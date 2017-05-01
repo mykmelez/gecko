@@ -3643,6 +3643,12 @@ nsDOMWindowUtils::GetIsParentWindowMainWidgetVisible(bool* aIsVisible)
   nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
   NS_ENSURE_STATE(window);
 
+  nsIDocument* doc = window->GetDoc();
+  if (doc && nsContentUtils::IsChromeDoc(doc)) {
+    *aIsVisible = true;
+    return NS_OK;
+  }
+
   nsCOMPtr<nsIWidget> parentWidget;
   nsIDocShell *docShell = window->GetDocShell();
   if (docShell) {
@@ -3654,6 +3660,23 @@ nsDOMWindowUtils::GetIsParentWindowMainWidgetVisible(bool* aIsVisible)
 
     nsCOMPtr<nsIDocShellTreeOwner> parentTreeOwner;
     docShell->GetTreeOwner(getter_AddRefs(parentTreeOwner));
+
+    // For consistency with nsWindowWatcher::OpenWindowInternal, if the parent
+    // window's document is chrome, then return true to indicate that the window
+    // can open other windows, whether or not it's actually visible.
+    //
+    // TODO: consider making the name of this method more accurate (if longer):
+    //   nsDOMWindowUtils::GetIsParentWindowMainWidgetVisibleOrChromeDoc()
+    //
+    nsCOMPtr<nsPIDOMWindowOuter> parentOuter(do_GetInterface(parentTreeOwner));
+    if (parentOuter) {
+      nsIDocument* doc = parentOuter->GetDoc();
+      if (doc && nsContentUtils::IsChromeDoc(doc)) {
+        *aIsVisible = true;
+        return NS_OK;
+      }
+    }
+
     nsCOMPtr<nsIBaseWindow> parentWindow(do_GetInterface(parentTreeOwner));
     if (parentWindow) {
         parentWindow->GetMainWidget(getter_AddRefs(parentWidget));
