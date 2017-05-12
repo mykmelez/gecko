@@ -3,8 +3,6 @@ sudo: required
 dist: trusty
 compiler:
 - clang
-os:
-- linux
 cache:
   - ccache
   - apt
@@ -37,6 +35,8 @@ before_install:
 jobs:
   include:
     - stage: test
+      os:
+        - linux
       script: skip
     - stage: ./mach configure
       script: ./mach configure
