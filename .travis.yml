@@ -1,0 +1,55 @@
+language: cpp
+sudo: required
+dist: trusty
+compiler:
+- clang
+os:
+- linux
+- osx
+cache:
+  - ccache
+  - apt
+env:
+  global:
+    - MAKE_ARGS=-j4
+    - USE_CCACHE=true
+addons:
+  apt:
+    packages:
+      - autoconf2.13
+      - build-essential
+      - ccache
+      - python-dev
+      - python-pip
+      - python-setuptools
+      - unzip
+      - uuid
+      - zip
+      - libasound2-dev
+      - libdbus-glib-1-dev
+      - libgconf2-dev
+      - libgtk2.0-dev
+      - libgtk-3-dev
+      - libpulse-dev
+      - yasm
+before_install:
+  - if [ "$TRAVIS_OS_NAME" == "osx" ]; then brew update && brew install autoconf213 yasm ccache; fi
+  - curl https://sh.rustup.rs -sSf | sh -s -- -y
+jobs:
+  include:
+    - stage: ./mach configure
+      script: ./mach configure
+    - stage: ./mach build export
+      script: ./mach build export
+    - stage: ./mach build compile
+      script: ./mach build compile
+    - stage: ./mach build libs
+      script: ./mach build libs
+    - stage: ./mach build tools
+      script: ./mach build tools
+    - stage: ./mach build binaries
+      script: ./mach build binaries
+    - stage: ./mach build install-manifests
+      script: ./mach build install-manifests
+    - stage: ./mach build
+      script: ./mach build
