@@ -1,8 +1,6 @@
 language: cpp
 sudo: required
 dist: trusty
-compiler:
-- clang
 cache:
   - ccache
   - apt
@@ -37,6 +35,8 @@ jobs:
     - stage: test
       os:
         - linux
+      compiler:
+        - clang
       script: skip
     - stage: ./mach configure
       script: ./mach configure
