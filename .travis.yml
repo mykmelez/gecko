@@ -40,8 +40,6 @@ before_install:
   - export PATH="$HOME/.cargo/bin:$PATH"
   - sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-4.9 20
   - sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-4.9 20
-  - sudo update-alternatives --config gcc
-  - sudo update-alternatives --config g++
 jobs:
   include:
     - stage: test
