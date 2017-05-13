@@ -6,6 +6,10 @@ cache:
   apt: true
   directories:
     - obj-firefox
+    - configure
+    - js/src/configure
+    - js/src/old-configure
+    - old-configure
 env:
   global:
     - MAKE_ARGS=-j4
