@@ -6,10 +6,6 @@ cache:
   apt: true
   directories:
     - obj-firefox
-    - configure
-    - js/src/configure
-    - js/src/old-configure
-    - old-configure
 env:
   global:
     - MAKE_ARGS=-j4
@@ -50,19 +46,17 @@ jobs:
       os:
         - linux
       script: skip
-    - stage: ./mach configure
-      script: ./mach configure
     - stage: ./mach build export
-      script: ./mach build export
+      script: ./mach configure && ./mach build export
     - stage: ./mach build compile
-      script: ./mach build compile
+      script: ./mach configure && ./mach build compile
     - stage: ./mach build libs
-      script: ./mach build libs
+      script: ./mach configure && ./mach build libs
     - stage: ./mach build tools
-      script: ./mach build tools
+      script: ./mach configure && ./mach build tools
     - stage: ./mach build binaries
-      script: ./mach build binaries
+      script: ./mach configure && ./mach build binaries
     - stage: ./mach build install-manifests
-      script: ./mach build install-manifests
+      script: ./mach configure && ./mach build install-manifests
     - stage: ./mach build
-      script: ./mach build
+      script: ./mach configure && ./mach build
