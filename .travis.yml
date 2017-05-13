@@ -50,14 +50,14 @@ jobs:
     - stage: ./mach build export
       script: ./mach configure && ./mach build export
     - stage: ./mach build compile
-      script: ./mach configure && ./mach build compile
+      script: obj-x86_64-pc-linux-gnu/CLOBBER && ./mach configure && ./mach build compile
     - stage: ./mach build libs
-      script: ./mach configure && ./mach build libs
+      script: obj-x86_64-pc-linux-gnu/CLOBBER && ./mach configure && ./mach build libs
     - stage: ./mach build tools
-      script: ./mach configure && ./mach build tools
+      script: obj-x86_64-pc-linux-gnu/CLOBBER && ./mach configure && ./mach build tools
     - stage: ./mach build binaries
-      script: ./mach configure && ./mach build binaries
+      script: obj-x86_64-pc-linux-gnu/CLOBBER && ./mach configure && ./mach build binaries
     - stage: ./mach build install-manifests
-      script: ./mach configure && ./mach build install-manifests
+      script: obj-x86_64-pc-linux-gnu/CLOBBER && ./mach configure && ./mach build install-manifests
     - stage: ./mach build
-      script: ./mach configure && ./mach build
+      script: obj-x86_64-pc-linux-gnu/CLOBBER && ./mach configure && ./mach build
