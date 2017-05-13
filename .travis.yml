@@ -34,6 +34,7 @@ addons:
 before_install:
   - if [ "$TRAVIS_OS_NAME" == "osx" ]; then brew update && brew install autoconf213 yasm ccache; fi
   - curl https://sh.rustup.rs -sSf | sh -s -- -y
+  - export PATH="$HOME/.cargo/bin:$PATH"
   - sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-4.9 20
   - sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-4.9 20
   - sudo update-alternatives --config gcc
@@ -43,8 +44,6 @@ jobs:
     - stage: test
       os:
         - linux
-      compiler:
-        - clang
       script: skip
     - stage: ./mach configure
       script: ./mach configure
