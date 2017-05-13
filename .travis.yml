@@ -2,12 +2,15 @@ language: cpp
 sudo: required
 dist: trusty
 cache:
-  - ccache
-  - apt
+  ccache: true
+  apt: true
+  directories:
+    - obj-firefox
 env:
   global:
     - MAKE_ARGS=-j4
     - USE_CCACHE=true
+    - MOZ_OBJDIR=obj-firefox
 addons:
   apt:
     sources:
