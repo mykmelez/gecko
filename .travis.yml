@@ -6,6 +6,7 @@ cache:
   apt: true
   directories:
     - obj-firefox
+    - obj-x86_64-pc-linux-gnu
 env:
   global:
     - MAKE_ARGS=-j4
