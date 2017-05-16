@@ -45,7 +45,7 @@ before_install:
   - mv obj-x86_64-pc-linux-gnu/configure obj-x86_64-pc-linux-gnu/old-configure ./ || true
   - mv obj-x86_64-pc-linux-gnu/js/src/configure obj-x86_64-pc-linux-gnu/js/src/old-configure js/src/ || true
   - ls -lad configure old-configure js/src/configure js/src/old-configure
-  - touch obj-x86_64-pc-linux-gnu/CLOBBER obj-x86_64-pc-linux-gnu/config.status
+  - touch obj-x86_64-pc-linux-gnu/CLOBBER configure old-configure js/src/configure js/src/old-configure obj-x86_64-pc-linux-gnu/config.status
   - ls -lad configure old-configure js/src/configure js/src/old-configure
 before_cache:
   - ls -lad configure old-configure js/src/configure js/src/old-configure
