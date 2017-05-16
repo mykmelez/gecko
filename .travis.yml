@@ -41,23 +41,28 @@ before_install:
   - export PATH="$HOME/.cargo/bin:$PATH"
   - sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-4.9 20
   - sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-4.9 20
+  - mv obj-x86_64-pc-linux-gnu/configure obj-x86_64-pc-linux-gnu/old-configure ./
+  - mv obj-x86_64-pc-linux-gnu/js/src/configure obj-x86_64-pc-linux-gnu/js/src/old-configure ./
+before_cache:
+  - cp -p configure old-configure obj-x86_64-pc-linux-gnu/
+  - cp -p js/src/configure js/src/old-configure obj-x86_64-pc-linux-gnu/js/src/
 jobs:
   include:
     - stage: test
       os:
         - linux
-      script: ./mach clobber
+      script: ./mach clobber && ./mach configure
     - stage: ./mach build export
-      script: ./mach configure && ./mach build export
+      script: ./mach build export
     - stage: ./mach build compile
-      script: touch obj-x86_64-pc-linux-gnu/CLOBBER && ./mach configure && ./mach build compile
+      script: ./mach build compile
     - stage: ./mach build libs
-      script: touch obj-x86_64-pc-linux-gnu/CLOBBER && ./mach configure && ./mach build libs
+      script: ./mach build libs
     - stage: ./mach build tools
-      script: touch obj-x86_64-pc-linux-gnu/CLOBBER && ./mach configure && ./mach build tools
+      script: ./mach build tools
     - stage: ./mach build binaries
-      script: touch obj-x86_64-pc-linux-gnu/CLOBBER && ./mach configure && ./mach build binaries
+      script: ./mach build binaries
     - stage: ./mach build install-manifests
-      script: touch obj-x86_64-pc-linux-gnu/CLOBBER && ./mach configure && ./mach build install-manifests
+      script: ./mach build install-manifests
     - stage: ./mach build
-      script: touch obj-x86_64-pc-linux-gnu/CLOBBER && ./mach configure && ./mach build
+      script: ./mach build
