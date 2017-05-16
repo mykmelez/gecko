@@ -41,8 +41,8 @@ before_install:
   - export PATH="$HOME/.cargo/bin:$PATH"
   - sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-4.9 20
   - sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-4.9 20
-  - mv obj-x86_64-pc-linux-gnu/configure obj-x86_64-pc-linux-gnu/old-configure ./
-  - mv obj-x86_64-pc-linux-gnu/js/src/configure obj-x86_64-pc-linux-gnu/js/src/old-configure ./
+  - mv obj-x86_64-pc-linux-gnu/configure obj-x86_64-pc-linux-gnu/old-configure ./ || true
+  - mv obj-x86_64-pc-linux-gnu/js/src/configure obj-x86_64-pc-linux-gnu/js/src/old-configure ./ || true
 before_cache:
   - cp -p configure old-configure obj-x86_64-pc-linux-gnu/
   - cp -p js/src/configure js/src/old-configure obj-x86_64-pc-linux-gnu/js/src/
