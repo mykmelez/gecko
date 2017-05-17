@@ -59,6 +59,8 @@ jobs:
       os:
         - linux
       script: ./mach clobber && ./mach configure
+    - stage: ./mach build pre-export
+      script: ./mach build pre-export
     - stage: ./mach build export
       script: ./mach build export
     - stage: ./mach build compile
