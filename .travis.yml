@@ -52,22 +52,16 @@ before_cache:
 jobs:
   include:
     - stage: test
-      os:
-        - linux
+      compiler: clang
       script: ./mach clobber && ./mach configure
     - stage: ./mach build pre-export
+      compiler: clang
       script: ./mach build pre-export
     - stage: ./mach build export
+      compiler: clang
       script: ./mach build export
-    - stage: ./mach build js/src
-      script: ./mach build js/src
-    - stage: ./mach build dom
-      script: ./mach build dom
-    - stage: ./mach build layout
-      script: ./mach build layout
-    - stage: ./mach build widget
-      script: ./mach build widget
     - stage: ./mach build compile
+      compiler: clang
       script: ./mach build compile
     - stage: ./mach build
       script: ./mach build
