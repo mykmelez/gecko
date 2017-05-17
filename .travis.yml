@@ -79,6 +79,8 @@ jobs:
       script: ./mach build docshell
     - stage: ./mach build xpcom
       script: ./mach build xpcom
+    - stage: ./mach build compile
+      script: ./mach build compile
     - stage: ./mach build libs
       script: ./mach build libs
     - stage: ./mach build tools
