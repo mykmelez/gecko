@@ -63,8 +63,22 @@ jobs:
       script: ./mach build pre-export
     - stage: ./mach build export
       script: ./mach build export
-    - stage: ./mach build compile
-      script: ./mach build compile
+    - stage: ./mach build js/src
+      script: ./mach build js/src
+    - stage: ./mach build dom
+      script: ./mach build dom
+    - stage: ./mach build layout
+      script: ./mach build layout
+    - stage: ./mach build storage
+      script: ./mach build storage
+    - stage: ./mach build widget
+      script: ./mach build widget
+    - stage: ./mach build gfx
+      script: ./mach build gfx
+    - stage: ./mach build docshell
+      script: ./mach build docshell
+    - stage: ./mach build xpcom
+      script: ./mach build xpcom
     - stage: ./mach build libs
       script: ./mach build libs
     - stage: ./mach build tools
