@@ -45,7 +45,7 @@ before_install:
   - mv obj-x86_64-pc-linux-gnu/configure obj-x86_64-pc-linux-gnu/old-configure ./ || true
   - mv obj-x86_64-pc-linux-gnu/js/src/configure obj-x86_64-pc-linux-gnu/js/src/old-configure js/src/ || true
   - touch configure old-configure js/src/configure js/src/old-configure
-  - find obj-x86_64-pc-linux-gnu -exec touch {} +
+  - find obj-x86_64-pc-linux-gnu -exec touch {} + || true
 before_cache:
   - cp -p configure old-configure obj-x86_64-pc-linux-gnu/
   - cp -p js/src/configure js/src/old-configure obj-x86_64-pc-linux-gnu/js/src/
