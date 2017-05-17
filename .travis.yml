@@ -61,15 +61,13 @@ jobs:
       script: ./mach build export
     - stage: ./mach build js/src
       script: ./mach build js/src
+    - stage: ./mach build dom
+      script: ./mach build dom
+    - stage: ./mach build layout
+      script: ./mach build layout
+    - stage: ./mach build widget
+      script: ./mach build widget
     - stage: ./mach build compile
       script: ./mach build compile
-    - stage: ./mach build libs
-      script: ./mach build libs
-    - stage: ./mach build tools
-      script: ./mach build tools
-    - stage: ./mach build binaries
-      script: ./mach build binaries
-    - stage: ./mach build install-manifests
-      script: ./mach build install-manifests
     - stage: ./mach build
       script: ./mach build
