@@ -969,6 +969,9 @@ force-cargo-test-run:
 check:: force-cargo-test-run
 endif
 
+force-cargo-doc-build:
+	$(call RUN_CARGO,doc --lib $(cargo_target_flag) $(rust_features_flag),$(target_cargo_env_vars))
+
 ifdef HOST_RUST_LIBRARY_FILE
 
 ifdef HOST_RUST_LIBRARY_FEATURES
