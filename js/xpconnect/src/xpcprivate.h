@@ -298,10 +298,8 @@ class XPCRootSetElem
 public:
     XPCRootSetElem()
     {
-#ifdef DEBUG
         mNext = nullptr;
         mSelfp = nullptr;
-#endif
     }
 
     ~XPCRootSetElem()
@@ -464,6 +462,7 @@ public:
         IDX_MESSAGE                 ,
         IDX_LASTINDEX               ,
         IDX_THEN                    ,
+        IDX_ISINSTANCE              ,
         IDX_TOTAL_COUNT // just a count of the above
     };
 
@@ -1094,7 +1093,14 @@ public:
         {mIndexInInterface = index;}
 
     /* default ctor - leave random contents */
-    XPCNativeMember()  {MOZ_COUNT_CTOR(XPCNativeMember);}
+    XPCNativeMember()
+      : mName{}
+      , mIndex{}
+      , mFlags{}
+      , mIndexInInterface{}
+    {
+      MOZ_COUNT_CTOR(XPCNativeMember);
+    }
     ~XPCNativeMember() {MOZ_COUNT_DTOR(XPCNativeMember);}
 
 private:

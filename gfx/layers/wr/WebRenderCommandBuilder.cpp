@@ -97,8 +97,10 @@ struct BlobItemData
   IntRect mImageRect;
   IntPoint mGroupOffset;
 
-  BlobItemData(DIGroup* aGroup, nsDisplayItem *aItem)
-    : mGroup(aGroup)
+  BlobItemData(DIGroup* aGroup, nsDisplayItem* aItem)
+    : mUsed{ false }
+    , mGroup(aGroup)
+    , mOpacity{ 0.0 }
   {
     mInvalid = false;
     mEmpty = false;
@@ -179,7 +181,9 @@ struct DIGroup;
 struct Grouper
 {
   explicit Grouper(ScrollingLayersHelper& aScrollingHelper)
-   : mScrollingHelper(aScrollingHelper)
+    : mAppUnitsPerDevPixel{}
+    , mDisplayListBuilder{ nullptr }
+    , mScrollingHelper(aScrollingHelper)
   {}
 
   int32_t mAppUnitsPerDevPixel;
@@ -916,21 +920,20 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
       // tighter for just the sublist that made it into this group.
       // We want to ensure the tight bounds are still clipped by area
       // that we're building the display list for.
-      if (groupData->mFollowingGroup.mKey) {
-        if (!groupData->mFollowingGroup.mGroupBounds.IsEqualEdges(currentGroup->mGroupBounds) ||
-            groupData->mFollowingGroup.mScale != currentGroup->mScale ||
-            groupData->mFollowingGroup.mAppUnitsPerDevPixel != currentGroup->mAppUnitsPerDevPixel) {
-          if (groupData->mFollowingGroup.mAppUnitsPerDevPixel != currentGroup->mAppUnitsPerDevPixel) {
-            printf("app unit change following: %d %d\n", groupData->mFollowingGroup.mAppUnitsPerDevPixel, currentGroup->mAppUnitsPerDevPixel);
-          }
-          // The group changed size
-          GP("Inner group size change\n");
-          aCommandBuilder->mManager->AddImageKeyForDiscard(groupData->mFollowingGroup.mKey.value());
-          groupData->mFollowingGroup.mKey = Nothing();
-          groupData->mFollowingGroup.ClearItems();
-
+      if (!groupData->mFollowingGroup.mGroupBounds.IsEqualEdges(currentGroup->mGroupBounds) ||
+          groupData->mFollowingGroup.mScale != currentGroup->mScale ||
+          groupData->mFollowingGroup.mAppUnitsPerDevPixel != currentGroup->mAppUnitsPerDevPixel) {
+        if (groupData->mFollowingGroup.mAppUnitsPerDevPixel != currentGroup->mAppUnitsPerDevPixel) {
+          GP("app unit change following: %d %d\n", groupData->mFollowingGroup.mAppUnitsPerDevPixel, currentGroup->mAppUnitsPerDevPixel);
+        }
+        // The group changed size
+        GP("Inner group size change\n");
+        groupData->mFollowingGroup.ClearItems();
+        if (groupData->mFollowingGroup.mKey) {
           IntSize size = currentGroup->mGroupBounds.Size().ScaleToNearestPixels(currentGroup->mScale.width, currentGroup->mScale.height, mAppUnitsPerDevPixel);
           groupData->mFollowingGroup.mInvalidRect = IntRect(IntPoint(0, 0), size);
+          aCommandBuilder->mManager->AddImageKeyForDiscard(groupData->mFollowingGroup.mKey.value());
+          groupData->mFollowingGroup.mKey = Nothing();
         }
       }
       groupData->mFollowingGroup.mGroupBounds = currentGroup->mGroupBounds;
