@@ -57,7 +57,7 @@ class LayerMetricsWrapper;
 class InputQueue;
 class GeckoContentController;
 class HitTestingTreeNode;
-class WebRenderScrollData;
+class WebRenderScrollDataWrapper;
 struct AncestorTransform;
 struct ScrollThumbData;
 
@@ -189,7 +189,7 @@ public:
    * shadow layers in that scenario.
    */
   void UpdateHitTestingTree(LayersId aRootLayerTreeId,
-                            const WebRenderScrollData& aScrollData,
+                            const WebRenderScrollDataWrapper& aScrollWrapper,
                             bool aIsFirstPaint,
                             LayersId aOriginatingLayersId,
                             uint32_t aPaintSequenceNumber);
@@ -201,13 +201,12 @@ public:
    * sample time. In effect it is the webrender equivalent of (part of) the
    * code in AsyncCompositionManager. If scrollbar transforms need updating
    * to reflect the async scroll position, the updated transforms are appended
-   * to the provided aTransformArray.
+   * to the provided transaction as well.
    * Returns true if any APZ animations are in progress and we need to keep
    * compositing.
    */
   bool PushStateToWR(wr::TransactionBuilder& aTxn,
-                     const TimeStamp& aSampleTime,
-                     nsTArray<wr::WrTransformProperty>& aTransformArray);
+                     const TimeStamp& aSampleTime);
 
   /**
    * Walk the tree of APZCs and flushes the repaint requests for all the APZCS
@@ -533,12 +532,24 @@ public:
   // Assert that the current thread is the updater thread for this APZCTM.
   void AssertOnUpdaterThread();
 
+  // Returns a pointer to the WebRenderAPI for the root layers id this APZCTreeManager
+  // is for. This might be null (for example, if WebRender is not enabled).
+  already_AddRefed<wr::WebRenderAPI> GetWebRenderAPI() const;
+
 protected:
   // Protected destructor, to discourage deletion outside of Release():
   virtual ~APZCTreeManager();
 
   APZSampler* GetSampler() const;
   APZUpdater* GetUpdater() const;
+
+  // We need to allow APZUpdater to lock and unlock this tree during a WR
+  // scene swap. We do this using private helpers to avoid exposing these
+  // functions to the world.
+private:
+  friend class APZUpdater;
+  void LockTree();
+  void UnlockTree();
 
   // Protected hooks for gtests subclass
   virtual AsyncPanZoomController* NewAPZCInstance(LayersId aLayersId,
@@ -686,10 +697,6 @@ private:
 
   // Requires the caller to hold mTreeLock.
   LayerToParentLayerMatrix4x4 ComputeTransformForNode(const HitTestingTreeNode* aNode) const;
-
-  // Returns a pointer to the WebRenderAPI for the root layers id this APZCTreeManager
-  // is for. This might be null (for example, if WebRender is not enabled).
-  already_AddRefed<wr::WebRenderAPI> GetWebRenderAPI() const;
 
   // Returns a pointer to the GeckoContentController for the given layers id.
   already_AddRefed<GeckoContentController> GetContentController(LayersId aLayersId) const;

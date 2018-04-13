@@ -553,7 +553,7 @@ CompositorBridgeParent::RecvWaitOnTransactionProcessed()
 mozilla::ipc::IPCResult
 CompositorBridgeParent::RecvFlushRendering()
 {
-  if (mOptions.UseWebRender()) {
+  if (mWrBridge) {
     mWrBridge->FlushRendering();
     return IPC_OK();
   }
@@ -568,7 +568,7 @@ CompositorBridgeParent::RecvFlushRendering()
 mozilla::ipc::IPCResult
 CompositorBridgeParent::RecvFlushRenderingAsync()
 {
-  if (mOptions.UseWebRender()) {
+  if (mWrBridge) {
     mWrBridge->FlushRenderingAsync();
     return IPC_OK();
   }
@@ -579,6 +579,9 @@ CompositorBridgeParent::RecvFlushRenderingAsync()
 mozilla::ipc::IPCResult
 CompositorBridgeParent::RecvForcePresent()
 {
+  if (mWrBridge) {
+    mWrBridge->ScheduleGenerateFrame();
+  }
   // During the shutdown sequence mLayerManager may be null
   if (mLayerManager) {
     mLayerManager->ForcePresent();
@@ -640,7 +643,7 @@ CompositorBridgeParent::ActorDestroy(ActorDestroyReason why)
   MOZ_ASSERT((mApzUpdater != nullptr) == (mApzcTreeManager != nullptr));
   if (mApzUpdater) {
     mApzSampler = nullptr;
-    mApzUpdater->ClearTree();
+    mApzUpdater->ClearTree(mRootLayerTreeID);
     mApzUpdater = nullptr;
     mApzcTreeManager = nullptr;
   }
@@ -693,9 +696,9 @@ CompositorBridgeParent::PauseComposition()
   if (!mPaused) {
     mPaused = true;
 
-    if (!mOptions.UseWebRender()) {
+    if (mCompositor) {
       mCompositor->Pause();
-    } else {
+    } else if (mWrBridge) {
       mWrBridge->Pause();
     }
     TimeStamp now = TimeStamp::Now();
@@ -1766,7 +1769,14 @@ CompositorBridgeParent::AllocPWebRenderBridgeParent(const wr::PipelineId& aPipel
   MOZ_ASSERT(mWidget);
 
   RefPtr<widget::CompositorWidget> widget = mWidget;
-  RefPtr<wr::WebRenderAPI> api = wr::WebRenderAPI::Create(this, Move(widget), aSize);
+  wr::WrWindowId windowId = wr::NewWindowId();
+  if (mApzUpdater) {
+    // If APZ is enabled, we need to register the APZ updater with the window id
+    // before the updater thread is created in WebRenderAPI::Create, so
+    // that the callback from the updater thread can find the right APZUpdater.
+    mApzUpdater->SetWebRenderWindowId(windowId);
+  }
+  RefPtr<wr::WebRenderAPI> api = wr::WebRenderAPI::Create(this, Move(widget), windowId, aSize);
   if (!api) {
     mWrBridge = WebRenderBridgeParent::CreateDestroyed(aPipelineId);
     mWrBridge.get()->AddRef(); // IPDL reference
@@ -1828,18 +1838,22 @@ CompositorBridgeParent::GetTestingTimeStamp() const
 void
 EraseLayerState(LayersId aId)
 {
-  MonitorAutoLock lock(*sIndirectLayerTreesLock);
+  RefPtr<APZUpdater> apz;
 
-  auto iter = sIndirectLayerTrees.find(aId);
-  if (iter != sIndirectLayerTrees.end()) {
-    CompositorBridgeParent* parent = iter->second.mParent;
-    if (parent) {
-      if (RefPtr<APZUpdater> apz = parent->GetAPZUpdater()) {
-        apz->NotifyLayerTreeRemoved(aId);
+  { // scope lock
+    MonitorAutoLock lock(*sIndirectLayerTreesLock);
+    auto iter = sIndirectLayerTrees.find(aId);
+    if (iter != sIndirectLayerTrees.end()) {
+      CompositorBridgeParent* parent = iter->second.mParent;
+      if (parent) {
+        apz = parent->GetAPZUpdater();
       }
+      sIndirectLayerTrees.erase(iter);
     }
+  }
 
-    sIndirectLayerTrees.erase(iter);
+  if (apz) {
+    apz->NotifyLayerTreeRemoved(aId);
   }
 }
 

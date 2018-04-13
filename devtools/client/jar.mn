@@ -272,6 +272,7 @@ devtools.jar:
     skin/images/debugger/close.svg (themes/images/debugger/close.svg)
     skin/images/debugger/coffeescript.svg (themes/images/debugger/coffeescript.svg)
     skin/images/debugger/domain.svg (themes/images/debugger/domain.svg)
+    skin/images/debugger/extension.svg (themes/images/debugger/extension.svg)
     skin/images/debugger/file.svg (themes/images/debugger/file.svg)
     skin/images/debugger/folder.svg (themes/images/debugger/folder.svg)
     skin/images/debugger/forward.svg (themes/images/debugger/forward.svg)
@@ -284,6 +285,7 @@ devtools.jar:
     skin/images/debugger/stepIn.svg (themes/images/debugger/stepIn.svg)
     skin/images/debugger/stepOut.svg (themes/images/debugger/stepOut.svg)
     skin/images/debugger/stepOver.svg (themes/images/debugger/stepOver.svg)
+    skin/images/debugger/tab.svg (themes/images/debugger/tab.svg)
     skin/images/debugger/typescript.svg (themes/images/debugger/typescript.svg)
 
     # Netmonitor

@@ -483,7 +483,14 @@ var BrowserApp = {
     }, NativeWindow, "contextmenus");
 
     if (AppConstants.ACCESSIBILITY) {
-      InitLater(() => AccessFu.attach(window), window, "AccessFu");
+      InitLater(() => GlobalEventDispatcher.dispatch("GeckoView:AccessibilityReady"));
+      GlobalEventDispatcher.registerListener((aEvent, aData, aCallback) => {
+        if (aData.enabled) {
+          AccessFu.attach(window);
+        } else {
+          AccessFu.detach();
+        }
+      }, "GeckoView:AccessibilitySettings");
     }
 
     InitLater(() => {
@@ -1884,7 +1891,7 @@ var BrowserApp = {
         try {
           let sh = webNav.sessionHistory;
           if (sh)
-            webNav = sh.QueryInterface(Ci.nsIWebNavigation);
+            webNav = sh.legacySHistory.QueryInterface(Ci.nsIWebNavigation);
         } catch (e) {}
         webNav.reload(flags);
         break;
@@ -2240,7 +2247,7 @@ var BrowserApp = {
     }
 
     let browser = this.selectedBrowser;
-    let hist = browser.sessionHistory;
+    let hist = browser.sessionHistory.legacySHistory;
     for (let i = toIndex; i >= fromIndex; i--) {
       let entry = hist.getEntryAtIndex(i, false);
       let item = {
@@ -3718,7 +3725,7 @@ Tab.prototype = {
     this.filter = Cc["@mozilla.org/appshell/component/browser-status-filter;1"].createInstance(Ci.nsIWebProgress);
     this.filter.addProgressListener(this, flags)
     this.browser.addProgressListener(this.filter, flags);
-    this.browser.sessionHistory.addSHistoryListener(this);
+    this.browser.sessionHistory.legacySHistory.addSHistoryListener(this);
 
     this.browser.addEventListener("DOMContentLoaded", this, true);
     this.browser.addEventListener("DOMFormHasPassword", this, true);
@@ -3842,7 +3849,7 @@ Tab.prototype = {
     this.browser.removeProgressListener(this.filter);
     this.filter.removeProgressListener(this);
     this.filter = null;
-    this.browser.sessionHistory.removeSHistoryListener(this);
+    this.browser.sessionHistory.legacySHistory.removeSHistoryListener(this);
 
     this.browser.removeEventListener("DOMContentLoaded", this, true);
     this.browser.removeEventListener("DOMFormHasPassword", this, true);

@@ -2619,6 +2619,11 @@ enum nsStyleContentType {
 struct nsStyleContentAttr {
   RefPtr<nsAtom> mName; // Non-null.
   RefPtr<nsAtom> mNamespaceURL; // May be null.
+
+  bool operator==(const nsStyleContentAttr& aOther) const
+  {
+    return mName == aOther.mName && mNamespaceURL == aOther.mNamespaceURL;
+  }
 };
 
 class nsStyleContentData
@@ -3252,20 +3257,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVGReset
   uint8_t          mDominantBaseline; // [reset] see nsStyleConsts.h
   uint8_t          mVectorEffect;     // [reset] see nsStyleConsts.h
   uint8_t          mMaskType;         // [reset] see nsStyleConsts.h
-};
-
-// XXX This can be removed once the old style system is gone.
-struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleVariables
-{
-  nsStyleVariables();
-  explicit nsStyleVariables(const nsPresContext* aContext);
-  nsStyleVariables(const nsStyleVariables& aSource);
-  ~nsStyleVariables();
-  void FinishStyle(nsPresContext*, const nsStyleVariables*) {}
-  const static bool kHasFinishStyle = false;
-
-  nsChangeHint CalcDifference(const nsStyleVariables& aNewData) const;
-
 };
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleEffects

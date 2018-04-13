@@ -177,7 +177,7 @@ function waitForState(dbg, predicate, msg) {
     }
 
     const unsubscribe = dbg.store.subscribe(() => {
-      const result = predicate(dbg.store.getState())
+      const result = predicate(dbg.store.getState());
       if (result) {
         info(`Finished waiting for state change: ${msg || ""}`);
         unsubscribe();
@@ -228,10 +228,14 @@ async function waitForSources(dbg, ...sources) {
  * @static
  */
 function waitForSource(dbg, url) {
-  return waitForState(dbg, state => {
-    const sources = dbg.selectors.getSources(state);
-    return sources.find(s => (s.get("url") || "").includes(url));
-  }, `source exists`);
+  return waitForState(
+    dbg,
+    state => {
+      const sources = dbg.selectors.getSources(state);
+      return sources.find(s => (s.get("url") || "").includes(url));
+    },
+    `source exists`
+  );
 }
 
 async function waitForElement(dbg, name) {
@@ -248,6 +252,7 @@ function waitForSelectedSource(dbg, url) {
   return waitForState(
     dbg,
     state => {
+
       const source = dbg.selectors.getSelectedSource(state);
       const isLoaded = source && sourceUtils.isLoaded(source);
       if (!isLoaded) {
@@ -265,7 +270,10 @@ function waitForSelectedSource(dbg, url) {
 
       // wait for async work to be done
       const hasSymbols = dbg.selectors.hasSymbols(state, source);
-      const hasSourceMetaData = dbg.selectors.hasSourceMetaData(state, source.id);
+      const hasSourceMetaData = dbg.selectors.hasSourceMetaData(
+        state,
+        source.id
+      );
       const hasPausePoints = dbg.selectors.hasPausePoints(state, source.id);
       return hasSymbols && hasSourceMetaData && hasPausePoints;
     },
@@ -689,8 +697,8 @@ function deleteExpression(dbg, input) {
  * @static
  */
 async function reload(dbg, ...sources) {
-  const navigated = waitForDispatch(dbg, "NAVIGATE")
-  await dbg.client.reload()
+  const navigated = waitForDispatch(dbg, "NAVIGATE");
+  await dbg.client.reload();
   await navigated;
   return waitForSources(dbg, ...sources);
 }
@@ -706,7 +714,10 @@ async function reload(dbg, ...sources) {
  * @static
  */
 async function navigate(dbg, url, ...sources) {
+  info(`Navigating to ${url}`)
+  const navigated =  waitForDispatch(dbg, "NAVIGATE");
   await dbg.client.navigate(url);
+  await navigated;
   return waitForSources(dbg, ...sources);
 }
 
@@ -733,6 +744,91 @@ function disableBreakpoint(dbg, source, line, column) {
   const sourceId = source.id;
   dbg.actions.disableBreakpoint({ sourceId, line, column });
   return waitForDispatch(dbg, "DISABLE_BREAKPOINT");
+}
+
+async function loadAndAddBreakpoint(dbg, filename, line, column) {
+  const { selectors: { getBreakpoint, getBreakpoints }, getState } = dbg;
+
+  await waitForSources(dbg, filename);
+
+  ok(true, "Original sources exist");
+  const source = findSource(dbg, filename);
+
+  await selectSource(dbg, source);
+
+  // Test that breakpoint is not off by a line.
+  await addBreakpoint(dbg, source, line);
+
+  is(getBreakpoints(getState()).size, 1, "One breakpoint exists");
+  ok(
+    getBreakpoint(getState(), { sourceId: source.id, line, column }),
+    "Breakpoint has correct line"
+  );
+
+  return source;
+}
+
+async function invokeWithBreakpoint(dbg, fnName, filename, { line, column }, handler) {
+  const { selectors: { getBreakpoints }, getState } = dbg;
+
+  const source = await loadAndAddBreakpoint(dbg, filename, line, column);
+
+  const invokeResult = invokeInTab(fnName);
+
+  let invokeFailed = await Promise.race([
+    waitForPaused(dbg),
+    invokeResult.then(() => new Promise(() => {}), () => true)
+  ]);
+
+  if (invokeFailed) {
+    return invokeResult;
+  }
+
+  assertPausedLocation(dbg);
+
+  await removeBreakpoint(dbg, source.id, line, column);
+
+  is(getBreakpoints(getState()).size, 0, "Breakpoint reverted");
+
+  await handler(source);
+
+  await resume(dbg);
+
+  // If the invoke errored later somehow, capture here so the error is reported nicely.
+  await invokeResult;
+}
+
+async function expandAllScopes(dbg) {
+  const scopes = await waitForElement(dbg, "scopes");
+  const scopeElements = scopes.querySelectorAll(
+    `.tree-node[aria-level="1"][data-expandable="true"]:not([aria-expanded="true"])`
+  );
+  const indices = Array.from(scopeElements, el => {
+    return Array.prototype.indexOf.call(el.parentNode.childNodes, el);
+  }).reverse();
+
+  for (const index of indices) {
+    await toggleScopeNode(dbg, index + 1);
+  }
+}
+
+async function assertScopes(dbg, items) {
+  await expandAllScopes(dbg);
+
+  for (const [i, val] of items.entries()) {
+    if (Array.isArray(val)) {
+      is(getScopeLabel(dbg, i + 1), val[0]);
+      is(
+        getScopeValue(dbg, i + 1),
+        val[1],
+        `"${val[0]}" has the expected "${val[1]}" value`
+      );
+    } else {
+      is(getScopeLabel(dbg, i + 1), val);
+    }
+  }
+
+  is(getScopeLabel(dbg, items.length + 1), "Window");
 }
 
 /**
@@ -934,9 +1030,11 @@ const selectors = {
     `.expressions-list .expression-container:nth-child(${i}) .object-delimiter + *`,
   expressionClose: i =>
     `.expressions-list .expression-container:nth-child(${i}) .close`,
+  expressionInput: '.expressions-list  input.input-expression',
   expressionNodes: ".expressions-list .tree-node",
   scopesHeader: ".scopes-pane ._header",
-  breakpointItem: i => `.breakpoints-list .breakpoint:nth-child(${i})`,
+  breakpointItem: i => `.breakpoints-list .breakpoint:nth-of-type(${i})`,
+  breakpointItems: `.breakpoints-list .breakpoint`,
   scopes: ".scopes-list",
   scopeNode: i => `.scopes-list .tree-node:nth-child(${i}) .object-label`,
   scopeValue: i =>
@@ -1095,8 +1193,11 @@ function getScopeValue(dbg, index) {
 }
 
 function toggleObjectInspectorNode(node) {
+
   const objectInspector = node.closest(".object-inspector");
   const properties = objectInspector.querySelectorAll(".node").length;
+
+  log(`Toggling node ${node.innerText}`)
   node.click();
   return waitUntil(
     () => objectInspector.querySelectorAll(".node").length !== properties
@@ -1113,12 +1214,13 @@ function getCoordsFromPosition(cm, { line, ch }) {
 }
 
 function hoverAtPos(dbg, { line, ch }) {
+  info(`Hovering at ${line}, ${ch}`);
   const cm = getCM(dbg);
 
   // Ensure the line is visible with margin because the bar at the bottom of
   // the editor overlaps into what the editor things is its own space, blocking
   // the click event below.
-  cm.scrollIntoView({ line: line - 1, ch  }, 100);
+  cm.scrollIntoView({ line: line - 1, ch }, 100);
 
   const coords = getCoordsFromPosition(cm, { line: line - 1, ch });
   const tokenEl = dbg.win.document.elementFromPoint(coords.left, coords.top);
@@ -1132,7 +1234,7 @@ function hoverAtPos(dbg, { line, ch }) {
 }
 
 async function assertPreviewTextValue(dbg, { text, expression }) {
-  const previewEl = await waitForElement(dbg, "previewPopup");;
+  const previewEl = await waitForElement(dbg, "previewPopup");
 
   is(previewEl.innerText, text, "Preview text shown to user");
 
@@ -1155,13 +1257,35 @@ async function assertPreviewPopup(dbg, { field, value, expression }) {
   const previewEl = await waitForElement(dbg, "popup");
   const preview = dbg.selectors.getPreview(dbg.getState());
 
-  is(
-    `${preview.result.preview.ownProperties[field].value}`,
-    value,
-    "Preview.result"
-  );
+  const properties =
+    preview.result.preview.ownProperties || preview.result.preview.items;
+  const property = properties[field];
+
+  is(`${property.value || property}`, value, "Preview.result");
   is(preview.updating, false, "Preview.updating");
   is(preview.expression, expression, "Preview.expression");
+}
+
+async function assertPreviews(dbg, previews) {
+  for (const { line, column, expression, result, fields } of previews) {
+    hoverAtPos(dbg, { line, ch: column - 1 });
+
+    if (fields && result) {
+      throw new Error("Invalid test fixture");
+    }
+
+    if (fields) {
+      for (const [field, value] of fields) {
+        await assertPreviewPopup(dbg, { expression, field, value });
+      }
+    } else {
+      await assertPreviewTextValue(dbg, { expression, text: result });
+    }
+
+    // Move to column 0 after to make sure that the preview created by this
+    // test does not affect later attempts to hover and preview.
+    hoverAtPos(dbg, { line: line, ch: 0 });
+  }
 }
 
 // NOTE: still experimental, the screenshots might not be exactly correct

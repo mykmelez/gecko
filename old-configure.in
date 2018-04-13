@@ -66,7 +66,7 @@ W32API_VERSION=3.14
 GCONF_VERSION=1.2.1
 STARTUP_NOTIFICATION_VERSION=0.8
 DBUS_VERSION=0.60
-SQLITE_VERSION=3.22.0
+SQLITE_VERSION=3.23.1
 
 dnl Set various checks
 dnl ========================================================
@@ -2598,50 +2598,6 @@ fi
 MOZ_WEBM_ENCODER=1
 AC_DEFINE(MOZ_WEBM_ENCODER)
 AC_SUBST(MOZ_WEBM_ENCODER)
-
-dnl ==================================
-dnl = Check alsa availability on Linux
-dnl ==================================
-
-MOZ_ARG_ENABLE_BOOL(alsa,
-[  --enable-alsa          Enable Alsa support],
-   MOZ_ALSA=1,
-   MOZ_ALSA=)
-
-if test -n "$MOZ_ALSA"; then
-    PKG_CHECK_MODULES(MOZ_ALSA, alsa, ,
-         [echo "$MOZ_ALSA_PKG_ERRORS"
-          AC_MSG_ERROR([Need alsa for audio output on Linux. (On Ubuntu, you might try installing the package libasound2-dev.)])])
-fi
-
-AC_SUBST(MOZ_ALSA)
-
-dnl ========================================================
-dnl = Disable PulseAudio
-dnl ========================================================
-
-dnl If using Desktop Linux, ensure that the PA library is available
-case "$OS_TARGET" in
-WINNT|Darwin|Android|OpenBSD)
-    ;;
-*)
-    MOZ_PULSEAUDIO=1
-    ;;
-esac
-
-MOZ_ARG_DISABLE_BOOL(pulseaudio,
-[  --disable-pulseaudio          Disable PulseAudio support],
-   MOZ_PULSEAUDIO=,
-   MOZ_PULSEAUDIO=1)
-
-if test -n "$MOZ_PULSEAUDIO"; then
-    AC_DEFINE(MOZ_PULSEAUDIO)
-    PKG_CHECK_MODULES(MOZ_PULSEAUDIO, libpulse, ,
-         [echo "$MOZ_PULSEAUDIO_PKG_ERRORS"
-          AC_MSG_ERROR([pulseaudio audio backend requires libpulse development package])])
-fi
-
-AC_SUBST(MOZ_PULSEAUDIO)
 
 dnl ========================================================
 dnl NegotiateAuth

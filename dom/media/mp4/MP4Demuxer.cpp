@@ -499,7 +499,7 @@ MP4TrackDemuxer::GetNextSample()
   }
 
   if (sample->mCrypto.mValid) {
-    nsAutoPtr<MediaRawDataWriter> writer(sample->CreateWriter());
+    UniquePtr<MediaRawDataWriter> writer(sample->CreateWriter());
     writer->mCrypto.mMode = mInfo->mCrypto.mMode;
 
     // Only use the default key parsed from the moov if we haven't already got

@@ -673,7 +673,9 @@ ScrollWheelInput::ScrollWheelInput(uint32_t aTime, TimeStamp aTimeStamp,
                                    ScrollDeltaType aDeltaType,
                                    const ScreenPoint& aOrigin, double aDeltaX,
                                    double aDeltaY,
-                                   bool aAllowToOverrideSystemScrollSpeed)
+                                   bool aAllowToOverrideSystemScrollSpeed,
+                                   WheelDeltaAdjustmentStrategy
+                                     aWheelDeltaAdjustmentStrategy)
   : InputData(SCROLLWHEEL_INPUT, aTime, aTimeStamp, aModifiers)
   , mDeltaType(aDeltaType)
   , mScrollMode(aScrollMode)
@@ -689,6 +691,7 @@ ScrollWheelInput::ScrollWheelInput(uint32_t aTime, TimeStamp aTimeStamp,
   , mMayHaveMomentum(false)
   , mIsMomentum(false)
   , mAllowToOverrideSystemScrollSpeed(aAllowToOverrideSystemScrollSpeed)
+  , mWheelDeltaAdjustmentStrategy(aWheelDeltaAdjustmentStrategy)
 {
 }
 
@@ -709,6 +712,7 @@ ScrollWheelInput::ScrollWheelInput(const WidgetWheelEvent& aWheelEvent)
   , mIsMomentum(aWheelEvent.mIsMomentum)
   , mAllowToOverrideSystemScrollSpeed(
       aWheelEvent.mAllowToOverrideSystemScrollSpeed)
+  , mWheelDeltaAdjustmentStrategy(WheelDeltaAdjustmentStrategy::eNone)
 {
   mOrigin =
     ScreenPoint(ViewAs<ScreenPixel>(aWheelEvent.mRefPoint,

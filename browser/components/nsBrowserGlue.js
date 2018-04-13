@@ -67,6 +67,10 @@ ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
   // The window becomes visible after OnStopRequest, so make this happen now.
   win.stop();
 
+  let { TelemetryTimestamps } =
+    ChromeUtils.import("resource://gre/modules/TelemetryTimestamps.jsm", {});
+  TelemetryTimestamps.add("blankWindowShown");
+
   // Used in nsBrowserContentHandler.js to close unwanted blank windows.
   docElt.setAttribute("windowtype", "navigator:blank");
 })();
@@ -509,7 +513,7 @@ BrowserGlue.prototype = {
             if (where == "current") {
               where = "tab";
             }
-            win.openUILinkIn(data.href, where);
+            win.openTrustedLinkIn(data.href, where);
             linkHandled.data = true;
           }
         }
@@ -839,7 +843,7 @@ BrowserGlue.prototype = {
         label:     win.gNavigatorBundle.getString("slowStartup.helpButton.label"),
         accessKey: win.gNavigatorBundle.getString("slowStartup.helpButton.accesskey"),
         callback() {
-          win.openUILinkIn("https://support.mozilla.org/kb/reset-firefox-easily-fix-most-problems", "tab");
+          win.openTrustedLinkIn("https://support.mozilla.org/kb/reset-firefox-easily-fix-most-problems", "tab");
         }
       },
       {
@@ -1485,7 +1489,7 @@ BrowserGlue.prototype = {
                         accessKey: key,
                         popup:     null,
                         callback(aNotificationBar, aButton) {
-                          win.openUILinkIn(url, "tab");
+                          win.openTrustedLinkIn(url, "tab");
                         }
                       }
                     ];
@@ -1512,7 +1516,7 @@ BrowserGlue.prototype = {
       if (topic != "alertclickcallback")
         return;
       let win = RecentWindow.getMostRecentBrowserWindow();
-      win.openUILinkIn(data, "tab");
+      win.openTrustedLinkIn(data, "tab");
     }
 
     try {
@@ -1780,7 +1784,7 @@ BrowserGlue.prototype = {
                       accessKey,
                       popup:     null,
                       callback(aNotificationBar, aButton) {
-                        win.openUILinkIn(url, "tab");
+                        win.openTrustedLinkIn(url, "tab");
                       }
                     }
                   ];
@@ -2697,7 +2701,7 @@ BrowserGlue.prototype = {
       label: win.gNavigatorBundle.getString("flashHang.helpButton.label"),
       accessKey: win.gNavigatorBundle.getString("flashHang.helpButton.accesskey"),
       callback() {
-        win.openUILinkIn("https://support.mozilla.org/kb/flash-protected-mode-autodisabled", "tab");
+        win.openTrustedLinkIn("https://support.mozilla.org/kb/flash-protected-mode-autodisabled", "tab");
       }
     }];
     let nb = win.document.getElementById("global-notificationbox");

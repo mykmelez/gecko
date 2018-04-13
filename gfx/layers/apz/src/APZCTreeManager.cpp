@@ -519,22 +519,20 @@ APZCTreeManager::UpdateHitTestingTree(LayersId aRootLayerTreeId,
 
 void
 APZCTreeManager::UpdateHitTestingTree(LayersId aRootLayerTreeId,
-                                      const WebRenderScrollData& aScrollData,
+                                      const WebRenderScrollDataWrapper& aScrollWrapper,
                                       bool aIsFirstPaint,
                                       LayersId aOriginatingLayersId,
                                       uint32_t aPaintSequenceNumber)
 {
   AssertOnUpdaterThread();
 
-  WebRenderScrollDataWrapper wrapper(&aScrollData);
-  UpdateHitTestingTreeImpl(aRootLayerTreeId, wrapper, aIsFirstPaint,
+  UpdateHitTestingTreeImpl(aRootLayerTreeId, aScrollWrapper, aIsFirstPaint,
                            aOriginatingLayersId, aPaintSequenceNumber);
 }
 
 bool
 APZCTreeManager::PushStateToWR(wr::TransactionBuilder& aTxn,
-                               const TimeStamp& aSampleTime,
-                               nsTArray<wr::WrTransformProperty>& aTransformArray)
+                               const TimeStamp& aSampleTime)
 {
   AssertOnSamplerThread();
 
@@ -609,6 +607,7 @@ APZCTreeManager::PushStateToWR(wr::TransactionBuilder& aTxn,
   // iteration, it's cleaner and more efficient to do it as a separate pass
   // because now we have a populated httnMap which allows O(log n) lookup here,
   // resulting in O(n log n) runtime.
+  nsTArray<wr::WrTransformProperty> scrollbarTransforms;
   ForEachNode<ReverseIterator>(mRootNode.get(),
       [&](HitTestingTreeNode* aNode)
       {
@@ -638,10 +637,11 @@ APZCTreeManager::PushStateToWR(wr::TransactionBuilder& aTxn,
                     scrollTargetNode->IsAncestorOf(aNode),
                     nullptr);
             });
-        aTransformArray.AppendElement(wr::ToWrTransformProperty(
+        scrollbarTransforms.AppendElement(wr::ToWrTransformProperty(
             aNode->GetScrollbarAnimationId(),
             transform));
       });
+  aTxn.AppendTransformProperties(scrollbarTransforms);
 
   return activeAnimations;
 }
@@ -1977,6 +1977,7 @@ APZCTreeManager::UpdateZoomConstraints(const ScrollableLayerGuid& aGuid,
     MOZ_ASSERT(XRE_IsParentProcess());
 
     GetUpdater()->RunOnUpdaterThread(
+        aGuid.mLayersId,
         NewRunnableMethod<ScrollableLayerGuid, Maybe<ZoomConstraints>>(
             "APZCTreeManager::UpdateZoomConstraints",
             this,
@@ -3239,6 +3240,20 @@ void
 APZCTreeManager::AssertOnUpdaterThread()
 {
   GetUpdater()->AssertOnUpdaterThread();
+}
+
+void
+APZCTreeManager::LockTree()
+{
+  AssertOnUpdaterThread();
+  mTreeLock.Lock();
+}
+
+void
+APZCTreeManager::UnlockTree()
+{
+  AssertOnUpdaterThread();
+  mTreeLock.Unlock();
 }
 
 void

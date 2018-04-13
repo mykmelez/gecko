@@ -314,6 +314,9 @@ nsHostRecord::ResolveComplete()
     case MODE_SHADOW:
         AccumulateCategorical(Telemetry::LABELS_DNS_LOOKUP_ALGORITHM::trrShadow);
         break;
+    case MODE_TRROFF:
+        AccumulateCategorical(Telemetry::LABELS_DNS_LOOKUP_ALGORITHM::trrOff);
+        break;
     }
 
     if (mTRRUsed && !mTRRSuccess && mNativeSuccess && gTRRService) {
@@ -530,8 +533,8 @@ nsHostResolver::nsHostResolver(uint32_t maxCacheEntries,
 {
     mCreationTime = PR_Now();
 
-    mLongIdleTimeout  = PR_SecondsToInterval(LongIdleTimeoutSeconds);
-    mShortIdleTimeout = PR_SecondsToInterval(ShortIdleTimeoutSeconds);
+    mLongIdleTimeout  = TimeDuration::FromSeconds(LongIdleTimeoutSeconds);
+    mShortIdleTimeout = TimeDuration::FromSeconds(ShortIdleTimeoutSeconds);
 }
 
 nsHostResolver::~nsHostResolver() = default;
@@ -1267,12 +1270,12 @@ nsHostResolver::NameLookup(nsHostRecord *rec)
         mode = MODE_NATIVEONLY;
     }
 
-    if (mode != MODE_NATIVEONLY) {
+    if (!TRR_DISABLED(mode)) {
         rv = TrrLookup(rec);
     }
 
     if ((mode == MODE_PARALLEL) ||
-        (mode == MODE_NATIVEONLY) ||
+        TRR_DISABLED(mode) ||
         (mode == MODE_SHADOW) ||
         ((mode == MODE_TRRFIRST) && NS_FAILED(rv))) {
         rv = NativeLookup(rec);
@@ -1313,12 +1316,13 @@ bool
 nsHostResolver::GetHostToLookup(nsHostRecord **result)
 {
     bool timedOut = false;
-    PRIntervalTime epoch, now, timeout;
+    TimeDuration timeout;
+    TimeStamp epoch, now;
 
     MutexAutoLock lock(mLock);
 
     timeout = (mNumIdleThreads >= HighThreadThreshold) ? mShortIdleTimeout : mLongIdleTimeout;
-    epoch = PR_IntervalNow();
+    epoch = TimeStamp::Now();
 
     while (!mShutdown) {
         // remove next record from Q; hand over owning reference. Check high, then med, then low
@@ -1363,15 +1367,16 @@ nsHostResolver::GetHostToLookup(nsHostRecord **result)
         mIdleThreadCV.Wait(timeout);
         mNumIdleThreads--;
 
-        now = PR_IntervalNow();
+        now = TimeStamp::Now();
 
-        if ((PRIntervalTime)(now - epoch) >= timeout)
+        if (now - epoch >= timeout) {
             timedOut = true;
-        else {
-            // It is possible that PR_WaitCondVar() was interrupted and returned early,
-            // in which case we will loop back and re-enter it. In that case we want to
-            // do so with the new timeout reduced to reflect time already spent waiting.
-            timeout -= (PRIntervalTime)(now - epoch);
+        } else {
+            // It is possible that CondVar::Wait() was interrupted and returned
+            // early, in which case we will loop back and re-enter it. In that
+            // case we want to do so with the new timeout reduced to reflect
+            // time already spent waiting.
+            timeout -= now - epoch;
             epoch = now;
         }
     }

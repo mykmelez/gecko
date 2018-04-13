@@ -31,12 +31,11 @@ APZSampler::~APZSampler()
 
 bool
 APZSampler::PushStateToWR(wr::TransactionBuilder& aTxn,
-                          const TimeStamp& aSampleTime,
-                          nsTArray<wr::WrTransformProperty>& aTransformArray)
+                          const TimeStamp& aSampleTime)
 {
   // This function will be removed eventually since we'll have WR pull
   // the transforms from APZ instead.
-  return mApz->PushStateToWR(aTxn, aSampleTime, aTransformArray);
+  return mApz->PushStateToWR(aTxn, aSampleTime);
 }
 
 bool
@@ -146,7 +145,7 @@ APZSampler::HasUnusedAsyncTransform(const LayerMetricsWrapper& aLayer)
 }
 
 void
-APZSampler::AssertOnSamplerThread()
+APZSampler::AssertOnSamplerThread() const
 {
   if (APZThreadUtils::GetThreadAssertionsEnabled()) {
     MOZ_ASSERT(IsSamplerThread());
@@ -154,7 +153,7 @@ APZSampler::AssertOnSamplerThread()
 }
 
 bool
-APZSampler::IsSamplerThread()
+APZSampler::IsSamplerThread() const
 {
   return CompositorThreadHolder::IsInCompositorThread();
 }

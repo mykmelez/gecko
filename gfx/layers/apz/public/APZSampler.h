@@ -38,8 +38,7 @@ public:
   explicit APZSampler(const RefPtr<APZCTreeManager>& aApz);
 
   bool PushStateToWR(wr::TransactionBuilder& aTxn,
-                     const TimeStamp& aSampleTime,
-                     nsTArray<wr::WrTransformProperty>& aTransformArray);
+                     const TimeStamp& aSampleTime);
 
   bool SampleAnimations(const LayerMetricsWrapper& aLayer,
                         const TimeStamp& aSampleTime);
@@ -75,12 +74,12 @@ public:
    * sampler thread (which samples the async transform).
    * This does nothing if thread assertions are disabled.
    */
-  void AssertOnSamplerThread();
+  void AssertOnSamplerThread() const;
 
   /**
    * Returns true if currently on the APZSampler's "sampler thread".
    */
-  bool IsSamplerThread();
+  bool IsSamplerThread() const;
 
 protected:
   virtual ~APZSampler();
