@@ -77,6 +77,7 @@ public:
 
   void UpdateDynamicProperties(const nsTArray<wr::WrOpacityProperty>& aOpacityArray,
                                const nsTArray<wr::WrTransformProperty>& aTransformArray);
+  void AppendTransformProperties(const nsTArray<wr::WrTransformProperty>& aTransformArray);
 
   void SetWindowParameters(const LayoutDeviceIntSize& aWindowSize,
                            const LayoutDeviceIntRect& aDocRect);
@@ -247,6 +248,7 @@ public:
                 wr::BuiltDisplayList& aOutDisplayList);
 
   void PushStackingContext(const wr::LayoutRect& aBounds, // TODO: We should work with strongly typed rects
+                           const wr::WrClipId* aClipNodeId,
                            const wr::WrAnimationProperty* aAnimation,
                            const float* aOpacity,
                            const gfx::Matrix4x4* aTransform,

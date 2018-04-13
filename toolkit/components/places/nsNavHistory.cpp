@@ -270,6 +270,7 @@ const int32_t nsNavHistory::kGetInfoIndex_VisitType = 17;
 
 PLACES_FACTORY_SINGLETON_IMPLEMENTATION(nsNavHistory, gHistoryService)
 
+
 nsNavHistory::nsNavHistory()
   : mBatchLevel(0)
   , mBatchDBTransaction(nullptr)
@@ -280,28 +281,6 @@ nsNavHistory::nsNavHistory()
   , mEmbedVisits(EMBED_VISITS_INITIAL_CACHE_LENGTH)
   , mHistoryEnabled(true)
   , mNumVisitsForFrecency(10)
-  , mFirstBucketCutoffInDays{}
-  , mSecondBucketCutoffInDays{}
-  , mThirdBucketCutoffInDays{}
-  , mFourthBucketCutoffInDays{}
-  , mFirstBucketWeight{}
-  , mSecondBucketWeight{}
-  , mThirdBucketWeight{}
-  , mFourthBucketWeight{}
-  , mDefaultWeight{}
-  , mEmbedVisitBonus{}
-  , mFramedLinkVisitBonus{}
-  , mLinkVisitBonus{}
-  , mTypedVisitBonus{}
-  , mBookmarkVisitBonus{}
-  , mDownloadVisitBonus{}
-  , mPermRedirectVisitBonus{}
-  , mTempRedirectVisitBonus{}
-  , mRedirectSourceVisitBonus{}
-  , mDefaultVisitBonus{}
-  , mUnvisitedBookmarkBonus{}
-  , mUnvisitedTypedBonus{}
-  , mReloadVisitBonus{}
   , mTagsFolder(-1)
   , mDaysOfHistory(-1)
   , mLastCachedStartOfDay(INT64_MAX)
@@ -3460,6 +3439,12 @@ nsNavHistory::RowToResult(mozIStorageValueArray* aRow,
   nsAutoCString url;
   nsresult rv = aRow->GetUTF8String(kGetInfoIndex_URL, url);
   NS_ENSURE_SUCCESS(rv, rv);
+  // In case of data corruption URL may be null, but our UI code prefers an
+  // empty string.
+  if (url.IsVoid()) {
+    MOZ_ASSERT(false, "Found a NULL url in moz_places");
+    url.SetIsVoid(false);
+  }
 
   // title
   nsAutoCString title;

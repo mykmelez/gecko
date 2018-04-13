@@ -942,6 +942,11 @@ struct FontInstancePlatformOptions {
 };
 #endif
 
+struct WrTransformProperty {
+  uint64_t id;
+  LayoutTransform transform;
+};
+
 struct WrOpacityProperty {
   uint64_t id;
   float opacity;
@@ -950,11 +955,6 @@ struct WrOpacityProperty {
     return id == aOther.id &&
            opacity == aOther.opacity;
   }
-};
-
-struct WrTransformProperty {
-  uint64_t id;
-  LayoutTransform transform;
 };
 
 extern "C" {
@@ -1309,6 +1309,7 @@ WR_FUNC;
 WR_INLINE
 void wr_dp_push_stacking_context(WrState *aState,
                                  LayoutRect aBounds,
+                                 const uintptr_t *aClipNodeId,
                                  const WrAnimationProperty *aAnimation,
                                  const float *aOpacity,
                                  const LayoutTransform *aTransform,
@@ -1594,6 +1595,12 @@ WR_DESTRUCTOR_SAFE_FUNC;
 
 WR_INLINE
 WrThreadPool *wr_thread_pool_new()
+WR_FUNC;
+
+WR_INLINE
+void wr_transaction_append_transform_properties(Transaction *aTxn,
+                                                const WrTransformProperty *aTransformArray,
+                                                uintptr_t aTransformCount)
 WR_FUNC;
 
 WR_INLINE

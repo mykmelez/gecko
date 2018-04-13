@@ -1066,8 +1066,6 @@ pub extern "C" fn wr_transaction_update_dynamic_properties(
     transform_array: *const WrTransformProperty,
     transform_count: usize,
 ) {
-    debug_assert!(transform_count > 0 || opacity_count > 0);
-
     let mut properties = DynamicProperties {
         transforms: Vec::new(),
         floats: Vec::new(),
@@ -1099,6 +1097,35 @@ pub extern "C" fn wr_transaction_update_dynamic_properties(
     }
 
     txn.update_dynamic_properties(properties);
+}
+
+#[no_mangle]
+pub extern "C" fn wr_transaction_append_transform_properties(
+    txn: &mut Transaction,
+    transform_array: *const WrTransformProperty,
+    transform_count: usize,
+) {
+    if transform_count == 0 {
+        return;
+    }
+
+    let mut properties = DynamicProperties {
+        transforms: Vec::new(),
+        floats: Vec::new(),
+    };
+
+    let transform_slice = make_slice(transform_array, transform_count);
+
+    for element in transform_slice.iter() {
+        let prop = PropertyValue {
+            key: PropertyBindingKey::new(element.id),
+            value: element.transform.into(),
+        };
+
+        properties.transforms.push(prop);
+    }
+
+    txn.append_dynamic_properties(properties);
 }
 
 #[no_mangle]
@@ -1504,6 +1531,7 @@ pub extern "C" fn wr_dp_clear_save(state: &mut WrState) {
 #[no_mangle]
 pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
                                               bounds: LayoutRect,
+                                              clip_node_id: *const usize,
                                               animation: *const WrAnimationProperty,
                                               opacity: *const f32,
                                               transform: *const LayoutTransform,
@@ -1533,6 +1561,12 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
             WrFilterOpType::ColorMatrix => FilterOp::ColorMatrix(c_filter.matrix),
         }
     }).collect();
+
+    let clip_node_id_ref = unsafe { clip_node_id.as_ref() };
+    let clip_node_id = match clip_node_id_ref {
+        Some(clip_node_id) => Some(ClipId::Clip(*clip_node_id, state.pipeline_id)),
+        None => None,
+    };
 
     let opacity_ref = unsafe { opacity.as_ref() };
     if let Some(opacity) = opacity_ref {
@@ -1569,7 +1603,7 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
     state.frame_builder
          .dl_builder
          .push_stacking_context(&prim_info,
-                                None,
+                                clip_node_id,
                                 ScrollPolicy::Scrollable,
                                 transform_binding,
                                 transform_style,

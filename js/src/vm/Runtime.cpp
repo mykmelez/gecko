@@ -215,7 +215,7 @@ JSRuntime::init(JSContext* cx, uint32_t maxbytes, uint32_t maxNurseryBytes)
     if (!gc.init(maxbytes, maxNurseryBytes))
         return false;
 
-    ScopedJSDeletePtr<Zone> atomsZone(js_new<Zone>(this, nullptr));
+    ScopedJSDeletePtr<Zone> atomsZone(js_new<Zone>(this));
     if (!atomsZone || !atomsZone->init(true))
         return false;
 
@@ -281,7 +281,7 @@ JSRuntime::destroyRuntime()
          * Finish any in-progress GCs first. This ensures the parseWaitingOnGC
          * list is empty in CancelOffThreadParses.
          */
-        JSContext* cx = TlsContext.get();
+        JSContext* cx = mainContextFromOwnThread();
         if (JS::IsIncrementalGCInProgress(cx))
             FinishGC(cx);
 
@@ -434,7 +434,7 @@ InvokeInterruptCallback(JSContext* cx)
 
     // A worker thread may have requested an interrupt after finishing an Ion
     // compilation.
-    jit::AttachFinishedCompilations(cx->zone()->group(), cx);
+    jit::AttachFinishedCompilations(cx);
 
     // Important: Additional callbacks can occur inside the callback handler
     // if it re-enters the JS engine. The embedding must ensure that the
@@ -792,19 +792,19 @@ JSRuntime::destroyAtomsAddedWhileSweepingTable()
 void
 JSRuntime::setUsedByHelperThread(Zone* zone)
 {
-    MOZ_ASSERT(!zone->group()->usedByHelperThread());
+    MOZ_ASSERT(!zone->usedByHelperThread());
     MOZ_ASSERT(!zone->wasGCStarted());
-    zone->group()->setUsedByHelperThread();
+    zone->setUsedByHelperThread();
     numActiveHelperThreadZones++;
 }
 
 void
 JSRuntime::clearUsedByHelperThread(Zone* zone)
 {
-    MOZ_ASSERT(zone->group()->usedByHelperThread());
-    zone->group()->clearUsedByHelperThread();
+    MOZ_ASSERT(zone->usedByHelperThread());
+    zone->clearUsedByHelperThread();
     numActiveHelperThreadZones--;
-    JSContext* cx = TlsContext.get();
+    JSContext* cx = mainContextFromOwnThread();
     if (gc.fullGCForAtomsRequested() && cx->canCollectAtoms())
         gc.triggerFullGCForAtoms(cx);
 }
@@ -820,7 +820,7 @@ js::CurrentThreadCanAccessZone(Zone* zone)
 {
     // Helper thread zones can only be used by their owning thread.
     if (zone->usedByHelperThread())
-        return zone->group()->ownedByCurrentHelperThread();
+        return zone->ownedByCurrentHelperThread();
 
     // Other zones can only be accessed by the runtime's active context.
     return CurrentThreadCanAccessRuntime(zone->runtime_);

@@ -298,8 +298,10 @@ class XPCRootSetElem
 public:
     XPCRootSetElem()
     {
+#ifdef DEBUG
         mNext = nullptr;
         mSelfp = nullptr;
+#endif
     }
 
     ~XPCRootSetElem()
@@ -412,6 +414,8 @@ public:
     ~XPCJSContext();
 
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
+
+    bool IsSystemCaller() const override;
 
     AutoMarkingPtr** GetAutoRootsAdr() {return &mAutoRoots;}
 
@@ -1093,14 +1097,7 @@ public:
         {mIndexInInterface = index;}
 
     /* default ctor - leave random contents */
-    XPCNativeMember()
-      : mName{}
-      , mIndex{}
-      , mFlags{}
-      , mIndexInInterface{}
-    {
-      MOZ_COUNT_CTOR(XPCNativeMember);
-    }
+    XPCNativeMember()  {MOZ_COUNT_CTOR(XPCNativeMember);}
     ~XPCNativeMember() {MOZ_COUNT_DTOR(XPCNativeMember);}
 
 private:

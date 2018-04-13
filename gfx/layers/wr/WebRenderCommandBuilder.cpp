@@ -97,10 +97,8 @@ struct BlobItemData
   IntRect mImageRect;
   IntPoint mGroupOffset;
 
-  BlobItemData(DIGroup* aGroup, nsDisplayItem* aItem)
-    : mUsed{ false }
-    , mGroup(aGroup)
-    , mOpacity{ 0.0 }
+  BlobItemData(DIGroup* aGroup, nsDisplayItem *aItem)
+    : mGroup(aGroup)
   {
     mInvalid = false;
     mEmpty = false;
@@ -181,9 +179,7 @@ struct DIGroup;
 struct Grouper
 {
   explicit Grouper(ScrollingLayersHelper& aScrollingHelper)
-    : mAppUnitsPerDevPixel{}
-    , mDisplayListBuilder{ nullptr }
-    , mScrollingHelper(aScrollingHelper)
+   : mScrollingHelper(aScrollingHelper)
   {}
 
   int32_t mAppUnitsPerDevPixel;
@@ -362,7 +358,6 @@ struct DIGroup
       nsRect bounds = combined.GetBounds();
 
       IntRect transformedRect = ToDeviceSpace(combined.GetBounds(), aMatrix, appUnitsPerDevPixel, mGroupOffset);
-      ToDeviceSpace(combined.GetBounds(), aMatrix, appUnitsPerDevPixel, mGroupOffset);
       aData->mRect = transformedRect.Intersect(imageRect);
       GP("CGC %s %d %d %d %d\n", aItem->Name(), bounds.x, bounds.y, bounds.width, bounds.height);
       GP("%d %d,  %f %f\n", mGroupOffset.x, mGroupOffset.y, aMatrix._11, aMatrix._22);

@@ -1445,16 +1445,6 @@ pref("javascript.options.mem.gc_incremental_slice_ms", 5);
 // JSGC_COMPACTING_ENABLED
 pref("javascript.options.mem.gc_compacting", true);
 
-pref("javascript.options.mem.log", false);
-pref("javascript.options.mem.notify", false);
-pref("javascript.options.gc_on_memory_pressure", true);
-pref("javascript.options.compact_on_user_inactive", true);
-#ifdef NIGHTLY_BUILD
-pref("javascript.options.compact_on_user_inactive_delay", 15000); // ms
-#else
-pref("javascript.options.compact_on_user_inactive_delay", 300000); // ms
-#endif
-
 // JSGC_HIGH_FREQUENCY_TIME_LIMIT
 pref("javascript.options.mem.gc_high_frequency_time_limit_ms", 1000);
 
@@ -2536,7 +2526,7 @@ pref("security.csp.experimentalEnabled", false);
 pref("security.csp.enableStrictDynamic", true);
 
 #if defined(DEBUG) && !defined(ANDROID)
-pref("csp.content_privileged_about_uris_without_csp", "blank,blocked,cache,certerror,checkerboard,credits,home,logo,neterror,newtab,printpreview,rights,srcdoc,studies");
+pref("csp.content_privileged_about_uris_without_csp", "blank,cache,certerror,checkerboard,credits,home,logo,neterror,newtab,printpreview,rights,srcdoc,studies");
 #endif
 
 #ifdef NIGHTLY_BUILD
@@ -2741,6 +2731,34 @@ pref("mousewheel.with_win.delta_multiplier_z", 100);
 // If line-height is lower than this value (in device pixels), 1 line scroll
 // scrolls this height.
 pref("mousewheel.min_line_scroll_amount", 5);
+
+// Auto-dir is a feature which treats any single-wheel scroll as a scroll in the
+// only one scrollable direction if the target has only one scrollable
+// direction. For example, if the user scrolls a vertical wheel inside a target
+// which is horizontally scrollable but vertical unscrollable, then the vertical
+// scroll is converted to a horizontal scroll for that target.
+// Note that auto-dir only takes effect for |mousewheel.*.action|s and
+// |mousewheel.*.action.override_x|s whose values are 1.
+#ifdef EARLY_BETA_OR_EARLIER
+pref("mousewheel.autodir.enabled", true);
+#else
+pref("mousewheel.autodir.enabled", false);
+#endif
+// When a wheel scroll is converted due to auto-dir, which side the converted
+// scroll goes towards is decided by one thing called "honoured target". If the
+// content of the honoured target horizontally starts from right to left, then
+// an upward scroll maps to a rightward scroll and a downward scroll maps to a
+// leftward scroll; otherwise, an upward scroll maps to a leftward scroll and a
+// downward scroll maps to a rightward scroll.
+// If this pref is set to false, then consider the scrolling target as the
+// honoured target.
+// If set to true, then consider the root element in the document where the
+// scrolling target is as the honoured target. But note that there's one
+// exception: for targets in an HTML document, the real root element(I.e. the
+// <html> element) is typically not considered as a root element, but the <body>
+// element is typically considered as a root element. If there is no <body>
+// element, then consider the <html> element instead.
+pref("mousewheel.autodir.honourroot", false);
 
 // These define the smooth scroll behavior (min ms, max ms) for different triggers
 // Some triggers:
@@ -5300,14 +5318,19 @@ pref("network.captive-portal-service.backoffFactor", "5.0");
 pref("network.captive-portal-service.enabled", false);
 
 // DNS Trusted Recursive Resolver
-// 0 - off, 1 - race, 2 TRR first, 3 TRR only, 4 shadow
+// 0 - default off, 1 - race, 2 TRR first, 3 TRR only, 4 shadow, 5 off by choice
 pref("network.trr.mode", 0);
 // DNS-over-HTTP service to use, must be HTTPS://
 pref("network.trr.uri", "");
 // credentials to pass to DOH end-point
 pref("network.trr.credentials", "");
 // Wait for captive portal confirmation before enabling TRR
+#if defined(ANDROID)
+// On Android, the captive portal is handled by the OS itself
+pref("network.trr.wait-for-portal", false);
+#else
 pref("network.trr.wait-for-portal", true);
+#endif
 // Allow RFC1918 address in responses?
 pref("network.trr.allow-rfc1918", false);
 // Use GET (rather than POST)
