@@ -320,8 +320,12 @@ class CargoProvider(MachCommandBase):
                 description='Run `cargo doc` on a given crate.  Defaults to gkrust.')
     @CommandArgument('--all-crates', default=None, action='store_true',
         help='Document all of the crates in the tree.')
+    @CommandArgument('--open', dest='auto_open', default=False, action='store_true',
+        help="Automatically open HTML docs in a browser.")
     @CommandArgument('crates', default=None, nargs='*', help='The crate name(s) to document.')
-    def doc(self, all_crates=None, crates=None):
+    def doc(self, all_crates=None, crates=None, auto_open=False):
+        import webbrowser
+
         if all_crates:
             crates = self._crates_and_roots.keys()
         elif crates == None or crates == []:
@@ -340,6 +344,14 @@ class CargoProvider(MachCommandBase):
                                  target='force-cargo-doc-build')
             if ret != 0:
                 return ret
+
+            # TODO: determine the correct location of the docs based on
+            # the value of CARGO_TARGET_DIR instead of optimistically computing
+            # it relative to the root.
+            doc_path = os.path.join(self.topobjdir, root, '..', 'doc')
+            if auto_open and os.path.isdir(doc_path):
+                # TODO: use a library like pathlib to convert the path to a URL.
+                webbrowser.open('file://' + doc_path)
 
         return 0
 
