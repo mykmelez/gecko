@@ -74,6 +74,6 @@ struct XULStore {
 impl XULStore {
     #[no_mangle]
     pub extern fn setValue(doc: &nsAString, id: &nsAString, attr: &nsAString, value: &nsAString) -> nsresult {
-        0
+        NS_OK
     }
 }
