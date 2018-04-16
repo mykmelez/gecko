@@ -1,6 +1,3 @@
-#[macro_use]
-extern crate lazy_static;
-
 extern crate rkv;
 extern crate tempdir;
 
@@ -14,7 +11,7 @@ use self::tempdir::TempDir;
 use std::fs;
 
 extern crate nsstring;
-use nsstring::{nsACString};
+use nsstring::{nsAString};
 
 extern crate nserror;
 use nserror::*;
@@ -71,11 +68,12 @@ pub extern fn test_xul_store() -> *const u8 {
 }
 
 #[repr(C)]
-struct XULStore() {
-};
+struct XULStore {
+}
 
-impl XULStore() {
+impl XULStore {
     #[no_mangle]
-    pub extern fn setValue(&nsAString doc, &nsAString id, &nsAString attr, &nsAString value) -> nsresult {
+    pub extern fn setValue(doc: &nsAString, id: &nsAString, attr: &nsAString, value: &nsAString) -> nsresult {
+        0
     }
 }
