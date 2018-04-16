@@ -1291,11 +1291,23 @@ WasmInstanceObject::getExportedFunction(JSContext* cx, HandleWasmInstanceObject 
         RootedAtom name(cx, NumberToAtom(cx, funcIndex));
         if (!name)
             return false;
+
+        // Functions with anyref don't have jit entries yet, so they should
+        // mostly behave like asm.js functions. Pretend it's the case, until
+        // jit entries are implemented.
+        JSFunction::Flags flags = sig.temporarilyUnsupportedAnyRef()
+                                ? JSFunction::ASMJS_NATIVE
+                                : JSFunction::WASM_FUN;
+
         fun.set(NewNativeFunction(cx, WasmCall, numArgs, name, gc::AllocKind::FUNCTION_EXTENDED,
-                                  SingletonObject, JSFunction::WASM_FUN));
+                                  SingletonObject, flags));
         if (!fun)
             return false;
-        fun->setWasmJitEntry(instance.code().getAddressOfJitEntry(funcIndex));
+
+        if (sig.temporarilyUnsupportedAnyRef())
+            fun->setAsmJSIndex(funcIndex);
+        else
+            fun->setWasmJitEntry(instance.code().getAddressOfJitEntry(funcIndex));
     }
 
     fun->setExtendedSlot(FunctionExtended::WASM_INSTANCE_SLOT, ObjectValue(*instanceObj));
@@ -3116,11 +3128,10 @@ InitErrorClass(JSContext* cx, HandleObject wasm, const char* name, JSExnType exn
 }
 
 JSObject*
-js::InitWebAssemblyClass(JSContext* cx, HandleObject obj)
+js::InitWebAssemblyClass(JSContext* cx, Handle<GlobalObject*> global)
 {
     MOZ_RELEASE_ASSERT(HasSupport(cx));
 
-    Handle<GlobalObject*> global = obj.as<GlobalObject>();
     MOZ_ASSERT(!global->isStandardClassResolved(JSProto_WebAssembly));
 
     RootedObject proto(cx, GlobalObject::getOrCreateObjectPrototype(cx, global));

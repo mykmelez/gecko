@@ -9,22 +9,14 @@ var EXPORTED_SYMBOLS = ["GeckoViewContent"];
 ChromeUtils.import("resource://gre/modules/GeckoViewModule.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "dump", () =>
-    ChromeUtils.import("resource://gre/modules/AndroidLog.jsm",
-                       {}).AndroidLog.d.bind(null, "ViewContent"));
-
-function debug(aMsg) {
-  // dump(aMsg);
-}
-
 class GeckoViewContent extends GeckoViewModule {
-  init() {
+  onInit() {
     this.eventDispatcher.registerListener(this, [
       "GeckoView:SetActive"
     ]);
   }
 
-  register() {
+  onEnable() {
     this.registerContent("chrome://geckoview/content/GeckoViewContent.js");
 
     this.window.addEventListener("MozDOMFullScreen:Entered", this,
@@ -41,9 +33,22 @@ class GeckoViewContent extends GeckoViewModule {
     this.messageManager.addMessageListener("GeckoView:DOMFullscreenRequest", this);
   }
 
+  onDisable() {
+    this.window.removeEventListener("MozDOMFullScreen:Entered", this,
+                                    /* capture */ true);
+    this.window.removeEventListener("MozDOMFullScreen:Exited", this,
+                                    /* capture */ true);
+
+    this.unregisterListener();
+
+    this.messageManager.removeMessageListener("GeckoView:DOMFullscreenExit", this);
+    this.messageManager.removeMessageListener("GeckoView:DOMFullscreenRequest", this);
+  }
+
   // Bundle event handler.
   onEvent(aEvent, aData, aCallback) {
-    debug("onEvent: " + aEvent);
+    debug `onEvent: event=${aEvent}, data=${aData}`;
+
     switch (aEvent) {
       case "GeckoViewContent:ExitFullScreen":
         this.messageManager.sendAsyncMessage("GeckoView:DOMFullscreenExited");
@@ -65,19 +70,9 @@ class GeckoViewContent extends GeckoViewModule {
     }
   }
 
-  unregister() {
-    this.window.removeEventListener("MozDOMFullScreen:Entered", this,
-                                    /* capture */ true);
-    this.window.removeEventListener("MozDOMFullScreen:Exited", this,
-                                    /* capture */ true);
-
-    this.messageManager.removeMessageListener("GeckoView:DOMFullscreenExit", this);
-    this.messageManager.removeMessageListener("GeckoView:DOMFullscreenRequest", this);
-  }
-
   // DOM event handler
   handleEvent(aEvent) {
-    debug("handleEvent: aEvent.type=" + aEvent.type);
+    debug `handleEvent: ${aEvent.type}`;
 
     switch (aEvent.type) {
       case "MozDOMFullscreen:Entered":
@@ -94,7 +89,7 @@ class GeckoViewContent extends GeckoViewModule {
 
   // Message manager event handler.
   receiveMessage(aMsg) {
-    debug("receiveMessage " + aMsg.name);
+    debug `receiveMessage: ${aMsg.name}`;
 
     switch (aMsg.name) {
       case "GeckoView:DOMFullscreenExit":

@@ -2340,7 +2340,7 @@ TemporaryTypeSet::getTypedArrayType(CompilerConstraintList* constraints,
     if (clasp && IsTypedArrayClass(clasp)) {
         if (sharedness)
             getTypedArraySharedness(constraints, sharedness);
-        return (Scalar::Type) (clasp - &TypedArrayObject::classes[0]);
+        return GetTypedArrayClassType(clasp);
     }
     return Scalar::MaxTypedArrayViewType;
 }
@@ -4547,7 +4547,7 @@ AutoClearTypeInferenceStateOnOOM::~AutoClearTypeInferenceStateOnOOM()
     zone->types.setSweepingTypes(false);
 
     if (oom) {
-        JSRuntime* rt = zone->runtimeFromActiveCooperatingThread();
+        JSRuntime* rt = zone->runtimeFromMainThread();
         js::CancelOffThreadIonCompile(rt);
         zone->setPreservingCode(false);
         zone->discardJitCode(rt->defaultFreeOp(), /* discardBaselineCode = */ false);

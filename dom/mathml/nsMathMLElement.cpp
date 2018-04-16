@@ -8,9 +8,10 @@
 #include "nsMathMLElement.h"
 #include "base/compiler_specific.h"
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/FontPropertyTypes.h"
+#include "mozilla/TextUtils.h"
 #include "nsGkAtoms.h"
 #include "nsITableCellLayout.h" // for MAX_COLSPAN / MAX_ROWSPAN
-#include "nsCRT.h"
 #include "nsLayoutStylesheetCache.h"
 #include "nsCSSValue.h"
 #include "nsCSSParser.h"
@@ -420,7 +421,7 @@ nsMathMLElement::ParseNumericValue(const nsString& aString,
     }
     else if (c == '.')
       gotDot = true;
-    else if (!nsCRT::IsAsciiDigit(c)) {
+    else if (!IsAsciiDigit(c)) {
       str.Right(unit, stringLength - i);
       // some authors leave blanks before the unit, but that shouldn't
       // be allowed, so don't CompressWhitespace on 'unit'.
@@ -726,10 +727,10 @@ nsMathMLElement::MapMathMLAttributesInto(const nsMappedAttributes* aAttributes,
       str.CompressWhitespace();
       if (str.EqualsASCII("normal")) {
         aData->SetKeywordValue(eCSSProperty_font_weight,
-                               NS_FONT_WEIGHT_NORMAL);
+                               FontWeight::Normal().ToFloat());
       } else if (str.EqualsASCII("bold")) {
         aData->SetKeywordValue(eCSSProperty_font_weight,
-                               NS_FONT_WEIGHT_BOLD);
+                               FontWeight::Bold().ToFloat());
       }
     }
   }
