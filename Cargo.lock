@@ -874,11 +874,11 @@ dependencies = [
  "nserror 0.1.0",
  "nsstring 0.1.0",
  "prefs_parser 0.0.1",
- "rkv 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rsdparsa_capi 0.1.0",
  "u2fhid 0.1.0",
  "webrender_bindings 0.1.0",
  "xpcom 0.1.0",
+ "xulstore 0.1.0",
 ]
 
 [[package]]
@@ -2550,6 +2550,13 @@ dependencies = [
  "lazy_static 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "quote 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "syn 0.13.1 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "xulstore"
+version = "0.1.0"
+dependencies = [
+ "rkv 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
