@@ -11,7 +11,7 @@ use self::tempdir::TempDir;
 use std::fs;
 
 extern crate nsstring;
-use nsstring::{nsAString};
+use nsstring::{nsAString, nsString};
 
 extern crate nserror;
 use nserror::*;
@@ -75,5 +75,14 @@ impl XULStore {
     #[no_mangle]
     pub extern fn setValue(doc: &nsAString, id: &nsAString, attr: &nsAString, value: &nsAString) -> nsresult {
         NS_OK
+    }
+
+    pub extern fn hasValue(doc: &nsAString, id: &nsAString, attr: &nsAString) -> bool {
+        true
+    }
+
+    pub extern fn getValue(doc: &nsAString, id: &nsAString, attr: &nsAString) -> nsString {
+        let mut str = nsString::new();
+        str
     }
 }
