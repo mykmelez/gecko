@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate lazy_static;
+
 extern crate rkv;
 extern crate tempdir;
 
@@ -9,6 +12,12 @@ use rkv::{
 
 use self::tempdir::TempDir;
 use std::fs;
+
+extern crate nsstring;
+use nsstring::{nsACString};
+
+extern crate nserror;
+use nserror::*;
 
 #[no_mangle]
 pub extern fn test_xul_store() -> *const u8 {
@@ -59,4 +68,14 @@ pub extern fn test_xul_store() -> *const u8 {
     // NB: rust &str aren't null terminated.
     let greeting = "hello from XUL store.\0";
     greeting.as_ptr()
+}
+
+#[repr(C)]
+struct XULStore() {
+};
+
+impl XULStore() {
+    #[no_mangle]
+    pub extern fn setValue(&nsAString doc, &nsAString id, &nsAString attr, &nsAString value) -> nsresult {
+    }
 }
