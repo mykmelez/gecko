@@ -17,6 +17,41 @@ use nsstring::{nsAString, nsString};
 extern crate nserror;
 use nserror::*;
 
+#[macro_use]
+extern crate lazy_static;
+
+lazy_static! {
+  static ref XUL_STORE: XULStore = {
+    XULStore {}
+  };
+}
+
+impl Drop for XULStore {
+  fn drop(&mut self) {
+    // unsafe { /* TODO: close store */ }
+  }
+}
+
+#[repr(C)]
+pub struct XULStore {
+}
+
+#[no_mangle]
+pub extern "C" fn xulstore_set_value(doc: &nsAString, id: &nsAString, attr: &nsAString, value: &nsAString) -> nsresult {
+    NS_OK
+}
+
+#[no_mangle]
+pub extern "C" fn xulstore_has_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> bool {
+    true
+}
+
+#[no_mangle]
+pub extern "C" fn xulstore_get_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> nsString {
+    let mut str = nsString::new();
+    str
+}
+
 #[no_mangle]
 pub extern fn test_xul_store() -> *const u8 {
     let dir_svc = xpcom::services::get_DirectoryService().unwrap();
@@ -68,26 +103,4 @@ pub extern fn test_xul_store() -> *const u8 {
     // NB: rust &str aren't null terminated.
     let greeting = "hello from XUL store.\0";
     greeting.as_ptr()
-}
-
-#[repr(C)]
-pub struct XULStore {
-}
-
-impl XULStore {
-    #[no_mangle]
-    pub extern "C" fn set_value(doc: &nsAString, id: &nsAString, attr: &nsAString, value: &nsAString) -> nsresult {
-        NS_OK
-    }
-
-    #[no_mangle]
-    pub extern "C" fn has_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> bool {
-        true
-    }
-
-    #[no_mangle]
-    pub extern "C" fn get_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> nsString {
-        let mut str = nsString::new();
-        str
-    }
 }
