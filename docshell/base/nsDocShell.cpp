@@ -11854,6 +11854,8 @@ nsDocShell::AddState(JS::Handle<JS::Value> aData, const nsAString& aTitle,
   // call ReplaceEntry so that we notify nsIHistoryListeners that an entry
   // was replaced.
   RefPtr<ChildSHistory> rootSH = GetRootSessionHistory();
+  NS_ENSURE_TRUE(rootSH, NS_ERROR_UNEXPECTED);
+
   if (!aReplace) {
     int32_t curIndex = rootSH->Index();
     if (curIndex > -1) {
@@ -13674,7 +13676,7 @@ nsDocShell::OnOverLink(nsIContent* aContent,
   }
 
   nsAutoCString spec;
-  rv = aURI->GetSpec(spec);
+  rv = aURI->GetDisplaySpec(spec);
   NS_ENSURE_SUCCESS(rv, rv);
 
   NS_ConvertUTF8toUTF16 uStr(spec);
