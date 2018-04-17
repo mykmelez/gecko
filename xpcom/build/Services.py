@@ -43,6 +43,8 @@ service('ActivityDistributor', 'nsIHttpActivityDistributor',
         "@mozilla.org/network/http-activity-distributor;1")
 service('HistoryService', 'mozilla::IHistory',
         "@mozilla.org/browser/history;1")
+service('DirectoryService', 'nsIDirectoryService',
+        "@mozilla.org/file/directory_service;1")
 
 # The definition file needs access to the definitions of the particular
 # interfaces. If you add a new interface here, make sure the necessary includes

@@ -1,5 +1,6 @@
 extern crate rkv;
 extern crate tempdir;
+extern crate xpcom;
 
 use rkv::{
     Rkv,
@@ -18,6 +19,8 @@ use nserror::*;
 
 #[no_mangle]
 pub extern fn test_xul_store() -> *const u8 {
+    let dir_svc = xpcom::services::get_DirectoryService().unwrap();
+
     let root = TempDir::new("use_store").expect("tempdir");
     fs::create_dir_all(root.path()).expect("dir created");
     let k = Rkv::new(root.path()).expect("new succeeded");
