@@ -2,15 +2,6 @@
 #include "gtest/gtest.h"
 #include "nsString.h"
 
-extern "C" uint8_t* test_xul_store();
-class XULStore;
-extern "C" XULStore XUL_STORE;
-
-TEST(XULStore, CallFromCpp) {
-  auto greeting = test_xul_store();
-  EXPECT_STREQ(reinterpret_cast<char*>(greeting), "hello from XUL store.");
-}
-
 extern "C" nsresult xulstore_set_value(nsAString* doc, nsAString* id, nsAString* attr, nsAString* value);
 TEST(XULStore, SetValue) {
   nsAutoString doc(NS_LITERAL_STRING("chrome://browser/content/example.xul"));
