@@ -71,20 +71,22 @@ pub extern fn test_xul_store() -> *const u8 {
 }
 
 #[repr(C)]
-struct XULStore {
+pub struct XULStore {
 }
 
 impl XULStore {
     #[no_mangle]
-    pub extern fn setValue(doc: &nsAString, id: &nsAString, attr: &nsAString, value: &nsAString) -> nsresult {
+    pub extern "C" fn set_value(doc: &nsAString, id: &nsAString, attr: &nsAString, value: &nsAString) -> nsresult {
         NS_OK
     }
 
-    pub extern fn hasValue(doc: &nsAString, id: &nsAString, attr: &nsAString) -> bool {
+    #[no_mangle]
+    pub extern "C" fn has_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> bool {
         true
     }
 
-    pub extern fn getValue(doc: &nsAString, id: &nsAString, attr: &nsAString) -> nsString {
+    #[no_mangle]
+    pub extern "C" fn get_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> nsString {
         let mut str = nsString::new();
         str
     }
