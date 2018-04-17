@@ -9,6 +9,7 @@ use rkv::{
 };
 
 use self::tempdir::TempDir;
+use std::fmt::Write;
 use std::fs;
 
 extern crate nsstring;
@@ -47,9 +48,10 @@ pub extern "C" fn xulstore_has_value(doc: &nsAString, id: &nsAString, attr: &nsA
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_get_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> nsString {
-    let mut str = nsString::new();
-    str
+pub extern "C" fn xulstore_get_value(doc: &nsAString, id: &nsAString, attr: &nsAString, value: *mut nsAString) {
+    unsafe {
+        (*value).assign(&nsString::from("Hello, World!"));
+    }
 }
 
 #[no_mangle]
