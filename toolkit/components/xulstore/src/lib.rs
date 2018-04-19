@@ -24,26 +24,30 @@ use nserror::*;
 #[macro_use]
 extern crate lazy_static;
 
-struct XULStore {}
+struct XULStore {
+    foo: u32,
+}
 
 lazy_static! {
+  #[derive(Debug)]
   static ref XUL_STORE: XULStore = {
-    // TODO: get the profile directory and open the store within it.
     let dir_svc = xpcom::services::get_DirectoryService().unwrap();
     let property = CString::new("ProfD").unwrap();
-
-    // Given refptr.rs, it seems like we should be able to do this:
-    // let x: Result<RefPtr<T>, nsresult> =
-    //     getter_addrefs(|p| dir_svc.Get(property.as_ptr(), &xpcom::interfaces::nsIFile::IID, p));
-
-    // But it doesn't work, and I'm not sure why.  This does, on the other hand,
-    // although I worry about it.  More research needed.
-    let nsi_file = 0 as *mut *mut xpcom::reexports::libc::c_void;
+    let mut ga = xpcom::GetterAddrefs::<xpcom::interfaces::nsIFile>::new();
     unsafe {
-        dir_svc.Get(property.as_ptr(), &xpcom::interfaces::nsIFile::IID, nsi_file);
+        dir_svc.Get(property.as_ptr(), &xpcom::interfaces::nsIFile::IID, ga.void_ptr());
     }
+    let mut s = nsString::new();
+    unsafe {
+        ga.refptr().unwrap().GetPath(&mut s);
+    }
+    println!("profile directory: {:?}", s);
 
-    XULStore {}
+    // TODO: open the store and store a reference to it.
+
+    XULStore {
+        foo: 5,
+    }
   };
 }
 
@@ -55,6 +59,7 @@ impl Drop for XULStore {
 
 #[no_mangle]
 pub extern "C" fn xulstore_set_value(doc: &nsAString, id: &nsAString, attr: &nsAString, value: &nsAString) -> nsresult {
+    println!("XUL_STORE.foo: {:?}", XUL_STORE.foo);
     NS_OK
 }
 
