@@ -2136,31 +2136,35 @@ nsEventStatus AsyncPanZoomController::OnScrollWheel(const ScrollWheelInput& aEve
   // first, and then get the delta values in parent-layer pixels based on the
   // adjusted values.
   bool adjustedByAutoDir = false;
+  auto deltaX = aEvent.mDeltaX;
+  auto deltaY = aEvent.mDeltaY;
   ParentLayerPoint delta;
   if (aEvent.IsAutoDir()) {
     // It's an auto-dir scroll, so check if its delta should be adjusted, if so,
     // adjust it.
     RecursiveMutexAutoLock lock(mRecursiveMutex);
-    auto deltaX = aEvent.mDeltaX;
-    auto deltaY = aEvent.mDeltaY;
     bool isRTL = IsContentOfHonouredTargetRightToLeft(aEvent.HonoursRoot());
     APZAutoDirWheelDeltaAdjuster adjuster(deltaX, deltaY, mX, mY, isRTL);
     if (adjuster.ShouldBeAdjusted()) {
       adjuster.Adjust();
-      // If the original delta values have been adjusted, we pass them to
-      // replace the original delta values in |aEvent| so that the delta values
-      // in parent-layer pixels are caculated based on the adjusted values, not
-      // the original ones.
-      // Pay special attention to the last two parameters. They are in a swaped
-      // order so that they still correspond to their delta after adjustment.
-      delta = GetScrollWheelDelta(aEvent,
-                                  deltaX, deltaY,
-                                  aEvent.mUserDeltaMultiplierY,
-                                  aEvent.mUserDeltaMultiplierX);
       adjustedByAutoDir = true;
     }
   }
-  if (!adjustedByAutoDir) {
+  // Ensure the calls to GetScrollWheelDelta are outside the mRecursiveMutex
+  // lock since these calls may acquire the APZ tree lock. Holding mRecursiveMutex
+  // while acquiring the APZ tree lock is lock ordering violation.
+  if (adjustedByAutoDir) {
+    // If the original delta values have been adjusted, we pass them to
+    // replace the original delta values in |aEvent| so that the delta values
+    // in parent-layer pixels are caculated based on the adjusted values, not
+    // the original ones.
+    // Pay special attention to the last two parameters. They are in a swaped
+    // order so that they still correspond to their delta after adjustment.
+    delta = GetScrollWheelDelta(aEvent,
+                                deltaX, deltaY,
+                                aEvent.mUserDeltaMultiplierY,
+                                aEvent.mUserDeltaMultiplierX);
+  } else {
     // If the original delta values haven't been adjusted by auto-dir, just pass
     // the |aEvent| and caculate the delta values in parent-layer pixels based
     // on the original delta values from |aEvent|.
@@ -3573,12 +3577,14 @@ bool AsyncPanZoomController::UpdateAnimation(const TimeStamp& aSampleTime,
 {
   AssertOnSamplerThread();
 
-  // This function may get called multiple with the same sample time, because
-  // there may be multiple layers with this APZC, and each layer invokes this
-  // function during composition. However we only want to do one animation step
-  // per composition so we need to deduplicate these calls first.
+  // This function may get called multiple with the same sample time, for two
+  // reasons: (1) there may be multiple layers with this APZC, and each layer
+  // invokes this function during composition, and (2) we might composite
+  // multiple times at the same timestamp.
+  // However we only want to do one animation step per composition so we need
+  // to deduplicate these calls first.
   if (mLastSampleTime == aSampleTime) {
-    return false;
+    return (mAnimation != nullptr);
   }
 
   // Sample the composited async transform once per composite. Note that we
@@ -3667,14 +3673,11 @@ bool AsyncPanZoomController::AdvanceAnimations(const TimeStamp& aSampleTime)
   // since the tasks are allowed to call APZCTreeManager methods which can grab
   // the tree lock.
   for (uint32_t i = 0; i < deferredTasks.Length(); ++i) {
-    deferredTasks[i]->Run();
-    deferredTasks[i] = nullptr;
+    APZThreadUtils::RunOnControllerThread(deferredTasks[i].forget());
   }
 
-  // One of the deferred tasks may have started a new animation. In this case,
-  // we want to ask the compositor to schedule a new composite.
-  requestAnimationFrame |= (mAnimation != nullptr);
-
+  // If any of the deferred tasks starts a new animation, it will request a
+  // new composite directly, so we can just return requestAnimationFrame here.
   return requestAnimationFrame;
 }
 

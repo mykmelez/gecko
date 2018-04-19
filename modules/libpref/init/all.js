@@ -854,7 +854,8 @@ pref("gfx.compositor.glcontext.opaque", false);
 #endif
 
 pref("gfx.webrender.highlight-painted-layers", false);
-pref("gfx.webrender.blob-images", 1);
+pref("gfx.webrender.async-scene-build", false);
+pref("gfx.webrender.blob-images", true);
 pref("gfx.webrender.blob.invalidation", true);
 pref("gfx.webrender.hit-test", true);
 
@@ -2674,11 +2675,7 @@ pref("mousewheel.min_line_scroll_amount", 5);
 // scroll is converted to a horizontal scroll for that target.
 // Note that auto-dir only takes effect for |mousewheel.*.action|s and
 // |mousewheel.*.action.override_x|s whose values are 1.
-#ifdef EARLY_BETA_OR_EARLIER
-pref("mousewheel.autodir.enabled", true);
-#else
 pref("mousewheel.autodir.enabled", false);
-#endif
 // When a wheel scroll is converted due to auto-dir, which side the converted
 // scroll goes towards is decided by one thing called "honoured target". If the
 // content of the honoured target horizontally starts from right to left, then
@@ -2880,10 +2877,6 @@ pref("layout.css.text-align-unsafe-value.enabled", false);
 
 // Is support for CSS text-justify property enabled?
 pref("layout.css.text-justify.enabled", true);
-
-// Is support for CSS "float: inline-{start,end}" and
-// "clear: inline-{start,end}" enabled?
-pref("layout.css.float-logical-values.enabled", true);
 
 // Is support for the CSS4 image-orientation property enabled?
 pref("layout.css.image-orientation.enabled", true);
@@ -4564,7 +4557,7 @@ pref("image.mem.animated.use_heap", false);
 
 // Decodes images into shared memory to allow direct use in separate
 // rendering processes. Only applicable with WebRender.
-pref("image.mem.shared", 1);
+pref("image.mem.shared", true);
 
 // Allows image locking of decoded image data in content processes.
 pref("image.mem.allow_locking_in_content_processes", true);

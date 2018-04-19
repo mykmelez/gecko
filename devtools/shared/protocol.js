@@ -4,13 +4,26 @@
 
 "use strict";
 
-var promise = require("promise");
-var defer = require("devtools/shared/defer");
 const { extend } = require("devtools/shared/extend");
 var EventEmitter = require("devtools/shared/event-emitter");
 var {getStack, callFunctionWithAsyncStack} = require("devtools/shared/platform/stack");
 var {settleAll} = require("devtools/shared/DevToolsUtils");
 var {lazyLoadSpec, lazyLoadFront} = require("devtools/shared/specs/index");
+
+// Bug 1454373: devtools/shared/defer still uses Promise.jsm which is slower
+// than DOM Promises. So implement our own copy of `defer` based on DOM Promises.
+function defer() {
+  let resolve, reject;
+  let promise = new Promise(function() {
+    resolve = arguments[0];
+    reject = arguments[1];
+  });
+  return {
+    resolve: resolve,
+    reject: reject,
+    promise: promise
+  };
+}
 
 /**
  * Types: named marshallers/demarshallers.
@@ -105,6 +118,13 @@ types.getType = function(type) {
 };
 
 /**
+ * Helper function to identify iterators. This will return false for Arrays.
+ */
+function isIterator(v) {
+  return v && typeof v === "object" && Symbol.iterator in v && !Array.isArray(v);
+}
+
+/**
  * Don't allow undefined when writing primitive types to packets.  If
  * you want to allow undefined, use a nullable type.
  */
@@ -114,7 +134,7 @@ function identityWrite(v) {
   }
   // This has to handle iterator->array conversion because arrays of
   // primitive types pass through here.
-  if (v && typeof (v) === "object" && Symbol.iterator in v) {
+  if (isIterator(v)) {
     return [...v];
   }
   return v;
@@ -202,8 +222,18 @@ types.addArrayType = function(subtype) {
   }
   return types.addType(name, {
     category: "array",
-    read: (v, ctx) => [...v].map(i => subtype.read(i, ctx)),
-    write: (v, ctx) => [...v].map(i => subtype.write(i, ctx))
+    read: (v, ctx) => {
+      if (isIterator(v)) {
+        v = [...v];
+      }
+      return v.map(i => subtype.read(i, ctx));
+    },
+    write: (v, ctx) => {
+      if (isIterator(v)) {
+        v = [...v];
+      }
+      return v.map(i => subtype.write(i, ctx));
+    }
   });
 };
 
@@ -919,9 +949,8 @@ var Actor = function(conn) {
   if (this._actorSpec && this._actorSpec.events) {
     for (let key of this._actorSpec.events.keys()) {
       let name = key;
-      let sendEvent = this._sendEvent.bind(this, name);
       this.on(name, (...args) => {
-        sendEvent.apply(null, args);
+        this._sendEvent(name, ...args);
       });
     }
   }
@@ -983,7 +1012,7 @@ Actor.prototype = extend(Pool.prototype, {
   },
 
   _queueResponse: function(create) {
-    let pending = this._pendingResponse || promise.resolve(null);
+    let pending = this._pendingResponse || Promise.resolve(null);
     let response = create(pending);
     this._pendingResponse = response;
   }
@@ -1146,7 +1175,7 @@ var generateRequestHandlers = function(actorSpec, actorProto) {
           return p
             .then(() => ret)
             .then(sendReturn)
-            .catch(this.writeError.bind(this));
+            .catch(e => this.writeError(e));
         });
       } catch (e) {
         this._queueResponse(p => {
@@ -1248,7 +1277,7 @@ Front.prototype = extend(Pool.prototype, {
    * represents.
    */
   actor: function() {
-    return promise.resolve(this.actorID);
+    return Promise.resolve(this.actorID);
   },
 
   toString: function() {
@@ -1314,7 +1343,7 @@ Front.prototype = extend(Pool.prototype, {
         // Check to see if any of the preEvents returned a promise -- if so,
         // wait for their resolution before emitting. Otherwise, emit synchronously.
         if (results.some(result => result && typeof result.then === "function")) {
-          promise.all(results).then(() => {
+          Promise.all(results).then(() => {
             return EventEmitter.emit.apply(null, [this, event.name].concat(args));
           });
           return;

@@ -532,12 +532,12 @@ WebRenderBridgeParent::UpdateAPZScrollData(const wr::Epoch& aEpoch,
   }
 }
 
-bool
-WebRenderBridgeParent::PushAPZStateToWR(wr::TransactionBuilder& aTxn)
+void
+WebRenderBridgeParent::SetAPZSampleTime()
 {
   CompositorBridgeParent* cbp = GetRootCompositorBridgeParent();
   if (!cbp) {
-    return false;
+    return;
   }
   if (RefPtr<APZSampler> apz = cbp->GetAPZSampler()) {
     TimeStamp animationTime = cbp->GetTestingTimeStamp().valueOr(
@@ -548,9 +548,8 @@ WebRenderBridgeParent::PushAPZStateToWR(wr::TransactionBuilder& aTxn)
     if (frameInterval != TimeDuration::Forever()) {
       animationTime += frameInterval;
     }
-    return apz->PushStateToWR(aTxn, animationTime);
+    apz->SetSampleTime(animationTime);
   }
-  return false;
 }
 
 mozilla::ipc::IPCResult
@@ -796,6 +795,13 @@ WebRenderBridgeParent::RecvGetSnapshot(PTextureParent* aTexture)
     return IPC_OK();
   }
   MOZ_ASSERT(!mPaused);
+
+  // This function should only get called in the root WRBP. If this function
+  // gets called in a non-root WRBP, we will set mForceRendering in this WRBP
+  // but it will have no effect because CompositeToTarget (which reads the
+  // flag) only gets invoked in the root WRBP. So we assert that this is the
+  // root WRBP (i.e. has a non-null mWidget) to catch violations of this rule.
+  MOZ_ASSERT(mWidget);
 
   RefPtr<TextureHost> texture = TextureHost::AsTextureHost(aTexture);
   if (!texture) {
@@ -1200,6 +1206,9 @@ WebRenderBridgeParent::SampleAnimations(nsTArray<wr::WrOpacityProperty>& aOpacit
 void
 WebRenderBridgeParent::CompositeToTarget(gfx::DrawTarget* aTarget, const gfx::IntRect* aRect)
 {
+  // This function should only get called in the root WRBP
+  MOZ_ASSERT(mWidget);
+
   // The two arguments are part of the CompositorVsyncSchedulerOwner API but in
   // this implementation they should never be non-null.
   MOZ_ASSERT(aTarget == nullptr);
@@ -1243,15 +1252,10 @@ WebRenderBridgeParent::CompositeToTarget(gfx::DrawTarget* aTarget, const gfx::In
     ScheduleGenerateFrame();
   }
   // We do this even if the arrays are empty, because it will clear out any
-  // previous properties stored on the WR side, which is desirable. Also, we
-  // must do this before the PushAPZStateToWR call which will append more
-  // properties, If we did this after that call, this would clobber those
-  // properties.
+  // previous properties store on the WR side, which is desirable.
   txn.UpdateDynamicProperties(opacityArray, transformArray);
 
-  if (PushAPZStateToWR(txn)) {
-    ScheduleGenerateFrame();
-  }
+  SetAPZSampleTime();
 
   wr::RenderThread::Get()->IncPendingFrameCount(mApi->GetId());
 

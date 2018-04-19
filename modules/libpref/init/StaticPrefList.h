@@ -145,6 +145,13 @@ VARCACHE_PREF(
 // Layout prefs
 //---------------------------------------------------------------------------
 
+// Is parallel CSS parsing enabled?
+VARCACHE_PREF(
+  "layout.css.parsing.parallel",
+   layout_css_parsing_parallel,
+  bool, false
+)
+
 // Is support for the font-display @font-face descriptor enabled?
 VARCACHE_PREF(
   "layout.css.font-display.enabled",
@@ -517,6 +524,14 @@ VARCACHE_PREF(
   bool, false
 )
 #endif // MOZ_WEBRTC
+
+#ifdef MOZ_OMX
+VARCACHE_PREF(
+  "media.omx.enabled",
+   MediaOmxEnabled,
+  bool, false
+)
+#endif
 
 #ifdef MOZ_FFMPEG
 
