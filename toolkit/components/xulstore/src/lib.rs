@@ -13,7 +13,7 @@ use std::ffi::CString;
 use std::fmt::Write;
 use std::fs;
 // use std::os::raw::c_void;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use xpcom::{getter_addrefs, RefPtr, XpCom};
 
 extern crate nsstring;
@@ -25,54 +25,53 @@ use nserror::*;
 #[macro_use]
 extern crate lazy_static;
 
-struct XULStore {
-    rkv: Rkv,
-}
-
 lazy_static! {
-  #[derive(Debug)]
-  static ref XUL_STORE: XULStore = {
-    // Get the profile directory path.
-    let dir_svc = xpcom::services::get_DirectoryService().unwrap();
-    let property = CString::new("ProfD").unwrap();
-    let mut profile_dir = xpcom::GetterAddrefs::<xpcom::interfaces::nsIFile>::new();
-    unsafe {
-        dir_svc.Get(property.as_ptr(), &xpcom::interfaces::nsIFile::IID, profile_dir.void_ptr());
-    }
+    #[derive(Debug)]
+    static ref XULSTORE_DIR_PATH: PathBuf = {
+        // Get the profile directory path.
+        let dir_svc = xpcom::services::get_DirectoryService().unwrap();
+        let property = CString::new("ProfD").unwrap();
+        let mut profile_dir = xpcom::GetterAddrefs::<xpcom::interfaces::nsIFile>::new();
+        unsafe {
+            dir_svc.Get(property.as_ptr(), &xpcom::interfaces::nsIFile::IID, profile_dir.void_ptr());
+        }
 
-    // Convert the profile directory path to a Path.
-    // 
-    // This might be easier if we could access nsIFile::NativePath,
-    // but the generated file nsIFile.rs declares:
-    // "Unable to generate binding because `nostdcall is unsupported`"
-    //
-    let mut profile_dir_path = nsString::new();
-    unsafe {
-        profile_dir.refptr().unwrap().GetPath(&mut profile_dir_path);
-    }
-    println!("profile directory: {:?}", &profile_dir_path);
-    let profile_dir_path = String::from_utf16_lossy(&profile_dir_path[..]);
-    let profile_dir_path = Path::new(&profile_dir_path);
+        // Convert the profile directory path to a Path.
+        //
+        // This might be easier if we could access nsIFile::NativePath,
+        // but the generated file nsIFile.rs declares:
+        // "Unable to generate binding because `nostdcall is unsupported`"
+        //
+        let mut profile_dir_path = nsString::new();
+        unsafe {
+            profile_dir.refptr().unwrap().GetPath(&mut profile_dir_path);
+        }
+        let profile_dir_path = String::from_utf16_lossy(&profile_dir_path[..]);
+        let profile_dir_path = Path::new(&profile_dir_path);
 
-    let xulstore_dir_path = profile_dir_path.join("xulstore");
-    fs::create_dir_all(&xulstore_dir_path).expect("dir created");
-    let rkv = Rkv::new(&xulstore_dir_path).expect("new succeeded");
+        let xulstore_dir_path = profile_dir_path.join("xulstore");
+        fs::create_dir_all(xulstore_dir_path.clone()).expect("dir created");
+        println!("xulstore directory: {:?}", &xulstore_dir_path);
+        xulstore_dir_path
+    };
 
-    XULStore {
-        rkv: rkv,
-    }
-  };
-}
+    #[derive(Debug)]
+    static ref RKV: Rkv = {
+        println!("{:?}", XULSTORE_DIR_PATH);
+        Rkv::new(&XULSTORE_DIR_PATH).expect("new succeeded")
+    };
 
-impl Drop for XULStore {
-  fn drop(&mut self) {
-    // unsafe { /* TODO: close store */ }
-  }
+    #[derive(Debug)]
+    static ref STORE: Store<&'static str> = {
+        println!("{:?}", RKV);
+        RKV.create_or_open_default().expect("created default")
+    };
 }
 
 #[no_mangle]
 pub extern "C" fn xulstore_set_value(doc: &nsAString, id: &nsAString, attr: &nsAString, value: &nsAString) -> nsresult {
-    println!("{:?}", XUL_STORE.rkv);
+    println!("{:?}", STORE);
+    STORE.read(&RKV).expect("reader");
     NS_OK
 }
 
