@@ -27,7 +27,7 @@ extern crate lazy_static;
 
 lazy_static! {
     #[derive(Debug)]
-    static ref XULSTORE_DIR_PATH: PathBuf = {
+    static ref RKV: Rkv = {
         // Get the profile directory path.
         let dir_svc = xpcom::services::get_DirectoryService().unwrap();
         let property = CString::new("ProfD").unwrap();
@@ -52,13 +52,7 @@ lazy_static! {
         let xulstore_dir_path = profile_dir_path.join("xulstore");
         fs::create_dir_all(xulstore_dir_path.clone()).expect("dir created");
         println!("xulstore directory: {:?}", &xulstore_dir_path);
-        xulstore_dir_path
-    };
-
-    #[derive(Debug)]
-    static ref RKV: Rkv = {
-        println!("{:?}", XULSTORE_DIR_PATH);
-        Rkv::new(&XULSTORE_DIR_PATH).expect("new succeeded")
+        Rkv::new(&xulstore_dir_path).expect("new succeeded")
     };
 
     #[derive(Debug)]
