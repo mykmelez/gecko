@@ -2,11 +2,7 @@ extern crate rkv;
 extern crate tempdir;
 extern crate xpcom;
 
-use rkv::{
-    Rkv,
-    Store,
-    Value,
-};
+use rkv::{Rkv, Store, Value};
 
 use self::tempdir::TempDir;
 use std::ffi::CString;
@@ -65,7 +61,9 @@ lazy_static! {
 #[no_mangle]
 pub extern "C" fn xulstore_set_value(doc: &nsAString, id: &nsAString, attr: &nsAString, value: &nsAString) -> nsresult {
     println!("{:?}", STORE);
-    STORE.read(&RKV).expect("reader");
+    let mut writer = STORE.write(&RKV).expect("writer");
+    writer.put("foo", &Value::Str("Hello, World!"));
+    writer.commit();
     NS_OK
 }
 
@@ -76,7 +74,11 @@ pub extern "C" fn xulstore_has_value(doc: &nsAString, id: &nsAString, attr: &nsA
 
 #[no_mangle]
 pub extern "C" fn xulstore_get_value(doc: &nsAString, id: &nsAString, attr: &nsAString, value: *mut nsAString) {
+    let reader = STORE.read(&RKV).expect("reader");
+    let rkv_value = &reader.get("foo").expect("read").unwrap();
+    println!("{:?}", rkv_value);
+    let nsstring_value = &nsString::from("Hello, World!");
     unsafe {
-        (*value).assign(&nsString::from("Hello, World!"));
+        (*value).assign(nsstring_value);
     }
 }
