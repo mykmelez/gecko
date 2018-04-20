@@ -1730,7 +1730,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "rkv"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "arrayref 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "bincode 0.9.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2558,7 +2557,7 @@ dependencies = [
  "lazy_static 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "nserror 0.1.0",
  "nsstring 0.1.0",
- "rkv 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rkv 0.2.0",
  "tempdir 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "xpcom 0.1.0",
 ]
@@ -2753,7 +2752,6 @@ dependencies = [
 "checksum redox_syscall 0.1.32 (registry+https://github.com/rust-lang/crates.io-index)" = "ab105df655884ede59d45b7070c8a65002d921461ee813a024558ca16030eea0"
 "checksum regex 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "1731164734096285ec2a5ec7fea5248ae2f5485b3feeb0115af4fda2183b2d1b"
 "checksum regex-syntax 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "ad890a5eef7953f55427c50575c680c42841653abd2b028b68cd223d157f62db"
-"checksum rkv 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "db9d63ddc17cc9753970bd32c176d1aefa31d15558877bfa3fd0c48dc57f23e4"
 "checksum ron 0.1.7 (registry+https://github.com/rust-lang/crates.io-index)" = "da06feaa07f69125ab9ddc769b11de29090122170b402547f64b86fe16ebc399"
 "checksum runloop 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "5d79b4b604167921892e84afbbaad9d5ad74e091bf6c511d9dbfb0593f09fabd"
 "checksum rust-ini 0.10.2 (registry+https://github.com/rust-lang/crates.io-index)" = "22dab655e8122ccb15db25a56852ce62506f1486cdefd37e86371bf34ea8f601"
