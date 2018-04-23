@@ -151,27 +151,39 @@ HTMLEditor::InsertCell(nsIDOMElement* aDOMCell,
 
   // Don't let Rules System change the selection.
   AutoTransactionsConserveSelection dontChangeSelection(this);
-  return InsertNode(*newCell, pointToInsert);
+  return InsertNodeWithTransaction(*newCell, pointToInsert);
 }
 
 nsresult
-HTMLEditor::SetColSpan(nsIDOMElement* aCell,
+HTMLEditor::SetColSpan(nsIDOMElement* aDOMCell,
                        int32_t aColSpan)
 {
-  NS_ENSURE_TRUE(aCell, NS_ERROR_NULL_POINTER);
+  if (NS_WARN_IF(!aDOMCell)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+  nsCOMPtr<Element> cell = do_QueryInterface(aDOMCell);
+  if (NS_WARN_IF(!cell)) {
+    return NS_ERROR_INVALID_ARG;
+  }
   nsAutoString newSpan;
   newSpan.AppendInt(aColSpan, 10);
-  return SetAttribute(aCell, NS_LITERAL_STRING("colspan"), newSpan);
+  return SetAttributeWithTransaction(*cell, *nsGkAtoms::colspan, newSpan);
 }
 
 nsresult
-HTMLEditor::SetRowSpan(nsIDOMElement* aCell,
+HTMLEditor::SetRowSpan(nsIDOMElement* aDOMCell,
                        int32_t aRowSpan)
 {
-  NS_ENSURE_TRUE(aCell, NS_ERROR_NULL_POINTER);
+  if (NS_WARN_IF(!aDOMCell)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+  nsCOMPtr<Element> cell = do_QueryInterface(aDOMCell);
+  if (NS_WARN_IF(!cell)) {
+    return NS_ERROR_INVALID_ARG;
+  }
   nsAutoString newSpan;
   newSpan.AppendInt(aRowSpan, 10);
-  return SetAttribute(aCell, NS_LITERAL_STRING("rowspan"), newSpan);
+  return SetAttributeWithTransaction(*cell, *nsGkAtoms::rowspan, newSpan);
 }
 
 NS_IMETHODIMP
@@ -220,14 +232,15 @@ HTMLEditor::InsertTableCell(int32_t aNumber,
       if (NS_WARN_IF(!cell)) {
         return NS_ERROR_FAILURE;
       }
-      rv = InsertNode(*cell, EditorRawDOMPoint(cellParent, cellOffset));
+      rv = InsertNodeWithTransaction(*cell,
+                                     EditorRawDOMPoint(cellParent, cellOffset));
       if (NS_FAILED(rv)) {
         break;
       }
     }
   }
-  // XXX This is perhaps the result of the last call of InsertNode() or
-  //     CreateElementWithDefaults().
+  // XXX This is perhaps the result of the last call of
+  //     InsertNodeWithTransaction() or CreateElementWithDefaults().
   return rv;
 }
 
@@ -661,8 +674,12 @@ HTMLEditor::InsertTableRow(int32_t aNumber,
 
       // Use transaction system to insert the entire row+cells
       // (Note that rows are inserted at same childoffset each time)
-      rv = InsertNode(*newRow, EditorRawDOMPoint(parentOfRow, newRowOffset));
-      NS_ENSURE_SUCCESS(rv, rv);
+      rv = InsertNodeWithTransaction(*newRow,
+                                     EditorRawDOMPoint(parentOfRow,
+                                                       newRowOffset));
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
     }
   }
 
@@ -694,7 +711,11 @@ HTMLEditor::DeleteTable2(nsIDOMElement* aTable,
   rv = AppendNodeToSelectionAsRange(aTable);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return DeleteSelection(nsIEditor::eNext, nsIEditor::eStrip);
+  rv = DeleteSelectionAsAction(eNext, eStrip);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -833,8 +854,14 @@ HTMLEditor::DeleteTableCell(int32_t aNumber)
           NS_ENSURE_SUCCESS(rv, rv);
 
           // Then delete the cell
-          rv = DeleteNode(cell);
-          NS_ENSURE_SUCCESS(rv, rv);
+          nsCOMPtr<nsINode> cellToBeRemoved = do_QueryInterface(cell);
+          if (NS_WARN_IF(!cellToBeRemoved)) {
+            return NS_ERROR_FAILURE;
+          }
+          rv = DeleteNodeWithTransaction(*cellToBeRemoved);
+          if (NS_WARN_IF(NS_FAILED(rv))) {
+            return rv;
+          }
 
           // The next cell to delete
           cell = nextCell;
@@ -886,10 +913,15 @@ HTMLEditor::DeleteTableCell(int32_t aNumber)
                                                    startColIndex, ePreviousColumn,
                                                    false);
         AutoTransactionsConserveSelection dontChangeSelection(this);
-
-        rv = DeleteNode(cell);
+        nsCOMPtr<nsINode> cellToBeRemoved = do_QueryInterface(cell);
+        if (NS_WARN_IF(!cellToBeRemoved)) {
+          return NS_ERROR_FAILURE;
+        }
+        rv = DeleteNodeWithTransaction(*cellToBeRemoved);
         // If we fail, don't try to delete any more cells???
-        NS_ENSURE_SUCCESS(rv, rv);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return rv;
+        }
       }
     }
   }
@@ -958,8 +990,10 @@ HTMLEditor::DeleteCellContents(nsIDOMElement* aCell)
   AutoRules beginRulesSniffing(this, EditAction::deleteNode, nsIEditor::eNext);
 
   while (nsCOMPtr<nsINode> child = cell->GetLastChild()) {
-    nsresult rv = DeleteNode(child);
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsresult rv = DeleteNodeWithTransaction(*child);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
   }
   return NS_OK;
 }
@@ -1116,8 +1150,14 @@ HTMLEditor::DeleteColumn(nsIDOMElement* aTable,
           // row now has current rowIndex
         } else {
           // A more "normal" deletion
-          rv = DeleteNode(cell);
-          NS_ENSURE_SUCCESS(rv, rv);
+          nsCOMPtr<nsINode> cellToBeRemoved = do_QueryInterface(cell);
+          if (NS_WARN_IF(!cellToBeRemoved)) {
+            return NS_ERROR_FAILURE;
+          }
+          rv = DeleteNodeWithTransaction(*cellToBeRemoved);
+          if (NS_WARN_IF(NS_FAILED(rv))) {
+            return rv;
+          }
 
           //Skip over any rows spanned by this cell
           rowIndex += actualRowSpan;
@@ -1307,8 +1347,14 @@ HTMLEditor::DeleteRow(nsIDOMElement* aTable,
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (parentRow) {
-    rv = DeleteNode(parentRow);
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<nsINode> rowToBeRemoved = do_QueryInterface(parentRow);
+    if (NS_WARN_IF(!rowToBeRemoved)) {
+      return NS_ERROR_FAILURE;
+    }
+    rv = DeleteNodeWithTransaction(*rowToBeRemoved);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
   }
 
   // Now we can set new rowspans for cells stored above
@@ -1732,23 +1778,30 @@ HTMLEditor::SplitTableCell()
 }
 
 nsresult
-HTMLEditor::CopyCellBackgroundColor(nsIDOMElement* destCell,
-                                    nsIDOMElement* sourceCell)
+HTMLEditor::CopyCellBackgroundColor(nsIDOMElement* aDOMDestCell,
+                                    nsIDOMElement* aDOMSourceCell)
 {
-  NS_ENSURE_TRUE(destCell && sourceCell, NS_ERROR_NULL_POINTER);
+  if (NS_WARN_IF(!aDOMDestCell) || NS_WARN_IF(!aDOMSourceCell)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+  nsCOMPtr<Element> destCell = do_QueryInterface(aDOMDestCell);
+  if (NS_WARN_IF(!destCell)) {
+    return NS_ERROR_INVALID_ARG;
+  }
 
-  // Copy backgournd color to new cell
-  NS_NAMED_LITERAL_STRING(bgcolor, "bgcolor");
+  // Copy backgournd color to new cell.
   nsAutoString color;
   bool isSet;
-  nsresult rv = GetAttributeValue(sourceCell, bgcolor, color, &isSet);
+  nsresult rv =
+    GetAttributeValue(aDOMSourceCell, NS_LITERAL_STRING("bgcolor"),
+                      color, &isSet);
   if (NS_FAILED(rv)) {
     return rv;
   }
   if (!isSet) {
     return NS_OK;
   }
-  return SetAttribute(destCell, bgcolor, color);
+  return SetAttributeWithTransaction(*destCell, *nsGkAtoms::bgcolor, color);
 }
 
 nsresult
@@ -1917,32 +1970,41 @@ HTMLEditor::SwitchTableCellHeaderType(nsIDOMElement* aSourceCell,
                                       nsIDOMElement** aNewCell)
 {
   nsCOMPtr<Element> sourceCell = do_QueryInterface(aSourceCell);
-  NS_ENSURE_TRUE(sourceCell, NS_ERROR_NULL_POINTER);
+  if (NS_WARN_IF(!sourceCell)) {
+    return NS_ERROR_INVALID_ARG;
+  }
 
   AutoPlaceholderBatch beginBatching(this);
-  // Prevent auto insertion of BR in new cell created by ReplaceContainer
+  // Prevent auto insertion of BR in new cell created by
+  // ReplaceContainerAndCloneAttributesWithTransaction().
   AutoRules beginRulesSniffing(this, EditAction::insertNode, nsIEditor::eNext);
 
-  // Save current selection to restore when done
-  // This is needed so ReplaceContainer can monitor selection
-  //  when replacing nodes
+  // Save current selection to restore when done.
+  // This is needed so ReplaceContainerAndCloneAttributesWithTransaction()
+  // can monitor selection when replacing nodes.
   RefPtr<Selection> selection = GetSelection();
-  NS_ENSURE_TRUE(selection, NS_ERROR_FAILURE);
+  if (NS_WARN_IF(!selection)) {
+    return NS_ERROR_FAILURE;
+  }
+
   AutoSelectionRestorer selectionRestorer(selection, this);
 
   // Set to the opposite of current type
-  nsAtom* newCellType =
+  nsAtom* newCellName =
     sourceCell->IsHTMLElement(nsGkAtoms::td) ? nsGkAtoms::th : nsGkAtoms::td;
 
   // This creates new node, moves children, copies attributes (true)
   //   and manages the selection!
-  nsCOMPtr<Element> newNode = ReplaceContainer(sourceCell, newCellType,
-      nullptr, nullptr, EditorBase::eCloneAttributes);
-  NS_ENSURE_TRUE(newNode, NS_ERROR_FAILURE);
+  RefPtr<Element> newCell =
+    ReplaceContainerAndCloneAttributesWithTransaction(*sourceCell,
+                                                      *newCellName);
+  if (NS_WARN_IF(!newCell)) {
+    return NS_ERROR_FAILURE;
+  }
 
   // Return the new cell
   if (aNewCell) {
-    nsCOMPtr<nsIDOMElement> newElement = do_QueryInterface(newNode);
+    nsCOMPtr<nsIDOMElement> newElement = do_QueryInterface(newCell);
     *aNewCell = newElement.get();
     NS_ADDREF(*aNewCell);
   }
@@ -2164,9 +2226,14 @@ HTMLEditor::JoinTableCells(bool aMergeNonContiguousContents)
     for (uint32_t i = 0, n = deleteList.Length(); i < n; i++) {
       nsIDOMElement *elementPtr = deleteList[i];
       if (elementPtr) {
-        nsCOMPtr<nsIDOMNode> node = do_QueryInterface(elementPtr);
-        rv = DeleteNode(node);
-        NS_ENSURE_SUCCESS(rv, rv);
+        nsCOMPtr<nsINode> nodeToBeRemoved = do_QueryInterface(elementPtr);
+        if (NS_WARN_IF(!nodeToBeRemoved)) {
+          return NS_ERROR_FAILURE;
+        }
+        rv = DeleteNodeWithTransaction(*nodeToBeRemoved);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return rv;
+        }
       }
     }
     // Cleanup selection: remove ranges where cells were deleted
@@ -2288,8 +2355,13 @@ HTMLEditor::MergeCells(nsCOMPtr<nsIDOMElement> aTargetCell,
     if (len == 1 && IsEmptyCell(targetCell)) {
       // Delete the empty node
       nsIContent* cellChild = targetCell->GetFirstChild();
-      nsresult rv = DeleteNode(cellChild->AsDOMNode());
-      NS_ENSURE_SUCCESS(rv, rv);
+      if (NS_WARN_IF(!cellChild)) {
+        return NS_ERROR_FAILURE;
+      }
+      nsresult rv = DeleteNodeWithTransaction(*cellChild);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
       insertIndex = 0;
     } else {
       insertIndex = (int32_t)len;
@@ -2298,20 +2370,35 @@ HTMLEditor::MergeCells(nsCOMPtr<nsIDOMElement> aTargetCell,
     // Move the contents
     while (cellToMerge->HasChildren()) {
       nsCOMPtr<nsIContent> cellChild = cellToMerge->GetLastChild();
-      // XXX We need HTMLEditor::DeleteNode(nsINode&).
-      nsresult rv = DeleteNode(cellChild->AsDOMNode());
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      rv = InsertNode(*cellChild, EditorRawDOMPoint(aTargetCell, insertIndex));
-      NS_ENSURE_SUCCESS(rv, rv);
+      if (NS_WARN_IF(!cellChild)) {
+        return NS_ERROR_FAILURE;
+      }
+      nsresult rv = DeleteNodeWithTransaction(*cellChild);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+      rv = InsertNodeWithTransaction(*cellChild,
+                                     EditorRawDOMPoint(aTargetCell,
+                                                       insertIndex));
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
     }
   }
 
-  // Delete cells whose contents were moved
-  if (aDeleteCellToMerge) {
-    return DeleteNode(aCellToMerge);
+  if (!aDeleteCellToMerge) {
+    return NS_OK;
   }
 
+  // Delete cells whose contents were moved.
+  nsCOMPtr<nsIContent> cellToBeRemoved = do_QueryInterface(aCellToMerge);
+  if (NS_WARN_IF(!cellToBeRemoved)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+  nsresult rv = DeleteNodeWithTransaction(*cellToBeRemoved);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
   return NS_OK;
 }
 

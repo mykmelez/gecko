@@ -557,7 +557,7 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
                                           InfallibleTArray<WebRenderParentCommand>&& aCommands,
                                           InfallibleTArray<OpDestroy>&& aToDestroy,
                                           const uint64_t& aFwdTransactionId,
-                                          const uint64_t& aTransactionId,
+                                          const TransactionId& aTransactionId,
                                           const wr::LayoutSize& aContentSize,
                                           ipc::ByteBuf&& dl,
                                           const wr::BuiltDisplayListDescriptor& dlDesc,
@@ -649,7 +649,7 @@ WebRenderBridgeParent::RecvEmptyTransaction(const FocusTarget& aFocusTarget,
                                             InfallibleTArray<WebRenderParentCommand>&& aCommands,
                                             InfallibleTArray<OpDestroy>&& aToDestroy,
                                             const uint64_t& aFwdTransactionId,
-                                            const uint64_t& aTransactionId,
+                                            const TransactionId& aTransactionId,
                                             const wr::IdNamespace& aIdNamespace,
                                             const TimeStamp& aTxnStartTime,
                                             const TimeStamp& aFwdTime)
@@ -1165,20 +1165,32 @@ WebRenderBridgeParent::ActorDestroy(ActorDestroyReason aWhy)
 void
 WebRenderBridgeParent::AdvanceAnimations()
 {
-  TimeStamp animTime = mCompositorScheduler->GetLastComposeTime();
   if (CompositorBridgeParent* cbp = GetRootCompositorBridgeParent()) {
-    animTime = cbp->GetTestingTimeStamp().valueOr(animTime);
+    Maybe<TimeStamp> testingTimeStamp = cbp->GetTestingTimeStamp();
+    if (testingTimeStamp) {
+      // If we are on testing refresh mode, use the testing time stamp.  And
+      // also we don't update mPreviousFrameTimeStamp since unlike normal
+      // refresh mode, on the testing mode animations on the compositor are
+      // synchronously composed, so we don't need to worry about the time gap
+      // between the main thread and compositor thread.
+      AnimationHelper::SampleAnimations(mAnimStorage, *testingTimeStamp);
+      return;
+    }
   }
 
+  TimeStamp lastComposeTime = mCompositorScheduler->GetLastComposeTime();
+  // if we have already mPreviousTimeStamp, use it since on the compositor the
+  // time in the previous tick is more closer to the main-thread tick time.
   AnimationHelper::SampleAnimations(mAnimStorage,
-                                    !mPreviousFrameTimeStamp.IsNull() ?
-                                    mPreviousFrameTimeStamp : animTime);
+      !mPreviousFrameTimeStamp.IsNull()
+      ? mPreviousFrameTimeStamp
+      : lastComposeTime);
 
   // Reset the previous time stamp if we don't already have any running
   // animations to avoid using the time which is far behind for newly
   // started animations.
   mPreviousFrameTimeStamp =
-    mAnimStorage->AnimatedValueCount() ? animTime : TimeStamp();
+    mAnimStorage->AnimatedValueCount() ? lastComposeTime : TimeStamp();
 }
 
 void
@@ -1271,7 +1283,7 @@ WebRenderBridgeParent::CompositeToTarget(gfx::DrawTarget* aTarget, const gfx::In
 
 void
 WebRenderBridgeParent::HoldPendingTransactionId(const wr::Epoch& aWrEpoch,
-                                                uint64_t aTransactionId,
+                                                TransactionId aTransactionId,
                                                 const TimeStamp& aTxnStartTime,
                                                 const TimeStamp& aFwdTime)
 {
@@ -1279,20 +1291,20 @@ WebRenderBridgeParent::HoldPendingTransactionId(const wr::Epoch& aWrEpoch,
   mPendingTransactionIds.push(PendingTransactionId(aWrEpoch, aTransactionId, aTxnStartTime, aFwdTime));
 }
 
-uint64_t
+TransactionId
 WebRenderBridgeParent::LastPendingTransactionId()
 {
-  uint64_t id = 0;
+  TransactionId id{0};
   if (!mPendingTransactionIds.empty()) {
     id = mPendingTransactionIds.back().mId;
   }
   return id;
 }
 
-uint64_t
+TransactionId
 WebRenderBridgeParent::FlushPendingTransactionIds()
 {
-  uint64_t id = 0;
+  TransactionId id{0};
   if (!mPendingTransactionIds.empty()) {
     id = mPendingTransactionIds.back().mId;
     std::queue<PendingTransactionId>().swap(mPendingTransactionIds); // clear queue
@@ -1300,10 +1312,10 @@ WebRenderBridgeParent::FlushPendingTransactionIds()
   return id;
 }
 
-uint64_t
+TransactionId
 WebRenderBridgeParent::FlushTransactionIdsForEpoch(const wr::Epoch& aEpoch, const TimeStamp& aEndTime)
 {
-  uint64_t id = 0;
+  TransactionId id{0};
   while (!mPendingTransactionIds.empty()) {
     if (aEpoch.mHandle < mPendingTransactionIds.front().mEpoch.mHandle) {
       break;

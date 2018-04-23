@@ -43,7 +43,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 const {nsIBlocklistService} = Ci;
 
 XPCOMUtils.defineLazyServiceGetters(this, {
-  Blocklist: ["@mozilla.org/extensions/blocklist;1", "nsIBlocklistService"],
   AddonPolicyService: ["@mozilla.org/addons/policy-service;1", "nsIAddonPolicyService"],
   aomStartup: ["@mozilla.org/addons/addon-manager-startup;1", "amIAddonManagerStartup"],
 });
@@ -2459,12 +2458,6 @@ var XPIProvider = {
     let addonList = new Map(
       res.gmpAddons.map(spec => [spec.id, { spec, path: null, addon: null }]));
 
-    let getAddonsInLocation = (location) => {
-      return new Promise(resolve => {
-        XPIDatabase.getAddonsInLocation(location, resolve);
-      });
-    };
-
     let setMatches = (wanted, existing) => {
       if (wanted.size != existing.size)
         return false;
@@ -2482,7 +2475,7 @@ var XPIProvider = {
     };
 
     // If this matches the current set in the profile location then do nothing.
-    let updatedAddons = addonMap(await getAddonsInLocation(KEY_APP_SYSTEM_ADDONS));
+    let updatedAddons = addonMap(await XPIDatabase.getAddonsInLocation(KEY_APP_SYSTEM_ADDONS));
     if (setMatches(addonList, updatedAddons)) {
       logger.info("Retaining existing updated system add-ons.");
       await systemAddonLocation.cleanDirectories();
@@ -2491,7 +2484,7 @@ var XPIProvider = {
 
     // If this matches the current set in the default location then reset the
     // updated set.
-    let defaultAddons = addonMap(await getAddonsInLocation(KEY_APP_SYSTEM_DEFAULTS));
+    let defaultAddons = addonMap(await XPIDatabase.getAddonsInLocation(KEY_APP_SYSTEM_DEFAULTS));
     if (setMatches(addonList, defaultAddons)) {
       logger.info("Resetting system add-ons.");
       systemAddonLocation.resetAddonSet();
@@ -3173,11 +3166,8 @@ var XPIProvider = {
    *         A version for the install
    * @param  aBrowser
    *         The browser performing the install
-   * @param  aCallback
-   *         A callback to pass the AddonInstall to
    */
-  getInstallForURL(aUrl, aHash, aName, aIcons, aVersion, aBrowser,
-                             aCallback) {
+  async getInstallForURL(aUrl, aHash, aName, aIcons, aVersion, aBrowser) {
     let location = XPIProvider.installLocationsByName[KEY_APP_PROFILE];
     let url = Services.io.newURI(aUrl);
 
@@ -3191,11 +3181,12 @@ var XPIProvider = {
 
     if (url instanceof Ci.nsIFileURL) {
       let install = new LocalAddonInstall(location, url, options);
-      install.init().then(() => { aCallback(install.wrapper); });
-    } else {
-      let install = new DownloadAddonInstall(location, url, options);
-      aCallback(install.wrapper);
+      await install.init();
+      return install.wrapper;
     }
+
+    let install = new DownloadAddonInstall(location, url, options);
+    return install.wrapper;
   },
 
   /**
@@ -3203,13 +3194,10 @@ var XPIProvider = {
    *
    * @param  aFile
    *         The file to be installed
-   * @param  aCallback
-   *         A callback to pass the AddonInstall to
    */
-  getInstallForFile(aFile, aCallback) {
-    createLocalInstall(aFile).then(install => {
-      aCallback(install ? install.wrapper : null);
-    });
+  async getInstallForFile(aFile) {
+    let install = await createLocalInstall(aFile);
+    return install ? install.wrapper : null;
   },
 
   /**
@@ -3283,8 +3271,7 @@ var XPIProvider = {
                     + " can be installed from sources:", addon.id);
     }
     let installReason = BOOTSTRAP_REASONS.ADDON_INSTALL;
-    let oldAddon = await new Promise(
-                   resolve => XPIDatabase.getVisibleAddonForID(addon.id, resolve));
+    let oldAddon = await XPIDatabase.getVisibleAddonForID(addon.id);
     let callUpdate = false;
 
     let extraParams = {};
@@ -3394,17 +3381,26 @@ var XPIProvider = {
    * @throws if the aInstanceID argument is not specified
    */
    getAddonByInstanceID(aInstanceID) {
+     let id = this.getAddonIDByInstanceID(aInstanceID);
+     if (id) {
+       return this.syncGetAddonByID(id);
+     }
+
+     return null;
+   },
+
+   getAddonIDByInstanceID(aInstanceID) {
      if (!aInstanceID || typeof aInstanceID != "symbol")
        throw Components.Exception("aInstanceID must be a Symbol()",
                                   Cr.NS_ERROR_INVALID_ARG);
 
      for (let [id, val] of this.activeAddons) {
        if (aInstanceID == val.instanceID) {
-         return new Promise(resolve => this.getAddonByID(id, resolve));
+         return id;
        }
      }
 
-     return Promise.resolve(null);
+     return null;
    },
 
   /**
@@ -3422,13 +3418,30 @@ var XPIProvider = {
    *
    * @param  aId
    *         The ID of the add-on to retrieve
-   * @param  aCallback
-   *         A callback to pass the Addon to
    */
-  getAddonByID(aId, aCallback) {
-    XPIDatabase.getVisibleAddonForID(aId, function(aAddon) {
-      aCallback(aAddon ? aAddon.wrapper : null);
-    });
+  async getAddonByID(aId) {
+    let aAddon = await XPIDatabase.getVisibleAddonForID(aId);
+    return aAddon ? aAddon.wrapper : null;
+  },
+
+  /**
+   * Synchronously returns the Addon object for the add-on with the
+   * given ID.
+   *
+   * *DO NOT USE THIS IF YOU CAN AT ALL AVOID IT*
+   *
+   * This will always return null if the add-on database has not been
+   * loaded, and the resulting Addon object may not yet include a
+   * reference to its corresponding repository add-on object.
+   *
+   * @param {string} aId
+   *        The ID of the add-on to return.
+   * @returns {DBAddonInternal?}
+   *        The Addon object, if available.
+   */
+  syncGetAddonByID(aId) {
+    let aAddon = XPIDatabase.syncGetVisibleAddonForID(aId);
+    return aAddon ? aAddon.wrapper : null;
   },
 
   /**
@@ -3436,19 +3449,15 @@ var XPIProvider = {
    *
    * @param  aTypes
    *         An array of types to fetch. Can be null to get all types.
-   * @param  aCallback
-   *         A callback to pass an array of Addons to
    */
-  getAddonsByTypes(aTypes, aCallback) {
+  async getAddonsByTypes(aTypes) {
     let typesToGet = getAllAliasesForTypes(aTypes);
     if (typesToGet && !typesToGet.some(type => ALL_EXTERNAL_TYPES.has(type))) {
-      aCallback([]);
-      return;
+      return [];
     }
 
-    XPIDatabase.getVisibleAddons(typesToGet, function(aAddons) {
-      aCallback(aAddons.map(a => a.wrapper));
-    });
+    let addons = await XPIDatabase.getVisibleAddons(typesToGet);
+    return addons.map(a => a.wrapper);
   },
 
   /**
@@ -3458,23 +3467,20 @@ var XPIProvider = {
    *         An array of types to fetch. Can be null to get all types.
    * @returns {Promise<Array<Addon>>}
    */
-  getActiveAddons(aTypes) {
+  async getActiveAddons(aTypes) {
     // If we already have the database loaded, returning full info is fast.
     if (this.isDBLoaded) {
-      return new Promise(resolve => {
-        this.getAddonsByTypes(aTypes, addons => {
-          resolve({
-            addons: addons.filter(addon => addon.isActive),
-            fullData: true,
-          });
-        });
-      });
+      let addons = await this.getAddonsByTypes(aTypes);
+      return {
+        addons: addons.filter(addon => addon.isActive),
+        fullData: true,
+      };
     }
 
     // Construct addon-like objects with the information we already
     // have in memory.
     if (!XPIStates.db) {
-      return Promise.reject(new Error("XPIStates not yet initialized"));
+      throw new Error("XPIStates not yet initialized");
     }
 
     let result = [];
@@ -3498,7 +3504,7 @@ var XPIProvider = {
       });
     }
 
-    return Promise.resolve({addons: result, fullData: false});
+    return {addons: result, fullData: false};
   },
 
 
@@ -3507,13 +3513,10 @@ var XPIProvider = {
    *
    * @param  aGUID
    *         String GUID of add-on to retrieve
-   * @param  aCallback
-   *         A callback to pass the Addon to. Receives null if not found.
    */
-  getAddonBySyncGUID(aGUID, aCallback) {
-    XPIDatabase.getAddonBySyncGUID(aGUID, function(aAddon) {
-      aCallback(aAddon ? aAddon.wrapper : null);
-    });
+  async getAddonBySyncGUID(aGUID) {
+    let addon = await XPIDatabase.getAddonBySyncGUID(aGUID);
+    return addon ? addon.wrapper : null;
   },
 
   /**
@@ -3521,21 +3524,18 @@ var XPIProvider = {
    *
    * @param  aTypes
    *         An array of types to fetch. Can be null to get all types
-   * @param  aCallback
-   *         A callback to pass an array of Addons to
    */
-  getAddonsWithOperationsByTypes(aTypes, aCallback) {
+  async getAddonsWithOperationsByTypes(aTypes) {
     let typesToGet = getAllAliasesForTypes(aTypes);
 
-    XPIDatabase.getVisibleAddonsWithPendingOperations(typesToGet, function(aAddons) {
-      let results = aAddons.map(a => a.wrapper);
-      for (let install of XPIProvider.installs) {
-        if (install.state == AddonManager.STATE_INSTALLED &&
-            !(install.addon.inDatabase))
-          results.push(install.addon.wrapper);
-      }
-      aCallback(results);
-    });
+    let aAddons = await XPIDatabase.getVisibleAddonsWithPendingOperations(typesToGet);
+    let results = aAddons.map(a => a.wrapper);
+    for (let install of XPIProvider.installs) {
+      if (install.state == AddonManager.STATE_INSTALLED &&
+          !(install.addon.inDatabase))
+        results.push(install.addon.wrapper);
+    }
+    return results;
   },
 
   /**
@@ -3544,10 +3544,8 @@ var XPIProvider = {
    *
    * @param  aTypes
    *         An array of types or null to get all types
-   * @param  aCallback
-   *         A callback to pass the array of AddonInstalls to
    */
-  getInstallsByTypes(aTypes, aCallback) {
+  getInstallsByTypes(aTypes) {
     let results = [...this.installs];
     if (aTypes) {
       results = results.filter(install => {
@@ -3555,7 +3553,7 @@ var XPIProvider = {
       });
     }
 
-    aCallback(results.map(install => install.wrapper));
+    return results.map(install => install.wrapper);
   },
 
   /**
@@ -3594,36 +3592,19 @@ var XPIProvider = {
 
   /**
    * Update the repositoryAddon property for all add-ons.
-   *
-   * @param  aCallback
-   *         Function to call when operation is complete.
    */
-  updateAddonRepositoryData(aCallback) {
-    XPIDatabase.getVisibleAddons(null, aAddons => {
-      let pending = aAddons.length;
-      logger.debug("updateAddonRepositoryData found " + pending + " visible add-ons");
-      if (pending == 0) {
-        aCallback();
-        return;
-      }
+  async updateAddonRepositoryData() {
+    let addons = await XPIDatabase.getVisibleAddons(null);
+    logger.debug("updateAddonRepositoryData found " + addons.length + " visible add-ons");
 
-      function notifyComplete() {
-        if (--pending == 0)
-          aCallback();
-      }
-
-      for (let addon of aAddons) {
-        AddonRepository.getCachedAddonByID(addon.id).then(aRepoAddon => {
-          if (aRepoAddon || AddonRepository.getCompatibilityOverridesSync(addon.id)) {
-            logger.debug("updateAddonRepositoryData got info for " + addon.id);
-            addon._repositoryAddon = aRepoAddon;
-            this.updateAddonDisabledState(addon);
-          }
-
-          notifyComplete();
-        });
-      }
-    });
+    await Promise.all(addons.map(addon =>
+      AddonRepository.getCachedAddonByID(addon.id).then(aRepoAddon => {
+        if (aRepoAddon || AddonRepository.getCompatibilityOverridesSync(addon.id)) {
+          logger.debug("updateAddonRepositoryData got info for " + addon.id);
+          addon._repositoryAddon = aRepoAddon;
+          this.updateAddonDisabledState(addon);
+        }
+      })));
   },
 
   onDebugConnectionChange({what, connection}) {
@@ -4060,7 +4041,7 @@ var XPIProvider = {
    * @throws if the addon cannot be uninstalled because it is in an install
    *         location that does not allow it
    */
-  uninstallAddon(aAddon, aForcePending) {
+  async uninstallAddon(aAddon, aForcePending) {
     if (!(aAddon.inDatabase))
       throw new Error("Cannot uninstall addon " + aAddon.id + " because it is not installed");
 
@@ -4146,31 +4127,30 @@ var XPIProvider = {
       AddonManagerPrivate.callAddonListeners("onUninstalled", wrapper);
 
       if (existingAddon) {
-        XPIDatabase.getAddonInLocation(aAddon.id, existingAddon.location.name, existing => {
-          XPIDatabase.makeAddonVisible(existing);
+        let existing = await XPIDatabase.getAddonInLocation(aAddon.id, existingAddon.location.name);
+        XPIDatabase.makeAddonVisible(existing);
 
-          let wrappedAddon = existing.wrapper;
-          AddonManagerPrivate.callAddonListeners("onInstalling", wrappedAddon, false);
+        let wrappedAddon = existing.wrapper;
+        AddonManagerPrivate.callAddonListeners("onInstalling", wrappedAddon, false);
 
-          if (!existing.disabled) {
-            XPIDatabase.updateAddonActive(existing, true);
-          }
+        if (!existing.disabled) {
+          XPIDatabase.updateAddonActive(existing, true);
+        }
 
-          if (aAddon.bootstrap) {
-            let method = callUpdate ? "update" : "install";
+        if (aAddon.bootstrap) {
+          let method = callUpdate ? "update" : "install";
+          XPIProvider.callBootstrapMethod(existing, existing._sourceBundle,
+                                          method, reason);
+
+          if (existing.active) {
             XPIProvider.callBootstrapMethod(existing, existing._sourceBundle,
-                                            method, reason);
-
-            if (existing.active) {
-              XPIProvider.callBootstrapMethod(existing, existing._sourceBundle,
-                                              "startup", reason);
-            } else {
-              XPIProvider.unloadBootstrapScope(existing.id);
-            }
+                                            "startup", reason);
+          } else {
+            XPIProvider.unloadBootstrapScope(existing.id);
           }
+        }
 
-          AddonManagerPrivate.callAddonListeners("onInstalled", wrappedAddon);
-        });
+        AddonManagerPrivate.callAddonListeners("onInstalled", wrappedAddon);
       }
     } else if (aAddon.bootstrap && aAddon.active) {
       this.callBootstrapMethod(aAddon, aAddon._sourceBundle, "shutdown", reason);
@@ -4503,7 +4483,7 @@ AddonInternal.prototype = {
       };
     }
 
-    return Blocklist.getAddonBlocklistEntry(this.wrapper);
+    return Services.blocklist.getAddonBlocklistEntry(this.wrapper);
   },
 
   async updateBlocklistState(options = {}) {
@@ -4517,7 +4497,7 @@ AddonInternal.prototype = {
     let oldState = this.blocklistState;
 
     let entry = await this.findBlocklistEntry();
-    let newState = entry ? entry.state : Blocklist.STATE_NOT_BLOCKED;
+    let newState = entry ? entry.state : Services.blocklist.STATE_NOT_BLOCKED;
 
     this.blocklistState = newState;
     this.blocklistURL = entry && entry.url;
@@ -4527,7 +4507,7 @@ AddonInternal.prototype = {
     // new soft blocks after displaying a UI, in which cases we need to
     // skip updating it here.
     if (applySoftBlock && oldState != newState) {
-      if (newState == Blocklist.STATE_SOFTBLOCKED) {
+      if (newState == Services.blocklist.STATE_SOFTBLOCKED) {
         if (this.type == "theme") {
           userDisabled = true;
         } else {
@@ -5974,7 +5954,7 @@ class SystemAddonInstallLocation extends MutableDirectoryInstallLocation {
   /**
    * Resets the add-on set so on the next startup the default set will be used.
    */
-  resetAddonSet() {
+  async resetAddonSet() {
     logger.info("Removing all system add-on upgrades.");
 
     // remove everything from the pref first, if uninstall
@@ -5991,12 +5971,11 @@ class SystemAddonInstallLocation extends MutableDirectoryInstallLocation {
     // removed restartlessly, for instance if they are no longer
     // part of the latest update set.
     if (this._addonSet) {
-      for (let id of Object.keys(this._addonSet.addons)) {
-        AddonManager.getAddonByID(id, addon => {
-          if (addon) {
-            addon.uninstall();
-          }
-        });
+      let ids = Object.keys(this._addonSet.addons);
+      for (let addon of await AddonManager.getAddonsByIDs(ids)) {
+        if (addon) {
+          addon.uninstall();
+        }
       }
     }
   }
@@ -6071,7 +6050,7 @@ class SystemAddonInstallLocation extends MutableDirectoryInstallLocation {
     // Remove any add-ons that are no longer part of the set.
     for (let addonID of Object.keys(addonSet.addons)) {
       if (!aAddons.includes(addonID)) {
-        AddonManager.getAddonByID(addonID, a => a.uninstall());
+        AddonManager.getAddonByID(addonID).then(a => a.uninstall());
       }
     }
 

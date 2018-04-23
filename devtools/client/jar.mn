@@ -222,6 +222,7 @@ devtools.jar:
     skin/images/tool-memory.svg (themes/images/tool-memory.svg)
     skin/images/tool-dom.svg (themes/images/tool-dom.svg)
     skin/images/tool-accessibility.svg (themes/images/tool-accessibility.svg)
+    skin/images/tool-application.svg (themes/images/tool-application.svg)
     skin/images/close.svg (themes/images/close.svg)
     skin/images/clear.svg (themes/images/clear.svg)
     skin/images/vview-delete.png (themes/images/vview-delete.png)
@@ -268,8 +269,10 @@ devtools.jar:
     skin/images/debugger/arrow.svg (themes/images/debugger/arrow.svg)
     skin/images/debugger/back.svg (themes/images/debugger/back.svg)
     skin/images/debugger/blackBox.svg (themes/images/debugger/blackBox.svg)
+    skin/images/debugger/breakpoint.svg (themes/images/debugger/breakpoint.svg)
     skin/images/debugger/close.svg (themes/images/debugger/close.svg)
     skin/images/debugger/coffeescript.svg (themes/images/debugger/coffeescript.svg)
+    skin/images/debugger/disable-pausing.svg (themes/images/debugger/disable-pausing.svg)
     skin/images/debugger/domain.svg (themes/images/debugger/domain.svg)
     skin/images/debugger/extension.svg (themes/images/debugger/extension.svg)
     skin/images/debugger/file.svg (themes/images/debugger/file.svg)
@@ -299,6 +302,10 @@ devtools.jar:
     content/netmonitor/src/assets/icons/play.svg (netmonitor/src/assets/icons/play.svg)
     content/netmonitor/index.html (netmonitor/index.html)
     content/netmonitor/initializer.js (netmonitor/initializer.js)
+
+    # Application panel
+    content/application/index.html (application/index.html)
+    content/application/initializer.js (application/initializer.js)
 
     # Devtools-components
     skin/images/devtools-components/arrow.svg (themes/images/devtools-components/arrow.svg)

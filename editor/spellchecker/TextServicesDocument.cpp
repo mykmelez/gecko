@@ -1099,7 +1099,8 @@ TextServicesDocument::DeleteSelection()
   // Now delete the actual content!
   RefPtr<TextEditor> textEditor = mTextEditor;
   nsresult rv =
-    textEditor->DeleteSelection(nsIEditor::ePrevious, nsIEditor::eStrip);
+    textEditor->DeleteSelectionAsAction(nsIEditor::ePrevious,
+                                        nsIEditor::eStrip);
   if (NS_FAILED(rv)) {
     UNLOCK_DOC(this);
     return rv;
@@ -1258,7 +1259,7 @@ TextServicesDocument::InsertText(const nsString* aText)
     return rv;
   }
 
-  rv = textEditor->InsertText(*aText);
+  rv = textEditor->InsertTextAsAction(*aText);
   if (NS_FAILED(rv)) {
     textEditor->EndTransaction();
     UNLOCK_DOC(this);

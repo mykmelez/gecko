@@ -17,6 +17,7 @@ ChromeUtils.import("resource://gre/modules/AsyncShutdown.jsm");
 ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
 ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Timer.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 const {EventEmitter} = ChromeUtils.import("resource://gre/modules/EventEmitter.jsm", {});
@@ -108,27 +109,41 @@ class MockBlocklist {
       addons = new Map(Object.entries(addons));
     }
     this.addons = addons;
+    this.wrappedJSObject = this;
+
+    // Copy blocklist constants.
+    for (let [k, v] of Object.entries(Ci.nsIBlocklistService)) {
+      if (typeof v === "number") {
+        this[k] = v;
+      }
+    }
   }
 
   get contractID() {
     return "@mozilla.org/extensions/blocklist;1";
   }
 
+  _reLazifyService() {
+    XPCOMUtils.defineLazyServiceGetter(Services, "blocklist", this.contractID);
+  }
+
   register() {
     this.originalCID = MockRegistrar.register(this.contractID, this);
+    this._reLazifyService();
   }
 
   unregister() {
     MockRegistrar.unregister(this.originalCID);
+    this._reLazifyService();
   }
 
-  getAddonBlocklistState(addon, appVersion, toolkitVersion) {
-    return this.addons.get(addon.id, Ci.nsIBlocklistService.STATE_NOT_BLOCKED);
+  async getAddonBlocklistState(addon, appVersion, toolkitVersion) {
+    await new Promise(r => setTimeout(r, 0));
+    return this.addons.get(addon.id) || Ci.nsIBlocklistService.STATE_NOT_BLOCKED;
   }
 
   async getAddonBlocklistEntry(addon, appVersion, toolkitVersion) {
-    await Promise.resolve();
-    let state = this.getAddonBlocklistState(addon, appVersion, toolkitVersion);
+    let state = await this.getAddonBlocklistState(addon, appVersion, toolkitVersion);
     if (state != Ci.nsIBlocklistService.STATE_NOT_BLOCKED) {
       return {
         state,

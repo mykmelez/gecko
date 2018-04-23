@@ -25,13 +25,6 @@ config = {
         'hg': 'c:/mozilla-build/hg/hg',
     },
 
-    "find_links": [
-        "http://pypi.pvt.build.mozilla.org/pub",
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
-
-    "pip_index": False,
-
     "buildbot_json_path": "buildprops.json",
 
     "default_blob_upload_servers": [
@@ -42,5 +35,5 @@ config = {
 
     "download_minidump_stackwalk": True,
 
-    "verify_category": "web-platform",
+    "per_test_category": "web-platform",
 }

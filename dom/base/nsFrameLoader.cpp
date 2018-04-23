@@ -35,7 +35,6 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsIScrollable.h"
 #include "nsFrameLoader.h"
-#include "nsIDOMEventTarget.h"
 #include "nsIFrame.h"
 #include "nsIScrollableFrame.h"
 #include "nsSubDocumentFrame.h"
@@ -1003,6 +1002,28 @@ nsFrameLoader::Hide()
                "Found an nsIDocShell which doesn't implement nsIBaseWindow.");
   baseWin->SetVisibility(false);
   baseWin->SetParentWidget(nullptr);
+}
+
+void
+nsFrameLoader::ForceLayoutIfNecessary()
+{
+  nsIFrame* frame = GetPrimaryFrameOfOwningContent();
+  if (!frame) {
+    return;
+  }
+
+  nsPresContext* presContext = frame->PresContext();
+  if (!presContext) {
+    return;
+  }
+
+  // Only force the layout flush if the frameloader hasn't ever been
+  // run through layout.
+  if (frame->GetStateBits() & NS_FRAME_FIRST_REFLOW) {
+    if (nsCOMPtr<nsIPresShell> shell = presContext->GetPresShell()) {
+      shell->FlushPendingNotifications(FlushType::Layout);
+    }
+  }
 }
 
 nsresult
@@ -2054,13 +2075,13 @@ nsFrameLoader::MaybeCreateDocShell()
 
   // Make sure all shells have links back to the content element
   // in the nearest enclosing chrome shell.
-  nsCOMPtr<nsIDOMEventTarget> chromeEventHandler;
+  RefPtr<EventTarget> chromeEventHandler;
 
   if (parentType == nsIDocShellTreeItem::typeChrome) {
     // Our parent shell is a chrome shell. It is therefore our nearest
     // enclosing chrome shell.
 
-    chromeEventHandler = do_QueryInterface(mOwnerContent);
+    chromeEventHandler = mOwnerContent;
     NS_ASSERTION(chromeEventHandler,
                  "This mContent should implement this.");
   } else {

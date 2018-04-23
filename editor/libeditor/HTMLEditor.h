@@ -58,6 +58,7 @@ struct PropItem;
 template<class T> class OwningNonNull;
 namespace dom {
 class DocumentFragment;
+class Event;
 class MouseEvent;
 } // namespace dom
 namespace widget {
@@ -158,10 +159,6 @@ public:
   NS_DECL_NSIHTMLINLINETABLEEDITOR
 
   // XXX Following methods are not overriding but defined here...
-  nsresult CopyLastEditableChildStyles(nsINode* aPreviousBlock,
-                                       nsINode* aNewBlock,
-                                       Element** aOutBrNode);
-
   nsresult LoadHTML(const nsAString& aInputString);
 
   nsresult GetCSSBackgroundColorState(bool* aMixed, nsAString& aOutColor,
@@ -188,8 +185,8 @@ public:
    * This sets background on the appropriate container element (table, cell,)
    * or calls into nsTextEditor to set the page background.
    */
-  nsresult SetCSSBackgroundColor(const nsAString& aColor);
-  nsresult SetHTMLBackgroundColor(const nsAString& aColor);
+  nsresult SetCSSBackgroundColorWithTransaction(const nsAString& aColor);
+  nsresult SetHTMLBackgroundColorWithTransaction(const nsAString& aColor);
 
   /**
    * GetBlockNodeParent() returns parent or nearest ancestor of aNode if
@@ -349,14 +346,14 @@ public:
    * All editor operations which alter the doc should be prefaced
    * with a call to StartOperation, naming the action and direction.
    */
-  NS_IMETHOD StartOperation(EditAction opID,
-                            nsIEditor::EDirection aDirection) override;
+  virtual nsresult StartOperation(EditAction opID,
+                                  nsIEditor::EDirection aDirection) override;
 
   /**
    * All editor operations which alter the doc should be followed
    * with a call to EndOperation.
    */
-  NS_IMETHOD EndOperation() override;
+  virtual nsresult EndOperation() override;
 
   /**
    * returns true if aParentTag can contain a child of type aChildTag.
@@ -382,18 +379,51 @@ public:
   virtual bool AreNodesSameType(nsIContent* aNode1,
                                 nsIContent* aNode2) override;
 
-  NS_IMETHOD DeleteSelectionImpl(EDirection aAction,
-                                 EStripWrappers aStripWrappers) override;
-  nsresult DeleteNode(nsINode* aNode);
-  NS_IMETHOD DeleteNode(nsIDOMNode* aNode) override;
-  nsresult DeleteText(dom::CharacterData& aTextNode, uint32_t aOffset,
-                      uint32_t aLength);
+  /**
+   * DeleteSelectionWithTransaction() removes selected content or content
+   * around caret with transactions.
+   *
+   * @param aDirection          How much range should be removed.
+   * @param aStripWrappers      Whether the parent blocks should be removed
+   *                            when they become empty.
+   */
   virtual nsresult
-  InsertTextImpl(nsIDocument& aDocument,
-                 const nsAString& aStringToInsert,
-                 const EditorRawDOMPoint& aPointToInsert,
-                 EditorRawDOMPoint* aPointAfterInsertedString =
-                   nullptr) override;
+  DeleteSelectionWithTransaction(EDirection aAction,
+                                 EStripWrappers aStripWrappers) override;
+
+  /**
+   * DeleteNodeWithTransaction() removes aNode from the DOM tree if it's
+   * modifiable.  Note that this is not an override of same method of
+   * EditorBase.
+   *
+   * @param aNode       The node to be removed from the DOM tree.
+   */
+  nsresult DeleteNodeWithTransaction(nsINode& aNode);
+
+  NS_IMETHOD DeleteNode(nsIDOMNode* aNode) override;
+
+  /**
+   * DeleteTextWithTransaction() removes text in the range from aCharData if
+   * it's modifiable.  Note that this not an override of same method of
+   * EditorBase.
+   *
+   * @param aCharData           The data node which should be modified.
+   * @param aOffset             Start offset of removing text in aCharData.
+   * @param aLength             Length of removing text.
+   */
+  nsresult DeleteTextWithTransaction(dom::CharacterData& aTextNode,
+                                     uint32_t aOffset, uint32_t aLength);
+
+  /**
+   * InsertTextWithTransaction() inserts aStringToInsert at aPointToInsert.
+   */
+  virtual nsresult
+  InsertTextWithTransaction(nsIDocument& aDocument,
+                            const nsAString& aStringToInsert,
+                            const EditorRawDOMPoint& aPointToInsert,
+                            EditorRawDOMPoint* aPointAfterInsertedString =
+                              nullptr) override;
+
   virtual bool IsModifiableNode(nsINode* aNode) override;
 
   NS_IMETHOD SelectAll() override;
@@ -402,20 +432,22 @@ public:
   NS_IMETHOD StyleSheetLoaded(StyleSheet* aSheet,
                               bool aWasAlternate, nsresult aStatus) override;
 
-  // Utility Routines, not part of public API
-  NS_IMETHOD TypedText(const nsAString& aString,
-                       ETypingAction aAction) override;
+  /**
+   * OnInputLineBreak() is called when user inputs a line break with
+   * Shift + Enter or something.
+   */
+  nsresult OnInputLineBreak();
 
   /**
-   * InsertNodeIntoProperAncestor() attempts to insert aNode into the document,
-   * at aPointToInsert.  Checks with strict dtd to see if containment is
-   * allowed.  If not allowed, will attempt to find a parent in the parent
-   * hierarchy of aPointToInsert.GetContainer() that will accept aNode as a
-   * child.  If such a parent is found, will split the document tree from
-   * aPointToInsert up to parent, and then insert aNode. aPointToInsert is then
-   * adjusted to point to the actual location that aNode was inserted at.
-   * aSplitAtEdges specifies if the splitting process is allowed to result in
-   * empty nodes.
+   * InsertNodeIntoProperAncestorWithTransaction() attempts to insert aNode
+   * into the document, at aPointToInsert.  Checks with strict dtd to see if
+   * containment is allowed.  If not allowed, will attempt to find a parent
+   * in the parent hierarchy of aPointToInsert.GetContainer() that will accept
+   * aNode as a child.  If such a parent is found, will split the document
+   * tree from aPointToInsert up to parent, and then insert aNode.
+   * aPointToInsert is then adjusted to point to the actual location that
+   * aNode was inserted at.  aSplitAtEdges specifies if the splitting process
+   * is allowed to result in empty nodes.
    *
    * @param aNode             Node to insert.
    * @param aPointToInsert    Insertion point.
@@ -425,9 +457,27 @@ public:
    */
   template<typename PT, typename CT>
   EditorDOMPoint
-  InsertNodeIntoProperAncestor(nsIContent& aNode,
-                               const EditorDOMPointBase<PT, CT>& aPointToInsert,
-                               SplitAtEdges aSplitAtEdges);
+  InsertNodeIntoProperAncestorWithTransaction(
+    nsIContent& aNode,
+    const EditorDOMPointBase<PT, CT>& aPointToInsert,
+    SplitAtEdges aSplitAtEdges);
+
+  /**
+   * CopyLastEditableChildStyles() clones inline container elements into
+   * aPreviousBlock to aNewBlock to keep using same style in it.
+   *
+   * @param aPreviousBlock      The previous block element.  All inline
+   *                            elements which are last sibling of each level
+   *                            are cloned to aNewBlock.
+   * @param aNewBlock           New block container element.
+   * @param aNewBrElement       If this method creates a new <br> element for
+   *                            placeholder, this is set to the new <br>
+   *                            element.
+   */
+  nsresult
+  CopyLastEditableChildStylesWithTransaction(Element& aPreviousBlock,
+                                             Element& aNewBlock,
+                                             RefPtr<Element>* aNewBrElement);
 
   /**
    * Use this to assure that selection is set after attribute nodes when
@@ -518,7 +568,7 @@ public:
    * @param aMouseEvent [IN] the event
    */
   nsresult OnMouseDown(int32_t aX, int32_t aY, nsIDOMElement* aTarget,
-                       nsIDOMEvent* aMouseEvent);
+                       dom::Event* aMouseEvent);
 
   /**
    * event callback when a mouse button is released
@@ -620,10 +670,11 @@ protected:
   nsresult TabInTable(bool inIsShift, bool* outHandled);
 
   /**
-   * InsertBR() inserts a new <br> element at selection.  If there is
-   * non-collapsed selection ranges, the selected ranges is deleted first.
+   * InsertBrElementAtSelectionWithTransaction() inserts a new <br> element at
+   * selection.  If there is non-collapsed selection ranges, the selected
+   * ranges is deleted first.
    */
-  nsresult InsertBR();
+  nsresult InsertBrElementAtSelectionWithTransaction();
 
   // Table Editing (implemented in nsTableEditor.cpp)
 
@@ -857,10 +908,22 @@ protected:
                              const EditorRawDOMPoint& aPointToInsert);
 
   /**
-   * Helpers for block transformations.
+   * MakeDefinitionListItemWithTransaction() replaces parent list of current
+   * selection with <dl> or create new <dl> element and creates a definition
+   * list item whose name is aTagName.
+   *
+   * @param aTagName            Must be nsGkAtoms::dt or nsGkAtoms::dd.
    */
-  nsresult MakeDefinitionItem(const nsAString& aItemType);
-  nsresult InsertBasicBlock(const nsAString& aBlockType);
+  nsresult MakeDefinitionListItemWithTransaction(nsAtom& aTagName);
+
+  /**
+   * InsertBasicBlockWithTransaction() inserts a block element whose name
+   * is aTagName at selection.
+   *
+   * @param aTagName            A block level element name.  Must NOT be
+   *                            nsGkAtoms::dt nor nsGkAtoms::dd.
+   */
+  nsresult InsertBasicBlockWithTransaction(nsAtom& aTagName);
 
   /**
    * Increase/decrease the font size of selection.
@@ -912,7 +975,15 @@ protected:
   bool IsAtEndOfNode(nsINode& aNode, int32_t aOffset);
   bool IsOnlyAttribute(const Element* aElement, nsAtom* aAttribute);
 
-  nsresult RemoveBlockContainer(nsIContent& aNode);
+  /**
+   * RemoveBlockContainerWithTransaction() removes aElement from the DOM tree
+   * but moves its all children to its parent node and if its parent needs <br>
+   * element to have at least one line-height, this inserts <br> element
+   * automatically.
+   *
+   * @param aElement            Block element to be removed.
+   */
+  nsresult RemoveBlockContainerWithTransaction(Element& aElement);
 
   nsIContent* GetPriorHTMLSibling(nsINode* aNode);
 
@@ -1162,6 +1233,12 @@ protected:
    * that just returns null on errors.
    */
   already_AddRefed<dom::Element> GetSelectedElement(const nsAString& aTagName);
+
+  /**
+   * RemoveStyleSheetWithTransaction() removes the given URL stylesheet
+   * from mStyleSheets and mStyleSheetURLs.
+   */
+  nsresult RemoveStyleSheetWithTransaction(const nsAString& aURL);
 
 protected:
   RefPtr<TypeInState> mTypeInState;

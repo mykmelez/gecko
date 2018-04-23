@@ -32,6 +32,8 @@ const {
   ChromeUtils,
   CSS,
   CSSRule,
+  DOMParser,
+  Event,
   FileReader,
   FormData,
   indexedDB,
@@ -47,6 +49,8 @@ const {
     "ChromeUtils",
     "CSS",
     "CSSRule",
+    "DOMParser",
+    "Event",
     "FileReader",
     "FormData",
     "indexedDB",
@@ -262,7 +266,9 @@ exports.globals = {
   define(factory) {
     factory(this.require, this.exports, this.module);
   },
+  DOMParser,
   Element: Ci.nsIDOMElement,
+  Event,
   FormData,
   isWorker: false,
   loader: {
@@ -311,9 +317,6 @@ lazyGlobal("clearInterval", () => {
 });
 lazyGlobal("setInterval", () => {
   return require("resource://gre/modules/Timer.jsm").setInterval;
-});
-lazyGlobal("DOMParser", () => {
-  return CC("@mozilla.org/xmlextras/domparser;1", "nsIDOMParser");
 });
 lazyGlobal("WebSocket", () => {
   return Services.appShell.hiddenDOMWindow.WebSocket;

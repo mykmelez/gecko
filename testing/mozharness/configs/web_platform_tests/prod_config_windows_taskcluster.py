@@ -25,12 +25,6 @@ config = {
         'hg': os.path.join(os.environ['PROGRAMFILES'], 'Mercurial', 'hg')
     },
 
-    "find_links": [
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
-
-    "pip_index": False,
-
     "default_blob_upload_servers": [
          "https://blobupload.elasticbeanstalk.com",
     ],
@@ -64,5 +58,5 @@ config = {
 
     "download_minidump_stackwalk": True,
 
-    "verify_category": "web-platform",
+    "per_test_category": "web-platform",
 }

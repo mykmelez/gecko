@@ -1799,6 +1799,15 @@ nsStandardURL::SetPassword(const nsACString &input)
 
     const nsPromiseFlatCString &password = PromiseFlatCString(input);
 
+    auto clearedPassword = MakeScopeExit([&password, this]() {
+        // Check that if this method is called with the empty string then the
+        // password is definitely cleared when exiting this method.
+        if (password.IsEmpty()) {
+            MOZ_DIAGNOSTIC_ASSERT(this->Password().IsEmpty());
+        }
+        Unused << this; // silence compiler -Wunused-lambda-capture
+    });
+
     LOG(("nsStandardURL::SetPassword [password=%s]\n", password.get()));
 
     if (mURLType == URLTYPE_NO_AUTHORITY) {

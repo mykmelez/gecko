@@ -974,10 +974,10 @@ function handleUriInChrome(aBrowser, aUri) {
                                               .getTypeFromURI(aUri);
       if (mimeType == "application/x-xpinstall") {
         let systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
-        AddonManager.getInstallForURL(aUri.spec, install => {
+        AddonManager.getInstallForURL(aUri.spec, mimeType).then(install => {
           AddonManager.installAddonFromWebpage(mimeType, aBrowser, systemPrincipal,
                                                install);
-        }, mimeType);
+        });
         return true;
       }
     } catch (e) {
@@ -1268,6 +1268,8 @@ var gBrowserInit = {
       remoteType, sameProcessAsFrameLoader
     });
 
+    BrowserSearch.initPlaceHolder();
+
     // Hack to ensure that the about:home favicon is loaded
     // instantaneously, to avoid flickering and improve perceived performance.
     this._callWithURIToLoad(uriToLoad => {
@@ -1463,6 +1465,7 @@ var gBrowserInit = {
     UpdateUrlbarSearchSplitterState();
 
     BookmarkingUI.init();
+    BrowserSearch.delayedStartupInit();
     AutoShowBookmarksToolbar.init();
 
     Services.prefs.addObserver(gHomeButton.prefDomain, gHomeButton);
@@ -3765,8 +3768,23 @@ const DOMEventHandler = {
 };
 
 const BrowserSearch = {
+  _searchInitComplete: false,
+
   init() {
     Services.obs.addObserver(this, "browser-search-engine-modified");
+  },
+
+  delayedStartupInit() {
+    // Asynchronously initialize the search service if necessary, to get the
+    // current engine for working out the placeholder.
+    Services.search.init(rv => {
+      if (Components.isSuccessCode(rv)) {
+        // Delay the update for this until so that we don't change it while
+        // the user is looking at it / isn't expecting it.
+        this._updateURLBarPlaceholder(Services.search.currentEngine, true);
+        this._searchInitComplete = true;
+      }
+    });
   },
 
   uninit() {
@@ -3794,6 +3812,11 @@ const BrowserSearch = {
       // engine, then the engine needs to be removed from the corresponding
       // browser's offered engines.
       this._removeMaybeOfferedEngine(engineName);
+      break;
+    case "engine-current":
+      if (this._searchInitComplete) {
+        this._updateURLBarPlaceholder(engine);
+      }
       break;
     }
   },
@@ -3840,6 +3863,88 @@ const BrowserSearch = {
     if (selectedBrowserOffersEngine) {
       this.updateOpenSearchBadge();
     }
+  },
+
+  /**
+   * Initializes the urlbar placeholder to the pre-saved engine name. We do this
+   * via a preference, to avoid needing to synchronously init the search service.
+   *
+   * This should be called around the time of DOMContentLoaded, so that it is
+   * initialized quickly before the user sees anything.
+   *
+   * Note: If the preference doesn't exist, we don't do anything as the default
+   * placeholder is a string which doesn't have the engine name.
+   */
+  initPlaceHolder() {
+    let engineName = Services.prefs.getStringPref("browser.urlbar.placeholderName", "");
+    if (engineName) {
+      // We can do this directly, since we know we're at DOMContentLoaded.
+      this._setURLBarPlaceholder(engineName);
+    }
+  },
+
+  /**
+   * Updates the URLBar placeholder for the specified engine, delaying the
+   * update if required. This also saves the current engine name in preferences
+   * for the next restart.
+   *
+   * Note: The engine name will only be displayed for built-in engines, as we
+   * know they should have short names.
+   *
+   * @param {nsISearchEngine} engine The search engine to use for the update.
+   * @param {Boolean} delayUpdate    Set to true, to delay update until the
+   *                                 placeholder is not displayed.
+   */
+  _updateURLBarPlaceholder(engine, delayUpdate = false) {
+    if (!engine) {
+      throw new Error("Expected an engine to be specified");
+    }
+
+    let engineName = "";
+    if (Services.search.getDefaultEngines().includes(engine)) {
+      engineName = engine.name;
+      Services.prefs.setStringPref("browser.urlbar.placeholderName", engineName);
+    } else {
+      Services.prefs.clearUserPref("browser.urlbar.placeholderName");
+    }
+
+    // Only delay if requested, and we're not displaying text in the URL bar
+    // currently.
+    if (delayUpdate && !gURLBar.value) {
+      // Delays changing the URL Bar placeholder until the user is not going to be
+      // seeing it, e.g. when there is a value entered in the bar, or if there is
+      // a tab switch to a tab which has a url loaded.
+      let placeholderUpdateListener = () => {
+        if (gURLBar.value) {
+          this._setURLBarPlaceholder(engineName);
+          gURLBar.removeEventListener("input", placeholderUpdateListener);
+          gBrowser.tabContainer.removeEventListener("TabSelect", placeholderUpdateListener);
+        }
+      };
+
+      gURLBar.addEventListener("input", placeholderUpdateListener);
+      gBrowser.tabContainer.addEventListener("TabSelect", placeholderUpdateListener);
+    } else {
+      this._setURLBarPlaceholder(engineName);
+    }
+  },
+
+  /**
+   * Sets the URLBar placeholder to either something based on the engine name,
+   * or the default placeholder.
+   *
+   * @param {String} name The name of the engine to use, an empty string if to
+   *                      use the default placeholder.
+   */
+  _setURLBarPlaceholder(name) {
+    let placeholder;
+    if (name) {
+      placeholder = gBrowserBundle.formatStringFromName("urlbar.placeholder",
+        [name], 1);
+    } else {
+      placeholder = gURLBar.getAttribute("defaultPlaceholder");
+    }
+    gURLBar.setAttribute("placeholder", placeholder);
   },
 
   addEngine(browser, engine, uri) {
@@ -4519,10 +4624,6 @@ var XULBrowserWindow = {
   get canViewSource() {
     delete this.canViewSource;
     return this.canViewSource = document.getElementById("canViewSource");
-  },
-
-  setJSStatus() {
-    // unsupported
   },
 
   forceInitialBrowserNonRemote(aOpener) {
@@ -7819,19 +7920,64 @@ var MousePosTracker = {
   _listeners: new Set(),
   _x: 0,
   _y: 0,
+  _mostRecentEvent: null,
+
   get _windowUtils() {
     delete this._windowUtils;
     return this._windowUtils = window.getInterface(Ci.nsIDOMWindowUtils);
   },
 
+  /**
+   * Registers a listener, and then waits for the next refresh
+   * driver tick before running the listener to see if the
+   * mouse is within the listener's target rect.
+   *
+   * @param listener (object)
+   *        A listener is expected to expose the following properties:
+   *
+   *        getMouseTargetRect (function)
+   *          Returns the rect that the MousePosTracker needs to alert
+   *          the listener about if the mouse happens to be within it.
+   *
+   *        onTrackingStarted (function, optional)
+   *          Called after the next refresh driver tick after listening,
+   *          when the mouse's initial position relative to the MouseTargetRect
+   *          can be computed. If the listener is removed before the refresh
+   *          driver tick, this might never be called.
+   *
+   *        onMouseEnter (function, optional)
+   *          The function to be called if the mouse enters the rect
+   *          returned by getMouseTargetRect. MousePosTracker always
+   *          runs this inside of a requestAnimationFrame, since it
+   *          assumes that the notification is used to update the DOM.
+   *
+   *        onMouseLeave (function, optional)
+   *          The function to be called if the mouse exits the rect
+   *          returned by getMouseTargetRect. MousePosTracker always
+   *          runs this inside of a requestAnimationFrame, since it
+   *          assumes that the notification is used to update the DOM.
+   */
   addListener(listener) {
-    if (this._listeners.has(listener))
+    if (this._listeners.has(listener)) {
       return;
+    }
 
     listener._hover = false;
     this._listeners.add(listener);
 
-    this._callListener(listener);
+    // We're adding some asynchronicity here, during which the listener
+    // might be removed. At each step, we need to ensure that the listener
+    // is still registered before proceeding.
+    window.promiseDocumentFlushed(() => {
+      if (this._listeners.has(listener)) {
+        this._callListeners([listener]);
+        window.requestAnimationFrame(() => {
+          if (this._listeners.has(listener) && listener.onTrackingStarted) {
+            listener.onTrackingStarted();
+          }
+        });
+      }
+    });
   },
 
   removeListener(listener) {
@@ -7839,38 +7985,73 @@ var MousePosTracker = {
   },
 
   handleEvent(event) {
-    var fullZoom = this._windowUtils.fullZoom;
-    this._x = event.screenX / fullZoom - window.mozInnerScreenX;
-    this._y = event.screenY / fullZoom - window.mozInnerScreenY;
+    let firstEvent = !this._mostRecentEvent;
+    this._mostRecentEvent = event;
 
-    this._listeners.forEach(function(listener) {
-      try {
-        this._callListener(listener);
-      } catch (e) {
-        Cu.reportError(e);
-      }
-    }, this);
+    if (firstEvent) {
+      window.promiseDocumentFlushed(() => {
+        this.onDocumentFlushed();
+        this._mostRecentEvent = null;
+      });
+    }
   },
 
-  _callListener(listener) {
-    let rect = listener.getMouseTargetRect();
-    let hover = this._x >= rect.left &&
-                this._x <= rect.right &&
-                this._y >= rect.top &&
-                this._y <= rect.bottom;
+  onDocumentFlushed() {
+    let event = this._mostRecentEvent;
 
-    if (hover == listener._hover)
-      return;
+    if (event) {
+      let fullZoom = this._windowUtils.fullZoom;
+      this._x = event.screenX / fullZoom - window.mozInnerScreenX;
+      this._y = event.screenY / fullZoom - window.mozInnerScreenY;
 
-    listener._hover = hover;
-
-    if (hover) {
-      if (listener.onMouseEnter)
-        listener.onMouseEnter();
-    } else if (listener.onMouseLeave) {
-      listener.onMouseLeave();
+      this._callListeners(this._listeners);
     }
-  }
+  },
+
+  _callListeners(listeners) {
+    let functionsToCall = [];
+    for (let listener of listeners) {
+      let rect;
+      try {
+        rect = listener.getMouseTargetRect();
+      } catch (e) {
+        Cu.reportError(e);
+        continue;
+      }
+
+      let hover = this._x >= rect.left &&
+                  this._x <= rect.right &&
+                  this._y >= rect.top &&
+                  this._y <= rect.bottom;
+
+      if (hover == listener._hover) {
+        continue;
+      }
+
+      listener._hover = hover;
+      if (hover) {
+        if (listener.onMouseEnter) {
+          functionsToCall.push(listener.onMouseEnter.bind(listener));
+        }
+      } else if (listener.onMouseLeave) {
+        functionsToCall.push(listener.onMouseLeave.bind(listener));
+      }
+    }
+
+    // _callListeners is being called from within a promiseDocumentFlushed,
+    // where we are expressly forbidden from dirtying styles or layout. Since
+    // the onMouseEnter or onMouseLeave functions are liable to do such
+    // dirtying, we run them inside a requestAnimationFrame callback instead.
+    window.requestAnimationFrame(() => {
+      for (let fn of functionsToCall) {
+        try {
+          fn();
+        } catch (e) {
+          Cu.reportError(e);
+        }
+      }
+    });
+  },
 };
 
 var ToolbarIconColor = {

@@ -114,8 +114,10 @@ HTMLEditor::LoadHTML(const nsAString& aInputString)
   if (!handled) {
     // Delete Selection, but only if it isn't collapsed, see bug #106269
     if (!selection->Collapsed()) {
-      rv = DeleteSelection(eNone, eStrip);
-      NS_ENSURE_SUCCESS(rv, rv);
+      rv = DeleteSelectionAsAction(eNone, eStrip);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
     }
 
     // Get the first range in the selection, for context:
@@ -141,7 +143,7 @@ HTMLEditor::LoadHTML(const nsAString& aInputString)
            documentFragment->GetFirstChild();
          contentToInsert;
          contentToInsert = documentFragment->GetFirstChild()) {
-      rv = InsertNode(*contentToInsert, pointToInsert);
+      rv = InsertNodeWithTransaction(*contentToInsert, pointToInsert);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
@@ -253,8 +255,10 @@ HTMLEditor::DoInsertHTMLWithContext(const nsAString& aInputString,
       // Use an auto tracker so that our drop point is correctly
       // positioned after the delete.
       AutoTrackDOMPoint tracker(mRangeUpdater, &targetPoint);
-      rv = DeleteSelection(eNone, eStrip);
-      NS_ENSURE_SUCCESS(rv, rv);
+      rv = DeleteSelectionAsAction(eNone, eStrip);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
     }
 
     ErrorResult error;
@@ -269,16 +273,21 @@ HTMLEditor::DoInsertHTMLWithContext(const nsAString& aInputString,
 
   // make a list of what nodes in docFrag we need to move
   nsTArray<OwningNonNull<nsINode>> nodeList;
-  CreateListOfNodesToPaste(*static_cast<DocumentFragment*>(fragmentAsNode.get()),
+  CreateListOfNodesToPaste(*fragmentAsNode->AsDocumentFragment(),
                            nodeList,
-                           streamStartParent, streamStartOffset,
-                           streamEndParent, streamEndOffset);
+                           streamStartParent,
+                           streamStartOffset,
+                           streamEndParent,
+                           streamEndOffset);
 
   if (nodeList.IsEmpty()) {
     // We aren't inserting anything, but if aDeleteSelection is set, we do want
     // to delete everything.
     if (aDeleteSelection) {
-      return DeleteSelection(eNone, eStrip);
+      nsresult rv = DeleteSelectionAsAction(eNone, eStrip);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
     }
     return NS_OK;
   }
@@ -354,8 +363,10 @@ HTMLEditor::DoInsertHTMLWithContext(const nsAString& aInputString,
         TextEditUtils::IsBreak(wsObj.mEndReasonNode) &&
         !IsVisibleBRElement(wsObj.mEndReasonNode)) {
       AutoEditorDOMPointChildInvalidator lockOffset(pointToInsert);
-      rv = DeleteNode(wsObj.mEndReasonNode);
-      NS_ENSURE_SUCCESS(rv, rv);
+      rv = DeleteNodeWithTransaction(*wsObj.mEndReasonNode);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
     }
 
     // Remember if we are in a link.
@@ -364,8 +375,9 @@ HTMLEditor::DoInsertHTMLWithContext(const nsAString& aInputString,
     // Are we in a text node? If so, split it.
     if (pointToInsert.IsInTextNode()) {
       SplitNodeResult splitNodeResult =
-        SplitNodeDeep(*pointToInsert.GetContainerAsContent(), pointToInsert,
-                      SplitAtEdges::eAllowToCreateEmptyContainer);
+        SplitNodeDeepWithTransaction(
+          *pointToInsert.GetContainerAsContent(), pointToInsert,
+          SplitAtEdges::eAllowToCreateEmptyContainer);
       if (NS_WARN_IF(splitNodeResult.Failed())) {
         return splitNodeResult.Rv();
       }
@@ -452,7 +464,7 @@ HTMLEditor::DoInsertHTMLWithContext(const nsAString& aInputString,
              firstChild;
              firstChild = curNode->GetFirstChild()) {
           EditorDOMPoint insertedPoint =
-            InsertNodeIntoProperAncestor(
+            InsertNodeIntoProperAncestorWithTransaction(
               *firstChild, pointToInsert,
               SplitAtEdges::eDoNotCreateEmptyContainer);
           if (NS_WARN_IF(!insertedPoint.IsSet())) {
@@ -488,13 +500,13 @@ HTMLEditor::DoInsertHTMLWithContext(const nsAString& aInputString,
                                                 GetParentNode())) {
                   // Is it an orphan node?
                 } else {
-                  DeleteNode(pointToInsert.GetContainer());
+                  DeleteNodeWithTransaction(*pointToInsert.GetContainer());
                   pointToInsert.Set(pointToInsert.GetContainer());
                 }
               }
             }
             EditorDOMPoint insertedPoint =
-              InsertNodeIntoProperAncestor(
+              InsertNodeIntoProperAncestorWithTransaction(
                 *firstChild, pointToInsert,
                 SplitAtEdges::eDoNotCreateEmptyContainer);
             if (NS_WARN_IF(!insertedPoint.IsSet())) {
@@ -523,7 +535,7 @@ HTMLEditor::DoInsertHTMLWithContext(const nsAString& aInputString,
              firstChild;
              firstChild = curNode->GetFirstChild()) {
           EditorDOMPoint insertedPoint =
-            InsertNodeIntoProperAncestor(
+            InsertNodeIntoProperAncestorWithTransaction(
               *firstChild, pointToInsert,
               SplitAtEdges::eDoNotCreateEmptyContainer);
           if (NS_WARN_IF(!insertedPoint.IsSet())) {
@@ -542,7 +554,7 @@ HTMLEditor::DoInsertHTMLWithContext(const nsAString& aInputString,
       if (!bDidInsert || NS_FAILED(rv)) {
         // Try to insert.
         EditorDOMPoint insertedPoint =
-          InsertNodeIntoProperAncestor(
+          InsertNodeIntoProperAncestorWithTransaction(
             *curNode->AsContent(), pointToInsert,
             SplitAtEdges::eDoNotCreateEmptyContainer);
         if (insertedPoint.IsSet()) {
@@ -562,7 +574,7 @@ HTMLEditor::DoInsertHTMLWithContext(const nsAString& aInputString,
           }
           nsCOMPtr<nsINode> oldParent = content->GetParentNode();
           insertedPoint =
-            InsertNodeIntoProperAncestor(
+            InsertNodeIntoProperAncestorWithTransaction(
               *content->GetParent(), pointToInsert,
               SplitAtEdges::eDoNotCreateEmptyContainer);
           if (insertedPoint.IsSet()) {
@@ -667,8 +679,9 @@ HTMLEditor::DoInsertHTMLWithContext(const nsAString& aInputString,
         nsCOMPtr<nsIContent> linkContent = do_QueryInterface(link);
         NS_ENSURE_STATE(linkContent || !link);
         SplitNodeResult splitLinkResult =
-          SplitNodeDeep(*linkContent, EditorRawDOMPoint(selNode, selOffset),
-                        SplitAtEdges::eDoNotCreateEmptyContainer);
+          SplitNodeDeepWithTransaction(
+            *linkContent, EditorRawDOMPoint(selNode, selOffset),
+            SplitAtEdges::eDoNotCreateEmptyContainer);
         NS_WARNING_ASSERTION(splitLinkResult.Succeeded(),
           "Failed to split the link");
         if (splitLinkResult.GetPreviousNode()) {
@@ -1743,7 +1756,9 @@ HTMLEditor::InsertTextWithQuotations(const nsAString& aStringToInsert)
       rv = InsertAsPlaintextQuotation(curHunk, false,
                                       getter_AddRefs(dummyNode));
     } else {
-      rv = InsertText(curHunk);
+      rv = InsertTextAsAction(curHunk);
+      NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+        "Failed to insert a line of the quoted text");
     }
     if (!found) {
       break;
@@ -1833,7 +1848,9 @@ HTMLEditor::InsertAsPlaintextQuotation(const nsAString& aQuotedText,
   if (aAddCites) {
     rv = TextEditor::InsertAsQuotation(aQuotedText, aNodeInserted);
   } else {
-    rv = TextEditor::InsertText(aQuotedText);
+    rv = InsertTextAsAction(aQuotedText);
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+      "Failed to insert the quoted text as plain text");
   }
   // Note that if !aAddCites, aNodeInserted isn't set.
   // That's okay because the routines that use aAddCites
@@ -1915,7 +1932,8 @@ HTMLEditor::InsertAsCitedQuotation(const nsAString& aQuotedText,
   if (aInsertHTML) {
     rv = LoadHTML(aQuotedText);
   } else {
-    rv = InsertText(aQuotedText);  // XXX ignore charset
+    rv = InsertTextAsAction(aQuotedText);  // XXX ignore charset
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to insert the quoted text");
   }
 
   if (aNodeInserted && NS_SUCCEEDED(rv)) {
@@ -1991,9 +2009,9 @@ nsresult FindTargetNode(nsINode *aStart, nsCOMPtr<nsINode> &aResult)
 
   do {
     // Is this child the magical cookie?
-    if (child->IsNodeOfType(nsINode::eCOMMENT)) {
+    if (auto* comment = Comment::FromNode(child)) {
       nsAutoString data;
-      static_cast<Comment*>(child.get())->GetData(data);
+      comment->GetData(data);
 
       if (data.EqualsLiteral(kInsertCookie)) {
         // Yes it is! Return an error so we bubble out and short-circuit the

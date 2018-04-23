@@ -1615,13 +1615,6 @@ module.exports = "<!-- This Source Code Form is subject to the terms of the Mozi
 
 /***/ }),
 
-/***/ 1330:
-/***/ (function(module, exports) {
-
-// removed by extract-text-webpack-plugin
-
-/***/ }),
-
 /***/ 1331:
 /***/ (function(module, exports) {
 
@@ -2939,13 +2932,14 @@ const {
   isOriginalId
 } = __webpack_require__(1389);
 
-const { workerUtils: { WorkerDispatcher } } = __webpack_require__(1390);
+const { workerUtils: { WorkerDispatcher } } = __webpack_require__(1363);
 
 const dispatcher = new WorkerDispatcher();
 
 const getOriginalURLs = dispatcher.task("getOriginalURLs");
-const getGeneratedLocation = dispatcher.task("getGeneratedLocation");
-const getAllGeneratedLocations = dispatcher.task("getAllGeneratedLocations");
+const getGeneratedRanges = dispatcher.task("getGeneratedRanges", { queue: true });
+const getGeneratedLocation = dispatcher.task("getGeneratedLocation", { queue: true });
+const getAllGeneratedLocations = dispatcher.task("getAllGeneratedLocations", { queue: true });
 const getOriginalLocation = dispatcher.task("getOriginalLocation");
 const getLocationScopes = dispatcher.task("getLocationScopes");
 const getOriginalSourceText = dispatcher.task("getOriginalSourceText");
@@ -2960,6 +2954,7 @@ module.exports = {
   isOriginalId,
   hasMappedSource,
   getOriginalURLs,
+  getGeneratedRanges,
   getGeneratedLocation,
   getAllGeneratedLocations,
   getOriginalLocation,
@@ -3235,7 +3230,7 @@ function createPendingBreakpoint(bp) {
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.replaceOriginalVariableName = exports.getPausePoints = exports.getFramework = exports.mapOriginalExpression = exports.hasSyntaxError = exports.clearSources = exports.setSource = exports.hasSource = exports.getNextStep = exports.clearASTs = exports.clearScopes = exports.clearSymbols = exports.findOutOfScopeLocations = exports.getScopes = exports.getSymbols = exports.getClosestExpression = exports.stopParserWorker = exports.startParserWorker = undefined;
+exports.replaceOriginalVariableName = exports.getPausePoints = exports.getFramework = exports.mapOriginalExpression = exports.hasSyntaxError = exports.clearSources = exports.setSource = exports.hasSource = exports.getNextStep = exports.clearASTs = exports.clearScopes = exports.clearSymbols = exports.findOutOfScopeLocations = exports.getScopes = exports.getSymbols = exports.getClosestExpression = exports.stop = exports.start = undefined;
 
 var _devtoolsUtils = __webpack_require__(1363);
 
@@ -3244,8 +3239,8 @@ const { WorkerDispatcher } = _devtoolsUtils.workerUtils; /* This Source Code For
                                                           * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 const dispatcher = new WorkerDispatcher();
-const startParserWorker = exports.startParserWorker = dispatcher.start.bind(dispatcher);
-const stopParserWorker = exports.stopParserWorker = dispatcher.stop.bind(dispatcher);
+const start = exports.start = dispatcher.start.bind(dispatcher);
+const stop = exports.stop = dispatcher.stop.bind(dispatcher);
 
 const getClosestExpression = exports.getClosestExpression = dispatcher.task("getClosestExpression");
 const getSymbols = exports.getSymbols = dispatcher.task("getSymbols");
@@ -4224,6 +4219,8 @@ const Services = __webpack_require__(22);
 const KeyShortcuts = __webpack_require__(1468);
 const { ZoomKeys } = __webpack_require__(1469);
 const EventEmitter = __webpack_require__(1382);
+const SourceUtils = __webpack_require__(3637);
+const { getUnicodeHostname, getUnicodeUrlPath, getUnicodeUrl } = __webpack_require__(3638);
 
 module.exports = {
   KeyShortcuts,
@@ -4232,7 +4229,11 @@ module.exports = {
   PrefsHelper,
   Services,
   ZoomKeys,
-  EventEmitter
+  EventEmitter,
+  SourceUtils,
+  getUnicodeHostname,
+  getUnicodeUrlPath,
+  getUnicodeUrl
 };
 
 /***/ }),
@@ -5465,184 +5466,6 @@ module.exports = {
 
 /***/ }),
 
-/***/ 1390:
-/***/ (function(module, exports, __webpack_require__) {
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const networkRequest = __webpack_require__(1391);
-const workerUtils = __webpack_require__(1392);
-
-module.exports = {
-  networkRequest,
-  workerUtils
-};
-
-/***/ }),
-
-/***/ 1391:
-/***/ (function(module, exports) {
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-function networkRequest(url, opts) {
-  return fetch(url, {
-    cache: opts.loadFromCache ? "default" : "no-cache"
-  }).then(res => {
-    if (res.status >= 200 && res.status < 300) {
-      return res.text().then(text => ({ content: text }));
-    }
-    return Promise.reject(`request failed with status ${res.status}`);
-  });
-}
-
-module.exports = networkRequest;
-
-/***/ }),
-
-/***/ 1392:
-/***/ (function(module, exports) {
-
-function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
-
-function WorkerDispatcher() {
-  this.msgId = 1;
-  this.worker = null;
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-WorkerDispatcher.prototype = {
-  start(url) {
-    this.worker = new Worker(url);
-    this.worker.onerror = () => {
-      console.error(`Error in worker ${url}`);
-    };
-  },
-
-  stop() {
-    if (!this.worker) {
-      return;
-    }
-
-    this.worker.terminate();
-    this.worker = null;
-  },
-
-  task(method) {
-    return (...args) => {
-      return new Promise((resolve, reject) => {
-        const id = this.msgId++;
-        this.worker.postMessage({ id, method, args });
-
-        const listener = ({ data: result }) => {
-          if (result.id !== id) {
-            return;
-          }
-
-          if (!this.worker) {
-            return;
-          }
-
-          this.worker.removeEventListener("message", listener);
-          if (result.error) {
-            reject(result.error);
-          } else {
-            resolve(result.response);
-          }
-        };
-
-        this.worker.addEventListener("message", listener);
-      });
-    };
-  }
-};
-
-function workerHandler(publicInterface) {
-  return function (msg) {
-    const { id, method, args } = msg.data;
-    try {
-      const response = publicInterface[method].apply(undefined, args);
-      if (response instanceof Promise) {
-        response.then(val => self.postMessage({ id, response: val }),
-        // Error can't be sent via postMessage, so be sure to
-        // convert to string.
-        err => self.postMessage({ id, error: err.toString() }));
-      } else {
-        self.postMessage({ id, response });
-      }
-    } catch (error) {
-      // Error can't be sent via postMessage, so be sure to convert to
-      // string.
-      self.postMessage({ id, error: error.toString() });
-    }
-  };
-}
-
-function streamingWorkerHandler(publicInterface, { timeout = 100 } = {}, worker = self) {
-  let streamingWorker = (() => {
-    var _ref = _asyncToGenerator(function* (id, tasks) {
-      let isWorking = true;
-
-      const intervalId = setTimeout(function () {
-        isWorking = false;
-      }, timeout);
-
-      const results = [];
-      while (tasks.length !== 0 && isWorking) {
-        const { callback, context, args } = tasks.shift();
-        const result = yield callback.call(context, args);
-        results.push(result);
-      }
-      worker.postMessage({ id, status: "pending", data: results });
-      clearInterval(intervalId);
-
-      if (tasks.length !== 0) {
-        yield streamingWorker(id, tasks);
-      }
-    });
-
-    return function streamingWorker(_x, _x2) {
-      return _ref.apply(this, arguments);
-    };
-  })();
-
-  return (() => {
-    var _ref2 = _asyncToGenerator(function* (msg) {
-      const { id, method, args } = msg.data;
-      const workerMethod = publicInterface[method];
-      if (!workerMethod) {
-        console.error(`Could not find ${method} defined in worker.`);
-      }
-      worker.postMessage({ id, status: "start" });
-
-      try {
-        const tasks = workerMethod(args);
-        yield streamingWorker(id, tasks);
-        worker.postMessage({ id, status: "done" });
-      } catch (error) {
-        worker.postMessage({ id, status: "error", error });
-      }
-    });
-
-    return function (_x3) {
-      return _ref2.apply(this, arguments);
-    };
-  })();
-}
-
-module.exports = {
-  WorkerDispatcher,
-  workerHandler,
-  streamingWorkerHandler
-};
-
-/***/ }),
-
 /***/ 1393:
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -5729,6 +5552,7 @@ exports.getSelectedScopeMappings = getSelectedScopeMappings;
 exports.getSelectedFrameId = getSelectedFrameId;
 exports.getTopFrame = getTopFrame;
 exports.getDebuggeeUrl = getDebuggeeUrl;
+exports.getSkipPausing = getSkipPausing;
 exports.getChromeScopes = getChromeScopes;
 
 var _reselect = __webpack_require__(993);
@@ -5756,7 +5580,8 @@ const createPauseState = exports.createPauseState = () => ({
   canRewind: false,
   debuggeeUrl: "",
   command: null,
-  previousLocation: null
+  previousLocation: null,
+  skipPausing: _prefs.prefs.skipPausing
 });
 
 const emptyPauseState = {
@@ -5901,6 +5726,14 @@ function update(state = createPauseState(), action) {
 
     case "NAVIGATE":
       return _extends({}, state, emptyPauseState, { debuggeeUrl: action.url });
+
+    case "TOGGLE_SKIP_PAUSING":
+      {
+        const { skipPausing } = action;
+        _prefs.prefs.skipPausing = skipPausing;
+
+        return _extends({}, state, { skipPausing });
+      }
   }
 
   return state;
@@ -6058,6 +5891,10 @@ function getDebuggeeUrl(state) {
   return state.pause.debuggeeUrl;
 }
 
+function getSkipPausing(state) {
+  return state.pause.skipPausing;
+}
+
 // NOTE: currently only used for chrome
 function getChromeScopes(state) {
   const frame = getSelectedFrame(state);
@@ -6077,7 +5914,7 @@ exports.default = update;
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.findSourceMatches = exports.searchSources = exports.getMatches = exports.stopSearchWorker = exports.startSearchWorker = undefined;
+exports.findSourceMatches = exports.getMatches = exports.stop = exports.start = undefined;
 
 var _devtoolsUtils = __webpack_require__(1363);
 
@@ -6086,11 +5923,10 @@ const { WorkerDispatcher } = _devtoolsUtils.workerUtils; /* This Source Code For
                                                           * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 const dispatcher = new WorkerDispatcher();
-const startSearchWorker = exports.startSearchWorker = dispatcher.start.bind(dispatcher);
-const stopSearchWorker = exports.stopSearchWorker = dispatcher.stop.bind(dispatcher);
+const start = exports.start = dispatcher.start.bind(dispatcher);
+const stop = exports.stop = dispatcher.stop.bind(dispatcher);
 
 const getMatches = exports.getMatches = dispatcher.task("getMatches");
-const searchSources = exports.searchSources = dispatcher.task("searchSources");
 const findSourceMatches = exports.findSourceMatches = dispatcher.task("findSourceMatches");
 
 /***/ }),
@@ -6521,12 +6357,15 @@ async function getGeneratedLocation(state, source, location, sourceMaps) {
   const { line, sourceId, column } = await sourceMaps.getGeneratedLocation(location, source);
 
   const generatedSource = (0, _selectors.getSource)(state, sourceId);
-  const sourceUrl = generatedSource.get("url");
+  if (!generatedSource) {
+    return location;
+  }
+
   return {
     line,
     sourceId,
     column: column === 0 ? undefined : column,
-    sourceUrl
+    sourceUrl: generatedSource.url
   };
 } /* This Source Code Form is subject to the terms of the Mozilla Public
    * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -6725,9 +6564,7 @@ var _promise = __webpack_require__(1653);
 
 var _devtoolsSourceMap = __webpack_require__(1360);
 
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+var _prefs = __webpack_require__(226);
 
 function setSourceMetaData(sourceId) {
   return async ({ dispatch, getState }) => {
@@ -6746,7 +6583,9 @@ function setSourceMetaData(sourceId) {
       }
     });
   };
-}
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 function setSymbols(sourceId) {
   return async ({ dispatch, getState }) => {
@@ -6796,7 +6635,7 @@ function setOutOfScopeLocations() {
 function setPausePoints(sourceId) {
   return async ({ dispatch, getState, client }) => {
     const source = (0, _selectors.getSource)(getState(), sourceId);
-    if (!source || !source.text || source.isWasm) {
+    if (!_prefs.features.pausePoints || !source || !source.text || source.isWasm) {
       return;
     }
 
@@ -9232,9 +9071,15 @@ var _devtoolsSourceMap = __webpack_require__(1360);
 
 var _search = __webpack_require__(1395);
 
+var search = _interopRequireWildcard(_search);
+
 var _prettyPrint = __webpack_require__(1431);
 
+var prettyPrint = _interopRequireWildcard(_prettyPrint);
+
 var _parser = __webpack_require__(1365);
+
+var parser = _interopRequireWildcard(_parser);
 
 var _createStore = __webpack_require__(1658);
 
@@ -9295,9 +9140,10 @@ function bootstrapWorkers() {
     // When used in Firefox, the toolbox manages the source map worker.
     (0, _devtoolsSourceMap.startSourceMapWorker)((0, _devtoolsConfig.getValue)("workers.sourceMapURL"));
   }
-  (0, _prettyPrint.startPrettyPrintWorker)((0, _devtoolsConfig.getValue)("workers.prettyPrintURL"));
-  (0, _parser.startParserWorker)((0, _devtoolsConfig.getValue)("workers.parserURL"));
-  (0, _search.startSearchWorker)((0, _devtoolsConfig.getValue)("workers.searchURL"));
+  prettyPrint.start((0, _devtoolsConfig.getValue)("workers.prettyPrintURL"));
+  parser.start((0, _devtoolsConfig.getValue)("workers.parserURL"));
+  search.start((0, _devtoolsConfig.getValue)("workers.searchURL"));
+  return { prettyPrint, parser, search };
 }
 
 function teardownWorkers() {
@@ -9305,9 +9151,9 @@ function teardownWorkers() {
     // When used in Firefox, the toolbox manages the source map worker.
     (0, _devtoolsSourceMap.stopSourceMapWorker)();
   }
-  (0, _prettyPrint.stopPrettyPrintWorker)();
-  (0, _parser.stopParserWorker)();
-  (0, _search.stopSearchWorker)();
+  prettyPrint.stop();
+  parser.stop();
+  search.stop();
 }
 
 function bootstrapApp(store) {
@@ -9338,7 +9184,7 @@ function updatePrefs(state) {
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.stopPrettyPrintWorker = exports.startPrettyPrintWorker = undefined;
+exports.stop = exports.start = undefined;
 exports.prettyPrint = prettyPrint;
 
 var _devtoolsUtils = __webpack_require__(1363);
@@ -9356,8 +9202,8 @@ const { WorkerDispatcher } = _devtoolsUtils.workerUtils; /* This Source Code For
                                                           * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 const dispatcher = new WorkerDispatcher();
-const startPrettyPrintWorker = exports.startPrettyPrintWorker = dispatcher.start.bind(dispatcher);
-const stopPrettyPrintWorker = exports.stopPrettyPrintWorker = dispatcher.stop.bind(dispatcher);
+const start = exports.start = dispatcher.start.bind(dispatcher);
+const stop = exports.stop = dispatcher.stop.bind(dispatcher);
 const _prettyPrint = dispatcher.task("prettyPrint");
 
 async function prettyPrint({ source, url }) {
@@ -12485,6 +12331,10 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.onConnect = undefined;
 
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
+                                                                                                                                                                                                                                                                   * License, v. 2.0. If a copy of the MPL was not distributed with this
+                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
 var _firefox = __webpack_require__(1500);
 
 var firefox = _interopRequireWildcard(_firefox);
@@ -12496,10 +12346,6 @@ var _dbg = __webpack_require__(2246);
 var _bootstrap = __webpack_require__(1430);
 
 function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 function loadFromPrefs(actions) {
   const { pauseOnExceptions, ignoreCaughtExceptions } = _prefs.prefs;
@@ -12520,7 +12366,7 @@ async function onConnect(connection, { services, toolboxActions }) {
     toolboxActions
   });
 
-  (0, _bootstrap.bootstrapWorkers)();
+  const workers = (0, _bootstrap.bootstrapWorkers)();
   await firefox.onConnect(connection, actions);
   await loadFromPrefs(actions);
 
@@ -12528,6 +12374,7 @@ async function onConnect(connection, { services, toolboxActions }) {
     store,
     actions,
     selectors,
+    workers: _extends({}, workers, services),
     connection,
     client: firefox.clientCommands
   });
@@ -12881,6 +12728,14 @@ async function setPausePoints(sourceId, pausePoints) {
   return sendPacket({ to: sourceId, type: "setPausePoints", pausePoints });
 }
 
+async function setSkipPausing(shouldSkip) {
+  return threadClient.request({
+    skip: shouldSkip,
+    to: threadClient.actor,
+    type: "skipPausing"
+  });
+}
+
 function interrupt() {
   return threadClient.interrupt();
 }
@@ -12979,7 +12834,8 @@ const clientCommands = {
   fetchSources,
   fetchWorkers,
   sendPacket,
-  setPausePoints
+  setPausePoints,
+  setSkipPausing
 };
 
 exports.setupCommands = setupCommands;
@@ -13508,10 +13364,6 @@ var _actions2 = _interopRequireDefault(_actions);
 
 var _ShortcutsModal = __webpack_require__(1535);
 
-var _VisibilityHandler = __webpack_require__(3611);
-
-var _VisibilityHandler2 = _interopRequireDefault(_VisibilityHandler);
-
 var _selectors = __webpack_require__(3590);
 
 var _devtoolsModules = __webpack_require__(1376);
@@ -13560,11 +13412,9 @@ var _QuickOpenModal2 = _interopRequireDefault(_QuickOpenModal);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-const shortcuts = new _devtoolsModules.KeyShortcuts({ window });
+const shortcuts = new _devtoolsModules.KeyShortcuts({ window }); /* This Source Code Form is subject to the terms of the Mozilla Public
+                                                                  * License, v. 2.0. If a copy of the MPL was not distributed with this
+                                                                  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 const { appinfo } = _devtoolsModules.Services;
 
@@ -13765,18 +13615,14 @@ class App extends _react.Component {
   render() {
     const { quickOpenEnabled } = this.props;
     return _react2.default.createElement(
-      _VisibilityHandler2.default,
-      null,
-      _react2.default.createElement(
-        "div",
-        { className: "debugger" },
-        this.renderLayout(),
-        quickOpenEnabled === true && _react2.default.createElement(_QuickOpenModal2.default, {
-          shortcutsModalEnabled: this.state.shortcutsModalEnabled,
-          toggleShortcutsModal: () => this.toggleShortcutsModal()
-        }),
-        this.renderShortcutsModal()
-      )
+      "div",
+      { className: "debugger" },
+      this.renderLayout(),
+      quickOpenEnabled === true && _react2.default.createElement(_QuickOpenModal2.default, {
+        shortcutsModalEnabled: this.state.shortcutsModalEnabled,
+        toggleShortcutsModal: () => this.toggleShortcutsModal()
+      }),
+      this.renderShortcutsModal()
     );
   }
 }
@@ -17712,9 +17558,6 @@ class Editor extends _react.PureComponent {
   }
 
   componentDidMount() {
-    const editor = this.setupEditor();
-
-    const { selectedSource } = this.props;
     const { shortcuts } = this.context;
 
     const searchAgainKey = L10N.getStr("sourceSearch.search.again.key2");
@@ -17725,8 +17568,6 @@ class Editor extends _react.PureComponent {
     shortcuts.on("Esc", this.onEscape);
     shortcuts.on(searchAgainPrevKey, this.onSearchAgain);
     shortcuts.on(searchAgainKey, this.onSearchAgain);
-
-    (0, _editor.updateDocument)(editor, selectedSource);
   }
 
   componentWillUnmount() {
@@ -17745,12 +17586,18 @@ class Editor extends _react.PureComponent {
   }
 
   componentDidUpdate(prevProps, prevState) {
+    const { selectedSource } = this.props;
     // NOTE: when devtools are opened, the editor is not set when
     // the source loads so we need to wait until the editor is
     // set to update the text and size.
-    if (!prevState.editor && this.state.editor) {
-      this.setText(this.props);
-      this.setSize(this.props);
+    if (!prevState.editor && selectedSource) {
+      if (!this.state.editor) {
+        const editor = this.setupEditor();
+        (0, _editor.updateDocument)(editor, selectedSource);
+      } else {
+        this.setText(this.props);
+        this.setSize(this.props);
+      }
     }
   }
 
@@ -17862,6 +17709,7 @@ class Editor extends _react.PureComponent {
       return;
     }
 
+    // check if we previously had a selected source
     if (!selectedSource) {
       return this.clearEditor();
     }
@@ -22247,7 +22095,9 @@ var _selectors = __webpack_require__(3590);
 
 var _editor = __webpack_require__(1358);
 
-__webpack_require__(1330);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 class EmptyLines extends _react.Component {
 
@@ -22265,6 +22115,7 @@ class EmptyLines extends _react.Component {
     if (!emptyLines) {
       return;
     }
+
     editor.codeMirror.operation(() => {
       emptyLines.forEach(emptyLine => {
         const line = (0, _editor.toEditorLine)(selectedSource.get("id"), emptyLine);
@@ -22290,9 +22141,7 @@ class EmptyLines extends _react.Component {
   render() {
     return null;
   }
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+}
 
 exports.default = (0, _reactRedux.connect)(state => {
   const selectedSource = (0, _selectors.getSelectedSource)(state);
@@ -23042,6 +22891,10 @@ var _FrameworkComponent = __webpack_require__(3623);
 
 var _FrameworkComponent2 = _interopRequireDefault(_FrameworkComponent);
 
+var _ReactComponentStack = __webpack_require__(3639);
+
+var _ReactComponentStack2 = _interopRequireDefault(_ReactComponentStack);
+
 var _Scopes = __webpack_require__(1611);
 
 var _Scopes2 = _interopRequireDefault(_Scopes);
@@ -23049,10 +22902,6 @@ var _Scopes2 = _interopRequireDefault(_Scopes);
 __webpack_require__(1342);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 function debugBtn(onClick, type, className, tooltip) {
   return _react2.default.createElement(
@@ -23065,7 +22914,9 @@ function debugBtn(onClick, type, className, tooltip) {
     },
     _react2.default.createElement(_Svg2.default, { name: type, title: tooltip, "aria-label": tooltip })
   );
-}
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 class SecondaryPanes extends _react.Component {
   constructor(props) {
@@ -23089,7 +22940,7 @@ class SecondaryPanes extends _react.Component {
     } = this.props;
     const isIndeterminate = !breakpointsDisabled && breakpoints.some(x => x.disabled);
 
-    if (breakpoints.size == 0) {
+    if (_prefs.features.skipPausing || breakpoints.size == 0) {
       return null;
     }
 
@@ -23134,6 +22985,17 @@ class SecondaryPanes extends _react.Component {
       opened: _prefs.prefs.scopesVisible,
       onToggle: opened => {
         _prefs.prefs.scopesVisible = opened;
+      }
+    };
+  }
+
+  getComponentStackItem() {
+    return {
+      header: L10N.getStr("components.header"),
+      component: _react2.default.createElement(_ReactComponentStack2.default, null),
+      opened: _prefs.prefs.componentStackVisible,
+      onToggle: opened => {
+        _prefs.prefs.componentStackVisible = opened;
       }
     };
   }
@@ -23234,6 +23096,9 @@ class SecondaryPanes extends _react.Component {
 
       if (this.props.horizontal) {
         if (extra && extra.react) {
+          if (_prefs.features.componentStack && extra.react.componentStack.length > 1) {
+            items.push(this.getComponentStackItem());
+          }
           items.push(this.getComponentItem());
         }
 
@@ -23504,7 +23369,7 @@ class Breakpoints extends _react.Component {
         "div",
         { className: "breakpoint-heading", title: filename, key: filename },
         filename
-      ), ...groupedBreakpoints[filename].filter(bp => !bp.hidden && bp.text).map((bp, i) => this.renderBreakpoint(bp))];
+      ), ...groupedBreakpoints[filename].filter(bp => !bp.hidden && bp.text).map(bp => this.renderBreakpoint(bp))];
     })];
   }
 
@@ -23793,7 +23658,7 @@ class Expressions extends _react.Component {
       "ul",
       { className: "pane expressions-list" },
       expressions.map(this.renderExpression),
-      showInput && this.renderNewExpressionInput()
+      (showInput || !expressions.size) && this.renderNewExpressionInput()
     );
   }
 }
@@ -24464,10 +24329,10 @@ class Accordion extends _react.Component {
       const { opened } = item;
 
       return _react2.default.createElement(
-        "div",
-        { className: item.className, key: i },
+        "li",
+        { role: "listitem", className: item.className, key: i },
         _react2.default.createElement(
-          "div",
+          "h2",
           {
             className: "_header",
             tabIndex: "0",
@@ -24511,8 +24376,8 @@ class Accordion extends _react.Component {
 
   render() {
     return _react2.default.createElement(
-      "div",
-      { className: "accordion" },
+      "ul",
+      { role: "list", className: "accordion" },
       this.props.items.map(this.renderContainer)
     );
   }
@@ -24765,6 +24630,26 @@ class CommandBar extends _react.Component {
     );
   }
 
+  renderSkipPausingButton() {
+    const { skipPausing, toggleSkipPausing } = this.props;
+
+    if (!_prefs.features.skipPausing) {
+      return null;
+    }
+
+    return _react2.default.createElement(
+      "button",
+      {
+        className: (0, _classnames2.default)("command-bar-button", {
+          active: skipPausing
+        }),
+        title: L10N.getStr("skipPausingTooltip"),
+        onClick: toggleSkipPausing
+      },
+      _react2.default.createElement("img", { className: "skipPausing" })
+    );
+  }
+
   render() {
     return _react2.default.createElement(
       "div",
@@ -24779,7 +24664,8 @@ class CommandBar extends _react.Component {
       _react2.default.createElement("div", { className: "filler" }),
       this.replayPreviousButton(),
       this.renderStepPosition(),
-      this.replayNextButton()
+      this.replayNextButton(),
+      this.renderSkipPausingButton()
     );
   }
 }
@@ -24794,7 +24680,8 @@ exports.default = (0, _reactRedux.connect)(state => {
     history: (0, _selectors.getHistory)(state),
     historyPosition: (0, _selectors.getHistoryPosition)(state),
     isWaitingOnBreak: (0, _selectors.getIsWaitingOnBreak)(state),
-    canRewind: (0, _selectors.getCanRewind)(state)
+    canRewind: (0, _selectors.getCanRewind)(state),
+    skipPausing: (0, _selectors.getSkipPausing)(state)
   };
 }, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(CommandBar);
 
@@ -25305,6 +25192,21 @@ class Tabs extends _react.PureComponent {
   constructor(props) {
     super(props);
 
+    this.updateHiddenTabs = () => {
+      if (!this.refs.sourceTabs) {
+        return;
+      }
+      const { selectedSource, tabSources, moveTab } = this.props;
+      const sourceTabEls = this.refs.sourceTabs.children;
+      const hiddenTabs = (0, _tabs.getHiddenTabs)(tabSources, sourceTabEls);
+
+      if ((0, _ui.isVisible)() && hiddenTabs.indexOf(selectedSource) !== -1) {
+        return moveTab(selectedSource.url, 0);
+      }
+
+      this.setState({ hiddenTabs });
+    };
+
     this.renderDropdownSource = source => {
       const { selectSpecificSource } = this.props;
       const filename = (0, _source.getFilename)(source.toJS());
@@ -25335,7 +25237,7 @@ class Tabs extends _react.PureComponent {
   }
 
   componentDidMount() {
-    this.updateHiddenTabs();
+    window.requestIdleCallback(this.updateHiddenTabs);
     window.addEventListener("resize", this.onResize);
   }
 
@@ -25347,20 +25249,7 @@ class Tabs extends _react.PureComponent {
    * Updates the hiddenSourceTabs state, by
    * finding the source tabs which are wrapped and are not on the top row.
    */
-  updateHiddenTabs() {
-    if (!this.refs.sourceTabs) {
-      return;
-    }
-    const { selectedSource, tabSources, moveTab } = this.props;
-    const sourceTabEls = this.refs.sourceTabs.children;
-    const hiddenTabs = (0, _tabs.getHiddenTabs)(tabSources, sourceTabEls);
 
-    if ((0, _ui.isVisible)() && hiddenTabs.indexOf(selectedSource) !== -1) {
-      return moveTab(selectedSource.url, 0);
-    }
-
-    this.setState({ hiddenTabs });
-  }
 
   toggleSourcesDropdown(e) {
     this.setState(prevState => ({
@@ -26806,7 +26695,7 @@ function findEmptyLines(selectedSource, pausePoints) {
   const breakpoints = pausePointsList.filter(point => point.types.break);
   const breakpointLines = breakpoints.map(point => point.location.line);
 
-  if (!selectedSource.text) {
+  if (!selectedSource.text || breakpointLines.length == 0) {
     return [];
   }
 
@@ -27016,6 +26905,15 @@ Object.defineProperty(exports, "selectFrame", {
   enumerable: true,
   get: function () {
     return _selectFrame.selectFrame;
+  }
+});
+
+var _skipPausing = __webpack_require__(3640);
+
+Object.defineProperty(exports, "toggleSkipPausing", {
+  enumerable: true,
+  get: function () {
+    return _skipPausing.toggleSkipPausing;
   }
 });
 
@@ -34467,6 +34365,7 @@ if (isDevelopment()) {
   pref("devtools.debugger.call-stack-visible", true);
   pref("devtools.debugger.scopes-visible", true);
   pref("devtools.debugger.component-visible", true);
+  pref("devtools.debugger.component-stack-visible", false);
   pref("devtools.debugger.workers-visible", true);
   pref("devtools.debugger.expressions-visible", true);
   pref("devtools.debugger.breakpoints-visible", true);
@@ -34483,6 +34382,7 @@ if (isDevelopment()) {
   pref("devtools.debugger.file-search-regex-match", false);
   pref("devtools.debugger.project-directory-root", "");
   pref("devtools.debugger.prefs-schema-version", "1.0.1");
+  pref("devtools.debugger.skip-pausing", false);
   pref("devtools.debugger.features.workers", true);
   pref("devtools.debugger.features.async-stepping", true);
   pref("devtools.debugger.features.wasm", true);
@@ -34497,6 +34397,9 @@ if (isDevelopment()) {
   pref("devtools.debugger.features.outline", true);
   pref("devtools.debugger.features.column-breakpoints", true);
   pref("devtools.debugger.features.replay", true);
+  pref("devtools.debugger.features.pause-points", true);
+  pref("devtools.debugger.features.component-stack", true);
+  pref("devtools.debugger.features.skip-pausing", false);
 }
 
 const prefs = new PrefsHelper("devtools", {
@@ -34508,6 +34411,7 @@ const prefs = new PrefsHelper("devtools", {
   callStackVisible: ["Bool", "debugger.call-stack-visible"],
   scopesVisible: ["Bool", "debugger.scopes-visible"],
   componentVisible: ["Bool", "debugger.component-visible"],
+  componentStackVisible: ["Bool", "debugger.component-stack-visible"],
   workersVisible: ["Bool", "debugger.workers-visible"],
   breakpointsVisible: ["Bool", "debugger.breakpoints-visible"],
   expressionsVisible: ["Bool", "debugger.expressions-visible"],
@@ -34523,7 +34427,8 @@ const prefs = new PrefsHelper("devtools", {
   fileSearchWholeWord: ["Bool", "debugger.file-search-whole-word"],
   fileSearchRegexMatch: ["Bool", "debugger.file-search-regex-match"],
   debuggerPrefsSchemaVersion: ["Char", "debugger.prefs-schema-version"],
-  projectDirectoryRoot: ["Char", "debugger.project-directory-root", ""]
+  projectDirectoryRoot: ["Char", "debugger.project-directory-root", ""],
+  skipPausing: ["Bool", "debugger.skip-pausing"]
 });
 /* harmony export (immutable) */ __webpack_exports__["prefs"] = prefs;
 
@@ -34541,7 +34446,10 @@ const features = new PrefsHelper("devtools.debugger.features", {
   eventListeners: ["Bool", "event-listeners"],
   outline: ["Bool", "outline"],
   codeFolding: ["Bool", "code-folding"],
-  replay: ["Bool", "replay"]
+  replay: ["Bool", "replay"],
+  pausePoints: ["Bool", "pause-points"],
+  componentStack: ["Bool", "component-stack"],
+  skipPausing: ["Bool", "skip-pausing"]
 });
 /* harmony export (immutable) */ __webpack_exports__["features"] = features;
 
@@ -34825,14 +34733,6 @@ function locColumn(loc) {
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
-                                                                                                                                                                                                                                                                   * License, v. 2.0. If a copy of the MPL was not distributed with this
-                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-// eslint-disable-next-line max-len
-
-
 exports.findGeneratedBindingFromPosition = findGeneratedBindingFromPosition;
 
 var _locColumn = __webpack_require__(2349);
@@ -34841,116 +34741,132 @@ var _filtering = __webpack_require__(3635);
 
 var _firefox = __webpack_require__(1500);
 
-async function findGeneratedBindingFromPosition(sourceMaps, client, source, pos, name, type, generatedAstBindings) {
-  const range = await getGeneratedLocationRange(pos, source, type, sourceMaps);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-  if (range) {
-    let result;
-    if (type === "import") {
-      result = await findGeneratedImportReference(type, generatedAstBindings, _extends({
-        type: pos.type
-      }, range));
-    } else {
-      result = await findGeneratedReference(type, generatedAstBindings, _extends({
-        type: pos.type
-      }, range));
-    }
+async function findGeneratedBindingFromPosition(sourceMaps, client, source, pos, name, bindingType, generatedAstBindings) {
+  const locationType = pos.type;
 
-    if (result) {
-      return result;
-    }
+  const generatedRanges = await getGeneratedLocationRanges(source, pos, bindingType, locationType, sourceMaps);
+  const applicableBindings = filterApplicableBindings(generatedAstBindings, generatedRanges);
+
+  let result;
+  if (bindingType === "import") {
+    result = await findGeneratedImportReference(applicableBindings);
+  } else {
+    result = await findGeneratedReference(applicableBindings);
   }
 
-  if (type === "import" && pos.type === "decl") {
-    let importRange = range;
-    if (!importRange) {
-      // If the imported name itself does not map to a useful range, fall back
-      // to resolving the bindinding using the location of the overall
-      // import declaration.
-      importRange = await getGeneratedLocationRange({
-        type: pos.type,
-        start: pos.declaration.start,
-        end: pos.declaration.end
-      }, source, type, sourceMaps);
+  if (result) {
+    return result;
+  }
 
-      if (!importRange) {
-        return null;
-      }
-    }
-
+  if (bindingType === "import" && pos.type === "decl") {
     const importName = pos.importName;
     if (typeof importName !== "string") {
       // Should never happen, just keeping Flow happy.
       return null;
     }
 
-    return await findGeneratedImportDeclaration(generatedAstBindings, _extends({
-      importName
-    }, importRange));
+    let applicableImportBindings = applicableBindings;
+    if (generatedRanges.length === 0) {
+      // If the imported name itself does not map to a useful range, fall back
+      // to resolving the bindinding using the location of the overall
+      // import declaration.
+      const importRanges = await getGeneratedLocationRanges(source, pos.declaration, bindingType, locationType, sourceMaps);
+      applicableImportBindings = filterApplicableBindings(generatedAstBindings, importRanges);
+
+      if (applicableImportBindings.length === 0) {
+        return null;
+      }
+    }
+
+    return await findGeneratedImportDeclaration(applicableImportBindings, importName);
   }
 
   return null;
 }
+// eslint-disable-next-line max-len
 
-function filterApplicableBindings(bindings, mapped) {
-  // Any binding overlapping a part of the mapping range.
-  return (0, _filtering.filterSortedArray)(bindings, binding => {
-    if (positionCmp(binding.loc.end, mapped.start) <= 0) {
-      return -1;
-    }
-    if (positionCmp(binding.loc.start, mapped.end) >= 0) {
-      return 1;
-    }
 
-    return 0;
-  });
+function filterApplicableBindings(bindings, ranges) {
+  const result = [];
+  for (const range of ranges) {
+    // Any binding overlapping a part of the mapping range.
+    const filteredBindings = (0, _filtering.filterSortedArray)(bindings, binding => {
+      if (positionCmp(binding.loc.end, range.start) <= 0) {
+        return -1;
+      }
+      if (positionCmp(binding.loc.start, range.end) >= 0) {
+        return 1;
+      }
+
+      return 0;
+    });
+
+    let firstInRange = true;
+    let firstOnLine = true;
+    let line = -1;
+
+    for (const binding of filteredBindings) {
+      if (binding.loc.start.line === line) {
+        firstOnLine = false;
+      } else {
+        line = binding.loc.start.line;
+        firstOnLine = true;
+      }
+
+      result.push({
+        binding,
+        range,
+        firstOnLine,
+        firstInRange
+      });
+
+      firstInRange = false;
+    }
+  }
+
+  return result;
 }
 
 /**
  * Given a mapped range over the generated source, attempt to resolve a real
  * binding descriptor that can be used to access the value.
  */
-async function findGeneratedReference(type, generatedAstBindings, mapped) {
-  const bindings = filterApplicableBindings(generatedAstBindings, mapped);
-
-  let lineStart = true;
-  let line = -1;
-
-  return bindings.reduce(async (acc, val, i) => {
-    const accVal = await acc;
-    if (accVal) {
-      return accVal;
+async function findGeneratedReference(applicableBindings) {
+  for (const applicable of applicableBindings) {
+    const result = await mapBindingReferenceToDescriptor(applicable);
+    if (result) {
+      return result;
     }
-
-    if (val.loc.start.line === line) {
-      lineStart = false;
-    } else {
-      line = val.loc.start.line;
-      lineStart = true;
-    }
-
-    return mapBindingReferenceToDescriptor(val, mapped, lineStart);
-  }, null);
+  }
+  return null;
 }
 
-async function findGeneratedImportReference(type, generatedAstBindings, mapped) {
-  let bindings = filterApplicableBindings(generatedAstBindings, mapped);
-
+async function findGeneratedImportReference(applicableBindings) {
   // When wrapped, for instance as `Object(ns.default)`, the `Object` binding
   // will be the first in the list. To avoid resolving `Object` as the
   // value of the import itself, we potentially skip the first binding.
-  if (bindings.length > 1 && !bindings[0].loc.meta && bindings[1].loc.meta) {
-    bindings = bindings.slice(1);
-  }
-
-  return bindings.reduce(async (acc, val) => {
-    const accVal = await acc;
-    if (accVal) {
-      return accVal;
+  applicableBindings = applicableBindings.filter((applicable, i) => {
+    if (!applicable.firstInRange || applicable.binding.loc.type !== "ref" || applicable.binding.loc.meta) {
+      return true;
     }
 
-    return mapImportReferenceToDescriptor(val, mapped);
-  }, null);
+    const next = i + 1 < applicableBindings.length ? applicableBindings[i + 1] : null;
+
+    return !next || next.binding.loc.type !== "ref" || !next.binding.loc.meta;
+  });
+
+  for (const applicable of applicableBindings) {
+    const result = await mapImportReferenceToDescriptor(applicable);
+    if (result) {
+      return result;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -34958,12 +34874,12 @@ async function findGeneratedImportReference(type, generatedAstBindings, mapped) 
  * value that is referenced, attempt to resolve a binding descriptor for
  * the import's value.
  */
-async function findGeneratedImportDeclaration(generatedAstBindings, mapped) {
-  const bindings = filterApplicableBindings(generatedAstBindings, mapped);
-
+async function findGeneratedImportDeclaration(applicableBindings, importName) {
   let result = null;
 
-  for (const binding of bindings) {
+  for (const _ref of applicableBindings) {
+    const { binding } = _ref;
+
     if (binding.loc.type !== "decl") {
       continue;
     }
@@ -34989,8 +34905,8 @@ async function findGeneratedImportDeclaration(generatedAstBindings, mapped) {
       continue;
     }
 
-    const desc = await readDescriptorProperty(namespaceDesc, mapped.importName);
-    const expression = `${binding.name}.${mapped.importName}`;
+    const desc = await readDescriptorProperty(namespaceDesc, importName);
+    const expression = `${binding.name}.${importName}`;
 
     if (desc) {
       result = {
@@ -35009,17 +34925,22 @@ async function findGeneratedImportDeclaration(generatedAstBindings, mapped) {
  * Given a generated binding, and a range over the generated code, statically
  * check if the given binding matches the range.
  */
-async function mapBindingReferenceToDescriptor(binding, mapped, isFirst) {
+async function mapBindingReferenceToDescriptor({
+  binding,
+  range,
+  firstInRange,
+  firstOnLine
+}) {
   // Allow the mapping to point anywhere within the generated binding
   // location to allow for less than perfect sourcemaps. Since you also
   // need at least one character between identifiers, we also give one
   // characters of space at the front the generated binding in order
   // to increase the probability of finding the right mapping.
-  if (mapped.start.line === binding.loc.start.line && (
+  if (range.start.line === binding.loc.start.line && (
   // If a binding is the first on a line, Babel will extend the mapping to
   // include the whitespace between the newline and the binding. To handle
   // that, we skip the range requirement for starting location.
-  isFirst || (0, _locColumn.locColumn)(mapped.start) >= (0, _locColumn.locColumn)(binding.loc.start)) && (0, _locColumn.locColumn)(mapped.start) <= (0, _locColumn.locColumn)(binding.loc.end)) {
+  firstInRange || firstOnLine || (0, _locColumn.locColumn)(range.start) >= (0, _locColumn.locColumn)(binding.loc.start)) && (0, _locColumn.locColumn)(range.start) <= (0, _locColumn.locColumn)(binding.loc.end)) {
     return {
       name: binding.name,
       desc: await binding.desc(),
@@ -35035,8 +34956,11 @@ async function mapBindingReferenceToDescriptor(binding, mapped, isFirst) {
  * evaluate accessed properties within the mapped range to resolve the actual
  * imported value.
  */
-async function mapImportReferenceToDescriptor(binding, mapped) {
-  if (mapped.type !== "ref") {
+async function mapImportReferenceToDescriptor({
+  binding,
+  range
+}) {
+  if (binding.loc.type !== "ref") {
     return null;
   }
 
@@ -35067,7 +34991,7 @@ async function mapImportReferenceToDescriptor(binding, mapped) {
   //   ^^^^^^^^^^^^^^^^^
   //   ^                 // wrapped to column 0 of next line
 
-  if (!mappingContains(mapped, binding.loc)) {
+  if (!mappingContains(range, binding.loc)) {
     return null;
   }
 
@@ -35081,7 +35005,7 @@ async function mapImportReferenceToDescriptor(binding, mapped) {
     // just be more work to search more and it is very unlikely that
     // bindings would be mapped to more than a single member + inherits
     // wrapper.
-    for (let op = meta, index = 0; op && mappingContains(mapped, op) && desc && index < 2; index++, op = op && op.parent) {
+    for (let op = meta, index = 0; op && mappingContains(range, op) && desc && index < 2; index++, op = op && op.parent) {
       // Calling could potentially trigger side-effects, which would not
       // be ideal for this case.
       if (op.type === "call") {
@@ -35162,42 +35086,48 @@ function positionCmp(p1, p2) {
   return p1.line < p2.line ? -1 : 1;
 }
 
-async function getGeneratedLocationRange(pos, source, type, sourceMaps) {
-  const endPosition = await sourceMaps.getGeneratedLocation(pos.end, source);
-  const startPosition = await sourceMaps.getGeneratedLocation(pos.start, source);
-  const ranges = await sourceMaps.getGeneratedRanges(pos.start, source);
-  if (ranges.length === 0) {
-    return null;
-  }
+async function getGeneratedLocationRanges(source, {
+  start,
+  end
+}, bindingType, locationType, sourceMaps) {
+  const endPosition = await sourceMaps.getGeneratedLocation(end, source);
+  const startPosition = await sourceMaps.getGeneratedLocation(start, source);
 
   // If the start and end positions collapse into eachother, it means that
   // the range in the original content didn't _start_ at the start position.
   // Since this likely means that the range doesn't logically apply to this
   // binding location, we skip it.
   if (positionCmp(startPosition, endPosition) === 0) {
-    return null;
+    return [];
   }
 
-  const start = {
-    line: ranges[0].line,
-    column: ranges[0].columnStart
-  };
-  const end = {
-    line: ranges[0].line,
-    // SourceMapConsumer's 'lastColumn' is inclusive, so we add 1 to make
-    // it exclusive like all other locations.
-    column: ranges[0].columnEnd + 1
-  };
+  const ranges = await sourceMaps.getGeneratedRanges(start, source);
 
-  // Expand the range over any following ranges if they are contiguous.
-  for (let i = 1; i < ranges.length; i++) {
-    const range = ranges[i];
-    if (end.column !== Infinity || range.line !== end.line + 1 || range.columnStart !== 0) {
-      break;
+  const resultRanges = ranges.reduce((acc, mapRange) => {
+    const range = {
+      start: {
+        line: mapRange.line,
+        column: mapRange.columnStart
+      },
+      end: {
+        line: mapRange.line,
+        // SourceMapConsumer's 'lastColumn' is inclusive, so we add 1 to make
+        // it exclusive like all other locations.
+        column: mapRange.columnEnd + 1
+      }
+    };
+
+    const previous = acc[acc.length - 1];
+
+    if (previous && (previous.end.line === range.start.line && previous.end.column === range.start.column || previous.end.line + 1 === range.start.line && previous.end.column === Infinity && range.start.column === 0)) {
+      previous.end.line = range.end.line;
+      previous.end.column = range.end.column;
+    } else {
+      acc.push(range);
     }
-    end.line = range.line;
-    end.column = range.columnEnd + 1;
-  }
+
+    return acc;
+  }, []);
 
   // When searching for imports, we expand the range to up to the next available
   // mapping to allow for import declarations that are composed of multiple
@@ -35206,12 +35136,17 @@ async function getGeneratedLocationRange(pos, source, type, sourceMaps) {
   //
   // var _mod = require("mod"); // mapped from import statement
   // var _mod2 = interop(_mod); // entirely unmapped
-  if (type === "import" && pos.type === "decl" && endPosition.line > end.line) {
-    end.line = endPosition.line;
-    end.column = endPosition.column;
+  if (bindingType === "import" && locationType === "decl") {
+    for (const range of resultRanges) {
+      if (mappingContains(range, { start: startPosition, end: startPosition }) && positionCmp(range.end, endPosition) < 0) {
+        range.end.line = endPosition.line;
+        range.end.column = endPosition.column;
+        break;
+      }
+    }
   }
 
-  return { start, end };
+  return resultRanges;
 }
 
 /***/ }),
@@ -38108,75 +38043,6 @@ function formatCopyName(frame) {
 
 /***/ }),
 
-/***/ 3611:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-var _propTypes = __webpack_require__(20);
-
-var _propTypes2 = _interopRequireDefault(_propTypes);
-
-var _react = __webpack_require__(0);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-/**
- * Helper class to disable panel rendering when it is in background.
- *
- * Toolbox code hides the iframes when switching to another panel
- * and triggers `visibilitychange` events.
- *
- * See devtools/client/framework/toolbox.js:setIframeVisible().
- */
-
-class VisibilityHandler extends _react.Component {
-  static get propTypes() {
-    return {
-      children: _propTypes2.default.element.isRequired
-    };
-  }
-
-  constructor(props) {
-    super(props);
-    this.isVisible = true;
-    this.onVisibilityChange = this.onVisibilityChange.bind(this);
-  }
-
-  componentDidMount() {
-    window.addEventListener("visibilitychange", this.onVisibilityChange);
-  }
-
-  shouldComponentUpdate() {
-    return document.visibilityState == "visible";
-  }
-
-  componentWillUnmount() {
-    window.removeEventListener("visibilitychange", this.onVisibilityChange);
-  }
-
-  onVisibilityChange() {
-    this.isVisible = false;
-    if (document.visibilityState == "visible") {
-      this.isVisible = true;
-    }
-    this.forceUpdate();
-  }
-
-  render() {
-    return this.isVisible ? this.props.children : null;
-  }
-}
-
-module.exports = VisibilityHandler;
-
-/***/ }),
-
 /***/ 3614:
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -39081,7 +38947,7 @@ class FrameworkComponent extends _react.PureComponent {
 
   render() {
     const { selectedFrame } = this.props;
-    if ((0, _preview.isReactComponent)(selectedFrame.this)) {
+    if (selectedFrame && (0, _preview.isReactComponent)(selectedFrame.this)) {
       return this.renderReactComponent();
     }
 
@@ -39415,10 +39281,14 @@ function findInsertionLocation(array, callback) {
 
   // Ensure the value is the start of any set of matches.
   let i = left;
-  while (i > 0 && callback(array[i]) >= 0) {
-    i--;
+  if (i < array.length) {
+    while (i > 0 && callback(array[i]) >= 0) {
+      i--;
+    }
+    return i + 1;
   }
-  return i + 1;
+
+  return i;
 }
 
 function filterSortedArray(array, callback) {
@@ -39443,6 +39313,11 @@ function filterSortedArray(array, callback) {
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
+                                                                                                                                                                                                                                                                   * License, v. 2.0. If a copy of the MPL was not distributed with this
+                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
 exports.fetchExtra = fetchExtra;
 exports.getExtra = getExtra;
 
@@ -39453,14 +39328,28 @@ var _preview = __webpack_require__(1807);
 var _ast = __webpack_require__(1638);
 
 async function getReactProps(evaluate) {
-  const reactDisplayName = await evaluate("this.hasOwnProperty('_reactInternalFiber') ? " + "this._reactInternalFiber.type.name : " + "this._reactInternalInstance.getName()");
-
-  return {
-    displayName: reactDisplayName.result
-  };
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+  const componentNames = await evaluate(`
+    if(this.hasOwnProperty('_reactInternalFiber')) {
+      let componentNames = []; 
+      let componentNode = this._reactInternalFiber; 
+      while(componentNode) { 
+        componentNames.push(componentNode.type.name); 
+        componentNode = componentNode._debugOwner
+      }
+      componentNames;
+    }
+    else {
+      [this._reactInternalInstance.getName()];
+    }
+    `);
+  const items = componentNames.result.preview && componentNames.result.preview.items;
+  if (items) {
+    return {
+      displayName: items[0],
+      componentStack: items
+    };
+  }
+}
 
 async function getImmutableProps(expression, evaluate) {
   const immutableEntries = await evaluate((exp => `${exp}.toJS()`)(expression));
@@ -39488,9 +39377,7 @@ async function getExtraProps(getState, expression, result, evaluate) {
       }
     }
 
-    if (!props.react) {
-      props.react = await getReactProps(evaluate);
-    }
+    props.react = _extends({}, (await getReactProps(evaluate)), props.react);
   }
 
   if ((0, _preview.isImmutable)(result)) {
@@ -39526,10 +39413,539 @@ function getExtra(expression, result) {
 
 /***/ }),
 
+/***/ 3637:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+* License, v. 2.0. If a copy of the MPL was not distributed with this
+* file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+// TODO : Localize this (was l10n.getStr("frame.unknownSource"))
+const UNKNOWN_SOURCE_STRING = "(unknown)";
+
+// Character codes used in various parsing helper functions.
+const CHAR_CODE_A = "a".charCodeAt(0);
+const CHAR_CODE_B = "b".charCodeAt(0);
+const CHAR_CODE_C = "c".charCodeAt(0);
+const CHAR_CODE_D = "d".charCodeAt(0);
+const CHAR_CODE_E = "e".charCodeAt(0);
+const CHAR_CODE_F = "f".charCodeAt(0);
+const CHAR_CODE_H = "h".charCodeAt(0);
+const CHAR_CODE_I = "i".charCodeAt(0);
+const CHAR_CODE_J = "j".charCodeAt(0);
+const CHAR_CODE_L = "l".charCodeAt(0);
+const CHAR_CODE_M = "m".charCodeAt(0);
+const CHAR_CODE_N = "n".charCodeAt(0);
+const CHAR_CODE_O = "o".charCodeAt(0);
+const CHAR_CODE_P = "p".charCodeAt(0);
+const CHAR_CODE_R = "r".charCodeAt(0);
+const CHAR_CODE_S = "s".charCodeAt(0);
+const CHAR_CODE_T = "t".charCodeAt(0);
+const CHAR_CODE_U = "u".charCodeAt(0);
+const CHAR_CODE_W = "w".charCodeAt(0);
+const CHAR_CODE_COLON = ":".charCodeAt(0);
+const CHAR_CODE_DASH = "-".charCodeAt(0);
+const CHAR_CODE_L_SQUARE_BRACKET = "[".charCodeAt(0);
+const CHAR_CODE_SLASH = "/".charCodeAt(0);
+const CHAR_CODE_CAP_S = "S".charCodeAt(0);
+
+// The cache used in the `parseURL` function.
+const gURLStore = new Map();
+// The cache used in the `getSourceNames` function.
+const gSourceNamesStore = new Map();
+
+/**
+* Takes a string and returns an object containing all the properties
+* available on an URL instance, with additional properties (fileName),
+* Leverages caching.
+*
+* @param {String} location
+* @return {Object?} An object containing most properties available
+*                   in https://developer.mozilla.org/en-US/docs/Web/API/URL
+*/
+
+function parseURL(location) {
+  let url = gURLStore.get(location);
+
+  if (url !== void 0) {
+    return url;
+  }
+
+  try {
+    url = new URL(location);
+    // The callers were generally written to expect a URL from
+    // sdk/url, which is subtly different.  So, work around some
+    // important differences here.
+    url = {
+      href: url.href,
+      protocol: url.protocol,
+      host: url.host,
+      hostname: url.hostname,
+      port: url.port || null,
+      pathname: url.pathname,
+      search: url.search,
+      hash: url.hash,
+      username: url.username,
+      password: url.password,
+      origin: url.origin
+    };
+
+    // Definitions:
+    // Example: https://foo.com:8888/file.js
+    // `hostname`: "foo.com"
+    // `host`: "foo.com:8888"
+    let isChrome = isChromeScheme(location);
+
+    url.fileName = url.pathname ? url.pathname.slice(url.pathname.lastIndexOf("/") + 1) || "/" : "/";
+
+    if (isChrome) {
+      url.hostname = null;
+      url.host = null;
+    }
+
+    gURLStore.set(location, url);
+    return url;
+  } catch (e) {
+    gURLStore.set(location, null);
+    return null;
+  }
+}
+
+/**
+* Parse a source into a short and long name as well as a host name.
+*
+* @param {String} source
+*        The source to parse. Can be a URI or names like "(eval)" or
+*        "self-hosted".
+* @return {Object}
+*         An object with the following properties:
+*           - {String} short: A short name for the source.
+*             - "http://page.com/test.js#go?q=query" -> "test.js"
+*           - {String} long: The full, long name for the source, with
+              hash/query stripped.
+*             - "http://page.com/test.js#go?q=query" -> "http://page.com/test.js"
+*           - {String?} host: If available, the host name for the source.
+*             - "http://page.com/test.js#go?q=query" -> "page.com"
+*/
+function getSourceNames(source) {
+  let data = gSourceNamesStore.get(source);
+
+  if (data) {
+    return data;
+  }
+
+  let short, long, host;
+  const sourceStr = source ? String(source) : "";
+
+  // If `data:...` uri
+  if (isDataScheme(sourceStr)) {
+    let commaIndex = sourceStr.indexOf(",");
+    if (commaIndex > -1) {
+      // The `short` name for a data URI becomes `data:` followed by the actual
+      // encoded content, omitting the MIME type, and charset.
+      short = `data:${sourceStr.substring(commaIndex + 1)}`.slice(0, 100);
+      let result = { short, long: sourceStr };
+      gSourceNamesStore.set(source, result);
+      return result;
+    }
+  }
+
+  // If Scratchpad URI, like "Scratchpad/1"; no modifications,
+  // and short/long are the same.
+  if (isScratchpadScheme(sourceStr)) {
+    let result = { short: sourceStr, long: sourceStr };
+    gSourceNamesStore.set(source, result);
+    return result;
+  }
+
+  const parsedUrl = parseURL(sourceStr);
+
+  if (!parsedUrl) {
+    // Malformed URI.
+    long = sourceStr;
+    short = sourceStr.slice(0, 100);
+  } else {
+    host = parsedUrl.host;
+
+    long = parsedUrl.href;
+    if (parsedUrl.hash) {
+      long = long.replace(parsedUrl.hash, "");
+    }
+    if (parsedUrl.search) {
+      long = long.replace(parsedUrl.search, "");
+    }
+
+    short = parsedUrl.fileName;
+    // If `short` is just a slash, and we actually have a path,
+    // strip the slash and parse again to get a more useful short name.
+    // e.g. "http://foo.com/bar/" -> "bar", rather than "/"
+    if (short === "/" && parsedUrl.pathname !== "/") {
+      short = parseURL(long.replace(/\/$/, "")).fileName;
+    }
+  }
+
+  if (!short) {
+    if (!long) {
+      long = UNKNOWN_SOURCE_STRING;
+    }
+    short = long.slice(0, 100);
+  }
+
+  let result = { short, long, host };
+  gSourceNamesStore.set(source, result);
+  return result;
+}
+
+// For the functions below, we assume that we will never access the location
+// argument out of bounds, which is indeed the vast majority of cases.
+//
+// They are written this way because they are hot. Each frame is checked for
+// being content or chrome when processing the profile.
+
+function isColonSlashSlash(location, i = 0) {
+  return location.charCodeAt(++i) === CHAR_CODE_COLON && location.charCodeAt(++i) === CHAR_CODE_SLASH && location.charCodeAt(++i) === CHAR_CODE_SLASH;
+}
+
+/**
+* Checks for a Scratchpad URI, like "Scratchpad/1"
+*/
+function isScratchpadScheme(location, i = 0) {
+  return location.charCodeAt(i) === CHAR_CODE_CAP_S && location.charCodeAt(++i) === CHAR_CODE_C && location.charCodeAt(++i) === CHAR_CODE_R && location.charCodeAt(++i) === CHAR_CODE_A && location.charCodeAt(++i) === CHAR_CODE_T && location.charCodeAt(++i) === CHAR_CODE_C && location.charCodeAt(++i) === CHAR_CODE_H && location.charCodeAt(++i) === CHAR_CODE_P && location.charCodeAt(++i) === CHAR_CODE_A && location.charCodeAt(++i) === CHAR_CODE_D && location.charCodeAt(++i) === CHAR_CODE_SLASH;
+}
+
+function isDataScheme(location, i = 0) {
+  return location.charCodeAt(i) === CHAR_CODE_D && location.charCodeAt(++i) === CHAR_CODE_A && location.charCodeAt(++i) === CHAR_CODE_T && location.charCodeAt(++i) === CHAR_CODE_A && location.charCodeAt(++i) === CHAR_CODE_COLON;
+}
+
+function isContentScheme(location, i = 0) {
+  let firstChar = location.charCodeAt(i);
+
+  switch (firstChar) {
+    // "http://" or "https://"
+    case CHAR_CODE_H:
+      if (location.charCodeAt(++i) === CHAR_CODE_T && location.charCodeAt(++i) === CHAR_CODE_T && location.charCodeAt(++i) === CHAR_CODE_P) {
+        if (location.charCodeAt(i + 1) === CHAR_CODE_S) {
+          ++i;
+        }
+        return isColonSlashSlash(location, i);
+      }
+      return false;
+
+    // "file://"
+    case CHAR_CODE_F:
+      if (location.charCodeAt(++i) === CHAR_CODE_I && location.charCodeAt(++i) === CHAR_CODE_L && location.charCodeAt(++i) === CHAR_CODE_E) {
+        return isColonSlashSlash(location, i);
+      }
+      return false;
+
+    // "app://"
+    case CHAR_CODE_A:
+      if (location.charCodeAt(++i) == CHAR_CODE_P && location.charCodeAt(++i) == CHAR_CODE_P) {
+        return isColonSlashSlash(location, i);
+      }
+      return false;
+
+    // "blob:"
+    case CHAR_CODE_B:
+      if (location.charCodeAt(++i) == CHAR_CODE_L && location.charCodeAt(++i) == CHAR_CODE_O && location.charCodeAt(++i) == CHAR_CODE_B && location.charCodeAt(++i) == CHAR_CODE_COLON) {
+        return isContentScheme(location, i + 1);
+      }
+      return false;
+
+    default:
+      return false;
+  }
+}
+
+function isChromeScheme(location, i = 0) {
+  let firstChar = location.charCodeAt(i);
+
+  switch (firstChar) {
+    // "chrome://"
+    case CHAR_CODE_C:
+      if (location.charCodeAt(++i) === CHAR_CODE_H && location.charCodeAt(++i) === CHAR_CODE_R && location.charCodeAt(++i) === CHAR_CODE_O && location.charCodeAt(++i) === CHAR_CODE_M && location.charCodeAt(++i) === CHAR_CODE_E) {
+        return isColonSlashSlash(location, i);
+      }
+      return false;
+
+    // "resource://"
+    case CHAR_CODE_R:
+      if (location.charCodeAt(++i) === CHAR_CODE_E && location.charCodeAt(++i) === CHAR_CODE_S && location.charCodeAt(++i) === CHAR_CODE_O && location.charCodeAt(++i) === CHAR_CODE_U && location.charCodeAt(++i) === CHAR_CODE_R && location.charCodeAt(++i) === CHAR_CODE_C && location.charCodeAt(++i) === CHAR_CODE_E) {
+        return isColonSlashSlash(location, i);
+      }
+      return false;
+
+    // "jar:file://"
+    case CHAR_CODE_J:
+      if (location.charCodeAt(++i) === CHAR_CODE_A && location.charCodeAt(++i) === CHAR_CODE_R && location.charCodeAt(++i) === CHAR_CODE_COLON && location.charCodeAt(++i) === CHAR_CODE_F && location.charCodeAt(++i) === CHAR_CODE_I && location.charCodeAt(++i) === CHAR_CODE_L && location.charCodeAt(++i) === CHAR_CODE_E) {
+        return isColonSlashSlash(location, i);
+      }
+      return false;
+
+    default:
+      return false;
+  }
+}
+
+function isWASM(location, i = 0) {
+  return (
+    // "wasm-function["
+    location.charCodeAt(i) === CHAR_CODE_W && location.charCodeAt(++i) === CHAR_CODE_A && location.charCodeAt(++i) === CHAR_CODE_S && location.charCodeAt(++i) === CHAR_CODE_M && location.charCodeAt(++i) === CHAR_CODE_DASH && location.charCodeAt(++i) === CHAR_CODE_F && location.charCodeAt(++i) === CHAR_CODE_U && location.charCodeAt(++i) === CHAR_CODE_N && location.charCodeAt(++i) === CHAR_CODE_C && location.charCodeAt(++i) === CHAR_CODE_T && location.charCodeAt(++i) === CHAR_CODE_I && location.charCodeAt(++i) === CHAR_CODE_O && location.charCodeAt(++i) === CHAR_CODE_N && location.charCodeAt(++i) === CHAR_CODE_L_SQUARE_BRACKET
+  );
+}
+
+/**
+* A utility method to get the file name from a sourcemapped location
+* The sourcemap location can be in any form. This method returns a
+* formatted file name for different cases like Windows or OSX.
+* @param source
+* @returns String
+*/
+function getSourceMappedFile(source) {
+  // If sourcemapped source is a OSX path, return
+  // the characters after last "/".
+  // If sourcemapped source is a Windowss path, return
+  // the characters after last "\\".
+  if (source.lastIndexOf("/") >= 0) {
+    source = source.slice(source.lastIndexOf("/") + 1);
+  } else if (source.lastIndexOf("\\") >= 0) {
+    source = source.slice(source.lastIndexOf("\\") + 1);
+  }
+  return source;
+}
+
+module.exports = {
+  parseURL,
+  getSourceNames,
+  isScratchpadScheme,
+  isChromeScheme,
+  isContentScheme,
+  isWASM,
+  isDataScheme,
+  getSourceMappedFile
+};
+
+/***/ }),
+
+/***/ 3638:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+// This file is a chrome-API-free version of the module
+// devtools/client/shared/unicode-url.js in the mozilla-central repository, so
+// that it can be used in Chrome-API-free applications, such as the Launchpad.
+// But because of this, it cannot take advantage of utilizing chrome APIs and
+// should implement the similar functionalities on its own.
+//
+// Please keep in mind that if the feature in this file has changed, don't
+// forget to also change that accordingly in
+// devtools/client/shared/unicode-url.js in the mozilla-central repository.
+
+
+
+const punycode = __webpack_require__(916);
+
+/**
+ * Gets a readble Unicode hostname from a hostname.
+ *
+ * If the `hostname` is a readable ASCII hostname, such as example.org, then
+ * this function will simply return the original `hostname`.
+ *
+ * If the `hostname` is a Punycode hostname representing a Unicode domain name,
+ * such as xn--g6w.xn--8pv, then this function will return the readable Unicode
+ * domain name by decoding the Punycode hostname.
+ *
+ * @param {string}  hostname
+ *                  the hostname from which the Unicode hostname will be
+ *                  parsed, such as example.org, xn--g6w.xn--8pv.
+ * @return {string} The Unicode hostname. It may be the same as the `hostname`
+ *                  passed to this function if the `hostname` itself is
+ *                  a readable ASCII hostname or a Unicode hostname.
+ */
+function getUnicodeHostname(hostname) {
+  try {
+    return punycode.toUnicode(hostname);
+  } catch (err) {}
+  return hostname;
+}
+
+/**
+ * Gets a readble Unicode URL pathname from a URL pathname.
+ *
+ * If the `urlPath` is a readable ASCII URL pathname, such as /a/b/c.js, then
+ * this function will simply return the original `urlPath`.
+ *
+ * If the `urlPath` is a URI-encoded pathname, such as %E8%A9%A6/%E6%B8%AC.js,
+ * then this function will return the readable Unicode pathname.
+ *
+ * If the `urlPath` is a malformed URL pathname, then this function will simply
+ * return the original `urlPath`.
+ *
+ * @param {string}  urlPath
+ *                  the URL path from which the Unicode URL path will be parsed,
+ *                  such as /a/b/c.js, %E8%A9%A6/%E6%B8%AC.js.
+ * @return {string} The Unicode URL Path. It may be the same as the `urlPath`
+ *                  passed to this function if the `urlPath` itself is a readable
+ *                  ASCII url or a Unicode url.
+ */
+function getUnicodeUrlPath(urlPath) {
+  try {
+    return decodeURIComponent(urlPath);
+  } catch (err) {}
+  return urlPath;
+}
+
+/**
+ * Gets a readable Unicode URL from a URL.
+ *
+ * If the `url` is a readable ASCII URL, such as http://example.org/a/b/c.js,
+ * then this function will simply return the original `url`.
+ *
+ * If the `url` includes either an unreadable Punycode domain name or an
+ * unreadable URI-encoded pathname, such as
+ * http://xn--g6w.xn--8pv/%E8%A9%A6/%E6%B8%AC.js, then this function will return
+ * the readable URL by decoding all its unreadable URL components to Unicode
+ * characters.
+ *
+ * If the `url` is a malformed URL, then this function will return the original
+ * `url`.
+ *
+ * If the `url` is a data: URI, then this function will return the original
+ * `url`.
+ *
+ * @param {string}  url
+ *                  the full URL, or a data: URI. from which the readable URL
+ *                  will be parsed, such as, http://example.org/a/b/c.js,
+ *                  http://xn--g6w.xn--8pv/%E8%A9%A6/%E6%B8%AC.js
+ * @return {string} The readable URL. It may be the same as the `url` passed to
+ *                  this function if the `url` itself is readable.
+ */
+function getUnicodeUrl(url) {
+  try {
+    const { protocol, hostname } = new URL(url);
+    if (protocol === "data:") {
+      // Never convert a data: URI.
+      return url;
+    }
+    const readableHostname = getUnicodeHostname(hostname);
+    url = decodeURIComponent(url);
+    return url.replace(hostname, readableHostname);
+  } catch (err) {}
+  return url;
+}
+
+module.exports = {
+  getUnicodeHostname,
+  getUnicodeUrlPath,
+  getUnicodeUrl
+};
+
+/***/ }),
+
+/***/ 3639:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _react = __webpack_require__(0);
+
+var _react2 = _interopRequireDefault(_react);
+
+var _redux = __webpack_require__(3593);
+
+var _reactRedux = __webpack_require__(3592);
+
+var _actions = __webpack_require__(1354);
+
+var _actions2 = _interopRequireDefault(_actions);
+
+var _selectors = __webpack_require__(3590);
+
+__webpack_require__(1338);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+class ReactComponentStack extends _react.PureComponent {
+  render() {
+    const { componentStack } = this.props.extra.react;
+    return _react2.default.createElement(
+      "div",
+      { className: "pane frames" },
+      _react2.default.createElement(
+        "ul",
+        null,
+        componentStack.slice().reverse().map((component, index) => _react2.default.createElement(
+          "li",
+          { key: index },
+          component
+        ))
+      )
+    );
+  }
+}
+
+exports.default = (0, _reactRedux.connect)(state => {
+  return {
+    extra: (0, _selectors.getExtra)(state)
+  };
+}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(ReactComponentStack);
+
+/***/ }),
+
 /***/ 364:
 /***/ (function(module, exports) {
 
 module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 33 12\"><path id=\"base-path\" d=\"M27.1,0H1C0.4,0,0,0.4,0,1v10c0,0.6,0.4,1,1,1h26.1 c0.6,0,1.2-0.3,1.5-0.7L33,6l-4.4-5.3C28.2,0.3,27.7,0,27.1,0z\"></path></svg>"
+
+/***/ }),
+
+/***/ 3640:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.toggleSkipPausing = toggleSkipPausing;
+
+var _selectors = __webpack_require__(3590);
+
+/**
+ * @memberof actions/pause
+ * @static
+ */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+function toggleSkipPausing() {
+  return async ({ dispatch, client, getState, sourceMaps }) => {
+    const skipPausing = !(0, _selectors.getSkipPausing)(getState());
+
+    // NOTE: enable this when we land the endpoint in m-c
+    // await client.setSkipPausing(skipPausing);
+
+    dispatch({ type: "TOGGLE_SKIP_PAUSING", skipPausing });
+  };
+}
 
 /***/ }),
 

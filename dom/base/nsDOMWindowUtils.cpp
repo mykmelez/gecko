@@ -10,7 +10,6 @@
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "nsPresContext.h"
 #include "nsError.h"
-#include "nsIDOMEvent.h"
 #include "nsQueryContentEventResult.h"
 #include "nsGlobalWindow.h"
 #include "nsIDocument.h"
@@ -19,6 +18,7 @@
 #include "nsRefreshDriver.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/BlobBinding.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/dom/Touch.h"
 #include "mozilla/PendingAnimationTracker.h"
 #include "nsIObjectLoadingContent.h"
@@ -1851,7 +1851,7 @@ nsDOMWindowUtils::GetFullZoom(float* aFullZoom)
 
 NS_IMETHODIMP
 nsDOMWindowUtils::DispatchDOMEventViaPresShell(nsIDOMNode* aTarget,
-                                               nsIDOMEvent* aEvent,
+                                               Event* aEvent,
                                                bool aTrusted,
                                                bool* aRetVal)
 {
@@ -2474,7 +2474,7 @@ nsDOMWindowUtils::GetLastTransactionId(uint64_t *aLastTransactionId)
   }
 
   nsRefreshDriver* driver = presContext->GetRootPresContext()->RefreshDriver();
-  *aLastTransactionId = driver->LastTransactionId();
+  *aLastTransactionId = uint64_t(driver->LastTransactionId());
   return NS_OK;
 }
 
@@ -2739,60 +2739,6 @@ nsDOMWindowUtils::ComputeAnimationDistance(nsIDOMElement* aElement,
   RefPtr<ComputedStyle> computedStyle =
     nsComputedDOMStyle::GetComputedStyle(element, nullptr);
   *aResult = v1.ComputeDistance(property, v2, computedStyle);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDOMWindowUtils::GetAnimationTypeForLonghand(const nsAString& aProperty,
-                                              nsAString& aResult)
-{
-  nsCSSPropertyID propertyID =
-    nsCSSProps::LookupProperty(aProperty, CSSEnabledState::eForAllContent);
-  if (propertyID == eCSSProperty_UNKNOWN) {
-    return NS_ERROR_INVALID_ARG;
-  }
-  if (nsCSSProps::IsShorthand(propertyID)) {
-    // The given property should be a longhand.
-    return NS_ERROR_INVALID_ARG;
-  }
-  switch (nsCSSProps::kAnimTypeTable[propertyID]) {
-    case eStyleAnimType_Custom:
-      aResult.AssignLiteral("custom");
-      break;
-    case eStyleAnimType_Coord:
-    case eStyleAnimType_Sides_Top:
-    case eStyleAnimType_Sides_Right:
-    case eStyleAnimType_Sides_Bottom:
-    case eStyleAnimType_Sides_Left:
-    case eStyleAnimType_Corner_TopLeft:
-    case eStyleAnimType_Corner_TopRight:
-    case eStyleAnimType_Corner_BottomRight:
-    case eStyleAnimType_Corner_BottomLeft:
-      aResult.AssignLiteral("coord");
-      break;
-    case eStyleAnimType_nscoord:
-      aResult.AssignLiteral("length");
-      break;
-    case eStyleAnimType_float:
-      aResult.AssignLiteral("float");
-      break;
-    case eStyleAnimType_Color:
-    case eStyleAnimType_ComplexColor:
-      aResult.AssignLiteral("color");
-      break;
-    case eStyleAnimType_PaintServer:
-      aResult.AssignLiteral("paintServer");
-      break;
-    case eStyleAnimType_Shadow:
-      aResult.AssignLiteral("shadow");
-      break;
-    case eStyleAnimType_Discrete:
-      aResult.AssignLiteral("discrete");
-      break;
-    case eStyleAnimType_None:
-      aResult.AssignLiteral("none");
-      break;
-  }
   return NS_OK;
 }
 
@@ -3705,15 +3651,15 @@ nsDOMWindowUtils::GetPaintFlashing(bool* aRetVal)
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::DispatchEventToChromeOnly(nsIDOMEventTarget* aTarget,
-                                            nsIDOMEvent* aEvent,
+nsDOMWindowUtils::DispatchEventToChromeOnly(EventTarget* aTarget,
+                                            Event* aEvent,
                                             bool* aRetVal)
 {
   *aRetVal = false;
   NS_ENSURE_STATE(aTarget && aEvent);
   aEvent->WidgetEventPtr()->mFlags.mOnlyChromeDispatch = true;
-  *aRetVal = EventTarget::From(aTarget)->
-    DispatchEvent(*aEvent->InternalDOMEvent(), CallerType::System, IgnoreErrors());
+  *aRetVal = aTarget->
+    DispatchEvent(*aEvent, CallerType::System, IgnoreErrors());
   return NS_OK;
 }
 

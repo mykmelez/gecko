@@ -33,6 +33,7 @@
 #include "mozilla/TextEvents.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"
+#include "mozilla/dom/EventBinding.h"
 #include "mozilla/dom/KeyboardEvent.h"
 #include "mozilla/layers/KeyboardMap.h"
 
@@ -206,13 +207,14 @@ BuildHandlerChain(nsIContent* aContent, nsXBLPrototypeHandler** aResult)
     // Such element is used by localizers for alternative shortcut key
     // definition on the locale. See bug 426501.
     nsAutoString valKey, valCharCode, valKeyCode;
-    bool attrExists =
-      keyElement->GetAttr(kNameSpaceID_None, nsGkAtoms::key, valKey) ||
+    // Hopefully at least one of the attributes is set:
+    keyElement->GetAttr(kNameSpaceID_None, nsGkAtoms::key, valKey) ||
       keyElement->GetAttr(kNameSpaceID_None, nsGkAtoms::charcode, valCharCode) ||
       keyElement->GetAttr(kNameSpaceID_None, nsGkAtoms::keycode, valKeyCode);
-    if (attrExists &&
-        valKey.IsEmpty() && valCharCode.IsEmpty() && valKeyCode.IsEmpty())
+    // If not, ignore this key element.
+    if (valKey.IsEmpty() && valCharCode.IsEmpty() && valKeyCode.IsEmpty()) {
       continue;
+    }
 
     // reserved="pref" is the default for <key> elements.
     XBLReservedKey reserved = XBLReservedKey_Unset;
@@ -486,15 +488,12 @@ nsXBLWindowKeyHandler::ConvertEventToDOMEventType(
 }
 
 NS_IMETHODIMP
-nsXBLWindowKeyHandler::HandleEvent(nsIDOMEvent* aEvent)
+nsXBLWindowKeyHandler::HandleEvent(Event* aEvent)
 {
-  RefPtr<KeyboardEvent> keyEvent =
-    aEvent->InternalDOMEvent()->AsKeyboardEvent();
+  RefPtr<KeyboardEvent> keyEvent = aEvent->AsKeyboardEvent();
   NS_ENSURE_TRUE(keyEvent, NS_ERROR_INVALID_ARG);
 
-  uint16_t eventPhase;
-  aEvent->GetEventPhase(&eventPhase);
-  if (eventPhase == nsIDOMEvent::CAPTURING_PHASE) {
+  if (aEvent->EventPhase() == EventBinding::CAPTURING_PHASE) {
     if (aEvent->WidgetEventPtr()->mFlags.mInSystemGroup) {
       HandleEventOnCaptureInSystemEventGroup(keyEvent);
     } else {

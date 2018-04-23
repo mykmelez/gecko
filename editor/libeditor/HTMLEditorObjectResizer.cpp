@@ -13,6 +13,7 @@
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/mozalloc.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/dom/MouseEvent.h"
 #include "mozilla/dom/EventTarget.h"
 #include "nsAString.h"
@@ -25,7 +26,6 @@
 #include "nsIContent.h"
 #include "nsID.h"
 #include "nsIDOMElement.h"
-#include "nsIDOMEvent.h"
 #include "nsIDocument.h"
 #include "nsIPresShell.h"
 #include "nsISupportsUtils.h"
@@ -55,7 +55,7 @@ DocumentResizeEventListener::DocumentResizeEventListener(
 }
 
 NS_IMETHODIMP
-DocumentResizeEventListener::HandleEvent(nsIDOMEvent* aMouseEvent)
+DocumentResizeEventListener::HandleEvent(Event* aMouseEvent)
 {
   RefPtr<HTMLEditor> htmlEditor = mHTMLEditorWeak.get();
   if (htmlEditor) {
@@ -76,9 +76,9 @@ ResizerMouseMotionListener::ResizerMouseMotionListener(HTMLEditor& aHTMLEditor)
 }
 
 NS_IMETHODIMP
-ResizerMouseMotionListener::HandleEvent(nsIDOMEvent* aMouseEvent)
+ResizerMouseMotionListener::HandleEvent(Event* aMouseEvent)
 {
-  MouseEvent* mouseEvent = aMouseEvent->InternalDOMEvent()->AsMouseEvent();
+  MouseEvent* mouseEvent = aMouseEvent->AsMouseEvent();
   if (!mouseEvent) {
     //non-ui event passed in.  bad things.
     return NS_OK;
@@ -521,7 +521,7 @@ nsresult
 HTMLEditor::OnMouseDown(int32_t aClientX,
                         int32_t aClientY,
                         nsIDOMElement* aTarget,
-                        nsIDOMEvent* aEvent)
+                        Event* aEvent)
 {
   nsCOMPtr<Element> element = do_QueryInterface(aTarget);
   NS_ENSURE_ARG_POINTER(element);
@@ -876,12 +876,12 @@ HTMLEditor::SetFinalSize(int32_t aX,
   }
   if (IsCSSEnabled() || mResizedObjectIsAbsolutelyPositioned) {
     if (setWidth && mResizedObject->HasAttr(kNameSpaceID_None, nsGkAtoms::width)) {
-      RemoveAttribute(mResizedObject, nsGkAtoms::width);
+      RemoveAttributeWithTransaction(*mResizedObject, *nsGkAtoms::width);
     }
 
     if (setHeight && mResizedObject->HasAttr(kNameSpaceID_None,
                                              nsGkAtoms::height)) {
-      RemoveAttribute(mResizedObject, nsGkAtoms::height);
+      RemoveAttributeWithTransaction(*mResizedObject, *nsGkAtoms::height);
     }
 
     if (setWidth) {
@@ -909,12 +909,12 @@ HTMLEditor::SetFinalSize(int32_t aX,
     if (setWidth) {
       nsAutoString w;
       w.AppendInt(width);
-      SetAttribute(mResizedObject, nsGkAtoms::width, w);
+      SetAttributeWithTransaction(*mResizedObject, *nsGkAtoms::width, w);
     }
     if (setHeight) {
       nsAutoString h;
       h.AppendInt(height);
-      SetAttribute(mResizedObject, nsGkAtoms::height, h);
+      SetAttributeWithTransaction(*mResizedObject, *nsGkAtoms::height, h);
     }
 
     if (setWidth) {

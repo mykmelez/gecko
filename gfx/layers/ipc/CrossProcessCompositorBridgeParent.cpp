@@ -135,7 +135,7 @@ CrossProcessCompositorBridgeParent::AllocPAPZCTreeManagerParent(const LayersId& 
     // retain a reference to itself, through the checkerboard observer.
     LayersId dummyId{0};
     RefPtr<APZCTreeManager> temp = new APZCTreeManager(dummyId);
-    RefPtr<APZUpdater> tempUpdater = new APZUpdater(temp);
+    RefPtr<APZUpdater> tempUpdater = new APZUpdater(temp, false);
     tempUpdater->ClearTree(dummyId);
     return new APZCTreeManagerParent(aLayersId, temp, tempUpdater);
   }
@@ -386,13 +386,13 @@ CrossProcessCompositorBridgeParent::DidCompositeLocked(
 {
   sIndirectLayerTreesLock->AssertCurrentThreadOwns();
   if (LayerTransactionParent *layerTree = sIndirectLayerTrees[aId].mLayerTree) {
-    uint64_t transactionId = layerTree->FlushTransactionId(aCompositeEnd);
-    if (transactionId) {
+    TransactionId transactionId = layerTree->FlushTransactionId(aCompositeEnd);
+    if (transactionId.IsValid()) {
       Unused << SendDidComposite(aId, transactionId, aCompositeStart, aCompositeEnd);
     }
   } else if (WebRenderBridgeParent* wrbridge = sIndirectLayerTrees[aId].mWrBridge) {
-    uint64_t transactionId = wrbridge->FlushPendingTransactionIds();
-    if (transactionId) {
+    TransactionId transactionId = wrbridge->FlushPendingTransactionIds();
+    if (transactionId.IsValid()) {
       Unused << SendDidComposite(aId, transactionId, aCompositeStart, aCompositeEnd);
     }
   }

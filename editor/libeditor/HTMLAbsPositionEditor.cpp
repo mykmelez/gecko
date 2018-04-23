@@ -491,9 +491,10 @@ HTMLEditor::SetPositionToAbsolute(Element& aElement)
     if (NS_WARN_IF(!selection)) {
       return NS_ERROR_FAILURE;
     }
-    RefPtr<Element> newBRElement =
-      CreateBRImpl(*selection, EditorRawDOMPoint(parentNode, 0), eNone);
-    if (NS_WARN_IF(!newBRElement)) {
+    RefPtr<Element> newBrElement =
+      InsertBrElementWithTransaction(*selection,
+                                     EditorRawDOMPoint(parentNode, 0));
+    if (NS_WARN_IF(!newBrElement)) {
       return NS_ERROR_FAILURE;
     }
   }
@@ -528,7 +529,7 @@ HTMLEditor::SetPositionToStatic(Element& aElement)
     NS_ENSURE_TRUE(htmlRules, NS_ERROR_FAILURE);
     nsresult rv = htmlRules->MakeSureElemStartsOrEndsOnCR(aElement);
     NS_ENSURE_SUCCESS(rv, rv);
-    rv = RemoveContainer(&aElement);
+    rv = RemoveContainerWithTransaction(aElement);
     NS_ENSURE_SUCCESS(rv, rv);
   }
   return NS_OK;
