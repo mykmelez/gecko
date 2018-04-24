@@ -2986,10 +2986,8 @@ exports.CSS_PROPERTIES = {
       "grid-auto-flow",
       "grid-auto-rows",
       "grid-column-end",
-      "grid-column-gap",
       "grid-column-start",
       "grid-row-end",
-      "grid-row-gap",
       "grid-row-start",
       "grid-template-areas",
       "grid-template-columns",
@@ -3089,6 +3087,7 @@ exports.CSS_PROPERTIES = {
       "resize",
       "right",
       "rotate",
+      "row-gap",
       "ruby-align",
       "ruby-position",
       "scale",
@@ -5930,7 +5929,9 @@ exports.CSS_PROPERTIES = {
     "subproperties": [
       "font-stretch"
     ],
-    "supports": [],
+    "supports": [
+      8
+    ],
     "values": [
       "condensed",
       "expanded",
@@ -6165,6 +6166,24 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "gap": {
+    "isInherited": false,
+    "subproperties": [
+      "row-gap",
+      "column-gap"
+    ],
+    "supports": [
+      6,
+      8
+    ],
+    "values": [
+      "calc",
+      "inherit",
+      "initial",
+      "normal",
+      "unset"
+    ]
+  },
   "grid": {
     "isInherited": false,
     "subproperties": [
@@ -6288,7 +6307,7 @@ exports.CSS_PROPERTIES = {
   "grid-column-gap": {
     "isInherited": false,
     "subproperties": [
-      "grid-column-gap"
+      "column-gap"
     ],
     "supports": [
       6,
@@ -6298,6 +6317,7 @@ exports.CSS_PROPERTIES = {
       "calc",
       "inherit",
       "initial",
+      "normal",
       "unset"
     ]
   },
@@ -6318,8 +6338,8 @@ exports.CSS_PROPERTIES = {
   "grid-gap": {
     "isInherited": false,
     "subproperties": [
-      "grid-row-gap",
-      "grid-column-gap"
+      "row-gap",
+      "column-gap"
     ],
     "supports": [
       6,
@@ -6329,6 +6349,7 @@ exports.CSS_PROPERTIES = {
       "calc",
       "inherit",
       "initial",
+      "normal",
       "unset"
     ]
   },
@@ -6364,7 +6385,7 @@ exports.CSS_PROPERTIES = {
   "grid-row-gap": {
     "isInherited": false,
     "subproperties": [
-      "grid-row-gap"
+      "row-gap"
     ],
     "supports": [
       6,
@@ -6374,6 +6395,7 @@ exports.CSS_PROPERTIES = {
       "calc",
       "inherit",
       "initial",
+      "normal",
       "unset"
     ]
   },
@@ -8352,6 +8374,23 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "row-gap": {
+    "isInherited": false,
+    "subproperties": [
+      "row-gap"
+    ],
+    "supports": [
+      6,
+      8
+    ],
+    "values": [
+      "calc",
+      "inherit",
+      "initial",
+      "normal",
+      "unset"
+    ]
+  },
   "ruby-align": {
     "isInherited": true,
     "subproperties": [
@@ -8503,6 +8542,36 @@ exports.CSS_PROPERTIES = {
       "mandatory",
       "none",
       "proximity",
+      "unset"
+    ]
+  },
+  "shape-image-threshold": {
+    "isInherited": false,
+    "subproperties": [
+      "shape-image-threshold"
+    ],
+    "supports": [
+      7
+    ],
+    "values": [
+      "inherit",
+      "initial",
+      "unset"
+    ]
+  },
+  "shape-outside": {
+    "isInherited": false,
+    "subproperties": [
+      "shape-outside"
+    ],
+    "supports": [
+      4,
+      5,
+      11
+    ],
+    "values": [
+      "inherit",
+      "initial",
       "unset"
     ]
   },

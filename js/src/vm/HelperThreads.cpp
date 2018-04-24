@@ -23,6 +23,7 @@
 #include "vm/Time.h"
 #include "vm/TraceLogging.h"
 #include "vm/Xdr.h"
+#include "wasm/WasmGenerator.h"
 
 #include "gc/PrivateIterators-inl.h"
 #include "vm/JSCompartment-inl.h"
@@ -457,6 +458,14 @@ ParseTask::trace(JSTracer* trc)
     TraceManuallyBarrieredEdge(trc, &parseGlobal, "ParseTask::parseGlobal");
     scripts.trace(trc);
     sourceObjects.trace(trc);
+}
+
+size_t
+ParseTask::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const
+{
+    return options.sizeOfExcludingThis(mallocSizeOf) +
+           alloc.sizeOfExcludingThis(mallocSizeOf) +
+           errors.sizeOfExcludingThis(mallocSizeOf);
 }
 
 ScriptParseTask::ScriptParseTask(JSContext* cx, const char16_t* chars, size_t length,
@@ -991,7 +1000,7 @@ GlobalHelperThreadState::unlock()
 
 #ifdef DEBUG
 bool
-GlobalHelperThreadState::isLockedByCurrentThread()
+GlobalHelperThreadState::isLockedByCurrentThread() const
 {
     return helperLock.ownedByCurrentThread();
 }
@@ -1118,6 +1127,72 @@ IsHelperThreadSimulatingOOM(js::ThreadType threadType)
 #else
     return false;
 #endif
+}
+
+void
+GlobalHelperThreadState::addSizeOfIncludingThis(JS::GlobalStats* stats,
+                                                AutoLockHelperThreadState& lock) const
+{
+    MOZ_ASSERT(isLockedByCurrentThread());
+
+    mozilla::MallocSizeOf mallocSizeOf = stats->mallocSizeOf_;
+    JS::HelperThreadStats& htStats = stats->helperThread;
+
+    htStats.stateData += mallocSizeOf(this);
+
+    if (threads)
+        htStats.stateData += threads->sizeOfIncludingThis(mallocSizeOf);
+
+    // Report memory used by various containers
+    htStats.stateData +=
+        ionWorklist_.sizeOfExcludingThis(mallocSizeOf) +
+        ionFinishedList_.sizeOfExcludingThis(mallocSizeOf) +
+        ionFreeList_.sizeOfExcludingThis(mallocSizeOf) +
+        wasmWorklist_tier1_.sizeOfExcludingThis(mallocSizeOf) +
+        wasmWorklist_tier2_.sizeOfExcludingThis(mallocSizeOf) +
+        wasmTier2GeneratorWorklist_.sizeOfExcludingThis(mallocSizeOf) +
+        promiseHelperTasks_.sizeOfExcludingThis(mallocSizeOf) +
+        parseWorklist_.sizeOfExcludingThis(mallocSizeOf) +
+        parseFinishedList_.sizeOfExcludingThis(mallocSizeOf) +
+        parseWaitingOnGC_.sizeOfExcludingThis(mallocSizeOf) +
+        compressionPendingList_.sizeOfExcludingThis(mallocSizeOf) +
+        compressionWorklist_.sizeOfExcludingThis(mallocSizeOf) +
+        compressionFinishedList_.sizeOfExcludingThis(mallocSizeOf) +
+        gcHelperWorklist_.sizeOfExcludingThis(mallocSizeOf) +
+        gcParallelWorklist_.sizeOfExcludingThis(mallocSizeOf);
+
+    // Report ParseTasks on wait lists
+    for (auto task : parseWorklist_)
+        htStats.parseTask += task->sizeOfIncludingThis(mallocSizeOf);
+    for (auto task : parseFinishedList_)
+        htStats.parseTask += task->sizeOfIncludingThis(mallocSizeOf);
+    for (auto task : parseWaitingOnGC_)
+        htStats.parseTask += task->sizeOfIncludingThis(mallocSizeOf);
+
+    // Report IonBuilders on wait lists
+    for (auto builder : ionWorklist_)
+        htStats.ionBuilder += builder->sizeOfIncludingThis(mallocSizeOf);
+    for (auto builder : ionFinishedList_)
+        htStats.ionBuilder += builder->sizeOfIncludingThis(mallocSizeOf);
+    for (auto builder : ionFreeList_)
+        htStats.ionBuilder += builder->sizeOfIncludingThis(mallocSizeOf);
+
+    // Report wasm::CompileTasks on wait lists
+    for (auto task : wasmWorklist_tier1_)
+        htStats.wasmCompile += task->sizeOfIncludingThis(mallocSizeOf);
+    for (auto task : wasmWorklist_tier2_)
+        htStats.wasmCompile += task->sizeOfIncludingThis(mallocSizeOf);
+
+    // Report number of helper threads.
+    MOZ_ASSERT(htStats.idleThreadCount == 0);
+    if (threads) {
+        for (auto& thread : *threads) {
+            if (thread.idle())
+                htStats.idleThreadCount++;
+            else
+                htStats.activeThreadCount++;
+        }
+    }
 }
 
 size_t
