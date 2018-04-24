@@ -8,7 +8,6 @@ use self::tempdir::TempDir;
 use std::ffi::CString;
 use std::fmt::Write;
 use std::fs;
-// use std::os::raw::c_void;
 use std::path::{Path, PathBuf};
 use std::str;
 use xpcom::{getter_addrefs, RefPtr, XpCom};
@@ -61,44 +60,68 @@ lazy_static! {
 
 #[no_mangle]
 pub extern "C" fn xulstore_set_value(doc: &nsAString, id: &nsAString, attr: &nsAString, value: &nsAString) -> nsresult {
-    println!("{:?}", STORE);
-    let key = String::from_utf16_lossy(doc);
-    let mut writer = STORE.write(&RKV).expect("writer");
+    let store_name = String::from_utf16_lossy(doc);
+    // TODO: migrate data if store doesn't exist.
+    // TODO: cache opened stores.
+    let store = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
+    let key = String::from_utf16_lossy(id) + "=" + &String::from_utf16_lossy(attr);
+    let mut writer = store.write(&RKV).expect("writer");
 
     // This writer.get() call borrows writer immutably, and the &str value
     // that Value::Str wraps is scoped to the lifetime of writer, which means
     // we need to release it before the writer.put() call below that borrows
     // writer mutably.  So we clone the &str.
     // TODO: figure out how to avoid the allocation.
-    let rkv_value = match writer.get(&key).expect("read") {
-        Some(Value::Str(val)) => val,
-        _ => "",
-    }.to_string();
+    // let existing_value = match writer.get(&key).expect("read") {
+    //     Some(Value::Str(val)) => val,
+    //     _ => "",
+    // }.to_string();
+    // println!("{:?}", existing_value);
 
-    println!("{:?}", rkv_value);
-    writer.put(&key, &Value::Str("Hello, World!"));
+    writer.put(&key, &Value::Str(&String::from_utf16_lossy(value)));
     writer.commit();
     NS_OK
 }
 
 #[no_mangle]
 pub extern "C" fn xulstore_has_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> bool {
-    let reader = STORE.read(&RKV).expect("reader");
-    let key = &String::from_utf16_lossy(doc);
-    let value = reader.get(key).expect("read");
+    let store_name = String::from_utf16_lossy(doc);
+    let store = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
+    let key = String::from_utf16_lossy(id) + "=" + &String::from_utf16_lossy(attr);
+    let reader = store.read(&RKV).expect("reader");
+
+    let value = reader.get(key);
     println!("{:?}", value);
     match value {
-        None => false,
+        // TODO: report instead of merely swallow error.
+        Result::Err(_) => false,
+        Result::Ok(None) => false,
         _ => true,
     }
 }
 
 #[no_mangle]
 pub extern "C" fn xulstore_get_value(doc: &nsAString, id: &nsAString, attr: &nsAString, value: *mut nsAString) {
-    let reader = STORE.read(&RKV).expect("reader");
-    let key = &String::from_utf16_lossy(doc);
-    let rkv_value = &reader.get(key).expect("read").unwrap();
-    println!("{:?}", rkv_value);
+    let store_name = String::from_utf16_lossy(doc);
+    let store = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
+    let key = String::from_utf16_lossy(id) + "=" + &String::from_utf16_lossy(attr);
+    println!("key: {:?}", &key);
+    let reader = store.read(&RKV).expect("reader");
+
+    let retrieved_value = reader.get(key);
+    println!("retrieved_value: {:?}", retrieved_value);
+
+    // let retrieved_value = match reader.get(key) {
+    //     Err(DataError(UnknownType(0))) =>
+    // }
+    // println!("{:?}", retrieved_value);
+    //  {
+    //     Some(Value::Str(value)) => value,
+    //     _ => "",
+    // };
+    // println!("retrieved_value");
+    // println!("retrieved_value: {:?}", retrieved_value);
+
     let nsstring_value = &nsString::from("Hello, World!");
     unsafe {
         (*value).assign(nsstring_value);
