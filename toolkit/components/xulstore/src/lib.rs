@@ -83,7 +83,14 @@ pub extern "C" fn xulstore_set_value(doc: &nsAString, id: &nsAString, attr: &nsA
 
 #[no_mangle]
 pub extern "C" fn xulstore_has_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> bool {
-    true
+    let reader = STORE.read(&RKV).expect("reader");
+    let key = &String::from_utf16_lossy(doc);
+    let value = reader.get(key).expect("read");
+    println!("{:?}", value);
+    match value {
+        None => false,
+        _ => true,
+    }
 }
 
 #[no_mangle]

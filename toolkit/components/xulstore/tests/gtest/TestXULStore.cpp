@@ -10,7 +10,7 @@ TEST(XULStore, SetValue) {
   nsAutoString attr(NS_LITERAL_STRING("width"));
 
   {
-    nsAutoString value(NS_LITERAL_STRING("600"));
+    nsAutoString value(NS_LITERAL_STRING("800"));
     EXPECT_TRUE(xulstore_set_value(&doc, &id, &attr, &value) == NS_OK);
   }
 
@@ -21,13 +21,16 @@ TEST(XULStore, SetValue) {
   }
 }
 
-// extern "C" bool xulstore_has_value(nsAString* doc, nsAString* id, nsAString* attr);
-// TEST(XULStore, HasValue) {
-//   nsAutoString doc(NS_LITERAL_STRING("chrome://browser/content/example.xul"));
-//   nsAutoString id(NS_LITERAL_STRING("window"));
-//   nsAutoString attr(NS_LITERAL_STRING("width"));
-//   EXPECT_TRUE(xulstore_has_value(&doc, &id, &attr) == true);
-// }
+extern "C" bool xulstore_has_value(nsAString* doc, nsAString* id, nsAString* attr);
+TEST(XULStore, HasValue) {
+  nsAutoString doc(NS_LITERAL_STRING("chrome://browser/content/has-value.xul"));
+  nsAutoString id(NS_LITERAL_STRING("window"));
+  nsAutoString attr(NS_LITERAL_STRING("height"));
+  EXPECT_TRUE(xulstore_has_value(&doc, &id, &attr) == false);
+  nsAutoString value(NS_LITERAL_STRING("600"));
+  EXPECT_TRUE(xulstore_set_value(&doc, &id, &attr, &value) == NS_OK);
+  EXPECT_TRUE(xulstore_has_value(&doc, &id, &attr) == true);
+}
 
 // TEST(XULStore, GetValue) {
 //   nsAutoString doc(NS_LITERAL_STRING("chrome://browser/content/example.xul"));
