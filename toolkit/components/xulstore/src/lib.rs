@@ -73,7 +73,7 @@ pub extern "C" fn xulstore_set_value(doc: &nsAString, id: &nsAString, attr: &nsA
     let rkv_value = match writer.get(&key).expect("read") {
         Some(Value::Str(val)) => val,
         _ => "",
-    }.to_string().clone();
+    }.to_string();
 
     println!("{:?}", rkv_value);
     writer.put(&key, &Value::Str("Hello, World!"));
