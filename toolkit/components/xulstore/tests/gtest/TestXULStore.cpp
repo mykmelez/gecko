@@ -17,7 +17,7 @@ TEST(XULStore, SetValue) {
   {
     nsAutoString value;
     xulstore_get_value(&doc, &id, &attr, &value);
-    EXPECT_TRUE(value.EqualsASCII("Hello, World!"));
+    EXPECT_TRUE(value.EqualsASCII("800"));
   }
 }
 

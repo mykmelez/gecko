@@ -93,9 +93,9 @@ pub extern "C" fn xulstore_has_value(doc: &nsAString, id: &nsAString, attr: &nsA
     let value = reader.get(key);
     println!("{:?}", value);
     match value {
-        // TODO: report instead of merely swallow error.
-        Result::Err(_) => false,
         Result::Ok(None) => false,
+        // TODO: report error instead of merely swallowing it.
+        Result::Err(_) => false,
         _ => true,
     }
 }
@@ -105,25 +105,19 @@ pub extern "C" fn xulstore_get_value(doc: &nsAString, id: &nsAString, attr: &nsA
     let store_name = String::from_utf16_lossy(doc);
     let store = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
     let key = String::from_utf16_lossy(id) + "=" + &String::from_utf16_lossy(attr);
-    println!("key: {:?}", &key);
     let reader = store.read(&RKV).expect("reader");
 
     let retrieved_value = reader.get(key);
     println!("retrieved_value: {:?}", retrieved_value);
 
-    // let retrieved_value = match reader.get(key) {
-    //     Err(DataError(UnknownType(0))) =>
-    // }
-    // println!("{:?}", retrieved_value);
-    //  {
-    //     Some(Value::Str(value)) => value,
-    //     _ => "",
-    // };
-    // println!("retrieved_value");
-    // println!("retrieved_value: {:?}", retrieved_value);
-
-    let nsstring_value = &nsString::from("Hello, World!");
+    let return_value = match retrieved_value {
+        Ok(Some(Value::Str(value))) => value,
+        // TODO: report error instead of merely swallowing it.
+        Err(_) => "",
+        _ => "",
+    };
+    println!("return_value: {:?}", return_value);
     unsafe {
-        (*value).assign(nsstring_value);
+        (*value).assign(&nsString::from(return_value))
     }
 }
