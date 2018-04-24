@@ -10,6 +10,7 @@ use std::fmt::Write;
 use std::fs;
 // use std::os::raw::c_void;
 use std::path::{Path, PathBuf};
+use std::str;
 use xpcom::{getter_addrefs, RefPtr, XpCom};
 
 extern crate nsstring;
@@ -61,8 +62,21 @@ lazy_static! {
 #[no_mangle]
 pub extern "C" fn xulstore_set_value(doc: &nsAString, id: &nsAString, attr: &nsAString, value: &nsAString) -> nsresult {
     println!("{:?}", STORE);
+    let key = String::from_utf16_lossy(doc);
     let mut writer = STORE.write(&RKV).expect("writer");
-    writer.put("foo", &Value::Str("Hello, World!"));
+
+    // This writer.get() call borrows writer immutably, and the &str value
+    // that Value::Str wraps is scoped to the lifetime of writer, which means
+    // we need to release it before the writer.put() call below that borrows
+    // writer mutably.  So we clone the &str.
+    // TODO: figure out how to avoid the allocation.
+    let rkv_value = match writer.get(&key).expect("read") {
+        Some(Value::Str(val)) => val,
+        _ => "",
+    }.to_string().clone();
+
+    println!("{:?}", rkv_value);
+    writer.put(&key, &Value::Str("Hello, World!"));
     writer.commit();
     NS_OK
 }
@@ -75,7 +89,8 @@ pub extern "C" fn xulstore_has_value(doc: &nsAString, id: &nsAString, attr: &nsA
 #[no_mangle]
 pub extern "C" fn xulstore_get_value(doc: &nsAString, id: &nsAString, attr: &nsAString, value: *mut nsAString) {
     let reader = STORE.read(&RKV).expect("reader");
-    let rkv_value = &reader.get("foo").expect("read").unwrap();
+    let key = &String::from_utf16_lossy(doc);
+    let rkv_value = &reader.get(key).expect("read").unwrap();
     println!("{:?}", rkv_value);
     let nsstring_value = &nsString::from("Hello, World!");
     unsafe {
