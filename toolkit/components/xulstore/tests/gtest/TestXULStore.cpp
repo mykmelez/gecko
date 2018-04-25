@@ -5,6 +5,7 @@
 extern "C" nsresult xulstore_set_value(nsAString* doc, nsAString* id, nsAString* attr, nsAString* value);
 extern "C" bool xulstore_has_value(nsAString* doc, nsAString* id, nsAString* attr);
 extern "C" void xulstore_get_value(const nsAString* doc, const nsAString* id, const nsAString* attr, nsAString* value);
+extern "C" nsresult xulstore_remove_value(const nsAString* doc, const nsAString* id, const nsAString* attr);
 
 TEST(XULStore, SetGetValue) {
   nsAutoString doc(NS_LITERAL_STRING("SetGetValue"));
@@ -39,6 +40,19 @@ TEST(XULStore, GetMissingValue) {
   nsAutoString id(NS_LITERAL_STRING("foo"));
   nsAutoString attr(NS_LITERAL_STRING("bar"));
   nsAutoString value;
+  xulstore_get_value(&doc, &id, &attr, &value);
+  EXPECT_TRUE(value.EqualsASCII(""));
+}
+
+TEST(XULStore, RemoveValue) {
+  nsAutoString doc(NS_LITERAL_STRING("RemoveValue"));
+  nsAutoString id(NS_LITERAL_STRING("foo"));
+  nsAutoString attr(NS_LITERAL_STRING("bar"));
+  nsAutoString value(NS_LITERAL_STRING("baz"));
+  EXPECT_EQ(xulstore_set_value(&doc, &id, &attr, &value), NS_OK);
+  xulstore_get_value(&doc, &id, &attr, &value);
+  EXPECT_TRUE(value.EqualsASCII("baz"));
+  EXPECT_EQ(xulstore_remove_value(&doc, &id, &attr), NS_OK);
   xulstore_get_value(&doc, &id, &attr, &value);
   EXPECT_TRUE(value.EqualsASCII(""));
 }

@@ -121,3 +121,15 @@ pub extern "C" fn xulstore_get_value(doc: &nsAString, id: &nsAString, attr: &nsA
         (*value).assign(&nsString::from(return_value))
     }
 }
+
+#[no_mangle]
+pub extern "C" fn xulstore_remove_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> nsresult {
+    let store_name = String::from_utf16_lossy(doc);
+    let store = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
+    let key = String::from_utf16_lossy(id) + "=" + &String::from_utf16_lossy(attr);
+    let mut writer = store.write(&RKV).expect("writer");
+    writer.delete(&key);
+    // TODO: remove database if we've removed the last key/value pair from it.
+    writer.commit();
+    NS_OK
+}
