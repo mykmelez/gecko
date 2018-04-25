@@ -10,7 +10,7 @@ use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str;
-use xpcom::{getter_addrefs, RefPtr, XpCom};
+use xpcom::{getter_addrefs, interfaces, RefPtr, XpCom};
 
 extern crate nsstring;
 use nsstring::{nsAString, nsString};
@@ -27,9 +27,9 @@ lazy_static! {
         // Get the profile directory path.
         let dir_svc = xpcom::services::get_DirectoryService().unwrap();
         let property = CString::new("ProfD").unwrap();
-        let mut profile_dir = xpcom::GetterAddrefs::<xpcom::interfaces::nsIFile>::new();
+        let mut profile_dir = xpcom::GetterAddrefs::<interfaces::nsIFile>::new();
         unsafe {
-            dir_svc.Get(property.as_ptr(), &xpcom::interfaces::nsIFile::IID, profile_dir.void_ptr());
+            dir_svc.Get(property.as_ptr(), &interfaces::nsIFile::IID, profile_dir.void_ptr());
         }
 
         // Convert the profile directory path to a Path.
@@ -135,7 +135,7 @@ pub extern "C" fn xulstore_remove_value(doc: &nsAString, id: &nsAString, attr: &
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_get_ids_enumerator(doc: &nsAString, ids: *mut xpcom::interfaces::nsIStringEnumerator)
+pub extern "C" fn xulstore_get_ids_enumerator(doc: &nsAString, ids: *mut interfaces::nsIStringEnumerator)
 -> nsresult {
     NS_OK
 }
