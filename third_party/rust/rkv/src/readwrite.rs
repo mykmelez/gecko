@@ -17,6 +17,7 @@ use std::marker::{
 use lmdb::{
     Database,
     Transaction,
+    RoCursor,
     RoTransaction,
     RwTransaction,
 };
@@ -91,6 +92,14 @@ impl<'env, K> Reader<'env, K> where K: AsRef<[u8]> {
     pub fn get<'s>(&'s self, k: K) -> Result<Option<Value<'s>>, StoreError> {
         let bytes = self.tx.get(self.db, &k.as_ref());
         read_transform(bytes)
+    }
+
+    // TODO: replace with higher-level wrapper function.
+    pub fn open_cursor<'s>(&'s self) -> Result<RoCursor<'s>, StoreError> {
+        match self.tx.open_ro_cursor(self.db) {
+            Ok(cursor) => Ok(cursor),
+            Err(e) => Err(StoreError::LmdbError(e)),
+        }
     }
 
     pub fn abort(self) {

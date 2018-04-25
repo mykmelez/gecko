@@ -1,3 +1,4 @@
+extern crate lmdb;
 extern crate rkv;
 extern crate tempdir;
 #[macro_use]
@@ -137,7 +138,17 @@ pub extern "C" fn xulstore_remove_value(doc: &nsAString, id: &nsAString, attr: &
 
 #[no_mangle]
 pub extern "C" fn xulstore_get_ids_enumerator(doc: &nsAString, ids: *mut *const interfaces::nsIStringEnumerator) -> nsresult {
-    let enumerator = ImplStringEnumerator::allocate(InitImplStringEnumerator {});
+    let store_name = String::from_utf16_lossy(doc);
+    let store: Store<&'static str> = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
+    let reader = store.read(&RKV).expect("reader");
+    let cursor = reader.open_cursor();
+    let iterator = cursor.iter().peekable();
+
+    println!("{:?}", cursor);
+
+    let enumerator = ImplStringEnumerator::allocate(InitImplStringEnumerator {
+        iterator: iterator,
+    });
     unsafe {
         enumerator.query_interface::<interfaces::nsIStringEnumerator>().unwrap().forget(&mut *ids);
     }
@@ -148,7 +159,8 @@ pub extern "C" fn xulstore_get_ids_enumerator(doc: &nsAString, ids: *mut *const 
 #[derive(xpcom)]
 #[xpimplements(nsIStringEnumerator)]
 #[refcnt = "atomic"]
-struct InitImplStringEnumerator {
+struct InitImplStringEnumerator<'a> {
+    iterator: std::iter::Peekable<std::result::Iter<'a, lmdb::RoCursor<'a>>>,
 }
 
 // Implementing methods on an XPCOM Struct
