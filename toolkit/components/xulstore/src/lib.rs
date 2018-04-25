@@ -1,5 +1,6 @@
 extern crate rkv;
 extern crate tempdir;
+#[macro_use]
 extern crate xpcom;
 
 use rkv::{Rkv, Store, Value};
@@ -135,7 +136,35 @@ pub extern "C" fn xulstore_remove_value(doc: &nsAString, id: &nsAString, attr: &
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_get_ids_enumerator(doc: &nsAString, ids: *mut interfaces::nsIStringEnumerator)
--> nsresult {
+pub extern "C" fn xulstore_get_ids_enumerator(doc: &nsAString, ids: *mut *const interfaces::nsIStringEnumerator) -> nsresult {
+    let enumerator = ImplStringEnumerator::allocate(InitImplStringEnumerator {});
+    unsafe {
+        enumerator.query_interface::<interfaces::nsIStringEnumerator>().unwrap().forget(&mut *ids);
+    }
     NS_OK
+}
+
+// Declaring an XPCOM Struct
+#[derive(xpcom)]
+#[xpimplements(nsIStringEnumerator)]
+#[refcnt = "atomic"]
+struct InitImplStringEnumerator {
+}
+
+// Implementing methods on an XPCOM Struct
+impl ImplStringEnumerator {
+    #![allow(non_snake_case)]
+
+    pub fn HasMore(&self, has_more: *mut bool) -> nsresult {
+        unsafe {
+            *has_more = false;
+        }
+        NS_OK
+    }
+    pub fn GetNext(&self, next_element: *mut nsAString) -> nsresult {
+        unsafe {
+            (*next_element).assign(&nsString::from(""))
+        }
+        NS_OK
+    }
 }
