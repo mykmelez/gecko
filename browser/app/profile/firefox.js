@@ -1273,11 +1273,7 @@ pref("browser.newtabpage.enabled", true);
 // Activity Stream prefs that control to which page to redirect
 pref("browser.newtabpage.activity-stream.prerender", true);
 #ifndef RELEASE_OR_BETA
-#ifdef MOZILLA_OFFICIAL
 pref("browser.newtabpage.activity-stream.debug", false);
-#else
-pref("browser.newtabpage.activity-stream.debug", true);
-#endif
 #endif
 
 pref("browser.library.activity-stream.enabled", true);
@@ -1431,6 +1427,9 @@ pref("identity.fxaccounts.migrateToDevEdition", true);
 #else
 pref("identity.fxaccounts.migrateToDevEdition", false);
 #endif
+
+// If activated, send tab will use the new FxA messages backend.
+pref("identity.fxaccounts.messages.enabled", false);
 
 // On GTK, we now default to showing the menubar only when alt is pressed:
 #ifdef MOZ_WIDGET_GTK
