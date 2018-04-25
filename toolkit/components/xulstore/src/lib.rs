@@ -133,3 +133,9 @@ pub extern "C" fn xulstore_remove_value(doc: &nsAString, id: &nsAString, attr: &
     writer.commit();
     NS_OK
 }
+
+#[no_mangle]
+pub extern "C" fn xulstore_get_ids_enumerator(doc: &nsAString, ids: *mut xpcom::interfaces::nsIStringEnumerator)
+-> nsresult {
+    NS_OK
+}
