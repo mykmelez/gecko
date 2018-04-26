@@ -146,37 +146,37 @@ pub extern "C" fn xulstore_get_ids_enumerator(doc: &nsAString, ids: *mut *const 
 
     println!("{:?}", cursor);
 
-    let enumerator = ImplStringEnumerator::allocate(InitImplStringEnumerator {
-        iterator: iterator,
-    });
-    unsafe {
-        enumerator.query_interface::<interfaces::nsIStringEnumerator>().unwrap().forget(&mut *ids);
-    }
+    // let enumerator = ImplStringEnumerator::allocate(InitImplStringEnumerator {
+    //     iterator: iterator,
+    // });
+    // unsafe {
+    //     enumerator.query_interface::<interfaces::nsIStringEnumerator>().unwrap().forget(&mut *ids);
+    // }
     NS_OK
 }
 
-// Declaring an XPCOM Struct
-#[derive(xpcom)]
-#[xpimplements(nsIStringEnumerator)]
-#[refcnt = "atomic"]
-struct InitImplStringEnumerator<'a> {
-    iterator: std::iter::Peekable<std::result::Iter<'a, lmdb::RoCursor<'a>>>,
-}
+// // Declaring an XPCOM Struct
+// #[derive(xpcom)]
+// #[xpimplements(nsIStringEnumerator)]
+// #[refcnt = "atomic"]
+// struct InitImplStringEnumerator<'a> {
+//     iterator: std::iter::Peekable<std::result::Iter<'a, lmdb::RoCursor<'a>>>,
+// }
 
-// Implementing methods on an XPCOM Struct
-impl ImplStringEnumerator {
-    #![allow(non_snake_case)]
+// // Implementing methods on an XPCOM Struct
+// impl ImplStringEnumerator {
+//     #![allow(non_snake_case)]
 
-    pub fn HasMore(&self, has_more: *mut bool) -> nsresult {
-        unsafe {
-            *has_more = false;
-        }
-        NS_OK
-    }
-    pub fn GetNext(&self, next_element: *mut nsAString) -> nsresult {
-        unsafe {
-            (*next_element).assign(&nsString::from(""))
-        }
-        NS_OK
-    }
-}
+//     pub fn HasMore(&self, has_more: *mut bool) -> nsresult {
+//         unsafe {
+//             *has_more = false;
+//         }
+//         NS_OK
+//     }
+//     pub fn GetNext(&self, next_element: *mut nsAString) -> nsresult {
+//         unsafe {
+//             (*next_element).assign(&nsString::from(""))
+//         }
+//         NS_OK
+//     }
+// }
