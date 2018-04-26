@@ -4,13 +4,14 @@ extern crate tempdir;
 #[macro_use]
 extern crate xpcom;
 
-use rkv::{Rkv, Store, Value};
+use rkv::{Reader, Rkv, Store, Value};
 
 use self::tempdir::TempDir;
 use std::ffi::CString;
 use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::ptr;
 use std::str;
 use xpcom::{getter_addrefs, interfaces, RefPtr, XpCom};
 
@@ -80,6 +81,9 @@ pub extern "C" fn xulstore_set_value(doc: &nsAString, id: &nsAString, attr: &nsA
     // }.to_string();
     // println!("{:?}", existing_value);
 
+    // TODO: store (and retrieve) values as raw bytes rather than converting
+    // them to String and back, which is not only potentially lossy but also
+    // presumably unnecessary expense.
     writer.put(&key, &Value::Str(&String::from_utf16_lossy(value)));
     writer.commit();
     NS_OK
@@ -137,7 +141,7 @@ pub extern "C" fn xulstore_remove_value(doc: &nsAString, id: &nsAString, attr: &
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_get_ids_enumerator(doc: &nsAString, ids: *mut *const interfaces::nsIStringEnumerator) -> nsresult {
+pub extern "C" fn xulstore_get_ids_iterator(doc: &nsAString) -> *mut StringIterator {
     let store_name = String::from_utf16_lossy(doc);
     let store: Store<&'static str> = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
     let reader = store.read(&RKV).expect("reader");
@@ -145,15 +149,79 @@ pub extern "C" fn xulstore_get_ids_enumerator(doc: &nsAString, ids: *mut *const 
     let iterator = cursor.iter().peekable();
 
     println!("{:?}", cursor);
+    println!("{:?}", iterator);
 
-    // let enumerator = ImplStringEnumerator::allocate(InitImplStringEnumerator {
-    //     iterator: iterator,
-    // });
-    // unsafe {
-    //     enumerator.query_interface::<interfaces::nsIStringEnumerator>().unwrap().forget(&mut *ids);
-    // }
-    NS_OK
+    Box::into_raw(Box::new(StringIterator::new()))
+    // ptr::null_mut()
 }
+
+pub struct StringIterator {
+}
+
+impl StringIterator {
+    pub fn new() -> StringIterator {
+        Self {
+        }
+    }
+}
+
+// pub struct StringReader<'a> {
+//     reader: Box<Reader<'a, &'static str>>,
+// }
+
+// pub struct StringIterator<'a> {
+//     reader: Box<StringReader<'a>>,
+//     cursor: Box<lmdb::RoCursor<'a>>,
+// }
+
+// impl<'a> StringReader<'a> {
+//     pub fn new(reader: Box<Reader<'a, &'static str>>) -> StringReader<'a> {
+//         Self {
+//             reader: reader,
+//         }
+//     }
+// }
+
+// impl<'a> StringIterator<'a> {
+//     pub fn new(reader: Box<Reader<'a, &'static str>>) -> StringIterator<'a> {
+//         let string_reader = Box::new(StringReader::new(reader));
+//         let cursor = Box::new(string_reader.reader.open_cursor().expect("cursor"));
+
+//         let iter = Self {
+//             reader: string_reader,
+//             cursor: cursor,
+//         };
+
+//         // let iterator = Box::new(cursor.iter());
+//         iter
+//     }
+// }
+
+#[no_mangle]
+pub unsafe extern "C" fn xulstore_destroy_iterator(iter: *mut StringIterator) {
+    if !iter.is_null() {
+        drop(Box::from_raw(iter));
+    }
+}
+
+// #[no_mangle]
+// pub extern "C" fn xulstore_get_ids_enumerator(doc: &nsAString, ids: *mut *const interfaces::nsIStringEnumerator) -> nsresult {
+//     let store_name = String::from_utf16_lossy(doc);
+//     let store: Store<&'static str> = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
+//     let reader = store.read(&RKV).expect("reader");
+//     let cursor = reader.open_cursor();
+//     let iterator = cursor.iter().peekable();
+
+//     println!("{:?}", cursor);
+
+//     let enumerator = ImplStringEnumerator::allocate(InitImplStringEnumerator {
+//         iterator: iterator,
+//     });
+//     unsafe {
+//         enumerator.query_interface::<interfaces::nsIStringEnumerator>().unwrap().forget(&mut *ids);
+//     }
+//     NS_OK
+// }
 
 // // Declaring an XPCOM Struct
 // #[derive(xpcom)]
