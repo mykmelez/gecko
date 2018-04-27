@@ -10,7 +10,9 @@ extern "C" {
   void xulstore_get_value(const nsAString* doc, const nsAString* id, const nsAString* attr, nsAString* value);
   nsresult xulstore_remove_value(const nsAString* doc, const nsAString* id, const nsAString* attr);
   void *xulstore_get_ids_iterator(const nsAString* doc);
-  void xulstore_destroy_iterator(void *);
+  bool xulstore_iter_has_more(void *);
+  nsresult xulstore_iter_get_next(void *, nsAString* value);
+  void xulstore_iter_destroy(void *);
 }
 
 TEST(XULStore, SetGetValue) {
@@ -72,30 +74,22 @@ TEST(XULStore, GetIDsEnumerator) {
   nsAutoString value(NS_LITERAL_STRING("value"));
 
   void *raw = xulstore_get_ids_iterator(&doc);
+  EXPECT_FALSE(xulstore_iter_has_more(raw));
+  xulstore_iter_destroy(raw);
 
-  // Temporarily work around unused-variables error.
-  (void)raw;
+  EXPECT_EQ(xulstore_set_value(&doc, &id1, &attr, &value), NS_OK);
+  EXPECT_EQ(xulstore_set_value(&doc, &id2, &attr, &value), NS_OK);
+  EXPECT_EQ(xulstore_set_value(&doc, &id3, &attr, &value), NS_OK);
 
-  // bool hasmore = true;
-  // ids->HasMore(&hasmore);
-  // EXPECT_FALSE(hasmore);
-
-  // EXPECT_EQ(xulstore_set_value(&doc, &id1, &attr, &value), NS_OK);
-  // EXPECT_EQ(xulstore_set_value(&doc, &id2, &attr, &value), NS_OK);
-  // EXPECT_EQ(xulstore_set_value(&doc, &id3, &attr, &value), NS_OK);
-
-  // rv = xulstore_get_ids_enumerator(&doc, getter_AddRefs(ids));
-  // ids->HasMore(&hasmore);
-  // EXPECT_TRUE(hasmore);
-
-  // nsAutoString id;
-  // ids->GetNext(id);
-  // EXPECT_TRUE(id.EqualsASCII("bar"));
-  // ids->GetNext(id);
-  // EXPECT_TRUE(id.EqualsASCII("baz"));
-  // ids->GetNext(id);
-  // EXPECT_TRUE(id.EqualsASCII("foo"));
-
-  // ids->HasMore(&hasmore);
-  // EXPECT_FALSE(hasmore);
+  raw = xulstore_get_ids_iterator(&doc);
+  EXPECT_TRUE(xulstore_iter_has_more(raw));
+  nsAutoString id;
+  xulstore_iter_get_next(raw, &id);
+  EXPECT_TRUE(id.EqualsASCII("bar"));
+  xulstore_iter_get_next(raw, &id);
+  EXPECT_TRUE(id.EqualsASCII("baz"));
+  xulstore_iter_get_next(raw, &id);
+  EXPECT_TRUE(id.EqualsASCII("foo"));
+  EXPECT_FALSE(xulstore_iter_has_more(raw));
+  xulstore_iter_destroy(raw);
 }

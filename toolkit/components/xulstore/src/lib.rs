@@ -4,6 +4,7 @@ extern crate tempdir;
 #[macro_use]
 extern crate xpcom;
 
+use lmdb::{Cursor};
 use rkv::{Reader, Rkv, Store, Value};
 
 use self::tempdir::TempDir;
@@ -145,65 +146,87 @@ pub extern "C" fn xulstore_get_ids_iterator(doc: &nsAString) -> *mut StringItera
     let store_name = String::from_utf16_lossy(doc);
     let store: Store<&'static str> = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
     let reader = store.read(&RKV).expect("reader");
-    let cursor = reader.open_cursor();
-    let iterator = cursor.iter().peekable();
+    let mut cursor = reader.open_cursor().expect("cursor");
+    println!("cursor: {:?}", cursor);
+    let mut iterator = cursor.iter();
+    println!("iterator: {:?}", iterator);
+    // let collection: () = iterator.map(|v| println!("item: {:?}", v)).collect();
+    let collection: Vec<&str> = iterator
+        .map(|(key,val)| key)
 
-    println!("{:?}", cursor);
-    println!("{:?}", iterator);
+        // Assumes we control all writes into database.
+        // TODO: avoid making that assumption and check the conversion.
+        .map(|v| unsafe { str::from_utf8_unchecked(&v) })
 
-    Box::into_raw(Box::new(StringIterator::new()))
+        .map(|v| v.split_at(v.find('=').unwrap()))
+        .map(|(id, attr)| id)
+        // .map(|v| println!("item: {:?}", v))
+        .collect();
+
+    println!("collection: {:?}", collection);
+
+    Box::into_raw(Box::new(StringIterator::new(collection)))
     // ptr::null_mut()
 }
 
-pub struct StringIterator {
+pub struct StringIterator<'a> {
+    index: usize,
+    values: Vec<&'a str>,
 }
 
-impl StringIterator {
-    pub fn new() -> StringIterator {
+impl<'a> StringIterator<'a> {
+    pub fn new(values: Vec<&'a str>) -> StringIterator {
         Self {
+            index: 0,
+            values: values,
         }
+    }
+
+    pub fn has_more(&self) -> bool {
+        self.index < self.values.len()
+    }
+
+    pub fn get_next(&mut self, value: *mut nsAString) -> nsresult {
+        // TODO: confirm that self.index in range.
+        // TODO: consume the value being returned.
+        unsafe {
+            (*value).assign(&nsString::from(self.values[self.index]));
+        }
+        self.index = self.index + 1;
+        NS_OK
     }
 }
 
-// pub struct StringReader<'a> {
-//     reader: Box<Reader<'a, &'static str>>,
-// }
-
-// pub struct StringIterator<'a> {
-//     reader: Box<StringReader<'a>>,
-//     cursor: Box<lmdb::RoCursor<'a>>,
-// }
-
-// impl<'a> StringReader<'a> {
-//     pub fn new(reader: Box<Reader<'a, &'static str>>) -> StringReader<'a> {
-//         Self {
-//             reader: reader,
-//         }
-//     }
-// }
-
-// impl<'a> StringIterator<'a> {
-//     pub fn new(reader: Box<Reader<'a, &'static str>>) -> StringIterator<'a> {
-//         let string_reader = Box::new(StringReader::new(reader));
-//         let cursor = Box::new(string_reader.reader.open_cursor().expect("cursor"));
-
-//         let iter = Self {
-//             reader: string_reader,
-//             cursor: cursor,
-//         };
-
-//         // let iterator = Box::new(cursor.iter());
-//         iter
-//     }
-// }
+#[no_mangle]
+pub unsafe extern "C" fn xulstore_iter_has_more(iter: *mut StringIterator) -> bool {
+    if iter.is_null() {
+        // TODO: figure out the appropriate response in this case.  Panic?!
+        return false;
+    }
+    (&*iter).has_more()
+}
 
 #[no_mangle]
-pub unsafe extern "C" fn xulstore_destroy_iterator(iter: *mut StringIterator) {
+pub unsafe extern "C" fn xulstore_iter_get_next(iter: *mut StringIterator, value: *mut nsAString) -> nsresult {
+    if iter.is_null() {
+        // TODO: figure out the appropriate response in this case.  Panic?!
+        return NS_OK;
+    }
+    (&mut *iter).get_next(value)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn xulstore_iter_destroy(iter: *mut StringIterator) {
     if !iter.is_null() {
         drop(Box::from_raw(iter));
     }
 }
 
+// In theory, we should be able to implement iteration as nsIStringEnumerator.
+// But we need to specify a lifetime parameter on the RoCursor and Iter,
+// which runs afoul of the "Cannot #[derive(xpcom)] on a generic type" error
+// in the xpcom procedural macro definition
+// <https://searchfox.org/mozilla-central/rev/68fdb6c/xpcom/rust/xpcom/xpcom_macros/src/lib.rs#501-505>.
 // #[no_mangle]
 // pub extern "C" fn xulstore_get_ids_enumerator(doc: &nsAString, ids: *mut *const interfaces::nsIStringEnumerator) -> nsresult {
 //     let store_name = String::from_utf16_lossy(doc);
@@ -211,9 +234,7 @@ pub unsafe extern "C" fn xulstore_destroy_iterator(iter: *mut StringIterator) {
 //     let reader = store.read(&RKV).expect("reader");
 //     let cursor = reader.open_cursor();
 //     let iterator = cursor.iter().peekable();
-
 //     println!("{:?}", cursor);
-
 //     let enumerator = ImplStringEnumerator::allocate(InitImplStringEnumerator {
 //         iterator: iterator,
 //     });
@@ -222,19 +243,14 @@ pub unsafe extern "C" fn xulstore_destroy_iterator(iter: *mut StringIterator) {
 //     }
 //     NS_OK
 // }
-
-// // Declaring an XPCOM Struct
 // #[derive(xpcom)]
 // #[xpimplements(nsIStringEnumerator)]
 // #[refcnt = "atomic"]
 // struct InitImplStringEnumerator<'a> {
 //     iterator: std::iter::Peekable<std::result::Iter<'a, lmdb::RoCursor<'a>>>,
 // }
-
-// // Implementing methods on an XPCOM Struct
 // impl ImplStringEnumerator {
 //     #![allow(non_snake_case)]
-
 //     pub fn HasMore(&self, has_more: *mut bool) -> nsresult {
 //         unsafe {
 //             *has_more = false;
@@ -246,5 +262,37 @@ pub unsafe extern "C" fn xulstore_destroy_iterator(iter: *mut StringIterator) {
 //             (*next_element).assign(&nsString::from(""))
 //         }
 //         NS_OK
+//     }
+// }
+
+// Another option is to define a StringIterator struct that encapsulates
+// an LMDB cursor, with functions for iterating it.  Unfortunately, that has
+// the issue that Rust doesn't support a Struct with fields that reference
+// each other, and in this case the struct would need to reference both
+// the cursor, which references its reader, and the reader itself, in order
+// in order to keep the reader alive as long as the cursor.
+//
+// <https://stackoverflow.com/questions/32300132/why-cant-i-store-a-value-and-a-reference-to-that-value-in-the-same-struct>
+//
+// We should be able to work around that in this case with the rental crate.
+//
+// pub struct StringIterator<'a> {
+//     reader: Box<Reader<'a, &'static str>>,
+//     cursor: Box<lmdb::RoCursor<'a>>,
+// }
+// impl<'a> StringReader<'a> {
+//     pub fn new(reader: Box<Reader<'a, &'static str>>) -> StringIterator<'a> {
+//         Self {
+//             reader: reader,
+//         }
+//     }
+// }
+// impl<'a> StringIterator<'a> {
+//     pub fn new(reader: Box<Reader<'a, &'static str>>) -> StringIterator<'a> {
+//         let cursor = Box::new(reader.open_cursor().expect("cursor"));
+//         iter = Self {
+//             reader: reader,
+//             cursor: cursor,
+//         }
 //     }
 // }
