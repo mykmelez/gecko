@@ -186,7 +186,7 @@ struct ComputedStyleMap
     bool IsLayoutFlushNeeded() const
     {
       return nsCSSProps::PropHasFlags(mProperty,
-                                      CSS_PROPERTY_GETCS_NEEDS_LAYOUT_FLUSH);
+                                      CSSPropFlags::GetCSNeedsLayoutFlush);
     }
 
     bool IsEnabled() const
@@ -6597,6 +6597,14 @@ nsComputedDOMStyle::DoGetShapeImageThreshold()
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
   val->SetNumber(StyleDisplay()->mShapeImageThreshold);
+  return val.forget();
+}
+
+already_AddRefed<CSSValue>
+nsComputedDOMStyle::DoGetShapeMargin()
+{
+  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
+  SetValueToCoord(val, StyleDisplay()->mShapeMargin, true);
   return val.forget();
 }
 

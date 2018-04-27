@@ -1764,10 +1764,11 @@ window._gBrowser = {
   },
 
   _isPreloadingEnabled() {
-    // Preloading for the newtab page is enabled when the pref is true
+    // Preloading for the newtab page is enabled when the prefs are true
     // and the URL is "about:newtab". We do not support preloading for
-    // custom newtab URLs.
+    // custom newtab URLs -- only for the default Firefox Home page.
     return Services.prefs.getBoolPref("browser.newtab.preload") &&
+      Services.prefs.getBoolPref("browser.newtabpage.enabled") &&
       !aboutNewTabService.overridden;
   },
 
@@ -2888,6 +2889,10 @@ window._gBrowser = {
 
     // Remove the tab ...
     this.tabContainer.removeChild(aTab);
+
+    // Update hashiddentabs if this tab was hidden.
+    if (aTab.hidden)
+      this.tabContainer._updateHiddenTabsStatus();
 
     // ... and fix up the _tPos properties immediately.
     for (let i = aTab._tPos; i < this.tabs.length; i++)

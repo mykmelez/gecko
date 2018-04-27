@@ -17,9 +17,7 @@ typedef unsigned long long nsViewID;
 
 // Core
 interface nsIDOMDocument;
-interface nsIDOMElement;
 interface nsIDOMNode;
-interface nsIDOMNodeList;
 
 // Needed for raises() in our IDL
 %{C++

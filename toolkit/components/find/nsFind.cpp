@@ -10,7 +10,6 @@
 #include "nsContentCID.h"
 #include "nsIContent.h"
 #include "nsIDOMNode.h"
-#include "nsIDOMNodeList.h"
 #include "nsISelection.h"
 #include "nsISelectionController.h"
 #include "nsIFrame.h"
@@ -21,12 +20,12 @@
 #include "nsAtom.h"
 #include "nsServiceManagerUtils.h"
 #include "nsUnicharUtils.h"
-#include "nsIDOMElement.h"
 #include "nsCRT.h"
 #include "nsRange.h"
 #include "nsContentUtils.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/TextEditor.h"
+#include "mozilla/dom/Element.h"
 
 using namespace mozilla;
 
@@ -389,11 +388,9 @@ nsFindContentIterator::SetupInnerIterator(nsIContent* aContent)
     return;
   }
 
-  nsCOMPtr<nsIDOMElement> rootElement;
-  textEditor->GetRootElement(getter_AddRefs(rootElement));
+  RefPtr<dom::Element> rootElement = textEditor->GetRoot();
 
-  nsCOMPtr<nsINode> rootNode = do_QueryInterface(rootElement);
-  if (!rootNode) {
+  if (!rootElement) {
     return;
   }
 
@@ -407,7 +404,7 @@ nsFindContentIterator::SetupInnerIterator(nsIContent* aContent)
   mInnerIterator = do_CreateInstance(kCPreContentIteratorCID);
 
   if (mInnerIterator) {
-    innerRange->SelectNodeContents(*rootNode, IgnoreErrors());
+    innerRange->SelectNodeContents(*rootElement, IgnoreErrors());
 
     // fix up the inner bounds, we may have to only lookup a portion
     // of the text control if the current node is a boundary point

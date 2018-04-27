@@ -318,11 +318,6 @@ CompositorBridgeParent::FinishShutdown()
   sIndirectLayerTrees.clear();
 }
 
-static void SetThreadPriority()
-{
-  hal::SetCurrentThreadPriority(hal::THREAD_PRIORITY_COMPOSITOR);
-}
-
 #ifdef COMPOSITOR_PERFORMANCE_WARNING
 static int32_t
 CalculateCompositionFrameRate()
@@ -424,9 +419,6 @@ CompositorBridgeParent::Initialize()
   CompositorLoop()->PostTask(NewRunnableFunction("AddCompositorRunnable",
                                                  &AddCompositor,
                                                  this, &mCompositorBridgeID));
-
-  CompositorLoop()->PostTask(NewRunnableFunction("SetThreadPriorityRunnable",
-                                                 SetThreadPriority));
 
 
   { // scope lock
@@ -1840,9 +1832,11 @@ CompositorBridgeParent::AllocPWebRenderBridgeParent(const wr::PipelineId& aPipel
   *aIdNamespace = mWrBridge->GetIdNamespace();
   mCompositorScheduler = mWrBridge->CompositorScheduler();
   MOZ_ASSERT(mCompositorScheduler);
-  MonitorAutoLock lock(*sIndirectLayerTreesLock);
-  MOZ_ASSERT(sIndirectLayerTrees[mRootLayerTreeID].mWrBridge == nullptr);
-  sIndirectLayerTrees[mRootLayerTreeID].mWrBridge = mWrBridge;
+  { // scope lock
+    MonitorAutoLock lock(*sIndirectLayerTreesLock);
+    MOZ_ASSERT(sIndirectLayerTrees[mRootLayerTreeID].mWrBridge == nullptr);
+    sIndirectLayerTrees[mRootLayerTreeID].mWrBridge = mWrBridge;
+  }
   *aTextureFactoryIdentifier = mWrBridge->GetTextureFactoryIdentifier();
   return mWrBridge;
 }

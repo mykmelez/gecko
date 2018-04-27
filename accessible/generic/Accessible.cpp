@@ -30,7 +30,6 @@
 #include "TreeWalker.h"
 #include "XULDocument.h"
 
-#include "nsIDOMElement.h"
 #include "nsIDOMXULButtonElement.h"
 #include "nsIDOMXULLabelElement.h"
 #include "nsIDOMXULSelectCntrlEl.h"
@@ -670,32 +669,31 @@ Accessible::RelativeBounds(nsIFrame** aBoundingFrame) const
   return nsRect();
 }
 
-nsIntRect
-Accessible::Bounds() const
+nsRect
+Accessible::BoundsInAppUnits() const
 {
   nsIFrame* boundingFrame = nullptr;
   nsRect unionRectTwips = RelativeBounds(&boundingFrame);
-  if (!boundingFrame)
-    return nsIntRect();
-
-  nsIntRect screenRect;
-  nsPresContext* presContext = mDoc->PresContext();
-  screenRect.SetRect(presContext->AppUnitsToDevPixels(unionRectTwips.X()),
-                     presContext->AppUnitsToDevPixels(unionRectTwips.Y()),
-                     presContext->AppUnitsToDevPixels(unionRectTwips.Width()),
-                     presContext->AppUnitsToDevPixels(unionRectTwips.Height()));
+  if (!boundingFrame) {
+    return nsRect();
+  }
 
   // We need to take into account a non-1 resolution set on the presshell.
   // This happens in mobile platforms with async pinch zooming. Here we
   // scale the bounds before adding the screen-relative offset.
-  screenRect.ScaleRoundOut(presContext->PresShell()->GetResolution());
+  unionRectTwips.ScaleRoundOut(mDoc->PresContext()->PresShell()->GetResolution());
   // We have the union of the rectangle, now we need to put it in absolute
   // screen coords.
-  nsIntRect orgRectPixels = boundingFrame->GetScreenRectInAppUnits().
-    ToNearestPixels(presContext->AppUnitsPerDevPixel());
-  screenRect.MoveBy(orgRectPixels.X(), orgRectPixels.Y());
+  nsRect orgRectPixels = boundingFrame->GetScreenRectInAppUnits();
+  unionRectTwips.MoveBy(orgRectPixels.X(), orgRectPixels.Y());
 
-  return screenRect;
+  return unionRectTwips;
+}
+
+nsIntRect
+Accessible::BoundsInCSSPixels() const
+{
+  return BoundsInAppUnits().ToNearestPixels(mDoc->PresContext()->AppUnitsPerCSSPixel());
 }
 
 void
@@ -762,7 +760,9 @@ Accessible::TakeFocus()
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
   if (fm) {
     AutoHandlingUserInputStatePusher inputStatePusher(true, nullptr, focusContent->OwnerDoc());
-    nsCOMPtr<nsIDOMElement> element(do_QueryInterface(focusContent));
+    // XXXbz: Can we actually have a non-element content here?
+    RefPtr<Element> element =
+      focusContent->IsElement() ? focusContent->AsElement() : nullptr;
     fm->SetFocus(element, 0);
   }
 }
@@ -1757,9 +1757,10 @@ Accessible::RelationByType(RelationType aType)
         }
       } else {
         // In XUL, use first <button default="true" .../> in the document
-        dom::XULDocument* xulDoc = mContent->OwnerDoc()->AsXULDocument();
+        nsIDocument* doc = mContent->OwnerDoc();
         nsCOMPtr<nsIDOMXULButtonElement> buttonEl;
-        if (xulDoc) {
+        if (doc->IsXULDocument()) {
+          dom::XULDocument* xulDoc = doc->AsXULDocument();
           nsCOMPtr<nsINodeList> possibleDefaultButtons =
             xulDoc->GetElementsByAttribute(NS_LITERAL_STRING("default"),
                                            NS_LITERAL_STRING("true"));

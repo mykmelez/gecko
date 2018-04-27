@@ -5285,9 +5285,12 @@ function setProjectDirectoryRoot(newRoot) {
   return ({ dispatch, getState }) => {
     const curRoot = (0, _ui.getProjectDirectoryRoot)(getState());
     if (newRoot && curRoot) {
-      const temp = newRoot.split("/");
-      temp.splice(0, 2);
-      newRoot = `${curRoot}/${temp.join("/")}`;
+      const newRootArr = newRoot.replace(/\/+/g, "/").split("/");
+      const curRootArr = curRoot.replace(/^\//, "").replace(/\/+/g, "/").split("/");
+      if (newRootArr[0] !== curRootArr[0]) {
+        newRootArr.splice(0, 2);
+        newRoot = `${curRoot}/${newRootArr.join("/")}`;
+      }
     }
 
     dispatch({
@@ -17021,10 +17024,12 @@ class SourcesTree extends _react.Component {
     // The "sourceTree.contents[0]" check ensures that there are contents
     // A custom root with no existing sources will be ignored
     if (isCustomRoot) {
+      const sourceContents = sourceTree.contents[0];
       let rootLabel = projectRoot.split("/").pop();
-      if (sourceTree.contents[0]) {
-        rootLabel = sourceTree.contents[0].name;
-        roots = () => sourceTree.contents[0].contents;
+      roots = () => sourceContents.contents;
+      if (sourceContents && sourceContents.name !== rootLabel) {
+        rootLabel = sourceContents.contents[0].name;
+        roots = () => sourceContents.contents[0].contents;
       }
 
       clearProjectRootButton = _react2.default.createElement(
@@ -18679,8 +18684,6 @@ var _PreviewFunction2 = _interopRequireDefault(_PreviewFunction);
 
 var _editor = __webpack_require__(1358);
 
-var _preview = __webpack_require__(1807);
-
 var _Svg = __webpack_require__(1359);
 
 var _Svg2 = _interopRequireDefault(_Svg);
@@ -18699,7 +18702,8 @@ const {
   createNode,
   getChildren,
   getValue,
-  nodeIsPrimitive
+  nodeIsPrimitive,
+  NODE_TYPES
 } = ObjectInspectorUtils.node;
 const { loadItemProperties } = ObjectInspectorUtils.loadProperties;
 
@@ -18708,20 +18712,17 @@ class Popup extends _react.Component {
   async componentWillMount() {
     const {
       value,
-      expression,
       setPopupObjectProperties,
       popupObjectProperties
     } = this.props;
-    const root = createNode({
-      name: expression,
-      contents: { value }
-    });
+
+    const root = this.getRoot();
 
     if (!nodeIsPrimitive(root) && value && value.actor && !popupObjectProperties[value.actor]) {
       const onLoadItemProperties = loadItemProperties(root, _firefox.createObjectClient);
       if (onLoadItemProperties !== null) {
         const properties = await onLoadItemProperties;
-        setPopupObjectProperties(value, properties);
+        setPopupObjectProperties(root.contents.value, properties);
       }
     }
   }
@@ -18743,13 +18744,18 @@ class Popup extends _react.Component {
   }
 
   getRoot() {
-    const { expression, value } = this.props;
+    const { expression, value, extra } = this.props;
 
-    return {
+    let rootValue = value;
+    if (extra.immutable) {
+      rootValue = extra.immutable.entries;
+    }
+
+    return createNode({
       name: expression,
       path: expression,
-      contents: { value }
-    };
+      contents: { value: rootValue }
+    });
   }
 
   getChildren() {
@@ -18796,75 +18802,61 @@ class Popup extends _react.Component {
   renderReact(react, roots) {
     const reactHeader = react.displayName || "React Component";
 
-    const header = _react2.default.createElement(
+    return _react2.default.createElement(
       "div",
       { className: "header-container" },
+      _react2.default.createElement(_Svg2.default, { name: "react", className: "logo" }),
       _react2.default.createElement(
         "h3",
         null,
         reactHeader
       )
     );
-
-    roots = roots.filter(r => ["state", "props"].includes(r.name));
-    return _react2.default.createElement(
-      "div",
-      { className: "preview-popup" },
-      header,
-      this.renderObjectInspector(roots)
-    );
   }
 
   renderImmutable(immutable) {
     const immutableHeader = immutable.type || "Immutable";
 
-    const header = _react2.default.createElement(
+    return _react2.default.createElement(
       "div",
       { className: "header-container" },
-      _react2.default.createElement(_Svg2.default, { name: "immutable", className: "immutable-logo" }),
+      _react2.default.createElement(_Svg2.default, { name: "immutable", className: "logo" }),
       _react2.default.createElement(
         "h3",
         null,
         immutableHeader
       )
     );
-
-    const roots = [createNode({ name: "entries", contents: { value: immutable.entries } })];
-
-    return _react2.default.createElement(
-      "div",
-      { className: "preview-popup" },
-      header,
-      this.renderObjectInspector(roots)
-    );
   }
 
   renderObjectPreview() {
+    const { extra } = this.props;
     const root = this.getRoot();
 
     if (nodeIsPrimitive(root)) {
       return null;
     }
 
-    const roots = this.getChildren();
+    let roots = this.getChildren();
     if (!Array.isArray(roots) || roots.length === 0) {
       return null;
     }
 
-    const { extra: { react, immutable } } = this.props;
-    const grip = getValue(root);
-
-    if ((0, _preview.isReactComponent)(grip)) {
-      return this.renderReact(react, roots);
+    let header = null;
+    if (extra.immutable) {
+      header = this.renderImmutable(extra.immutable);
+      roots = roots.filter(r => r.type != NODE_TYPES.PROTOTYPE);
     }
 
-    if ((0, _preview.isImmutable)(grip)) {
-      return this.renderImmutable(immutable);
+    if (extra.react) {
+      header = this.renderReact(extra.react);
+      roots = roots.filter(r => ["state", "props"].includes(r.name));
     }
 
     return _react2.default.createElement(
       "div",
       { className: "preview-popup" },
+      header,
       this.renderObjectInspector(roots)
     );
   }
@@ -21522,7 +21514,7 @@ class Breakpoint extends _react.Component {
         return;
       }
 
-      const sourceId = selectedSource.get("id");
+      const sourceId = selectedSource.id;
       const line = (0, _editor.toEditorLine)(sourceId, breakpoint.location.line);
 
       editor.codeMirror.setGutterMarker(line, "breakpoints", makeMarker(breakpoint.disabled));
@@ -21560,7 +21552,7 @@ class Breakpoint extends _react.Component {
       return;
     }
 
-    const sourceId = selectedSource.get("id");
+    const sourceId = selectedSource.id;
     const doc = (0, _editor.getDocument)(sourceId);
     if (!doc) {
       return;
@@ -22594,10 +22586,12 @@ var _indentation = __webpack_require__(1438);
 
 function findFunctionText(line, source, symbols) {
   const func = (0, _ast.findClosestFunction)(symbols, {
+    sourceId: source.id,
     line,
     column: Infinity
   });
-  if (!func) {
+
+  if (!func || !source.text) {
     return null;
   }
 
@@ -23276,10 +23270,6 @@ function isCurrentlyPausedAtBreakpoint(frame, why, breakpoint) {
   return bpId === pausedId;
 }
 
-function getBreakpointFilename(source) {
-  return source ? (0, _source.getFilename)(source) : "";
-}
-
 function createExceptionOption(label, value, onChange, className) {
   return _react2.default.createElement(
     "div",
@@ -23295,6 +23285,20 @@ function createExceptionOption(label, value, onChange, className) {
       label
     )
   );
+}
+
+function sortFilenames(urlA, urlB) {
+  const filenameA = (0, _source.getFilenameFromURL)(urlA);
+  const filenameB = (0, _source.getFilenameFromURL)(urlB);
+
+  if (filenameA > filenameB) {
+    return 1;
+  }
+  if (filenameA < filenameB) {
+    return -1;
+  }
+
+  return 0;
 }
 
 class Breakpoints extends _react.Component {
@@ -23320,9 +23324,12 @@ class Breakpoints extends _react.Component {
   }
 
   renderBreakpoint(breakpoint) {
+    const { selectedSource } = this.props;
+
     return _react2.default.createElement(_Breakpoint2.default, {
       key: breakpoint.locationId,
       breakpoint: breakpoint,
+      selectedSource: selectedSource,
       onClick: () => this.selectBreakpoint(breakpoint),
       onContextMenu: e => (0, _BreakpointsContextMenu2.default)(_extends({}, this.props, { breakpoint, contextMenuEvent: e })),
       onChange: () => this.handleBreakpointCheckbox(breakpoint),
@@ -23362,14 +23369,26 @@ class Breakpoints extends _react.Component {
       return;
     }
 
-    const groupedBreakpoints = (0, _lodash.groupBy)((0, _lodash.sortBy)([...breakpoints.valueSeq()], bp => bp.location.line), bp => getBreakpointFilename(bp.source));
+    const groupedBreakpoints = (0, _lodash.groupBy)((0, _lodash.sortBy)([...breakpoints.valueSeq()], bp => bp.location.line), bp => bp.source.url);
 
-    return [...Object.keys(groupedBreakpoints).sort().map(filename => {
+    return [...Object.keys(groupedBreakpoints).sort(sortFilenames).map(url => {
+      const file = (0, _source.getFilenameFromURL)(url);
+      const groupBreakpoints = groupedBreakpoints[url].filter(bp => !bp.hidden && (bp.text || bp.originalText));
+
+      if (!groupBreakpoints.length) {
+        return null;
+      }
+
       return [_react2.default.createElement(
         "div",
-        { className: "breakpoint-heading", title: filename, key: filename },
-        filename
-      ), ...groupedBreakpoints[filename].filter(bp => !bp.hidden && bp.text).map(bp => this.renderBreakpoint(bp))];
+        {
+          className: "breakpoint-heading",
+          title: url,
+          key: url,
+          onClick: () => this.props.selectSource(groupBreakpoints[0].source.id)
+        },
+        file
+      ), ...groupBreakpoints.map(bp => this.renderBreakpoint(bp))];
     })];
   }
 
@@ -23394,7 +23413,10 @@ function updateLocation(sources, frame, why, bp) {
 
 const _getBreakpoints = (0, _reselect.createSelector)(_selectors.getBreakpoints, _selectors.getSources, _selectors.getTopFrame, _selectors.getPauseReason, (breakpoints, sources, frame, why) => breakpoints.map(bp => updateLocation(sources, frame, why, bp)).filter(bp => bp.source && !bp.source.isBlackBoxed));
 
-exports.default = (0, _reactRedux.connect)((state, props) => ({ breakpoints: _getBreakpoints(state) }), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Breakpoints);
+exports.default = (0, _reactRedux.connect)((state, props) => ({
+  breakpoints: _getBreakpoints(state),
+  selectedSource: (0, _selectors.getSelectedSource)(state)
+}), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Breakpoints);
 
 /***/ }),
 
@@ -23465,7 +23487,12 @@ class Expressions extends _react.Component {
     };
 
     this.hideInput = () => {
+      this.setState({ focused: false });
       this.props.onExpressionAdded();
+    };
+
+    this.onFocus = () => {
+      this.setState({ focused: true });
     };
 
     this.handleExistingSubmit = async (e, expression) => {
@@ -23547,7 +23574,8 @@ class Expressions extends _react.Component {
     this.state = {
       editing: false,
       editIndex: -1,
-      inputValue: ""
+      inputValue: "",
+      focused: false
     };
   }
 
@@ -23565,10 +23593,10 @@ class Expressions extends _react.Component {
   }
 
   shouldComponentUpdate(nextProps, nextState) {
-    const { editing, inputValue } = this.state;
+    const { editing, inputValue, focused } = this.state;
     const { expressions, expressionError, showInput } = this.props;
 
-    return expressions !== nextProps.expressions || expressionError !== nextProps.expressionError || editing !== nextState.editing || inputValue !== nextState.inputValue || nextProps.showInput !== showInput;
+    return expressions !== nextProps.expressions || expressionError !== nextProps.expressionError || editing !== nextState.editing || inputValue !== nextState.inputValue || nextProps.showInput !== showInput || focused !== nextState.focused;
   }
 
   componentDidUpdate(prevProps, prevState) {
@@ -23599,24 +23627,29 @@ class Expressions extends _react.Component {
   }
 
   renderNewExpressionInput() {
-    const { expressionError } = this.props;
-    const { editing, inputValue } = this.state;
+    const { expressionError, expressions } = this.props;
+    const { editing, inputValue, focused } = this.state;
     const error = editing === false && expressionError === true;
     const placeholder = error ? L10N.getStr("expressions.errorMsg") : L10N.getStr("expressions.placeholder");
+    const autoFocus = expressions.size > 0;
+
     return _react2.default.createElement(
       "li",
-      { className: "expression-input-container" },
+      {
+        className: (0, _classnames2.default)("expression-input-container", { focused, error })
+      },
       _react2.default.createElement(
         "form",
         { className: "expression-input-form", onSubmit: this.handleNewSubmit },
         _react2.default.createElement("input", {
-          className: (0, _classnames2.default)("input-expression", { error }),
+          className: "input-expression",
           type: "text",
           placeholder: placeholder,
           onChange: this.handleChange,
           onBlur: this.hideInput,
           onKeyDown: this.handleKeyDown,
-          autoFocus: "true",
+          onFocus: this.onFocus,
+          autoFocus: autoFocus,
           value: !editing ? inputValue : ""
         }),
         _react2.default.createElement("input", { type: "submit", style: { display: "none" } })
@@ -23626,11 +23659,15 @@ class Expressions extends _react.Component {
 
   renderExpressionEditInput(expression) {
     const { expressionError } = this.props;
-    const { inputValue, editing } = this.state;
+    const { inputValue, editing, focused } = this.state;
     const error = editing === true && expressionError === true;
+
     return _react2.default.createElement(
       "span",
-      { className: "expression-input-container", key: expression.input },
+      {
+        className: (0, _classnames2.default)("expression-input-container", { focused, error }),
+        key: expression.input
+      },
       _react2.default.createElement(
         "form",
         {
@@ -23643,6 +23680,7 @@ class Expressions extends _react.Component {
           onChange: this.handleChange,
           onBlur: this.clear,
           onKeyDown: this.handleKeyDown,
+          onFocus: this.onFocus,
           value: editing ? inputValue : expression.input,
           ref: c => this._input = c
         }),
@@ -26669,9 +26707,12 @@ var _pausePoints = __webpack_require__(3622);
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 function findBestMatchExpression(symbols, tokenPos) {
-  const { memberExpressions, identifiers, literals } = symbols;
-  const { line, column } = tokenPos;
+  if (symbols.loading) {
+    return null;
+  }
 
+  const { line, column } = tokenPos;
+  const { memberExpressions, identifiers, literals } = symbols;
   const members = memberExpressions.filter(({ computed }) => !computed);
 
   return [].concat(identifiers, members, literals).reduce((found, expression) => {
@@ -26740,13 +26781,19 @@ function findClosestofSymbol(declarations, location) {
 }
 
 function findClosestFunction(symbols, location) {
-  const { functions } = symbols;
-  return findClosestofSymbol(functions, location);
+  if (!symbols || symbols.loading) {
+    return null;
+  }
+
+  return findClosestofSymbol(symbols.functions, location);
 }
 
 function findClosestClass(symbols, location) {
-  const { classes } = symbols;
-  return findClosestofSymbol(classes, location);
+  if (!symbols || symbols.loading) {
+    return null;
+  }
+
+  return findClosestofSymbol(symbols.functions, location);
 }
 
 /***/ }),
@@ -31463,7 +31510,11 @@ function createOriginalSource(originalUrl, generatedSource, sourceMaps) {
 }
 
 function loadSourceMaps(sources) {
-  return async function ({ dispatch, getState, sourceMaps }) {
+  return async function ({ dispatch, sourceMaps }) {
+    if (!sourceMaps) {
+      return;
+    }
+
     const originalSources = await Promise.all(sources.map(source => dispatch(loadSourceMap(source.id))));
 
     await dispatch(newSources((0, _lodash.flatten)(originalSources)));
@@ -31478,7 +31529,7 @@ function loadSourceMap(sourceId) {
   return async function ({ dispatch, getState, sourceMaps }) {
     const source = (0, _selectors.getSource)(getState(), sourceId).toJS();
 
-    if (!(0, _devtoolsSourceMap.isGeneratedId)(sourceId) || !source.sourceMapURL) {
+    if (!sourceMaps || !(0, _devtoolsSourceMap.isGeneratedId)(sourceId) || !source.sourceMapURL) {
       return;
     }
 
@@ -39099,6 +39150,8 @@ var _classnames = __webpack_require__(175);
 
 var _classnames2 = _interopRequireDefault(_classnames);
 
+var _devtoolsSourceMap = __webpack_require__(1360);
+
 var _Close = __webpack_require__(1374);
 
 var _Close2 = _interopRequireDefault(_Close);
@@ -39109,16 +39162,28 @@ var _prefs = __webpack_require__(226);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
 function getBreakpointLocation(source, line, column) {
   const isWasm = source && source.isWasm;
   const columnVal = _prefs.features.columnBreakpoints && column ? `:${column}` : "";
   const bpLocation = isWasm ? `0x${line.toString(16).toUpperCase()}` : `${line}${columnVal}`;
 
   return bpLocation;
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+function getBreakpointText(selectedSource, breakpoint) {
+  const { condition, text, originalText } = breakpoint;
+
+  if (condition) {
+    return condition;
+  }
+
+  if (!selectedSource || (0, _devtoolsSourceMap.isGeneratedId)(selectedSource.id) || originalText.length == 0) {
+    return text;
+  }
+
+  return originalText;
 }
 
 class Breakpoint extends _react.Component {
@@ -39127,26 +39192,29 @@ class Breakpoint extends _react.Component {
     this.setupEditor();
   }
 
-  componentDidUpdate() {
+  componentDidUpdate(prevProps) {
+    if (getBreakpointText(this.props.selectedSource, this.props.breakpoint) != getBreakpointText(prevProps.selectedSource, prevProps.breakpoint)) {
+      this.destroyEditor();
+    }
     this.setupEditor();
   }
 
   componentWillUnmount() {
-    if (this.editor) {
-      this.editor.destroy();
-    }
+    this.destroyEditor();
   }
 
   shouldComponentUpdate(nextProps) {
     const prevBreakpoint = this.props.breakpoint;
     const nextBreakpoint = nextProps.breakpoint;
 
-    return !prevBreakpoint || prevBreakpoint.text != nextBreakpoint.text || prevBreakpoint.disabled != nextBreakpoint.disabled || prevBreakpoint.condition != nextBreakpoint.condition || prevBreakpoint.hidden != nextBreakpoint.hidden || prevBreakpoint.isCurrentlyPaused != nextBreakpoint.isCurrentlyPaused;
+    return !prevBreakpoint || this.props.selectedSource != nextProps.selectedSource || prevBreakpoint.text != nextBreakpoint.text || prevBreakpoint.disabled != nextBreakpoint.disabled || prevBreakpoint.condition != nextBreakpoint.condition || prevBreakpoint.hidden != nextBreakpoint.hidden || prevBreakpoint.isCurrentlyPaused != nextBreakpoint.isCurrentlyPaused;
   }
 
-  getBreakpointText() {
-    const { breakpoint } = this.props;
-    return breakpoint.condition || breakpoint.text;
+  destroyEditor() {
+    if (this.editor) {
+      this.editor.destroy();
+      this.editor = null;
+    }
   }
 
   setupEditor() {
@@ -39154,7 +39222,9 @@ class Breakpoint extends _react.Component {
       return;
     }
 
-    this.editor = (0, _breakpoint.createEditor)(this.getBreakpointText());
+    const { selectedSource, breakpoint } = this.props;
+
+    this.editor = (0, _breakpoint.createEditor)(getBreakpointText(selectedSource, breakpoint));
 
     // disables the default search shortcuts
     // $FlowIgnore
@@ -39186,7 +39256,8 @@ class Breakpoint extends _react.Component {
   }
 
   renderText() {
-    const text = this.getBreakpointText();
+    const { selectedSource, breakpoint } = this.props;
+    const text = getBreakpointText(selectedSource, breakpoint);
 
     return _react2.default.createElement(
       "label",
@@ -39196,8 +39267,14 @@ class Breakpoint extends _react.Component {
   }
 
   renderLineClose() {
-    const { breakpoint, onCloseClick } = this.props;
-    const { line, column } = breakpoint.location;
+    const { breakpoint, onCloseClick, selectedSource } = this.props;
+    const { location } = breakpoint;
+
+    let { line, column } = location;
+    if (selectedSource && (0, _devtoolsSourceMap.isGeneratedId)(selectedSource.id) && breakpoint.generatedLocation) {
+      line = breakpoint.generatedLocation.line;
+      column = breakpoint.generatedLocation.column;
+    }
 
     return _react2.default.createElement(
       "div",

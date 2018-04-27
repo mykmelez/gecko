@@ -31,7 +31,6 @@
 #include "mozilla/LoadInfo.h"
 #include "nsAutoPtr.h"
 #include "nsContentPolicyUtils.h"
-#include "nsCSSParser.h"
 #include "nsDeviceContext.h"
 #include "nsFontFaceLoader.h"
 #include "nsIConsoleService.h"
@@ -990,13 +989,25 @@ GetWeightForDescriptor(const nsCSSValue& aVal)
     case eCSSUnit_Normal:
     case eCSSUnit_Null:
       return FontWeight::Normal();
-    case eCSSUnit_Pair:
-      // TODO(jfkthame): Handle optional second value of the font descriptor.
-      return GetWeightForDescriptor(aVal.GetPairValue().mXValue);
     default:
       MOZ_ASSERT_UNREACHABLE("Unknown font-weight descriptor value");
       return FontWeight::Normal();
   }
+}
+
+static WeightRange
+GetWeightRangeForDescriptor(const nsCSSValue& aVal,
+                            gfxFontEntry::RangeFlags& aRangeFlags)
+{
+  if (aVal.GetUnit() == eCSSUnit_Null) {
+    aRangeFlags |= gfxFontEntry::RangeFlags::eAutoWeight;
+    return WeightRange(FontWeight::Normal());
+  }
+  if (aVal.GetUnit() == eCSSUnit_Pair) {
+    return WeightRange(GetWeightForDescriptor(aVal.GetPairValue().mXValue),
+                       GetWeightForDescriptor(aVal.GetPairValue().mYValue));
+  }
+  return WeightRange(GetWeightForDescriptor(aVal));
 }
 
 static FontSlantStyle
@@ -1011,13 +1022,25 @@ GetStyleForDescriptor(const nsCSSValue& aVal)
       return FontSlantStyle::Italic();
     case eCSSUnit_FontSlantStyle:
       return aVal.GetFontSlantStyle();
-    case eCSSUnit_Pair:
-      // TODO(jfkthame): Handle optional second value of the font descriptor.
-      return GetStyleForDescriptor(aVal.GetPairValue().mXValue);
     default:
       MOZ_ASSERT_UNREACHABLE("Unknown font-style descriptor value");
       return FontSlantStyle::Normal();
   }
+}
+
+static SlantStyleRange
+GetStyleRangeForDescriptor(const nsCSSValue& aVal,
+                           gfxFontEntry::RangeFlags& aRangeFlags)
+{
+  if (aVal.GetUnit() == eCSSUnit_Null) {
+    aRangeFlags |= gfxFontEntry::RangeFlags::eAutoSlantStyle;
+    return SlantStyleRange(FontSlantStyle::Normal());
+  }
+  if (aVal.GetUnit() == eCSSUnit_Pair) {
+    return SlantStyleRange(GetStyleForDescriptor(aVal.GetPairValue().mXValue),
+                           GetStyleForDescriptor(aVal.GetPairValue().mYValue));
+  }
+  return SlantStyleRange(GetStyleForDescriptor(aVal));
 }
 
 static FontStretch
@@ -1028,13 +1051,25 @@ GetStretchForDescriptor(const nsCSSValue& aVal)
       return FontStretch::Normal();
     case eCSSUnit_FontStretch:
       return aVal.GetFontStretch();
-    case eCSSUnit_Pair:
-      // TODO(jfkthame): Handle optional second value of the font descriptor.
-      return GetStretchForDescriptor(aVal.GetPairValue().mXValue);
     default:
       MOZ_ASSERT_UNREACHABLE("Unknown font-style descriptor value");
       return FontStretch::Normal();
   }
+}
+
+static StretchRange
+GetStretchRangeForDescriptor(const nsCSSValue& aVal,
+                             gfxFontEntry::RangeFlags& aRangeFlags)
+{
+  if (aVal.GetUnit() == eCSSUnit_Null) {
+    aRangeFlags |= gfxFontEntry::RangeFlags::eAutoStretch;
+    return StretchRange(FontStretch::Normal());
+  }
+  if (aVal.GetUnit() == eCSSUnit_Pair) {
+    return StretchRange(GetStretchForDescriptor(aVal.GetPairValue().mXValue),
+                       GetStretchForDescriptor(aVal.GetPairValue().mYValue));
+  }
+  return StretchRange(GetStretchForDescriptor(aVal));
 }
 
 /* static */ already_AddRefed<gfxUserFontEntry>
@@ -1050,17 +1085,19 @@ FontFaceSet::FindOrCreateUserFontEntryFromFontFace(const nsAString& aFamilyName,
   uint32_t languageOverride = NO_FONT_LANGUAGE_OVERRIDE;
   uint8_t fontDisplay = NS_FONT_DISPLAY_AUTO;
 
+  gfxFontEntry::RangeFlags rangeFlags = gfxFontEntry::RangeFlags::eNoFlags;
+
   // set up weight
   aFontFace->GetDesc(eCSSFontDesc_Weight, val);
-  FontWeight weight = GetWeightForDescriptor(val);
+  WeightRange weight = GetWeightRangeForDescriptor(val, rangeFlags);
 
   // set up stretch
   aFontFace->GetDesc(eCSSFontDesc_Stretch, val);
-  FontStretch stretch = GetStretchForDescriptor(val);
+  StretchRange stretch = GetStretchRangeForDescriptor(val, rangeFlags);
 
   // set up font style
   aFontFace->GetDesc(eCSSFontDesc_Style, val);
-  FontSlantStyle italicStyle = GetStyleForDescriptor(val);
+  SlantStyleRange italicStyle = GetStyleRangeForDescriptor(val, rangeFlags);
 
   // set up font display
   aFontFace->GetDesc(eCSSFontDesc_Display, val);
@@ -1242,7 +1279,9 @@ FontFaceSet::FindOrCreateUserFontEntryFromFontFace(const nsAString& aFamilyName,
                                                  featureSettings,
                                                  variationSettings,
                                                  languageOverride,
-                                                 unicodeRanges, fontDisplay);
+                                                 unicodeRanges, fontDisplay,
+                                                 rangeFlags);
+
   return entry.forget();
 }
 
@@ -1288,14 +1327,18 @@ FontFaceSet::LogMessage(gfxUserFontEntry* aUserFontEntry,
   nsAutoCString fontURI;
   aUserFontEntry->GetFamilyNameAndURIForLogging(familyName, fontURI);
 
+  nsAutoCString weightString;
+  aUserFontEntry->Weight().ToString(weightString);
+  nsAutoCString stretchString;
+  aUserFontEntry->Stretch().ToString(stretchString);
   nsPrintfCString message
        ("downloadable font: %s "
-        "(font-family: \"%s\" style:%s weight:%g stretch:%g%% src index:%d)",
+        "(font-family: \"%s\" style:%s weight:%s stretch:%s src index:%d)",
         aMessage,
         familyName.get(),
-        aUserFontEntry->IsItalic() ? "italic" : "normal",
-        aUserFontEntry->Weight().ToFloat(),
-        aUserFontEntry->Stretch().Percentage(),
+        aUserFontEntry->IsItalic() ? "italic" : "normal", // XXX todo: oblique?
+        weightString.get(),
+        stretchString.get(),
         aUserFontEntry->GetSrcIndex());
 
   if (NS_FAILED(aStatus)) {
@@ -1825,7 +1868,7 @@ FontFaceSet::PrefEnabled()
 
 NS_IMETHODIMP
 FontFaceSet::StyleSheetLoaded(StyleSheet* aSheet,
-                              bool aWasAlternate,
+                              bool aWasDeferred,
                               nsresult aStatus)
 {
   CheckLoadingFinished();
@@ -1966,20 +2009,21 @@ FontFaceSet::UserFontSet::DoRebuildUserFontSet()
 /* virtual */ already_AddRefed<gfxUserFontEntry>
 FontFaceSet::UserFontSet::CreateUserFontEntry(
                                const nsTArray<gfxFontFaceSrc>& aFontFaceSrcList,
-                               FontWeight aWeight,
-                               FontStretch aStretch,
-                               FontSlantStyle aStyle,
+                               WeightRange aWeight,
+                               StretchRange aStretch,
+                               SlantStyleRange aStyle,
                                const nsTArray<gfxFontFeature>& aFeatureSettings,
                                const nsTArray<gfxFontVariation>& aVariationSettings,
                                uint32_t aLanguageOverride,
                                gfxCharacterMap* aUnicodeRanges,
-                               uint8_t aFontDisplay)
+                               uint8_t aFontDisplay,
+                               RangeFlags aRangeFlags)
 {
   RefPtr<gfxUserFontEntry> entry =
     new FontFace::Entry(this, aFontFaceSrcList, aWeight, aStretch, aStyle,
                         aFeatureSettings, aVariationSettings,
                         aLanguageOverride, aUnicodeRanges,
-                        aFontDisplay);
+                        aFontDisplay, aRangeFlags);
   return entry.forget();
 }
 

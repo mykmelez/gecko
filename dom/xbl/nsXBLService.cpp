@@ -14,7 +14,6 @@
 #include "nsIInputStream.h"
 #include "nsNameSpaceManager.h"
 #include "nsIURI.h"
-#include "nsIDOMElement.h"
 #include "nsIURL.h"
 #include "nsIChannel.h"
 #include "nsString.h"
@@ -27,7 +26,6 @@
 #include "nsGkAtoms.h"
 #include "nsIMemory.h"
 #include "nsIObserverService.h"
-#include "nsIDOMNodeList.h"
 #include "nsXBLContentSink.h"
 #include "nsXBLBinding.h"
 #include "nsXBLPrototypeBinding.h"
@@ -617,7 +615,8 @@ nsXBLService::AttachGlobalKeyHandler(EventTarget* aTarget)
   if (contentNode && contentNode->GetProperty(nsGkAtoms::listener))
     return NS_OK;
 
-  nsCOMPtr<nsIDOMElement> elt(do_QueryInterface(contentNode));
+  Element* elt =
+   contentNode && contentNode->IsElement() ? contentNode->AsElement() : nullptr;
 
   // Create the key handler
   RefPtr<nsXBLWindowKeyHandler> handler =

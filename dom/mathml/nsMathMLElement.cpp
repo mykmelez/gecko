@@ -14,7 +14,6 @@
 #include "nsITableCellLayout.h" // for MAX_COLSPAN / MAX_ROWSPAN
 #include "nsLayoutStylesheetCache.h"
 #include "nsCSSValue.h"
-#include "nsCSSParser.h"
 #include "nsMappedAttributes.h"
 #include "nsStyleConsts.h"
 #include "nsIDocument.h"
@@ -37,7 +36,7 @@ using namespace mozilla::dom;
 // nsISupports methods:
 
 NS_IMPL_ISUPPORTS_INHERITED(nsMathMLElement, nsMathMLElementBase,
-                            nsIDOMElement, nsIDOMNode, Link)
+                            nsIDOMNode, Link)
 
 static nsresult
 WarnDeprecated(const char16_t* aDeprecatedAttribute,

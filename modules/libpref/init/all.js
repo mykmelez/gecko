@@ -595,8 +595,8 @@ pref("media.cubeb.logging_level", "");
 #ifdef XP_LINUX
 pref("media.cubeb.sandbox", true);
 pref("media.audioipc.pool_size", 2);
-// 64 kB stack per pool thread.
-pref("media.audioipc.stack_size", 65536);
+// 64 * 4 kB stack per pool thread.
+pref("media.audioipc.stack_size", 262144);
 #else
 pref("media.cubeb.sandbox", false);
 #endif
@@ -626,6 +626,10 @@ pref("layers.geometry.d3d11.enabled", true);
 pref("apz.allow_checkerboarding", true);
 pref("apz.allow_immediate_handoff", true);
 pref("apz.allow_zooming", false);
+pref("apz.android.chrome_fling_physics.enabled", false);
+pref("apz.android.chrome_fling_physics.friction", "0.015");
+pref("apz.android.chrome_fling_physics.inflexion", "0.35");
+pref("apz.android.chrome_fling_physics.stop_threshold", "0.1");
 pref("apz.autoscroll.enabled", true);
 
 // Whether to lock touch scrolling to one axis at a time
@@ -2164,6 +2168,7 @@ pref("network.cookie.lifetimePolicy",       0); // 0-accept, 1-dontUse 2-acceptF
 pref("network.cookie.prefsMigrated",        false);
 pref("network.cookie.lifetime.days",        90); // Ignored unless network.cookie.lifetimePolicy is 3.
 
+pref("network.proxy.enable_wpad_over_dhcp", true);
 // The PAC file to load.  Ignored unless network.proxy.type is 2.
 pref("network.proxy.autoconfig_url", "");
 // Strip off paths when sending URLs to PAC scripts
@@ -2459,7 +2464,7 @@ pref("security.csp.experimentalEnabled", false);
 pref("security.csp.enableStrictDynamic", true);
 
 #if defined(DEBUG) && !defined(ANDROID)
-pref("csp.content_privileged_about_uris_without_csp", "blank,cache,certerror,credits,home,logo,neterror,newtab,printpreview,srcdoc,studies");
+pref("csp.content_privileged_about_uris_without_csp", "blank,cache,credits,home,logo,newtab,printpreview,srcdoc,studies");
 #endif
 
 #ifdef NIGHTLY_BUILD
@@ -2898,8 +2903,6 @@ pref("layout.css.prefixes.font-features", true);
 // Is support for background-blend-mode enabled?
 pref("layout.css.background-blend-mode.enabled", true);
 
-// Is support for CSS text-combine-upright (tate-chu-yoko) enabled?
-pref("layout.css.text-combine-upright.enabled", true);
 // Is support for CSS text-combine-upright: digits 2-4 enabled?
 pref("layout.css.text-combine-upright-digits.enabled", false);
 

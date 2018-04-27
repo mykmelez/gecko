@@ -42,7 +42,8 @@ use selector_parser::PseudoElement;
 use selectors::parser::SelectorParseErrorKind;
 #[cfg(feature = "servo")] use servo_config::prefs::PREFS;
 use shared_lock::StylesheetGuards;
-use style_traits::{CssWriter, ParseError, ParsingMode, StyleParseErrorKind, ToCss};
+use style_traits::{CssWriter, ParseError, ParsingMode};
+use style_traits::{SpecifiedValueInfo, StyleParseErrorKind, ToCss};
 use stylesheets::{CssRuleType, Origin, UrlExtraData};
 #[cfg(feature = "servo")] use values::Either;
 use values::generics::text::LineHeight;
@@ -540,6 +541,24 @@ impl NonCustomPropertyId {
         }
 
         false
+    }
+
+    /// The supported types of this property. The return value should be
+    /// style_traits::CssType when it can become a bitflags type.
+    fn supported_types(&self) -> u8 {
+        const SUPPORTED_TYPES: [u8; ${len(data.longhands) + len(data.shorthands)}] = [
+            % for prop in data.longhands:
+                <${prop.specified_type()} as SpecifiedValueInfo>::SUPPORTED_TYPES,
+            % endfor
+            % for prop in data.shorthands:
+            % if prop.name == "all":
+                0, // 'all' accepts no value other than CSS-wide keywords
+            % else:
+                <shorthands::${prop.ident}::Longhands as SpecifiedValueInfo>::SUPPORTED_TYPES,
+            % endif
+            % endfor
+        ];
+        SUPPORTED_TYPES[self.0]
     }
 }
 
@@ -1713,6 +1732,19 @@ impl PropertyId {
         };
         id.allowed_in(context)
     }
+
+    /// Whether the property supports the given CSS type.
+    /// `ty` should a bitflags of constants in style_traits::CssType.
+    pub fn supports_type(&self, ty: u8) -> bool {
+        let non_custom_id: NonCustomPropertyId = match *self {
+            PropertyId::Custom(_) => return false,
+            PropertyId::Shorthand(id) => id.into(),
+            PropertyId::Longhand(id) => id.into(),
+            PropertyId::ShorthandAlias(id, _) => id.into(),
+            PropertyId::LonghandAlias(id, _) => id.into(),
+        };
+        non_custom_id.supported_types() & ty != 0
+    }
 }
 
 /// A declaration using a CSS-wide keyword.
@@ -2243,7 +2275,7 @@ pub mod style_structs {
                     // Corresponds to the fields in
                     // `gfx::font_template::FontTemplateDescriptor`.
                     let mut hasher: FnvHasher = Default::default();
-                    hasher.write_u16(self.font_weight.0);
+                    self.font_weight.hash(&mut hasher);
                     self.font_stretch.hash(&mut hasher);
                     self.font_family.hash(&mut hasher);
                     self.hash = hasher.finish()
@@ -3420,7 +3452,7 @@ where
             let source = node.style_source();
 
             let declarations = if source.is_some() {
-                source.read(cascade_level.guard(guards)).declaration_importance_iter()
+                source.as_ref().unwrap().read(cascade_level.guard(guards)).declaration_importance_iter()
             } else {
                 // The root node has no style source.
                 DeclarationImportanceIterator::new(&[], &empty)

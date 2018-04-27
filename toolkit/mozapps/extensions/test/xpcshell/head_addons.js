@@ -46,6 +46,8 @@ ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
 ChromeUtils.import("resource://testing-common/AddonTestUtils.jsm");
 
+ChromeUtils.defineModuleGetter(this, "Blocklist",
+                               "resource://gre/modules/Blocklist.jsm");
 ChromeUtils.defineModuleGetter(this, "Extension",
                                "resource://gre/modules/Extension.jsm");
 ChromeUtils.defineModuleGetter(this, "ExtensionTestUtils",
@@ -1153,12 +1155,13 @@ gExtensionsJSON.append(EXTENSIONS_DB);
 function promiseInstallWebExtension(aData) {
   let addonFile = createTempWebExtensionFile(aData);
 
+  let promise = promiseWebExtensionStartup();
   return promiseInstallAllFiles([addonFile]).then(installs => {
     Services.obs.notifyObservers(addonFile, "flush-cache-entry");
     // Since themes are disabled by default, it won't start up.
     if (aData.manifest.theme)
       return installs[0].addon;
-    return promiseWebExtensionStartup();
+    return promise.then(() => installs[0].addon);
   });
 }
 
@@ -1627,4 +1630,51 @@ async function execSystemAddonTest(setupName, setup, test, distroDir, root, test
   }
 
   await promiseShutdownManager();
+}
+
+XPCOMUtils.defineLazyServiceGetter(this, "pluginHost",
+                                  "@mozilla.org/plugin/host;1", "nsIPluginHost");
+
+class MockPluginTag {
+  constructor(opts, enabledState = Ci.nsIPluginTag.STATE_ENABLED) {
+    this.pluginTag = pluginHost.createFakePlugin({
+      handlerURI: "resource://fake-plugin/${Math.random()}.xhtml",
+      mimeEntries: [{type: "application/x-fake-plugin"}],
+      fileName: `${opts.name}.so`,
+      ...opts,
+    });
+    this.pluginTag.enabledState = enabledState;
+
+    this.name = opts.name;
+    this.version = opts.version;
+  }
+  async isBlocklisted() {
+    let state = await Blocklist.getPluginBlocklistState(this.pluginTag);
+    return state == Services.blocklist.STATE_BLOCKED;
+  }
+  get disabled() {
+    return this.pluginTag.enabledState == Ci.nsIPluginTag.STATE_DISABLED;
+  }
+  set disabled(val) {
+    this.enabledState = Ci.nsIPluginTag[val ? "STATE_DISABLED" : "STATE_ENABLED"];
+  }
+  get enabledState() {
+    return this.pluginTag.enabledState;
+  }
+  set enabledState(val) {
+    this.pluginTag.enabledState = val;
+  }
+}
+
+function mockPluginHost(plugins) {
+  let PluginHost = {
+    getPluginTags(count) {
+      count.value = plugins.length;
+      return plugins.map(p => p.pluginTag);
+    },
+
+    QueryInterface: XPCOMUtils.generateQI(["nsIPluginHost"]),
+  };
+
+  MockRegistrar.register("@mozilla.org/plugin/host;1", PluginHost);
 }

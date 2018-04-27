@@ -294,7 +294,7 @@ license file's hash.
         # We do an |update -p| here to regenerate the Cargo.lock file with minimal changes. See bug 1324462
         subprocess.check_call([cargo, 'update', '-p', 'gkrust'], cwd=self.topsrcdir)
 
-        subprocess.check_call([cargo, 'vendor', '--quiet', '--no-delete', '--sync', 'Cargo.lock'] + [vendor_dir], cwd=self.topsrcdir)
+        subprocess.check_call([cargo, 'vendor', '--quiet', '--sync', 'Cargo.lock'] + [vendor_dir], cwd=self.topsrcdir)
 
         if not self._check_licenses(vendor_dir):
             self.log(logging.ERROR, 'license_check_failed', {},

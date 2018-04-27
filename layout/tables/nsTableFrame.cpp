@@ -33,7 +33,6 @@
 #include "nsGkAtoms.h"
 #include "nsCSSAnonBoxes.h"
 #include "nsIPresShell.h"
-#include "nsIDOMElement.h"
 #include "nsIScriptError.h"
 #include "nsFrameManager.h"
 #include "nsError.h"
@@ -1295,6 +1294,7 @@ nsDisplayTableBorderCollapse::CreateWebRenderCommands(mozilla::wr::DisplayListBu
 {
   static_cast<nsTableFrame *>(mFrame)->CreateWebRenderCommandsForBCBorders(aBuilder,
                                                                           aSc,
+                                                                          mVisibleRect,
                                                                           ToReferenceFrame());
   return true;
 }
@@ -8029,12 +8029,13 @@ nsTableFrame::PaintBCBorders(DrawTarget& aDrawTarget, const nsRect& aDirtyRect)
 void
 nsTableFrame::CreateWebRenderCommandsForBCBorders(wr::DisplayListBuilder& aBuilder,
                                                   const mozilla::layers::StackingContextHelper& aSc,
+                                                  const nsRect& aVisibleRect,
                                                   const nsPoint& aOffsetToReferenceFrame)
 {
   BCPaintBorderAction action(aBuilder, aSc, aOffsetToReferenceFrame);
-  // We always draw whole table border for webrender. Passing the table rect as
+  // We always draw whole table border for webrender. Passing the visible rect
   // dirty rect.
-  IterateBCBorders(action, GetRect());
+  IterateBCBorders(action, aVisibleRect - aOffsetToReferenceFrame);
 
   LayoutDeviceRect allBorderRect;
   wr::BorderSide wrSide[4];

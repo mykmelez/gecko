@@ -6,7 +6,7 @@
 
 /*
  * Base class for all element classes; this provides an implementation
- * of DOM Core's nsIDOMElement, implements nsIContent, provides
+ * of DOM Core's Element, implements nsIContent, provides
  * utility methods for subclasses, and so forth.
  */
 
@@ -26,7 +26,6 @@
 #include "mozilla/dom/NodeInfo.h"
 #include "nsIDocumentInlines.h"
 #include "mozilla/dom/DocumentTimeline.h"
-#include "nsIDOMNodeList.h"
 #include "nsIDOMDocument.h"
 #include "nsIContentIterator.h"
 #include "nsFlexContainerFrame.h"
@@ -119,7 +118,6 @@
 
 #include "mozAutoDocUpdate.h"
 
-#include "nsCSSParser.h"
 #include "nsDOMMutationObserver.h"
 #include "nsWrapperCacheInlines.h"
 #include "xpcpublic.h"
@@ -340,15 +338,14 @@ Element::TabIndex()
 void
 Element::Focus(mozilla::ErrorResult& aError)
 {
-  nsCOMPtr<nsIDOMElement> domElement = do_QueryInterface(this);
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
   // Also other browsers seem to have the hack to not re-focus (and flush) when
   // the element is already focused.
-  if (fm && domElement) {
+  if (fm) {
     if (fm->CanSkipFocus(this)) {
       fm->NeedsFlushBeforeEventHandling(this);
     } else {
-      aError = fm->SetFocus(domElement, 0);
+      aError = fm->SetFocus(this, 0);
     }
   }
 }
@@ -3308,9 +3305,9 @@ Element::PostHandleEventForLinks(EventChainPostVisitor& aVisitor)
           nsIFocusManager* fm = nsFocusManager::GetFocusManager();
           if (fm) {
             aVisitor.mEvent->mFlags.mMultipleActionsPrevented = true;
-            nsCOMPtr<nsIDOMElement> elem = do_QueryInterface(this);
-            fm->SetFocus(elem, nsIFocusManager::FLAG_BYMOUSE |
-                               nsIFocusManager::FLAG_NOSCROLL);
+            RefPtr<Element> kungFuDeathGrip(this);
+            fm->SetFocus(kungFuDeathGrip, nsIFocusManager::FLAG_BYMOUSE |
+                                          nsIFocusManager::FLAG_NOSCROLL);
           }
 
           EventStateManager::SetActiveManager(
