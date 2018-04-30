@@ -11,6 +11,7 @@ use self::tempdir::TempDir;
 use std::ffi::CString;
 use std::fmt::Write;
 use std::fs;
+use std::os::raw::c_uint;
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::str;
@@ -24,6 +25,9 @@ use nserror::*;
 
 #[macro_use]
 extern crate lazy_static;
+
+// TODO: set this to max DBs needed by Firefox.
+static MAX_DBS: c_uint = 10;
 
 lazy_static! {
     #[derive(Debug)]
@@ -52,7 +56,7 @@ lazy_static! {
         let xulstore_dir_path = profile_dir_path.join("xulstore");
         fs::create_dir_all(xulstore_dir_path.clone()).expect("dir created");
         println!("xulstore directory: {:?}", &xulstore_dir_path);
-        Rkv::new(&xulstore_dir_path).expect("new succeeded")
+        Rkv::with_capacity(&xulstore_dir_path, MAX_DBS).expect("new succeeded")
     };
 
     #[derive(Debug)]
@@ -160,6 +164,37 @@ pub extern "C" fn xulstore_get_ids_iterator(doc: &nsAString) -> *mut StringItera
 
         .map(|v| v.split_at(v.find('=').unwrap()))
         .map(|(id, attr)| id)
+        // .map(|v| println!("item: {:?}", v))
+        .collect();
+
+    println!("collection: {:?}", collection);
+
+    Box::into_raw(Box::new(StringIterator::new(collection)))
+    // ptr::null_mut()
+}
+
+// TODO refactor with xulstore_get_ids_iterator.
+#[no_mangle]
+pub extern "C" fn xulstore_get_attribute_iterator(doc: &nsAString) -> *mut StringIterator {
+    let store_name = String::from_utf16_lossy(doc);
+    let store: Store<&'static str> = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
+    let reader = store.read(&RKV).expect("reader");
+    let mut cursor = reader.open_cursor().expect("cursor");
+    println!("cursor: {:?}", cursor);
+    let mut iterator = cursor.iter();
+    println!("iterator: {:?}", iterator);
+    // let collection: () = iterator.map(|v| println!("item: {:?}", v)).collect();
+    let collection: Vec<&str> = iterator
+        .map(|(key,val)| key)
+
+        // Assumes we control all writes into database.
+        // TODO: avoid making that assumption and check the conversion.
+        .map(|v| unsafe { str::from_utf8_unchecked(&v) })
+
+        .map(|v| v.split_at(v.find('=').unwrap()))
+        // Split-at doesn't remove the character at which the string is split,
+        // so we have to slice it off ourselves.
+        .map(|(id, attr)| &attr[1..])
         // .map(|v| println!("item: {:?}", v))
         .collect();
 
