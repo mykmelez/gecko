@@ -3396,6 +3396,10 @@ nsWindow::OnWindowStateEvent(GtkWidget *aWidget, GdkEventWindowState *aEvent)
           aEvent->new_window_state & GDK_WINDOW_STATE_FULLSCREEN);
       }
     }
+
+    if (mDrawInTitlebar && mCSDSupportLevel == CSD_SUPPORT_CLIENT) {
+        UpdateClientOffsetForCSDWindow();
+    }
 }
 
 void
@@ -6635,9 +6639,13 @@ nsWindow::UpdateClientOffsetForCSDWindow()
     // _NET_FRAME_EXTENTS is not set on client decorated windows,
     // so we need to read offset between mContainer and toplevel mShell
     // window.
-    GtkBorder decorationSize;
-    GetCSDDecorationSize(GTK_WINDOW(mShell), &decorationSize);
-    mClientOffset = nsIntPoint(decorationSize.left, decorationSize.top);
+    if (mSizeState == nsSizeMode_Normal) {
+        GtkBorder decorationSize;
+        GetCSDDecorationSize(GTK_WINDOW(mShell), &decorationSize);
+        mClientOffset = nsIntPoint(decorationSize.left, decorationSize.top);
+    } else {
+        mClientOffset = nsIntPoint(0, 0);
+    }
 
     // Send a WindowMoved notification. This ensures that TabParent
     // picks up the new client offset and sends it to the child process
@@ -6719,7 +6727,17 @@ nsWindow::SetDrawsInTitlebar(bool aState)
         mNeedsShow = true;
         NativeResize();
 
-        UpdateClientOffsetForCSDWindow();
+        // Label mShell toplevel window so property_notify_event_cb callback
+        // can find its way home.
+        g_object_set_data(G_OBJECT(gtk_widget_get_window(mShell)),
+                          "nsWindow", this);
+
+        // When we use system titlebar setup managed by Gtk+ we also get
+        // _NET_FRAME_EXTENTS property for our toplevel window so we can't
+        // update the client offset it here.
+        if (aState) {
+            UpdateClientOffsetForCSDWindow();
+        }
 
         gtk_widget_destroy(tmpWindow);
     }

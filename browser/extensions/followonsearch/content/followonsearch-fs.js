@@ -92,6 +92,15 @@ let searchDomains = [{
   "followOnSearch": "oq",
   "codes": ["firefox-b-ab", "firefox-b", "firefox-b-1-ab", "firefox-b-1"],
   "sap": "google",
+}, {
+  // This is intended only for tests.
+  "domains": [ "mochi.test" ],
+  "search": "m",
+  "prefix": ["mt"],
+  "followOnSearch": "mtfo",
+  "reportPrefix": "form",
+  "codes": ["TEST"],
+  "sap": "mochitest"
 }];
 
 function getSearchDomainCodes(host) {
@@ -132,7 +141,7 @@ let searchingGoogle = false;
  * a progress listener.
  */
 var webProgressListener = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener, Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIWebProgressListener, Ci.nsISupportsWeakReference]),
   onLocationChange(aWebProgress, aRequest, aLocation, aFlags)
   {
     if (aWebProgress.DOMWindow && (aWebProgress.DOMWindow != content)) {
