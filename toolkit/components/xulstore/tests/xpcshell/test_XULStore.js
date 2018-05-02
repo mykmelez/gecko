@@ -4,6 +4,7 @@
 
 "use strict";
 
+ChromeUtils.import("resource://gre/modules/ctypes.jsm");
 ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
 var XULStore = null;
@@ -196,24 +197,56 @@ add_task(async function testRemoveValue() {
   checkArrays([], getIDs(aboutURI));
 });
 
-add_task(async function testRustAPI() {
-  ChromeUtils.import("resource://gre/modules/ctypes.jsm");
-  const lib = ctypes.open(OS.Constants.Path.libxul);
-  console.log(`${OS.Constants.Path.libxul} is ${lib}`);
-  Assert.equal(lib.toString(), "[object Library]");
+const lib = ctypes.open(OS.Constants.Path.libxul);
+const NSRESULT = ctypes.uint32_t;
+const xulstore_has_value_c = lib.declare(
+  "xulstore_has_value_c",
+  ctypes.default_abi,
+  ctypes.bool,
+  ctypes.char.ptr,
+  ctypes.char.ptr,
+  ctypes.char.ptr
+);
+const xulstore_get_value_c = lib.declare(
+  "xulstore_get_value_c",
+  ctypes.default_abi,
+  ctypes.char.ptr,
+  ctypes.char.ptr,
+  ctypes.char.ptr,
+  ctypes.char.ptr
+);
+const xulstore_free_value_c = lib.declare(
+  "xulstore_free_value_c",
+  ctypes.default_abi,
+  ctypes.void_t,
+  ctypes.char.ptr
+);
+const xulstore_set_value_c = lib.declare(
+  "xulstore_set_value_c",
+  ctypes.default_abi,
+  NSRESULT,
+  ctypes.char.ptr,
+  ctypes.char.ptr,
+  ctypes.char.ptr,
+  ctypes.char.ptr
+);
 
-  const xulstore_has_value_c = lib.declare(
-    "xulstore_has_value_c",
-    ctypes.default_abi,
-    ctypes.bool,
-    ctypes.char.ptr,
-    ctypes.char.ptr,
-    ctypes.char.ptr
-  );
-  console.log(`xulstore_has_value_c is ${xulstore_has_value_c.toString()}`);
-  Assert.ok(xulstore_has_value_c.toString().startsWith(
-    "ctypes.FunctionType(ctypes.default_abi, ctypes.bool, [ctypes.char.ptr, ctypes.char.ptr, ctypes.char.ptr])"
-  ));
+add_task(async function testHasValueCtypes() {
+  Assert.equal(xulstore_has_value_c("HasValue", "foo", "bar"), false);
+  Assert.equal(xulstore_set_value_c("HasValue", "foo", "bar", "baz"), Cr.NS_OK);
+  Assert.equal(xulstore_has_value_c("HasValue", "foo", "bar"), true);
+});
 
-  lib.close();
+add_task(async function testSetGetValueCtypes() {
+  {
+    let value = xulstore_get_value_c("SetGetValue", "foo", "bar");
+    Assert.equal(value.readString(), "");
+    xulstore_free_value_c(value);
+  }
+  Assert.equal(xulstore_set_value_c("SetGetValue", "foo", "bar", "baz"), Cr.NS_OK);
+  {
+    let value = xulstore_get_value_c("SetGetValue", "foo", "bar");
+    Assert.equal(value.readString(), "baz");
+    xulstore_free_value_c(value);
+  }
 });

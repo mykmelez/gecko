@@ -95,6 +95,18 @@ pub extern "C" fn xulstore_set_value(doc: &nsAString, id: &nsAString, attr: &nsA
 }
 
 #[no_mangle]
+pub extern "C" fn xulstore_set_value_c(doc: *const c_char, id: *const c_char, attr: *const c_char, value: *const c_char) -> nsresult {
+    let store_name = unsafe { CStr::from_ptr(doc) }.to_str().unwrap();
+    let store = RKV.create_or_open(Some(store_name)).expect("open store");
+    let key = unsafe { CStr::from_ptr(id) }.to_str().unwrap().to_owned() + "=" +
+              unsafe { CStr::from_ptr(attr) }.to_str().unwrap();
+    let mut writer = store.write(&RKV).expect("writer");
+    writer.put(&key, &Value::Str(unsafe { CStr::from_ptr(value) }.to_str().unwrap()));
+    writer.commit();
+    NS_OK
+}
+
+#[no_mangle]
 pub extern "C" fn xulstore_has_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> bool {
     let store_name = String::from_utf16_lossy(doc);
     let store = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
@@ -148,6 +160,39 @@ pub extern "C" fn xulstore_get_value(doc: &nsAString, id: &nsAString, attr: &nsA
     println!("return_value: {:?}", return_value);
     unsafe {
         (*value).assign(&nsString::from(return_value))
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn xulstore_get_value_c(doc: *const c_char, id: *const c_char, attr: *const c_char) -> *const c_char {
+    assert!(!doc.is_null());
+    assert!(!id.is_null());
+    assert!(!attr.is_null());
+
+    let store_name = unsafe { CStr::from_ptr(doc) }.to_str().unwrap();
+    let store = RKV.create_or_open(Some(store_name)).expect("open store");
+    let key = unsafe { CStr::from_ptr(id) }.to_str().unwrap().to_owned() + "=" +
+              unsafe { CStr::from_ptr(attr) }.to_str().unwrap();
+    let reader = store.read(&RKV).expect("reader");
+
+    let retrieved_value = reader.get(key);
+    println!("{:?}", retrieved_value);
+    let return_value = match retrieved_value {
+        Ok(Some(Value::Str(value))) => value,
+        // TODO: report error instead of merely swallowing it.
+        Err(_) => "",
+        _ => "",
+    };
+    println!("return_value: {:?}", return_value);
+    unsafe {
+        CString::new(return_value).unwrap().into_raw()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn xulstore_free_value_c(str: *mut c_char) {
+    if str.is_null() {
+        unsafe { CString::from_raw(str) };
     }
 }
 
