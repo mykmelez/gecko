@@ -8,10 +8,10 @@ use lmdb::{Cursor};
 use rkv::{Reader, Rkv, Store, Value};
 
 use self::tempdir::TempDir;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::fmt::Write;
 use std::fs;
-use std::os::raw::c_uint;
+use std::os::raw::{c_char, c_uint};
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::str;
@@ -99,6 +99,24 @@ pub extern "C" fn xulstore_has_value(doc: &nsAString, id: &nsAString, attr: &nsA
     let store_name = String::from_utf16_lossy(doc);
     let store = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
     let key = String::from_utf16_lossy(id) + "=" + &String::from_utf16_lossy(attr);
+    let reader = store.read(&RKV).expect("reader");
+
+    let value = reader.get(key);
+    println!("{:?}", value);
+    match value {
+        Result::Ok(None) => false,
+        // TODO: report error instead of merely swallowing it.
+        Result::Err(_) => false,
+        _ => true,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn xulstore_has_value_2(doc: *const c_char, id: *const c_char, attr: *const c_char) -> bool {
+    let store_name = unsafe { CStr::from_ptr(doc) }.to_str().unwrap();
+    let store = RKV.create_or_open(Some(store_name)).expect("open store");
+    let key = unsafe { CStr::from_ptr(id) }.to_str().unwrap().to_owned() + "=" +
+              unsafe { CStr::from_ptr(attr) }.to_str().unwrap();
     let reader = store.read(&RKV).expect("reader");
 
     let value = reader.get(key);

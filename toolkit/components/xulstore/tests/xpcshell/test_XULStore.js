@@ -195,3 +195,25 @@ add_task(async function testRemoveValue() {
   checkArrays([], getAttributes(aboutURI, "lockCol"));
   checkArrays([], getIDs(aboutURI));
 });
+
+add_task(async function testRustAPI() {
+  ChromeUtils.import("resource://gre/modules/ctypes.jsm");
+  const lib = ctypes.open(OS.Constants.Path.libxul);
+  console.log(`${OS.Constants.Path.libxul} is ${lib}`);
+  Assert.equal(lib.toString(), "[object Library]");
+
+  const xulstore_has_value_c = lib.declare(
+    "xulstore_has_value_c",
+    ctypes.default_abi,
+    ctypes.bool,
+    ctypes.char.ptr,
+    ctypes.char.ptr,
+    ctypes.char.ptr
+  );
+  console.log(`xulstore_has_value_c is ${xulstore_has_value_c.toString()}`);
+  Assert.ok(xulstore_has_value_c.toString().startsWith(
+    "ctypes.FunctionType(ctypes.default_abi, ctypes.bool, [ctypes.char.ptr, ctypes.char.ptr, ctypes.char.ptr])"
+  ));
+
+  lib.close();
+});
