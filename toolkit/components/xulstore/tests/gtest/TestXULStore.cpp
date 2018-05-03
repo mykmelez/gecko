@@ -43,6 +43,7 @@ TEST(XULStore, HasValue) {
   EXPECT_TRUE(xulstore_has_value(&doc, &id, &attr));
 }
 
+// TODO: merge with SetGetValue.
 TEST(XULStore, GetMissingValue) {
   nsAutoString doc(NS_LITERAL_STRING("GetMissingValue"));
   nsAutoString id(NS_LITERAL_STRING("foo"));

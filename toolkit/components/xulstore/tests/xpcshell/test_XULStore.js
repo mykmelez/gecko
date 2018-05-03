@@ -199,10 +199,11 @@ add_task(async function testRemoveValue() {
 
 const lib = ctypes.open(OS.Constants.Path.libxul);
 const NSRESULT = ctypes.uint32_t;
-const xulstore_has_value_c = lib.declare(
-  "xulstore_has_value_c",
+const xulstore_set_value_c = lib.declare(
+  "xulstore_set_value_c",
   ctypes.default_abi,
-  ctypes.bool,
+  NSRESULT,
+  ctypes.char.ptr,
   ctypes.char.ptr,
   ctypes.char.ptr,
   ctypes.char.ptr
@@ -215,20 +216,51 @@ const xulstore_get_value_c = lib.declare(
   ctypes.char.ptr,
   ctypes.char.ptr
 );
+const xulstore_has_value_c = lib.declare(
+  "xulstore_has_value_c",
+  ctypes.default_abi,
+  ctypes.bool,
+  ctypes.char.ptr,
+  ctypes.char.ptr,
+  ctypes.char.ptr
+);
 const xulstore_free_value_c = lib.declare(
   "xulstore_free_value_c",
   ctypes.default_abi,
   ctypes.void_t,
   ctypes.char.ptr
 );
-const xulstore_set_value_c = lib.declare(
-  "xulstore_set_value_c",
+const xulstore_remove_value_c = lib.declare(
+  "xulstore_remove_value_c",
   ctypes.default_abi,
   NSRESULT,
   ctypes.char.ptr,
   ctypes.char.ptr,
-  ctypes.char.ptr,
   ctypes.char.ptr
+);
+const xulstore_get_ids_iterator_c = lib.declare(
+  "xulstore_get_ids_iterator_c",
+  ctypes.default_abi,
+  ctypes.voidptr_t,
+  ctypes.char.ptr
+);
+const xulstore_iter_has_more_c = lib.declare(
+  "xulstore_iter_has_more_c",
+  ctypes.default_abi,
+  ctypes.bool,
+  ctypes.voidptr_t
+);
+const xulstore_get_next_c = lib.declare(
+  "xulstore_iter_get_next_c",
+  ctypes.default_abi,
+  ctypes.char.ptr,
+  ctypes.voidptr_t
+);
+const xulstore_iter_destroy_c = lib.declare(
+  "xulstore_iter_destroy_c",
+  ctypes.default_abi,
+  ctypes.void_t,
+  ctypes.voidptr_t
 );
 
 add_task(async function testHasValueCtypes() {
@@ -249,4 +281,48 @@ add_task(async function testSetGetValueCtypes() {
     Assert.equal(value.readString(), "baz");
     xulstore_free_value_c(value);
   }
+});
+
+add_task(async function testRemoveValueCtypes() {
+  Assert.equal(xulstore_set_value_c("RemoveValue", "foo", "bar", "baz"), Cr.NS_OK);
+  Assert.equal(xulstore_has_value_c("RemoveValue", "foo", "bar"), true);
+  {
+    let value = xulstore_get_value_c("RemoveValue", "foo", "bar");
+    Assert.equal(value.readString(), "baz");
+    xulstore_free_value_c(value);
+  }
+  Assert.equal(xulstore_remove_value_c("RemoveValue", "foo", "bar"), Cr.NS_OK);
+  Assert.equal(xulstore_has_value_c("RemoveValue", "foo", "bar"), false);
+  {
+    let value = xulstore_get_value_c("RemoveValue", "foo", "bar");
+    Assert.equal(value.readString(), "");
+    xulstore_free_value_c(value);
+  }
+});
+
+add_task(async function testGetIDsIteratorCtypes() {
+  let iterPtr, value;
+
+  iterPtr = xulstore_get_ids_iterator_c("GetIDsIterator");
+  Assert.equal(xulstore_iter_has_more_c(iterPtr), false);
+  xulstore_iter_destroy_c(iterPtr);
+
+  // We insert them out of order and assert that rkv will return them in order.
+  Assert.equal(xulstore_set_value_c("GetIDsIterator", "id1", "attr", "value"), Cr.NS_OK);
+  Assert.equal(xulstore_set_value_c("GetIDsIterator", "id3", "attr", "value"), Cr.NS_OK);
+  Assert.equal(xulstore_set_value_c("GetIDsIterator", "id2", "attr", "value"), Cr.NS_OK);
+
+  iterPtr = xulstore_get_ids_iterator_c("GetIDsIterator");
+  Assert.equal(xulstore_iter_has_more_c(iterPtr), true);
+  value = xulstore_get_next_c(iterPtr);
+  Assert.equal(value.readString(), "id1");
+  xulstore_free_value_c(value);
+  value = xulstore_get_next_c(iterPtr);
+  Assert.equal(value.readString(), "id2");
+  xulstore_free_value_c(value);
+  value = xulstore_get_next_c(iterPtr);
+  Assert.equal(value.readString(), "id3");
+  xulstore_free_value_c(value);
+  xulstore_iter_destroy_c(iterPtr);
+  Assert.equal(xulstore_iter_has_more_c(iterPtr), false);
 });

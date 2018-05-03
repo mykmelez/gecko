@@ -209,9 +209,50 @@ pub extern "C" fn xulstore_remove_value(doc: &nsAString, id: &nsAString, attr: &
 }
 
 #[no_mangle]
+pub extern "C" fn xulstore_remove_value_c(doc: *const c_char, id: *const c_char, attr: *const c_char) -> nsresult {
+    let store_name = unsafe { CStr::from_ptr(doc) }.to_str().unwrap();
+    let store = RKV.create_or_open(Some(store_name)).expect("open store");
+    let key = unsafe { CStr::from_ptr(id) }.to_str().unwrap().to_owned() + "=" +
+              unsafe { CStr::from_ptr(attr) }.to_str().unwrap();
+    let mut writer = store.write(&RKV).expect("writer");
+    writer.delete(&key);
+    writer.commit();
+    NS_OK
+}
+
+#[no_mangle]
 pub extern "C" fn xulstore_get_ids_iterator(doc: &nsAString) -> *mut StringIterator {
     let store_name = String::from_utf16_lossy(doc);
     let store: Store<&'static str> = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
+    let reader = store.read(&RKV).expect("reader");
+    let mut cursor = reader.open_cursor().expect("cursor");
+    println!("cursor: {:?}", cursor);
+    let mut iterator = cursor.iter();
+    println!("iterator: {:?}", iterator);
+    // let collection: () = iterator.map(|v| println!("item: {:?}", v)).collect();
+    let collection: Vec<&str> = iterator
+        .map(|(key,val)| key)
+
+        // Assumes we control all writes into database.
+        // TODO: avoid making that assumption and check the conversion.
+        .map(|v| unsafe { str::from_utf8_unchecked(&v) })
+
+        .map(|v| v.split_at(v.find('=').unwrap()))
+        .map(|(id, attr)| id)
+        // .map(|v| println!("item: {:?}", v))
+        .collect();
+
+    println!("collection: {:?}", collection);
+
+    Box::into_raw(Box::new(StringIterator::new(collection)))
+    // ptr::null_mut()
+}
+// TODO: refactor all duplicate implementations.
+
+#[no_mangle]
+pub extern "C" fn xulstore_get_ids_iterator_c<'a>(doc: *const c_char) -> *mut StringIterator<'a> {
+    let store_name = unsafe { CStr::from_ptr(doc) }.to_str().unwrap();
+    let store: Store<&'static str> = RKV.create_or_open(Some(store_name)).expect("open store");
     let reader = store.read(&RKV).expect("reader");
     let mut cursor = reader.open_cursor().expect("cursor");
     println!("cursor: {:?}", cursor);
@@ -293,10 +334,27 @@ impl<'a> StringIterator<'a> {
         self.index = self.index + 1;
         NS_OK
     }
+
+    pub fn get_next_c(&mut self) -> &'a str {
+        // TODO: confirm that self.index in range.
+        // TODO: consume the value being returned.
+        let value = self.values[self.index];
+        self.index = self.index + 1;
+        value
+    }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn xulstore_iter_has_more(iter: *mut StringIterator) -> bool {
+    if iter.is_null() {
+        // TODO: figure out the appropriate response in this case.  Panic?!
+        return false;
+    }
+    (&*iter).has_more()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn xulstore_iter_has_more_c(iter: *mut StringIterator) -> bool {
     if iter.is_null() {
         // TODO: figure out the appropriate response in this case.  Panic?!
         return false;
@@ -314,7 +372,22 @@ pub unsafe extern "C" fn xulstore_iter_get_next(iter: *mut StringIterator, value
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn xulstore_iter_get_next_c(iter: *mut StringIterator) -> *const c_char {
+    if iter.is_null() {
+        // TODO: figure out the appropriate response in this case.  Panic?!
+    }
+    CString::new((&mut *iter).get_next_c()).unwrap().into_raw()
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn xulstore_iter_destroy(iter: *mut StringIterator) {
+    if !iter.is_null() {
+        drop(Box::from_raw(iter));
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn xulstore_iter_destroy_c(iter: *mut StringIterator) {
     if !iter.is_null() {
         drop(Box::from_raw(iter));
     }
