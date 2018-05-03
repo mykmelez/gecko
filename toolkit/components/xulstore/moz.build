@@ -21,6 +21,10 @@ EXTRA_COMPONENTS += [
     'XULStore.manifest',
 ]
 
+EXTRA_JS_MODULES += [
+	'XULStore.jsm',
+]
+
 TEST_DIRS += [
     'tests/gtest',
 ]

@@ -1,0 +1,88 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+"use strict";
+
+const EXPORTED_SYMBOLS = ["XULStoreStore"];
+
+ChromeUtils.import("resource://gre/modules/ctypes.jsm");
+ChromeUtils.import("resource://gre/modules/osfile.jsm");
+
+const lib = ctypes.open(OS.Constants.Path.libxul);
+
+// TODO: determine under what conditions we must close the library
+// and how best to do so.
+
+const NSRESULT = ctypes.uint32_t;
+
+const XULStoreStore = {
+  setValue: lib.declare("xulstore_set_value_c",
+    ctypes.default_abi,
+    NSRESULT,
+    ctypes.char.ptr,
+    ctypes.char.ptr,
+    ctypes.char.ptr,
+    ctypes.char.ptr
+  ),
+  getValue: lib.declare(
+    "xulstore_get_value_c",
+    ctypes.default_abi,
+    ctypes.char.ptr,
+    ctypes.char.ptr,
+    ctypes.char.ptr,
+    ctypes.char.ptr
+  ),
+  hasValue: lib.declare(
+    "xulstore_has_value_c",
+    ctypes.default_abi,
+    ctypes.bool,
+    ctypes.char.ptr,
+    ctypes.char.ptr,
+    ctypes.char.ptr
+  ),
+  freeValue: lib.declare(
+    "xulstore_free_value_c",
+    ctypes.default_abi,
+    ctypes.void_t,
+    ctypes.char.ptr
+  ),
+  removeValue: lib.declare(
+    "xulstore_remove_value_c",
+    ctypes.default_abi,
+    NSRESULT,
+    ctypes.char.ptr,
+    ctypes.char.ptr,
+    ctypes.char.ptr
+  ),
+  getIDsIterator: lib.declare(
+    "xulstore_get_ids_iterator_c",
+    ctypes.default_abi,
+    ctypes.voidptr_t,
+    ctypes.char.ptr
+  ),
+  getAttributeIterator: lib.declare(
+    "xulstore_get_attribute_iterator_c",
+    ctypes.default_abi,
+    ctypes.voidptr_t,
+    ctypes.char.ptr
+  ),
+  iterHasMore: lib.declare(
+    "xulstore_iter_has_more_c",
+    ctypes.default_abi,
+    ctypes.bool,
+    ctypes.voidptr_t
+  ),
+  iterGetNext: lib.declare(
+    "xulstore_iter_get_next_c",
+    ctypes.default_abi,
+    ctypes.char.ptr,
+    ctypes.voidptr_t
+  ),
+  iterDestroy: lib.declare(
+    "xulstore_iter_destroy_c",
+    ctypes.default_abi,
+    ctypes.void_t,
+    ctypes.voidptr_t
+  ),
+};

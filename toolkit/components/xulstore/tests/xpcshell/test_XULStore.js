@@ -4,7 +4,7 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/ctypes.jsm");
+ChromeUtils.import("resource://gre/modules/XULStore.jsm");
 ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
 var XULStore = null;
@@ -197,165 +197,93 @@ add_task(async function testRemoveValue() {
   checkArrays([], getIDs(aboutURI));
 });
 
-const lib = ctypes.open(OS.Constants.Path.libxul);
-const NSRESULT = ctypes.uint32_t;
-const xulstore_set_value_c = lib.declare(
-  "xulstore_set_value_c",
-  ctypes.default_abi,
-  NSRESULT,
-  ctypes.char.ptr,
-  ctypes.char.ptr,
-  ctypes.char.ptr,
-  ctypes.char.ptr
-);
-const xulstore_get_value_c = lib.declare(
-  "xulstore_get_value_c",
-  ctypes.default_abi,
-  ctypes.char.ptr,
-  ctypes.char.ptr,
-  ctypes.char.ptr,
-  ctypes.char.ptr
-);
-const xulstore_has_value_c = lib.declare(
-  "xulstore_has_value_c",
-  ctypes.default_abi,
-  ctypes.bool,
-  ctypes.char.ptr,
-  ctypes.char.ptr,
-  ctypes.char.ptr
-);
-const xulstore_free_value_c = lib.declare(
-  "xulstore_free_value_c",
-  ctypes.default_abi,
-  ctypes.void_t,
-  ctypes.char.ptr
-);
-const xulstore_remove_value_c = lib.declare(
-  "xulstore_remove_value_c",
-  ctypes.default_abi,
-  NSRESULT,
-  ctypes.char.ptr,
-  ctypes.char.ptr,
-  ctypes.char.ptr
-);
-const xulstore_get_ids_iterator_c = lib.declare(
-  "xulstore_get_ids_iterator_c",
-  ctypes.default_abi,
-  ctypes.voidptr_t,
-  ctypes.char.ptr
-);
-const xulstore_get_attribute_iterator_c = lib.declare(
-  "xulstore_get_attribute_iterator_c",
-  ctypes.default_abi,
-  ctypes.voidptr_t,
-  ctypes.char.ptr
-);
-const xulstore_iter_has_more_c = lib.declare(
-  "xulstore_iter_has_more_c",
-  ctypes.default_abi,
-  ctypes.bool,
-  ctypes.voidptr_t
-);
-const xulstore_get_next_c = lib.declare(
-  "xulstore_iter_get_next_c",
-  ctypes.default_abi,
-  ctypes.char.ptr,
-  ctypes.voidptr_t
-);
-const xulstore_iter_destroy_c = lib.declare(
-  "xulstore_iter_destroy_c",
-  ctypes.default_abi,
-  ctypes.void_t,
-  ctypes.voidptr_t
-);
-
 add_task(async function testHasValueCtypes() {
-  Assert.equal(xulstore_has_value_c("HasValue", "foo", "bar"), false);
-  Assert.equal(xulstore_set_value_c("HasValue", "foo", "bar", "baz"), Cr.NS_OK);
-  Assert.equal(xulstore_has_value_c("HasValue", "foo", "bar"), true);
+  Assert.equal(XULStoreStore.hasValue("HasValue", "foo", "bar"), false);
+  Assert.equal(XULStoreStore.setValue("HasValue", "foo", "bar", "baz"), Cr.NS_OK);
+  Assert.equal(XULStoreStore.hasValue("HasValue", "foo", "bar"), true);
 });
 
 add_task(async function testSetGetValueCtypes() {
   {
-    let value = xulstore_get_value_c("SetGetValue", "foo", "bar");
+    let value = XULStoreStore.getValue("SetGetValue", "foo", "bar");
     Assert.equal(value.readString(), "");
-    xulstore_free_value_c(value);
+    XULStoreStore.freeValue(value);
   }
-  Assert.equal(xulstore_set_value_c("SetGetValue", "foo", "bar", "baz"), Cr.NS_OK);
+  Assert.equal(XULStoreStore.setValue("SetGetValue", "foo", "bar", "baz"), Cr.NS_OK);
   {
-    let value = xulstore_get_value_c("SetGetValue", "foo", "bar");
+    let value = XULStoreStore.getValue("SetGetValue", "foo", "bar");
     Assert.equal(value.readString(), "baz");
-    xulstore_free_value_c(value);
+    XULStoreStore.freeValue(value);
   }
 });
 
 add_task(async function testRemoveValueCtypes() {
-  Assert.equal(xulstore_set_value_c("RemoveValue", "foo", "bar", "baz"), Cr.NS_OK);
-  Assert.equal(xulstore_has_value_c("RemoveValue", "foo", "bar"), true);
+  Assert.equal(XULStoreStore.setValue("RemoveValue", "foo", "bar", "baz"), Cr.NS_OK);
+  Assert.equal(XULStoreStore.hasValue("RemoveValue", "foo", "bar"), true);
   {
-    let value = xulstore_get_value_c("RemoveValue", "foo", "bar");
+    let value = XULStoreStore.getValue("RemoveValue", "foo", "bar");
     Assert.equal(value.readString(), "baz");
-    xulstore_free_value_c(value);
+    XULStoreStore.freeValue(value);
   }
-  Assert.equal(xulstore_remove_value_c("RemoveValue", "foo", "bar"), Cr.NS_OK);
-  Assert.equal(xulstore_has_value_c("RemoveValue", "foo", "bar"), false);
+  Assert.equal(XULStoreStore.removeValue("RemoveValue", "foo", "bar"), Cr.NS_OK);
+  Assert.equal(XULStoreStore.hasValue("RemoveValue", "foo", "bar"), false);
   {
-    let value = xulstore_get_value_c("RemoveValue", "foo", "bar");
+    let value = XULStoreStore.getValue("RemoveValue", "foo", "bar");
     Assert.equal(value.readString(), "");
-    xulstore_free_value_c(value);
+    XULStoreStore.freeValue(value);
   }
 });
 
 add_task(async function testGetIDsIteratorCtypes() {
   let iterPtr, value;
 
-  iterPtr = xulstore_get_ids_iterator_c("GetIDsIterator");
-  Assert.equal(xulstore_iter_has_more_c(iterPtr), false);
-  xulstore_iter_destroy_c(iterPtr);
+  iterPtr = XULStoreStore.getIDsIterator("GetIDsIterator");
+  Assert.equal(XULStoreStore.iterHasMore(iterPtr), false);
+  XULStoreStore.iterDestroy(iterPtr);
 
   // We insert them out of order and assert that rkv will return them in order.
-  Assert.equal(xulstore_set_value_c("GetIDsIterator", "id1", "attr", "value"), Cr.NS_OK);
-  Assert.equal(xulstore_set_value_c("GetIDsIterator", "id3", "attr", "value"), Cr.NS_OK);
-  Assert.equal(xulstore_set_value_c("GetIDsIterator", "id2", "attr", "value"), Cr.NS_OK);
+  Assert.equal(XULStoreStore.setValue("GetIDsIterator", "id1", "attr", "value"), Cr.NS_OK);
+  Assert.equal(XULStoreStore.setValue("GetIDsIterator", "id3", "attr", "value"), Cr.NS_OK);
+  Assert.equal(XULStoreStore.setValue("GetIDsIterator", "id2", "attr", "value"), Cr.NS_OK);
 
-  iterPtr = xulstore_get_ids_iterator_c("GetIDsIterator");
-  Assert.equal(xulstore_iter_has_more_c(iterPtr), true);
-  value = xulstore_get_next_c(iterPtr);
+  iterPtr = XULStoreStore.getIDsIterator("GetIDsIterator");
+  Assert.equal(XULStoreStore.iterHasMore(iterPtr), true);
+  value = XULStoreStore.iterGetNext(iterPtr);
   Assert.equal(value.readString(), "id1");
-  xulstore_free_value_c(value);
-  value = xulstore_get_next_c(iterPtr);
+  XULStoreStore.freeValue(value);
+  value = XULStoreStore.iterGetNext(iterPtr);
   Assert.equal(value.readString(), "id2");
-  xulstore_free_value_c(value);
-  value = xulstore_get_next_c(iterPtr);
+  XULStoreStore.freeValue(value);
+  value = XULStoreStore.iterGetNext(iterPtr);
   Assert.equal(value.readString(), "id3");
-  xulstore_free_value_c(value);
-  Assert.equal(xulstore_iter_has_more_c(iterPtr), false);
-  xulstore_iter_destroy_c(iterPtr);
+  XULStoreStore.freeValue(value);
+  Assert.equal(XULStoreStore.iterHasMore(iterPtr), false);
+  XULStoreStore.iterDestroy(iterPtr);
 });
 
 add_task(async function GetAttributeIteratorCtypes() {
   let iterPtr, value;
 
-  iterPtr = xulstore_get_attribute_iterator_c("GetAttributeIterator");
-  Assert.equal(xulstore_iter_has_more_c(iterPtr), false);
-  xulstore_iter_destroy_c(iterPtr);
+  iterPtr = XULStoreStore.getAttributeIterator("GetAttributeIterator");
+  Assert.equal(XULStoreStore.iterHasMore(iterPtr), false);
+  XULStoreStore.iterDestroy(iterPtr);
 
   // We insert them out of order and assert that rkv will return them in order.
-  Assert.equal(xulstore_set_value_c("GetAttributeIterator", "id", "attr1", "value"), Cr.NS_OK);
-  Assert.equal(xulstore_set_value_c("GetAttributeIterator", "id", "attr3", "value"), Cr.NS_OK);
-  Assert.equal(xulstore_set_value_c("GetAttributeIterator", "id", "attr2", "value"), Cr.NS_OK);
+  Assert.equal(XULStoreStore.setValue("GetAttributeIterator", "id", "attr1", "value"), Cr.NS_OK);
+  Assert.equal(XULStoreStore.setValue("GetAttributeIterator", "id", "attr3", "value"), Cr.NS_OK);
+  Assert.equal(XULStoreStore.setValue("GetAttributeIterator", "id", "attr2", "value"), Cr.NS_OK);
 
-  iterPtr = xulstore_get_attribute_iterator_c("GetAttributeIterator");
-  Assert.equal(xulstore_iter_has_more_c(iterPtr), true);
-  value = xulstore_get_next_c(iterPtr);
+  iterPtr = XULStoreStore.getAttributeIterator("GetAttributeIterator");
+  Assert.equal(XULStoreStore.iterHasMore(iterPtr), true);
+  value = XULStoreStore.iterGetNext(iterPtr);
   Assert.equal(value.readString(), "attr1");
-  xulstore_free_value_c(value);
-  value = xulstore_get_next_c(iterPtr);
+  XULStoreStore.freeValue(value);
+  value = XULStoreStore.iterGetNext(iterPtr);
   Assert.equal(value.readString(), "attr2");
-  xulstore_free_value_c(value);
-  value = xulstore_get_next_c(iterPtr);
+  XULStoreStore.freeValue(value);
+  value = XULStoreStore.iterGetNext(iterPtr);
   Assert.equal(value.readString(), "attr3");
-  xulstore_free_value_c(value);
-  Assert.equal(xulstore_iter_has_more_c(iterPtr), false);
-  xulstore_iter_destroy_c(iterPtr);
+  XULStoreStore.freeValue(value);
+  Assert.equal(XULStoreStore.iterHasMore(iterPtr), false);
+  XULStoreStore.iterDestroy(iterPtr);
 });
