@@ -2555,6 +2555,7 @@ dependencies = [
 name = "xulstore"
 version = "0.1.0"
 dependencies = [
+ "itertools 0.7.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "lmdb 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "nserror 0.1.0",
