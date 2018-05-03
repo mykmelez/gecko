@@ -308,6 +308,36 @@ pub extern "C" fn xulstore_get_attribute_iterator(doc: &nsAString) -> *mut Strin
     // ptr::null_mut()
 }
 
+#[no_mangle]
+pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(doc: *const c_char) -> *mut StringIterator<'a> {
+    let store_name = unsafe { CStr::from_ptr(doc) }.to_str().unwrap();
+    let store: Store<&'static str> = RKV.create_or_open(Some(store_name)).expect("open store");
+    let reader = store.read(&RKV).expect("reader");
+    let mut cursor = reader.open_cursor().expect("cursor");
+    println!("cursor: {:?}", cursor);
+    let mut iterator = cursor.iter();
+    println!("iterator: {:?}", iterator);
+    // let collection: () = iterator.map(|v| println!("item: {:?}", v)).collect();
+    let collection: Vec<&str> = iterator
+        .map(|(key,val)| key)
+
+        // Assumes we control all writes into database.
+        // TODO: avoid making that assumption and check the conversion.
+        .map(|v| unsafe { str::from_utf8_unchecked(&v) })
+
+        .map(|v| v.split_at(v.find('=').unwrap()))
+        // Split-at doesn't remove the character at which the string is split,
+        // so we have to slice it off ourselves.
+        .map(|(id, attr)| &attr[1..])
+        // .map(|v| println!("item: {:?}", v))
+        .collect();
+
+    println!("collection: {:?}", collection);
+
+    Box::into_raw(Box::new(StringIterator::new(collection)))
+    // ptr::null_mut()
+}
+
 pub struct StringIterator<'a> {
     index: usize,
     values: Vec<&'a str>,

@@ -244,6 +244,12 @@ const xulstore_get_ids_iterator_c = lib.declare(
   ctypes.voidptr_t,
   ctypes.char.ptr
 );
+const xulstore_get_attribute_iterator_c = lib.declare(
+  "xulstore_get_attribute_iterator_c",
+  ctypes.default_abi,
+  ctypes.voidptr_t,
+  ctypes.char.ptr
+);
 const xulstore_iter_has_more_c = lib.declare(
   "xulstore_iter_has_more_c",
   ctypes.default_abi,
@@ -323,6 +329,33 @@ add_task(async function testGetIDsIteratorCtypes() {
   value = xulstore_get_next_c(iterPtr);
   Assert.equal(value.readString(), "id3");
   xulstore_free_value_c(value);
-  xulstore_iter_destroy_c(iterPtr);
   Assert.equal(xulstore_iter_has_more_c(iterPtr), false);
+  xulstore_iter_destroy_c(iterPtr);
+});
+
+add_task(async function GetAttributeIteratorCtypes() {
+  let iterPtr, value;
+
+  iterPtr = xulstore_get_attribute_iterator_c("GetAttributeIterator");
+  Assert.equal(xulstore_iter_has_more_c(iterPtr), false);
+  xulstore_iter_destroy_c(iterPtr);
+
+  // We insert them out of order and assert that rkv will return them in order.
+  Assert.equal(xulstore_set_value_c("GetAttributeIterator", "id", "attr1", "value"), Cr.NS_OK);
+  Assert.equal(xulstore_set_value_c("GetAttributeIterator", "id", "attr3", "value"), Cr.NS_OK);
+  Assert.equal(xulstore_set_value_c("GetAttributeIterator", "id", "attr2", "value"), Cr.NS_OK);
+
+  iterPtr = xulstore_get_attribute_iterator_c("GetAttributeIterator");
+  Assert.equal(xulstore_iter_has_more_c(iterPtr), true);
+  value = xulstore_get_next_c(iterPtr);
+  Assert.equal(value.readString(), "attr1");
+  xulstore_free_value_c(value);
+  value = xulstore_get_next_c(iterPtr);
+  Assert.equal(value.readString(), "attr2");
+  xulstore_free_value_c(value);
+  value = xulstore_get_next_c(iterPtr);
+  Assert.equal(value.readString(), "attr3");
+  xulstore_free_value_c(value);
+  Assert.equal(xulstore_iter_has_more_c(iterPtr), false);
+  xulstore_iter_destroy_c(iterPtr);
 });
