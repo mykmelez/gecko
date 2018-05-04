@@ -237,16 +237,21 @@ add_task(async function testRemoveValueCtypes() {
 add_task(async function testGetIDsIteratorCtypes() {
   let iterPtr, value;
 
-  iterPtr = XULStoreStore.getIDsIterator("GetIDsIterator");
+  iterPtr = XULStoreStore.getIDsIterator("idIterDoc");
   Assert.equal(XULStoreStore.iterHasMore(iterPtr), false);
   XULStoreStore.iterDestroy(iterPtr);
 
-  // We insert them out of order and assert that rkv will return them in order.
-  Assert.equal(XULStoreStore.setValue("GetIDsIterator", "id1", "attr", "value"), Cr.NS_OK);
-  Assert.equal(XULStoreStore.setValue("GetIDsIterator", "id3", "attr", "value"), Cr.NS_OK);
-  Assert.equal(XULStoreStore.setValue("GetIDsIterator", "id2", "attr", "value"), Cr.NS_OK);
+  // Insert with IDs in non-alphanumeric order to confirm
+  // that store will order them when iterating them.
+  Assert.equal(XULStoreStore.setValue("idIterDoc", "id3", "attr", "value"), Cr.NS_OK);
+  Assert.equal(XULStoreStore.setValue("idIterDoc", "id1", "attr", "value"), Cr.NS_OK);
+  Assert.equal(XULStoreStore.setValue("idIterDoc", "id2", "attr", "value"), Cr.NS_OK);
 
-  iterPtr = XULStoreStore.getIDsIterator("GetIDsIterator");
+  // Insert different ID for another doc to confirm that store
+  // won't return it when iterating IDs for our doc.
+  Assert.equal(XULStoreStore.setValue("otherDoc", "otherID", "attr", "value"), Cr.NS_OK);
+
+  iterPtr = XULStoreStore.getIDsIterator("idIterDoc");
   Assert.equal(XULStoreStore.iterHasMore(iterPtr), true);
   value = XULStoreStore.iterGetNext(iterPtr);
   Assert.equal(value.readString(), "id1");
@@ -264,16 +269,21 @@ add_task(async function testGetIDsIteratorCtypes() {
 add_task(async function GetAttributeIteratorCtypes() {
   let iterPtr, value;
 
-  iterPtr = XULStoreStore.getAttributeIterator("GetAttributeIterator");
+  iterPtr = XULStoreStore.getAttributeIterator("attrIterDoc", "id");
   Assert.equal(XULStoreStore.iterHasMore(iterPtr), false);
   XULStoreStore.iterDestroy(iterPtr);
 
-  // We insert them out of order and assert that rkv will return them in order.
-  Assert.equal(XULStoreStore.setValue("GetAttributeIterator", "id", "attr1", "value"), Cr.NS_OK);
-  Assert.equal(XULStoreStore.setValue("GetAttributeIterator", "id", "attr3", "value"), Cr.NS_OK);
-  Assert.equal(XULStoreStore.setValue("GetAttributeIterator", "id", "attr2", "value"), Cr.NS_OK);
+  // Insert with attributes in non-alphanumeric order to confirm
+  // that store will order them when iterating them.
+  Assert.equal(XULStoreStore.setValue("attrIterDoc", "id", "attr3", "value"), Cr.NS_OK);
+  Assert.equal(XULStoreStore.setValue("attrIterDoc", "id", "attr1", "value"), Cr.NS_OK);
+  Assert.equal(XULStoreStore.setValue("attrIterDoc", "id", "attr2", "value"), Cr.NS_OK);
 
-  iterPtr = XULStoreStore.getAttributeIterator("GetAttributeIterator");
+  // Insert different attribute for another ID to confirm that store
+  // won't return it when iterating attributes for our ID.
+  Assert.equal(XULStoreStore.setValue("attrIterDoc", "otherID", "otherAttr", "value"), Cr.NS_OK);
+
+  iterPtr = XULStoreStore.getAttributeIterator("attrIterDoc", "id");
   Assert.equal(XULStoreStore.iterHasMore(iterPtr), true);
   value = XULStoreStore.iterGetNext(iterPtr);
   Assert.equal(value.readString(), "attr1");

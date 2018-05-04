@@ -15,6 +15,7 @@ const STOREDB_FILENAME = "xulstore.json";
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XULStore.jsm");
 
 ChromeUtils.defineModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
 
@@ -65,13 +66,9 @@ XULStore.prototype = {
         throw new Error("Can't find profile directory.");
       }
     }
-    this._storeFile.append(STOREDB_FILENAME);
-
-    this.readFile();
   },
 
   observe(subject, topic, data) {
-    this.writeFile();
     if (topic == "profile-before-change") {
       this._saveAllowed = false;
     }
@@ -85,46 +82,6 @@ XULStore.prototype = {
       return;
     dump("XULStore: " + message + "\n");
     Services.console.logStringMessage("XULStore: " + message);
-  },
-
-  readFile() {
-    try {
-      this._data = JSON.parse(Cu.readUTF8File(this._storeFile));
-    } catch (e) {
-      this.log("Error reading JSON: " + e);
-      // This exception could mean that the file didn't exist.
-      // We'll just ignore the error and start with a blank slate.
-    }
-  },
-
-  async writeFile() {
-    if (!this._needsSaving)
-      return;
-
-    this._needsSaving = false;
-
-    this.log("Writing to xulstore.json");
-
-    try {
-      let data = JSON.stringify(this._data);
-      let encoder = new TextEncoder();
-
-      data = encoder.encode(data);
-      await OS.File.writeAtomic(this._storeFile.path, data,
-                              { tmpPath: this._storeFile.path + ".tmp" });
-    } catch (e) {
-      this.log("Failed to write xulstore.json: " + e);
-      throw e;
-    }
-  },
-
-  markAsChanged() {
-    if (this._needsSaving || !this._storeFile)
-      return;
-
-    // Don't write the file more than once every 30 seconds.
-    this._needsSaving = true;
-    this._writeTimer.init(this, WRITE_DELAY_MS, Ci.nsITimer.TYPE_ONE_SHOT);
   },
 
   /* ---------- interface implementation ---------- */
@@ -147,51 +104,21 @@ XULStore.prototype = {
       value = value.substr(0, 4096);
     }
 
-    let obj = this._data;
-    if (!(docURI in obj)) {
-      obj[docURI] = {};
-    }
-    obj = obj[docURI];
-    if (!(id in obj)) {
-      obj[id] = {};
-    }
-    obj = obj[id];
-
-    // Don't set the value if it is already set to avoid saving the file.
-    if (attr in obj && obj[attr] == value)
-      return;
-
-    obj[attr] = value; // IE, this._data[docURI][id][attr] = value;
-
-    this.markAsChanged();
+    XULStoreStore.setValue(docURI, id, attr, value);
   },
 
   hasValue(docURI, id, attr) {
     this.log("has store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
 
-    let ids = this._data[docURI];
-    if (ids) {
-      let attrs = ids[id];
-      if (attrs) {
-        return attr in attrs;
-      }
-    }
-
-    return false;
+    return XULStoreStore.hasValue(docURI, id, attr);
   },
 
   getValue(docURI, id, attr) {
     this.log("get store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
-
-    let ids = this._data[docURI];
-    if (ids) {
-      let attrs = ids[id];
-      if (attrs) {
-        return attrs[attr] || "";
-      }
-    }
-
-    return "";
+    const valuePtr = XULStoreStore.getValue(docURI, id, attr);
+    const value = valuePtr.readString();
+    XULStoreStore.freeValue(valuePtr);
+    return value;
   },
 
   removeValue(docURI, id, attr) {
@@ -202,23 +129,7 @@ XULStore.prototype = {
       return;
     }
 
-    let ids = this._data[docURI];
-    if (ids) {
-      let attrs = ids[id];
-      if (attrs && attr in attrs) {
-        delete attrs[attr];
-
-        if (Object.getOwnPropertyNames(attrs).length == 0) {
-          delete ids[id];
-
-          if (Object.getOwnPropertyNames(ids).length == 0) {
-            delete this._data[docURI];
-          }
-        }
-
-        this.markAsChanged();
-      }
-    }
+    XULStoreStore.removeValue(docURI, id, attr);
   },
 
   removeDocument(docURI) {
@@ -229,58 +140,38 @@ XULStore.prototype = {
       return;
     }
 
-    if (this._data[docURI]) {
-      delete this._data[docURI];
-      this.markAsChanged();
-    }
+    // Not implemented because never used.
+    throw new Error(NS_ERROR_NOT_AVAILABLE);
   },
 
   getIDsEnumerator(docURI) {
     this.log("Getting ID enumerator for doc=" + docURI);
-
-    if (!(docURI in this._data))
-      return new nsStringEnumerator([]);
-
-    let result = [];
-    let ids = this._data[docURI];
-    if (ids) {
-      for (let id in this._data[docURI]) {
-        result.push(id);
-      }
-    }
-
-    return new nsStringEnumerator(result);
+    return new nsStringEnumerator(XULStoreStore.getIDsIterator(docURI));
   },
 
   getAttributeEnumerator(docURI, id) {
     this.log("Getting attribute enumerator for id=" + id + ", doc=" + docURI);
-
-    if (!(docURI in this._data) || !(id in this._data[docURI]))
-      return new nsStringEnumerator([]);
-
-    let attrs = [];
-    for (let attr in this._data[docURI][id]) {
-      attrs.push(attr);
-    }
-
-    return new nsStringEnumerator(attrs);
+    return new nsStringEnumerator(XULStoreStore.getAttributeIterator(docURI, id));
   }
 };
 
-function nsStringEnumerator(items) {
-  this._items = items;
+// TODO: free the iterPtr when the enumerator is destroyed.
+function nsStringEnumerator(iterPtr) {
+  this._iterPtr = iterPtr;
 }
 
 nsStringEnumerator.prototype = {
   QueryInterface: ChromeUtils.generateQI([Ci.nsIStringEnumerator]),
-  _nextIndex: 0,
   hasMore() {
-    return this._nextIndex < this._items.length;
+    return XULStoreStore.iterHasMore(this._iterPtr);
   },
   getNext() {
     if (!this.hasMore())
       throw Cr.NS_ERROR_NOT_AVAILABLE;
-    return this._items[this._nextIndex++];
+    const valuePtr = XULStoreStore.iterGetNext(this._iterPtr);
+    const value = valuePtr.readString();
+    XULStoreStore.freeValue(valuePtr);
+    return value;
   },
 };
 

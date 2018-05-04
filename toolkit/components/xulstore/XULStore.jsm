@@ -65,6 +65,7 @@ const XULStoreStore = {
     "xulstore_get_attribute_iterator_c",
     ctypes.default_abi,
     ctypes.voidptr_t,
+    ctypes.char.ptr,
     ctypes.char.ptr
   ),
   iterHasMore: lib.declare(

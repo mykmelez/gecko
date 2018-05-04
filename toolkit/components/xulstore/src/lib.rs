@@ -1,3 +1,4 @@
+extern crate itertools;
 extern crate lmdb;
 extern crate rkv;
 extern crate tempdir;
@@ -7,6 +8,7 @@ extern crate xpcom;
 use lmdb::{Cursor};
 use rkv::{Reader, Rkv, Store, Value};
 
+use itertools::Itertools;
 use self::tempdir::TempDir;
 use std::ffi::{CStr, CString};
 use std::fmt::Write;
@@ -214,6 +216,7 @@ pub extern "C" fn xulstore_remove_value_c(doc: *const c_char, id: *const c_char,
     let store = RKV.create_or_open(Some(store_name)).expect("open store");
     let key = unsafe { CStr::from_ptr(id) }.to_str().unwrap().to_owned() + "=" +
               unsafe { CStr::from_ptr(attr) }.to_str().unwrap();
+println!("xulstore_remove_value_C; key: {:?}", key);
     let mut writer = store.write(&RKV).expect("writer");
     writer.delete(&key);
     writer.commit();
@@ -240,6 +243,9 @@ pub extern "C" fn xulstore_get_ids_iterator(doc: &nsAString) -> *mut StringItera
         .map(|v| v.split_at(v.find('=').unwrap()))
         .map(|(id, attr)| id)
         // .map(|v| println!("item: {:?}", v))
+        // TODO: unique() collects values, and collect() does too,
+        // so do so only once, by collecting the values into a set.
+        .unique()
         .collect();
 
     println!("collection: {:?}", collection);
@@ -269,6 +275,7 @@ pub extern "C" fn xulstore_get_ids_iterator_c<'a>(doc: *const c_char) -> *mut St
         .map(|v| v.split_at(v.find('=').unwrap()))
         .map(|(id, attr)| id)
         // .map(|v| println!("item: {:?}", v))
+        .unique()
         .collect();
 
     println!("collection: {:?}", collection);
@@ -279,8 +286,9 @@ pub extern "C" fn xulstore_get_ids_iterator_c<'a>(doc: *const c_char) -> *mut St
 
 // TODO refactor with xulstore_get_ids_iterator.
 #[no_mangle]
-pub extern "C" fn xulstore_get_attribute_iterator(doc: &nsAString) -> *mut StringIterator {
+pub extern "C" fn xulstore_get_attribute_iterator<'a>(doc: &nsAString, id: &nsAString) -> *mut StringIterator<'a> {
     let store_name = String::from_utf16_lossy(doc);
+    let element_id = String::from_utf16_lossy(id);
     let store: Store<&'static str> = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
     let reader = store.read(&RKV).expect("reader");
     let mut cursor = reader.open_cursor().expect("cursor");
@@ -296,10 +304,12 @@ pub extern "C" fn xulstore_get_attribute_iterator(doc: &nsAString) -> *mut Strin
         .map(|v| unsafe { str::from_utf8_unchecked(&v) })
 
         .map(|v| v.split_at(v.find('=').unwrap()))
+        .filter(|&(id, attr)| id == element_id)
         // Split-at doesn't remove the character at which the string is split,
         // so we have to slice it off ourselves.
         .map(|(id, attr)| &attr[1..])
         // .map(|v| println!("item: {:?}", v))
+        .unique()
         .collect();
 
     println!("collection: {:?}", collection);
@@ -309,8 +319,9 @@ pub extern "C" fn xulstore_get_attribute_iterator(doc: &nsAString) -> *mut Strin
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(doc: *const c_char) -> *mut StringIterator<'a> {
+pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(doc: *const c_char, id: *const c_char) -> *mut StringIterator<'a> {
     let store_name = unsafe { CStr::from_ptr(doc) }.to_str().unwrap();
+    let element_id = unsafe { CStr::from_ptr(id) }.to_str().unwrap();
     let store: Store<&'static str> = RKV.create_or_open(Some(store_name)).expect("open store");
     let reader = store.read(&RKV).expect("reader");
     let mut cursor = reader.open_cursor().expect("cursor");
@@ -320,16 +331,18 @@ pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(doc: *const c_char) -> *
     // let collection: () = iterator.map(|v| println!("item: {:?}", v)).collect();
     let collection: Vec<&str> = iterator
         .map(|(key,val)| key)
+        .map(|v| { println!("v: {:?}", v); v })
 
         // Assumes we control all writes into database.
         // TODO: avoid making that assumption and check the conversion.
         .map(|v| unsafe { str::from_utf8_unchecked(&v) })
 
         .map(|v| v.split_at(v.find('=').unwrap()))
+        .filter(|&(id, attr)| id == element_id)
         // Split-at doesn't remove the character at which the string is split,
         // so we have to slice it off ourselves.
         .map(|(id, attr)| &attr[1..])
-        // .map(|v| println!("item: {:?}", v))
+        .unique()
         .collect();
 
     println!("collection: {:?}", collection);
