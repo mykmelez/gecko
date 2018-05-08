@@ -2020,12 +2020,6 @@ pref("network.standard-url.punycode-host", true);
 // Idle timeout for ftp control connections - 5 minute default
 pref("network.ftp.idleConnectionTimeout", 300);
 
-// directory listing format
-// 2: HTML
-// 3: XUL directory viewer
-// all other values are treated like 2
-pref("network.dir.format", 2);
-
 // enables the prefetch service (i.e., prefetching of <link rel="next"> and
 // <link rel="prefetch"> URLs).
 pref("network.prefetch-next", true);
@@ -2476,7 +2470,7 @@ pref("security.csp.experimentalEnabled", false);
 pref("security.csp.enableStrictDynamic", true);
 
 #if defined(DEBUG) && !defined(ANDROID)
-pref("csp.content_privileged_about_uris_without_csp", "blank,credits,home,logo,newtab,printpreview,srcdoc,studies");
+pref("csp.content_privileged_about_uris_without_csp", "blank,home,newtab,printpreview,srcdoc,studies");
 #endif
 
 #ifdef NIGHTLY_BUILD
@@ -4934,8 +4928,8 @@ pref("extensions.webextensions.remote", false);
 // unless other process sandboxing and extension remoting prefs are changed.
 pref("extensions.webextensions.protocol.remote", true);
 
-// Disable tab hiding API by default.
-pref("extensions.webextensions.tabhide.enabled", false);
+// Enable tab hiding API by default.
+pref("extensions.webextensions.tabhide.enabled", true);
 
 pref("extensions.webextensions.background-delayed-startup", false);
 

@@ -32,7 +32,6 @@ load 345837-1.xhtml
 load 346381-1.html
 load 348049-1.xhtml
 load 349355-1.html
-load 354645-1.xul
 load 359432-1.xhtml
 load 360599-1.html
 load 366200-1.xhtml
@@ -243,3 +242,4 @@ pref(dom.webcomponents.shadowdom.enabled,true) load 1428053.html
 load 1449601.html
 load 1445670.html
 load 1458016.html
+pref(dom.webcomponents.shadowdom.enabled,true) load 1459688.html

@@ -572,8 +572,6 @@ class AndroidEmulatorTest(TestingMixin, EmulatorMixin, BaseScript, MozbaseMixin,
         self._restart_adbd()
 
         if not self.config.get("developer_mode"):
-            # We kill compiz because it sometimes prevents us from starting the emulator
-            self._kill_processes("compiz")
             self._kill_processes("xpcshell")
 
         # We add a symlink for libGL.so because the emulator dlopen()s it by that name
@@ -747,7 +745,9 @@ class AndroidEmulatorTest(TestingMixin, EmulatorMixin, BaseScript, MozbaseMixin,
                               'chrome': 'mochitest-chrome',
                               'plain-clipboard': 'mochitest-plain-clipboard',
                               'plain-gpu': 'mochitest-plain-gpu'}),
-               ('reftest', {'reftest': 'reftest', 'crashtest': 'crashtest'}),
+               ('reftest', {'reftest': 'reftest',
+                            'reftest-fonts': 'reftest-fonts',
+                            'crashtest': 'crashtest'}),
                ('xpcshell', {'xpcshell': 'xpcshell'})]
         suites = []
         for (category, all_suites) in all:

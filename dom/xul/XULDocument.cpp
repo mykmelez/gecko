@@ -219,7 +219,7 @@ XULDocument::~XULDocument()
 nsresult
 NS_NewXULDocument(nsIDocument** result)
 {
-    NS_PRECONDITION(result != nullptr, "null ptr");
+    MOZ_ASSERT(result != nullptr, "null ptr");
     if (! result)
         return NS_ERROR_NULL_POINTER;
 
@@ -1622,7 +1622,7 @@ XULDocument::MatchAttribute(Element* aElement,
                             nsAtom* aAttrName,
                             void* aData)
 {
-    NS_PRECONDITION(aElement, "Must have content node to work with!");
+    MOZ_ASSERT(aElement, "Must have content node to work with!");
     nsString* attrValue = static_cast<nsString*>(aData);
     if (aNamespaceID != kNameSpaceID_Unknown &&
         aNamespaceID != kNameSpaceID_Wildcard) {
@@ -2054,8 +2054,8 @@ nsresult
 XULDocument::CreateAndInsertPI(const nsXULPrototypePI* aProtoPI,
                                nsINode* aParent, nsINode* aBeforeThis)
 {
-    NS_PRECONDITION(aProtoPI, "null ptr");
-    NS_PRECONDITION(aParent, "null ptr");
+    MOZ_ASSERT(aProtoPI, "null ptr");
+    MOZ_ASSERT(aParent, "null ptr");
 
     RefPtr<ProcessingInstruction> node =
         NS_NewXMLProcessingInstruction(mNodeInfoManager, aProtoPI->mTarget,
@@ -2745,8 +2745,8 @@ XULDocument::GetXULWindowIfToplevelChrome() const
 nsresult
 XULDocument::DoneWalking()
 {
-    NS_PRECONDITION(mPendingSheets == 0, "there are sheets to be loaded");
-    NS_PRECONDITION(!mStillWalking, "walk not done");
+    MOZ_ASSERT(mPendingSheets == 0, "there are sheets to be loaded");
+    MOZ_ASSERT(!mStillWalking, "walk not done");
 
     // XXXldb This is where we should really be setting the chromehidden
     // attribute.
@@ -2965,7 +2965,7 @@ XULDocument::EndUpdate(nsUpdateType aUpdateType)
 void
 XULDocument::ReportMissingOverlay(nsIURI* aURI)
 {
-    NS_PRECONDITION(aURI, "Must have a URI");
+    MOZ_ASSERT(aURI, "Must have a URI");
 
     NS_ConvertUTF8toUTF16 utfSpec(aURI->GetSpecOrDefault());
     const char16_t* params[] = { utfSpec.get() };
@@ -3271,7 +3271,7 @@ XULDocument::OnScriptCompileComplete(JSScript* aScript, nsresult aStatus)
 nsresult
 XULDocument::ExecuteScript(nsXULPrototypeScript *aScript)
 {
-    NS_PRECONDITION(aScript != nullptr, "null ptr");
+    MOZ_ASSERT(aScript != nullptr, "null ptr");
     NS_ENSURE_TRUE(aScript, NS_ERROR_NULL_POINTER);
     NS_ENSURE_TRUE(mScriptGlobalObject, NS_ERROR_NOT_INITIALIZED);
 
@@ -3312,7 +3312,7 @@ XULDocument::CreateElementFromPrototype(nsXULPrototypeElement* aPrototype,
                                         bool aIsRoot)
 {
     // Create a content model element from a prototype element.
-    NS_PRECONDITION(aPrototype != nullptr, "null ptr");
+    MOZ_ASSERT(aPrototype != nullptr, "null ptr");
     if (! aPrototype)
         return NS_ERROR_NULL_POINTER;
 
