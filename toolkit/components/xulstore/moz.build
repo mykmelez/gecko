@@ -29,10 +29,6 @@ TEST_DIRS += [
     'tests/gtest',
 ]
 
-EXPORTS += [
-    'XULStore.h',
-]
-
 UNIFIED_SOURCES += [
     'XULStore.cpp',
 ]

@@ -1,20 +1,24 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "XULStore.h"
-
 extern "C" {
-  bool xulstore_has_value_2(const char* doc, const char* id, const char* attr);
+	void xulstore_function_marked_used();
 }
 
-// Define a C function that is marked used and visible so the linker doesn't
-// strip it and js-ctypes can call it.  We only need this because Rust doesn't
-// enable us to mark a Rust-implemented C-compatible function used
-// <https://github.com/rust-lang/rfcs/issues/1002>.
-extern "C" bool __attribute__((__used__)) __attribute__((visibility("default")))
-xulstore_has_value_c(const char* doc, const char* id, const char* attr) {
-  return xulstore_has_value_2(doc, id, attr);
+// Use a XULStore function to prevent the linker from stripping functions
+// that are only called via js-ctypes.
+//
+// We need this because Rust doesn't enable us to mark functions as "used"
+// <https://github.com/rust-lang/rfcs/issues/1002>, and the linker will strip
+// XULStore functions that are only called via js-ctypes.
+//
+// Strangely, however, this doesn't need to call the functions that are only
+// called via js-ctypes.  It just needs to call some function in the same Rust
+// library.  So we call a stub.
+//
+// TODO: figure out a better way to tell the linker these functions are used.
+//
+void __attribute__((__used__)) mark_xulstore_function_used() {
+	xulstore_function_marked_used();
 }

@@ -69,6 +69,9 @@ lazy_static! {
 }
 
 #[no_mangle]
+pub extern "C" fn xulstore_function_marked_used() {}
+
+#[no_mangle]
 pub extern "C" fn xulstore_set_value(doc: &nsAString, id: &nsAString, attr: &nsAString, value: &nsAString) -> nsresult {
     let store_name = String::from_utf16_lossy(doc);
     // TODO: migrate data if store doesn't exist.
@@ -126,7 +129,7 @@ pub extern "C" fn xulstore_has_value(doc: &nsAString, id: &nsAString, attr: &nsA
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_has_value_2(doc: *const c_char, id: *const c_char, attr: *const c_char) -> bool {
+pub extern "C" fn xulstore_has_value_c(doc: *const c_char, id: *const c_char, attr: *const c_char) -> bool {
     let store_name = unsafe { CStr::from_ptr(doc) }.to_str().unwrap();
     let store = RKV.create_or_open(Some(store_name)).expect("open store");
     let key = unsafe { CStr::from_ptr(id) }.to_str().unwrap().to_owned() + "=" +
