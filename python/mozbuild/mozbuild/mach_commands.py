@@ -275,28 +275,28 @@ class CargoProvider(MachCommandBase):
         self.parser.print_usage()
         return 1
 
-    # XXX duplication with `mach vendor rust`
-    _crates_and_roots = {
-        'gkrust': 'toolkit/library/rust',
-        'gkrust-gtest': 'toolkit/library/gtest/rust',
-        'js': 'js/rust',
-        'mozjs_sys': 'js/src',
-        'geckodriver': 'testing/geckodriver',
-    }
-
     @SubCommand('cargo', 'check',
                 description='Run `cargo check` on a given crate.  Defaults to gkrust.')
     @CommandArgument('--all-crates', default=None, action='store_true',
         help='Check all of the crates in the tree.')
     @CommandArgument('crates', default=None, nargs='*', help='The crate name(s) to check.')
     def check(self, all_crates=None, crates=None):
+        # XXX duplication with `mach vendor rust`
+        crates_and_roots = {
+            'gkrust': 'toolkit/library/rust',
+            'gkrust-gtest': 'toolkit/library/gtest/rust',
+            'js': 'js/rust',
+            'mozjs_sys': 'js/src',
+            'geckodriver': 'testing/geckodriver',
+        }
+
         if all_crates:
-            crates = self._crates_and_roots.keys()
+            crates = crates_and_roots.keys()
         elif crates == None or crates == []:
             crates = ['gkrust']
 
         for crate in crates:
-            root = self._crates_and_roots.get(crate, None)
+            root = crates_and_roots.get(crate, None)
             if not root:
                 print('Cannot locate crate %s.  Please check your spelling or '
                       'add the crate information to the list.' % crate)
@@ -314,45 +314,6 @@ class CargoProvider(MachCommandBase):
                                  print_directory=False, target=check_targets)
             if ret != 0:
                 return ret
-
-        return 0
-
-    @SubCommand('cargo', 'doc',
-                description='Run `cargo doc` on a given crate.  Defaults to gkrust.')
-    @CommandArgument('--all-crates', default=None, action='store_true',
-        help='Document all of the crates in the tree.')
-    @CommandArgument('--open', dest='auto_open', default=False, action='store_true',
-        help="Automatically open HTML docs in a browser.")
-    @CommandArgument('crates', default=None, nargs='*', help='The crate name(s) to document.')
-    def doc(self, all_crates=None, crates=None, auto_open=False):
-        import webbrowser
-
-        if all_crates:
-            crates = self._crates_and_roots.keys()
-        elif crates == None or crates == []:
-            crates = ['gkrust']
-
-        for crate in crates:
-            root = self._crates_and_roots.get(crate, None)
-            if not root:
-                print('Cannot locate crate %s.  Please check your spelling or '
-                      'add the crate information to the list.' % crate)
-                return 1
-
-            ret = self._run_make(srcdir=False, directory=root,
-                                 ensure_exit_code=0, silent=False,
-                                 print_directory=False,
-                                 target='force-cargo-doc-build')
-            if ret != 0:
-                return ret
-
-            # TODO: determine the correct location of the docs based on
-            # the value of CARGO_TARGET_DIR instead of optimistically computing
-            # it relative to the root.
-            doc_path = os.path.join(self.topobjdir, root, '..', 'doc')
-            if auto_open and os.path.isdir(doc_path):
-                # TODO: use a library like pathlib to convert the path to a URL.
-                webbrowser.open('file://' + doc_path)
 
         return 0
 
