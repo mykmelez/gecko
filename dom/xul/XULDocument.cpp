@@ -1707,8 +1707,6 @@ XULDocument::PrepareToLoadPrototype(nsIURI* aURI, const char* aCommand,
 nsresult
 XULDocument::ApplyPersistentAttributes()
 {
-    clock_t startTime = clock();
-
     // For non-chrome documents, persistance is simply broken
     if (!nsContentUtils::IsSystemPrincipal(NodePrincipal()))
         return NS_ERROR_NOT_AVAILABLE;
@@ -1730,10 +1728,6 @@ XULDocument::ApplyPersistentAttributes()
     // it to nodes created by overlays
     mRestrictPersistence = true;
     mPersistenceIds.Clear();
-
-    clock_t endTime = clock();
-    float runTime = (float) (endTime - startTime) / CLOCKS_PER_SEC * 1000;
-    printf("XULDocument::ApplyPersistentAttributes time: %fms\n", runTime);
 
     return NS_OK;
 }
