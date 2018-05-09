@@ -80,6 +80,10 @@ pref("extensions.webextensions.default-content-security-policy", "script-src 'se
 pref("extensions.webextensions.remote", true);
 #endif
 
+#ifdef NIGHTLY_BUILD
+pref("extensions.webextensions.background-delayed-startup", true);
+#endif
+
 // Extensions that should not be flagged as legacy in about:addons
 pref("extensions.legacy.exceptions", "testpilot@cliqz.com,@testpilot-containers,jid1-NeEaf3sAHdKHPA@jetpack,@activity-streams,pulse@mozilla.com,@testpilot-addon,@min-vid,tabcentertest1@mozilla.com,snoozetabs@mozilla.com,speaktome@mozilla.com,hoverpad@mozilla.com");
 
@@ -383,9 +387,6 @@ pref("browser.helperApps.deleteTempFileOnExit", true);
 // search engines URL
 pref("browser.search.searchEnginesURL",      "https://addons.mozilla.org/%LOCALE%/firefox/search-engines/");
 
-// pointer to the default engine name
-pref("browser.search.defaultenginename",      "chrome://browser-region/locale/region.properties");
-
 // Ordering of Search Engines in the Engine list.
 pref("browser.search.order.1",                "chrome://browser-region/locale/region.properties");
 pref("browser.search.order.2",                "chrome://browser-region/locale/region.properties");
@@ -395,8 +396,7 @@ pref("browser.search.order.3",                "chrome://browser-region/locale/re
 pref("browser.search.geoSpecificDefaults", true);
 pref("browser.search.geoSpecificDefaults.url", "https://search.services.mozilla.com/1/%APP%/%VERSION%/%CHANNEL%/%LOCALE%/%REGION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%");
 
-// US specific default (used as a fallback if the geoSpecificDefaults request fails).
-pref("browser.search.defaultenginename.US",      "data:text/plain,browser.search.defaultenginename.US=Google");
+// US specific default
 pref("browser.search.order.US.1",                "data:text/plain,browser.search.order.US.1=Google");
 pref("browser.search.order.US.2",                "data:text/plain,browser.search.order.US.2=Bing");
 
