@@ -50,6 +50,8 @@ lazy_static! {
         //
         let mut profile_dir_path = nsString::new();
         unsafe {
+            // TODO: ensure the directory service returns a valid pointer
+            // to an nsIFile instance.
             profile_dir.refptr().unwrap().GetPath(&mut profile_dir_path);
         }
         let profile_dir_path = String::from_utf16_lossy(&profile_dir_path[..]);

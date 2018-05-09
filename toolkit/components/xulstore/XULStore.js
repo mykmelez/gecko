@@ -141,6 +141,7 @@ XULStore.prototype = {
     }
 
     // Not implemented because never used.
+    // TODO: remove method from nsIXULStore.
     throw new Error(NS_ERROR_NOT_AVAILABLE);
   },
 
