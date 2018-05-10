@@ -1,32 +1,25 @@
 extern crate itertools;
+#[macro_use]
+extern crate lazy_static;
 extern crate lmdb;
+extern crate nserror;
+extern crate nsstring;
 extern crate rkv;
 extern crate tempdir;
-#[macro_use]
 extern crate xpcom;
 
 use lmdb::{Cursor};
-use rkv::{Reader, Rkv, Store, Value};
+use rkv::{Rkv, Store, Value};
 
 use itertools::Itertools;
-use self::tempdir::TempDir;
+use nserror::{NS_OK, nsresult};
+use nsstring::{nsAString, nsString};
 use std::ffi::{CStr, CString};
-use std::fmt::Write;
 use std::fs;
 use std::os::raw::{c_char, c_uint};
-use std::path::{Path, PathBuf};
-use std::ptr;
+use std::path::{Path};
 use std::str;
-use xpcom::{getter_addrefs, interfaces, RefPtr, XpCom};
-
-extern crate nsstring;
-use nsstring::{nsAString, nsString};
-
-extern crate nserror;
-use nserror::*;
-
-#[macro_use]
-extern crate lazy_static;
+use xpcom::{interfaces, XpCom};
 
 // TODO: set this to max DBs needed by Firefox.
 static MAX_DBS: c_uint = 10;
@@ -351,6 +344,10 @@ pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(doc: *const c_char, id: 
 // which runs afoul of the "Cannot #[derive(xpcom)] on a generic type" error
 // in the xpcom procedural macro definition
 // <https://searchfox.org/mozilla-central/rev/68fdb6c/xpcom/rust/xpcom/xpcom_macros/src/lib.rs#501-505>.
+//
+// #[macro_use]
+// extern crate xpcom;
+//
 // #[no_mangle]
 // pub extern "C" fn xulstore_get_ids_enumerator(doc: &nsAString, ids: *mut *const interfaces::nsIStringEnumerator) -> nsresult {
 //     let store_name = String::from_utf16_lossy(doc);
