@@ -222,14 +222,14 @@ pub extern "C" fn xulstore_get_ids_iterator(doc: &nsAString) -> *mut StringItera
     println!("iterator: {:?}", iterator);
     // let collection: () = iterator.map(|v| println!("item: {:?}", v)).collect();
     let collection: Vec<&str> = iterator
-        .map(|(key,val)| key)
+        .map(|(key, _val)| key)
 
         // Assumes we control all writes into database.
         // TODO: avoid making that assumption and check the conversion.
         .map(|v| unsafe { str::from_utf8_unchecked(&v) })
 
         .map(|v| v.split_at(v.find('=').unwrap()))
-        .map(|(id, attr)| id)
+        .map(|(id, _attr)| id)
         // .map(|v| println!("item: {:?}", v))
         // TODO: unique() collects values, and collect() does too,
         // so do so only once, by collecting the values into a set.
@@ -254,14 +254,14 @@ pub extern "C" fn xulstore_get_ids_iterator_c<'a>(doc: *const c_char) -> *mut St
     println!("iterator: {:?}", iterator);
     // let collection: () = iterator.map(|v| println!("item: {:?}", v)).collect();
     let collection: Vec<&str> = iterator
-        .map(|(key,val)| key)
+        .map(|(key, _val)| key)
 
         // Assumes we control all writes into database.
         // TODO: avoid making that assumption and check the conversion.
         .map(|v| unsafe { str::from_utf8_unchecked(&v) })
 
         .map(|v| v.split_at(v.find('=').unwrap()))
-        .map(|(id, attr)| id)
+        .map(|(id, _attr)| id)
         // .map(|v| println!("item: {:?}", v))
         .unique()
         .collect();
@@ -285,17 +285,17 @@ pub extern "C" fn xulstore_get_attribute_iterator<'a>(doc: &nsAString, id: &nsAS
     println!("iterator: {:?}", iterator);
     // let collection: () = iterator.map(|v| println!("item: {:?}", v)).collect();
     let collection: Vec<&str> = iterator
-        .map(|(key,val)| key)
+        .map(|(key, _val)| key)
 
         // Assumes we control all writes into database.
         // TODO: avoid making that assumption and check the conversion.
         .map(|v| unsafe { str::from_utf8_unchecked(&v) })
 
         .map(|v| v.split_at(v.find('=').unwrap()))
-        .filter(|&(id, attr)| id == element_id)
+        .filter(|&(id, _attr)| id == element_id)
         // Split-at doesn't remove the character at which the string is split,
         // so we have to slice it off ourselves.
-        .map(|(id, attr)| &attr[1..])
+        .map(|(_id, attr)| &attr[1..])
         // .map(|v| println!("item: {:?}", v))
         .unique()
         .collect();
@@ -318,7 +318,7 @@ pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(doc: *const c_char, id: 
     println!("iterator: {:?}", iterator);
     // let collection: () = iterator.map(|v| println!("item: {:?}", v)).collect();
     let collection: Vec<&str> = iterator
-        .map(|(key,val)| key)
+        .map(|(key, _val)| key)
         .map(|v| { println!("v: {:?}", v); v })
 
         // Assumes we control all writes into database.
@@ -326,10 +326,10 @@ pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(doc: *const c_char, id: 
         .map(|v| unsafe { str::from_utf8_unchecked(&v) })
 
         .map(|v| v.split_at(v.find('=').unwrap()))
-        .filter(|&(id, attr)| id == element_id)
+        .filter(|&(id, _attr)| id == element_id)
         // Split-at doesn't remove the character at which the string is split,
         // so we have to slice it off ourselves.
-        .map(|(id, attr)| &attr[1..])
+        .map(|(_id, attr)| &attr[1..])
         .unique()
         .collect();
 
