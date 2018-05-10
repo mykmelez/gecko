@@ -55,12 +55,6 @@ lazy_static! {
         println!("xulstore directory: {:?}", &xulstore_dir_path);
         Rkv::with_capacity(&xulstore_dir_path, MAX_DBS).expect("new succeeded")
     };
-
-    #[derive(Debug)]
-    static ref STORE: Store<&'static str> = {
-        println!("{:?}", RKV);
-        RKV.create_or_open_default().expect("created default")
-    };
 }
 
 // See XULStore.cpp for an explanation of this function.
@@ -174,9 +168,7 @@ pub extern "C" fn xulstore_get_value_c(doc: *const c_char, id: *const c_char, at
         _ => "",
     };
     println!("return_value: {:?}", return_value);
-    unsafe {
-        CString::new(return_value).unwrap().into_raw()
-    }
+    CString::new(return_value).unwrap().into_raw()
 }
 
 #[no_mangle]
@@ -218,7 +210,7 @@ pub extern "C" fn xulstore_get_ids_iterator(doc: &nsAString) -> *mut StringItera
     let reader = store.read(&RKV).expect("reader");
     let mut cursor = reader.open_cursor().expect("cursor");
     println!("cursor: {:?}", cursor);
-    let mut iterator = cursor.iter();
+    let iterator = cursor.iter();
     println!("iterator: {:?}", iterator);
     // let collection: () = iterator.map(|v| println!("item: {:?}", v)).collect();
     let collection: Vec<&str> = iterator
@@ -250,7 +242,7 @@ pub extern "C" fn xulstore_get_ids_iterator_c<'a>(doc: *const c_char) -> *mut St
     let reader = store.read(&RKV).expect("reader");
     let mut cursor = reader.open_cursor().expect("cursor");
     println!("cursor: {:?}", cursor);
-    let mut iterator = cursor.iter();
+    let iterator = cursor.iter();
     println!("iterator: {:?}", iterator);
     // let collection: () = iterator.map(|v| println!("item: {:?}", v)).collect();
     let collection: Vec<&str> = iterator
@@ -281,7 +273,7 @@ pub extern "C" fn xulstore_get_attribute_iterator<'a>(doc: &nsAString, id: &nsAS
     let reader = store.read(&RKV).expect("reader");
     let mut cursor = reader.open_cursor().expect("cursor");
     println!("cursor: {:?}", cursor);
-    let mut iterator = cursor.iter();
+    let iterator = cursor.iter();
     println!("iterator: {:?}", iterator);
     // let collection: () = iterator.map(|v| println!("item: {:?}", v)).collect();
     let collection: Vec<&str> = iterator
@@ -314,7 +306,7 @@ pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(doc: *const c_char, id: 
     let reader = store.read(&RKV).expect("reader");
     let mut cursor = reader.open_cursor().expect("cursor");
     println!("cursor: {:?}", cursor);
-    let mut iterator = cursor.iter();
+    let iterator = cursor.iter();
     println!("iterator: {:?}", iterator);
     // let collection: () = iterator.map(|v| println!("item: {:?}", v)).collect();
     let collection: Vec<&str> = iterator
