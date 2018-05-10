@@ -138,7 +138,10 @@ lazilyLoadedBrowserScripts.forEach(function (aScript) {
 });
 
 var lazilyLoadedObserverScripts = [
-  ["MemoryObserver", ["memory-pressure", "Memory:Dump"], "chrome://browser/content/MemoryObserver.js"],
+  ["MemoryObserver", ["memory-pressure",
+                      "memory-pressure-stop",
+                      "Memory:Dump"],
+   "chrome://browser/content/MemoryObserver.js"],
   ["ConsoleAPI", ["console-api-log-event"], "chrome://browser/content/ConsoleAPI.js"],
   ["ExtensionPermissions", ["webextension-permission-prompt",
                             "webextension-update-permissions",
@@ -2904,7 +2907,10 @@ var NativeWindow = {
       if (node.hasAttribute && node.hasAttribute("title")) {
         return node.getAttribute("title");
       }
-      return this._getUrl(node);
+      let url = this._getUrl(node);
+      let readerUrl = ReaderMode.getOriginalUrlObjectForDisplay(url);
+
+      return (readerUrl && readerUrl.displaySpec) || url;
     },
 
     // Returns a url associated with a node

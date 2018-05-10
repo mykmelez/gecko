@@ -2175,6 +2175,9 @@ pref("network.cookie.lifetime.days",        90); // Ignored unless network.cooki
 // Set to 0 to disable moving the cookies.
 pref("network.cookie.move.interval_sec",    10);
 
+pref("network.cookie.maxNumber", 3000);
+pref("network.cookie.maxPerHost", 180);
+
 // The PAC file to load.  Ignored unless network.proxy.type is 2.
 pref("network.proxy.autoconfig_url", "");
 // Strip off paths when sending URLs to PAC scripts
@@ -3208,7 +3211,6 @@ pref("dom.ipc.useNativeEventProcessing.content", true);
 #endif
 
 // Quantum DOM scheduling:
-pref("dom.ipc.scheduler", false);
 pref("dom.ipc.scheduler.useMultipleQueues", true);
 pref("dom.ipc.scheduler.preemption", false);
 pref("dom.ipc.scheduler.threadCount", 2);
@@ -4511,11 +4513,15 @@ pref("toolkit.zoomManager.zoomValues", ".3,.5,.67,.8,.9,1,1.1,1.2,1.33,1.5,1.7,2
 // The maximum size (in kB) that the aggregate frames of an animation can use
 // before it starts to discard already displayed frames and redecode them as
 // necessary.
-pref("image.animated.decode-on-demand.threshold-kb", 4194303);
+pref("image.animated.decode-on-demand.threshold-kb", 20480);
 
 // The minimum number of frames we want to have buffered ahead of an
 // animation's currently displayed frame.
 pref("image.animated.decode-on-demand.batch-size", 6);
+
+// Resume an animated image from the last displayed frame rather than
+// advancing when out of view.
+pref("image.animated.resume-from-last-displayed", true);
 
 // Maximum number of surfaces for an image before entering "factor of 2" mode.
 // This in addition to the number of "native" sizes of an image. A native size
@@ -5412,10 +5418,8 @@ pref("browser.safebrowsing.provider.mozilla.gethashURL", "https://shavar.service
 pref("browser.safebrowsing.provider.mozilla.nextupdatetime", "1");
 // Block lists for tracking protection. The name values will be used as the keys
 // to lookup the localized name in preferences.properties.
-pref("browser.safebrowsing.provider.mozilla.lists.base.name", "mozstdName");
-pref("browser.safebrowsing.provider.mozilla.lists.base.description", "mozstdDesc");
-pref("browser.safebrowsing.provider.mozilla.lists.content.name", "mozfullName");
-pref("browser.safebrowsing.provider.mozilla.lists.content.description", "mozfullDesc2");
+pref("browser.safebrowsing.provider.mozilla.lists.base", "moz-std");
+pref("browser.safebrowsing.provider.mozilla.lists.content", "moz-full");
 
 // The table and global pref for blocking plugin content
 pref("browser.safebrowsing.blockedURIs.enabled", true);
