@@ -61,7 +61,7 @@ lazy_static! {
 pub extern "C" fn xulstore_function_marked_used() {}
 
 #[no_mangle]
-pub extern "C" fn xulstore_set_value(doc: &nsAString, id: &nsAString, attr: &nsAString, value: &nsAString) -> nsresult {
+pub extern "C" fn xulstore_set_value_ns(doc: &nsAString, id: &nsAString, attr: &nsAString, value: &nsAString) -> nsresult {
     let store_name = String::from_utf16_lossy(doc);
     // TODO: migrate data if store doesn't exist.
     // TODO: cache opened stores.
@@ -90,7 +90,7 @@ pub extern "C" fn xulstore_set_value_c(doc: *const c_char, id: *const c_char, at
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_has_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> bool {
+pub extern "C" fn xulstore_has_value_ns(doc: &nsAString, id: &nsAString, attr: &nsAString) -> bool {
     let store_name = String::from_utf16_lossy(doc);
     let store = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
     let key = String::from_utf16_lossy(id) + "=" + &String::from_utf16_lossy(attr);
@@ -125,7 +125,7 @@ pub extern "C" fn xulstore_has_value_c(doc: *const c_char, id: *const c_char, at
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_get_value(doc: &nsAString, id: &nsAString, attr: &nsAString, value: *mut nsAString) {
+pub extern "C" fn xulstore_get_value_ns(doc: &nsAString, id: &nsAString, attr: &nsAString, value: *mut nsAString) {
     let store_name = String::from_utf16_lossy(doc);
     let store = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
     let key = String::from_utf16_lossy(id) + "=" + &String::from_utf16_lossy(attr);
@@ -178,7 +178,7 @@ pub extern "C" fn xulstore_free_value_c(str: *mut c_char) {
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_remove_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> nsresult {
+pub extern "C" fn xulstore_remove_value_ns(doc: &nsAString, id: &nsAString, attr: &nsAString) -> nsresult {
     let store_name = String::from_utf16_lossy(doc);
     let store = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
     let key = String::from_utf16_lossy(id) + "=" + &String::from_utf16_lossy(attr);
@@ -215,7 +215,7 @@ println!("xulstore_remove_value_C; key: {:?}", key);
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_get_ids_iterator(doc: &nsAString) -> *mut StringIterator {
+pub extern "C" fn xulstore_get_ids_iterator_ns(doc: &nsAString) -> *mut StringIterator {
     let store_name = String::from_utf16_lossy(doc);
     let store: Store<&'static str> = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
     let reader = store.read(&RKV).expect("reader");
@@ -277,7 +277,7 @@ pub extern "C" fn xulstore_get_ids_iterator_c<'a>(doc: *const c_char) -> *mut St
 
 // TODO refactor with xulstore_get_ids_iterator.
 #[no_mangle]
-pub extern "C" fn xulstore_get_attribute_iterator<'a>(doc: &nsAString, id: &nsAString) -> *mut StringIterator<'a> {
+pub extern "C" fn xulstore_get_attribute_iterator_ns<'a>(doc: &nsAString, id: &nsAString) -> *mut StringIterator<'a> {
     let store_name = String::from_utf16_lossy(doc);
     let element_id = String::from_utf16_lossy(id);
     let store: Store<&'static str> = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
@@ -445,7 +445,7 @@ impl<'a> StringIterator<'a> {
         self.index < self.values.len()
     }
 
-    pub fn get_next(&mut self, value: *mut nsAString) -> nsresult {
+    pub fn get_next_ns(&mut self, value: *mut nsAString) -> nsresult {
         // TODO: confirm that self.index in range.
         // TODO: consume the value being returned.
         unsafe {
@@ -471,15 +471,9 @@ pub unsafe extern "C" fn xulstore_iter_has_more(iter: *mut StringIterator) -> bo
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn xulstore_iter_has_more_c(iter: *mut StringIterator) -> bool {
+pub unsafe extern "C" fn xulstore_iter_get_next_ns(iter: *mut StringIterator, value: *mut nsAString) -> nsresult {
     assert!(!iter.is_null());
-    (&*iter).has_more()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn xulstore_iter_get_next(iter: *mut StringIterator, value: *mut nsAString) -> nsresult {
-    assert!(!iter.is_null());
-    (&mut *iter).get_next(value)
+    (&mut *iter).get_next_ns(value)
 }
 
 #[no_mangle]
@@ -490,13 +484,6 @@ pub unsafe extern "C" fn xulstore_iter_get_next_c(iter: *mut StringIterator) -> 
 
 #[no_mangle]
 pub unsafe extern "C" fn xulstore_iter_destroy(iter: *mut StringIterator) {
-    if !iter.is_null() {
-        drop(Box::from_raw(iter));
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn xulstore_iter_destroy_c(iter: *mut StringIterator) {
     if !iter.is_null() {
         drop(Box::from_raw(iter));
     }
