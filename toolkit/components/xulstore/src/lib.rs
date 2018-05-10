@@ -70,6 +70,7 @@ lazy_static! {
     };
 }
 
+// See XULStore.cpp for an explanation of this function.
 #[no_mangle]
 pub extern "C" fn xulstore_function_marked_used() {}
 
@@ -81,17 +82,6 @@ pub extern "C" fn xulstore_set_value(doc: &nsAString, id: &nsAString, attr: &nsA
     let store = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
     let key = String::from_utf16_lossy(id) + "=" + &String::from_utf16_lossy(attr);
     let mut writer = store.write(&RKV).expect("writer");
-
-    // This writer.get() call borrows writer immutably, and the &str value
-    // that Value::Str wraps is scoped to the lifetime of writer, which means
-    // we need to release it before the writer.put() call below that borrows
-    // writer mutably.  So we clone the &str.
-    // TODO: figure out how to avoid the allocation.
-    // let existing_value = match writer.get(&key).expect("read") {
-    //     Some(Value::Str(val)) => val,
-    //     _ => "",
-    // }.to_string();
-    // println!("{:?}", existing_value);
 
     // TODO: store (and retrieve) values as raw bytes rather than converting
     // them to String and back, which is not only potentially lossy but also
@@ -356,91 +346,6 @@ pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(doc: *const c_char, id: 
     // ptr::null_mut()
 }
 
-pub struct StringIterator<'a> {
-    index: usize,
-    values: Vec<&'a str>,
-}
-
-impl<'a> StringIterator<'a> {
-    pub fn new(values: Vec<&'a str>) -> StringIterator {
-        Self {
-            index: 0,
-            values: values,
-        }
-    }
-
-    pub fn has_more(&self) -> bool {
-        self.index < self.values.len()
-    }
-
-    pub fn get_next(&mut self, value: *mut nsAString) -> nsresult {
-        // TODO: confirm that self.index in range.
-        // TODO: consume the value being returned.
-        unsafe {
-            (*value).assign(&nsString::from(self.values[self.index]));
-        }
-        self.index = self.index + 1;
-        NS_OK
-    }
-
-    pub fn get_next_c(&mut self) -> &'a str {
-        // TODO: confirm that self.index in range.
-        // TODO: consume the value being returned.
-        let value = self.values[self.index];
-        self.index = self.index + 1;
-        value
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn xulstore_iter_has_more(iter: *mut StringIterator) -> bool {
-    if iter.is_null() {
-        // TODO: figure out the appropriate response in this case.  Panic?!
-        return false;
-    }
-    (&*iter).has_more()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn xulstore_iter_has_more_c(iter: *mut StringIterator) -> bool {
-    if iter.is_null() {
-        // TODO: figure out the appropriate response in this case.  Panic?!
-        return false;
-    }
-    (&*iter).has_more()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn xulstore_iter_get_next(iter: *mut StringIterator, value: *mut nsAString) -> nsresult {
-    if iter.is_null() {
-        // TODO: figure out the appropriate response in this case.  Panic?!
-        return NS_OK;
-    }
-    (&mut *iter).get_next(value)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn xulstore_iter_get_next_c(iter: *mut StringIterator) -> *const c_char {
-    if iter.is_null() {
-        // TODO: figure out the appropriate response in this case.  Panic?!
-    }
-    CString::new((&mut *iter).get_next_c()).unwrap().into_raw()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn xulstore_iter_destroy(iter: *mut StringIterator) {
-    if !iter.is_null() {
-        drop(Box::from_raw(iter));
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn xulstore_iter_destroy_c(iter: *mut StringIterator) {
-    if !iter.is_null() {
-        drop(Box::from_raw(iter));
-    }
-}
-
 // In theory, we should be able to implement iteration as nsIStringEnumerator.
 // But we need to specify a lifetime parameter on the RoCursor and Iter,
 // which runs afoul of the "Cannot #[derive(xpcom)] on a generic type" error
@@ -484,7 +389,7 @@ pub unsafe extern "C" fn xulstore_iter_destroy_c(iter: *mut StringIterator) {
 //     }
 // }
 
-// Another option is to define a StringIterator struct that encapsulates
+// Another option would be to define a StringIterator struct that encapsulates
 // an LMDB cursor, with functions for iterating it.  Unfortunately, that has
 // the issue that Rust doesn't support a Struct with fields that reference
 // each other, and in this case the struct would need to reference both
@@ -493,7 +398,7 @@ pub unsafe extern "C" fn xulstore_iter_destroy_c(iter: *mut StringIterator) {
 //
 // <https://stackoverflow.com/questions/32300132/why-cant-i-store-a-value-and-a-reference-to-that-value-in-the-same-struct>
 //
-// We should be able to work around that in this case with the rental crate.
+// We might be able to work around that in this case with the rental crate.
 //
 // pub struct StringIterator<'a> {
 //     reader: Box<Reader<'a, &'static str>>,
@@ -515,3 +420,84 @@ pub unsafe extern "C" fn xulstore_iter_destroy_c(iter: *mut StringIterator) {
 //         }
 //     }
 // }
+
+// A third option is to pre-collect the values into a StringIterator struct
+// and iterator methods that take a raw pointer to the struct.  This avoids
+// the limitations of both XPCOM support for Rust and Rust support for Structs
+// with fields that reference each other.  It consumes more memory and is
+// less performant, but the difference is likely to be insignificant
+// for XULStore, which stores and iterates very small amounts of data.
+
+pub struct StringIterator<'a> {
+    index: usize,
+    values: Vec<&'a str>,
+}
+
+impl<'a> StringIterator<'a> {
+    pub fn new(values: Vec<&'a str>) -> StringIterator {
+        Self {
+            index: 0,
+            values: values,
+        }
+    }
+
+    pub fn has_more(&self) -> bool {
+        self.index < self.values.len()
+    }
+
+    pub fn get_next(&mut self, value: *mut nsAString) -> nsresult {
+        // TODO: confirm that self.index in range.
+        // TODO: consume the value being returned.
+        unsafe {
+            (*value).assign(&nsString::from(self.values[self.index]));
+        }
+        self.index = self.index + 1;
+        NS_OK
+    }
+
+    pub fn get_next_c(&mut self) -> &'a str {
+        // TODO: confirm that self.index in range.
+        // TODO: consume the value being returned.
+        let value = self.values[self.index];
+        self.index = self.index + 1;
+        value
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn xulstore_iter_has_more(iter: *mut StringIterator) -> bool {
+    assert!(!iter.is_null());
+    (&*iter).has_more()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn xulstore_iter_has_more_c(iter: *mut StringIterator) -> bool {
+    assert!(!iter.is_null());
+    (&*iter).has_more()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn xulstore_iter_get_next(iter: *mut StringIterator, value: *mut nsAString) -> nsresult {
+    assert!(!iter.is_null());
+    (&mut *iter).get_next(value)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn xulstore_iter_get_next_c(iter: *mut StringIterator) -> *const c_char {
+    assert!(!iter.is_null());
+    CString::new((&mut *iter).get_next_c()).unwrap().into_raw()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn xulstore_iter_destroy(iter: *mut StringIterator) {
+    if !iter.is_null() {
+        drop(Box::from_raw(iter));
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn xulstore_iter_destroy_c(iter: *mut StringIterator) {
+    if !iter.is_null() {
+        drop(Box::from_raw(iter));
+    }
+}
