@@ -8,12 +8,11 @@ extern crate rkv;
 extern crate tempdir;
 extern crate xpcom;
 
-use lmdb::{Cursor};
-use rkv::{Rkv, Store, Value};
-
 use itertools::Itertools;
+use lmdb::{Cursor};
 use nserror::{NS_OK, nsresult};
 use nsstring::{nsAString, nsString};
+use rkv::{Rkv, Store, StoreError, Value};
 use std::ffi::{CStr, CString};
 use std::fs;
 use std::os::raw::{c_char, c_uint};
@@ -73,8 +72,8 @@ pub extern "C" fn xulstore_set_value(doc: &nsAString, id: &nsAString, attr: &nsA
     // TODO: store (and retrieve) values as raw bytes rather than converting
     // them to String and back, which is not only potentially lossy but also
     // presumably unnecessary expense.
-    writer.put(&key, &Value::Str(&String::from_utf16_lossy(value)));
-    writer.commit();
+    writer.put(&key, &Value::Str(&String::from_utf16_lossy(value))).expect("put");
+    writer.commit().expect("commit");
     NS_OK
 }
 
@@ -85,8 +84,8 @@ pub extern "C" fn xulstore_set_value_c(doc: *const c_char, id: *const c_char, at
     let key = unsafe { CStr::from_ptr(id) }.to_str().unwrap().to_owned() + "=" +
               unsafe { CStr::from_ptr(attr) }.to_str().unwrap();
     let mut writer = store.write(&RKV).expect("writer");
-    writer.put(&key, &Value::Str(unsafe { CStr::from_ptr(value) }.to_str().unwrap()));
-    writer.commit();
+    writer.put(&key, &Value::Str(unsafe { CStr::from_ptr(value) }.to_str().unwrap())).expect("put");
+    writer.commit().expect("commit");
     NS_OK
 }
 
@@ -184,9 +183,15 @@ pub extern "C" fn xulstore_remove_value(doc: &nsAString, id: &nsAString, attr: &
     let store = RKV.create_or_open(Some(store_name.as_str())).expect("open store");
     let key = String::from_utf16_lossy(id) + "=" + &String::from_utf16_lossy(attr);
     let mut writer = store.write(&RKV).expect("writer");
-    writer.delete(&key);
+    match writer.delete(&key) {
+        // The XULStore API doesn't care if a consumer tries to remove a value
+        // that doesn't actually exist, so we ignore that error.
+        Err(StoreError::LmdbError(lmdb::Error::NotFound)) => Ok(()),
+        Ok(ok) => Ok(ok),
+        Err(err) => Err(err),
+    }.expect("delete");
     // TODO: remove database if we've removed the last key/value pair from it.
-    writer.commit();
+    writer.commit().expect("commit");
     NS_OK
 }
 
@@ -198,8 +203,14 @@ pub extern "C" fn xulstore_remove_value_c(doc: *const c_char, id: *const c_char,
               unsafe { CStr::from_ptr(attr) }.to_str().unwrap();
 println!("xulstore_remove_value_C; key: {:?}", key);
     let mut writer = store.write(&RKV).expect("writer");
-    writer.delete(&key);
-    writer.commit();
+    match writer.delete(&key) {
+        // The XULStore API doesn't care if a consumer tries to remove a value
+        // that doesn't actually exist, so we ignore that error.
+        Err(StoreError::LmdbError(lmdb::Error::NotFound)) => Ok(()),
+        Ok(ok) => Ok(ok),
+        Err(err) => Err(err),
+    }.expect("delete");
+    writer.commit().expect("commit");
     NS_OK
 }
 
