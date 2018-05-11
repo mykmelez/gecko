@@ -2,48 +2,46 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/*
-A proof-of-concept XULStore implementation that uses rkv to store data.
-This PoC translates the XULStore data model into rkv concepts by mapping:
-
-  * XUL document -> rkv store
-  * (element ID, attribute name) -> rkv key
-  * attribute value -> rkv value
-
-The PoC creates an rkv store (LMDB database) for each unique XUL document
-and specifies rkv keys as tuples of element ID and attribute name (serialized
-to a string concatenation with an equals sign separator, i.e. ID=name).
-
-Note that the maximum number of rkv stores needs to be known during
-initialization of the rkv singleton (LMDB environment).  Also note that
-"a moderate number of slots are cheap but a huge number gets expensive"
-<http://www.lmdb.tech/doc/group__mdb.html#gaa2fc2f1f37cb1115e733b62cab2fcdbc>.
-
-Since extensions no longer store data using XULStore, and Firefox itself
-only stores data for a small number of XUL documents, these shouldn't be
-issues in practice.  Firefox can set MAX_STORES to the number of XUL docs
-for which it'll ever store values, and migration from the old JSON store
-to a new rkv store can drop values stored by legacy extensions.
-
-However, a complete implementation might choose the alternative of mapping
-documents to rkv keys in a single rkv store and store element/attribute/value
-triples for a given document as a single rkv value, using JSON or the like
-to structure and serialize the data to a blob that can be stored as a value.
-
-The API for this crate comprises two sets of C ABI functions, one of which
-uses raw pointers to char arrays to receive and return strings, the other
-of which uses Gecko's nsstring crate, which provides Rust implementations
-of common Gecko string types.
-
-These sets model two possible implementation strategies, the first of which
-is more generic and can be accessed from code that doesn't support the Gecko
-string types, such as JS (using js-ctypes) or Java/Kotlin/Swift (on mobile);
-the second of which is more specific to Gecko consumers on desktop and may be
-safer, faster, more ergonomic, or more efficient.
-
-A complete implementation of XULStore will presumably use the nsstring-based
-API, with a C++ XPCOM interface abstraction for both C++ and JS consumers.
-*/
+//! A proof-of-concept XULStore implementation that uses rkv to store data.
+//! This PoC translates the XULStore data model into rkv concepts by mapping:
+//!
+//!   * XUL document -> rkv store
+//!   * (element ID, attribute name) -> rkv key
+//!   * attribute value -> rkv value
+//!
+//! The PoC creates an rkv store (LMDB database) for each unique XUL document
+//! and specifies rkv keys as tuples of element ID and attribute name (serialized
+//! to a string concatenation with an equals sign separator, i.e. ID=name).
+//!
+//! Note that the maximum number of rkv stores needs to be known during
+//! initialization of the rkv singleton (LMDB environment).  Also note that
+//! "a moderate number of slots are cheap but a huge number gets expensive"
+//! <http://www.lmdb.tech/doc/group__mdb.html#gaa2fc2f1f37cb1115e733b62cab2fcdbc>.
+//!
+//! Since extensions no longer store data using XULStore, and Firefox itself
+//! only stores data for a small number of XUL documents, these shouldn't be
+//! issues in practice.  Firefox can set MAX_STORES to the number of XUL docs
+//! for which it'll ever store values, and migration from the old JSON store
+//! to a new rkv store can drop values stored by legacy extensions.
+//!
+//! However, a complete implementation might choose the alternative of mapping
+//! documents to rkv keys in a single rkv store and store element/attribute/value
+//! triples for a given document as a single rkv value, using JSON or the like
+//! to structure and serialize the data to a blob that can be stored as a value.
+//!
+//! The API for this crate comprises two sets of C ABI functions, one of which
+//! uses raw pointers to char arrays to receive and return strings, the other
+//! of which uses Gecko's nsstring crate, which provides Rust implementations
+//! of common Gecko string types.
+//!
+//! These sets model two possible implementation strategies, the first of which
+//! is more generic and can be accessed from code that doesn't support the Gecko
+//! string types, such as JS (using js-ctypes) or Java/Kotlin/Swift (on mobile);
+//! the second of which is more specific to Gecko consumers on desktop and may be
+//! safer, faster, more ergonomic, or more efficient.
+//!
+//! A complete implementation of XULStore will presumably use the nsstring-based
+//! API, with a C++ XPCOM interface abstraction for both C++ and JS consumers.
 
 extern crate itertools;
 #[macro_use]
