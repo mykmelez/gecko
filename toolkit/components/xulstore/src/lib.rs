@@ -6,16 +6,16 @@
 A proof-of-concept XULStore implementation that uses rkv to store data.
 This PoC translates the XULStore data model into rkv concepts by mapping:
 
-  * XUL document -> RKV store
-  * (element ID, attribute name) -> RKV key
-  * attribute value -> RKV value
+  * XUL document -> rkv store
+  * (element ID, attribute name) -> rkv key
+  * attribute value -> rkv value
 
 The PoC creates an rkv store (LMDB database) for each unique XUL document
 and specifies rkv keys as tuples of element ID and attribute name (serialized
 to a string concatenation with an equals sign separator, i.e. ID=name).
 
 Note that the maximum number of rkv stores needs to be known during
-initialization of the RKV singleton (LMDB environment).  Also note that
+initialization of the rkv singleton (LMDB environment).  Also note that
 "a moderate number of slots are cheap but a huge number gets expensive"
 <http://www.lmdb.tech/doc/group__mdb.html#gaa2fc2f1f37cb1115e733b62cab2fcdbc>.
 
@@ -25,7 +25,7 @@ issues in practice.  Firefox can set MAX_STORES to the number of XUL docs
 for which it'll ever store values, and migration from the old JSON store
 to a new rkv store can drop values stored by legacy extensions.
 
-However, a real implementation might choose the alternative of mapping
+However, a complete implementation might choose the alternative of mapping
 documents to rkv keys in a single rkv store and store element/attribute/value
 triples for a given document as a single rkv value, using JSON or the like
 to structure and serialize the data to a blob that can be stored as a value.
@@ -41,8 +41,8 @@ string types, such as JS (using js-ctypes) or Java/Kotlin/Swift (on mobile);
 the second of which is more specific to Gecko consumers on desktop and may be
 safer, faster, more ergonomic, or more efficient.
 
-A real implementation of XULStore will presumably use the nsstring-based API,
-with a C++ XPCOM interface abstraction for both C++ and JS consumers.
+A complete implementation of XULStore will presumably use the nsstring-based
+API, with a C++ XPCOM interface abstraction for both C++ and JS consumers.
 */
 
 extern crate itertools;
@@ -306,7 +306,7 @@ pub extern "C" fn xulstore_get_value_c(
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_free_value_c(str: *mut c_char) {
+pub extern "C" fn xulstore_drop_value_c(str: *mut c_char) {
     if str.is_null() {
         // Implicitly calls drop when the CString goes out of scope.
         unsafe { CString::from_raw(str) };
@@ -619,7 +619,7 @@ pub unsafe extern "C" fn xulstore_iter_get_next_c(iter: *mut StringIterator) -> 
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn xulstore_iter_destroy(iter: *mut StringIterator) {
+pub unsafe extern "C" fn xulstore_iter_drop(iter: *mut StringIterator) {
     if !iter.is_null() {
         drop(Box::from_raw(iter));
     }

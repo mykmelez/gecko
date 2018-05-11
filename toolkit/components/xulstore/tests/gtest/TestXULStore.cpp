@@ -12,7 +12,7 @@ extern "C" {
   void *xulstore_get_attribute_iterator_ns(const nsAString* doc, const nsAString* id);
   bool xulstore_iter_has_more(void *);
   nsresult xulstore_iter_get_next_ns(void *, nsAString* value);
-  void xulstore_iter_destroy(void *);
+  void xulstore_iter_drop(void *);
 }
 
 TEST(XULStore, SetGetValue) {
@@ -67,7 +67,7 @@ TEST(XULStore, GetIDsIterator) {
   // Confirm that the store doesn't have any IDs yet.
   void *raw = xulstore_get_ids_iterator_ns(&doc);
   EXPECT_FALSE(xulstore_iter_has_more(raw));
-  xulstore_iter_destroy(raw);
+  xulstore_iter_drop(raw);
 
   // Insert with IDs in non-alphanumeric order to confirm
   // that store will order them when iterating them.
@@ -91,7 +91,7 @@ TEST(XULStore, GetIDsIterator) {
   xulstore_iter_get_next_ns(raw, &id);
   EXPECT_TRUE(id.EqualsASCII("id3"));
   EXPECT_FALSE(xulstore_iter_has_more(raw));
-  xulstore_iter_destroy(raw);
+  xulstore_iter_drop(raw);
 }
 
 TEST(XULStore, GetAttributeIterator) {
@@ -104,7 +104,7 @@ TEST(XULStore, GetAttributeIterator) {
 
   void *raw = xulstore_get_attribute_iterator_ns(&doc, &id);
   EXPECT_FALSE(xulstore_iter_has_more(raw));
-  xulstore_iter_destroy(raw);
+  xulstore_iter_drop(raw);
 
   // Insert with attributes in non-alphanumeric order to confirm
   // that store will order them when iterating them.
@@ -128,5 +128,5 @@ TEST(XULStore, GetAttributeIterator) {
   xulstore_iter_get_next_ns(raw, &attr);
   EXPECT_TRUE(attr.EqualsASCII("attr3"));
   EXPECT_FALSE(xulstore_iter_has_more(raw));
-  xulstore_iter_destroy(raw);
+  xulstore_iter_drop(raw);
 }

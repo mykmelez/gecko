@@ -45,7 +45,7 @@ const XULStoreStore = {
     ctypes.char.ptr
   ),
   freeValue: lib.declare(
-    "xulstore_free_value_c",
+    "xulstore_drop_value_c",
     ctypes.default_abi,
     ctypes.void_t,
     ctypes.char.ptr
@@ -84,7 +84,7 @@ const XULStoreStore = {
     ctypes.voidptr_t
   ),
   iterDestroy: lib.declare(
-    "xulstore_iter_destroy",
+    "xulstore_iter_drop",
     ctypes.default_abi,
     ctypes.void_t,
     ctypes.voidptr_t
