@@ -132,13 +132,18 @@ pub extern "C" fn xulstore_set_value_ns(
 ) -> nsresult {
     let store_name = String::from_utf16_lossy(doc);
     let store = get_store(store_name.as_str());
-    let key = get_key(&String::from_utf16_lossy(id), &String::from_utf16_lossy(attr));
+    let key = get_key(
+        &String::from_utf16_lossy(id),
+        &String::from_utf16_lossy(attr),
+    );
     let mut writer = store.write(&RKV).expect("writer");
 
     // TODO: store (and retrieve) values as blobs instead of converting them
     // to Value::Str (and back).
     // TODO: handle errors by returning NS_ERROR_FAILURE or another nsresult.
-    writer.put(&key, &Value::Str(&String::from_utf16_lossy(value))).expect("put");
+    writer
+        .put(&key, &Value::Str(&String::from_utf16_lossy(value)))
+        .expect("put");
     writer.commit().expect("commit");
 
     NS_OK
@@ -178,7 +183,10 @@ pub extern "C" fn xulstore_set_value_c(
 pub extern "C" fn xulstore_has_value_ns(doc: &nsAString, id: &nsAString, attr: &nsAString) -> bool {
     let store_name = String::from_utf16_lossy(doc);
     let store = get_store(store_name.as_str());
-    let key = get_key(&String::from_utf16_lossy(id), &String::from_utf16_lossy(attr));
+    let key = get_key(
+        &String::from_utf16_lossy(id),
+        &String::from_utf16_lossy(attr),
+    );
     let reader = store.read(&RKV).expect("reader");
     let value = reader.get(&key);
 
@@ -226,7 +234,10 @@ pub extern "C" fn xulstore_get_value_ns(
 ) -> nsresult {
     let store_name = String::from_utf16_lossy(doc);
     let store = get_store(store_name.as_str());
-    let key = get_key(&String::from_utf16_lossy(id), &String::from_utf16_lossy(attr));
+    let key = get_key(
+        &String::from_utf16_lossy(id),
+        &String::from_utf16_lossy(attr),
+    );
     let reader = store.read(&RKV).expect("reader");
 
     let retrieved_value = reader.get(&key);
@@ -280,6 +291,7 @@ pub extern "C" fn xulstore_get_value_c(
 #[no_mangle]
 pub extern "C" fn xulstore_free_value_c(str: *mut c_char) {
     if str.is_null() {
+        // Implicitly calls drop when the CString goes out of scope.
         unsafe { CString::from_raw(str) };
     }
 }
@@ -292,7 +304,10 @@ pub extern "C" fn xulstore_remove_value_ns(
 ) -> nsresult {
     let store_name = String::from_utf16_lossy(doc);
     let store = get_store(store_name.as_str());
-    let key = get_key(&String::from_utf16_lossy(id), &String::from_utf16_lossy(attr));
+    let key = get_key(
+        &String::from_utf16_lossy(id),
+        &String::from_utf16_lossy(attr),
+    );
     let mut writer = store.write(&RKV).expect("writer");
 
     // TODO: handle errors by returning NS_ERROR_FAILURE or another nsresult.
