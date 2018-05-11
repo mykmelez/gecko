@@ -6,7 +6,7 @@
 extern "C" {
   nsresult xulstore_set_value_ns(nsAString* doc, nsAString* id, nsAString* attr, nsAString* value);
   bool xulstore_has_value_ns(nsAString* doc, nsAString* id, nsAString* attr);
-  void xulstore_get_value_ns(const nsAString* doc, const nsAString* id, const nsAString* attr, nsAString* value);
+  nsresult xulstore_get_value_ns(const nsAString* doc, const nsAString* id, const nsAString* attr, nsAString* value);
   nsresult xulstore_remove_value_ns(const nsAString* doc, const nsAString* id, const nsAString* attr);
   void *xulstore_get_ids_iterator_ns(const nsAString* doc);
   void *xulstore_get_attribute_iterator_ns(const nsAString* doc, const nsAString* id);
@@ -21,7 +21,7 @@ TEST(XULStore, SetGetValue) {
   nsAutoString attr(NS_LITERAL_STRING("bar"));
   nsAutoString value;
 
-  xulstore_get_value_ns(&doc, &id, &attr, &value);
+  EXPECT_EQ(xulstore_get_value_ns(&doc, &id, &attr, &value), NS_OK);
   EXPECT_TRUE(value.EqualsASCII(""));
 
   {
@@ -29,7 +29,7 @@ TEST(XULStore, SetGetValue) {
     EXPECT_EQ(xulstore_set_value_ns(&doc, &id, &attr, &value), NS_OK);
   }
 
-  xulstore_get_value_ns(&doc, &id, &attr, &value);
+  EXPECT_EQ(xulstore_get_value_ns(&doc, &id, &attr, &value), NS_OK);
   EXPECT_TRUE(value.EqualsASCII("baz"));
 }
 
@@ -49,10 +49,10 @@ TEST(XULStore, RemoveValue) {
   nsAutoString attr(NS_LITERAL_STRING("bar"));
   nsAutoString value(NS_LITERAL_STRING("baz"));
   EXPECT_EQ(xulstore_set_value_ns(&doc, &id, &attr, &value), NS_OK);
-  xulstore_get_value_ns(&doc, &id, &attr, &value);
+  EXPECT_EQ(xulstore_get_value_ns(&doc, &id, &attr, &value), NS_OK);
   EXPECT_TRUE(value.EqualsASCII("baz"));
   EXPECT_EQ(xulstore_remove_value_ns(&doc, &id, &attr), NS_OK);
-  xulstore_get_value_ns(&doc, &id, &attr, &value);
+  EXPECT_EQ(xulstore_get_value_ns(&doc, &id, &attr, &value), NS_OK);
   EXPECT_TRUE(value.EqualsASCII(""));
 }
 
