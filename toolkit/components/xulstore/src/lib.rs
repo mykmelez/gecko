@@ -101,6 +101,23 @@ lazy_static! {
         let xulstore_dir_path = profile_dir_path.join("xulstore");
         fs::create_dir_all(xulstore_dir_path.clone()).expect("dir created");
         println!("xulstore directory: {:?}", &xulstore_dir_path);
+
+        // NB: this singleton is tied to the profile directory it retrieves
+        // during initialization, which can change if the application changes
+        // profiles without restarting.
+        //
+        // It isn't clear that there's any way to initiate such a profile
+        // change anymore, but in any case the nsIXULStore implementation
+        // ignores writes after receiving a profile-after-change notification,
+        // so it isn't necessary to support that here, assuming consumers
+        // always access this store via that interface.
+        //
+        // If they don't, or if we want to support writes (and reads from,
+        // the correct profile dir, for that matter), then we could listen
+        // for profile-after-change ourselves, as demonstrated in
+        // xpcom/rust/gtest/xpcom/test.rs, and reinitialize the singleton
+        // with the new profile directory.
+
         Rkv::with_capacity(&xulstore_dir_path, MAX_STORES).expect("new succeeded")
     };
 }
