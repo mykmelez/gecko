@@ -295,7 +295,7 @@ pub extern "C" fn xulstore_remove_value_c(doc: *const c_char, id: *const c_char,
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_get_ids_iterator_ns(doc: &nsAString) -> *mut StringIterator {
+pub extern "C" fn xulstore_get_ids_iterator_ns(doc: &nsAString) -> *const StringIterator {
     let store_name = String::from_utf16_lossy(doc);
     let store = get_store(store_name.as_str());
     let reader = store.read(&RKV).expect("reader");
@@ -316,7 +316,7 @@ pub extern "C" fn xulstore_get_ids_iterator_ns(doc: &nsAString) -> *mut StringIt
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_get_ids_iterator_c<'a>(doc: *const c_char) -> *mut StringIterator<'a> {
+pub extern "C" fn xulstore_get_ids_iterator_c<'a>(doc: *const c_char) -> *const StringIterator<'a> {
     assert!(!doc.is_null());
 
     let store_name = unsafe { CStr::from_ptr(doc) };
@@ -339,7 +339,7 @@ pub extern "C" fn xulstore_get_ids_iterator_c<'a>(doc: *const c_char) -> *mut St
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_get_attribute_iterator_ns<'a>(doc: &nsAString, id: &nsAString) -> *mut StringIterator<'a> {
+pub extern "C" fn xulstore_get_attribute_iterator_ns<'a>(doc: &nsAString, id: &nsAString) -> *const StringIterator<'a> {
     let store_name = String::from_utf16_lossy(doc);
     let element_id = String::from_utf16_lossy(id);
     let store = get_store(store_name.as_str());
@@ -360,7 +360,7 @@ pub extern "C" fn xulstore_get_attribute_iterator_ns<'a>(doc: &nsAString, id: &n
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(doc: *const c_char, id: *const c_char) -> *mut StringIterator<'a> {
+pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(doc: *const c_char, id: *const c_char) -> *const StringIterator<'a> {
     assert!(!doc.is_null());
     assert!(!id.is_null());
 
