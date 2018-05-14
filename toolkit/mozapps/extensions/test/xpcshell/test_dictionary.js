@@ -44,13 +44,7 @@ var HunspellEngine = {
   dictionaryURIs: new Map(),
   listener: null,
 
-  QueryInterface: function hunspell_qi(iid) {
-    if (iid.equals(Ci.nsISupports) ||
-        iid.equals(Ci.nsIFactory) ||
-        iid.equals(Ci.mozISpellCheckingEngine))
-      return this;
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  },
+  QueryInterface: ChromeUtils.generateQI(["nsIFactory", "mozISpellCheckingEngine"]),
   createInstance: function hunspell_ci(outer, iid) {
     if (outer)
       throw Cr.NS_ERROR_NO_AGGREGATION;
@@ -107,7 +101,7 @@ var HunspellEngine = {
     }
     try {
       let xhr = new XMLHttpRequest();
-      xhr.open("GET", uri.spec, false);
+      xhr.open("GET", uri.spec.replace(/\.aff$/, ".dic"), false);
       xhr.send();
       return true;
     } catch (e) {

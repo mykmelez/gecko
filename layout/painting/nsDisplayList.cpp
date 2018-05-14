@@ -19,7 +19,7 @@
 #include "gfxContext.h"
 #include "gfxUtils.h"
 #include "mozilla/dom/TabChild.h"
-#include "mozilla/dom/KeyframeEffectReadOnly.h"
+#include "mozilla/dom/KeyframeEffect.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/layers/PLayerTransaction.h"
@@ -698,7 +698,7 @@ AddAnimationsForProperty(nsIFrame* aFrame, nsDisplayListBuilder* aBuilder,
       continue;
     }
 
-    dom::KeyframeEffectReadOnly* keyframeEffect =
+    dom::KeyframeEffect* keyframeEffect =
       anim->GetEffect() ? anim->GetEffect()->AsKeyframeEffect() : nullptr;
     MOZ_ASSERT(keyframeEffect,
                "A playing animation should have a keyframe effect");
@@ -3501,7 +3501,7 @@ nsDisplayBackgroundImage::GetInitData(nsDisplayListBuilder* aBuilder,
   // if it's affected by a transform.
   // See https://www.w3.org/Bugs/Public/show_bug.cgi?id=17521.
   bool shouldTreatAsFixed =
-    layer.mAttachment == NS_STYLE_IMAGELAYER_ATTACHMENT_FIXED && !isTransformedFixed;
+    layer.mAttachment == StyleImageLayerAttachment::Fixed && !isTransformedFixed;
 
   bool shouldFixToViewport = shouldTreatAsFixed && !layer.mImage.IsEmpty();
   bool isRasterImage = state.mImageRenderer.IsRasterImage();
@@ -7101,13 +7101,39 @@ nsDisplaySubDocument::nsDisplaySubDocument(nsDisplayListBuilder* aBuilder,
   if (*mAnimatedGeometryRoot == mFrame && mAnimatedGeometryRoot->mParentAGR) {
     mAnimatedGeometryRoot = mAnimatedGeometryRoot->mParentAGR;
   }
+
+  if (mSubDocFrame && mSubDocFrame != mFrame) {
+    mSubDocFrame->AddDisplayItem(this);
+  }
 }
 
-#ifdef NS_BUILD_REFCNT_LOGGING
 nsDisplaySubDocument::~nsDisplaySubDocument() {
   MOZ_COUNT_DTOR(nsDisplaySubDocument);
+  if (mSubDocFrame) {
+    mSubDocFrame->RemoveDisplayItem(this);
+  }
 }
-#endif
+
+nsIFrame*
+nsDisplaySubDocument::FrameForInvalidation() const
+{
+  return mSubDocFrame ? mSubDocFrame : mFrame;
+}
+
+bool
+nsDisplaySubDocument::HasDeletedFrame() const
+{
+  return !mSubDocFrame || nsDisplayItem::HasDeletedFrame();
+}
+
+void
+nsDisplaySubDocument::RemoveFrame(nsIFrame* aFrame)
+{
+  if (aFrame == mSubDocFrame) {
+    mSubDocFrame = nullptr;
+  }
+  nsDisplayItem::RemoveFrame(aFrame);
+}
 
 UniquePtr<ScrollMetadata>
 nsDisplaySubDocument::ComputeScrollMetadata(LayerManager* aLayerManager,

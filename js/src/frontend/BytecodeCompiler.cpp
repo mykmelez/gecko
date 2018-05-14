@@ -223,14 +223,15 @@ BytecodeCompiler::createParser()
 
     if (canLazilyParse()) {
         syntaxParser.emplace(cx, alloc, options, sourceBuffer.get(), sourceBuffer.length(),
-                             /* foldConstants = */ false, *usedNames, nullptr, nullptr);
-
+                             /* foldConstants = */ false, *usedNames, nullptr, nullptr,
+                             sourceObject);
         if (!syntaxParser->checkOptions())
             return false;
     }
 
     parser.emplace(cx, alloc, options, sourceBuffer.get(), sourceBuffer.length(),
-                   /* foldConstants = */ true, *usedNames, syntaxParser.ptrOr(nullptr), nullptr);
+                   /* foldConstants = */ true, *usedNames, syntaxParser.ptrOr(nullptr), nullptr,
+                   sourceObject);
     parser->ss = scriptSource;
     return parser->checkOptions();
 }
@@ -622,7 +623,7 @@ frontend::CompileGlobalScript(JSContext* cx, LifoAlloc& alloc, ScopeKind scopeKi
 
 JSScript*
 frontend::CompileGlobalBinASTScript(JSContext* cx, LifoAlloc& alloc, const ReadOnlyCompileOptions& options,
-                                    const uint8_t* src, size_t len)
+                                    const uint8_t* src, size_t len, ScriptSourceObject** sourceObjectOut)
 {
     AutoAssertReportedException assertException(cx);
 
@@ -630,7 +631,7 @@ frontend::CompileGlobalBinASTScript(JSContext* cx, LifoAlloc& alloc, const ReadO
     if (!usedNames.init())
         return nullptr;
 
-    RootedObject sourceObj(cx, CreateScriptSourceObject(cx, options));
+    RootedScriptSourceObject sourceObj(cx, CreateScriptSourceObject(cx, options));
 
     if (!sourceObj)
         return nullptr;
@@ -660,6 +661,9 @@ frontend::CompileGlobalBinASTScript(JSContext* cx, LifoAlloc& alloc, const ReadO
 
     if (!NameFunctions(cx, pn))
         return nullptr;
+
+    if (sourceObjectOut)
+        *sourceObjectOut = sourceObj;
 
     assertException.reset();
     return script;
@@ -738,6 +742,8 @@ bool
 frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const char16_t* chars, size_t length)
 {
     MOZ_ASSERT(cx->compartment() == lazy->functionNonDelazifying()->compartment());
+    // We can't be running this script unless we've run its parent.
+    MOZ_ASSERT(!lazy->isEnclosingScriptLazy());
 
     AutoAssertReportedException assertException(cx);
 
@@ -770,9 +776,11 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
     UsedNameTracker usedNames(cx);
     if (!usedNames.init())
         return false;
+
+    RootedScriptSourceObject sourceObject(cx, &lazy->sourceObject());
     Parser<FullParseHandler, char16_t> parser(cx, cx->tempLifoAlloc(), options, chars, length,
                                               /* foldConstants = */ true, usedNames, nullptr,
-                                              lazy);
+                                              lazy, sourceObject);
     if (!parser.checkOptions())
         return false;
 
@@ -782,9 +790,6 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
                                                   lazy->asyncKind());
     if (!pn)
         return false;
-
-    RootedScriptSourceObject sourceObject(cx, lazy->sourceObject());
-    MOZ_ASSERT(sourceObject);
 
     Rooted<JSScript*> script(cx, JSScript::Create(cx, options, sourceObject,
                                                   lazy->sourceStart(), lazy->sourceEnd(),

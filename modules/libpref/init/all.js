@@ -82,13 +82,8 @@ pref("browser.cache.max_shutdown_io_lag", 2);
 
 pref("browser.cache.offline.enable",           true);
 
-// Nightly and Early Beta will have AppCache disabled by default
-// Stable will remain enabled until Firefox 62.
-#ifdef EARLY_BETA_OR_EARLIER
+// AppCache over insecure connection is disabled by default
 pref("browser.cache.offline.insecure.enable",  false);
-#else
-pref("browser.cache.offline.insecure.enable",  true);
-#endif
 
 // enable offline apps by default, disable prompt
 pref("offline-apps.allow_by_default",          true);
@@ -853,12 +848,25 @@ pref("gfx.logging.peak-texture-usage.enabled", false);
 
 pref("gfx.ycbcr.accurate-conversion", false);
 
+// On Nightly, we expose two prefs: gfx.webrender.all and gfx.webrender.enabled.
+// The first enables WR+additional features, and the second just enables WR.
+// For developer convenience, building with --enable-webrender=true or just
+// --enable-webrender will set gfx.webrender.enabled to true by default.
+// On non-Nightly, we ignore these prefs.
+//
+// On both Nightly and non-Nightly, we have a pref gfx.webrender.all.qualified
+// which is not exposed via about:config. That pref enables WR but only on
+// qualified hardware. This is the pref we'll eventually flip to deploy WebRender
+// to the target population.
+#ifdef NIGHTLY_BUILD
 pref("gfx.webrender.all", false);
 #ifdef MOZ_ENABLE_WEBRENDER
 pref("gfx.webrender.enabled", true);
 #else
 pref("gfx.webrender.enabled", false);
 #endif
+#endif
+
 #ifdef XP_WIN
 pref("gfx.webrender.force-angle", true);
 pref("gfx.webrender.dcomp-win.enabled", true);
@@ -2473,7 +2481,8 @@ pref("security.csp.experimentalEnabled", false);
 pref("security.csp.enableStrictDynamic", true);
 
 #if defined(DEBUG) && !defined(ANDROID)
-pref("csp.content_privileged_about_uris_without_csp", "blank,home,newtab,printpreview,srcdoc,studies");
+// about:welcome has been added until Bug 1448359 is fixed at which time home, newtab, and welcome will all be removed.
+pref("csp.content_privileged_about_uris_without_csp", "blank,home,newtab,printpreview,srcdoc,welcome");
 #endif
 
 #ifdef NIGHTLY_BUILD
@@ -2818,12 +2827,6 @@ pref("layout.selection.caret_style", 0);
 
 // pref to report CSS errors to the error console
 pref("layout.css.report_errors", true);
-
-#ifdef NIGHTLY_BUILD
-pref("layout.css.getPropertyCSSValue.enabled", false);
-#else
-pref("layout.css.getPropertyCSSValue.enabled", true);
-#endif
 
 // Override DPI. A value of -1 means use the maximum of 96 and the system DPI.
 // A value of 0 means use the system DPI. A positive value is used as the DPI.

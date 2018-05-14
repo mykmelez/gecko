@@ -1073,7 +1073,8 @@ WR_DESTRUCTOR_SAFE_FUNC;
 
 WR_INLINE
 void wr_api_send_transaction(DocumentHandle *aDh,
-                             Transaction *aTransaction)
+                             Transaction *aTransaction,
+                             bool aIsAsync)
 WR_FUNC;
 
 WR_INLINE
@@ -1577,6 +1578,8 @@ WR_FUNC;
 WR_INLINE
 uintptr_t wr_root_scroll_node_id()
 WR_FUNC;
+
+extern void wr_schedule_render(WrWindowId aWindowId);
 
 WR_INLINE
 void wr_set_item_tag(WrState *aState,

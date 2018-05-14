@@ -4248,6 +4248,22 @@ JS::DecodeBinAST(JSContext* cx, const ReadOnlyCompileOptions& options, FILE* fil
     return DecodeBinAST(cx, options, fileContents.begin(), fileContents.length());
 }
 
+JS_PUBLIC_API(bool)
+JS::DecodeBinASTOffThread(JSContext* cx, const ReadOnlyCompileOptions& options,
+                          const uint8_t* buf, size_t length,
+                          OffThreadCompileCallback callback, void* callbackData)
+{
+    return StartOffThreadDecodeBinAST(cx, options, buf, length, callback, callbackData);
+}
+
+JS_PUBLIC_API(JSScript*)
+JS::FinishOffThreadBinASTDecode(JSContext* cx, JS::OffThreadToken* token)
+{
+    MOZ_ASSERT(cx);
+    MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
+    return HelperThreadState().finishBinASTDecodeTask(cx, token);
+}
+
 #endif /* JS_BUILD_BINAST */
 
 enum class OffThread {
@@ -4305,7 +4321,7 @@ JS::CompileOffThread(JSContext* cx, const ReadOnlyCompileOptions& options,
 }
 
 JS_PUBLIC_API(JSScript*)
-JS::FinishOffThreadScript(JSContext* cx, void* token)
+JS::FinishOffThreadScript(JSContext* cx, JS::OffThreadToken* token)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
@@ -4313,7 +4329,7 @@ JS::FinishOffThreadScript(JSContext* cx, void* token)
 }
 
 JS_PUBLIC_API(void)
-JS::CancelOffThreadScript(JSContext* cx, void* token)
+JS::CancelOffThreadScript(JSContext* cx, JS::OffThreadToken* token)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
@@ -4330,7 +4346,7 @@ JS::CompileOffThreadModule(JSContext* cx, const ReadOnlyCompileOptions& options,
 }
 
 JS_PUBLIC_API(JSObject*)
-JS::FinishOffThreadModule(JSContext* cx, void* token)
+JS::FinishOffThreadModule(JSContext* cx, JS::OffThreadToken* token)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
@@ -4338,7 +4354,7 @@ JS::FinishOffThreadModule(JSContext* cx, void* token)
 }
 
 JS_PUBLIC_API(void)
-JS::CancelOffThreadModule(JSContext* cx, void* token)
+JS::CancelOffThreadModule(JSContext* cx, JS::OffThreadToken* token)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
@@ -4380,7 +4396,7 @@ JS::DecodeMultiOffThreadScripts(JSContext* cx, const ReadOnlyCompileOptions& opt
 }
 
 JS_PUBLIC_API(JSScript*)
-JS::FinishOffThreadScriptDecoder(JSContext* cx, void* token)
+JS::FinishOffThreadScriptDecoder(JSContext* cx, JS::OffThreadToken* token)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
@@ -4388,7 +4404,7 @@ JS::FinishOffThreadScriptDecoder(JSContext* cx, void* token)
 }
 
 JS_PUBLIC_API(void)
-JS::CancelOffThreadScriptDecoder(JSContext* cx, void* token)
+JS::CancelOffThreadScriptDecoder(JSContext* cx, JS::OffThreadToken* token)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
@@ -4396,7 +4412,7 @@ JS::CancelOffThreadScriptDecoder(JSContext* cx, void* token)
 }
 
 JS_PUBLIC_API(bool)
-JS::FinishMultiOffThreadScriptsDecoder(JSContext* cx, void* token, MutableHandle<ScriptVector> scripts)
+JS::FinishMultiOffThreadScriptsDecoder(JSContext* cx, JS::OffThreadToken* token, MutableHandle<ScriptVector> scripts)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
@@ -4404,7 +4420,7 @@ JS::FinishMultiOffThreadScriptsDecoder(JSContext* cx, void* token, MutableHandle
 }
 
 JS_PUBLIC_API(void)
-JS::CancelMultiOffThreadScriptsDecoder(JSContext* cx, void* token)
+JS::CancelMultiOffThreadScriptsDecoder(JSContext* cx, JS::OffThreadToken* token)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
@@ -4446,10 +4462,17 @@ JS_BufferIsCompilableUnit(JSContext* cx, HandleObject obj, const char* utf8, siz
     frontend::UsedNameTracker usedNames(cx);
     if (!usedNames.init())
         return false;
+
+    RootedScriptSourceObject sourceObject(cx, frontend::CreateScriptSourceObject(cx, options,
+                                                                                 mozilla::Nothing()));
+    if (!sourceObject)
+        return false;
+
     frontend::Parser<frontend::FullParseHandler, char16_t> parser(cx, cx->tempLifoAlloc(),
                                                                   options, chars, length,
                                                                   /* foldConstants = */ true,
-                                                                  usedNames, nullptr, nullptr);
+                                                                  usedNames, nullptr, nullptr,
+                                                                  sourceObject);
     JS::WarningReporter older = JS::SetWarningReporter(cx, nullptr);
     if (!parser.checkOptions() || !parser.parse()) {
         // We ran into an error. If it was because we ran out of source, we

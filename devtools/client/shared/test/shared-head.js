@@ -65,7 +65,7 @@ registerCleanupFunction(function() {
  * Watch console messages for failed propType definitions in React components.
  */
 const ConsoleObserver = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver]),
 
   observe: function(subject) {
     let message = subject.wrappedJSObject.arguments[0];
@@ -462,6 +462,19 @@ function waitUntil(predicate, interval = 10) {
       waitUntil(predicate, interval).then(() => resolve(true));
     }, interval);
   });
+}
+
+/**
+ * Variant of waitUntil that accepts a predicate returning a promise.
+ */
+async function asyncWaitUntil(predicate, interval = 10) {
+  let success = await predicate();
+  while (!success) {
+    // Wait for X milliseconds.
+    await new Promise(resolve => setTimeout(resolve, interval));
+    // Test the predicate again.
+    success = await predicate();
+  }
 }
 
 /**

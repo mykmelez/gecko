@@ -229,6 +229,8 @@ GetPropIRGenerator::tryAttachStub()
                 return true;
             if (tryAttachDenseElementHole(obj, objId, index, indexId))
                 return true;
+            if (tryAttachUnboxedElementHole(obj, objId, index, indexId))
+                return true;
             if (tryAttachArgumentsObjectArg(obj, objId, indexId))
                 return true;
 
@@ -2018,6 +2020,46 @@ GetPropIRGenerator::tryAttachTypedElement(HandleObject obj, ObjOperandId objId,
 }
 
 bool
+GetPropIRGenerator::tryAttachUnboxedElementHole(HandleObject obj, ObjOperandId objId,
+                                                uint32_t index, Int32OperandId indexId)
+{
+    if (!obj->is<UnboxedPlainObject>())
+        return false;
+
+    // Only support unboxed objects with no elements (i.e. no expando)
+    UnboxedExpandoObject* expando = obj->as<UnboxedPlainObject>().maybeExpando();
+    if (expando)
+        return false;
+
+    if (JSObject* proto = obj->staticPrototype()) {
+        // Start the check at the first object on the [[Prototype]],
+        // which must be native now.
+        if (!proto->isNative())
+            return false;
+
+        if (proto->as<NativeObject>().getDenseInitializedLength() != 0)
+            return false;
+
+        if (!CanAttachDenseElementHole(&proto->as<NativeObject>(), false))
+            return false;
+    }
+
+    // Guard on the group and prevent expandos from appearing.
+    Maybe<ObjOperandId> tempId;
+    TestMatchingReceiver(writer, obj, objId, &tempId);
+
+    // Guard that the prototype chain has no elements.
+    GeneratePrototypeHoleGuards(writer, obj, objId);
+
+    writer.loadUndefinedResult();
+    // No monitor: We know undefined must be in the typeset already.
+    writer.returnFromIC();
+
+    trackAttached("UnboxedElementHole");
+    return true;
+}
+
+bool
 GetPropIRGenerator::tryAttachProxyElement(HandleObject obj, ObjOperandId objId)
 {
     if (!obj->is<ProxyObject>())
@@ -3435,13 +3477,13 @@ SetPropIRGenerator::tryAttachSetDenseElement(HandleObject obj, ObjOperandId objI
 }
 
 static bool
-CanAttachAddElement(JSObject* obj, bool isInit)
+CanAttachAddElement(NativeObject* obj, bool isInit)
 {
     // Make sure the objects on the prototype don't have any indexed properties
     // or that such properties can't appear without a shape change.
     do {
         // The first two checks are also relevant to the receiver object.
-        if (obj->isNative() && obj->as<NativeObject>().isIndexed())
+        if (obj->isIndexed())
             return false;
 
         const Class* clasp = obj->getClass();
@@ -3466,10 +3508,21 @@ CanAttachAddElement(JSObject* obj, bool isInit)
         if (!proto->isNative())
             return false;
 
-        if (proto->as<NativeObject>().denseElementsAreFrozen())
+        // We have to make sure the proto has no non-writable (frozen) elements
+        // because we're not allowed to shadow them. There are a few cases to
+        // consider:
+        //
+        // * If the proto is extensible, its Shape will change when it's made
+        //   non-extensible.
+        //
+        // * If the proto is already non-extensible, no new elements will be
+        //   added, so if there are no elements now it doesn't matter if the
+        //   object is frozen later on.
+        NativeObject* nproto = &proto->as<NativeObject>();
+        if (!nproto->isExtensible() && nproto->getDenseInitializedLength() > 0)
             return false;
 
-        obj = proto;
+        obj = nproto;
     } while (true);
 
     return true;
@@ -3490,7 +3543,7 @@ SetPropIRGenerator::tryAttachSetDenseElementHole(HandleObject obj, ObjOperandId 
         return false;
 
     NativeObject* nobj = &obj->as<NativeObject>();
-    if (!nobj->nonProxyIsExtensible())
+    if (!nobj->isExtensible())
         return false;
 
     MOZ_ASSERT(!nobj->getElementsHeader()->isFrozen(),
@@ -4340,7 +4393,7 @@ CallIRGenerator::tryAttachArrayPush()
         return false;
 
     // Check for other indexed properties or class hooks.
-    if (!CanAttachAddElement(thisobj, /* isInit = */ false))
+    if (!CanAttachAddElement(thisarray, /* isInit = */ false))
         return false;
 
     // Can't add new elements to arrays with non-writable length.
@@ -4348,7 +4401,7 @@ CallIRGenerator::tryAttachArrayPush()
         return false;
 
     // Check that array is extensible.
-    if (!thisarray->nonProxyIsExtensible())
+    if (!thisarray->isExtensible())
         return false;
 
     MOZ_ASSERT(!thisarray->getElementsHeader()->isFrozen(),

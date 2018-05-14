@@ -7,7 +7,7 @@
 "use strict";
 
 const {Ci, Cu, CC} = require("chrome");
-const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
+const ChromeUtils = require("ChromeUtils");
 const Services = require("Services");
 
 loader.lazyRequireGetter(this, "NetworkHelper",
@@ -21,6 +21,8 @@ const BinaryInput = CC("@mozilla.org/binaryinputstream;1",
                        "nsIBinaryInputStream", "setInputStream");
 const BufferStream = CC("@mozilla.org/io/arraybuffer-input-stream;1",
                        "nsIArrayBufferInputStream", "setData");
+
+const kCSP = "default-src 'none' ; script-src resource:; ";
 
 // Localization
 loader.lazyGetter(this, "jsonViewStrings", () => {
@@ -38,7 +40,7 @@ loader.lazyGetter(this, "jsonViewStrings", () => {
 function Converter() {}
 
 Converter.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([
+  QueryInterface: ChromeUtils.generateQI([
     Ci.nsIStreamConverter,
     Ci.nsIStreamListener,
     Ci.nsIRequestObserver
@@ -84,8 +86,8 @@ Converter.prototype = {
     // Enforce strict CSP:
     try {
       request.QueryInterface(Ci.nsIHttpChannel);
-      request.setResponseHeader("Content-Security-Policy",
-        "default-src 'none' ; script-src resource:; ", false);
+      request.setResponseHeader("Content-Security-Policy", kCSP, false);
+      request.setResponseHeader("Content-Security-Policy-Report-Only", "", false);
     } catch (ex) {
       // If this is not an HTTP channel we can't and won't do anything.
     }
@@ -248,6 +250,10 @@ function initialHTML(doc) {
       "dir": Services.locale.isAppLocaleRTL ? "rtl" : "ltr"
     }, [
       element("head", {}, [
+        element("meta", {
+          "http-equiv": "Content-Security-Policy",
+          content: kCSP,
+        }),
         element("link", {
           rel: "stylesheet",
           type: "text/css",

@@ -70,7 +70,7 @@ return /******/ (function(modules) { // webpackBootstrap
 /******/ 	__webpack_require__.p = "/assets/build";
 /******/
 /******/ 	// Load entry module and return exports
-/******/ 	return __webpack_require__(__webpack_require__.s = 3709);
+/******/ 	return __webpack_require__(__webpack_require__.s = 3726);
 /******/ })
 /************************************************************************/
 /******/ ({
@@ -1985,9 +1985,7 @@ const {
 
 const { clearSourceMaps } = __webpack_require__(3704);
 
-const {
-  workerUtils: { workerHandler }
-} = __webpack_require__(3651);
+const { workerUtils: { workerHandler } } = __webpack_require__(3651);
 
 // The interface is implemented in source-map to be
 // easier to unit test.
@@ -4409,6 +4407,14 @@ class WasmRemap {
 }
 
 exports.WasmRemap = WasmRemap;
+
+/***/ }),
+
+/***/ 3726:
+/***/ (function(module, exports, __webpack_require__) {
+
+module.exports = __webpack_require__(3709);
+
 
 /***/ })
 

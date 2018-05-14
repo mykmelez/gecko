@@ -133,7 +133,6 @@ nsHttpTransaction::nsHttpTransaction()
     , mWaitingOnPipeOut(false)
     , mReportedStart(false)
     , mReportedResponseHeader(false)
-    , mForTakeResponseHead(nullptr)
     , mResponseHeadTaken(false)
     , mForTakeResponseTrailers(nullptr)
     , mResponseTrailersTaken(false)
@@ -230,7 +229,6 @@ nsHttpTransaction::~nsHttpTransaction()
     mConnection = nullptr;
 
     delete mResponseHead;
-    delete mForTakeResponseHead;
     delete mChunkedDecoder;
     ReleaseBlockingTransaction();
 }
@@ -467,15 +465,6 @@ nsHttpTransaction::TakeResponseHead()
 
     mResponseHeadTaken = true;
 
-    // Prefer mForTakeResponseHead over mResponseHead. It is always a complete
-    // set of headers.
-    nsHttpResponseHead *head;
-    if (mForTakeResponseHead) {
-        head = mForTakeResponseHead;
-        mForTakeResponseHead = nullptr;
-        return head;
-    }
-
     // Even in OnStartRequest() the headers won't be available if we were
     // canceled
     if (!mHaveAllHeaders) {
@@ -483,7 +472,7 @@ nsHttpTransaction::TakeResponseHead()
         return nullptr;
     }
 
-    head = mResponseHead;
+    nsHttpResponseHead *head = mResponseHead;
     mResponseHead = nullptr;
     return head;
 }
@@ -545,6 +534,27 @@ nsHttpTransaction::OnActivated()
 
     if (mActivated) {
         return;
+    }
+
+    if (mConnection && mRequestHead) {
+        // So this is fun. On http/2, we want to send TE: Trailers, to be
+        // spec-compliant. So we add it to the request head here. The fun part
+        // is that adding a header to the request head at this point has no
+        // effect on what we send on the wire, as the headers are already
+        // flattened (in Init()) by the time we get here. So the *real* adding
+        // of the header happens in the h2 compression code. We still have to
+        // add the header to the request head here, though, so that devtools can
+        // show that we sent the header. FUN!
+        // Oh, and we can't just check for version >= NS_HTTP_VERSION_2_0 because
+        // right now, mConnection->Version() returns HTTP_VERSION_2 (=5) instead
+        // of NS_HTTP_VERSION_2_0 (=20) for... reasons.
+        bool isOldHttp = (mConnection->Version() == NS_HTTP_VERSION_0_9 ||
+                          mConnection->Version() == NS_HTTP_VERSION_1_0 ||
+                          mConnection->Version() == NS_HTTP_VERSION_1_1 ||
+                          mConnection->Version() == NS_HTTP_VERSION_UNKNOWN);
+        if (!isOldHttp) {
+            Unused << mRequestHead->SetHeader(nsHttp::TE, NS_LITERAL_CSTRING("Trailers"));
+        }
     }
 
     mActivated = true;
@@ -612,7 +622,7 @@ nsHttpTransaction::OnTransportStatus(nsITransport* transport,
                 // After a socket is connected we know for sure whether data
                 // has been sent on SYN packet and if not we should update TLS
                 // start timing.
-                if ((mFastOpenStatus != TFO_DATA_SENT) && 
+                if ((mFastOpenStatus != TFO_DATA_SENT) &&
                     !mTimings.secureConnectionStart.IsNull()) {
                     mTimings.secureConnectionStart = tnow;
                 }

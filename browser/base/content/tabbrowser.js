@@ -134,6 +134,8 @@ window._gBrowser = {
 
   _removingTabs: [],
 
+  _multiSelectedTabsMap: new WeakMap(),
+
   /**
    * Tab close requests are ignored if the window is closing anyway,
    * e.g. when holding Ctrl+W.
@@ -2327,6 +2329,9 @@ window._gBrowser = {
             lastRelatedTab.owner = null;
           } else if (openerTab) {
             t.owner = openerTab;
+          }
+          // Always set related map if opener exists.
+          if (openerTab) {
             this._lastRelatedTabMap.set(openerTab, t);
           }
         } else {
@@ -2334,8 +2339,11 @@ window._gBrowser = {
           aIndex = this.tabs.length;
         }
       }
+      // Ensure position respectes tab pinned state.
       if (aPinned) {
         aIndex = Math.min(aIndex, this._numPinnedTabs);
+      } else {
+        aIndex = Math.max(aIndex, this._numPinnedTabs);
       }
 
       // use .item() instead of [] because dragging to the end of the strip goes out of
@@ -2441,9 +2449,9 @@ window._gBrowser = {
       throw e;
     }
 
-    // Hack to ensure that the about:newtab favicon is loaded
+    // Hack to ensure that the about:newtab, and about:welcome favicon is loaded
     // instantaneously, to avoid flickering and improve perceived performance.
-    if (aURI == "about:newtab") {
+    if (aURI == "about:newtab" || aURI == "about:home" || aURI == "about:welcome") {
       this.setIcon(t, "chrome://branding/content/icon32.png");
     } else if (aURI == "about:privatebrowsing") {
       this.setIcon(t, "chrome://browser/skin/privatebrowsing/favicon.svg");
@@ -3605,6 +3613,39 @@ window._gBrowser = {
     return SessionStore.duplicateTab(window, aTab, 0, aRestoreTabImmediately);
   },
 
+  addToMultiSelectedTabs(aTab) {
+    if (aTab.multiselected) {
+      return;
+    }
+
+    aTab.setAttribute("multiselected", "true");
+    this._multiSelectedTabsMap.set(aTab, null);
+  },
+
+  removeFromMultiSelectedTabs(aTab) {
+    if (!aTab.multiselected) {
+      return;
+    }
+    aTab.removeAttribute("multiselected");
+    this._multiSelectedTabsMap.delete(aTab);
+  },
+
+  clearMultiSelectedTabs() {
+    const selectedTabs = ChromeUtils.nondeterministicGetWeakMapKeys(this._multiSelectedTabsMap);
+    for (let tab of selectedTabs) {
+      if (tab.isConnected && tab.multiselected) {
+        tab.removeAttribute("multiselected");
+      }
+    }
+    this._multiSelectedTabsMap = new WeakMap();
+  },
+
+  multiSelectedTabsCount() {
+    return ChromeUtils.nondeterministicGetWeakMapKeys(this._multiSelectedTabsMap)
+      .filter(tab => tab.isConnected)
+      .length;
+  },
+
   activateBrowserForPrintPreview(aBrowser) {
     this._printPreviewBrowsers.add(aBrowser);
     if (this._switcher) {
@@ -4460,13 +4501,14 @@ class TabProgressListener {
 
         // Ignore initial about:blank to prevent flickering.
         if (!this.mBrowser.mIconURL && !ignoreBlank) {
-          // Don't switch to the default icon on about:home or about:newtab,
-          // since these pages get their favicon set in browser code to
-          // improve perceived performance.
+          // Don't switch to the default icon on about:home, about:newtab,
+          // about:privatebrowsing, or about:welcome since these pages get
+          // their favicon set in browser code to improve perceived performance.
           let isNewTab = originalLocation &&
-            (originalLocation.spec == "about:newtab" ||
+             (originalLocation.spec == "about:newtab" ||
               originalLocation.spec == "about:privatebrowsing" ||
-              originalLocation.spec == "about:home");
+              originalLocation.spec == "about:home" ||
+              originalLocation.spec == "about:welcome");
           if (!isNewTab) {
             gBrowser.useDefaultIcon(this.mTab);
           }

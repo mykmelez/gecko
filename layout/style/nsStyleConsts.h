@@ -239,8 +239,8 @@ enum class StyleOrient : uint8_t {
 #define NS_STYLE_WILL_CHANGE_FIXPOS_CB          (1<<4)
 #define NS_STYLE_WILL_CHANGE_ABSPOS_CB          (1<<5)
 
-// See AnimationEffectReadOnly.webidl
-// and mozilla/dom/AnimationEffectReadOnlyBinding.h
+// See AnimationEffect.webidl
+// and mozilla/dom/AnimationEffectBinding.h
 namespace dom {
 enum class PlaybackDirection : uint8_t;
 enum class FillMode : uint8_t;
@@ -254,9 +254,11 @@ enum class FillMode : uint8_t;
 #define NS_STYLE_ANIMATION_PLAY_STATE_PAUSED      1
 
 // See nsStyleImageLayers
-#define NS_STYLE_IMAGELAYER_ATTACHMENT_SCROLL        0
-#define NS_STYLE_IMAGELAYER_ATTACHMENT_FIXED         1
-#define NS_STYLE_IMAGELAYER_ATTACHMENT_LOCAL         2
+enum class StyleImageLayerAttachment : uint8_t {
+    Scroll,
+    Fixed,
+    Local
+};
 
 // A magic value that we use for our "pretend that background-clip is
 // 'padding' when we have a solid border" optimization.  This isn't

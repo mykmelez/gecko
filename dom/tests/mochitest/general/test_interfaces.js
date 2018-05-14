@@ -125,11 +125,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "Animation", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "AnimationEffectReadOnly", insecureContext: true, release: false},
-// IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "AnimationEffectTiming", insecureContext: true, release: false},
-// IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "AnimationEffectTimingReadOnly", insecureContext: true, release: false},
+    {name: "AnimationEffect", insecureContext: true, release: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "AnimationEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -615,8 +611,6 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "KeyboardEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "KeyframeEffectReadOnly", insecureContext: true, release: false},
-// IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "KeyframeEffect", insecureContext: true, release: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "LocalMediaStream", insecureContext: true},
@@ -735,7 +729,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "OfflineAudioContext", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "OfflineResourceList", insecureContext: !isEarlyBetaOrEarlier},
+    {name: "OfflineResourceList", insecureContext: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "Option", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!

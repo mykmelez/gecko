@@ -70,7 +70,7 @@ return /******/ (function(modules) { // webpackBootstrap
 /******/ 	__webpack_require__.p = "/assets/build";
 /******/
 /******/ 	// Load entry module and return exports
-/******/ 	return __webpack_require__(__webpack_require__.s = 3655);
+/******/ 	return __webpack_require__(__webpack_require__.s = 3730);
 /******/ })
 /************************************************************************/
 /******/ ({
@@ -1612,9 +1612,7 @@ const { nodeIsError, nodeIsPrimitive } = node;
 const selection = __webpack_require__(3698);
 
 const { MODE } = __webpack_require__(3645);
-const {
-  REPS: { Rep, Grip }
-} = __webpack_require__(3647);
+const { REPS: { Rep, Grip } } = __webpack_require__(3647);
 
 
 function shouldRenderRootsInReps(roots) {
@@ -3078,9 +3076,7 @@ function nodeNeedsNumericalBuckets(item) {
 }
 
 function makeNodesForPromiseProperties(item) {
-  const {
-    promiseState: { reason, value, state }
-  } = getValue(item);
+  const { promiseState: { reason, value, state } } = getValue(item);
 
   const properties = [];
 
@@ -6889,6 +6885,14 @@ function reducer(state = {}, action) {
 
 
 module.exports = reducer;
+
+/***/ }),
+
+/***/ 3730:
+/***/ (function(module, exports, __webpack_require__) {
+
+module.exports = __webpack_require__(3655);
+
 
 /***/ })
 

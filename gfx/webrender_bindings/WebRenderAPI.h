@@ -51,7 +51,7 @@ struct Line {
 
 class TransactionBuilder {
 public:
-  TransactionBuilder();
+  explicit TransactionBuilder(bool aUseSceneBuilderThread = true);
 
   ~TransactionBuilder();
 
@@ -138,9 +138,11 @@ public:
 
   void Clear();
 
+  bool UseSceneBuilderThread() const { return mUseSceneBuilderThread; }
   Transaction* Raw() { return mTxn; }
   wr::ResourceUpdates* RawUpdates() { return mResourceUpdates; }
 protected:
+  bool mUseSceneBuilderThread;
   Transaction* mTxn;
   wr::ResourceUpdates* mResourceUpdates;
 };

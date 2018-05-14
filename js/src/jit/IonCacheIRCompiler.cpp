@@ -36,14 +36,13 @@ class MOZ_RAII IonCacheIRCompiler : public CacheIRCompiler
     friend class AutoSaveLiveRegisters;
 
     IonCacheIRCompiler(JSContext* cx, const CacheIRWriter& writer, IonIC* ic, IonScript* ionScript,
-                       IonICStub* stub, const PropertyTypeCheckInfo* typeCheckInfo)
-      : CacheIRCompiler(cx, writer, Mode::Ion),
+                       IonICStub* stub, const PropertyTypeCheckInfo* typeCheckInfo, uint32_t stubDataOffset)
+      : CacheIRCompiler(cx, writer, stubDataOffset, Mode::Ion, StubFieldPolicy::Constant),
         writer_(writer),
         ic_(ic),
         ionScript_(ionScript),
         stub_(stub),
         typeCheckInfo_(typeCheckInfo),
-        nextStubField_(0),
 #ifdef DEBUG
         calledPrepareVMCall_(false),
 #endif
@@ -72,51 +71,13 @@ class MOZ_RAII IonCacheIRCompiler : public CacheIRCompiler
     Vector<CodeOffset, 4, SystemAllocPolicy> nextCodeOffsets_;
     Maybe<LiveRegisterSet> liveRegs_;
     Maybe<CodeOffset> stubJitCodeOffset_;
-    uint32_t nextStubField_;
 
 #ifdef DEBUG
     bool calledPrepareVMCall_;
 #endif
     bool savedLiveRegs_;
 
-    uintptr_t readStubWord(uint32_t offset, StubField::Type type) {
-        MOZ_ASSERT((offset % sizeof(uintptr_t)) == 0);
-        return writer_.readStubFieldForIon(nextStubField_++, type).asWord();
-    }
-    uint64_t readStubInt64(uint32_t offset, StubField::Type type) {
-        MOZ_ASSERT((offset % sizeof(uintptr_t)) == 0);
-        return writer_.readStubFieldForIon(nextStubField_++, type).asInt64();
-    }
-    int32_t int32StubField(uint32_t offset) {
-        return readStubWord(offset, StubField::Type::RawWord);
-    }
-    Shape* shapeStubField(uint32_t offset) {
-        return (Shape*)readStubWord(offset, StubField::Type::Shape);
-    }
-    JSObject* objectStubField(uint32_t offset) {
-        return (JSObject*)readStubWord(offset, StubField::Type::JSObject);
-    }
-    JSString* stringStubField(uint32_t offset) {
-        return (JSString*)readStubWord(offset, StubField::Type::String);
-    }
-    JS::Symbol* symbolStubField(uint32_t offset) {
-        return (JS::Symbol*)readStubWord(offset, StubField::Type::Symbol);
-    }
-    ObjectGroup* groupStubField(uint32_t offset) {
-        return (ObjectGroup*)readStubWord(offset, StubField::Type::ObjectGroup);
-    }
-    JSCompartment* compartmentStubField(uint32_t offset) {
-        return (JSCompartment*)readStubWord(offset, StubField::Type::RawWord);
-    }
-    const Class* classStubField(uintptr_t offset) {
-        return (const Class*)readStubWord(offset, StubField::Type::RawWord);
-    }
-    const void* proxyHandlerStubField(uintptr_t offset) {
-        return (const void*)readStubWord(offset, StubField::Type::RawWord);
-    }
-    jsid idStubField(uint32_t offset) {
-        return mozilla::BitwiseCast<jsid>(readStubWord(offset, StubField::Type::Id));
-    }
+
     template <typename T>
     T rawWordStubField(uint32_t offset) {
         static_assert(sizeof(T) == sizeof(uintptr_t), "T must have word size");
@@ -599,7 +560,7 @@ IonCacheIRCompiler::compile()
         allocator.nextOp();
     } while (reader.more());
 
-    MOZ_ASSERT(nextStubField_ == writer_.numStubFields());
+    MOZ_RELEASE_ASSERT(nextStubField_ == writer_.numStubFields());
 
     masm.assumeUnreachable("Should have returned from IC");
 
@@ -1904,6 +1865,22 @@ EmitStoreDenseElement(MacroAssembler& masm, const ConstantOrRegister& value,
     masm.bind(&done);
 }
 
+static void
+EmitAssertNoCopyOnWriteElements(MacroAssembler& masm, Register elementsReg)
+{
+#ifdef DEBUG
+    // IonBuilder::initOrSetElemTryCache ensures we have no copy-on-write
+    // elements. Assert this in debug builds.
+    Address elementsFlags(elementsReg, ObjectElements::offsetOfFlags());
+    Label ok;
+    masm.branchTest32(Assembler::Zero, elementsFlags,
+                      Imm32(ObjectElements::COPY_ON_WRITE),
+                      &ok);
+    masm.assumeUnreachable("Unexpected copy-on-write elements in Ion IC!");
+    masm.bind(&ok);
+#endif
+}
+
 bool
 IonCacheIRCompiler::emitStoreDenseElement()
 {
@@ -1920,8 +1897,10 @@ IonCacheIRCompiler::emitStoreDenseElement()
 
     EmitCheckPropertyTypes(masm, typeCheckInfo_, obj, val, *liveRegs_, failure->label());
 
-    // Load obj->elements in scratch.
+    // Load obj->elements in scratch1.
     masm.loadPtr(Address(obj, NativeObject::offsetOfElements()), scratch1);
+
+    EmitAssertNoCopyOnWriteElements(masm, scratch1);
 
     // Bounds check.
     Address initLength(scratch1, ObjectElements::offsetOfInitializedLength());
@@ -1930,6 +1909,12 @@ IonCacheIRCompiler::emitStoreDenseElement()
     // Hole check.
     BaseObjectElementIndex element(scratch1, index);
     masm.branchTestMagic(Assembler::Equal, element, failure->label());
+
+    // Check for frozen elements. We have to check this here because we attach
+    // this stub also for non-extensible objects, and these can become frozen
+    // without triggering a Shape change.
+    Address flags(scratch1, ObjectElements::offsetOfFlags());
+    masm.branchTest32(Assembler::NonZero, flags, Imm32(ObjectElements::FROZEN), failure->label());
 
     EmitPreBarrier(masm, element, MIRType::Value);
     EmitStoreDenseElement(masm, val, scratch1, element);
@@ -1961,6 +1946,8 @@ IonCacheIRCompiler::emitStoreDenseElementHole()
 
     // Load obj->elements in scratch1.
     masm.loadPtr(Address(obj, NativeObject::offsetOfElements()), scratch1);
+
+    EmitAssertNoCopyOnWriteElements(masm, scratch1);
 
     Address initLength(scratch1, ObjectElements::offsetOfInitializedLength());
     BaseObjectElementIndex element(scratch1, index);
@@ -2559,7 +2546,7 @@ IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer, CacheKind k
     writer.copyStubData(newStub->stubDataStart());
 
     JitContext jctx(cx, nullptr);
-    IonCacheIRCompiler compiler(cx, writer, this, ionScript, newStub, typeCheckInfo);
+    IonCacheIRCompiler compiler(cx, writer, this, ionScript, newStub, typeCheckInfo, stubDataOffset);
     if (!compiler.init())
         return;
 

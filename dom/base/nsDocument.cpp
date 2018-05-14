@@ -3014,7 +3014,7 @@ void
 nsIDocument::SetDocumentURI(nsIURI* aURI)
 {
   nsCOMPtr<nsIURI> oldBase = GetDocBaseURI();
-  mDocumentURI = NS_TryToMakeImmutable(aURI);
+  mDocumentURI = aURI;
   nsIURI* newBase = GetDocBaseURI();
 
   bool equalBases = false;
@@ -3629,11 +3629,7 @@ nsIDocument::SetBaseURI(nsIURI* aURI)
     }
   }
 
-  if (aURI) {
-    mDocumentBaseURI = NS_TryToMakeImmutable(aURI);
-  } else {
-    mDocumentBaseURI = nullptr;
-  }
+  mDocumentBaseURI = aURI;
   RefreshLinkHrefs();
 }
 
@@ -7042,8 +7038,7 @@ nsIDocument::AdoptNode(nsINode& aAdoptedNode, ErrorResult& rv)
   {
     nsINode* parent = adoptedNode->GetParentNode();
     if (parent) {
-      nsContentUtils::MaybeFireNodeRemoved(adoptedNode, parent,
-                                           adoptedNode->OwnerDoc());
+      nsContentUtils::MaybeFireNodeRemoved(adoptedNode, parent);
     }
   }
 
@@ -9971,10 +9966,13 @@ nsIDocument::CaretPositionFromPoint(float aX, float aY)
     return nullptr;
   }
 
-  // GetContentOffsetsFromPoint requires frame-relative coordinates, so we need
-  // to adjust to frame-relative coordinates before we can perform this call.
-  // It should also not take into account the padding of the frame.
-  nsPoint adjustedPoint = pt - ptFrame->GetOffsetTo(rootFrame);
+  // We require frame-relative coordinates for GetContentOffsetsFromPoint.
+  nsPoint aOffset;
+  nsCOMPtr<nsIWidget> widget = nsContentUtils::GetWidget(ps, &aOffset);
+  LayoutDeviceIntPoint refPoint =
+    nsContentUtils::ToWidgetPoint(CSSPoint(aX, aY), aOffset, GetPresContext());
+  nsPoint adjustedPoint =
+    nsLayoutUtils::GetEventCoordinatesRelativeTo(widget, refPoint, ptFrame);
 
   nsFrame::ContentOffsets offsets =
     ptFrame->GetContentOffsetsFromPoint(adjustedPoint);

@@ -117,7 +117,7 @@ ObjectElements::MakeElementsCopyOnWrite(JSContext* cx, NativeObject* obj)
     // Note: this method doesn't update type information to indicate that the
     // elements might be copy on write. Handling this is left to the caller.
     MOZ_ASSERT(!header->isCopyOnWrite());
-    MOZ_ASSERT(!header->isFrozen());
+    MOZ_ASSERT(obj->isExtensible());
     header->flags |= COPY_ON_WRITE;
 
     header->ownerObject().init(obj);
@@ -125,24 +125,39 @@ ObjectElements::MakeElementsCopyOnWrite(JSContext* cx, NativeObject* obj)
 }
 
 /* static */ bool
-ObjectElements::FreezeElements(JSContext* cx, HandleNativeObject obj)
+ObjectElements::PreventExtensions(JSContext* cx, NativeObject* obj)
 {
-    MOZ_ASSERT_IF(obj->is<ArrayObject>(),
-                  !obj->as<ArrayObject>().lengthIsWritable());
-
     if (!obj->maybeCopyElementsForWrite(cx))
         return false;
 
-    if (obj->hasEmptyElements() || obj->denseElementsAreFrozen())
-        return true;
+    if (!obj->hasEmptyElements()) {
+        obj->shrinkCapacityToInitializedLength(cx);
+        MarkObjectGroupFlags(cx, obj, OBJECT_FLAG_NON_EXTENSIBLE_ELEMENTS);
+    }
 
-    if (obj->getElementsHeader()->numShiftedElements() > 0)
-        obj->moveShiftedElements();
-
-    MarkObjectGroupFlags(cx, obj, OBJECT_FLAG_FROZEN_ELEMENTS);
-    obj->getElementsHeader()->freeze();
+    // shrinkCapacityToInitializedLength ensures there are no shifted elements.
+    MOZ_ASSERT(obj->getElementsHeader()->numShiftedElements() == 0);
 
     return true;
+}
+
+/* static */ void
+ObjectElements::FreezeOrSeal(JSContext* cx, NativeObject* obj, IntegrityLevel level)
+{
+    MOZ_ASSERT_IF(level == IntegrityLevel::Frozen && obj->is<ArrayObject>(),
+                  !obj->as<ArrayObject>().lengthIsWritable());
+    MOZ_ASSERT(!obj->denseElementsAreCopyOnWrite());
+    MOZ_ASSERT(!obj->isExtensible());
+    MOZ_ASSERT(obj->getElementsHeader()->numShiftedElements() == 0);
+
+    if (obj->hasEmptyElements() || obj->denseElementsAreFrozen())
+        return;
+
+    if (!obj->denseElementsAreSealed())
+        obj->getElementsHeader()->seal();
+
+    if (level == IntegrityLevel::Frozen)
+        obj->getElementsHeader()->freeze();
 }
 
 #ifdef DEBUG
@@ -268,14 +283,25 @@ js::NativeObject::copySlotRange(uint32_t start, const Value* vector, uint32_t le
 }
 
 #ifdef DEBUG
+
 bool
 js::NativeObject::slotInRange(uint32_t slot, SentinelAllowed sentinel) const
 {
+    MOZ_ASSERT(!gc::IsForwarded(lastProperty()));
     uint32_t capacity = numFixedSlots() + numDynamicSlots();
     if (sentinel == SENTINEL_ALLOWED)
         return slot <= capacity;
     return slot < capacity;
 }
+
+bool
+js::NativeObject::slotIsFixed(uint32_t slot) const
+{
+    // We call numFixedSlotsMaybeForwarded() to allow reading slots of
+    // associated objects in trace hooks that may be called during a moving GC.
+    return slot < numFixedSlotsMaybeForwarded();
+}
+
 #endif /* DEBUG */
 
 Shape*
@@ -429,7 +455,7 @@ NativeObject::addDenseElementDontReportOOM(JSContext* cx, NativeObject* obj)
 
     MOZ_ASSERT(obj->getDenseInitializedLength() == obj->getDenseCapacity());
     MOZ_ASSERT(!obj->denseElementsAreCopyOnWrite());
-    MOZ_ASSERT(!obj->denseElementsAreFrozen());
+    MOZ_ASSERT(obj->isExtensible());
     MOZ_ASSERT(!obj->isIndexed());
     MOZ_ASSERT(!obj->is<TypedArrayObject>());
     MOZ_ASSERT_IF(obj->is<ArrayObject>(), obj->as<ArrayObject>().lengthIsWritable());
@@ -502,7 +528,8 @@ NativeObject::sparsifyDenseElement(JSContext* cx, HandleNativeObject obj, uint32
     }
 
     // NOTE: We don't use addDataProperty because we don't want the
-    // extensibility check if we're, for example, sparsifying frozen objects..
+    // extensibility check if we're, for example, sparsifying an element of a
+    // non-extensible object.
     Shape* shape = addDataPropertyInternal(cx, obj, id, SHAPE_INVALID_SLOT,
                                            obj->getElementsHeader()->elementAttributes(),
                                            table, entry, keep);
@@ -512,41 +539,6 @@ NativeObject::sparsifyDenseElement(JSContext* cx, HandleNativeObject obj, uint32
     }
 
     obj->initSlot(shape->slot(), value);
-
-    return true;
-}
-
-/* static */ bool
-NativeObject::sparsifyDenseElements(JSContext* cx, HandleNativeObject obj)
-{
-    if (!obj->maybeCopyElementsForWrite(cx))
-        return false;
-
-    uint32_t initialized = obj->getDenseInitializedLength();
-
-    /* Create new properties with the value of non-hole dense elements. */
-    for (uint32_t i = 0; i < initialized; i++) {
-        if (obj->getDenseElement(i).isMagic(JS_ELEMENTS_HOLE))
-            continue;
-
-        if (!sparsifyDenseElement(cx, obj, i))
-            return false;
-    }
-
-    if (initialized)
-        obj->setDenseInitializedLengthUnchecked(0);
-
-    // Reduce storage for dense elements which are now holes. Explicitly mark
-    // the elements capacity as zero, so that any attempts to add dense
-    // elements will be caught in ensureDenseElements.
-
-    if (obj->getElementsHeader()->numShiftedElements() > 0)
-        obj->moveShiftedElements();
-
-    if (obj->getDenseCapacity()) {
-        obj->shrinkElements(cx, 0);
-        obj->getElementsHeader()->capacity = 0;
-    }
 
     return true;
 }
@@ -600,7 +592,7 @@ NativeObject::maybeDensifySparseElements(JSContext* cx, HandleNativeObject obj)
         return DenseElementResult::Incomplete;
 
     /* Watch for conditions under which an object's elements cannot be dense. */
-    if (!obj->nonProxyIsExtensible())
+    if (!obj->isExtensible())
         return DenseElementResult::Incomplete;
 
     /*
@@ -756,7 +748,7 @@ NativeObject::tryUnshiftDenseElements(uint32_t count)
         // limit.
         if (header->initializedLength <= 10 ||
             header->isCopyOnWrite() ||
-            header->isFrozen() ||
+            !isExtensible() ||
             header->hasNonwritableArrayLength() ||
             MOZ_UNLIKELY(count > ObjectElements::MaxShiftedElements))
         {
@@ -911,9 +903,8 @@ NativeObject::goodElementsAllocationAmount(JSContext* cx, uint32_t reqCapacity,
 bool
 NativeObject::growElements(JSContext* cx, uint32_t reqCapacity)
 {
-    MOZ_ASSERT(nonProxyIsExtensible());
+    MOZ_ASSERT(isExtensible());
     MOZ_ASSERT(canHaveNonEmptyElements());
-    MOZ_ASSERT(!denseElementsAreFrozen());
     if (denseElementsAreCopyOnWrite())
         MOZ_CRASH();
 
@@ -1052,7 +1043,7 @@ NativeObject::shrinkElements(JSContext* cx, uint32_t reqCapacity)
 NativeObject::CopyElementsForWrite(JSContext* cx, NativeObject* obj)
 {
     MOZ_ASSERT(obj->denseElementsAreCopyOnWrite());
-    MOZ_ASSERT(!obj->denseElementsAreFrozen());
+    MOZ_ASSERT(obj->isExtensible());
 
     // The original owner of a COW elements array should never be modified.
     MOZ_ASSERT(obj->getElementsHeader()->ownerObject() != obj);
@@ -1719,7 +1710,7 @@ js::NativeDefineProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
 
     // Step 2.
     if (!prop) {
-        if (!obj->nonProxyIsExtensible())
+        if (!obj->isExtensible())
             return result.fail(JSMSG_CANT_DEFINE_PROP_OBJECT_NOT_EXTENSIBLE);
 
         // Fill in missing desc fields with defaults.
@@ -2012,7 +2003,7 @@ DefineNonexistentProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
     // Step 1 is a redundant assertion, step 3 and later don't apply here.
 
     // Step 2.
-    if (!obj->nonProxyIsExtensible())
+    if (!obj->isExtensible())
         return result.fail(JSMSG_CANT_DEFINE_PROP_OBJECT_NOT_EXTENSIBLE);
 
     if (JSID_IS_INT(id)) {
@@ -2724,7 +2715,7 @@ SetExistingProperty(JSContext* cx, HandleNativeObject obj, HandleId id, HandleVa
     // Step 5 for dense elements.
     if (prop.isDenseOrTypedArrayElement()) {
         // Step 5.a.
-        if (pobj->getElementsHeader()->isFrozen())
+        if (pobj->denseElementsAreFrozen())
             return result.fail(JSMSG_READ_ONLY);
 
         // Pure optimization for the common case:

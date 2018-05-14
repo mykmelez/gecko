@@ -1343,10 +1343,8 @@ public:
    *
    * @param aChild    The node to fire DOMNodeRemoved at.
    * @param aParent   The parent of aChild.
-   * @param aOwnerDoc The ownerDocument of aChild.
    */
-  static void MaybeFireNodeRemoved(nsINode* aChild, nsINode* aParent,
-                                   nsIDocument* aOwnerDoc);
+  static void MaybeFireNodeRemoved(nsINode* aChild, nsINode* aParent);
 
   /**
    * This method creates and dispatches a trusted event.
@@ -3119,12 +3117,6 @@ public:
    * to their target. Instead, the key event should be handled by chrome only.
    */
   static bool ShouldBlockReservedKeys(mozilla::WidgetKeyboardEvent* aKeyEvent);
-
-  /**
-   * Walks up the tree from aElement until it finds an element that is
-   * not native anonymous content.  aElement must be NAC itself.
-   */
-  static Element* GetClosestNonNativeAnonymousAncestor(Element* aElement);
 
   /**
    * Returns the nsIPluginTag for the plugin we should try to use for a given

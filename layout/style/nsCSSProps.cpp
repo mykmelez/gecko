@@ -20,7 +20,7 @@
 #include "nsIWidget.h"
 #include "nsThemeConstants.h"  // For system widget appearance types
 
-#include "mozilla/dom/AnimationEffectReadOnlyBinding.h" // for PlaybackDirection
+#include "mozilla/dom/AnimationEffectBinding.h" // for PlaybackDirection
 #include "mozilla/LookAndFeel.h" // for system colors
 
 #include "nsString.h"
@@ -447,9 +447,9 @@ const KTableEntry nsCSSProps::kTransformStyleKTable[] = {
 };
 
 const KTableEntry nsCSSProps::kImageLayerAttachmentKTable[] = {
-  { eCSSKeyword_fixed, NS_STYLE_IMAGELAYER_ATTACHMENT_FIXED },
-  { eCSSKeyword_scroll, NS_STYLE_IMAGELAYER_ATTACHMENT_SCROLL },
-  { eCSSKeyword_local, NS_STYLE_IMAGELAYER_ATTACHMENT_LOCAL },
+  { eCSSKeyword_fixed, StyleImageLayerAttachment::Fixed },
+  { eCSSKeyword_scroll, StyleImageLayerAttachment::Scroll },
+  { eCSSKeyword_local, StyleImageLayerAttachment::Local },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
