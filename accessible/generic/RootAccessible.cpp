@@ -8,7 +8,6 @@
 #include "mozilla/ArrayUtils.h"
 
 #define CreateEvent CreateEventA
-#include "nsIDOMDocument.h"
 
 #include "Accessible-inl.h"
 #include "DocAccessible-inl.h"
@@ -89,7 +88,7 @@ RootAccessible::Name(nsString& aName)
 }
 
 role
-RootAccessible::NativeRole()
+RootAccessible::NativeRole() const
 {
   // If it's a <dialog> or <wizard>, use roles::DIALOG instead
   dom::Element* rootElm = mDocumentNode->GetRootElement();
