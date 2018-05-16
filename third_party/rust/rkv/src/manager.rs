@@ -16,6 +16,10 @@ use std::collections::btree_map::{
     Entry,
 };
 
+use std::os::raw::{
+    c_uint,
+};
+
 use std::path::{
     Path,
     PathBuf,
@@ -40,7 +44,7 @@ pub struct Manager {
 }
 
 impl Manager {
-    fn new() -> Manager {
+    pub fn new() -> Manager {
         Manager {
             stores: Mutex::new(Default::default()),
         }
@@ -63,6 +67,22 @@ impl Manager {
             Entry::Occupied(e) => e.get().clone(),
             Entry::Vacant(e) => {
                 let k = Arc::new(RwLock::new(f(e.key().as_path())?));
+                e.insert(k).clone()
+            }
+        })
+    }
+
+    /// Return the open store at `path` with capacity `capacity`,
+    /// or create it by calling `f`.
+    pub fn get_or_create_with_capacity<'p, F, P>(&mut self, path: P, capacity: c_uint, f: F) -> Result<Arc<RwLock<Rkv>>, StoreError>
+    where F: FnOnce(&Path, c_uint) -> Result<Rkv, StoreError>,
+          P: Into<&'p Path> {
+        let canonical = path.into().canonicalize()?;
+        let mut map = self.stores.lock().unwrap();
+        Ok(match map.entry(canonical) {
+            Entry::Occupied(e) => e.get().clone(),
+            Entry::Vacant(e) => {
+                let k = Arc::new(RwLock::new(f(e.key().as_path(), capacity)?));
                 e.insert(k).clone()
             }
         })
