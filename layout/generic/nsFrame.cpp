@@ -246,8 +246,10 @@ nsReflowStatus::UpdateTruncated(const ReflowInput& aReflowInput,
 nsIFrame::DestroyAnonymousContent(nsPresContext* aPresContext,
                                   already_AddRefed<nsIContent>&& aContent)
 {
-  aPresContext->PresShell()->FrameConstructor()
-              ->DestroyAnonymousContent(Move(aContent));
+  if (nsCOMPtr<nsIContent> content = aContent) {
+    aPresContext->EventStateManager()->NativeAnonymousContentRemoved(content);
+    content->UnbindFromTree();
+  }
 }
 
 // Formerly the nsIFrameDebug interface
@@ -2230,7 +2232,7 @@ void nsDisplaySelectionOverlay::Paint(nsDisplayListBuilder* aBuilder,
   ColorPattern color(ComputeColor());
 
   nsIntRect pxRect =
-    mVisibleRect.ToOutsidePixels(mFrame->PresContext()->AppUnitsPerDevPixel());
+    GetPaintRect().ToOutsidePixels(mFrame->PresContext()->AppUnitsPerDevPixel());
   Rect rect(pxRect.x, pxRect.y, pxRect.width, pxRect.height);
   MaybeSnapToDevicePixels(rect, aDrawTarget, true);
 

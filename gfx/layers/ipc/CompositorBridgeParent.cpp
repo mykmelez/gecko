@@ -642,9 +642,8 @@ CompositorBridgeParent::RecvNotifyRegionInvalidated(const nsIntRegion& aRegion)
 void
 CompositorBridgeParent::Invalidate()
 {
-  if (mLayerManager && mLayerManager->GetRoot()) {
-    mLayerManager->AddInvalidRegion(
-                                    mLayerManager->GetRoot()->GetLocalVisibleRegion().ToUnknownRegion().GetBounds());
+  if (mLayerManager) {
+    mLayerManager->InvalidateAll();
   }
 }
 
@@ -2106,6 +2105,13 @@ MetricsSharingController*
 CompositorBridgeParent::LayerTreeState::InProcessSharingController() const
 {
   return mParent;
+}
+
+void
+CompositorBridgeParent::DidComposite(LayersId aId, TimeStamp& aCompositeStart, TimeStamp& aCompositeEnd)
+{
+  MOZ_ASSERT(aId == mRootLayerTreeID);
+  DidComposite(aCompositeStart, aCompositeEnd);
 }
 
 void

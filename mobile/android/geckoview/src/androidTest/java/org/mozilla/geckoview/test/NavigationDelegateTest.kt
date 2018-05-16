@@ -94,6 +94,29 @@ class NavigationDelegateTest : BaseSessionTest() {
         sessionRule.session.waitForPageStop()
     }
 
+    @NullDelegate(GeckoSession.NavigationDelegate::class)
+    @Test fun load_canUnsetNavigationDelegate() {
+        // Test that if we unset the navigation delegate during a load, the load still proceeds.
+        var onLocationCount = 0
+        sessionRule.session.navigationDelegate = object : Callbacks.NavigationDelegate {
+            override fun onLocationChange(session: GeckoSession, url: String) {
+                onLocationCount++
+            }
+        }
+        sessionRule.session.loadTestPath(HELLO_HTML_PATH)
+        sessionRule.session.waitForPageStop()
+
+        assertThat("Should get callback for first load",
+                   onLocationCount, equalTo(1))
+
+        sessionRule.session.reload()
+        sessionRule.session.navigationDelegate = null
+        sessionRule.session.waitForPageStop()
+
+        assertThat("Should not get callback for second load",
+                   onLocationCount, equalTo(1))
+    }
+
     @Test fun loadString() {
         val dataString = "<html><head><title>TheTitle</title></head><body>TheBody</body></html>"
         val mimeType = "text/html"
@@ -373,6 +396,9 @@ class NavigationDelegateTest : BaseSessionTest() {
 
     @WithDevToolsAPI
     @Test fun onNewSession_calledForTargetBlankLink() {
+        // Disable popup blocker.
+        sessionRule.setPrefsUntilTestEnd(mapOf("dom.disable_open_during_load" to false))
+
         sessionRule.session.loadTestPath(NEW_SESSION_HTML_PATH)
         sessionRule.session.waitForPageStop()
 
@@ -410,6 +436,9 @@ class NavigationDelegateTest : BaseSessionTest() {
 
     @WithDevToolsAPI
     @Test fun onNewSession_childShouldLoad() {
+        // Disable popup blocker.
+        sessionRule.setPrefsUntilTestEnd(mapOf("dom.disable_open_during_load" to false))
+
         sessionRule.session.loadTestPath(NEW_SESSION_HTML_PATH)
         sessionRule.session.waitForPageStop()
 
@@ -432,6 +461,9 @@ class NavigationDelegateTest : BaseSessionTest() {
 
     @WithDevToolsAPI
     @Test fun onNewSession_setWindowOpener() {
+        // Disable popup blocker.
+        sessionRule.setPrefsUntilTestEnd(mapOf("dom.disable_open_during_load" to false))
+
         sessionRule.session.loadTestPath(NEW_SESSION_HTML_PATH)
         sessionRule.session.waitForPageStop()
 
@@ -446,6 +478,9 @@ class NavigationDelegateTest : BaseSessionTest() {
 
     @WithDevToolsAPI
     @Test fun onNewSession_supportNoOpener() {
+        // Disable popup blocker.
+        sessionRule.setPrefsUntilTestEnd(mapOf("dom.disable_open_during_load" to false))
+
         sessionRule.session.loadTestPath(NEW_SESSION_HTML_PATH)
         sessionRule.session.waitForPageStop()
 
@@ -459,6 +494,9 @@ class NavigationDelegateTest : BaseSessionTest() {
 
     @WithDevToolsAPI
     @Test fun onNewSession_notCalledForHandledLoads() {
+        // Disable popup blocker.
+        sessionRule.setPrefsUntilTestEnd(mapOf("dom.disable_open_during_load" to false))
+
         sessionRule.session.loadTestPath(NEW_SESSION_HTML_PATH)
         sessionRule.session.waitForPageStop()
 
@@ -491,6 +529,9 @@ class NavigationDelegateTest : BaseSessionTest() {
     @WithDevToolsAPI
     @Test(expected = IllegalArgumentException::class)
     fun onNewSession_doesNotAllowOpened() {
+        // Disable popup blocker.
+        sessionRule.setPrefsUntilTestEnd(mapOf("dom.disable_open_during_load" to false))
+
         sessionRule.session.loadTestPath(NEW_SESSION_HTML_PATH)
         sessionRule.session.waitForPageStop()
 

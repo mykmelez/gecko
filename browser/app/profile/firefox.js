@@ -54,6 +54,7 @@ pref("extensions.update.autoUpdateDefault", true);
 
 // Check AUS for system add-on updates.
 pref("extensions.systemAddon.update.url", "https://aus5.mozilla.org/update/3/SystemAddons/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
+pref("extensions.systemAddon.update.enabled", true);
 
 // Disable add-ons that are not installed by the user in all scopes by default.
 // See the SCOPE constants in AddonManager.jsm for values to use here.
@@ -718,8 +719,6 @@ pref("plugin.default.state", 1);
 // Plugins bundled in XPIs are enabled by default.
 pref("plugin.defaultXpi.state", 2);
 
-// Java is Click-to-Activate by default on all channels.
-pref("plugin.state.java", 1);
 
 // Flash is Click-to-Activate by default on all channels.
 pref("plugin.state.flash", 1);
