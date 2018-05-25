@@ -62,7 +62,11 @@ pub trait Cursor<'txn> {
     /// duplicate data items of each key will be returned before moving on to
     /// the next key.
     fn iter_from<K>(&mut self, key: K) -> Iter<'txn> where K: AsRef<[u8]> {
-        self.get(Some(key.as_ref()), None, ffi::MDB_SET_RANGE).unwrap();
+        match self.get(Some(key.as_ref()), None, ffi::MDB_SET_RANGE) {
+            Err(Error::NotFound) => Ok(()),
+            Err(error) => Err(error),
+            Ok(_) => Ok(()),
+        }.unwrap();
         Iter::new(self.cursor(), ffi::MDB_GET_CURRENT, ffi::MDB_NEXT)
     }
 

@@ -264,7 +264,6 @@ pub extern "C" fn xulstore_get_value_ns(
     let reader = store.read(&rkv).expect("reader");
 
     let retrieved_value = reader.get(&key);
-    println!("retrieved_value: {:?}", retrieved_value);
 
     // TODO: distinguish between a value not found and an error retrieving it.
     // For the former, continue to return an empty string, per the XULStore API.
@@ -472,11 +471,15 @@ pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(
     let store = get_store(store_name.to_str().unwrap());
     let reader = store.read(&rkv).expect("reader");
     let mut cursor = reader.open_cursor().expect("cursor");
-    let iterator = cursor.iter();
+    let iterator = cursor.iter_from(element_id);
 
     let collection: Vec<&str> = iterator
+        // .map(|(key, val)| {
+        //     println!("key {:?} = val {:?}", unsafe { str::from_utf8_unchecked(&key) },
+        //                                     unsafe { str::from_utf8_unchecked(&val) });
+        //     (key, val)
+        // })
         .map(|(key, _val)| key)
-        .map(|v| { println!("v: {:?}", v); v })
         // TODO: avoid assuming we control writes and check the conversion.
         .map(|v| unsafe { str::from_utf8_unchecked(&v) })
         .map(|v| v.split_at(v.find('=').unwrap()))
