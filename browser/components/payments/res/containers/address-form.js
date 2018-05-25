@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /* import-globals-from ../../../../../browser/extensions/formautofill/content/autofillEditForms.js*/
+import LabelledCheckbox from "../components/labelled-checkbox.js";
 import PaymentStateSubscriberMixin from "../mixins/PaymentStateSubscriberMixin.js";
 import paymentRequest from "../paymentRequest.js";
 /* import-globals-from ../unprivileged-fallbacks.js */
@@ -22,14 +23,18 @@ export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement
     this.genericErrorText = document.createElement("div");
 
     this.cancelButton = document.createElement("button");
-    this.cancelButton.id = "address-page-cancel-button";
+    this.cancelButton.className = "cancel-button";
     this.cancelButton.addEventListener("click", this);
 
     this.backButton = document.createElement("button");
+    this.backButton.className = "back-button";
     this.backButton.addEventListener("click", this);
 
     this.saveButton = document.createElement("button");
+    this.saveButton.className = "save-button";
     this.saveButton.addEventListener("click", this);
+
+    this.persistCheckbox = new LabelledCheckbox();
 
     // The markup is shared with form autofill preferences.
     let url = "formautofill/editAddress.xhtml";
@@ -66,6 +71,7 @@ export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement
         supportedCountries: PaymentDialogUtils.supportedCountries,
       });
 
+      this.appendChild(this.persistCheckbox);
       this.appendChild(this.genericErrorText);
       this.appendChild(this.cancelButton);
       this.appendChild(this.backButton);
@@ -77,35 +83,49 @@ export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement
   }
 
   render(state) {
-    this.cancelButton.textContent = this.dataset.cancelButtonLabel;
-    this.backButton.textContent = this.dataset.backButtonLabel;
-    this.saveButton.textContent = this.dataset.saveButtonLabel;
-
     let record = {};
     let {
       page,
-      savedAddresses,
+      "address-page": addressPage,
     } = state;
 
-    this.backButton.hidden = page.onboardingWizard;
+    if (this.id && page && page.id !== this.id) {
+      log.debug(`AddressForm: no need to further render inactive page: ${page.id}`);
+      return;
+    }
 
-    if (page.addressFields) {
-      this.setAttribute("address-fields", page.addressFields);
+    this.cancelButton.textContent = this.dataset.cancelButtonLabel;
+    this.backButton.textContent = this.dataset.backButtonLabel;
+    this.saveButton.textContent = this.dataset.saveButtonLabel;
+    this.persistCheckbox.label = this.dataset.persistCheckboxLabel;
+
+    this.backButton.hidden = page.onboardingWizard;
+    this.cancelButton.hidden = !page.onboardingWizard;
+
+    if (addressPage.addressFields) {
+      this.setAttribute("address-fields", addressPage.addressFields);
     } else {
       this.removeAttribute("address-fields");
     }
 
-    this.pageTitle.textContent = page.title;
+    this.pageTitle.textContent = addressPage.title;
     this.genericErrorText.textContent = page.error;
 
-    let editing = !!page.guid;
+    let editing = !!addressPage.guid;
+    let addresses = paymentRequest.getAddresses(state);
 
     // If an address is selected we want to edit it.
     if (editing) {
-      record = savedAddresses[page.guid];
+      record = addresses[addressPage.guid];
       if (!record) {
-        throw new Error("Trying to edit a non-existing address: " + page.guid);
+        throw new Error("Trying to edit a non-existing address: " + addressPage.guid);
       }
+      // When editing an existing record, prevent changes to persistence
+      this.persistCheckbox.hidden = true;
+    } else {
+      // Adding a new record: default persistence to checked when in a not-private session
+      this.persistCheckbox.hidden = false;
+      this.persistCheckbox.checked = !state.isPrivate;
     }
 
     this.formHandler.loadRecord(record);
@@ -127,11 +147,19 @@ export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement
         break;
       }
       case this.backButton: {
-        this.requestStore.setState({
+        let currentState = this.requestStore.getState();
+        const previousId = currentState.page.previousId;
+        let state = {
           page: {
-            id: "payment-summary",
+            id: previousId || "payment-summary",
           },
-        });
+        };
+        if (previousId) {
+          state[previousId] = Object.assign({}, currentState[previousId], {
+            preserveFieldValues: true,
+          });
+        }
+        this.requestStore.setState(state);
         break;
       }
       case this.saveButton: {
@@ -146,26 +174,56 @@ export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement
 
   saveRecord() {
     let record = this.formHandler.buildFormObject();
+    let currentState = this.requestStore.getState();
     let {
       page,
-    } = this.requestStore.getState();
+      tempAddresses,
+      savedBasicCards,
+      "address-page": addressPage,
+    } = currentState;
+    let editing = !!addressPage.guid;
 
-    paymentRequest.updateAutofillRecord("addresses", record, page.guid, {
+    if (editing ? (addressPage.guid in tempAddresses) : !this.persistCheckbox.checked) {
+      record.isTemporary = true;
+    }
+
+    let state = {
       errorStateChange: {
         page: {
           id: "address-page",
           onboardingWizard: page.onboardingWizard,
           error: this.dataset.errorGenericSave,
         },
+        "address-page": addressPage,
       },
       preserveOldProperties: true,
       selectedStateKey: page.selectedStateKey,
-      successStateChange: {
+    };
+
+    const previousId = page.previousId;
+    if (page.onboardingWizard && !Object.keys(savedBasicCards).length) {
+      state.successStateChange = {
         page: {
-          id: "payment-summary",
+          id: "basic-card-page",
+          previousId: "address-page",
+          onboardingWizard: page.onboardingWizard,
         },
-      },
-    });
+      };
+    } else {
+      state.successStateChange = {
+        page: {
+          id: previousId || "payment-summary",
+          onboardingWizard: page.onboardingWizard,
+        },
+      };
+    }
+
+    if (previousId) {
+      state.successStateChange[previousId] = Object.assign({}, currentState[previousId]);
+      state.successStateChange[previousId].preserveFieldValues = true;
+    }
+
+    paymentRequest.updateAutofillRecord("addresses", record, addressPage.guid, state);
   }
 }
 

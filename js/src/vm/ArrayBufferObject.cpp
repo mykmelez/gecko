@@ -91,17 +91,25 @@ js::ToClampedIndex(JSContext* cx, HandleValue v, uint32_t length, uint32_t* out)
 // bug 1068684, bug 1073934 for details.  The limiting case seems to be
 // Windows Vista Home 64-bit, where the per-process address space is limited
 // to 8TB.  Thus we track the number of live objects, and set a limit of
-// 1000 live objects per process; we run synchronous GC if necessary; and
-// we throw an OOM error if the per-process limit is exceeded.
+// 1000 live objects per process and we throw an OOM error if the per-process
+// limit is exceeded.
 //
 // Since the MaximumLiveMappedBuffers limit is not generally accounted for by
 // any existing GC-trigger heuristics, we need an extra heuristic for triggering
 // GCs when the caller is allocating memories rapidly without other garbage.
 // Thus, once the live buffer count crosses a certain threshold, we start
-// triggering GCs every N allocations.
+// triggering GCs every N allocations. As we get close to the limit, perform
+// expensive non-incremental full GCs as a last-ditch effort to avoid
+// unnecessary failure. The *Sans use a ton of vmem for bookkeeping leaving a
+// lot less for the program so use a lower limit.
 
+#if defined(MOZ_TSAN) || defined(MOZ_ASAN)
+static const int32_t MaximumLiveMappedBuffers = 500;
+#else
 static const int32_t MaximumLiveMappedBuffers = 1000;
-static const int32_t StartTriggeringAtLiveBufferCount = 200;
+#endif
+static const int32_t StartTriggeringAtLiveBufferCount = 100;
+static const int32_t StartSyncFullGCAtLiveBufferCount = MaximumLiveMappedBuffers - 100;
 static const int32_t AllocatedBuffersPerTrigger = 100;
 
 static Atomic<int32_t, mozilla::ReleaseAcquire> liveBufferCount(0);
@@ -484,8 +492,8 @@ ArrayBufferObject::detach(JSContext* cx, Handle<ArrayBufferObject*> buffer,
 
     // When detaching a buffer with typed object views, any jitcode accessing
     // such views must be deoptimized so that detachment checks are performed.
-    // This is done by setting a compartment-wide flag indicating that buffers
-    // with typed object views have been detached.
+    // This is done by setting a zone-wide flag indicating that buffers with
+    // typed object views have been detached.
     if (buffer->hasTypedObjectViews()) {
         // Make sure the global object's group has been instantiated, so the
         // flag change will be observed.
@@ -493,13 +501,13 @@ ArrayBufferObject::detach(JSContext* cx, Handle<ArrayBufferObject*> buffer,
         if (!JSObject::getGroup(cx, cx->global()))
             oomUnsafe.crash("ArrayBufferObject::detach");
         MarkObjectGroupFlags(cx, cx->global(), OBJECT_FLAG_TYPED_OBJECT_HAS_DETACHED_BUFFER);
-        cx->compartment()->detachedTypedObjects = 1;
+        cx->zone()->detachedTypedObjects = 1;
     }
 
     // Update all views of the buffer to account for the buffer having been
     // detached, and clear the buffer's data and list of views.
 
-    auto& innerViews = cx->compartment()->innerViews.get();
+    auto& innerViews = ObjectRealm::get(buffer).innerViews.get();
     if (InnerViewTable::ViewVector* views = innerViews.maybeViewsUnbarriered(buffer)) {
         for (size_t i = 0; i < views->length(); i++)
             NoteViewBufferWasDetached((*views)[i], newContents, cx);
@@ -574,7 +582,7 @@ ArrayBufferObject::changeContents(JSContext* cx, BufferContents newContents,
     setNewData(cx->runtime()->defaultFreeOp(), newContents, ownsState);
 
     // Update all views.
-    auto& innerViews = cx->compartment()->innerViews.get();
+    auto& innerViews = ObjectRealm::get(this).innerViews.get();
     if (InnerViewTable::ViewVector* views = innerViews.maybeViewsUnbarriered(this)) {
         for (size_t i = 0; i < views->length(); i++)
             changeViewContents(cx, (*views)[i], oldDataPointer, newContents);
@@ -838,8 +846,12 @@ CreateBuffer(JSContext* cx, uint32_t initialSize, const Maybe<uint32_t>& maxSize
 
     maybeSharedObject.set(object);
 
-    // See StartTriggeringAtLiveBufferCount comment above.
-    if (liveBufferCount > StartTriggeringAtLiveBufferCount) {
+    // See MaximumLiveMappedBuffers comment above.
+    if (liveBufferCount > StartSyncFullGCAtLiveBufferCount) {
+        JS::PrepareForFullGC(cx);
+        JS::GCForReason(cx, GC_NORMAL, JS::gcreason::TOO_MUCH_WASM_MEMORY);
+        allocatedSinceLastTrigger = 0;
+    } else if (liveBufferCount > StartTriggeringAtLiveBufferCount) {
         allocatedSinceLastTrigger++;
         if (allocatedSinceLastTrigger > AllocatedBuffersPerTrigger) {
             Unused << cx->runtime()->gc.triggerGC(JS::gcreason::TOO_MUCH_WASM_MEMORY);
@@ -884,7 +896,7 @@ js::CreateWasmBuffer(JSContext* cx, const wasm::Limits& memory,
 #endif
 
     if (memory.shared == wasm::Shareable::True) {
-        if (!cx->compartment()->creationOptions().getSharedMemoryAndAtomicsEnabled()) {
+        if (!cx->realm()->creationOptions().getSharedMemoryAndAtomicsEnabled()) {
             JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_WASM_NO_SHMEM_LINK);
             return false;
         }
@@ -1473,7 +1485,7 @@ ArrayBufferObject::addView(JSContext* cx, JSObject* viewArg)
         setFirstView(view);
         return true;
     }
-    return cx->compartment()->innerViews.get().addView(cx, this, view);
+    return ObjectRealm::get(this).innerViews.get().addView(cx, this, view);
 }
 
 /*
@@ -1984,7 +1996,7 @@ JS_StealArrayBufferContents(JSContext* cx, HandleObject objArg)
     // returning something that handles releasing the memory.
     bool hasStealableContents = buffer->hasStealableContents() && buffer->isPlain();
 
-    AutoCompartment ac(cx, buffer);
+    AutoRealm ar(cx, buffer);
     return ArrayBufferObject::stealContents(cx, buffer, hasStealableContents).data();
 }
 

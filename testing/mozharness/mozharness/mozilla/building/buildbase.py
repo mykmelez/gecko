@@ -38,7 +38,6 @@ from mozharness.mozilla.buildbot import (
     TBPL_SUCCESS,
     TBPL_WORST_LEVEL_TUPLE,
 )
-from mozharness.mozilla.purge import PurgeMixin
 from mozharness.mozilla.secrets import SecretsMixin
 from mozharness.mozilla.testing.errors import TinderBoxPrintRe
 from mozharness.mozilla.testing.unittest import tbox_print_summary
@@ -418,7 +417,8 @@ class BuildOptionParser(object):
         'asan-and-debug': 'builds/releng_sub_%s_configs/%s_asan_and_debug.py',
         'asan-tc-and-debug': 'builds/releng_sub_%s_configs/%s_asan_tc_and_debug.py',
         'stat-and-debug': 'builds/releng_sub_%s_configs/%s_stat_and_debug.py',
-        'code-coverage': 'builds/releng_sub_%s_configs/%s_code_coverage.py',
+        'code-coverage-debug': 'builds/releng_sub_%s_configs/%s_code_coverage_debug.py',
+        'code-coverage-opt': 'builds/releng_sub_%s_configs/%s_code_coverage_opt.py',
         'source': 'builds/releng_sub_%s_configs/%s_source.py',
         'noopt-debug': 'builds/releng_sub_%s_configs/%s_noopt_debug.py',
         'api-16-gradle-dependencies': 'builds/releng_sub_%s_configs/%s_api_16_gradle_dependencies.py',
@@ -667,7 +667,7 @@ def generate_build_UID():
     return uuid.uuid4().hex
 
 
-class BuildScript(BuildbotMixin, PurgeMixin, BalrogMixin,
+class BuildScript(BuildbotMixin, BalrogMixin,
                   VirtualenvMixin, MercurialScript,
                   SecretsMixin, PerfherderResourceOptionsMixin):
     def __init__(self, **kwargs):

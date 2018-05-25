@@ -1671,14 +1671,6 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     }
   }
 
-  // Propagate scoped style sheet tracking bit.
-  if (mParent->IsContent()) {
-    nsIContent* parent = mParent->AsContent();
-    if (ShadowRoot* shadowRootParent = ShadowRoot::FromNode(parent)) {
-      parent = shadowRootParent->GetHost();
-    }
-  }
-
   // This has to be here, rather than in nsGenericHTMLElement::BindToTree,
   //  because it has to happen after updating the parent pointer, but before
   //  recursively binding the kids.
@@ -3684,11 +3676,11 @@ Element::Animate(const Nullable<ElementOrCSSPseudoElement>& aTarget,
   }
 
   // Animation constructor follows the standard Xray calling convention and
-  // needs to be called in the target element's compartment.
-  Maybe<JSAutoCompartment> ac;
+  // needs to be called in the target element's realm.
+  Maybe<JSAutoRealm> ar;
   if (js::GetContextCompartment(aContext) !=
       js::GetObjectCompartment(ownerGlobal->GetGlobalJSObject())) {
-    ac.emplace(aContext, ownerGlobal->GetGlobalJSObject());
+    ar.emplace(aContext, ownerGlobal->GetGlobalJSObject());
   }
 
   AnimationTimeline* timeline = referenceElement->OwnerDoc()->Timeline();
@@ -4278,10 +4270,27 @@ Element::SetCustomElementData(CustomElementData* aData)
   #if DEBUG
     nsAtom* name = NodeInfo()->NameAtom();
     nsAtom* type = aData->GetCustomElementType();
-    if (nsContentUtils::IsCustomElementName(name, NodeInfo()->NamespaceID())) {
-      MOZ_ASSERT(type == name);
-    } else {
-      MOZ_ASSERT(type != name);
+    if (NodeInfo()->NamespaceID() == kNameSpaceID_XHTML) {
+      if (nsContentUtils::IsCustomElementName(name, kNameSpaceID_XHTML)) {
+        MOZ_ASSERT(type == name);
+      } else {
+        MOZ_ASSERT(type != name);
+      }
+    } else { // kNameSpaceID_XUL
+      // Check to see if the tag name is a dashed name.
+      if (nsContentUtils::IsNameWithDash(name)) {
+        // Assert that a tag name with dashes is always an autonomous custom
+        // element.
+        MOZ_ASSERT(type == name);
+      } else {
+        // Could still be an autonomous custom element with a non-dashed tag name.
+        // Need the check below for sure.
+        if (type != name) {
+          // Assert that the name of the built-in custom element type is always
+          // a dashed name.
+          MOZ_ASSERT(nsContentUtils::IsNameWithDash(type));
+        }
+      }
     }
   #endif
   slots->mCustomElementData = aData;

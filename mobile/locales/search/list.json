@@ -1,6 +1,7 @@
 {
   "default": {
     "searchDefault": "Google",
+    "searchOrder": ["Google", "Bing"],
     "visibleDefaultEngines": [
       "google", "bing", "amazondotcom", "ddg", "twitter", "wikipedia"
     ]
@@ -160,6 +161,13 @@
       "default": {
         "visibleDefaultEngines": [
           "google", "bing", "skroutz", "twitter", "wikipedia-el"
+        ]
+      }
+    },
+    "en-CA": {
+      "default": {
+        "visibleDefaultEngines": [
+          "google", "bing", "amazon-ca", "ddg", "twitter", "wikipedia"
         ]
       }
     },

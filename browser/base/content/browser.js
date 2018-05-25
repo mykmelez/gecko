@@ -16,7 +16,6 @@ const {WebExtensionPolicy} = Cu.getGlobalForObject(Services);
 // lazy module getters
 
 XPCOMUtils.defineLazyModuleGetters(this, {
-  AboutHome: "resource:///modules/AboutHome.jsm",
   BrowserUITelemetry: "resource:///modules/BrowserUITelemetry.jsm",
   BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.jsm",
   BrowserUtils: "resource://gre/modules/BrowserUtils.jsm",
@@ -55,6 +54,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   SchedulePressure: "resource:///modules/SchedulePressure.jsm",
   ShortcutUtils: "resource://gre/modules/ShortcutUtils.jsm",
   SimpleServiceDiscovery: "resource://gre/modules/SimpleServiceDiscovery.jsm",
+  SiteDataManager: "resource:///modules/SiteDataManager.jsm",
   SitePermissions: "resource:///modules/SitePermissions.jsm",
   TabCrashHandler: "resource:///modules/ContentCrashHandlers.jsm",
   TelemetryStopwatch: "resource://gre/modules/TelemetryStopwatch.jsm",
@@ -2314,16 +2314,6 @@ function openLocation() {
 }
 
 function BrowserOpenTab(event) {
-  // A notification intended to be useful for modular peformance tracking
-  // starting as close as is reasonably possible to the time when the user
-  // expressed the intent to open a new tab.  Since there are a lot of
-  // entry points, this won't catch every single tab created, but most
-  // initiated by the user should go through here.
-  //
-  // This is also used to notify a user that an extension has changed the
-  // New Tab page.
-  Services.obs.notifyObservers(null, "browser-open-newtab-start");
-
   let where = "tab";
   let relatedToCurrent = false;
 
@@ -2343,9 +2333,24 @@ function BrowserOpenTab(event) {
     }
   }
 
-  openTrustedLinkIn(BROWSER_NEW_TAB_URL, where, {
-    relatedToCurrent,
-  });
+  // A notification intended to be useful for modular peformance tracking
+  // starting as close as is reasonably possible to the time when the user
+  // expressed the intent to open a new tab.  Since there are a lot of
+  // entry points, this won't catch every single tab created, but most
+  // initiated by the user should go through here.
+  //
+  // Note 1: This notification gets notified with a promise that resolves
+  //         with the linked browser when the tab gets created
+  // Note 2: This is also used to notify a user that an extension has changed
+  //         the New Tab page.
+  Services.obs.notifyObservers({
+    wrappedJSObject: new Promise(resolve => {
+      openTrustedLinkIn(BROWSER_NEW_TAB_URL, where, {
+        relatedToCurrent,
+        resolveOnNewTabCreated: resolve
+      });
+    })
+  }, "browser-open-newtab-start");
 }
 
 var gLastOpenDirectory = {
@@ -6385,6 +6390,29 @@ function onDownloadsAutoHideChange(event) {
   Services.prefs.setBoolPref("browser.download.autohideButton", autoHide);
 }
 
+function getUnwrappedTriggerNode(popup) {
+  // Toolbar buttons are wrapped in customize mode. Unwrap if necessary.
+  let {triggerNode} = popup;
+  if (triggerNode && gCustomizeMode.isWrappedToolbarItem(triggerNode)) {
+    return triggerNode.firstChild;
+  }
+  return triggerNode;
+}
+
+function UpdateManageExtension(popup) {
+  let checkbox = popup.querySelector(".customize-context-manageExtension");
+  let separator = checkbox.nextElementSibling;
+  let node = getUnwrappedTriggerNode(popup);
+  let isWebExt = node && node.hasAttribute("data-extensionid");
+  checkbox.hidden = separator.hidden = !isWebExt;
+}
+
+function openAboutAddonsForContextAction(popup) {
+  let id = getUnwrappedTriggerNode(popup).getAttribute("data-extensionid");
+  let viewID = "addons://detail/" + encodeURIComponent(id);
+  BrowserOpenAddonsMgr(viewID);
+}
+
 var gPageStyleMenu = {
   // This maps from a <browser> element (or, more specifically, a
   // browser's permanentKey) to an Object that contains the most recent
@@ -7434,13 +7462,6 @@ const gRemoteControl = {
   },
 };
 
-function getNotificationBox(aWindow) {
-  var foundBrowser = gBrowser.getBrowserForDocument(aWindow.document);
-  if (foundBrowser)
-    return gBrowser.getNotificationBox(foundBrowser);
-  return null;
-}
-
 function getTabModalPromptBox(aWindow) {
   var foundBrowser = gBrowser.getBrowserForDocument(aWindow.document);
   if (foundBrowser)
@@ -7809,6 +7830,11 @@ var TabContextMenu = {
       unpinnedTabsToClose--;
     }
     document.getElementById("context_closeOtherTabs").disabled = unpinnedTabsToClose < 1;
+
+    // Only one of close_tab/close_selected_tabs should be visible
+    let hasMultiSelectedTabs = !!gBrowser.multiSelectedTabsCount;
+    document.getElementById("context_closeTab").hidden = hasMultiSelectedTabs;
+    document.getElementById("context_closeSelectedTabs").hidden = !hasMultiSelectedTabs;
 
     // Hide "Bookmark All Tabs" for a pinned tab.  Update its state if visible.
     let bookmarkAllTabs = document.getElementById("context_bookmarkAllTabs");

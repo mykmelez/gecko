@@ -9,6 +9,7 @@
 #include "jit/CacheIR.h"
 #include "jit/Linker.h"
 #include "jit/SharedICHelpers.h"
+#include "proxy/DeadObjectProxy.h"
 #include "proxy/Proxy.h"
 
 #include "jit/MacroAssembler-inl.h"
@@ -267,22 +268,6 @@ BaselineCacheIRCompiler::emitGuardGroup()
 }
 
 bool
-BaselineCacheIRCompiler::emitGuardGroupHasUnanalyzedNewScript()
-{
-    Address addr(stubAddress(reader.stubOffset()));
-    AutoScratchRegister scratch1(allocator, masm);
-    AutoScratchRegister scratch2(allocator, masm);
-
-    FailurePath* failure;
-    if (!addFailurePath(&failure))
-        return false;
-
-    masm.loadPtr(addr, scratch1);
-    masm.guardGroupHasUnanalyzedNewScript(scratch1, scratch2, failure->label());
-    return true;
-}
-
-bool
 BaselineCacheIRCompiler::emitGuardProto()
 {
     Register obj = allocator.useRegister(masm, reader.objOperandId());
@@ -302,12 +287,18 @@ bool
 BaselineCacheIRCompiler::emitGuardCompartment()
 {
     Register obj = allocator.useRegister(masm, reader.objOperandId());
-    reader.stubOffset(); // Read global wrapper.
     AutoScratchRegister scratch(allocator, masm);
 
     FailurePath* failure;
     if (!addFailurePath(&failure))
         return false;
+
+    // Verify that the global wrapper is still valid, as
+    // it is pre-requisite for doing the compartment check.
+    Address globalWrapper(stubAddress(reader.stubOffset()));
+    masm.loadPtr(globalWrapper, scratch);
+    Address handlerAddr(scratch, ProxyObject::offsetOfHandler());
+    masm.branchPtr(Assembler::Equal, handlerAddr, ImmPtr(&DeadObjectProxy::singleton), failure->label());
 
     Address addr(stubAddress(reader.stubOffset()));
     masm.branchTestObjCompartment(Assembler::NotEqual, obj, addr, scratch, failure->label());
@@ -1958,14 +1949,6 @@ BaselineCacheIRCompiler::emitReturnFromIC()
 }
 
 bool
-BaselineCacheIRCompiler::emitLoadObject()
-{
-    Register reg = allocator.defineRegister(masm, reader.objOperandId());
-    masm.loadPtr(stubAddress(reader.stubOffset()), reg);
-    return true;
-}
-
-bool
 BaselineCacheIRCompiler::emitLoadStackValue()
 {
     ValueOperand val = allocator.defineValueRegister(masm, reader.valOperandId());
@@ -1997,19 +1980,20 @@ BaselineCacheIRCompiler::emitGuardAndGetIterator()
     masm.loadObjPrivate(output, JSObject::ITER_CLASS_NFIXED_SLOTS, niScratch);
 
     // Ensure the |active| and |unreusable| bits are not set.
-    masm.branchTest32(Assembler::NonZero, Address(niScratch, offsetof(NativeIterator, flags)),
-                      Imm32(JSITER_ACTIVE|JSITER_UNREUSABLE), failure->label());
+    masm.branchTest32(Assembler::NonZero,
+                      Address(niScratch, NativeIterator::offsetOfFlags()),
+                      Imm32(NativeIterator::Flags::All), failure->label());
 
-    // Pre-write barrier for store to 'obj'.
-    Address iterObjAddr(niScratch, offsetof(NativeIterator, obj));
+    // Pre-write barrier for store to 'objectBeingIterated_'.
+    Address iterObjAddr(niScratch, NativeIterator::offsetOfObjectBeingIterated());
     EmitPreBarrier(masm, iterObjAddr, MIRType::Object);
 
     // Mark iterator as active.
-    Address iterFlagsAddr(niScratch, offsetof(NativeIterator, flags));
+    Address iterFlagsAddr(niScratch, NativeIterator::offsetOfFlags());
     masm.storePtr(obj, iterObjAddr);
-    masm.or32(Imm32(JSITER_ACTIVE), iterFlagsAddr);
+    masm.or32(Imm32(NativeIterator::Flags::Active), iterFlagsAddr);
 
-    // Post-write barrier for stores to 'obj'.
+    // Post-write barrier for stores to 'objectBeingIterated_'.
     emitPostBarrierSlot(output, TypedOrValueRegister(MIRType::Object, AnyRegister(obj)), scratch1);
 
     // Chain onto the active iterator stack. Note that Baseline CacheIR stub

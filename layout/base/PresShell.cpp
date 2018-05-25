@@ -177,6 +177,7 @@
 #include "nsLayoutStylesheetCache.h"
 #include "mozilla/layers/InputAPZContext.h"
 #include "mozilla/layers/FocusTarget.h"
+#include "mozilla/ServoBindings.h"
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/StyleSheetInlines.h"
@@ -3779,6 +3780,10 @@ PresShell::GetRectVisibility(nsIFrame* aFrame,
 void
 PresShell::ScheduleViewManagerFlush(PaintType aType)
 {
+  if (MOZ_UNLIKELY(mIsDestroying)) {
+    return;
+  }
+
   if (aType == PAINT_DELAYED_COMPRESS) {
     // Delay paint for 1 second.
     static const uint32_t kPaintDelayPeriod = 1000;

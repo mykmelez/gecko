@@ -116,6 +116,7 @@ class nsWindowSizes;
 class nsDOMCaretPosition;
 class nsViewportInfo;
 class nsIGlobalObject;
+class nsIXULWindow;
 
 namespace mozilla {
 class AbstractThread;
@@ -3089,6 +3090,10 @@ public:
 
   nsIDocument* GetTopLevelContentDocument();
 
+  // Returns the associated XUL window if this is a top-level chrome document,
+  // null otherwise.
+  already_AddRefed<nsIXULWindow> GetXULWindowIfToplevelChrome() const;
+
   already_AddRefed<Element>
   CreateElement(const nsAString& aTagName,
                 const mozilla::dom::ElementCreationOptionsOrString& aOptions,
@@ -3380,11 +3385,6 @@ public:
   }
 
   void PropagateUseCounters(nsIDocument* aParentDocument);
-
-  void SetDocumentIncCounter(mozilla::IncCounter aIncCounter, uint32_t inc = 1)
-  {
-    mIncCounters[aIncCounter] += inc;
-  }
 
   void SetUserHasInteracted(bool aUserHasInteracted);
   bool UserHasInteracted()
@@ -4240,9 +4240,6 @@ protected:
   // Flags for whether we've notified our top-level "page" of a use counter
   // for this child document.
   std::bitset<mozilla::eUseCounter_Count> mNotifiedPageForUseCounter;
-
-  // Count the number of times something is seen in a document.
-  mozilla::Array<uint16_t, mozilla::eIncCounter_Count> mIncCounters;
 
   // Whether the user has interacted with the document or not:
   bool mUserHasInteracted;

@@ -98,9 +98,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mContent, mDoc)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Accessible)
-  if (aIID.Equals(NS_GET_IID(Accessible)))
-    foundInterface = this;
-  else
+  NS_INTERFACE_MAP_ENTRY_CONCRETE(Accessible)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, Accessible)
 NS_INTERFACE_MAP_END
 
@@ -124,7 +122,7 @@ Accessible::~Accessible()
 }
 
 ENameValueFlag
-Accessible::Name(nsString& aName)
+Accessible::Name(nsString& aName) const
 {
   aName.Truncate();
 
@@ -407,7 +405,7 @@ Accessible::VisibilityState() const
 }
 
 uint64_t
-Accessible::NativeState()
+Accessible::NativeState() const
 {
   uint64_t state = 0;
 
@@ -747,7 +745,7 @@ Accessible::TakeSelection()
 }
 
 void
-Accessible::TakeFocus()
+Accessible::TakeFocus() const
 {
   nsIFrame* frame = GetFrame();
   if (!frame)
@@ -1343,7 +1341,7 @@ Accessible::ApplyARIAState(uint64_t* aState) const
 }
 
 void
-Accessible::Value(nsString& aValue)
+Accessible::Value(nsString& aValue) const
 {
   const nsRoleMapEntry* roleMapEntry = ARIARoleMap();
   if (!roleMapEntry)
@@ -1445,7 +1443,7 @@ Accessible::SetCurValue(double aValue)
 }
 
 role
-Accessible::ARIATransformRole(role aRole)
+Accessible::ARIATransformRole(role aRole) const
 {
   // Beginning with ARIA 1.1, user agents are expected to use the native host
   // language role of the element when the region role is used without a name.
@@ -1526,7 +1524,7 @@ Accessible::NativeRole() const
 }
 
 uint8_t
-Accessible::ActionCount()
+Accessible::ActionCount() const
 {
   return GetActionRule() == eNoAction ? 0 : 1;
 }
@@ -1599,7 +1597,7 @@ Accessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 }
 
 bool
-Accessible::DoAction(uint8_t aIndex)
+Accessible::DoAction(uint8_t aIndex) const
 {
   if (aIndex != 0)
     return false;
@@ -1627,7 +1625,7 @@ Accessible::GetAtomicRegion() const
 }
 
 Relation
-Accessible::RelationByType(RelationType aType)
+Accessible::RelationByType(RelationType aType) const
 {
   if (!HasOwnContent())
     return Relation();
@@ -2000,7 +1998,7 @@ Accessible::Shutdown()
 
 // Accessible protected
 void
-Accessible::ARIAName(nsString& aName)
+Accessible::ARIAName(nsString& aName) const
 {
   // aria-labelledby now takes precedence over aria-label
   nsresult rv = nsTextEquivUtils::
@@ -2019,7 +2017,7 @@ Accessible::ARIAName(nsString& aName)
 
 // Accessible protected
 ENameValueFlag
-Accessible::NativeName(nsString& aName)
+Accessible::NativeName(nsString& aName) const
 {
   if (mContent->IsHTMLElement()) {
     Accessible* label = nullptr;
@@ -2396,7 +2394,7 @@ Accessible::AnchorAt(uint32_t aAnchorIndex)
 }
 
 already_AddRefed<nsIURI>
-Accessible::AnchorURIAt(uint32_t aAnchorIndex)
+Accessible::AnchorURIAt(uint32_t aAnchorIndex) const
 {
   MOZ_ASSERT(IsLink(), "AnchorURIAt is called on not hyper link!");
   return nullptr;
@@ -2733,7 +2731,7 @@ Accessible::GetActionRule() const
 }
 
 AccGroupInfo*
-Accessible::GetGroupInfo()
+Accessible::GetGroupInfo() const
 {
   if (IsProxy())
     MOZ_CRASH("This should never be called on proxy wrappers");

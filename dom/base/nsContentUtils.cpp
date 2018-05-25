@@ -524,6 +524,35 @@ class SameOriginCheckerImpl final : public nsIChannelEventSink,
 
 } // namespace
 
+class nsContentUtils::nsContentUtilsReporter final : public nsIMemoryReporter
+{
+  MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf);
+
+  ~nsContentUtilsReporter() = default;
+
+public:
+  NS_DECL_ISUPPORTS
+
+  NS_IMETHOD
+  CollectReports(nsIHandleReportCallback* aHandleReport,
+                 nsISupports* aData, bool aAnonymize) override
+  {
+    int64_t amt = 0;
+    for (int32_t i = 0; i < PropertiesFile_COUNT; ++i) {
+      if (sStringBundles[i]) {
+        amt += sStringBundles[i]->SizeOfIncludingThisIfUnshared(MallocSizeOf);
+      }
+    }
+
+    MOZ_COLLECT_REPORT("explicit/dom/content-utils-string-bundles", KIND_HEAP, UNITS_BYTES,
+                       amt, "string-bundles in ContentUtils");
+
+    return NS_OK;
+  }
+};
+
+NS_IMPL_ISUPPORTS(nsContentUtils::nsContentUtilsReporter, nsIMemoryReporter)
+
 /**
  * This class is used to determine whether or not the user is currently
  * interacting with the browser. It listens to observer events to toggle the
@@ -624,6 +653,7 @@ nsContentUtils::Init()
       new PLDHashTable(&hash_table_ops, sizeof(EventListenerManagerMapEntry));
 
     RegisterStrongMemoryReporter(new DOMEventListenerManagersHashReporter());
+    RegisterStrongMemoryReporter(new nsContentUtilsReporter());
   }
 
   sBlockedScriptRunners = new AutoTArray<nsCOMPtr<nsIRunnable>, 8>;
@@ -3123,7 +3153,7 @@ nsContentUtils::SubjectPrincipal()
   JSCompartment *compartment = js::GetContextCompartment(cx);
 
   // When an AutoJSAPI is instantiated, we are in a null compartment until the
-  // first JSAutoCompartment, which is kind of a purgatory as far as permissions
+  // first JSAutoRealm, which is kind of a purgatory as far as permissions
   // go. It would be nice to just hard-abort if somebody does a security check
   // in this purgatory zone, but that would be too fragile, since it could be
   // triggered by random IsCallerChrome() checks 20-levels deep.
@@ -3183,13 +3213,8 @@ nsContentUtils::NewURIWithDocumentCharset(nsIURI** aResult,
 
 // static
 bool
-nsContentUtils::IsCustomElementName(nsAtom* aName, uint32_t aNameSpaceID)
+nsContentUtils::IsNameWithDash(nsAtom* aName)
 {
-  // Allow non-dashed names in XUL for XBL to Custom Element migrations.
-  if (aNameSpaceID == kNameSpaceID_XUL) {
-    return true;
-  }
-
   // A valid custom element name is a sequence of characters name which
   // must match the PotentialCustomElementName production:
   // PotentialCustomElementName ::= [a-z] (PCENChar)* '-' (PCENChar)*
@@ -3239,6 +3264,19 @@ nsContentUtils::IsCustomElementName(nsAtom* aName, uint32_t aNameSpaceID)
     }
   }
 
+  return hasDash;
+}
+
+// static
+bool
+nsContentUtils::IsCustomElementName(nsAtom* aName, uint32_t aNameSpaceID)
+{
+  // Allow non-dashed names in XUL for XBL to Custom Element migrations.
+  if (aNameSpaceID == kNameSpaceID_XUL) {
+    return true;
+  }
+
+  bool hasDash = IsNameWithDash(aName);
   if (!hasDash) {
     return false;
   }
@@ -5530,7 +5568,7 @@ nsContentUtils::TriggerLink(nsIContent *aContent, nsPresContext *aPresContext,
 
     handler->OnLinkClick(aContent, aLinkURI,
                          fileName.IsVoid() ? aTargetSpec.get() : EmptyString().get(),
-                         fileName, nullptr, -1, nullptr, EventStateManager::IsHandlingUserInput(),
+                         fileName, nullptr, nullptr, EventStateManager::IsHandlingUserInput(),
                          aIsTrusted, aContent->NodePrincipal());
   }
 }
@@ -7071,7 +7109,7 @@ nsContentUtils::IsPatternMatching(nsAString& aValue, nsAString& aPattern,
 
   // We can use the junk scope here, because we're just using it for
   // regexp evaluation, not actual script execution.
-  JSAutoCompartment ac(cx, xpc::UnprivilegedJunkScope());
+  JSAutoRealm ar(cx, xpc::UnprivilegedJunkScope());
 
   // The pattern has to match the entire value.
   aPattern.InsertLiteral(u"^(?:", 0);
@@ -9886,8 +9924,22 @@ nsContentUtils::NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* a
     tag = nsHTMLTags::CaseSensitiveAtomTagToId(name);
     isCustomElementName = (tag == eHTMLTag_userdefined &&
                            nsContentUtils::IsCustomElementName(name, kNameSpaceID_XHTML));
-  } else {
-    isCustomElementName = nsContentUtils::IsCustomElementName(name, kNameSpaceID_XUL);
+  } else { // kNameSpaceID_XUL
+    if (aIsAtom) {
+      // Make sure the customized built-in element to be constructed confirms
+      // to our naming requirement, i.e. [is] must be a dashed name and
+      // the tag name must not.
+      // if so, set isCustomElementName to false to kick off all the logics
+      // that pick up aIsAtom.
+      if (nsContentUtils::IsNameWithDash(aIsAtom) &&
+          !nsContentUtils::IsNameWithDash(name)) {
+        isCustomElementName = false;
+      } else {
+        isCustomElementName = nsContentUtils::IsCustomElementName(name, kNameSpaceID_XUL);
+      }
+    } else {
+      isCustomElementName = nsContentUtils::IsCustomElementName(name, kNameSpaceID_XUL);
+    }
   }
 
   RefPtr<nsAtom> tagAtom = nodeInfo->NameAtom();
@@ -9956,9 +10008,11 @@ nsContentUtils::NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* a
       // CustomElementData setup, if not we will hit the assertion in
       // SetCustomElementData().
       // Built-in element
-      MOZ_ASSERT(nodeInfo->NamespaceEquals(kNameSpaceID_XHTML),
-                 "Custom built-in XUL elements are not supported yet.");
-      *aResult = CreateHTMLElement(tag, nodeInfo.forget(), aFromParser).take();
+      if (nodeInfo->NamespaceEquals(kNameSpaceID_XHTML)) {
+        *aResult = CreateHTMLElement(tag, nodeInfo.forget(), aFromParser).take();
+      } else {
+        NS_IF_ADDREF(*aResult = nsXULElement::Construct(nodeInfo.forget()));
+      }
       (*aResult)->SetCustomElementData(new CustomElementData(typeAtom));
       if (synchronousCustomElements) {
         CustomElementRegistry::Upgrade(*aResult, definition, rv);

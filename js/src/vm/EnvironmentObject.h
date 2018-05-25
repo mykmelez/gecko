@@ -1165,6 +1165,8 @@ CreateObjectsForEnvironmentChain(JSContext* cx, AutoObjectVector& chain,
                                  HandleObject terminatingEnv,
                                  MutableHandleObject envObj);
 
+ModuleObject* GetModuleObjectForScript(JSScript* script);
+
 ModuleEnvironmentObject* GetModuleEnvironmentForScript(JSScript* script);
 
 MOZ_MUST_USE bool
@@ -1208,13 +1210,5 @@ AnalyzeEntrainedVariables(JSContext* cx, HandleScript script);
 #endif
 
 } // namespace js
-
-namespace JS {
-
-template <>
-struct DeletePolicy<js::DebugEnvironments> : public js::GCManagedDeletePolicy<js::DebugEnvironments>
-{};
-
-} // namespace JS
 
 #endif /* vm_EnvironmentObject_h */

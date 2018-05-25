@@ -13,6 +13,7 @@ import org.mozilla.geckoview.GeckoRuntimeSettings;
 import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.test.rdp.Actor;
+import org.mozilla.geckoview.test.rdp.Promise;
 import org.mozilla.geckoview.test.rdp.RDPConnection;
 import org.mozilla.geckoview.test.rdp.Tab;
 import org.mozilla.geckoview.test.util.Callbacks;
@@ -301,6 +302,69 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
         }
     }
 
+    public static class RejectedPromiseException extends RuntimeException {
+        private final Object mReason;
+
+        /* package */ RejectedPromiseException(final Object reason) {
+            super(String.valueOf(reason));
+            mReason = reason;
+        }
+
+        public Object getReason() {
+            return mReason;
+        }
+    }
+
+    public static class PromiseWrapper {
+        private final Promise mPromise;
+        private final long mTimeoutMillis;
+
+        /* package */ PromiseWrapper(final @NonNull Promise promise, final long timeoutMillis) {
+            mPromise = promise;
+            mTimeoutMillis = timeoutMillis;
+        }
+
+        @Override
+        public boolean equals(final Object o) {
+            return (o instanceof PromiseWrapper) && mPromise.equals(((PromiseWrapper) o).mPromise);
+        }
+
+        @Override
+        public int hashCode() {
+            return mPromise.hashCode();
+        }
+
+        @Override
+        public String toString() {
+            return mPromise.toString();
+        }
+
+        /**
+         * Return whether this promise is pending.
+         *
+         * @return True if this promise is pending.
+         */
+        public boolean isPending() {
+            return mPromise.isPending();
+        }
+
+        /**
+         * Wait for this promise to settle. If the promise is fulfilled, return its value.
+         * If the promise is rejected, throw an exception containing the reason.
+         *
+         * @return Fulfilled value of the promise.
+         */
+        public Object getValue() {
+            while (mPromise.isPending()) {
+                loopUntilIdle(mTimeoutMillis);
+            }
+            if (mPromise.isRejected()) {
+                throw new RejectedPromiseException(mPromise.getReason());
+            }
+            return mPromise.getValue();
+        }
+    }
+
     public static class CallRequirement {
         public final boolean allowed;
         public final int count;
@@ -507,10 +571,17 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
                     } catch (final NoSuchMethodException e) {
                         throw new RuntimeException(e);
                     }
+                    final Pair<GeckoSession, Method> pair = new Pair<>(session, method);
                     final MethodCall call = new MethodCall(
                             session, callbackMethod,
                             getAssertCalled(callbackMethod, callback), callback);
-                    mDelegates.put(new Pair<>(session, method), call);
+                    // It's unclear if we should assert the call count if we replace an existing
+                    // delegate half way through. Until that is resolved, forbid replacing an
+                    // existing delegate during a test. If you are thinking about changing this
+                    // behavior, first see if #delegateDuringNextWait fits your needs.
+                    assertThat("Cannot replace an existing delegate",
+                               mDelegates, not(hasKey(pair)));
+                    mDelegates.put(pair, call);
                 }
             }
         }
@@ -1039,7 +1110,6 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
                 sRDPConnection.setTimeout(mTimeoutMillis);
             }
             final Tab tab = sRDPConnection.getMostRecentTab();
-            tab.attach();
             mRDPTabs.put(session, tab);
         }
     }
@@ -1085,6 +1155,7 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
     protected void cleanupSession(final GeckoSession session) {
         final Tab tab = (mRDPTabs != null) ? mRDPTabs.get(session) : null;
         if (tab != null) {
+            tab.getPromises().detach();
             tab.detach();
             mRDPTabs.remove(session);
         }
@@ -1421,7 +1492,8 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
         }
 
         boolean calledAny = false;
-        int index = mLastWaitStart = mLastWaitEnd;
+        int index = mLastWaitEnd;
+        beforeWait();
 
         while (!calledAny || !methodCalls.isEmpty()) {
             while (index >= mCallRecords.size()) {
@@ -1444,7 +1516,15 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
             }
         }
 
-        mLastWaitEnd = index;
+        afterWait(index);
+    }
+
+    protected void beforeWait() {
+        mLastWaitStart = mLastWaitEnd;
+    }
+
+    protected void afterWait(final int endCallIndex) {
+        mLastWaitEnd = endCallIndex;
         mWaitScopeDelegates.clearAndAssert();
     }
 
@@ -1733,6 +1813,7 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
      * @param js JavaScript expression.
      * @return Result of evaluating the expression.
      * @see #evaluateChromeJS
+     * @see #waitForJS
      */
     public Object evaluateJS(final @NonNull GeckoSession session, final @NonNull String js) {
         assertThat("Must enable RDP using @WithDevToolsAPI",
@@ -1751,18 +1832,21 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
      * @param js JavaScript expression.
      * @return Result of evaluating the expression.
      * @see #evaluateJS
+     * @see #waitForChromeJS
      */
     public Object evaluateChromeJS(final @NonNull String js) {
         assertThat("Must enable RDP using @WithDevToolsAPI",
                    mWithDevTools, equalTo(true));
+        ensureChromeProcess();
+        return evaluateJS(mRDPChromeProcess, js);
+    }
 
+    private void ensureChromeProcess() {
         if (mRDPChromeProcess == null) {
             mRDPChromeProcess = sRDPConnection.getChromeProcess();
             assertThat("Should have chrome process object",
                        mRDPChromeProcess, notNullValue());
-            mRDPChromeProcess.attach();
         }
-        return evaluateJS(mRDPChromeProcess, js);
     }
 
     private Object evaluateJS(final @NonNull Tab tab, final @NonNull String js) {
@@ -1770,7 +1854,72 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
         while (!reply.hasResult()) {
             loopUntilIdle(mTimeoutMillis);
         }
-        return reply.get();
+
+        final Object result = reply.get();
+        if (result instanceof Promise) {
+            // Map the static Promise into a live Promise. In order to perform the mapping, we set
+            // a tag on the static Promise, fetch a list of live Promises, and see which live
+            // Promise has the same tag on it.
+            final String tag = String.valueOf(result.hashCode());
+            tab.getConsole().evaluateJS("$_.tag = " + JSONObject.quote(tag) + ", $_");
+
+            final Promise[] promises = tab.getPromises().listPromises();
+            for (final Promise promise : promises) {
+                if (tag.equals(promise.getProperty("tag"))) {
+                    return new PromiseWrapper(promise, mTimeoutMillis);
+                }
+            }
+            throw new AssertionError("Cannot find Promise");
+        }
+        return result;
+    }
+
+    /**
+     * Evaluate a JavaScript expression and return the result, similar to {@link #evaluateJS}.
+     * In addition, treat the evaluation as a wait event, which will affect other calls such as
+     * {@link #forCallbacksDuringWait}. If the result is a Promise, wait on the Promise to settle
+     * and return or throw based on the outcome.
+     *
+     * @param session Session containing the target page.
+     * @param js JavaScript expression.
+     * @return Result of the expression or value of the resolved Promise.
+     * @see #evaluateJS
+     * @see #waitForChromeJS
+     */
+    public @Nullable Object waitForJS(final @NonNull GeckoSession session, final @NonNull String js) {
+        try {
+            beforeWait();
+            return resolvePromise(evaluateJS(session, js));
+        } finally {
+            afterWait(mCallRecords.size());
+        }
+    }
+
+    /**
+     * Evaluate a JavaScript expression in the context of a chrome window and return the result,
+     * similar to {@link #evaluateChromeJS}. In addition, treat the evaluation as a wait event,
+     * which will affect other calls such as {@link #forCallbacksDuringWait}. If the result is a
+     * Promise, wait on the Promise to settle and return or throw based on the outcome.
+     *
+     * @param js JavaScript expression.
+     * @return Result of the expression or value of the resolved Promise.
+     * @see #evaluateChromeJS
+     * @see #waitForJS
+     */
+    public @Nullable Object waitForChromeJS(final @NonNull String js) {
+        try {
+            beforeWait();
+            return resolvePromise(evaluateChromeJS(js));
+        } finally {
+            afterWait(mCallRecords.size());
+        }
+    }
+
+    private @Nullable Object resolvePromise(final @Nullable Object result) {
+        if (result instanceof PromiseWrapper) {
+            return ((PromiseWrapper) result).getValue();
+        }
+        return result;
     }
 
     /**
@@ -1822,5 +1971,17 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
         assertThat("Must enable RDP using @WithDevToolsAPI",
                    mWithDevTools, equalTo(true));
         mWaitScopeDelegates.setPrefs(prefs);
+    }
+
+    /**
+     * Force cycle/garbage collection in the content to clean up previous resources. RDP must
+     * be enabled first using the {@link WithDevToolsAPI} annotation.
+     */
+    public void forceGarbageCollection() {
+        assertThat("Must enable RDP using @WithDevToolsAPI",
+                   mWithDevTools, equalTo(true));
+        ensureChromeProcess();
+        mRDPChromeProcess.getMemory().forceCycleCollection();
+        mRDPChromeProcess.getMemory().forceGarbageCollection();
     }
 }

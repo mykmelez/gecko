@@ -1813,12 +1813,6 @@ CallSelfHostedNonGenericMethod(JSContext* cx, const CallArgs& args)
     MOZ_ASSERT(args.length() > 0);
     RootedPropertyName name(cx, args[args.length() - 1].toString()->asAtom().asPropertyName());
 
-    RootedValue selfHostedFun(cx);
-    if (!GlobalObject::getIntrinsicValue(cx, cx->global(), name, &selfHostedFun))
-        return false;
-
-    MOZ_ASSERT(selfHostedFun.toObject().is<JSFunction>());
-
     InvokeArgs args2(cx);
     if (!args2.init(cx, args.length() - 1))
         return false;
@@ -1826,19 +1820,21 @@ CallSelfHostedNonGenericMethod(JSContext* cx, const CallArgs& args)
     for (size_t i = 0; i < args.length() - 1; i++)
         args2[i].set(args[i]);
 
-    return js::Call(cx, selfHostedFun, args.thisv(), args2, args.rval());
+    return CallSelfHostedFunction(cx, name, args.thisv(), args2, args.rval());
 }
 
+#ifdef DEBUG
 bool
 js::CallSelfHostedFunction(JSContext* cx, const char* name, HandleValue thisv,
                            const AnyInvokeArgs& args, MutableHandleValue rval)
 {
-    RootedAtom funAtom(cx, Atomize(cx, name, strlen(name)));
+    JSAtom* funAtom = Atomize(cx, name, strlen(name));
     if (!funAtom)
         return false;
     RootedPropertyName funName(cx, funAtom->asPropertyName());
     return CallSelfHostedFunction(cx, funName, thisv, args, rval);
 }
+#endif
 
 bool
 js::CallSelfHostedFunction(JSContext* cx, HandlePropertyName name, HandleValue thisv,
@@ -1999,7 +1995,7 @@ intrinsic_AddContentTelemetry(JSContext* cx, unsigned argc, Value* vp)
     MOZ_ASSERT(id < JS_TELEMETRY_END);
     MOZ_ASSERT(id >= 0);
 
-    if (!cx->compartment()->isProbablySystemCode())
+    if (!cx->realm()->isProbablySystemCode())
         cx->runtime()->addTelemetry(id, args[1].toInt32());
 
     args.rval().setUndefined();
@@ -2018,7 +2014,7 @@ intrinsic_WarnDeprecatedStringMethod(JSContext* cx, unsigned argc, Value* vp)
     MOZ_ASSERT(id < STRING_GENERICS_METHODS_LIMIT);
 
     uint32_t mask = (1 << id);
-    if (!(cx->compartment()->warnedAboutStringGenericsMethods & mask)) {
+    if (!(cx->realm()->warnedAboutStringGenericsMethods & mask)) {
         JSFlatString* name = args[1].toString()->ensureFlat(cx);
         if (!name)
             return false;
@@ -2033,7 +2029,7 @@ intrinsic_WarnDeprecatedStringMethod(JSContext* cx, unsigned argc, Value* vp)
         {
             return false;
         }
-        cx->compartment()->warnedAboutStringGenericsMethods |= mask;
+        cx->realm()->warnedAboutStringGenericsMethods |= mask;
     }
 
     args.rval().setUndefined();
@@ -2146,25 +2142,26 @@ intrinsic_HostResolveImportedModule(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     MOZ_ASSERT(args.length() == 2);
-    MOZ_ASSERT(args[0].toObject().is<ModuleObject>());
-    MOZ_ASSERT(args[1].isString());
+    RootedModuleObject module(cx, &args[0].toObject().as<ModuleObject>());
+    RootedString specifier(cx, args[1].toString());
 
-    RootedFunction moduleResolveHook(cx, cx->global()->moduleResolveHook());
+    JS::ModuleResolveHook moduleResolveHook = cx->runtime()->moduleResolveHook;
     if (!moduleResolveHook) {
         JS_ReportErrorASCII(cx, "Module resolve hook not set");
         return false;
     }
 
-    RootedValue result(cx);
-    if (!JS_CallFunction(cx, nullptr, moduleResolveHook, args, &result))
+    RootedObject result(cx);
+    result = moduleResolveHook(cx, module, specifier);
+    if (!result)
         return false;
 
-    if (!result.isObject() || !result.toObject().is<ModuleObject>()) {
+    if (!result->is<ModuleObject>()) {
         JS_ReportErrorASCII(cx, "Module resolve hook did not return Module object");
         return false;
     }
 
-    args.rval().set(result);
+    args.rval().setObject(*result);
     return true;
 }
 
@@ -2788,15 +2785,17 @@ GlobalObject*
 JSRuntime::createSelfHostingGlobal(JSContext* cx)
 {
     MOZ_ASSERT(!cx->isExceptionPending());
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm());
 
-    JS::CompartmentOptions options;
+    JS::RealmOptions options;
     options.creationOptions().setNewZone();
     options.behaviors().setDiscardSource(true);
 
     JSCompartment* compartment = NewCompartment(cx, nullptr, options);
     if (!compartment)
         return nullptr;
+
+    JS::Realm* realm = JS::GetRealmForCompartment(compartment);
 
     static const ClassOps shgClassOps = {
         nullptr, nullptr, nullptr, nullptr,
@@ -2810,14 +2809,14 @@ JSRuntime::createSelfHostingGlobal(JSContext* cx)
         &shgClassOps
     };
 
-    AutoCompartmentUnchecked ac(cx, compartment);
+    AutoRealmUnchecked ar(cx, realm);
     Rooted<GlobalObject*> shg(cx, GlobalObject::createInternal(cx, &shgClass));
     if (!shg)
         return nullptr;
 
     cx->runtime()->selfHostingGlobal_ = shg;
-    compartment->isSelfHosting = true;
-    compartment->setIsSystem(true);
+    realm->setIsSelfHostingRealm();
+    realm->setIsSystem(true);
 
     if (!GlobalObject::initSelfHostingBuiltins(cx, shg, intrinsic_functions))
         return nullptr;
@@ -2937,7 +2936,7 @@ JSRuntime::initSelfHosting(JSContext* cx)
     if (!shg)
         return false;
 
-    JSAutoCompartment ac(cx, shg);
+    JSAutoRealm ar(cx, shg);
 
     /*
      * Set a temporary error reporter printing to stderr because it is too
@@ -2985,12 +2984,6 @@ JSRuntime::traceSelfHostingGlobal(JSTracer* trc)
 {
     if (selfHostingGlobal_ && !parentRuntime)
         TraceRoot(trc, const_cast<NativeObject**>(&selfHostingGlobal_.ref()), "self-hosting global");
-}
-
-bool
-JSRuntime::isSelfHostingCompartment(JSCompartment* comp) const
-{
-    return selfHostingGlobal_->compartment() == comp;
 }
 
 bool
@@ -3333,18 +3326,6 @@ JSRuntime::assertSelfHostedFunctionHasCanonicalName(JSContext* cx, HandlePropert
     MOZ_ASSERT(selfHostedFun);
     MOZ_ASSERT(selfHostedFun->getExtendedSlot(HAS_SELFHOSTED_CANONICAL_NAME_SLOT).toBoolean());
 #endif
-}
-
-JSFunction*
-js::SelfHostedFunction(JSContext* cx, HandlePropertyName propName)
-{
-    RootedValue func(cx);
-    if (!GlobalObject::getIntrinsicValue(cx, cx->global(), propName, &func))
-        return nullptr;
-
-    MOZ_ASSERT(func.isObject());
-    MOZ_ASSERT(func.toObject().is<JSFunction>());
-    return &func.toObject().as<JSFunction>();
 }
 
 bool

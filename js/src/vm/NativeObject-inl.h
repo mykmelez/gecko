@@ -33,7 +33,7 @@ inline uint8_t*
 NativeObject::fixedData(size_t nslots) const
 {
     MOZ_ASSERT(ClassCanHaveFixedData(getClass()));
-    MOZ_ASSERT(nslots == numFixedSlots() + (hasPrivate() ? 1 : 0));
+    MOZ_ASSERT(nslots == numFixedSlotsMaybeForwarded() + (hasPrivate() ? 1 : 0));
     return reinterpret_cast<uint8_t*>(&fixedSlots()[nslots]);
 }
 
@@ -553,11 +553,11 @@ NativeObject::create(JSContext* cx, js::gc::AllocKind kind, js::gc::InitialHeap 
         nobj->initializeSlotRange(0, span);
 
     if (clasp->shouldDelayMetadataBuilder())
-        cx->compartment()->setObjectPendingMetadata(cx, nobj);
+        cx->realm()->setObjectPendingMetadata(cx, nobj);
     else
         nobj = SetNewObjectMetadata(cx, nobj);
 
-    js::gc::TraceCreateObject(nobj);
+    js::gc::gcTracer.traceCreateObject(nobj);
 
     return nobj;
 }

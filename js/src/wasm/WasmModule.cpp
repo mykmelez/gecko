@@ -594,7 +594,7 @@ wasm::DeserializeModule(PRFileDesc* bytecodeFile, PRFileDesc* maybeCompiledFile,
         return nullptr;
 
     // The true answer to whether shared memory is enabled is provided by
-    // cx->compartment()->creationOptions().getSharedMemoryAndAtomicsEnabled()
+    // cx->realm()->creationOptions().getSharedMemoryAndAtomicsEnabled()
     // where cx is the context that originated the call that caused this
     // deserialization attempt to happen.  We don't have that context here, so
     // we assume that shared memory is enabled; we will catch a wrong assumption
@@ -887,7 +887,7 @@ CheckLimits(JSContext* cx, uint32_t declaredMin, const Maybe<uint32_t>& declared
 static bool
 CheckSharing(JSContext* cx, bool declaredShared, bool isShared)
 {
-    if (isShared && !cx->compartment()->creationOptions().getSharedMemoryAndAtomicsEnabled()) {
+    if (isShared && !cx->realm()->creationOptions().getSharedMemoryAndAtomicsEnabled()) {
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_WASM_NO_SHMEM_LINK);
         return false;
     }
@@ -1281,13 +1281,13 @@ Module::instantiate(JSContext* cx,
     // To support viewing the source of an instance (Instance::createText), the
     // instance must hold onto a ref of the bytecode (keeping it alive). This
     // wastes memory for most users, so we try to only save the source when a
-    // developer actually cares: when the compartment is debuggable (which is
-    // true when the web console is open), has code compiled with debug flag
+    // developer actually cares: when the realm is debuggable (which is true
+    // when the web console is open), has code compiled with debug flag
     // enabled or a names section is present (since this going to be stripped
     // for non-developer builds).
 
     const ShareableBytes* maybeBytecode = nullptr;
-    if (cx->compartment()->isDebuggee() || metadata().debugEnabled ||
+    if (cx->realm()->isDebuggee() || metadata().debugEnabled ||
         !metadata().funcNames.empty())
     {
         maybeBytecode = bytecode_.get();
@@ -1297,7 +1297,7 @@ Module::instantiate(JSContext* cx,
     // provides the lazily created source text for the program, even if that
     // text is a placeholder message when debugging is not enabled.
 
-    bool binarySource = cx->compartment()->debuggerObservesBinarySource();
+    bool binarySource = cx->realm()->debuggerObservesBinarySource();
     auto debug = cx->make_unique<DebugState>(code, maybeBytecode, binarySource);
     if (!debug)
         return false;
@@ -1322,12 +1322,12 @@ Module::instantiate(JSContext* cx,
         return false;
     }
 
-    // Register the instance with the JSCompartment so that it can find out
-    // about global events like profiling being enabled in the compartment.
-    // Registration does not require a fully-initialized instance and must
-    // precede initSegments as the final pre-requisite for a live instance.
+    // Register the instance with the Realm so that it can find out about global
+    // events like profiling being enabled in the realm. Registration does not
+    // require a fully-initialized instance and must precede initSegments as the
+    // final pre-requisite for a live instance.
 
-    if (!cx->compartment()->wasm.registerInstance(cx, instance))
+    if (!cx->realm()->wasm.registerInstance(cx, instance))
         return false;
 
     // Perform initialization as the final step after the instance is fully

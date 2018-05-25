@@ -13,6 +13,8 @@
 #include "mozilla/PodOperations.h"
 #include "mozilla/Sprintf.h"
 
+#include <new>
+
 #include "jsapi.h"
 #include "builtin/String.h"
 
@@ -21,7 +23,7 @@
 #include "jit/CompileInfo.h"
 #include "jit/Ion.h"
 #include "jit/IonAnalysis.h"
-#include "jit/JitCompartment.h"
+#include "jit/JitRealm.h"
 #include "jit/OptimizationTracking.h"
 #include "js/MemoryMetrics.h"
 #include "vm/HelperThreads.h"
@@ -111,6 +113,10 @@ TypeSet::NonObjectTypeString(TypeSet::Type type)
             return "string";
           case JSVAL_TYPE_SYMBOL:
             return "symbol";
+#ifdef ENABLE_BIGINT
+          case JSVAL_TYPE_BIGINT:
+            return "BigInt";
+#endif
           case JSVAL_TYPE_MAGIC:
             return "lazyargs";
           default:
@@ -783,6 +789,10 @@ TypeSet::print(FILE* fp)
         fprintf(fp, " string");
     if (flags & TYPE_FLAG_SYMBOL)
         fprintf(fp, " symbol");
+#ifdef ENABLE_BIGINT
+    if (flags & TYPE_FLAG_BIGINT)
+        fprintf(fp, " BigInt");
+#endif
     if (flags & TYPE_FLAG_LAZYARGS)
         fprintf(fp, " lazyargs");
 
@@ -872,10 +882,8 @@ TypeSet::IsTypeAboutToBeFinalized(TypeSet::Type* v)
 }
 
 bool
-TypeSet::clone(LifoAlloc* alloc, TemporaryTypeSet* result) const
+TypeSet::cloneIntoUninitialized(LifoAlloc* alloc, TemporaryTypeSet* result) const
 {
-    MOZ_ASSERT(result->empty());
-
     unsigned objectCount = baseObjectCount();
     unsigned capacity = (objectCount >= 2) ? TypeHashSet::Capacity(objectCount) : 0;
 
@@ -890,15 +898,15 @@ TypeSet::clone(LifoAlloc* alloc, TemporaryTypeSet* result) const
         PodCopy(newSet - 1, objectSet - 1, capacity + 1);
     }
 
-    new(result) TemporaryTypeSet(flags, capacity ? newSet : objectSet);
+    new (result) TemporaryTypeSet(flags, capacity ? newSet : objectSet);
     return true;
 }
 
 TemporaryTypeSet*
 TypeSet::clone(LifoAlloc* alloc) const
 {
-    TemporaryTypeSet* res = alloc->new_<TemporaryTypeSet>();
-    if (!res || !clone(alloc, res))
+    TemporaryTypeSet* res = alloc->pod_malloc<TemporaryTypeSet>();
+    if (!res || !cloneIntoUninitialized(alloc, res))
         return nullptr;
     return res;
 }
@@ -1167,10 +1175,9 @@ TypeScript::FreezeTypeSets(CompilerConstraintList* constraints, JSScript* script
     TemporaryTypeSet* types = alloc->newArrayUninitialized<TemporaryTypeSet>(count);
     if (!types)
         return false;
-    PodZero(types, count);
 
     for (size_t i = 0; i < count; i++) {
-        if (!existing[i].clone(alloc, &types[i]))
+        if (!existing[i].cloneIntoUninitialized(alloc, &types[i]))
             return false;
     }
 
@@ -2982,6 +2989,8 @@ ObjectGroup::markUnknown(const AutoSweepObjectGroup& sweep, JSContext* cx)
         }
     }
 
+    clearProperties(sweep);
+
     if (ObjectGroup* unboxedGroup = maybeOriginalUnboxedGroup())
         MarkObjectGroupUnknownProperties(cx, unboxedGroup);
     if (maybeUnboxedLayout(sweep) && maybeUnboxedLayout(sweep)->nativeGroup())
@@ -3546,10 +3555,10 @@ PreliminaryObjectArray::sweep()
             // Object.prototype group. This is done to ensure JSObject::finalize
             // sees a NativeObject Class even if we change the current group's
             // Class to one of the unboxed object classes in the meantime. If
-            // the compartment's global is dead, we don't do anything as the
-            // group's Class is not going to change in that case.
+            // the realm's global is dead, we don't do anything as the group's
+            // Class is not going to change in that case.
             JSObject* obj = *ptr;
-            GlobalObject* global = obj->compartment()->unsafeUnbarrieredMaybeGlobal();
+            GlobalObject* global = obj->realm()->unsafeUnbarrieredMaybeGlobal();
             if (global && !obj->isSingleton()) {
                 JSObject* objectProto = global->maybeGetPrototype(JSProto_Object);
                 obj->setGroup(objectProto->groupRaw());
@@ -3696,7 +3705,7 @@ TypeNewScript::make(JSContext* cx, ObjectGroup* group, JSFunction* fun)
 
     group->setNewScript(newScript.forget());
 
-    gc::TraceTypeNewScript(group);
+    gc::gcTracer.traceTypeNewScript(group);
     return true;
 }
 
@@ -4360,6 +4369,11 @@ ConstraintTypeSet::sweep(const AutoSweepBase& sweep, Zone* zone,
 inline void
 ObjectGroup::clearProperties(const AutoSweepObjectGroup& sweep)
 {
+    // We're about to remove edges from the group to property ids. Incremental
+    // GC should know about these edges.
+    if (zone()->needsIncrementalBarrier())
+        traceChildren(zone()->barrierTracer());
+
     setBasePropertyCount(sweep, 0);
     propertySet = nullptr;
 }
@@ -4547,7 +4561,7 @@ JSScript::sweepTypes(const js::AutoSweepTypeScript& sweep, AutoClearTypeInferenc
 
         // Freeze constraints on stack type sets need to be regenerated the
         // next time the script is analyzed.
-        hasFreezeConstraints_ = false;
+        bitFields_.hasFreezeConstraints_ = false;
 
         return;
     }
@@ -4562,7 +4576,7 @@ JSScript::sweepTypes(const js::AutoSweepTypeScript& sweep, AutoClearTypeInferenc
     if (oom->hadOOM()) {
         // It's possible we OOM'd while copying freeze constraints, so they
         // need to be regenerated.
-        hasFreezeConstraints_ = false;
+        bitFields_.hasFreezeConstraints_ = false;
     }
 }
 

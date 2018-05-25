@@ -468,7 +468,7 @@ GetLimits(JSContext* cx, HandleObject obj, uint32_t maxInitial, uint32_t maxMaxi
                     return false;
                 }
 
-                if (!cx->compartment()->creationOptions().getSharedMemoryAndAtomicsEnabled()) {
+                if (!cx->realm()->creationOptions().getSharedMemoryAndAtomicsEnabled()) {
                     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                                               JSMSG_WASM_NO_SHMEM_LINK);
                     return false;
@@ -2196,13 +2196,22 @@ WasmGlobalObject::construct(JSContext* cx, unsigned argc, Value* vp)
 
     bool isMutable = ToBoolean(mutableVal);
 
-    RootedValue valueVal(cx);
-    if (!JS_GetProperty(cx, obj, "value", &valueVal))
-        return false;
+    // Extract the initial value, or provide a suitable default.
+    // Guard against control flow mistakes below failing to set |globalVal|.
+    Val globalVal = Val(uint32_t(0));
+    if (args.length() >= 2) {
+        RootedValue valueVal(cx, args.get(1));
 
-    Val globalVal;
-    if (!ToWebAssemblyValue(cx, globalType, valueVal, &globalVal))
-        return false;
+        if (!ToWebAssemblyValue(cx, globalType, valueVal, &globalVal))
+            return false;
+    } else {
+        switch (globalType) {
+          case ValType::I32: /* set above */ break;
+          case ValType::F32: globalVal = Val(float(0.0));  break;
+          case ValType::F64: globalVal = Val(double(0.0)); break;
+          default: MOZ_CRASH();
+        }
+    }
 
     WasmGlobalObject* global = WasmGlobalObject::create(cx, globalVal, isMutable);
     if (!global)

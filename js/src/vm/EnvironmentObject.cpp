@@ -2510,7 +2510,7 @@ DebugEnvironments::checkHashTablesAfterMovingGC()
 static bool
 CanUseDebugEnvironmentMaps(JSContext* cx)
 {
-    return cx->compartment()->isDebuggee();
+    return cx->realm()->isDebuggee();
 }
 
 DebugEnvironments*
@@ -2518,7 +2518,7 @@ DebugEnvironments::ensureCompartmentData(JSContext* cx)
 {
     JSCompartment* c = cx->compartment();
     if (c->debugEnvs)
-        return c->debugEnvs;
+        return c->debugEnvs.get();
 
     auto debugEnvs = cx->make_unique<DebugEnvironments>(cx, cx->zone());
     if (!debugEnvs || !debugEnvs->init()) {
@@ -2526,14 +2526,14 @@ DebugEnvironments::ensureCompartmentData(JSContext* cx)
         return nullptr;
     }
 
-    c->debugEnvs = debugEnvs.release();
-    return c->debugEnvs;
+    c->debugEnvs = Move(debugEnvs);
+    return c->debugEnvs.get();
 }
 
 /* static */ DebugEnvironmentProxy*
 DebugEnvironments::hasDebugEnvironment(JSContext* cx, EnvironmentObject& env)
 {
-    DebugEnvironments* envs = env.compartment()->debugEnvs;
+    DebugEnvironments* envs = env.compartment()->debugEnvs.get();
     if (!envs)
         return nullptr;
 
@@ -2567,7 +2567,7 @@ DebugEnvironments::hasDebugEnvironment(JSContext* cx, const EnvironmentIter& ei)
 {
     MOZ_ASSERT(!ei.hasSyntacticEnvironment());
 
-    DebugEnvironments* envs = cx->compartment()->debugEnvs;
+    DebugEnvironments* envs = cx->compartment()->debugEnvs.get();
     if (!envs)
         return nullptr;
 
@@ -2717,7 +2717,7 @@ DebugEnvironments::onPopCall(JSContext* cx, AbstractFramePtr frame)
 {
     assertSameCompartment(cx, frame);
 
-    DebugEnvironments* envs = cx->compartment()->debugEnvs;
+    DebugEnvironments* envs = cx->compartment()->debugEnvs.get();
     if (!envs)
         return;
 
@@ -2759,7 +2759,7 @@ DebugEnvironments::onPopLexical(JSContext* cx, AbstractFramePtr frame, jsbytecod
 {
     assertSameCompartment(cx, frame);
 
-    DebugEnvironments* envs = cx->compartment()->debugEnvs;
+    DebugEnvironments* envs = cx->compartment()->debugEnvs.get();
     if (!envs)
         return;
 
@@ -2771,7 +2771,7 @@ template <typename Environment, typename Scope>
 void
 DebugEnvironments::onPopGeneric(JSContext* cx, const EnvironmentIter& ei)
 {
-    DebugEnvironments* envs = cx->compartment()->debugEnvs;
+    DebugEnvironments* envs = cx->compartment()->debugEnvs.get();
     if (!envs)
         return;
 
@@ -2807,7 +2807,7 @@ DebugEnvironments::onPopVar(JSContext* cx, AbstractFramePtr frame, jsbytecode* p
 {
     assertSameCompartment(cx, frame);
 
-    DebugEnvironments* envs = cx->compartment()->debugEnvs;
+    DebugEnvironments* envs = cx->compartment()->debugEnvs.get();
     if (!envs)
         return;
 
@@ -2827,14 +2827,14 @@ DebugEnvironments::onPopVar(JSContext* cx, const EnvironmentIter& ei)
 void
 DebugEnvironments::onPopWith(AbstractFramePtr frame)
 {
-    if (DebugEnvironments* envs = frame.compartment()->debugEnvs)
+    if (DebugEnvironments* envs = frame.compartment()->debugEnvs.get())
         envs->liveEnvs.remove(&frame.environmentChain()->as<WithEnvironmentObject>());
 }
 
 void
 DebugEnvironments::onCompartmentUnsetIsDebuggee(JSCompartment* c)
 {
-    if (DebugEnvironments* envs = c->debugEnvs) {
+    if (DebugEnvironments* envs = c->debugEnvs.get()) {
         envs->proxiedEnvs.clear();
         envs->missingEnvs.clear();
         envs->liveEnvs.clear();
@@ -2893,7 +2893,7 @@ DebugEnvironments::updateLiveEnvironments(JSContext* cx)
 
         if (frame.prevUpToDate())
             return true;
-        MOZ_ASSERT(frame.environmentChain()->compartment()->isDebuggee());
+        MOZ_ASSERT(frame.environmentChain()->realm()->isDebuggee());
         frame.setPrevUpToDate();
     }
 
@@ -2903,7 +2903,7 @@ DebugEnvironments::updateLiveEnvironments(JSContext* cx)
 LiveEnvironmentVal*
 DebugEnvironments::hasLiveEnvironment(EnvironmentObject& env)
 {
-    DebugEnvironments* envs = env.compartment()->debugEnvs;
+    DebugEnvironments* envs = env.compartment()->debugEnvs.get();
     if (!envs)
         return nullptr;
 
@@ -2942,7 +2942,7 @@ DebugEnvironments::unsetPrevUpToDateUntil(JSContext* cx, AbstractFramePtr until)
 /* static */ void
 DebugEnvironments::forwardLiveFrame(JSContext* cx, AbstractFramePtr from, AbstractFramePtr to)
 {
-    DebugEnvironments* envs = cx->compartment()->debugEnvs;
+    DebugEnvironments* envs = cx->compartment()->debugEnvs.get();
     if (!envs)
         return;
 
@@ -3215,9 +3215,19 @@ WithEnvironmentObject::scope() const
 ModuleEnvironmentObject*
 js::GetModuleEnvironmentForScript(JSScript* script)
 {
+    ModuleObject* module = GetModuleObjectForScript(script);
+    if (!module)
+        return nullptr;
+
+    return module->environment();
+}
+
+ModuleObject*
+js::GetModuleObjectForScript(JSScript* script)
+{
     for (ScopeIter si(script); si; si++) {
         if (si.kind() == ScopeKind::Module)
-            return si.scope()->as<ModuleScope>().module()->environment();
+            return si.scope()->as<ModuleScope>().module();
     }
     return nullptr;
 }
@@ -3316,7 +3326,7 @@ js::CheckLexicalNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> le
     const char* redeclKind = nullptr;
     RootedId id(cx, NameToId(name));
     RootedShape shape(cx);
-    if (varObj->is<GlobalObject>() && varObj->compartment()->isInVarNames(name)) {
+    if (varObj->is<GlobalObject>() && varObj->realm()->isInVarNames(name)) {
         // ES 15.1.11 step 5.a
         redeclKind = "var";
     } else if ((shape = lexicalEnv->lookup(cx, name))) {

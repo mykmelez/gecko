@@ -258,6 +258,8 @@
 #include "mozilla/dom/MenuBoxObject.h"
 #include "mozilla/dom/ScrollBoxObject.h"
 #include "mozilla/dom/TreeBoxObject.h"
+#include "nsIXULWindow.h"
+#include "nsIDocShellTreeOwner.h"
 #endif
 #include "nsIPresShellInlines.h"
 
@@ -1492,7 +1494,6 @@ nsIDocument::nsIDocument()
     mUseCounters(0),
     mChildDocumentUseCounters(0),
     mNotifiedPageForUseCounter(0),
-    mIncCounters(),
     mUserHasInteracted(false),
     mUserHasActivatedInteraction(false),
     mStackRefCnt(0),
@@ -1509,9 +1510,6 @@ nsIDocument::nsIDocument()
     mIgnoreOpensDuringUnloadCounter(0)
 {
   SetIsInDocument();
-  for (auto& cnt : mIncCounters) {
-    cnt = 0;
-  }
 }
 
 nsDocument::nsDocument(const char* aContentType)
@@ -2624,7 +2622,7 @@ nsDocument::IsShadowDOMEnabled(JSContext* aCx, JSObject* aObject)
 {
   JS::Rooted<JSObject*> obj(aCx, aObject);
 
-  JSAutoCompartment ac(aCx, obj);
+  JSAutoRealm ar(aCx, obj);
   JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForObject(aCx, obj));
   nsCOMPtr<nsPIDOMWindowInner> window =
     do_QueryInterface(nsJSUtils::GetStaticScriptGlobal(global));
@@ -6554,6 +6552,13 @@ nsIDocument::SetMayStartLayout(bool aMayStartLayout)
 {
   mMayStartLayout = aMayStartLayout;
   if (MayStartLayout()) {
+    // Before starting layout, check whether we're a toplevel chrome
+    // window.  If we are, setup some state so that we don't have to restyle
+    // the whole tree after StartLayout.
+    if (nsCOMPtr<nsIXULWindow> win = GetXULWindowIfToplevelChrome()) {
+        // We're the chrome document!
+        win->BeforeStartLayout();
+    }
     ReadyState state = GetReadyStateEnum();
     if (state >= READYSTATE_INTERACTIVE) {
       // DOMContentLoaded has fired already.
@@ -7092,7 +7097,7 @@ nsIDocument::AdoptNode(nsINode& aAdoptedNode, ErrorResult& rv)
       // It's kind of irrelevant, given that we're passing aAllowWrapping =
       // false, and documents should always insist on being wrapped in an
       // canonical scope. But we try to pass something sane anyway.
-      JSAutoCompartment ac(cx, GetScopeObject()->GetGlobalJSObject());
+      JSAutoRealm ar(cx, GetScopeObject()->GetGlobalJSObject());
       JS::Rooted<JS::Value> v(cx);
       rv = nsContentUtils::WrapNative(cx, this, this, &v,
                                       /* aAllowWrapping = */ false);
@@ -7996,6 +8001,10 @@ nsIDocument::CollectDescendantDocuments(
 bool
 nsIDocument::CanSavePresentation(nsIRequest *aNewRequest)
 {
+  if (!IsBFCachingAllowed()) {
+    return false;
+  }
+
   if (EventHandlingSuppressed()) {
     return false;
   }
@@ -9647,7 +9656,7 @@ nsIDocument::GetStateObject(nsIVariant** aState)
     NS_ENSURE_TRUE(sgo, NS_ERROR_UNEXPECTED);
     JS::Rooted<JSObject*> global(cx, sgo->GetGlobalJSObject());
     NS_ENSURE_TRUE(global, NS_ERROR_UNEXPECTED);
-    JSAutoCompartment ac(cx, global);
+    JSAutoRealm ar(cx, global);
 
     mStateObjectContainer->
       DeserializeToVariant(cx, getter_AddRefs(mStateObjectCached));
@@ -11259,7 +11268,7 @@ nsIDocument::ApplyFullscreen(const FullscreenRequest& aRequest)
       break;
     }
     nsIDocument* parent = child->GetParentDocument();
-    Element* element = parent->FindContentForSubDocument(child)->AsElement();
+    Element* element = parent->FindContentForSubDocument(child);
     if (static_cast<nsDocument*>(parent)->FullScreenStackPush(element)) {
       changed.AppendElement(parent);
       child = parent;
@@ -11892,6 +11901,27 @@ nsIDocument::Evaluate(JSContext* aCx, const nsAString& aExpression,
                                     aType, aResult, rv);
 }
 
+already_AddRefed<nsIXULWindow>
+nsIDocument::GetXULWindowIfToplevelChrome() const
+{
+  nsCOMPtr<nsIDocShellTreeItem> item = GetDocShell();
+  if (!item) {
+    return nullptr;
+  }
+  nsCOMPtr<nsIDocShellTreeOwner> owner;
+  item->GetTreeOwner(getter_AddRefs(owner));
+  nsCOMPtr<nsIXULWindow> xulWin = do_GetInterface(owner);
+  if (!xulWin) {
+    return nullptr;
+  }
+  nsCOMPtr<nsIDocShell> xulWinShell;
+  xulWin->GetDocShell(getter_AddRefs(xulWinShell));
+  if (!SameCOMIdentity(xulWinShell, item)) {
+    return nullptr;
+  }
+  return xulWin.forget();
+}
+
 nsIDocument*
 nsIDocument::GetTopLevelContentDocument()
 {
@@ -12154,11 +12184,6 @@ nsIDocument::ReportUseCounters(UseCounterReportKind aKind)
         }
       }
     }
-  }
-
-  if (IsContentDocument() || IsResourceDoc()) {
-    uint16_t num = mIncCounters[eIncCounter_ScriptTag];
-    Telemetry::Accumulate(Telemetry::DOM_SCRIPT_EVAL_PER_DOCUMENT, num);
   }
 }
 

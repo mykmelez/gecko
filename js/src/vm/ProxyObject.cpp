@@ -160,12 +160,12 @@ ProxyObject::create(JSContext* cx, const Class* clasp, Handle<TaggedProto> proto
 {
     MOZ_ASSERT(clasp->isProxy());
 
-    JSCompartment* comp = cx->compartment();
+    Realm* realm = cx->realm();
     RootedObjectGroup group(cx);
     RootedShape shape(cx);
 
     // Try to look up the group and shape in the NewProxyCache.
-    if (!comp->newProxyCache.lookup(clasp, proto, group.address(), shape.address())) {
+    if (!realm->newProxyCache.lookup(clasp, proto, group.address(), shape.address())) {
         group = ObjectGroup::defaultNewGroup(cx, clasp, proto, nullptr);
         if (!group)
             return cx->alreadyReportedOOM();
@@ -174,7 +174,8 @@ ProxyObject::create(JSContext* cx, const Class* clasp, Handle<TaggedProto> proto
         if (!shape)
             return cx->alreadyReportedOOM();
 
-        comp->newProxyCache.add(group, shape);
+        MOZ_ASSERT(group->realm() == realm);
+        realm->newProxyCache.add(group, shape);
     }
 
     gc::InitialHeap heap = GetInitialHeap(newKind, clasp);
@@ -189,9 +190,9 @@ ProxyObject::create(JSContext* cx, const Class* clasp, Handle<TaggedProto> proto
     pobj->initShape(shape);
 
     MOZ_ASSERT(clasp->shouldDelayMetadataBuilder());
-    cx->compartment()->setObjectPendingMetadata(cx, pobj);
+    cx->realm()->setObjectPendingMetadata(cx, pobj);
 
-    js::gc::TraceCreateObject(pobj);
+    js::gc::gcTracer.traceCreateObject(pobj);
 
     if (newKind == SingletonObject) {
         Rooted<ProxyObject*> pobjRoot(cx, pobj);

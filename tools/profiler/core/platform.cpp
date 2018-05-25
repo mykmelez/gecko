@@ -696,7 +696,7 @@ uint32_t ActivePS::sNextGeneration = 0;
 // The mutex that guards accesses to CorePS and ActivePS.
 static PSMutex gPSMutex;
 
-Atomic<uint32_t> RacyFeatures::sActiveAndFeatures(0);
+Atomic<uint32_t, MemoryOrdering::Relaxed> RacyFeatures::sActiveAndFeatures(0);
 
 // Each live thread has a RegisteredThread, and we store a reference to it in TLS.
 // This class encapsulates that TLS.
@@ -1662,38 +1662,42 @@ StreamMetaJSCustomObject(PSLockRef aLock, SpliceableJSONWriter& aWriter,
       aWriter.StringProperty("appBuildID", string.Data());
   }
 
-  aWriter.StartObjectProperty("extensions");
-  {
+  // We should avoid collecting extension metadata for profiler while XPCOM is
+  // shutting down since it cannot create a new ExtensionPolicyService.
+  if (!gXPCOMShuttingDown) {
+    aWriter.StartObjectProperty("extensions");
     {
-      JSONSchemaWriter schema(aWriter);
-      schema.WriteField("id");
-      schema.WriteField("name");
-      schema.WriteField("baseURL");
-    }
-
-    aWriter.StartArrayProperty("data");
-    {
-      nsTArray<RefPtr<WebExtensionPolicy>> exts;
-      ExtensionPolicyService::GetSingleton().GetAll(exts);
-
-      for (auto& ext : exts) {
-        aWriter.StartArrayElement(JSONWriter::SingleLineStyle);
-
-        nsAutoString id;
-        ext->GetId(id);
-        aWriter.StringElement(NS_ConvertUTF16toUTF8(id).get());
-
-        aWriter.StringElement(NS_ConvertUTF16toUTF8(ext->Name()).get());
-
-        auto url = ext->GetURL(NS_LITERAL_STRING(""));
-        if (url.isOk()) {
-          aWriter.StringElement(NS_ConvertUTF16toUTF8(url.unwrap()).get());
-        }
-
-        aWriter.EndArray();
+      {
+        JSONSchemaWriter schema(aWriter);
+        schema.WriteField("id");
+        schema.WriteField("name");
+        schema.WriteField("baseURL");
       }
+
+      aWriter.StartArrayProperty("data");
+      {
+        nsTArray<RefPtr<WebExtensionPolicy>> exts;
+        ExtensionPolicyService::GetSingleton().GetAll(exts);
+
+        for (auto& ext : exts) {
+          aWriter.StartArrayElement(JSONWriter::SingleLineStyle);
+
+          nsAutoString id;
+          ext->GetId(id);
+          aWriter.StringElement(NS_ConvertUTF16toUTF8(id).get());
+
+          aWriter.StringElement(NS_ConvertUTF16toUTF8(ext->Name()).get());
+
+          auto url = ext->GetURL(NS_LITERAL_STRING(""));
+          if (url.isOk()) {
+            aWriter.StringElement(NS_ConvertUTF16toUTF8(url.unwrap()).get());
+          }
+
+          aWriter.EndArray();
+        }
+      }
+      aWriter.EndArray();
     }
-    aWriter.EndArray();
   }
   aWriter.EndObject();
 }
@@ -1790,7 +1794,8 @@ locked_profiler_stream_json_for_this_process(PSLockRef aLock,
      // java thread, we have to get thread id and name via JNI.
      RefPtr<ThreadInfo> threadInfo =
        new ThreadInfo("Java Main Thread", 0, false);
-     ProfiledThreadData profiledThreadData(threadInfo, nullptr);
+     ProfiledThreadData profiledThreadData(threadInfo, nullptr,
+                                           ActivePS::FeatureResponsiveness(aLock));
      profiledThreadData.StreamJSON(*javaBuffer.get(), nullptr, aWriter,
                                    CorePS::ProcessStartTime(), aSinceTime);
 
@@ -2085,7 +2090,10 @@ SamplerThread::Run()
             }
           }
 
-          profiledThreadData->GetThreadResponsiveness()->Update();
+          ThreadResponsiveness* resp = profiledThreadData->GetThreadResponsiveness();
+          if (resp) {
+            resp->Update();
+          }
 
           TimeStamp now = TimeStamp::Now();
           SuspendAndSampleAndResumeThread(lock, *registeredThread,
@@ -2265,7 +2273,8 @@ locked_register_thread(PSLockRef aLock, const char* aName, void* aStackTop)
     nsCOMPtr<nsIEventTarget> eventTarget = registeredThread->GetEventTarget();
     ProfiledThreadData* profiledThreadData =
       ActivePS::AddLiveProfiledThread(aLock, registeredThread.get(),
-        MakeUnique<ProfiledThreadData>(info, eventTarget));
+        MakeUnique<ProfiledThreadData>(info, eventTarget,
+                                       ActivePS::FeatureResponsiveness(aLock)));
 
     if (ActivePS::FeatureJS(aLock)) {
       // This StartJSSampling() call is on-thread, so we can poll manually to
@@ -2867,7 +2876,8 @@ locked_profiler_start(PSLockRef aLock, uint32_t aEntries, double aInterval,
       nsCOMPtr<nsIEventTarget> eventTarget = registeredThread->GetEventTarget();
       ProfiledThreadData* profiledThreadData =
         ActivePS::AddLiveProfiledThread(aLock, registeredThread.get(),
-          MakeUnique<ProfiledThreadData>(info, eventTarget));
+          MakeUnique<ProfiledThreadData>(info, eventTarget,
+                                         ActivePS::FeatureResponsiveness(aLock)));
       if (ActivePS::FeatureJS(aLock)) {
         registeredThread->StartJSSampling(
           ActivePS::FeatureTrackOptimizations(aLock));

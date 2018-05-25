@@ -108,6 +108,7 @@
 #include "mozilla/css/ImageLoader.h"
 #include "mozilla/layers/IAPZCTreeManager.h" // for layers::ZoomToRectBehavior
 #include "mozilla/dom/Promise.h"
+#include "mozilla/ServoBindings.h"
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/gfx/GPUProcessManager.h"
 #include "mozilla/dom/TimeoutManager.h"
@@ -2906,7 +2907,14 @@ nsDOMWindowUtils::CheckAndClearPaintedState(Element* aElement, bool* aResult)
     }
   }
 
-  *aResult = frame->CheckAndClearPaintedState();
+  while (frame) {
+    if (!frame->CheckAndClearPaintedState()) {
+      *aResult = false;
+      return NS_OK;
+    }
+    frame = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(frame);
+  }
+  *aResult = true;
   return NS_OK;
 }
 
@@ -2935,7 +2943,14 @@ nsDOMWindowUtils::CheckAndClearDisplayListState(Element* aElement, bool* aResult
     }
   }
 
-  *aResult = frame->CheckAndClearDisplayListState();
+  while (frame) {
+    if (!frame->CheckAndClearDisplayListState()) {
+      *aResult = false;
+      return NS_OK;
+    }
+    frame = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(frame);
+  }
+  *aResult = true;
   return NS_OK;
 
 }

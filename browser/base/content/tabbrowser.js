@@ -69,7 +69,7 @@ window._gBrowser = {
 
   ownerDocument: document,
 
-  closingTabsEnum: { ALL: 0, OTHER: 1, TO_END: 2 },
+  closingTabsEnum: { ALL: 0, OTHER: 1, TO_END: 2, MULTI_SELECTED: 3 },
 
   _visibleTabs: null,
 
@@ -96,6 +96,8 @@ window._gBrowser = {
   _lastFindValue: "",
 
   _contentWaitingCount: 0,
+
+  _tabLayerCache: [],
 
   tabAnimationsInProgress: 0,
 
@@ -135,6 +137,8 @@ window._gBrowser = {
   _removingTabs: [],
 
   _multiSelectedTabsMap: new WeakMap(),
+
+  _lastMultiSelectedTabRef: null,
 
   /**
    * Tab close requests are ignored if the window is closing anyway,
@@ -1619,7 +1623,7 @@ window._gBrowser = {
 
     // Change the "remote" attribute.
     let parent = aBrowser.parentNode;
-    parent.removeChild(aBrowser);
+    aBrowser.remove();
     if (aShouldBeRemote) {
       aBrowser.setAttribute("remote", "true");
       aBrowser.setAttribute("remoteType", aOptions.remoteType);
@@ -2093,6 +2097,12 @@ window._gBrowser = {
       return;
     }
 
+    // Reset webrtc sharing state.
+    if (tab._sharingState) {
+      this.setBrowserSharing(aBrowser, {});
+    }
+    webrtcUI.forgetStreamsFromBrowser(aBrowser);
+
     // Set browser parameters for when browser is restored.  Also remove
     // listeners and set up lazy restore data in SessionStore. This must
     // be done before aBrowser is destroyed and removed from the document.
@@ -2124,9 +2134,7 @@ window._gBrowser = {
     }
 
     aBrowser.destroy();
-
-    let notificationbox = this.getNotificationBox(aBrowser);
-    this.tabpanels.removeChild(notificationbox);
+    this.getNotificationBox(aBrowser).remove();
     tab.removeAttribute("linkedpanel");
 
     this._createLazyBrowser(tab);
@@ -2531,6 +2539,9 @@ window._gBrowser = {
 
         tabsToClose = this.getTabsToTheEndFrom(aTab).length;
         break;
+      case this.closingTabsEnum.MULTI_SELECTED:
+        tabsToClose = this.multiSelectedTabsCount;
+        break;
       default:
         throw new Error("Invalid argument: " + aCloseTabs);
     }
@@ -2590,28 +2601,12 @@ window._gBrowser = {
     return tabsToEnd;
   },
 
-  removeTabsToTheEndFrom(aTab, aParams) {
+  removeTabsToTheEndFrom(aTab) {
     if (!this.warnAboutClosingTabs(this.closingTabsEnum.TO_END, aTab))
       return;
 
-    let removeTab = tab => {
-      // Avoid changing the selected browser several times.
-      if (tab.selected)
-        this.selectedTab = aTab;
-
-      this.removeTab(tab, aParams);
-    };
-
     let tabs = this.getTabsToTheEndFrom(aTab);
-    let tabsWithBeforeUnload = [];
-    for (let i = tabs.length - 1; i >= 0; --i) {
-      let tab = tabs[i];
-      if (this._hasBeforeUnload(tab))
-        tabsWithBeforeUnload.push(tab);
-      else
-        removeTab(tab);
-    }
-    tabsWithBeforeUnload.forEach(removeTab);
+    this.removeCollectionOfTabs(tabs);
   },
 
   removeAllTabsBut(aTab) {
@@ -2619,21 +2614,41 @@ window._gBrowser = {
       return;
     }
 
-    let tabs = this.visibleTabs.reverse();
+    let tabs = this.visibleTabs.filter(tab => tab != aTab && !tab.pinned);
     this.selectedTab = aTab;
+    this.removeCollectionOfTabs(tabs);
+  },
 
+  removeMultiSelectedTabs() {
+    if (!this.warnAboutClosingTabs(this.closingTabsEnum.MULTI_SELECTED)) {
+      return;
+    }
+
+    let selectedTabs = ChromeUtils.nondeterministicGetWeakMapKeys(this._multiSelectedTabsMap)
+                                    .filter(tab => tab.isConnected);
+    this.removeCollectionOfTabs(selectedTabs);
+  },
+
+  removeCollectionOfTabs(tabs) {
     let tabsWithBeforeUnload = [];
-    for (let i = tabs.length - 1; i >= 0; --i) {
-      let tab = tabs[i];
-      if (tab != aTab && !tab.pinned) {
-        if (this._hasBeforeUnload(tab))
-          tabsWithBeforeUnload.push(tab);
-        else
-          this.removeTab(tab, { animate: true });
-      }
+    let lastToClose;
+    let aParams = {animation: true};
+    for (let tab of tabs) {
+      if (tab.selected)
+        lastToClose = tab;
+      else if (this._hasBeforeUnload(tab))
+        tabsWithBeforeUnload.push(tab);
+      else
+        this.removeTab(tab, aParams);
     }
     for (let tab of tabsWithBeforeUnload) {
-      this.removeTab(tab, { animate: true });
+      this.removeTab(tab, aParams);
+    }
+
+    // Avoid changing the selected browser several times by removing it,
+    // if appropriate, lastly.
+    if (lastToClose) {
+      this.removeTab(lastToClose, aParams);
     }
   },
 
@@ -2743,6 +2758,13 @@ window._gBrowser = {
       if (aTab.closing || (!timedOut && !permitUnload)) {
         return false;
       }
+    }
+
+    // this._switcher would normally cover removing a tab from this
+    // cache, but we may not have one at this time.
+    let tabCacheIndex = this._tabLayerCache.indexOf(aTab);
+    if (tabCacheIndex != -1) {
+      this._tabLayerCache.splice(tabCacheIndex, 1);
     }
 
     this._blurTab(aTab);
@@ -2920,7 +2942,7 @@ window._gBrowser = {
     var wasPinned = aTab.pinned;
 
     // Remove the tab ...
-    this.tabContainer.removeChild(aTab);
+    aTab.remove();
 
     // Update hashiddentabs if this tab was hidden.
     if (aTab.hidden)
@@ -3611,6 +3633,29 @@ window._gBrowser = {
     this._multiSelectedTabsMap.set(aTab, null);
   },
 
+  /**
+   * Adds two given tabs and all tabs between them into the (multi) selected tabs collection
+   */
+  addRangeToMultiSelectedTabs(aTab1, aTab2) {
+    // Let's avoid going through all the heavy process below when the same
+    // tab is given as params.
+    if (aTab1 == aTab2) {
+      this.addToMultiSelectedTabs(aTab1);
+      return;
+    }
+
+    const tabs = this._visibleTabs;
+    const indexOfTab1 = tabs.indexOf(aTab1);
+    const indexOfTab2 = tabs.indexOf(aTab2);
+
+    const [lowerIndex, higherIndex] = indexOfTab1 < indexOfTab2 ?
+      [indexOfTab1, indexOfTab2] : [indexOfTab2, indexOfTab1];
+
+    for (let i = lowerIndex; i <= higherIndex; i++) {
+      this.addToMultiSelectedTabs(tabs[i]);
+    }
+  },
+
   removeFromMultiSelectedTabs(aTab) {
     if (!aTab.multiselected) {
       return;
@@ -3629,10 +3674,22 @@ window._gBrowser = {
     this._multiSelectedTabsMap = new WeakMap();
   },
 
-  multiSelectedTabsCount() {
+  get multiSelectedTabsCount() {
     return ChromeUtils.nondeterministicGetWeakMapKeys(this._multiSelectedTabsMap)
-      .filter(tab => tab.isConnected)
+      .filter(tab => tab.isConnected && !tab.closing)
       .length;
+  },
+
+  get lastMultiSelectedTab() {
+    let tab = this._lastMultiSelectedTabRef ? this._lastMultiSelectedTabRef.get() : null;
+    if (tab && tab.isConnected && this._multiSelectedTabsMap.has(tab)) {
+      return tab;
+    }
+    return gBrowser.selectedTab;
+  },
+
+  set lastMultiSelectedTab(aTab) {
+    this._lastMultiSelectedTabRef = Cu.getWeakReference(aTab);
   },
 
   activateBrowserForPrintPreview(aBrowser) {
@@ -4619,6 +4676,14 @@ class TabProgressListener {
             PrivateBrowsingUtils.permanentPrivateBrowsing)) {
         gBrowser._unifiedComplete.registerOpenPage(aLocation, userContextId);
         this.mBrowser.registeredOpenURI = aLocation;
+      }
+
+      if (this.mTab != gBrowser.selectedTab) {
+        let tabCacheIndex = gBrowser._tabLayerCache.indexOf(this.mTab);
+        if (tabCacheIndex != -1) {
+          gBrowser._tabLayerCache.splice(tabCacheIndex, 1);
+          gBrowser._getSwitcher().cleanUpTabAfterEviction(this.mTab);
+        }
       }
     }
 

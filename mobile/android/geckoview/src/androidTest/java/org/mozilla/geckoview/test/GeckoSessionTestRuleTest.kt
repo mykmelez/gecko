@@ -9,6 +9,7 @@ import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.AssertCalled
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.ClosedSessionAtStart
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.NullDelegate
+import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.RejectedPromiseException
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.Setting
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.TimeoutException
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.TimeoutMillis
@@ -20,6 +21,7 @@ import android.support.test.filters.MediumTest
 import android.support.test.runner.AndroidJUnit4
 
 import org.hamcrest.Matchers.*
+import org.junit.Assert.fail
 import org.junit.Assume.assumeThat
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -1250,6 +1252,52 @@ class GeckoSessionTestRuleTest : BaseSessionTest(noErrorCollector = true) {
                    (array dot 0) as String, equalTo("foo"))
         assertThat("JS array toString should be expanded after evaluation",
                    array.toString(), equalTo("[Array(2)][foo, bar]"))
+
+        assertThat("JS user function toString should be correct",
+                   sessionRule.session.evaluateJS("(function foo(){})").toString(),
+                   equalTo("[Function(foo)]"))
+
+        assertThat("JS window function toString should be correct",
+                   sessionRule.session.evaluateJS("window.alert").toString(),
+                   equalTo("[Function(alert)]"))
+
+        assertThat("JS pending promise toString should be correct",
+                   sessionRule.session.evaluateJS("new Promise(_=>{})").toString(),
+                   equalTo("[Promise(pending)]"))
+
+        assertThat("JS fulfilled promise toString should be correct",
+                   sessionRule.session.evaluateJS("Promise.resolve('foo')").toString(),
+                   equalTo("[Promise(fulfilled)](foo)"))
+
+        assertThat("JS rejected promise toString should be correct",
+                   sessionRule.session.evaluateJS("Promise.reject('bar')").toString(),
+                   equalTo("[Promise(rejected)](bar)"))
+    }
+
+    @WithDevToolsAPI
+    @Test fun evaluateJS_supportPromises() {
+        assertThat("Can get resolved promise",
+                   sessionRule.session.evaluateJS(
+                           "Promise.resolve('foo')").asJSPromise().value as String,
+                   equalTo("foo"))
+
+        val promise = sessionRule.session.evaluateJS(
+                "let resolve; new Promise(r => resolve = r)").asJSPromise()
+        assertThat("Promise is initially pending",
+                   promise.isPending, equalTo(true))
+
+        sessionRule.session.evaluateJS("resolve('bar')")
+
+        assertThat("Can wait for promise to resolve",
+                   promise.value as String, equalTo("bar"))
+        assertThat("Resolved promise is no longer pending",
+                   promise.isPending, equalTo(false))
+    }
+
+    @WithDevToolsAPI
+    @Test(expected = RejectedPromiseException::class)
+    fun evaluateJS_throwOnRejectedPromise() {
+        sessionRule.session.evaluateJS("Promise.reject('foo')").asJSPromise().value
     }
 
     @WithDevToolsAPI
@@ -1413,5 +1461,87 @@ class GeckoSessionTestRuleTest : BaseSessionTest(noErrorCollector = true) {
     @Test(expected = AssertionError::class)
     fun setPrefsDuringNextWait_throwOnNotWithDevTools() {
         sessionRule.setPrefsDuringNextWait(mapOf("invalid.pref" to true))
+    }
+
+    @WithDevToolsAPI
+    @Test fun waitForJS() {
+        assertThat("waitForJS should return correct result",
+                   sessionRule.session.waitForJS("alert(), 'foo'") as String,
+                   equalTo("foo"))
+
+        sessionRule.session.forCallbacksDuringWait(object : Callbacks.PromptDelegate {
+            @AssertCalled(count = 1)
+            override fun onAlert(session: GeckoSession, title: String, msg: String, callback: GeckoSession.PromptDelegate.AlertCallback) {
+            }
+        })
+    }
+
+    @WithDevToolsAPI
+    @Test fun waitForJS_resolvePromise() {
+        assertThat("waitForJS should wait for promises",
+                   sessionRule.session.waitForJS("Promise.resolve('foo')") as String,
+                   equalTo("foo"))
+    }
+
+    @WithDevToolsAPI
+    @Test fun waitForJS_delegateDuringWait() {
+        var count = 0
+        sessionRule.session.delegateDuringNextWait(object : Callbacks.PromptDelegate {
+            override fun onAlert(session: GeckoSession, title: String, msg: String, callback: GeckoSession.PromptDelegate.AlertCallback) {
+                count++
+                callback.dismiss()
+            }
+        })
+
+        sessionRule.session.waitForJS("alert()")
+        sessionRule.session.waitForJS("alert()")
+
+        // The delegate set through delegateDuringNextWait
+        // should have been cleared after the first wait.
+        assertThat("Delegate should only run once", count, equalTo(1))
+    }
+
+    @WithDevToolsAPI
+    @Test fun waitForChromeJS() {
+        sessionRule.session.reload()
+        sessionRule.session.waitForPageStop()
+
+        assertThat("waitForChromeJS should return correct result",
+                   sessionRule.waitForChromeJS("1+1") as Double, equalTo(2.0))
+
+        // Because waitForChromeJS() counts as a wait event,
+        // the previous onPageStop call is not included.
+        sessionRule.session.forCallbacksDuringWait(object : Callbacks.ProgressDelegate {
+            @AssertCalled(count = 0)
+            override fun onPageStop(session: GeckoSession, success: Boolean) {
+            }
+        })
+    }
+
+    @WithDevToolsAPI
+    @Test fun waitForChromeJS_rejectionCountsAsWait() {
+        sessionRule.session.reload()
+        sessionRule.session.waitForPageStop()
+
+        try {
+            sessionRule.waitForChromeJS("Promise.reject('foo')")
+            fail("Rejected promise should have thrown")
+        } catch (e: RejectedPromiseException) {
+            // Ignore
+        }
+
+        // A rejected Promise throws, but the wait should still count as a wait.
+        sessionRule.session.forCallbacksDuringWait(object : Callbacks.ProgressDelegate {
+            @AssertCalled(count = 0)
+            override fun onPageStop(session: GeckoSession, success: Boolean) {
+            }
+        })
+    }
+
+    @WithDevToolsAPI
+    @Test fun forceGarbageCollection() {
+        sessionRule.forceGarbageCollection()
+        sessionRule.session.reload()
+        sessionRule.session.waitForPageStop()
     }
 }

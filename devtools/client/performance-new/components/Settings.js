@@ -96,6 +96,12 @@ const featureCheckboxes = [
     recommended: true
   },
   {
+    name: "Responsiveness",
+    value: "responsiveness",
+    title: "Collect thread responsiveness information.",
+    recommended: true
+  },
+  {
     name: "Java",
     value: "java",
     title: "Profile Java code (Android only)."
@@ -121,6 +127,11 @@ const featureCheckboxes = [
     name: "Privacy",
     value: "privacy",
     title: "Remove some potentially user-identifiable information."
+  },
+  {
+    name: "Sequential Styling",
+    value: "seqstyle",
+    title: "Disable parallel traversal in styling."
   },
   {
     name: "JIT Optimizations",

@@ -1739,6 +1739,15 @@ nsWindow::GetNativeData(uint32_t aDataType)
     case NS_NATIVE_COMPOSITOR_DISPLAY:
         return gfxPlatformGtk::GetPlatform()->GetCompositorDisplay();
 #endif // MOZ_X11
+    case NS_NATIVE_EGL_WINDOW: {
+        if (mIsX11Display)
+            return mGdkWindow ? (void*)GDK_WINDOW_XID(mGdkWindow) : nullptr;
+#ifdef MOZ_WAYLAND
+        if (mContainer)
+            return moz_container_get_wl_egl_window(mContainer);
+#endif
+        return nullptr;
+    }
     default:
         NS_WARNING("nsWindow::GetNativeData called with bad value");
         return nullptr;
@@ -4308,6 +4317,16 @@ nsWindow::NativeShow(bool aAction)
         }
     }
     else {
+#ifdef MOZ_WAYLAND
+        if (mContainer && moz_container_has_wl_egl_window(mContainer)) {
+            // Because wl_egl_window is destroyed on moz_container_unmap(),
+            // the current compositor cannot use it anymore. To avoid crash,
+            // destroy the compositor & recreate a new compositor on next
+            // expose event.
+            DestroyLayerManager();
+        }
+#endif
+
         if (mIsTopLevel) {
             // Workaround window freezes on GTK versions before 3.21.2 by
             // ensuring that configure events get dispatched to windows before
@@ -6067,13 +6086,13 @@ nsWindow::InitDragEvent(WidgetDragEvent &aEvent)
     KeymapWrapper::InitInputEvent(aEvent, modifierState);
 }
 
-static gboolean
-drag_motion_event_cb(GtkWidget *aWidget,
-                     GdkDragContext *aDragContext,
-                     gint aX,
-                     gint aY,
-                     guint aTime,
-                     gpointer aData)
+gboolean
+WindowDragMotionHandler(GtkWidget *aWidget,
+                        GdkDragContext *aDragContext,
+                        nsWaylandDragContext *aWaylandDragContext,
+                        gint aX,
+                        gint aY,
+                        guint aTime)
 {
     RefPtr<nsWindow> window = get_window_for_gtk_widget(aWidget);
     if (!window)
@@ -6098,15 +6117,24 @@ drag_motion_event_cb(GtkWidget *aWidget,
 
     RefPtr<nsDragService> dragService = nsDragService::GetInstance();
     return dragService->
-        ScheduleMotionEvent(innerMostWindow, aDragContext,
+        ScheduleMotionEvent(innerMostWindow, aDragContext, aWaylandDragContext,
                             point, aTime);
 }
 
-static void
-drag_leave_event_cb(GtkWidget *aWidget,
-                    GdkDragContext *aDragContext,
-                    guint aTime,
-                    gpointer aData)
+static gboolean
+drag_motion_event_cb(GtkWidget *aWidget,
+                     GdkDragContext *aDragContext,
+                     gint aX,
+                     gint aY,
+                     guint aTime,
+                     gpointer aData)
+{
+    return WindowDragMotionHandler(aWidget, aDragContext, nullptr,
+                                   aX, aY, aTime);
+}
+
+void
+WindowDragLeaveHandler(GtkWidget *aWidget)
 {
     RefPtr<nsWindow> window = get_window_for_gtk_widget(aWidget);
     if (!window)
@@ -6139,14 +6167,22 @@ drag_leave_event_cb(GtkWidget *aWidget,
     dragService->ScheduleLeaveEvent();
 }
 
+static void
+drag_leave_event_cb(GtkWidget *aWidget,
+                    GdkDragContext *aDragContext,
+                    guint aTime,
+                    gpointer aData)
+{
+    WindowDragLeaveHandler(aWidget);
+}
 
-static gboolean
-drag_drop_event_cb(GtkWidget *aWidget,
-                   GdkDragContext *aDragContext,
-                   gint aX,
-                   gint aY,
-                   guint aTime,
-                   gpointer aData)
+gboolean
+WindowDragDropHandler(GtkWidget *aWidget,
+                      GdkDragContext *aDragContext,
+                      nsWaylandDragContext *aWaylandDragContext,
+                      gint aX,
+                      gint aY,
+                      guint aTime)
 {
     RefPtr<nsWindow> window = get_window_for_gtk_widget(aWidget);
     if (!window)
@@ -6171,8 +6207,19 @@ drag_drop_event_cb(GtkWidget *aWidget,
 
     RefPtr<nsDragService> dragService = nsDragService::GetInstance();
     return dragService->
-        ScheduleDropEvent(innerMostWindow, aDragContext,
+        ScheduleDropEvent(innerMostWindow, aDragContext, aWaylandDragContext,
                           point, aTime);
+}
+
+static gboolean
+drag_drop_event_cb(GtkWidget *aWidget,
+                   GdkDragContext *aDragContext,
+                   gint aX,
+                   gint aY,
+                   guint aTime,
+                   gpointer aData)
+{
+    return WindowDragDropHandler(aWidget, aDragContext, nullptr, aX, aY, aTime);
 }
 
 static void

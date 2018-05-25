@@ -16,7 +16,6 @@ sys.path.insert(1, os.path.dirname(sys.path[0]))
 from mozharness.base.errors import BaseErrorList
 from mozharness.base.script import PreScriptAction
 from mozharness.base.vcs.vcsbase import MercurialScript
-from mozharness.mozilla.blob_upload import BlobUploadMixin, blobupload_config_options
 from mozharness.mozilla.testing.testbase import TestingMixin, testing_config_options
 from mozharness.mozilla.testing.codecoverage import (
     CodeCoverageMixin,
@@ -28,7 +27,7 @@ from mozharness.mozilla.structuredlog import StructuredOutputParser
 from mozharness.base.log import INFO
 
 
-class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin, CodeCoverageMixin):
+class WebPlatformTest(TestingMixin, MercurialScript, CodeCoverageMixin):
     config_options = [
         [['--test-type'], {
             "action": "extend",
@@ -89,7 +88,6 @@ class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin, CodeCovera
             "help": "Forcibly enable single thread traversal in Stylo with STYLO_THREADS=1"}
          ],
     ] + copy.deepcopy(testing_config_options) + \
-        copy.deepcopy(blobupload_config_options) + \
         copy.deepcopy(code_coverage_config_options)
 
     def __init__(self, require_config_file=True):
@@ -211,17 +209,18 @@ class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin, CodeCovera
         else:
             cmd.append("--stylo-threads=4")
 
-        if os.environ.get('MOZHARNESS_TEST_PATHS'):
-            prefix = 'testing/web-platform'
-            paths = os.environ['MOZHARNESS_TEST_PATHS'].split(':')
-            paths = [os.path.join(dirs["abs_wpttest_dir"], os.path.relpath(p, prefix))
-                     for p in paths if p.startswith(prefix)]
-            cmd.extend(paths)
-        elif not self.verify_enabled:
-            for opt in ["total_chunks", "this_chunk"]:
-                val = c.get(opt)
-                if val:
-                    cmd.append("--%s=%s" % (opt.replace("_", "-"), val))
+        if not (self.verify_enabled or self.per_test_coverage):
+            if os.environ.get('MOZHARNESS_TEST_PATHS'):
+                prefix = 'testing/web-platform'
+                paths = os.environ['MOZHARNESS_TEST_PATHS'].split(':')
+                paths = [os.path.join(dirs["abs_wpttest_dir"], os.path.relpath(p, prefix))
+                         for p in paths if p.startswith(prefix)]
+                cmd.extend(paths)
+            else:
+                for opt in ["total_chunks", "this_chunk"]:
+                    val = c.get(opt)
+                    if val:
+                        cmd.append("--%s=%s" % (opt.replace("_", "-"), val))
 
         if "wdspec" in test_types:
             geckodriver_path = self._query_geckodriver()
@@ -239,7 +238,7 @@ class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin, CodeCovera
             'test_install_path': dirs["abs_test_install_dir"],
             'abs_app_dir': abs_app_dir,
             'abs_work_dir': dirs["abs_work_dir"]
-            }
+        }
 
         test_type_suite = {
             "testharness": "web-platform-tests",

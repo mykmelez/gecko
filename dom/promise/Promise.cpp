@@ -63,8 +63,13 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(Promise)
   NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mPromiseObj);
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
-NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(Promise, AddRef);
-NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(Promise, Release);
+NS_IMPL_CYCLE_COLLECTING_ADDREF(Promise)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(Promise)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Promise)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+  NS_INTERFACE_MAP_ENTRY(Promise)
+NS_INTERFACE_MAP_END
 
 Promise::Promise(nsIGlobalObject* aGlobal)
   : mGlobal(aGlobal)
@@ -101,7 +106,7 @@ already_AddRefed<Promise>
 Promise::Resolve(nsIGlobalObject* aGlobal, JSContext* aCx,
                  JS::Handle<JS::Value> aValue, ErrorResult& aRv)
 {
-  JSAutoCompartment ac(aCx, aGlobal->GetGlobalJSObject());
+  JSAutoRealm ar(aCx, aGlobal->GetGlobalJSObject());
   JS::Rooted<JSObject*> p(aCx,
                           JS::CallOriginalPromiseResolve(aCx, aValue));
   if (!p) {
@@ -117,7 +122,7 @@ already_AddRefed<Promise>
 Promise::Reject(nsIGlobalObject* aGlobal, JSContext* aCx,
                 JS::Handle<JS::Value> aValue, ErrorResult& aRv)
 {
-  JSAutoCompartment ac(aCx, aGlobal->GetGlobalJSObject());
+  JSAutoRealm ar(aCx, aGlobal->GetGlobalJSObject());
   JS::Rooted<JSObject*> p(aCx,
                           JS::CallOriginalPromiseReject(aCx, aValue));
   if (!p) {

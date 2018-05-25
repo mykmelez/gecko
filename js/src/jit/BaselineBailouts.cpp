@@ -469,18 +469,18 @@ IsInlinableFallback(ICFallbackStub* icEntry)
 static inline void*
 GetStubReturnAddress(JSContext* cx, jsbytecode* pc)
 {
-    JitCompartment* jitComp = cx->compartment()->jitCompartment();
+    JitRealm* jitRealm = cx->realm()->jitRealm();
 
     if (IsGetPropPC(pc))
-        return jitComp->bailoutReturnAddr(BailoutReturnStub::GetProp);
+        return jitRealm->bailoutReturnAddr(BailoutReturnStub::GetProp);
     if (IsSetPropPC(pc))
-        return jitComp->bailoutReturnAddr(BailoutReturnStub::SetProp);
+        return jitRealm->bailoutReturnAddr(BailoutReturnStub::SetProp);
 
     // This should be a call op of some kind, now.
     MOZ_ASSERT(IsCallPC(pc) && !IsSpreadCallPC(pc));
     if (IsConstructorCallPC(pc))
-        return jitComp->bailoutReturnAddr(BailoutReturnStub::New);
-    return jitComp->bailoutReturnAddr(BailoutReturnStub::Call);
+        return jitRealm->bailoutReturnAddr(BailoutReturnStub::New);
+    return jitRealm->bailoutReturnAddr(BailoutReturnStub::Call);
 }
 
 static inline jsbytecode*
@@ -986,7 +986,7 @@ InitFromBailout(JSContext* cx, size_t frameNo,
             // possible nothing was pushed before we threw. We can't drop
             // iterators, however, so read them out. They will be closed by
             // HandleExceptionBaseline.
-            MOZ_ASSERT(cx->compartment()->isDebuggee());
+            MOZ_ASSERT(cx->realm()->isDebuggee());
             if (iter.moreFrames() || HasLiveStackValueAtDepth(script, pc, i + 1)) {
                 v = iter.read();
             } else {

@@ -704,6 +704,11 @@ public:
                                             nsIURI* aBaseURI);
 
   /**
+   * Returns true if |aName| is a name with dashes.
+   */
+  static bool IsNameWithDash(nsAtom* aName);
+
+  /**
    * Returns true if |aName| is a valid name to be registered via
    * customElements.define.
    */
@@ -3378,6 +3383,7 @@ private:
 
   static nsIStringBundleService* sStringBundleService;
   static nsIStringBundle* sStringBundles[PropertiesFile_COUNT];
+  class nsContentUtilsReporter;
 
   static nsIContentPolicy* sContentPolicyService;
   static bool sTriedToGetContentPolicy;

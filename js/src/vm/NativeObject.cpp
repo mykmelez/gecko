@@ -302,6 +302,14 @@ js::NativeObject::slotIsFixed(uint32_t slot) const
     return slot < numFixedSlotsMaybeForwarded();
 }
 
+bool
+js::NativeObject::isNumFixedSlots(uint32_t nfixed) const
+{
+    // We call numFixedSlotsMaybeForwarded() to allow reading slots of
+    // associated objects in trace hooks that may be called during a moving GC.
+    return nfixed == numFixedSlotsMaybeForwarded();
+}
+
 #endif /* DEBUG */
 
 Shape*
@@ -2253,7 +2261,7 @@ GetNonexistentProperty(JSContext* cx, HandleId id, IsNameLookup nameLookup, Muta
     //
     // Don't warn if extra warnings not enabled or for random getprop
     // operations.
-    if (MOZ_LIKELY(!cx->compartment()->behaviors().extraWarnings(cx)))
+    if (MOZ_LIKELY(!cx->realm()->behaviors().extraWarnings(cx)))
         return true;
 
     jsbytecode* pc;
@@ -2448,7 +2456,7 @@ MaybeReportUndeclaredVarAssignment(JSContext* cx, HandleString propname)
         // check is needed.
         if (IsStrictSetPC(pc))
             flags = JSREPORT_ERROR;
-        else if (cx->compartment()->behaviors().extraWarnings(cx))
+        else if (cx->realm()->behaviors().extraWarnings(cx))
             flags = JSREPORT_WARNING | JSREPORT_STRICT;
         else
             return true;

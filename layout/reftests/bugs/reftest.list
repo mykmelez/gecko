@@ -273,7 +273,7 @@ skip-if(Android&&asyncPan) == 243519-1.html 243519-1-ref.html
 == 244135-2.html 244135-2-ref.html
 == 244932-1.html 244932-1-ref.html
 == 246669-1.html 246669-1-ref.html
-== 249141.xul 249141-ref.xul
+fails-if(Android) == 249141.xul 249141-ref.xul # dependent on width of '…' and '*' in the default font
 == 249982-1.html 249982-1-ref.html
 == 252920-1.html 252920-1-ref.html
 == 253701-1.html 253701-1-ref.html
@@ -656,7 +656,7 @@ fails-if(Android&&!asyncPan) == 371561-1.html 371561-1-ref.html
 == 372768-1.html 372768-1-ref.html
 fuzzy-if(webrender&&winWidget,83-83,2-2) == 373295-1.html 373295-1-ref.html
 == 373298-1.html 373298-1-ref.html
-== 373381-1.html 373381-1-ref.html
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == 373381-1.html 373381-1-ref.html
 fuzzy-if(skiaContent&&!Android,2,40) == 373381-2.html 373381-2-ref.html
 random-if(d2d) == 373381-3.html 373381-3-ref.html
 == 373381-4.html 373381-4-ref.html
@@ -1195,7 +1195,7 @@ fuzzy-if(webrender,4,361) == 449519-1.html 449519-1-ref.html
 == 455171-5.html 455171-5-ref.html
 == 455280-1.xhtml 455280-1-ref.xhtml
 == 455826-1.html 455826-1-ref.html
-fails-if(Android||cocoaWidget) fuzzy-if(webrender&&winWidget,222-222,2806-2806) == 456147.xul 456147-ref.html # bug 458047
+fails-if(Android||cocoaWidget||winWidget) == 456147.xul 456147-ref.html # bug 458047
 fuzzy-if(Android,11,41) fuzzy-if(winWidget||gtkWidget,4,6) fuzzy-if(d2d,15,69) fuzzy-if(skiaContent,42,154) == 456219-1a.html 456219-1-ref.html # bug 1128229
 fuzzy-if(Android,11,41) fuzzy-if(winWidget||gtkWidget,4,6) fuzzy-if(d2d,15,69) fuzzy-if(skiaContent,42,154) == 456219-1b.html 456219-1-ref.html # bug 1128229
 fuzzy-if(Android,11,41) fuzzy-if(winWidget||gtkWidget,4,6) fuzzy-if(d2d,15,69) fuzzy-if(skiaContent,42,154) == 456219-1c.html 456219-1-ref.html # bug 1128229
@@ -1606,9 +1606,9 @@ fails-if(!haveTestPlugin) HTTP == 599476.html 599476-ref.html
 == 599882-2.html 599882-2-ref.html
 == 600045-1.html 600045-1-ref.html
 == 600803-1.html 600803-1-ref.html
-== 600974-1.html 600974-1-ref.html
-== 600974-2.html 600974-1-ref.html
-== 600974-3.html 600974-1-ref.html
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == 600974-1.html 600974-1-ref.html
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == 600974-2.html 600974-1-ref.html
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == 600974-3.html 600974-1-ref.html
 == 602200-1.html 602200-1-ref.html
 == 602200-2.html 602200-2-ref.html
 fuzzy-if(Android,8,20) == 602200-3.html 602200-3-ref.html

@@ -449,6 +449,20 @@ nsINode::GetComposedDocInternal() const
     OwnerDoc() : nullptr;
 }
 
+DocumentOrShadowRoot*
+nsINode::GetUncomposedDocOrConnectedShadowRoot() const
+{
+  if (IsInUncomposedDoc()) {
+    return OwnerDoc();
+  }
+
+  if (IsInComposedDoc() && HasFlag(NODE_IS_IN_SHADOW_TREE)) {
+    return AsContent()->GetContainingShadow();
+  }
+
+  return nullptr;
+}
+
 #ifdef DEBUG
 void
 nsINode::CheckNotNativeAnonymous() const
@@ -1276,7 +1290,7 @@ CheckForOutdatedParent(nsINode* aParent, nsINode* aNode, ErrorResult& aError)
 
     if (js::GetGlobalForObjectCrossCompartment(existingObj) !=
         global->GetGlobalJSObject()) {
-      JSAutoCompartment ac(cx, existingObj);
+      JSAutoRealm ar(cx, existingObj);
       ReparentWrapper(cx, existingObj, aError);
     }
   }

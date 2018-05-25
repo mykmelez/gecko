@@ -28,7 +28,6 @@ from mozharness.base.errors import BaseErrorList
 from mozharness.base.log import INFO
 from mozharness.base.script import PreScriptAction
 from mozharness.base.vcs.vcsbase import MercurialScript
-from mozharness.mozilla.blob_upload import BlobUploadMixin, blobupload_config_options
 from mozharness.mozilla.buildbot import TBPL_EXCEPTION
 from mozharness.mozilla.mozbase import MozbaseMixin
 from mozharness.mozilla.structuredlog import StructuredOutputParser
@@ -47,7 +46,7 @@ SUITE_NO_E10S = ['xpcshell']
 
 
 # DesktopUnittest {{{1
-class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMixin,
+class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
                       CodeCoverageMixin):
     config_options = [
         [['--mochitest-suite', ], {
@@ -175,14 +174,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
             "default": "False",
             "help": "Run additional verification on modified tests using gpu instances."}
          ],
-        [["--run-slower"], {
-            "action": "store_true",
-            "dest": "run_slower",
-            "default": False,
-            "help": "Run additional verification on modified tests using gpu instances."}
-         ],
     ] + copy.deepcopy(testing_config_options) + \
-        copy.deepcopy(blobupload_config_options) + \
         copy.deepcopy(code_coverage_config_options)
 
     def __init__(self, require_config_file=True):
@@ -409,11 +401,12 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                     base_cmd.append('--e10s')
 
             # Ignore chunking if we have user specified test paths
-            if os.environ.get('MOZHARNESS_TEST_PATHS'):
-                base_cmd.extend(os.environ['MOZHARNESS_TEST_PATHS'].split(':'))
-            elif c.get('total_chunks') and c.get('this_chunk') and not self.verify_enabled:
-                base_cmd.extend(['--total-chunks', c['total_chunks'],
-                                 '--this-chunk', c['this_chunk']])
+            if not (self.verify_enabled or self.per_test_coverage):
+                if os.environ.get('MOZHARNESS_TEST_PATHS'):
+                    base_cmd.extend(os.environ['MOZHARNESS_TEST_PATHS'].split(':'))
+                elif c.get('total_chunks') and c.get('this_chunk'):
+                    base_cmd.extend(['--total-chunks', c['total_chunks'],
+                                     '--this-chunk', c['this_chunk']])
 
             if c['no_random']:
                 if suite_category == "mochitest":
@@ -424,13 +417,6 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
 
             if c['headless']:
                 base_cmd.append('--headless')
-
-            if c['run_slower']:
-                if suite_category == "reftest":
-                    base_cmd.append('--run-slower')
-                else:
-                    self.warning("--run-slow does not currently work with suites other than "
-                                 "reftest.")
 
             # set pluginsPath
             abs_res_plugins_dir = os.path.join(abs_res_dir, 'plugins')
@@ -540,7 +526,6 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
     # create_virtualenv is in VirtualenvMixin.
     # preflight_install is in TestingMixin.
     # install is in TestingMixin.
-    # upload_blobber_files is in BlobUploadMixin
 
     @PreScriptAction('download-and-extract')
     def _pre_download_and_extract(self, action):

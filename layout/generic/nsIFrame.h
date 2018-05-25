@@ -1857,10 +1857,7 @@ public:
     return HasPerspective(StyleDisplay());
   }
 
-  bool ChildrenHavePerspective(const nsStyleDisplay* aStyleDisplay) const {
-    MOZ_ASSERT(aStyleDisplay == StyleDisplay());
-    return aStyleDisplay->HasPerspectiveStyle();
-  }
+  bool ChildrenHavePerspective(const nsStyleDisplay* aStyleDisplay) const;
   bool ChildrenHavePerspective() const {
     return ChildrenHavePerspective(StyleDisplay());
   }
@@ -4004,14 +4001,6 @@ public:
   bool FrameMaintainsOverflow() const {
     return !HasAllStateBits(NS_FRAME_SVG_LAYOUT | NS_FRAME_IS_NONDISPLAY);
   }
-
-  /**
-   * Returns the content node within the anonymous content that this frame
-   * generated and which corresponds to the specified pseudo-element type,
-   * or nullptr if there is no such anonymous content.
-   */
-  virtual mozilla::dom::Element*
-  GetPseudoElement(mozilla::CSSPseudoElementType aType);
 
   /*
    * @param aStyleDisplay:  If the caller has this->StyleDisplay(), providing

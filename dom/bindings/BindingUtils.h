@@ -703,6 +703,8 @@ struct NamedConstructor
  * protoCache a pointer to a JSObject pointer where we should cache the
  *            interface prototype object. This must be null if protoClass is and
  *            vice versa.
+ * toStringTag if not null, a string to define as @@toStringTag on the prototype.
+ *             Must be null if protoClass is.
  * constructorClass is the JSClass to use for the interface object.
  *                  This is null if we should not create an interface object or
  *                  if it should be a function object.
@@ -741,6 +743,7 @@ void
 CreateInterfaceObjects(JSContext* cx, JS::Handle<JSObject*> global,
                        JS::Handle<JSObject*> protoProto,
                        const js::Class* protoClass, JS::Heap<JSObject*>* protoCache,
+                       const char* toStringTag,
                        JS::Handle<JSObject*> interfaceProto,
                        const js::Class* constructorClass,
                        unsigned ctorNargs, const NamedConstructor* namedConstructors,
@@ -1128,7 +1131,7 @@ DoGetOrCreateDOMReflector(JSContext* cx, T* value,
 
   if (wrapBehavior == eDontWrapIntoContextCompartment) {
     if (TypeNeedsOuterization<T>::value) {
-      JSAutoCompartment ac(cx, obj);
+      JSAutoRealm ar(cx, obj);
       return TryToOuterize(rval);
     }
 
@@ -1188,12 +1191,12 @@ WrapNewBindingNonWrapperCachedObject(JSContext* cx,
 {
   static_assert(IsRefcounted<T>::value, "Don't pass owned classes in here.");
   MOZ_ASSERT(value);
-  // We try to wrap in the compartment of the underlying object of "scope"
+  // We try to wrap in the realm of the underlying object of "scope"
   JS::Rooted<JSObject*> obj(cx);
   {
-    // scope for the JSAutoCompartment so that we restore the compartment
+    // scope for the JSAutoRealm so that we restore the realm
     // before we call JS_WrapValue.
-    Maybe<JSAutoCompartment> ac;
+    Maybe<JSAutoRealm> ar;
     // Maybe<Handle> doesn't so much work, and in any case, adding
     // more Maybe (one for a Rooted and one for a Handle) adds more
     // code (and branches!) than just adding a single rooted.
@@ -1203,7 +1206,7 @@ WrapNewBindingNonWrapperCachedObject(JSContext* cx,
       scope = js::CheckedUnwrap(scope, /* stopAtWindowProxy = */ false);
       if (!scope)
         return false;
-      ac.emplace(cx, scope);
+      ar.emplace(cx, scope);
       if (!JS_WrapObject(cx, &proto)) {
         return false;
       }
@@ -1239,12 +1242,12 @@ WrapNewBindingNonWrapperCachedObject(JSContext* cx,
   if (!value) {
     MOZ_CRASH("Don't try to wrap null objects");
   }
-  // We try to wrap in the compartment of the underlying object of "scope"
+  // We try to wrap in the realm of the underlying object of "scope"
   JS::Rooted<JSObject*> obj(cx);
   {
-    // scope for the JSAutoCompartment so that we restore the compartment
+    // scope for the JSAutoRealm so that we restore the realm
     // before we call JS_WrapValue.
-    Maybe<JSAutoCompartment> ac;
+    Maybe<JSAutoRealm> ar;
     // Maybe<Handle> doesn't so much work, and in any case, adding
     // more Maybe (one for a Rooted and one for a Handle) adds more
     // code (and branches!) than just adding a single rooted.
@@ -1254,7 +1257,7 @@ WrapNewBindingNonWrapperCachedObject(JSContext* cx,
       scope = js::CheckedUnwrap(scope, /* stopAtWindowProxy = */ false);
       if (!scope)
         return false;
-      ac.emplace(cx, scope);
+      ar.emplace(cx, scope);
       if (!JS_WrapObject(cx, &proto)) {
         return false;
       }
@@ -2510,7 +2513,7 @@ XrayGetNativeProto(JSContext* cx, JS::Handle<JSObject*> obj,
 {
   JS::Rooted<JSObject*> global(cx, js::GetGlobalForObjectCrossCompartment(obj));
   {
-    JSAutoCompartment ac(cx, global);
+    JSAutoRealm ar(cx, global);
     const DOMJSClass* domClass = GetDOMClass(obj);
     if (domClass) {
       ProtoHandleGetter protoGetter = domClass->mGetProto;
@@ -3135,7 +3138,7 @@ struct CreateGlobalOptions<nsGlobalWindowInner>
 template <class T, ProtoHandleGetter GetProto>
 bool
 CreateGlobal(JSContext* aCx, T* aNative, nsWrapperCache* aCache,
-             const JSClass* aClass, JS::CompartmentOptions& aOptions,
+             const JSClass* aClass, JS::RealmOptions& aOptions,
              JSPrincipals* aPrincipal, bool aInitStandardClasses,
              JS::MutableHandle<JSObject*> aGlobal)
 {
@@ -3151,7 +3154,7 @@ CreateGlobal(JSContext* aCx, T* aNative, nsWrapperCache* aCache,
     return false;
   }
 
-  JSAutoCompartment ac(aCx, aGlobal);
+  JSAutoRealm ar(aCx, aGlobal);
 
   {
     js::SetReservedSlot(aGlobal, DOM_OBJECT_SLOT, JS::PrivateValue(aNative));
@@ -3340,7 +3343,7 @@ WrappedJSToDictionary(JSContext* aCx, nsISupports* aObject, T& aDictionary)
     return false;
   }
 
-  JSAutoCompartment ac(aCx, obj);
+  JSAutoRealm ar(aCx, obj);
   JS::Rooted<JS::Value> v(aCx, JS::ObjectValue(*obj));
   return aDictionary.Init(aCx, v);
 }
@@ -3490,6 +3493,14 @@ HTMLConstructor(JSContext* aCx, unsigned aArgc, JS::Value* aVp,
                 constructors::id::ID aConstructorId,
                 prototypes::id::ID aProtoId,
                 CreateInterfaceObjectsMethod aCreator);
+
+// A method to test whether an attribute with the given JSJitGetterOp getter is
+// enabled in the given set of prefable proeprty specs.  For use for toJSON
+// conversions.  aObj is the object that would be used as the "this" value.
+bool
+IsGetterEnabled(JSContext* aCx, JS::Handle<JSObject*> aObj,
+                JSJitGetterOp aGetter,
+                const Prefable<const JSPropertySpec>* aAttributes);
 } // namespace binding_detail
 
 } // namespace dom

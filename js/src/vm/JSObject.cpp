@@ -25,6 +25,9 @@
 #include "jsutil.h"
 
 #include "builtin/Array.h"
+#ifdef ENABLE_BIGINT
+#include "builtin/BigInt.h"
+#endif
 #include "builtin/Eval.h"
 #include "builtin/Object.h"
 #include "builtin/String.h"
@@ -1152,7 +1155,7 @@ JS_CopyPropertyFrom(JSContext* cx, HandleId id, HandleObject target,
         desc.attributesRef() &= ~JSPROP_PERMANENT;
     }
 
-    JSAutoCompartment ac(cx, target);
+    JSAutoRealm ar(cx, target);
     cx->markId(id);
     RootedId wrappedId(cx, id);
     if (!cx->compartment()->wrap(cx, &desc))
@@ -1164,7 +1167,7 @@ JS_CopyPropertyFrom(JSContext* cx, HandleId id, HandleObject target,
 JS_FRIEND_API(bool)
 JS_CopyPropertiesFrom(JSContext* cx, HandleObject target, HandleObject obj)
 {
-    JSAutoCompartment ac(cx, obj);
+    JSAutoRealm ar(cx, obj);
 
     AutoIdVector props(cx);
     if (!GetPropertyKeys(cx, obj, JSITER_OWNONLY | JSITER_HIDDEN | JSITER_SYMBOLS, &props))
@@ -1326,7 +1329,7 @@ js::DeepCloneObjectLiteral(JSContext* cx, HandleObject obj, NewObjectKind newKin
 {
     /* NB: Keep this in sync with XDRObjectLiteral. */
     MOZ_ASSERT_IF(obj->isSingleton(),
-                  cx->compartment()->behaviors().getSingletonsAsTemplates());
+                  cx->realm()->behaviors().getSingletonsAsTemplates());
     MOZ_ASSERT(obj->is<PlainObject>() || obj->is<UnboxedPlainObject>() ||
                obj->is<ArrayObject>());
     MOZ_ASSERT(newKind != SingletonObject);
@@ -2177,7 +2180,7 @@ js::GetObjectFromIncumbentGlobal(JSContext* cx, MutableHandleObject obj)
     }
 
     {
-        AutoCompartment ac(cx, globalObj);
+        AutoRealm ar(cx, globalObj);
         Handle<GlobalObject*> global = globalObj.as<GlobalObject>();
         obj.set(GlobalObject::getOrCreateObjectPrototype(cx, global));
         if (!obj)
@@ -3251,9 +3254,19 @@ js::PrimitiveToObject(JSContext* cx, const Value& v)
         return NumberObject::create(cx, v.toNumber());
     if (v.isBoolean())
         return BooleanObject::create(cx, v.toBoolean());
+#ifdef ENABLE_BIGINT
+    if (v.isSymbol()) {
+        RootedSymbol symbol(cx, v.toSymbol());
+        return SymbolObject::create(cx, symbol);
+    }
+    MOZ_ASSERT(v.isBigInt());
+    RootedBigInt bigInt(cx, v.toBigInt());
+    return BigIntObject::create(cx, bigInt);
+#else
     MOZ_ASSERT(v.isSymbol());
     RootedSymbol symbol(cx, v.toSymbol());
     return SymbolObject::create(cx, symbol);
+#endif
 }
 
 /*
@@ -4166,7 +4179,7 @@ JSObject::debugCheckNewObject(ObjectGroup* group, Shape* shape, js::gc::AllocKin
                                         clasp->isProxy());
     MOZ_ASSERT_IF(group->hasUnanalyzedPreliminaryObjects(), heap == gc::TenuredHeap);
 
-    MOZ_ASSERT(!group->compartment()->hasObjectPendingMetadata());
+    MOZ_ASSERT(!group->realm()->hasObjectPendingMetadata());
 
     // Non-native classes manage their own data and slots, so numFixedSlots and
     // slotSpan are always 0. Note that proxy classes can have reserved slots

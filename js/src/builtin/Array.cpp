@@ -670,7 +670,7 @@ MaybeInIteration(HandleObject obj, JSContext* cx)
      * the iterated object itself.
      */
 
-    if (MOZ_LIKELY(!cx->compartment()->objectMaybeInIteration(obj)))
+    if (MOZ_LIKELY(!ObjectRealm::get(obj).objectMaybeInIteration(obj)))
         return false;
 
     ObjectGroup* group = JSObject::getGroup(cx, obj);
@@ -1088,7 +1088,7 @@ IsArraySpecies(JSContext* cx, HandleObject origArray)
     if (!origArray->is<ArrayObject>())
         return true;
 
-    if (cx->compartment()->arraySpeciesLookup.tryOptimizeArray(cx, &origArray->as<ArrayObject>()))
+    if (cx->realm()->arraySpeciesLookup.tryOptimizeArray(cx, &origArray->as<ArrayObject>()))
         return true;
 
     Value ctor;
@@ -1271,6 +1271,12 @@ ArrayJoinDenseKernel(JSContext* cx, SeparatorOp sepOp, HandleNativeObject obj, u
              * Symbol stringifying is a TypeError, so into the slow path
              * with those as well.
              */
+            break;
+        } else if (IF_BIGINT(elem.isBigInt(), false)) {
+            // ToString(bigint) doesn't access bigint.toString or
+            // anything like that, so it can't mutate the array we're
+            // walking through, so it *could* be handled here. We don't
+            // do so yet for reasons of initial-implementation economy.
             break;
         } else {
             MOZ_ASSERT(elem.isMagic(JS_ELEMENTS_HOLE) || elem.isNullOrUndefined());

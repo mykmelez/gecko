@@ -124,6 +124,26 @@ SpammyLayoutWarningsEnabled()
 }
 #endif
 
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+void AssertUniqueItem(nsDisplayItem* aItem) {
+  nsIFrame::DisplayItemArray* items = aItem->Frame()->GetProperty(nsIFrame::DisplayItems());
+  if (!items) {
+    return;
+  }
+  for (nsDisplayItem* i : *items) {
+    if (i != aItem &&
+        !i->HasDeletedFrame() &&
+        i->Frame() == aItem->Frame() &&
+        i->GetPerFrameKey() == aItem->GetPerFrameKey()) {
+      if (i->mPreProcessedItem) {
+        continue;
+      }
+      MOZ_DIAGNOSTIC_ASSERT(false, "Duplicate display item!");
+    }
+  }
+}
+#endif
+
 /* static */ bool
 ActiveScrolledRoot::IsAncestor(const ActiveScrolledRoot* aAncestor,
                                const ActiveScrolledRoot* aDescendant)
@@ -996,6 +1016,7 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
       mAllowMergingAndFlattening(true),
       mWillComputePluginGeometry(false),
       mInTransform(false),
+      mInPageSequence(false),
       mIsInChromePresContext(false),
       mSyncDecodeImages(false),
       mIsPaintingToWindow(false),
@@ -3088,7 +3109,8 @@ nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
 {}
 
 nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-                             const ActiveScrolledRoot* aActiveScrolledRoot)
+                             const ActiveScrolledRoot* aActiveScrolledRoot,
+                             bool aAnonymous)
   : mFrame(aFrame)
   , mActiveScrolledRoot(aActiveScrolledRoot)
   , mAnimatedGeometryRoot(nullptr)
@@ -3102,7 +3124,7 @@ nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
 #endif
 {
   MOZ_COUNT_CTOR(nsDisplayItem);
-  if (aBuilder->IsRetainingDisplayList()) {
+  if (aBuilder->IsRetainingDisplayList() && !aAnonymous) {
     mFrame->AddDisplayItem(this);
   }
   mReferenceFrame = aBuilder->FindReferenceFrameFor(aFrame, &mToReferenceFrame);
@@ -6093,17 +6115,18 @@ nsDisplayBoxShadowInner::ComputeVisibility(nsDisplayListBuilder* aBuilder,
 }
 
 nsDisplayWrapList::nsDisplayWrapList(nsDisplayListBuilder* aBuilder,
-                                     nsIFrame* aFrame, nsDisplayList* aList)
+                                     nsIFrame* aFrame, nsDisplayList* aList, bool aAnonymous)
   : nsDisplayWrapList(aBuilder, aFrame, aList,
-                      aBuilder->CurrentActiveScrolledRoot())
+                      aBuilder->CurrentActiveScrolledRoot(), false, 0, aAnonymous)
 {}
 
 nsDisplayWrapList::nsDisplayWrapList(nsDisplayListBuilder* aBuilder,
                                      nsIFrame* aFrame, nsDisplayList* aList,
                                      const ActiveScrolledRoot* aActiveScrolledRoot,
                                      bool aClearClipChain,
-                                     uint32_t aIndex)
-  : nsDisplayItem(aBuilder, aFrame, aActiveScrolledRoot)
+                                     uint32_t aIndex,
+                                     bool aAnonymous)
+  : nsDisplayItem(aBuilder, aFrame, aActiveScrolledRoot, aAnonymous)
   , mFrameActiveScrolledRoot(aBuilder->CurrentActiveScrolledRoot())
   , mOverrideZIndex(0)
   , mIndex(aIndex)
@@ -6146,8 +6169,8 @@ nsDisplayWrapList::nsDisplayWrapList(nsDisplayListBuilder* aBuilder,
 }
 
 nsDisplayWrapList::nsDisplayWrapList(nsDisplayListBuilder* aBuilder,
-                                     nsIFrame* aFrame, nsDisplayItem* aItem)
-  : nsDisplayItem(aBuilder, aFrame)
+                                     nsIFrame* aFrame, nsDisplayItem* aItem, bool aAnonymous)
+  : nsDisplayItem(aBuilder, aFrame, aBuilder->CurrentActiveScrolledRoot(), aAnonymous)
   , mOverrideZIndex(0)
   , mIndex(0)
   , mHasZIndexOverride(false)
@@ -6501,6 +6524,12 @@ nsDisplayOpacity::NeedsActiveLayer(nsDisplayListBuilder* aBuilder, nsIFrame* aFr
     return true;
   }
   return false;
+}
+
+/* static */ bool
+nsDisplayOpacity::MayNeedActiveLayer(nsIFrame* aFrame)
+{
+  return ActiveLayerTracker::IsStyleMaybeAnimated(aFrame, eCSSProperty_opacity);
 }
 
 void
@@ -7459,8 +7488,10 @@ nsDisplayTableFixedPosition::CreateForFixedBackground(nsDisplayListBuilder* aBui
 nsDisplayStickyPosition::nsDisplayStickyPosition(nsDisplayListBuilder* aBuilder,
                                                  nsIFrame* aFrame,
                                                  nsDisplayList* aList,
-                                                 const ActiveScrolledRoot* aActiveScrolledRoot)
+                                                 const ActiveScrolledRoot* aActiveScrolledRoot,
+                                                 const ActiveScrolledRoot* aContainerASR)
   : nsDisplayOwnLayer(aBuilder, aFrame, aList, aActiveScrolledRoot)
+  , mContainerASR(aContainerASR)
 {
   MOZ_COUNT_CTOR(nsDisplayStickyPosition);
 }
@@ -7696,14 +7727,14 @@ nsDisplayStickyPosition::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder
         vBounds, hBounds, applied);
 
     aBuilder.PushClip(id);
-    aManager->CommandBuilder().PushOverrideForASR(GetActiveScrolledRoot(), Some(id));
+    aManager->CommandBuilder().PushOverrideForASR(mContainerASR, Some(id));
   }
 
   nsDisplayOwnLayer::CreateWebRenderCommands(aBuilder, aResources, aSc,
       aManager, aDisplayListBuilder);
 
   if (stickyScrollContainer) {
-    aManager->CommandBuilder().PopOverrideForASR(GetActiveScrolledRoot());
+    aManager->CommandBuilder().PopOverrideForASR(mContainerASR);
     aBuilder.PopClip();
   }
 
@@ -8603,14 +8634,14 @@ nsDisplayTransform::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBu
   }
 
   nsTArray<mozilla::wr::WrFilterOp> filters;
-  Maybe<Matrix4x4> transformForScrollData;
+  Maybe<nsDisplayTransform*> deferredTransformItem;
   if (!mFrame->HasPerspective()) {
     // If it has perspective, we create a new scroll data via the
     // UpdateScrollData call because that scenario is more complex. Otherwise
     // we can just stash the transform on the StackingContextHelper and
     // apply it to any scroll data that are created inside this
     // nsDisplayTransform.
-    transformForScrollData = Some(GetTransform().GetMatrix());
+    deferredTransformItem = Some(this);
   }
 
   // If it looks like we're animated, we should rasterize in local space
@@ -8630,7 +8661,7 @@ nsDisplayTransform::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBu
                            gfx::CompositionOp::OP_OVER,
                            !BackfaceIsHidden(),
                            mFrame->Extend3DContext() && !mNoExtendContext,
-                           transformForScrollData,
+                           deferredTransformItem,
                            nullptr,
                            rasterizeLocally);
 
@@ -9139,7 +9170,7 @@ nsDisplayPerspective::nsDisplayPerspective(nsDisplayListBuilder* aBuilder,
                                            nsIFrame* aPerspectiveFrame,
                                            nsDisplayList* aList)
   : nsDisplayItem(aBuilder, aPerspectiveFrame)
-  , mList(aBuilder, aPerspectiveFrame, aList)
+  , mList(aBuilder, aPerspectiveFrame, aList, true)
   , mTransformFrame(aTransformFrame)
   , mIndex(aBuilder->AllocatePerspectiveItemIndex())
 {

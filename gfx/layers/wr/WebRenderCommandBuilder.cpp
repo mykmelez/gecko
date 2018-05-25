@@ -315,6 +315,7 @@ struct DIGroup
   int32_t mAppUnitsPerDevPixel;
   gfx::Size mScale;
   FrameMetrics::ViewID mScrollId;
+  LayerPoint mResidualOffset;
   LayerIntRect mLayerBounds;
   Maybe<wr::ImageKey> mKey;
   std::vector<RefPtr<SourceSurface>> mExternalSurfaces;
@@ -569,9 +570,9 @@ struct DIGroup
 
     // Round the bounds out to leave space for unsnapped content
     LayoutDeviceToLayerScale2D scale(mScale.width, mScale.height);
-    LayerIntRect layerBounds = LayerIntRect::FromUnknownRect(mGroupBounds.ScaleToOutsidePixels(mScale.width, mScale.height, aGrouper->mAppUnitsPerDevPixel));
+    LayerIntRect layerBounds = mLayerBounds;
     IntSize dtSize = layerBounds.Size().ToUnknownSize();
-    LayoutDeviceRect bounds = layerBounds / scale;
+    LayoutDeviceRect bounds = (LayerRect(layerBounds) - mResidualOffset) / scale;
 
     if (mInvalidRect.IsEmpty()) {
       GP("Not repainting group because it's empty\n");
@@ -956,10 +957,7 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
         GP("Inner group size change\n");
         groupData->mFollowingGroup.ClearItems();
         if (groupData->mFollowingGroup.mKey) {
-          LayerIntRect layerBounds = LayerIntRect::FromUnknownRect(currentGroup->mGroupBounds.ScaleToOutsidePixels(currentGroup->mScale.width,
-                                                                                                                   currentGroup->mScale.height,
-                                                                                                                   mAppUnitsPerDevPixel));
-          groupData->mFollowingGroup.mInvalidRect = IntRect(IntPoint(0, 0), layerBounds.Size().ToUnknownSize());
+          MOZ_RELEASE_ASSERT(groupData->mFollowingGroup.mInvalidRect.IsEmpty());
           aCommandBuilder->mManager->AddImageKeyForDiscard(groupData->mFollowingGroup.mKey.value());
           groupData->mFollowingGroup.mKey = Nothing();
         }
@@ -968,6 +966,7 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
       groupData->mFollowingGroup.mAppUnitsPerDevPixel = currentGroup->mAppUnitsPerDevPixel;
       groupData->mFollowingGroup.mLayerBounds = currentGroup->mLayerBounds;
       groupData->mFollowingGroup.mScale = currentGroup->mScale;
+      groupData->mFollowingGroup.mResidualOffset = currentGroup->mResidualOffset;
 
       currentGroup = &groupData->mFollowingGroup;
 
@@ -1049,6 +1048,24 @@ Grouper::ConstructGroupInsideInactive(WebRenderCommandBuilder* aCommandBuilder,
   }
 }
 
+/* This is just a copy of nsRect::ScaleToOutsidePixels with an offset added in.
+ * The offset is applied just before the rounding. It's in the scaled space. */
+static mozilla::gfx::IntRect
+ScaleToOutsidePixelsOffset(nsRect aRect, float aXScale, float aYScale,
+                           nscoord aAppUnitsPerPixel, LayerPoint aOffset)
+{
+  mozilla::gfx::IntRect rect;
+  rect.SetNonEmptyBox(NSToIntFloor(NSAppUnitsToFloatPixels(aRect.x,
+                                                           float(aAppUnitsPerPixel)) * aXScale + aOffset.x),
+                      NSToIntFloor(NSAppUnitsToFloatPixels(aRect.y,
+                                                           float(aAppUnitsPerPixel)) * aYScale + aOffset.y),
+                      NSToIntCeil(NSAppUnitsToFloatPixels(aRect.XMost(),
+                                                          float(aAppUnitsPerPixel)) * aXScale + aOffset.x),
+                      NSToIntCeil(NSAppUnitsToFloatPixels(aRect.YMost(),
+                                                          float(aAppUnitsPerPixel)) * aYScale + aOffset.y));
+  return rect;
+}
+
 void
 WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
                                                   nsDisplayItem* aWrappingItem,
@@ -1074,11 +1091,16 @@ WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
   auto p = group.mGroupBounds;
   auto q = groupBounds;
   gfx::Size scale = aSc.GetInheritedScale();
+  auto trans = ViewAs<LayerPixel>(aSc.GetSnappingSurfaceTransform().GetTranslation());
+  auto snappedTrans = LayerIntPoint::Floor(trans);
+  LayerPoint residualOffset = trans - snappedTrans;
+
   GP("Inherrited scale %f %f\n", scale.width, scale.height);
   GP("Bounds: %d %d %d %d vs %d %d %d %d\n", p.x, p.y, p.width, p.height, q.x, q.y, q.width, q.height);
   if (!group.mGroupBounds.IsEqualEdges(groupBounds) ||
       group.mAppUnitsPerDevPixel != appUnitsPerDevPixel ||
-      group.mScale != scale) {
+      group.mScale != scale ||
+      group.mResidualOffset != residualOffset) {
     if (group.mAppUnitsPerDevPixel != appUnitsPerDevPixel) {
       GP("app unit %d %d\n", group.mAppUnitsPerDevPixel, appUnitsPerDevPixel);
     }
@@ -1090,8 +1112,7 @@ WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
 
     group.ClearItems();
     if (group.mKey) {
-      IntSize size = groupBounds.Size().ScaleToNearestPixels(scale.width, scale.height, g.mAppUnitsPerDevPixel);
-      group.mInvalidRect = IntRect(IntPoint(0, 0), size);
+      MOZ_RELEASE_ASSERT(group.mInvalidRect.IsEmpty());
       mManager->AddImageKeyForDiscard(group.mKey.value());
       group.mKey = Nothing();
     }
@@ -1103,12 +1124,18 @@ WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
   }
 
   g.mAppUnitsPerDevPixel = appUnitsPerDevPixel;
-  g.mTransform = Matrix::Scaling(scale.width, scale.height);
-  group.mAppUnitsPerDevPixel = appUnitsPerDevPixel;
+  group.mResidualOffset = residualOffset;
   group.mGroupBounds = groupBounds;
+  group.mAppUnitsPerDevPixel = appUnitsPerDevPixel;
+  group.mLayerBounds = LayerIntRect::FromUnknownRect(ScaleToOutsidePixelsOffset(group.mGroupBounds,
+                                                                                scale.width,
+                                                                                scale.height,
+                                                                                group.mAppUnitsPerDevPixel,
+                                                                                residualOffset));
+  g.mTransform = Matrix::Scaling(scale.width, scale.height)
+                                .PostTranslate(residualOffset.x, residualOffset.y);
   group.mScale = scale;
   group.mScrollId = scrollId;
-  group.mLayerBounds = LayerIntRect::FromUnknownRect(group.mGroupBounds.ScaleToOutsidePixels(scale.width, scale.height, group.mAppUnitsPerDevPixel));
   group.mAnimatedGeometryRootOrigin = group.mGroupBounds.TopLeft();
   g.ConstructGroups(this, aBuilder, aResources, &group, aList, aSc);
   mClipManager.EndList(aSc);
@@ -1344,9 +1371,52 @@ WebRenderCommandBuilder::CreateWebRenderCommandsFromDisplayList(nsDisplayList* a
 
         int32_t descendants = mLayerScrollData.size() - layerCountBeforeRecursing;
 
-        mLayerScrollData.emplace_back();
-        mLayerScrollData.back().Initialize(mManager->GetScrollData(), item,
-            descendants, stopAtAsr, aSc.GetTransformForScrollData());
+        // A deferred transform item is a nsDisplayTransform for which we did
+        // not create a dedicated WebRenderLayerScrollData item at the point
+        // that we encountered the item. Instead, we "deferred" the transform
+        // from that item to combine it into the WebRenderLayerScrollData produced
+        // by child display items. However, in the case where we have a child
+        // display item with a different ASR than the nsDisplayTransform item,
+        // we cannot do this, because it will not conform to APZ's expectations
+        // with respect to how the APZ tree ends up structured. In particular,
+        // the GetTransformToThis() for the child APZ (which is created for the
+        // child item's ASR) will not include the transform when we actually do
+        // want it to.
+        // When we run into this scenario, we solve it by creating two
+        // WebRenderLayerScrollData items; one that just holds the transform,
+        // that we deferred, and a child WebRenderLayerScrollData item that
+        // holds the scroll metadata for the child's ASR.
+        Maybe<nsDisplayTransform*> deferred = aSc.GetDeferredTransformItem();
+        if (deferred && (*deferred)->GetActiveScrolledRoot() != item->GetActiveScrolledRoot()) {
+          // This creates the child WebRenderLayerScrollData for |item|, but
+          // omits the transform (hence the Nothing() as the last argument to
+          // Initialize(...)). We also need to make sure that the ASR from
+          // the deferred transform item is not on this node, so we use that
+          // ASR as the "stop at" ASR for this WebRenderLayerScrollData.
+          mLayerScrollData.emplace_back();
+          mLayerScrollData.back().Initialize(mManager->GetScrollData(), item,
+              descendants, (*deferred)->GetActiveScrolledRoot(), Nothing());
+
+          // The above WebRenderLayerScrollData will also be a descendant of
+          // the transform-holding WebRenderLayerScrollData we create below.
+          descendants++;
+
+          // This creates the WebRenderLayerScrollData for the deferred transform
+          // item. This holds the transform matrix. and the remaining ASRs
+          // needed to complete the ASR chain (i.e. the ones from the stopAtAsr
+          // down to the deferred transform item's ASR, which must be "between"
+          // stopAtAsr and |item|'s ASR in the ASR tree.
+          mLayerScrollData.emplace_back();
+          mLayerScrollData.back().Initialize(mManager->GetScrollData(), *deferred,
+              descendants, stopAtAsr, Some((*deferred)->GetTransform().GetMatrix()));
+        } else {
+          // This is the "simple" case where we don't need to create two
+          // WebRenderLayerScrollData items; we can just create one that also
+          // holds the deferred transform matrix, if any.
+          mLayerScrollData.emplace_back();
+          mLayerScrollData.back().Initialize(mManager->GetScrollData(), item,
+              descendants, stopAtAsr, deferred ? Some((*deferred)->GetTransform().GetMatrix()) : Nothing());
+        }
       } else if (mLayerScrollData.size() != layerCountBeforeRecursing &&
                  !eventRegions.IsEmpty()) {
         // We are not forcing a new layer for |item|, but we did create some

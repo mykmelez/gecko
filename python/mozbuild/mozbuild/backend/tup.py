@@ -588,10 +588,6 @@ class TupBackend(CommonBackend):
             # TODO: AB_CD only exists in Makefiles at the moment.
             acdefines_flags += ' -DAB_CD=en-US'
 
-            # TODO: BOOKMARKS_INCLUDE_DIR is used by bookmarks.html.in, and is
-            # only defined in browser/locales/Makefile.in
-            acdefines_flags += ' -DBOOKMARKS_INCLUDE_DIR=%s/browser/locales/en-US/profile' % self.environment.topsrcdir
-
             # Use BUILD_FASTER to avoid CXXFLAGS/CPPFLAGS in
             # toolkit/content/buildconfig.html
             acdefines_flags += ' -DBUILD_FASTER=1'
@@ -788,10 +784,6 @@ class TupBackend(CommonBackend):
     def _handle_idl_manager(self, manager):
         if self.environment.is_artifact_build:
             return
-
-        dist_idl_backend_file = self._get_backend_file('dist/idl')
-        for idl in manager.idls.values():
-            dist_idl_backend_file.symlink_rule(idl['source'], output_group=self._installed_idls)
 
         backend_file = self._get_backend_file('xpcom/xpidl')
         backend_file.export_shell()

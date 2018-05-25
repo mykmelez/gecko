@@ -54,7 +54,7 @@ SetProcessMitigationPolicy(PROCESS_MITIGATION_POLICY aMitigationPolicy,
 static void
 SetMitigationPolicies(mozilla::ProcThreadAttributes& aAttrs, const bool aIsSafeMode)
 {
-  if (mozilla::IsWin10November2015UpdateOrLater()) {
+  if (mozilla::IsWin10AnniversaryUpdateOrLater()) {
     aAttrs.AddMitigationPolicy(PROCESS_CREATION_MITIGATION_POLICY_IMAGE_LOAD_PREFER_SYSTEM32_ALWAYS_ON);
   }
 }
@@ -122,7 +122,7 @@ int
 LauncherMain(int argc, wchar_t* argv[])
 {
   // Make sure that the launcher process itself has image load policies set
-  if (IsWin10November2015UpdateOrLater()) {
+  if (IsWin10AnniversaryUpdateOrLater()) {
     const DynamicallyLinkedFunctionPtr<decltype(&SetProcessMitigationPolicy)>
       pSetProcessMitigationPolicy(L"kernel32.dll", "SetProcessMitigationPolicy");
     if (pSetProcessMitigationPolicy) {
@@ -217,6 +217,11 @@ LauncherMain(int argc, wchar_t* argv[])
     ::TerminateProcess(process.get(), 1);
     return 1;
   }
+
+  // Keep the current process around until the callback process has created
+  // its message queue, to avoid the launched process's windows being forced
+  // into the background.
+  ::WaitForInputIdle(process.get(), kWaitForInputIdleTimeoutMS);
 
   return 0;
 }

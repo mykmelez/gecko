@@ -224,6 +224,9 @@
 #include "js/SliceBudget.h"
 #include "proxy/DeadObjectProxy.h"
 #include "util/Windows.h"
+#ifdef ENABLE_BIGINT
+#include "vm/BigIntType.h"
+#endif
 #include "vm/Debugger.h"
 #include "vm/GeckoProfiler.h"
 #include "vm/JSAtom.h"
@@ -495,7 +498,10 @@ static const FinalizePhase BackgroundFinalizePhases[] = {
             AllocKind::EXTERNAL_STRING,
             AllocKind::FAT_INLINE_ATOM,
             AllocKind::ATOM,
-            AllocKind::SYMBOL
+            AllocKind::SYMBOL,
+#ifdef ENABLE_BIGINT
+            AllocKind::BIGINT
+#endif
         }
     },
     {
@@ -594,7 +600,7 @@ Arena::finalize(FreeOp* fop, AllocKind thingKind, size_t thingSize)
         } else {
             t->finalize(fop);
             JS_POISON(t, JS_SWEPT_TENURED_PATTERN, thingSize, MemCheckKind::MakeUndefined);
-            TraceTenuredFinalize(t);
+            gcTracer.traceTenuredFinalize(t);
         }
     }
 
@@ -1294,7 +1300,7 @@ GCRuntime::init(uint32_t maxbytes, uint32_t maxNurseryBytes)
         return false;
 #endif
 
-    if (!InitTrace(*this))
+    if (!gcTracer.initTrace(*this))
         return false;
 
     if (!marker.init(mode))
@@ -1334,7 +1340,7 @@ GCRuntime::finish()
         AutoSetThreadIsSweeping threadIsSweeping;
         for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
             for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next())
-                js_delete(comp.get());
+                js_delete(JS::GetRealmForCompartment(comp.get()));
             zone->compartments().clear();
             js_delete(zone.get());
         }
@@ -1346,7 +1352,7 @@ GCRuntime::finish()
     FreeChunkPool(availableChunks_.ref());
     FreeChunkPool(emptyChunks_.ref());
 
-    FinishTrace();
+    gcTracer.finishTrace();
 
     nursery().printTotalProfileTimes();
     stats().printTotalProfileTimes();
@@ -2570,17 +2576,17 @@ GCRuntime::sweepZoneAfterCompacting(Zone* zone)
     if (jit::JitZone* jitZone = zone->jitZone())
         jitZone->sweep();
 
-    for (CompartmentsInZoneIter c(zone); !c.done(); c.next()) {
-        c->objectGroups.sweep();
-        c->sweepRegExps();
-        c->sweepSavedStacks();
-        c->sweepVarNames();
-        c->sweepGlobalObject();
-        c->sweepSelfHostingScriptSource();
-        c->sweepDebugEnvironments();
-        c->sweepJitCompartment();
-        c->sweepNativeIterators();
-        c->sweepTemplateObjects();
+    for (RealmsInZoneIter r(zone); !r.done(); r.next()) {
+        r->objectGroups.sweep();
+        r->sweepRegExps();
+        r->sweepSavedStacks();
+        r->sweepVarNames();
+        r->sweepGlobalObject();
+        r->sweepSelfHostingScriptSource();
+        r->sweepDebugEnvironments();
+        r->sweepJitRealm();
+        r->sweepObjectRealm();
+        r->sweepTemplateObjects();
     }
 }
 
@@ -3388,7 +3394,7 @@ GCRuntime::triggerZoneGC(Zone* zone, JS::gcreason::Reason reason, size_t used, s
 #endif
 
     if (zone->isAtomsZone()) {
-        /* We can't do a zone GC of the atoms compartment. */
+        /* We can't do a zone GC of the atoms zone. */
         if (rt->mainContextFromOwnThread()->keepAtoms || rt->hasHelperThreadZones()) {
             /* Skip GC and retrigger later, since atoms zone won't be collected
              * if keepAtoms is true. */
@@ -3803,11 +3809,11 @@ JS::Zone::sweepUniqueIds()
 }
 
 void
-JSCompartment::destroy(FreeOp* fop)
+Realm::destroy(FreeOp* fop)
 {
     JSRuntime* rt = fop->runtime();
     if (auto callback = rt->destroyRealmCallback)
-        callback(fop, JS::GetRealmForCompartment(this));
+        callback(fop, this);
     if (auto callback = rt->destroyCompartmentCallback)
         callback(fop, this);
     if (principals())
@@ -3845,15 +3851,16 @@ Zone::sweepCompartments(FreeOp* fop, bool keepAtleastOne, bool destroyingRuntime
     bool foundOne = false;
     while (read < end) {
         JSCompartment* comp = *read++;
-        MOZ_ASSERT(!rt->isAtomsCompartment(comp));
+        Realm* realm = JS::GetRealmForCompartment(comp);
+        MOZ_ASSERT(!realm->isAtomsRealm());
 
         /*
-         * Don't delete the last compartment if all the ones before it were
-         * deleted and keepAtleastOne is true.
+         * Don't delete the last compartment and realm if all the ones before
+         * it were deleted and keepAtleastOne is true.
          */
         bool dontDelete = read == end && !foundOne && keepAtleastOne;
-        if ((!comp->marked && !dontDelete) || destroyingRuntime) {
-            comp->destroy(fop);
+        if ((!realm->marked() && !dontDelete) || destroyingRuntime) {
+            realm->destroy(fop);
         } else {
             *write++ = comp;
             foundOne = true;
@@ -3899,7 +3906,7 @@ GCRuntime::sweepZones(FreeOp* fop, bool destroyingRuntime)
         if (zone->wasGCStarted()) {
             MOZ_ASSERT(!zone->isQueuedForBackgroundSweep());
             const bool zoneIsDead = zone->arenas.arenaListsAreEmpty() &&
-                                    !zone->hasMarkedCompartments();
+                                    !zone->hasMarkedRealms();
             if (zoneIsDead || destroyingRuntime)
             {
                 // We have just finished sweeping, so we should have freed any
@@ -4013,8 +4020,8 @@ GCRuntime::purgeRuntime()
 {
     gcstats::AutoPhase ap(stats(), gcstats::PhaseKind::PURGE);
 
-    for (GCCompartmentsIter comp(rt); !comp.done(); comp.next())
-        comp->purge();
+    for (GCRealmsIter realm(rt); !realm.done(); realm.next())
+        realm->purge();
 
     for (GCZonesIter zone(rt); !zone.done(); zone.next()) {
         zone->atomCache().clearAndShrink();
@@ -4037,7 +4044,7 @@ GCRuntime::purgeRuntime()
 }
 
 bool
-GCRuntime::shouldPreserveJITCode(JSCompartment* comp, int64_t currentTime,
+GCRuntime::shouldPreserveJITCode(Realm* realm, int64_t currentTime,
                                  JS::gcreason::Reason reason, bool canAllocateMoreCode)
 {
     if (cleanUpEverything)
@@ -4047,9 +4054,9 @@ GCRuntime::shouldPreserveJITCode(JSCompartment* comp, int64_t currentTime,
 
     if (alwaysPreserveCode)
         return true;
-    if (comp->preserveJitCode())
+    if (realm->preserveJitCode())
         return true;
-    if (comp->lastAnimationTime + PRMJ_USEC_PER_SEC >= currentTime)
+    if (realm->lastAnimationTime + PRMJ_USEC_PER_SEC >= currentTime)
         return true;
     if (reason == JS::gcreason::DEBUG_GC)
         return true;
@@ -4244,12 +4251,12 @@ GCRuntime::prepareZonesForCollection(JS::gcreason::Reason reason, bool* isFullOu
     // executable code limit.
     bool canAllocateMoreCode = jit::CanLikelyAllocateMoreExecutableMemory();
 
-    for (CompartmentsIter c(rt, WithAtoms); !c.done(); c.next()) {
-        c->marked = false;
-        c->scheduledForDestruction = false;
-        c->maybeAlive = c->shouldTraceGlobal() || !c->zone()->isGCScheduled();
-        if (shouldPreserveJITCode(c, currentTime, reason, canAllocateMoreCode))
-            c->zone()->setPreservingCode(true);
+    for (RealmsIter r(rt, WithAtoms); !r.done(); r.next()) {
+        r->unmark();
+        r->scheduledForDestruction = false;
+        r->maybeAlive = r->shouldTraceGlobal() || !r->zone()->isGCScheduled();
+        if (shouldPreserveJITCode(r, currentTime, reason, canAllocateMoreCode))
+            r->zone()->setPreservingCode(true);
     }
 
     if (!cleanUpEverything && canAllocateMoreCode) {
@@ -4490,7 +4497,7 @@ GCRuntime::markCompartments()
 
     for (GCCompartmentsIter comp(rt); !comp.done(); comp.next()) {
         MOZ_ASSERT(!comp->scheduledForDestruction);
-        if (!comp->maybeAlive && !rt->isAtomsCompartment(comp))
+        if (!comp->maybeAlive && !JS::GetRealmForCompartment(comp)->isAtomsRealm())
             comp->scheduledForDestruction = true;
     }
 }
@@ -5008,7 +5015,6 @@ GCRuntime::groupZonesForSweeping(JS::gcreason::Reason reason)
 
 #ifdef JS_GC_ZEAL
     // Use one component for two-slice zeal modes.
-    MOZ_ASSERT_IF(useZeal, isIncremental);
     if (useZeal && hasIncrementalTwoSliceZealMode())
         finder.useOneComponent();
 #endif
@@ -5334,9 +5340,9 @@ GCRuntime::endMarkingSweepGroup(FreeOp* fop, SliceBudget& budget)
 
     /*
      * Change state of current group to MarkGray to restrict marking to this
-     * group.  Note that there may be pointers to the atoms compartment, and
+     * group.  Note that there may be pointers to the atoms zone, and
      * these will be marked through, as they are not marked with
-     * MarkCrossCompartmentXXX.
+     * TraceCrossCompartmentEdge.
      */
     for (SweepGroupZonesIter zone(rt); !zone.done(); zone.next())
         zone->changeGCState(Zone::Mark, Zone::MarkGray);
@@ -5402,8 +5408,8 @@ UpdateAtomsBitmap(GCParallelTask* task)
     // For convenience sweep these tables non-incrementally as part of bitmap
     // sweeping; they are likely to be much smaller than the main atoms table.
     runtime->unsafeSymbolRegistry().sweep();
-    for (CompartmentsIter comp(runtime, SkipAtoms); !comp.done(); comp.next())
-        comp->sweepVarNames();
+    for (RealmsIter realm(runtime, SkipAtoms); !realm.done(); realm.next())
+        realm->sweepVarNames();
 }
 
 static void
@@ -5426,13 +5432,13 @@ static void
 SweepMisc(GCParallelTask* task)
 {
     JSRuntime* runtime = task->runtime();
-    for (SweepGroupCompartmentsIter c(runtime); !c.done(); c.next()) {
-        c->sweepGlobalObject();
-        c->sweepTemplateObjects();
-        c->sweepSavedStacks();
-        c->sweepSelfHostingScriptSource();
-        c->sweepNativeIterators();
-        c->sweepRegExps();
+    for (SweepGroupRealmsIter r(runtime); !r.done(); r.next()) {
+        r->sweepGlobalObject();
+        r->sweepTemplateObjects();
+        r->sweepSavedStacks();
+        r->sweepSelfHostingScriptSource();
+        r->sweepObjectRealm();
+        r->sweepRegExps();
     }
 }
 
@@ -5552,8 +5558,8 @@ GCRuntime::sweepJitDataOnMainThread(FreeOp* fop)
             js::CancelOffThreadIonCompile(rt, JS::Zone::Sweep);
         }
 
-        for (SweepGroupCompartmentsIter c(rt); !c.done(); c.next())
-            c->sweepJitCompartment();
+        for (SweepGroupRealmsIter r(rt); !r.done(); r.next())
+            r->sweepJitRealm();
 
         for (SweepGroupZonesIter zone(rt); !zone.done(); zone.next()) {
             if (jit::JitZone* jitZone = zone->jitZone())
@@ -5761,8 +5767,7 @@ GCRuntime::beginSweepingSweepGroup(FreeOp* fop, SliceBudget& budget)
 bool
 GCRuntime::shouldYieldForZeal(ZealMode mode)
 {
-    MOZ_ASSERT_IF(useZeal, isIncremental);
-    return useZeal && hasZealMode(mode);
+    return useZeal && isIncremental && hasZealMode(mode);
 }
 
 IncrementalProgress
@@ -5846,7 +5851,9 @@ GCRuntime::beginSweepPhase(JS::gcreason::Reason reason, AutoTraceSession& sessio
     gcstats::AutoPhase ap(stats(), gcstats::PhaseKind::SWEEP);
 
     sweepOnBackgroundThread =
-        reason != JS::gcreason::DESTROY_RUNTIME && !TraceEnabled() && CanUseExtraThreads();
+        reason != JS::gcreason::DESTROY_RUNTIME &&
+        !gcTracer.traceEnabled() &&
+        CanUseExtraThreads();
 
     releaseObservedTypes = shouldReleaseObservedTypes();
 
@@ -7471,7 +7478,7 @@ GCRuntime::gcCycle(bool nonincrementalByAPI, SliceBudget& budget, JS::gcreason::
         return result;
     }
 
-    TraceMajorGCStart();
+    gcTracer.traceMajorGCStart();
 
     incrementalCollectSlice(budget, reason, session);
 
@@ -7482,7 +7489,7 @@ GCRuntime::gcCycle(bool nonincrementalByAPI, SliceBudget& budget, JS::gcreason::
     clearSelectedForMarking();
 #endif
 
-    TraceMajorGCEnd();
+    gcTracer.traceMajorGCEnd();
 
     return IncrementalResult::Ok;
 }
@@ -7528,28 +7535,27 @@ GCRuntime::scanZonesBeforeGC()
     return zoneStats;
 }
 
-// The GC can only clean up scheduledForDestruction compartments that were
-// marked live by a barrier (e.g. by RemapWrappers from a navigation event).
-// It is also common to have compartments held live because they are part of a
-// cycle in gecko, e.g. involving the HTMLDocument wrapper. In this case, we
-// need to run the CycleCollector in order to remove these edges before the
-// compartment can be freed.
+// The GC can only clean up scheduledForDestruction realms that were marked live
+// by a barrier (e.g. by RemapWrappers from a navigation event). It is also
+// common to have realms held live because they are part of a cycle in gecko,
+// e.g. involving the HTMLDocument wrapper. In this case, we need to run the
+// CycleCollector in order to remove these edges before the realm can be freed.
 void
 GCRuntime::maybeDoCycleCollection()
 {
-    const static double ExcessiveGrayCompartments = 0.8;
-    const static size_t LimitGrayCompartments = 200;
+    const static double ExcessiveGrayRealms = 0.8;
+    const static size_t LimitGrayRealms = 200;
 
-    size_t compartmentsTotal = 0;
-    size_t compartmentsGray = 0;
-    for (CompartmentsIter c(rt, SkipAtoms); !c.done(); c.next()) {
-        ++compartmentsTotal;
-        GlobalObject* global = c->unsafeUnbarrieredMaybeGlobal();
+    size_t realmsTotal = 0;
+    size_t realmsGray = 0;
+    for (RealmsIter realm(rt, SkipAtoms); !realm.done(); realm.next()) {
+        ++realmsTotal;
+        GlobalObject* global = realm->unsafeUnbarrieredMaybeGlobal();
         if (global && global->isMarkedGray())
-            ++compartmentsGray;
+            ++realmsGray;
     }
-    double grayFraction = double(compartmentsGray) / double(compartmentsTotal);
-    if (grayFraction > ExcessiveGrayCompartments || compartmentsGray > LimitGrayCompartments)
+    double grayFraction = double(realmsGray) / double(realmsTotal);
+    if (grayFraction > ExcessiveGrayRealms || realmsGray > LimitGrayRealms)
         callDoCycleCollectionCallback(rt->mainContextFromOwnThread());
 }
 
@@ -7909,7 +7915,7 @@ AutoPrepareForTracing::AutoPrepareForTracing(JSContext* cx)
 
 JSCompartment*
 js::NewCompartment(JSContext* cx, JSPrincipals* principals,
-                   const JS::CompartmentOptions& options)
+                   const JS::RealmOptions& options)
 {
     JSRuntime* rt = cx->runtime();
     JS_AbortIfWrongThread(cx);
@@ -7947,7 +7953,7 @@ js::NewCompartment(JSContext* cx, JSPrincipals* principals,
         }
     }
 
-    ScopedJSDeletePtr<JSCompartment> compartment(cx->new_<JSCompartment>(zone, options));
+    ScopedJSDeletePtr<Realm> compartment(cx->new_<Realm>(zone, options));
     if (!compartment || !compartment->init(cx))
         return nullptr;
 
@@ -7992,12 +7998,14 @@ gc::MergeCompartments(JSCompartment* source, JSCompartment* target)
 void
 GCRuntime::mergeCompartments(JSCompartment* source, JSCompartment* target)
 {
-    // The source compartment must be specifically flagged as mergable.  This
-    // also implies that the compartment is not visible to the debugger.
-    MOZ_ASSERT(source->creationOptions_.mergeable());
-    MOZ_ASSERT(source->creationOptions_.invisibleToDebugger());
+    // The source realm must be specifically flagged as mergable.  This
+    // also implies that the realm is not visible to the debugger.
+    Realm* sourceRealm = JS::GetRealmForCompartment(source);
+    Realm* targetRealm = JS::GetRealmForCompartment(target);
+    MOZ_ASSERT(sourceRealm->creationOptions().mergeable());
+    MOZ_ASSERT(sourceRealm->creationOptions().invisibleToDebugger());
 
-    MOZ_ASSERT(!source->hasBeenEntered());
+    MOZ_ASSERT(!sourceRealm->hasBeenEntered());
     MOZ_ASSERT(source->zone()->compartments().length() == 1);
 
     JSContext* cx = rt->mainContextFromOwnThread();
@@ -8007,18 +8015,18 @@ GCRuntime::mergeCompartments(JSCompartment* source, JSCompartment* target)
 
     AutoTraceSession session(rt);
 
-    // Cleanup tables and other state in the source compartment that will be
-    // meaningless after merging into the target compartment.
+    // Cleanup tables and other state in the source realm/zone that will be
+    // meaningless after merging into the target realm/zone.
 
-    source->clearTables();
+    sourceRealm->clearTables();
     source->zone()->clearTables();
-    source->unsetIsDebuggee();
+    sourceRealm->unsetIsDebuggee();
 
     // The delazification flag indicates the presence of LazyScripts in a
-    // compartment for the Debugger API, so if the source compartment created
-    // LazyScripts, the flag must be propagated to the target compartment.
-    if (source->needsDelazificationForDebugger())
-        target->scheduleDelazificationForDebugger();
+    // realm for the Debugger API, so if the source realm created LazyScripts,
+    // the flag must be propagated to the target realm.
+    if (sourceRealm->needsDelazificationForDebugger())
+        targetRealm->scheduleDelazificationForDebugger();
 
     // Release any relocated arenas which we may be holding on to as they might
     // be in the source zone
@@ -8029,11 +8037,11 @@ GCRuntime::mergeCompartments(JSCompartment* source, JSCompartment* target)
 
     for (auto script = source->zone()->cellIter<JSScript>(); !script.done(); script.next()) {
         MOZ_ASSERT(script->compartment() == source);
-        script->compartment_ = target;
+        script->realm_ = JS::GetRealmForCompartment(target);
         script->setTypesGeneration(target->zone()->types.generation);
     }
 
-    GlobalObject* global = target->maybeGlobal();
+    GlobalObject* global = targetRealm->maybeGlobal();
     MOZ_ASSERT(global);
 
     for (auto group = source->zone()->cellIter<ObjectGroup>(); !group.done(); group.next()) {
@@ -8054,7 +8062,7 @@ GCRuntime::mergeCompartments(JSCompartment* source, JSCompartment* target)
         }
 
         group->setGeneration(target->zone()->types.generation);
-        group->compartment_ = target;
+        group->realm_ = JS::GetRealmForCompartment(target);
 
         // Remove any unboxed layouts from the list in the off thread
         // compartment. These do not need to be reinserted in the target
@@ -8101,27 +8109,27 @@ GCRuntime::mergeCompartments(JSCompartment* source, JSCompartment* target)
     atomMarking.adoptMarkedAtoms(target->zone(), source->zone());
 
     // Merge script name maps in the target compartment's map.
-    if (rt->lcovOutput().isEnabled() && source->scriptNameMap) {
+    if (rt->lcovOutput().isEnabled() && sourceRealm->scriptNameMap) {
         AutoEnterOOMUnsafeRegion oomUnsafe;
 
-        if (!target->scriptNameMap) {
-            target->scriptNameMap = cx->new_<ScriptNameMap>();
+        if (!targetRealm->scriptNameMap) {
+            targetRealm->scriptNameMap = cx->make_unique<ScriptNameMap>();
 
-            if (!target->scriptNameMap)
+            if (!targetRealm->scriptNameMap)
                 oomUnsafe.crash("Failed to create a script name map.");
 
-            if (!target->scriptNameMap->init())
+            if (!targetRealm->scriptNameMap->init())
                 oomUnsafe.crash("Failed to initialize a script name map.");
         }
 
-        for (ScriptNameMap::Range r = source->scriptNameMap->all(); !r.empty(); r.popFront()) {
+        for (ScriptNameMap::Range r = sourceRealm->scriptNameMap->all(); !r.empty(); r.popFront()) {
             JSScript* key = r.front().key();
-            const char* value = r.front().value();
-            if (!target->scriptNameMap->putNew(key, value))
+            auto value = Move(r.front().value());
+            if (!targetRealm->scriptNameMap->putNew(key, Move(value)))
                 oomUnsafe.crash("Failed to add an entry in the script name map.");
         }
 
-        source->scriptNameMap->clear();
+        sourceRealm->scriptNameMap->clear();
     }
 
     // The source compartment is now completely empty, and is the only
@@ -8434,6 +8442,10 @@ JS::GCCellPtr::GCCellPtr(const Value& v)
         ptr = checkedCast(&v.toObject(), JS::TraceKind::Object);
     else if (v.isSymbol())
         ptr = checkedCast(v.toSymbol(), JS::TraceKind::Symbol);
+#ifdef ENABLE_BIGINT
+    else if (v.isBigInt())
+        ptr = checkedCast(v.toBigInt(), JS::TraceKind::BigInt);
+#endif
     else if (v.isPrivateGCThing())
         ptr = checkedCast(v.toGCThing(), v.toGCThing()->getTraceKind());
     else
@@ -8468,13 +8480,14 @@ js::gc::CheckHashTablesAfterMovingGC(JSRuntime* rt)
                 table->checkAfterMovingGC();
         }
     }
-    for (CompartmentsIter c(rt, SkipAtoms); !c.done(); c.next()) {
-        c->objectGroups.checkTablesAfterMovingGC();
-        c->dtoaCache.checkCacheAfterMovingGC();
-        c->checkWrapperMapAfterMovingGC();
-        c->checkScriptMapsAfterMovingGC();
-        if (c->debugEnvs)
-            c->debugEnvs->checkHashTablesAfterMovingGC();
+
+    for (RealmsIter r(rt, SkipAtoms); !r.done(); r.next()) {
+        r->objectGroups.checkTablesAfterMovingGC();
+        r->dtoaCache.checkCacheAfterMovingGC();
+        JS::GetCompartmentForRealm(r)->checkWrapperMapAfterMovingGC();
+        r->checkScriptMapsAfterMovingGC();
+        if (r->debugEnvs)
+            r->debugEnvs->checkHashTablesAfterMovingGC();
     }
 }
 #endif
@@ -9135,6 +9148,9 @@ js::gc::ClearEdgesTracer::clearEdge(S** thingp)
 void js::gc::ClearEdgesTracer::onObjectEdge(JSObject** objp) { clearEdge(objp); }
 void js::gc::ClearEdgesTracer::onStringEdge(JSString** strp) { clearEdge(strp); }
 void js::gc::ClearEdgesTracer::onSymbolEdge(JS::Symbol** symp) { clearEdge(symp); }
+#ifdef ENABLE_BIGINT
+void js::gc::ClearEdgesTracer::onBigIntEdge(JS::BigInt** bip) { clearEdge(bip); }
+#endif
 void js::gc::ClearEdgesTracer::onScriptEdge(JSScript** scriptp) { clearEdge(scriptp); }
 void js::gc::ClearEdgesTracer::onShapeEdge(js::Shape** shapep) { clearEdge(shapep); }
 void js::gc::ClearEdgesTracer::onObjectGroupEdge(js::ObjectGroup** groupp) { clearEdge(groupp); }

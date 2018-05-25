@@ -8,14 +8,12 @@ var Services = require("Services");
 loader.lazyRequireGetter(this, "Utils", "devtools/client/webconsole/utils", true);
 loader.lazyRequireGetter(this, "extend", "devtools/shared/extend", true);
 loader.lazyRequireGetter(this, "TargetFactory", "devtools/client/framework/target", true);
-loader.lazyRequireGetter(this, "gDevToolsBrowser", "devtools/client/framework/devtools-browser", true);
 loader.lazyRequireGetter(this, "Tools", "devtools/client/definitions", true);
 loader.lazyRequireGetter(this, "Telemetry", "devtools/client/shared/telemetry");
 loader.lazyRequireGetter(this, "NewWebConsoleFrame", "devtools/client/webconsole/new-webconsole", true);
 loader.lazyRequireGetter(this, "gDevTools", "devtools/client/framework/devtools", true);
 loader.lazyRequireGetter(this, "DebuggerServer", "devtools/server/main", true);
 loader.lazyRequireGetter(this, "DebuggerClient", "devtools/shared/client/debugger-client", true);
-loader.lazyRequireGetter(this, "showDoorhanger", "devtools/client/shared/doorhanger", true);
 loader.lazyRequireGetter(this, "viewSource", "devtools/client/shared/view-source");
 loader.lazyRequireGetter(this, "l10n", "devtools/client/webconsole/webconsole-l10n");
 const BC_WINDOW_FEATURES = "chrome,titlebar,toolbar,centerscreen,resizable,dialog=no";
@@ -352,17 +350,6 @@ WebConsole.prototype = {
   },
 
   /**
-   * The clear output button handler.
-   * @private
-   */
-  _onClearButton() {
-    if (this.target.isLocalTab) {
-      gDevToolsBrowser.getDeveloperToolbar(this.browserWindow)
-        .resetErrorsCount(this.target.tab);
-    }
-  },
-
-  /**
    * Alias for the WebConsoleFrame.setFilterState() method.
    * @see webconsole.js::WebConsoleFrame.setFilterState()
    */
@@ -610,17 +597,10 @@ BrowserConsole.prototype = extend(WebConsole.prototype, {
     // Make sure that the closing of the Browser Console window destroys this
     // instance.
     window.addEventListener("unload", () => {
-      window.removeEventListener("focus", onFocus);
       this.destroy();
     }, {once: true});
 
     this._telemetry.toolOpened("browserconsole");
-
-    // Create an onFocus handler just to display the dev edition promo.
-    // This is to prevent race conditions in some environments.
-    // Hook to display promotional Developer Edition doorhanger. Only displayed once.
-    let onFocus = () => showDoorhanger({ window, type: "deveditionpromo" });
-    window.addEventListener("focus", onFocus);
 
     this._bcInit = this.$init();
     return this._bcInit;

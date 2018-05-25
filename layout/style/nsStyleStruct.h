@@ -43,6 +43,7 @@ class nsIURI;
 class nsTextFrame;
 class imgIContainer;
 class nsPresContext;
+struct nsStyleDisplay;
 struct nsStyleVisibility;
 namespace mozilla {
 class ComputedStyle;
@@ -382,7 +383,7 @@ struct nsStyleImage
     if (mType == eStyleImageType_Image && !mImage->IsResolved()) {
       const nsStyleImageRequest* oldRequest =
         (aOldImage && aOldImage->GetType() == eStyleImageType_Image)
-        ? aOldImage->GetImageRequest() : nullptr;
+        ? aOldImage->ImageRequest() : nullptr;
       mImage->Resolve(aContext, oldRequest);
     }
   }
@@ -390,20 +391,20 @@ struct nsStyleImage
   nsStyleImageType GetType() const {
     return mType;
   }
-  nsStyleImageRequest* GetImageRequest() const {
+  nsStyleImageRequest* ImageRequest() const {
     MOZ_ASSERT(mType == eStyleImageType_Image, "Data is not an image!");
     MOZ_ASSERT(mImage);
     return mImage;
   }
   imgRequestProxy* GetImageData() const {
-    return GetImageRequest()->get();
+    return ImageRequest()->get();
   }
   nsStyleGradient* GetGradientData() const {
     NS_ASSERTION(mType == eStyleImageType_Gradient, "Data is not a gradient!");
     return mGradient;
   }
   bool IsResolved() const {
-    return mType != eStyleImageType_Image || GetImageRequest()->IsResolved();
+    return mType != eStyleImageType_Image || ImageRequest()->IsResolved();
   }
   const nsAtom* GetElementId() const {
     NS_ASSERTION(mType == eStyleImageType_Element, "Data is not an element!");
@@ -2522,6 +2523,13 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay
   inline bool HasTransform(const nsIFrame* aContextFrame) const;
 
   /**
+   * Returns true when the element has the perspective property,
+   * and supports CSS transforms. aContextFrame is the frame for
+   * which this is the nsStyleDisplay.
+   */
+  inline bool HasPerspective(const nsIFrame* aContextFrame) const;
+
+  /**
    * Returns true when the element is a containing block for its fixed-pos
    * descendants.
    * aContextFrame is the frame for which this is the nsStyleDisplay.
@@ -2685,15 +2693,16 @@ public:
     return mContent.mCounters;
   }
 
-  nsStyleImageRequest* GetImageRequest() const
+  nsStyleImageRequest* ImageRequest() const
   {
     MOZ_ASSERT(mType == eStyleContentType_Image);
+    MOZ_ASSERT(mContent.mImage);
     return mContent.mImage;
   }
 
   imgRequestProxy* GetImage() const
   {
-    return GetImageRequest()->get();
+    return ImageRequest()->get();
   }
 
   void SetKeyword(nsStyleContentType aType)
@@ -2891,7 +2900,15 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleUserInterface
   nsTArray<nsCursorImage> mCursorImages;      // [inherited] images and coords
   mozilla::StyleComplexColor mCaretColor;     // [inherited]
 
+  mozilla::StyleComplexColor mScrollbarFaceColor;   // [inherited]
+  mozilla::StyleComplexColor mScrollbarTrackColor;  // [inherited]
+
   inline uint8_t GetEffectivePointerEvents(nsIFrame* aFrame) const;
+
+  bool HasCustomScrollbars() const
+  {
+    return !mScrollbarFaceColor.mIsAuto || !mScrollbarTrackColor.mIsAuto;
+  }
 };
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleXUL

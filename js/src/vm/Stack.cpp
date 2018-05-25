@@ -9,7 +9,7 @@
 #include "gc/Marking.h"
 #include "jit/BaselineFrame.h"
 #include "jit/JitcodeMap.h"
-#include "jit/JitCompartment.h"
+#include "jit/JitRealm.h"
 #include "vm/Debugger.h"
 #include "vm/JSContext.h"
 #include "vm/Opcodes.h"
@@ -673,12 +673,14 @@ FrameIter::settleOnActivation()
 
         Activation* activation = data_.activations_.activation();
 
-        // If the caller supplied principals, only show activations which are subsumed (of the same
-        // origin or of an origin accessible) by these principals.
+        // If the caller supplied principals, only show activations which are
+        // subsumed (of the same origin or of an origin accessible) by these
+        // principals.
         if (data_.principals_) {
             JSContext* cx = data_.cx_;
             if (JSSubsumesOp subsumes = cx->runtime()->securityCallbacks->subsumes) {
-                if (!subsumes(data_.principals_, activation->compartment()->principals())) {
+                JS::Realm* realm = JS::GetRealmForCompartment(activation->compartment());
+                if (!subsumes(data_.principals_, realm->principals())) {
                     ++data_.activations_;
                     continue;
                 }
@@ -1622,7 +1624,7 @@ jit::JitActivation::getRematerializedFrame(JSContext* cx, const JSJitFrameIter& 
         // Frames are often rematerialized with the cx inside a Debugger's
         // compartment. To recover slots and to create CallObjects, we need to
         // be in the activation's compartment.
-        AutoCompartmentUnchecked ac(cx, compartment_);
+        AutoRealmUnchecked ar(cx, compartment_);
 
         if (!RematerializedFrame::RematerializeInlineFrames(cx, top, inlineIter, recover, frames))
             return nullptr;
@@ -1655,7 +1657,7 @@ jit::JitActivation::removeRematerializedFramesFromDebugger(JSContext* cx, uint8_
     // Ion bailout can fail due to overrecursion and OOM. In such cases we
     // cannot honor any further Debugger hooks on the frame, and need to
     // ensure that its Debugger.Frame entry is cleaned up.
-    if (!cx->compartment()->isDebuggee() || !rematerializedFrames_)
+    if (!cx->realm()->isDebuggee() || !rematerializedFrames_)
         return;
     if (RematerializedFrameTable::Ptr p = rematerializedFrames_->lookup(top)) {
         for (uint32_t i = 0; i < p->value().length(); i++)
