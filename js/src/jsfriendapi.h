@@ -553,8 +553,8 @@ extern JS_FRIEND_API(size_t)
 SizeOfDataIfCDataObject(mozilla::MallocSizeOf mallocSizeOf, JSObject* obj);
 #endif
 
-extern JS_FRIEND_API(JSCompartment*)
-GetAnyCompartmentInZone(JS::Zone* zone);
+extern JS_FRIEND_API(JS::Realm*)
+GetAnyRealmInZone(JS::Zone* zone);
 
 /*
  * Shadow declarations of JS internal structures, for access by inline access
@@ -2671,8 +2671,8 @@ bool IdMatchesAtom(jsid id, JSString* atom);
 static MOZ_ALWAYS_INLINE jsid
 NON_INTEGER_ATOM_TO_JSID(JSAtom* atom)
 {
-    MOZ_ASSERT(((size_t)atom & 0x7) == 0);
-    jsid id = JSID_FROM_BITS((size_t)atom);
+    MOZ_ASSERT(((size_t)atom & JSID_TYPE_MASK) == 0);
+    jsid id = JSID_FROM_BITS((size_t)atom | JSID_TYPE_STRING);
     MOZ_ASSERT(js::detail::IdMatchesAtom(id, atom));
     return id;
 }
@@ -2680,8 +2680,8 @@ NON_INTEGER_ATOM_TO_JSID(JSAtom* atom)
 static MOZ_ALWAYS_INLINE jsid
 NON_INTEGER_ATOM_TO_JSID(JSString* atom)
 {
-    MOZ_ASSERT(((size_t)atom & 0x7) == 0);
-    jsid id = JSID_FROM_BITS((size_t)atom);
+    MOZ_ASSERT(((size_t)atom & JSID_TYPE_MASK) == 0);
+    jsid id = JSID_FROM_BITS((size_t)atom | JSID_TYPE_STRING);
     MOZ_ASSERT(js::detail::IdMatchesAtom(id, atom));
     return id;
 }
@@ -2696,7 +2696,7 @@ JSID_IS_ATOM(jsid id)
 static MOZ_ALWAYS_INLINE bool
 JSID_IS_ATOM(jsid id, JSAtom* atom)
 {
-    return id == JSID_FROM_BITS((size_t)atom);
+    return id == NON_INTEGER_ATOM_TO_JSID(atom);
 }
 
 static MOZ_ALWAYS_INLINE JSAtom*

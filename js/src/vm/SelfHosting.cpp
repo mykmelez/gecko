@@ -1764,7 +1764,7 @@ js::intrinsic_StringSplitString(JSContext* cx, unsigned argc, Value* vp)
     RootedString string(cx, args[0].toString());
     RootedString sep(cx, args[1].toString());
 
-    RootedObjectGroup group(cx, ObjectGroupCompartment::getStringSplitStringGroup(cx));
+    RootedObjectGroup group(cx, ObjectGroupRealm::getStringSplitStringGroup(cx));
     if (!group)
         return false;
 
@@ -1790,7 +1790,7 @@ intrinsic_StringSplitStringLimit(JSContext* cx, unsigned argc, Value* vp)
     uint32_t limit = uint32_t(args[2].toNumber());
     MOZ_ASSERT(limit > 0, "Zero limit case is already handled in self-hosted code.");
 
-    RootedObjectGroup group(cx, ObjectGroupCompartment::getStringSplitStringGroup(cx));
+    RootedObjectGroup group(cx, ObjectGroupRealm::getStringSplitStringGroup(cx));
     if (!group)
         return false;
 
@@ -2791,11 +2791,9 @@ JSRuntime::createSelfHostingGlobal(JSContext* cx)
     options.creationOptions().setNewZone();
     options.behaviors().setDiscardSource(true);
 
-    JSCompartment* compartment = NewCompartment(cx, nullptr, options);
-    if (!compartment)
+    Realm* realm = NewRealm(cx, nullptr, options);
+    if (!realm)
         return nullptr;
-
-    JS::Realm* realm = JS::GetRealmForCompartment(compartment);
 
     static const ClassOps shgClassOps = {
         nullptr, nullptr, nullptr, nullptr,

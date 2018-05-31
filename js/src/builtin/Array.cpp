@@ -3555,7 +3555,7 @@ static const JSFunctionSpec array_methods[] = {
 
 #ifdef NIGHTLY_BUILD
     JS_SELF_HOSTED_FN("flatMap",     "ArrayFlatMap",     1,0),
-    JS_SELF_HOSTED_FN("flatten",     "ArrayFlatten",     0,0),
+    JS_SELF_HOSTED_FN("flat",        "ArrayFlat",        0,0),
 #endif
 
     JS_FS_END
@@ -3702,7 +3702,8 @@ CreateArrayPrototype(JSContext* cx, JSProtoKey key)
      * arrays in JSON and script literals and allows setDenseArrayElement to
      * be used without updating the indexed type set for such default arrays.
      */
-    if (!JSObject::setNewGroupUnknown(cx, &ArrayObject::class_, arrayProto))
+    ObjectGroupRealm& realm = ObjectGroupRealm::getForNewObject(cx);
+    if (!JSObject::setNewGroupUnknown(cx, realm, &ArrayObject::class_, arrayProto))
         return nullptr;
 
     return arrayProto;

@@ -112,6 +112,7 @@
 #include "nsIMIMEInputStream.h"
 #include "nsIMultiplexInputStream.h"
 #include "../../cache2/CacheFileUtils.h"
+#include "nsINetworkLinkService.h"
 
 #ifdef MOZ_TASK_TRACER
 #include "GeckoTaskTracer.h"
@@ -5961,6 +5962,13 @@ nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
         return rv;
     }
 
+    if (!mLoadGroup && !mCallbacks) {
+        // If no one called SetLoadGroup or SetNotificationCallbacks, the private
+        // state has not been updated on PrivateBrowsingChannel (which we derive from)
+        // Hence, we have to call UpdatePrivateBrowsing() here
+        UpdatePrivateBrowsing();
+    }
+
     if (WaitingForTailUnblock()) {
         // This channel is marked as Tail and is part of a request context
         // that has positive number of non-tailed requestst, hence this channel
@@ -9122,6 +9130,23 @@ nsHttpChannel::TriggerNetwork()
 nsresult
 nsHttpChannel::MaybeRaceCacheWithNetwork()
 {
+    nsresult rv;
+
+    nsCOMPtr<nsINetworkLinkService> netLinkSvc =
+        do_GetService(NS_NETWORK_LINK_SERVICE_CONTRACTID, &rv);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    uint32_t linkType;
+    rv = netLinkSvc->GetLinkType(&linkType);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    if (!(linkType == nsINetworkLinkService::LINK_TYPE_UNKNOWN ||
+          linkType == nsINetworkLinkService::LINK_TYPE_ETHERNET ||
+          linkType == nsINetworkLinkService::LINK_TYPE_USB ||
+          linkType == nsINetworkLinkService::LINK_TYPE_WIFI)) {
+        return NS_OK;
+    }
+
     // Don't trigger the network if the load flags say so.
     if (mLoadFlags & (LOAD_ONLY_FROM_CACHE | LOAD_NO_NETWORK_IO)) {
         return NS_OK;

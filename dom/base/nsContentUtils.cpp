@@ -133,7 +133,6 @@
 #include "nsIDocument.h"
 #include "nsIDocumentEncoder.h"
 #include "nsIDOMChromeWindow.h"
-#include "nsIDOMNode.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsIDragService.h"
 #include "nsIFormControl.h"
@@ -2071,10 +2070,7 @@ nsContentUtils::Shutdown()
 
 /**
  * Checks whether two nodes come from the same origin. aTrustedNode is
- * considered 'safe' in that a user can operate on it and that it isn't
- * a js-object that implements nsIDOMNode.
- * Never call this function with the first node provided by script, it
- * must always be known to be a 'real' node!
+ * considered 'safe' in that a user can operate on it.
  */
 // static
 nsresult
@@ -2122,15 +2118,6 @@ nsContentUtils::CanCallerAccess(nsIPrincipal* aSubjectPrincipal,
   // The subject doesn't subsume aPrincipal. Allow access only if the subject
   // is chrome.
   return IsCallerChrome();
-}
-
-// static
-bool
-nsContentUtils::CanCallerAccess(nsIDOMNode *aNode)
-{
-  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
-  NS_ENSURE_TRUE(node, false);
-  return CanCallerAccess(node);
 }
 
 // static
@@ -2597,18 +2584,17 @@ nsContentUtils::GetAncestors(nsINode* aNode,
 
 // static
 nsresult
-nsContentUtils::GetAncestorsAndOffsets(nsIDOMNode* aNode,
+nsContentUtils::GetAncestorsAndOffsets(nsINode* aNode,
                                        int32_t aOffset,
                                        nsTArray<nsIContent*>* aAncestorNodes,
                                        nsTArray<int32_t>* aAncestorOffsets)
 {
   NS_ENSURE_ARG_POINTER(aNode);
 
-  nsCOMPtr<nsIContent> content(do_QueryInterface(aNode));
-
-  if (!content) {
+  if (!aNode->IsContent()) {
     return NS_ERROR_FAILURE;
   }
+  nsIContent* content = aNode->AsContent();
 
   if (!aAncestorNodes->IsEmpty()) {
     NS_WARNING("aAncestorNodes is not empty");
@@ -2621,7 +2607,7 @@ nsContentUtils::GetAncestorsAndOffsets(nsIDOMNode* aNode,
   }
 
   // insert the node itself
-  aAncestorNodes->AppendElement(content.get());
+  aAncestorNodes->AppendElement(content);
   aAncestorOffsets->AppendElement(aOffset);
 
   // insert all the ancestors
@@ -2635,25 +2621,6 @@ nsContentUtils::GetAncestorsAndOffsets(nsIDOMNode* aNode,
   }
 
   return NS_OK;
-}
-
-// static
-nsresult
-nsContentUtils::GetCommonAncestor(nsIDOMNode *aNode,
-                                  nsIDOMNode *aOther,
-                                  nsIDOMNode** aCommonAncestor)
-{
-  *aCommonAncestor = nullptr;
-
-  nsCOMPtr<nsINode> node1 = do_QueryInterface(aNode);
-  nsCOMPtr<nsINode> node2 = do_QueryInterface(aOther);
-
-  NS_ENSURE_TRUE(node1 && node2, NS_ERROR_UNEXPECTED);
-
-  nsINode* common = GetCommonAncestor(node1, node2);
-  NS_ENSURE_TRUE(common, NS_ERROR_NOT_AVAILABLE);
-
-  return CallQueryInterface(common, aCommonAncestor);
 }
 
 template <typename Node, typename GetParentFunc>
@@ -2800,18 +2767,6 @@ nsContentUtils::ComparePoints(nsINode* aParent1, int32_t aOffset1,
   // XXX aOffset2 may be -1 as mentioned above.  So, why does this return it's
   //     *after* of the valid DOM point?
   return parent->ComputeIndexOf(child1) < aOffset2 ? -1 : 1;
-}
-
-/* static */
-int32_t
-nsContentUtils::ComparePoints(nsIDOMNode* aParent1, int32_t aOffset1,
-                              nsIDOMNode* aParent2, int32_t aOffset2,
-                              bool* aDisconnected)
-{
-  nsCOMPtr<nsINode> parent1 = do_QueryInterface(aParent1);
-  nsCOMPtr<nsINode> parent2 = do_QueryInterface(aParent2);
-  NS_ENSURE_TRUE(parent1 && parent2, -1);
-  return ComparePoints(parent1, aOffset1, parent2, aOffset2);
 }
 
 /* static */
@@ -3484,9 +3439,7 @@ nsContentUtils::GetContextForContent(const nsIContent* aContent)
 bool
 nsContentUtils::CanLoadImage(nsIURI* aURI, nsINode* aNode,
                              nsIDocument* aLoadingDocument,
-                             nsIPrincipal* aLoadingPrincipal,
-                             int16_t* aImageBlockingStatus,
-                             uint32_t aContentType)
+                             nsIPrincipal* aLoadingPrincipal)
 {
   MOZ_ASSERT(aURI, "Must have a URI");
   MOZ_ASSERT(aLoadingDocument, "Must have a document");
@@ -3518,21 +3471,16 @@ nsContentUtils::CanLoadImage(nsIURI* aURI, nsINode* aNode,
       CheckLoadURIWithPrincipal(aLoadingPrincipal, aURI,
                                 nsIScriptSecurityManager::ALLOW_CHROME);
     if (NS_FAILED(rv)) {
-      if (aImageBlockingStatus) {
-        // Reject the request itself, not all requests to the relevant
-        // server...
-        *aImageBlockingStatus = nsIContentPolicy::REJECT_REQUEST;
-      }
       return false;
     }
   }
 
   nsCOMPtr<nsILoadInfo> secCheckLoadInfo =
-    new LoadInfo(aLoadingPrincipal,
-                 aLoadingPrincipal, // triggering principal
-                 aNode,
-                 nsILoadInfo::SEC_ONLY_FOR_EXPLICIT_CONTENTSEC_CHECK,
-                 aContentType);
+    new mozilla::net::LoadInfo(aLoadingPrincipal,
+                               aLoadingPrincipal, // triggering principal
+                               aNode,
+                               nsILoadInfo::SEC_ONLY_FOR_EXPLICIT_CONTENTSEC_CHECK,
+                               nsIContentPolicy::TYPE_INTERNAL_IMAGE);
 
   int16_t decision = nsIContentPolicy::ACCEPT;
 
@@ -3541,10 +3489,6 @@ nsContentUtils::CanLoadImage(nsIURI* aURI, nsINode* aNode,
                                  &decision,
                                  GetContentPolicy());
 
-  if (aImageBlockingStatus) {
-    *aImageBlockingStatus =
-      NS_FAILED(rv) ? nsIContentPolicy::REJECT_REQUEST : decision;
-  }
   return NS_FAILED(rv) ? false : NS_CP_ACCEPTED(decision);
 }
 
@@ -4800,7 +4744,7 @@ nsContentUtils::MaybeFireNodeRemoved(nsINode* aChild, nsINode* aParent)
   if (HasMutationListeners(aChild,
         NS_EVENT_BITS_MUTATION_NODEREMOVED, aParent)) {
     InternalMutationEvent mutation(true, eLegacyNodeRemoved);
-    mutation.mRelatedNode = do_QueryInterface(aParent);
+    mutation.mRelatedNode = aParent;
 
     mozAutoSubtreeModified subtree(aParent->OwnerDoc(), aParent);
     EventDispatcher::Dispatch(aChild, nullptr, &mutation);
@@ -9921,6 +9865,9 @@ nsContentUtils::NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* a
   int32_t tag = eHTMLTag_unknown;
   bool isCustomElementName = false;
   if (nodeInfo->NamespaceEquals(kNameSpaceID_XHTML)) {
+    if (aIsAtom && !nsContentUtils::IsNameWithDash(aIsAtom)) {
+      aIsAtom = nullptr;
+    }
     tag = nsHTMLTags::CaseSensitiveAtomTagToId(name);
     isCustomElementName = (tag == eHTMLTag_userdefined &&
                            nsContentUtils::IsCustomElementName(name, kNameSpaceID_XHTML));
@@ -10069,22 +10016,18 @@ nsContentUtils::NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* a
 
   if (customElementEnabled && isCustomElement) {
     (*aResult)->SetCustomElementData(new CustomElementData(typeAtom));
+    nsContentUtils::RegisterCallbackUpgradeElement(*aResult, typeAtom);
   }
 
   return NS_OK;
 }
 
-/* static */ CustomElementDefinition*
-nsContentUtils::LookupCustomElementDefinition(nsIDocument* aDoc,
-                                              nsAtom* aNameAtom,
-                                              uint32_t aNameSpaceID,
-                                              nsAtom* aTypeAtom)
+CustomElementRegistry*
+GetCustomElementRegistry(nsIDocument* aDoc)
 {
   MOZ_ASSERT(aDoc);
 
-  if ((aNameSpaceID != kNameSpaceID_XUL &&
-       aNameSpaceID != kNameSpaceID_XHTML) ||
-      !aDoc->GetDocShell()) {
+  if (!aDoc->GetDocShell()) {
     return nullptr;
   }
 
@@ -10093,7 +10036,21 @@ nsContentUtils::LookupCustomElementDefinition(nsIDocument* aDoc,
     return nullptr;
   }
 
-  CustomElementRegistry* registry = window->CustomElements();
+  return window->CustomElements();
+}
+
+/* static */ CustomElementDefinition*
+nsContentUtils::LookupCustomElementDefinition(nsIDocument* aDoc,
+                                              nsAtom* aNameAtom,
+                                              uint32_t aNameSpaceID,
+                                              nsAtom* aTypeAtom)
+{
+  if (aNameSpaceID != kNameSpaceID_XUL &&
+      aNameSpaceID != kNameSpaceID_XHTML) {
+    return nullptr;
+  }
+
+  RefPtr<CustomElementRegistry> registry(GetCustomElementRegistry(aDoc));
   if (!registry) {
     return nullptr;
   }
@@ -10102,22 +10059,28 @@ nsContentUtils::LookupCustomElementDefinition(nsIDocument* aDoc,
 }
 
 /* static */ void
+nsContentUtils::RegisterCallbackUpgradeElement(Element* aElement,
+                                               nsAtom* aTypeName)
+{
+  MOZ_ASSERT(aElement);
+
+  nsIDocument* doc = aElement->OwnerDoc();
+  CustomElementRegistry* registry = GetCustomElementRegistry(doc);
+  if (registry) {
+    registry->RegisterCallbackUpgradeElement(aElement, aTypeName);
+  }
+}
+
+/* static */ void
 nsContentUtils::RegisterUnresolvedElement(Element* aElement, nsAtom* aTypeName)
 {
   MOZ_ASSERT(aElement);
 
   nsIDocument* doc = aElement->OwnerDoc();
-  nsPIDOMWindowInner* window(doc->GetInnerWindow());
-  if (!window) {
-    return;
+  CustomElementRegistry* registry = GetCustomElementRegistry(doc);
+  if (registry) {
+    registry->RegisterUnresolvedElement(aElement, aTypeName);
   }
-
-  RefPtr<CustomElementRegistry> registry(window->CustomElements());
-  if (!registry) {
-    return;
-  }
-
-  registry->RegisterUnresolvedElement(aElement, aTypeName);
 }
 
 /* static */ void
@@ -10128,17 +10091,10 @@ nsContentUtils::UnregisterUnresolvedElement(Element* aElement)
   nsAtom* typeAtom =
     aElement->GetCustomElementData()->GetCustomElementType();
   nsIDocument* doc = aElement->OwnerDoc();
-  nsPIDOMWindowInner* window(doc->GetInnerWindow());
-  if (!window) {
-    return;
+  CustomElementRegistry* registry = GetCustomElementRegistry(doc);
+  if (registry) {
+    registry->UnregisterUnresolvedElement(aElement, typeAtom);
   }
-
-  CustomElementRegistry* registry = window->CustomElements();
-  if (!registry) {
-    return;
-  }
-
-  registry->UnregisterUnresolvedElement(aElement, typeAtom);
 }
 
 /* static */ void

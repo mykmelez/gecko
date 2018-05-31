@@ -2108,7 +2108,7 @@ SetClassAndProto(JSContext* cx, HandleObject obj,
         // group so we can keep track of the interpreted function for Ion
         // inlining.
         MOZ_ASSERT(obj->is<JSFunction>());
-        newGroup = ObjectGroupCompartment::makeGroup(cx, &JSFunction::class_, proto);
+        newGroup = ObjectGroupRealm::makeGroup(cx, &JSFunction::class_, proto);
         if (!newGroup)
             return false;
         newGroup->setInterpretedFunction(oldGroup->maybeInterpretedFunction());
@@ -2144,7 +2144,8 @@ JSObject::changeToSingleton(JSContext* cx, HandleObject obj)
 
     MarkObjectGroupUnknownProperties(cx, obj->group());
 
-    ObjectGroup* group = ObjectGroup::lazySingletonGroup(cx, obj->getClass(),
+    ObjectGroupRealm& realm = ObjectGroupRealm::get(obj->group());
+    ObjectGroup* group = ObjectGroup::lazySingletonGroup(cx, realm, obj->getClass(),
                                                          obj->taggedProto());
     if (!group)
         return false;
@@ -3436,7 +3437,7 @@ dumpValue(const Value& v, js::GenericPrinter& out)
         }
         if (fun->hasScript()) {
             JSScript* script = fun->nonLazyScript();
-            out.printf(" (%s:%zu)",
+            out.printf(" (%s:%u)",
                     script->filename() ? script->filename() : "", script->lineno());
         }
         out.printf(" at %p>", (void*) fun);
@@ -3716,7 +3717,7 @@ js::DumpInterpreterFrame(JSContext* cx, js::GenericPrinter& out, InterpreterFram
         }
         out.putChar('\n');
 
-        out.printf("file %s line %zu\n",
+        out.printf("file %s line %u\n",
                 i.script()->filename(), i.script()->lineno());
 
         if (jsbytecode* pc = i.pc()) {
@@ -4136,6 +4137,10 @@ js::Unbox(JSContext* cx, HandleObject obj, MutableHandleValue vp)
         vp.set(obj->as<DateObject>().UTCTime());
     else if (obj->is<SymbolObject>())
         vp.setSymbol(obj->as<SymbolObject>().unbox());
+#ifdef ENABLE_BIGINT
+    else if (obj->is<BigIntObject>())
+        vp.setBigInt(obj->as<BigIntObject>().unbox());
+#endif
     else
         vp.setUndefined();
 

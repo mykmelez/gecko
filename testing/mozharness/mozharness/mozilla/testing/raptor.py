@@ -10,6 +10,8 @@ import os
 import re
 import sys
 
+from shutil import copyfile
+
 import mozharness
 
 from mozharness.base.config import parse_config_file
@@ -103,35 +105,7 @@ class Raptor(TestingMixin, MercurialScript, Python3Virtualenv, CodeCoverageMixin
     #   mozharness: --geckoProfile try: <stuff>
     def query_gecko_profile_options(self):
         gecko_results = []
-        if self.buildbot_config:
-            # this is inside automation
-            # now let's see if we added GeckoProfile specs in the commit message
-            try:
-                junk, junk, opts = self.buildbot_config['sourcestamp']['changes'][-1]['comments'].partition('mozharness:')
-            except IndexError:
-                # when we don't have comments on changes (bug 1255187)
-                opts = None
-
-            if opts:
-                # In the case of a multi-line commit message, only examine
-                # the first line for mozharness options
-                opts = opts.split('\n')[0]
-                opts = re.sub(r'\w+:.*', '', opts).strip().split(' ')
-                if "--geckoProfile" in opts:
-                    # overwrite whatever was set here.
-                    self.gecko_profile = True
-                try:
-                    idx = opts.index('--geckoProfileInterval')
-                    if len(opts) > idx + 1:
-                        self.gecko_profile_interval = opts[idx + 1]
-                except ValueError:
-                    pass
-            else:
-                # no opts, check for '--geckoProfile' in try message text directly
-                if self.try_message_has_flag('geckoProfile'):
-                    self.gecko_profile = True
-
-        # finally, if gecko_profile is set, we add that to the raptor options
+        # if gecko_profile is set, we add that to the raptor options
         if self.gecko_profile:
             gecko_results.append('--geckoProfile')
             if self.gecko_profile_interval:
@@ -281,15 +255,22 @@ class Raptor(TestingMixin, MercurialScript, Python3Virtualenv, CodeCoverageMixin
                 schema = json.load(f)
             data = json.loads(parser.found_perf_data[0])
             jsonschema.validate(data, schema)
-        except:
+        except Exception as e:
             self.exception("Error while validating PERFHERDER_DATA")
+            self.info(e)
 
     def _artifact_perf_data(self, dest):
-        src = os.path.join(self.query_abs_dirs()['abs_work_dir'], 'local.json')
+        src = os.path.join(self.query_abs_dirs()['abs_work_dir'], 'raptor.json')
+        if not os.path.isdir(os.path.dirname(dest)):
+            # create upload dir if it doesn't already exist
+            self.info("creating dir: %s" % os.path.dirname(dest))
+            os.makedirs(os.path.dirname(dest))
+        self.info('copying raptor results from %s to %s' % (src, dest))
         try:
-            shutil.copyfile(src, dest)
-        except:
+            copyfile(src, dest)
+        except Exception as e:
             self.critical("Error copying results %s to upload dir %s" % (src, dest))
+            self.info(e)
 
     def run_tests(self, args=None, **kw):
         """run raptor tests"""
@@ -374,7 +355,9 @@ class Raptor(TestingMixin, MercurialScript, Python3Virtualenv, CodeCoverageMixin
                 self._validate_treeherder_data(parser)
                 if not self.run_local:
                     # copy results to upload dir so they are included as an artifact
+                    self.info("copying raptor results to upload dir:")
                     dest = os.path.join(env['MOZ_UPLOAD_DIR'], 'perfherder-data.json')
+                    self.info(str(dest))
                     self._artifact_perf_data(dest)
 
 

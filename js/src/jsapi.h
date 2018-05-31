@@ -1046,7 +1046,7 @@ JS_RefreshCrossCompartmentWrappers(JSContext* cx, JS::Handle<JSObject*> obj);
  *
  *   void foo(JSContext* cx, JSObject* obj) {
  *     // in 'oldRealm'
- *     JSCompartment* oldRealm = JS::EnterRealm(cx, obj);
+ *     JS::Realm* oldRealm = JS::EnterRealm(cx, obj);
  *     // in the realm of 'obj'
  *     JS::LeaveRealm(cx, oldRealm);
  *     // back in 'oldRealm'
@@ -1089,14 +1089,24 @@ namespace JS {
 
 /** NB: This API is infallible; a nullptr return value does not indicate error.
  *
- * Entering a compartment roots the compartment and its global object until the
- * matching JS::LeaveRealm() call.
+ * Entering a realm roots the realm and its global object until the matching
+ * JS::LeaveRealm() call.
  */
-extern JS_PUBLIC_API(JSCompartment*)
+extern JS_PUBLIC_API(JS::Realm*)
 EnterRealm(JSContext* cx, JSObject* target);
 
 extern JS_PUBLIC_API(void)
 LeaveRealm(JSContext* cx, JS::Realm* oldRealm);
+
+using IterateRealmCallback = void (*)(JSContext* cx, void* data, Handle<Realm*> realm);
+
+/**
+ * This function calls |realmCallback| on every realm. Beware that there is no
+ * guarantee that the realm will survive after the callback returns. Also,
+ * barriers are disabled via the TraceSession.
+ */
+extern JS_PUBLIC_API(void)
+IterateRealms(JSContext* cx, void* data, IterateRealmCallback realmCallback);
 
 } // namespace JS
 
@@ -4614,7 +4624,7 @@ static MOZ_ALWAYS_INLINE JSFlatString*
 JSID_TO_FLAT_STRING(jsid id)
 {
     MOZ_ASSERT(JSID_IS_STRING(id));
-    return (JSFlatString*)(JSID_BITS(id));
+    return (JSFlatString*)JSID_TO_STRING(id);
 }
 
 static MOZ_ALWAYS_INLINE JSFlatString*

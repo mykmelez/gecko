@@ -226,67 +226,16 @@ nsNSSComponent::~nsNSSComponent()
 }
 
 NS_IMETHODIMP
-nsNSSComponent::PIPBundleFormatStringFromName(const char* name,
-                                              const char16_t** params,
-                                              uint32_t numParams,
-                                              nsAString& outString)
-{
-  MutexAutoLock lock(mMutex);
-  nsresult rv = NS_ERROR_FAILURE;
-
-  if (mPIPNSSBundle && name) {
-    nsAutoString result;
-    rv = mPIPNSSBundle->FormatStringFromName(name, params, numParams, result);
-    if (NS_SUCCEEDED(rv)) {
-      outString = result;
-    }
-  }
-  return rv;
-}
-
-NS_IMETHODIMP
 nsNSSComponent::GetPIPNSSBundleString(const char* name, nsAString& outString)
 {
   MutexAutoLock lock(mMutex);
-  return GetPIPNSSBundleStringLocked(name, outString, lock);
-}
 
-nsresult
-nsNSSComponent::GetPIPNSSBundleStringLocked(
-  const char* name, nsAString& outString, const MutexAutoLock& /*proofOfLock*/)
-{
-  nsresult rv = NS_ERROR_FAILURE;
-
-  outString.SetLength(0);
+  outString.Truncate();
   if (mPIPNSSBundle && name) {
-    nsAutoString result;
-    rv = mPIPNSSBundle->GetStringFromName(name, result);
-    if (NS_SUCCEEDED(rv)) {
-      outString = result;
-      rv = NS_OK;
-    }
+    return mPIPNSSBundle->GetStringFromName(name, outString);
   }
 
-  return rv;
-}
-
-NS_IMETHODIMP
-nsNSSComponent::GetNSSBundleString(const char* name, nsAString& outString)
-{
-  MutexAutoLock lock(mMutex);
-  nsresult rv = NS_ERROR_FAILURE;
-
-  outString.SetLength(0);
-  if (mNSSErrorsBundle && name) {
-    nsAutoString result;
-    rv = mNSSErrorsBundle->GetStringFromName(name, result);
-    if (NS_SUCCEEDED(rv)) {
-      outString = result;
-      rv = NS_OK;
-    }
-  }
-
-  return rv;
+  return NS_ERROR_FAILURE;
 }
 
 #ifdef XP_WIN
@@ -977,11 +926,9 @@ nsNSSComponent::TrustLoaded3rdPartyRoots()
 class LoadLoadableRootsTask final : public Runnable
 {
 public:
-  explicit LoadLoadableRootsTask(nsNSSComponent* nssComponent,
-                                 nsCString&& rootModuleName)
+  explicit LoadLoadableRootsTask(nsNSSComponent* nssComponent)
     : Runnable("LoadLoadableRootsTask")
     , mNSSComponent(nssComponent)
-    , mRootModuleName(Move(rootModuleName))
   {
     MOZ_ASSERT(nssComponent);
   }
@@ -995,7 +942,6 @@ private:
   nsresult LoadLoadableRoots();
   RefPtr<nsNSSComponent> mNSSComponent;
   nsCOMPtr<nsIThread> mThread;
-  nsCString mRootModuleName;
 };
 
 nsresult
@@ -1286,7 +1232,7 @@ LoadLoadableRootsTask::LoadLoadableRoots()
   }
 
   for (const auto& possibleCKBILocation : possibleCKBILocations) {
-    if (mozilla::psm::LoadLoadableRoots(possibleCKBILocation, mRootModuleName)) {
+    if (mozilla::psm::LoadLoadableRoots(possibleCKBILocation)) {
       MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("loaded CKBI from %s",
                                             possibleCKBILocation.get()));
       return NS_OK;
@@ -1294,20 +1240,6 @@ LoadLoadableRootsTask::LoadLoadableRoots()
   }
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("could not load loadable roots"));
   return NS_ERROR_FAILURE;
-}
-
-void
-nsNSSComponent::UnloadLoadableRoots(const MutexAutoLock& proofOfLock)
-{
-  nsresult rv;
-  nsAutoString modName;
-  rv = GetPIPNSSBundleStringLocked("RootCertModuleName", modName, proofOfLock);
-  if (NS_FAILED(rv)) {
-    return;
-  }
-
-  NS_ConvertUTF16toUTF8 modNameUTF8(modName);
-  ::mozilla::psm::UnloadLoadableRoots(modNameUTF8.get());
 }
 
 nsresult
@@ -1363,22 +1295,14 @@ nsresult
 nsNSSComponent::InitializePIPNSSBundle()
 {
   MutexAutoLock lock(mMutex);
-  nsresult rv;
-  nsCOMPtr<nsIStringBundleService> bundleService(do_GetService(NS_STRINGBUNDLE_CONTRACTID, &rv));
-  if (NS_FAILED(rv) || !bundleService)
+  nsCOMPtr<nsIStringBundleService> bundleService(
+    do_GetService(NS_STRINGBUNDLE_CONTRACTID));
+  if (!bundleService) {
     return NS_ERROR_FAILURE;
+  }
 
-  bundleService->CreateBundle("chrome://pipnss/locale/pipnss.properties",
-                              getter_AddRefs(mPIPNSSBundle));
-  if (!mPIPNSSBundle)
-    rv = NS_ERROR_FAILURE;
-
-  bundleService->CreateBundle("chrome://pipnss/locale/nsserrors.properties",
-                              getter_AddRefs(mNSSErrorsBundle));
-  if (!mNSSErrorsBundle)
-    rv = NS_ERROR_FAILURE;
-
-  return rv;
+  return bundleService->CreateBundle("chrome://pipnss/locale/pipnss.properties",
+                                     getter_AddRefs(mPIPNSSBundle));
 }
 
 // Table of pref names and SSL cipher ID
@@ -2206,23 +2130,8 @@ nsNSSComponent::InitializeNSS()
     // SSL_ConfigServerSessionIDCache.
     setValidationOptions(true, lock);
 
-    nsAutoString rootModuleName;
-    rv = GetPIPNSSBundleStringLocked("RootCertModuleName", rootModuleName,
-                                     lock);
-    if (NS_FAILED(rv)) {
-      // When running Cpp unit tests on Android, this will fail because string
-      // bundles aren't available (see bug 1311077, bug 1228175 comment 12, and
-      // bug 929655). Because the module name is really only for display
-      // purposes, we can just hard-code the value here. Furthermore, if we want
-      // to be able to stop using string bundles in PSM in this way, we'll have
-      // to hard-code the string and only use the localized version when
-      // displaying it to the user, so this is a step in that direction anyway.
-      rootModuleName.AssignLiteral("Builtin Roots Module");
-    }
-    NS_ConvertUTF16toUTF8 rootModuleNameUTF8(rootModuleName);
-
     RefPtr<LoadLoadableRootsTask> loadLoadableRootsTask(
-      new LoadLoadableRootsTask(this, Move(rootModuleNameUTF8)));
+      new LoadLoadableRootsTask(this));
     rv = loadLoadableRootsTask->Dispatch();
     if (NS_FAILED(rv)) {
       return rv;
@@ -2258,7 +2167,7 @@ nsNSSComponent::ShutdownNSS()
     Unused << SSL_ShutdownServerSessionIDCache();
   }
 
-  UnloadLoadableRoots(lock);
+  ::mozilla::psm::UnloadLoadableRoots();
 
 #ifdef XP_WIN
   mFamilySafetyRoot = nullptr;

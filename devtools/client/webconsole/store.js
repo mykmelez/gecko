@@ -49,10 +49,15 @@ function configureStore(hud, options = {}) {
 
   const logLimit = options.logLimit
     || Math.max(getIntPref("devtools.hud.loglimit"), 1);
-  const sidebarToggle = getBoolPref(PREFS.UI.SIDEBAR_TOGGLE);
+  const sidebarToggle = getBoolPref(PREFS.FEATURES.SIDEBAR_TOGGLE);
+  const jstermCodeMirror = getBoolPref(PREFS.FEATURES.JSTERM_CODE_MIRROR);
 
   const initialState = {
-    prefs: PrefState({ logLimit, sidebarToggle }),
+    prefs: PrefState({
+      logLimit,
+      sidebarToggle,
+      jstermCodeMirror,
+    }),
     filters: FilterState({
       error: getBoolPref(PREFS.FILTER.ERROR),
       warn: getBoolPref(PREFS.FILTER.WARN),
@@ -230,7 +235,7 @@ function enableNetProvider(hud) {
 
         // /!\ This is terrible, but it allows ResponsePanel to be able to call
         // `dataProvider.requestData` to fetch response content lazily.
-        // `proxy.networkDataProvider` is put by NewConsoleOutputWrapper on
+        // `proxy.networkDataProvider` is put by WebConsoleOutputWrapper on
         // `serviceContainer` which allow NetworkEventMessage to expose requestData on
         // the fake `connector` object it hands over to ResponsePanel.
         proxy.networkDataProvider = dataProvider;
@@ -260,7 +265,7 @@ function enableNetProvider(hud) {
 
       // Process all incoming HTTP details packets. Note that
       // Network event update packets are sent in batches from:
-      // `NewConsoleOutputWrapper.dispatchMessageUpdate` using
+      // `WebConsoleOutputWrapper.dispatchMessageUpdate` using
       // NETWORK_MESSAGE_UPDATE action.
       // Make sure to call `dataProvider.onNetworkEventUpdate`
       // to fetch data from the backend.

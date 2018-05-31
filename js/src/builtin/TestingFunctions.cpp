@@ -348,7 +348,7 @@ GC(JSContext* cx, unsigned argc, Value* vp)
         JS::PrepareForFullGC(cx);
 
     JSGCInvocationKind gckind = shrinking ? GC_SHRINK : GC_NORMAL;
-    JS::GCForReason(cx, gckind, JS::gcreason::API);
+    JS::NonIncrementalGC(cx, gckind, JS::gcreason::API);
 
     char buf[256] = { '\0' };
 #ifndef JS_MORE_DETERMINISTIC
@@ -512,7 +512,7 @@ RelazifyFunctions(JSContext* cx, unsigned argc, Value* vp)
     SetAllowRelazification(cx, true);
 
     JS::PrepareForFullGC(cx);
-    JS::GCForReason(cx, GC_SHRINK, JS::gcreason::API);
+    JS::NonIncrementalGC(cx, GC_SHRINK, JS::gcreason::API);
 
     SetAllowRelazification(cx, false);
     args.rval().setUndefined();
@@ -1271,7 +1271,7 @@ SetSavedStacksRNGState(JSContext* cx, unsigned argc, Value* vp)
 
     // Either one or the other of the seed arguments must be non-zero;
     // make this true no matter what value 'seed' has.
-    cx->compartment()->savedStacks().setRNGState(seed, (seed + 1) * 33);
+    cx->realm()->savedStacks().setRNGState(seed, (seed + 1) * 33);
     return true;
 }
 
@@ -1279,7 +1279,7 @@ static bool
 GetSavedFrameCount(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    args.rval().setNumber(cx->compartment()->savedStacks().count());
+    args.rval().setNumber(cx->realm()->savedStacks().count());
     return true;
 }
 
@@ -1288,13 +1288,12 @@ ClearSavedFrames(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    js::SavedStacks& savedStacks = cx->compartment()->savedStacks();
+    js::SavedStacks& savedStacks = cx->realm()->savedStacks();
     if (savedStacks.initialized())
         savedStacks.clear();
 
-    for (ActivationIterator iter(cx); !iter.done(); ++iter) {
+    for (ActivationIterator iter(cx); !iter.done(); ++iter)
         iter->clearLiveSavedFrameCache();
-    }
 
     args.rval().setUndefined();
     return true;
@@ -4213,7 +4212,7 @@ majorGC(JSContext* cx, JSGCStatus status, void* data)
     if (info->depth > 0) {
         info->depth--;
         JS::PrepareForFullGC(cx);
-        JS::GCForReason(cx, GC_NORMAL, JS::gcreason::API);
+        JS::NonIncrementalGC(cx, GC_NORMAL, JS::gcreason::API);
         info->depth++;
     }
 }

@@ -835,14 +835,11 @@ CreateFunctionPrototype(JSContext* cx, JSProtoKey key)
      * give it the guts to be one.
      */
     RootedObject enclosingEnv(cx, &self->lexicalEnvironment());
-    JSObject* functionProto_ =
-        NewFunctionWithProto(cx, nullptr, 0, JSFunction::INTERPRETED,
-                             enclosingEnv, nullptr, objectProto, AllocKind::FUNCTION,
-                             SingletonObject);
-    if (!functionProto_)
-        return nullptr;
-
-    RootedFunction functionProto(cx, &functionProto_->as<JSFunction>());
+    RootedFunction functionProto(cx, NewFunctionWithProto(cx, nullptr, 0, JSFunction::INTERPRETED,
+                                                          enclosingEnv, nullptr, objectProto,
+                                                          AllocKind::FUNCTION, SingletonObject));
+    if (!functionProto)
+    	return nullptr;
 
     const char* rawSource = "function () {\n}";
     size_t sourceLen = strlen(rawSource);
@@ -890,7 +887,8 @@ CreateFunctionPrototype(JSContext* cx, JSProtoKey key)
      * inference to have unknown properties, to simplify handling of e.g.
      * NewFunctionClone.
      */
-    if (!JSObject::setNewGroupUnknown(cx, &JSFunction::class_, functionProto))
+    ObjectGroupRealm& realm = ObjectGroupRealm::getForNewObject(cx);
+    if (!JSObject::setNewGroupUnknown(cx, realm, &JSFunction::class_, functionProto))
         return nullptr;
 
     return functionProto;
