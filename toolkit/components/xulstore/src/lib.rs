@@ -375,15 +375,17 @@ pub extern "C" fn xulstore_remove_value_c(
 
 #[no_mangle]
 pub extern "C" fn xulstore_get_ids_iterator_ns(doc: &nsAString) -> *const StringIterator {
+    let doc_url = String::from_utf16_lossy(doc);
     let reader = STORE.read(&RKV).expect("reader");
-    let iterator = reader.iter_start().expect("iter");
+    let iterator = reader.iter_from(&doc_url).expect("iter");
 
     let collection: Vec<String> = iterator
         .map(|(key, _val)| key)
         // TODO: avoid assuming we control writes and check the conversion.
-        .map(|v| unsafe { str::from_utf8_unchecked(&v) })
-        .map(|v| v.split_at(v.find('=').unwrap()))
-        .map(|(id, _attr)| id.to_owned())
+        .map(|key| unsafe { str::from_utf8_unchecked(&key) })
+        .map(|key| key.split('\u{0009}').collect::<Vec<&str>>())
+        .filter(|parts| parts[0] == doc_url)
+        .map(|parts| parts[1].to_owned())
         // TODO: unique() collects values, and collect() does too,
         // so do so only once, by collecting the values into a set.
         .unique()
@@ -396,15 +398,17 @@ pub extern "C" fn xulstore_get_ids_iterator_ns(doc: &nsAString) -> *const String
 pub extern "C" fn xulstore_get_ids_iterator_c<'a>(doc: *const c_char) -> *const StringIterator {
     assert!(!doc.is_null());
 
+    let doc_url = unsafe { CStr::from_ptr(doc) }.to_str().unwrap();
     let reader = STORE.read(&RKV).expect("reader");
     let iterator = reader.iter_start().expect("iter");
 
     let collection: Vec<String> = iterator
         .map(|(key, _val)| key)
         // TODO: avoid assuming we control writes and check the conversion.
-        .map(|v| unsafe { str::from_utf8_unchecked(&v) })
-        .map(|v| v.split_at(v.find('=').unwrap()))
-        .map(|(id, _attr)| id.to_owned())
+        .map(|key| unsafe { str::from_utf8_unchecked(&key) })
+        .map(|key| key.split('\u{0009}').collect::<Vec<&str>>())
+        .filter(|parts| parts[0] == doc_url)
+        .map(|parts| parts[1].to_owned())
         // TODO: unique() collects values, and collect() does too,
         // so do so only once, by collecting the values into a set.
         .unique()
@@ -418,18 +422,19 @@ pub extern "C" fn xulstore_get_attribute_iterator_ns<'a>(
     doc: &nsAString,
     id: &nsAString,
 ) -> *const StringIterator {
+    let doc_url = String::from_utf16_lossy(doc);
     let element_id = String::from_utf16_lossy(id);
+    let key_prefix = doc_url.to_owned() + "\u{0009}" + &element_id;
     let reader = STORE.read(&RKV).expect("reader");
-    let iterator = reader.iter_start().expect("iter");
+    let iterator = reader.iter_from(&key_prefix).expect("iter");
 
     let collection: Vec<String> = iterator
         .map(|(key, _val)| key)
         // TODO: avoid assuming we control writes and check the conversion.
-        .map(|v| unsafe { str::from_utf8_unchecked(&v) })
-        .map(|v| v.split_at(v.find('=').unwrap()))
-        .filter(|&(id, _attr)| id == element_id)
-        .map(|(_id, attr)| attr[1..].to_owned()) // slice off the leading equals sign
-        .unique()
+        .map(|key| unsafe { str::from_utf8_unchecked(&key) })
+        .map(|key| key.split('\u{0009}').collect::<Vec<&str>>())
+        .filter(|parts| parts[0] == doc_url && parts[1] == element_id)
+        .map(|parts| parts[2].to_owned())
         .collect();
 
     Box::into_raw(Box::new(StringIterator::new(collection)))
@@ -443,23 +448,19 @@ pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(
     assert!(!doc.is_null());
     assert!(!id.is_null());
 
+    let doc_url = unsafe { CStr::from_ptr(doc) }.to_str().unwrap();
     let element_id = unsafe { CStr::from_ptr(id) }.to_str().unwrap();
+    let key_prefix = doc_url.to_owned() + "\u{0009}" + element_id;
     let reader = STORE.read(&RKV).expect("reader");
-    let iterator = reader.iter_from(element_id).expect("iter");
+    let iterator = reader.iter_from(&key_prefix).expect("iter");
 
     let collection: Vec<String> = iterator
-        // .map(|(key, val)| {
-        //     println!("key {:?} = val {:?}", unsafe { str::from_utf8_unchecked(&key) },
-        //                                     unsafe { str::from_utf8_unchecked(&val) });
-        //     (key, val)
-        // })
         .map(|(key, _val)| key)
         // TODO: avoid assuming we control writes and check the conversion.
-        .map(|v| unsafe { str::from_utf8_unchecked(&v) })
-        .map(|v| v.split_at(v.find('=').unwrap()))
-        .filter(|&(id, _attr)| id == element_id)
-        .map(|(_id, attr)| attr[1..].to_owned()) // slice off the leading equals sign
-        .unique()
+        .map(|key| unsafe { str::from_utf8_unchecked(&key) })
+        .map(|key| key.split('\u{0009}').collect::<Vec<&str>>())
+        .filter(|parts| parts[0] == doc_url && parts[1] == element_id)
+        .map(|parts| parts[2].to_owned())
         .collect();
 
     Box::into_raw(Box::new(StringIterator::new(collection)))
