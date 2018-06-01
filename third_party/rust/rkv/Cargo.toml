@@ -12,7 +12,7 @@
 
 [package]
 name = "rkv"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Richard Newman <rnewman@twinql.com>"]
 description = "A humane key-value store built on LMDB."
 homepage = "https://github.com/mozilla-prototypes/rkv"
@@ -29,6 +29,9 @@ version = "0.1"
 features = ["derive"]
 default_features = false
 
+[dependencies.lazy_static]
+version = "1.0"
+
 [dependencies.lmdb]
 version = "0.7"
 
@@ -40,6 +43,9 @@ version = "1.0"
 
 [dependencies.uuid]
 version = "0.5"
+[dev-dependencies.byteorder]
+version = "1"
+
 [dev-dependencies.tempdir]
 version = "0.3"
 

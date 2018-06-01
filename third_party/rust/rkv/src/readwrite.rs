@@ -15,11 +15,13 @@ use std::marker::{
 };
 
 use lmdb::{
+    Cursor,
     Database,
-    Transaction,
+    Iter as LmdbIter,
     RoCursor,
     RoTransaction,
     RwTransaction,
+    Transaction,
 };
 
 use lmdb::{
@@ -57,6 +59,11 @@ pub struct Reader<'env, K> where K: AsRef<[u8]> {
     phantom: PhantomData<K>,
 }
 
+pub struct Iter<'env> {
+    iter: LmdbIter<'env>,
+    cursor: RoCursor<'env>,
+}
+
 impl<'env, K> Writer<'env, K> where K: AsRef<[u8]> {
     pub fn get<'s>(&'s self, k: K) -> Result<Option<Value<'s>>, StoreError> {
         let bytes = self.tx.get(self.db, &k.as_ref());
@@ -72,11 +79,19 @@ impl<'env, K> Writer<'env, K> where K: AsRef<[u8]> {
             .map_err(StoreError::LmdbError)
     }
 
-    // TODO: duplicate data
     pub fn delete<'s>(&'s mut self, k: K) -> Result<(), StoreError> {
         self.tx
             .del(self.db, &k.as_ref(), None)
             .map_err(StoreError::LmdbError)
+    }
+
+    pub fn delete_value<'s>(&'s mut self, _k: K, _v: &Value) -> Result<(), StoreError> {
+        // Even better would be to make this a method only on a dupsort store —
+        // it would need a little bit of reorganizing of types and traits,
+        // but when I see "If the database does not support sorted duplicate
+        // data items (MDB_DUPSORT) the data parameter is ignored" in the docs,
+        // I see a footgun that we can avoid by using the type system.
+        unimplemented!();
     }
 
     pub fn commit(self) -> Result<(), StoreError> {
@@ -94,16 +109,37 @@ impl<'env, K> Reader<'env, K> where K: AsRef<[u8]> {
         read_transform(bytes)
     }
 
-    // TODO: replace with higher-level wrapper function.
-    pub fn open_cursor<'s>(&'s self) -> Result<RoCursor<'s>, StoreError> {
-        match self.tx.open_ro_cursor(self.db) {
-            Ok(cursor) => Ok(cursor),
-            Err(e) => Err(StoreError::LmdbError(e)),
-        }
-    }
-
     pub fn abort(self) {
         self.tx.abort();
+    }
+
+    pub fn iter_start<'s>(&'s self) -> Result<Iter<'s>, StoreError> {
+        let mut cursor = self.tx.open_ro_cursor(self.db).map_err(StoreError::LmdbError)?;
+        let iter = cursor.iter();
+        Ok(Iter {
+            iter: iter,
+            cursor: cursor,
+        })
+    }
+
+    pub fn iter_from<'s>(&'s self, k: K) -> Result<Iter<'s>, StoreError> {
+        let mut cursor = self.tx.open_ro_cursor(self.db).map_err(StoreError::LmdbError)?;
+        let iter = cursor.iter_from(k);
+        Ok(Iter {
+            iter: iter,
+            cursor: cursor,
+        })
+    }
+}
+
+impl<'env> Iterator for Iter<'env> {
+    type Item = (&'env [u8], Result<Option<Value<'env>>, StoreError>);
+
+    fn next(&mut self) -> Option<(&'env [u8], Result<Option<Value<'env>>, StoreError>)> {
+        match self.iter.next() {
+            None => None,
+            Some((key, bytes)) => Some((key, read_transform(Ok(bytes)))),
+        }
     }
 }
 
