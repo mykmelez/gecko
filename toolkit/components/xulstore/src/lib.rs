@@ -55,7 +55,6 @@ extern crate tempdir;
 extern crate xpcom;
 
 use itertools::Itertools;
-use lmdb::Cursor;
 use nserror::{nsresult, NS_OK};
 use nsstring::{nsAString, nsString};
 use rkv::{Manager, Rkv, StoreError, Value};
@@ -118,7 +117,7 @@ lazy_static! {
         // with the new profile directory.
 
         // Rkv::with_capacity(&xulstore_dir_path, MAX_STORES).expect("new succeeded")
-        let mut manager = Manager::new();
+        let mut manager = Manager::singleton().write().unwrap();
         manager.get_or_create_with_capacity(xulstore_dir_path.as_path(), MAX_STORES, Rkv::with_capacity).expect("Rkv")
     };
 }
@@ -389,15 +388,14 @@ pub extern "C" fn xulstore_get_ids_iterator_ns(doc: &nsAString) -> *const String
     let store_name = String::from_utf16_lossy(doc);
     let store = get_store(store_name.as_str());
     let reader = store.read(&rkv).expect("reader");
-    let mut cursor = reader.open_cursor().expect("cursor");
-    let iterator = cursor.iter();
+    let iterator = reader.iter_start().expect("iter");
 
-    let collection: Vec<&str> = iterator
+    let collection: Vec<String> = iterator
         .map(|(key, _val)| key)
         // TODO: avoid assuming we control writes and check the conversion.
         .map(|v| unsafe { str::from_utf8_unchecked(&v) })
         .map(|v| v.split_at(v.find('=').unwrap()))
-        .map(|(id, _attr)| id)
+        .map(|(id, _attr)| id.to_owned())
         // TODO: unique() collects values, and collect() does too,
         // so do so only once, by collecting the values into a set.
         .unique()
@@ -407,22 +405,21 @@ pub extern "C" fn xulstore_get_ids_iterator_ns(doc: &nsAString) -> *const String
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_get_ids_iterator_c<'a>(doc: *const c_char) -> *const StringIterator<'a> {
+pub extern "C" fn xulstore_get_ids_iterator_c<'a>(doc: *const c_char) -> *const StringIterator {
     assert!(!doc.is_null());
 
     let rkv = RKV.read().unwrap();
     let store_name = unsafe { CStr::from_ptr(doc) };
     let store = get_store(store_name.to_str().unwrap());
     let reader = store.read(&rkv).expect("reader");
-    let mut cursor = reader.open_cursor().expect("cursor");
-    let iterator = cursor.iter();
+    let iterator = reader.iter_start().expect("iter");
 
-    let collection: Vec<&str> = iterator
+    let collection: Vec<String> = iterator
         .map(|(key, _val)| key)
         // TODO: avoid assuming we control writes and check the conversion.
         .map(|v| unsafe { str::from_utf8_unchecked(&v) })
         .map(|v| v.split_at(v.find('=').unwrap()))
-        .map(|(id, _attr)| id)
+        .map(|(id, _attr)| id.to_owned())
         // TODO: unique() collects values, and collect() does too,
         // so do so only once, by collecting the values into a set.
         .unique()
@@ -435,22 +432,21 @@ pub extern "C" fn xulstore_get_ids_iterator_c<'a>(doc: *const c_char) -> *const 
 pub extern "C" fn xulstore_get_attribute_iterator_ns<'a>(
     doc: &nsAString,
     id: &nsAString,
-) -> *const StringIterator<'a> {
+) -> *const StringIterator {
     let rkv = RKV.read().unwrap();
     let store_name = String::from_utf16_lossy(doc);
     let element_id = String::from_utf16_lossy(id);
     let store = get_store(store_name.as_str());
     let reader = store.read(&rkv).expect("reader");
-    let mut cursor = reader.open_cursor().expect("cursor");
-    let iterator = cursor.iter();
+    let iterator = reader.iter_start().expect("iter");
 
-    let collection: Vec<&str> = iterator
+    let collection: Vec<String> = iterator
         .map(|(key, _val)| key)
         // TODO: avoid assuming we control writes and check the conversion.
         .map(|v| unsafe { str::from_utf8_unchecked(&v) })
         .map(|v| v.split_at(v.find('=').unwrap()))
         .filter(|&(id, _attr)| id == element_id)
-        .map(|(_id, attr)| &attr[1..]) // slice off the leading equals sign
+        .map(|(_id, attr)| attr[1..].to_owned()) // slice off the leading equals sign
         .unique()
         .collect();
 
@@ -461,7 +457,7 @@ pub extern "C" fn xulstore_get_attribute_iterator_ns<'a>(
 pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(
     doc: *const c_char,
     id: *const c_char,
-) -> *const StringIterator<'a> {
+) -> *const StringIterator {
     assert!(!doc.is_null());
     assert!(!id.is_null());
 
@@ -470,10 +466,9 @@ pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(
     let element_id = unsafe { CStr::from_ptr(id) }.to_str().unwrap();
     let store = get_store(store_name.to_str().unwrap());
     let reader = store.read(&rkv).expect("reader");
-    let mut cursor = reader.open_cursor().expect("cursor");
-    let iterator = cursor.iter_from(element_id);
+    let iterator = reader.iter_from(element_id).expect("iter");
 
-    let collection: Vec<&str> = iterator
+    let collection: Vec<String> = iterator
         // .map(|(key, val)| {
         //     println!("key {:?} = val {:?}", unsafe { str::from_utf8_unchecked(&key) },
         //                                     unsafe { str::from_utf8_unchecked(&val) });
@@ -484,7 +479,7 @@ pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(
         .map(|v| unsafe { str::from_utf8_unchecked(&v) })
         .map(|v| v.split_at(v.find('=').unwrap()))
         .filter(|&(id, _attr)| id == element_id)
-        .map(|(_id, attr)| &attr[1..]) // slice off the leading equals sign
+        .map(|(_id, attr)| attr[1..].to_owned()) // slice off the leading equals sign
         .unique()
         .collect();
 
@@ -578,13 +573,13 @@ pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(
 // less performant, but the difference is likely to be insignificant
 // for XULStore, which stores and iterates very small amounts of data.
 
-pub struct StringIterator<'a> {
+pub struct StringIterator {
     index: usize,
-    values: Vec<&'a str>,
+    values: Vec<String>,
 }
 
-impl<'a> StringIterator<'a> {
-    pub fn new(values: Vec<&'a str>) -> StringIterator {
+impl<'a> StringIterator {
+    pub fn new(values: Vec<String>) -> Self {
         Self {
             index: 0,
             values: values,
@@ -599,16 +594,16 @@ impl<'a> StringIterator<'a> {
         // TODO: confirm that self.index in range.
         // TODO: consume the value being returned.
         unsafe {
-            (*value).assign(&nsString::from(self.values[self.index]));
+            (*value).assign(&nsString::from(self.values[self.index].as_str()));
         }
         self.index = self.index + 1;
         NS_OK
     }
 
-    pub fn get_next_c(&mut self) -> &'a str {
+    pub fn get_next_c(&mut self) -> &String {
         // TODO: confirm that self.index in range.
         // TODO: consume the value being returned.
-        let value = self.values[self.index];
+        let value = &self.values[self.index];
         self.index = self.index + 1;
         value
     }
@@ -632,7 +627,7 @@ pub unsafe extern "C" fn xulstore_iter_get_next_ns(
 #[no_mangle]
 pub unsafe extern "C" fn xulstore_iter_get_next_c(iter: *mut StringIterator) -> *const c_char {
     assert!(!iter.is_null());
-    CString::new((&mut *iter).get_next_c()).unwrap().into_raw()
+    CString::new((&mut *iter).get_next_c().as_str()).unwrap().into_raw()
 }
 
 #[no_mangle]
