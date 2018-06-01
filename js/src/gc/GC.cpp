@@ -3852,7 +3852,6 @@ Zone::sweepCompartments(FreeOp* fop, bool keepAtleastOne, bool destroyingRuntime
     while (read < end) {
         JSCompartment* comp = *read++;
         Realm* realm = JS::GetRealmForCompartment(comp);
-        MOZ_ASSERT(!realm->isAtomsRealm());
 
         /*
          * Don't delete the last compartment and realm if all the ones before
@@ -4126,7 +4125,7 @@ CompartmentCheckTracer::onChild(const JS::GCCellPtr& thing)
 {
     JSCompartment* comp = DispatchTyped(MaybeCompartmentFunctor(), thing);
     if (comp && compartment) {
-        MOZ_ASSERT(comp == compartment || runtime()->isAtomsCompartment(comp) ||
+        MOZ_ASSERT(comp == compartment ||
                    (srcKind == JS::TraceKind::Object &&
                     InCrossCompartmentMap(static_cast<JSObject*>(src), thing)));
     } else {
@@ -4223,7 +4222,7 @@ GCRuntime::prepareZonesForCollection(JS::gcreason::Reason reason, bool* isFullOu
     /* Assert that zone state is as we expect */
     for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
         MOZ_ASSERT(!zone->isCollecting());
-        MOZ_ASSERT(!zone->compartments().empty());
+        MOZ_ASSERT_IF(!zone->isAtomsZone(), !zone->compartments().empty());
         for (auto i : AllAllocKinds())
             MOZ_ASSERT(!zone->arenas.arenaListsToSweep(i));
     }
@@ -4251,7 +4250,7 @@ GCRuntime::prepareZonesForCollection(JS::gcreason::Reason reason, bool* isFullOu
     // executable code limit.
     bool canAllocateMoreCode = jit::CanLikelyAllocateMoreExecutableMemory();
 
-    for (CompartmentsIter c(rt, WithAtoms); !c.done(); c.next()) {
+    for (CompartmentsIter c(rt); !c.done(); c.next()) {
         c->scheduledForDestruction = false;
         c->maybeAlive = false;
         for (RealmsInCompartmentIter r(c); !r.done(); r.next()) {
@@ -4478,7 +4477,7 @@ GCRuntime::markCompartments()
 
     Vector<JSCompartment*, 0, js::SystemAllocPolicy> workList;
 
-    for (CompartmentsIter comp(rt, SkipAtoms); !comp.done(); comp.next()) {
+    for (CompartmentsIter comp(rt); !comp.done(); comp.next()) {
         if (comp->maybeAlive) {
             if (!workList.append(comp))
                 return;
@@ -4895,7 +4894,7 @@ DropStringWrappers(JSRuntime* rt)
      * us to sweep the wrappers in all compartments every time we sweep a
      * compartment group.
      */
-    for (CompartmentsIter c(rt, SkipAtoms); !c.done(); c.next()) {
+    for (CompartmentsIter c(rt); !c.done(); c.next()) {
         for (JSCompartment::StringWrapperEnum e(c); !e.empty(); e.popFront()) {
             MOZ_ASSERT(e.front().key().is<JSString*>());
             e.removeFront();
@@ -5137,7 +5136,7 @@ static void
 AssertNoWrappersInGrayList(JSRuntime* rt)
 {
 #ifdef DEBUG
-    for (CompartmentsIter c(rt, SkipAtoms); !c.done(); c.next()) {
+    for (CompartmentsIter c(rt); !c.done(); c.next()) {
         MOZ_ASSERT(!c->gcIncomingGrayPointers);
         for (JSCompartment::NonStringWrapperEnum e(c); !e.empty(); e.popFront())
             AssertNotOnGrayList(&e.front().value().unbarrieredGet().toObject());
@@ -5412,7 +5411,7 @@ UpdateAtomsBitmap(GCParallelTask* task)
     // For convenience sweep these tables non-incrementally as part of bitmap
     // sweeping; they are likely to be much smaller than the main atoms table.
     runtime->unsafeSymbolRegistry().sweep();
-    for (RealmsIter realm(runtime, SkipAtoms); !realm.done(); realm.next())
+    for (RealmsIter realm(runtime); !realm.done(); realm.next())
         realm->sweepVarNames();
 }
 
@@ -6888,7 +6887,7 @@ GCRuntime::resetIncrementalGC(gc::AbortReason reason, AutoTraceSession& session)
       case State::Sweep: {
         marker.reset();
 
-        for (CompartmentsIter c(rt, SkipAtoms); !c.done(); c.next())
+        for (CompartmentsIter c(rt); !c.done(); c.next())
             c->scheduledForDestruction = false;
 
         /* Finish sweeping the current sweep group, then abort. */
@@ -6966,10 +6965,13 @@ GCRuntime::resetIncrementalGC(gc::AbortReason reason, AutoTraceSession& session)
 
 namespace {
 
-class AutoGCSlice {
+/*
+ * Temporarily disable barriers during GC slices.
+ */
+class AutoDisableBarriers {
   public:
-    explicit AutoGCSlice(JSRuntime* rt);
-    ~AutoGCSlice();
+    explicit AutoDisableBarriers(JSRuntime* rt);
+    ~AutoDisableBarriers();
 
   private:
     JSRuntime* runtime;
@@ -6978,7 +6980,7 @@ class AutoGCSlice {
 
 } /* anonymous namespace */
 
-AutoGCSlice::AutoGCSlice(JSRuntime* rt)
+AutoDisableBarriers::AutoDisableBarriers(JSRuntime* rt)
   : runtime(rt)
 {
     for (GCZonesIter zone(rt); !zone.done(); zone.next()) {
@@ -6986,7 +6988,7 @@ AutoGCSlice::AutoGCSlice(JSRuntime* rt)
          * Clear needsIncrementalBarrier early so we don't do any write
          * barriers during GC. We don't need to update the Ion barriers (which
          * is expensive) because Ion code doesn't run during GC. If need be,
-         * we'll update the Ion barriers in ~AutoGCSlice.
+         * we'll update the Ion barriers in ~AutoDisableBarriers.
          */
         if (zone->isGCMarking()) {
             MOZ_ASSERT(zone->needsIncrementalBarrier());
@@ -6996,7 +6998,7 @@ AutoGCSlice::AutoGCSlice(JSRuntime* rt)
     }
 }
 
-AutoGCSlice::~AutoGCSlice()
+AutoDisableBarriers::~AutoDisableBarriers()
 {
     /* We can't use GCZonesIter if this is the end of the last slice. */
     for (ZonesIter zone(runtime, WithAtoms); !zone.done(); zone.next()) {
@@ -7053,7 +7055,7 @@ GCRuntime::incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason rea
     if (isIncrementalGCInProgress() && !atomsZone->isCollecting())
         session.maybeLock.reset();
 
-    AutoGCSlice slice(rt);
+    AutoDisableBarriers disableBarriers(rt);
 
     bool destroyingRuntime = (reason == JS::gcreason::DESTROY_RUNTIME);
 
@@ -7070,6 +7072,14 @@ GCRuntime::incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason rea
     bool useZeal = false;
 #endif
 
+#ifdef DEBUG
+    {
+        char budgetBuffer[32];
+        budget.describe(budgetBuffer, 32);
+        stats().writeLogMessage("Incremental: %d, useZeal: %d, budget: %s",
+            bool(isIncremental), bool(useZeal), budgetBuffer);
+    }
+#endif
     MOZ_ASSERT_IF(isIncrementalGCInProgress(), isIncremental);
     if (isIncrementalGCInProgress() && budget.isUnlimited())
         changeToNonIncrementalGC();
@@ -7081,6 +7091,8 @@ GCRuntime::incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason rea
          * Yields between slices occurs at predetermined points in these modes;
          * the budget is not used.
          */
+        stats().writeLogMessage(
+            "Using unlimited budget for two-slice zeal mode");
         budget.makeUnlimited();
     }
 
@@ -7128,7 +7140,7 @@ GCRuntime::incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason rea
         MOZ_ASSERT(marker.isDrained());
 
         /*
-         * In incremental GCs where we have already performed more than once
+         * In incremental GCs where we have already performed more than one
          * slice we yield after marking with the aim of starting the sweep in
          * the next slice, since the first slice of sweeping can be expensive.
          *
@@ -7145,6 +7157,7 @@ GCRuntime::incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason rea
              (useZeal && hasZealMode(ZealMode::YieldBeforeSweeping))))
         {
             lastMarkSlice = true;
+            stats().writeLogMessage("Yeilding before starting sweeping");
             break;
         }
 
@@ -7552,7 +7565,7 @@ GCRuntime::maybeDoCycleCollection()
 
     size_t realmsTotal = 0;
     size_t realmsGray = 0;
-    for (RealmsIter realm(rt, SkipAtoms); !realm.done(); realm.next()) {
+    for (RealmsIter realm(rt); !realm.done(); realm.next()) {
         ++realmsTotal;
         GlobalObject* global = realm->unsafeUnbarrieredMaybeGlobal();
         if (global && global->isMarkedGray())
@@ -7602,7 +7615,7 @@ GCRuntime::shouldRepeatForDeadZone(JS::gcreason::Reason reason)
     if (!isIncremental)
         return false;
 
-    for (CompartmentsIter c(rt, SkipAtoms); !c.done(); c.next()) {
+    for (CompartmentsIter c(rt); !c.done(); c.next()) {
         if (c->scheduledForDestruction)
             return true;
     }
@@ -7620,6 +7633,9 @@ GCRuntime::collect(bool nonincrementalByAPI, SliceBudget budget, JS::gcreason::R
     if (!checkIfGCAllowedInCurrentState(reason))
         return;
 
+    stats().writeLogMessage("GC starting in state %s",
+        StateName(incrementalState));
+
     AutoTraceLog logGC(TraceLoggerForCurrentThread(), TraceLogger_GC);
     AutoStopVerifyingBarriers av(rt, IsShutdownGC(reason));
     AutoEnqueuePendingParseTasksAfterGC aept(*this);
@@ -7631,6 +7647,7 @@ GCRuntime::collect(bool nonincrementalByAPI, SliceBudget budget, JS::gcreason::R
 
         if (reason == JS::gcreason::ABORT_GC) {
             MOZ_ASSERT(!isIncrementalGCInProgress());
+            stats().writeLogMessage("GC aborted by request");
             break;
         }
 
@@ -7670,6 +7687,7 @@ GCRuntime::collect(bool nonincrementalByAPI, SliceBudget budget, JS::gcreason::R
         MOZ_RELEASE_ASSERT(CheckGrayMarkingState(rt));
     }
 #endif
+    stats().writeLogMessage("GC ending");
 }
 
 js::AutoEnqueuePendingParseTasksAfterGC::~AutoEnqueuePendingParseTasksAfterGC()
@@ -7961,7 +7979,7 @@ js::NewRealm(JSContext* cx, JSPrincipals* principals, const JS::RealmOptions& op
         return nullptr;
 
     // Set up the principals.
-    JS_SetCompartmentPrincipals(JS::GetCompartmentForRealm(realm), principals);
+    JS::SetRealmPrincipals(realm, principals);
 
     JSCompartment* comp = realm->compartment();
     if (!comp->realms().append(realm)) {
@@ -8488,7 +8506,7 @@ js::gc::CheckHashTablesAfterMovingGC(JSRuntime* rt)
         }
     }
 
-    for (CompartmentsIter c(rt, SkipAtoms); !c.done(); c.next()) {
+    for (CompartmentsIter c(rt); !c.done(); c.next()) {
         c->checkWrapperMapAfterMovingGC();
 
         for (RealmsInCompartmentIter r(c); !r.done(); r.next()) {
