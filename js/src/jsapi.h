@@ -1958,16 +1958,10 @@ JS_PUBLIC_API(const RealmCreationOptions&)
 RealmCreationOptionsRef(JSCompartment* compartment);
 
 JS_PUBLIC_API(const RealmCreationOptions&)
-RealmCreationOptionsRef(JSObject* obj);
-
-JS_PUBLIC_API(const RealmCreationOptions&)
 RealmCreationOptionsRef(JSContext* cx);
 
 JS_PUBLIC_API(RealmBehaviors&)
-RealmBehaviorsRef(JSCompartment* compartment);
-
-JS_PUBLIC_API(RealmBehaviors&)
-RealmBehaviorsRef(JSObject* obj);
+RealmBehaviorsRef(JS::Realm* realm);
 
 JS_PUBLIC_API(RealmBehaviors&)
 RealmBehaviorsRef(JSContext* cx);
@@ -6248,7 +6242,7 @@ struct JS_PUBLIC_API(FirstSubsumedFrame)
     }
 
     FirstSubsumedFrame& operator=(FirstSubsumedFrame&& rhs) {
-        new (this) FirstSubsumedFrame(mozilla::Move(rhs));
+        new (this) FirstSubsumedFrame(std::move(rhs));
         return *this;
     }
 

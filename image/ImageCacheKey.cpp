@@ -7,9 +7,9 @@
 
 #include "mozilla/Move.h"
 #include "ImageURL.h"
-#include "nsHostObjectProtocolHandler.h"
 #include "nsLayoutUtils.h"
 #include "nsString.h"
+#include "mozilla/dom/BlobURLProtocolHandler.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/ServiceWorkerManager.h"
 #include "nsIDocument.h"
@@ -93,8 +93,8 @@ ImageCacheKey::ImageCacheKey(const ImageCacheKey& aOther)
 { }
 
 ImageCacheKey::ImageCacheKey(ImageCacheKey&& aOther)
-  : mURI(Move(aOther.mURI))
-  , mBlobSerial(Move(aOther.mBlobSerial))
+  : mURI(std::move(aOther.mURI))
+  , mBlobSerial(std::move(aOther.mBlobSerial))
   , mOriginAttributes(aOther.mOriginAttributes)
   , mControlledDocument(aOther.mControlledDocument)
   , mHash(aOther.mHash)

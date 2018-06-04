@@ -89,7 +89,7 @@ class SegmentedVector : private AllocPolicy
       // Pre-increment mLength so that the bounds-check in operator[] passes.
       mLength++;
       T* elem = &(*this)[mLength - 1];
-      new (elem) T(mozilla::Forward<U>(aU));
+      new (elem) T(std::forward<U>(aU));
     }
 
     void PopLast()
@@ -140,7 +140,7 @@ public:
   }
 
   SegmentedVector(SegmentedVector&& aOther)
-    : mSegments(mozilla::Move(aOther.mSegments))
+    : mSegments(std::move(aOther.mSegments))
   {
   }
 
@@ -175,7 +175,7 @@ public:
       new (last) Segment();
       mSegments.insertBack(last);
     }
-    last->Append(mozilla::Forward<U>(aU));
+    last->Append(std::forward<U>(aU));
     return true;
   }
 
@@ -184,7 +184,7 @@ public:
   template<typename U>
   void InfallibleAppend(U&& aU)
   {
-    bool ok = Append(mozilla::Forward<U>(aU));
+    bool ok = Append(std::forward<U>(aU));
     MOZ_RELEASE_ASSERT(ok);
   }
 

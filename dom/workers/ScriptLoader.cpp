@@ -29,7 +29,6 @@
 #include "nsContentPolicyUtils.h"
 #include "nsContentUtils.h"
 #include "nsDocShellCID.h"
-#include "nsHostObjectProtocolHandler.h"
 #include "nsISupportsPrimitives.h"
 #include "nsNetUtil.h"
 #include "nsIPipe.h"
@@ -46,6 +45,7 @@
 #include "mozilla/LoadContext.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/ipc/BackgroundUtils.h"
+#include "mozilla/dom/BlobURLProtocolHandler.h"
 #include "mozilla/dom/CacheBinding.h"
 #include "mozilla/dom/cache/CacheTypes.h"
 #include "mozilla/dom/cache/Cache.h"
@@ -778,7 +778,7 @@ private:
       return rv;
     }
 
-    ir->SetPrincipalInfo(Move(principalInfo));
+    ir->SetPrincipalInfo(std::move(principalInfo));
     ir->Headers()->FillResponseHeaders(loadInfo.mChannel);
 
     RefPtr<mozilla::dom::Response> response =
@@ -1054,7 +1054,7 @@ private:
     if (IsMainWorkerScript()) {
       MOZ_DIAGNOSTIC_ASSERT(loadInfo.mReservedClientInfo.isSome());
       rv = AddClientChannelHelper(channel,
-                                  Move(loadInfo.mReservedClientInfo),
+                                  std::move(loadInfo.mReservedClientInfo),
                                   Maybe<ClientInfo>(),
                                   mWorkerPrivate->HybridEventTarget());
       if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -1834,7 +1834,7 @@ CacheScriptLoader::ResolvedCallback(JSContext* aCx,
   if (!inputStream) {
     mLoadInfo.mCacheStatus = ScriptLoadInfo::Cached;
     mRunnable->DataReceivedFromCache(mIndex, (uint8_t*)"", 0, mChannelInfo,
-                                     Move(mPrincipalInfo), mCSPHeaderValue,
+                                     std::move(mPrincipalInfo), mCSPHeaderValue,
                                      mCSPReportOnlyHeaderValue,
                                      mReferrerPolicyHeaderValue);
     return;
@@ -1901,7 +1901,7 @@ CacheScriptLoader::OnStreamComplete(nsIStreamLoader* aLoader, nsISupports* aCont
 
   MOZ_ASSERT(mPrincipalInfo);
   mRunnable->DataReceivedFromCache(mIndex, aString, aStringLen, mChannelInfo,
-                                   Move(mPrincipalInfo), mCSPHeaderValue,
+                                   std::move(mPrincipalInfo), mCSPHeaderValue,
                                    mCSPReportOnlyHeaderValue,
                                    mReferrerPolicyHeaderValue);
   return NS_OK;

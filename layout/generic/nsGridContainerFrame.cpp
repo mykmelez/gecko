@@ -3715,7 +3715,7 @@ MaxContentContribution(const GridItemInfo&    aGridItem,
 }
 
 // Computes the min-size contribution for a grid item, as defined at
-// https://drafts.csswg.org/css-grid/#min-size-contributions
+// https://drafts.csswg.org/css-grid/#min-size-contribution
 static nscoord
 MinSize(const GridItemInfo&    aGridItem,
         const GridReflowInput& aState,
@@ -3732,7 +3732,7 @@ MinSize(const GridItemInfo&    aGridItem,
   const nsStylePosition* stylePos = child->StylePosition();
   const nsStyleCoord& sizeStyle =
     axis == eAxisHorizontal ? stylePos->mWidth : stylePos->mHeight;
-  if (sizeStyle.GetUnit() != eStyleUnit_Auto) {
+  if (sizeStyle.GetUnit() != eStyleUnit_Auto && !sizeStyle.HasPercent()) {
     nscoord s =
       MinContentContribution(aGridItem, aState, aRC, aCBWM, aAxis, aCache);
     aCache->mMinSize.emplace(s);
@@ -4617,7 +4617,7 @@ nsGridContainerFrame::Tracks::StretchFlexibleTracks(
         aAvailableSize = std::max(0, aAvailableSize - sumOfGridGaps);
         // Restart with the original track sizes and definite aAvailableSize.
         if (origSizes.isSome()) {
-          mSizes = Move(*origSizes);
+          mSizes = std::move(*origSizes);
           origSizes.reset();
         } // else, no mSizes[].mBase were changed above so it's still correct
         if (aAvailableSize == 0) {
@@ -6128,10 +6128,10 @@ nsGridContainerFrame::Reflow(nsPresContext*           aPresContext,
       gridReflowInput.mColFunctions.NumExplicitTracks(),
       0,
       col,
-      Move(colTrackPositions),
-      Move(colTrackSizes),
-      Move(colTrackStates),
-      Move(colRemovedRepeatTracks),
+      std::move(colTrackPositions),
+      std::move(colTrackSizes),
+      std::move(colTrackStates),
+      std::move(colRemovedRepeatTracks),
       gridReflowInput.mColFunctions.mRepeatAutoStart);
     SetProperty(GridColTrackInfo(), colInfo);
 
@@ -6163,10 +6163,10 @@ nsGridContainerFrame::Reflow(nsPresContext*           aPresContext,
       gridReflowInput.mRowFunctions.NumExplicitTracks(),
       gridReflowInput.mStartRow,
       row,
-      Move(rowTrackPositions),
-      Move(rowTrackSizes),
-      Move(rowTrackStates),
-      Move(rowRemovedRepeatTracks),
+      std::move(rowTrackPositions),
+      std::move(rowTrackSizes),
+      std::move(rowTrackStates),
+      std::move(rowRemovedRepeatTracks),
       gridReflowInput.mRowFunctions.mRepeatAutoStart);
     SetProperty(GridRowTrackInfo(), rowInfo);
 
@@ -6194,10 +6194,10 @@ nsGridContainerFrame::Reflow(nsPresContext*           aPresContext,
         priorRowInfo->mNumExplicitTracks,
         priorRowInfo->mStartFragmentTrack,
         gridReflowInput.mStartRow,
-        Move(priorRowInfo->mPositions),
-        Move(priorRowInfo->mSizes),
-        Move(priorRowInfo->mStates),
-        Move(priorRowInfo->mRemovedRepeatTracks),
+        std::move(priorRowInfo->mPositions),
+        std::move(priorRowInfo->mSizes),
+        std::move(priorRowInfo->mStates),
+        std::move(priorRowInfo->mRemovedRepeatTracks),
         priorRowInfo->mRepeatFirstTrack);
       prevInFlow->SetProperty(GridRowTrackInfo(), revisedPriorRowInfo);
     }
@@ -6234,10 +6234,10 @@ nsGridContainerFrame::Reflow(nsPresContext*           aPresContext,
     }
 
     ComputedGridLineInfo* columnLineInfo = new ComputedGridLineInfo(
-      Move(columnLineNames),
+      std::move(columnLineNames),
       gridColTemplate.mRepeatAutoLineNameListBefore,
       gridColTemplate.mRepeatAutoLineNameListAfter,
-      Move(colNamesFollowingRepeat));
+      std::move(colNamesFollowingRepeat));
     SetProperty(GridColumnLineInfo(), columnLineInfo);
 
     // Generate row lines next.
@@ -6267,10 +6267,10 @@ nsGridContainerFrame::Reflow(nsPresContext*           aPresContext,
     }
 
     ComputedGridLineInfo* rowLineInfo = new ComputedGridLineInfo(
-      Move(rowLineNames),
+      std::move(rowLineNames),
       gridRowTemplate.mRepeatAutoLineNameListBefore,
       gridRowTemplate.mRepeatAutoLineNameListAfter,
-      Move(rowNamesFollowingRepeat));
+      std::move(rowNamesFollowingRepeat));
     SetProperty(GridRowLineInfo(), rowLineInfo);
 
     // Generate area info for explicit areas. Implicit areas are handled

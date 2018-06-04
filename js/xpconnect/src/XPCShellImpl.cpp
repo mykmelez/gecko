@@ -501,21 +501,21 @@ Options(JSContext* cx, unsigned argc, Value* vp)
 
     UniqueChars names;
     if (oldContextOptions.extraWarnings()) {
-        names = JS_sprintf_append(Move(names), "%s", "strict");
+        names = JS_sprintf_append(std::move(names), "%s", "strict");
         if (!names) {
             JS_ReportOutOfMemory(cx);
             return false;
         }
     }
     if (oldContextOptions.werror()) {
-        names = JS_sprintf_append(Move(names), "%s%s", names ? "," : "", "werror");
+        names = JS_sprintf_append(std::move(names), "%s%s", names ? "," : "", "werror");
         if (!names) {
             JS_ReportOutOfMemory(cx);
             return false;
         }
     }
     if (names && oldContextOptions.strictMode()) {
-        names = JS_sprintf_append(Move(names), "%s%s", names ? "," : "", "strict_mode");
+        names = JS_sprintf_append(std::move(names), "%s%s", names ? "," : "", "strict_mode");
         if (!names) {
             JS_ReportOutOfMemory(cx);
             return false;
@@ -1332,14 +1332,14 @@ XRE_XPCShellMain(int argc, char** argv, char** envp,
                 return 1;
             }
 
-            // Even if we're building in a configuration where source is
-            // discarded, there's no reason to do that on XPCShell, and doing so
-            // might break various automation scripts.
-            JS::RealmBehaviorsRef(glob).setDiscardSource(false);
-
             backstagePass->SetGlobalObject(glob);
 
             JSAutoRealm ar(cx, glob);
+
+            // Even if we're building in a configuration where source is
+            // discarded, there's no reason to do that on XPCShell, and doing so
+            // might break various automation scripts.
+            JS::RealmBehaviorsRef(cx).setDiscardSource(false);
 
             if (!JS_InitReflectParse(cx, glob)) {
                 return 1;

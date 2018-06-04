@@ -1758,11 +1758,8 @@ nsGlobalWindowOuter::SetNewDocument(nsIDocument* aDocument,
       nsJSPrincipals::get(JS::GetRealmPrincipals(realm));
     aDocument->NodePrincipal()->Equals(existing, &sameOrigin);
     MOZ_ASSERT(sameOrigin);
-
-    JSCompartment* compartment = JS::GetCompartmentForRealm(realm);
     MOZ_ASSERT_IF(aDocument == oldDoc,
-                  xpc::GetCompartmentPrincipal(compartment) ==
-                  aDocument->NodePrincipal());
+                  xpc::GetRealmPrincipal(realm) == aDocument->NodePrincipal());
 #endif
     if (aDocument != oldDoc) {
       JS::SetRealmPrincipals(realm,
@@ -7572,9 +7569,9 @@ nsGlobalWindowOuter::Dispatch(TaskCategory aCategory,
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   if (GetDocGroup()) {
-    return GetDocGroup()->Dispatch(aCategory, Move(aRunnable));
+    return GetDocGroup()->Dispatch(aCategory, std::move(aRunnable));
   }
-  return DispatcherTrait::Dispatch(aCategory, Move(aRunnable));
+  return DispatcherTrait::Dispatch(aCategory, std::move(aRunnable));
 }
 
 nsISerialEventTarget*

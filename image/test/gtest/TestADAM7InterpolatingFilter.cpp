@@ -31,7 +31,7 @@ WithADAM7InterpolatingFilter(const IntSize& aSize, Func aFunc)
   RefPtr<Decoder> decoder = CreateTrivialDecoder();
   ASSERT_TRUE(bool(decoder));
 
-  WithFilterPipeline(decoder, Forward<Func>(aFunc),
+  WithFilterPipeline(decoder, std::forward<Func>(aFunc),
                      ADAM7InterpolatingConfig { },
                      SurfaceConfig { decoder, aSize,
                                      SurfaceFormat::B8G8R8A8, false });
@@ -241,7 +241,7 @@ WriteUninterpolatedPixels(SurfaceFilter* aFilter,
   for (int32_t row = 0; row < aSize.height; ++row) {
     // Compute uninterpolated pixels for this row.
     vector<BGRAColor> pixels =
-      Move(ADAM7HorizontallyInterpolatedRow(aPass, row, aSize.width,
+      std::move(ADAM7HorizontallyInterpolatedRow(aPass, row, aSize.width,
                                             ShouldInterpolate::eNo, aColors));
 
     // Write them to the surface.
@@ -275,7 +275,7 @@ CheckHorizontallyInterpolatedImage(Decoder* aDecoder,
     // Compute the expected pixels, *with* interpolation to match what the
     // filter should have done.
     vector<BGRAColor> expectedPixels =
-      Move(ADAM7HorizontallyInterpolatedRow(aPass, row, aSize.width,
+      std::move(ADAM7HorizontallyInterpolatedRow(aPass, row, aSize.width,
                                             ShouldInterpolate::eYes, aColors));
 
     if (!RowHasPixels(surface, row, expectedPixels)) {

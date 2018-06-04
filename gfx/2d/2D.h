@@ -480,7 +480,7 @@ public:
       , mIsMapped(aSurface->Map(aType, &mMap)) {}
 
     ScopedMap(ScopedMap&& aOther)
-      : mSurface(Move(aOther.mSurface))
+      : mSurface(std::move(aOther.mSurface))
       , mMap(aOther.mMap)
       , mIsMapped(aOther.mIsMapped)
     {
@@ -493,7 +493,7 @@ public:
       if (mIsMapped) {
         mSurface->Unmap();
       }
-      mSurface = Move(aOther.mSurface);
+      mSurface = std::move(aOther.mSurface);
       mMap = aOther.mMap;
       mIsMapped = aOther.mIsMapped;
       aOther.mMap.mData = nullptr;
@@ -880,6 +880,8 @@ public:
   }
 
   virtual bool CanSerialize() { return false; }
+
+  virtual bool HasVariationSettings() { return false; }
 
   void AddUserData(UserDataKey *key, void *userData, void (*destroy)(void*)) {
     mUserData.Add(key, userData, destroy);

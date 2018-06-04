@@ -387,7 +387,7 @@ class WrapperMap
         auto p = map.lookupForAdd(c);
         if (!p) {
             InnerMap m;
-            if (!m.init(InitialInnerMapSize) || !map.add(p, c, mozilla::Move(m)))
+            if (!m.init(InitialInnerMapSize) || !map.add(p, c, std::move(m)))
                 return false;
         }
         return p->value().put(k, v);
@@ -618,7 +618,6 @@ struct JSCompartment
 
   protected:
     explicit JSCompartment(JS::Zone* zone);
-    ~JSCompartment();
 
     MOZ_MUST_USE bool init(JSContext* cx);
 
