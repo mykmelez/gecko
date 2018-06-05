@@ -572,19 +572,6 @@ WasmThreadsSupported(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static bool
-WasmSignExtensionSupported(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-#ifdef ENABLE_WASM_SIGNEXTEND_OPS
-    bool isSupported = true;
-#else
-    bool isSupported = false;
-#endif
-    args.rval().setBoolean(isSupported);
-    return true;
-}
-
-static bool
 WasmSaturatingTruncationSupported(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -3527,7 +3514,7 @@ struct FindPathHandler {
         EdgeName edgeName = DuplicateString(cx, edge.name.get());
         if (!edgeName)
             return false;
-        *backEdge = std::move(BackEdge(origin, std::move(edgeName)));
+        *backEdge = BackEdge(origin, std::move(edgeName));
 
         // Have we reached our final target node?
         if (edge.referent == target) {
@@ -5561,11 +5548,6 @@ gc::ZealModeHelpText),
     JS_FN_HELP("wasmThreadsSupported", WasmThreadsSupported, 0, 0,
 "wasmThreadsSupported()",
 "  Returns a boolean indicating whether the WebAssembly threads proposal is\n"
-"  supported on the current device."),
-
-    JS_FN_HELP("wasmSignExtensionSupported", WasmSignExtensionSupported, 0, 0,
-"wasmSignExtensionSupported()",
-"  Returns a boolean indicating whether the WebAssembly sign extension opcodes are\n"
 "  supported on the current device."),
 
     JS_FN_HELP("wasmSaturatingTruncationSupported", WasmSaturatingTruncationSupported, 0, 0,

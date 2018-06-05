@@ -2859,12 +2859,17 @@ GCRuntime::updateCellPointers(Zone* zone, AllocKinds kinds, size_t bgTaskCount)
 //  2) typed object type descriptor objects
 //  3) all other objects
 //
-// Since we want to minimize the number of phases, we put everything else into
-// the first phase and label it the 'misc' phase.
+// Also, JSScripts and LazyScripts can have pointers to each other. Each can be
+// updated safely without requiring the referent to be up-to-date, but TSAN can
+// warn about data races when calling IsForwarded() on the new location of a
+// cell that is being updated in parallel. To avoid this, we update these in
+// separate phases.
+//
+// Since we want to minimize the number of phases, arrange kinds into three
+// arbitrary phases.
 
-static const AllocKinds UpdatePhaseMisc {
+static const AllocKinds UpdatePhaseOne {
     AllocKind::SCRIPT,
-    AllocKind::LAZY_SCRIPT,
     AllocKind::BASE_SHAPE,
     AllocKind::SHAPE,
     AllocKind::ACCESSOR_SHAPE,
@@ -2874,7 +2879,10 @@ static const AllocKinds UpdatePhaseMisc {
     AllocKind::SCOPE
 };
 
-static const AllocKinds UpdatePhaseObjects {
+// UpdatePhaseTwo is typed object descriptor objects.
+
+static const AllocKinds UpdatePhaseThree {
+    AllocKind::LAZY_SCRIPT,
     AllocKind::FUNCTION,
     AllocKind::FUNCTION_EXTENDED,
     AllocKind::OBJECT0,
@@ -2896,13 +2904,13 @@ GCRuntime::updateAllCellPointers(MovingTracer* trc, Zone* zone)
 {
     size_t bgTaskCount = CellUpdateBackgroundTaskCount();
 
-    updateCellPointers(zone, UpdatePhaseMisc, bgTaskCount);
+    updateCellPointers(zone, UpdatePhaseOne, bgTaskCount);
 
-    // Update TypeDescrs before all other objects as typed objects access these
-    // objects when we trace them.
+    // UpdatePhaseTwo: Update TypeDescrs before all other objects as typed
+    // objects access these objects when we trace them.
     updateTypeDescrObjects(trc, zone);
 
-    updateCellPointers(zone, UpdatePhaseObjects, bgTaskCount);
+    updateCellPointers(zone, UpdatePhaseThree, bgTaskCount);
 }
 
 /*
@@ -3393,10 +3401,9 @@ GCRuntime::triggerZoneGC(Zone* zone, JS::gcreason::Reason reason, size_t used, s
 #endif
 
     if (zone->isAtomsZone()) {
-        /* We can't do a zone GC of the atoms zone. */
-        if (rt->mainContextFromOwnThread()->keepAtoms || rt->hasHelperThreadZones()) {
-            /* Skip GC and retrigger later, since atoms zone won't be collected
-             * if keepAtoms is true. */
+        /* We can't do a zone GC of just the atoms zone. */
+        if (rt->hasHelperThreadZones()) {
+            /* We can't collect atoms while off-thread parsing is allocating. */
             fullGCForAtomsRequested_ = true;
             return false;
         }
@@ -4021,7 +4028,7 @@ GCRuntime::purgeRuntime()
         realm->purge();
 
     for (GCZonesIter zone(rt); !zone.done(); zone.next()) {
-        zone->atomCache().clearAndShrink();
+        zone->purgeAtomCacheOrDefer();
         zone->externalStringCache().purge();
         zone->functionToStringCache().purge();
     }
@@ -5390,21 +5397,19 @@ class ImmediateSweepWeakCacheTask : public GCParallelTaskHelper<ImmediateSweepWe
 };
 
 static void
-UpdateAtomsBitmap(GCParallelTask* task)
+UpdateAtomsBitmap(JSRuntime* runtime)
 {
-    JSRuntime* runtime = task->runtime();
-
     DenseBitmap marked;
     if (runtime->gc.atomMarking.computeBitmapFromChunkMarkBits(runtime, marked)) {
         for (GCZonesIter zone(runtime); !zone.done(); zone.next())
-            runtime->gc.atomMarking.updateZoneBitmap(zone, marked);
+            runtime->gc.atomMarking.refineZoneBitmapForCollectedZone(zone, marked);
     } else {
-        // Ignore OOM in computeBitmapFromChunkMarkBits. The updateZoneBitmap
-        // call can only remove atoms from the zone bitmap, so it is
-        // conservative to just not call it.
+        // Ignore OOM in computeBitmapFromChunkMarkBits. The
+        // refineZoneBitmapForCollectedZone call can only remove atoms from the
+        // zone bitmap, so it is conservative to just not call it.
     }
 
-    runtime->gc.atomMarking.updateChunkMarkBits(runtime);
+    runtime->gc.atomMarking.markAtomsUsedByUncollectedZones(runtime);
 
     // For convenience sweep these tables non-incrementally as part of bitmap
     // sweeping; they are likely to be much smaller than the main atoms table.
@@ -5707,14 +5712,18 @@ GCRuntime::beginSweepingSweepGroup(FreeOp* fop, SliceBudget& budget)
         callFinalizeCallbacks(fop, JSFINALIZE_GROUP_START);
     }
 
+    // Updating the atom marking bitmaps. This marks atoms referenced by
+    // uncollected zones so cannot be done in parallel with the other sweeping
+    // work below.
+    if (sweepingAtoms) {
+        AutoPhase ap(stats(), PhaseKind::UPDATE_ATOMS_BITMAP);
+        UpdateAtomsBitmap(rt);
+    }
+
     sweepDebuggerOnMainThread(fop);
 
     {
         AutoLockHelperThreadState lock;
-
-        Maybe<AutoRunParallelTask> updateAtomsBitmap;
-        if (sweepingAtoms)
-            updateAtomsBitmap.emplace(rt, UpdateAtomsBitmap, PhaseKind::UPDATE_ATOMS_BITMAP, lock);
 
         AutoPhase ap(stats(), PhaseKind::SWEEP_COMPARTMENTS);
 
@@ -6821,7 +6830,7 @@ AutoTraceSession::AutoTraceSession(JSRuntime* rt, JS::HeapState heapState)
   : runtime(rt),
     prevState(rt->mainContextFromOwnThread()->heapState),
     profilingStackFrame(rt->mainContextFromOwnThread(), HeapStateToLabel(heapState),
-                        ProfilingStackFrame::Category::GC)
+                        ProfilingStackFrame::Category::GCCC)
 {
     MOZ_ASSERT(prevState == JS::HeapState::Idle);
     MOZ_ASSERT(heapState != JS::HeapState::Idle);
