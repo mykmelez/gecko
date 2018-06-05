@@ -16,10 +16,10 @@ cd lmdb-rs
 cargo build
 ```
 
-## TODO
+## Features
 
 * [x] lmdb-sys.
 * [x] Cursors.
 * [x] Zero-copy put API.
 * [x] Nested transactions.
-* [ ] Database statistics.
+* [x] Database statistics.

@@ -28,7 +28,7 @@ pub trait Cursor<'txn> {
             let mut key_val = slice_to_val(key);
             let mut data_val = slice_to_val(data);
             let key_ptr = key_val.mv_data;
-            try!(lmdb_result(ffi::mdb_cursor_get(self.cursor(), &mut key_val, &mut data_val, op)));
+            lmdb_result(ffi::mdb_cursor_get(self.cursor(), &mut key_val, &mut data_val, op))?;
             let key_out = if key_ptr != key_val.mv_data { Some(val_to_slice(key_val)) } else { None };
             let data_out = val_to_slice(data_val);
             Ok((key_out, data_out))
@@ -87,7 +87,11 @@ pub trait Cursor<'txn> {
     /// Iterate over duplicate items in the database starting from the given
     /// key. Each item will be returned as an iterator of its duplicates.
     fn iter_dup_from<K>(&mut self, key: &K) -> IterDup<'txn> where K: AsRef<[u8]> {
-        self.get(Some(key.as_ref()), None, ffi::MDB_SET_RANGE).unwrap();
+        match self.get(Some(key.as_ref()), None, ffi::MDB_SET_RANGE) {
+            Err(Error::NotFound) => Ok(()),
+            Err(error) => Err(error),
+            Ok(_) => Ok(()),
+        }.unwrap();
         IterDup::new(self.cursor(), ffi::MDB_GET_CURRENT)
     }
 
@@ -95,7 +99,7 @@ pub trait Cursor<'txn> {
     /// key.
     fn iter_dup_of<K>(&mut self, key: &K) -> Result<Iter<'txn>> where K:
         AsRef<[u8]> {
-        try!(self.get(Some(key.as_ref()), None, ffi::MDB_SET));
+        self.get(Some(key.as_ref()), None, ffi::MDB_SET)?;
         Ok(Iter::new(self.cursor(), ffi::MDB_GET_CURRENT, ffi::MDB_NEXT_DUP))
     }
 }
@@ -128,10 +132,9 @@ impl <'txn> RoCursor<'txn> {
 
     /// Creates a new read-only cursor in the given database and transaction.
     /// Prefer using `Transaction::open_cursor`.
-    #[doc(hidden)]
-    pub fn new<T>(txn: &'txn T, db: Database) -> Result<RoCursor<'txn>> where T: Transaction {
+    pub(crate) fn new<T>(txn: &'txn T, db: Database) -> Result<RoCursor<'txn>> where T: Transaction {
         let mut cursor: *mut ffi::MDB_cursor = ptr::null_mut();
-        unsafe { try!(lmdb_result(ffi::mdb_cursor_open(txn.txn(), db.dbi(), &mut cursor))); }
+        unsafe { lmdb_result(ffi::mdb_cursor_open(txn.txn(), db.dbi(), &mut cursor))?; }
         Ok(RoCursor {
             cursor: cursor,
             _marker: PhantomData,
@@ -139,7 +142,7 @@ impl <'txn> RoCursor<'txn> {
     }
 }
 
-/// A read-only cursor for navigating items within a database.
+/// A read-write cursor for navigating items within a database.
 pub struct RwCursor<'txn> {
     cursor: *mut ffi::MDB_cursor,
     _marker: PhantomData<fn() -> &'txn ()>,
@@ -167,10 +170,9 @@ impl <'txn> RwCursor<'txn> {
 
     /// Creates a new read-only cursor in the given database and transaction.
     /// Prefer using `RwTransaction::open_rw_cursor`.
-    #[doc(hidden)]
-    pub fn new<T>(txn: &'txn T, db: Database) -> Result<RwCursor<'txn>> where T: Transaction {
+    pub(crate) fn new<T>(txn: &'txn T, db: Database) -> Result<RwCursor<'txn>> where T: Transaction {
         let mut cursor: *mut ffi::MDB_cursor = ptr::null_mut();
-        unsafe { try!(lmdb_result(ffi::mdb_cursor_open(txn.txn(), db.dbi(), &mut cursor))); }
+        unsafe { lmdb_result(ffi::mdb_cursor_open(txn.txn(), db.dbi(), &mut cursor))?; }
         Ok(RwCursor { cursor: cursor, _marker: PhantomData })
     }
 
@@ -218,6 +220,7 @@ unsafe fn val_to_slice<'a>(val: ffi::MDB_val) -> &'a [u8] {
     slice::from_raw_parts(val.mv_data as *const u8, val.mv_size as usize)
 }
 
+/// An iterator over the values in an LMDB database.
 pub struct Iter<'txn> {
     cursor: *mut ffi::MDB_cursor,
     op: c_uint,
@@ -265,6 +268,10 @@ impl <'txn> Iterator for Iter<'txn> {
     }
 }
 
+/// An iterator over the keys and duplicate values in an LMDB database.
+///
+/// The yielded items of the iterator are themselves iterators over the duplicate values for a
+/// specific key.
 pub struct IterDup<'txn> {
     cursor: *mut ffi::MDB_cursor,
     op: c_uint,
@@ -353,7 +360,7 @@ mod test {
     fn test_get_dup() {
         let dir = TempDir::new("test").unwrap();
         let env = Environment::new().open(dir.path()).unwrap();
-        let db = env.create_db(None, DUP_SORT).unwrap();
+        let db = env.create_db(None, DatabaseFlags::DUP_SORT).unwrap();
 
         let mut txn = env.begin_rw_txn().unwrap();
         txn.put(db, b"key1", b"val1", WriteFlags::empty()).unwrap();
@@ -399,7 +406,7 @@ mod test {
     fn test_get_dupfixed() {
         let dir = TempDir::new("test").unwrap();
         let env = Environment::new().open(dir.path()).unwrap();
-        let db = env.create_db(None, DUP_SORT | DUP_FIXED).unwrap();
+        let db = env.create_db(None, DatabaseFlags::DUP_SORT | DatabaseFlags::DUP_FIXED).unwrap();
 
         let mut txn = env.begin_rw_txn().unwrap();
         txn.put(db, b"key1", b"val1", WriteFlags::empty()).unwrap();
@@ -425,7 +432,8 @@ mod test {
 
         let items: Vec<(&[u8], &[u8])> = vec!((b"key1", b"val1"),
                                               (b"key2", b"val2"),
-                                              (b"key3", b"val3"));
+                                              (b"key3", b"val3"),
+                                              (b"key5", b"val5"));
 
         {
             let mut txn = env.begin_rw_txn().unwrap();
@@ -447,13 +455,19 @@ mod test {
 
         assert_eq!(items.clone().into_iter().skip(1).collect::<Vec<_>>(),
                    cursor.iter_from(b"key2").collect::<Vec<_>>());
+
+        assert_eq!(items.clone().into_iter().skip(3).collect::<Vec<_>>(),
+                   cursor.iter_from(b"key4").collect::<Vec<_>>());
+
+        assert_eq!(vec!().into_iter().collect::<Vec<(&[u8], &[u8])>>(),
+                   cursor.iter_from(b"key6").collect::<Vec<_>>());
     }
 
     #[test]
     fn test_iter_dup() {
         let dir = TempDir::new("test").unwrap();
         let env = Environment::new().open(dir.path()).unwrap();
-        let db = env.create_db(None, DUP_SORT).unwrap();
+        let db = env.create_db(None, DatabaseFlags::DUP_SORT).unwrap();
 
         let items: Vec<(&[u8], &[u8])> = vec!((b"a", b"1"),
                                               (b"a", b"2"),
@@ -463,7 +477,10 @@ mod test {
                                               (b"b", b"3"),
                                               (b"c", b"1"),
                                               (b"c", b"2"),
-                                              (b"c", b"3"));
+                                              (b"c", b"3"),
+                                              (b"e", b"1"),
+                                              (b"e", b"2"),
+                                              (b"e", b"3"));
 
         {
             let mut txn = env.begin_rw_txn().unwrap();
@@ -489,6 +506,12 @@ mod test {
 
         assert_eq!(items.clone().into_iter().skip(3).collect::<Vec<(&[u8], &[u8])>>(),
                    cursor.iter_dup_from(b"ab").flat_map(|x| x).collect::<Vec<_>>());
+
+        assert_eq!(items.clone().into_iter().skip(9).collect::<Vec<(&[u8], &[u8])>>(),
+                   cursor.iter_dup_from(b"d").flat_map(|x| x).collect::<Vec<_>>());
+
+        assert_eq!(vec!().into_iter().collect::<Vec<(&[u8], &[u8])>>(),
+                   cursor.iter_dup_from(b"f").flat_map(|x| x).collect::<Vec<_>>());
 
         assert_eq!(items.clone().into_iter().skip(3).take(3).collect::<Vec<(&[u8], &[u8])>>(),
                    cursor.iter_dup_of(b"b").unwrap().collect::<Vec<_>>());

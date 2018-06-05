@@ -22,7 +22,7 @@ repository = "https://github.com/mozilla-prototypes/rkv"
 version = "0.3"
 
 [dependencies.bincode]
-version = "0.9"
+version = "1.0.0"
 
 [dependencies.failure]
 version = "0.1"
@@ -33,7 +33,7 @@ default_features = false
 version = "1.0"
 
 [dependencies.lmdb]
-version = "0.7"
+version = "0.8"
 
 [dependencies.ordered-float]
 version = "0.5"
@@ -43,6 +43,8 @@ version = "1.0"
 
 [dependencies.uuid]
 version = "0.5"
+features = ["v4"]
+
 [dev-dependencies.byteorder]
 version = "1"
 

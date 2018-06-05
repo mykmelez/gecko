@@ -1,5 +1,5 @@
 use libc::{c_uint, size_t};
-use std::{fmt, ptr, result};
+use std::{fmt, ptr, result, mem};
 use std::ffi::CString;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
@@ -71,9 +71,9 @@ impl Environment {
     /// The database name may not contain the null character.
     pub fn open_db<'env>(&'env self, name: Option<&str>) -> Result<Database> {
         let mutex = self.dbi_open_mutex.lock();
-        let txn = try!(self.begin_ro_txn());
-        let db = unsafe { try!(txn.open_db(name)) };
-        try!(txn.commit());
+        let txn = self.begin_ro_txn()?;
+        let db = unsafe { txn.open_db(name)? };
+        txn.commit()?;
         drop(mutex);
         Ok(db)
     }
@@ -97,18 +97,21 @@ impl Environment {
                            flags: DatabaseFlags)
                            -> Result<Database> {
         let mutex = self.dbi_open_mutex.lock();
-        let txn = try!(self.begin_rw_txn());
-        let db = unsafe { try!(txn.create_db(name, flags)) };
-        try!(txn.commit());
+        let txn = self.begin_rw_txn()?;
+        let db = unsafe { txn.create_db(name, flags)? };
+        txn.commit()?;
         drop(mutex);
         Ok(db)
     }
 
+    /// Retrieves the set of flags which the database is opened with.
+    ///
+    /// The database must belong to to this environment.
     pub fn get_db_flags<'env>(&'env self, db: Database) -> Result<DatabaseFlags> {
-        let txn = try!(self.begin_ro_txn());
+        let txn = self.begin_ro_txn()?;
         let mut flags: c_uint = 0;
         unsafe {
-            try!(lmdb_result(ffi::mdb_dbi_flags(txn.txn(), db.dbi(), &mut flags)));
+            lmdb_result(ffi::mdb_dbi_flags(txn.txn(), db.dbi(), &mut flags))?;
         }
         Ok(DatabaseFlags::from_bits(flags).unwrap())
     }
@@ -150,6 +153,58 @@ impl Environment {
     /// `Error::BadValSize` (since the DB name is gone).
     pub unsafe fn close_db(&mut self, db: Database) {
         ffi::mdb_dbi_close(self.env, db.dbi());
+    }
+
+    /// Retrieves statistics about this environment.
+    pub fn stat(&self) -> Result<Stat> {
+        unsafe {
+            let mut stat = Stat(mem::zeroed());
+            lmdb_try!(ffi::mdb_env_stat(self.env(), &mut stat.0));
+            Ok(stat)
+        }
+    }
+}
+
+/// Environment statistics.
+///
+/// Contains information about the size and layout of an LMDB environment.
+pub struct Stat(ffi::MDB_stat);
+
+impl Stat {
+    /// Size of a database page. This is the same for all databases in the environment.
+    #[inline]
+    pub fn page_size(&self) -> u32 {
+        self.0.ms_psize
+    }
+
+    /// Depth (height) of the B-tree.
+    #[inline]
+    pub fn depth(&self) -> u32 {
+        self.0.ms_depth
+    }
+
+    /// Number of internal (non-leaf) pages.
+    #[inline]
+    pub fn branch_pages(&self) -> usize {
+        self.0.ms_branch_pages
+    }
+
+    /// Number of leaf pages.
+    #[inline]
+    pub fn leaf_pages(&self) -> usize {
+        self.0.ms_leaf_pages
+    }
+
+    /// Number of overflow pages.
+    #[inline]
+    pub fn overflow_pages(&self) -> usize {
+        self.0.ms_overflow_pages
+    }
+
+    /// Number of data items.
+    #[inline]
+    pub fn entries(&self) -> usize {
+        self.0.ms_entries
     }
 }
 
@@ -224,6 +279,7 @@ impl EnvironmentBuilder {
 
     }
 
+    /// Sets the provided options in the environment.
     pub fn set_flags(&mut self, flags: EnvironmentFlags) -> &mut EnvironmentBuilder {
         self.flags = flags;
         self
@@ -274,7 +330,10 @@ impl EnvironmentBuilder {
 #[cfg(test)]
 mod test {
 
+    extern crate byteorder;
+
     use tempdir::TempDir;
+    use self::byteorder::{ByteOrder, LittleEndian};
 
     use flags::*;
 
@@ -285,7 +344,7 @@ mod test {
         let dir = TempDir::new("test").unwrap();
 
         // opening non-existent env with read-only should fail
-        assert!(Environment::new().set_flags(READ_ONLY)
+        assert!(Environment::new().set_flags(EnvironmentFlags::READ_ONLY)
                                   .open(dir.path())
                                   .is_err());
 
@@ -293,7 +352,7 @@ mod test {
         assert!(Environment::new().open(dir.path()).is_ok());
 
         // opening env with read-only should succeed
-        assert!(Environment::new().set_flags(READ_ONLY)
+        assert!(Environment::new().set_flags(EnvironmentFlags::READ_ONLY)
                                   .open(dir.path())
                                   .is_ok());
     }
@@ -310,7 +369,7 @@ mod test {
         }
 
         { // read-only environment
-            let env = Environment::new().set_flags(READ_ONLY)
+            let env = Environment::new().set_flags(EnvironmentFlags::READ_ONLY)
                                         .open(dir.path())
                                         .unwrap();
 
@@ -360,10 +419,45 @@ mod test {
             let env = Environment::new().open(dir.path()).unwrap();
             assert!(env.sync(true).is_ok());
         } {
-            let env = Environment::new().set_flags(READ_ONLY)
+            let env = Environment::new().set_flags(EnvironmentFlags::READ_ONLY)
                                         .open(dir.path())
                                         .unwrap();
             assert!(env.sync(true).is_err());
         }
+    }
+
+    #[test]
+    fn test_stat() {
+        let dir = TempDir::new("test").unwrap();
+        let env = Environment::new().open(dir.path()).unwrap();
+
+        // Stats should be empty initially.
+        let stat = env.stat().unwrap();
+        assert_eq!(stat.page_size(), 4096);
+        assert_eq!(stat.depth(), 0);
+        assert_eq!(stat.branch_pages(), 0);
+        assert_eq!(stat.leaf_pages(), 0);
+        assert_eq!(stat.overflow_pages(), 0);
+        assert_eq!(stat.entries(), 0);
+
+        let db = env.open_db(None).unwrap();
+
+        // Write a few small values.
+        for i in 0..64 {
+            let mut value = [0u8; 8];
+            LittleEndian::write_u64(&mut value, i);
+            let mut tx = env.begin_rw_txn().expect("begin_rw_txn");
+            tx.put(db, &value, &value, WriteFlags::default()).expect("tx.put");
+            tx.commit().expect("tx.commit")
+        }
+
+        // Stats should now reflect inserted values.
+        let stat = env.stat().unwrap();
+        assert_eq!(stat.page_size(), 4096);
+        assert_eq!(stat.depth(), 1);
+        assert_eq!(stat.branch_pages(), 0);
+        assert_eq!(stat.leaf_pages(), 1);
+        assert_eq!(stat.overflow_pages(), 0);
+        assert_eq!(stat.entries(), 64);
     }
 }

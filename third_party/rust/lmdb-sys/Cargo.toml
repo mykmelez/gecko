@@ -12,7 +12,7 @@
 
 [package]
 name = "lmdb-sys"
-version = "0.7.1"
+version = "0.8.0"
 authors = ["Dan Burkert <dan@danburkert.com>"]
 build = "build.rs"
 description = "Rust bindings for liblmdb."
@@ -24,8 +24,8 @@ license = "Apache-2.0"
 repository = "https://github.com/danburkert/lmdb-rs.git"
 [dependencies.libc]
 version = "0.2"
-[build-dependencies.pkg-config]
-version = "0.3"
+[build-dependencies.cc]
+version = "1"
 
-[build-dependencies.gcc]
+[build-dependencies.pkg-config]
 version = "0.3"

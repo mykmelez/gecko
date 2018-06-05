@@ -12,7 +12,7 @@
 
 [package]
 name = "lmdb"
-version = "0.7.1"
+version = "0.8.0"
 authors = ["Dan Burkert <dan@danburkert.com>"]
 description = "Idiomatic and safe LMDB wrapper."
 documentation = "https://docs.rs/lmdb"
@@ -22,20 +22,23 @@ categories = ["database"]
 license = "Apache-2.0"
 repository = "https://github.com/danburkert/lmdb-rs.git"
 [dependencies.bitflags]
-version = "0.9"
+version = "1"
 
 [dependencies.libc]
 version = "0.2"
 
 [dependencies.lmdb-sys]
-version = "0.7.1"
+version = "0.8.0"
+[dev-dependencies.byteorder]
+version = "1.0"
+
 [dev-dependencies.rand]
-version = "0.3"
+version = "0.4"
 
 [dev-dependencies.tempdir]
 version = "0.3"
-[badges.travis-ci]
+[badges.appveyor]
 repository = "danburkert/lmdb-rs"
 
-[badges.appveyor]
+[badges.travis-ci]
 repository = "danburkert/lmdb-rs"

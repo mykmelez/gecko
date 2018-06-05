@@ -7,7 +7,7 @@ license = "MPL-2.0"
 [dependencies]
 itertools = "^0.7.6"
 lazy_static = "1.0"
-lmdb = "0.7"
+lmdb = "0.8"
 nsstring = { path = "../../../servo/support/gecko/nsstring" }
 nserror = { path = "../../../xpcom/rust/nserror" }
 rkv = "0.3.0"
