@@ -163,3 +163,16 @@ add_task(async function testRemoveValue() {
   checkArrays([], getAttributes(aboutURI, "lockCol"));
   checkArrays([], getIDs(aboutURI));
 });
+
+add_task(async function testSetManyValues() {
+  const uri = "chrome://browser/content/testSetManyValues.xul";
+  const start = Date.now();
+  for (let i = 0; i < 50; i++) {
+    for (let j = 0; j < 50; j++) {
+      XULStore.setValue(uri, `id${i}`, `attribute${j}`, "value");
+    }
+  }
+  const end = Date.now();
+  const duration = end - start;
+  dump(`${end} - ${start} = ${duration}\n`);
+});
