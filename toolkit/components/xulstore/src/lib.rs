@@ -117,8 +117,17 @@ lazy_static! {
         // with the new profile directory.
 
         Rkv::new(&xulstore_dir_path).expect("new succeeded")
+
+        // How we'd do it if we were using the manager:
         // let mut manager = Manager::singleton().write().unwrap();
         // manager.get_or_create(xulstore_dir_path.as_path(), Rkv::new).expect("Rkv")
+
+        // How we'd do it if we were setting custom environment flags:
+        // use lmdb::{Environment, EnvironmentFlags};
+        // let mut env_builder = Environment::new();
+        // env_builder.set_flags(EnvironmentFlags::NO_SYNC);
+        // Rkv::from_env(env_builder, &xulstore_dir_path).expect("new succeeded")
+
     };
 
     #[derive(Debug)]
