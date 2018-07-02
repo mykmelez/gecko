@@ -30,7 +30,7 @@ features = ["derive"]
 default_features = false
 
 [dependencies.lazy_static]
-version = "1.0"
+version = "1"
 
 [dependencies.lmdb]
 version = "0.8"
