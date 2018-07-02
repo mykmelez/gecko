@@ -13,6 +13,7 @@
 #include "xpcpublic.h"
 #include "XPCWrapper.h"
 #include "XPCJSMemoryReporter.h"
+#include "XrayWrapper.h"
 #include "WrapperFactory.h"
 #include "mozJSComponentLoader.h"
 #include "nsAutoPtr.h"
@@ -170,7 +171,7 @@ public:
 
 namespace xpc {
 
-CompartmentPrivate::CompartmentPrivate(JSCompartment* c)
+CompartmentPrivate::CompartmentPrivate(JS::Compartment* c)
     : wantXrays(false)
     , allowWaivers(true)
     , isWebExtensionContentScript(false)
@@ -434,7 +435,7 @@ Scriptability::Get(JSObject* aScope)
 }
 
 bool
-IsContentXBLCompartment(JSCompartment* compartment)
+IsContentXBLCompartment(JS::Compartment* compartment)
 {
     // We always eagerly create compartment privates for content XBL compartments.
     CompartmentPrivate* priv = CompartmentPrivate::Get(compartment);
@@ -454,7 +455,7 @@ IsInContentXBLScope(JSObject* obj)
 }
 
 bool
-IsUniversalXPConnectEnabled(JSCompartment* compartment)
+IsUniversalXPConnectEnabled(JS::Compartment* compartment)
 {
     CompartmentPrivate* priv = CompartmentPrivate::Get(compartment);
     if (!priv)
@@ -465,7 +466,7 @@ IsUniversalXPConnectEnabled(JSCompartment* compartment)
 bool
 IsUniversalXPConnectEnabled(JSContext* cx)
 {
-    JSCompartment* compartment = js::GetContextCompartment(cx);
+    JS::Compartment* compartment = js::GetContextCompartment(cx);
     if (!compartment)
         return false;
     return IsUniversalXPConnectEnabled(compartment);
@@ -474,7 +475,7 @@ IsUniversalXPConnectEnabled(JSContext* cx)
 bool
 EnableUniversalXPConnect(JSContext* cx)
 {
-    JSCompartment* compartment = js::GetContextCompartment(cx);
+    JS::Compartment* compartment = js::GetContextCompartment(cx);
     if (!compartment)
         return true;
     // Never set universalXPConnectEnabled on a chrome compartment - it confuses
@@ -514,13 +515,13 @@ UnprivilegedJunkScope()
 JSObject*
 PrivilegedJunkScope()
 {
-    return XPCJSRuntime::Get()->PrivilegedJunkScope();
+    return XPCJSRuntime::Get()->LoaderGlobal();
 }
 
 JSObject*
 CompilationScope()
 {
-    return XPCJSRuntime::Get()->CompilationScope();
+    return XPCJSRuntime::Get()->LoaderGlobal();
 }
 
 nsGlobalWindowInner*
@@ -558,7 +559,7 @@ CurrentWindowOrNull(JSContext* cx)
 // Wrappers between web compartments must never be cut in web-observable
 // ways.
 void
-NukeAllWrappersForCompartment(JSContext* cx, JSCompartment* compartment,
+NukeAllWrappersForCompartment(JSContext* cx, JS::Compartment* compartment,
                               js::NukeReferencesToWindow nukeReferencesToWindow)
 {
     // First, nuke all wrappers into or out of the target compartment. Once
@@ -586,7 +587,7 @@ NukeAllWrappersForCompartment(JSContext* cx, JSCompartment* compartment,
 } // namespace xpc
 
 static void
-CompartmentDestroyedCallback(JSFreeOp* fop, JSCompartment* compartment)
+CompartmentDestroyedCallback(JSFreeOp* fop, JS::Compartment* compartment)
 {
     // NB - This callback may be called in JS_DestroyContext, which happens
     // after the XPCJSRuntime has been torn down.
@@ -598,7 +599,7 @@ CompartmentDestroyedCallback(JSFreeOp* fop, JSCompartment* compartment)
 }
 
 static size_t
-CompartmentSizeOfIncludingThisCallback(MallocSizeOf mallocSizeOf, JSCompartment* compartment)
+CompartmentSizeOfIncludingThisCallback(MallocSizeOf mallocSizeOf, JS::Compartment* compartment)
 {
     CompartmentPrivate* priv = CompartmentPrivate::Get(compartment);
     return priv ? priv->SizeOfIncludingThis(mallocSizeOf) : 0;
@@ -878,7 +879,7 @@ XPCJSRuntime::WeakPointerZonesCallback(JSContext* cx, void* data)
 }
 
 /* static */ void
-XPCJSRuntime::WeakPointerCompartmentCallback(JSContext* cx, JSCompartment* comp, void* data)
+XPCJSRuntime::WeakPointerCompartmentCallback(JSContext* cx, JS::Compartment* comp, void* data)
 {
     // Called immediately after the ZoneGroup weak pointer callback, but only
     // once for each compartment that is being swept.
@@ -1352,7 +1353,7 @@ ReportZoneStats(const JS::ZoneStats& zStats,
 
     ZRREPORT_BYTES(pathPrefix + NS_LITERAL_CSTRING("compartments/compartment-objects"),
         zStats.compartmentObjects,
-        "The JSCompartment objects in this zone.");
+        "The JS::Compartment objects in this zone.");
 
     ZRREPORT_BYTES(pathPrefix + NS_LITERAL_CSTRING("compartments/cross-compartment-wrapper-tables"),
         zStats.crossCompartmentWrappersTables,
@@ -2102,7 +2103,7 @@ class OrphanReporter : public JS::ObjectPrivateVisitor
         // https://bugzilla.mozilla.org/show_bug.cgi?id=773533#c11 explains
         // that we have to skip XBL elements because they violate certain
         // assumptions.  Yuk.
-        if (node && !node->IsInUncomposedDoc() &&
+        if (node && !node->IsInComposedDoc() &&
             !(node->IsElement() && node->AsElement()->IsInNamespace(kNameSpaceID_XBL)))
         {
             // This is an orphan node.  If we haven't already handled the
@@ -2820,8 +2821,7 @@ void
 XPCJSRuntime::Initialize(JSContext* cx)
 {
     mUnprivilegedJunkScope.init(cx, nullptr);
-    mPrivilegedJunkScope.init(cx, nullptr);
-    mCompilationScope.init(cx, nullptr);
+    mLoaderGlobal.init(cx, nullptr);
 
     // these jsids filled in later when we have a JSContext to work with.
     mStrIDs[0] = JSID_VOID;
@@ -3071,24 +3071,6 @@ XPCJSRuntime::InitSingletonScopes()
     rv = CreateSandboxObject(cx, &v, nullptr, unprivilegedJunkScopeOptions);
     MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
     mUnprivilegedJunkScope = js::UncheckedUnwrap(&v.toObject());
-
-    // Create the Privileged Junk Scope.
-    SandboxOptions privilegedJunkScopeOptions;
-    privilegedJunkScopeOptions.sandboxName.AssignLiteral("XPConnect Privileged Junk Compartment");
-    privilegedJunkScopeOptions.invisibleToDebugger = true;
-    privilegedJunkScopeOptions.wantComponents = false;
-    rv = CreateSandboxObject(cx, &v, nsXPConnect::SystemPrincipal(), privilegedJunkScopeOptions);
-    MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
-    mPrivilegedJunkScope = js::UncheckedUnwrap(&v.toObject());
-
-    // Create the Compilation Scope.
-    SandboxOptions compilationScopeOptions;
-    compilationScopeOptions.sandboxName.AssignLiteral("XPConnect Compilation Compartment");
-    compilationScopeOptions.invisibleToDebugger = true;
-    compilationScopeOptions.discardSource = ShouldDiscardSystemSource();
-    rv = CreateSandboxObject(cx, &v, /* principal = */ nullptr, compilationScopeOptions);
-    MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
-    mCompilationScope = js::UncheckedUnwrap(&v.toObject());
 }
 
 void
@@ -3099,10 +3081,20 @@ XPCJSRuntime::DeleteSingletonScopes()
     RefPtr<SandboxPrivate> sandbox = SandboxPrivate::GetPrivate(mUnprivilegedJunkScope);
     sandbox->ReleaseWrapper(sandbox);
     mUnprivilegedJunkScope = nullptr;
-    sandbox = SandboxPrivate::GetPrivate(mPrivilegedJunkScope);
-    sandbox->ReleaseWrapper(sandbox);
-    mPrivilegedJunkScope = nullptr;
-    sandbox = SandboxPrivate::GetPrivate(mCompilationScope);
-    sandbox->ReleaseWrapper(sandbox);
-    mCompilationScope = nullptr;
+    mLoaderGlobal = nullptr;
+}
+
+JSObject*
+XPCJSRuntime::LoaderGlobal()
+{
+    if (!mLoaderGlobal) {
+        RefPtr<mozJSComponentLoader> loader = mozJSComponentLoader::GetOrCreate();
+
+        dom::AutoJSAPI jsapi;
+        jsapi.Init();
+
+        mLoaderGlobal = loader->GetSharedGlobal(jsapi.cx());
+        MOZ_RELEASE_ASSERT(!JS_IsExceptionPending(jsapi.cx()));
+    }
+    return mLoaderGlobal;
 }

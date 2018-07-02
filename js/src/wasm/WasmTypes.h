@@ -24,7 +24,6 @@
 #include "mozilla/EnumeratedArray.h"
 #include "mozilla/HashFunctions.h"
 #include "mozilla/Maybe.h"
-#include "mozilla/Move.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/Unused.h"
 
@@ -163,17 +162,230 @@ struct ShareableBase : AtomicRefCounted<T>
     }
 };
 
-enum class ExprType;
+// A PackedTypeCode represents a TypeCode paired with a refTypeIndex (valid only
+// for TypeCode::Ref).  PackedTypeCode is guaranteed to be POD.
+//
+// PackedTypeCode is an enum class, as opposed to the more natural
+// struct-with-bitfields, because bitfields would make it non-POD.
+//
+// DO NOT use PackedTypeCode as a cast.  ALWAYS go via PackTypeCode().
+
+enum class PackedTypeCode : uint32_t {};
+
+const uint32_t NoTypeCode     = 0xFF;      // Only use these
+const uint32_t NoRefTypeIndex = 0xFFFFFF;  //   with PackedTypeCode
+
+static inline PackedTypeCode
+InvalidPackedTypeCode()
+{
+    return PackedTypeCode((NoRefTypeIndex << 8) | NoTypeCode);
+}
+
+static inline PackedTypeCode
+PackTypeCode(TypeCode tc)
+{
+    MOZ_ASSERT(uint32_t(tc) <= 0xFF);
+    MOZ_ASSERT(tc != TypeCode::Ref);
+    return PackedTypeCode((NoRefTypeIndex << 8) | uint32_t(tc));
+}
+
+static inline PackedTypeCode
+PackTypeCode(TypeCode tc, uint32_t refTypeIndex)
+{
+    MOZ_ASSERT(uint32_t(tc) <= 0xFF);
+    MOZ_ASSERT_IF(tc != TypeCode::Ref, refTypeIndex == NoRefTypeIndex);
+    MOZ_ASSERT_IF(tc == TypeCode::Ref, refTypeIndex <= MaxTypes);
+    return PackedTypeCode((refTypeIndex << 8) | uint32_t(tc));
+}
+
+static inline PackedTypeCode
+PackedTypeCodeFromBits(uint32_t bits)
+{
+    return PackTypeCode(TypeCode(bits & 255), bits >> 8);
+}
+
+static inline bool
+IsValid(PackedTypeCode ptc)
+{
+    return (uint32_t(ptc) & 255) != NoTypeCode;
+}
+
+static inline uint32_t
+PackedTypeCodeToBits(PackedTypeCode ptc)
+{
+    return uint32_t(ptc);
+}
+
+static inline TypeCode
+UnpackTypeCodeType(PackedTypeCode ptc)
+{
+    MOZ_ASSERT(IsValid(ptc));
+    return TypeCode(uint32_t(ptc) & 255);
+}
+
+static inline uint32_t
+UnpackTypeCodeIndex(PackedTypeCode ptc)
+{
+    MOZ_ASSERT(UnpackTypeCodeType(ptc) == TypeCode::Ref);
+    return uint32_t(ptc) >> 8;
+}
+
+// The ExprType represents the type of a WebAssembly expression or return value
+// and may either be a ValType or void.
+//
+// (Soon, expression types will be generalized to a list of ValType and this
+// class will go away, replaced, wherever it is used, by a varU32 + list of
+// ValType.)
+
+class ValType;
+
+class ExprType
+{
+    PackedTypeCode tc_;
+
+#ifdef DEBUG
+    bool isValidCode() {
+        switch (UnpackTypeCodeType(tc_)) {
+          case TypeCode::I32:
+          case TypeCode::I64:
+          case TypeCode::F32:
+          case TypeCode::F64:
+          case TypeCode::I8x16:
+          case TypeCode::I16x8:
+          case TypeCode::I32x4:
+          case TypeCode::F32x4:
+          case TypeCode::B8x16:
+          case TypeCode::B16x8:
+          case TypeCode::B32x4:
+          case TypeCode::AnyRef:
+          case TypeCode::Ref:
+          case TypeCode::BlockVoid:
+          case TypeCode::Limit:
+            return true;
+          default:
+            return false;
+        }
+    }
+#endif
+
+  public:
+    enum Code {
+        Void   = uint8_t(TypeCode::BlockVoid),
+
+        I32    = uint8_t(TypeCode::I32),
+        I64    = uint8_t(TypeCode::I64),
+        F32    = uint8_t(TypeCode::F32),
+        F64    = uint8_t(TypeCode::F64),
+        AnyRef = uint8_t(TypeCode::AnyRef),
+        Ref    = uint8_t(TypeCode::Ref),
+
+        I8x16  = uint8_t(TypeCode::I8x16),
+        I16x8  = uint8_t(TypeCode::I16x8),
+        I32x4  = uint8_t(TypeCode::I32x4),
+        F32x4  = uint8_t(TypeCode::F32x4),
+        B8x16  = uint8_t(TypeCode::B8x16),
+        B16x8  = uint8_t(TypeCode::B16x8),
+        B32x4  = uint8_t(TypeCode::B32x4),
+
+        Limit  = uint8_t(TypeCode::Limit)
+    };
+
+    ExprType() : tc_() {}
+
+    ExprType(const ExprType& that) : tc_(that.tc_) {}
+
+    MOZ_IMPLICIT ExprType(Code c)
+      : tc_(PackTypeCode(TypeCode(c)))
+    {
+        MOZ_ASSERT(isValidCode());
+    }
+
+    ExprType(Code c, uint32_t refTypeIndex)
+      : tc_(PackTypeCode(TypeCode(c), refTypeIndex))
+    {
+        MOZ_ASSERT(isValidCode());
+    }
+
+    explicit ExprType(PackedTypeCode ptc)
+      : tc_(ptc)
+    {
+        MOZ_ASSERT(isValidCode());
+    }
+
+    explicit inline ExprType(const ValType& t);
+
+    PackedTypeCode packed() const {
+        return tc_;
+    }
+
+    Code code() const {
+        return Code(UnpackTypeCodeType(tc_));
+    }
+
+    uint32_t refTypeIndex() const {
+        return UnpackTypeCodeIndex(tc_);
+    }
+
+    bool isValid() const {
+        return IsValid(tc_);
+    }
+
+    bool isRef() const {
+        return UnpackTypeCodeType(tc_) == TypeCode::Ref;
+    }
+
+    bool isRefOrAnyRef() const {
+        TypeCode tc = UnpackTypeCodeType(tc_);
+        return tc == TypeCode::Ref || tc == TypeCode::AnyRef;
+    }
+
+    bool operator ==(const ExprType& that) const {
+        return tc_ == that.tc_;
+    }
+
+    bool operator !=(const ExprType& that) const {
+        return tc_ != that.tc_;
+    }
+
+    bool operator ==(Code that) const {
+        MOZ_ASSERT(that != Code::Ref);
+        return code() == that;
+    }
+
+    bool operator !=(Code that) const {
+        return !(*this == that);
+    }
+};
+
+// The ValType represents the storage type of a WebAssembly location, whether
+// parameter, local, or global.
 
 class ValType
 {
-    struct {
-        uint32_t code_ : 8;           // If code_ is InvalidCode then the ValType is invalid
-        uint32_t refTypeIndex_ : 24;  // If code_ is not Ref then this must be NoIndex
-    };
+    PackedTypeCode tc_;
 
-    static const uint32_t InvalidCode  = uint32_t(TypeCode::Limit);
-    static const uint32_t NoIndex = 0xFFFFFF;
+#ifdef DEBUG
+    bool isValidCode() {
+        switch (UnpackTypeCodeType(tc_)) {
+          case TypeCode::I32:
+          case TypeCode::I64:
+          case TypeCode::F32:
+          case TypeCode::F64:
+          case TypeCode::I8x16:
+          case TypeCode::I16x8:
+          case TypeCode::I32x4:
+          case TypeCode::F32x4:
+          case TypeCode::B8x16:
+          case TypeCode::B16x8:
+          case TypeCode::B32x4:
+          case TypeCode::AnyRef:
+          case TypeCode::Ref:
+            return true;
+          default:
+            return false;
+        }
+    }
+#endif
 
   public:
     enum Code {
@@ -183,10 +395,7 @@ class ValType
         F64    = uint8_t(TypeCode::F64),
 
         AnyRef = uint8_t(TypeCode::AnyRef),
-
-        // ------------------------------------------------------------------------
-        // The rest of these types are currently only emitted internally when
-        // compiling asm.js and are rejected by wasm validation.
+        Ref    = uint8_t(TypeCode::Ref),
 
         I8x16  = uint8_t(TypeCode::I8x16),
         I16x8  = uint8_t(TypeCode::I16x8),
@@ -197,94 +406,80 @@ class ValType
         B32x4  = uint8_t(TypeCode::B32x4)
     };
 
-    ValType()
-      : code_(InvalidCode), refTypeIndex_(NoIndex)
-    {}
+    ValType() : tc_(InvalidPackedTypeCode()) {}
 
-    MOZ_IMPLICIT ValType(ValType::Code c)
-      : code_(uint32_t(c)), refTypeIndex_(NoIndex)
+    MOZ_IMPLICIT ValType(Code c)
+      : tc_(PackTypeCode(TypeCode(c)))
     {
-        assertValid();
+        MOZ_ASSERT(isValidCode());
     }
 
-    explicit inline ValType(ExprType t);
+    ValType(Code c, uint32_t refTypeIndex)
+      : tc_(PackTypeCode(TypeCode(c), refTypeIndex))
+    {
+        MOZ_ASSERT(isValidCode());
+    }
 
-    static ValType fromTypeCode(uint32_t code) {
-        return ValType(code, NoIndex);
+    explicit ValType(const ExprType& t)
+      : tc_(t.packed())
+    {
+        MOZ_ASSERT(isValidCode());
+    }
+
+    explicit ValType(PackedTypeCode ptc)
+      : tc_(ptc)
+    {
+        MOZ_ASSERT(isValidCode());
     }
 
     static ValType fromBitsUnsafe(uint32_t bits) {
-        // This will change once we have Ref types.
-        return ValType(bits & 255, NoIndex);
+        return ValType(PackedTypeCodeFromBits(bits));
     }
 
-    bool isValid() const {
-        return code_ != InvalidCode;
-    }
-
-    Code code() const {
-        return Code(code_);
-    }
-    uint32_t refTypeIndex() const {
-        return refTypeIndex_;
+    PackedTypeCode packed() const {
+        return tc_;
     }
 
     uint32_t bitsUnsafe() const {
-        // This will change once we have Ref types.
-        return code_;
+        return PackedTypeCodeToBits(tc_);
+    }
+
+    Code code() const {
+        return Code(UnpackTypeCodeType(tc_));
+    }
+
+    uint32_t refTypeIndex() const {
+        return UnpackTypeCodeIndex(tc_);
+    }
+
+    bool isValid() const {
+        return IsValid(tc_);
+    }
+
+    bool isRef() const {
+        return UnpackTypeCodeType(tc_) == TypeCode::Ref;
+    }
+
+    bool isRefOrAnyRef() const {
+        TypeCode tc = UnpackTypeCodeType(tc_);
+        return tc == TypeCode::Ref || tc == TypeCode::AnyRef;
     }
 
     bool operator ==(const ValType& that) const {
-        return code_ == that.code_ && refTypeIndex_ == that.refTypeIndex_;
+        return tc_ == that.tc_;
     }
+
     bool operator !=(const ValType& that) const {
+        return tc_ != that.tc_;
+    }
+
+    bool operator ==(Code that) const {
+        MOZ_ASSERT(that != Code::Ref);
+        return code() == that;
+    }
+
+    bool operator !=(Code that) const {
         return !(*this == that);
-    }
-    bool operator ==(ValType::Code that) const {
-        // This will change once we have Ref types.
-        return code_ == uint32_t(that) && refTypeIndex_ == NoIndex;
-    }
-    bool operator !=(ValType::Code that) const {
-        return !(*this == that);
-    }
-
-  private:
-    ValType(uint32_t code, uint32_t refTypeIndex)
-      : code_(code),
-        refTypeIndex_(refTypeIndex)
-    {
-        // 8-bit field.  Invalid values have their own constructor and should
-        // not appear here.
-        MOZ_ASSERT(code <= 0xFF && code != InvalidCode);
-        // 24-bit field.
-        MOZ_ASSERT(refTypeIndex <= 0xFFFFFF);
-
-        assertValid();
-    }
-
-    void assertValid() const {
-#ifdef DEBUG
-        // This will change once we have Ref types.
-        MOZ_ASSERT(refTypeIndex_ == NoIndex);
-        switch (code_) {
-          case uint8_t(Code::I32):
-          case uint8_t(Code::I64):
-          case uint8_t(Code::F32):
-          case uint8_t(Code::F64):
-          case uint8_t(Code::AnyRef):
-          case uint8_t(Code::I8x16):
-          case uint8_t(Code::I16x8):
-          case uint8_t(Code::I32x4):
-          case uint8_t(Code::F32x4):
-          case uint8_t(Code::B8x16):
-          case uint8_t(Code::B16x8):
-          case uint8_t(Code::B32x4):
-          case InvalidCode:
-            break;
-          default:
-            MOZ_CRASH("Invalid code");
-        }
-#endif
     }
 };
 
@@ -311,7 +506,8 @@ SizeOf(ValType vt)
       case ValType::B32x4:
         return 16;
       case ValType::AnyRef:
-        MOZ_CRASH("unexpected anyref");
+      case ValType::Ref:
+        MOZ_CRASH("unexpected ref/anyref");
     }
     MOZ_CRASH("Invalid ValType");
 }
@@ -407,6 +603,7 @@ ToMIRType(ValType vt)
       case ValType::I64:    return jit::MIRType::Int64;
       case ValType::F32:    return jit::MIRType::Float32;
       case ValType::F64:    return jit::MIRType::Double;
+      case ValType::Ref:    return jit::MIRType::Pointer;
       case ValType::AnyRef: return jit::MIRType::Pointer;
       case ValType::I8x16:  return jit::MIRType::Int8x16;
       case ValType::I16x8:  return jit::MIRType::Int16x8;
@@ -420,48 +617,17 @@ ToMIRType(ValType vt)
 }
 
 static inline bool
-IsRefType(ValType vt)
-{
-    return vt == ValType::AnyRef;
-}
-
-static inline bool
 IsNumberType(ValType vt)
 {
-    return !IsRefType(vt);
+    return !vt.isRefOrAnyRef();
 }
 
-// The ExprType enum represents the type of a WebAssembly expression or return
-// value and may either be a value type or void. Soon, expression types will be
-// generalized to a list of ValType and this enum will go away, replaced,
-// wherever it is used, by a varU32 + list of ValType.
+// ExprType utilities
 
-enum class ExprType
-{
-    Void   = uint8_t(TypeCode::BlockVoid),
-
-    I32    = uint8_t(TypeCode::I32),
-    I64    = uint8_t(TypeCode::I64),
-    F32    = uint8_t(TypeCode::F32),
-    F64    = uint8_t(TypeCode::F64),
-    AnyRef = uint8_t(TypeCode::AnyRef),
-
-    I8x16  = uint8_t(TypeCode::I8x16),
-    I16x8  = uint8_t(TypeCode::I16x8),
-    I32x4  = uint8_t(TypeCode::I32x4),
-    F32x4  = uint8_t(TypeCode::F32x4),
-    B8x16  = uint8_t(TypeCode::B8x16),
-    B16x8  = uint8_t(TypeCode::B16x8),
-    B32x4  = uint8_t(TypeCode::B32x4),
-
-    Limit  = uint8_t(TypeCode::Limit)
-};
-
-inline ValType::ValType(ExprType t)
-  : code_(uint32_t(t)), refTypeIndex_(NoIndex)
-{
-    assertValid();
-}
+inline
+ExprType::ExprType(const ValType& t)
+  : tc_(t.packed())
+{}
 
 static inline bool
 IsVoid(ExprType et)
@@ -474,12 +640,6 @@ NonVoidToValType(ExprType et)
 {
     MOZ_ASSERT(!IsVoid(et));
     return ValType(et);
-}
-
-static inline ExprType
-ToExprType(ValType vt)
-{
-    return ExprType(vt.bitsUnsafe());
 }
 
 static inline bool
@@ -497,13 +657,14 @@ ToMIRType(ExprType et)
 static inline const char*
 ToCString(ExprType type)
 {
-    switch (type) {
+    switch (type.code()) {
       case ExprType::Void:    return "void";
       case ExprType::I32:     return "i32";
       case ExprType::I64:     return "i64";
       case ExprType::F32:     return "f32";
       case ExprType::F64:     return "f64";
       case ExprType::AnyRef:  return "anyref";
+      case ExprType::Ref:     return "ref";
       case ExprType::I8x16:   return "i8x16";
       case ExprType::I16x8:   return "i16x8";
       case ExprType::I32x4:   return "i32x4";
@@ -519,7 +680,7 @@ ToCString(ExprType type)
 static inline const char*
 ToCString(ValType type)
 {
-    return ToCString(ToExprType(type));
+    return ToCString(ExprType(type));
 }
 
 // Code can be compiled either with the Baseline compiler or the Ion compiler,
@@ -653,6 +814,7 @@ class Val
 
     ValType type() const { return type_; }
     bool isSimd() const { return IsSimdType(type()); }
+    static constexpr size_t sizeofLargestValue() { return sizeof(u); }
 
     uint32_t i32() const { MOZ_ASSERT(type_ == ValType::I32); return u.i32_; }
     uint64_t i64() const { MOZ_ASSERT(type_ == ValType::I64); return u.i64_; }
@@ -681,26 +843,26 @@ class Val
 
 typedef Vector<Val, 0, SystemAllocPolicy> ValVector;
 
-// The Sig class represents a WebAssembly function signature which takes a list
-// of value types and returns an expression type. The engine uses two in-memory
-// representations of the argument Vector's memory (when elements do not fit
-// inline): normal malloc allocation (via SystemAllocPolicy) and allocation in
-// a LifoAlloc (via LifoAllocPolicy). The former Sig objects can have any
-// lifetime since they own the memory. The latter Sig objects must not outlive
-// the associated LifoAlloc mark/release interval (which is currently the
-// duration of module validation+compilation). Thus, long-lived objects like
-// WasmModule must use malloced allocation.
+// The FuncType class represents a WebAssembly function signature which takes a
+// list of value types and returns an expression type. The engine uses two
+// in-memory representations of the argument Vector's memory (when elements do
+// not fit inline): normal malloc allocation (via SystemAllocPolicy) and
+// allocation in a LifoAlloc (via LifoAllocPolicy). The former FuncType objects
+// can have any lifetime since they own the memory. The latter FuncType objects
+// must not outlive the associated LifoAlloc mark/release interval (which is
+// currently the duration of module validation+compilation). Thus, long-lived
+// objects like WasmModule must use malloced allocation.
 
-class Sig
+class FuncType
 {
     ValTypeVector args_;
     ExprType ret_;
 
   public:
-    Sig() : args_(), ret_(ExprType::Void) {}
-    Sig(ValTypeVector&& args, ExprType ret) : args_(std::move(args)), ret_(ret) {}
+    FuncType() : args_(), ret_(ExprType::Void) {}
+    FuncType(ValTypeVector&& args, ExprType ret) : args_(std::move(args)), ret_(ret) {}
 
-    MOZ_MUST_USE bool clone(const Sig& rhs) {
+    MOZ_MUST_USE bool clone(const FuncType& rhs) {
         ret_ = rhs.ret_;
         MOZ_ASSERT(args_.empty());
         return args_.appendAll(rhs.args_);
@@ -711,15 +873,15 @@ class Sig
     const ExprType& ret() const { return ret_; }
 
     HashNumber hash() const {
-        HashNumber hn = HashNumber(ret_);
+        HashNumber hn = HashNumber(ret_.code());
         for (const ValType& vt : args_)
             hn = mozilla::AddToHash(hn, HashNumber(vt.code()));
         return hn;
     }
-    bool operator==(const Sig& rhs) const {
+    bool operator==(const FuncType& rhs) const {
         return ret() == rhs.ret() && EqualContainers(args(), rhs.args());
     }
-    bool operator!=(const Sig& rhs) const {
+    bool operator!=(const FuncType& rhs) const {
         return !(*this == rhs);
     }
 
@@ -733,24 +895,58 @@ class Sig
         return false;
     }
     bool temporarilyUnsupportedAnyRef() const {
-        if (ret() == ExprType::AnyRef)
+        if (ret().isRefOrAnyRef())
             return true;
         for (ValType arg : args()) {
-            if (arg == ValType::AnyRef)
+            if (arg.isRefOrAnyRef())
                 return true;
         }
         return false;
     }
 
-    WASM_DECLARE_SERIALIZABLE(Sig)
+    WASM_DECLARE_SERIALIZABLE(FuncType)
 };
 
-struct SigHashPolicy
+struct FuncTypeHashPolicy
 {
-    typedef const Sig& Lookup;
-    static HashNumber hash(Lookup sig) { return sig.hash(); }
-    static bool match(const Sig* lhs, Lookup rhs) { return *lhs == rhs; }
+    typedef const FuncType& Lookup;
+    static HashNumber hash(Lookup ft) { return ft.hash(); }
+    static bool match(const FuncType* lhs, Lookup rhs) { return *lhs == rhs; }
 };
+
+// Structure type.
+//
+// The Module owns a dense array of Struct values that represent the structure
+// types that the module knows about.  It is created from the sparse array of
+// types in the ModuleEnvironment when the Module is created.
+
+struct StructField
+{
+    ValType  type;
+    uint32_t offset;
+    bool     isMutable;
+};
+
+typedef Vector<StructField, 0, SystemAllocPolicy> StructFieldVector;
+
+class StructType
+{
+  public:
+    StructFieldVector fields_;
+
+  public:
+    StructType() : fields_() {}
+
+    explicit StructType(StructFieldVector&& fields)
+      : fields_(std::move(fields))
+    {}
+
+    bool hasPrefix(const StructType& other) const;
+
+    WASM_DECLARE_SERIALIZABLE(StructType)
+};
+
+typedef Vector<StructType, 0, SystemAllocPolicy> StructTypeVector;
 
 // An InitExpr describes a deferred initializer expression, used to initialize
 // a global or a table element offset. Such expressions are created during
@@ -772,7 +968,7 @@ class InitExpr
             uint32_t index_;
             ValType type_;
         } global;
-        U() {}
+        U() : global{} {}
     } u;
 
   public:
@@ -895,7 +1091,7 @@ class GlobalDesc
                     ValType type_;
                     uint32_t index_;
                 } import;
-                U() {}
+                U() : import{} {}
             } val;
             unsigned offset_;
             bool isMutable_;
@@ -1056,18 +1252,18 @@ struct DataSegment
 
 typedef Vector<DataSegment, 0, SystemAllocPolicy> DataSegmentVector;
 
-// SigIdDesc describes a signature id that can be used by call_indirect and
-// table-entry prologues to structurally compare whether the caller and callee's
-// signatures *structurally* match. To handle the general case, a Sig is
-// allocated and stored in a process-wide hash table, so that pointer equality
-// implies structural equality. As an optimization for the 99% case where the
-// Sig has a small number of parameters, the Sig is bit-packed into a uint32
-// immediate value so that integer equality implies structural equality. Both
-// cases can be handled with a single comparison by always setting the LSB for
-// the immediates (the LSB is necessarily 0 for allocated Sig pointers due to
-// alignment).
+// FuncTypeIdDesc describes a function type that can be used by call_indirect
+// and table-entry prologues to structurally compare whether the caller and
+// callee's signatures *structurally* match. To handle the general case, a
+// FuncType is allocated and stored in a process-wide hash table, so that
+// pointer equality implies structural equality. As an optimization for the 99%
+// case where the FuncType has a small number of parameters, the FuncType is
+// bit-packed into a uint32 immediate value so that integer equality implies
+// structural equality. Both cases can be handled with a single comparison by
+// always setting the LSB for the immediates (the LSB is necessarily 0 for
+// allocated FuncType pointers due to alignment).
 
-class SigIdDesc
+class FuncTypeIdDesc
 {
   public:
     enum class Kind { None, Immediate, Global };
@@ -1077,15 +1273,15 @@ class SigIdDesc
     Kind kind_;
     size_t bits_;
 
-    SigIdDesc(Kind kind, size_t bits) : kind_(kind), bits_(bits) {}
+    FuncTypeIdDesc(Kind kind, size_t bits) : kind_(kind), bits_(bits) {}
 
   public:
     Kind kind() const { return kind_; }
-    static bool isGlobal(const Sig& sig);
+    static bool isGlobal(const FuncType& funcType);
 
-    SigIdDesc() : kind_(Kind::None), bits_(0) {}
-    static SigIdDesc global(const Sig& sig, uint32_t globalDataOffset);
-    static SigIdDesc immediate(const Sig& sig);
+    FuncTypeIdDesc() : kind_(Kind::None), bits_(0) {}
+    static FuncTypeIdDesc global(const FuncType& funcType, uint32_t globalDataOffset);
+    static FuncTypeIdDesc immediate(const FuncType& funcType);
 
     bool isGlobal() const { return kind_ == Kind::Global; }
 
@@ -1093,24 +1289,141 @@ class SigIdDesc
     uint32_t globalDataOffset() const { MOZ_ASSERT(kind_ == Kind::Global); return bits_; }
 };
 
-// SigWithId pairs a Sig with SigIdDesc, describing either how to compile code
-// that compares this signature's id or, at instantiation what signature ids to
-// allocate in the global hash and where to put them.
+// FuncTypeWithId pairs a FuncType with FuncTypeIdDesc, describing either how to
+// compile code that compares this signature's id or, at instantiation what
+// signature ids to allocate in the global hash and where to put them.
 
-struct SigWithId : Sig
+struct FuncTypeWithId : FuncType
 {
-    SigIdDesc id;
+    FuncTypeIdDesc id;
 
-    SigWithId() = default;
-    explicit SigWithId(Sig&& sig) : Sig(std::move(sig)), id() {}
-    SigWithId(Sig&& sig, SigIdDesc id) : Sig(std::move(sig)), id(id) {}
-    void operator=(Sig&& rhs) { Sig::operator=(std::move(rhs)); }
+    FuncTypeWithId() = default;
+    explicit FuncTypeWithId(FuncType&& funcType) : FuncType(std::move(funcType)), id() {}
+    FuncTypeWithId(FuncType&& funcType, FuncTypeIdDesc id) : FuncType(std::move(funcType)), id(id) {}
+    void operator=(FuncType&& rhs) { FuncType::operator=(std::move(rhs)); }
 
-    WASM_DECLARE_SERIALIZABLE(SigWithId)
+    WASM_DECLARE_SERIALIZABLE(FuncTypeWithId)
 };
 
-typedef Vector<SigWithId, 0, SystemAllocPolicy> SigWithIdVector;
-typedef Vector<const SigWithId*, 0, SystemAllocPolicy> SigWithIdPtrVector;
+typedef Vector<FuncTypeWithId, 0, SystemAllocPolicy> FuncTypeWithIdVector;
+typedef Vector<const FuncTypeWithId*, 0, SystemAllocPolicy> FuncTypeWithIdPtrVector;
+
+// A tagged container for the various types that can be present in a wasm
+// module's type section.
+
+class TypeDef
+{
+    enum { IsFuncType, IsStructType, IsNone } tag_;
+    union {
+        FuncTypeWithId funcType_;
+        StructType     structType_;
+    };
+
+  public:
+    TypeDef() : tag_(IsNone) {}
+
+    explicit TypeDef(FuncType&& funcType)
+      : tag_(IsFuncType),
+        funcType_(FuncTypeWithId(std::move(funcType)))
+    {}
+
+    explicit TypeDef(StructType&& structType)
+      : tag_(IsStructType),
+        structType_(std::move(structType))
+    {}
+
+    TypeDef(TypeDef&& td) : tag_(td.tag_) {
+        switch (tag_) {
+          case IsFuncType:
+            new (&funcType_) FuncTypeWithId(std::move(td.funcType_));
+            break;
+          case IsStructType:
+            new (&structType_) StructType(std::move(td.structType_));
+            break;
+          case IsNone:
+            break;
+        }
+    }
+
+    ~TypeDef() {
+        switch (tag_) {
+          case IsFuncType:
+            funcType_.~FuncTypeWithId();
+            break;
+          case IsStructType:
+            structType_.~StructType();
+            break;
+          case IsNone:
+            break;
+        }
+    }
+
+    TypeDef& operator=(TypeDef&& that) {
+        MOZ_ASSERT(isNone());
+        switch (that.tag_) {
+          case IsFuncType:
+            new (&funcType_) FuncTypeWithId(std::move(that.funcType_));
+            break;
+          case IsStructType:
+            new (&structType_) StructType(std::move(that.structType_));
+            break;
+          case IsNone:
+            break;
+        }
+        tag_ = that.tag_;
+        return *this;
+    }
+
+    bool isFuncType() const {
+        return tag_ == IsFuncType;
+    }
+
+    bool isNone() const {
+        return tag_ == IsNone;
+    }
+
+    bool isStructType() const {
+        return tag_ == IsStructType;
+    }
+
+    const FuncTypeWithId& funcType() const {
+        MOZ_ASSERT(isFuncType());
+        return funcType_;
+    }
+
+    FuncTypeWithId& funcType() {
+        MOZ_ASSERT(isFuncType());
+        return funcType_;
+    }
+
+    // p has to point to the funcType_ embedded within a TypeDef for this to be
+    // valid.
+    static const TypeDef* fromFuncTypeWithIdPtr(const FuncTypeWithId* p) {
+        const TypeDef* q = (const TypeDef*)((char*)p - offsetof(TypeDef, funcType_));
+        MOZ_ASSERT(q->tag_ == IsFuncType);
+        return q;
+    }
+
+    const StructType& structType() const {
+        MOZ_ASSERT(isStructType());
+        return structType_;
+    }
+
+    StructType& structType() {
+        MOZ_ASSERT(isStructType());
+        return structType_;
+    }
+
+    // p has to point to the struct_ embedded within a TypeDef for this to be
+    // valid.
+    static const TypeDef* fromStructPtr(const StructType* p) {
+        const TypeDef* q = (const TypeDef*)((char*)p - offsetof(TypeDef, structType_));
+        MOZ_ASSERT(q->tag_ == IsStructType);
+        return q;
+    }
+};
+
+typedef Vector<TypeDef, 0, SystemAllocPolicy> TypeDefVector;
 
 // A wasm::Trap represents a wasm-defined trap that can occur during execution
 // which triggers a WebAssembly.RuntimeError. Generated code may jump to a Trap
@@ -1478,7 +1791,10 @@ class CallSiteDesc
         LeaveFrame, // call to a leave frame handler
         Breakpoint  // call to instruction breakpoint
     };
-    CallSiteDesc() {}
+    CallSiteDesc()
+      : lineOrBytecode_(0),
+        kind_(0)
+    {}
     explicit CallSiteDesc(Kind kind)
       : lineOrBytecode_(0), kind_(kind)
     {
@@ -1499,7 +1815,7 @@ class CallSite : public CallSiteDesc
     uint32_t returnAddressOffset_;
 
   public:
-    CallSite() {}
+    CallSite() : returnAddressOffset_(0) {}
 
     CallSite(CallSiteDesc desc, uint32_t returnAddressOffset)
       : CallSiteDesc(desc),
@@ -1733,6 +2049,9 @@ struct TlsData
     // Pointer to the Instance that contains this TLS data.
     Instance* instance;
 
+    // Equal to instance->realm_.
+    JS::Realm* realm;
+
     // The containing JSContext.
     JSContext* cx;
 
@@ -1801,6 +2120,9 @@ struct FuncImportTls
     // The callee's TlsData pointer, which must be loaded to WasmTlsReg (along
     // with any pinned registers) before calling 'code'.
     TlsData* tls;
+
+    // The callee function's realm.
+    JS::Realm* realm;
 
     // If 'code' points into a JIT code thunk, the BaselineScript of the callee,
     // for bidirectional registration purposes.
@@ -1877,7 +2199,7 @@ class CalleeDesc
     // which_ shall be initialized in the static constructors
     MOZ_INIT_OUTSIDE_CTOR Which which_;
     union U {
-        U() {}
+        U() : funcIndex_(0) {}
         uint32_t funcIndex_;
         struct {
             uint32_t globalDataOffset_;
@@ -1886,7 +2208,7 @@ class CalleeDesc
             uint32_t globalDataOffset_;
             uint32_t minLength_;
             bool external_;
-            SigIdDesc sigId_;
+            FuncTypeIdDesc funcTypeId_;
         } table;
         SymbolicAddress builtin_;
     } u;
@@ -1905,13 +2227,13 @@ class CalleeDesc
         c.u.import.globalDataOffset_ = globalDataOffset;
         return c;
     }
-    static CalleeDesc wasmTable(const TableDesc& desc, SigIdDesc sigId) {
+    static CalleeDesc wasmTable(const TableDesc& desc, FuncTypeIdDesc funcTypeId) {
         CalleeDesc c;
         c.which_ = WasmTable;
         c.u.table.globalDataOffset_ = desc.globalDataOffset;
         c.u.table.minLength_ = desc.limits.initial;
         c.u.table.external_ = desc.external;
-        c.u.table.sigId_ = sigId;
+        c.u.table.funcTypeId_ = funcTypeId;
         return c;
     }
     static CalleeDesc asmJSTable(const TableDesc& desc) {
@@ -1958,9 +2280,9 @@ class CalleeDesc
         MOZ_ASSERT(which_ == WasmTable);
         return u.table.external_;
     }
-    SigIdDesc wasmTableSigId() const {
+    FuncTypeIdDesc wasmTableSigId() const {
         MOZ_ASSERT(which_ == WasmTable);
-        return u.table.sigId_;
+        return u.table.funcTypeId_;
     }
     uint32_t wasmTableMinLength() const {
         MOZ_ASSERT(which_ == WasmTable);
@@ -1993,7 +2315,7 @@ static const unsigned PageSize = 64 * 1024;
 // catch the overflow. MaxMemoryAccessSize is a conservative approximation of
 // the maximum guard space needed to catch all unaligned overflows.
 
-static const unsigned MaxMemoryAccessSize = sizeof(Val);
+static const unsigned MaxMemoryAccessSize = Val::sizeofLargestValue();
 
 #ifdef WASM_HUGE_MEMORY
 

@@ -40,14 +40,14 @@ add_task(async function() {
 
   // Calculate offsets to click in the middle of the first box quad.
   const rect = prop.editor.valueSpan.getBoundingClientRect();
-  const firstQuad = prop.editor.valueSpan.getBoxQuads()[0];
+  const firstQuadBounds = prop.editor.valueSpan.getBoxQuads()[0].getBounds();
   // For a multiline value, the first quad left edge is not aligned with the
   // bounding rect left edge. The offsets expected by focusEditableField are
   // relative to the bouding rectangle, so we need to translate the x-offset.
-  const x = firstQuad.bounds.left - rect.left + firstQuad.bounds.width / 2;
+  const x = firstQuadBounds.left - rect.left + firstQuadBounds.width / 2;
   // The first quad top edge is aligned with the bounding top edge, no
   // translation needed here.
-  const y = firstQuad.bounds.height / 2;
+  const y = firstQuadBounds.height / 2;
 
   info("Focusing the css property editable value");
   const editor = await focusEditableField(view, prop.editor.valueSpan, x, y);
@@ -84,9 +84,9 @@ add_task(async function() {
   info("Check autocomplete suggestions can be cycled using UP/DOWN arrows.");
 
   await synthesizeKeyForAutocomplete("VK_DOWN", editor, view.styleWindow);
-  ok(editor.popup.selectedIndex, 1, "Using DOWN cycles autocomplete values.");
+  is(editor.popup.selectedIndex, 1, "Using DOWN cycles autocomplete values.");
   await synthesizeKeyForAutocomplete("VK_DOWN", editor, view.styleWindow);
-  ok(editor.popup.selectedIndex, 2, "Using DOWN cycles autocomplete values.");
+  is(editor.popup.selectedIndex, 2, "Using DOWN cycles autocomplete values.");
   await synthesizeKeyForAutocomplete("VK_UP", editor, view.styleWindow);
   is(editor.popup.selectedIndex, 1, "Using UP cycles autocomplete values.");
   item = editor.popup.getItemAtIndex(editor.popup.selectedIndex);

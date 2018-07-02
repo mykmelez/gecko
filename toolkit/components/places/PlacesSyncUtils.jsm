@@ -6,10 +6,10 @@
 
 var EXPORTED_SYMBOLS = ["PlacesSyncUtils"];
 
-Cu.importGlobalProperties(["URL", "URLSearchParams"]);
-
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+
+XPCOMUtils.defineLazyGlobalGetters(this, ["URL", "URLSearchParams"]);
 
 ChromeUtils.defineModuleGetter(this, "Log",
                                "resource://gre/modules/Log.jsm");
@@ -378,8 +378,6 @@ const HistorySyncUtils = PlacesSyncUtils.history = Object.freeze({
 
 const BookmarkSyncUtils = PlacesSyncUtils.bookmarks = Object.freeze({
   SMART_BOOKMARKS_ANNO: "Places/SmartBookmark",
-  DESCRIPTION_ANNO: "bookmarkProperties/description",
-  SIDEBAR_ANNO: "bookmarkProperties/loadInSidebar",
   SYNC_PARENT_ANNO: "sync/parent",
 
   SYNC_ID_META_KEY: "sync/bookmarks/syncId",
@@ -1115,8 +1113,6 @@ const BookmarkSyncUtils = PlacesSyncUtils.bookmarks = Object.freeze({
    *  - url: Optional.
    *  - tags: Optional; replaces all existing tags.
    *  - keyword: Optional.
-   *  - description: Optional.
-   *  - loadInSidebar: Optional.
    *  - query: Optional.
    *
    * @param info
@@ -1147,8 +1143,6 @@ const BookmarkSyncUtils = PlacesSyncUtils.bookmarks = Object.freeze({
    *  - query: A smart bookmark query string, optional.
    *  - tags: An optional array of tag strings.
    *  - keyword: An optional keyword string.
-   *  - description: An optional description string.
-   *  - loadInSidebar: An optional boolean; defaults to false.
    *
    * Sync doesn't set the index, since it appends and reorders children
    * after applying all incoming items.
@@ -1184,10 +1178,6 @@ const BookmarkSyncUtils = PlacesSyncUtils.bookmarks = Object.freeze({
    *  - url ("bookmark", "query"): The item's URL.
    *  - tags ("bookmark", "query"): An array containing the item's tags.
    *  - keyword ("bookmark"): The bookmark's keyword, if one exists.
-   *  - description ("bookmark", "folder", "livemark"): The item's description.
-   *    Omitted if one isn't set.
-   *  - loadInSidebar ("bookmark", "query"): Whether to load the bookmark in
-   *    the sidebar. Always `false` for queries.
    *  - feed ("livemark"): A `URL` object pointing to the livemark's feed URL.
    *  - site ("livemark"): A `URL` object pointing to the livemark's site URL,
    *    or `null` if one isn't set.
@@ -1607,22 +1597,6 @@ async function insertBookmarkMetadata(db, bookmarkItem, insertInfo) {
     newItem.keyword = insertInfo.keyword;
   }
 
-  if (insertInfo.description) {
-    PlacesUtils.annotations.setItemAnnotation(itemId,
-      BookmarkSyncUtils.DESCRIPTION_ANNO, insertInfo.description, 0,
-      PlacesUtils.annotations.EXPIRE_NEVER,
-      SOURCE_SYNC);
-    newItem.description = insertInfo.description;
-  }
-
-  if (insertInfo.loadInSidebar) {
-    PlacesUtils.annotations.setItemAnnotation(itemId,
-      BookmarkSyncUtils.SIDEBAR_ANNO, insertInfo.loadInSidebar, 0,
-      PlacesUtils.annotations.EXPIRE_NEVER,
-      SOURCE_SYNC);
-    newItem.loadInSidebar = insertInfo.loadInSidebar;
-  }
-
   return newItem;
 }
 
@@ -1836,32 +1810,6 @@ async function updateBookmarkMetadata(db, oldBookmarkItem,
     newItem.keyword = updateInfo.keyword;
   }
 
-  if (updateInfo.hasOwnProperty("description")) {
-    if (updateInfo.description) {
-      PlacesUtils.annotations.setItemAnnotation(itemId,
-        BookmarkSyncUtils.DESCRIPTION_ANNO, updateInfo.description, 0,
-        PlacesUtils.annotations.EXPIRE_NEVER,
-        SOURCE_SYNC);
-    } else {
-      PlacesUtils.annotations.removeItemAnnotation(itemId,
-        BookmarkSyncUtils.DESCRIPTION_ANNO, SOURCE_SYNC);
-    }
-    newItem.description = updateInfo.description;
-  }
-
-  if (updateInfo.hasOwnProperty("loadInSidebar")) {
-    if (updateInfo.loadInSidebar) {
-      PlacesUtils.annotations.setItemAnnotation(itemId,
-        BookmarkSyncUtils.SIDEBAR_ANNO, updateInfo.loadInSidebar, 0,
-        PlacesUtils.annotations.EXPIRE_NEVER,
-        SOURCE_SYNC);
-    } else {
-      PlacesUtils.annotations.removeItemAnnotation(itemId,
-        BookmarkSyncUtils.SIDEBAR_ANNO, SOURCE_SYNC);
-    }
-    newItem.loadInSidebar = updateInfo.loadInSidebar;
-  }
-
   if (updateInfo.hasOwnProperty("query")) {
     PlacesUtils.annotations.setItemAnnotation(itemId,
       BookmarkSyncUtils.SMART_BOOKMARKS_ANNO, updateInfo.query, 0,
@@ -1893,12 +1841,6 @@ function validateNewBookmark(name, info) {
                               BookmarkSyncUtils.KINDS.QUERY ].includes(b.kind) },
       keyword: { validIf: b => [ BookmarkSyncUtils.KINDS.BOOKMARK,
                                  BookmarkSyncUtils.KINDS.QUERY ].includes(b.kind) },
-      description: { validIf: b => [ BookmarkSyncUtils.KINDS.BOOKMARK,
-                                     BookmarkSyncUtils.KINDS.QUERY,
-                                     BookmarkSyncUtils.KINDS.FOLDER,
-                                     BookmarkSyncUtils.KINDS.LIVEMARK ].includes(b.kind) },
-      loadInSidebar: { validIf: b => [ BookmarkSyncUtils.KINDS.BOOKMARK,
-                                       BookmarkSyncUtils.KINDS.QUERY ].includes(b.kind) },
       feed: { validIf: b => b.kind == BookmarkSyncUtils.KINDS.LIVEMARK },
       site: { validIf: b => b.kind == BookmarkSyncUtils.KINDS.LIVEMARK },
       dateAdded: { required: false }
@@ -2013,9 +1955,8 @@ async function placesBookmarkToSyncBookmark(db, bookmarkItem) {
 
 // Converts a Sync bookmark object to a Places bookmark or livemark object.
 // This function maps record IDs to Places GUIDs, and filters out extra Sync
-// properties like keywords, tags, and descriptions. Returns an object that can
-// be passed to `PlacesUtils.livemarks.addLivemark` or
-// `PlacesUtils.bookmarks.{insert, update}`.
+// properties like keywords, tags. Returns an object that can be passed to
+// `PlacesUtils.livemarks.addLivemark` or `PlacesUtils.bookmarks.{insert, update}`.
 function syncBookmarkToPlacesBookmark(info) {
   let bookmarkInfo = {
     source: SOURCE_SYNC,
@@ -2068,7 +2009,7 @@ function syncBookmarkToPlacesBookmark(info) {
 }
 
 // Creates and returns a Sync bookmark object containing the bookmark's
-// tags, keyword, description, and whether it loads in the sidebar.
+// tags, keyword.
 var fetchBookmarkItem = async function(db, bookmarkItem) {
   let item = await placesBookmarkToSyncBookmark(db, bookmarkItem);
 
@@ -2086,31 +2027,15 @@ var fetchBookmarkItem = async function(db, bookmarkItem) {
     item.keyword = keywordEntry.keyword;
   }
 
-  let description = await getAnno(db, bookmarkItem.guid,
-                                  BookmarkSyncUtils.DESCRIPTION_ANNO);
-  if (description) {
-    item.description = description;
-  }
-
-  item.loadInSidebar = !!(await getAnno(db, bookmarkItem.guid,
-                                        BookmarkSyncUtils.SIDEBAR_ANNO));
-
   return item;
 };
 
-// Creates and returns a Sync bookmark object containing the folder's
-// description and children.
+// Creates and returns a Sync bookmark object containing the folder's children.
 async function fetchFolderItem(db, bookmarkItem) {
   let item = await placesBookmarkToSyncBookmark(db, bookmarkItem);
 
   if (!item.title) {
     item.title = "";
-  }
-
-  let description = await getAnno(db, bookmarkItem.guid,
-                                  BookmarkSyncUtils.DESCRIPTION_ANNO);
-  if (description) {
-    item.description = description;
   }
 
   let childGuids = await fetchChildGuids(db, bookmarkItem.guid);
@@ -2122,18 +2047,12 @@ async function fetchFolderItem(db, bookmarkItem) {
 }
 
 // Creates and returns a Sync bookmark object containing the livemark's
-// description, children (none), feed URI, and site URI.
+// children (none), feed URI, and site URI.
 async function fetchLivemarkItem(db, bookmarkItem) {
   let item = await placesBookmarkToSyncBookmark(db, bookmarkItem);
 
   if (!item.title) {
     item.title = "";
-  }
-
-  let description = await getAnno(db, bookmarkItem.guid,
-                                  BookmarkSyncUtils.DESCRIPTION_ANNO);
-  if (description) {
-    item.description = description;
   }
 
   let feedAnno = await getAnno(db, bookmarkItem.guid,
@@ -2153,12 +2072,6 @@ async function fetchLivemarkItem(db, bookmarkItem) {
 // folder name and smart bookmark query ID.
 async function fetchQueryItem(db, bookmarkItem) {
   let item = await placesBookmarkToSyncBookmark(db, bookmarkItem);
-
-  let description = await getAnno(db, bookmarkItem.guid,
-                                  BookmarkSyncUtils.DESCRIPTION_ANNO);
-  if (description) {
-    item.description = description;
-  }
 
   let params = new URLSearchParams(bookmarkItem.url.pathname);
   let tags = params.getAll("tag");

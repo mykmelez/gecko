@@ -268,12 +268,8 @@ pref("browser.aboutHomeSnippets.updateUrl", "https://snippets.cdn.mozilla.net/%S
 
 pref("browser.enable_automatic_image_resizing", true);
 pref("browser.chrome.site_icons", true);
-pref("browser.chrome.favicons", true);
 // browser.warnOnQuit == false will override all other possible prompts when quitting or restarting
 pref("browser.warnOnQuit", true);
-// browser.showQuitWarning specifically controls the quit warning dialog. We
-// might still show the window closing dialog with showQuitWarning == false.
-pref("browser.showQuitWarning", false);
 pref("browser.fullscreen.autohide", true);
 pref("browser.overlink-delay", 80);
 
@@ -983,8 +979,14 @@ pref("app.productInfo.baseURL", "https://www.mozilla.org/firefox/features/");
 // Name of alternate about: page for certificate errors (when undefined, defaults to about:neterror)
 pref("security.alternate_certificate_error_page", "certerror");
 
+// Indicates if new certificate error page (enabled) or not
+pref("browser.security.newcerterrorpage.enabled", false);
+
 // Whether to start the private browsing mode at application startup
 pref("browser.privatebrowsing.autostart", false);
+
+// Whether the bookmark panel should be shown when bookmarking a page.
+pref("browser.bookmarks.editDialog.showForNewBookmarks", true);
 
 // Don't try to alter this pref, it'll be reset the next time you use the
 // bookmarking dialog

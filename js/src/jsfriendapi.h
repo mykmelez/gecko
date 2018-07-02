@@ -185,7 +185,7 @@ extern JS_FRIEND_API(void)
 JS_SetSetUseCounterCallback(JSContext* cx, JSSetUseCounterCallback callback);
 
 extern JS_FRIEND_API(JSPrincipals*)
-JS_GetCompartmentPrincipals(JSCompartment* compartment);
+JS_GetCompartmentPrincipals(JS::Compartment* compartment);
 
 extern JS_FRIEND_API(JSPrincipals*)
 JS_GetScriptPrincipals(JSScript* script);
@@ -239,7 +239,7 @@ RemoveRawValueRoot(JSContext* cx, JS::Value* vp);
 JS_FRIEND_API(JSAtom*)
 GetPropertyNameFromPC(JSScript* script, jsbytecode* pc);
 
-#ifdef JS_DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
 
 /*
  * Routines to print out values during debugging. These are FRIEND_API to help
@@ -484,7 +484,7 @@ extern JS_FRIEND_API(bool)
 IsSystemRealm(JS::Realm* realm);
 
 extern JS_FRIEND_API(bool)
-IsSystemCompartment(JSCompartment* comp);
+IsSystemCompartment(JS::Compartment* comp);
 
 extern JS_FRIEND_API(bool)
 IsSystemZone(JS::Zone* zone);
@@ -675,9 +675,9 @@ JS_FRIEND_API(bool)
 IsFunctionObject(JSObject* obj);
 
 JS_FRIEND_API(bool)
-IsCrossCompartmentWrapper(JSObject* obj);
+IsCrossCompartmentWrapper(const JSObject* obj);
 
-static MOZ_ALWAYS_INLINE JSCompartment*
+static MOZ_ALWAYS_INLINE JS::Compartment*
 GetObjectCompartment(JSObject* obj)
 {
     JS::Realm* realm = reinterpret_cast<shadow::Object*>(obj)->group->realm;
@@ -743,8 +743,7 @@ extern JS_FRIEND_API(JSObject*)
 GetStaticPrototype(JSObject* obj);
 
 JS_FRIEND_API(bool)
-GetOriginalEval(JSContext* cx, JS::HandleObject scope,
-                JS::MutableHandleObject eval);
+GetRealmOriginalEval(JSContext* cx, JS::MutableHandleObject eval);
 
 inline void*
 GetObjectPrivate(JSObject* obj)
@@ -1217,11 +1216,6 @@ CastToJSFreeOp(FreeOp* fop)
 extern JS_FRIEND_API(JSFlatString*)
 GetErrorTypeName(JSContext* cx, int16_t exnType);
 
-#ifdef JS_DEBUG
-extern JS_FRIEND_API(unsigned)
-GetEnterRealmDepth(JSContext* cx);
-#endif
-
 extern JS_FRIEND_API(RegExpShared*)
 RegExpToSharedNonInline(JSContext* cx, JS::HandleObject regexp);
 
@@ -1241,35 +1235,35 @@ typedef enum NukeReferencesFromTarget {
  * do any rooting or holding of their members.
  */
 struct CompartmentFilter {
-    virtual bool match(JSCompartment* c) const = 0;
+    virtual bool match(JS::Compartment* c) const = 0;
 };
 
 struct AllCompartments : public CompartmentFilter {
-    virtual bool match(JSCompartment* c) const override { return true; }
+    virtual bool match(JS::Compartment* c) const override { return true; }
 };
 
 struct ContentCompartmentsOnly : public CompartmentFilter {
-    virtual bool match(JSCompartment* c) const override {
+    virtual bool match(JS::Compartment* c) const override {
         return !IsSystemCompartment(c);
     }
 };
 
 struct ChromeCompartmentsOnly : public CompartmentFilter {
-    virtual bool match(JSCompartment* c) const override {
+    virtual bool match(JS::Compartment* c) const override {
         return IsSystemCompartment(c);
     }
 };
 
 struct SingleCompartment : public CompartmentFilter {
-    JSCompartment* ours;
-    explicit SingleCompartment(JSCompartment* c) : ours(c) {}
-    virtual bool match(JSCompartment* c) const override { return c == ours; }
+    JS::Compartment* ours;
+    explicit SingleCompartment(JS::Compartment* c) : ours(c) {}
+    virtual bool match(JS::Compartment* c) const override { return c == ours; }
 };
 
 struct CompartmentsWithPrincipals : public CompartmentFilter {
     JSPrincipals* principals;
     explicit CompartmentsWithPrincipals(JSPrincipals* p) : principals(p) {}
-    virtual bool match(JSCompartment* c) const override {
+    virtual bool match(JS::Compartment* c) const override {
         return JS_GetCompartmentPrincipals(c) == principals;
     }
 };
@@ -1277,7 +1271,7 @@ struct CompartmentsWithPrincipals : public CompartmentFilter {
 extern JS_FRIEND_API(bool)
 NukeCrossCompartmentWrappers(JSContext* cx,
                              const CompartmentFilter& sourceFilter,
-                             JSCompartment* target,
+                             JS::Compartment* target,
                              NukeReferencesToWindow nukeReferencesToWindow,
                              NukeReferencesFromTarget nukeReferencesFromTarget);
 
@@ -1430,7 +1424,7 @@ class MOZ_STACK_CLASS JS_FRIEND_API(AutoStableStringChars)
 
     /* Ensure the string is kept alive while we're using its chars. */
     JS::RootedString s_;
-    union {
+    MOZ_INIT_OUTSIDE_CTOR union {
         const char16_t* twoByteChars_;
         const JS::Latin1Char* latin1Chars_;
     };

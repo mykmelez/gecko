@@ -521,25 +521,15 @@ nsNavHistory::LoadPrefs()
 }
 
 void
-nsNavHistory::NotifyOnVisits(nsIVisitData** aVisits, uint32_t aVisitsCount)
+nsNavHistory::UpdateDaysOfHistory(PRTime visitTime)
 {
-  MOZ_ASSERT(aVisits, "Can't call NotifyOnVisits with a NULL aVisits");
-  MOZ_ASSERT(aVisitsCount, "Should have at least 1 visit when notifying");
-
   if (mDaysOfHistory == 0) {
     mDaysOfHistory = 1;
   }
 
-  for (uint32_t i = 0; i < aVisitsCount; ++i) {
-    PRTime time;
-    MOZ_ALWAYS_SUCCEEDS(aVisits[i]->GetTime(&time));
-    if (time > mLastCachedEndOfDay || time < mLastCachedStartOfDay) {
-      mDaysOfHistory = -1;
-    }
+  if (visitTime > mLastCachedEndOfDay || visitTime < mLastCachedStartOfDay) {
+    mDaysOfHistory = -1;
   }
-
-  NOTIFY_OBSERVERS(mCanNotify, mObservers, nsINavHistoryObserver,
-                   OnVisits(aVisits, aVisitsCount));
 }
 
 void
@@ -788,7 +778,7 @@ nsNavHistory::NormalizeTime(uint32_t aRelative, PRTime aOffset)
       ref = PR_Now();
       break;
     default:
-      NS_NOTREACHED("Invalid relative time");
+      MOZ_ASSERT_UNREACHABLE("Invalid relative time");
       return 0;
   }
   return ref + aOffset;
@@ -1293,7 +1283,7 @@ PlacesSQLQueryBuilder::Select()
       break;
 
     default:
-      NS_NOTREACHED("Invalid result type");
+      MOZ_ASSERT_UNREACHABLE("Invalid result type");
   }
   return NS_OK;
 }
@@ -1466,7 +1456,7 @@ PlacesSQLQueryBuilder::SelectAsDay()
         // visits older than yesterday.
         sqlFragmentSearchBeginTime = sqlFragmentContainerBeginTime;
         sqlFragmentSearchEndTime = NS_LITERAL_CSTRING(
-          "(strftime('%s','now','localtime','start of day','-2 days','utc')*1000000)");
+          "(strftime('%s','now','localtime','start of day','-1 day','utc')*1000000)");
         break;
       case 3:
         // This month
@@ -1889,8 +1879,6 @@ PlacesSQLQueryBuilder::OrderBy()
       break;
     case nsINavHistoryQueryOptions::SORT_BY_TAGS_ASCENDING:
     case nsINavHistoryQueryOptions::SORT_BY_TAGS_DESCENDING:
-    case nsINavHistoryQueryOptions::SORT_BY_ANNOTATION_ASCENDING:
-    case nsINavHistoryQueryOptions::SORT_BY_ANNOTATION_DESCENDING:
       break; // Sort later in nsNavHistoryQueryResultNode::FillChildren()
     case nsINavHistoryQueryOptions::SORT_BY_FRECENCY_ASCENDING:
         OrderByColumnIndexAsc(nsNavHistory::kGetInfoIndex_Frecency);
@@ -1899,7 +1887,7 @@ PlacesSQLQueryBuilder::OrderBy()
         OrderByColumnIndexDesc(nsNavHistory::kGetInfoIndex_Frecency);
       break;
     default:
-      NS_NOTREACHED("Invalid sorting mode");
+      MOZ_ASSERT_UNREACHABLE("Invalid sorting mode");
   }
   return NS_OK;
 }
@@ -3473,7 +3461,7 @@ nsNavHistory::VisitIdToResultNode(int64_t visitId,
   rv = statement->ExecuteStep(&hasMore);
   NS_ENSURE_SUCCESS(rv, rv);
   if (! hasMore) {
-    NS_NOTREACHED("Trying to get a result node for an invalid visit");
+    MOZ_ASSERT_UNREACHABLE("Trying to get a result node for an invalid visit");
     return NS_ERROR_INVALID_ARG;
   }
 
@@ -3512,7 +3500,8 @@ nsNavHistory::BookmarkIdToResultNode(int64_t aBookmarkId, nsNavHistoryQueryOptio
   rv = stmt->ExecuteStep(&hasMore);
   NS_ENSURE_SUCCESS(rv, rv);
   if (!hasMore) {
-    NS_NOTREACHED("Trying to get a result node for an invalid bookmark identifier");
+    MOZ_ASSERT_UNREACHABLE("Trying to get a result node for an invalid "
+                           "bookmark identifier");
     return NS_ERROR_INVALID_ARG;
   }
 
@@ -3551,7 +3540,7 @@ nsNavHistory::URIToResultNode(nsIURI* aURI,
   rv = stmt->ExecuteStep(&hasMore);
   NS_ENSURE_SUCCESS(rv, rv);
   if (!hasMore) {
-    NS_NOTREACHED("Trying to get a result node for an invalid url");
+    MOZ_ASSERT_UNREACHABLE("Trying to get a result node for an invalid url");
     return NS_ERROR_INVALID_ARG;
   }
 

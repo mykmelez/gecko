@@ -83,6 +83,18 @@ const toolkitVariableMap = [
       return `rgba(${r}, ${g}, ${b}, ${a})`;
     }
   }],
+  ["--lwt-toolbar-field-border-color", {
+    lwtProperty: "toolbar_field_border"
+  }],
+  ["--lwt-toolbar-field-focus", {
+    lwtProperty: "toolbar_field_focus"
+  }],
+  ["--lwt-toolbar-field-focus-color", {
+    lwtProperty: "toolbar_field_text_focus"
+  }],
+  ["--toolbar-field-focus-border-color", {
+    lwtProperty: "toolbar_field_border_focus"
+  }],
 ];
 
 // Get the theme variables from the app resource directory.
@@ -104,6 +116,10 @@ function LightweightThemeConsumer(aDocument) {
 
   this._win.addEventListener("resolutionchange", this);
   this._win.addEventListener("unload", this, { once: true });
+
+  let darkThemeMediaQuery = this._win.matchMedia("(-moz-system-dark-theme)");
+  darkThemeMediaQuery.addListener(temp.LightweightThemeManager);
+  temp.LightweightThemeManager.systemThemeChanged(darkThemeMediaQuery);
 }
 
 LightweightThemeConsumer.prototype = {

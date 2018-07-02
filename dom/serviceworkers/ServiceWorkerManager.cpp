@@ -9,6 +9,7 @@
 #include "nsAutoPtr.h"
 #include "nsIConsoleService.h"
 #include "nsIDocument.h"
+#include "nsIEffectiveTLDService.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIStreamLoader.h"
 #include "nsIHttpChannel.h"
@@ -310,11 +311,13 @@ ServiceWorkerManager::Init(ServiceWorkerRegistrar* aRegistrar)
 
 RefPtr<GenericPromise>
 ServiceWorkerManager::StartControllingClient(const ClientInfo& aClientInfo,
-                                             ServiceWorkerRegistrationInfo* aRegistrationInfo)
+                                             ServiceWorkerRegistrationInfo* aRegistrationInfo,
+                                             bool aControlClientHandle)
 {
   MOZ_DIAGNOSTIC_ASSERT(aRegistrationInfo->GetActive());
 
   RefPtr<GenericPromise> ref;
+  RefPtr<ServiceWorkerManager> self(this);
 
   const ServiceWorkerDescriptor& active =
     aRegistrationInfo->GetActive()->Descriptor();
@@ -324,7 +327,12 @@ ServiceWorkerManager::StartControllingClient(const ClientInfo& aClientInfo,
     RefPtr<ServiceWorkerRegistrationInfo> old =
       entry.Data()->mRegistrationInfo.forget();
 
-    ref = entry.Data()->mClientHandle->Control(active);
+    if (aControlClientHandle) {
+      ref = entry.Data()->mClientHandle->Control(active);
+    } else {
+      ref = GenericPromise::CreateAndResolve(false, __func__);
+    }
+
     entry.Data()->mRegistrationInfo = aRegistrationInfo;
 
     if (old != aRegistrationInfo) {
@@ -334,6 +342,17 @@ ServiceWorkerManager::StartControllingClient(const ClientInfo& aClientInfo,
 
     Telemetry::Accumulate(Telemetry::SERVICE_WORKER_CONTROLLED_DOCUMENTS, 1);
 
+    // Always check to see if we failed to actually control the client.  In
+    // that case removed the client from our list of controlled clients.
+    ref->Then(
+      SystemGroup::EventTargetFor(TaskCategory::Other), __func__,
+      [] (bool) {
+        // do nothing on success
+      }, [self, aClientInfo] (nsresult aRv) {
+        // failed to control, forget about this client
+        self->StopControllingClient(aClientInfo);
+      });
+
     return ref;
   }
 
@@ -341,7 +360,11 @@ ServiceWorkerManager::StartControllingClient(const ClientInfo& aClientInfo,
     ClientManager::CreateHandle(aClientInfo,
                                 SystemGroup::EventTargetFor(TaskCategory::Other));
 
-  ref = clientHandle->Control(active);
+  if (aControlClientHandle) {
+    ref = clientHandle->Control(active);
+  } else {
+    ref = GenericPromise::CreateAndResolve(false, __func__);
+  }
 
   aRegistrationInfo->StartControllingClient();
 
@@ -349,14 +372,24 @@ ServiceWorkerManager::StartControllingClient(const ClientInfo& aClientInfo,
     return new ControlledClientData(clientHandle, aRegistrationInfo);
   });
 
-  RefPtr<ServiceWorkerManager> self(this);
   clientHandle->OnDetach()->Then(
     SystemGroup::EventTargetFor(TaskCategory::Other), __func__,
-    [self = std::move(self), aClientInfo] {
+    [self, aClientInfo] {
       self->StopControllingClient(aClientInfo);
     });
 
   Telemetry::Accumulate(Telemetry::SERVICE_WORKER_CONTROLLED_DOCUMENTS, 1);
+
+  // Always check to see if we failed to actually control the client.  In
+  // that case removed the client from our list of controlled clients.
+  ref->Then(
+    SystemGroup::EventTargetFor(TaskCategory::Other), __func__,
+    [] (bool) {
+      // do nothing on success
+    }, [self, aClientInfo] (nsresult aRv) {
+      // failed to control, forget about this client
+      self->StopControllingClient(aClientInfo);
+    });
 
   return ref;
 }
@@ -1156,6 +1189,29 @@ ServiceWorkerManager::RemovePendingReadyPromise(const ClientInfo& aClientInfo)
       mPendingReadyList.AppendElement(std::move(prd));
     }
   }
+}
+
+void
+ServiceWorkerManager::NoteInheritedController(const ClientInfo& aClientInfo,
+                                              const ServiceWorkerDescriptor& aController)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsCOMPtr<nsIPrincipal> principal =
+    PrincipalInfoToPrincipal(aController.PrincipalInfo());
+  NS_ENSURE_TRUE_VOID(principal);
+
+  nsCOMPtr<nsIURI> scope;
+  nsresult rv =
+    NS_NewURI(getter_AddRefs(scope), aController.Scope(), nullptr, nullptr);
+  NS_ENSURE_SUCCESS_VOID(rv);
+
+  RefPtr<ServiceWorkerRegistrationInfo> registration =
+    GetServiceWorkerRegistrationInfo(principal, scope);
+  NS_ENSURE_TRUE_VOID(registration);
+  NS_ENSURE_TRUE_VOID(registration->GetActive());
+
+  StartControllingClient(aClientInfo, registration, false /* aControlClientHandle */);
 }
 
 ServiceWorkerInfo*
@@ -2666,7 +2722,20 @@ ServiceWorkerManager::UpdateClientControllers(ServiceWorkerRegistrationInfo* aRe
   // Fire event after iterating mControlledClients is done to prevent
   // modification by reentering from the event handlers during iteration.
   for (auto& handle : handleList) {
-    handle->Control(activeWorker->Descriptor());
+    RefPtr<GenericPromise> p = handle->Control(activeWorker->Descriptor());
+
+    RefPtr<ServiceWorkerManager> self = this;
+
+    // If we fail to control the client, then automatically remove it
+    // from our list of controlled clients.
+    p->Then(
+      SystemGroup::EventTargetFor(TaskCategory::Other), __func__,
+      [] (bool) {
+        // do nothing on success
+      }, [self, clientInfo = handle->Info()] (nsresult aRv) {
+        // failed to control, forget about this client
+        self->StopControllingClient(clientInfo);
+      });
   }
 }
 
@@ -2801,50 +2870,6 @@ ServiceWorkerManager::RemoveRegistration(ServiceWorkerRegistrationInfo* aRegistr
   RemoveScopeAndRegistration(aRegistration);
 }
 
-namespace {
-/**
- * See toolkit/modules/sessionstore/Utils.jsm function hasRootDomain().
- *
- * Returns true if the |url| passed in is part of the given root |domain|.
- * For example, if |url| is "www.mozilla.org", and we pass in |domain| as
- * "mozilla.org", this will return true. It would return false the other way
- * around.
- */
-bool
-HasRootDomain(nsIURI* aURI, const nsACString& aDomain)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aURI);
-
-  nsAutoCString host;
-  nsresult rv = aURI->GetHost(host);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return false;
-  }
-
-  nsACString::const_iterator start, end;
-  host.BeginReading(start);
-  host.EndReading(end);
-  if (!FindInReadable(aDomain, start, end)) {
-    return false;
-  }
-
-  if (host.Equals(aDomain)) {
-    return true;
-  }
-
-  // Beginning of the string matches, can't look at the previous char.
-  if (start.get() == host.BeginReading()) {
-    // Equals failed so this is fine.
-    return false;
-  }
-
-  char prevChar = *(--start);
-  return prevChar == '.';
-}
-
-} // namespace
-
 NS_IMETHODIMP
 ServiceWorkerManager::GetAllRegistrations(nsIArray** aResult)
 {
@@ -2900,6 +2925,12 @@ ServiceWorkerManager::Remove(const nsACString& aHost)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
+  nsCOMPtr<nsIEffectiveTLDService> tldService =
+    do_GetService(NS_EFFECTIVETLDSERVICE_CONTRACTID);
+  if (NS_WARN_IF(!tldService)) {
+    return;
+  }
+
   for (auto it1 = mRegistrationInfos.Iter(); !it1.Done(); it1.Next()) {
     ServiceWorkerManager::RegistrationDataPerPrincipal* data = it1.UserData();
     for (auto it2 = data->mInfos.Iter(); !it2.Done(); it2.Next()) {
@@ -2907,8 +2938,24 @@ ServiceWorkerManager::Remove(const nsACString& aHost)
       nsCOMPtr<nsIURI> scopeURI;
       nsresult rv = NS_NewURI(getter_AddRefs(scopeURI), it2.Key(),
                               nullptr, nullptr);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        continue;
+      }
+
+      nsAutoCString host;
+      rv = scopeURI->GetHost(host);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        continue;
+      }
+
       // This way subdomains are also cleared.
-      if (NS_SUCCEEDED(rv) && HasRootDomain(scopeURI, aHost)) {
+      bool hasRootDomain = false;
+      rv = tldService->HasRootDomain(host, aHost, &hasRootDomain);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        continue;
+      }
+
+      if (hasRootDomain) {
         ForceUnregister(data, reg);
       }
     }

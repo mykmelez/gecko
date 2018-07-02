@@ -86,7 +86,7 @@ NS_INTERFACE_MAP_END
 /* virtual */ JSObject*
 HeapSnapshot::WrapObject(JSContext* aCx, HandleObject aGivenProto)
 {
-  return HeapSnapshotBinding::Wrap(aCx, this, aGivenProto);
+  return HeapSnapshot_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 /*** Reading Heap Snapshots ***********************************************************************/
@@ -1069,7 +1069,7 @@ ShouldIncludeEdge(JS::CompartmentSet* compartments,
   // Shape's getter/setter JSObjects). However, we do not serialize nodes in other
   // compartments that are reachable from these non-compartment nodes.
 
-  JSCompartment* compartment = edge.referent.compartment();
+  JS::Compartment* compartment = edge.referent.compartment();
 
   if (!compartment || compartments->has(compartment)) {
     return true;
@@ -1359,7 +1359,9 @@ public:
   HeapSnapshotHandler(CoreDumpWriter& writer,
                       JS::CompartmentSet* compartments)
     : writer(writer),
-      compartments(compartments)
+      compartments(compartments),
+      nodeCount(0),
+      edgeCount(0)
   { }
 
   // JS::ubi::BreadthFirst handler interface.

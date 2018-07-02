@@ -9,11 +9,12 @@
 #include "js/MemoryMetrics.h"
 #include "MessageEventRunnable.h"
 #include "mozilla/ScopeExit.h"
+#include "mozilla/StaticPrefs.h"
+#include "mozilla/dom/BlobURLProtocolHandler.h"
 #include "mozilla/dom/ClientManager.h"
 #include "mozilla/dom/ClientSource.h"
 #include "mozilla/dom/ClientState.h"
 #include "mozilla/dom/Console.h"
-#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/DOMTypes.h"
 #include "mozilla/dom/ErrorEvent.h"
 #include "mozilla/dom/ErrorEventBinding.h"
@@ -58,6 +59,7 @@
 #include "WorkerError.h"
 #include "WorkerEventTarget.h"
 #include "WorkerNavigator.h"
+#include "WorkerRef.h"
 #include "WorkerRunnable.h"
 #include "WorkerScope.h"
 #include "WorkerThread.h"
@@ -430,7 +432,8 @@ private:
     // Let's be sure that it is created before any
     // content loading.
     aWorkerPrivate->EnsurePerformanceStorage();
-    if (mozilla::dom::DOMPrefs::SchedulerLoggingEnabled()) {
+
+    if (mozilla::StaticPrefs::dom_performance_enable_scheduler_timing()) {
       aWorkerPrivate->EnsurePerformanceCounter();
     }
 
@@ -967,16 +970,6 @@ PRThreadFromThread(nsIThread* aThread)
 
   return result;
 }
-
-class SimpleWorkerHolder final : public WorkerHolder
-{
-public:
-  SimpleWorkerHolder()
-    : WorkerHolder("SimpleWorkerHolder")
-  {}
-
-  virtual bool Notify(WorkerStatus aStatus) override { return true; }
-};
 
 // A runnable to cancel the worker from the parent thread when self.close() is
 // called. This runnable is executed on the parent process in order to cancel
@@ -2795,18 +2788,19 @@ WorkerPrivate::Constructor(JSContext* aCx,
                            const nsACString& aServiceWorkerScope,
                            WorkerLoadInfo* aLoadInfo, ErrorResult& aRv)
 {
-  // If this is a sub-worker, we need to keep the parent worker alive until this
-  // one is registered.
-  UniquePtr<SimpleWorkerHolder> holder;
-
   WorkerPrivate* parent = NS_IsMainThread() ?
                           nullptr :
                           GetCurrentThreadWorkerPrivate();
+
+  // If this is a sub-worker, we need to keep the parent worker alive until this
+  // one is registered.
+  RefPtr<StrongWorkerRef> workerRef;
   if (parent) {
     parent->AssertIsOnWorkerThread();
 
-    holder.reset(new SimpleWorkerHolder());
-    if (!holder->HoldWorker(parent, Canceling)) {
+    workerRef =
+      StrongWorkerRef::Create(parent, "WorkerPrivate::Constructor");
+    if (NS_WARN_IF(!workerRef)) {
       aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
       return nullptr;
     }
@@ -3539,7 +3533,16 @@ WorkerPrivate::Control(const ServiceWorkerDescriptor& aServiceWorker)
     }
   }
   MOZ_DIAGNOSTIC_ASSERT(mClientSource);
-  mClientSource->SetController(aServiceWorker);
+
+  if (IsBlobURI(mLoadInfo.mBaseURI)) {
+    // Blob URL workers can only become controlled by inheriting from
+    // their parent.  Make sure to note this properly.
+    mClientSource->InheritController(aServiceWorker);
+  } else {
+    // Otherwise this is a normal interception and we simply record the
+    // controller locally.
+    mClientSource->SetController(aServiceWorker);
+  }
 }
 
 void
@@ -5389,16 +5392,16 @@ void
 WorkerPrivate::EnsurePerformanceCounter()
 {
   AssertIsOnWorkerThread();
-  MOZ_ASSERT(mozilla::dom::DOMPrefs::SchedulerLoggingEnabled());
+  MOZ_ASSERT(mozilla::StaticPrefs::dom_performance_enable_scheduler_timing());
   if (!mPerformanceCounter) {
-    mPerformanceCounter = new PerformanceCounter(NS_ConvertUTF16toUTF8(mWorkerName));
+    nsPrintfCString workerName("Worker:%s", NS_ConvertUTF16toUTF8(mWorkerName).get());
+    mPerformanceCounter = new PerformanceCounter(workerName);
   }
 }
 
 PerformanceCounter*
 WorkerPrivate::GetPerformanceCounter()
 {
-  MOZ_ASSERT(mPerformanceCounter);
   return mPerformanceCounter;
 }
 

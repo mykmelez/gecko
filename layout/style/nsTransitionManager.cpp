@@ -41,6 +41,7 @@ using mozilla::TimeDuration;
 using mozilla::dom::Animation;
 using mozilla::dom::AnimationPlayState;
 using mozilla::dom::CSSTransition;
+using mozilla::dom::Nullable;
 
 using namespace mozilla;
 using namespace mozilla::css;
@@ -130,7 +131,7 @@ ElementPropertyTransition::UpdateStartValueFromReplacedTransition()
 JSObject*
 CSSTransition::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return dom::CSSTransitionBinding::Wrap(aCx, this, aGivenProto);
+  return dom::CSSTransition_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void

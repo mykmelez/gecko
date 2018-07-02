@@ -150,9 +150,6 @@ nsContextMenu.prototype = {
 
     // Initialize (disable/remove) menu items.
     this.initItems();
-
-    // Register this opening of the menu with telemetry:
-    this._checkTelemetryForMenu(aXulMenu);
   },
 
   setContext() {
@@ -204,7 +201,6 @@ nsContextMenu.prototype = {
     this.onLink              = context.onLink;
     this.onLoadedImage       = context.onLoadedImage;
     this.onMailtoLink        = context.onMailtoLink;
-    this.onMathML            = context.onMathML;
     this.onMozExtLink        = context.onMozExtLink;
     this.onNumeric           = context.onNumeric;
     this.onPassword          = context.onPassword;
@@ -427,8 +423,6 @@ nsContextMenu.prototype = {
     // View source is always OK, unless in directory listing.
     this.showItem("context-viewpartialsource-selection",
                   this.isContentSelected);
-    this.showItem("context-viewpartialsource-mathml",
-                  this.onMathML && !this.isContentSelected);
 
     var shouldShow = !(this.isContentSelected ||
                        this.onImage || this.onCanvas ||
@@ -879,7 +873,7 @@ nsContextMenu.prototype = {
   },
 
   // View Partial Source
-  viewPartialSource(aContext) {
+  viewPartialSource() {
     let {browser} = this;
     let openSelectionFn = function() {
       let tabBrowser = gBrowser;
@@ -901,8 +895,7 @@ nsContextMenu.prototype = {
       return tabBrowser.getBrowserForTab(tab);
     };
 
-    let target = aContext == "mathml" ? this.target : null;
-    top.gViewSourceUtils.viewPartialSourceInBrowser(browser, target, openSelectionFn);
+    top.gViewSourceUtils.viewPartialSourceInBrowser(browser, openSelectionFn);
   },
 
   // Open new "view source" window with the frame's URL.
@@ -1526,64 +1519,6 @@ nsContextMenu.prototype = {
                                                          selectedText]);
     menuItem.label = menuLabel;
     menuItem.accessKey = gNavigatorBundle.getString("contextMenuSearch.accesskey");
-  },
-
-  _getTelemetryClickInfo(aXulMenu) {
-    this._onPopupHiding = () => {
-      aXulMenu.ownerDocument.removeEventListener("command", activationHandler, true);
-      aXulMenu.removeEventListener("popuphiding", this._onPopupHiding, true);
-      delete this._onPopupHiding;
-
-      let eventKey = [
-          this._telemetryPageContext,
-          this._telemetryHadCustomItems ? "withcustom" : "withoutcustom"
-      ];
-      let target = this._telemetryClickID || "close-without-interaction";
-      BrowserUITelemetry.registerContextMenuInteraction(eventKey, target);
-    };
-    let activationHandler = (e) => {
-      // Deal with command events being routed to command elements; figure out
-      // what triggered the event (which will have the right e.target)
-      if (e.sourceEvent) {
-        e = e.sourceEvent;
-      }
-      // Target should be in the menu (this catches using shortcuts for items
-      // not in the menu while the menu is up)
-      if (!aXulMenu.contains(e.target)) {
-        return;
-      }
-
-      // Check if this is a page menu item:
-      if (e.target.hasAttribute(PageMenuParent.GENERATEDITEMID_ATTR)) {
-        this._telemetryClickID = "custom-page-item";
-      } else {
-        this._telemetryClickID = (e.target.id || "unknown").replace(/^context-/i, "");
-      }
-    };
-    aXulMenu.ownerDocument.addEventListener("command", activationHandler, true);
-    aXulMenu.addEventListener("popuphiding", this._onPopupHiding, true);
-  },
-
-  _getTelemetryPageContextInfo() {
-    let rv = [];
-    for (let k of ["isContentSelected", "onLink", "onImage", "onCanvas", "onVideo", "onAudio",
-                   "onTextInput", "inWebExtBrowser", "inTabBrowser"]) {
-      if (this[k]) {
-        rv.push(k.replace(/^(?:is|on)(.)/, (match, firstLetter) => firstLetter.toLowerCase()));
-      }
-    }
-    if (!rv.length) {
-      rv.push("other");
-    }
-
-    return JSON.stringify(rv);
-  },
-
-  _checkTelemetryForMenu(aXulMenu) {
-    this._telemetryClickID = null;
-    this._telemetryPageContext = this._getTelemetryPageContextInfo();
-    this._telemetryHadCustomItems = this.hasPageMenu;
-    this._getTelemetryClickInfo(aXulMenu);
   },
 
   createContainerMenu(aEvent) {

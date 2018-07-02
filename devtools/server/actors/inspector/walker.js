@@ -113,10 +113,10 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
    * @param DebuggerServerConnection conn
    *    The server connection.
    */
-  initialize: function(conn, tabActor, options) {
+  initialize: function(conn, targetActor, options) {
     protocol.Actor.prototype.initialize.call(this, conn);
-    this.tabActor = tabActor;
-    this.rootWin = tabActor.window;
+    this.targetActor = targetActor;
+    this.rootWin = targetActor.window;
     this.rootDoc = this.rootWin.document;
     this._refMap = new Map();
     this._pendingMutations = [];
@@ -142,14 +142,14 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     this._throttledEmitNewMutations = throttle(this._emitNewMutations.bind(this),
       MUTATIONS_THROTTLING_DELAY);
 
-    tabActor.on("will-navigate", this.onFrameUnload);
-    tabActor.on("window-ready", this.onFrameLoad);
+    targetActor.on("will-navigate", this.onFrameUnload);
+    targetActor.on("window-ready", this.onFrameLoad);
 
     // Ensure that the root document node actor is ready and
     // managed.
     this.rootNode = this.document();
 
-    this.layoutChangeObserver = getLayoutChangesObserver(this.tabActor);
+    this.layoutChangeObserver = getLayoutChangesObserver(this.targetActor);
     this._onReflows = this._onReflows.bind(this);
     this.layoutChangeObserver.on("reflows", this._onReflows);
     this._onResize = this._onResize.bind(this);
@@ -231,8 +231,8 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       this._retainedOrphans = null;
       this._refMap = null;
 
-      this.tabActor.off("will-navigate", this.onFrameUnload);
-      this.tabActor.off("window-ready", this.onFrameLoad);
+      this.targetActor.off("will-navigate", this.onFrameUnload);
+      this.targetActor.off("window-ready", this.onFrameLoad);
 
       this.onFrameLoad = null;
       this.onFrameUnload = null;
@@ -242,7 +242,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       this.layoutChangeObserver.off("reflows", this._onReflows);
       this.layoutChangeObserver.off("resize", this._onResize);
       this.layoutChangeObserver = null;
-      releaseLayoutChangesObserver(this.tabActor);
+      releaseLayoutChangesObserver(this.targetActor);
 
       eventListenerService.removeListenerChangeListener(
         this._onEventListenerChange);
@@ -250,7 +250,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       this.onMutations = null;
 
       this.layoutActor = null;
-      this.tabActor = null;
+      this.targetActor = null;
 
       this.emit("destroyed");
     } catch (e) {
@@ -605,7 +605,20 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       maxNodes = Number.MAX_VALUE;
     }
 
-    const { isShadowHost, isShadowRoot, isDirectShadowHostChild } = node;
+    const {
+      isDirectShadowHostChild,
+      isShadowHost,
+      isShadowRoot,
+      isTemplateElement,
+    } = node;
+
+    if (isTemplateElement) {
+      // <template> tags should have a single child pointing to the element's template
+      // content.
+      const documentFragment = node.rawNode.content;
+      const nodes = [this._ref(documentFragment)];
+      return { hasFirst: true, hasLast: true, nodes };
+    }
 
     // Detect special case of unslotted shadow host children that cannot rely on a
     // regular anonymous walker.
@@ -627,8 +640,8 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       // in case this one is incompatible with the walker's filter function.
       const skipTo = SKIP_TO_SIBLING;
 
-      const useAnonymousWalker = !(isShadowRoot || isShadowHost || isUnslottedHostChild);
-      if (!useAnonymousWalker) {
+      const useNonAnonymousWalker = isShadowRoot || isShadowHost || isUnslottedHostChild;
+      if (useNonAnonymousWalker) {
         // Do not use an anonymous walker for :
         // - shadow roots: if the host element has an ::after pseudo element, a walker on
         //   the last child of the shadow root will jump to the ::after element, which is
@@ -715,7 +728,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
       nodes = [
         // #shadow-root
-        this._ref(node.rawNode.shadowRoot),
+        this._ref(node.rawNode.openOrClosedShadowRoot),
         // ::before
         ...(hasBefore ? [this._ref(first)] : []),
         // shadow host direct children
@@ -853,7 +866,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
   _multiFrameQuerySelectorAll: function(selector) {
     let nodes = [];
 
-    for (const {document} of this.tabActor.windows) {
+    for (const {document} of this.targetActor.windows) {
       try {
         nodes = [...nodes, ...document.querySelectorAll(selector)];
       } catch (e) {
@@ -1989,7 +2002,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
    */
   getLayoutInspector: function() {
     if (!this.layoutActor) {
-      this.layoutActor = new LayoutActor(this.conn, this.tabActor, this);
+      this.layoutActor = new LayoutActor(this.conn, this.targetActor, this);
     }
 
     return this.layoutActor;

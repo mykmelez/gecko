@@ -117,6 +117,7 @@ const char kHkdfLabelFinishedSecret[] = "finished";
 const char kHkdfLabelResumptionMasterSecret[] = "res master";
 const char kHkdfLabelExporterMasterSecret[] = "exp master";
 const char kHkdfLabelResumption[] = "resumption";
+const char kHkdfLabelTrafficUpdate[] = "traffic upd";
 const char kHkdfPurposeKey[] = "key";
 const char kHkdfPurposeIv[] = "iv";
 
@@ -603,8 +604,8 @@ tls13_UpdateTrafficKeys(sslSocket *ss, CipherSpecDirection direction)
     secret = tls13_TrafficSecretRef(ss, direction);
     rv = tls13_HkdfExpandLabel(*secret, tls13_GetHash(ss),
                                NULL, 0,
-                               kHkdfLabelApplicationTrafficSecret,
-                               strlen(kHkdfLabelApplicationTrafficSecret),
+                               kHkdfLabelTrafficUpdate,
+                               strlen(kHkdfLabelTrafficUpdate),
                                tls13_GetHmacMechanism(ss),
                                tls13_GetHashSize(ss),
                                &updatedSecret);
@@ -1417,30 +1418,6 @@ tls13_NegotiateKeyExchange(sslSocket *ss,
     return SECSuccess;
 }
 
-SSLAuthType
-ssl_SignatureSchemeToAuthType(SSLSignatureScheme scheme)
-{
-    switch (scheme) {
-        case ssl_sig_rsa_pkcs1_sha1:
-        case ssl_sig_rsa_pkcs1_sha256:
-        case ssl_sig_rsa_pkcs1_sha384:
-        case ssl_sig_rsa_pkcs1_sha512:
-        /* We report PSS signatures as being just RSA signatures. */
-        case ssl_sig_rsa_pss_rsae_sha256:
-        case ssl_sig_rsa_pss_rsae_sha384:
-        case ssl_sig_rsa_pss_rsae_sha512:
-            return ssl_auth_rsa_sign;
-        case ssl_sig_ecdsa_secp256r1_sha256:
-        case ssl_sig_ecdsa_secp384r1_sha384:
-        case ssl_sig_ecdsa_secp521r1_sha512:
-        case ssl_sig_ecdsa_sha1:
-            return ssl_auth_ecdsa;
-        default:
-            PORT_Assert(0);
-    }
-    return ssl_auth_null;
-}
-
 SECStatus
 tls13_SelectServerCert(sslSocket *ss)
 {
@@ -1469,6 +1446,7 @@ tls13_SelectServerCert(sslSocket *ss)
         }
 
         rv = ssl_PickSignatureScheme(ss,
+                                     cert->serverCert,
                                      cert->serverKeyPair->pubKey,
                                      cert->serverKeyPair->privKey,
                                      ss->xtnData.sigSchemes,
@@ -3254,6 +3232,17 @@ tls13_SetupPendingCipherSpec(sslSocket *ss, ssl3CipherSpec *spec)
     }
 
     tls13_SetSpecRecordVersion(ss, spec);
+
+    /* The record size limit is reduced by one so that the remainder of the
+     * record handling code can use the same checks for all versions. */
+    if (ssl3_ExtensionNegotiated(ss, ssl_record_size_limit_xtn)) {
+        spec->recordSizeLimit = ((spec->direction == CipherSpecRead)
+                                     ? ss->opt.recordSizeLimit
+                                     : ss->xtnData.recordSizeLimit) -
+                                1;
+    } else {
+        spec->recordSizeLimit = MAX_FRAGMENT_LENGTH;
+    }
     return SECSuccess;
 }
 
@@ -4746,7 +4735,8 @@ static const struct {
     { ssl_tls13_cookie_xtn, _M2(client_hello, hello_retry_request) },
     { ssl_tls13_certificate_authorities_xtn, _M1(certificate_request) },
     { ssl_tls13_supported_versions_xtn, _M3(client_hello, server_hello,
-                                            hello_retry_request) }
+                                            hello_retry_request) },
+    { ssl_record_size_limit_xtn, _M2(client_hello, encrypted_extensions) }
 };
 
 tls13ExtensionStatus
@@ -5012,6 +5002,16 @@ tls13_UnprotectRecord(sslSocket *ss,
                 ("%d: TLS13[%d]: record has bogus MAC",
                  SSL_GETPID(), ss->fd));
         PORT_SetError(SSL_ERROR_BAD_MAC_READ);
+        return SECFailure;
+    }
+
+    /* There is a similar test in ssl3_HandleRecord, but this test is needed to
+     * account for padding.  It's safe to do this here (including the alert),
+     * because it only confirms that the record exceeded the size limit, which
+     * is apparent from the size of the ciphertext. */
+    if (plaintext->len > spec->recordSizeLimit + 1) {
+        SSL3_SendAlert(ss, alert_fatal, record_overflow);
+        PORT_SetError(SSL_ERROR_RX_RECORD_TOO_LONG);
         return SECFailure;
     }
 

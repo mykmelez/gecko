@@ -73,7 +73,6 @@ namespace jit {
     _(LoadDoubleTruthyResult)             \
     _(LoadStringTruthyResult)             \
     _(LoadObjectTruthyResult)             \
-    _(CompareStringResult)                \
     _(CompareObjectResult)                \
     _(CompareSymbolResult)                \
     _(ArrayJoinResult)                    \
@@ -81,6 +80,7 @@ namespace jit {
     _(Breakpoint)                         \
     _(MegamorphicLoadSlotResult)          \
     _(MegamorphicLoadSlotByValueResult)   \
+    _(MegamorphicStoreSlot)               \
     _(MegamorphicHasPropResult)           \
     _(CallObjectHasSparseElementResult)   \
     _(WrapResult)
@@ -656,7 +656,7 @@ class MOZ_RAII CacheIRCompiler
                                          uint32_t typeDescr,
                                          const AutoOutputRegister& output);
 
-    void emitStoreTypedObjectReferenceProp(ValueOperand val, ReferenceTypeDescr::Type type,
+    void emitStoreTypedObjectReferenceProp(ValueOperand val, ReferenceType type,
                                            const Address& dest, Register scratch);
 
     void emitRegisterEnumerator(Register enumeratorsList, Register iter, Register scratch);
@@ -728,9 +728,9 @@ class MOZ_RAII CacheIRCompiler
         MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Constant);
         return (ObjectGroup*)readStubWord(offset, StubField::Type::ObjectGroup);
     }
-    JSCompartment* compartmentStubField(uint32_t offset) {
+    JS::Compartment* compartmentStubField(uint32_t offset) {
         MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Constant);
-        return (JSCompartment*)readStubWord(offset, StubField::Type::RawWord);
+        return (JS::Compartment*)readStubWord(offset, StubField::Type::RawWord);
     }
     const Class* classStubField(uintptr_t offset) {
         MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Constant);

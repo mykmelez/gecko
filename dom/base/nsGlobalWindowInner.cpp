@@ -941,6 +941,10 @@ nsGlobalWindowInner::nsGlobalWindowInner(nsGlobalWindowOuter *aOuterWindow)
                         false);
 
         os->AddObserver(mObserver, MEMORY_PRESSURE_OBSERVER_TOPIC, false);
+
+        if (aOuterWindow->IsTopLevelWindow()) {
+          os->AddObserver(mObserver, "clear-site-data-reload-needed", false);
+        }
       }
 
       Preferences::AddStrongObserver(mObserver, "intl.accept_languages");
@@ -1182,7 +1186,6 @@ nsGlobalWindowInner::FreeInnerObjects()
   }
 
   mHistory = nullptr;
-  mCustomElements = nullptr;
 
   if (mNavigator) {
     mNavigator->OnNavigation();
@@ -1269,6 +1272,11 @@ nsGlobalWindowInner::FreeInnerObjects()
     if (os) {
       os->RemoveObserver(mObserver, NS_IOSERVICE_OFFLINE_STATUS_TOPIC);
       os->RemoveObserver(mObserver, MEMORY_PRESSURE_OBSERVER_TOPIC);
+
+      if (GetOuterWindowInternal() &&
+          GetOuterWindowInternal()->IsTopLevelWindow()) {
+        os->RemoveObserver(mObserver, "clear-site-data-reload-needed");
+      }
     }
 
     RefPtr<StorageNotifierService> sns = StorageNotifierService::GetOrCreate();
@@ -2347,6 +2355,12 @@ nsPIDOMWindowInner::NoteCalledRegisterForServiceWorkerScope(const nsACString& aS
   nsGlobalWindowInner::Cast(this)->NoteCalledRegisterForServiceWorkerScope(aScope);
 }
 
+void
+nsPIDOMWindowInner::NoteDOMContentLoaded()
+{
+  nsGlobalWindowInner::Cast(this)->NoteDOMContentLoaded();
+}
+
 bool
 nsGlobalWindowInner::ShouldReportForServiceWorkerScope(const nsAString& aScope)
 {
@@ -2461,6 +2475,16 @@ nsGlobalWindowInner::NoteCalledRegisterForServiceWorkerScope(const nsACString& a
   }
 
   mClientSource->NoteCalledRegisterForServiceWorkerScope(aScope);
+}
+
+void
+nsGlobalWindowInner::NoteDOMContentLoaded()
+{
+  if (!mClientSource) {
+    return;
+  }
+
+  mClientSource->NoteDOMContentLoaded();
 }
 
 void
@@ -5196,8 +5220,8 @@ nsGlobalWindowInner::FireOfflineStatusEventIfChanged()
   nsContentUtils::DispatchTrustedEvent(mDoc,
                                        static_cast<EventTarget*>(this),
                                        name,
-                                       false,
-                                       false);
+                                       CanBubble::eNo,
+                                       Cancelable::eNo);
 }
 
 class NotifyIdleObserverRunnable : public Runnable
@@ -5819,6 +5843,13 @@ nsGlobalWindowInner::Observe(nsISupports* aSubject, const char* aTopic,
     return NS_OK;
   }
 
+  if (!nsCRT::strcmp(aTopic, "clear-site-data-reload-needed")) {
+    // The reload is propagated from the top-level window only.
+    NS_ConvertUTF16toUTF8 otherOrigin(aData);
+    PropagateClearSiteDataReload(otherOrigin);
+    return NS_OK;
+  }
+
   if (!nsCRT::strcmp(aTopic, OBSERVER_TOPIC_IDLE)) {
     mCurrentlyIdle = true;
     if (IsFrozen()) {
@@ -5868,8 +5899,8 @@ nsGlobalWindowInner::Observe(nsISupports* aSubject, const char* aTopic,
     // very likely situation where an event handler will try to read its value.
 
     if (mNavigator) {
-      NavigatorBinding::ClearCachedLanguageValue(mNavigator);
-      NavigatorBinding::ClearCachedLanguagesValue(mNavigator);
+      Navigator_Binding::ClearCachedLanguageValue(mNavigator);
+      Navigator_Binding::ClearCachedLanguagesValue(mNavigator);
     }
 
     // The event has to be dispatched only to the current inner window.
@@ -7667,8 +7698,8 @@ void
 nsGlobalWindowInner::ClearDocumentDependentSlots(JSContext* aCx)
 {
   // If JSAPI OOMs here, there is basically nothing we can do to recover safely.
-  if (!WindowBinding::ClearCachedDocumentValue(aCx, this) ||
-      !WindowBinding::ClearCachedPerformanceValue(aCx, this)) {
+  if (!Window_Binding::ClearCachedDocumentValue(aCx, this) ||
+      !Window_Binding::ClearCachedPerformanceValue(aCx, this)) {
     MOZ_CRASH("Unhandlable OOM while clearing document dependent slots.");
   }
 }
@@ -8052,6 +8083,39 @@ nsPIDOMWindowInner::MaybeCreateDoc()
     nsCOMPtr<nsIDocument> document = docShell->GetDocument();
     Unused << document;
   }
+}
+
+void
+nsGlobalWindowInner::PropagateClearSiteDataReload(const nsACString& aOrigin)
+{
+  nsIPrincipal* principal = GetPrincipal();
+  if (!principal) {
+    return;
+  }
+
+  nsAutoCString origin;
+  nsresult rv = principal->GetOrigin(origin);
+  NS_ENSURE_SUCCESS_VOID(rv);
+
+  // If the URL of this window matches, let's refresh this window only.
+  // We don't need to traverse the DOM tree.
+  if (origin.Equals(aOrigin)) {
+    nsCOMPtr<nsIDocShell> docShell = GetDocShell();
+    nsCOMPtr<nsIWebNavigation> webNav(do_QueryInterface(docShell));
+    if (NS_WARN_IF(!webNav)) {
+      return;
+    }
+
+    // We don't need any special reload flags, because this notification is
+    // dispatched by Clear-Site-Data header, which should have already cleaned
+    // up all the needed data.
+    rv = webNav->Reload(nsIWebNavigation::LOAD_FLAGS_NONE);
+    NS_ENSURE_SUCCESS_VOID(rv);
+
+    return;
+  }
+
+  CallOnChildren(&nsGlobalWindowInner::PropagateClearSiteDataReload, aOrigin);
 }
 
 mozilla::dom::DocGroup*

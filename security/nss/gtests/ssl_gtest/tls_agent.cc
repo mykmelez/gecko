@@ -583,6 +583,7 @@ void TlsAgent::CheckAuthType(SSLAuthType auth,
   // switch statement because default label is different.
   switch (auth) {
     case ssl_auth_rsa_sign:
+    case ssl_auth_rsa_pss:
       EXPECT_EQ(ssl_auth_rsa_decrypt, csinfo_.authAlgorithm)
           << "authAlgorithm for RSA is always decrypt";
       break;
@@ -939,9 +940,9 @@ static bool ErrorIsNonFatal(PRErrorCode code) {
 }
 
 void TlsAgent::SendData(size_t bytes, size_t blocksize) {
-  uint8_t block[4096];
+  uint8_t block[16385];  // One larger than the maximum record size.
 
-  ASSERT_LT(blocksize, sizeof(block));
+  ASSERT_LE(blocksize, sizeof(block));
 
   while (bytes) {
     size_t tosend = std::min(blocksize, bytes);

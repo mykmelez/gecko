@@ -264,7 +264,7 @@ WebConsoleActor.prototype =
 
   /**
    * Flag used to track if we are listening for events from the progress
-   * listener of the tab actor. We use the progress listener to clear
+   * listener of the target actor. We use the progress listener to clear
    * this.evalWindow on page navigation.
    *
    * @private
@@ -310,7 +310,7 @@ WebConsoleActor.prototype =
    */
   _webConsoleCommandsCache: null,
 
-  actorPrefix: "console",
+  typeName: "console",
 
   get globalDebugObject() {
     return this.parentActor.threadActor.globalDebugObject;
@@ -481,9 +481,9 @@ WebConsoleActor.prototype =
         Error("sources not yet implemented")),
       createEnvironmentActor: (env) => this.createEnvironmentActor(env),
       getGlobalDebugObject: () => this.globalDebugObject
-    });
+    }, this.conn);
     pool.addActor(actor);
-    return actor.grip();
+    return actor.form();
   },
 
   /**

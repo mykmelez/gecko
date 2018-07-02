@@ -130,7 +130,7 @@ static mozilla::LazyLogModule gMediaElementEventsLog("nsMediaElementEvents");
 
 using namespace mozilla::layers;
 using mozilla::net::nsMediaFragmentURIParser;
-using namespace mozilla::dom::HTMLMediaElementBinding;
+using namespace mozilla::dom::HTMLMediaElement_Binding;
 
 namespace mozilla {
 namespace dom {
@@ -364,7 +364,8 @@ public:
     LOG_EVENT(LogLevel::Debug,
               ("%p Dispatching simple event source error", mElement.get()));
     return nsContentUtils::DispatchTrustedEvent(
-      mElement->OwnerDoc(), mSource, NS_LITERAL_STRING("error"), false, false);
+      mElement->OwnerDoc(), mSource, NS_LITERAL_STRING("error"),
+      CanBubble::eNo, Cancelable::eNo);
   }
 };
 
@@ -1434,8 +1435,7 @@ public:
       mOwner->OwnerDoc(),
       static_cast<nsIContent*>(mOwner),
       NS_LITERAL_STRING("OpenMediaWithExternalApp"),
-      true,
-      true);
+      CanBubble::eYes, Cancelable::eYes);
   }
 
   RefPtr<MediaError> mError;
@@ -1996,7 +1996,7 @@ HTMLMediaElement::Load()
        IsAllowedToPlay(),
        OwnerDoc(),
        DocumentOrigin(OwnerDoc()).get(),
-       OwnerDoc() ? OwnerDoc()->HasBeenUserActivated() : 0,
+       OwnerDoc() ? OwnerDoc()->HasBeenUserGestureActivated() : 0,
        mMuted,
        mVolume));
 
@@ -2473,7 +2473,7 @@ HTMLMediaElement::LoadFromSourceChildren()
     // If we fail to load, loop back and try loading the next resource.
     DispatchAsyncSourceError(child);
   }
-  NS_NOTREACHED("Execution should not reach here!");
+  MOZ_ASSERT_UNREACHABLE("Execution should not reach here!");
 }
 
 void
@@ -2720,12 +2720,6 @@ HTMLMediaElement::FastSeek(double aTime, ErrorResult& aRv)
 already_AddRefed<Promise>
 HTMLMediaElement::SeekToNextFrame(ErrorResult& aRv)
 {
-  if (mSeekDOMPromise) {
-    // We can't perform NextFrameSeek while seek is already in action.
-    // Just return the pending seek promise.
-    return do_AddRef(mSeekDOMPromise);
-  }
-
   /* This will cause JIT code to be kept around longer, to help performance
    * when using SeekToNextFrame to iterate through every frame of a video.
    */
@@ -3884,11 +3878,12 @@ NS_IMPL_ISUPPORTS(HTMLMediaElement::ShutdownObserver, nsIObserver)
 HTMLMediaElement::HTMLMediaElement(
   already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
+  , mWatchManager(this, OwnerDoc()->AbstractMainThreadFor(TaskCategory::Other))
   , mMainThreadEventTarget(OwnerDoc()->EventTargetFor(TaskCategory::Other))
   , mAbstractMainThread(OwnerDoc()->AbstractMainThreadFor(TaskCategory::Other))
   , mShutdownObserver(new ShutdownObserver)
   , mPlayed(new TimeRanges(ToSupports(OwnerDoc())))
-  , mPaused(true, *this)
+  , mPaused(true, "HTMLMediaElement::mPaused")
   , mErrorSink(new ErrorSink(this))
   , mAudioChannelWrapper(new AudioChannelAgentCallback(this))
 {
@@ -3896,6 +3891,8 @@ HTMLMediaElement::HTMLMediaElement(
   MOZ_ASSERT(mAbstractMainThread);
 
   DecoderDoctorLogger::LogConstruction(this);
+
+  mWatchManager.Watch(mPaused, &HTMLMediaElement::UpdateWakeLock);
 
   ErrorResult rv;
 
@@ -4180,31 +4177,20 @@ HTMLMediaElement::MaybeDoLoad()
   }
 }
 
-HTMLMediaElement::WakeLockBoolWrapper&
-HTMLMediaElement::WakeLockBoolWrapper::operator=(bool val)
-{
-  if (mValue == val) {
-    return *this;
-  }
-
-  mValue = val;
-  UpdateWakeLock();
-  return *this;
-}
-
 void
-HTMLMediaElement::WakeLockBoolWrapper::UpdateWakeLock()
+HTMLMediaElement::UpdateWakeLock()
 {
   MOZ_ASSERT(NS_IsMainThread());
-
-  bool playing = !mValue;
+  // Ensure we have a wake lock if we're playing audibly. This ensures the
+  // device doesn't sleep while playing.
+  bool playing = !mPaused;
   bool isAudible =
-    mOuter.Volume() > 0.0 && !mOuter.mMuted && mOuter.mIsAudioTrackAudible;
-  // when playing audible media.
+    Volume() > 0.0 && !mMuted && mIsAudioTrackAudible;
+  // WakeLock when playing audible media.
   if (playing && isAudible) {
-    mOuter.WakeLockCreate();
+    WakeLockCreate();
   } else {
-    mOuter.WakeLockRelease();
+    WakeLockRelease();
   }
 }
 
@@ -6066,7 +6052,7 @@ HTMLMediaElement::ChangeReadyState(nsMediaReadyState aState)
   if (oldState < HAVE_FUTURE_DATA && mReadyState >= HAVE_FUTURE_DATA) {
     DispatchAsyncEvent(NS_LITERAL_STRING("canplay"));
     if (!mPaused) {
-      if (mDecoder) {
+      if (mDecoder && !mPausedForInactiveDocumentOrChannel) {
         mDecoder->Play();
       }
       NotifyAboutPlaying();
@@ -6192,6 +6178,7 @@ HTMLMediaElement::CheckAutoplayDataReady()
     if (mCurrentPlayRangeStart == -1.0) {
       mCurrentPlayRangeStart = CurrentTime();
     }
+    MOZ_ASSERT(!mPausedForInactiveDocumentOrChannel);
     mDecoder->Play();
   } else if (mSrcStream) {
     SetPlayedOrSeeked(true);
@@ -6322,7 +6309,9 @@ HTMLMediaElement::DispatchEvent(const nsAString& aName)
   }
 
   return nsContentUtils::DispatchTrustedEvent(
-    OwnerDoc(), static_cast<nsIContent*>(this), aName, false, false);
+    OwnerDoc(), static_cast<nsIContent*>(this), aName,
+    CanBubble::eNo,
+    Cancelable::eNo);
 }
 
 void
@@ -6717,7 +6706,7 @@ HTMLMediaElement::GetNextSource()
       return child->AsElement();
     }
   }
-  NS_NOTREACHED("Execution should not reach here!");
+  MOZ_ASSERT_UNREACHABLE("Execution should not reach here!");
   return nullptr;
 }
 
@@ -6970,12 +6959,12 @@ HTMLMediaElement::IsAllowedToPlay()
 {
   if (!AutoplayPolicy::IsMediaElementAllowedToPlay(WrapNotNull(this))) {
 #if defined(MOZ_WIDGET_ANDROID)
-    nsContentUtils::DispatchTrustedEvent(
+    nsContentUtils::DispatchChromeEvent(
       OwnerDoc(),
       static_cast<nsIContent*>(this),
       NS_LITERAL_STRING("MozAutoplayMediaBlocked"),
-      false,
-      false);
+      CanBubble::eNo,
+      Cancelable::eNo);
 #endif
     LOG(LogLevel::Debug,
         ("%p %s AutoplayPolicy blocked autoplay.", this, __func__));
@@ -7549,7 +7538,7 @@ HTMLMediaElement::NotifyAudioPlaybackChanged(AudibleChangedReasons aReason)
     mAudioChannelWrapper->NotifyAudioPlaybackChanged(aReason);
   }
   // only request wake lock for audible media.
-  mPaused.UpdateWakeLock();
+  UpdateWakeLock();
 }
 
 bool

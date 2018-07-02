@@ -165,6 +165,50 @@ add_task(async function test_check_up_to_date() {
 add_task(clear_state);
 
 
+add_task(async function test_success_with_partial_list() {
+  function partialList(request, response) {
+    const entries = [{
+      id: "028261ad-16d4-40c2-a96a-66f72914d125",
+      last_modified: 43,
+      host: "localhost",
+      bucket: "main",
+      collection: "cid-1"
+    }, {
+      id: "98a34576-bcd6-423f-abc2-1d290b776ed8",
+      last_modified: 42,
+      host: "localhost",
+      bucket: "main",
+      collection: "test-collection"
+    }];
+    if (request.queryString == `_since=${encodeURIComponent('"42"')}`) {
+      response.write(JSON.stringify({
+        data: entries.slice(0, 1)
+      }));
+      response.setHeader("ETag", '"43"');
+    } else {
+      response.write(JSON.stringify({
+        data: entries
+      }));
+      response.setHeader("ETag", '"42"');
+    }
+    response.setHeader("Date", (new Date()).toUTCString());
+    response.setStatusLine(null, 200, "OK");
+  }
+  server.registerPathHandler(CHANGES_PATH, partialList);
+
+  const c = RemoteSettings("test-collection");
+  let maybeSyncCount = 0;
+  c.maybeSync = () => { maybeSyncCount++; };
+
+  await RemoteSettings.pollChanges();
+  await RemoteSettings.pollChanges();
+
+  // On the second call, the server does not mention the test-collection
+  // and maybeSync() is not called.
+  Assert.equal(maybeSyncCount, 1, "maybeSync should not be called twice");
+});
+add_task(clear_state);
+
 add_task(async function test_server_error() {
   const startHistogram = getUptakeTelemetrySnapshot(TELEMETRY_HISTOGRAM_KEY);
 
@@ -244,6 +288,29 @@ add_task(async function test_check_clockskew_is_updated() {
   clockDifference = Services.prefs.getIntPref(PREF_CLOCK_SKEW_SECONDS);
   // we previously set the serverTime to Date.now() + 10000 ms past epoch
   Assert.ok(clockDifference <= 0 && clockDifference >= -10);
+});
+add_task(clear_state);
+
+
+add_task(async function test_check_clockskew_takes_age_into_account() {
+  const currentTime = Date.now();
+  const skewSeconds = 5;
+  const ageCDNSeconds = 3600;
+  const serverTime = currentTime - (skewSeconds * 1000) - (ageCDNSeconds * 1000);
+
+  function serverResponse(request, response) {
+    response.setHeader("Content-Type", "application/json; charset=UTF-8");
+    response.setHeader("Date", (new Date(serverTime)).toUTCString());
+    response.setHeader("Age", `${ageCDNSeconds}`);
+    response.write(JSON.stringify({data: []}));
+    response.setStatusLine(null, 200, "OK");
+  }
+  server.registerPathHandler(CHANGES_PATH, serverResponse);
+
+  await RemoteSettings.pollChanges();
+
+  const clockSkew = Services.prefs.getIntPref(PREF_CLOCK_SKEW_SECONDS);
+  Assert.ok(clockSkew >= skewSeconds, `clockSkew is ${clockSkew}`);
 });
 add_task(clear_state);
 

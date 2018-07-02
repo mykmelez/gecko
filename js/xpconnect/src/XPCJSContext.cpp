@@ -645,7 +645,7 @@ XPCJSContext::InterruptCallback(JSContext* cx)
         JS::Rooted<JSObject*> proto(cx);
         if (!JS_GetPrototype(cx, global, &proto))
             return false;
-        if (proto && IsSandboxPrototypeProxy(proto) &&
+        if (proto && xpc::IsSandboxPrototypeProxy(proto) &&
             (proto = js::CheckedUnwrap(proto, /* stopAtWindowProxy = */ false)))
         {
             win = WindowGlobalOrNull(proto);
@@ -810,8 +810,6 @@ ReloadPrefsCallback(const char* pref, void* data)
     bool fuzzingEnabled = Preferences::GetBool("fuzzing.enabled");
 #endif
 
-    bool arrayProtoValues = Preferences::GetBool(JS_OPTIONS_DOT_STR "array_prototype_values");
-
     JS::ContextOptionsRef(cx).setBaseline(useBaseline)
                              .setIon(useIon)
                              .setAsmJS(useAsmJS)
@@ -831,8 +829,7 @@ ReloadPrefsCallback(const char* pref, void* data)
                              .setFuzzing(fuzzingEnabled)
 #endif
                              .setStreams(streams)
-                             .setExtraWarnings(extraWarnings)
-                             .setArrayProtoValues(arrayProtoValues);
+                             .setExtraWarnings(extraWarnings);
 
     nsCOMPtr<nsIXULRuntime> xr = do_GetService("@mozilla.org/xre/runtime;1");
     if (xr) {

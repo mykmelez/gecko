@@ -16,6 +16,7 @@ loader.lazyRequireGetter(this, "DebuggerServer", "devtools/server/main", true);
 loader.lazyRequireGetter(this, "DebuggerClient", "devtools/shared/client/debugger-client", true);
 loader.lazyRequireGetter(this, "viewSource", "devtools/client/shared/view-source");
 loader.lazyRequireGetter(this, "l10n", "devtools/client/webconsole/webconsole-l10n");
+loader.lazyRequireGetter(this, "openDocLink", "devtools/client/shared/link", true);
 const BC_WINDOW_FEATURES = "chrome,titlebar,toolbar,centerscreen,resizable,dialog=no";
 
 // The preference prefix for all of the Browser Console filters.
@@ -166,18 +167,18 @@ HUD_SERVICE.prototype =
     }
 
     async function connect() {
-      // Ensure that the root actor and the tab actors have been registered on the
-      // DebuggerServer, so that the Browser Console can retrieve the console actors.
+      // Ensure that the root actor and the target-scoped actors have been registered on
+      // the DebuggerServer, so that the Browser Console can retrieve the console actors.
       // (See Bug 1416105 for rationale).
       DebuggerServer.init();
-      DebuggerServer.registerActors({ root: true, tab: true });
+      DebuggerServer.registerActors({ root: true, target: true });
 
       DebuggerServer.allowChromeProcess = true;
 
       const client = new DebuggerClient(DebuggerServer.connectPipe());
       await client.connect();
       const response = await client.getProcess();
-      return { form: response.form, client, chrome: true, isTabActor: true };
+      return { form: response.form, client, chrome: true, isBrowsingContext: true };
     }
 
     async function openWindow(t) {
@@ -191,7 +192,7 @@ HUD_SERVICE.prototype =
 
       win.document.title = l10n.getStr("browserConsole.title");
 
-      // With a XUL wrapper doc, we host webconsole.html in an iframe.
+      // With a XUL wrapper doc, we host index.html in an iframe.
       // Wait for that to be ready before resolving:
       if (!Tools.webConsole.browserConsoleUsesHTML) {
         const iframe = win.document.querySelector("iframe");
@@ -364,12 +365,7 @@ WebConsole.prototype = {
    *        The URL you want to open in a new tab.
    */
   openLink(link, e) {
-    const isOSX = Services.appinfo.OS == "Darwin";
-    let where = "tab";
-    if (e && (e.button === 1 || (e.button === 0 && (isOSX ? e.metaKey : e.ctrlKey)))) {
-      where = "tabshifted";
-    }
-    this.chromeUtilsWindow.openWebLinkIn(link, where);
+    openDocLink(link);
   },
 
   /**

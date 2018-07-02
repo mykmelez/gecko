@@ -125,7 +125,7 @@ rusty-enums = [
     "mozilla::FontFamilyType",
     "mozilla::css::URLMatchingFunction",
     "mozilla::css::SheetParsingMode",
-    "nsStyleContentType",
+    "mozilla::StyleContentType",
     "nsStyleSVGOpacitySource",
     "nsStyleUnit",
     "nsCSSKeyword",
@@ -211,6 +211,7 @@ whitelist-vars = [
 ]
 whitelist-types = [
     "RawGecko.*",
+    "DeclarationBlockMutationClosure",
     "mozilla::AnimationPropertySegment",
     "mozilla::AnonymousCounterStyle",
     "mozilla::AtomArray",
@@ -466,6 +467,7 @@ structs-types = [
     "mozilla::OriginFlags",
     "mozilla::UniquePtr",
     "ServoRawOffsetArc",
+    "DeclarationBlockMutationClosure",
     "nsIContent",
     "nsINode",
     "nsIDocument",
@@ -544,7 +546,7 @@ structs-types = [
     "nsStyleContent",
     "nsStyleContentData",
     "nsStyleContentData_CounterFunction",
-    "nsStyleContentType",
+    "mozilla::StyleContentType",
     "ComputedStyle",
     "nsStyleCoord",
     "nsStyleCoord_Calc",

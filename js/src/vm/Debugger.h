@@ -24,8 +24,8 @@
 #include "js/Utility.h"
 #include "js/Wrapper.h"
 #include "vm/GlobalObject.h"
-#include "vm/JSCompartment.h"
 #include "vm/JSContext.h"
+#include "vm/Realm.h"
 #include "vm/SavedStacks.h"
 #include "vm/Stack.h"
 #include "wasm/WasmJS.h"
@@ -89,6 +89,14 @@ typedef HashSet<ReadBarrieredGlobalObject,
                 MovableCellHasher<ReadBarrieredGlobalObject>,
                 ZoneAllocPolicy> WeakGlobalObjectSet;
 
+#ifdef DEBUG
+extern void
+CheckDebuggeeThing(JSScript* script, bool invisibleOk);
+
+extern void
+CheckDebuggeeThing(JSObject* obj, bool invisibleOk);
+#endif
+
 /*
  * A weakmap from GC thing keys to JSObject values that supports the keys being
  * in different compartments to the values. All values must be in the same
@@ -127,7 +135,7 @@ class DebuggerWeakMap : private WeakMap<HeapPtr<UnbarrieredKey>, HeapPtr<JSObjec
                     ZoneAllocPolicy> CountMap;
 
     CountMap zoneCounts;
-    JSCompartment* compartment;
+    JS::Compartment* compartment;
 
   public:
     typedef WeakMap<Key, Value, MovableCellHasher<Key>> Base;
@@ -161,9 +169,9 @@ class DebuggerWeakMap : private WeakMap<HeapPtr<UnbarrieredKey>, HeapPtr<JSObjec
     template<typename KeyInput, typename ValueInput>
     bool relookupOrAdd(AddPtr& p, const KeyInput& k, const ValueInput& v) {
         MOZ_ASSERT(v->compartment() == this->compartment);
-        MOZ_ASSERT(!k->realm()->creationOptions().mergeable());
-        MOZ_ASSERT_IF(!InvisibleKeysOk,
-                      !k->realm()->creationOptions().invisibleToDebugger());
+#ifdef DEBUG
+        CheckDebuggeeThing(k, InvisibleKeysOk);
+#endif
         MOZ_ASSERT(!Base::has(k));
         if (!incZoneCount(k->zone()))
             return false;
@@ -990,7 +998,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
      * debugger's compartment.
      *
      * If *vp is an object, this produces a (new or existing) Debugger.Object
-     * wrapper for it. Otherwise this is the same as JSCompartment::wrap.
+     * wrapper for it. Otherwise this is the same as Compartment::wrap.
      *
      * If *vp is a magic JS_OPTIMIZED_OUT value, this produces a plain object
      * of the form { optimizedOut: true }.
@@ -1592,7 +1600,6 @@ class WasmBreakpointSite;
 
 class BreakpointSite {
     friend class Breakpoint;
-    friend struct ::JSCompartment;
     friend class ::JSScript;
     friend class Debugger;
 
@@ -1655,7 +1662,6 @@ class BreakpointSite {
  * Zone::sweepBreakpoints.
  */
 class Breakpoint {
-    friend struct ::JSCompartment;
     friend class Debugger;
     friend class BreakpointSite;
 

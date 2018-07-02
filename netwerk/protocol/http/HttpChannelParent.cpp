@@ -145,7 +145,8 @@ HttpChannelParent::Init(const HttpChannelCreationArgs& aArgs)
                        a.suspendAfterSynthesizeResponse(),
                        a.allowStaleCacheContent(), a.contentTypeHint(),
                        a.corsMode(), a.redirectMode(),
-                       a.channelId(), a.contentWindowId(), a.preferredAlternativeType(),
+                       a.channelId(), a.integrityMetadata(),
+                       a.contentWindowId(), a.preferredAlternativeType(),
                        a.topLevelOuterContentWindowId(),
                        a.launchServiceWorkerStart(),
                        a.launchServiceWorkerEnd(),
@@ -161,7 +162,7 @@ HttpChannelParent::Init(const HttpChannelCreationArgs& aArgs)
     return ConnectChannel(cArgs.registrarId(), cArgs.shouldIntercept());
   }
   default:
-    NS_NOTREACHED("unknown open type");
+    MOZ_ASSERT_UNREACHABLE("unknown open type");
     return false;
   }
 }
@@ -443,6 +444,7 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
                                  const uint32_t&            aCorsMode,
                                  const uint32_t&            aRedirectMode,
                                  const uint64_t&            aChannelId,
+                                 const nsString&            aIntegrityMetadata,
                                  const uint64_t&            aContentWindowId,
                                  const nsCString&           aPreferredAlternativeType,
                                  const uint64_t&            aTopLevelOuterContentWindowId,
@@ -506,6 +508,8 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
   httpChannel->SetChannelId(aChannelId);
   httpChannel->SetTopLevelContentWindowId(aContentWindowId);
   httpChannel->SetTopLevelOuterContentWindowId(aTopLevelOuterContentWindowId);
+
+  httpChannel->SetIntegrityMetadata(aIntegrityMetadata);
 
   RefPtr<nsHttpChannel> httpChannelImpl = do_QueryObject(httpChannel);
   if (httpChannelImpl) {
@@ -594,11 +598,6 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
       rv = httpChannel->OverrideSecurityInfo(secInfo);
       MOZ_ASSERT(NS_SUCCEEDED(rv));
     }
-  } else if (!ServiceWorkerParentInterceptEnabled()) {
-    nsLoadFlags newLoadFlags;
-    httpChannel->GetLoadFlags(&newLoadFlags);
-    newLoadFlags |= nsIChannel::LOAD_BYPASS_SERVICE_WORKER;
-    httpChannel->SetLoadFlags(newLoadFlags);
   }
 
   nsCOMPtr<nsICacheInfoChannel> cacheChannel =
@@ -1351,6 +1350,31 @@ HttpChannelParent::RecvRemoveCorsPreflightCacheEntry(const URIParams& uri,
 // HttpChannelParent::nsIRequestObserver
 //-----------------------------------------------------------------------------
 
+static void
+GetTimingAttributes(HttpBaseChannel* aChannel, ResourceTimingStruct& aTiming)
+{
+  aChannel->GetDomainLookupStart(&aTiming.domainLookupStart);
+  aChannel->GetDomainLookupEnd(&aTiming.domainLookupEnd);
+  aChannel->GetConnectStart(&aTiming.connectStart);
+  aChannel->GetTcpConnectEnd(&aTiming.tcpConnectEnd);
+  aChannel->GetSecureConnectionStart(&aTiming.secureConnectionStart);
+  aChannel->GetConnectEnd(&aTiming.connectEnd);
+  aChannel->GetRequestStart(&aTiming.requestStart);
+  aChannel->GetResponseStart(&aTiming.responseStart);
+  aChannel->GetResponseEnd(&aTiming.responseEnd);
+  aChannel->GetAsyncOpen(&aTiming.fetchStart);
+  aChannel->GetRedirectStart(&aTiming.redirectStart);
+  aChannel->GetRedirectEnd(&aTiming.redirectEnd);
+  aChannel->GetTransferSize(&aTiming.transferSize);
+  aChannel->GetEncodedBodySize(&aTiming.encodedBodySize);
+  // decodedBodySize can be computed in the child process so it doesn't need
+  // to be passed down.
+  aChannel->GetProtocolVersion(aTiming.protocolVersion);
+
+  aChannel->GetCacheReadStart(&aTiming.cacheReadStart);
+  aChannel->GetCacheReadEnd(&aTiming.cacheReadEnd);
+}
+
 NS_IMETHODIMP
 HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
 {
@@ -1383,8 +1407,6 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
     MOZ_ASSERT(NS_SUCCEEDED(rv));
   }
 
-  nsHttpResponseHead *responseHead = chan->GetResponseHead();
-  nsHttpRequestHead  *requestHead = chan->GetRequestHead();
   bool isFromCache = false;
   uint64_t cacheEntryId = 0;
   int32_t fetchCount = 0;
@@ -1460,14 +1482,40 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
   ParentLoadInfoForwarderArgs loadInfoForwarderArg;
   mozilla::ipc::LoadInfoToParentLoadInfoForwarder(loadInfo, &loadInfoForwarderArg);
 
+  nsHttpResponseHead *responseHead = chan->GetResponseHead();
+  bool useResponseHead = !!responseHead;
+  nsHttpResponseHead cleanedUpResponseHead;
+  if (responseHead && responseHead->HasHeader(nsHttp::Set_Cookie)) {
+    cleanedUpResponseHead = *responseHead;
+    cleanedUpResponseHead.ClearHeader(nsHttp::Set_Cookie);
+    responseHead = &cleanedUpResponseHead;
+  }
+
+  if (!responseHead) {
+    responseHead = &cleanedUpResponseHead;
+  }
+
+  nsHttpRequestHead *requestHead = chan->GetRequestHead();
   // !!! We need to lock headers and please don't forget to unlock them !!!
   requestHead->Enter();
+
+  nsHttpHeaderArray cleanedUpRequestHeaders;
+  bool cleanedUpRequest = false;
+  if (requestHead->HasHeader(nsHttp::Cookie)) {
+    cleanedUpRequestHeaders = requestHead->Headers();
+    cleanedUpRequestHeaders.ClearHeader(nsHttp::Cookie);
+    cleanedUpRequest = true;
+  }
+
+  ResourceTimingStruct timing;
+  GetTimingAttributes(mChannel, timing);
+
   rv = NS_OK;
   if (mIPCClosed ||
       !SendOnStartRequest(channelStatus,
-                          responseHead ? *responseHead : nsHttpResponseHead(),
-                          !!responseHead,
-                          requestHead->Headers(),
+                          *responseHead,
+                          useResponseHead,
+                          cleanedUpRequest ? cleanedUpRequestHeaders : requestHead->Headers(),
                           loadInfoForwarderArg,
                           isFromCache,
                           mCacheEntry ? true : false,
@@ -1479,7 +1527,8 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
                           cacheKey,
                           altDataType,
                           altDataLen,
-                          applyConversion))
+                          applyConversion,
+                          timing))
   {
     rv = NS_ERROR_UNEXPECTED;
   }
@@ -1510,26 +1559,7 @@ HttpChannelParent::OnStopRequest(nsIRequest *aRequest,
   MOZ_RELEASE_ASSERT(!mDivertingFromChild,
     "Cannot call OnStopRequest if diverting is set!");
   ResourceTimingStruct timing;
-  mChannel->GetDomainLookupStart(&timing.domainLookupStart);
-  mChannel->GetDomainLookupEnd(&timing.domainLookupEnd);
-  mChannel->GetConnectStart(&timing.connectStart);
-  mChannel->GetTcpConnectEnd(&timing.tcpConnectEnd);
-  mChannel->GetSecureConnectionStart(&timing.secureConnectionStart);
-  mChannel->GetConnectEnd(&timing.connectEnd);
-  mChannel->GetRequestStart(&timing.requestStart);
-  mChannel->GetResponseStart(&timing.responseStart);
-  mChannel->GetResponseEnd(&timing.responseEnd);
-  mChannel->GetAsyncOpen(&timing.fetchStart);
-  mChannel->GetRedirectStart(&timing.redirectStart);
-  mChannel->GetRedirectEnd(&timing.redirectEnd);
-  mChannel->GetTransferSize(&timing.transferSize);
-  mChannel->GetEncodedBodySize(&timing.encodedBodySize);
-  // decodedBodySize can be computed in the child process so it doesn't need
-  // to be passed down.
-  mChannel->GetProtocolVersion(timing.protocolVersion);
-
-  mChannel->GetCacheReadStart(&timing.cacheReadStart);
-  mChannel->GetCacheReadEnd(&timing.cacheReadEnd);
+  GetTimingAttributes(mChannel, timing);
 
   RefPtr<nsHttpChannel> httpChannelImpl = do_QueryObject(mChannel);
   if (httpChannelImpl) {
@@ -1820,6 +1850,9 @@ HttpChannelParent::StartRedirect(uint32_t registrarId,
   URIParams uriParams;
   SerializeURI(newOriginalURI, uriParams);
 
+  uint32_t newLoadFlags = nsIRequest::LOAD_NORMAL;
+  MOZ_ALWAYS_SUCCEEDS(newChannel->GetLoadFlags(&newLoadFlags));
+
   nsCString secInfoSerialization;
   UpdateAndSerializeSecurityInfo(secInfoSerialization);
 
@@ -1840,12 +1873,23 @@ HttpChannelParent::StartRedirect(uint32_t registrarId,
   mozilla::ipc::LoadInfoToParentLoadInfoForwarder(loadInfo, &loadInfoForwarderArg);
 
   nsHttpResponseHead *responseHead = mChannel->GetResponseHead();
+
+  nsHttpResponseHead cleanedUpResponseHead;
+  if (responseHead && responseHead->HasHeader(nsHttp::Set_Cookie)) {
+    cleanedUpResponseHead = *responseHead;
+    cleanedUpResponseHead.ClearHeader(nsHttp::Set_Cookie);
+    responseHead = &cleanedUpResponseHead;
+  }
+
+  if (!responseHead) {
+    responseHead = &cleanedUpResponseHead;
+  }
+
   bool result = false;
   if (!mIPCClosed) {
-    result = SendRedirect1Begin(registrarId, uriParams, redirectFlags,
-                                loadInfoForwarderArg,
-                                responseHead ? *responseHead
-                                             : nsHttpResponseHead(),
+    result = SendRedirect1Begin(registrarId, uriParams, newLoadFlags,
+                                redirectFlags, loadInfoForwarderArg,
+                                *responseHead,
                                 secInfoSerialization,
                                 channelId,
                                 mChannel->GetPeerAddr());

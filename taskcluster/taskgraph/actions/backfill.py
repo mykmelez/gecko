@@ -12,8 +12,7 @@ import requests
 from requests.exceptions import HTTPError
 
 from .registry import register_callback_action
-from .util import find_decision_task, create_task_from_def, fix_task_dependencies
-from slugid import nice as slugid
+from .util import find_decision_task, create_tasks
 from taskgraph.util.taskcluster import get_artifact_from_index
 from taskgraph.taskgraph import TaskGraph
 
@@ -62,7 +61,6 @@ logger = logging.getLogger(__name__)
             'testPath': {
                 'type': 'string',
                 'title': 'Test Path',
-                'description': 'If specified, set MOZHARNESS_TEST_PATHS to this value.'
             }
         },
         'additionalProperties': False
@@ -110,21 +108,22 @@ def backfill_action(parameters, graph_config, input, task_group_id, task_id, tas
             continue
 
         if label in full_task_graph.tasks.keys():
-            task_def = fix_task_dependencies(full_task_graph.tasks[label], label_to_taskid)
-            task_def['taskGroupId'] = push_decision_task_id
+            def modifier(task):
+                if task.label != label:
+                    return task
+                if input.get('addGeckoProfile'):
+                    mh = task.task['payload'].setdefault('env', {}) \
+                                                    .get('MOZHARNESS_OPTIONS', '')
+                    task.task['payload']['env']['MOZHARNESS_OPTIONS'] = mh + ' --geckoProfile'
+                    task.task['extra']['treeherder']['symbol'] += '-p'
 
-            if input.get('addGeckoProfile'):
-                mh_options = task_def['payload'].setdefault('env', {}) \
-                                                .get('MOZHARNESS_OPTIONS', '')
-                task_def['payload']['env']['MOZHARNESS_OPTIONS'] = mh_options + ' --geckoProfile'
-                task_def['extra']['treeherder']['symbol'] += '-p'
+                if input.get('testPath'):
+                    env = task.task['payload'].setdefault('env', {})
+                    env['MOZHARNESS_TEST_PATHS'] = input.get('testPath')
+                    task.task['extra']['treeherder']['symbol'] += '-b'
+                return task
 
-            if input.get('testPath'):
-                env = task_def['payload'].setdefault('env', {})
-                env['MOZHARNESS_TEST_PATHS'] = input.get('testPath')
-                task_def['extra']['treeherder']['symbol'] += '-b'
-
-            new_task_id = slugid()
-            create_task_from_def(new_task_id, task_def, parameters['level'])
+            create_tasks([label], full_task_graph, label_to_taskid,
+                         push_params, push_decision_task_id, push, modifier=modifier)
         else:
             logging.info('Could not find {} on {}. Skipping.'.format(label, push))

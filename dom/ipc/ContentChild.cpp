@@ -15,10 +15,12 @@
 #include "HandlerServiceChild.h"
 
 #include "mozilla/Attributes.h"
+#include "mozilla/BackgroundHangMonitor.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ProcessHangMonitorIPC.h"
 #include "mozilla/Unused.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/TelemetryIPC.h"
 #include "mozilla/devtools/HeapSnapshotTempFileHelperChild.h"
 #include "mozilla/docshell/OfflineCacheUpdateChild.h"
@@ -83,6 +85,7 @@
 #include "GMPServiceChild.h"
 #include "NullPrincipal.h"
 #include "nsISimpleEnumerator.h"
+#include "nsIStringBundle.h"
 #include "nsIWorkerDebuggerManager.h"
 
 #if !defined(XP_WIN)
@@ -509,15 +512,15 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage)
 
 #ifdef NIGHTLY_BUILD
 /**
- * The singleton of this class is registered with the HangMonitor as an
+ * The singleton of this class is registered with the BackgroundHangMonitor as an
  * annotator, so that the hang monitor can record whether or not there were
  * pending input events when the thread hung.
  */
 class PendingInputEventHangAnnotator final
-  : public HangMonitor::Annotator
+  : public BackgroundHangAnnotator
 {
 public:
-  virtual void AnnotateHang(HangMonitor::HangAnnotations& aAnnotations) override
+  virtual void AnnotateHang(BackgroundHangAnnotations& aAnnotations) override
   {
     int32_t pending = ContentChild::GetSingleton()->GetPendingInputEvents();
     if (pending > 0) {
@@ -711,7 +714,7 @@ ContentChild::Init(MessageLoop* aIOLoop,
   // only affect a single thread.
   SystemGroup::Dispatch(TaskCategory::Other,
                         NS_NewRunnableFunction("RegisterPendingInputEventHangAnnotator", [] {
-                          HangMonitor::RegisterAnnotator(
+                          BackgroundHangMonitor::RegisterAnnotator(
                             PendingInputEventHangAnnotator::sSingleton);
                         }));
 #endif
@@ -1386,7 +1389,7 @@ ContentChild::GetResultForRenderingInitFailure(base::ProcessId aOtherPid)
 mozilla::ipc::IPCResult
 ContentChild::RecvRequestPerformanceMetrics()
 {
-  MOZ_ASSERT(mozilla::dom::DOMPrefs::SchedulerLoggingEnabled());
+  MOZ_ASSERT(mozilla::StaticPrefs::dom_performance_enable_scheduler_timing());
   nsTArray<PerformanceInfo> info;
   CollectPerformanceInfo(info);
   SendAddPerformanceMetrics(info);
@@ -2260,11 +2263,6 @@ ContentChild::RecvRegisterChrome(InfallibleTArray<ChromePackage>&& packages,
     static_cast<nsChromeRegistryContent*>(registrySvc.get());
   chromeRegistry->RegisterRemoteChrome(packages, resources, overrides,
                                        locale, reset);
-  static bool preloadDone = false;
-  if (!preloadDone) {
-    preloadDone = true;
-    nsContentUtils::AsyncPrecreateStringBundles();
-  }
   return IPC_OK();
 }
 
@@ -2535,6 +2533,20 @@ ContentChild::RecvAsyncMessage(const nsString& aMsg,
 }
 
 mozilla::ipc::IPCResult
+ContentChild::RecvRegisterStringBundles(nsTArray<mozilla::dom::StringBundleDescriptor>&& aDescriptors)
+{
+  nsCOMPtr<nsIStringBundleService> stringBundleService =
+    services::GetStringBundleService();
+
+  for (auto& descriptor : aDescriptors) {
+    stringBundleService->RegisterContentBundle(descriptor.bundleURL(), descriptor.mapFile(),
+                                               descriptor.mapSize());
+  }
+
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
 ContentChild::RecvGeolocationUpdate(nsIDOMGeoPosition* aPosition)
 {
   nsCOMPtr<nsIGeolocationUpdate> gs =
@@ -2585,6 +2597,18 @@ mozilla::ipc::IPCResult
 ContentChild::RecvUpdateRequestedLocales(nsTArray<nsCString>&& aRequestedLocales)
 {
   LocaleService::GetInstance()->AssignRequestedLocales(aRequestedLocales);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentChild::RecvClearSiteDataReloadNeeded(const nsString& aOrigin)
+{
+  // Rebroadcast "clear-site-data-reload-needed".
+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+  if (obs) {
+    obs->NotifyObservers(nullptr, "clear-site-data-reload-needed",
+                         aOrigin.get());
+  }
   return IPC_OK();
 }
 
@@ -2732,6 +2756,8 @@ ContentChild::RecvRemoteType(const nsString& aRemoteType)
     SetProcessName(NS_LITERAL_STRING("file:// Content"));
   } else if (aRemoteType.EqualsLiteral(EXTENSION_REMOTE_TYPE)) {
     SetProcessName(NS_LITERAL_STRING("WebExtensions"));
+  } else if (aRemoteType.EqualsLiteral(PRIVILEGED_REMOTE_TYPE)) {
+    SetProcessName(NS_LITERAL_STRING("Privileged Content"));
   } else if (aRemoteType.EqualsLiteral(LARGE_ALLOCATION_REMOTE_TYPE)) {
     SetProcessName(NS_LITERAL_STRING("Large Allocation Web Content"));
   }
@@ -2944,7 +2970,7 @@ ContentChild::RecvDomainSetChanged(const uint32_t& aSetType,
       mPolicy->GetSuperWhitelist(getter_AddRefs(set));
       break;
     default:
-      NS_NOTREACHED("Unexpected setType");
+      MOZ_ASSERT_UNREACHABLE("Unexpected setType");
       return IPC_FAIL_NO_REASON(this);
   }
 
@@ -2965,7 +2991,7 @@ ContentChild::RecvDomainSetChanged(const uint32_t& aSetType,
       set->Clear();
       break;
     default:
-      NS_NOTREACHED("Unexpected changeType");
+      MOZ_ASSERT_UNREACHABLE("Unexpected changeType");
       return IPC_FAIL_NO_REASON(this);
   }
 
@@ -3041,7 +3067,7 @@ ContentChild::ShutdownInternal()
   mShuttingDown = true;
 
 #ifdef NIGHTLY_BUILD
-  HangMonitor::UnregisterAnnotator(PendingInputEventHangAnnotator::sSingleton);
+  BackgroundHangMonitor::UnregisterAnnotator(PendingInputEventHangAnnotator::sSingleton);
 #endif
 
   if (mPolicy) {
@@ -3682,10 +3708,11 @@ ContentChild::RecvShareCodeCoverageMutex(const CrossProcessMutexHandle& aHandle)
 }
 
 mozilla::ipc::IPCResult
-ContentChild::RecvDumpCodeCoverageCounters()
+ContentChild::RecvDumpCodeCoverageCounters(DumpCodeCoverageCountersResolver&& aResolver)
 {
 #ifdef MOZ_CODE_COVERAGE
-  CodeCoverageHandler::DumpCounters(0);
+  CodeCoverageHandler::DumpCounters();
+  aResolver(/* unused */ true);
   return IPC_OK();
 #else
   MOZ_CRASH("Shouldn't receive this message in non-code coverage builds!");
@@ -3693,10 +3720,11 @@ ContentChild::RecvDumpCodeCoverageCounters()
 }
 
 mozilla::ipc::IPCResult
-ContentChild::RecvResetCodeCoverageCounters()
+ContentChild::RecvResetCodeCoverageCounters(ResetCodeCoverageCountersResolver&& aResolver)
 {
 #ifdef MOZ_CODE_COVERAGE
-  CodeCoverageHandler::ResetCounters(0);
+  CodeCoverageHandler::ResetCounters();
+  aResolver(/* unused */ true);
   return IPC_OK();
 #else
   MOZ_CRASH("Shouldn't receive this message in non-code coverage builds!");

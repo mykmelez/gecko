@@ -308,9 +308,7 @@ LoadContextOptions(const char* aPrefName, void* /* aClosure */)
                 .setFuzzing(GetWorkerPref<bool>(NS_LITERAL_CSTRING("fuzzing.enabled")))
 #endif
                 .setStreams(GetWorkerPref<bool>(NS_LITERAL_CSTRING("streams")))
-                .setExtraWarnings(GetWorkerPref<bool>(NS_LITERAL_CSTRING("strict")))
-                .setArrayProtoValues(GetWorkerPref<bool>(
-                      NS_LITERAL_CSTRING("array_prototype_values")));
+                .setExtraWarnings(GetWorkerPref<bool>(NS_LITERAL_CSTRING("strict")));
 
   nsCOMPtr<nsIXULRuntime> xr = do_GetService("@mozilla.org/xre/runtime;1");
   if (xr) {
@@ -2372,7 +2370,9 @@ RuntimeService::CreateSharedWorkerFromLoadInfo(JSContext* aCx,
     // We're done here.  Just queue up our error event and return our
     // dead-on-arrival SharedWorker.
     RefPtr<AsyncEventDispatcher> errorEvent =
-      new AsyncEventDispatcher(sharedWorker, NS_LITERAL_STRING("error"), false);
+      new AsyncEventDispatcher(sharedWorker,
+                               NS_LITERAL_STRING("error"),
+                               CanBubble::eNo);
     errorEvent->PostDOMEvent();
     sharedWorker.forget(aSharedWorker);
     return NS_OK;
@@ -2562,7 +2562,7 @@ RuntimeService::ClampedHardwareConcurrency() const
     }
     uint32_t clampedValue = std::min(uint32_t(numberOfProcessors),
                                      gMaxHardwareConcurrency);
-    clampedHardwareConcurrency.compareExchange(0, clampedValue);
+    Unused << clampedHardwareConcurrency.compareExchange(0, clampedValue);
   }
 
   return clampedHardwareConcurrency;
@@ -2605,7 +2605,7 @@ RuntimeService::Observe(nsISupports* aSubject, const char* aTopic,
     return NS_OK;
   }
 
-  NS_NOTREACHED("Unknown observer topic!");
+  MOZ_ASSERT_UNREACHABLE("Unknown observer topic!");
   return NS_OK;
 }
 

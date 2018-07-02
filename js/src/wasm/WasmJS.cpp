@@ -109,8 +109,8 @@ wasm::HasSupport(JSContext* cx)
            HasAvailableCompilerTier(cx);
 }
 
-bool
-wasm::ToWebAssemblyValue(JSContext* cx, ValType targetType, HandleValue v, Val* val)
+static bool
+ToWebAssemblyValue(JSContext* cx, ValType targetType, HandleValue v, Val* val)
 {
     switch (targetType.code()) {
       case ValType::I32: {
@@ -140,8 +140,8 @@ wasm::ToWebAssemblyValue(JSContext* cx, ValType targetType, HandleValue v, Val* 
     }
 }
 
-Value
-wasm::ToJSValue(const Val& val)
+static Value
+ToJSValue(const Val& val)
 {
     switch (val.type().code()) {
       case ValType::I32:
@@ -608,14 +608,14 @@ KindToString(JSContext* cx, const KindNames& names, DefinitionKind kind)
 }
 
 static JSString*
-SigToString(JSContext* cx, const Sig& sig)
+FuncTypeToString(JSContext* cx, const FuncType& funcType)
 {
     StringBuffer buf(cx);
     if (!buf.append('('))
         return nullptr;
 
     bool first = true;
-    for (ValType arg : sig.args()) {
+    for (ValType arg : funcType.args()) {
         if (!first && !buf.append(", ", strlen(", ")))
             return nullptr;
 
@@ -629,8 +629,8 @@ SigToString(JSContext* cx, const Sig& sig)
     if (!buf.append(") -> (", strlen(") -> (")))
         return nullptr;
 
-    if (sig.ret() != ExprType::Void) {
-        const char* retStr = ToCString(sig.ret());
+    if (funcType.ret() != ExprType::Void) {
+        const char* retStr = ToCString(funcType.ret());
         if (!buf.append(retStr, strlen(retStr)))
             return nullptr;
     }
@@ -688,10 +688,10 @@ WasmModuleObject::imports(JSContext* cx, unsigned argc, Value* vp)
         props.infallibleAppend(IdValuePair(NameToId(names.kind), StringValue(kindStr)));
 
         if (fuzzingSafe && import.kind == DefinitionKind::Function) {
-            JSString* sigStr = SigToString(cx, funcImports[numFuncImport++].sig());
-            if (!sigStr)
+            JSString* ftStr = FuncTypeToString(cx, funcImports[numFuncImport++].funcType());
+            if (!ftStr)
                 return false;
-            if (!props.append(IdValuePair(NameToId(names.signature), StringValue(sigStr))))
+            if (!props.append(IdValuePair(NameToId(names.signature), StringValue(ftStr))))
                 return false;
         }
 
@@ -746,10 +746,10 @@ WasmModuleObject::exports(JSContext* cx, unsigned argc, Value* vp)
         props.infallibleAppend(IdValuePair(NameToId(names.kind), StringValue(kindStr)));
 
         if (fuzzingSafe && exp.kind() == DefinitionKind::Function) {
-            JSString* sigStr = SigToString(cx, funcExports[numFuncExport++].sig());
-            if (!sigStr)
+            JSString* ftStr = FuncTypeToString(cx, funcExports[numFuncExport++].funcType());
+            if (!ftStr)
                 return false;
-            if (!props.append(IdValuePair(NameToId(names.signature), StringValue(sigStr))))
+            if (!props.append(IdValuePair(NameToId(names.signature), StringValue(ftStr))))
                 return false;
         }
 
@@ -1300,8 +1300,8 @@ WasmInstanceObject::getExportedFunction(JSContext* cx, HandleWasmInstanceObject 
     if (!EnsureLazyEntryStub(instance, funcExportIndex, funcExport))
         return false;
 
-    const Sig& sig = funcExport.sig();
-    unsigned numArgs = sig.args().length();
+    const FuncType& funcType = funcExport.funcType();
+    unsigned numArgs = funcType.args().length();
 
     if (instance.isAsmJS()) {
         // asm.js needs to act like a normal JS function which means having the
@@ -1322,7 +1322,7 @@ WasmInstanceObject::getExportedFunction(JSContext* cx, HandleWasmInstanceObject 
         // Functions with anyref don't have jit entries yet, so they should
         // mostly behave like asm.js functions. Pretend it's the case, until
         // jit entries are implemented.
-        JSFunction::Flags flags = sig.temporarilyUnsupportedAnyRef()
+        JSFunction::Flags flags = funcType.temporarilyUnsupportedAnyRef()
                                 ? JSFunction::ASMJS_NATIVE
                                 : JSFunction::WASM_FUN;
 
@@ -1331,7 +1331,7 @@ WasmInstanceObject::getExportedFunction(JSContext* cx, HandleWasmInstanceObject 
         if (!fun)
             return false;
 
-        if (sig.temporarilyUnsupportedAnyRef())
+        if (funcType.temporarilyUnsupportedAnyRef())
             fun->setAsmJSIndex(funcIndex);
         else
             fun->setWasmJitEntry(instance.code().getAddressOfJitEntry(funcIndex));
@@ -1903,7 +1903,7 @@ WasmTableObject::construct(JSContext* cx, unsigned argc, Value* vp)
     }
 
     Limits limits;
-    if (!GetLimits(cx, obj, MaxTableInitialLength, UINT32_MAX, "Table", &limits,
+    if (!GetLimits(cx, obj, MaxTableInitialLength, MaxTableMaximumLength, "Table", &limits,
                    Shareable::False))
     {
         return false;
@@ -2182,6 +2182,10 @@ WasmGlobalObject::construct(JSContext* cx, unsigned argc, Value* vp)
     ValType globalType;
     if (StringEqualsAscii(typeLinearStr, "i32")) {
         globalType = ValType::I32;
+    } else if (args.length() == 1 && StringEqualsAscii(typeLinearStr, "i64")) {
+        // For the time being, i64 is allowed only if there is not an
+        // initializing value.
+        globalType = ValType::I64;
     } else if (StringEqualsAscii(typeLinearStr, "f32")) {
         globalType = ValType::F32;
     } else if (StringEqualsAscii(typeLinearStr, "f64")) {
@@ -2207,7 +2211,8 @@ WasmGlobalObject::construct(JSContext* cx, unsigned argc, Value* vp)
             return false;
     } else {
         switch (globalType.code()) {
-          case ValType::I32: /* set above */ break;
+          case ValType::I32: /* set above */               break;
+          case ValType::I64: globalVal = Val(uint64_t(0)); break;
           case ValType::F32: globalVal = Val(float(0.0));  break;
           case ValType::F64: globalVal = Val(double(0.0)); break;
           default: MOZ_CRASH();
@@ -2892,6 +2897,7 @@ class CompileStreamTask : public PromiseHelperTask, public JS::StreamConsumer
         instantiate_(instantiate),
         importObj_(cx, importObj),
         streamState_(mutexid::WasmStreamStatus, Env),
+        codeSection_{},
         codeStreamEnd_(nullptr),
         exclusiveCodeStreamEnd_(mutexid::WasmCodeStreamEnd, nullptr),
         exclusiveTailBytes_(mutexid::WasmTailBytesPtr, nullptr),

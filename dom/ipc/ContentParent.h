@@ -43,6 +43,7 @@
 #define DEFAULT_REMOTE_TYPE "web"
 #define FILE_REMOTE_TYPE "file"
 #define EXTENSION_REMOTE_TYPE "extension"
+#define PRIVILEGED_REMOTE_TYPE "privileged"
 
 // This must start with the DEFAULT_REMOTE_TYPE above.
 #define LARGE_ALLOCATION_REMOTE_TYPE "webLargeAllocation"
@@ -78,6 +79,9 @@ class OptionalURIParams;
 class PFileDescriptorSetParent;
 class URIParams;
 class TestShellParent;
+#ifdef FUZZING
+class ProtocolFuzzerHelper;
+#endif
 } // namespace ipc
 
 namespace jsipc {
@@ -123,6 +127,9 @@ class ContentParent final : public PContentParent
 
   friend class ContentProcessHost;
   friend class mozilla::PreallocatedProcessManagerImpl;
+#ifdef FUZZING
+  friend class mozilla::ipc::ProtocolFuzzerHelper;
+#endif
 
 public:
 
@@ -196,6 +203,8 @@ public:
   static void GetAll(nsTArray<ContentParent*>& aArray);
 
   static void GetAllEvenIfDead(nsTArray<ContentParent*>& aArray);
+
+  static void BroadcastStringBundle(const StringBundleDescriptor&);
 
   const nsAString& GetRemoteType() const;
 
@@ -988,6 +997,10 @@ private:
   virtual mozilla::ipc::IPCResult RecvClipboardHasType(nsTArray<nsCString>&& aTypes,
                                                        const int32_t& aWhichClipboard,
                                                        bool* aHasType) override;
+
+  virtual mozilla::ipc::IPCResult RecvGetExternalClipboardFormats(const int32_t& aWhichClipboard,
+                                                                  const bool& aPlainTextOnly,
+                                                                  nsTArray<nsCString>* aTypes) override;
 
   virtual mozilla::ipc::IPCResult RecvPlaySound(const URIParams& aURI) override;
   virtual mozilla::ipc::IPCResult RecvBeep() override;

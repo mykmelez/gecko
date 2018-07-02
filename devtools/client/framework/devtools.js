@@ -18,7 +18,7 @@ loader.lazyImporter(this, "ScratchpadManager", "resource://devtools/client/scrat
 loader.lazyImporter(this, "BrowserToolboxProcess", "resource://devtools/client/framework/ToolboxProcess.jsm");
 
 loader.lazyRequireGetter(this, "WebExtensionInspectedWindowFront",
-      "devtools/shared/fronts/webextension-inspected-window", true);
+      "devtools/shared/fronts/addon/webextension-inspected-window", true);
 
 const {defaultTools: DefaultTools, defaultThemes: DefaultThemes} =
   require("devtools/client/definitions");
@@ -441,7 +441,7 @@ DevTools.prototype = {
    * @param {string} toolId
    *        The id of the tool to show
    * @param {Toolbox.HostType} hostType
-   *        The type of host (bottom, window, side)
+   *        The type of host (bottom, window, left, right)
    * @param {object} hostOptions
    *        Options for host specifically
    * @param {Number} startTime

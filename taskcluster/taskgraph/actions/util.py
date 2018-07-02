@@ -18,7 +18,6 @@ from taskgraph.decision import write_artifact
 from taskgraph.taskgraph import TaskGraph
 from taskgraph.optimize import optimize_task_graph
 from taskgraph.util.taskcluster import get_session, find_task_id, get_artifact, list_tasks
-from taskgraph.util.parameterization import resolve_task_references
 
 logger = logging.getLogger(__name__)
 
@@ -106,28 +105,23 @@ def create_task_from_def(task_id, task_def, level):
     create.create_task(session, task_id, label, task_def)
 
 
-def fix_task_dependencies(task_def, label_to_taskid):
-    """fix up the task's dependencies, similar to how optimization would
-    have done in the decision"""
-    dependencies = {name: label_to_taskid[label]
-                    for name, label in task_def.dependencies.iteritems()}
-    new_task_definition = resolve_task_references(task_def.label, task_def.task, dependencies)
-    new_task_definition.setdefault('dependencies', []).extend(dependencies.itervalues())
-    return new_task_definition
-
-
 def update_parent(task, graph):
     task.task.setdefault('extra', {})['parent'] = os.environ.get('TASK_ID', '')
     return task
 
 
 def create_tasks(to_run, full_task_graph, label_to_taskid,
-                 params, decision_task_id=None, suffix=''):
+                 params, decision_task_id=None, suffix='', modifier=lambda t: t):
     """Create new tasks.  The task definition will have {relative-datestamp':
     '..'} rendered just like in a decision task.  Action callbacks should use
     this function to create new tasks,
     allowing easy debugging with `mach taskgraph action-callback --test`.
     This builds up all required tasks to run in order to run the tasks requested.
+
+    Optionally this function takes a `modifier` function that is passed in each
+    task before it is put into a new graph. It should return a valid task. Note
+    that this is passed _all_ tasks in the graph, not just the set in to_run. You
+    may want to skip modifying tasks not in your to_run list.
 
     If you wish to create the tasks in a new group, leave out decision_task_id."""
     if suffix != '':
@@ -140,7 +134,7 @@ def create_tasks(to_run, full_task_graph, label_to_taskid,
 
     target_graph = full_task_graph.graph.transitive_closure(to_run)
     target_task_graph = TaskGraph(
-        {l: full_task_graph[l] for l in target_graph.nodes},
+        {l: modifier(full_task_graph[l]) for l in target_graph.nodes},
         target_graph)
     target_task_graph.for_each_task(update_parent)
     optimized_task_graph, label_to_taskid = optimize_task_graph(target_task_graph,

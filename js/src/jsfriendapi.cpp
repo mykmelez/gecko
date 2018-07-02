@@ -24,9 +24,9 @@
 #include "js/Wrapper.h"
 #include "proxy/DeadObjectProxy.h"
 #include "vm/ArgumentsObject.h"
-#include "vm/JSCompartment.h"
 #include "vm/JSContext.h"
 #include "vm/JSObject.h"
+#include "vm/Realm.h"
 #include "vm/Time.h"
 #include "vm/WrapperObject.h"
 
@@ -155,7 +155,7 @@ JS::GetIsSecureContext(JS::Realm* realm)
 }
 
 JS_FRIEND_API(JSPrincipals*)
-JS_GetCompartmentPrincipals(JSCompartment* compartment)
+JS_GetCompartmentPrincipals(JS::Compartment* compartment)
 {
     // Note: for now we assume a single realm per compartment. This API will go
     // away after we remove the remaining callers. See bug 1465700.
@@ -347,7 +347,7 @@ js::GetRealmZone(JS::Realm* realm)
 }
 
 JS_FRIEND_API(bool)
-js::IsSystemCompartment(JSCompartment* comp)
+js::IsSystemCompartment(JS::Compartment* comp)
 {
     // Note: for now we assume a single realm per compartment. This API will
     // hopefully go away once Gecko supports same-compartment realms. Another
@@ -385,7 +385,7 @@ js::IsFunctionObject(JSObject* obj)
 JS_FRIEND_API(JSObject*)
 js::GetGlobalForObjectCrossCompartment(JSObject* obj)
 {
-    return &obj->global();
+    return &obj->deprecatedGlobal();
 }
 
 JS_FRIEND_API(JSObject*)
@@ -418,8 +418,10 @@ js::AssertSameCompartment(JSObject* objA, JSObject* objB)
 JS_FRIEND_API(void)
 js::NotifyAnimationActivity(JSObject* obj)
 {
+    MOZ_ASSERT(obj->is<GlobalObject>());
+
     int64_t timeNow = PRMJ_Now();
-    obj->realm()->lastAnimationTime = timeNow;
+    obj->as<GlobalObject>().realm()->lastAnimationTime = timeNow;
     obj->runtimeFromMainThread()->lastAnimationTime = timeNow;
 }
 
@@ -533,11 +535,9 @@ js::GetStaticPrototype(JSObject* obj)
 }
 
 JS_FRIEND_API(bool)
-js::GetOriginalEval(JSContext* cx, HandleObject scope, MutableHandleObject eval)
+js::GetRealmOriginalEval(JSContext* cx, MutableHandleObject eval)
 {
-    assertSameCompartment(cx, scope);
-    Rooted<GlobalObject*> global(cx, &scope->global());
-    return GlobalObject::getOrCreateEval(cx, global, eval);
+    return GlobalObject::getOrCreateEval(cx, cx->global(), eval);
 }
 
 JS_FRIEND_API(void)
@@ -629,7 +629,7 @@ JS_FRIEND_API(void)
 js::VisitGrayWrapperTargets(Zone* zone, GCThingCallback callback, void* closure)
 {
     for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next()) {
-        for (JSCompartment::WrapperEnum e(comp); !e.empty(); e.popFront())
+        for (Compartment::WrapperEnum e(comp); !e.empty(); e.popFront())
             e.front().mutableKey().applyToWrapped(VisitGrayCallbackFunctor(callback, closure));
     }
 }
@@ -669,7 +669,7 @@ JS_CloneObject(JSContext* cx, HandleObject obj, HandleObject protoArg)
     return CloneObject(cx, obj, proto);
 }
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
 
 // We don't want jsfriendapi.h to depend on GenericPrinter,
 // so these functions are declared directly in the cpp.
@@ -1252,9 +1252,9 @@ js::DumpHeap(JSContext* cx, FILE* fp, js::DumpHeapNurseryBehaviour nurseryBehavi
     fprintf(dtrc.output, "# Roots.\n");
     {
         JSRuntime* rt = cx->runtime();
-        js::gc::AutoPrepareForTracing prep(cx);
+        js::gc::AutoTraceSession session(rt);
         gcstats::AutoPhase ap(rt->gc.stats(), gcstats::PhaseKind::TRACE_HEAP);
-        rt->gc.traceRuntime(&dtrc, prep.session());
+        rt->gc.traceRuntime(&dtrc, session);
     }
 
     fprintf(dtrc.output, "# Weak maps.\n");
@@ -1335,14 +1335,6 @@ js::GetTestingFunctions(JSContext* cx)
 
     return obj;
 }
-
-#ifdef DEBUG
-JS_FRIEND_API(unsigned)
-js::GetEnterRealmDepth(JSContext* cx)
-{
-  return cx->getEnterRealmDepth();
-}
-#endif
 
 JS_FRIEND_API(void)
 js::SetDOMCallbacks(JSContext* cx, const DOMCallbacks* callbacks)
@@ -1513,7 +1505,7 @@ JS_FRIEND_API(JSObject*)
 js::ToWindowIfWindowProxy(JSObject* obj)
 {
     if (IsWindowProxy(obj))
-        return &obj->global();
+        return &obj->nonCCWGlobal();
     return obj;
 }
 
@@ -1562,7 +1554,7 @@ JS_FRIEND_API(void)
 js::SetRealmValidAccessPtr(JSContext* cx, JS::HandleObject global, bool* accessp)
 {
     MOZ_ASSERT(global->is<GlobalObject>());
-    global->realm()->setValidAccessPtr(accessp);
+    global->as<GlobalObject>().realm()->setValidAccessPtr(accessp);
 }
 
 JS_FRIEND_API(bool)

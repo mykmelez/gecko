@@ -28,6 +28,8 @@
 #include "js/Utility.h"
 
 /*
+ * [SMDOC] Stack Rooting
+ *
  * Moving GC Stack Rooting
  *
  * A moving GC may change the physical location of GC allocated things, even
@@ -1060,7 +1062,7 @@ GetContextRealm(const JSContext* cx)
     return JS::RootingContext::get(cx)->realm_;
 }
 
-inline JSCompartment*
+inline JS::Compartment*
 GetContextCompartment(const JSContext* cx)
 {
     if (JS::Realm* realm = GetContextRealm(cx))

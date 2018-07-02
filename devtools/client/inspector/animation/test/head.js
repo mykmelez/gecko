@@ -190,7 +190,7 @@ const clickOnCurrentTimeScrubberController = async function(animationInspector,
                                                             panel,
                                                             mouseDownPosition,
                                                             mouseMovePosition) {
-  const controllerEl = panel.querySelector(".current-time-scrubber-controller");
+  const controllerEl = panel.querySelector(".current-time-scrubber-area");
   const bounds = controllerEl.getBoundingClientRect();
   const mousedonwX = bounds.width * mouseDownPosition;
 
@@ -277,8 +277,10 @@ const clickOnTargetNode = async function(animationInspector, panel, index) {
   const targetEl = panel.querySelectorAll(".animation-target .objectBox")[index];
   targetEl.scrollIntoView(false);
   const onHighlight = animationInspector.inspector.toolbox.once("node-highlight");
+  const onAnimationTargetUpdated = animationInspector.once("animation-target-rendered");
   EventUtils.synthesizeMouseAtCenter(targetEl, {}, targetEl.ownerGlobal);
-  await waitForRendering(animationInspector);
+  await onAnimationTargetUpdated;
+  await waitForSummaryAndDetail(animationInspector);
   await onHighlight;
 };
 
@@ -337,7 +339,7 @@ const dragOnCurrentTimeScrubberController = async function(animationInspector,
                                                             panel,
                                                             mouseDownPosition,
                                                             mouseMovePosition) {
-  const controllerEl = panel.querySelector(".current-time-scrubber-controller");
+  const controllerEl = panel.querySelector(".current-time-scrubber-area");
   const bounds = controllerEl.getBoundingClientRect();
   const mousedonwX = bounds.width * mouseDownPosition;
   const mousemoveX = bounds.width * mouseMovePosition;
@@ -368,7 +370,7 @@ const dragOnCurrentTimeScrubberController = async function(animationInspector,
  *         }
  */
 const getDurationAndRate = function(animationInspector, panel, pixels) {
-  const controllerEl = panel.querySelector(".current-time-scrubber-controller");
+  const controllerEl = panel.querySelector(".current-time-scrubber-area");
   const bounds = controllerEl.getBoundingClientRect();
   const duration =
     animationInspector.state.timeScale.getDuration() / bounds.width * pixels;

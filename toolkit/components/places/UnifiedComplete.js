@@ -82,6 +82,10 @@ const MAXIMUM_ALLOWED_EXTENSION_MATCHES = 6;
 // After this time, we'll give up waiting for the extension to return matches.
 const MAXIMUM_ALLOWED_EXTENSION_TIME_MS = 3000;
 
+// By default we add remote tabs that have been used less than this time ago.
+// Any remaining remote tabs are added in queue if no other results are found.
+const RECENT_REMOTE_TAB_THRESHOLD_MS = 259200000; // 72 hours.
+
 // A regex that matches "single word" hostnames for whitelisting purposes.
 // The hostname will already have been checked for general validity, so we
 // don't need to be exhaustive here, so allow dashes anywhere.
@@ -389,7 +393,7 @@ const SQL_URL_PREFIX_BOOKMARKED_QUERY = urlQuery(
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-Cu.importGlobalProperties(["fetch"]);
+XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
@@ -936,6 +940,9 @@ function Search(searchString, searchParam, autocompleteListener,
   this._adaptiveCount = 0;
   this._extraAdaptiveRows = [];
 
+  // Used to limit the number of remote tab results.
+  this._extraRemoteTabRows = [];
+
   // This is a replacement for this._result.matchCount, to be used when you need
   // to check how many "current" matches have been inserted.
   // Indeed this._result.matchCount may include matches from the previous search.
@@ -1221,6 +1228,12 @@ Search.prototype = {
     while (this._extraAdaptiveRows.length &&
            this._currentMatchCount < Prefs.get("maxRichResults")) {
       this._addFilteredQueryMatch(this._extraAdaptiveRows.shift());
+    }
+
+    // If we have some unused remote tab matches, add them now.
+    while (this._extraRemoteTabRows.length &&
+          this._currentMatchCount < Prefs.get("maxRichResults")) {
+      this._addMatch(this._extraRemoteTabRows.shift());
     }
 
     // Ideally we should wait until MATCH_BOUNDARY_ANYWHERE, but that query
@@ -1709,7 +1722,7 @@ Search.prototype = {
       return;
     }
     let matches = await PlacesRemoteTabsAutocompleteProvider.getMatches(this._originalSearchString);
-    for (let {url, title, icon, deviceName} of matches) {
+    for (let {url, title, icon, deviceName, lastUsed} of matches) {
       // It's rare that Sync supplies the icon for the page (but if it does, it
       // is a string URL)
       if (!icon) {
@@ -1730,7 +1743,11 @@ Search.prototype = {
         frecency: FRECENCY_DEFAULT + 1,
         icon,
       };
-      this._addMatch(match);
+      if (lastUsed > (Date.now() - RECENT_REMOTE_TAB_THRESHOLD_MS)) {
+        this._addMatch(match);
+      } else {
+        this._extraRemoteTabRows.push(match);
+      }
     }
   },
 
@@ -1740,18 +1757,19 @@ Search.prototype = {
     let flags = Ci.nsIURIFixup.FIXUP_FLAG_FIX_SCHEME_TYPOS |
                 Ci.nsIURIFixup.FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP;
     let fixupInfo = null;
+    let searchUrl = this._trimmedOriginalSearchString;
     try {
-      fixupInfo = Services.uriFixup.getFixupURIInfo(this._originalSearchString,
+      fixupInfo = Services.uriFixup.getFixupURIInfo(searchUrl,
                                                     flags);
     } catch (e) {
       if (e.result == Cr.NS_ERROR_MALFORMED_URI && !Prefs.get("keyword.enabled")) {
         let value = PlacesUtils.mozActionURI("visiturl", {
-          url: this._originalSearchString,
-          input: this._originalSearchString,
+          url: searchUrl,
+          input: searchUrl,
         });
         this._addMatch({
           value,
-          comment: this._originalSearchString,
+          comment: searchUrl,
           style: "action visiturl",
           frecency: Infinity
         });
@@ -1788,7 +1806,7 @@ Search.prototype = {
 
     let value = PlacesUtils.mozActionURI("visiturl", {
       url: escapedURL,
-      input: this._originalSearchString,
+      input: searchUrl,
     });
 
     let match = {
@@ -1805,7 +1823,7 @@ Search.prototype = {
     // By default we won't provide an icon, but for the subset of urls with a
     // host we'll check for a typed slash and set favicon for the host part.
     if (hostExpected &&
-        (this._trimmedOriginalSearchString.endsWith("/") || uri.pathQueryRef.length > 1)) {
+        (searchUrl.endsWith("/") || uri.pathQueryRef.length > 1)) {
       match.icon = `page-icon:${uri.prePath}/`;
     }
 

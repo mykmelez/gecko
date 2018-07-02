@@ -4,12 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/*
- * Ways to get various per-Realm objects. All the getters declared in this
- * header operate on the Realm corresponding to the current compartment on the
- * JSContext.
- */
-
 #ifndef js_Realm_h
 #define js_Realm_h
 
@@ -49,14 +43,14 @@ namespace shadow {
 class Realm
 {
   protected:
-    JSCompartment* compartment_;
+    JS::Compartment* compartment_;
 
-    explicit Realm(JSCompartment* comp)
+    explicit Realm(JS::Compartment* comp)
       : compartment_(comp)
     {}
 
   public:
-    JSCompartment* compartment() {
+    JS::Compartment* compartment() {
         return compartment_;
     }
     static shadow::Realm* get(JS::Realm* realm) {
@@ -67,7 +61,7 @@ class Realm
 }; // namespace shadow
 
 // Return the compartment that contains a given realm.
-inline JSCompartment*
+inline JS::Compartment*
 GetCompartmentForRealm(Realm* realm)
 {
     return shadow::Realm::get(realm)->compartment();
@@ -113,6 +107,17 @@ SetRealmNameCallback(JSContext* cx, RealmNameCallback callback);
 // GC, between collecting the global object and destroying the Realm.
 extern JS_PUBLIC_API(JSObject*)
 GetRealmGlobalOrNull(Handle<Realm*> realm);
+
+// Initialize standard JS class constructors, prototypes, and any top-level
+// functions and constants associated with the standard classes (e.g. isNaN
+// for Number).
+extern JS_PUBLIC_API(bool)
+InitRealmStandardClasses(JSContext* cx);
+
+/*
+ * Ways to get various per-Realm objects. All the getters declared below operate
+ * on the JSContext's current Realm.
+ */
 
 extern JS_PUBLIC_API(JSObject*)
 GetRealmObjectPrototype(JSContext* cx);

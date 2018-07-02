@@ -375,7 +375,6 @@ pref("media.wmf.dxva.enabled", true);
 pref("media.wmf.dxva.d3d11.enabled", true);
 pref("media.wmf.dxva.max-videos", 8);
 pref("media.wmf.low-latency.enabled", false);
-pref("media.wmf.amd.vp9.enabled", false);
 pref("media.wmf.amd.highres.enabled", true);
 pref("media.wmf.allow-unsupported-resolutions", false);
 pref("media.wmf.use-nv12-format", true);
@@ -605,9 +604,6 @@ pref("layers.amd-switchable-gfx.enabled", true);
 // Whether to use async panning and zooming
 pref("layers.async-pan-zoom.enabled", true);
 
-// Whether to enable event region building during painting
-pref("layout.event-regions.enabled", false);
-
 // Whether to enable arbitrary layer geometry for OpenGL compositor
 pref("layers.geometry.opengl.enabled", true);
 
@@ -817,8 +813,6 @@ pref("gfx.content.azure.backends", "direct2d1.1,skia,cairo");
 #ifdef XP_MACOSX
 pref("gfx.content.azure.backends", "skia");
 pref("gfx.canvas.azure.backends", "skia");
-// Accelerated cg canvas where available (10.7+)
-pref("gfx.canvas.azure.accelerated", true);
 #else
 pref("gfx.canvas.azure.backends", "skia");
 pref("gfx.content.azure.backends", "skia");
@@ -858,6 +852,11 @@ pref("gfx.webrender.enabled", false);
 #endif
 #endif
 
+// Also expose a pref to allow users to force-disable WR. This is exposed
+// on all channels because WR can be enabled on qualified hardware on all
+// channels.
+pref("gfx.webrender.force-disabled", false);
+
 #ifdef XP_WIN
 pref("gfx.webrender.force-angle", true);
 pref("gfx.webrender.dcomp-win.enabled", true);
@@ -873,7 +872,6 @@ pref("gfx.webrender.highlight-painted-layers", false);
 pref("gfx.webrender.async-scene-build", true);
 pref("gfx.webrender.blob-images", true);
 pref("gfx.webrender.blob.invalidation", true);
-pref("gfx.webrender.hit-test", true);
 
 // WebRender debugging utilities.
 pref("gfx.webrender.debug.texture-cache", false);
@@ -885,6 +883,9 @@ pref("gfx.webrender.debug.gpu-sample-queries", false);
 pref("gfx.webrender.debug.disable-batching", false);
 pref("gfx.webrender.debug.epochs", false);
 pref("gfx.webrender.debug.compact-profiler", false);
+pref("gfx.webrender.debug.echo-driver-messages", false);
+pref("gfx.webrender.debug.new-frame-indicator", false);
+pref("gfx.webrender.debug.new-scene-indicator", false);
 
 pref("accessibility.browsewithcaret", false);
 pref("accessibility.warn_on_browsewithcaret", true);
@@ -959,6 +960,8 @@ pref("accessibility.mouse_focuses_formcontrol", false);
 
 // Type Ahead Find
 pref("accessibility.typeaheadfind", true);
+// Enable FAYT by pressing / or "
+pref("accessibility.typeaheadfind.manual", true);
 pref("accessibility.typeaheadfind.autostart", true);
 // casesensitive: controls the find bar's case-sensitivity
 //     0 - "never"  (case-insensitive)
@@ -1333,8 +1336,6 @@ pref("dom.webcomponents.customelements.enabled", false);
 #endif
 
 pref("javascript.enabled",                  true);
-// Enable Array.prototype.values
-pref("javascript.options.array_prototype_values", true);
 pref("javascript.options.strict",           false);
 #ifdef DEBUG
 pref("javascript.options.strict.debug",     false);
@@ -1771,8 +1772,12 @@ pref("network.http.focused_window_transaction_ratio", "0.9");
 
 // Whether or not we give more priority to active tab.
 // Note that this requires restart for changes to take effect.
+#ifdef ANDROID
+// disabled because of bug 1382274
+pref("network.http.active_tab_priority", false);
+#else
 pref("network.http.active_tab_priority", true);
-// </http>
+#endif
 
 // default values for FTP
 // in a DSCP environment this should be 40 (0x28, or AF11), per RFC-4594,
@@ -1998,7 +2003,11 @@ pref("network.dns.ipv4OnlyDomains", "");
 pref("network.dns.disableIPv6", false);
 
 // This is the number of dns cache entries allowed
+#ifdef ANDROID
 pref("network.dnsCacheEntries", 400);
+#else
+pref("network.dnsCacheEntries", 800);
+#endif
 
 // In the absence of OS TTLs, the DNS cache TTL value
 pref("network.dnsCacheExpiration", 60);
@@ -2124,7 +2133,12 @@ pref("network.auth.private-browsing-sso", false);
 
 // Control how throttling of http responses works - number of ms that each
 // suspend and resume period lasts (prefs named appropriately)
+#ifdef ANDROID
+// disabled because of bug 1382274
+pref("network.http.throttle.enable", false);
+#else
 pref("network.http.throttle.enable", true);
+#endif
 pref("network.http.throttle.version", 2);
 
 // V1 prefs
@@ -2940,9 +2954,6 @@ pref("layout.css.osx-font-smoothing.enabled", false);
 // Is support for the CSS-wide "unset" value enabled?
 pref("layout.css.unset-value.enabled", true);
 
-// Is support for the "all" shorthand enabled?
-pref("layout.css.all-shorthand.enabled", true);
-
 // Is support for CSS overflow-clip-box enabled for non-UA sheets?
 pref("layout.css.overflow-clip-box.enabled", false);
 
@@ -2981,11 +2992,7 @@ pref("layout.css.scroll-behavior.damping-ratio", "1.0");
 pref("layout.css.scroll-snap.enabled", true);
 
 // Is support for CSS shape-outside enabled?
-#ifdef NIGHTLY_BUILD
 pref("layout.css.shape-outside.enabled", true);
-#else
-pref("layout.css.shape-outside.enabled", false);
-#endif
 
 // Is support for document.fonts enabled?
 pref("layout.css.font-loading-api.enabled", true);
@@ -3050,6 +3057,9 @@ pref("layout.idle_period.required_quiescent_frames", 2);
 // end and the start of the next tick to avoid jank.
 pref("layout.idle_period.time_limit", 1);
 
+// Whether -webkit-appearance is aliased to -moz-appearance
+pref("layout.css.webkit-appearance.enabled", false);
+
 // Is support for the Web Animations API enabled?
 // Before enabling this by default, make sure also CSSPseudoElement interface
 // has been spec'ed properly, or we should add a separate pref for
@@ -3109,12 +3119,6 @@ pref("input_event_queue.default_duration_per_event", 1);
 // The number of processed input events we use to predict the amount of time
 // required to process the following input events.
 pref("input_event_queue.count_for_prediction", 9);
-
-// Hang monitor timeout after which we kill the browser, in seconds
-// (0 is disabled)
-// Disabled on all platforms per bug 705748 until the found issues are
-// resolved.
-pref("hangmonitor.timeout", 0);
 
 pref("plugins.load_appdir_plugins", false);
 // If true, plugins will be click to play
@@ -3211,6 +3215,14 @@ pref("dom.ipc.processCount.file", 1);
 // WebExtensions only support a single extension process.
 pref("dom.ipc.processCount.extension", 1);
 
+// Privileged content only supports a single content process.
+pref("dom.ipc.processCount.privileged", 1);
+
+// Keep a single privileged content process alive for performance reasons.
+// e.g. we do not want to throw content processes out every time we navigate
+// away from about:newtab.
+pref("dom.ipc.keepProcessesAlive.privileged", 1);
+
 // Whether a native event loop should be used in the content process.
 #if defined(XP_WIN)
 pref("dom.ipc.useNativeEventProcessing.content", false);
@@ -3246,6 +3258,9 @@ pref("browser.tabs.remote.separateFileUriProcess", true);
 // sorts of pages, which we have to do when we run them in the normal web
 // content process, causes compatibility issues.
 pref("browser.tabs.remote.allowLinkedWebInFileUriProcess", true);
+
+// Pref to control whether we use separate privileged content processes.
+pref("browser.tabs.remote.separatePrivilegedContentProcess", false);
 
 // Enable the use of display-lists for SVG hit-testing and painting.
 pref("svg.display-lists.hit-testing.enabled", true);
@@ -5126,11 +5141,18 @@ pref("memory.blob_report.stack_frames", 0);
 // observers (bug 780507).
 pref("dom.idle-observers-api.fuzz_time.disabled", true);
 
-// Minimum delay in milliseconds between network activity notifications (0 means
-// no notifications). The delay is the same for both download and upload, though
+// Activates the activity monitor
+pref("io.activity.enabled", false);
+
+// Minimum delay in milliseconds between I/O activity notifications (0 means
+// no notifications). I/O activity includes socket and disk files.
+//
+// The delay is the same for both read and write, though
 // they are handled separately. This pref is only read once at startup:
 // a restart is required to enable a new value.
-pref("network.activity.intervalMilliseconds", 0);
+//
+// io.activity.enabled needs to be set to true
+pref("io.activity.intervalMilliseconds", 0);
 
 // If true, reuse the same global for (almost) everything loaded by the component
 // loader (JS components, JSMs, etc). This saves memory, but makes it possible
@@ -5300,8 +5322,9 @@ pref("network.trr.confirmationNS", "example.com");
 // hardcode the resolution of the hostname in network.trr.uri instead of
 // relying on the system resolver to do it for you
 pref("network.trr.bootstrapAddress", "");
-// TRR blacklist entry expire time (in seconds). Default is 20 minutes.
-pref("network.trr.blacklist-duration", 1200);
+// TRR blacklist entry expire time (in seconds). Default is one minute.
+// Meant to survive basically a page load.
+pref("network.trr.blacklist-duration", 60);
 // Single TRR request timeout, in milliseconds
 pref("network.trr.request-timeout", 3000);
 // Allow AAAA entries to be used "early", before the A results are in

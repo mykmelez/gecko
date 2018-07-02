@@ -260,7 +260,7 @@ ReadExpires(JSContext* aCx, const ObjectOrString& aOptions,
 already_AddRefed<Promise>
 RTCCertificate::GenerateCertificate(
     const GlobalObject& aGlobal, const ObjectOrString& aOptions,
-    ErrorResult& aRv, JSCompartment* aCompartment)
+    ErrorResult& aRv, JS::Compartment* aCompartment)
 {
   nsIGlobalObject* global = xpc::NativeGlobal(aGlobal.Get());
   RefPtr<Promise> p = Promise::Create(global, aRv);
@@ -321,7 +321,7 @@ RTCCertificate::CreateDtlsIdentity() const
 JSObject*
 RTCCertificate::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return RTCCertificateBinding::Wrap(aCx, this, aGivenProto);
+  return RTCCertificate_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 bool

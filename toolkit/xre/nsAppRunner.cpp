@@ -9,6 +9,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/FilePreferences.h"
 #include "mozilla/ChaosMode.h"
 #include "mozilla/CmdLineAndEnvUtils.h"
 #include "mozilla/IOInterposer.h"
@@ -4572,6 +4573,10 @@ XREMain::XRE_mainRun()
 
   mDirProvider.DoStartup();
 
+  // As FilePreferences need the profile directory, we must initialize right here.
+  mozilla::FilePreferences::InitDirectoriesWhitelist();
+  mozilla::FilePreferences::InitPrefs();
+
   OverrideDefaultLocaleIfNeeded();
 
   nsCString userAgentLocale;
@@ -5182,7 +5187,6 @@ BrowserTabsRemoteAutostart()
 
   gBrowserTabsRemoteStatus = status;
 
-  mozilla::Telemetry::Accumulate(mozilla::Telemetry::E10S_STATUS, status);
   return gBrowserTabsRemoteAutostart;
 }
 
