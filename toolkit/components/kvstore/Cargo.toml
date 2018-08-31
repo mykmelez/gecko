@@ -1,0 +1,13 @@
+[package]
+name = "kvstore"
+version = "0.1.0"
+authors = ["Myk Melez <myk@mykzilla.org>"]
+
+[dependencies]
+failure = "0.1"
+libc = "0.2"
+log = "0.4"
+nserror = { path = "../../../xpcom/rust/nserror" }
+nsstring = { path = "../../../servo/support/gecko/nsstring" }
+rkv = "0.4"
+xpcom = { path = "../../../xpcom/rust/xpcom" }
