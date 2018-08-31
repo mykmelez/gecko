@@ -889,6 +889,7 @@ dependencies = [
  "encoding_glue 0.1.0",
  "env_logger 0.5.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "geckoservo 0.0.1",
+ "kvstore 0.1.0",
  "log 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "mozurl 0.0.1",
  "mp4parse_capi 0.10.1",
@@ -896,7 +897,6 @@ dependencies = [
  "nserror 0.1.0",
  "nsstring 0.1.0",
  "prefs_parser 0.0.1",
- "rkv 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "rsdparsa_capi 0.1.0",
  "rustc_version 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "u2fhid 0.2.1",
@@ -1069,6 +1069,20 @@ dependencies = [
 name = "khronos_api"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "kvstore"
+version = "0.1.0"
+dependencies = [
+ "failure 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libc 0.2.43 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lmdb-rkv 0.8.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "nserror 0.1.0",
+ "nsstring 0.1.0",
+ "rkv 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "xpcom 0.1.0",
+]
 
 [[package]]
 name = "lalrpop"

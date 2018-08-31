@@ -88,6 +88,9 @@
   "@mozilla.org/telemetry/geckoview-testing;1"
 #endif
 
+#define NS_KEY_VALUE_SERVICE_CONTRACTID \
+  "@mozilla.org/key-value-service;1"
+
 /////////////////////////////////////////////////////////////////////////////
 
 #define ALERT_NOTIFICATION_CID \
@@ -193,3 +196,7 @@
 #define NS_TELEMETRYGECKOVIEWTESTING_CID \
   { 0xaaa3f7f2, 0x8ef0, 0x41ec, { 0x8d, 0x3, 0xae, 0xd6, 0x67, 0xcf, 0x7f, 0xa2 } };
 #endif
+
+// 6cc1a0a8-af97-4d41-9b4a-58dcec46ebce
+#define NS_KEY_VALUE_SERVICE_CID \
+{ 0x6cc1a0a8, 0xaf97, 0x4d41, { 0x9b, 0x4a, 0x58, 0xdc, 0xec, 0x46, 0xeb, 0xce } }

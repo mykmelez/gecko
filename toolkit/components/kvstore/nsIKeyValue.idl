@@ -1,0 +1,54 @@
+#include "nsISimpleEnumerator.idl"
+#include "nsISupports.idl"
+#include "nsIVariant.idl"
+
+// Ideally we'd expose all the functionality of rkv, like transactions.
+// But the Rust XPCOM macro doesn't support #[derive(xpcom)] on a generic
+// type, due to Rust limitations.  And rkv transactions reference LMDB
+// transactions, which requires a lifetime parameter.  And a lifetime
+// parameter on a type makes it generic.  So this is a simplified interface
+// that supports common operations and should be suitable for a variety
+// of use cases.
+
+[scriptable, uuid(bc37b06a-23b5-4b32-8281-4b8479601c7e)]
+interface nsIKeyValuePair : nsISupports {
+    readonly attribute AString key;
+    readonly attribute nsIVariant value;
+};
+
+[scriptable, uuid(c449398e-174c-425b-8195-da6aa0ccd9a5)]
+interface nsIKeyValueDatabase : nsISupports {
+    void put(in AString key, in nsIVariant value);
+    boolean has(in AString key);
+    nsIVariant get(in AString key, [optional] in nsIVariant defaultValue);
+    void delete(in AString key);
+
+    // An alternative implementation of getters that specify their expected
+    // return type, which enables us to enforce those expectations by returning
+    // an error if the retrieved value isn't of the specified type.
+    long long getInt(in AString key, in long long defaultValue);
+    double getDouble(in AString key, in double defaultValue);
+    AString getString(in AString key, in AString defaultValue);
+    boolean getBool(in AString key, in boolean defaultValue);
+
+    // Enumerate (key, value) pairs.  If you specify a "from" key,
+    // then enumeration starts at the first key equal to or greater than
+    // (lexicographically) the specified key.
+    nsISimpleEnumerator enumerate([optional] in AString fromKey);
+};
+
+[scriptable, uuid(46c893dd-4c14-4de0-b33d-a1be18c6d062)]
+interface nsIKeyValueService : nsISupports {
+    // Gets a handle to the default key/value database at the given path,
+    // creating the database if necessary.
+    //
+    // There can be multiple key/value databases for a given path, which share
+    // the database file.  This function retrieves the "default" (unnamed) one.
+    // To retrieve a handle to a non-default (named) database, use getOrCreate.
+    //
+    nsIKeyValueDatabase getOrCreateDefault(in AString path);
+
+    // Gets a handle to the named key/value database at the given path,
+    // creating the database if necessary.
+    nsIKeyValueDatabase getOrCreate(in AString path, in AString name);
+};
