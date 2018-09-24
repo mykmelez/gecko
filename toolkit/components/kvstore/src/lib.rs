@@ -451,9 +451,10 @@ impl KeyValueDatabase {
 
         match writer.delete(&self.store, &key) {
             Ok(_) => (),
+
             // LMDB fails with an error if the key to delete wasn't found,
-            // and Rkv returns the error; but we ignore it and succeed,
-            // as we expect most of our consumers to want this behavior.
+            // and Rkv returns that error, but we ignore it, as we expect most
+            // of our consumers to want this behavior.
             Err(StoreError::LmdbError(lmdb::Error::NotFound)) => (),
 
             Err(err) => return Err(KeyValueError::StoreError(err)),
