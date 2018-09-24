@@ -10,16 +10,28 @@ const debugMode = false;
 const WRITE_DELAY_MS = (debugMode ? 3 : 30) * 1000;
 
 const XULSTORE_CID = Components.ID("{6f46b6f4-c8b1-4bd4-a4fa-9ebbed0753ea}");
-const STOREDB_FILENAME = "xulstore.json";
+const STOREDB_FILENAME = "xulstore";
 
+ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
 
+const gKeyValueService =
+  Cc["@mozilla.org/key-value-service;1"].getService(Ci.nsIKeyValueService);
+
+let gDatabase;
+
 function XULStore() {
   if (!Services.appinfo.inSafeMode)
     this.load();
+}
+
+function* KeyValueIterator(enumerator) {
+  while (enumerator.hasMoreElements()) {
+    yield enumerator.getNext().QueryInterface(Ci.nsIKeyValuePair);
+  }
 }
 
 XULStore.prototype = {
@@ -28,27 +40,11 @@ XULStore.prototype = {
                                           Ci.nsISupportsWeakReference]),
   _xpcom_factory: XPCOMUtils.generateSingletonFactory(XULStore),
 
-  /* ---------- private members ---------- */
-
-  /*
-   * The format of _data is _data[docuri][elementid][attribute]. For example:
-   *  {
-   *      "chrome://blah/foo.xul" : {
-   *                                    "main-window" : { aaa : 1, bbb : "c" },
-   *                                    "barColumn"   : { ddd : 9, eee : "f" },
-   *                                },
-   *
-   *      "chrome://foopy/b.xul" :  { ... },
-   *      ...
-   *  }
-   */
-  _data: {},
   _storeFile: null,
-  _needsSaving: false,
   _saveAllowed: true,
   _writeTimer: Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer),
 
-  load() {
+  async load() {
     Services.obs.addObserver(this, "profile-before-change", true);
 
     try {
@@ -66,7 +62,6 @@ XULStore.prototype = {
   },
 
   observe(subject, topic, data) {
-    this.writeFile();
     if (topic == "profile-before-change") {
       this._saveAllowed = false;
     }
@@ -82,43 +77,11 @@ XULStore.prototype = {
   },
 
   readFile() {
-    try {
-      this._data = JSON.parse(Cu.readUTF8File(this._storeFile));
-    } catch (e) {
-      this.log("Error reading JSON: " + e);
-      // This exception could mean that the file didn't exist.
-      // We'll just ignore the error and start with a blank slate.
+    if (!this._storeFile.exists()) {
+      this._storeFile.create(Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
     }
-  },
 
-  async writeFile() {
-    if (!this._needsSaving)
-      return;
-
-    this._needsSaving = false;
-
-    this.log("Writing to xulstore.json");
-
-    try {
-      let data = JSON.stringify(this._data);
-      let encoder = new TextEncoder();
-
-      data = encoder.encode(data);
-      await OS.File.writeAtomic(this._storeFile.path, data,
-                              { tmpPath: this._storeFile.path + ".tmp" });
-    } catch (e) {
-      this.log("Failed to write xulstore.json: " + e);
-      throw e;
-    }
-  },
-
-  markAsChanged() {
-    if (this._needsSaving || !this._storeFile)
-      return;
-
-    // Don't write the file more than once every 30 seconds.
-    this._needsSaving = true;
-    this._writeTimer.init(this, WRITE_DELAY_MS, Ci.nsITimer.TYPE_ONE_SHOT);
+    gDatabase = gKeyValueService.getOrCreateDefault(this._storeFile.path);
   },
 
   /* ---------- interface implementation ---------- */
@@ -165,51 +128,20 @@ XULStore.prototype = {
       value = value.substr(0, 4096);
     }
 
-    let obj = this._data;
-    if (!(docURI in obj)) {
-      obj[docURI] = {};
-    }
-    obj = obj[docURI];
-    if (!(id in obj)) {
-      obj[id] = {};
-    }
-    obj = obj[id];
-
-    // Don't set the value if it is already set to avoid saving the file.
-    if (attr in obj && obj[attr] == value)
-      return;
-
-    obj[attr] = value; // IE, this._data[docURI][id][attr] = value;
-
-    this.markAsChanged();
+    const key = [docURI, id, attr].join("\t");
+    gDatabase.put(key, value);
   },
 
   hasValue(docURI, id, attr) {
     this.log("has store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
-
-    let ids = this._data[docURI];
-    if (ids) {
-      let attrs = ids[id];
-      if (attrs) {
-        return attr in attrs;
-      }
-    }
-
-    return false;
+    const key = [docURI, id, attr].join("\t");
+    return gDatabase.has(key);
   },
 
   getValue(docURI, id, attr) {
     this.log("get store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
-
-    let ids = this._data[docURI];
-    if (ids) {
-      let attrs = ids[id];
-      if (attrs) {
-        return attrs[attr] || "";
-      }
-    }
-
-    return "";
+    const key = [docURI, id, attr].join("\t");
+    return gDatabase.getString(key, "");
   },
 
   removeValue(docURI, id, attr) {
@@ -220,23 +152,8 @@ XULStore.prototype = {
       return;
     }
 
-    let ids = this._data[docURI];
-    if (ids) {
-      let attrs = ids[id];
-      if (attrs && attr in attrs) {
-        delete attrs[attr];
-
-        if (Object.getOwnPropertyNames(attrs).length == 0) {
-          delete ids[id];
-
-          if (Object.getOwnPropertyNames(ids).length == 0) {
-            delete this._data[docURI];
-          }
-        }
-
-        this.markAsChanged();
-      }
-    }
+    const key = [docURI, id, attr].join("\t");
+    return gDatabase.delete(key);
   },
 
   removeDocument(docURI) {
@@ -247,41 +164,47 @@ XULStore.prototype = {
       return;
     }
 
-    if (this._data[docURI]) {
-      delete this._data[docURI];
-      this.markAsChanged();
+    for (let { key, value } of KeyValueIterator(gDatabase.enumerate(docURI))) {
+      if (key.startsWith(docURI)) {
+        gDatabase.delete(key);
+      } else {
+        break;
+      }
     }
   },
 
   getIDsEnumerator(docURI) {
     this.log("Getting ID enumerator for doc=" + docURI);
 
-    if (!(docURI in this._data))
-      return new nsStringEnumerator([]);
-
-    let result = [];
-    let ids = this._data[docURI];
-    if (ids) {
-      for (let id in this._data[docURI]) {
-        result.push(id);
+    let result = new Set();
+    for (let { key, value } of KeyValueIterator(gDatabase.enumerate(docURI))) {
+      if (key.startsWith(docURI)) {
+        let [uri, id, attr] = key.split("\t");
+        result.add(id);
+      } else {
+        break;
       }
     }
 
-    return new nsStringEnumerator(result);
+    return new nsStringEnumerator(Array.from(result));
   },
 
   getAttributeEnumerator(docURI, id) {
     this.log("Getting attribute enumerator for id=" + id + ", doc=" + docURI);
 
-    if (!(docURI in this._data) || !(id in this._data[docURI]))
-      return new nsStringEnumerator([]);
+    let keyPrefix = [docURI, id].join("\t");
 
-    let attrs = [];
-    for (let attr in this._data[docURI][id]) {
-      attrs.push(attr);
+    let attrs = new Set();
+    for (let { key, value } of KeyValueIterator(gDatabase.enumerate(keyPrefix))) {
+      if (key.startsWith(keyPrefix)) {
+        let [uri, id, attr] = key.split("\t");
+        attrs.add(attr);
+      } else {
+        break;
+      }
     }
 
-    return new nsStringEnumerator(attrs);
+    return new nsStringEnumerator(Array.from(attrs));
   },
 };
 
