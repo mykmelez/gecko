@@ -3,11 +3,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use nserror::{
-    nsresult, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED,
-    NS_ERROR_NO_INTERFACE, NS_ERROR_NULL_POINTER, NS_ERROR_UNEXPECTED,
+    nsresult, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_INTERFACE,
+    NS_ERROR_NULL_POINTER, NS_ERROR_UNEXPECTED,
 };
-use rkv::{StoreError};
-use std::{string::FromUtf16Error, sync::{PoisonError, RwLockReadGuard, RwLockWriteGuard}};
+use rkv::StoreError;
+use std::{
+    string::FromUtf16Error,
+    sync::{PoisonError, RwLockReadGuard, RwLockWriteGuard},
+};
 
 #[derive(Debug, Fail)]
 pub enum KeyValueError {

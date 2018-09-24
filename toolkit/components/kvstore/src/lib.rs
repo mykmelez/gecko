@@ -18,7 +18,7 @@ extern crate xpcom;
 mod error;
 mod variant;
 
-use error::{KeyValueError};
+use error::KeyValueError;
 use libc::{int32_t, int64_t, uint16_t};
 use nserror::{
     nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_INTERFACE,
@@ -166,15 +166,12 @@ impl KeyValueService {
         path: *const nsAString,
         retval: *mut *const nsIKeyValueDatabase,
     ) -> Result<(), KeyValueError> {
-        let path =
-            String::from_utf16(ensure_ref(path)?)?;
+        let path = String::from_utf16(ensure_ref(path)?)?;
 
         let mut writer = Manager::singleton().write()?;
 
         let rkv = writer.get_or_create(Path::new(&path), Rkv::new)?;
-        let store = rkv
-            .write()?
-            .open_or_create_default()?;
+        let store = rkv.write()?.open_or_create_default()?;
         let key_value_db = KeyValueDatabase::new(rkv, store);
 
         match key_value_db.query_interface::<nsIKeyValueDatabase>() {
@@ -427,9 +424,7 @@ impl KeyValueDatabase {
                         let mut val: bool = false;
                         unsafe { default_value.GetAsBool(&mut val) }.to_result()?;
                         println!("boolean val: {:?}", val);
-                        let variant = (val as bool)
-                            .into_variant()
-                            .ok_or(KeyValueError::Read)?;
+                        let variant = (val as bool).into_variant().ok_or(KeyValueError::Read)?;
                         unsafe { variant.take().forget(&mut *retval) };
                     }
                     DATA_TYPE_EMPTY => {
