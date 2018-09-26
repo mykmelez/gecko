@@ -16,6 +16,12 @@ interface nsIKeyValuePair : nsISupports {
     readonly attribute nsIVariant value;
 };
 
+[scriptable, uuid(0c17497a-ccf8-451a-838d-9dfa7f846379)]
+interface nsIKeyValueCallback : nsISupports {
+    void handleResult(in nsISupports result);
+    void handleError(in AString message);
+};
+
 [scriptable, uuid(c449398e-174c-425b-8195-da6aa0ccd9a5)]
 interface nsIKeyValueDatabase : nsISupports {
     void put(in AString key, in nsIVariant value);
@@ -37,6 +43,15 @@ interface nsIKeyValueDatabase : nsISupports {
     nsISimpleEnumerator enumerate([optional] in AString fromKey);
 };
 
+[scriptable, uuid(2cbb5567-cac9-4da0-8a67-9635ab7428e8)]
+interface nsIAsyncKeyValueDatabase : nsISupports {
+    void put(in AString key, in nsIVariant value, in nsIKeyValueCallback callback);
+    void has(in AString key, in nsIKeyValueCallback callback);
+    void get(in AString key, in nsIKeyValueCallback callback, [optional] in nsIVariant defaultValue);
+    void delete(in AString key, in nsIKeyValueCallback callback);
+    void enumerate(in nsIKeyValueCallback callback, [optional] in AString fromKey);
+};
+
 [scriptable, uuid(46c893dd-4c14-4de0-b33d-a1be18c6d062)]
 interface nsIKeyValueService : nsISupports {
     // Gets a handle to the default key/value database at the given path,
@@ -51,4 +66,7 @@ interface nsIKeyValueService : nsISupports {
     // Gets a handle to the named key/value database at the given path,
     // creating the database if necessary.
     nsIKeyValueDatabase getOrCreate(in AString path, in AString name);
+
+    void getOrCreateAsync(in AString path, in nsIKeyValueCallback callback,
+                          [optional] in AString name);
 };

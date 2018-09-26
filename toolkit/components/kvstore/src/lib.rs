@@ -39,7 +39,7 @@ use std::{
 use variant::IntoVariant;
 use xpcom::{
     interfaces::{
-        nsIJSEnumerator, nsIKeyValueDatabase, nsIKeyValueService, nsISimpleEnumerator, nsISupports,
+        nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabase, nsIKeyValueService, nsISimpleEnumerator, nsISupports,
         nsIVariant,
     },
     nsIID, RefPtr,
@@ -131,6 +131,16 @@ pub extern "C" fn NewKeyValueService(result: *mut *const nsIKeyValueService) -> 
 pub struct InitKeyValueService {}
 
 impl KeyValueService {
+    fn GetOrCreateAsync(
+        &self,
+        path: *const nsAString,
+        callback: *const nsIKeyValueCallback,
+        name: *const nsAString,
+
+    ) -> nsresult {
+        NS_ERROR_NOT_IMPLEMENTED
+    }
+
     fn GetOrCreateDefault(
         &self,
         path: *const nsAString,

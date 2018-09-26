@@ -302,3 +302,11 @@ add_task(async function enumeration() {
   database.delete("string-key");
   database.delete("bool-key");
 });
+
+add_task(async function getOrCreateAsync() {
+  const databaseDir = await makeDatabaseDir("getOrCreateAsync");
+  Assert.throws(() => gKeyValueService.getOrCreateAsync(databaseDir, {
+    handleResult() {},
+    handleError() {},
+  }), /NS_ERROR_NOT_IMPLEMENTED/);
+});
