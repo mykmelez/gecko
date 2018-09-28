@@ -37,6 +37,7 @@ use std::{
     str,
     sync::{Arc, RwLock},
 };
+use task::get_current_thread;
 use variant::IntoVariant;
 use xpcom::{
     interfaces::{
@@ -230,6 +231,9 @@ impl KeyValueService {
         _name: *const nsAString,
 
     ) -> Result<(), KeyValueError> {
+        let _source = get_current_thread()?;
+        let _target = get_current_thread()?;
+
         Err(KeyValueError::Nsresult(NS_ERROR_NOT_IMPLEMENTED))
     }
 }

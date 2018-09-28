@@ -27,7 +27,7 @@ extern "C" {
 }
 
 /// Returns a handle to the current thread.
-fn get_current_thread() -> Result<RefPtr<nsIThread>> {
+pub fn get_current_thread() -> Result<RefPtr<nsIThread>> {
     getter_addrefs(|p| unsafe { NS_GetCurrentThreadEventTarget(p) })
 }
 
