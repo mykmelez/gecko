@@ -24,7 +24,7 @@ mod variant;
 use error::KeyValueError;
 use libc::{c_double, int32_t, int64_t, uint16_t};
 use nserror::{
-    nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_INTERFACE,
+    nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_INVALID_ARG, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_INTERFACE,
     NS_ERROR_UNEXPECTED, NS_OK,
 };
 use nsstring::{nsAString, nsString};
@@ -107,7 +107,9 @@ pub extern "C" fn NewKeyValueService(result: *mut *const nsIKeyValueService) -> 
     }
 }
 
-pub struct GetOrCreateTask {}
+pub struct GetOrCreateTask {
+    callback: RefPtr<nsIKeyValueCallback>,
+}
 
 impl Task for GetOrCreateTask {
     fn run(&self) -> Result<(), nsresult> {
@@ -116,6 +118,10 @@ impl Task for GetOrCreateTask {
     }
     fn done(&self, result: Result<(), nsresult>) -> nsresult {
         error!("GetOrCreateTask.done");
+        match result {
+            Ok(_) => unsafe { self.callback.HandleResult(NS_OK) },
+            Err(_) => unsafe { self.callback.HandleError(NS_ERROR_FAILURE) },
+        };
         NS_OK
     }
 }
@@ -245,13 +251,19 @@ impl KeyValueService {
     fn get_or_create_async(
         &self,
         _path: *const nsAString,
-        _callback: *const nsIKeyValueCallback,
+        callback: *const nsIKeyValueCallback,
         _name: *const nsAString,
 
     ) -> Result<(), KeyValueError> {
         let source = get_current_thread()?;
         let target = get_current_thread()?;
-        let task = Box::new(GetOrCreateTask {});
+        let callback = match unsafe { RefPtr::from_raw(callback) } {
+            Some(callback) => callback,
+            None => return Err(KeyValueError::Nsresult(NS_ERROR_INVALID_ARG)),
+        };
+        let task = Box::new(GetOrCreateTask {
+            callback,
+        });
 
         let runnable = TaskRunnable::new("KeyValueDatabase::GetOrCreateAsync", source, task, Cell::default());
         let rv = unsafe { target.DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32) };

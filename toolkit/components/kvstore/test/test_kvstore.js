@@ -316,5 +316,5 @@ add_task(async function getOrCreateAsync() {
     });
   });
 
-  Assert.strictEqual(result, "foo");
+  Assert.strictEqual(result, Cr.NS_OK);
 });

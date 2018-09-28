@@ -18,8 +18,8 @@ interface nsIKeyValuePair : nsISupports {
 
 [scriptable, uuid(0c17497a-ccf8-451a-838d-9dfa7f846379)]
 interface nsIKeyValueCallback : nsISupports {
-    void handleResult(in nsISupports result);
-    void handleError(in AString message);
+    void handleResult(in nsresult result);
+    void handleError(in nsresult message);
 };
 
 [scriptable, uuid(c449398e-174c-425b-8195-da6aa0ccd9a5)]
