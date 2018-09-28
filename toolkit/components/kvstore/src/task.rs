@@ -31,7 +31,7 @@ pub fn get_current_thread() -> Result<RefPtr<nsIThread>> {
     getter_addrefs(|p| unsafe { NS_GetCurrentThreadEventTarget(p) })
 }
 
-/// A task is executed asynchronously on the storage thread, and passes its
+/// A task is executed asynchronously on a target thread, and passes its
 /// result back to the original thread.
 pub trait Task {
     fn run(&self) -> Result<()>;
@@ -41,19 +41,28 @@ pub trait Task {
 #[derive(xpcom)]
 #[xpimplements(nsIRunnable, nsINamed)]
 #[refcnt = "atomic"]
-struct InitTaskRunnable {
+pub struct InitTaskRunnable {
     name: &'static str,
     source: RefPtr<nsIThread>,
 
     /// Holds the task, and the result of the task. The task is created on the
-    /// current thread, run on the storage thread, and handled again on the
-    /// original thread; the result is mutated on the storage thread and
+    /// current thread, run on a target thread, and handled again on the
+    /// original thread; the result is mutated on the target thread and
     /// accessed on the original thread.
     task: Box<Task>,
     result: Cell<Option<Result<()>>>,
 }
 
 impl TaskRunnable {
+    pub fn new(name: &'static str, source: RefPtr<nsIThread>, task: Box<Task>, result: Cell<Option<Result<()>>>) -> RefPtr<TaskRunnable> {
+        TaskRunnable::allocate(InitTaskRunnable {
+            name,
+            source,
+            task,
+            result,
+        })
+    }
+
     unsafe fn Run(&self) -> nsresult {
         match self.result.take() {
             None => {

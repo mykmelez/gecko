@@ -305,8 +305,16 @@ add_task(async function enumeration() {
 
 add_task(async function getOrCreateAsync() {
   const databaseDir = await makeDatabaseDir("getOrCreateAsync");
-  Assert.throws(() => gKeyValueService.getOrCreateAsync(databaseDir, {
-    handleResult() {},
-    handleError() {},
-  }), /NS_ERROR_NOT_IMPLEMENTED/);
+  let result = await new Promise((resolve, reject) => {
+    gKeyValueService.getOrCreateAsync(databaseDir, {
+      handleResult(result) {
+        resolve(result);
+      },
+      handleError(error) {
+        reject(error);
+      },
+    });
+  });
+
+  Assert.strictEqual(result, "foo");
 });

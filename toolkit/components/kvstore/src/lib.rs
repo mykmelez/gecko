@@ -31,17 +31,22 @@ use nsstring::{nsAString, nsString};
 use ownedvalue::OwnedValue;
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::VecDeque,
     path::Path,
     str,
     sync::{Arc, RwLock},
 };
-use task::get_current_thread;
+use task::{
+    InitTaskRunnable,
+    Task,
+    TaskRunnable,
+    get_current_thread,
+};
 use variant::IntoVariant;
 use xpcom::{
     interfaces::{
-        nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabase, nsIKeyValueService, nsISimpleEnumerator, nsISupports,
+        nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabase, nsIKeyValueService, nsISimpleEnumerator, nsISupports,
         nsIVariant,
     },
     nsIID, RefPtr,
@@ -99,6 +104,19 @@ pub extern "C" fn NewKeyValueService(result: *mut *const nsIKeyValueService) -> 
             NS_OK
         }
         None => NS_ERROR_NO_INTERFACE,
+    }
+}
+
+pub struct GetOrCreateTask {}
+
+impl Task for GetOrCreateTask {
+    fn run(&self) -> Result<(), nsresult> {
+        error!("GetOrCreateTask.run");
+        Ok(())
+    }
+    fn done(&self, result: Result<(), nsresult>) -> nsresult {
+        error!("GetOrCreateTask.done");
+        NS_OK
     }
 }
 
@@ -231,10 +249,19 @@ impl KeyValueService {
         _name: *const nsAString,
 
     ) -> Result<(), KeyValueError> {
-        let _source = get_current_thread()?;
-        let _target = get_current_thread()?;
+        let source = get_current_thread()?;
+        let target = get_current_thread()?;
+        let task = Box::new(GetOrCreateTask {});
 
-        Err(KeyValueError::Nsresult(NS_ERROR_NOT_IMPLEMENTED))
+        let runnable = TaskRunnable::new("KeyValueDatabase::GetOrCreateAsync", source, task, Cell::default());
+        let rv = unsafe { target.DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32) };
+
+        // TODO: consider wrapping the nsresult in a KeyValueError type.
+        if rv.succeeded() {
+            Ok(())
+        } else {
+            Err(KeyValueError::Nsresult(rv))
+        }
     }
 }
 
