@@ -131,16 +131,6 @@ pub extern "C" fn NewKeyValueService(result: *mut *const nsIKeyValueService) -> 
 pub struct InitKeyValueService {}
 
 impl KeyValueService {
-    fn GetOrCreateAsync(
-        &self,
-        path: *const nsAString,
-        callback: *const nsIKeyValueCallback,
-        name: *const nsAString,
-
-    ) -> nsresult {
-        NS_ERROR_NOT_IMPLEMENTED
-    }
-
     fn GetOrCreateDefault(
         &self,
         path: *const nsAString,
@@ -167,6 +157,24 @@ impl KeyValueService {
         match self.get_or_create(path, name) {
             Ok(ptr) => {
                 unsafe { ptr.forget(&mut *retval) };
+                NS_OK
+            }
+            Err(error) => {
+                error!("{}", error);
+                error.into()
+            }
+        }
+    }
+
+    fn GetOrCreateAsync(
+        &self,
+        path: *const nsAString,
+        callback: *const nsIKeyValueCallback,
+        name: *const nsAString,
+
+    ) -> nsresult {
+        match self.get_or_create_async(path, callback, name) {
+            Ok(_) => {
                 NS_OK
             }
             Err(error) => {
@@ -212,6 +220,16 @@ impl KeyValueService {
         key_value_db
             .query_interface::<nsIKeyValueDatabase>()
             .ok_or(KeyValueError::NoInterface("nsIKeyValueDatabase"))
+    }
+
+    fn get_or_create_async(
+        &self,
+        path: *const nsAString,
+        callback: *const nsIKeyValueCallback,
+        name: *const nsAString,
+
+    ) -> Result<(), KeyValueError> {
+        Err(KeyValueError::Nsresult(NS_ERROR_NOT_IMPLEMENTED))
     }
 }
 
