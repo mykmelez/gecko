@@ -645,3 +645,14 @@ nsIEventTarget::IsOnCurrentThread()
   }
   return IsOnCurrentThreadInfallible();
 }
+
+extern "C" nsresult
+NS_GetCurrentThreadEventTarget(nsIEventTarget** aResult)
+{
+  nsCOMPtr<nsIEventTarget> target = mozilla::GetCurrentThreadEventTarget();
+  if (!target) {
+    return NS_ERROR_UNEXPECTED;
+  }
+  target.forget(aResult);
+  return NS_OK;
+}

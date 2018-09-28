@@ -18,6 +18,7 @@ extern crate xpcom;
 
 mod error;
 mod ownedvalue;
+mod task;
 mod variant;
 
 use error::KeyValueError;
@@ -224,9 +225,9 @@ impl KeyValueService {
 
     fn get_or_create_async(
         &self,
-        path: *const nsAString,
-        callback: *const nsIKeyValueCallback,
-        name: *const nsAString,
+        _path: *const nsAString,
+        _callback: *const nsIKeyValueCallback,
+        _name: *const nsAString,
 
     ) -> Result<(), KeyValueError> {
         Err(KeyValueError::Nsresult(NS_ERROR_NOT_IMPLEMENTED))
