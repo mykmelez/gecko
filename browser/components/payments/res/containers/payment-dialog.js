@@ -155,6 +155,13 @@ export default class PaymentDialog extends PaymentStateSubscriberMixin(HTMLEleme
         };
         state.changesPrevented = false;
         break;
+      case "": {
+        // When we get a DOM update for an updateWith() or retry() the completeStatus
+        // is "" when we need to show non-final screens. Don't set the page as we
+        // may be on a form instead of payment-summary
+        state.changesPrevented = false;
+        break;
+      }
     }
     return state;
   }
@@ -373,13 +380,6 @@ export default class PaymentDialog extends PaymentStateSubscriberMixin(HTMLEleme
     }
 
     this._renderPayerFields(state);
-
-    // hide the accepted cards list if the merchant didn't specify a preference
-    let basicCardMethod = request.paymentMethods
-      .find(method => method.supportedMethods == "basic-card");
-    let merchantNetworks = basicCardMethod && basicCardMethod.data &&
-                           basicCardMethod.data.supportedNetworks;
-    this._acceptedCardsList.hidden = !(merchantNetworks && merchantNetworks.length);
 
     let isMac = /mac/i.test(navigator.platform);
     for (let manageTextEl of this._manageText.children) {

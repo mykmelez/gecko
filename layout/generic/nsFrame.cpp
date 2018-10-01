@@ -1173,9 +1173,8 @@ nsFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
   // correctness because text nodes themselves shouldn't have effects applied.
   if (!IsTextFrame() && !GetPrevContinuation()) {
     // Kick off loading of external SVG resources referenced from properties if
-    // any. This currently includes filter, clip-path, and mask. We don't care
-    // about the return value. We only want its side effect.
-    Unused << SVGObserverUtils::GetEffectProperties(this);
+    // any. This currently includes filter, clip-path, and mask.
+    SVGObserverUtils::InitiateResourceDocLoads(this);
   }
 
   // If the page contains markup that overrides text direction, and
@@ -2718,10 +2717,11 @@ ComputeClipForMaskItem(nsDisplayListBuilder* aBuilder, nsIFrame* aMaskedFrame,
     // case, and we handle that specially.
     nsRect dirtyRect(nscoord_MIN/2, nscoord_MIN/2, nscoord_MAX, nscoord_MAX);
 
-    nsIFrame* firstFrame = nsLayoutUtils::FirstContinuationOrIBSplitSibling(aMaskedFrame);
-    SVGObserverUtils::EffectProperties effectProperties =
-        SVGObserverUtils::GetEffectProperties(firstFrame);
-    nsTArray<nsSVGMaskFrame*> maskFrames = effectProperties.GetMaskFrames();
+    nsIFrame* firstFrame =
+      nsLayoutUtils::FirstContinuationOrIBSplitSibling(aMaskedFrame);
+    nsTArray<nsSVGMaskFrame*> maskFrames;
+    // XXX check return value?
+    SVGObserverUtils::GetAndObserveMasks(firstFrame, &maskFrames);
 
     for (uint32_t i = 0; i < maskFrames.Length(); ++i) {
       gfxRect clipArea;

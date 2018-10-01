@@ -88,9 +88,10 @@ var paymentRequest = {
 
     switch (messageType) {
       case "responseSent": {
+        let {request} = document.querySelector("payment-dialog").requestStore.getState();
         document.querySelector("payment-dialog").requestStore.setState({
           changesPrevented: true,
-          completionState: "processing",
+          request: Object.assign({}, request, { completeStatus: "processing" }),
         });
         break;
       }
@@ -280,18 +281,6 @@ var paymentRequest = {
   getBasicCards(state) {
     let cards = Object.assign({}, state.savedBasicCards, state.tempBasicCards);
     return cards;
-  },
-
-  getAcceptedNetworks(request) {
-    let basicCardMethod = request.paymentMethods
-      .find(method => method.supportedMethods == "basic-card");
-    let merchantNetworks = basicCardMethod && basicCardMethod.data &&
-                           basicCardMethod.data.supportedNetworks;
-    if (merchantNetworks && merchantNetworks.length) {
-      return merchantNetworks;
-    }
-    // fallback to the complete list if the merchant didn't specify
-    return PaymentDialogUtils.getCreditCardNetworks();
   },
 };
 

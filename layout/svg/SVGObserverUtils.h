@@ -36,6 +36,7 @@ class nsSVGMaskFrame;
 namespace mozilla {
 class SVGFilterObserverList;
 namespace dom {
+class CanvasRenderingContext2D;
 class SVGGeometryElement;
 }
 }
@@ -74,16 +75,25 @@ private:
   mozilla::net::ReferrerPolicy mReferrerPolicy;
 };
 
-/*
+/**
  * This interface allows us to be notified when a piece of SVG content is
  * re-rendered.
  *
- * Concrete implementations of this interface need to implement
- * "GetTarget()" to specify the piece of SVG content that they'd like to
- * monitor, and they need to implement "OnRenderingChange" to specify how
- * we'll react when that content gets re-rendered. They also need to implement
- * a constructor and destructor, which should call StartObserving and
- * StopObserving, respectively.
+ * Concrete implementations of this base class need to implement
+ * GetReferencedElementWithoutObserving to specify the SVG element that
+ * they'd like to monitor for rendering changes, and they need to implement
+ * OnRenderingChange to specify how we'll react when that content gets
+ * re-rendered.  They also need to implement a constructor and destructor,
+ * which should call StartObserving and StopObserving, respectively.
+ *
+ * The referenced element is generally looked up and stored during
+ * construction.  If the referenced element is in an extenal SVG resource
+ * document, the lookup code will initiate loading of the external resource and
+ * OnRenderingChange will be called once the element in the external resource
+ * is available.
+ *
+ * Although the referenced element may be found and stored during construction,
+ * observing for rendering changes does not start until requested.
  */
 class SVGRenderingObserver : public nsStubMutationObserver
 {
@@ -119,14 +129,15 @@ public:
   // react.
   void NotifyEvictedFromRenderingObserverList();
 
-  nsIFrame* GetReferencedFrame();
+  nsIFrame* GetAndObserveReferencedFrame();
   /**
    * @param aOK this is only for the convenience of callers. We set *aOK to false
    * if the frame is the wrong type
    */
-  nsIFrame* GetReferencedFrame(mozilla::LayoutFrameType aFrameType, bool* aOK);
+  nsIFrame* GetAndObserveReferencedFrame(mozilla::LayoutFrameType aFrameType,
+                                         bool* aOK);
 
-  Element* GetReferencedElement();
+  Element* GetAndObserveReferencedElement();
 
   virtual bool ObservesReflow() { return true; }
 
@@ -148,9 +159,7 @@ protected:
    */
   virtual void OnRenderingChange() = 0;
 
-  // This is an internally-used version of GetReferencedElement that doesn't
-  // forcibly add us as an observer. (whereas GetReferencedElement does)
-  virtual Element* GetTarget() = 0;
+  virtual Element* GetReferencedElementWithoutObserving() = 0;
 
   // Whether we're in our referenced element's observer list at this time.
   bool mInObserverList;
@@ -159,7 +168,7 @@ protected:
 
 /*
  * SVG elements reference supporting resources by element ID. We need to
- * track when those resources change and when the DOM changes in ways
+ * track when those resources change and when the document changes in ways
  * that affect which element is referenced by a given ID (e.g., when
  * element IDs change). The code here is responsible for that.
  *
@@ -178,7 +187,9 @@ public:
   virtual ~SVGIDRenderingObserver();
 
 protected:
-  Element* GetTarget() override { return mObservedElementTracker.get(); }
+  Element* GetReferencedElementWithoutObserving() override {
+    return mObservedElementTracker.get();
+  }
 
   void OnRenderingChange() override;
 
@@ -313,14 +324,16 @@ public:
   {
   }
 
-  bool ReferencesValidResource() { return GetFilterFrame(); }
+  // XXXjwatt: This will return false if the reference is to a filter in an
+  // external resource document that hasn't loaded yet!
+  bool ReferencesValidResource() { return GetAndObserveFilterFrame(); }
 
   void DetachFromChainObserver() { mFilterObserverList = nullptr; }
 
   /**
    * @return the filter frame, or null if there is no filter frame
    */
-  nsSVGFilterFrame *GetFilterFrame();
+  nsSVGFilterFrame* GetAndObserveFilterFrame();
 
   // nsISupports
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -530,6 +543,7 @@ private:
 class SVGObserverUtils
 {
 public:
+  typedef mozilla::dom::CanvasRenderingContext2D CanvasRenderingContext2D;
   typedef mozilla::dom::Element Element;
   typedef dom::SVGGeometryElement SVGGeometryElement;
   typedef nsInterfaceHashtable<nsRefPtrHashKey<URLAndReferrerInfo>,
@@ -567,64 +581,13 @@ public:
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(BackgroundImageProperty,
                                       URIObserverHashtable)
 
-  struct EffectProperties {
-    SVGMaskObserverList* mMaskObservers;
-    nsSVGPaintingProperty* mClipPath;
-
-    /**
-     * @return the clip-path frame, or null if there is no clip-path frame
-     */
-    nsSVGClipPathFrame* GetClipPathFrame();
-
-    /**
-     * @return an array which contains all SVG mask frames.
-     */
-    nsTArray<nsSVGMaskFrame*> GetMaskFrames();
-
-    /*
-     * @return true if all effects we have are valid or we have no effect
-     * at all.
-     */
-    bool HasNoOrValidEffects();
-
-    /*
-     * @return true if we have any invalid effect.
-     */
-    bool HasInvalidEffects() {
-      return !HasNoOrValidEffects();
-    }
-
-    /*
-     * @return true if we either do not have clip-path or have a valid
-     * clip-path.
-     */
-    bool HasNoOrValidClipPath();
-
-    /*
-     * @return true if we have an invalid clip-path.
-     */
-    bool HasInvalidClipPath() {
-      return !HasNoOrValidClipPath();
-    }
-
-    /*
-     * @return true if we either do not have mask or all masks we have
-     * are valid.
-     */
-    bool HasNoOrValidMask();
-
-    /*
-     * @return true if we have an invalid mask.
-     */
-    bool HasInvalidMask() {
-      return !HasNoOrValidMask();
-    }
-  };
-
   /**
-   * @param aFrame should be the first continuation
+   * Ensures that that if the given frame requires any resources that are in
+   * SVG resource documents that the loading of those documents is initiated.
+   * This does not make aFrame start to observe any elements that it
+   * references.
    */
-  static EffectProperties GetEffectProperties(nsIFrame* aFrame);
+  static void InitiateResourceDocLoads(nsIFrame* aFrame);
 
   /**
    * Called when changes to an element (e.g. CSS property changes) cause its
@@ -731,6 +694,84 @@ public:
                        nsTArray<nsSVGFilterFrame*>* aFilterFrames);
 
   /**
+   * If the given frame is already observing SVG filters, this function gets
+   * those filters.  If the frame is not already observing filters this
+   * function assumes that it doesn't have anything to observe.
+   */
+  static ReferenceState
+  GetFiltersIfObserving(nsIFrame* aFilteredFrame,
+                        nsTArray<nsSVGFilterFrame*>* aFilterFrames);
+
+  /**
+   * Starts observing filters for a <canvas> element's CanvasRenderingContext2D.
+   *
+   * Returns a RAII object that the caller should make sure is released once
+   * the CanvasRenderingContext2D is no longer using them (that is, when the
+   * CanvasRenderingContext2D "drawing style state" on which the filters were
+   * set is destroyed or has its filter style reset).
+   *
+   * XXXjwatt: It's a bit unfortunate that both we and
+   * CanvasRenderingContext2D::UpdateFilter process the list of nsStyleFilter
+   * objects separately.  It would be better to refactor things so that we only
+   * do that work once.
+   */
+  static already_AddRefed<nsISupports>
+  ObserveFiltersForCanvasContext(CanvasRenderingContext2D* aContext,
+                                 Element* aCanvasElement,
+                                 nsTArray<nsStyleFilter>& aFilters);
+
+  /**
+   * Called when cycle collecting CanvasRenderingContext2D, and requires the
+   * RAII object returned from ObserveFiltersForCanvasContext to be passed in.
+   *
+   * XXXjwatt: I don't think this is doing anything useful.  All we do under
+   * this function is clear a raw C-style (i.e. not strong) pointer.  That's
+   * clearly not helping in breaking any cycles.  The fact that we MOZ_CRASH
+   * in OnRenderingChange if that pointer is null indicates that this isn't
+   * even doing anything useful in terms of preventing further invalidation
+   * from any observed filters.
+   */
+  static void
+  DetachFromCanvasContext(nsISupports* aAutoObserver);
+
+  /**
+   * Get the frame of the SVG clipPath applied to aClippedFrame, if any, and
+   * set up aClippedFrame as a rendering observer of the clipPath's frame, to
+   * be invalidated if it changes.
+   *
+   * Currently we only have support for 'clip-path' with a single item, but the
+   * spec. now says 'clip-path' can be set to an arbitrary number of items.
+   * Once we support that, aClipPathFrame will need to be an nsTArray as it
+   * is for 'filter' and 'mask'.  Currently a return value of eHasNoRefs means
+   * that there is no clipping at all, but once we support more than one item
+   * then - as for filter and mask - we could still have basic shape clipping
+   * to apply even if there are no references to SVG clipPath elements.
+   *
+   * Note that, unlike for filters, a reference to an ID that doesn't exist
+   * is not invalid for clip-path or mask.  We will return eHasNoRefs in that
+   * case.
+   */
+  static ReferenceState
+  GetAndObserveClipPath(nsIFrame* aClippedFrame,
+                        nsSVGClipPathFrame** aClipPathFrame);
+
+  /**
+   * If masking is applied to aMaskedFrame, gets an array of any SVG masks
+   * that are referenced, setting up aMaskFrames as a rendering observer of
+   * those masks (if any).
+   *
+   * NOTE! A return value of eHasNoRefs does NOT mean that there are no masks
+   * to be applied, only that there are no references to SVG mask elements.
+   *
+   * Note that, unlike for filters, a reference to an ID that doesn't exist
+   * is not invalid for clip-path or mask.  We will return eHasNoRefs in that
+   * case.
+   */
+  static ReferenceState
+  GetAndObserveMasks(nsIFrame* aMaskedFrame,
+                     nsTArray<nsSVGMaskFrame*>* aMaskFrames);
+
+  /**
    * Get the SVGGeometryElement that is referenced by aTextPathFrame, and make
    * aTextPathFrame start observing rendering changes to that element.
    */
@@ -785,12 +826,6 @@ public:
   static already_AddRefed<URLAndReferrerInfo>
   GetMarkerURI(nsIFrame* aFrame,
                RefPtr<mozilla::css::URLValue> nsStyleSVG::* aMarker);
-
-  /**
-   * A helper function to resolve clip-path URL.
-   */
-  static already_AddRefed<URLAndReferrerInfo>
-  GetClipPathURI(nsIFrame* aFrame);
 
   /**
    * A helper function to resolve filter URL.

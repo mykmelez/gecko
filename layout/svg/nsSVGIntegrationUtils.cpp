@@ -303,7 +303,7 @@ nsRect
   // GetPostFilterBounds below!  See bug 1494263.
   // TODO: we should really return an empty rect for eHasRefsSomeInvalid since
   // in that case we disable painting of the element.
-  if (SVGObserverUtils::GetAndObserveFilters(aFrame, nullptr) ==
+  if (SVGObserverUtils::GetAndObserveFilters(firstFrame, nullptr) ==
         SVGObserverUtils::eHasRefsSomeInvalid) {
     return aPreEffectsOverflowRect;
   }
@@ -338,16 +338,17 @@ nsSVGIntegrationUtils::AdjustInvalidAreaForSVGEffects(nsIFrame* aFrame,
     return nsIntRect();
   }
 
-  // Don't bother calling GetEffectProperties; the filter property should
-  // already have been set up during reflow/ComputeFrameEffectsRect
+  int32_t appUnitsPerDevPixel = aFrame->PresContext()->AppUnitsPerDevPixel();
   nsIFrame* firstFrame =
     nsLayoutUtils::FirstContinuationOrIBSplitSibling(aFrame);
-  SVGFilterObserverListForCSSProp* observers =
-    SVGObserverUtils::GetFilterObserverList(firstFrame);
 
-  int32_t appUnitsPerDevPixel = aFrame->PresContext()->AppUnitsPerDevPixel();
-
-  if (!observers || !observers->ReferencesValidResources()) {
+  // If we have any filters to observe then we should have started doing that
+  // during reflow/ComputeFrameEffectsRect, so we use GetFiltersIfObserving
+  // here to avoid needless work (or masking bugs by setting up observers at
+  // the wrong time).
+  if (!aFrame->StyleEffects()->HasFilters() ||
+      SVGObserverUtils::GetFiltersIfObserving(firstFrame, nullptr) ==
+        SVGObserverUtils::eHasRefsSomeInvalid) {
     // The frame is either not there or not currently available,
     // perhaps because we're in the middle of tearing stuff down.
     // Be conservative, return our visual overflow rect relative
@@ -380,13 +381,16 @@ nsRect
 nsSVGIntegrationUtils::GetRequiredSourceForInvalidArea(nsIFrame* aFrame,
                                                        const nsRect& aDirtyRect)
 {
-  // Don't bother calling GetEffectProperties; the filter property should
-  // already have been set up during reflow/ComputeFrameEffectsRect
   nsIFrame* firstFrame =
     nsLayoutUtils::FirstContinuationOrIBSplitSibling(aFrame);
-  SVGFilterObserverListForCSSProp* observers =
-    SVGObserverUtils::GetFilterObserverList(firstFrame);
-  if (!observers || !observers->ReferencesValidResources()) {
+
+  // If we have any filters to observe then we should have started doing that
+  // during reflow/ComputeFrameEffectsRect, so we use GetFiltersIfObserving
+  // here to avoid needless work (or masking bugs by setting up observers at
+  // the wrong time).
+  if (!aFrame->StyleEffects()->HasFilters() ||
+      SVGObserverUtils::GetFiltersIfObserving(firstFrame, nullptr) ==
+        SVGObserverUtils::eHasRefsSomeInvalid) {
     return aDirtyRect;
   }
 
@@ -743,9 +747,10 @@ nsSVGIntegrationUtils::IsMaskResourceReady(nsIFrame* aFrame)
 {
   nsIFrame* firstFrame =
     nsLayoutUtils::FirstContinuationOrIBSplitSibling(aFrame);
-  SVGObserverUtils::EffectProperties effectProperties =
-    SVGObserverUtils::GetEffectProperties(firstFrame);
-  nsTArray<nsSVGMaskFrame*> maskFrames = effectProperties.GetMaskFrames();
+  nsTArray<nsSVGMaskFrame*> maskFrames;
+  // XXX check return value?
+  SVGObserverUtils::GetAndObserveMasks(firstFrame, &maskFrames);
+
   const nsStyleSVGReset* svgReset = firstFrame->StyleSVGReset();
 
   for (uint32_t i = 0; i < maskFrames.Length(); i++) {
@@ -799,11 +804,6 @@ nsSVGIntegrationUtils::PaintMask(const PaintFramesParams& aParams)
   }
 
   gfxContext& ctx = aParams.ctx;
-  nsIFrame* firstFrame =
-    nsLayoutUtils::FirstContinuationOrIBSplitSibling(frame);
-  SVGObserverUtils::EffectProperties effectProperties =
-    SVGObserverUtils::GetEffectProperties(firstFrame);
-
   RefPtr<DrawTarget> maskTarget = ctx.GetDrawTarget();
 
   if (maskUsage.shouldGenerateMaskLayer &&
@@ -819,7 +819,12 @@ nsSVGIntegrationUtils::PaintMask(const PaintFramesParams& aParams)
                                                      SurfaceFormat::A8);
   }
 
-  nsTArray<nsSVGMaskFrame *> maskFrames = effectProperties.GetMaskFrames();
+  nsIFrame* firstFrame =
+    nsLayoutUtils::FirstContinuationOrIBSplitSibling(frame);
+  nsTArray<nsSVGMaskFrame*> maskFrames;
+  // XXX check return value?
+  SVGObserverUtils::GetAndObserveMasks(firstFrame, &maskFrames);
+
   AutoPopGroup autoPop;
   bool shouldPushOpacity = (maskUsage.opacity != 1.0) &&
                            (maskFrames.Length() != 1);
@@ -871,7 +876,9 @@ nsSVGIntegrationUtils::PaintMask(const PaintFramesParams& aParams)
     Matrix clipMaskTransform;
     gfxMatrix cssPxToDevPxMatrix = nsSVGUtils::GetCSSPxToDevPxMatrix(frame);
 
-    nsSVGClipPathFrame *clipPathFrame = effectProperties.GetClipPathFrame();
+    nsSVGClipPathFrame* clipPathFrame;
+    // XXX check return value?
+    SVGObserverUtils::GetAndObserveClipPath(firstFrame, &clipPathFrame);
     RefPtr<SourceSurface> maskSurface =
       maskUsage.shouldGenerateMaskLayer ? maskTarget->Snapshot() : nullptr;
     clipPathFrame->PaintClipMask(ctx, frame, cssPxToDevPxMatrix,
@@ -918,17 +925,18 @@ void PaintMaskAndClipPathInternal(const PaintFramesParams& aParams, const T& aPa
   gfxContext& context = aParams.ctx;
   gfxContextMatrixAutoSaveRestore matrixAutoSaveRestore(&context);
 
-  /* Properties are added lazily and may have been removed by a restyle,
-     so make sure all applicable ones are set again. */
   nsIFrame* firstFrame =
     nsLayoutUtils::FirstContinuationOrIBSplitSibling(frame);
-  SVGObserverUtils::EffectProperties effectProperties =
-    SVGObserverUtils::GetEffectProperties(firstFrame);
 
-  nsSVGClipPathFrame *clipPathFrame = effectProperties.GetClipPathFrame();
+  nsSVGClipPathFrame* clipPathFrame;
+  // XXX check return value?
+  SVGObserverUtils::GetAndObserveClipPath(firstFrame, &clipPathFrame);
+
+  nsTArray<nsSVGMaskFrame*> maskFrames;
+  // XXX check return value?
+  SVGObserverUtils::GetAndObserveMasks(firstFrame, &maskFrames);
 
   gfxMatrix cssPxToDevPxMatrix = nsSVGUtils::GetCSSPxToDevPxMatrix(frame);
-  nsTArray<nsSVGMaskFrame*> maskFrames = effectProperties.GetMaskFrames();
 
   bool shouldGenerateMask = (maskUsage.opacity != 1.0f ||
                              maskUsage.shouldGenerateClipMaskLayer ||

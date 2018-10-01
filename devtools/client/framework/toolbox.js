@@ -5,6 +5,7 @@
 "use strict";
 
 const SOURCE_MAP_WORKER = "resource://devtools/client/shared/source-map/worker.js";
+const SOURCE_MAP_WORKER_ASSETS = "resource://devtools/client/shared/source-map/assets/";
 
 const MAX_ORDINAL = 99;
 const SPLITCONSOLE_ENABLED_PREF = "devtools.toolbox.splitconsoleEnabled";
@@ -665,7 +666,10 @@ Toolbox.prototype = {
       },
     });
 
-    this._sourceMapService.startSourceMapWorker(SOURCE_MAP_WORKER);
+    this._sourceMapService.startSourceMapWorker(
+      SOURCE_MAP_WORKER,
+      SOURCE_MAP_WORKER_ASSETS,
+    );
     return this._sourceMapService;
   },
 
@@ -2871,16 +2875,6 @@ Toolbox.prototype = {
 
     this.browserRequire = null;
     this._toolNames = null;
-
-    // Now that we are closing the toolbox we can re-enable the cache settings
-    // and disable the service workers testing settings for the current tab.
-    // FF41+ automatically cleans up state in actor on disconnect.
-    if (this.target.activeTab && !this.target.activeTab.traits.noTabReconfigureOnClose) {
-      this.target.activeTab.reconfigure({
-        "cacheDisabled": false,
-        "serviceWorkersTestingEnabled": false
-      });
-    }
 
     // Destroying the walker and inspector fronts
     outstanding.push(this.destroyInspector());

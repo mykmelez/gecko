@@ -5,6 +5,7 @@
 import BasicCardOption from "../components/basic-card-option.js";
 import RichPicker from "./rich-picker.js";
 import paymentRequest from "../paymentRequest.js";
+/* import-globals-from ../unprivileged-fallbacks.js */
 
 /**
  * <payment-method-picker></payment-method-picker>
@@ -83,21 +84,25 @@ export default class PaymentMethodPicker extends RichPicker {
     super.render(state);
   }
 
-  isSelectedOptionValid(state) {
-    let hasMissingFields = this.missingFieldsOfSelectedOption().length;
-    if (hasMissingFields) {
-      return false;
+  errorForSelectedOption(state) {
+    let superError = super.errorForSelectedOption(state);
+    if (superError) {
+      return superError;
     }
     let selectedOption = this.selectedOption;
     if (!selectedOption) {
-      return true;
+      return "";
     }
 
-    let acceptedNetworks = paymentRequest.getAcceptedNetworks(state.request);
+    let basicCardMethod = state.request.paymentMethods
+      .find(method => method.supportedMethods == "basic-card");
+    let merchantNetworks = basicCardMethod && basicCardMethod.data &&
+                           basicCardMethod.data.supportedNetworks;
+    let acceptedNetworks = merchantNetworks || PaymentDialogUtils.getCreditCardNetworks();
     let selectedCard = paymentRequest.getBasicCards(state)[selectedOption.value];
     let isSupported = selectedCard["cc-type"] &&
                       acceptedNetworks.includes(selectedCard["cc-type"]);
-    return isSupported;
+    return isSupported ? "" : this.dataset.invalidLabel;
   }
 
   get selectedStateKey() {

@@ -129,7 +129,11 @@ class WebPlatformTestsRunnerSetup(MozbuildObject):
 
 class WebPlatformTestsUpdater(MozbuildObject):
     """Update web platform tests."""
-    def run_update(self, **kwargs):
+    def setup_logging(self, **kwargs):
+        import update
+        return update.setup_logging(kwargs, {"mach": sys.stdout})
+
+    def run_update(self, logger, **kwargs):
         import update
         from update import updatecommandline
 
@@ -141,7 +145,6 @@ class WebPlatformTestsUpdater(MozbuildObject):
         kwargs["store_state"] = False
 
         kwargs = updatecommandline.check_args(kwargs)
-        logger = update.setup_logging(kwargs, {"mach": sys.stdout})
 
         try:
             update.run_update(logger, **kwargs)
@@ -150,24 +153,6 @@ class WebPlatformTestsUpdater(MozbuildObject):
             import traceback
             traceback.print_exc()
 #            pdb.post_mortem()
-
-
-class WebPlatformTestsReduce(WebPlatformTestsRunner):
-
-    def run_reduce(self, **kwargs):
-        from wptrunner import reduce
-
-        self.setup_kwargs(kwargs)
-
-        kwargs["capture_stdio"] = True
-        logger = reduce.setup_logging(kwargs, {"mach": sys.stdout})
-        tests = reduce.do_reduce(**kwargs)
-
-        if not tests:
-            logger.warning("Test was not unstable")
-
-        for item in tests:
-            logger.info(item.id)
 
 
 class WebPlatformTestsCreator(MozbuildObject):
@@ -287,24 +272,26 @@ testing/web-platform/tests for tests that may be shared
         if proc:
             proc.wait()
 
-        context.commands.dispatch("wpt-manifest-update", context)
-
 
 class WPTManifestUpdater(MozbuildObject):
-    def run_update(self, rebuild=False, **kwargs):
-        import manifestupdate
+    def setup_logging(self, **kwargs):
         from wptrunner import wptlogging
         logger = wptlogging.setup(kwargs, {"mach": sys.stdout})
+
+    def run_update(self, logger, rebuild=False, **kwargs):
+        import manifestupdate
         wpt_dir = os.path.abspath(os.path.join(self.topsrcdir, 'testing', 'web-platform'))
         config_dir = os.path.abspath(os.path.join(self.topobjdir, '_tests', 'web-platform'))
         manifestupdate.update(logger, wpt_dir, rebuild, config_dir)
 
 
 class WPTManifestDownloader(MozbuildObject):
-    def run_download(self, manifest_update=True, force=False, **kwargs):
-        import manifestdownload
+    def setup_logging(self, **kwargs):
         from wptrunner import wptlogging
         logger = wptlogging.setup(kwargs, {"mach": sys.stdout})
+
+    def run_download(self, logger, manifest_update=True, force=False, **kwargs):
+        import manifestdownload
         wpt_dir = os.path.abspath(os.path.join(self.topobjdir, '_tests', 'web-platform'))
         manifestdownload.run(wpt_dir, self.topsrcdir, logger, force, manifest_update)
 
@@ -312,11 +299,6 @@ class WPTManifestDownloader(MozbuildObject):
 def create_parser_update():
     from update import updatecommandline
     return updatecommandline.create_parser()
-
-
-def create_parser_reduce():
-    from wptrunner import wptcommandline
-    return wptcommandline.create_parser_reduce()
 
 
 def create_parser_create():
@@ -370,11 +352,14 @@ class MachCommands(MachCommandBase):
                 params["include"].append(item["name"])
             del params["test_objects"]
 
-        self.wpt_manifest_download(**params)
-        params["manifest_update"] = False
         wpt_setup = self._spawn(WebPlatformTestsRunnerSetup)
         wpt_runner = WebPlatformTestsRunner(wpt_setup)
-        return wpt_runner.run(**params)
+
+        logger = wpt_runner.setup_logging(**params)
+
+        self.wpt_manifest_download(logger, **params)
+        params["manifest_update"] = False
+        return wpt_runner.run(logger, **params)
 
     @Command("wpt",
              category="testing",
@@ -391,30 +376,16 @@ class MachCommands(MachCommandBase):
         self.virtualenv_manager.install_pip_package('html5lib==1.0.1')
         self.virtualenv_manager.install_pip_package('ujson')
         self.virtualenv_manager.install_pip_package('requests')
+
         wpt_updater = self._spawn(WebPlatformTestsUpdater)
-        return wpt_updater.run_update(**params)
+        logger = wpt_updater.setup_logging(**params)
+        return wpt_updater.run_update(logger, **params)
 
     @Command("wpt-update",
              category="testing",
              parser=create_parser_update)
     def update_wpt(self, **params):
         return self.update_web_platform_tests(**params)
-
-    @Command("web-platform-tests-reduce",
-             category="testing",
-             conditions=[conditions.is_firefox],
-             parser=create_parser_reduce)
-    def unstable_web_platform_tests(self, **params):
-        self.setup()
-        wpt_reduce = self._spawn(WebPlatformTestsReduce)
-        return wpt_reduce.run_reduce(**params)
-
-    @Command("wpt-reduce",
-             category="testing",
-             conditions=[conditions.is_firefox],
-             parser=create_parser_reduce)
-    def unstable_wpt(self, **params):
-        return self.unstable_web_platform_tests(**params)
 
     @Command("web-platform-tests-create",
              category="testing",
@@ -435,13 +406,19 @@ class MachCommands(MachCommandBase):
              parser=create_parser_manifest_update)
     def wpt_manifest_update(self, **params):
         self.setup()
+        self.wpt_manifest_download(**params)
         wpt_manifest_updater = self._spawn(WPTManifestUpdater)
-        return wpt_manifest_updater.run_update(**params)
+        logger = wpt_manifest_updater.setup_logging(**params)
+        self.wpt_manifest_download(logger, **params)
+        return wpt_manifest_updater.run_update(logger, **params)
 
     @Command("wpt-manifest-download",
              category="testing",
              parser=create_parser_manifest_download)
-    def wpt_manifest_download(self, **params):
+    def wpt_manifest_download(self, logger=None, **params):
         self.setup()
+        if logger is None:
+            from wptrunner import wptlogging
+            logger = wptlogging.setup(params, {"mach": sys.stdout})
         wpt_manifest_downloader = self._spawn(WPTManifestDownloader)
-        return wpt_manifest_downloader.run_download(**params)
+        return wpt_manifest_downloader.run_download(logger, **params)
