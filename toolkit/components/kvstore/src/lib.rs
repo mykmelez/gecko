@@ -214,8 +214,18 @@ pub struct InitKeyValueDatabase {
 }
 
 impl KeyValueDatabase {
-    fn Put(&self, key: *const nsAString, value: *const nsIVariant) -> nsresult {
+    fn Put(&self, key: *const nsACString, value: *const nsIVariant) -> nsresult {
         match self.put(key, value) {
+            Ok(_) => NS_OK,
+            Err(error) => {
+                error!("{}", error);
+                error.into()
+            }
+        }
+    }
+
+    fn Has(&self, key: *const nsACString, retval: *mut bool) -> nsresult {
+        match self.has(key, retval) {
             Ok(_) => NS_OK,
             Err(error) => {
                 error!("{}", error);
@@ -226,7 +236,7 @@ impl KeyValueDatabase {
 
     fn Get(
         &self,
-        key: *const nsAString,
+        key: *const nsACString,
         default_value: *const nsIVariant,
         retval: *mut *const nsIVariant,
     ) -> nsresult {
@@ -235,6 +245,16 @@ impl KeyValueDatabase {
                 unsafe { ptr.forget(&mut *retval) };
                 NS_OK
             }
+            Err(error) => {
+                error!("{}", error);
+                error.into()
+            }
+        }
+    }
+
+    fn Delete(&self, key: *const nsACString) -> nsresult {
+        match self.delete(key) {
+            Ok(_) => NS_OK,
             Err(error) => {
                 error!("{}", error);
                 error.into()
@@ -297,26 +317,6 @@ impl KeyValueDatabase {
         }
     }
 
-    fn Has(&self, key: *const nsAString, retval: *mut bool) -> nsresult {
-        match self.has(key, retval) {
-            Ok(_) => NS_OK,
-            Err(error) => {
-                error!("{}", error);
-                error.into()
-            }
-        }
-    }
-
-    fn Delete(&self, key: *const nsAString) -> nsresult {
-        match self.delete(key) {
-            Ok(_) => NS_OK,
-            Err(error) => {
-                error!("{}", error);
-                error.into()
-            }
-        }
-    }
-
     fn Enumerate(
         &self,
         from_key: *const nsAString,
@@ -340,8 +340,8 @@ impl KeyValueDatabase {
         KeyValueDatabase::allocate(InitKeyValueDatabase { rkv, store })
     }
 
-    fn put(&self, key: *const nsAString, value: *const nsIVariant) -> Result<(), KeyValueError> {
-        let key = String::from_utf16(ensure_ref(key)?)?;
+    fn put(&self, key: *const nsACString, value: *const nsIVariant) -> Result<(), KeyValueError> {
+        let key = str::from_utf8(ensure_ref(key)?)?;
         let value = ensure_ref(value)?;
 
         let mut dataType: uint16_t = 0;
@@ -356,14 +356,14 @@ impl KeyValueDatabase {
                 info!("nsIVariant type is int32");
                 let mut value_as_int32: int32_t = 0;
                 unsafe { value.GetAsInt32(&mut value_as_int32) }.to_result()?;
-                writer.put(&self.store, &key, &Value::I64(value_as_int32.into()))?;
+                writer.put(&self.store, key, &Value::I64(value_as_int32.into()))?;
                 writer.commit()?;
             }
             DATA_TYPE_DOUBLE => {
                 info!("nsIVariant type is double");
                 let mut value_as_double: f64 = 0.0;
                 unsafe { value.GetAsDouble(&mut value_as_double) }.to_result()?;
-                writer.put(&self.store, &key, &Value::F64(value_as_double.into()))?;
+                writer.put(&self.store, key, &Value::F64(value_as_double.into()))?;
                 writer.commit()?;
             }
             DATA_TYPE_WSTRING => {
@@ -371,14 +371,14 @@ impl KeyValueDatabase {
                 let mut value_as_astring: nsString = nsString::new();
                 unsafe { value.GetAsAString(&mut *value_as_astring) }.to_result()?;
                 let value = String::from_utf16(&value_as_astring)?;
-                writer.put(&self.store, &key, &Value::Str(&value))?;
+                writer.put(&self.store, key, &Value::Str(&value))?;
                 writer.commit()?;
             }
             DATA_TYPE_BOOL => {
                 info!("nsIVariant type is bool");
                 let mut value_as_bool: bool = false;
                 unsafe { value.GetAsBool(&mut value_as_bool) }.to_result()?;
-                writer.put(&self.store, &key, &Value::Bool(value_as_bool.into()))?;
+                writer.put(&self.store, key, &Value::Bool(value_as_bool.into()))?;
                 writer.commit()?;
             }
             _unsupported_type => {
@@ -389,11 +389,11 @@ impl KeyValueDatabase {
         Ok(())
     }
 
-    fn has(&self, key: *const nsAString, retval: *mut bool) -> Result<(), KeyValueError> {
-        let key = String::from_utf16(ensure_ref(key)?)?;
+    fn has(&self, key: *const nsACString, retval: *mut bool) -> Result<(), KeyValueError> {
+        let key = str::from_utf8(ensure_ref(key)?)?;
         let env = self.rkv.read()?;
         let reader = env.read()?;
-        let value = reader.get(&self.store, &key)?;
+        let value = reader.get(&self.store, key)?;
 
         match value {
             Some(_) => unsafe { *retval = true },
@@ -405,13 +405,13 @@ impl KeyValueDatabase {
 
     fn get(
         &self,
-        key: *const nsAString,
+        key: *const nsACString,
         default_value: *const nsIVariant,
     ) -> Result<RefPtr<nsIVariant>, KeyValueError> {
-        let key = String::from_utf16(ensure_ref(key)?)?;
+        let key = str::from_utf8(ensure_ref(key)?)?;
         let env = self.rkv.read()?;
         let reader = env.read()?;
-        let value = reader.get(&self.store, &key)?;
+        let value = reader.get(&self.store, key)?;
 
         match value {
             Some(Value::I64(value)) => Ok(value.into_variant().ok_or(KeyValueError::Read)?.take()),
@@ -462,12 +462,12 @@ impl KeyValueDatabase {
         }
     }
 
-    fn delete(&self, key: *const nsAString) -> Result<(), KeyValueError> {
-        let key = String::from_utf16(ensure_ref(key)?)?;
+    fn delete(&self, key: *const nsACString) -> Result<(), KeyValueError> {
+        let key = str::from_utf8(ensure_ref(key)?)?;
         let env = self.rkv.read()?;
         let mut writer = env.write()?;
 
-        match writer.delete(&self.store, &key) {
+        match writer.delete(&self.store, key) {
             Ok(_) => (),
 
             // LMDB fails with an error if the key to delete wasn't found,
