@@ -2,13 +2,18 @@
 #include "nsISupports.idl"
 #include "nsIVariant.idl"
 
-// Ideally we'd expose all the functionality of rkv, like transactions.
-// But the Rust XPCOM macro doesn't support #[derive(xpcom)] on a generic
-// type, due to Rust limitations.  And rkv transactions reference LMDB
-// transactions, which requires a lifetime parameter.  And a lifetime
-// parameter on a type makes it generic.  So this is a simplified interface
-// that supports common operations and should be suitable for a variety
-// of use cases.
+/**
+ * The nsIKeyValue* interfaces provide a simple, synchronous API to a key/value
+ * storage engine.  Basic put/get/has/delete operations are supported, as is
+ * enumeration of key/value pairs and the use of multiple named databases within
+ * a single storage file.  Operations have ACID semantics.
+ *
+ * This API does not (yet) support asynchronous operations, so it must not
+ * be used from the main thread.
+ *
+ * This API does not (yet) support transactions, so it will not be appropriate
+ * for all use cases.
+ */
 
 [scriptable, uuid(bc37b06a-23b5-4b32-8281-4b8479601c7e)]
 interface nsIKeyValuePair : nsISupports {
