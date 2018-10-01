@@ -181,6 +181,23 @@ add_task(async function largeNumbers() {
   Assert.strictEqual(database.getDouble("min-value", 1.1), Number.MIN_VALUE);
 });
 
+add_task(async function extendedCharacterKey() {
+  const databaseDir = await makeDatabaseDir("extendedCharacterKey");
+  const database = gKeyValueService.getOrCreateDefault(databaseDir);
+
+  // Ensure that we can use extended character (i.e. non-ASCII) strings as keys.
+
+  database.put("Héllo, wőrld!", 1);
+  Assert.strictEqual(database.has("Héllo, wőrld!"), true);
+  Assert.strictEqual(database.get("Héllo, wőrld!"), 1);
+
+  const enumerator = database.enumerate();
+  const key = enumerator.getNext().QueryInterface(Ci.nsIKeyValuePair).key;
+  Assert.strictEqual(key, "Héllo, wőrld!");
+
+  database.delete("Héllo, wőrld!");
+});
+
 add_task(async function getOrCreateNamedDatabases() {
   const databaseDir = await makeDatabaseDir("getOrCreateNamedDatabases");
 

@@ -26,7 +26,7 @@ use nserror::{
     nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_INTERFACE,
     NS_ERROR_UNEXPECTED, NS_OK,
 };
-use nsstring::{nsACString, nsAString, nsString};
+use nsstring::{nsACString, nsAString, nsCString, nsString};
 use ownedvalue::OwnedValue;
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
@@ -264,7 +264,7 @@ impl KeyValueDatabase {
 
     fn GetInt(
         &self,
-        key: *const nsAString,
+        key: *const nsACString,
         default_value: int64_t,
         retval: *mut int64_t,
     ) -> nsresult {
@@ -279,7 +279,7 @@ impl KeyValueDatabase {
 
     fn GetDouble(
         &self,
-        key: *const nsAString,
+        key: *const nsACString,
         default_value: c_double,
         retval: *mut c_double,
     ) -> nsresult {
@@ -294,7 +294,7 @@ impl KeyValueDatabase {
 
     fn GetString(
         &self,
-        key: *const nsAString,
+        key: *const nsACString,
         default_value: *const nsAString,
         retval: *mut nsAString,
     ) -> nsresult {
@@ -307,7 +307,7 @@ impl KeyValueDatabase {
         }
     }
 
-    fn GetBool(&self, key: *const nsAString, default_value: bool, retval: *mut bool) -> nsresult {
+    fn GetBool(&self, key: *const nsACString, default_value: bool, retval: *mut bool) -> nsresult {
         match self.get_bool(key, default_value, retval) {
             Ok(_) => NS_OK,
             Err(error) => {
@@ -319,7 +319,7 @@ impl KeyValueDatabase {
 
     fn Enumerate(
         &self,
-        from_key: *const nsAString,
+        from_key: *const nsACString,
         retval: *mut *const nsISimpleEnumerator,
     ) -> nsresult {
         match self.enumerate(from_key) {
@@ -485,11 +485,11 @@ impl KeyValueDatabase {
 
     fn get_int(
         &self,
-        key: *const nsAString,
+        key: *const nsACString,
         default_value: int64_t,
         retval: *mut int64_t,
     ) -> Result<(), KeyValueError> {
-        let key = String::from_utf16(ensure_ref(key)?)?;
+        let key = str::from_utf8(ensure_ref(key)?)?;
         let env = self.rkv.read()?;
         let reader = env.read()?;
         let value = reader.get(&self.store, &key)?;
@@ -505,11 +505,11 @@ impl KeyValueDatabase {
 
     fn get_double(
         &self,
-        key: *const nsAString,
+        key: *const nsACString,
         default_value: c_double,
         retval: *mut c_double,
     ) -> Result<(), KeyValueError> {
-        let key = String::from_utf16(ensure_ref(key)?)?;
+        let key = str::from_utf8(ensure_ref(key)?)?;
         let env = self.rkv.read()?;
         let reader = env.read()?;
         let value = reader.get(&self.store, &key)?;
@@ -525,11 +525,11 @@ impl KeyValueDatabase {
 
     fn get_string(
         &self,
-        key: *const nsAString,
+        key: *const nsACString,
         default_value: *const nsAString,
         retval: *mut nsAString,
     ) -> Result<(), KeyValueError> {
-        let key = String::from_utf16(ensure_ref(key)?)?;
+        let key = str::from_utf8(ensure_ref(key)?)?;
         let env = self.rkv.read()?;
         let reader = env.read()?;
         let value = reader.get(&self.store, &key)?;
@@ -545,11 +545,11 @@ impl KeyValueDatabase {
 
     fn get_bool(
         &self,
-        key: *const nsAString,
+        key: *const nsACString,
         default_value: bool,
         retval: *mut bool,
     ) -> Result<(), KeyValueError> {
-        let key = String::from_utf16(ensure_ref(key)?)?;
+        let key = str::from_utf8(ensure_ref(key)?)?;
         let env = self.rkv.read()?;
         let reader = env.read()?;
         let value = reader.get(&self.store, &key)?;
@@ -565,14 +565,14 @@ impl KeyValueDatabase {
 
     fn enumerate(
         &self,
-        from_key: *const nsAString,
+        from_key: *const nsACString,
     ) -> Result<RefPtr<nsISimpleEnumerator>, KeyValueError> {
         let env = self.rkv.read()?;
         let reader = env.read()?;
 
         // from_key is [optional], and XPConnect maps the absence of a value
         // to an empty string, so we know it isn't a null pointer.
-        let from_key = String::from_utf16(unsafe { &*from_key })?;
+        let from_key = str::from_utf8(unsafe { &*from_key })?;
 
         let iterator = if from_key == "" {
             reader.iter_start(&self.store)?
@@ -688,8 +688,8 @@ impl KeyValuePair {
         KeyValuePair::allocate(InitKeyValuePair { key, value })
     }
 
-    fn GetKey(&self, key: *mut nsAString) -> nsresult {
-        unsafe { (*key).assign(&nsString::from(&self.key)) }
+    fn GetKey(&self, key: *mut nsACString) -> nsresult {
+        unsafe { (*key).assign(&nsCString::from(&self.key)) }
         NS_OK
     }
 
