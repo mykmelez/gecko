@@ -26,7 +26,7 @@ use nserror::{
     nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_INTERFACE,
     NS_ERROR_UNEXPECTED, NS_OK,
 };
-use nsstring::{nsAString, nsString};
+use nsstring::{nsACString, nsAString, nsString};
 use ownedvalue::OwnedValue;
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
@@ -133,7 +133,7 @@ pub struct InitKeyValueService {}
 impl KeyValueService {
     fn GetOrCreateDefault(
         &self,
-        path: *const nsAString,
+        path: *const nsACString,
         retval: *mut *const nsIKeyValueDatabase,
     ) -> nsresult {
         match self.get_or_create_default(path) {
@@ -150,8 +150,8 @@ impl KeyValueService {
 
     fn GetOrCreate(
         &self,
-        path: *const nsAString,
-        name: *const nsAString,
+        path: *const nsACString,
+        name: *const nsACString,
         retval: *mut *const nsIKeyValueDatabase,
     ) -> nsresult {
         match self.get_or_create(path, name) {
@@ -174,11 +174,11 @@ impl KeyValueService {
 
     fn get_or_create_default(
         &self,
-        path: *const nsAString,
+        path: *const nsACString,
     ) -> Result<RefPtr<nsIKeyValueDatabase>, KeyValueError> {
-        let path = String::from_utf16(ensure_ref(path)?)?;
+        let path = str::from_utf8(ensure_ref(path)?)?;
         let mut writer = Manager::singleton().write()?;
-        let rkv = writer.get_or_create(Path::new(&path), Rkv::new)?;
+        let rkv = writer.get_or_create(Path::new(path), Rkv::new)?;
         let store = rkv.write()?.open_or_create_default()?;
         let key_value_db = KeyValueDatabase::new(rkv, store);
 
@@ -189,14 +189,14 @@ impl KeyValueService {
 
     fn get_or_create(
         &self,
-        path: *const nsAString,
-        name: *const nsAString,
+        path: *const nsACString,
+        name: *const nsACString,
     ) -> Result<RefPtr<nsIKeyValueDatabase>, KeyValueError> {
-        let path = String::from_utf16(ensure_ref(path)?)?;
-        let name = String::from_utf16(ensure_ref(name)?)?;
+        let path = str::from_utf8(ensure_ref(path)?)?;
+        let name = str::from_utf8(ensure_ref(name)?)?;
         let mut writer = Manager::singleton().write()?;
-        let rkv = writer.get_or_create(Path::new(&path), Rkv::new)?;
-        let store = rkv.write()?.open_or_create(Some(name.as_str()))?;
+        let rkv = writer.get_or_create(Path::new(path), Rkv::new)?;
+        let store = rkv.write()?.open_or_create(Some(name))?;
         let key_value_db = KeyValueDatabase::new(rkv, store);
 
         key_value_db

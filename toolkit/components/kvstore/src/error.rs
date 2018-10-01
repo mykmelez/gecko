@@ -9,6 +9,7 @@ use nserror::{
 };
 use rkv::StoreError;
 use std::{
+    str::Utf8Error,
     string::FromUtf16Error,
     sync::{PoisonError, RwLockReadGuard, RwLockWriteGuard},
 };
@@ -16,6 +17,9 @@ use OwnedValue;
 
 #[derive(Debug, Fail)]
 pub enum KeyValueError {
+    #[fail(display = "error converting string: {:?}", _0)]
+    ConvertBytes(Utf8Error),
+
     #[fail(display = "error converting string: {:?}", _0)]
     ConvertString(FromUtf16Error),
 
@@ -58,6 +62,7 @@ impl From<nsresult> for KeyValueError {
 impl From<KeyValueError> for nsresult {
     fn from(err: KeyValueError) -> nsresult {
         match err {
+            KeyValueError::ConvertBytes(_) => NS_ERROR_FAILURE,
             KeyValueError::ConvertString(_) => NS_ERROR_FAILURE,
             KeyValueError::NoInterface(_) => NS_ERROR_NO_INTERFACE,
             KeyValueError::Nsresult(result) => result,
@@ -75,6 +80,12 @@ impl From<KeyValueError> for nsresult {
 impl From<StoreError> for KeyValueError {
     fn from(err: StoreError) -> KeyValueError {
         KeyValueError::StoreError(err)
+    }
+}
+
+impl From<Utf8Error> for KeyValueError {
+    fn from(err: Utf8Error) -> KeyValueError {
+        KeyValueError::ConvertBytes(err)
     }
 }
 

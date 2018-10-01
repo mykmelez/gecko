@@ -51,9 +51,9 @@ interface nsIKeyValueService : nsISupports {
     // the database file.  This function retrieves the "default" (unnamed) one.
     // To retrieve a handle to a non-default (named) database, use getOrCreate.
     //
-    nsIKeyValueDatabase getOrCreateDefault(in AString path);
+    nsIKeyValueDatabase getOrCreateDefault(in AUTF8String path);
 
     // Gets a handle to the named key/value database at the given path,
     // creating the database if necessary.
-    nsIKeyValueDatabase getOrCreate(in AString path, in AString name);
+    nsIKeyValueDatabase getOrCreate(in AUTF8String path, in AUTF8String name);
 };
