@@ -15,7 +15,7 @@ nsresult NewKeyValueService(nsIKeyValueService** aResult);
 } // extern "C"
 
 namespace {
-  static nsCOMPtr<nsIKeyValueService> gKeyValueService;
+static nsCOMPtr<nsIKeyValueService> gKeyValueService;
 } // anonymous namespace
 
 static nsresult
