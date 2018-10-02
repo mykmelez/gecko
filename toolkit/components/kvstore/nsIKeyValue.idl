@@ -28,32 +28,39 @@ interface nsIKeyValueDatabase : nsISupports {
     nsIVariant get(in AUTF8String key, [optional] in nsIVariant defaultValue);
     void delete(in AUTF8String key);
 
-    // An alternative implementation of getters that specify their expected
-    // return type, which enables us to enforce those expectations by returning
-    // an error if the retrieved value isn't of the specified type.
+    /**
+     * An alternative implementation of getters that specify their expected
+     * return type, which enables us to enforce those expectations by returning
+     * an error if the retrieved value isn't of the specified type.
+     */
     long long getInt(in AUTF8String key, in long long defaultValue);
     double getDouble(in AUTF8String key, in double defaultValue);
     AString getString(in AUTF8String key, in AString defaultValue);
     boolean getBool(in AUTF8String key, in boolean defaultValue);
 
-    // Enumerate (key, value) pairs.  If you specify a "from" key,
-    // then enumeration starts at the first key equal to or greater than
-    // (lexicographically) the specified key.
+    /**
+     * Enumerate (key, value) pairs.  If you specify a "from" key,
+     * then enumeration starts at the first key equal to or greater than
+     * (lexicographically) the specified key.
+     */
     nsISimpleEnumerator enumerate([optional] in AUTF8String fromKey);
 };
 
 [scriptable, uuid(46c893dd-4c14-4de0-b33d-a1be18c6d062)]
 interface nsIKeyValueService : nsISupports {
-    // Gets a handle to the default key/value database at the given path,
-    // creating the database if necessary.
-    //
-    // There can be multiple key/value databases for a given path, which share
-    // the database file.  This function retrieves the "default" (unnamed) one.
-    // To retrieve a handle to a non-default (named) database, use getOrCreate.
-    //
+    /**
+     * Get a handle to the default key/value database at the given path,
+     * creating the database if necessary.
+     *
+     * There can be multiple key/value databases for a given path, which share
+     * the database file.  This function retrieves the "default" (unnamed) one.
+     * To retrieve a handle to a non-default (named) database, use getOrCreate.
+     */
     nsIKeyValueDatabase getOrCreateDefault(in AUTF8String path);
 
-    // Gets a handle to the named key/value database at the given path,
-    // creating the database if necessary.
+    /**
+     * Get a handle to the named key/value database at the given path,
+     * creating the database if necessary.
+     */
     nsIKeyValueDatabase getOrCreate(in AUTF8String path, in AUTF8String name);
 };
