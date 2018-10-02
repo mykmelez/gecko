@@ -26,8 +26,7 @@ KeyValueServiceConstructor(nsISupports* aOuter, REFNSIID aIID, void** aResult)
   if (NS_FAILED(rv)) {
     return rv;
   }
-  service.forget(aResult);
-  return NS_OK;
+  return service->QueryInterface(aIID, aResult);
 }
 
 NS_DEFINE_NAMED_CID(NS_KEY_VALUE_SERVICE_CID);
