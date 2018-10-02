@@ -14,10 +14,6 @@ extern "C" {
 nsresult NewKeyValueService(nsIKeyValueService** aResult);
 } // extern "C"
 
-namespace {
-static nsCOMPtr<nsIKeyValueService> gKeyValueService;
-} // anonymous namespace
-
 static nsresult
 KeyValueServiceConstructor(nsISupports* aOuter, REFNSIID aIID, void** aResult)
 {
@@ -26,15 +22,9 @@ KeyValueServiceConstructor(nsISupports* aOuter, REFNSIID aIID, void** aResult)
     return NS_ERROR_NO_AGGREGATION;
   }
   nsCOMPtr<nsIKeyValueService> service;
-  if (gKeyValueService) {
-    service = gKeyValueService;
-  } else {
-    nsresult rv = NewKeyValueService(getter_AddRefs(service));
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-    gKeyValueService = service;
-    mozilla::ClearOnShutdown(&gKeyValueService);
+  nsresult rv = NewKeyValueService(getter_AddRefs(service));
+  if (NS_FAILED(rv)) {
+    return rv;
   }
   service.forget(aResult);
   return NS_OK;
