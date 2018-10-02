@@ -720,22 +720,6 @@ TabChild::SetStatus(uint32_t aStatusType, const char16_t* aStatus)
 }
 
 NS_IMETHODIMP
-TabChild::GetWebBrowser(nsIWebBrowser** aWebBrowser)
-{
-  NS_WARNING("TabChild::GetWebBrowser not supported in TabChild");
-
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-TabChild::SetWebBrowser(nsIWebBrowser* aWebBrowser)
-{
-  NS_WARNING("TabChild::SetWebBrowser not supported in TabChild");
-
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
 TabChild::GetChromeFlags(uint32_t* aChromeFlags)
 {
   *aChromeFlags = mChromeFlags;
@@ -746,14 +730,6 @@ NS_IMETHODIMP
 TabChild::SetChromeFlags(uint32_t aChromeFlags)
 {
   NS_WARNING("trying to SetChromeFlags from content process?");
-
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-TabChild::DestroyBrowserWindow()
-{
-  NS_WARNING("TabChild::DestroyBrowserWindow not supported in TabChild");
 
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -815,14 +791,6 @@ TabChild::RemoteDropLinks(uint32_t aLinksCount,
 }
 
 NS_IMETHODIMP
-TabChild::SizeBrowserTo(int32_t aWidth, int32_t aHeight)
-{
-  NS_WARNING("TabChild::SizeBrowserTo not supported in TabChild");
-
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
 TabChild::ShowAsModal()
 {
   NS_WARNING("TabChild::ShowAsModal not supported in TabChild");
@@ -835,14 +803,6 @@ TabChild::IsWindowModal(bool* aRetVal)
 {
   *aRetVal = false;
   return NS_OK;
-}
-
-NS_IMETHODIMP
-TabChild::ExitModalEventLoop(nsresult aStatus)
-{
-  NS_WARNING("TabChild::ExitModalEventLoop not supported in TabChild");
-
-  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
@@ -1618,12 +1578,8 @@ TabChild::RecvRealMouseMoveEvent(const WidgetMouseEvent& aEvent,
                                  const uint64_t& aInputBlockId)
 {
   if (mCoalesceMouseMoveEvents && mCoalescedMouseEventFlusher) {
-    CoalescedMouseData* data = nullptr;
-    mCoalescedMouseData.Get(aEvent.pointerId, &data);
-    if (!data) {
-      data = new CoalescedMouseData();
-      mCoalescedMouseData.Put(aEvent.pointerId, data);
-    }
+    CoalescedMouseData* data = mCoalescedMouseData.LookupOrAdd(aEvent.pointerId);
+    MOZ_ASSERT(data);
     if (data->CanCoalesce(aEvent, aGuid, aInputBlockId)) {
       data->Coalesce(aEvent, aGuid, aInputBlockId);
       mCoalescedMouseEventFlusher->StartObserver();
@@ -1632,7 +1588,6 @@ TabChild::RecvRealMouseMoveEvent(const WidgetMouseEvent& aEvent,
     // Can't coalesce current mousemove event. Put the coalesced mousemove data
     // with the same pointer id to mToBeDispatchedMouseData, coalesce the
     // current one, and process all pending data in mToBeDispatchedMouseData.
-    MOZ_ASSERT(data);
     UniquePtr<CoalescedMouseData> dispatchData =
       MakeUnique<CoalescedMouseData>();
 
