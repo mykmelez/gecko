@@ -13,12 +13,12 @@ extern crate log;
 extern crate nserror;
 extern crate nsstring;
 extern crate rkv;
+extern crate storage_variant;
 #[macro_use]
 extern crate xpcom;
 
 mod error;
 mod ownedvalue;
-mod variant;
 
 use error::KeyValueError;
 use libc::{c_double, c_void, int32_t, int64_t, uint16_t};
@@ -36,7 +36,7 @@ use std::{
     ptr, str,
     sync::{Arc, RwLock},
 };
-use variant::IntoVariant;
+use storage_variant::IntoVariant;
 use xpcom::{
     interfaces::{
         nsIJSEnumerator, nsIKeyValueDatabase, nsISimpleEnumerator, nsISupports, nsIVariant,

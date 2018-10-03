@@ -4,7 +4,7 @@
 
 use nsstring::nsString;
 use rkv::{StoreError, Value};
-use variant::{IntoVariant, Variant};
+use storage_variant::{IntoVariant, Variant};
 
 // This is implemented in rkv but is incomplete there.  We implement a subset
 // to give KeyValuePair ownership over its value, so it can #[derive(xpcom)].

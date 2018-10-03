@@ -2,7 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use libc;
+extern crate libc;
+extern crate nserror;
+extern crate nsstring;
+extern crate xpcom;
+
 use nserror::{NsresultExt, NS_OK};
 use nsstring::{nsACString, nsAString, nsCString, nsString};
 use xpcom::{getter_addrefs, interfaces::nsIVariant, RefPtr};

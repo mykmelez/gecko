@@ -1164,6 +1164,7 @@ dependencies = [
  "nserror 0.1.0",
  "nsstring 0.1.0",
  "rkv 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "storage_variant 0.1.0",
  "xpcom 0.1.0",
 ]
 
@@ -2134,6 +2135,16 @@ dependencies = [
 name = "stable_deref_trait"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "storage_variant"
+version = "0.1.0"
+dependencies = [
+ "libc 0.2.43 (registry+https://github.com/rust-lang/crates.io-index)",
+ "nserror 0.1.0",
+ "nsstring 0.1.0",
+ "xpcom 0.1.0",
+]
 
 [[package]]
 name = "string"
