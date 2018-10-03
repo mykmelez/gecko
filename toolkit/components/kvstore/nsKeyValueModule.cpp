@@ -7,7 +7,6 @@
 #include "nsIClassInfoImpl.h"
 #include "nsIKeyValue.h"
 #include "nsToolkitCompsCID.h"
-#include "mozilla/storage/Variant.h"
 
 extern "C" {
 // Implemented in Rust.
@@ -38,54 +37,3 @@ const mozilla::Module kKeyValueModule = {
 };
 
 NSMODULE_DEFN(nsKeyValueModule) = &kKeyValueModule;
-
-// Based on a patch in bug 1482608.
-// TODO: move these to a more common location, such as storage/.
-extern "C" {
-
-using namespace mozilla::storage;
-
-// Convenience functions to create Storage variants from Rust.
-void
-NS_NewStorageNullVariant(nsIVariant** aVariant)
-{
-  nsCOMPtr<nsIVariant> variant = new NullVariant();
-  variant.forget(aVariant);
-}
-
-void
-NS_NewStorageBooleanVariant(bool aValue, nsIVariant** aVariant)
-{
-  nsCOMPtr<nsIVariant> variant = new BooleanVariant(aValue);
-  variant.forget(aVariant);
-}
-
-void
-NS_NewStorageIntegerVariant(int64_t aValue, nsIVariant** aVariant)
-{
-  nsCOMPtr<nsIVariant> variant = new IntegerVariant(aValue);
-  variant.forget(aVariant);
-}
-
-void
-NS_NewStorageFloatVariant(double aValue, nsIVariant** aVariant)
-{
-  nsCOMPtr<nsIVariant> variant = new FloatVariant(aValue);
-  variant.forget(aVariant);
-}
-
-void
-NS_NewStorageTextVariant(const nsAString& aValue, nsIVariant** aVariant)
-{
-  nsCOMPtr<nsIVariant> variant = new TextVariant(aValue);
-  variant.forget(aVariant);
-}
-
-void
-NS_NewStorageUTF8TextVariant(const nsACString& aValue, nsIVariant** aVariant)
-{
-  nsCOMPtr<nsIVariant> variant = new UTF8TextVariant(aValue);
-  variant.forget(aVariant);
-}
-
-} // extern "C"
