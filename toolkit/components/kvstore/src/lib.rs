@@ -21,9 +21,9 @@ mod ownedvalue;
 mod variant;
 
 use error::KeyValueError;
-use libc::{c_double, int32_t, int64_t, uint16_t};
+use libc::{c_double, c_void, int32_t, int64_t, uint16_t};
 use nserror::{
-    nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_INTERFACE,
+    nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_AGGREGATION,
     NS_ERROR_UNEXPECTED, NS_OK,
 };
 use nsstring::{nsACString, nsAString, nsCString, nsString};
@@ -33,14 +33,13 @@ use std::{
     cell::RefCell,
     collections::VecDeque,
     path::Path,
-    str,
+    ptr, str,
     sync::{Arc, RwLock},
 };
 use variant::IntoVariant;
 use xpcom::{
     interfaces::{
-        nsIJSEnumerator, nsIKeyValueDatabase, nsIKeyValueService, nsISimpleEnumerator, nsISupports,
-        nsIVariant,
+        nsIJSEnumerator, nsIKeyValueDatabase, nsISimpleEnumerator, nsISupports, nsIVariant,
     },
     nsIID, RefPtr,
 };
@@ -84,20 +83,20 @@ const DATA_TYPE_BOOL: uint16_t = DataType::BOOL as u16;
 const DATA_TYPE_WSTRING: uint16_t = DataType::WSTRING as u16;
 const DATA_TYPE_EMPTY: uint16_t = DataType::EMPTY as u16;
 
-/// Construct an nsIKeyValueService.  This should be called only once
-/// from `KeyValueServiceConstructor` in C++, after which the instance
-/// is memoized and reused (hence the "service" in its name).  It is
-/// the XPCOM equivalent of rkv's Manager singleton.
 #[no_mangle]
-pub extern "C" fn NewKeyValueService(result: *mut *const nsIKeyValueService) -> nsresult {
-    let service = KeyValueService::new();
-    match service.query_interface::<nsIKeyValueService>() {
-        Some(ptr) => {
-            unsafe { ptr.forget(&mut *result) }
-            NS_OK
-        }
-        None => NS_ERROR_NO_INTERFACE,
+pub extern "C" fn KeyValueServiceConstructor(
+    outer: *const nsISupports,
+    iid: &nsIID,
+    result: *mut *mut c_void,
+) -> nsresult {
+    unsafe { *result = ptr::null_mut() };
+
+    if !outer.is_null() {
+        return NS_ERROR_NO_AGGREGATION;
     }
+
+    let service: RefPtr<KeyValueService> = KeyValueService::new();
+    unsafe { service.QueryInterface(iid, result) }
 }
 
 // For each public XPCOM method in the nsIKeyValue* interfaces, we implement

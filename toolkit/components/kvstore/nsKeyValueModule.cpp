@@ -11,23 +11,8 @@
 
 extern "C" {
 // Implemented in Rust.
-nsresult NewKeyValueService(nsIKeyValueService** aResult);
+nsresult KeyValueServiceConstructor(nsISupports* aOuter, REFNSIID aIID, void** aResult);
 } // extern "C"
-
-static nsresult
-KeyValueServiceConstructor(nsISupports* aOuter, REFNSIID aIID, void** aResult)
-{
-  *aResult = nullptr;
-  if (aOuter) {
-    return NS_ERROR_NO_AGGREGATION;
-  }
-  nsCOMPtr<nsIKeyValueService> service;
-  nsresult rv = NewKeyValueService(getter_AddRefs(service));
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-  return service->QueryInterface(aIID, aResult);
-}
 
 NS_DEFINE_NAMED_CID(NS_KEY_VALUE_SERVICE_CID);
 
