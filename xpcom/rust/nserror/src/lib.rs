@@ -1,11 +1,29 @@
 extern crate nsstring;
 
 use nsstring::{nsCString, nsACString};
+use std::fmt;
+use std::ops::Deref;
 
 /// The type of errors in gecko.
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
+#[derive(Debug)]
 pub struct nsresult(pub u32);
+
+impl Deref for nsresult {
+    type Target = u32;
+
+    fn deref(&self) -> &u32 {
+        &self.0
+    }
+}
+
+impl fmt::Display for nsresult {
+    // This trait requires `fmt` with this exact signature.
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 /// An extension trait that adds methods to `nsresult` types.
 pub trait NsresultExt {

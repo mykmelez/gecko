@@ -135,17 +135,16 @@ impl KeyValueService {
         path: *const nsACString,
         retval: *mut *const nsIKeyValueDatabase,
     ) -> nsresult {
-        NS_ERROR_NOT_IMPLEMENTED
-        // match self.get_or_create_default(path) {
-        //     Ok(ptr) => {
-        //         unsafe { ptr.forget(&mut *retval) };
-        //         NS_OK
-        //     }
-        //     Err(error) => {
-        //         error!("{}", error);
-        //         error.into()
-        //     }
-        // }
+        match self.get_or_create_default(path) {
+            Ok(ptr) => {
+                unsafe { ptr.forget(&mut *retval) };
+                NS_OK
+            }
+            Err(error) => {
+                error!("{}", error);
+                error.into()
+            }
+        }
     }
 
     fn GetOrCreate(
@@ -154,17 +153,16 @@ impl KeyValueService {
         name: *const nsACString,
         retval: *mut *const nsIKeyValueDatabase,
     ) -> nsresult {
-        NS_ERROR_NOT_IMPLEMENTED
-        // match self.get_or_create(path, name) {
-        //     Ok(ptr) => {
-        //         unsafe { ptr.forget(&mut *retval) };
-        //         NS_OK
-        //     }
-        //     Err(error) => {
-        //         error!("{}", error);
-        //         error.into()
-        //     }
-        // }
+        match self.get_or_create(path, name) {
+            Ok(ptr) => {
+                unsafe { ptr.forget(&mut *retval) };
+                NS_OK
+            }
+            Err(error) => {
+                error!("{}", error);
+                error.into()
+            }
+        }
     }
 }
 

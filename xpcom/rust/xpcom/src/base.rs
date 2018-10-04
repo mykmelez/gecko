@@ -8,7 +8,7 @@ use {
     GetterAddrefs
 };
 use interfaces::nsISupports;
-use nserror::{nsresult, NsresultExt};
+use nserror::{NsresultExt};
 
 #[repr(C)]
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -35,10 +35,10 @@ pub unsafe trait XpCom : RefCounted {
     fn query_interface<T: XpCom>(&self) -> Option<RefPtr<T>> {
         let mut ga = GetterAddrefs::<T>::new();
         unsafe {
-            if nsresult((*(self as *const Self as *const nsISupports)).QueryInterface(
+            if (*(self as *const Self as *const nsISupports)).QueryInterface(
                 &T::IID,
                 ga.void_ptr(),
-            )).succeeded() {
+            ).succeeded() {
                 ga.refptr()
             } else {
                 None
