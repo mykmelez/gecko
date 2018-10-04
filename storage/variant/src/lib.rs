@@ -7,7 +7,7 @@ extern crate nserror;
 extern crate nsstring;
 extern crate xpcom;
 
-use nserror::{NsresultExt, NS_OK};
+use nserror::{nsresult, NsresultExt, NS_OK};
 use nsstring::{nsACString, nsAString, nsCString, nsString};
 use xpcom::{getter_addrefs, interfaces::nsIVariant, RefPtr};
 
@@ -46,7 +46,7 @@ macro_rules! variant {
         impl From<Variant> for $typ {
             fn from(variant: Variant) -> Self {
                 let mut result = $typ::default();
-                let rv = unsafe { (variant.0).$getter(&mut result) };
+                let rv = nsresult(unsafe { (variant.0).$getter(&mut result) });
                 if rv.succeeded() {
                     result
                 } else {
@@ -69,7 +69,7 @@ macro_rules! variant {
         impl From<Variant> for $typ {
             fn from(variant: Variant) -> Self {
                 let mut result = $typ::new();
-                let rv = unsafe { (variant.0).$getter(&mut *result) };
+                let rv = nsresult(unsafe { (variant.0).$getter(&mut *result) });
                 if rv.succeeded() {
                     result
                 } else {

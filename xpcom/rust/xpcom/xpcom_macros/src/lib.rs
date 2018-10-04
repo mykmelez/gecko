@@ -339,7 +339,6 @@ fn gen_vtable_methods(iface: &Interface) -> Result<Tokens, Box<Error>> {
     for method in methods {
         let name = Ident::from(method.name);
         let ret = syn::parse_str::<Type>(method.ret)?;
-
         let mut params = Vec::new();
         let mut args = Vec::new();
         for param in method.params {
