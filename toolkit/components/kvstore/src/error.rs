@@ -4,9 +4,10 @@
 
 use libc::uint16_t;
 use nserror::{
-    nsresult, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_INTERFACE,
+    NsresultExt, nsresult, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_INTERFACE,
     NS_ERROR_NULL_POINTER, NS_ERROR_UNEXPECTED,
 };
+use nsstring::nsCString;
 use rkv::StoreError;
 use std::{
     str::Utf8Error,
@@ -26,9 +27,8 @@ pub enum KeyValueError {
     #[fail(display = "no interface '{}'", _0)]
     NoInterface(&'static str),
 
-    // TODO: use nsresult.error_name() to convert the number to its name.
-    #[fail(display = "error result '{}'", _0)]
-    Nsresult(nsresult),
+    #[fail(display = "error result {}", _0)]
+    Nsresult(nsCString, nsresult),
 
     #[fail(display = "arg is null")]
     NullPointer,
@@ -55,7 +55,7 @@ pub enum KeyValueError {
 
 impl From<nsresult> for KeyValueError {
     fn from(result: nsresult) -> KeyValueError {
-        KeyValueError::Nsresult(result)
+        KeyValueError::Nsresult(result.error_name(), result)
     }
 }
 
@@ -65,7 +65,7 @@ impl From<KeyValueError> for nsresult {
             KeyValueError::ConvertBytes(_) => NS_ERROR_FAILURE,
             KeyValueError::ConvertString(_) => NS_ERROR_FAILURE,
             KeyValueError::NoInterface(_) => NS_ERROR_NO_INTERFACE,
-            KeyValueError::Nsresult(result) => result,
+            KeyValueError::Nsresult(_, result) => result,
             KeyValueError::NullPointer => NS_ERROR_NULL_POINTER,
             KeyValueError::Read => NS_ERROR_FAILURE,
             KeyValueError::ReadLock(_) => NS_ERROR_UNEXPECTED,

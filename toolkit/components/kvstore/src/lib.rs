@@ -651,7 +651,7 @@ impl SimpleEnumerator {
         let mut pairs = self.pairs.borrow_mut();
         let (key, value) = pairs
             .pop_front()
-            .ok_or(KeyValueError::Nsresult(NS_ERROR_FAILURE))?;
+            .ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
 
         // Perhaps we should never fail if the value was unexpected and instead
         // return a null or undefined variant.
@@ -664,7 +664,7 @@ impl SimpleEnumerator {
         // enumerates pairs but doesn't access all values.
         //
         if value == OwnedValue::Unexpected {
-            return Err(KeyValueError::Nsresult(NS_ERROR_UNEXPECTED));
+            return Err(NS_ERROR_UNEXPECTED.into());
         }
 
         let pair = KeyValuePair::new(key, value);
@@ -712,7 +712,7 @@ impl KeyValuePair {
             .value
             .clone()
             .into_variant()
-            .ok_or(KeyValueError::Nsresult(NS_ERROR_FAILURE))?
+            .ok_or(KeyValueError::from(NS_ERROR_FAILURE))?
             .take())
     }
 }
