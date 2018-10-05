@@ -73,7 +73,7 @@ extern "C" {
 // This is an extern "C" binding for the GetErrorName method which is used by
 // the nsresult rust bindings in xpcom/rust/nserror.
 void
-Gecko_GetErrorName(nsresult aRv, nsACString& aName)
+Gecko_GetErrorName(nsresult& aRv, nsACString& aName)
 {
   mozilla::GetErrorName(aRv, aName);
 }

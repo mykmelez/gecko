@@ -142,7 +142,7 @@ def attributeParamList(iface, a, getter):
 
 def attrAsVTableEntry(iface, m, getter):
     try:
-        return "pub %s: unsafe extern \"system\" fn (%s) -> nsresult" % \
+        return "pub %s: unsafe extern \"system\" fn (%s) -> ::nserror::nsresult" % \
             (attributeNativeName(m, getter),
              attributeParamList(iface, m, getter))
     except xpidl.RustNoncompat as reason:
@@ -160,7 +160,7 @@ def methodNativeName(m):
 def methodReturnType(m):
     if m.notxpcom:
         return m.realtype.rustType('in').strip()
-    return "nsresult"
+    return "::nserror::nsresult"
 
 
 def methodRawParamList(iface, m):
@@ -230,7 +230,7 @@ infallible_impl_tmpl = """\
 pub unsafe fn %(name)s(&self) -> %(realtype)s {
     let mut result = <%(realtype)s as ::std::default::Default>::default();
     let _rv = ((*self.vtable).%(name)s)(self, &mut result);
-    debug_assert!(::nserror::NsresultExt::succeeded(_rv));
+    debug_assert!(::nserror::NsresultExt::succeeded(&_rv));
     result
 }
 """
@@ -257,7 +257,7 @@ def attrAsWrapper(iface, m, getter):
         return method_impl_tmpl % {
             'name': attributeNativeName(m, getter),
             'params': name + ': ' + rust_type,
-            'ret_ty': 'nsresult',
+            'ret_ty': '::nserror::nsresult',
             'args': name,
         }
 
