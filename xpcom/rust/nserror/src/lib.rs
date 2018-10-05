@@ -1,20 +1,14 @@
 extern crate nsstring;
 
 use nsstring::{nsCString, nsACString};
-use std::fmt;
 
-/// The type of errors in gecko.
-#[allow(non_camel_case_types)]
+/// The type of errors in gecko.  Uses a newtype to provide additional type
+/// safety in Rust and #[repr(transparent)] to ensure the same representation
+/// as the C++ equivalent.
 #[repr(transparent)]
+#[allow(non_camel_case_types)]
 #[derive(Debug)]
 pub struct nsresult(pub u32);
-
-impl fmt::Display for nsresult {
-    // This trait requires `fmt` with this exact signature.
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
 
 /// An extension trait that adds methods to `nsresult` types.
 pub trait NsresultExt {
