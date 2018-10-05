@@ -92,7 +92,7 @@ impl From<FromUtf16Error> for KeyValueError {
 }
 
 impl<T> From<PoisonError<T>> for KeyValueError {
-    fn from(err: PoisonError<T>) -> KeyValueError {
+    fn from(_err: PoisonError<T>) -> KeyValueError {
         KeyValueError::PoisonError
     }
 }
