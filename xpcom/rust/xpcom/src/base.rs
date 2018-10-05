@@ -8,7 +8,7 @@ use {
     GetterAddrefs
 };
 use interfaces::nsISupports;
-use nserror::{NsresultExt};
+use nserror::NsresultExt;
 
 #[repr(C)]
 #[derive(Copy, Clone, Eq, PartialEq)]
