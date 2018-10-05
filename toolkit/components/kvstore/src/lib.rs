@@ -126,7 +126,7 @@ pub extern "C" fn KeyValueServiceConstructor(
 
 #[derive(xpcom)]
 #[xpimplements(nsIKeyValueService)]
-#[refcnt = "nonatomic"]
+#[refcnt = "atomic"]
 pub struct InitKeyValueService {}
 
 impl KeyValueService {
