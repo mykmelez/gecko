@@ -22,8 +22,13 @@
 #include "mozilla/widget/CompositorWidget.h"
 
 #ifdef XP_WIN
+#include "GLLibraryEGL.h"
 #include "mozilla/widget/WinCompositorWindowThread.h"
 #endif
+
+using namespace mozilla;
+
+static already_AddRefed<gl::GLContext> CreateGLContext();
 
 namespace mozilla {
 namespace wr {
@@ -76,6 +81,11 @@ RenderThread::Start()
 #endif
   layers::SharedSurfacesParent::Initialize();
 
+  RefPtr<Runnable> runnable = WrapRunnable(
+    RefPtr<RenderThread>(sRenderThread.get()),
+    &RenderThread::InitSharedGLContext);
+  sRenderThread->Loop()->PostTask(runnable.forget());
+
   if (XRE_IsGPUProcess() &&
       gfx::gfxVars::UseWebRenderProgramBinary()) {
     MOZ_ASSERT(gfx::gfxVars::UseWebRender());
@@ -126,6 +136,7 @@ RenderThread::ShutDownTask(layers::SynchronousTask* aTask)
   layers::SharedSurfacesParent::Shutdown();
 
   ClearAllBlobImageResources();
+  ClearSharedGL();
 }
 
 // static
@@ -242,7 +253,7 @@ RenderThread::RendererCount()
 }
 
 void
-RenderThread::NewFrameReady(wr::WindowId aWindowId)
+RenderThread::HandleFrame(wr::WindowId aWindowId, bool aRender)
 {
   if (mHasShutdown) {
     return;
@@ -250,10 +261,11 @@ RenderThread::NewFrameReady(wr::WindowId aWindowId)
 
   if (!IsInRenderThread()) {
     Loop()->PostTask(
-      NewRunnableMethod<wr::WindowId>("wr::RenderThread::NewFrameReady",
-                                      this,
-                                      &RenderThread::NewFrameReady,
-                                      aWindowId));
+      NewRunnableMethod<wr::WindowId, bool>("wr::RenderThread::NewFrameReady",
+                                            this,
+                                            &RenderThread::HandleFrame,
+                                            aWindowId,
+                                            aRender));
     return;
   }
 
@@ -276,7 +288,7 @@ RenderThread::NewFrameReady(wr::WindowId aWindowId)
     startTime = info->mStartTimes.front();
   }
 
-  UpdateAndRender(aWindowId, startTime);
+  UpdateAndRender(aWindowId, startTime, aRender, /* aReadback */ false);
   FrameRenderingComplete(aWindowId);
 }
 
@@ -353,10 +365,12 @@ NotifyDidRender(layers::CompositorBridgeParent* aBridge,
 void
 RenderThread::UpdateAndRender(wr::WindowId aWindowId,
                               const TimeStamp& aStartTime,
+                              bool aRender,
                               bool aReadback)
 {
   AUTO_PROFILER_TRACING("Paint", "Composite");
   MOZ_ASSERT(IsInRenderThread());
+  MOZ_ASSERT(aRender || !aReadback);
 
   auto it = mRenderers.find(aWindowId);
   MOZ_ASSERT(it != mRenderers.end());
@@ -366,10 +380,10 @@ RenderThread::UpdateAndRender(wr::WindowId aWindowId,
 
   auto& renderer = it->second;
 
-  bool ret = renderer->UpdateAndRender(aReadback);
-  if (!ret) {
-    // Render did not happen, do not call NotifyDidRender.
-    return;
+  if (aRender) {
+    renderer->UpdateAndRender(aReadback);
+  } else {
+    renderer->Update();
   }
 
   TimeStamp end = TimeStamp::Now();
@@ -718,6 +732,33 @@ RenderThread::ProgramCache()
   return mProgramCache.get();
 }
 
+void
+RenderThread::InitSharedGLContext()
+{
+  MOZ_ASSERT(IsInRenderThread());
+
+  if (!mSharedGL) {
+    mSharedGL = CreateGLContext();
+  }
+}
+
+gl::GLContext*
+RenderThread::SharedGL()
+{
+  MOZ_ASSERT(IsInRenderThread());
+  InitSharedGLContext();
+
+  return mSharedGL.get();
+}
+
+void
+RenderThread::ClearSharedGL()
+{
+  MOZ_ASSERT(IsInRenderThread());
+  mSharedGL = nullptr;
+}
+
+
 WebRenderThreadPool::WebRenderThreadPool()
 {
   mThreadPool = wr_thread_pool_new();
@@ -748,12 +789,55 @@ WebRenderProgramCache::~WebRenderProgramCache()
 } // namespace wr
 } // namespace mozilla
 
+#ifdef XP_WIN
+static already_AddRefed<gl::GLContext>
+CreateGLContextANGLE()
+{
+  nsCString discardFailureId;
+  if (!gl::GLLibraryEGL::EnsureInitialized(/* forceAccel */ true, &discardFailureId)) {
+    gfxCriticalNote << "Failed to load EGL library: " << discardFailureId.get();
+    return nullptr;
+  }
+
+  auto* egl = gl::GLLibraryEGL::Get();
+  auto flags = gl::CreateContextFlags::PREFER_ES3;
+
+  // Create GLContext with dummy EGLSurface, the EGLSurface is not used.
+  // Instread we override it with EGLSurface of SwapChain's back buffer.
+  RefPtr<gl::GLContext> gl = gl::GLContextProviderEGL::CreateHeadless(flags, &discardFailureId);
+  if (!gl || !gl->IsANGLE()) {
+    gfxCriticalNote << "Failed ANGLE GL context creation for WebRender: " << gfx::hexa(gl.get());
+    return nullptr;
+  }
+
+  if (!gl->MakeCurrent()) {
+    gfxCriticalNote << "Failed GL context creation for WebRender: " << gfx::hexa(gl.get());
+    return nullptr;
+  }
+
+  return gl.forget();
+}
+#endif
+
+static already_AddRefed<gl::GLContext>
+CreateGLContext()
+{
+#ifdef XP_WIN
+  if (gfx::gfxVars::UseWebRenderANGLE()) {
+    return CreateGLContextANGLE();
+  }
+#endif
+  // We currently only support a shared GLContext
+  // with ANGLE.
+  return nullptr;
+}
+
 extern "C" {
 
-static void NewFrameReady(mozilla::wr::WrWindowId aWindowId)
+static void HandleFrame(mozilla::wr::WrWindowId aWindowId, bool aRender)
 {
   mozilla::wr::RenderThread::Get()->IncRenderingFrameCount(aWindowId);
-  mozilla::wr::RenderThread::Get()->NewFrameReady(aWindowId);
+  mozilla::wr::RenderThread::Get()->HandleFrame(aWindowId, aRender);
 }
 
 void wr_notifier_wake_up(mozilla::wr::WrWindowId aWindowId)
@@ -763,12 +847,12 @@ void wr_notifier_wake_up(mozilla::wr::WrWindowId aWindowId)
 
 void wr_notifier_new_frame_ready(mozilla::wr::WrWindowId aWindowId)
 {
-  NewFrameReady(aWindowId);
+  HandleFrame(aWindowId, /* aRender */ true);
 }
 
 void wr_notifier_nop_frame_done(mozilla::wr::WrWindowId aWindowId)
 {
-  mozilla::wr::RenderThread::Get()->DecPendingFrameCount(aWindowId);
+  HandleFrame(aWindowId, /* aRender */ false);
 }
 
 void wr_notifier_external_event(mozilla::wr::WrWindowId aWindowId, size_t aRawEvent)

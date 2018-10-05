@@ -3715,7 +3715,7 @@ IonBuilder::arithTryBinaryStub(bool* emitted, JSOp op,
       case JSOP_MUL:
       case JSOP_DIV:
       case JSOP_MOD:
-        stub = MBinaryCache::New(alloc(), left, right);
+        stub = MBinaryCache::New(alloc(), left, right, MIRType::Value);
         break;
       default:
         MOZ_CRASH("unsupported arith");
@@ -6470,14 +6470,10 @@ IonBuilder::compareTryBinaryStub(bool* emitted, MDefinition* left, MDefinition* 
         return Ok();
     }
 
-    MBinaryCache* stub = MBinaryCache::New(alloc(), left, right);
+    MBinaryCache* stub = MBinaryCache::New(alloc(), left, right, MIRType::Boolean);
     current->add(stub);
     current->push(stub);
     MOZ_TRY(resumeAfter(stub));
-
-    MUnbox* unbox = MUnbox::New(alloc(), current->pop(), MIRType::Boolean, MUnbox::Infallible);
-    current->add(unbox);
-    current->push(unbox);
 
     trackOptimizationSuccess();
     *emitted = true;
@@ -7269,6 +7265,7 @@ IonBuilder::newPendingLoopHeader(MBasicBlock* predecessor, jsbytecode* pc, bool 
 
             // Extract typeset from value.
             LifoAlloc* lifoAlloc = alloc().lifoAlloc();
+            LifoAlloc::AutoFallibleScope fallibleAllocator(lifoAlloc);
             TemporaryTypeSet* typeSet =
                 lifoAlloc->new_<TemporaryTypeSet>(lifoAlloc, existingType);
             if (!typeSet) {
@@ -8986,58 +8983,17 @@ IonBuilder::getElemAddCache(MDefinition* obj, MDefinition* index)
 {
     // Emit GetPropertyCache.
 
-    TemporaryTypeSet* types = bytecodeTypes(pc);
-
-    BarrierKind barrier;
-    if (obj->type() == MIRType::Object) {
-        // Always add a barrier if the index is not an int32 value, so we can
-        // attach stubs for particular properties.
-        if (index->type() == MIRType::Int32) {
-            barrier = PropertyReadNeedsTypeBarrier(analysisContext, alloc(), constraints(), obj,
-                                                   nullptr, types);
-        } else {
-            barrier = BarrierKind::TypeSet;
-        }
-    } else {
-        // PropertyReadNeedsTypeBarrier only accounts for object types, so for
-        // now always insert a barrier if the input is not known to be an
-        // object.
-        barrier = BarrierKind::TypeSet;
-    }
-
-    // Ensure we insert a type barrier for reads from typed objects, as type
-    // information does not account for the initial undefined/null types.
-    if (barrier != BarrierKind::TypeSet && !types->unknown()) {
-        MOZ_ASSERT(obj->resultTypeSet());
-        switch (obj->resultTypeSet()->forAllClasses(constraints(), IsTypedObjectClass)) {
-          case TemporaryTypeSet::ForAllResult::ALL_FALSE:
-          case TemporaryTypeSet::ForAllResult::EMPTY:
-            break;
-          case TemporaryTypeSet::ForAllResult::ALL_TRUE:
-          case TemporaryTypeSet::ForAllResult::MIXED:
-            barrier = BarrierKind::TypeSet;
-            break;
-        }
-    }
-
     MGetPropertyCache* ins = MGetPropertyCache::New(alloc(), obj, index,
-                                                    barrier == BarrierKind::TypeSet);
+                                                    /* monitoredResult = */ true);
     current->add(ins);
     current->push(ins);
 
     MOZ_TRY(resumeAfter(ins));
 
-    // Spice up type information.
-    if (index->type() == MIRType::Int32 && barrier == BarrierKind::NoBarrier) {
-        bool needHoleCheck = !ElementAccessIsPacked(constraints(), obj);
-        MIRType knownType = GetElemKnownType(needHoleCheck, types);
-
-        if (knownType != MIRType::Value && knownType != MIRType::Double) {
-            ins->setResultType(knownType);
-        }
-    }
-
-    MOZ_TRY(pushTypeBarrier(ins, types, barrier));
+    // We always barrier getElem to handle missing elements, as type inference doesn't
+    // handle missing properties (see Bug 1488786)
+    TemporaryTypeSet* types = bytecodeTypes(pc);
+    MOZ_TRY(pushTypeBarrier(ins, types, BarrierKind::TypeSet));
 
     trackOptimizationSuccess();
     return Ok();

@@ -307,8 +307,8 @@ HTMLTableHeaderCellAccessible::NativeRole() const
 {
   // Check value of @scope attribute.
   static Element::AttrValuesArray scopeValues[] =
-    { &nsGkAtoms::col, &nsGkAtoms::colgroup,
-      &nsGkAtoms::row, &nsGkAtoms::rowgroup, nullptr };
+    { nsGkAtoms::col, nsGkAtoms::colgroup,
+      nsGkAtoms::row, nsGkAtoms::rowgroup, nullptr };
   int32_t valueIdx =
     mContent->AsElement()->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::scope,
                                            scopeValues, eCaseMatters);
@@ -623,8 +623,7 @@ HTMLTableAccessible::CellAt(uint32_t aRowIdx, uint32_t aColIdx)
   // a cell accessible, for example when a cell has CSS display:block; set.
   // In such cases, iterate through the cells in this row differently to find it.
   if (cell && cell->IsTableRow()) {
-    Accessible* row = RowAt(aRowIdx);
-    return CellInRowAt(row, aColIdx);
+    return CellInRowAt(cell, aColIdx);
   }
 
   // XXX bug 576838: crazy tables (like table6 in tables/test_table2.html) may

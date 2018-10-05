@@ -122,6 +122,9 @@ about-debugging-extension-id = Extension ID
 # Clicking on it will add the new network location to the list.
 about-debugging-network-locations-add-button = Add
 
+# Text to display when there are no locations to show.
+about-debugging-network-locations-empty-text = No network locations have been added yet.
+
 # Text of the label for the text input that allows users to add new network locations in
 # the Connect page. A host is a hostname and a port separated by a colon, as suggested by
 # the input's placeholder "localhost:6080".
@@ -164,3 +167,14 @@ about-debugging-worker-status-stopped = Stopped
 # registration could be found yet. Only active registrations are visible from
 # about:debugging, so such service workers are considered as registering.
 about-debugging-worker-status-registering = Registering
+
+# Displayed for runtime info in runtime pages.
+# { $name } is brand name such as "Firefox Nightly"
+# { $version } is version such as "64.0a1"
+about-debugging-runtime-info = { $name } ({ $version })
+
+# Displayed for runtime info in runtime page when we display the model as well.
+# { $name } is brand name such as "Firefox Nightly"
+# { $version } is version such as "64.0a1"
+# { $model } is model name of device
+about-debugging-runtime-info-with-model = { $name } on { $model } ({ $version })

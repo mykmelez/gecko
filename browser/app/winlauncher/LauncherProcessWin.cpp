@@ -40,11 +40,12 @@ PostCreationSetup(HANDLE aChildProcess, HANDLE aChildMainThread,
 {
   // The launcher process's DLL blocking code is incompatible with ASAN because
   // it is able to execute before ASAN itself has even initialized.
-#if defined(MOZ_ASAN)
+  // Also, the AArch64 build doesn't yet have a working interceptor.
+#if defined(MOZ_ASAN) || defined(_M_ARM64)
   return true;
 #else
   return mozilla::InitializeDllBlocklistOOP(aChildProcess);
-#endif // defiend(MOZ_ASAN)
+#endif // defined(MOZ_ASAN) || defined(_M_ARM64)
 }
 
 #if !defined(PROCESS_CREATION_MITIGATION_POLICY_IMAGE_LOAD_PREFER_SYSTEM32_ALWAYS_ON)
@@ -165,35 +166,52 @@ MaybeBreakForBrowserDebugging()
 
 #if defined(MOZ_LAUNCHER_PROCESS)
 
-static mozilla::Maybe<bool>
+static bool
 IsSameBinaryAsParentProcess()
 {
   mozilla::Maybe<DWORD> parentPid = mozilla::nt::GetParentProcessId();
   if (!parentPid) {
-    return mozilla::Nothing();
+    // If NtQueryInformationProcess failed (in GetParentProcessId()),
+    // we should not behave as the launcher process because it will also
+    // likely to fail in child processes.
+    MOZ_CRASH("NtQueryInformationProcess failed");
   }
 
   nsAutoHandle parentProcess(::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,
                                            FALSE, parentPid.value()));
   if (!parentProcess.get()) {
-    return mozilla::Nothing();
+    // If OpenProcess failed, the parent process may not be present,
+    // may be already terminated, etc. So we will have to behave as the
+    // launcher proces in this case.
+    return false;
   }
 
   WCHAR parentExe[MAX_PATH + 1] = {};
   DWORD parentExeLen = mozilla::ArrayLength(parentExe);
   if (!::QueryFullProcessImageNameW(parentProcess.get(), 0, parentExe,
                                     &parentExeLen)) {
-    return mozilla::Nothing();
+    // If QueryFullProcessImageNameW failed, we should not behave as the
+    // launcher process for the same reason as NtQueryInformationProcess.
+    MOZ_CRASH("QueryFullProcessImageNameW failed");
   }
 
   WCHAR ourExe[MAX_PATH + 1] = {};
   DWORD ourExeOk = ::GetModuleFileNameW(nullptr, ourExe,
                                         mozilla::ArrayLength(ourExe));
   if (!ourExeOk || ourExeOk == mozilla::ArrayLength(ourExe)) {
-    return mozilla::Nothing();
+    // If GetModuleFileNameW failed, we should not behave as the launcher
+    // process for the same reason as NtQueryInformationProcess.
+    MOZ_CRASH("GetModuleFileNameW failed");
   }
 
-  return mozilla::DoPathsPointToIdenticalFile(parentExe, ourExe);
+  mozilla::Maybe<bool> isSame =
+    mozilla::DoPathsPointToIdenticalFile(parentExe, ourExe);
+  if (!isSame) {
+    // If DoPathsPointToIdenticalFile failed, we should not behave as the
+    // launcher process for the same reason as NtQueryInformationProcess.
+    MOZ_CRASH("DoPathsPointToIdenticalFile failed");
+  }
+  return isSame.value();
 }
 
 #endif // defined(MOZ_LAUNCHER_PROCESS)
@@ -209,12 +227,7 @@ RunAsLauncherProcess(int& argc, wchar_t** argv)
   bool result = false;
 
 #if defined(MOZ_LAUNCHER_PROCESS)
-  Maybe<bool> isChildOfFirefox = IsSameBinaryAsParentProcess();
-  if (isChildOfFirefox) {
-    result |= !isChildOfFirefox.value();
-  } else {
-    result = true;
-  }
+  result = !IsSameBinaryAsParentProcess();
 #endif // defined(MOZ_LAUNCHER_PROCESS)
 
   if (mozilla::EnvHasValue("MOZ_LAUNCHER_PROCESS")) {

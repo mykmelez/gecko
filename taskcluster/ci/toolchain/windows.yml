@@ -159,7 +159,8 @@ win64-rust-1.29:
         using: toolchain-script
         script: repack_rust.py
         arguments: [
-            '--channel', '1.29.0',
+            # Rustc 1.30 beta for rust-lang/rust#52847
+            '--channel', 'beta-2018-09-28',
             '--host', 'x86_64-pc-windows-msvc',
             '--target', 'x86_64-pc-windows-msvc',
             '--target', 'i686-pc-windows-msvc',
@@ -322,6 +323,28 @@ win64-rust-size:
         toolchain-artifact: public/build/rust-size.tar.bz2
     toolchains:
         - win64-rust-1.28
+
+win64-grcov:
+    description: "grcov toolchain build"
+    treeherder:
+        kind: build
+        platform: toolchains/opt
+        symbol: TW64(grcov)
+        tier: 1
+    worker-type: aws-provisioner-v1/gecko-{level}-b-win2012
+    worker:
+        max-run-time: 1800
+        env:
+            TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/sccache-build.manifest"
+    run:
+        using: toolchain-script
+        script: build-grcov.sh
+        resources:
+            - 'taskcluster/scripts/misc/tooltool-download.sh'
+        toolchain-artifact: public/build/grcov.tar.bz2
+    toolchains:
+        - win64-rust-1.28
+        - win64-clang-cl
 
 win32-gn:
     description: "gn toolchain build"

@@ -490,27 +490,21 @@ var PlacesCommandHook = {
    * Adds a folder with bookmarks to URIList given in param.
    */
   bookmarkPages(URIList) {
-    if (URIList.length > 1) {
-      PlacesUIUtils.showBookmarkDialog({ action: "add",
-                                         type: "folder",
-                                         URIList,
-                                       }, window);
-    }
-  },
-
-  /**
-   * Updates disabled state for the "Bookmark All Tabs" command.
-   */
-  updateBookmarkAllTabsCommand:
-  function PCH_updateBookmarkAllTabsCommand() {
-    // There's nothing to do in non-browser windows.
-    if (window.location.href != AppConstants.BROWSER_CHROME_URL)
+    if (!URIList.length) {
       return;
+    }
 
-    // Disable "Bookmark All Tabs" if there are less than two
-    // "unique current pages".
-    goSetCommandEnabled("Browser:BookmarkAllTabs",
-                        this.uniqueCurrentPages.length >= 2);
+    let bookmarkDialogInfo = {action: "add"};
+    if (URIList.length > 1) {
+      bookmarkDialogInfo.type = "folder";
+      bookmarkDialogInfo.URIList = URIList;
+    } else {
+      bookmarkDialogInfo.type = "bookmark";
+      bookmarkDialogInfo.title = URIList[0].title;
+      bookmarkDialogInfo.uri = URIList[0].uri;
+    }
+
+    PlacesUIUtils.showBookmarkDialog(bookmarkDialogInfo, window);
   },
 
   /**
@@ -1569,7 +1563,6 @@ var BookmarkingUI = {
       return;
 
     this.updateBookmarkPageMenuItem();
-    PlacesCommandHook.updateBookmarkAllTabsCommand();
     this._initMobileBookmarks(document.getElementById("menu_mobileBookmarks"));
   },
 
@@ -1642,20 +1635,14 @@ var BookmarkingUI = {
 
   onPanelMenuViewShowing: function BUI_onViewShowing(aEvent) {
     let panelview = aEvent.target;
+
     this.updateBookmarkPageMenuItem();
-    // Update checked status of the toolbar toggle.
-    let viewToolbar = document.getElementById("panelMenu_viewBookmarksToolbar");
-    if (viewToolbar) {
-      let personalToolbar = document.getElementById("PersonalToolbar");
-      if (personalToolbar.collapsed)
-        viewToolbar.removeAttribute("checked");
-      else
-        viewToolbar.setAttribute("checked", "true");
-    }
+
     // Get all statically placed buttons to supply them with keyboard shortcuts.
     let staticButtons = panelview.getElementsByTagName("toolbarbutton");
     for (let i = 0, l = staticButtons.length; i < l; ++i)
       CustomizableUI.addShortcut(staticButtons[i]);
+
     // Setup the Places view.
     // We restrict the amount of results to 42. Not 50, but 42. Why? Because 42.
     let query = "place:queryType=" + Ci.nsINavHistoryQueryOptions.QUERY_TYPE_BOOKMARKS +

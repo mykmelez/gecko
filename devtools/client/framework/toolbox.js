@@ -1628,6 +1628,13 @@ Toolbox.prototype = {
    *        An unique sidebar id
    */
   unregisterInspectorExtensionSidebar(id) {
+    // Unregister the sidebar from the toolbox if the toolbox is not already
+    // being destroyed (otherwise we would trigger a re-rendering of the
+    // inspector sidebar tabs while the toolbox is going away).
+    if (this._destroyer) {
+      return;
+    }
+
     const sidebarDef = this._inspectorExtensionSidebars.get(id);
     if (!sidebarDef) {
       return;
@@ -2265,7 +2272,14 @@ Toolbox.prototype = {
    * client. See the definition of the preference actor for more information.
    */
   get preferenceFront() {
-    return this.target.client.mainRoot.getFront("preference");
+    const frontPromise = this.target.client.mainRoot.getFront("preference");
+    frontPromise.then(front => {
+      // Set the _preferenceFront property to allow the resetPreferences toolbox method
+      // to cleanup the preference set when the toolbox is closed.
+      this._preferenceFront = front;
+    });
+
+    return frontPromise;
   },
 
   // Is the disable auto-hide of pop-ups feature available in this context?
@@ -2275,6 +2289,7 @@ Toolbox.prototype = {
 
   async toggleNoAutohide() {
     const front = await this.preferenceFront;
+
     const toggledValue = !(await this._isDisableAutohideEnabled());
 
     front.setBoolPref(DISABLE_AUTOHIDE_PREF, toggledValue);
@@ -2662,7 +2677,10 @@ Toolbox.prototype = {
   initInspector: function() {
     if (!this._initInspector) {
       this._initInspector = (async function() {
-        this._inspector = this.target.getFront("inspector");
+        // Temporary fix for bug #1493131 - inspector has a different life cycle
+        // than most other fronts because it is closely related to the toolbox.
+        // TODO: replace with getFront once inspector is separated from the toolbox
+        this._inspector = this.target.getInspector();
         const pref = "devtools.inspector.showAllAnonymousContent";
         const showAllAnonymousContent = Services.prefs.getBoolPref(pref);
         this._walker = await this._inspector.getWalker({ showAllAnonymousContent });
@@ -2733,6 +2751,7 @@ Toolbox.prototype = {
   /**
    * Destroy the inspector/walker/selection fronts
    * Returns a promise that resolves when the fronts are destroyed
+   * TODO: move to the inspector front once we can have listener hooks into fronts
    */
   destroyInspector: function() {
     if (this._destroyingInspector) {
@@ -2754,6 +2773,9 @@ Toolbox.prototype = {
       } else {
         await this.highlighterUtils.stopPicker();
       }
+      // Temporary fix for bug #1493131 - inspector has a different life cycle
+      // than most other fronts because it is closely related to the toolbox.
+      this._inspector.destroy();
 
       if (this._highlighter) {
         // Note that if the toolbox is closed, this will work fine, but will fail
@@ -2803,6 +2825,12 @@ Toolbox.prototype = {
       return this._destroyer;
     }
 
+    this._destroyer = this._destroyToolbox();
+
+    return this._destroyer;
+  },
+
+  _destroyToolbox: async function() {
     this.emit("destroy");
 
     this._target.off("inspect-object", this._onInspectObject);
@@ -2921,7 +2949,7 @@ Toolbox.prototype = {
     // Finish all outstanding tasks (which means finish destroying panels and
     // then destroying the host, successfully or not) before destroying the
     // target.
-    this._destroyer = new Promise(resolve => {
+    const onceDestroyed = new Promise(resolve => {
       resolve(settleAll(outstanding)
         .catch(console.error)
         .then(() => {
@@ -2977,16 +3005,15 @@ Toolbox.prototype = {
     const leakCheckObserver = ({wrappedJSObject: barrier}) => {
       // Make the leak detector wait until this toolbox is properly destroyed.
       barrier.client.addBlocker("DevTools: Wait until toolbox is destroyed",
-                                this._destroyer);
+                                onceDestroyed);
     };
 
     const topic = "shutdown-leaks-before-check";
     Services.obs.addObserver(leakCheckObserver, topic);
-    this._destroyer.then(() => {
-      Services.obs.removeObserver(leakCheckObserver, topic);
-    });
 
-    return this._destroyer;
+    await onceDestroyed;
+
+    Services.obs.removeObserver(leakCheckObserver, topic);
   },
 
   _highlighterReady: function() {

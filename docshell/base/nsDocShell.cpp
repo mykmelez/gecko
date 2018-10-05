@@ -339,6 +339,7 @@ nsDocShell::nsDocShell()
   , mDisplayMode(nsIDocShell::DISPLAY_MODE_BROWSER)
   , mJSRunToCompletionDepth(0)
   , mTouchEventsOverride(nsIDocShell::TOUCHEVENTS_OVERRIDE_NONE)
+  , mMetaViewportOverride(nsIDocShell::META_VIEWPORT_OVERRIDE_NONE)
   , mFullscreenAllowed(CHECK_ATTRIBUTES)
   , mCreatingDocument(false)
 #ifdef DEBUG
@@ -2648,6 +2649,36 @@ nsDocShell::SetTouchEventsOverride(uint32_t aTouchEventsOverride)
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsDocShell::GetMetaViewportOverride(uint32_t* aMetaViewportOverride)
+{
+  NS_ENSURE_ARG_POINTER(aMetaViewportOverride);
+
+  *aMetaViewportOverride = mMetaViewportOverride;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::SetMetaViewportOverride(uint32_t aMetaViewportOverride)
+{
+  if (!(aMetaViewportOverride == nsIDocShell::META_VIEWPORT_OVERRIDE_NONE ||
+        aMetaViewportOverride == nsIDocShell::META_VIEWPORT_OVERRIDE_ENABLED ||
+        aMetaViewportOverride == nsIDocShell::META_VIEWPORT_OVERRIDE_DISABLED)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  mMetaViewportOverride = aMetaViewportOverride;
+
+  // Inform our presShell that it needs to re-check its need for a viewport
+  // override.
+  nsCOMPtr<nsIPresShell> presShell = GetPresShell();
+  if (presShell) {
+    presShell->UpdateViewportOverridden(true);
+  }
+
+  return NS_OK;
+}
+
 /* virtual */ int32_t
 nsDocShell::ItemType()
 {
@@ -2927,6 +2958,9 @@ nsDocShell::SetDocLoaderParent(nsDocLoader* aParent)
     if (NS_SUCCEEDED(parentAsDocShell->GetTouchEventsOverride(&touchEventsOverride))) {
       SetTouchEventsOverride(touchEventsOverride);
     }
+    // We don't need to inherit metaViewportOverride, because the viewport
+    // is only relevant for the outermost nsDocShell, not for any iframes
+    // like this that might be embedded within it.
   }
 
   nsCOMPtr<nsILoadContext> parentAsLoadContext(do_QueryInterface(parent));
@@ -3832,7 +3866,7 @@ nsDocShell::AddChildSHEntryInternal(nsISHEntry* aCloneRef,
       index, getter_AddRefs(currentHE));
     NS_ENSURE_TRUE(currentHE, NS_ERROR_FAILURE);
 
-    nsCOMPtr<nsISHEntry> currentEntry(do_QueryInterface(currentHE));
+    nsCOMPtr<nsISHEntry> currentEntry(currentHE);
     if (currentEntry) {
       nsCOMPtr<nsISHEntry> nextEntry;
       uint32_t cloneID = aCloneRef->GetID();
@@ -6631,11 +6665,7 @@ nsDocShell::SuspendRefreshURIs()
 
       timer->Cancel();
 
-      nsCOMPtr<nsITimerCallback> rt = do_QueryInterface(callback);
-      NS_ASSERTION(rt,
-                   "RefreshURIList timer callbacks should only be RefreshTimer objects");
-
-      mRefreshURIList->ReplaceElementAt(rt, i);
+      mRefreshURIList->ReplaceElementAt(callback, i);
     }
   }
 
@@ -9501,7 +9531,7 @@ nsDocShell::InternalLoad(nsIURI* aURI,
       // In some cases the Open call doesn't actually result in a new
       // window being opened.  We can detect these cases by examining the
       // document in |newWin|, if any.
-      nsCOMPtr<nsPIDOMWindowOuter> piNewWin = do_QueryInterface(newWin);
+      nsCOMPtr<nsPIDOMWindowOuter> piNewWin = newWin;
       if (piNewWin) {
         nsCOMPtr<nsIDocument> newDoc = piNewWin->GetExtantDoc();
         if (!newDoc || newDoc->IsInitialDocument()) {

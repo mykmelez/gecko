@@ -39,6 +39,20 @@ set_config('MOZ_GECKO_PROFILER', gecko_profiler_define)
 set_define('MOZ_GECKO_PROFILER', gecko_profiler_define)
 
 
+# Whether code to parse ELF binaries should be compiled for the Gecko profiler
+# (for symbol table dumping).
+@depends(gecko_profiler, target)
+def gecko_profiler_parse_elf(value, target):
+    # Currently we only want to build this code on Android, in order to dump
+    # symbols from Android system libraries on the device. For other platforms
+    # there exist alternatives that don't require bloating up our binary size.
+    if value and target.os == 'Android':
+        return True
+
+set_config('MOZ_GECKO_PROFILER_PARSE_ELF', gecko_profiler_parse_elf)
+set_define('MOZ_GECKO_PROFILER_PARSE_ELF', gecko_profiler_parse_elf)
+
+
 option('--enable-dmd', env='MOZ_DMD',
        help='Enable Dark Matter Detector (heap profiler). '
             'Also enables jemalloc, replace-malloc and profiling')
@@ -189,25 +203,9 @@ def toolkit_define(toolkit):
 set_define(toolkit_define, True)
 
 
-option('--without-x', env='WITHOUT_X', help='Disable X11 support')
-
-@depends('--without-x', toolkit)
-def x11(value, toolkit):
-    if not value:
-        die('--without-x is not supported')
-
-    x11_toolkits = ('gtk3',)
-    if value and value.origin != 'default' and toolkit not in x11_toolkits:
-        die('--with-x is only valid with --enable-default-toolkit={%s}',
-            ','.join(x11_toolkits))
-
-    return True if value and toolkit in x11_toolkits else None
-
-set_config('MOZ_ENABLE_XREMOTE', x11)
-set_define('MOZ_ENABLE_XREMOTE', x11)
-set_config('MOZ_X11', x11)
-set_define('MOZ_X11', x11)
-add_old_configure_assignment('MOZ_X11', x11)
+set_config('MOZ_X11', True, when=toolkit_gtk)
+set_define('MOZ_X11', True, when=toolkit_gtk)
+add_old_configure_assignment('MOZ_X11', True, when=toolkit_gtk)
 
 # Wayland support
 # ==============================================================
@@ -233,13 +231,13 @@ def gl_provider_define(provider):
 
 set_define('MOZ_GL_PROVIDER', gl_provider_define)
 
-@depends(gl_provider, wayland, x11)
-def gl_default_provider(value, wayland, x11):
+@depends(gl_provider, wayland, toolkit_gtk)
+def gl_default_provider(value, wayland, toolkit_gtk):
     if value:
         return value
     elif wayland:
         return 'EGL'
-    elif x11:
+    elif toolkit_gtk:
         return 'GLX'
 
 set_config('MOZ_GL_PROVIDER', gl_provider)
@@ -1062,6 +1060,80 @@ def proxy_bypass_protection(_):
 
 set_config('MOZ_PROXY_BYPASS_PROTECTION', proxy_bypass_protection)
 set_define('MOZ_PROXY_BYPASS_PROTECTION', proxy_bypass_protection)
+
+# MIDL
+# ==============================================================
+
+@depends(c_compiler, toolchain_prefix)
+def midl_names(c_compiler, toolchain_prefix):
+    if c_compiler and c_compiler.type in ['gcc', 'clang']:
+        # mingw
+        widl = ('widl', )
+        if toolchain_prefix:
+            prefixed = tuple('%s%s' % (p, 'widl') for p in toolchain_prefix)
+            widl = prefixed + widl
+        return widl
+
+    return ('midl',)
+
+@depends(target, '--enable-compile-environment')
+def check_for_midl(target, compile_environment):
+    if target.os != 'WINNT':
+        return
+
+    if compile_environment:
+        return True
+
+
+midl = check_prog('MIDL', midl_names, when=check_for_midl, allow_missing=True)
+
+
+@depends(c_compiler, target, when=depends(midl, target)(lambda m, t: m and t.kernel == 'WINNT'))
+def midl_flags(c_compiler, target):
+    if c_compiler and c_compiler.type in ('msvc', 'clang-cl'):
+        env = {
+            'x86': 'win32',
+            'x86_64': 'x64',
+            'aarch64': 'arm64',
+        }[target.cpu]
+        return ['-env', env]
+
+    # mingw
+    return {
+        'x86': ['--win32', '-m32'],
+        'x86_64': ['--win64', '-m64'],
+    }[target.cpu]
+
+
+set_config('MIDL_FLAGS', midl_flags)
+
+# Accessibility
+# ==============================================================
+
+option('--disable-accessibility', help='Disable accessibility support')
+
+@depends('--disable-accessibility', check_for_midl, midl, c_compiler)
+def accessibility(value, check_for_midl, midl, c_compiler):
+    enabled = bool(value)
+
+    if not enabled:
+        return
+
+    if check_for_midl and not midl:
+        if c_compiler and c_compiler.type in ('gcc', 'clang'):
+            die('You have accessibility enabled, but widl could not be found. '
+                'Add --disable-accessibility to your mozconfig or install widl. '
+                'See https://developer.mozilla.org/en-US/docs/Cross_Compile_Mozilla_for_Mingw32 for details.')
+        else:
+            die('MIDL could not be found. '
+                'Building accessibility without MIDL is not supported.')
+
+    return enabled
+
+
+set_config('ACCESSIBILITY', accessibility)
+set_define('ACCESSIBILITY', accessibility)
+add_old_configure_assignment('ACCESSIBILITY', accessibility)
 
 # Addon signing
 # ==============================================================

@@ -3,6 +3,7 @@ use std::{mem, slice, ptr, env};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::os::raw::{c_void, c_char, c_float};
 use gleam::gl;
 
@@ -13,6 +14,7 @@ use webrender::DebugFlags;
 use webrender::{ApiRecordingReceiver, BinaryRecorder};
 use webrender::{AsyncPropertySampler, PipelineInfo, SceneBuilderHooks};
 use webrender::{UploadMethod, VertexUsageHint};
+use webrender::ShaderPrecacheFlags;
 use thread_profiler::register_thread_with_profiler;
 use moz2d_renderer::Moz2dBlobImageHandler;
 use program_cache::{WrProgramCache, remove_disk_cache};
@@ -28,6 +30,13 @@ use dwrote::{FontDescriptor, FontWeight, FontStretch, FontStyle};
 use core_foundation::string::CFString;
 #[cfg(target_os = "macos")]
 use core_graphics::font::CGFont;
+
+/// The unique id for WR resource identification.
+static NEXT_NAMESPACE_ID: AtomicUsize = AtomicUsize::new(1);
+
+fn next_namespace_id() -> IdNamespace {
+    IdNamespace(NEXT_NAMESPACE_ID.fetch_add(1, Ordering::Relaxed) as u32)
+}
 
 /// Whether a border should be antialiased.
 #[repr(C)]
@@ -959,6 +968,12 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         UploadMethod::PixelBuffer(VertexUsageHint::Dynamic)
     };
 
+    let precache_flags = if env_var_to_bool("MOZ_WR_PRECACHE_SHADERS") {
+        ShaderPrecacheFlags::FULL_COMPILE
+    } else {
+        ShaderPrecacheFlags::empty()
+    };
+
     let opts = RendererOptions {
         enable_aa: true,
         enable_subpixel_aa: true,
@@ -985,7 +1000,8 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         sampler: Some(Box::new(SamplerCallback::new(window_id))),
         max_texture_size: Some(8192), // Moz2D doesn't like textures bigger than this
         clear_color: Some(ColorF::new(0.0, 0.0, 0.0, 0.0)),
-        precache_shaders: env_var_to_bool("MOZ_WR_PRECACHE_SHADERS"),
+        precache_flags,
+        namespace_alloc_by_client: true,
         ..Default::default()
     };
 
@@ -1010,7 +1026,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
     let window_size = DeviceUintSize::new(window_width, window_height);
     let layer = 0;
     *out_handle = Box::into_raw(Box::new(
-            DocumentHandle::new(sender.create_api(), window_size, layer)));
+            DocumentHandle::new(sender.create_api_by_client(next_namespace_id()), window_size, layer)));
     *out_renderer = Box::into_raw(Box::new(renderer));
 
     return true;
@@ -1026,7 +1042,7 @@ pub extern "C" fn wr_api_create_document(
     assert!(unsafe { is_in_compositor_thread() });
 
     *out_handle = Box::into_raw(Box::new(DocumentHandle::new(
-        root_dh.api.clone_sender().create_api(),
+        root_dh.api.clone_sender().create_api_by_client(next_namespace_id()),
         doc_size,
         layer
     )));
@@ -1046,7 +1062,7 @@ pub extern "C" fn wr_api_clone(
     assert!(unsafe { is_in_compositor_thread() });
 
     let handle = DocumentHandle {
-        api: dh.api.clone_sender().create_api(),
+        api: dh.api.clone_sender().create_api_by_client(next_namespace_id()),
         document_id: dh.document_id,
     };
     *out_handle = Box::into_raw(Box::new(handle));
@@ -1128,7 +1144,7 @@ pub extern "C" fn wr_transaction_notify(txn: &mut Transaction, when: Checkpoint,
         }
     }
 
-    let handler = Arc::new(GeckoNotification(event));
+    let handler = Box::new(GeckoNotification(event));
     txn.notify(NotificationRequest::new(when, handler));
 }
 
@@ -2544,9 +2560,9 @@ extern "C" {
                                width: u32,
                                height: u32,
                                format: ImageFormat,
-                               tile_size: *const u16,
-                               tile_offset: *const TileOffset,
-                               dirty_rect: *const DeviceUintRect,
+                               tile_size: Option<&u16>,
+                               tile_offset: Option<&TileOffset>,
+                               dirty_rect: Option<&DeviceUintRect>,
                                output: MutByteSlice)
                                -> bool;
 }

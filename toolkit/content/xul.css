@@ -100,10 +100,6 @@ vbox {
 
 /********** label **********/
 
-label {
-  -moz-binding: url("chrome://global/content/bindings/text.xml#text-label");
-}
-
 label.text-link, label[onclick] {
   -moz-binding: url("chrome://global/content/bindings/text.xml#text-link");
   -moz-user-focus: normal;
@@ -375,7 +371,6 @@ tooltip {
 }
 
 tooltip {
-  -moz-binding: url("chrome://global/content/bindings/popup.xml#tooltip");
   -moz-box-orient: vertical;
   white-space: pre-wrap;
   margin-top: 21px;
@@ -590,12 +585,6 @@ tabpanels {
 tooltip[titletip="true"] {
   /* The width of the tooltip isn't limited on cropped <tree> cells. */
   max-width: none;
-}
-
-/********** progressmeter **********/
-
-progressmeter {
-  -moz-binding: url("chrome://global/content/bindings/progressmeter.xml#progressmeter");
 }
 
 /********** basic rule for anonymous content that needs to pass box properties through

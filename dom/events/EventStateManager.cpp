@@ -498,7 +498,7 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
     }
     ++gMouseOrKeyboardEventCounter;
 
-    nsCOMPtr<nsINode> node = do_QueryInterface(aTargetContent);
+    nsCOMPtr<nsINode> node = aTargetContent;
     if (node &&
         (aEvent->mMessage == eKeyUp || aEvent->mMessage == eMouseUp ||
          aEvent->mMessage == eWheel || aEvent->mMessage == eTouchEnd ||
@@ -874,7 +874,7 @@ EventStateManager::NotifyTargetUserActivation(WidgetEvent* aEvent,
     return;
   }
 
-  nsCOMPtr<nsINode> node = do_QueryInterface(aTargetContent);
+  nsCOMPtr<nsINode> node = aTargetContent;
   if (!node) {
     return;
   }
@@ -3012,7 +3012,7 @@ NodeAllowsClickThrough(nsINode* aNode)
     if (aNode->IsXULElement()) {
       mozilla::dom::Element* element = aNode->AsElement();
       static Element::AttrValuesArray strings[] =
-        {&nsGkAtoms::always, &nsGkAtoms::never, nullptr};
+        {nsGkAtoms::always, nsGkAtoms::never, nullptr};
       switch (element->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::clickthrough,
                                        strings, eCaseMatters)) {
         case 0:
@@ -4206,8 +4206,7 @@ EventStateManager::DispatchMouseOrPointerEvent(WidgetMouseEvent* aMouseEvent,
       NS_WARNING("Should have pointer locked element, but didn't.");
       return nullptr;
     }
-    nsCOMPtr<nsIContent> content = do_QueryInterface(pointerLockedElement);
-    return mPresContext->GetPrimaryFrameFor(content);
+    return mPresContext->GetPrimaryFrameFor(pointerLockedElement);
   }
 
   mCurrentTargetContent = nullptr;

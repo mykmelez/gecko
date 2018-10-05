@@ -223,7 +223,7 @@ pref("dom.keyboardevent.keypress.dispatch_non_printable_keys_only_system_group_i
 // if you need to limit under a directory, the path should end with "/" like
 // "example.com/foo/".  Note that this cannot limit port number for now.
 pref("dom.keyboardevent.keypress.hack.dispatch_non_printable_keys",
-     "*.etherpad.org/p/,etherpad.wikimedia.org/p/,board.net/p/,pad.riseup.net/p/,*.sandstorm.io,factor.cc/pad/,*.etherpad.fr/p/,piratenpad.de/p/,notes.typo3.org/p/,etherpad.net/p/,*.framapad.org/p/,pad.ouvaton.coop/,pad.systemli.org/p/,pad.lqdn.fr/p/,public.etherpad-mozilla.org/p/,*.cloudron.me/p/,pad.aquilenet.fr/p/,free.primarypad.com/p/,pad.ondesk.work/p/,demo.maadix.org/etherpad/pads/");
+     "medium.com/p/");
 #else
 pref("dom.keyboardevent.keypress.dispatch_non_printable_keys_only_system_group_in_content", false);
 #endif
@@ -1395,7 +1395,7 @@ pref("dom.event.clipboardevents.enabled",   true);
 pref("dom.event.highrestimestamp.enabled",  true);
 pref("dom.event.coalesce_mouse_move",       true);
 
-#if defined(NIGHTLY_BUILD) && !defined(ANDROID)
+#if defined(NIGHTLY_BUILD)
 pref("dom.ua_widget.enabled", true);
 #else
 pref("dom.ua_widget.enabled", false);
@@ -1410,7 +1410,13 @@ pref("javascript.options.strict",           false);
 pref("javascript.options.strict.debug",     false);
 #endif
 pref("javascript.options.baselinejit",      true);
+//Duplicated in JitOptions - ensure both match.
+pref("javascript.options.baselinejit.threshold", 10);
 pref("javascript.options.ion",              true);
+//Duplicated in JitOptions - ensure both match.
+pref("javascript.options.ion.threshold",    1000);
+//Duplicated in JitOptions - ensure both match.
+pref("javascript.options.ion.frequent_bailout_threshold", 10);
 pref("javascript.options.asmjs",            true);
 pref("javascript.options.wasm",             true);
 pref("javascript.options.wasm_ionjit",      true);
@@ -2596,9 +2602,10 @@ pref("security.dialog_enable_delay", 1000);
 pref("security.notification_enable_delay", 500);
 
 #if defined(DEBUG) && !defined(ANDROID)
-pref("csp.content_privileged_about_uris_without_csp", "blank,printpreview,srcdoc");
-// the following pref is for testing purposes only.
-pref("csp.overrule_content_privileged_about_uris_without_csp_whitelist", false);
+pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,about,addons,cache-entry,config,crashes,debugging,devtools,downloads,home,memory,networking,newtab,performance,plugins,policies,profiles,restartrequired,searchreset,serviceworkers,sessionrestore,support,sync-log,telemetry,url-classifier,webrtc,welcomeback");
+// the following prefs are for testing purposes only.
+pref("csp.overrule_about_uris_without_csp_whitelist", false);
+pref("csp.skip_about_page_has_csp_assert", false);
 #endif
 
 // Default Content Security Policy to apply to signed contents.
@@ -5090,7 +5097,18 @@ pref("alerts.showFavicons", false);
 // Whether to use platform-specific backends for showing desktop notifications.
 // If no such backend is available, or if the pref is false, then XUL
 // notifications are used.
+
+// Linux and macOS turn on system level notification as default, but Windows is
+// Nightly only due to unstable yet.
+#if defined(XP_WIN)
+#if defined(NIGHTLY_BUILD)
 pref("alerts.useSystemBackend", true);
+#else
+pref("alerts.useSystemBackend", false);
+#endif
+#else
+pref("alerts.useSystemBackend", true);
+#endif
 
 // DOM full-screen API.
 pref("full-screen-api.enabled", false);
@@ -5418,11 +5436,13 @@ pref("network.trr.bootstrapAddress", "");
 // Meant to survive basically a page load.
 pref("network.trr.blacklist-duration", 60);
 // Single TRR request timeout, in milliseconds
-pref("network.trr.request-timeout", 3000);
+pref("network.trr.request-timeout", 1500);
 // Allow AAAA entries to be used "early", before the A results are in
 pref("network.trr.early-AAAA", false);
 // Explicitly disable ECS (EDNS Client Subnet, RFC 7871)
 pref("network.trr.disable-ECS", true);
+// After this many failed TRR requests in a row, consider TRR borked
+pref("network.trr.max-fails", 5);
 
 pref("captivedetect.canonicalURL", "http://detectportal.firefox.com/success.txt");
 pref("captivedetect.canonicalContent", "success\n");
