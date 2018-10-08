@@ -7,7 +7,7 @@ use nsstring::{nsCString, nsACString};
 /// as the C++ equivalent.
 #[repr(transparent)]
 #[allow(non_camel_case_types)]
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct nsresult(pub u32);
 
 /// An extension trait that adds methods to `nsresult` types.
@@ -22,7 +22,7 @@ pub trait NsresultExt {
 }
 
 impl NsresultExt for nsresult {
-    fn failed(&self) -> bool {
+    fn failed(self) -> bool {
         (self.0 >> 31) != 0
     }
 
