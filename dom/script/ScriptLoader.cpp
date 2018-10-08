@@ -1070,9 +1070,8 @@ ScriptLoader::StartLoad(ScriptLoadRequest* aRequest)
     // According to the spec, module scripts have different behaviour to classic
     // scripts and always use CORS.
     securityFlags = nsILoadInfo::SEC_REQUIRE_CORS_DATA_INHERITS;
-    if (aRequest->CORSMode() == CORS_NONE) {
-      securityFlags |= nsILoadInfo::SEC_COOKIES_OMIT;
-    } else if (aRequest->CORSMode() == CORS_ANONYMOUS) {
+    if (aRequest->CORSMode() == CORS_NONE ||
+        aRequest->CORSMode() == CORS_ANONYMOUS) {
       securityFlags |= nsILoadInfo::SEC_COOKIES_SAME_ORIGIN;
     } else {
       MOZ_ASSERT(aRequest->CORSMode() == CORS_USE_CREDENTIALS);
@@ -1110,7 +1109,9 @@ ScriptLoader::StartLoad(ScriptLoadRequest* aRequest)
   // constant.
   aRequest->mCacheInfo = nullptr;
   nsCOMPtr<nsICacheInfoChannel> cic(do_QueryInterface(channel));
-  if (cic && nsContentUtils::IsBytecodeCacheEnabled()) {
+  if (cic && nsContentUtils::IsBytecodeCacheEnabled() &&
+      // Bug 1436400: no bytecode cache support for modules yet.
+      !aRequest->IsModuleRequest()) {
     if (!aRequest->IsLoadingSource()) {
       // Inform the HTTP cache that we prefer to have information coming from the
       // bytecode cache instead of the sources, if such entry is already registered.

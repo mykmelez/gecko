@@ -171,7 +171,7 @@ pref("dom.enable_performance_navigation_timing", true);
 pref("dom.performance.enable_notify_performance_timing", false);
 
 // Enable collecting of docgroup activity in the scheduler
-pref("dom.performance.enable_scheduler_timing", false);
+pref("dom.performance.enable_scheduler_timing", true);
 
 // Enable Permission API's .revoke() method
 pref("dom.permissions.revoke.enable", false);
@@ -1090,6 +1090,8 @@ pref("toolkit.dump.emit", false);
 pref("devtools.recordreplay.enabled", true);
 pref("devtools.recordreplay.enableRewinding", true);
 #endif
+
+pref("devtools.recordreplay.mvp.enabled", false);
 
 // view source
 pref("view_source.syntax_highlight", true);
@@ -5070,7 +5072,7 @@ pref("extensions.webextensions.ExtensionStorageIDB.enabled", false);
 #endif
 
 // if enabled, store execution times for API calls
-pref("extensions.webextensions.enablePerformanceCounters", false);
+pref("extensions.webextensions.enablePerformanceCounters", true);
 
 // Maximum age in milliseconds of performance counters in children
 // When reached, the counters are sent to the main process and
