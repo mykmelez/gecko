@@ -644,41 +644,8 @@ window._gBrowser = {
     return this.browsers[aIndex];
   },
 
-  getBrowserIndexForDocument(aDocument) {
-    var tab = this._getTabForContentWindow(aDocument.defaultView);
-    return tab ? tab._tPos : -1;
-  },
-
-  getBrowserForDocument(aDocument) {
-    var tab = this._getTabForContentWindow(aDocument.defaultView);
-    return tab ? tab.linkedBrowser : null;
-  },
-
-  getBrowserForContentWindow(aWindow) {
-    var tab = this._getTabForContentWindow(aWindow);
-    return tab ? tab.linkedBrowser : null;
-  },
-
   getBrowserForOuterWindowID(aID) {
     return this._outerWindowIDBrowserMap.get(aID);
-  },
-
-  _getTabForContentWindow(aWindow) {
-    // When not using remote browsers, we can take a fast path by getting
-    // directly from the content window to the browser without looping
-    // over all browsers.
-    if (!gMultiProcessBrowser) {
-      let browser = aWindow.docShell.chromeEventHandler;
-      return this.getTabForBrowser(browser);
-    }
-
-    for (let i = 0; i < this.browsers.length; i++) {
-      // NB: We use contentWindowAsCPOW so that this code works both
-      // for remote browsers as well. aWindow may be a CPOW.
-      if (this.browsers[i].contentWindowAsCPOW == aWindow)
-        return this.tabs[i];
-    }
-    return null;
   },
 
   getTabForBrowser(aBrowser) {
@@ -1634,6 +1601,8 @@ window._gBrowser = {
       // Web Replay middleman processes need the default URL to be loaded in
       // order to set up their rendering state.
       aBrowser.setAttribute("nodefaultsrc", "false");
+    } else if (aBrowser.hasAttribute("recordExecution")) {
+      aBrowser.removeAttribute("recordExecution");
     }
 
     // NB: This works with the hack in the browser constructor that
@@ -2585,6 +2554,30 @@ window._gBrowser = {
     }
 
     return t;
+  },
+
+  moveTabsToStart(contextTab) {
+    let tabs = contextTab.multiselected ?
+      gBrowser.selectedTabs :
+      [contextTab];
+    // Walk the array in reverse order so the tabs are kept in order.
+    for (let i = tabs.length - 1; i >= 0; i--) {
+      let tab = tabs[i];
+      if (tab._tPos > 0) {
+        this.moveTabTo(tab, 0);
+      }
+    }
+  },
+
+  moveTabsToEnd(contextTab) {
+    let tabs = contextTab.multiselected ?
+      gBrowser.selectedTabs :
+      [contextTab];
+    for (let tab of tabs) {
+      if (tab._tPos < this.tabs.length - 1) {
+        this.moveTabTo(tab, this.tabs.length - 1);
+      }
+    }
   },
 
   warnAboutClosingTabs(tabsToClose, aCloseTabs, aOptionalMessage) {
@@ -3874,7 +3867,8 @@ window._gBrowser = {
   },
 
   allTabsSelected() {
-    return this.visibleTabs.every(t => t.multiselected);
+    return this.visibleTabs.length == 1 ||
+           this.visibleTabs.every(t => t.multiselected);
   },
 
   lockClearMultiSelectionOnce() {
@@ -4029,8 +4023,13 @@ window._gBrowser = {
   },
 
   unpinMultiSelectedTabs() {
-    for (let tab of this.selectedTabs) {
-        this.unpinTab(tab);
+    // The selectedTabs getter returns the tabs
+    // in visual order. We need to unpin in reverse
+    // order to maintain visual order.
+    let selectedTabs = this.selectedTabs;
+    for (let i = selectedTabs.length - 1; i >= 0; i--) {
+      let tab = selectedTabs[i];
+      this.unpinTab(tab);
     }
   },
 
@@ -4162,7 +4161,7 @@ window._gBrowser = {
     const affectedTabsLength = contextTabInSelection ? selectedTabs.length : 1;
     if (tab.mOverCloseButton) {
       label = tab.selected ?
-        stringWithShortcut("tabs.closeSelectedTabs.tooltip", "key_close", affectedTabsLength) :
+        stringWithShortcut("tabs.closeTabs.tooltip", "key_close", affectedTabsLength) :
         PluralForm.get(affectedTabsLength, gTabBrowserBundle.GetStringFromName("tabs.closeTabs.tooltip"))
                   .replace("#1", affectedTabsLength);
     } else if (tab._overPlayingIcon) {
@@ -4449,7 +4448,8 @@ window._gBrowser = {
         return;
       }
 
-      var tab = this._getTabForContentWindow(event.target);
+      let browser = event.target.docShell.chromeEventHandler;
+      let tab = this.getTabForBrowser(browser);
       if (tab) {
         // Skip running PermitUnload since it already happened.
         this.removeTab(tab, { skipPermitUnload: true });
@@ -4469,7 +4469,7 @@ window._gBrowser = {
       // browser, but that's in the originalTarget and not the target,
       // because it's across the tabbrowser's XBL boundary.
       let tabForEvent = targetIsWindow ?
-        this._getTabForContentWindow(event.target.top) :
+        this.getTabForBrowser(event.target.docShell.chromeEventHandler) :
         this.getTabForBrowser(event.originalTarget);
 
       // Focus window for beforeunload dialog so it is seen but don't
@@ -4532,7 +4532,8 @@ window._gBrowser = {
       if (contentWin != contentWin.top)
         return;
 
-      var tab = this._getTabForContentWindow(contentWin);
+      let browser = contentWin.docShell.chromeEventHandler;
+      var tab = this.getTabForBrowser(browser);
       if (!tab || tab.hasAttribute("pending"))
         return;
 
@@ -5324,6 +5325,23 @@ var TabContextMenu = {
     let contextUnpinSelectedTabs = document.getElementById("context_unpinSelectedTabs");
     contextUnpinSelectedTabs.hidden = !this.contextTab.pinned || !multiselectionContext;
 
+    let contextMoveTabOptions = document.getElementById("context_moveTabOptions");
+    contextMoveTabOptions.disabled = gBrowser.allTabsSelected();
+    let moveTabOptionsStringPrefix = multiselectionContext ? "multiselectcontext" : "nonmultiselectcontext";
+    let moveTabOptionsLabel = contextMoveTabOptions.getAttribute(moveTabOptionsStringPrefix + "label");
+    let moveTabOptionsAccessKey = contextMoveTabOptions.getAttribute(moveTabOptionsStringPrefix + "accesskey");
+    contextMoveTabOptions.setAttribute("label", moveTabOptionsLabel);
+    contextMoveTabOptions.setAttribute("accesskey", moveTabOptionsAccessKey);
+    let selectedTabs = gBrowser.selectedTabs;
+    let contextMoveTabToEnd = document.getElementById("context_moveToEnd");
+    let allSelectedTabsAdjacent = selectedTabs.every((element, index, array) => {
+      return array.length > index + 1 ? element._tPos + 1 == array[index + 1]._tPos : true;
+    });
+    contextMoveTabToEnd.disabled = selectedTabs[selectedTabs.length - 1]._tPos == gBrowser.visibleTabs.length - 1 &&
+                                   allSelectedTabsAdjacent;
+    let contextMoveTabToStart = document.getElementById("context_moveToStart");
+    contextMoveTabToStart.disabled = selectedTabs[0]._tPos == 0 && allSelectedTabsAdjacent;
+
     // Hide the "Duplicate Tab" if there is a selection present
     let contextDuplicateTab = document.getElementById("context_duplicateTab");
     contextDuplicateTab.hidden = multiselectionContext;
@@ -5343,13 +5361,13 @@ var TabContextMenu = {
     document.getElementById("context_closeTab").hidden = multiselectionContext;
     document.getElementById("context_closeSelectedTabs").hidden = !multiselectionContext;
 
-    // Hide "Bookmark All Tabs" for a pinned tab or multiselection.
+    // Disable "Close Tab Options" if all tabs are selected
+    document.getElementById("context_closeTabOptions").disabled = gBrowser.allTabsSelected();
+
+    // Hide "Bookmark Tab" for multiselection.
     // Update its state if visible.
-    let bookmarkAllTabs = document.getElementById("context_bookmarkAllTabs");
-    bookmarkAllTabs.hidden = this.contextTab.pinned || multiselectionContext;
-    if (!bookmarkAllTabs.hidden) {
-      PlacesCommandHook.updateBookmarkAllTabsCommand();
-    }
+    let bookmarkTab = document.getElementById("context_bookmarkTab");
+    bookmarkTab.hidden = multiselectionContext;
 
     // Show "Bookmark Selected Tabs" in a multiselect context and hide it otherwise.
     let bookmarkMultiSelectedTabs = document.getElementById("context_bookmarkSelectedTabs");

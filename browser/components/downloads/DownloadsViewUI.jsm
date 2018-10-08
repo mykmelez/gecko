@@ -14,6 +14,7 @@ var EXPORTED_SYMBOLS = [
 ];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
@@ -65,6 +66,14 @@ var gDownloadElementButtons = {
     iconClass: "downloadIconCancel",
   },
 };
+
+/**
+ * Associates each document with a pre-built DOM fragment representing the
+ * download list item. This is then cloned to create each individual list item.
+ * This is stored on the document to prevent leaks that would occur if a single
+ * instance created by one document's DOMParser was stored globally.
+ */
+var gDownloadListItemFragments = new WeakMap();
 
 var DownloadsViewUI = {
   /**
@@ -140,6 +149,69 @@ this.DownloadsViewUI.DownloadElementShell.prototype = {
   element: null,
 
   /**
+   * Manages the "active" state of the shell. By default all the shells are
+   * inactive, thus their UI is not updated. They must be activated when
+   * entering the visible area.
+   */
+  ensureActive() {
+    if (!this._active) {
+      this._active = true;
+      this.connect();
+      this.onChanged();
+    }
+  },
+  get active() {
+    return !!this._active;
+  },
+
+  connect() {
+    let document = this.element.ownerDocument;
+    let downloadListItemFragment = gDownloadListItemFragments.get(document);
+    if (!downloadListItemFragment) {
+      let MozXULElement = document.defaultView.MozXULElement;
+      downloadListItemFragment = MozXULElement.parseXULToFragment(`
+        <hbox class="downloadMainArea" flex="1" align="center">
+          <stack>
+            <image class="downloadTypeIcon" validate="always"/>
+            <image class="downloadBlockedBadge" />
+          </stack>
+          <vbox class="downloadContainer" flex="1" pack="center">
+            <description class="downloadTarget" crop="center"/>
+            <progressmeter class="downloadProgress" min="0" max="100"/>
+            <description class="downloadDetails downloadDetailsNormal"
+                         crop="end"/>
+            <description class="downloadDetails downloadDetailsHover"
+                         crop="end"/>
+            <description class="downloadDetails downloadDetailsButtonHover"
+                         crop="end"/>
+          </vbox>
+        </hbox>
+        <toolbarseparator />
+        <button class="downloadButton"
+                oncommand="DownloadsView.onDownloadButton(event);"/>
+      `);
+      gDownloadListItemFragments.set(document, downloadListItemFragment);
+    }
+    this.element.setAttribute("active", true);
+    this.element.setAttribute("orient", "horizontal");
+    this.element.setAttribute("onclick",
+                              "DownloadsView.onDownloadClick(event);");
+    this.element.appendChild(document.importNode(downloadListItemFragment,
+                                                 true));
+    for (let [propertyName, selector] of [
+      ["_downloadTypeIcon", ".downloadTypeIcon"],
+      ["_downloadTarget", ".downloadTarget"],
+      ["_downloadProgress", ".downloadProgress"],
+      ["_downloadDetailsNormal", ".downloadDetailsNormal"],
+      ["_downloadDetailsHover", ".downloadDetailsHover"],
+      ["_downloadDetailsButtonHover", ".downloadDetailsButtonHover"],
+      ["_downloadButton", ".downloadButton"],
+    ]) {
+      this[propertyName] = this.element.querySelector(selector);
+    }
+  },
+
+  /**
    * Returns a string from the downloads stringbundleset, which contains legacy
    * strings that are loaded from DTD files instead of properties files. This
    * won't be necessary once localization is converted to Fluent (bug 1452637).
@@ -174,18 +246,52 @@ this.DownloadsViewUI.DownloadElementShell.prototype = {
   },
 
   /**
-   * The progress element for the download, or undefined in case the XBL binding
-   * has not been applied yet.
+   * Updates the display name and icon.
+   *
+   * @param displayName
+   *        This is usually the full file name of the download without the path.
+   * @param icon
+   *        URL of the icon to load, generally from the "image" property.
    */
-  get _progressElement() {
-    if (!this.__progressElement) {
-      // If the element is not available now, we will try again the next time.
-      this.__progressElement =
-           this.element.ownerDocument.getAnonymousElementByAttribute(
-                                         this.element, "anonid",
-                                         "progressmeter");
+  showDisplayNameAndIcon(displayName, icon) {
+    this._downloadTarget.setAttribute("value", displayName);
+    this._downloadTarget.setAttribute("tooltiptext", displayName);
+    this._downloadTypeIcon.setAttribute("src", icon);
+  },
+
+  /**
+   * Updates the displayed progress bar.
+   *
+   * @param mode
+   *        Either "normal" or "undetermined".
+   * @param value
+   *        Percentage of the progress bar to display, from 0 to 100.
+   * @param paused
+   *        True to display the progress bar style for paused downloads.
+   */
+  showProgress(mode, value, paused) {
+    // The "undetermined" mode of the progressmeter is implemented with a
+    // different element structure, and with support from platform code as well.
+    // On Linux only, this mode isn't compatible with the custom styling that we
+    // apply separately with the "progress-undetermined" attribute.
+    this._downloadProgress.setAttribute("mode",
+      AppConstants.platform == "linux" ? "normal" : mode);
+    if (mode == "undetermined") {
+      this._downloadProgress.setAttribute("progress-undetermined", "true");
+    } else {
+      this._downloadProgress.removeAttribute("progress-undetermined");
     }
-    return this.__progressElement;
+    this._downloadProgress.setAttribute("value", value);
+    if (paused) {
+      this._downloadProgress.setAttribute("paused", "true");
+    } else {
+      this._downloadProgress.removeAttribute("paused");
+    }
+
+    // Dispatch the ValueChange event for accessibility.
+    let event = this.element.ownerDocument.createEvent("Events");
+    event.initEvent("ValueChange", true, true);
+    this._downloadProgress.dispatchEvent(event);
   },
 
   /**
@@ -199,8 +305,9 @@ this.DownloadsViewUI.DownloadElementShell.prototype = {
    *        as the status line. This is ignored in the Downloads View.
    */
   showStatus(status, hoverStatus = status) {
-    this.element.setAttribute("status", status);
-    this.element.setAttribute("hoverStatus", hoverStatus);
+    this._downloadDetailsNormal.setAttribute("value", status);
+    this._downloadDetailsNormal.setAttribute("tooltiptext", status);
+    this._downloadDetailsHover.setAttribute("value", hoverStatus);
   },
 
   /**
@@ -237,23 +344,29 @@ this.DownloadsViewUI.DownloadElementShell.prototype = {
     }
   },
 
+  /**
+   * Updates the main action button and makes it visible.
+   *
+   * @param type
+   *        One of the presets defined in gDownloadElementButtons.
+   */
   showButton(type) {
     let { commandName, l10nId, descriptionL10nId,
           iconClass } = gDownloadElementButtons[type];
 
     this.buttonCommandName = commandName;
-    let labelAttribute = this.isPanel ? "buttonarialabel" : "buttontooltiptext";
-    this.element.setAttribute(labelAttribute, this.string(l10nId));
+    let labelAttribute = this.isPanel ? "aria-label" : "tooltiptext";
+    this._downloadButton.setAttribute(labelAttribute, this.string(l10nId));
     if (this.isPanel && descriptionL10nId) {
-      this.element.setAttribute("buttonHoverStatus",
-                                this.string(descriptionL10nId));
+      this._downloadDetailsButtonHover.setAttribute("value",
+        this.string(descriptionL10nId));
     }
-    this.element.setAttribute("buttonclass", "downloadButton " + iconClass);
-    this.element.removeAttribute("buttonhidden");
+    this._downloadButton.setAttribute("class", "downloadButton " + iconClass);
+    this._downloadButton.removeAttribute("hidden");
   },
 
   hideButton() {
-    this.element.setAttribute("buttonhidden", "true");
+    this._downloadButton.setAttribute("hidden", "true");
   },
 
   lastEstimatedSecondsLeft: Infinity,
@@ -263,9 +376,8 @@ this.DownloadsViewUI.DownloadElementShell.prototype = {
    * called for every progress update in order to improve performance.
    */
   _updateState() {
-    this.element.setAttribute("displayName",
-                              DownloadsViewUI.getDisplayName(this.download));
-    this.element.setAttribute("image", this.image);
+    this.showDisplayNameAndIcon(DownloadsViewUI.getDisplayName(this.download),
+                                this.image);
     this.element.setAttribute("state",
                               DownloadsCommon.stateOfDownload(this.download));
 
@@ -423,26 +535,11 @@ this.DownloadsViewUI.DownloadElementShell.prototype = {
     }
 
     // These attributes are set in all code paths, because they are relevant for
-    // downloads that are in progress and for other states where the progress
-    // bar is visible.
+    // downloads that are in progress and for other states.
     if (this.download.hasProgress) {
-      this.element.setAttribute("progressmode", "normal");
-      this.element.setAttribute("progress", this.download.progress);
+      this.showProgress("normal", this.download.progress, progressPaused);
     } else {
-      this.element.setAttribute("progressmode", "undetermined");
-    }
-
-    if (progressPaused) {
-      this.element.setAttribute("progresspaused", "true");
-    } else {
-      this.element.removeAttribute("progresspaused");
-    }
-
-    // Dispatch the ValueChange event for accessibility, if possible.
-    if (this._progressElement) {
-      let event = this.element.ownerDocument.createEvent("Events");
-      event.initEvent("ValueChange", true, true);
-      this._progressElement.dispatchEvent(event);
+      this.showProgress("undetermined", 100, progressPaused);
     }
   },
 

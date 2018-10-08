@@ -60,12 +60,11 @@ NS_IMPL_RELEASE_INHERITED(PaymentRequest, DOMEventTargetHelper)
 bool
 PaymentRequest::PrefEnabled(JSContext* aCx, JSObject* aObj)
 {
-#ifdef NIGHTLY_BUILD
-  return XRE_IsContentProcess() &&
-         Preferences::GetBool("dom.payments.request.enabled");
-#else
-  return false;
-#endif
+  if (!XRE_IsContentProcess()) {
+    return false;
+  }
+
+  return StaticPrefs::dom_payments_request_enabled();
 }
 
 nsresult
@@ -1041,6 +1040,7 @@ nsresult
 PaymentRequest::UpdateShippingAddress(const nsAString& aCountry,
                                       const nsTArray<nsString>& aAddressLine,
                                       const nsAString& aRegion,
+                                      const nsAString& aRegionCode,
                                       const nsAString& aCity,
                                       const nsAString& aDependentLocality,
                                       const nsAString& aPostalCode,
@@ -1051,11 +1051,13 @@ PaymentRequest::UpdateShippingAddress(const nsAString& aCountry,
 {
   nsTArray<nsString> emptyArray;
   mShippingAddress = new PaymentAddress(GetOwner(), aCountry, emptyArray,
-                                        aRegion, aCity, aDependentLocality,
-                                        aPostalCode, aSortingCode,
-                                        EmptyString(), EmptyString(), EmptyString());
+                                        aRegion, aRegionCode, aCity,
+                                        aDependentLocality, aPostalCode,
+                                        aSortingCode, EmptyString(),
+                                        EmptyString(), EmptyString());
   mFullShippingAddress = new PaymentAddress(GetOwner(), aCountry, aAddressLine,
-                                            aRegion, aCity, aDependentLocality,
+                                            aRegion, aRegionCode, aCity,
+                                            aDependentLocality,
                                             aPostalCode, aSortingCode,
                                             aOrganization, aRecipient, aPhone);
   // Fire shippingaddresschange event

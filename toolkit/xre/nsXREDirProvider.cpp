@@ -172,7 +172,7 @@ nsXREDirProvider::Initialize(nsIFile *aXULAppDir,
 #endif
 
   if (!mProfileDir) {
-    nsCOMPtr<nsIDirectoryServiceProvider> app(do_QueryInterface(mAppProvider));
+    nsCOMPtr<nsIDirectoryServiceProvider> app(mAppProvider);
     if (app) {
       bool per = false;
       app->GetFile(NS_APP_USER_PROFILE_50_DIR, &per, getter_AddRefs(mProfileDir));
@@ -1490,7 +1490,7 @@ nsXREDirProvider::GetUserDataDirectoryHome(nsIFile** aFile, bool aLocal)
   rv = dirFileMac->InitWithFSRef(&fsRef);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  localDir = do_QueryInterface(dirFileMac, &rv);
+  localDir = dirFileMac;
 #elif defined(XP_IOS)
   nsAutoCString userDir;
   if (GetUIKitDirectory(aLocal, userDir)) {

@@ -65,6 +65,13 @@ WebConsoleOutputWrapper.prototype = {
         openLink: (url, e) => {
           hud.owner.openLink(url, e);
         },
+        canRewind: () => {
+          if (!hud.owner.target.activeTab) {
+            return false;
+          }
+
+          return hud.owner.target.activeTab.traits.canRewind;
+        },
         createElement: nodename => {
           return this.document.createElement(nodename);
         },
@@ -166,6 +173,9 @@ WebConsoleOutputWrapper.prototype = {
       };
 
       if (this.toolbox) {
+        this.toolbox.threadClient.addListener("paused", this.dispatchPaused.bind(this));
+        this.toolbox.threadClient.addListener("resumed", this.dispatchResumed.bind(this));
+
         Object.assign(serviceContainer, {
           onViewSourceInDebugger: frame => {
             this.toolbox.viewSourceInDebugger(frame.url, frame.line).then(() => {
@@ -220,7 +230,9 @@ WebConsoleOutputWrapper.prototype = {
               .setNodeFront(front, { reason: "console" });
 
             return Promise.all([onNodeFrontSet, onInspectorUpdated]);
-          }
+          },
+          jumpToExecutionPoint: executionPoint =>
+            this.toolbox.threadClient.timeWarp(executionPoint)
         });
       }
 
@@ -344,6 +356,16 @@ WebConsoleOutputWrapper.prototype = {
 
   dispatchTimestampsToggle: function(enabled) {
     store.dispatch(actions.timestampsToggle(enabled));
+  },
+
+  dispatchPaused: function(_, packet) {
+    if (packet.executionPoint) {
+      store.dispatch(actions.setPauseExecutionPoint(packet.executionPoint));
+    }
+  },
+
+  dispatchResumed: function(_, packet) {
+    store.dispatch(actions.setPauseExecutionPoint(null));
   },
 
   dispatchMessageUpdate: function(message, res) {

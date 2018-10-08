@@ -93,6 +93,7 @@ RenderCompositorANGLE::SutdownEGLLibraryIfNecessary()
   if (device.get() != GetDeviceOfEGLDisplay() &&
       RenderThread::Get()->RendererCount() == 0) {
     // Shutdown GLLibraryEGL for updating EGLDisplay.
+    RenderThread::Get()->ClearSharedGL();
     egl->Shutdown();
   }
   return true;
@@ -110,10 +111,8 @@ RenderCompositorANGLE::Initialize()
   if (!SutdownEGLLibraryIfNecessary()) {
     return false;
   }
-
-  nsCString discardFailureId;
-  if (!gl::GLLibraryEGL::EnsureInitialized(/* forceAccel */ true, &discardFailureId)) {
-    gfxCriticalNote << "Failed to load EGL library: " << discardFailureId.get();
+  if (!RenderThread::Get()->SharedGL()) {
+    gfxCriticalNote << "[WR] failed to get shared GL context.";
     return false;
   }
 
@@ -213,21 +212,6 @@ RenderCompositorANGLE::Initialize()
     return false;
   }
 
-  const auto flags = gl::CreateContextFlags::PREFER_ES3;
-
-  // Create GLContext with dummy EGLSurface, the EGLSurface is not used.
-  // Instread we override it with EGLSurface of SwapChain's back buffer.
-  mGL = gl::GLContextProviderEGL::CreateHeadless(flags, &discardFailureId);
-  if (!mGL || !mGL->IsANGLE()) {
-    gfxCriticalNote << "Failed ANGLE GL context creation for WebRender: " << gfx::hexa(mGL.get());
-    return false;
-  }
-
-  if (!mGL->MakeCurrent()) {
-    gfxCriticalNote << "Failed GL context creation for WebRender: " << gfx::hexa(mGL.get());
-    return false;
-  }
-
   // Force enable alpha channel to make sure ANGLE use correct framebuffer formart
   if (!gl::CreateConfig(&mEGLConfig, /* bpp */ 32, /* enableDepthBuffer */ true)) {
     gfxCriticalNote << "Failed to create EGLConfig for WebRender";
@@ -324,13 +308,13 @@ RenderCompositorANGLE::BeginFrame()
     return false;
   }
 
-  if (!mGL->MakeCurrent()) {
+  if (!MakeCurrent()) {
     gfxCriticalNote << "Failed to make render context current, can't draw.";
     return false;
   }
 
   if (mSyncObject) {
-    if (!mSyncObject->Synchronize()) {
+    if (!mSyncObject->Synchronize(/* aFallible */ true)) {
       // It's timeout or other error. Handle the device-reset here.
       RenderThread::Get()->HandleDeviceReset("SyncObject", /* aNotify */ true);
       return false;
@@ -434,8 +418,6 @@ RenderCompositorANGLE::ResizeBufferIfNeeded()
     return false;
   }
 
-  gl::GLContextEGL::Cast(mGL)->SetEGLSurfaceOverride(surface);
-
   mEGLSurface = surface;
   mBufferSize = Some(size);
 
@@ -449,7 +431,7 @@ RenderCompositorANGLE::DestroyEGLSurface()
 
   // Release EGLSurface of back buffer before calling ResizeBuffers().
   if (mEGLSurface) {
-    gl::GLContextEGL::Cast(mGL)->SetEGLSurfaceOverride(EGL_NO_SURFACE);
+    gl::GLContextEGL::Cast(gl())->SetEGLSurfaceOverride(EGL_NO_SURFACE);
     egl->fDestroySurface(egl->Display(), mEGLSurface);
     mEGLSurface = nullptr;
   }
@@ -464,6 +446,13 @@ bool
 RenderCompositorANGLE::Resume()
 {
   return true;
+}
+
+bool
+RenderCompositorANGLE::MakeCurrent()
+{
+  gl::GLContextEGL::Cast(gl())->SetEGLSurfaceOverride(mEGLSurface);
+  return gl()->MakeCurrent();
 }
 
 LayoutDeviceIntSize

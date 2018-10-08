@@ -718,6 +718,15 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
                 })
          ->Track(mRequest);
 
+  // The stream, received from the child process, must be cloneable and seekable
+  // in order to allow devtools to inspect its content.
+  nsCOMPtr<nsIRunnable> r =
+    NS_NewRunnableFunction("HttpChannelParent::EnsureUploadStreamIsCloneable",
+      [self]() {
+        self->TryInvokeAsyncOpen(NS_OK);
+      });
+  ++mAsyncOpenBarrier;
+  mChannel->EnsureUploadStreamIsCloneable(r);
   return true;
 }
 
@@ -741,7 +750,7 @@ HttpChannelParent::WaitForBgParent()
     return promise.forget();
   }
 
-  return mPromise.Ensure(__func__);;
+  return mPromise.Ensure(__func__);
 }
 
 bool
@@ -1619,7 +1628,29 @@ HttpChannelParent::OnStopRequest(nsIRequest *aRequest,
   }
 
   if (NeedFlowControl()) {
-    Telemetry::Accumulate(Telemetry::NETWORK_BACK_PRESSURE_SUSPENSION_RATE, mHasSuspendedByBackPressure);
+    bool isLocal = false;
+    NetAddr peerAddr = mChannel->GetPeerAddr();
+
+    #if defined(XP_UNIX)
+      // Unix-domain sockets are always local.
+      isLocal = (peerAddr.raw.family == PR_AF_LOCAL);
+    #endif
+
+    isLocal = isLocal || IsLoopBackAddress(&peerAddr);
+
+    if (!isLocal) {
+      if (!mHasSuspendedByBackPressure) {
+        AccumulateCategorical(Telemetry::LABELS_NETWORK_BACK_PRESSURE_SUSPENSION_RATE_V2::NotSuspended);
+      } else {
+        AccumulateCategorical(Telemetry::LABELS_NETWORK_BACK_PRESSURE_SUSPENSION_RATE_V2::Suspended);
+      }
+    } else {
+      if (!mHasSuspendedByBackPressure) {
+        AccumulateCategorical(Telemetry::LABELS_NETWORK_BACK_PRESSURE_SUSPENSION_RATE_V2::NotSuspendedLocal);
+      } else {
+        AccumulateCategorical(Telemetry::LABELS_NETWORK_BACK_PRESSURE_SUSPENSION_RATE_V2::SuspendedLocal);
+      }
+    }
   }
 
   return NS_OK;

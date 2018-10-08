@@ -6555,17 +6555,8 @@ CheckBuffer(JSContext* cx, const AsmJSMetadata& metadata, HandleValue bufferVal,
     }
 
     if (buffer->is<ArrayBufferObject>()) {
-        // On 64-bit, bounds checks are statically removed so the huge guard
-        // region is always necessary. On 32-bit, allocating a guard page
-        // requires reallocating the incoming ArrayBuffer which could trigger
-        // OOM. Thus, don't ask for a guard page in this case;
-#ifdef WASM_HUGE_MEMORY
-        bool needGuard = true;
-#else
-        bool needGuard = false;
-#endif
         Rooted<ArrayBufferObject*> arrayBuffer(cx, &buffer->as<ArrayBufferObject>());
-        if (!ArrayBufferObject::prepareForAsmJS(cx, arrayBuffer, needGuard)) {
+        if (!ArrayBufferObject::prepareForAsmJS(cx, arrayBuffer)) {
             return LinkFail(cx, "Unable to prepare ArrayBuffer for asm.js use");
         }
     } else {
@@ -6682,7 +6673,7 @@ HandleInstantiationFailure(JSContext* cx, CallArgs args, const AsmJSMetadata& me
 
     // Source discarding is allowed to affect JS semantics because it is never
     // enabled for normal JS content.
-    bool haveSource = source->hasSourceData();
+    bool haveSource = source->hasSourceText();
     if (!haveSource && !JSScript::loadSource(cx, source, &haveSource)) {
         return false;
     }
@@ -7618,7 +7609,7 @@ js::AsmJSModuleToString(JSContext* cx, HandleFunction fun, bool isToSource)
         return nullptr;
     }
 
-    bool haveSource = source->hasSourceData();
+    bool haveSource = source->hasSourceText();
     if (!haveSource && !JSScript::loadSource(cx, source, &haveSource)) {
         return nullptr;
     }
@@ -7669,7 +7660,7 @@ js::AsmJSFunctionToString(JSContext* cx, HandleFunction fun)
         return nullptr;
     }
 
-    bool haveSource = source->hasSourceData();
+    bool haveSource = source->hasSourceText();
     if (!haveSource && !JSScript::loadSource(cx, source, &haveSource)) {
         return nullptr;
     }

@@ -44,6 +44,7 @@ class Message extends Component {
       attachment: PropTypes.any,
       stacktrace: PropTypes.any,
       messageId: PropTypes.string,
+      executionPoint: PropTypes.string,
       scrollToMessage: PropTypes.bool,
       exceptionDocURL: PropTypes.string,
       request: PropTypes.object,
@@ -63,6 +64,7 @@ class Message extends Component {
         messageBody: PropTypes.string.isRequired,
         frame: PropTypes.any,
       })),
+      isPaused: PropTypes.bool
     };
   }
 
@@ -77,6 +79,7 @@ class Message extends Component {
     this.onLearnMoreClick = this.onLearnMoreClick.bind(this);
     this.toggleMessage = this.toggleMessage.bind(this);
     this.onContextMenu = this.onContextMenu.bind(this);
+    this.renderIcon = this.renderIcon.bind(this);
   }
 
   componentDidMount() {
@@ -119,6 +122,21 @@ class Message extends Component {
     e.preventDefault();
   }
 
+  renderIcon() {
+    const { level, messageId, executionPoint, serviceContainer } = this.props;
+
+    if (serviceContainer.canRewind()) {
+      return dom.span({
+        className: "icon",
+        title: "Jump",
+        "aria-live": "off",
+        onClick: () => serviceContainer.jumpToExecutionPoint(executionPoint, messageId)
+      });
+    }
+
+    return MessageIcon({ level });
+  }
+
   render() {
     const {
       open,
@@ -126,6 +144,7 @@ class Message extends Component {
       collapseTitle,
       source,
       type,
+      isPaused,
       level,
       indent,
       topLevelClasses,
@@ -136,10 +155,10 @@ class Message extends Component {
       exceptionDocURL,
       timeStamp = Date.now(),
       timestampsVisible,
-      notes,
+      notes
     } = this.props;
 
-    topLevelClasses.push("message", source, type, level);
+    topLevelClasses.push("message", source, type, level, isPaused ? "paused" : "");
     if (open) {
       topLevelClasses.push("open");
     }
@@ -151,7 +170,7 @@ class Message extends Component {
       }, l10n.timestampString(timeStamp));
     }
 
-    const icon = MessageIcon({level});
+    const icon = this.renderIcon();
 
     // Figure out if there is an expandable part to the message.
     let attachment = null;

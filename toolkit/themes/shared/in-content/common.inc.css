@@ -45,6 +45,8 @@
   --grey-90-a10: rgba(12, 12, 13, 0.1);
   --grey-90-a20: rgba(12, 12, 13, 0.2);
   --grey-90-a30: rgba(12, 12, 13, 0.3);
+  --yellow-50: #ffe900;
+  --yellow-90: #3e2800;
 }
 
 html|html,
@@ -167,7 +169,7 @@ html|button {
 
 *|button,
 html|select,
-xul|colorpicker[type="button"],
+html|input[type="color"],
 xul|menulist,
 html|*.numberbox-input::-moz-number-spin-up,
 html|*.numberbox-input::-moz-number-spin-down {
@@ -208,8 +210,8 @@ html|button:enabled:hover,
 html|select:not([size]):not([multiple]):enabled:hover,
 html|*.numberbox-input::-moz-number-spin-up:hover,
 html|*.numberbox-input::-moz-number-spin-down:hover,
+html|input[type="color"]:hover,
 xul|button:not([disabled="true"]):hover,
-xul|colorpicker[type="button"]:not([disabled="true"]):hover,
 xul|menulist:not([disabled="true"]):hover {
   background-color: var(--in-content-box-background-hover);
 }
@@ -218,8 +220,8 @@ html|button:enabled:hover:active,
 html|select:not([size]):not([multiple]):enabled:hover:active,
 html|*.numberbox-input::-moz-number-spin-up:hover:active,
 html|*.numberbox-input::-moz-number-spin-down:hover:active,
+html|input[type="color"]:enabled:hover:active,
 xul|button:not([disabled="true"]):hover:active,
-xul|colorpicker[type="button"]:not([disabled="true"]):hover:active,
 xul|menulist[open="true"]:not([disabled="true"]) {
   background-color: var(--in-content-box-background-active);
 }
@@ -227,8 +229,8 @@ xul|menulist[open="true"]:not([disabled="true"]) {
 html|button:disabled,
 html|select:disabled,
 html|*.numberbox-input:disabled::-moz-number-spin-box,
+html|input[type="color"]:disabled,
 xul|button[disabled="true"],
-xul|colorpicker[type="button"][disabled="true"],
 xul|menulist[disabled="true"] {
   opacity: 0.5;
 }
@@ -249,7 +251,7 @@ xul|button.primary:not([disabled="true"]):hover:active {
   background-color: var(--in-content-primary-button-background-active);
 }
 
-xul|colorpicker[type="button"] {
+html|input[type="color"] {
   padding: 6px;
   width: 50px;
 }
@@ -796,7 +798,11 @@ xul|treechildren::-moz-tree-image(selected) {
   border-radius: 4px;
   color: var(--grey-90);
   min-height: 32px;
-  padding: 0 4px;
+  padding: 4px;
+}
+
+.message-bar-description {
+  line-height: 1.25;
 }
 
 /* The message-bar-button styles have extra specificity to override
@@ -826,4 +832,14 @@ xul|treechildren::-moz-tree-image(selected) {
   margin-inline-end: 4px;
   -moz-context-properties: fill;
   fill: currentColor;
+}
+
+/* Warning styles */
+.message-bar-warning {
+  background-color: var(--yellow-50);
+  color: var(--yellow-90);
+}
+
+.message-bar-warning > .message-bar-icon {
+  list-style-image: url("chrome://browser/skin/warning.svg");
 }

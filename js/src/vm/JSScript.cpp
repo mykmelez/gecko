@@ -1444,6 +1444,16 @@ ScriptSourceObject::finalize(FreeOp* fop, JSObject* obj)
     sso->source()->decref();
 }
 
+void
+ScriptSourceObject::trace(JSTracer* trc, JSObject* obj)
+{
+    // This can be invoked during allocation of the SSO itself, before we've had a chance
+    // to initialize things properly. In that case, there's nothing to trace.
+    if (obj->as<ScriptSourceObject>().hasSource()) {
+        obj->as<ScriptSourceObject>().source()->trace(trc);
+    }
+}
+
 static const ClassOps ScriptSourceObjectClassOps = {
     nullptr, /* addProperty */
     nullptr, /* delProperty */
@@ -1455,7 +1465,7 @@ static const ClassOps ScriptSourceObjectClassOps = {
     nullptr, /* call */
     nullptr, /* hasInstance */
     nullptr, /* construct */
-    nullptr  /* trace */
+    ScriptSourceObject::trace
 };
 
 const Class ScriptSourceObject::class_ = {
@@ -1543,7 +1553,7 @@ ScriptSourceObject::initElementProperties(JSContext* cx, HandleScriptSourceObjec
 /* static */ bool
 JSScript::loadSource(JSContext* cx, ScriptSource* ss, bool* worked)
 {
-    MOZ_ASSERT(!ss->hasSourceData());
+    MOZ_ASSERT(!ss->hasSourceText());
     *worked = false;
     if (!cx->runtime()->sourceHook.ref() || !ss->sourceRetrievable()) {
         return true;
@@ -1567,14 +1577,14 @@ JSScript::loadSource(JSContext* cx, ScriptSource* ss, bool* worked)
 /* static */ JSFlatString*
 JSScript::sourceData(JSContext* cx, HandleScript script)
 {
-    MOZ_ASSERT(script->scriptSource()->hasSourceData());
+    MOZ_ASSERT(script->scriptSource()->hasSourceText());
     return script->scriptSource()->substring(cx, script->sourceStart(), script->sourceEnd());
 }
 
 bool
 JSScript::appendSourceDataForToString(JSContext* cx, StringBuffer& buf)
 {
-    MOZ_ASSERT(scriptSource()->hasSourceData());
+    MOZ_ASSERT(scriptSource()->hasSourceText());
     return scriptSource()->appendSubstring(cx, buf, toStringStart(), toStringEnd());
 }
 
@@ -1936,6 +1946,45 @@ ScriptSource::setSource(JSContext* cx, UniqueTwoByteChars&& source, size_t lengt
     return true;
 }
 
+#if defined(JS_BUILD_BINAST)
+
+MOZ_MUST_USE bool
+ScriptSource::setBinASTSourceCopy(JSContext* cx, const uint8_t* buf, size_t len)
+{
+    auto &cache = cx->zone()->runtimeFromAnyThread()->sharedImmutableStrings();
+    auto deduped = cache.getOrCreate(reinterpret_cast<const char *>(buf), len);
+    if (!deduped) {
+        ReportOutOfMemory(cx);
+        return false;
+    }
+    MOZ_ASSERT(data.is<Missing>());
+    data = SourceType(BinAST(std::move(*deduped)));
+    return true;
+}
+
+MOZ_MUST_USE bool
+ScriptSource::setBinASTSource(JSContext* cx, UniqueChars&& buf, size_t len)
+{
+    auto& cache = cx->zone()->runtimeFromAnyThread()->sharedImmutableStrings();
+    auto deduped = cache.getOrCreate(std::move(buf), len);
+    if (!deduped) {
+        ReportOutOfMemory(cx);
+        return false;
+    }
+    MOZ_ASSERT(data.is<Missing>());
+    data = SourceType(BinAST(std::move(*deduped)));
+    return true;
+}
+
+const uint8_t*
+ScriptSource::binASTSource()
+{
+    MOZ_ASSERT(hasBinASTSource());
+    return reinterpret_cast<const uint8_t*>(data.as<BinAST>().string.chars());
+}
+
+#endif /* JS_BUILD_BINAST */
+
 void
 ScriptSource::setSource(SharedImmutableTwoByteString&& string)
 {
@@ -2021,7 +2070,7 @@ ScriptSource::setCompressedSource(SharedImmutableString&& raw, size_t uncompress
 bool
 ScriptSource::setSourceCopy(JSContext* cx, SourceBufferHolder& srcBuf)
 {
-    MOZ_ASSERT(!hasSourceData());
+    MOZ_ASSERT(!hasSourceText());
 
     JSRuntime* runtime = cx->zone()->runtimeFromAnyThread();
     auto& cache = runtime->sharedImmutableStrings();
@@ -2037,6 +2086,18 @@ ScriptSource::setSourceCopy(JSContext* cx, SourceBufferHolder& srcBuf)
     setSource(std::move(*deduped));
 
     return true;
+}
+
+void
+ScriptSource::trace(JSTracer* trc)
+{
+#ifdef JS_BUILD_BINAST
+    if (binASTMetadata_) {
+        binASTMetadata_->trace(trc);
+    }
+#else
+    MOZ_ASSERT(!binASTMetadata_);
+#endif // JS_BUILD_BINAST
 }
 
 static MOZ_MUST_USE bool
@@ -2232,11 +2293,17 @@ ScriptSource::performXDR(XDRState<mode>* xdr)
     struct CompressedLengthMatcher
     {
         size_t match(Uncompressed&) {
+            // Return 0 for uncompressed source so that |if (compressedLength)|
+            // can be used to distinguish compressed and uncompressed source.
             return 0;
         }
 
         size_t match(Compressed& c) {
             return c.raw.length();
+        }
+
+        size_t match(BinAST&) {
+            return 0;
         }
 
         size_t match(Missing&) {
@@ -2255,26 +2322,34 @@ ScriptSource::performXDR(XDRState<mode>* xdr)
             return (void*) c.raw.chars();
         }
 
+        void* match(BinAST& b) {
+            return (void*) b.string.chars();
+        }
+
         void* match(Missing&) {
             MOZ_CRASH("Missing source data in ScriptSource::performXDR");
             return nullptr;
         }
     };
 
-    uint8_t hasSource = hasSourceData();
+    uint8_t hasSource = hasSourceText();
     MOZ_TRY(xdr->codeUint8(&hasSource));
+
+    uint8_t hasBinSource = hasBinASTSource();
+    MOZ_TRY(xdr->codeUint8(&hasBinSource));
 
     uint8_t retrievable = sourceRetrievable_;
     MOZ_TRY(xdr->codeUint8(&retrievable));
     sourceRetrievable_ = retrievable;
 
-    if (hasSource && !sourceRetrievable_) {
-        uint32_t len = 0;
+    if ((hasSource || hasBinSource) && !sourceRetrievable_) {
+        uint32_t uncompressedLength = 0;
         if (mode == XDR_ENCODE) {
-            len = length();
+            uncompressedLength = length();
         }
-        MOZ_TRY(xdr->codeUint32(&len));
+        MOZ_TRY(xdr->codeUint32(&uncompressedLength));
 
+        // A compressed length of 0 indicates source is uncompressed.
         uint32_t compressedLength;
         if (mode == XDR_ENCODE) {
             CompressedLengthMatcher m;
@@ -2282,28 +2357,132 @@ ScriptSource::performXDR(XDRState<mode>* xdr)
         }
         MOZ_TRY(xdr->codeUint32(&compressedLength));
 
-        size_t byteLen = compressedLength ? compressedLength : (len * sizeof(char16_t));
         if (mode == XDR_DECODE) {
-            auto bytes = xdr->cx()->template make_pod_array<char>(Max<size_t>(byteLen, 1));
-            if (!bytes) {
-                return xdr->fail(JS::TranscodeResult_Throw);
-            }
-            MOZ_TRY(xdr->codeBytes(bytes.get(), byteLen));
+            if (hasBinSource) {
+#if defined(JS_BUILD_BINAST)
+                auto bytes =
+                    xdr->cx()->template make_pod_array<char>(Max<size_t>(uncompressedLength, 1));
+                if (!bytes) {
+                    return xdr->fail(JS::TranscodeResult_Throw);
+                }
+                MOZ_TRY(xdr->codeBytes(bytes.get(), uncompressedLength));
 
-            if (compressedLength) {
-                if (!setCompressedSource(xdr->cx(), std::move(bytes), byteLen, len)) {
+                if (!setBinASTSource(xdr->cx(), std::move(bytes), uncompressedLength)) {
+                    return xdr->fail(JS::TranscodeResult_Throw);
+                }
+#else
+                MOZ_ASSERT(mode != XDR_ENCODE);
+                return xdr->fail(JS::TranscodeResult_Throw);
+#endif /* JS_BUILD_BINAST */
+            } else if (compressedLength) {
+                auto bytes =
+                    xdr->cx()->template make_pod_array<char>(Max<size_t>(compressedLength, 1));
+                if (!bytes) {
+                    return xdr->fail(JS::TranscodeResult_Throw);
+                }
+                MOZ_TRY(xdr->codeBytes(bytes.get(), compressedLength));
+
+                if (!setCompressedSource(xdr->cx(), std::move(bytes), compressedLength,
+                                         uncompressedLength))
+                {
                     return xdr->fail(JS::TranscodeResult_Throw);
                 }
             } else {
-                UniqueTwoByteChars source(reinterpret_cast<char16_t*>(bytes.release()));
-                if (!setSource(xdr->cx(), std::move(source), len)) {
+                auto sourceChars =
+                    xdr->cx()->template make_pod_array<char16_t>(Max<size_t>(uncompressedLength,
+                                                                             1));
+                if (!sourceChars) {
+                    return xdr->fail(JS::TranscodeResult_Throw);
+                }
+                MOZ_TRY(xdr->codeChars(sourceChars.get(), uncompressedLength));
+
+                if (!setSource(xdr->cx(), std::move(sourceChars), uncompressedLength)) {
                     return xdr->fail(JS::TranscodeResult_Throw);
                 }
             }
         } else {
-            RawDataMatcher rdm;
-            void* p = data.match(rdm);
-            MOZ_TRY(xdr->codeBytes(p, byteLen));
+            if (hasBinSource) {
+                void* bytes = data.match(RawDataMatcher());
+                MOZ_TRY(xdr->codeBytes(bytes, uncompressedLength));
+            } else if (compressedLength) {
+                void* bytes = data.match(RawDataMatcher());
+                MOZ_TRY(xdr->codeBytes(bytes, compressedLength));
+            } else {
+                char16_t* sourceChars = static_cast<char16_t*>(data.match(RawDataMatcher()));
+                MOZ_TRY(xdr->codeChars(sourceChars, uncompressedLength));
+            }
+        }
+
+        uint8_t hasMetadata = !!binASTMetadata_;
+        MOZ_TRY(xdr->codeUint8(&hasMetadata));
+        if (hasMetadata) {
+#if defined(JS_BUILD_BINAST)
+            uint32_t numBinKinds;
+            uint32_t numStrings;
+            if (mode == XDR_ENCODE) {
+                numBinKinds = binASTMetadata_->numBinKinds();
+                numStrings = binASTMetadata_->numStrings();
+            }
+            MOZ_TRY(xdr->codeUint32(&numBinKinds));
+            MOZ_TRY(xdr->codeUint32(&numStrings));
+
+            if (mode == XDR_DECODE) {
+                // Use calloc, since we're storing this immediately, and filling it might GC, to
+                // avoid marking bogus atoms.
+                setBinASTSourceMetadata(
+                    static_cast<frontend::BinASTSourceMetadata*>(
+                        js_calloc(frontend::BinASTSourceMetadata::totalSize(numBinKinds, numStrings))));
+                if (!binASTMetadata_) {
+                    return xdr->fail(JS::TranscodeResult_Throw);
+                }
+            }
+
+            for (uint32_t i = 0; i < numBinKinds; i++) {
+                frontend::BinKind* binKindBase = binASTMetadata_->binKindBase();
+                MOZ_TRY(xdr->codeEnum32(&binKindBase[i]));
+            }
+
+            RootedAtom atom(xdr->cx());
+            JSAtom** atomsBase = binASTMetadata_->atomsBase();
+            auto slices = binASTMetadata_->sliceBase();
+            auto sourceBase = reinterpret_cast<const char*>(binASTSource());
+
+            for (uint32_t i = 0; i < numStrings; i++) {
+                uint8_t isNull;
+                if (mode == XDR_ENCODE) {
+                    atom = binASTMetadata_->getAtom(i);
+                    isNull = !atom;
+                }
+                MOZ_TRY(xdr->codeUint8(&isNull));
+                if (isNull) {
+                    atom = nullptr;
+                } else {
+                    MOZ_TRY(XDRAtom(xdr, &atom));
+                }
+                if (mode == XDR_DECODE) {
+                    atomsBase[i] = atom;
+                }
+
+                uint64_t sliceOffset;
+                uint32_t sliceLen;
+                if (mode == XDR_ENCODE) {
+                    auto &slice = binASTMetadata_->getSlice(i);
+                    sliceOffset = slice.begin()-sourceBase;
+                    sliceLen = slice.byteLen_;
+                }
+
+                MOZ_TRY(xdr->codeUint64(&sliceOffset));
+                MOZ_TRY(xdr->codeUint32(&sliceLen));
+
+                if (mode == XDR_DECODE) {
+                    new (&slices[i]) frontend::BinASTSourceMetadata::CharSlice(sourceBase + sliceOffset, sliceLen);
+                }
+            }
+#else
+            // No BinAST, no BinASTMetadata
+            MOZ_ASSERT(mode != XDR_ENCODE);
+            return xdr->fail(JS::TranscodeResult_Throw);
+#endif // JS_BUILD_BINAST
         }
     }
 
@@ -2367,7 +2546,10 @@ ScriptSource::performXDR(XDRState<mode>* xdr)
         }
 
         // Note the content of sources decoded when recording or replaying.
-        if (mode == XDR_DECODE && hasSourceData() && mozilla::recordreplay::IsRecordingOrReplaying()) {
+        if (mode == XDR_DECODE &&
+            hasSourceText() &&
+            mozilla::recordreplay::IsRecordingOrReplaying())
+        {
             UncompressedSourceCache::AutoHoldEntry holder;
             ScriptSource::PinnedChars chars(xdr->cx(), this, holder, 0, length());
             if (!chars.get()) {
@@ -4606,6 +4788,7 @@ LazyScript::Create(JSContext* cx, HandleFunction fun,
     p.isLikelyConstructorWrapper = false;
     p.isDerivedClassConstructor = false;
     p.needsHomeObject = false;
+    p.isBinAST = false;
     p.parseGoal = uint32_t(parseGoal);
 
     LazyScript* res = LazyScript::CreateRaw(cx, fun, sourceObject, packedFields,
@@ -4779,38 +4962,6 @@ JSScript::AutoDelazify::dropScript()
         script_->setDoNotRelazify(oldDoNotRelazify_);
     }
     script_ = nullptr;
-}
-
-void
-JSScript::setTopLevelPrivate(void* value)
-{
-    MOZ_ASSERT(module() || isGlobalCode());
-
-    Scope* scope = bodyScope();
-    if (scope->is<GlobalScope>()) {
-        scope->as<GlobalScope>().setTopLevelPrivate(value);
-    } else if (scope->is<ModuleScope>()) {
-        scope->as<ModuleScope>().setTopLevelPrivate(value);
-    } else {
-        MOZ_CRASH("Unexpected scope kind");
-    }
-}
-
-void*
-JSScript::maybeTopLevelPrivate() const
-{
-    if (!module() && !isGlobalCode()) {
-        return nullptr;
-    }
-
-    Scope* scope = bodyScope();
-    if (scope->is<GlobalScope>()) {
-        return scope->as<GlobalScope>().topLevelPrivate();
-    } else if (scope->is<ModuleScope>()) {
-        return scope->as<ModuleScope>().topLevelPrivate();
-    }
-
-    MOZ_CRASH("Unexpected scope kind");
 }
 
 JS::ubi::Base::Size

@@ -293,7 +293,7 @@
       <button id="manageBrowserLanguagesButton"
               class="accessory-button"
               data-l10n-id="manage-browser-languages-button"
-              oncommand="gMainPane.showBrowserLanguages()"/>
+              oncommand="gMainPane.showBrowserLanguages({search: false})"/>
     </hbox>
   </vbox>
   <hbox id="confirmBrowserLanguage" class="message-bar" align="center" hidden="true">
@@ -682,6 +682,7 @@
               class="accessory-button"
               icon="network"
               data-l10n-id="network-proxy-connection-settings"
+              searchkeywords="doh trr"
               search-l10n-ids="
                 connection-window.title,
                 connection-proxy-option-no.label,

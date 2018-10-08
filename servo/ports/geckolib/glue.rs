@@ -14,7 +14,6 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::fmt::Write;
 use std::iter;
-use std::mem;
 use std::os::raw::c_void;
 use std::ptr;
 use style::applicable_declarations::ApplicableDeclarationBlock;
@@ -5345,15 +5344,6 @@ pub unsafe extern "C" fn Servo_ReleaseArcStringData(string: *const RawOffsetArc<
     let string = string as *const RawOffsetArc<String>;
     // Cause RawOffsetArc::drop to run, releasing the strong reference to the string data.
     let _ = ptr::read(string);
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn Servo_CloneArcStringData(
-    string: *const RawOffsetArc<RustString>,
-) -> RawOffsetArc<RustString> {
-    let string = string as *const RawOffsetArc<String>;
-    let cloned = (*string).clone();
-    mem::transmute::<_, RawOffsetArc<RustString>>(cloned)
 }
 
 #[no_mangle]

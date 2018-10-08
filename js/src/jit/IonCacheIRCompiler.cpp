@@ -546,12 +546,12 @@ IonCacheIRCompiler::init()
       }
       case CacheKind::Compare: {
         IonCompareIC *ic = ic_->asCompareIC();
-        ValueOperand output = ic->output();
+        Register output = ic->output();
 
         available.add(output);
 
         liveRegs_.emplace(ic->liveRegs());
-        outputUnchecked_.emplace(TypedOrValueRegister(output));
+        outputUnchecked_.emplace(TypedOrValueRegister(MIRType::Boolean, AnyRegister(output)));
 
         MOZ_ASSERT(numInputs == 2);
         allocator.initInputLocation(0, ic->lhs());
@@ -1189,6 +1189,33 @@ IonCacheIRCompiler::emitCallProxyHasPropResult()
     return true;
 }
 
+
+bool
+IonCacheIRCompiler::emitCallNativeGetElementResult()
+{
+    AutoSaveLiveRegisters save(*this);
+    AutoOutputRegister output(*this);
+
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    Register index = allocator.useRegister(masm, reader.int32OperandId());
+
+    allocator.discardStack(masm);
+
+    prepareVMCall(masm, save);
+
+    masm.Push(index);
+    masm.Push(TypedOrValueRegister(MIRType::Object, AnyRegister(obj)));
+    masm.Push(obj);
+
+    if (!callVM(masm, NativeGetElementInfo)) {
+        return false;
+    }
+
+    masm.storeCallResultValue(output);
+    return true;
+}
+
+
 bool
 IonCacheIRCompiler::emitLoadUnboxedPropertyResult()
 {
@@ -1314,12 +1341,11 @@ IonCacheIRCompiler::emitCompareStringResult()
     Register right = allocator.useRegister(masm, reader.stringOperandId());
     JSOp op = reader.jsop();
 
-    AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
-
     allocator.discardStack(masm);
 
     Label slow, done;
-    masm.compareStrings(op, left, right, scratch, &slow);
+    MOZ_ASSERT(!output.hasValue());
+    masm.compareStrings(op, left, right, output.typedReg().gpr(), &slow);
 
     masm.jump(&done);
     masm.bind(&slow);
@@ -1335,10 +1361,8 @@ IonCacheIRCompiler::emitCompareStringResult()
         return false;
     }
 
-    masm.storeCallBoolResult(scratch);
+    masm.storeCallBoolResult(output.typedReg().gpr());
     masm.bind(&done);
-
-    masm.tagValue(JSVAL_TYPE_BOOLEAN, scratch, output.valueReg());
     return true;
 }
 

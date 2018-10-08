@@ -14,6 +14,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   Services: "resource://gre/modules/Services.jsm",
   UrlbarController: "resource:///modules/UrlbarController.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
+  UrlbarValueFormatter: "resource:///modules/UrlbarValueFormatter.jsm",
   UrlbarView: "resource:///modules/UrlbarView.jsm",
 });
 
@@ -95,8 +96,15 @@ class UrlbarInput {
       });
     }
 
+    XPCOMUtils.defineLazyGetter(this, "valueFormatter", () => {
+      return new UrlbarValueFormatter(this);
+    });
+
     this.addEventListener("input", this);
+    this.inputField.addEventListener("blur", this);
+    this.inputField.addEventListener("focus", this);
     this.inputField.addEventListener("mousedown", this);
+    this.inputField.addEventListener("mouseover", this);
     this.inputField.addEventListener("overflow", this);
     this.inputField.addEventListener("underflow", this);
     this.inputField.addEventListener("scrollend", this);
@@ -116,7 +124,11 @@ class UrlbarInput {
     return UrlbarPrefs.get("trimURLs") ? this.window.trimURL(val) : val;
   }
 
+  /**
+   * Applies styling to the text in the urlbar input, depending on the text.
+   */
   formatValue() {
+    this.valueFormatter.update();
   }
 
   closePopup() {
@@ -157,7 +169,7 @@ class UrlbarInput {
    *   DOM event from the <textbox>.
    */
   handleEvent(event) {
-    let methodName = "_on" + event.type;
+    let methodName = "_on_" + event.type;
     if (methodName in this) {
       this[methodName](event);
     } else {
@@ -166,6 +178,10 @@ class UrlbarInput {
   }
 
   // Getters and Setters below.
+
+  _get_focused() {
+    return this.inputField.getAttribute("focused") == "true";
+  }
 
   _set_value(val) {
     val = this.trimValue(val);
@@ -193,6 +209,14 @@ class UrlbarInput {
         this.setAttribute("textoverflow", side);
       }
     });
+  }
+
+  _updateUrlTooltip() {
+    if (this.focused || !this._inOverflow) {
+      this.inputField.removeAttribute("title");
+    } else {
+      this.inputField.setAttribute("title", this.value);
+    }
   }
 
   _getSelectedValueForClipboard() {
@@ -308,7 +332,21 @@ class UrlbarInput {
 
   // Event handlers below.
 
-  _onmousedown(event) {
+  _on_blur(event) {
+    this.formatValue();
+  }
+
+  _on_focus(event) {
+    this._updateUrlTooltip();
+
+    this.formatValue();
+  }
+
+  _on_mouseover(event) {
+    this._updateUrlTooltip();
+  }
+
+  _on_mousedown(event) {
     if (event.button == 0 &&
         event.detail == 2 &&
         UrlbarPrefs.get("doubleClickSelectsAll")) {
@@ -317,11 +355,11 @@ class UrlbarInput {
     }
   }
 
-  _oninput(event) {
+  _on_input(event) {
     this.valueIsTyped = true;
 
     // XXX Fill in lastKey, and add anything else we need.
-    this.controller.handleQuery(new QueryContext({
+    this.controller.startQuery(new QueryContext({
       searchString: event.target.value,
       lastKey: "",
       maxResults: UrlbarPrefs.get("maxRichResults"),
@@ -329,7 +367,7 @@ class UrlbarInput {
     }));
   }
 
-  _onselect(event) {
+  _on_select(event) {
     if (!Services.clipboard.supportsSelectionClipboard()) {
       return;
     }
@@ -346,7 +384,7 @@ class UrlbarInput {
     ClipboardHelper.copyStringToClipboard(val, Services.clipboard.kSelectionClipboard);
   }
 
-  _onoverflow(event) {
+  _on_overflow(event) {
     const targetIsPlaceholder =
       !event.originalTarget.classList.contains("anonymous-div");
     // We only care about the non-placeholder text.
@@ -358,7 +396,7 @@ class UrlbarInput {
     this._updateTextOverflow();
   }
 
-  _onunderflow(event) {
+  _on_underflow(event) {
     const targetIsPlaceholder =
       !event.originalTarget.classList.contains("anonymous-div");
     // We only care about the non-placeholder text.
@@ -367,11 +405,18 @@ class UrlbarInput {
       return;
     }
     this._inOverflow = false;
+
+    this._updateTextOverflow();
+
+    this._updateUrlTooltip();
+  }
+
+  _on_scrollend(event) {
     this._updateTextOverflow();
   }
 
-  _onscrollend(event) {
-    this._updateTextOverflow();
+  _on_TabSelect(event) {
+    this.controller.tabContextChanged();
   }
 }
 
@@ -442,4 +487,3 @@ class CopyCutController {
 
   onEvent() {}
 }
-

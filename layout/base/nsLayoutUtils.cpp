@@ -8288,15 +8288,9 @@ MinimumFontSizeFor(nsPresContext* aPresContext, WritingMode aWritingMode,
     return 0;
   }
 
-  // Clamp the container width to the device dimensions
-  nscoord iFrameISize = aWritingMode.IsVertical()
-    ? aPresContext->GetVisibleArea().height
-    : aPresContext->GetVisibleArea().width;
-  nscoord effectiveContainerISize = std::min(iFrameISize, aContainerISize);
-
   nscoord byLine = 0, byInch = 0;
   if (emPerLine != 0) {
-    byLine = effectiveContainerISize / emPerLine;
+    byLine = aContainerISize / emPerLine;
   }
   if (minTwips != 0) {
     // REVIEW: Is this giving us app units and sizes *not* counting
@@ -8304,7 +8298,7 @@ MinimumFontSizeFor(nsPresContext* aPresContext, WritingMode aWritingMode,
     gfxSize screenSize = aPresContext->ScreenSizeInchesForFontInflation();
     float deviceISizeInches = aWritingMode.IsVertical()
       ? screenSize.height : screenSize.width;
-    byInch = NSToCoordRound(effectiveContainerISize /
+    byInch = NSToCoordRound(aContainerISize /
                             (deviceISizeInches * 1440 /
                              minTwips ));
   }
@@ -8452,7 +8446,7 @@ nsLayoutUtils::InflationMinFontSizeFor(const nsIFrame *aFrame)
 
       return MinimumFontSizeFor(aFrame->PresContext(),
                                 aFrame->GetWritingMode(),
-                                data->EffectiveISize());
+                                data->UsableISize());
     }
   }
 
@@ -9092,18 +9086,20 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
     nsRect dp;
     if (nsLayoutUtils::GetDisplayPort(aContent, &dp)) {
       metrics.SetDisplayPort(CSSRect::FromAppUnits(dp));
-      if (IsAPZTestLoggingEnabled()) {
-        LogTestDataForPaint(aLayerManager, scrollId, "displayport",
-                            metrics.GetDisplayPort());
-      }
     }
     if (nsLayoutUtils::GetCriticalDisplayPort(aContent, &dp)) {
       metrics.SetCriticalDisplayPort(CSSRect::FromAppUnits(dp));
-      if (IsAPZTestLoggingEnabled()) {
-        LogTestDataForPaint(aLayerManager, scrollId, "criticalDisplayport",
-                            metrics.GetCriticalDisplayPort());
-      }
     }
+
+    // Log the high-resolution display port (which is either the displayport
+    // or the critical displayport) for test purposes.
+    if (IsAPZTestLoggingEnabled()) {
+      LogTestDataForPaint(aLayerManager, scrollId, "displayport",
+                          gfxPrefs::UseLowPrecisionBuffer()
+                        ? metrics.GetCriticalDisplayPort()
+                        : metrics.GetDisplayPort());
+    }
+
     DisplayPortMarginsPropertyData* marginsData =
         static_cast<DisplayPortMarginsPropertyData*>(aContent->GetProperty(nsGkAtoms::DisplayPortMargins));
     if (marginsData) {
@@ -10221,6 +10217,28 @@ nsLayoutUtils::ParseFontLanguageOverride(const nsAString& aLangTag)
     result = (result << 8) + 0x20;
   }
   return result;
+}
+
+/* static */ bool
+nsLayoutUtils::ShouldHandleMetaViewport(nsIDocument* aDocument)
+{
+  uint32_t metaViewportOverride = nsIDocShell::META_VIEWPORT_OVERRIDE_NONE;
+  if (aDocument) {
+    if (nsIDocShell* docShell = aDocument->GetDocShell()) {
+      docShell->GetMetaViewportOverride(&metaViewportOverride);
+    }
+  }
+  switch (metaViewportOverride) {
+    case nsIDocShell::META_VIEWPORT_OVERRIDE_ENABLED:
+      return true;
+    case nsIDocShell::META_VIEWPORT_OVERRIDE_DISABLED:
+      return false;
+    default:
+      MOZ_ASSERT(metaViewportOverride == nsIDocShell::META_VIEWPORT_OVERRIDE_NONE);
+      // The META_VIEWPORT_OVERRIDE_NONE case means that there is no override
+      // and we rely solely on the gfxPrefs.
+      return gfxPrefs::MetaViewportEnabled();
+  }
 }
 
 /* static */ ComputedStyle*

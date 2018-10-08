@@ -33,6 +33,16 @@ function ReloadAndRecordTab() {
   });
 }
 
+function ReloadAndStopRecordingTab() {
+  const { gBrowser } = Services.wm.getMostRecentWindow("navigator:browser");
+  const url = gBrowser.currentURI.spec;
+  gBrowser.updateBrowserRemoteness(gBrowser.selectedBrowser, true,
+                                   { newFrameloader: true });
+  gBrowser.loadURI(url, {
+    triggeringPrincipal: gBrowser.selectedBrowser.contentPrincipal,
+  });
+}
+
 function SaveRecording() {
   const { gBrowser } = Services.wm.getMostRecentWindow("navigator:browser");
   const fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
@@ -71,6 +81,7 @@ exports.addWebReplayMenu = function(doc) {
   const menu = doc.createXULElement("menu");
   menu.id = "menu_webreplay";
   menu.setAttribute("label", l10n("devtoolsWebReplay.label"));
+  menu.setAttribute("hidden", "true");
 
   const popup = doc.createXULElement("menupopup");
   popup.id = "menupopup_webreplay";
@@ -89,3 +100,6 @@ exports.addWebReplayMenu = function(doc) {
     mds.parentNode.insertBefore(menu, mds);
   }
 };
+
+exports.reloadAndRecordTab = ReloadAndRecordTab;
+exports.reloadAndStopRecordingTab = ReloadAndStopRecordingTab;

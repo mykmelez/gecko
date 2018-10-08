@@ -1822,8 +1822,7 @@ XULDocument::MaybeBroadcast()
             for (uint32_t i = 0; i < mDelayedAttrChangeBroadcasts.Length(); ++i) {
                 nsAtom* attrName = mDelayedAttrChangeBroadcasts[i].mAttrName;
                 if (mDelayedAttrChangeBroadcasts[i].mNeedsAttrChange) {
-                    nsCOMPtr<Element> listener =
-                        do_QueryInterface(mDelayedAttrChangeBroadcasts[i].mListener);
+                    nsCOMPtr<Element> listener = mDelayedAttrChangeBroadcasts[i].mListener;
                     const nsString& value = mDelayedAttrChangeBroadcasts[i].mAttr;
                     if (mDelayedAttrChangeBroadcasts[i].mSetAttr) {
                         listener->SetAttr(kNameSpaceID_None, attrName, value,
@@ -2365,12 +2364,11 @@ XULDocument::CheckBroadcasterHookup(Element* aElement)
 
     // Tell the world we succeeded
     if (MOZ_LOG_TEST(gXULLog, LogLevel::Debug)) {
-        nsCOMPtr<nsIContent> content =
-            do_QueryInterface(listener);
-
+        nsCOMPtr<nsIContent> content = listener;
         NS_ASSERTION(content != nullptr, "not an nsIContent");
-        if (! content)
+        if (!content) {
             return rv;
+        }
 
         nsAutoCString attributeC,broadcasteridC;
         LossyCopyUTF16toASCII(attribute, attributeC);
@@ -2444,7 +2442,7 @@ XULDocument::IsDocumentRightToLeft()
     Element* element = GetRootElement();
     if (element) {
         static Element::AttrValuesArray strings[] =
-            {&nsGkAtoms::ltr, &nsGkAtoms::rtl, nullptr};
+            {nsGkAtoms::ltr, nsGkAtoms::rtl, nullptr};
         switch (element->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::localedir,
                                          strings, eCaseMatters)) {
             case 0: return false;

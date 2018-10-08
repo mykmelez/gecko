@@ -131,9 +131,9 @@ NS_IMETHODIMP_(bool)
 HTMLIFrameElement::IsAttributeMapped(const nsAtom* aAttribute) const
 {
   static const MappedAttributeEntry attributes[] = {
-    { &nsGkAtoms::width },
-    { &nsGkAtoms::height },
-    { &nsGkAtoms::frameborder },
+    { nsGkAtoms::width },
+    { nsGkAtoms::height },
+    { nsGkAtoms::frameborder },
     { nullptr },
   };
 
@@ -312,8 +312,12 @@ HTMLIFrameElement::RefreshFeaturePolicy()
     mFeaturePolicy->MaybeSetAllowedPolicy(NS_LITERAL_STRING("payment"));
   }
 
+  if (AllowFullscreen()) {
+    mFeaturePolicy->MaybeSetAllowedPolicy(NS_LITERAL_STRING("fullscreen"));
+  }
+
   // TODO: https://wicg.github.io/feature-policy/#process-feature-policy-attributes
-  // requires to check allowfullscreen, and allowusermediarequest
+  // requires to check allowusermediarequest
 }
 
 } // namespace dom

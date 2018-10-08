@@ -4286,8 +4286,9 @@ GCRuntime::purgeRuntime()
 
     // If we're the main runtime, tell helper threads to free their unused
     // memory when they are next idle.
-    if (!rt->parentRuntime)
+    if (!rt->parentRuntime) {
         HelperThreadState().triggerFreeUnusedMemory();
+    }
 }
 
 bool
@@ -8817,6 +8818,12 @@ js::ReleaseAllJITCode(FreeOp* fop)
     for (ZonesIter zone(fop->runtime(), SkipAtoms); !zone.done(); zone.next()) {
         zone->setPreservingCode(false);
         zone->discardJitCode(fop);
+    }
+
+    for (RealmsIter realm(fop->runtime()); !realm.done(); realm.next()) {
+        if (jit::JitRealm* jitRealm = realm->jitRealm()) {
+            jitRealm->discardStubs();
+        }
     }
 }
 

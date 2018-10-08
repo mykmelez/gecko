@@ -12,7 +12,7 @@ use rkv::StoreError;
 use std::{
     str::Utf8Error,
     string::FromUtf16Error,
-    sync::{PoisonError, RwLockReadGuard, RwLockWriteGuard},
+    sync::PoisonError,
 };
 use OwnedValue;
 
@@ -33,17 +33,14 @@ pub enum KeyValueError {
     #[fail(display = "arg is null")]
     NullPointer,
 
+    #[fail(display = "poison error getting read/write lock")]
+    PoisonError,
+
     #[fail(display = "error reading key/value pair")]
     Read,
 
-    #[fail(display = "error getting read lock: {}", _0)]
-    ReadLock(String),
-
     #[fail(display = "store error: {:?}", _0)]
     StoreError(StoreError),
-
-    #[fail(display = "error getting write lock: {}", _0)]
-    WriteLock(String),
 
     // TODO: convert the number to its name.
     #[fail(display = "unsupported type: {}", _0)]
@@ -67,10 +64,9 @@ impl From<KeyValueError> for nsresult {
             KeyValueError::NoInterface(_) => NS_ERROR_NO_INTERFACE,
             KeyValueError::Nsresult(_, result) => result,
             KeyValueError::NullPointer => NS_ERROR_NULL_POINTER,
+            KeyValueError::PoisonError => NS_ERROR_UNEXPECTED,
             KeyValueError::Read => NS_ERROR_FAILURE,
-            KeyValueError::ReadLock(_) => NS_ERROR_UNEXPECTED,
             KeyValueError::StoreError(_) => NS_ERROR_FAILURE,
-            KeyValueError::WriteLock(_) => NS_ERROR_UNEXPECTED,
             KeyValueError::UnsupportedType(_) => NS_ERROR_NOT_IMPLEMENTED,
             KeyValueError::UnsupportedValue(_) => NS_ERROR_NOT_IMPLEMENTED,
         }
@@ -95,14 +91,8 @@ impl From<FromUtf16Error> for KeyValueError {
     }
 }
 
-impl<'a, T> From<PoisonError<RwLockReadGuard<'a, T>>> for KeyValueError {
-    fn from(err: PoisonError<RwLockReadGuard<'a, T>>) -> KeyValueError {
-        KeyValueError::ReadLock(format!("{:?}", err))
-    }
-}
-
-impl<'a, T> From<PoisonError<RwLockWriteGuard<'a, T>>> for KeyValueError {
-    fn from(err: PoisonError<RwLockWriteGuard<'a, T>>) -> KeyValueError {
-        KeyValueError::WriteLock(format!("{:?}", err))
+impl<T> From<PoisonError<T>> for KeyValueError {
+    fn from(_err: PoisonError<T>) -> KeyValueError {
+        KeyValueError::PoisonError
     }
 }

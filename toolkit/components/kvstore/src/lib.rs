@@ -44,11 +44,11 @@ use xpcom::{
     nsIID, RefPtr,
 };
 
-fn ensure_ref<'a, T>(ptr: *const T) -> Result<&'a T, KeyValueError> {
+unsafe fn ensure_ref<'a, T>(ptr: *const T) -> Result<&'a T, KeyValueError> {
     if ptr.is_null() {
         Err(KeyValueError::NullPointer)
     } else {
-        Ok(unsafe { &*ptr })
+        Ok(&*ptr)
     }
 }
 
@@ -126,7 +126,7 @@ pub extern "C" fn KeyValueServiceConstructor(
 
 #[derive(xpcom)]
 #[xpimplements(nsIKeyValueService)]
-#[refcnt = "nonatomic"]
+#[refcnt = "atomic"]
 pub struct InitKeyValueService {}
 
 impl KeyValueService {
@@ -175,7 +175,7 @@ impl KeyValueService {
         &self,
         path: *const nsACString,
     ) -> Result<RefPtr<nsIKeyValueDatabase>, KeyValueError> {
-        let path = str::from_utf8(ensure_ref(path)?)?;
+        let path = str::from_utf8(unsafe { ensure_ref(path) }?)?;
         let mut writer = Manager::singleton().write()?;
         let rkv = writer.get_or_create(Path::new(path), Rkv::new)?;
         let store = rkv.write()?.open_or_create_default()?;
@@ -191,8 +191,8 @@ impl KeyValueService {
         path: *const nsACString,
         name: *const nsACString,
     ) -> Result<RefPtr<nsIKeyValueDatabase>, KeyValueError> {
-        let path = str::from_utf8(ensure_ref(path)?)?;
-        let name = str::from_utf8(ensure_ref(name)?)?;
+        let path = str::from_utf8(unsafe { ensure_ref(path) }?)?;
+        let name = str::from_utf8(unsafe { ensure_ref(name) }?)?;
         let mut writer = Manager::singleton().write()?;
         let rkv = writer.get_or_create(Path::new(path), Rkv::new)?;
         let store = rkv.write()?.open_or_create(Some(name))?;
@@ -340,8 +340,8 @@ impl KeyValueDatabase {
     }
 
     fn put(&self, key: *const nsACString, value: *const nsIVariant) -> Result<(), KeyValueError> {
-        let key = str::from_utf8(ensure_ref(key)?)?;
-        let value = ensure_ref(value)?;
+        let key = str::from_utf8(unsafe { ensure_ref(key) }?)?;
+        let value = unsafe { ensure_ref(value) }?;
 
         let mut dataType: uint16_t = 0;
         unsafe { value.GetDataType(&mut dataType) }.to_result()?;
@@ -389,7 +389,7 @@ impl KeyValueDatabase {
     }
 
     fn has(&self, key: *const nsACString, retval: *mut bool) -> Result<(), KeyValueError> {
-        let key = str::from_utf8(ensure_ref(key)?)?;
+        let key = str::from_utf8(unsafe { ensure_ref(key) }?)?;
         let env = self.rkv.read()?;
         let reader = env.read()?;
         let value = reader.get(&self.store, key)?;
@@ -407,7 +407,7 @@ impl KeyValueDatabase {
         key: *const nsACString,
         default_value: *const nsIVariant,
     ) -> Result<RefPtr<nsIVariant>, KeyValueError> {
-        let key = str::from_utf8(ensure_ref(key)?)?;
+        let key = str::from_utf8(unsafe { ensure_ref(key) }?)?;
         let env = self.rkv.read()?;
         let reader = env.read()?;
         let value = reader.get(&self.store, key)?;
@@ -421,7 +421,7 @@ impl KeyValueDatabase {
                 .take()),
             Some(Value::Bool(value)) => Ok(value.into_variant().ok_or(KeyValueError::Read)?.take()),
             None => {
-                let default_value = ensure_ref(default_value)?;
+                let default_value = unsafe { ensure_ref(default_value) }?;
 
                 let mut dataType: uint16_t = 0;
                 unsafe { default_value.GetDataType(&mut dataType) }.to_result()?;
@@ -462,7 +462,7 @@ impl KeyValueDatabase {
     }
 
     fn delete(&self, key: *const nsACString) -> Result<(), KeyValueError> {
-        let key = str::from_utf8(ensure_ref(key)?)?;
+        let key = str::from_utf8(unsafe { ensure_ref(key) }?)?;
         let env = self.rkv.read()?;
         let mut writer = env.write()?;
 
@@ -488,7 +488,7 @@ impl KeyValueDatabase {
         default_value: int64_t,
         retval: *mut int64_t,
     ) -> Result<(), KeyValueError> {
-        let key = str::from_utf8(ensure_ref(key)?)?;
+        let key = str::from_utf8(unsafe { ensure_ref(key) }?)?;
         let env = self.rkv.read()?;
         let reader = env.read()?;
         let value = reader.get(&self.store, &key)?;
@@ -508,7 +508,7 @@ impl KeyValueDatabase {
         default_value: c_double,
         retval: *mut c_double,
     ) -> Result<(), KeyValueError> {
-        let key = str::from_utf8(ensure_ref(key)?)?;
+        let key = str::from_utf8(unsafe { ensure_ref(key) }?)?;
         let env = self.rkv.read()?;
         let reader = env.read()?;
         let value = reader.get(&self.store, &key)?;
@@ -528,7 +528,7 @@ impl KeyValueDatabase {
         default_value: *const nsAString,
         retval: *mut nsAString,
     ) -> Result<(), KeyValueError> {
-        let key = str::from_utf8(ensure_ref(key)?)?;
+        let key = str::from_utf8(unsafe { ensure_ref(key) }?)?;
         let env = self.rkv.read()?;
         let reader = env.read()?;
         let value = reader.get(&self.store, &key)?;
@@ -548,7 +548,7 @@ impl KeyValueDatabase {
         default_value: bool,
         retval: *mut bool,
     ) -> Result<(), KeyValueError> {
-        let key = str::from_utf8(ensure_ref(key)?)?;
+        let key = str::from_utf8(unsafe { ensure_ref(key) }?)?;
         let env = self.rkv.read()?;
         let reader = env.read()?;
         let value = reader.get(&self.store, &key)?;

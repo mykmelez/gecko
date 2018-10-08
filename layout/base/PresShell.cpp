@@ -1045,9 +1045,9 @@ PresShell::Init(nsIDocument* aDocument,
   if (mPresContext->IsRootContentDocument()) {
     mZoomConstraintsClient = new ZoomConstraintsClient();
     mZoomConstraintsClient->Init(this, mDocument);
-    if (gfxPrefs::MetaViewportEnabled() || gfxPrefs::APZAllowZooming()) {
-      mMobileViewportManager = new MobileViewportManager(this, mDocument);
-    }
+
+    // We call this to create mMobileViewportManager, if it is needed.
+    UpdateViewportOverridden(false);
   }
 }
 
@@ -7959,9 +7959,9 @@ PresShell::DispatchEventToDOM(WidgetEvent* aEvent,
              GetContentForEvent(aEvent, getter_AddRefs(targetContent));
     }
     if (NS_SUCCEEDED(rv) && targetContent) {
-      eventTarget = do_QueryInterface(targetContent);
+      eventTarget = targetContent;
     } else if (mDocument) {
-      eventTarget = do_QueryInterface(mDocument);
+      eventTarget = mDocument;
       // If we don't have any content, the callback wouldn't probably
       // do nothing.
       eventCBPtr = nullptr;
@@ -10503,6 +10503,49 @@ PresShell::SetIsActive(bool aIsActive)
   }
 #endif
   return rv;
+}
+
+void
+PresShell::UpdateViewportOverridden(bool aAfterInitialization)
+{
+  // Determine if we require a MobileViewportManager.
+  bool needMVM = nsLayoutUtils::ShouldHandleMetaViewport(mDocument) ||
+                 gfxPrefs::APZAllowZooming();
+
+  if (needMVM == !!mMobileViewportManager) {
+    // Either we've need one and we've already got it, or we don't need one
+    // and don't have it. Either way, we're done.
+    return;
+  }
+
+  if (needMVM) {
+    if (mPresContext->IsRootContentDocument()) {
+      mMobileViewportManager = new MobileViewportManager(this, mDocument);
+
+      if (aAfterInitialization) {
+        // Setting the initial viewport will trigger a reflow.
+        mMobileViewportManager->SetInitialViewport();
+      }
+    }
+    return;
+  }
+
+  MOZ_ASSERT(mMobileViewportManager, "Shouldn't reach this without a "
+                                     "MobileViewportManager.");
+  mMobileViewportManager->Destroy();
+  mMobileViewportManager = nullptr;
+
+  if (aAfterInitialization) {
+    // Force a reflow to our correct size by going back to the docShell
+    // and asking it to reassert its size. This is necessary because
+    // everything underneath the docShell, like the ViewManager, has been
+    // altered by the MobileViewportManager in an irreversible way.
+    nsDocShell* docShell =
+      static_cast<nsDocShell*>(GetPresContext()->GetDocShell());
+    int32_t width, height;
+    docShell->GetSize(&width, &height);
+    docShell->SetSize(width, height, false);
+  }
 }
 
 /*

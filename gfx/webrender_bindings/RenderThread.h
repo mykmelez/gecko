@@ -19,6 +19,7 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/webrender/WebRenderTypes.h"
 #include "mozilla/layers/SynchronousTask.h"
+#include "GLContext.h"
 
 #include <list>
 #include <queue>
@@ -126,7 +127,7 @@ public:
   // RenderNotifier implementation
 
   /// Automatically forwarded to the render thread.
-  void NewFrameReady(wr::WindowId aWindowId);
+  void HandleFrame(wr::WindowId aWindowId, bool aRender);
 
   /// Automatically forwarded to the render thread.
   void WakeUp(wr::WindowId aWindowId);
@@ -138,7 +139,7 @@ public:
   void RunEvent(wr::WindowId aWindowId, UniquePtr<RendererEvent> aCallBack);
 
   /// Can only be called from the render thread.
-  void UpdateAndRender(wr::WindowId aWindowId, const TimeStamp& aStartTime, bool aReadback = false);
+  void UpdateAndRender(wr::WindowId aWindowId, const TimeStamp& aStartTime, bool aRender, bool aReadback);
 
   void Pause(wr::WindowId aWindowId);
   bool Resume(wr::WindowId aWindowId);
@@ -180,6 +181,13 @@ public:
   WebRenderProgramCache* ProgramCache();
 
   /// Can only be called from the render thread.
+  void InitSharedGLContext();
+  /// Can only be called from the render thread.
+  gl::GLContext* SharedGL();
+
+  void ClearSharedGL();
+
+  /// Can only be called from the render thread.
   void HandleDeviceReset(const char* aWhere, bool aNotify);
   /// Can only be called from the render thread.
   bool IsHandlingDeviceReset();
@@ -203,6 +211,10 @@ private:
 
   WebRenderThreadPool mThreadPool;
   UniquePtr<WebRenderProgramCache> mProgramCache;
+
+  // An optional shared GLContext to be used for all
+  // windows.
+  RefPtr<gl::GLContext> mSharedGL;
 
   std::map<wr::WindowId, UniquePtr<RendererOGL>> mRenderers;
 

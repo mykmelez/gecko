@@ -12,10 +12,10 @@ const { Component, createFactory } = require("devtools/client/shared/vendor/reac
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 
-const Menu = require("devtools/client/framework/menu");
-const MenuItem = require("devtools/client/framework/menu-item");
-
 const Sidebar = createFactory(require("devtools/client/shared/components/Sidebar"));
+
+loader.lazyRequireGetter(this, "Menu", "devtools/client/framework/menu");
+loader.lazyRequireGetter(this, "MenuItem", "devtools/client/framework/menu-item");
 
 // Shortcuts
 const { div } = dom;
@@ -139,8 +139,10 @@ class Tabbar extends Component {
     }
 
     const tabs = this.state.tabs.slice();
-    let activeId;
-    let activeTab;
+
+    // Preselect the first sidebar tab if none was explicitly selected.
+    let activeTab = 0;
+    let activeId = this.queuedTabs[0].id;
 
     for (const { id, index, panel, selected, title, url } of this.queuedTabs) {
       if (index >= 0) {

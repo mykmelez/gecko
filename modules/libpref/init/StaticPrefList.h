@@ -200,13 +200,26 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "dom.performance.enable_scheduler_timing",
   dom_performance_enable_scheduler_timing,
-  RelaxedAtomicBool, false
+  RelaxedAtomicBool, true
 )
 
 // If true. then the service worker interception and the ServiceWorkerManager
 // will live in the parent process.  This only takes effect on browser start.
 // Note, this is not currently safe to use for normal browsing yet.
 PREF("dom.serviceWorkers.parent_intercept", bool, false)
+
+// Enable PaymentRequest API
+#ifdef NIGHTLY_BUILD
+# define PREF_VALUE  true
+#else
+# define PREF_VALUE  false
+#endif
+VARCACHE_PREF(
+  "dom.payments.request.enabled",
+   dom_payments_request_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
 
 // Whether a user gesture is required to call PaymentRequest.prototype.show().
 VARCACHE_PREF(
@@ -283,6 +296,12 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "dom.serviceWorkers.testing.enabled",
    dom_serviceWorkers_testing_enabled,
+  RelaxedAtomicBool, false
+)
+
+VARCACHE_PREF(
+  "dom.testing.structuredclonetester.enabled",
+  dom_testing_structuredclonetester_enabled,
   RelaxedAtomicBool, false
 )
 
@@ -701,31 +720,19 @@ VARCACHE_PREF(
 
 // Pref to control whether display: -moz-box and display: -moz-inline-box are
 // parsed in content pages.
-#ifdef EARLY_BETA_OR_EARLIER
-#define PREF_VALUE false
-#else
-#define PREF_VALUE true
-#endif
 VARCACHE_PREF(
   "layout.css.xul-box-display-values.content.enabled",
    layout_css_xul_box_display_values_content_enabled,
-  bool, PREF_VALUE
+  bool, false
 )
-#undef PREF_VALUE
 
 // Pref to control whether ::xul-tree-* pseudo-elements are parsed in content
 // pages.
-#ifdef EARLY_BETA_OR_EARLIER
-#define PREF_VALUE false
-#else
-#define PREF_VALUE true
-#endif
 VARCACHE_PREF(
   "layout.css.xul-tree-pseudos.content.enabled",
    layout_css_xul_tree_pseudos_content_enabled,
-  bool, PREF_VALUE
+  bool, false
 )
-#undef PREF_VALUE
 
 // Is support for CSS "grid-template-{columns,rows}: subgrid X" enabled?
 VARCACHE_PREF(

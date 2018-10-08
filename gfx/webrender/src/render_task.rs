@@ -2,7 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceSize, DeviceIntSideOffsets, ImageDescriptor, ImageFormat};
+use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceSize, DeviceIntSideOffsets};
+use api::{DevicePixelScale, ImageDescriptor, ImageFormat};
 #[cfg(feature = "pathfinder")]
 use api::FontRenderMode;
 use border::BorderCacheKey;
@@ -15,8 +16,8 @@ use euclid::{TypedPoint2D, TypedVector2D};
 use freelist::{FreeList, FreeListHandle, WeakFreeListHandle};
 use glyph_rasterizer::GpuGlyphCacheKey;
 use gpu_cache::{GpuCache, GpuCacheAddress, GpuCacheHandle};
-use gpu_types::{BorderInstance, ImageSource, RasterizationSpace, UvRectKind};
-use internal_types::{FastHashMap, SavedTargetIndex, SourceTexture};
+use gpu_types::{BorderInstance, ImageSource, UvRectKind};
+use internal_types::{CacheTextureId, FastHashMap, SavedTargetIndex};
 #[cfg(feature = "pathfinder")]
 use pathfinder_partitioner::mesh::Mesh;
 use picture::PictureCacheKey;
@@ -116,16 +117,6 @@ impl RenderTaskTree {
             }
         }
 
-        // If this task can be shared between multiple
-        // passes, render it in the first pass so that
-        // it is available to all subsequent passes.
-        let pass_index = if task.is_shared() {
-            debug_assert!(task.children.is_empty());
-            0
-        } else {
-            pass_index
-        };
-
         let pass = &mut passes[pass_index];
         pass.add_render_task(id, task.get_dynamic_size(), task.target_kind());
     }
@@ -141,9 +132,9 @@ impl RenderTaskTree {
         RenderTaskAddress(id.0)
     }
 
-    pub fn write_task_data(&mut self) {
+    pub fn write_task_data(&mut self, device_pixel_scale: DevicePixelScale) {
         for task in &self.tasks {
-            self.task_data.push(task.write_task_data());
+            self.task_data.push(task.write_task_data(device_pixel_scale));
         }
     }
 
@@ -174,13 +165,27 @@ impl ops::IndexMut<RenderTaskId> for RenderTaskTree {
     }
 }
 
+/// Identifies the output buffer location for a given `RenderTask`.
 #[derive(Debug)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub enum RenderTaskLocation {
+    /// The `RenderTask` should be drawn to a fixed region in a specific render
+    /// target. This is used for the root `RenderTask`, where the main
+    /// framebuffer is used as the render target.
     Fixed(DeviceIntRect),
+    /// The `RenderTask` should be drawn to a target provided by the atlas
+    /// allocator. This is the most common case.
+    ///
+    /// The second member specifies the width and height of the task
+    /// output, and the first member is initially left as `None`. During the
+    /// build phase, we invoke `RenderTargetList::alloc()` and store the
+    /// resulting location in the first member. That location identifies the
+    /// render target and the offset of the allocated region within that target.
     Dynamic(Option<(DeviceIntPoint, RenderTargetIndex)>, DeviceIntSize),
-    TextureCache(SourceTexture, i32, DeviceIntRect),
+    /// The output of the `RenderTask` will be persisted beyond this frame, and
+    /// thus should be drawn into the `TextureCache`.
+    TextureCache(CacheTextureId, i32, DeviceIntRect),
 }
 
 #[derive(Debug)]
@@ -705,7 +710,7 @@ impl RenderTask {
     // Write (up to) 8 floats of data specific to the type
     // of render task that is provided to the GPU shaders
     // via a vertex texture.
-    pub fn write_task_data(&self) -> RenderTaskData {
+    pub fn write_task_data(&self, device_pixel_scale: DevicePixelScale) -> RenderTaskData {
         // NOTE: The ordering and layout of these structures are
         //       required to match both the GPU structures declared
         //       in prim_shared.glsl, and also the uses in submit_batch()
@@ -720,21 +725,12 @@ impl RenderTask {
                 [
                     task.content_origin.x as f32,
                     task.content_origin.y as f32,
-                    0.0,
                 ]
             }
             RenderTaskKind::CacheMask(ref task) => {
                 [
                     task.actual_rect.origin.x as f32,
                     task.actual_rect.origin.y as f32,
-                    RasterizationSpace::Screen as i32 as f32,
-                ]
-            }
-            RenderTaskKind::ClipRegion(..) => {
-                [
-                    0.0,
-                    0.0,
-                    RasterizationSpace::Local as i32 as f32,
                 ]
             }
             RenderTaskKind::VerticalBlur(ref task) |
@@ -742,17 +738,17 @@ impl RenderTask {
                 [
                     task.blur_std_deviation,
                     0.0,
-                    0.0,
                 ]
             }
             RenderTaskKind::Glyph(_) => {
-                [1.0, 0.0, 0.0]
+                [1.0, 0.0]
             }
+            RenderTaskKind::ClipRegion(..) |
             RenderTaskKind::Readback(..) |
             RenderTaskKind::Scaling(..) |
             RenderTaskKind::Border(..) |
             RenderTaskKind::Blit(..) => {
-                [0.0; 3]
+                [0.0; 2]
             }
         };
 
@@ -771,9 +767,9 @@ impl RenderTask {
                 target_rect.size.width as f32,
                 target_rect.size.height as f32,
                 target_index.0 as f32,
+                device_pixel_scale.0,
                 data[0],
                 data[1],
-                data[2],
             ]
         }
     }
@@ -868,33 +864,6 @@ impl RenderTask {
             RenderTaskKind::Blit(..) => {
                 RenderTargetKind::Color
             }
-        }
-    }
-
-    // Check if this task wants to be made available as an input
-    // to all passes (except the first) in the render task tree.
-    // To qualify for this, the task needs to have no children / dependencies.
-    // Currently, this is only supported for A8 targets, but it can be
-    // trivially extended to also support RGBA8 targets in the future
-    // if we decide that is useful.
-    pub fn is_shared(&self) -> bool {
-        match self.kind {
-            RenderTaskKind::Picture(..) |
-            RenderTaskKind::VerticalBlur(..) |
-            RenderTaskKind::Readback(..) |
-            RenderTaskKind::HorizontalBlur(..) |
-            RenderTaskKind::Scaling(..) |
-            RenderTaskKind::ClipRegion(..) |
-            RenderTaskKind::Blit(..) |
-            RenderTaskKind::Border(..) |
-            RenderTaskKind::Glyph(..) => false,
-
-            // TODO(gw): For now, we've disabled the shared clip mask
-            //           optimization. It's of dubious value in the
-            //           future once we start to cache clip tasks anyway.
-            //           I have left shared texture support here though,
-            //           just in case we want it in the future.
-            RenderTaskKind::CacheMask(..) => false,
         }
     }
 

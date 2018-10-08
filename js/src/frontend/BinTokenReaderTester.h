@@ -22,6 +22,8 @@
 namespace js {
 namespace frontend {
 
+class BinASTSourceMetadata;
+
 /**
  * A token reader for a simple, alternative serialization format for BinAST.
  *
@@ -62,20 +64,23 @@ class MOZ_STACK_CLASS BinTokenReaderTester: public BinTokenReaderBase
     class AutoTuple;
     class AutoTaggedTuple;
 
+    // The maximum number of fields in single tagged tuple.
+    static const uint32_t FIELD_NUM_MAX = 32;
+
   public:
     /**
      * Construct a token reader.
      *
      * Does NOT copy the buffer.
      */
-    BinTokenReaderTester(JSContext* cx, const uint8_t* start, const size_t length);
+    BinTokenReaderTester(JSContext* cx, ErrorReporter* er, const uint8_t* start, const size_t length);
 
     /**
      * Construct a token reader.
      *
      * Does NOT copy the buffer.
      */
-    BinTokenReaderTester(JSContext* cx, const Vector<uint8_t>& chars);
+    BinTokenReaderTester(JSContext* cx, ErrorReporter* er, const Vector<uint8_t>& chars);
 
     /**
      * Read the header of the file.
@@ -212,6 +217,11 @@ class MOZ_STACK_CLASS BinTokenReaderTester: public BinTokenReaderBase
      * Read a single uint32_t.
      */
     MOZ_MUST_USE JS::Result<uint32_t> readInternalUint32();
+
+  public:
+    void traceMetadata(JSTracer*) {}
+    BinASTSourceMetadata* takeMetadata() { MOZ_CRASH("Tester format has no metadata to take!"); }
+    MOZ_MUST_USE JS::Result<Ok> initFromScriptSource(ScriptSource*) { MOZ_CRASH("Tester format not for dynamic use"); }
 
   public:
     // The following classes are used whenever we encounter a tuple/tagged tuple/list
