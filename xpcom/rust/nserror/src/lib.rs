@@ -7,26 +7,26 @@ use nsstring::{nsCString, nsACString};
 /// as the C++ equivalent.
 #[repr(transparent)]
 #[allow(non_camel_case_types)]
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct nsresult(pub u32);
 
 /// An extension trait that adds methods to `nsresult` types.
 pub trait NsresultExt {
-    fn failed(&self) -> bool;
-    fn succeeded(&self) -> bool;
+    fn failed(self) -> bool;
+    fn succeeded(self) -> bool;
     fn to_result(self) -> Result<nsresult, nsresult>;
 
     /// Get a printable name for the nsresult error code. This function returns
     /// a nsCString<'static>, which implements `Display`.
-    fn error_name(&self) -> nsCString;
+    fn error_name(self) -> nsCString;
 }
 
 impl NsresultExt for nsresult {
-    fn failed(&self) -> bool {
+    fn failed(self) -> bool {
         (self.0 >> 31) != 0
     }
 
-    fn succeeded(&self) -> bool {
+    fn succeeded(self) -> bool {
         !self.failed()
     }
 
@@ -38,7 +38,7 @@ impl NsresultExt for nsresult {
         }
     }
 
-    fn error_name(&self) -> nsCString {
+    fn error_name(self) -> nsCString {
         let mut cstr = nsCString::new();
         unsafe {
             Gecko_GetErrorName(self, &mut *cstr);
@@ -48,7 +48,7 @@ impl NsresultExt for nsresult {
 }
 
 extern "C" {
-    fn Gecko_GetErrorName(rv: &nsresult, cstr: *mut nsACString);
+    fn Gecko_GetErrorName(rv: nsresult, cstr: *mut nsACString);
 }
 
 mod error_list {
