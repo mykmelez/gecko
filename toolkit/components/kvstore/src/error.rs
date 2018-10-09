@@ -8,11 +8,7 @@ use nserror::{
     NS_ERROR_NULL_POINTER, NS_ERROR_UNEXPECTED,
 };
 use rkv::StoreError;
-use std::{
-    str::Utf8Error,
-    string::FromUtf16Error,
-    sync::PoisonError,
-};
+use std::{str::Utf8Error, string::FromUtf16Error, sync::PoisonError};
 use OwnedValue;
 
 #[derive(Debug, Fail)]
