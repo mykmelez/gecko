@@ -49,18 +49,20 @@ interface nsIKeyValueDatabase : nsISupports {
 [scriptable, uuid(46c893dd-4c14-4de0-b33d-a1be18c6d062)]
 interface nsIKeyValueService : nsISupports {
     /**
-     * Get a handle to the default key/value database at the given path,
-     * creating the database if necessary.
+     * Get a handle to the key/value database at the given path and optionally
+     * with the given name, creating the database if necessary.
      *
      * There can be multiple key/value databases for a given path, which share
-     * the database file.  This function retrieves the "default" (unnamed) one.
-     * To retrieve a handle to a non-default (named) database, use getOrCreate.
+     * the database files.  If you don't specify a name, then this method
+     * will retrieve a handle to the "default" (unnamed) database.
+     *
+     * It isn't a good idea to use both named and unnamed databases in the same
+     * path, as the underlying implementation stores information about the named
+     * databases in the default database.  So if you need multiple databases,
+     * then give them all names!
      */
-    nsIKeyValueDatabase getOrCreateDefault(in AUTF8String path);
-
-    /**
-     * Get a handle to the named key/value database at the given path,
-     * creating the database if necessary.
-     */
-    nsIKeyValueDatabase getOrCreate(in AUTF8String path, in AUTF8String name);
+    nsIKeyValueDatabase getOrCreate(
+        in AUTF8String path,
+        [optional] in AUTF8String name
+    );
 };

@@ -23,15 +23,15 @@ add_task(async function getService() {
   Assert.ok(gKeyValueService);
 });
 
-add_task(async function getOrCreateDefault() {
-  const databaseDir = await makeDatabaseDir("getOrCreateDefault");
-  const defaultDatabase = gKeyValueService.getOrCreateDefault(databaseDir);
+add_task(async function getOrCreate() {
+  const databaseDir = await makeDatabaseDir("getOrCreate");
+  const defaultDatabase = gKeyValueService.getOrCreate(databaseDir);
   Assert.ok(defaultDatabase);
 });
 
 add_task(async function putGetHasDelete() {
   const databaseDir = await makeDatabaseDir("putGetHasDelete");
-  const database = gKeyValueService.getOrCreateDefault(databaseDir);
+  const database = gKeyValueService.getOrCreate(databaseDir);
 
   // Getting key/value pairs that don't exist (yet) returns default values
   // or null, depending on whether you specify a default value.
@@ -134,7 +134,7 @@ add_task(async function putGetHasDelete() {
 
 add_task(async function largeNumbers() {
   const databaseDir = await makeDatabaseDir("largeNumbers");
-  const database = gKeyValueService.getOrCreateDefault(databaseDir);
+  const database = gKeyValueService.getOrCreate(databaseDir);
 
   const MAX_INT_VARIANT = Math.pow(2, 31) - 1;
   const MIN_DOUBLE_VARIANT = Math.pow(2, 31);
@@ -183,7 +183,7 @@ add_task(async function largeNumbers() {
 
 add_task(async function extendedCharacterKey() {
   const databaseDir = await makeDatabaseDir("extendedCharacterKey");
-  const database = gKeyValueService.getOrCreateDefault(databaseDir);
+  const database = gKeyValueService.getOrCreate(databaseDir);
 
   // Ensure that we can use extended character (i.e. non-ASCII) strings as keys.
 
@@ -207,7 +207,7 @@ add_task(async function getOrCreateNamedDatabases() {
   let barDB = gKeyValueService.getOrCreate(databaseDir, "bar");
   Assert.ok(barDB, "retrieval of second named database works");
 
-  let defaultDB = gKeyValueService.getOrCreateDefault(databaseDir);
+  let defaultDB = gKeyValueService.getOrCreate(databaseDir);
   Assert.ok(defaultDB, "retrieval of default database works");
 
   // Key/value pairs that are put into a database don't exist in others.
@@ -242,7 +242,7 @@ add_task(async function getOrCreateNamedDatabases() {
 
 add_task(async function enumeration() {
   const databaseDir = await makeDatabaseDir("enumeration");
-  const database = gKeyValueService.getOrCreateDefault(databaseDir);
+  const database = gKeyValueService.getOrCreate(databaseDir);
 
   database.put("int-key", 1234);
   database.put("string-key", "Héllo, wőrld!");

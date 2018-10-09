@@ -38,11 +38,10 @@ use std::{
 };
 use storage_variant::IntoVariant;
 use xpcom::{
-    Ensure,
     interfaces::{
         nsIJSEnumerator, nsIKeyValueDatabase, nsISimpleEnumerator, nsISupports, nsIVariant,
     },
-    nsIID, RefPtr,
+    nsIID, Ensure, RefPtr,
 };
 
 // These are the relevant parts of the nsXPTTypeTag enum in xptinfo.h,
@@ -128,27 +127,11 @@ impl KeyValueService {
     }
 
     xpcom_method!(
-        GetOrCreateDefault,
-        get_or_create_default,
-        { path: *const nsACString },
+        GetOrCreate,
+        get_or_create,
+        { path: *const nsACString, name: *const nsACString },
         *mut *const nsIKeyValueDatabase
     );
-    xpcom_method!(GetOrCreate, get_or_create, {path: *const nsACString, name: *const nsACString}, *mut *const nsIKeyValueDatabase);
-
-    fn get_or_create_default(
-        &self,
-        path: &nsACString,
-    ) -> Result<RefPtr<nsIKeyValueDatabase>, KeyValueError> {
-        let path = str::from_utf8(path)?;
-        let mut writer = Manager::singleton().write()?;
-        let rkv = writer.get_or_create(Path::new(path), Rkv::new)?;
-        let store = rkv.write()?.open_or_create_default()?;
-        let key_value_db = KeyValueDatabase::new(rkv, store);
-
-        key_value_db
-            .query_interface::<nsIKeyValueDatabase>()
-            .ok_or(KeyValueError::NoInterface("nsIKeyValueDatabase"))
-    }
 
     fn get_or_create(
         &self,
@@ -159,7 +142,10 @@ impl KeyValueService {
         let name = str::from_utf8(name)?;
         let mut writer = Manager::singleton().write()?;
         let rkv = writer.get_or_create(Path::new(path), Rkv::new)?;
-        let store = rkv.write()?.open_or_create(Some(name))?;
+        let store = match name {
+            "" => rkv.write()?.open_or_create_default(),
+            _ => rkv.write()?.open_or_create(Some(name)),
+        }?;
         let key_value_db = KeyValueDatabase::new(rkv, store);
 
         key_value_db
@@ -181,14 +167,14 @@ impl KeyValueDatabase {
         KeyValueDatabase::allocate(InitKeyValueDatabase { rkv, store })
     }
 
-    xpcom_method!(Put, put, {key: *const nsACString, value: *const nsIVariant});
+    xpcom_method!(Put, put, { key: *const nsACString, value: *const nsIVariant });
     xpcom_method!(Has, has, { key: *const nsACString }, *mut bool);
-    xpcom_method!(Get, get, {key: *const nsACString, default_value: *const nsIVariant}, *mut *const nsIVariant);
+    xpcom_method!(Get, get, { key: *const nsACString, default_value: *const nsIVariant }, *mut *const nsIVariant);
     xpcom_method!(Delete, delete, { key: *const nsACString });
-    xpcom_method!(GetInt, get_int, {key: *const nsACString, default_value: int64_t}, *mut int64_t);
-    xpcom_method!(GetDouble, get_double, {key: *const nsACString, default_value: c_double}, *mut c_double);
-    xpcom_method!(GetBool, get_bool, {key: *const nsACString, default_value: bool}, *mut bool);
-    xpcom_method!(GetString, get_string, {key: *const nsACString, default_value: *const nsAString}, *mut nsAString);
+    xpcom_method!(GetInt, get_int, { key: *const nsACString, default_value: int64_t }, *mut int64_t);
+    xpcom_method!(GetDouble, get_double, { key: *const nsACString, default_value: c_double }, *mut c_double);
+    xpcom_method!(GetBool, get_bool, { key: *const nsACString, default_value: bool }, *mut bool);
+    xpcom_method!(GetString, get_string, { key: *const nsACString, default_value: *const nsAString }, *mut nsAString);
     xpcom_method!(
         Enumerate,
         enumerate,
