@@ -346,12 +346,9 @@ impl KeyValueDatabase {
     ) -> Result<RefPtr<nsISimpleEnumerator>, KeyValueError> {
         let env = self.rkv.read()?;
         let reader = env.read()?;
-
-        // from_key is [optional], and XPConnect maps the absence of a value
-        // to an empty string, so we know it isn't a null pointer.
         let from_key = str::from_utf8(from_key)?;
 
-        let iterator = if from_key == "" {
+        let iterator = if from_key.is_empty() {
             reader.iter_start(&self.store)?
         } else {
             reader.iter_from(&self.store, &from_key)?
