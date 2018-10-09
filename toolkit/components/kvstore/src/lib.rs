@@ -254,8 +254,8 @@ impl KeyValueDatabase {
                 .ok_or(KeyValueError::Read)?
                 .take()),
             Some(Value::Bool(value)) => Ok(value.into_variant().ok_or(KeyValueError::Read)?.take()),
-            None => Ok(into_variant(default_value)?.take()),
             Some(value) => return Err(KeyValueError::UnsupportedValue(value.into())),
+            None => Ok(into_variant(default_value)?.take()),
         }
     }
 
@@ -305,8 +305,8 @@ impl KeyValueDatabase {
 
         match value {
             Some(Value::F64(value)) => Ok(value.into()),
-            None => Ok(default_value),
             Some(value) => return Err(KeyValueError::UnsupportedValue(value.into())),
+            None => Ok(default_value),
         }
     }
 
@@ -322,8 +322,8 @@ impl KeyValueDatabase {
 
         match value {
             Some(Value::Str(value)) => Ok(nsString::from(value)),
-            None => Ok(nsString::from(default_value)),
             Some(value) => return Err(KeyValueError::UnsupportedValue(value.into())),
+            None => Ok(nsString::from(default_value)),
         }
     }
 
@@ -335,8 +335,8 @@ impl KeyValueDatabase {
 
         match value {
             Some(Value::Bool(value)) => Ok(value),
-            None => Ok(default_value),
             Some(value) => return Err(KeyValueError::UnsupportedValue(value.into())),
+            None => Ok(default_value),
         }
     }
 
