@@ -35,7 +35,7 @@ interface nsIKeyValueDatabase : nsISupports {
      */
     long long getInt(in AUTF8String key, in long long defaultValue);
     double getDouble(in AUTF8String key, in double defaultValue);
-    AString getString(in AUTF8String key, in AString defaultValue);
+    AUTF8String getString(in AUTF8String key, in AUTF8String defaultValue);
     boolean getBool(in AUTF8String key, in boolean defaultValue);
 
     /**

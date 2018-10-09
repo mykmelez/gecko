@@ -24,7 +24,7 @@ use nserror::{
     nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_AGGREGATION,
     NS_ERROR_UNEXPECTED, NS_OK,
 };
-use nsstring::{nsACString, nsAString, nsCString, nsString};
+use nsstring::{nsACString, nsCString, nsString};
 use ownedvalue::OwnedValue;
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
@@ -172,7 +172,7 @@ impl KeyValueDatabase {
     xpcom_method!(GetInt, get_int, { key: *const nsACString, default_value: int64_t }, *mut int64_t);
     xpcom_method!(GetDouble, get_double, { key: *const nsACString, default_value: c_double }, *mut c_double);
     xpcom_method!(GetBool, get_bool, { key: *const nsACString, default_value: bool }, *mut bool);
-    xpcom_method!(GetString, get_string, { key: *const nsACString, default_value: *const nsAString }, *mut nsAString);
+    xpcom_method!(GetString, get_string, { key: *const nsACString, default_value: *const nsACString }, *mut nsACString);
     xpcom_method!(
         Enumerate,
         enumerate,
@@ -313,17 +313,17 @@ impl KeyValueDatabase {
     fn get_string(
         &self,
         key: &nsACString,
-        default_value: &nsAString,
-    ) -> Result<nsString, KeyValueError> {
+        default_value: &nsACString,
+    ) -> Result<nsCString, KeyValueError> {
         let key = str::from_utf8(key)?;
         let env = self.rkv.read()?;
         let reader = env.read()?;
         let value = reader.get(&self.store, &key)?;
 
         match value {
-            Some(Value::Str(value)) => Ok(nsString::from(value)),
+            Some(Value::Str(value)) => Ok(nsCString::from(value)),
             Some(value) => return Err(KeyValueError::UnsupportedValue(value.into())),
-            None => Ok(nsString::from(default_value)),
+            None => Ok(nsCString::from(default_value)),
         }
     }
 
