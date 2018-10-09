@@ -34,7 +34,7 @@ use std::{
     ptr, str,
     sync::{Arc, RwLock},
 };
-use storage_variant::IntoVariant;
+use storage_variant::{IntoVariant, Variant};
 use xpcom::{
     interfaces::{
         nsIJSEnumerator, nsIKeyValueDatabase, nsISimpleEnumerator, nsISupports, nsIVariant,
@@ -254,41 +254,7 @@ impl KeyValueDatabase {
                 .ok_or(KeyValueError::Read)?
                 .take()),
             Some(Value::Bool(value)) => Ok(value.into_variant().ok_or(KeyValueError::Read)?.take()),
-            None => {
-                let mut data_type: uint16_t = 0;
-                unsafe { default_value.GetDataType(&mut data_type) }.to_result()?;
-                info!("get: default value nsIVariant type is {}", data_type);
-
-                match data_type {
-                    DATA_TYPE_INT32 => {
-                        let mut val: int32_t = 0;
-                        unsafe { default_value.GetAsInt32(&mut val) }.to_result()?;
-                        Ok(val.into_variant().ok_or(KeyValueError::Read)?.take())
-                    }
-                    DATA_TYPE_DOUBLE => {
-                        let mut val: f64 = 0.0;
-                        unsafe { default_value.GetAsDouble(&mut val) }.to_result()?;
-                        Ok(val.into_variant().ok_or(KeyValueError::Read)?.take())
-                    }
-                    DATA_TYPE_WSTRING => {
-                        let mut val: nsString = nsString::new();
-                        unsafe { default_value.GetAsAString(&mut *val) }.to_result()?;
-                        Ok(val.into_variant().ok_or(KeyValueError::Read)?.take())
-                    }
-                    DATA_TYPE_BOOL => {
-                        let mut val: bool = false;
-                        unsafe { default_value.GetAsBool(&mut val) }.to_result()?;
-                        Ok(val.into_variant().ok_or(KeyValueError::Read)?.take())
-                    }
-                    DATA_TYPE_EMPTY => {
-                        let val = ();
-                        Ok(val.into_variant().ok_or(KeyValueError::Read)?.take())
-                    }
-                    _unsupported_type => {
-                        return Err(KeyValueError::UnsupportedType(data_type));
-                    }
-                }
-            }
+            None => Ok(into_variant(default_value)?.take()),
             Some(value) => return Err(KeyValueError::UnsupportedValue(value.into())),
         }
     }
@@ -503,5 +469,42 @@ impl KeyValuePair {
             .into_variant()
             .ok_or(KeyValueError::Nsresult(NS_ERROR_FAILURE))?
             .take())
+    }
+}
+
+// TODO: consider making this an implementation of the IntoVariant trait
+// from storage/variant/src/lib.rs.
+fn into_variant(variant: &nsIVariant) -> Result<Variant, KeyValueError> {
+    let mut data_type: uint16_t = 0;
+    unsafe { variant.GetDataType(&mut data_type) }.to_result()?;
+
+    match data_type {
+        DATA_TYPE_INT32 => {
+            let mut val: int32_t = 0;
+            unsafe { variant.GetAsInt32(&mut val) }.to_result()?;
+            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
+        }
+        DATA_TYPE_DOUBLE => {
+            let mut val: f64 = 0.0;
+            unsafe { variant.GetAsDouble(&mut val) }.to_result()?;
+            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
+        }
+        DATA_TYPE_WSTRING => {
+            let mut val: nsString = nsString::new();
+            unsafe { variant.GetAsAString(&mut *val) }.to_result()?;
+            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
+        }
+        DATA_TYPE_BOOL => {
+            let mut val: bool = false;
+            unsafe { variant.GetAsBool(&mut val) }.to_result()?;
+            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
+        }
+        DATA_TYPE_EMPTY => {
+            let val = ();
+            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
+        }
+        _unsupported_type => {
+            return Err(KeyValueError::UnsupportedType(data_type));
+        }
     }
 }
