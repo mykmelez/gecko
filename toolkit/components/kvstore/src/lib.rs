@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#![allow(non_snake_case)]
-
 #[macro_use]
 extern crate failure;
 extern crate libc;
@@ -185,14 +183,14 @@ impl KeyValueDatabase {
     fn put(&self, key: &nsACString, value: &nsIVariant) -> Result<(), KeyValueError> {
         let key = str::from_utf8(key)?;
 
-        let mut dataType: uint16_t = 0;
-        unsafe { value.GetDataType(&mut dataType) }.to_result()?;
-        info!("nsIVariant type is {}", dataType);
+        let mut data_type: uint16_t = 0;
+        unsafe { value.GetDataType(&mut data_type) }.to_result()?;
+        info!("nsIVariant type is {}", data_type);
 
         let env = self.rkv.read()?;
         let mut writer = env.write()?;
 
-        match dataType {
+        match data_type {
             DATA_TYPE_INT32 => {
                 info!("nsIVariant type is int32");
                 let mut value_as_int32: int32_t = 0;
@@ -223,7 +221,7 @@ impl KeyValueDatabase {
                 writer.commit()?;
             }
             _unsupported_type => {
-                return Err(KeyValueError::UnsupportedType(dataType));
+                return Err(KeyValueError::UnsupportedType(data_type));
             }
         };
 
@@ -257,11 +255,11 @@ impl KeyValueDatabase {
                 .take()),
             Some(Value::Bool(value)) => Ok(value.into_variant().ok_or(KeyValueError::Read)?.take()),
             None => {
-                let mut dataType: uint16_t = 0;
-                unsafe { default_value.GetDataType(&mut dataType) }.to_result()?;
-                info!("get: default value nsIVariant type is {}", dataType);
+                let mut data_type: uint16_t = 0;
+                unsafe { default_value.GetDataType(&mut data_type) }.to_result()?;
+                info!("get: default value nsIVariant type is {}", data_type);
 
-                match dataType {
+                match data_type {
                     DATA_TYPE_INT32 => {
                         let mut val: int32_t = 0;
                         unsafe { default_value.GetAsInt32(&mut val) }.to_result()?;
@@ -287,7 +285,7 @@ impl KeyValueDatabase {
                         Ok(val.into_variant().ok_or(KeyValueError::Read)?.take())
                     }
                     _unsupported_type => {
-                        return Err(KeyValueError::UnsupportedType(dataType));
+                        return Err(KeyValueError::UnsupportedType(data_type));
                     }
                 }
             }
@@ -438,9 +436,11 @@ impl SimpleEnumerator {
 
     // The nsISimpleEnumeratorBase methods iterator() and entries() depend on
     // nsIJSEnumerator, which requires jscontext, which is unsupported for Rust.
+    #[allow(non_snake_case)]
     fn Iterator(&self, _retval: *mut *const nsIJSEnumerator) -> nsresult {
         NS_ERROR_NOT_IMPLEMENTED
     }
+    #[allow(non_snake_case)]
     fn Entries(&self, _aIface: *const nsIID, _retval: *mut *const nsIJSEnumerator) -> nsresult {
         NS_ERROR_NOT_IMPLEMENTED
     }
