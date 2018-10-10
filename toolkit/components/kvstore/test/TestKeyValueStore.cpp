@@ -22,6 +22,32 @@ protected:
         EXPECT_TRUE(NS_SUCCEEDED(rv));
     }
 public:
+    nsAutoCString GetDatabasePath(nsLiteralString name) {
+        nsresult rv;
+
+        nsCOMPtr<nsIFile> databaseDir;
+        rv = mProfileDir->Clone(getter_AddRefs(databaseDir));
+        EXPECT_TRUE(NS_SUCCEEDED(rv));
+
+        rv = databaseDir->Append(name);
+        EXPECT_TRUE(NS_SUCCEEDED(rv));
+
+        bool exists;
+        rv = databaseDir->Exists(&exists);
+        EXPECT_TRUE(NS_SUCCEEDED(rv));
+
+        if (!exists) {
+            rv = databaseDir->Create(nsIFile::DIRECTORY_TYPE, 0755);
+            EXPECT_TRUE(NS_SUCCEEDED(rv));
+        }
+
+        nsAutoString path;
+        rv = databaseDir->GetPath(path);
+        EXPECT_TRUE(NS_SUCCEEDED(rv));
+
+        return NS_ConvertUTF16toUTF8(path);
+    }
+
     nsCOMPtr<nsIKeyValueService> mKeyValueService;
     nsCOMPtr<nsIFile> mProfileDir;
 };
@@ -29,34 +55,11 @@ public:
 TEST_F(KeyValueStore, GetOrCreate) {
     nsresult rv;
 
-    nsCOMPtr<nsIFile> databaseDir;
-
-    rv = mProfileDir->Clone(getter_AddRefs(databaseDir));
-    EXPECT_TRUE(NS_SUCCEEDED(rv));
-
-    rv = databaseDir->Append(NS_LITERAL_STRING("GetOrCreate"));
-    EXPECT_TRUE(NS_SUCCEEDED(rv));
-
-    bool exists;
-    rv = databaseDir->Exists(&exists);
-    EXPECT_TRUE(NS_SUCCEEDED(rv));
-    EXPECT_FALSE(exists);
-
-    rv = databaseDir->Create(nsIFile::DIRECTORY_TYPE, 0755);
-    EXPECT_TRUE(NS_SUCCEEDED(rv));
-
-    nsAutoString path;
-    rv = databaseDir->GetPath(path);
-    EXPECT_TRUE(NS_SUCCEEDED(rv));
-
-    NS_ConvertUTF16toUTF8 pathUtf8(path);
+    nsAutoCString path = GetDatabasePath(NS_LITERAL_STRING("GetOrCreate"));
     nsAutoCString name;
 
-    nsCOMPtr<nsIKeyValueService> service = do_GetService(NS_KEY_VALUE_SERVICE_CONTRACTID);
-    EXPECT_TRUE(service);
-
     nsCOMPtr<nsIKeyValueDatabase> database;
-    rv = service->GetOrCreate(pathUtf8, name, getter_AddRefs(database));
+    rv = mKeyValueService->GetOrCreate(path, name, getter_AddRefs(database));
     EXPECT_TRUE(NS_SUCCEEDED(rv));
 }
 
