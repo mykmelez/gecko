@@ -48,6 +48,7 @@ use xpcom::{
 #[allow(non_camel_case_types)]
 enum DataType {
     INT32 = 2,
+    INT64 = 3,
     DOUBLE = 9,
     BOOL = 10,
     WSTRING = 21,
@@ -68,6 +69,7 @@ enum DataType {
 // seems sufficient.)
 //
 const DATA_TYPE_INT32: uint16_t = DataType::INT32 as u16;
+const DATA_TYPE_INT64: uint16_t = DataType::INT64 as u16;
 const DATA_TYPE_DOUBLE: uint16_t = DataType::DOUBLE as u16;
 const DATA_TYPE_BOOL: uint16_t = DataType::BOOL as u16;
 const DATA_TYPE_WSTRING: uint16_t = DataType::WSTRING as u16;
@@ -479,6 +481,11 @@ fn into_variant(variant: &nsIVariant) -> Result<Variant, KeyValueError> {
         DATA_TYPE_INT32 => {
             let mut val: int32_t = 0;
             unsafe { variant.GetAsInt32(&mut val) }.to_result()?;
+            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
+        }
+        DATA_TYPE_INT64 => {
+            let mut val: int64_t = 0;
+            unsafe { variant.GetAsInt64(&mut val) }.to_result()?;
             Ok(val.into_variant().ok_or(KeyValueError::Read)?)
         }
         DATA_TYPE_DOUBLE => {

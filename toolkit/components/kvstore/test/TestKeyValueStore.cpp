@@ -10,6 +10,10 @@
 #include "nsServiceManagerUtils.h"
 #include "nsString.h"
 #include "nsToolkitCompsCID.h"
+#include "mozilla/storage/Variant.h"
+
+// using namespace mozilla;
+using namespace mozilla::storage;
 
 namespace TestKeyValueStore {
 
@@ -61,6 +65,27 @@ TEST_F(KeyValueStore, GetOrCreate) {
     nsCOMPtr<nsIKeyValueDatabase> database;
     rv = mKeyValueService->GetOrCreate(path, name, getter_AddRefs(database));
     EXPECT_TRUE(NS_SUCCEEDED(rv));
+}
+
+TEST_F(KeyValueStore, PutGetHasDelete) {
+    nsresult rv;
+
+    const nsCString path = GetProfileSubdir(NS_LITERAL_STRING("PutGetHasDelete"));
+    nsAutoCString name;
+
+    nsCOMPtr<nsIKeyValueDatabase> database;
+    rv = mKeyValueService->GetOrCreate(path, name, getter_AddRefs(database));
+    EXPECT_TRUE(NS_SUCCEEDED(rv));
+
+    int64_t defaultInt = 1;
+    nsCOMPtr<nsIVariant> defaultIntVariant = new IntegerVariant(defaultInt);
+    nsCOMPtr<nsIVariant> intValueVariant;
+    rv = database->Get(NS_LITERAL_CSTRING("int-key"), defaultIntVariant, getter_AddRefs(intValueVariant));
+    EXPECT_TRUE(NS_SUCCEEDED(rv));
+    int64_t intValue;
+    rv = intValueVariant->GetAsInt64(&intValue);
+    EXPECT_TRUE(NS_SUCCEEDED(rv));
+    EXPECT_EQ(intValue, defaultInt);
 }
 
 } // namespace TestKeyValueStore
