@@ -13,24 +13,23 @@
 
 class KeyValueStore : public ::testing::Test {
 protected:
-  void SetUp() override {
-  }
+    void SetUp() override {
+        mKeyValueService = do_GetService(NS_KEY_VALUE_SERVICE_CONTRACTID);
+        nsresult rv = NS_GetSpecialDirectory(NS_APP_USER_PROFILE_50_DIR,
+                                             getter_AddRefs(mProfileDir));
+        EXPECT_TRUE(NS_SUCCEEDED(rv));
+    }
+public:
+    nsCOMPtr<nsIKeyValueService> mKeyValueService;
+    nsCOMPtr<nsIFile> mProfileDir;
 };
 
-TEST_F(KeyValueStore, GetService) {
-    nsCOMPtr<nsIKeyValueService> service = do_GetService(NS_KEY_VALUE_SERVICE_CONTRACTID);
-    EXPECT_TRUE(service);
-}
-
 TEST_F(KeyValueStore, GetOrCreate) {
-    nsCOMPtr<nsIFile> profileDir;
-    nsresult rv = NS_GetSpecialDirectory(NS_APP_USER_PROFILE_50_DIR,
-                                         getter_AddRefs(profileDir));
+    nsresult rv;
 
     nsCOMPtr<nsIFile> databaseDir;
-    EXPECT_TRUE(NS_SUCCEEDED(rv));
 
-    rv = profileDir->Clone(getter_AddRefs(databaseDir));
+    rv = mProfileDir->Clone(getter_AddRefs(databaseDir));
     EXPECT_TRUE(NS_SUCCEEDED(rv));
 
     rv = databaseDir->Append(NS_LITERAL_STRING("GetOrCreate"));
@@ -57,5 +56,4 @@ TEST_F(KeyValueStore, GetOrCreate) {
     nsCOMPtr<nsIKeyValueDatabase> database;
     rv = service->GetOrCreate(pathUtf8, name, getter_AddRefs(database));
     EXPECT_TRUE(NS_SUCCEEDED(rv));
-    EXPECT_TRUE(database);
 }
