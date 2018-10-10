@@ -22,7 +22,7 @@ protected:
         EXPECT_TRUE(NS_SUCCEEDED(rv));
     }
 public:
-    nsAutoCString GetDatabasePath(nsLiteralString name) {
+    const nsCString GetDatabasePath(const nsAString& name) {
         nsresult rv;
 
         nsCOMPtr<nsIFile> databaseDir;
@@ -55,7 +55,7 @@ public:
 TEST_F(KeyValueStore, GetOrCreate) {
     nsresult rv;
 
-    nsAutoCString path = GetDatabasePath(NS_LITERAL_STRING("GetOrCreate"));
+    const nsCString path = GetDatabasePath(NS_LITERAL_STRING("GetOrCreate"));
     nsAutoCString name;
 
     nsCOMPtr<nsIKeyValueDatabase> database;
