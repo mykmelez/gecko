@@ -11,6 +11,8 @@
 #include "nsString.h"
 #include "nsToolkitCompsCID.h"
 
+namespace TestKeyValueStore {
+
 class KeyValueStore : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -57,3 +59,5 @@ TEST_F(KeyValueStore, GetOrCreate) {
     rv = service->GetOrCreate(pathUtf8, name, getter_AddRefs(database));
     EXPECT_TRUE(NS_SUCCEEDED(rv));
 }
+
+} // namespace TestKeyValueStore
