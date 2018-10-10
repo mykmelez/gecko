@@ -11,12 +11,18 @@
 #include "nsString.h"
 #include "nsToolkitCompsCID.h"
 
-TEST(KeyValueStore, GetService) {
+class KeyValueStore : public ::testing::Test {
+protected:
+  void SetUp() override {
+  }
+};
+
+TEST_F(KeyValueStore, GetService) {
     nsCOMPtr<nsIKeyValueService> service = do_GetService(NS_KEY_VALUE_SERVICE_CONTRACTID);
     EXPECT_TRUE(service);
 }
 
-TEST(KeyValueStore, GetOrCreate) {
+TEST_F(KeyValueStore, GetOrCreate) {
     nsCOMPtr<nsIFile> profileDir;
     nsresult rv = NS_GetSpecialDirectory(NS_APP_USER_PROFILE_50_DIR,
                                          getter_AddRefs(profileDir));
@@ -44,7 +50,6 @@ TEST(KeyValueStore, GetOrCreate) {
 
     NS_ConvertUTF16toUTF8 pathUtf8(path);
     nsAutoCString name;
-    // nsAutoCString name("");
 
     nsCOMPtr<nsIKeyValueService> service = do_GetService(NS_KEY_VALUE_SERVICE_CONTRACTID);
     EXPECT_TRUE(service);
