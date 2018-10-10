@@ -29,10 +29,10 @@ use ownedvalue::OwnedValue;
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
     cell::RefCell,
-    collections::VecDeque,
     path::Path,
     ptr, str,
     sync::{Arc, RwLock},
+    vec::IntoIter,
 };
 use storage_variant::{IntoVariant, Variant};
 use xpcom::{
@@ -363,7 +363,7 @@ impl KeyValueDatabase {
         // Our fallback approach is to collect the iterator into a collection
         // that SimpleEnumerator owns.
         //
-        let pairs: VecDeque<(String, OwnedValue)> = iterator
+        let pairs: Vec<(String, OwnedValue)> = iterator
             .map(|(key, val)| {
                 (
                     // TODO: stop using unsafe str::from_utf8_unchecked.
@@ -384,13 +384,13 @@ impl KeyValueDatabase {
 #[xpimplements(nsISimpleEnumerator)]
 #[refcnt = "nonatomic"]
 pub struct InitSimpleEnumerator {
-    pairs: RefCell<VecDeque<(String, OwnedValue)>>,
+    iter: RefCell<IntoIter<(String, OwnedValue)>>,
 }
 
 impl SimpleEnumerator {
-    fn new(pairs: VecDeque<(String, OwnedValue)>) -> RefPtr<SimpleEnumerator> {
+    fn new(pairs: Vec<(String, OwnedValue)>) -> RefPtr<SimpleEnumerator> {
         SimpleEnumerator::allocate(InitSimpleEnumerator {
-            pairs: RefCell::new(pairs),
+            iter: RefCell::new(pairs.into_iter()),
         })
     }
 
@@ -409,13 +409,13 @@ impl SimpleEnumerator {
     }
 
     fn has_more_elements(&self) -> Result<bool, KeyValueError> {
-        Ok(!self.pairs.borrow().is_empty())
+        Ok(!self.iter.borrow().as_slice().is_empty())
     }
 
     fn get_next(&self) -> Result<RefPtr<nsISupports>, KeyValueError> {
-        let mut pairs = self.pairs.borrow_mut();
-        let (key, value) = pairs
-            .pop_front()
+        let mut iter = self.iter.borrow_mut();
+        let (key, value) = iter
+            .next()
             .ok_or(KeyValueError::Nsresult(NS_ERROR_FAILURE))?;
 
         // Perhaps we should never fail if the value was unexpected and instead
