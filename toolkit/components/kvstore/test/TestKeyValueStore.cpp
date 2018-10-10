@@ -78,12 +78,11 @@ TEST_F(KeyValueStore, PutGetHasDelete) {
     EXPECT_TRUE(NS_SUCCEEDED(rv));
 
     int64_t defaultInt = 1;
-    nsCOMPtr<nsIVariant> defaultIntVariant = new IntegerVariant(defaultInt);
-    nsCOMPtr<nsIVariant> intValueVariant;
-    rv = database->Get(NS_LITERAL_CSTRING("int-key"), defaultIntVariant, getter_AddRefs(intValueVariant));
+    nsCOMPtr<nsIVariant> value;
+    rv = database->Get(NS_LITERAL_CSTRING("int-key"), new IntegerVariant(defaultInt), getter_AddRefs(value));
     EXPECT_TRUE(NS_SUCCEEDED(rv));
     int64_t intValue;
-    rv = intValueVariant->GetAsInt64(&intValue);
+    rv = value->GetAsInt64(&intValue);
     EXPECT_TRUE(NS_SUCCEEDED(rv));
     EXPECT_EQ(intValue, defaultInt);
 }
