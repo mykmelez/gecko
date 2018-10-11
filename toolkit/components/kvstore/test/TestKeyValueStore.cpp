@@ -26,6 +26,9 @@ protected:
         ASSERT_TRUE(NS_SUCCEEDED(rv));
     }
 public:
+    nsCOMPtr<nsIKeyValueService> mKeyValueService;
+    nsCOMPtr<nsIFile> mProfileDir;
+
     void GetProfileSubdir(const nsAString& name, nsACString& path) {
         nsresult rv;
 
@@ -51,9 +54,6 @@ public:
 
         CopyUTF16toUTF8(utf16Path, path);
     }
-
-    nsCOMPtr<nsIKeyValueService> mKeyValueService;
-    nsCOMPtr<nsIFile> mProfileDir;
 };
 
 TEST_F(KeyValueStore, GetOrCreate) {
