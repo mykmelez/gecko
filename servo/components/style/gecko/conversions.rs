@@ -110,8 +110,8 @@ impl From<nsStyleCoord_CalcValue> for LengthOrPercentageOrAuto {
 // disappear as we move more stuff to cbindgen.
 impl From<nsStyleCoord_CalcValue> for NonNegativeLengthOrPercentageOrAuto {
     fn from(other: nsStyleCoord_CalcValue) -> Self {
-        use values::generics::NonNegative;
         use style_traits::values::specified::AllowedNumericType;
+        use values::generics::NonNegative;
         NonNegative(if other.mLength < 0 || other.mPercent < 0. {
             LengthOrPercentageOrAuto::Calc(
                 CalcLengthOrPercentage::with_clamping_mode(
@@ -225,13 +225,13 @@ impl nsStyleImage {
         match image {
             GenericImage::Gradient(boxed_gradient) => self.set_gradient(*boxed_gradient),
             GenericImage::Url(ref url) => unsafe {
-                bindings::Gecko_SetLayerImageImageValue(self, url.0.image_value.get());
+                bindings::Gecko_SetLayerImageImageValue(self, (url.0).0.url_value.get());
             },
             GenericImage::Rect(ref image_rect) => {
                 unsafe {
                     bindings::Gecko_SetLayerImageImageValue(
                         self,
-                        image_rect.url.0.image_value.get(),
+                        (image_rect.url.0).0.url_value.get(),
                     );
                     bindings::Gecko_InitializeImageCropRect(self);
 

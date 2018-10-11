@@ -456,8 +456,8 @@ Navigator::GetProduct(nsAString& aProduct)
 void
 Navigator::GetProductSub(nsAString& aProductSub)
 {
-  // Legacy build ID hardcoded for backward compatibility (bug 776376)
-  aProductSub.AssignLiteral(LEGACY_BUILD_ID);
+  // Legacy build date hardcoded for backward compatibility (bug 776376)
+  aProductSub.AssignLiteral(LEGACY_UA_GECKO_TRAIL);
 }
 
 nsMimeTypeArray*
@@ -573,10 +573,33 @@ Navigator::GetBuildID(nsAString& aBuildID, CallerType aCallerType,
       aBuildID.AssignLiteral(LEGACY_BUILD_ID);
       return;
     }
+
     nsAutoString override;
     nsresult rv = Preferences::GetString("general.buildID.override", override);
     if (NS_SUCCEEDED(rv)) {
       aBuildID = override;
+      return;
+    }
+
+    nsAutoCString host;
+    bool isHTTPS = false;
+    if (mWindow) {
+      nsCOMPtr<nsIDocument> doc = mWindow->GetDoc();
+      if (doc) {
+        nsIURI* uri = doc->GetDocumentURI();
+        if (uri) {
+          MOZ_ALWAYS_SUCCEEDS(uri->SchemeIs("https", &isHTTPS));
+          if (isHTTPS) {
+            MOZ_ALWAYS_SUCCEEDS(uri->GetHost(host));
+          }
+        }
+      }
+    }
+
+    // Spoof the buildID on pages not loaded from "https://*.mozilla.org".
+    if (!isHTTPS ||
+        !StringEndsWith(host, NS_LITERAL_CSTRING(".mozilla.org"))) {
+      aBuildID.AssignLiteral(LEGACY_BUILD_ID);
       return;
     }
   }
@@ -857,8 +880,15 @@ Navigator::Vibrate(const nsTArray<uint32_t>& aPattern)
 //*****************************************************************************
 
 uint32_t
-Navigator::MaxTouchPoints()
+Navigator::MaxTouchPoints(CallerType aCallerType)
 {
+  // The maxTouchPoints is going to reveal the detail of users' hardware. So,
+  // we will spoof it into 0 if fingerprinting resistance is on.
+  if (aCallerType != CallerType::System &&
+      nsContentUtils::ShouldResistFingerprinting()) {
+    return 0;
+  }
+
   nsCOMPtr<nsIWidget> widget = widget::WidgetUtils::DOMWindowToWidget(mWindow->GetOuterWindow());
 
   NS_ENSURE_TRUE(widget, 0);

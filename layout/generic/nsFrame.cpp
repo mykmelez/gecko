@@ -251,6 +251,7 @@ nsIFrame::DestroyAnonymousContent(nsPresContext* aPresContext,
 {
   if (nsCOMPtr<nsIContent> content = aContent) {
     aPresContext->EventStateManager()->NativeAnonymousContentRemoved(content);
+    aPresContext->PresShell()->NativeAnonymousContentRemoved(content);
     content->UnbindFromTree();
   }
 }
@@ -10966,8 +10967,9 @@ nsIFrame::IsStackingContext(EffectSet* aEffectSet,
 {
   return HasOpacity(aEffectSet) ||
          IsTransformed(aStyleDisplay) ||
-         aStyleDisplay->IsContainPaint() ||
-         aStyleDisplay->IsContainLayout() ||
+         (IsFrameOfType(eSupportsContainLayoutAndPaint) &&
+          (aStyleDisplay->IsContainPaint() ||
+           aStyleDisplay->IsContainLayout())) ||
          // strictly speaking, 'perspective' doesn't require visual atomicity,
          // but the spec says it acts like the rest of these
          ChildrenHavePerspective(aStyleDisplay) ||

@@ -3820,7 +3820,7 @@ EvalInContext(JSContext* cx, unsigned argc, Value* vp)
 static bool
 EnsureGeckoProfilingStackInstalled(JSContext* cx, ShellContext* sc)
 {
-    if (cx->geckoProfiler().installed()) {
+    if (cx->geckoProfiler().infraInstalled()) {
         MOZ_ASSERT(sc->geckoProfilingStack);
         return true;
     }
@@ -10347,6 +10347,8 @@ main(int argc, char** argv, char** envp)
         || !op.addMultiStringOption('m', "module", "PATH", "Module path to run")
 #if defined(JS_BUILD_BINAST)
         || !op.addMultiStringOption('B', "binast", "PATH", "BinAST path to run")
+#else
+        || !op.addMultiStringOption('B', "binast", "", "No-op")
 #endif // JS_BUILD_BINAST
         || !op.addMultiStringOption('e', "execute", "CODE", "Inline code to run")
         || !op.addBoolOption('i', "shell", "Enter prompt after running code")
@@ -10519,9 +10521,6 @@ main(int argc, char** argv, char** envp)
         || !op.addBoolOption('\0', "no-async-stacks", "Disable async stacks")
         || !op.addMultiStringOption('\0', "dll", "LIBRARY", "Dynamically load LIBRARY")
         || !op.addBoolOption('\0', "suppress-minidump", "Suppress crash minidumps")
-#ifdef JS_TRACE_LOGGING
-        || !op.addBoolOption('\0', "enable-tracelogger","Enable Trace Logging")
-#endif
     )
     {
         return EXIT_FAILURE;
@@ -10584,12 +10583,6 @@ main(int argc, char** argv, char** envp)
     if (op.getBoolOption("suppress-minidump")) {
         js::NoteIntentionalCrash();
     }
-
-#ifdef JS_TRACE_LOGGING
-    if (op.getBoolOption("enable-tracelogger")) {
-        jit::JitOptions.enableTraceLogger = true;
-    }
-#endif
 
     if (!InitSharedObjectMailbox()) {
         return 1;

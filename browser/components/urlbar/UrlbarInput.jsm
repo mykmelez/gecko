@@ -50,11 +50,12 @@ class UrlbarInput {
     this.userInitiatedFocus = false;
     this.isPrivate = PrivateBrowsingUtils.isWindowPrivate(this.window);
 
+    // Forward textbox methods and properties.
     const METHODS = ["addEventListener", "removeEventListener",
       "setAttribute", "hasAttribute", "removeAttribute", "getAttribute",
       "focus", "blur", "select"];
-    const READ_ONLY_PROPERTIES = ["focused", "inputField", "editor"];
-    const READ_WRITE_PROPERTIES = ["value", "placeholder", "readOnly",
+    const READ_ONLY_PROPERTIES = ["inputField", "editor"];
+    const READ_WRITE_PROPERTIES = ["placeholder", "readOnly",
       "selectionStart", "selectionEnd"];
 
     for (let method of METHODS) {
@@ -67,10 +68,6 @@ class UrlbarInput {
       Object.defineProperty(this, property, {
         enumerable: true,
         get() {
-          let getter = "_get_" + property;
-          if (getter in this) {
-            return this[getter]();
-          }
           return this.textbox[property];
         },
       });
@@ -80,17 +77,9 @@ class UrlbarInput {
       Object.defineProperty(this, property, {
         enumerable: true,
         get() {
-          let getter = "_get_" + property;
-          if (getter in this) {
-            return this[getter]();
-          }
           return this.textbox[property];
         },
         set(val) {
-          let setter = "_set_" + property;
-          if (setter in this) {
-            return this[setter](val);
-          }
           return this.textbox[property] = val;
         },
       });
@@ -113,12 +102,15 @@ class UrlbarInput {
     this.inputField.controllers.insertControllerAt(0, new CopyCutController(this));
   }
 
-  /* Shortens the given value, usually by removing http:// and trailing slashes,
+  /**
+   * Shortens the given value, usually by removing http:// and trailing slashes,
    * such that calling nsIURIFixup::createFixupURI with the result will produce
    * the same URI.
    *
    * @param {string} val
    *   The string to be trimmed if it appears to be URI
+   * @returns {string}
+   *   The trimmed string
    */
   trimValue(val) {
     return UrlbarPrefs.get("trimURLs") ? this.window.trimURL(val) : val;
@@ -179,15 +171,20 @@ class UrlbarInput {
 
   // Getters and Setters below.
 
-  _get_focused() {
-    return this.inputField.getAttribute("focused") == "true";
+  get focused() {
+    return this.textbox.getAttribute("focused") == "true";
   }
 
-  _set_value(val) {
+  get value() {
+    return this.inputField.value;
+  }
+
+  set value(val) {
     val = this.trimValue(val);
 
     this.valueIsTyped = false;
     this.inputField.value = val;
+    this.formatValue();
 
     return val;
   }
@@ -195,7 +192,7 @@ class UrlbarInput {
   // Private methods below.
 
   _updateTextOverflow() {
-    if (!this._inOverflow) {
+    if (!this._overflowing) {
       this.removeAttribute("textoverflow");
       return;
     }
@@ -203,7 +200,7 @@ class UrlbarInput {
     this.window.promiseDocumentFlushed(() => {
       // Check overflow again to ensure it didn't change in the meantime.
       let input = this.inputField;
-      if (input && this._inOverflow) {
+      if (input && this._overflowing) {
         let side = input.scrollLeft &&
                    input.scrollLeft == input.scrollLeftMax ? "start" : "end";
         this.setAttribute("textoverflow", side);
@@ -212,7 +209,7 @@ class UrlbarInput {
   }
 
   _updateUrlTooltip() {
-    if (this.focused || !this._inOverflow) {
+    if (this.focused || !this._overflowing) {
       this.inputField.removeAttribute("title");
     } else {
       this.inputField.setAttribute("title", this.value);
@@ -392,7 +389,7 @@ class UrlbarInput {
     if (targetIsPlaceholder) {
       return;
     }
-    this._inOverflow = true;
+    this._overflowing = true;
     this._updateTextOverflow();
   }
 
@@ -404,7 +401,7 @@ class UrlbarInput {
     if (targetIsPlaceholder) {
       return;
     }
-    this._inOverflow = false;
+    this._overflowing = false;
 
     this._updateTextOverflow();
 

@@ -189,7 +189,7 @@ typedef JSObject*
 (* JSGetIncumbentGlobalCallback)(JSContext* cx);
 
 typedef bool
-(* JSEnqueuePromiseJobCallback)(JSContext* cx, JS::HandleObject job,
+(* JSEnqueuePromiseJobCallback)(JSContext* cx, JS::HandleObject promise, JS::HandleObject job,
                                 JS::HandleObject allocationSite, JS::HandleObject incumbentGlobal,
                                 void* data);
 
@@ -2526,8 +2526,9 @@ JS_DeleteElement(JSContext* cx, JS::HandleObject obj, uint32_t index);
  * This function is roughly equivalent to:
  *
  *     var result = [];
- *     for (key in obj)
+ *     for (key in obj) {
  *         result.push(key);
+ *     }
  *     return result;
  *
  * This is the closest thing we currently have to the ES6 [[Enumerate]]
@@ -2710,21 +2711,23 @@ extern JS_PUBLIC_API(JSObject*)
 JS_NewArrayObject(JSContext* cx, size_t length);
 
 /**
- * Returns true and sets |*isArray| indicating whether |value| is an Array
- * object or a wrapper around one, otherwise returns false on failure.
+ * On success, returns true, setting |*isArray| to true if |value| is an Array
+ * object or a wrapper around one, or to false if not.  Returns false on
+ * failure.
  *
- * This method returns true with |*isArray == false| when passed a proxy whose
- * target is an Array, or when passed a revoked proxy.
+ * This method returns true with |*isArray == false| when passed an ES6 proxy
+ * whose target is an Array, or when passed a revoked proxy.
  */
 extern JS_PUBLIC_API(bool)
 JS_IsArrayObject(JSContext* cx, JS::HandleValue value, bool* isArray);
 
 /**
- * Returns true and sets |*isArray| indicating whether |obj| is an Array object
- * or a wrapper around one, otherwise returns false on failure.
+ * On success, returns true, setting |*isArray| to true if |obj| is an Array
+ * object or a wrapper around one, or to false if not.  Returns false on
+ * failure.
  *
- * This method returns true with |*isArray == false| when passed a proxy whose
- * target is an Array, or when passed a revoked proxy.
+ * This method returns true with |*isArray == false| when passed an ES6 proxy
+ * whose target is an Array, or when passed a revoked proxy.
  */
 extern JS_PUBLIC_API(bool)
 JS_IsArrayObject(JSContext* cx, JS::HandleObject obj, bool* isArray);
@@ -2738,21 +2741,21 @@ JS_SetArrayLength(JSContext* cx, JS::Handle<JSObject*> obj, uint32_t length);
 namespace JS {
 
 /**
- * Returns true and sets |*isMap| indicating whether |obj| is an Map object
- * or a wrapper around one, otherwise returns false on failure.
+ * On success, returns true, setting |*isMap| to true if |obj| is a Map object
+ * or a wrapper around one, or to false if not.  Returns false on failure.
  *
- * This method returns true with |*isMap == false| when passed a proxy whose
- * target is an Map, or when passed a revoked proxy.
+ * This method returns true with |*isMap == false| when passed an ES6 proxy
+ * whose target is a Map, or when passed a revoked proxy.
  */
 extern JS_PUBLIC_API(bool)
 IsMapObject(JSContext* cx, JS::HandleObject obj, bool* isMap);
 
 /**
- * Returns true and sets |*isSet| indicating whether |obj| is an Set object
- * or a wrapper around one, otherwise returns false on failure.
+ * On success, returns true, setting |*isSet| to true if |obj| is a Set object
+ * or a wrapper around one, or to false if not.  Returns false on failure.
  *
- * This method returns true with |*isSet == false| when passed a proxy whose
- * target is an Set, or when passed a revoked proxy.
+ * This method returns true with |*isSet == false| when passed an ES6 proxy
+ * whose target is a Set, or when passed a revoked proxy.
  */
 extern JS_PUBLIC_API(bool)
 IsSetObject(JSContext* cx, JS::HandleObject obj, bool* isSet);
@@ -3381,6 +3384,51 @@ extern JS_PUBLIC_API(bool)
 AddPromiseReactions(JSContext* cx, JS::HandleObject promise,
                     JS::HandleObject onResolve, JS::HandleObject onReject);
 
+// This enum specifies whether a promise is expected to keep track of information
+// that is useful for embedders to implement user activation behavior handling as
+// specified in the HTML spec:
+// https://html.spec.whatwg.org/multipage/interaction.html#triggered-by-user-activation
+// By default, promises created by SpiderMonkey do not make any attempt to keep
+// track of information about whether an activation behavior was being processed
+// when the original promise in a promise chain was created.  If the embedder sets
+// either of the HadUserInteractionAtCreation or DidntHaveUserInteractionAtCreation
+// flags on a promise after creating it, SpiderMonkey will propagate that flag to
+// newly created promises when processing Promise#then and will make it possible
+// to query this flag off of a promise further down the chain later using the
+// GetPromiseUserInputEventHandlingState() API.
+enum class PromiseUserInputEventHandlingState {
+  // Don't keep track of this state (default for all promises)
+  DontCare,
+  // Keep track of this state, the original promise in the chain was created
+  // while an activation behavior was being processed.
+  HadUserInteractionAtCreation,
+  // Keep track of this state, the original promise in the chain was created
+  // while an activation behavior was not being processed.
+  DidntHaveUserInteractionAtCreation
+};
+
+/**
+ * Returns the given Promise's activation behavior state flag per above as a
+ * JS::PromiseUserInputEventHandlingState value.  All promises are created with
+ * the DontCare state by default.
+ *
+ * Returns JS::PromiseUserInputEventHandlingState::DontCare if the given object
+ * is a wrapper that can't safely be unwrapped.
+ */
+extern JS_PUBLIC_API(PromiseUserInputEventHandlingState)
+GetPromiseUserInputEventHandlingState(JS::HandleObject promise);
+
+/**
+ * Sets the given Promise's activation behavior state flag per above as a
+ * JS::PromiseUserInputEventHandlingState value.
+ *
+ * Returns false if the given object is a wrapper that can't safely be unwrapped,
+ * or if the promise isn't pending.
+ */
+extern JS_PUBLIC_API(bool)
+SetPromiseUserInputEventHandlingState(JS::HandleObject promise,
+                                      JS::PromiseUserInputEventHandlingState state);
+
 /**
  * Unforgeable version of the JS builtin Promise.all.
  *
@@ -3481,7 +3529,7 @@ class OptimizedEncodingListener
     virtual void storeOptimizedEncoding(const uint8_t* bytes, size_t length) = 0;
 };
 
-extern JS_PUBLIC_API(bool)
+extern MOZ_MUST_USE JS_PUBLIC_API(bool)
 GetOptimizedEncodingBuildId(BuildIdCharVector* buildId);
 
 class JS_PUBLIC_API(StreamConsumer)
@@ -3729,8 +3777,9 @@ JS_PutEscapedString(JSContext* cx, char* buffer, size_t size, JSString* str, cha
  *
  *   // in a fallible context
  *   JSFlatString* fstr = JS_FlattenString(cx, str);
- *   if (!fstr)
+ *   if (!fstr) {
  *     return false;
+ *   }
  *   MOZ_ASSERT(fstr == JS_ASSERT_STRING_IS_FLAT(str));
  *
  *   // in an infallible context, for the same 'str'
@@ -4234,11 +4283,12 @@ extern JS_PUBLIC_API(JSObject*)
 JS_NewDateObject(JSContext* cx, int year, int mon, int mday, int hour, int min, int sec);
 
 /**
- * Returns true and sets |*isDate| indicating whether |obj| is a Date object or
- * a wrapper around one, otherwise returns false on failure.
+ * On success, returns true, setting |*isDate| to true if |obj| is a Date
+ * object or a wrapper around one, or to false if not.  Returns false on
+ * failure.
  *
- * This method returns true with |*isDate == false| when passed a proxy whose
- * target is a Date, or when passed a revoked proxy.
+ * This method returns true with |*isDate == false| when passed an ES6 proxy
+ * whose target is a Date, or when passed a revoked proxy.
  */
 extern JS_PUBLIC_API(bool)
 JS_ObjectIsDate(JSContext* cx, JS::HandleObject obj, bool* isDate);
@@ -4278,11 +4328,12 @@ JS_ExecuteRegExpNoStatics(JSContext* cx, JS::HandleObject reobj, char16_t* chars
                           size_t* indexp, bool test, JS::MutableHandleValue rval);
 
 /**
- * Returns true and sets |*isRegExp| indicating whether |obj| is a RegExp
- * object or a wrapper around one, otherwise returns false on failure.
+ * On success, returns true, setting |*isRegExp| to true if |obj| is a RegExp
+ * object or a wrapper around one, or to false if not.  Returns false on
+ * failure.
  *
- * This method returns true with |*isRegExp == false| when passed a proxy whose
- * target is a RegExp, or when passed a revoked proxy.
+ * This method returns true with |*isRegExp == false| when passed an ES6 proxy
+ * whose target is a RegExp, or when passed a revoked proxy.
  */
 extern JS_PUBLIC_API(bool)
 JS_ObjectIsRegExp(JSContext* cx, JS::HandleObject obj, bool* isRegExp);
@@ -4466,7 +4517,6 @@ JS_SetOffthreadIonCompilationEnabled(JSContext* cx, bool enabled);
     Register(FULL_DEBUG_CHECKS, "jit.full-debug-checks")                    \
     Register(JUMP_THRESHOLD, "jump-threshold")                              \
     Register(TRACK_OPTIMIZATIONS, "jit.track-optimizations")                \
-    Register(ENABLE_TRACELOGGER, "jit.enable-tracelogger")                  \
     Register(SIMULATOR_ALWAYS_INTERRUPT, "simulator.always-interrupt")      \
     Register(SPECTRE_INDEX_MASKING, "spectre.index-masking")                \
     Register(SPECTRE_OBJECT_MITIGATIONS_BARRIERS, "spectre.object-mitigations.barriers") \
@@ -4740,17 +4790,21 @@ DeserializeWasmModule(PRFileDesc* bytecode, JS::UniqueChars filename, unsigned l
  * Convenience class for imitating a JS level for-of loop. Typical usage:
  *
  *     ForOfIterator it(cx);
- *     if (!it.init(iterable))
+ *     if (!it.init(iterable)) {
  *       return false;
+ *     }
  *     RootedValue val(cx);
  *     while (true) {
  *       bool done;
- *       if (!it.next(&val, &done))
+ *       if (!it.next(&val, &done)) {
  *         return false;
- *       if (done)
+ *       }
+ *       if (done) {
  *         break;
- *       if (!DoStuff(cx, val))
+ *       }
+ *       if (!DoStuff(cx, val)) {
  *         return false;
+ *       }
  *     }
  */
 class MOZ_STACK_CLASS JS_PUBLIC_API(ForOfIterator) {

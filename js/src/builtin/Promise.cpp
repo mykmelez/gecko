@@ -664,6 +664,13 @@ AddPromiseFlags(PromiseObject& promise, int32_t flag)
     promise.setFixedSlot(PromiseSlot_Flags, Int32Value(flags | flag));
 }
 
+static void
+RemovePromiseFlags(PromiseObject& promise, int32_t flag)
+{
+    int32_t flags = promise.flags();
+    promise.setFixedSlot(PromiseSlot_Flags, Int32Value(flags & ~flag));
+}
+
 static bool
 PromiseHasAnyFlag(PromiseObject& promise, int32_t flag)
 {
@@ -3292,6 +3299,21 @@ PromiseThenNewPromiseCapability(JSContext* cx, HandleObject promiseObj,
             if (!NewPromiseCapability(cx, C, resultCapability, true)) {
                 return false;
             }
+
+            RootedObject unwrappedPromise(cx, promiseObj);
+            if (IsWrapper(promiseObj)) {
+              unwrappedPromise = UncheckedUnwrap(promiseObj);
+            }
+            RootedObject unwrappedNewPromise(cx, resultCapability.promise());
+            if (IsWrapper(resultCapability.promise())) {
+              unwrappedNewPromise = UncheckedUnwrap(resultCapability.promise());
+            }
+            if (unwrappedPromise->is<PromiseObject>() &&
+                unwrappedNewPromise->is<PromiseObject>())
+            {
+              unwrappedNewPromise->as<PromiseObject>()
+                .copyUserInteractionFlagsFrom(*unwrappedPromise.as<PromiseObject>());
+            }
         }
     }
 
@@ -3370,6 +3392,7 @@ OriginalPromiseThenBuiltin(JSContext* cx, HandleValue promiseVal, HandleValue on
             return false;
         }
 
+        resultPromise->copyUserInteractionFlagsFrom(promiseVal.toObject().as<PromiseObject>());
         resultCapability.promise().set(resultPromise);
     }
 
@@ -4437,6 +4460,35 @@ PromiseObject::onSettled(JSContext* cx, Handle<PromiseObject*> promise)
     Debugger::onPromiseSettled(cx, promise);
 }
 
+void
+PromiseObject::setRequiresUserInteractionHandling(bool state)
+{
+    if (state) {
+        AddPromiseFlags(*this, PROMISE_FLAG_REQUIRES_USER_INTERACTION_HANDLING);
+    } else {
+        RemovePromiseFlags(*this, PROMISE_FLAG_REQUIRES_USER_INTERACTION_HANDLING);
+    }
+}
+
+void
+PromiseObject::setHadUserInteractionUponCreation(bool state)
+{
+    MOZ_ASSERT(this->state() == JS::PromiseState::Pending);
+    if (state) {
+        AddPromiseFlags(*this, PROMISE_FLAG_HAD_USER_INTERACTION_UPON_CREATION);
+    } else {
+        RemovePromiseFlags(*this, PROMISE_FLAG_HAD_USER_INTERACTION_UPON_CREATION);
+    }
+}
+
+void
+PromiseObject::copyUserInteractionFlagsFrom(PromiseObject& rhs)
+{
+    MOZ_ASSERT(state() == JS::PromiseState::Pending);
+    setRequiresUserInteractionHandling(rhs.requiresUserInteractionHandling());
+    setHadUserInteractionUponCreation(rhs.hadUserInteractionUponCreation());
+}
+
 JSFunction*
 js::PromiseLookup::getPromiseConstructor(JSContext* cx)
 {
@@ -5045,12 +5097,6 @@ OffThreadPromiseRuntimeState::shutdown(JSContext* cx)
     MOZ_ASSERT(!initialized());
 }
 
-static JSObject*
-CreatePromisePrototype(JSContext* cx, JSProtoKey key)
-{
-    return GlobalObject::createBlankPrototype(cx, cx->global(), &PromiseObject::protoClass_);
-}
-
 const JSJitInfo promise_then_info = {
   { (JSJitGetterOp)Promise_then_noRetVal },
   { 0 }, /* unused */
@@ -5096,7 +5142,7 @@ static const JSPropertySpec promise_static_properties[] = {
 
 static const ClassSpec PromiseObjectClassSpec = {
     GenericCreateConstructor<PromiseConstructor, 1, gc::AllocKind::FUNCTION>,
-    CreatePromisePrototype,
+    GenericCreatePrototype<PromiseObject>,
     promise_static_methods,
     promise_static_properties,
     promise_methods,

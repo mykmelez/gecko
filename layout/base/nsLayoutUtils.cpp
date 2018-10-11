@@ -12,6 +12,7 @@
 #include "mozilla/EffectCompositor.h"
 #include "mozilla/EffectSet.h"
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/EventStateManager.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/PathHelpers.h"
@@ -2228,6 +2229,59 @@ nsLayoutUtils::GetPopupFrameForEventCoordinates(nsPresContext* aPresContext,
   }
 #endif
   return nullptr;
+}
+
+void
+nsLayoutUtils::GetContainerAndOffsetAtEvent(nsIPresShell* aPresShell,
+                                            const WidgetEvent* aEvent,
+                                            nsIContent** aContainer,
+                                            int32_t* aOffset)
+{
+  MOZ_ASSERT(aContainer || aOffset);
+
+  if (aContainer) {
+    *aContainer = nullptr;
+  }
+  if (aOffset) {
+    *aOffset = 0;
+  }
+
+  if (!aPresShell) {
+    return;
+  }
+
+  aPresShell->FlushPendingNotifications(FlushType::Layout);
+
+  RefPtr<nsPresContext> presContext = aPresShell->GetPresContext();
+  if (!presContext) {
+    return;
+  }
+
+  nsIFrame* targetFrame = presContext->EventStateManager()->GetEventTarget();
+  if (!targetFrame) {
+    return;
+  }
+
+  nsPoint point =
+    nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, targetFrame);
+
+  if (aContainer) {
+    // TODO: This result may be useful to change to Selection.  However, this
+    //       may return improper node (e.g., native anonymous node) for the
+    //       Selection.  Perhaps, this should take Selection optionally and
+    //       if it's specified, needs to check if it's proper for the
+    //       Selection.
+    nsCOMPtr<nsIContent> container =
+      targetFrame->GetContentOffsetsFromPoint(point).content;
+    if (container &&
+        (!container->ChromeOnlyAccess() ||
+         nsContentUtils::CanAccessNativeAnon())) {
+      container.forget(aContainer);
+    }
+  }
+  if (aOffset) {
+    *aOffset = targetFrame->GetContentOffsetsFromPoint(point).offset;
+  }
 }
 
 static void ConstrainToCoordValues(float& aStart, float& aSize)
@@ -6188,7 +6242,7 @@ nsLayoutUtils::GetFirstLinePosition(WritingMode aWM,
                                     const nsIFrame* aFrame,
                                     LinePosition* aResult)
 {
-  if (aFrame->StyleDisplay()->IsContainSize()) {
+  if (aFrame->StyleDisplay()->IsContainLayout()) {
     return false;
   }
   const nsBlockFrame* block = nsLayoutUtils::GetAsBlock(const_cast<nsIFrame*>(aFrame));
@@ -6289,7 +6343,7 @@ nsLayoutUtils::GetFirstLinePosition(WritingMode aWM,
 nsLayoutUtils::GetLastLineBaseline(WritingMode aWM,
                                    const nsIFrame* aFrame, nscoord* aResult)
 {
-  if (aFrame->StyleDisplay()->IsContainSize()) {
+  if (aFrame->StyleDisplay()->IsContainLayout()) {
     return false;
   }
 
@@ -10123,100 +10177,6 @@ nsLayoutUtils::ComputeSystemFont(nsFont* aSystemFont, LookAndFeel::FontID aFontI
     }
 #endif
   }
-}
-
-static inline void
-AssertValidFontTag(const nsString& aString)
-{
-  // To be valid as a font feature tag, a string MUST be:
-  MOZ_ASSERT(aString.Length() == 4 &&              // (1) exactly 4 chars long
-             NS_IsAscii(aString.BeginReading()) && // (2) entirely ASCII
-             isprint(aString[0]) &&                // (3) all printable chars
-             isprint(aString[1]) &&
-             isprint(aString[2]) &&
-             isprint(aString[3]));
-}
-
-/* static */ void
-nsLayoutUtils::ComputeFontFeatures(const nsCSSValuePairList *aFeaturesList,
-                                   nsTArray<gfxFontFeature>& aFeatureSettings)
-{
-  aFeatureSettings.Clear();
-  for (const nsCSSValuePairList* p = aFeaturesList; p; p = p->mNext) {
-    gfxFontFeature feat;
-
-    MOZ_ASSERT(aFeaturesList->mXValue.GetUnit() == eCSSUnit_String,
-               "unexpected value unit");
-
-    // tag is a 4-byte ASCII sequence
-    nsAutoString tag;
-    p->mXValue.GetStringValue(tag);
-    AssertValidFontTag(tag);
-    if (tag.Length() != 4) {
-      continue;
-    }
-    // parsing validates that these are ASCII chars
-    // tags are always big-endian
-    feat.mTag = (tag[0] << 24) | (tag[1] << 16) | (tag[2] << 8)  | tag[3];
-
-    // value
-    NS_ASSERTION(p->mYValue.GetUnit() == eCSSUnit_Integer,
-                 "should have found an integer unit");
-    feat.mValue = p->mYValue.GetIntValue();
-
-    aFeatureSettings.AppendElement(feat);
-  }
-}
-
-/* static */ void
-nsLayoutUtils::ComputeFontVariations(const nsCSSValuePairList* aVariationsList,
-                                     nsTArray<gfxFontVariation>& aVariationSettings)
-{
-  aVariationSettings.Clear();
-  for (const nsCSSValuePairList* p = aVariationsList; p; p = p->mNext) {
-    gfxFontVariation var;
-
-    MOZ_ASSERT(aVariationsList->mXValue.GetUnit() == eCSSUnit_String,
-               "unexpected value unit");
-
-    // tag is a 4-byte ASCII sequence
-    nsAutoString tag;
-    p->mXValue.GetStringValue(tag);
-    AssertValidFontTag(tag);
-    if (tag.Length() != 4) {
-      continue;
-    }
-    // parsing validates that these are ASCII chars
-    // tags are always big-endian
-    var.mTag = (tag[0] << 24) | (tag[1] << 16) | (tag[2] << 8)  | tag[3];
-
-    // value
-    NS_ASSERTION(p->mYValue.GetUnit() == eCSSUnit_Number,
-                 "should have found a number unit");
-    var.mValue = p->mYValue.GetFloatValue();
-
-    aVariationSettings.AppendElement(var);
-  }
-}
-
-/* static */ uint32_t
-nsLayoutUtils::ParseFontLanguageOverride(const nsAString& aLangTag)
-{
-  if (!aLangTag.Length() || aLangTag.Length() > 4) {
-    return NO_FONT_LANGUAGE_OVERRIDE;
-  }
-  uint32_t index, result = 0;
-  for (index = 0; index < aLangTag.Length(); ++index) {
-    char16_t ch = aLangTag[index];
-    if (!nsCRT::IsAscii(ch)) { // valid tags are pure ASCII
-      return NO_FONT_LANGUAGE_OVERRIDE;
-    }
-    result = (result << 8) + ch;
-  }
-  while (index++ < 4) {
-    result = (result << 8) + 0x20;
-  }
-  return result;
 }
 
 /* static */ bool

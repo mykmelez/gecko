@@ -447,6 +447,8 @@ pref("media.navigator.video.max_fr", 60);
 pref("media.navigator.video.h264.level", 31); // 0x42E01f - level 3.1
 pref("media.navigator.video.h264.max_br", 0);
 pref("media.navigator.video.h264.max_mbps", 0);
+pref("media.navigator.mediadatadecoder_enabled", false);
+pref("media.navigator.mediadatadecoder_h264_enabled", false);
 pref("media.peerconnection.video.vp9_enabled", true);
 pref("media.peerconnection.video.vp9_preferred", false);
 pref("media.getusermedia.aec", 1);
@@ -502,7 +504,7 @@ pref("media.getusermedia.noise_enabled", true);
 #endif
 pref("media.getusermedia.aec_extended_filter", true);
 pref("media.getusermedia.noise", 1);
-pref("media.getusermedia.agc_enabled", false);
+pref("media.getusermedia.agc_enabled", true);
 pref("media.getusermedia.agc", 3); // kAgcAdaptiveDigital
 // capture_delay: Adjustments for OS-specific input delay (lower bound)
 // playout_delay: Adjustments for OS-specific AudioStream+cubeb+output delay (lower bound)
@@ -1461,7 +1463,7 @@ pref("javascript.options.mem.high_water_mark", 128);
 pref("javascript.options.mem.max", -1);
 
 // JSGC_MAX_NURSERY_BYTES
-#if defined(ANDROID) || defined(XP_IOS) || defined(MOZ_B2G)
+#if defined(ANDROID) || defined(XP_IOS)
 pref("javascript.options.mem.nursery.max_kb", 4096);
 #else
 pref("javascript.options.mem.nursery.max_kb", 16384);
@@ -3125,7 +3127,7 @@ pref("layout.display-list.dump-parent", false);
 // Toggle retaining display lists between paints
 #if !defined(ANDROID)
 pref("layout.display-list.retain", true);
-pref("layout.display-list.retain.chrome", true);
+pref("layout.display-list.retain.chrome", false);
 #else
 pref("layout.display-list.retain", false);
 #endif
@@ -3282,7 +3284,11 @@ pref("dom.ipc.plugins.asyncdrawing.enabled", true);
 pref("dom.ipc.plugins.forcedirect.enabled", true);
 
 // Enable multi by default.
+#if defined(NIGHTLY_BUILD) && !defined(MOZ_ASAN)
+pref("dom.ipc.processCount", 8);
+#else
 pref("dom.ipc.processCount", 4);
+#endif
 
 // Default to allow only one file:// URL content process.
 pref("dom.ipc.processCount.file", 1);

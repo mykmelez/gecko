@@ -31,7 +31,6 @@ this.AntiTracking = {
       name,
       cookieBehavior: BEHAVIOR_REJECT_TRACKER,
       blockingByContentBlocking: true,
-      blockingByContentBlockingUI: true,
       blockingByContentBlockingRTUI: true,
       allowList: false,
       callback: callbackTracking,
@@ -46,7 +45,6 @@ this.AntiTracking = {
       name,
       cookieBehavior: BEHAVIOR_REJECT_TRACKER,
       blockingByContentBlocking: true,
-      blockingByContentBlockingUI: true,
       blockingByContentBlockingRTUI: false,
       allowList: true,
       callback: callbackTracking,
@@ -74,12 +72,6 @@ this.AntiTracking = {
         } else {
           options.blockingByContentBlocking = false;
         }
-        if ("blockingByContentBlockingUI" in callbackNonTracking) {
-          options.blockingByContentBlockingUI =
-            callbackNonTracking.blockingByContentBlockingUI;
-        } else {
-          options.blockingByContentBlockingUI = false;
-        }
         if ("blockingByContentBlockingRTUI" in callbackNonTracking) {
           options.blockingByContentBlockingRTUI =
             callbackNonTracking.blockingByContentBlockingRTUI;
@@ -97,10 +89,9 @@ this.AntiTracking = {
 
       // Phase 1: Here we want to test that a 3rd party context is not blocked if pref is off.
       if (runExtraTests) {
-        // There are six ways in which the third-party context may not be blocked:
+        // There are five ways in which the third-party context may not be blocked:
         //   * If the cookieBehavior pref causes it to not be blocked.
         //   * If the contentBlocking pref causes it to not be blocked.
-        //   * If the contentBlocking UI pref causes it to not be blocked.
         //   * If both of these prefs cause it to not be blocked.
         //   * If the top-level page is on the content blocking allow list.
         //   * If the contentBlocking third-party cookies UI pref is off, the allow list will be ignored.
@@ -109,7 +100,6 @@ this.AntiTracking = {
           name,
           cookieBehavior: BEHAVIOR_ACCEPT,
           blockingByContentBlocking: true,
-          blockingByContentBlockingUI: true,
           blockingByContentBlockingRTUI: true,
           allowList: false,
           callback: callbackNonTracking,
@@ -124,7 +114,6 @@ this.AntiTracking = {
           name,
           cookieBehavior: BEHAVIOR_ACCEPT,
           blockingByContentBlocking: true,
-          blockingByContentBlockingUI: true,
           blockingByContentBlockingRTUI: false,
           allowList: true,
           callback: callbackNonTracking,
@@ -139,249 +128,8 @@ this.AntiTracking = {
           name,
           cookieBehavior: BEHAVIOR_ACCEPT,
           blockingByContentBlocking: true,
-          blockingByContentBlockingUI: true,
           blockingByContentBlockingRTUI: false,
           allowList: false,
-          callback: callbackNonTracking,
-          extraPrefs: [],
-          expectedBlockingNotifications: false,
-          runInPrivateWindow,
-          iframeSandbox,
-        });
-        this._createCleanupTask(cleanupFunction);
-
-        this._createTask({
-          name,
-          cookieBehavior: BEHAVIOR_REJECT_FOREIGN,
-          blockingByContentBlocking: false,
-          blockingByContentBlockingUI: true,
-          blockingByContentBlockingRTUI: true,
-          allowList: false,
-          callback: callbackNonTracking,
-          extraPrefs: [],
-          expectedBlockingNotifications: false,
-          runInPrivateWindow,
-          iframeSandbox,
-        });
-        this._createCleanupTask(cleanupFunction);
-
-        this._createTask({
-          name,
-          cookieBehavior: BEHAVIOR_REJECT_FOREIGN,
-          blockingByContentBlocking: false,
-          blockingByContentBlockingUI: true,
-          blockingByContentBlockingRTUI: false,
-          allowList: true,
-          callback: callbackNonTracking,
-          extraPrefs: [],
-          expectedBlockingNotifications: false,
-          runInPrivateWindow,
-          iframeSandbox,
-        });
-        this._createCleanupTask(cleanupFunction);
-
-        this._createTask({
-          name,
-          cookieBehavior: BEHAVIOR_REJECT_FOREIGN,
-          blockingByContentBlocking: false,
-          blockingByContentBlockingUI: true,
-          blockingByContentBlockingRTUI: false,
-          allowList: false,
-          callback: callbackNonTracking,
-          extraPrefs: [],
-          expectedBlockingNotifications: false,
-          runInPrivateWindow,
-          iframeSandbox,
-        });
-        this._createCleanupTask(cleanupFunction);
-
-        this._createTask({
-          name,
-          cookieBehavior: BEHAVIOR_REJECT_FOREIGN,
-          blockingByContentBlocking: true,
-          blockingByContentBlockingUI: false,
-          blockingByContentBlockingRTUI: true,
-          allowList: false,
-          callback: callbackNonTracking,
-          extraPrefs: [],
-          expectedBlockingNotifications: false,
-          runInPrivateWindow,
-          iframeSandbox,
-        });
-        this._createCleanupTask(cleanupFunction);
-
-        this._createTask({
-          name,
-          cookieBehavior: BEHAVIOR_REJECT_FOREIGN,
-          blockingByContentBlocking: true,
-          blockingByContentBlockingUI: false,
-          blockingByContentBlockingRTUI: false,
-          allowList: true,
-          callback: callbackNonTracking,
-          extraPrefs: [],
-          expectedBlockingNotifications: false,
-          runInPrivateWindow,
-          iframeSandbox,
-        });
-        this._createCleanupTask(cleanupFunction);
-
-        this._createTask({
-          name,
-          cookieBehavior: BEHAVIOR_REJECT_FOREIGN,
-          blockingByContentBlocking: true,
-          blockingByContentBlockingUI: false,
-          blockingByContentBlockingRTUI: false,
-          allowList: false,
-          callback: callbackNonTracking,
-          extraPrefs: [],
-          expectedBlockingNotifications: false,
-          runInPrivateWindow,
-          iframeSandbox,
-        });
-        this._createCleanupTask(cleanupFunction);
-
-        this._createTask({
-          name,
-          cookieBehavior: BEHAVIOR_REJECT_TRACKER,
-          blockingByContentBlocking: false,
-          blockingByContentBlockingUI: true,
-          blockingByContentBlockingRTUI: true,
-          allowList: false,
-          callback: callbackNonTracking,
-          extraPrefs: [],
-          expectedBlockingNotifications: false,
-          runInPrivateWindow,
-          iframeSandbox,
-        });
-        this._createCleanupTask(cleanupFunction);
-
-        this._createTask({
-          name,
-          cookieBehavior: BEHAVIOR_REJECT_TRACKER,
-          blockingByContentBlocking: false,
-          blockingByContentBlockingUI: true,
-          blockingByContentBlockingRTUI: false,
-          allowList: true,
-          callback: callbackNonTracking,
-          extraPrefs: [],
-          expectedBlockingNotifications: false,
-          runInPrivateWindow,
-          iframeSandbox,
-        });
-        this._createCleanupTask(cleanupFunction);
-
-        this._createTask({
-          name,
-          cookieBehavior: BEHAVIOR_REJECT_TRACKER,
-          blockingByContentBlocking: false,
-          blockingByContentBlockingUI: true,
-          blockingByContentBlockingRTUI: false,
-          allowList: false,
-          callback: callbackNonTracking,
-          extraPrefs: [],
-          expectedBlockingNotifications: false,
-          runInPrivateWindow,
-          iframeSandbox,
-        });
-        this._createCleanupTask(cleanupFunction);
-
-        this._createTask({
-          name,
-          cookieBehavior: BEHAVIOR_REJECT_TRACKER,
-          blockingByContentBlocking: true,
-          blockingByContentBlockingUI: false,
-          blockingByContentBlockingRTUI: true,
-          allowList: false,
-          callback: callbackNonTracking,
-          extraPrefs: [],
-          expectedBlockingNotifications: false,
-          runInPrivateWindow,
-          iframeSandbox,
-        });
-        this._createCleanupTask(cleanupFunction);
-
-        this._createTask({
-          name,
-          cookieBehavior: BEHAVIOR_REJECT_TRACKER,
-          blockingByContentBlocking: true,
-          blockingByContentBlockingUI: false,
-          blockingByContentBlockingRTUI: false,
-          allowList: true,
-          callback: callbackNonTracking,
-          extraPrefs: [],
-          expectedBlockingNotifications: false,
-          runInPrivateWindow,
-          iframeSandbox,
-        });
-        this._createCleanupTask(cleanupFunction);
-
-        this._createTask({
-          name,
-          cookieBehavior: BEHAVIOR_REJECT_TRACKER,
-          blockingByContentBlocking: true,
-          blockingByContentBlockingUI: false,
-          blockingByContentBlockingRTUI: false,
-          allowList: false,
-          callback: callbackNonTracking,
-          extraPrefs: [],
-          expectedBlockingNotifications: false,
-          runInPrivateWindow,
-          iframeSandbox,
-        });
-        this._createCleanupTask(cleanupFunction);
-
-        this._createTask({
-          name,
-          cookieBehavior: BEHAVIOR_REJECT_FOREIGN,
-          blockingByContentBlocking: false,
-          blockingByContentBlockingUI: true,
-          blockingByContentBlockingRTUI: true,
-          allowList: true,
-          callback: callbackNonTracking,
-          extraPrefs: [],
-          expectedBlockingNotifications: false,
-          runInPrivateWindow,
-          iframeSandbox,
-        });
-        this._createCleanupTask(cleanupFunction);
-
-        this._createTask({
-          name,
-          cookieBehavior: BEHAVIOR_REJECT_FOREIGN,
-          blockingByContentBlocking: true,
-          blockingByContentBlockingUI: false,
-          blockingByContentBlockingRTUI: true,
-          allowList: true,
-          callback: callbackNonTracking,
-          extraPrefs: [],
-          expectedBlockingNotifications: false,
-          runInPrivateWindow,
-          iframeSandbox,
-        });
-        this._createCleanupTask(cleanupFunction);
-
-        this._createTask({
-          name,
-          cookieBehavior: BEHAVIOR_REJECT_TRACKER,
-          blockingByContentBlocking: false,
-          blockingByContentBlockingUI: true,
-          blockingByContentBlockingRTUI: true,
-          allowList: true,
-          callback: callbackNonTracking,
-          extraPrefs: [],
-          expectedBlockingNotifications: false,
-          runInPrivateWindow,
-          iframeSandbox,
-        });
-        this._createCleanupTask(cleanupFunction);
-
-        this._createTask({
-          name,
-          cookieBehavior: BEHAVIOR_REJECT_TRACKER,
-          blockingByContentBlocking: true,
-          blockingByContentBlockingUI: false,
-          blockingByContentBlockingRTUI: true,
-          allowList: true,
           callback: callbackNonTracking,
           extraPrefs: [],
           expectedBlockingNotifications: false,
@@ -394,7 +142,6 @@ this.AntiTracking = {
           name,
           cookieBehavior: BEHAVIOR_ACCEPT,
           blockingByContentBlocking: false,
-          blockingByContentBlockingUI: true,
           blockingByContentBlockingRTUI: true,
           allowList: false,
           callback: callbackNonTracking,
@@ -409,7 +156,6 @@ this.AntiTracking = {
           name,
           cookieBehavior: BEHAVIOR_ACCEPT,
           blockingByContentBlocking: false,
-          blockingByContentBlockingUI: true,
           blockingByContentBlockingRTUI: false,
           allowList: true,
           callback: callbackNonTracking,
@@ -424,7 +170,6 @@ this.AntiTracking = {
           name,
           cookieBehavior: BEHAVIOR_ACCEPT,
           blockingByContentBlocking: false,
-          blockingByContentBlockingUI: true,
           blockingByContentBlockingRTUI: false,
           allowList: false,
           callback: callbackNonTracking,
@@ -437,9 +182,8 @@ this.AntiTracking = {
 
         this._createTask({
           name,
-          cookieBehavior: BEHAVIOR_ACCEPT,
-          blockingByContentBlocking: true,
-          blockingByContentBlockingUI: false,
+          cookieBehavior: BEHAVIOR_REJECT_FOREIGN,
+          blockingByContentBlocking: false,
           blockingByContentBlockingRTUI: true,
           allowList: false,
           callback: callbackNonTracking,
@@ -452,9 +196,8 @@ this.AntiTracking = {
 
         this._createTask({
           name,
-          cookieBehavior: BEHAVIOR_ACCEPT,
-          blockingByContentBlocking: true,
-          blockingByContentBlockingUI: false,
+          cookieBehavior: BEHAVIOR_REJECT_FOREIGN,
+          blockingByContentBlocking: false,
           blockingByContentBlockingRTUI: false,
           allowList: true,
           callback: callbackNonTracking,
@@ -467,9 +210,8 @@ this.AntiTracking = {
 
         this._createTask({
           name,
-          cookieBehavior: BEHAVIOR_ACCEPT,
-          blockingByContentBlocking: true,
-          blockingByContentBlockingUI: false,
+          cookieBehavior: BEHAVIOR_REJECT_FOREIGN,
+          blockingByContentBlocking: false,
           blockingByContentBlockingRTUI: false,
           allowList: false,
           callback: callbackNonTracking,
@@ -480,12 +222,80 @@ this.AntiTracking = {
         });
         this._createCleanupTask(cleanupFunction);
 
-        // Try testing using the allow list with both reject foreign and reject tracker cookie behaviors
+        this._createTask({
+          name,
+          cookieBehavior: BEHAVIOR_REJECT_FOREIGN,
+          blockingByContentBlocking: false,
+          blockingByContentBlockingRTUI: true,
+          allowList: true,
+          callback: callbackNonTracking,
+          extraPrefs: [],
+          expectedBlockingNotifications: false,
+          runInPrivateWindow,
+          iframeSandbox,
+        });
+        this._createCleanupTask(cleanupFunction);
+
         this._createTask({
           name,
           cookieBehavior: BEHAVIOR_REJECT_FOREIGN,
           blockingByContentBlocking: true,
-          blockingByContentBlockingUI: true,
+          blockingByContentBlockingRTUI: true,
+          allowList: true,
+          callback: callbackNonTracking,
+          extraPrefs: [],
+          expectedBlockingNotifications: false,
+          runInPrivateWindow,
+          iframeSandbox,
+        });
+        this._createCleanupTask(cleanupFunction);
+
+        this._createTask({
+          name,
+          cookieBehavior: BEHAVIOR_REJECT_TRACKER,
+          blockingByContentBlocking: false,
+          blockingByContentBlockingRTUI: true,
+          allowList: false,
+          callback: callbackNonTracking,
+          extraPrefs: [],
+          expectedBlockingNotifications: false,
+          runInPrivateWindow,
+          iframeSandbox,
+        });
+        this._createCleanupTask(cleanupFunction);
+
+        this._createTask({
+          name,
+          cookieBehavior: BEHAVIOR_REJECT_TRACKER,
+          blockingByContentBlocking: false,
+          blockingByContentBlockingRTUI: false,
+          allowList: true,
+          callback: callbackNonTracking,
+          extraPrefs: [],
+          expectedBlockingNotifications: false,
+          runInPrivateWindow,
+          iframeSandbox,
+        });
+        this._createCleanupTask(cleanupFunction);
+
+        this._createTask({
+          name,
+          cookieBehavior: BEHAVIOR_REJECT_TRACKER,
+          blockingByContentBlocking: false,
+          blockingByContentBlockingRTUI: false,
+          allowList: false,
+          callback: callbackNonTracking,
+          extraPrefs: [],
+          expectedBlockingNotifications: false,
+          runInPrivateWindow,
+          iframeSandbox,
+        });
+        this._createCleanupTask(cleanupFunction);
+
+        this._createTask({
+          name,
+          cookieBehavior: BEHAVIOR_REJECT_TRACKER,
+          blockingByContentBlocking: false,
           blockingByContentBlockingRTUI: true,
           allowList: true,
           callback: callbackNonTracking,
@@ -500,7 +310,6 @@ this.AntiTracking = {
           name,
           cookieBehavior: BEHAVIOR_REJECT_TRACKER,
           blockingByContentBlocking: true,
-          blockingByContentBlockingUI: true,
           blockingByContentBlockingRTUI: true,
           allowList: true,
           callback: callbackNonTracking,
@@ -510,14 +319,12 @@ this.AntiTracking = {
           iframeSandbox,
         });
         this._createCleanupTask(cleanupFunction);
-      } else if (!options.blockingByContentBlocking ||
-                 !options.blockingByContentBlockingUI) {
+      } else if (!options.blockingByContentBlocking) {
         // Don't run this extra test if we are in blocking mode!
         this._createTask({
           name,
           cookieBehavior: options.cookieBehavior,
           blockingByContentBlocking: options.blockingByContentBlocking,
-          blockingByContentBlockingUI: options.blockingByContentBlockingUI,
           blockingByContentBlockingRTUI: options.blockingByContentBlockingRTUI,
           allowList: options.blockingByAllowList,
           callback: callbackNonTracking,
@@ -548,15 +355,30 @@ this.AntiTracking = {
     }
   },
 
+  async interactWithTracker() {
+    let windowClosed = new Promise(resolve => {
+      Services.ww.registerNotification(function notification(aSubject, aTopic, aData) {
+        if (aTopic == "domwindowclosed") {
+          Services.ww.unregisterNotification(notification);
+          resolve();
+        }
+      });
+    });
+
+    info("Let's interact with the tracker");
+    window.open(TEST_3RD_PARTY_DOMAIN + TEST_PATH + "3rdPartyOpenUI.html");
+    await windowClosed;
+  },
+
   async _setupTest(win, cookieBehavior, blockingByContentBlocking,
-                   blockingByContentBlockingUI, blockingByContentBlockingRTUI,
+                   blockingByContentBlockingRTUI,
                    extraPrefs) {
     await SpecialPowers.flushPrefEnv();
     await SpecialPowers.pushPrefEnv({"set": [
       ["dom.storage_access.enabled", true],
       ["browser.contentblocking.allowlist.annotations.enabled", blockingByContentBlockingRTUI],
       ["browser.contentblocking.allowlist.storage.enabled", blockingByContentBlockingRTUI],
-      ["browser.contentblocking.enabled", blockingByContentBlocking && blockingByContentBlockingUI],
+      ["browser.contentblocking.enabled", blockingByContentBlocking],
       ["network.cookie.cookieBehavior", cookieBehavior],
       ["privacy.trackingprotection.enabled", false],
       ["privacy.trackingprotection.pbmode.enabled", false],
@@ -576,7 +398,6 @@ this.AntiTracking = {
     add_task(async function() {
       info("Starting " + (options.cookieBehavior != BEHAVIOR_ACCEPT ? "blocking" : "non-blocking") + " cookieBehavior (" + options.cookieBehavior + ") and " +
                          (options.blockingByContentBlocking ? "blocking" : "non-blocking") + " contentBlocking and " +
-                         (options.blockingByContentBlockingUI ? "" : "no") + " contentBlocking UI and " +
                          (options.blockingByContentBlockingRTUI ? "" : "no") + " contentBlocking third-party cookies UI with" +
                          (options.allowList ? "" : "out") + " allow list test " + options.name +
                          " running in a " + (options.runInPrivateWindow ? "private" : "normal") + " window " +
@@ -590,7 +411,6 @@ this.AntiTracking = {
 
       await AntiTracking._setupTest(win, options.cookieBehavior,
                                     options.blockingByContentBlocking,
-                                    options.blockingByContentBlockingUI,
                                     options.blockingByContentBlockingRTUI,
                                     options.extraPrefs);
 
@@ -606,20 +426,25 @@ this.AntiTracking = {
             contentBlockingLog = JSON.parse(contentBlockingLogJSON);
           } catch (e) {
           }
+
+          let trackerInteractionHelper = false;
+          if (request) {
+            request.QueryInterface(Ci.nsIChannel);
+            trackerInteractionHelper = request.URI.spec.endsWith("?messageme");
+          }
+
           // If this is the first cookie to be blocked, our state should have
           // just changed, otherwise it should have previously contained the
           // STATE_COOKIES_BLOCKED_TRACKER bit too.
           if (options.expectedBlockingNotifications && cookieBlocked &&
-              !options.allowList) {
+              !options.allowList && !trackerInteractionHelper) {
             if (cookieBlocked == 1) {
               is(oldState & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_TRACKER, 0,
                  "When blocking the first cookie, old state should not have had the " +
                  "STATE_COOKIES_BLOCKED_TRACKER bit");
             }
 
-            let trackerOriginCount = 0;
             for (let trackerOrigin in contentBlockingLog) {
-              ++trackerOriginCount;
               is(trackerOrigin, TEST_3RD_PARTY_DOMAIN, "Correct tracker origin must be reported");
               let originLog = contentBlockingLog[trackerOrigin];
               if (originLog.length == 1) {
@@ -633,6 +458,10 @@ this.AntiTracking = {
                 // This branch is needed here because of the tests that use the storage
                 // access API to gain storage access.
                 is(originLog.length, 2, "Correct origin log length");
+                if (originLog.length > 2) {
+                  console.log(originLog);
+                  console.log(originLog.toSource());
+                }
                 is(originLog[0][0], Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_TRACKER,
                    "Correct blocking type reported");
                 is(originLog[0][1], true,
@@ -647,7 +476,9 @@ this.AntiTracking = {
                    "Correct repeat count reported");
               }
             }
-            is(trackerOriginCount, 1, "Should only report one tracker origin");
+            // Can't assert the number of tracker origins because we may get 0
+            // for web progress navigations coming from the window opening from
+            // storage access API tracker interaction attempts...
           }
           if (!options.expectedBlockingNotifications) {
             is(oldState & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_TRACKER, 0,
@@ -961,7 +792,6 @@ this.AntiTracking = {
                               { page: TEST_3RD_PARTY_PAGE_UI,
                                 popup: TEST_POPUP_PAGE,
                                 blockingCallback: blockingCallback.toString(),
-                                nonBlockingCallback: nonBlockingCallback.toString(),
                                 iframeSandbox,
                               },
                               async function(obj) {
@@ -1013,7 +843,66 @@ this.AntiTracking = {
         info("Let's wait for the window to be closed");
         await windowClosed;
 
-        info("The 3rd party content should have access to first party storage.");
+        info("First time, the 3rd party content should not have access to first party storage " +
+             "because the tracker did not have user interaction");
+        await new content.Promise(resolve => {
+          content.addEventListener("message", function msg(event) {
+            if (event.data.type == "finish") {
+              content.removeEventListener("message", msg);
+              resolve();
+              return;
+            }
+
+            if (event.data.type == "ok") {
+              ok(event.data.what, event.data.msg);
+              return;
+            }
+
+            if (event.data.type == "info") {
+              info(event.data.msg);
+              return;
+            }
+
+            ok(false, "Unknown message");
+          });
+          ifr.contentWindow.postMessage({ callback: obj.blockingCallback }, "*");
+        });
+      });
+
+      await AntiTracking.interactWithTracker();
+
+      await ContentTask.spawn(browser,
+                              { page: TEST_3RD_PARTY_PAGE_UI,
+                                popup: TEST_POPUP_PAGE,
+                                nonBlockingCallback: nonBlockingCallback.toString(),
+                                iframeSandbox,
+                              },
+                              async function(obj) {
+        let ifr = content.document.createElement("iframe");
+        let loading = new content.Promise(resolve => { ifr.onload = resolve; });
+        if (typeof obj.iframeSandbox == "string") {
+          ifr.setAttribute("sandbox", obj.iframeSandbox);
+        }
+        content.document.body.appendChild(ifr);
+        ifr.src = obj.page;
+        await loading;
+
+        let windowClosed = new content.Promise(resolve => {
+          Services.ww.registerNotification(function notification(aSubject, aTopic, aData) {
+            if (aTopic == "domwindowclosed") {
+              Services.ww.unregisterNotification(notification);
+              resolve();
+            }
+          });
+        });
+
+        info("Opening a window from the iframe.");
+        ifr.contentWindow.open(obj.popup);
+
+        info("Let's wait for the window to be closed");
+        await windowClosed;
+
+        info("The 3rd party content should now have access to first party storage.");
         await new content.Promise(resolve => {
           content.addEventListener("message", function msg(event) {
             if (event.data.type == "finish") {

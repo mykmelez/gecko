@@ -812,8 +812,8 @@ NewOuterWindowProxy(JSContext *cx, JS::Handle<JSObject*> global, bool isChrome)
 //***    nsGlobalWindowOuter: Object Management
 //*****************************************************************************
 
-nsGlobalWindowOuter::nsGlobalWindowOuter()
-  : nsPIDOMWindowOuter(),
+nsGlobalWindowOuter::nsGlobalWindowOuter(uint64_t aWindowID)
+  : nsPIDOMWindowOuter(aWindowID),
     mIdleFuzzFactor(0),
     mIdleCallbackIndex(-1),
     mCurrentlyIdle(false),
@@ -1970,7 +1970,7 @@ nsGlobalWindowOuter::SetNewDocument(nsIDocument* aDocument,
   // We no longer need the old inner window.  Start its destruction if
   // its not being reused and clear our reference.
   if (doomCurrentInner) {
-    currentInner->FreeInnerObjects();
+    currentInner->FreeInnerObjects(handleDocumentOpen);
   }
   currentInner = nullptr;
 
@@ -4454,10 +4454,7 @@ nsGlobalWindowOuter::MakeScriptDialogTitle(nsAString& aOutTitle,
 
   nsCOMPtr<nsIURI> uri;
   nsresult rv = aSubjectPrincipal->GetURI(getter_AddRefs(uri));
-  // Note - The check for the current JSContext here isn't necessarily sensical.
-  // It's just designed to preserve existing behavior during a mass-conversion
-  // patch.
-  if (NS_SUCCEEDED(rv) && uri && nsContentUtils::GetCurrentJSContext()) {
+  if (NS_SUCCEEDED(rv) && uri) {
     // remove user:pass for privacy and spoof prevention
 
     nsCOMPtr<nsIURIFixup> fixup(do_GetService(NS_URIFIXUP_CONTRACTID));
@@ -5622,13 +5619,11 @@ nsGlobalWindowOuter::GetFramesOuter()
 }
 
 nsGlobalWindowInner*
-nsGlobalWindowOuter::CallerInnerWindow()
+nsGlobalWindowOuter::CallerInnerWindow(JSContext* aCx)
 {
-  JSContext *cx = nsContentUtils::GetCurrentJSContext();
-  NS_ENSURE_TRUE(cx, nullptr);
   nsIGlobalObject* global = GetIncumbentGlobal();
   NS_ENSURE_TRUE(global, nullptr);
-  JS::Rooted<JSObject*> scope(cx, global->GetGlobalJSObject());
+  JS::Rooted<JSObject*> scope(aCx, global->GetGlobalJSObject());
   NS_ENSURE_TRUE(scope, nullptr);
 
   // When Jetpack runs content scripts inside a sandbox, it uses
@@ -5638,9 +5633,9 @@ nsGlobalWindowOuter::CallerInnerWindow()
   // sandboxPrototype. This used to work incidentally for unrelated reasons, but
   // now we need to do some special handling to support it.
   if (xpc::IsSandbox(scope)) {
-    JSAutoRealm ar(cx, scope);
-    JS::Rooted<JSObject*> scopeProto(cx);
-    bool ok = JS_GetPrototype(cx, scope, &scopeProto);
+    JSAutoRealm ar(aCx, scope);
+    JS::Rooted<JSObject*> scopeProto(aCx);
+    bool ok = JS_GetPrototype(aCx, scope, &scopeProto);
     NS_ENSURE_TRUE(ok, nullptr);
     if (scopeProto && xpc::IsSandboxPrototypeProxy(scopeProto) &&
         (scopeProto = js::CheckedUnwrap(scopeProto, /* stopAtWindowProxy = */ false)))
@@ -5672,7 +5667,7 @@ nsGlobalWindowOuter::PostMessageMozOuter(JSContext* aCx, JS::Handle<JS::Value> a
   //
 
   // First, get the caller's window
-  RefPtr<nsGlobalWindowInner> callerInnerWin = CallerInnerWindow();
+  RefPtr<nsGlobalWindowInner> callerInnerWin = CallerInnerWindow(aCx);
   nsIPrincipal* callerPrin;
   if (callerInnerWin) {
     // Compute the caller's origin either from its principal or, in the case the
@@ -7106,14 +7101,16 @@ nsGlobalWindowOuter::MaybeAllowStorageForOpenedWindow(nsIURI* aURI)
     return;
   }
 
-  nsAutoString origin;
-  nsresult rv = nsContentUtils::GetUTFOrigin(aURI, origin);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
+  nsIDocument* doc = inner->GetDoc();
+  if (!doc) {
     return;
   }
+  nsCOMPtr<nsIPrincipal> principal =
+    BasePrincipal::CreateCodebasePrincipal(aURI,
+      doc->NodePrincipal()->OriginAttributesRef());
 
   // We don't care when the asynchronous work finishes here.
-  Unused << AntiTrackingCommon::AddFirstPartyStorageAccessGrantedFor(origin,
+  Unused << AntiTrackingCommon::AddFirstPartyStorageAccessGrantedFor(principal,
                                                                      inner,
                                                                      AntiTrackingCommon::eHeuristic);
 }
@@ -7666,12 +7663,14 @@ nsPIDOMWindowOuter::TabGroup()
 }
 
 /* static */ already_AddRefed<nsGlobalWindowOuter>
-nsGlobalWindowOuter::Create(bool aIsChrome)
+nsGlobalWindowOuter::Create(nsIDocShell* aDocShell, bool aIsChrome)
 {
-  RefPtr<nsGlobalWindowOuter> window = new nsGlobalWindowOuter();
+  uint64_t outerWindowID = aDocShell->GetOuterWindowID();
+  RefPtr<nsGlobalWindowOuter> window = new nsGlobalWindowOuter(outerWindowID);
   if (aIsChrome) {
     window->mIsChrome = true;
   }
+  window->SetDocShell(aDocShell);
 
   window->InitWasOffline();
   return window.forget();
@@ -7720,15 +7719,7 @@ nsPIDOMWindowOuter::GetDocGroup() const
   return nullptr;
 }
 
-// XXX: Can we define this in a header instead of here?
-namespace mozilla {
-namespace dom {
-extern uint64_t
-NextWindowID();
-} // namespace dom
-} // namespace mozilla
-
-nsPIDOMWindowOuter::nsPIDOMWindowOuter()
+nsPIDOMWindowOuter::nsPIDOMWindowOuter(uint64_t aWindowID)
   : mFrameElement(nullptr)
   , mDocShell(nullptr)
   , mModalStateDepth(0)
@@ -7743,9 +7734,7 @@ nsPIDOMWindowOuter::nsPIDOMWindowOuter()
   , mDesktopModeViewport(false)
   , mIsRootOuterWindow(false)
   , mInnerWindow(nullptr)
-  ,
-  // Make sure no actual window ends up with mWindowID == 0
-  mWindowID(NextWindowID())
+  , mWindowID(aWindowID)
   , mMarkedCCGeneration(0)
   , mServiceWorkersTestingEnabled(false)
   , mLargeAllocStatus(LargeAllocStatus::NONE)
