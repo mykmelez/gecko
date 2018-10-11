@@ -49,7 +49,7 @@ public:
         rv = databaseDir->GetPath(utf16Path);
         ASSERT_TRUE(NS_SUCCEEDED(rv));
 
-        path.Assign(NS_ConvertUTF16toUTF8(utf16Path));
+        CopyUTF16toUTF8(utf16Path, path);
     }
 
     nsCOMPtr<nsIKeyValueService> mKeyValueService;
