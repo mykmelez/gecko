@@ -23,33 +23,33 @@ protected:
         mKeyValueService = do_GetService(NS_KEY_VALUE_SERVICE_CONTRACTID);
         nsresult rv = NS_GetSpecialDirectory(NS_APP_USER_PROFILE_50_DIR,
                                              getter_AddRefs(mProfileDir));
-        EXPECT_TRUE(NS_SUCCEEDED(rv));
+        ASSERT_TRUE(NS_SUCCEEDED(rv));
     }
 public:
-    const nsCString GetProfileSubdir(const nsAString& name) {
+    void GetProfileSubdir(const nsAString& name, nsACString& path) {
         nsresult rv;
 
         nsCOMPtr<nsIFile> databaseDir;
         rv = mProfileDir->Clone(getter_AddRefs(databaseDir));
-        EXPECT_TRUE(NS_SUCCEEDED(rv));
+        ASSERT_TRUE(NS_SUCCEEDED(rv));
 
         rv = databaseDir->Append(name);
-        EXPECT_TRUE(NS_SUCCEEDED(rv));
+        ASSERT_TRUE(NS_SUCCEEDED(rv));
 
         bool exists;
         rv = databaseDir->Exists(&exists);
-        EXPECT_TRUE(NS_SUCCEEDED(rv));
+        ASSERT_TRUE(NS_SUCCEEDED(rv));
 
         if (!exists) {
             rv = databaseDir->Create(nsIFile::DIRECTORY_TYPE, 0755);
-            EXPECT_TRUE(NS_SUCCEEDED(rv));
+            ASSERT_TRUE(NS_SUCCEEDED(rv));
         }
 
-        nsAutoString path;
-        rv = databaseDir->GetPath(path);
-        EXPECT_TRUE(NS_SUCCEEDED(rv));
+        nsAutoString utf16Path;
+        rv = databaseDir->GetPath(utf16Path);
+        ASSERT_TRUE(NS_SUCCEEDED(rv));
 
-        return NS_ConvertUTF16toUTF8(path);
+        path.Assign(NS_ConvertUTF16toUTF8(utf16Path));
     }
 
     nsCOMPtr<nsIKeyValueService> mKeyValueService;
@@ -59,31 +59,35 @@ public:
 TEST_F(KeyValueStore, GetOrCreate) {
     nsresult rv;
 
-    const nsCString path = GetProfileSubdir(NS_LITERAL_STRING("GetOrCreate"));
+    nsAutoCString path;
+    GetProfileSubdir(NS_LITERAL_STRING("GetOrCreate"), path);
+
     nsAutoCString name;
 
     nsCOMPtr<nsIKeyValueDatabase> database;
     rv = mKeyValueService->GetOrCreate(path, name, getter_AddRefs(database));
-    EXPECT_TRUE(NS_SUCCEEDED(rv));
+    ASSERT_TRUE(NS_SUCCEEDED(rv));
 }
 
 TEST_F(KeyValueStore, PutGetHasDelete) {
     nsresult rv;
 
-    const nsCString path = GetProfileSubdir(NS_LITERAL_STRING("PutGetHasDelete"));
+    nsAutoCString path;
+    GetProfileSubdir(NS_LITERAL_STRING("PutGetHasDelete"), path);
+
     nsAutoCString name;
 
     nsCOMPtr<nsIKeyValueDatabase> database;
     rv = mKeyValueService->GetOrCreate(path, name, getter_AddRefs(database));
-    EXPECT_TRUE(NS_SUCCEEDED(rv));
+    ASSERT_TRUE(NS_SUCCEEDED(rv));
 
     int64_t defaultInt = 1;
     nsCOMPtr<nsIVariant> value;
     rv = database->Get(NS_LITERAL_CSTRING("int-key"), new IntegerVariant(defaultInt), getter_AddRefs(value));
-    EXPECT_TRUE(NS_SUCCEEDED(rv));
+    ASSERT_TRUE(NS_SUCCEEDED(rv));
     int64_t intValue;
     rv = value->GetAsInt64(&intValue);
-    EXPECT_TRUE(NS_SUCCEEDED(rv));
+    ASSERT_TRUE(NS_SUCCEEDED(rv));
     EXPECT_EQ(intValue, defaultInt);
 }
 
