@@ -3799,7 +3799,7 @@ nsIDocument::DefaultStyleAttrURLData()
       mCachedURLData->BaseURI() != baseURI ||
       mCachedURLData->GetReferrer() != docURI ||
       mCachedURLData->GetReferrerPolicy() != policy ||
-      mCachedURLData->GetPrincipal() != principal) {
+      mCachedURLData->Principal() != principal) {
     mCachedURLData = new URLExtraData(baseURI, docURI, principal, policy);
   }
   return mCachedURLData;
@@ -12816,19 +12816,8 @@ nsIDocument::MaybeAllowStorageForOpener()
     return;
   }
 
-  nsCOMPtr<nsIURI> uri = GetDocumentURI();
-  if (NS_WARN_IF(!uri)) {
-    return;
-  }
-
-  nsAutoString origin;
-  nsresult rv = nsContentUtils::GetUTFOrigin(uri, origin);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return;
-  }
-
   // We don't care when the asynchronous work finishes here.
-  Unused << AntiTrackingCommon::AddFirstPartyStorageAccessGrantedFor(origin,
+  Unused << AntiTrackingCommon::AddFirstPartyStorageAccessGrantedFor(NodePrincipal(),
                                                                      openerInner,
                                                                      AntiTrackingCommon::eHeuristic);
 }
@@ -13727,14 +13716,16 @@ nsIDocument::RequestStorageAccess(mozilla::ErrorResult& aRv)
     return nullptr;
   }
 
-  RefPtr<Promise> promise = Promise::Create(global, aRv);
+  // Propagate user input event handling to the resolve handler
+  RefPtr<Promise> promise = Promise::Create(global, aRv,
+                                            Promise::ePropagateUserInteraction);
   if (aRv.Failed()) {
     return nullptr;
   }
 
   // Step 1. If the document already has been granted access, resolve.
   nsPIDOMWindowInner* inner = GetInnerWindow();
-  nsGlobalWindowOuter* outer = nullptr;
+  RefPtr<nsGlobalWindowOuter> outer;
   if (inner) {
     outer = nsGlobalWindowOuter::Cast(inner->GetOuterWindow());
     if (outer->HasStorageAccess()) {
@@ -13828,27 +13819,17 @@ nsIDocument::RequestStorageAccess(mozilla::ErrorResult& aRv)
   //          the purposes of future calls to hasStorageAccess() and
   //          requestStorageAccess().
   if (granted && inner) {
-    outer->SetHasStorageAccess(true);
     if (isTrackingWindow) {
-      nsCOMPtr<nsIURI> uri = GetDocumentURI();
-      if (NS_WARN_IF(!uri)) {
-        aRv.Throw(NS_ERROR_NOT_AVAILABLE);
-        return nullptr;
-      }
-      nsAutoString origin;
-      nsresult rv = nsContentUtils::GetUTFOrigin(uri, origin);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        aRv.Throw(rv);
-        return nullptr;
-      }
-      AntiTrackingCommon::AddFirstPartyStorageAccessGrantedFor(origin,
+      AntiTrackingCommon::AddFirstPartyStorageAccessGrantedFor(NodePrincipal(),
                                                                inner,
                                                                AntiTrackingCommon::eStorageAccessAPI)
         ->Then(GetCurrentThreadSerialEventTarget(), __func__,
-               [promise] (bool) {
+               [outer, promise] (bool) {
+                 outer->SetHasStorageAccess(true);
                  promise->MaybeResolveWithUndefined();
                },
-               [promise] (bool) {
+               [outer, promise] (bool) {
+                 outer->SetHasStorageAccess(false);
                  promise->MaybeRejectWithUndefined();
                });
     } else {

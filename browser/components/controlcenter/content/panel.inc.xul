@@ -15,12 +15,17 @@
                   mainViewId="identity-popup-mainView">
     <panelview id="identity-popup-mainView"
                descriptionheightworkaround="true">
+      <vbox id="identity-popup-mainView-panel-header">
+        <label>
+          <html:span id="identity-popup-mainView-panel-header-span"/>
+        </label>
+      </vbox>
+
       <!-- Security Section -->
       <hbox id="identity-popup-security" class="identity-popup-section">
         <vbox class="identity-popup-security-content" flex="1">
           <label class="plain">
-            <label class="identity-popup-headline identity-popup-host"></label>
-            <label class="identity-popup-headline identity-popup-hostless" crop="end"/>
+            <label class="identity-popup-headline">&identity.connection;</label>
           </label>
           <description class="identity-popup-connection-not-secure"
                        when-connection="not-secure secure-cert-user-overridden">&identity.connectionNotSecure;</description>
@@ -91,7 +96,7 @@
             <hbox id="identity-popup-content-blocking-category-tracking-protection"
                   class="identity-popup-content-blocking-category" align="center" role="group">
               <image class="identity-popup-content-blocking-category-icon tracking-protection-icon"/>
-              <label flex="1" class="identity-popup-content-blocking-category-label">&contentBlocking.trackingProtection2.label;</label>
+              <label flex="1" class="identity-popup-content-blocking-category-label">&contentBlocking.trackingProtection3.label;</label>
               <label flex="1" class="identity-popup-content-blocking-category-state-label">&contentBlocking.trackingProtection.blocked.label;</label>
               <label flex="1" class="identity-popup-content-blocking-category-add-blocking text-link"
                      onclick="ContentBlocking.openPreferences('identityPopup-CB-tracking-protection');">&contentBlocking.trackingProtection.add.label;</label>
@@ -165,8 +170,7 @@
                descriptionheightworkaround="true">
       <vbox class="identity-popup-security-content">
         <label class="plain">
-          <label class="identity-popup-headline identity-popup-host"></label>
-          <label class="identity-popup-headline identity-popup-hostless" crop="end"/>
+          <label class="identity-popup-headline" id="identity-popup-host"></label>
         </label>
         <description class="identity-popup-connection-not-secure"
                      when-connection="not-secure secure-cert-user-overridden">&identity.connectionNotSecure;</description>

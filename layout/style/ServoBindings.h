@@ -44,7 +44,6 @@ namespace mozilla {
   namespace css {
     class ErrorReporter;
     struct URLValue;
-    struct ImageValue;
     class LoaderReusableStyleSheets;
   };
   namespace dom {
@@ -114,10 +113,9 @@ extern "C" {
 class ServoBundledURI
 {
 public:
-  // NOTE(emilio): Not calling IntoCssUrl or IntoCssImage will cause to leak the
+  // NOTE(emilio): Not calling IntoCssUrl will cause to leak the
   // string, so don't do that :)
-  already_AddRefed<mozilla::css::URLValue> IntoCssUrl();
-  already_AddRefed<mozilla::css::ImageValue> IntoCssImage(mozilla::CORSMode);
+  already_AddRefed<mozilla::css::URLValue> IntoCssUrl(mozilla::CORSMode);
   mozilla::ServoRawOffsetArc<RustString> mURLString;
   mozilla::URLExtraData* mExtraData;
 };
@@ -352,12 +350,8 @@ Gecko_CounterStyle_GetAnonymous(const mozilla::CounterStylePtr* ptr);
 // background-image style.
 void Gecko_SetNullImageValue(nsStyleImage* image);
 void Gecko_SetGradientImageValue(nsStyleImage* image, nsStyleGradient* gradient);
-NS_DECL_THREADSAFE_FFI_REFCOUNTING(mozilla::css::ImageValue, ImageValue);
-mozilla::css::ImageValue* Gecko_ImageValue_Create(ServoBundledURI aURI,
-                                                  mozilla::CORSMode aCORSMode);
-size_t Gecko_ImageValue_SizeOfIncludingThis(mozilla::css::ImageValue* aImageValue);
 void Gecko_SetLayerImageImageValue(nsStyleImage* image,
-                                   mozilla::css::ImageValue* aImageValue);
+                                   mozilla::css::URLValue* image_value);
 
 void Gecko_SetImageElement(nsStyleImage* image, nsAtom* atom);
 void Gecko_CopyImageValueFrom(nsStyleImage* image, const nsStyleImage* other);
@@ -377,17 +371,17 @@ const nsStyleGradient* Gecko_GetGradientImageValue(const nsStyleImage* image);
 // list-style-image style.
 void Gecko_SetListStyleImageNone(nsStyleList* style_struct);
 void Gecko_SetListStyleImageImageValue(nsStyleList* style_struct,
-                                  mozilla::css::ImageValue* aImageValue);
+                                  mozilla::css::URLValue* aImageValue);
 void Gecko_CopyListStyleImageFrom(nsStyleList* dest, const nsStyleList* src);
 
 // cursor style.
 void Gecko_SetCursorArrayLength(nsStyleUI* ui, size_t len);
 void Gecko_SetCursorImageValue(nsCursorImage* aCursor,
-                               mozilla::css::ImageValue* aImageValue);
+                               mozilla::css::URLValue* aImageValue);
 void Gecko_CopyCursorArrayFrom(nsStyleUI* dest, const nsStyleUI* src);
 
 void Gecko_SetContentDataImageValue(nsStyleContentData* aList,
-                                    mozilla::css::ImageValue* aImageValue);
+                                    mozilla::css::URLValue* aImageValue);
 nsStyleContentData::CounterFunction* Gecko_SetCounterFunction(
     nsStyleContentData* content_data, mozilla::StyleContentType);
 
@@ -547,10 +541,10 @@ void Gecko_nsStyleSVG_CopyDashArray(nsStyleSVG* dst, const nsStyleSVG* src);
 void Gecko_nsStyleSVG_SetContextPropertiesLength(nsStyleSVG* svg, uint32_t len);
 void Gecko_nsStyleSVG_CopyContextProperties(nsStyleSVG* dst, const nsStyleSVG* src);
 
-mozilla::css::URLValue* Gecko_NewURLValue(ServoBundledURI uri);
+mozilla::css::URLValue* Gecko_URLValue_Create(ServoBundledURI uri, mozilla::CORSMode aCORSMode);
 size_t Gecko_URLValue_SizeOfIncludingThis(mozilla::css::URLValue* url);
-void Gecko_GetComputedURLSpec(const mozilla::css::URLValueData* url, nsCString* spec);
-void Gecko_GetComputedImageURLSpec(const mozilla::css::URLValueData* url, nsCString* spec);
+void Gecko_GetComputedURLSpec(const mozilla::css::URLValue* url, nsCString* spec);
+void Gecko_GetComputedImageURLSpec(const mozilla::css::URLValue* url, nsCString* spec);
 void Gecko_nsIURI_Debug(nsIURI*, nsCString* spec);
 
 NS_DECL_THREADSAFE_FFI_REFCOUNTING(mozilla::css::URLValue, CSSURLValue);
@@ -582,9 +576,6 @@ void Gecko_CSSValue_SetKeyword(nsCSSValueBorrowedMut css_value, nsCSSKeyword key
 void Gecko_CSSValue_SetPercentage(nsCSSValueBorrowedMut css_value, float percent);
 void Gecko_CSSValue_SetPixelLength(nsCSSValueBorrowedMut aCSSValue, float aLen);
 void Gecko_CSSValue_SetCalc(nsCSSValueBorrowedMut css_value, nsStyleCoord::CalcValue calc);
-void Gecko_CSSValue_SetFontStretch(nsCSSValueBorrowedMut css_value, float stretch);
-void Gecko_CSSValue_SetFontSlantStyle(nsCSSValueBorrowedMut css_value, float style);
-void Gecko_CSSValue_SetFontWeight(nsCSSValueBorrowedMut css_value, float weight);
 void Gecko_CSSValue_SetFunction(nsCSSValueBorrowedMut css_value, int32_t len);
 void Gecko_CSSValue_SetString(nsCSSValueBorrowedMut css_value,
                               const uint8_t* string, uint32_t len, nsCSSUnit unit);
@@ -593,7 +584,6 @@ void Gecko_CSSValue_SetStringFromAtom(nsCSSValueBorrowedMut css_value,
 // Take an addrefed nsAtom and set it to the nsCSSValue
 void Gecko_CSSValue_SetAtomIdent(nsCSSValueBorrowedMut css_value, nsAtom* atom);
 void Gecko_CSSValue_SetArray(nsCSSValueBorrowedMut css_value, int32_t len);
-void Gecko_CSSValue_SetURL(nsCSSValueBorrowedMut css_value, mozilla::css::URLValue* uri);
 void Gecko_CSSValue_SetInt(nsCSSValueBorrowedMut css_value, int32_t integer, nsCSSUnit unit);
 void Gecko_CSSValue_SetFloat(nsCSSValueBorrowedMut css_value, float value, nsCSSUnit unit);
 void Gecko_CSSValue_SetPair(nsCSSValueBorrowedMut css_value,

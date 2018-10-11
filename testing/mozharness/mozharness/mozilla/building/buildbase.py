@@ -394,7 +394,6 @@ class BuildOptionParser(object):
         'artifact': 'builds/releng_sub_%s_configs/%s_artifact.py',
         'debug-artifact': 'builds/releng_sub_%s_configs/%s_debug_artifact.py',
         'devedition': 'builds/releng_sub_%s_configs/%s_devedition.py',
-        'dmd': 'builds/releng_sub_%s_configs/%s_dmd.py',
         'tup': 'builds/releng_sub_%s_configs/%s_tup.py',
     }
     build_pool_cfg_file = 'builds/build_pool_specifics.py'
@@ -1693,6 +1692,16 @@ or run without that action (ie: --no-{action})"
         if not self.return_code:  # only overwrite return_code if it's 0
             self.error('setting return code to 2 because fatal was called')
             self.return_code = 2
+
+    @PostScriptRun
+    def _shutdown_sccache(self):
+        '''If sccache was in use for this build, shut down the sccache server.'''
+        if os.environ.get('USE_SCCACHE') == '1':
+            topsrcdir = self.query_abs_dirs()['abs_src_dir']
+            sccache = os.path.join(topsrcdir, 'sccache2', 'sccache')
+            if self._is_windows():
+                sccache += '.exe'
+            self.run_command([sccache, '--stop-server'], cwd=topsrcdir)
 
     @PostScriptRun
     def _summarize(self):

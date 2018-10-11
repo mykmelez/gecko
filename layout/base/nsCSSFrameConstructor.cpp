@@ -2426,7 +2426,7 @@ nsCSSFrameConstructor::ConstructDocElementFrame(Element*                 aDocEle
 
     RefPtr<nsXBLBinding> binding;
     rv = xblService->LoadBindings(aDocElement, display->mBinding->GetURI(),
-                                  display->mBinding->mExtraData->GetPrincipal(),
+                                  display->mBinding->mExtraData->Principal(),
                                   getter_AddRefs(binding), &resolveStyle);
     if (NS_FAILED(rv) && rv != NS_ERROR_XBL_BLOCKED) {
       // Binding will load asynchronously.
@@ -4960,7 +4960,7 @@ nsCSSFrameConstructor::ConstructFrameWithAnonymousChild(
                                    nsFrameItems&            aFrameItems,
                                    ContainerFrameCreationFunc aConstructor,
                                    ContainerFrameCreationFunc aInnerConstructor,
-                                   nsICSSAnonBoxPseudo*     aInnerPseudo,
+                                   nsCSSAnonBoxPseudoStaticAtom* aInnerPseudo,
                                    bool                     aCandidateRootFrame)
 {
   nsIContent* const content = aItem.mContent;
@@ -5579,7 +5579,7 @@ nsCSSFrameConstructor::LoadXBLBindingIfNeeded(nsIContent& aContent,
   bool resolveStyle;
   nsresult rv = xblService->LoadBindings(aContent.AsElement(),
                                          binding->GetURI(),
-                                         binding->mExtraData->GetPrincipal(),
+                                         binding->mExtraData->Principal(),
                                          getter_AddRefs(newPendingBinding->mBinding),
                                          &resolveStyle);
   if (NS_FAILED(rv)) {
@@ -9780,7 +9780,7 @@ nsCSSFrameConstructor::WrapItemsInPseudoParent(nsIContent* aParentContent,
                                                const FCItemIterator& aEndIter)
 {
   const PseudoParentData& pseudoData = sPseudoParentData[aWrapperType];
-  nsICSSAnonBoxPseudo* pseudoType = pseudoData.mPseudoType;
+  nsCSSAnonBoxPseudoStaticAtom* pseudoType = pseudoData.mPseudoType;
   StyleDisplay parentDisplay = aParentStyle->StyleDisplay()->mDisplay;
 
   if (pseudoType == nsCSSAnonBoxes::table() &&

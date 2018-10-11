@@ -53,7 +53,7 @@ ImageLoader::DropDocumentReference()
       request->CancelAndForgetObserver(NS_BINDING_ABORTED);
     }
 
-    // Need to check whether the entry exists, since the css::ImageValue might
+    // Need to check whether the entry exists, since the css::URLValue might
     // go away before ImageLoader::DropDocumentReference is called.
     uint64_t imageLoadID = it.Key();
     if (auto entry = sImages->Lookup(imageLoadID)) {
@@ -208,7 +208,7 @@ ImageLoader::AssociateRequestToFrame(imgIRequest* aRequest,
 }
 
 imgRequestProxy*
-ImageLoader::RegisterCSSImage(ImageLoader::Image* aImage)
+ImageLoader::RegisterCSSImage(URLValue* aImage)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aImage);
@@ -254,7 +254,7 @@ ImageLoader::RegisterCSSImage(ImageLoader::Image* aImage)
 }
 
 /* static */ void
-ImageLoader::DeregisterCSSImageFromAllLoaders(ImageLoader::Image* aImage)
+ImageLoader::DeregisterCSSImageFromAllLoaders(URLValue* aImage)
 {
   MOZ_ASSERT(aImage);
 
@@ -455,7 +455,7 @@ ImageLoader::LoadImage(nsIURI* aURI,
                        nsIURI* aReferrer,
                        mozilla::net::ReferrerPolicy aPolicy,
                        nsIDocument* aDocument,
-                       ImageLoader::Image* aImage,
+                       URLValue* aImage,
                        CORSMode aCorsMode)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -468,13 +468,16 @@ ImageLoader::LoadImage(nsIURI* aURI,
     return;
   }
 
-  if (sImages->Contains(aImage->LoadID())) {
-    // This css::ImageValue has already been loaded.
-    return;
-  }
+  ImageTableEntry* entry;
 
-  ImageTableEntry* entry = new ImageTableEntry();
-  sImages->Put(aImage->LoadID(), entry);
+  {
+    auto lookup = sImages->LookupForAdd(aImage->LoadID());
+    if (lookup) {
+      // This css::URLValue has already been loaded.
+      return;
+    }
+    entry = lookup.OrInsert([]() { return new ImageTableEntry(); });
+  }
 
   if (!aURI) {
     return;
