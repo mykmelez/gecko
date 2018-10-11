@@ -417,7 +417,7 @@ impl SimpleEnumerator {
     fn get_next(&self) -> Result<RefPtr<nsISupports>, KeyValueError> {
         let mut iter = self.iter.borrow_mut();
         let (key, value) = iter
-            .pop_front()
+            .next()
             .ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
 
         // Perhaps we should never fail if the value was unexpected and instead
