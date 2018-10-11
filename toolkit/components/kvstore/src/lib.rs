@@ -417,8 +417,8 @@ impl SimpleEnumerator {
     fn get_next(&self) -> Result<RefPtr<nsISupports>, KeyValueError> {
         let mut iter = self.iter.borrow_mut();
         let (key, value) = iter
-            .next()
-            .ok_or(KeyValueError::Nsresult(NS_ERROR_FAILURE))?;
+            .pop_front()
+            .ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
 
         // Perhaps we should never fail if the value was unexpected and instead
         // return a null or undefined variant.
@@ -431,7 +431,7 @@ impl SimpleEnumerator {
         // enumerates pairs but doesn't access all values.
         //
         if value == OwnedValue::Unexpected {
-            return Err(KeyValueError::Nsresult(NS_ERROR_UNEXPECTED));
+            return Err(NS_ERROR_UNEXPECTED.into());
         }
 
         let pair = KeyValuePair::new(key, value);
@@ -466,7 +466,7 @@ impl KeyValuePair {
             .value
             .clone()
             .into_variant()
-            .ok_or(KeyValueError::Nsresult(NS_ERROR_FAILURE))?
+            .ok_or(KeyValueError::from(NS_ERROR_FAILURE))?
             .take())
     }
 }
