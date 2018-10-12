@@ -2,6 +2,7 @@
 //  * License, v. 2.0. If a copy of the MPL was not distributed with this
 //  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use error::KeyValueError;
 use nsstring::nsString;
 use rkv::{StoreError, Value};
 use storage_variant::{IntoVariant, Variant};
@@ -13,21 +14,16 @@ pub enum OwnedValue {
     Bool(bool),
     I64(i64),
     Str(String),
-
-    // Unexpected means either that the value's type isn't one of the ones
-    // we support or that we got a StoreError while retrieving the value.
-    // Either way, we do the same thing: return an "unexpected" error lazily
-    // when the pair is retrieved.  We might consider differentiating between
-    // these two types of failure.
-    Unexpected,
 }
 
-pub fn value_to_owned<'a>(value: Result<Option<Value<'a>>, StoreError>) -> OwnedValue {
+pub fn value_to_owned<'a>(value: Result<Option<Value<'a>>, StoreError>) -> Result<OwnedValue, KeyValueError> {
     match value {
-        Ok(Some(Value::Bool(val))) => OwnedValue::Bool(val),
-        Ok(Some(Value::I64(val))) => OwnedValue::I64(val),
-        Ok(Some(Value::Str(val))) => OwnedValue::Str(val.to_owned()),
-        _ => OwnedValue::Unexpected,
+        Ok(Some(Value::Bool(val))) => Ok(OwnedValue::Bool(val)),
+        Ok(Some(Value::I64(val))) => Ok(OwnedValue::I64(val)),
+        Ok(Some(Value::Str(val))) => Ok(OwnedValue::Str(val.to_owned())),
+        Ok(Some(_value)) => Err(KeyValueError::UnexpectedValue),
+        Ok(None) => Err(KeyValueError::UnexpectedValue),
+        Err(err) => Err(KeyValueError::StoreError(err)),
     }
 }
 
@@ -37,7 +33,6 @@ impl<'a> IntoVariant for OwnedValue {
             OwnedValue::Bool(val) => val.into_variant(),
             OwnedValue::I64(val) => val.into_variant(),
             OwnedValue::Str(val) => nsString::from(&val).into_variant(),
-            _ => None,
         }
     }
 }

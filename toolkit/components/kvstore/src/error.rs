@@ -10,7 +10,6 @@ use nserror::{
 use nsstring::nsCString;
 use rkv::StoreError;
 use std::{str::Utf8Error, string::FromUtf16Error, sync::PoisonError};
-use OwnedValue;
 
 #[derive(Debug, Fail)]
 pub enum KeyValueError {

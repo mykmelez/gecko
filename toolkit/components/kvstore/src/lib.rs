@@ -22,7 +22,7 @@ use error::KeyValueError;
 use libc::{c_double, c_void, int32_t, int64_t, uint16_t};
 use nserror::{
     nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_AGGREGATION,
-    NS_ERROR_UNEXPECTED, NS_OK,
+    NS_OK,
 };
 use nsstring::{nsACString, nsCString, nsString};
 use ownedvalue::{OwnedValue, value_to_owned};
@@ -254,7 +254,7 @@ impl KeyValueDatabase {
                 .ok_or(KeyValueError::Read)?
                 .take()),
             Some(Value::Bool(value)) => Ok(value.into_variant().ok_or(KeyValueError::Read)?.take()),
-            Some(value) => return Err(KeyValueError::UnexpectedValue),
+            Some(_value) => Err(KeyValueError::UnexpectedValue),
             None => Ok(into_variant(default_value)?.take()),
         }
     }
@@ -288,8 +288,8 @@ impl KeyValueDatabase {
 
         match value {
             Some(Value::I64(value)) => Ok(value),
+            Some(_value) => Err(KeyValueError::UnexpectedValue),
             None => Ok(default_value),
-            Some(value) => Err(KeyValueError::UnexpectedValue),
         }
     }
 
@@ -305,7 +305,7 @@ impl KeyValueDatabase {
 
         match value {
             Some(Value::F64(value)) => Ok(value.into()),
-            Some(value) => return Err(KeyValueError::UnexpectedValue),
+            Some(_value) => Err(KeyValueError::UnexpectedValue),
             None => Ok(default_value),
         }
     }
@@ -322,7 +322,7 @@ impl KeyValueDatabase {
 
         match value {
             Some(Value::Str(value)) => Ok(nsCString::from(value)),
-            Some(value) => return Err(KeyValueError::UnexpectedValue),
+            Some(_value) => Err(KeyValueError::UnexpectedValue),
             None => Ok(nsCString::from(default_value)),
         }
     }
@@ -335,7 +335,7 @@ impl KeyValueDatabase {
 
         match value {
             Some(Value::Bool(value)) => Ok(value),
-            Some(value) => return Err(KeyValueError::UnexpectedValue),
+            Some(_value) => Err(KeyValueError::UnexpectedValue),
             None => Ok(default_value),
         }
     }
@@ -363,7 +363,7 @@ impl KeyValueDatabase {
         // Our fallback approach is to collect the iterator into a collection
         // that SimpleEnumerator owns.
         //
-        let pairs: Vec<(String, OwnedValue)> = iterator
+        let pairs: Vec<(String, Result<OwnedValue, KeyValueError>)> = iterator
             .map(|(key, val)| {
                 (
                     // TODO: stop using unsafe str::from_utf8_unchecked.
@@ -384,11 +384,11 @@ impl KeyValueDatabase {
 #[xpimplements(nsISimpleEnumerator)]
 #[refcnt = "nonatomic"]
 pub struct InitSimpleEnumerator {
-    iter: RefCell<IntoIter<(String, OwnedValue)>>,
+    iter: RefCell<IntoIter<(String, Result<OwnedValue, KeyValueError>)>>,
 }
 
 impl SimpleEnumerator {
-    fn new(pairs: Vec<(String, OwnedValue)>) -> RefPtr<SimpleEnumerator> {
+    fn new(pairs: Vec<(String, Result<OwnedValue, KeyValueError>)>) -> RefPtr<SimpleEnumerator> {
         SimpleEnumerator::allocate(InitSimpleEnumerator {
             iter: RefCell::new(pairs.into_iter()),
         })
@@ -418,21 +418,18 @@ impl SimpleEnumerator {
             .next()
             .ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
 
-        // Perhaps we should never fail if the value was unexpected and instead
-        // return a null or undefined variant.
+        // We fail on retrieval of the key/value pair if the value
+        // is unexpected or we encountered a store error while retrieving it.
         //
-        // Alternately, we could fail eagerly—when instantiating the enumerator;
-        // or even more lazily—on nsIKeyValuePair.getValue().  But eagerly seems
-        // too soon, since it exposes the implementation detail that we eagerly
-        // collect the results of the cursor iterator (which ideally we'll stop
-        // doing in the future).  And lazily would hide errors when the consumer
-        // enumerates pairs but doesn't access all values.
+        // We could fail eagerly—when instantiating the enumerator, but that
+        // would expose the implementation detail that we eagerly collect
+        // the results of the cursor iterator, which we plan to stop doing
+        // in the future.
         //
-        if value == OwnedValue::Unexpected {
-            return Err(NS_ERROR_UNEXPECTED.into());
-        }
-
-        let pair = KeyValuePair::new(key, value);
+        // We could also fail more lazily—on nsIKeyValuePair.getValue(),
+        // but that would hide errors when the consumer enumerates pairs
+        // without accessing their values.
+        let pair = KeyValuePair::new(key, value?);
 
         pair.query_interface::<nsISupports>()
             .ok_or(KeyValueError::NoInterface("nsIKeyValuePair"))
