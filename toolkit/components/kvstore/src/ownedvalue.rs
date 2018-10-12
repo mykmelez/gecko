@@ -16,27 +16,18 @@ pub enum OwnedValue {
 
     // Unexpected means either that the value's type isn't one of the ones
     // we support or that we got a StoreError while retrieving the value.
-    // TODO: differentiate between "unexpected type" and StoreError.
+    // Either way, we do the same thing: return an "unexpected" error lazily
+    // when the pair is retrieved.  We might consider differentiating between
+    // these two types of failure.
     Unexpected,
 }
 
-impl<'a> From<Result<Option<Value<'a>>, StoreError>> for OwnedValue {
-    fn from(value: Result<Option<Value<'a>>, StoreError>) -> OwnedValue {
-        match value {
-            Ok(Some(value)) => value.into(),
-            _ => OwnedValue::Unexpected,
-        }
-    }
-}
-
-impl<'a> From<Value<'a>> for OwnedValue {
-    fn from(value: Value) -> OwnedValue {
-        match value {
-            Value::Bool(val) => OwnedValue::Bool(val),
-            Value::I64(val) => OwnedValue::I64(val),
-            Value::Str(val) => OwnedValue::Str(val.to_owned()),
-            _ => OwnedValue::Unexpected,
-        }
+pub fn value_to_owned<'a>(value: Result<Option<Value<'a>>, StoreError>) -> OwnedValue {
+    match value {
+        Ok(Some(Value::Bool(val))) => OwnedValue::Bool(val),
+        Ok(Some(Value::I64(val))) => OwnedValue::I64(val),
+        Ok(Some(Value::Str(val))) => OwnedValue::Str(val.to_owned()),
+        _ => OwnedValue::Unexpected,
     }
 }
 

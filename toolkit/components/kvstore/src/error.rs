@@ -42,8 +42,8 @@ pub enum KeyValueError {
     #[fail(display = "unsupported type: {}", _0)]
     UnsupportedType(uint16_t),
 
-    #[fail(display = "unsupported value: {:?}", _0)]
-    UnsupportedValue(OwnedValue),
+    #[fail(display = "unexpected value")]
+    UnexpectedValue,
 }
 
 impl From<nsresult> for KeyValueError {
@@ -64,7 +64,7 @@ impl From<KeyValueError> for nsresult {
             KeyValueError::Read => NS_ERROR_FAILURE,
             KeyValueError::StoreError(_) => NS_ERROR_FAILURE,
             KeyValueError::UnsupportedType(_) => NS_ERROR_NOT_IMPLEMENTED,
-            KeyValueError::UnsupportedValue(_) => NS_ERROR_NOT_IMPLEMENTED,
+            KeyValueError::UnexpectedValue => NS_ERROR_UNEXPECTED,
         }
     }
 }

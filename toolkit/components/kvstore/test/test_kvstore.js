@@ -84,19 +84,18 @@ add_task(async function putGetHasDelete() {
 
   // Getting key/value pairs that do exist, but using the wrong getter
   // for the value's type, throws an exception.
-  // NB: the error should be more accurate than NS_ERROR_NOT_IMPLEMENTED.
-  Assert.throws(() => database.getString("int-key", ""), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getDouble("int-key", 1.1), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getBool("int-key", false), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getInt("string-key", 1), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getDouble("string-key", 1.1), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getBool("string-key", false), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getInt("bool-key", 1), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getDouble("bool-key", 1.1), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getString("bool-key", ""), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getInt("double-key", 1), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getBool("double-key", false), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getString("double-key", ""), /NS_ERROR_NOT_IMPLEMENTED/);
+  Assert.throws(() => database.getString("int-key", ""), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getDouble("int-key", 1.1), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getBool("int-key", false), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getInt("string-key", 1), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getDouble("string-key", 1.1), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getBool("string-key", false), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getInt("bool-key", 1), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getDouble("bool-key", 1.1), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getString("bool-key", ""), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getInt("double-key", 1), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getBool("double-key", false), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getString("double-key", ""), /NS_ERROR_UNEXPECTED/);
 
   // The has() method works as expected for both existing and non-existent keys.
   Assert.strictEqual(database.has("int-key"), true);
@@ -161,23 +160,23 @@ add_task(async function largeNumbers() {
   Assert.strictEqual(database.getInt("max-int-variant", 1), MAX_INT_VARIANT);
 
   Assert.strictEqual(database.get("min-double-variant"), MIN_DOUBLE_VARIANT);
-  Assert.throws(() => database.getInt("min-double-variant", 1), /NS_ERROR_NOT_IMPLEMENTED/);
+  Assert.throws(() => database.getInt("min-double-variant", 1), /NS_ERROR_UNEXPECTED/);
   Assert.strictEqual(database.getDouble("min-double-variant", 1.1), MIN_DOUBLE_VARIANT);
 
   Assert.strictEqual(database.get("max-safe-integer"), Number.MAX_SAFE_INTEGER);
-  Assert.throws(() => database.getInt("max-safe-integer", 1), /NS_ERROR_NOT_IMPLEMENTED/);
+  Assert.throws(() => database.getInt("max-safe-integer", 1), /NS_ERROR_UNEXPECTED/);
   Assert.strictEqual(database.getDouble("max-safe-integer", 1.1), Number.MAX_SAFE_INTEGER);
 
   Assert.strictEqual(database.get("min-safe-integer"), Number.MIN_SAFE_INTEGER);
-  Assert.throws(() => database.getInt("min-safe-integer", 1), /NS_ERROR_NOT_IMPLEMENTED/);
+  Assert.throws(() => database.getInt("min-safe-integer", 1), /NS_ERROR_UNEXPECTED/);
   Assert.strictEqual(database.getDouble("min-safe-integer", 1.1), Number.MIN_SAFE_INTEGER);
 
   Assert.strictEqual(database.get("max-value"), Number.MAX_VALUE);
-  Assert.throws(() => database.getInt("max-value", 1), /NS_ERROR_NOT_IMPLEMENTED/);
+  Assert.throws(() => database.getInt("max-value", 1), /NS_ERROR_UNEXPECTED/);
   Assert.strictEqual(database.getDouble("max-value", 1.1), Number.MAX_VALUE);
 
   Assert.strictEqual(database.get("min-value"), Number.MIN_VALUE);
-  Assert.throws(() => database.getInt("min-value", 1), /NS_ERROR_NOT_IMPLEMENTED/);
+  Assert.throws(() => database.getInt("min-value", 1), /NS_ERROR_UNEXPECTED/);
   Assert.strictEqual(database.getDouble("min-value", 1.1), Number.MIN_VALUE);
 });
 

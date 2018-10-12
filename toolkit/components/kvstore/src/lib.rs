@@ -25,7 +25,7 @@ use nserror::{
     NS_ERROR_UNEXPECTED, NS_OK,
 };
 use nsstring::{nsACString, nsCString, nsString};
-use ownedvalue::OwnedValue;
+use ownedvalue::{OwnedValue, value_to_owned};
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
     cell::RefCell,
@@ -254,7 +254,7 @@ impl KeyValueDatabase {
                 .ok_or(KeyValueError::Read)?
                 .take()),
             Some(Value::Bool(value)) => Ok(value.into_variant().ok_or(KeyValueError::Read)?.take()),
-            Some(value) => return Err(KeyValueError::UnsupportedValue(value.into())),
+            Some(value) => return Err(KeyValueError::UnexpectedValue),
             None => Ok(into_variant(default_value)?.take()),
         }
     }
@@ -289,7 +289,7 @@ impl KeyValueDatabase {
         match value {
             Some(Value::I64(value)) => Ok(value),
             None => Ok(default_value),
-            Some(value) => Err(KeyValueError::UnsupportedValue(value.into())),
+            Some(value) => Err(KeyValueError::UnexpectedValue),
         }
     }
 
@@ -305,7 +305,7 @@ impl KeyValueDatabase {
 
         match value {
             Some(Value::F64(value)) => Ok(value.into()),
-            Some(value) => return Err(KeyValueError::UnsupportedValue(value.into())),
+            Some(value) => return Err(KeyValueError::UnexpectedValue),
             None => Ok(default_value),
         }
     }
@@ -322,7 +322,7 @@ impl KeyValueDatabase {
 
         match value {
             Some(Value::Str(value)) => Ok(nsCString::from(value)),
-            Some(value) => return Err(KeyValueError::UnsupportedValue(value.into())),
+            Some(value) => return Err(KeyValueError::UnexpectedValue),
             None => Ok(nsCString::from(default_value)),
         }
     }
@@ -335,7 +335,7 @@ impl KeyValueDatabase {
 
         match value {
             Some(Value::Bool(value)) => Ok(value),
-            Some(value) => return Err(KeyValueError::UnsupportedValue(value.into())),
+            Some(value) => return Err(KeyValueError::UnexpectedValue),
             None => Ok(default_value),
         }
     }
@@ -368,7 +368,7 @@ impl KeyValueDatabase {
                 (
                     // TODO: stop using unsafe str::from_utf8_unchecked.
                     unsafe { str::from_utf8_unchecked(&key) }.to_owned(),
-                    val.into(),
+                    value_to_owned(val),
                 )
             }).collect();
 
