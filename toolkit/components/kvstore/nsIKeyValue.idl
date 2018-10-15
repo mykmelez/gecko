@@ -8,8 +8,8 @@
  * enumeration of key/value pairs and the use of multiple named databases within
  * a single storage file.  Operations have ACID semantics.
  *
- * This API does not (yet) support asynchronous operations, so it must not
- * be used from the main thread.
+ * This API does not (yet) support asynchronous operations, so it MUST NOT
+ * BE USED from the main thread (i.e. by JavaScript in the parent process).
  *
  * This API does not (yet) support transactions, so it will not be appropriate
  * for all use cases.
