@@ -10,6 +10,7 @@ extern crate lmdb;
 extern crate log;
 extern crate nserror;
 extern crate nsstring;
+extern crate ordered_float;
 extern crate rkv;
 extern crate storage_variant;
 #[macro_use]

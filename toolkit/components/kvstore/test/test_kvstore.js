@@ -244,6 +244,7 @@ add_task(async function enumeration() {
   const database = gKeyValueService.getOrCreate(databaseDir);
 
   database.put("int-key", 1234);
+  database.put("double-key", 56.78);
   database.put("string-key", "Héllo, wőrld!");
   database.put("bool-key", true);
 
@@ -264,6 +265,7 @@ add_task(async function enumeration() {
 
   test(null, [
     ["bool-key", true],
+    ["double-key", 56.78],
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
@@ -274,11 +276,13 @@ add_task(async function enumeration() {
 
   test("aaaaa", [
     ["bool-key", true],
+    ["double-key", 56.78],
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
 
   test("ccccc", [
+    ["double-key", 56.78],
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
@@ -310,11 +314,13 @@ add_task(async function enumeration() {
   }
   Assert.deepEqual(actual, {
     "bool-key": true,
+    "double-key": 56.78,
     "int-key": 1234,
     "string-key": "Héllo, wőrld!",
   });
 
   database.delete("int-key");
+  database.delete("double-key");
   database.delete("string-key");
   database.delete("bool-key");
 });

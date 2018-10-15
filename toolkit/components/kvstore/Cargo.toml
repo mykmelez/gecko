@@ -9,6 +9,7 @@ lmdb-rkv = "0.8"
 log = "0.4"
 nserror = { path = "../../../xpcom/rust/nserror" }
 nsstring = { path = "../../../servo/support/gecko/nsstring" }
+new-ordered-float = "1.0"
 rkv = "0.4"
 storage_variant = { path = "../../../storage/variant" }
 xpcom = { path = "../../../xpcom/rust/xpcom" }
