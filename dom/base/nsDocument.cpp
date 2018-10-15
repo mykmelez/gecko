@@ -2100,9 +2100,7 @@ nsDocument::Init()
   // subclasses currently do, other don't). This is because the code in
   // nsNodeUtils always notifies the first observer first, expecting the
   // first observer to be the document.
-  NS_ENSURE_TRUE(slots->mMutationObservers.PrependElementUnlessExists(static_cast<nsIMutationObserver*>(this)),
-                 NS_ERROR_OUT_OF_MEMORY);
-
+  slots->mMutationObservers.PrependElementUnlessExists(static_cast<nsIMutationObserver*>(this));
 
   mOnloadBlocker = new nsOnloadBlocker();
   mCSSLoader = new mozilla::css::Loader(this);
@@ -3024,24 +3022,16 @@ nsIDocument::InitFeaturePolicy(nsIChannel* aChannel)
     return NS_OK;
   }
 
-  nsAutoString origin;
-  nsresult rv = nsContentUtils::GetUTFOrigin(NodePrincipal(), origin);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  mFeaturePolicy->SetDefaultOrigin(origin);
+  mFeaturePolicy->SetDefaultOrigin(NodePrincipal());
 
   RefPtr<FeaturePolicy> parentPolicy = nullptr;
   if (mDocumentContainer) {
     nsPIDOMWindowOuter* containerWindow = mDocumentContainer->GetWindow();
     if (containerWindow) {
       nsCOMPtr<nsINode> node = containerWindow->GetFrameElementInternal();
-      if (node) {
-        HTMLIFrameElement* iframe = HTMLIFrameElement::FromNode(node);
-        if (iframe) {
-          parentPolicy = iframe->Policy();
-        }
+      HTMLIFrameElement* iframe = HTMLIFrameElement::FromNodeOrNull(node);
+      if (iframe) {
+        parentPolicy = iframe->Policy();
       }
     }
   }
@@ -3052,7 +3042,7 @@ nsIDocument::InitFeaturePolicy(nsIChannel* aChannel)
   }
 
   nsCOMPtr<nsIHttpChannel> httpChannel;
-  rv = GetHttpChannelHelper(aChannel, getter_AddRefs(httpChannel));
+  nsresult rv = GetHttpChannelHelper(aChannel, getter_AddRefs(httpChannel));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -3067,8 +3057,7 @@ nsIDocument::InitFeaturePolicy(nsIChannel* aChannel)
                                       value);
   if (NS_SUCCEEDED(rv)) {
     mFeaturePolicy->SetDeclaredPolicy(this, NS_ConvertUTF8toUTF16(value),
-                                      origin, EmptyString(),
-                                      false /* 'src' enabled */);
+                                      NodePrincipal(), nullptr);
   }
 
   return NS_OK;
@@ -10228,10 +10217,9 @@ nsIDocument::MaybeResolveReadyForIdle()
 FeaturePolicy*
 nsIDocument::Policy() const
 {
-  MOZ_ASSERT(StaticPrefs::dom_security_featurePolicy_enabled());
-
   // The policy is created when the document is initialized. We _must_ have a
-  // policy here.
+  // policy here even if the featurePolicy pref is off. If this assertion fails,
+  // it means that ::Policy() is called before ::StartDocumentLoad().
   MOZ_ASSERT(mFeaturePolicy);
   return mFeaturePolicy;
 }

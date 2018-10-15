@@ -507,7 +507,7 @@ button > hbox > label {
   min-width: 66ch;
 }
 
-.dialogBox > .groupbox-title {
+.dialogTitleBar {
   margin-top: 0;
   padding: 3.5px 0;
   background-color: #F1F1F1;
@@ -516,6 +516,7 @@ button > hbox > label {
 
 .dialogTitle {
   font-size: .9em;
+  font-weight: 600;
   text-align: center;
   -moz-user-select: none;
 }
@@ -527,12 +528,8 @@ button > hbox > label {
   min-height: auto;
 }
 
-.dialogBox > .groupbox-body {
-  -moz-appearance: none;
-  padding: 20px;
-}
-
 .dialogFrame {
+  margin: 20px;
   -moz-box-flex: 1;
   /* Default dialog dimensions */
   width: 66ch;
@@ -704,73 +701,6 @@ button > hbox > label {
 .navigation {
   overflow-x: hidden;
   overflow-y: auto;
-}
-
-.navigation > .help-button {
-  margin-bottom: 36px;
-  padding: 1px; /* Adding padding around help label in order to make entire keyboard focusing outline visible */
-}
-
-.help-button > .text-link {
-  -moz-box-flex: 1;
-  margin-inline-start: 34px;
-  margin-inline-end: 0;
-  text-decoration: none;
-  color: currentColor;
-  width: 36px;
-  height: 36px;
-  cursor: default;
-}
-
-.help-button > .text-link:hover {
-  background-color: var(--in-content-category-background-hover);
-  border-radius: 2px;
-}
-
-.help-button > .text-link:hover:active:not([disabled]) {
-  background-color: var(--in-content-category-background-active);
-}
-
-.help-button > .text-link:-moz-focusring {
-  outline: var(--in-content-category-outline-focus);
-}
-
-.help-icon {
-  list-style-image: url("chrome://global/skin/icons/help.svg");
-  -moz-context-properties: fill, fill-opacity;
-  fill: currentColor;
-  width: 16px;
-  height: 16px;
-  margin: 10px;
-  margin-inline-start: 13px;
-  vertical-align: middle;
-}
-
-.help-icon:hover {
-  fill: currentColor !important;
-}
-
-.help-label {
-  margin: 0 4px;
-  font-size: .9em;
-  -moz-user-select: none;
-}
-
-@media (max-width: 830px) {
-  .help-button > .text-link {
-    -moz-box-flex: 0;
-    width: 36px;
-    height: 36px;
-    margin-inline-start: 0;
-  }
-
-  .help-icon {
-    margin: 10px;
-  }
-
-  .help-label {
-    display: none;
-  }
 }
 
 .face-sad {
