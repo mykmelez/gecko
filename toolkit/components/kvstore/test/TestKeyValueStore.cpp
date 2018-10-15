@@ -72,6 +72,7 @@ TEST_F(KeyValueStore, GetOrCreate) {
 const auto INT_KEY = NS_LITERAL_CSTRING("int-key");
 const auto DOUBLE_KEY = NS_LITERAL_CSTRING("double-key");
 const auto STRING_KEY = NS_LITERAL_CSTRING("string-key");
+const auto BOOL_KEY = NS_LITERAL_CSTRING("bool-key");
 
 TEST_F(KeyValueStore, PutGetHasDelete) {
     nsresult rv;
@@ -118,6 +119,17 @@ TEST_F(KeyValueStore, PutGetHasDelete) {
     rv = value->GetAsAUTF8String(stringValue);
     ASSERT_TRUE(NS_SUCCEEDED(rv));
     EXPECT_TRUE(stringValue.Equals(defaultString));
+
+    // Assert.strictEqual(database.get("bool-key", false), false);
+
+    const bool defaultBool = false;
+    rv = database->Get(BOOL_KEY, new BooleanVariant(defaultBool), getter_AddRefs(value));
+    ASSERT_TRUE(NS_SUCCEEDED(rv));
+
+    bool boolValue;
+    rv = value->GetAsBool(&boolValue);
+    ASSERT_TRUE(NS_SUCCEEDED(rv));
+    EXPECT_EQ(boolValue, defaultBool);
 }
 
 } // namespace TestKeyValueStore
