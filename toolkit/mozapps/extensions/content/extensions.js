@@ -125,14 +125,6 @@ function initialize(event) {
     gViewController.doCommand(event.target.id);
   });
 
-  let detailScreenshot = document.getElementById("detail-screenshot");
-  detailScreenshot.addEventListener("load", function(event) {
-    this.removeAttribute("loading");
-  });
-  detailScreenshot.addEventListener("error", function(event) {
-    this.setAttribute("loading", "error");
-  });
-
   let addonPage = document.getElementById("addons-page");
   addonPage.addEventListener("dragenter", function(event) {
     gDragDrop.onDragOver(event);
@@ -149,6 +141,20 @@ function initialize(event) {
   if (!isDiscoverEnabled()) {
     gViewDefault = "addons://list/extension";
   }
+
+  let helpButton = document.getElementById("helpButton");
+  let helpUrl = Services.urlFormatter.formatURLPref("app.support.baseURL") + "addons-help";
+  helpButton.setAttribute("href", helpUrl);
+
+  document.getElementById("preferencesButton")
+    .addEventListener("click", () => {
+      let mainWindow = getMainWindow();
+      if ("switchToTabHavingURI" in mainWindow) {
+        mainWindow.switchToTabHavingURI("about:preferences", true, {
+          triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+        });
+      }
+    });
 
   gViewController.initialize();
   gCategories.initialize();
@@ -270,6 +276,18 @@ function isDiscoverEnabled() {
   }
 
   return true;
+}
+
+function setSearchLabel(type) {
+  let searchLabel = document.getElementById("search-label");
+  if (type == "extension" || type == "theme") {
+    searchLabel
+      .textContent = gStrings.ext.GetStringFromName(`searchLabel.${type}`);
+    searchLabel.hidden = false;
+  } else {
+    searchLabel.textContent = "";
+    searchLabel.hidden = true;
+  }
 }
 
 /**
@@ -1459,7 +1477,7 @@ function shouldShowVersionNumber(aAddon) {
 function createItem(aObj, aIsInstall) {
   let item = document.createXULElement("richlistitem");
 
-  item.setAttribute("class", "addon addon-view");
+  item.setAttribute("class", "addon addon-view card");
   item.setAttribute("name", aObj.name);
   item.setAttribute("type", aObj.type);
 
@@ -2374,6 +2392,14 @@ var gListView = {
     this.node.setAttribute("type", aType);
     this.showEmptyNotice(false);
 
+    try {
+      document.getElementById("list-view-heading-name")
+        .textContent = gStrings.ext.GetStringFromName(`listHeading.${aType}`);
+      setSearchLabel(aType);
+    } catch (e) {
+      // In tests we sometimes render this view with a type we don't support, that's fine.
+    }
+
     this._listBox.textContent = "";
 
     if (aType == "plugin") {
@@ -2572,6 +2598,8 @@ var gDetailView = {
   },
 
   _updateView(aAddon, aIsRemote, aScrollToPreferences) {
+    setSearchLabel(aAddon.type);
+
     AddonManager.addManagerListener(this);
     this.clearLoading();
 
@@ -2604,24 +2632,6 @@ var gDetailView = {
       version.value = aAddon.version;
     } else {
       version.hidden = true;
-    }
-
-    var screenshotbox = document.getElementById("detail-screenshot-box");
-    var screenshot = document.getElementById("detail-screenshot");
-    if (aAddon.screenshots && aAddon.screenshots.length > 0) {
-      if (aAddon.screenshots[0].thumbnailURL) {
-        screenshot.src = aAddon.screenshots[0].thumbnailURL;
-        screenshot.width = aAddon.screenshots[0].thumbnailWidth;
-        screenshot.height = aAddon.screenshots[0].thumbnailHeight;
-      } else {
-        screenshot.src = aAddon.screenshots[0].url;
-        screenshot.width = aAddon.screenshots[0].width;
-        screenshot.height = aAddon.screenshots[0].height;
-      }
-      screenshot.setAttribute("loading", "true");
-      screenshotbox.hidden = false;
-    } else {
-      screenshotbox.hidden = true;
     }
 
     var desc = document.getElementById("detail-desc");

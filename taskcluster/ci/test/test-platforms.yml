@@ -130,12 +130,6 @@ windows7-32/debug:
         - windows-reftest-gpu
         - windows-tests
 
-windows7-32-msvc/debug:
-    build-platform: win32-msvc/debug
-    test-sets:
-        - windows-reftest-gpu
-        - windows-tests
-
 windows7-32/opt:
     build-platform: win32/opt
     test-sets:
@@ -172,15 +166,6 @@ windows7-32-devedition/opt:
         - windows-reftest-gpu
         - windows-tests
 
-windows7-32-msvc/opt:
-    build-platform: win32-msvc/opt
-    test-sets:
-        - awsy
-        - desktop-screenshot-capture
-        - windows-reftest-gpu
-        - windows-talos
-        - windows-tests
-
 # win64
 windows10-64-ccov/debug:
     build-platform: win64-ccov/debug
@@ -194,12 +179,6 @@ windows10-64-ccov/debug:
 
 windows10-64/debug:
     build-platform: win64/debug
-    test-sets:
-        - windows-tests
-        - mochitest-headless
-
-windows10-64-msvc/debug:
-    build-platform: win64-msvc/debug
     test-sets:
         - windows-tests
         - mochitest-headless
@@ -243,15 +222,6 @@ windows10-64-asan/opt:
     build-platform: win64-asan/opt
     test-sets:
         - common-tests
-
-windows10-64-msvc/opt:
-    build-platform: win64-msvc/opt
-    test-sets:
-        - awsy
-        - desktop-screenshot-capture
-        - windows-talos
-        - windows-tests
-        - mochitest-headless
 
 # QR builds just run a subset right now.
 windows10-64-qr/debug:
@@ -320,7 +290,6 @@ android-em-4.3-arm7-api-16/debug:
     build-platform: android-api-16/debug
     test-sets:
         - android-common-tests
-        - android-gradle-tests
 
 android-em-4.3-arm7-api-16-ccov/debug:
     build-platform: android-api-16-ccov/debug
@@ -332,7 +301,6 @@ android-em-4.3-arm7-api-16/opt:
     test-sets:
         - android-common-tests
         - android-opt-tests
-        - android-gradle-tests
 
 android-em-4.2-x86/opt:
     build-platform: android-x86/opt

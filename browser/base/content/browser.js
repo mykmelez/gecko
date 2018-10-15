@@ -63,6 +63,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   SiteDataManager: "resource:///modules/SiteDataManager.jsm",
   SitePermissions: "resource:///modules/SitePermissions.jsm",
   TabCrashHandler: "resource:///modules/ContentCrashHandlers.jsm",
+  TelemetryEnvironment: "resource://gre/modules/TelemetryEnvironment.jsm",
   TelemetryStopwatch: "resource://gre/modules/TelemetryStopwatch.jsm",
   Translation: "resource:///modules/translation/Translation.jsm",
   UITour: "resource:///modules/UITour.jsm",
@@ -1250,15 +1251,28 @@ var gBrowserInit = {
 
     new LightweightThemeConsumer(document);
     CompactTheme.init();
-    if (window.matchMedia("(-moz-os-version: windows-win8)").matches &&
-        window.matchMedia("(-moz-windows-default-theme)").matches) {
-      let windowFrameColor = new Color(...ChromeUtils.import("resource:///modules/Windows8WindowFrameColor.jsm", {})
-                                            .Windows8WindowFrameColor.get());
-      // Default to black for foreground text.
-      if (!windowFrameColor.isContrastRatioAcceptable(new Color(0, 0, 0))) {
-        document.documentElement.setAttribute("darkwindowframe", "true");
+
+    if (AppConstants.platform == "win") {
+      if (window.matchMedia("(-moz-os-version: windows-win8)").matches &&
+          window.matchMedia("(-moz-windows-default-theme)").matches) {
+        let windowFrameColor = new Color(...ChromeUtils.import("resource:///modules/Windows8WindowFrameColor.jsm", {})
+                                              .Windows8WindowFrameColor.get());
+        // Default to black for foreground text.
+        if (!windowFrameColor.isContrastRatioAcceptable(new Color(0, 0, 0))) {
+          document.documentElement.setAttribute("darkwindowframe", "true");
+        }
+      } else if (AppConstants.isPlatformAndVersionAtLeast("win", "10")) {
+        TelemetryEnvironment.onInitialized().then(() => {
+          // 17763 is the build number of Windows 10 version 1809
+          if (TelemetryEnvironment.currentEnvironment.system.os.windowsBuildNumber < 17763) {
+            document.documentElement.setAttribute("always-use-accent-color-for-window-border", "");
+          }
+        });
       }
     }
+
+    // Call this after we set attributes that might change toolbars' computed
+    // text color.
     ToolbarIconColor.init();
   },
 
@@ -1799,6 +1813,26 @@ var gBrowserInit = {
     if (Win7Features) {
       scheduleIdleTask(() => Win7Features.onOpenWindow());
     }
+
+    scheduleIdleTask(() => {
+      if (Services.prefs.getBoolPref("privacy.resistFingerprinting")) {
+        return;
+      }
+
+      setTimeout(() => {
+        if (window.closed) {
+          return;
+        }
+
+        let browser = gBrowser.selectedBrowser;
+        let browserBounds = window.windowUtils.getBoundsWithoutFlushing(browser);
+
+        Services.telemetry.keyedScalarAdd(
+          "resistfingerprinting.content_window_size",
+          `${browserBounds.width}x${browserBounds.height}`,
+          1);
+      }, 300 * 1000);
+    });
 
     // This should always go last, since the idle tasks (except for the ones with
     // timeouts) should execute in order. Note that this observer notification is
@@ -5736,9 +5770,11 @@ function onViewToolbarsPopupShowing(aEvent, aInsertPoint) {
   }
 
   if (showTabStripItems) {
-    let haveMultipleTabs = gBrowser.visibleTabs.length > 1;
-    document.getElementById("toolbar-context-reloadAllTabs").disabled = !haveMultipleTabs;
-
+    let multipleTabsSelected = !!gBrowser.multiSelectedTabsCount;
+    document.getElementById("toolbar-context-bookmarkSelectedTabs").hidden = !multipleTabsSelected;
+    document.getElementById("toolbar-context-bookmarkSelectedTab").hidden = multipleTabsSelected;
+    document.getElementById("toolbar-context-reloadSelectedTabs").hidden = !multipleTabsSelected;
+    document.getElementById("toolbar-context-reloadSelectedTab").hidden = multipleTabsSelected;
     document.getElementById("toolbar-context-selectAllTabs").disabled = gBrowser.allTabsSelected();
     document.getElementById("toolbar-context-undoCloseTab").disabled =
       SessionStore.getClosedTabCount(window) == 0;

@@ -18,11 +18,6 @@ from mach.decorators import (
     Command,
 )
 
-try:
-    from os import scandir
-except ImportError:
-    from scandir import scandir
-
 
 here = os.path.abspath(os.path.dirname(__file__))
 GLOBAL_EXCLUDES = [
@@ -37,8 +32,8 @@ def setup_argument_parser():
 
 def get_global_excludes(topsrcdir):
     excludes = GLOBAL_EXCLUDES[:]
-    excludes.extend([e.name for e in scandir(topsrcdir)
-                     if e.name.startswith('obj') and e.is_dir()])
+    excludes.extend([name for name in os.listdir(topsrcdir)
+                     if name.startswith('obj') and os.path.isdir(name)])
     return excludes
 
 

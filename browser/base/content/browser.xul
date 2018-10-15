@@ -70,7 +70,11 @@
         fullscreenbutton="true"
         sizemode="normal"
         retargetdocumentfocus="urlbar"
-        persist="screenX screenY width height sizemode">
+        persist="screenX screenY width height sizemode"
+#ifdef BROWSER_XHTML
+        hidden="true"
+#endif
+        >
 
 # All JS files which are needed by browser.xul and other top level windows to
 # support MacOS specific features *must* go into the global-scripts.inc file so
@@ -88,9 +92,14 @@ xmlns="http://www.w3.org/1999/xhtml"
   window.onload = gBrowserInit.onLoad.bind(gBrowserInit);
   window.onunload = gBrowserInit.onUnload.bind(gBrowserInit);
   window.onclose = WindowIsClosing;
+
 #ifdef BROWSER_XHTML
-  window.addEventListener("DOMContentLoaded",
-    gBrowserInit.onBeforeInitialXULLayout.bind(gBrowserInit), { once: true });
+  window.addEventListener("readystatechange", () => {
+    // We initially hide the window to prevent layouts during parse. This lets us
+    // avoid accidental XBL construction and better match browser.xul (see Bug 1497975).
+    gBrowserInit.onBeforeInitialXULLayout();
+    document.documentElement.removeAttribute("hidden");
+  }, { once: true, capture: true });
 #else
   window.addEventListener("MozBeforeInitialXULLayout",
     gBrowserInit.onBeforeInitialXULLayout.bind(gBrowserInit), { once: true });
@@ -181,10 +190,6 @@ xmlns="http://www.w3.org/1999/xhtml"
         <menupopup id="context_sendTabToDevicePopupMenu"
                    onpopupshowing="gSync.populateSendTabToDevicesMenu(event.target, TabContextMenu.contextTab.linkedBrowser.currentURI.spec, TabContextMenu.contextTab.linkedBrowser.contentTitle, TabContextMenu.contextTab.multiselected);"/>
       </menu>
-      <menuseparator/>
-      <menuitem id="context_reloadAllTabs" label="&reloadAllTabs.label;" accesskey="&reloadAllTabs.accesskey;"
-                tbattr="tabbrowser-multiple-visible"
-                oncommand="gBrowser.reloadAllTabs();"/>
       <menuseparator/>
       <menu id="context_closeTabOptions"
             label="&closeTabOptions.label;"
@@ -440,12 +445,24 @@ xmlns="http://www.w3.org/1999/xhtml"
                 label="&customizeMenu.removeFromToolbar.label;"
                 contexttype="toolbaritem"
                 class="customize-context-removeFromToolbar"/>
-      <menuitem id="toolbar-context-reloadAllTabs"
+      <menuitem id="toolbar-context-reloadSelectedTab"
                 class="toolbaritem-tabsmenu"
                 contexttype="tabbar"
-                oncommand="gBrowser.reloadAllTabs();"
-                label="&toolbarContextMenu.reloadAllTabs.label;"
-                accesskey="&toolbarContextMenu.reloadAllTabs.accesskey;"/>
+                oncommand="gBrowser.reloadMultiSelectedTabs();"
+                label="&toolbarContextMenu.reloadSelectedTab.label;"
+                accesskey="&toolbarContextMenu.reloadSelectedTab.accesskey;"/>
+      <menuitem id="toolbar-context-reloadSelectedTabs"
+                class="toolbaritem-tabsmenu"
+                contexttype="tabbar"
+                oncommand="gBrowser.reloadMultiSelectedTabs();"
+                label="&toolbarContextMenu.reloadSelectedTabs.label;"
+                accesskey="&toolbarContextMenu.reloadSelectedTabs.accesskey;"/>
+      <menuitem id="toolbar-context-bookmarkSelectedTab"
+                class="toolbaritem-tabsmenu"
+                contexttype="tabbar"
+                oncommand="PlacesCommandHook.bookmarkPages(PlacesCommandHook.uniqueSelectedPages);"
+                label="&toolbarContextMenu.bookmarkSelectedTab.label;"
+                accesskey="&toolbarContextMenu.bookmarkSelectedTab.accesskey;"/>
       <menuitem id="toolbar-context-bookmarkSelectedTabs"
                 class="toolbaritem-tabsmenu"
                 contexttype="tabbar"

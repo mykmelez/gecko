@@ -257,6 +257,7 @@ struct VerifyReflowFlags {
 };
 
 static const VerifyReflowFlags gFlags[] = {
+  // clang-format off
   { "verify",                VERIFY_REFLOW_ON },
   { "reflow",                VERIFY_REFLOW_NOISY },
   { "all",                   VERIFY_REFLOW_ALL },
@@ -264,6 +265,7 @@ static const VerifyReflowFlags gFlags[] = {
   { "noisy-commands",        VERIFY_REFLOW_NOISY_RC },
   { "really-noisy-commands", VERIFY_REFLOW_REALLY_NOISY_RC },
   { "resize",                VERIFY_REFLOW_DURING_RESIZE_REFLOW },
+  // clang-format on
 };
 
 #define NUM_VERIFY_REFLOW_FLAGS (sizeof(gFlags) / sizeof(gFlags[0]))
@@ -5561,12 +5563,8 @@ void PresShell::SynthesizeMouseMove(bool aFromScroll)
     RefPtr<nsSynthMouseMoveEvent> ev =
         new nsSynthMouseMoveEvent(this, aFromScroll);
 
-    if (!GetPresContext()->RefreshDriver()
-                         ->AddRefreshObserver(ev, FlushType::Display)) {
-      NS_WARNING("failed to dispatch nsSynthMouseMoveEvent");
-      return;
-    }
-
+    GetPresContext()->RefreshDriver()
+                    ->AddRefreshObserver(ev, FlushType::Display);
     mSynthMouseMoveEvent = std::move(ev);
   }
 }
@@ -9414,8 +9412,11 @@ nsIPresShell::AddRefreshObserver(nsARefreshObserver* aObserver,
                                  FlushType aFlushType)
 {
   nsPresContext* presContext = GetPresContext();
-  return presContext &&
-      presContext->RefreshDriver()->AddRefreshObserver(aObserver, aFlushType);
+  if (MOZ_UNLIKELY(!presContext)) {
+    return false;
+  }
+  presContext->RefreshDriver()->AddRefreshObserver(aObserver, aFlushType);
+  return true;
 }
 
 bool

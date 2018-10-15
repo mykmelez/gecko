@@ -9,11 +9,6 @@ import os
 from mozpack import path as mozpath
 from mozpack.files import FileFinder
 
-try:
-    from os import scandir, walk
-except ImportError:
-    from scandir import scandir, walk
-
 
 class FilterPath(object):
     """Helper class to make comparing and matching file paths easier."""
@@ -93,7 +88,7 @@ def collapse(paths, base=None, dotfiles=False):
 
         # Need to test whether directory chain is empty. If it is then bubble
         # the base back up so that it counts as 'covered'.
-        for _, _, names in walk(base):
+        for _, _, names in os.walk(base):
             if names:
                 return []
         return [base]
@@ -107,18 +102,18 @@ def collapse(paths, base=None, dotfiles=False):
 
     covered = set()
     full = set()
-    for entry in scandir(base):
-        if not dotfiles and entry.name[0] == '.':
+    for name in os.listdir(base):
+        if not dotfiles and name[0] == '.':
             continue
 
-        path = mozpath.normpath(entry.path)
+        path = mozpath.join(base, name)
         full.add(path)
 
         if path in paths:
             # This path was explicitly specified, so just bubble it back up
             # without recursing down into it (if it was a directory).
             covered.add(path)
-        elif entry.is_dir():
+        elif os.path.isdir(path):
             new_paths = [p for p in paths if p.startswith(path)]
             covered.update(collapse(new_paths, base=path, dotfiles=dotfiles))
 

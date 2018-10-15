@@ -125,10 +125,10 @@ const TargetingGetters = {
     return new Date();
   },
   get profileAgeCreated() {
-    return new ProfileAge(null, null).created;
+    return ProfileAge().then(times => times.created);
   },
   get profileAgeReset() {
-    return new ProfileAge(null, null).reset;
+    return ProfileAge().then(times => times.reset);
   },
   get usesFirefoxSync() {
     return Services.prefs.prefHasUserValue(FXA_USERNAME_PREF);
@@ -139,6 +139,10 @@ const TargetingGetters = {
       mobileDevices: Services.prefs.getIntPref("services.sync.clients.devices.mobile", 0),
       totalDevices: Services.prefs.getIntPref("services.sync.numClients", 0),
     };
+  },
+  get xpinstallEnabled() {
+    // This is needed for all add-on recommendations, to know if we allow xpi installs in the first place
+    return Services.prefs.getBoolPref("xpinstall.enabled", true);
   },
   get addonsInfo() {
     return AddonManager.getActiveAddons(["extension", "service"])

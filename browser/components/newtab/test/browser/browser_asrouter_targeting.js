@@ -109,7 +109,7 @@ add_task(async function check_localeLanguageCode() {
 });
 
 add_task(async function checkProfileAgeCreated() {
-  let profileAccessor = new ProfileAge();
+  let profileAccessor = await ProfileAge();
   is(await ASRouterTargeting.Environment.profileAgeCreated, await profileAccessor.created,
     "should return correct profile age creation date");
 
@@ -119,7 +119,7 @@ add_task(async function checkProfileAgeCreated() {
 });
 
 add_task(async function checkProfileAgeReset() {
-  let profileAccessor = new ProfileAge();
+  let profileAccessor = await ProfileAge();
   is(await ASRouterTargeting.Environment.profileAgeReset, await profileAccessor.reset,
     "should return correct profile age reset");
 
@@ -361,4 +361,15 @@ add_task(async function check_provider_cohorts() {
   await pushPrefs(["browser.newtabpage.activity-stream.asrouter.messageProviders", JSON.stringify([{id: "onboarding", messages: [], enabled: true, cohort: "foo"}, {id: "cfr", messages: [], cohort: "bar"}])]);
   is(await ASRouterTargeting.Environment.providerCohorts.onboarding, "foo");
   is(await ASRouterTargeting.Environment.providerCohorts.cfr, "bar");
+});
+
+add_task(async function check_xpinstall_enabled() {
+  // should default to true if pref doesn't exist
+  is(await ASRouterTargeting.Environment.xpinstallEnabled, true);
+  // flip to false, check targeting reflects that
+  await pushPrefs(["xpinstall.enabled", false]);
+  is(await ASRouterTargeting.Environment.xpinstallEnabled, false);
+  // flip to true, check targeting reflects that
+  await pushPrefs(["xpinstall.enabled", true]);
+  is(await ASRouterTargeting.Environment.xpinstallEnabled, true);
 });

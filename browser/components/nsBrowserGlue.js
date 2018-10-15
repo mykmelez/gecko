@@ -424,6 +424,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   RemoteSettings: "resource://services-settings/remote-settings.js",
   SafeBrowsing: "resource://gre/modules/SafeBrowsing.jsm",
   Sanitizer: "resource:///modules/Sanitizer.jsm",
+  SaveToPocket: "chrome://pocket/content/SaveToPocket.jsm",
   SessionStartup: "resource:///modules/sessionstore/SessionStartup.jsm",
   SessionStore: "resource:///modules/sessionstore/SessionStore.jsm",
   ShellService: "resource:///modules/ShellService.jsm",
@@ -1066,6 +1067,7 @@ BrowserGlue.prototype = {
     const appSource = new FileSource("app", locales, "resource://app/localization/{locale}/");
     L10nRegistry.registerSource(appSource);
 
+    SaveToPocket.init();
     Services.obs.notifyObservers(null, "browser-ui-startup-complete");
   },
 
@@ -1152,7 +1154,7 @@ BrowserGlue.prototype = {
 
   async _calculateProfileAgeInDays() {
     let ProfileAge = ChromeUtils.import("resource://gre/modules/ProfileAge.jsm", {}).ProfileAge;
-    let profileAge = new ProfileAge(null, null);
+    let profileAge = await ProfileAge();
 
     let creationDate = await profileAge.created;
     let resetDate = await profileAge.reset;
@@ -1350,6 +1352,34 @@ BrowserGlue.prototype = {
     PlacesUtils.favicons.setDefaultIconURIPreferredSize(16 * aWindow.devicePixelRatio);
   },
 
+  _recordContentBlockingTelemetry() {
+    let recordIdentityPopupEvents = Services.prefs.getBoolPref("security.identitypopup.recordEventElemetry");
+    Services.telemetry.setEventRecordingEnabled("security.ui.identitypopup", recordIdentityPopupEvents);
+
+    let tpEnabled = Services.prefs.getBoolPref("privacy.trackingprotection.enabled");
+    Services.telemetry.getHistogramById("TRACKING_PROTECTION_ENABLED").add(tpEnabled);
+
+    let tpPBDisabled = Services.prefs.getBoolPref("privacy.trackingprotection.pbmode.enabled");
+    Services.telemetry.getHistogramById("TRACKING_PROTECTION_PBM_DISABLED").add(!tpPBDisabled);
+
+    let cookieBehavior = Services.prefs.getIntPref("network.cookie.cookieBehavior");
+    Services.telemetry.getHistogramById("COOKIE_BEHAVIOR").add(cookieBehavior);
+
+    let fastBlockEnabled = Services.prefs.getBoolPref("browser.fastblock.enabled");
+    Services.telemetry.scalarSet("contentblocking.fastblock_enabled", fastBlockEnabled);
+
+    let contentBlockingEnabled = Services.prefs.getBoolPref("browser.contentblocking.enabled");
+    Services.telemetry.scalarSet("contentblocking.enabled", contentBlockingEnabled);
+
+    let exceptions = 0;
+    for (let permission of Services.perms.enumerator) {
+      if (permission.type == "trackingprotection") {
+        exceptions++;
+      }
+    }
+    Services.telemetry.scalarSet("contentblocking.exceptions", exceptions);
+  },
+
   _sendMediaTelemetry() {
     let win = Services.appShell.hiddenDOMWindow;
     let v = win.document.createElementNS("http://www.w3.org/1999/xhtml", "video");
@@ -1394,6 +1424,7 @@ BrowserGlue.prototype = {
     AboutPrivateBrowsingHandler.uninit();
     AutoCompletePopup.uninit();
     DateTimePickerParent.uninit();
+    SaveToPocket.uninit();
 
     // Browser errors are only collected on Nightly, but telemetry for
     // them is collected on all channels.
@@ -1418,6 +1449,22 @@ BrowserGlue.prototype = {
         await addon.enable({allowSystemAddons: true});
       }
     });
+  },
+
+  _monitorWebcompatReporterPref() {
+    const PREF = "extensions.webcompat-reporter.enabled";
+    const ID = "webcompat-reporter@mozilla.org";
+    async function checkPref() {
+      let addon = await AddonManager.getAddonByID(ID);
+      let enabled = Services.prefs.getBoolPref(PREF, false);
+      if (enabled && !addon.isActive) {
+        await addon.enable({allowSystemAddons: true});
+      } else if (!enabled && addon.isActive) {
+        await addon.disable({allowSystemAddons: true});
+      }
+    }
+    Services.prefs.addObserver(PREF, checkPref);
+    checkPref();
   },
 
   // All initial windows have opened.
@@ -1478,6 +1525,7 @@ BrowserGlue.prototype = {
       this._lateTasksIdleObserver, LATE_TASKS_IDLE_TIME_SEC);
 
     this._monitorScreenshotsPref();
+    this._monitorWebcompatReporterPref();
   },
 
   /**
@@ -2030,6 +2078,10 @@ BrowserGlue.prototype = {
       this._placesBrowserInitComplete = true;
       Services.obs.notifyObservers(null, "places-browser-init-complete");
     });
+
+    Services.tm.idleDispatchToMainThread(() => {
+      this._recordContentBlockingTelemetry();
+    });
   },
 
   /**
@@ -2131,7 +2183,7 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 74;
+    const UI_VERSION = 75;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     let currentUIVersion;
@@ -2479,6 +2531,10 @@ BrowserGlue.prototype = {
     }
 
     if (currentUIVersion < 74) {
+      Services.prefs.clearUserPref("browser.search.region");
+    }
+
+    if (currentUIVersion < 75) {
       // Ensure we try to migrate any live bookmarks the user might have, trying up to
       // 5 times. We set this early, and here, to avoid running the migration on
       // new profile (or, indeed, ever creating the pref there).

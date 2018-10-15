@@ -841,6 +841,14 @@ gfxPlatform::Init()
     /* this currently will only succeed on Windows */
     gfxInfo = services::GetGfxInfo();
 
+    if (XRE_IsParentProcess()) {
+      // Some gfxVars must be initialized prior gPlatform for coherent results.
+      gfxVars::SetDXInterop2Blocked(IsDXInterop2Blocked());
+      gfxVars::SetDXNV12Blocked(IsDXNV12Blocked());
+      gfxVars::SetDXP010Blocked(IsDXP010Blocked());
+      gfxVars::SetDXP016Blocked(IsDXP016Blocked());
+    }
+
 #if defined(XP_WIN)
     gPlatform = new gfxWindowsPlatform;
 #elif defined(XP_MACOSX)
@@ -961,8 +969,6 @@ gfxPlatform::Init()
     InitOpenGLConfig();
 
     if (XRE_IsParentProcess()) {
-      gfxVars::SetDXInterop2Blocked(IsDXInterop2Blocked());
-      gfxVars::SetDXNV12Blocked(IsDXNV12Blocked());
       Preferences::Unlock(FONT_VARIATIONS_PREF);
       if (!gPlatform->HasVariationFontSupport()) {
         // Ensure variation fonts are disabled and the pref is locked.
@@ -991,30 +997,40 @@ gfxPlatform::Init()
     }
 }
 
-/* static*/ bool
-gfxPlatform::IsDXInterop2Blocked()
+bool
+IsFeatureSupported(long aFeature)
 {
   nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
   nsCString blockId;
   int32_t status;
-  if (!NS_SUCCEEDED(gfxInfo->GetFeatureStatus(nsIGfxInfo::FEATURE_DX_INTEROP2,
+  if (!NS_SUCCEEDED(gfxInfo->GetFeatureStatus(aFeature,
                                               blockId, &status))) {
     return true;
   }
   return status != nsIGfxInfo::FEATURE_STATUS_OK;
 }
+/* static*/ bool
+gfxPlatform::IsDXInterop2Blocked()
+{
+  return IsFeatureSupported(nsIGfxInfo::FEATURE_DX_INTEROP2);
+}
 
 /* static*/ bool
 gfxPlatform::IsDXNV12Blocked()
 {
-  nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
-  nsCString blockId;
-  int32_t status;
-  if (!NS_SUCCEEDED(gfxInfo->GetFeatureStatus(nsIGfxInfo::FEATURE_DX_NV12,
-                                              blockId, &status))) {
-    return true;
-  }
-  return status != nsIGfxInfo::FEATURE_STATUS_OK;
+  return IsFeatureSupported(nsIGfxInfo::FEATURE_DX_NV12);
+}
+
+/* static*/ bool
+gfxPlatform::IsDXP010Blocked()
+{
+  return IsFeatureSupported(nsIGfxInfo::FEATURE_DX_P010);
+}
+
+/* static*/ bool
+gfxPlatform::IsDXP016Blocked()
+{
+  return IsFeatureSupported(nsIGfxInfo::FEATURE_DX_P016);
 }
 
 /* static */ int32_t

@@ -119,6 +119,7 @@ using JS::ToNumber;
 using JS::GenericNaN;
 
 static const JSConstDoubleSpec math_constants[] = {
+    // clang-format off
     {"E"      ,  M_E       },
     {"LOG2E"  ,  M_LOG2E   },
     {"LOG10E" ,  M_LOG10E  },
@@ -128,6 +129,7 @@ static const JSConstDoubleSpec math_constants[] = {
     {"SQRT2"  ,  M_SQRT2   },
     {"SQRT1_2",  M_SQRT1_2 },
     {nullptr  ,  0         }
+    // clang-format on
 };
 
 typedef double (*UnaryMathFunctionType)(double);
@@ -462,7 +464,7 @@ js::math_log(JSContext* cx, unsigned argc, Value* vp)
 double
 js::math_max_impl(double x, double y)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
 
     // Math.max(num, NaN) => NaN, Math.max(-0, +0) => +0
     if (x > y || IsNaN(x) || (x == y && IsNegative(y))) {
@@ -491,7 +493,7 @@ js::math_max(JSContext* cx, unsigned argc, Value* vp)
 double
 js::math_min_impl(double x, double y)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
 
     // Math.min(num, NaN) => NaN, Math.min(-0, +0) => -0
     if (x < y || IsNaN(x) || (x == y && IsNegativeZero(x))) {
@@ -977,7 +979,7 @@ js::math_atanh(JSContext* cx, unsigned argc, Value* vp)
 double
 js::ecmaHypot(double x, double y)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
     return fdlibm::hypot(x, y);
 }
 
@@ -1123,7 +1125,7 @@ js::math_trunc(JSContext* cx, unsigned argc, Value* vp)
 double
 js::math_sign_impl(double x)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
 
     if (mozilla::IsNaN(x)) {
         return GenericNaN();
@@ -1178,6 +1180,7 @@ math_toSource(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static const JSFunctionSpec math_static_methods[] = {
+    // clang-format off
     JS_FN(js_toSource_str,  math_toSource,        0, 0),
     JS_INLINABLE_FN("abs",    math_abs,             1, 0, MathAbs),
     JS_INLINABLE_FN("acos",   math_acos,            1, 0, MathACos),
@@ -1215,6 +1218,7 @@ static const JSFunctionSpec math_static_methods[] = {
     JS_INLINABLE_FN("sign",   math_sign,            1, 0, MathSign),
     JS_INLINABLE_FN("cbrt",   math_cbrt,            1, 0, MathCbrt),
     JS_FS_END
+    // clang-format on
 };
 
 JSObject*
