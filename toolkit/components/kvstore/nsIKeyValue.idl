@@ -41,9 +41,11 @@ interface nsIKeyValueDatabase : nsISupports {
     /**
      * Enumerate (key, value) pairs.  If you specify a "from" key,
      * then enumeration starts at the first key equal to or greater than
-     * (lexicographically) the specified key.
+     * (lexicographically) the specified key.  And if you specify a "to" key,
+     * then enumeration ends at the first key less than or equal to it.
      */
-    nsISimpleEnumerator enumerate([optional] in AUTF8String fromKey);
+    nsISimpleEnumerator enumerate([optional] in AUTF8String fromKey,
+                                  [optional] in AUTF8String toKey);
 };
 
 [scriptable, uuid(46c893dd-4c14-4de0-b33d-a1be18c6d062)]

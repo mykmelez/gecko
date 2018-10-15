@@ -177,7 +177,7 @@ impl KeyValueDatabase {
     xpcom_method!(
         Enumerate,
         enumerate,
-        { from_key: *const nsACString },
+        { from_key: *const nsACString, to_key: *const nsACString },
         *mut *const nsISimpleEnumerator
     );
 
@@ -344,10 +344,12 @@ impl KeyValueDatabase {
     fn enumerate(
         &self,
         from_key: &nsACString,
+        to_key: &nsACString,
     ) -> Result<RefPtr<nsISimpleEnumerator>, KeyValueError> {
         let env = self.rkv.read()?;
         let reader = env.read()?;
         let from_key = str::from_utf8(from_key)?;
+        let to_key = str::from_utf8(to_key)?;
 
         let iterator = if from_key.is_empty() {
             reader.iter_start(&self.store)?
@@ -367,11 +369,18 @@ impl KeyValueDatabase {
         let pairs: Vec<(String, Result<OwnedValue, KeyValueError>)> = iterator
             .map(|(key, val)| {
                 (
-                    // TODO: stop using unsafe str::from_utf8_unchecked.
-                    unsafe { str::from_utf8_unchecked(&key) }.to_owned(),
+                    unsafe { str::from_utf8_unchecked(&key) },
+                    val,
+                )
+            })
+            .take_while(|(key, _val)| if to_key.is_empty() { true } else { *key <= to_key })
+            .map(|(key, val)| {
+                (
+                    key.to_owned(),
                     value_to_owned(val),
                 )
-            }).collect();
+            })
+            .collect();
 
         let enumerator = SimpleEnumerator::new(pairs);
 
