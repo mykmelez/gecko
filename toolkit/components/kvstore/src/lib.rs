@@ -52,6 +52,7 @@ enum DataType {
     DOUBLE = 9,
     BOOL = 10,
     WSTRING = 21,
+    UTF8STRING = 24,
     EMPTY = 255,
 }
 
@@ -73,6 +74,7 @@ const DATA_TYPE_INT64: uint16_t = DataType::INT64 as u16;
 const DATA_TYPE_DOUBLE: uint16_t = DataType::DOUBLE as u16;
 const DATA_TYPE_BOOL: uint16_t = DataType::BOOL as u16;
 const DATA_TYPE_WSTRING: uint16_t = DataType::WSTRING as u16;
+const DATA_TYPE_UTF8STRING: uint16_t = DataType::UTF8STRING as u16;
 const DATA_TYPE_EMPTY: uint16_t = DataType::EMPTY as u16;
 
 #[no_mangle]
@@ -493,6 +495,11 @@ fn into_variant(variant: &nsIVariant) -> Result<Variant, KeyValueError> {
         DATA_TYPE_WSTRING => {
             let mut val: nsString = nsString::new();
             unsafe { variant.GetAsAString(&mut *val) }.to_result()?;
+            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
+        }
+        DATA_TYPE_UTF8STRING => {
+            let mut val: nsCString = nsCString::new();
+            unsafe { variant.GetAsAUTF8String(&mut *val) }.to_result()?;
             Ok(val.into_variant().ok_or(KeyValueError::Read)?)
         }
         DATA_TYPE_BOOL => {

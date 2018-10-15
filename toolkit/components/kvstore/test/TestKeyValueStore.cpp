@@ -69,8 +69,13 @@ TEST_F(KeyValueStore, GetOrCreate) {
     ASSERT_TRUE(NS_SUCCEEDED(rv));
 }
 
+const auto INT_KEY = NS_LITERAL_CSTRING("int-key");
+const auto DOUBLE_KEY = NS_LITERAL_CSTRING("double-key");
+const auto STRING_KEY = NS_LITERAL_CSTRING("string-key");
+
 TEST_F(KeyValueStore, PutGetHasDelete) {
     nsresult rv;
+    nsCOMPtr<nsIVariant> value;
 
     nsAutoCString path;
     GetProfileSubdir(NS_LITERAL_STRING("PutGetHasDelete"), path);
@@ -81,14 +86,38 @@ TEST_F(KeyValueStore, PutGetHasDelete) {
     rv = mKeyValueService->GetOrCreate(path, name, getter_AddRefs(database));
     ASSERT_TRUE(NS_SUCCEEDED(rv));
 
-    int64_t defaultInt = 1;
-    nsCOMPtr<nsIVariant> value;
-    rv = database->Get(NS_LITERAL_CSTRING("int-key"), new IntegerVariant(defaultInt), getter_AddRefs(value));
+    // Assert.strictEqual(database.get("int-key", 1), 1);
+
+    const int64_t defaultInt = 1;
+    rv = database->Get(INT_KEY, new IntegerVariant(defaultInt), getter_AddRefs(value));
     ASSERT_TRUE(NS_SUCCEEDED(rv));
+
     int64_t intValue;
     rv = value->GetAsInt64(&intValue);
     ASSERT_TRUE(NS_SUCCEEDED(rv));
     EXPECT_EQ(intValue, defaultInt);
+
+    // Assert.strictEqual(database.get("double-key", 1.1), 1.1);
+
+    const double defaultDouble = 1.1;
+    rv = database->Get(DOUBLE_KEY, new FloatVariant(defaultDouble), getter_AddRefs(value));
+    ASSERT_TRUE(NS_SUCCEEDED(rv));
+
+    double doubleValue;
+    rv = value->GetAsDouble(&doubleValue);
+    ASSERT_TRUE(NS_SUCCEEDED(rv));
+    EXPECT_EQ(doubleValue, defaultDouble);
+
+    // Assert.strictEqual(database.get("string-key", ""), "");
+
+    const nsAutoCString defaultString(NS_LITERAL_CSTRING(""));
+    rv = database->Get(STRING_KEY, new UTF8TextVariant(defaultString), getter_AddRefs(value));
+    ASSERT_TRUE(NS_SUCCEEDED(rv));
+
+    nsCString stringValue;
+    rv = value->GetAsAUTF8String(stringValue);
+    ASSERT_TRUE(NS_SUCCEEDED(rv));
+    EXPECT_TRUE(stringValue.Equals(defaultString));
 }
 
 } // namespace TestKeyValueStore

@@ -61,7 +61,6 @@ use nserror::{ nsresult, NS_ERROR_NULL_POINTER };
 ///             NS_OK
 ///         }
 ///         Err(error) => {
-///             error!("{}", error);
 ///             error.into()
 ///         }
 ///     }
