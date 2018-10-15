@@ -10,9 +10,12 @@
  *
  * This API does not (yet) support asynchronous operations, so it MUST NOT
  * BE USED from the main thread (i.e. by JavaScript in the parent process).
+ * Implementation of an async variant of this API that is appropriate for JS
+ * in the main thread is tracked by bug 1499237.
  *
  * This API does not (yet) support transactions, so it will not be appropriate
- * for all use cases.
+ * for all use cases.  Extension of this API to support transactions is tracked
+ * by bug 1499238.
  */
 
 [scriptable, uuid(bc37b06a-23b5-4b32-8281-4b8479601c7e)]
