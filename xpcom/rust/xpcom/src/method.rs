@@ -4,7 +4,7 @@
 
 extern crate nserror;
 
-use nserror::{ nsresult, NS_ERROR_NULL_POINTER };
+use nserror::{nsresult, NS_ERROR_NULL_POINTER};
 
 /// The xpcom_method macro generates a Rust XPCOM method stub that converts
 /// raw pointer arguments to references, calls a Rustic implementation
