@@ -74,6 +74,23 @@ const DATA_TYPE_BOOL: uint16_t = DataType::BOOL as u16;
 const DATA_TYPE_WSTRING: uint16_t = DataType::WSTRING as u16;
 const DATA_TYPE_EMPTY: uint16_t = DataType::EMPTY as u16;
 
+macro_rules! get_method {
+    ($name:ident, $default:ty, $variant:ident, $result:ty) => {
+        fn $name(&self, key: &nsACString, default_value: $default) -> Result<$result, KeyValueError> {
+            let key = str::from_utf8(key)?;
+            let env = self.rkv.read()?;
+            let reader = env.read()?;
+            let value = reader.get(&self.store, &key)?;
+
+            match value {
+                Some(Value::$variant(value)) => Ok(value.into()),
+                Some(_value) => Err(KeyValueError::UnexpectedValue),
+                None => Ok(default_value.into()),
+            }
+        }
+    };
+}
+
 #[no_mangle]
 pub extern "C" fn KeyValueServiceConstructor(
     outer: *const nsISupports,
@@ -281,65 +298,10 @@ impl KeyValueDatabase {
         Ok(())
     }
 
-    fn get_int(&self, key: &nsACString, default_value: int64_t) -> Result<int64_t, KeyValueError> {
-        let key = str::from_utf8(key)?;
-        let env = self.rkv.read()?;
-        let reader = env.read()?;
-        let value = reader.get(&self.store, &key)?;
-
-        match value {
-            Some(Value::I64(value)) => Ok(value),
-            Some(_value) => Err(KeyValueError::UnexpectedValue),
-            None => Ok(default_value),
-        }
-    }
-
-    fn get_double(
-        &self,
-        key: &nsACString,
-        default_value: c_double,
-    ) -> Result<c_double, KeyValueError> {
-        let key = str::from_utf8(key)?;
-        let env = self.rkv.read()?;
-        let reader = env.read()?;
-        let value = reader.get(&self.store, &key)?;
-
-        match value {
-            Some(Value::F64(value)) => Ok(value.into()),
-            Some(_value) => Err(KeyValueError::UnexpectedValue),
-            None => Ok(default_value),
-        }
-    }
-
-    fn get_string(
-        &self,
-        key: &nsACString,
-        default_value: &nsACString,
-    ) -> Result<nsCString, KeyValueError> {
-        let key = str::from_utf8(key)?;
-        let env = self.rkv.read()?;
-        let reader = env.read()?;
-        let value = reader.get(&self.store, &key)?;
-
-        match value {
-            Some(Value::Str(value)) => Ok(nsCString::from(value)),
-            Some(_value) => Err(KeyValueError::UnexpectedValue),
-            None => Ok(nsCString::from(default_value)),
-        }
-    }
-
-    fn get_bool(&self, key: &nsACString, default_value: bool) -> Result<bool, KeyValueError> {
-        let key = str::from_utf8(key)?;
-        let env = self.rkv.read()?;
-        let reader = env.read()?;
-        let value = reader.get(&self.store, &key)?;
-
-        match value {
-            Some(Value::Bool(value)) => Ok(value),
-            Some(_value) => Err(KeyValueError::UnexpectedValue),
-            None => Ok(default_value),
-        }
-    }
+    get_method!(get_int, int64_t, I64, int64_t);
+    get_method!(get_double, c_double, F64, c_double);
+    get_method!(get_bool, bool, Bool, bool);
+    get_method!(get_string, &nsACString, Str, nsCString);
 
     fn enumerate(
         &self,
