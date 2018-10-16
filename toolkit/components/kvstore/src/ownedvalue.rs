@@ -18,7 +18,9 @@ pub enum OwnedValue {
     Str(String),
 }
 
-pub fn value_to_owned<'a>(value: Result<Option<Value<'a>>, StoreError>) -> Result<OwnedValue, KeyValueError> {
+pub fn value_to_owned<'a>(
+    value: Result<Option<Value<'a>>, StoreError>,
+) -> Result<OwnedValue, KeyValueError> {
     match value {
         Ok(Some(Value::Bool(val))) => Ok(OwnedValue::Bool(val)),
         Ok(Some(Value::I64(val))) => Ok(OwnedValue::I64(val)),

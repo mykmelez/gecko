@@ -26,7 +26,7 @@ use nserror::{
     NS_OK,
 };
 use nsstring::{nsACString, nsCString, nsString};
-use ownedvalue::{OwnedValue, value_to_owned};
+use ownedvalue::{value_to_owned, OwnedValue};
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
     cell::RefCell,
@@ -365,7 +365,10 @@ impl KeyValueDatabase {
         //
         // Our fallback approach is to collect the iterator into a collection
         // that SimpleEnumerator owns.
-        let pairs: Vec<(Result<String, KeyValueError>, Result<OwnedValue, KeyValueError>)> = iterator
+        let pairs: Vec<(
+            Result<String, KeyValueError>,
+            Result<OwnedValue, KeyValueError>,
+        )> = iterator
             // Convert the key to a string so we can compare it to the "to" key.
             // For forward compatibility, we don't fail here if we can't convert
             // a key to UTF-8.  Instead, we store the Err in the collection
@@ -409,11 +412,21 @@ impl KeyValueDatabase {
 #[xpimplements(nsISimpleEnumerator)]
 #[refcnt = "nonatomic"]
 pub struct InitSimpleEnumerator {
-    iter: RefCell<IntoIter<(Result<String, KeyValueError>, Result<OwnedValue, KeyValueError>)>>,
+    iter: RefCell<
+        IntoIter<(
+            Result<String, KeyValueError>,
+            Result<OwnedValue, KeyValueError>,
+        )>,
+    >,
 }
 
 impl SimpleEnumerator {
-    fn new(pairs: Vec<(Result<String, KeyValueError>, Result<OwnedValue, KeyValueError>)>) -> RefPtr<SimpleEnumerator> {
+    fn new(
+        pairs: Vec<(
+            Result<String, KeyValueError>,
+            Result<OwnedValue, KeyValueError>,
+        )>,
+    ) -> RefPtr<SimpleEnumerator> {
         SimpleEnumerator::allocate(InitSimpleEnumerator {
             iter: RefCell::new(pairs.into_iter()),
         })
@@ -439,9 +452,7 @@ impl SimpleEnumerator {
 
     fn get_next(&self) -> Result<RefPtr<nsISupports>, KeyValueError> {
         let mut iter = self.iter.borrow_mut();
-        let (key, value) = iter
-            .next()
-            .ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
+        let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
 
         // We fail on retrieval of the key/value pair if the key isn't valid
         // UTF-*, if the value is unexpected, or if we encountered a store error
