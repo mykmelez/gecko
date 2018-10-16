@@ -317,14 +317,16 @@ impl KeyValueDatabase {
             reader.iter_from(&self.store, &from_key)?
         };
 
-        // Ideally, we'd iterate pairs lazily, as the consumer calls
-        // nsISimpleEnumerator.getNext().  But SimpleEnumerator can't reference
-        // the Iter because Rust "cannot #[derive(xpcom)] on a generic type,"
-        // and the Iter requires a lifetime parameter, which would make
-        // SimpleEnumerator generic.
+        // Ideally, we'd enumerate pairs lazily, as the consumer calls
+        // nsISimpleEnumerator.getNext(), which calls our
+        // SimpleEnumerator.get_next() implementation.  But SimpleEnumerator
+        // can't reference the Iter because Rust "cannot #[derive(xpcom)]
+        // on a generic type," and the Iter requires a lifetime parameter,
+        // which would make SimpleEnumerator generic.
         //
-        // Our fallback approach is to collect the iterator into a collection
-        // that SimpleEnumerator owns.
+        // Our fallback approach is to eagerly collect the iterator
+        // into a collection that SimpleEnumerator owns.  Fixing this so we
+        // enumerate pairs lazily is bug 1499252.
         let pairs: Vec<(
             Result<String, KeyValueError>,
             Result<OwnedValue, KeyValueError>,
@@ -332,7 +334,7 @@ impl KeyValueDatabase {
             // Convert the key to a string so we can compare it to the "to" key.
             // For forward compatibility, we don't fail here if we can't convert
             // a key to UTF-8.  Instead, we store the Err in the collection
-            // and fail lazily in KeyValueEnumerator.get_next().
+            // and fail lazily in SimpleEnumerator.get_next().
             .map(|(key, val)| {
                 (
                     str::from_utf8(&key),
@@ -417,15 +419,6 @@ impl SimpleEnumerator {
         // We fail on retrieval of the key/value pair if the key isn't valid
         // UTF-*, if the value is unexpected, or if we encountered a store error
         // while retrieving the pair.
-        //
-        // We could fail eagerly—when instantiating the enumerator, but that
-        // would expose the implementation detail that we eagerly collect
-        // the results of the cursor iterator, which we plan to stop doing
-        // in the future.
-        //
-        // We could also fail more lazily—on nsIKeyValuePair.getValue(),
-        // but that would hide errors when the consumer enumerates pairs
-        // without accessing their values.
         let pair = KeyValuePair::new(key?, value?);
 
         pair.query_interface::<nsISupports>()
