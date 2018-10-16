@@ -127,10 +127,8 @@ pub extern "C" fn KeyValueServiceConstructor(
 // to simplify the implementation in the second method while returning XPCOM-
 // compatible nsresult values to XPCOM callers.
 //
-// I wonder if it'd be possible/useful to make Rust implementations of XPCOM
-// methods return Result<nsresult, nsresult> rather than nsresult.  Then we
-// might be able to merge these pairs of methods into a single method that can
-// use Rust idioms while returning the type of value that XPCOM expects.
+// The XPCOM methods are implemented using the xpcom_method! declarative macro
+// from the xpcom crate.
 
 #[derive(xpcom)]
 #[xpimplements(nsIKeyValueService)]
