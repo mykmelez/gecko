@@ -78,6 +78,23 @@ const DATA_TYPE_WSTRING: uint16_t = DataType::WSTRING as u16;
 const DATA_TYPE_UTF8STRING: uint16_t = DataType::UTF8STRING as u16;
 const DATA_TYPE_EMPTY: uint16_t = DataType::EMPTY as u16;
 
+macro_rules! get_method {
+    ($name:ident, $default:ty, $variant:ident, $result:ty) => {
+        fn $name(&self, key: &nsACString, default_value: $default) -> Result<$result, KeyValueError> {
+            let key = str::from_utf8(key)?;
+            let env = self.rkv.read()?;
+            let reader = env.read()?;
+            let value = reader.get(&self.store, &key)?;
+
+            match value {
+                Some(Value::$variant(value)) => Ok(value.into()),
+                Some(_value) => Err(KeyValueError::UnexpectedValue),
+                None => Ok(default_value.into()),
+            }
+        }
+    };
+}
+
 #[no_mangle]
 pub extern "C" fn KeyValueServiceConstructor(
     outer: *const nsISupports,
@@ -114,10 +131,8 @@ pub extern "C" fn KeyValueServiceConstructor(
 // to simplify the implementation in the second method while returning XPCOM-
 // compatible nsresult values to XPCOM callers.
 //
-// I wonder if it'd be possible/useful to make Rust implementations of XPCOM
-// methods return Result<nsresult, nsresult> rather than nsresult.  Then we
-// might be able to merge these pairs of methods into a single method that can
-// use Rust idioms while returning the type of value that XPCOM expects.
+// The XPCOM methods are implemented using the xpcom_method! declarative macro
+// from the xpcom crate.
 
 #[derive(xpcom)]
 #[xpimplements(nsIKeyValueService)]
@@ -285,65 +300,10 @@ impl KeyValueDatabase {
         Ok(())
     }
 
-    fn get_int(&self, key: &nsACString, default_value: int64_t) -> Result<int64_t, KeyValueError> {
-        let key = str::from_utf8(key)?;
-        let env = self.rkv.read()?;
-        let reader = env.read()?;
-        let value = reader.get(&self.store, &key)?;
-
-        match value {
-            Some(Value::I64(value)) => Ok(value),
-            Some(_value) => Err(KeyValueError::UnexpectedValue),
-            None => Ok(default_value),
-        }
-    }
-
-    fn get_double(
-        &self,
-        key: &nsACString,
-        default_value: c_double,
-    ) -> Result<c_double, KeyValueError> {
-        let key = str::from_utf8(key)?;
-        let env = self.rkv.read()?;
-        let reader = env.read()?;
-        let value = reader.get(&self.store, &key)?;
-
-        match value {
-            Some(Value::F64(value)) => Ok(value.into()),
-            Some(_value) => Err(KeyValueError::UnexpectedValue),
-            None => Ok(default_value),
-        }
-    }
-
-    fn get_string(
-        &self,
-        key: &nsACString,
-        default_value: &nsACString,
-    ) -> Result<nsCString, KeyValueError> {
-        let key = str::from_utf8(key)?;
-        let env = self.rkv.read()?;
-        let reader = env.read()?;
-        let value = reader.get(&self.store, &key)?;
-
-        match value {
-            Some(Value::Str(value)) => Ok(nsCString::from(value)),
-            Some(_value) => Err(KeyValueError::UnexpectedValue),
-            None => Ok(nsCString::from(default_value)),
-        }
-    }
-
-    fn get_bool(&self, key: &nsACString, default_value: bool) -> Result<bool, KeyValueError> {
-        let key = str::from_utf8(key)?;
-        let env = self.rkv.read()?;
-        let reader = env.read()?;
-        let value = reader.get(&self.store, &key)?;
-
-        match value {
-            Some(Value::Bool(value)) => Ok(value),
-            Some(_value) => Err(KeyValueError::UnexpectedValue),
-            None => Ok(default_value),
-        }
-    }
+    get_method!(get_int, int64_t, I64, int64_t);
+    get_method!(get_double, c_double, F64, c_double);
+    get_method!(get_bool, bool, Bool, bool);
+    get_method!(get_string, &nsACString, Str, nsCString);
 
     fn enumerate(
         &self,
@@ -361,14 +321,16 @@ impl KeyValueDatabase {
             reader.iter_from(&self.store, &from_key)?
         };
 
-        // Ideally, we'd iterate pairs lazily, as the consumer calls
-        // nsISimpleEnumerator.getNext().  But SimpleEnumerator can't reference
-        // the Iter because Rust "cannot #[derive(xpcom)] on a generic type,"
-        // and the Iter requires a lifetime parameter, which would make
-        // SimpleEnumerator generic.
+        // Ideally, we'd enumerate pairs lazily, as the consumer calls
+        // nsISimpleEnumerator.getNext(), which calls our
+        // SimpleEnumerator.get_next() implementation.  But SimpleEnumerator
+        // can't reference the Iter because Rust "cannot #[derive(xpcom)]
+        // on a generic type," and the Iter requires a lifetime parameter,
+        // which would make SimpleEnumerator generic.
         //
-        // Our fallback approach is to collect the iterator into a collection
-        // that SimpleEnumerator owns.
+        // Our fallback approach is to eagerly collect the iterator
+        // into a collection that SimpleEnumerator owns.  Fixing this so we
+        // enumerate pairs lazily is bug 1499252.
         let pairs: Vec<(
             Result<String, KeyValueError>,
             Result<OwnedValue, KeyValueError>,
@@ -376,7 +338,7 @@ impl KeyValueDatabase {
             // Convert the key to a string so we can compare it to the "to" key.
             // For forward compatibility, we don't fail here if we can't convert
             // a key to UTF-8.  Instead, we store the Err in the collection
-            // and fail lazily in KeyValueEnumerator.get_next().
+            // and fail lazily in SimpleEnumerator.get_next().
             .map(|(key, val)| {
                 (
                     str::from_utf8(&key),
@@ -461,15 +423,6 @@ impl SimpleEnumerator {
         // We fail on retrieval of the key/value pair if the key isn't valid
         // UTF-*, if the value is unexpected, or if we encountered a store error
         // while retrieving the pair.
-        //
-        // We could fail eagerly—when instantiating the enumerator, but that
-        // would expose the implementation detail that we eagerly collect
-        // the results of the cursor iterator, which we plan to stop doing
-        // in the future.
-        //
-        // We could also fail more lazily—on nsIKeyValuePair.getValue(),
-        // but that would hide errors when the consumer enumerates pairs
-        // without accessing their values.
         let pair = KeyValuePair::new(key?, value?);
 
         pair.query_interface::<nsISupports>()
