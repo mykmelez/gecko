@@ -3,11 +3,14 @@
 # Add steps that build, run tests, deploy, and more:
 # https://aka.ms/yaml
 
-pool:
-  vmImage: 'Ubuntu 16.04'
-
-steps:
-- script: sudo ./mach bootstrap --application-choice browser --no-interactive
-  displayName: 'bootstrap'
-- script: bash ./mach build
-  displayName: 'build'
+jobs:
+- job: Linux
+  pool:
+    vmImage: 'ubuntu-16.04'
+  steps:
+  - script: sudo ./mach bootstrap --application-choice browser --no-interactive
+    displayName: 'bootstrap'
+  - script: export SHELL=`which bash`
+    name: 'ensure SHELL defined'
+  - script: ./mach build
+    displayName: 'build'
