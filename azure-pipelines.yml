@@ -11,6 +11,6 @@ jobs:
   - script: sudo ./mach bootstrap --application-choice browser --no-interactive
     displayName: 'bootstrap'
   - script: export SHELL=`which bash`
-    name: 'ensure SHELL defined'
+    name: 'ensure_SHELL_defined'
   - script: ./mach build
     displayName: 'build'
