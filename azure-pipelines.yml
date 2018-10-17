@@ -9,5 +9,5 @@ pool:
 steps:
 - script: sudo ./mach bootstrap --application-choice browser --no-interactive
   displayName: 'bootstrap'
-- script: ./mach build
+- script: bash ./mach build
   displayName: 'build'
