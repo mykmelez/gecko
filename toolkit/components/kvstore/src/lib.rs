@@ -26,7 +26,7 @@ use nserror::{
     NS_OK,
 };
 use nsstring::{nsACString, nsCString, nsString};
-use ownedvalue::{OwnedValue, value_to_owned};
+use ownedvalue::{value_to_owned, OwnedValue};
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
     cell::RefCell,
@@ -181,7 +181,7 @@ impl KeyValueDatabase {
     xpcom_method!(
         Enumerate,
         enumerate,
-        { from_key: *const nsACString },
+        { from_key: *const nsACString, to_key: *const nsACString },
         *mut *const nsISimpleEnumerator
     );
 
@@ -348,10 +348,12 @@ impl KeyValueDatabase {
     fn enumerate(
         &self,
         from_key: &nsACString,
+        to_key: &nsACString,
     ) -> Result<RefPtr<nsISimpleEnumerator>, KeyValueError> {
         let env = self.rkv.read()?;
         let reader = env.read()?;
         let from_key = str::from_utf8(from_key)?;
+        let to_key = str::from_utf8(to_key)?;
 
         let iterator = if from_key.is_empty() {
             reader.iter_start(&self.store)?
@@ -367,15 +369,40 @@ impl KeyValueDatabase {
         //
         // Our fallback approach is to collect the iterator into a collection
         // that SimpleEnumerator owns.
-        //
-        let pairs: Vec<(String, Result<OwnedValue, KeyValueError>)> = iterator
+        let pairs: Vec<(
+            Result<String, KeyValueError>,
+            Result<OwnedValue, KeyValueError>,
+        )> = iterator
+            // Convert the key to a string so we can compare it to the "to" key.
+            // For forward compatibility, we don't fail here if we can't convert
+            // a key to UTF-8.  Instead, we store the Err in the collection
+            // and fail lazily in KeyValueEnumerator.get_next().
             .map(|(key, val)| {
                 (
-                    // TODO: stop using unsafe str::from_utf8_unchecked.
-                    unsafe { str::from_utf8_unchecked(&key) }.to_owned(),
-                    value_to_owned(val),
+                    str::from_utf8(&key),
+                    val
                 )
-            }).collect();
+            })
+            .take_while(|(key, _val)| {
+                if to_key.is_empty() {
+                    true
+                } else {
+                    match *key {
+                        Ok(key) => key <= to_key,
+                        Err(_err) => true,
+                    }
+                }
+            })
+            .map(|(key, val)| {
+                (
+                    match key {
+                        Ok(key) => Ok(key.to_owned()),
+                        Err(err) => Err(err.into()),
+                    },
+                    value_to_owned(val)
+                )
+            })
+            .collect();
 
         let enumerator = SimpleEnumerator::new(pairs);
 
@@ -389,11 +416,21 @@ impl KeyValueDatabase {
 #[xpimplements(nsISimpleEnumerator)]
 #[refcnt = "nonatomic"]
 pub struct InitSimpleEnumerator {
-    iter: RefCell<IntoIter<(String, Result<OwnedValue, KeyValueError>)>>,
+    iter: RefCell<
+        IntoIter<(
+            Result<String, KeyValueError>,
+            Result<OwnedValue, KeyValueError>,
+        )>,
+    >,
 }
 
 impl SimpleEnumerator {
-    fn new(pairs: Vec<(String, Result<OwnedValue, KeyValueError>)>) -> RefPtr<SimpleEnumerator> {
+    fn new(
+        pairs: Vec<(
+            Result<String, KeyValueError>,
+            Result<OwnedValue, KeyValueError>,
+        )>,
+    ) -> RefPtr<SimpleEnumerator> {
         SimpleEnumerator::allocate(InitSimpleEnumerator {
             iter: RefCell::new(pairs.into_iter()),
         })
@@ -419,12 +456,11 @@ impl SimpleEnumerator {
 
     fn get_next(&self) -> Result<RefPtr<nsISupports>, KeyValueError> {
         let mut iter = self.iter.borrow_mut();
-        let (key, value) = iter
-            .next()
-            .ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
+        let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
 
-        // We fail on retrieval of the key/value pair if the value
-        // is unexpected or we encountered a store error while retrieving it.
+        // We fail on retrieval of the key/value pair if the key isn't valid
+        // UTF-*, if the value is unexpected, or if we encountered a store error
+        // while retrieving the pair.
         //
         // We could fail eagerly—when instantiating the enumerator, but that
         // would expose the implementation detail that we eagerly collect
@@ -434,7 +470,7 @@ impl SimpleEnumerator {
         // We could also fail more lazily—on nsIKeyValuePair.getValue(),
         // but that would hide errors when the consumer enumerates pairs
         // without accessing their values.
-        let pair = KeyValuePair::new(key, value?);
+        let pair = KeyValuePair::new(key?, value?);
 
         pair.query_interface::<nsISupports>()
             .ok_or(KeyValueError::NoInterface("nsIKeyValuePair"))

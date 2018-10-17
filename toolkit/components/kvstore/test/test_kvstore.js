@@ -248,8 +248,8 @@ add_task(async function enumeration() {
   database.put("string-key", "Héllo, wőrld!");
   database.put("bool-key", true);
 
-  function test(fromKey, pairs) {
-    const enumerator = database.enumerate(fromKey);
+  function test(fromKey, toKey, pairs) {
+    const enumerator = database.enumerate(fromKey, toKey);
 
     for (const pair of pairs) {
       Assert.strictEqual(enumerator.hasMoreElements(), true);
@@ -263,46 +263,117 @@ add_task(async function enumeration() {
     Assert.throws(() => enumerator.getNext(), /NS_ERROR_FAILURE/);
   }
 
-  test(null, [
+  // Test enumeration without specifying "from" and "to" keys, which should
+  // enumerate all of the pairs in the database.  This test does so explicitly
+  // by passing "null", "undefined" or "" (empty string) arguments
+  // for those parameters. The iterator test below also tests this implicitly
+  // by not specifying arguments for those parameters.
+  test(null, null, [
+    ["bool-key", true],
+    ["double-key", 56.78],
+    ["int-key", 1234],
+    ["string-key", "Héllo, wőrld!"],
+  ]);
+  test(undefined, undefined, [
     ["bool-key", true],
     ["double-key", 56.78],
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
 
-  // Enumerating from a specified key will return the subset of keys that are
-  // equal to or greater than (lexicographically) the specified key (whether or
-  // not the specified key itself exists).
-
-  test("aaaaa", [
+  // The implementation doesn't distinguish between a null/undefined value
+  // and an empty string, so enumerating pairs from "" to "" has the same effect
+  // as enumerating pairs without specifying from/to keys: it enumerates
+  // all of the pairs in the database.
+  test("", "", [
     ["bool-key", true],
     ["double-key", 56.78],
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
 
-  test("ccccc", [
+  // Test enumeration from a key that doesn't exist and is lexicographically
+  // less than the least key in the database, which should enumerate
+  // all of the pairs in the database.
+  test("aaaaa", null, [
+    ["bool-key", true],
     ["double-key", 56.78],
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
 
-  test("int-key", [
+  // Test enumeration from a key that doesn't exist and is lexicographically
+  // greater than the first key in the database, which should enumerate pairs
+  // whose key is greater than or equal to the specified key.
+  test("ccccc", null, [
+    ["double-key", 56.78],
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
 
-  test("zzzzz", []);
+  // Test enumeration from a key that does exist, which should enumerate pairs
+  // whose key is greater than or equal to that key.
+  test("int-key", null, [
+    ["int-key", 1234],
+    ["string-key", "Héllo, wőrld!"],
+  ]);
 
-  // Enumerators don't implement implicit iteration, because they're implemented
-  // in Rust, which doesn't support jscontext.
-  //
-  // This should throw an exception, but instead it crashes the application
-  // TODO: file a bug about this crash.
-  // Assert.throws(() => { for (let pair of database.enumerate()) {} },
-  //               /NS_ERROR_NOT_IMPLEMENTED/);
+  // Test enumeration from a key that doesn't exist and is lexicographically
+  // greater than the greatest key in the database, which should enumerate
+  // none of the pairs in the database.
+  test("zzzzz", null, []);
 
-  // But it's trivial to wrap them in a JavaScript iterable using a generator.
+  // Test enumeration to a key that doesn't exist and is lexicographically
+  // greater than the greatest key in the database, which should enumerate
+  // all of the pairs in the database.
+  test(null, "zzzzz", [
+    ["bool-key", true],
+    ["double-key", 56.78],
+    ["int-key", 1234],
+    ["string-key", "Héllo, wőrld!"],
+  ]);
+
+  // Test enumeration to a key that doesn't exist and is lexicographically
+  // less than the greatest key in the database, which should enumerate pairs
+  // whose key is less than or equal to the specified key.
+  test(null, "ppppp", [
+    ["bool-key", true],
+    ["double-key", 56.78],
+    ["int-key", 1234],
+  ]);
+
+  // Test enumeration to a key that does exist, which should enumerate pairs
+  // whose key is less than or equal to that key.
+  test(null, "int-key", [
+    ["bool-key", true],
+    ["double-key", 56.78],
+    ["int-key", 1234],
+  ]);
+
+  // Test enumeration to a key that doesn't exist and is lexicographically
+  // less than the least key in the database, which should enumerate
+  // none of the pairs in the database.
+  test(null, "aaaaa", []);
+
+  // Test enumeration between intermediate keys, which should enumerate
+  // the pairs whose keys lie in between them.
+  test("int-key", "int-key", [
+    ["int-key", 1234],
+  ]);
+  test("ggggg", "ppppp", [
+    ["int-key", 1234],
+  ]);
+
+  // Test enumeration from a greater key to a lesser one, which should enumerate
+  // none of the pairs in the database, even if the reverse ordering would
+  // enumerate some pairs.  Consumers are responsible for ordering the "from"
+  // and "to" keys such that "from" is less than or equal to "to".
+  test("ppppp", "ccccc", []);
+  test("int-key", "ccccc", []);
+  test("ppppp", "int-key", []);
+
+  // Enumerators don't implement the JS iteration protocol, but it's trivial
+  // to wrap them in an iterable using a generator.
   function* KeyValueIterator(enumerator) {
     while (enumerator.hasMoreElements()) {
       yield enumerator.getNext().QueryInterface(Ci.nsIKeyValuePair);
