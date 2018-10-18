@@ -14,6 +14,9 @@ jobs:
       ./mach bootstrap --application-choice browser --no-interactive
     displayName: 'bootstrap'
   - script: |
+      env
       export SHELL=`which bash`
+      source $HOME/.cargo/env
+      env
       ./mach build
     displayName: 'build'
