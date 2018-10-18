@@ -5,6 +5,7 @@
 
 jobs:
 - job: Linux
+  timeoutInMinutes: 0
   pool:
     vmImage: 'ubuntu-16.04'
   steps:
