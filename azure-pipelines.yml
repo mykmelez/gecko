@@ -13,5 +13,6 @@ jobs:
     displayName: 'bootstrap'
   - script: |
       export SHELL=`which bash`
+      export PATH="$PATH:$HOME/.mozbuild/cbindgen"
       ./mach build
     displayName: 'build'
