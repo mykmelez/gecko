@@ -10,5 +10,7 @@ jobs:
   steps:
   - script: sudo ./mach bootstrap --application-choice browser --no-interactive
     displayName: 'bootstrap'
-  - script: SHELL=`which bash` ./mach build
+  - script: |
+      export SHELL=`which bash`
+      ./mach build
     displayName: 'build'
