@@ -9,9 +9,11 @@ jobs:
   pool:
     vmImage: 'ubuntu-16.04'
   steps:
-  - script: ./mach bootstrap --application-choice browser --no-interactive
-    displayName: 'bootstrap'
-  - script: |
+  - displayName: 'bootstrap'
+    script: |
+      export SHELL=`which bash`
+      ./mach bootstrap --application-choice browser --no-interactive
+  - displayName: 'build'
+    script: |
       export SHELL=`which bash`
       ./mach build
-    displayName: 'build'
