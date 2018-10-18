@@ -16,7 +16,5 @@ jobs:
   - script: |
       env
       export SHELL=`which bash`
-      source $HOME/.cargo/env
-      env
       ./mach build
     displayName: 'build'
