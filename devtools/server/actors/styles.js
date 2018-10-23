@@ -9,6 +9,7 @@ const protocol = require("devtools/shared/protocol");
 const {getCSSLexer} = require("devtools/shared/css/lexer");
 const {LongStringActor} = require("devtools/server/actors/string");
 const InspectorUtils = require("InspectorUtils");
+const TrackChangeEmitter = require("devtools/server/actors/utils/track-change-emitter");
 
 // This will also add the "stylesheet" actor type for protocol.js to recognize
 
@@ -138,7 +139,7 @@ var PageStyleActor = protocol.ActorClassWithSpec(pageStyleSpec, {
         // expected support of font-stretch at CSS Fonts Level 4.
         fontWeightLevel4: CSS.supports("font-weight: 1") &&
           CSS.supports("font-stretch: 100%"),
-      }
+      },
     };
   },
 
@@ -235,7 +236,7 @@ var PageStyleActor = protocol.ActorClassWithSpec(pageStyleSpec, {
       }
       ret[name] = {
         value: computed.getPropertyValue(name),
-        priority: computed.getPropertyPriority(name) || undefined
+        priority: computed.getPropertyPriority(name) || undefined,
       };
     });
 
@@ -307,7 +308,7 @@ var PageStyleActor = protocol.ActorClassWithSpec(pageStyleSpec, {
         URI: font.URI,
         format: font.format,
         localName: font.localName,
-        metadata: font.metadata
+        metadata: font.metadata,
       };
 
       // If this font comes from a @font-face rule
@@ -338,13 +339,13 @@ var PageStyleActor = protocol.ActorClassWithSpec(pageStyleSpec, {
           previewText: options.previewText,
           previewFontSize: options.previewFontSize,
           fontStyle: weight + " " + style,
-          fillStyle: options.previewFillStyle
+          fillStyle: options.previewFillStyle,
         };
         const { dataURL, size } = getFontPreviewData(font.CSSFamilyName,
                                                    contentDocument, opts);
         fontFace.preview = {
           data: LongStringActor(this.conn, dataURL),
-          size: size
+          size: size,
         };
       }
 
@@ -434,7 +435,7 @@ var PageStyleActor = protocol.ActorClassWithSpec(pageStyleSpec, {
         selector: selectorInfo.selector.text,
         name: selectorInfo.property,
         value: selectorInfo.value,
-        status: selectorInfo.status
+        status: selectorInfo.status,
       });
     }
 
@@ -443,7 +444,7 @@ var PageStyleActor = protocol.ActorClassWithSpec(pageStyleSpec, {
     return {
       matched: matched,
       rules: [...rules],
-      sheets: [...sheets]
+      sheets: [...sheets],
     };
   },
 
@@ -547,7 +548,7 @@ var PageStyleActor = protocol.ActorClassWithSpec(pageStyleSpec, {
       rule: elementStyle,
       pseudoElement: null,
       isSystem: false,
-      inherited: false
+      inherited: false,
     };
 
     // First any inline styles
@@ -632,7 +633,7 @@ var PageStyleActor = protocol.ActorClassWithSpec(pageStyleSpec, {
         rule: ruleActor,
         inherited: inherited,
         isSystem: isSystem,
-        pseudoElement: pseudo
+        pseudoElement: pseudo,
       });
     }
     return rules;
@@ -730,7 +731,7 @@ var PageStyleActor = protocol.ActorClassWithSpec(pageStyleSpec, {
             for (const rule of keyframesRule.cssRules) {
               entries.push({
                 rule: this._styleRef(rule),
-                keyframes: this._styleRef(keyframesRule)
+                keyframes: this._styleRef(keyframesRule),
               });
             }
           }
@@ -746,7 +747,7 @@ var PageStyleActor = protocol.ActorClassWithSpec(pageStyleSpec, {
     return {
       entries: entries,
       rules: [...rules],
-      sheets: [...sheets]
+      sheets: [...sheets],
     };
   },
 
@@ -830,7 +831,7 @@ var PageStyleActor = protocol.ActorClassWithSpec(pageStyleSpec, {
       "box-sizing",
       "display",
       "float",
-      "line-height"
+      "line-height",
     ]) {
       layout[prop] = style.getPropertyValue(prop);
     }
@@ -958,7 +959,7 @@ var PageStyleActor = protocol.ActorClassWithSpec(pageStyleSpec, {
     }
 
     return this.getNewAppliedProps(node, sheet.cssRules.item(index));
-  }
+  },
 });
 exports.PageStyleActor = PageStyleActor;
 
@@ -1003,7 +1004,7 @@ var StyleRuleActor = protocol.ActorClassWithSpec(styleRuleSpec, {
         style: item.style,
         toString: function() {
           return "[element rule " + this.style + "]";
-        }
+        },
       };
     }
   },
@@ -1076,7 +1077,7 @@ var StyleRuleActor = protocol.ActorClassWithSpec(styleRuleSpec, {
         // Whether the style rule actor implements the setRuleText
         // method.
         canSetRuleText: this.canSetRuleText,
-      }
+      },
     };
 
     if (this.rawRule.parentRule) {
@@ -1520,7 +1521,7 @@ var StyleRuleActor = protocol.ActorClassWithSpec(styleRuleSpec, {
       return;
     }
 
-    this.emit("track-change", data);
+    TrackChangeEmitter.trackChange(data);
   },
 
   /**
@@ -1593,7 +1594,7 @@ var StyleRuleActor = protocol.ActorClassWithSpec(styleRuleSpec, {
 
       return { ruleProps, isMatching };
     });
-  }
+  },
 });
 
 /**
@@ -1643,7 +1644,7 @@ function getFontPreviewData(font, doc, options) {
 
   return {
     dataURL: dataURL,
-    size: textWidth + FONT_PREVIEW_OFFSET * 2
+    size: textWidth + FONT_PREVIEW_OFFSET * 2,
   };
 }
 

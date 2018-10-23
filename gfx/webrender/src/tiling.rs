@@ -285,10 +285,8 @@ impl<T: RenderTarget> RenderTargetList<T> {
     pub fn check_ready(&self, t: &Texture) {
         assert_eq!(t.get_dimensions(), self.max_size);
         assert_eq!(t.get_format(), self.format);
-        assert_eq!(t.get_render_target_layer_count(), self.targets.len());
         assert_eq!(t.get_layer_count() as usize, self.targets.len());
-        assert_eq!(t.has_depth(), t.get_rt_info().unwrap().has_depth);
-        assert_eq!(t.has_depth(), self.needs_depth());
+        assert!(t.supports_depth() >= self.needs_depth());
     }
 }
 
@@ -409,7 +407,7 @@ impl RenderTarget for ColorRenderTarget {
 
             match task.kind {
                 RenderTaskKind::Picture(ref pic_task) => {
-                    let pic = ctx.prim_store.get_pic(pic_task.prim_index);
+                    let pic = &ctx.prim_store.pictures[pic_task.pic_index.0];
 
                     let (target_rect, _) = task.get_target_rect();
 
@@ -474,7 +472,7 @@ impl RenderTarget for ColorRenderTarget {
                 );
             }
             RenderTaskKind::Picture(ref task_info) => {
-                let pic = ctx.prim_store.get_pic(task_info.prim_index);
+                let pic = &ctx.prim_store.pictures[task_info.pic_index.0];
                 self.alpha_tasks.push(task_id);
 
                 // If this pipeline is registered as a frame output
@@ -821,7 +819,7 @@ pub enum RenderPassKind {
     OffScreen {
         alpha: RenderTargetList<AlphaRenderTarget>,
         color: RenderTargetList<ColorRenderTarget>,
-        texture_cache: FastHashMap<(CacheTextureId, i32), TextureCacheRenderTarget>,
+        texture_cache: FastHashMap<(CacheTextureId, usize), TextureCacheRenderTarget>,
     },
 }
 
@@ -950,8 +948,8 @@ impl RenderPass {
                         // Find a target to assign this task to, or create a new
                         // one if required.
                         let texture_target = match task.location {
-                            RenderTaskLocation::TextureCache(texture_id, layer, _) => {
-                                Some((texture_id, layer))
+                            RenderTaskLocation::TextureCache { texture, layer, .. } => {
+                                Some((texture, layer))
                             }
                             RenderTaskLocation::Fixed(..) => {
                                 None

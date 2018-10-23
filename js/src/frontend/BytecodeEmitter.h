@@ -17,6 +17,7 @@
 #include "frontend/EitherParser.h"
 #include "frontend/JumpList.h"
 #include "frontend/NameFunctions.h"
+#include "frontend/ParseNode.h"
 #include "frontend/SharedContext.h"
 #include "frontend/SourceNotes.h"
 #include "frontend/ValueUsage.h"
@@ -65,9 +66,12 @@ struct CGTryNoteList {
     Vector<JSTryNote> list;
     explicit CGTryNoteList(JSContext* cx) : list(cx) {}
 
+    // Start/end offset are relative to main section and will be patch in
+    // finish().
+
     MOZ_MUST_USE bool append(JSTryNoteKind kind, uint32_t stackDepth, size_t start, size_t end);
     size_t length() const { return list.length(); }
-    void finish(mozilla::Span<JSTryNote> array);
+    void finish(mozilla::Span<JSTryNote> array, uint32_t prologueLength);
 };
 
 struct CGScopeNote : public ScopeNote
@@ -265,8 +269,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter
                     HandleScript script, Handle<LazyScript*> lazyScript, uint32_t lineNum,
                     EmitterMode emitterMode = Normal);
 
-    template<typename CharT>
-    BytecodeEmitter(BytecodeEmitter* parent, Parser<FullParseHandler, CharT>* parser,
+    template<typename Unit>
+    BytecodeEmitter(BytecodeEmitter* parent, Parser<FullParseHandler, Unit>* parser,
                     SharedContext* sc, HandleScript script, Handle<LazyScript*> lazyScript,
                     uint32_t lineNum, EmitterMode emitterMode = Normal)
       : BytecodeEmitter(parent, EitherParser(parser), sc, script, lazyScript,
@@ -295,8 +299,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter
         initFromBodyPosition(bodyPosition);
     }
 
-    template<typename CharT>
-    BytecodeEmitter(BytecodeEmitter* parent, Parser<FullParseHandler, CharT>* parser,
+    template<typename Unit>
+    BytecodeEmitter(BytecodeEmitter* parent, Parser<FullParseHandler, Unit>* parser,
                     SharedContext* sc, HandleScript script, Handle<LazyScript*> lazyScript,
                     TokenPos bodyPosition, EmitterMode emitterMode = Normal)
       : BytecodeEmitter(parent, EitherParser(parser), sc, script, lazyScript,
@@ -431,6 +435,10 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool checkStrictOrSloppy(JSOp op);
 #endif
 
+    // Add TryNote to the tryNoteList array. The start and end offset are
+    // relative to current section.
+    MOZ_MUST_USE bool addTryNote(JSTryNoteKind kind, uint32_t stackDepth, size_t start, size_t end);
+
     // Append a new source note of the given type (and therefore size) to the
     // notes dynamic array, updating noteCount. Return the new note's index
     // within the array pointed at by current->notes as outparam.
@@ -521,7 +529,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool emitNumberOp(double dval);
 
     MOZ_MUST_USE bool emitThisLiteral(ThisLiteral* pn);
-    MOZ_MUST_USE bool emitGetFunctionThis(ParseNode* pn);
+    MOZ_MUST_USE bool emitGetFunctionThis(NameNode* thisName);
     MOZ_MUST_USE bool emitGetFunctionThis(const mozilla::Maybe<uint32_t>& offset);
     MOZ_MUST_USE bool emitGetThisForSuperBase(UnaryNode* superBase);
     MOZ_MUST_USE bool emitSetThis(BinaryNode* setThisNode);
@@ -585,18 +593,18 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool emitGetName(JSAtom* name) {
         return emitGetNameAtLocation(name, lookupName(name));
     }
-    MOZ_MUST_USE bool emitGetName(ParseNode* pn);
+    MOZ_MUST_USE bool emitGetName(NameNode* name);
 
     MOZ_MUST_USE bool emitTDZCheckIfNeeded(JSAtom* name, const NameLocation& loc);
 
     MOZ_MUST_USE bool emitNameIncDec(UnaryNode* incDec);
 
     MOZ_MUST_USE bool emitDeclarationList(ListNode* declList);
-    MOZ_MUST_USE bool emitSingleDeclaration(ParseNode* declList, ParseNode* decl,
+    MOZ_MUST_USE bool emitSingleDeclaration(ListNode* declList, NameNode* decl,
                                             ParseNode* initializer);
 
     MOZ_MUST_USE bool emitNewInit();
-    MOZ_MUST_USE bool emitSingletonInitialiser(ParseNode* pn);
+    MOZ_MUST_USE bool emitSingletonInitialiser(ListNode* objOrArray);
 
     MOZ_MUST_USE bool emitPrepareIteratorResult();
     MOZ_MUST_USE bool emitFinishIteratorResult(bool done);
@@ -761,7 +769,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool emitConditionalExpression(ConditionalExpression& conditional,
                                                 ValueUsage valueUsage = ValueUsage::WantValue);
 
-    bool isRestParameter(ParseNode* pn);
+    bool isRestParameter(ParseNode* expr);
 
     MOZ_MUST_USE bool emitArguments(ListNode* argsList, bool isCall, bool isSpread,
                                     CallOrNewEmitter& cone);
@@ -792,8 +800,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool emitFunctionFormalParametersAndBody(ListNode* paramsBody);
     MOZ_MUST_USE bool emitFunctionFormalParameters(ListNode* paramsBody);
     MOZ_MUST_USE bool emitInitializeFunctionSpecialNames();
-    MOZ_MUST_USE bool emitFunctionBody(ParseNode* pn);
-    MOZ_MUST_USE bool emitLexicalInitialization(ParseNode* pn);
+    MOZ_MUST_USE bool emitFunctionBody(ParseNode* funBody);
+    MOZ_MUST_USE bool emitLexicalInitialization(NameNode* name);
 
     // Emit bytecode for the spread operator.
     //

@@ -27,6 +27,7 @@
 #include "nsIBrowserDOMWindow.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIDOMChromeWindow.h"
+#include "nsIObserver.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsITimer.h"
@@ -90,7 +91,6 @@ struct IdleObserverHolder;
 namespace mozilla {
 class AbstractThread;
 class DOMEventTargetHelper;
-class ThrottledEventQueue;
 namespace dom {
 class BarProp;
 struct ChannelPixelLayout;
@@ -172,6 +172,7 @@ class nsGlobalWindowOuter final
   , public nsSupportsWeakReference
   , public nsIInterfaceRequestor
   , public PRCListStr
+  , public nsIObserver
 {
 public:
   typedef nsDataHashtable<nsUint64HashKey, nsGlobalWindowOuter*> OuterWindowByIdTable;
@@ -360,6 +361,9 @@ public:
 
   // nsIInterfaceRequestor
   NS_DECL_NSIINTERFACEREQUESTOR
+
+  // nsIObserver
+  NS_DECL_NSIOBSERVER
 
   already_AddRefed<nsPIDOMWindowOuter> IndexedGetterOuter(uint32_t aIndex);
 
@@ -730,6 +734,12 @@ public:
   virtual bool IsInSyncOperation() override
   {
     return GetExtantDoc() && GetExtantDoc()->IsInSyncOperation();
+  }
+
+  void ParentWindowChanged()
+  {
+    // Reset our storage access flag when we get reparented.
+    mHasStorageAccess = false;
   }
 
 public:

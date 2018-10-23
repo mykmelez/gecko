@@ -107,7 +107,7 @@ XPCOMUtils.defineLazyScriptGetter(this, ["LightWeightThemeWebInstaller",
                                   "chrome://browser/content/browser-addons.js");
 XPCOMUtils.defineLazyScriptGetter(this, "ctrlTab",
                                   "chrome://browser/content/browser-ctrlTab.js");
-XPCOMUtils.defineLazyScriptGetter(this, "CustomizationHandler",
+XPCOMUtils.defineLazyScriptGetter(this, ["CustomizationHandler", "AutoHideMenubar"],
                                   "chrome://browser/content/browser-customization.js");
 XPCOMUtils.defineLazyScriptGetter(this, ["PointerLock", "FullScreen"],
                                   "chrome://browser/content/browser-fullScreenAndPointerLock.js");
@@ -265,10 +265,7 @@ Object.defineProperty(this, "gURLBar", {
 
     let element = document.getElementById("urlbar");
 
-    // For now, always use the legacy implementation in the first window to
-    // have a usable address bar e.g. for accessing about:config.
-    if (BrowserWindowTracker.windowCount <= 1 ||
-        !Services.prefs.getBoolPref("browser.urlbar.quantumbar", false)) {
+    if (!Services.prefs.getBoolPref("browser.urlbar.quantumbar", false)) {
       return this.gURLBar = element;
     }
 
@@ -563,7 +560,7 @@ const gStoragePressureObserver = {
       callback(notificationBar, button) {
         let learnMoreURL = Services.urlFormatter.formatURLPref("app.support.baseURL") + "storage-permissions";
         // This is a content URL, loaded from trusted UX.
-        gBrowser.selectedTab = gBrowser.addTrustedTab(learnMoreURL);
+        openTrustedLinkIn(learnMoreURL, "tab");
       },
     });
     if (usage < USAGE_THRESHOLD_BYTES) {
@@ -1245,6 +1242,9 @@ var gBrowserInit = {
       }
     }
 
+    // Run menubar initialization first, to avoid TabsInTitlebar code picking
+    // up mutations from it and causing a reflow.
+    AutoHideMenubar.init();
     // Update the chromemargin attribute so the window can be sized correctly.
     window.TabBarVisibility.update();
     TabsInTitlebar.init();
@@ -1355,7 +1355,6 @@ var gBrowserInit = {
     gPageStyleMenu.init();
     LanguageDetectionListener.init();
     BrowserOnClick.init();
-    FeedHandler.init();
     ContentBlocking.init();
     CaptivePortalWatcher.init();
     ZoomUI.init(window);
@@ -1935,8 +1934,6 @@ var gBrowserInit = {
     gTabletModePageCounter.finish();
 
     BrowserOnClick.uninit();
-
-    FeedHandler.uninit();
 
     ContentBlocking.uninit();
 
@@ -3044,15 +3041,17 @@ var BrowserOnClick = {
   },
 
   onCertError(browser, elementId, isTopFrame, location, securityInfoAsString, frameId) {
-    let secHistogram = Services.telemetry.getHistogramById("SECURITY_UI");
     let securityInfo;
+    let cert;
 
     switch (elementId) {
+      case "viewCertificate":
+        securityInfo = getSecurityInfo(securityInfoAsString);
+        cert = securityInfo.serverCert;
+        Services.ww.openWindow(window, "chrome://pippki/content/certViewer.xul",
+                               "_blank", "centerscreen,chrome", cert);
+        break;
       case "exceptionDialogButton":
-        if (isTopFrame) {
-          secHistogram.add(Ci.nsISecurityUITelemetry.WARNING_BAD_CERT_TOP_CLICK_ADD_EXCEPTION);
-        }
-
         securityInfo = getSecurityInfo(securityInfoAsString);
         let params = { exceptionAdded: false,
                        securityInfo };
@@ -3070,7 +3069,7 @@ var BrowserOnClick = {
             flags |= overrideService.ERROR_TIME;
           }
           let uri = Services.uriFixup.createFixupURI(location, 0);
-          let cert = securityInfo.serverCert;
+          cert = securityInfo.serverCert;
           overrideService.rememberValidityOverride(
             uri.asciiHost, uri.port,
             cert,
@@ -3101,9 +3100,6 @@ var BrowserOnClick = {
         break;
 
       case "returnButton":
-        if (isTopFrame) {
-          secHistogram.add(Ci.nsISecurityUITelemetry.WARNING_BAD_CERT_TOP_GET_ME_OUT_OF_HERE);
-        }
         goBackFromErrorPage();
         break;
 
@@ -3113,10 +3109,6 @@ var BrowserOnClick = {
 
       case "advancedButton":
       case "moreInformationButton":
-        if (isTopFrame) {
-          secHistogram.add(Ci.nsISecurityUITelemetry.WARNING_BAD_CERT_TOP_UNDERSTAND_RISKS);
-        }
-
         securityInfo = getSecurityInfo(securityInfoAsString);
         let errorInfo = getDetailedCertErrorInfo(location,
                                                  securityInfo);

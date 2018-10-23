@@ -31,39 +31,40 @@ public:
 
   virtual bool GetSelectionBounds(int32_t* aStartOffset, int32_t* aEndOffset);
 
-  virtual mozilla::java::GeckoBundle::LocalRef ToBundle();
+  mozilla::java::GeckoBundle::LocalRef ToBundle(bool aMinimal = false);
+
+  int32_t AndroidClass()
+  {
+    return mID == kNoID ? java::SessionAccessibility::CLASSNAME_WEBVIEW
+                        : GetAndroidClass(WrapperRole());
+  }
 
   static const int32_t kNoID = -1;
 
 protected:
-  mozilla::java::GeckoBundle::LocalRef CreateBundle(
-    int32_t aParentID,
-    role aRole,
-    uint64_t aState,
-    const nsString& aName,
-    const nsString& aTextValue,
-    const nsString& aDOMNodeID,
-    const nsIntRect& aBounds,
-    double aCurVal,
-    double aMinVal,
-    double aMaxVal,
-    double aStep,
-    nsIPersistentProperties* aAttributes,
-    const nsTArray<int32_t>& aChildren) const;
 
   // IDs should be a positive 32bit integer.
   static int32_t AcquireID();
   static void ReleaseID(int32_t aID);
 
+  static int32_t GetAndroidClass(role aRole);
+
+  static int32_t GetInputType(const nsString& aInputTypeAttr);
+
   int32_t mID;
 
 private:
-  void DOMNodeID(nsString& aDOMNodeID);
+  virtual AccessibleWrap* WrapperParent() { return static_cast<AccessibleWrap*>(Parent()); }
 
-  static void GetAndroidRoleAndClass(role aRole,
-                                     nsAString& aGeckoRole,
-                                     nsAString& aRoleDescription,
-                                     nsAString& aClassStr);
+  virtual bool WrapperRangeInfo(double* aCurVal, double* aMinVal, double* aMaxVal, double* aStep);
+
+  virtual role WrapperRole() { return Role(); }
+
+  virtual void WrapperDOMNodeID(nsString& aDOMNodeID);
+
+  static void GetRoleDescription(role aRole,
+                                 nsAString& aGeckoRole,
+                                 nsAString& aRoleDescription);
 
   static uint64_t GetFlags(role aRole, uint64_t aState);
 };

@@ -777,10 +777,8 @@ pref("apz.y_stationary_size_multiplier", "1.5");
 pref("gfx.hidpi.enabled", 2);
 #endif
 
-#if !defined(MOZ_WIDGET_ANDROID)
-// Use containerless scrolling for now on desktop.
-pref("layout.scroll.root-frame-containers", false);
-#endif
+// Default to containerless scrolling
+pref("layout.scroll.root-frame-containers", 0);
 
 pref("layout.scrollbars.always-layerize-track", false);
 
@@ -856,6 +854,9 @@ pref("gfx.font_rendering.graphite.enabled", true);
 #ifdef XP_WIN
 pref("gfx.font_rendering.directwrite.use_gdi_table_loading", true);
 #endif
+
+// Disable antialiasing of Ahem, for use in tests
+pref("gfx.font_ahem_antialias_none", false);
 
 #ifdef XP_WIN
 // comma separated list of backends to use in order of preference
@@ -2614,6 +2615,8 @@ pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,about,addons,cache
 // the following prefs are for testing purposes only.
 pref("csp.overrule_about_uris_without_csp_whitelist", false);
 pref("csp.skip_about_page_has_csp_assert", false);
+// assertion flag will be set to false after fixing Bug 1473549
+pref("security.allow_eval_with_system_principal", true);
 #endif
 
 // Default Content Security Policy to apply to signed contents.
@@ -3708,11 +3711,7 @@ pref("font.name-list.cursive.zh-CN", "KaiTi, KaiTi_GB2312");
 // Per Taiwanese users' demand. They don't want to use TC fonts for
 // rendering Latin letters. (bug 88579)
 pref("font.name-list.serif.zh-TW", "Times New Roman, PMingLiu, MingLiU, MingLiU-ExtB");
-#ifdef EARLY_BETA_OR_EARLIER
 pref("font.name-list.sans-serif.zh-TW", "Arial, Microsoft JhengHei, PMingLiU, MingLiU, MingLiU-ExtB");
-#else
-pref("font.name-list.sans-serif.zh-TW", "Arial, PMingLiU, MingLiU, MingLiU-ExtB");
-#endif
 pref("font.name-list.monospace.zh-TW", "MingLiU, MingLiU-ExtB");
 pref("font.name-list.cursive.zh-TW", "DFKai-SB");
 
@@ -4642,6 +4641,11 @@ pref("image.animated.decode-on-demand.threshold-kb", 20480);
 // The minimum number of frames we want to have buffered ahead of an
 // animation's currently displayed frame.
 pref("image.animated.decode-on-demand.batch-size", 6);
+
+// Whether we should recycle already displayed frames instead of discarding
+// them. This saves on the allocation itself, and may be able to reuse the
+// contents as well. Only applies if generating full frames.
+pref("image.animated.decode-on-demand.recycle", true);
 
 // Whether we should generate full frames at decode time or partial frames which
 // are combined at display time (historical behavior and default).
@@ -5851,8 +5855,7 @@ pref("dom.moduleScripts.enabled", true);
 // callback are allowed to run before yielding the event loop.
 pref("dom.timeout.max_consecutive_callbacks_ms", 4);
 
-// Use this preference to house "Payment Request API" during development
-pref("dom.payments.request.enabled", false);
+// Payment Request API preferences
 pref("dom.payments.loglevel", "Warn");
 pref("dom.payments.defaults.saveCreditCard", false);
 pref("dom.payments.defaults.saveAddress", true);
@@ -5915,11 +5918,7 @@ pref("dom.event.default_to_passive_touch_listeners", true);
 pref("browser.fastblock.timeout", 5000);
 // The amount of time (ms) since navigation start after which
 // we'll stop blocking tracker connections (0 = no limit).
-#ifdef NIGHTLY_BUILD
 pref("browser.fastblock.limit", 20000);
-#else
-pref("browser.fastblock.limit", 0);
-#endif
 
 // Enable clipboard readText() and writeText() by default
 pref("dom.events.asyncClipboard", true);
@@ -5938,4 +5937,11 @@ pref("dom.datatransfer.mozAtAPIs", true);
 // Whether or not Prio is supported on this platform.
 #ifdef MOZ_LIBPRIO
 pref("prio.enabled", false);
+#endif
+
+#ifdef NIGHTLY_BUILD
+// Bug 1499552; add a dummy pref to verify that collection of preferences
+// via telemetry is working as expected.
+pref("app.normandy.test.with_true_default", true);
+pref("app.normandy.test.with_false_default", false);
 #endif

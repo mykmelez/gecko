@@ -28,6 +28,13 @@ def filter_out_nightly(task, parameters):
     return not task.attributes.get('nightly') or parameters.get('include_nightly')
 
 
+def filter_out_cron(task, parameters):
+    """
+    Filter out tasks that run via cron.
+    """
+    return not task.attributes.get('cron')
+
+
 def filter_for_project(task, parameters):
     """Filter tasks by project.  Optionally enable nightlies."""
     run_on_projects = set(task.attributes.get('run_on_projects', []))
@@ -91,7 +98,7 @@ def filter_beta_release_tasks(task, parameters, ignore_kinds=None, allow_l10n=Fa
 def standard_filter(task, parameters):
     return all(
         filter_func(task, parameters) for filter_func in
-        (filter_out_nightly, filter_for_project)
+        (filter_out_nightly, filter_out_cron, filter_for_project)
     )
 
 
@@ -190,7 +197,7 @@ def target_tasks_ash(full_task_graph, parameters, graph_config):
         for p in ('nightly', 'haz', 'artifact', 'cov', 'add-on'):
             if p in platform:
                 return False
-        for k in ('toolchain', 'l10n', 'static-analysis'):
+        for k in ('toolchain', 'l10n'):
             if k in task.attributes['kind']:
                 return False
         # and none of this linux64-asan/debug stuff
@@ -568,6 +575,24 @@ def target_tasks_bouncer_check(full_task_graph, parameters, graph_config):
     """Select the set of tasks required to perform bouncer version verification.
     """
     def filter(task):
+        if not filter_for_project(task, parameters):
+            return False
         # For now any task in the repo-update kind is ok
         return task.kind in ['cron-bouncer-check']
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+
+
+@_target_task('staging_release_builds')
+def target_tasks_staging_release(full_task_graph, parameters, graph_config):
+    """
+    Select all builds that are part of releases.
+    """
+
+    def filter(task):
+        if not task.attributes.get('shipping_product'):
+            return False
+        if task.attributes.get('shipping_phase') == 'build':
+            return True
+        return False
+
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]

@@ -17,12 +17,15 @@ const SAVE_ADDRESS_DEFAULT_PREF = "dom.payments.defaults.saveAddress";
 const paymentSrv = Cc["@mozilla.org/dom/payments/payment-request-service;1"]
                      .getService(Ci.nsIPaymentRequestService);
 const paymentUISrv = Cc["@mozilla.org/dom/payments/payment-ui-service;1"]
-                     .getService().wrappedJSObject;
+                     .getService(Ci.nsIPaymentUIService).wrappedJSObject;
 const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm", {});
 const {formAutofillStorage} = ChromeUtils.import(
   "resource://formautofill/FormAutofillStorage.jsm", {});
+const {OSKeyStoreTestUtils} = ChromeUtils.import(
+  "resource://testing-common/OSKeyStoreTestUtils.jsm", {});
 const {PaymentTestUtils: PTU} = ChromeUtils.import(
   "resource://testing-common/PaymentTestUtils.jsm", {});
+ChromeUtils.import("resource:///modules/BrowserWindowTracker.jsm");
 ChromeUtils.import("resource://gre/modules/CreditCard.jsm");
 
 function getPaymentRequests() {
@@ -31,19 +34,23 @@ function getPaymentRequests() {
 
 /**
  * Return the container (e.g. dialog or overlay) that the payment request contents are shown in.
- * This abstracts away the details of the widget used so that this can more earily transition from a
- * dialog to another kind of overlay.
- * Consumers shouldn't rely on a dialog window being returned.
+ * This abstracts away the details of the widget used so that this can more easily transition to
+ * another kind of dialog/overlay.
+ * @param {string} requestId
  * @returns {Promise}
  */
-async function getPaymentWidget() {
-  let win;
-  await BrowserTestUtils.waitForCondition(() => {
-    win = Services.wm.getMostRecentWindow(null);
-    return win.name.startsWith(paymentUISrv.REQUEST_ID_PREFIX);
-  }, "payment dialog should be the most recent");
-
-  return win;
+async function getPaymentWidget(requestId) {
+  return BrowserTestUtils.waitForCondition(() => {
+    let {dialogContainer} = paymentUISrv.findDialog(requestId);
+    if (!dialogContainer) {
+      return false;
+    }
+    let browserIFrame = dialogContainer.querySelector("iframe");
+    if (!browserIFrame) {
+      return false;
+    }
+    return browserIFrame.contentWindow;
+  }, "payment dialog should be opened");
 }
 
 async function getPaymentFrame(widget) {
@@ -237,19 +244,18 @@ function checkPaymentMethodDetailsMatchesCard(methodDetails, card, msg) {
  */
 async function setupPaymentDialog(browser, {methodData, details, options, merchantTaskFn}) {
   let dialogReadyPromise = waitForWidgetReady();
-  await ContentTask.spawn(browser,
-                          {
-                            methodData,
-                            details,
-                            options,
-                          },
-                          merchantTaskFn);
+  let {requestId} = await ContentTask.spawn(browser,
+                                            {
+                                              methodData,
+                                              details,
+                                              options,
+                                            },
+                                            merchantTaskFn);
+  ok(requestId, "requestId should be defined");
 
   // get a reference to the UI dialog and the requestId
-  let [win] = await Promise.all([getPaymentWidget(), dialogReadyPromise]);
+  let [win] = await Promise.all([getPaymentWidget(requestId), dialogReadyPromise]);
   ok(win, "Got payment widget");
-  let requestId = paymentUISrv.requestIdForWindow(win);
-  ok(requestId, "requestId should be defined");
   is(win.closed, false, "dialog should not be closed");
 
   let frame = await getPaymentFrame(win);
@@ -358,10 +364,12 @@ add_task(async function setup_head() {
     }
     ok(false, msg.message || msg.errorMessage);
   });
+  OSKeyStoreTestUtils.setup();
   await setupFormAutofillStorage();
-  registerCleanupFunction(function cleanup() {
+  registerCleanupFunction(async function cleanup() {
     paymentSrv.cleanup();
     cleanupFormAutofillStorage();
+    await OSKeyStoreTestUtils.cleanup();
     Services.prefs.clearUserPref(RESPONSE_TIMEOUT_PREF);
     Services.prefs.clearUserPref(SAVE_CREDITCARD_DEFAULT_PREF);
     Services.prefs.clearUserPref(SAVE_ADDRESS_DEFAULT_PREF);
@@ -659,7 +667,7 @@ async function fillInCardForm(frame, aCard, aOptions = {}) {
  */
 /* eslint-enable valid-jsdoc */
 async function injectEventUtilsInContentTask(browser) {
-  await ContentTask.spawn(browser, {}, async function() {
+  await spawnPaymentDialogTask(browser, async function injectEventUtils() {
     if ("EventUtils" in this) {
       return;
     }

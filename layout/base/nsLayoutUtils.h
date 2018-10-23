@@ -1524,12 +1524,6 @@ public:
     return std::max(0, result - aContentEdgeToBoxSizingBoxEdge);
   }
 
-  // XXX to be removed
-  static bool IsAutoHeight(const nsStyleCoord &aCoord, nscoord aCBHeight)
-  {
-    return IsAutoBSize(aCoord, aCBHeight);
-  }
-
   static bool IsAutoBSize(const nsStyleCoord &aCoord, nscoord aCBBSize)
   {
     nsStyleUnit unit = aCoord.GetUnit();
@@ -2908,7 +2902,7 @@ public:
                                               const nsRect& aViewport,
                                               const mozilla::Maybe<nsRect>& aClipRect,
                                               bool aIsRoot,
-                                              const ContainerLayerParameters& aContainerParameters);
+                                              const mozilla::Maybe<ContainerLayerParameters>& aContainerParameters);
 
   /**
    * Returns the metadata to put onto the root layer of a layer tree, if one is

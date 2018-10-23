@@ -130,7 +130,7 @@ window._gBrowser = {
   _browserBindingProperties: [
     "canGoBack", "canGoForward", "goBack", "goForward", "permitUnload",
     "reload", "reloadWithFlags", "stop", "loadURI",
-    "gotoIndex", "currentURI", "documentURI",
+    "gotoIndex", "currentURI", "documentURI", "remoteType",
     "preferences", "imageDocument", "isRemoteBrowser", "messageManager",
     "getTabBrowser", "finder", "fastFind", "sessionHistory", "contentTitle",
     "characterSet", "fullZoom", "textZoom", "webProgress",
@@ -406,10 +406,6 @@ window._gBrowser = {
     return this.selectedBrowser.contentWindow;
   },
 
-  get contentWindowAsCPOW() {
-    return this.selectedBrowser.contentWindowAsCPOW;
-  },
-
   get sessionHistory() {
     return this.selectedBrowser.sessionHistory;
   },
@@ -420,10 +416,6 @@ window._gBrowser = {
 
   get contentDocument() {
     return this.selectedBrowser.contentDocument;
-  },
-
-  get contentDocumentAsCPOW() {
-    return this.selectedBrowser.contentDocumentAsCPOW;
   },
 
   get contentTitle() {
@@ -994,6 +986,10 @@ window._gBrowser = {
       this._tabAttrModified(oldTab, ["selected"]);
       this._tabAttrModified(newTab, ["selected"]);
 
+      this._startMultiSelectChange();
+      this._multiSelectChangeSelected = true;
+      this.clearMultiSelectedTabs(true);
+
       if (oldBrowser != newBrowser &&
           oldBrowser.getInPermitUnload) {
         oldBrowser.getInPermitUnload(inPermitUnload => {
@@ -1098,8 +1094,13 @@ window._gBrowser = {
     if (newBrowser.hasAttribute("tabmodalPromptShowing")) {
       let prompts = newBrowser.parentNode.getElementsByTagNameNS(this._XUL_NS, "tabmodalprompt");
       let prompt = prompts[prompts.length - 1];
-      prompt.Dialog.setDefaultFocus();
-      return;
+      // @tabmodalPromptShowing is also set for other tab modal prompts
+      // (e.g. the Payment Request dialog) so there may not be a <tabmodalprompt>.
+      // Bug 1492814 will implement this for the Payment Request dialog.
+      if (prompt) {
+        prompt.Dialog.setDefaultFocus();
+        return;
+      }
     }
 
     // Focus the location bar if it was previously focused for that tab.
@@ -1201,7 +1202,12 @@ window._gBrowser = {
     };
   },
 
-  setInitialTabTitle(aTab, aTitle, aOptions) {
+  setInitialTabTitle(aTab, aTitle, aOptions = {}) {
+    // Convert some non-content title (actually a url) to human readable title
+    if (!aOptions.isContentTitle && isBlankPageURL(aTitle)) {
+      aTitle = this.tabContainer.emptyTabTitle;
+    }
+
     if (aTitle) {
       if (!aTab.getAttribute("label")) {
         aTab._labelIsInitialTitle = true;
@@ -1986,6 +1992,22 @@ window._gBrowser = {
               gBrowser._insertBrowser(aTab);
             };
           break;
+        case "remoteType":
+          getter = () => {
+            let url = SessionStore.getLazyTabValue(aTab, "url");
+            // Avoid recreating the same nsIURI object over and over again...
+            let uri;
+            if (browser._cachedCurrentURI) {
+              uri = browser._cachedCurrentURI;
+            } else {
+              uri = browser._cachedCurrentURI = Services.io.newURI(url);
+            }
+            return E10SUtils.getRemoteTypeForURI(url,
+                                                 gMultiProcessBrowser,
+                                                 undefined,
+                                                 uri);
+          };
+          break;
         case "userTypedValue":
         case "userTypedClear":
           getter = () => SessionStore.getLazyTabValue(aTab, name);
@@ -2114,12 +2136,12 @@ window._gBrowser = {
     let permitUnloadFlags = aForceDiscard ? aBrowser.dontPromptAndUnload : aBrowser.dontPromptAndDontUnload;
 
     if (!tab ||
-      tab.selected ||
-      tab.closing ||
-      this._windowIsClosing ||
-      !aBrowser.isConnected ||
-      !aBrowser.isRemoteBrowser ||
-      !aBrowser.permitUnload(permitUnloadFlags).permitUnload) {
+        tab.selected ||
+        tab.closing ||
+        this._windowIsClosing ||
+        !aBrowser.isConnected ||
+        !aBrowser.isRemoteBrowser ||
+        !aBrowser.permitUnload(permitUnloadFlags).permitUnload) {
       return;
     }
 
@@ -2929,6 +2951,11 @@ window._gBrowser = {
     else
       TabBarVisibility.update();
 
+    // Splice this tab out of any lines of succession before any events are
+    // dispatched.
+    this.replaceInSuccession(aTab, aTab.successor);
+    this.setSuccessor(aTab, null);
+
     // We're committed to closing the tab now.
     // Dispatch a notification.
     // We dispatch it before any teardown so that event listeners can
@@ -3108,6 +3135,12 @@ window._gBrowser = {
       return null;
     }
 
+    // If this tab has a successor, it should be selectable, since
+    // hiding or closing a tab removes that tab as a successor.
+    if (aTab.successor) {
+      return aTab.successor;
+    }
+
     if (aTab.owner &&
         !aTab.owner.hidden &&
         !aTab.owner.closing &&
@@ -3175,7 +3208,10 @@ window._gBrowser = {
     var isPending = aOtherTab.hasAttribute("pending");
 
     let otherTabListener = remoteBrowser._tabListeners.get(aOtherTab);
-    let stateFlags = otherTabListener.mStateFlags;
+    let stateFlags = 0;
+    if (otherTabListener) {
+      stateFlags = otherTabListener.mStateFlags;
+    }
 
     // Expedite the removal of the icon if it was already scheduled.
     if (aOtherTab._soundPlayingAttrRemovalTimer) {
@@ -3290,7 +3326,7 @@ window._gBrowser = {
 
     this.setTabTitle(aOurTab);
 
-    // If the tab was already selected (this happpens in the scenario
+    // If the tab was already selected (this happens in the scenario
     // of replaceTabWithWindow), notify onLocationChange, etc.
     if (aOurTab.selected)
       this.updateCurrentBrowser(true);
@@ -3495,6 +3531,11 @@ window._gBrowser = {
 
       this.tabContainer._setPositionalAttributes();
 
+      // Splice this tab out of any lines of succession before any events are
+      // dispatched.
+      this.replaceInSuccession(aTab, aTab.successor);
+      this.setSuccessor(aTab, null);
+
       let event = document.createEvent("Events");
       event.initEvent("TabHide", true, false);
       aTab.dispatchEvent(event);
@@ -3571,13 +3612,12 @@ window._gBrowser = {
       return this.replaceTabWithWindow(tabs[0], aOptions);
     }
 
-    // The order of the tabs is reserved.
-    // To avoid mutliple tab-switch, the active tab is "moved" lastly, if applicable.
+    // The order of the tabs is preserved.
+    // To avoid multiple tab-switch, the active tab is "moved" last, if applicable.
     // If applicable, the active tab remains active in the new window.
     let activeTab = gBrowser.selectedTab;
     let inactiveTabs = tabs.filter(t => t != activeTab);
     let activeTabNewIndex = tabs.indexOf(activeTab);
-
 
     // Play the closing animation for all selected tabs to give
     // immediate feedback while waiting for the new window to appear.
@@ -3590,7 +3630,8 @@ window._gBrowser = {
 
     let win;
     let firstInactiveTab = inactiveTabs[0];
-    firstInactiveTab.linkedBrowser.addEventListener("EndSwapDocShells", function() {
+
+    let adoptRemainingTabs = () => {
       for (let i = 1; i < inactiveTabs.length; i++) {
         win.gBrowser.adoptTab(inactiveTabs[i], i);
       }
@@ -3604,7 +3645,14 @@ window._gBrowser = {
       let winTabLength = winVisibleTabs.length;
       win.gBrowser.addRangeToMultiSelectedTabs(winVisibleTabs[0],
                                                winVisibleTabs[winTabLength - 1]);
-    }, { once: true });
+    };
+
+    // Pending tabs don't get their docshell swapped, wait for their TabClose
+    if (firstInactiveTab.hasAttribute("pending")) {
+      firstInactiveTab.addEventListener("TabClose", adoptRemainingTabs, {once: true});
+    } else {
+      firstInactiveTab.linkedBrowser.addEventListener("EndSwapDocShells", adoptRemainingTabs, {once: true});
+    }
 
     win = this.replaceTabWithWindow(firstInactiveTab, aOptions);
     return win;
@@ -4681,11 +4729,40 @@ window._gBrowser = {
 
       Services.obs.notifyObservers(tab, "AudibleAutoplayMediaOccurred");
     });
+  },
 
-    this.ownerGlobal.addEventListener("TabSelect", (event) => {
-      this._startMultiSelectChange();
-      this._multiSelectChangeSelected = true;
-    }, {passive: true});
+  setSuccessor(aTab, successorTab) {
+    if (aTab.ownerGlobal != window) {
+      throw new Error("Cannot set the successor of another window's tab");
+    }
+    if (successorTab == aTab) {
+      successorTab = null;
+    }
+    if (successorTab && successorTab.ownerGlobal != window) {
+      throw new Error("Cannot set the successor to another window's tab");
+    }
+    if (aTab.successor) {
+      aTab.successor.predecessors.delete(aTab);
+    }
+    aTab.successor = successorTab;
+    if (successorTab) {
+      if (!successorTab.predecessors) {
+        successorTab.predecessors = new Set();
+      }
+      successorTab.predecessors.add(aTab);
+    }
+  },
+
+  /**
+   * For all tabs with aTab as a successor, set the successor to aOtherTab
+   * instead.
+   */
+  replaceInSuccession(aTab, aOtherTab) {
+    if (aTab.predecessors) {
+      for (const predecessor of Array.from(aTab.predecessors)) {
+        this.setSuccessor(predecessor, aOtherTab);
+      }
+    }
   },
 };
 
@@ -5482,4 +5559,3 @@ var TabContextMenu = {
     }
   },
 };
-

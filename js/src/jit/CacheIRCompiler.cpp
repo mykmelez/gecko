@@ -1616,29 +1616,25 @@ CacheIRCompiler::emitGuardIsInt32Index()
 
     masm.bind(&notInt32);
 
-    if (cx_->runtime()->jitSupportsFloatingPoint) {
-        masm.branchTestDouble(Assembler::NotEqual, input, failure->label());
+    masm.branchTestDouble(Assembler::NotEqual, input, failure->label());
 
-        // If we're compiling a Baseline IC, FloatReg0 is always available.
-        Label failurePopReg;
-        if (mode_ != Mode::Baseline) {
-            masm.push(FloatReg0);
-        }
+    // If we're compiling a Baseline IC, FloatReg0 is always available.
+    Label failurePopReg;
+    if (mode_ != Mode::Baseline) {
+        masm.push(FloatReg0);
+    }
 
-        masm.unboxDouble(input, FloatReg0);
-        // ToPropertyKey(-0.0) is "0", so we can truncate -0.0 to 0 here.
-        masm.convertDoubleToInt32(FloatReg0, output,
-                                  (mode_ == Mode::Baseline) ? failure->label() : &failurePopReg,
-                                  false);
-        if (mode_ != Mode::Baseline) {
-            masm.pop(FloatReg0);
-            masm.jump(&done);
+    masm.unboxDouble(input, FloatReg0);
+    // ToPropertyKey(-0.0) is "0", so we can truncate -0.0 to 0 here.
+    masm.convertDoubleToInt32(FloatReg0, output,
+                              (mode_ == Mode::Baseline) ? failure->label() : &failurePopReg,
+                              false);
+    if (mode_ != Mode::Baseline) {
+        masm.pop(FloatReg0);
+        masm.jump(&done);
 
-            masm.bind(&failurePopReg);
-            masm.pop(FloatReg0);
-            masm.jump(failure->label());
-        }
-    } else {
+        masm.bind(&failurePopReg);
+        masm.pop(FloatReg0);
         masm.jump(failure->label());
     }
 
@@ -2817,6 +2813,32 @@ CacheIRCompiler::emitGuardIndexIsNonNegative()
     }
 
     masm.branch32(Assembler::LessThan, index, Imm32(0), failure->label());
+    return true;
+}
+
+bool
+CacheIRCompiler::emitGuardIndexGreaterThanDenseInitLength()
+{
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    Register index = allocator.useRegister(masm, reader.int32OperandId());
+    AutoScratchRegister scratch(allocator, masm);
+    AutoScratchRegister scratch2(allocator, masm);
+
+    FailurePath* failure;
+    if (!addFailurePath(&failure)) {
+        return false;
+    }
+
+    // Load obj->elements.
+    masm.loadPtr(Address(obj, NativeObject::offsetOfElements()), scratch);
+
+    // Ensure index >= capacity.
+    Label outOfBounds;
+    Address capacity(scratch, ObjectElements::offsetOfInitializedLength());
+    masm.spectreBoundsCheck32(index, capacity, scratch2, &outOfBounds);
+    masm.jump(failure->label());
+    masm.bind(&outOfBounds);
+
     return true;
 }
 

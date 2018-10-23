@@ -6,15 +6,7 @@ import {LocalizationProvider} from "fluent-react";
 import {OnboardingMessage} from "./templates/OnboardingMessage/OnboardingMessage";
 import React from "react";
 import ReactDOM from "react-dom";
-import {SimpleSnippet} from "./templates/SimpleSnippet/SimpleSnippet";
-import {SubmitFormSnippet} from "./templates/SubmitFormSnippet/SubmitFormSnippet";
-
-// Key names matching schema name of templates
-const SnippetComponents = {
-  simple_snippet: SimpleSnippet,
-  newsletter_snippet: props => <SubmitFormSnippet {...props} form_method="POST" />,
-  fxa_signup_snippet: props => <SubmitFormSnippet {...props} form_method="GET" />,
-};
+import {SnippetsTemplates} from "./templates/template-manifest";
 
 const INCOMING_MESSAGE_NAME = "ASRouter:parent-to-child";
 const OUTGOING_MESSAGE_NAME = "ASRouter:child-to-parent";
@@ -129,7 +121,7 @@ export class ASRouterUISurface extends React.PureComponent {
     if (action.type) {
       ASRouterUtils.executeAction(action);
     }
-    if (!this.state.message.content.do_not_autoblock) {
+    if (!this.state.message.content.do_not_autoblock && !event.target.dataset.do_not_autoblock) {
       ASRouterUtils.blockById(this.state.message.id);
     }
     if (this.state.message.provider !== "preview") {
@@ -194,7 +186,7 @@ export class ASRouterUISurface extends React.PureComponent {
   }
 
   renderSnippets() {
-    const SnippetComponent = SnippetComponents[this.state.message.template];
+    const SnippetComponent = SnippetsTemplates[this.state.message.template];
     const {content} = this.state.message;
 
     return (

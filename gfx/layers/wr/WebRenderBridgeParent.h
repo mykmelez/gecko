@@ -15,6 +15,7 @@
 #include "mozilla/layers/CompositableTransactionParent.h"
 #include "mozilla/layers/CompositorVsyncSchedulerOwner.h"
 #include "mozilla/layers/PWebRenderBridgeParent.h"
+#include "mozilla/layers/UiCompositorControllerParent.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/webrender/WebRenderTypes.h"
 #include "mozilla/webrender/WebRenderAPI.h"
@@ -143,6 +144,7 @@ public:
   bool IsPendingComposite() override { return false; }
   void FinishPendingComposite() override { }
   void CompositeToTarget(gfx::DrawTarget* aTarget, const gfx::IntRect* aRect = nullptr) override;
+  TimeDuration GetVsyncInterval() const override;
 
   // CompositableParentManager
   bool IsSameProcess() const override;
@@ -158,9 +160,11 @@ public:
                                 const TimeStamp& aRefreshStartTime,
                                 const TimeStamp& aTxnStartTime,
                                 const TimeStamp& aFwdTime,
+                                const bool aIsFirstPaint,
                                 const bool aUseForTelemetry = true);
   TransactionId LastPendingTransactionId();
-  TransactionId FlushTransactionIdsForEpoch(const wr::Epoch& aEpoch, const TimeStamp& aEndTime);
+  TransactionId FlushTransactionIdsForEpoch(const wr::Epoch& aEpoch, const TimeStamp& aEndTime,
+                                            UiCompositorControllerParent* aUiController);
 
   TextureFactoryIdentifier GetTextureFactoryIdentifier();
 
@@ -186,6 +190,14 @@ public:
    */
   void ScheduleGenerateFrame();
 
+  /**
+   * Schedule forced frame rendering at next composite timing.
+   *
+   * WebRender could skip frame rendering if there is no update.
+   * This function is used to force rendering even when there is not update.
+   */
+  void ScheduleForcedGenerateFrame();
+
   wr::Epoch UpdateWebRender(CompositorVsyncScheduler* aScheduler,
                             wr::WebRenderAPI* aApi,
                             AsyncImagePipelineManager* aImageMgr,
@@ -193,6 +205,16 @@ public:
                             const TextureFactoryIdentifier& aTextureFactoryIdentifier);
 
   void RemoveEpochDataPriorTo(const wr::Epoch& aRenderedEpoch);
+
+  /**
+   * This sets the is-first-paint flag to true for the next received
+   * display list. This is intended to be called by the widget code when it
+   * loses its viewport information (or for whatever reason wants to refresh
+   * the viewport information). The message will sent back to the widget code
+   * via UiCompositorControllerParent::NotifyFirstPaint() when the corresponding
+   * transaction is flushed.
+   */
+  void ForceIsFirstPaint() { mIsFirstPaint = true; }
 
 private:
   explicit WebRenderBridgeParent(const wr::PipelineId& aPipelineId);
@@ -269,6 +291,7 @@ private:
                          const TimeStamp& aRefreshStartTime,
                          const TimeStamp& aTxnStartTime,
                          const TimeStamp& aFwdTime,
+                         const bool aIsFirstPaint,
                          const bool aUseForTelemetry)
       : mEpoch(aEpoch)
       , mId(aId)
@@ -276,6 +299,7 @@ private:
       , mTxnStartTime(aTxnStartTime)
       , mFwdTime(aFwdTime)
       , mContainsSVGGroup(aContainsSVGGroup)
+      , mIsFirstPaint(aIsFirstPaint)
       , mUseForTelemetry(aUseForTelemetry)
     {}
     wr::Epoch mEpoch;
@@ -284,6 +308,7 @@ private:
     TimeStamp mTxnStartTime;
     TimeStamp mFwdTime;
     bool mContainsSVGGroup;
+    bool mIsFirstPaint;
     bool mUseForTelemetry;
   };
 
@@ -329,6 +354,7 @@ private:
   bool mPaused;
   bool mDestroyed;
   bool mReceivedDisplayList;
+  bool mIsFirstPaint;
 };
 
 } // namespace layers

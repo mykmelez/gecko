@@ -778,7 +778,9 @@ ReleaseAssertObjectHasNoWrappers(JSContext* cx, HandleObject target)
 }
 
 /*
- * Brain transplants. Not for beginners or the squeamish.
+ * [SMDOC] Brain transplants.
+ *
+ * Not for beginners or the squeamish.
  *
  * Sometimes a web spec requires us to transplant an object from one
  * compartment to another, like when a DOM node is inserted into a document in
@@ -4139,6 +4141,31 @@ JS::SetModuleMetadataHook(JSRuntime* rt, JS::ModuleMetadataHook func)
     rt->moduleMetadataHook = func;
 }
 
+JS_PUBLIC_API(JS::ModuleDynamicImportHook)
+JS::GetModuleDynamicImportHook(JSRuntime* rt)
+{
+    AssertHeapIsIdle();
+    return rt->moduleDynamicImportHook;
+}
+
+JS_PUBLIC_API(void)
+JS::SetModuleDynamicImportHook(JSRuntime* rt, JS::ModuleDynamicImportHook func)
+{
+    AssertHeapIsIdle();
+    rt->moduleDynamicImportHook = func;
+}
+
+JS_PUBLIC_API(bool)
+JS::FinishDynamicModuleImport(JSContext* cx, HandleValue referencingPrivate, HandleString specifier,
+                              HandleObject promise)
+{
+    AssertHeapIsIdle();
+    CHECK_THREAD(cx);
+    cx->check(referencingPrivate, promise);
+
+    return js::FinishDynamicModuleImport(cx, referencingPrivate, specifier, promise);
+}
+
 JS_PUBLIC_API(bool)
 JS::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
                   SourceBufferHolder& srcBuf, JS::MutableHandleObject module)
@@ -4152,15 +4179,27 @@ JS::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
 }
 
 JS_PUBLIC_API(void)
-JS::SetModuleHostDefinedField(JSObject* module, const JS::Value& value)
+JS::SetModulePrivate(JSObject* module, const JS::Value& value)
 {
-    module->as<ModuleObject>().setHostDefinedField(value);
+    module->as<ModuleObject>().scriptSourceObject()->setPrivate(value);
 }
 
 JS_PUBLIC_API(JS::Value)
-JS::GetModuleHostDefinedField(JSObject* module)
+JS::GetModulePrivate(JSObject* module)
 {
-    return module->as<ModuleObject>().hostDefinedField();
+    return module->as<ModuleObject>().scriptSourceObject()->getPrivate();
+}
+
+JS_PUBLIC_API(void)
+JS::SetScriptPrivate(JSScript* script, const JS::Value& value)
+{
+    script->scriptSourceUnwrap().setPrivate(value);
+}
+
+JS_PUBLIC_API(JS::Value)
+JS::GetScriptPrivate(JSScript* script)
+{
+    return script->scriptSourceUnwrap().getPrivate();
 }
 
 JS_PUBLIC_API(bool)

@@ -1473,7 +1473,6 @@ WorkerPrivate::SetCSP(nsIContentSecurityPolicy* aCSP)
   aCSP->EnsureEventTarget(mMainThreadEventTarget);
 
   mLoadInfo.mCSP = aCSP;
-  EnsureCSPEventListener();
 }
 
 nsresult
@@ -1514,7 +1513,6 @@ WorkerPrivate::SetCSPFromHeaderValues(const nsACString& aCSPHeaderValue,
   mLoadInfo.mCSP = csp;
   mLoadInfo.mEvalAllowed = evalAllowed;
   mLoadInfo.mReportCSPViolations = reportEvalViolations;
-  EnsureCSPEventListener();
 
   return NS_OK;
 }
@@ -2607,7 +2605,6 @@ WorkerPrivate::WorkerPrivate(WorkerPrivate* aParent,
   , mDebugger(nullptr)
   , mJSContext(nullptr)
   , mPRThread(nullptr)
-  , mMainThreadEventTarget(GetMainThreadEventTarget())
   , mWorkerControlEventTarget(new WorkerEventTarget(this,
                                                     WorkerEventTarget::Behavior::ControlOnly))
   , mWorkerHybridEventTarget(new WorkerEventTarget(this,
@@ -2716,7 +2713,6 @@ WorkerPrivate::WorkerPrivate(WorkerPrivate* aParent,
   // that ThrottledEventQueue can only be created on the main thread at the
   // moment.
   if (aParent) {
-    mMainThreadThrottledEventQueue = aParent->mMainThreadThrottledEventQueue;
     mMainThreadEventTarget = aParent->mMainThreadEventTarget;
     return;
   }
@@ -2730,17 +2726,8 @@ WorkerPrivate::WorkerPrivate(WorkerPrivate* aParent,
   }
 
   // Throttle events to the main thread using a ThrottledEventQueue specific to
-  // this worker thread.  This may return nullptr during shutdown.
-  mMainThreadThrottledEventQueue = ThrottledEventQueue::Create(target);
-
-  // If we were able to creat the throttled event queue, then use it for
-  // dispatching our main thread runnables.  Otherwise use our underlying
-  // base target.
-  if (mMainThreadThrottledEventQueue) {
-    mMainThreadEventTarget = mMainThreadThrottledEventQueue;
-  } else {
-    mMainThreadEventTarget = target.forget();
-  }
+  // this tree of worker threads.
+  mMainThreadEventTarget = ThrottledEventQueue::Create(target);
 }
 
 WorkerPrivate::~WorkerPrivate()
@@ -3316,9 +3303,8 @@ WorkerPrivate::DoRunLoop(JSContext* aCx)
     // If the worker thread is spamming the main thread faster than it can
     // process the work, then pause the worker thread until the MT catches
     // up.
-    if (mMainThreadThrottledEventQueue &&
-        mMainThreadThrottledEventQueue->Length() > 5000) {
-      mMainThreadThrottledEventQueue->AwaitIdle();
+    if (mMainThreadEventTarget->Length() > 5000) {
+      mMainThreadEventTarget->AwaitIdle();
     }
   }
 
@@ -3451,12 +3437,14 @@ WorkerPrivate::EnsureCSPEventListener()
       return false;
     }
   }
-
-  if (mLoadInfo.mCSP) {
-    mLoadInfo.mCSP->SetEventListener(mCSPEventListener);
-  }
-
   return true;
+}
+
+nsICSPEventListener*
+WorkerPrivate::CSPEventListener() const
+{
+  MOZ_ASSERT(mCSPEventListener);
+  return mCSPEventListener;
 }
 
 void

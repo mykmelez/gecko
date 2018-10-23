@@ -16,9 +16,12 @@ export class SimpleSnippet extends React.PureComponent {
     if (this.props.provider !== "preview") {
       this.props.sendUserActionTelemetry({event: "CLICK_BUTTON", id: this.props.UISurface});
     }
+    const {button_url} = this.props.content;
+    // If button_url is defined handle it as OPEN_URL action
+    const type = this.props.content.button_action || (button_url && "OPEN_URL");
     this.props.onAction({
-      type: this.props.content.button_action,
-      data: {args: this.props.content.button_action_args},
+      type,
+      data: {args: this.props.content.button_action_args || button_url},
     });
     if (!this.props.content.do_not_autoblock) {
       this.props.onBlock();
@@ -37,7 +40,7 @@ export class SimpleSnippet extends React.PureComponent {
 
   renderButton() {
     const {props} = this;
-    if (!props.content.button_action && !props.onButtonClick) {
+    if (!props.content.button_action && !props.onButtonClick && !props.content.button_url) {
       return null;
     }
 
@@ -52,6 +55,7 @@ export class SimpleSnippet extends React.PureComponent {
   renderText() {
     const {props} = this;
     return (<RichText text={props.content.text}
+      customElements={this.props.customElements}
       localization_id="text"
       links={props.content.links}
       sendClick={props.sendClick} />);
@@ -59,11 +63,18 @@ export class SimpleSnippet extends React.PureComponent {
 
   render() {
     const {props} = this;
-    const className = `SimpleSnippet${props.content.tall ? " tall" : ""}`;
-    return (<SnippetBase {...props} className={className}>
+    let className = "SimpleSnippet";
+    if (props.className) {
+      className += ` ${props.className}`;
+    }
+    if (props.content.tall) {
+      className += " tall";
+    }
+    return (<SnippetBase {...props} className={className} textStyle={this.props.textStyle}>
       <img src={safeURI(props.content.icon) || DEFAULT_ICON_PATH} className="icon" />
       <div>
         {this.renderTitleIcon()} {this.renderTitle()} <p className="body">{this.renderText()}</p>
+        {this.props.extraContent}
       </div>
       {<div>{this.renderButton()}</div>}
     </SnippetBase>);

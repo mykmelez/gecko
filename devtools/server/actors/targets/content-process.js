@@ -35,7 +35,7 @@ function ContentProcessTargetActor(connection) {
   // Use a see-everything debugger
   this.makeDebugger = makeDebugger.bind(null, {
     findDebuggees: dbg => dbg.findAllGlobals(),
-    shouldAddNewGlobalAsDebuggee: global => true
+    shouldAddNewGlobalAsDebuggee: global => true,
   });
 
   const sandboxPrototype = {
@@ -119,7 +119,6 @@ ContentProcessTargetActor.prototype = {
       promisesActor: this._promisesActor.actorID,
 
       traits: {
-        highlightable: false,
         networkMonitor: false,
       },
     };
@@ -146,7 +145,7 @@ ContentProcessTargetActor.prototype = {
 
       return {
         "from": this.actorID,
-        "workers": actors.map(actor => actor.form())
+        "workers": actors.map(actor => actor.form()),
       };
     });
   },

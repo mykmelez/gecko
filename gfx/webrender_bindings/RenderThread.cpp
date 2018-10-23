@@ -278,7 +278,7 @@ RenderThread::HandleFrame(wr::WindowId aWindowId, bool aRender)
     startTime = info->mStartTimes.front();
   }
 
-  UpdateAndRender(aWindowId, startTime, aRender, /* aReadback */ false);
+  UpdateAndRender(aWindowId, startTime, aRender, /* aReadbackSize */ Nothing(), /* aReadbackBuffer */ Nothing());
   FrameRenderingComplete(aWindowId);
 }
 
@@ -335,9 +335,13 @@ static void
 NotifyDidRender(layers::CompositorBridgeParent* aBridge,
                 wr::WrPipelineInfo aInfo,
                 TimeStamp aStart,
-                TimeStamp aEnd)
+                TimeStamp aEnd,
+                bool aRender)
 {
-  if (aBridge->GetWrBridge()) {
+  if (aRender && aBridge->GetWrBridge()) {
+    // We call this here to mimic the behavior in LayerManagerComposite, as to
+    // not change what Talos measures. That is, we do not record an empty frame
+    // as a frame.
     aBridge->GetWrBridge()->RecordFrame();
   }
 
@@ -356,11 +360,12 @@ void
 RenderThread::UpdateAndRender(wr::WindowId aWindowId,
                               const TimeStamp& aStartTime,
                               bool aRender,
-                              bool aReadback)
+                              const Maybe<gfx::IntSize>& aReadbackSize,
+                              const Maybe<Range<uint8_t>>& aReadbackBuffer)
 {
   AUTO_PROFILER_TRACING("Paint", "Composite");
   MOZ_ASSERT(IsInRenderThread());
-  MOZ_ASSERT(aRender || !aReadback);
+  MOZ_ASSERT(aRender || aReadbackBuffer.isNothing());
 
   auto it = mRenderers.find(aWindowId);
   MOZ_ASSERT(it != mRenderers.end());
@@ -371,10 +376,12 @@ RenderThread::UpdateAndRender(wr::WindowId aWindowId,
   auto& renderer = it->second;
 
   if (aRender) {
-    renderer->UpdateAndRender(aReadback);
+    renderer->UpdateAndRender(aReadbackSize, aReadbackBuffer);
   } else {
     renderer->Update();
   }
+  // Check graphics reset status even when rendering is skipped.
+  renderer->CheckGraphicsResetStatus();
 
   TimeStamp end = TimeStamp::Now();
 
@@ -394,7 +401,8 @@ RenderThread::UpdateAndRender(wr::WindowId aWindowId,
     &NotifyDidRender,
     renderer->GetCompositorBridge(),
     info,
-    aStartTime, end
+    aStartTime, end,
+    aRender
   ));
 }
 

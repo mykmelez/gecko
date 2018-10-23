@@ -11,6 +11,7 @@
 
 #include "nsContainerFrame.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/dom/FlexBinding.h"
 
 class nsStyleCoord;
 
@@ -72,6 +73,8 @@ struct ComputedFlexLineInfo
 struct ComputedFlexContainerInfo
 {
   nsTArray<ComputedFlexLineInfo> mLines;
+  mozilla::dom::FlexPhysicalDirection mMainAxisDirection;
+  mozilla::dom::FlexPhysicalDirection mCrossAxisDirection;
 };
 
 /**
@@ -228,6 +231,11 @@ public:
    */
   static bool IsUsedFlexBasisContent(const nsStyleCoord* aFlexBasis,
                                      const nsStyleCoord* aMainSize);
+
+  /**
+   * Callback for nsFrame::MarkIntrinsicISizesDirty() on a flex item.
+   */
+  static void MarkCachedFlexMeasurementsDirty(nsIFrame* aItemFrame);
 
 protected:
   // Protected constructor & destructor

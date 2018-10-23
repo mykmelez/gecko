@@ -277,6 +277,12 @@ TransactionWrapper::UpdateScrollPosition(const wr::WrPipelineId& aPipelineId,
   wr_transaction_scroll_layer(mTxn, aPipelineId, aScrollId, aScrollPosition);
 }
 
+void
+TransactionWrapper::UpdatePinchZoom(float aZoom)
+{
+  wr_transaction_pinch_zoom(mTxn, aZoom);
+}
+
 /*static*/ already_AddRefed<WebRenderAPI>
 WebRenderAPI::Create(layers::CompositorBridgeParent* aBridge,
                      RefPtr<widget::CompositorWidget>&& aWidget,
@@ -396,20 +402,18 @@ WebRenderAPI::HitTest(const wr::WorldPoint& aPoint,
 void
 WebRenderAPI::Readback(const TimeStamp& aStartTime,
                        gfx::IntSize size,
-                       uint8_t *buffer,
-                       uint32_t buffer_size)
+                       const Range<uint8_t>& buffer)
 {
     class Readback : public RendererEvent
     {
         public:
             explicit Readback(layers::SynchronousTask* aTask,
                               TimeStamp aStartTime,
-                              gfx::IntSize aSize, uint8_t *aBuffer, uint32_t aBufferSize)
+                              gfx::IntSize aSize, const Range<uint8_t>& aBuffer)
                 : mTask(aTask)
                 , mStartTime(aStartTime)
                 , mSize(aSize)
                 , mBuffer(aBuffer)
-                , mBufferSize(aBufferSize)
             {
                 MOZ_COUNT_CTOR(Readback);
             }
@@ -421,21 +425,18 @@ WebRenderAPI::Readback(const TimeStamp& aStartTime,
 
             virtual void Run(RenderThread& aRenderThread, WindowId aWindowId) override
             {
-                aRenderThread.UpdateAndRender(aWindowId, mStartTime, /* aRender */ true, /* aReadback */ true);
-                wr_renderer_readback(aRenderThread.GetRenderer(aWindowId)->GetRenderer(),
-                                     mSize.width, mSize.height, mBuffer, mBufferSize);
+                aRenderThread.UpdateAndRender(aWindowId, mStartTime, /* aRender */ true, Some(mSize), Some(mBuffer));
                 layers::AutoCompleteTask complete(mTask);
             }
 
             layers::SynchronousTask* mTask;
             TimeStamp mStartTime;
             gfx::IntSize mSize;
-            uint8_t *mBuffer;
-            uint32_t mBufferSize;
+            const Range<uint8_t>& mBuffer;
     };
 
     layers::SynchronousTask task("Readback");
-    auto event = MakeUnique<Readback>(&task, aStartTime, size, buffer, buffer_size);
+    auto event = MakeUnique<Readback>(&task, aStartTime, size, buffer);
     // This event will be passed from wr_backend thread to renderer thread. That
     // implies that all frame data have been processed when the renderer runs this
     // read-back event. Then, we could make sure this read-back event gets the

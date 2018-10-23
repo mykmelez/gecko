@@ -3606,6 +3606,12 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
     builder.IgnorePaintSuppression();
   }
 
+  if (nsIDocShell* doc = presContext->GetDocShell()) {
+    bool isActive = false;
+    doc->GetIsActive(&isActive);
+    builder.SetInActiveDocShell(isActive);
+  }
+
   nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame();
   if (rootScrollFrame && !aFrame->GetParent()) {
     nsIScrollableFrame* rootScrollableFrame = presShell->GetRootScrollFrameAsScrollable();
@@ -3809,7 +3815,9 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
   Telemetry::AccumulateTimeDelta(Telemetry::PAINT_BUILD_DISPLAYLIST_TIME,
                                  startBuildDisplayList);
 
-  bool consoleNeedsDisplayList = gfxUtils::DumpDisplayList() || gfxEnv::DumpPaint();
+  bool consoleNeedsDisplayList =
+      (gfxUtils::DumpDisplayList() || gfxEnv::DumpPaint()) &&
+      builder.IsInActiveDocShell();
 #ifdef MOZ_DUMP_PAINTING
   FILE* savedDumpFile = gfxUtils::sDumpPaintFile;
 #endif
@@ -5313,17 +5321,43 @@ nsLayoutUtils::IntrinsicForAxis(PhysicalAxis              aAxis,
   const nsStylePosition* stylePos = aFrame->StylePosition();
   StyleBoxSizing boxSizing = stylePos->mBoxSizing;
 
-  const nsStyleCoord& styleMinISize =
+  nsStyleCoord styleMinISize =
     horizontalAxis ? stylePos->mMinWidth : stylePos->mMinHeight;
-  const nsStyleCoord& styleISize =
+  nsStyleCoord styleISize =
     (aFlags & MIN_INTRINSIC_ISIZE) ? styleMinISize :
     (horizontalAxis ? stylePos->mWidth : stylePos->mHeight);
   MOZ_ASSERT(!(aFlags & MIN_INTRINSIC_ISIZE) ||
              styleISize.GetUnit() == eStyleUnit_Auto ||
              styleISize.GetUnit() == eStyleUnit_Enumerated,
              "should only use MIN_INTRINSIC_ISIZE for intrinsic values");
-  const nsStyleCoord& styleMaxISize =
+  nsStyleCoord styleMaxISize =
     horizontalAxis ? stylePos->mMaxWidth : stylePos->mMaxHeight;
+
+  PhysicalAxis ourInlineAxis =
+    aFrame->GetWritingMode().PhysicalAxis(eLogicalAxisInline);
+  const bool isInlineAxis = aAxis == ourInlineAxis;
+
+  auto resetIfKeywords = [](nsStyleCoord& aSize,
+                            nsStyleCoord& aMinSize,
+                            nsStyleCoord& aMaxSize) {
+    if (aSize.GetUnit() == eStyleUnit_Enumerated) {
+      aSize.SetAutoValue();
+    }
+    if (aMinSize.GetUnit() == eStyleUnit_Enumerated) {
+      aMinSize.SetAutoValue();
+    }
+    if (aMaxSize.GetUnit() == eStyleUnit_Enumerated) {
+      aMaxSize.SetNoneValue();
+    }
+  };
+  // According to the spec, max-content and min-content should behave as the
+  // property's initial values in block axis.
+  // It also make senses to use the initial values for -moz-fit-content and
+  // -moz-available for intrinsic size in block axis. Therefore, we reset them
+  // if needed.
+  if (!isInlineAxis) {
+    resetIfKeywords(styleISize, styleMinISize, styleMaxISize);
+  }
 
   // We build up two values starting with the content box, and then
   // adding padding, border and margin.  The result is normally
@@ -5354,9 +5388,6 @@ nsLayoutUtils::IntrinsicForAxis(PhysicalAxis              aAxis,
     haveFixedMinISize = GetAbsoluteCoord(styleMinISize, minISize);
   }
 
-  PhysicalAxis ourInlineAxis =
-    aFrame->GetWritingMode().PhysicalAxis(eLogicalAxisInline);
-  const bool isInlineAxis = aAxis == ourInlineAxis;
   // If we have a specified width (or a specified 'min-width' greater
   // than the specified 'max-width', which works out to the same thing),
   // don't even bother getting the frame's intrinsic width, because in
@@ -5365,6 +5396,7 @@ nsLayoutUtils::IntrinsicForAxis(PhysicalAxis              aAxis,
   if (styleISize.GetUnit() == eStyleUnit_Enumerated &&
       (styleISize.GetIntValue() == NS_STYLE_WIDTH_MAX_CONTENT ||
        styleISize.GetIntValue() == NS_STYLE_WIDTH_MIN_CONTENT)) {
+    MOZ_ASSERT(isInlineAxis);
     // -moz-fit-content and -moz-available enumerated widths compute intrinsic
     // widths just like auto.
     // For -moz-max-content and -moz-min-content, we handle them like
@@ -5416,12 +5448,21 @@ nsLayoutUtils::IntrinsicForAxis(PhysicalAxis              aAxis,
     // since that's what it means in all cases except for on flex items -- and
     // even there, we're supposed to ignore it (i.e. treat it as 0) until the
     // flex container explicitly considers it.
-    const nsStyleCoord& styleBSize =
+    nsStyleCoord styleBSize =
       horizontalAxis ? stylePos->mHeight : stylePos->mWidth;
-    const nsStyleCoord& styleMinBSize =
+    nsStyleCoord styleMinBSize =
       horizontalAxis ? stylePos->mMinHeight : stylePos->mMinWidth;
-    const nsStyleCoord& styleMaxBSize =
+    nsStyleCoord styleMaxBSize =
       horizontalAxis ? stylePos->mMaxHeight : stylePos->mMaxWidth;
+
+    // According to the spec, max-content and min-content should behave as the
+    // property's initial values in block axis.
+    // It also make senses to use the initial values for -moz-fit-content and
+    // -moz-available for intrinsic size in block axis. Therefore, we reset them
+    // if needed.
+    if (isInlineAxis) {
+      resetIfKeywords(styleBSize, styleMinBSize, styleMaxBSize);
+    }
 
     if (styleBSize.GetUnit() != eStyleUnit_Auto ||
         !(styleMinBSize.GetUnit() == eStyleUnit_Auto ||
@@ -5566,22 +5607,44 @@ nsLayoutUtils::MinSizeContributionForAxis(PhysicalAxis       aAxis,
 
   // Note: this method is only meant for grid/flex items.
   const nsStylePosition* const stylePos = aFrame->StylePosition();
-  const nsStyleCoord* style = aAxis == eAxisHorizontal ? &stylePos->mMinWidth
-                                                       : &stylePos->mMinHeight;
+  nsStyleCoord size = aAxis == eAxisHorizontal ? stylePos->mMinWidth
+                                               : stylePos->mMinHeight;
+  nsStyleCoord maxSize = aAxis == eAxisHorizontal ? stylePos->mMaxWidth
+                                                  : stylePos->mMaxHeight;
+  auto childWM = aFrame->GetWritingMode();
+  PhysicalAxis ourInlineAxis = childWM.PhysicalAxis(eLogicalAxisInline);
+  // According to the spec, max-content and min-content should behave as the
+  // property's initial values in block axis.
+  // It also make senses to use the initial values for -moz-fit-content and
+  // -moz-available for intrinsic size in block axis. Therefore, we reset them
+  // if needed.
+  if (aAxis != ourInlineAxis) {
+    if (size.GetUnit() == eStyleUnit_Enumerated) {
+      size.SetAutoValue();
+    }
+    if (maxSize.GetUnit() == eStyleUnit_Enumerated) {
+      maxSize.SetNoneValue();
+    }
+  }
+
   nscoord minSize;
   nscoord* fixedMinSize = nullptr;
-  auto minSizeUnit = style->GetUnit();
+  auto minSizeUnit = size.GetUnit();
   if (minSizeUnit == eStyleUnit_Auto) {
     if (aFrame->StyleDisplay()->mOverflowX == NS_STYLE_OVERFLOW_VISIBLE) {
-      style = aAxis == eAxisHorizontal ? &stylePos->mWidth
-                                       : &stylePos->mHeight;
-      if (GetAbsoluteCoord(*style, minSize)) {
+      size = aAxis == eAxisHorizontal ? stylePos->mWidth
+                                      : stylePos->mHeight;
+      // This is same as above: keywords should behaves as property's initial
+      // values in block axis.
+      if (aAxis != ourInlineAxis && size.GetUnit() == eStyleUnit_Enumerated) {
+        size.SetAutoValue();
+      }
+
+      if (GetAbsoluteCoord(size, minSize)) {
         // We have a definite width/height.  This is the "specified size" in:
         // https://drafts.csswg.org/css-grid/#min-size-auto
         fixedMinSize = &minSize;
-      } else if (::IsReplacedBoxResolvedAgainstZero(aFrame, *style,
-                     aAxis == eAxisHorizontal ? stylePos->mMaxWidth
-                                              : stylePos->mMaxHeight)) {
+      } else if (::IsReplacedBoxResolvedAgainstZero(aFrame, size, maxSize)) {
         // XXX bug 1463700: this doesn't handle calc() according to spec
         minSize = 0;
         fixedMinSize = &minSize;
@@ -5592,10 +5655,10 @@ nsLayoutUtils::MinSizeContributionForAxis(PhysicalAxis       aAxis,
       minSize = 0;
       fixedMinSize = &minSize;
     }
-  } else if (GetAbsoluteCoord(*style, minSize)) {
+  } else if (GetAbsoluteCoord(size, minSize)) {
     fixedMinSize = &minSize;
   } else if (minSizeUnit != eStyleUnit_Enumerated) {
-    MOZ_ASSERT(style->HasPercent());
+    MOZ_ASSERT(size.HasPercent());
     minSize = 0;
     fixedMinSize = &minSize;
   }
@@ -5617,23 +5680,19 @@ nsLayoutUtils::MinSizeContributionForAxis(PhysicalAxis       aAxis,
 
   // The padding/margin percentage basis is the inline-size in the parent's
   // writing-mode.
-  auto childWM = aFrame->GetWritingMode();
   nscoord pmPercentageBasis =
     aFrame->GetParent()->GetWritingMode().IsOrthogonalTo(childWM) ?
       aPercentageBasis.BSize(childWM) :
       aPercentageBasis.ISize(childWM);
-  PhysicalAxis ourInlineAxis = childWM.PhysicalAxis(eLogicalAxisInline);
   nsIFrame::IntrinsicISizeOffsetData offsets =
     ourInlineAxis == aAxis ? aFrame->IntrinsicISizeOffsets(pmPercentageBasis)
                            : aFrame->IntrinsicBSizeOffsets(pmPercentageBasis);
   nscoord result = 0;
   nscoord min = 0;
-  const nsStyleCoord& maxISize =
-    aAxis == eAxisHorizontal ? stylePos->mMaxWidth : stylePos->mMaxHeight;
   result = AddIntrinsicSizeOffset(aRC, aFrame, offsets, aType,
                                   stylePos->mBoxSizing,
-                                  result, min, *style, fixedMinSize,
-                                  *style, nullptr, maxISize, aFlags, aAxis);
+                                  result, min, size, fixedMinSize,
+                                  size, nullptr, maxSize, aFlags, aAxis);
 
 #ifdef DEBUG_INTRINSIC_WIDTH
   nsFrame::IndentBy(stderr, gNoiseIndent);
@@ -9120,7 +9179,7 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
                                      const nsRect& aViewport,
                                      const Maybe<nsRect>& aClipRect,
                                      bool aIsRootContent,
-                                     const ContainerLayerParameters& aContainerParameters)
+                                     const Maybe<ContainerLayerParameters>& aContainerParameters)
 {
   nsPresContext* presContext = aForFrame->PresContext();
   int32_t auPerDevPixel = presContext->AppUnitsPerDevPixel();
@@ -9282,8 +9341,13 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
   // content is actually rendered. It includes the pres shell resolutions of
   // all the pres shells from here up to the root, as well as any css-driven
   // resolution. We don't need to compute it as it's already stored in the
-  // container parameters.
-  metrics.SetCumulativeResolution(aContainerParameters.Scale());
+  // container parameters... except if we're in WebRender in which case we
+  // don't have a aContainerParameters. In that case we're also not rasterizing
+  // in Gecko anyway, so the only resolution we care about here is the presShell
+  // resolution which we need to propagate to WebRender.
+  metrics.SetCumulativeResolution(aContainerParameters
+      ? aContainerParameters->Scale()
+      : LayoutDeviceToLayerScale2D(LayoutDeviceToLayerScale(presShell->GetCumulativeResolution())));
 
   LayoutDeviceToScreenScale2D resolutionToScreen(
       presShell->GetCumulativeResolution()
@@ -9451,7 +9515,7 @@ nsLayoutUtils::GetRootMetadata(nsDisplayListBuilder* aBuilder,
                            rootScrollFrame, content,
                            aBuilder->FindReferenceFrameFor(frame),
                            aLayerManager, FrameMetrics::NULL_SCROLL_ID, viewport, Nothing(),
-                           isRootContent, aContainerParameters));
+                           isRootContent, Some(aContainerParameters)));
   }
 
   return Nothing();

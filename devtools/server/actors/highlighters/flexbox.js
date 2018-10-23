@@ -31,21 +31,21 @@ const {
 
 const FLEXBOX_LINES_PROPERTIES = {
   "edge": {
-    lineDash: [12, 10]
+    lineDash: [5, 3],
   },
   "item": {
-    lineDash: [0, 0]
+    lineDash: [0, 0],
   },
   "alignItems": {
-    lineDash: [0, 0]
-  }
+    lineDash: [0, 0],
+  },
 };
 
+const FLEXBOX_CONTAINER_PATTERN_LINE_DASH = [5, 3]; // px
 const FLEXBOX_CONTAINER_PATTERN_WIDTH = 14; // px
 const FLEXBOX_CONTAINER_PATTERN_HEIGHT = 14; // px
 const FLEXBOX_JUSTIFY_CONTENT_PATTERN_WIDTH = 7; // px
 const FLEXBOX_JUSTIFY_CONTENT_PATTERN_HEIGHT = 7; // px
-const FLEXBOX_CONTAINER_PATTERN_LINE_DISH = [5, 3]; // px
 
 /**
  * Cached used by `FlexboxHighlighter.getFlexContainerPattern`.
@@ -87,7 +87,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     // Initialize the <canvas> position to the top left corner of the page
     this._canvasPosition = {
       x: 0,
-      y: 0
+      y: 0,
     };
 
     this._ignoreZoom = true;
@@ -101,17 +101,17 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
   _buildMarkup() {
     const container = createNode(this.win, {
       attributes: {
-        "class": "highlighter-container"
-      }
+        "class": "highlighter-container",
+      },
     });
 
     const root = createNode(this.win, {
       parent: container,
       attributes: {
         "id": "root",
-        "class": "root"
+        "class": "root",
       },
-      prefix: this.ID_CLASS_PREFIX
+      prefix: this.ID_CLASS_PREFIX,
     });
 
     // We use a <canvas> element because there is an arbitrary number of items and texts
@@ -125,9 +125,9 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
         "class": "canvas",
         "hidden": "true",
         "width": CANVAS_SIZE,
-        "height": CANVAS_SIZE
+        "height": CANVAS_SIZE,
       },
-      prefix: this.ID_CLASS_PREFIX
+      prefix: this.ID_CLASS_PREFIX,
     });
 
     return container;
@@ -210,7 +210,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
 
     const ctx = canvas.getContext("2d");
     ctx.save();
-    ctx.setLineDash(FLEXBOX_CONTAINER_PATTERN_LINE_DISH);
+    ctx.setLineDash(FLEXBOX_CONTAINER_PATTERN_LINE_DASH);
     ctx.beginPath();
     ctx.translate(.5, .5);
 
@@ -259,7 +259,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
 
     const ctx = canvas.getContext("2d");
     ctx.save();
-    ctx.setLineDash(FLEXBOX_CONTAINER_PATTERN_LINE_DISH);
+    ctx.setLineDash(FLEXBOX_CONTAINER_PATTERN_LINE_DASH);
     ctx.beginPath();
     ctx.translate(.5, .5);
 
@@ -481,32 +481,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     this.ctx.restore();
   }
 
-  renderFlexContainerBorder() {
-    if (!this.currentQuads.content || !this.currentQuads.content[0]) {
-      return;
-    }
-
-    const { devicePixelRatio } = this.win;
-    const lineWidth = getDisplayPixelRatio(this.win) * 2;
-    const offset = (lineWidth / 2) % 1;
-    const zoom = getCurrentZoom(this.win);
-    const canvasX = Math.round(this._canvasPosition.x * devicePixelRatio * zoom);
-    const canvasY = Math.round(this._canvasPosition.y * devicePixelRatio * zoom);
-
-    this.ctx.save();
-    this.ctx.translate(offset - canvasX, offset - canvasY);
-    this.ctx.setLineDash(FLEXBOX_LINES_PROPERTIES.edge.lineDash);
-    this.ctx.lineWidth = lineWidth;
-    this.ctx.strokeStyle = this.color;
-
-    const { bounds } = this.currentQuads.content[0];
-    drawRect(this.ctx, 0, 0, bounds.width, bounds.height, this.currentMatrix);
-
-    this.ctx.stroke();
-    this.ctx.restore();
-  }
-
-  renderFlexContainerFill() {
+  renderFlexContainer() {
     if (!this.currentQuads.content || !this.currentQuads.content[0]) {
       return;
     }
@@ -521,7 +496,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     this.ctx.save();
     this.ctx.translate(offset - canvasX, offset - canvasY);
     this.ctx.setLineDash(FLEXBOX_LINES_PROPERTIES.edge.lineDash);
-    this.ctx.lineWidth = 0;
+    this.ctx.lineWidth = lineWidth * 2;
     this.ctx.strokeStyle = this.color;
     this.ctx.fillStyle = this.getFlexContainerPattern(devicePixelRatio);
 
@@ -713,11 +688,10 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     this.currentMatrix = currentMatrix;
     this.hasNodeTransformations = hasNodeTransformations;
 
-    this.renderFlexContainerFill();
+    this.renderFlexContainer();
     this.renderFlexLines();
     this.renderJustifyContent();
     this.renderFlexItems();
-    this.renderFlexContainerBorder();
     this.renderAlignItemLine();
 
     this._showFlexbox();
@@ -766,7 +740,7 @@ function getFlexData(flex, win) {
           };
         }),
       };
-    })
+    }),
   };
 }
 

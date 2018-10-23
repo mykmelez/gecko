@@ -20,6 +20,7 @@ import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
+import android.util.Log;
 import android.view.InputDevice;
 import android.view.MotionEvent;
 import android.view.View;
@@ -58,6 +59,50 @@ public class SessionAccessibility {
     @WrapForJNI static final int FLAG_VISIBLE_TO_USER = 1 << 15;
     @WrapForJNI static final int FLAG_SELECTABLE = 1 << 16;
 
+    @WrapForJNI static final int CLASSNAME_VIEW = 0;
+    @WrapForJNI static final int CLASSNAME_BUTTON = 1;
+    @WrapForJNI static final int CLASSNAME_CHECKBOX = 2;
+    @WrapForJNI static final int CLASSNAME_DIALOG = 3;
+    @WrapForJNI static final int CLASSNAME_EDITTEXT = 4;
+    @WrapForJNI static final int CLASSNAME_GRIDVIEW = 5;
+    @WrapForJNI static final int CLASSNAME_IMAGE = 6;
+    @WrapForJNI static final int CLASSNAME_LISTVIEW = 7;
+    @WrapForJNI static final int CLASSNAME_MENUITEM = 8;
+    @WrapForJNI static final int CLASSNAME_PROGRESSBAR = 9;
+    @WrapForJNI static final int CLASSNAME_RADIOBUTTON = 10;
+    @WrapForJNI static final int CLASSNAME_SEEKBAR = 11;
+    @WrapForJNI static final int CLASSNAME_SPINNER = 12;
+    @WrapForJNI static final int CLASSNAME_TABWIDGET = 13;
+    @WrapForJNI static final int CLASSNAME_TOGGLEBUTTON = 14;
+    @WrapForJNI static final int CLASSNAME_WEBVIEW = 15;
+
+    private static final String[] CLASSNAMES = {
+            "android.view.View",
+            "android.widget.Button",
+            "android.widget.CheckBox",
+            "android.app.Dialog",
+            "android.widget.EditText",
+            "android.widget.GridView",
+            "android.widget.Image",
+            "android.widget.ListView",
+            "android.view.MenuItem",
+            "android.widget.ProgressBar",
+            "android.widget.RadioButton",
+            "android.widget.SeekBar",
+            "android.widget.Spinner",
+            "android.widget.TabWidget",
+            "android.widget.ToggleButton",
+            "android.webkit.WebView"
+    };
+
+    static private String getClassName(final int index) {
+        if (index < CLASSNAMES.length) {
+            return CLASSNAMES[index];
+        }
+
+        Log.e(LOGTAG, "Index " + index + " our of CLASSNAME bounds.");
+        return "android.view.View"; // Fallback class is View
+    }
 
     /* package */ final class NodeProvider extends AccessibilityNodeProvider {
         @Override
@@ -212,7 +257,7 @@ public class SessionAccessibility {
 
             // The basics
             node.setPackageName(GeckoAppShell.getApplicationContext().getPackageName());
-            node.setClassName(nodeInfo.getString("className", "android.view.View"));
+            node.setClassName(getClassName(nodeInfo.getInt("className")));
             node.setText(nodeInfo.getString("text", ""));
 
             // Add actions
@@ -288,7 +333,7 @@ public class SessionAccessibility {
                 // Set bundle keys like role and hint
                 Bundle bundle = node.getExtras();
                 if (nodeInfo.containsKey("hint")) {
-                    final String hint =  nodeInfo.getString("hint");
+                    final String hint = nodeInfo.getString("hint");
                     bundle.putCharSequence("AccessibilityNodeInfo.hint", hint);
                     if (Build.VERSION.SDK_INT >= 26) {
                         node.setHintText(hint);
@@ -338,41 +383,21 @@ public class SessionAccessibility {
                 // Set CollectionInfo
                 GeckoBundle collectionBundle = nodeInfo.getBundle("collectionInfo");
                 if (collectionBundle != null) {
-                    final CollectionInfo collectionInfo = CollectionInfo.obtain(
-                            collectionBundle.getInt("rowCount"),
-                            collectionBundle.getInt("columnCount"),
-                            collectionBundle.getBoolean("isHierarchical", false),
-                            collectionBundle.getInt("selectionMode", 0));
+                    // selectionMode is only supported in SDK >= 21.
+                    final CollectionInfo collectionInfo = Build.VERSION.SDK_INT >= 21
+                            ? CollectionInfo.obtain(
+                                collectionBundle.getInt("rowCount"),
+                                collectionBundle.getInt("columnCount"),
+                                collectionBundle.getBoolean("isHierarchical", false),
+                                collectionBundle.getInt("selectionMode", 0))
+                            : CollectionInfo.obtain(
+                                collectionBundle.getInt("rowCount"),
+                                collectionBundle.getInt("columnCount"),
+                                collectionBundle.getBoolean("isHierarchical", false));
                     node.setCollectionInfo(collectionInfo);
                 }
 
-                // Set inputType
-                switch (nodeInfo.getString("inputType", "").toLowerCase()) {
-                    case "email":
-                        node.setInputType(InputType.TYPE_CLASS_TEXT |
-                                InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS);
-                        break;
-                    case "number":
-                        node.setInputType(InputType.TYPE_CLASS_NUMBER);
-                        break;
-                    case "password":
-                        node.setInputType(InputType.TYPE_CLASS_TEXT |
-                                InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD);
-                        break;
-                    case "tel":
-                        node.setInputType(InputType.TYPE_CLASS_PHONE);
-                        break;
-                    case "text":
-                        node.setInputType(InputType.TYPE_CLASS_TEXT |
-                                InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT);
-                        break;
-                    case "url":
-                        node.setInputType(InputType.TYPE_CLASS_TEXT |
-                                InputType.TYPE_TEXT_VARIATION_URI);
-                        break;
-                    default:
-                        break;
-                }
+                node.setInputType(nodeInfo.getInt("inputType"));
             }
 
             // SDK 23 and above
@@ -567,7 +592,7 @@ public class SessionAccessibility {
 
         if (sourceInfo != null) {
             final int flags = sourceInfo.getInt("flags");
-            event.setClassName(sourceInfo.getString("className", "android.view.View"));
+            event.setClassName(getClassName(sourceInfo.getInt("className")));
             event.setChecked((flags & FLAG_CHECKED) != 0);
             event.getText().add(sourceInfo.getString("text", ""));
         }

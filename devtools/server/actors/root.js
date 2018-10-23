@@ -116,9 +116,6 @@ RootActor.prototype = {
 
   traits: {
     sources: true,
-    // Whether the server-side highlighter actor exists and can be used to
-    // remotely highlight nodes (see server/actors/highlighters.js)
-    highlightable: true,
     networkMonitor: true,
     // Whether the storage inspector actor to inspect cookies, etc.
     storageInspector: true,
@@ -179,7 +176,7 @@ RootActor.prototype = {
       applicationType: this.applicationType,
       /* This is not in the spec, but it's used by tests. */
       testConnectionPrefix: this.conn.prefix,
-      traits: this.traits
+      traits: this.traits,
     };
   },
 
@@ -347,7 +344,7 @@ RootActor.prototype = {
       }
       return {
         error: "noTab",
-        message: "Unexpected error while calling getTab(): " + error
+        message: "Unexpected error while calling getTab(): " + error,
       };
     }
 
@@ -362,7 +359,7 @@ RootActor.prototype = {
       return {
         from: this.actorID,
         error: "forbidden",
-        message: "You are not allowed to debug windows."
+        message: "You are not allowed to debug windows.",
       };
     }
     const window = Services.wm.getOuterWindowWithId(outerWindowID);
@@ -417,7 +414,7 @@ RootActor.prototype = {
 
       return {
         "from": this.actorID,
-        "addons": addonTargetActors.map(addonTargetActor => addonTargetActor.form())
+        "addons": addonTargetActors.map(addonTargetActor => addonTargetActor.form()),
       };
     });
   },
@@ -453,7 +450,7 @@ RootActor.prototype = {
 
       return {
         "from": this.actorID,
-        "workers": actors.map(actor => actor.form())
+        "workers": actors.map(actor => actor.form()),
       };
     });
   },
@@ -486,7 +483,7 @@ RootActor.prototype = {
 
       return {
         "from": this.actorID,
-        "registrations": actors.map(actor => actor.form())
+        "registrations": actors.map(actor => actor.form()),
       };
     });
   },
@@ -504,7 +501,7 @@ RootActor.prototype = {
     }
     processList.onListChanged = this._onProcessListChanged;
     return {
-      processes: processList.getList()
+      processes: processList.getList(),
     };
   },
 
@@ -605,7 +602,7 @@ RootActor.prototype = {
       }
       delete this._extraActors[name];
     }
-  }
+  },
 };
 
 RootActor.prototype.requestTypes = {
@@ -619,7 +616,7 @@ RootActor.prototype.requestTypes = {
   listProcesses: RootActor.prototype.onListProcesses,
   getProcess: RootActor.prototype.onGetProcess,
   echo: RootActor.prototype.onEcho,
-  protocolDescription: RootActor.prototype.onProtocolDescription
+  protocolDescription: RootActor.prototype.onProtocolDescription,
 };
 
 exports.RootActor = RootActor;

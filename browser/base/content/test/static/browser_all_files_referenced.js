@@ -166,9 +166,9 @@ var whitelist = [
   {file: "resource://gre/modules/Promise.jsm"},
   // Still used by WebIDE, which is going away but not entirely gone.
   {file: "resource://gre/modules/ZipUtils.jsm"},
-  // Bug 1463225 (on Mac this is only used by a test)
+  // Bug 1463225 (on Mac and Windows this is only used by a test)
   {file: "chrome://global/content/bindings/toolbar.xml",
-   platforms: ["macosx"]},
+   platforms: ["macosx", "win"]},
   // Bug 1483277 (temporarily unreferenced)
   {file: "chrome://browser/content/browser.xhtml"},
   // Bug 1494170
@@ -275,7 +275,14 @@ function parseManifest(manifestUri) {
       let [type, ...argv] = line.split(/\s+/);
       if (type == "content" || type == "skin" || type == "locale") {
         let chromeUri = `chrome://${argv[0]}/${type}/`;
-        trackChromeUri(chromeUri);
+        // The webcompat reporter's locale directory may not exist if
+        // the addon is preffed-off, and since it's a hack until we
+        // get bz1425104 landed, we'll just skip it for now.
+        if (chromeUri === "chrome://webcompat-reporter/locale/") {
+          gChromeMap.set("chrome://webcompat-reporter/locale/", true);
+        } else {
+          trackChromeUri(chromeUri);
+        }
       } else if (type == "override" || type == "overlay") {
         // Overlays aren't really overrides, but behave the same in
         // that the overlay is only referenced if the original xul

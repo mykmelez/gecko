@@ -164,14 +164,15 @@ const FlexItemActor = ActorClassWithSpec(flexItemSpec, {
       "flex-shrink": "",
       [`min-${dimension}`]: "",
       [`max-${dimension}`]: "",
-      [dimension]: ""
+      [dimension]: "",
     };
 
     if (this.element.nodeType === this.element.ELEMENT_NODE) {
       for (const name in properties) {
         let value = "";
         // Look first on the element style.
-        if (this.element.style[name] && this.element.style[name] !== "auto") {
+        if (this.element.style &&
+            this.element.style[name] && this.element.style[name] !== "auto") {
           value = this.element.style[name];
         } else {
           // And then on the rules that apply to the element.
@@ -294,10 +295,13 @@ const LayoutActor = ActorClassWithSpec(layoutSpec, {
    *         The node to start iterating at.
    * @param  {String} type
    *         Can be "grid" or "flex", the display type we are searching for.
+   * @param  {Boolean|null} onlyLookAtCurrentNode
+   *         Whether or not to consider only the current node's display (ie, don't walk
+   *         up the tree).
    * @return {GridActor|FlexboxActor|null} The GridActor or FlexboxActor of the
    * grid/flex container of the give node. Otherwise, returns null.
    */
-  getCurrentDisplay(node, type) {
+  getCurrentDisplay(node, type, onlyLookAtCurrentNode) {
     if (isNodeDead(node)) {
       return null;
     }
@@ -311,20 +315,29 @@ const LayoutActor = ActorClassWithSpec(layoutSpec, {
     let currentNode = treeWalker.currentNode;
     let displayType = this.walker.getNode(currentNode).displayType;
 
-    if (!displayType) {
-      return null;
-    }
+    // If the node is an element, check first if it is itself a flex or a grid.
+    if (currentNode.nodeType === currentNode.ELEMENT_NODE) {
+      if (!displayType) {
+        return null;
+      }
 
-    if (type == "flex" &&
-        (displayType == "inline-flex" || displayType == "flex")) {
-      return new FlexboxActor(this, currentNode);
-    } else if (type == "grid" &&
-               (displayType == "inline-grid" || displayType == "grid")) {
-      return new GridActor(this, currentNode);
+      if (type == "flex") {
+        if (displayType == "inline-flex" || displayType == "flex") {
+          return new FlexboxActor(this, currentNode);
+        } else if (onlyLookAtCurrentNode) {
+          return null;
+        }
+      } else if (type == "grid" &&
+                 (displayType == "inline-grid" || displayType == "grid")) {
+        return new GridActor(this, currentNode);
+      }
     }
 
     // Otherwise, check if this is a flex/grid item or the parent node is a flex/grid
     // container.
+    // Note that text nodes that are children of flex/grid containers are wrapped in
+    // anonymous containers, so even if their displayType getter returns null we still
+    // want to walk up the chain to find their container.
     while ((currentNode = treeWalker.parentNode())) {
       if (!currentNode) {
         break;
@@ -382,7 +395,7 @@ const LayoutActor = ActorClassWithSpec(layoutSpec, {
       node = node.rawNode.parentNode;
     }
 
-    return this.getCurrentDisplay(node, "flex");
+    return this.getCurrentDisplay(node, "flex", onlyLookAtParents);
   },
 
   /**

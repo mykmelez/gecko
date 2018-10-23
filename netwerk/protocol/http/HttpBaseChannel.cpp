@@ -920,14 +920,10 @@ HttpBaseChannel::EnsureUploadStreamIsCloneable(nsIRunnable* aCallback)
     return NS_OK;
   }
 
-  // Some nsSeekableStreams do not implement ::Seek() (see nsPipeInputStream).
-  // In this case, we must clone the uploadStream into a memory stream in order
-  // to have it seekable.  If the CloneUploadStream() will succeed, then
-  // synchronously invoke the callback to indicate we're already cloneable.
+  // Upload nsIInputStream must be cloneable and seekable in order to be
+  // processed by devtools network inspector.
   nsCOMPtr<nsISeekableStream> seekable = do_QueryInterface(mUploadStream);
-  if (seekable &&
-      NS_SUCCEEDED(seekable->Seek(nsISeekableStream::NS_SEEK_SET, 0)) &&
-      NS_InputStreamIsCloneable(mUploadStream)) {
+  if (seekable && NS_InputStreamIsCloneable(mUploadStream)) {
     aCallback->Run();
     return NS_OK;
   }
@@ -3909,7 +3905,9 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
   // Pass the preferred alt-data type on to the new channel.
   nsCOMPtr<nsICacheInfoChannel> cacheInfoChan(do_QueryInterface(newChannel));
   if (cacheInfoChan) {
-    cacheInfoChan->PreferAlternativeDataType(mPreferredCachedAltDataType);
+    for (auto& pair : mPreferredCachedAltDataTypes) {
+      cacheInfoChan->PreferAlternativeDataType(mozilla::Get<0>(pair), mozilla::Get<1>(pair));
+    }
   }
 
   if (redirectFlags & (nsIChannelEventSink::REDIRECT_INTERNAL |

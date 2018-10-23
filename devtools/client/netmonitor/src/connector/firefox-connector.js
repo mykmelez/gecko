@@ -244,7 +244,7 @@ class FirefoxConnector {
     const event = {
       name: marker.name == "document::DOMContentLoaded" ?
             "dom-interactive" : "dom-complete",
-      time: marker.unixTime / 1000
+      time: marker.unixTime / 1000,
     };
 
     if (this.actions) {
@@ -316,7 +316,7 @@ class FirefoxConnector {
 
     // Reconfigures the tab, optionally triggering a reload.
     const reconfigureTab = options => {
-      return this.tabTarget.activeTab.reconfigure(options);
+      return this.tabTarget.activeTab.reconfigure({ options });
     };
 
     // Reconfigures the tab and waits for the target to finish navigating.

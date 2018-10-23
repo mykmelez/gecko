@@ -1607,6 +1607,7 @@ static bool
 DoToBoolFallback(JSContext* cx, BaselineFrame* frame, ICToBool_Fallback* stub, HandleValue arg,
                  MutableHandleValue ret)
 {
+    stub->incrementEnteredCount();
     FallbackICSpew(cx, stub, "ToBool");
 
     MOZ_ASSERT(!arg.isBoolean());
@@ -1647,6 +1648,7 @@ ICToBool_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
 static bool
 DoToNumberFallback(JSContext* cx, ICToNumber_Fallback* stub, HandleValue arg, MutableHandleValue ret)
 {
+    stub->incrementEnteredCount();
     FallbackICSpew(cx, stub, "ToNumber");
     ret.set(arg);
     return ToNumber(cx, ret);
@@ -1708,6 +1710,7 @@ DoGetElemFallback(JSContext* cx, BaselineFrame* frame, ICGetElem_Fallback* stub_
 {
     // This fallback stub may trigger debug mode toggling.
     DebugModeOSRVolatileStub<ICGetElem_Fallback*> stub(frame, stub_);
+    stub->incrementEnteredCount();
 
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub->icEntry()->pc(frame->script());
@@ -1800,6 +1803,7 @@ DoGetElemSuperFallback(JSContext* cx, BaselineFrame* frame, ICGetElem_Fallback* 
 {
     // This fallback stub may trigger debug mode toggling.
     DebugModeOSRVolatileStub<ICGetElem_Fallback*> stub(frame, stub_);
+    stub->incrementEnteredCount();
 
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub->icEntry()->pc(frame->script());
@@ -1939,6 +1943,7 @@ DoSetElemFallback(JSContext* cx, BaselineFrame* frame, ICSetElem_Fallback* stub_
 {
     // This fallback stub may trigger debug mode toggling.
     DebugModeOSRVolatileStub<ICSetElem_Fallback*> stub(frame, stub_);
+    stub->incrementEnteredCount();
 
     RootedScript script(cx, frame->script());
     RootedScript outerScript(cx, script);
@@ -2183,14 +2188,10 @@ StoreToTypedArray(JSContext* cx, MacroAssembler& masm, Scalar::Type type,
         // If the value is a double, clamp to uint8 and jump back.
         // Else, jump to failure.
         masm.bind(&notInt32);
-        if (cx->runtime()->jitSupportsFloatingPoint) {
-            masm.branchTestDouble(Assembler::NotEqual, value, failure);
-            masm.unboxDouble(value, FloatReg0);
-            masm.clampDoubleToUint8(FloatReg0, scratch);
-            masm.jump(&clamped);
-        } else {
-            masm.jump(failure);
-        }
+        masm.branchTestDouble(Assembler::NotEqual, value, failure);
+        masm.unboxDouble(value, FloatReg0);
+        masm.clampDoubleToUint8(FloatReg0, scratch);
+        masm.jump(&clamped);
     } else {
         Label notInt32;
         masm.branchTestInt32(Assembler::NotEqual, value, &notInt32);
@@ -2204,14 +2205,10 @@ StoreToTypedArray(JSContext* cx, MacroAssembler& masm, Scalar::Type type,
         // If the value is a double, truncate and jump back.
         // Else, jump to failure.
         masm.bind(&notInt32);
-        if (cx->runtime()->jitSupportsFloatingPoint) {
-            masm.branchTestDouble(Assembler::NotEqual, value, failure);
-            masm.unboxDouble(value, FloatReg0);
-            masm.branchTruncateDoubleMaybeModUint32(FloatReg0, scratch, failure);
-            masm.jump(&isInt32);
-        } else {
-            masm.jump(failure);
-        }
+        masm.branchTestDouble(Assembler::NotEqual, value, failure);
+        masm.unboxDouble(value, FloatReg0);
+        masm.branchTruncateDoubleMaybeModUint32(FloatReg0, scratch, failure);
+        masm.jump(&isInt32);
     }
 
     masm.bind(&done);
@@ -2237,6 +2234,7 @@ DoInFallback(JSContext* cx, BaselineFrame* frame, ICIn_Fallback* stub_,
 {
     // This fallback stub may trigger debug mode toggling.
     DebugModeOSRVolatileStub<ICIn_Fallback*> stub(frame, stub_);
+    stub->incrementEnteredCount();
 
     FallbackICSpew(cx, stub, "In");
 
@@ -2290,6 +2288,7 @@ DoHasOwnFallback(JSContext* cx, BaselineFrame* frame, ICHasOwn_Fallback* stub_,
 {
     // This fallback stub may trigger debug mode toggling.
     DebugModeOSRVolatileStub<ICIn_Fallback*> stub(frame, stub_);
+    stub->incrementEnteredCount();
 
     FallbackICSpew(cx, stub, "HasOwn");
 
@@ -2340,6 +2339,7 @@ DoGetNameFallback(JSContext* cx, BaselineFrame* frame, ICGetName_Fallback* stub_
 {
     // This fallback stub may trigger debug mode toggling.
     DebugModeOSRVolatileStub<ICGetName_Fallback*> stub(frame, stub_);
+    stub->incrementEnteredCount();
 
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub->icEntry()->pc(script);
@@ -2407,6 +2407,8 @@ static bool
 DoBindNameFallback(JSContext* cx, BaselineFrame* frame, ICBindName_Fallback* stub,
                    HandleObject envChain, MutableHandleValue res)
 {
+    stub->incrementEnteredCount();
+
     jsbytecode* pc = stub->icEntry()->pc(frame->script());
     mozilla::DebugOnly<JSOp> op = JSOp(*pc);
     FallbackICSpew(cx, stub, "BindName(%s)", CodeName[JSOp(*pc)]);
@@ -2455,6 +2457,7 @@ DoGetIntrinsicFallback(JSContext* cx, BaselineFrame* frame, ICGetIntrinsic_Fallb
 {
     // This fallback stub may trigger debug mode toggling.
     DebugModeOSRVolatileStub<ICGetIntrinsic_Fallback*> stub(frame, stub_);
+    stub->incrementEnteredCount();
 
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub->icEntry()->pc(script);
@@ -2542,6 +2545,7 @@ DoGetPropFallback(JSContext* cx, BaselineFrame* frame, ICGetProp_Fallback* stub_
 {
     // This fallback stub may trigger debug mode toggling.
     DebugModeOSRVolatileStub<ICGetProp_Fallback*> stub(frame, stub_);
+    stub->incrementEnteredCount();
 
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub_->icEntry()->pc(script);
@@ -2614,6 +2618,7 @@ DoGetPropSuperFallback(JSContext* cx, BaselineFrame* frame, ICGetProp_Fallback* 
 {
     // This fallback stub may trigger debug mode toggling.
     DebugModeOSRVolatileStub<ICGetProp_Fallback*> stub(frame, stub_);
+    stub->incrementEnteredCount();
 
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub_->icEntry()->pc(script);
@@ -2761,6 +2766,7 @@ DoSetPropFallback(JSContext* cx, BaselineFrame* frame, ICSetProp_Fallback* stub_
 {
     // This fallback stub may trigger debug mode toggling.
     DebugModeOSRVolatileStub<ICSetProp_Fallback*> stub(frame, stub_);
+    stub->incrementEnteredCount();
 
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub->icEntry()->pc(script);
@@ -3593,6 +3599,7 @@ DoCallFallback(JSContext* cx, BaselineFrame* frame, ICCall_Fallback* stub_, uint
 {
     // This fallback stub may trigger debug mode toggling.
     DebugModeOSRVolatileStub<ICCall_Fallback*> stub(frame, stub_);
+    stub->incrementEnteredCount();
 
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub->icEntry()->pc(script);
@@ -3731,6 +3738,7 @@ DoSpreadCallFallback(JSContext* cx, BaselineFrame* frame, ICCall_Fallback* stub_
 {
     // This fallback stub may trigger debug mode toggling.
     DebugModeOSRVolatileStub<ICCall_Fallback*> stub(frame, stub_);
+    stub->incrementEnteredCount();
 
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub->icEntry()->pc(script);
@@ -5138,19 +5146,6 @@ ICCall_ScriptedFunCall::Compiler::generateStubCode(MacroAssembler& masm)
     return true;
 }
 
-static bool
-DoubleValueToInt32ForSwitch(Value* v)
-{
-    double d = v->toDouble();
-    int32_t truncated = int32_t(d);
-    if (d != double(truncated)) {
-        return false;
-    }
-
-    v->setInt32(truncated);
-    return true;
-}
-
 bool
 ICTableSwitch::Compiler::generateStubCode(MacroAssembler& masm)
 {
@@ -5177,27 +5172,10 @@ ICTableSwitch::Compiler::generateStubCode(MacroAssembler& masm)
     masm.bind(&notInt32);
 
     masm.branchTestDouble(Assembler::NotEqual, R0, &outOfRange);
-    if (cx->runtime()->jitSupportsFloatingPoint) {
-        masm.unboxDouble(R0, FloatReg0);
+    masm.unboxDouble(R0, FloatReg0);
 
-        // N.B. -0 === 0, so convert -0 to a 0 int32.
-        masm.convertDoubleToInt32(FloatReg0, key, &outOfRange, /* negativeZeroCheck = */ false);
-    } else {
-        // Pass pointer to double value.
-        masm.pushValue(R0);
-        masm.moveStackPtrTo(R0.scratchReg());
-
-        masm.setupUnalignedABICall(scratch);
-        masm.passABIArg(R0.scratchReg());
-        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, DoubleValueToInt32ForSwitch));
-
-        // If the function returns |true|, the value has been converted to
-        // int32.
-        masm.movePtr(ReturnReg, scratch);
-        masm.popValue(R0);
-        masm.branchIfFalseBool(scratch, &outOfRange);
-        masm.unboxInt32(R0, key);
-    }
+    // N.B. -0 === 0, so convert -0 to a 0 int32.
+    masm.convertDoubleToInt32(FloatReg0, key, &outOfRange, /* negativeZeroCheck = */ false);
     masm.jump(&isInt32);
 
     masm.bind(&outOfRange);
@@ -5264,6 +5242,7 @@ static bool
 DoGetIteratorFallback(JSContext* cx, BaselineFrame* frame, ICGetIterator_Fallback* stub,
                       HandleValue value, MutableHandleValue res)
 {
+    stub->incrementEnteredCount();
     FallbackICSpew(cx, stub, "GetIterator");
 
     TryAttachStub<GetIteratorIRGenerator>("GetIterator", cx, frame, stub, BaselineCacheIRStubKind::Regular, value);
@@ -5308,6 +5287,7 @@ DoIteratorMoreFallback(JSContext* cx, BaselineFrame* frame, ICIteratorMore_Fallb
 {
     // This fallback stub may trigger debug mode toggling.
     DebugModeOSRVolatileStub<ICIteratorMore_Fallback*> stub(frame, stub_);
+    stub->incrementEnteredCount();
 
     FallbackICSpew(cx, stub, "IteratorMore");
 
@@ -5441,6 +5421,7 @@ DoInstanceOfFallback(JSContext* cx, BaselineFrame* frame, ICInstanceOf_Fallback*
 {
     // This fallback stub may trigger debug mode toggling.
     DebugModeOSRVolatileStub<ICInstanceOf_Fallback*> stub(frame, stub_);
+    stub->incrementEnteredCount();
 
     FallbackICSpew(cx, stub, "InstanceOf");
 
@@ -5509,6 +5490,7 @@ static bool
 DoTypeOfFallback(JSContext* cx, BaselineFrame* frame, ICTypeOf_Fallback* stub, HandleValue val,
                  MutableHandleValue res)
 {
+    stub->incrementEnteredCount();
     FallbackICSpew(cx, stub, "TypeOf");
 
     TryAttachStub<TypeOfIRGenerator>("TypeOf", cx, frame, stub, BaselineCacheIRStubKind::Regular, val);
@@ -5540,6 +5522,7 @@ static bool
 DoRetSubFallback(JSContext* cx, BaselineFrame* frame, ICRetSub_Fallback* stub,
                  HandleValue val, uint8_t** resumeAddr)
 {
+    stub->incrementEnteredCount();
     FallbackICSpew(cx, stub, "RetSub");
 
     // |val| is the bytecode offset where we should resume.
@@ -5817,6 +5800,7 @@ DoUnaryArithFallback(JSContext* cx, BaselineFrame* frame, ICUnaryArith_Fallback*
 {
     // This fallback stub may trigger debug mode toggling.
     DebugModeOSRVolatileStub<ICUnaryArith_Fallback*> debug_stub(frame, stub);
+    stub->incrementEnteredCount();
 
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub->icEntry()->pc(script);
@@ -5891,6 +5875,7 @@ DoBinaryArithFallback(JSContext* cx, BaselineFrame* frame, ICBinaryArith_Fallbac
 {
     // This fallback stub may trigger debug mode toggling.
     DebugModeOSRVolatileStub<ICBinaryArith_Fallback*> stub(frame, stub_);
+    stub->incrementEnteredCount();
 
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub->icEntry()->pc(script);
@@ -6026,6 +6011,7 @@ DoCompareFallback(JSContext* cx, BaselineFrame* frame, ICCompare_Fallback* stub_
 {
     // This fallback stub may trigger debug mode toggling.
     DebugModeOSRVolatileStub<ICCompare_Fallback*> stub(frame, stub_);
+    stub->incrementEnteredCount();
 
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub->icEntry()->pc(script);
@@ -6136,6 +6122,7 @@ static bool
 DoNewArray(JSContext* cx, BaselineFrame* frame, ICNewArray_Fallback* stub, uint32_t length,
            MutableHandleValue res)
 {
+    stub->incrementEnteredCount();
     FallbackICSpew(cx, stub, "NewArray");
 
     RootedObject obj(cx);
@@ -6190,6 +6177,7 @@ ICNewArray_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
 static bool
 DoNewObject(JSContext* cx, BaselineFrame* frame, ICNewObject_Fallback* stub, MutableHandleValue res)
 {
+    stub->incrementEnteredCount();
     FallbackICSpew(cx, stub, "NewObject");
 
     RootedObject obj(cx);

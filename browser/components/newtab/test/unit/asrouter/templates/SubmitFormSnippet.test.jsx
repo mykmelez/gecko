@@ -82,6 +82,32 @@ describe("SubmitFormSnippet", () => {
       });
     });
 
+    it("should set the input type if provided through props.inputType", () => {
+      wrapper.setProps({inputType: "number"});
+      wrapper.setState({expanded: true});
+      assert.equal(wrapper.find(".mainInput").instance().type, "number");
+    });
+
+    it("should validate via props.validateInput if provided", () => {
+      function validateInput(value, content) {
+        if (content.country === "CA" && value === "poutine") {
+          return "";
+        }
+        return "Must be poutine";
+      }
+      const setCustomValidity = sandbox.stub();
+      wrapper.setProps({validateInput, content: {...DEFAULT_CONTENT, country: "CA"}});
+      wrapper.setState({expanded: true});
+      const input = wrapper.find(".mainInput");
+      input.instance().value = "poutine";
+      input.simulate("change", {target: {value: "poutine", setCustomValidity}});
+      assert.calledWith(setCustomValidity, "");
+
+      input.instance().value = "fried chicken";
+      input.simulate("change", {target: {value: "fried chicken", setCustomValidity}});
+      assert.calledWith(setCustomValidity, "Must be poutine");
+    });
+
     it("should show the signup form if state.expanded is true", () => {
       wrapper.setState({expanded: true});
 
@@ -147,6 +173,21 @@ describe("SubmitFormSnippet", () => {
       assert.equal(wrapper.state().signupSubmitted, true);
       assert.notCalled(onBlockStub);
     });
+    it("should not block if do_not_autoblock is true", async () => {
+      sandbox.stub(window, "fetch").resolves(fetchOk);
+      wrapper = mountAndCheckProps({
+        scene1_text: "bar",
+        scene2_email_placeholder_text: "Email",
+        scene2_text: "signup",
+        do_not_autoblock: true,
+      });
+      wrapper.setState({expanded: true});
+      await wrapper.instance().handleSubmit({preventDefault: sandbox.stub()});
+
+      assert.equal(wrapper.state().signupSuccess, true);
+      assert.equal(wrapper.state().signupSubmitted, true);
+      assert.notCalled(onBlockStub);
+    });
     it("should send user telemetry if submission failed", async () => {
       sandbox.stub(window, "fetch").resolves(fetchFail);
       wrapper.setState({expanded: true});
@@ -158,11 +199,11 @@ describe("SubmitFormSnippet", () => {
       wrapper.setProps({content: {success_text: "success"}});
       wrapper.setState({signupSuccess: true, signupSubmitted: true});
 
-      assert.isTrue(wrapper.find(".body").exists());
-      assert.equal(wrapper.find(".body").text(), "success");
+      assert.isTrue(wrapper.find(".submissionStatus").exists());
+      assert.equal(wrapper.find(".submissionStatus").text(), "success");
       assert.isFalse(wrapper.find(".ASRouterButton").exists());
     });
-    it("should render the button to return to the signup form", () => {
+    it("should render the button to return to the signup form if there was an error", () => {
       wrapper.setState({signupSubmitted: true, signupSuccess: false});
 
       assert.isTrue(wrapper.find(".ASRouterButton").exists());
@@ -173,13 +214,13 @@ describe("SubmitFormSnippet", () => {
     it("should not render the privacy notice checkbox if prop is missing", () => {
       wrapper.setState({expanded: true});
 
-      assert.isFalse(wrapper.find(".privacy-notice").exists());
+      assert.isFalse(wrapper.find(".privacyNotice").exists());
     });
     it("should render the privacy notice checkbox if prop is provided", () => {
       wrapper.setProps({content: {...DEFAULT_CONTENT, scene2_privacy_html: "privacy notice"}});
       wrapper.setState({expanded: true});
 
-      assert.isTrue(wrapper.find(".privacy-notice").exists());
+      assert.isTrue(wrapper.find(".privacyNotice").exists());
     });
     it("should not call fetch if form_method is GET", async () => {
       sandbox.stub(window, "fetch").resolves(fetchOk);

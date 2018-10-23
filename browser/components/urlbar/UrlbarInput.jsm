@@ -44,6 +44,7 @@ class UrlbarInput {
 
     this.panel = options.panel;
     this.window = this.textbox.ownerGlobal;
+    this.document = this.window.document;
     this.controller = options.controller || new UrlbarController({
       window: this.window,
     });
@@ -51,6 +52,7 @@ class UrlbarInput {
     this.valueIsTyped = false;
     this.userInitiatedFocus = false;
     this.isPrivate = PrivateBrowsingUtils.isWindowPrivate(this.window);
+    this._untrimmedValue = "";
 
     // Forward textbox methods and properties.
     const METHODS = ["addEventListener", "removeEventListener",
@@ -238,16 +240,28 @@ class UrlbarInput {
     return this.textbox.getAttribute("focused") == "true";
   }
 
+  get goButton() {
+    return this.document.getAnonymousElementByAttribute(this.textbox, "anonid",
+      "urlbar-go-button");
+  }
+
   get value() {
-    return this.inputField.value;
+    return this._untrimmedValue;
   }
 
   set value(val) {
+    this._untrimmedValue = val;
+
     val = this.trimValue(val);
 
     this.valueIsTyped = false;
     this.inputField.value = val;
     this.formatValue();
+
+    // Dispatch ValueChange event for accessibility.
+    let event = this.document.createEvent("Events");
+    event.initEvent("ValueChange", true, true);
+    this.inputField.dispatchEvent(event);
 
     return val;
   }
@@ -416,11 +430,20 @@ class UrlbarInput {
   }
 
   _on_input(event) {
+    let value = event.target.value;
     this.valueIsTyped = true;
+    this._untrimmedValue = value;
+    this.window.gBrowser.userTypedValue = value;
+
+    if (value) {
+      this.setAttribute("usertyping", "true");
+    } else {
+      this.removeAttribute("usertyping");
+    }
 
     // XXX Fill in lastKey, and add anything else we need.
     this.controller.startQuery(new QueryContext({
-      searchString: event.target.value,
+      searchString: value,
       lastKey: "",
       maxResults: UrlbarPrefs.get("maxRichResults"),
       isPrivate: this.isPrivate,
@@ -519,9 +542,9 @@ class CopyCutController {
                                 urlbar.inputField.value.substring(end);
       urlbar.selectionStart = urlbar.selectionEnd = start;
 
-      let event = urlbar.window.document.createEvent("UIEvents");
+      let event = urlbar.document.createEvent("UIEvents");
       event.initUIEvent("input", true, false, this.window, 0);
-      urlbar.dispatchEvent(event);
+      urlbar.textbox.dispatchEvent(event);
 
       urlbar.window.SetPageProxyState("invalid");
     }

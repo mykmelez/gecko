@@ -16,7 +16,8 @@ Please note that some targeting attributes require stricter controls on the tele
 * [firefoxVersion](#firefoxversion)
 * [locale](#locale)
 * [localeLanguageCode](#localelanguagecode)
-* [usesFirefoxSync](#usesfirefoxsync)
+* [needsUpdate](#needsupdate)
+* [pinnedSites](#pinnedsites)
 * [previousSessionEnd](#previoussessionend)
 * [profileAgeCreated](#profileagecreated)
 * [profileAgeReset](#profileagereset)
@@ -26,6 +27,7 @@ Please note that some targeting attributes require stricter controls on the tele
 * [sync](#sync)
 * [topFrecentSites](#topfrecentsites)
 * [totalBookmarksCount](#totalbookmarkscount)
+* [usesFirefoxSync](#usesfirefoxsync)
 * [xpinstallEnabled](#xpinstallEnabled)
 
 ## Detailed usage
@@ -209,14 +211,39 @@ localeLanguageCode == "en"
 declare const localeLanguageCode: string;
 ```
 
-### `usesFirefoxSync`
+### `needsUpdate`
 
-Does the user use Firefox sync?
-
-#### Definition
+Does the client have the latest available version installed
 
 ```ts
-declare const usesFirefoxSync: boolean;
+declare const needsUpdate: boolean;
+```
+
+### `pinnedSites`
+The sites (including search shortcuts) that are pinned on a user's new tab page.
+
+#### Examples
+* Has the user pinned any site on `foo.com`?
+```java
+"foo.com" in pinnedSites|mapToProperty("host")
+```
+
+* Does the user have a pinned `duckduckgo.com` search shortcut?
+```java
+"duckduckgo.com" in pinnedSites[.searchTopSite == true]|mapToProperty("host")
+```
+
+#### Definition
+```ts
+interface PinnedSite {
+  // e.g. https://foo.mozilla.com/foo/bar
+  url: string;
+  // e.g. foo.mozilla.com
+  host: string;
+  // is the pin a search shortcut?
+  searchTopSite: boolean;
+}
+declare const pinnedSites: Array<PinnedSite>
 ```
 
 ### `previousSessionEnd`
@@ -373,6 +400,16 @@ Total number of bookmarks.
 
 ```ts
 declare const totalBookmarksCount: number;
+```
+
+### `usesFirefoxSync`
+
+Does the user use Firefox sync?
+
+#### Definition
+
+```ts
+declare const usesFirefoxSync: boolean;
 ```
 
 ### `xpinstallEnabled`

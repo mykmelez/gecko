@@ -467,7 +467,11 @@ CompositorBridgeParent::~CompositorBridgeParent()
 void
 CompositorBridgeParent::ForceIsFirstPaint()
 {
-  mCompositionManager->ForceIsFirstPaint();
+  if (mWrBridge) {
+    mWrBridge->ForceIsFirstPaint();
+  } else {
+    mCompositionManager->ForceIsFirstPaint();
+  }
 }
 
 void
@@ -645,7 +649,7 @@ mozilla::ipc::IPCResult
 CompositorBridgeParent::RecvForcePresent()
 {
   if (mWrBridge) {
-    mWrBridge->ScheduleGenerateFrame();
+    mWrBridge->ScheduleForcedGenerateFrame();
   }
   // During the shutdown sequence mLayerManager may be null
   if (mLayerManager) {
@@ -2205,11 +2209,14 @@ CompositorBridgeParent::NotifyPipelineRendered(const wr::PipelineId& aPipelineId
     return;
   }
 
+  RefPtr<UiCompositorControllerParent> uiController =
+    UiCompositorControllerParent::GetFromRootLayerTreeId(mRootLayerTreeID);
+
   if (mWrBridge->PipelineId() == aPipelineId) {
     mWrBridge->RemoveEpochDataPriorTo(aEpoch);
 
     if (!mPaused) {
-      TransactionId transactionId = mWrBridge->FlushTransactionIdsForEpoch(aEpoch, aCompositeEnd);
+      TransactionId transactionId = mWrBridge->FlushTransactionIdsForEpoch(aEpoch, aCompositeEnd, uiController);
       Unused << SendDidComposite(LayersId{0}, transactionId, aCompositeStart, aCompositeEnd);
 
       nsTArray<ImageCompositeNotificationInfo> notifications;
@@ -2231,7 +2238,7 @@ CompositorBridgeParent::NotifyPipelineRendered(const wr::PipelineId& aPipelineId
 
       if (!mPaused) {
         CrossProcessCompositorBridgeParent* cpcp = lts->mCrossProcessParent;
-        TransactionId transactionId = lts->mWrBridge->FlushTransactionIdsForEpoch(aEpoch, aCompositeEnd);
+        TransactionId transactionId = lts->mWrBridge->FlushTransactionIdsForEpoch(aEpoch, aCompositeEnd, uiController);
         Unused << cpcp->SendDidComposite(aLayersId, transactionId, aCompositeStart, aCompositeEnd);
       }
     }

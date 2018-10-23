@@ -21,14 +21,6 @@ xul|button[dlgtype="help"] {
   width: auto;
 }
 
-xul|caption {
-  padding-inline-start: 0;
-}
-
-xul|groupbox > xul|*.groupbox-body {
-  padding: 0;
-}
-
 xul|menulist > xul|menupopup > xul|menuitem[checked="true"]::before,
 xul|menulist > xul|menupopup > xul|menuitem[selected="true"]::before {
   display: none;
@@ -94,7 +86,7 @@ textbox[type="search"] {
   padding-inline-start: 10px;
 }
 
-xul|textbox[type="search"]:not([searchbutton]) > moz-input-box > .textbox-search-sign {
+xul|textbox[type="search"] > moz-input-box > .textbox-search-sign {
   list-style-image: url(chrome://global/skin/icons/search-textbox.svg);
   margin-inline-end: 5px;
 }

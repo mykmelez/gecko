@@ -308,7 +308,7 @@ task_description_schema = Schema({
         Optional('skip-artifacts'): bool,
     }, {
         Required('implementation'): 'generic-worker',
-        Required('os'): Any('windows', 'macosx'),
+        Required('os'): Any('windows', 'macosx', 'linux'),
         # see http://schemas.taskcluster.net/generic-worker/v1/payload.json
         # and https://docs.taskcluster.net/reference/workers/generic-worker/payload
 
@@ -572,6 +572,9 @@ task_description_schema = Schema({
         Required('implementation'): 'bouncer-locations',
         Required('bouncer-products'): [basestring],
     }, {
+        Required('implementation'): 'bouncer-locations-breakpoint',
+        Required('payload'): object,
+    }, {
         Required('implementation'): 'bouncer-submission',
         Required('locales'): [basestring],
         Required('entries'): object,
@@ -616,6 +619,12 @@ task_description_schema = Schema({
     }, {
         Required('implementation'): 'shipit-shipped',
         Required('release-name'): basestring,
+    }, {
+        Required('implementation'): 'shipit-started',
+        Required('release-name'): basestring,
+        Required('product'): basestring,
+        Required('branch'): basestring,
+        Required('locales'): basestring,
     }, {
         Required('implementation'): 'treescript',
         Required('tags'): [Any('buildN', 'release', None)],
@@ -1022,9 +1031,14 @@ def build_generic_worker_payload(config, task, task_def):
     for mount in mounts:
         if 'cache-name' in mount:
             mount['cacheName'] = mount.pop('cache-name')
+            task_def['scopes'].append('generic-worker:cache:{}'.format(mount['cacheName']))
         if 'content' in mount:
             if 'task-id' in mount['content']:
                 mount['content']['taskId'] = mount['content'].pop('task-id')
+            if 'artifact' in mount['content']:
+                if not mount['content']['artifact'].startswith('public/'):
+                    task_def['scopes'].append(
+                        'queue:get-artifact:{}'.format(mount['content']['artifact']))
 
     if mounts:
         task_def['payload']['mounts'] = mounts
@@ -1209,6 +1223,11 @@ def build_bouncer_locations_payload(config, task, task_def):
     }
 
 
+@payload_builder('bouncer-locations-breakpoint')
+def build_bouncer_locations_breakpoint_payload(config, task, task_def):
+    task_def['payload'] = task['worker']['payload']
+
+
 @payload_builder('bouncer-submission')
 def build_bouncer_submission_payload(config, task, task_def):
     worker = task['worker']
@@ -1248,6 +1267,23 @@ def build_ship_it_shipped_payload(config, task, task_def):
 
     task_def['payload'] = {
         'release_name': worker['release-name']
+    }
+
+
+@payload_builder('shipit-started')
+def build_ship_it_started_payload(config, task, task_def):
+    worker = task['worker']
+    release_config = get_release_config(config)
+
+    task_def['payload'] = {
+        'release_name': worker['release-name'],
+        'product': worker['product'],
+        'version': release_config['version'],
+        'build_number': release_config['build_number'],
+        'branch': worker['branch'],
+        'revision': get_branch_rev(config),
+        'partials': release_config.get('partial_versions', ""),
+        'l10n_changesets': worker['locales'],
     }
 
 

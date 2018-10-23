@@ -265,7 +265,7 @@ var gDevToolsBrowser = exports.gDevToolsBrowser = {
         break;
       case "responsiveDesignMode":
         ResponsiveUIManager.toggle(window, window.gBrowser.selectedTab, {
-          trigger: "shortcut"
+          trigger: "shortcut",
         });
         break;
       case "scratchpad":
@@ -375,10 +375,10 @@ var gDevToolsBrowser = exports.gDevToolsBrowser = {
    *         worker actor form to debug
    */
   async openWorkerToolbox(client, workerTargetActor) {
-    const [, workerClient] = await client.attachWorker(workerTargetActor);
-    const workerTarget = TargetFactory.forWorker(workerClient);
+    const [, workerTargetFront] = await client.attachWorker(workerTargetActor);
+    const workerTarget = TargetFactory.forWorker(workerTargetFront);
     const toolbox = await gDevTools.showToolbox(workerTarget, null, Toolbox.HostType.WINDOW);
-    toolbox.once("destroy", () => workerClient.detach());
+    toolbox.once("destroy", () => workerTargetFront.detach());
   },
 
   /**
@@ -397,7 +397,7 @@ var gDevToolsBrowser = exports.gDevToolsBrowser = {
       tooltiptext: "devtools-webide-button2.tooltiptext",
       onCommand(event) {
         gDevToolsBrowser.openWebIDE();
-      }
+      },
     });
   },
 
@@ -594,7 +594,7 @@ var gDevToolsBrowser = exports.gDevToolsBrowser = {
 
   hasToolboxOpened(win) {
     const tab = win.gBrowser.selectedTab;
-    for (const [target, ] of gDevTools._toolboxes) {
+    for (const [target ] of gDevTools._toolboxes) {
       if (target.tab == tab) {
         return true;
       }

@@ -217,11 +217,6 @@
   --select-arrow-image: url(chrome://devtools/skin/images/select-arrow.svg);
   --theme-pane-collapse-image: url(chrome://devtools/skin/images/pane-collapse.svg);
   --theme-pane-expand-image: url(chrome://devtools/skin/images/pane-expand.svg);
-  --theme-console-alert-image: url(chrome://devtools/skin/images/webconsole/alert.svg);
-  --theme-console-info-image: url(chrome://devtools/skin/images/webconsole/info.svg);
-  --theme-console-input-image: url(chrome://devtools/skin/images/webconsole/input.svg);
-  --theme-console-return-image: url(chrome://devtools/skin/images/webconsole/return.svg);
-  --theme-console-jump-image: url(chrome://devtools/skin/images/webconsole/jump.svg);
 
   /* Firefox Colors CSS Variables v1.0.3
    * Colors are taken from: https://github.com/FirefoxUX/design-tokens
@@ -243,6 +238,7 @@
   --teal-60: #00c8d7;
   --teal-70: #008ea4;
 
+  --red-20: #ffb3d2;
   --red-70: #a4000f;
 
   --green-50: #30e60b;

@@ -2959,9 +2959,9 @@ bool AsyncPanZoomController::AttemptScroll(ParentLayerPoint& aStartPoint,
 #if defined(MOZ_WIDGET_ANDROID)
         if (block->AsTouchBlock() && (block->GetScrolledApzc() != this) && IsRootContent()) {
           if (APZCTreeManager* manager = GetApzcTreeManager()) {
-            AndroidDynamicToolbarAnimator* animator = manager->GetAndroidDynamicToolbarAnimator();
-            MOZ_ASSERT(animator);
-            animator->SetScrollingRootContent();
+            if (AndroidDynamicToolbarAnimator* animator = manager->GetAndroidDynamicToolbarAnimator()) {
+              animator->SetScrollingRootContent();
+            }
           }
         }
 #endif
@@ -3963,6 +3963,16 @@ AsyncPanZoomController::GetCurrentAsyncTransformWithOverscroll(AsyncTransformCon
        * GetOverscrollTransform(aMode);
 }
 
+LayoutDeviceToParentLayerScale
+AsyncPanZoomController::GetCurrentPinchZoomScale(AsyncTransformConsumer aMode) const
+{
+  CSSToParentLayerScale2D scale = GetEffectiveZoom(aMode);
+  // Note that in general the zoom might have different x- and y-scales.
+  // However, this function in particular is only used on the WebRender codepath
+  // for which the scales should always be the same.
+  return scale.ToScaleFactor() / Metrics().GetDevPixelsPerCSSPixel();
+}
+
 CSSRect
 AsyncPanZoomController::GetEffectiveLayoutViewport(AsyncTransformConsumer aMode) const
 {
@@ -4269,9 +4279,9 @@ void AsyncPanZoomController::NotifyLayersUpdated(const ScrollMetadata& aScrollMe
 #if defined(MOZ_WIDGET_ANDROID)
   if (aLayerMetrics.IsRootContent()) {
     if (APZCTreeManager* manager = GetApzcTreeManager()) {
-      AndroidDynamicToolbarAnimator* animator = manager->GetAndroidDynamicToolbarAnimator();
-      MOZ_ASSERT(animator);
-      animator->MaybeUpdateCompositionSizeAndRootFrameMetrics(aLayerMetrics);
+      if (AndroidDynamicToolbarAnimator* animator = manager->GetAndroidDynamicToolbarAnimator()) {
+        animator->MaybeUpdateCompositionSizeAndRootFrameMetrics(aLayerMetrics);
+      }
     }
   }
 #endif
@@ -4709,9 +4719,9 @@ void AsyncPanZoomController::DispatchStateChangeNotification(PanZoomState aOldSt
       // panned or zoomed and it is in a steady state. So the FrameMetrics only need to be
       // updated when the transform ends.
       if (APZCTreeManager* manager = GetApzcTreeManager()) {
-        AndroidDynamicToolbarAnimator* animator = manager->GetAndroidDynamicToolbarAnimator();
-        MOZ_ASSERT(animator);
-        animator->UpdateRootFrameMetrics(Metrics());
+        if (AndroidDynamicToolbarAnimator* animator = manager->GetAndroidDynamicToolbarAnimator()) {
+          animator->UpdateRootFrameMetrics(Metrics());
+        }
       }
 #endif
 

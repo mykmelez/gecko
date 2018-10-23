@@ -34,7 +34,6 @@ loader.lazyRequireGetter(this, "MenuItem", "devtools/client/framework/menu-item"
 loader.lazyRequireGetter(this, "ExtensionSidebar", "devtools/client/inspector/extensions/extension-sidebar");
 loader.lazyRequireGetter(this, "clipboardHelper", "devtools/shared/platform/clipboard");
 loader.lazyRequireGetter(this, "openContentLink", "devtools/client/shared/link", true);
-loader.lazyRequireGetter(this, "getScreenshotFront", "devtools/shared/fronts/screenshot", true);
 loader.lazyRequireGetter(this, "saveScreenshot", "devtools/shared/screenshot/save");
 loader.lazyRequireGetter(this, "ChangesManager",
 "devtools/client/inspector/changes/ChangesManager");
@@ -66,7 +65,7 @@ const THREE_PANE_ENABLED_PREF = "devtools.inspector.three-pane-enabled";
 const THREE_PANE_ENABLED_SCALAR = "devtools.inspector.three_pane_enabled";
 const THREE_PANE_CHROME_ENABLED_PREF = "devtools.inspector.chrome.three-pane-enabled";
 const TELEMETRY_EYEDROPPER_OPENED = "devtools.toolbar.eyedropper.opened";
-const TRACK_CHANGES_ENABLED = "devtools.inspector.changes.enabled";
+const TRACK_CHANGES_PREF = "devtools.inspector.changes.enabled";
 
 /**
  * Represents an open instance of the Inspector for a tab.
@@ -123,7 +122,7 @@ function Inspector(toolbox) {
 
   this.reflowTracker = new ReflowTracker(this._target);
   this.styleChangeTracker = new InspectorStyleChangeTracker(this);
-  if (Services.prefs.getBoolPref(TRACK_CHANGES_ENABLED)) {
+  if (Services.prefs.getBoolPref(TRACK_CHANGES_PREF)) {
     this.changesManager = new ChangesManager(this);
   }
 
@@ -271,6 +270,14 @@ Inspector.prototype = {
     // nodeFront ready when they're initialized.
     if (this._defaultNode) {
       this.selection.setNodeFront(this._defaultNode, { reason: "inspector-open" });
+    }
+
+    if (Services.prefs.getBoolPref(TRACK_CHANGES_PREF)) {
+      // Get the Changes front, then call a method on it, which will instantiate
+      // the ChangesActor. We want the ChangesActor to be guaranteed available before
+      // the user makes any changes.
+      this.changesFront = this.toolbox.target.getFront("changes");
+      await this.changesFront.allChanges();
     }
 
     // Setup the splitter before the sidebar is displayed so, we don't miss any events.
@@ -877,7 +884,7 @@ Inspector.prototype = {
     let defaultTab = Services.prefs.getCharPref("devtools.inspector.activeSidebar");
 
     if (this.is3PaneModeEnabled && defaultTab === "ruleview") {
-      defaultTab = "computedview";
+      defaultTab = "layoutview";
     }
 
     // Append all side panels
@@ -957,7 +964,7 @@ Inspector.prototype = {
       },
       defaultTab == fontId);
 
-    if (Services.prefs.getBoolPref(TRACK_CHANGES_ENABLED)) {
+    if (Services.prefs.getBoolPref(TRACK_CHANGES_PREF)) {
       // Inject a lazy loaded react tab by exposing a fake React object
       // with a lazy defined Tab thanks to `panel` being a function
       const changesId = "changesview";
@@ -2334,7 +2341,7 @@ Inspector.prototype = {
       selector: this.selectionCssSelector,
       clipboard: clipboardEnabled
     };
-    const screenshotFront = getScreenshotFront(this.target);
+    const screenshotFront = this.target.getFront("screenshot");
     const screenshot = await screenshotFront.capture(args);
     await saveScreenshot(this.panelWin, args, screenshot);
   },

@@ -7,7 +7,7 @@ use api::{DevicePixelScale, ImageDescriptor, ImageFormat};
 use api::{LineStyle, LineOrientation, LayoutSize};
 #[cfg(feature = "pathfinder")]
 use api::FontRenderMode;
-use border::BorderCacheKey;
+use border::{BorderCornerCacheKey, BorderEdgeCacheKey};
 use box_shadow::{BoxShadowCacheKey};
 use clip::{ClipDataStore, ClipItem, ClipStore, ClipNodeRange};
 use clip_scroll_tree::SpatialNodeIndex;
@@ -18,11 +18,11 @@ use freelist::{FreeList, FreeListHandle, WeakFreeListHandle};
 use glyph_rasterizer::GpuGlyphCacheKey;
 use gpu_cache::{GpuCache, GpuCacheAddress, GpuCacheHandle};
 use gpu_types::{BorderInstance, ImageSource, UvRectKind};
-use internal_types::{CacheTextureId, FastHashMap, SavedTargetIndex};
+use internal_types::{CacheTextureId, FastHashMap, LayerIndex, SavedTargetIndex};
 #[cfg(feature = "pathfinder")]
 use pathfinder_partitioner::mesh::Mesh;
 use picture::PictureCacheKey;
-use prim_store::{PrimitiveIndex, ImageCacheKey, LineDecorationCacheKey};
+use prim_store::{PictureIndex, ImageCacheKey, LineDecorationCacheKey};
 #[cfg(feature = "debugger")]
 use print_tree::{PrintTreePrinter};
 use render_backend::FrameId;
@@ -113,7 +113,7 @@ impl RenderTaskTree {
                 debug_assert!(pass_index == passes.len() - 1);
             }
             RenderTaskLocation::Dynamic(..) |
-            RenderTaskLocation::TextureCache(..) => {
+            RenderTaskLocation::TextureCache { .. } => {
                 debug_assert!(pass_index < passes.len() - 1);
             }
         }
@@ -192,7 +192,14 @@ pub enum RenderTaskLocation {
     Dynamic(Option<(DeviceIntPoint, RenderTargetIndex)>, DeviceIntSize),
     /// The output of the `RenderTask` will be persisted beyond this frame, and
     /// thus should be drawn into the `TextureCache`.
-    TextureCache(CacheTextureId, i32, DeviceIntRect),
+    TextureCache {
+        /// Which texture in the texture cache should be drawn into.
+        texture: CacheTextureId,
+        /// The target layer in the above texture.
+        layer: LayerIndex,
+        /// The target region within the above layer.
+        rect: DeviceIntRect,
+    },
 }
 
 #[derive(Debug)]
@@ -215,7 +222,7 @@ pub struct ClipRegionTask {
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct PictureTask {
-    pub prim_index: PrimitiveIndex,
+    pub pic_index: PictureIndex,
     pub can_merge: bool,
     pub content_origin: DeviceIntPoint,
     pub uv_rect_handle: GpuCacheHandle,
@@ -377,7 +384,7 @@ impl RenderTask {
     pub fn new_picture(
         location: RenderTaskLocation,
         unclipped_size: DeviceSize,
-        prim_index: PrimitiveIndex,
+        pic_index: PictureIndex,
         content_origin: DeviceIntPoint,
         children: Vec<RenderTaskId>,
         uv_rect_kind: UvRectKind,
@@ -386,7 +393,7 @@ impl RenderTask {
         let size = match location {
             RenderTaskLocation::Dynamic(_, size) => size,
             RenderTaskLocation::Fixed(rect) => rect.size,
-            RenderTaskLocation::TextureCache(_, _, rect) => rect.size,
+            RenderTaskLocation::TextureCache { rect, .. } => rect.size,
         };
 
         render_task_sanity_check(&size);
@@ -398,7 +405,7 @@ impl RenderTask {
             location,
             children,
             kind: RenderTaskKind::Picture(PictureTask {
-                prim_index,
+                pic_index,
                 content_origin,
                 can_merge,
                 uv_rect_handle: GpuCacheHandle::new(),
@@ -655,7 +662,7 @@ impl RenderTask {
         )
     }
 
-    pub fn new_border(
+    pub fn new_border_segment(
         size: DeviceIntSize,
         instances: Vec<BorderInstance>,
     ) -> Self {
@@ -839,7 +846,7 @@ impl RenderTask {
         match self.location {
             RenderTaskLocation::Fixed(..) => DeviceIntSize::zero(),
             RenderTaskLocation::Dynamic(_, size) => size,
-            RenderTaskLocation::TextureCache(_, _, rect) => rect.size,
+            RenderTaskLocation::TextureCache { rect, .. } => rect.size,
         }
     }
 
@@ -868,7 +875,7 @@ impl RenderTask {
             RenderTaskLocation::Dynamic(None, _) => {
                 (DeviceIntRect::zero(), RenderTargetIndex(0))
             }
-            RenderTaskLocation::TextureCache(_, layer, rect) => {
+            RenderTaskLocation::TextureCache {layer, rect, .. } => {
                 (rect, RenderTargetIndex(layer as usize))
             }
         }
@@ -985,7 +992,7 @@ impl RenderTask {
     pub fn print_with<T: PrintTreePrinter>(&self, pt: &mut T, tree: &RenderTaskTree) -> bool {
         match self.kind {
             RenderTaskKind::Picture(ref task) => {
-                pt.new_level(format!("Picture of {:?}", task.prim_index));
+                pt.new_level(format!("Picture of {:?}", task.pic_index));
             }
             RenderTaskKind::CacheMask(ref task) => {
                 pt.new_level(format!("CacheMask with {} clips", task.clip_node_range.count));
@@ -1044,7 +1051,7 @@ impl RenderTask {
             RenderTaskLocation::Dynamic(..) => {
                 self.saved_index = Some(SavedTargetIndex::PENDING);
             }
-            RenderTaskLocation::TextureCache(..) => {
+            RenderTaskLocation::TextureCache { .. } => {
                 panic!("Unable to mark a permanently cached task for saving!");
             }
         }
@@ -1060,7 +1067,8 @@ pub enum RenderTaskCacheKeyKind {
     #[allow(dead_code)]
     Glyph(GpuGlyphCacheKey),
     Picture(PictureCacheKey),
-    Border(BorderCacheKey),
+    BorderEdge(BorderEdgeCacheKey),
+    BorderCorner(BorderCornerCacheKey),
     LineDecoration(LineDecorationCacheKey),
 }
 
@@ -1161,7 +1169,7 @@ impl RenderTaskCache {
                 // Find out what size to alloc in the texture cache.
                 let size = match render_task.location {
                     RenderTaskLocation::Fixed(..) |
-                    RenderTaskLocation::TextureCache(..) => {
+                    RenderTaskLocation::TextureCache { .. } => {
                         panic!("BUG: dynamic task was expected");
                     }
                     RenderTaskLocation::Dynamic(_, size) => size,
@@ -1203,11 +1211,11 @@ impl RenderTaskCache {
                 let (texture_id, texture_layer, uv_rect) =
                     texture_cache.get_cache_location(&entry.handle);
 
-                render_task.location = RenderTaskLocation::TextureCache(
-                    texture_id,
-                    texture_layer,
-                    uv_rect.to_i32()
-                );
+                render_task.location = RenderTaskLocation::TextureCache {
+                    texture: texture_id,
+                    layer: texture_layer,
+                    rect: uv_rect.to_i32(),
+                };
             }
         }
     }

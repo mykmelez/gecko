@@ -605,6 +605,8 @@
         <xul:spacer flex="5000"/> <!-- Necessary to allow the message to wrap -->
       </xul:hbox>
 
+      <xul:image class="card-heading-image" anonid="theme-screenshot" hidden="true"/>
+
       <xul:hbox class="content-container" align="center">
         <xul:vbox class="icon-container">
           <xul:image anonid="icon" class="icon"/>
@@ -613,7 +615,7 @@
           <xul:hbox class="basicinfo-container">
               <xul:hbox class="name-container">
                 <xul:label anonid="name" class="name" crop="end" flex="1"
-                           tooltip="addonitem-tooltip" xbl:inherits="value=name"/>
+                           tooltip="addonitem-tooltip" xbl:inherits="xbl:text=name"/>
                 <xul:label anonid="legacy" class="legacy-warning text-link" value="&addon.legacy.label;"/>
                 <xul:label class="disabled-postfix" value="&addon.disabled.postfix;"/>
                 <xul:label class="update-postfix" value="&addon.update.postfix;"/>
@@ -668,7 +670,7 @@
             <xul:hbox anonid="install-status" class="install-status"
                       hidden="true"/>
           </xul:hbox>
-          <xul:hbox anonid="control-container" class="control-container">
+          <xul:hbox anonid="control-container" class="control-container" flex="1">
             <xul:button anonid="preferences-btn"
                         class="addon-control preferences"
 #ifdef XP_WIN
@@ -693,6 +695,7 @@
                         oncommand="document.getBindingParent(this).uninstall();"/>
             <xul:menulist anonid="state-menulist"
                           class="addon-control state"
+                          flex="1"
                           tooltiptext="&cmd.stateMenu.tooltip;">
               <xul:menupopup>
                 <xul:menuitem anonid="ask-to-activate-menuitem"
@@ -1488,8 +1491,10 @@
 
     <handlers>
       <handler event="click" button="0"><![CDATA[
-        if (!["button", "checkbox"].includes(event.originalTarget.localName) &&
-            !event.originalTarget.classList.contains("text-link")) {
+        if (!["button", "checkbox", "menulist", "menuitem"].includes(event.originalTarget.localName) &&
+            !event.originalTarget.classList.contains("text-link") &&
+            // Treat the relnotes container as embedded text instead of a click target.
+            !event.originalTarget.closest(".relnotes-container")) {
           this.showInDetailView();
         }
       ]]></handler>
