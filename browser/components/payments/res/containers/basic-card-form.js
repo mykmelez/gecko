@@ -4,6 +4,7 @@
 
 /* import-globals-from ../../../../../browser/extensions/formautofill/content/autofillEditForms.js*/
 import AcceptedCards from "../components/accepted-cards.js";
+import CscInput from "../components/csc-input.js";
 import LabelledCheckbox from "../components/labelled-checkbox.js";
 import PaymentDialog from "./payment-dialog.js";
 import PaymentRequestPage from "../components/payment-request-page.js";
@@ -35,6 +36,11 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
     this.addressEditLink.className = "edit-link";
     this.addressEditLink.href = "javascript:void(0)";
     this.addressEditLink.addEventListener("click", this);
+
+    this.cscInput = new CscInput({
+      useAlwaysVisiblePlaceholder: true,
+      inputId: "cc-csc",
+    });
 
     this.persistCheckbox = new LabelledCheckbox();
     // The persist checkbox shouldn't be part of the record which gets saved so
@@ -107,6 +113,11 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
         field.addEventListener("invalid", this);
       }
 
+      // Replace the form-autofill cc-csc fields with our csc-input.
+      let cscContainer = this.form.querySelector("#cc-csc-container");
+      cscContainer.textContent = "";
+      cscContainer.appendChild(this.cscInput);
+
       let fragment = document.createDocumentFragment();
       fragment.append(" ");
       fragment.append(this.addressEditLink);
@@ -140,21 +151,28 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
       return;
     }
 
+    if (!basicCardPage.selectedStateKey) {
+      throw new Error("A `selectedStateKey` is required");
+    }
+
     let editing = !!basicCardPage.guid;
     this.cancelButton.textContent = this.dataset.cancelButtonLabel;
     this.backButton.textContent = this.dataset.backButtonLabel;
-    if (page.onboardingWizard) {
-      this.saveButton.textContent = this.dataset.nextButtonLabel;
+    if (editing) {
+      this.saveButton.textContent = this.dataset.updateButtonLabel;
     } else {
-      this.saveButton.textContent = editing ? this.dataset.updateButtonLabel :
-                                              this.dataset.addButtonLabel;
+      this.saveButton.textContent = this.dataset.nextButtonLabel;
     }
+
+    this.cscInput.placeholder = this.dataset.cscPlaceholder;
+    this.cscInput.frontTooltip = this.dataset.cscFrontInfoTooltip;
+    this.cscInput.backTooltip = this.dataset.cscBackInfoTooltip;
+
     this.persistCheckbox.label = this.dataset.persistCheckboxLabel;
     this.persistCheckbox.infoTooltip = this.dataset.persistCheckboxInfoTooltip;
     this.addressAddLink.textContent = this.dataset.addressAddLinkLabel;
     this.addressEditLink.textContent = this.dataset.addressEditLinkLabel;
     this.acceptedCardsList.label = this.dataset.acceptedCardsLabel;
-    this.acceptedCardsList.hidden = editing;
 
     // The next line needs an onboarding check since we don't set previousId
     // when navigating to add/edit directly from the summary page.
@@ -171,7 +189,7 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
 
     // The CVV fields should be hidden and disabled when editing.
     this.form.querySelector("#cc-csc-container").hidden = editing;
-    this.form.querySelector("#cc-csc").disabled = editing;
+    this.cscInput.disabled = editing;
 
     // If a card is selected we want to edit it.
     if (editing) {
@@ -260,6 +278,9 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
   }
 
   onChange(evt) {
+    let ccType = this.form.querySelector("#cc-type");
+    this.cscInput.setAttribute("card-type", ccType.value);
+
     this.updateSaveButtonState();
   }
 
@@ -431,7 +452,7 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
           id: "payment-summary",
         },
         [selectedStateKey]: guid,
-        [selectedStateKey + "SecurityCode"]: this.form.querySelector("#cc-csc").value,
+        [selectedStateKey + "SecurityCode"]: this.cscInput.value,
       });
     } catch (ex) {
       log.warn("saveRecord: error:", ex);

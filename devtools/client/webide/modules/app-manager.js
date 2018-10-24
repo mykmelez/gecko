@@ -150,12 +150,14 @@ var AppManager = exports.AppManager = {
       this._listTabsResponse = null;
       this.deviceFront = null;
       this.preferenceFront = null;
+      this.perfFront = null;
     } else {
       const response = await this.connection.client.listTabs();
       this._listTabsResponse = response;
       try {
         this.deviceFront = await this.connection.client.mainRoot.getFront("device");
         this.preferenceFront = await this.connection.client.mainRoot.getFront("preference");
+        this.perfFront = await this.connection.client.mainRoot.getFront("perf");
         this._recordRuntimeInfo();
       } catch (e) {
         // This may fail on <FF55 (because of lack of bug 1352157) but we will want to
@@ -252,12 +254,12 @@ var AppManager = exports.AppManager = {
     if (this.selectedProject.type == "mainProcess") {
       // Fx >=39 exposes a ParentProcessTargetActor to debug the main process
       if (this.connection.client.mainRoot.traits.allowChromeProcess) {
-        return this.connection.client.getProcess()
+        return this.connection.client.mainRoot.getProcess(0)
                    .then(aResponse => {
                      return TargetFactory.forRemoteTab({
                        form: aResponse.form,
                        client: this.connection.client,
-                       chrome: true
+                       chrome: true,
                      });
                    });
       }
@@ -266,7 +268,6 @@ var AppManager = exports.AppManager = {
           form: this._listTabsResponse,
           client: this.connection.client,
           chrome: true,
-          isBrowsingContext: false
       });
     }
 
@@ -601,7 +602,7 @@ var AppManager = exports.AppManager = {
         const appId = origin.host;
         const metadata = {
           origin: origin.spec,
-          manifestURL: project.location
+          manifestURL: project.location,
         };
         response = await self._appsFront.installHosted(appId,
                                             metadata,
@@ -649,7 +650,7 @@ var AppManager = exports.AppManager = {
       const validation = new AppValidator({
         type: project.type,
         // Build process may place the manifest in a non-root directory
-        location: packageDir
+        location: packageDir,
       });
 
       await validation.validate();
@@ -729,7 +730,7 @@ var AppManager = exports.AppManager = {
     this.runtimeList = {
       usb: [],
       wifi: [],
-      other: []
+      other: [],
     };
   },
 

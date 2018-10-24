@@ -6,7 +6,7 @@
 /* import-globals-from project-panel.js */
 /* import-globals-from runtime-panel.js */
 
-const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const {loader, require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 const {gDevTools} = require("devtools/client/framework/devtools");
 const {gDevToolsBrowser} = require("devtools/client/framework/devtools-browser");
 const {Toolbox} = require("devtools/client/framework/toolbox");
@@ -16,11 +16,12 @@ const {Connection} = require("devtools/shared/client/connection-manager");
 const {AppManager} = require("devtools/client/webide/modules/app-manager");
 const EventEmitter = require("devtools/shared/event-emitter");
 const promise = require("promise");
-const {GetAvailableAddons} = require("devtools/client/webide/modules/addons");
 const {getJSON} = require("devtools/client/shared/getjson");
 const Telemetry = require("devtools/client/shared/telemetry");
 const {RuntimeScanners} = require("devtools/client/webide/modules/runtimes");
 const {openContentLink} = require("devtools/client/shared/link");
+
+loader.lazyRequireGetter(this, "adbAddon", "devtools/shared/adb/adb-addon", true);
 
 const Strings =
   Services.strings.createBundle("chrome://devtools/locale/webide.properties");
@@ -38,7 +39,7 @@ const MIN_ZOOM = 0.6;
    Object.defineProperty(this, key, {
      value: value,
      enumerable: true,
-     writable: false
+     writable: false,
    });
  });
 
@@ -86,8 +87,7 @@ var UI = {
     // If the user decides to uninstall any of this addon, we won't install it again.
     const autoinstallADBExtension = Services.prefs.getBoolPref("devtools.webide.autoinstallADBExtension");
     if (autoinstallADBExtension) {
-      const addons = GetAvailableAddons();
-      addons.adb.install();
+      adbAddon.install("webide");
     }
 
     Services.prefs.setBoolPref("devtools.webide.autoinstallADBExtension", false);
@@ -232,8 +232,6 @@ var UI = {
   busyWithProgressUntil: function(promise, operationDescription) {
     const busy = this.busyUntil(promise, operationDescription);
     const win = document.querySelector("window");
-    const progress = document.querySelector("#action-busy-determined");
-    progress.mode = "undetermined";
     win.classList.add("busy-determined");
     win.classList.remove("busy-undetermined");
     return busy;
@@ -287,7 +285,7 @@ var UI = {
       accessKey: Strings.GetStringFromName("notification_showTroubleShooting_accesskey"),
       callback: function() {
         Cmds.showTroubleShooting();
-      }
+      },
     }];
 
     const nbox = document.querySelector("#notificationbox");
@@ -371,6 +369,11 @@ var UI = {
     const disconnectCmd = document.querySelector("#cmd_disconnectRuntime");
     const devicePrefsCmd = document.querySelector("#cmd_showDevicePrefs");
     const settingsCmd = document.querySelector("#cmd_showSettings");
+    const performancePanelCmd = document.querySelector("#cmd_showPerformancePanel");
+
+    // Display the performance menu only if the pref is enabled
+    const performancePanelMenu = document.querySelector("menuitem[command=cmd_showPerformancePanel]");
+    performancePanelMenu.hidden = !Services.prefs.getBoolPref("devtools.performance.new-panel-enabled", false);
 
     if (AppManager.connected) {
       if (AppManager.deviceFront) {
@@ -381,12 +384,16 @@ var UI = {
         devicePrefsCmd.removeAttribute("disabled");
       }
       disconnectCmd.removeAttribute("disabled");
+      if (AppManager.perfFront) {
+        performancePanelCmd.removeAttribute("disabled");
+      }
     } else {
       detailsCmd.setAttribute("disabled", "true");
       screenshotCmd.setAttribute("disabled", "true");
       disconnectCmd.setAttribute("disabled", "true");
       devicePrefsCmd.setAttribute("disabled", "true");
       settingsCmd.setAttribute("disabled", "true");
+      performancePanelCmd.setAttribute("disabled", "true");
     }
 
     const runtimePanelButton = document.querySelector("#runtime-panel-button");
@@ -671,7 +678,7 @@ var UI = {
       AppManager.selectedProject = {
         type: "mainProcess",
         name: Strings.GetStringFromName("mainProcess_label"),
-        icon: AppManager.DEFAULT_PROJECT_ICON
+        icon: AppManager.DEFAULT_PROJECT_ICON,
       };
     } else if (type == "runtimeApp") {
       const app = AppManager.apps.get(project);
@@ -680,7 +687,7 @@ var UI = {
           type: "runtimeApp",
           app: app.manifest,
           icon: app.iconURL,
-          name: app.manifest.name
+          name: app.manifest.name,
         };
       }
     }
@@ -865,6 +872,15 @@ var Cmds = {
     UI.selectDeckPanel("devicepreferences");
   },
 
+  showPerformancePanel: function() {
+    UI.selectDeckPanel("performance");
+    const iframe = document.getElementById("deck-panel-performance");
+
+    iframe.addEventListener("DOMContentLoaded", () => {
+      iframe.contentWindow.gInit(AppManager.perfFront, AppManager.preferenceFront);
+    }, { once: true });
+  },
+
   async play() {
     let busy;
     switch (AppManager.selectedProject.type) {
@@ -936,5 +952,5 @@ var Cmds = {
   resetZoom: function() {
     UI.contentViewer.fullZoom = 1;
     Services.prefs.setCharPref("devtools.webide.zoom", 1);
-  }
+  },
 };

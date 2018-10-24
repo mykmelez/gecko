@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#![allow(non_snake_case)]
-
 #[macro_use]
 extern crate failure;
 extern crate libc;
@@ -12,30 +10,31 @@ extern crate lmdb;
 extern crate log;
 extern crate nserror;
 extern crate nsstring;
+extern crate ordered_float;
 extern crate rkv;
+extern crate storage_variant;
 #[macro_use]
 extern crate xpcom;
 
 mod error;
 mod ownedvalue;
 mod task;
-mod variant;
 
 use error::KeyValueError;
-use libc::{c_double, int32_t, int64_t, uint16_t};
+use libc::{c_double, c_void, int32_t, int64_t, uint16_t};
 use nserror::{
-    nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_INVALID_ARG, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_INTERFACE,
-    NS_ERROR_UNEXPECTED, NS_OK,
+    nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_INVALID_ARG, NS_ERROR_NO_AGGREGATION,
+    NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_INTERFACE, NS_ERROR_UNEXPECTED, NS_OK,
 };
-use nsstring::{nsAString, nsString};
-use ownedvalue::OwnedValue;
+use nsstring::{nsACString, nsCString, nsString};
+use ownedvalue::{value_to_owned, OwnedValue};
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
     cell::{Cell, RefCell},
-    collections::VecDeque,
     path::Path,
-    str,
+    ptr, str,
     sync::{Arc, RwLock},
+    vec::IntoIter,
 };
 use task::{
     InitTaskRunnable,
@@ -43,22 +42,14 @@ use task::{
     TaskRunnable,
     get_current_thread,
 };
-use variant::IntoVariant;
+use storage_variant::{IntoVariant, Variant};
 use xpcom::{
     interfaces::{
-        nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabase, nsIKeyValueService, nsISimpleEnumerator, nsISupports,
+        nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabase, nsISimpleEnumerator, nsISupports,
         nsIVariant,
     },
-    nsIID, RefPtr,
+    nsIID, Ensure, RefPtr,
 };
-
-fn ensure_ref<'a, T>(ptr: *const T) -> Result<&'a T, KeyValueError> {
-    if ptr.is_null() {
-        Err(KeyValueError::NullPointer)
-    } else {
-        Ok(unsafe { &*ptr })
-    }
-}
 
 // These are the relevant parts of the nsXPTTypeTag enum in xptinfo.h,
 // which nsIVariant.idl reflects into the nsIDataType struct class and uses
@@ -91,20 +82,37 @@ const DATA_TYPE_BOOL: uint16_t = DataType::BOOL as u16;
 const DATA_TYPE_WSTRING: uint16_t = DataType::WSTRING as u16;
 const DATA_TYPE_EMPTY: uint16_t = DataType::EMPTY as u16;
 
-/// Construct an nsIKeyValueService.  This should be called only once
-/// from `KeyValueServiceConstructor` in C++, after which the instance
-/// is memoized and reused (hence the "service" in its name).  It is
-/// the XPCOM equivalent of rkv's Manager singleton.
-#[no_mangle]
-pub extern "C" fn NewKeyValueService(result: *mut *const nsIKeyValueService) -> nsresult {
-    let service = KeyValueService::new();
-    match service.query_interface::<nsIKeyValueService>() {
-        Some(ptr) => {
-            unsafe { ptr.forget(&mut *result) }
-            NS_OK
+macro_rules! get_method {
+    ($name:ident, $default:ty, $variant:ident, $result:ty) => {
+        fn $name(&self, key: &nsACString, default_value: $default) -> Result<$result, KeyValueError> {
+            let key = str::from_utf8(key)?;
+            let env = self.rkv.read()?;
+            let reader = env.read()?;
+            let value = reader.get(&self.store, &key)?;
+
+            match value {
+                Some(Value::$variant(value)) => Ok(value.into()),
+                Some(_value) => Err(KeyValueError::UnexpectedValue),
+                None => Ok(default_value.into()),
+            }
         }
-        None => NS_ERROR_NO_INTERFACE,
+    };
+}
+
+#[no_mangle]
+pub extern "C" fn KeyValueServiceConstructor(
+    outer: *const nsISupports,
+    iid: &nsIID,
+    result: *mut *mut c_void,
+) -> nsresult {
+    unsafe { *result = ptr::null_mut() };
+
+    if !outer.is_null() {
+        return NS_ERROR_NO_AGGREGATION;
     }
+
+    let service: RefPtr<KeyValueService> = KeyValueService::new();
+    unsafe { service.QueryInterface(iid, result) }
 }
 
 pub struct GetOrCreateTask {
@@ -146,50 +154,44 @@ impl Task for GetOrCreateTask {
 // to simplify the implementation in the second method while returning XPCOM-
 // compatible nsresult values to XPCOM callers.
 //
-// I wonder if it'd be possible/useful to make Rust implementations of XPCOM
-// methods return Result<nsresult, nsresult> rather than nsresult.  Then we
-// might be able to merge these pairs of methods into a single method that can
-// use Rust idioms while returning the type of value that XPCOM expects.
+// The XPCOM methods are implemented using the xpcom_method! declarative macro
+// from the xpcom crate.
 
 #[derive(xpcom)]
 #[xpimplements(nsIKeyValueService)]
-#[refcnt = "nonatomic"]
+#[refcnt = "atomic"]
 pub struct InitKeyValueService {}
 
 impl KeyValueService {
-    fn GetOrCreateDefault(
-        &self,
-        path: *const nsAString,
-        retval: *mut *const nsIKeyValueDatabase,
-    ) -> nsresult {
-        match self.get_or_create_default(path) {
-            Ok(ptr) => {
-                unsafe { ptr.forget(&mut *retval) };
-                NS_OK
-            }
-            Err(error) => {
-                error!("{}", error);
-                error.into()
-            }
-        }
+    fn new() -> RefPtr<KeyValueService> {
+        KeyValueService::allocate(InitKeyValueService {})
     }
 
-    fn GetOrCreate(
+    xpcom_method!(
+        GetOrCreate,
+        get_or_create,
+        { path: *const nsACString, name: *const nsACString },
+        *mut *const nsIKeyValueDatabase
+    );
+
+    fn get_or_create(
         &self,
-        path: *const nsAString,
-        name: *const nsAString,
-        retval: *mut *const nsIKeyValueDatabase,
-    ) -> nsresult {
-        match self.get_or_create(path, name) {
-            Ok(ptr) => {
-                unsafe { ptr.forget(&mut *retval) };
-                NS_OK
-            }
-            Err(error) => {
-                error!("{}", error);
-                error.into()
-            }
-        }
+        path: &nsACString,
+        name: &nsACString,
+    ) -> Result<RefPtr<nsIKeyValueDatabase>, KeyValueError> {
+        let path = str::from_utf8(path)?;
+        let name = str::from_utf8(name)?;
+        let mut writer = Manager::singleton().write()?;
+        let rkv = writer.get_or_create(Path::new(path), Rkv::new)?;
+        let store = match name {
+            "" => rkv.write()?.open_or_create_default(),
+            _ => rkv.write()?.open_or_create(Some(name)),
+        }?;
+        let key_value_db = KeyValueDatabase::new(rkv, store);
+
+        key_value_db
+            .query_interface::<nsIKeyValueDatabase>()
+            .ok_or(KeyValueError::NoInterface("nsIKeyValueDatabase"))
     }
 
     fn GetOrCreateAsync(
@@ -208,44 +210,6 @@ impl KeyValueService {
                 error.into()
             }
         }
-    }
-}
-
-impl KeyValueService {
-    fn new() -> RefPtr<KeyValueService> {
-        KeyValueService::allocate(InitKeyValueService {})
-    }
-
-    fn get_or_create_default(
-        &self,
-        path: *const nsAString,
-    ) -> Result<RefPtr<nsIKeyValueDatabase>, KeyValueError> {
-        let path = String::from_utf16(ensure_ref(path)?)?;
-        let mut writer = Manager::singleton().write()?;
-        let rkv = writer.get_or_create(Path::new(&path), Rkv::new)?;
-        let store = rkv.write()?.open_or_create_default()?;
-        let key_value_db = KeyValueDatabase::new(rkv, store);
-
-        key_value_db
-            .query_interface::<nsIKeyValueDatabase>()
-            .ok_or(KeyValueError::NoInterface("nsIKeyValueDatabase"))
-    }
-
-    fn get_or_create(
-        &self,
-        path: *const nsAString,
-        name: *const nsAString,
-    ) -> Result<RefPtr<nsIKeyValueDatabase>, KeyValueError> {
-        let path = String::from_utf16(ensure_ref(path)?)?;
-        let name = String::from_utf16(ensure_ref(name)?)?;
-        let mut writer = Manager::singleton().write()?;
-        let rkv = writer.get_or_create(Path::new(&path), Rkv::new)?;
-        let store = rkv.write()?.open_or_create(Some(name.as_str()))?;
-        let key_value_db = KeyValueDatabase::new(rkv, store);
-
-        key_value_db
-            .query_interface::<nsIKeyValueDatabase>()
-            .ok_or(KeyValueError::NoInterface("nsIKeyValueDatabase"))
     }
 
     fn get_or_create_async(
@@ -286,156 +250,48 @@ pub struct InitKeyValueDatabase {
 }
 
 impl KeyValueDatabase {
-    fn Put(&self, key: *const nsAString, value: *const nsIVariant) -> nsresult {
-        match self.put(key, value) {
-            Ok(_) => NS_OK,
-            Err(error) => {
-                error!("{}", error);
-                error.into()
-            }
-        }
-    }
-
-    fn Get(
-        &self,
-        key: *const nsAString,
-        default_value: *const nsIVariant,
-        retval: *mut *const nsIVariant,
-    ) -> nsresult {
-        match self.get(key, default_value) {
-            Ok(ptr) => {
-                unsafe { ptr.forget(&mut *retval) };
-                NS_OK
-            }
-            Err(error) => {
-                error!("{}", error);
-                error.into()
-            }
-        }
-    }
-
-    fn GetInt(
-        &self,
-        key: *const nsAString,
-        default_value: int64_t,
-        retval: *mut int64_t,
-    ) -> nsresult {
-        match self.get_int(key, default_value, retval) {
-            Ok(_) => NS_OK,
-            Err(error) => {
-                error!("{}", error);
-                error.into()
-            }
-        }
-    }
-
-    fn GetDouble(
-        &self,
-        key: *const nsAString,
-        default_value: c_double,
-        retval: *mut c_double,
-    ) -> nsresult {
-        match self.get_double(key, default_value, retval) {
-            Ok(_) => NS_OK,
-            Err(error) => {
-                error!("{}", error);
-                error.into()
-            }
-        }
-    }
-
-    fn GetString(
-        &self,
-        key: *const nsAString,
-        default_value: *const nsAString,
-        retval: *mut nsAString,
-    ) -> nsresult {
-        match self.get_string(key, default_value, retval) {
-            Ok(_) => NS_OK,
-            Err(error) => {
-                error!("{}", error);
-                error.into()
-            }
-        }
-    }
-
-    fn GetBool(&self, key: *const nsAString, default_value: bool, retval: *mut bool) -> nsresult {
-        match self.get_bool(key, default_value, retval) {
-            Ok(_) => NS_OK,
-            Err(error) => {
-                error!("{}", error);
-                error.into()
-            }
-        }
-    }
-
-    fn Has(&self, key: *const nsAString, retval: *mut bool) -> nsresult {
-        match self.has(key, retval) {
-            Ok(_) => NS_OK,
-            Err(error) => {
-                error!("{}", error);
-                error.into()
-            }
-        }
-    }
-
-    fn Delete(&self, key: *const nsAString) -> nsresult {
-        match self.delete(key) {
-            Ok(_) => NS_OK,
-            Err(error) => {
-                error!("{}", error);
-                error.into()
-            }
-        }
-    }
-
-    fn Enumerate(
-        &self,
-        from_key: *const nsAString,
-        retval: *mut *const nsISimpleEnumerator,
-    ) -> nsresult {
-        match self.enumerate(from_key) {
-            Ok(ptr) => {
-                unsafe { ptr.forget(&mut *retval) };
-                NS_OK
-            }
-            Err(error) => {
-                error!("{}", error);
-                error.into()
-            }
-        }
-    }
-}
-
-impl KeyValueDatabase {
     fn new(rkv: Arc<RwLock<Rkv>>, store: Store) -> RefPtr<KeyValueDatabase> {
         KeyValueDatabase::allocate(InitKeyValueDatabase { rkv, store })
     }
 
-    fn put(&self, key: *const nsAString, value: *const nsIVariant) -> Result<(), KeyValueError> {
-        let key = String::from_utf16(ensure_ref(key)?)?;
-        let value = ensure_ref(value)?;
+    xpcom_method!(Put, put, { key: *const nsACString, value: *const nsIVariant });
+    xpcom_method!(Has, has, { key: *const nsACString }, *mut bool);
+    xpcom_method!(Get, get, { key: *const nsACString, default_value: *const nsIVariant }, *mut *const nsIVariant);
+    xpcom_method!(Delete, delete, { key: *const nsACString });
+    xpcom_method!(GetInt, get_int, { key: *const nsACString, default_value: int64_t }, *mut int64_t);
+    xpcom_method!(GetDouble, get_double, { key: *const nsACString, default_value: c_double }, *mut c_double);
+    xpcom_method!(GetBool, get_bool, { key: *const nsACString, default_value: bool }, *mut bool);
+    xpcom_method!(GetString, get_string, { key: *const nsACString, default_value: *const nsACString }, *mut nsACString);
+    xpcom_method!(
+        Enumerate,
+        enumerate,
+        { from_key: *const nsACString, to_key: *const nsACString },
+        *mut *const nsISimpleEnumerator
+    );
 
-        let mut dataType: uint16_t = 0;
-        unsafe { value.GetDataType(&mut dataType) }.to_result()?;
-        info!("nsIVariant type is {}", dataType);
+    fn put(&self, key: &nsACString, value: &nsIVariant) -> Result<(), KeyValueError> {
+        let key = str::from_utf8(key)?;
+
+        let mut data_type: uint16_t = 0;
+        unsafe { value.GetDataType(&mut data_type) }.to_result()?;
+        info!("nsIVariant type is {}", data_type);
 
         let env = self.rkv.read()?;
         let mut writer = env.write()?;
 
-        match dataType {
+        match data_type {
             DATA_TYPE_INT32 => {
                 info!("nsIVariant type is int32");
                 let mut value_as_int32: int32_t = 0;
                 unsafe { value.GetAsInt32(&mut value_as_int32) }.to_result()?;
-                writer.put(&self.store, &key, &Value::I64(value_as_int32.into()))?;
+                writer.put(&self.store, key, &Value::I64(value_as_int32.into()))?;
                 writer.commit()?;
             }
             DATA_TYPE_DOUBLE => {
                 info!("nsIVariant type is double");
                 let mut value_as_double: f64 = 0.0;
                 unsafe { value.GetAsDouble(&mut value_as_double) }.to_result()?;
-                writer.put(&self.store, &key, &Value::F64(value_as_double.into()))?;
+                writer.put(&self.store, key, &Value::F64(value_as_double.into()))?;
                 writer.commit()?;
             }
             DATA_TYPE_WSTRING => {
@@ -443,47 +299,41 @@ impl KeyValueDatabase {
                 let mut value_as_astring: nsString = nsString::new();
                 unsafe { value.GetAsAString(&mut *value_as_astring) }.to_result()?;
                 let value = String::from_utf16(&value_as_astring)?;
-                writer.put(&self.store, &key, &Value::Str(&value))?;
+                writer.put(&self.store, key, &Value::Str(&value))?;
                 writer.commit()?;
             }
             DATA_TYPE_BOOL => {
                 info!("nsIVariant type is bool");
                 let mut value_as_bool: bool = false;
                 unsafe { value.GetAsBool(&mut value_as_bool) }.to_result()?;
-                writer.put(&self.store, &key, &Value::Bool(value_as_bool.into()))?;
+                writer.put(&self.store, key, &Value::Bool(value_as_bool.into()))?;
                 writer.commit()?;
             }
             _unsupported_type => {
-                return Err(KeyValueError::UnsupportedType(dataType));
+                return Err(KeyValueError::UnsupportedType(data_type));
             }
         };
 
         Ok(())
     }
 
-    fn has(&self, key: *const nsAString, retval: *mut bool) -> Result<(), KeyValueError> {
-        let key = String::from_utf16(ensure_ref(key)?)?;
+    fn has(&self, key: &nsACString) -> Result<bool, KeyValueError> {
+        let key = str::from_utf8(key)?;
         let env = self.rkv.read()?;
         let reader = env.read()?;
-        let value = reader.get(&self.store, &key)?;
-
-        match value {
-            Some(_) => unsafe { *retval = true },
-            None => unsafe { *retval = false },
-        };
-
-        Ok(())
+        let value = reader.get(&self.store, key)?;
+        Ok(value.is_some())
     }
 
     fn get(
         &self,
-        key: *const nsAString,
-        default_value: *const nsIVariant,
+        key: &nsACString,
+        default_value: &nsIVariant,
     ) -> Result<RefPtr<nsIVariant>, KeyValueError> {
-        let key = String::from_utf16(ensure_ref(key)?)?;
+        let key = str::from_utf8(key)?;
         let env = self.rkv.read()?;
         let reader = env.read()?;
-        let value = reader.get(&self.store, &key)?;
+        let value = reader.get(&self.store, key)?;
 
         match value {
             Some(Value::I64(value)) => Ok(value.into_variant().ok_or(KeyValueError::Read)?.take()),
@@ -493,53 +343,17 @@ impl KeyValueDatabase {
                 .ok_or(KeyValueError::Read)?
                 .take()),
             Some(Value::Bool(value)) => Ok(value.into_variant().ok_or(KeyValueError::Read)?.take()),
-            None => {
-                let default_value = ensure_ref(default_value)?;
-
-                let mut dataType: uint16_t = 0;
-                unsafe { default_value.GetDataType(&mut dataType) }.to_result()?;
-                info!("get: default value nsIVariant type is {}", dataType);
-
-                match dataType {
-                    DATA_TYPE_INT32 => {
-                        let mut val: int32_t = 0;
-                        unsafe { default_value.GetAsInt32(&mut val) }.to_result()?;
-                        Ok(val.into_variant().ok_or(KeyValueError::Read)?.take())
-                    }
-                    DATA_TYPE_DOUBLE => {
-                        let mut val: f64 = 0.0;
-                        unsafe { default_value.GetAsDouble(&mut val) }.to_result()?;
-                        Ok(val.into_variant().ok_or(KeyValueError::Read)?.take())
-                    }
-                    DATA_TYPE_WSTRING => {
-                        let mut val: nsString = nsString::new();
-                        unsafe { default_value.GetAsAString(&mut *val) }.to_result()?;
-                        Ok(val.into_variant().ok_or(KeyValueError::Read)?.take())
-                    }
-                    DATA_TYPE_BOOL => {
-                        let mut val: bool = false;
-                        unsafe { default_value.GetAsBool(&mut val) }.to_result()?;
-                        Ok(val.into_variant().ok_or(KeyValueError::Read)?.take())
-                    }
-                    DATA_TYPE_EMPTY => {
-                        let val = ();
-                        Ok(val.into_variant().ok_or(KeyValueError::Read)?.take())
-                    }
-                    _unsupported_type => {
-                        return Err(KeyValueError::UnsupportedType(dataType));
-                    }
-                }
-            }
-            Some(value) => return Err(KeyValueError::UnsupportedValue(value.into())),
+            Some(_value) => Err(KeyValueError::UnexpectedValue),
+            None => Ok(into_variant(default_value)?.take()),
         }
     }
 
-    fn delete(&self, key: *const nsAString) -> Result<(), KeyValueError> {
-        let key = String::from_utf16(ensure_ref(key)?)?;
+    fn delete(&self, key: &nsACString) -> Result<(), KeyValueError> {
+        let key = str::from_utf8(key)?;
         let env = self.rkv.read()?;
         let mut writer = env.write()?;
 
-        match writer.delete(&self.store, &key) {
+        match writer.delete(&self.store, key) {
             Ok(_) => (),
 
             // LMDB fails with an error if the key to delete wasn't found,
@@ -555,119 +369,71 @@ impl KeyValueDatabase {
         Ok(())
     }
 
-    fn get_int(
-        &self,
-        key: *const nsAString,
-        default_value: int64_t,
-        retval: *mut int64_t,
-    ) -> Result<(), KeyValueError> {
-        let key = String::from_utf16(ensure_ref(key)?)?;
-        let env = self.rkv.read()?;
-        let reader = env.read()?;
-        let value = reader.get(&self.store, &key)?;
-
-        match value {
-            Some(Value::I64(value)) => unsafe { *retval = value },
-            None => unsafe { *retval = default_value },
-            Some(value) => return Err(KeyValueError::UnsupportedValue(value.into())),
-        };
-
-        Ok(())
-    }
-
-    fn get_double(
-        &self,
-        key: *const nsAString,
-        default_value: c_double,
-        retval: *mut c_double,
-    ) -> Result<(), KeyValueError> {
-        let key = String::from_utf16(ensure_ref(key)?)?;
-        let env = self.rkv.read()?;
-        let reader = env.read()?;
-        let value = reader.get(&self.store, &key)?;
-
-        match value {
-            Some(Value::F64(value)) => unsafe { *retval = value.into() },
-            None => unsafe { *retval = default_value },
-            Some(value) => return Err(KeyValueError::UnsupportedValue(value.into())),
-        };
-
-        Ok(())
-    }
-
-    fn get_string(
-        &self,
-        key: *const nsAString,
-        default_value: *const nsAString,
-        retval: *mut nsAString,
-    ) -> Result<(), KeyValueError> {
-        let key = String::from_utf16(ensure_ref(key)?)?;
-        let env = self.rkv.read()?;
-        let reader = env.read()?;
-        let value = reader.get(&self.store, &key)?;
-
-        match value {
-            Some(Value::Str(value)) => unsafe { (*retval).assign(&nsString::from(value)) },
-            None => unsafe { (*retval).assign(&*default_value) },
-            Some(value) => return Err(KeyValueError::UnsupportedValue(value.into())),
-        };
-
-        Ok(())
-    }
-
-    fn get_bool(
-        &self,
-        key: *const nsAString,
-        default_value: bool,
-        retval: *mut bool,
-    ) -> Result<(), KeyValueError> {
-        let key = String::from_utf16(ensure_ref(key)?)?;
-        let env = self.rkv.read()?;
-        let reader = env.read()?;
-        let value = reader.get(&self.store, &key)?;
-
-        match value {
-            Some(Value::Bool(value)) => unsafe { *retval = value },
-            None => unsafe { *retval = default_value },
-            Some(value) => return Err(KeyValueError::UnsupportedValue(value.into())),
-        };
-
-        Ok(())
-    }
+    get_method!(get_int, int64_t, I64, int64_t);
+    get_method!(get_double, c_double, F64, c_double);
+    get_method!(get_bool, bool, Bool, bool);
+    get_method!(get_string, &nsACString, Str, nsCString);
 
     fn enumerate(
         &self,
-        from_key: *const nsAString,
+        from_key: &nsACString,
+        to_key: &nsACString,
     ) -> Result<RefPtr<nsISimpleEnumerator>, KeyValueError> {
         let env = self.rkv.read()?;
         let reader = env.read()?;
+        let from_key = str::from_utf8(from_key)?;
+        let to_key = str::from_utf8(to_key)?;
 
-        // from_key is [optional], and XPConnect maps the absence of a value
-        // to an empty string, so we know it isn't a null pointer.
-        let from_key = String::from_utf16(unsafe { &*from_key })?;
-
-        let iterator = if from_key == "" {
+        let iterator = if from_key.is_empty() {
             reader.iter_start(&self.store)?
         } else {
             reader.iter_from(&self.store, &from_key)?
         };
 
-        // Ideally, we'd iterate pairs lazily, as the consumer calls
-        // nsISimpleEnumerator.getNext().  But SimpleEnumerator can't reference
-        // the Iter because Rust "cannot #[derive(xpcom)] on a generic type,"
-        // and the Iter requires a lifetime parameter, which would make
-        // SimpleEnumerator generic.
+        // Ideally, we'd enumerate pairs lazily, as the consumer calls
+        // nsISimpleEnumerator.getNext(), which calls our
+        // SimpleEnumerator.get_next() implementation.  But SimpleEnumerator
+        // can't reference the Iter because Rust "cannot #[derive(xpcom)]
+        // on a generic type," and the Iter requires a lifetime parameter,
+        // which would make SimpleEnumerator generic.
         //
-        // Our fallback approach is to collect the iterator into a collection
-        // that SimpleEnumerator owns.
-        //
-        let pairs: VecDeque<(String, OwnedValue)> = iterator
+        // Our fallback approach is to eagerly collect the iterator
+        // into a collection that SimpleEnumerator owns.  Fixing this so we
+        // enumerate pairs lazily is bug 1499252.
+        let pairs: Vec<(
+            Result<String, KeyValueError>,
+            Result<OwnedValue, KeyValueError>,
+        )> = iterator
+            // Convert the key to a string so we can compare it to the "to" key.
+            // For forward compatibility, we don't fail here if we can't convert
+            // a key to UTF-8.  Instead, we store the Err in the collection
+            // and fail lazily in SimpleEnumerator.get_next().
             .map(|(key, val)| {
                 (
-                    unsafe { str::from_utf8_unchecked(&key) }.to_owned(),
-                    val.into(),
+                    str::from_utf8(&key),
+                    val
                 )
-            }).collect();
+            })
+            .take_while(|(key, _val)| {
+                if to_key.is_empty() {
+                    true
+                } else {
+                    match *key {
+                        Ok(key) => key <= to_key,
+                        Err(_err) => true,
+                    }
+                }
+            })
+            .map(|(key, val)| {
+                (
+                    match key {
+                        Ok(key) => Ok(key.to_owned()),
+                        Err(err) => Err(err.into()),
+                    },
+                    value_to_owned(val)
+                )
+            })
+            .collect();
 
         let enumerator = SimpleEnumerator::new(pairs);
 
@@ -681,66 +447,52 @@ impl KeyValueDatabase {
 #[xpimplements(nsISimpleEnumerator)]
 #[refcnt = "nonatomic"]
 pub struct InitSimpleEnumerator {
-    pairs: RefCell<VecDeque<(String, OwnedValue)>>,
+    iter: RefCell<
+        IntoIter<(
+            Result<String, KeyValueError>,
+            Result<OwnedValue, KeyValueError>,
+        )>,
+    >,
 }
 
 impl SimpleEnumerator {
-    fn new(pairs: VecDeque<(String, OwnedValue)>) -> RefPtr<SimpleEnumerator> {
+    fn new(
+        pairs: Vec<(
+            Result<String, KeyValueError>,
+            Result<OwnedValue, KeyValueError>,
+        )>,
+    ) -> RefPtr<SimpleEnumerator> {
         SimpleEnumerator::allocate(InitSimpleEnumerator {
-            pairs: RefCell::new(pairs),
+            iter: RefCell::new(pairs.into_iter()),
         })
     }
 
-    fn HasMoreElements(&self, retval: *mut bool) -> nsresult {
-        unsafe { *retval = !self.pairs.borrow().is_empty() };
-        NS_OK
-    }
-
-    fn GetNext(&self, retval: *mut *const nsISupports) -> nsresult {
-        match self.get_next() {
-            Ok(ptr) => {
-                unsafe { ptr.forget(&mut *retval) };
-                NS_OK
-            }
-            Err(error) => {
-                error!("{}", error);
-                error.into()
-            }
-        }
-    }
+    xpcom_method!(HasMoreElements, has_more_elements, {}, *mut bool);
+    xpcom_method!(GetNext, get_next, {}, *mut *const nsISupports);
 
     // The nsISimpleEnumeratorBase methods iterator() and entries() depend on
     // nsIJSEnumerator, which requires jscontext, which is unsupported for Rust.
+    #[allow(non_snake_case)]
     fn Iterator(&self, _retval: *mut *const nsIJSEnumerator) -> nsresult {
         NS_ERROR_NOT_IMPLEMENTED
     }
+    #[allow(non_snake_case)]
     fn Entries(&self, _aIface: *const nsIID, _retval: *mut *const nsIJSEnumerator) -> nsresult {
         NS_ERROR_NOT_IMPLEMENTED
     }
-}
 
-impl SimpleEnumerator {
+    fn has_more_elements(&self) -> Result<bool, KeyValueError> {
+        Ok(!self.iter.borrow().as_slice().is_empty())
+    }
+
     fn get_next(&self) -> Result<RefPtr<nsISupports>, KeyValueError> {
-        let mut pairs = self.pairs.borrow_mut();
-        let (key, value) = pairs
-            .pop_front()
-            .ok_or(KeyValueError::Nsresult(NS_ERROR_FAILURE))?;
+        let mut iter = self.iter.borrow_mut();
+        let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
 
-        // Perhaps we should never fail if the value was unexpected and instead
-        // return a null or undefined variant.
-        //
-        // Alternately, we could fail eagerly—when instantiating the enumerator;
-        // or even more lazily—on nsIKeyValuePair.getValue().  But eagerly seems
-        // too soon, since it exposes the implementation detail that we eagerly
-        // collect the results of the cursor iterator (which ideally we'll stop
-        // doing in the future).  And lazily would hide errors when the consumer
-        // enumerates pairs but doesn't access all values.
-        //
-        if value == OwnedValue::Unexpected {
-            return Err(KeyValueError::Nsresult(NS_ERROR_UNEXPECTED));
-        }
-
-        let pair = KeyValuePair::new(key, value);
+        // We fail on retrieval of the key/value pair if the key isn't valid
+        // UTF-*, if the value is unexpected, or if we encountered a store error
+        // while retrieving the pair.
+        let pair = KeyValuePair::new(key?, value?);
 
         pair.query_interface::<nsISupports>()
             .ok_or(KeyValueError::NoInterface("nsIKeyValuePair"))
@@ -760,32 +512,56 @@ impl KeyValuePair {
         KeyValuePair::allocate(InitKeyValuePair { key, value })
     }
 
-    fn GetKey(&self, key: *mut nsAString) -> nsresult {
-        unsafe { (*key).assign(&nsString::from(&self.key)) }
-        NS_OK
+    xpcom_method!(GetKey, get_key, {}, *mut nsACString);
+    xpcom_method!(GetValue, get_value, {}, *mut *const nsIVariant);
+
+    fn get_key(&self) -> Result<nsCString, KeyValueError> {
+        Ok(nsCString::from(&self.key))
     }
 
-    fn GetValue(&self, value: *mut *const nsIVariant) -> nsresult {
-        match self.get_value() {
-            Ok(ptr) => {
-                unsafe { ptr.forget(&mut *value) };
-                NS_OK
-            }
-            Err(error) => {
-                error!("{}", error);
-                error.into()
-            }
-        }
-    }
-}
-
-impl KeyValuePair {
     fn get_value(&self) -> Result<RefPtr<nsIVariant>, KeyValueError> {
         Ok(self
             .value
             .clone()
             .into_variant()
-            .ok_or(KeyValueError::Nsresult(NS_ERROR_FAILURE))?
+            .ok_or(KeyValueError::from(NS_ERROR_FAILURE))?
             .take())
+    }
+}
+
+// TODO: consider making this an implementation of the IntoVariant trait
+// from storage/variant/src/lib.rs.
+fn into_variant(variant: &nsIVariant) -> Result<Variant, KeyValueError> {
+    let mut data_type: uint16_t = 0;
+    unsafe { variant.GetDataType(&mut data_type) }.to_result()?;
+
+    match data_type {
+        DATA_TYPE_INT32 => {
+            let mut val: int32_t = 0;
+            unsafe { variant.GetAsInt32(&mut val) }.to_result()?;
+            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
+        }
+        DATA_TYPE_DOUBLE => {
+            let mut val: f64 = 0.0;
+            unsafe { variant.GetAsDouble(&mut val) }.to_result()?;
+            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
+        }
+        DATA_TYPE_WSTRING => {
+            let mut val: nsString = nsString::new();
+            unsafe { variant.GetAsAString(&mut *val) }.to_result()?;
+            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
+        }
+        DATA_TYPE_BOOL => {
+            let mut val: bool = false;
+            unsafe { variant.GetAsBool(&mut val) }.to_result()?;
+            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
+        }
+        DATA_TYPE_EMPTY => {
+            let val = ();
+            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
+        }
+        _unsupported_type => {
+            return Err(KeyValueError::UnsupportedType(data_type));
+        }
     }
 }

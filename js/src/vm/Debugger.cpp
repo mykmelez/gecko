@@ -1029,9 +1029,7 @@ Debugger::slowPathOnLeaveFrame(JSContext* cx, AbstractFramePtr frame, jsbytecode
                 RootedValue wrappedValue(cx, value);
                 RootedValue completion(cx);
                 if (!dbg->wrapDebuggeeValue(cx, &wrappedValue)) {
-                {
                     resumeMode = dbg->reportUncaughtException(ar);
-                }
                     break;
                 }
 
@@ -5056,12 +5054,14 @@ class MOZ_STACK_CLASS Debugger::SourceQuery : public Debugger::QueryBase
     {}
 
     bool findSources() {
-        if (!matchAllDebuggeeGlobals())
+        if (!matchAllDebuggeeGlobals()) {
             return false;
+        }
 
         Realm* singletonRealm = nullptr;
-        if (realms.count() == 1)
+        if (realms.count() == 1) {
             singletonRealm = realms.all().front();
+        }
 
         // Search each realm for debuggee scripts.
         MOZ_ASSERT(sources.empty());
@@ -5108,43 +5108,53 @@ class MOZ_STACK_CLASS Debugger::SourceQuery : public Debugger::QueryBase
     }
 
     void consider(JSScript* script, const JS::AutoRequireNoGC& nogc) {
-        if (oom || script->selfHosted())
+        if (oom || script->selfHosted()) {
             return;
+        }
         Realm* realm = script->realm();
-        if (!realms.has(realm))
+        if (!realms.has(realm)) {
             return;
+        }
 
-        if (!script->sourceObject())
+        if (!script->sourceObject()) {
             return;
+        }
 
         ScriptSourceObject* source =
             &UncheckedUnwrap(script->sourceObject())->as<ScriptSourceObject>();
-        if (!sources.put(source))
+        if (!sources.put(source)) {
             oom = true;
+        }
     }
 
     void consider(LazyScript* lazyScript, const JS::AutoRequireNoGC& nogc) {
-        if (oom)
+        if (oom) {
             return;
+        }
         Realm* realm = lazyScript->realm();
-        if (!realms.has(realm))
+        if (!realms.has(realm)) {
             return;
+        }
 
         // If the script is already delazified, it should already be handled.
-        if (lazyScript->maybeScript())
+        if (lazyScript->maybeScript()) {
             return;
+        }
 
         ScriptSourceObject* source = &lazyScript->sourceObject();
-        if (!sources.put(source))
+        if (!sources.put(source)) {
             oom = true;
+        }
     }
 
     void consider(WasmInstanceObject* instanceObject) {
-        if (oom)
+        if (oom) {
             return;
+        }
 
-        if (!sources.put(instanceObject))
+        if (!sources.put(instanceObject)) {
             oom = true;
+        }
     }
 };
 
@@ -5168,15 +5178,17 @@ Debugger::findSources(JSContext* cx, unsigned argc, Value* vp)
     }
 
     SourceQuery query(cx, dbg);
-    if (!query.findSources())
+    if (!query.findSources()) {
         return false;
+    }
 
     Handle<SourceQuery::SourceSet> sources(query.foundSources());
 
     size_t resultLength = sources.count();
     RootedArrayObject result(cx, NewDenseFullyAllocatedArray(cx, resultLength));
-    if (!result)
+    if (!result) {
         return false;
+    }
 
     result->ensureDenseInitializedLength(cx, 0, resultLength);
 
@@ -5184,8 +5196,9 @@ Debugger::findSources(JSContext* cx, unsigned argc, Value* vp)
     for (auto iter = sources.get().iter(); !iter.done(); iter.next()) {
         Rooted<DebuggerSourceReferent> sourceReferent(cx, AsSourceReferent(iter.get()));
         RootedObject sourceObject(cx, dbg->wrapVariantReferent(cx, sourceReferent));
-        if (!sourceObject)
+        if (!sourceObject) {
             return false;
+        }
         result->setDenseElement(i, ObjectValue(*sourceObject));
         i++;
     }
@@ -5728,6 +5741,14 @@ DelazifyScript(JSContext* cx, Handle<LazyScript*> lazyScript)
     if (lazyScript->hasEnclosingLazyScript()) {
         Rooted<LazyScript*> enclosingLazyScript(cx, lazyScript->enclosingLazyScript());
         if (!DelazifyScript(cx, enclosingLazyScript)) {
+            return nullptr;
+        }
+
+        if (!lazyScript->enclosingScriptHasEverBeenCompiled()) {
+            // It didn't work! Delazifying the enclosing script still didn't
+            // delazify this script. This happens when the function
+            // corresponding to this script was removed by constant folding.
+            JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_OPTIMIZED_OUT_FUN);
             return nullptr;
         }
     }
@@ -6428,9 +6449,8 @@ class FlowGraphSummary {
                 // because we only report offsets of entry points which have
                 // valid incoming edges.
                 for (const JSTryNote& tn : script->trynotes()) {
-                    uint32_t startOffset = script->mainOffset() + tn.start;
-                    if (startOffset == r.frontOffset() + 1) {
-                        uint32_t catchOffset = startOffset + tn.length;
+                    if (tn.start == r.frontOffset() + 1) {
+                        uint32_t catchOffset = tn.start + tn.length;
                         if (tn.kind == JSTRY_CATCH || tn.kind == JSTRY_FINALLY) {
                             addEdge(lineno, column, catchOffset);
                         }
@@ -7446,14 +7466,10 @@ class DebuggerScriptIsInCatchScopeMatcher
             return false;
         }
 
-        // Try note ranges are relative to the mainOffset of the script, so adjust
-        // offset accordingly.
-        size_t offset = offset_ - script->mainOffset();
-
         if (script->hasTrynotes()) {
             for (const JSTryNote& tn : script->trynotes()) {
-                if (tn.start <= offset &&
-                    offset <= tn.start + tn.length &&
+                if (tn.start <= offset_ &&
+                    offset_ < tn.start + tn.length &&
                     tn.kind == JSTRY_CATCH)
                 {
                     isInCatch_ = true;
@@ -7802,11 +7818,11 @@ class DebuggerSourceGetTextMatcher
 
     ReturnType match(HandleScriptSourceObject sourceObject) {
         ScriptSource* ss = sourceObject->source();
-        bool hasSourceData = ss->hasSourceData();
-        if (!ss->hasSourceData() && !JSScript::loadSource(cx_, ss, &hasSourceData)) {
+        bool hasSourceText = ss->hasSourceText();
+        if (!ss->hasSourceText() && !JSScript::loadSource(cx_, ss, &hasSourceText)) {
             return nullptr;
         }
-        if (!hasSourceData) {
+        if (!hasSourceText) {
             return NewStringCopyZ<CanGC>(cx_, "[no source]");
         }
 
@@ -7877,7 +7893,7 @@ DebuggerSource_getBinary(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
-    memcpy(arr->as<TypedArrayObject>().viewDataUnshared(), bytecode.begin(), bytecode.length());
+    memcpy(arr->as<TypedArrayObject>().dataPointerUnshared(), bytecode.begin(), bytecode.length());
 
     args.rval().setObject(*arr);
     return true;
@@ -11035,7 +11051,7 @@ Debugger::getObjectAllocationSite(JSObject& obj)
     }
 
     MOZ_ASSERT(!metadata->is<WrapperObject>());
-    return SavedFrame::isSavedFrameAndNotProto(*metadata)
+    return metadata->is<SavedFrame>()
         ? &metadata->as<SavedFrame>()
         : nullptr;
 }

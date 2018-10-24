@@ -16,6 +16,8 @@ const {Hosts} = require("devtools/client/framework/toolbox-hosts");
 const TEST_URI_ROOT = "http://example.com/browser/devtools/client/shared/test/";
 const OPTIONS_VIEW_URL = TEST_URI_ROOT + "doc_options-view.xul";
 
+const EXAMPLE_URL = "chrome://mochitests/content/browser/devtools/client/shared/test/";
+
 function catchFail(func) {
   return function() {
     try {
@@ -148,13 +150,13 @@ function synthesizeProfileForTest(samples) {
 
   samples.unshift({
     time: 0,
-    frames: []
+    frames: [],
   });
 
   const uniqueStacks = new RecordingUtils.UniqueStacks();
   return RecordingUtils.deflateThread({
     samples: samples,
-    markers: []
+    markers: [],
   }, uniqueStacks);
 }
 
@@ -208,7 +210,7 @@ async function(widget, name, value) {
 
   onRender = widget.once("render");
   widget._savePreset({
-    preventDefault: () => {}
+    preventDefault: () => {},
   });
 
   await onRender;

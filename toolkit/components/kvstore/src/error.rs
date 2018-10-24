@@ -4,70 +4,66 @@
 
 use libc::uint16_t;
 use nserror::{
-    nsresult, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_INTERFACE,
+    nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_INTERFACE,
     NS_ERROR_NULL_POINTER, NS_ERROR_UNEXPECTED,
 };
+use nsstring::nsCString;
 use rkv::StoreError;
-use std::{
-    string::FromUtf16Error,
-    sync::{PoisonError, RwLockReadGuard, RwLockWriteGuard},
-};
-use OwnedValue;
+use std::{str::Utf8Error, string::FromUtf16Error, sync::PoisonError};
 
 #[derive(Debug, Fail)]
 pub enum KeyValueError {
+    #[fail(display = "error converting string: {:?}", _0)]
+    ConvertBytes(Utf8Error),
+
     #[fail(display = "error converting string: {:?}", _0)]
     ConvertString(FromUtf16Error),
 
     #[fail(display = "no interface '{}'", _0)]
     NoInterface(&'static str),
 
-    // TODO: use nsresult.error_name() to convert the number to its name.
-    #[fail(display = "error result '{}'", _0)]
-    Nsresult(nsresult),
+    #[fail(display = "error result {}", _0)]
+    Nsresult(nsCString, nsresult),
 
     #[fail(display = "arg is null")]
     NullPointer,
 
+    #[fail(display = "poison error getting read/write lock")]
+    PoisonError,
+
     #[fail(display = "error reading key/value pair")]
     Read,
 
-    #[fail(display = "error getting read lock: {}", _0)]
-    ReadLock(String),
-
     #[fail(display = "store error: {:?}", _0)]
     StoreError(StoreError),
-
-    #[fail(display = "error getting write lock: {}", _0)]
-    WriteLock(String),
 
     // TODO: convert the number to its name.
     #[fail(display = "unsupported type: {}", _0)]
     UnsupportedType(uint16_t),
 
-    #[fail(display = "unsupported value: {:?}", _0)]
-    UnsupportedValue(OwnedValue),
+    #[fail(display = "unexpected value")]
+    UnexpectedValue,
 }
 
 impl From<nsresult> for KeyValueError {
     fn from(result: nsresult) -> KeyValueError {
-        KeyValueError::Nsresult(result)
+        KeyValueError::Nsresult(result.error_name(), result)
     }
 }
 
 impl From<KeyValueError> for nsresult {
     fn from(err: KeyValueError) -> nsresult {
         match err {
+            KeyValueError::ConvertBytes(_) => NS_ERROR_FAILURE,
             KeyValueError::ConvertString(_) => NS_ERROR_FAILURE,
             KeyValueError::NoInterface(_) => NS_ERROR_NO_INTERFACE,
-            KeyValueError::Nsresult(result) => result,
+            KeyValueError::Nsresult(_, result) => result,
             KeyValueError::NullPointer => NS_ERROR_NULL_POINTER,
+            KeyValueError::PoisonError => NS_ERROR_UNEXPECTED,
             KeyValueError::Read => NS_ERROR_FAILURE,
-            KeyValueError::ReadLock(_) => NS_ERROR_UNEXPECTED,
             KeyValueError::StoreError(_) => NS_ERROR_FAILURE,
-            KeyValueError::WriteLock(_) => NS_ERROR_UNEXPECTED,
             KeyValueError::UnsupportedType(_) => NS_ERROR_NOT_IMPLEMENTED,
-            KeyValueError::UnsupportedValue(_) => NS_ERROR_NOT_IMPLEMENTED,
+            KeyValueError::UnexpectedValue => NS_ERROR_UNEXPECTED,
         }
     }
 }
@@ -78,20 +74,20 @@ impl From<StoreError> for KeyValueError {
     }
 }
 
+impl From<Utf8Error> for KeyValueError {
+    fn from(err: Utf8Error) -> KeyValueError {
+        KeyValueError::ConvertBytes(err)
+    }
+}
+
 impl From<FromUtf16Error> for KeyValueError {
     fn from(err: FromUtf16Error) -> KeyValueError {
         KeyValueError::ConvertString(err)
     }
 }
 
-impl<'a, T> From<PoisonError<RwLockReadGuard<'a, T>>> for KeyValueError {
-    fn from(err: PoisonError<RwLockReadGuard<'a, T>>) -> KeyValueError {
-        KeyValueError::ReadLock(format!("{:?}", err))
-    }
-}
-
-impl<'a, T> From<PoisonError<RwLockWriteGuard<'a, T>>> for KeyValueError {
-    fn from(err: PoisonError<RwLockWriteGuard<'a, T>>) -> KeyValueError {
-        KeyValueError::WriteLock(format!("{:?}", err))
+impl<T> From<PoisonError<T>> for KeyValueError {
+    fn from(_err: PoisonError<T>) -> KeyValueError {
+        KeyValueError::PoisonError
     }
 }

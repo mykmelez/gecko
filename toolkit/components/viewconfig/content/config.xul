@@ -26,8 +26,6 @@
 
 <script src="chrome://global/content/config.js"/>
 
-<stringbundle id="configBundle" src="chrome://global/locale/config.properties"/>
-
 <menupopup id="configContext" onpopupshowing="if (event.target == this) updateContextMenu();">
   <menuitem id="toggleSelected" data-l10n-id="config-toggle" default="true"
             oncommand="ModifySelected();"/>
@@ -72,7 +70,7 @@
   <vbox flex="1">
     <hbox id="filterRow" align="center">
       <label data-l10n-id="config-search-prefs" control="textbox"/>
-      <textbox id="textbox" flex="1" type="search" class="compact"
+      <textbox id="textbox" flex="1" type="search"
                aria-controls="configTree"
                oncommand="FilterPrefs();"/>
     </hbox>

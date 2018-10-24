@@ -274,7 +274,6 @@ var ContentListener = {
 };
 
 // load the current page, start timing
-var removeLastAddedListener = null;
 var removeLastAddedMsgListener = null;
 function plLoadPage() {
   if (profilingInfo) {
@@ -282,11 +281,6 @@ function plLoadPage() {
   }
 
   var pageName = pages[pageIndex].url.spec;
-
-  if (removeLastAddedListener) {
-    removeLastAddedListener();
-    removeLastAddedListener = null;
-  }
 
   if (removeLastAddedMsgListener) {
     removeLastAddedMsgListener();
@@ -331,7 +325,7 @@ function startAndLoadURI(pageName) {
   if (loadNoCache) {
     content.loadURI(pageName, {
       triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-      flags: Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_CACHE
+      flags: Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_CACHE,
     });
   } else {
     content.loadURI(pageName, {
@@ -384,7 +378,6 @@ function loadFail() {
     content.removeEventListener("MozAfterPaint", plPainted, true);
     gPaintWindow.removeEventListener("MozAfterPaint", plPaintedCapturing, true);
     gPaintWindow.removeEventListener("MozAfterPaint", plPainted, true);
-    removeLastAddedListener = null;
     removeLastAddedMsgListener = null;
     gPaintListener = false;
 
@@ -543,7 +536,6 @@ function plLoadHandlerCapturing(evt) {
   };
 
   content.removeEventListener("load", plLoadHandlerCapturing, true);
-  removeLastAddedListener = null;
 
   setTimeout(plWaitForPaintingCapturing, 0);
 }

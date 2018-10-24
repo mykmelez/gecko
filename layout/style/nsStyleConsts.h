@@ -285,9 +285,11 @@ enum class FillMode : uint8_t;
 // See nsStyleDisplay
 #define NS_STYLE_ANIMATION_ITERATION_COUNT_INFINITE 0
 
-// See nsStyleDisplay
-#define NS_STYLE_ANIMATION_PLAY_STATE_RUNNING     0
-#define NS_STYLE_ANIMATION_PLAY_STATE_PAUSED      1
+// Animation play state
+enum class StyleAnimationPlayState : uint8_t {
+    Running,
+    Paused
+};
 
 // See nsStyleImageLayers
 enum class StyleImageLayerAttachment : uint8_t {
@@ -806,6 +808,7 @@ enum class StyleGridTrackBreadth : uint8_t {
 #define NS_STYLE_TEXT_TRANSFORM_LOWERCASE       2
 #define NS_STYLE_TEXT_TRANSFORM_UPPERCASE       3
 #define NS_STYLE_TEXT_TRANSFORM_FULL_WIDTH      4
+#define NS_STYLE_TEXT_TRANSFORM_FULL_SIZE_KANA  5
 
 // See nsStyleDisplay
 #define NS_STYLE_TOUCH_ACTION_NONE            (1 << 0)

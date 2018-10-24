@@ -17,6 +17,7 @@
 #include "mozilla/dom/TabContext.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/dom/File.h"
+#include "mozilla/gfx/CrossProcessPaint.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/Move.h"
@@ -562,6 +563,9 @@ public:
 
   void LayerTreeUpdate(const LayersObserverEpoch& aEpoch, bool aActive);
 
+  void RequestRootPaint(gfx::CrossProcessPaint* aPaint, IntRect aRect, float aScale, nscolor aBackgroundColor);
+  void RequestSubPaint(gfx::CrossProcessPaint* aPaint, float aScale, nscolor aBackgroundColor);
+
   virtual mozilla::ipc::IPCResult
   RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
                         const uint32_t& aAction,
@@ -774,6 +778,9 @@ private:
   // does not necessarily mean that the layers have finished rendering
   // and have uploaded - for that, use mHasLayers.
   bool mRenderLayers;
+
+  // Whether this is active for the ProcessPriorityManager or not.
+  bool mActiveInPriorityManager;
 
   // True if the compositor has reported that the TabChild has uploaded
   // layers.

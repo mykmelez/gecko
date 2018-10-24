@@ -89,6 +89,8 @@ public:
 
   void GenerateFrame();
 
+  void InvalidateRenderedFrame();
+
   void UpdateDynamicProperties(const nsTArray<wr::WrOpacityProperty>& aOpacityArray,
                                const nsTArray<wr::WrTransformProperty>& aTransformArray);
 
@@ -141,7 +143,7 @@ public:
                                         const wr::DeviceUintRect& aDirtyRect,
                                         uint8_t aChannelIndex = 0);
 
-  void SetImageVisibleArea(ImageKey aKey, const wr::NormalizedRect& aArea);
+  void SetImageVisibleArea(ImageKey aKey, const wr::DeviceUintRect& aArea);
 
   void DeleteImage(wr::ImageKey aKey);
 
@@ -180,6 +182,7 @@ public:
   void UpdateScrollPosition(const wr::WrPipelineId& aPipelineId,
                             const layers::FrameMetrics::ViewID& aScrollId,
                             const wr::LayoutPoint& aScrollPosition);
+  void UpdatePinchZoom(float aZoom);
 private:
   Transaction* mTxn;
 };
@@ -212,7 +215,7 @@ public:
 
   void RunOnRenderThread(UniquePtr<RendererEvent> aEvent);
 
-  void Readback(const TimeStamp& aStartTime, gfx::IntSize aSize, uint8_t *aBuffer, uint32_t aBufferSize);
+  void Readback(const TimeStamp& aStartTime, gfx::IntSize aSize, const Range<uint8_t>& aBuffer);
 
   void ClearAllCaches();
 

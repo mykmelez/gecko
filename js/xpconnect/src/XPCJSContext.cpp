@@ -800,6 +800,9 @@ ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx)
     bool useWasm = Preferences::GetBool(JS_OPTIONS_DOT_STR "wasm");
     bool useWasmIon = Preferences::GetBool(JS_OPTIONS_DOT_STR "wasm_ionjit");
     bool useWasmBaseline = Preferences::GetBool(JS_OPTIONS_DOT_STR "wasm_baselinejit");
+#ifdef ENABLE_WASM_CRANELIFT
+    bool useWasmCranelift = Preferences::GetBool(JS_OPTIONS_DOT_STR "wasm_cranelift");
+#endif
 #ifdef ENABLE_WASM_GC
     bool useWasmGc = Preferences::GetBool(JS_OPTIONS_DOT_STR "wasm_gc");
 #endif
@@ -819,6 +822,7 @@ ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx)
 
     int32_t baselineThreshold = Preferences::GetInt(JS_OPTIONS_DOT_STR "baselinejit.threshold", -1);
     int32_t ionThreshold = Preferences::GetInt(JS_OPTIONS_DOT_STR "ion.threshold", -1);
+    int32_t ionFrequentBailoutThreshold = Preferences::GetInt(JS_OPTIONS_DOT_STR "ion.frequent_bailout_threshold", -1);
 
     sDiscardSystemSource = Preferences::GetBool(JS_OPTIONS_DOT_STR "discardSystemSource");
 
@@ -871,6 +875,9 @@ ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx)
                              .setWasm(useWasm)
                              .setWasmIon(useWasmIon)
                              .setWasmBaseline(useWasmBaseline)
+#ifdef ENABLE_WASM_CRANELIFT
+                             .setWasmForceCranelift(useWasmCranelift)
+#endif
 #ifdef ENABLE_WASM_GC
                              .setWasmGc(useWasmGc)
 #endif
@@ -900,6 +907,9 @@ ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx)
                                   useBaselineEager ? 0 : baselineThreshold);
     JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_ION_WARMUP_TRIGGER,
                                   useIonEager ? 0 : ionThreshold);
+    JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_ION_FREQUENT_BAILOUT_THRESHOLD,
+                                  ionFrequentBailoutThreshold);
+
 #ifdef DEBUG
     JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_FULL_DEBUG_CHECKS, fullJitDebugChecks);
 #endif

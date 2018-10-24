@@ -74,15 +74,25 @@ const CFR_MESSAGES = [
             data: {url: null},
           },
         },
-        secondary: {
+        secondary: [{
           label: {string_id: "cfr-doorhanger-extension-cancel-button"},
           action: {type: "CANCEL"},
-        },
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-never-show-recommendation"},
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-manage-settings-button"},
+          action: {
+            type: "OPEN_PREFERENCES_PAGE",
+            data: {category: "general-cfr", origin: "CFR"},
+          },
+        }],
       },
     },
     frequency: {lifetime: 1},
     targeting: `
+      localeLanguageCode == "en" &&
       (providerCohorts.cfr == "one_per_day_amazon") &&
+      (xpinstallEnabled == true) &&
       (${JSON.stringify(AMAZON_ASSISTANT_PARAMS.existing_addons)} intersect addonsInfo.addons|keys)|length == 0 &&
       (${JSON.stringify(AMAZON_ASSISTANT_PARAMS.open_urls)} intersect topFrecentSites[.frecency >= ${AMAZON_ASSISTANT_PARAMS.min_frecency}]|mapToProperty('host'))|length > 0`,
     trigger: {id: "openURL", params: AMAZON_ASSISTANT_PARAMS.open_urls},
@@ -116,15 +126,25 @@ const CFR_MESSAGES = [
             data: {url: null},
           },
         },
-        secondary: {
+        secondary: [{
           label: {string_id: "cfr-doorhanger-extension-cancel-button"},
           action: {type: "CANCEL"},
-        },
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-never-show-recommendation"},
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-manage-settings-button"},
+          action: {
+            type: "OPEN_PREFERENCES_PAGE",
+            data: {category: "general-cfr", origin: "CFR"},
+          },
+        }],
       },
     },
     frequency: {lifetime: 3},
     targeting: `
+      localeLanguageCode == "en" &&
       (providerCohorts.cfr == "three_per_day_amazon") &&
+      (xpinstallEnabled == true) &&
       (${JSON.stringify(AMAZON_ASSISTANT_PARAMS.existing_addons)} intersect addonsInfo.addons|keys)|length == 0 &&
       (${JSON.stringify(AMAZON_ASSISTANT_PARAMS.open_urls)} intersect topFrecentSites[.frecency >= ${AMAZON_ASSISTANT_PARAMS.min_frecency}]|mapToProperty('host'))|length > 0`,
     trigger: {id: "openURL", params: AMAZON_ASSISTANT_PARAMS.open_urls},
@@ -158,15 +178,25 @@ const CFR_MESSAGES = [
             data: {url: null},
           },
         },
-        secondary: {
+        secondary: [{
           label: {string_id: "cfr-doorhanger-extension-cancel-button"},
           action: {type: "CANCEL"},
-        },
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-never-show-recommendation"},
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-manage-settings-button"},
+          action: {
+            type: "OPEN_PREFERENCES_PAGE",
+            data: {category: "general-cfr", origin: "CFR"},
+          },
+        }],
       },
     },
     frequency: {lifetime: 1},
     targeting: `
+      localeLanguageCode == "en" &&
       (providerCohorts.cfr in ["one_per_day", "nightly"]) &&
+      (xpinstallEnabled == true) &&
       (${JSON.stringify(FACEBOOK_CONTAINER_PARAMS.existing_addons)} intersect addonsInfo.addons|keys)|length == 0 &&
       (${JSON.stringify(FACEBOOK_CONTAINER_PARAMS.open_urls)} intersect topFrecentSites[.frecency >= ${FACEBOOK_CONTAINER_PARAMS.min_frecency}]|mapToProperty('host'))|length > 0`,
     trigger: {id: "openURL", params: FACEBOOK_CONTAINER_PARAMS.open_urls},
@@ -200,15 +230,25 @@ const CFR_MESSAGES = [
             data: {url: null},
           },
         },
-        secondary: {
+        secondary: [{
           label: {string_id: "cfr-doorhanger-extension-cancel-button"},
           action: {type: "CANCEL"},
-        },
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-never-show-recommendation"},
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-manage-settings-button"},
+          action: {
+            type: "OPEN_PREFERENCES_PAGE",
+            data: {category: "general-cfr", origin: "CFR"},
+          },
+        }],
       },
     },
     frequency: {lifetime: 3},
     targeting: `
+      localeLanguageCode == "en" &&
       (providerCohorts.cfr == "three_per_day") &&
+      (xpinstallEnabled == true) &&
       (${JSON.stringify(FACEBOOK_CONTAINER_PARAMS.existing_addons)} intersect addonsInfo.addons|keys)|length == 0 &&
       (${JSON.stringify(FACEBOOK_CONTAINER_PARAMS.open_urls)} intersect topFrecentSites[.frecency >= ${FACEBOOK_CONTAINER_PARAMS.min_frecency}]|mapToProperty('host'))|length > 0`,
     trigger: {id: "openURL", params: FACEBOOK_CONTAINER_PARAMS.open_urls},
@@ -242,15 +282,25 @@ const CFR_MESSAGES = [
             data: {url: null},
           },
         },
-        secondary: {
+        secondary: [{
           label: {string_id: "cfr-doorhanger-extension-cancel-button"},
           action: {type: "CANCEL"},
-        },
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-never-show-recommendation"},
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-manage-settings-button"},
+          action: {
+            type: "OPEN_PREFERENCES_PAGE",
+            data: {category: "general-cfr", origin: "CFR"},
+          },
+        }],
       },
     },
     frequency: {lifetime: 1},
     targeting: `
+      localeLanguageCode == "en" &&
       (providerCohorts.cfr in ["one_per_day", "nightly"]) &&
+      (xpinstallEnabled == true) &&
       (${JSON.stringify(GOOGLE_TRANSLATE_PARAMS.existing_addons)} intersect addonsInfo.addons|keys)|length == 0 &&
       (${JSON.stringify(GOOGLE_TRANSLATE_PARAMS.open_urls)} intersect topFrecentSites[.frecency >= ${GOOGLE_TRANSLATE_PARAMS.min_frecency}]|mapToProperty('host'))|length > 0`,
     trigger: {id: "openURL", params: GOOGLE_TRANSLATE_PARAMS.open_urls},
@@ -284,15 +334,25 @@ const CFR_MESSAGES = [
             data: {url: null},
           },
         },
-        secondary: {
+        secondary: [{
           label: {string_id: "cfr-doorhanger-extension-cancel-button"},
           action: {type: "CANCEL"},
-        },
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-never-show-recommendation"},
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-manage-settings-button"},
+          action: {
+            type: "OPEN_PREFERENCES_PAGE",
+            data: {category: "general-cfr", origin: "CFR"},
+          },
+        }],
       },
     },
     frequency: {lifetime: 3},
     targeting: `
+      localeLanguageCode == "en" &&
       (providerCohorts.cfr == "three_per_day") &&
+      (xpinstallEnabled == true) &&
       (${JSON.stringify(GOOGLE_TRANSLATE_PARAMS.existing_addons)} intersect addonsInfo.addons|keys)|length == 0 &&
       (${JSON.stringify(GOOGLE_TRANSLATE_PARAMS.open_urls)} intersect topFrecentSites[.frecency >= ${GOOGLE_TRANSLATE_PARAMS.min_frecency}]|mapToProperty('host'))|length > 0`,
     trigger: {id: "openURL", params: GOOGLE_TRANSLATE_PARAMS.open_urls},
@@ -326,15 +386,25 @@ const CFR_MESSAGES = [
             data: {url: null},
           },
         },
-        secondary: {
+        secondary: [{
           label: {string_id: "cfr-doorhanger-extension-cancel-button"},
           action: {type: "CANCEL"},
-        },
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-never-show-recommendation"},
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-manage-settings-button"},
+          action: {
+            type: "OPEN_PREFERENCES_PAGE",
+            data: {category: "general-cfr", origin: "CFR"},
+          },
+        }],
       },
     },
     frequency: {lifetime: 1},
     targeting: `
+      localeLanguageCode == "en" &&
       (providerCohorts.cfr in ["one_per_day", "nightly"]) &&
+      (xpinstallEnabled == true) &&
       (${JSON.stringify(YOUTUBE_ENHANCE_PARAMS.existing_addons)} intersect addonsInfo.addons|keys)|length == 0 &&
       (${JSON.stringify(YOUTUBE_ENHANCE_PARAMS.open_urls)} intersect topFrecentSites[.frecency >= ${YOUTUBE_ENHANCE_PARAMS.min_frecency}]|mapToProperty('host'))|length > 0`,
     trigger: {id: "openURL", params: YOUTUBE_ENHANCE_PARAMS.open_urls},
@@ -368,15 +438,25 @@ const CFR_MESSAGES = [
             data: {url: null},
           },
         },
-        secondary: {
+        secondary: [{
           label: {string_id: "cfr-doorhanger-extension-cancel-button"},
           action: {type: "CANCEL"},
-        },
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-never-show-recommendation"},
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-manage-settings-button"},
+          action: {
+            type: "OPEN_PREFERENCES_PAGE",
+            data: {category: "general-cfr", origin: "CFR"},
+          },
+        }],
       },
     },
     frequency: {lifetime: 3},
     targeting: `
+      localeLanguageCode == "en" &&
       (providerCohorts.cfr == "three_per_day") &&
+      (xpinstallEnabled == true) &&
       (${JSON.stringify(YOUTUBE_ENHANCE_PARAMS.existing_addons)} intersect addonsInfo.addons|keys)|length == 0 &&
       (${JSON.stringify(YOUTUBE_ENHANCE_PARAMS.open_urls)} intersect topFrecentSites[.frecency >= ${YOUTUBE_ENHANCE_PARAMS.min_frecency}]|mapToProperty('host'))|length > 0`,
     trigger: {id: "openURL", params: YOUTUBE_ENHANCE_PARAMS.open_urls},
@@ -410,15 +490,25 @@ const CFR_MESSAGES = [
             data: {url: null},
           },
         },
-        secondary: {
+        secondary: [{
           label: {string_id: "cfr-doorhanger-extension-cancel-button"},
           action: {type: "CANCEL"},
-        },
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-never-show-recommendation"},
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-manage-settings-button"},
+          action: {
+            type: "OPEN_PREFERENCES_PAGE",
+            data: {category: "general-cfr", origin: "CFR"},
+          },
+        }],
       },
     },
     frequency: {lifetime: 1},
     targeting: `
+      localeLanguageCode == "en" &&
       (providerCohorts.cfr in ["one_per_day", "nightly"]) &&
+      (xpinstallEnabled == true) &&
       (${JSON.stringify(WIKIPEDIA_CONTEXT_MENU_SEARCH_PARAMS.existing_addons)} intersect addonsInfo.addons|keys)|length == 0 &&
       (${JSON.stringify(WIKIPEDIA_CONTEXT_MENU_SEARCH_PARAMS.open_urls)} intersect topFrecentSites[.frecency >= ${WIKIPEDIA_CONTEXT_MENU_SEARCH_PARAMS.min_frecency}]|mapToProperty('host'))|length > 0`,
     trigger: {id: "openURL", params: WIKIPEDIA_CONTEXT_MENU_SEARCH_PARAMS.open_urls},
@@ -452,15 +542,25 @@ const CFR_MESSAGES = [
             data: {url: null},
           },
         },
-        secondary: {
+        secondary: [{
           label: {string_id: "cfr-doorhanger-extension-cancel-button"},
           action: {type: "CANCEL"},
-        },
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-never-show-recommendation"},
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-manage-settings-button"},
+          action: {
+            type: "OPEN_PREFERENCES_PAGE",
+            data: {category: "general-cfr", origin: "CFR"},
+          },
+        }],
       },
     },
     frequency: {lifetime: 3},
     targeting: `
+      localeLanguageCode == "en" &&
       (providerCohorts.cfr == "three_per_day") &&
+      (xpinstallEnabled == true) &&
       (${JSON.stringify(WIKIPEDIA_CONTEXT_MENU_SEARCH_PARAMS.existing_addons)} intersect addonsInfo.addons|keys)|length == 0 &&
       (${JSON.stringify(WIKIPEDIA_CONTEXT_MENU_SEARCH_PARAMS.open_urls)} intersect topFrecentSites[.frecency >= ${WIKIPEDIA_CONTEXT_MENU_SEARCH_PARAMS.min_frecency}]|mapToProperty('host'))|length > 0`,
     trigger: {id: "openURL", params: WIKIPEDIA_CONTEXT_MENU_SEARCH_PARAMS.open_urls},
@@ -494,15 +594,25 @@ const CFR_MESSAGES = [
             data: {url: null},
           },
         },
-        secondary: {
+        secondary: [{
           label: {string_id: "cfr-doorhanger-extension-cancel-button"},
           action: {type: "CANCEL"},
-        },
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-never-show-recommendation"},
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-manage-settings-button"},
+          action: {
+            type: "OPEN_PREFERENCES_PAGE",
+            data: {category: "general-cfr", origin: "CFR"},
+          },
+        }],
       },
     },
     frequency: {lifetime: 1},
     targeting: `
+      localeLanguageCode == "en" &&
       (providerCohorts.cfr in ["one_per_day", "nightly"]) &&
+      (xpinstallEnabled == true) &&
       (${JSON.stringify(REDDIT_ENHANCEMENT_PARAMS.existing_addons)} intersect addonsInfo.addons|keys)|length == 0 &&
       (${JSON.stringify(REDDIT_ENHANCEMENT_PARAMS.open_urls)} intersect topFrecentSites[.frecency >= ${REDDIT_ENHANCEMENT_PARAMS.min_frecency}]|mapToProperty('host'))|length > 0`,
     trigger: {id: "openURL", params: REDDIT_ENHANCEMENT_PARAMS.open_urls},
@@ -536,15 +646,25 @@ const CFR_MESSAGES = [
             data: {url: null},
           },
         },
-        secondary: {
+        secondary: [{
           label: {string_id: "cfr-doorhanger-extension-cancel-button"},
           action: {type: "CANCEL"},
-        },
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-never-show-recommendation"},
+        }, {
+          label: {string_id: "cfr-doorhanger-extension-manage-settings-button"},
+          action: {
+            type: "OPEN_PREFERENCES_PAGE",
+            data: {category: "general-cfr", origin: "CFR"},
+          },
+        }],
       },
     },
     frequency: {lifetime: 3},
     targeting: `
+      localeLanguageCode == "en" &&
       (providerCohorts.cfr == "three_per_day") &&
+      (xpinstallEnabled == true) &&
       (${JSON.stringify(REDDIT_ENHANCEMENT_PARAMS.existing_addons)} intersect addonsInfo.addons|keys)|length == 0 &&
       (${JSON.stringify(REDDIT_ENHANCEMENT_PARAMS.open_urls)} intersect topFrecentSites[.frecency >= ${REDDIT_ENHANCEMENT_PARAMS.min_frecency}]|mapToProperty('host'))|length > 0`,
     trigger: {id: "openURL", params: REDDIT_ENHANCEMENT_PARAMS.open_urls},

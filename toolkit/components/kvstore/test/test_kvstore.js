@@ -23,15 +23,15 @@ add_task(async function getService() {
   Assert.ok(gKeyValueService);
 });
 
-add_task(async function getOrCreateDefault() {
-  const databaseDir = await makeDatabaseDir("getOrCreateDefault");
-  const defaultDatabase = gKeyValueService.getOrCreateDefault(databaseDir);
+add_task(async function getOrCreate() {
+  const databaseDir = await makeDatabaseDir("getOrCreate");
+  const defaultDatabase = gKeyValueService.getOrCreate(databaseDir);
   Assert.ok(defaultDatabase);
 });
 
 add_task(async function putGetHasDelete() {
   const databaseDir = await makeDatabaseDir("putGetHasDelete");
-  const database = gKeyValueService.getOrCreateDefault(databaseDir);
+  const database = gKeyValueService.getOrCreate(databaseDir);
 
   // Getting key/value pairs that don't exist (yet) returns default values
   // or null, depending on whether you specify a default value.
@@ -84,19 +84,18 @@ add_task(async function putGetHasDelete() {
 
   // Getting key/value pairs that do exist, but using the wrong getter
   // for the value's type, throws an exception.
-  // NB: the error should be more accurate than NS_ERROR_NOT_IMPLEMENTED.
-  Assert.throws(() => database.getString("int-key", ""), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getDouble("int-key", 1.1), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getBool("int-key", false), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getInt("string-key", 1), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getDouble("string-key", 1.1), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getBool("string-key", false), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getInt("bool-key", 1), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getDouble("bool-key", 1.1), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getString("bool-key", ""), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getInt("double-key", 1), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getBool("double-key", false), /NS_ERROR_NOT_IMPLEMENTED/);
-  Assert.throws(() => database.getString("double-key", ""), /NS_ERROR_NOT_IMPLEMENTED/);
+  Assert.throws(() => database.getString("int-key", ""), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getDouble("int-key", 1.1), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getBool("int-key", false), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getInt("string-key", 1), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getDouble("string-key", 1.1), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getBool("string-key", false), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getInt("bool-key", 1), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getDouble("bool-key", 1.1), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getString("bool-key", ""), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getInt("double-key", 1), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getBool("double-key", false), /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => database.getString("double-key", ""), /NS_ERROR_UNEXPECTED/);
 
   // The has() method works as expected for both existing and non-existent keys.
   Assert.strictEqual(database.has("int-key"), true);
@@ -134,7 +133,7 @@ add_task(async function putGetHasDelete() {
 
 add_task(async function largeNumbers() {
   const databaseDir = await makeDatabaseDir("largeNumbers");
-  const database = gKeyValueService.getOrCreateDefault(databaseDir);
+  const database = gKeyValueService.getOrCreate(databaseDir);
 
   const MAX_INT_VARIANT = Math.pow(2, 31) - 1;
   const MIN_DOUBLE_VARIANT = Math.pow(2, 31);
@@ -161,24 +160,41 @@ add_task(async function largeNumbers() {
   Assert.strictEqual(database.getInt("max-int-variant", 1), MAX_INT_VARIANT);
 
   Assert.strictEqual(database.get("min-double-variant"), MIN_DOUBLE_VARIANT);
-  Assert.throws(() => database.getInt("min-double-variant", 1), /NS_ERROR_NOT_IMPLEMENTED/);
+  Assert.throws(() => database.getInt("min-double-variant", 1), /NS_ERROR_UNEXPECTED/);
   Assert.strictEqual(database.getDouble("min-double-variant", 1.1), MIN_DOUBLE_VARIANT);
 
   Assert.strictEqual(database.get("max-safe-integer"), Number.MAX_SAFE_INTEGER);
-  Assert.throws(() => database.getInt("max-safe-integer", 1), /NS_ERROR_NOT_IMPLEMENTED/);
+  Assert.throws(() => database.getInt("max-safe-integer", 1), /NS_ERROR_UNEXPECTED/);
   Assert.strictEqual(database.getDouble("max-safe-integer", 1.1), Number.MAX_SAFE_INTEGER);
 
   Assert.strictEqual(database.get("min-safe-integer"), Number.MIN_SAFE_INTEGER);
-  Assert.throws(() => database.getInt("min-safe-integer", 1), /NS_ERROR_NOT_IMPLEMENTED/);
+  Assert.throws(() => database.getInt("min-safe-integer", 1), /NS_ERROR_UNEXPECTED/);
   Assert.strictEqual(database.getDouble("min-safe-integer", 1.1), Number.MIN_SAFE_INTEGER);
 
   Assert.strictEqual(database.get("max-value"), Number.MAX_VALUE);
-  Assert.throws(() => database.getInt("max-value", 1), /NS_ERROR_NOT_IMPLEMENTED/);
+  Assert.throws(() => database.getInt("max-value", 1), /NS_ERROR_UNEXPECTED/);
   Assert.strictEqual(database.getDouble("max-value", 1.1), Number.MAX_VALUE);
 
   Assert.strictEqual(database.get("min-value"), Number.MIN_VALUE);
-  Assert.throws(() => database.getInt("min-value", 1), /NS_ERROR_NOT_IMPLEMENTED/);
+  Assert.throws(() => database.getInt("min-value", 1), /NS_ERROR_UNEXPECTED/);
   Assert.strictEqual(database.getDouble("min-value", 1.1), Number.MIN_VALUE);
+});
+
+add_task(async function extendedCharacterKey() {
+  const databaseDir = await makeDatabaseDir("extendedCharacterKey");
+  const database = gKeyValueService.getOrCreate(databaseDir);
+
+  // Ensure that we can use extended character (i.e. non-ASCII) strings as keys.
+
+  database.put("Héllo, wőrld!", 1);
+  Assert.strictEqual(database.has("Héllo, wőrld!"), true);
+  Assert.strictEqual(database.get("Héllo, wőrld!"), 1);
+
+  const enumerator = database.enumerate();
+  const key = enumerator.getNext().QueryInterface(Ci.nsIKeyValuePair).key;
+  Assert.strictEqual(key, "Héllo, wőrld!");
+
+  database.delete("Héllo, wőrld!");
 });
 
 add_task(async function getOrCreateNamedDatabases() {
@@ -190,7 +206,7 @@ add_task(async function getOrCreateNamedDatabases() {
   let barDB = gKeyValueService.getOrCreate(databaseDir, "bar");
   Assert.ok(barDB, "retrieval of second named database works");
 
-  let defaultDB = gKeyValueService.getOrCreateDefault(databaseDir);
+  let defaultDB = gKeyValueService.getOrCreate(databaseDir);
   Assert.ok(defaultDB, "retrieval of default database works");
 
   // Key/value pairs that are put into a database don't exist in others.
@@ -225,14 +241,15 @@ add_task(async function getOrCreateNamedDatabases() {
 
 add_task(async function enumeration() {
   const databaseDir = await makeDatabaseDir("enumeration");
-  const database = gKeyValueService.getOrCreateDefault(databaseDir);
+  const database = gKeyValueService.getOrCreate(databaseDir);
 
   database.put("int-key", 1234);
+  database.put("double-key", 56.78);
   database.put("string-key", "Héllo, wőrld!");
   database.put("bool-key", true);
 
-  function test(fromKey, pairs) {
-    const enumerator = database.enumerate(fromKey);
+  function test(fromKey, toKey, pairs) {
+    const enumerator = database.enumerate(fromKey, toKey);
 
     for (const pair of pairs) {
       Assert.strictEqual(enumerator.hasMoreElements(), true);
@@ -246,43 +263,117 @@ add_task(async function enumeration() {
     Assert.throws(() => enumerator.getNext(), /NS_ERROR_FAILURE/);
   }
 
-  test(null, [
+  // Test enumeration without specifying "from" and "to" keys, which should
+  // enumerate all of the pairs in the database.  This test does so explicitly
+  // by passing "null", "undefined" or "" (empty string) arguments
+  // for those parameters. The iterator test below also tests this implicitly
+  // by not specifying arguments for those parameters.
+  test(null, null, [
     ["bool-key", true],
+    ["double-key", 56.78],
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
-
-  // Enumerating from a specified key will return the subset of keys that are
-  // equal to or greater than (lexicographically) the specified key (whether or
-  // not the specified key itself exists).
-
-  test("aaaaa", [
+  test(undefined, undefined, [
     ["bool-key", true],
+    ["double-key", 56.78],
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
 
-  test("ccccc", [
+  // The implementation doesn't distinguish between a null/undefined value
+  // and an empty string, so enumerating pairs from "" to "" has the same effect
+  // as enumerating pairs without specifying from/to keys: it enumerates
+  // all of the pairs in the database.
+  test("", "", [
+    ["bool-key", true],
+    ["double-key", 56.78],
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
 
-  test("int-key", [
+  // Test enumeration from a key that doesn't exist and is lexicographically
+  // less than the least key in the database, which should enumerate
+  // all of the pairs in the database.
+  test("aaaaa", null, [
+    ["bool-key", true],
+    ["double-key", 56.78],
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
 
-  test("zzzzz", []);
+  // Test enumeration from a key that doesn't exist and is lexicographically
+  // greater than the first key in the database, which should enumerate pairs
+  // whose key is greater than or equal to the specified key.
+  test("ccccc", null, [
+    ["double-key", 56.78],
+    ["int-key", 1234],
+    ["string-key", "Héllo, wőrld!"],
+  ]);
 
-  // Enumerators don't implement implicit iteration, because they're implemented
-  // in Rust, which doesn't support jscontext.
-  //
-  // This should throw an exception, but instead it crashes the application
-  // TODO: file a bug about this crash.
-  // Assert.throws(() => { for (let pair of database.enumerate()) {} },
-  //               /NS_ERROR_NOT_IMPLEMENTED/);
+  // Test enumeration from a key that does exist, which should enumerate pairs
+  // whose key is greater than or equal to that key.
+  test("int-key", null, [
+    ["int-key", 1234],
+    ["string-key", "Héllo, wőrld!"],
+  ]);
 
-  // But it's trivial to wrap them in a JavaScript iterable using a generator.
+  // Test enumeration from a key that doesn't exist and is lexicographically
+  // greater than the greatest key in the database, which should enumerate
+  // none of the pairs in the database.
+  test("zzzzz", null, []);
+
+  // Test enumeration to a key that doesn't exist and is lexicographically
+  // greater than the greatest key in the database, which should enumerate
+  // all of the pairs in the database.
+  test(null, "zzzzz", [
+    ["bool-key", true],
+    ["double-key", 56.78],
+    ["int-key", 1234],
+    ["string-key", "Héllo, wőrld!"],
+  ]);
+
+  // Test enumeration to a key that doesn't exist and is lexicographically
+  // less than the greatest key in the database, which should enumerate pairs
+  // whose key is less than or equal to the specified key.
+  test(null, "ppppp", [
+    ["bool-key", true],
+    ["double-key", 56.78],
+    ["int-key", 1234],
+  ]);
+
+  // Test enumeration to a key that does exist, which should enumerate pairs
+  // whose key is less than or equal to that key.
+  test(null, "int-key", [
+    ["bool-key", true],
+    ["double-key", 56.78],
+    ["int-key", 1234],
+  ]);
+
+  // Test enumeration to a key that doesn't exist and is lexicographically
+  // less than the least key in the database, which should enumerate
+  // none of the pairs in the database.
+  test(null, "aaaaa", []);
+
+  // Test enumeration between intermediate keys, which should enumerate
+  // the pairs whose keys lie in between them.
+  test("int-key", "int-key", [
+    ["int-key", 1234],
+  ]);
+  test("ggggg", "ppppp", [
+    ["int-key", 1234],
+  ]);
+
+  // Test enumeration from a greater key to a lesser one, which should enumerate
+  // none of the pairs in the database, even if the reverse ordering would
+  // enumerate some pairs.  Consumers are responsible for ordering the "from"
+  // and "to" keys such that "from" is less than or equal to "to".
+  test("ppppp", "ccccc", []);
+  test("int-key", "ccccc", []);
+  test("ppppp", "int-key", []);
+
+  // Enumerators don't implement the JS iteration protocol, but it's trivial
+  // to wrap them in an iterable using a generator.
   function* KeyValueIterator(enumerator) {
     while (enumerator.hasMoreElements()) {
       yield enumerator.getNext().QueryInterface(Ci.nsIKeyValuePair);
@@ -294,11 +385,13 @@ add_task(async function enumeration() {
   }
   Assert.deepEqual(actual, {
     "bool-key": true,
+    "double-key": 56.78,
     "int-key": 1234,
     "string-key": "Héllo, wőrld!",
   });
 
   database.delete("int-key");
+  database.delete("double-key");
   database.delete("string-key");
   database.delete("bool-key");
 });

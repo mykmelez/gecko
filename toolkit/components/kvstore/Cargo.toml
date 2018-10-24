@@ -9,7 +9,9 @@ lmdb-rkv = "0.8"
 log = "0.4"
 nserror = { path = "../../../xpcom/rust/nserror" }
 nsstring = { path = "../../../servo/support/gecko/nsstring" }
-rkv = "0.4"
+ordered-float = "1"
+rkv = "0.5"
+storage_variant = { path = "../../../storage/variant" }
 xpcom = { path = "../../../xpcom/rust/xpcom" }
 
 # Get rid of failure's dependency on backtrace. Eventually

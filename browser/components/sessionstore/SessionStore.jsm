@@ -1046,10 +1046,6 @@ var SessionStoreInternal = {
           this.resetEpoch(target);
         }
         break;
-      case "BrowserWillChangeProcess":
-        let promise = TabStateFlusher.flush(target);
-        target.frameLoader.addProcessChangeBlockingPromise(promise);
-        break;
       case "BrowserChangedProcess":
         let newEpoch = 1 + Math.max(this.getCurrentEpoch(target),
                                     this.getCurrentEpoch(aEvent.otherBrowser));
@@ -1125,7 +1121,6 @@ var SessionStoreInternal = {
     // Keep track of a browser's latest frameLoader.
     aWindow.gBrowser.addEventListener("XULFrameLoaderCreated", this);
     aWindow.gBrowser.addEventListener("BrowserChangedProcess", this);
-    aWindow.gBrowser.addEventListener("BrowserWillChangeProcess", this);
   },
 
   /**
@@ -1391,7 +1386,6 @@ var SessionStoreInternal = {
 
     aWindow.gBrowser.removeEventListener("XULFrameLoaderCreated", this);
     aWindow.gBrowser.removeEventListener("BrowserChangedProcess", this);
-    aWindow.gBrowser.removeEventListener("BrowserWillChangeProcess", this);
 
     let winData = this._windows[aWindow.__SSi];
 
@@ -2773,7 +2767,7 @@ var SessionStoreInternal = {
       if (activePageData.title &&
           activePageData.title != activePageData.url) {
         win.gBrowser.setInitialTabTitle(tab, activePageData.title, { isContentTitle: true });
-      } else if (activePageData.url != "about:blank") {
+      } else {
         win.gBrowser.setInitialTabTitle(tab, activePageData.url);
       }
     }
@@ -3594,15 +3588,20 @@ var SessionStoreInternal = {
   /**
    * Prepare connection to host beforehand.
    *
+   * @param tab
+   *        Tab we are loading from.
    * @param url
    *        URL of a host.
    * @returns a flag indicates whether a connection has been made
    */
-  prepareConnectionToHost(url) {
+  prepareConnectionToHost(tab, url) {
     if (!url.startsWith("about:")) {
+      let principal = Services.scriptSecurityManager.createNullPrincipal({
+        userContextId: tab.userContextId,
+      });
       let sc = Services.io.QueryInterface(Ci.nsISpeculativeConnect);
       let uri = Services.io.newURI(url);
-      sc.speculativeConnect(uri, null, null);
+      sc.speculativeConnect2(uri, principal, null);
       return true;
     }
     return false;
@@ -3620,7 +3619,7 @@ var SessionStoreInternal = {
     let tabState = TAB_LAZY_STATES.get(tab);
     if (tabState && !tabState.connectionPrepared) {
       let url = this.getLazyTabValue(tab, "url");
-      let prepared = this.prepareConnectionToHost(url);
+      let prepared = this.prepareConnectionToHost(tab, url);
       // This is used to test if a connection has been made beforehand.
       if (gDebuggingEnabled) {
         tab.__test_connection_prepared = prepared;
@@ -3927,7 +3926,7 @@ var SessionStoreInternal = {
         if (TabRestoreQueue.willRestoreSoon(tab)) {
           if (activeIndex in tabData.entries) {
             let url = tabData.entries[activeIndex].url;
-            let prepared = this.prepareConnectionToHost(url);
+            let prepared = this.prepareConnectionToHost(tab, url);
             if (gDebuggingEnabled) {
               tab.__test_connection_prepared = prepared;
               tab.__test_connection_url = url;

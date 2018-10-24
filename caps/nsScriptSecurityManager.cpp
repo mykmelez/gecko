@@ -65,6 +65,8 @@
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/dom/WorkerCommon.h"
+#include "mozilla/dom/WorkerPrivate.h"
 #include "nsContentUtils.h"
 #include "nsJSUtils.h"
 #include "nsILoadInfo.h"
@@ -476,6 +478,14 @@ nsScriptSecurityManager::ContentSecurityPolicyPermitsJSAction(JSContext *cx,
 {
     MOZ_ASSERT(cx == nsContentUtils::GetCurrentJSContext());
     nsCOMPtr<nsIPrincipal> subjectPrincipal = nsContentUtils::SubjectPrincipal();
+
+#if defined(DEBUG) && !defined(ANDROID)
+    if (!(Preferences::GetBool("security.allow_eval_with_system_principal"))) {
+      MOZ_ASSERT(!nsContentUtils::IsSystemPrincipal(subjectPrincipal),
+               "do not use eval with system privileges");
+    }
+#endif
+
     nsCOMPtr<nsIContentSecurityPolicy> csp;
     nsresult rv = subjectPrincipal->GetCsp(getter_AddRefs(csp));
     NS_ASSERTION(NS_SUCCEEDED(rv), "CSP: Failed to get CSP from principal.");
@@ -483,6 +493,15 @@ nsScriptSecurityManager::ContentSecurityPolicyPermitsJSAction(JSContext *cx,
     // don't do anything unless there's a CSP
     if (!csp)
         return true;
+
+    nsCOMPtr<nsICSPEventListener> cspEventListener;
+    if (!NS_IsMainThread()) {
+      WorkerPrivate* workerPrivate =
+        mozilla::dom::GetWorkerPrivateFromContext(cx);
+      if (workerPrivate) {
+        cspEventListener = workerPrivate->CSPEventListener();
+      }
+    }
 
     bool evalOK = true;
     bool reportViolation = false;
@@ -521,6 +540,7 @@ nsScriptSecurityManager::ContentSecurityPolicyPermitsJSAction(JSContext *cx,
         }
         csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_EVAL,
                                  nullptr, // triggering element
+                                 cspEventListener,
                                  fileName,
                                  scriptSample,
                                  lineNum,

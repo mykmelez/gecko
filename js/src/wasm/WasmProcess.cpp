@@ -22,6 +22,7 @@
 #include "mozilla/ScopeExit.h"
 
 #include "vm/MutexIDs.h"
+#include "wasm/cranelift/clifapi.h"
 #include "wasm/WasmBuiltins.h"
 #include "wasm/WasmCode.h"
 #include "wasm/WasmInstance.h"
@@ -277,9 +278,25 @@ wasm::LookupCode(const void* pc, const CodeRange** codeRange /* = nullptr */)
 }
 
 bool
+wasm::InCompiledCode(void* pc)
+{
+    if (LookupCodeSegment(pc)) {
+        return true;
+    }
+
+    const CodeRange* codeRange;
+    uint8_t* codeBase;
+    return LookupBuiltinThunk(pc, &codeRange, &codeBase);
+}
+
+bool
 wasm::Init()
 {
     MOZ_RELEASE_ASSERT(!sProcessCodeSegmentMap);
+
+#ifdef ENABLE_WASM_CRANELIFT
+    cranelift_initialize();
+#endif
 
     ProcessCodeSegmentMap* map = js_new<ProcessCodeSegmentMap>();
     if (!map) {

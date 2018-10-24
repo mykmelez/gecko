@@ -2,6 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+//! The high-level module responsible for managing the pipeline and preparing
+//! commands to be issued by the `Renderer`.
+//!
+//! See the comment at the top of the `renderer` module for a description of
+//! how these two pieces interact.
+
 use api::{ApiMsg, BuiltDisplayList, ClearCache, DebugCommand};
 #[cfg(feature = "debugger")]
 use api::{BuiltDisplayListIter, SpecificDisplayItem};
@@ -16,9 +22,7 @@ use api::channel::{MsgReceiver, Payload};
 use api::CaptureBits;
 #[cfg(feature = "replay")]
 use api::CapturedDocument;
-#[cfg(feature = "replay")]
-use clip::ClipDataInterner;
-use clip::{ClipDataUpdateList, ClipDataStore};
+use clip::ClipDataStore;
 use clip_scroll_tree::{SpatialNodeIndex, ClipScrollTree};
 #[cfg(feature = "debugger")]
 use debug_server;
@@ -26,6 +30,7 @@ use frame_builder::{FrameBuilder, FrameBuilderConfig};
 use gpu_cache::GpuCache;
 use hit_test::{HitTest, HitTester};
 use internal_types::{DebugOutput, FastHashMap, FastHashSet, RenderedDocument, ResultMsg};
+use prim_store::PrimitiveDataStore;
 use profiler::{BackendProfileCounters, IpcProfileCounters, ResourceProfileCounters};
 use record::ApiRecordingReceiver;
 use renderer::{AsyncPropertySampler, PipelineInfo};
@@ -80,6 +85,29 @@ impl DocumentView {
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct FrameId(pub u32);
 
+// A collection of resources that are shared by clips, primitives
+// between display lists.
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub struct FrameResources {
+    /// The store of currently active / available clip nodes. This is kept
+    /// in sync with the clip interner in the scene builder for each document.
+    pub clip_data_store: ClipDataStore,
+
+    /// Currently active / available primitives. Kept in sync with the
+    /// primitive interner in the scene builder, per document.
+    pub prim_data_store: PrimitiveDataStore,
+}
+
+impl FrameResources {
+    fn new() -> Self {
+        FrameResources {
+            clip_data_store: ClipDataStore::new(),
+            prim_data_store: PrimitiveDataStore::new(),
+        }
+    }
+}
+
 struct Document {
     // The latest built scene, usable to build frames.
     // received from the scene builder thread.
@@ -117,10 +145,9 @@ struct Document {
     /// before rendering again.
     frame_is_valid: bool,
     hit_tester_is_valid: bool,
+    rendered_frame_is_valid: bool,
 
-    // The store of currently active / available clip nodes. This is kept
-    // in sync with the clip interner in the scene builder for each document.
-    clip_data_store: ClipDataStore,
+    resources: FrameResources,
 }
 
 impl Document {
@@ -149,7 +176,8 @@ impl Document {
             dynamic_properties: SceneProperties::new(),
             frame_is_valid: false,
             hit_tester_is_valid: false,
-            clip_data_store: ClipDataStore::new(),
+            rendered_frame_is_valid: false,
+            resources: FrameResources::new(),
         }
     }
 
@@ -249,6 +277,12 @@ impl Document {
             FrameMsg::AppendDynamicProperties(property_bindings) => {
                 self.dynamic_properties.add_properties(property_bindings);
             }
+            FrameMsg::SetPinchZoom(factor) => {
+                if self.view.pinch_zoom_factor != factor.get() {
+                    self.view.pinch_zoom_factor = factor.get();
+                    self.frame_is_valid = false;
+                }
+            }
         }
 
         DocumentOps::nop()
@@ -278,11 +312,11 @@ impl Document {
                 &mut resource_profile.texture_cache,
                 &mut resource_profile.gpu_cache,
                 &self.dynamic_properties,
-                &mut self.clip_data_store,
+                &mut self.resources,
             );
             self.hit_tester = Some(frame_builder.create_hit_tester(
                 &self.clip_scroll_tree,
-                &self.clip_data_store,
+                &self.resources.clip_data_store,
             ));
             frame
         };
@@ -309,7 +343,7 @@ impl Document {
 
             self.hit_tester = Some(frame_builder.create_hit_tester(
                 &self.clip_scroll_tree,
-                &self.clip_data_store,
+                &self.resources.clip_data_store,
             ));
         }
     }
@@ -419,6 +453,7 @@ pub struct RenderBackend {
     recorder: Option<Box<ApiRecordingReceiver>>,
     sampler: Option<Box<AsyncPropertySampler + Send>>,
     size_of_op: Option<VoidPtrToSizeFn>,
+    namespace_alloc_by_client: bool,
 
     last_scene_id: u64,
 }
@@ -438,6 +473,7 @@ impl RenderBackend {
         recorder: Option<Box<ApiRecordingReceiver>>,
         sampler: Option<Box<AsyncPropertySampler + Send>>,
         size_of_op: Option<VoidPtrToSizeFn>,
+        namespace_alloc_by_client: bool,
     ) -> RenderBackend {
         RenderBackend {
             api_rx,
@@ -457,6 +493,7 @@ impl RenderBackend {
             sampler,
             size_of_op,
             last_scene_id: 0,
+            namespace_alloc_by_client,
         }
     }
 
@@ -476,9 +513,6 @@ impl RenderBackend {
             }
             SceneMsg::SetPageZoom(factor) => {
                 doc.view.page_zoom_factor = factor.get();
-            }
-            SceneMsg::SetPinchZoom(factor) => {
-                doc.view.pinch_zoom_factor = factor.get();
             }
             SceneMsg::SetWindowParameters {
                 window_size,
@@ -629,10 +663,11 @@ impl RenderBackend {
                         self.update_document(
                             txn.document_id,
                             replace(&mut txn.resource_updates, Vec::new()),
-                            txn.clip_updates.take(),
+                            txn.doc_resource_updates.take(),
                             replace(&mut txn.frame_ops, Vec::new()),
                             replace(&mut txn.notifications, Vec::new()),
                             txn.render_frame,
+                            txn.invalidate_rendered_frame,
                             &mut frame_counter,
                             &mut profile_counters,
                             has_built_scene,
@@ -643,6 +678,10 @@ impl RenderBackend {
                     }
                     SceneBuilderResult::ExternalEvent(evt) => {
                         self.notifier.external_event(evt);
+                    }
+                    SceneBuilderResult::ClearNamespace(id) => {
+                        self.resource_cache.clear_namespace(id);
+                        self.documents.retain(|doc_id, _doc| doc_id.0 != id);
                     }
                     SceneBuilderResult::Stopped => {
                         panic!("We haven't sent a Stop yet, how did we get a Stopped back?");
@@ -729,7 +768,12 @@ impl RenderBackend {
                 tx.send(glyph_indices).unwrap();
             }
             ApiMsg::CloneApi(sender) => {
+                assert!(!self.namespace_alloc_by_client);
                 sender.send(self.next_namespace_id()).unwrap();
+            }
+            ApiMsg::CloneApiByClient(namespace_id) => {
+                assert!(self.namespace_alloc_by_client);
+                debug_assert!(!self.documents.iter().any(|(did, _doc)| did.0 == namespace_id));
             }
             ApiMsg::AddDocument(document_id, initial_size, layer) => {
                 let document = Document::new(
@@ -748,9 +792,8 @@ impl RenderBackend {
             ApiMsg::ExternalEvent(evt) => {
                 self.low_priority_scene_tx.send(SceneBuilderRequest::ExternalEvent(evt)).unwrap();
             }
-            ApiMsg::ClearNamespace(namespace_id) => {
-                self.resource_cache.clear_namespace(namespace_id);
-                self.documents.retain(|did, _doc| did.0 != namespace_id);
+            ApiMsg::ClearNamespace(id) => {
+                self.low_priority_scene_tx.send(SceneBuilderRequest::ClearNamespace(id)).unwrap();
             }
             ApiMsg::MemoryPressure => {
                 // This is drastic. It will basically flush everything out of the cache,
@@ -905,6 +948,7 @@ impl RenderBackend {
             notifications: transaction_msg.notifications,
             set_root_pipeline: None,
             render_frame: transaction_msg.generate_frame,
+            invalidate_rendered_frame: transaction_msg.invalidate_rendered_frame,
         });
 
         self.resource_cache.pre_scene_building_update(
@@ -940,6 +984,7 @@ impl RenderBackend {
                 replace(&mut txn.frame_ops, Vec::new()),
                 replace(&mut txn.notifications, Vec::new()),
                 txn.render_frame,
+                txn.invalidate_rendered_frame,
                 frame_counter,
                 profile_counters,
                 false
@@ -973,10 +1018,11 @@ impl RenderBackend {
         &mut self,
         document_id: DocumentId,
         resource_updates: Vec<ResourceUpdate>,
-        clip_updates: Option<ClipDataUpdateList>,
+        doc_resource_updates: Option<DocumentResourceUpdates>,
         mut frame_ops: Vec<FrameMsg>,
         mut notifications: Vec<NotificationRequest>,
         mut render_frame: bool,
+        invalidate_rendered_frame: bool,
         frame_counter: &mut u32,
         profile_counters: &mut BackendProfileCounters,
         has_built_scene: bool,
@@ -998,8 +1044,9 @@ impl RenderBackend {
 
         // If there are any additions or removals of clip modes
         // during the scene build, apply them to the data store now.
-        if let Some(clip_updates) = clip_updates {
-            doc.clip_data_store.apply_updates(clip_updates);
+        if let Some(updates) = doc_resource_updates {
+            doc.resources.clip_data_store.apply_updates(updates.clip_updates);
+            doc.resources.prim_data_store.apply_updates(updates.prim_updates);
         }
 
         // TODO: this scroll variable doesn't necessarily mean we scrolled. It is only used
@@ -1037,11 +1084,19 @@ impl RenderBackend {
         // Avoid re-building the frame if the current built frame is still valid.
         let build_frame = render_frame && !doc.frame_is_valid;
 
+        // Request composite is true when we want to composite frame even when
+        // there is no frame update. This happens when video frame is updated under
+        // external image with NativeTexture or when platform requested to composite frame.
+        if invalidate_rendered_frame {
+            doc.rendered_frame_is_valid = false;
+        }
+
         let mut frame_build_time = None;
         if build_frame && doc.has_pixels() {
             profile_scope!("generate frame");
 
             *frame_counter += 1;
+            doc.rendered_frame_is_valid = false;
 
             // borrow ck hack for profile_counters
             let (pending_update, rendered_document) = {
@@ -1102,6 +1157,12 @@ impl RenderBackend {
         // otherwise gecko can get into a state where it waits (forever) for the
         // transaction to complete before sending new work.
         if requested_frame {
+            // If rendered frame is already valid, there is no need to render frame.
+            if doc.rendered_frame_is_valid {
+                render_frame = false;
+            } else if render_frame {
+                doc.rendered_frame_is_valid = true;
+            }
             self.notifier.new_frame_ready(document_id, scroll, render_frame, frame_build_time);
         }
 
@@ -1316,8 +1377,8 @@ impl RenderBackend {
                 config.serialize(&rendered_document.frame, file_name);
             }
 
-            let clip_data_name = format!("clip-data-{}-{}", (id.0).0, id.1);
-            config.serialize(&doc.clip_data_store, clip_data_name);
+            let frame_resources_name = format!("frame-resources-{}-{}", (id.0).0, id.1);
+            config.serialize(&doc.resources, frame_resources_name);
         }
 
         debug!("\tscene builder");
@@ -1403,13 +1464,13 @@ impl RenderBackend {
             let scene = CaptureConfig::deserialize::<Scene, _>(root, &scene_name)
                 .expect(&format!("Unable to open {}.ron", scene_name));
 
-            let clip_interner_name = format!("clip-interner-{}-{}", (id.0).0, id.1);
-            let clip_interner = CaptureConfig::deserialize::<ClipDataInterner, _>(root, &clip_interner_name)
-                .expect(&format!("Unable to open {}.ron", clip_interner_name));
+            let doc_resources_name = format!("doc-resources-{}-{}", (id.0).0, id.1);
+            let doc_resources = CaptureConfig::deserialize::<DocumentResources, _>(root, &doc_resources_name)
+                .expect(&format!("Unable to open {}.ron", doc_resources_name));
 
-            let clip_data_name = format!("clip-data-{}-{}", (id.0).0, id.1);
-            let clip_data_store = CaptureConfig::deserialize::<ClipDataStore, _>(root, &clip_data_name)
-                .expect(&format!("Unable to open {}.ron", clip_data_name));
+            let frame_resources_name = format!("frame-resources-{}-{}", (id.0).0, id.1);
+            let frame_resources = CaptureConfig::deserialize::<FrameResources, _>(root, &frame_resources_name)
+                .expect(&format!("Unable to open {}.ron", frame_resources_name));
 
             let mut doc = Document {
                 scene: scene.clone(),
@@ -1423,7 +1484,8 @@ impl RenderBackend {
                 hit_tester: None,
                 frame_is_valid: false,
                 hit_tester_is_valid: false,
-                clip_data_store,
+                rendered_frame_is_valid: false,
+                resources: frame_resources,
             };
 
             let frame_name = format!("frame-{}-{}", (id.0).0, id.1);
@@ -1464,7 +1526,7 @@ impl RenderBackend {
                 font_instances: self.resource_cache.get_font_instances(),
                 scene_id: last_scene_id,
                 build_frame,
-                clip_interner,
+                doc_resources,
             });
 
             self.documents.insert(id, doc);

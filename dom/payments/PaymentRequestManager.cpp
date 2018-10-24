@@ -51,18 +51,9 @@ ConvertCurrencyAmount(const PaymentCurrencyAmount& aAmount,
 void
 ConvertItem(const PaymentItem& aItem, IPCPaymentItem& aIPCItem)
 {
-  uint8_t typeIndex = UINT8_MAX;
-  if (aItem.mType.WasPassed()) {
-    typeIndex = static_cast<uint8_t>(aItem.mType.Value());
-  }
-  nsString type;
-  if (typeIndex < ArrayLength(PaymentItemTypeValues::strings)) {
-    type.AssignASCII(
-      PaymentItemTypeValues::strings[typeIndex].value);
-  }
   IPCPaymentCurrencyAmount amount;
   ConvertCurrencyAmount(aItem.mAmount, amount);
-  aIPCItem = IPCPaymentItem(aItem.mLabel, amount, aItem.mPending, type);
+  aIPCItem = IPCPaymentItem(aItem.mLabel, amount, aItem.mPending);
 }
 
 nsresult
@@ -652,6 +643,7 @@ PaymentRequestManager::ChangeShippingAddress(PaymentRequest* aRequest,
   return aRequest->UpdateShippingAddress(aAddress.country(),
                                          aAddress.addressLine(),
                                          aAddress.region(),
+                                         aAddress.regionCode(),
                                          aAddress.city(),
                                          aAddress.dependentLocality(),
                                          aAddress.postalCode(),

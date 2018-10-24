@@ -23,6 +23,7 @@
 #include "mozilla/dom/Selection.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/layers/PLayerTransaction.h"
+#include "mozilla/ShapeUtils.h"
 #include "nsCSSRendering.h"
 #include "nsCSSRenderingGradients.h"
 #include "nsISelectionController.h"
@@ -1018,6 +1019,7 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
   , mInInvalidSubtree(false)
   , mDisablePartialUpdates(false)
   , mPartialBuildFailed(false)
+  , mIsInActiveDocShell(false)
 {
   MOZ_COUNT_CTOR(nsDisplayListBuilder);
 
@@ -2046,46 +2048,42 @@ nsDisplayListBuilder::GetWindowDraggingRegion() const
 }
 
 /**
- * Removes modified frames and rects from |aRegion|.
+ * Removes modified frames and rects from this WeakFrameRegion.
  */
-static void
-RemoveModifiedFramesAndRects(nsDisplayListBuilder::WeakFrameRegion& aRegion)
+void
+nsDisplayListBuilder::WeakFrameRegion::RemoveModifiedFramesAndRects()
 {
-  std::vector<WeakFrame>& frames = aRegion.mFrames;
-  nsTArray<pixman_box32_t>& rects = aRegion.mRects;
-
-  MOZ_ASSERT(frames.size() == rects.Length());
+  MOZ_ASSERT(mFrames.Length() == mRects.Length());
 
   uint32_t i = 0;
-  uint32_t length = frames.size();
+  uint32_t length = mFrames.Length();
 
   while (i < length) {
-    WeakFrame& frame = frames[i];
+    auto& wrapper = mFrames[i];
 
-    if (!frame.IsAlive() || frame->IsFrameModified()) {
-      // To avoid O(n) shifts in the array, move the last element of the array
-      // to the current position and decrease the array length. Moving WeakFrame
-      // inside of the array causes a new WeakFrame to be created and registered
-      // with PresShell. We could avoid this by, for example, using a wrapper
-      // class for WeakFrame, or by storing raw  WeakFrame pointers.
-      frames[i] = frames[length - 1];
-      rects[i] = rects[length - 1];
+    if (!wrapper.mWeakFrame->IsAlive() ||
+        wrapper.mWeakFrame->GetFrame()->IsFrameModified()) {
+      // To avoid multiple O(n) shifts in the array, move the last element of
+      // the array to the current position and decrease the array length.
+      mFrameSet.RemoveEntry(wrapper.mFrame);
+      mFrames[i] = std::move(mFrames[length - 1]);
+      mRects[i] = std::move(mRects[length - 1]);
       length--;
     } else {
       i++;
     }
   }
 
-  frames.resize(length);
-  rects.TruncateLength(length);
+  mFrames.TruncateLength(length);
+  mRects.TruncateLength(length);
 }
 
 void
 nsDisplayListBuilder::RemoveModifiedWindowRegions()
 {
-  RemoveModifiedFramesAndRects(mRetainedWindowDraggingRegion);
-  RemoveModifiedFramesAndRects(mRetainedWindowNoDraggingRegion);
-  RemoveModifiedFramesAndRects(mWindowExcludeGlassRegion);
+  mRetainedWindowDraggingRegion.RemoveModifiedFramesAndRects();
+  mRetainedWindowNoDraggingRegion.RemoveModifiedFramesAndRects();
+  mWindowExcludeGlassRegion.RemoveModifiedFramesAndRects();
 }
 
 void
@@ -6543,6 +6541,30 @@ nsDisplayOpacity::ApplyOpacityToChildren(nsDisplayListBuilder* aBuilder)
   return true;
 }
 
+/**
+ * Returns true if this nsDisplayOpacity contains only a filter or a mask item
+ * that has the same frame as the opacity item. In this case the opacity item
+ * can be optimized away.
+ */
+bool
+nsDisplayOpacity::IsEffectsWrapper() const
+{
+  if (mList.Count() != 1) {
+    return false;
+  }
+
+  const nsDisplayItem* item = mList.GetBottom();
+
+  if (item->Frame() != mFrame) {
+    // The effect item needs to have the same frame as the opacity item.
+    return false;
+  }
+
+  const DisplayItemType type = item->GetType();
+  return type == DisplayItemType::TYPE_MASK ||
+         type == DisplayItemType::TYPE_FILTER;
+}
+
 bool
 nsDisplayOpacity::ShouldFlattenAway(nsDisplayListBuilder* aBuilder)
 {
@@ -6563,6 +6585,13 @@ nsDisplayOpacity::ShouldFlattenAway(nsDisplayListBuilder* aBuilder)
 
   if (mList.IsEmpty()) {
     return false;
+  }
+
+  if (IsEffectsWrapper()) {
+    MOZ_ASSERT(nsSVGIntegrationUtils::UsingEffectsForFrame(mFrame));
+    static_cast<nsDisplayEffectsBase*>(mList.GetBottom())->SetHandleOpacity();
+    mChildOpacityState = ChildOpacityState::Applied;
+    return true;
   }
 
   // Return true if we successfully applied opacity to child items, or if
@@ -7157,7 +7186,7 @@ nsDisplaySubDocument::ComputeScrollMetadata(
                                          viewport,
                                          Nothing(),
                                          isRootContentDocument,
-                                         params));
+                                         Some(params)));
 }
 
 static bool
@@ -7848,7 +7877,7 @@ nsDisplayScrollInfoLayer::ComputeScrollMetadata(
                                          viewport,
                                          Nothing(),
                                          false,
-                                         aContainerParameters);
+                                         Some(aContainerParameters));
   metadata.GetMetrics().SetIsScrollInfoLayer(true);
 
   return UniquePtr<ScrollMetadata>(new ScrollMetadata(metadata));
@@ -9449,7 +9478,6 @@ nsDisplayEffectsBase::nsDisplayEffectsBase(
   nsDisplayListBuilder* aBuilder,
   nsIFrame* aFrame,
   nsDisplayList* aList,
-  bool aHandleOpacity,
   const ActiveScrolledRoot* aActiveScrolledRoot,
   bool aClearClipChain)
   : nsDisplayWrapList(aBuilder,
@@ -9457,17 +9485,16 @@ nsDisplayEffectsBase::nsDisplayEffectsBase(
                       aList,
                       aActiveScrolledRoot,
                       aClearClipChain)
-  , mHandleOpacity(aHandleOpacity)
+  , mHandleOpacity(false)
 {
   MOZ_COUNT_CTOR(nsDisplayEffectsBase);
 }
 
 nsDisplayEffectsBase::nsDisplayEffectsBase(nsDisplayListBuilder* aBuilder,
                                            nsIFrame* aFrame,
-                                           nsDisplayList* aList,
-                                           bool aHandleOpacity)
+                                           nsDisplayList* aList)
   : nsDisplayWrapList(aBuilder, aFrame, aList)
-  , mHandleOpacity(aHandleOpacity)
+  , mHandleOpacity(false)
 {
   MOZ_COUNT_CTOR(nsDisplayEffectsBase);
 }
@@ -9516,7 +9543,9 @@ nsDisplayEffectsBase::ComputeInvalidationRegion(
   nsRect bounds = GetBounds(aBuilder, &snap);
   if (geometry->mFrameOffsetToReferenceFrame != ToReferenceFrame() ||
       geometry->mUserSpaceOffset != UserSpaceOffset() ||
-      !geometry->mBBox.IsEqualInterior(BBoxInUserSpace())) {
+      !geometry->mBBox.IsEqualInterior(BBoxInUserSpace()) ||
+      geometry->mOpacity != mFrame->StyleEffects()->mOpacity ||
+      geometry->mHandleOpacity != ShouldHandleOpacity()) {
     // Filter and mask output can depend on the location of the frame's user
     // space and on the frame's BBox. We need to invalidate if either of these
     // change relative to the reference frame.
@@ -9572,9 +9601,9 @@ ComputeMaskGeometry(PaintFramesParams& aParams)
 
   const nsStyleSVGReset* svgReset = firstFrame->StyleSVGReset();
 
-  SVGObserverUtils::EffectProperties effectProperties =
-    SVGObserverUtils::GetEffectProperties(firstFrame);
-  nsTArray<nsSVGMaskFrame*> maskFrames = effectProperties.GetMaskFrames();
+  nsTArray<nsSVGMaskFrame*> maskFrames;
+  // XXX check return value?
+  SVGObserverUtils::GetAndObserveMasks(firstFrame, &maskFrames);
 
   if (maskFrames.Length() == 0) {
     return;
@@ -9637,12 +9666,10 @@ nsDisplayMasksAndClipPaths::nsDisplayMasksAndClipPaths(
                               nsDisplayListBuilder* aBuilder,
                               nsIFrame* aFrame,
                               nsDisplayList* aList,
-                              bool aHandleOpacity,
                               const ActiveScrolledRoot* aActiveScrolledRoot)
   : nsDisplayEffectsBase(aBuilder,
                          aFrame,
                          aList,
-                         aHandleOpacity,
                          aActiveScrolledRoot,
                          true)
 {
@@ -9715,11 +9742,11 @@ nsDisplayMasksAndClipPaths::IsValidMask() {
 
   nsIFrame* firstFrame =
     nsLayoutUtils::FirstContinuationOrIBSplitSibling(mFrame);
-  SVGObserverUtils::EffectProperties effectProperties =
-    SVGObserverUtils::GetEffectProperties(firstFrame);
 
-  if (effectProperties.HasInvalidClipPath() ||
-      effectProperties.HasInvalidMask()) {
+  if (SVGObserverUtils::GetAndObserveClipPath(firstFrame, nullptr) ==
+        SVGObserverUtils::eHasRefsSomeInvalid ||
+      SVGObserverUtils::GetAndObserveMasks(firstFrame, nullptr) ==
+        SVGObserverUtils::eHasRefsSomeInvalid) {
     return false;
   }
 
@@ -9840,11 +9867,6 @@ nsDisplayMasksAndClipPaths::ComputeInvalidationRegion(
   bool snap;
   nsRect bounds = GetBounds(aBuilder, &snap);
 
-  if (mFrame->StyleEffects()->mOpacity != geometry->mOpacity ||
-      mHandleOpacity != geometry->mHandleOpacity) {
-    aInvalidRegion->Or(*aInvalidRegion, bounds);
-  }
-
   if (mDestRects.Length() != geometry->mDestRects.Length()) {
     aInvalidRegion->Or(bounds, geometry->mBounds);
   } else {
@@ -9943,6 +9965,84 @@ nsDisplayMasksAndClipPaths::PaintWithContentsPaintCallback(
   nsDisplayMasksAndClipPathsGeometry::UpdateDrawResult(this, imgParams.result);
 }
 
+static Maybe<wr::WrClipId>
+CreateSimpleClipRegion(const nsDisplayMasksAndClipPaths& aDisplayItem,
+                       wr::DisplayListBuilder& aBuilder)
+{
+  nsIFrame* frame = aDisplayItem.Frame();
+  auto* style = frame->StyleSVGReset();
+  MOZ_ASSERT(style->HasClipPath() || style->HasMask());
+  if (style->HasMask()) {
+    return Nothing();
+  }
+
+  // TODO(emilio): We should be able to still generate a clip and pass the
+  // opacity down to StackingContextHelper instead.
+  if (frame->StyleEffects()->mOpacity != 1.0) {
+    return Nothing();
+  }
+
+  auto& clipPath = style->mClipPath;
+  if (clipPath.GetType() != StyleShapeSourceType::Shape) {
+    return Nothing();
+  }
+
+  // TODO(emilio): We should be able to also simplify most of the circle() and
+  // ellipse() shapes.
+  auto& shape = clipPath.GetBasicShape();
+  if (shape->GetShapeType() != StyleBasicShapeType::Inset) {
+    return Nothing();
+  }
+
+  const nsRect refBox =
+    nsLayoutUtils::ComputeGeometryBox(frame, clipPath.GetReferenceBox());
+
+  const nsRect insetRect =
+    ShapeUtils::ComputeInsetRect(shape, refBox) + aDisplayItem.ToReferenceFrame();
+
+  auto appUnitsPerDevPixel = frame->PresContext()->AppUnitsPerDevPixel();
+
+  nscoord radii[8] = { 0 };
+  AutoTArray<wr::ComplexClipRegion, 1> clipRegions;
+  if (ShapeUtils::ComputeInsetRadii(shape, insetRect, refBox, radii)) {
+    clipRegions.AppendElement(wr::ToComplexClipRegion(
+      insetRect, radii, appUnitsPerDevPixel));
+  }
+
+  auto rect = wr::ToRoundedLayoutRect(
+    LayoutDeviceRect::FromAppUnits(insetRect, appUnitsPerDevPixel));
+  wr::WrClipId clipId =
+    aBuilder.DefineClip(Nothing(), rect, &clipRegions, nullptr);
+  return Some(clipId);
+}
+
+static Maybe<wr::WrClipId>
+CreateWRClipPathAndMasks(nsDisplayMasksAndClipPaths* aDisplayItem,
+                         const LayoutDeviceRect& aBounds,
+                         wr::IpcResourceUpdateQueue& aResources,
+                         wr::DisplayListBuilder& aBuilder,
+                         const StackingContextHelper& aSc,
+                         layers::WebRenderLayerManager* aManager,
+                         nsDisplayListBuilder* aDisplayListBuilder)
+{
+  if (auto clip = CreateSimpleClipRegion(*aDisplayItem, aBuilder)) {
+    return clip;
+  }
+
+  Maybe<wr::WrImageMask> mask = aManager->CommandBuilder().BuildWrMaskImage(
+    aDisplayItem, aBuilder, aResources, aSc, aDisplayListBuilder, aBounds);
+  if (!mask) {
+    return Nothing();
+  }
+
+  wr::WrClipId clipId =
+    aBuilder.DefineClip(Nothing(),
+                        wr::ToRoundedLayoutRect(aBounds),
+                        nullptr,
+                        mask.ptr());
+
+  return Some(clipId);
+}
 
 bool
 nsDisplayMasksAndClipPaths::CreateWebRenderCommands(
@@ -9953,20 +10053,18 @@ nsDisplayMasksAndClipPaths::CreateWebRenderCommands(
   nsDisplayListBuilder* aDisplayListBuilder)
 {
   bool snap;
-  float appUnitsPerDevPixel = mFrame->PresContext()->AppUnitsPerDevPixel();
+  auto appUnitsPerDevPixel = mFrame->PresContext()->AppUnitsPerDevPixel();
   nsRect displayBounds = GetBounds(aDisplayListBuilder, &snap);
   LayoutDeviceRect bounds =
     LayoutDeviceRect::FromAppUnits(displayBounds, appUnitsPerDevPixel);
 
-  Maybe<wr::WrImageMask> mask = aManager->CommandBuilder().BuildWrMaskImage(
-    this, aBuilder, aResources, aSc, aDisplayListBuilder, bounds);
+  Maybe<wr::WrClipId> clip =
+    CreateWRClipPathAndMasks(
+      this, bounds, aResources, aBuilder, aSc, aManager, aDisplayListBuilder);
+
   Maybe<StackingContextHelper> layer;
   const StackingContextHelper* sc = &aSc;
-  if (mask) {
-    auto layoutBounds = wr::ToRoundedLayoutRect(bounds);
-    wr::WrClipId clipId =
-      aBuilder.DefineClip(Nothing(), layoutBounds, nullptr, mask.ptr());
-
+  if (clip) {
     // Create a new stacking context to attach the mask to, ensuring the mask is
     // applied to the aggregate, and not the individual elements.
 
@@ -9986,7 +10084,7 @@ nsDisplayMasksAndClipPaths::CreateWebRenderCommands(
                   /*aBackfaceVisible: */ true,
                   /*aIsPreserve3D: */ false,
                   /*aTransformForScrollData: */ Nothing(),
-                  /*aClipNodeId: */ &clipId);
+                  /*aClipNodeId: */ clip.ptr());
     sc = layer.ptr();
     // The whole stacking context will be clipped by us, so no need to have any
     // parent for the children context's clip.
@@ -9997,7 +10095,7 @@ nsDisplayMasksAndClipPaths::CreateWebRenderCommands(
   nsDisplayEffectsBase::CreateWebRenderCommands(
     aBuilder, aResources, *sc, aManager, aDisplayListBuilder);
 
-  if (mask) {
+  if (clip) {
     aManager->CommandBuilder().PopOverrideForASR(GetActiveScrolledRoot());
   }
 
@@ -10034,15 +10132,15 @@ nsDisplayMasksAndClipPaths::PrintEffects(nsACString& aTo)
 {
   nsIFrame* firstFrame =
     nsLayoutUtils::FirstContinuationOrIBSplitSibling(mFrame);
-  SVGObserverUtils::EffectProperties effectProperties =
-    SVGObserverUtils::GetEffectProperties(firstFrame);
-  nsSVGClipPathFrame* clipPathFrame = effectProperties.GetClipPathFrame();
   bool first = true;
   aTo += " effects=(";
-  if (mFrame->StyleEffects()->mOpacity != 1.0f && mHandleOpacity) {
+  if (mHandleOpacity) {
     first = false;
     aTo += nsPrintfCString("opacity(%f)", mFrame->StyleEffects()->mOpacity);
   }
+  nsSVGClipPathFrame* clipPathFrame;
+  // XXX Check return value?
+  SVGObserverUtils::GetAndObserveClipPath(firstFrame, &clipPathFrame);
   if (clipPathFrame) {
     if (!first) {
       aTo += ", ";
@@ -10050,9 +10148,7 @@ nsDisplayMasksAndClipPaths::PrintEffects(nsACString& aTo)
     aTo += nsPrintfCString(
       "clip(%s)", clipPathFrame->IsTrivial() ? "trivial" : "non-trivial");
     first = false;
-  }
-  const nsStyleSVGReset* style = mFrame->StyleSVGReset();
-  if (style->HasClipPath() && !clipPathFrame) {
+  } else if (mFrame->StyleSVGReset()->HasClipPath()) {
     if (!first) {
       aTo += ", ";
     }
@@ -10060,7 +10156,9 @@ nsDisplayMasksAndClipPaths::PrintEffects(nsACString& aTo)
     first = false;
   }
 
-  nsTArray<nsSVGMaskFrame*> masks = effectProperties.GetMaskFrames();
+  nsTArray<nsSVGMaskFrame*> masks;
+  // XXX check return value?
+  SVGObserverUtils::GetAndObserveMasks(firstFrame, &masks);
   if (!masks.IsEmpty() && masks[0]) {
     if (!first) {
       aTo += ", ";
@@ -10073,9 +10171,8 @@ nsDisplayMasksAndClipPaths::PrintEffects(nsACString& aTo)
 
 nsDisplayFilters::nsDisplayFilters(nsDisplayListBuilder* aBuilder,
                                    nsIFrame* aFrame,
-                                   nsDisplayList* aList,
-                                   bool aHandleOpacity)
-  : nsDisplayEffectsBase(aBuilder, aFrame, aList, aHandleOpacity)
+                                   nsDisplayList* aList)
+  : nsDisplayEffectsBase(aBuilder, aFrame, aList)
   , mEffectsBounds(aFrame->GetVisualOverflowRectRelativeToSelf())
 {
   MOZ_COUNT_CTOR(nsDisplayFilters);
@@ -10324,7 +10421,7 @@ nsDisplayFilters::PrintEffects(nsACString& aTo)
     nsLayoutUtils::FirstContinuationOrIBSplitSibling(mFrame);
   bool first = true;
   aTo += " effects=(";
-  if (mFrame->StyleEffects()->mOpacity != 1.0f && mHandleOpacity) {
+  if (mHandleOpacity) {
     first = false;
     aTo += nsPrintfCString("opacity(%f)", mFrame->StyleEffects()->mOpacity);
   }

@@ -73,6 +73,8 @@ public:
     wr::Renderer* wrRenderer = nullptr;
     if (!wr_window_new(aWindowId, mSize.width, mSize.height, supportLowPriorityTransactions,
                        compositor->gl(),
+                       aRenderThread.ProgramCache() ? aRenderThread.ProgramCache()->Raw() : nullptr,
+                       aRenderThread.Shaders() ? aRenderThread.Shaders()->RawShaders() : nullptr,
                        aRenderThread.ThreadPool().Raw(),
                        &WebRenderMallocSizeOf,
                        mDocHandle, &wrRenderer,
@@ -91,9 +93,6 @@ public:
     if (wrRenderer && renderer) {
       wr::WrExternalImageHandler handler = renderer->GetExternalImageHandler();
       wr_renderer_set_external_image_handler(wrRenderer, &handler);
-      if (gfx::gfxVars::UseWebRenderProgramBinary()) {
-        wr_renderer_update_program_cache(wrRenderer, aRenderThread.ProgramCache()->Raw());
-      }
     }
 
     if (renderer) {
@@ -210,6 +209,12 @@ TransactionBuilder::GenerateFrame()
 }
 
 void
+TransactionBuilder::InvalidateRenderedFrame()
+{
+  wr_transaction_invalidate_rendered_frame(mTxn);
+}
+
+void
 TransactionBuilder::UpdateDynamicProperties(const nsTArray<wr::WrOpacityProperty>& aOpacityArray,
                                      const nsTArray<wr::WrTransformProperty>& aTransformArray)
 {
@@ -270,6 +275,12 @@ TransactionWrapper::UpdateScrollPosition(const wr::WrPipelineId& aPipelineId,
                                          const wr::LayoutPoint& aScrollPosition)
 {
   wr_transaction_scroll_layer(mTxn, aPipelineId, aScrollId, aScrollPosition);
+}
+
+void
+TransactionWrapper::UpdatePinchZoom(float aZoom)
+{
+  wr_transaction_pinch_zoom(mTxn, aZoom);
 }
 
 /*static*/ already_AddRefed<WebRenderAPI>
@@ -391,20 +402,18 @@ WebRenderAPI::HitTest(const wr::WorldPoint& aPoint,
 void
 WebRenderAPI::Readback(const TimeStamp& aStartTime,
                        gfx::IntSize size,
-                       uint8_t *buffer,
-                       uint32_t buffer_size)
+                       const Range<uint8_t>& buffer)
 {
     class Readback : public RendererEvent
     {
         public:
             explicit Readback(layers::SynchronousTask* aTask,
                               TimeStamp aStartTime,
-                              gfx::IntSize aSize, uint8_t *aBuffer, uint32_t aBufferSize)
+                              gfx::IntSize aSize, const Range<uint8_t>& aBuffer)
                 : mTask(aTask)
                 , mStartTime(aStartTime)
                 , mSize(aSize)
                 , mBuffer(aBuffer)
-                , mBufferSize(aBufferSize)
             {
                 MOZ_COUNT_CTOR(Readback);
             }
@@ -416,21 +425,18 @@ WebRenderAPI::Readback(const TimeStamp& aStartTime,
 
             virtual void Run(RenderThread& aRenderThread, WindowId aWindowId) override
             {
-                aRenderThread.UpdateAndRender(aWindowId, mStartTime, /* aReadback */ true);
-                wr_renderer_readback(aRenderThread.GetRenderer(aWindowId)->GetRenderer(),
-                                     mSize.width, mSize.height, mBuffer, mBufferSize);
+                aRenderThread.UpdateAndRender(aWindowId, mStartTime, /* aRender */ true, Some(mSize), Some(mBuffer));
                 layers::AutoCompleteTask complete(mTask);
             }
 
             layers::SynchronousTask* mTask;
             TimeStamp mStartTime;
             gfx::IntSize mSize;
-            uint8_t *mBuffer;
-            uint32_t mBufferSize;
+            const Range<uint8_t>& mBuffer;
     };
 
     layers::SynchronousTask task("Readback");
-    auto event = MakeUnique<Readback>(&task, aStartTime, size, buffer, buffer_size);
+    auto event = MakeUnique<Readback>(&task, aStartTime, size, buffer);
     // This event will be passed from wr_backend thread to renderer thread. That
     // implies that all frame data have been processed when the renderer runs this
     // read-back event. Then, we could make sure this read-back event gets the
@@ -583,8 +589,6 @@ WebRenderAPI::Capture()
 {
   uint8_t bits = 3; //TODO: get from JavaScript
   const char* path = "wr-capture"; //TODO: get from JavaScript
-  const char* border = "--------------------------\n";
-  printf("%s Capturing WR state to: %s\n%s", border, path, border);
   wr_api_capture(mDocHandle, path, bits);
 }
 
@@ -702,7 +706,9 @@ TransactionBuilder::UpdateExternalImageWithDirtyRect(ImageKey aKey,
                                                             aDirtyRect);
 }
 
-void TransactionBuilder::SetImageVisibleArea(ImageKey aKey, const wr::NormalizedRect& aArea)
+void
+TransactionBuilder::SetImageVisibleArea(ImageKey aKey,
+                                        const wr::DeviceUintRect& aArea)
 {
   wr_resource_updates_set_image_visible_area(mTxn, aKey, &aArea);
 }

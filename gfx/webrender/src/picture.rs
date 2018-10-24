@@ -14,8 +14,7 @@ use frame_builder::{FrameBuildingContext, FrameBuildingState, PictureState};
 use frame_builder::{PictureContext, PrimitiveContext};
 use gpu_cache::{GpuCacheHandle};
 use gpu_types::UvRectKind;
-use prim_store::{PrimitiveIndex, PrimitiveInstance, SpaceMapper};
-use prim_store::{PrimitiveMetadata, get_raster_rects};
+use prim_store::{PictureIndex, PrimitiveInstance, SpaceMapper, get_raster_rects};
 use render_task::{ClearMode, RenderTask, RenderTaskCacheEntryHandle};
 use render_task::{RenderTaskCacheKey, RenderTaskCacheKeyKind, RenderTaskId, RenderTaskLocation};
 use scene::{FilterOpHelpers, SceneProperties};
@@ -222,9 +221,10 @@ impl PicturePrimitive {
         frame_output_pipeline_id: Option<PipelineId>,
         apply_local_clip_rect: bool,
         requested_raster_space: RasterSpace,
+        prim_instances: Vec<PrimitiveInstance>,
     ) -> Self {
         PicturePrimitive {
-            prim_instances: Vec::new(),
+            prim_instances,
             state: None,
             secondary_render_task_id: None,
             requested_composite_mode,
@@ -241,6 +241,7 @@ impl PicturePrimitive {
 
     pub fn take_context(
         &mut self,
+        pic_index: PictureIndex,
         prim_context: &PrimitiveContext,
         surface_spatial_node_index: SpatialNodeIndex,
         raster_spatial_node_index: SpatialNodeIndex,
@@ -279,10 +280,19 @@ impl PicturePrimitive {
         // a surface, and we have perspective or local raster
         // space request.
         let raster_space = self.requested_raster_space;
-        let local_scale = raster_space.local_scale();
 
-        let wants_raster_root = xf.has_perspective_component() ||
-                                local_scale.is_some();
+        // TODO(gw): A temporary hack here to revert behavior to
+        //           always raster in screen-space. This is not
+        //           a problem yet, since we're not taking advantage
+        //           of this for caching yet. This is a workaround
+        //           for some existing issues with handling scale
+        //           when rasterizing in local space mode. Once
+        //           the fixes for those are in-place, we can
+        //           remove this hack!
+        //let local_scale = raster_space.local_scale();
+        // let wants_raster_root = xf.has_perspective_component() ||
+        //                         local_scale.is_some();
+        let wants_raster_root = xf.has_perspective_component();
 
         let establishes_raster_root = has_surface && wants_raster_root;
 
@@ -292,9 +302,9 @@ impl PicturePrimitive {
             raster_spatial_node_index
         };
 
-        if establishes_raster_root {
+        if has_surface {
             frame_state.clip_store
-                       .push_raster_root(raster_spatial_node_index);
+                       .push_surface(surface_spatial_node_index);
         }
 
         let map_pic_to_world = SpaceMapper::new_with_target(
@@ -356,28 +366,18 @@ impl PicturePrimitive {
         };
 
         let context = PictureContext {
+            pic_index,
             pipeline_id: self.pipeline_id,
             apply_local_clip_rect: self.apply_local_clip_rect,
             inflation_factor,
             allow_subpixel_aa,
             is_passthrough: self.raster_config.is_none(),
-            establishes_raster_root,
             raster_space,
         };
 
         let instances = mem::replace(&mut self.prim_instances, Vec::new());
 
         Some((context, state, instances))
-    }
-
-    pub fn add_primitive(
-        &mut self,
-        prim_index: PrimitiveIndex,
-    ) {
-        self.prim_instances.push(PrimitiveInstance {
-            prim_index,
-            combined_local_clip_rect: LayoutRect::zero(),
-        });
     }
 
     pub fn restore_context(
@@ -425,10 +425,10 @@ impl PicturePrimitive {
             }
         };
 
-        let clip_node_collector = if context.establishes_raster_root {
-            Some(frame_state.clip_store.pop_raster_root())
-        } else {
+        let clip_node_collector = if context.is_passthrough {
             None
+        } else {
+            Some(frame_state.clip_store.pop_surface())
         };
 
         (local_rect, clip_node_collector)
@@ -440,8 +440,9 @@ impl PicturePrimitive {
 
     pub fn prepare_for_render(
         &mut self,
-        prim_index: PrimitiveIndex,
-        prim_metadata: &mut PrimitiveMetadata,
+        pic_index: PictureIndex,
+        prim_instance: &PrimitiveInstance,
+        prim_local_rect: &LayoutRect,
         pic_state: &mut PictureState,
         frame_context: &FrameBuildingContext,
         frame_state: &mut FrameBuildingState,
@@ -451,18 +452,18 @@ impl PicturePrimitive {
         match self.raster_config {
             Some(ref mut raster_config) => {
                 let (map_raster_to_world, map_pic_to_raster) = create_raster_mappers(
-                    prim_metadata.spatial_node_index,
+                    prim_instance.spatial_node_index,
                     raster_config.raster_spatial_node_index,
                     frame_context,
                 );
 
-                let pic_rect = PictureRect::from_untyped(&prim_metadata.local_rect.to_untyped());
+                let pic_rect = PictureRect::from_untyped(&prim_local_rect.to_untyped());
 
                 let (clipped, unclipped, transform) = match get_raster_rects(
                     pic_rect,
                     &map_pic_to_raster,
                     &map_raster_to_world,
-                    prim_metadata.clipped_world_rect.expect("bug1"),
+                    prim_instance.clipped_world_rect.expect("bug1"),
                     frame_context.device_pixel_scale,
                 ) {
                     Some(info) => info,
@@ -512,7 +513,7 @@ impl PicturePrimitive {
                             let picture_task = RenderTask::new_picture(
                                 RenderTaskLocation::Dynamic(None, device_rect.size),
                                 unclipped.size,
-                                prim_index,
+                                pic_index,
                                 device_rect.origin,
                                 pic_state_for_children.tasks,
                                 uv_rect_kind,
@@ -570,7 +571,7 @@ impl PicturePrimitive {
                                     let picture_task = RenderTask::new_picture(
                                         RenderTaskLocation::Dynamic(None, device_rect.size),
                                         unclipped.size,
-                                        prim_index,
+                                        pic_index,
                                         device_rect.origin,
                                         child_tasks,
                                         uv_rect_kind,
@@ -627,7 +628,7 @@ impl PicturePrimitive {
                         let mut picture_task = RenderTask::new_picture(
                             RenderTaskLocation::Dynamic(None, device_rect.size),
                             unclipped.size,
-                            prim_index,
+                            pic_index,
                             device_rect.origin,
                             pic_state_for_children.tasks,
                             uv_rect_kind,
@@ -670,14 +671,14 @@ impl PicturePrimitive {
                             // Basic brush primitive header is (see end of prepare_prim_for_render_inner in prim_store.rs)
                             //  [brush specific data]
                             //  [segment_rect, segment data]
-                            let shadow_rect = prim_metadata.local_rect.translate(&offset);
+                            let shadow_rect = prim_local_rect.translate(&offset);
 
                             // ImageBrush colors
                             request.push(color.premultiplied());
                             request.push(PremultipliedColorF::WHITE);
                             request.push([
-                                prim_metadata.local_rect.size.width,
-                                prim_metadata.local_rect.size.height,
+                                prim_local_rect.size.width,
+                                prim_local_rect.size.height,
                                 0.0,
                                 0.0,
                             ]);
@@ -698,7 +699,7 @@ impl PicturePrimitive {
                         let picture_task = RenderTask::new_picture(
                             RenderTaskLocation::Dynamic(None, clipped.size),
                             unclipped.size,
-                            prim_index,
+                            pic_index,
                             clipped.origin,
                             pic_state_for_children.tasks,
                             uv_rect_kind,
@@ -735,7 +736,7 @@ impl PicturePrimitive {
                         let picture_task = RenderTask::new_picture(
                             RenderTaskLocation::Dynamic(None, clipped.size),
                             unclipped.size,
-                            prim_index,
+                            pic_index,
                             clipped.origin,
                             pic_state_for_children.tasks,
                             uv_rect_kind,
@@ -757,7 +758,7 @@ impl PicturePrimitive {
                         let picture_task = RenderTask::new_picture(
                             RenderTaskLocation::Dynamic(None, clipped.size),
                             unclipped.size,
-                            prim_index,
+                            pic_index,
                             clipped.origin,
                             pic_state_for_children.tasks,
                             uv_rect_kind,

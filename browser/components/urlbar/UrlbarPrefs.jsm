@@ -43,13 +43,26 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // this value.  See UnifiedComplete.
   ["autoFill.stddevMultiplier", [0.0, "getFloatPref"]],
 
+  // If true, this optimizes for replacing the full URL rather than editing
+  // part of it. This also copies the urlbar value to the selection clipboard
+  // on systems that support it.
+  ["clickSelectsAll", false],
+
   // The amount of time (ms) to wait after the user has stopped typing before
   // fetching results.  However, we ignore this for the very first result (the
   // "heuristic" result).  We fetch it as fast as possible.
   ["delay", 50],
 
+  // If true, this optimizes for replacing the full URL rather than selecting a
+  // portion of it. This also copies the urlbar value to the selection
+  // clipboard on systems that support it.
+  ["doubleClickSelectsAll", false],
+
   // When true, `javascript:` URLs are not included in search results.
   ["filter.javascript", true],
+
+  // Applies URL highlighting and other styling to the text in the urlbar input.
+  ["formatting.enabled", false],
 
   // Allows results from one search to be reused in the next search.  One of the
   // INSERTMETHOD values.
@@ -95,6 +108,10 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // Results will include search suggestions when this is true.
   ["suggest.searches", false],
 
+  // When using switch to tabs, if set to true this will move the tab into the
+  // active window.
+  ["switchTabs.adoptIntoActiveWindow", false],
+
   // Remove redundant portions from URLs.
   ["trimURLs", true],
 
@@ -138,15 +155,15 @@ const PREF_TYPES = new Map([
 //
 // First buckets. Anything with an Infinity frecency ends up here.
 const DEFAULT_BUCKETS_BEFORE = [
-  [UrlbarUtils.MATCHTYPE.HEURISTIC, 1],
-  [UrlbarUtils.MATCHTYPE.EXTENSION, UrlbarUtils.MAXIMUM_ALLOWED_EXTENSION_MATCHES - 1],
+  [UrlbarUtils.MATCH_GROUP.HEURISTIC, 1],
+  [UrlbarUtils.MATCH_GROUP.EXTENSION, UrlbarUtils.MAXIMUM_ALLOWED_EXTENSION_MATCHES - 1],
 ];
 // => USER DEFINED BUCKETS WILL BE INSERTED HERE <=
 //
 // Catch-all buckets. Anything remaining ends up here.
 const DEFAULT_BUCKETS_AFTER = [
-  [UrlbarUtils.MATCHTYPE.SUGGESTION, Infinity],
-  [UrlbarUtils.MATCHTYPE.GENERAL, Infinity],
+  [UrlbarUtils.MATCH_GROUP.SUGGESTION, Infinity],
+  [UrlbarUtils.MATCH_GROUP.GENERAL, Infinity],
 ];
 
 /**

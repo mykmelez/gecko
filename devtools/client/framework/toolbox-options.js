@@ -371,7 +371,7 @@ OptionsPanel.prototype = {
       pref: "devtools.performance.new-panel-enabled",
       label: "Enable new performance recorder (then re-open DevTools)",
       id: "devtools-new-performance",
-      parentId: "context-options"
+      parentId: "context-options",
     }];
 
     const createPreferenceOption = ({pref, label, id}) => {
@@ -460,9 +460,8 @@ OptionsPanel.prototype = {
     }
 
     if (this.target.activeTab && !this.target.chrome) {
-      const [ response ] = await this.target.client.attachTarget(this.target.activeTab._actor);
-      this._origJavascriptEnabled = !response.javascriptEnabled;
-      this.disableJSNode.checked = this._origJavascriptEnabled;
+      this.disableJSNode.checked =
+        !this.target.activeTab.configureOptions.javascriptEnabled;
       this.disableJSNode.addEventListener("click", this._disableJSClicked);
     } else {
       // Hide the checkbox and label
@@ -509,39 +508,24 @@ OptionsPanel.prototype = {
     const checked = event.target.checked;
 
     const options = {
-      "javascriptEnabled": !checked
+      "javascriptEnabled": !checked,
     };
 
-    this.target.activeTab.reconfigure(options);
+    this.target.activeTab.reconfigure({ options });
   },
 
   destroy: function() {
-    if (this.destroyPromise) {
-      return this.destroyPromise;
+    if (this.destroyed) {
+      return;
     }
+    this.destroyed = true;
 
     this._removeListeners();
 
-    this.destroyPromise = new Promise(resolve => {
-      if (this.target.activeTab) {
-        this.disableJSNode.removeEventListener("click", this._disableJSClicked);
-        // FF41+ automatically cleans up state in actor on disconnect
-        if (!this.target.activeTab.traits.noTabReconfigureOnClose) {
-          const options = {
-            "javascriptEnabled": this._origJavascriptEnabled,
-            "performReload": false
-          };
-          this.target.activeTab.reconfigure(options).then(resolve);
-        } else {
-          resolve();
-        }
-      } else {
-        resolve();
-      }
-    });
+    if (this.target.activeTab) {
+      this.disableJSNode.removeEventListener("click", this._disableJSClicked);
+    }
 
     this.panelWin = this.panelDoc = this.disableJSNode = this.toolbox = null;
-
-    return this.destroyPromise;
-  }
+  },
 };

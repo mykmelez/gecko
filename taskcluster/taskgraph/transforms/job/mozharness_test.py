@@ -29,7 +29,6 @@ VARIANTS = [
     'stylo-sequential',
     'qr',
     'ccov',
-    'jsdcov',
 ]
 
 
@@ -106,6 +105,7 @@ def mozharness_test_on_docker(config, job, taskdesc):
         'NEED_WINDOW_MANAGER': 'true',
         'ENABLE_E10S': str(bool(test.get('e10s'))).lower(),
         'MOZ_AUTOMATION': '1',
+        'WORKING_DIR': '/builds/worker',
     })
 
     if mozharness.get('mochitest-flavor'):
@@ -184,7 +184,8 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
 
     is_macosx = worker['os'] == 'macosx'
     is_windows = worker['os'] == 'windows'
-    assert is_macosx or is_windows
+    is_linux = worker['os'] == 'linux'
+    assert is_macosx or is_windows or is_linux
 
     artifacts = [
         {
@@ -255,17 +256,18 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
             'XPC_SERVICE_NAME': '0',
         })
 
-    if is_macosx:
-        mh_command = [
-            'python2.7',
-            '-u',
-            'mozharness/scripts/' + mozharness['script']
-        ]
-    elif is_windows:
+    if is_windows:
         mh_command = [
             'c:\\mozilla-build\\python\\python.exe',
             '-u',
             'mozharness\\scripts\\' + normpath(mozharness['script'])
+        ]
+    else:
+        # is_linux or is_macosx
+        mh_command = [
+            'python2.7',
+            '-u',
+            'mozharness/scripts/' + mozharness['script']
         ]
 
     for mh_config in mozharness['config']:
@@ -448,8 +450,13 @@ def mozharness_test_on_script_engine_autophone(config, job, taskdesc):
         'MOZ_AUTOMATION': '1',
         'WORKSPACE': '/builds/worker/workspace',
         'TASKCLUSTER_WORKER_TYPE': job['worker-type'],
-
     }
+
+    # for fetch tasks on mobile
+    if 'env' in job['worker'] and 'MOZ_FETCHES' in job['worker']['env']:
+        env['MOZ_FETCHES'] = job['worker']['env']['MOZ_FETCHES']
+        env['MOZ_FETCHES_DIR'] = job['worker']['env']['MOZ_FETCHES_DIR']
+
     # talos tests don't need Xvfb
     if is_talos:
         env['NEED_XVFB'] = 'false'

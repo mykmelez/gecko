@@ -929,6 +929,9 @@ public:
   void SetPartialBuildFailed(bool aFailed) { mPartialBuildFailed = aFailed; }
   bool PartialBuildFailed() { return mPartialBuildFailed; }
 
+  bool IsInActiveDocShell() { return mIsInActiveDocShell; }
+  void SetInActiveDocShell(bool aActive) { mIsInActiveDocShell = aActive; }
+
   /**
    * Return true if we're currently building a display list for the presshell
    * of a chrome document, or if we're building the display list for a popup.
@@ -1921,26 +1924,46 @@ public:
    */
   struct WeakFrameRegion
   {
-    std::vector<WeakFrame> mFrames;
+    /**
+     * A wrapper to store WeakFrame and the pointer to the underlying frame.
+     * This is needed because WeakFrame does not store the frame pointer after
+     * the frame has been deleted.
+     */
+    struct WeakFrameWrapper {
+      explicit WeakFrameWrapper(nsIFrame* aFrame)
+        : mWeakFrame(new WeakFrame(aFrame))
+        , mFrame(aFrame)
+      {
+      }
+
+      mozilla::UniquePtr<WeakFrame> mWeakFrame;
+      void* mFrame;
+    };
+
+    nsTHashtable<nsPtrHashKey<void>> mFrameSet;
+    nsTArray<WeakFrameWrapper> mFrames;
     nsTArray<pixman_box32_t> mRects;
 
-    void Add(nsIFrame* aFrame, const nsRect& aRect)
+    template<typename RectType>
+    void Add(nsIFrame* aFrame, const RectType& aRect)
     {
-      mFrames.emplace_back(aFrame);
-      mRects.AppendElement(nsRegion::RectToBox(aRect));
-    }
+      if (mFrameSet.Contains(aFrame)) {
+        return;
+      }
 
-    void Add(nsIFrame* aFrame, const mozilla::gfx::IntRect& aRect)
-    {
-      mFrames.emplace_back(aFrame);
+      mFrameSet.PutEntry(aFrame);
+      mFrames.AppendElement(WeakFrameWrapper(aFrame));
       mRects.AppendElement(nsRegion::RectToBox(aRect));
     }
 
     void Clear()
     {
-      mFrames.clear();
+      mFrameSet.Clear();
+      mFrames.Clear();
       mRects.Clear();
     }
+
+    void RemoveModifiedFramesAndRects();
 
     typedef mozilla::gfx::ArrayView<pixman_box32_t> BoxArrayView;
 
@@ -2183,6 +2206,7 @@ private:
   bool mLessEventRegionItems;
   bool mDisablePartialUpdates;
   bool mPartialBuildFailed;
+  bool mIsInActiveDocShell;
 };
 
 class nsDisplayItem;
@@ -5770,6 +5794,7 @@ public:
 
 private:
   bool ApplyOpacityToChildren(nsDisplayListBuilder* aBuilder);
+  bool IsEffectsWrapper() const;
 
   float mOpacity;
   bool mForEventsAndPluginsOnly : 1;
@@ -6668,13 +6693,11 @@ public:
   nsDisplayEffectsBase(nsDisplayListBuilder* aBuilder,
                        nsIFrame* aFrame,
                        nsDisplayList* aList,
-                       bool aHandleOpacity,
                        const ActiveScrolledRoot* aActiveScrolledRoot,
                        bool aClearClipChain = false);
   nsDisplayEffectsBase(nsDisplayListBuilder* aBuilder,
                        nsIFrame* aFrame,
-                       nsDisplayList* aList,
-                       bool aHandleOpacity);
+                       nsDisplayList* aList);
 
   nsDisplayEffectsBase(nsDisplayListBuilder* aBuilder,
                        const nsDisplayEffectsBase& aOther)
@@ -6696,12 +6719,15 @@ public:
                HitTestState* aState,
                nsTArray<nsIFrame*>* aOutFrames) override;
 
+  void RestoreState() override { mHandleOpacity = false; }
+
   bool ShouldFlattenAway(nsDisplayListBuilder* aBuilder) override
   {
     return false;
   }
 
-  bool ShouldHandleOpacity() { return mHandleOpacity; }
+  void SetHandleOpacity() { mHandleOpacity = true; }
+  bool ShouldHandleOpacity() const { return mHandleOpacity; }
 
   gfxRect BBoxInUserSpace() const;
   gfxPoint UserSpaceOffset() const;
@@ -6737,7 +6763,6 @@ public:
   nsDisplayMasksAndClipPaths(nsDisplayListBuilder* aBuilder,
                              nsIFrame* aFrame,
                              nsDisplayList* aList,
-                             bool aHandleOpacity,
                              const ActiveScrolledRoot* aActiveScrolledRoot);
   nsDisplayMasksAndClipPaths(nsDisplayListBuilder* aBuilder,
                              const nsDisplayMasksAndClipPaths& aOther)
@@ -6849,8 +6874,7 @@ class nsDisplayFilters : public nsDisplayEffectsBase
 public:
   nsDisplayFilters(nsDisplayListBuilder* aBuilder,
                    nsIFrame* aFrame,
-                   nsDisplayList* aList,
-                   bool aHandleOpacity);
+                   nsDisplayList* aList);
 
   nsDisplayFilters(nsDisplayListBuilder* aBuilder,
                    const nsDisplayFilters& aOther)

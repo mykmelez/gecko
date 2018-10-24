@@ -42,6 +42,7 @@
 #include "mozilla/Logging.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/net/HttpBaseChannel.h"
+#include "mozilla/net/TrackingDummyChannel.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPrefs.h"
@@ -329,6 +330,11 @@ SetIsTrackingResourceHelper(nsIChannel* aChannel, bool aIsThirdParty)
   if (httpChannel) {
     httpChannel->SetIsTrackingResource(aIsThirdParty);
   }
+
+  RefPtr<TrackingDummyChannel> dummyChannel = do_QueryObject(aChannel);
+  if (dummyChannel) {
+    dummyChannel->SetIsTrackingResource();
+  }
 }
 
 static void
@@ -518,6 +524,7 @@ nsChannelClassifier::ShouldEnableTrackingProtectionInternal(
     }
 
     rv = AntiTrackingCommon::IsOnContentBlockingAllowList(topWinURI,
+                                                          NS_UsePrivateBrowsing(aChannel),
                                                           aAnnotationsOnly ?
                                                             AntiTrackingCommon::eTrackingAnnotations :
                                                             AntiTrackingCommon::eTrackingProtection,
@@ -623,8 +630,9 @@ nsChannelClassifier::NotifyTrackingProtectionDisabled(nsIChannel *aChannel)
     }
     doc->SetHasTrackingContentLoaded(true);
     securityUI->GetState(&state);
+    const uint32_t oldState = state;
     state |= nsIWebProgressListener::STATE_LOADED_TRACKING_CONTENT;
-    eventSink->OnSecurityChange(nullptr, state);
+    eventSink->OnSecurityChange(nullptr, oldState, state, doc->GetContentBlockingLog());
 
     return NS_OK;
 }

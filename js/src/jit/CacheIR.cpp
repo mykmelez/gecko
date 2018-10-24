@@ -290,6 +290,9 @@ GetPropIRGenerator::tryAttachStub()
             if (tryAttachArgumentsObjectArg(obj, objId, indexId)) {
                 return true;
             }
+            if (tryAttachGenericElement(obj, objId, index, indexId)) {
+                return true;
+            }
 
             trackAttached(IRGenerator::NotAttached);
             return false;
@@ -1693,10 +1696,6 @@ GetPropIRGenerator::tryAttachUnboxed(HandleObject obj, ObjOperandId objId, Handl
         return false;
     }
 
-    if (!cx_->runtime()->jitSupportsFloatingPoint) {
-        return false;
-    }
-
     maybeEmitIdGuard(id);
     writer.guardGroupForLayout(objId, obj->group());
     writer.loadUnboxedPropertyResult(objId, property->type,
@@ -1760,7 +1759,7 @@ GetPropIRGenerator::tryAttachTypedObject(HandleObject obj, ObjOperandId objId, H
         return false;
     }
 
-    if (!cx_->runtime()->jitSupportsFloatingPoint || cx_->zone()->detachedTypedObjects) {
+    if (cx_->zone()->detachedTypedObjects) {
         return false;
     }
 
@@ -2242,24 +2241,11 @@ TypedThingElementType(JSObject* obj)
            : PrimitiveArrayTypedObjectType(obj);
 }
 
-static bool
-TypedThingRequiresFloatingPoint(JSObject* obj)
-{
-    Scalar::Type type = TypedThingElementType(obj);
-    return type == Scalar::Uint32 ||
-           type == Scalar::Float32 ||
-           type == Scalar::Float64;
-}
-
 bool
 GetPropIRGenerator::tryAttachTypedElement(HandleObject obj, ObjOperandId objId,
                                           uint32_t index, Int32OperandId indexId)
 {
     if (!obj->is<TypedArrayObject>() && !IsPrimitiveArrayTypedObject(obj)) {
-        return false;
-    }
-
-    if (!cx_->runtime()->jitSupportsFloatingPoint && TypedThingRequiresFloatingPoint(obj)) {
         return false;
     }
 
@@ -2341,6 +2327,32 @@ GetPropIRGenerator::tryAttachUnboxedElementHole(HandleObject obj, ObjOperandId o
     trackAttached("UnboxedElementHole");
     return true;
 }
+
+bool
+GetPropIRGenerator::tryAttachGenericElement(HandleObject obj, ObjOperandId objId,
+                                            uint32_t index, Int32OperandId indexId)
+{
+    if (!obj->isNative()) {
+        return false;
+    }
+
+    // To allow other types to attach in the non-megamorphic case we test the specific
+    // matching native reciever; however, once megamorphic we can attach for any native
+    if (mode_ == ICState::Mode::Megamorphic) {
+        writer.guardIsNativeObject(objId);
+    } else {
+        NativeObject* nobj = &obj->as<NativeObject>();
+        TestMatchingNativeReceiver(writer, nobj, objId);
+    }
+    writer.guardIndexGreaterThanDenseInitLength(objId, indexId);
+    writer.callNativeGetElementResult(objId, indexId);
+    writer.typeMonitorResult();
+
+    trackAttached(mode_ == ICState::Mode::Megamorphic
+                  ? "GenericElementMegamorphic": "GenericElement");
+    return true;
+}
+
 
 bool
 GetPropIRGenerator::tryAttachProxyElement(HandleObject obj, ObjOperandId objId)
@@ -2854,7 +2866,7 @@ BindNameIRGenerator::trackAttached(const char* name)
 }
 
 HasPropIRGenerator::HasPropIRGenerator(JSContext* cx, HandleScript script, jsbytecode* pc,
-                                       CacheKind cacheKind, ICState::Mode mode,
+                                       ICState::Mode mode, CacheKind cacheKind,
                                        HandleValue idVal, HandleValue val)
   : IRGenerator(cx, script, pc, cacheKind, mode),
     val_(val),
@@ -3296,9 +3308,6 @@ IRGenerator::maybeGuardInt32Index(const Value& index, ValOperandId indexId,
             if (!mozilla::NumberEqualsInt32(index.toDouble(), &indexSigned)) {
                 return false;
             }
-            if (!cx_->runtime()->jitSupportsFloatingPoint) {
-                return false;
-            }
         }
 
         if (indexSigned < 0) {
@@ -3584,10 +3593,6 @@ SetPropIRGenerator::tryAttachUnboxedProperty(HandleObject obj, ObjOperandId objI
         return false;
     }
 
-    if (!cx_->runtime()->jitSupportsFloatingPoint) {
-        return false;
-    }
-
     const UnboxedLayout::Property* property = obj->as<UnboxedPlainObject>().layout().lookup(id);
     if (!property) {
         return false;
@@ -3616,7 +3621,7 @@ SetPropIRGenerator::tryAttachTypedObjectProperty(HandleObject obj, ObjOperandId 
         return false;
     }
 
-    if (!cx_->runtime()->jitSupportsFloatingPoint || cx_->zone()->detachedTypedObjects) {
+    if (cx_->zone()->detachedTypedObjects) {
         return false;
     }
 
@@ -3680,6 +3685,7 @@ SetPropIRGenerator::trackAttached(const char* name)
 {
 #ifdef JS_CACHEIR_SPEW
     if (const CacheIRSpewer::Guard& sp = CacheIRSpewer::Guard(*this, name)) {
+        sp.opcodeProperty("op", JSOp(*pc_));
         sp.valueProperty("base", lhsVal_);
         sp.valueProperty("property", idVal_);
         sp.valueProperty("value", rhsVal_);
@@ -3993,8 +3999,9 @@ SetPropIRGenerator::tryAttachSetDenseElementHole(HandleObject obj, ObjOperandId 
     uint32_t initLength = nobj->getDenseInitializedLength();
 
     // Optimize if we're adding an element at initLength or writing to a hole.
-    // Don't handle the adding case if the current accesss is in bounds, to
-    // ensure we always call noteArrayWriteHole.
+    //
+    // In the case where index > initLength, we need noteHasDenseAdd to be called
+    // to ensure Ion is aware that writes have occurred to-out-of-bound indexes before.
     bool isAdd = index == initLength;
     bool isHoleInBounds = index < initLength && !nobj->containsDenseElement(index);
     if (!isAdd && !isHoleInBounds) {
@@ -4047,10 +4054,6 @@ SetPropIRGenerator::tryAttachSetTypedElement(HandleObject obj, ObjOperandId objI
     }
 
     if (!rhsVal_.isNumber()) {
-        return false;
-    }
-
-    if (!cx_->runtime()->jitSupportsFloatingPoint && TypedThingRequiresFloatingPoint(obj)) {
         return false;
     }
 
@@ -5256,10 +5259,6 @@ CompareIRGenerator::tryAttachInt32(ValOperandId lhsId, ValOperandId rhsId)
 bool
 CompareIRGenerator::tryAttachNumber(ValOperandId lhsId, ValOperandId rhsId)
 {
-    if (!cx_->runtime()->jitSupportsFloatingPoint) {
-        return false;
-    }
-
     if (!lhsVal_.isNumber() || !rhsVal_.isNumber()) {
         return false;
     }
@@ -5587,7 +5586,7 @@ ToBoolIRGenerator::tryAttachInt32()
 bool
 ToBoolIRGenerator::tryAttachDouble()
 {
-    if (!val_.isDouble() || !cx_->runtime()->jitSupportsFloatingPoint) {
+    if (!val_.isDouble()) {
         return false;
     }
 
@@ -5749,7 +5748,7 @@ UnaryArithIRGenerator::tryAttachInt32()
 bool
 UnaryArithIRGenerator::tryAttachNumber()
 {
-    if (!val_.isNumber() || !res_.isNumber() || !cx_->runtime()->jitSupportsFloatingPoint) {
+    if (!val_.isNumber() || !res_.isNumber()) {
         return false;
     }
 
@@ -5825,8 +5824,9 @@ BinaryArithIRGenerator::tryAttachStub()
         return true;
     }
 
-    if (tryAttachStringNumberConcat())
+    if (tryAttachStringNumberConcat()) {
         return true;
+    }
 
 
     trackAttached(IRGenerator::NotAttached);
@@ -5918,10 +5918,6 @@ BinaryArithIRGenerator::tryAttachDouble()
 
     // Check guard conditions
     if (!lhs_.isNumber() || !rhs_.isNumber()) {
-        return false;
-    }
-
-    if (!cx_->runtime()->jitSupportsFloatingPoint) {
         return false;
     }
 
@@ -6029,8 +6025,9 @@ bool
 BinaryArithIRGenerator::tryAttachStringNumberConcat()
 {
     // Only Addition
-    if (op_ != JSOP_ADD)
+    if (op_ != JSOP_ADD) {
         return false;
+    }
 
     if (!(lhs_.isString() && rhs_.isNumber()) &&
         !(lhs_.isNumber() && rhs_.isString()))

@@ -435,6 +435,29 @@ impl BorderStyle {
     pub fn is_hidden(&self) -> bool {
         *self == BorderStyle::Hidden || *self == BorderStyle::None
     }
+
+    /// Returns true if the border style itself is opaque. Other
+    /// factors (such as color, or border radii) may mean that
+    /// the border segment isn't opaque regardless of this.
+    pub fn is_opaque(&self) -> bool {
+        match *self {
+            BorderStyle::None |
+            BorderStyle::Double |
+            BorderStyle::Dotted |
+            BorderStyle::Dashed |
+            BorderStyle::Hidden => {
+                false
+            }
+
+            BorderStyle::Solid |
+            BorderStyle::Groove |
+            BorderStyle::Ridge |
+            BorderStyle::Inset |
+            BorderStyle::Outset => {
+                true
+            }
+        }
+    }
 }
 
 #[repr(u32)]
@@ -612,6 +635,8 @@ pub enum FilterOp {
     Sepia(f32),
     DropShadow(LayoutVector2D, f32, ColorF),
     ColorMatrix([f32; 20]),
+    SrgbToLinear,
+    LinearToSrgb,
 }
 
 impl FilterOp {
@@ -741,57 +766,6 @@ pub struct ImageMask {
     pub image: ImageKey,
     pub rect: LayoutRect,
     pub repeat: bool,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub enum LocalClip {
-    Rect(LayoutRect),
-    RoundedRect(LayoutRect, ComplexClipRegion),
-}
-
-impl From<LayoutRect> for LocalClip {
-    fn from(rect: LayoutRect) -> Self {
-        LocalClip::Rect(rect)
-    }
-}
-
-impl LocalClip {
-    pub fn clip_rect(&self) -> &LayoutRect {
-        match *self {
-            LocalClip::Rect(ref rect) => rect,
-            LocalClip::RoundedRect(ref rect, _) => rect,
-        }
-    }
-
-    pub fn create_with_offset(&self, offset: &LayoutVector2D) -> LocalClip {
-        match *self {
-            LocalClip::Rect(rect) => LocalClip::from(rect.translate(offset)),
-            LocalClip::RoundedRect(rect, complex) => LocalClip::RoundedRect(
-                rect.translate(offset),
-                ComplexClipRegion {
-                    rect: complex.rect.translate(offset),
-                    radii: complex.radii,
-                    mode: complex.mode,
-                },
-            ),
-        }
-    }
-
-    pub fn clip_by(&self, rect: &LayoutRect) -> LocalClip {
-        match *self {
-            LocalClip::Rect(clip_rect) => {
-                LocalClip::Rect(
-                    clip_rect.intersection(rect).unwrap_or_else(LayoutRect::zero)
-                )
-            }
-            LocalClip::RoundedRect(clip_rect, complex) => {
-                LocalClip::RoundedRect(
-                    clip_rect.intersection(rect).unwrap_or_else(LayoutRect::zero),
-                    complex,
-                )
-            }
-        }
-    }
 }
 
 #[repr(C)]

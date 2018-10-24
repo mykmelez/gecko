@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* Generated with cbindgen:0.6.3 */
+/* Generated with cbindgen:0.6.6 */
 
 /* DO NOT MODIFY THIS MANUALLY! This file was generated using cbindgen.
  * To generate this file:
@@ -16,10 +16,6 @@
 
 namespace mozilla {
 namespace wr {
-
-static const uint32_t MAX_CACHED_PROGRAM_COUNT = 15;
-
-static const uint64_t MAX_LOAD_TIME_MS = 400;
 
 // Whether a border should be antialiased.
 enum class AntialiasBorder {
@@ -77,6 +73,8 @@ enum class ColorDepth : uint8_t {
   Color10,
   // 12 bits image
   Color12,
+  // 16 bits image
+  Color16,
 
   Sentinel /* this must be last for serialization purposes. */
 };
@@ -268,6 +266,8 @@ enum class YuvColorSpace : uint32_t {
 template<typename T>
 struct Arc;
 
+struct Device;
+
 // Geometry in the coordinate system of the render target (screen or intermediate
 // surface) in physical pixels.
 struct DevicePixel;
@@ -277,11 +277,11 @@ struct DocumentHandle;
 // Geometry in a stacking context's local coordinate space (logical pixels).
 struct LayoutPixel;
 
-// Coordinates in normalized space (between zero and one).
-struct NormalizedCoordinates;
-
 // The renderer is responsible for submitting to the GPU the work prepared by the
 // RenderBackend.
+//
+// We have a separate `Renderer` instance for each instance of WebRender (generally
+// one per OS window), and all instances share the same thread.
 struct Renderer;
 
 // Offset in number of tiles.
@@ -300,6 +300,8 @@ struct Vec;
 struct WorldPixel;
 
 struct WrProgramCache;
+
+struct WrShaders;
 
 struct WrState;
 
@@ -536,6 +538,7 @@ struct MemoryReport {
   uintptr_t vertex_data_textures;
   uintptr_t render_target_textures;
   uintptr_t texture_cache_textures;
+  uintptr_t depth_target_textures;
 
   bool operator==(const MemoryReport& aOther) const {
     return primitive_stores == aOther.primitive_stores &&
@@ -550,7 +553,8 @@ struct MemoryReport {
            gpu_cache_textures == aOther.gpu_cache_textures &&
            vertex_data_textures == aOther.vertex_data_textures &&
            render_target_textures == aOther.render_target_textures &&
-           texture_cache_textures == aOther.texture_cache_textures;
+           texture_cache_textures == aOther.texture_cache_textures &&
+           depth_target_textures == aOther.depth_target_textures;
   }
 };
 
@@ -1052,8 +1056,6 @@ struct WrImageDescriptor {
   }
 };
 
-using NormalizedRect = TypedRect<float, NormalizedCoordinates>;
-
 struct WrTransformProperty {
   uint64_t id;
   LayoutTransform transform;
@@ -1239,6 +1241,10 @@ WR_FUNC;
 
 WR_INLINE
 void wr_dec_ref_arc(const VecU8 *aArc)
+WR_DESTRUCTOR_SAFE_FUNC;
+
+WR_INLINE
+void wr_device_delete(Device *aDevice)
 WR_DESTRUCTOR_SAFE_FUNC;
 
 WR_INLINE
@@ -1715,7 +1721,7 @@ WR_FUNC;
 WR_INLINE
 void wr_resource_updates_set_image_visible_area(Transaction *aTxn,
                                                 WrImageKey aKey,
-                                                const NormalizedRect *aArea)
+                                                const DeviceUintRect *aArea)
 WR_FUNC;
 
 WR_INLINE
@@ -1765,6 +1771,16 @@ void wr_set_item_tag(WrState *aState,
 WR_FUNC;
 
 WR_INLINE
+void wr_shaders_delete(WrShaders *aShaders,
+                       void *aGlContext)
+WR_DESTRUCTOR_SAFE_FUNC;
+
+WR_INLINE
+WrShaders *wr_shaders_new(void *aGlContext,
+                          WrProgramCache *aProgramCache)
+WR_FUNC;
+
+WR_INLINE
 void wr_state_delete(WrState *aState)
 WR_DESTRUCTOR_SAFE_FUNC;
 
@@ -1803,6 +1819,10 @@ void wr_transaction_generate_frame(Transaction *aTxn)
 WR_FUNC;
 
 WR_INLINE
+void wr_transaction_invalidate_rendered_frame(Transaction *aTxn)
+WR_FUNC;
+
+WR_INLINE
 bool wr_transaction_is_empty(const Transaction *aTxn)
 WR_FUNC;
 
@@ -1817,6 +1837,11 @@ WR_INLINE
 void wr_transaction_notify(Transaction *aTxn,
                            Checkpoint aWhen,
                            uintptr_t aEvent)
+WR_FUNC;
+
+WR_INLINE
+void wr_transaction_pinch_zoom(Transaction *aTxn,
+                               float aPinchZoom)
 WR_FUNC;
 
 WR_INLINE
@@ -1892,6 +1917,8 @@ bool wr_window_new(WrWindowId aWindowId,
                    uint32_t aWindowHeight,
                    bool aSupportLowPriorityTransactions,
                    void *aGlContext,
+                   WrProgramCache *aProgramCache,
+                   WrShaders *aShaders,
                    WrThreadPool *aThreadPool,
                    VoidPtrToSizeFn aSizeOfOp,
                    DocumentHandle **aOutHandle,

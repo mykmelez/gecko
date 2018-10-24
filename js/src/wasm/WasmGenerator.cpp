@@ -29,6 +29,7 @@
 #include "util/Text.h"
 #include "wasm/WasmBaselineCompile.h"
 #include "wasm/WasmCompile.h"
+#include "wasm/WasmCraneliftCompile.h"
 #include "wasm/WasmIonCompile.h"
 #include "wasm/WasmStubs.h"
 
@@ -660,6 +661,17 @@ ExecuteCompileTask(CompileTask* task, UniqueChars* error)
 
     switch (task->env.tier()) {
       case Tier::Optimized:
+#ifdef ENABLE_WASM_CRANELIFT
+        if (task->env.optimizedBackend() == OptimizedBackend::Cranelift) {
+            if (!CraneliftCompileFunctions(task->env, task->lifo, task->inputs, &task->output,
+                                           error))
+            {
+                return false;
+            }
+            break;
+        }
+#endif
+        MOZ_ASSERT(task->env.optimizedBackend() == OptimizedBackend::Ion);
         if (!IonCompileFunctions(task->env, task->lifo, task->inputs,
                                  &task->output, task->dvs, error)) {
             return false;
@@ -944,8 +956,9 @@ ModuleGenerator::finishCodeTier()
     // All functions and stubs have been compiled.  Perform module-end
     // validation.
 
-    if (!deferredValidationState_.lock()->performDeferredValidation(*env_, error_))
+    if (!deferredValidationState_.lock()->performDeferredValidation(*env_, error_)) {
         return nullptr;
+    }
 
     // Finish linking and metadata.
 

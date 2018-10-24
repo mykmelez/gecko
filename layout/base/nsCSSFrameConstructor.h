@@ -33,7 +33,7 @@ struct nsGenConInitializer;
 class nsContainerFrame;
 class nsFirstLineFrame;
 class nsFirstLetterFrame;
-class nsICSSAnonBoxPseudo;
+class nsCSSAnonBoxPseudoStaticAtom;
 class nsIDocument;
 class nsPageContentFrame;
 struct PendingBinding;
@@ -742,7 +742,7 @@ private:
     FrameFullConstructor mFullConstructor;
     // For cases when FCDATA_CREATE_BLOCK_WRAPPER_FOR_ALL_KIDS is set, the
     // anonymous box type to use for that wrapper.
-    nsICSSAnonBoxPseudo * const * const mAnonBoxPseudo;
+    nsCSSAnonBoxPseudoStaticAtom* const mAnonBoxPseudo;
   };
 
   /* Structure representing a mapping of an atom to a FrameConstructionData.
@@ -750,9 +750,7 @@ private:
      stored somewhere that this struct can point to (that is, a static
      nsAtom*) and that it's allocated before the struct is ever used. */
   struct FrameConstructionDataByTag {
-    // Pointer to nsStaticAtom* is used because we want to initialize this
-    // statically, so before our atom tables are set up.
-    const nsStaticAtom * const * const mTag;
+    const nsStaticAtom* const mTag;
     const FrameConstructionData mData;
   };
 
@@ -783,7 +781,7 @@ private:
      for a table pseudo-frame */
   struct PseudoParentData {
     const FrameConstructionData mFCData;
-    nsICSSAnonBoxPseudo * const * const mPseudoType;
+    nsCSSAnonBoxPseudoStaticAtom* const mPseudoType;
   };
   /* Array of such structures that we use to properly construct table
      pseudo-frames as needed */
@@ -1588,7 +1586,7 @@ private:
                                   nsFrameItems&            aFrameItems,
                                   ContainerFrameCreationFunc aConstructor,
                                   ContainerFrameCreationFunc aInnerConstructor,
-                                  nsICSSAnonBoxPseudo*     aInnerPseudo,
+                                  nsCSSAnonBoxPseudoStaticAtom* aInnerPseudo,
                                   bool                     aCandidateRootFrame);
 
   /**

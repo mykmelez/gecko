@@ -44,6 +44,7 @@
 #include "ProfilerIOInterposeObserver.h"
 #include "mozilla/AutoProfilerLabel.h"
 #include "mozilla/ExtensionPolicyService.h"
+#include "mozilla/MathAlgorithms.h"
 #include "mozilla/Scheduler.h"
 #include "mozilla/StackWalk.h"
 #include "mozilla/StaticPtr.h"
@@ -69,6 +70,7 @@
 #include "mozilla/Services.h"
 #include "nsThreadUtils.h"
 #include "ProfilerMarkerPayload.h"
+#include "memory_hooks.h"
 #include "shared-libraries.h"
 #include "prdtoa.h"
 #include "prtime.h"
@@ -295,6 +297,23 @@ public:
       [&](UniquePtr<RegisteredThread>& rt) { return rt.get() == aRegisteredThread; });
   }
 
+  PS_GET(const nsTArray<BaseProfilerCount*>&, Counters)
+
+  static void AppendCounter(PSLockRef, BaseProfilerCount* aCounter)
+  {
+    // we don't own the counter; they may be stored in static objects
+    sInstance->mCounters.AppendElement(aCounter);
+  }
+
+  static void RemoveCounter(PSLockRef, BaseProfilerCount* aCounter)
+  {
+    // we may be called to remove a counter after the profiler is stopped or
+    // late in shutdown.
+    if (sInstance) {
+      sInstance->mCounters.RemoveElement(aCounter);
+    }
+  }
+
 #ifdef USE_LUL_STACKWALK
   static lul::LUL* Lul(PSLockRef) { return sInstance->mLul.get(); }
   static void SetLul(PSLockRef, UniquePtr<lul::LUL> aLul)
@@ -314,6 +333,9 @@ private:
   // ThreadIds in mRegisteredThreads are unique.
   nsTArray<UniquePtr<RegisteredThread>> mRegisteredThreads;
 
+  // Non-owning pointers to all active counters
+  nsTArray<BaseProfilerCount*> mCounters;
+
 #ifdef USE_LUL_STACKWALK
   // LUL's state. Null prior to the first activation, non-null thereafter.
   UniquePtr<lul::LUL> mLul;
@@ -321,6 +343,8 @@ private:
 };
 
 CorePS* CorePS::sInstance = nullptr;
+
+static const uint32_t kInitialProfileBufferCapacity = 4096;
 
 class SamplerThread;
 
@@ -363,13 +387,13 @@ private:
     return aFeatures;
   }
 
-  ActivePS(PSLockRef aLock, uint32_t aEntries, double aInterval,
+  ActivePS(PSLockRef aLock, uint32_t aCapacity, double aInterval,
            uint32_t aFeatures, const char** aFilters, uint32_t aFilterCount)
     : mGeneration(sNextGeneration++)
-    , mEntries(aEntries)
+    , mCapacity(aCapacity)
     , mInterval(aInterval)
     , mFeatures(AdjustFeatures(aFeatures, aFilterCount))
-    , mBuffer(MakeUnique<ProfileBuffer>(aEntries))
+    , mBuffer(MakeUnique<ProfileBuffer>(std::min(kInitialProfileBufferCapacity, aCapacity)))
       // The new sampler thread doesn't start sampling immediately because the
       // main loop within Run() is blocked until this function's caller unlocks
       // gPSMutex.
@@ -460,11 +484,11 @@ private:
   }
 
 public:
-  static void Create(PSLockRef aLock, uint32_t aEntries, double aInterval,
+  static void Create(PSLockRef aLock, uint32_t aCapacity, double aInterval,
                      uint32_t aFeatures,
                      const char** aFilters, uint32_t aFilterCount)
   {
-    sInstance = new ActivePS(aLock, aEntries, aInterval, aFeatures,
+    sInstance = new ActivePS(aLock, aCapacity, aInterval, aFeatures,
                              aFilters, aFilterCount);
   }
 
@@ -480,10 +504,10 @@ public:
   static bool Exists(PSLockRef) { return !!sInstance; }
 
   static bool Equals(PSLockRef,
-                     uint32_t aEntries, double aInterval, uint32_t aFeatures,
+                     uint32_t aCapacity, double aInterval, uint32_t aFeatures,
                      const char** aFilters, uint32_t aFilterCount)
   {
-    if (sInstance->mEntries != aEntries ||
+    if (sInstance->mCapacity != aCapacity ||
         sInstance->mInterval != aInterval ||
         sInstance->mFeatures != aFeatures ||
         sInstance->mFilters.length() != aFilterCount) {
@@ -523,7 +547,7 @@ public:
 
   PS_GET(uint32_t, Generation)
 
-  PS_GET(uint32_t, Entries)
+  PS_GET(uint32_t, Capacity)
 
   PS_GET(double, Interval)
 
@@ -648,6 +672,49 @@ public:
       });
   }
 
+  static void EnsureAdequateBufferCapacity(PSLockRef aLockRef)
+  {
+    ProfileBuffer& buffer = Buffer(aLockRef);
+    uint32_t maxCapacity = RoundUpPow2(Capacity(aLockRef));
+    uint32_t minCapacity = std::min(kInitialProfileBufferCapacity, maxCapacity);
+    uint32_t usedSize = buffer.Length();
+    uint32_t currentCapacity = buffer.mCapacity;
+    // The usedSize should always be between 25% and 90% of the capacity.
+    // If the usedSize exceeds 90% of the capacity, enlarge the capacity.
+    // Enlarging the capacity will at least double it, so then the usedSize
+    // will be a bit above 45% of the new capacity.
+    // If the usedSize goes below 25% of the capacity, shrink the capacity.
+    // Shrinking the capacity will at least halve it, so then the usedSize will
+    // be at most 70% of the new capacity.
+    uint32_t minDesiredCapacity = usedSize * 100 / 90;
+    uint32_t maxDesiredCapacity = usedSize * 100 / 25;
+
+    // Clamp the desired capacities to the hard minimum and maximum.
+    minDesiredCapacity = Clamp(minDesiredCapacity, minCapacity, maxCapacity);
+    maxDesiredCapacity = Clamp(maxDesiredCapacity, minCapacity, maxCapacity);
+
+    // Now find newCapacity such that newCapacity is a power of two and such that
+    // minDesiredCapacity <= newCapacity <= maxDesiredCapacity.
+    // Such a value exists, because either maxDesiredCapacity >= 2 * minDesiredCapacity
+    // (if no clamping happened above), or at least one of them is a power of two (because
+    // both minCapacity and maxCapacity are powers of two).
+    // Usually multiple such values exist; in that case we want to find the one that is
+    // closer to the current capacity.
+    uint32_t newCapacity = currentCapacity;
+    while (newCapacity < minDesiredCapacity) {
+      // Enlarge the buffer.
+      newCapacity *= 2;
+    }
+    while (newCapacity > maxDesiredCapacity) {
+      // Shrink the buffer.
+      newCapacity /= 2;
+    }
+
+    MOZ_RELEASE_ASSERT(newCapacity >= minCapacity);
+    MOZ_RELEASE_ASSERT(newCapacity <= maxCapacity);
+    buffer.SetCapacityPow2(newCapacity);
+  }
+
 private:
   // The singleton instance.
   static ActivePS* sInstance;
@@ -672,8 +739,8 @@ private:
   const uint32_t mGeneration;
   static uint32_t sNextGeneration;
 
-  // The number of entries in mBuffer.
-  const uint32_t mEntries;
+  // The maximum number of entries in mBuffer.
+  const uint32_t mCapacity;
 
   // The interval between samples, measured in milliseconds.
   const double mInterval;
@@ -1461,8 +1528,7 @@ DoSyncSample(PSLockRef aLock, RegisteredThread& aRegisteredThread,
 static void
 DoPeriodicSample(PSLockRef aLock, RegisteredThread& aRegisteredThread,
                  ProfiledThreadData& aProfiledThreadData,
-                 const TimeStamp& aNow, const Registers& aRegs,
-                 int64_t aRSSMemory, int64_t aUSSMemory)
+                 const TimeStamp& aNow, const Registers& aRegs)
 {
   // WARNING: this function runs within the profiler's "critical section".
 
@@ -1484,16 +1550,6 @@ DoPeriodicSample(PSLockRef aLock, RegisteredThread& aRegisteredThread,
     double delta = resp->GetUnresponsiveDuration(
       (aNow - CorePS::ProcessStartTime()).ToMilliseconds());
     buffer.AddEntry(ProfileBufferEntry::Responsiveness(delta));
-  }
-
-  if (aRSSMemory != 0) {
-    double rssMemory = static_cast<double>(aRSSMemory);
-    buffer.AddEntry(ProfileBufferEntry::ResidentMemory(rssMemory));
-  }
-
-  if (aUSSMemory != 0) {
-    double ussMemory = static_cast<double>(aUSSMemory);
-    buffer.AddEntry(ProfileBufferEntry::UnsharedMemory(ussMemory));
   }
 }
 
@@ -1865,6 +1921,9 @@ locked_profiler_stream_json_for_this_process(PSLockRef aLock,
   }
   aWriter.EndObject();
 
+  buffer.StreamCountersToJSON(aWriter, CorePS::ProcessStartTime(), aSinceTime);
+  buffer.StreamMemoryToJSON(aWriter, CorePS::ProcessStartTime(), aSinceTime);
+
   // Data of TaskTracer doesn't belong in the circular buffer.
   if (ActivePS::FeatureTaskTracer(aLock)) {
     aWriter.StartObjectProperty("tasktracer");
@@ -2165,13 +2224,45 @@ SamplerThread::Run()
         const nsTArray<LiveProfiledThreadData>& liveThreads =
           ActivePS::LiveProfiledThreads(lock);
 
+        TimeDuration delta = sampleStart - CorePS::ProcessStartTime();
+        ProfileBuffer& buffer = ActivePS::Buffer(lock);
+
+        // Report memory use
         int64_t rssMemory = 0;
         int64_t ussMemory = 0;
-        if (!liveThreads.IsEmpty() && ActivePS::FeatureMemory(lock)) {
+        if (ActivePS::FeatureMemory(lock)) {
           rssMemory = nsMemoryReporterManager::ResidentFast();
 #if defined(GP_OS_linux) || defined(GP_OS_android)
           ussMemory = nsMemoryReporterManager::ResidentUnique();
 #endif
+          if (rssMemory != 0) {
+            buffer.AddEntry(ProfileBufferEntry::ResidentMemory(rssMemory));
+            if (ussMemory != 0) {
+              buffer.AddEntry(ProfileBufferEntry::UnsharedMemory(ussMemory));
+            }
+          }
+          buffer.AddEntry(ProfileBufferEntry::Time(delta.ToMilliseconds()));
+        }
+
+        // handle per-process generic counters
+        const nsTArray<BaseProfilerCount*>& counters =
+          CorePS::Counters(lock);
+        TimeStamp now = TimeStamp::Now();
+        for (auto& counter : counters) {
+          // create Buffer entries for each counter
+          buffer.AddEntry(ProfileBufferEntry::CounterId(counter));
+          buffer.AddEntry(ProfileBufferEntry::Time(delta.ToMilliseconds()));
+          // XXX support keyed maps of counts
+          // In the future, we'll support keyed counters - for example, counters with a key
+          // which is a thread ID. For "simple" counters we'll just use a key of 0.
+          int64_t count;
+          uint64_t number;
+          counter->Sample(count, number);
+          buffer.AddEntry(ProfileBufferEntry::CounterKey(0));
+          buffer.AddEntry(ProfileBufferEntry::Count(count));
+          if (number) {
+            buffer.AddEntry(ProfileBufferEntry::Number(number));
+          }
         }
 
         for (auto& thread : liveThreads) {
@@ -2198,11 +2289,15 @@ SamplerThread::Run()
             resp->Update();
           }
 
-          TimeStamp now = TimeStamp::Now();
+          now = TimeStamp::Now();
           SuspendAndSampleAndResumeThread(lock, *registeredThread,
                                           [&](const Registers& aRegs) {
             DoPeriodicSample(lock, *registeredThread, *profiledThreadData, now,
-                             aRegs, rssMemory, ussMemory);
+                             aRegs);
+            // only report these once per sample-time (if 0 we don't put them in the buffer,
+            // so for the rest of the threads we won't insert them)
+            rssMemory = 0;
+            ussMemory = 0;
           });
         }
 
@@ -2215,6 +2310,14 @@ SamplerThread::Run()
         CorePS::Lul(lock)->MaybeShowStats();
 #endif
       }
+
+      // This needs to be done outside the profiler's "critical section".
+      // The buffer entries are added just after stackwalking *while the target
+      // thread is suspended*, and during that time we can't allocate, so we
+      // can't grow the buffer as we add the entries. Instead, we need to grow the
+      // buffer ahead of time, by using some heuristic to predict whether growing
+      // the buffer is necessary.
+      ActivePS::EnsureAdequateBufferCapacity(lock);
     }
     // gPSMutex is not held after this point.
 
@@ -2422,7 +2525,7 @@ NotifyObservers(const char* aTopic, nsISupports* aSubject = nullptr)
 }
 
 static void
-NotifyProfilerStarted(const int aEntries, double aInterval, uint32_t aFeatures,
+NotifyProfilerStarted(const int aCapacity, double aInterval, uint32_t aFeatures,
                       const char** aFilters, uint32_t aFilterCount)
 {
   nsTArray<nsCString> filtersArray;
@@ -2431,14 +2534,14 @@ NotifyProfilerStarted(const int aEntries, double aInterval, uint32_t aFeatures,
   }
 
   nsCOMPtr<nsIProfilerStartParams> params =
-    new nsProfilerStartParams(aEntries, aInterval, aFeatures, filtersArray);
+    new nsProfilerStartParams(aCapacity, aInterval, aFeatures, filtersArray);
 
   ProfilerParent::ProfilerStarted(params);
   NotifyObservers("profiler-started", params);
 }
 
 static void
-locked_profiler_start(PSLockRef aLock, uint32_t aEntries, double aInterval,
+locked_profiler_start(PSLockRef aLock, uint32_t aCapacity, double aInterval,
                       uint32_t aFeatures,
                       const char** aFilters, uint32_t aFilterCount);
 
@@ -2522,7 +2625,7 @@ profiler_init(void* aStackTop)
   filters.AppendElement("Compositor");
   filters.AppendElement("DOM Worker");
 
-  int entries = PROFILER_DEFAULT_ENTRIES;
+  int capacity = PROFILER_DEFAULT_ENTRIES;
   double interval = PROFILER_DEFAULT_INTERVAL;
 
   {
@@ -2563,15 +2666,15 @@ profiler_init(void* aStackTop)
 
     LOG("- MOZ_PROFILER_STARTUP is set");
 
-    const char* startupEntries = getenv("MOZ_PROFILER_STARTUP_ENTRIES");
-    if (startupEntries && startupEntries[0] != '\0') {
+    const char* startupCapacity = getenv("MOZ_PROFILER_STARTUP_ENTRIES");
+    if (startupCapacity && startupCapacity[0] != '\0') {
       errno = 0;
-      entries = strtol(startupEntries, nullptr, 10);
-      if (errno == 0 && entries > 0) {
-        LOG("- MOZ_PROFILER_STARTUP_ENTRIES = %d", entries);
+      capacity = strtol(startupCapacity, nullptr, 10);
+      if (errno == 0 && capacity > 0) {
+        LOG("- MOZ_PROFILER_STARTUP_ENTRIES = %d", capacity);
       } else {
         LOG("- MOZ_PROFILER_STARTUP_ENTRIES not a valid integer: %s",
-            startupEntries);
+            startupCapacity);
         PrintUsageThenExit(1);
       }
     }
@@ -2621,13 +2724,13 @@ profiler_init(void* aStackTop)
       LOG("- MOZ_PROFILER_STARTUP_FILTERS = %s", startupFilters);
     }
 
-    locked_profiler_start(lock, entries, interval, features,
+    locked_profiler_start(lock, capacity, interval, features,
                           filters.Elements(), filters.Length());
   }
 
   // We do this with gPSMutex unlocked. The comment in profiler_stop() explains
   // why.
-  NotifyProfilerStarted(entries, interval, features,
+  NotifyProfilerStarted(capacity, interval, features,
                         filters.Elements(), filters.Length());
 }
 
@@ -2739,12 +2842,12 @@ profiler_get_profile_json_into_lazily_allocated_buffer(
 }
 
 void
-profiler_get_start_params(int* aEntries, double* aInterval, uint32_t* aFeatures,
+profiler_get_start_params(int* aCapacity, double* aInterval, uint32_t* aFeatures,
                           Vector<const char*>* aFilters)
 {
   MOZ_RELEASE_ASSERT(CorePS::Exists());
 
-  if (NS_WARN_IF(!aEntries) || NS_WARN_IF(!aInterval) ||
+  if (NS_WARN_IF(!aCapacity) || NS_WARN_IF(!aInterval) ||
       NS_WARN_IF(!aFeatures) || NS_WARN_IF(!aFilters)) {
     return;
   }
@@ -2752,14 +2855,14 @@ profiler_get_start_params(int* aEntries, double* aInterval, uint32_t* aFeatures,
   PSAutoLock lock(gPSMutex);
 
   if (!ActivePS::Exists(lock)) {
-    *aEntries = 0;
+    *aCapacity = 0;
     *aInterval = 0;
     *aFeatures = 0;
     aFilters->clear();
     return;
   }
 
-  *aEntries = ActivePS::Entries(lock);
+  *aCapacity = ActivePS::Capacity(lock);
   *aInterval = ActivePS::Interval(lock);
   *aFeatures = ActivePS::Features(lock);
 
@@ -2772,7 +2875,7 @@ profiler_get_start_params(int* aEntries, double* aInterval, uint32_t* aFeatures,
 
 AutoSetProfilerEnvVarsForChildProcess::AutoSetProfilerEnvVarsForChildProcess(
   MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM_IN_IMPL)
-  : mSetEntries()
+  : mSetCapacity()
   , mSetInterval()
   , mSetFeaturesBitfield()
   , mSetFilters()
@@ -2789,9 +2892,9 @@ AutoSetProfilerEnvVarsForChildProcess::AutoSetProfilerEnvVarsForChildProcess(
   }
 
   PR_SetEnv("MOZ_PROFILER_STARTUP=1");
-  SprintfLiteral(mSetEntries, "MOZ_PROFILER_STARTUP_ENTRIES=%d",
-                 ActivePS::Entries(lock));
-  PR_SetEnv(mSetEntries);
+  SprintfLiteral(mSetCapacity, "MOZ_PROFILER_STARTUP_ENTRIES=%d",
+                 ActivePS::Capacity(lock));
+  PR_SetEnv(mSetCapacity);
 
   // Use AppendFloat instead of SprintfLiteral with %f because the decimal
   // separator used by %f is locale-dependent. But the string we produce needs
@@ -2921,7 +3024,7 @@ profiler_get_buffer_info()
   return Some(ProfilerBufferInfo {
     ActivePS::Buffer(lock).mRangeStart,
     ActivePS::Buffer(lock).mRangeEnd,
-    ActivePS::Entries(lock)
+    ActivePS::Capacity(lock)
   });
 }
 
@@ -2967,13 +3070,13 @@ TriggerPollJSSamplingOnMainThread()
 }
 
 static void
-locked_profiler_start(PSLockRef aLock, uint32_t aEntries, double aInterval,
+locked_profiler_start(PSLockRef aLock, uint32_t aCapacity, double aInterval,
                       uint32_t aFeatures,
                       const char** aFilters, uint32_t aFilterCount)
 {
   if (LOG_TEST) {
     LOG("locked_profiler_start");
-    LOG("- entries  = %d", aEntries);
+    LOG("- capacity  = %d", aCapacity);
     LOG("- interval = %.2f", aInterval);
 
     #define LOG_FEATURE(n_, str_, Name_) \
@@ -2997,10 +3100,10 @@ locked_profiler_start(PSLockRef aLock, uint32_t aEntries, double aInterval,
 #endif
 
   // Fall back to the default values if the passed-in values are unreasonable.
-  uint32_t entries = aEntries > 0 ? aEntries : PROFILER_DEFAULT_ENTRIES;
+  uint32_t capacity = aCapacity > 0 ? aCapacity : PROFILER_DEFAULT_ENTRIES;
   double interval = aInterval > 0 ? aInterval : PROFILER_DEFAULT_INTERVAL;
 
-  ActivePS::Create(aLock, entries, interval, aFeatures, aFilters, aFilterCount);
+  ActivePS::Create(aLock, capacity, interval, aFeatures, aFilters, aFilterCount);
 
   // Set up profiling for each registered thread, if appropriate.
   int tid = Thread::GetCurrentId();
@@ -3058,7 +3161,7 @@ locked_profiler_start(PSLockRef aLock, uint32_t aEntries, double aInterval,
 }
 
 void
-profiler_start(uint32_t aEntries, double aInterval, uint32_t aFeatures,
+profiler_start(uint32_t aCapacity, double aInterval, uint32_t aFeatures,
                const char** aFilters, uint32_t aFilterCount)
 {
   LOG("profiler_start");
@@ -3078,9 +3181,14 @@ profiler_start(uint32_t aEntries, double aInterval, uint32_t aFeatures,
       samplerThread = locked_profiler_stop(lock);
     }
 
-    locked_profiler_start(lock, aEntries, aInterval, aFeatures,
+    locked_profiler_start(lock, aCapacity, aInterval, aFeatures,
                           aFilters, aFilterCount);
   }
+
+#if defined(MOZ_REPLACE_MALLOC) && defined(MOZ_PROFILER_MEMORY)
+  // start counting memory allocations (outside of lock)
+  mozilla::profiler::install_memory_counter(true);
+#endif
 
   // We do these operations with gPSMutex unlocked. The comments in
   // profiler_stop() explain why.
@@ -3089,12 +3197,12 @@ profiler_start(uint32_t aEntries, double aInterval, uint32_t aFeatures,
     NotifyObservers("profiler-stopped");
     delete samplerThread;
   }
-  NotifyProfilerStarted(aEntries, aInterval, aFeatures,
+  NotifyProfilerStarted(aCapacity, aInterval, aFeatures,
                         aFilters, aFilterCount);
 }
 
 void
-profiler_ensure_started(uint32_t aEntries, double aInterval, uint32_t aFeatures,
+profiler_ensure_started(uint32_t aCapacity, double aInterval, uint32_t aFeatures,
                         const char** aFilters, uint32_t aFilterCount)
 {
   LOG("profiler_ensure_started");
@@ -3111,17 +3219,17 @@ profiler_ensure_started(uint32_t aEntries, double aInterval, uint32_t aFeatures,
 
     if (ActivePS::Exists(lock)) {
       // The profiler is active.
-      if (!ActivePS::Equals(lock, aEntries, aInterval, aFeatures,
+      if (!ActivePS::Equals(lock, aCapacity, aInterval, aFeatures,
                             aFilters, aFilterCount)) {
         // Stop and restart with different settings.
         samplerThread = locked_profiler_stop(lock);
-        locked_profiler_start(lock, aEntries, aInterval, aFeatures,
+        locked_profiler_start(lock, aCapacity, aInterval, aFeatures,
                               aFilters, aFilterCount);
         startedProfiler = true;
       }
     } else {
       // The profiler is stopped.
-      locked_profiler_start(lock, aEntries, aInterval, aFeatures,
+      locked_profiler_start(lock, aCapacity, aInterval, aFeatures,
                             aFilters, aFilterCount);
       startedProfiler = true;
     }
@@ -3135,7 +3243,7 @@ profiler_ensure_started(uint32_t aEntries, double aInterval, uint32_t aFeatures,
     delete samplerThread;
   }
   if (startedProfiler) {
-    NotifyProfilerStarted(aEntries, aInterval, aFeatures,
+    NotifyProfilerStarted(aCapacity, aInterval, aFeatures,
                           aFilters, aFilterCount);
   }
 }
@@ -3149,6 +3257,10 @@ locked_profiler_stop(PSLockRef aLock)
 
   // At the very start, clear RacyFeatures.
   RacyFeatures::SetInactive();
+
+#if defined(MOZ_REPLACE_MALLOC) && defined(MOZ_PROFILER_MEMORY)
+  mozilla::profiler::install_memory_counter(false);
+#endif
 
 #if defined(GP_OS_android)
   if (ActivePS::FeatureJava(aLock)) {
@@ -3300,6 +3412,24 @@ profiler_feature_active(uint32_t aFeature)
 
   // This function is hot enough that we use RacyFeatures, not ActivePS.
   return RacyFeatures::IsActiveWithFeature(aFeature);
+}
+
+void
+profiler_add_sampled_counter(BaseProfilerCount* aCounter)
+{
+  DEBUG_LOG("profiler_add_sampled_counter(%s)", aCounter->mLabel);
+  PSAutoLock lock(gPSMutex);
+  CorePS::AppendCounter(lock, aCounter);
+}
+
+void
+profiler_remove_sampled_counter(BaseProfilerCount* aCounter)
+{
+  DEBUG_LOG("profiler_remove_sampled_counter(%s)", aCounter->mLabel);
+  PSAutoLock lock(gPSMutex);
+  // Note: we don't enforce a final sample, though we could do so if the
+  // profiler was active
+  CorePS::RemoveCounter(lock, aCounter);
 }
 
 ProfilingStack*

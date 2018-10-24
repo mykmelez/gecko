@@ -6,7 +6,6 @@
 
 "use strict";
 
-const { getTabPrefs } = require("devtools/shared/indentation");
 const InspectorUtils = require("InspectorUtils");
 
 const MAX_DATA_URL_LENGTH = 40;
@@ -50,8 +49,9 @@ const Services = require("Services");
 loader.lazyImporter(this, "findCssSelector", "resource://gre/modules/css-selector.js");
 loader.lazyImporter(this, "getCssPath", "resource://gre/modules/css-selector.js");
 loader.lazyImporter(this, "getXPath", "resource://gre/modules/css-selector.js");
+loader.lazyRequireGetter(this, "getCSSLexer", "devtools/shared/css/lexer", true);
+loader.lazyRequireGetter(this, "getTabPrefs", "devtools/shared/indentation", true);
 
-const CSSLexer = require("devtools/shared/css/lexer");
 const {LocalizationHelper} = require("devtools/shared/l10n");
 const styleInspectorL10N =
   new LocalizationHelper("devtools/shared/locales/styleinspector.properties");
@@ -190,7 +190,7 @@ function prettifyCSS(text, ruleCount) {
   // minified file.
   let indent = "";
   let indentLevel = 0;
-  const tokens = CSSLexer.getCSSLexer(text);
+  const tokens = getCSSLexer(text);
   let result = "";
   let pushbackToken = undefined;
 
@@ -231,6 +231,10 @@ function prettifyCSS(text, ruleCount) {
   // True if the token just before the terminating token was
   // whitespace.
   let lastWasWS;
+  // True if the current token is inside a CSS selector.
+  let isInSelector = true;
+  // True if the current token is inside an at-rule definition.
+  let isInAtRuleDefinition = false;
 
   // A helper function that reads tokens until there is a reason to
   // insert a newline.  This updates the state variables as needed.
@@ -252,12 +256,22 @@ function prettifyCSS(text, ruleCount) {
         break;
       }
 
+      if (token.tokenType === "at") {
+        isInAtRuleDefinition = true;
+      }
+
       // A "}" symbol must be inserted later, to deal with indentation
       // and newline.
       if (token.tokenType === "symbol" && token.text === "}") {
+        isInSelector = true;
         isCloseBrace = true;
         break;
       } else if (token.tokenType === "symbol" && token.text === "{") {
+        if (isInAtRuleDefinition) {
+          isInAtRuleDefinition = false;
+        } else {
+          isInSelector = false;
+        }
         break;
       }
 
@@ -271,6 +285,11 @@ function prettifyCSS(text, ruleCount) {
       endIndex = token.endOffset;
 
       if (token.tokenType === "symbol" && token.text === ";") {
+        break;
+      }
+
+      if (token.tokenType === "symbol" && token.text === "," &&
+          isInSelector && !isInAtRuleDefinition) {
         break;
       }
 
@@ -406,7 +425,7 @@ function getBindingElementAndPseudo(node) {
   }
   return {
     bindingElement: bindingElement,
-    pseudo: pseudo
+    pseudo: pseudo,
   };
 }
 exports.getBindingElementAndPseudo = getBindingElementAndPseudo;

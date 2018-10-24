@@ -9239,8 +9239,15 @@ BaseCompiler::emitInstanceCall(uint32_t lineOrBytecode, const MIRTypeVector& sig
 
     popValueStackBy(numArgs);
 
-    // Note, a number of clients of emitInstanceCall currently assume that the
-    // following operation does not destroy ReturnReg.
+    // Note, many clients of emitInstanceCall currently assume that pushing the
+    // result here does not destroy ReturnReg.
+    //
+    // Furthermore, clients assume that even if retType == ExprType::Void, the
+    // callee may have returned a status result and left it in ReturnReg for us
+    // to find, and that that register will not be destroyed here (or above).
+    // In this case the callee will have a C++ declaration stating that there is
+    // a return value.  Examples include memory and table operations that are
+    // implemented as callouts.
 
     pushReturnedIfNonVoid(baselineCall, retType);
 }
@@ -9779,7 +9786,7 @@ BaseCompiler::emitStructNew()
     // Null pointer check.
 
     Label ok;
-    masm.branchTestPtr(Assembler::NotEqual, ReturnReg, ReturnReg, &ok);
+    masm.branchTestPtr(Assembler::NonZero, ReturnReg, ReturnReg, &ok);
     trap(Trap::ThrowReported);
     masm.bind(&ok);
 
@@ -9908,7 +9915,7 @@ BaseCompiler::emitStructGet()
     RegPtr rp = popRef();
 
     Label ok;
-    masm.branchTestPtr(Assembler::NotEqual, rp, rp, &ok);
+    masm.branchTestPtr(Assembler::NonZero, rp, rp, &ok);
     trap(Trap::NullPointerDereference);
     masm.bind(&ok);
 
@@ -10013,7 +10020,7 @@ BaseCompiler::emitStructSet()
     RegPtr rp = popRef();
 
     Label ok;
-    masm.branchTestPtr(Assembler::NotEqual, rp, rp, &ok);
+    masm.branchTestPtr(Assembler::NonZero, rp, rp, &ok);
     trap(Trap::NullPointerDereference);
     masm.bind(&ok);
 
@@ -10080,14 +10087,7 @@ BaseCompiler::emitStructNarrow()
         return true;
     }
 
-    // Null pointers are just passed through.
-
-    Label done;
-    Label doTest;
     RegPtr rp = popRef();
-    masm.branchTestPtr(Assembler::NotEqual, rp, rp, &doTest);
-    pushRef(NULLREF_VALUE);
-    masm.jump(&done);
 
     // AnyRef -> (ref T) must first unbox; leaves rp or null
 
@@ -10097,14 +10097,10 @@ BaseCompiler::emitStructNarrow()
 
     const StructType& outputStruct = env_.types[outputType.refTypeIndex()].structType();
 
-    masm.bind(&doTest);
-
     pushI32(mustUnboxAnyref);
     pushI32(outputStruct.moduleIndex_);
     pushRef(rp);
     emitInstanceCall(lineOrBytecode, SigPIIP_, ExprType::AnyRef, SymbolicAddress::StructNarrow);
-
-    masm.bind(&done);
 
     return true;
 }
@@ -10696,7 +10692,6 @@ BaseCompiler::emitBody()
           // "Miscellaneous" operations
           case uint16_t(Op::MiscPrefix): {
             switch (op.b1) {
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
               case uint16_t(MiscOp::I32TruncSSatF32):
                 CHECK_NEXT(emitConversionOOM(emitTruncateF32ToI32<TRUNC_SATURATING>,
                                              ValType::F32, ValType::I32));
@@ -10745,7 +10740,6 @@ BaseCompiler::emitBody()
                 CHECK_NEXT(emitConversionOOM(emitTruncateF64ToI64<TRUNC_UNSIGNED | TRUNC_SATURATING>,
                                              ValType::F64, ValType::I64));
 #endif
-#endif // ENABLE_WASM_SATURATING_TRUNC_OPS
 #ifdef ENABLE_WASM_BULKMEM_OPS
               case uint16_t(MiscOp::MemCopy):
                 CHECK_NEXT(emitMemOrTableCopy(/*isMem=*/true));

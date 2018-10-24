@@ -809,6 +809,17 @@ ImageBitmap::ToCloneData() const
 }
 
 /* static */ already_AddRefed<ImageBitmap>
+ImageBitmap::CreateFromSourceSurface(nsIGlobalObject* aGlobal,
+                                     gfx::SourceSurface* aSource,
+                                     ErrorResult& aRv)
+{
+  RefPtr<layers::Image> data = CreateImageFromSurface(aSource);
+  RefPtr<ImageBitmap> ret = new ImageBitmap(aGlobal, data);
+  ret->mAllocatedImageData = true;
+  return ret.forget();
+}
+
+/* static */ already_AddRefed<ImageBitmap>
 ImageBitmap::CreateFromCloneData(nsIGlobalObject* aGlobal,
                                  ImageBitmapCloneData* aData)
 {
@@ -1386,7 +1397,7 @@ ImageBitmap::Create(nsIGlobalObject* aGlobal, const ImageBitmapSource& aSrc,
   }
 
   if (aCropRect.isSome() && (aCropRect->Width() == 0 || aCropRect->Height() == 0)) {
-    aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    aRv.Throw(NS_ERROR_RANGE_ERR);
     return promise.forget();
   }
 
