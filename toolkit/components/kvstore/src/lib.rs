@@ -127,8 +127,8 @@ impl Task for GetOrCreateTask {
     fn done(&self, result: Result<(), nsresult>) -> nsresult {
         error!("GetOrCreateTask.done");
         match result {
-            Ok(_) => unsafe { self.callback.HandleResult(NS_OK) },
-            Err(_) => unsafe { self.callback.HandleError(NS_ERROR_FAILURE) },
+            Ok(_) => unsafe { self.callback.HandleResult(NS_OK.0) },
+            Err(_) => unsafe { self.callback.HandleError(NS_ERROR_FAILURE.0) },
         };
         NS_OK
     }
@@ -196,9 +196,9 @@ impl KeyValueService {
 
     fn GetOrCreateAsync(
         &self,
-        path: *const nsAString,
+        path: *const nsACString,
         callback: *const nsIKeyValueCallback,
-        name: *const nsAString,
+        name: *const nsACString,
 
     ) -> nsresult {
         match self.get_or_create_async(path, callback, name) {
@@ -214,16 +214,16 @@ impl KeyValueService {
 
     fn get_or_create_async(
         &self,
-        _path: *const nsAString,
+        _path: *const nsACString,
         callback: *const nsIKeyValueCallback,
-        _name: *const nsAString,
+        _name: *const nsACString,
 
     ) -> Result<(), KeyValueError> {
         let source = get_current_thread()?;
         let target = get_current_thread()?;
         let callback = match unsafe { RefPtr::from_raw(callback) } {
             Some(callback) => callback,
-            None => return Err(KeyValueError::Nsresult(NS_ERROR_INVALID_ARG)),
+            None => return Err(KeyValueError::Nsresult(NS_ERROR_INVALID_ARG.error_name(), NS_ERROR_INVALID_ARG)),
         };
         let task = Box::new(GetOrCreateTask {
             callback,
@@ -236,7 +236,7 @@ impl KeyValueService {
         if rv.succeeded() {
             Ok(())
         } else {
-            Err(KeyValueError::Nsresult(rv))
+            Err(KeyValueError::Nsresult(rv.error_name(), rv))
         }
     }
 }

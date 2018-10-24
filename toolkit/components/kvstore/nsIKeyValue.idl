@@ -87,8 +87,8 @@ interface nsIKeyValueService : nsISupports {
     );
 
     void getOrCreateAsync(
-        in AString path,
+        in AUTF8String path,
         in nsIKeyValueCallback callback,
-        [optional] in AString name
+        [optional] in AUTF8String name
     );
 };
