@@ -6,21 +6,35 @@
 
 extern crate xpcom;
 
-use std::{cell::Cell, fmt::Write, result};
-
+use libc::uint32_t;
 use nserror::{nsresult, NS_ERROR_FAILURE, NS_OK};
-use nsstring::nsACString;
-use xpcom::{getter_addrefs, interfaces::nsIThread, RefPtr};
+use nsstring::{nsACString, nsCString};
+use std::{cell::Cell, fmt::Write, ptr, result};
+use xpcom::{
+    getter_addrefs,
+    interfaces::{nsIRunnable, nsIThread, nsIThreadManager},
+    RefPtr,
+};
 
 pub type Result<T> = result::Result<T, nsresult>;
 
 extern "C" {
     fn NS_GetCurrentThreadEventTarget(result: *mut *const nsIThread) -> nsresult;
+    fn NS_NewNamedThreadWithDefaultStackSize(
+        name: *const nsACString,
+        result: *mut *const nsIThread,
+        event: *const nsIRunnable,
+    ) -> nsresult;
 }
 
 /// Returns a handle to the current thread.
 pub fn get_current_thread() -> Result<RefPtr<nsIThread>> {
     getter_addrefs(|p| unsafe { NS_GetCurrentThreadEventTarget(p) })
+}
+
+pub fn create_thread() -> Result<RefPtr<nsIThread>> {
+    let name: nsCString = "".into();
+    getter_addrefs(|p| unsafe { NS_NewNamedThreadWithDefaultStackSize(&*name, p, ptr::null()) })
 }
 
 /// A task is executed asynchronously on a target thread, and passes its

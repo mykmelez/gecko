@@ -37,7 +37,7 @@ use std::{
     vec::IntoIter,
 };
 use storage_variant::{IntoVariant, Variant};
-use task::{get_current_thread, Task, TaskRunnable};
+use task::{create_thread, get_current_thread, Task, TaskRunnable};
 use xpcom::{
     interfaces::{
         nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabase,
@@ -209,7 +209,7 @@ impl KeyValueService {
         _name: &nsACString,
     ) -> Result<(), KeyValueError> {
         let source = get_current_thread()?;
-        let target = get_current_thread()?;
+        let target = create_thread()?;
         let task = Box::new(GetOrCreateTask::new(RefPtr::new(callback)));
 
         let runnable = TaskRunnable::new(

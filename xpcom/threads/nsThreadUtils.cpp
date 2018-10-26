@@ -657,7 +657,9 @@ nsIEventTarget::IsOnCurrentThread()
   return IsOnCurrentThreadInfallible();
 }
 
-extern "C" nsresult
+extern "C" {
+
+nsresult
 NS_GetCurrentThreadEventTarget(nsIEventTarget** aResult)
 {
   nsCOMPtr<nsIEventTarget> target = mozilla::GetCurrentThreadEventTarget();
@@ -666,4 +668,20 @@ NS_GetCurrentThreadEventTarget(nsIEventTarget** aResult)
   }
   target.forget(aResult);
   return NS_OK;
+}
+
+// NS_NewNamedThread's aStackSize parameter has the default argument
+// nsIThreadManager::DEFAULT_STACK_SIZE, but we can't omit default arguments
+// when calling a C++ function from Rust, and we can't access
+// nsIThreadManager::DEFAULT_STACK_SIZE in Rust to pass it explicitly,
+// , since it is defined in a %{C++ ... %} block within nsIThreadManager.idl.
+// So we indirect through this function.
+nsresult
+NS_NewNamedThreadWithDefaultStackSize(const nsACString& aName,
+                                      nsIThread** aResult,
+                                      nsIRunnable* aEvent)
+{
+  return NS_NewNamedThread(aName, aResult, aEvent);
+}
+
 }
