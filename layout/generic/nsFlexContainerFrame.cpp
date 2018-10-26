@@ -546,8 +546,29 @@ public:
 
   bool IsFrozen() const            { return mIsFrozen; }
 
-  bool HadMinViolation() const     { return mHadMinViolation; }
-  bool HadMaxViolation() const     { return mHadMaxViolation; }
+  bool HadMinViolation() const
+  {
+    MOZ_ASSERT(!mIsFrozen, "min violation has no meaning for frozen items.");
+    return mHadMinViolation;
+  }
+
+  bool HadMaxViolation() const
+  {
+    MOZ_ASSERT(!mIsFrozen, "max violation has no meaning for frozen items.");
+    return mHadMaxViolation;
+  }
+
+  bool WasMinClamped() const
+  {
+    MOZ_ASSERT(mIsFrozen, "min clamping has no meaning for unfrozen items.");
+    return mHadMinViolation;
+  }
+
+  bool WasMaxClamped() const
+  {
+    MOZ_ASSERT(mIsFrozen, "max clamping has no meaning for unfrozen items.");
+    return mHadMaxViolation;
+  }
 
   // Indicates whether this item received a preliminary "measuring" reflow
   // before its actual reflow.
@@ -740,7 +761,16 @@ public:
     mShareOfWeightSoFar = aNewShare;
   }
 
-  void Freeze() { mIsFrozen = true; }
+  void Freeze()
+  {
+    mIsFrozen = true;
+    // Now that we are frozen, the meaning of mHadMinViolation and
+    // mHadMaxViolation changes to indicate min and max clamping. Clear
+    // both of the member variables so that they are ready to be set
+    // as clamping state later, if necessary.
+    mHadMinViolation = false;
+    mHadMaxViolation = false;
+  }
 
   void SetHadMinViolation()
   {
@@ -757,7 +787,31 @@ public:
     mHadMaxViolation = true;
   }
   void ClearViolationFlags()
-  { mHadMinViolation = mHadMaxViolation = false; }
+  {
+    MOZ_ASSERT(!mIsFrozen,
+               "shouldn't be altering violation flags after we're "
+               "frozen");
+    mHadMinViolation = mHadMaxViolation = false;
+  }
+
+  void SetWasMinClamped()
+  {
+    MOZ_ASSERT(!mHadMinViolation && !mHadMaxViolation, "only clamp once");
+    // This reuses the mHadMinViolation member variable to track clamping
+    // events. This is allowable because mHadMinViolation only reflects
+    // a violation up until the item is frozen.
+    MOZ_ASSERT(mIsFrozen, "shouldn't set clamping state when we are unfrozen");
+    mHadMinViolation = true;
+  }
+  void SetWasMaxClamped()
+  {
+    MOZ_ASSERT(!mHadMinViolation && !mHadMaxViolation, "only clamp once");
+    // This reuses the mHadMaxViolation member variable to track clamping
+    // events. This is allowable because mHadMaxViolation only reflects
+    // a violation up until the item is frozen.
+    MOZ_ASSERT(mIsFrozen, "shouldn't set clamping state when we are unfrozen");
+    mHadMaxViolation = true;
+  }
 
   // Setters for values that are determined after we've resolved our main size
   // -------------------------------------------------------------------------
@@ -1403,6 +1457,11 @@ nsFlexContainerFrame::GenerateFlexItemForChild(
   // valid size, so we freeze to keep ourselves from flexing.
   if (isFixedSizeWidget || (flexGrow == 0.0f && flexShrink == 0.0f)) {
     item->Freeze();
+    if (flexBaseSize < mainMinSize) {
+      item->SetWasMinClamped();
+    } else if (flexBaseSize > mainMaxSize) {
+      item->SetWasMaxClamped();
+    }
   }
 
   // Resolve "flex-basis:auto" and/or "min-[width|height]:auto" (which might
@@ -2554,6 +2613,11 @@ FlexLine::FreezeItemsEarly(bool aIsUsingFlexGrow,
       if (shouldFreeze) {
         // Freeze item! (at its hypothetical main size)
         item->Freeze();
+        if (item->GetFlexBaseSize() < item->GetMainSize()) {
+          item->SetWasMinClamped();
+        } else if (item->GetFlexBaseSize() > item->GetMainSize()) {
+          item->SetWasMaxClamped();
+        }
         mNumFrozenItems++;
       }
     }
@@ -2593,9 +2657,11 @@ FlexLine::FreezeOrRestoreEachFlexibleSize(const nscoord aTotalViolation,
       MOZ_ASSERT(!item->HadMinViolation() || !item->HadMaxViolation(),
                  "Can have either min or max violation, but not both");
 
+      bool hadMinViolation = item->HadMinViolation();
+      bool hadMaxViolation = item->HadMaxViolation();
       if (eFreezeEverything == freezeType ||
-          (eFreezeMinViolations == freezeType && item->HadMinViolation()) ||
-          (eFreezeMaxViolations == freezeType && item->HadMaxViolation())) {
+          (eFreezeMinViolations == freezeType && hadMinViolation) ||
+          (eFreezeMaxViolations == freezeType && hadMaxViolation)) {
 
         MOZ_ASSERT(item->GetMainSize() >= item->GetMainMinSize(),
                    "Freezing item at a size below its minimum");
@@ -2603,6 +2669,11 @@ FlexLine::FreezeOrRestoreEachFlexibleSize(const nscoord aTotalViolation,
                    "Freezing item at a size above its maximum");
 
         item->Freeze();
+        if (hadMinViolation) {
+          item->SetWasMinClamped();
+        } else if (hadMaxViolation) {
+          item->SetWasMaxClamped();
+        }
         mNumFrozenItems++;
       } else if (MOZ_UNLIKELY(aIsFinalIteration)) {
         // XXXdholbert If & when bug 765861 is fixed, we should upgrade this
@@ -2614,8 +2685,10 @@ FlexLine::FreezeOrRestoreEachFlexibleSize(const nscoord aTotalViolation,
       } // else, we'll reset this item's main size to its flex base size on the
         // next iteration of this algorithm.
 
-      // Clear this item's violation(s), now that we've dealt with them
-      item->ClearViolationFlags();
+      if (!item->IsFrozen()) {
+        // Clear this item's violation(s), now that we've dealt with them
+        item->ClearViolationFlags();
+      }
     }
   }
 }
@@ -2642,6 +2715,12 @@ FlexLine::ResolveFlexibleLengths(nscoord aFlexContainerMainSize,
   // Determine whether we're going to be growing or shrinking items.
   const bool isUsingFlexGrow =
     (mTotalOuterHypotheticalMainSize < aFlexContainerMainSize);
+
+  if (aLineInfo) {
+    aLineInfo->mGrowthState = isUsingFlexGrow ?
+                              mozilla::dom::FlexLineGrowthState::Growing :
+                              mozilla::dom::FlexLineGrowthState::Shrinking;
+  }
 
   // Do an "early freeze" for flex items that obviously can't flex in the
   // direction we've chosen:
@@ -2781,11 +2860,12 @@ FlexLine::ResolveFlexibleLengths(nscoord aFlexContainerMainSize,
           // (using min or max, depending on sign).
           // This should not change the sign of availableFreeSpace (except
           // possibly by setting it to 0), as enforced by this assertion:
-          MOZ_ASSERT(totalDesiredPortionOfOrigFreeSpace == 0 ||
-                     ((totalDesiredPortionOfOrigFreeSpace > 0) ==
-                      (availableFreeSpace > 0)),
-                     "When we reduce available free space for flex factors < 1,"
-                     "we shouldn't change the sign of the free space...");
+          NS_ASSERTION(totalDesiredPortionOfOrigFreeSpace == 0 ||
+                       ((totalDesiredPortionOfOrigFreeSpace > 0) ==
+                        (availableFreeSpace > 0)),
+                       "When we reduce available free space for flex "
+                       "factors < 1, we shouldn't change the sign of the "
+                       "free space...");
 
           if (availableFreeSpace > 0) {
             availableFreeSpace = std::min(availableFreeSpace,
@@ -2872,30 +2952,6 @@ FlexLine::ResolveFlexibleLengths(nscoord aFlexContainerMainSize,
                 aLineInfo->mItems[itemIndex].mMainBaseSize;
 
               aLineInfo->mItems[itemIndex].mMainDeltaSize = deltaSize;
-              // If any (unfrozen) item on the line is growing, we mark the
-              // aLineInfo structure; likewise if any item is shrinking.
-              // (Note: a line can't contain a mix of items that are growing
-              // and shrinking. Also, the sign of any delta should match the
-              // type of flex factor we're using [grow vs shrink].)
-              if (deltaSize > 0) {
-                MOZ_ASSERT(isUsingFlexGrow,
-                           "Unfrozen items can only grow if we're "
-                           "distributing (positive) space with flex-grow");
-                MOZ_ASSERT(aLineInfo->mGrowthState !=
-                           ComputedFlexLineInfo::GrowthState::SHRINKING,
-                           "shouldn't flip flop from shrinking to growing");
-                aLineInfo->mGrowthState =
-                  ComputedFlexLineInfo::GrowthState::GROWING;
-              } else if (deltaSize < 0) {
-                MOZ_ASSERT(!isUsingFlexGrow,
-                           "Unfrozen items can only shrink if we're "
-                           "distributing (negative) space with flex-shrink");
-                MOZ_ASSERT(aLineInfo->mGrowthState !=
-                           ComputedFlexLineInfo::GrowthState::GROWING,
-                           "shouldn't flip flop from growing to shrinking");
-                aLineInfo->mGrowthState =
-                  ComputedFlexLineInfo::GrowthState::SHRINKING;
-              }
             }
           }
         }
@@ -4770,16 +4826,10 @@ nsFlexContainerFrame::DoFlexLayout(nsPresContext*           aPresContext,
          line = line->getNext()) {
       ComputedFlexLineInfo* lineInfo =
         containerInfo->mLines.AppendElement();
-      // Most lineInfo properties will be set later, but we set
-      // mGrowthState to UNCHANGED here because it may be later
-      // modified by ResolveFlexibleLengths().
-      lineInfo->mGrowthState =
-        ComputedFlexLineInfo::GrowthState::UNCHANGED;
-
-      // The remaining lineInfo properties will be filled out at the
-      // end of this function, when we have real values. But we still
-      // add all the items here, so we can capture computed data for
-      // each item.
+      // Most of the remaining lineInfo properties will be filled out at the
+      // end of this function (some will be provided by other functions),
+      // when we have real values. But we still add all the items here, so
+      // we can capture computed data for each item as we proceed.
       for (const FlexItem* item = line->GetFirstItem(); item;
            item = item->getNext()) {
         nsIFrame* frame = item->Frame();
@@ -4833,6 +4883,28 @@ nsFlexContainerFrame::DoFlexLayout(nsPresContext*           aPresContext,
                                      &containerInfo->mLines[lineIndex] :
                                      nullptr;
     line->ResolveFlexibleLengths(aContentBoxMainSize, lineInfo);
+  }
+
+  // If needed, capture the final clamp state from all the items.
+  if (containerInfo) {
+    uint32_t lineIndex = 0;
+    for (const FlexLine* line = lines.getFirst(); line;
+         line = line->getNext(), ++lineIndex) {
+      ComputedFlexLineInfo* lineInfo = &containerInfo->mLines[lineIndex];
+
+      uint32_t itemIndex = 0;
+      for (const FlexItem* item = line->GetFirstItem(); item;
+           item = item->getNext(), ++itemIndex) {
+        ComputedFlexItemInfo* itemInfo = &lineInfo->mItems[itemIndex];
+
+        itemInfo->mClampState =
+          item->WasMinClamped() ?
+          mozilla::dom::FlexItemClampState::Clamped_to_min :
+          (item->WasMaxClamped() ?
+           mozilla::dom::FlexItemClampState::Clamped_to_max :
+           mozilla::dom::FlexItemClampState::Unclamped);
+      }
+    }
   }
 
   // Cross Size Determination - Flexbox spec section 9.4

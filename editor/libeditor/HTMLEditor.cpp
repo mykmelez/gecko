@@ -1110,7 +1110,7 @@ HTMLEditor::UpdateBaseURL()
 nsresult
 HTMLEditor::OnInputLineBreak()
 {
-  AutoPlaceholderBatch batch(this, nsGkAtoms::TypingTxnName);
+  AutoPlaceholderBatch treatAsOneTransaction(*this, *nsGkAtoms::TypingTxnName);
   nsresult rv = InsertBrElementAtSelectionWithTransaction();
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -1326,7 +1326,7 @@ HTMLEditor::ReplaceHeadContentsWithSourceWithTransaction(
   inputString.ReplaceSubstring(NS_LITERAL_STRING("\r"),
                                NS_LITERAL_STRING("\n"));
 
-  AutoPlaceholderBatch beginBatching(this);
+  AutoPlaceholderBatch treatAsOneTransaction(*this);
 
   // Get the first range in the selection, for context:
   RefPtr<nsRange> range = selection->GetRangeAt(0);
@@ -1422,7 +1422,7 @@ HTMLEditor::RebuildDocumentFromSource(const nsAString& aSourceString)
   }
 
   // Time to change the document
-  AutoPlaceholderBatch beginBatching(this);
+  AutoPlaceholderBatch treatAsOneTransaction(*this);
 
   nsReadingIterator<char16_t> endtotal;
   aSourceString.EndReading(endtotal);
@@ -1632,7 +1632,7 @@ HTMLEditor::InsertElementAtSelection(Element* aElement,
   NS_ENSURE_TRUE(aElement, NS_ERROR_NULL_POINTER);
 
   CommitComposition();
-  AutoPlaceholderBatch beginBatching(this);
+  AutoPlaceholderBatch treatAsOneTransaction(*this);
   AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
                                       *this, EditSubAction::eInsertElement,
                                       nsIEditor::eNext);
@@ -1824,7 +1824,7 @@ HTMLEditor::SelectContentInternal(Selection& aSelection,
   }
 
   // Don't notify selection change at collapse.
-  AutoUpdateViewBatch notifySelectionChangeOnce(this);
+  AutoUpdateViewBatch notifySelectionChangeOnce(*this);
 
   // XXX Perhaps, Selection should have SelectNode(nsIContent&).
   int32_t offsetInParent = parent->ComputeIndexOf(&aContentToSelect);
@@ -2131,7 +2131,7 @@ HTMLEditor::MakeOrChangeList(const nsAString& aListType,
 
   bool cancel, handled;
 
-  AutoPlaceholderBatch beginBatching(this);
+  AutoPlaceholderBatch treatAsOneTransaction(*this);
   AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
                                       *this, EditSubAction::eCreateOrChangeList,
                                       nsIEditor::eNext);
@@ -2226,7 +2226,7 @@ HTMLEditor::RemoveList(const nsAString&)
 
   bool cancel, handled;
 
-  AutoPlaceholderBatch beginBatching(this);
+  AutoPlaceholderBatch treatAsOneTransaction(*this);
   AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
                                       *this, EditSubAction::eRemoveList,
                                       nsIEditor::eNext);
@@ -2262,7 +2262,7 @@ HTMLEditor::MakeDefinitionListItemWithTransaction(nsAtom& aTagName)
 
   bool cancel, handled;
 
-  AutoPlaceholderBatch beginBatching(this);
+  AutoPlaceholderBatch treatAsOneTransaction(*this);
   AutoTopLevelEditSubActionNotifier
     maybeTopLevelEditSubAction(*this,
                                EditSubAction::eCreateOrChangeDefinitionList,
@@ -2304,7 +2304,7 @@ HTMLEditor::InsertBasicBlockWithTransaction(nsAtom& aTagName)
 
   bool cancel, handled;
 
-  AutoPlaceholderBatch beginBatching(this);
+  AutoPlaceholderBatch treatAsOneTransaction(*this);
   AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
                                       *this,
                                       EditSubAction::eCreateOrRemoveBlock,
@@ -2408,7 +2408,7 @@ HTMLEditor::IndentAsAction()
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  AutoPlaceholderBatch beginBatching(this);
+  AutoPlaceholderBatch treatAsOneTransaction(*this);
   nsresult rv = IndentOrOutdentAsSubAction(EditSubAction::eIndent);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -2423,7 +2423,7 @@ HTMLEditor::OutdentAsAction()
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  AutoPlaceholderBatch beginBatching(this);
+  AutoPlaceholderBatch treatAsOneTransaction(*this);
   nsresult rv = IndentOrOutdentAsSubAction(EditSubAction::eOutdent);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -2545,7 +2545,7 @@ HTMLEditor::Align(const nsAString& aAlignType)
   // Protect the edit rules object from dying
   RefPtr<TextEditRules> rules(mRules);
 
-  AutoPlaceholderBatch beginBatching(this);
+  AutoPlaceholderBatch treatAsOneTransaction(*this);
   AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
                                       *this,
                                       EditSubAction::eSetOrClearAlignment,
@@ -2959,7 +2959,7 @@ HTMLEditor::InsertLinkAroundSelection(Element* aAnchorElement)
   }
 
   nsresult rv;
-  AutoPlaceholderBatch beginBatching(this);
+  AutoPlaceholderBatch treatAsOneTransaction(*this);
 
   // Set all attributes found on the supplied anchor element
   RefPtr<nsDOMAttributeMap> attrMap = anchor->Attributes();
@@ -3521,9 +3521,10 @@ HTMLEditor::DoContentInserted(nsIContent* aChild,
       // Ignore insertion of the bogus node
       return;
     }
-    // Protect the edit rules object from dying
-    RefPtr<TextEditRules> rules(mRules);
-    rules->DocumentModified();
+    RefPtr<HTMLEditRules> htmlRules = mRules->AsHTMLEditRules();
+    if (htmlRules) {
+      htmlRules->DocumentModified();
+    }
 
     // Update spellcheck for only the newly-inserted node (bug 743819)
     if (mInlineSpellChecker) {
@@ -3564,9 +3565,11 @@ HTMLEditor::ContentRemoved(nsIContent* aChild,
       // Ignore removal of the bogus node
       return;
     }
-    // Protect the edit rules object from dying
-    RefPtr<TextEditRules> rules(mRules);
-    rules->DocumentModified();
+
+    RefPtr<HTMLEditRules> htmlRules = mRules->AsHTMLEditRules();
+    if (htmlRules) {
+      htmlRules->DocumentModified();
+    }
   }
 }
 
@@ -4473,11 +4476,11 @@ HTMLEditor::SetCSSBackgroundColorWithTransaction(const nsAString& aColor)
 
   bool isCollapsed = selection->IsCollapsed();
 
-  AutoPlaceholderBatch batchIt(this);
+  AutoPlaceholderBatch treatAsOneTransaction(*this);
   AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
                                       *this, EditSubAction::eInsertElement,
                                       nsIEditor::eNext);
-  AutoSelectionRestorer selectionRestorer(selection, this);
+  AutoSelectionRestorer restoreSelectionLater(*selection, *this);
   AutoTransactionsConserveSelection dontChangeMySelection(*this);
 
   // XXX Although, this method may set background color of ancestor block
@@ -5220,6 +5223,20 @@ HTMLEditor::GetHTMLDocument() const
     return nullptr;
   }
   return doc->AsHTMLDocument();
+}
+
+void
+HTMLEditor::OnModifyDocument()
+{
+  MOZ_ASSERT(mRules);
+
+  RefPtr<Selection> selection = GetSelection();
+  if (NS_WARN_IF(!selection)) {
+    return;
+  }
+
+  RefPtr<HTMLEditRules> htmlRules = mRules->AsHTMLEditRules();
+  htmlRules->OnModifyDocument(*selection);
 }
 
 } // namespace mozilla

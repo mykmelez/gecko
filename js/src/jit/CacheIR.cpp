@@ -284,6 +284,9 @@ GetPropIRGenerator::tryAttachStub()
             if (tryAttachDenseElementHole(obj, objId, index, indexId)) {
                 return true;
             }
+            if (tryAttachSparseElement(obj, objId, index, indexId)) {
+                return true;
+            }
             if (tryAttachUnboxedElementHole(obj, objId, index, indexId)) {
                 return true;
             }
@@ -2213,6 +2216,70 @@ GetPropIRGenerator::tryAttachDenseElementHole(HandleObject obj, ObjOperandId obj
     return true;
 }
 
+bool
+GetPropIRGenerator::tryAttachSparseElement(HandleObject obj, ObjOperandId objId,
+                                           uint32_t index, Int32OperandId indexId)
+{
+    if (!obj->isNative()) {
+        return false;
+    }
+    NativeObject* nobj = &obj->as<NativeObject>();
+
+    // Stub doesn't handle negative indices.
+    if (index > INT_MAX) {
+        return false;
+    }
+
+    // We also need to be past the end of the dense capacity, to ensure sparse.
+    if (index < nobj->getDenseInitializedLength()) {
+        return false;
+    }
+
+    // Only handle Array objects in this stub.
+    if (!nobj->is<ArrayObject>()) {
+        return false;
+    }
+
+    // Here, we ensure that the prototype chain does not define any sparse
+    // indexed properties on the shape lineage. This allows us to guard on
+    // the shapes up the prototype chain to ensure that no indexed properties
+    // exist outside of the dense elements.
+    //
+    // The `GeneratePrototypeHoleGuards` call below will guard on the shapes,
+    // as well as ensure that no prototypes contain dense elements, allowing
+    // us to perform a pure shape-search for out-of-bounds integer-indexed
+    // properties on the recevier object.
+    if ((nobj->staticPrototype() != nullptr) &&
+        ObjectMayHaveExtraIndexedProperties(nobj->staticPrototype()))
+    {
+        return false;
+    }
+
+    // Ensure that obj is an Array.
+    writer.guardClass(objId, GuardClassKind::Array);
+
+    // The helper we are going to call only applies to non-dense elements.
+    writer.guardIndexGreaterThanDenseInitLength(objId, indexId);
+
+    // Ensures we are able to efficiently able to map to an integral jsid.
+    writer.guardIndexIsNonNegative(indexId);
+
+    // Shape guard the prototype chain to avoid shadowing indexes from appearing.
+    // The helper function also ensures that the index does not appear within the
+    // dense element set of the prototypes.
+    GeneratePrototypeHoleGuards(writer, nobj, objId);
+
+    // At this point, we are guaranteed that the indexed property will not
+    // be found on one of the prototypes. We are assured that we only have
+    // to check that the receiving object has the property.
+
+    writer.callGetSparseElementResult(objId, indexId);
+    writer.typeMonitorResult();
+
+    trackAttached("GetSparseElement");
+    return true;
+}
+
 static bool
 IsPrimitiveArrayTypedObject(JSObject* obj)
 {
@@ -3430,6 +3497,9 @@ SetPropIRGenerator::tryAttachStub()
             if (tryAttachSetTypedElement(obj, objId, index, indexId, rhsValId)) {
                 return true;
             }
+            if (tryAttachAddOrUpdateSparseElement(obj, objId, index, indexId, rhsValId)) {
+                return true;
+            }
             return false;
         }
         return false;
@@ -4043,6 +4113,91 @@ SetPropIRGenerator::tryAttachSetDenseElementHole(HandleObject obj, ObjOperandId 
     trackAttached(isAdd ? "AddDenseElement" : "StoreDenseElementHole");
     return true;
 }
+
+// Add an IC for adding or updating a sparse array element.
+bool
+SetPropIRGenerator::tryAttachAddOrUpdateSparseElement(HandleObject obj, ObjOperandId objId,
+                                                      uint32_t index, Int32OperandId indexId,
+                                                      ValOperandId rhsId)
+{
+    JSOp op = JSOp(*pc_);
+    MOZ_ASSERT(IsPropertySetOp(op) || IsPropertyInitOp(op));
+
+    if (op != JSOP_SETELEM && op != JSOP_STRICTSETELEM) {
+        return false;
+    }
+
+    if (!obj->isNative()) {
+        return false;
+    }
+    NativeObject* nobj = &obj->as<NativeObject>();
+
+    // We cannot attach a stub to a non-extensible object
+    if (!nobj->isExtensible()) {
+        return false;
+    }
+
+    // Stub doesn't handle negative indices.
+    if (index > INT_MAX) {
+        return false;
+    }
+
+    // We also need to be past the end of the dense capacity, to ensure sparse.
+    if (index < nobj->getDenseInitializedLength()) {
+        return false;
+    }
+
+    // Only handle Array objects in this stub.
+    if (!nobj->is<ArrayObject>()) {
+        return false;
+    }
+    ArrayObject* aobj = &nobj->as<ArrayObject>();
+
+    // Don't attach if we're adding to an array with non-writable length.
+    bool isAdd = (index >= aobj->length());
+    if (isAdd && !aobj->lengthIsWritable()) {
+        return false;
+    }
+
+    // Indexed properties on the prototype chain aren't handled by the helper.
+    if ((aobj->staticPrototype() != nullptr) &&
+        ObjectMayHaveExtraIndexedProperties(aobj->staticPrototype()))
+    {
+        return false;
+    }
+
+    // Ensure we are still talking about an array class.
+    writer.guardClass(objId, GuardClassKind::Array);
+
+    // The helper we are going to call only applies to non-dense elements.
+    writer.guardIndexGreaterThanDenseInitLength(objId, indexId);
+
+    // Guard extensible: We may be trying to add a new element, and so we'd best
+    // be able to do so safely.
+    writer.guardIsExtensible(objId);
+
+    // Ensures we are able to efficiently able to map to an integral jsid.
+    writer.guardIndexIsNonNegative(indexId);
+
+    // Shape guard the prototype chain to avoid shadowing indexes from appearing.
+    // Dense elements may appear on the prototype chain (and prototypes may
+    // have a different notion of which elements are dense), but they can
+    // only be data properties, so our specialized Set handler is ok to bind
+    // to them.
+    ShapeGuardProtoChain(writer, obj, objId);
+
+    // Ensure that if we're adding an element to the object, the object's
+    // length is writable.
+    writer.guardIndexIsValidUpdateOrAdd(objId, indexId);
+
+    writer.callAddOrUpdateSparseElementHelper(objId, indexId, rhsId,
+                                              /* strict = */op == JSOP_STRICTSETELEM);
+    writer.returnFromIC();
+
+    trackAttached("AddOrUpdateSparseElement");
+    return true;
+}
+
 
 bool
 SetPropIRGenerator::tryAttachSetTypedElement(HandleObject obj, ObjOperandId objId,

@@ -36,12 +36,21 @@ about-debugging-sidebar-item-connect-button = Connect
 # successfully connecting to them. Temporary UI, do not localize.
 about-debugging-sidebar-item-connected-label = Connected
 
+# Temporary text displayed in a sidebar button to refresh USB devices. Temporary
+# UI, do not localize.
+about-debugging-refresh-usb-devices-button = Refresh devices
+
 # Title of the Connect page.
 about-debugging-connect-title = Connect a Device
 
 # WiFi section of the Connect page
 about-debugging-connect-wifi
-  .title = Via WiFi (Recommended)
+  .title = Via WiFi
+
+# Temporary text displayed when wifi support is turned off via preferences.
+# { $pref } is the name of the preference that enables wifi
+# Do not localize
+about-debugging-connect-wifi-disabled = WiFi debugging currently under development. You can enable it with the preference "{ $pref }".
 
 # WiFi section step by step guide
 about-debugging-connect-wifi-step-same-network = Ensure that your browser and device are on the same network
@@ -76,6 +85,11 @@ about-debugging-connect-usb-step-plug-device = Connect the USB Device to your co
 # Network section of the Connect page
 about-debugging-connect-network
   .title = Via Network Location
+
+# Temporary text displayed when network location support is turned off via preferences.
+# { $pref } is the name of the preference that enables network locations
+# Do not localize
+about-debugging-connect-network-disabled = Network location support currently under development. You can enable it with the preference "{ $pref }".
 
 # Below are the titles for the various categories of debug targets that can be found
 # on "runtime" pages of about:debugging.
@@ -195,3 +209,11 @@ about-debugging-runtime-info = { $name } ({ $version })
 # { $version } is version such as "64.0a1"
 # { $deviceName } is model name of device
 about-debugging-runtime-info-with-model = { $name } on { $deviceName } ({ $version })
+
+# Text of the connection prompt button displayed in Runtime pages, when the preference
+# "devtools.debugger.prompt-connection" is false on the target runtime.
+about-debugging-connection-prompt-enable-button = Enable connection prompt
+
+# Text of the connection prompt button displayed in Runtime pages, when the preference
+# "devtools.debugger.prompt-connection" is true on the target runtime.
+about-debugging-connection-prompt-disable-button = Disable connection prompt

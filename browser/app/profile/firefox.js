@@ -312,10 +312,6 @@ pref("browser.urlbar.timesBeforeHidingSuggestionsHint", 4);
 // suggestions.
 pref("browser.urlbar.maxCharsForSearchSuggestions", 20);
 
-// Restrictions to current suggestions can also be applied (intersection).
-// Typed suggestion works only if history is set to true.
-pref("browser.urlbar.suggest.history.onlyTyped",    false);
-
 pref("browser.urlbar.formatting.enabled", true);
 pref("browser.urlbar.trimURLs", true);
 
@@ -1172,7 +1168,6 @@ pref("services.sync.prefs.sync.browser.urlbar.matchBuckets", true);
 pref("services.sync.prefs.sync.browser.urlbar.maxRichResults", true);
 pref("services.sync.prefs.sync.browser.urlbar.suggest.bookmark", true);
 pref("services.sync.prefs.sync.browser.urlbar.suggest.history", true);
-pref("services.sync.prefs.sync.browser.urlbar.suggest.history.onlyTyped", true);
 pref("services.sync.prefs.sync.browser.urlbar.suggest.openpage", true);
 pref("services.sync.prefs.sync.browser.urlbar.suggest.searches", true);
 pref("services.sync.prefs.sync.dom.disable_open_during_load", true);
@@ -1512,8 +1507,9 @@ pref("browser.ping-centre.production.endpoint", "https://tiles.services.mozilla.
 // Enable GMP support in the addon manager.
 pref("media.gmp-provider.enabled", true);
 
-// Enable blocking access to storage from tracking resources by default on Nightly
-#ifdef NIGHTLY_BUILD
+// Enable blocking access to storage from tracking resources by default on
+// Nightly and Beta
+#ifdef EARLY_BETA_OR_EARLIER
 pref("network.cookie.cookieBehavior", 4 /* BEHAVIOR_REJECT_TRACKER */);
 #endif
 
@@ -1529,10 +1525,6 @@ pref("browser.contentblocking.global-toggle.enabled", false);
 // Enable the Storage Access API in Nightly
 pref("dom.storage_access.enabled", true);
 #endif
-
-// Disable the UI for FastBlock in product.
-pref("browser.contentblocking.fastblock.ui.enabled", false);
-pref("browser.contentblocking.fastblock.control-center.ui.enabled", false);
 
 // Define a set of default features for the Content Blocking UI.
 pref("browser.contentblocking.trackingprotection.ui.enabled", true);
@@ -1554,11 +1546,8 @@ pref("browser.contentblocking.rejecttrackers.reportBreakage.enabled", true);
 
 pref("browser.contentblocking.reportBreakage.url", "https://tracking-protection-issues.herokuapp.com/new");
 
-// Content Blocking has a separate pref for the intro count, since the former TP intro
-// was updated when we introduced content blocking and we want people to see it again.
 pref("browser.contentblocking.introCount", 0);
 
-pref("privacy.trackingprotection.introCount", 0);
 pref("privacy.trackingprotection.introURL", "https://www.mozilla.org/%LOCALE%/firefox/%VERSION%/tracking-protection/start/");
 
 // Always enable newtab segregation using containers
@@ -1764,6 +1753,12 @@ pref("app.shield.optoutstudies.enabled", false);
 
 // Multi-lingual preferences
 pref("intl.multilingual.enabled", false);
+// AMO only serves language packs for release versions, so this feature only works on release.
+#ifdef RELEASE
+pref("intl.multilingual.downloadEnabled", true);
+#else
+pref("intl.multilingual.downloadEnabled", false);
+#endif
 
 // Simulate conditions that will happen when the browser
 // is running with Fission enabled. This is meant to assist

@@ -770,7 +770,8 @@ class CCacheStats(object):
     STATS_KEYS = [
         # (key, description)
         # Refer to stats.c in ccache project for all the descriptions.
-        ('stats_zero_time', 'stats zero time'),
+        ('stats_zeroed', 'stats zero time'), # Old name prior to ccache 3.4
+        ('stats_zeroed', 'stats zeroed'),
         ('stats_updated', 'stats updated'),
         ('cache_hit_direct', 'cache hit (direct)'),
         ('cache_hit_preprocessed', 'cache hit (preprocessed)'),
@@ -1330,6 +1331,7 @@ class BuildDriver(MozbuildObject):
         # Disable indexing in objdir because it is not necessary and can slow
         # down builds.
         mkdir(self.topobjdir, not_indexed=True)
+        self._write_mozconfig_json()
 
         def on_line(line):
             self.log(logging.INFO, 'build_output', {'line': line}, '{line}')

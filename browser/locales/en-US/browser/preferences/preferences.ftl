@@ -4,8 +4,6 @@
 
 do-not-track-description = Send websites a “Do Not Track” signal that you don’t want to be tracked
 do-not-track-learn-more = Learn more
-do-not-track-option-default =
-    .label = Only when using Tracking Protection
 do-not-track-option-default-content-blocking =
     .label = Only when { -brand-short-name } is set to block Detected Trackers
 do-not-track-option-always =
@@ -108,10 +106,6 @@ extension-controlled-default-search = An extension, <img data-l10n-name="icon"/>
 # This string is shown to notify the user that Container Tabs
 # are being enabled by an extension.
 extension-controlled-privacy-containers = An extension, <img data-l10n-name="icon"/> { $name }, requires Container Tabs.
-
-# This string is shown to notify the user that their tracking protection preferences
-# are being controlled by an extension.
-extension-controlled-websites-tracking-protection-mode = An extension, <img data-l10n-name="icon"/> { $name }, is controlling tracking protection.
 
 # This string is shown to notify the user that their content blocking "All Detected Trackers"
 # preferences are being controlled by an extension.
@@ -843,13 +837,6 @@ content-blocking-toggle-label-off = OFF
 
 content-blocking-category-label = Choose what to block
 
-# "Slow" in this instance means "slow to load on the network".
-# FastBlock is a feature that blocks requests to tracking sites if they
-# have not finished loading after a certain threshold of seconds.
-content-blocking-fastblock-slow-loading-trackers-label =
-  .label = Slow-Loading Trackers
-  .accesskey = S
-content-blocking-fastblock-new-description = Block just the trackers that keep pages from loading quickly.
 content-blocking-tracking-protection-trackers-label =
   .label = Trackers
   .accesskey = T
@@ -889,29 +876,9 @@ content-blocking-reject-trackers-all-third-parties-option =
 
 ## Privacy Section - Tracking
 
-tracking-header = Tracking Protection
-
-tracking-desc = Tracking Protection blocks online trackers that collect your browsing data across multiple websites. <a data-l10n-name="learn-more">Learn more about Tracking Protection and your privacy</a>
-
-tracking-mode-label = Use Tracking Protection to block known trackers
-
-tracking-mode-always =
-    .label = Always
-    .accesskey = y
-tracking-mode-private =
-    .label = Only in private windows
-    .accesskey = l
-tracking-mode-never =
-    .label = Never
-    .accesskey = N
-
 tracking-exceptions =
     .label = Exceptions…
     .accesskey = x
-
-tracking-change-block-list =
-    .label = Change Block List…
-    .accesskey = C
 
 ## Privacy Section - Permissions
 

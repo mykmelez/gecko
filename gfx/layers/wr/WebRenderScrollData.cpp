@@ -68,9 +68,13 @@ WebRenderLayerScrollData::Initialize(WebRenderScrollData& aOwner,
       Maybe<ScrollMetadata> metadata = asr->mScrollableFrame->ComputeScrollMetadata(
           aOwner.GetManager(), aItem->ReferenceFrame(),
           Nothing(), nullptr);
-      MOZ_ASSERT(metadata);
-      MOZ_ASSERT(metadata->GetMetrics().GetScrollId() == scrollId);
-      mScrollIds.AppendElement(aOwner.AddMetadata(metadata.ref()));
+      asr->mScrollableFrame->NotifyApzTransaction();
+      if (metadata) {
+        MOZ_ASSERT(metadata->GetMetrics().GetScrollId() == scrollId);
+        mScrollIds.AppendElement(aOwner.AddMetadata(metadata.ref()));
+      } else {
+        MOZ_ASSERT_UNREACHABLE("Expected scroll metadata to be available!");
+      }
     }
     asr = asr->mParent;
   }

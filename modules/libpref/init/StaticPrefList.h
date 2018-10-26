@@ -250,13 +250,6 @@ VARCACHE_PREF(
   uint32_t, 5000
 )
 
-// Disable the ImageBitmap-extensions for now.
-VARCACHE_PREF(
-  "canvas.imagebitmap_extensions.enabled",
-   canvas_imagebitmap_extensions_enabled,
-  RelaxedAtomicBool, false
-)
-
 // SW Cache API
 VARCACHE_PREF(
   "dom.caches.enabled",
@@ -1640,13 +1633,6 @@ PREF("preferences.allow.omt-write", bool, true)
 VARCACHE_PREF(
   "browser.contentblocking.enabled",
    browser_contentblocking_enabled,
-  bool, true
-)
-
-// Whether Content Blocking UI has been enabled.
-VARCACHE_PREF(
-  "browser.contentblocking.ui.enabled",
-   browser_contentblocking_ui_enabled,
   bool, true
 )
 

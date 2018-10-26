@@ -70,6 +70,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   UpdateUtils: "resource://gre/modules/UpdateUtils.jsm",
   UrlbarInput: "resource:///modules/UrlbarInput.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
+  UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
   UrlbarValueFormatter: "resource:///modules/UrlbarValueFormatter.jsm",
   Utils: "resource://gre/modules/sessionstore/Utils.jsm",
   Weave: "resource://services-sync/main.js",
@@ -592,8 +593,7 @@ const gStoragePressureObserver = {
         callback(notificationBar, button) {
           // The advanced subpanes are only supported in the old organization, which will
           // be removed by bug 1349689.
-          let win = gBrowser.ownerGlobal;
-          win.openPreferences("privacy-sitedata", { origin: "storagePressure" });
+          openPreferences("privacy-sitedata", { origin: "storagePressure" });
         },
       });
     }
@@ -2466,80 +2466,6 @@ function loadURI(uri, referrer, postData, allowThirdPartyFixup, referrerPolicy,
   }
 }
 
-/**
- * Given a string, will generate a more appropriate urlbar value if a Places
- * keyword or a search alias is found at the beginning of it.
- *
- * @param url
- *        A string that may begin with a keyword or an alias.
- *
- * @return {Promise}
- * @resolves { url, postData, mayInheritPrincipal }. If it's not possible
- *           to discern a keyword or an alias, url will be the input string.
- */
-async function getShortcutOrURIAndPostData(url) {
-  let mayInheritPrincipal = false;
-  let postData = null;
-  // Split on the first whitespace.
-  let [keyword, param = ""] = url.trim().split(/\s(.+)/, 2);
-
-  if (!keyword) {
-    return { url, postData, mayInheritPrincipal };
-  }
-
-  let engine = Services.search.getEngineByAlias(keyword);
-  if (engine) {
-    let submission = engine.getSubmission(param, null, "keyword");
-    return { url: submission.uri.spec,
-             postData: submission.postData,
-             mayInheritPrincipal };
-  }
-
-  // A corrupt Places database could make this throw, breaking navigation
-  // from the location bar.
-  let entry = null;
-  try {
-    entry = await PlacesUtils.keywords.fetch(keyword);
-  } catch (ex) {
-    Cu.reportError(`Unable to fetch Places keyword "${keyword}": ${ex}`);
-  }
-  if (!entry || !entry.url) {
-    // This is not a Places keyword.
-    return { url, postData, mayInheritPrincipal };
-  }
-
-  try {
-    [url, postData] =
-      await BrowserUtils.parseUrlAndPostData(entry.url.href,
-                                             entry.postData,
-                                             param);
-    if (postData) {
-      postData = getPostDataStream(postData);
-    }
-
-    // Since this URL came from a bookmark, it's safe to let it inherit the
-    // current document's principal.
-    mayInheritPrincipal = true;
-  } catch (ex) {
-    // It was not possible to bind the param, just use the original url value.
-  }
-
-  return { url, postData, mayInheritPrincipal };
-}
-
-function getPostDataStream(aPostDataString,
-                           aType = "application/x-www-form-urlencoded") {
-  let dataStream = Cc["@mozilla.org/io/string-input-stream;1"]
-                     .createInstance(Ci.nsIStringInputStream);
-  dataStream.data = aPostDataString;
-
-  let mimeStream = Cc["@mozilla.org/network/mime-input-stream;1"]
-                     .createInstance(Ci.nsIMIMEInputStream);
-  mimeStream.addHeader("Content-Type", aType);
-  mimeStream.setData(dataStream);
-  return mimeStream.QueryInterface(Ci.nsIInputStream);
-}
-
 function getLoadContext() {
   return window.docShell.QueryInterface(Ci.nsILoadContext);
 }
@@ -3704,7 +3630,7 @@ var newTabButtonObserver = {
 
     for (let link of links) {
       if (link.url) {
-        let data = await getShortcutOrURIAndPostData(link.url);
+        let data = await UrlbarUtils.getShortcutOrURIAndPostData(link.url);
         // Allow third-party services to fixup this URL.
         openNewTabWith(data.url, shiftKey, {
           // TODO fix allowInheritPrincipal
@@ -3739,7 +3665,7 @@ var newWindowButtonObserver = {
 
     for (let link of links) {
       if (link.url) {
-        let data = await getShortcutOrURIAndPostData(link.url);
+        let data = await UrlbarUtils.getShortcutOrURIAndPostData(link.url);
         // Allow third-party services to fixup this URL.
         openNewWindowWith(data.url, {
           // TODO fix allowInheritPrincipal
@@ -4386,14 +4312,6 @@ function FillHistoryMenu(aParent) {
   return true;
 }
 
-function addToUrlbarHistory(aUrlToAdd) {
-  if (!PrivateBrowsingUtils.isWindowPrivate(window) &&
-      aUrlToAdd &&
-      !aUrlToAdd.includes(" ") &&
-      !/[\x00-\x1F]/.test(aUrlToAdd)) // eslint-disable-line no-control-regex
-    PlacesUIUtils.markPageAsTyped(aUrlToAdd);
-}
-
 function BrowserDownloadsUI() {
   if (PrivateBrowsingUtils.isWindowPrivate(window)) {
     openTrustedLinkIn("about:downloads", "tab");
@@ -4675,19 +4593,24 @@ var XULBrowserWindow = {
     delete this.reloadCommand;
     return this.reloadCommand = document.getElementById("Browser:Reload");
   },
-  get elementsForTextBasedTypes() {
-    delete this.elementsForTextBasedTypes;
-    return this.elementsForTextBasedTypes = [
+  get _elementsForTextBasedTypes() {
+    delete this._elementsForTextBasedTypes;
+    return this._elementsForTextBasedTypes = [
       document.getElementById("pageStyleMenu"),
       document.getElementById("context-viewpartialsource-selection"),
+    ];
+  },
+  get _elementsForFind() {
+    delete this._elementsForFind;
+    return this._elementsForFind = [
       document.getElementById("cmd_find"),
       document.getElementById("cmd_findAgain"),
       document.getElementById("cmd_findPrevious"),
     ];
   },
-  get elementsForViewSource() {
-    delete this.elementsForViewSource;
-    return this.elementsForViewSource = [
+  get _elementsForViewSource() {
+    delete this._elementsForViewSource;
+    return this._elementsForViewSource = [
       document.getElementById("context-viewsource"),
       document.getElementById("View:PageSource"),
     ];
@@ -4841,24 +4764,18 @@ var XULBrowserWindow = {
         this.status = "";
         this.setDefaultStatus(msg);
 
-        // Disable menu entries for images, enable otherwise
+        // Disable View Source menu entries for images, enable otherwise
         let isText = browser.documentContentType &&
                      BrowserUtils.mimeTypeIsTextBased(browser.documentContentType);
-        for (let element of this.elementsForTextBasedTypes) {
-          if (isText) {
-            element.removeAttribute("disabled");
-          } else {
-            element.setAttribute("disabled", "true");
-          }
-        }
-
-        for (let element of this.elementsForViewSource) {
+        for (let element of this._elementsForViewSource) {
           if (canViewSource && isText) {
             element.removeAttribute("disabled");
           } else {
             element.setAttribute("disabled", "true");
           }
         }
+
+        this._updateElementsForContentType();
       }
 
       this.isBusy = false;
@@ -4890,19 +4807,6 @@ var XULBrowserWindow = {
             break;
           }
         }
-      }
-    }
-
-    let browser = gBrowser.selectedBrowser;
-
-    // Disable menu entries for images, enable otherwise
-    let isText = browser.documentContentType &&
-                 BrowserUtils.mimeTypeIsTextBased(browser.documentContentType);
-    for (let element of this.elementsForTextBasedTypes) {
-      if (isText) {
-        element.removeAttribute("disabled");
-      } else {
-        element.setAttribute("disabled", "true");
       }
     }
 
@@ -4940,46 +4844,7 @@ var XULBrowserWindow = {
 
       gTabletModePageCounter.inc();
 
-      // Utility functions for disabling find
-      var shouldDisableFind = function(aDocument) {
-        let docElt = aDocument.documentElement;
-        return docElt && docElt.getAttribute("disablefastfind") == "true";
-      };
-
-      var disableFindCommands = function(aDisable) {
-        let findCommands = [document.getElementById("cmd_find"),
-                            document.getElementById("cmd_findAgain"),
-                            document.getElementById("cmd_findPrevious")];
-        for (let elt of findCommands) {
-          if (aDisable)
-            elt.setAttribute("disabled", "true");
-          else
-            elt.removeAttribute("disabled");
-        }
-      };
-
-      var onContentRSChange = function(e) {
-        if (e.target.readyState != "interactive" && e.target.readyState != "complete")
-          return;
-
-        e.target.removeEventListener("readystatechange", onContentRSChange);
-        disableFindCommands(shouldDisableFind(e.target));
-      };
-
-      // Disable find commands in documents that ask for them to be disabled.
-      if (!gMultiProcessBrowser && aLocationURI &&
-          (aLocationURI.schemeIs("about") || aLocationURI.schemeIs("chrome"))) {
-        // Don't need to re-enable/disable find commands for same-document location changes
-        // (e.g. the replaceStates in about:addons)
-        if (!(aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT)) {
-          if (window.content.document.readyState == "interactive" || window.content.document.readyState == "complete")
-            disableFindCommands(shouldDisableFind(window.content.document));
-          else {
-            window.content.document.addEventListener("readystatechange", onContentRSChange);
-          }
-        }
-      } else
-        disableFindCommands(false);
+      this._updateElementsForContentType();
 
       // Try not to instantiate gCustomizeMode as much as possible,
       // so don't use CustomizeMode.jsm to check for URI or customizing.
@@ -5022,6 +4887,32 @@ var XULBrowserWindow = {
         if (ex.result != Cr.NS_ERROR_NOT_INITIALIZED) {
           throw ex;
         }
+      }
+    }
+  },
+
+  _updateElementsForContentType() {
+    let browser = gBrowser.selectedBrowser;
+
+    let isText = browser.documentContentType &&
+                 BrowserUtils.mimeTypeIsTextBased(browser.documentContentType);
+    for (let element of this._elementsForTextBasedTypes) {
+      if (isText) {
+        element.removeAttribute("disabled");
+      } else {
+        element.setAttribute("disabled", "true");
+      }
+    }
+
+    // Always enable find commands in PDF documents, otherwise do it only for
+    // text documents whose location is not in the blacklist.
+    let enableFind = browser.documentContentType == "application/pdf" ||
+      (isText && BrowserUtils.canFindInPage(gBrowser.currentURI.spec));
+    for (let element of this._elementsForFind) {
+      if (enableFind) {
+        element.removeAttribute("disabled");
+      } else {
+        element.setAttribute("disabled", "true");
       }
     }
   },
@@ -6268,7 +6159,7 @@ function middleMousePaste(event) {
     lastLocationChange = gBrowser.selectedBrowser.lastLocationChange;
   }
 
-  getShortcutOrURIAndPostData(clipboard).then(data => {
+  UrlbarUtils.getShortcutOrURIAndPostData(clipboard).then(data => {
     try {
       makeURI(data.url);
     } catch (ex) {
@@ -6277,7 +6168,7 @@ function middleMousePaste(event) {
     }
 
     try {
-      addToUrlbarHistory(data.url);
+      UrlbarUtils.addToUrlbarHistory(data.url, window);
     } catch (ex) {
       // Things may go wrong when adding url to session history,
       // but don't let that interfere with the loading of the url.
@@ -6354,7 +6245,7 @@ function handleDroppedLink(event, urlOrLinks, nameOrTriggeringPrincipal, trigger
     let urls = [];
     let postDatas = [];
     for (let link of links) {
-      let data = await getShortcutOrURIAndPostData(link.url);
+      let data = await UrlbarUtils.getShortcutOrURIAndPostData(link.url);
       urls.push(data.url);
       postDatas.push(data.postData);
     }

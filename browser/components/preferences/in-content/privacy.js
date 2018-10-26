@@ -20,17 +20,11 @@ ChromeUtils.defineModuleGetter(this, "SiteDataManager",
 
 ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 
-XPCOMUtils.defineLazyPreferenceGetter(this, "contentBlockingUiEnabled",
-                                      "browser.contentblocking.ui.enabled");
-
 XPCOMUtils.defineLazyPreferenceGetter(this, "contentBlockingCookiesAndSiteDataRejectTrackersRecommended",
                                       "browser.contentblocking.cookies-site-data.ui.reject-trackers.recommended");
 
 XPCOMUtils.defineLazyPreferenceGetter(this, "contentBlockingCookiesAndSiteDataRejectTrackersEnabled",
                                       "browser.contentblocking.cookies-site-data.ui.reject-trackers.enabled");
-
-XPCOMUtils.defineLazyPreferenceGetter(this, "contentBlockingFastBlockUiEnabled",
-                                      "browser.contentblocking.fastblock.ui.enabled");
 
 XPCOMUtils.defineLazyPreferenceGetter(this, "contentBlockingTrackingProtectionUiEnabled",
                                       "browser.contentblocking.trackingprotection.ui.enabled");
@@ -69,9 +63,6 @@ XPCOMUtils.defineLazyGetter(this, "AlertsServiceDND", function() {
 Preferences.addAll([
   // Content Blocking
   { id: "browser.contentblocking.enabled", type: "bool" },
-
-  // FastBlock
-  { id: "browser.fastblock.enabled", type: "bool" },
 
   // Tracking Protection
   { id: "privacy.trackingprotection.enabled", type: "bool" },
@@ -185,19 +176,6 @@ var gPrivacyPane = {
   _shouldPromptForRestart: true,
 
   /**
-   * Initialize the tracking protection prefs and linkify its Learn More link.
-   */
-  _initTrackingProtection() {
-    setEventListener("trackingProtectionRadioGroup", "command",
-      this.trackingProtectionWritePrefs);
-    setEventListener("changeBlockList", "command", this.showBlockLists);
-
-    let link = document.getElementById("trackingProtectionLearnMore");
-    let url = Services.urlFormatter.formatURLPref("app.support.baseURL") + "tracking-protection";
-    link.setAttribute("href", url);
-  },
-
-  /**
    * Update the tracking protection UI to deal with extension control.
    */
   _updateTrackingProtectionUI() {
@@ -206,24 +184,15 @@ var gPrivacyPane = {
 
     function setInputsDisabledState(isControlled) {
       let disabled = isLocked || isControlled;
-      if (contentBlockingUiEnabled) {
-        let tpCheckbox =
-          document.getElementById("contentBlockingTrackingProtectionCheckbox");
-        // Only enable the TP menu if content blocking and Detect All Trackers
-        // are enabled.
-        document.getElementById("trackingProtectionMenu").disabled = disabled ||
-          !tpCheckbox.checked ||
-          !contentBlockingEnabled;
-        // Only enable the TP category checkbox if content blocking is enabled.
-        tpCheckbox.disabled = disabled || !contentBlockingEnabled;
-      } else {
-        document.querySelectorAll("#trackingProtectionRadioGroup > radio")
-          .forEach((element) => {
-            element.disabled = disabled;
-          });
-        document.querySelector("#trackingProtectionDesc > label")
-          .disabled = disabled;
-      }
+      let tpCheckbox =
+        document.getElementById("contentBlockingTrackingProtectionCheckbox");
+      // Only enable the TP menu if content blocking and Detect All Trackers
+      // are enabled.
+      document.getElementById("trackingProtectionMenu").disabled = disabled ||
+        !tpCheckbox.checked ||
+        !contentBlockingEnabled;
+      // Only enable the TP category checkbox if content blocking is enabled.
+      tpCheckbox.disabled = disabled || !contentBlockingEnabled;
 
       // Notify observers that the TP UI has been updated.
       // This is needed since our tests need to be notified about the
@@ -248,9 +217,7 @@ var gPrivacyPane = {
    * for tracking protection.
    */
   _initTrackingProtectionExtensionControl() {
-    let disableButton = contentBlockingUiEnabled ?
-      "contentBlockingDisableTrackingProtectionExtension" : "disableTrackingProtectionExtension";
-    setEventListener(disableButton, "command",
+    setEventListener("contentBlockingDisableTrackingProtectionExtension", "command",
       makeDisableControllingExtension(
         PREF_SETTING_TYPE, TRACKING_PROTECTION_KEY));
 
@@ -292,13 +259,8 @@ var gPrivacyPane = {
     this.initAutoStartPrivateBrowsingReverter();
     this._initAutocomplete();
 
-    /* Initialize Content Blocking / Tracking Protection */
-
-    if (contentBlockingUiEnabled) {
-      this.initContentBlocking();
-    } else {
-      this._initTrackingProtection();
-    }
+    /* Initialize Content Blocking */
+    this.initContentBlocking();
 
     this.trackingProtectionReadPrefs();
     this.networkCookieBehaviorReadPrefs();
@@ -512,7 +474,6 @@ var gPrivacyPane = {
     // Honour our Content Blocking category UI prefs. If each pref is set to false,
     // Make all descendants of the corresponding selector hidden.
     let selectorPrefMap = {
-      ".fast-block-ui": contentBlockingFastBlockUiEnabled,
       ".tracking-protection-ui": contentBlockingTrackingProtectionUiEnabled,
       ".reject-trackers-ui": contentBlockingRejectTrackersUiEnabled,
     };
@@ -545,7 +506,6 @@ var gPrivacyPane = {
     }
 
     clearIfNotLocked("browser.contentblocking.enabled");
-    clearIfNotLocked("browser.fastblock.enabled");
     clearIfNotLocked("urlclassifier.trackingTable");
     clearIfNotLocked("network.cookie.cookieBehavior");
     clearIfNotLocked("network.cookie.lifetimePolicy");
@@ -567,38 +527,13 @@ var gPrivacyPane = {
   },
 
   /**
-   * Changes the visibility of elements in the TP/CB section depending on the
-   * content blocking UI pref.
+   * Changes the visibility of elements in the CB section depending on the
+   * content blocking UI prefs.
    */
   updateContentBlockingVisibility() {
-    // First, update the content blocking UI.
-    let visibleState = {
-      "contentBlockingHeader": true,
-      "contentBlockingDescription": true,
-      "contentBlockingLearnMore": true,
-      "contentBlockingRestoreDefaults": true,
-      "contentBlockingCheckboxContainer": true,
-      "contentBlockingCategories": true,
-
-      "trackingProtectionHeader": false,
-      "trackingProtectionDescription": false,
-      "trackingProtectionBox": false,
-    };
-    for (let id in visibleState) {
-      document.getElementById(id).hidden = contentBlockingUiEnabled != visibleState[id];
-    }
-
-    if (contentBlockingUiEnabled) {
-      // Update the Do Not Track section to not mention "Tracking Protection".
-      let dntDefaultRadioItem =
-        document.querySelector("#doNotTrackRadioGroup > radio[value=false]");
-      document.l10n.setAttributes(
-        dntDefaultRadioItem, "do-not-track-option-default-content-blocking");
-
-      // Potentially hide the global toggle.
-      document.getElementById("contentBlockingCheckboxContainer").hidden =
-        !Services.prefs.getBoolPref("browser.contentblocking.global-toggle.enabled", true);
-    }
+    // Potentially hide the global toggle.
+    document.getElementById("contentBlockingCheckboxContainer").hidden =
+      !Services.prefs.getBoolPref("browser.contentblocking.global-toggle.enabled", true);
 
     // Allow turning off the "(recommended)" label using a pref
     let blockCookiesFromTrackers = document.getElementById("blockCookiesFromTrackers");
@@ -688,23 +623,15 @@ var gPrivacyPane = {
     let enabledPref = Preferences.get("privacy.trackingprotection.enabled");
     let pbmPref = Preferences.get("privacy.trackingprotection.pbmode.enabled");
     let btpmPref = Preferences.get("browser.privacy.trackingprotection.menu");
-    let tpControl,
-        tpCheckbox;
-    if (contentBlockingUiEnabled) {
-      tpControl = document.getElementById("trackingProtectionMenu");
-      tpCheckbox = document.getElementById("contentBlockingTrackingProtectionCheckbox");
-    } else {
-      tpControl = document.getElementById("trackingProtectionRadioGroup");
-    }
+    let tpControl = document.getElementById("trackingProtectionMenu");
+    let tpCheckbox = document.getElementById("contentBlockingTrackingProtectionCheckbox");
 
     let savedMenuValue;
-    if (contentBlockingUiEnabled) {
-      // Only look at the backup pref when restoring the checkbox next to
-      // "All Detected Trackers".
-      if (["always", "private"].includes(btpmPref.value) &&
-          tpCheckbox.checked) {
-        savedMenuValue = btpmPref.value;
-      }
+    // Only look at the backup pref when restoring the checkbox next to
+    // "All Detected Trackers".
+    if (["always", "private"].includes(btpmPref.value) &&
+        tpCheckbox.checked) {
+      savedMenuValue = btpmPref.value;
     }
 
     this._updateTrackingProtectionUI();
@@ -741,7 +668,7 @@ var gPrivacyPane = {
     let keepUntilLabel = document.getElementById("keepUntil");
     let keepUntilMenu = document.getElementById("keepCookiesUntil");
 
-    let disabledByCB = contentBlockingUiEnabled ? !contentBlockingEnabled : false;
+    let disabledByCB = !contentBlockingEnabled;
     let blockCookies = (behavior != 0);
     let cookieBehaviorLocked = Services.prefs.prefIsLocked("network.cookie.cookieBehavior");
     let blockCookiesControlsDisabled = !blockCookies || cookieBehaviorLocked || disabledByCB;
@@ -784,14 +711,8 @@ var gPrivacyPane = {
     let enabledPref = Preferences.get("privacy.trackingprotection.enabled");
     let pbmPref = Preferences.get("privacy.trackingprotection.pbmode.enabled");
     let btpmPref = Preferences.get("browser.privacy.trackingprotection.menu");
-    let tpControl,
-        tpCheckbox;
-    if (contentBlockingUiEnabled) {
-      tpControl = document.getElementById("trackingProtectionMenu");
-      tpCheckbox = document.getElementById("contentBlockingTrackingProtectionCheckbox");
-    } else {
-      tpControl = document.getElementById("trackingProtectionRadioGroup");
-    }
+    let tpControl = document.getElementById("trackingProtectionMenu");
+    let tpCheckbox = document.getElementById("contentBlockingTrackingProtectionCheckbox");
 
     let value;
     if (tpCheckbox) {

@@ -64,7 +64,7 @@ class UrlbarInput {
 
     for (let method of METHODS) {
       this[method] = (...args) => {
-        this.textbox[method](...args);
+        return this.textbox[method](...args);
       };
     }
 
@@ -230,7 +230,17 @@ class UrlbarInput {
    * @param {UrlbarMatch} result The result that was selected.
    */
   resultSelected(event, result) {
-    // TODO: Set the input value to the target url.
+    // Set the input value to the target url.
+    let val = result.url;
+    let uri;
+    try {
+      uri = Services.io.newURI(val);
+    } catch (ex) {}
+    if (uri) {
+      val = this.window.losslessDecodeURI(uri);
+    }
+    this.value = val;
+
     this.controller.resultSelected(event, result);
   }
 
@@ -243,6 +253,10 @@ class UrlbarInput {
   get goButton() {
     return this.document.getAnonymousElementByAttribute(this.textbox, "anonid",
       "urlbar-go-button");
+  }
+
+  get textValue() {
+    return this.inputField.value;
   }
 
   get value() {
