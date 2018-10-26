@@ -398,7 +398,7 @@ add_task(async function enumeration() {
 
 add_task(async function getOrCreateAsync() {
   const databaseDir = await makeDatabaseDir("getOrCreateAsync");
-  let result = await new Promise((resolve, reject) => {
+  let defaultDatabase = await new Promise((resolve, reject) => {
     gKeyValueService.getOrCreateAsync({
       handleResult(result) {
         resolve(result);
@@ -409,8 +409,24 @@ add_task(async function getOrCreateAsync() {
     }, databaseDir);
   });
 
-  Assert.ok(result);
-  Assert.ok(result instanceof Ci.nsISupports);
-  Assert.ok(result.QueryInterface(Ci.nsIKeyValueDatabase));
-  Assert.ok(result instanceof Ci.nsIKeyValueDatabase);
+  Assert.ok(defaultDatabase);
+  Assert.ok(defaultDatabase instanceof Ci.nsISupports);
+  Assert.ok(defaultDatabase.QueryInterface(Ci.nsIKeyValueDatabase));
+  Assert.ok(defaultDatabase instanceof Ci.nsIKeyValueDatabase);
+
+  let namedDatabase = await new Promise((resolve, reject) => {
+    gKeyValueService.getOrCreateAsync({
+      handleResult(result) {
+        resolve(result);
+      },
+      handleError(error) {
+        reject(error);
+      },
+    }, databaseDir, "named-database");
+  });
+
+  Assert.ok(namedDatabase);
+  Assert.ok(namedDatabase instanceof Ci.nsISupports);
+  Assert.ok(namedDatabase.QueryInterface(Ci.nsIKeyValueDatabase));
+  Assert.ok(namedDatabase instanceof Ci.nsIKeyValueDatabase);
 });
