@@ -31,8 +31,8 @@ pub fn get_current_thread() -> Result<RefPtr<nsIThread>> {
     getter_addrefs(|p| unsafe { NS_GetCurrentThreadEventTarget(p) })
 }
 
-pub fn create_thread() -> Result<RefPtr<nsIThread>> {
-    let name: nsCString = "".into();
+pub fn create_thread(name: &str) -> Result<RefPtr<nsIThread>> {
+    let name: nsCString = name.into();
     getter_addrefs(|p| unsafe { NS_NewNamedThreadWithDefaultStackSize(&*name, p, ptr::null()) })
 }
 

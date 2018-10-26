@@ -229,7 +229,7 @@ impl KeyValueService {
         name: &nsACString,
     ) -> Result<(), KeyValueError> {
         let source = get_current_thread()?;
-        let target = create_thread()?;
+        let target = create_thread("KeyValDB")?;
         let task = Box::new(GetOrCreateTask::new(RefPtr::new(callback), path, name));
 
         let runnable = TaskRunnable::new(
