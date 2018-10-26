@@ -41,7 +41,7 @@ use task::{create_thread, get_current_thread, Task, TaskRunnable};
 use xpcom::{
     interfaces::{
         nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabase,
-        nsISimpleEnumerator, nsISupports, nsIVariant,
+        nsISimpleEnumerator, nsISupports, nsIThread, nsIVariant,
     },
     nsIID, Ensure, RefPtr,
 };
@@ -112,13 +112,14 @@ pub extern "C" fn KeyValueServiceConstructor(
 
 pub struct GetOrCreateTask {
     callback: RefPtr<nsIKeyValueCallback>,
+    thread: RefPtr<nsIThread>,
     path: nsCString,
     name: nsCString,
 }
 
 impl GetOrCreateTask {
-    fn new(callback: RefPtr<nsIKeyValueCallback>, path: &nsACString, name: &nsACString) -> GetOrCreateTask {
-        GetOrCreateTask { callback, path: nsCString::from(path), name: nsCString::from(name) }
+    fn new(callback: RefPtr<nsIKeyValueCallback>, thread: RefPtr<nsIThread>, path: &nsACString, name: &nsACString) -> GetOrCreateTask {
+        GetOrCreateTask { callback, thread, path: nsCString::from(path), name: nsCString::from(name) }
     }
 
     fn run_result(&self) -> Result<RefPtr<nsIKeyValueDatabase>, KeyValueError> {
@@ -129,7 +130,7 @@ impl GetOrCreateTask {
         } else {
             rkv.write()?.open_or_create(Some(str::from_utf8(&self.name)?))
         }?;
-        let key_value_db = KeyValueDatabase::new(rkv, store);
+        let key_value_db = KeyValueDatabase::new(rkv, store, Some(self.thread.clone()));
 
         key_value_db
             .query_interface::<nsIKeyValueDatabase>()
@@ -215,7 +216,7 @@ impl KeyValueService {
         } else {
             rkv.write()?.open_or_create(Some(name))
         }?;
-        let key_value_db = KeyValueDatabase::new(rkv, store);
+        let key_value_db = KeyValueDatabase::new(rkv, store, None);
 
         key_value_db
             .query_interface::<nsIKeyValueDatabase>()
@@ -230,7 +231,7 @@ impl KeyValueService {
     ) -> Result<(), KeyValueError> {
         let source = get_current_thread()?;
         let target = create_thread("KeyValDB")?;
-        let task = Box::new(GetOrCreateTask::new(RefPtr::new(callback), path, name));
+        let task = Box::new(GetOrCreateTask::new(RefPtr::new(callback), target.clone(), path, name));
 
         let runnable = TaskRunnable::new(
             "KeyValueDatabase::GetOrCreateAsync",
@@ -257,11 +258,13 @@ impl KeyValueService {
 pub struct InitKeyValueDatabase {
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
+    // TODO: require this rather than making it optional.
+    thread: Option<RefPtr<nsIThread>>,
 }
 
 impl KeyValueDatabase {
-    fn new(rkv: Arc<RwLock<Rkv>>, store: Store) -> RefPtr<KeyValueDatabase> {
-        KeyValueDatabase::allocate(InitKeyValueDatabase { rkv, store })
+    fn new(rkv: Arc<RwLock<Rkv>>, store: Store, thread: Option<RefPtr<nsIThread>>) -> RefPtr<KeyValueDatabase> {
+        KeyValueDatabase::allocate(InitKeyValueDatabase { rkv, store, thread })
     }
 
     xpcom_method!(Put, put, { key: *const nsACString, value: *const nsIVariant });
