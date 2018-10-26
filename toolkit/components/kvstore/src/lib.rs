@@ -148,8 +148,8 @@ impl Task for GetOrCreateTask {
     fn done(&self, result: Result<RefPtr<nsIKeyValueDatabase>, nsresult>) -> nsresult {
         error!("GetOrCreateTask.done");
         match result {
-            Ok(_) => unsafe { self.callback.HandleResult(NS_OK.0) },
-            Err(_) => unsafe { self.callback.HandleError(NS_ERROR_FAILURE.0) },
+            Ok(value) => unsafe { self.callback.HandleResult(value.coerce()) },
+            Err(err) => unsafe { self.callback.HandleError(err.0) },
         };
         NS_OK
     }

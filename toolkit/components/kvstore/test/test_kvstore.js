@@ -409,5 +409,8 @@ add_task(async function getOrCreateAsync() {
     }, databaseDir);
   });
 
-  Assert.strictEqual(result, Cr.NS_OK);
+  Assert.ok(result);
+  Assert.ok(result instanceof Ci.nsISupports);
+  Assert.ok(result.QueryInterface(Ci.nsIKeyValueDatabase));
+  Assert.ok(result instanceof Ci.nsIKeyValueDatabase);
 });
