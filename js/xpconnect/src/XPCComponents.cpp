@@ -207,6 +207,7 @@ NS_IMETHODIMP
 nsXPCComponents_Interfaces::NewEnumerate(nsIXPConnectWrappedNative* wrapper,
                                          JSContext* cx, JSObject* obj,
                                          JS::AutoIdVector& properties,
+                                         bool enumerableOnly,
                                          bool* _retval)
 {
 
@@ -394,6 +395,7 @@ NS_IMETHODIMP
 nsXPCComponents_InterfacesByID::NewEnumerate(nsIXPConnectWrappedNative* wrapper,
                                              JSContext* cx, JSObject* obj,
                                              JS::AutoIdVector& properties,
+                                             bool enumerableOnly,
                                              bool* _retval)
 {
 
@@ -589,6 +591,7 @@ NS_IMETHODIMP
 nsXPCComponents_Classes::NewEnumerate(nsIXPConnectWrappedNative* wrapper,
                                       JSContext* cx, JSObject* obj,
                                       JS::AutoIdVector& properties,
+                                      bool enumerableOnly,
                                       bool* _retval)
 {
     nsCOMPtr<nsIComponentRegistrar> compMgr;
@@ -784,6 +787,7 @@ NS_IMETHODIMP
 nsXPCComponents_ClassesByID::NewEnumerate(nsIXPConnectWrappedNative* wrapper,
                                           JSContext* cx, JSObject* obj,
                                           JS::AutoIdVector& properties,
+                                          bool enumerableOnly,
                                           bool* _retval)
 {
 
@@ -993,6 +997,7 @@ NS_IMETHODIMP
 nsXPCComponents_Results::NewEnumerate(nsIXPConnectWrappedNative* wrapper,
                                       JSContext* cx, JSObject* obj,
                                       JS::AutoIdVector& properties,
+                                      bool enumerableOnly,
                                       bool* _retval)
 {
     const char* name;
@@ -3271,18 +3276,16 @@ nsXPCComponents_Utils::CreatePersistentProperties(nsIPersistentProperties** aPer
 }
 
 NS_IMETHODIMP
-nsXPCComponents_Utils::LoadedModules(uint32_t* aLength,
-                                     char*** aModules)
+nsXPCComponents_Utils::GetLoadedModules(nsTArray<nsCString>& aLoadedModules)
 {
-    mozJSComponentLoader::Get()->LoadedModules(aLength, aModules);
+    mozJSComponentLoader::Get()->GetLoadedModules(aLoadedModules);
     return NS_OK;
 }
 
 NS_IMETHODIMP
-nsXPCComponents_Utils::LoadedComponents(uint32_t* aLength,
-                                        char*** aComponents)
+nsXPCComponents_Utils::GetLoadedComponents(nsTArray<nsCString>& aLoadedComponents)
 {
-    mozJSComponentLoader::Get()->LoadedComponents(aLength, aComponents);
+    mozJSComponentLoader::Get()->GetLoadedComponents(aLoadedComponents);
     return NS_OK;
 }
 

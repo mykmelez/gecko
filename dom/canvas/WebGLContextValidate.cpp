@@ -305,23 +305,22 @@ WebGLContext::InitAndValidateGL(FailureReason* const out_failReason)
 {
     MOZ_RELEASE_ASSERT(gl, "GFX: GL not initialized");
 
+    if (!gl->MakeCurrent(true)) {
+        MOZ_ASSERT(false);
+        *out_failReason = { "FEATURE_FAILURE_WEBGL_MAKECURRENT",
+                            "Failed to MakeCurrent for init." };
+        return false;
+    }
+
     // Unconditionally create a new format usage authority. This is
     // important when restoring contexts and extensions need to add
     // formats back into the authority.
     mFormatUsage = CreateFormatUsage(gl);
-    if (!mFormatUsage) {
-        *out_failReason = { "FEATURE_FAILURE_WEBGL_FORMAT",
-                            "Failed to create mFormatUsage." };
-        return false;
-    }
+    MOZ_RELEASE_ASSERT(mFormatUsage);
 
-    GLenum error = gl->fGetError();
-    if (error != LOCAL_GL_NO_ERROR) {
-        const nsPrintfCString reason("GL error 0x%x occurred during OpenGL context"
-                                     " initialization, before WebGL initialization!",
-                                     error);
-        *out_failReason = { "FEATURE_FAILURE_WEBGL_GLERR_1", reason };
-        return false;
+    {
+        const auto error = gl->fGetError();
+        MOZ_ALWAYS_TRUE(!error);
     }
 
     mDisableExtensions = gfxPrefs::WebGLDisableExtensions();
@@ -604,13 +603,9 @@ WebGLContext::InitAndValidateGL(FailureReason* const out_failReason)
     // Notice that the point of calling fGetError here is not only to check for
     // errors, but also to reset the error flags so that a subsequent WebGL
     // getError call will give the correct result.
-    error = gl->fGetError();
-    if (error != LOCAL_GL_NO_ERROR) {
-        const nsPrintfCString reason("GL error 0x%x occurred during WebGL context"
-                                     " initialization!",
-                                     error);
-        *out_failReason = { "FEATURE_FAILURE_WEBGL_GLERR_2", reason };
-        return false;
+    {
+        const auto error = gl->fGetError();
+        MOZ_ALWAYS_TRUE(!error);
     }
 
     if (IsWebGL2() &&
@@ -626,10 +621,6 @@ WebGLContext::InitAndValidateGL(FailureReason* const out_failReason)
         return false;
     }
 
-    mDefaultVertexArray = WebGLVertexArray::Create(this);
-    mDefaultVertexArray->mAttribs.SetLength(mGLMaxVertexAttribs);
-    mBoundVertexArray = mDefaultVertexArray;
-
     // OpenGL core profiles remove the default VAO object from version
     // 4.0.0. We create a default VAO for all core profiles,
     // regardless of version.
@@ -638,11 +629,9 @@ WebGLContext::InitAndValidateGL(FailureReason* const out_failReason)
     // (https://www.opengl.org/registry/doc/glspec40.core.20100311.pdf)
     // in Section E.2.2 "Removed Features", pg 397: "[...] The default
     // vertex array object (the name zero) is also deprecated. [...]"
-
-    if (gl->IsCoreProfile()) {
-        mDefaultVertexArray->GenVertexArray();
-        mDefaultVertexArray->BindVertexArray();
-    }
+    mDefaultVertexArray = WebGLVertexArray::Create(this);
+    mDefaultVertexArray->BindVertexArray();
+    mDefaultVertexArray->mAttribs.SetLength(mGLMaxVertexAttribs);
 
     mPixelStore_FlipY = false;
     mPixelStore_PremultiplyAlpha = false;

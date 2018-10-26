@@ -2276,6 +2276,17 @@ js::shell::FileAsString(JSContext* cx, JS::HandleString pathnameStr)
 
     AutoCloseFile autoClose(file);
 
+    struct stat st;
+    if (fstat(fileno(file), &st) != 0) {
+        JS_ReportErrorUTF8(cx, "can't stat %s", pathname.get());
+        return nullptr;
+    }
+
+    if ((st.st_mode & S_IFMT) != S_IFREG) {
+        JS_ReportErrorUTF8(cx, "can't read non-regular file %s", pathname.get());
+        return nullptr;
+    }
+
     if (fseek(file, 0, SEEK_END) != 0) {
         pathname = JS_EncodeStringToUTF8(cx, pathnameStr);
         if (!pathname) {
@@ -2285,7 +2296,13 @@ js::shell::FileAsString(JSContext* cx, JS::HandleString pathnameStr)
         return nullptr;
     }
 
-    size_t len = ftell(file);
+    long endPos = ftell(file);
+    if (endPos < 0) {
+        JS_ReportErrorUTF8(cx, "can't read length of %s", pathname.get());
+        return nullptr;
+    }
+
+    size_t len = endPos;
     if (fseek(file, 0, SEEK_SET) != 0) {
         pathname = JS_EncodeStringToUTF8(cx, pathnameStr);
         if (!pathname) {
@@ -2297,6 +2314,7 @@ js::shell::FileAsString(JSContext* cx, JS::HandleString pathnameStr)
 
     UniqueChars buf(js_pod_malloc<char>(len + 1));
     if (!buf) {
+        JS_ReportErrorUTF8(cx, "out of memory reading %s", pathname.get());
         return nullptr;
     }
 
@@ -10026,7 +10044,7 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
 #endif
     enableTestWasmAwaitTier2 = op.getBoolOption("test-wasm-await-tier2");
     enableAsyncStacks = !op.getBoolOption("no-async-stacks");
-    enableStreams = op.getBoolOption("enable-streams");
+    enableStreams = !op.getBoolOption("no-streams");
 
 #if defined ENABLE_WASM_GC && defined ENABLE_WASM_CRANELIFT
     // Note, once we remove --wasm-gc this test will no longer make any sense
@@ -10651,7 +10669,8 @@ main(int argc, char** argv, char** envp)
 #endif
         || !op.addBoolOption('\0', "no-native-regexp", "Disable native regexp compilation")
         || !op.addBoolOption('\0', "no-unboxed-objects", "Disable creating unboxed plain objects")
-        || !op.addBoolOption('\0', "enable-streams", "Enable WHATWG Streams")
+        || !op.addBoolOption('\0', "enable-streams", "Enable WHATWG Streams (default)")
+        || !op.addBoolOption('\0', "no-streams", "Disable WHATWG Streams")
 #ifdef ENABLE_SHARED_ARRAY_BUFFER
         || !op.addStringOption('\0', "shared-memory", "on/off",
                                "SharedArrayBuffer and Atomics "
@@ -10948,7 +10967,7 @@ main(int argc, char** argv, char** envp)
 
 #ifdef DEBUG
     if (OOM_printAllocationCount) {
-        printf("OOM max count: %" PRIu64 "\n", js::oom::counter);
+        printf("OOM max count: %" PRIu64 "\n", js::oom::simulator.counter());
     }
 #endif
 

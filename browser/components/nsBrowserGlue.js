@@ -713,7 +713,7 @@ BrowserGlue.prototype = {
   observe: async function BG_observe(subject, topic, data) {
     switch (topic) {
       case "notifications-open-settings":
-        this._openPreferences("privacy", { origin: "notifOpenSettings" });
+        this._openPreferences("privacy-permissions", { origin: "notifOpenSettings" });
         break;
       case "final-ui-startup":
         this._beforeUIStartup();
@@ -1363,9 +1363,6 @@ BrowserGlue.prototype = {
 
     let cookieBehavior = Services.prefs.getIntPref("network.cookie.cookieBehavior");
     Services.telemetry.getHistogramById("COOKIE_BEHAVIOR").add(cookieBehavior);
-
-    let fastBlockEnabled = Services.prefs.getBoolPref("browser.fastblock.enabled");
-    Services.telemetry.scalarSet("contentblocking.fastblock_enabled", fastBlockEnabled);
 
     let contentBlockingEnabled = Services.prefs.getBoolPref("browser.contentblocking.enabled");
     Services.telemetry.scalarSet("contentblocking.enabled", contentBlockingEnabled);

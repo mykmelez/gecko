@@ -8,7 +8,6 @@ const BENIGN_PAGE = "http://tracking.example.org/browser/browser/base/content/te
 const COOKIE_PAGE = "http://not-tracking.example.com/browser/browser/base/content/test/trackingUI/cookiePage.html";
 
 const CB_PREF = "browser.contentblocking.enabled";
-const CB_UI_PREF = "browser.contentblocking.ui.enabled";
 const TP_PREF = "privacy.trackingprotection.enabled";
 const PREF_REPORT_BREAKAGE_ENABLED = "browser.contentblocking.reportBreakage.enabled";
 const PREF_REPORT_BREAKAGE_URL = "browser.contentblocking.reportBreakage.url";
@@ -18,9 +17,6 @@ let {CommonUtils} = ChromeUtils.import("resource://services-common/utils.js", {}
 let {Preferences} = ChromeUtils.import("resource://gre/modules/Preferences.jsm", {});
 
 add_task(async function setup() {
-  await SpecialPowers.pushPrefEnv({set: [
-    [CB_UI_PREF, true],
-  ]});
   await UrlClassifierTestUtils.addTestTrackers();
 
   let oldCanRecord = Services.telemetry.canRecordExtended;
@@ -90,7 +86,6 @@ add_task(async function testReportBreakageVisibility() {
       url: COOKIE_PAGE,
       prefs: {
         "browser.contentblocking.enabled": true,
-        "browser.fastblock.enabled": false,
         "privacy.trackingprotection.enabled": false,
         "network.cookie.cookieBehavior": Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER,
         "browser.contentblocking.reportBreakage.enabled": false,
@@ -217,9 +212,6 @@ add_task(async function testReportBreakage() {
           "network.cookie.cookieBehavior",
           "network.cookie.lifetimePolicy",
           "privacy.restrict3rdpartystorage.expiration",
-          "browser.fastblock.enabled",
-          "browser.contentblocking.fastblock.control-center.ui.enabled",
-          "browser.fastblock.timeout",
         ];
         let prefsBody = "";
 

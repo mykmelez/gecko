@@ -1,14 +1,11 @@
 /* eslint-env webextensions */
 
 const CB_PREF = "browser.contentblocking.enabled";
-const CB_UI_PREF = "browser.contentblocking.ui.enabled";
-const CB_FB_UI_PREF = "browser.contentblocking.fastblock.ui.enabled";
 const CB_TP_UI_PREF = "browser.contentblocking.trackingprotection.ui.enabled";
 const CB_RT_UI_PREF = "browser.contentblocking.rejecttrackers.ui.enabled";
 const TP_PREF = "privacy.trackingprotection.enabled";
 const TP_PBM_PREF = "privacy.trackingprotection.pbmode.enabled";
 const TP_LIST_PREF = "urlclassifier.trackingTable";
-const FB_PREF = "browser.fastblock.enabled";
 const NCB_PREF = "network.cookie.cookieBehavior";
 const TOGGLE_PREF = "browser.contentblocking.global-toggle.enabled";
 
@@ -17,7 +14,6 @@ requestLongerTimeout(2);
 // Checks that the content blocking toggle follows and changes the CB pref.
 add_task(async function testContentBlockingToggle() {
   SpecialPowers.pushPrefEnv({set: [
-    [CB_UI_PREF, true],
     [TOGGLE_PREF, true],
   ]});
 
@@ -60,13 +56,8 @@ add_task(async function testContentBlockingToggle() {
 
 // Tests that the content blocking main category checkboxes have the correct default state.
 add_task(async function testContentBlockingMainCategory() {
-  SpecialPowers.pushPrefEnv({set: [
-    [CB_UI_PREF, true],
-  ]});
-
   let prefs = [
     [CB_PREF, true],
-    [FB_PREF, true],
     [TP_PREF, false],
     [TP_PBM_PREF, true],
     [NCB_PREF, Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER],
@@ -84,7 +75,6 @@ add_task(async function testContentBlockingMainCategory() {
   }
 
   let checkboxes = [
-    "#contentBlockingFastBlockCheckbox",
     "#contentBlockingTrackingProtectionCheckbox",
     "#contentBlockingBlockCookiesCheckbox",
   ];
@@ -100,7 +90,7 @@ add_task(async function testContentBlockingMainCategory() {
   }
 
   // Ensure the dependent controls of the tracking protection subsection behave properly.
-  let tpCheckbox = doc.querySelector(checkboxes[1]);
+  let tpCheckbox = doc.querySelector(checkboxes[0]);
 
   let dependentControls = [
     "#trackingProtectionMenu",
@@ -161,13 +151,8 @@ add_task(async function testContentBlockingMainCategory() {
 
 // Tests that the content blocking "Restore Defaults" button does what it's supposed to.
 add_task(async function testContentBlockingRestoreDefaults() {
-  SpecialPowers.pushPrefEnv({set: [
-    [CB_UI_PREF, true],
-  ]});
-
   let prefs = {
     CB_PREF: null,
-    FB_PREF: null,
     TP_LIST_PREF: null,
     TP_PREF: null,
     TP_PBM_PREF: null,
@@ -186,7 +171,6 @@ add_task(async function testContentBlockingRestoreDefaults() {
   }
 
   Services.prefs.setBoolPref(CB_PREF, false);
-  Services.prefs.setBoolPref(FB_PREF, !Services.prefs.getBoolPref(FB_PREF));
   Services.prefs.setStringPref(TP_LIST_PREF, "test-track-simple,base-track-digest256,content-track-digest256");
   Services.prefs.setBoolPref(TP_PREF, true);
   Services.prefs.setBoolPref(TP_PBM_PREF, false);
@@ -227,10 +211,6 @@ add_task(async function testContentBlockingRestoreDefaults() {
 // Tests that the content blocking "Restore Defaults" button does not restore prefs
 // that are controlled by extensions.
 add_task(async function testContentBlockingRestoreDefaultsSkipExtensionControlled() {
-  SpecialPowers.pushPrefEnv({set: [
-    [CB_UI_PREF, true],
-  ]});
-
   function background() {
     browser.privacy.websites.trackingProtectionMode.set({value: "always"});
   }
@@ -248,7 +228,6 @@ add_task(async function testContentBlockingRestoreDefaultsSkipExtensionControlle
 
   let resettable = {
     CB_PREF: null,
-    FB_PREF: null,
     TP_LIST_PREF: null,
     NCB_PREF: null,
   };
@@ -265,7 +244,6 @@ add_task(async function testContentBlockingRestoreDefaultsSkipExtensionControlle
   }
 
   Services.prefs.setBoolPref(CB_PREF, false);
-  Services.prefs.setBoolPref(FB_PREF, !Services.prefs.getBoolPref(FB_PREF));
   Services.prefs.setStringPref(TP_LIST_PREF, "test-track-simple,base-track-digest256,content-track-digest256");
   Services.prefs.setIntPref(NCB_PREF, Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER);
 
@@ -290,7 +268,6 @@ add_task(async function testContentBlockingRestoreDefaultsSkipExtensionControlle
   await TestUtils.waitForCondition(() => Services.prefs.prefHasUserValue(TP_PREF));
 
   let dependentControls = [
-    ".fast-block-ui .content-blocking-checkbox",
     ".reject-trackers-ui .content-blocking-checkbox",
     "#content-blocking-categories-label",
     "#changeBlockListLink",
@@ -390,8 +367,6 @@ add_task(async function testContentBlockingDependentControls() {
   // In Accept All Cookies mode, the radiogroup under Third-Party Cookies is always disabled
   // since the checkbox next to Third-Party Cookies would be unchecked.
   SpecialPowers.pushPrefEnv({set: [
-    [CB_UI_PREF, true],
-    [CB_FB_UI_PREF, true],
     [CB_TP_UI_PREF, true],
     [CB_RT_UI_PREF, true],
     [NCB_PREF, Ci.nsICookieService.BEHAVIOR_ACCEPT],
@@ -417,8 +392,6 @@ add_task(async function testContentBlockingDependentControls() {
   // In Block Cookies from Trackers (or Block Cookies from All Third-Parties) mode, the
   // radiogroup's disabled status must obey the content blocking enabled state.
   SpecialPowers.pushPrefEnv({set: [
-    [CB_UI_PREF, true],
-    [CB_FB_UI_PREF, true],
     [CB_TP_UI_PREF, true],
     [CB_RT_UI_PREF, true],
     [NCB_PREF, Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER],
@@ -443,8 +416,6 @@ add_task(async function testContentBlockingDependentControls() {
 // Checks that the controls for tracking protection are disabled when all TP prefs are off.
 add_task(async function testContentBlockingDependentTPControls() {
   SpecialPowers.pushPrefEnv({set: [
-    [CB_UI_PREF, true],
-    [CB_FB_UI_PREF, true],
     [CB_TP_UI_PREF, true],
     [CB_RT_UI_PREF, true],
     [TP_PREF, false],
@@ -481,8 +452,6 @@ add_task(async function testContentBlockingDependentControlsOnSiteDataUI() {
   ];
   for (let value of prefValuesToTest) {
     await SpecialPowers.pushPrefEnv({set: [
-      [CB_UI_PREF, true],
-      [CB_FB_UI_PREF, true],
       [CB_TP_UI_PREF, true],
       [CB_RT_UI_PREF, true],
       [TP_PREF, false],
@@ -495,9 +464,7 @@ add_task(async function testContentBlockingDependentControlsOnSiteDataUI() {
     // unconditionally.
     let dependentControls = [
       "#content-blocking-categories-label",
-      "#contentBlockingFastBlockCheckbox",
       "#contentBlockingTrackingProtectionCheckbox",
-      ".fastblock-icon",
       ".tracking-protection-icon",
       "#trackingProtectionMenu",
       "[control=trackingProtectionMenu]",
@@ -525,8 +492,6 @@ add_task(async function testContentBlockingDependentControlsOnSiteDataUI() {
   ];
   for (let value of prefValuesToTest) {
     await SpecialPowers.pushPrefEnv({set: [
-      [CB_UI_PREF, true],
-      [CB_FB_UI_PREF, true],
       [CB_TP_UI_PREF, true],
       [CB_RT_UI_PREF, true],
       [TP_PREF, false],
@@ -536,9 +501,7 @@ add_task(async function testContentBlockingDependentControlsOnSiteDataUI() {
 
     let dependentControls = [
       "#content-blocking-categories-label",
-      "#contentBlockingFastBlockCheckbox",
       "#contentBlockingTrackingProtectionCheckbox",
-      ".fastblock-icon",
       ".tracking-protection-icon",
       "#trackingProtectionMenu",
       "[control=trackingProtectionMenu]",
@@ -567,8 +530,6 @@ add_task(async function testContentBlockingDependentControlsOnSiteDataUI() {
   ];
   for (let value of prefValuesToTest) {
     await SpecialPowers.pushPrefEnv({set: [
-      [CB_UI_PREF, true],
-      [CB_FB_UI_PREF, true],
       [CB_TP_UI_PREF, true],
       [CB_RT_UI_PREF, true],
       [TP_PREF, false],
@@ -604,8 +565,6 @@ add_task(async function testContentBlockingDependentControlsOnSiteDataUI() {
   ];
   for (let value of prefValuesToTest) {
     await SpecialPowers.pushPrefEnv({set: [
-      [CB_UI_PREF, true],
-      [CB_FB_UI_PREF, true],
       [CB_TP_UI_PREF, true],
       [CB_RT_UI_PREF, true],
       [TP_PREF, false],
@@ -638,8 +597,6 @@ add_task(async function testContentBlockingDependentControlsOnSiteDataUI() {
 add_task(async function testContentBlockingThirdPartyCookiesWarning() {
   await SpecialPowers.pushPrefEnv({set: [
     [CB_PREF, true],
-    [CB_UI_PREF, true],
-    [CB_FB_UI_PREF, true],
     [CB_TP_UI_PREF, true],
     [CB_RT_UI_PREF, true],
   ]});

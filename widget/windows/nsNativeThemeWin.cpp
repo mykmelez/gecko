@@ -142,6 +142,14 @@ GetCheckboxMargins(HANDLE theme, HDC hdc)
     return checkboxContent;
 }
 
+static COLORREF
+GetTextfieldFillColor(HANDLE theme, int32_t part, int32_t state)
+{
+    COLORREF color = {0};
+    GetThemeColor(theme, part, state, TMT_FILLCOLOR, &color);
+    return color;
+}
+
 static SIZE
 GetCheckboxBGSize(HANDLE theme, HDC hdc)
 {
@@ -1875,11 +1883,19 @@ RENDER_AGAIN:
            aWidgetType == StyleAppearance::NumberInput ||
            aWidgetType == StyleAppearance::Textfield ||
            aWidgetType == StyleAppearance::TextfieldMultiline) {
-    // Paint the border, except for 'menulist-textfield' that isn't focused:
-    if (aWidgetType != StyleAppearance::MenulistTextfield ||
-        state == TFS_EDITBORDER_FOCUSED) {
+    if (aWidgetType == StyleAppearance::MenulistTextfield &&
+        state != TFS_EDITBORDER_FOCUSED) {
+      // We want 'menulist-textfield' to behave like 'textfield', except we
+      // don't want a border unless it's focused.  We have to handle the
+      // non-focused case manually here.
+      COLORREF color = GetTextfieldFillColor(theme, part, state);
+      HBRUSH brush = CreateSolidBrush(color);
+      ::FillRect(hdc, &widgetRect, brush);
+      DeleteObject(brush);
+    } else {
       DrawThemeBackground(theme, hdc, part, state, &widgetRect, &clipRect);
     }
+
     if (state == TFS_EDITBORDER_DISABLED) {
       InflateRect(&widgetRect, -1, -1);
       ::FillRect(hdc, &widgetRect, reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1));
@@ -1987,41 +2003,6 @@ RENDER_AGAIN:
   nativeDrawing.PaintToContext();
 
   return NS_OK;
-}
-
-static nscolor
-GetScrollbarFaceColorForAuto(ComputedStyle* aStyle)
-{
-  return NS_RGB(205, 205, 205);
-}
-
-static nscolor
-GetScrollbarTrackColorForAuto(ComputedStyle* aStyle)
-{
-  return NS_RGB(240, 240, 240);
-}
-
-nscolor
-nsNativeThemeWin::GetWidgetAutoColor(ComputedStyle* aStyle, WidgetType aWidgetType)
-{
-  switch (aWidgetType) {
-    case StyleAppearance::Scrollbar:
-    case StyleAppearance::ScrollbarSmall:
-    case StyleAppearance::ScrollbarVertical:
-    case StyleAppearance::ScrollbarHorizontal:
-    case StyleAppearance::ScrollbarbuttonUp:
-    case StyleAppearance::ScrollbarbuttonDown:
-    case StyleAppearance::ScrollbarbuttonLeft:
-    case StyleAppearance::ScrollbarbuttonRight:
-      return GetScrollbarTrackColorForAuto(aStyle);
-
-    case StyleAppearance::ScrollbarthumbVertical:
-    case StyleAppearance::ScrollbarthumbHorizontal:
-      return GetScrollbarFaceColorForAuto(aStyle);
-
-    default:
-      return nsITheme::GetWidgetAutoColor(aStyle, aWidgetType);
-  }
 }
 
 static void
@@ -4350,7 +4331,7 @@ nsNativeThemeWin::DrawCustomScrollbarPart(gfxContext* aContext,
 
   const nsStyleUI* ui = aStyle->StyleUI();
   nscolor trackColor = ui->mScrollbarTrackColor.IsAuto()
-    ? GetScrollbarTrackColorForAuto(aStyle)
+    ? NS_RGB(240, 240, 240)
     : ui->mScrollbarTrackColor.CalcColor(aStyle);
   switch (aWidgetType) {
     case StyleAppearance::ScrollbarHorizontal:
@@ -4387,7 +4368,7 @@ nsNativeThemeWin::DrawCustomScrollbarPart(gfxContext* aContext,
     case StyleAppearance::ScrollbarthumbVertical:
     case StyleAppearance::ScrollbarthumbHorizontal: {
       nscolor faceColor = ui->mScrollbarFaceColor.IsAuto()
-        ? GetScrollbarFaceColorForAuto(aStyle)
+        ? NS_RGB(205, 205, 205)
         : ui->mScrollbarFaceColor.CalcColor(aStyle);
       faceColor = AdjustScrollbarFaceColor(faceColor, eventStates);
       ctx->SetColor(Color::FromABGR(faceColor));

@@ -3095,7 +3095,8 @@ nsGlobalWindowInner::GetOwnPropertyNames(JSContext* aCx, JS::AutoIdVector& aName
 nsGlobalWindowInner::IsPrivilegedChromeWindow(JSContext* aCx, JSObject* aObj)
 {
   // For now, have to deal with XPConnect objects here.
-  return xpc::WindowOrNull(aObj)->IsChromeWindow() &&
+  nsGlobalWindowInner* win = xpc::WindowOrNull(aObj);
+  return win && win->IsChromeWindow() &&
          nsContentUtils::ObjectPrincipal(aObj) == nsContentUtils::GetSystemPrincipal();
 }
 
@@ -3941,13 +3942,13 @@ nsGlobalWindowInner::ScrollBy(double aXScrollDif, double aYScrollDif)
   nsIScrollableFrame *sf = GetScrollFrame();
 
   if (sf) {
-    // Convert -Inf, Inf, and NaN to 0; otherwise, convert by C-style cast.
-    auto scrollDif = CSSIntPoint::Truncate(mozilla::ToZeroIfNonfinite(aXScrollDif),
-                                           mozilla::ToZeroIfNonfinite(aYScrollDif));
     // It seems like it would make more sense for ScrollBy to use
     // SMOOTH mode, but tests seem to depend on the synchronous behaviour.
     // Perhaps Web content does too.
-    ScrollTo(sf->GetScrollPositionCSSPixels() + scrollDif, ScrollOptions());
+    ScrollToOptions options;
+    options.mLeft.Construct(aXScrollDif);
+    options.mTop.Construct(aYScrollDif);
+    ScrollBy(options);
   }
 }
 
@@ -3958,15 +3959,25 @@ nsGlobalWindowInner::ScrollBy(const ScrollToOptions& aOptions)
   nsIScrollableFrame *sf = GetScrollFrame();
 
   if (sf) {
-    CSSIntPoint scrollPos = sf->GetScrollPositionCSSPixels();
+    CSSIntPoint scrollDelta;
     if (aOptions.mLeft.WasPassed()) {
-      scrollPos.x += mozilla::ToZeroIfNonfinite(aOptions.mLeft.Value());
+      scrollDelta.x = mozilla::ToZeroIfNonfinite(aOptions.mLeft.Value());
     }
     if (aOptions.mTop.WasPassed()) {
-      scrollPos.y += mozilla::ToZeroIfNonfinite(aOptions.mTop.Value());
+      scrollDelta.y = mozilla::ToZeroIfNonfinite(aOptions.mTop.Value());
     }
 
-    ScrollTo(scrollPos, aOptions);
+    nsIScrollableFrame::ScrollMode scrollMode = nsIScrollableFrame::INSTANT;
+    if (aOptions.mBehavior == ScrollBehavior::Smooth) {
+      scrollMode = nsIScrollableFrame::SMOOTH_MSD;
+    } else if (aOptions.mBehavior == ScrollBehavior::Auto) {
+      ScrollStyles styles = sf->GetScrollStyles();
+      if (styles.mScrollBehavior == NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
+        scrollMode = nsIScrollableFrame::SMOOTH_MSD;
+      }
+    }
+
+    sf->ScrollByCSSPixels(scrollDelta, scrollMode, nsGkAtoms::relative);
   }
 }
 
@@ -7715,11 +7726,6 @@ nsGlobalWindowInner::CreateImageBitmap(JSContext* aCx,
                                        const ImageBitmapSource& aImage,
                                        ErrorResult& aRv)
 {
-  if (aImage.IsArrayBuffer() || aImage.IsArrayBufferView()) {
-    aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
-    return nullptr;
-  }
-
   return ImageBitmap::Create(this, aImage, Nothing(), aRv);
 }
 
@@ -7729,32 +7735,7 @@ nsGlobalWindowInner::CreateImageBitmap(JSContext* aCx,
                                        int32_t aSx, int32_t aSy, int32_t aSw, int32_t aSh,
                                        ErrorResult& aRv)
 {
-  if (aImage.IsArrayBuffer() || aImage.IsArrayBufferView()) {
-    aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
-    return nullptr;
-  }
-
   return ImageBitmap::Create(this, aImage, Some(gfx::IntRect(aSx, aSy, aSw, aSh)), aRv);
-}
-
-already_AddRefed<mozilla::dom::Promise>
-nsGlobalWindowInner::CreateImageBitmap(JSContext* aCx,
-                                       const ImageBitmapSource& aImage,
-                                       int32_t aOffset, int32_t aLength,
-                                       ImageBitmapFormat aFormat,
-                                       const Sequence<ChannelPixelLayout>& aLayout,
-                                       ErrorResult& aRv)
-{
-  if (!StaticPrefs::canvas_imagebitmap_extensions_enabled()) {
-    aRv.Throw(NS_ERROR_TYPE_ERR);
-    return nullptr;
-  }
-  if (aImage.IsArrayBuffer() || aImage.IsArrayBufferView()) {
-    return ImageBitmap::Create(this, aImage, aOffset, aLength, aFormat, aLayout,
-                               aRv);
-  }
-  aRv.Throw(NS_ERROR_TYPE_ERR);
-  return nullptr;
 }
 
 mozilla::dom::TabGroup*

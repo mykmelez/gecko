@@ -219,17 +219,10 @@ nsLineLayout::BeginLineReflow(nscoord aICoord, nscoord aBCoord,
   // property amounts to anything.
 
   if (0 == mLineNumber && !HasPrevInFlow(mBlockReflowInput->mFrame)) {
-    const nsStyleCoord &textIndent = mStyleText->mTextIndent;
-    nscoord pctBasis = 0;
-    if (textIndent.HasPercent()) {
-      pctBasis =
-        mBlockReflowInput->GetContainingBlockContentISize(aWritingMode);
-    }
-    nscoord indent = textIndent.ComputeCoordPercentCalc(pctBasis);
-
-    mTextIndent = indent;
-
-    psd->mICoord += indent;
+    nscoord pctBasis = mBlockReflowInput->ComputedISize();
+    mTextIndent = nsLayoutUtils::ResolveToLength<false>(mStyleText->mTextIndent,
+                                                        pctBasis);
+    psd->mICoord += mTextIndent;
   }
 
   PerFrameData* pfd = NewPerFrameData(mBlockReflowInput->mFrame);
@@ -3218,9 +3211,7 @@ nsLineLayout::TextAlignLine(nsLineBox* aLine,
   //
   nscoord dx = 0;
   uint8_t textAlign = mStyleText->mTextAlign;
-  bool textAlignTrue = mStyleText->mTextAlignTrue;
   if (aIsLastLine) {
-    textAlignTrue = mStyleText->mTextAlignLastTrue;
     if (mStyleText->mTextAlignLast == NS_STYLE_TEXT_ALIGN_AUTO) {
       if (textAlign == NS_STYLE_TEXT_ALIGN_JUSTIFY) {
         textAlign = NS_STYLE_TEXT_ALIGN_START;
@@ -3231,7 +3222,7 @@ nsLineLayout::TextAlignLine(nsLineBox* aLine,
   }
 
   bool isSVG = nsSVGUtils::IsInSVGTextSubtree(mBlockReflowInput->mFrame);
-  bool doTextAlign = remainingISize > 0 || textAlignTrue;
+  bool doTextAlign = remainingISize > 0;
 
   int32_t additionalGaps = 0;
   if (!isSVG && (mHasRuby || (doTextAlign &&

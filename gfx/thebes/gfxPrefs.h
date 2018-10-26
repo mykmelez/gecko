@@ -365,6 +365,7 @@ private:
   DECL_GFX_PREF(Live, "apz.y_stationary_size_multiplier",      APZYStationarySizeMultiplier, float, 3.5f);
   DECL_GFX_PREF(Live, "apz.zoom_animation_duration_ms",        APZZoomAnimationDuration, int32_t, 250);
   DECL_GFX_PREF(Live, "apz.scale_repaint_delay_ms",            APZScaleRepaintDelay, int32_t, 500);
+  DECL_GFX_PREF(Live, "apz.relative-update.enabled",           APZRelativeUpdate, bool, false);
 
   DECL_GFX_PREF(Live, "browser.ui.scroll-toolbar-threshold",   ToolbarScrollThreshold, int32_t, 10);
   DECL_GFX_PREF(Live, "browser.ui.zoom.force-user-scalable",   ForceUserScalable, bool, false);
@@ -740,6 +741,8 @@ private:
   DECL_GFX_PREF(Live, "nglayout.debug.widget_update_flashing", WidgetUpdateFlashing, bool, false);
 
   DECL_GFX_PREF(Live, "print.font-variations-as-paths",        PrintFontVariationsAsPaths, bool, true);
+
+  DECL_GFX_PREF(Live, "sanity-test.running",                   SanityTestRunning, bool, false);
 
   DECL_GFX_PREF(Once, "slider.snapMultiplier",                 SliderSnapMultiplier, int32_t, 0);
 

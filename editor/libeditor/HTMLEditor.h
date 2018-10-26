@@ -336,16 +336,15 @@ public:
    */
   nsresult AddZIndex(int32_t aChange);
 
-  nsresult SetInlineProperty(nsAtom& aProperty,
-                             nsAtom* aAttribute,
-                             const nsAString& aValue)
-  {
-    nsresult rv = SetInlinePropertyInternal(aProperty, aAttribute, aValue);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-    return NS_OK;
-  }
+  /**
+   * SetInlinePropertyAsAction() sets a property which changes inline style of
+   * text.  E.g., bold, italic, super and sub.
+   * This automatically removes exclusive style, however, treats all changes
+   * as a transaction.
+   */
+  nsresult SetInlinePropertyAsAction(nsAtom& aProperty,
+                                     nsAtom* aAttribute,
+                                     const nsAString& aValue);
 
   nsresult GetInlineProperty(nsAtom* aProperty,
                              nsAtom* aAttribute,
@@ -982,6 +981,13 @@ protected: // May be called by friends.
   nsresult SetPositionToAbsolute(Element& aElement);
   nsresult SetPositionToStatic(Element& aElement);
 
+  /**
+   * OnModifyDocument() is called when the editor is changed.  This should
+   * be called only by HTMLEditRules::DocumentModifiedWorker() to call
+   * HTMLEditRules::OnModifyDocument().
+   */
+  MOZ_CAN_RUN_SCRIPT void OnModifyDocument();
+
 protected: // Called by helper classes.
   virtual void
   OnStartToHandleTopLevelEditSubAction(
@@ -1518,6 +1524,26 @@ protected: // Shouldn't be used by friend classes
    */
   nsresult PasteInternal(int32_t aClipboardType,
                          bool aDispatchPasteEvent);
+
+  /**
+   * InsertAsCitedQuotationInternal() inserts a <blockquote> element whose
+   * cite attribute is aCitation and whose content is aQuotedText.
+   * Note that this shouldn't be called when IsPlaintextEditor() is true.
+   *
+   * @param aQuotedText     HTML source if aInsertHTML is true.  Otherwise,
+   *                        plain text.  This is inserted into new <blockquote>
+   *                        element.
+   * @param aCitation       cite attribute value of new <blockquote> element.
+   * @param aInsertHTML     true if aQuotedText should be treated as HTML
+   *                        source.
+   *                        false if aQuotedText should be treated as plain
+   *                        text.
+   * @param aNodeInserted   [OUT] The new <blockquote> element.
+   */
+  nsresult InsertAsCitedQuotationInternal(const nsAString& aQuotedText,
+                                          const nsAString& aCitation,
+                                          bool aInsertHTML,
+                                          nsINode** aNodeInserted);
 
   /**
    * InsertNodeIntoProperAncestorWithTransaction() attempts to insert aNode

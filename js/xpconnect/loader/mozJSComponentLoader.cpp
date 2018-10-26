@@ -200,16 +200,6 @@ mozJSComponentLoader::mozJSComponentLoader()
     MOZ_ASSERT(!sSelf, "mozJSComponentLoader should be a singleton");
 }
 
-// static
-already_AddRefed<mozJSComponentLoader>
-mozJSComponentLoader::GetOrCreate()
-{
-    if (!sSelf) {
-        sSelf = new mozJSComponentLoader();
-    }
-    return do_AddRef(sSelf);
-}
-
 #define ENSURE_DEP(name) { nsresult rv = Ensure##name(); NS_ENSURE_SUCCESS(rv, rv); }
 #define ENSURE_DEPS(...) MOZ_FOR_EACH(ENSURE_DEP, (), (__VA_ARGS__));
 #define BEGIN_ENSURE(self, ...) { \
@@ -311,7 +301,7 @@ mozJSComponentLoader::~mozJSComponentLoader()
     sSelf = nullptr;
 }
 
-mozJSComponentLoader*
+StaticRefPtr<mozJSComponentLoader>
 mozJSComponentLoader::sSelf;
 
 NS_IMPL_ISUPPORTS(mozJSComponentLoader,
@@ -538,6 +528,20 @@ mozJSComponentLoader::FindTargetObject(JSContext* aCx,
         !IsLoaderGlobal(JS::GetNonCCWObjectGlobal(aTargetObject))) {
         aTargetObject.set(CurrentGlobalOrNull(aCx));
     }
+}
+
+void
+mozJSComponentLoader::InitStatics()
+{
+    MOZ_ASSERT(!sSelf);
+    sSelf = new mozJSComponentLoader();
+}
+
+void
+mozJSComponentLoader::Shutdown()
+{
+    MOZ_ASSERT(sSelf);
+    sSelf = nullptr;
 }
 
 // This requires that the keys be strings and the values be pointers.
@@ -1063,30 +1067,20 @@ mozJSComponentLoader::IsModuleLoaded(const nsACString& aLocation,
 }
 
 void
-mozJSComponentLoader::LoadedModules(uint32_t* length,
-                                    char*** aModules)
+mozJSComponentLoader::GetLoadedModules(nsTArray<nsCString>& aLoadedModules)
 {
-    char** modules = new char*[mImports.Count()];
-    *length = mImports.Count();
-    *aModules = modules;
-
+    aLoadedModules.SetCapacity(mImports.Count());
     for (auto iter = mImports.Iter(); !iter.Done(); iter.Next()) {
-        *modules = NS_xstrdup(iter.Data()->location);
-        modules++;
+        aLoadedModules.AppendElement(iter.Data()->location);
     }
 }
 
 void
-mozJSComponentLoader::LoadedComponents(uint32_t* length,
-                                       char*** aComponents)
+mozJSComponentLoader::GetLoadedComponents(nsTArray<nsCString>& aLoadedComponents)
 {
-    char** comp = new char*[mModules.Count()];
-    *length = mModules.Count();
-    *aComponents = comp;
-
+    aLoadedComponents.SetCapacity(mModules.Count());
     for (auto iter = mModules.Iter(); !iter.Done(); iter.Next()) {
-        *comp = NS_xstrdup(iter.Data()->location);
-        comp++;
+        aLoadedComponents.AppendElement(iter.Data()->location);
     }
 }
 

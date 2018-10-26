@@ -4318,9 +4318,6 @@ protected:
 
   // These member variables cache information about the viewport so we don't
   // have to recalculate it each time.
-  bool mValidWidth: 1;
-  bool mValidHeight: 1;
-  bool mAutoSize: 1;
   bool mAllowZoom: 1;
   bool mValidScaleFloat: 1;
   bool mValidMaxScale: 1;
@@ -4771,6 +4768,9 @@ protected:
   // document lightweight theme for use with :-moz-lwtheme, :-moz-lwtheme-brighttext
   // and :-moz-lwtheme-darktext
   DocumentTheme                         mDocLWTheme;
+
+  // Pres shell resolution saved before entering fullscreen mode.
+  float mSavedResolution;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIDocument, NS_IDOCUMENT_IID)
