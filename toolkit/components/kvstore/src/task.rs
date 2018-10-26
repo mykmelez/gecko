@@ -6,16 +6,20 @@
 
 extern crate xpcom;
 
+use error::KeyValueError;
+use KeyValueDatabase;
 use nserror::{nsresult, NS_ERROR_FAILURE, NS_OK};
 use nsstring::{nsACString, nsCString};
-use std::{cell::Cell, fmt::Write, ptr, result};
+use rkv::{Manager, Rkv};
+use std::{cell::Cell, fmt::Write, path::Path, ptr, result, str};
 use xpcom::{
     getter_addrefs,
-    interfaces::{nsIKeyValueDatabase, nsIRunnable, nsIThread},
+    interfaces::{nsIKeyValueDatabase, nsIKeyValueCallback, nsIRunnable, nsIThread},
     RefPtr,
 };
 
-pub type Result<T> = result::Result<T, nsresult>;
+pub type NsResult<T> = result::Result<T, nsresult>;
+pub type KvResult<T> = result::Result<T, KeyValueError>;
 
 extern "C" {
     fn NS_GetCurrentThreadEventTarget(result: *mut *const nsIThread) -> nsresult;
@@ -27,11 +31,11 @@ extern "C" {
 }
 
 /// Returns a handle to the current thread.
-pub fn get_current_thread() -> Result<RefPtr<nsIThread>> {
+pub fn get_current_thread() -> NsResult<RefPtr<nsIThread>> {
     getter_addrefs(|p| unsafe { NS_GetCurrentThreadEventTarget(p) })
 }
 
-pub fn create_thread(name: &str) -> Result<RefPtr<nsIThread>> {
+pub fn create_thread(name: &str) -> NsResult<RefPtr<nsIThread>> {
     let name: nsCString = name.into();
     getter_addrefs(|p| unsafe { NS_NewNamedThreadWithDefaultStackSize(&*name, p, ptr::null()) })
 }
@@ -39,8 +43,54 @@ pub fn create_thread(name: &str) -> Result<RefPtr<nsIThread>> {
 /// A task is executed asynchronously on a target thread, and passes its
 /// result back to the original thread.
 pub trait Task {
-    fn run(&self) -> Result<RefPtr<nsIKeyValueDatabase>>;
-    fn done(&self, result: Result<RefPtr<nsIKeyValueDatabase>>) -> nsresult;
+    fn run(&self) -> NsResult<RefPtr<nsIKeyValueDatabase>>;
+    fn done(&self, result: NsResult<RefPtr<nsIKeyValueDatabase>>) -> nsresult;
+}
+
+pub struct GetOrCreateTask {
+    callback: RefPtr<nsIKeyValueCallback>,
+    thread: RefPtr<nsIThread>,
+    path: nsCString,
+    name: nsCString,
+}
+
+impl GetOrCreateTask {
+    pub fn new(callback: RefPtr<nsIKeyValueCallback>, thread: RefPtr<nsIThread>, path: &nsACString, name: &nsACString) -> GetOrCreateTask {
+        GetOrCreateTask { callback, thread, path: nsCString::from(path), name: nsCString::from(name) }
+    }
+
+    fn run_result(&self) -> KvResult<RefPtr<nsIKeyValueDatabase>> {
+        let mut writer = Manager::singleton().write()?;
+        let rkv = writer.get_or_create(Path::new(str::from_utf8(&self.path)?), Rkv::new)?;
+        let store = if self.name.is_empty() {
+            rkv.write()?.open_or_create_default()
+        } else {
+            rkv.write()?.open_or_create(Some(str::from_utf8(&self.name)?))
+        }?;
+        let key_value_db = KeyValueDatabase::new(rkv, store, Some(self.thread.clone()));
+
+        key_value_db
+            .query_interface::<nsIKeyValueDatabase>()
+            .ok_or(KeyValueError::NoInterface("nsIKeyValueDatabase").into())
+    }
+}
+
+impl Task for GetOrCreateTask {
+    fn run(&self) -> NsResult<RefPtr<nsIKeyValueDatabase>> {
+        match self.run_result() {
+            Ok(result) => Ok(result),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    fn done(&self, result: NsResult<RefPtr<nsIKeyValueDatabase>>) -> nsresult {
+        error!("GetOrCreateTask.done");
+        match result {
+            Ok(value) => unsafe { self.callback.HandleResult(value.coerce()) },
+            Err(err) => unsafe { self.callback.HandleError(err.0) },
+        };
+        NS_OK
+    }
 }
 
 #[derive(xpcom)]
@@ -55,7 +105,7 @@ pub struct InitTaskRunnable {
     /// original thread; the result is mutated on the target thread and
     /// accessed on the original thread.
     task: Box<Task>,
-    result: Cell<Option<Result<RefPtr<nsIKeyValueDatabase>>>>,
+    result: Cell<Option<NsResult<RefPtr<nsIKeyValueDatabase>>>>,
 }
 
 impl TaskRunnable {
@@ -63,7 +113,7 @@ impl TaskRunnable {
         name: &'static str,
         source: RefPtr<nsIThread>,
         task: Box<Task>,
-        result: Cell<Option<Result<RefPtr<nsIKeyValueDatabase>>>>,
+        result: Cell<Option<NsResult<RefPtr<nsIKeyValueDatabase>>>>,
     ) -> RefPtr<TaskRunnable> {
         TaskRunnable::allocate(InitTaskRunnable {
             name,

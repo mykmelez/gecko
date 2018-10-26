@@ -37,7 +37,7 @@ use std::{
     vec::IntoIter,
 };
 use storage_variant::{IntoVariant, Variant};
-use task::{create_thread, get_current_thread, Task, TaskRunnable};
+use task::{create_thread, GetOrCreateTask, get_current_thread, TaskRunnable};
 use xpcom::{
     interfaces::{
         nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabase,
@@ -108,52 +108,6 @@ pub extern "C" fn KeyValueServiceConstructor(
 
     let service: RefPtr<KeyValueService> = KeyValueService::new();
     unsafe { service.QueryInterface(iid, result) }
-}
-
-pub struct GetOrCreateTask {
-    callback: RefPtr<nsIKeyValueCallback>,
-    thread: RefPtr<nsIThread>,
-    path: nsCString,
-    name: nsCString,
-}
-
-impl GetOrCreateTask {
-    fn new(callback: RefPtr<nsIKeyValueCallback>, thread: RefPtr<nsIThread>, path: &nsACString, name: &nsACString) -> GetOrCreateTask {
-        GetOrCreateTask { callback, thread, path: nsCString::from(path), name: nsCString::from(name) }
-    }
-
-    fn run_result(&self) -> Result<RefPtr<nsIKeyValueDatabase>, KeyValueError> {
-        let mut writer = Manager::singleton().write()?;
-        let rkv = writer.get_or_create(Path::new(str::from_utf8(&self.path)?), Rkv::new)?;
-        let store = if self.name.is_empty() {
-            rkv.write()?.open_or_create_default()
-        } else {
-            rkv.write()?.open_or_create(Some(str::from_utf8(&self.name)?))
-        }?;
-        let key_value_db = KeyValueDatabase::new(rkv, store, Some(self.thread.clone()));
-
-        key_value_db
-            .query_interface::<nsIKeyValueDatabase>()
-            .ok_or(KeyValueError::NoInterface("nsIKeyValueDatabase").into())
-    }
-}
-
-impl Task for GetOrCreateTask {
-    fn run(&self) -> Result<RefPtr<nsIKeyValueDatabase>, nsresult> {
-        match self.run_result() {
-            Ok(result) => Ok(result),
-            Err(err) => Err(err.into()),
-        }
-    }
-
-    fn done(&self, result: Result<RefPtr<nsIKeyValueDatabase>, nsresult>) -> nsresult {
-        error!("GetOrCreateTask.done");
-        match result {
-            Ok(value) => unsafe { self.callback.HandleResult(value.coerce()) },
-            Err(err) => unsafe { self.callback.HandleError(err.0) },
-        };
-        NS_OK
-    }
 }
 
 // For each public XPCOM method in the nsIKeyValue* interfaces, we implement
