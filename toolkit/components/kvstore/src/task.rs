@@ -11,7 +11,7 @@ use nsstring::{nsACString, nsCString};
 use std::{cell::Cell, fmt::Write, ptr, result};
 use xpcom::{
     getter_addrefs,
-    interfaces::{nsIRunnable, nsIThread},
+    interfaces::{nsIKeyValueDatabase, nsIRunnable, nsIThread},
     RefPtr,
 };
 
@@ -39,8 +39,8 @@ pub fn create_thread() -> Result<RefPtr<nsIThread>> {
 /// A task is executed asynchronously on a target thread, and passes its
 /// result back to the original thread.
 pub trait Task {
-    fn run(&self) -> Result<()>;
-    fn done(&self, result: Result<()>) -> nsresult;
+    fn run(&self) -> Result<RefPtr<nsIKeyValueDatabase>>;
+    fn done(&self, result: Result<RefPtr<nsIKeyValueDatabase>>) -> nsresult;
 }
 
 #[derive(xpcom)]
@@ -55,7 +55,7 @@ pub struct InitTaskRunnable {
     /// original thread; the result is mutated on the target thread and
     /// accessed on the original thread.
     task: Box<Task>,
-    result: Cell<Option<Result<()>>>,
+    result: Cell<Option<Result<RefPtr<nsIKeyValueDatabase>>>>,
 }
 
 impl TaskRunnable {
@@ -63,7 +63,7 @@ impl TaskRunnable {
         name: &'static str,
         source: RefPtr<nsIThread>,
         task: Box<Task>,
-        result: Cell<Option<Result<()>>>,
+        result: Cell<Option<Result<RefPtr<nsIKeyValueDatabase>>>>,
     ) -> RefPtr<TaskRunnable> {
         TaskRunnable::allocate(InitTaskRunnable {
             name,

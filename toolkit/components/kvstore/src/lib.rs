@@ -120,15 +120,32 @@ impl GetOrCreateTask {
     fn new(callback: RefPtr<nsIKeyValueCallback>, path: &nsACString, name: &nsACString) -> GetOrCreateTask {
         GetOrCreateTask { callback, path: nsCString::from(path), name: nsCString::from(name) }
     }
+
+    fn run_result(&self) -> Result<RefPtr<nsIKeyValueDatabase>, KeyValueError> {
+        let mut writer = Manager::singleton().write()?;
+        let rkv = writer.get_or_create(Path::new(str::from_utf8(&self.path)?), Rkv::new)?;
+        let store = if self.name.is_empty() {
+            rkv.write()?.open_or_create_default()
+        } else {
+            rkv.write()?.open_or_create(Some(str::from_utf8(&self.name)?))
+        }?;
+        let key_value_db = KeyValueDatabase::new(rkv, store);
+
+        key_value_db
+            .query_interface::<nsIKeyValueDatabase>()
+            .ok_or(KeyValueError::NoInterface("nsIKeyValueDatabase").into())
+    }
 }
 
 impl Task for GetOrCreateTask {
-    fn run(&self) -> Result<(), nsresult> {
-        error!("GetOrCreateTask.run");
-        Ok(())
+    fn run(&self) -> Result<RefPtr<nsIKeyValueDatabase>, nsresult> {
+        match self.run_result() {
+            Ok(result) => Ok(result),
+            Err(err) => Err(err.into()),
+        }
     }
 
-    fn done(&self, result: Result<(), nsresult>) -> nsresult {
+    fn done(&self, result: Result<RefPtr<nsIKeyValueDatabase>, nsresult>) -> nsresult {
         error!("GetOrCreateTask.done");
         match result {
             Ok(_) => unsafe { self.callback.HandleResult(NS_OK.0) },
@@ -193,9 +210,10 @@ impl KeyValueService {
         let name = str::from_utf8(name)?;
         let mut writer = Manager::singleton().write()?;
         let rkv = writer.get_or_create(Path::new(path), Rkv::new)?;
-        let store = match name {
-            "" => rkv.write()?.open_or_create_default(),
-            _ => rkv.write()?.open_or_create(Some(name)),
+        let store = if name.is_empty() {
+            rkv.write()?.open_or_create_default()
+        } else {
+            rkv.write()?.open_or_create(Some(name))
         }?;
         let key_value_db = KeyValueDatabase::new(rkv, store);
 
