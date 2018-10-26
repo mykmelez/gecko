@@ -23,8 +23,8 @@ mod task;
 use error::KeyValueError;
 use libc::{c_double, c_void, int32_t, int64_t, uint16_t};
 use nserror::{
-    nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_INVALID_ARG, NS_ERROR_NOT_IMPLEMENTED,
-    NS_ERROR_NO_AGGREGATION, NS_ERROR_NO_INTERFACE, NS_ERROR_UNEXPECTED, NS_OK,
+    nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_AGGREGATION,
+    NS_OK,
 };
 use nsstring::{nsACString, nsCString, nsString};
 use ownedvalue::{value_to_owned, OwnedValue};
@@ -37,7 +37,7 @@ use std::{
     vec::IntoIter,
 };
 use storage_variant::{IntoVariant, Variant};
-use task::{get_current_thread, InitTaskRunnable, Task, TaskRunnable};
+use task::{get_current_thread, Task, TaskRunnable};
 use xpcom::{
     interfaces::{
         nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabase,
@@ -114,11 +114,18 @@ pub struct GetOrCreateTask {
     callback: RefPtr<nsIKeyValueCallback>,
 }
 
+impl GetOrCreateTask {
+    fn new(callback: RefPtr<nsIKeyValueCallback>) -> GetOrCreateTask {
+        GetOrCreateTask { callback }
+    }
+}
+
 impl Task for GetOrCreateTask {
     fn run(&self) -> Result<(), nsresult> {
         error!("GetOrCreateTask.run");
         Ok(())
     }
+
     fn done(&self, result: Result<(), nsresult>) -> nsresult {
         error!("GetOrCreateTask.done");
         match result {
@@ -203,9 +210,7 @@ impl KeyValueService {
     ) -> Result<(), KeyValueError> {
         let source = get_current_thread()?;
         let target = get_current_thread()?;
-        let task = Box::new(GetOrCreateTask {
-            callback: RefPtr::new(callback),
-        });
+        let task = Box::new(GetOrCreateTask::new(RefPtr::new(callback)));
 
         let runnable = TaskRunnable::new(
             "KeyValueDatabase::GetOrCreateAsync",
@@ -213,6 +218,7 @@ impl KeyValueService {
             task,
             Cell::default(),
         );
+
         let rv = unsafe {
             target.DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
         };
