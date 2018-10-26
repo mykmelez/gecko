@@ -6,13 +6,12 @@
 
 extern crate xpcom;
 
-use libc::uint32_t;
 use nserror::{nsresult, NS_ERROR_FAILURE, NS_OK};
 use nsstring::{nsACString, nsCString};
 use std::{cell::Cell, fmt::Write, ptr, result};
 use xpcom::{
     getter_addrefs,
-    interfaces::{nsIRunnable, nsIThread, nsIThreadManager},
+    interfaces::{nsIRunnable, nsIThread},
     RefPtr,
 };
 

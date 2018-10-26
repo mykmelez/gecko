@@ -399,14 +399,14 @@ add_task(async function enumeration() {
 add_task(async function getOrCreateAsync() {
   const databaseDir = await makeDatabaseDir("getOrCreateAsync");
   let result = await new Promise((resolve, reject) => {
-    gKeyValueService.getOrCreateAsync(databaseDir, {
+    gKeyValueService.getOrCreateAsync({
       handleResult(result) {
         resolve(result);
       },
       handleError(error) {
         reject(error);
       },
-    });
+    }, databaseDir);
   });
 
   Assert.strictEqual(result, Cr.NS_OK);

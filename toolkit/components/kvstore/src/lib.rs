@@ -110,17 +110,19 @@ pub extern "C" fn KeyValueServiceConstructor(
     unsafe { service.QueryInterface(iid, result) }
 }
 
-pub struct GetOrCreateTask {
+pub struct GetOrCreateTask<'a> {
     callback: RefPtr<nsIKeyValueCallback>,
+    path: &'a nsACString,
+    name: &'a nsACString,
 }
 
-impl GetOrCreateTask {
-    fn new(callback: RefPtr<nsIKeyValueCallback>) -> GetOrCreateTask {
-        GetOrCreateTask { callback }
+impl<'a> GetOrCreateTask<'a> {
+    fn new(callback: RefPtr<nsIKeyValueCallback>, path: &'a nsACString, name: &'a nsACString) -> GetOrCreateTask<'a> {
+        GetOrCreateTask { callback, path, name }
     }
 }
 
-impl Task for GetOrCreateTask {
+impl<'a> Task for GetOrCreateTask<'a> {
     fn run(&self) -> Result<(), nsresult> {
         error!("GetOrCreateTask.run");
         Ok(())
@@ -179,7 +181,7 @@ impl KeyValueService {
     xpcom_method!(
         GetOrCreateAsync,
         get_or_create_async,
-        { path: *const nsACString, callback: *const nsIKeyValueCallback, name: *const nsACString }
+        { callback: *const nsIKeyValueCallback, path: *const nsACString, name: *const nsACString }
     );
 
     fn get_or_create(
@@ -204,13 +206,13 @@ impl KeyValueService {
 
     fn get_or_create_async(
         &self,
-        _path: &nsACString,
         callback: &nsIKeyValueCallback,
-        _name: &nsACString,
+        path: &'static nsACString,
+        name: &'static nsACString,
     ) -> Result<(), KeyValueError> {
         let source = get_current_thread()?;
         let target = create_thread()?;
-        let task = Box::new(GetOrCreateTask::new(RefPtr::new(callback)));
+        let task = Box::new(GetOrCreateTask::new(RefPtr::new(callback), path, name));
 
         let runnable = TaskRunnable::new(
             "KeyValueDatabase::GetOrCreateAsync",
