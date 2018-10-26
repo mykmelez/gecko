@@ -110,19 +110,19 @@ pub extern "C" fn KeyValueServiceConstructor(
     unsafe { service.QueryInterface(iid, result) }
 }
 
-pub struct GetOrCreateTask<'a> {
+pub struct GetOrCreateTask {
     callback: RefPtr<nsIKeyValueCallback>,
-    path: &'a nsACString,
-    name: &'a nsACString,
+    path: nsCString,
+    name: nsCString,
 }
 
-impl<'a> GetOrCreateTask<'a> {
-    fn new(callback: RefPtr<nsIKeyValueCallback>, path: &'a nsACString, name: &'a nsACString) -> GetOrCreateTask<'a> {
-        GetOrCreateTask { callback, path, name }
+impl GetOrCreateTask {
+    fn new(callback: RefPtr<nsIKeyValueCallback>, path: &nsACString, name: &nsACString) -> GetOrCreateTask {
+        GetOrCreateTask { callback, path: nsCString::from(path), name: nsCString::from(name) }
     }
 }
 
-impl<'a> Task for GetOrCreateTask<'a> {
+impl Task for GetOrCreateTask {
     fn run(&self) -> Result<(), nsresult> {
         error!("GetOrCreateTask.run");
         Ok(())
@@ -207,8 +207,8 @@ impl KeyValueService {
     fn get_or_create_async(
         &self,
         callback: &nsIKeyValueCallback,
-        path: &'static nsACString,
-        name: &'static nsACString,
+        path: &nsACString,
+        name: &nsACString,
     ) -> Result<(), KeyValueError> {
         let source = get_current_thread()?;
         let target = create_thread()?;
