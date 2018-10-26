@@ -174,6 +174,12 @@ impl KeyValueService {
         *mut *const nsIKeyValueDatabase
     );
 
+    xpcom_method!(
+        GetOrCreateAsync,
+        get_or_create_async,
+        { path: *const nsACString, callback: *const nsIKeyValueCallback, name: *const nsACString }
+    );
+
     fn get_or_create(
         &self,
         path: &nsACString,
@@ -194,45 +200,21 @@ impl KeyValueService {
             .ok_or(KeyValueError::NoInterface("nsIKeyValueDatabase"))
     }
 
-    fn GetOrCreateAsync(
-        &self,
-        path: *const nsACString,
-        callback: *const nsIKeyValueCallback,
-        name: *const nsACString,
-
-    ) -> nsresult {
-        match self.get_or_create_async(path, callback, name) {
-            Ok(_) => {
-                NS_OK
-            }
-            Err(error) => {
-                error!("{}", error);
-                error.into()
-            }
-        }
-    }
-
     fn get_or_create_async(
         &self,
-        _path: *const nsACString,
-        callback: *const nsIKeyValueCallback,
-        _name: *const nsACString,
-
+        _path: &nsACString,
+        callback: &nsIKeyValueCallback,
+        _name: &nsACString,
     ) -> Result<(), KeyValueError> {
         let source = get_current_thread()?;
         let target = get_current_thread()?;
-        let callback = match unsafe { RefPtr::from_raw(callback) } {
-            Some(callback) => callback,
-            None => return Err(KeyValueError::Nsresult(NS_ERROR_INVALID_ARG.error_name(), NS_ERROR_INVALID_ARG)),
-        };
         let task = Box::new(GetOrCreateTask {
-            callback,
+            callback: RefPtr::new(callback),
         });
 
         let runnable = TaskRunnable::new("KeyValueDatabase::GetOrCreateAsync", source, task, Cell::default());
         let rv = unsafe { target.DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32) };
 
-        // TODO: consider wrapping the nsresult in a KeyValueError type.
         if rv.succeeded() {
             Ok(())
         } else {
