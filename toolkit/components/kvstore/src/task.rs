@@ -8,17 +8,9 @@ extern crate xpcom;
 
 use std::{cell::Cell, fmt::Write, result};
 
-use nserror::{
-    nsresult, NS_ERROR_FAILURE, NS_OK,
-};
-use nsstring::{nsACString};
-use xpcom::{
-    getter_addrefs,
-    interfaces::{
-        nsIThread,
-    },
-    RefPtr,
-};
+use nserror::{nsresult, NS_ERROR_FAILURE, NS_OK};
+use nsstring::nsACString;
+use xpcom::{getter_addrefs, interfaces::nsIThread, RefPtr};
 
 pub type Result<T> = result::Result<T, nsresult>;
 
@@ -54,7 +46,12 @@ pub struct InitTaskRunnable {
 }
 
 impl TaskRunnable {
-    pub fn new(name: &'static str, source: RefPtr<nsIThread>, task: Box<Task>, result: Cell<Option<Result<()>>>) -> RefPtr<TaskRunnable> {
+    pub fn new(
+        name: &'static str,
+        source: RefPtr<nsIThread>,
+        task: Box<Task>,
+        result: Cell<Option<Result<()>>>,
+    ) -> RefPtr<TaskRunnable> {
         TaskRunnable::allocate(InitTaskRunnable {
             name,
             source,

@@ -23,8 +23,8 @@ mod task;
 use error::KeyValueError;
 use libc::{c_double, c_void, int32_t, int64_t, uint16_t};
 use nserror::{
-    nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_INVALID_ARG, NS_ERROR_NO_AGGREGATION,
-    NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_INTERFACE, NS_ERROR_UNEXPECTED, NS_OK,
+    nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_INVALID_ARG, NS_ERROR_NOT_IMPLEMENTED,
+    NS_ERROR_NO_AGGREGATION, NS_ERROR_NO_INTERFACE, NS_ERROR_UNEXPECTED, NS_OK,
 };
 use nsstring::{nsACString, nsCString, nsString};
 use ownedvalue::{value_to_owned, OwnedValue};
@@ -36,17 +36,12 @@ use std::{
     sync::{Arc, RwLock},
     vec::IntoIter,
 };
-use task::{
-    InitTaskRunnable,
-    Task,
-    TaskRunnable,
-    get_current_thread,
-};
 use storage_variant::{IntoVariant, Variant};
+use task::{get_current_thread, InitTaskRunnable, Task, TaskRunnable};
 use xpcom::{
     interfaces::{
-        nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabase, nsISimpleEnumerator, nsISupports,
-        nsIVariant,
+        nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabase,
+        nsISimpleEnumerator, nsISupports, nsIVariant,
     },
     nsIID, Ensure, RefPtr,
 };
@@ -212,8 +207,15 @@ impl KeyValueService {
             callback: RefPtr::new(callback),
         });
 
-        let runnable = TaskRunnable::new("KeyValueDatabase::GetOrCreateAsync", source, task, Cell::default());
-        let rv = unsafe { target.DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32) };
+        let runnable = TaskRunnable::new(
+            "KeyValueDatabase::GetOrCreateAsync",
+            source,
+            task,
+            Cell::default(),
+        );
+        let rv = unsafe {
+            target.DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+        };
 
         if rv.succeeded() {
             Ok(())
@@ -390,12 +392,7 @@ impl KeyValueDatabase {
             // For forward compatibility, we don't fail here if we can't convert
             // a key to UTF-8.  Instead, we store the Err in the collection
             // and fail lazily in SimpleEnumerator.get_next().
-            .map(|(key, val)| {
-                (
-                    str::from_utf8(&key),
-                    val
-                )
-            })
+            .map(|(key, val)| (str::from_utf8(&key), val))
             .take_while(|(key, _val)| {
                 if to_key.is_empty() {
                     true
@@ -405,17 +402,15 @@ impl KeyValueDatabase {
                         Err(_err) => true,
                     }
                 }
-            })
-            .map(|(key, val)| {
+            }).map(|(key, val)| {
                 (
                     match key {
                         Ok(key) => Ok(key.to_owned()),
                         Err(err) => Err(err.into()),
                     },
-                    value_to_owned(val)
+                    value_to_owned(val),
                 )
-            })
-            .collect();
+            }).collect();
 
         let enumerator = SimpleEnumerator::new(pairs);
 
