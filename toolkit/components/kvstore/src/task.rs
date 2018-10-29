@@ -27,14 +27,14 @@ extern "C" {
     ) -> nsresult;
 }
 
-/// Returns a handle to the current thread.
 pub fn get_current_thread() -> Result<RefPtr<nsIThread>, nsresult> {
     getter_addrefs(|p| unsafe { NS_GetCurrentThreadEventTarget(p) })
 }
 
 pub fn create_thread(name: &str) -> Result<RefPtr<nsIThread>, nsresult> {
-    let name: nsCString = name.into();
-    getter_addrefs(|p| unsafe { NS_NewNamedThreadWithDefaultStackSize(&*name, p, ptr::null()) })
+    getter_addrefs(|p| unsafe {
+        NS_NewNamedThreadWithDefaultStackSize(&*nsCString::from(name), p, ptr::null())
+    })
 }
 
 /// A task is executed asynchronously on a target thread, and passes its
