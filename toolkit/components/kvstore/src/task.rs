@@ -14,7 +14,7 @@ use std::{cell::Cell, fmt::Write, path::Path, ptr, result, str};
 use xpcom::{
     getter_addrefs,
     interfaces::{
-        nsIEventTarget, nsIKeyValueCallback, nsIKeyValueDatabase, nsIRunnable, nsIThread,
+        nsIEventTarget, nsIKeyValueCallback, nsIKeyValueDatabase, nsIRunnable, nsISupports, nsIThread,
     },
     RefPtr,
 };
@@ -45,8 +45,8 @@ pub fn create_thread(name: &str) -> NsResult<RefPtr<nsIThread>> {
 /// A task is executed asynchronously on a target thread, and passes its
 /// result back to the original thread.
 pub trait Task {
-    fn run(&self) -> NsResult<RefPtr<nsIKeyValueDatabase>>;
-    fn done(&self, result: NsResult<RefPtr<nsIKeyValueDatabase>>) -> nsresult;
+    fn run(&self) -> NsResult<RefPtr<nsISupports>>;
+    fn done(&self, result: NsResult<RefPtr<nsISupports>>) -> nsresult;
 }
 
 pub struct GetOrCreateTask {
@@ -71,7 +71,7 @@ impl GetOrCreateTask {
         }
     }
 
-    fn run_result(&self) -> KvResult<RefPtr<nsIKeyValueDatabase>> {
+    fn run_result(&self) -> KvResult<RefPtr<nsISupports>> {
         let mut writer = Manager::singleton().write()?;
         let rkv = writer.get_or_create(Path::new(str::from_utf8(&self.path)?), Rkv::new)?;
         let store = if self.name.is_empty() {
@@ -83,20 +83,20 @@ impl GetOrCreateTask {
         let key_value_db = KeyValueDatabase::new(rkv, store, Some(self.thread.clone()));
 
         key_value_db
-            .query_interface::<nsIKeyValueDatabase>()
+            .query_interface::<nsISupports>()
             .ok_or(KeyValueError::NoInterface("nsIKeyValueDatabase").into())
     }
 }
 
 impl Task for GetOrCreateTask {
-    fn run(&self) -> NsResult<RefPtr<nsIKeyValueDatabase>> {
+    fn run(&self) -> NsResult<RefPtr<nsISupports>> {
         match self.run_result() {
             Ok(result) => Ok(result),
             Err(err) => Err(err.into()),
         }
     }
 
-    fn done(&self, result: NsResult<RefPtr<nsIKeyValueDatabase>>) -> nsresult {
+    fn done(&self, result: NsResult<RefPtr<nsISupports>>) -> nsresult {
         error!("GetOrCreateTask.done");
         match result {
             Ok(value) => unsafe { self.callback.HandleResult(value.coerce()) },
@@ -118,7 +118,7 @@ pub struct InitTaskRunnable {
     /// original thread; the result is mutated on the target thread and
     /// accessed on the original thread.
     task: Box<Task>,
-    result: Cell<Option<NsResult<RefPtr<nsIKeyValueDatabase>>>>,
+    result: Cell<Option<NsResult<RefPtr<nsISupports>>>>,
 }
 
 impl TaskRunnable {
@@ -126,7 +126,7 @@ impl TaskRunnable {
         name: &'static str,
         source: RefPtr<nsIThread>,
         task: Box<Task>,
-        result: Cell<Option<NsResult<RefPtr<nsIKeyValueDatabase>>>>,
+        result: Cell<Option<NsResult<RefPtr<nsISupports>>>>,
     ) -> RefPtr<TaskRunnable> {
         TaskRunnable::allocate(InitTaskRunnable {
             name,
