@@ -84,7 +84,7 @@ impl GetOrCreateTask {
 
         key_value_db
             .query_interface::<nsISupports>()
-            .ok_or(KeyValueError::NoInterface("nsIKeyValueDatabase").into())
+            .ok_or(KeyValueError::NoInterface("nsISupports").into())
     }
 }
 
