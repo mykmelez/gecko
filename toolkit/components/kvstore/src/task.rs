@@ -13,9 +13,7 @@ use rkv::{Manager, Rkv};
 use std::{cell::Cell, path::Path, ptr, str};
 use xpcom::{
     getter_addrefs,
-    interfaces::{
-        nsIEventTarget, nsIKeyValueCallback, nsIRunnable, nsISupports, nsIThread,
-    },
+    interfaces::{nsIEventTarget, nsIKeyValueCallback, nsIRunnable, nsISupports, nsIThread},
     RefPtr,
 };
 use KeyValueDatabase;
