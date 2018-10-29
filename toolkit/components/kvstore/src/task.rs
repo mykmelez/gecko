@@ -145,7 +145,9 @@ impl TaskRunnable {
                 let result = self.task.run();
                 self.result.set(Some(result));
                 let target = getter_addrefs(|p| unsafe { self.source.GetEventTarget(p) })?;
-                unsafe { target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32) }.to_result()
+                unsafe {
+                    target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+                }.to_result()
             }
             Some(result) => {
                 // Back on the source thread, notify the task we're done.
