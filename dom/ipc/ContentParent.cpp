@@ -2742,15 +2742,6 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority)
   // of value to take effect.
   shouldSandbox = IsContentSandboxEnabled();
 
-#ifdef XP_MACOSX
-  // If the sandbox was initialized during content process
-  // startup, we must not send the SetProcessSandbox message.
-  // If early startup was pref'd off or the process is a
-  // middleman process, send SetProcessSandbox now.
-  shouldSandbox = shouldSandbox &&
-    (!sEarlySandboxInit || IsRecordingOrReplaying());
-#endif
-
 #ifdef XP_LINUX
   if (shouldSandbox) {
     MOZ_ASSERT(!mSandboxBroker);
@@ -3083,26 +3074,6 @@ ContentParent::RecvPlayEventSound(const uint32_t& aEventId)
 
   sound->PlayEventSound(aEventId);
 
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-ContentParent::RecvGetSystemColors(const uint32_t& colorsCount,
-                                   InfallibleTArray<uint32_t>* colors)
-{
-#ifdef MOZ_WIDGET_ANDROID
-  NS_ASSERTION(AndroidBridge::Bridge() != nullptr, "AndroidBridge is not available");
-  if (AndroidBridge::Bridge() == nullptr) {
-    // Do not fail - the colors won't be right, but it's not critical
-    return IPC_OK();
-  }
-
-  colors->AppendElements(colorsCount);
-
-  // The array elements correspond to the members of AndroidSystemColors structure,
-  // so just pass the pointer to the elements buffer
-  AndroidBridge::Bridge()->GetSystemColors((AndroidSystemColors*)colors->Elements());
-#endif
   return IPC_OK();
 }
 

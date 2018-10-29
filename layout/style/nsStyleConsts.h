@@ -769,11 +769,7 @@ enum class StyleGridTrackBreadth : uint8_t {
 #define NS_STYLE_TEXT_ALIGN_MOZ_CENTER            8
 #define NS_STYLE_TEXT_ALIGN_MOZ_RIGHT             9
 #define NS_STYLE_TEXT_ALIGN_MOZ_LEFT             10
-// NS_STYLE_TEXT_ALIGN_MOZ_CENTER_OR_INHERIT is only used in data structs; it
-// is never present in stylesheets or computed data.
-#define NS_STYLE_TEXT_ALIGN_MOZ_CENTER_OR_INHERIT 11
-#define NS_STYLE_TEXT_ALIGN_UNSAFE                12
-#define NS_STYLE_TEXT_ALIGN_MATCH_PARENT          13
+
 // Note: make sure that the largest NS_STYLE_TEXT_ALIGN_* value is smaller than
 // the smallest NS_STYLE_VERTICAL_ALIGN_* value below!
 
@@ -820,15 +816,6 @@ enum class StyleGridTrackBreadth : uint8_t {
 // See nsStyleDisplay
 #define NS_STYLE_TOP_LAYER_NONE   0 // not in the top layer
 #define NS_STYLE_TOP_LAYER_TOP    1 // in the top layer
-
-// See nsStyleDisplay
-#define NS_STYLE_TRANSITION_TIMING_FUNCTION_EASE         0
-#define NS_STYLE_TRANSITION_TIMING_FUNCTION_LINEAR       1
-#define NS_STYLE_TRANSITION_TIMING_FUNCTION_EASE_IN      2
-#define NS_STYLE_TRANSITION_TIMING_FUNCTION_EASE_OUT     3
-#define NS_STYLE_TRANSITION_TIMING_FUNCTION_EASE_IN_OUT  4
-#define NS_STYLE_TRANSITION_TIMING_FUNCTION_STEP_START   5
-#define NS_STYLE_TRANSITION_TIMING_FUNCTION_STEP_END     6
 
 // See nsStyleText
 // Note: these values pickup after the text-align values because there

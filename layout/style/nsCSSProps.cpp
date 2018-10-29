@@ -34,8 +34,6 @@ using namespace mozilla;
 
 typedef nsCSSProps::KTableEntry KTableEntry;
 
-using namespace mozilla;
-
 static int32_t gPropertyTableRefCount;
 static nsStaticCaseInsensitiveNameTable* gFontDescTable;
 static nsStaticCaseInsensitiveNameTable* gCounterDescTable;
@@ -564,7 +562,7 @@ const KTableEntry nsCSSProps::kScrollSnapTypeKTable[] = {
   { eCSSKeyword_UNKNOWN,   -1 }
 };
 
-KTableEntry nsCSSProps::kTextAlignKTable[] = {
+const KTableEntry nsCSSProps::kTextAlignKTable[] = {
   { eCSSKeyword_left, NS_STYLE_TEXT_ALIGN_LEFT },
   { eCSSKeyword_right, NS_STYLE_TEXT_ALIGN_RIGHT },
   { eCSSKeyword_center, NS_STYLE_TEXT_ALIGN_CENTER },
@@ -574,8 +572,6 @@ KTableEntry nsCSSProps::kTextAlignKTable[] = {
   { eCSSKeyword__moz_left, NS_STYLE_TEXT_ALIGN_MOZ_LEFT },
   { eCSSKeyword_start, NS_STYLE_TEXT_ALIGN_START },
   { eCSSKeyword_end, NS_STYLE_TEXT_ALIGN_END },
-  { eCSSKeyword_unsafe, NS_STYLE_TEXT_ALIGN_UNSAFE },
-  { eCSSKeyword_match_parent, NS_STYLE_TEXT_ALIGN_MATCH_PARENT },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -623,13 +619,11 @@ const KTableEntry nsCSSProps::kTouchActionKTable[] = {
 };
 
 const KTableEntry nsCSSProps::kTransitionTimingFunctionKTable[] = {
-  { eCSSKeyword_ease, NS_STYLE_TRANSITION_TIMING_FUNCTION_EASE },
-  { eCSSKeyword_linear, NS_STYLE_TRANSITION_TIMING_FUNCTION_LINEAR },
-  { eCSSKeyword_ease_in, NS_STYLE_TRANSITION_TIMING_FUNCTION_EASE_IN },
-  { eCSSKeyword_ease_out, NS_STYLE_TRANSITION_TIMING_FUNCTION_EASE_OUT },
-  { eCSSKeyword_ease_in_out, NS_STYLE_TRANSITION_TIMING_FUNCTION_EASE_IN_OUT },
-  { eCSSKeyword_step_start, NS_STYLE_TRANSITION_TIMING_FUNCTION_STEP_START },
-  { eCSSKeyword_step_end, NS_STYLE_TRANSITION_TIMING_FUNCTION_STEP_END },
+  { eCSSKeyword_linear,       StyleTimingKeyword::Linear },
+  { eCSSKeyword_ease,         StyleTimingKeyword::Ease },
+  { eCSSKeyword_ease_in,      StyleTimingKeyword::EaseIn },
+  { eCSSKeyword_ease_out,     StyleTimingKeyword::EaseOut },
+  { eCSSKeyword_ease_in_out,  StyleTimingKeyword::EaseInOut },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
