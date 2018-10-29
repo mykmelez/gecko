@@ -37,7 +37,7 @@ use std::{
     vec::IntoIter,
 };
 use storage_variant::{IntoVariant, Variant};
-use task::{create_thread, get_current_thread, GetOrCreateTask, TaskRunnable};
+use task::{create_thread, get_current_thread, GetOrCreateTask, PutTask, TaskRunnable};
 use xpcom::{
     interfaces::{
         nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabase,
@@ -205,6 +205,7 @@ impl KeyValueService {
     }
 }
 
+#[derive(Clone)]
 #[derive(xpcom)]
 #[xpimplements(nsIKeyValueDatabase)]
 #[refcnt = "nonatomic"]
@@ -222,6 +223,38 @@ impl KeyValueDatabase {
         thread: Option<RefPtr<nsIThread>>,
     ) -> RefPtr<KeyValueDatabase> {
         KeyValueDatabase::allocate(InitKeyValueDatabase { rkv, store, thread })
+    }
+
+    xpcom_method!(
+        PutAsync,
+        put_async,
+        { callback: *const nsIKeyValueCallback, key: *const nsACString, value: *const nsIVariant }
+    );
+
+    fn put_async(
+        &self,
+        callback: &nsIKeyValueCallback,
+        key: &nsACString,
+        value: &nsIVariant,
+    ) -> Result<(), nsresult> {
+        let source = get_current_thread()?;
+        let task = Box::new(PutTask::new(
+            RefPtr::new(callback),
+            Arc::clone(&self.rkv),
+            nsCString::from(key),
+            RefPtr::new(value),
+        ));
+
+        let runnable = TaskRunnable::new(
+            "KeyValueDatabase::PutAsync",
+            source,
+            task,
+            Cell::default(),
+        );
+
+        unsafe {
+            self.thread.as_ref().unwrap().DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+        }.to_result()
     }
 
     xpcom_method!(Put, put, { key: *const nsACString, value: *const nsIVariant });

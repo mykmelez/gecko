@@ -32,6 +32,12 @@ interface nsIKeyValueCallback : nsISupports {
 
 [scriptable, uuid(c449398e-174c-425b-8195-da6aa0ccd9a5)]
 interface nsIKeyValueDatabase : nsISupports {
+    void putAsync(
+        in nsIKeyValueCallback callback,
+        in AUTF8String key,
+        in nsIVariant value
+    );
+
     void put(in AUTF8String key, in nsIVariant value);
     boolean has(in AUTF8String key);
     nsIVariant get(in AUTF8String key, [optional] in nsIVariant defaultValue);

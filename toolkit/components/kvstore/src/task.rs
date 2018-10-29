@@ -8,10 +8,10 @@ use error::KeyValueError;
 use nserror::{nsresult, NsresultExt, NS_OK};
 use nsstring::{nsACString, nsCString};
 use rkv::{Manager, Rkv};
-use std::{cell::Cell, path::Path, ptr, str};
+use std::{cell::Cell, cell::RefCell, path::Path, ptr, str, sync::{Arc, RwLock}};
 use xpcom::{
     getter_addrefs,
-    interfaces::{nsIEventTarget, nsIKeyValueCallback, nsIRunnable, nsISupports, nsIThread},
+    interfaces::{nsIEventTarget, nsIKeyValueCallback, nsIRunnable, nsISupports, nsIThread, nsIVariant},
     RefPtr,
 };
 use KeyValueDatabase;
@@ -87,6 +87,39 @@ impl Task for GetOrCreateTask {
             Ok(value) => unsafe { self.callback.HandleResult(value.coerce()) },
             Err(err) => unsafe { self.callback.HandleError(nsresult::from(err)) },
         }.to_result()
+    }
+}
+
+pub struct PutTask {
+    callback: RefPtr<nsIKeyValueCallback>,
+    rkv: Arc<RwLock<Rkv>>,
+    key: nsCString,
+    value: RefPtr<nsIVariant>,
+}
+
+impl PutTask {
+    pub fn new(
+        callback: RefPtr<nsIKeyValueCallback>,
+        rkv: Arc<RwLock<Rkv>>,
+        key: nsCString,
+        value: RefPtr<nsIVariant>,
+    ) -> PutTask {
+        PutTask {
+            callback,
+            rkv,
+            key,
+            value,
+        }
+    }
+}
+
+impl Task for PutTask {
+    fn run(&self) -> Result<RefPtr<nsISupports>, KeyValueError> {
+        Err(KeyValueError::NoInterface("nsISupports"))
+    }
+
+    fn done(&self, result: Result<RefPtr<nsISupports>, KeyValueError>) -> Result<(), nsresult> {
+        Err(nserror::NS_ERROR_FAILURE)
     }
 }
 
