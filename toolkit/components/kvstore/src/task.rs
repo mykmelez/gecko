@@ -41,7 +41,7 @@ pub fn create_thread(name: &str) -> Result<RefPtr<nsIThread>, nsresult> {
 /// result back to the original thread.
 pub trait Task {
     fn run(&self) -> Result<RefPtr<nsISupports>, KeyValueError>;
-    fn done(&self, result: Result<RefPtr<nsISupports>, KeyValueError>) -> Result<nsresult, nsresult>;
+    fn done(&self, result: Result<RefPtr<nsISupports>, KeyValueError>) -> Result<(), nsresult>;
 }
 
 pub struct GetOrCreateTask {
@@ -84,11 +84,11 @@ impl Task for GetOrCreateTask {
             .ok_or(KeyValueError::NoInterface("nsISupports"))
     }
 
-    fn done(&self, result: Result<RefPtr<nsISupports>, KeyValueError>) -> Result<nsresult, nsresult> {
+    fn done(&self, result: Result<RefPtr<nsISupports>, KeyValueError>) -> Result<(), nsresult> {
         match result {
-            Ok(value) => unsafe { self.callback.HandleResult(value.coerce()).to_result() },
-            Err(err) => unsafe { self.callback.HandleError(nsresult::from(err)).to_result() },
-        }
+            Ok(value) => unsafe { self.callback.HandleResult(value.coerce()) },
+            Err(err) => unsafe { self.callback.HandleError(nsresult::from(err)) },
+        }.to_result()
     }
 }
 
@@ -123,7 +123,7 @@ impl TaskRunnable {
     }
 
     xpcom_method!(Run, run, {});
-    fn run(&self) -> Result<nsresult, nsresult> {
+    fn run(&self) -> Result<(), nsresult> {
         match self.result.take() {
             None => {
                 // Run the task on the target thread, store the result,
