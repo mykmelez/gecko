@@ -13,7 +13,9 @@ use rkv::{Manager, Rkv};
 use std::{cell::Cell, fmt::Write, path::Path, ptr, result, str};
 use xpcom::{
     getter_addrefs,
-    interfaces::{nsIKeyValueCallback, nsIKeyValueDatabase, nsIRunnable, nsIThread},
+    interfaces::{
+        nsIEventTarget, nsIKeyValueCallback, nsIKeyValueDatabase, nsIRunnable, nsIThread,
+    },
     RefPtr,
 };
 use KeyValueDatabase;
@@ -142,7 +144,7 @@ impl TaskRunnable {
                 let result = self.task.run();
                 self.result.set(Some(result));
                 let target = getter_addrefs(|p| self.source.GetEventTarget(p)).unwrap();
-                target.DispatchFromScript(self.coerce(), 0)
+                target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
             }
             Some(result) => {
                 // Back on the source thread, notify the task we're done.
