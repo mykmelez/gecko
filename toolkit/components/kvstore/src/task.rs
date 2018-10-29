@@ -7,7 +7,7 @@ extern crate xpcom;
 use error::KeyValueError;
 use nserror::{nsresult, NsresultExt, NS_OK};
 use nsstring::{nsACString, nsCString};
-use rkv::{Manager, Rkv};
+use rkv::{Manager, Rkv, Store};
 use std::{cell::Cell, cell::RefCell, path::Path, ptr, str, sync::{Arc, RwLock}};
 use xpcom::{
     getter_addrefs,
@@ -93,6 +93,7 @@ impl Task for GetOrCreateTask {
 pub struct PutTask {
     callback: RefPtr<nsIKeyValueCallback>,
     rkv: Arc<RwLock<Rkv>>,
+    store: Store,
     key: nsCString,
     value: RefPtr<nsIVariant>,
 }
@@ -101,12 +102,14 @@ impl PutTask {
     pub fn new(
         callback: RefPtr<nsIKeyValueCallback>,
         rkv: Arc<RwLock<Rkv>>,
+        store: Store,
         key: nsCString,
         value: RefPtr<nsIVariant>,
     ) -> PutTask {
         PutTask {
             callback,
             rkv,
+            store,
             key,
             value,
         }

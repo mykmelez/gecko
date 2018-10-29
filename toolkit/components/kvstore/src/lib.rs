@@ -241,6 +241,7 @@ impl KeyValueDatabase {
         let task = Box::new(PutTask::new(
             RefPtr::new(callback),
             Arc::clone(&self.rkv),
+            self.store,
             nsCString::from(key),
             RefPtr::new(value),
         ));
