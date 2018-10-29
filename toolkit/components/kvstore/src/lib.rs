@@ -188,8 +188,8 @@ impl KeyValueService {
         let task = Box::new(GetOrCreateTask::new(
             RefPtr::new(callback),
             target.clone(),
-            path,
-            name,
+            nsCString::from(path),
+            nsCString::from(name),
         ));
 
         let runnable = TaskRunnable::new(

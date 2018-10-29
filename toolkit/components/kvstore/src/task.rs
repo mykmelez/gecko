@@ -7,14 +7,14 @@
 extern crate xpcom;
 
 use error::KeyValueError;
-use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_OK};
+use nserror::{nsresult, NsresultExt, NS_OK};
 use nsstring::{nsACString, nsCString};
 use rkv::{Manager, Rkv};
-use std::{cell::Cell, fmt::Write, path::Path, ptr, result, str};
+use std::{cell::Cell, path::Path, ptr, str};
 use xpcom::{
     getter_addrefs,
     interfaces::{
-        nsIEventTarget, nsIKeyValueCallback, nsIKeyValueDatabase, nsIRunnable, nsISupports, nsIThread,
+        nsIEventTarget, nsIKeyValueCallback, nsIRunnable, nsISupports, nsIThread,
     },
     RefPtr,
 };
@@ -57,14 +57,14 @@ impl GetOrCreateTask {
     pub fn new(
         callback: RefPtr<nsIKeyValueCallback>,
         thread: RefPtr<nsIThread>,
-        path: &nsACString,
-        name: &nsACString,
+        path: nsCString,
+        name: nsCString,
     ) -> GetOrCreateTask {
         GetOrCreateTask {
             callback,
             thread,
-            path: nsCString::from(path),
-            name: nsCString::from(name),
+            path,
+            name,
         }
     }
 }
