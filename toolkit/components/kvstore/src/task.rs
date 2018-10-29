@@ -7,7 +7,7 @@
 extern crate xpcom;
 
 use error::KeyValueError;
-use nserror::{nsresult, NS_ERROR_FAILURE, NS_OK};
+use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_OK};
 use nsstring::{nsACString, nsCString};
 use rkv::{Manager, Rkv};
 use std::{cell::Cell, fmt::Write, path::Path, ptr, result, str};
@@ -136,27 +136,26 @@ impl TaskRunnable {
         })
     }
 
-    unsafe fn Run(&self) -> nsresult {
+    xpcom_method!(Run, run, {});
+    fn run(&self) -> Result<nsresult, nsresult> {
         match self.result.take() {
             None => {
-                // Run the task on the storage thread, store the result, and
-                // dispatch the runnable back to the source thread.
+                // Run the task on the target thread, store the result,
+                // and dispatch the runnable back to the source thread.
                 let result = self.task.run();
                 self.result.set(Some(result));
-                let target = getter_addrefs(|p| self.source.GetEventTarget(p)).unwrap();
-                target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+                let target = getter_addrefs(|p| unsafe { self.source.GetEventTarget(p) })?;
+                unsafe { target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32) }.to_result()
             }
             Some(result) => {
                 // Back on the source thread, notify the task we're done.
-                self.task.done(result)
+                self.task.done(result).to_result()
             }
         }
     }
 
-    unsafe fn GetName(&self, name: *mut nsACString) -> nsresult {
-        match write!(*name, "{}", self.name) {
-            Ok(()) => NS_OK,
-            Err(_) => NS_ERROR_FAILURE,
-        }
+    xpcom_method!(GetName, get_name, {}, *mut nsACString);
+    fn get_name(&self) -> Result<nsCString, nsresult> {
+        Ok(nsCString::from(self.name))
     }
 }
