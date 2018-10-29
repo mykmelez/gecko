@@ -182,7 +182,7 @@ impl KeyValueService {
         callback: &nsIKeyValueCallback,
         path: &nsACString,
         name: &nsACString,
-    ) -> Result<(), KeyValueError> {
+    ) -> Result<(), nsresult> {
         let source = get_current_thread()?;
         let target = create_thread("KeyValDB")?;
         let task = Box::new(GetOrCreateTask::new(
@@ -199,15 +199,9 @@ impl KeyValueService {
             Cell::default(),
         );
 
-        let rv = unsafe {
+        unsafe {
             target.DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
-        };
-
-        if rv.succeeded() {
-            Ok(())
-        } else {
-            Err(KeyValueError::Nsresult(rv.error_name(), rv))
-        }
+        }.to_result()
     }
 }
 
