@@ -41,7 +41,7 @@ pub fn create_thread(name: &str) -> Result<RefPtr<nsIThread>, nsresult> {
 /// result back to the original thread.
 pub trait Task {
     fn run(&self) -> Result<RefPtr<nsISupports>, KeyValueError>;
-    fn done(&self, result: Result<RefPtr<nsISupports>, KeyValueError>) -> nsresult;
+    fn done(&self, result: Result<RefPtr<nsISupports>, KeyValueError>) -> Result<nsresult, nsresult>;
 }
 
 pub struct GetOrCreateTask {
@@ -84,10 +84,10 @@ impl Task for GetOrCreateTask {
             .ok_or(KeyValueError::NoInterface("nsISupports"))
     }
 
-    fn done(&self, result: Result<RefPtr<nsISupports>, KeyValueError>) -> nsresult {
+    fn done(&self, result: Result<RefPtr<nsISupports>, KeyValueError>) -> Result<nsresult, nsresult> {
         match result {
-            Ok(value) => unsafe { self.callback.HandleResult(value.coerce()) },
-            Err(err) => unsafe { self.callback.HandleError(nsresult::from(err)) },
+            Ok(value) => unsafe { self.callback.HandleResult(value.coerce()).to_result() },
+            Err(err) => unsafe { self.callback.HandleError(nsresult::from(err)).to_result() },
         }
     }
 }
@@ -137,7 +137,7 @@ impl TaskRunnable {
             }
             Some(result) => {
                 // Back on the source thread, notify the task we're done.
-                self.task.done(result).to_result()
+                self.task.done(result)
             }
         }
     }
