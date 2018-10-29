@@ -88,8 +88,7 @@ impl Task for GetOrCreateTask {
         match result {
             Ok(value) => unsafe { self.callback.HandleResult(value.coerce()) },
             Err(err) => unsafe { self.callback.HandleError(nsresult::from(err)) },
-        };
-        NS_OK
+        }
     }
 }
 
