@@ -20,8 +20,6 @@ use xpcom::{
 };
 use KeyValueDatabase;
 
-pub type KvResult<T> = result::Result<T, KeyValueError>;
-
 extern "C" {
     fn NS_GetCurrentThreadEventTarget(result: *mut *const nsIThread) -> nsresult;
     fn NS_NewNamedThreadWithDefaultStackSize(
@@ -70,7 +68,7 @@ impl GetOrCreateTask {
         }
     }
 
-    fn run_result(&self) -> KvResult<RefPtr<nsISupports>> {
+    fn run_result(&self) -> Result<RefPtr<nsISupports>, KeyValueError> {
         let mut writer = Manager::singleton().write()?;
         let rkv = writer.get_or_create(Path::new(str::from_utf8(&self.path)?), Rkv::new)?;
         let store = if self.name.is_empty() {
