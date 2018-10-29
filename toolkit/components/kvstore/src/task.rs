@@ -99,10 +99,10 @@ pub struct InitTaskRunnable {
     name: &'static str,
     source: RefPtr<nsIThread>,
 
-    /// Holds the task, and the result of the task. The task is created on the
-    /// current thread, run on a target thread, and handled again on the
-    /// original thread; the result is mutated on the target thread and
-    /// accessed on the original thread.
+    /// Holds the task, and the result of the task.  The task is created
+    /// on the current thread, run on a target thread, and handled again
+    /// on the original thread; the result is mutated on the target thread
+    /// and accessed on the original thread.
     task: Box<Task>,
     result: Cell<Option<Result<RefPtr<nsISupports>, KeyValueError>>>,
 }
