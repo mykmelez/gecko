@@ -20,7 +20,6 @@ use xpcom::{
 };
 use KeyValueDatabase;
 
-pub type NsResult<T> = result::Result<T, nsresult>;
 pub type KvResult<T> = result::Result<T, KeyValueError>;
 
 extern "C" {
@@ -33,11 +32,11 @@ extern "C" {
 }
 
 /// Returns a handle to the current thread.
-pub fn get_current_thread() -> NsResult<RefPtr<nsIThread>> {
+pub fn get_current_thread() -> Result<RefPtr<nsIThread>, nsresult> {
     getter_addrefs(|p| unsafe { NS_GetCurrentThreadEventTarget(p) })
 }
 
-pub fn create_thread(name: &str) -> NsResult<RefPtr<nsIThread>> {
+pub fn create_thread(name: &str) -> Result<RefPtr<nsIThread>, nsresult> {
     let name: nsCString = name.into();
     getter_addrefs(|p| unsafe { NS_NewNamedThreadWithDefaultStackSize(&*name, p, ptr::null()) })
 }
@@ -45,8 +44,8 @@ pub fn create_thread(name: &str) -> NsResult<RefPtr<nsIThread>> {
 /// A task is executed asynchronously on a target thread, and passes its
 /// result back to the original thread.
 pub trait Task {
-    fn run(&self) -> NsResult<RefPtr<nsISupports>>;
-    fn done(&self, result: NsResult<RefPtr<nsISupports>>) -> nsresult;
+    fn run(&self) -> Result<RefPtr<nsISupports>, nsresult>;
+    fn done(&self, result: Result<RefPtr<nsISupports>, nsresult>) -> nsresult;
 }
 
 pub struct GetOrCreateTask {
@@ -89,14 +88,14 @@ impl GetOrCreateTask {
 }
 
 impl Task for GetOrCreateTask {
-    fn run(&self) -> NsResult<RefPtr<nsISupports>> {
+    fn run(&self) -> Result<RefPtr<nsISupports>, nsresult> {
         match self.run_result() {
             Ok(result) => Ok(result),
             Err(err) => Err(err.into()),
         }
     }
 
-    fn done(&self, result: NsResult<RefPtr<nsISupports>>) -> nsresult {
+    fn done(&self, result: Result<RefPtr<nsISupports>, nsresult>) -> nsresult {
         error!("GetOrCreateTask.done");
         match result {
             Ok(value) => unsafe { self.callback.HandleResult(value.coerce()) },
@@ -118,7 +117,7 @@ pub struct InitTaskRunnable {
     /// original thread; the result is mutated on the target thread and
     /// accessed on the original thread.
     task: Box<Task>,
-    result: Cell<Option<NsResult<RefPtr<nsISupports>>>>,
+    result: Cell<Option<Result<RefPtr<nsISupports>, nsresult>>>,
 }
 
 impl TaskRunnable {
@@ -126,7 +125,7 @@ impl TaskRunnable {
         name: &'static str,
         source: RefPtr<nsIThread>,
         task: Box<Task>,
-        result: Cell<Option<NsResult<RefPtr<nsISupports>>>>,
+        result: Cell<Option<Result<RefPtr<nsISupports>, nsresult>>>,
     ) -> RefPtr<TaskRunnable> {
         TaskRunnable::allocate(InitTaskRunnable {
             name,
