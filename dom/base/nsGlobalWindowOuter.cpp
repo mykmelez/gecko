@@ -20,6 +20,7 @@
 #include "nsIDOMStorageManager.h"
 #include "nsIPermission.h"
 #include "nsIPermissionManager.h"
+#include "nsIPrefBranch.h"
 #include "nsISecureBrowserUI.h"
 #include "nsIWebProgressListener.h"
 #include "mozilla/AntiTrackingCommon.h"
@@ -983,6 +984,11 @@ nsGlobalWindowOuter::~nsGlobalWindowOuter()
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (obs) {
     obs->RemoveObserver(this, PERM_CHANGE_NOTIFICATION);
+  }
+  nsCOMPtr<nsIPrefBranch> prefBranch =
+    do_GetService(NS_PREFSERVICE_CONTRACTID);
+  if (prefBranch) {
+    prefBranch->RemoveObserver("network.cookie.cookieBehavior", this);
   }
 
   nsLayoutStatics::Release();
@@ -5784,6 +5790,31 @@ nsGlobalWindowOuter::PostMessageMozOuter(JSContext* aCx, JS::Handle<JS::Value> a
     if (NS_WARN_IF(!providedPrincipal)) {
       return;
     }
+  } else {
+    // We still need to check the originAttributes if the target origin is '*'.
+    // But we will ingore the FPD here since the FPDs are possible to be different.
+    auto principal = BasePrincipal::Cast(GetPrincipal());
+    NS_ENSURE_TRUE_VOID(principal);
+
+    OriginAttributes targetAttrs = principal->OriginAttributesRef();
+    OriginAttributes sourceAttrs = aSubjectPrincipal.OriginAttributesRef();
+    // We have to exempt the check of OA if the subject prioncipal is a system
+    // principal since there are many tests try to post messages to content from
+    // chrome with a mismatch OA. For example, using the ContentTask.spawn() to
+    // post a message into a private browsing window. The injected code in
+    // ContentTask.spawn() will be executed under the system principal and the
+    // OA of the system principal mismatches with the OA of a private browsing
+    // window.
+    MOZ_DIAGNOSTIC_ASSERT(aSubjectPrincipal.GetIsSystemPrincipal() ||
+                          sourceAttrs.EqualsIgnoringFPD(targetAttrs));
+
+    // If 'privacy.firstparty.isolate.block_post_message' is true, we will block
+    // postMessage across different first party domains.
+    if (OriginAttributes::IsBlockPostMessageForFPI() &&
+        !aSubjectPrincipal.GetIsSystemPrincipal() &&
+        sourceAttrs.mFirstPartyDomain != targetAttrs.mFirstPartyDomain) {
+      return;
+    }
   }
 
   // Create and asynchronously dispatch a runnable which will handle actual DOM
@@ -6610,6 +6641,7 @@ nsGlobalWindowOuter::SetIsBackground(bool aIsBackground)
     // the background window.
     if (inner && changed) {
       inner->StopGamepadHaptics();
+      inner->StopVRActivity();
       // true is for asking to set the delta time to
       // the telemetry.
       inner->ResetVRTelemetry(true);
@@ -6622,6 +6654,7 @@ nsGlobalWindowOuter::SetIsBackground(bool aIsBackground)
     // false is for only resetting the timestamp.
     inner->ResetVRTelemetry(false);
     inner->SyncGamepadState();
+    inner->StartVRActivity();
   }
 }
 
@@ -6857,6 +6890,10 @@ nsGlobalWindowOuter::Observe(nsISupports* aSupports, const char* aTopic,
         return NS_OK;
       }
     }
+  } else if (!nsCRT::strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID)) {
+    // Reset the storage access permission when our cookie policy changes.
+    mHasStorageAccess = false;
+    return NS_OK;
   }
   return NS_OK;
 }
@@ -7735,6 +7772,11 @@ nsGlobalWindowOuter::Create(nsIDocShell* aDocShell, bool aIsChrome)
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (obs) {
     obs->AddObserver(window, PERM_CHANGE_NOTIFICATION, true);
+  }
+  nsCOMPtr<nsIPrefBranch> prefBranch =
+    do_GetService(NS_PREFSERVICE_CONTRACTID);
+  if (prefBranch) {
+    prefBranch->AddObserver("network.cookie.cookieBehavior", window, true);
   }
   return window.forget();
 }
