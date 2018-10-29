@@ -42,8 +42,8 @@ pub fn create_thread(name: &str) -> Result<RefPtr<nsIThread>, nsresult> {
 /// A task is executed asynchronously on a target thread, and passes its
 /// result back to the original thread.
 pub trait Task {
-    fn run(&self) -> Result<RefPtr<nsISupports>, nsresult>;
-    fn done(&self, result: Result<RefPtr<nsISupports>, nsresult>) -> nsresult;
+    fn run(&self) -> Result<RefPtr<nsISupports>, KeyValueError>;
+    fn done(&self, result: Result<RefPtr<nsISupports>, KeyValueError>) -> nsresult;
 }
 
 pub struct GetOrCreateTask {
@@ -67,8 +67,10 @@ impl GetOrCreateTask {
             name: nsCString::from(name),
         }
     }
+}
 
-    fn run_result(&self) -> Result<RefPtr<nsISupports>, KeyValueError> {
+impl Task for GetOrCreateTask {
+    fn run(&self) -> Result<RefPtr<nsISupports>, KeyValueError> {
         let mut writer = Manager::singleton().write()?;
         let rkv = writer.get_or_create(Path::new(str::from_utf8(&self.path)?), Rkv::new)?;
         let store = if self.name.is_empty() {
@@ -81,23 +83,13 @@ impl GetOrCreateTask {
 
         key_value_db
             .query_interface::<nsISupports>()
-            .ok_or(KeyValueError::NoInterface("nsISupports").into())
-    }
-}
-
-impl Task for GetOrCreateTask {
-    fn run(&self) -> Result<RefPtr<nsISupports>, nsresult> {
-        match self.run_result() {
-            Ok(result) => Ok(result),
-            Err(err) => Err(err.into()),
-        }
+            .ok_or(KeyValueError::NoInterface("nsISupports"))
     }
 
-    fn done(&self, result: Result<RefPtr<nsISupports>, nsresult>) -> nsresult {
-        error!("GetOrCreateTask.done");
+    fn done(&self, result: Result<RefPtr<nsISupports>, KeyValueError>) -> nsresult {
         match result {
             Ok(value) => unsafe { self.callback.HandleResult(value.coerce()) },
-            Err(err) => unsafe { self.callback.HandleError(err.0) },
+            Err(err) => unsafe { self.callback.HandleError(nsresult::from(err)) },
         };
         NS_OK
     }
@@ -115,7 +107,7 @@ pub struct InitTaskRunnable {
     /// original thread; the result is mutated on the target thread and
     /// accessed on the original thread.
     task: Box<Task>,
-    result: Cell<Option<Result<RefPtr<nsISupports>, nsresult>>>,
+    result: Cell<Option<Result<RefPtr<nsISupports>, KeyValueError>>>,
 }
 
 impl TaskRunnable {
@@ -123,7 +115,7 @@ impl TaskRunnable {
         name: &'static str,
         source: RefPtr<nsIThread>,
         task: Box<Task>,
-        result: Cell<Option<Result<RefPtr<nsISupports>, nsresult>>>,
+        result: Cell<Option<Result<RefPtr<nsISupports>, KeyValueError>>>,
     ) -> RefPtr<TaskRunnable> {
         TaskRunnable::allocate(InitTaskRunnable {
             name,
