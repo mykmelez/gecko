@@ -7,16 +7,16 @@
 extern crate xpcom;
 
 use error::KeyValueError;
-use KeyValueDatabase;
 use nserror::{nsresult, NS_ERROR_FAILURE, NS_OK};
 use nsstring::{nsACString, nsCString};
 use rkv::{Manager, Rkv};
 use std::{cell::Cell, fmt::Write, path::Path, ptr, result, str};
 use xpcom::{
     getter_addrefs,
-    interfaces::{nsIKeyValueDatabase, nsIKeyValueCallback, nsIRunnable, nsIThread},
+    interfaces::{nsIKeyValueCallback, nsIKeyValueDatabase, nsIRunnable, nsIThread},
     RefPtr,
 };
+use KeyValueDatabase;
 
 pub type NsResult<T> = result::Result<T, nsresult>;
 pub type KvResult<T> = result::Result<T, KeyValueError>;
@@ -55,8 +55,18 @@ pub struct GetOrCreateTask {
 }
 
 impl GetOrCreateTask {
-    pub fn new(callback: RefPtr<nsIKeyValueCallback>, thread: RefPtr<nsIThread>, path: &nsACString, name: &nsACString) -> GetOrCreateTask {
-        GetOrCreateTask { callback, thread, path: nsCString::from(path), name: nsCString::from(name) }
+    pub fn new(
+        callback: RefPtr<nsIKeyValueCallback>,
+        thread: RefPtr<nsIThread>,
+        path: &nsACString,
+        name: &nsACString,
+    ) -> GetOrCreateTask {
+        GetOrCreateTask {
+            callback,
+            thread,
+            path: nsCString::from(path),
+            name: nsCString::from(name),
+        }
     }
 
     fn run_result(&self) -> KvResult<RefPtr<nsIKeyValueDatabase>> {
@@ -65,7 +75,8 @@ impl GetOrCreateTask {
         let store = if self.name.is_empty() {
             rkv.write()?.open_or_create_default()
         } else {
-            rkv.write()?.open_or_create(Some(str::from_utf8(&self.name)?))
+            rkv.write()?
+                .open_or_create(Some(str::from_utf8(&self.name)?))
         }?;
         let key_value_db = KeyValueDatabase::new(rkv, store, Some(self.thread.clone()));
 

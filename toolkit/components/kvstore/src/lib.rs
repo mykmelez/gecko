@@ -37,7 +37,7 @@ use std::{
     vec::IntoIter,
 };
 use storage_variant::{IntoVariant, Variant};
-use task::{create_thread, GetOrCreateTask, get_current_thread, TaskRunnable};
+use task::{create_thread, get_current_thread, GetOrCreateTask, TaskRunnable};
 use xpcom::{
     interfaces::{
         nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabase,
@@ -185,7 +185,12 @@ impl KeyValueService {
     ) -> Result<(), KeyValueError> {
         let source = get_current_thread()?;
         let target = create_thread("KeyValDB")?;
-        let task = Box::new(GetOrCreateTask::new(RefPtr::new(callback), target.clone(), path, name));
+        let task = Box::new(GetOrCreateTask::new(
+            RefPtr::new(callback),
+            target.clone(),
+            path,
+            name,
+        ));
 
         let runnable = TaskRunnable::new(
             "KeyValueDatabase::GetOrCreateAsync",
@@ -217,7 +222,11 @@ pub struct InitKeyValueDatabase {
 }
 
 impl KeyValueDatabase {
-    fn new(rkv: Arc<RwLock<Rkv>>, store: Store, thread: Option<RefPtr<nsIThread>>) -> RefPtr<KeyValueDatabase> {
+    fn new(
+        rkv: Arc<RwLock<Rkv>>,
+        store: Store,
+        thread: Option<RefPtr<nsIThread>>,
+    ) -> RefPtr<KeyValueDatabase> {
         KeyValueDatabase::allocate(InitKeyValueDatabase { rkv, store, thread })
     }
 
