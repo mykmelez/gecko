@@ -439,16 +439,43 @@ function promisify(fn) {
   }
 }
 
+class KeyValueDatabase {
+  constructor(handle) {
+    this.handle = handle;
+  }
+
+  static async new(databaseDir) {
+    return new KeyValueDatabase(
+      (await promisify(gKeyValueService.getOrCreateAsync)(databaseDir))
+      .QueryInterface(Ci.nsIKeyValueDatabase)
+    );
+  }
+
+  async put(key, value) {
+    return await promisify(this.handle.putAsync)(key, value);
+  }
+
+  async has(key) {
+    return await promisify(this.handle.hasAsync)(key);
+  }
+
+  async get(key) {
+    return await promisify(this.handle.getAsync)(key);
+  }
+
+  async delete(key) {
+    return await promisify(this.handle.deleteAsync)(key);
+  }
+}
+
 add_task(async function putAsync() {
   const databaseDir = await makeDatabaseDir("getOrCreateAsync");
-  let defaultDatabase =
-    (await promisify(gKeyValueService.getOrCreateAsync)(databaseDir))
-    .QueryInterface(Ci.nsIKeyValueDatabase);
+  let defaultDatabase = await KeyValueDatabase.new(databaseDir);
 
-  Assert.strictEqual(await promisify(defaultDatabase.hasAsync)("foo"), false);
-  await promisify(defaultDatabase.putAsync)("foo", "bar");
-  Assert.strictEqual(await promisify(defaultDatabase.getAsync)("foo"), "bar");
-  Assert.strictEqual(await promisify(defaultDatabase.hasAsync)("foo"), true);
-  await promisify(defaultDatabase.deleteAsync)("foo");
-  Assert.strictEqual(await promisify(defaultDatabase.hasAsync)("foo"), false);
+  Assert.strictEqual(await defaultDatabase.has("foo"), false);
+  await defaultDatabase.put("foo", "bar");
+  Assert.strictEqual(await defaultDatabase.get("foo"), "bar");
+  Assert.strictEqual(await defaultDatabase.has("foo"), true);
+  await defaultDatabase.delete("foo");
+  Assert.strictEqual(await defaultDatabase.has("foo"), false);
 });
