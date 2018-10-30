@@ -431,25 +431,22 @@ add_task(async function getOrCreateAsync() {
   Assert.ok(namedDatabase instanceof Ci.nsIKeyValueDatabase);
 });
 
+function promisify(fn) {
+  return function() {
+    return new Promise((resolve, reject) => {
+      fn({ handleResult: resolve, handleError: reject }, ...arguments);
+    });
+  }
+}
+
 add_task(async function putAsync() {
   const databaseDir = await makeDatabaseDir("getOrCreateAsync");
-  let defaultDatabase = (await new Promise((resolve, reject) => {
-    gKeyValueService.getOrCreateAsync({ handleResult: resolve, handleError: reject }, databaseDir);
-  })).QueryInterface(Ci.nsIKeyValueDatabase);
+  let defaultDatabase =
+    (await promisify(gKeyValueService.getOrCreateAsync)(databaseDir))
+    .QueryInterface(Ci.nsIKeyValueDatabase);
 
-  let has;
-  has = await new Promise((resolve, reject) => {
-    defaultDatabase.hasAsync({ handleResult: resolve, handleError: reject }, "foo");
-  });
-  Assert.strictEqual(has, false);
-
-  await new Promise((resolve, reject) => {
-    defaultDatabase.putAsync({ handleResult: resolve, handleError: reject }, "foo", "bar");
-  });
+  Assert.strictEqual(await promisify(defaultDatabase.hasAsync)("foo"), false);
+  await promisify(defaultDatabase.putAsync)("foo", "bar");
   Assert.strictEqual(defaultDatabase.get("foo"), "bar");
-
-  has = await new Promise((resolve, reject) => {
-    defaultDatabase.hasAsync({ handleResult: resolve, handleError: reject }, "foo");
-  });
-  Assert.strictEqual(has, true);
+  Assert.strictEqual(await promisify(defaultDatabase.hasAsync)("foo"), true);
 });
