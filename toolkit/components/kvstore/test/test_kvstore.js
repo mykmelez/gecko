@@ -447,6 +447,6 @@ add_task(async function putAsync() {
 
   Assert.strictEqual(await promisify(defaultDatabase.hasAsync)("foo"), false);
   await promisify(defaultDatabase.putAsync)("foo", "bar");
-  Assert.strictEqual(defaultDatabase.get("foo"), "bar");
+  Assert.strictEqual(await promisify(defaultDatabase.getAsync)("foo"), "bar");
   Assert.strictEqual(await promisify(defaultDatabase.hasAsync)("foo"), true);
 });

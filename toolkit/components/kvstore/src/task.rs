@@ -5,6 +5,7 @@
 extern crate xpcom;
 
 use error::KeyValueError;
+use into_variant;
 use libc::{int32_t, uint16_t};
 use nserror::{nsresult, NsresultExt, NS_OK};
 use nsstring::{nsACString, nsCString, nsString};
@@ -73,6 +74,11 @@ pub fn create_thread(name: &str) -> Result<RefPtr<nsIThread>, nsresult> {
 pub trait Task {
     fn run(&self) -> Result<Option<RefPtr<nsISupports>>, KeyValueError>;
     fn done(&self, result: Result<Option<RefPtr<nsISupports>>, KeyValueError>) -> Result<(), nsresult>;
+}
+
+pub trait VariantTask {
+    fn run(&self) -> Result<Option<RefPtr<nsIVariant>>, KeyValueError>;
+    fn done(&self, result: Result<Option<RefPtr<nsIVariant>>, KeyValueError>) -> Result<(), nsresult>;
 }
 
 /// We can't generalize Task with a type parameter because it's held by
@@ -251,6 +257,61 @@ impl BoolTask for HasTask {
     }
 }
 
+pub struct GetTask {
+    callback: RefPtr<nsIKeyValueCallback2>,
+    rkv: Arc<RwLock<Rkv>>,
+    store: Store,
+    key: nsCString,
+    default_value: RefPtr<nsIVariant>,
+}
+
+impl GetTask {
+    pub fn new(
+        callback: RefPtr<nsIKeyValueCallback2>,
+        rkv: Arc<RwLock<Rkv>>,
+        store: Store,
+        key: nsCString,
+        default_value: RefPtr<nsIVariant>,
+    ) -> GetTask {
+        GetTask {
+            callback,
+            rkv,
+            store,
+            key,
+            default_value,
+        }
+    }
+}
+
+impl VariantTask for GetTask {
+    fn run(&self) -> Result<Option<RefPtr<nsIVariant>>, KeyValueError> {
+        let key = str::from_utf8(&self.key)?;
+        let env = self.rkv.read()?;
+        let reader = env.read()?;
+        let value = reader.get(&self.store, key)?;
+
+        match value {
+            Some(Value::I64(value)) => Ok(Some(value.into_variant().ok_or(KeyValueError::Read)?.take())),
+            Some(Value::F64(value)) => Ok(Some(value.into_variant().ok_or(KeyValueError::Read)?.take())),
+            Some(Value::Str(value)) => Ok(Some(nsString::from(value)
+                .into_variant()
+                .ok_or(KeyValueError::Read)?
+                .take())),
+            Some(Value::Bool(value)) => Ok(Some(value.into_variant().ok_or(KeyValueError::Read)?.take())),
+            Some(_value) => Err(KeyValueError::UnexpectedValue),
+            None => Ok(Some(into_variant(&self.default_value)?.take())),
+        }
+    }
+
+    fn done(&self, result: Result<Option<RefPtr<nsIVariant>>, KeyValueError>) -> Result<(), nsresult> {
+        match result {
+            Ok(Some(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
+            Ok(None) => unsafe { self.callback.HandleResult(ptr::null()) },
+            Err(err) => unsafe { self.callback.HandleError(nsresult::from(err)) },
+        }.to_result()
+    }
+}
+
 #[derive(xpcom)]
 #[xpimplements(nsIRunnable, nsINamed)]
 #[refcnt = "atomic"]
@@ -330,6 +391,62 @@ impl BoolTaskRunnable {
         result: Cell<Option<Result<bool, KeyValueError>>>,
     ) -> RefPtr<BoolTaskRunnable> {
         BoolTaskRunnable::allocate(InitBoolTaskRunnable {
+            name,
+            source,
+            task,
+            result,
+        })
+    }
+
+    xpcom_method!(Run, run, {});
+    fn run(&self) -> Result<(), nsresult> {
+        match self.result.take() {
+            None => {
+                // Run the task on the target thread, store the result,
+                // and dispatch the runnable back to the source thread.
+                let result = self.task.run();
+                self.result.set(Some(result));
+                let target = getter_addrefs(|p| unsafe { self.source.GetEventTarget(p) })?;
+                unsafe {
+                    target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+                }.to_result()
+            }
+            Some(result) => {
+                // Back on the source thread, notify the task we're done.
+                self.task.done(result)
+            }
+        }
+    }
+
+    xpcom_method!(GetName, get_name, {}, *mut nsACString);
+    fn get_name(&self) -> Result<nsCString, nsresult> {
+        Ok(nsCString::from(self.name))
+    }
+}
+
+#[derive(xpcom)]
+#[xpimplements(nsIRunnable, nsINamed)]
+#[refcnt = "atomic"]
+pub struct InitVariantTaskRunnable {
+    name: &'static str,
+    source: RefPtr<nsIThread>,
+
+    /// Holds the task, and the result of the task.  The task is created
+    /// on the current thread, run on a target thread, and handled again
+    /// on the original thread; the result is mutated on the target thread
+    /// and accessed on the original thread.
+    task: Box<VariantTask>,
+    result: Cell<Option<Result<Option<RefPtr<nsIVariant>>, KeyValueError>>>,
+}
+
+impl VariantTaskRunnable {
+    pub fn new(
+        name: &'static str,
+        source: RefPtr<nsIThread>,
+        task: Box<VariantTask>,
+        result: Cell<Option<Result<Option<RefPtr<nsIVariant>>, KeyValueError>>>,
+    ) -> RefPtr<VariantTaskRunnable> {
+        VariantTaskRunnable::allocate(InitVariantTaskRunnable {
             name,
             source,
             task,

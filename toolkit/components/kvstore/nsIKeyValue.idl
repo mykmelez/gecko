@@ -49,6 +49,12 @@ interface nsIKeyValueDatabase : nsISupports {
         in AUTF8String key
     );
 
+    void getAsync(
+        in nsIKeyValueCallback2 callback,
+        in AUTF8String key,
+        [optional] in nsIVariant defaultValue
+    );
+
     void put(in AUTF8String key, in nsIVariant value);
     boolean has(in AUTF8String key);
     nsIVariant get(in AUTF8String key, [optional] in nsIVariant defaultValue);
