@@ -9,7 +9,7 @@ use into_variant;
 use libc::{int32_t, uint16_t};
 use nserror::{nsresult, NsresultExt, NS_OK};
 use nsstring::{nsACString, nsCString, nsString};
-use rkv::{Manager, Rkv, Store, Value};
+use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{cell::Cell, cell::RefCell, path::Path, ptr, str, sync::{Arc, RwLock}};
 use storage_variant::{IntoVariant, Variant};
 use xpcom::{
@@ -304,6 +304,60 @@ impl VariantTask for GetTask {
     }
 
     fn done(&self, result: Result<Option<RefPtr<nsIVariant>>, KeyValueError>) -> Result<(), nsresult> {
+        match result {
+            Ok(Some(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
+            Ok(None) => unsafe { self.callback.HandleResult(ptr::null()) },
+            Err(err) => unsafe { self.callback.HandleError(nsresult::from(err)) },
+        }.to_result()
+    }
+}
+
+pub struct DeleteTask {
+    callback: RefPtr<nsIKeyValueCallback>,
+    rkv: Arc<RwLock<Rkv>>,
+    store: Store,
+    key: nsCString,
+}
+
+impl DeleteTask {
+    pub fn new(
+        callback: RefPtr<nsIKeyValueCallback>,
+        rkv: Arc<RwLock<Rkv>>,
+        store: Store,
+        key: nsCString,
+    ) -> DeleteTask {
+        DeleteTask {
+            callback,
+            rkv,
+            store,
+            key,
+        }
+    }
+}
+
+impl Task for DeleteTask {
+    fn run(&self) -> Result<Option<RefPtr<nsISupports>>, KeyValueError> {
+        let key = str::from_utf8(&self.key)?;
+        let env = self.rkv.read()?;
+        let mut writer = env.write()?;
+
+        match writer.delete(&self.store, key) {
+            Ok(_) => (),
+
+            // LMDB fails with an error if the key to delete wasn't found,
+            // and Rkv returns that error, but we ignore it, as we expect most
+            // of our consumers to want this behavior.
+            Err(StoreError::LmdbError(lmdb::Error::NotFound)) => (),
+
+            Err(err) => return Err(KeyValueError::StoreError(err)),
+        };
+
+        writer.commit()?;
+
+        Ok(None)
+    }
+
+    fn done(&self, result: Result<Option<RefPtr<nsISupports>>, KeyValueError>) -> Result<(), nsresult> {
         match result {
             Ok(Some(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
             Ok(None) => unsafe { self.callback.HandleResult(ptr::null()) },

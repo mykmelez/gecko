@@ -37,7 +37,7 @@ use std::{
     vec::IntoIter,
 };
 use storage_variant::{IntoVariant, Variant};
-use task::{create_thread, get_current_thread, BoolTaskRunnable, GetOrCreateTask, GetTask, HasTask, PutTask, TaskRunnable, VariantTaskRunnable};
+use task::{create_thread, get_current_thread, BoolTaskRunnable, DeleteTask, GetOrCreateTask, GetTask, HasTask, PutTask, TaskRunnable, VariantTaskRunnable};
 use xpcom::{
     interfaces::{
         nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueCallback2, nsIKeyValueDatabase,
@@ -312,6 +312,37 @@ impl KeyValueDatabase {
 
         let runnable = VariantTaskRunnable::new(
             "KeyValueDatabase::GetAsync",
+            source,
+            task,
+            Cell::default(),
+        );
+
+        unsafe {
+            self.thread.as_ref().unwrap().DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+        }.to_result()
+    }
+
+    xpcom_method!(
+        DeleteAsync,
+        delete_async,
+        { callback: *const nsIKeyValueCallback, key: *const nsACString }
+    );
+
+    fn delete_async(
+        &self,
+        callback: &nsIKeyValueCallback,
+        key: &nsACString,
+    ) -> Result<(), nsresult> {
+        let source = get_current_thread()?;
+        let task = Box::new(DeleteTask::new(
+            RefPtr::new(callback),
+            Arc::clone(&self.rkv),
+            self.store,
+            nsCString::from(key),
+        ));
+
+        let runnable = TaskRunnable::new(
+            "KeyValueDatabase::DeleteAsync",
             source,
             task,
             Cell::default(),
