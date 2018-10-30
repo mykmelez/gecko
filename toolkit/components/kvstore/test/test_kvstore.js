@@ -433,27 +433,23 @@ add_task(async function getOrCreateAsync() {
 
 add_task(async function putAsync() {
   const databaseDir = await makeDatabaseDir("getOrCreateAsync");
-  let defaultDatabase = await new Promise((resolve, reject) => {
-    gKeyValueService.getOrCreateAsync({
-      handleResult(result) {
-        resolve(result);
-      },
-      handleError(error) {
-        reject(error);
-      },
-    }, databaseDir);
+  let defaultDatabase = (await new Promise((resolve, reject) => {
+    gKeyValueService.getOrCreateAsync({ handleResult: resolve, handleError: reject }, databaseDir);
+  })).QueryInterface(Ci.nsIKeyValueDatabase);
+
+  let has;
+  has = await new Promise((resolve, reject) => {
+    defaultDatabase.hasAsync({ handleResult: resolve, handleError: reject }, "foo");
   });
+  Assert.strictEqual(has, false);
 
   await new Promise((resolve, reject) => {
-    defaultDatabase.QueryInterface(Ci.nsIKeyValueDatabase).putAsync({
-      handleResult(result) {
-        resolve(result);
-      },
-      handleError(error) {
-        reject(error);
-      },
-    }, "foo", "bar");
+    defaultDatabase.putAsync({ handleResult: resolve, handleError: reject }, "foo", "bar");
   });
-
   Assert.strictEqual(defaultDatabase.get("foo"), "bar");
+
+  has = await new Promise((resolve, reject) => {
+    defaultDatabase.hasAsync({ handleResult: resolve, handleError: reject }, "foo");
+  });
+  Assert.strictEqual(has, true);
 });

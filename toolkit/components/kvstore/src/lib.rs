@@ -37,10 +37,10 @@ use std::{
     vec::IntoIter,
 };
 use storage_variant::{IntoVariant, Variant};
-use task::{create_thread, get_current_thread, GetOrCreateTask, PutTask, TaskRunnable};
+use task::{create_thread, get_current_thread, BoolTaskRunnable, GetOrCreateTask, HasTask, PutTask, TaskRunnable};
 use xpcom::{
     interfaces::{
-        nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabase,
+        nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueCallback2, nsIKeyValueDatabase,
         nsISimpleEnumerator, nsISupports, nsIThread, nsIVariant,
     },
     nsIID, Ensure, RefPtr,
@@ -248,6 +248,37 @@ impl KeyValueDatabase {
 
         let runnable = TaskRunnable::new(
             "KeyValueDatabase::PutAsync",
+            source,
+            task,
+            Cell::default(),
+        );
+
+        unsafe {
+            self.thread.as_ref().unwrap().DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+        }.to_result()
+    }
+
+    xpcom_method!(
+        HasAsync,
+        has_async,
+        { callback: *const nsIKeyValueCallback2, key: *const nsACString }
+    );
+
+    fn has_async(
+        &self,
+        callback: &nsIKeyValueCallback2,
+        key: &nsACString,
+    ) -> Result<(), nsresult> {
+        let source = get_current_thread()?;
+        let task = Box::new(HasTask::new(
+            RefPtr::new(callback),
+            Arc::clone(&self.rkv),
+            self.store,
+            nsCString::from(key),
+        ));
+
+        let runnable = BoolTaskRunnable::new(
+            "KeyValueDatabase::HasAsync",
             source,
             task,
             Cell::default(),

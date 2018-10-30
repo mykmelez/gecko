@@ -13,7 +13,7 @@ use std::{cell::Cell, cell::RefCell, path::Path, ptr, str, sync::{Arc, RwLock}};
 use storage_variant::{IntoVariant, Variant};
 use xpcom::{
     getter_addrefs,
-    interfaces::{nsIEventTarget, nsIKeyValueCallback, nsIRunnable, nsISupports, nsIThread, nsIVariant},
+    interfaces::{nsIEventTarget, nsIKeyValueCallback, nsIKeyValueCallback2, nsIRunnable, nsISupports, nsIThread, nsIVariant},
     RefPtr,
 };
 use KeyValueDatabase;
@@ -73,6 +73,14 @@ pub fn create_thread(name: &str) -> Result<RefPtr<nsIThread>, nsresult> {
 pub trait Task {
     fn run(&self) -> Result<Option<RefPtr<nsISupports>>, KeyValueError>;
     fn done(&self, result: Result<Option<RefPtr<nsISupports>>, KeyValueError>) -> Result<(), nsresult>;
+}
+
+/// We can't generalize Task with a type parameter because it's held by
+/// the nsIRunnable, which can't be generic, because "cannot #[derive(xpcom)]
+/// on a generic type."  So we specialize Task/TaskRunnable by return value.
+pub trait BoolTask {
+    fn run(&self) -> Result<bool, KeyValueError>;
+    fn done(&self, result: Result<bool, KeyValueError>) -> Result<(), nsresult>;
 }
 
 pub struct GetOrCreateTask {
@@ -203,6 +211,46 @@ impl Task for PutTask {
     }
 }
 
+pub struct HasTask {
+    callback: RefPtr<nsIKeyValueCallback2>,
+    rkv: Arc<RwLock<Rkv>>,
+    store: Store,
+    key: nsCString,
+}
+
+impl HasTask {
+    pub fn new(
+        callback: RefPtr<nsIKeyValueCallback2>,
+        rkv: Arc<RwLock<Rkv>>,
+        store: Store,
+        key: nsCString,
+    ) -> HasTask {
+        HasTask {
+            callback,
+            rkv,
+            store,
+            key,
+        }
+    }
+}
+
+impl BoolTask for HasTask {
+    fn run(&self) -> Result<bool, KeyValueError> {
+        let key = str::from_utf8(&self.key)?;
+        let env = self.rkv.read()?;
+        let reader = env.read()?;
+        let value = reader.get(&self.store, key)?;
+        Ok(value.is_some())
+    }
+
+    fn done(&self, result: Result<bool, KeyValueError>) -> Result<(), nsresult> {
+        match result {
+            Ok(value) => unsafe { self.callback.HandleResult(value.into_variant().ok_or(KeyValueError::Read)?.take().coerce()) },
+            Err(err) => unsafe { self.callback.HandleError(nsresult::from(err)) },
+        }.to_result()
+    }
+}
+
 #[derive(xpcom)]
 #[xpimplements(nsIRunnable, nsINamed)]
 #[refcnt = "atomic"]
@@ -226,6 +274,62 @@ impl TaskRunnable {
         result: Cell<Option<Result<Option<RefPtr<nsISupports>>, KeyValueError>>>,
     ) -> RefPtr<TaskRunnable> {
         TaskRunnable::allocate(InitTaskRunnable {
+            name,
+            source,
+            task,
+            result,
+        })
+    }
+
+    xpcom_method!(Run, run, {});
+    fn run(&self) -> Result<(), nsresult> {
+        match self.result.take() {
+            None => {
+                // Run the task on the target thread, store the result,
+                // and dispatch the runnable back to the source thread.
+                let result = self.task.run();
+                self.result.set(Some(result));
+                let target = getter_addrefs(|p| unsafe { self.source.GetEventTarget(p) })?;
+                unsafe {
+                    target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+                }.to_result()
+            }
+            Some(result) => {
+                // Back on the source thread, notify the task we're done.
+                self.task.done(result)
+            }
+        }
+    }
+
+    xpcom_method!(GetName, get_name, {}, *mut nsACString);
+    fn get_name(&self) -> Result<nsCString, nsresult> {
+        Ok(nsCString::from(self.name))
+    }
+}
+
+#[derive(xpcom)]
+#[xpimplements(nsIRunnable, nsINamed)]
+#[refcnt = "atomic"]
+pub struct InitBoolTaskRunnable {
+    name: &'static str,
+    source: RefPtr<nsIThread>,
+
+    /// Holds the task, and the result of the task.  The task is created
+    /// on the current thread, run on a target thread, and handled again
+    /// on the original thread; the result is mutated on the target thread
+    /// and accessed on the original thread.
+    task: Box<BoolTask>,
+    result: Cell<Option<Result<bool, KeyValueError>>>,
+}
+
+impl BoolTaskRunnable {
+    pub fn new(
+        name: &'static str,
+        source: RefPtr<nsIThread>,
+        task: Box<BoolTask>,
+        result: Cell<Option<Result<bool, KeyValueError>>>,
+    ) -> RefPtr<BoolTaskRunnable> {
+        BoolTaskRunnable::allocate(InitBoolTaskRunnable {
             name,
             source,
             task,
