@@ -665,6 +665,11 @@ nsDocShell::LoadURI(nsDocShellLoadState* aLoadState)
     StartupTimeline::RecordOnce(StartupTimeline::FIRST_LOAD_URI);
   }
 
+  // LoadType used to be set to a default value here, if no LoadInfo/LoadState
+  // object was passed in. That functionality has been removed as of bug
+  // 1492648. LoadType should now be set up by the caller at the time they
+  // create their nsDocShellLoadState object to pass into LoadURI.
+
   MOZ_LOG(gDocShellLeakLog, LogLevel::Debug,
           ("nsDocShell[%p]: loading %s with flags 0x%08x",
            this, aLoadState->URI()->GetSpecOrDefault().get(),
@@ -2850,8 +2855,10 @@ nsDocShell::SetDocLoaderParent(nsDocLoader* aParent)
   // Our parent has changed. Recompute scriptability.
   RecomputeCanExecuteScripts();
 
-  nsCOMPtr<nsPIDOMWindowOuter> window = GetWindow();
-  if (window) {
+  // Inform windows when they're being removed from their parent.
+  if (!aParent && mScriptGlobal) {
+    nsCOMPtr<nsPIDOMWindowOuter> window = mScriptGlobal->AsOuter();
+    MOZ_ASSERT(window);
     auto* win = nsGlobalWindowOuter::Cast(window);
     win->ParentWindowChanged();
   }
