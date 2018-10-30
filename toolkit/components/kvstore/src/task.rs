@@ -190,7 +190,7 @@ impl Task for PutTask {
         };
 
         // TODO: don't return anything.
-        Ok(true.into_variant().unwrap().query_interface::<nsISupports>().take())
+        Ok(true.into_variant().unwrap().query_interface::<nsISupports>())
 )
     }
 
