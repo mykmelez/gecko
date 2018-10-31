@@ -5,6 +5,43 @@
 
 ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
+function promisify(fn) {
+  return function() {
+    return new Promise((resolve, reject) => {
+      fn({ handleResult: resolve, handleError: reject }, ...arguments);
+    });
+  }
+}
+
+class KeyValueDatabase {
+  constructor(handle) {
+    this.handle = handle;
+  }
+
+  static async new(databaseDir) {
+    return new KeyValueDatabase(
+      (await promisify(gKeyValueService.getOrCreateAsync)(databaseDir))
+      .QueryInterface(Ci.nsIKeyValueDatabase)
+    );
+  }
+
+  async put(key, value) {
+    return await promisify(this.handle.putAsync)(key, value);
+  }
+
+  async has(key) {
+    return await promisify(this.handle.hasAsync)(key);
+  }
+
+  async get(key, defaultValue) {
+    return await promisify(this.handle.getAsync)(key, defaultValue);
+  }
+
+  async delete(key) {
+    return await promisify(this.handle.deleteAsync)(key);
+  }
+}
+
 function run_test() {
   do_get_profile();
   run_next_test();
@@ -25,110 +62,110 @@ add_task(async function getService() {
 
 add_task(async function getOrCreate() {
   const databaseDir = await makeDatabaseDir("getOrCreate");
-  const defaultDatabase = gKeyValueService.getOrCreate(databaseDir);
+  const defaultDatabase = await KeyValueDatabase.new(databaseDir);
   Assert.ok(defaultDatabase);
 });
 
 add_task(async function putGetHasDelete() {
   const databaseDir = await makeDatabaseDir("putGetHasDelete");
-  const database = gKeyValueService.getOrCreate(databaseDir);
+  const database = await KeyValueDatabase.new(databaseDir);
 
   // Getting key/value pairs that don't exist (yet) returns default values
   // or null, depending on whether you specify a default value.
-  Assert.strictEqual(database.get("int-key", 1), 1);
-  Assert.strictEqual(database.get("double-key", 1.1), 1.1);
-  Assert.strictEqual(database.get("string-key", ""), "");
-  Assert.strictEqual(database.get("bool-key", false), false);
-  Assert.strictEqual(database.get("int-key"), null);
-  Assert.strictEqual(database.get("double-key"), null);
-  Assert.strictEqual(database.get("string-key"), null);
-  Assert.strictEqual(database.get("bool-key"), null);
-  Assert.strictEqual(database.getInt("int-key", 1), 1);
-  Assert.strictEqual(database.getDouble("double-key", 1.1), 1.1);
-  Assert.strictEqual(database.getString("string-key", ""), "");
-  Assert.strictEqual(database.getBool("bool-key", false), false);
+  Assert.strictEqual(await database.get("int-key", 1), 1);
+  Assert.strictEqual(await database.get("double-key", 1.1), 1.1);
+  Assert.strictEqual(await database.get("string-key", ""), "");
+  Assert.strictEqual(await database.get("bool-key", false), false);
+  Assert.strictEqual(await database.get("int-key"), null);
+  Assert.strictEqual(await database.get("double-key"), null);
+  Assert.strictEqual(await database.get("string-key"), null);
+  Assert.strictEqual(await database.get("bool-key"), null);
+  // Assert.strictEqual(database.getInt("int-key", 1), 1);
+  // Assert.strictEqual(database.getDouble("double-key", 1.1), 1.1);
+  // Assert.strictEqual(database.getString("string-key", ""), "");
+  // Assert.strictEqual(database.getBool("bool-key", false), false);
 
   // The put method succeeds without returning a value.
-  Assert.strictEqual(database.put("int-key", 1234), undefined);
-  Assert.strictEqual(database.put("double-key", 56.78), undefined);
-  Assert.strictEqual(database.put("string-key", "Héllo, wőrld!"), undefined);
-  Assert.strictEqual(database.put("bool-key", true), undefined);
+  Assert.strictEqual(await database.put("int-key", 1234), null);
+  Assert.strictEqual(await database.put("double-key", 56.78), null);
+  Assert.strictEqual(await database.put("string-key", "Héllo, wőrld!"), null);
+  Assert.strictEqual(await database.put("bool-key", true), null);
 
   // Getting key/value pairs that exist returns the expected values.
-  Assert.strictEqual(database.get("int-key", 1), 1234);
-  Assert.strictEqual(database.get("double-key", 1.1), 56.78);
-  Assert.strictEqual(database.get("string-key", ""), "Héllo, wőrld!");
-  Assert.strictEqual(database.get("bool-key", false), true);
-  Assert.strictEqual(database.get("int-key"), 1234);
-  Assert.strictEqual(database.get("double-key"), 56.78);
-  Assert.strictEqual(database.get("string-key"), "Héllo, wőrld!");
-  Assert.strictEqual(database.get("bool-key"), true);
-  Assert.strictEqual(database.getInt("int-key", 1), 1234);
-  Assert.strictEqual(database.getDouble("double-key", 1.1), 56.78);
-  Assert.strictEqual(database.getString("string-key", ""), "Héllo, wőrld!");
-  Assert.strictEqual(database.getBool("bool-key", false), true);
+  Assert.strictEqual(await database.get("int-key", 1), 1234);
+  Assert.strictEqual(await database.get("double-key", 1.1), 56.78);
+  Assert.strictEqual(await database.get("string-key", ""), "Héllo, wőrld!");
+  Assert.strictEqual(await database.get("bool-key", false), true);
+  Assert.strictEqual(await database.get("int-key"), 1234);
+  Assert.strictEqual(await database.get("double-key"), 56.78);
+  Assert.strictEqual(await database.get("string-key"), "Héllo, wőrld!");
+  Assert.strictEqual(await database.get("bool-key"), true);
+  // Assert.strictEqual(database.getInt("int-key", 1), 1234);
+  // Assert.strictEqual(database.getDouble("double-key", 1.1), 56.78);
+  // Assert.strictEqual(database.getString("string-key", ""), "Héllo, wőrld!");
+  // Assert.strictEqual(database.getBool("bool-key", false), true);
 
   // You must specify a default value (per note in nsIKeyValue.idl)
   // for the type-specific getters.
-  Assert.throws(() => database.getInt("any-key"), /NS_ERROR_XPC_NOT_ENOUGH_ARGS/);
-  Assert.throws(() => database.getDouble("any-key"), /NS_ERROR_XPC_NOT_ENOUGH_ARGS/);
-  Assert.throws(() => database.getString("any-key"), /NS_ERROR_XPC_NOT_ENOUGH_ARGS/);
-  Assert.throws(() => database.getBool("any-key"), /NS_ERROR_XPC_NOT_ENOUGH_ARGS/);
+  // Assert.throws(() => database.getInt("any-key"), /NS_ERROR_XPC_NOT_ENOUGH_ARGS/);
+  // Assert.throws(() => database.getDouble("any-key"), /NS_ERROR_XPC_NOT_ENOUGH_ARGS/);
+  // Assert.throws(() => database.getString("any-key"), /NS_ERROR_XPC_NOT_ENOUGH_ARGS/);
+  // Assert.throws(() => database.getBool("any-key"), /NS_ERROR_XPC_NOT_ENOUGH_ARGS/);
 
   // If you specify a default value while retrieving the value of a nonexistent
   // key, then the result is the default value, no matter which getter you call.
-  Assert.strictEqual(database.getInt("nonexistent-key", 1), 1);
-  Assert.strictEqual(database.getDouble("nonexistent-key", 1.1), 1.1);
-  Assert.strictEqual(database.getString("nonexistent-key", "Hi."), "Hi.");
-  Assert.strictEqual(database.getBool("nonexistent-key", true), true);
+  // Assert.strictEqual(database.getInt("nonexistent-key", 1), 1);
+  // Assert.strictEqual(database.getDouble("nonexistent-key", 1.1), 1.1);
+  // Assert.strictEqual(database.getString("nonexistent-key", "Hi."), "Hi.");
+  // Assert.strictEqual(database.getBool("nonexistent-key", true), true);
 
   // Getting key/value pairs that do exist, but using the wrong getter
   // for the value's type, throws an exception.
-  Assert.throws(() => database.getString("int-key", ""), /NS_ERROR_UNEXPECTED/);
-  Assert.throws(() => database.getDouble("int-key", 1.1), /NS_ERROR_UNEXPECTED/);
-  Assert.throws(() => database.getBool("int-key", false), /NS_ERROR_UNEXPECTED/);
-  Assert.throws(() => database.getInt("string-key", 1), /NS_ERROR_UNEXPECTED/);
-  Assert.throws(() => database.getDouble("string-key", 1.1), /NS_ERROR_UNEXPECTED/);
-  Assert.throws(() => database.getBool("string-key", false), /NS_ERROR_UNEXPECTED/);
-  Assert.throws(() => database.getInt("bool-key", 1), /NS_ERROR_UNEXPECTED/);
-  Assert.throws(() => database.getDouble("bool-key", 1.1), /NS_ERROR_UNEXPECTED/);
-  Assert.throws(() => database.getString("bool-key", ""), /NS_ERROR_UNEXPECTED/);
-  Assert.throws(() => database.getInt("double-key", 1), /NS_ERROR_UNEXPECTED/);
-  Assert.throws(() => database.getBool("double-key", false), /NS_ERROR_UNEXPECTED/);
-  Assert.throws(() => database.getString("double-key", ""), /NS_ERROR_UNEXPECTED/);
+  // Assert.throws(() => database.getString("int-key", ""), /NS_ERROR_UNEXPECTED/);
+  // Assert.throws(() => database.getDouble("int-key", 1.1), /NS_ERROR_UNEXPECTED/);
+  // Assert.throws(() => database.getBool("int-key", false), /NS_ERROR_UNEXPECTED/);
+  // Assert.throws(() => database.getInt("string-key", 1), /NS_ERROR_UNEXPECTED/);
+  // Assert.throws(() => database.getDouble("string-key", 1.1), /NS_ERROR_UNEXPECTED/);
+  // Assert.throws(() => database.getBool("string-key", false), /NS_ERROR_UNEXPECTED/);
+  // Assert.throws(() => database.getInt("bool-key", 1), /NS_ERROR_UNEXPECTED/);
+  // Assert.throws(() => database.getDouble("bool-key", 1.1), /NS_ERROR_UNEXPECTED/);
+  // Assert.throws(() => database.getString("bool-key", ""), /NS_ERROR_UNEXPECTED/);
+  // Assert.throws(() => database.getInt("double-key", 1), /NS_ERROR_UNEXPECTED/);
+  // Assert.throws(() => database.getBool("double-key", false), /NS_ERROR_UNEXPECTED/);
+  // Assert.throws(() => database.getString("double-key", ""), /NS_ERROR_UNEXPECTED/);
 
   // The has() method works as expected for both existing and non-existent keys.
-  Assert.strictEqual(database.has("int-key"), true);
-  Assert.strictEqual(database.has("double-key"), true);
-  Assert.strictEqual(database.has("string-key"), true);
-  Assert.strictEqual(database.has("bool-key"), true);
-  Assert.strictEqual(database.has("nonexistent-key"), false);
+  Assert.strictEqual(await database.has("int-key"), true);
+  Assert.strictEqual(await database.has("double-key"), true);
+  Assert.strictEqual(await database.has("string-key"), true);
+  Assert.strictEqual(await database.has("bool-key"), true);
+  Assert.strictEqual(await database.has("nonexistent-key"), false);
 
   // The delete() method succeeds without returning a value.
-  Assert.strictEqual(database.delete("int-key"), undefined);
-  Assert.strictEqual(database.delete("double-key"), undefined);
-  Assert.strictEqual(database.delete("string-key"), undefined);
-  Assert.strictEqual(database.delete("bool-key"), undefined);
+  Assert.strictEqual(await database.delete("int-key"), null);
+  Assert.strictEqual(await database.delete("double-key"), null);
+  Assert.strictEqual(await database.delete("string-key"), null);
+  Assert.strictEqual(await database.delete("bool-key"), null);
 
   // The has() method works as expected for a deleted key.
-  Assert.strictEqual(database.has("int-key"), false);
-  Assert.strictEqual(database.has("double-key"), false);
-  Assert.strictEqual(database.has("string-key"), false);
-  Assert.strictEqual(database.has("bool-key"), false);
+  Assert.strictEqual(await database.has("int-key"), false);
+  Assert.strictEqual(await database.has("double-key"), false);
+  Assert.strictEqual(await database.has("string-key"), false);
+  Assert.strictEqual(await database.has("bool-key"), false);
 
   // Getting key/value pairs that were deleted returns default values.
-  Assert.strictEqual(database.get("int-key", 1), 1);
-  Assert.strictEqual(database.get("double-key", 1.1), 1.1);
-  Assert.strictEqual(database.get("string-key", ""), "");
-  Assert.strictEqual(database.get("bool-key", false), false);
-  Assert.strictEqual(database.get("int-key"), null);
-  Assert.strictEqual(database.get("double-key"), null);
-  Assert.strictEqual(database.get("string-key"), null);
-  Assert.strictEqual(database.get("bool-key"), null);
-  Assert.strictEqual(database.getInt("int-key", 1), 1);
-  Assert.strictEqual(database.getDouble("double-key", 1.1), 1.1);
-  Assert.strictEqual(database.getString("string-key", ""), "");
-  Assert.strictEqual(database.getBool("bool-key", false), false);
+  Assert.strictEqual(await database.get("int-key", 1), 1);
+  Assert.strictEqual(await database.get("double-key", 1.1), 1.1);
+  Assert.strictEqual(await database.get("string-key", ""), "");
+  Assert.strictEqual(await database.get("bool-key", false), false);
+  Assert.strictEqual(await database.get("int-key"), null);
+  Assert.strictEqual(await database.get("double-key"), null);
+  Assert.strictEqual(await database.get("string-key"), null);
+  Assert.strictEqual(await database.get("bool-key"), null);
+  // Assert.strictEqual(database.getInt("int-key", 1), 1);
+  // Assert.strictEqual(database.getDouble("double-key", 1.1), 1.1);
+  // Assert.strictEqual(database.getString("string-key", ""), "");
+  // Assert.strictEqual(database.getBool("bool-key", false), false);
 });
 
 add_task(async function largeNumbers() {
@@ -430,43 +467,6 @@ add_task(async function getOrCreateAsync() {
   Assert.ok(namedDatabase.QueryInterface(Ci.nsIKeyValueDatabase));
   Assert.ok(namedDatabase instanceof Ci.nsIKeyValueDatabase);
 });
-
-function promisify(fn) {
-  return function() {
-    return new Promise((resolve, reject) => {
-      fn({ handleResult: resolve, handleError: reject }, ...arguments);
-    });
-  }
-}
-
-class KeyValueDatabase {
-  constructor(handle) {
-    this.handle = handle;
-  }
-
-  static async new(databaseDir) {
-    return new KeyValueDatabase(
-      (await promisify(gKeyValueService.getOrCreateAsync)(databaseDir))
-      .QueryInterface(Ci.nsIKeyValueDatabase)
-    );
-  }
-
-  async put(key, value) {
-    return await promisify(this.handle.putAsync)(key, value);
-  }
-
-  async has(key) {
-    return await promisify(this.handle.hasAsync)(key);
-  }
-
-  async get(key) {
-    return await promisify(this.handle.getAsync)(key);
-  }
-
-  async delete(key) {
-    return await promisify(this.handle.deleteAsync)(key);
-  }
-}
 
 add_task(async function putAsync() {
   const databaseDir = await makeDatabaseDir("getOrCreateAsync");

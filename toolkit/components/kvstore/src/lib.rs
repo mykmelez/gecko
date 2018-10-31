@@ -54,6 +54,7 @@ enum DataType {
     INT32 = 2,
     DOUBLE = 9,
     BOOL = 10,
+    VOID = 13,
     WSTRING = 21,
     EMPTY = 255,
 }
@@ -74,6 +75,7 @@ enum DataType {
 const DATA_TYPE_INT32: uint16_t = DataType::INT32 as u16;
 const DATA_TYPE_DOUBLE: uint16_t = DataType::DOUBLE as u16;
 const DATA_TYPE_BOOL: uint16_t = DataType::BOOL as u16;
+const DATA_TYPE_VOID: uint16_t = DataType::VOID as u16;
 const DATA_TYPE_WSTRING: uint16_t = DataType::WSTRING as u16;
 const DATA_TYPE_EMPTY: uint16_t = DataType::EMPTY as u16;
 
@@ -648,11 +650,12 @@ fn into_variant(variant: &nsIVariant) -> Result<Variant, KeyValueError> {
             unsafe { variant.GetAsBool(&mut val) }.to_result()?;
             Ok(val.into_variant().ok_or(KeyValueError::Read)?)
         }
-        DATA_TYPE_EMPTY => {
+        DATA_TYPE_EMPTY | DATA_TYPE_VOID => {
             let val = ();
             Ok(val.into_variant().ok_or(KeyValueError::Read)?)
         }
         _unsupported_type => {
+            println!("unsupported variant data type: {:?}", data_type);
             return Err(KeyValueError::UnsupportedType(data_type));
         }
     }
