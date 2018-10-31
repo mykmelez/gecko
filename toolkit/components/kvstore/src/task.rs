@@ -138,7 +138,7 @@ impl Task for GetOrCreateTask {
         match result {
             Ok(Some(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
             Ok(None) => unsafe { self.callback.HandleResult(ptr::null()) },
-            Err(err) => unsafe { self.callback.HandleError(nsresult::from(err)) },
+            Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
         }.to_result()
     }
 }
@@ -216,7 +216,7 @@ impl Task for PutTask {
         match result {
             Ok(Some(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
             Ok(None) => unsafe { self.callback.HandleResult(ptr::null()) },
-            Err(err) => unsafe { self.callback.HandleError(nsresult::from(err)) },
+            Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
         }.to_result()
     }
 }
@@ -256,7 +256,7 @@ impl BoolTask for HasTask {
     fn done(&self, result: Result<bool, KeyValueError>) -> Result<(), nsresult> {
         match result {
             Ok(value) => unsafe { self.callback.HandleResult(value.into_variant().ok_or(KeyValueError::Read)?.take().coerce()) },
-            Err(err) => unsafe { self.callback.HandleError(nsresult::from(err)) },
+            Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
         }.to_result()
     }
 }
@@ -311,7 +311,7 @@ impl VariantTask for GetTask {
         match result {
             Ok(Some(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
             Ok(None) => unsafe { self.callback.HandleResult(ptr::null()) },
-            Err(err) => unsafe { self.callback.HandleError(nsresult::from(err)) },
+            Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
         }.to_result()
     }
 }
@@ -365,7 +365,7 @@ impl Task for DeleteTask {
         match result {
             Ok(Some(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
             Ok(None) => unsafe { self.callback.HandleResult(ptr::null()) },
-            Err(err) => unsafe { self.callback.HandleError(nsresult::from(err)) },
+            Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
         }.to_result()
     }
 }
@@ -459,7 +459,7 @@ impl Task for EnumerateTask {
         match result {
             Ok(Some(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
             Ok(None) => unsafe { self.callback.HandleResult(ptr::null()) },
-            Err(err) => unsafe { self.callback.HandleError(nsresult::from(err)) },
+            Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
         }.to_result()
     }
 }

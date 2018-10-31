@@ -18,27 +18,29 @@ class KeyValueDatabase {
     this.handle = handle;
   }
 
-  static async new(databaseDir) {
+  static async new() {
     return new KeyValueDatabase(
-      (await promisify(gKeyValueService.getOrCreateAsync)(databaseDir))
+      (await promisify(gKeyValueService.getOrCreateAsync)(...arguments))
       .QueryInterface(Ci.nsIKeyValueDatabase)
     );
   }
 
-  async put(key, value) {
-    return await promisify(this.handle.putAsync)(key, value);
+  put(key, value) {
+    return new Promise((resolve, reject) => {
+      this.handle.putAsync({ handleResult: resolve, handleError: reject }, key, value);
+    });
   }
 
-  async has(key) {
-    return await promisify(this.handle.hasAsync)(key);
+  has(key) {
+    return promisify(this.handle.hasAsync)(key);
   }
 
-  async get(key, defaultValue) {
-    return await promisify(this.handle.getAsync)(key, defaultValue);
+  get(key, defaultValue) {
+    return promisify(this.handle.getAsync)(key, defaultValue);
   }
 
-  async delete(key) {
-    return await promisify(this.handle.deleteAsync)(key);
+  delete(key) {
+    return promisify(this.handle.deleteAsync)(key);
   }
 
   async enumerate(from_key, to_key) {
@@ -242,31 +244,31 @@ add_task(async function extendedCharacterKey() {
 add_task(async function getOrCreateNamedDatabases() {
   const databaseDir = await makeDatabaseDir("getOrCreateNamedDatabases");
 
-  let fooDB = gKeyValueService.getOrCreate(databaseDir, "foo");
+  let fooDB = await KeyValueDatabase.new(databaseDir, "foo");
   Assert.ok(fooDB, "retrieval of first named database works");
 
-  let barDB = gKeyValueService.getOrCreate(databaseDir, "bar");
+  let barDB = await KeyValueDatabase.new(databaseDir, "bar");
   Assert.ok(barDB, "retrieval of second named database works");
 
-  let defaultDB = gKeyValueService.getOrCreate(databaseDir);
+  let defaultDB = await KeyValueDatabase.new(databaseDir);
   Assert.ok(defaultDB, "retrieval of default database works");
 
   // Key/value pairs that are put into a database don't exist in others.
-  defaultDB.put("key", 1);
-  Assert.ok(!fooDB.has("key"), "the foo DB still doesn't have the key");
-  fooDB.put("key", 2);
-  Assert.ok(!barDB.has("key"), "the bar DB still doesn't have the key");
-  barDB.put("key", 3);
-  Assert.strictEqual(defaultDB.getInt("key", 0), 1, "the default DB has its KV pair");
-  Assert.strictEqual(fooDB.getInt("key", 0), 2, "the foo DB has its KV pair");
-  Assert.strictEqual(barDB.getInt("key", 0), 3, "the bar DB has its KV pair");
+  await defaultDB.put("key", 1);
+  Assert.ok(!(await fooDB.has("key")), "the foo DB still doesn't have the key");
+  await fooDB.put("key", 2);
+  Assert.ok(!(await barDB.has("key")), "the bar DB still doesn't have the key");
+  await barDB.put("key", 3);
+  Assert.strictEqual(await defaultDB.get("key", 0), 1, "the default DB has its KV pair");
+  Assert.strictEqual(await fooDB.get("key", 0), 2, "the foo DB has its KV pair");
+  Assert.strictEqual(await barDB.get("key", 0), 3, "the bar DB has its KV pair");
 
   // Key/value pairs that are deleted from a database still exist in other DBs.
-  defaultDB.delete("key");
-  Assert.strictEqual(fooDB.getInt("key", 0), 2, "the foo DB still has its KV pair");
-  fooDB.delete("key");
-  Assert.strictEqual(barDB.getInt("key", 0), 3, "the bar DB still has its KV pair");
-  barDB.delete("key");
+  await defaultDB.delete("key");
+  Assert.strictEqual(await fooDB.get("key", 0), 2, "the foo DB still has its KV pair");
+  await fooDB.delete("key");
+  Assert.strictEqual(await barDB.get("key", 0), 3, "the bar DB still has its KV pair");
+  await barDB.delete("key");
 
   // LMDB uses the default database to store information about named databases,
   // so it's tricky to use both in the same directory (i.e. LMDB environment).
@@ -274,11 +276,11 @@ add_task(async function getOrCreateNamedDatabases() {
   // If you try to put a key into the default database with the same name as
   // a named database, then the write will fail because LMDB doesn't let you
   // overwrite the key.
-  Assert.throws(() => defaultDB.put("foo", 5), /NS_ERROR_FAILURE/);
+  await Assert.rejects(defaultDB.put("foo", 5), /LmdbError\(Incompatible\)/);
 
   // If you try to get a key from the default database for a named database,
   // then the read will fail because rkv doesn't understand the key's data type.
-  Assert.throws(() => defaultDB.get("foo"), /NS_ERROR_FAILURE/);
+  await Assert.rejects(defaultDB.get("foo"), /DataError\(UnknownType\(0\)\)/);
 });
 
 add_task(async function enumeration() {
