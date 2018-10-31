@@ -40,6 +40,10 @@ class KeyValueDatabase {
   async delete(key) {
     return await promisify(this.handle.deleteAsync)(key);
   }
+
+  async enumerate(from_key, to_key) {
+    return await promisify(this.handle.enumerateAsync)(from_key, to_key);
+  }
 }
 
 function run_test() {
@@ -227,7 +231,7 @@ add_task(async function extendedCharacterKey() {
   Assert.strictEqual(database.has("Héllo, wőrld!"), true);
   Assert.strictEqual(database.get("Héllo, wőrld!"), 1);
 
-  const enumerator = database.enumerate();
+  const enumerator = await database.enumerate();
   const key = enumerator.getNext().QueryInterface(Ci.nsIKeyValuePair).key;
   Assert.strictEqual(key, "Héllo, wőrld!");
 
@@ -285,8 +289,8 @@ add_task(async function enumeration() {
   database.put("string-key", "Héllo, wőrld!");
   database.put("bool-key", true);
 
-  function test(fromKey, toKey, pairs) {
-    const enumerator = database.enumerate(fromKey, toKey);
+  async function test(fromKey, toKey, pairs) {
+    const enumerator = await database.enumerate(fromKey, toKey);
 
     for (const pair of pairs) {
       Assert.strictEqual(enumerator.hasMoreElements(), true);
@@ -305,13 +309,13 @@ add_task(async function enumeration() {
   // by passing "null", "undefined" or "" (empty string) arguments
   // for those parameters. The iterator test below also tests this implicitly
   // by not specifying arguments for those parameters.
-  test(null, null, [
+  await test(null, null, [
     ["bool-key", true],
     ["double-key", 56.78],
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
-  test(undefined, undefined, [
+  await test(undefined, undefined, [
     ["bool-key", true],
     ["double-key", 56.78],
     ["int-key", 1234],
@@ -322,92 +326,92 @@ add_task(async function enumeration() {
   // and an empty string, so enumerating pairs from "" to "" has the same effect
   // as enumerating pairs without specifying from/to keys: it enumerates
   // all of the pairs in the database.
-  test("", "", [
+  await test("", "", [
     ["bool-key", true],
     ["double-key", 56.78],
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
 
-  // Test enumeration from a key that doesn't exist and is lexicographically
+  // Await test enumeration from a key that doesn't exist and is lexicographically
   // less than the least key in the database, which should enumerate
   // all of the pairs in the database.
-  test("aaaaa", null, [
+  await test("aaaaa", null, [
     ["bool-key", true],
     ["double-key", 56.78],
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
 
-  // Test enumeration from a key that doesn't exist and is lexicographically
+  // Await test enumeration from a key that doesn't exist and is lexicographically
   // greater than the first key in the database, which should enumerate pairs
   // whose key is greater than or equal to the specified key.
-  test("ccccc", null, [
+  await test("ccccc", null, [
     ["double-key", 56.78],
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
 
-  // Test enumeration from a key that does exist, which should enumerate pairs
+  // Await test enumeration from a key that does exist, which should enumerate pairs
   // whose key is greater than or equal to that key.
-  test("int-key", null, [
+  await test("int-key", null, [
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
 
-  // Test enumeration from a key that doesn't exist and is lexicographically
-  // greater than the greatest key in the database, which should enumerate
+  // Await test enumeration from a key that doesn't exist and is lexicographically
+  // greater than the greaawait test key in the database, which should enumerate
   // none of the pairs in the database.
-  test("zzzzz", null, []);
+  await test("zzzzz", null, []);
 
-  // Test enumeration to a key that doesn't exist and is lexicographically
-  // greater than the greatest key in the database, which should enumerate
+  // Await test enumeration to a key that doesn't exist and is lexicographically
+  // greater than the greaawait test key in the database, which should enumerate
   // all of the pairs in the database.
-  test(null, "zzzzz", [
+  await test(null, "zzzzz", [
     ["bool-key", true],
     ["double-key", 56.78],
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
 
-  // Test enumeration to a key that doesn't exist and is lexicographically
-  // less than the greatest key in the database, which should enumerate pairs
+  // Await test enumeration to a key that doesn't exist and is lexicographically
+  // less than the greaawait test key in the database, which should enumerate pairs
   // whose key is less than or equal to the specified key.
-  test(null, "ppppp", [
+  await test(null, "ppppp", [
     ["bool-key", true],
     ["double-key", 56.78],
     ["int-key", 1234],
   ]);
 
-  // Test enumeration to a key that does exist, which should enumerate pairs
+  // Await test enumeration to a key that does exist, which should enumerate pairs
   // whose key is less than or equal to that key.
-  test(null, "int-key", [
+  await test(null, "int-key", [
     ["bool-key", true],
     ["double-key", 56.78],
     ["int-key", 1234],
   ]);
 
-  // Test enumeration to a key that doesn't exist and is lexicographically
+  // Await test enumeration to a key that doesn't exist and is lexicographically
   // less than the least key in the database, which should enumerate
   // none of the pairs in the database.
-  test(null, "aaaaa", []);
+  await test(null, "aaaaa", []);
 
-  // Test enumeration between intermediate keys, which should enumerate
+  // Await test enumeration between intermediate keys, which should enumerate
   // the pairs whose keys lie in between them.
-  test("int-key", "int-key", [
+  await test("int-key", "int-key", [
     ["int-key", 1234],
   ]);
-  test("ggggg", "ppppp", [
+  await test("ggggg", "ppppp", [
     ["int-key", 1234],
   ]);
 
-  // Test enumeration from a greater key to a lesser one, which should enumerate
+  // Await test enumeration from a greater key to a lesser one, which should enumerate
   // none of the pairs in the database, even if the reverse ordering would
   // enumerate some pairs.  Consumers are responsible for ordering the "from"
   // and "to" keys such that "from" is less than or equal to "to".
-  test("ppppp", "ccccc", []);
-  test("int-key", "ccccc", []);
-  test("ppppp", "int-key", []);
+  await test("ppppp", "ccccc", []);
+  await test("int-key", "ccccc", []);
+  await test("ppppp", "int-key", []);
 
   // Enumerators don't implement the JS iteration protocol, but it's trivial
   // to wrap them in an iterable using a generator.
@@ -417,7 +421,7 @@ add_task(async function enumeration() {
     }
   }
   let actual = {};
-  for (let { key, value } of KeyValueIterator(database.enumerate())) {
+  for (let { key, value } of KeyValueIterator(await database.enumerate())) {
     actual[key] = value;
   }
   Assert.deepEqual(actual, {

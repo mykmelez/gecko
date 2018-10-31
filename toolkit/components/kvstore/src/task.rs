@@ -9,6 +9,7 @@ use into_variant;
 use libc::{int32_t, uint16_t};
 use nserror::{nsresult, NsresultExt, NS_OK};
 use nsstring::{nsACString, nsCString, nsString};
+use ownedvalue::{value_to_owned, OwnedValue};
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{cell::Cell, cell::RefCell, path::Path, ptr, str, sync::{Arc, RwLock}};
 use storage_variant::{IntoVariant, Variant};
@@ -18,6 +19,7 @@ use xpcom::{
     RefPtr,
 };
 use KeyValueDatabase;
+use SimpleEnumerator;
 
 // These are the relevant parts of the nsXPTTypeTag enum in xptinfo.h,
 // which nsIVariant.idl reflects into the nsIDataType struct class and uses
@@ -357,6 +359,100 @@ impl Task for DeleteTask {
         writer.commit()?;
 
         Ok(None)
+    }
+
+    fn done(&self, result: Result<Option<RefPtr<nsISupports>>, KeyValueError>) -> Result<(), nsresult> {
+        match result {
+            Ok(Some(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
+            Ok(None) => unsafe { self.callback.HandleResult(ptr::null()) },
+            Err(err) => unsafe { self.callback.HandleError(nsresult::from(err)) },
+        }.to_result()
+    }
+}
+
+pub struct EnumerateTask {
+    callback: RefPtr<nsIKeyValueCallback>,
+    rkv: Arc<RwLock<Rkv>>,
+    store: Store,
+    from_key: nsCString,
+    to_key: nsCString,
+}
+
+impl EnumerateTask {
+    pub fn new(
+        callback: RefPtr<nsIKeyValueCallback>,
+        rkv: Arc<RwLock<Rkv>>,
+        store: Store,
+        from_key: nsCString,
+        to_key: nsCString,
+    ) -> EnumerateTask {
+        EnumerateTask {
+            callback,
+            rkv,
+            store,
+            from_key,
+            to_key,
+        }
+    }
+}
+
+impl Task for EnumerateTask {
+    fn run(&self) -> Result<Option<RefPtr<nsISupports>>, KeyValueError> {
+        let env = self.rkv.read()?;
+        let reader = env.read()?;
+        let from_key = str::from_utf8(&self.from_key)?;
+        let to_key = str::from_utf8(&self.to_key)?;
+
+        let iterator = if from_key.is_empty() {
+            reader.iter_start(&self.store)?
+        } else {
+            reader.iter_from(&self.store, &from_key)?
+        };
+
+        // Ideally, we'd enumerate pairs lazily, as the consumer calls
+        // nsISimpleEnumerator.getNext(), which calls our
+        // SimpleEnumerator.get_next() implementation.  But SimpleEnumerator
+        // can't reference the Iter because Rust "cannot #[derive(xpcom)]
+        // on a generic type," and the Iter requires a lifetime parameter,
+        // which would make SimpleEnumerator generic.
+        //
+        // Our fallback approach is to eagerly collect the iterator
+        // into a collection that SimpleEnumerator owns.  Fixing this so we
+        // enumerate pairs lazily is bug 1499252.
+        let pairs: Vec<(
+            Result<String, KeyValueError>,
+            Result<OwnedValue, KeyValueError>,
+        )> = iterator
+            // Convert the key to a string so we can compare it to the "to" key.
+            // For forward compatibility, we don't fail here if we can't convert
+            // a key to UTF-8.  Instead, we store the Err in the collection
+            // and fail lazily in SimpleEnumerator.get_next().
+            .map(|(key, val)| (str::from_utf8(&key), val))
+            .take_while(|(key, _val)| {
+                if to_key.is_empty() {
+                    true
+                } else {
+                    match *key {
+                        Ok(key) => key <= to_key,
+                        Err(_err) => true,
+                    }
+                }
+            }).map(|(key, val)| {
+                (
+                    match key {
+                        Ok(key) => Ok(key.to_owned()),
+                        Err(err) => Err(err.into()),
+                    },
+                    value_to_owned(val),
+                )
+            }).collect();
+
+        let enumerator = SimpleEnumerator::new(pairs);
+
+        match enumerator.query_interface::<nsISupports>() {
+            Some(supports) => Ok(Some(supports)),
+            None => Err(KeyValueError::NoInterface("nsISupports")),
+        }
     }
 
     fn done(&self, result: Result<Option<RefPtr<nsISupports>>, KeyValueError>) -> Result<(), nsresult> {

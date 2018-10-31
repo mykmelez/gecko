@@ -37,7 +37,7 @@ use std::{
     vec::IntoIter,
 };
 use storage_variant::{IntoVariant, Variant};
-use task::{create_thread, get_current_thread, BoolTaskRunnable, DeleteTask, GetOrCreateTask, GetTask, HasTask, PutTask, TaskRunnable, VariantTaskRunnable};
+use task::{create_thread, get_current_thread, BoolTaskRunnable, DeleteTask, EnumerateTask, GetOrCreateTask, GetTask, HasTask, PutTask, TaskRunnable, VariantTaskRunnable};
 use xpcom::{
     interfaces::{
         nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueCallback2, nsIKeyValueDatabase,
@@ -474,6 +474,39 @@ impl KeyValueDatabase {
     get_method!(get_double, c_double, F64, c_double);
     get_method!(get_bool, bool, Bool, bool);
     get_method!(get_string, &nsACString, Str, nsCString);
+
+    xpcom_method!(
+        EnumerateAsync,
+        enumerate_async,
+        { callback: *const nsIKeyValueCallback, from_key: *const nsACString, to_key: *const nsACString }
+    );
+
+    fn enumerate_async(
+        &self,
+        callback: &nsIKeyValueCallback,
+        from_key: &nsACString,
+        to_key: &nsACString,
+    ) -> Result<(), nsresult> {
+        let source = get_current_thread()?;
+        let task = Box::new(EnumerateTask::new(
+            RefPtr::new(callback),
+            Arc::clone(&self.rkv),
+            self.store,
+            nsCString::from(from_key),
+            nsCString::from(to_key),
+        ));
+
+        let runnable = TaskRunnable::new(
+            "KeyValueDatabase::EnumerateAsync",
+            source,
+            task,
+            Cell::default(),
+        );
+
+        unsafe {
+            self.thread.as_ref().unwrap().DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+        }.to_result()
+    }
 
     fn enumerate(
         &self,

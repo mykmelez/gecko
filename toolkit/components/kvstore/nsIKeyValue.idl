@@ -41,24 +41,25 @@ interface nsIKeyValueDatabase : nsISupports {
     void putAsync(
         in nsIKeyValueCallback callback,
         in AUTF8String key,
-        in nsIVariant value
-    );
+        in nsIVariant value);
 
     void hasAsync(
         in nsIKeyValueCallback2 callback,
-        in AUTF8String key
-    );
+        in AUTF8String key);
 
     void getAsync(
         in nsIKeyValueCallback2 callback,
         in AUTF8String key,
-        [optional] in nsIVariant defaultValue
-    );
+        [optional] in nsIVariant defaultValue);
 
     void deleteAsync(
         in nsIKeyValueCallback callback,
-        in AUTF8String key
-    );
+        in AUTF8String key);
+
+    void enumerateAsync(
+        in nsIKeyValueCallback callback,
+        [optional] in AUTF8String fromKey,
+        [optional] in AUTF8String toKey);
 
     void put(in AUTF8String key, in nsIVariant value);
     boolean has(in AUTF8String key);
