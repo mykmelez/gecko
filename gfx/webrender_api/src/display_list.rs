@@ -721,7 +721,7 @@ fn serialize_fast<T: Serialize>(vec: &mut Vec<u8>, e: &T) {
 /// * The ExactSizeIterator impl is stable and correct across a Clone
 /// * The Serialize impl has a stable size across two invocations
 ///
-/// If the first is incorrect, webrender will be very slow. If the other two are
+/// If the first is incorrect, WebRender will be very slow. If the other two are
 /// incorrect, the result will be Undefined Behaviour! The ExactSizeIterator
 /// bound would ideally be replaced with a TrustedLen bound to protect us a bit
 /// better, but that trait isn't stable (and won't be for a good while, if ever).
@@ -1276,7 +1276,7 @@ impl DisplayListBuilder {
         clip_node_id: Option<ClipId>,
         transform_style: TransformStyle,
         mix_blend_mode: MixBlendMode,
-        filters: Vec<FilterOp>,
+        filters: &[FilterOp],
         raster_space: RasterSpace,
     ) {
         let item = SpecificDisplayItem::PushStackingContext(PushStackingContextDisplayItem {
@@ -1289,7 +1289,7 @@ impl DisplayListBuilder {
         });
 
         self.push_item(item, info);
-        self.push_iter(&filters);
+        self.push_iter(filters);
     }
 
     pub fn pop_stacking_context(&mut self) {
