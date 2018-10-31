@@ -42,7 +42,8 @@ class KeyValueDatabase {
   }
 
   async enumerate(from_key, to_key) {
-    return await promisify(this.handle.enumerateAsync)(from_key, to_key);
+    return (await promisify(this.handle.enumerateAsync)(from_key, to_key))
+      .QueryInterface(Ci.nsISimpleEnumerator);
   }
 }
 
@@ -174,7 +175,7 @@ add_task(async function putGetHasDelete() {
 
 add_task(async function largeNumbers() {
   const databaseDir = await makeDatabaseDir("largeNumbers");
-  const database = gKeyValueService.getOrCreate(databaseDir);
+  const database = await KeyValueDatabase.new(databaseDir);
 
   const MAX_INT_VARIANT = Math.pow(2, 31) - 1;
   const MIN_DOUBLE_VARIANT = Math.pow(2, 31);
@@ -190,52 +191,52 @@ add_task(async function largeNumbers() {
   // Perhaps we should even mark all the type-specific getters as [noscript]
   // and only expose them to native code.
 
-  database.put("max-int-variant", MAX_INT_VARIANT);
-  database.put("min-double-variant", MIN_DOUBLE_VARIANT);
-  database.put("max-safe-integer", Number.MAX_SAFE_INTEGER);
-  database.put("min-safe-integer", Number.MIN_SAFE_INTEGER);
-  database.put("max-value", Number.MAX_VALUE);
-  database.put("min-value", Number.MIN_VALUE);
+  await database.put("max-int-variant", MAX_INT_VARIANT);
+  await database.put("min-double-variant", MIN_DOUBLE_VARIANT);
+  await database.put("max-safe-integer", Number.MAX_SAFE_INTEGER);
+  await database.put("min-safe-integer", Number.MIN_SAFE_INTEGER);
+  await database.put("max-value", Number.MAX_VALUE);
+  await database.put("min-value", Number.MIN_VALUE);
 
-  Assert.strictEqual(database.get("max-int-variant"), MAX_INT_VARIANT);
-  Assert.strictEqual(database.getInt("max-int-variant", 1), MAX_INT_VARIANT);
+  Assert.strictEqual(await database.get("max-int-variant"), MAX_INT_VARIANT);
+  // Assert.strictEqual(database.getInt("max-int-variant", 1), MAX_INT_VARIANT);
 
-  Assert.strictEqual(database.get("min-double-variant"), MIN_DOUBLE_VARIANT);
-  Assert.throws(() => database.getInt("min-double-variant", 1), /NS_ERROR_UNEXPECTED/);
-  Assert.strictEqual(database.getDouble("min-double-variant", 1.1), MIN_DOUBLE_VARIANT);
+  Assert.strictEqual(await database.get("min-double-variant"), MIN_DOUBLE_VARIANT);
+  // Assert.throws(() => database.getInt("min-double-variant", 1), /NS_ERROR_UNEXPECTED/);
+  // Assert.strictEqual(database.getDouble("min-double-variant", 1.1), MIN_DOUBLE_VARIANT);
 
-  Assert.strictEqual(database.get("max-safe-integer"), Number.MAX_SAFE_INTEGER);
-  Assert.throws(() => database.getInt("max-safe-integer", 1), /NS_ERROR_UNEXPECTED/);
-  Assert.strictEqual(database.getDouble("max-safe-integer", 1.1), Number.MAX_SAFE_INTEGER);
+  Assert.strictEqual(await database.get("max-safe-integer"), Number.MAX_SAFE_INTEGER);
+  // Assert.throws(() => database.getInt("max-safe-integer", 1), /NS_ERROR_UNEXPECTED/);
+  // Assert.strictEqual(database.getDouble("max-safe-integer", 1.1), Number.MAX_SAFE_INTEGER);
 
-  Assert.strictEqual(database.get("min-safe-integer"), Number.MIN_SAFE_INTEGER);
-  Assert.throws(() => database.getInt("min-safe-integer", 1), /NS_ERROR_UNEXPECTED/);
-  Assert.strictEqual(database.getDouble("min-safe-integer", 1.1), Number.MIN_SAFE_INTEGER);
+  Assert.strictEqual(await database.get("min-safe-integer"), Number.MIN_SAFE_INTEGER);
+  // Assert.throws(() => database.getInt("min-safe-integer", 1), /NS_ERROR_UNEXPECTED/);
+  // Assert.strictEqual(database.getDouble("min-safe-integer", 1.1), Number.MIN_SAFE_INTEGER);
 
-  Assert.strictEqual(database.get("max-value"), Number.MAX_VALUE);
-  Assert.throws(() => database.getInt("max-value", 1), /NS_ERROR_UNEXPECTED/);
-  Assert.strictEqual(database.getDouble("max-value", 1.1), Number.MAX_VALUE);
+  Assert.strictEqual(await database.get("max-value"), Number.MAX_VALUE);
+  // Assert.throws(() => database.getInt("max-value", 1), /NS_ERROR_UNEXPECTED/);
+  // Assert.strictEqual(database.getDouble("max-value", 1.1), Number.MAX_VALUE);
 
-  Assert.strictEqual(database.get("min-value"), Number.MIN_VALUE);
-  Assert.throws(() => database.getInt("min-value", 1), /NS_ERROR_UNEXPECTED/);
-  Assert.strictEqual(database.getDouble("min-value", 1.1), Number.MIN_VALUE);
+  Assert.strictEqual(await database.get("min-value"), Number.MIN_VALUE);
+  // Assert.throws(() => database.getInt("min-value", 1), /NS_ERROR_UNEXPECTED/);
+  // Assert.strictEqual(database.getDouble("min-value", 1.1), Number.MIN_VALUE);
 });
 
 add_task(async function extendedCharacterKey() {
   const databaseDir = await makeDatabaseDir("extendedCharacterKey");
-  const database = gKeyValueService.getOrCreate(databaseDir);
+  const database = await KeyValueDatabase.new(databaseDir);
 
   // Ensure that we can use extended character (i.e. non-ASCII) strings as keys.
 
-  database.put("Héllo, wőrld!", 1);
-  Assert.strictEqual(database.has("Héllo, wőrld!"), true);
-  Assert.strictEqual(database.get("Héllo, wőrld!"), 1);
+  await database.put("Héllo, wőrld!", 1);
+  Assert.strictEqual(await database.has("Héllo, wőrld!"), true);
+  Assert.strictEqual(await database.get("Héllo, wőrld!"), 1);
 
   const enumerator = await database.enumerate();
   const key = enumerator.getNext().QueryInterface(Ci.nsIKeyValuePair).key;
   Assert.strictEqual(key, "Héllo, wőrld!");
 
-  database.delete("Héllo, wőrld!");
+  await database.delete("Héllo, wőrld!");
 });
 
 add_task(async function getOrCreateNamedDatabases() {
