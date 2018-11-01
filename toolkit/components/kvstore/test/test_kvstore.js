@@ -27,7 +27,7 @@ class KeyValueEnumerator {
 
 class KeyValueDatabase {
   constructor(database) {
-    this.database = database.QueryInterface(Ci.nsIKeyValueDatabase);
+    this.database = database;
   }
 
   static async new(dir, name) {

@@ -37,13 +37,13 @@ use std::{
     vec::IntoIter,
 };
 use storage_variant::{IntoVariant, Variant};
-use task::{create_thread, get_current_thread, BoolTaskRunnable, DeleteTask, EnumerateTask,
+use task::{create_thread, get_current_thread, BoolTaskRunnable, DatabaseTaskRunnable, DeleteTask, EnumerateTask,
     GetNextTask, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable,
     VariantTaskRunnable,
 };
 use xpcom::{
     interfaces::{
-        nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueCallback2, nsIKeyValueDatabase,
+        nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabaseCallback, nsIKeyValueCallback2, nsIKeyValueDatabase,
         nsIKeyValueEnumerator, nsISupports, nsIThread, nsIVariant,
     },
     nsIID, Ensure, RefPtr,
@@ -155,12 +155,6 @@ impl KeyValueService {
         *mut *const nsIKeyValueDatabase
     );
 
-    xpcom_method!(
-        GetOrCreateAsync,
-        get_or_create_async,
-        { callback: *const nsIKeyValueCallback, path: *const nsACString, name: *const nsACString }
-    );
-
     fn get_or_create(
         &self,
         path: &nsACString,
@@ -182,9 +176,15 @@ impl KeyValueService {
             .ok_or(KeyValueError::NoInterface("nsIKeyValueDatabase"))
     }
 
+    xpcom_method!(
+        GetOrCreateAsync,
+        get_or_create_async,
+        { callback: *const nsIKeyValueDatabaseCallback, path: *const nsACString, name: *const nsACString }
+    );
+
     fn get_or_create_async(
         &self,
-        callback: &nsIKeyValueCallback,
+        callback: &nsIKeyValueDatabaseCallback,
         path: &nsACString,
         name: &nsACString,
     ) -> Result<(), nsresult> {
@@ -197,7 +197,7 @@ impl KeyValueService {
             nsCString::from(name),
         ));
 
-        let runnable = TaskRunnable::new(
+        let runnable = DatabaseTaskRunnable::new(
             "KeyValueDatabase::GetOrCreateAsync",
             source,
             task,

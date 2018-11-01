@@ -91,6 +91,12 @@ interface nsIKeyValueDatabase : nsISupports {
     //                                 [optional] in AUTF8String toKey);
 };
 
+[scriptable, uuid(2becc1f8-2d80-4b63-92a8-24ee8f79ee45)]
+interface nsIKeyValueDatabaseCallback : nsISupports {
+    void handleResult(in nsIKeyValueDatabase database);
+    void handleError(in AUTF8String message);
+};
+
 [scriptable, uuid(2cbb5567-cac9-4da0-8a67-9635ab7428e8)]
 interface nsIAsyncKeyValueDatabase : nsISupports {
     void put(in AString key, in nsIVariant value, in nsIKeyValueCallback callback);
@@ -121,7 +127,7 @@ interface nsIKeyValueService : nsISupports {
     );
 
     void getOrCreateAsync(
-        in nsIKeyValueCallback callback,
+        in nsIKeyValueDatabaseCallback callback,
         in AUTF8String path,
         [optional] in AUTF8String name
     );

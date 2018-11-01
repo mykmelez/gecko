@@ -15,7 +15,7 @@ use std::{cell::Cell, cell::RefCell, path::Path, ptr, rc::Rc, str, sync::{Arc, R
 use storage_variant::{IntoVariant, Variant};
 use xpcom::{
     getter_addrefs,
-    interfaces::{nsIEventTarget, nsIKeyValueCallback, nsIKeyValueCallback2, nsIRunnable,
+    interfaces::{nsIEventTarget, nsIKeyValueCallback, nsIKeyValueDatabase, nsIKeyValueDatabaseCallback, nsIKeyValueCallback2, nsIRunnable,
         nsISupports, nsIThread, nsIVariant,
     },
     RefPtr,
@@ -83,6 +83,11 @@ pub trait Task {
     fn done(&self, result: Result<Option<RefPtr<nsISupports>>, KeyValueError>) -> Result<(), nsresult>;
 }
 
+pub trait DatabaseTask {
+    fn run(&self) -> Result<Option<RefPtr<nsIKeyValueDatabase>>, KeyValueError>;
+    fn done(&self, result: Result<Option<RefPtr<nsIKeyValueDatabase>>, KeyValueError>) -> Result<(), nsresult>;
+}
+
 pub trait VariantTask {
     fn run(&self) -> Result<Option<RefPtr<nsIVariant>>, KeyValueError>;
     fn done(&self, result: Result<Option<RefPtr<nsIVariant>>, KeyValueError>) -> Result<(), nsresult>;
@@ -97,7 +102,7 @@ pub trait BoolTask {
 }
 
 pub struct GetOrCreateTask {
-    callback: RefPtr<nsIKeyValueCallback>,
+    callback: RefPtr<nsIKeyValueDatabaseCallback>,
     thread: RefPtr<nsIThread>,
     path: nsCString,
     name: nsCString,
@@ -105,7 +110,7 @@ pub struct GetOrCreateTask {
 
 impl GetOrCreateTask {
     pub fn new(
-        callback: RefPtr<nsIKeyValueCallback>,
+        callback: RefPtr<nsIKeyValueDatabaseCallback>,
         thread: RefPtr<nsIThread>,
         path: nsCString,
         name: nsCString,
@@ -119,8 +124,8 @@ impl GetOrCreateTask {
     }
 }
 
-impl Task for GetOrCreateTask {
-    fn run(&self) -> Result<Option<RefPtr<nsISupports>>, KeyValueError> {
+impl DatabaseTask for GetOrCreateTask {
+    fn run(&self) -> Result<Option<RefPtr<nsIKeyValueDatabase>>, KeyValueError> {
         let mut writer = Manager::singleton().write()?;
         let rkv = writer.get_or_create(Path::new(str::from_utf8(&self.path)?), Rkv::new)?;
         let store = if self.name.is_empty() {
@@ -129,15 +134,15 @@ impl Task for GetOrCreateTask {
             rkv.write()?
                 .open_or_create(Some(str::from_utf8(&self.name)?))
         }?;
-        let key_value_db = KeyValueDatabase::new(rkv, store, Some(self.thread.clone()));
+        let db = KeyValueDatabase::new(rkv, store, Some(self.thread.clone()));
 
-        match key_value_db.query_interface::<nsISupports>() {
+        match db.query_interface::<nsIKeyValueDatabase>() {
             Some(db) => Ok(Some(db)),
             None => Err(KeyValueError::NoInterface("nsISupports")),
         }
     }
 
-    fn done(&self, result: Result<Option<RefPtr<nsISupports>>, KeyValueError>) -> Result<(), nsresult> {
+    fn done(&self, result: Result<Option<RefPtr<nsIKeyValueDatabase>>, KeyValueError>) -> Result<(), nsresult> {
         match result {
             Ok(Some(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
             Ok(None) => unsafe { self.callback.HandleResult(ptr::null()) },
@@ -574,6 +579,62 @@ impl TaskRunnable {
         result: Cell<Option<Result<Option<RefPtr<nsISupports>>, KeyValueError>>>,
     ) -> RefPtr<TaskRunnable> {
         TaskRunnable::allocate(InitTaskRunnable {
+            name,
+            source,
+            task,
+            result,
+        })
+    }
+
+    xpcom_method!(Run, run, {});
+    fn run(&self) -> Result<(), nsresult> {
+        match self.result.take() {
+            None => {
+                // Run the task on the target thread, store the result,
+                // and dispatch the runnable back to the source thread.
+                let result = self.task.run();
+                self.result.set(Some(result));
+                let target = getter_addrefs(|p| unsafe { self.source.GetEventTarget(p) })?;
+                unsafe {
+                    target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+                }.to_result()
+            }
+            Some(result) => {
+                // Back on the source thread, notify the task we're done.
+                self.task.done(result)
+            }
+        }
+    }
+
+    xpcom_method!(GetName, get_name, {}, *mut nsACString);
+    fn get_name(&self) -> Result<nsCString, nsresult> {
+        Ok(nsCString::from(self.name))
+    }
+}
+
+#[derive(xpcom)]
+#[xpimplements(nsIRunnable, nsINamed)]
+#[refcnt = "atomic"]
+pub struct InitDatabaseTaskRunnable {
+    name: &'static str,
+    source: RefPtr<nsIThread>,
+
+    /// Holds the task, and the result of the task.  The task is created
+    /// on the current thread, run on a target thread, and handled again
+    /// on the original thread; the result is mutated on the target thread
+    /// and accessed on the original thread.
+    task: Box<DatabaseTask>,
+    result: Cell<Option<Result<Option<RefPtr<nsIKeyValueDatabase>>, KeyValueError>>>,
+}
+
+impl DatabaseTaskRunnable {
+    pub fn new(
+        name: &'static str,
+        source: RefPtr<nsIThread>,
+        task: Box<DatabaseTask>,
+        result: Cell<Option<Result<Option<RefPtr<nsIKeyValueDatabase>>, KeyValueError>>>,
+    ) -> RefPtr<DatabaseTaskRunnable> {
+        DatabaseTaskRunnable::allocate(InitDatabaseTaskRunnable {
             name,
             source,
             task,
