@@ -281,12 +281,12 @@ add_task(async function getOrCreateNamedDatabases() {
 
 add_task(async function enumeration() {
   const databaseDir = await makeDatabaseDir("enumeration");
-  const database = gKeyValueService.getOrCreate(databaseDir);
+  const database = await KeyValueDatabase.new(databaseDir);
 
-  database.put("int-key", 1234);
-  database.put("double-key", 56.78);
-  database.put("string-key", "Héllo, wőrld!");
-  database.put("bool-key", true);
+  await database.put("int-key", 1234);
+  await database.put("double-key", 56.78);
+  await database.put("string-key", "Héllo, wőrld!");
+  await database.put("bool-key", true);
 
   async function test(fromKey, toKey, pairs) {
     const enumerator = await database.enumerate(fromKey, toKey);
@@ -430,55 +430,8 @@ add_task(async function enumeration() {
     "string-key": "Héllo, wőrld!",
   });
 
-  database.delete("int-key");
-  database.delete("double-key");
-  database.delete("string-key");
-  database.delete("bool-key");
-});
-
-add_task(async function getOrCreateAsync() {
-  const databaseDir = await makeDatabaseDir("getOrCreateAsync");
-  let defaultDatabase = await new Promise((resolve, reject) => {
-    gKeyValueService.getOrCreateAsync({
-      handleResult(result) {
-        resolve(result);
-      },
-      handleError(error) {
-        reject(error);
-      },
-    }, databaseDir);
-  });
-
-  Assert.ok(defaultDatabase);
-  Assert.ok(defaultDatabase instanceof Ci.nsISupports);
-  Assert.ok(defaultDatabase.QueryInterface(Ci.nsIKeyValueDatabase));
-  Assert.ok(defaultDatabase instanceof Ci.nsIKeyValueDatabase);
-
-  let namedDatabase = await new Promise((resolve, reject) => {
-    gKeyValueService.getOrCreateAsync({
-      handleResult(result) {
-        resolve(result);
-      },
-      handleError(error) {
-        reject(error);
-      },
-    }, databaseDir, "named-database");
-  });
-
-  Assert.ok(namedDatabase);
-  Assert.ok(namedDatabase instanceof Ci.nsISupports);
-  Assert.ok(namedDatabase.QueryInterface(Ci.nsIKeyValueDatabase));
-  Assert.ok(namedDatabase instanceof Ci.nsIKeyValueDatabase);
-});
-
-add_task(async function putAsync() {
-  const databaseDir = await makeDatabaseDir("getOrCreateAsync");
-  let defaultDatabase = await KeyValueDatabase.new(databaseDir);
-
-  Assert.strictEqual(await defaultDatabase.has("foo"), false);
-  await defaultDatabase.put("foo", "bar");
-  Assert.strictEqual(await defaultDatabase.get("foo"), "bar");
-  Assert.strictEqual(await defaultDatabase.has("foo"), true);
-  await defaultDatabase.delete("foo");
-  Assert.strictEqual(await defaultDatabase.has("foo"), false);
+  await database.delete("int-key");
+  await database.delete("double-key");
+  await database.delete("string-key");
+  await database.delete("bool-key");
 });
