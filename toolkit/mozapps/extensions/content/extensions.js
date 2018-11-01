@@ -2632,7 +2632,7 @@ var gDetailView = {
     gCategories.select(category);
 
     document.getElementById("detail-name").textContent = aAddon.name;
-    var icon = AddonManager.getPreferredIconURL(aAddon, 64, window);
+    var icon = AddonManager.getPreferredIconURL(aAddon, 32, window);
     document.getElementById("detail-icon").src = icon ? icon : "";
     document.getElementById("detail-creator").setCreator(aAddon.creator, aAddon.homepageURL);
 
@@ -3081,10 +3081,9 @@ var gDetailView = {
       let policy = ExtensionParent.WebExtensionPolicy.getByID(this._addon.id);
       browser.sameProcessAsFrameLoader = policy.extension.groupFrameLoader;
     }
-    let remote = !E10SUtils.canLoadURIInProcess(optionsURL, Services.appinfo.PROCESS_TYPE_DEFAULT);
 
     let readyPromise;
-    if (remote) {
+    if (E10SUtils.canLoadURIInRemoteType(optionsURL, E10SUtils.EXTENSION_REMOTE_TYPE)) {
       browser.setAttribute("remote", "true");
       browser.setAttribute("remoteType", E10SUtils.EXTENSION_REMOTE_TYPE);
       readyPromise = promiseEvent("XULFrameLoaderCreated", browser);

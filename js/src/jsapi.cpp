@@ -4589,9 +4589,6 @@ JS::SetPromiseUserInputEventHandlingState(JS::HandleObject promiseObj_,
     }
 
     auto& promise = promiseObj->as<PromiseObject>();
-    if (promise.state() != JS::PromiseState::Pending) {
-      return false;
-    }
 
     switch (state) {
       case JS::PromiseUserInputEventHandlingState::DontCare:
@@ -4719,28 +4716,19 @@ JS::NewReadableExternalSourceStreamObject(JSContext* cx, void* underlyingSource,
 JS_PUBLIC_API(bool)
 JS::IsReadableStream(JSObject* obj)
 {
-    if (IsWrapper(obj)) {
-        obj = CheckedUnwrap(obj);
-    }
-    return obj && obj->is<ReadableStream>();
+    return obj->canUnwrapAs<ReadableStream>();
 }
 
 JS_PUBLIC_API(bool)
 JS::IsReadableStreamReader(JSObject* obj)
 {
-    if (IsWrapper(obj)) {
-        obj = CheckedUnwrap(obj);
-    }
-    return obj && obj->is<ReadableStreamDefaultReader>();
+    return obj->canUnwrapAs<ReadableStreamDefaultReader>();
 }
 
 JS_PUBLIC_API(bool)
 JS::IsReadableStreamDefaultReader(JSObject* obj)
 {
-    if (IsWrapper(obj)) {
-        obj = CheckedUnwrap(obj);
-    }
-    return obj && obj->is<ReadableStreamDefaultReader>();
+    return obj->canUnwrapAs<ReadableStreamDefaultReader>();
 }
 
 template<class T>

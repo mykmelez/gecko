@@ -109,6 +109,15 @@ LogBlockedRequest(nsIRequest* aRequest,
   // we are passing aProperty as the category so we can link to the
   // appropriate MDN docs depending on the specific error.
   uint64_t innerWindowID = nsContentUtils::GetInnerWindowID(aRequest);
+  // The |innerWindowID| could be 0 if this request is created from script.
+  // We can always try top level content window id in this case,
+  // since the window id can lead to current top level window's web console.
+  if (!innerWindowID) {
+    nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aRequest);
+    if (httpChannel) {
+      Unused << httpChannel->GetTopLevelContentWindowId(&innerWindowID);
+    }
+  }
   nsCORSListenerProxy::LogBlockedCORSRequest(innerWindowID, privateBrowsing,
                                              msg, category);
 }
@@ -957,10 +966,10 @@ nsCORSListenerProxy::UpdateChannel(nsIChannel* aChannel,
   }
 
   if (!mHasBeenCrossSite &&
-      NS_SUCCEEDED(mRequestingPrincipal->CheckMayLoad(uri, false, false)) &&
+      NS_SUCCEEDED(mRequestingPrincipal->CheckMayLoad(uri, true, false)) &&
       (originalURI == uri ||
        NS_SUCCEEDED(mRequestingPrincipal->CheckMayLoad(originalURI,
-                                                       false, false)))) {
+                                                       true, false)))) {
     return NS_OK;
   }
 
