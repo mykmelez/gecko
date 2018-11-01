@@ -32,13 +32,13 @@ use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
     cell::{Cell, RefCell},
     path::Path,
-    ptr, str,
+    ptr, rc::Rc, str,
     sync::{Arc, RwLock},
     vec::IntoIter,
 };
 use storage_variant::{IntoVariant, Variant};
 use task::{create_thread, get_current_thread, BoolTaskRunnable, DeleteTask, EnumerateTask,
-    GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable,
+    GetNextTask, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable,
     VariantTaskRunnable,
 };
 use xpcom::{
@@ -578,12 +578,10 @@ impl KeyValueDatabase {
 #[refcnt = "nonatomic"]
 pub struct InitKeyValueEnumerator {
     thread: RefPtr<nsIThread>,
-    iter: Arc<
-        IntoIter<(
-            Result<String, KeyValueError>,
-            Result<OwnedValue, KeyValueError>,
-        )>,
-    >,
+    iter: Rc<RefCell<IntoIter<(
+        Result<String, KeyValueError>,
+        Result<OwnedValue, KeyValueError>,
+    )>>>,
 }
 
 impl KeyValueEnumerator {
@@ -596,7 +594,7 @@ impl KeyValueEnumerator {
     ) -> RefPtr<KeyValueEnumerator> {
         KeyValueEnumerator::allocate(InitKeyValueEnumerator {
             thread,
-            iter: Arc::new(pairs.into_iter()),
+            iter: Rc::new(RefCell::new(pairs.into_iter())),
         })
     }
 
@@ -615,6 +613,30 @@ impl KeyValueEnumerator {
 
         let runnable = BoolTaskRunnable::new(
             "KeyValueDatabase::HasMoreElementsAsync",
+            source,
+            task,
+            Cell::default(),
+        );
+
+        unsafe {
+            self.thread.DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+        }.to_result()
+    }
+
+    xpcom_method!(GetNextAsync, get_next_async, { callback: *const nsIKeyValueCallback });
+
+    fn get_next_async(
+        &self,
+        callback: &nsIKeyValueCallback,
+    ) -> Result<(), nsresult> {
+        let source = get_current_thread()?;
+        let task = Box::new(GetNextTask::new(
+            RefPtr::new(callback),
+            self.iter.clone(),
+        ));
+
+        let runnable = TaskRunnable::new(
+            "KeyValueDatabase::GetNextAsync",
             source,
             task,
             Cell::default(),

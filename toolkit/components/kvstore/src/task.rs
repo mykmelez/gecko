@@ -7,11 +7,11 @@ extern crate xpcom;
 use error::KeyValueError;
 use into_variant;
 use libc::{int32_t, uint16_t};
-use nserror::{nsresult, NsresultExt, NS_OK};
+use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_OK};
 use nsstring::{nsACString, nsCString, nsString};
 use ownedvalue::{value_to_owned, OwnedValue};
 use rkv::{Manager, Rkv, Store, StoreError, Value};
-use std::{cell::Cell, cell::RefCell, path::Path, ptr, str, sync::{Arc, RwLock}, vec::IntoIter};
+use std::{cell::Cell, cell::RefCell, path::Path, ptr, rc::Rc, str, sync::{Arc, RwLock}, vec::IntoIter};
 use storage_variant::{IntoVariant, Variant};
 use xpcom::{
     getter_addrefs,
@@ -22,6 +22,7 @@ use xpcom::{
 };
 use KeyValueDatabase;
 use KeyValueEnumerator;
+use KeyValuePair;
 
 // These are the relevant parts of the nsXPTTypeTag enum in xptinfo.h,
 // which nsIVariant.idl reflects into the nsIDataType struct class and uses
@@ -468,23 +469,19 @@ impl Task for EnumerateTask {
 
 pub struct HasMoreElementsTask {
     callback: RefPtr<nsIKeyValueCallback2>,
-    iter: Arc<
-        IntoIter<(
-            Result<String, KeyValueError>,
-            Result<OwnedValue, KeyValueError>,
-        )>,
-    >,
+    iter: Rc<RefCell<IntoIter<(
+        Result<String, KeyValueError>,
+        Result<OwnedValue, KeyValueError>,
+    )>>>,
 }
 
 impl HasMoreElementsTask {
     pub fn new(
         callback: RefPtr<nsIKeyValueCallback2>,
-        iter: Arc<
-            IntoIter<(
-                Result<String, KeyValueError>,
-                Result<OwnedValue, KeyValueError>,
-            )>,
-        >,
+        iter: Rc<RefCell<IntoIter<(
+            Result<String, KeyValueError>,
+            Result<OwnedValue, KeyValueError>,
+        )>>>,
     ) -> HasMoreElementsTask {
         HasMoreElementsTask {
             callback,
@@ -495,12 +492,60 @@ impl HasMoreElementsTask {
 
 impl BoolTask for HasMoreElementsTask {
     fn run(&self) -> Result<bool, KeyValueError> {
-        Ok(false)
+        Ok(!self.iter.borrow().as_slice().is_empty())
     }
 
     fn done(&self, result: Result<bool, KeyValueError>) -> Result<(), nsresult> {
         match result {
             Ok(value) => unsafe { self.callback.HandleResult(value.into_variant().ok_or(KeyValueError::Read)?.take().coerce()) },
+            Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+        }.to_result()
+    }
+}
+
+pub struct GetNextTask {
+    callback: RefPtr<nsIKeyValueCallback>,
+    iter: Rc<RefCell<IntoIter<(
+        Result<String, KeyValueError>,
+        Result<OwnedValue, KeyValueError>,
+    )>>>,
+}
+
+impl GetNextTask {
+    pub fn new(
+        callback: RefPtr<nsIKeyValueCallback>,
+        iter: Rc<RefCell<IntoIter<(
+            Result<String, KeyValueError>,
+            Result<OwnedValue, KeyValueError>,
+        )>>>,
+    ) -> GetNextTask {
+        GetNextTask {
+            callback,
+            iter,
+        }
+    }
+}
+
+impl Task for GetNextTask {
+    fn run(&self) -> Result<Option<RefPtr<nsISupports>>, KeyValueError> {
+        let mut iter = self.iter.borrow_mut();
+        let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
+
+        // We fail on retrieval of the key/value pair if the key isn't valid
+        // UTF-*, if the value is unexpected, or if we encountered a store error
+        // while retrieving the pair.
+        let pair = KeyValuePair::new(key?, value?);
+
+        match pair.query_interface::<nsISupports>() {
+            Some(interface) => Ok(Some(interface)),
+            None => Err(KeyValueError::NoInterface("nsISupports")),
+        }
+    }
+
+    fn done(&self, result: Result<Option<RefPtr<nsISupports>>, KeyValueError>) -> Result<(), nsresult> {
+        match result {
+            Ok(Some(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
+            Ok(None) => unsafe { self.callback.HandleResult(ptr::null()) },
             Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
         }.to_result()
     }

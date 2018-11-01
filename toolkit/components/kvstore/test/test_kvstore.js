@@ -11,37 +11,60 @@ function promisify(fn, ...args) {
   });
 }
 
+class KeyValueEnumerator {
+  constructor(enumerator) {
+    this.enumerator = enumerator.QueryInterface(Ci.nsIKeyValueEnumerator);
+  }
+
+  hasMoreElements() {
+    return promisify(this.enumerator.hasMoreElementsAsync);
+  }
+
+  getNext() {
+    return promisify(this.enumerator.getNextAsync);
+  }
+}
+
 class KeyValueDatabase {
-  constructor(handle) {
-    this.handle = handle;
+  constructor(database) {
+    this.database = database.QueryInterface(Ci.nsIKeyValueDatabase);
   }
 
   static async new(dir, name) {
     return new KeyValueDatabase(
       await promisify(gKeyValueService.getOrCreateAsync, dir, name)
-      .then(database => database.QueryInterface(Ci.nsIKeyValueDatabase))
     );
   }
 
   put(key, value) {
-    return promisify(this.handle.putAsync, key, value);
+    return promisify(this.database.putAsync, key, value);
   }
 
   has(key) {
-    return promisify(this.handle.hasAsync, key);
+    return promisify(this.database.hasAsync, key);
   }
 
   get(key, defaultValue) {
-    return promisify(this.handle.getAsync, key, defaultValue);
+    return promisify(this.database.getAsync, key, defaultValue);
   }
 
   delete(key) {
-    return promisify(this.handle.deleteAsync, key);
+    return promisify(this.database.deleteAsync, key);
   }
 
-  enumerate(from_key, to_key) {
-    return promisify(this.handle.enumerateAsync, from_key, to_key)
-    .then(enumerator => enumerator.QueryInterface(Ci.nsIKeyValueEnumerator));
+  async enumerate(from_key, to_key) {
+    return new KeyValueEnumerator(
+      await promisify(this.database.enumerateAsync, from_key, to_key)
+    );
+  }
+}
+
+// KeyValueEnumerator doesn't implement the JS iteration protocol,
+// but it's trivial to make it iterable via an async generator.
+async function* KeyValueIterator(enumerator) {
+  enumerator = await enumerator;
+  while (await enumerator.hasMoreElements()) {
+    yield (await enumerator.getNext()).QueryInterface(Ci.nsIKeyValuePair);
   }
 }
 
@@ -231,7 +254,7 @@ add_task(async function extendedCharacterKey() {
   Assert.strictEqual(await database.get("Héllo, wőrld!"), 1);
 
   const enumerator = await database.enumerate();
-  const key = enumerator.getNext().QueryInterface(Ci.nsIKeyValuePair).key;
+  const key = (await enumerator.getNext()).QueryInterface(Ci.nsIKeyValuePair).key;
   Assert.strictEqual(key, "Héllo, wőrld!");
 
   await database.delete("Héllo, wőrld!");
@@ -293,14 +316,14 @@ add_task(async function enumeration() {
 
     for (const pair of pairs) {
       Assert.strictEqual(await enumerator.hasMoreElements(), true);
-      const element = enumerator.getNext().QueryInterface(Ci.nsIKeyValuePair);
+      const element = (await enumerator.getNext()).QueryInterface(Ci.nsIKeyValuePair);
       Assert.ok(element);
       Assert.strictEqual(element.key, pair[0]);
       Assert.strictEqual(element.value, pair[1]);
     }
 
     Assert.strictEqual(await enumerator.hasMoreElements(), false);
-    Assert.throws(() => enumerator.getNext(), /NS_ERROR_FAILURE/);
+    await Assert.rejects(enumerator.getNext(), /NS_ERROR_FAILURE/);
   }
 
   // Test enumeration without specifying "from" and "to" keys, which should
@@ -404,23 +427,16 @@ add_task(async function enumeration() {
     ["int-key", 1234],
   ]);
 
-  // Await test enumeration from a greater key to a lesser one, which should enumerate
-  // none of the pairs in the database, even if the reverse ordering would
-  // enumerate some pairs.  Consumers are responsible for ordering the "from"
-  // and "to" keys such that "from" is less than or equal to "to".
+  // Await test enumeration from a greater key to a lesser one, which should
+  // enumerate none of the pairs in the database, even if the reverse ordering
+  // would enumerate some pairs.  Consumers are responsible for ordering
+  // the "from" and "to" keys such that "from" is less than or equal to "to".
   await test("ppppp", "ccccc", []);
   await test("int-key", "ccccc", []);
   await test("ppppp", "int-key", []);
 
-  // Enumerators don't implement the JS iteration protocol, but it's trivial
-  // to wrap them in an iterable using a generator.
-  async function* KeyValueIterator(enumerator) {
-    while (await enumerator.hasMoreElements()) {
-      yield enumerator.getNext().QueryInterface(Ci.nsIKeyValuePair);
-    }
-  }
   let actual = {};
-  for (let { key, value } of KeyValueIterator(await database.enumerate())) {
+  for await (let { key, value } of KeyValueIterator(database.enumerate())) {
     actual[key] = value;
   }
   Assert.deepEqual(actual, {
