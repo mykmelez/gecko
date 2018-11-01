@@ -41,7 +41,7 @@ class KeyValueDatabase {
 
   enumerate(from_key, to_key) {
     return promisify(this.handle.enumerateAsync, from_key, to_key)
-    .then(enumerator => enumerator.QueryInterface(Ci.nsISimpleEnumerator));
+    .then(enumerator => enumerator.QueryInterface(Ci.nsIKeyValueEnumerator));
   }
 }
 
@@ -292,14 +292,14 @@ add_task(async function enumeration() {
     const enumerator = await database.enumerate(fromKey, toKey);
 
     for (const pair of pairs) {
-      Assert.strictEqual(enumerator.hasMoreElements(), true);
+      Assert.strictEqual(await enumerator.hasMoreElements(), true);
       const element = enumerator.getNext().QueryInterface(Ci.nsIKeyValuePair);
       Assert.ok(element);
       Assert.strictEqual(element.key, pair[0]);
       Assert.strictEqual(element.value, pair[1]);
     }
 
-    Assert.strictEqual(enumerator.hasMoreElements(), false);
+    Assert.strictEqual(await enumerator.hasMoreElements(), false);
     Assert.throws(() => enumerator.getNext(), /NS_ERROR_FAILURE/);
   }
 
@@ -414,8 +414,8 @@ add_task(async function enumeration() {
 
   // Enumerators don't implement the JS iteration protocol, but it's trivial
   // to wrap them in an iterable using a generator.
-  function* KeyValueIterator(enumerator) {
-    while (enumerator.hasMoreElements()) {
+  async function* KeyValueIterator(enumerator) {
+    while (await enumerator.hasMoreElements()) {
       yield enumerator.getNext().QueryInterface(Ci.nsIKeyValuePair);
     }
   }

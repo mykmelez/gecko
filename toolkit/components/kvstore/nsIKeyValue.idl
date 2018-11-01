@@ -1,4 +1,3 @@
-#include "nsISimpleEnumerator.idl"
 #include "nsISupports.idl"
 #include "nsIVariant.idl"
 
@@ -34,6 +33,12 @@ interface nsIKeyValueCallback : nsISupports {
 interface nsIKeyValueCallback2 : nsISupports {
     void handleResult([optional] in nsIVariant result);
     void handleError(in AUTF8String message);
+};
+
+[scriptable, uuid(b9ba7116-b7ff-4717-9a28-a08e6879b199)]
+interface nsIKeyValueEnumerator : nsISupports {
+    void hasMoreElementsAsync(in nsIKeyValueCallback2 callback);
+    // void getNextAsync(in nsIKeyValueCallback callback);
 };
 
 [scriptable, uuid(c449398e-174c-425b-8195-da6aa0ccd9a5)]
@@ -82,8 +87,8 @@ interface nsIKeyValueDatabase : nsISupports {
      * (lexicographically) the specified key.  And if you specify a "to" key,
      * then enumeration ends at the first key less than or equal to it.
      */
-    nsISimpleEnumerator enumerate([optional] in AUTF8String fromKey,
-                                  [optional] in AUTF8String toKey);
+    // nsIKeyValueEnumerator enumerate([optional] in AUTF8String fromKey,
+    //                                 [optional] in AUTF8String toKey);
 };
 
 [scriptable, uuid(2cbb5567-cac9-4da0-8a67-9635ab7428e8)]

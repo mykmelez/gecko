@@ -11,15 +11,17 @@ use nserror::{nsresult, NsresultExt, NS_OK};
 use nsstring::{nsACString, nsCString, nsString};
 use ownedvalue::{value_to_owned, OwnedValue};
 use rkv::{Manager, Rkv, Store, StoreError, Value};
-use std::{cell::Cell, cell::RefCell, path::Path, ptr, str, sync::{Arc, RwLock}};
+use std::{cell::Cell, cell::RefCell, path::Path, ptr, str, sync::{Arc, RwLock}, vec::IntoIter};
 use storage_variant::{IntoVariant, Variant};
 use xpcom::{
     getter_addrefs,
-    interfaces::{nsIEventTarget, nsIKeyValueCallback, nsIKeyValueCallback2, nsIRunnable, nsISupports, nsIThread, nsIVariant},
+    interfaces::{nsIEventTarget, nsIKeyValueCallback, nsIKeyValueCallback2, nsIRunnable,
+        nsISupports, nsIThread, nsIVariant,
+    },
     RefPtr,
 };
 use KeyValueDatabase;
-use SimpleEnumerator;
+use KeyValueEnumerator;
 
 // These are the relevant parts of the nsXPTTypeTag enum in xptinfo.h,
 // which nsIVariant.idl reflects into the nsIDataType struct class and uses
@@ -410,14 +412,14 @@ impl Task for EnumerateTask {
         };
 
         // Ideally, we'd enumerate pairs lazily, as the consumer calls
-        // nsISimpleEnumerator.getNext(), which calls our
-        // SimpleEnumerator.get_next() implementation.  But SimpleEnumerator
+        // nsIKeyValueEnumerator.getNext(), which calls our
+        // KeyValueEnumerator.get_next() implementation.  But KeyValueEnumerator
         // can't reference the Iter because Rust "cannot #[derive(xpcom)]
         // on a generic type," and the Iter requires a lifetime parameter,
-        // which would make SimpleEnumerator generic.
+        // which would make KeyValueEnumerator generic.
         //
         // Our fallback approach is to eagerly collect the iterator
-        // into a collection that SimpleEnumerator owns.  Fixing this so we
+        // into a collection that KeyValueEnumerator owns.  Fixing this so we
         // enumerate pairs lazily is bug 1499252.
         let pairs: Vec<(
             Result<String, KeyValueError>,
@@ -426,7 +428,7 @@ impl Task for EnumerateTask {
             // Convert the key to a string so we can compare it to the "to" key.
             // For forward compatibility, we don't fail here if we can't convert
             // a key to UTF-8.  Instead, we store the Err in the collection
-            // and fail lazily in SimpleEnumerator.get_next().
+            // and fail lazily in KeyValueEnumerator.get_next().
             .map(|(key, val)| (str::from_utf8(&key), val))
             .take_while(|(key, _val)| {
                 if to_key.is_empty() {
@@ -447,7 +449,7 @@ impl Task for EnumerateTask {
                 )
             }).collect();
 
-        let enumerator = SimpleEnumerator::new(pairs);
+        let enumerator = KeyValueEnumerator::new(get_current_thread().unwrap(), pairs);
 
         match enumerator.query_interface::<nsISupports>() {
             Some(supports) => Ok(Some(supports)),
@@ -459,6 +461,46 @@ impl Task for EnumerateTask {
         match result {
             Ok(Some(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
             Ok(None) => unsafe { self.callback.HandleResult(ptr::null()) },
+            Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+        }.to_result()
+    }
+}
+
+pub struct HasMoreElementsTask {
+    callback: RefPtr<nsIKeyValueCallback2>,
+    iter: Arc<
+        IntoIter<(
+            Result<String, KeyValueError>,
+            Result<OwnedValue, KeyValueError>,
+        )>,
+    >,
+}
+
+impl HasMoreElementsTask {
+    pub fn new(
+        callback: RefPtr<nsIKeyValueCallback2>,
+        iter: Arc<
+            IntoIter<(
+                Result<String, KeyValueError>,
+                Result<OwnedValue, KeyValueError>,
+            )>,
+        >,
+    ) -> HasMoreElementsTask {
+        HasMoreElementsTask {
+            callback,
+            iter,
+        }
+    }
+}
+
+impl BoolTask for HasMoreElementsTask {
+    fn run(&self) -> Result<bool, KeyValueError> {
+        Ok(false)
+    }
+
+    fn done(&self, result: Result<bool, KeyValueError>) -> Result<(), nsresult> {
+        match result {
+            Ok(value) => unsafe { self.callback.HandleResult(value.into_variant().ok_or(KeyValueError::Read)?.take().coerce()) },
             Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
         }.to_result()
     }

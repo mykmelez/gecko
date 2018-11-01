@@ -37,11 +37,14 @@ use std::{
     vec::IntoIter,
 };
 use storage_variant::{IntoVariant, Variant};
-use task::{create_thread, get_current_thread, BoolTaskRunnable, DeleteTask, EnumerateTask, GetOrCreateTask, GetTask, HasTask, PutTask, TaskRunnable, VariantTaskRunnable};
+use task::{create_thread, get_current_thread, BoolTaskRunnable, DeleteTask, EnumerateTask,
+    GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable,
+    VariantTaskRunnable,
+};
 use xpcom::{
     interfaces::{
         nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueCallback2, nsIKeyValueDatabase,
-        nsISimpleEnumerator, nsISupports, nsIThread, nsIVariant,
+        nsIKeyValueEnumerator, nsISupports, nsIThread, nsIVariant,
     },
     nsIID, Ensure, RefPtr,
 };
@@ -363,12 +366,12 @@ impl KeyValueDatabase {
     xpcom_method!(GetDouble, get_double, { key: *const nsACString, default_value: c_double }, *mut c_double);
     xpcom_method!(GetBool, get_bool, { key: *const nsACString, default_value: bool }, *mut bool);
     xpcom_method!(GetString, get_string, { key: *const nsACString, default_value: *const nsACString }, *mut nsACString);
-    xpcom_method!(
-        Enumerate,
-        enumerate,
-        { from_key: *const nsACString, to_key: *const nsACString },
-        *mut *const nsISimpleEnumerator
-    );
+    // xpcom_method!(
+    //     Enumerate,
+    //     enumerate,
+    //     { from_key: *const nsACString, to_key: *const nsACString },
+    //     *mut *const nsIKeyValueEnumerator
+    // );
 
     fn put(&self, key: &nsACString, value: &nsIVariant) -> Result<(), KeyValueError> {
         let key = str::from_utf8(key)?;
@@ -508,73 +511,74 @@ impl KeyValueDatabase {
         }.to_result()
     }
 
-    fn enumerate(
-        &self,
-        from_key: &nsACString,
-        to_key: &nsACString,
-    ) -> Result<RefPtr<nsISimpleEnumerator>, KeyValueError> {
-        let env = self.rkv.read()?;
-        let reader = env.read()?;
-        let from_key = str::from_utf8(from_key)?;
-        let to_key = str::from_utf8(to_key)?;
+    // fn enumerate(
+    //     &self,
+    //     from_key: &nsACString,
+    //     to_key: &nsACString,
+    // ) -> Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError> {
+    //     let env = self.rkv.read()?;
+    //     let reader = env.read()?;
+    //     let from_key = str::from_utf8(from_key)?;
+    //     let to_key = str::from_utf8(to_key)?;
 
-        let iterator = if from_key.is_empty() {
-            reader.iter_start(&self.store)?
-        } else {
-            reader.iter_from(&self.store, &from_key)?
-        };
+    //     let iterator = if from_key.is_empty() {
+    //         reader.iter_start(&self.store)?
+    //     } else {
+    //         reader.iter_from(&self.store, &from_key)?
+    //     };
 
-        // Ideally, we'd enumerate pairs lazily, as the consumer calls
-        // nsISimpleEnumerator.getNext(), which calls our
-        // SimpleEnumerator.get_next() implementation.  But SimpleEnumerator
-        // can't reference the Iter because Rust "cannot #[derive(xpcom)]
-        // on a generic type," and the Iter requires a lifetime parameter,
-        // which would make SimpleEnumerator generic.
-        //
-        // Our fallback approach is to eagerly collect the iterator
-        // into a collection that SimpleEnumerator owns.  Fixing this so we
-        // enumerate pairs lazily is bug 1499252.
-        let pairs: Vec<(
-            Result<String, KeyValueError>,
-            Result<OwnedValue, KeyValueError>,
-        )> = iterator
-            // Convert the key to a string so we can compare it to the "to" key.
-            // For forward compatibility, we don't fail here if we can't convert
-            // a key to UTF-8.  Instead, we store the Err in the collection
-            // and fail lazily in SimpleEnumerator.get_next().
-            .map(|(key, val)| (str::from_utf8(&key), val))
-            .take_while(|(key, _val)| {
-                if to_key.is_empty() {
-                    true
-                } else {
-                    match *key {
-                        Ok(key) => key <= to_key,
-                        Err(_err) => true,
-                    }
-                }
-            }).map(|(key, val)| {
-                (
-                    match key {
-                        Ok(key) => Ok(key.to_owned()),
-                        Err(err) => Err(err.into()),
-                    },
-                    value_to_owned(val),
-                )
-            }).collect();
+    //     // Ideally, we'd enumerate pairs lazily, as the consumer calls
+    //     // nsIKeyValueEnumerator.getNext(), which calls our
+    //     // KeyValueEnumerator.get_next() implementation.  But KeyValueEnumerator
+    //     // can't reference the Iter because Rust "cannot #[derive(xpcom)]
+    //     // on a generic type," and the Iter requires a lifetime parameter,
+    //     // which would make KeyValueEnumerator generic.
+    //     //
+    //     // Our fallback approach is to eagerly collect the iterator
+    //     // into a collection that KeyValueEnumerator owns.  Fixing this so we
+    //     // enumerate pairs lazily is bug 1499252.
+    //     let pairs: Vec<(
+    //         Result<String, KeyValueError>,
+    //         Result<OwnedValue, KeyValueError>,
+    //     )> = iterator
+    //         // Convert the key to a string so we can compare it to the "to" key.
+    //         // For forward compatibility, we don't fail here if we can't convert
+    //         // a key to UTF-8.  Instead, we store the Err in the collection
+    //         // and fail lazily in KeyValueEnumerator.get_next().
+    //         .map(|(key, val)| (str::from_utf8(&key), val))
+    //         .take_while(|(key, _val)| {
+    //             if to_key.is_empty() {
+    //                 true
+    //             } else {
+    //                 match *key {
+    //                     Ok(key) => key <= to_key,
+    //                     Err(_err) => true,
+    //                 }
+    //             }
+    //         }).map(|(key, val)| {
+    //             (
+    //                 match key {
+    //                     Ok(key) => Ok(key.to_owned()),
+    //                     Err(err) => Err(err.into()),
+    //                 },
+    //                 value_to_owned(val),
+    //             )
+    //         }).collect();
 
-        let enumerator = SimpleEnumerator::new(pairs);
+    //     let enumerator = KeyValueEnumerator::new(RefPtr::new(&self.thread.unwrap()), pairs);
 
-        enumerator
-            .query_interface::<nsISimpleEnumerator>()
-            .ok_or(KeyValueError::NoInterface("nsISimpleEnumerator"))
-    }
+    //     enumerator
+    //         .query_interface::<nsIKeyValueEnumerator>()
+    //         .ok_or(KeyValueError::NoInterface("nsIKeyValueEnumerator"))
+    // }
 }
 
 #[derive(xpcom)]
-#[xpimplements(nsISimpleEnumerator)]
+#[xpimplements(nsIKeyValueEnumerator)]
 #[refcnt = "nonatomic"]
-pub struct InitSimpleEnumerator {
-    iter: RefCell<
+pub struct InitKeyValueEnumerator {
+    thread: RefPtr<nsIThread>,
+    iter: Arc<
         IntoIter<(
             Result<String, KeyValueError>,
             Result<OwnedValue, KeyValueError>,
@@ -582,48 +586,61 @@ pub struct InitSimpleEnumerator {
     >,
 }
 
-impl SimpleEnumerator {
+impl KeyValueEnumerator {
     fn new(
+        thread: RefPtr<nsIThread>,
         pairs: Vec<(
             Result<String, KeyValueError>,
             Result<OwnedValue, KeyValueError>,
         )>,
-    ) -> RefPtr<SimpleEnumerator> {
-        SimpleEnumerator::allocate(InitSimpleEnumerator {
-            iter: RefCell::new(pairs.into_iter()),
+    ) -> RefPtr<KeyValueEnumerator> {
+        KeyValueEnumerator::allocate(InitKeyValueEnumerator {
+            thread,
+            iter: Arc::new(pairs.into_iter()),
         })
     }
 
-    xpcom_method!(HasMoreElements, has_more_elements, {}, *mut bool);
-    xpcom_method!(GetNext, get_next, {}, *mut *const nsISupports);
+    xpcom_method!(HasMoreElementsAsync, has_more_elements_async, { callback: *const nsIKeyValueCallback2 });
+    // xpcom_method!(GetNextAsync, get_next_async, { callback: *const nsIKeyValueCallback });
 
-    // The nsISimpleEnumeratorBase methods iterator() and entries() depend on
-    // nsIJSEnumerator, which requires jscontext, which is unsupported for Rust.
-    #[allow(non_snake_case)]
-    fn Iterator(&self, _retval: *mut *const nsIJSEnumerator) -> nsresult {
-        NS_ERROR_NOT_IMPLEMENTED
+    fn has_more_elements_async(
+        &self,
+        callback: &nsIKeyValueCallback2,
+    ) -> Result<(), nsresult> {
+        let source = get_current_thread()?;
+        let task = Box::new(HasMoreElementsTask::new(
+            RefPtr::new(callback),
+            self.iter.clone(),
+        ));
+
+        let runnable = BoolTaskRunnable::new(
+            "KeyValueDatabase::HasMoreElementsAsync",
+            source,
+            task,
+            Cell::default(),
+        );
+
+        unsafe {
+            self.thread.DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+        }.to_result()
     }
-    #[allow(non_snake_case)]
-    fn Entries(&self, _aIface: *const nsIID, _retval: *mut *const nsIJSEnumerator) -> nsresult {
-        NS_ERROR_NOT_IMPLEMENTED
-    }
 
-    fn has_more_elements(&self) -> Result<bool, KeyValueError> {
-        Ok(!self.iter.borrow().as_slice().is_empty())
-    }
+    // fn has_more_elements(&self) -> Result<bool, KeyValueError> {
+    //     Ok(!self.iter.borrow().as_slice().is_empty())
+    // }
 
-    fn get_next(&self) -> Result<RefPtr<nsISupports>, KeyValueError> {
-        let mut iter = self.iter.borrow_mut();
-        let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
+    // fn get_next(&self) -> Result<RefPtr<nsISupports>, KeyValueError> {
+    //     let mut iter = self.iter.borrow_mut();
+    //     let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
 
-        // We fail on retrieval of the key/value pair if the key isn't valid
-        // UTF-*, if the value is unexpected, or if we encountered a store error
-        // while retrieving the pair.
-        let pair = KeyValuePair::new(key?, value?);
+    //     // We fail on retrieval of the key/value pair if the key isn't valid
+    //     // UTF-*, if the value is unexpected, or if we encountered a store error
+    //     // while retrieving the pair.
+    //     let pair = KeyValuePair::new(key?, value?);
 
-        pair.query_interface::<nsISupports>()
-            .ok_or(KeyValueError::NoInterface("nsIKeyValuePair"))
-    }
+    //     pair.query_interface::<nsISupports>()
+    //         .ok_or(KeyValueError::NoInterface("nsIKeyValuePair"))
+    // }
 }
 
 #[derive(xpcom)]
