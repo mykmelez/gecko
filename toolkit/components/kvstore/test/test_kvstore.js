@@ -5,12 +5,10 @@
 
 ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
-function promisify(fn) {
-  return function() {
-    return new Promise((resolve, reject) => {
-      fn({ handleResult: resolve, handleError: reject }, ...arguments);
-    });
-  }
+function promisify(fn, ...args) {
+  return new Promise((resolve, reject) => {
+    fn({ handleResult: resolve, handleError: reject }, ...args);
+  });
 }
 
 class KeyValueDatabase {
@@ -18,34 +16,32 @@ class KeyValueDatabase {
     this.handle = handle;
   }
 
-  static async new() {
+  static async new(dir, name) {
     return new KeyValueDatabase(
-      (await promisify(gKeyValueService.getOrCreateAsync)(...arguments))
-      .QueryInterface(Ci.nsIKeyValueDatabase)
+      await promisify(gKeyValueService.getOrCreateAsync, dir, name)
+      .then(database => database.QueryInterface(Ci.nsIKeyValueDatabase))
     );
   }
 
   put(key, value) {
-    return new Promise((resolve, reject) => {
-      this.handle.putAsync({ handleResult: resolve, handleError: reject }, key, value);
-    });
+    return promisify(this.handle.putAsync, key, value);
   }
 
   has(key) {
-    return promisify(this.handle.hasAsync)(key);
+    return promisify(this.handle.hasAsync, key);
   }
 
   get(key, defaultValue) {
-    return promisify(this.handle.getAsync)(key, defaultValue);
+    return promisify(this.handle.getAsync, key, defaultValue);
   }
 
   delete(key) {
-    return promisify(this.handle.deleteAsync)(key);
+    return promisify(this.handle.deleteAsync, key);
   }
 
-  async enumerate(from_key, to_key) {
-    return (await promisify(this.handle.enumerateAsync)(from_key, to_key))
-      .QueryInterface(Ci.nsISimpleEnumerator);
+  enumerate(from_key, to_key) {
+    return promisify(this.handle.enumerateAsync, from_key, to_key)
+    .then(enumerator => enumerator.QueryInterface(Ci.nsISimpleEnumerator));
   }
 }
 
