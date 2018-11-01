@@ -38,13 +38,13 @@ use std::{
 };
 use storage_variant::{IntoVariant, Variant};
 use task::{create_thread, get_current_thread, BoolTaskRunnable, DatabaseTaskRunnable, DeleteTask, EnumerateTask,
-    GetNextTask, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable,
+    GetNextTask, GetNextRunnable, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable,
     VariantTaskRunnable,
 };
 use xpcom::{
     interfaces::{
         nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabaseCallback, nsIKeyValueCallback2, nsIKeyValueDatabase,
-        nsIKeyValueEnumerator, nsISupports, nsIThread, nsIVariant,
+        nsIKeyValueEnumerator, nsIKeyValuePairCallback, nsISupports, nsIThread, nsIVariant,
     },
     nsIID, Ensure, RefPtr,
 };
@@ -623,11 +623,11 @@ impl KeyValueEnumerator {
         }.to_result()
     }
 
-    xpcom_method!(GetNextAsync, get_next_async, { callback: *const nsIKeyValueCallback });
+    xpcom_method!(GetNextAsync, get_next_async, { callback: *const nsIKeyValuePairCallback });
 
     fn get_next_async(
         &self,
-        callback: &nsIKeyValueCallback,
+        callback: &nsIKeyValuePairCallback,
     ) -> Result<(), nsresult> {
         let source = get_current_thread()?;
         let task = Box::new(GetNextTask::new(
@@ -635,7 +635,7 @@ impl KeyValueEnumerator {
             self.iter.clone(),
         ));
 
-        let runnable = TaskRunnable::new(
+        let runnable = GetNextRunnable::new(
             "KeyValueDatabase::GetNextAsync",
             source,
             task,

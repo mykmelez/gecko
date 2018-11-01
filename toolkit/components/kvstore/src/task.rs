@@ -15,8 +15,8 @@ use std::{cell::Cell, cell::RefCell, path::Path, ptr, rc::Rc, str, sync::{Arc, R
 use storage_variant::{IntoVariant, Variant};
 use xpcom::{
     getter_addrefs,
-    interfaces::{nsIEventTarget, nsIKeyValueCallback, nsIKeyValueDatabase, nsIKeyValueDatabaseCallback, nsIKeyValueCallback2, nsIRunnable,
-        nsISupports, nsIThread, nsIVariant,
+    interfaces::{nsIEventTarget, nsIKeyValueCallback, nsIKeyValueDatabase, nsIKeyValueDatabaseCallback,
+        nsIKeyValueCallback2, nsIKeyValuePairCallback, nsIRunnable, nsISupports, nsIThread, nsIVariant,
     },
     RefPtr,
 };
@@ -509,7 +509,7 @@ impl BoolTask for HasMoreElementsTask {
 }
 
 pub struct GetNextTask {
-    callback: RefPtr<nsIKeyValueCallback>,
+    callback: RefPtr<nsIKeyValuePairCallback>,
     iter: Rc<RefCell<IntoIter<(
         Result<String, KeyValueError>,
         Result<OwnedValue, KeyValueError>,
@@ -518,7 +518,7 @@ pub struct GetNextTask {
 
 impl GetNextTask {
     pub fn new(
-        callback: RefPtr<nsIKeyValueCallback>,
+        callback: RefPtr<nsIKeyValuePairCallback>,
         iter: Rc<RefCell<IntoIter<(
             Result<String, KeyValueError>,
             Result<OwnedValue, KeyValueError>,
@@ -529,30 +529,83 @@ impl GetNextTask {
             iter,
         }
     }
-}
 
-impl Task for GetNextTask {
-    fn run(&self) -> Result<Option<RefPtr<nsISupports>>, KeyValueError> {
+    fn run(&self) -> Result<(String, OwnedValue), KeyValueError> {
         let mut iter = self.iter.borrow_mut();
         let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
 
         // We fail on retrieval of the key/value pair if the key isn't valid
         // UTF-*, if the value is unexpected, or if we encountered a store error
         // while retrieving the pair.
-        let pair = KeyValuePair::new(key?, value?);
+        Ok((key?, value?))
+    }
 
-        match pair.query_interface::<nsISupports>() {
-            Some(interface) => Ok(Some(interface)),
-            None => Err(KeyValueError::NoInterface("nsISupports")),
+    fn done(&self, result: Result<(String, OwnedValue), KeyValueError>) -> Result<(), nsresult> {
+        match result {
+            Ok((key, value)) => unsafe {
+                self.callback.HandleResult(
+                    &*nsCString::from(key),
+                    value.into_variant().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?.take().coerce()
+                )
+            },
+            Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+        }.to_result()
+    }
+}
+
+#[derive(xpcom)]
+#[xpimplements(nsIRunnable, nsINamed)]
+#[refcnt = "atomic"]
+pub struct InitGetNextRunnable {
+    name: &'static str,
+    source: RefPtr<nsIThread>,
+
+    /// Holds the task, and the result of the task.  The task is created
+    /// on the current thread, run on a target thread, and handled again
+    /// on the original thread; the result is mutated on the target thread
+    /// and accessed on the original thread.
+    task: Box<GetNextTask>,
+    result: Cell<Option<Result<(String, OwnedValue), KeyValueError>>>,
+}
+
+impl GetNextRunnable {
+    pub fn new(
+        name: &'static str,
+        source: RefPtr<nsIThread>,
+        task: Box<GetNextTask>,
+        result: Cell<Option<Result<(String, OwnedValue), KeyValueError>>>,
+    ) -> RefPtr<GetNextRunnable> {
+        GetNextRunnable::allocate(InitGetNextRunnable {
+            name,
+            source,
+            task,
+            result,
+        })
+    }
+
+    xpcom_method!(Run, run, {});
+    fn run(&self) -> Result<(), nsresult> {
+        match self.result.take() {
+            None => {
+                // Run the task on the target thread, store the result,
+                // and dispatch the runnable back to the source thread.
+                let result = self.task.run();
+                self.result.set(Some(result));
+                let target = getter_addrefs(|p| unsafe { self.source.GetEventTarget(p) })?;
+                unsafe {
+                    target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+                }.to_result()
+            }
+            Some(result) => {
+                // Back on the source thread, notify the task we're done.
+                self.task.done(result)
+            }
         }
     }
 
-    fn done(&self, result: Result<Option<RefPtr<nsISupports>>, KeyValueError>) -> Result<(), nsresult> {
-        match result {
-            Ok(Some(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
-            Ok(None) => unsafe { self.callback.HandleResult(ptr::null()) },
-            Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
-        }.to_result()
+    xpcom_method!(GetName, get_name, {}, *mut nsACString);
+    fn get_name(&self) -> Result<nsCString, nsresult> {
+        Ok(nsCString::from(self.name))
     }
 }
 

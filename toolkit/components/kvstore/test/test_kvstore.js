@@ -21,7 +21,12 @@ class KeyValueEnumerator {
   }
 
   getNext() {
-    return promisify(this.enumerator.getNextAsync);
+    return new Promise((resolve, reject) => {
+      this.enumerator.getNextAsync({
+        handleResult(key, value) { resolve({ key, value }) },
+        handleError(error) { reject(error) },
+      });
+    });
   }
 }
 
@@ -64,7 +69,7 @@ class KeyValueDatabase {
 async function* KeyValueIterator(enumerator) {
   enumerator = await enumerator;
   while (await enumerator.hasMoreElements()) {
-    yield (await enumerator.getNext()).QueryInterface(Ci.nsIKeyValuePair);
+    yield (await enumerator.getNext());
   }
 }
 
@@ -254,7 +259,7 @@ add_task(async function extendedCharacterKey() {
   Assert.strictEqual(await database.get("Héllo, wőrld!"), 1);
 
   const enumerator = await database.enumerate();
-  const key = (await enumerator.getNext()).QueryInterface(Ci.nsIKeyValuePair).key;
+  const key = (await enumerator.getNext()).key;
   Assert.strictEqual(key, "Héllo, wőrld!");
 
   await database.delete("Héllo, wőrld!");
@@ -316,7 +321,7 @@ add_task(async function enumeration() {
 
     for (const pair of pairs) {
       Assert.strictEqual(await enumerator.hasMoreElements(), true);
-      const element = (await enumerator.getNext()).QueryInterface(Ci.nsIKeyValuePair);
+      const element = (await enumerator.getNext());
       Assert.ok(element);
       Assert.strictEqual(element.key, pair[0]);
       Assert.strictEqual(element.value, pair[1]);
