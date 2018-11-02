@@ -315,57 +315,6 @@ impl VariantTask for GetTask {
     }
 }
 
-pub struct DeleteTask {
-    callback: RefPtr<nsIKeyValueVoidCallback>,
-    rkv: Arc<RwLock<Rkv>>,
-    store: Store,
-    key: nsCString,
-}
-
-impl DeleteTask {
-    pub fn new(
-        callback: RefPtr<nsIKeyValueVoidCallback>,
-        rkv: Arc<RwLock<Rkv>>,
-        store: Store,
-        key: nsCString,
-    ) -> DeleteTask {
-        DeleteTask {
-            callback,
-            rkv,
-            store,
-            key,
-        }
-    }
-
-    fn run(&self) -> Result<(), KeyValueError> {
-        let key = str::from_utf8(&self.key)?;
-        let env = self.rkv.read()?;
-        let mut writer = env.write()?;
-
-        match writer.delete(&self.store, key) {
-            Ok(_) => (),
-
-            // LMDB fails with an error if the key to delete wasn't found,
-            // and Rkv returns that error, but we ignore it, as we expect most
-            // of our consumers to want this behavior.
-            Err(StoreError::LmdbError(lmdb::Error::NotFound)) => (),
-
-            Err(err) => return Err(KeyValueError::StoreError(err)),
-        };
-
-        writer.commit()?;
-
-        Ok(())
-    }
-
-    fn done(&self, result: Result<(), KeyValueError>) -> Result<(), nsresult> {
-        match result {
-            Ok(()) => unsafe { self.callback.HandleResult() },
-            Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
-        }.to_result()
-    }
-}
-
 pub struct EnumerateTask {
     callback: RefPtr<nsIKeyValueEnumeratorCallback>,
     rkv: Arc<RwLock<Rkv>>,
@@ -594,52 +543,114 @@ impl GetNextRunnable {
     }
 }
 
+pub trait Task {
+    fn run(&self);
+    fn done(&self) -> Result<(), nsresult>;
+}
+
+pub struct DeleteTask {
+    callback: RefPtr<nsIKeyValueVoidCallback>,
+    rkv: Arc<RwLock<Rkv>>,
+    store: Store,
+    key: nsCString,
+    result: Cell<Option<Result<(), KeyValueError>>>
+}
+
+impl DeleteTask {
+    pub fn new(
+        callback: RefPtr<nsIKeyValueVoidCallback>,
+        rkv: Arc<RwLock<Rkv>>,
+        store: Store,
+        key: nsCString,
+    ) -> DeleteTask {
+        DeleteTask {
+            callback,
+            rkv,
+            store,
+            key,
+            result: Cell::default(),
+        }
+    }
+
+    fn run_inner(&self) -> Result<(), KeyValueError> {
+        let key = str::from_utf8(&self.key)?;
+        let env = self.rkv.read()?;
+        let mut writer = env.write()?;
+
+        match writer.delete(&self.store, key) {
+            Ok(_) => (),
+
+            // LMDB fails with an error if the key to delete wasn't found,
+            // and Rkv returns that error, but we ignore it, as we expect most
+            // of our consumers to want this behavior.
+            Err(StoreError::LmdbError(lmdb::Error::NotFound)) => (),
+
+            Err(err) => return Err(KeyValueError::StoreError(err)),
+        };
+
+        writer.commit()?;
+
+        Ok(())
+    }
+}
+
+impl Task for DeleteTask {
+    fn run(&self) {
+        self.result.set(Some(self.run_inner()));
+    }
+
+    fn done(&self) -> Result<(), nsresult> {
+        match self.result.take() {
+            Some(Ok(())) => unsafe { self.callback.HandleResult() },
+            Some(Err(err)) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+            None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
+        }.to_result()
+    }
+}
+
 #[derive(xpcom)]
 #[xpimplements(nsIRunnable, nsINamed)]
 #[refcnt = "atomic"]
-pub struct InitDeleteTaskRunnable {
+pub struct InitTaskRunnable {
     name: &'static str,
-    source: RefPtr<nsIThread>,
+    origin: RefPtr<nsIThread>,
 
     /// Holds the task, and the result of the task.  The task is created
     /// on the current thread, run on a target thread, and handled again
     /// on the original thread; the result is mutated on the target thread
     /// and accessed on the original thread.
-    task: Box<DeleteTask>,
-    result: Cell<Option<Result<(), KeyValueError>>>,
+    task: Box<Task>,
+
+    has_run: Cell<bool>,
 }
 
-impl DeleteTaskRunnable {
+impl TaskRunnable {
     pub fn new(
         name: &'static str,
-        source: RefPtr<nsIThread>,
-        task: Box<DeleteTask>,
-        result: Cell<Option<Result<(), KeyValueError>>>,
-    ) -> RefPtr<DeleteTaskRunnable> {
-        DeleteTaskRunnable::allocate(InitDeleteTaskRunnable {
+        origin: RefPtr<nsIThread>,
+        task: Box<Task>,
+    ) -> RefPtr<TaskRunnable> {
+        TaskRunnable::allocate(InitTaskRunnable {
             name,
-            source,
+            origin,
             task,
-            result,
+            has_run: Cell::new(false),
         })
     }
 
     xpcom_method!(Run, run, {});
     fn run(&self) -> Result<(), nsresult> {
-        match self.result.take() {
-            None => {
-                // Run the task on the target thread, store the result,
-                // and dispatch the runnable back to the source thread.
-                let result = self.task.run();
-                self.result.set(Some(result));
-                let target = getter_addrefs(|p| unsafe { self.source.GetEventTarget(p) })?;
+        match self.has_run.take() {
+            false => {
+                self.task.run();
+                self.has_run.set(true);
+                let target = getter_addrefs(|p| unsafe { self.origin.GetEventTarget(p) })?;
                 unsafe {
                     target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
                 }.to_result()
             }
-            Some(result) => {
-                // Back on the source thread, notify the task we're done.
-                self.task.done(result)
+            true => {
+                self.task.done()
             }
         }
     }

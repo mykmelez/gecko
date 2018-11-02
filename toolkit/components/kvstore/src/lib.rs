@@ -38,7 +38,7 @@ use std::{
 };
 use storage_variant::{IntoVariant, Variant};
 use task::{create_thread, get_current_thread, BoolTaskRunnable, DatabaseTaskRunnable, DeleteTask, EnumerateTask, EnumerateTaskRunnable,
-    GetNextTask, GetNextRunnable, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, PutTaskRunnable, DeleteTaskRunnable,
+    GetNextTask, GetNextRunnable, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, PutTaskRunnable, TaskRunnable,
     VariantTaskRunnable,
 };
 use xpcom::{
@@ -346,11 +346,10 @@ impl KeyValueDatabase {
             nsCString::from(key),
         ));
 
-        let runnable = DeleteTaskRunnable::new(
+        let runnable = TaskRunnable::new(
             "KeyValueDatabase::DeleteAsync",
             source,
             task,
-            Cell::default(),
         );
 
         unsafe {
