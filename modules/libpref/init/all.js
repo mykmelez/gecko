@@ -1097,6 +1097,7 @@ pref("devtools.recordreplay.enableRewinding", true);
 #endif
 
 pref("devtools.recordreplay.mvp.enabled", false);
+pref("devtools.recordreplay.timeline.enabled", false);
 
 // view source
 pref("view_source.syntax_highlight", true);
@@ -5279,10 +5280,6 @@ pref("io.activity.intervalMilliseconds", 0);
 // for the scripts to interfere with each other.  A restart is required for this
 // to take effect.
 pref("jsloader.shareGlobal", true);
-
-// When we're asked to take a screenshot, don't wait more than 2000ms for the
-// event loop to become idle before actually taking the screenshot.
-pref("dom.browserElement.maxScreenshotDelayMS", 2000);
 
 // Whether we should show the placeholder when the element is focused but empty.
 pref("dom.placeholder.show_on_focus", true);
