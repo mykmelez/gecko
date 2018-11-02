@@ -15,7 +15,7 @@ use std::{cell::Cell, cell::RefCell, path::Path, ptr, rc::Rc, str, sync::{Arc, R
 use storage_variant::{IntoVariant, Variant};
 use xpcom::{
     getter_addrefs,
-    interfaces::{nsIEventTarget, nsIKeyValueCallback, nsIKeyValueDatabase, nsIKeyValueDatabaseCallback,
+    interfaces::{nsIEventTarget, nsIKeyValueVoidCallback, nsIKeyValueDatabase, nsIKeyValueDatabaseCallback,
         nsIKeyValueEnumerator, nsIKeyValueEnumeratorCallback, nsIKeyValueVariantCallback, nsIKeyValuePairCallback, nsIRunnable,
         nsISupports, nsIThread, nsIVariant,
     },
@@ -75,13 +75,6 @@ pub fn create_thread(name: &str) -> Result<RefPtr<nsIThread>, nsresult> {
     getter_addrefs(|p| unsafe {
         NS_NewNamedThreadWithDefaultStackSize(&*nsCString::from(name), p, ptr::null())
     })
-}
-
-/// A task is executed asynchronously on a target thread, and passes its
-/// result back to the original thread.
-pub trait Task {
-    fn run(&self) -> Result<Option<RefPtr<nsISupports>>, KeyValueError>;
-    fn done(&self, result: Result<Option<RefPtr<nsISupports>>, KeyValueError>) -> Result<(), nsresult>;
 }
 
 pub trait DatabaseTask {
@@ -153,7 +146,7 @@ impl DatabaseTask for GetOrCreateTask {
 }
 
 pub struct PutTask {
-    callback: RefPtr<nsIKeyValueCallback>,
+    callback: RefPtr<nsIKeyValueVoidCallback>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
@@ -162,7 +155,7 @@ pub struct PutTask {
 
 impl PutTask {
     pub fn new(
-        callback: RefPtr<nsIKeyValueCallback>,
+        callback: RefPtr<nsIKeyValueVoidCallback>,
         rkv: Arc<RwLock<Rkv>>,
         store: Store,
         key: nsCString,
@@ -221,7 +214,7 @@ impl PutTask {
 
     fn done(&self, result: Result<(), KeyValueError>) -> Result<(), nsresult> {
         match result {
-            Ok(()) => unsafe { self.callback.HandleResult(ptr::null()) },
+            Ok(()) => unsafe { self.callback.HandleResult() },
             Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
         }.to_result()
     }
@@ -323,7 +316,7 @@ impl VariantTask for GetTask {
 }
 
 pub struct DeleteTask {
-    callback: RefPtr<nsIKeyValueCallback>,
+    callback: RefPtr<nsIKeyValueVoidCallback>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
@@ -331,7 +324,7 @@ pub struct DeleteTask {
 
 impl DeleteTask {
     pub fn new(
-        callback: RefPtr<nsIKeyValueCallback>,
+        callback: RefPtr<nsIKeyValueVoidCallback>,
         rkv: Arc<RwLock<Rkv>>,
         store: Store,
         key: nsCString,
@@ -343,10 +336,8 @@ impl DeleteTask {
             key,
         }
     }
-}
 
-impl Task for DeleteTask {
-    fn run(&self) -> Result<Option<RefPtr<nsISupports>>, KeyValueError> {
+    fn run(&self) -> Result<(), KeyValueError> {
         let key = str::from_utf8(&self.key)?;
         let env = self.rkv.read()?;
         let mut writer = env.write()?;
@@ -364,13 +355,12 @@ impl Task for DeleteTask {
 
         writer.commit()?;
 
-        Ok(None)
+        Ok(())
     }
 
-    fn done(&self, result: Result<Option<RefPtr<nsISupports>>, KeyValueError>) -> Result<(), nsresult> {
+    fn done(&self, result: Result<(), KeyValueError>) -> Result<(), nsresult> {
         match result {
-            Ok(Some(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
-            Ok(None) => unsafe { self.callback.HandleResult(ptr::null()) },
+            Ok(()) => unsafe { self.callback.HandleResult() },
             Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
         }.to_result()
     }
@@ -607,7 +597,7 @@ impl GetNextRunnable {
 #[derive(xpcom)]
 #[xpimplements(nsIRunnable, nsINamed)]
 #[refcnt = "atomic"]
-pub struct InitTaskRunnable {
+pub struct InitDeleteTaskRunnable {
     name: &'static str,
     source: RefPtr<nsIThread>,
 
@@ -615,18 +605,18 @@ pub struct InitTaskRunnable {
     /// on the current thread, run on a target thread, and handled again
     /// on the original thread; the result is mutated on the target thread
     /// and accessed on the original thread.
-    task: Box<Task>,
-    result: Cell<Option<Result<Option<RefPtr<nsISupports>>, KeyValueError>>>,
+    task: Box<DeleteTask>,
+    result: Cell<Option<Result<(), KeyValueError>>>,
 }
 
-impl TaskRunnable {
+impl DeleteTaskRunnable {
     pub fn new(
         name: &'static str,
         source: RefPtr<nsIThread>,
-        task: Box<Task>,
-        result: Cell<Option<Result<Option<RefPtr<nsISupports>>, KeyValueError>>>,
-    ) -> RefPtr<TaskRunnable> {
-        TaskRunnable::allocate(InitTaskRunnable {
+        task: Box<DeleteTask>,
+        result: Cell<Option<Result<(), KeyValueError>>>,
+    ) -> RefPtr<DeleteTaskRunnable> {
+        DeleteTaskRunnable::allocate(InitDeleteTaskRunnable {
             name,
             source,
             task,

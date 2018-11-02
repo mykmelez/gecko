@@ -38,12 +38,12 @@ use std::{
 };
 use storage_variant::{IntoVariant, Variant};
 use task::{create_thread, get_current_thread, BoolTaskRunnable, DatabaseTaskRunnable, DeleteTask, EnumerateTask, EnumerateTaskRunnable,
-    GetNextTask, GetNextRunnable, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, PutTaskRunnable, TaskRunnable,
+    GetNextTask, GetNextRunnable, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, PutTaskRunnable, DeleteTaskRunnable,
     VariantTaskRunnable,
 };
 use xpcom::{
     interfaces::{
-        nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback, nsIKeyValueVariantCallback, nsIKeyValueDatabase,
+        nsIEventTarget, nsIJSEnumerator, nsIKeyValueVoidCallback, nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback, nsIKeyValueVariantCallback, nsIKeyValueDatabase,
         nsIKeyValueEnumerator, nsIKeyValuePairCallback, nsISupports, nsIThread, nsIVariant,
     },
     nsIID, Ensure, RefPtr,
@@ -233,12 +233,12 @@ impl KeyValueDatabase {
     xpcom_method!(
         PutAsync,
         put_async,
-        { callback: *const nsIKeyValueCallback, key: *const nsACString, value: *const nsIVariant }
+        { callback: *const nsIKeyValueVoidCallback, key: *const nsACString, value: *const nsIVariant }
     );
 
     fn put_async(
         &self,
-        callback: &nsIKeyValueCallback,
+        callback: &nsIKeyValueVoidCallback,
         key: &nsACString,
         value: &nsIVariant,
     ) -> Result<(), nsresult> {
@@ -330,12 +330,12 @@ impl KeyValueDatabase {
     xpcom_method!(
         DeleteAsync,
         delete_async,
-        { callback: *const nsIKeyValueCallback, key: *const nsACString }
+        { callback: *const nsIKeyValueVoidCallback, key: *const nsACString }
     );
 
     fn delete_async(
         &self,
-        callback: &nsIKeyValueCallback,
+        callback: &nsIKeyValueVoidCallback,
         key: &nsACString,
     ) -> Result<(), nsresult> {
         let source = get_current_thread()?;
@@ -346,7 +346,7 @@ impl KeyValueDatabase {
             nsCString::from(key),
         ));
 
-        let runnable = TaskRunnable::new(
+        let runnable = DeleteTaskRunnable::new(
             "KeyValueDatabase::DeleteAsync",
             source,
             task,
@@ -599,7 +599,7 @@ impl KeyValueEnumerator {
     }
 
     xpcom_method!(HasMoreElementsAsync, has_more_elements_async, { callback: *const nsIKeyValueVariantCallback });
-    // xpcom_method!(GetNextAsync, get_next_async, { callback: *const nsIKeyValueCallback });
+    // xpcom_method!(GetNextAsync, get_next_async, { callback: *const nsIKeyValueVoidCallback });
 
     fn has_more_elements_async(
         &self,

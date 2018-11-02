@@ -117,10 +117,10 @@ add_task(async function putGetHasDelete() {
   // Assert.strictEqual(database.getBool("bool-key", false), false);
 
   // The put method succeeds without returning a value.
-  Assert.strictEqual(await database.put("int-key", 1234), null);
-  Assert.strictEqual(await database.put("double-key", 56.78), null);
-  Assert.strictEqual(await database.put("string-key", "Héllo, wőrld!"), null);
-  Assert.strictEqual(await database.put("bool-key", true), null);
+  Assert.strictEqual(await database.put("int-key", 1234), undefined);
+  Assert.strictEqual(await database.put("double-key", 56.78), undefined);
+  Assert.strictEqual(await database.put("string-key", "Héllo, wőrld!"), undefined);
+  Assert.strictEqual(await database.put("bool-key", true), undefined);
 
   // Getting key/value pairs that exist returns the expected values.
   Assert.strictEqual(await database.get("int-key", 1), 1234);
@@ -173,10 +173,10 @@ add_task(async function putGetHasDelete() {
   Assert.strictEqual(await database.has("nonexistent-key"), false);
 
   // The delete() method succeeds without returning a value.
-  Assert.strictEqual(await database.delete("int-key"), null);
-  Assert.strictEqual(await database.delete("double-key"), null);
-  Assert.strictEqual(await database.delete("string-key"), null);
-  Assert.strictEqual(await database.delete("bool-key"), null);
+  Assert.strictEqual(await database.delete("int-key"), undefined);
+  Assert.strictEqual(await database.delete("double-key"), undefined);
+  Assert.strictEqual(await database.delete("string-key"), undefined);
+  Assert.strictEqual(await database.delete("bool-key"), undefined);
 
   // The has() method works as expected for a deleted key.
   Assert.strictEqual(await database.has("int-key"), false);
