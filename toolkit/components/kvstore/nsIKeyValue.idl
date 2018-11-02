@@ -36,14 +36,14 @@ interface nsIKeyValuePairCallback : nsISupports {
 };
 
 [scriptable, uuid(174ebfa1-74ea-42a7-aa90-85bbaf1da4bf)]
-interface nsIKeyValueCallback2 : nsISupports {
+interface nsIKeyValueVariantCallback : nsISupports {
     void handleResult([optional] in nsIVariant result);
     void handleError(in AUTF8String message);
 };
 
 [scriptable, uuid(b9ba7116-b7ff-4717-9a28-a08e6879b199)]
 interface nsIKeyValueEnumerator : nsISupports {
-    void hasMoreElementsAsync(in nsIKeyValueCallback2 callback);
+    void hasMoreElementsAsync(in nsIKeyValueVariantCallback callback);
     void getNextAsync(in nsIKeyValuePairCallback callback);
 };
 
@@ -55,11 +55,11 @@ interface nsIKeyValueDatabase : nsISupports {
         in nsIVariant value);
 
     void hasAsync(
-        in nsIKeyValueCallback2 callback,
+        in nsIKeyValueVariantCallback callback,
         in AUTF8String key);
 
     void getAsync(
-        in nsIKeyValueCallback2 callback,
+        in nsIKeyValueVariantCallback callback,
         in AUTF8String key,
         [optional] in nsIVariant defaultValue);
 

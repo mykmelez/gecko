@@ -38,12 +38,12 @@ use std::{
 };
 use storage_variant::{IntoVariant, Variant};
 use task::{create_thread, get_current_thread, BoolTaskRunnable, DatabaseTaskRunnable, DeleteTask, EnumerateTask,
-    GetNextTask, GetNextRunnable, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable,
+    GetNextTask, GetNextRunnable, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, PutTaskRunnable, TaskRunnable,
     VariantTaskRunnable,
 };
 use xpcom::{
     interfaces::{
-        nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabaseCallback, nsIKeyValueCallback2, nsIKeyValueDatabase,
+        nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabaseCallback, nsIKeyValueVariantCallback, nsIKeyValueDatabase,
         nsIKeyValueEnumerator, nsIKeyValuePairCallback, nsISupports, nsIThread, nsIVariant,
     },
     nsIID, Ensure, RefPtr,
@@ -251,7 +251,7 @@ impl KeyValueDatabase {
             RefPtr::new(value),
         ));
 
-        let runnable = TaskRunnable::new(
+        let runnable = PutTaskRunnable::new(
             "KeyValueDatabase::PutAsync",
             source,
             task,
@@ -266,12 +266,12 @@ impl KeyValueDatabase {
     xpcom_method!(
         HasAsync,
         has_async,
-        { callback: *const nsIKeyValueCallback2, key: *const nsACString }
+        { callback: *const nsIKeyValueVariantCallback, key: *const nsACString }
     );
 
     fn has_async(
         &self,
-        callback: &nsIKeyValueCallback2,
+        callback: &nsIKeyValueVariantCallback,
         key: &nsACString,
     ) -> Result<(), nsresult> {
         let source = get_current_thread()?;
@@ -297,12 +297,12 @@ impl KeyValueDatabase {
     xpcom_method!(
         GetAsync,
         get_async,
-        { callback: *const nsIKeyValueCallback2, key: *const nsACString, default_value: *const nsIVariant }
+        { callback: *const nsIKeyValueVariantCallback, key: *const nsACString, default_value: *const nsIVariant }
     );
 
     fn get_async(
         &self,
-        callback: &nsIKeyValueCallback2,
+        callback: &nsIKeyValueVariantCallback,
         key: &nsACString,
         default_value: &nsIVariant,
     ) -> Result<(), nsresult> {
@@ -598,12 +598,12 @@ impl KeyValueEnumerator {
         })
     }
 
-    xpcom_method!(HasMoreElementsAsync, has_more_elements_async, { callback: *const nsIKeyValueCallback2 });
+    xpcom_method!(HasMoreElementsAsync, has_more_elements_async, { callback: *const nsIKeyValueVariantCallback });
     // xpcom_method!(GetNextAsync, get_next_async, { callback: *const nsIKeyValueCallback });
 
     fn has_more_elements_async(
         &self,
-        callback: &nsIKeyValueCallback2,
+        callback: &nsIKeyValueVariantCallback,
     ) -> Result<(), nsresult> {
         let source = get_current_thread()?;
         let task = Box::new(HasMoreElementsTask::new(
