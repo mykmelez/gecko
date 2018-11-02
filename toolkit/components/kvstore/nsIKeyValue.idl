@@ -47,6 +47,12 @@ interface nsIKeyValueEnumerator : nsISupports {
     void getNextAsync(in nsIKeyValuePairCallback callback);
 };
 
+[scriptable, uuid(b7ea2183-880b-4424-ab24-5aa1555b775d)]
+interface nsIKeyValueEnumeratorCallback : nsISupports {
+    void handleResult(in nsIKeyValueEnumerator enumerator);
+    void handleError(in AUTF8String message);
+};
+
 [scriptable, uuid(c449398e-174c-425b-8195-da6aa0ccd9a5)]
 interface nsIKeyValueDatabase : nsISupports {
     void putAsync(
@@ -68,7 +74,7 @@ interface nsIKeyValueDatabase : nsISupports {
         in AUTF8String key);
 
     void enumerateAsync(
-        in nsIKeyValueCallback callback,
+        in nsIKeyValueEnumeratorCallback callback,
         [optional] in AUTF8String fromKey,
         [optional] in AUTF8String toKey);
 

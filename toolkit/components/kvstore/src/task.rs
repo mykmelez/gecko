@@ -16,7 +16,8 @@ use storage_variant::{IntoVariant, Variant};
 use xpcom::{
     getter_addrefs,
     interfaces::{nsIEventTarget, nsIKeyValueCallback, nsIKeyValueDatabase, nsIKeyValueDatabaseCallback,
-        nsIKeyValueVariantCallback, nsIKeyValuePairCallback, nsIRunnable, nsISupports, nsIThread, nsIVariant,
+        nsIKeyValueEnumerator, nsIKeyValueEnumeratorCallback, nsIKeyValueVariantCallback, nsIKeyValuePairCallback, nsIRunnable,
+        nsISupports, nsIThread, nsIVariant,
     },
     RefPtr,
 };
@@ -376,7 +377,7 @@ impl Task for DeleteTask {
 }
 
 pub struct EnumerateTask {
-    callback: RefPtr<nsIKeyValueCallback>,
+    callback: RefPtr<nsIKeyValueEnumeratorCallback>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     from_key: nsCString,
@@ -385,7 +386,7 @@ pub struct EnumerateTask {
 
 impl EnumerateTask {
     pub fn new(
-        callback: RefPtr<nsIKeyValueCallback>,
+        callback: RefPtr<nsIKeyValueEnumeratorCallback>,
         rkv: Arc<RwLock<Rkv>>,
         store: Store,
         from_key: nsCString,
@@ -399,10 +400,8 @@ impl EnumerateTask {
             to_key,
         }
     }
-}
 
-impl Task for EnumerateTask {
-    fn run(&self) -> Result<Option<RefPtr<nsISupports>>, KeyValueError> {
+    fn run(&self) -> Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError> {
         let env = self.rkv.read()?;
         let reader = env.read()?;
         let from_key = str::from_utf8(&self.from_key)?;
@@ -454,16 +453,15 @@ impl Task for EnumerateTask {
 
         let enumerator = KeyValueEnumerator::new(get_current_thread().unwrap(), pairs);
 
-        match enumerator.query_interface::<nsISupports>() {
-            Some(supports) => Ok(Some(supports)),
-            None => Err(KeyValueError::NoInterface("nsISupports")),
+        match enumerator.query_interface::<nsIKeyValueEnumerator>() {
+            Some(interface) => Ok(interface),
+            None => Err(KeyValueError::NoInterface("nsIKeyValueEnumerator")),
         }
     }
 
-    fn done(&self, result: Result<Option<RefPtr<nsISupports>>, KeyValueError>) -> Result<(), nsresult> {
+    fn done(&self, result: Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError>) -> Result<(), nsresult> {
         match result {
-            Ok(Some(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
-            Ok(None) => unsafe { self.callback.HandleResult(ptr::null()) },
+            Ok(value) => unsafe { self.callback.HandleResult(value.coerce()) },
             Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
         }.to_result()
     }
@@ -685,6 +683,62 @@ impl PutTaskRunnable {
         result: Cell<Option<Result<(), KeyValueError>>>,
     ) -> RefPtr<PutTaskRunnable> {
         PutTaskRunnable::allocate(InitPutTaskRunnable {
+            name,
+            source,
+            task,
+            result,
+        })
+    }
+
+    xpcom_method!(Run, run, {});
+    fn run(&self) -> Result<(), nsresult> {
+        match self.result.take() {
+            None => {
+                // Run the task on the target thread, store the result,
+                // and dispatch the runnable back to the source thread.
+                let result = self.task.run();
+                self.result.set(Some(result));
+                let target = getter_addrefs(|p| unsafe { self.source.GetEventTarget(p) })?;
+                unsafe {
+                    target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+                }.to_result()
+            }
+            Some(result) => {
+                // Back on the source thread, notify the task we're done.
+                self.task.done(result)
+            }
+        }
+    }
+
+    xpcom_method!(GetName, get_name, {}, *mut nsACString);
+    fn get_name(&self) -> Result<nsCString, nsresult> {
+        Ok(nsCString::from(self.name))
+    }
+}
+
+#[derive(xpcom)]
+#[xpimplements(nsIRunnable, nsINamed)]
+#[refcnt = "atomic"]
+pub struct InitEnumerateTaskRunnable {
+    name: &'static str,
+    source: RefPtr<nsIThread>,
+
+    /// Holds the task, and the result of the task.  The task is created
+    /// on the current thread, run on a target thread, and handled again
+    /// on the original thread; the result is mutated on the target thread
+    /// and accessed on the original thread.
+    task: Box<EnumerateTask>,
+    result: Cell<Option<Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError>>>,
+}
+
+impl EnumerateTaskRunnable {
+    pub fn new(
+        name: &'static str,
+        source: RefPtr<nsIThread>,
+        task: Box<EnumerateTask>,
+        result: Cell<Option<Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError>>>,
+    ) -> RefPtr<EnumerateTaskRunnable> {
+        EnumerateTaskRunnable::allocate(InitEnumerateTaskRunnable {
             name,
             source,
             task,

@@ -37,13 +37,13 @@ use std::{
     vec::IntoIter,
 };
 use storage_variant::{IntoVariant, Variant};
-use task::{create_thread, get_current_thread, BoolTaskRunnable, DatabaseTaskRunnable, DeleteTask, EnumerateTask,
+use task::{create_thread, get_current_thread, BoolTaskRunnable, DatabaseTaskRunnable, DeleteTask, EnumerateTask, EnumerateTaskRunnable,
     GetNextTask, GetNextRunnable, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, PutTaskRunnable, TaskRunnable,
     VariantTaskRunnable,
 };
 use xpcom::{
     interfaces::{
-        nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabaseCallback, nsIKeyValueVariantCallback, nsIKeyValueDatabase,
+        nsIEventTarget, nsIJSEnumerator, nsIKeyValueCallback, nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback, nsIKeyValueVariantCallback, nsIKeyValueDatabase,
         nsIKeyValueEnumerator, nsIKeyValuePairCallback, nsISupports, nsIThread, nsIVariant,
     },
     nsIID, Ensure, RefPtr,
@@ -481,12 +481,12 @@ impl KeyValueDatabase {
     xpcom_method!(
         EnumerateAsync,
         enumerate_async,
-        { callback: *const nsIKeyValueCallback, from_key: *const nsACString, to_key: *const nsACString }
+        { callback: *const nsIKeyValueEnumeratorCallback, from_key: *const nsACString, to_key: *const nsACString }
     );
 
     fn enumerate_async(
         &self,
-        callback: &nsIKeyValueCallback,
+        callback: &nsIKeyValueEnumeratorCallback,
         from_key: &nsACString,
         to_key: &nsACString,
     ) -> Result<(), nsresult> {
@@ -499,7 +499,7 @@ impl KeyValueDatabase {
             nsCString::from(to_key),
         ));
 
-        let runnable = TaskRunnable::new(
+        let runnable = EnumerateTaskRunnable::new(
             "KeyValueDatabase::EnumerateAsync",
             source,
             task,

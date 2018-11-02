@@ -13,7 +13,7 @@ function promisify(fn, ...args) {
 
 class KeyValueEnumerator {
   constructor(enumerator) {
-    this.enumerator = enumerator.QueryInterface(Ci.nsIKeyValueEnumerator);
+    this.enumerator = enumerator;
   }
 
   hasMoreElements() {
