@@ -571,32 +571,30 @@ impl DeleteTask {
             result: Cell::default(),
         }
     }
-
-    fn run_inner(&self) -> Result<(), KeyValueError> {
-        let key = str::from_utf8(&self.key)?;
-        let env = self.rkv.read()?;
-        let mut writer = env.write()?;
-
-        match writer.delete(&self.store, key) {
-            Ok(_) => (),
-
-            // LMDB fails with an error if the key to delete wasn't found,
-            // and Rkv returns that error, but we ignore it, as we expect most
-            // of our consumers to want this behavior.
-            Err(StoreError::LmdbError(lmdb::Error::NotFound)) => (),
-
-            Err(err) => return Err(KeyValueError::StoreError(err)),
-        };
-
-        writer.commit()?;
-
-        Ok(())
-    }
 }
 
 impl Task for DeleteTask {
     fn run(&self) {
-        self.result.set(Some(self.run_inner()));
+        self.result.set(Some(|| -> Result<(), KeyValueError> {
+            let key = str::from_utf8(&self.key)?;
+            let env = self.rkv.read()?;
+            let mut writer = env.write()?;
+
+            match writer.delete(&self.store, key) {
+                Ok(_) => (),
+
+                // LMDB fails with an error if the key to delete wasn't found,
+                // and Rkv returns that error, but we ignore it, as we expect most
+                // of our consumers to want this behavior.
+                Err(StoreError::LmdbError(lmdb::Error::NotFound)) => (),
+
+                Err(err) => return Err(KeyValueError::StoreError(err)),
+            };
+
+            writer.commit()?;
+
+            Ok(())
+        }()));
     }
 
     fn done(&self) -> Result<(), nsresult> {
