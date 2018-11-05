@@ -151,6 +151,7 @@ pub struct PutTask {
     store: Store,
     key: nsCString,
     value: OwnedValue,
+    result: Cell<Option<Result<(), KeyValueError>>>
 }
 
 impl PutTask {
@@ -167,31 +168,37 @@ impl PutTask {
             store,
             key,
             value,
+            result: Cell::default(),
         }
     }
+}
 
-    fn run(&self) -> Result<(), KeyValueError> {
-        let key = str::from_utf8(&self.key)?;
-        let env = self.rkv.read()?;
-        let mut writer = env.write()?;
+impl Task for PutTask {
+    fn run(&self) {
+        self.result.set(Some(|| -> Result<(), KeyValueError> {
+            let key = str::from_utf8(&self.key)?;
+            let env = self.rkv.read()?;
+            let mut writer = env.write()?;
 
-        let value = match self.value {
-            OwnedValue::Bool(val) => Value::Bool(val),
-            OwnedValue::I64(val) => Value::I64(val),
-            OwnedValue::F64(val) => Value::F64(val),
-            OwnedValue::Str(ref val) => Value::Str(&val),
-        };
+            let value = match self.value {
+                OwnedValue::Bool(val) => Value::Bool(val),
+                OwnedValue::I64(val) => Value::I64(val),
+                OwnedValue::F64(val) => Value::F64(val),
+                OwnedValue::Str(ref val) => Value::Str(&val),
+            };
 
-        writer.put(&self.store, key, &value)?;
-        writer.commit()?;
+            writer.put(&self.store, key, &value)?;
+            writer.commit()?;
 
-        Ok(())
+            Ok(())
+        }()));
     }
 
-    fn done(&self, result: Result<(), KeyValueError>) -> Result<(), nsresult> {
-        match result {
-            Ok(()) => unsafe { self.callback.HandleResult() },
-            Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+    fn done(&self) -> Result<(), nsresult> {
+        match self.result.take() {
+            Some(Ok(())) => unsafe { self.callback.HandleResult() },
+            Some(Err(err)) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+            None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
@@ -628,62 +635,6 @@ impl TaskRunnable {
             }
             true => {
                 self.task.done()
-            }
-        }
-    }
-
-    xpcom_method!(GetName, get_name, {}, *mut nsACString);
-    fn get_name(&self) -> Result<nsCString, nsresult> {
-        Ok(nsCString::from(self.name))
-    }
-}
-
-#[derive(xpcom)]
-#[xpimplements(nsIRunnable, nsINamed)]
-#[refcnt = "atomic"]
-pub struct InitPutTaskRunnable {
-    name: &'static str,
-    source: RefPtr<nsIThread>,
-
-    /// Holds the task, and the result of the task.  The task is created
-    /// on the current thread, run on a target thread, and handled again
-    /// on the original thread; the result is mutated on the target thread
-    /// and accessed on the original thread.
-    task: Box<PutTask>,
-    result: Cell<Option<Result<(), KeyValueError>>>,
-}
-
-impl PutTaskRunnable {
-    pub fn new(
-        name: &'static str,
-        source: RefPtr<nsIThread>,
-        task: Box<PutTask>,
-        result: Cell<Option<Result<(), KeyValueError>>>,
-    ) -> RefPtr<PutTaskRunnable> {
-        PutTaskRunnable::allocate(InitPutTaskRunnable {
-            name,
-            source,
-            task,
-            result,
-        })
-    }
-
-    xpcom_method!(Run, run, {});
-    fn run(&self) -> Result<(), nsresult> {
-        match self.result.take() {
-            None => {
-                // Run the task on the target thread, store the result,
-                // and dispatch the runnable back to the source thread.
-                let result = self.task.run();
-                self.result.set(Some(result));
-                let target = getter_addrefs(|p| unsafe { self.source.GetEventTarget(p) })?;
-                unsafe {
-                    target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
-                }.to_result()
-            }
-            Some(result) => {
-                // Back on the source thread, notify the task we're done.
-                self.task.done(result)
             }
         }
     }
