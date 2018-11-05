@@ -44,6 +44,7 @@ var TelemetryUtils = {
     ShutdownPingSenderFirstSession: "toolkit.telemetry.shutdownPingSender.enabledFirstSession",
     TelemetryEnabled: "toolkit.telemetry.enabled",
     Unified: "toolkit.telemetry.unified",
+    UntrustedModulesPingFrequency: "toolkit.telemetry.untrustedModulesPing.frequency",
     UpdatePing: "toolkit.telemetry.updatePing.enabled",
     NewProfilePingEnabled: "toolkit.telemetry.newProfilePing.enabled",
     NewProfilePingDelay: "toolkit.telemetry.newProfilePing.delay",
@@ -242,94 +243,6 @@ var TelemetryUtils = {
     Services.telemetry.canRecordExtended = isPrereleaseChannel ||
       isReleaseCandidateOnBeta ||
       Services.prefs.getBoolPref(this.Preferences.OverridePreRelease, false);
-  },
-
-  /**
-   * Converts histograms from the raw to the packed format.
-   * This additionally filters TELEMETRY_TEST_ histograms.
-   *
-   * @param {Object} snapshot - The histogram snapshot.
-   * @param {Boolean} [testingMode=false] - Whether or not testing histograms
-   *        should be filtered.
-   * @returns {Object}
-   *
-   * {
-   *  "<process>": {
-   *    "<histogram>": {
-   *      range: [min, max],
-   *      bucket_count: <number of buckets>,
-   *      histogram_type: <histogram_type>,
-   *      sum: <sum>,
-   *      values: { bucket1: count1, bucket2: count2, ... }
-   *    },
-   *   ..
-   *   },
-   *  ..
-   * }
-   */
-  packHistograms(snapshot, testingMode = false) {
-    let ret = {};
-
-    for (let [process, histograms] of Object.entries(snapshot)) {
-      ret[process] = {};
-      for (let [name, value] of Object.entries(histograms)) {
-        if (testingMode || !name.startsWith("TELEMETRY_TEST_")) {
-          ret[process][name] = value;
-        }
-      }
-    }
-
-    return ret;
-  },
-
-  /**
-   * Converts keyed histograms from the raw to the packed format.
-   * This additionally filters TELEMETRY_TEST_ histograms and skips
-   * empty keyed histograms.
-   *
-   * @param {Object} snapshot - The keyed histogram snapshot.
-   * @param {Boolean} [testingMode=false] - Whether or not testing histograms should
-   *        be filtered.
-   * @returns {Object}
-   *
-   * {
-   *  "<process>": {
-   *    "<histogram>": {
-   *      "<key>": {
-   *        range: [min, max],
-   *        bucket_count: <number of buckets>,
-   *        histogram_type: <histogram_type>,
-   *        sum: <sum>,
-   *        values: { bucket1: count1, bucket2: count2, ... }
-   *      },
-   *      ..
-   *    },
-   *   ..
-   *   },
-   *  ..
-   * }
-   */
-  packKeyedHistograms(snapshot, testingMode = false) {
-    let ret = {};
-
-    for (let [process, histograms] of Object.entries(snapshot)) {
-      ret[process] = {};
-      for (let [name, value] of Object.entries(histograms)) {
-        if (testingMode || !name.startsWith("TELEMETRY_TEST_")) {
-          let keys = Object.keys(value);
-          if (keys.length == 0) {
-            // Skip empty keyed histogram
-            continue;
-          }
-          ret[process][name] = {};
-          for (let [key, hgram] of Object.entries(value)) {
-            ret[process][name][key] = hgram;
-          }
-        }
-      }
-    }
-
-    return ret;
   },
 
   /**

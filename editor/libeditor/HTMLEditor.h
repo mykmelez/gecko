@@ -43,7 +43,6 @@ class nsRange;
 namespace mozilla {
 class AutoSelectionSetterAfterTableEdit;
 class AutoSetTemporaryAncestorLimiter;
-class DocumentResizeEventListener;
 class EmptyEditableFunctor;
 class ResizerSelectionListener;
 enum class EditSubAction : int32_t;
@@ -139,6 +138,8 @@ public:
 
   NS_IMETHOD DeleteNode(nsINode* aNode) override;
 
+  NS_IMETHOD InsertLineBreak() override;
+
   virtual nsresult HandleKeyPressEvent(
                      WidgetKeyboardEvent* aKeyboardEvent) override;
   virtual nsIContent* GetFocusedContent() override;
@@ -171,10 +172,16 @@ public:
   virtual bool CanPasteTransferable(nsITransferable* aTransferable) override;
 
   /**
-   * OnInputLineBreak() is called when user inputs a line break with
+   * InsertLineBreakAsAction() is called when user inputs a line break with
    * Shift + Enter or something.
    */
-  nsresult OnInputLineBreak();
+  virtual nsresult InsertLineBreakAsAction() override;
+
+  /**
+   * InsertParagraphSeparatorAsAction() is called when user tries to separate
+   * current paragraph with Enter key press in HTMLEditor or something.
+   */
+  nsresult InsertParagraphSeparatorAsAction();
 
   /**
    * CreateElementWithDefaults() creates new element whose name is
@@ -998,6 +1005,12 @@ protected: // Called by helper classes.
 protected: // Shouldn't be used by friend classes
   virtual ~HTMLEditor();
 
+  /**
+   * InsertParagraphSeparatorAsSubAction() inserts a line break if it's
+   * HTMLEditor and it's possible.
+   */
+  nsresult InsertParagraphSeparatorAsSubAction();
+
   virtual nsresult SelectAllInternal() override;
 
   /**
@@ -1055,35 +1068,32 @@ protected: // Shouldn't be used by friend classes
                                       nsINode& aNode) const;
 
   /**
-   * GetSelectedElement() returns an element node which is in first range of
-   * Selection.  The rule is a little bit complicated and the rules do not
-   * make sense except in a few cases.  If you want to use this newly,
-   * you should create new method instead.  This needs to be here for
-   * comm-central.
-   * The rules are:
-   *   1. If Selection selects an element node, i.e., both containers are
-   *      same node and start offset and end offset is start offset + 1.
-   *      (XXX However, if last child is selected, this path is not used.)
-   *   2. If the argument is "href", look for anchor elements whose href
-   *      attribute is not empty from container of anchor/focus of Selection
-   *      to <body> element.  Then, both result are same one, returns the node.
-   *      (i.e., this allows collapsed selection.)
-   *   3. If the Selection is collapsed, returns null.
-   *   4. Otherwise, listing up all nodes with content iterator (post-order).
-   *     4-1. When first element node does *not* match with the argument,
-   *          *returns* the element.
-   *     4-2. When first element node matches with the argument, returns
-   *          *next* element node.
+   * GetSelectedElement() returns a "selected" element node.  "selected" means:
+   * - there is only one selection range
+   * - the range starts from an element node or in an element
+   * - the range ends at immediately after same element
+   * - and the range does not include any other element nodes.
+   * Additionally, only when aTagName is nsGkAtoms::href, this thinks that an
+   * <a> element which has non-empty "href" attribute includes the range, the
+   * <a> element is selected.
    *
-   * @param aTagName            The atom of tag name in lower case.
-   *                            If nullptr, look for any element node.
-   *                            If nsGkAtoms::href, look for an <a> element
-   *                            which has non-empty href attribute.
-   *                            If nsGkAtoms::anchor or atomized "namedanchor",
-   *                            look for an <a> element which has non-empty
-   *                            name attribute.
-   * @param aRv                 Returns error code.
-   * @return                    An element in first range of Selection.
+   * NOTE: This method is implementation of nsIHTMLEditor.getSelectedElement()
+   * and comm-central depends on this behavior.  Therefore, if you need to use
+   * this method internally but you need to change, perhaps, you should create
+   * another method for avoiding breakage of comm-central apps.
+   *
+   * @param aTagName    The atom of tag name in lower case.  Set this to
+   *                    result  of GetLowerCaseNameAtom() if you have a tag
+   *                    name with nsString.
+   *                    If nullptr, this returns any element node or nullptr.
+   *                    If nsGkAtoms::href, this returns an <a> element which
+   *                    has non-empty "href" attribute or nullptr.
+   *                    If nsGkAtoms::anchor, this returns an <a> element which
+   *                    has non-empty "name" attribute or nullptr.
+   *                    Otherwise, returns an element node whose name is
+   *                    same as aTagName or nullptr.
+   * @param aRv         Returns error code.
+   * @return            A "selected" element.
    */
   already_AddRefed<Element>
   GetSelectedElement(const nsAtom* aTagName,
@@ -1724,6 +1734,7 @@ protected: // Shouldn't be used by friend classes
 
   class BlobReader final
   {
+  typedef EditorBase::AutoEditActionDataSetter AutoEditActionDataSetter;
   public:
     BlobReader(dom::BlobImpl* aBlob, HTMLEditor* aHTMLEditor,
                bool aIsSafe, nsIDocument* aSourceDoc,
@@ -1743,10 +1754,11 @@ protected: // Shouldn't be used by friend classes
 
     RefPtr<dom::BlobImpl> mBlob;
     RefPtr<HTMLEditor> mHTMLEditor;
-    bool mIsSafe;
     nsCOMPtr<nsIDocument> mSourceDoc;
     nsCOMPtr<nsINode> mDestinationNode;
     int32_t mDestOffset;
+    EditAction mEditAction;
+    bool mIsSafe;
     bool mDoDeleteSelection;
   };
 
@@ -2615,7 +2627,6 @@ protected:
   friend class AutoSelectionSetterAfterTableEdit;
   friend class AutoSetTemporaryAncestorLimiter;
   friend class CSSEditUtils;
-  friend class DocumentResizeEventListener;
   friend class EditorBase;
   friend class EmptyEditableFunctor;
   friend class HTMLEditRules;

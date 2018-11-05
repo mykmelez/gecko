@@ -238,8 +238,8 @@ BaselineCompiler::compile()
     // Note: There is an extra entry in the bytecode type map for the search
     // hint, see below.
     size_t bytecodeTypeMapEntries = script->nTypeSets() + 1;
-    size_t yieldAndAwaitEntries =
-        script->hasYieldAndAwaitOffsets() ? script->yieldAndAwaitOffsets().size() : 0;
+    size_t resumeEntries =
+        script->hasResumeOffsets() ? script->resumeOffsets().size() : 0;
     UniquePtr<BaselineScript> baselineScript(
         BaselineScript::New(script, bailoutPrologueOffset_.offset(),
                             debugOsrPrologueOffset_.offset(),
@@ -251,7 +251,7 @@ BaselineCompiler::compile()
                             pcMappingIndexEntries.length(),
                             pcEntries.length(),
                             bytecodeTypeMapEntries,
-                            yieldAndAwaitEntries,
+                            resumeEntries,
                             traceLoggerToggleOffsets_.length()),
         JS::DeletePolicy<BaselineScript>(cx->runtime()));
     if (!baselineScript) {
@@ -318,7 +318,7 @@ BaselineCompiler::compile()
     bytecodeMap[script->nTypeSets()] = 0;
 
     // Compute yield/await native resume addresses.
-    baselineScript->computeYieldAndAwaitNativeOffsets(script);
+    baselineScript->computeResumeNativeOffsets(script);
 
     if (compileDebugInstrumentation_) {
         baselineScript->setHasDebugInstrumentation();
@@ -1220,7 +1220,6 @@ BaselineCompiler::emitBody()
             // Intentionally not implemented.
           case JSOP_SETINTRINSIC:
             // Run-once opcode during self-hosting initialization.
-          case JSOP_UNUSED126:
           case JSOP_UNUSED206:
           case JSOP_LIMIT:
             // === !! WARNING WARNING WARNING !! ===
@@ -1856,6 +1855,12 @@ BaselineCompiler::emit_JSOP_UINT24()
 {
     frame.push(Int32Value(GET_UINT24(pc)));
     return true;
+}
+
+bool
+BaselineCompiler::emit_JSOP_RESUMEINDEX()
+{
+    return emit_JSOP_UINT24();
 }
 
 bool
@@ -3937,14 +3942,6 @@ BaselineCompiler::emit_JSOP_FINALLY()
 bool
 BaselineCompiler::emit_JSOP_GOSUB()
 {
-    // Push |false| so that RETSUB knows the value on top of the
-    // stack is not an exception but the offset to the op following
-    // this GOSUB.
-    frame.push(BooleanValue(false));
-
-    int32_t nextOffset = script->pcToOffset(GetNextPc(pc));
-    frame.push(Int32Value(nextOffset));
-
     // Jump to the finally block.
     frame.syncStack(0);
     jsbytecode* target = pc + GET_JUMP_OFFSET(pc);
@@ -3957,8 +3954,29 @@ BaselineCompiler::emit_JSOP_RETSUB()
 {
     frame.popRegsAndSync(2);
 
-    ICRetSub_Fallback::Compiler stubCompiler(cx);
-    return emitOpIC(stubCompiler.getStub(&stubSpace_));
+    Label isReturn;
+    masm.branchTestBooleanTruthy(/* branchIfTrue = */ false, R0, &isReturn);
+
+    // R0 is |true|. We need to throw R1.
+    prepareVMCall();
+    pushArg(R1);
+    if (!callVM(ThrowInfo)) {
+        return false;
+    }
+
+    masm.bind(&isReturn);
+
+    // R0 is |false|. R1 contains the resumeIndex to jump to.
+    Register scratch1 = R2.scratchReg();
+    Register scratch2 = R0.scratchReg();
+    masm.movePtr(ImmGCPtr(script), scratch1);
+    masm.loadPtr(Address(scratch1, JSScript::offsetOfBaselineScript()), scratch1);
+    masm.load32(Address(scratch1, BaselineScript::offsetOfResumeEntriesOffset()), scratch2);
+    masm.addPtr(scratch2, scratch1);
+    masm.unboxInt32(R1, scratch2);
+    masm.loadPtr(BaseIndex(scratch1, scratch2, ScaleFromElemWidth(sizeof(uintptr_t))), scratch1);
+    masm.jump(scratch1);
+    return true;
 }
 
 typedef bool (*PushLexicalEnvFn)(JSContext*, BaselineFrame*, Handle<LexicalScope*>);
@@ -4825,9 +4843,9 @@ BaselineCompiler::emit_JSOP_INITIALYIELD()
     Register genObj = R2.scratchReg();
     masm.unboxObject(frame.addressOfStackValue(frame.peek(-1)), genObj);
 
-    MOZ_ASSERT(GET_UINT24(pc) == 0);
+    MOZ_ASSERT(GET_RESUMEINDEX(pc) == 0);
     masm.storeValue(Int32Value(0),
-                    Address(genObj, GeneratorObject::offsetOfYieldAndAwaitIndexSlot()));
+                    Address(genObj, GeneratorObject::offsetOfResumeIndexSlot()));
 
     Register envObj = R0.scratchReg();
     Address envChainSlot(genObj, GeneratorObject::offsetOfEnvironmentChainSlot());
@@ -4867,8 +4885,8 @@ BaselineCompiler::emit_JSOP_YIELD()
     if (frame.stackDepth() == 1) {
         // If the expression stack is empty, we can inline the YIELD.
 
-        masm.storeValue(Int32Value(GET_UINT24(pc)),
-                        Address(genObj, GeneratorObject::offsetOfYieldAndAwaitIndexSlot()));
+        masm.storeValue(Int32Value(GET_RESUMEINDEX(pc)),
+                        Address(genObj, GeneratorObject::offsetOfResumeIndexSlot()));
 
         Register envObj = R0.scratchReg();
         Address envChainSlot(genObj, GeneratorObject::offsetOfEnvironmentChainSlot());
@@ -5127,17 +5145,17 @@ BaselineCompiler::emit_JSOP_RESUME()
     masm.switchToObjectRealm(genObj, scratch2);
 
     if (resumeKind == GeneratorObject::NEXT) {
-        // Determine the resume address based on the yieldAndAwaitIndex and the
-        // yieldAndAwaitIndex -> native table in the BaselineScript.
-        masm.load32(Address(scratch1, BaselineScript::offsetOfYieldEntriesOffset()), scratch2);
+        // Determine the resume address based on the resumeIndex and the
+        // resumeIndex -> native table in the BaselineScript.
+        masm.load32(Address(scratch1, BaselineScript::offsetOfResumeEntriesOffset()), scratch2);
         masm.addPtr(scratch2, scratch1);
-        masm.unboxInt32(Address(genObj, GeneratorObject::offsetOfYieldAndAwaitIndexSlot()),
+        masm.unboxInt32(Address(genObj, GeneratorObject::offsetOfResumeIndexSlot()),
                         scratch2);
         masm.loadPtr(BaseIndex(scratch1, scratch2, ScaleFromElemWidth(sizeof(uintptr_t))), scratch1);
 
         // Mark as running and jump to the generator's JIT code.
-        masm.storeValue(Int32Value(GeneratorObject::YIELD_AND_AWAIT_INDEX_RUNNING),
-                        Address(genObj, GeneratorObject::offsetOfYieldAndAwaitIndexSlot()));
+        masm.storeValue(Int32Value(GeneratorObject::RESUME_INDEX_RUNNING),
+                        Address(genObj, GeneratorObject::offsetOfResumeIndexSlot()));
         masm.jump(scratch1);
     } else {
         MOZ_ASSERT(resumeKind == GeneratorObject::THROW || resumeKind == GeneratorObject::RETURN);

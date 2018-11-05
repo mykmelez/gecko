@@ -789,23 +789,12 @@ var Impl = {
     return ret;
   },
 
-  /**
-   * Get the type of the dataset that needs to be collected, based on the preferences.
-   * @return {Integer} A value from nsITelemetry.DATASET_*.
-   */
-  getDatasetType() {
-    return Telemetry.canRecordExtended ? Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN
-                                       : Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTOUT;
-  },
-
   getHistograms: function getHistograms(clearSubsession) {
-    let hls = Telemetry.snapshotHistograms(this.getDatasetType(), clearSubsession);
-    return TelemetryUtils.packHistograms(hls, this._testing);
+    return Telemetry.getSnapshotForHistograms("main", clearSubsession, !this._testing);
   },
 
   getKeyedHistograms(clearSubsession) {
-    let khs = Telemetry.snapshotKeyedHistograms(this.getDatasetType(), clearSubsession);
-    return TelemetryUtils.packKeyedHistograms(khs, this._testing);
+    return Telemetry.getSnapshotForKeyedHistograms("main", clearSubsession, !this._testing);
   },
 
   /**
@@ -825,25 +814,10 @@ var Impl = {
     }
 
     let scalarsSnapshot = keyed ?
-      Telemetry.snapshotKeyedScalars(this.getDatasetType(), clearSubsession) :
-      Telemetry.snapshotScalars(this.getDatasetType(), clearSubsession);
+      Telemetry.getSnapshotForKeyedScalars("main", clearSubsession, !this._testing) :
+      Telemetry.getSnapshotForScalars("main", clearSubsession, !this._testing);
 
-    // Don't return the test scalars.
-    let ret = {};
-    for (let processName in scalarsSnapshot) {
-      for (let name in scalarsSnapshot[processName]) {
-        if (name.startsWith("telemetry.test") && !this._testing) {
-          continue;
-        }
-        // Finally arrange the data in the returned object.
-        if (!(processName in ret)) {
-          ret[processName] = {};
-        }
-        ret[processName][name] = scalarsSnapshot[processName][name];
-      }
-    }
-
-    return ret;
+    return scalarsSnapshot;
   },
 
   /**
