@@ -37,7 +37,7 @@ use std::{
     vec::IntoIter,
 };
 use storage_variant::{IntoVariant, Variant};
-use task::{create_thread, get_current_thread, BoolTaskRunnable, DatabaseTaskRunnable, DeleteTask, EnumerateTask, EnumerateTaskRunnable,
+use task::{create_thread, get_current_thread, BoolTaskRunnable, DeleteTask, EnumerateTask, EnumerateTaskRunnable,
     GetNextTask, GetNextRunnable, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable,
     VariantTaskRunnable,
 };
@@ -197,11 +197,10 @@ impl KeyValueService {
             nsCString::from(name),
         ));
 
-        let runnable = DatabaseTaskRunnable::new(
+        let runnable = TaskRunnable::new(
             "KeyValueDatabase::GetOrCreateAsync",
             source,
             task,
-            Cell::default(),
         );
 
         unsafe {

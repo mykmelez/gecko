@@ -77,11 +77,6 @@ pub fn create_thread(name: &str) -> Result<RefPtr<nsIThread>, nsresult> {
     })
 }
 
-pub trait DatabaseTask {
-    fn run(&self) -> Result<Option<RefPtr<nsIKeyValueDatabase>>, KeyValueError>;
-    fn done(&self, result: Result<Option<RefPtr<nsIKeyValueDatabase>>, KeyValueError>) -> Result<(), nsresult>;
-}
-
 pub trait VariantTask {
     fn run(&self) -> Result<Option<RefPtr<nsIVariant>>, KeyValueError>;
     fn done(&self, result: Result<Option<RefPtr<nsIVariant>>, KeyValueError>) -> Result<(), nsresult>;
@@ -100,6 +95,7 @@ pub struct GetOrCreateTask {
     thread: RefPtr<nsIThread>,
     path: nsCString,
     name: nsCString,
+    result: Cell<Option<Result<RefPtr<KeyValueDatabase>, KeyValueError>>>
 }
 
 impl GetOrCreateTask {
@@ -114,33 +110,36 @@ impl GetOrCreateTask {
             thread,
             path,
             name,
+            result: Cell::default(),
         }
     }
 }
 
-impl DatabaseTask for GetOrCreateTask {
-    fn run(&self) -> Result<Option<RefPtr<nsIKeyValueDatabase>>, KeyValueError> {
-        let mut writer = Manager::singleton().write()?;
-        let rkv = writer.get_or_create(Path::new(str::from_utf8(&self.path)?), Rkv::new)?;
-        let store = if self.name.is_empty() {
-            rkv.write()?.open_or_create_default()
-        } else {
-            rkv.write()?
-                .open_or_create(Some(str::from_utf8(&self.name)?))
-        }?;
-        let db = KeyValueDatabase::new(rkv, store, Some(self.thread.clone()));
-
-        match db.query_interface::<nsIKeyValueDatabase>() {
-            Some(db) => Ok(Some(db)),
-            None => Err(KeyValueError::NoInterface("nsISupports")),
-        }
+impl Task for GetOrCreateTask {
+    fn run(&self) {
+        self.result.set(Some(|| -> Result<RefPtr<KeyValueDatabase>, KeyValueError> {
+            let mut writer = Manager::singleton().write()?;
+            let rkv = writer.get_or_create(Path::new(str::from_utf8(&self.path)?), Rkv::new)?;
+            let store = if self.name.is_empty() {
+                rkv.write()?.open_or_create_default()
+            } else {
+                rkv.write()?
+                    .open_or_create(Some(str::from_utf8(&self.name)?))
+            }?;
+            Ok(KeyValueDatabase::new(rkv, store, Some(self.thread.clone())))
+        }()));
     }
 
-    fn done(&self, result: Result<Option<RefPtr<nsIKeyValueDatabase>>, KeyValueError>) -> Result<(), nsresult> {
-        match result {
-            Ok(Some(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
-            Ok(None) => unsafe { self.callback.HandleResult(ptr::null()) },
-            Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+    fn done(&self) -> Result<(), nsresult> {
+        match self.result.take() {
+            Some(Ok(db)) => unsafe {
+                match db.query_interface::<nsIKeyValueDatabase>() {
+                    Some(db) => self.callback.HandleResult(db.coerce()),
+                    None => KeyValueError::NoInterface("nsISupports").into(),
+                }
+            }
+            None => unsafe { self.callback.HandleResult(ptr::null()) },
+            Some(Err(err)) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
         }.to_result()
     }
 }
@@ -668,62 +667,6 @@ impl EnumerateTaskRunnable {
         result: Cell<Option<Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError>>>,
     ) -> RefPtr<EnumerateTaskRunnable> {
         EnumerateTaskRunnable::allocate(InitEnumerateTaskRunnable {
-            name,
-            source,
-            task,
-            result,
-        })
-    }
-
-    xpcom_method!(Run, run, {});
-    fn run(&self) -> Result<(), nsresult> {
-        match self.result.take() {
-            None => {
-                // Run the task on the target thread, store the result,
-                // and dispatch the runnable back to the source thread.
-                let result = self.task.run();
-                self.result.set(Some(result));
-                let target = getter_addrefs(|p| unsafe { self.source.GetEventTarget(p) })?;
-                unsafe {
-                    target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
-                }.to_result()
-            }
-            Some(result) => {
-                // Back on the source thread, notify the task we're done.
-                self.task.done(result)
-            }
-        }
-    }
-
-    xpcom_method!(GetName, get_name, {}, *mut nsACString);
-    fn get_name(&self) -> Result<nsCString, nsresult> {
-        Ok(nsCString::from(self.name))
-    }
-}
-
-#[derive(xpcom)]
-#[xpimplements(nsIRunnable, nsINamed)]
-#[refcnt = "atomic"]
-pub struct InitDatabaseTaskRunnable {
-    name: &'static str,
-    source: RefPtr<nsIThread>,
-
-    /// Holds the task, and the result of the task.  The task is created
-    /// on the current thread, run on a target thread, and handled again
-    /// on the original thread; the result is mutated on the target thread
-    /// and accessed on the original thread.
-    task: Box<DatabaseTask>,
-    result: Cell<Option<Result<Option<RefPtr<nsIKeyValueDatabase>>, KeyValueError>>>,
-}
-
-impl DatabaseTaskRunnable {
-    pub fn new(
-        name: &'static str,
-        source: RefPtr<nsIThread>,
-        task: Box<DatabaseTask>,
-        result: Cell<Option<Result<Option<RefPtr<nsIKeyValueDatabase>>, KeyValueError>>>,
-    ) -> RefPtr<DatabaseTaskRunnable> {
-        DatabaseTaskRunnable::allocate(InitDatabaseTaskRunnable {
             name,
             source,
             task,
