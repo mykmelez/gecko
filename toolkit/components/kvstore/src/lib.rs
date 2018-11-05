@@ -38,8 +38,7 @@ use std::{
 };
 use storage_variant::{IntoVariant, Variant};
 use task::{create_thread, get_current_thread, BoolTaskRunnable, DeleteTask, EnumerateTask, EnumerateTaskRunnable,
-    GetNextTask, GetNextRunnable, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable,
-    VariantTaskRunnable,
+    GetNextTask, GetNextRunnable, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable
 };
 use xpcom::{
     interfaces::{
@@ -317,11 +316,10 @@ impl KeyValueDatabase {
             RefPtr::new(default_value),
         ));
 
-        let runnable = VariantTaskRunnable::new(
+        let runnable = TaskRunnable::new(
             "KeyValueDatabase::GetAsync",
             source,
             task,
-            Cell::default(),
         );
 
         unsafe {
