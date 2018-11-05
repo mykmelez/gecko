@@ -77,9 +77,62 @@ pub fn create_thread(name: &str) -> Result<RefPtr<nsIThread>, nsresult> {
     })
 }
 
-pub trait VariantTask {
-    fn run(&self) -> Result<Option<RefPtr<nsIVariant>>, KeyValueError>;
-    fn done(&self, result: Result<Option<RefPtr<nsIVariant>>, KeyValueError>) -> Result<(), nsresult>;
+pub trait Task {
+    fn run(&self);
+    fn done(&self) -> Result<(), nsresult>;
+}
+
+#[derive(xpcom)]
+#[xpimplements(nsIRunnable, nsINamed)]
+#[refcnt = "atomic"]
+pub struct InitTaskRunnable {
+    name: &'static str,
+    origin: RefPtr<nsIThread>,
+
+    /// Holds the task, and the result of the task.  The task is created
+    /// on the current thread, run on a target thread, and handled again
+    /// on the original thread; the result is mutated on the target thread
+    /// and accessed on the original thread.
+    task: Box<Task>,
+
+    has_run: Cell<bool>,
+}
+
+impl TaskRunnable {
+    pub fn new(
+        name: &'static str,
+        origin: RefPtr<nsIThread>,
+        task: Box<Task>,
+    ) -> RefPtr<TaskRunnable> {
+        TaskRunnable::allocate(InitTaskRunnable {
+            name,
+            origin,
+            task,
+            has_run: Cell::new(false),
+        })
+    }
+
+    xpcom_method!(Run, run, {});
+    fn run(&self) -> Result<(), nsresult> {
+        match self.has_run.take() {
+            false => {
+                self.task.run();
+                self.has_run.set(true);
+                let target = getter_addrefs(|p| unsafe { self.origin.GetEventTarget(p) })?;
+                unsafe {
+                    target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+                }.to_result()
+            }
+            true => {
+                self.task.done()
+            }
+        }
+    }
+
+    xpcom_method!(GetName, get_name, {}, *mut nsACString);
+    fn get_name(&self) -> Result<nsCString, nsresult> {
+        Ok(nsCString::from(self.name))
+    }
 }
 
 pub struct GetOrCreateTask {
@@ -492,11 +545,6 @@ impl Task for GetNextTask {
     }
 }
 
-pub trait Task {
-    fn run(&self);
-    fn done(&self) -> Result<(), nsresult>;
-}
-
 pub struct DeleteTask {
     callback: RefPtr<nsIKeyValueVoidCallback>,
     rkv: Arc<RwLock<Rkv>>,
@@ -552,58 +600,5 @@ impl Task for DeleteTask {
             Some(Err(err)) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
             None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
         }.to_result()
-    }
-}
-
-#[derive(xpcom)]
-#[xpimplements(nsIRunnable, nsINamed)]
-#[refcnt = "atomic"]
-pub struct InitTaskRunnable {
-    name: &'static str,
-    origin: RefPtr<nsIThread>,
-
-    /// Holds the task, and the result of the task.  The task is created
-    /// on the current thread, run on a target thread, and handled again
-    /// on the original thread; the result is mutated on the target thread
-    /// and accessed on the original thread.
-    task: Box<Task>,
-
-    has_run: Cell<bool>,
-}
-
-impl TaskRunnable {
-    pub fn new(
-        name: &'static str,
-        origin: RefPtr<nsIThread>,
-        task: Box<Task>,
-    ) -> RefPtr<TaskRunnable> {
-        TaskRunnable::allocate(InitTaskRunnable {
-            name,
-            origin,
-            task,
-            has_run: Cell::new(false),
-        })
-    }
-
-    xpcom_method!(Run, run, {});
-    fn run(&self) -> Result<(), nsresult> {
-        match self.has_run.take() {
-            false => {
-                self.task.run();
-                self.has_run.set(true);
-                let target = getter_addrefs(|p| unsafe { self.origin.GetEventTarget(p) })?;
-                unsafe {
-                    target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
-                }.to_result()
-            }
-            true => {
-                self.task.done()
-            }
-        }
-    }
-
-    xpcom_method!(GetName, get_name, {}, *mut nsACString);
-    fn get_name(&self) -> Result<nsCString, nsresult> {
-        Ok(nsCString::from(self.name))
     }
 }
