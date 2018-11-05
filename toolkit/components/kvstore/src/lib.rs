@@ -37,7 +37,7 @@ use std::{
     vec::IntoIter,
 };
 use storage_variant::{IntoVariant, Variant};
-use task::{create_thread, get_current_thread, BoolTaskRunnable, DeleteTask, EnumerateTask,
+use task::{create_thread, get_current_thread, DeleteTask, EnumerateTask,
     GetNextTask, GetNextRunnable, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable
 };
 use xpcom::{
@@ -609,11 +609,10 @@ impl KeyValueEnumerator {
             self.iter.clone(),
         ));
 
-        let runnable = BoolTaskRunnable::new(
+        let runnable = TaskRunnable::new(
             "KeyValueDatabase::HasMoreElementsAsync",
             source,
             task,
-            Cell::default(),
         );
 
         unsafe {
