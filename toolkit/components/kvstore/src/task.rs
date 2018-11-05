@@ -150,7 +150,7 @@ pub struct PutTask {
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
-    value: RefPtr<nsIVariant>,
+    value: OwnedValue,
 }
 
 impl PutTask {
@@ -159,7 +159,7 @@ impl PutTask {
         rkv: Arc<RwLock<Rkv>>,
         store: Store,
         key: nsCString,
-        value: RefPtr<nsIVariant>,
+        value: OwnedValue,
     ) -> PutTask {
         PutTask {
             callback,
@@ -172,42 +172,18 @@ impl PutTask {
 
     fn run(&self) -> Result<(), KeyValueError> {
         let key = str::from_utf8(&self.key)?;
-
-        let mut data_type: uint16_t = 0;
-        unsafe { self.value.GetDataType(&mut data_type) }.to_result()?;
         let env = self.rkv.read()?;
         let mut writer = env.write()?;
 
-        match data_type {
-            DATA_TYPE_INT32 => {
-                let mut value_as_int32: int32_t = 0;
-                unsafe { self.value.GetAsInt32(&mut value_as_int32) }.to_result()?;
-                writer.put(&self.store, key, &Value::I64(value_as_int32.into()))?;
-                writer.commit()?;
-            }
-            DATA_TYPE_DOUBLE => {
-                let mut value_as_double: f64 = 0.0;
-                unsafe { self.value.GetAsDouble(&mut value_as_double) }.to_result()?;
-                writer.put(&self.store, key, &Value::F64(value_as_double.into()))?;
-                writer.commit()?;
-            }
-            DATA_TYPE_WSTRING => {
-                let mut value_as_astring: nsString = nsString::new();
-                unsafe { self.value.GetAsAString(&mut *value_as_astring) }.to_result()?;
-                let value = String::from_utf16(&value_as_astring)?;
-                writer.put(&self.store, key, &Value::Str(&value))?;
-                writer.commit()?;
-            }
-            DATA_TYPE_BOOL => {
-                let mut value_as_bool: bool = false;
-                unsafe { self.value.GetAsBool(&mut value_as_bool) }.to_result()?;
-                writer.put(&self.store, key, &Value::Bool(value_as_bool.into()))?;
-                writer.commit()?;
-            }
-            _unsupported_type => {
-                return Err(KeyValueError::UnsupportedType(data_type));
-            }
+        let value = match self.value {
+            OwnedValue::Bool(val) => Value::Bool(val),
+            OwnedValue::I64(val) => Value::I64(val),
+            OwnedValue::F64(val) => Value::F64(val),
+            OwnedValue::Str(ref val) => Value::Str(&val),
         };
+
+        writer.put(&self.store, key, &value)?;
+        writer.commit()?;
 
         Ok(())
     }
@@ -386,7 +362,10 @@ impl EnumerateTask {
                         Ok(key) => Ok(key.to_owned()),
                         Err(err) => Err(err.into()),
                     },
-                    value_to_owned(val),
+                    match val {
+                        Ok(val) => value_to_owned(val),
+                        Err(err) => Err(KeyValueError::StoreError(err)),
+                    },
                 )
             }).collect();
 

@@ -27,7 +27,7 @@ use nserror::{
     NS_OK,
 };
 use nsstring::{nsACString, nsCString, nsString};
-use ownedvalue::{value_to_owned, OwnedValue};
+use ownedvalue::{value_to_owned, variant_to_owned, OwnedValue};
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -243,12 +243,17 @@ impl KeyValueDatabase {
         value: &nsIVariant,
     ) -> Result<(), nsresult> {
         let source = get_current_thread()?;
+        let value = match variant_to_owned(value)? {
+            Some(value) => Ok(value),
+            None => Err(KeyValueError::UnexpectedValue),
+        }?;
+
         let task = Box::new(PutTask::new(
             RefPtr::new(callback),
             Arc::clone(&self.rkv),
             self.store,
             nsCString::from(key),
-            RefPtr::new(value),
+            value,
         ));
 
         let runnable = PutTaskRunnable::new(
