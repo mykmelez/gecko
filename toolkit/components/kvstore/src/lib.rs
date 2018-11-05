@@ -38,7 +38,7 @@ use std::{
 };
 use storage_variant::{IntoVariant, Variant};
 use task::{create_thread, get_current_thread, DeleteTask, EnumerateTask,
-    GetNextTask, GetNextRunnable, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable
+    GetNextTask, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable
 };
 use xpcom::{
     interfaces::{
@@ -632,11 +632,10 @@ impl KeyValueEnumerator {
             self.iter.clone(),
         ));
 
-        let runnable = GetNextRunnable::new(
+        let runnable = TaskRunnable::new(
             "KeyValueDatabase::GetNextAsync",
             source,
             task,
-            Cell::default(),
         );
 
         unsafe {
