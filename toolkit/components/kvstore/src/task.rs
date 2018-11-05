@@ -312,6 +312,7 @@ pub struct EnumerateTask {
     store: Store,
     from_key: nsCString,
     to_key: nsCString,
+    result: Cell<Option<Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError>>>
 }
 
 impl EnumerateTask {
@@ -328,74 +329,80 @@ impl EnumerateTask {
             store,
             from_key,
             to_key,
+            result: Cell::default(),
         }
     }
+}
 
-    fn run(&self) -> Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError> {
-        let env = self.rkv.read()?;
-        let reader = env.read()?;
-        let from_key = str::from_utf8(&self.from_key)?;
-        let to_key = str::from_utf8(&self.to_key)?;
+impl Task for EnumerateTask {
+    fn run(&self) {
+        self.result.set(Some(|| -> Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError> {
+            let env = self.rkv.read()?;
+            let reader = env.read()?;
+            let from_key = str::from_utf8(&self.from_key)?;
+            let to_key = str::from_utf8(&self.to_key)?;
 
-        let iterator = if from_key.is_empty() {
-            reader.iter_start(&self.store)?
-        } else {
-            reader.iter_from(&self.store, &from_key)?
-        };
+            let iterator = if from_key.is_empty() {
+                reader.iter_start(&self.store)?
+            } else {
+                reader.iter_from(&self.store, &from_key)?
+            };
 
-        // Ideally, we'd enumerate pairs lazily, as the consumer calls
-        // nsIKeyValueEnumerator.getNext(), which calls our
-        // KeyValueEnumerator.get_next() implementation.  But KeyValueEnumerator
-        // can't reference the Iter because Rust "cannot #[derive(xpcom)]
-        // on a generic type," and the Iter requires a lifetime parameter,
-        // which would make KeyValueEnumerator generic.
-        //
-        // Our fallback approach is to eagerly collect the iterator
-        // into a collection that KeyValueEnumerator owns.  Fixing this so we
-        // enumerate pairs lazily is bug 1499252.
-        let pairs: Vec<(
-            Result<String, KeyValueError>,
-            Result<OwnedValue, KeyValueError>,
-        )> = iterator
-            // Convert the key to a string so we can compare it to the "to" key.
-            // For forward compatibility, we don't fail here if we can't convert
-            // a key to UTF-8.  Instead, we store the Err in the collection
-            // and fail lazily in KeyValueEnumerator.get_next().
-            .map(|(key, val)| (str::from_utf8(&key), val))
-            .take_while(|(key, _val)| {
-                if to_key.is_empty() {
-                    true
-                } else {
-                    match *key {
-                        Ok(key) => key <= to_key,
-                        Err(_err) => true,
+            // Ideally, we'd enumerate pairs lazily, as the consumer calls
+            // nsIKeyValueEnumerator.getNext(), which calls our
+            // KeyValueEnumerator.get_next() implementation.  But KeyValueEnumerator
+            // can't reference the Iter because Rust "cannot #[derive(xpcom)]
+            // on a generic type," and the Iter requires a lifetime parameter,
+            // which would make KeyValueEnumerator generic.
+            //
+            // Our fallback approach is to eagerly collect the iterator
+            // into a collection that KeyValueEnumerator owns.  Fixing this so we
+            // enumerate pairs lazily is bug 1499252.
+            let pairs: Vec<(
+                Result<String, KeyValueError>,
+                Result<OwnedValue, KeyValueError>,
+            )> = iterator
+                // Convert the key to a string so we can compare it to the "to" key.
+                // For forward compatibility, we don't fail here if we can't convert
+                // a key to UTF-8.  Instead, we store the Err in the collection
+                // and fail lazily in KeyValueEnumerator.get_next().
+                .map(|(key, val)| (str::from_utf8(&key), val))
+                .take_while(|(key, _val)| {
+                    if to_key.is_empty() {
+                        true
+                    } else {
+                        match *key {
+                            Ok(key) => key <= to_key,
+                            Err(_err) => true,
+                        }
                     }
-                }
-            }).map(|(key, val)| {
-                (
-                    match key {
-                        Ok(key) => Ok(key.to_owned()),
-                        Err(err) => Err(err.into()),
-                    },
-                    match val {
-                        Ok(val) => value_to_owned(val),
-                        Err(err) => Err(KeyValueError::StoreError(err)),
-                    },
-                )
-            }).collect();
+                }).map(|(key, val)| {
+                    (
+                        match key {
+                            Ok(key) => Ok(key.to_owned()),
+                            Err(err) => Err(err.into()),
+                        },
+                        match val {
+                            Ok(val) => value_to_owned(val),
+                            Err(err) => Err(KeyValueError::StoreError(err)),
+                        },
+                    )
+                }).collect();
 
-        let enumerator = KeyValueEnumerator::new(get_current_thread().unwrap(), pairs);
+            let enumerator = KeyValueEnumerator::new(get_current_thread().unwrap(), pairs);
 
-        match enumerator.query_interface::<nsIKeyValueEnumerator>() {
-            Some(interface) => Ok(interface),
-            None => Err(KeyValueError::NoInterface("nsIKeyValueEnumerator")),
-        }
+            match enumerator.query_interface::<nsIKeyValueEnumerator>() {
+                Some(interface) => Ok(interface),
+                None => Err(KeyValueError::NoInterface("nsIKeyValueEnumerator")),
+            }
+        }()));
     }
 
-    fn done(&self, result: Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError>) -> Result<(), nsresult> {
-        match result {
-            Ok(value) => unsafe { self.callback.HandleResult(value.coerce()) },
-            Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+    fn done(&self) -> Result<(), nsresult> {
+        match self.result.take() {
+            Some(Ok(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
+            Some(Err(err)) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+            None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
@@ -643,62 +650,6 @@ impl TaskRunnable {
             }
             true => {
                 self.task.done()
-            }
-        }
-    }
-
-    xpcom_method!(GetName, get_name, {}, *mut nsACString);
-    fn get_name(&self) -> Result<nsCString, nsresult> {
-        Ok(nsCString::from(self.name))
-    }
-}
-
-#[derive(xpcom)]
-#[xpimplements(nsIRunnable, nsINamed)]
-#[refcnt = "atomic"]
-pub struct InitEnumerateTaskRunnable {
-    name: &'static str,
-    source: RefPtr<nsIThread>,
-
-    /// Holds the task, and the result of the task.  The task is created
-    /// on the current thread, run on a target thread, and handled again
-    /// on the original thread; the result is mutated on the target thread
-    /// and accessed on the original thread.
-    task: Box<EnumerateTask>,
-    result: Cell<Option<Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError>>>,
-}
-
-impl EnumerateTaskRunnable {
-    pub fn new(
-        name: &'static str,
-        source: RefPtr<nsIThread>,
-        task: Box<EnumerateTask>,
-        result: Cell<Option<Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError>>>,
-    ) -> RefPtr<EnumerateTaskRunnable> {
-        EnumerateTaskRunnable::allocate(InitEnumerateTaskRunnable {
-            name,
-            source,
-            task,
-            result,
-        })
-    }
-
-    xpcom_method!(Run, run, {});
-    fn run(&self) -> Result<(), nsresult> {
-        match self.result.take() {
-            None => {
-                // Run the task on the target thread, store the result,
-                // and dispatch the runnable back to the source thread.
-                let result = self.task.run();
-                self.result.set(Some(result));
-                let target = getter_addrefs(|p| unsafe { self.source.GetEventTarget(p) })?;
-                unsafe {
-                    target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
-                }.to_result()
-            }
-            Some(result) => {
-                // Back on the source thread, notify the task we're done.
-                self.task.done(result)
             }
         }
     }

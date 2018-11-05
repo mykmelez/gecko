@@ -37,7 +37,7 @@ use std::{
     vec::IntoIter,
 };
 use storage_variant::{IntoVariant, Variant};
-use task::{create_thread, get_current_thread, BoolTaskRunnable, DeleteTask, EnumerateTask, EnumerateTaskRunnable,
+use task::{create_thread, get_current_thread, BoolTaskRunnable, DeleteTask, EnumerateTask,
     GetNextTask, GetNextRunnable, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable
 };
 use xpcom::{
@@ -498,11 +498,10 @@ impl KeyValueDatabase {
             nsCString::from(to_key),
         ));
 
-        let runnable = EnumerateTaskRunnable::new(
+        let runnable = TaskRunnable::new(
             "KeyValueDatabase::EnumerateAsync",
             source,
             task,
-            Cell::default(),
         );
 
         unsafe {
