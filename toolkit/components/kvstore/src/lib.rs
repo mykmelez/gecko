@@ -285,11 +285,10 @@ impl KeyValueDatabase {
             nsCString::from(key),
         ));
 
-        let runnable = BoolTaskRunnable::new(
+        let runnable = TaskRunnable::new(
             "KeyValueDatabase::HasAsync",
             source,
             task,
-            Cell::default(),
         );
 
         unsafe {

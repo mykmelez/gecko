@@ -138,7 +138,7 @@ impl Task for GetOrCreateTask {
                     None => KeyValueError::NoInterface("nsISupports").into(),
                 }
             }
-            None => unsafe { self.callback.HandleResult(ptr::null()) },
+            None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
             Some(Err(err)) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
         }.to_result()
     }
@@ -207,6 +207,7 @@ pub struct HasTask {
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
+    result: Cell<Option<Result<bool, KeyValueError>>>
 }
 
 impl HasTask {
@@ -221,23 +222,27 @@ impl HasTask {
             rkv,
             store,
             key,
+            result: Cell::default(),
         }
     }
 }
 
-impl BoolTask for HasTask {
-    fn run(&self) -> Result<bool, KeyValueError> {
-        let key = str::from_utf8(&self.key)?;
-        let env = self.rkv.read()?;
-        let reader = env.read()?;
-        let value = reader.get(&self.store, key)?;
-        Ok(value.is_some())
+impl Task for HasTask {
+    fn run(&self) {
+        self.result.set(Some(|| -> Result<bool, KeyValueError> {
+            let key = str::from_utf8(&self.key)?;
+            let env = self.rkv.read()?;
+            let reader = env.read()?;
+            let value = reader.get(&self.store, key)?;
+            Ok(value.is_some())
+        }()));
     }
 
-    fn done(&self, result: Result<bool, KeyValueError>) -> Result<(), nsresult> {
-        match result {
-            Ok(value) => unsafe { self.callback.HandleResult(value.into_variant().ok_or(KeyValueError::Read)?.take().coerce()) },
-            Err(err) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+    fn done(&self) -> Result<(), nsresult> {
+        match self.result.take() {
+            Some(Ok(value)) => unsafe { self.callback.HandleResult(value.into_variant().ok_or(KeyValueError::Read)?.take().coerce()) },
+            Some(Err(err)) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+            None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
