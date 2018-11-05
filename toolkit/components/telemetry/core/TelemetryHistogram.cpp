@@ -271,6 +271,8 @@ const HistogramID kRecordingInitiallyDisabledIDs[] = {
   mozilla::Telemetry::TELEMETRY_TEST_KEYED_COUNT_INIT_NO_RECORD
 };
 
+const char* TEST_HISTOGRAM_PREFIX = "TELEMETRY_TEST_";
+
 } // namespace
 
 ////////////////////////////////////////////////////////////////////////
@@ -872,6 +874,7 @@ internal_GetHistogramsSnapshot(const StaticMutexAutoLock& aLock,
                                unsigned int aDataset,
                                bool aClearSubsession,
                                bool aIncludeGPU,
+                               bool aFilterTest,
                                HistogramProcessSnapshotsArray& aOutSnapshot)
 {
   if (!aOutSnapshot.resize(static_cast<uint32_t>(ProcessID::Count))) {
@@ -905,6 +908,15 @@ internal_GetHistogramsSnapshot(const StaticMutexAutoLock& aLock,
       if (!h || internal_IsExpired(aLock, h) || !internal_ShouldReflectHistogram(aLock, h, id)) {
         continue;
       }
+
+      const char* name = info.name();
+      if (aFilterTest && strncmp(TEST_HISTOGRAM_PREFIX, name, strlen(TEST_HISTOGRAM_PREFIX)) == 0) {
+        if (aClearSubsession) {
+          h->Clear();
+        }
+        continue;
+      }
+
 
       HistogramSnapshotData snapshotData;
       if (NS_FAILED(internal_GetHistogramAndSamples(aLock, h, snapshotData))) {
@@ -1173,6 +1185,7 @@ internal_GetKeyedHistogramsSnapshot(const StaticMutexAutoLock& aLock,
                                     unsigned int aDataset,
                                     bool aClearSubsession,
                                     bool aIncludeGPU,
+                                    bool aFilterTest,
                                     KeyedHistogramProcessSnapshotsArray& aOutSnapshot,
                                     bool aSkipEmpty = false)
 {
@@ -1203,6 +1216,14 @@ internal_GetKeyedHistogramsSnapshot(const StaticMutexAutoLock& aLock,
                                                              ProcessID(process),
                                                              /* instantiate = */ false);
       if (!keyed || (aSkipEmpty && keyed->IsEmpty()) || keyed->IsExpired()) {
+        continue;
+      }
+
+      const char* name = info.name();
+      if (aFilterTest && strncmp(TEST_HISTOGRAM_PREFIX, name, strlen(TEST_HISTOGRAM_PREFIX)) == 0) {
+        if (aClearSubsession) {
+          keyed->Clear();
+        }
         continue;
       }
 
@@ -2264,22 +2285,23 @@ TelemetryHistogram::Accumulate(HistogramID aID, const nsCString& aKey,
   }
 }
 
-void
+bool
 TelemetryHistogram::Accumulate(const char* name, uint32_t sample)
 {
   StaticMutexAutoLock locker(gTelemetryHistogramMutex);
   if (!internal_CanRecordBase()) {
-    return;
+    return false;
   }
   HistogramID id;
   nsresult rv = internal_GetHistogramIdByName(locker, nsDependentCString(name), &id);
   if (NS_FAILED(rv)) {
-    return;
+    return false;
   }
   internal_Accumulate(locker, id, sample);
+  return true;
 }
 
-void
+bool
 TelemetryHistogram::Accumulate(const char* name,
                                const nsCString& key, uint32_t sample)
 {
@@ -2288,7 +2310,7 @@ TelemetryHistogram::Accumulate(const char* name,
   {
     StaticMutexAutoLock locker(gTelemetryHistogramMutex);
     if (!internal_CanRecordBase()) {
-      return;
+      return false;
     }
     HistogramID id;
     nsresult rv = internal_GetHistogramIdByName(locker, nsDependentCString(name), &id);
@@ -2296,7 +2318,7 @@ TelemetryHistogram::Accumulate(const char* name,
       // Check if we're allowed to record in the provided key, for this histogram.
       if (gHistogramInfos[id].allows_key(key)) {
         internal_Accumulate(locker, id, key, sample);
-        return;
+        return true;
       }
       // We're holding |gTelemetryHistogramMutex|, so we can't print a message
       // here.
@@ -2311,6 +2333,7 @@ TelemetryHistogram::Accumulate(const char* name,
       mozilla::Telemetry::ScalarID::TELEMETRY_ACCUMULATE_UNKNOWN_HISTOGRAM_KEYS,
       NS_ConvertASCIItoUTF16(name), 1);
   }
+  return false;
 }
 
 void
@@ -2468,7 +2491,8 @@ nsresult
 TelemetryHistogram::CreateHistogramSnapshots(JSContext* aCx,
                                              JS::MutableHandleValue aResult,
                                              unsigned int aDataset,
-                                             bool aClearSubsession)
+                                             bool aClearSubsession,
+                                             bool aFilterTest)
 {
   // Runs without protection from |gTelemetryHistogramMutex|
   JS::Rooted<JSObject*> root_obj(aCx, JS_NewPlainObject(aCx));
@@ -2488,6 +2512,7 @@ TelemetryHistogram::CreateHistogramSnapshots(JSContext* aCx,
                                                  aDataset,
                                                  aClearSubsession,
                                                  includeGPUProcess,
+                                                 aFilterTest,
                                                  processHistArray);
     if (NS_FAILED(rv)) {
       return rv;
@@ -2534,7 +2559,8 @@ nsresult
 TelemetryHistogram::GetKeyedHistogramSnapshots(JSContext* aCx,
                                                JS::MutableHandleValue aResult,
                                                unsigned int aDataset,
-                                               bool aClearSubsession)
+                                               bool aClearSubsession,
+                                               bool aFilterTest)
 {
   // Runs without protection from |gTelemetryHistogramMutex|
   JS::Rooted<JSObject*> obj(aCx, JS_NewPlainObject(aCx));
@@ -2555,7 +2581,9 @@ TelemetryHistogram::GetKeyedHistogramSnapshots(JSContext* aCx,
                                                       aDataset,
                                                       aClearSubsession,
                                                       includeGPUProcess,
-                                                      processHistArray);
+                                                      aFilterTest,
+                                                      processHistArray,
+                                                      true /* skipEmpty */);
     if (NS_FAILED(rv)) {
       return rv;
     }
@@ -2821,6 +2849,7 @@ TelemetryHistogram::SerializeHistograms(mozilla::JSONWriter& aWriter)
                                                  nsITelemetry::DATASET_RELEASE_CHANNEL_OPTIN,
                                                  false /* aClearSubsession */,
                                                  includeGPUProcess,
+                                                 false /* aFilterTest */,
                                                  processHistArray))) {
       return NS_ERROR_FAILURE;
     }
@@ -2868,6 +2897,7 @@ TelemetryHistogram::SerializeKeyedHistograms(mozilla::JSONWriter& aWriter)
                                                       nsITelemetry::DATASET_RELEASE_CHANNEL_OPTIN,
                                                       false /* aClearSubsession */,
                                                       includeGPUProcess,
+                                                      false /* aFilterTest */,
                                                       processHistArray,
                                                       true /* aSkipEmpty */))) {
       return NS_ERROR_FAILURE;

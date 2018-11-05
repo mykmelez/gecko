@@ -1007,20 +1007,27 @@ HTMLEditor::BlobReader::BlobReader(BlobImpl* aBlob,
                                    bool aDoDeleteSelection)
   : mBlob(aBlob)
   , mHTMLEditor(aHTMLEditor)
-  , mIsSafe(aIsSafe)
   , mSourceDoc(aSourceDoc)
   , mDestinationNode(aDestinationNode)
   , mDestOffset(aDestOffset)
+  , mEditAction(aHTMLEditor->GetEditAction())
+  , mIsSafe(aIsSafe)
   , mDoDeleteSelection(aDoDeleteSelection)
 {
   MOZ_ASSERT(mBlob);
   MOZ_ASSERT(mHTMLEditor);
+  MOZ_ASSERT(mHTMLEditor->IsEditActionDataAvailable());
   MOZ_ASSERT(mDestinationNode);
 }
 
 nsresult
 HTMLEditor::BlobReader::OnResult(const nsACString& aResult)
 {
+  AutoEditActionDataSetter editActionData(*mHTMLEditor, mEditAction);
+  if (NS_WARN_IF(!editActionData.CanHandle())) {
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+
   nsString blobType;
   mBlob->GetType(blobType);
 
@@ -1158,6 +1165,8 @@ HTMLEditor::InsertObject(const nsACString& aType,
                          int32_t aDestOffset,
                          bool aDoDeleteSelection)
 {
+  MOZ_ASSERT(IsEditActionDataAvailable());
+
   nsresult rv;
 
   if (nsCOMPtr<BlobImpl> blob = do_QueryInterface(aObject)) {
@@ -1227,6 +1236,28 @@ HTMLEditor::InsertObject(const nsACString& aType,
   return NS_OK;
 }
 
+static bool
+GetString(nsISupports* aData, nsAString& aText)
+{
+  if (nsCOMPtr<nsISupportsString> str = do_QueryInterface(aData)) {
+    str->GetData(aText);
+    return !aText.IsEmpty();
+  }
+
+  return false;
+}
+
+static bool
+GetCString(nsISupports* aData, nsACString& aText)
+{
+  if (nsCOMPtr<nsISupportsCString> str = do_QueryInterface(aData)) {
+    str->GetData(aText);
+    return !aText.IsEmpty();
+  }
+
+  return false;
+}
+
 nsresult
 HTMLEditor::InsertFromTransferable(nsITransferable* transferable,
                                    nsIDocument* aSourceDoc,
@@ -1238,15 +1269,12 @@ HTMLEditor::InsertFromTransferable(nsITransferable* transferable,
   nsresult rv = NS_OK;
   nsAutoCString bestFlavor;
   nsCOMPtr<nsISupports> genericDataObj;
-  uint32_t len = 0;
   if (NS_SUCCEEDED(
         transferable->GetAnyTransferData(bestFlavor,
-                                         getter_AddRefs(genericDataObj),
-                                         &len))) {
+                                         getter_AddRefs(genericDataObj)))) {
     AutoTransactionsConserveSelection dontChangeMySelection(*this);
     nsAutoString flavor;
     CopyASCIItoUTF16(bestFlavor, flavor);
-    nsAutoString stuffToPaste;
     bool isSafe = IsSafeToInsertData(aSourceDoc);
 
     if (bestFlavor.EqualsLiteral(kFileMime) ||
@@ -1257,12 +1285,9 @@ HTMLEditor::InsertFromTransferable(nsITransferable* transferable,
       rv = InsertObject(bestFlavor, genericDataObj, isSafe,
                         aSourceDoc, nullptr, 0, aDoDeleteSelection);
     } else if (bestFlavor.EqualsLiteral(kNativeHTMLMime)) {
-      // note cf_html uses utf8, hence use length = len, not len/2 as in flavors below
-      nsCOMPtr<nsISupportsCString> textDataObj = do_QueryInterface(genericDataObj);
-      if (textDataObj && len > 0) {
-        nsAutoCString cfhtml;
-        textDataObj->GetData(cfhtml);
-        NS_ASSERTION(cfhtml.Length() <= (len), "Invalid length!");
+      // note cf_html uses utf8
+      nsAutoCString cfhtml;
+      if (GetCString(genericDataObj, cfhtml)) {
         nsString cfcontext, cffragment, cfselection; // cfselection left emtpy for now
 
         rv = ParseCFHTML(cfhtml, getter_Copies(cffragment), getter_Copies(cfcontext));
@@ -1300,19 +1325,11 @@ HTMLEditor::InsertFromTransferable(nsITransferable* transferable,
     if (bestFlavor.EqualsLiteral(kHTMLMime) ||
         bestFlavor.EqualsLiteral(kUnicodeMime) ||
         bestFlavor.EqualsLiteral(kMozTextInternal)) {
-      nsCOMPtr<nsISupportsString> textDataObj = do_QueryInterface(genericDataObj);
-      if (textDataObj && len > 0) {
-        nsAutoString text;
-        textDataObj->GetData(text);
-        NS_ASSERTION(text.Length() <= (len/2), "Invalid length!");
-        stuffToPaste.Assign(text.get(), len / 2);
-      } else {
-        nsCOMPtr<nsISupportsCString> textDataObj(do_QueryInterface(genericDataObj));
-        if (textDataObj && len > 0) {
-          nsAutoCString text;
-          textDataObj->GetData(text);
-          NS_ASSERTION(text.Length() <= len, "Invalid length!");
-          stuffToPaste.Assign(NS_ConvertUTF8toUTF16(Substring(text, 0, len)));
+      nsAutoString stuffToPaste;
+      if (!GetString(genericDataObj, stuffToPaste)) {
+        nsAutoCString text;
+        if (GetCString(genericDataObj, text)) {
+          CopyUTF8toUTF16(text, stuffToPaste);
         }
       }
 
@@ -1482,6 +1499,8 @@ nsresult
 HTMLEditor::PasteInternal(int32_t aClipboardType,
                           bool aDispatchPasteEvent)
 {
+  MOZ_ASSERT(IsEditActionDataAvailable());
+
   if (aDispatchPasteEvent && !FireClipboardEvent(ePaste, aClipboardType)) {
     return NS_OK;
   }
@@ -1817,17 +1836,13 @@ HTMLEditor::PasteAsPlaintextQuotation(int32_t aSelectionType)
   // it still owns the data, we just have a pointer to it.
   // If it can't support a "text" output of the data the call will fail
   nsCOMPtr<nsISupports> genericDataObj;
-  uint32_t len = 0;
   nsAutoCString flav;
-  rv = trans->GetAnyTransferData(flav, getter_AddRefs(genericDataObj), &len);
+  rv = trans->GetAnyTransferData(flav, getter_AddRefs(genericDataObj));
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (flav.EqualsLiteral(kUnicodeMime)) {
-    nsCOMPtr<nsISupportsString> textDataObj = do_QueryInterface(genericDataObj);
-    if (textDataObj && len > 0) {
-      nsAutoString stuffToPaste;
-      textDataObj->GetData(stuffToPaste);
-      NS_ASSERTION(stuffToPaste.Length() <= (len/2), "Invalid length!");
+    nsAutoString stuffToPaste;
+    if (GetString(genericDataObj, stuffToPaste)) {
       AutoPlaceholderBatch treatAsOneTransaction(*this);
       rv = InsertAsPlaintextQuotation(stuffToPaste, true, 0);
     }
