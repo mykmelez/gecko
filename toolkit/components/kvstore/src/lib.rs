@@ -58,23 +58,6 @@ use xpcom::{
     nsIID, Ensure, RefPtr,
 };
 
-macro_rules! get_method {
-    ($name:ident, $default:ty, $variant:ident, $result:ty) => {
-        fn $name(&self, key: &nsACString, default_value: $default) -> Result<$result, KeyValueError> {
-            let key = str::from_utf8(key)?;
-            let env = self.rkv.read()?;
-            let reader = env.read()?;
-            let value = reader.get(&self.store, &key)?;
-
-            match value {
-                Some(Value::$variant(value)) => Ok(value.into()),
-                Some(_value) => Err(KeyValueError::UnexpectedValue),
-                None => Ok(default_value.into()),
-            }
-        }
-    };
-}
-
 #[no_mangle]
 pub extern "C" fn KeyValueServiceConstructor(
     outer: *const nsISupports,
