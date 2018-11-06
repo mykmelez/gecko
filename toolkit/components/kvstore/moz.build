@@ -7,6 +7,10 @@
 with Files('**'):
     BUG_COMPONENT = ('Toolkit', 'Key Value Storage')
 
+EXTRA_JS_MODULES += [
+    'kvstore.jsm',
+]
+
 XPCSHELL_TESTS_MANIFESTS += ['test/xpcshell.ini']
 
 XPIDL_SOURCES += [
