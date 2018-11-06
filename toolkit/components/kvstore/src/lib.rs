@@ -334,12 +334,11 @@ impl KeyValueEnumerator {
         })
     }
 
-    xpcom_method!(HasMoreElementsAsync, has_more_elements_async, {
+    xpcom_method!(HasMoreElements, has_more_elements, {
         callback: *const nsIKeyValueVariantCallback
     });
-    // xpcom_method!(GetNextAsync, get_next_async, { callback: *const nsIKeyValueVoidCallback });
 
-    fn has_more_elements_async(
+    fn has_more_elements(
         &self,
         callback: &nsIKeyValueVariantCallback,
     ) -> Result<(), nsresult> {
@@ -349,7 +348,7 @@ impl KeyValueEnumerator {
             self.iter.clone(),
         ));
 
-        let runnable = TaskRunnable::new("KeyValueDatabase::HasMoreElementsAsync", source, task);
+        let runnable = TaskRunnable::new("KeyValueDatabase::HasMoreElements", source, task);
 
         unsafe {
             self.thread
@@ -357,15 +356,15 @@ impl KeyValueEnumerator {
         }.to_result()
     }
 
-    xpcom_method!(GetNextAsync, get_next_async, {
+    xpcom_method!(GetNext, get_next, {
         callback: *const nsIKeyValuePairCallback
     });
 
-    fn get_next_async(&self, callback: &nsIKeyValuePairCallback) -> Result<(), nsresult> {
+    fn get_next(&self, callback: &nsIKeyValuePairCallback) -> Result<(), nsresult> {
         let source = get_current_thread()?;
         let task = Box::new(GetNextTask::new(RefPtr::new(callback), self.iter.clone()));
 
-        let runnable = TaskRunnable::new("KeyValueDatabase::GetNextAsync", source, task);
+        let runnable = TaskRunnable::new("KeyValueDatabase::GetNext", source, task);
 
         unsafe {
             self.thread

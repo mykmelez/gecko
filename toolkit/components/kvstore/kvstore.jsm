@@ -25,12 +25,12 @@ class KeyValueEnumerator {
   }
 
   hasMoreElements() {
-    return promisify(this.enumerator.hasMoreElementsAsync);
+    return promisify(this.enumerator.hasMoreElements);
   }
 
   getNext() {
     return new Promise((resolve, reject) => {
-      this.enumerator.getNextAsync({
+      this.enumerator.getNext({
         handleResult(key, value) { resolve({ key, value }) },
         handleError(error) { reject(error) },
       });
