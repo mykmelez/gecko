@@ -912,6 +912,7 @@ pref("gfx.webrender.force-disabled", false);
 #ifdef XP_WIN
 pref("gfx.webrender.force-angle", true);
 pref("gfx.webrender.dcomp-win.enabled", true);
+pref("gfx.webrender.dcomp-win-triple-buffering.enabled", true);
 pref("gfx.webrender.program-binary", true);
 pref("gfx.webrender.program-binary-disk", true);
 #endif
@@ -3089,9 +3090,6 @@ pref("layout.css.scroll-behavior.damping-ratio", "1.0");
 
 // Is support for scroll-snap enabled?
 pref("layout.css.scroll-snap.enabled", true);
-
-// Is support for CSS shape-outside enabled?
-pref("layout.css.shape-outside.enabled", true);
 
 // Is support for document.fonts enabled?
 pref("layout.css.font-loading-api.enabled", true);
