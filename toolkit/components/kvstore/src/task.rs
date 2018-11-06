@@ -4,35 +4,24 @@
 
 extern crate xpcom;
 
-use data_type::{
-    DataType,
-    DATA_TYPE_INT32,
-    DATA_TYPE_DOUBLE,
-    DATA_TYPE_BOOL,
-    DATA_TYPE_VOID,
-    DATA_TYPE_WSTRING,
-    DATA_TYPE_EMPTY,
-};
 use error::KeyValueError;
 use into_variant;
-use libc::{int32_t, uint16_t};
 use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_OK};
 use nsstring::{nsACString, nsCString, nsString};
 use owned_value::{value_to_owned, OwnedValue};
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{cell::Cell, cell::RefCell, path::Path, ptr, rc::Rc, str, sync::{Arc, RwLock}, vec::IntoIter};
-use storage_variant::{IntoVariant, Variant};
+use storage_variant::{IntoVariant};
 use xpcom::{
     getter_addrefs,
     interfaces::{nsIEventTarget, nsIKeyValueVoidCallback, nsIKeyValueDatabase, nsIKeyValueDatabaseCallback,
         nsIKeyValueEnumerator, nsIKeyValueEnumeratorCallback, nsIKeyValueVariantCallback, nsIKeyValuePairCallback, nsIRunnable,
-        nsISupports, nsIThread, nsIVariant,
+        nsIThread, nsIVariant,
     },
     RefPtr,
 };
 use KeyValueDatabase;
 use KeyValueEnumerator;
-use KeyValuePair;
 
 extern "C" {
     fn NS_GetCurrentThreadEventTarget(result: *mut *const nsIThread) -> nsresult;

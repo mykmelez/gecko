@@ -6,7 +6,6 @@
 extern crate failure;
 extern crate libc;
 extern crate lmdb;
-#[macro_use]
 extern crate log;
 extern crate nserror;
 extern crate nsstring;
@@ -22,7 +21,6 @@ mod owned_value;
 mod task;
 
 use data_type::{
-    DataType,
     DATA_TYPE_INT32,
     DATA_TYPE_DOUBLE,
     DATA_TYPE_BOOL,
@@ -31,18 +29,17 @@ use data_type::{
     DATA_TYPE_EMPTY,
 };
 use error::KeyValueError;
-use libc::{c_double, c_void, int32_t, int64_t, uint16_t};
+use libc::{c_void, int32_t, uint16_t};
 use nserror::{
-    nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_AGGREGATION,
+    nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NO_AGGREGATION,
     NS_OK,
 };
 use nsstring::{nsACString, nsCString, nsString};
-use owned_value::{value_to_owned, variant_to_owned, OwnedValue};
-use rkv::{Manager, Rkv, Store, StoreError, Value};
+use owned_value::{variant_to_owned, OwnedValue};
+use rkv::{Rkv, Store};
 use std::{
-    cell::{Cell, RefCell},
-    path::Path,
-    ptr, rc::Rc, str,
+    cell::{RefCell},
+    ptr, rc::Rc,
     sync::{Arc, RwLock},
     vec::IntoIter,
 };
@@ -52,8 +49,8 @@ use task::{create_thread, get_current_thread, DeleteTask, EnumerateTask,
 };
 use xpcom::{
     interfaces::{
-        nsIEventTarget, nsIJSEnumerator, nsIKeyValueVoidCallback, nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback, nsIKeyValueVariantCallback, nsIKeyValueDatabase,
-        nsIKeyValueEnumerator, nsIKeyValuePairCallback, nsISupports, nsIThread, nsIVariant,
+        nsIEventTarget, nsIKeyValueVoidCallback, nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback, nsIKeyValueVariantCallback,
+        nsIKeyValuePairCallback, nsISupports, nsIThread, nsIVariant,
     },
     nsIID, Ensure, RefPtr,
 };

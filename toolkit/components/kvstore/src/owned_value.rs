@@ -4,7 +4,6 @@
 
 
 use data_type::{
-    DataType,
     DATA_TYPE_INT32,
     DATA_TYPE_DOUBLE,
     DATA_TYPE_BOOL,
@@ -17,7 +16,7 @@ use libc::{int32_t, uint16_t};
 use nserror::NsresultExt;
 use nsstring::nsString;
 use ordered_float::OrderedFloat;
-use rkv::{StoreError, Value};
+use rkv::{Value};
 use storage_variant::{IntoVariant, Variant};
 use xpcom::interfaces::nsIVariant;
 
