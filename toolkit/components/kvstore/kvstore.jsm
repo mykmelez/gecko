@@ -52,29 +52,29 @@ class KeyValueDatabase {
 
   static async new(dir, name) {
     return new KeyValueDatabase(
-      await promisify(gKeyValueService.getOrCreateAsync, dir, name)
+      await promisify(gKeyValueService.getOrCreate, dir, name)
     );
   }
 
   put(key, value) {
-    return promisify(this.database.putAsync, key, value);
+    return promisify(this.database.put, key, value);
   }
 
   has(key) {
-    return promisify(this.database.hasAsync, key);
+    return promisify(this.database.has, key);
   }
 
   get(key, defaultValue) {
-    return promisify(this.database.getAsync, key, defaultValue);
+    return promisify(this.database.get, key, defaultValue);
   }
 
   delete(key) {
-    return promisify(this.database.deleteAsync, key);
+    return promisify(this.database.delete, key);
   }
 
   async enumerate(from_key, to_key) {
     return new KeyValueEnumerator(
-      await promisify(this.database.enumerateAsync, from_key, to_key)
+      await promisify(this.database.enumerate, from_key, to_key)
     );
   }
 }

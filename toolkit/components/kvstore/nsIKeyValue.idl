@@ -2,15 +2,10 @@
 #include "nsIVariant.idl"
 
 /**
- * The nsIKeyValue* interfaces provide a simple, synchronous API to a key/value
+ * The nsIKeyValue* interfaces provide a simple, asynchronous API to a key/value
  * storage engine.  Basic put/get/has/delete operations are supported, as is
  * enumeration of key/value pairs and the use of multiple named databases within
  * a single storage file.  Operations have ACID semantics.
- *
- * This API does not (yet) support asynchronous operations, so it MUST NOT
- * BE USED from the main thread (i.e. by JavaScript in the parent process).
- * Implementation of an async variant of this API that is appropriate for JS
- * in the main thread is tracked by bug 1499237.
  *
  * This API does not (yet) support transactions, so it will not be appropriate
  * for all use cases.  Extension of this API to support transactions is tracked
@@ -55,25 +50,25 @@ interface nsIKeyValueEnumeratorCallback : nsISupports {
 
 [scriptable, uuid(c449398e-174c-425b-8195-da6aa0ccd9a5)]
 interface nsIKeyValueDatabase : nsISupports {
-    void putAsync(
+    void put(
         in nsIKeyValueVoidCallback callback,
         in AUTF8String key,
         in nsIVariant value);
 
-    void hasAsync(
+    void has(
         in nsIKeyValueVariantCallback callback,
         in AUTF8String key);
 
-    void getAsync(
+    void get(
         in nsIKeyValueVariantCallback callback,
         in AUTF8String key,
         [optional] in nsIVariant defaultValue);
 
-    void deleteAsync(
+    void delete(
         in nsIKeyValueVoidCallback callback,
         in AUTF8String key);
 
-    void enumerateAsync(
+    void enumerate(
         in nsIKeyValueEnumeratorCallback callback,
         [optional] in AUTF8String fromKey,
         [optional] in AUTF8String toKey);
@@ -87,7 +82,7 @@ interface nsIKeyValueDatabaseCallback : nsISupports {
 
 [scriptable, uuid(46c893dd-4c14-4de0-b33d-a1be18c6d062)]
 interface nsIKeyValueService : nsISupports {
-    void getOrCreateAsync(
+    void getOrCreate(
         in nsIKeyValueDatabaseCallback callback,
         in AUTF8String path,
         [optional] in AUTF8String name

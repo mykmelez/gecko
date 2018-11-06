@@ -101,12 +101,12 @@ impl KeyValueService {
     }
 
     xpcom_method!(
-        GetOrCreateAsync,
-        get_or_create_async,
+        GetOrCreate,
+        get_or_create,
         { callback: *const nsIKeyValueDatabaseCallback, path: *const nsACString, name: *const nsACString }
     );
 
-    fn get_or_create_async(
+    fn get_or_create(
         &self,
         callback: &nsIKeyValueDatabaseCallback,
         path: &nsACString,
@@ -121,7 +121,7 @@ impl KeyValueService {
             nsCString::from(name),
         ));
 
-        let runnable = TaskRunnable::new("KeyValueDatabase::GetOrCreateAsync", source, task);
+        let runnable = TaskRunnable::new("KeyValueDatabase::GetOrCreate", source, task);
 
         unsafe {
             target.DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
@@ -149,12 +149,12 @@ impl KeyValueDatabase {
     }
 
     xpcom_method!(
-        PutAsync,
-        put_async,
+        Put,
+        put,
         { callback: *const nsIKeyValueVoidCallback, key: *const nsACString, value: *const nsIVariant }
     );
 
-    fn put_async(
+    fn put(
         &self,
         callback: &nsIKeyValueVoidCallback,
         key: &nsACString,
@@ -174,7 +174,7 @@ impl KeyValueDatabase {
             value,
         ));
 
-        let runnable = TaskRunnable::new("KeyValueDatabase::PutAsync", source, task);
+        let runnable = TaskRunnable::new("KeyValueDatabase::Put", source, task);
 
         unsafe {
             self.thread
@@ -185,12 +185,12 @@ impl KeyValueDatabase {
     }
 
     xpcom_method!(
-        HasAsync,
-        has_async,
+        Has,
+        has,
         { callback: *const nsIKeyValueVariantCallback, key: *const nsACString }
     );
 
-    fn has_async(
+    fn has(
         &self,
         callback: &nsIKeyValueVariantCallback,
         key: &nsACString,
@@ -203,7 +203,7 @@ impl KeyValueDatabase {
             nsCString::from(key),
         ));
 
-        let runnable = TaskRunnable::new("KeyValueDatabase::HasAsync", source, task);
+        let runnable = TaskRunnable::new("KeyValueDatabase::Has", source, task);
 
         unsafe {
             self.thread
@@ -214,12 +214,12 @@ impl KeyValueDatabase {
     }
 
     xpcom_method!(
-        GetAsync,
-        get_async,
+        Get,
+        get,
         { callback: *const nsIKeyValueVariantCallback, key: *const nsACString, default_value: *const nsIVariant }
     );
 
-    fn get_async(
+    fn get(
         &self,
         callback: &nsIKeyValueVariantCallback,
         key: &nsACString,
@@ -234,7 +234,7 @@ impl KeyValueDatabase {
             RefPtr::new(default_value),
         ));
 
-        let runnable = TaskRunnable::new("KeyValueDatabase::GetAsync", source, task);
+        let runnable = TaskRunnable::new("KeyValueDatabase::Get", source, task);
 
         unsafe {
             self.thread
@@ -245,12 +245,12 @@ impl KeyValueDatabase {
     }
 
     xpcom_method!(
-        DeleteAsync,
-        delete_async,
+        Delete,
+        delete,
         { callback: *const nsIKeyValueVoidCallback, key: *const nsACString }
     );
 
-    fn delete_async(
+    fn delete(
         &self,
         callback: &nsIKeyValueVoidCallback,
         key: &nsACString,
@@ -263,7 +263,7 @@ impl KeyValueDatabase {
             nsCString::from(key),
         ));
 
-        let runnable = TaskRunnable::new("KeyValueDatabase::DeleteAsync", source, task);
+        let runnable = TaskRunnable::new("KeyValueDatabase::Delete", source, task);
 
         unsafe {
             self.thread
@@ -274,12 +274,12 @@ impl KeyValueDatabase {
     }
 
     xpcom_method!(
-        EnumerateAsync,
-        enumerate_async,
+        Enumerate,
+        enumerate,
         { callback: *const nsIKeyValueEnumeratorCallback, from_key: *const nsACString, to_key: *const nsACString }
     );
 
-    fn enumerate_async(
+    fn enumerate(
         &self,
         callback: &nsIKeyValueEnumeratorCallback,
         from_key: &nsACString,
@@ -294,7 +294,7 @@ impl KeyValueDatabase {
             nsCString::from(to_key),
         ));
 
-        let runnable = TaskRunnable::new("KeyValueDatabase::EnumerateAsync", source, task);
+        let runnable = TaskRunnable::new("KeyValueDatabase::Enumerate", source, task);
 
         unsafe {
             self.thread
