@@ -10,13 +10,23 @@ use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_OK};
 use nsstring::{nsACString, nsCString, nsString};
 use owned_value::{value_to_owned, OwnedValue};
 use rkv::{Manager, Rkv, Store, StoreError, Value};
-use std::{cell::Cell, cell::RefCell, path::Path, ptr, rc::Rc, str, sync::{Arc, RwLock}, vec::IntoIter};
-use storage_variant::{IntoVariant};
+use std::{
+    cell::Cell,
+    cell::RefCell,
+    path::Path,
+    ptr,
+    rc::Rc,
+    str,
+    sync::{Arc, RwLock},
+    vec::IntoIter,
+};
+use storage_variant::IntoVariant;
 use xpcom::{
     getter_addrefs,
-    interfaces::{nsIEventTarget, nsIKeyValueVoidCallback, nsIKeyValueDatabase, nsIKeyValueDatabaseCallback,
-        nsIKeyValueEnumerator, nsIKeyValueEnumeratorCallback, nsIKeyValueVariantCallback, nsIKeyValuePairCallback, nsIRunnable,
-        nsIThread, nsIVariant,
+    interfaces::{
+        nsIEventTarget, nsIKeyValueDatabase, nsIKeyValueDatabaseCallback, nsIKeyValueEnumerator,
+        nsIKeyValueEnumeratorCallback, nsIKeyValuePairCallback, nsIKeyValueVariantCallback,
+        nsIKeyValueVoidCallback, nsIRunnable, nsIThread, nsIVariant,
     },
     RefPtr,
 };
@@ -88,9 +98,7 @@ impl TaskRunnable {
                     target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
                 }.to_result()
             }
-            true => {
-                self.task.done()
-            }
+            true => self.task.done(),
         }
     }
 
@@ -105,7 +113,7 @@ pub struct GetOrCreateTask {
     thread: RefPtr<nsIThread>,
     path: nsCString,
     name: nsCString,
-    result: Cell<Option<Result<RefPtr<KeyValueDatabase>, KeyValueError>>>
+    result: Cell<Option<Result<RefPtr<KeyValueDatabase>, KeyValueError>>>,
 }
 
 impl GetOrCreateTask {
@@ -127,17 +135,19 @@ impl GetOrCreateTask {
 
 impl Task for GetOrCreateTask {
     fn run(&self) {
-        self.result.set(Some(|| -> Result<RefPtr<KeyValueDatabase>, KeyValueError> {
-            let mut writer = Manager::singleton().write()?;
-            let rkv = writer.get_or_create(Path::new(str::from_utf8(&self.path)?), Rkv::new)?;
-            let store = if self.name.is_empty() {
-                rkv.write()?.open_or_create_default()
-            } else {
-                rkv.write()?
-                    .open_or_create(Some(str::from_utf8(&self.name)?))
-            }?;
-            Ok(KeyValueDatabase::new(rkv, store, Some(self.thread.clone())))
-        }()));
+        self.result.set(Some(
+            || -> Result<RefPtr<KeyValueDatabase>, KeyValueError> {
+                let mut writer = Manager::singleton().write()?;
+                let rkv = writer.get_or_create(Path::new(str::from_utf8(&self.path)?), Rkv::new)?;
+                let store = if self.name.is_empty() {
+                    rkv.write()?.open_or_create_default()
+                } else {
+                    rkv.write()?
+                        .open_or_create(Some(str::from_utf8(&self.name)?))
+                }?;
+                Ok(KeyValueDatabase::new(rkv, store, Some(self.thread.clone())))
+            }(),
+        ));
     }
 
     fn done(&self) -> Result<(), nsresult> {
@@ -147,9 +157,12 @@ impl Task for GetOrCreateTask {
                     Some(db) => self.callback.HandleResult(db.coerce()),
                     None => KeyValueError::NoInterface("nsISupports").into(),
                 }
-            }
+            },
             None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
-            Some(Err(err)) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+            Some(Err(err)) => unsafe {
+                self.callback
+                    .HandleError(&*nsCString::from(err.to_string()))
+            },
         }.to_result()
     }
 }
@@ -160,7 +173,7 @@ pub struct PutTask {
     store: Store,
     key: nsCString,
     value: OwnedValue,
-    result: Cell<Option<Result<(), KeyValueError>>>
+    result: Cell<Option<Result<(), KeyValueError>>>,
 }
 
 impl PutTask {
@@ -206,7 +219,10 @@ impl Task for PutTask {
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
             Some(Ok(())) => unsafe { self.callback.HandleResult() },
-            Some(Err(err)) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+            Some(Err(err)) => unsafe {
+                self.callback
+                    .HandleError(&*nsCString::from(err.to_string()))
+            },
             None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
         }.to_result()
     }
@@ -217,7 +233,7 @@ pub struct HasTask {
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
-    result: Cell<Option<Result<bool, KeyValueError>>>
+    result: Cell<Option<Result<bool, KeyValueError>>>,
 }
 
 impl HasTask {
@@ -250,8 +266,19 @@ impl Task for HasTask {
 
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
-            Some(Ok(value)) => unsafe { self.callback.HandleResult(value.into_variant().ok_or(KeyValueError::Read)?.take().coerce()) },
-            Some(Err(err)) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+            Some(Ok(value)) => unsafe {
+                self.callback.HandleResult(
+                    value
+                        .into_variant()
+                        .ok_or(KeyValueError::Read)?
+                        .take()
+                        .coerce(),
+                )
+            },
+            Some(Err(err)) => unsafe {
+                self.callback
+                    .HandleError(&*nsCString::from(err.to_string()))
+            },
             None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
         }.to_result()
     }
@@ -263,7 +290,7 @@ pub struct GetTask {
     store: Store,
     key: nsCString,
     default_value: RefPtr<nsIVariant>,
-    result: Cell<Option<Result<RefPtr<nsIVariant>, KeyValueError>>>
+    result: Cell<Option<Result<RefPtr<nsIVariant>, KeyValueError>>>,
 }
 
 impl GetTask {
@@ -287,30 +314,40 @@ impl GetTask {
 
 impl Task for GetTask {
     fn run(&self) {
-        self.result.set(Some(|| -> Result<RefPtr<nsIVariant>, KeyValueError> {
-            let key = str::from_utf8(&self.key)?;
-            let env = self.rkv.read()?;
-            let reader = env.read()?;
-            let value = reader.get(&self.store, key)?;
+        self.result
+            .set(Some(|| -> Result<RefPtr<nsIVariant>, KeyValueError> {
+                let key = str::from_utf8(&self.key)?;
+                let env = self.rkv.read()?;
+                let reader = env.read()?;
+                let value = reader.get(&self.store, key)?;
 
-            match value {
-                Some(Value::I64(value)) => Ok(value.into_variant().ok_or(KeyValueError::Read)?.take()),
-                Some(Value::F64(value)) => Ok(value.into_variant().ok_or(KeyValueError::Read)?.take()),
-                Some(Value::Str(value)) => Ok(nsString::from(value)
-                    .into_variant()
-                    .ok_or(KeyValueError::Read)?
-                    .take()),
-                Some(Value::Bool(value)) => Ok(value.into_variant().ok_or(KeyValueError::Read)?.take()),
-                Some(_value) => Err(KeyValueError::UnexpectedValue),
-                None => Ok(into_variant(&self.default_value)?.take()),
-            }
-        }()));
+                match value {
+                    Some(Value::I64(value)) => {
+                        Ok(value.into_variant().ok_or(KeyValueError::Read)?.take())
+                    }
+                    Some(Value::F64(value)) => {
+                        Ok(value.into_variant().ok_or(KeyValueError::Read)?.take())
+                    }
+                    Some(Value::Str(value)) => Ok(nsString::from(value)
+                        .into_variant()
+                        .ok_or(KeyValueError::Read)?
+                        .take()),
+                    Some(Value::Bool(value)) => {
+                        Ok(value.into_variant().ok_or(KeyValueError::Read)?.take())
+                    }
+                    Some(_value) => Err(KeyValueError::UnexpectedValue),
+                    None => Ok(into_variant(&self.default_value)?.take()),
+                }
+            }()));
     }
 
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
             Some(Ok(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
-            Some(Err(err)) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+            Some(Err(err)) => unsafe {
+                self.callback
+                    .HandleError(&*nsCString::from(err.to_string()))
+            },
             None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
         }.to_result()
     }
@@ -322,7 +359,7 @@ pub struct EnumerateTask {
     store: Store,
     from_key: nsCString,
     to_key: nsCString,
-    result: Cell<Option<Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError>>>
+    result: Cell<Option<Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError>>>,
 }
 
 impl EnumerateTask {
@@ -346,72 +383,77 @@ impl EnumerateTask {
 
 impl Task for EnumerateTask {
     fn run(&self) {
-        self.result.set(Some(|| -> Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError> {
-            let env = self.rkv.read()?;
-            let reader = env.read()?;
-            let from_key = str::from_utf8(&self.from_key)?;
-            let to_key = str::from_utf8(&self.to_key)?;
+        self.result.set(Some(
+            || -> Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError> {
+                let env = self.rkv.read()?;
+                let reader = env.read()?;
+                let from_key = str::from_utf8(&self.from_key)?;
+                let to_key = str::from_utf8(&self.to_key)?;
 
-            let iterator = if from_key.is_empty() {
-                reader.iter_start(&self.store)?
-            } else {
-                reader.iter_from(&self.store, &from_key)?
-            };
+                let iterator = if from_key.is_empty() {
+                    reader.iter_start(&self.store)?
+                } else {
+                    reader.iter_from(&self.store, &from_key)?
+                };
 
-            // Ideally, we'd enumerate pairs lazily, as the consumer calls
-            // nsIKeyValueEnumerator.getNext(), which calls our
-            // KeyValueEnumerator.get_next() implementation.  But KeyValueEnumerator
-            // can't reference the Iter because Rust "cannot #[derive(xpcom)]
-            // on a generic type," and the Iter requires a lifetime parameter,
-            // which would make KeyValueEnumerator generic.
-            //
-            // Our fallback approach is to eagerly collect the iterator
-            // into a collection that KeyValueEnumerator owns.  Fixing this so we
-            // enumerate pairs lazily is bug 1499252.
-            let pairs: Vec<(
-                Result<String, KeyValueError>,
-                Result<OwnedValue, KeyValueError>,
-            )> = iterator
-                // Convert the key to a string so we can compare it to the "to" key.
-                // For forward compatibility, we don't fail here if we can't convert
-                // a key to UTF-8.  Instead, we store the Err in the collection
-                // and fail lazily in KeyValueEnumerator.get_next().
-                .map(|(key, val)| (str::from_utf8(&key), val))
-                .take_while(|(key, _val)| {
-                    if to_key.is_empty() {
-                        true
-                    } else {
-                        match *key {
-                            Ok(key) => key <= to_key,
-                            Err(_err) => true,
+                // Ideally, we'd enumerate pairs lazily, as the consumer calls
+                // nsIKeyValueEnumerator.getNext(), which calls our
+                // KeyValueEnumerator.get_next() implementation.  But KeyValueEnumerator
+                // can't reference the Iter because Rust "cannot #[derive(xpcom)]
+                // on a generic type," and the Iter requires a lifetime parameter,
+                // which would make KeyValueEnumerator generic.
+                //
+                // Our fallback approach is to eagerly collect the iterator
+                // into a collection that KeyValueEnumerator owns.  Fixing this so we
+                // enumerate pairs lazily is bug 1499252.
+                let pairs: Vec<(
+                    Result<String, KeyValueError>,
+                    Result<OwnedValue, KeyValueError>,
+                )> = iterator
+                    // Convert the key to a string so we can compare it to the "to" key.
+                    // For forward compatibility, we don't fail here if we can't convert
+                    // a key to UTF-8.  Instead, we store the Err in the collection
+                    // and fail lazily in KeyValueEnumerator.get_next().
+                    .map(|(key, val)| (str::from_utf8(&key), val))
+                    .take_while(|(key, _val)| {
+                        if to_key.is_empty() {
+                            true
+                        } else {
+                            match *key {
+                                Ok(key) => key <= to_key,
+                                Err(_err) => true,
+                            }
                         }
-                    }
-                }).map(|(key, val)| {
-                    (
-                        match key {
-                            Ok(key) => Ok(key.to_owned()),
-                            Err(err) => Err(err.into()),
-                        },
-                        match val {
-                            Ok(val) => value_to_owned(val),
-                            Err(err) => Err(KeyValueError::StoreError(err)),
-                        },
-                    )
-                }).collect();
+                    }).map(|(key, val)| {
+                        (
+                            match key {
+                                Ok(key) => Ok(key.to_owned()),
+                                Err(err) => Err(err.into()),
+                            },
+                            match val {
+                                Ok(val) => value_to_owned(val),
+                                Err(err) => Err(KeyValueError::StoreError(err)),
+                            },
+                        )
+                    }).collect();
 
-            let enumerator = KeyValueEnumerator::new(get_current_thread().unwrap(), pairs);
+                let enumerator = KeyValueEnumerator::new(get_current_thread().unwrap(), pairs);
 
-            match enumerator.query_interface::<nsIKeyValueEnumerator>() {
-                Some(interface) => Ok(interface),
-                None => Err(KeyValueError::NoInterface("nsIKeyValueEnumerator")),
-            }
-        }()));
+                match enumerator.query_interface::<nsIKeyValueEnumerator>() {
+                    Some(interface) => Ok(interface),
+                    None => Err(KeyValueError::NoInterface("nsIKeyValueEnumerator")),
+                }
+            }(),
+        ));
     }
 
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
             Some(Ok(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
-            Some(Err(err)) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+            Some(Err(err)) => unsafe {
+                self.callback
+                    .HandleError(&*nsCString::from(err.to_string()))
+            },
             None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
         }.to_result()
     }
@@ -419,20 +461,28 @@ impl Task for EnumerateTask {
 
 pub struct HasMoreElementsTask {
     callback: RefPtr<nsIKeyValueVariantCallback>,
-    iter: Rc<RefCell<IntoIter<(
-        Result<String, KeyValueError>,
-        Result<OwnedValue, KeyValueError>,
-    )>>>,
-    result: Cell<Option<Result<bool, KeyValueError>>>
+    iter: Rc<
+        RefCell<
+            IntoIter<(
+                Result<String, KeyValueError>,
+                Result<OwnedValue, KeyValueError>,
+            )>,
+        >,
+    >,
+    result: Cell<Option<Result<bool, KeyValueError>>>,
 }
 
 impl HasMoreElementsTask {
     pub fn new(
         callback: RefPtr<nsIKeyValueVariantCallback>,
-        iter: Rc<RefCell<IntoIter<(
-            Result<String, KeyValueError>,
-            Result<OwnedValue, KeyValueError>,
-        )>>>,
+        iter: Rc<
+            RefCell<
+                IntoIter<(
+                    Result<String, KeyValueError>,
+                    Result<OwnedValue, KeyValueError>,
+                )>,
+            >,
+        >,
     ) -> HasMoreElementsTask {
         HasMoreElementsTask {
             callback,
@@ -451,8 +501,19 @@ impl Task for HasMoreElementsTask {
 
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
-            Some(Ok(value)) => unsafe { self.callback.HandleResult(value.into_variant().ok_or(KeyValueError::Read)?.take().coerce()) },
-            Some(Err(err)) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+            Some(Ok(value)) => unsafe {
+                self.callback.HandleResult(
+                    value
+                        .into_variant()
+                        .ok_or(KeyValueError::Read)?
+                        .take()
+                        .coerce(),
+                )
+            },
+            Some(Err(err)) => unsafe {
+                self.callback
+                    .HandleError(&*nsCString::from(err.to_string()))
+            },
             None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
         }.to_result()
     }
@@ -460,20 +521,28 @@ impl Task for HasMoreElementsTask {
 
 pub struct GetNextTask {
     callback: RefPtr<nsIKeyValuePairCallback>,
-    iter: Rc<RefCell<IntoIter<(
-        Result<String, KeyValueError>,
-        Result<OwnedValue, KeyValueError>,
-    )>>>,
-    result: Cell<Option<Result<(String, OwnedValue), KeyValueError>>>
+    iter: Rc<
+        RefCell<
+            IntoIter<(
+                Result<String, KeyValueError>,
+                Result<OwnedValue, KeyValueError>,
+            )>,
+        >,
+    >,
+    result: Cell<Option<Result<(String, OwnedValue), KeyValueError>>>,
 }
 
 impl GetNextTask {
     pub fn new(
         callback: RefPtr<nsIKeyValuePairCallback>,
-        iter: Rc<RefCell<IntoIter<(
-            Result<String, KeyValueError>,
-            Result<OwnedValue, KeyValueError>,
-        )>>>,
+        iter: Rc<
+            RefCell<
+                IntoIter<(
+                    Result<String, KeyValueError>,
+                    Result<OwnedValue, KeyValueError>,
+                )>,
+            >,
+        >,
     ) -> GetNextTask {
         GetNextTask {
             callback,
@@ -485,15 +554,16 @@ impl GetNextTask {
 
 impl Task for GetNextTask {
     fn run(&self) {
-        self.result.set(Some(|| -> Result<(String, OwnedValue), KeyValueError> {
-            let mut iter = self.iter.borrow_mut();
-            let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
+        self.result
+            .set(Some(|| -> Result<(String, OwnedValue), KeyValueError> {
+                let mut iter = self.iter.borrow_mut();
+                let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
 
-            // We fail on retrieval of the key/value pair if the key isn't valid
-            // UTF-*, if the value is unexpected, or if we encountered a store error
-            // while retrieving the pair.
-            Ok((key?, value?))
-        }()));
+                // We fail on retrieval of the key/value pair if the key isn't valid
+                // UTF-*, if the value is unexpected, or if we encountered a store error
+                // while retrieving the pair.
+                Ok((key?, value?))
+            }()));
     }
 
     fn done(&self) -> Result<(), nsresult> {
@@ -501,10 +571,17 @@ impl Task for GetNextTask {
             Some(Ok((key, value))) => unsafe {
                 self.callback.HandleResult(
                     &*nsCString::from(key),
-                    value.into_variant().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?.take().coerce()
+                    value
+                        .into_variant()
+                        .ok_or(KeyValueError::from(NS_ERROR_FAILURE))?
+                        .take()
+                        .coerce(),
                 )
             },
-            Some(Err(err)) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+            Some(Err(err)) => unsafe {
+                self.callback
+                    .HandleError(&*nsCString::from(err.to_string()))
+            },
             None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
         }.to_result()
     }
@@ -515,7 +592,7 @@ pub struct DeleteTask {
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
-    result: Cell<Option<Result<(), KeyValueError>>>
+    result: Cell<Option<Result<(), KeyValueError>>>,
 }
 
 impl DeleteTask {
@@ -562,7 +639,10 @@ impl Task for DeleteTask {
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
             Some(Ok(())) => unsafe { self.callback.HandleResult() },
-            Some(Err(err)) => unsafe { self.callback.HandleError(&*nsCString::from(err.to_string())) },
+            Some(Err(err)) => unsafe {
+                self.callback
+                    .HandleError(&*nsCString::from(err.to_string()))
+            },
             None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
         }.to_result()
     }

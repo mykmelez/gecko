@@ -21,36 +21,32 @@ mod owned_value;
 mod task;
 
 use data_type::{
-    DATA_TYPE_INT32,
-    DATA_TYPE_DOUBLE,
-    DATA_TYPE_BOOL,
-    DATA_TYPE_VOID,
+    DATA_TYPE_BOOL, DATA_TYPE_DOUBLE, DATA_TYPE_EMPTY, DATA_TYPE_INT32, DATA_TYPE_VOID,
     DATA_TYPE_WSTRING,
-    DATA_TYPE_EMPTY,
 };
 use error::KeyValueError;
 use libc::{c_void, int32_t, uint16_t};
-use nserror::{
-    nsresult, NsresultExt, NS_ERROR_NO_AGGREGATION,
-    NS_OK,
-};
+use nserror::{nsresult, NsresultExt, NS_ERROR_NO_AGGREGATION, NS_OK};
 use nsstring::{nsACString, nsCString, nsString};
 use owned_value::{variant_to_owned, OwnedValue};
 use rkv::{Rkv, Store};
 use std::{
-    cell::{RefCell},
-    ptr, rc::Rc,
+    cell::RefCell,
+    ptr,
+    rc::Rc,
     sync::{Arc, RwLock},
     vec::IntoIter,
 };
 use storage_variant::{IntoVariant, Variant};
-use task::{create_thread, get_current_thread, DeleteTask, EnumerateTask,
-    GetNextTask, GetOrCreateTask, GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable
+use task::{
+    create_thread, get_current_thread, DeleteTask, EnumerateTask, GetNextTask, GetOrCreateTask,
+    GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable,
 };
 use xpcom::{
     interfaces::{
-        nsIEventTarget, nsIKeyValueVoidCallback, nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback, nsIKeyValueVariantCallback,
-        nsIKeyValuePairCallback, nsISupports, nsIThread, nsIVariant,
+        nsIEventTarget, nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback,
+        nsIKeyValuePairCallback, nsIKeyValueVariantCallback, nsIKeyValueVoidCallback, nsISupports,
+        nsIThread, nsIVariant,
     },
     nsIID, Ensure, RefPtr,
 };
@@ -125,11 +121,7 @@ impl KeyValueService {
             nsCString::from(name),
         ));
 
-        let runnable = TaskRunnable::new(
-            "KeyValueDatabase::GetOrCreateAsync",
-            source,
-            task,
-        );
+        let runnable = TaskRunnable::new("KeyValueDatabase::GetOrCreateAsync", source, task);
 
         unsafe {
             target.DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
@@ -137,8 +129,7 @@ impl KeyValueService {
     }
 }
 
-#[derive(Clone)]
-#[derive(xpcom)]
+#[derive(Clone, xpcom)]
 #[xpimplements(nsIKeyValueDatabase)]
 #[refcnt = "nonatomic"]
 pub struct InitKeyValueDatabase {
@@ -183,14 +174,13 @@ impl KeyValueDatabase {
             value,
         ));
 
-        let runnable = TaskRunnable::new(
-            "KeyValueDatabase::PutAsync",
-            source,
-            task,
-        );
+        let runnable = TaskRunnable::new("KeyValueDatabase::PutAsync", source, task);
 
         unsafe {
-            self.thread.as_ref().unwrap().DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+            self.thread
+                .as_ref()
+                .unwrap()
+                .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
         }.to_result()
     }
 
@@ -213,14 +203,13 @@ impl KeyValueDatabase {
             nsCString::from(key),
         ));
 
-        let runnable = TaskRunnable::new(
-            "KeyValueDatabase::HasAsync",
-            source,
-            task,
-        );
+        let runnable = TaskRunnable::new("KeyValueDatabase::HasAsync", source, task);
 
         unsafe {
-            self.thread.as_ref().unwrap().DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+            self.thread
+                .as_ref()
+                .unwrap()
+                .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
         }.to_result()
     }
 
@@ -245,14 +234,13 @@ impl KeyValueDatabase {
             RefPtr::new(default_value),
         ));
 
-        let runnable = TaskRunnable::new(
-            "KeyValueDatabase::GetAsync",
-            source,
-            task,
-        );
+        let runnable = TaskRunnable::new("KeyValueDatabase::GetAsync", source, task);
 
         unsafe {
-            self.thread.as_ref().unwrap().DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+            self.thread
+                .as_ref()
+                .unwrap()
+                .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
         }.to_result()
     }
 
@@ -275,14 +263,13 @@ impl KeyValueDatabase {
             nsCString::from(key),
         ));
 
-        let runnable = TaskRunnable::new(
-            "KeyValueDatabase::DeleteAsync",
-            source,
-            task,
-        );
+        let runnable = TaskRunnable::new("KeyValueDatabase::DeleteAsync", source, task);
 
         unsafe {
-            self.thread.as_ref().unwrap().DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+            self.thread
+                .as_ref()
+                .unwrap()
+                .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
         }.to_result()
     }
 
@@ -307,14 +294,13 @@ impl KeyValueDatabase {
             nsCString::from(to_key),
         ));
 
-        let runnable = TaskRunnable::new(
-            "KeyValueDatabase::EnumerateAsync",
-            source,
-            task,
-        );
+        let runnable = TaskRunnable::new("KeyValueDatabase::EnumerateAsync", source, task);
 
         unsafe {
-            self.thread.as_ref().unwrap().DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+            self.thread
+                .as_ref()
+                .unwrap()
+                .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
         }.to_result()
     }
 }
@@ -324,10 +310,14 @@ impl KeyValueDatabase {
 #[refcnt = "nonatomic"]
 pub struct InitKeyValueEnumerator {
     thread: RefPtr<nsIThread>,
-    iter: Rc<RefCell<IntoIter<(
-        Result<String, KeyValueError>,
-        Result<OwnedValue, KeyValueError>,
-    )>>>,
+    iter: Rc<
+        RefCell<
+            IntoIter<(
+                Result<String, KeyValueError>,
+                Result<OwnedValue, KeyValueError>,
+            )>,
+        >,
+    >,
 }
 
 impl KeyValueEnumerator {
@@ -344,7 +334,9 @@ impl KeyValueEnumerator {
         })
     }
 
-    xpcom_method!(HasMoreElementsAsync, has_more_elements_async, { callback: *const nsIKeyValueVariantCallback });
+    xpcom_method!(HasMoreElementsAsync, has_more_elements_async, {
+        callback: *const nsIKeyValueVariantCallback
+    });
     // xpcom_method!(GetNextAsync, get_next_async, { callback: *const nsIKeyValueVoidCallback });
 
     fn has_more_elements_async(
@@ -357,37 +349,27 @@ impl KeyValueEnumerator {
             self.iter.clone(),
         ));
 
-        let runnable = TaskRunnable::new(
-            "KeyValueDatabase::HasMoreElementsAsync",
-            source,
-            task,
-        );
+        let runnable = TaskRunnable::new("KeyValueDatabase::HasMoreElementsAsync", source, task);
 
         unsafe {
-            self.thread.DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+            self.thread
+                .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
         }.to_result()
     }
 
-    xpcom_method!(GetNextAsync, get_next_async, { callback: *const nsIKeyValuePairCallback });
+    xpcom_method!(GetNextAsync, get_next_async, {
+        callback: *const nsIKeyValuePairCallback
+    });
 
-    fn get_next_async(
-        &self,
-        callback: &nsIKeyValuePairCallback,
-    ) -> Result<(), nsresult> {
+    fn get_next_async(&self, callback: &nsIKeyValuePairCallback) -> Result<(), nsresult> {
         let source = get_current_thread()?;
-        let task = Box::new(GetNextTask::new(
-            RefPtr::new(callback),
-            self.iter.clone(),
-        ));
+        let task = Box::new(GetNextTask::new(RefPtr::new(callback), self.iter.clone()));
 
-        let runnable = TaskRunnable::new(
-            "KeyValueDatabase::GetNextAsync",
-            source,
-            task,
-        );
+        let runnable = TaskRunnable::new("KeyValueDatabase::GetNextAsync", source, task);
 
         unsafe {
-            self.thread.DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+            self.thread
+                .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
         }.to_result()
     }
 }

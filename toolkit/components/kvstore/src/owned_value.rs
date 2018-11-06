@@ -2,21 +2,16 @@
 //  * License, v. 2.0. If a copy of the MPL was not distributed with this
 //  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
 use data_type::{
-    DATA_TYPE_INT32,
-    DATA_TYPE_DOUBLE,
-    DATA_TYPE_BOOL,
-    DATA_TYPE_VOID,
+    DATA_TYPE_BOOL, DATA_TYPE_DOUBLE, DATA_TYPE_EMPTY, DATA_TYPE_INT32, DATA_TYPE_VOID,
     DATA_TYPE_WSTRING,
-    DATA_TYPE_EMPTY,
 };
 use error::KeyValueError;
 use libc::{int32_t, uint16_t};
 use nserror::NsresultExt;
 use nsstring::nsString;
 use ordered_float::OrderedFloat;
-use rkv::{Value};
+use rkv::Value;
 use storage_variant::{IntoVariant, Variant};
 use xpcom::interfaces::nsIVariant;
 
@@ -30,9 +25,7 @@ pub enum OwnedValue {
     Str(String),
 }
 
-pub fn value_to_owned<'a>(
-    value: Option<Value<'a>>,
-) -> Result<OwnedValue, KeyValueError> {
+pub fn value_to_owned<'a>(value: Option<Value<'a>>) -> Result<OwnedValue, KeyValueError> {
     match value {
         Some(Value::Bool(val)) => Ok(OwnedValue::Bool(val)),
         Some(Value::I64(val)) => Ok(OwnedValue::I64(val)),
@@ -80,9 +73,7 @@ pub fn variant_to_owned(variant: &nsIVariant) -> Result<Option<OwnedValue>, KeyV
             unsafe { variant.GetAsBool(&mut val) }.to_result()?;
             Ok(Some(OwnedValue::Bool(val)))
         }
-        DATA_TYPE_EMPTY | DATA_TYPE_VOID => {
-            Ok(None)
-        }
+        DATA_TYPE_EMPTY | DATA_TYPE_VOID => Ok(None),
         _unsupported_type => {
             return Err(KeyValueError::UnsupportedType(data_type));
         }
