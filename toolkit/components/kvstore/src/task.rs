@@ -18,7 +18,7 @@ use into_variant;
 use libc::{int32_t, uint16_t};
 use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_OK};
 use nsstring::{nsACString, nsCString, nsString};
-use ownedvalue::{value_to_owned, OwnedValue};
+use owned_value::{value_to_owned, OwnedValue};
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{cell::Cell, cell::RefCell, path::Path, ptr, rc::Rc, str, sync::{Arc, RwLock}, vec::IntoIter};
 use storage_variant::{IntoVariant, Variant};

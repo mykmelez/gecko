@@ -18,7 +18,7 @@ extern crate xpcom;
 
 mod data_type;
 mod error;
-mod ownedvalue;
+mod owned_value;
 mod task;
 
 use data_type::{
@@ -37,7 +37,7 @@ use nserror::{
     NS_OK,
 };
 use nsstring::{nsACString, nsCString, nsString};
-use ownedvalue::{value_to_owned, variant_to_owned, OwnedValue};
+use owned_value::{value_to_owned, variant_to_owned, OwnedValue};
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
     cell::{Cell, RefCell},
