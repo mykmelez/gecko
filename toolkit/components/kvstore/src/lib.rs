@@ -31,7 +31,7 @@ use data_type::{
 use error::KeyValueError;
 use libc::{c_void, int32_t, uint16_t};
 use nserror::{
-    nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NO_AGGREGATION,
+    nsresult, NsresultExt, NS_ERROR_NO_AGGREGATION,
     NS_OK,
 };
 use nsstring::{nsACString, nsCString, nsString};
@@ -389,53 +389,6 @@ impl KeyValueEnumerator {
         unsafe {
             self.thread.DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
         }.to_result()
-    }
-
-    // fn has_more_elements(&self) -> Result<bool, KeyValueError> {
-    //     Ok(!self.iter.borrow().as_slice().is_empty())
-    // }
-
-    // fn get_next(&self) -> Result<RefPtr<nsISupports>, KeyValueError> {
-    //     let mut iter = self.iter.borrow_mut();
-    //     let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
-
-    //     // We fail on retrieval of the key/value pair if the key isn't valid
-    //     // UTF-*, if the value is unexpected, or if we encountered a store error
-    //     // while retrieving the pair.
-    //     let pair = KeyValuePair::new(key?, value?);
-
-    //     pair.query_interface::<nsISupports>()
-    //         .ok_or(KeyValueError::NoInterface("nsIKeyValuePair"))
-    // }
-}
-
-#[derive(xpcom)]
-#[xpimplements(nsIKeyValuePair)]
-#[refcnt = "nonatomic"]
-pub struct InitKeyValuePair {
-    key: String,
-    value: OwnedValue,
-}
-
-impl KeyValuePair {
-    fn new(key: String, value: OwnedValue) -> RefPtr<KeyValuePair> {
-        KeyValuePair::allocate(InitKeyValuePair { key, value })
-    }
-
-    xpcom_method!(GetKey, get_key, {}, *mut nsACString);
-    xpcom_method!(GetValue, get_value, {}, *mut *const nsIVariant);
-
-    fn get_key(&self) -> Result<nsCString, KeyValueError> {
-        Ok(nsCString::from(&self.key))
-    }
-
-    fn get_value(&self) -> Result<RefPtr<nsIVariant>, KeyValueError> {
-        Ok(self
-            .value
-            .clone()
-            .into_variant()
-            .ok_or(KeyValueError::from(NS_ERROR_FAILURE))?
-            .take())
     }
 }
 
