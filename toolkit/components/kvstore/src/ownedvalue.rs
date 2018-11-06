@@ -55,18 +55,6 @@ impl<'a> IntoVariant for OwnedValue {
     }
 }
 
-// pub fn owned_to_value<'a>(
-//     owned_value: OwnedValue,
-// ) -> Result<Value<'a>, KeyValueError> {
-//     match owned_value {
-//         OwnedValue::Bool(val) => Ok(Value::Bool(val)),
-//         OwnedValue::I64(val) => Ok(Value::I64(val)),
-//         OwnedValue::F64(val) => Ok(Value::F64(val)),
-//         OwnedValue::Str(val) => Ok(Value::Str(&val)),
-//         _value => Err(KeyValueError::UnexpectedValue),
-//     }
-// }
-
 pub fn variant_to_owned(variant: &nsIVariant) -> Result<Option<OwnedValue>, KeyValueError> {
     let mut data_type: uint16_t = 0;
     unsafe { variant.GetDataType(&mut data_type) }.to_result()?;
