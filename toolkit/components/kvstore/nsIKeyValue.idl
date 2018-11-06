@@ -77,30 +77,6 @@ interface nsIKeyValueDatabase : nsISupports {
         in nsIKeyValueEnumeratorCallback callback,
         [optional] in AUTF8String fromKey,
         [optional] in AUTF8String toKey);
-
-    void put(in AUTF8String key, in nsIVariant value);
-    boolean has(in AUTF8String key);
-    nsIVariant get(in AUTF8String key, [optional] in nsIVariant defaultValue);
-    void delete(in AUTF8String key);
-
-    /**
-     * An alternative implementation of getters that specify their expected
-     * return type, which enables us to enforce those expectations by returning
-     * an error if the retrieved value isn't of the specified type.
-     */
-    long long getInt(in AUTF8String key, in long long defaultValue);
-    double getDouble(in AUTF8String key, in double defaultValue);
-    AUTF8String getString(in AUTF8String key, in AUTF8String defaultValue);
-    boolean getBool(in AUTF8String key, in boolean defaultValue);
-
-    /**
-     * Enumerate (key, value) pairs.  If you specify a "from" key,
-     * then enumeration starts at the first key equal to or greater than
-     * (lexicographically) the specified key.  And if you specify a "to" key,
-     * then enumeration ends at the first key less than or equal to it.
-     */
-    // nsIKeyValueEnumerator enumerate([optional] in AUTF8String fromKey,
-    //                                 [optional] in AUTF8String toKey);
 };
 
 [scriptable, uuid(2becc1f8-2d80-4b63-92a8-24ee8f79ee45)]
@@ -111,24 +87,6 @@ interface nsIKeyValueDatabaseCallback : nsISupports {
 
 [scriptable, uuid(46c893dd-4c14-4de0-b33d-a1be18c6d062)]
 interface nsIKeyValueService : nsISupports {
-    /**
-     * Get a handle to the key/value database at the given path and optionally
-     * with the given name, creating the database if necessary.
-     *
-     * There can be multiple key/value databases for a given path, which share
-     * the database files.  If you don't specify a name, then this method
-     * will retrieve a handle to the "default" (unnamed) database.
-     *
-     * It isn't a good idea to use both named and unnamed databases in the same
-     * path, as the underlying implementation stores information about the named
-     * databases in the default database.  So if you need multiple databases,
-     * then give them all names!
-     */
-    nsIKeyValueDatabase getOrCreate(
-        in AUTF8String path,
-        [optional] in AUTF8String name
-    );
-
     void getOrCreateAsync(
         in nsIKeyValueDatabaseCallback callback,
         in AUTF8String path,

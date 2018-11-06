@@ -111,10 +111,6 @@ add_task(async function putGetHasDelete() {
   Assert.strictEqual(await database.get("double-key"), null);
   Assert.strictEqual(await database.get("string-key"), null);
   Assert.strictEqual(await database.get("bool-key"), null);
-  // Assert.strictEqual(database.getInt("int-key", 1), 1);
-  // Assert.strictEqual(database.getDouble("double-key", 1.1), 1.1);
-  // Assert.strictEqual(database.getString("string-key", ""), "");
-  // Assert.strictEqual(database.getBool("bool-key", false), false);
 
   // The put method succeeds without returning a value.
   Assert.strictEqual(await database.put("int-key", 1234), undefined);
@@ -131,39 +127,6 @@ add_task(async function putGetHasDelete() {
   Assert.strictEqual(await database.get("double-key"), 56.78);
   Assert.strictEqual(await database.get("string-key"), "Héllo, wőrld!");
   Assert.strictEqual(await database.get("bool-key"), true);
-  // Assert.strictEqual(database.getInt("int-key", 1), 1234);
-  // Assert.strictEqual(database.getDouble("double-key", 1.1), 56.78);
-  // Assert.strictEqual(database.getString("string-key", ""), "Héllo, wőrld!");
-  // Assert.strictEqual(database.getBool("bool-key", false), true);
-
-  // You must specify a default value (per note in nsIKeyValue.idl)
-  // for the type-specific getters.
-  // Assert.throws(() => database.getInt("any-key"), /NS_ERROR_XPC_NOT_ENOUGH_ARGS/);
-  // Assert.throws(() => database.getDouble("any-key"), /NS_ERROR_XPC_NOT_ENOUGH_ARGS/);
-  // Assert.throws(() => database.getString("any-key"), /NS_ERROR_XPC_NOT_ENOUGH_ARGS/);
-  // Assert.throws(() => database.getBool("any-key"), /NS_ERROR_XPC_NOT_ENOUGH_ARGS/);
-
-  // If you specify a default value while retrieving the value of a nonexistent
-  // key, then the result is the default value, no matter which getter you call.
-  // Assert.strictEqual(database.getInt("nonexistent-key", 1), 1);
-  // Assert.strictEqual(database.getDouble("nonexistent-key", 1.1), 1.1);
-  // Assert.strictEqual(database.getString("nonexistent-key", "Hi."), "Hi.");
-  // Assert.strictEqual(database.getBool("nonexistent-key", true), true);
-
-  // Getting key/value pairs that do exist, but using the wrong getter
-  // for the value's type, throws an exception.
-  // Assert.throws(() => database.getString("int-key", ""), /NS_ERROR_UNEXPECTED/);
-  // Assert.throws(() => database.getDouble("int-key", 1.1), /NS_ERROR_UNEXPECTED/);
-  // Assert.throws(() => database.getBool("int-key", false), /NS_ERROR_UNEXPECTED/);
-  // Assert.throws(() => database.getInt("string-key", 1), /NS_ERROR_UNEXPECTED/);
-  // Assert.throws(() => database.getDouble("string-key", 1.1), /NS_ERROR_UNEXPECTED/);
-  // Assert.throws(() => database.getBool("string-key", false), /NS_ERROR_UNEXPECTED/);
-  // Assert.throws(() => database.getInt("bool-key", 1), /NS_ERROR_UNEXPECTED/);
-  // Assert.throws(() => database.getDouble("bool-key", 1.1), /NS_ERROR_UNEXPECTED/);
-  // Assert.throws(() => database.getString("bool-key", ""), /NS_ERROR_UNEXPECTED/);
-  // Assert.throws(() => database.getInt("double-key", 1), /NS_ERROR_UNEXPECTED/);
-  // Assert.throws(() => database.getBool("double-key", false), /NS_ERROR_UNEXPECTED/);
-  // Assert.throws(() => database.getString("double-key", ""), /NS_ERROR_UNEXPECTED/);
 
   // The has() method works as expected for both existing and non-existent keys.
   Assert.strictEqual(await database.has("int-key"), true);
@@ -193,10 +156,6 @@ add_task(async function putGetHasDelete() {
   Assert.strictEqual(await database.get("double-key"), null);
   Assert.strictEqual(await database.get("string-key"), null);
   Assert.strictEqual(await database.get("bool-key"), null);
-  // Assert.strictEqual(database.getInt("int-key", 1), 1);
-  // Assert.strictEqual(database.getDouble("double-key", 1.1), 1.1);
-  // Assert.strictEqual(database.getString("string-key", ""), "");
-  // Assert.strictEqual(database.getBool("bool-key", false), false);
 });
 
 add_task(async function largeNumbers() {
@@ -206,17 +165,6 @@ add_task(async function largeNumbers() {
   const MAX_INT_VARIANT = Math.pow(2, 31) - 1;
   const MIN_DOUBLE_VARIANT = Math.pow(2, 31);
 
-  // It's tricky to use getInt() in script, as XPConnect (?) translates
-  // integers larger than the maximum value of int32 to doubles, even though
-  // nsIVariant and the key/value storage engine both support int64.
-  //
-  // Thus getInt() on such a value will fail (although getDouble() will work).
-  // It's probably better to always use get() in script, especially since script
-  // doesn't distinguish between these types, representing them all as Number.
-
-  // Perhaps we should even mark all the type-specific getters as [noscript]
-  // and only expose them to native code.
-
   await database.put("max-int-variant", MAX_INT_VARIANT);
   await database.put("min-double-variant", MIN_DOUBLE_VARIANT);
   await database.put("max-safe-integer", Number.MAX_SAFE_INTEGER);
@@ -225,27 +173,11 @@ add_task(async function largeNumbers() {
   await database.put("min-value", Number.MIN_VALUE);
 
   Assert.strictEqual(await database.get("max-int-variant"), MAX_INT_VARIANT);
-  // Assert.strictEqual(database.getInt("max-int-variant", 1), MAX_INT_VARIANT);
-
   Assert.strictEqual(await database.get("min-double-variant"), MIN_DOUBLE_VARIANT);
-  // Assert.throws(() => database.getInt("min-double-variant", 1), /NS_ERROR_UNEXPECTED/);
-  // Assert.strictEqual(database.getDouble("min-double-variant", 1.1), MIN_DOUBLE_VARIANT);
-
   Assert.strictEqual(await database.get("max-safe-integer"), Number.MAX_SAFE_INTEGER);
-  // Assert.throws(() => database.getInt("max-safe-integer", 1), /NS_ERROR_UNEXPECTED/);
-  // Assert.strictEqual(database.getDouble("max-safe-integer", 1.1), Number.MAX_SAFE_INTEGER);
-
   Assert.strictEqual(await database.get("min-safe-integer"), Number.MIN_SAFE_INTEGER);
-  // Assert.throws(() => database.getInt("min-safe-integer", 1), /NS_ERROR_UNEXPECTED/);
-  // Assert.strictEqual(database.getDouble("min-safe-integer", 1.1), Number.MIN_SAFE_INTEGER);
-
   Assert.strictEqual(await database.get("max-value"), Number.MAX_VALUE);
-  // Assert.throws(() => database.getInt("max-value", 1), /NS_ERROR_UNEXPECTED/);
-  // Assert.strictEqual(database.getDouble("max-value", 1.1), Number.MAX_VALUE);
-
   Assert.strictEqual(await database.get("min-value"), Number.MIN_VALUE);
-  // Assert.throws(() => database.getInt("min-value", 1), /NS_ERROR_UNEXPECTED/);
-  // Assert.strictEqual(database.getDouble("min-value", 1.1), Number.MIN_VALUE);
 });
 
 add_task(async function extendedCharacterKey() {
