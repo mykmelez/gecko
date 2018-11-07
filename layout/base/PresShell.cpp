@@ -826,7 +826,8 @@ PresShell::PresShell()
   , mHasHandledUserInput(false)
 #ifdef NIGHTLY_BUILD
   , mForceDispatchKeyPressEventsForNonPrintableKeys(false)
-  , mInitializedForceDispatchKeyPressEventsForNonPrintableKeys(false)
+  , mForceUseLegacyKeyCodeAndCharCodeValues(false)
+  , mInitializedWithKeyPressEventDispatchingBlacklist(false)
 #endif // #ifdef NIGHTLY_BUILD
 {
   MOZ_LOG(gLog, LogLevel::Debug, ("PresShell::PresShell this=%p", this));
@@ -2104,8 +2105,9 @@ static nsIContent* GetNativeAnonymousSubtreeRoot(nsIContent* aContent)
     return nullptr;
   }
   auto* current = aContent;
-  while (!current->IsRootOfNativeAnonymousSubtree()) {
+  while (current && !current->IsRootOfNativeAnonymousSubtree()) {
     current = current->GetFlattenedTreeParent();
+    MOZ_DIAGNOSTIC_ASSERT(current, "How?");
   }
   return current;
 }
@@ -3869,7 +3871,8 @@ PresShell::ScheduleViewManagerFlush(PaintType aType)
 void
 nsIPresShell::DispatchSynthMouseMove(WidgetGUIEvent* aEvent)
 {
-  AUTO_PROFILER_TRACING("Paint", "DispatchSynthMouseMove");
+  AUTO_PROFILER_TRACING_DOCSHELL(
+    "Paint", "DispatchSynthMouseMove", mPresContext->GetDocShell());
   nsEventStatus status = nsEventStatus_eIgnore;
   nsView* targetView = nsView::GetViewFor(aEvent->mWidget);
   if (!targetView)
@@ -4339,7 +4342,10 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
     if (MOZ_LIKELY(!mIsDestroying)) {
       nsAutoScriptBlocker scriptBlocker;
 #ifdef MOZ_GECKO_PROFILER
-      AutoProfilerStyleMarker tracingStyleFlush(std::move(mStyleCause));
+      nsCOMPtr<nsIDocShell> docShell = mPresContext->GetDocShell();
+      DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);
+      AutoProfilerStyleMarker tracingStyleFlush(
+        std::move(mStyleCause), docShellId, docShellHistoryId);
 #endif
 
       mPresContext->RestyleManager()->ProcessPendingRestyles();
@@ -4362,7 +4368,10 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
     if (MOZ_LIKELY(!mIsDestroying)) {
       nsAutoScriptBlocker scriptBlocker;
 #ifdef MOZ_GECKO_PROFILER
-      AutoProfilerStyleMarker tracingStyleFlush(std::move(mStyleCause));
+      nsCOMPtr<nsIDocShell> docShell = mPresContext->GetDocShell();
+      DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);
+      AutoProfilerStyleMarker tracingStyleFlush(
+        std::move(mStyleCause), docShellId, docShellHistoryId);
 #endif
 
       mPresContext->RestyleManager()->ProcessPendingRestyles();
@@ -7911,7 +7920,8 @@ GetDocumentURIToCompareWithBlacklist(PresShell& aPresShell)
 }
 
 static bool
-DispatchKeyPressEventsEvenForNonPrintableKeys(nsIURI* aURI)
+IsURIInBlacklistPref(nsIURI* aURI,
+                     const char* aBlacklistPrefName)
 {
   if (!aURI) {
     return false;
@@ -7932,11 +7942,8 @@ DispatchKeyPressEventsEvenForNonPrintableKeys(nsIURI* aURI)
 
   // The black list is comma separated domain list.  Each item may start with
   // "*.".  If starts with "*.", it matches any sub-domains.
-  static const char* kPrefNameOfBlackList =
-    "dom.keyboardevent.keypress.hack.dispatch_non_printable_keys";
-
   nsAutoCString blackList;
-  Preferences::GetCString(kPrefNameOfBlackList, blackList);
+  Preferences::GetCString(aBlacklistPrefName, blackList);
   if (blackList.IsEmpty()) {
     return false;
   }
@@ -8008,8 +8015,7 @@ PresShell::DispatchEventToDOM(WidgetEvent* aEvent,
     if (aEvent->IsBlockedForFingerprintingResistance()) {
       aEvent->mFlags.mOnlySystemGroupDispatchInContent = true;
 #ifdef NIGHTLY_BUILD
-    } else if (aEvent->mMessage == eKeyPress &&
-               aEvent->mFlags.mOnlySystemGroupDispatchInContent) {
+    } else if (aEvent->mMessage == eKeyPress) {
       // If eKeyPress event is marked as not dispatched in the default event
       // group in web content, it's caused by non-printable key or key
       // combination.  In this case, UI Events declares that browsers
@@ -8017,14 +8023,25 @@ PresShell::DispatchEventToDOM(WidgetEvent* aEvent,
       // broken with this strict behavior due to historical issue.
       // Therefore, we need to keep dispatching keypress event for such keys
       // even with breaking the standard.
-      if (!mInitializedForceDispatchKeyPressEventsForNonPrintableKeys) {
-        mInitializedForceDispatchKeyPressEventsForNonPrintableKeys = true;
+      // Similarly, the other browsers sets non-zero value of keyCode or
+      // charCode of keypress event to the other.  Therefore, we should
+      // behave so, however, some web apps may be broken.  On such web apps,
+      // we should keep using legacy our behavior.
+      if (!mInitializedWithKeyPressEventDispatchingBlacklist) {
+        mInitializedWithKeyPressEventDispatchingBlacklist = true;
         nsCOMPtr<nsIURI> uri = GetDocumentURIToCompareWithBlacklist(*this);
         mForceDispatchKeyPressEventsForNonPrintableKeys =
-          DispatchKeyPressEventsEvenForNonPrintableKeys(uri);
+          IsURIInBlacklistPref(uri,
+            "dom.keyboardevent.keypress.hack.dispatch_non_printable_keys");
+        mForceUseLegacyKeyCodeAndCharCodeValues =
+          IsURIInBlacklistPref(uri,
+            "dom.keyboardevent.keypress.hack.use_legacy_keycode_and_charcode");
       }
       if (mForceDispatchKeyPressEventsForNonPrintableKeys) {
         aEvent->mFlags.mOnlySystemGroupDispatchInContent = false;
+      }
+      if (mForceUseLegacyKeyCodeAndCharCodeValues) {
+        aEvent->AsKeyboardEvent()->mUseLegacyKeyCodeAndCharCodeValues = true;
       }
 #endif // #ifdef NIGHTLY_BUILD
     }
@@ -8971,8 +8988,12 @@ PresShell::DoReflow(nsIFrame* target, bool aInterruptible)
   }
 
 #ifdef MOZ_GECKO_PROFILER
-  AutoProfilerTracing tracingLayoutFlush("Paint", "Reflow",
-                                          std::move(mReflowCause));
+  DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);
+  AutoProfilerTracing tracingLayoutFlush("Paint",
+                                         "Reflow",
+                                         std::move(mReflowCause),
+                                         docShellId,
+                                         docShellHistoryId);
   mReflowCause = nullptr;
 #endif
 

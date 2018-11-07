@@ -1333,10 +1333,6 @@ var gBrowserInit = {
     });
 
     this._setInitialFocus();
-
-    // Update the UI density before TabsInTitlebar lays out the titlbar.
-    gUIDensity.init();
-    TabsInTitlebar.whenWindowLayoutReady();
   },
 
   onLoad() {
@@ -1393,6 +1389,7 @@ var gBrowserInit = {
     }
 
     // Misc. inits.
+    gUIDensity.init();
     TabletModeUpdater.init();
     CombinedStopReload.ensureInitialized();
     gPrivateBrowsingUI.init();
@@ -4153,7 +4150,7 @@ const BrowserSearch = {
    */
   recordSearchInTelemetry(engine, source, details = {}) {
     try {
-      BrowserUsageTelemetry.recordSearch(engine, source, details);
+      BrowserUsageTelemetry.recordSearch(gBrowser, engine, source, details);
     } catch (ex) {
       Cu.reportError(ex);
     }
@@ -4177,7 +4174,7 @@ const BrowserSearch = {
   recordOneoffSearchInTelemetry(engine, source, type, where) {
     try {
       const details = {type, isOneOff: true};
-      BrowserUsageTelemetry.recordSearch(engine, source, details);
+      BrowserUsageTelemetry.recordSearch(gBrowser, engine, source, details);
     } catch (ex) {
       Cu.reportError(ex);
     }
@@ -5584,7 +5581,7 @@ function onViewToolbarsPopupShowing(aEvent, aInsertPoint) {
 
   var firstMenuItem = aInsertPoint || popup.firstElementChild;
 
-  let toolbarNodes = gNavToolbox.children;
+  let toolbarNodes = gNavToolbox.querySelectorAll("toolbar");
 
   for (let toolbar of toolbarNodes) {
     if (!toolbar.hasAttribute("toolbarname")) {
@@ -5861,7 +5858,6 @@ var gUIDensity = {
       }
     }
 
-    TabsInTitlebar.update();
     gBrowser.tabContainer.uiDensityChanged();
   },
 };
