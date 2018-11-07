@@ -153,17 +153,12 @@ impl Task for GetOrCreateTask {
 
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
-            Some(Ok(db)) => unsafe {
-                match db.query_interface::<nsIKeyValueDatabase>() {
-                    Some(db) => self.callback.Resolve(db.coerce()),
-                    None => KeyValueError::NoInterface("nsISupports").into(),
-                }
-            },
-            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
+            Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
             Some(Err(err)) => unsafe {
                 self.callback
                     .Reject(&*nsCString::from(err.to_string()))
             },
+            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
@@ -360,7 +355,7 @@ pub struct EnumerateTask {
     store: Store,
     from_key: nsCString,
     to_key: nsCString,
-    result: Cell<Option<Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError>>>,
+    result: Cell<Option<Result<RefPtr<KeyValueEnumerator>, KeyValueError>>>,
 }
 
 impl EnumerateTask {
@@ -385,7 +380,7 @@ impl EnumerateTask {
 impl Task for EnumerateTask {
     fn run(&self) {
         self.result.set(Some(
-            || -> Result<RefPtr<nsIKeyValueEnumerator>, KeyValueError> {
+            || -> Result<RefPtr<KeyValueEnumerator>, KeyValueError> {
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
                 let from_key = str::from_utf8(&self.from_key)?;
@@ -438,12 +433,9 @@ impl Task for EnumerateTask {
                         )
                     }).collect();
 
-                let enumerator = KeyValueEnumerator::new(get_current_thread().unwrap(), pairs);
-
-                match enumerator.query_interface::<nsIKeyValueEnumerator>() {
-                    Some(interface) => Ok(interface),
-                    None => Err(KeyValueError::NoInterface("nsIKeyValueEnumerator")),
-                }
+                // TODO: return an error rather than unwrapping if the thread
+                // could not be gotten.
+                Ok(KeyValueEnumerator::new(get_current_thread().unwrap(), pairs))
             }(),
         ));
     }
@@ -530,7 +522,7 @@ pub struct GetNextTask {
             )>,
         >,
     >,
-    result: Cell<Option<Result<(String, OwnedValue), KeyValueError>>>,
+    result: Cell<Option<Result<RefPtr<KeyValuePair>, KeyValueError>>>,
 }
 
 impl GetNextTask {
@@ -556,24 +548,23 @@ impl GetNextTask {
 impl Task for GetNextTask {
     fn run(&self) {
         self.result
-            .set(Some(|| -> Result<(String, OwnedValue), KeyValueError> {
+            .set(Some(|| -> Result<RefPtr<KeyValuePair>, KeyValueError> {
                 let mut iter = self.iter.borrow_mut();
                 let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
 
                 // We fail on retrieval of the key/value pair if the key isn't valid
                 // UTF-*, if the value is unexpected, or if we encountered a store error
                 // while retrieving the pair.
-                Ok((key?, value?))
+                Ok(KeyValuePair::new(key?, value?))
             }()));
     }
 
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
-            Some(Ok((key, value))) => unsafe {
-                self.callback.Resolve(KeyValuePair::new(key, value).coerce())
-            },
+            Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
             Some(Err(err)) => unsafe {
-                self.callback.Reject(&*nsCString::from(err.to_string()))
+                self.callback
+                    .Reject(&*nsCString::from(err.to_string()))
             },
             None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
