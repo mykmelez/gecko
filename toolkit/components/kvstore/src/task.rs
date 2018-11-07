@@ -146,7 +146,7 @@ impl Task for GetOrCreateTask {
                     rkv.write()?
                         .open_or_create(Some(str::from_utf8(&self.name)?))
                 }?;
-                Ok(KeyValueDatabase::new(rkv, store, Some(self.thread.clone())))
+                Ok(KeyValueDatabase::new(rkv, store, self.thread.clone()))
             }(),
         ));
     }

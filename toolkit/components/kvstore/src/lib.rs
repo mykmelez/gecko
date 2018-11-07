@@ -131,19 +131,18 @@ impl KeyValueService {
 
 #[derive(Clone, xpcom)]
 #[xpimplements(nsIKeyValueDatabase)]
-#[refcnt = "nonatomic"]
+#[refcnt = "atomic"]
 pub struct InitKeyValueDatabase {
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
-    // TODO: require this rather than making it optional.
-    thread: Option<RefPtr<nsIThread>>,
+    thread: RefPtr<nsIThread>,
 }
 
 impl KeyValueDatabase {
     fn new(
         rkv: Arc<RwLock<Rkv>>,
         store: Store,
-        thread: Option<RefPtr<nsIThread>>,
+        thread: RefPtr<nsIThread>,
     ) -> RefPtr<KeyValueDatabase> {
         KeyValueDatabase::allocate(InitKeyValueDatabase { rkv, store, thread })
     }
@@ -178,8 +177,6 @@ impl KeyValueDatabase {
 
         unsafe {
             self.thread
-                .as_ref()
-                .unwrap()
                 .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
         }.to_result()
     }
@@ -207,8 +204,6 @@ impl KeyValueDatabase {
 
         unsafe {
             self.thread
-                .as_ref()
-                .unwrap()
                 .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
         }.to_result()
     }
@@ -238,8 +233,6 @@ impl KeyValueDatabase {
 
         unsafe {
             self.thread
-                .as_ref()
-                .unwrap()
                 .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
         }.to_result()
     }
@@ -267,8 +260,6 @@ impl KeyValueDatabase {
 
         unsafe {
             self.thread
-                .as_ref()
-                .unwrap()
                 .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
         }.to_result()
     }
@@ -298,8 +289,6 @@ impl KeyValueDatabase {
 
         unsafe {
             self.thread
-                .as_ref()
-                .unwrap()
                 .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
         }.to_result()
     }
@@ -307,7 +296,7 @@ impl KeyValueDatabase {
 
 #[derive(xpcom)]
 #[xpimplements(nsIKeyValueEnumerator)]
-#[refcnt = "nonatomic"]
+#[refcnt = "atomic"]
 pub struct InitKeyValueEnumerator {
     thread: RefPtr<nsIThread>,
     iter: Rc<
@@ -375,7 +364,7 @@ impl KeyValueEnumerator {
 
 #[derive(xpcom)]
 #[xpimplements(nsIKeyValuePair)]
-#[refcnt = "nonatomic"]
+#[refcnt = "atomic"]
 pub struct InitKeyValuePair {
     key: String,
     value: OwnedValue,
