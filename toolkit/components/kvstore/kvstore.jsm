@@ -13,7 +13,7 @@ const EXPORTED_SYMBOLS = [
 
 function promisify(fn, ...args) {
   return new Promise((resolve, reject) => {
-    fn({ handleResult: resolve, handleError: reject }, ...args);
+    fn({ resolve, reject }, ...args);
   });
 }
 
@@ -130,12 +130,7 @@ class KeyValueEnumerator {
   }
 
   getNext() {
-    return new Promise((resolve, reject) => {
-      this.enumerator.getNext({
-        handleResult(key, value) { resolve({ key, value }) },
-        handleError(error) { reject(error) },
-      });
-    });
+    return promisify(this.enumerator.getNext);
   }
 
   [Symbol.asyncIterator]() {

@@ -26,7 +26,7 @@ use data_type::{
 };
 use error::KeyValueError;
 use libc::{c_void, int32_t, uint16_t};
-use nserror::{nsresult, NsresultExt, NS_ERROR_NO_AGGREGATION, NS_OK};
+use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NO_AGGREGATION, NS_OK};
 use nsstring::{nsACString, nsCString, nsString};
 use owned_value::{variant_to_owned, OwnedValue};
 use rkv::{Rkv, Store};
@@ -370,6 +370,36 @@ impl KeyValueEnumerator {
             self.thread
                 .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
         }.to_result()
+    }
+}
+
+#[derive(xpcom)]
+#[xpimplements(nsIKeyValuePair)]
+#[refcnt = "nonatomic"]
+pub struct InitKeyValuePair {
+    key: String,
+    value: OwnedValue,
+}
+
+impl KeyValuePair {
+    fn new(key: String, value: OwnedValue) -> RefPtr<KeyValuePair> {
+        KeyValuePair::allocate(InitKeyValuePair { key, value })
+    }
+
+    xpcom_method!(GetKey, get_key, {}, *mut nsACString);
+    xpcom_method!(GetValue, get_value, {}, *mut *const nsIVariant);
+
+    fn get_key(&self) -> Result<nsCString, KeyValueError> {
+        Ok(nsCString::from(&self.key))
+    }
+
+    fn get_value(&self) -> Result<RefPtr<nsIVariant>, KeyValueError> {
+        Ok(self
+            .value
+            .clone()
+            .into_variant()
+            .ok_or(KeyValueError::from(NS_ERROR_FAILURE))?
+            .take())
     }
 }
 

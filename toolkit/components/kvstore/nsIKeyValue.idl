@@ -75,7 +75,7 @@ interface nsIKeyValueDatabase : nsISupports {
      *
      * If the key/value pair doesn't exist in the database, and you specify
      * a default value, then the default value will be returned.  Otherwise,
-     * the callback's handleResult() method will be called with a variant
+     * the callback's resolve() method will be called with a variant
      * of type VTYPE_EMPTY, which translates to the JS `null` value.
      */
     void get(
@@ -94,8 +94,8 @@ interface nsIKeyValueDatabase : nsISupports {
      * Remove the key/value pair with the given key from the database.
      *
      * If the given key doesn't exist in the database, this operation doesn't
-     * fail; or rather, it fails silently, calling the handleResult() method
-     * of its callback rather than handleError().  If you want to know whether
+     * fail; or rather, it fails silently, calling the resolve() method
+     * of its callback rather than reject().  If you want to know whether
      * or not a key exists when deleting it, call the has() method first.
      */
     void delete(
@@ -120,12 +120,18 @@ interface nsIKeyValueDatabase : nsISupports {
  * An enumerator of key/value pairs.  Although its method names are identical
  * to those of nsISimpleEnumerator, this interface differs from that one in that
  * its methods are asynchronous, accepting a callback argument and calling
- * the callback's handleResult() method with the result of the operation.
+ * the callback's resolve() method with the result of the operation.
  */
 [scriptable, uuid(b9ba7116-b7ff-4717-9a28-a08e6879b199)]
 interface nsIKeyValueEnumerator : nsISupports {
     void hasMoreElements(in nsIKeyValueVariantCallback callback);
     void getNext(in nsIKeyValuePairCallback callback);
+};
+
+[scriptable, uuid(bc37b06a-23b5-4b32-8281-4b8479601c7e)]
+interface nsIKeyValuePair : nsISupports {
+    readonly attribute AUTF8String key;
+    readonly attribute nsIVariant value;
 };
 
 /**
@@ -135,8 +141,8 @@ interface nsIKeyValueEnumerator : nsISupports {
  */
 [scriptable, uuid(2becc1f8-2d80-4b63-92a8-24ee8f79ee45)]
 interface nsIKeyValueDatabaseCallback : nsISupports {
-    void handleResult(in nsIKeyValueDatabase database);
-    void handleError(in AUTF8String message);
+    void resolve(in nsIKeyValueDatabase database);
+    void reject(in AUTF8String message);
 };
 
 /**
@@ -146,8 +152,8 @@ interface nsIKeyValueDatabaseCallback : nsISupports {
  */
 [scriptable, uuid(b7ea2183-880b-4424-ab24-5aa1555b775d)]
 interface nsIKeyValueEnumeratorCallback : nsISupports {
-    void handleResult(in nsIKeyValueEnumerator enumerator);
-    void handleError(in AUTF8String message);
+    void resolve(in nsIKeyValueEnumerator enumerator);
+    void reject(in AUTF8String message);
 };
 
 /**
@@ -158,8 +164,8 @@ interface nsIKeyValueEnumeratorCallback : nsISupports {
  */
 [scriptable, uuid(50f65485-ec1e-4307-812b-b8a15e1f382e)]
 interface nsIKeyValuePairCallback : nsISupports {
-    void handleResult(in AUTF8String key, in nsIVariant value);
-    void handleError(in AUTF8String message);
+    void resolve(in nsIKeyValuePair pair);
+    void reject(in AUTF8String message);
 };
 
 /**
@@ -170,18 +176,18 @@ interface nsIKeyValuePairCallback : nsISupports {
  */
 [scriptable, uuid(174ebfa1-74ea-42a7-aa90-85bbaf1da4bf)]
 interface nsIKeyValueVariantCallback : nsISupports {
-    void handleResult(in nsIVariant result);
-    void handleError(in AUTF8String message);
+    void resolve(in nsIVariant result);
+    void reject(in AUTF8String message);
 };
 
 /**
  * A callback for the nsIKeyValueDatabase.put() and .delete() methods.
  *
- * There is no result, but the handleResult() method is still called when those
+ * There is no result, but the resolve() method is still called when those
  * async operations complete, to notify consumers of completion.
  */
 [scriptable, uuid(0c17497a-ccf8-451a-838d-9dfa7f846379)]
 interface nsIKeyValueVoidCallback : nsISupports {
-    void handleResult();
-    void handleError(in AUTF8String message);
+    void resolve();
+    void reject(in AUTF8String message);
 };

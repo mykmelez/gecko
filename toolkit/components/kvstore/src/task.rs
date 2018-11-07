@@ -32,6 +32,7 @@ use xpcom::{
 };
 use KeyValueDatabase;
 use KeyValueEnumerator;
+use KeyValuePair;
 
 extern "C" {
     fn NS_GetCurrentThreadEventTarget(result: *mut *const nsIThread) -> nsresult;
@@ -154,14 +155,14 @@ impl Task for GetOrCreateTask {
         match self.result.take() {
             Some(Ok(db)) => unsafe {
                 match db.query_interface::<nsIKeyValueDatabase>() {
-                    Some(db) => self.callback.HandleResult(db.coerce()),
+                    Some(db) => self.callback.Resolve(db.coerce()),
                     None => KeyValueError::NoInterface("nsISupports").into(),
                 }
             },
-            None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
+            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
             Some(Err(err)) => unsafe {
                 self.callback
-                    .HandleError(&*nsCString::from(err.to_string()))
+                    .Reject(&*nsCString::from(err.to_string()))
             },
         }.to_result()
     }
@@ -218,12 +219,12 @@ impl Task for PutTask {
 
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
-            Some(Ok(())) => unsafe { self.callback.HandleResult() },
+            Some(Ok(())) => unsafe { self.callback.Resolve() },
             Some(Err(err)) => unsafe {
                 self.callback
-                    .HandleError(&*nsCString::from(err.to_string()))
+                    .Reject(&*nsCString::from(err.to_string()))
             },
-            None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
+            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
@@ -267,7 +268,7 @@ impl Task for HasTask {
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
             Some(Ok(value)) => unsafe {
-                self.callback.HandleResult(
+                self.callback.Resolve(
                     value
                         .into_variant()
                         .ok_or(KeyValueError::Read)?
@@ -277,9 +278,9 @@ impl Task for HasTask {
             },
             Some(Err(err)) => unsafe {
                 self.callback
-                    .HandleError(&*nsCString::from(err.to_string()))
+                    .Reject(&*nsCString::from(err.to_string()))
             },
-            None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
+            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
@@ -343,12 +344,12 @@ impl Task for GetTask {
 
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
-            Some(Ok(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
+            Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
             Some(Err(err)) => unsafe {
                 self.callback
-                    .HandleError(&*nsCString::from(err.to_string()))
+                    .Reject(&*nsCString::from(err.to_string()))
             },
-            None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
+            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
@@ -449,12 +450,12 @@ impl Task for EnumerateTask {
 
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
-            Some(Ok(value)) => unsafe { self.callback.HandleResult(value.coerce()) },
+            Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
             Some(Err(err)) => unsafe {
                 self.callback
-                    .HandleError(&*nsCString::from(err.to_string()))
+                    .Reject(&*nsCString::from(err.to_string()))
             },
-            None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
+            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
@@ -502,7 +503,7 @@ impl Task for HasMoreElementsTask {
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
             Some(Ok(value)) => unsafe {
-                self.callback.HandleResult(
+                self.callback.Resolve(
                     value
                         .into_variant()
                         .ok_or(KeyValueError::Read)?
@@ -512,9 +513,9 @@ impl Task for HasMoreElementsTask {
             },
             Some(Err(err)) => unsafe {
                 self.callback
-                    .HandleError(&*nsCString::from(err.to_string()))
+                    .Reject(&*nsCString::from(err.to_string()))
             },
-            None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
+            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
@@ -569,20 +570,12 @@ impl Task for GetNextTask {
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
             Some(Ok((key, value))) => unsafe {
-                self.callback.HandleResult(
-                    &*nsCString::from(key),
-                    value
-                        .into_variant()
-                        .ok_or(KeyValueError::from(NS_ERROR_FAILURE))?
-                        .take()
-                        .coerce(),
-                )
+                self.callback.Resolve(KeyValuePair::new(key, value).coerce())
             },
             Some(Err(err)) => unsafe {
-                self.callback
-                    .HandleError(&*nsCString::from(err.to_string()))
+                self.callback.Reject(&*nsCString::from(err.to_string()))
             },
-            None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
+            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
@@ -638,12 +631,12 @@ impl Task for DeleteTask {
 
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
-            Some(Ok(())) => unsafe { self.callback.HandleResult() },
+            Some(Ok(())) => unsafe { self.callback.Resolve() },
             Some(Err(err)) => unsafe {
                 self.callback
-                    .HandleError(&*nsCString::from(err.to_string()))
+                    .Reject(&*nsCString::from(err.to_string()))
             },
-            None => unsafe { self.callback.HandleError(&*nsCString::from("unexpected")) },
+            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
