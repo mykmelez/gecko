@@ -8,8 +8,7 @@ const gKeyValueService =
   Cc["@mozilla.org/key-value-service;1"].getService(Ci.nsIKeyValueService);
 
 const EXPORTED_SYMBOLS = [
-  "KeyValueDatabase",
-  "KeyValueIterator",
+  "KeyValueService",
 ];
 
 function promisify(fn, ...args) {
@@ -19,22 +18,55 @@ function promisify(fn, ...args) {
 }
 
 /**
- * A class that wraps an nsIKeyValueDatabase component in a Promise-based API.
- * To use it, call it with the database's path and (optionally) its name:
+ * This module wraps the nsIKeyValue* interfaces in a Promise-based API.
+ * To use it, import it, then call the KeyValueService.getOrCreate() method
+ * with a database's path and (optionally) its name:
  * 
- *     let database = await KeyValueDatabase.new(path, name);
+ * ```
+ *     ChromeUtils.import("resource://gre/modules/kvstore.jsm");
+ *     let database = await KeyValueService.getOrCreate(path, name);
+ * ```
  *
- * See the docs for nsIKeyValueDatabase for more information.
+ * See the documentation in nsIKeyValue.idl for more information about the API
+ * for key/value storage.
+ */
+
+class KeyValueService {
+  static async getOrCreate(dir, name) {
+    return new KeyValueDatabase(
+      await promisify(gKeyValueService.getOrCreate, dir, name)
+    );
+  }
+
+}
+
+/**
+ * A class that wraps an nsIKeyValueDatabase in a Promise-based API.
+ *
+ * This class isn't exported, so you can't instantiate it directly, but you
+ * can retrieve an instance of this class via KeyValueService.getOrCreate():
+ *
+ * ```
+ *     const database = await KeyValueService.getOrCreate(path, name);
+ * ```
+ *
+ * You can then call its put(), get(), has(), and delete() methods to access
+ * and manipulate key/value pairs:
+ *
+ * ```
+ *     await database.put("foo", 1);
+ *     await database.get("foo") === 1; // true
+ *     await database.has("foo"); // true
+ *     await database.delete("foo");
+ *     await database.has("foo"); // false
+ * ```
+ *
+ * And you can call its enumerate() method to retrieve a KeyValueEnumerator,
+ * which is described below.
  */
 class KeyValueDatabase {
   constructor(database) {
     this.database = database;
-  }
-
-  static async new(dir, name) {
-    return new KeyValueDatabase(
-      await promisify(gKeyValueService.getOrCreate, dir, name)
-    );
   }
 
   put(key, value) {
@@ -61,15 +93,32 @@ class KeyValueDatabase {
 }
 
 /**
- * A class that wraps an nsIKeyValueEnumerator component in a Promise-based API.
- * KeyValueDatabase.enumerate() returns an instance of this class automatically.
+ * A class that wraps an nsIKeyValueEnumerator in a Promise-based API.
  *
- * The easiest way to use it is to wrap it in a KeyValueIterator and iterate it
- * asynchronously using the `for await...of` statement:
+ * This class isn't exported, so you can't instantiate it directly, but you
+ * can retrieve an instance of this class by calling enumerate() on an instance
+ * of KeyValueDatabase:
  *
- * for await (let { key, value } of KeyValueIterator(database.enumerate())) {
- *     ...
- * }
+ * ```
+ *     const database = await KeyValueService.getOrCreate(path, name);
+ *     const enumerator = await database.enumerate();
+ * ```
+ *
+ * And then iterate pairs via its hasMoreElements() and getNext() methods:
+ *
+ * ```
+ *     while (await enumerator.hasMoreElements()) {
+ *       const { key, value } = await enumerator.getNext();
+ *     }
+ * ```
+ *
+ * Or with a `for await...of` statement:
+ *
+ * ```
+ *     for await (const { key, value } of enumerator) {
+ *         …
+ *     }
+ * ```
  */
 class KeyValueEnumerator {
   constructor(enumerator) {
@@ -88,15 +137,13 @@ class KeyValueEnumerator {
       });
     });
   }
+
+  [Symbol.asyncIterator]() {
+    return KeyValueIterator(this);
+  }
 }
 
-/**
- * A generator function that wraps a KeyValueEnumerator and implements
- * the iterator protocol, so you can iterate key/value pairs using the JS
- * `for await...of` statement.
- */
 async function* KeyValueIterator(enumerator) {
-  enumerator = await enumerator;
   while (await enumerator.hasMoreElements()) {
     yield (await enumerator.getNext());
   }

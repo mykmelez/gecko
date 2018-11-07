@@ -26,13 +26,13 @@ add_task(async function getService() {
 
 add_task(async function getOrCreate() {
   const databaseDir = await makeDatabaseDir("getOrCreate");
-  const defaultDatabase = await KeyValueDatabase.new(databaseDir);
+  const defaultDatabase = await KeyValueService.getOrCreate(databaseDir);
   Assert.ok(defaultDatabase);
 });
 
 add_task(async function putGetHasDelete() {
   const databaseDir = await makeDatabaseDir("putGetHasDelete");
-  const database = await KeyValueDatabase.new(databaseDir);
+  const database = await KeyValueService.getOrCreate(databaseDir);
 
   // Getting key/value pairs that don't exist (yet) returns default values
   // or null, depending on whether you specify a default value.
@@ -93,7 +93,7 @@ add_task(async function putGetHasDelete() {
 
 add_task(async function largeNumbers() {
   const databaseDir = await makeDatabaseDir("largeNumbers");
-  const database = await KeyValueDatabase.new(databaseDir);
+  const database = await KeyValueService.getOrCreate(databaseDir);
 
   const MAX_INT_VARIANT = Math.pow(2, 31) - 1;
   const MIN_DOUBLE_VARIANT = Math.pow(2, 31);
@@ -115,7 +115,7 @@ add_task(async function largeNumbers() {
 
 add_task(async function extendedCharacterKey() {
   const databaseDir = await makeDatabaseDir("extendedCharacterKey");
-  const database = await KeyValueDatabase.new(databaseDir);
+  const database = await KeyValueService.getOrCreate(databaseDir);
 
   // Ensure that we can use extended character (i.e. non-ASCII) strings as keys.
 
@@ -124,7 +124,7 @@ add_task(async function extendedCharacterKey() {
   Assert.strictEqual(await database.get("Héllo, wőrld!"), 1);
 
   const enumerator = await database.enumerate();
-  const key = (await enumerator.getNext()).key;
+  const { key } = await enumerator.getNext();
   Assert.strictEqual(key, "Héllo, wőrld!");
 
   await database.delete("Héllo, wőrld!");
@@ -133,13 +133,13 @@ add_task(async function extendedCharacterKey() {
 add_task(async function getOrCreateNamedDatabases() {
   const databaseDir = await makeDatabaseDir("getOrCreateNamedDatabases");
 
-  let fooDB = await KeyValueDatabase.new(databaseDir, "foo");
+  let fooDB = await KeyValueService.getOrCreate(databaseDir, "foo");
   Assert.ok(fooDB, "retrieval of first named database works");
 
-  let barDB = await KeyValueDatabase.new(databaseDir, "bar");
+  let barDB = await KeyValueService.getOrCreate(databaseDir, "bar");
   Assert.ok(barDB, "retrieval of second named database works");
 
-  let defaultDB = await KeyValueDatabase.new(databaseDir);
+  let defaultDB = await KeyValueService.getOrCreate(databaseDir);
   Assert.ok(defaultDB, "retrieval of default database works");
 
   // Key/value pairs that are put into a database don't exist in others.
@@ -174,7 +174,7 @@ add_task(async function getOrCreateNamedDatabases() {
 
 add_task(async function enumeration() {
   const databaseDir = await makeDatabaseDir("enumeration");
-  const database = await KeyValueDatabase.new(databaseDir);
+  const database = await KeyValueService.getOrCreate(databaseDir);
 
   await database.put("int-key", 1234);
   await database.put("double-key", 56.78);
@@ -186,7 +186,7 @@ add_task(async function enumeration() {
 
     for (const pair of pairs) {
       Assert.strictEqual(await enumerator.hasMoreElements(), true);
-      const element = (await enumerator.getNext());
+      const element = await enumerator.getNext();
       Assert.ok(element);
       Assert.strictEqual(element.key, pair[0]);
       Assert.strictEqual(element.value, pair[1]);
@@ -305,8 +305,8 @@ add_task(async function enumeration() {
   await test("int-key", "ccccc", []);
   await test("ppppp", "int-key", []);
 
-  let actual = {};
-  for await (let { key, value } of KeyValueIterator(database.enumerate())) {
+  const actual = {};
+  for await (const { key, value } of await database.enumerate()) {
     actual[key] = value;
   }
   Assert.deepEqual(actual, {
