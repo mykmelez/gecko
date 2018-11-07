@@ -22,25 +22,24 @@ mod task;
 
 use error::KeyValueError;
 use libc::c_void;
-use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NO_AGGREGATION, NS_OK};
+use nserror::{nsresult, NS_ERROR_FAILURE, NS_ERROR_NO_AGGREGATION, NS_OK};
 use nsstring::{nsACString, nsCString};
 use owned_value::{variant_to_owned, OwnedValue};
 use rkv::{Rkv, Store};
 use std::{
     cell::RefCell,
     ptr,
-    rc::Rc,
     sync::{Arc, RwLock},
     vec::IntoIter,
 };
 use storage_variant::{IntoVariant};
 use task::{
-    create_thread, get_current_thread, DeleteTask, EnumerateTask, GetNextTask, GetOrCreateTask,
+    create_thread, DeleteTask, EnumerateTask, GetNextTask, GetOrCreateTask,
     GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable,
 };
 use xpcom::{
     interfaces::{
-        nsIEventTarget, nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback,
+        nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback,
         nsIKeyValuePairCallback, nsIKeyValueVariantCallback, nsIKeyValueVoidCallback, nsISupports,
         nsIThread, nsIVariant,
     },
@@ -261,7 +260,7 @@ impl KeyValueDatabase {
 #[refcnt = "atomic"]
 pub struct InitKeyValueEnumerator {
     thread: RefPtr<nsIThread>,
-    iter: Rc<
+    iter: Arc<
         RefCell<
             IntoIter<(
                 Result<String, KeyValueError>,
@@ -281,7 +280,7 @@ impl KeyValueEnumerator {
     ) -> RefPtr<KeyValueEnumerator> {
         KeyValueEnumerator::allocate(InitKeyValueEnumerator {
             thread,
-            iter: Rc::new(RefCell::new(pairs.into_iter())),
+            iter: Arc::new(RefCell::new(pairs.into_iter())),
         })
     }
 

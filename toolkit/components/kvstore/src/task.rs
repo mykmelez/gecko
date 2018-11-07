@@ -19,7 +19,6 @@ use std::{
     cell::RefCell,
     path::Path,
     ptr,
-    rc::Rc,
     str,
     sync::{Arc, RwLock},
     vec::IntoIter,
@@ -495,7 +494,7 @@ impl Task for EnumerateTask {
 
 pub struct HasMoreElementsTask {
     callback: RefPtr<nsIKeyValueVariantCallback>,
-    iter: Rc<
+    iter: Arc<
         RefCell<
             IntoIter<(
                 Result<String, KeyValueError>,
@@ -509,7 +508,7 @@ pub struct HasMoreElementsTask {
 impl HasMoreElementsTask {
     pub fn new(
         callback: RefPtr<nsIKeyValueVariantCallback>,
-        iter: Rc<
+        iter: Arc<
             RefCell<
                 IntoIter<(
                     Result<String, KeyValueError>,
@@ -555,7 +554,7 @@ impl Task for HasMoreElementsTask {
 
 pub struct GetNextTask {
     callback: RefPtr<nsIKeyValuePairCallback>,
-    iter: Rc<
+    iter: Arc<
         RefCell<
             IntoIter<(
                 Result<String, KeyValueError>,
@@ -569,7 +568,7 @@ pub struct GetNextTask {
 impl GetNextTask {
     pub fn new(
         callback: RefPtr<nsIKeyValuePairCallback>,
-        iter: Rc<
+        iter: Arc<
             RefCell<
                 IntoIter<(
                     Result<String, KeyValueError>,
