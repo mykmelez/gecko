@@ -37,7 +37,6 @@ pub enum KeyValueError {
     #[fail(display = "store error: {:?}", _0)]
     StoreError(StoreError),
 
-    // TODO: convert the number to its name.
     #[fail(display = "unsupported type: {}", _0)]
     UnsupportedType(uint16_t),
 
