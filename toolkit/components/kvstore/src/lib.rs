@@ -99,7 +99,8 @@ impl KeyValueService {
     xpcom_method!(
         GetOrCreate,
         get_or_create,
-        { callback: *const nsIKeyValueDatabaseCallback, path: *const nsACString, name: *const nsACString }
+        { callback: *const nsIKeyValueDatabaseCallback, path: *const nsACString,
+          name: *const nsACString }
     );
 
     fn get_or_create(
@@ -108,7 +109,6 @@ impl KeyValueService {
         path: &nsACString,
         name: &nsACString,
     ) -> Result<(), nsresult> {
-        let source = get_current_thread()?;
         let target = create_thread("KeyValDB")?;
         let task = Box::new(GetOrCreateTask::new(
             RefPtr::new(callback),
@@ -117,11 +117,7 @@ impl KeyValueService {
             nsCString::from(name),
         ));
 
-        let runnable = TaskRunnable::new("KeyValueDatabase::GetOrCreate", source, task);
-
-        unsafe {
-            target.DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
-        }.to_result()
+        TaskRunnable::new("KVService::GetOrCreate", task)?.dispatch(target)
     }
 }
 
@@ -155,7 +151,6 @@ impl KeyValueDatabase {
         key: &nsACString,
         value: &nsIVariant,
     ) -> Result<(), nsresult> {
-        let source = get_current_thread()?;
         let value = match variant_to_owned(value)? {
             Some(value) => Ok(value),
             None => Err(KeyValueError::UnexpectedValue),
@@ -169,12 +164,7 @@ impl KeyValueDatabase {
             value,
         ));
 
-        let runnable = TaskRunnable::new("KeyValueDatabase::Put", source, task);
-
-        unsafe {
-            self.thread
-                .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
-        }.to_result()
+        TaskRunnable::new("KVDatabase::Put", task)?.dispatch(self.thread.clone())
     }
 
     xpcom_method!(
@@ -188,7 +178,6 @@ impl KeyValueDatabase {
         callback: &nsIKeyValueVariantCallback,
         key: &nsACString,
     ) -> Result<(), nsresult> {
-        let source = get_current_thread()?;
         let task = Box::new(HasTask::new(
             RefPtr::new(callback),
             Arc::clone(&self.rkv),
@@ -196,12 +185,7 @@ impl KeyValueDatabase {
             nsCString::from(key),
         ));
 
-        let runnable = TaskRunnable::new("KeyValueDatabase::Has", source, task);
-
-        unsafe {
-            self.thread
-                .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
-        }.to_result()
+        TaskRunnable::new("KVDatabase::Has", task)?.dispatch(self.thread.clone())
     }
 
     xpcom_method!(
@@ -216,7 +200,6 @@ impl KeyValueDatabase {
         key: &nsACString,
         default_value: &nsIVariant,
     ) -> Result<(), nsresult> {
-        let source = get_current_thread()?;
         let task = Box::new(GetTask::new(
             RefPtr::new(callback),
             Arc::clone(&self.rkv),
@@ -225,12 +208,7 @@ impl KeyValueDatabase {
             RefPtr::new(default_value),
         ));
 
-        let runnable = TaskRunnable::new("KeyValueDatabase::Get", source, task);
-
-        unsafe {
-            self.thread
-                .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
-        }.to_result()
+        TaskRunnable::new("KVDatabase::Get", task)?.dispatch(self.thread.clone())
     }
 
     xpcom_method!(
@@ -244,7 +222,6 @@ impl KeyValueDatabase {
         callback: &nsIKeyValueVoidCallback,
         key: &nsACString,
     ) -> Result<(), nsresult> {
-        let source = get_current_thread()?;
         let task = Box::new(DeleteTask::new(
             RefPtr::new(callback),
             Arc::clone(&self.rkv),
@@ -252,12 +229,7 @@ impl KeyValueDatabase {
             nsCString::from(key),
         ));
 
-        let runnable = TaskRunnable::new("KeyValueDatabase::Delete", source, task);
-
-        unsafe {
-            self.thread
-                .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
-        }.to_result()
+        TaskRunnable::new("KVDatabase::Delete", task)?.dispatch(self.thread.clone())
     }
 
     xpcom_method!(
@@ -272,7 +244,6 @@ impl KeyValueDatabase {
         from_key: &nsACString,
         to_key: &nsACString,
     ) -> Result<(), nsresult> {
-        let source = get_current_thread()?;
         let task = Box::new(EnumerateTask::new(
             RefPtr::new(callback),
             Arc::clone(&self.rkv),
@@ -281,12 +252,7 @@ impl KeyValueDatabase {
             nsCString::from(to_key),
         ));
 
-        let runnable = TaskRunnable::new("KeyValueDatabase::Enumerate", source, task);
-
-        unsafe {
-            self.thread
-                .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
-        }.to_result()
+        TaskRunnable::new("KVDatabase::Enumerate", task)?.dispatch(self.thread.clone())
     }
 }
 
@@ -327,18 +293,12 @@ impl KeyValueEnumerator {
         &self,
         callback: &nsIKeyValueVariantCallback,
     ) -> Result<(), nsresult> {
-        let source = get_current_thread()?;
         let task = Box::new(HasMoreElementsTask::new(
             RefPtr::new(callback),
             self.iter.clone(),
         ));
 
-        let runnable = TaskRunnable::new("KeyValueDatabase::HasMoreElements", source, task);
-
-        unsafe {
-            self.thread
-                .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
-        }.to_result()
+        TaskRunnable::new("KVEnumerator::HasMoreElements", task)?.dispatch(self.thread.clone())
     }
 
     xpcom_method!(GetNext, get_next, {
@@ -346,15 +306,9 @@ impl KeyValueEnumerator {
     });
 
     fn get_next(&self, callback: &nsIKeyValuePairCallback) -> Result<(), nsresult> {
-        let source = get_current_thread()?;
         let task = Box::new(GetNextTask::new(RefPtr::new(callback), self.iter.clone()));
 
-        let runnable = TaskRunnable::new("KeyValueDatabase::GetNext", source, task);
-
-        unsafe {
-            self.thread
-                .DispatchFromScript(runnable.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
-        }.to_result()
+        TaskRunnable::new("KVEnumerator::GetNext", task)?.dispatch(self.thread.clone())
     }
 }
 

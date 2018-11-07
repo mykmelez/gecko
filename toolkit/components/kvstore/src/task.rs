@@ -119,15 +119,20 @@ pub struct InitTaskRunnable {
 impl TaskRunnable {
     pub fn new(
         name: &'static str,
-        origin: RefPtr<nsIThread>,
         task: Box<Task>,
-    ) -> RefPtr<TaskRunnable> {
-        TaskRunnable::allocate(InitTaskRunnable {
+    ) -> Result<RefPtr<TaskRunnable>, nsresult> {
+        Ok(TaskRunnable::allocate(InitTaskRunnable {
             name,
-            origin,
+            origin: get_current_thread()?,
             task,
             has_run: Cell::new(false),
-        })
+        }))
+    }
+
+    pub fn dispatch(&self, target: RefPtr<nsIThread>) -> Result<(), nsresult> {
+        unsafe {
+            target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+        }.to_result()
     }
 
     xpcom_method!(Run, run, {});
@@ -136,10 +141,7 @@ impl TaskRunnable {
             false => {
                 self.task.run();
                 self.has_run.set(true);
-                let target = getter_addrefs(|p| unsafe { self.origin.GetEventTarget(p) })?;
-                unsafe {
-                    target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
-                }.to_result()
+                self.dispatch(self.origin.clone())
             }
             true => self.task.done(),
         }
