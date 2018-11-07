@@ -4,8 +4,12 @@
 
 extern crate xpcom;
 
+use data_type::{
+    DATA_TYPE_BOOL, DATA_TYPE_DOUBLE, DATA_TYPE_EMPTY, DATA_TYPE_INT32, DATA_TYPE_VOID,
+    DATA_TYPE_WSTRING,
+};
 use error::KeyValueError;
-use into_variant;
+use libc::{int32_t, uint16_t};
 use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_OK};
 use nsstring::{nsACString, nsCString, nsString};
 use owned_value::{value_to_owned, OwnedValue};
@@ -20,11 +24,11 @@ use std::{
     sync::{Arc, RwLock},
     vec::IntoIter,
 };
-use storage_variant::IntoVariant;
+use storage_variant::{IntoVariant, Variant};
 use xpcom::{
     getter_addrefs,
     interfaces::{
-        nsIEventTarget, nsIKeyValueDatabase, nsIKeyValueDatabaseCallback, nsIKeyValueEnumerator,
+        nsIEventTarget, nsIKeyValueDatabaseCallback,
         nsIKeyValueEnumeratorCallback, nsIKeyValuePairCallback, nsIKeyValueVariantCallback,
         nsIKeyValueVoidCallback, nsIRunnable, nsIThread, nsIVariant,
     },
@@ -51,6 +55,44 @@ pub fn create_thread(name: &str) -> Result<RefPtr<nsIThread>, nsresult> {
     getter_addrefs(|p| unsafe {
         NS_NewNamedThreadWithDefaultStackSize(&*nsCString::from(name), p, ptr::null())
     })
+}
+
+// Perhaps we should convert this to an implementation of the IntoVariant trait
+// in storage/variant/src/lib.rs, although currently it only has one consumer.
+fn into_variant(variant: &nsIVariant) -> Result<Variant, KeyValueError> {
+    let mut data_type: uint16_t = 0;
+    unsafe { variant.GetDataType(&mut data_type) }.to_result()?;
+
+    match data_type {
+        DATA_TYPE_INT32 => {
+            let mut val: int32_t = 0;
+            unsafe { variant.GetAsInt32(&mut val) }.to_result()?;
+            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
+        }
+        DATA_TYPE_DOUBLE => {
+            let mut val: f64 = 0.0;
+            unsafe { variant.GetAsDouble(&mut val) }.to_result()?;
+            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
+        }
+        DATA_TYPE_WSTRING => {
+            let mut val: nsString = nsString::new();
+            unsafe { variant.GetAsAString(&mut *val) }.to_result()?;
+            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
+        }
+        DATA_TYPE_BOOL => {
+            let mut val: bool = false;
+            unsafe { variant.GetAsBool(&mut val) }.to_result()?;
+            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
+        }
+        DATA_TYPE_EMPTY | DATA_TYPE_VOID => {
+            let val = ();
+            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
+        }
+        _unsupported_type => {
+            println!("unsupported variant data type: {:?}", data_type);
+            return Err(KeyValueError::UnsupportedType(data_type));
+        }
+    }
 }
 
 pub trait Task {
@@ -286,7 +328,7 @@ pub struct GetTask {
     store: Store,
     key: nsCString,
     default_value: RefPtr<nsIVariant>,
-    result: Cell<Option<Result<RefPtr<nsIVariant>, KeyValueError>>>,
+    result: Cell<Option<Result<Variant, KeyValueError>>>,
 }
 
 impl GetTask {
@@ -311,7 +353,7 @@ impl GetTask {
 impl Task for GetTask {
     fn run(&self) {
         self.result
-            .set(Some(|| -> Result<RefPtr<nsIVariant>, KeyValueError> {
+            .set(Some(|| -> Result<Variant, KeyValueError> {
                 let key = str::from_utf8(&self.key)?;
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
@@ -319,27 +361,26 @@ impl Task for GetTask {
 
                 match value {
                     Some(Value::I64(value)) => {
-                        Ok(value.into_variant().ok_or(KeyValueError::Read)?.take())
+                        Ok(value.into_variant().ok_or(KeyValueError::Read)?)
                     }
                     Some(Value::F64(value)) => {
-                        Ok(value.into_variant().ok_or(KeyValueError::Read)?.take())
+                        Ok(value.into_variant().ok_or(KeyValueError::Read)?)
                     }
                     Some(Value::Str(value)) => Ok(nsString::from(value)
                         .into_variant()
-                        .ok_or(KeyValueError::Read)?
-                        .take()),
+                        .ok_or(KeyValueError::Read)?),
                     Some(Value::Bool(value)) => {
-                        Ok(value.into_variant().ok_or(KeyValueError::Read)?.take())
+                        Ok(value.into_variant().ok_or(KeyValueError::Read)?)
                     }
                     Some(_value) => Err(KeyValueError::UnexpectedValue),
-                    None => Ok(into_variant(&self.default_value)?.take()),
+                    None => Ok(into_variant(&self.default_value)?),
                 }
             }()));
     }
 
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
-            Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
+            Some(Ok(value)) => unsafe { self.callback.Resolve(value.take().coerce()) },
             Some(Err(err)) => unsafe {
                 self.callback
                     .Reject(&*nsCString::from(err.to_string()))

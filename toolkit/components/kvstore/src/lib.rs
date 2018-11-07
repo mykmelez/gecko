@@ -20,14 +20,10 @@ mod error;
 mod owned_value;
 mod task;
 
-use data_type::{
-    DATA_TYPE_BOOL, DATA_TYPE_DOUBLE, DATA_TYPE_EMPTY, DATA_TYPE_INT32, DATA_TYPE_VOID,
-    DATA_TYPE_WSTRING,
-};
 use error::KeyValueError;
-use libc::{c_void, int32_t, uint16_t};
+use libc::c_void;
 use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NO_AGGREGATION, NS_OK};
-use nsstring::{nsACString, nsCString, nsString};
+use nsstring::{nsACString, nsCString};
 use owned_value::{variant_to_owned, OwnedValue};
 use rkv::{Rkv, Store};
 use std::{
@@ -37,7 +33,7 @@ use std::{
     sync::{Arc, RwLock},
     vec::IntoIter,
 };
-use storage_variant::{IntoVariant, Variant};
+use storage_variant::{IntoVariant};
 use task::{
     create_thread, get_current_thread, DeleteTask, EnumerateTask, GetNextTask, GetOrCreateTask,
     GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable,
@@ -389,43 +385,5 @@ impl KeyValuePair {
             .into_variant()
             .ok_or(KeyValueError::from(NS_ERROR_FAILURE))?
             .take())
-    }
-}
-
-// TODO: consider making this an implementation of the IntoVariant trait
-// from storage/variant/src/lib.rs.
-fn into_variant(variant: &nsIVariant) -> Result<Variant, KeyValueError> {
-    let mut data_type: uint16_t = 0;
-    unsafe { variant.GetDataType(&mut data_type) }.to_result()?;
-
-    match data_type {
-        DATA_TYPE_INT32 => {
-            let mut val: int32_t = 0;
-            unsafe { variant.GetAsInt32(&mut val) }.to_result()?;
-            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
-        }
-        DATA_TYPE_DOUBLE => {
-            let mut val: f64 = 0.0;
-            unsafe { variant.GetAsDouble(&mut val) }.to_result()?;
-            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
-        }
-        DATA_TYPE_WSTRING => {
-            let mut val: nsString = nsString::new();
-            unsafe { variant.GetAsAString(&mut *val) }.to_result()?;
-            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
-        }
-        DATA_TYPE_BOOL => {
-            let mut val: bool = false;
-            unsafe { variant.GetAsBool(&mut val) }.to_result()?;
-            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
-        }
-        DATA_TYPE_EMPTY | DATA_TYPE_VOID => {
-            let val = ();
-            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
-        }
-        _unsupported_type => {
-            println!("unsupported variant data type: {:?}", data_type);
-            return Err(KeyValueError::UnsupportedType(data_type));
-        }
     }
 }
