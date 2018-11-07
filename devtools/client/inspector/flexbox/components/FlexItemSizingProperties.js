@@ -20,41 +20,33 @@ class FlexItemSizingProperties extends PureComponent {
   }
 
   /**
-   * Rounds some dimension in pixels and returns a string to be displayed to the user.
-   * The string will end with 'px'. If the number is 0, the string "0" is returned.
+   * Rounds some size in pixels and render it.
+   * The rendered value will end with 'px' (unless the dimension is 0 in which case the
+   * unit will be omitted)
    *
    * @param  {Number} value
    *         The number to be rounded
-   * @return {String}
-   *         Representation of the rounded number
+   * @param  {Boolean} prependPlusSign
+   *         If set to true, the + sign will be printed before a positive value
+   * @return {Object}
+   *         The React component representing this rounded size
    */
-  getRoundedDimension(value) {
+  renderSize(value, prependPlusSign) {
     if (value == 0) {
-      return "0";
-    }
-    return (Math.round(value * 100) / 100) + "px";
-  }
-
-  /**
-   * Format the flexibility value into a meaningful value for the UI.
-   * If the item grew, then prepend a + sign, if it shrank, prepend a - sign.
-   * If it didn't flex, return "0".
-   *
-   * @param  {Boolean} grew
-   *         Whether the item grew or not
-   * @param  {Number} value
-   *         The amount of pixels the item flexed
-   * @return {String}
-   *         Representation of the flexibility value
-   */
-  getFlexibilityValueString(grew, mainDeltaSize) {
-    const value = this.getRoundedDimension(mainDeltaSize);
-
-    if (grew) {
-      return "+" + value;
+      return dom.span({ className: "value" }, "0");
     }
 
-    return value;
+    value = (Math.round(value * 100) / 100);
+    if (prependPlusSign && value > 0) {
+      value = "+" + value;
+    }
+
+    return (
+      dom.span({ className: "value" },
+        value,
+        dom.span({ className: "unit" }, "px")
+      )
+    );
   }
 
   /**
@@ -70,14 +62,7 @@ class FlexItemSizingProperties extends PureComponent {
    *         The React component representing this CSS property
    */
   renderCssProperty(name, value, isDefaultValue) {
-    return (
-      dom.span({ className: "css-property-link" },
-        dom.span({ className: "theme-fg-color5" }, name),
-        ": ",
-        dom.span({ className: "theme-fg-color1" }, value),
-        ";"
-      )
-    );
+    return dom.span({ className: "css-property-link" }, `(${name}: ${value})`);
   }
 
   /**
@@ -101,8 +86,8 @@ class FlexItemSizingProperties extends PureComponent {
     const flexBasisValue = properties["flex-basis"];
     const dimensionValue = properties[dimension];
 
+    let title = getStr("flexbox.itemSizing.baseSizeSectionHeader");
     let property = null;
-    let reason = null;
 
     if (flexBasisValue) {
       // If flex-basis is defined, then that's what is used for the base size.
@@ -112,21 +97,18 @@ class FlexItemSizingProperties extends PureComponent {
       property = this.renderCssProperty(dimension, dimensionValue);
     } else {
       // Finally, if nothing is set, then the base size is the max-content size.
-      reason = this.renderReasons(
-        [getStr("flexbox.itemSizing.itemBaseSizeFromContent")]);
+      // In this case replace the section's title.
+      title = getStr("flexbox.itemSizing.itemContentSize");
     }
 
     const className = "section base";
     return (
       dom.li({ className: className + (property ? "" : " no-property") },
         dom.span({ className: "name" },
-          getStr("flexbox.itemSizing.baseSizeSectionHeader")
+          title,
+          property
         ),
-        dom.span({ className: "value theme-fg-color1" },
-          this.getRoundedDimension(mainBaseSize)
-        ),
-        property,
-        reason
+        this.renderSize(mainBaseSize)
       )
     );
   }
@@ -137,7 +119,6 @@ class FlexItemSizingProperties extends PureComponent {
       mainBaseSize,
       mainFinalSize,
       lineGrowthState,
-      clampState,
     } = flexItemSizing;
 
     // Don't display anything if all interesting sizes are 0.
@@ -156,7 +137,6 @@ class FlexItemSizingProperties extends PureComponent {
     const computedFlexGrow = computedStyle.flexGrow;
     const definedFlexShrink = properties["flex-shrink"];
     const computedFlexShrink = computedStyle.flexShrink;
-    const wasClamped = clampState !== "unclamped";
 
     const reasons = [];
 
@@ -176,35 +156,15 @@ class FlexItemSizingProperties extends PureComponent {
 
     let property = null;
 
-    if (grew) {
-      // If the item grew.
-      if (definedFlexGrow) {
-        // It's normally because it was set to grow (flex-grow is non 0).
-        property = this.renderCssProperty("flex-grow", definedFlexGrow);
-      }
-
-      if (wasClamped && clampState === "clamped_to_max") {
-        // It may have wanted to grow more than it did, because it was later max-clamped.
-        reasons.push(getStr("flexbox.itemSizing.growthAttemptButMaxClamped"));
-      } else if (wasClamped && clampState === "clamped_to_min") {
-        // Or it may have wanted to grow less, but was later min-clamped to a larger size.
-        reasons.push(getStr("flexbox.itemSizing.growthAttemptButMinClamped"));
-      }
-    } else if (shrank) {
-      // If the item shrank.
-      if (definedFlexShrink && computedFlexShrink) {
-        // It's either because flex-shrink is non 0.
-        property = this.renderCssProperty("flex-shrink", definedFlexShrink);
-      } else if (computedFlexShrink) {
-        // Or also because it's default value is 1 anyway.
-        property = this.renderCssProperty("flex-shrink", computedFlexShrink, true);
-      }
-
-      if (wasClamped) {
-        // It might have wanted to shrink more (to accomodate all items) but couldn't
-        // because it was later min-clamped.
-        reasons.push(getStr("flexbox.itemSizing.shrinkAttemptWhenClamped"));
-      }
+    if (grew && definedFlexGrow && computedFlexGrow) {
+      // If the item grew it's normally because it was set to grow (flex-grow is non 0).
+      property = this.renderCssProperty("flex-grow", definedFlexGrow);
+    } else if (shrank && definedFlexShrink && computedFlexShrink) {
+      // If the item shrank it's either because flex-shrink is non 0.
+      property = this.renderCssProperty("flex-shrink", definedFlexShrink);
+    } else if (shrank && computedFlexShrink) {
+      // Or also because it's default value is 1 anyway.
+      property = this.renderCssProperty("flex-shrink", computedFlexShrink, true);
     }
 
     // Don't display the section at all if there's nothing useful to show users.
@@ -216,55 +176,69 @@ class FlexItemSizingProperties extends PureComponent {
     return (
       dom.li({ className: className + (property ? "" : " no-property") },
         dom.span({ className: "name" },
-          getStr("flexbox.itemSizing.flexibilitySectionHeader")
+          getStr("flexbox.itemSizing.flexibilitySectionHeader"),
+          property
         ),
-        dom.span({ className: "value theme-fg-color1" },
-          this.getFlexibilityValueString(grew, mainDeltaSize)
-        ),
-        property,
+        this.renderSize(mainDeltaSize, true),
         this.renderReasons(reasons)
       )
     );
   }
 
-  renderMinimumSizeSection({ clampState, mainMinSize }, properties, dimension) {
+  renderMinimumSizeSection(flexItemSizing, properties, dimension) {
+    const { clampState, mainMinSize, mainDeltaSize } = flexItemSizing;
+    const grew = mainDeltaSize > 0;
+    const shrank = mainDeltaSize < 0;
+    const minDimensionValue = properties[`min-${dimension}`];
+
     // We only display the minimum size when the item actually violates that size during
     // layout & is clamped.
     if (clampState !== "clamped_to_min") {
       return null;
     }
 
-    const minDimensionValue = properties[`min-${dimension}`];
+    const reasons = [];
+    if (grew || shrank) {
+      // The item may have wanted to grow less, but was min-clamped to a larger size.
+      // Or the item may have wanted to shrink more but was min-clamped to a larger size.
+      reasons.push(getStr("flexbox.itemSizing.clampedToMin"));
+    }
 
     return (
       dom.li({ className: "section min" },
         dom.span({ className: "name" },
-          getStr("flexbox.itemSizing.minSizeSectionHeader")
+          getStr("flexbox.itemSizing.minSizeSectionHeader"),
+          this.renderCssProperty(`min-${dimension}`, minDimensionValue)
         ),
-        dom.span({ className: "value theme-fg-color1" },
-          this.getRoundedDimension(mainMinSize)
-        ),
-        this.renderCssProperty(`min-${dimension}`, minDimensionValue)
+        this.renderSize(mainMinSize),
+        this.renderReasons(reasons)
       )
     );
   }
 
-  renderMaximumSizeSection({ clampState, mainMaxSize }, properties, dimension) {
+  renderMaximumSizeSection(flexItemSizing, properties, dimension) {
+    const { clampState, mainMaxSize, mainDeltaSize } = flexItemSizing;
+    const grew = mainDeltaSize > 0;
+    const maxDimensionValue = properties[`max-${dimension}`];
+
     if (clampState !== "clamped_to_max") {
       return null;
     }
 
-    const maxDimensionValue = properties[`max-${dimension}`];
+    const reasons = [];
+    if (grew) {
+      // The item may have wanted to grow more than it did, because it was max-clamped.
+      reasons.push(getStr("flexbox.itemSizing.clampedToMax"));
+    }
 
     return (
       dom.li({ className: "section max" },
         dom.span({ className: "name" },
-          getStr("flexbox.itemSizing.maxSizeSectionHeader")
+          getStr("flexbox.itemSizing.maxSizeSectionHeader"),
+          this.renderCssProperty(`max-${dimension}`, maxDimensionValue)
         ),
-        dom.span({ className: "value theme-fg-color1" },
-          this.getRoundedDimension(mainMaxSize)
-        ),
-        this.renderCssProperty(`max-${dimension}`, maxDimensionValue)
+        this.renderSize(mainMaxSize),
+        this.renderReasons(reasons)
       )
     );
   }
@@ -275,9 +249,7 @@ class FlexItemSizingProperties extends PureComponent {
         dom.span({ className: "name" },
           getStr("flexbox.itemSizing.finalSizeSectionHeader")
         ),
-        dom.span({ className: "value theme-fg-color1" },
-          this.getRoundedDimension(mainFinalSize)
-        )
+        this.renderSize(mainFinalSize)
       )
     );
   }

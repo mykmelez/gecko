@@ -134,8 +134,15 @@ pref("app.update.download.promptMaxAttempts", 2);
 pref("app.update.elevation.promptMaxAttempts", 2);
 
 // If set to true, the Update Service will automatically download updates if the
-// user can apply updates.
+// user can apply updates. This pref is no longer used on Windows, except as the
+// default value to migrate to the new location that this data is now stored
+// (which is in a file in the update directory). Because of this, this pref
+// should no longer be used directly. Instead,
+// nsIUpdateService::getAutoUpdateIsEnabled and
+// nsIUpdateService::setAutoUpdateIsEnabled should be used.
+#ifndef XP_WIN
 pref("app.update.auto", true);
+#endif
 
 // If set to true, the Update Service will present no UI for any event.
 pref("app.update.silent", false);
@@ -944,8 +951,8 @@ pref("app.productInfo.baseURL", "https://www.mozilla.org/firefox/features/");
 // Name of alternate about: page for certificate errors (when undefined, defaults to about:neterror)
 pref("security.alternate_certificate_error_page", "certerror");
 
-// Enable the new certificate error page only for Nightly
-#if defined(NIGHTLY_BUILD)
+// Enable the new certificate error pages.
+#ifdef EARLY_BETA_OR_EARLIER
 pref("browser.security.newcerterrorpage.enabled", true);
 #else
 pref("browser.security.newcerterrorpage.enabled", false);

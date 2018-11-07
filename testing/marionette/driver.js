@@ -1064,8 +1064,8 @@ GeckoDriver.prototype.get = async function(cmd) {
 
   let get = this.listener.get({url, pageTimeout: this.timeouts.pageLoad});
 
-  // If a reload of the frame script interrupts our page load, this will
-  // never return. We need to re-issue this request to correctly poll for
+  // If a process change of the frame script interrupts our page load, this
+  // will never return. We need to re-issue this request to correctly poll for
   // readyState and send errors.
   this.curBrowser.pendingCommands.push(() => {
     let parameters = {
@@ -1183,8 +1183,8 @@ GeckoDriver.prototype.goBack = async function() {
   let lastURL = this.currentURL;
   let goBack = this.listener.goBack({pageTimeout: this.timeouts.pageLoad});
 
-  // If a reload of the frame script interrupts our page load, this will
-  // never return. We need to re-issue this request to correctly poll for
+  // If a process change of the frame script interrupts our page load, this
+  // will never return. We need to re-issue this request to correctly poll for
   // readyState and send errors.
   this.curBrowser.pendingCommands.push(() => {
     let parameters = {
@@ -1226,8 +1226,8 @@ GeckoDriver.prototype.goForward = async function() {
   let goForward = this.listener.goForward(
       {pageTimeout: this.timeouts.pageLoad});
 
-  // If a reload of the frame script interrupts our page load, this will
-  // never return. We need to re-issue this request to correctly poll for
+  // If a process change of the frame script interrupts our page load, this
+  // will never return. We need to re-issue this request to correctly poll for
   // readyState and send errors.
   this.curBrowser.pendingCommands.push(() => {
     let parameters = {
@@ -1263,8 +1263,8 @@ GeckoDriver.prototype.refresh = async function() {
   let refresh = this.listener.refresh(
       {pageTimeout: this.timeouts.pageLoad});
 
-  // If a reload of the frame script interrupts our page load, this will
-  // never return. We need to re-issue this request to correctly poll for
+  // If a process change of the frame script interrupts our page load, this
+  // will never return. We need to re-issue this request to correctly poll for
   // readyState and send errors.
   this.curBrowser.pendingCommands.push(() => {
     let parameters = {
@@ -2146,9 +2146,9 @@ GeckoDriver.prototype.clickElement = async function(cmd) {
       let click = this.listener.clickElement(
           {webElRef: webEl.toJSON(), pageTimeout: this.timeouts.pageLoad});
 
-      // If a reload of the frame script interrupts our page load, this will
-      // never return. We need to re-issue this request to correctly poll for
-      // readyState and send errors.
+      // If a process change of the frame script interrupts our page load,
+      // this will never return. We need to re-issue this request to correctly
+      // poll for readyState and send errors.
       this.curBrowser.pendingCommands.push(() => {
         let parameters = {
           // TODO(ato): Bug 1242595
@@ -3411,10 +3411,6 @@ GeckoDriver.prototype.receiveMessage = function(message) {
 
     case "Marionette:ListenersAttached":
       if (message.json.outerWindowID === this.curBrowser.curFrameId) {
-        // If the frame script gets reloaded we need to call newSession.
-        // In the case of desktop this just sets up a small amount of state
-        // that doesn't change over the course of a session.
-        this.sendAsync("newSession");
         this.curBrowser.flushPendingCommands();
       }
       break;
@@ -3548,7 +3544,6 @@ GeckoDriver.prototype.teardownReftest = function() {
 GeckoDriver.prototype.commands = {
   // Marionette service
   "Marionette:AcceptConnections": GeckoDriver.prototype.acceptConnections,
-  "acceptConnections": GeckoDriver.prototype.acceptConnections,  // deprecated, remove in Firefox 64
   "Marionette:GetContext": GeckoDriver.prototype.getContext,
   "Marionette:GetScreenOrientation": GeckoDriver.prototype.getScreenOrientation,
   "Marionette:GetWindowType": GeckoDriver.prototype.getWindowType,
@@ -3558,7 +3553,6 @@ GeckoDriver.prototype.commands = {
   "Marionette:ActionChain": GeckoDriver.prototype.actionChain,  // bug 1354578, legacy actions
   "Marionette:MultiAction": GeckoDriver.prototype.multiAction,  // bug 1354578, legacy actions
   "Marionette:SingleTap": GeckoDriver.prototype.singleTap,
-  "singleTap": GeckoDriver.prototype.singleTap,  // deprecated, remove in Firefox 66
 
   // Addon service
   "Addon:Install": GeckoDriver.prototype.installAddon,
