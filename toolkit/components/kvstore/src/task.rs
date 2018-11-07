@@ -433,9 +433,7 @@ impl Task for EnumerateTask {
                         )
                     }).collect();
 
-                // TODO: return an error rather than unwrapping if the thread
-                // could not be gotten.
-                Ok(KeyValueEnumerator::new(get_current_thread().unwrap(), pairs))
+                Ok(KeyValueEnumerator::new(get_current_thread()?, pairs))
             }(),
         ));
     }
