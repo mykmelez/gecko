@@ -168,23 +168,6 @@ impl KeyValueDatabase {
     }
 
     xpcom_method!(
-        Has,
-        has,
-        { callback: *const nsIKeyValueVariantCallback, key: *const nsACString }
-    );
-
-    fn has(&self, callback: &nsIKeyValueVariantCallback, key: &nsACString) -> Result<(), nsresult> {
-        let task = Box::new(HasTask::new(
-            RefPtr::new(callback),
-            Arc::clone(&self.rkv),
-            self.store,
-            nsCString::from(key),
-        ));
-
-        TaskRunnable::new("KVDatabase::Has", task)?.dispatch(self.thread.clone())
-    }
-
-    xpcom_method!(
         Get,
         get,
         { callback: *const nsIKeyValueVariantCallback, key: *const nsACString,
@@ -206,6 +189,23 @@ impl KeyValueDatabase {
         ));
 
         TaskRunnable::new("KVDatabase::Get", task)?.dispatch(self.thread.clone())
+    }
+
+    xpcom_method!(
+        Has,
+        has,
+        { callback: *const nsIKeyValueVariantCallback, key: *const nsACString }
+    );
+
+    fn has(&self, callback: &nsIKeyValueVariantCallback, key: &nsACString) -> Result<(), nsresult> {
+        let task = Box::new(HasTask::new(
+            RefPtr::new(callback),
+            Arc::clone(&self.rkv),
+            self.store,
+            nsCString::from(key),
+        ));
+
+        TaskRunnable::new("KVDatabase::Has", task)?.dispatch(self.thread.clone())
     }
 
     xpcom_method!(

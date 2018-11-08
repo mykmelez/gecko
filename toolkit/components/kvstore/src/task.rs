@@ -217,58 +217,6 @@ impl Task for PutTask {
     }
 }
 
-pub struct HasTask {
-    callback: RefPtr<nsIKeyValueVariantCallback>,
-    rkv: Arc<RwLock<Rkv>>,
-    store: Store,
-    key: nsCString,
-    result: Cell<Option<Result<RefPtr<nsIVariant>, KeyValueError>>>,
-}
-
-impl HasTask {
-    pub fn new(
-        callback: RefPtr<nsIKeyValueVariantCallback>,
-        rkv: Arc<RwLock<Rkv>>,
-        store: Store,
-        key: nsCString,
-    ) -> HasTask {
-        HasTask {
-            callback,
-            rkv,
-            store,
-            key,
-            result: Cell::default(),
-        }
-    }
-}
-
-impl Task for HasTask {
-    fn run(&self) {
-        // We do the work within a closure that returns a Result so we can
-        // use the ? operator to simplify the implementation.
-        self.result
-            .set(Some(|| -> Result<RefPtr<nsIVariant>, KeyValueError> {
-                let key = str::from_utf8(&self.key)?;
-                let env = self.rkv.read()?;
-                let reader = env.read()?;
-                let value = reader.get(&self.store, key)?;
-                Ok(value
-                    .is_some()
-                    .into_variant()
-                    .ok_or(KeyValueError::Read)?
-                    .take())
-            }()));
-    }
-
-    fn done(&self) -> Result<(), nsresult> {
-        match self.result.take() {
-            Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
-            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
-        }.to_result()
-    }
-}
-
 pub struct GetTask {
     callback: RefPtr<nsIKeyValueVariantCallback>,
     rkv: Arc<RwLock<Rkv>>,
@@ -334,6 +282,118 @@ impl Task for GetTask {
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
             Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
+            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
+            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
+        }.to_result()
+    }
+}
+
+pub struct HasTask {
+    callback: RefPtr<nsIKeyValueVariantCallback>,
+    rkv: Arc<RwLock<Rkv>>,
+    store: Store,
+    key: nsCString,
+    result: Cell<Option<Result<RefPtr<nsIVariant>, KeyValueError>>>,
+}
+
+impl HasTask {
+    pub fn new(
+        callback: RefPtr<nsIKeyValueVariantCallback>,
+        rkv: Arc<RwLock<Rkv>>,
+        store: Store,
+        key: nsCString,
+    ) -> HasTask {
+        HasTask {
+            callback,
+            rkv,
+            store,
+            key,
+            result: Cell::default(),
+        }
+    }
+}
+
+impl Task for HasTask {
+    fn run(&self) {
+        // We do the work within a closure that returns a Result so we can
+        // use the ? operator to simplify the implementation.
+        self.result
+            .set(Some(|| -> Result<RefPtr<nsIVariant>, KeyValueError> {
+                let key = str::from_utf8(&self.key)?;
+                let env = self.rkv.read()?;
+                let reader = env.read()?;
+                let value = reader.get(&self.store, key)?;
+                Ok(value
+                    .is_some()
+                    .into_variant()
+                    .ok_or(KeyValueError::Read)?
+                    .take())
+            }()));
+    }
+
+    fn done(&self) -> Result<(), nsresult> {
+        match self.result.take() {
+            Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
+            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
+            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
+        }.to_result()
+    }
+}
+
+pub struct DeleteTask {
+    callback: RefPtr<nsIKeyValueVoidCallback>,
+    rkv: Arc<RwLock<Rkv>>,
+    store: Store,
+    key: nsCString,
+    result: Cell<Option<Result<(), KeyValueError>>>,
+}
+
+impl DeleteTask {
+    pub fn new(
+        callback: RefPtr<nsIKeyValueVoidCallback>,
+        rkv: Arc<RwLock<Rkv>>,
+        store: Store,
+        key: nsCString,
+    ) -> DeleteTask {
+        DeleteTask {
+            callback,
+            rkv,
+            store,
+            key,
+            result: Cell::default(),
+        }
+    }
+}
+
+impl Task for DeleteTask {
+    fn run(&self) {
+        // We do the work within a closure that returns a Result so we can
+        // use the ? operator to simplify the implementation.
+        self.result.set(Some(|| -> Result<(), KeyValueError> {
+            let key = str::from_utf8(&self.key)?;
+            let env = self.rkv.read()?;
+            let mut writer = env.write()?;
+
+            match writer.delete(&self.store, key) {
+                Ok(_) => (),
+
+                // LMDB fails with an error if the key to delete wasn't found,
+                // and Rkv returns that error, but we ignore it, as we expect most
+                // of our consumers to want this behavior.
+                Err(StoreError::LmdbError(lmdb::Error::NotFound)) => (),
+
+                Err(err) => return Err(KeyValueError::StoreError(err)),
+            };
+
+            writer.commit()?;
+
+            Ok(())
+        }()));
+    }
+
+    fn done(&self) -> Result<(), nsresult> {
+        match self.result.take() {
+            Some(Ok(())) => unsafe { self.callback.Resolve() },
             Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
             None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
@@ -547,66 +607,6 @@ impl Task for GetNextTask {
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
             Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
-            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
-        }.to_result()
-    }
-}
-
-pub struct DeleteTask {
-    callback: RefPtr<nsIKeyValueVoidCallback>,
-    rkv: Arc<RwLock<Rkv>>,
-    store: Store,
-    key: nsCString,
-    result: Cell<Option<Result<(), KeyValueError>>>,
-}
-
-impl DeleteTask {
-    pub fn new(
-        callback: RefPtr<nsIKeyValueVoidCallback>,
-        rkv: Arc<RwLock<Rkv>>,
-        store: Store,
-        key: nsCString,
-    ) -> DeleteTask {
-        DeleteTask {
-            callback,
-            rkv,
-            store,
-            key,
-            result: Cell::default(),
-        }
-    }
-}
-
-impl Task for DeleteTask {
-    fn run(&self) {
-        // We do the work within a closure that returns a Result so we can
-        // use the ? operator to simplify the implementation.
-        self.result.set(Some(|| -> Result<(), KeyValueError> {
-            let key = str::from_utf8(&self.key)?;
-            let env = self.rkv.read()?;
-            let mut writer = env.write()?;
-
-            match writer.delete(&self.store, key) {
-                Ok(_) => (),
-
-                // LMDB fails with an error if the key to delete wasn't found,
-                // and Rkv returns that error, but we ignore it, as we expect most
-                // of our consumers to want this behavior.
-                Err(StoreError::LmdbError(lmdb::Error::NotFound)) => (),
-
-                Err(err) => return Err(KeyValueError::StoreError(err)),
-            };
-
-            writer.commit()?;
-
-            Ok(())
-        }()));
-    }
-
-    fn done(&self) -> Result<(), nsresult> {
-        match self.result.take() {
-            Some(Ok(())) => unsafe { self.callback.Resolve() },
             Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
             None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
