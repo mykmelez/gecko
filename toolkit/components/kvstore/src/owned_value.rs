@@ -1,6 +1,6 @@
-// /* This Source Code Form is subject to the terms of the Mozilla Public
-//  * License, v. 2.0. If a copy of the MPL was not distributed with this
-//  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use data_type::{
     DATA_TYPE_BOOL, DATA_TYPE_DOUBLE, DATA_TYPE_EMPTY, DATA_TYPE_INT32, DATA_TYPE_VOID,
@@ -74,8 +74,8 @@ pub fn variant_to_owned(variant: &nsIVariant) -> Result<Option<OwnedValue>, KeyV
             Ok(Some(OwnedValue::Bool(val)))
         }
         DATA_TYPE_EMPTY | DATA_TYPE_VOID => Ok(None),
-        _unsupported_type => {
-            return Err(KeyValueError::UnsupportedType(data_type));
+        unsupported_type => {
+            return Err(KeyValueError::UnsupportedType(unsupported_type));
         }
     }
 }

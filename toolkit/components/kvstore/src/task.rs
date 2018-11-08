@@ -4,32 +4,26 @@
 
 extern crate xpcom;
 
-use data_type::{
-    DATA_TYPE_BOOL, DATA_TYPE_DOUBLE, DATA_TYPE_EMPTY, DATA_TYPE_INT32, DATA_TYPE_VOID,
-    DATA_TYPE_WSTRING,
-};
 use error::KeyValueError;
-use libc::{int32_t, uint16_t};
 use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_OK};
 use nsstring::{nsACString, nsCString, nsString};
-use owned_value::{value_to_owned, OwnedValue};
+use owned_value::{value_to_owned, variant_to_owned, OwnedValue};
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
     cell::Cell,
     cell::RefCell,
     path::Path,
-    ptr,
-    str,
+    ptr, str,
     sync::{Arc, RwLock},
     vec::IntoIter,
 };
-use storage_variant::{IntoVariant, Variant};
+use storage_variant::IntoVariant;
 use xpcom::{
     getter_addrefs,
     interfaces::{
-        nsIEventTarget, nsIKeyValueDatabaseCallback,
-        nsIKeyValueEnumeratorCallback, nsIKeyValuePairCallback, nsIKeyValueVariantCallback,
-        nsIKeyValueVoidCallback, nsIRunnable, nsIThread, nsIVariant,
+        nsIEventTarget, nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback,
+        nsIKeyValuePairCallback, nsIKeyValueVariantCallback, nsIKeyValueVoidCallback, nsIRunnable,
+        nsIThread, nsIVariant,
     },
     RefPtr,
 };
@@ -56,44 +50,6 @@ pub fn create_thread(name: &str) -> Result<RefPtr<nsIThread>, nsresult> {
     })
 }
 
-// Perhaps we should convert this to an implementation of the IntoVariant trait
-// in storage/variant/src/lib.rs, although currently it only has one consumer.
-fn into_variant(variant: &nsIVariant) -> Result<Variant, KeyValueError> {
-    let mut data_type: uint16_t = 0;
-    unsafe { variant.GetDataType(&mut data_type) }.to_result()?;
-
-    match data_type {
-        DATA_TYPE_INT32 => {
-            let mut val: int32_t = 0;
-            unsafe { variant.GetAsInt32(&mut val) }.to_result()?;
-            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
-        }
-        DATA_TYPE_DOUBLE => {
-            let mut val: f64 = 0.0;
-            unsafe { variant.GetAsDouble(&mut val) }.to_result()?;
-            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
-        }
-        DATA_TYPE_WSTRING => {
-            let mut val: nsString = nsString::new();
-            unsafe { variant.GetAsAString(&mut *val) }.to_result()?;
-            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
-        }
-        DATA_TYPE_BOOL => {
-            let mut val: bool = false;
-            unsafe { variant.GetAsBool(&mut val) }.to_result()?;
-            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
-        }
-        DATA_TYPE_EMPTY | DATA_TYPE_VOID => {
-            let val = ();
-            Ok(val.into_variant().ok_or(KeyValueError::Read)?)
-        }
-        _unsupported_type => {
-            println!("unsupported variant data type: {:?}", data_type);
-            return Err(KeyValueError::UnsupportedType(data_type));
-        }
-    }
-}
-
 /// A database operation that is executed asynchronously on a database thread
 /// and returns its result to the original thread from which it was dispatched.
 pub trait Task {
@@ -115,10 +71,7 @@ pub struct InitTaskRunnable {
 }
 
 impl TaskRunnable {
-    pub fn new(
-        name: &'static str,
-        task: Box<Task>,
-    ) -> Result<RefPtr<TaskRunnable>, nsresult> {
+    pub fn new(name: &'static str, task: Box<Task>) -> Result<RefPtr<TaskRunnable>, nsresult> {
         Ok(TaskRunnable::allocate(InitTaskRunnable {
             name,
             original_thread: get_current_thread()?,
@@ -198,10 +151,7 @@ impl Task for GetOrCreateTask {
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
             Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
-            Some(Err(err)) => unsafe {
-                self.callback
-                    .Reject(&*nsCString::from(err.to_string()))
-            },
+            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
             None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
@@ -261,10 +211,7 @@ impl Task for PutTask {
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
             Some(Ok(())) => unsafe { self.callback.Resolve() },
-            Some(Err(err)) => unsafe {
-                self.callback
-                    .Reject(&*nsCString::from(err.to_string()))
-            },
+            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
             None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
@@ -275,7 +222,7 @@ pub struct HasTask {
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
-    result: Cell<Option<Result<bool, KeyValueError>>>,
+    result: Cell<Option<Result<RefPtr<nsIVariant>, KeyValueError>>>,
 }
 
 impl HasTask {
@@ -299,30 +246,24 @@ impl Task for HasTask {
     fn run(&self) {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
-        self.result.set(Some(|| -> Result<bool, KeyValueError> {
-            let key = str::from_utf8(&self.key)?;
-            let env = self.rkv.read()?;
-            let reader = env.read()?;
-            let value = reader.get(&self.store, key)?;
-            Ok(value.is_some())
-        }()));
+        self.result
+            .set(Some(|| -> Result<RefPtr<nsIVariant>, KeyValueError> {
+                let key = str::from_utf8(&self.key)?;
+                let env = self.rkv.read()?;
+                let reader = env.read()?;
+                let value = reader.get(&self.store, key)?;
+                Ok(value
+                    .is_some()
+                    .into_variant()
+                    .ok_or(KeyValueError::Read)?
+                    .take())
+            }()));
     }
 
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
-            Some(Ok(value)) => unsafe {
-                self.callback.Resolve(
-                    value
-                        .into_variant()
-                        .ok_or(KeyValueError::Read)?
-                        .take()
-                        .coerce(),
-                )
-            },
-            Some(Err(err)) => unsafe {
-                self.callback
-                    .Reject(&*nsCString::from(err.to_string()))
-            },
+            Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
+            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
             None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
@@ -334,7 +275,7 @@ pub struct GetTask {
     store: Store,
     key: nsCString,
     default_value: RefPtr<nsIVariant>,
-    result: Cell<Option<Result<Variant, KeyValueError>>>,
+    result: Cell<Option<Result<RefPtr<nsIVariant>, KeyValueError>>>,
 }
 
 impl GetTask {
@@ -361,38 +302,39 @@ impl Task for GetTask {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
         self.result
-            .set(Some(|| -> Result<Variant, KeyValueError> {
+            .set(Some(|| -> Result<RefPtr<nsIVariant>, KeyValueError> {
                 let key = str::from_utf8(&self.key)?;
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
                 let value = reader.get(&self.store, key)?;
 
-                match value {
-                    Some(Value::I64(value)) => {
-                        Ok(value.into_variant().ok_or(KeyValueError::Read)?)
+                Ok(if let Some(value) = value {
+                    match value {
+                        Value::I64(value) => value.into_variant(),
+                        Value::F64(value) => value.into_variant(),
+                        Value::Str(value) => nsString::from(value).into_variant(),
+                        Value::Bool(value) => value.into_variant(),
+                        _ => return Err(KeyValueError::UnexpectedValue),
                     }
-                    Some(Value::F64(value)) => {
-                        Ok(value.into_variant().ok_or(KeyValueError::Read)?)
+                } else {
+                    // We can't simply return the default_value, which is
+                    // a non-threadsafe XPCVariant.  Instead, we convert it
+                    // to a threadsafe storage variant by indirecting through
+                    // OwnedValue.  It seems like we'd be better off copying
+                    // to a storage variant directly.
+                    match variant_to_owned(&self.default_value)? {
+                        Some(value) => value.into_variant(),
+                        None => ().into_variant(),
                     }
-                    Some(Value::Str(value)) => Ok(nsString::from(value)
-                        .into_variant()
-                        .ok_or(KeyValueError::Read)?),
-                    Some(Value::Bool(value)) => {
-                        Ok(value.into_variant().ok_or(KeyValueError::Read)?)
-                    }
-                    Some(_value) => Err(KeyValueError::UnexpectedValue),
-                    None => Ok(into_variant(&self.default_value)?),
-                }
+                }.ok_or(KeyValueError::Read)?
+                .take())
             }()));
     }
 
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
-            Some(Ok(value)) => unsafe { self.callback.Resolve(value.take().coerce()) },
-            Some(Err(err)) => unsafe {
-                self.callback
-                    .Reject(&*nsCString::from(err.to_string()))
-            },
+            Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
+            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
             None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
@@ -492,10 +434,7 @@ impl Task for EnumerateTask {
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
             Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
-            Some(Err(err)) => unsafe {
-                self.callback
-                    .Reject(&*nsCString::from(err.to_string()))
-            },
+            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
             None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
@@ -511,7 +450,7 @@ pub struct HasMoreElementsTask {
             )>,
         >,
     >,
-    result: Cell<Option<Result<bool, KeyValueError>>>,
+    result: Cell<Option<Result<RefPtr<nsIVariant>, KeyValueError>>>,
 }
 
 impl HasMoreElementsTask {
@@ -538,26 +477,19 @@ impl Task for HasMoreElementsTask {
     fn run(&self) {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
-        self.result.set(Some(|| -> Result<bool, KeyValueError> {
-            Ok(!self.iter.borrow().as_slice().is_empty())
-        }()));
+        self.result
+            .set(Some(|| -> Result<RefPtr<nsIVariant>, KeyValueError> {
+                Ok((!self.iter.borrow().as_slice().is_empty())
+                    .into_variant()
+                    .ok_or(KeyValueError::Read)?
+                    .take())
+            }()));
     }
 
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
-            Some(Ok(value)) => unsafe {
-                self.callback.Resolve(
-                    value
-                        .into_variant()
-                        .ok_or(KeyValueError::Read)?
-                        .take()
-                        .coerce(),
-                )
-            },
-            Some(Err(err)) => unsafe {
-                self.callback
-                    .Reject(&*nsCString::from(err.to_string()))
-            },
+            Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
+            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
             None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
@@ -615,10 +547,7 @@ impl Task for GetNextTask {
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
             Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
-            Some(Err(err)) => unsafe {
-                self.callback
-                    .Reject(&*nsCString::from(err.to_string()))
-            },
+            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
             None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
@@ -678,10 +607,7 @@ impl Task for DeleteTask {
     fn done(&self) -> Result<(), nsresult> {
         match self.result.take() {
             Some(Ok(())) => unsafe { self.callback.Resolve() },
-            Some(Err(err)) => unsafe {
-                self.callback
-                    .Reject(&*nsCString::from(err.to_string()))
-            },
+            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
             None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }

@@ -32,16 +32,15 @@ use std::{
     sync::{Arc, RwLock},
     vec::IntoIter,
 };
-use storage_variant::{IntoVariant};
+use storage_variant::IntoVariant;
 use task::{
-    create_thread, DeleteTask, EnumerateTask, GetNextTask, GetOrCreateTask,
-    GetTask, HasMoreElementsTask, HasTask, PutTask, TaskRunnable,
+    create_thread, DeleteTask, EnumerateTask, GetNextTask, GetOrCreateTask, GetTask,
+    HasMoreElementsTask, HasTask, PutTask, TaskRunnable,
 };
 use xpcom::{
     interfaces::{
-        nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback,
-        nsIKeyValuePairCallback, nsIKeyValueVariantCallback, nsIKeyValueVoidCallback, nsISupports,
-        nsIThread, nsIVariant,
+        nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback, nsIKeyValuePairCallback,
+        nsIKeyValueVariantCallback, nsIKeyValueVoidCallback, nsISupports, nsIThread, nsIVariant,
     },
     nsIID, Ensure, RefPtr,
 };
@@ -174,11 +173,7 @@ impl KeyValueDatabase {
         { callback: *const nsIKeyValueVariantCallback, key: *const nsACString }
     );
 
-    fn has(
-        &self,
-        callback: &nsIKeyValueVariantCallback,
-        key: &nsACString,
-    ) -> Result<(), nsresult> {
+    fn has(&self, callback: &nsIKeyValueVariantCallback, key: &nsACString) -> Result<(), nsresult> {
         let task = Box::new(HasTask::new(
             RefPtr::new(callback),
             Arc::clone(&self.rkv),
@@ -219,11 +214,7 @@ impl KeyValueDatabase {
         { callback: *const nsIKeyValueVoidCallback, key: *const nsACString }
     );
 
-    fn delete(
-        &self,
-        callback: &nsIKeyValueVoidCallback,
-        key: &nsACString,
-    ) -> Result<(), nsresult> {
+    fn delete(&self, callback: &nsIKeyValueVoidCallback, key: &nsACString) -> Result<(), nsresult> {
         let task = Box::new(DeleteTask::new(
             RefPtr::new(callback),
             Arc::clone(&self.rkv),
@@ -292,10 +283,7 @@ impl KeyValueEnumerator {
         callback: *const nsIKeyValueVariantCallback
     });
 
-    fn has_more_elements(
-        &self,
-        callback: &nsIKeyValueVariantCallback,
-    ) -> Result<(), nsresult> {
+    fn has_more_elements(&self, callback: &nsIKeyValueVariantCallback) -> Result<(), nsresult> {
         let task = Box::new(HasMoreElementsTask::new(
             RefPtr::new(callback),
             self.iter.clone(),
