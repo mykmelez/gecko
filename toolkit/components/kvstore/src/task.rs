@@ -94,24 +94,23 @@ fn into_variant(variant: &nsIVariant) -> Result<Variant, KeyValueError> {
     }
 }
 
+/// A database operation that is executed asynchronously on a database thread
+/// and returns its result to the original thread from which it was dispatched.
 pub trait Task {
     fn run(&self);
     fn done(&self) -> Result<(), nsresult>;
 }
 
+/// The struct responsible for dispatching a Task by calling its run() method
+/// on the target thread and returning its result by calling its done() method
+/// on the original thread.
 #[derive(xpcom)]
 #[xpimplements(nsIRunnable, nsINamed)]
 #[refcnt = "atomic"]
 pub struct InitTaskRunnable {
     name: &'static str,
-    origin: RefPtr<nsIThread>,
-
-    /// Holds the task, and the result of the task.  The task is created
-    /// on the current thread, run on a target thread, and handled again
-    /// on the original thread; the result is mutated on the target thread
-    /// and accessed on the original thread.
+    original_thread: RefPtr<nsIThread>,
     task: Box<Task>,
-
     has_run: Cell<bool>,
 }
 
@@ -122,15 +121,15 @@ impl TaskRunnable {
     ) -> Result<RefPtr<TaskRunnable>, nsresult> {
         Ok(TaskRunnable::allocate(InitTaskRunnable {
             name,
-            origin: get_current_thread()?,
+            original_thread: get_current_thread()?,
             task,
             has_run: Cell::new(false),
         }))
     }
 
-    pub fn dispatch(&self, target: RefPtr<nsIThread>) -> Result<(), nsresult> {
+    pub fn dispatch(&self, target_thread: RefPtr<nsIThread>) -> Result<(), nsresult> {
         unsafe {
-            target.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
+            target_thread.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
         }.to_result()
     }
 
@@ -138,9 +137,9 @@ impl TaskRunnable {
     fn run(&self) -> Result<(), nsresult> {
         match self.has_run.take() {
             false => {
-                self.task.run();
                 self.has_run.set(true);
-                self.dispatch(self.origin.clone())
+                self.task.run();
+                self.dispatch(self.original_thread.clone())
             }
             true => self.task.done(),
         }
@@ -179,6 +178,8 @@ impl GetOrCreateTask {
 
 impl Task for GetOrCreateTask {
     fn run(&self) {
+        // We do the work within a closure that returns a Result so we can
+        // use the ? operator to simplify the implementation.
         self.result.set(Some(
             || -> Result<RefPtr<KeyValueDatabase>, KeyValueError> {
                 let mut writer = Manager::singleton().write()?;
@@ -236,6 +237,8 @@ impl PutTask {
 
 impl Task for PutTask {
     fn run(&self) {
+        // We do the work within a closure that returns a Result so we can
+        // use the ? operator to simplify the implementation.
         self.result.set(Some(|| -> Result<(), KeyValueError> {
             let key = str::from_utf8(&self.key)?;
             let env = self.rkv.read()?;
@@ -294,6 +297,8 @@ impl HasTask {
 
 impl Task for HasTask {
     fn run(&self) {
+        // We do the work within a closure that returns a Result so we can
+        // use the ? operator to simplify the implementation.
         self.result.set(Some(|| -> Result<bool, KeyValueError> {
             let key = str::from_utf8(&self.key)?;
             let env = self.rkv.read()?;
@@ -353,6 +358,8 @@ impl GetTask {
 
 impl Task for GetTask {
     fn run(&self) {
+        // We do the work within a closure that returns a Result so we can
+        // use the ? operator to simplify the implementation.
         self.result
             .set(Some(|| -> Result<Variant, KeyValueError> {
                 let key = str::from_utf8(&self.key)?;
@@ -421,6 +428,8 @@ impl EnumerateTask {
 
 impl Task for EnumerateTask {
     fn run(&self) {
+        // We do the work within a closure that returns a Result so we can
+        // use the ? operator to simplify the implementation.
         self.result.set(Some(
             || -> Result<RefPtr<KeyValueEnumerator>, KeyValueError> {
                 let env = self.rkv.read()?;
@@ -527,6 +536,8 @@ impl HasMoreElementsTask {
 
 impl Task for HasMoreElementsTask {
     fn run(&self) {
+        // We do the work within a closure that returns a Result so we can
+        // use the ? operator to simplify the implementation.
         self.result.set(Some(|| -> Result<bool, KeyValueError> {
             Ok(!self.iter.borrow().as_slice().is_empty())
         }()));
@@ -587,6 +598,8 @@ impl GetNextTask {
 
 impl Task for GetNextTask {
     fn run(&self) {
+        // We do the work within a closure that returns a Result so we can
+        // use the ? operator to simplify the implementation.
         self.result
             .set(Some(|| -> Result<RefPtr<KeyValuePair>, KeyValueError> {
                 let mut iter = self.iter.borrow_mut();
@@ -638,6 +651,8 @@ impl DeleteTask {
 
 impl Task for DeleteTask {
     fn run(&self) {
+        // We do the work within a closure that returns a Result so we can
+        // use the ? operator to simplify the implementation.
         self.result.set(Some(|| -> Result<(), KeyValueError> {
             let key = str::from_utf8(&self.key)?;
             let env = self.rkv.read()?;

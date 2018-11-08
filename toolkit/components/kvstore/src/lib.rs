@@ -99,7 +99,7 @@ impl KeyValueService {
         GetOrCreate,
         get_or_create,
         { callback: *const nsIKeyValueDatabaseCallback, path: *const nsACString,
-          name: *const nsACString }
+            name: *const nsACString }
     );
 
     fn get_or_create(
@@ -109,6 +109,7 @@ impl KeyValueService {
         name: &nsACString,
     ) -> Result<(), nsresult> {
         let target = create_thread("KeyValDB")?;
+
         let task = Box::new(GetOrCreateTask::new(
             RefPtr::new(callback),
             target.clone(),
@@ -141,7 +142,8 @@ impl KeyValueDatabase {
     xpcom_method!(
         Put,
         put,
-        { callback: *const nsIKeyValueVoidCallback, key: *const nsACString, value: *const nsIVariant }
+        { callback: *const nsIKeyValueVoidCallback, key: *const nsACString,
+            value: *const nsIVariant }
     );
 
     fn put(
@@ -190,7 +192,8 @@ impl KeyValueDatabase {
     xpcom_method!(
         Get,
         get,
-        { callback: *const nsIKeyValueVariantCallback, key: *const nsACString, default_value: *const nsIVariant }
+        { callback: *const nsIKeyValueVariantCallback, key: *const nsACString,
+            default_value: *const nsIVariant }
     );
 
     fn get(
@@ -234,7 +237,8 @@ impl KeyValueDatabase {
     xpcom_method!(
         Enumerate,
         enumerate,
-        { callback: *const nsIKeyValueEnumeratorCallback, from_key: *const nsACString, to_key: *const nsACString }
+        { callback: *const nsIKeyValueEnumeratorCallback, from_key: *const nsACString,
+            to_key: *const nsACString }
     );
 
     fn enumerate(
