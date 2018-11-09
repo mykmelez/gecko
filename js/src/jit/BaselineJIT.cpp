@@ -820,11 +820,6 @@ BaselineScript::copyICEntries(JSScript* script, const ICEntry* entries)
             ICTypeMonitor_Fallback* stub = realEntry.firstStub()->toTypeMonitor_Fallback();
             stub->fixupICEntry(&realEntry);
         }
-
-        if (realEntry.firstStub()->isTableSwitch()) {
-            ICTableSwitch* stub = realEntry.firstStub()->toTableSwitch();
-            stub->fixupJumpTable(script, this);
-        }
     }
 }
 
@@ -1150,7 +1145,7 @@ BaselineScript::purgeOptimizedStubs(Zone* zone)
         } else if (lastStub->isTypeMonitor_Fallback()) {
             lastStub->toTypeMonitor_Fallback()->resetMonitorStubChain(zone);
         } else {
-            MOZ_ASSERT(lastStub->isTableSwitch());
+            MOZ_CRASH("Unknown fallback stub");
         }
     }
 
@@ -1171,11 +1166,19 @@ BaselineScript::purgeOptimizedStubs(Zone* zone)
 static bool
 GetStubEnteredCount(ICStub* stub, uint32_t* count)
 {
-    if (stub->isCacheIR_Regular()) {
+    switch (stub->kind()) {
+      case ICStub::CacheIR_Regular:
         *count = stub->toCacheIR_Regular()->enteredCount();
         return true;
+      case ICStub::CacheIR_Updated:
+        *count = stub->toCacheIR_Updated()->enteredCount();
+        return true;
+      case ICStub::CacheIR_Monitored:
+        *count = stub->toCacheIR_Monitored()->enteredCount();
+        return true;
+      default:
+        return false;
     }
-    return false;
 }
 
 void

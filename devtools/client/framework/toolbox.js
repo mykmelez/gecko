@@ -158,6 +158,7 @@ function Toolbox(target, selectedTool, hostType, contentWindow, frameId,
   this.toggleSplitConsole = this.toggleSplitConsole.bind(this);
   this.toggleOptions = this.toggleOptions.bind(this);
   this.togglePaintFlashing = this.togglePaintFlashing.bind(this);
+  this.toggleDragging = this.toggleDragging.bind(this);
   this.isPaintFlashing = false;
 
   this._target.on("close", this.destroy);
@@ -324,6 +325,10 @@ Toolbox.prototype = {
    */
   getCurrentPanel: function() {
     return this._toolPanels.get(this.currentToolId);
+  },
+
+  toggleDragging: function() {
+    this.doc.querySelector("window").classList.toggle("dragging");
   },
 
   /**
@@ -2163,7 +2168,13 @@ Toolbox.prototype = {
    * Tells the target tab to reload.
    */
   reloadTarget: function(force) {
-    this.target.activeTab.reload({ force: force });
+    if (this.target.canRewind) {
+      // Recording tabs need to be reloaded in a new content process.
+      const { reloadAndRecordTab } = require("devtools/client/webreplay/menu");
+      reloadAndRecordTab();
+    } else {
+      this.target.activeTab.reload({ force: force });
+    }
   },
 
   /**
@@ -2760,28 +2771,9 @@ Toolbox.prototype = {
       // in the initialization process can throw errors.
       await this._initInspector;
 
-      const currentPanel = this.getCurrentPanel();
-      if (currentPanel.stopPicker) {
-        await currentPanel.stopPicker();
-      } else {
-        await this.highlighterUtils.stopPicker();
-      }
       // Temporary fix for bug #1493131 - inspector has a different life cycle
       // than most other fronts because it is closely related to the toolbox.
-      this._inspector.destroy();
-
-      if (this._highlighter) {
-        await this._highlighter.destroy();
-      }
-      if (this._selection) {
-        this._selection.off("new-node-front", this._onNewSelectedNodeFront);
-        this._selection.destroy();
-      }
-
-      if (this.walker) {
-        this.walker.off("highlighter-ready", this._highlighterReady);
-        this.walker.off("highlighter-hide", this._highlighterHidden);
-      }
+      await this._inspector.destroy();
 
       this._inspector = null;
       this._highlighter = null;

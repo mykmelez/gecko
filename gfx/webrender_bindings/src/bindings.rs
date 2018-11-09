@@ -1,11 +1,15 @@
 use std::ffi::{CStr, CString};
+use std::io::Cursor;
 use std::{mem, slice, ptr, env};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::ops::Range;
 use std::os::raw::{c_void, c_char, c_float};
+#[cfg(target_os = "android")]
+use std::os::raw::{c_int};
 use gleam::gl;
 
 use webrender::api::*;
@@ -31,6 +35,11 @@ use dwrote::{FontDescriptor, FontWeight, FontStretch, FontStyle};
 use core_foundation::string::CFString;
 #[cfg(target_os = "macos")]
 use core_graphics::font::CGFont;
+
+extern "C" {
+    #[cfg(target_os = "android")]
+    fn __android_log_write(prio: c_int, tag: *const c_char, text: *const c_char) -> c_int;
+}
 
 /// The unique id for WR resource identification.
 static NEXT_NAMESPACE_ID: AtomicUsize = AtomicUsize::new(1);
@@ -435,6 +444,8 @@ pub enum WrFilterOpType {
   Sepia = 8,
   DropShadow = 9,
   ColorMatrix = 10,
+  SrgbToLinear = 11,
+  LinearToSrgb = 12,
 }
 
 #[repr(C)]
@@ -676,6 +687,11 @@ pub unsafe extern "C" fn wr_renderer_delete(renderer: *mut Renderer) {
 pub unsafe extern "C" fn wr_renderer_accumulate_memory_report(renderer: &mut Renderer,
                                                               report: &mut MemoryReport) {
     *report += renderer.report_memory();
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn wr_total_gpu_bytes_allocated() -> usize {
+    ::webrender::total_gpu_bytes_allocated()
 }
 
 // cbindgen doesn't support tuples, so we have a little struct instead, with
@@ -1832,6 +1848,8 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
                                                                c_filter.argument,
                                                                c_filter.color),
             WrFilterOpType::ColorMatrix => FilterOp::ColorMatrix(c_filter.matrix),
+            WrFilterOpType::SrgbToLinear => FilterOp::SrgbToLinear,
+            WrFilterOpType::LinearToSrgb => FilterOp::LinearToSrgb,
         }
     }).collect();
 
@@ -2554,9 +2572,26 @@ pub extern "C" fn wr_dump_display_list(state: &mut WrState,
                                        end: *const usize) -> usize {
     let start = unsafe { start.as_ref().cloned() };
     let end = unsafe { end.as_ref().cloned() };
-    state.frame_builder
-         .dl_builder
-         .print_display_list(indent, start, end)
+    let range = Range { start, end };
+    let mut sink = Cursor::new(Vec::new());
+    let index = state.frame_builder
+                     .dl_builder
+                     .emit_display_list(indent, range, &mut sink);
+
+    // For Android, dump to logcat instead of stderr. This is the same as
+    // what printf_stderr does on the C++ side.
+
+    #[cfg(target_os = "android")]
+    unsafe {
+        __android_log_write(4 /* info */,
+                            CString::new("Gecko").unwrap().as_ptr(),
+                            CString::new(sink.into_inner()).unwrap().as_ptr());
+    }
+
+    #[cfg(not(target_os = "android"))]
+    eprint!("{}", String::from_utf8(sink.into_inner()).unwrap());
+
+    index
 }
 
 #[no_mangle]

@@ -59,6 +59,12 @@ var Assert = new AssertCls(function(err, message, stack) {
   }
 }, true);
 
+// Bug 1506134 for followup.  Some xpcshell tests use ContentTask.jsm, which
+// expects browser-test.js to have set a testScope that includes record.
+function record(condition, name, diag, stack) {
+  do_report_result(condition, name, stack);
+}
+
 var _add_params = function(params) {
   if (typeof _XPCSHELL_PROCESS != "undefined") {
     params.xpcshell_process = _XPCSHELL_PROCESS;
@@ -434,12 +440,16 @@ function _setupDebuggerServer(breakpointFiles, callback) {
   for (let topic of TOPICS) {
     _Services.obs.addObserver(observe, topic);
   }
-  return DebuggerServer;
+
+  const { SocketListener } = require("devtools/shared/security/socket");
+
+  return { DebuggerServer, SocketListener };
 }
 
 function _initDebugging(port) {
   let initialized = false;
-  let DebuggerServer = _setupDebuggerServer(_TEST_FILE, () => { initialized = true; });
+  const { DebuggerServer, SocketListener } =
+    _setupDebuggerServer(_TEST_FILE, () => { initialized = true; });
 
   info("");
   info("*******************************************************************");
@@ -450,19 +460,21 @@ function _initDebugging(port) {
   info("*******************************************************************");
   info("");
 
-  let AuthenticatorType = DebuggerServer.Authenticators.get("PROMPT");
-  let authenticator = new AuthenticatorType.Server();
+  const AuthenticatorType = DebuggerServer.Authenticators.get("PROMPT");
+  const authenticator = new AuthenticatorType.Server();
   authenticator.allowConnection = () => {
     return DebuggerServer.AuthenticationResult.ALLOW;
   };
+  const socketOptions = {
+    authenticator,
+    portOrPath: port,
+  };
 
-  let listener = DebuggerServer.createListener();
-  listener.portOrPath = port;
-  listener.authenticator = authenticator;
+  const listener = new SocketListener(DebuggerServer, socketOptions);
   listener.open();
 
   // spin an event loop until the debugger connects.
-  let tm = Cc["@mozilla.org/thread-manager;1"].getService();
+  const tm = Cc["@mozilla.org/thread-manager;1"].getService();
   tm.spinEventLoopUntil(() => {
     if (initialized) {
       return true;
