@@ -14,9 +14,7 @@ obj*/**
 # We ignore all these directories by default, until we get them enabled.
 # If you are enabling a directory, please add directory specific exclusions
 # below.
-docshell/resources/**
 docshell/test/browser/**
-docshell/test/chrome/**
 docshell/test/iframesandbox/**
 docshell/test/mochitest/**
 extensions/cookie/**
@@ -35,8 +33,6 @@ netwerk/test/browser/**
 netwerk/test/httpserver/**
 netwerk/test/mochitests/**
 netwerk/test/unit*/**
-# Bug 1501445.
-netwerk/wifi/tests/wifi_access_point_test.html
 parser/**
 tools/update-packaging/**
 uriloader/exthandler/**

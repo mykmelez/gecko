@@ -3256,6 +3256,12 @@ function BrowserReloadWithFlags(reloadFlags) {
                              { once: true });
         gBrowser._insertBrowser(tab);
       }
+    } else if (browser.hasAttribute("recordExecution")) {
+      // Recording tabs always use new content processes when reloading, to get
+      // a fresh recording.
+      gBrowser.updateBrowserRemoteness(browser, true,
+                                       { recordExecution: "*", newFrameloader: true });
+      loadBrowserURI(browser, url);
     } else {
       unchangedRemoteness.push(tab);
     }
@@ -6293,7 +6299,7 @@ function UpdateCurrentCharset(target) {
 
 var ToolbarContextMenu = {
   updateDownloadsAutoHide(popup) {
-    let checkbox = popup.querySelector(".customize-context-autoHide");
+    let checkbox = document.getElementById("toolbar-context-autohide-downloads-button");
     let isDownloads = popup.triggerNode && ["downloads-button", "wrapper-downloads-button"].includes(popup.triggerNode.id);
     checkbox.hidden = !isDownloads;
     if (DownloadsButton.autoHideDownloadsButton) {
@@ -7379,34 +7385,32 @@ const gAccessibilityServiceIndicator = {
     Services.prefs.addObserver("accessibility.indicator.enabled", this);
     // Accessibility service init/shutdown event.
     Services.obs.addObserver(this, "a11y-init-or-shutdown");
-    this.update(Services.appinfo.accessibilityEnabled);
+    this._update(Services.appinfo.accessibilityEnabled);
   },
 
-  update(accessibilityEnabled = false) {
+  _update(accessibilityEnabled = false) {
     if (this.enabled && accessibilityEnabled) {
       this._active = true;
       document.documentElement.setAttribute("accessibilitymode", "true");
       [...document.querySelectorAll(".accessibility-indicator")].forEach(
         indicator => ["click", "keypress"].forEach(type =>
           indicator.addEventListener(type, this)));
-      TabsInTitlebar.update();
     } else if (this._active) {
       this._active = false;
       document.documentElement.removeAttribute("accessibilitymode");
       [...document.querySelectorAll(".accessibility-indicator")].forEach(
         indicator => ["click", "keypress"].forEach(type =>
           indicator.removeEventListener(type, this)));
-      TabsInTitlebar.update();
     }
   },
 
   observe(subject, topic, data) {
     if (topic == "nsPref:changed" && data === "accessibility.indicator.enabled") {
-      this.update(Services.appinfo.accessibilityEnabled);
+      this._update(Services.appinfo.accessibilityEnabled);
     } else if (topic === "a11y-init-or-shutdown") {
       // When "a11y-init-or-shutdown" event is fired, "1" indicates that
       // accessibility service is started and "0" that it is shut down.
-      this.update(data === "1");
+      this._update(data === "1");
     }
   },
 
@@ -7428,7 +7432,6 @@ const gAccessibilityServiceIndicator = {
   uninit() {
     Services.prefs.removeObserver("accessibility.indicator.enabled", this);
     Services.obs.removeObserver(this, "a11y-init-or-shutdown");
-    this.update();
   },
 };
 

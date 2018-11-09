@@ -253,6 +253,8 @@ enum class WrFilterOpType : uint32_t {
   Sepia = 8,
   DropShadow = 9,
   ColorMatrix = 10,
+  SrgbToLinear = 11,
+  LinearToSrgb = 12,
 
   Sentinel /* this must be last for serialization purposes. */
 };
@@ -1106,6 +1108,12 @@ extern void DeleteBlobFont(WrFontInstanceKey aKey);
 
 extern void DeleteFontData(WrFontKey aKey);
 
+#if defined(ANDROID)
+extern int __android_log_write(int aPrio,
+                               const char *aTag,
+                               const char *aText);
+#endif
+
 extern void apz_deregister_sampler(WrWindowId aWindowId);
 
 extern void apz_deregister_updater(WrWindowId aWindowId);
@@ -1800,6 +1808,10 @@ WR_DESTRUCTOR_SAFE_FUNC;
 
 WR_INLINE
 WrThreadPool *wr_thread_pool_new()
+WR_FUNC;
+
+WR_INLINE
+uintptr_t wr_total_gpu_bytes_allocated()
 WR_FUNC;
 
 WR_INLINE

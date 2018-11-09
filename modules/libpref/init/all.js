@@ -461,11 +461,8 @@ pref("media.navigator.video.max_fr", 60);
 pref("media.navigator.video.h264.level", 31); // 0x42E01f - level 3.1
 pref("media.navigator.video.h264.max_br", 0);
 pref("media.navigator.video.h264.max_mbps", 0);
-pref("media.navigator.mediadatadecoder_enabled", false);
-pref("media.navigator.mediadatadecoder_h264_enabled", false);
 pref("media.peerconnection.video.vp9_enabled", true);
 pref("media.peerconnection.video.vp9_preferred", false);
-pref("media.getusermedia.aec", 1);
 pref("media.getusermedia.browser.enabled", false);
 pref("media.getusermedia.channels", 0);
 #if defined(ANDROID)
@@ -504,11 +501,10 @@ pref("media.peerconnection.ice.no_host", false);
 pref("media.peerconnection.ice.default_address_only", false);
 pref("media.peerconnection.ice.proxy_only", false);
 pref("media.peerconnection.rtpsourcesapi.enabled", true);
-
-// These values (aec, agc, and noise) are from media/webrtc/trunk/webrtc/common_types.h
-// kXxxUnchanged = 0, kXxxDefault = 1, and higher values are specific to each
-// setting (for Xxx = Ec, Agc, or Ns).  Defaults are all set to kXxxDefault here.
 pref("media.peerconnection.turn.disable", false);
+
+// These values (aec, agc, and noise) are from:
+// media/webrtc/trunk/webrtc/modules/audio_processing/include/audio_processing.h
 #if defined(MOZ_WEBRTC_HARDWARE_AEC_NS)
 pref("media.getusermedia.aec_enabled", false);
 pref("media.getusermedia.noise_enabled", false);
@@ -516,10 +512,12 @@ pref("media.getusermedia.noise_enabled", false);
 pref("media.getusermedia.aec_enabled", true);
 pref("media.getusermedia.noise_enabled", true);
 #endif
+pref("media.getusermedia.use_aec_mobile", false);
+pref("media.getusermedia.aec", 1); // kModerateSuppression
 pref("media.getusermedia.aec_extended_filter", true);
-pref("media.getusermedia.noise", 1);
-pref("media.getusermedia.agc_enabled", true);
-pref("media.getusermedia.agc", 3); // kAgcAdaptiveDigital
+pref("media.getusermedia.noise", 1); // kModerate
+pref("media.getusermedia.agc_enabled", false);
+pref("media.getusermedia.agc", 1); // kAdaptiveDigital
 // capture_delay: Adjustments for OS-specific input delay (lower bound)
 // playout_delay: Adjustments for OS-specific AudioStream+cubeb+output delay (lower bound)
 // full_duplex: enable cubeb full-duplex capture/playback
@@ -1110,6 +1108,7 @@ pref("devtools.recordreplay.enableRewinding", true);
 
 pref("devtools.recordreplay.mvp.enabled", false);
 pref("devtools.recordreplay.timeline.enabled", false);
+pref("devtools.recordreplay.allowRepaintFailures", true);
 
 // view source
 pref("view_source.syntax_highlight", true);
@@ -1154,12 +1153,6 @@ pref("browser.fixup.alternate.prefix", "www.");
 pref("browser.fixup.alternate.suffix", ".com");
 pref("browser.fixup.dns_first_for_single_words", false);
 pref("browser.fixup.hide_user_pass", true);
-
-// Location Bar AutoComplete
-pref("browser.urlbar.autocomplete.enabled", true);
-// This is disabled until Bug 1340663 figures out the remaining requirements.
-pref("browser.urlbar.usepreloadedtopurls.enabled", false);
-pref("browser.urlbar.usepreloadedtopurls.expire_days", 14);
 
 // Print header customization
 // Use the following codes:
@@ -1840,6 +1833,7 @@ pref("network.http.spdy.pull-allowance", 12582912); // 12MB
 pref("network.http.spdy.default-concurrent", 100);
 pref("network.http.spdy.default-hpack-buffer", 65536); // 64k
 pref("network.http.spdy.websockets", true);
+pref("network.http.spdy.enable-hpack-dump", false);
 
 // alt-svc allows separation of transport routing from
 // the origin host without using a proxy.
@@ -5464,6 +5458,7 @@ pref("network.trr.mode", 0);
 pref("network.trr.uri", "https://mozilla.cloudflare-dns.com/dns-query");
 // credentials to pass to DOH end-point
 pref("network.trr.credentials", "");
+pref("network.trr.custom_uri", "");
 // Wait for captive portal confirmation before enabling TRR
 #if defined(ANDROID)
 // On Android, the captive portal is handled by the OS itself

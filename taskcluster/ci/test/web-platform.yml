@@ -34,8 +34,8 @@ web-platform-tests:
             default: 12
     max-run-time:
         by-test-platform:
+            linux64-ccov/debug: 10800
             windows10-64-ccov/debug: 10800
-            macosx64-ccov/debug: 7200
             default: 7200
     e10s:
         by-test-platform:
@@ -88,11 +88,7 @@ web-platform-tests-reftests:
     description: "Web platform reftest run"
     suite: web-platform-tests-reftests
     treeherder-symbol: W(Wr)
-    chunks:
-        by-test-platform:
-            macosx.*: 1
-            default: 6
-
+    chunks: 6
     e10s:
         by-test-platform:
             linux32/debug: both
@@ -116,10 +112,7 @@ web-platform-tests-reftests-headless:
     description: "Web platform reftest headless run"
     suite: web-platform-tests-reftests
     treeherder-symbol: W(WrH)
-    chunks:
-        by-test-platform:
-            macosx.*: 1
-            default: 6
+    chunks: 6
     e10s:
         by-test-platform:
             linux32/debug: both
