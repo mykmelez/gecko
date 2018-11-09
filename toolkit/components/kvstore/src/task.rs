@@ -60,6 +60,10 @@ pub trait Task {
 /// The struct responsible for dispatching a Task by calling its run() method
 /// on the target thread and returning its result by calling its done() method
 /// on the original thread.
+///
+/// The struct uses its has_run field to determine whether it should call
+/// run() or done().  It could instead check if task.result is Some or None,
+/// but if run() failed to set task.result, then it would loop infinitely.
 #[derive(xpcom)]
 #[xpimplements(nsIRunnable, nsINamed)]
 #[refcnt = "atomic"]
