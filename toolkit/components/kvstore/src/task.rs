@@ -33,6 +33,7 @@ use KeyValuePair;
 
 extern "C" {
     fn NS_GetCurrentThreadEventTarget(result: *mut *const nsIThread) -> nsresult;
+    fn NS_IsMainThread() -> bool;
     fn NS_NewNamedThreadWithDefaultStackSize(
         name: *const nsACString,
         result: *mut *const nsIThread,
@@ -76,6 +77,7 @@ pub struct InitTaskRunnable {
 
 impl TaskRunnable {
     pub fn new(name: &'static str, task: Box<Task>) -> Result<RefPtr<TaskRunnable>, nsresult> {
+        debug_assert!(unsafe { NS_IsMainThread() });
         Ok(TaskRunnable::allocate(InitTaskRunnable {
             name,
             original_thread: get_current_thread()?,
@@ -94,11 +96,15 @@ impl TaskRunnable {
     fn run(&self) -> Result<(), nsresult> {
         match self.has_run.take() {
             false => {
+                debug_assert!(unsafe { !NS_IsMainThread() });
                 self.has_run.set(true);
                 self.task.run();
                 self.dispatch(self.original_thread.clone())
             }
-            true => self.task.done(),
+            true => {
+                debug_assert!(unsafe { NS_IsMainThread() });
+                self.task.done()
+            },
         }
     }
 
