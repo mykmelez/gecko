@@ -549,18 +549,45 @@ struct DIGroup
             aData->mRect = transformedRect.Intersect(mImageBounds);
             InvalidateRect(aData->mRect);
             GP("UpdateContainerLayerPropertiesAndDetectChange change\n");
+          } else if (!aData->mImageRect.IsEqualEdges(mImageBounds)) {
+            // Make sure we update mRect for mImageBounds changes
+            combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
+            IntRect transformedRect = ToDeviceSpace(combined.GetBounds(), aMatrix, appUnitsPerDevPixel, mLayerBounds.TopLeft());
+            // The invalid rect should contain the old rect and the new rect
+            // because the parent should have invalidated this area
+            MOZ_RELEASE_ASSERT(mInvalidRect.Contains(aData->mRect));
+            aData->mRect = transformedRect.Intersect(mImageBounds);
+            MOZ_RELEASE_ASSERT(mInvalidRect.Contains(aData->mRect));
+            GP("ContainerLayer image rect bounds change\n");
           } else {
             // XXX: this code can eventually be deleted/made debug only
             combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
+            IntRect transformedRect = ToDeviceSpace(combined.GetBounds(), aMatrix, appUnitsPerDevPixel, mLayerBounds.TopLeft());
+            auto rect = transformedRect.Intersect(mImageBounds);
             GP("Layer NoChange: %s %d %d %d %d\n", aItem->Name(),
                    aData->mRect.x, aData->mRect.y, aData->mRect.XMost(), aData->mRect.YMost());
+            MOZ_RELEASE_ASSERT(rect.IsEqualEdges(aData->mRect));
           }
+        } else if (!aData->mImageRect.IsEqualEdges(mImageBounds)) {
+          // Make sure we update mRect for mImageBounds changes
+          UniquePtr<nsDisplayItemGeometry> geometry(aItem->AllocateGeometry(aBuilder));
+          combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
+          IntRect transformedRect = ToDeviceSpace(combined.GetBounds(), aMatrix, appUnitsPerDevPixel, mLayerBounds.TopLeft());
+          // The invalid rect should contain the old rect and the new rect
+          // because the parent should have invalidated this area
+          MOZ_RELEASE_ASSERT(mInvalidRect.Contains(aData->mRect));
+          aData->mRect = transformedRect.Intersect(mImageBounds);
+          MOZ_RELEASE_ASSERT(mInvalidRect.Contains(aData->mRect));
+          GP("image rect bounds change\n");
         } else {
           // XXX: this code can eventually be deleted/made debug only
           UniquePtr<nsDisplayItemGeometry> geometry(aItem->AllocateGeometry(aBuilder));
           combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
+          IntRect transformedRect = ToDeviceSpace(combined.GetBounds(), aMatrix, appUnitsPerDevPixel, mLayerBounds.TopLeft());
+          auto rect = transformedRect.Intersect(mImageBounds);
           GP("NoChange: %s %d %d %d %d\n", aItem->Name(),
                  aData->mRect.x, aData->mRect.y, aData->mRect.XMost(), aData->mRect.YMost());
+          MOZ_RELEASE_ASSERT(rect.IsEqualEdges(aData->mRect));
         }
       }
     }
@@ -1321,7 +1348,14 @@ WebRenderCommandBuilder::BuildWebRenderCommands(wr::DisplayListBuilder& aBuilder
   mClipManager.BeginBuild(mManager, aBuilder);
 
   {
-    StackingContextHelper pageRootSc(sc, nullptr, aBuilder, aFilters);
+    if (!mZoomProp && gfxPrefs::APZAllowZooming() && XRE_IsContentProcess()) {
+      mZoomProp.emplace();
+      mZoomProp->effect_type = wr::WrAnimationType::Transform;
+      mZoomProp->id = AnimationHelper::GetNextCompositorAnimationsId();
+    }
+
+    StackingContextHelper pageRootSc(sc, nullptr, aBuilder, aFilters,
+        LayoutDeviceRect(), nullptr, mZoomProp.ptrOr(nullptr));
     if (ShouldDumpDisplayList(aDisplayListBuilder)) {
       mBuilderDumpIndex = aBuilder.Dump(mDumpIndent + 1, Some(mBuilderDumpIndex), Nothing());
     }
@@ -1332,6 +1366,9 @@ WebRenderCommandBuilder::BuildWebRenderCommands(wr::DisplayListBuilder& aBuilder
   // Make a "root" layer data that has everything else as descendants
   mLayerScrollData.emplace_back();
   mLayerScrollData.back().InitializeRoot(mLayerScrollData.size() - 1);
+  if (mZoomProp) {
+    mLayerScrollData.back().SetZoomAnimationId(mZoomProp->id);
+  }
   auto callback = [&aScrollData](ScrollableLayerGuid::ViewID aScrollId) -> bool {
     return aScrollData.HasMetadataFor(aScrollId).isSome();
   };

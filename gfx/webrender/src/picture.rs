@@ -163,38 +163,6 @@ pub enum PictureSurface {
     TextureCache(RenderTaskCacheEntryHandle),
 }
 
-// A unique identifier for a Picture. Once we start
-// doing deep compares of picture content, these
-// may be the same across display lists, but that's
-// not currently supported.
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-pub struct PictureId(pub u64);
-
-// TODO(gw): Having to generate globally unique picture
-//           ids for caching is not ideal. We should be
-//           able to completely remove this once we cache
-//           pictures based on their content, rather than
-//           the current cache key structure.
-pub struct PictureIdGenerator {
-    next: u64,
-}
-
-impl PictureIdGenerator {
-    pub fn new() -> Self {
-        PictureIdGenerator {
-            next: 0,
-        }
-    }
-
-    pub fn next(&mut self) -> PictureId {
-        let id = PictureId(self.next);
-        self.next += 1;
-        id
-    }
-}
-
 /// Enum value describing the place of a picture in a 3D context.
 #[derive(Clone, Debug)]
 pub enum Picture3DContext<C> {
@@ -426,12 +394,9 @@ pub struct PicturePrimitive {
     // picture.
     pub extra_gpu_data_handle: GpuCacheHandle,
 
-    // Unique identifier for this picture.
-    pub id: PictureId,
-
     /// The spatial node index of this picture when it is
     /// composited into the parent picture.
-    pub spatial_node_index: SpatialNodeIndex,
+    spatial_node_index: SpatialNodeIndex,
 
     /// The local rect of this picture. It is built
     /// dynamically during the first picture traversal.
@@ -471,7 +436,6 @@ impl PicturePrimitive {
     }
 
     pub fn new_image(
-        id: PictureId,
         requested_composite_mode: Option<PictureCompositeMode>,
         context_3d: Picture3DContext<OrderedPictureChild>,
         pipeline_id: PipelineId,
@@ -517,7 +481,6 @@ impl PicturePrimitive {
             extra_gpu_data_handle: GpuCacheHandle::new(),
             apply_local_clip_rect,
             pipeline_id,
-            id,
             requested_raster_space,
             spatial_node_index,
             local_rect: LayoutRect::zero(),
@@ -670,29 +633,31 @@ impl PicturePrimitive {
     pub fn add_split_plane(
         splitter: &mut PlaneSplitter,
         transforms: &TransformPalette,
-        local_rect: LayoutRect,
-        spatial_node_index: SpatialNodeIndex,
+        prim_instance: &PrimitiveInstance,
+        original_local_rect: LayoutRect,
         plane_split_anchor: usize,
-        world_bounds: WorldRect,
     ) -> bool {
-        // If the picture isn't visible, then ensure it's not added
-        // to the plane splitter, to avoid assertions during batching
-        // about each split plane having a surface.
-        if local_rect.size.width <= 0.0 ||
-           local_rect.size.height <= 0.0 {
-            return false;
-        }
-
         let transform = transforms
-            .get_world_transform(spatial_node_index);
+            .get_world_transform(prim_instance.spatial_node_index);
         let matrix = transform.cast();
-        let local_rect = local_rect.cast();
-        let world_bounds = world_bounds.cast();
+
+        // Apply the local clip rect here, before splitting. This is
+        // because the local clip rect can't be applied in the vertex
+        // shader for split composites, since we are drawing polygons
+        // rather that rectangles. The interpolation still works correctly
+        // since we determine the UVs by doing a bilerp with a factor
+        // from the original local rect.
+        let local_rect = match original_local_rect
+            .intersection(&prim_instance.combined_local_clip_rect)
+        {
+            Some(rect) => rect.cast(),
+            None => return false,
+        };
 
         match transform.transform_kind() {
             TransformedRectKind::AxisAligned => {
                 let inv_transform = transforms
-                    .get_world_inv_transform(spatial_node_index);
+                    .get_world_inv_transform(prim_instance.spatial_node_index);
                 let polygon = Polygon::from_transformed_rect_with_inverse(
                     local_rect,
                     &matrix,
@@ -709,7 +674,7 @@ impl PicturePrimitive {
                         plane_split_anchor,
                     ),
                     &matrix,
-                    Some(world_bounds),
+                    prim_instance.clipped_world_rect.map(|r| r.to_f64()),
                 );
                 if let Ok(results) = results {
                     for poly in results {
