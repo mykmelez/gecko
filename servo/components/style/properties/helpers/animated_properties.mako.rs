@@ -9,40 +9,40 @@
     from itertools import groupby
 %>
 
-#[cfg(feature = "gecko")] use gecko_bindings::structs::RawServoAnimationValueMap;
-#[cfg(feature = "gecko")] use gecko_bindings::structs::RawGeckoGfxMatrix4x4;
-#[cfg(feature = "gecko")] use gecko_bindings::structs::nsCSSPropertyID;
-#[cfg(feature = "gecko")] use gecko_bindings::sugar::ownership::{HasFFI, HasSimpleFFI};
+#[cfg(feature = "gecko")] use crate::gecko_bindings::structs::RawServoAnimationValueMap;
+#[cfg(feature = "gecko")] use crate::gecko_bindings::structs::RawGeckoGfxMatrix4x4;
+#[cfg(feature = "gecko")] use crate::gecko_bindings::structs::nsCSSPropertyID;
+#[cfg(feature = "gecko")] use crate::gecko_bindings::sugar::ownership::{HasFFI, HasSimpleFFI};
 use itertools::{EitherOrBoth, Itertools};
 use num_traits::Zero;
-use properties::{CSSWideKeyword, PropertyDeclaration};
-use properties::longhands;
-use properties::longhands::visibility::computed_value::T as Visibility;
-use properties::LonghandId;
+use crate::properties::{CSSWideKeyword, PropertyDeclaration};
+use crate::properties::longhands;
+use crate::properties::longhands::visibility::computed_value::T as Visibility;
+use crate::properties::LonghandId;
 use servo_arc::Arc;
 use smallvec::SmallVec;
 use std::{cmp, ptr};
 use std::mem::{self, ManuallyDrop};
-use hash::FxHashMap;
+use crate::hash::FxHashMap;
 use super::ComputedValues;
-use values::CSSFloat;
-use values::animated::{Animate, Procedure, ToAnimatedValue, ToAnimatedZero};
-use values::animated::effects::Filter as AnimatedFilter;
-#[cfg(feature = "gecko")] use values::computed::TransitionProperty;
-use values::computed::Angle;
-use values::computed::{ClipRect, Context};
-use values::computed::{Length, LengthOrPercentage};
-use values::computed::{Number, Percentage};
-use values::computed::ToComputedValue;
-use values::computed::transform::{DirectionVector, Matrix, Matrix3D};
-use values::computed::transform::TransformOperation as ComputedTransformOperation;
-use values::computed::transform::Transform as ComputedTransform;
-use values::computed::transform::Rotate as ComputedRotate;
-use values::computed::transform::Translate as ComputedTranslate;
-use values::computed::transform::Scale as ComputedScale;
-use values::generics::transform::{self, Rotate, Translate, Scale, Transform, TransformOperation};
-use values::distance::{ComputeSquaredDistance, SquaredDistance};
-use values::generics::effects::Filter;
+use crate::values::CSSFloat;
+use crate::values::animated::{Animate, Procedure, ToAnimatedValue, ToAnimatedZero};
+use crate::values::animated::effects::Filter as AnimatedFilter;
+#[cfg(feature = "gecko")] use crate::values::computed::TransitionProperty;
+use crate::values::computed::Angle;
+use crate::values::computed::{ClipRect, Context};
+use crate::values::computed::{Length, LengthOrPercentage};
+use crate::values::computed::{Number, Percentage};
+use crate::values::computed::ToComputedValue;
+use crate::values::computed::transform::{DirectionVector, Matrix, Matrix3D};
+use crate::values::computed::transform::TransformOperation as ComputedTransformOperation;
+use crate::values::computed::transform::Transform as ComputedTransform;
+use crate::values::computed::transform::Rotate as ComputedRotate;
+use crate::values::computed::transform::Translate as ComputedTranslate;
+use crate::values::computed::transform::Scale as ComputedScale;
+use crate::values::generics::transform::{self, Rotate, Translate, Scale, Transform, TransformOperation};
+use crate::values::distance::{ComputeSquaredDistance, SquaredDistance};
+use crate::values::generics::effects::Filter;
 use void::{self, Void};
 
 /// Convert nsCSSPropertyID to TransitionProperty
@@ -357,7 +357,7 @@ impl AnimationValue {
     /// "Uncompute" this animation value in order to be used inside the CSS
     /// cascade.
     pub fn uncompute(&self) -> PropertyDeclaration {
-        use properties::longhands;
+        use crate::properties::longhands;
         use self::AnimationValue::*;
 
         use super::PropertyDeclarationVariantRepr;
@@ -401,7 +401,7 @@ impl AnimationValue {
     pub fn from_declaration(
         decl: &PropertyDeclaration,
         context: &mut Context,
-        extra_custom_properties: Option<<&Arc<::custom_properties::CustomPropertiesMap>>,
+        extra_custom_properties: Option<<&Arc<crate::custom_properties::CustomPropertiesMap>>,
         initial: &ComputedValues
     ) -> Option<Self> {
         use super::PropertyDeclarationVariantRepr;
@@ -815,7 +815,7 @@ impl ToAnimatedZero for Visibility {
 impl Animate for ClipRect {
     #[inline]
     fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()> {
-        use values::computed::Length;
+        use crate::values::computed::Length;
         let animate_component = |this: &Option<Length>, other: &Option<Length>| {
             match (this.animate(other, procedure)?, procedure) {
                 (None, Procedure::Interpolate { .. }) => Ok(None),
@@ -1070,8 +1070,8 @@ impl Animate for ComputedTransformOperation {
                 &TransformOperation::Perspective(ref fd),
                 &TransformOperation::Perspective(ref td),
             ) => {
-                use values::computed::CSSPixelLength;
-                use values::generics::transform::create_perspective_matrix;
+                use crate::values::computed::CSSPixelLength;
+                use crate::values::generics::transform::create_perspective_matrix;
 
                 // From https://drafts.csswg.org/css-transforms-2/#interpolation-of-transform-functions:
                 //
@@ -1246,7 +1246,7 @@ impl ComputeSquaredDistance for MatrixDecomposed2D {
     #[inline]
     fn compute_squared_distance(&self, other: &Self) -> Result<SquaredDistance, ()> {
         // Use Radian to compute the distance.
-        const RAD_PER_DEG: f64 = ::std::f64::consts::PI / 180.0;
+        const RAD_PER_DEG: f64 = std::f64::consts::PI / 180.0;
         let angle1 = self.angle as f64 * RAD_PER_DEG;
         let angle2 = other.angle as f64 * RAD_PER_DEG;
         Ok(self.translate.compute_squared_distance(&other.translate)? +
@@ -2102,12 +2102,12 @@ impl Matrix3D {
 
 /// <https://drafts.csswg.org/css-transforms-2/#propdef-rotate>
 impl ComputedRotate {
-    fn resolve(rotate: &ComputedRotate) -> (Number, Number, Number, Angle) {
+    fn resolve(&self) -> (Number, Number, Number, Angle) {
         // According to the spec:
         // https://drafts.csswg.org/css-transforms-2/#individual-transforms
         //
         // If the axis is unspecified, it defaults to "0 0 1"
-        match *rotate {
+        match *self {
             Rotate::None => (0., 0., 1., Angle::zero()),
             Rotate::Rotate3D(rx, ry, rz, angle) => (rx, ry, rz, angle),
             Rotate::Rotate(angle) => (0., 0., 1., angle),
@@ -2122,8 +2122,7 @@ impl Animate for ComputedRotate {
         other: &Self,
         procedure: Procedure,
     ) -> Result<Self, ()> {
-        let from = ComputedRotate::resolve(self);
-        let to = ComputedRotate::resolve(other);
+        let (from, to) = (self.resolve(), other.resolve());
 
         let (mut fx, mut fy, mut fz, fa) =
             transform::get_normalized_vector_and_angle(from.0, from.1, from.2, from.3);
@@ -2163,24 +2162,17 @@ impl Animate for ComputedRotate {
 
 /// <https://drafts.csswg.org/css-transforms-2/#propdef-translate>
 impl ComputedTranslate {
-    fn resolve(
-        translate: &ComputedTranslate,
-    ) -> (LengthOrPercentage, LengthOrPercentage, Length) {
+    fn resolve(&self) -> (LengthOrPercentage, LengthOrPercentage, Length) {
         // According to the spec:
         // https://drafts.csswg.org/css-transforms-2/#individual-transforms
         //
         // Unspecified translations default to 0px
-        match *translate {
+        match *self {
             Translate::None => {
-                (
-                    LengthOrPercentage::Length(Length::zero()),
-                    LengthOrPercentage::Length(Length::zero()),
-                    Length::zero(),
-                )
+                (LengthOrPercentage::zero(), LengthOrPercentage::zero(), Length::zero())
             },
             Translate::Translate3D(tx, ty, tz) => (tx, ty, tz),
             Translate::Translate(tx, ty) => (tx, ty, Length::zero()),
-            Translate::TranslateX(tx) => (tx, LengthOrPercentage::Length(Length::zero()), Length::zero()),
         }
     }
 }
@@ -2192,23 +2184,31 @@ impl Animate for ComputedTranslate {
         other: &Self,
         procedure: Procedure,
     ) -> Result<Self, ()> {
-        let from = ComputedTranslate::resolve(self);
-        let to = ComputedTranslate::resolve(other);
-
-        Ok(Translate::Translate3D(from.0.animate(&to.0, procedure)?,
-                                  from.1.animate(&to.1, procedure)?,
-                                  from.2.animate(&to.2, procedure)?))
+        match (self, other) {
+            (&Translate::None, &Translate::None) => Ok(Translate::None),
+            (&Translate::Translate3D(_, ..), _) | (_, &Translate::Translate3D(_, ..)) => {
+                let (from, to) = (self.resolve(), other.resolve());
+                Ok(Translate::Translate3D(from.0.animate(&to.0, procedure)?,
+                                          from.1.animate(&to.1, procedure)?,
+                                          from.2.animate(&to.2, procedure)?))
+            },
+            (&Translate::Translate(_, ..), _) | (_, &Translate::Translate(_, ..)) => {
+                let (from, to) = (self.resolve(), other.resolve());
+                Ok(Translate::Translate(from.0.animate(&to.0, procedure)?,
+                                        from.1.animate(&to.1, procedure)?))
+            },
+        }
     }
 }
 
 /// <https://drafts.csswg.org/css-transforms-2/#propdef-scale>
 impl ComputedScale {
-    fn resolve(scale: &ComputedScale) -> (Number, Number, Number) {
+    fn resolve(&self) -> (Number, Number, Number) {
         // According to the spec:
         // https://drafts.csswg.org/css-transforms-2/#individual-transforms
         //
         // Unspecified scales default to 1
-        match *scale {
+        match *self {
             Scale::None => (1.0, 1.0, 1.0),
             Scale::Scale3D(sx, sy, sz) => (sx, sy, sz),
             Scale::Scale(sx, sy) => (sx, sy, 1.),
@@ -2226,8 +2226,7 @@ impl Animate for ComputedScale {
         match (self, other) {
             (&Scale::None, &Scale::None) => Ok(Scale::None),
             (&Scale::Scale3D(_, ..), _) | (_, &Scale::Scale3D(_, ..)) => {
-                let from = ComputedScale::resolve(self);
-                let to = ComputedScale::resolve(other);
+                let (from, to) = (self.resolve(), other.resolve());
                 // FIXME(emilio, bug 1464791): why does this do something different than
                 // Scale3D / TransformOperation::Scale3D?
                 if procedure == Procedure::Add {
@@ -2241,8 +2240,7 @@ impl Animate for ComputedScale {
                 ))
             },
             (&Scale::Scale(_, ..), _) | (_, &Scale::Scale(_, ..)) => {
-                let from = ComputedScale::resolve(self);
-                let to = ComputedScale::resolve(other);
+                let (from, to) = (self.resolve(), other.resolve());
                 // FIXME(emilio, bug 1464791): why does this do something different than
                 // Scale / TransformOperation::Scale?
                 if procedure == Procedure::Add {
