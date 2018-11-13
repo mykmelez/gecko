@@ -94,6 +94,7 @@ impl TaskRunnable {
 
     xpcom_method!(Run, run, {});
     fn run(&self) -> Result<(), nsresult> {
+        println!("{:?} refcnt: {:?}", self.name, self.__refcnt.get());
         match self.has_run.take() {
             false => {
                 debug_assert!(unsafe { !NS_IsMainThread() });

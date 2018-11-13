@@ -30,6 +30,20 @@ add_task(async function getOrCreate() {
   Assert.ok(defaultDatabase);
 });
 
+add_task(async function triggerAssertion() {
+  const databaseDir = await makeDatabaseDir("triggerAssertion");
+  const database = await KeyValueService.getOrCreate(databaseDir);
+
+  // Getting key/value pairs that don't exist (yet) returns default values
+  // or null, depending on whether you specify a default value.
+  for (let i = 0; i < 10000; i++) {
+    await database.put("foo", 1);
+    await database.get("foo");
+    await database.has("foo");
+    await database.delete("foo");
+  }
+});
+
 add_task(async function putGetHasDelete() {
   const databaseDir = await makeDatabaseDir("putGetHasDelete");
   const database = await KeyValueService.getOrCreate(databaseDir);
