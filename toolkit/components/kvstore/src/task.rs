@@ -15,6 +15,8 @@ use std::{
     path::Path,
     ptr, str,
     sync::{Arc, RwLock},
+    thread,
+    time,
     vec::IntoIter,
 };
 use storage_variant::IntoVariant;
@@ -100,7 +102,9 @@ impl TaskRunnable {
                 debug_assert!(unsafe { !NS_IsMainThread() });
                 self.has_run.set(true);
                 self.task.run();
-                self.dispatch(self.original_thread.clone())
+                let rv = self.dispatch(self.original_thread.clone());
+                thread::sleep(time::Duration::from_millis(100));
+                rv
             }
             true => {
                 debug_assert!(unsafe { NS_IsMainThread() });
