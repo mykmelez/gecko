@@ -30,7 +30,7 @@ use render_task::{RenderTaskCacheKeyKind, RenderTaskId, RenderTaskCacheEntryHand
 use renderer::{MAX_VERTEX_TEXTURE_WIDTH};
 use resource_cache::{ImageProperties, ImageRequest, ResourceCache};
 use scene::SceneProperties;
-use std::{cmp, fmt, mem, ops, usize};
+use std::{cmp, fmt, mem, ops, u32, usize};
 #[cfg(debug_assertions)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tiling::SpecialRenderPasses;
@@ -289,6 +289,13 @@ pub struct DeferredResolve {
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct PrimitiveIndex(pub usize);
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct ClipTaskIndex(pub u32);
+
+impl ClipTaskIndex {
+    pub const INVALID: ClipTaskIndex = ClipTaskIndex(0);
+}
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
@@ -823,26 +830,20 @@ bitflags! {
     }
 }
 
+/// Represents the visibility state of a segment (wrt clip masks).
 #[derive(Debug, Clone)]
-pub enum BrushSegmentTaskId {
-    RenderTaskId(RenderTaskId),
-    Opaque,
-    Empty,
-}
-
-impl BrushSegmentTaskId {
-    pub fn needs_blending(&self) -> bool {
-        match *self {
-            BrushSegmentTaskId::RenderTaskId(..) => true,
-            BrushSegmentTaskId::Opaque | BrushSegmentTaskId::Empty => false,
-        }
-    }
+pub enum ClipMaskKind {
+    /// The segment has a clip mask, specified by the render task.
+    Mask(RenderTaskId),
+    /// The segment has no clip mask.
+    None,
+    /// The segment is made invisible / clipped completely.
+    Clipped,
 }
 
 #[derive(Debug, Clone)]
 pub struct BrushSegment {
     pub local_rect: LayoutRect,
-    pub clip_task_id: BrushSegmentTaskId,
     pub may_need_clip_mask: bool,
     pub edge_flags: EdgeAaSegmentMask,
     pub extra_data: [f32; 4],
@@ -859,7 +860,6 @@ impl BrushSegment {
     ) -> Self {
         Self {
             local_rect,
-            clip_task_id: BrushSegmentTaskId::Opaque,
             may_need_clip_mask,
             edge_flags,
             extra_data,
@@ -867,6 +867,8 @@ impl BrushSegment {
         }
     }
 
+    /// Write out to the clip mask instances array the correct clip mask
+    /// config for this segment.
     pub fn update_clip_task(
         &mut self,
         clip_chain: Option<&ClipChainInstance>,
@@ -876,13 +878,12 @@ impl BrushSegment {
         pic_state: &mut PictureState,
         frame_context: &FrameBuildingContext,
         frame_state: &mut FrameBuildingState,
-    ) {
+    ) -> ClipMaskKind {
         match clip_chain {
             Some(clip_chain) => {
                 if !clip_chain.needs_mask ||
                    (!self.may_need_clip_mask && !clip_chain.has_non_local_clips) {
-                    self.clip_task_id = BrushSegmentTaskId::Opaque;
-                    return;
+                    return ClipMaskKind::None;
                 }
 
                 let (device_rect, _, _) = match get_raster_rects(
@@ -894,8 +895,7 @@ impl BrushSegment {
                 ) {
                     Some(info) => info,
                     None => {
-                        self.clip_task_id = BrushSegmentTaskId::Empty;
-                        return;
+                        return ClipMaskKind::Clipped;
                     }
                 };
 
@@ -912,10 +912,10 @@ impl BrushSegment {
 
                 let clip_task_id = frame_state.render_tasks.add(clip_task);
                 frame_state.surfaces[surface_index.0].tasks.push(clip_task_id);
-                self.clip_task_id = BrushSegmentTaskId::RenderTaskId(clip_task_id);
+                ClipMaskKind::Mask(clip_task_id)
             }
             None => {
-                self.clip_task_id = BrushSegmentTaskId::Empty;
+                ClipMaskKind::Clipped
             }
         }
     }
@@ -932,6 +932,7 @@ pub struct BrushPrimitive {
     pub kind: BrushKind,
     pub opacity: PrimitiveOpacity,
     pub segment_desc: Option<BrushSegmentDescriptor>,
+    pub gpu_location: GpuCacheHandle,
 }
 
 impl BrushPrimitive {
@@ -943,80 +944,101 @@ impl BrushPrimitive {
             kind,
             opacity: PrimitiveOpacity::translucent(),
             segment_desc,
+            gpu_location: GpuCacheHandle::new(),
         }
     }
 
-    fn write_gpu_blocks(
-        &self,
-        request: &mut GpuDataRequest,
+    fn write_gpu_blocks_if_required(
+        &mut self,
         local_rect: LayoutRect,
+        gpu_cache: &mut GpuCache,
     ) {
-        // has to match VECS_PER_SPECIFIC_BRUSH
-        match self.kind {
-            BrushKind::Border { .. } => {
-                // Border primitives currently used for
-                // image borders, and run through the
-                // normal brush_image shader.
-                request.push(PremultipliedColorF::WHITE);
-                request.push(PremultipliedColorF::WHITE);
-                request.push([
-                    local_rect.size.width,
-                    local_rect.size.height,
-                    0.0,
-                    0.0,
-                ]);
+        if let Some(mut request) = gpu_cache.request(&mut self.gpu_location) {
+            // has to match VECS_PER_SPECIFIC_BRUSH
+            match self.kind {
+                BrushKind::Border { .. } => {
+                    // Border primitives currently used for
+                    // image borders, and run through the
+                    // normal brush_image shader.
+                    request.push(PremultipliedColorF::WHITE);
+                    request.push(PremultipliedColorF::WHITE);
+                    request.push([
+                        local_rect.size.width,
+                        local_rect.size.height,
+                        0.0,
+                        0.0,
+                    ]);
+                }
+                BrushKind::YuvImage { color_depth, .. } => {
+                    request.push([
+                        color_depth.rescaling_factor(),
+                        0.0,
+                        0.0,
+                        0.0
+                    ]);
+                }
+                // Images are drawn as a white color, modulated by the total
+                // opacity coming from any collapsed property bindings.
+                BrushKind::Image { stretch_size, tile_spacing, color, .. } => {
+                    request.push(color.premultiplied());
+                    request.push(PremultipliedColorF::WHITE);
+                    request.push([
+                        stretch_size.width + tile_spacing.width,
+                        stretch_size.height + tile_spacing.height,
+                        0.0,
+                        0.0,
+                    ]);
+                }
+                // Solid rects also support opacity collapsing.
+                BrushKind::Solid { ref color, .. } => {
+                    request.push(color.premultiplied());
+                }
+                BrushKind::LinearGradient { stretch_size, start_point, end_point, extend_mode, .. } => {
+                    request.push([
+                        start_point.x,
+                        start_point.y,
+                        end_point.x,
+                        end_point.y,
+                    ]);
+                    request.push([
+                        pack_as_float(extend_mode as u32),
+                        stretch_size.width,
+                        stretch_size.height,
+                        0.0,
+                    ]);
+                }
+                BrushKind::RadialGradient { stretch_size, center, start_radius, end_radius, ratio_xy, extend_mode, .. } => {
+                    request.push([
+                        center.x,
+                        center.y,
+                        start_radius,
+                        end_radius,
+                    ]);
+                    request.push([
+                        ratio_xy,
+                        pack_as_float(extend_mode as u32),
+                        stretch_size.width,
+                        stretch_size.height,
+                    ]);
+                }
             }
-            BrushKind::YuvImage { color_depth, .. } => {
-                request.push([
-                    color_depth.rescaling_factor(),
-                    0.0,
-                    0.0,
-                    0.0
-                ]);
-            }
-            // Images are drawn as a white color, modulated by the total
-            // opacity coming from any collapsed property bindings.
-            BrushKind::Image { stretch_size, tile_spacing, color, .. } => {
-                request.push(color.premultiplied());
-                request.push(PremultipliedColorF::WHITE);
-                request.push([
-                    stretch_size.width + tile_spacing.width,
-                    stretch_size.height + tile_spacing.height,
-                    0.0,
-                    0.0,
-                ]);
-            }
-            // Solid rects also support opacity collapsing.
-            BrushKind::Solid { ref color, .. } => {
-                request.push(color.premultiplied());
-            }
-            BrushKind::LinearGradient { stretch_size, start_point, end_point, extend_mode, .. } => {
-                request.push([
-                    start_point.x,
-                    start_point.y,
-                    end_point.x,
-                    end_point.y,
-                ]);
-                request.push([
-                    pack_as_float(extend_mode as u32),
-                    stretch_size.width,
-                    stretch_size.height,
-                    0.0,
-                ]);
-            }
-            BrushKind::RadialGradient { stretch_size, center, start_radius, end_radius, ratio_xy, extend_mode, .. } => {
-                request.push([
-                    center.x,
-                    center.y,
-                    start_radius,
-                    end_radius,
-                ]);
-                request.push([
-                    ratio_xy,
-                    pack_as_float(extend_mode as u32),
-                    stretch_size.width,
-                    stretch_size.height,
-                ]);
+
+            match self.segment_desc {
+                Some(ref segment_desc) => {
+                    for segment in &segment_desc.segments {
+                        // has to match VECS_PER_SEGMENT
+                        request.write_segment(
+                            segment.local_rect,
+                            segment.extra_data,
+                        );
+                    }
+                }
+                None => {
+                    request.write_segment(
+                        local_rect,
+                        [0.0; 4],
+                    );
+                }
             }
         }
     }
@@ -1847,16 +1869,12 @@ pub struct PrimitiveInstance {
     /// completely off-screen.
     pub clipped_world_rect: Option<WorldRect>,
 
-    /// If this primitive has a global clip mask, this identifies
-    /// the render task for it.
-    pub clip_task_id: Option<RenderTaskId>,
-
-    /// The main GPU cache handle that this primitive uses to
-    /// store data accessible to shaders. This should be moved
-    /// into the interned data in order to retain this between
-    /// display list changes, but needs to be split into shared
-    /// and per-instance data.
-    pub gpu_location: GpuCacheHandle,
+    /// An index into the clip task instances array in the primitive
+    /// store. If this is ClipTaskIndex::INVALID, then the primitive
+    /// has no clip mask. Otherwise, it may store the offset of the
+    /// global clip mask task for this primitive, or the first of
+    /// a list of clip task ids (one per segment).
+    pub clip_task_index: ClipTaskIndex,
 
     /// ID of the clip chain that this primitive is clipped by.
     pub clip_chain_id: ClipChainId,
@@ -1881,11 +1899,10 @@ impl PrimitiveInstance {
             combined_local_clip_rect: LayoutRect::zero(),
             clipped_world_rect: None,
             #[cfg(debug_assertions)]
-            prepared_frame_id: FrameId::invalid(),
+            prepared_frame_id: FrameId::INVALID,
             #[cfg(debug_assertions)]
             id: PrimitiveDebugId(NEXT_PRIM_ID.fetch_add(1, Ordering::Relaxed)),
-            clip_task_id: None,
-            gpu_location: GpuCacheHandle::new(),
+            clip_task_index: ClipTaskIndex::INVALID,
             clip_chain_id,
             spatial_node_index,
             cluster_range: ClusterRange { start: 0, end: 0 },
@@ -1907,6 +1924,13 @@ pub struct PrimitiveStore {
     pub primitives: Vec<Primitive>,
     pub pictures: Vec<PicturePrimitive>,
     pub text_runs: Vec<TextRunPrimitive>,
+
+    /// Written during primitive preparation, and read during
+    /// batching. Contains a list of clip mask instance parameters
+    /// per segment generated.
+    /// TODO(gw): We should be able to completely remove this once
+    ///           the batching and prepare_prim passes are unified.
+    pub clip_mask_instances: Vec<ClipMaskKind>,
 }
 
 impl PrimitiveStore {
@@ -1915,7 +1939,16 @@ impl PrimitiveStore {
             primitives: Vec::new(),
             pictures: Vec::new(),
             text_runs: Vec::new(),
+            clip_mask_instances: Vec::new(),
         }
+    }
+
+    pub fn reset_clip_instances(&mut self) {
+        // Clear the clip mask tasks for the beginning of the frame. Append
+        // a single kind representing no clip mask, at the ClipTaskIndex::INVALID
+        // location.
+        self.clip_mask_instances.clear();
+        self.clip_mask_instances.push(ClipMaskKind::None)
     }
 
     pub fn create_picture(
@@ -2176,10 +2209,7 @@ impl PrimitiveStore {
                         frame_state,
                     );
 
-                if local_rect_changed {
-                    frame_state.gpu_cache.invalidate(&mut prim_instance.gpu_location);
-                    pic_state.local_rect_changed = true;
-                }
+                pic_state.local_rect_changed |= local_rect_changed;
 
                 (is_passthrough, clip_node_collector)
             }
@@ -2313,6 +2343,7 @@ impl PrimitiveStore {
                 frame_state,
                 &clip_node_collector,
                 &mut self.primitives,
+                &mut self.clip_mask_instances,
             );
 
             if prim_instance.is_chased() {
@@ -2350,7 +2381,7 @@ impl PrimitiveStore {
                     prim_instance.clipped_world_rect = None;
                 }
 
-                if let Some(mut request) = frame_state.gpu_cache.request(&mut prim_instance.gpu_location) {
+                if let Some(mut request) = frame_state.gpu_cache.request(&mut pic.gpu_location) {
                     request.push(PremultipliedColorF::WHITE);
                     request.push(PremultipliedColorF::WHITE);
                     request.push([
@@ -2790,6 +2821,7 @@ impl PrimitiveInstance {
         frame_state: &mut FrameBuildingState,
         clip_node_collector: &Option<ClipNodeCollector>,
         primitives: &mut [Primitive],
+        clip_mask_instances: &mut Vec<ClipMaskKind>,
     ) -> bool {
         let brush = match self.kind {
             PrimitiveInstanceKind::Picture { .. } |
@@ -2806,13 +2838,6 @@ impl PrimitiveInstance {
             }
         };
 
-        // Reset clip tasks from previous frame
-        if let Some(ref mut desc) = brush.segment_desc {
-            for segment in &mut desc.segments {
-                segment.clip_task_id = BrushSegmentTaskId::Opaque;
-            }
-        }
-
         brush.write_brush_segment_description(
             prim_local_rect,
             prim_local_clip_rect,
@@ -2825,12 +2850,23 @@ impl PrimitiveInstance {
             None => return false,
         };
 
+        // If there are no segments, early out to avoid setting a valid
+        // clip task instance location below.
+        if segment_desc.segments.is_empty() {
+            return true;
+        }
+
+        // Set where in the clip mask instances array the clip mask info
+        // can be found for this primitive. Each segment will push the
+        // clip mask information for itself in update_clip_task below.
+        self.clip_task_index = ClipTaskIndex(clip_mask_instances.len() as _);
+
         // If we only built 1 segment, there is no point in re-running
         // the clip chain builder. Instead, just use the clip chain
         // instance that was built for the main primitive. This is a
         // significant optimization for the common case.
         if segment_desc.segments.len() == 1 {
-            segment_desc.segments[0].update_clip_task(
+            let clip_mask_kind = segment_desc.segments[0].update_clip_task(
                 Some(prim_clip_chain),
                 prim_bounding_rect,
                 root_spatial_node_index,
@@ -2839,6 +2875,7 @@ impl PrimitiveInstance {
                 frame_context,
                 frame_state,
             );
+            clip_mask_instances.push(clip_mask_kind);
         } else {
             for segment in &mut segment_desc.segments {
                 // Build a clip chain for the smaller segment rect. This will
@@ -2862,7 +2899,7 @@ impl PrimitiveInstance {
                         &mut frame_state.resources.clip_data_store,
                     );
 
-                segment.update_clip_task(
+                let clip_mask_kind = segment.update_clip_task(
                     segment_clip_chain.as_ref(),
                     prim_bounding_rect,
                     root_spatial_node_index,
@@ -2871,6 +2908,7 @@ impl PrimitiveInstance {
                     frame_context,
                     frame_state,
                 );
+                clip_mask_instances.push(clip_mask_kind);
             }
         }
 
@@ -3431,33 +3469,12 @@ impl PrimitiveInstance {
         }
 
         // Mark this GPU resource as required for this frame.
-        let is_chased = self.is_chased();
-        if let Some(mut request) = frame_state.gpu_cache.request(&mut self.gpu_location) {
-            match *prim_details {
-                PrimitiveDetails::Brush(ref mut brush) => {
-                    brush.write_gpu_blocks(&mut request, prim_local_rect);
-
-                    match brush.segment_desc {
-                        Some(ref segment_desc) => {
-                            for segment in &segment_desc.segments {
-                                if is_chased {
-                                    println!("\t\t{:?}", segment);
-                                }
-                                // has to match VECS_PER_SEGMENT
-                                request.write_segment(
-                                    segment.local_rect,
-                                    segment.extra_data,
-                                );
-                            }
-                        }
-                        None => {
-                            request.write_segment(
-                                prim_local_rect,
-                                [0.0; 4],
-                            );
-                        }
-                    }
-                }
+        match *prim_details {
+            PrimitiveDetails::Brush(ref mut brush) => {
+                brush.write_gpu_blocks_if_required(
+                    prim_local_rect,
+                    frame_state.gpu_cache,
+                );
             }
         }
     }
@@ -3476,13 +3493,14 @@ impl PrimitiveInstance {
         frame_state: &mut FrameBuildingState,
         clip_node_collector: &Option<ClipNodeCollector>,
         primitives: &mut [Primitive],
+        clip_mask_instances: &mut Vec<ClipMaskKind>,
     ) {
         if self.is_chased() {
             println!("\tupdating clip task with pic rect {:?}", clip_chain.pic_clip_rect);
         }
 
         // Reset clips from previous frames since we may clip differently each frame.
-        self.clip_task_id = None;
+        self.clip_task_index = ClipTaskIndex::INVALID;
 
         // First try to  render this primitive's mask using optimized brush rendering.
         if self.update_clip_task_for_brush(
@@ -3498,6 +3516,7 @@ impl PrimitiveInstance {
             frame_state,
             clip_node_collector,
             primitives,
+            clip_mask_instances,
         ) {
             if self.is_chased() {
                 println!("\tsegment tasks have been created for clipping");
@@ -3529,7 +3548,10 @@ impl PrimitiveInstance {
                     println!("\tcreated task {:?} with device rect {:?}",
                         clip_task_id, device_rect);
                 }
-                self.clip_task_id = Some(clip_task_id);
+                // Set the global clip mask instance for this primitive.
+                let clip_task_index = ClipTaskIndex(clip_mask_instances.len() as _);
+                clip_mask_instances.push(ClipMaskKind::Mask(clip_task_id));
+                self.clip_task_index = clip_task_index;
                 frame_state.surfaces[surface_index.0].tasks.push(clip_task_id);
             }
         }
