@@ -444,7 +444,7 @@ impl ResourceCache {
             cached_glyph_dimensions: FastHashMap::default(),
             texture_cache,
             state: State::Idle,
-            current_frame_id: FrameId::invalid(),
+            current_frame_id: FrameId::INVALID,
             pending_image_requests: FastHashSet::default(),
             glyph_rasterizer,
             blob_image_handler,
@@ -1017,6 +1017,8 @@ impl ResourceCache {
                         }
                     }
                 };
+
+                assert!(descriptor.size.width != 0 && descriptor.size.height != 0);
 
                 self.missing_blob_images.push(
                     BlobImageParams {
@@ -2032,7 +2034,7 @@ impl ResourceCache {
                 self.texture_cache = cached.textures;
             }
             None => {
-                self.current_frame_id = FrameId::invalid();
+                self.current_frame_id = FrameId::INVALID;
                 self.cached_glyphs.clear();
                 self.cached_glyph_dimensions.clear();
                 self.cached_images.clear();
