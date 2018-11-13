@@ -103,6 +103,7 @@ impl TaskRunnable {
                 self.has_run.set(true);
                 self.task.run();
                 let rv = self.dispatch(self.original_thread.clone());
+                // TODO: remove this after fixing the bug that this helps to reproduce.
                 thread::sleep(time::Duration::from_millis(100));
                 rv
             }
