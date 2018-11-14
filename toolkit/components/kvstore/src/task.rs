@@ -104,7 +104,7 @@ impl TaskRunnable {
             true => {
                 debug_assert!(unsafe { NS_IsMainThread() });
                 self.task.done()
-            },
+            }
         }
     }
 
