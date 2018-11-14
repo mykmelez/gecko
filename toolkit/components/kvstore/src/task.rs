@@ -7,7 +7,7 @@ extern crate xpcom;
 use error::KeyValueError;
 use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_OK};
 use nsstring::{nsACString, nsCString, nsString};
-use owned_value::{value_to_owned, variant_to_owned, OwnedValue};
+use owned_value::{value_to_owned, OwnedValue};
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
     cell::Cell,
@@ -121,7 +121,7 @@ impl TaskRunnable {
 }
 
 pub struct GetOrCreateTask {
-    callback: RefPtr<nsIKeyValueDatabaseCallback>,
+    callback: Cell<Option<RefPtr<nsIKeyValueDatabaseCallback>>>,
     thread: RefPtr<nsIThread>,
     path: nsCString,
     name: nsCString,
@@ -136,7 +136,7 @@ impl GetOrCreateTask {
         name: nsCString,
     ) -> GetOrCreateTask {
         GetOrCreateTask {
-            callback,
+            callback: Cell::new(Some(callback)),
             thread,
             path,
             name,
@@ -165,16 +165,25 @@ impl Task for GetOrCreateTask {
     }
 
     fn done(&self) -> Result<(), nsresult> {
+        // If TaskRunnable.run() calls Task.done() to return a result
+        // on the main thread before TaskRunnable.run() returns on the database
+        // thread, then the Task will get dropped on the database thread.
+        //
+        // But the callback is an nsXPCWrappedJS that isn't safe to release
+        // on the database thread.  So we move it out of the Task here to ensure
+        // it gets released on the main thread.
+        let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
+
         match self.result.take() {
-            Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
-            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
+            Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
+            Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
+            None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
 
 pub struct PutTask {
-    callback: RefPtr<nsIKeyValueVoidCallback>,
+    callback: Cell<Option<RefPtr<nsIKeyValueVoidCallback>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
@@ -191,7 +200,7 @@ impl PutTask {
         value: OwnedValue,
     ) -> PutTask {
         PutTask {
-            callback,
+            callback: Cell::new(Some(callback)),
             rkv,
             store,
             key,
@@ -225,20 +234,29 @@ impl Task for PutTask {
     }
 
     fn done(&self) -> Result<(), nsresult> {
+        // If TaskRunnable.run() calls Task.done() to return a result
+        // on the main thread before TaskRunnable.run() returns on the database
+        // thread, then the Task will get dropped on the database thread.
+        //
+        // But the callback is an nsXPCWrappedJS that isn't safe to release
+        // on the database thread.  So we move it out of the Task here to ensure
+        // it gets released on the main thread.
+        let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
+
         match self.result.take() {
-            Some(Ok(())) => unsafe { self.callback.Resolve() },
-            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
+            Some(Ok(())) => unsafe { callback.Resolve() },
+            Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
+            None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
 
 pub struct GetTask {
-    callback: RefPtr<nsIKeyValueVariantCallback>,
+    callback: Cell<Option<RefPtr<nsIKeyValueVariantCallback>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
-    default_value: RefPtr<nsIVariant>,
+    default_value: Option<OwnedValue>,
     result: Cell<Option<Result<RefPtr<nsIVariant>, KeyValueError>>>,
 }
 
@@ -248,10 +266,10 @@ impl GetTask {
         rkv: Arc<RwLock<Rkv>>,
         store: Store,
         key: nsCString,
-        default_value: RefPtr<nsIVariant>,
+        default_value: Option<OwnedValue>,
     ) -> GetTask {
         GetTask {
-            callback,
+            callback: Cell::new(Some(callback)),
             rkv,
             store,
             key,
@@ -281,13 +299,11 @@ impl Task for GetTask {
                         _ => return Err(KeyValueError::UnexpectedValue),
                     }
                 } else {
-                    // We can't simply return the default_value, which is
-                    // a non-threadsafe XPCVariant.  Instead, we convert it
-                    // to a threadsafe storage variant by indirecting through
-                    // OwnedValue.  It seems like we'd be better off copying
-                    // to a storage variant directly.
-                    match variant_to_owned(&self.default_value)? {
-                        Some(value) => value.into_variant(),
+                    match self.default_value {
+                        Some(OwnedValue::Bool(value)) => value.into_variant(),
+                        Some(OwnedValue::I64(value)) => value.into_variant(),
+                        Some(OwnedValue::F64(value)) => value.into_variant(),
+                        Some(OwnedValue::Str(ref value)) => nsString::from(value).into_variant(),
                         None => ().into_variant(),
                     }
                 }.ok_or(KeyValueError::Read)?
@@ -296,16 +312,25 @@ impl Task for GetTask {
     }
 
     fn done(&self) -> Result<(), nsresult> {
+        // If TaskRunnable.run() calls Task.done() to return a result
+        // on the main thread before TaskRunnable.run() returns on the database
+        // thread, then the Task will get dropped on the database thread.
+        //
+        // But the callback is an nsXPCWrappedJS that isn't safe to release
+        // on the database thread.  So we move it out of the Task here to ensure
+        // it gets released on the main thread.
+        let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
+
         match self.result.take() {
-            Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
-            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
+            Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
+            Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
+            None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
 
 pub struct HasTask {
-    callback: RefPtr<nsIKeyValueVariantCallback>,
+    callback: Cell<Option<RefPtr<nsIKeyValueVariantCallback>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
@@ -320,7 +345,7 @@ impl HasTask {
         key: nsCString,
     ) -> HasTask {
         HasTask {
-            callback,
+            callback: Cell::new(Some(callback)),
             rkv,
             store,
             key,
@@ -348,16 +373,25 @@ impl Task for HasTask {
     }
 
     fn done(&self) -> Result<(), nsresult> {
+        // If TaskRunnable.run() calls Task.done() to return a result
+        // on the main thread before TaskRunnable.run() returns on the database
+        // thread, then the Task will get dropped on the database thread.
+        //
+        // But the callback is an nsXPCWrappedJS that isn't safe to release
+        // on the database thread.  So we move it out of the Task here to ensure
+        // it gets released on the main thread.
+        let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
+
         match self.result.take() {
-            Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
-            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
+            Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
+            Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
+            None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
 
 pub struct DeleteTask {
-    callback: RefPtr<nsIKeyValueVoidCallback>,
+    callback: Cell<Option<RefPtr<nsIKeyValueVoidCallback>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
@@ -372,7 +406,7 @@ impl DeleteTask {
         key: nsCString,
     ) -> DeleteTask {
         DeleteTask {
-            callback,
+            callback: Cell::new(Some(callback)),
             rkv,
             store,
             key,
@@ -408,16 +442,25 @@ impl Task for DeleteTask {
     }
 
     fn done(&self) -> Result<(), nsresult> {
+        // If TaskRunnable.run() calls Task.done() to return a result
+        // on the main thread before TaskRunnable.run() returns on the database
+        // thread, then the Task will get dropped on the database thread.
+        //
+        // But the callback is an nsXPCWrappedJS that isn't safe to release
+        // on the database thread.  So we move it out of the Task here to ensure
+        // it gets released on the main thread.
+        let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
+
         match self.result.take() {
-            Some(Ok(())) => unsafe { self.callback.Resolve() },
-            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
+            Some(Ok(())) => unsafe { callback.Resolve() },
+            Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
+            None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
 
 pub struct EnumerateTask {
-    callback: RefPtr<nsIKeyValueEnumeratorCallback>,
+    callback: Cell<Option<RefPtr<nsIKeyValueEnumeratorCallback>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     from_key: nsCString,
@@ -434,7 +477,7 @@ impl EnumerateTask {
         to_key: nsCString,
     ) -> EnumerateTask {
         EnumerateTask {
-            callback,
+            callback: Cell::new(Some(callback)),
             rkv,
             store,
             from_key,
@@ -508,16 +551,25 @@ impl Task for EnumerateTask {
     }
 
     fn done(&self) -> Result<(), nsresult> {
+        // If TaskRunnable.run() calls Task.done() to return a result
+        // on the main thread before TaskRunnable.run() returns on the database
+        // thread, then the Task will get dropped on the database thread.
+        //
+        // But the callback is an nsXPCWrappedJS that isn't safe to release
+        // on the database thread.  So we move it out of the Task here to ensure
+        // it gets released on the main thread.
+        let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
+
         match self.result.take() {
-            Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
-            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
+            Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
+            Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
+            None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
 
 pub struct HasMoreElementsTask {
-    callback: RefPtr<nsIKeyValueVariantCallback>,
+    callback: Cell<Option<RefPtr<nsIKeyValueVariantCallback>>>,
     iter: Arc<
         RefCell<
             IntoIter<(
@@ -542,7 +594,7 @@ impl HasMoreElementsTask {
         >,
     ) -> HasMoreElementsTask {
         HasMoreElementsTask {
-            callback,
+            callback: Cell::new(Some(callback)),
             iter,
             result: Cell::default(),
         }
@@ -563,16 +615,25 @@ impl Task for HasMoreElementsTask {
     }
 
     fn done(&self) -> Result<(), nsresult> {
+        // If TaskRunnable.run() calls Task.done() to return a result
+        // on the main thread before TaskRunnable.run() returns on the database
+        // thread, then the Task will get dropped on the database thread.
+        //
+        // But the callback is an nsXPCWrappedJS that isn't safe to release
+        // on the database thread.  So we move it out of the Task here to ensure
+        // it gets released on the main thread.
+        let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
+
         match self.result.take() {
-            Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
-            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
+            Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
+            Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
+            None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }
 
 pub struct GetNextTask {
-    callback: RefPtr<nsIKeyValuePairCallback>,
+    callback: Cell<Option<RefPtr<nsIKeyValuePairCallback>>>,
     iter: Arc<
         RefCell<
             IntoIter<(
@@ -597,7 +658,7 @@ impl GetNextTask {
         >,
     ) -> GetNextTask {
         GetNextTask {
-            callback,
+            callback: Cell::new(Some(callback)),
             iter,
             result: Cell::default(),
         }
@@ -621,10 +682,19 @@ impl Task for GetNextTask {
     }
 
     fn done(&self) -> Result<(), nsresult> {
+        // If TaskRunnable.run() calls Task.done() to return a result
+        // on the main thread before TaskRunnable.run() returns on the database
+        // thread, then the Task will get dropped on the database thread.
+        //
+        // But the callback is an nsXPCWrappedJS that isn't safe to release
+        // on the database thread.  So we move it out of the Task here to ensure
+        // it gets released on the main thread.
+        let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
+
         match self.result.take() {
-            Some(Ok(value)) => unsafe { self.callback.Resolve(value.coerce()) },
-            Some(Err(err)) => unsafe { self.callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { self.callback.Reject(&*nsCString::from("unexpected")) },
+            Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
+            Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
+            None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
         }.to_result()
     }
 }

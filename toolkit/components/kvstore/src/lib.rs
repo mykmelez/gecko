@@ -185,7 +185,7 @@ impl KeyValueDatabase {
             Arc::clone(&self.rkv),
             self.store,
             nsCString::from(key),
-            RefPtr::new(default_value),
+            variant_to_owned(default_value)?,
         ));
 
         TaskRunnable::new("KVDatabase::Get", task)?.dispatch(self.thread.clone())
