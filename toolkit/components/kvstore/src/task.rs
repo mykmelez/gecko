@@ -139,6 +139,50 @@ impl GetOrCreateTask {
     }
 }
 
+/// A macro to generate a done() implementation for a Task.
+/// Takes one argument that specifies the type of the Task's callback function:
+///   value: a callback function that takes a value
+///   void: the callback function doesn't take a value
+macro_rules! task_done {
+    (value) => {
+        fn done(&self) -> Result<(), nsresult> {
+            // If TaskRunnable.run() calls Task.done() to return a result
+            // on the main thread before TaskRunnable.run() returns on the database
+            // thread, then the Task will get dropped on the database thread.
+            //
+            // But the callback is an nsXPCWrappedJS that isn't safe to release
+            // on the database thread.  So we move it out of the Task here to ensure
+            // it gets released on the main thread.
+            let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
+
+            match self.result.take() {
+                Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
+                Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
+                None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
+            }.to_result()
+        }
+    };
+
+    (void) => {
+        fn done(&self) -> Result<(), nsresult> {
+            // If TaskRunnable.run() calls Task.done() to return a result
+            // on the main thread before TaskRunnable.run() returns on the database
+            // thread, then the Task will get dropped on the database thread.
+            //
+            // But the callback is an nsXPCWrappedJS that isn't safe to release
+            // on the database thread.  So we move it out of the Task here to ensure
+            // it gets released on the main thread.
+            let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
+
+            match self.result.take() {
+                Some(Ok(())) => unsafe { callback.Resolve() },
+                Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
+                None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
+            }.to_result()
+        }
+    };
+}
+
 impl Task for GetOrCreateTask {
     fn run(&self) {
         // We do the work within a closure that returns a Result so we can
@@ -158,22 +202,7 @@ impl Task for GetOrCreateTask {
         ));
     }
 
-    fn done(&self) -> Result<(), nsresult> {
-        // If TaskRunnable.run() calls Task.done() to return a result
-        // on the main thread before TaskRunnable.run() returns on the database
-        // thread, then the Task will get dropped on the database thread.
-        //
-        // But the callback is an nsXPCWrappedJS that isn't safe to release
-        // on the database thread.  So we move it out of the Task here to ensure
-        // it gets released on the main thread.
-        let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
-
-        match self.result.take() {
-            Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
-            Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
-        }.to_result()
-    }
+    task_done!(value);
 }
 
 pub struct PutTask {
@@ -227,22 +256,7 @@ impl Task for PutTask {
         }()));
     }
 
-    fn done(&self) -> Result<(), nsresult> {
-        // If TaskRunnable.run() calls Task.done() to return a result
-        // on the main thread before TaskRunnable.run() returns on the database
-        // thread, then the Task will get dropped on the database thread.
-        //
-        // But the callback is an nsXPCWrappedJS that isn't safe to release
-        // on the database thread.  So we move it out of the Task here to ensure
-        // it gets released on the main thread.
-        let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
-
-        match self.result.take() {
-            Some(Ok(())) => unsafe { callback.Resolve() },
-            Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
-        }.to_result()
-    }
+    task_done!(void);
 }
 
 pub struct GetTask {
@@ -305,22 +319,7 @@ impl Task for GetTask {
             }()));
     }
 
-    fn done(&self) -> Result<(), nsresult> {
-        // If TaskRunnable.run() calls Task.done() to return a result
-        // on the main thread before TaskRunnable.run() returns on the database
-        // thread, then the Task will get dropped on the database thread.
-        //
-        // But the callback is an nsXPCWrappedJS that isn't safe to release
-        // on the database thread.  So we move it out of the Task here to ensure
-        // it gets released on the main thread.
-        let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
-
-        match self.result.take() {
-            Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
-            Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
-        }.to_result()
-    }
+    task_done!(value);
 }
 
 pub struct HasTask {
@@ -366,22 +365,7 @@ impl Task for HasTask {
             }()));
     }
 
-    fn done(&self) -> Result<(), nsresult> {
-        // If TaskRunnable.run() calls Task.done() to return a result
-        // on the main thread before TaskRunnable.run() returns on the database
-        // thread, then the Task will get dropped on the database thread.
-        //
-        // But the callback is an nsXPCWrappedJS that isn't safe to release
-        // on the database thread.  So we move it out of the Task here to ensure
-        // it gets released on the main thread.
-        let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
-
-        match self.result.take() {
-            Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
-            Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
-        }.to_result()
-    }
+    task_done!(value);
 }
 
 pub struct DeleteTask {
@@ -435,22 +419,7 @@ impl Task for DeleteTask {
         }()));
     }
 
-    fn done(&self) -> Result<(), nsresult> {
-        // If TaskRunnable.run() calls Task.done() to return a result
-        // on the main thread before TaskRunnable.run() returns on the database
-        // thread, then the Task will get dropped on the database thread.
-        //
-        // But the callback is an nsXPCWrappedJS that isn't safe to release
-        // on the database thread.  So we move it out of the Task here to ensure
-        // it gets released on the main thread.
-        let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
-
-        match self.result.take() {
-            Some(Ok(())) => unsafe { callback.Resolve() },
-            Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
-        }.to_result()
-    }
+    task_done!(void);
 }
 
 pub struct EnumerateTask {
@@ -544,22 +513,7 @@ impl Task for EnumerateTask {
         ));
     }
 
-    fn done(&self) -> Result<(), nsresult> {
-        // If TaskRunnable.run() calls Task.done() to return a result
-        // on the main thread before TaskRunnable.run() returns on the database
-        // thread, then the Task will get dropped on the database thread.
-        //
-        // But the callback is an nsXPCWrappedJS that isn't safe to release
-        // on the database thread.  So we move it out of the Task here to ensure
-        // it gets released on the main thread.
-        let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
-
-        match self.result.take() {
-            Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
-            Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
-        }.to_result()
-    }
+    task_done!(value);
 }
 
 pub struct HasMoreElementsTask {
@@ -608,22 +562,7 @@ impl Task for HasMoreElementsTask {
             }()));
     }
 
-    fn done(&self) -> Result<(), nsresult> {
-        // If TaskRunnable.run() calls Task.done() to return a result
-        // on the main thread before TaskRunnable.run() returns on the database
-        // thread, then the Task will get dropped on the database thread.
-        //
-        // But the callback is an nsXPCWrappedJS that isn't safe to release
-        // on the database thread.  So we move it out of the Task here to ensure
-        // it gets released on the main thread.
-        let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
-
-        match self.result.take() {
-            Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
-            Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
-        }.to_result()
-    }
+    task_done!(value);
 }
 
 pub struct GetNextTask {
@@ -675,20 +614,5 @@ impl Task for GetNextTask {
             }()));
     }
 
-    fn done(&self) -> Result<(), nsresult> {
-        // If TaskRunnable.run() calls Task.done() to return a result
-        // on the main thread before TaskRunnable.run() returns on the database
-        // thread, then the Task will get dropped on the database thread.
-        //
-        // But the callback is an nsXPCWrappedJS that isn't safe to release
-        // on the database thread.  So we move it out of the Task here to ensure
-        // it gets released on the main thread.
-        let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
-
-        match self.result.take() {
-            Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
-            Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
-            None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
-        }.to_result()
-    }
+    task_done!(value);
 }
