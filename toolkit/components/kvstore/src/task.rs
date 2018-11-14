@@ -15,8 +15,6 @@ use std::{
     path::Path,
     ptr, str,
     sync::{Arc, RwLock},
-    thread,
-    time,
     vec::IntoIter,
 };
 use storage_variant::IntoVariant;
@@ -96,16 +94,12 @@ impl TaskRunnable {
 
     xpcom_method!(Run, run, {});
     fn run(&self) -> Result<(), nsresult> {
-        println!("{:?} refcnt: {:?}", self.name, self.__refcnt.get());
         match self.has_run.take() {
             false => {
                 debug_assert!(unsafe { !NS_IsMainThread() });
                 self.has_run.set(true);
                 self.task.run();
-                let rv = self.dispatch(self.original_thread.clone());
-                // TODO: remove this after fixing the bug that this helps to reproduce.
-                thread::sleep(time::Duration::from_millis(100));
-                rv
+                self.dispatch(self.original_thread.clone())
             }
             true => {
                 debug_assert!(unsafe { NS_IsMainThread() });
