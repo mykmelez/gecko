@@ -804,9 +804,6 @@ nsNativeThemeGTK::GetGtkWidgetAndState(StyleAppearance aAppearance,
   case StyleAppearance::MozWindowTitlebarMaximized:
     aGtkWidgetType = MOZ_GTK_HEADER_BAR_MAXIMIZED;
     break;
-  case StyleAppearance::MozWindowButtonBox:
-    aGtkWidgetType = MOZ_GTK_HEADER_BAR_BUTTON_BOX;
-    break;
   case StyleAppearance::MozWindowButtonClose:
     aGtkWidgetType = MOZ_GTK_HEADER_BAR_BUTTON_CLOSE;
     break;
@@ -1146,18 +1143,6 @@ nsNativeThemeGTK::GetExtraSizeForWidget(nsIFrame* aFrame,
   return true;
 }
 
-bool
-nsNativeThemeGTK::IsWidgetVisible(StyleAppearance aAppearance)
-{
-  switch (aAppearance) {
-  case StyleAppearance::MozWindowButtonBox:
-    return false;
-  default:
-    break;
-  }
-  return true;
-}
-
 NS_IMETHODIMP
 nsNativeThemeGTK::DrawWidgetBackground(gfxContext* aContext,
                                        nsIFrame* aFrame,
@@ -1169,9 +1154,7 @@ nsNativeThemeGTK::DrawWidgetBackground(gfxContext* aContext,
   WidgetNodeType gtkWidgetType;
   GtkTextDirection direction = GetTextDirection(aFrame);
   gint flags;
-
-  if (!IsWidgetVisible(aAppearance) ||
-      !GetGtkWidgetAndState(aAppearance, aFrame, gtkWidgetType, &state,
+  if (!GetGtkWidgetAndState(aAppearance, aFrame, gtkWidgetType, &state,
                             &flags)) {
     return NS_OK;
   }
@@ -1458,7 +1441,6 @@ nsNativeThemeGTK::GetWidgetPadding(nsDeviceContext* aContext,
   switch (aAppearance) {
     case StyleAppearance::ButtonFocus:
     case StyleAppearance::Toolbarbutton:
-    case StyleAppearance::MozWindowButtonBox:
     case StyleAppearance::MozWindowButtonClose:
     case StyleAppearance::MozWindowButtonMinimize:
     case StyleAppearance::MozWindowButtonMaximize:
@@ -2041,7 +2023,6 @@ nsNativeThemeGTK::ThemeSupportsWidget(nsPresContext* aPresContext,
 #endif
     return !IsWidgetStyled(aPresContext, aFrame, aAppearance);
 
-  case StyleAppearance::MozWindowButtonBox:
   case StyleAppearance::MozWindowButtonClose:
   case StyleAppearance::MozWindowButtonMinimize:
   case StyleAppearance::MozWindowButtonMaximize:

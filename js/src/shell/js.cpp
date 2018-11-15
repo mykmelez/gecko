@@ -70,6 +70,7 @@
 #if defined(JS_BUILD_BINAST)
 # include "frontend/BinSource.h"
 #endif // defined(JS_BUILD_BINAST)
+#include "frontend/ModuleSharedContext.h"
 #include "frontend/Parser.h"
 #include "gc/PublicIterators.h"
 #include "jit/arm/Simulator-arm.h"
@@ -86,7 +87,7 @@
 #include "js/Initialization.h"
 #include "js/JSON.h"
 #include "js/Printf.h"
-#include "js/SourceBufferHolder.h"
+#include "js/SourceText.h"
 #include "js/StableStringChars.h"
 #include "js/StructuredClone.h"
 #include "js/SweepingAPI.h"
@@ -522,6 +523,9 @@ static bool enableWasmGc = false;
 static bool enableTestWasmAwaitTier2 = false;
 static bool enableAsyncStacks = false;
 static bool enableStreams = false;
+#ifdef ENABLE_BIGINT
+static bool enableBigInt = false;
+#endif
 #ifdef JS_GC_ZEAL
 static uint32_t gZealBits = 0;
 static uint32_t gZealFrequency = 0;
@@ -876,8 +880,15 @@ RegisterScriptPathWithModuleLoader(JSContext* cx, HandleScript script, const cha
     return true;
 }
 
+enum class CompileUtf8
+{
+    InflateToUtf16,
+    DontInflate,
+};
+
 static MOZ_MUST_USE bool
-RunFile(JSContext* cx, const char* filename, FILE* file, bool compileOnly)
+RunFile(JSContext* cx, const char* filename, FILE* file, CompileUtf8 compileMethod,
+        bool compileOnly)
 {
     SkipUTF8BOM(file);
 
@@ -903,9 +914,18 @@ RunFile(JSContext* cx, const char* filename, FILE* file, bool compileOnly)
                .setIsRunOnce(true)
                .setNoScriptRval(true);
 
-        if (!JS::CompileUtf8File(cx, options, file, &script)) {
-            return false;
+        if (compileMethod == CompileUtf8::DontInflate) {
+            fprintf(stderr, "(compiling '%s' as UTF-8 without inflating)\n", filename);
+
+            if (!JS::CompileUtf8FileDontInflate(cx, options, file, &script)) {
+                return false;
+            }
+        } else {
+            if (!JS::CompileUtf8File(cx, options, file, &script)) {
+                return false;
+            }
         }
+
         MOZ_ASSERT(script);
     }
 
@@ -933,7 +953,7 @@ RunFile(JSContext* cx, const char* filename, FILE* file, bool compileOnly)
 #if defined(JS_BUILD_BINAST)
 
 static MOZ_MUST_USE bool
-RunBinAST(JSContext* cx, const char* filename, FILE* file)
+RunBinAST(JSContext* cx, const char* filename, FILE* file, bool compileOnly)
 {
     RootedScript script(cx);
 
@@ -951,6 +971,10 @@ RunBinAST(JSContext* cx, const char* filename, FILE* file)
 
     if (!RegisterScriptPathWithModuleLoader(cx, script, filename)) {
         return false;
+    }
+
+    if (compileOnly) {
+        return true;
     }
 
     return JS_ExecuteScript(cx, script);
@@ -1356,6 +1380,7 @@ ReadEvalPrintLoop(JSContext* cx, FILE* in, bool compileOnly)
 enum FileKind
 {
     FileScript,
+    FileScriptUtf8, // FileScript, but don't inflate to UTF-16 before parsing
     FileModule,
     FileBinAST
 };
@@ -1378,7 +1403,7 @@ ReportCantOpenErrorUnknownEncoding(JSContext* cx, const char* filename)
 }
 
 static MOZ_MUST_USE bool
-Process(JSContext* cx, const char* filename, bool forceTTY, FileKind kind = FileScript)
+Process(JSContext* cx, const char* filename, bool forceTTY, FileKind kind)
 {
     FILE* file;
     if (forceTTY || !filename || strcmp(filename, "-") == 0) {
@@ -1396,7 +1421,12 @@ Process(JSContext* cx, const char* filename, bool forceTTY, FileKind kind = File
         // It's not interactive - just execute it.
         switch (kind) {
           case FileScript:
-            if (!RunFile(cx, filename, file, compileOnly)) {
+            if (!RunFile(cx, filename, file, CompileUtf8::InflateToUtf16, compileOnly)) {
+                return false;
+            }
+            break;
+          case FileScriptUtf8:
+            if (!RunFile(cx, filename, file, CompileUtf8::DontInflate, compileOnly)) {
                 return false;
             }
             break;
@@ -1407,7 +1437,7 @@ Process(JSContext* cx, const char* filename, bool forceTTY, FileKind kind = File
             break;
 #if defined(JS_BUILD_BINAST)
           case FileBinAST:
-            if (!RunBinAST(cx, filename, file)) {
+            if (!RunBinAST(cx, filename, file, compileOnly)) {
                 return false;
             }
             break;
@@ -2134,8 +2164,13 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
                 }
             } else {
                 mozilla::Range<const char16_t> chars = codeChars.twoByteRange();
-                JS::SourceBufferHolder srcBuf(chars.begin().get(), chars.length(),
-                                              JS::SourceBufferHolder::NoOwnership);
+                JS::SourceText<char16_t> srcBuf;
+                if (!srcBuf.init(cx, chars.begin().get(), chars.length(),
+                                 JS::SourceOwnership::Borrowed))
+                {
+                    return false;
+                }
+
                 if (envChain.length() == 0) {
                     (void) JS::Compile(cx, options, srcBuf, &script);
                 } else {
@@ -2376,8 +2411,12 @@ Run(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
-    JS::SourceBufferHolder srcBuf(chars.twoByteRange().begin().get(), str->length(),
-                                  JS::SourceBufferHolder::NoOwnership);
+    JS::SourceText<char16_t> srcBuf;
+    if (!srcBuf.init(cx, chars.twoByteRange().begin().get(), str->length(),
+                     JS::SourceOwnership::Borrowed))
+    {
+        return false;
+    }
 
     RootedScript script(cx);
     int64_t startClock = PRMJ_Now();
@@ -3749,6 +3788,9 @@ static void
 SetStandardRealmOptions(JS::RealmOptions& options)
 {
     options.creationOptions().setSharedMemoryAndAtomicsEnabled(enableSharedMemory)
+#ifdef ENABLE_BIGINT
+                             .setBigIntEnabled(enableBigInt)
+#endif
                              .setStreamsEnabled(enableStreams);
 
 }
@@ -3853,10 +3895,14 @@ EvalInContext(JSContext* cx, unsigned argc, Value* vp)
             JS_ReportErrorASCII(cx, "Invalid scope argument to evalcx");
             return false;
         }
+
         JS::CompileOptions opts(cx);
         opts.setFileAndLine(filename.get(), lineno);
-        JS::SourceBufferHolder srcBuf(src, srclen, JS::SourceBufferHolder::NoOwnership);
-        if (!JS::Evaluate(cx, opts, srcBuf, args.rval())) {
+
+        JS::SourceText<char16_t> srcBuf;
+        if (!srcBuf.init(cx, src, srclen, JS::SourceOwnership::Borrowed) ||
+            !JS::Evaluate(cx, opts, srcBuf, args.rval()))
+        {
             return false;
         }
     }
@@ -3969,9 +4015,11 @@ WorkerMain(WorkerInput* input)
 
         AutoReportException are(cx);
         RootedScript script(cx);
-        JS::SourceBufferHolder srcBuf(input->chars.get(), input->length,
-                                      JS::SourceBufferHolder::NoOwnership);
-        if (!JS::Compile(cx, options, srcBuf, &script)) {
+        JS::SourceText<char16_t> srcBuf;
+        if (!srcBuf.init(cx, input->chars.get(), input->length,
+                         JS::SourceOwnership::Borrowed) ||
+            !JS::Compile(cx, options, srcBuf, &script))
+        {
             break;
         }
         RootedValue result(cx);
@@ -4646,13 +4694,21 @@ Compile(JSContext* cx, unsigned argc, Value* vp)
            .setFileAndLine("<string>", 1)
            .setIsRunOnce(true)
            .setNoScriptRval(true);
+
+    JS::SourceText<char16_t> srcBuf;
+    if (!srcBuf.init(cx, stableChars.twoByteRange().begin().get(), scriptContents->length(),
+                     JS::SourceOwnership::Borrowed))
+    {
+        return false;
+    }
+
     RootedScript script(cx);
-    JS::SourceBufferHolder srcBuf(stableChars.twoByteRange().begin().get(),
-                                  scriptContents->length(),
-                                  JS::SourceBufferHolder::NoOwnership);
-    bool ok = JS::Compile(cx, options, srcBuf, &script);
+    if (!JS::Compile(cx, options, srcBuf, &script)) {
+        return false;
+    }
+
     args.rval().setUndefined();
-    return ok;
+    return true;
 }
 
 static ShellCompartmentPrivate*
@@ -4714,8 +4770,10 @@ ParseModule(JSContext* cx, unsigned argc, Value* vp)
     }
 
     const char16_t* chars = stableChars.twoByteRange().begin().get();
-    JS::SourceBufferHolder srcBuf(chars, scriptContents->length(),
-                                  JS::SourceBufferHolder::NoOwnership);
+    JS::SourceText<char16_t> srcBuf;
+    if (!srcBuf.init(cx, chars, scriptContents->length(), JS::SourceOwnership::Borrowed)) {
+        return false;
+    }
 
     RootedObject module(cx, frontend::CompileModule(cx, options, srcBuf));
     if (!module) {
@@ -5256,7 +5314,7 @@ Parse(JSContext* cx, unsigned argc, Value* vp)
             return false;
         }
 
-        ModuleBuilder builder(cx, module, parser.anyChars);
+        ModuleBuilder builder(cx, module, &parser);
 
         ModuleSharedContext modulesc(cx, module, nullptr, builder);
         pn = parser.moduleBody(&modulesc);
@@ -5426,10 +5484,9 @@ OffThreadCompileScript(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
-    JS::SourceBufferHolder srcBuf(job->sourceChars(), length,
-                                  JS::SourceBufferHolder::NoOwnership);
-    if (!JS::CompileOffThread(cx, options, srcBuf,
-                              OffThreadCompileScriptCallback, job))
+    JS::SourceText<char16_t> srcBuf;
+    if (!srcBuf.init(cx, job->sourceChars(), length, JS::SourceOwnership::Borrowed) ||
+        !JS::CompileOffThread(cx, options, srcBuf, OffThreadCompileScriptCallback, job))
     {
         job->cancel();
         DeleteOffThreadJob(cx, job);
@@ -5520,10 +5577,9 @@ OffThreadCompileModule(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
-    JS::SourceBufferHolder srcBuf(job->sourceChars(), length,
-                                  JS::SourceBufferHolder::NoOwnership);
-    if (!JS::CompileOffThreadModule(cx, options, srcBuf,
-                                    OffThreadCompileScriptCallback, job))
+    JS::SourceText<char16_t> srcBuf;
+    if (!srcBuf.init(cx, job->sourceChars(), length, JS::SourceOwnership::Borrowed) ||
+        !JS::CompileOffThreadModule(cx, options, srcBuf, OffThreadCompileScriptCallback, job))
     {
         job->cancel();
         DeleteOffThreadJob(cx, job);
@@ -8201,9 +8257,12 @@ EntryPoints(JSContext* cx, unsigned argc, Value* vp)
             if (!stableChars.initTwoByte(cx, codeString)) {
                 return false;
             }
-            JS::SourceBufferHolder srcBuf(stableChars.twoByteRange().begin().get(),
-                                          codeString->length(),
-                                          JS::SourceBufferHolder::NoOwnership);
+            JS::SourceText<char16_t> srcBuf;
+            if (!srcBuf.init(cx, stableChars.twoByteRange().begin().get(), codeString->length(),
+                             JS::SourceOwnership::Borrowed))
+            {
+                return false;
+            }
 
             CompileOptions options(cx);
             options.setIntroductionType("entryPoint eval")
@@ -10242,6 +10301,7 @@ ProcessArgs(JSContext* cx, OptionParser* op)
     }
 
     MultiStringRange filePaths = op->getMultiStringOption('f');
+    MultiStringRange utf8FilePaths = op->getMultiStringOption('u');
     MultiStringRange codeChunks = op->getMultiStringOption('e');
     MultiStringRange modulePaths = op->getMultiStringOption('m');
     MultiStringRange binASTPaths(nullptr, nullptr);
@@ -10250,12 +10310,13 @@ ProcessArgs(JSContext* cx, OptionParser* op)
 #endif // JS_BUILD_BINAST
 
     if (filePaths.empty() &&
+        utf8FilePaths.empty() &&
         codeChunks.empty() &&
         modulePaths.empty() &&
         binASTPaths.empty() &&
         !op->getStringArg("script"))
     {
-        return Process(cx, nullptr, true); /* Interactive. */
+        return Process(cx, nullptr, true, FileScript); /* Interactive. */
     }
 
     if (const char* path = op->getStringOption("module-load-path")) {
@@ -10282,19 +10343,39 @@ ProcessArgs(JSContext* cx, OptionParser* op)
         return false;
     }
 
-    while (!filePaths.empty() || !codeChunks.empty() || !modulePaths.empty() || !binASTPaths.empty()) {
+    while (!filePaths.empty() ||
+           !utf8FilePaths.empty() ||
+           !codeChunks.empty() ||
+           !modulePaths.empty() ||
+           !binASTPaths.empty())
+    {
         size_t fpArgno = filePaths.empty() ? SIZE_MAX : filePaths.argno();
+        size_t ufpArgno = utf8FilePaths.empty() ? SIZE_MAX : utf8FilePaths.argno();
         size_t ccArgno = codeChunks.empty() ? SIZE_MAX : codeChunks.argno();
         size_t mpArgno = modulePaths.empty() ? SIZE_MAX : modulePaths.argno();
         size_t baArgno = binASTPaths.empty() ? SIZE_MAX : binASTPaths.argno();
 
-        if (fpArgno < ccArgno && fpArgno < mpArgno && fpArgno < baArgno) {
+        if (fpArgno < ufpArgno && fpArgno < ccArgno && fpArgno < mpArgno && fpArgno < baArgno) {
             char* path = filePaths.front();
             if (!Process(cx, path, false, FileScript)) {
                 return false;
             }
+
             filePaths.popFront();
-        } else if (ccArgno < fpArgno && ccArgno < mpArgno && ccArgno < baArgno) {
+            continue;
+        }
+
+        if (ufpArgno < fpArgno && ufpArgno < ccArgno && ufpArgno < mpArgno && ufpArgno < baArgno) {
+            char* path = utf8FilePaths.front();
+            if (!Process(cx, path, false, FileScriptUtf8)) {
+                return false;
+            }
+
+            utf8FilePaths.popFront();
+            continue;
+        }
+
+        if (ccArgno < fpArgno && ccArgno < ufpArgno && ccArgno < mpArgno && ccArgno < baArgno) {
             const char* code = codeChunks.front();
 
             JS::CompileOptions opts(cx);
@@ -10311,20 +10392,31 @@ ProcessArgs(JSContext* cx, OptionParser* op)
             if (sc->quitting) {
                 break;
             }
-        } else if (baArgno < fpArgno && baArgno < ccArgno && baArgno < mpArgno) {
+
+            continue;
+        }
+
+        if (baArgno < fpArgno && baArgno < ufpArgno && baArgno < ccArgno && baArgno < mpArgno) {
             char* path = binASTPaths.front();
             if (!Process(cx, path, false, FileBinAST)) {
                 return false;
             }
+
             binASTPaths.popFront();
-        } else {
-            MOZ_ASSERT(mpArgno < fpArgno && mpArgno < ccArgno && mpArgno < baArgno);
-            char* path = modulePaths.front();
-            if (!Process(cx, path, false, FileModule)) {
-                return false;
-            }
-            modulePaths.popFront();
+            continue;
         }
+
+        MOZ_ASSERT(mpArgno < fpArgno &&
+                   mpArgno < ufpArgno &&
+                   mpArgno < ccArgno &&
+                   mpArgno < baArgno);
+
+        char* path = modulePaths.front();
+        if (!Process(cx, path, false, FileModule)) {
+            return false;
+        }
+
+        modulePaths.popFront();
     }
 
     if (sc->quitting) {
@@ -10333,13 +10425,13 @@ ProcessArgs(JSContext* cx, OptionParser* op)
 
     /* The |script| argument is processed after all options. */
     if (const char* path = op->getStringArg("script")) {
-        if (!Process(cx, path, false)) {
+        if (!Process(cx, path, false, FileScript)) {
             return false;
         }
     }
 
     if (op->getBoolOption('i')) {
-        if (!Process(cx, nullptr, true)) {
+        if (!Process(cx, nullptr, true, FileScript)) {
             return false;
         }
     }
@@ -10366,6 +10458,9 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
     enableTestWasmAwaitTier2 = op.getBoolOption("test-wasm-await-tier2");
     enableAsyncStacks = !op.getBoolOption("no-async-stacks");
     enableStreams = !op.getBoolOption("no-streams");
+#ifdef ENABLE_BIGINT
+    enableBigInt = !op.getBoolOption("no-bigint");
+#endif
 
 #if defined ENABLE_WASM_GC && defined ENABLE_WASM_CRANELIFT
     // Note, once we remove --wasm-gc this test will no longer make any sense
@@ -10944,6 +11039,9 @@ main(int argc, char** argv, char** envp)
     op.setVersion(JS_GetImplementationVersion());
 
     if (!op.addMultiStringOption('f', "file", "PATH", "File path to run")
+        || !op.addMultiStringOption('u', "utf8-file", "PATH",
+                                    "File path to run, directly parsing file contents as UTF-8 "
+                                    "without first inflating to UTF-16")
         || !op.addMultiStringOption('m', "module", "PATH", "Module path to run")
 #if defined(JS_BUILD_BINAST)
         || !op.addMultiStringOption('B', "binast", "PATH", "BinAST path to run")
@@ -11001,6 +11099,9 @@ main(int argc, char** argv, char** envp)
         || !op.addBoolOption('\0', "no-unboxed-objects", "Disable creating unboxed plain objects")
         || !op.addBoolOption('\0', "enable-streams", "Enable WHATWG Streams (default)")
         || !op.addBoolOption('\0', "no-streams", "Disable WHATWG Streams")
+#ifdef ENABLE_BIGINT
+        || !op.addBoolOption('\0', "no-bigint", "Disable experimental BigInt support")
+#endif
 #ifdef ENABLE_SHARED_ARRAY_BUFFER
         || !op.addStringOption('\0', "shared-memory", "on/off",
                                "SharedArrayBuffer and Atomics "

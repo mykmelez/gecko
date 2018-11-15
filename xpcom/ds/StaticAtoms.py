@@ -162,6 +162,7 @@ STATIC_ATOMS = [
     Atom("bdi", "bdi"),
     Atom("bdo", "bdo"),
     Atom("before", "before"),
+    Atom("behavior", "behavior"),
     Atom("bgcolor", "bgcolor"),
     Atom("bgsound", "bgsound"),
     Atom("big", "big"),
@@ -294,6 +295,7 @@ STATIC_ATOMS = [
     Atom("headerDefaultStyle", "default-style"),
     Atom("defer", "defer"),
     Atom("del", "del"),
+    Atom("deprecation", "deprecation"),
     Atom("descendant", "descendant"),
     Atom("descendantOrSelf", "descendant-or-self"),
     Atom("descending", "descending"),
@@ -403,6 +405,7 @@ STATIC_ATOMS = [
     Atom("fallback", "fallback"),
     Atom("_false", "false"),
     Atom("farthest", "farthest"),
+    Atom("featurePolicyViolation", "feature-policy-violation"),
     Atom("field", "field"),
     Atom("fieldset", "fieldset"),
     Atom("file", "file"),
@@ -1015,6 +1018,7 @@ STATIC_ATOMS = [
     Atom("script", "script"),
     Atom("scriptEnabledBeforePrintOrPreview", "scriptEnabledBeforePrintOrPreview"),
     Atom("scrollbar", "scrollbar"),
+    Atom("scrollamount", "scrollamount"),
     Atom("scrollbarbutton", "scrollbarbutton"),
     Atom("scrollbarDownBottom", "scrollbar-down-bottom"),
     Atom("scrollbarDownTop", "scrollbar-down-top"),
@@ -1022,6 +1026,7 @@ STATIC_ATOMS = [
     Atom("scrollbarUpTop", "scrollbar-up-top"),
     Atom("scrollbox", "scrollbox"),
     Atom("scrollcorner", "scrollcorner"),
+    Atom("scrolldelay", "scrolldelay"),
     Atom("scrolling", "scrolling"),
     Atom("scrollPosition", "scroll-position"),
     Atom("section", "section"),
@@ -1157,6 +1162,7 @@ STATIC_ATOMS = [
     Atom("treerow", "treerow"),
     Atom("treeseparator", "treeseparator"),
     Atom("_true", "true"),
+    Atom("truespeed", "truespeed"),
     Atom("tt", "tt"),
     Atom("type", "type"),
     Atom("typemustmatch", "typemustmatch"),
@@ -2355,9 +2361,9 @@ def generate_nsgkatomlist_h(output, *ignore):
                  "#ifdef small\n"
                  "#undef small\n"
                  "#endif\n\n"
-                 "// GK_ATOM(identifier, string, hash, gecko_type, atom_type)\n" +
-                 "".join(["GK_ATOM(%s, \"%s\", 0x%08x, %s, %s)\n" %
-                            (a.ident, a.string, a.hash, a.ty, a.atom_type)
+                 "// GK_ATOM(identifier, string, hash, is_ascii_lower, gecko_type, atom_type)\n" +
+                 "".join(["GK_ATOM(%s, \"%s\", 0x%08x, %s, %s, %s)\n" %
+                            (a.ident, a.string, a.hash, str(a.is_ascii_lowercase).lower(), a.ty, a.atom_type)
                           for a in STATIC_ATOMS]))
 
 

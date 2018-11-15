@@ -8,6 +8,7 @@ use super::animated::ToAnimatedValue;
 use super::generics::grid::GridTemplateComponent as GenericGridTemplateComponent;
 use super::generics::grid::{GridLine as GenericGridLine, TrackBreadth as GenericTrackBreadth};
 use super::generics::grid::{TrackList as GenericTrackList, TrackSize as GenericTrackSize};
+use super::generics::transform::IsParallelTo;
 use super::generics::{GreaterThanOrEqualToOne, NonNegative};
 use super::specified;
 use super::{CSSFloat, CSSInteger};
@@ -22,6 +23,7 @@ use crate::Atom;
 #[cfg(feature = "servo")]
 use crate::Prefix;
 use euclid::Size2D;
+use self::transform::DirectionVector;
 use std::cell::RefCell;
 use std::cmp;
 use std::f32;
@@ -40,7 +42,7 @@ pub use self::border::{BorderCornerRadius, BorderRadius, BorderSpacing};
 pub use self::border::{BorderImageRepeat, BorderImageSideWidth};
 pub use self::border::{BorderImageSlice, BorderImageWidth};
 pub use self::box_::{AnimationIterationCount, AnimationName, Contain};
-pub use self::box_::{Appearance, Clear, Float};
+pub use self::box_::{Appearance, BreakBetween, BreakWithin, Clear, Float};
 pub use self::box_::{Display, TransitionProperty};
 pub use self::box_::{OverflowClipBox, OverscrollBehavior, Perspective, Resize};
 pub use self::box_::{ScrollSnapType, TouchAction, VerticalAlign, WillChange};
@@ -458,6 +460,16 @@ trivial_to_computed_value!(Box<str>);
 
 /// A `<number>` value.
 pub type Number = CSSFloat;
+
+impl IsParallelTo for (Number, Number, Number) {
+    fn is_parallel_to(&self, vector: &DirectionVector) -> bool {
+        use euclid::approxeq::ApproxEq;
+        // If a and b is parallel, the angle between them is 0deg, so
+        // a x b = |a|*|b|*sin(0)*n = 0 * n, |a x b| == 0.
+        let self_vector = DirectionVector::new(self.0, self.1, self.2);
+        self_vector.cross(*vector).square_length().approx_eq(&0.0f32)
+    }
+}
 
 /// A wrapper of Number, but the value >= 0.
 pub type NonNegativeNumber = NonNegative<CSSFloat>;

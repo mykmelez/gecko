@@ -749,6 +749,11 @@ pub unsafe extern "C" fn wr_pipeline_info_delete(_info: WrPipelineInfo) {
     // the underlying vec memory
 }
 
+extern "C" {
+    pub fn gecko_profiler_start_marker(name: *const c_char);
+    pub fn gecko_profiler_end_marker(name: *const c_char);
+}
+
 #[allow(improper_ctypes)] // this is needed so that rustc doesn't complain about passing the &mut Transaction to an extern function
 extern "C" {
     // These callbacks are invoked from the scene builder thread (aka the APZ
@@ -785,6 +790,10 @@ impl SceneBuilderHooks for APZCallbacks {
         unsafe { apz_register_updater(self.window_id) }
     }
 
+    fn pre_scene_build(&self) {
+        unsafe { gecko_profiler_start_marker(b"SceneBuilding\0".as_ptr() as *const c_char); }
+    }
+
     fn pre_scene_swap(&self, scenebuild_time: u64) {
         unsafe {
             record_telemetry_time(TelemetryProbe::SceneBuildTime, scenebuild_time);
@@ -803,10 +812,16 @@ impl SceneBuilderHooks for APZCallbacks {
         // otherwise there's no guarantee that the new scene will get rendered
         // anytime soon
         unsafe { wr_schedule_render(self.window_id) }
+        unsafe { gecko_profiler_end_marker(b"SceneBuilding\0".as_ptr() as *const c_char); }
     }
 
     fn post_resource_update(&self) {
         unsafe { wr_schedule_render(self.window_id) }
+        unsafe { gecko_profiler_end_marker(b"SceneBuilding\0".as_ptr() as *const c_char); }
+    }
+
+    fn post_empty_scene_build(&self) {
+        unsafe { gecko_profiler_end_marker(b"SceneBuilding\0".as_ptr() as *const c_char); }
     }
 
     fn poke(&self) {

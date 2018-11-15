@@ -15,6 +15,7 @@
 #include "mozilla/layers/WebRenderDrawEventRecorder.h"
 #include "WebRenderTypes.h"
 #include "webrender_ffi.h"
+#include "GeckoProfiler.h"
 
 #include <unordered_map>
 
@@ -325,6 +326,7 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
                                 const mozilla::wr::DeviceUintRect *aDirtyRect,
                                 Range<uint8_t> aOutput)
 {
+  AUTO_PROFILER_TRACING("WebRender", "RasterizeSingleBlob");
   MOZ_ASSERT(aSize.width > 0 && aSize.height > 0);
   if (aSize.width <= 0 || aSize.height <= 0) {
     return false;
@@ -445,7 +447,10 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
 
     Range<const uint8_t> blob(aBlob.begin() + offset, aBlob.begin() + end);
     ret = translator.TranslateRecording((char*)blob.begin().get(), blob.length());
-    MOZ_RELEASE_ASSERT(ret);
+    if (!ret) {
+      gfxCriticalNote << "Replay failure: " << translator.GetError();
+      MOZ_RELEASE_ASSERT(false);
+    }
     offset = extra_end;
   }
 
