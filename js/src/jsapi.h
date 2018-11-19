@@ -1835,6 +1835,21 @@ JS_NewGlobalObject(JSContext* cx, const JSClass* clasp, JSPrincipals* principals
 extern JS_PUBLIC_API(void)
 JS_GlobalObjectTraceHook(JSTracer* trc, JSObject* global);
 
+namespace JS {
+
+/**
+ * This allows easily constructing a global object without having to deal with
+ * JSClassOps, forgetting to add JS_GlobalObjectTraceHook, or forgetting to call
+ * JS::InitRealmStandardClasses(). Example:
+ *
+ *     const JSClass globalClass = { "MyGlobal", JSCLASS_GLOBAL_FLAGS,
+ *         &JS::DefaultGlobalClassOps };
+ *     JS_NewGlobalObject(cx, &globalClass, ...);
+ */
+extern JS_PUBLIC_DATA(const JSClassOps) DefaultGlobalClassOps;
+
+} // namespace JS
+
 extern JS_PUBLIC_API(void)
 JS_FireOnNewGlobalObject(JSContext* cx, JS::HandleObject global);
 
@@ -3395,6 +3410,14 @@ extern JS_PUBLIC_API(JS::Value)
 GetPromiseResult(JS::HandleObject promise);
 
 /**
+ * Returns whether the given promise's rejection is already handled or not.
+ *
+ * The caller must check the given promise is rejected before checking it's handled or not.
+ */
+extern JS_PUBLIC_API(bool)
+GetPromiseIsHandled(JS::HandleObject promise);
+
+/**
  * Returns a js::SavedFrame linked list of the stack that lead to the given
  * Promise's allocation.
  */
@@ -3579,13 +3602,14 @@ typedef js::Vector<char, 0, js::SystemAllocPolicy> BuildIdCharVector;
  * appropriate error on 'cx'. On success, the embedding must call
  * consumer->consumeChunk() repeatedly on any thread until exactly one of:
  *  - consumeChunk() returns false
- *  - the embedding calls consumer->streamClosed()
+ *  - the embedding calls consumer->streamEnd()
+ *  - the embedding calls consumer->streamError()
  * before JS_DestroyContext(cx) or JS::ShutdownAsyncTasks(cx) is called.
  *
- * Note: consumeChunk() and streamClosed() may be called synchronously by
- * ConsumeStreamCallback.
+ * Note: consumeChunk(), streamEnd() and streamError() may be called
+ * synchronously by ConsumeStreamCallback.
  *
- * When streamClosed() is called, the embedding may optionally pass an
+ * When streamEnd() is called, the embedding may optionally pass an
  * OptimizedEncodingListener*, indicating that there is a cache entry associated
  * with this stream that can store an optimized encoding of the bytes that were
  * just streamed at some point in the future by having SpiderMonkey call
@@ -3593,7 +3617,7 @@ typedef js::Vector<char, 0, js::SystemAllocPolicy> BuildIdCharVector;
  * will hold an outstanding refcount to keep the listener alive.
  *
  * After storeOptimizedEncoding() is called, on cache hit, the embedding
- * may call consumeOptimizedEncoding() instead of consumeChunk()/streamClosed().
+ * may call consumeOptimizedEncoding() instead of consumeChunk()/streamEnd().
  * The embedding must ensure that the GetOptimizedEncodingBuildId() at the time
  * when an optimized encoding is created is the same as when it is later
  * consumed.
@@ -3631,19 +3655,22 @@ class JS_PUBLIC_API(StreamConsumer)
     // this StreamConsumer.
     virtual bool consumeChunk(const uint8_t* begin, size_t length) = 0;
 
-    // Called by the embedding when the stream is closed according to the
-    // contract described above.
-    enum CloseReason { EndOfFile, Error };
-    virtual void streamClosed(CloseReason reason,
-                              OptimizedEncodingListener* listener = nullptr) = 0;
+    // Called by the embedding when the stream reaches end-of-file, passing the
+    // listener described above.
+    virtual void streamEnd(OptimizedEncodingListener* listener = nullptr) = 0;
 
-    // Called by the embedding *instead of* consumeChunk()/streamClosed() if an
+    // Called by the embedding when there is an error during streaming. The
+    // given error code should be passed to the ReportStreamErrorCallback on the
+    // main thread to produce the semantically-correct rejection value.
+    virtual void streamError(size_t errorCode) = 0;
+
+    // Called by the embedding *instead of* consumeChunk()/streamEnd() if an
     // optimized encoding is available from a previous streaming of the same
     // contents with the same optimized build id.
     virtual void consumeOptimizedEncoding(const uint8_t* begin, size_t length) = 0;
 
     // Provides optional stream attributes such as base or source mapping URLs.
-    // Necessarily called before consumeChunk(), streamClosed() or
+    // Necessarily called before consumeChunk(), streamEnd(), streamError() or
     // consumeOptimizedEncoding(). The caller retains ownership of the strings.
     virtual void noteResponseURLs(const char* maybeUrl, const char* maybeSourceMapUrl) = 0;
 };
@@ -3654,8 +3681,13 @@ typedef bool
 (*ConsumeStreamCallback)(JSContext* cx, JS::HandleObject obj, MimeType mimeType,
                          StreamConsumer* consumer);
 
+typedef void
+(*ReportStreamErrorCallback)(JSContext* cx, size_t errorCode);
+
 extern JS_PUBLIC_API(void)
-InitConsumeStreamCallback(JSContext* cx, ConsumeStreamCallback callback);
+InitConsumeStreamCallback(JSContext* cx,
+                          ConsumeStreamCallback consume,
+                          ReportStreamErrorCallback report);
 
 /**
  * When a JSRuntime is destroyed it implicitly cancels all async tasks in

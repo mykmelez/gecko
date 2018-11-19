@@ -1008,11 +1008,15 @@ JS_ResolveStandardClass(JSContext* cx, HandleObject obj, HandleId id, bool* reso
 
     /* Check whether we're resolving 'undefined', and define it if so. */
     JSAtom* idAtom = JSID_TO_ATOM(id);
-    JSAtom* undefinedAtom = cx->names().undefined;
-    if (idAtom == undefinedAtom) {
+    if (idAtom == cx->names().undefined) {
         *resolved = true;
         return DefineDataProperty(cx, global, id, UndefinedHandleValue,
                                   JSPROP_PERMANENT | JSPROP_READONLY | JSPROP_RESOLVING);
+    }
+
+    // Resolve a "globalThis" self-referential property if necessary.
+    if (idAtom == cx->names().globalThis) {
+        return GlobalObject::maybeResolveGlobalThis(cx, global, resolved);
     }
 
     /* Try for class constructors/prototypes named by well-known atoms. */
@@ -1072,6 +1076,7 @@ JS_MayResolveStandardClass(const JSAtomState& names, jsid id, JSObject* maybeObj
     // better, we need a JSContext here; it's fine as it is.)
 
     return atom == names.undefined ||
+           atom == names.globalThis ||
            LookupStdName(names, atom, standard_class_names) ||
            LookupStdName(names, atom, builtin_property_names);
 }
@@ -1925,6 +1930,20 @@ JS_GlobalObjectTraceHook(JSTracer* trc, JSObject* global)
         trace(trc, global);
     }
 }
+
+const JSClassOps JS::DefaultGlobalClassOps = {
+    nullptr,  // addProperty
+    nullptr,  // deleteProperty
+    nullptr,  // enumerate
+    JS_NewEnumerateStandardClasses,
+    JS_ResolveStandardClass,
+    JS_MayResolveStandardClass,
+    nullptr,  // finalize
+    nullptr,  // call
+    nullptr,  // hasInstance
+    nullptr,  // construct
+    JS_GlobalObjectTraceHook
+};
 
 JS_PUBLIC_API(void)
 JS_FireOnNewGlobalObject(JSContext* cx, JS::HandleObject global)
@@ -4408,6 +4427,13 @@ JS::GetPromiseResult(JS::HandleObject promiseObj)
     return promise->state() == JS::PromiseState::Fulfilled ? promise->value() : promise->reason();
 }
 
+JS_PUBLIC_API(bool)
+JS::GetPromiseIsHandled(JS::HandleObject promiseObj)
+{
+    PromiseObject* promise = &promiseObj->as<PromiseObject>();
+    return !promise->isUnhandled();
+}
+
 JS_PUBLIC_API(JSObject*)
 JS::GetPromiseAllocationSite(JS::HandleObject promise)
 {
@@ -4647,9 +4673,11 @@ JS::GetOptimizedEncodingBuildId(JS::BuildIdCharVector* buildId)
 }
 
 JS_PUBLIC_API(void)
-JS::InitConsumeStreamCallback(JSContext* cx, ConsumeStreamCallback callback)
+JS::InitConsumeStreamCallback(JSContext* cx, ConsumeStreamCallback consume,
+                              ReportStreamErrorCallback report)
 {
-    cx->runtime()->consumeStreamCallback = callback;
+    cx->runtime()->consumeStreamCallback = consume;
+    cx->runtime()->reportStreamErrorCallback = report;
 }
 
 JS_PUBLIC_API(void)

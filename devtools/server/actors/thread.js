@@ -28,6 +28,7 @@ loader.lazyRequireGetter(this, "PauseScopedObjectActor", "devtools/server/actors
 loader.lazyRequireGetter(this, "EventLoopStack", "devtools/server/actors/utils/event-loop", true);
 loader.lazyRequireGetter(this, "FrameActor", "devtools/server/actors/frame", true);
 loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
+loader.lazyRequireGetter(this, "throttle", "devtools/shared/throttle", true);
 
 /**
  * JSD2 actors.
@@ -113,6 +114,14 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       this._dbg.onNewScript = this.onNewScript;
       if (this._dbg.replaying) {
         this._dbg.replayingOnForcedPause = this.replayingOnForcedPause.bind(this);
+        const sendProgress = throttle((recording, executionPoint) => {
+          if (this.attached) {
+            this.conn.send({ type: "progress", from: this.actorID,
+                             recording, executionPoint });
+          }
+        }, 100);
+        this._dbg.replayingOnPositionChange =
+          this.replayingOnPositionChange.bind(this, sendProgress);
       }
       // Keep the debugger disabled until a client attaches.
       this._dbg.enabled = this._state != "detached";
@@ -177,6 +186,9 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
    */
   _threadPauseEventLoops: null,
   _pushThreadPause: function() {
+    if (this.dbg.replaying) {
+      this.dbg.replayPushThreadPause();
+    }
     if (!this._threadPauseEventLoops) {
       this._threadPauseEventLoops = [];
     }
@@ -188,6 +200,9 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     const eventLoop = this._threadPauseEventLoops.pop();
     assert(eventLoop, "Should have an event loop.");
     eventLoop.resolve();
+    if (this.dbg.replaying) {
+      this.dbg.replayPopThreadPause();
+    }
   },
 
   /**
@@ -545,10 +560,20 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       if (steppingType == "finish") {
         const parentFrame = thread._getNextStepFrame(this);
         if (parentFrame && parentFrame.script) {
+          // We can't use the completion value in stepping hooks if we're
+          // replaying, as we can't use its contents after resuming.
+          const ncompletion = thread.dbg.replaying ? null : completion;
           const { onStep, onPop } = thread._makeSteppingHooks(
-            originalLocation, "next", false, completion
+            originalLocation, "next", false, ncompletion
           );
-          parentFrame.onStep = onStep;
+          if (thread.dbg.replaying) {
+            const offsets =
+              thread._findReplayingStepOffsets(originalLocation, parentFrame,
+                                               /* rewinding = */ false);
+            parentFrame.setReplayingOnStep(onStep, offsets);
+          } else {
+            parentFrame.onStep = onStep;
+          }
           // We need the onPop alongside the onStep because it is possible that
           // the parent frame won't have any steppable offsets, and we want to
           // make sure that we always pause in the parent _somewhere_.
@@ -1766,6 +1791,17 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
   onSkipBreakpoints: function({ skip }) {
     this.skipBreakpoints = skip;
     return { skip };
+  },
+
+  /*
+   * A function that the engine calls when a recording/replaying process has
+   * changed its position: a checkpoint was reached or a switch between a
+   * recording and replaying child process occurred.
+   */
+  replayingOnPositionChange: function(sendProgress) {
+    const recording = this.dbg.replayIsRecording();
+    const executionPoint = this.dbg.replayCurrentExecutionPoint();
+    sendProgress(recording, executionPoint);
   },
 
   /**

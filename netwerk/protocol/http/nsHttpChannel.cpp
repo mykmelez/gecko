@@ -422,7 +422,7 @@ nsHttpChannel::Init(nsIURI *uri,
     if (NS_FAILED(rv))
         return rv;
 
-    LOG(("nsHttpChannel::Init [this=%p]\n", this));
+    LOG1(("nsHttpChannel::Init [this=%p]\n", this));
 
     return rv;
 }
@@ -1371,7 +1371,7 @@ nsHttpChannel::SetupTransaction()
 
     // create the transaction object
     mTransaction = new nsHttpTransaction();
-    LOG(("nsHttpChannel %p created nsHttpTransaction %p\n", this, mTransaction.get()));
+    LOG1(("nsHttpChannel %p created nsHttpTransaction %p\n", this, mTransaction.get()));
     mTransaction->SetTransactionObserver(mTransactionObserver);
     mTransactionObserver = nullptr;
 
@@ -6560,6 +6560,18 @@ nsHttpChannel::BeginConnect()
     if (mProxyInfo)
         proxyInfo = do_QueryInterface(mProxyInfo);
 
+    if (mCaps & NS_HTTP_CONNECT_ONLY) {
+        if (!proxyInfo) {
+            LOG(("return failure: no proxy for connect-only channel\n"));
+            return NS_ERROR_FAILURE;
+        }
+
+        if (!proxyInfo->IsHTTP() && !proxyInfo->IsHTTPS()) {
+            LOG(("return failure: non-http proxy for connect-only channel\n"));
+            return NS_ERROR_FAILURE;
+        }
+    }
+
     mRequestHead.SetHTTPS(isHttps);
     mRequestHead.SetOrigin(scheme, host, port);
 
@@ -7772,10 +7784,16 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
             return NS_OK;
         }
 
-        if (mUpgradeProtocolCallback && stickyConn &&
+        bool upgradeWebsocket = mUpgradeProtocolCallback && stickyConn &&
             mResponseHead &&
             ((mResponseHead->Status() == 101 && mResponseHead->Version() == HttpVersion::v1_1) ||
-             (mResponseHead->Status() == 200 && mResponseHead->Version() == HttpVersion::v2_0))) {
+             (mResponseHead->Status() == 200 && mResponseHead->Version() == HttpVersion::v2_0));
+
+        bool upgradeConnect = mUpgradeProtocolCallback && stickyConn &&
+            (mCaps & NS_HTTP_CONNECT_ONLY) && mResponseHead &&
+            mResponseHead->Status() == 200;
+
+        if (upgradeWebsocket || upgradeConnect) {
             nsresult rv =
                 gHttpHandler->ConnMgr()->CompleteUpgrade(stickyConn,
                                                          mUpgradeProtocolCallback);
@@ -9430,13 +9448,26 @@ nsHttpChannel::SetOriginHeader()
         nsContentUtils::GetASCIIOrigin(referrer, origin);
     }
 
-    // Restrict Origin to same-origin loads if requested by user
+    // Restrict Origin to same-origin loads if requested by user or leaving from
+    // .onion
     if (sSendOriginHeader == 1) {
         nsAutoCString currentOrigin;
         nsContentUtils::GetASCIIOrigin(mURI, currentOrigin);
         if (!origin.EqualsIgnoreCase(currentOrigin.get())) {
             // Origin header suppressed by user setting
             return;
+        }
+    } else if (gHttpHandler->HideOnionReferrerSource()) {
+        nsAutoCString host;
+        if (referrer &&
+            NS_SUCCEEDED(referrer->GetAsciiHost(host)) &&
+            StringEndsWith(host, NS_LITERAL_CSTRING(".onion"))) {
+            nsAutoCString currentOrigin;
+            nsContentUtils::GetASCIIOrigin(mURI, currentOrigin);
+            if (!origin.EqualsIgnoreCase(currentOrigin.get())) {
+                // Origin header is suppressed by .onion
+                return;
+            }
         }
     }
 

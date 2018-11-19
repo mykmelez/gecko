@@ -1096,9 +1096,13 @@ pref("toolkit.asyncshutdown.log", false);
 // it being specified, dump is disabled in artifact builds (see Bug 1490412).
 #ifdef MOZILLA_OFFICIAL
 pref("browser.dom.window.dump.enabled", false, sticky);
+pref("devtools.console.stdout.chrome", false, sticky);
 #else
 pref("browser.dom.window.dump.enabled", true, sticky);
+pref("devtools.console.stdout.chrome", true, sticky);
 #endif
+
+pref("devtools.console.stdout.content", false, sticky);
 
 // Controls whether EventEmitter module throws dump message on each emit
 pref("toolkit.dump.emit", false);
@@ -1112,6 +1116,7 @@ pref("devtools.recordreplay.enableRewinding", true);
 pref("devtools.recordreplay.mvp.enabled", false);
 pref("devtools.recordreplay.timeline.enabled", false);
 pref("devtools.recordreplay.allowRepaintFailures", true);
+pref("devtools.recordreplay.includeSystemScripts", false);
 
 // view source
 pref("view_source.syntax_highlight", true);
@@ -4707,7 +4712,7 @@ pref("image.decode-immediately.enabled", false);
 pref("image.downscale-during-decode.enabled", true);
 
 // The default Accept header sent for images loaded over HTTP(S)
-pref("image.http.accept", "*/*");
+pref("image.http.accept", "image/webp,*/*");
 
 // The threshold for inferring that changes to an <img> element's |src|
 // attribute by JavaScript represent an animation, in milliseconds. If the |src|
@@ -4790,7 +4795,7 @@ pref("image.multithreaded_decoding.limit", -1);
 pref("image.multithreaded_decoding.idle_timeout", 600000);
 
 // Whether we attempt to decode WebP images or not.
-pref("image.webp.enabled", false);
+pref("image.webp.enabled", true);
 
 // Limit for the canvas image cache. 0 means we don't limit the size of the
 // cache.
