@@ -32,7 +32,9 @@
 class nsIURI;
 
 namespace JS {
-  class SourceBufferHolder;
+
+template<typename UnitT> class SourceText;
+
 } // namespace JS
 
 namespace mozilla {
@@ -381,6 +383,12 @@ private:
                       SRIMetadata *aMetadataOut);
 
   /**
+   * Given a script element, get the referrer policy should be applied to load
+   * requests.
+   */
+  mozilla::net::ReferrerPolicy GetReferrerPolicy(nsIScriptElement* aElement);
+
+  /**
    * Helper function to check the content policy for a given request.
    */
   static nsresult CheckContentPolicy(nsIDocument* aDocument,
@@ -507,8 +515,8 @@ private:
 
   void MaybeMoveToLoadedList(ScriptLoadRequest* aRequest);
 
-  mozilla::Maybe<JS::SourceBufferHolder> GetScriptSource(JSContext* aCx,
-                                                         ScriptLoadRequest* aRequest);
+  mozilla::Maybe<JS::SourceText<char16_t>>
+  GetScriptSource(JSContext* aCx, ScriptLoadRequest* aRequest);
 
   void SetModuleFetchStarted(ModuleLoadRequest *aRequest);
   void SetModuleFetchFinishedAndResumeWaitingRequests(ModuleLoadRequest* aRequest,

@@ -1415,7 +1415,6 @@ nsIDocument::nsIDocument()
     mDidCallBeginLoad(false),
     mAllowPaymentRequest(false),
     mEncodingMenuDisabled(false),
-    mIsShadowDOMEnabled(false),
     mIsSVGGlyphsDocument(false),
     mInDestructor(false),
     mIsGoingAway(false),
@@ -2137,11 +2136,6 @@ nsDocument::Init()
 
   NS_ASSERTION(OwnerDoc() == this, "Our nodeinfo is busted!");
 
-  // Set this when document is initialized and value stays the same for the
-  // lifetime of the document.
-  mIsShadowDOMEnabled = nsContentUtils::IsShadowDOMEnabled() ||
-    (XRE_IsParentProcess() && AllowXULXBL());
-
   // If after creation the owner js global is not set for a document
   // we use the default compartment for this document, instead of creating
   // wrapper in some random compartment when the document is exposed to js
@@ -2656,39 +2650,14 @@ nsIDocument::IsSynthesized() {
   return loadInfo && loadInfo->GetServiceWorkerTaintingSynthesized();
 }
 
-bool
-nsDocument::IsShadowDOMEnabled(JSContext* aCx, JSObject* aGlobal)
-{
-  MOZ_DIAGNOSTIC_ASSERT(JS_IsGlobalObject(aGlobal));
-  nsCOMPtr<nsPIDOMWindowInner> window = xpc::WindowOrNull(aGlobal);
-
-  nsIDocument* doc = window ? window->GetExtantDoc() : nullptr;
-  if (!doc) {
-    return false;
-  }
-
-  return doc->IsShadowDOMEnabled();
-}
-
 // static
 bool
-nsDocument::IsShadowDOMEnabledAndCallerIsChromeOrAddon(JSContext* aCx,
-                                                       JSObject* aObject)
+nsDocument::IsCallerChromeOrAddon(JSContext* aCx, JSObject* aObject)
 {
-  if (IsShadowDOMEnabled(aCx, aObject)) {
-    nsIPrincipal* principal = nsContentUtils::SubjectPrincipal(aCx);
-    return principal &&
-      (nsContentUtils::IsSystemPrincipal(principal) ||
-       principal->GetIsAddonOrExpandedAddonPrincipal());
-  }
-
-  return false;
-}
-
-bool
-nsDocument::IsShadowDOMEnabled(const nsINode* aNode)
-{
-  return aNode->OwnerDoc()->IsShadowDOMEnabled();
+  nsIPrincipal* principal = nsContentUtils::SubjectPrincipal(aCx);
+  return principal &&
+    (nsContentUtils::IsSystemPrincipal(principal) ||
+     principal->GetIsAddonOrExpandedAddonPrincipal());
 }
 
 nsresult
@@ -3073,6 +3042,11 @@ nsIDocument::InitFeaturePolicy(nsIChannel* aChannel)
   if (parentPolicy) {
     // Let's inherit the policy from the parent HTMLIFrameElement if it exists.
     mFeaturePolicy->InheritPolicy(parentPolicy);
+  }
+
+  // We don't want to parse the http Feature-Policy header if this pref is off.
+  if (!StaticPrefs::dom_security_featurePolicy_header_enabled()) {
+    return NS_OK;
   }
 
   nsCOMPtr<nsIHttpChannel> httpChannel;
@@ -5774,8 +5748,7 @@ nsIDocument::CreateElement(const nsAString& aTagName,
     const ElementCreationOptions& options =
       aOptions.GetAsElementCreationOptions();
 
-    if (CustomElementRegistry::IsCustomElementEnabled(this) &&
-        options.mIs.WasPassed()) {
+    if (options.mIs.WasPassed()) {
       is = &options.mIs.Value();
     }
 
@@ -5819,8 +5792,7 @@ nsIDocument::CreateElementNS(const nsAString& aNamespaceURI,
   }
 
   const nsString* is = nullptr;
-  if (CustomElementRegistry::IsCustomElementEnabled(this) &&
-      aOptions.IsElementCreationOptions()) {
+  if (aOptions.IsElementCreationOptions()) {
     const ElementCreationOptions& options = aOptions.GetAsElementCreationOptions();
     if (options.mIs.WasPassed()) {
       is = &options.mIs.Value();
@@ -5848,8 +5820,7 @@ nsIDocument::CreateXULElement(const nsAString& aTagName,
   }
 
   const nsString* is = nullptr;
-  if (CustomElementRegistry::IsCustomElementEnabled(this) &&
-      aOptions.IsElementCreationOptions()) {
+  if (aOptions.IsElementCreationOptions()) {
     const ElementCreationOptions& options = aOptions.GetAsElementCreationOptions();
     if (options.mIs.WasPassed()) {
       is = &options.mIs.Value();
@@ -7347,13 +7318,13 @@ nsIDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
     ScreenIntSize fakeDesktopSize = RoundedToInt(viewportSize * scaleToFit);
     return nsViewportInfo(fakeDesktopSize,
                           scaleToFit,
-                          /*allowZoom*/ true);
+                          nsViewportInfo::ZoomFlag::AllowZoom);
   }
 
   if (!nsLayoutUtils::ShouldHandleMetaViewport(this)) {
     return nsViewportInfo(aDisplaySize,
                           defaultScale,
-                          /*allowZoom*/ false);
+                          nsViewportInfo::ZoomFlag::DisallowZoom);
   }
 
   // In cases where the width of the CSS viewport is less than or equal to the width
@@ -7364,7 +7335,7 @@ nsIDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
   case DisplayWidthHeight:
     return nsViewportInfo(aDisplaySize,
                           defaultScale,
-                          /*allowZoom*/ true);
+                          nsViewportInfo::ZoomFlag::AllowZoom);
   case Unknown:
   {
     nsAutoString viewport;
@@ -7384,7 +7355,7 @@ nsIDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
           mViewportType = DisplayWidthHeight;
           return nsViewportInfo(aDisplaySize,
                                 defaultScale,
-                                /*allowZoom*/true);
+                                nsViewportInfo::ZoomFlag::AllowZoom);
         }
       }
 
@@ -7393,7 +7364,7 @@ nsIDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
       if (handheldFriendly.EqualsLiteral("true")) {
         mViewportType = DisplayWidthHeight;
         return nsViewportInfo(aDisplaySize, defaultScale,
-                              /*allowZoom*/true);
+                              nsViewportInfo::ZoomFlag::AllowZoom);
       }
     }
 
@@ -7470,7 +7441,10 @@ nsIDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
     LayoutDeviceToScreenScale effectiveMinScale = mScaleMinFloat;
     LayoutDeviceToScreenScale effectiveMaxScale = mScaleMaxFloat;
     bool effectiveValidMaxScale = mValidMaxScale;
-    bool effectiveAllowZoom = mAllowZoom;
+
+    nsViewportInfo::ZoomFlag effectiveZoomFlag =
+      mAllowZoom ? nsViewportInfo::ZoomFlag::AllowZoom
+                 : nsViewportInfo::ZoomFlag::DisallowZoom;
     if (gfxPrefs::ForceUserScalable()) {
       // If the pref to force user-scalable is enabled, we ignore the values
       // from the meta-viewport tag for these properties and just assume they
@@ -7482,7 +7456,7 @@ nsIDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
       effectiveMinScale = kViewportMinScale;
       effectiveMaxScale = kViewportMaxScale;
       effectiveValidMaxScale = true;
-      effectiveAllowZoom = true;
+      effectiveZoomFlag = nsViewportInfo::ZoomFlag::AllowZoom;
     }
 
     // Returns extend-zoom value which is MIN(mScaleFloat, mScaleMaxFloat).
@@ -7595,16 +7569,21 @@ nsIDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
     CSSToScreenScale scaleMinFloat = effectiveMinScale * layoutDeviceScale;
     CSSToScreenScale scaleMaxFloat = effectiveMaxScale * layoutDeviceScale;
 
-    const bool autoSize =
-      mMaxWidth == nsViewportInfo::DeviceSize ||
-      (mWidthStrEmpty &&
-       (mMaxHeight == nsViewportInfo::DeviceSize ||
-        mScaleFloat.scale == 1.0f)) ||
-      (!mWidthStrEmpty && mMaxWidth == nsViewportInfo::Auto && mMaxHeight < 0);
+    nsViewportInfo::AutoSizeFlag sizeFlag =
+      nsViewportInfo::AutoSizeFlag::FixedSize;
+    if (mMaxWidth == nsViewportInfo::DeviceSize ||
+        (mWidthStrEmpty &&
+         (mMaxHeight == nsViewportInfo::DeviceSize ||
+          mScaleFloat.scale == 1.0f)) ||
+         (!mWidthStrEmpty &&
+          mMaxWidth == nsViewportInfo::Auto &&
+          mMaxHeight < 0)) {
+      sizeFlag = nsViewportInfo::AutoSizeFlag::AutoSize;
+    }
 
     // FIXME: Resolving width and height should be done above 'Resolve width
     // value' and 'Resolve height value'.
-    if (autoSize) {
+    if (sizeFlag == nsViewportInfo::AutoSizeFlag::AutoSize) {
       size = displaySize;
     }
 
@@ -7632,7 +7611,11 @@ nsIDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
     }
 
     return nsViewportInfo(scaleFloat, scaleMinFloat, scaleMaxFloat, size,
-                          autoSize, effectiveAllowZoom);
+                          sizeFlag,
+                          mValidScaleFloat
+                            ? nsViewportInfo::AutoScaleFlag::FixedScale
+                            : nsViewportInfo::AutoScaleFlag::AutoScale,
+                          effectiveZoomFlag);
   }
 }
 
@@ -12932,7 +12915,7 @@ nsIDocument::SetUserHasInteracted()
     loadInfo->SetDocumentHasUserInteracted(true);
   }
 
-  MaybeAllowStorageForOpener();
+  MaybeAllowStorageForOpenerAfterUserInteraction();
 }
 
 void
@@ -12979,7 +12962,7 @@ nsIDocument::SetDocTreeHadPlayRevoked()
 }
 
 void
-nsIDocument::MaybeAllowStorageForOpener()
+nsIDocument::MaybeAllowStorageForOpenerAfterUserInteraction()
 {
   if (StaticPrefs::network_cookie_cookieBehavior() !=
         nsICookieService::BEHAVIOR_REJECT_TRACKER) {
@@ -13037,7 +13020,7 @@ nsIDocument::MaybeAllowStorageForOpener()
   // We don't care when the asynchronous work finishes here.
   Unused << AntiTrackingCommon::AddFirstPartyStorageAccessGrantedFor(NodePrincipal(),
                                                                      openerInner,
-                                                                     AntiTrackingCommon::eHeuristic);
+                                                                     AntiTrackingCommon::eOpenerAfterUserInteraction);
 }
 
 namespace {

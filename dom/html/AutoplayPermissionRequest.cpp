@@ -16,78 +16,26 @@ extern mozilla::LazyLogModule gAutoplayPermissionLog;
 
 namespace mozilla {
 
-NS_IMPL_ISUPPORTS(AutoplayPermissionRequest, nsIContentPermissionRequest)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(AutoplayPermissionRequest,
+                                   ContentPermissionRequestBase)
+
+NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED_0(AutoplayPermissionRequest,
+                                               ContentPermissionRequestBase)
 
 AutoplayPermissionRequest::AutoplayPermissionRequest(
   AutoplayPermissionManager* aManager,
   nsGlobalWindowInner* aWindow,
-  nsIPrincipal* aNodePrincipal,
-  nsIEventTarget* aMainThreadTarget)
-  : mManager(aManager)
-  , mWindow(do_GetWeakReference(aWindow))
-  , mNodePrincipal(aNodePrincipal)
-  , mMainThreadTarget(aMainThreadTarget)
-  , mRequester(new dom::nsContentPermissionRequester(aWindow))
+  nsIPrincipal* aNodePrincipal)
+  : ContentPermissionRequestBase(aNodePrincipal, false, aWindow,
+                                 NS_LITERAL_CSTRING(""), // No testing pref used in this class
+                                 NS_LITERAL_CSTRING("autoplay-media"))
+  , mManager(aManager)
 {
-  MOZ_ASSERT(mNodePrincipal);
 }
 
 AutoplayPermissionRequest::~AutoplayPermissionRequest()
 {
   Cancel();
-}
-
-NS_IMETHODIMP
-AutoplayPermissionRequest::GetPrincipal(nsIPrincipal** aRequestingPrincipal)
-{
-  NS_ENSURE_ARG_POINTER(aRequestingPrincipal);
-
-  nsCOMPtr<nsIPrincipal> principal = mNodePrincipal;
-  principal.forget(aRequestingPrincipal);
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-AutoplayPermissionRequest::GetTypes(nsIArray** aTypes)
-{
-  NS_ENSURE_ARG_POINTER(aTypes);
-
-  nsTArray<nsString> emptyOptions;
-  return dom::nsContentPermissionUtils::CreatePermissionArray(
-    NS_LITERAL_CSTRING("autoplay-media"),
-    emptyOptions,
-    aTypes);
-}
-
-NS_IMETHODIMP
-AutoplayPermissionRequest::GetWindow(mozIDOMWindow** aRequestingWindow)
-{
-  NS_ENSURE_ARG_POINTER(aRequestingWindow);
-
-  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryReferent(mWindow);
-  if (!window) {
-    return NS_ERROR_FAILURE;
-  }
-  window.forget(aRequestingWindow);
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-AutoplayPermissionRequest::GetElement(dom::Element** aRequestingElement)
-{
-  NS_ENSURE_ARG_POINTER(aRequestingElement);
-  *aRequestingElement = nullptr;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-AutoplayPermissionRequest::GetIsHandlingUserInput(bool* aIsHandlingUserInput)
-{
-  NS_ENSURE_ARG_POINTER(aIsHandlingUserInput);
-  *aIsHandlingUserInput = false;
-  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -114,31 +62,17 @@ AutoplayPermissionRequest::Allow(JS::HandleValue aChoices)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-AutoplayPermissionRequest::GetRequester(
-  nsIContentPermissionRequester** aRequester)
-{
-  NS_ENSURE_ARG_POINTER(aRequester);
-
-  nsCOMPtr<nsIContentPermissionRequester> requester = mRequester;
-  requester.forget(aRequester);
-
-  return NS_OK;
-}
-
 already_AddRefed<AutoplayPermissionRequest>
 AutoplayPermissionRequest::Create(nsGlobalWindowInner* aWindow,
                                   AutoplayPermissionManager* aManager)
 {
-  if (!aWindow || !aWindow->GetPrincipal() ||
-      !aWindow->EventTargetFor(TaskCategory::Other)) {
+  if (!aWindow || !aWindow->GetPrincipal()) {
     return nullptr;
   }
   RefPtr<AutoplayPermissionRequest> request =
     new AutoplayPermissionRequest(aManager,
                                   aWindow,
-                                  aWindow->GetPrincipal(),
-                                  aWindow->EventTargetFor(TaskCategory::Other));
+                                  aWindow->GetPrincipal());
   PLAY_REQUEST_LOG("AutoplayPermissionRequest %p Create()", request.get());
   return request.forget();
 }

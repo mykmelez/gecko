@@ -809,12 +809,14 @@ StripURIForReporting(nsIURI* aURI,
   // 1) If the origin of uri is a globally unique identifier (for example,
   // aURI has a scheme of data, blob, or filesystem), then return the
   // ASCII serialization of uri’s scheme.
-  bool isHttpOrFtp =
-    (NS_SUCCEEDED(aURI->SchemeIs("http", &isHttpOrFtp)) && isHttpOrFtp) ||
-    (NS_SUCCEEDED(aURI->SchemeIs("https", &isHttpOrFtp)) && isHttpOrFtp) ||
-    (NS_SUCCEEDED(aURI->SchemeIs("ftp", &isHttpOrFtp)) && isHttpOrFtp);
+  bool isHttpFtpOrWs =
+    (NS_SUCCEEDED(aURI->SchemeIs("http", &isHttpFtpOrWs)) && isHttpFtpOrWs) ||
+    (NS_SUCCEEDED(aURI->SchemeIs("https", &isHttpFtpOrWs)) && isHttpFtpOrWs) ||
+    (NS_SUCCEEDED(aURI->SchemeIs("ftp", &isHttpFtpOrWs)) && isHttpFtpOrWs) ||
+    (NS_SUCCEEDED(aURI->SchemeIs("ws", &isHttpFtpOrWs)) && isHttpFtpOrWs) ||
+    (NS_SUCCEEDED(aURI->SchemeIs("wss", &isHttpFtpOrWs)) && isHttpFtpOrWs);
 
-  if (!isHttpOrFtp) {
+  if (!isHttpFtpOrWs) {
     // not strictly spec compliant, but what we really care about is
     // http/https and also ftp. If it's not http/https or ftp, then treat aURI
     // as if it's a globally unique identifier and just return the scheme.
@@ -1756,6 +1758,10 @@ nsCSPContext::Read(nsIObjectInputStream* aStream)
     rv = aStream->ReadBoolean(&reportOnly);
     NS_ENSURE_SUCCESS(rv, rv);
 
+    bool deliveredViaMetaTag = false;
+    rv = aStream->ReadBoolean(&deliveredViaMetaTag);
+    NS_ENSURE_SUCCESS(rv, rv);
+
     // @param deliveredViaMetaTag:
     // when parsing the CSP policy string initially we already remove directives
     // that should not be processed when delivered via the meta tag. Such directives
@@ -1764,7 +1770,7 @@ nsCSPContext::Read(nsIObjectInputStream* aStream)
                                                                   mSelfURI,
                                                                   reportOnly,
                                                                   this,
-                                                                  false);
+                                                                  deliveredViaMetaTag);
     if (policy) {
       mPolicies.AppendElement(policy);
     }
@@ -1791,6 +1797,7 @@ nsCSPContext::Write(nsIObjectOutputStream* aStream)
     mPolicies[p]->toString(polStr);
     aStream->WriteWStringZ(polStr.get());
     aStream->WriteBoolean(mPolicies[p]->getReportOnlyFlag());
+    aStream->WriteBoolean(mPolicies[p]->getDeliveredViaMetaTagFlag());
   }
   return NS_OK;
 }

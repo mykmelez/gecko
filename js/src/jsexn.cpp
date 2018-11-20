@@ -423,7 +423,7 @@ js::ErrorFromException(JSContext* cx, HandleObject objArg)
     return report;
 }
 
-JS_PUBLIC_API(JSObject*)
+JS_PUBLIC_API JSObject*
 JS::ExceptionStackOrNull(HandleObject objArg)
 {
     JSObject* obj = CheckedUnwrap(objArg);
@@ -434,7 +434,7 @@ JS::ExceptionStackOrNull(HandleObject objArg)
     return obj->as<ErrorObject>().stack();
 }
 
-JS_PUBLIC_API(uint64_t)
+JS_PUBLIC_API uint64_t
 JS::ExceptionTimeWarpTarget(JS::HandleValue value)
 {
     if (!value.isObject()) {
@@ -657,7 +657,7 @@ ErrorObject::createConstructor(JSContext* cx, JSProtoKey key)
     return ctor;
 }
 
-JS_FRIEND_API(JSFlatString*)
+JS_FRIEND_API JSFlatString*
 js::GetErrorTypeName(JSContext* cx, int16_t exnType)
 {
     /*
@@ -766,9 +766,13 @@ IsDuckTypedErrorObject(JSContext* cx, HandleObject exnObject, const char** filen
         return false;
     }
 
+    // First try "filename".
     const char* filename_str = *filename_strp;
-    if (!JS_HasProperty(cx, exnObject, filename_str, &found) || !found) {
-        /* Now try "fileName", in case this quacks like an Error */
+    if (!JS_HasProperty(cx, exnObject, filename_str, &found)) {
+        return false;
+    }
+    if (!found) {
+        // If that doesn't work, try "fileName".
         filename_str = js_fileName_str;
         if (!JS_HasProperty(cx, exnObject, filename_str, &found) || !found) {
             return false;
@@ -1087,7 +1091,7 @@ js::CopyErrorObject(JSContext* cx, Handle<ErrorObject*> err)
                                lineNumber, columnNumber, std::move(copyReport), message);
 }
 
-JS_PUBLIC_API(bool)
+JS_PUBLIC_API bool
 JS::CreateError(JSContext* cx, JSExnType type, HandleObject stack, HandleString fileName,
                     uint32_t lineNumber, uint32_t columnNumber, JSErrorReport* report,
                     HandleString message, MutableHandleValue rval)

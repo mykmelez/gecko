@@ -575,6 +575,19 @@ class JSFunction : public js::NativeObject
         return nonLazyScript();
     }
 
+    // If this is a scripted function, returns its canonical function (the
+    // original function allocated by the frontend). Note that lazy self-hosted
+    // builtins don't have a lazy script so in that case we also return nullptr.
+    JSFunction* maybeCanonicalFunction() const {
+        if (hasScript()) {
+            return nonLazyScript()->functionNonDelazifying();
+        }
+        if (isInterpretedLazy() && !isSelfHostedBuiltin()) {
+            return lazyScript()->functionNonDelazifying();
+        }
+        return nullptr;
+    }
+
     // The state of a JSFunction whose script errored out during bytecode
     // compilation. Such JSFunctions are only reachable via GC iteration and
     // not from script.
@@ -1064,7 +1077,7 @@ fun_call(JSContext* cx, unsigned argc, Value* vp);
 namespace JS {
 namespace detail {
 
-JS_PUBLIC_API(void)
+JS_PUBLIC_API void
 CheckIsValidConstructible(const Value& calleev);
 
 } // namespace detail

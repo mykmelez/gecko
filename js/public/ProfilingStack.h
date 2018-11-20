@@ -20,7 +20,7 @@
 #pragma GCC diagnostic ignored "-Wattributes"
 #endif // JS_BROKEN_GCC_ATTRIBUTE_WARNING
 
-class JS_PUBLIC_API(JSTracer);
+class JS_PUBLIC_API JSTracer;
 
 #ifdef JS_BROKEN_GCC_ATTRIBUTE_WARNING
 #pragma GCC diagnostic pop
@@ -152,7 +152,7 @@ class ProfilingStackFrame
     mozilla::Atomic<int32_t, mozilla::ReleaseAcquire,
                     mozilla::recordreplay::Behavior::DontPreserve> pcOffsetIfJS_;
 
-    // Bits 0...6 hold the Flags. Bits 7...31 hold the category.
+    // Bits 0...7 hold the Flags. Bits 8...31 hold the category.
     mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire,
                     mozilla::recordreplay::Behavior::DontPreserve> flagsAndCategory_;
 
@@ -173,8 +173,8 @@ class ProfilingStackFrame
         return *this;
     }
 
-    // 7 bits for the flags.
-    // That leaves 32 - 7 = 25 bits for the category.
+    // 8 bits for the flags.
+    // That leaves 32 - 8 = 25 bits for the category.
     enum class Flags : uint32_t {
         // The first three flags describe the kind of the frame and are
         // mutually exclusive. (We still give them individual bits for
@@ -207,7 +207,12 @@ class ProfilingStackFrame
         STRING_TEMPLATE_GETTER = 1 << 5, // "get <label>.<dynamicString>"
         STRING_TEMPLATE_SETTER = 1 << 6, // "set <label>.<dynamicString>"
 
-        FLAGS_BITCOUNT = 7,
+        // If set, causes this stack frame to be marked as "relevantForJS" in
+        // the profile JSON, which will make it show up in the "JS only" call
+        // tree view.
+        RELEVANT_FOR_JS = 1 << 7,
+
+        FLAGS_BITCOUNT = 8,
         FLAGS_MASK = (1 << FLAGS_BITCOUNT) - 1
     };
 
@@ -315,7 +320,7 @@ class ProfilingStackFrame
         return spOrScript;
     }
 
-    JS_PUBLIC_API(JSScript*) script() const;
+    JS_PUBLIC_API JSScript* script() const;
 
     // Note that the pointer returned might be invalid.
     JSScript* rawScript() const {
@@ -325,7 +330,7 @@ class ProfilingStackFrame
     }
 
     // We can't know the layout of JSScript, so look in vm/GeckoProfiler.cpp.
-    JS_FRIEND_API(jsbytecode*) pc() const;
+    JS_FRIEND_API jsbytecode* pc() const;
     void setPC(jsbytecode* pc);
 
     void trace(JSTracer* trc);
@@ -336,15 +341,15 @@ class ProfilingStackFrame
     static const int32_t NullPCOffset = -1;
 };
 
-JS_FRIEND_API(void)
+JS_FRIEND_API void
 SetContextProfilingStack(JSContext* cx, ProfilingStack* profilingStack);
 
 // GetContextProfilingStack also exists, but it's defined in RootingAPI.h.
 
-JS_FRIEND_API(void)
+JS_FRIEND_API void
 EnableContextProfilingStack(JSContext* cx, bool enabled);
 
-JS_FRIEND_API(void)
+JS_FRIEND_API void
 RegisterContextProfilingEventMarker(JSContext* cx, void (*fn)(const char*));
 
 } // namespace js
@@ -357,7 +362,7 @@ typedef ProfilingStack*
 typedef void
 (* UnregisterThreadCallback)();
 
-JS_FRIEND_API(void)
+JS_FRIEND_API void
 SetProfilingThreadCallbacks(RegisterThreadCallback registerThread,
                             UnregisterThreadCallback unregisterThread);
 

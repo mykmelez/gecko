@@ -12,12 +12,16 @@ lazy_static! {
         // Make sure Shield doesn't hit the network.
         ("app.normandy.api_url", Pref::new("")),
 
+        // Disable Firefox old build background check
+        ("app.update.checkInstallTime", Pref::new(false)),
+
         // Disable automatically upgrading Firefox
         ("app.update.disabledForTesting", Pref::new(true)),
 
         // Enable the dump function, which sends messages to the system
         // console
         ("browser.dom.window.dump.enabled", Pref::new(true)),
+        ("devtools.console.stdout.chrome", Pref::new(true)),
 
         // Disable safebrowsing components
         ("browser.safebrowsing.blockedURIs.enabled", Pref::new(false)),

@@ -363,6 +363,15 @@ public:
                         const ContentParentId& aCpId,
                         bool aMarkedDestroying);
 
+  // This method can be called on any thread.
+  void
+  RegisterRemoteWorkerActor();
+
+  // This method _must_ be called on main-thread because it can start the
+  // shutting down of the content process.
+  void
+  UnregisterRemoveWorkerActor();
+
   void ReportChildAlreadyBlocked();
 
   bool RequestRunToCompletion();
@@ -526,6 +535,7 @@ public:
   virtual PContentPermissionRequestParent*
   AllocPContentPermissionRequestParent(const InfallibleTArray<PermissionRequest>& aRequests,
                                        const IPC::Principal& aPrincipal,
+                                       const IPC::Principal& aTopLevelPrincipal,
                                        const bool& aIsTrusted,
                                        const TabId& aTabId) override;
 
@@ -792,6 +802,9 @@ private:
   // Common initialization after sub process launch.
   void InitInternal(ProcessPriority aPriority);
 
+  // Generate a minidump for the child process and one for the main process
+  void GeneratePairedMinidump(const char* aReason);
+
   virtual ~ContentParent();
 
   void Init();
@@ -1038,10 +1051,6 @@ private:
   virtual mozilla::ipc::IPCResult RecvGetShowPasswordSetting(bool* showPassword) override;
 
   virtual mozilla::ipc::IPCResult RecvStartVisitedQuery(const URIParams& uri) override;
-
-  virtual mozilla::ipc::IPCResult RecvVisitURI(const URIParams& uri,
-                                               const OptionalURIParams& referrer,
-                                               const uint32_t& flags) override;
 
   virtual mozilla::ipc::IPCResult RecvSetURITitle(const URIParams& uri,
                                                   const nsString& title) override;
@@ -1296,13 +1305,18 @@ private:
   // nsFakePluginTag::NOT_JSPLUGIN.
   int32_t mJSPluginID;
 
-  nsCString mKillHardAnnotation;
-
   // After we initiate shutdown, we also start a timer to ensure
   // that even content processes that are 100% blocked (say from
   // SIGSTOP), are still killed eventually.  This task enforces that
   // timer.
   nsCOMPtr<nsITimer> mForceKillTimer;
+
+  // Number of active remote workers. This value is increased when a
+  // RemoteWorkerParent actor is created for this ContentProcess and it is
+  // decreased when the actor is destroyed.
+  // It's touched on PBackground thread and on main-thread.
+  Atomic<uint32_t> mRemoteWorkerActors;
+
   // How many tabs we're waiting to finish their destruction
   // sequence.  Precisely, how many TabParents have called
   // NotifyTabDestroying() but not called NotifyTabDestroyed().
@@ -1315,6 +1329,7 @@ private:
   // still pass through.
   bool mIsAlive;
 
+  bool mShuttingDown;
   bool mIsForBrowser;
 
   // Whether this process is recording or replaying its execution, and any

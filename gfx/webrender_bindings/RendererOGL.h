@@ -57,7 +57,10 @@ public:
   void Update();
 
   /// This can be called on the render thread only.
-  bool UpdateAndRender(const Maybe<gfx::IntSize>& aReadbackSize, const Maybe<Range<uint8_t>>& aReadbackBuffer, bool aHadSlowFrame);
+  bool UpdateAndRender(const Maybe<gfx::IntSize>& aReadbackSize,
+                       const Maybe<Range<uint8_t>>& aReadbackBuffer,
+                       bool aHadSlowFrame,
+                       RendererStats* aOutStats);
 
   /// This can be called on the render thread only.
   void WaitForGPU();
@@ -95,6 +98,8 @@ public:
 
   RenderTextureHost* GetRenderTexture(wr::WrExternalImageId aExternalImageId);
 
+  void AccumulateMemoryReport(MemoryReport* aReport);
+
   wr::Renderer* GetRenderer() { return mRenderer; }
 
   gl::GLContext* gl() const;
@@ -108,7 +113,6 @@ protected:
   layers::CompositorBridgeParent* mBridge;
   wr::WindowId mWindowId;
   TimeStamp mFrameStartTime;
-  wr::DebugFlags mDebugFlags;
 };
 
 } // namespace wr

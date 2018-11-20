@@ -63,7 +63,9 @@ DataStruct::SetData(nsISupports* aData, uint32_t aDataLen, bool aIsPrivateData)
 {
   // Now, check to see if we consider the data to be "too large"
   // as well as ensuring that private browsing mode is disabled
-  if (aDataLen > kLargeDatasetSize && !aIsPrivateData) {
+  if (aDataLen > kLargeDatasetSize && !aIsPrivateData &&
+      // File IO is not allowed in content processes.
+      XRE_IsParentProcess()) {
     // if so, cache it to disk instead of memory
     if (NS_SUCCEEDED(WriteCache(aData, aDataLen))) {
       // Clear previously set small data.
@@ -514,57 +516,50 @@ nsTransferable::FlavorsTransferableCanExport(nsTArray<nsCString>& aFlavors)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsTransferable::GetIsPrivateData(bool* aIsPrivateData)
+bool
+nsTransferable::GetIsPrivateData()
 {
   MOZ_ASSERT(mInitialized);
 
-  *aIsPrivateData = mPrivateData;
-  return NS_OK;
+  return mPrivateData;
 }
 
-NS_IMETHODIMP
+void
 nsTransferable::SetIsPrivateData(bool aIsPrivateData)
 {
   MOZ_ASSERT(mInitialized);
 
   mPrivateData = aIsPrivateData;
-  return NS_OK;
 }
 
-NS_IMETHODIMP
-nsTransferable::GetRequestingPrincipal(nsIPrincipal** aRequestingPrincipal)
+nsIPrincipal*
+nsTransferable::GetRequestingPrincipal()
 {
   MOZ_ASSERT(mInitialized);
 
-  nsCOMPtr<nsIPrincipal> principal = mRequestingPrincipal;
-  principal.forget(aRequestingPrincipal);
-  return NS_OK;
+  return mRequestingPrincipal;
 }
 
-NS_IMETHODIMP
+void
 nsTransferable::SetRequestingPrincipal(nsIPrincipal* aRequestingPrincipal)
 {
   MOZ_ASSERT(mInitialized);
 
   mRequestingPrincipal = aRequestingPrincipal;
-  return NS_OK;
 }
 
-NS_IMETHODIMP
-nsTransferable::GetContentPolicyType(nsContentPolicyType* aContentPolicyType)
+nsContentPolicyType
+nsTransferable::GetContentPolicyType()
 {
   MOZ_ASSERT(mInitialized);
 
-  *aContentPolicyType = mContentPolicyType;
-  return NS_OK;
+  return mContentPolicyType;
 }
 
-NS_IMETHODIMP
+void
 nsTransferable::SetContentPolicyType(nsContentPolicyType aContentPolicyType)
 {
   MOZ_ASSERT(mInitialized);
 
   mContentPolicyType = aContentPolicyType;
-  return NS_OK;
 }

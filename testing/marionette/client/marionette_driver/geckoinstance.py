@@ -376,8 +376,9 @@ class GeckoInstance(object):
 
 class FennecInstance(GeckoInstance):
     fennec_prefs = {
-        # Enable output of dump()
+        # Enable output for dump() and chrome console API
         "browser.dom.window.dump.enabled": True,
+        "devtools.console.stdout.chrome": True,
 
         # Disable Android snippets
         "browser.snippets.enabled": False,
@@ -493,6 +494,8 @@ class FennecInstance(GeckoInstance):
 
 class DesktopInstance(GeckoInstance):
     desktop_prefs = {
+        # Disable Firefox old build background check
+        "app.update.checkInstallTime": False,
         # Disable application updates
         "app.update.disabledForTesting": True,
         "security.turn_off_all_security_so_that_viruses_can_take_over_this_computer": True,
@@ -504,8 +507,9 @@ class DesktopInstance(GeckoInstance):
         # We use a larger number than the default 22 to have some buffer
         "browser.contentblocking.introCount": 99,
 
-        # Enable output of dump()
+        # Enable output for dump() and chrome console API
         "browser.dom.window.dump.enabled": True,
+        "devtools.console.stdout.chrome": True,
 
         # Indicate that the download panel has been shown once so that whichever
         # download test runs first doesn"t show the popup inconsistently

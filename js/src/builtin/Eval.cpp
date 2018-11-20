@@ -9,9 +9,9 @@
 #include "mozilla/HashFunctions.h"
 #include "mozilla/Range.h"
 
-#include "frontend/BytecodeCompiler.h"
+#include "frontend/BytecodeCompilation.h"
 #include "gc/HashUtil.h"
-#include "js/SourceBufferHolder.h"
+#include "js/SourceText.h"
 #include "js/StableStringChars.h"
 #include "vm/Debugger.h"
 #include "vm/GlobalObject.h"
@@ -29,7 +29,8 @@ using mozilla::RangedPtr;
 using JS::AutoCheckCannotGC;
 using JS::AutoStableStringChars;
 using JS::CompileOptions;
-using JS::SourceBufferHolder;
+using JS::SourceOwnership;
+using JS::SourceText;
 
 // We should be able to assert this for *any* fp->environmentChain().
 static void
@@ -317,12 +318,18 @@ EvalKernel(JSContext* cx, HandleValue v, EvalType evalType, AbstractFramePtr cal
             return false;
         }
 
+        SourceText<char16_t> srcBuf;
+
         const char16_t* chars = linearChars.twoByteRange().begin().get();
-        SourceBufferHolder::Ownership ownership = linearChars.maybeGiveOwnershipToCaller()
-                                                  ? SourceBufferHolder::GiveOwnership
-                                                  : SourceBufferHolder::NoOwnership;
-        SourceBufferHolder srcBuf(chars, linearStr->length(), ownership);
-        JSScript* compiled = frontend::CompileEvalScript(cx, env, enclosing, options, srcBuf);
+        SourceOwnership ownership = linearChars.maybeGiveOwnershipToCaller()
+                                    ? SourceOwnership::TakeOwnership
+                                    : SourceOwnership::Borrowed;
+        if (!srcBuf.init(cx, chars, linearStr->length(), ownership)) {
+            return false;
+        }
+
+        frontend::EvalScriptInfo info(cx, options, env, enclosing);
+        JSScript* compiled = frontend::CompileEvalScript(info, srcBuf);
         if (!compiled) {
             return false;
         }
@@ -401,12 +408,18 @@ js::DirectEvalStringFromIon(JSContext* cx,
             return false;
         }
 
+        SourceText<char16_t> srcBuf;
+
         const char16_t* chars = linearChars.twoByteRange().begin().get();
-        SourceBufferHolder::Ownership ownership = linearChars.maybeGiveOwnershipToCaller()
-                                                  ? SourceBufferHolder::GiveOwnership
-                                                  : SourceBufferHolder::NoOwnership;
-        SourceBufferHolder srcBuf(chars, linearStr->length(), ownership);
-        JSScript* compiled = frontend::CompileEvalScript(cx, env, enclosing, options, srcBuf);
+        SourceOwnership ownership = linearChars.maybeGiveOwnershipToCaller()
+                                    ? SourceOwnership::TakeOwnership
+                                    : SourceOwnership::Borrowed;
+        if (!srcBuf.init(cx, chars, linearStr->length(), ownership)) {
+            return false;
+        }
+
+        frontend::EvalScriptInfo info(cx, options, env, enclosing);
+        JSScript* compiled = frontend::CompileEvalScript(info, srcBuf);
         if (!compiled) {
             return false;
         }
@@ -477,7 +490,7 @@ ExecuteInExtensibleLexicalEnvironment(JSContext* cx, HandleScript scriptArg, Han
                          NullFramePtr() /* evalInFrame */, rval.address());
 }
 
-JS_FRIEND_API(bool)
+JS_FRIEND_API bool
 js::ExecuteInFrameScriptEnvironment(JSContext* cx, HandleObject objArg, HandleScript scriptArg,
                                     MutableHandleObject envArg)
 {
@@ -515,7 +528,7 @@ js::ExecuteInFrameScriptEnvironment(JSContext* cx, HandleObject objArg, HandleSc
     return true;
 }
 
-JS_FRIEND_API(JSObject*)
+JS_FRIEND_API JSObject*
 js::NewJSMEnvironment(JSContext* cx)
 {
     RootedObject varEnv(cx, NonSyntacticVariablesObject::create(cx));
@@ -533,14 +546,14 @@ js::NewJSMEnvironment(JSContext* cx)
     return varEnv;
 }
 
-JS_FRIEND_API(bool)
+JS_FRIEND_API bool
 js::ExecuteInJSMEnvironment(JSContext* cx, HandleScript scriptArg, HandleObject varEnv)
 {
     AutoObjectVector emptyChain(cx);
     return ExecuteInJSMEnvironment(cx, scriptArg, varEnv, emptyChain);
 }
 
-JS_FRIEND_API(bool)
+JS_FRIEND_API bool
 js::ExecuteInJSMEnvironment(JSContext* cx, HandleScript scriptArg, HandleObject varEnv,
                             AutoObjectVector& targetObj)
 {
@@ -585,7 +598,7 @@ js::ExecuteInJSMEnvironment(JSContext* cx, HandleScript scriptArg, HandleObject 
     return ExecuteInExtensibleLexicalEnvironment(cx, scriptArg, env);
 }
 
-JS_FRIEND_API(JSObject*)
+JS_FRIEND_API JSObject*
 js::GetJSMEnvironmentOfScriptedCaller(JSContext* cx)
 {
     FrameIter iter(cx);
@@ -605,7 +618,7 @@ js::GetJSMEnvironmentOfScriptedCaller(JSContext* cx)
     return env;
 }
 
-JS_FRIEND_API(bool)
+JS_FRIEND_API bool
 js::IsJSMEnvironment(JSObject* obj)
 {
     // NOTE: This also returns true if the NonSyntacticVariablesObject was

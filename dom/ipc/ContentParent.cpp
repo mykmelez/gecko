@@ -95,6 +95,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/ProcessHangMonitor.h"
 #include "mozilla/ProcessHangMonitorIPC.h"
+#include "mozilla/RDDProcessManager.h"
 #include "mozilla/recordreplay/ParentIPC.h"
 #include "mozilla/Scheduler.h"
 #include "mozilla/ScopeExit.h"
@@ -1861,6 +1862,11 @@ ContentParent::ShouldKeepProcessAlive() const
     return true;
   }
 
+  // If we have active workers, we need to stay alive.
+  if (mRemoteWorkerActors) {
+    return true;
+  }
+
   if (!sBrowserContentParents) {
     return false;
   }
@@ -2384,6 +2390,7 @@ ContentParent::ContentParent(ContentParent* aOpener,
   , mChildID(gContentChildID++)
   , mGeolocationWatchID(-1)
   , mJSPluginID(aJSPluginID)
+  , mRemoteWorkerActors(0)
   , mNumDestroyingTabs(0)
   , mIsAvailable(true)
   , mIsAlive(true)
@@ -2654,6 +2661,23 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority)
                               namespaces);
 
   gpm->AddListener(this);
+
+  if (StaticPrefs::MediaRddProcessEnabled()) {
+    RDDProcessManager* rdd = RDDProcessManager::Get();
+
+    Endpoint<PRemoteDecoderManagerChild> remoteManager;
+    bool rddOpened = rdd->CreateContentBridge(OtherPid(),
+                                              &remoteManager);
+    MOZ_ASSERT(rddOpened);
+
+    if (rddOpened) {
+      // not using std::move here (like in SendInitRendering above) because
+      // clang-tidy says:
+      // Warning: Passing result of std::move() as a const reference
+      // argument; no move will actually happen
+      Unused << SendInitRemoteDecoder(remoteManager);
+    }
+  }
 
   nsStyleSheetService *sheetService = nsStyleSheetService::GetInstance();
   if (sheetService) {
@@ -3103,6 +3127,8 @@ ContentParent::Observe(nsISupports* aSubject,
 {
   if (mSubprocess && (!strcmp(aTopic, "profile-before-change") ||
                       !strcmp(aTopic, "xpcom-shutdown"))) {
+    mShuttingDown = true;
+
     // Make sure that our process will get scheduled.
     ProcessPriorityManager::SetProcessPriority(this,
                                                PROCESS_PRIORITY_FOREGROUND);
@@ -3405,26 +3431,14 @@ ContentParent::ForceKillTimerCallback(nsITimer* aTimer, void* aClosure)
   self->KillHard("ShutDownKill");
 }
 
-// WARNING: aReason appears in telemetry, so any new value passed in requires
-// data review.
 void
-ContentParent::KillHard(const char* aReason)
+ContentParent::GeneratePairedMinidump(const char* aReason)
 {
-  AUTO_PROFILER_LABEL("ContentParent::KillHard", OTHER);
-
-  // On Windows, calling KillHard multiple times causes problems - the
-  // process handle becomes invalid on the first call, causing a second call
-  // to crash our process - more details in bug 890840.
-  if (mCalledKillHard) {
-    return;
-  }
-  mCalledKillHard = true;
-  mForceKillTimer = nullptr;
-
   // We're about to kill the child process associated with this content.
   // Something has gone wrong to get us here, so we generate a minidump
-  // of the parent and child for submission to the crash server.
-  if (mCrashReporter) {
+  // of the parent and child for submission to the crash server unless we're
+  // already shutting down.
+  if (mCrashReporter && !mShuttingDown) {
     // GeneratePairedMinidump creates two minidumps for us - the main
     // one is for the content process we're about to kill, and the other
     // one is for the main browser process. That second one is the extra
@@ -3447,6 +3461,25 @@ ContentParent::KillHard(const char* aReason)
 
     Telemetry::Accumulate(Telemetry::SUBPROCESS_KILL_HARD, reason, 1);
   }
+}
+
+// WARNING: aReason appears in telemetry, so any new value passed in requires
+// data review.
+void
+ContentParent::KillHard(const char* aReason)
+{
+  AUTO_PROFILER_LABEL("ContentParent::KillHard", OTHER);
+
+  // On Windows, calling KillHard multiple times causes problems - the
+  // process handle becomes invalid on the first call, causing a second call
+  // to crash our process - more details in bug 890840.
+  if (mCalledKillHard) {
+    return;
+  }
+  mCalledKillHard = true;
+  mForceKillTimer = nullptr;
+
+  GeneratePairedMinidump(aReason);
 
   ProcessHandle otherProcessHandle;
   if (!base::OpenProcessHandle(OtherPid(), &otherProcessHandle)) {
@@ -3878,25 +3911,6 @@ ContentParent::RecvStartVisitedQuery(const URIParams& aURI)
   }
   return IPC_OK();
 }
-
-
-mozilla::ipc::IPCResult
-ContentParent::RecvVisitURI(const URIParams& uri,
-                            const OptionalURIParams& referrer,
-                            const uint32_t& flags)
-{
-  nsCOMPtr<nsIURI> ourURI = DeserializeURI(uri);
-  if (!ourURI) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-  nsCOMPtr<nsIURI> ourReferrer = DeserializeURI(referrer);
-  nsCOMPtr<IHistory> history = services::GetHistoryService();
-  if (history) {
-    history->VisitURI(ourURI, ourReferrer, flags);
-  }
-  return IPC_OK();
-}
-
 
 mozilla::ipc::IPCResult
 ContentParent::RecvSetURITitle(const URIParams& uri,
@@ -4864,6 +4878,7 @@ ContentParent::RecvUpdateDropEffect(const uint32_t& aDragAction,
 PContentPermissionRequestParent*
 ContentParent::AllocPContentPermissionRequestParent(const InfallibleTArray<PermissionRequest>& aRequests,
                                                     const IPC::Principal& aPrincipal,
+                                                    const IPC::Principal& aTopLevelPrincipal,
                                                     const bool& aIsHandlingUserInput,
                                                     const TabId& aTabId)
 {
@@ -4877,6 +4892,7 @@ ContentParent::AllocPContentPermissionRequestParent(const InfallibleTArray<Permi
   return nsContentPermissionUtils::CreateContentPermissionRequestParent(aRequests,
                                                                         tp->GetOwnerElement(),
                                                                         aPrincipal,
+                                                                        aTopLevelPrincipal,
                                                                         aIsHandlingUserInput,
                                                                         aTabId);
 }
@@ -6153,4 +6169,33 @@ ContentParent::RecvSetOpenerBrowsingContext(
   context->SetOpener(opener);
 
   return IPC_OK();
+}
+
+void
+ContentParent::RegisterRemoteWorkerActor()
+{
+  ++mRemoteWorkerActors;
+}
+
+void
+ContentParent::UnregisterRemoveWorkerActor()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (--mRemoteWorkerActors) {
+    return;
+  }
+
+  ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
+  if (!cpm->GetTabParentCountByProcessId(ChildID()) &&
+      !ShouldKeepProcessAlive() &&
+      !TryToRecycle()) {
+    // In the case of normal shutdown, send a shutdown message to child to
+    // allow it to perform shutdown tasks.
+    MessageLoop::current()->PostTask(
+      NewRunnableMethod<ShutDownMethod>("dom::ContentParent::ShutDownProcess",
+                                        this,
+                                        &ContentParent::ShutDownProcess,
+                                        SEND_SHUTDOWN_MESSAGE));
+  }
 }

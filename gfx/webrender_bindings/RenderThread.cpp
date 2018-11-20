@@ -147,13 +147,14 @@ void
 RenderThread::DoAccumulateMemoryReport(MemoryReport aReport, const RefPtr<MemoryReportPromise::Private>& aPromise)
 {
   MOZ_ASSERT(IsInRenderThread());
+  MOZ_ASSERT(aReport.total_gpu_bytes_allocated == 0);
+
   for (auto& r: mRenderers) {
-    wr_renderer_accumulate_memory_report(r.second->GetRenderer(), &aReport);
+    r.second->AccumulateMemoryReport(&aReport);
   }
 
   // Note total gpu bytes allocated across all WR instances.
-  MOZ_ASSERT(aReport.total_gpu_bytes_allocated == 0);
-  aReport.total_gpu_bytes_allocated = wr_total_gpu_bytes_allocated();
+  aReport.total_gpu_bytes_allocated += wr_total_gpu_bytes_allocated();
 
   aPromise->Resolve(aReport, __func__);
 }
@@ -343,7 +344,8 @@ NotifyDidRender(layers::CompositorBridgeParent* aBridge,
                 RefPtr<WebRenderPipelineInfo> aInfo,
                 TimeStamp aStart,
                 TimeStamp aEnd,
-                bool aRender)
+                bool aRender,
+                RendererStats aStats)
 {
   if (aRender && aBridge->GetWrBridge()) {
     // We call this here to mimic the behavior in LayerManagerComposite, as to
@@ -359,7 +361,8 @@ NotifyDidRender(layers::CompositorBridgeParent* aBridge,
         info.epochs.data[i].pipeline_id,
         info.epochs.data[i].epoch,
         aStart,
-        aEnd);
+        aEnd,
+        &aStats);
   }
 }
 
@@ -383,8 +386,9 @@ RenderThread::UpdateAndRender(wr::WindowId aWindowId,
 
   auto& renderer = it->second;
   bool rendered = false;
+  RendererStats stats = { 0 };
   if (aRender) {
-    rendered = renderer->UpdateAndRender(aReadbackSize, aReadbackBuffer, aHadSlowFrame);
+    rendered = renderer->UpdateAndRender(aReadbackSize, aReadbackBuffer, aHadSlowFrame, &stats);
   } else {
     renderer->Update();
   }
@@ -400,7 +404,8 @@ RenderThread::UpdateAndRender(wr::WindowId aWindowId,
     renderer->GetCompositorBridge(),
     info,
     aStartTime, end,
-    aRender
+    aRender,
+    stats
   ));
 
   if (rendered) {
@@ -420,7 +425,7 @@ RenderThread::UpdateAndRender(wr::WindowId aWindowId,
   // removed the relevant renderer. And after that happens we should never reach
   // this code at all; it would bail out at the mRenderers.find check above.
   MOZ_ASSERT(pipelineMgr);
-  pipelineMgr->NotifyPipelinesUpdated(info->Raw(), aRender);
+  pipelineMgr->NotifyPipelinesUpdated(info, aRender);
 }
 
 void

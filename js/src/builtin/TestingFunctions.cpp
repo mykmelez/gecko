@@ -47,7 +47,7 @@
 #include "js/Debug.h"
 #include "js/HashTable.h"
 #include "js/LocaleSensitive.h"
-#include "js/SourceBufferHolder.h"
+#include "js/SourceText.h"
 #include "js/StableStringChars.h"
 #include "js/StructuredClone.h"
 #include "js/UbiNode.h"
@@ -93,7 +93,8 @@ using mozilla::Maybe;
 
 using JS::AutoStableStringChars;
 using JS::CompileOptions;
-using JS::SourceBufferHolder;
+using JS::SourceOwnership;
+using JS::SourceText;
 
 // If fuzzingSafe is set, remove functionality that could cause problems with
 // fuzzers. Set this via the environment variable MOZ_FUZZING_SAFE.
@@ -663,15 +664,11 @@ static bool
 WasmThreadsSupported(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-#ifdef ENABLE_WASM_THREAD_OPS
     bool isSupported = wasm::HasSupport(cx);
-# ifdef ENABLE_WASM_CRANELIFT
+#ifdef ENABLE_WASM_CRANELIFT
     if (cx->options().wasmForceCranelift()) {
         isSupported = false;
     }
-# endif
-#else
-    bool isSupported = false;
 #endif
     args.rval().setBoolean(isSupported);
     return true;
@@ -696,9 +693,8 @@ WasmBulkMemSupported(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static bool
-WasmGcEnabled(JSContext* cx, unsigned argc, Value* vp)
+TestGCEnabled(JSContext* cx)
 {
-    CallArgs args = CallArgsFromVp(argc, vp);
 #ifdef ENABLE_WASM_GC
     bool isSupported = cx->options().wasmBaseline() && cx->options().wasmGc();
 # ifdef ENABLE_WASM_CRANELIFT
@@ -706,6 +702,28 @@ WasmGcEnabled(JSContext* cx, unsigned argc, Value* vp)
         isSupported = false;
     }
 # endif
+    return isSupported;
+#else
+    return false;
+#endif
+}
+
+static bool
+WasmGcEnabled(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    args.rval().setBoolean(TestGCEnabled(cx));
+    return true;
+}
+
+static bool
+WasmGeneralizedTables(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+#ifdef ENABLE_WASM_GENERALIZED_TABLES
+    // Generalized tables depend on anyref, though not currently on (ref T)
+    // types nor on structures or other GC-proposal features.
+    bool isSupported = TestGCEnabled(cx);
 #else
     bool isSupported = false;
 #endif
@@ -4012,7 +4030,11 @@ EvalReturningScope(JSContext* cx, unsigned argc, Value* vp)
     options.setFileAndLine(filename.get(), lineno);
     options.setNoScriptRval(true);
 
-    JS::SourceBufferHolder srcBuf(src, srclen, JS::SourceBufferHolder::NoOwnership);
+    JS::SourceText<char16_t> srcBuf;
+    if (!srcBuf.init(cx, src, srclen, SourceOwnership::Borrowed)) {
+        return false;
+    }
+
     RootedScript script(cx);
     if (!JS::CompileForNonSyntacticScope(cx, options, srcBuf, &script)) {
         return false;
@@ -4113,7 +4135,11 @@ ShellCloneAndExecuteScript(JSContext* cx, unsigned argc, Value* vp)
     options.setFileAndLine(filename.get(), lineno);
     options.setNoScriptRval(true);
 
-    JS::SourceBufferHolder srcBuf(src, srclen, JS::SourceBufferHolder::NoOwnership);
+    JS::SourceText<char16_t> srcBuf;
+    if (!srcBuf.init(cx, src, srclen, SourceOwnership::Borrowed)) {
+        return false;
+    }
+
     RootedScript script(cx);
     if (!JS::Compile(cx, options, srcBuf, &script)) {
         return false;
@@ -5537,9 +5563,13 @@ js::TestingFunctionArgumentToScript(JSContext* cx,
         }
         const char16_t* chars = linearChars.twoByteRange().begin().get();
 
+        SourceText<char16_t> source;
+        if (!source.init(cx, chars, len, SourceOwnership::Borrowed)) {
+            return nullptr;
+        }
+
         RootedScript script(cx);
         CompileOptions options(cx);
-        SourceBufferHolder source(chars, len, SourceBufferHolder::NoOwnership);
         if (!JS::Compile(cx, options, source, &script)) {
             return nullptr;
         }
@@ -6143,6 +6173,12 @@ gc::ZealModeHelpText),
     JS_FN_HELP("wasmGcEnabled", WasmGcEnabled, 1, 0,
 "wasmGcEnabled(bool)",
 "  Returns a boolean indicating whether the WebAssembly GC support is enabled."),
+
+    JS_FN_HELP("wasmGeneralizedTables", WasmGeneralizedTables, 1, 0,
+"wasmGeneralizedTables(bool)",
+"  Returns a boolean indicating whether generalized tables are available.\n"
+"  This feature set includes 'anyref' as a table type, and new instructions\n"
+"  including table.get, table.set, table.grow, and table.size."),
 
     JS_FN_HELP("isLazyFunction", IsLazyFunction, 1, 0,
 "isLazyFunction(fun)",

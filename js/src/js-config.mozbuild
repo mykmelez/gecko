@@ -8,8 +8,8 @@
 if CONFIG['NIGHTLY_BUILD']:
     DEFINES['ENABLE_BINARYDATA'] = True
     DEFINES['ENABLE_WASM_BULKMEM_OPS'] = True
-    DEFINES['ENABLE_WASM_THREAD_OPS'] = True
     DEFINES['ENABLE_WASM_GC'] = True
+    DEFINES['ENABLE_WASM_GENERALIZED_TABLES'] = True
     DEFINES['WASM_PRIVATE_REFTYPES'] = True
 
 # Some huge-mapping optimization instead of bounds checks on supported
@@ -20,10 +20,6 @@ if CONFIG['JS_CODEGEN_X64'] or CONFIG['JS_CODEGEN_ARM64']:
 # Enables CACHEIR_LOGS to diagnose IC coverage.
 if CONFIG['MOZ_DEBUG'] or CONFIG['NIGHTLY_BUILD']:
     DEFINES['JS_CACHEIR_SPEW'] = True
-
-# Build with SharedArrayBuffer code.
-# NOTE: This Realm creation options decide if this is exposed to script.
-DEFINES['ENABLE_SHARED_ARRAY_BUFFER'] = True
 
 # CTypes
 if CONFIG['JS_HAS_CTYPES']:

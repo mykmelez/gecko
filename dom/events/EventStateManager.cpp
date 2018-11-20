@@ -661,13 +661,9 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
   case ePointerDown:
     if (aEvent->mMessage == ePointerDown) {
       PointerEventHandler::ImplicitlyCapturePointer(aTargetFrame, aEvent);
-#ifndef MOZ_WIDGET_ANDROID
-      // Pointer events aren't enabled on Android yet, but when they
-      // are enabled, we should not activate on pointerdown, as that
-      // fires for touches that turn into moves on Android, and we don't
-      // want to gesture activate for scroll actions.
-      NotifyTargetUserActivation(aEvent, aTargetContent);
-#endif
+      if (mouseEvent->inputSource != MouseEvent_Binding::MOZ_SOURCE_TOUCH) {
+        NotifyTargetUserActivation(aEvent, aTargetContent);
+      }
     }
     MOZ_FALLTHROUGH;
   case ePointerMove: {
@@ -843,6 +839,9 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
       NS_ASSERTION(selectedText.mSucceeded, "Failed to get selected text");
       compositionEvent->mData = selectedText.mReply.mString;
     }
+    break;
+  case eTouchStart:
+    SetGestureDownPoint(aEvent->AsTouchEvent());
     break;
   case eTouchEnd:
     NotifyTargetUserActivation(aEvent, aTargetContent);
@@ -1688,8 +1687,7 @@ EventStateManager::BeginTrackingDragGesture(nsPresContext* aPresContext,
 
   // Note that |inDownEvent| could be either a mouse down event or a
   // synthesized mouse move event.
-  mGestureDownPoint =
-    inDownEvent->mRefPoint + inDownEvent->mWidget->WidgetToScreenOffset();
+  SetGestureDownPoint(inDownEvent);
 
   if (inDownFrame) {
     inDownFrame->GetContentForEvent(inDownEvent,
@@ -1707,6 +1705,21 @@ EventStateManager::BeginTrackingDragGesture(nsPresContext* aPresContext,
     // fire off a timer to track click-hold
     CreateClickHoldTimer(aPresContext, inDownFrame, inDownEvent);
   }
+}
+
+void
+EventStateManager::SetGestureDownPoint(WidgetGUIEvent* aEvent)
+{
+  mGestureDownPoint =
+    GetEventRefPoint(aEvent) + aEvent->mWidget->WidgetToScreenOffset();
+}
+
+LayoutDeviceIntPoint
+EventStateManager::GetEventRefPoint(WidgetEvent* aEvent) const
+{
+  auto touchEvent = aEvent->AsTouchEvent();
+  return (touchEvent && !touchEvent->mTouches.IsEmpty()) ?
+    aEvent->AsTouchEvent()->mTouches[0]->mRefPoint : aEvent->mRefPoint;
 }
 
 void
@@ -1808,11 +1821,8 @@ EventStateManager::IsEventOutsideDragThreshold(WidgetInputEvent* aEvent) const
       sPixelThresholdY = 5;
   }
 
-  auto touchEvent = aEvent->AsTouchEvent();
-  LayoutDeviceIntPoint pt = aEvent->mWidget->WidgetToScreenOffset() +
-    ((touchEvent && !touchEvent->mTouches.IsEmpty())
-      ? aEvent->AsTouchEvent()->mTouches[0]->mRefPoint
-      : aEvent->mRefPoint);
+  LayoutDeviceIntPoint pt =
+    aEvent->mWidget->WidgetToScreenOffset() + GetEventRefPoint(aEvent);
   LayoutDeviceIntPoint distance = pt - mGestureDownPoint;
   return
     Abs(distance.x) > AssertedCast<uint32_t>(sPixelThresholdX) ||
@@ -4349,8 +4359,7 @@ EventStateManager::NotifyMouseOut(WidgetMouseEvent* aMouseEvent,
     if (subdocFrame) {
       nsIDocShell* docshell = subdocFrame->GetDocShell();
       if (docshell) {
-        RefPtr<nsPresContext> presContext;
-        docshell->GetPresContext(getter_AddRefs(presContext));
+        RefPtr<nsPresContext> presContext = docshell->GetPresContext();
 
         if (presContext) {
           EventStateManager* kidESM = presContext->EventStateManager();
@@ -5820,12 +5829,11 @@ EventStateManager::DoContentCommandEvent(WidgetContentCommandEvent* aEvent)
                                                           &ipcDataTransfer,
                                                           false, nullptr,
                                                           cp);
-            bool isPrivateData = false;
-            transferable->GetIsPrivateData(&isPrivateData);
-            nsCOMPtr<nsIPrincipal> requestingPrincipal;
-            transferable->GetRequestingPrincipal(getter_AddRefs(requestingPrincipal));
-            nsContentPolicyType contentPolicyType = nsIContentPolicy::TYPE_OTHER;
-            transferable->GetContentPolicyType(&contentPolicyType);
+            bool isPrivateData = transferable->GetIsPrivateData();
+            nsCOMPtr<nsIPrincipal> requestingPrincipal =
+              transferable->GetRequestingPrincipal();
+            nsContentPolicyType contentPolicyType =
+              transferable->GetContentPolicyType();
             remote->SendPasteTransferable(ipcDataTransfer, isPrivateData,
                                           IPC::Principal(requestingPrincipal),
                                           contentPolicyType);

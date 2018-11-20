@@ -49,7 +49,7 @@
 #define AUTO_PROFILER_LABEL_DYNAMIC_FAST(label, dynamicString, category, ctx, flags)
 
 #define PROFILER_ADD_MARKER(markerName)
-#define PROFILER_ADD_NETWORK_MARKER(uri, pri, channel, type, start, end, count, timings, redirect)
+#define PROFILER_ADD_NETWORK_MARKER(uri, pri, channel, type, start, end, count, cache, timings, redirect)
 
 #define DECLARE_DOCSHELL_AND_HISTORY_ID(docShell)
 #define PROFILER_TRACING(category, markerName, kind)
@@ -93,6 +93,7 @@ class SpliceableJSONWriter;
 namespace mozilla {
 namespace net {
 struct TimingStruct;
+enum CacheDisposition : uint8_t;
 }
 }
 class nsIURI;
@@ -113,50 +114,50 @@ class TimeStamp;
 //---------------------------------------------------------------------------
 
 // Higher-order macro containing all the feature info in one place. Define
-// |macro| appropriately to extract the relevant parts. Note that the number
+// |MACRO| appropriately to extract the relevant parts. Note that the number
 // values are used internally only and so can be changed without consequence.
 // Any changes to this list should also be applied to the feature list in
 // browser/components/extensions/schemas/geckoProfiler.json.
-#define PROFILER_FOR_EACH_FEATURE(macro) \
+#define PROFILER_FOR_EACH_FEATURE(MACRO) \
   /* Profile Java code (Android only). */ \
-  macro(0, "java", Java) \
+  MACRO(0, "java", Java) \
   \
   /* Get the JS engine to expose the JS stack to the profiler */ \
-  macro(1, "js", JS) \
+  MACRO(1, "js", JS) \
   \
   /* Include the C++ leaf node if not stackwalking. */ \
   /* The DevTools profiler doesn't want the native addresses. */ \
-  macro(2, "leaf", Leaf) \
+  MACRO(2, "leaf", Leaf) \
   \
   /* Add main thread I/O to the profile. */ \
-  macro(3, "mainthreadio", MainThreadIO) \
+  MACRO(3, "mainthreadio", MainThreadIO) \
   \
   /* Add memory measurements (e.g. RSS). */ \
-  macro(4, "memory", Memory) \
+  MACRO(4, "memory", Memory) \
   \
   /* Do not include user-identifiable information. */ \
-  macro(5, "privacy", Privacy) \
+  MACRO(5, "privacy", Privacy) \
   \
   /* Collect thread responsiveness information. */ \
-  macro(6, "responsiveness", Responsiveness) \
+  MACRO(6, "responsiveness", Responsiveness) \
   \
   /* Take a snapshot of the window on every composition. */ \
-  macro(7, "screenshots", Screenshots) \
+  MACRO(7, "screenshots", Screenshots) \
   \
   /* Disable parallel traversal in styling. */ \
-  macro(8, "seqstyle", SequentialStyle) \
+  MACRO(8, "seqstyle", SequentialStyle) \
   \
   /* Walk the C++ stack. Not available on all platforms. */ \
-  macro(9, "stackwalk", StackWalk) \
+  MACRO(9, "stackwalk", StackWalk) \
   \
   /* Start profiling with feature TaskTracer. */ \
-  macro(10, "tasktracer", TaskTracer) \
+  MACRO(10, "tasktracer", TaskTracer) \
   \
   /* Profile the registered secondary threads. */ \
-  macro(11, "threads", Threads) \
+  MACRO(11, "threads", Threads) \
   \
   /* Have the JavaScript engine track JIT optimizations. */ \
-  macro(12, "trackopts", TrackOptimizations)
+  MACRO(12, "trackopts", TrackOptimizations)
 
 struct ProfilerFeature
 {
@@ -607,8 +608,8 @@ enum class NetworkLoadType {
   LOAD_REDIRECT
 };
 
-#define PROFILER_ADD_NETWORK_MARKER(uri, pri, channel, type, start, end, count, timings, redirect) \
-  profiler_add_network_marker(uri, pri, channel, type, start, end, count, timings, redirect)
+#define PROFILER_ADD_NETWORK_MARKER(uri, pri, channel, type, start, end, count, cache, timings, redirect) \
+  profiler_add_network_marker(uri, pri, channel, type, start, end, count, cache, timings, redirect)
 
 void profiler_add_network_marker(nsIURI* aURI,
                                  int32_t aPriority,
@@ -617,6 +618,7 @@ void profiler_add_network_marker(nsIURI* aURI,
                                  mozilla::TimeStamp aStart,
                                  mozilla::TimeStamp aEnd,
                                  int64_t aCount,
+                                 mozilla::net::CacheDisposition aCacheDisposition,
                                  const mozilla::net::TimingStruct* aTimings = nullptr,
                                  nsIURI* aRedirectURI = nullptr);
 
@@ -797,13 +799,14 @@ class MOZ_RAII AutoProfilerLabel
 public:
   // This is the AUTO_PROFILER_LABEL and AUTO_PROFILER_LABEL_DYNAMIC variant.
   AutoProfilerLabel(const char* aLabel, const char* aDynamicString,
-                    js::ProfilingStackFrame::Category aCategory
+                    js::ProfilingStackFrame::Category aCategory,
+                    uint32_t aFlags = 0
                     MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
   {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
 
     // Get the ProfilingStack from TLS.
-    Push(sProfilingStack.get(), aLabel, aDynamicString, aCategory);
+    Push(sProfilingStack.get(), aLabel, aDynamicString, aCategory, aFlags);
   }
 
   // This is the AUTO_PROFILER_LABEL_FAST variant. It retrieves the ProfilingStack

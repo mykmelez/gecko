@@ -293,7 +293,7 @@ var Sanitizer = {
   },
 
   QueryInterface: ChromeUtils.generateQI([
-    Ci.nsiObserver,
+    Ci.nsIObserver,
     Ci.nsISupportsWeakReference,
   ]),
 
@@ -682,13 +682,32 @@ async function sanitizeOnShutdown(progress) {
   // the permission explicitly set to ACCEPT_SESSION need to be wiped.  There
   // are also other ways to think about and accomplish this, but this is what
   // the logic below currently does!
-  await sanitizeSessionPrincipals();
+  if (Services.prefs.getIntPref(PREF_COOKIE_LIFETIME,
+                                Ci.nsICookieService.ACCEPT_NORMALLY) == Ci.nsICookieService.ACCEPT_SESSION) {
+    let principals = await getAllPrincipals();
+    await maybeSanitizeSessionPrincipals(principals);
+  }
+
 
   // Let's see if we have to forget some particular site.
   for (let permission of Services.perms.enumerator) {
-    if (permission.type == "cookie" && permission.capability == Ci.nsICookiePermission.ACCESS_SESSION) {
-      await sanitizeSessionPrincipal(permission.principal);
+    if (permission.type != "cookie" ||
+        permission.capability != Ci.nsICookiePermission.ACCESS_SESSION) {
+      continue;
     }
+
+    // We consider just permissions set for http, https and file URLs.
+    if (!isSupportedURI(permission.principal.URI)) {
+      continue;
+    }
+
+    // We use just the URI here, because permissions ignore OriginAttributes.
+    let principals = await getAllPrincipals(permission.principal.URI);
+    let promises = [];
+    principals.forEach(principal => {
+      promises.push(sanitizeSessionPrincipal(principal));
+    });
+    await Promise.all(promises);
   }
 
   if (Sanitizer.shouldSanitizeNewTabContainer) {
@@ -704,12 +723,10 @@ async function sanitizeOnShutdown(progress) {
   }
 }
 
-async function sanitizeSessionPrincipals() {
-  if (Services.prefs.getIntPref(PREF_COOKIE_LIFETIME,
-                                Ci.nsICookieService.ACCEPT_NORMALLY) != Ci.nsICookieService.ACCEPT_SESSION) {
-    return;
-  }
-
+// Retrieve the list of nsIPrincipals with site data. If matchUri is not null,
+// it returns only the principals matching that URI, ignoring the
+// OriginAttributes.
+async function getAllPrincipals(matchUri = null) {
   let principals = await new Promise(resolve => {
     quotaManagerService.getUsage(request => {
       if (request.resultCode != Cr.NS_OK) {
@@ -723,7 +740,11 @@ async function sanitizeSessionPrincipals() {
       for (let item of request.result) {
         let principal = Services.scriptSecurityManager.createCodebasePrincipalFromOrigin(item.origin);
         let uri = principal.URI;
-        if (uri.scheme == "http" || uri.scheme == "https" || uri.scheme == "file") {
+        if (!isSupportedURI(uri)) {
+          continue;
+        }
+
+        if (!matchUri || Services.eTLD.hasRootDomain(matchUri.host, uri.host)) {
           list.push(principal);
         }
       }
@@ -734,14 +755,20 @@ async function sanitizeSessionPrincipals() {
   let serviceWorkers = serviceWorkerManager.getAllRegistrations();
   for (let i = 0; i < serviceWorkers.length; i++) {
     let sw = serviceWorkers.queryElementAt(i, Ci.nsIServiceWorkerRegistrationInfo);
-    principals.push(sw.principal);
+    let uri = sw.principal.URI;
+    // We don't need to check the scheme. SW are just exposed to http/https URLs.
+    if (!matchUri || Services.eTLD.hasRootDomain(matchUri.host, uri.host)) {
+      principals.push(sw.principal);
+    }
   }
 
   // Let's take the list of unique hosts+OA from cookies.
   let enumerator = Services.cookies.enumerator;
   let hosts = new Set();
   for (let cookie of enumerator) {
-    hosts.add(cookie.rawHost + ChromeUtils.originAttributesToSuffix(cookie.originAttributes));
+    if (!matchUri || Services.eTLD.hasRootDomain(matchUri.host, cookie.rawHost)) {
+      hosts.add(cookie.rawHost + ChromeUtils.originAttributesToSuffix(cookie.originAttributes));
+    }
   }
 
   hosts.forEach(host => {
@@ -751,7 +778,7 @@ async function sanitizeSessionPrincipals() {
       Services.scriptSecurityManager.createCodebasePrincipalFromOrigin("https://" + host));
   });
 
-  await maybeSanitizeSessionPrincipals(principals);
+  return principals;
 }
 
 // This method receives a list of principals and it checks if some of them or
@@ -788,8 +815,8 @@ function cookiesAllowedForDomainOrSubDomain(principal) {
       continue;
     }
 
-    if (!ChromeUtils.isOriginAttributesEqual(principal.originAttributes,
-                                             perm.principal.originAttributes)) {
+    // We consider just permissions set for http, https and file URLs.
+    if (!isSupportedURI(perm.principal.URI)) {
       continue;
     }
 
@@ -849,6 +876,7 @@ function addPendingSanitization(id, itemsToClear, options) {
   Services.prefs.setStringPref(Sanitizer.PREF_PENDING_SANITIZATIONS,
                                JSON.stringify(pendingSanitizations));
 }
+
 function removePendingSanitization(id) {
   let pendingSanitizations = safeGetPendingSanitizations();
   let i = pendingSanitizations.findIndex(s => s.id == id);
@@ -857,12 +885,14 @@ function removePendingSanitization(id) {
     JSON.stringify(pendingSanitizations));
   return s;
 }
+
 function getAndClearPendingSanitizations() {
   let pendingSanitizations = safeGetPendingSanitizations();
   if (pendingSanitizations.length)
     Services.prefs.clearUserPref(Sanitizer.PREF_PENDING_SANITIZATIONS);
   return pendingSanitizations;
 }
+
 function safeGetPendingSanitizations() {
   try {
     return JSON.parse(
@@ -884,4 +914,10 @@ async function clearData(range, flags) {
       Services.clearData.deleteData(flags, resolve);
     });
   }
+}
+
+function isSupportedURI(uri) {
+  return uri.scheme == "http" ||
+         uri.scheme == "https" ||
+         uri.scheme == "file";
 }

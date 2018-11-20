@@ -9,9 +9,10 @@
 const EDIT_ADDRESS_URL = "chrome://formautofill/content/editAddress.xhtml";
 const EDIT_CREDIT_CARD_URL = "chrome://formautofill/content/editCreditCard.xhtml";
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://formautofill/FormAutofill.jsm");
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://formautofill/FormAutofill.jsm");
 
 ChromeUtils.defineModuleGetter(this, "CreditCard",
                                "resource://gre/modules/CreditCard.jsm");
@@ -21,6 +22,12 @@ ChromeUtils.defineModuleGetter(this, "FormAutofillUtils",
                                "resource://formautofill/FormAutofillUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "OSKeyStore",
                                "resource://formautofill/OSKeyStore.jsm");
+
+XPCOMUtils.defineLazyGetter(this, "reauthPasswordPromptMessage", () => {
+  const brandShortName = FormAutofillUtils.brandBundle.GetStringFromName("brandShortName");
+  return FormAutofillUtils.stringBundle.formatStringFromName(
+    `editCreditCardPasswordPrompt.${AppConstants.platform}`, [brandShortName], 1);
+});
 
 this.log = null;
 FormAutofill.defineLazyLogGetter(this, "manageAddresses");
@@ -124,7 +131,7 @@ class ManageRecords {
     let selectedGuids = this._selectedOptions.map(option => option.value);
     this.clearRecordElements();
     for (let record of records) {
-      let option = new Option(await this.getLabel(record),
+      let option = new Option(this.getLabel(record),
                               record.guid,
                               false,
                               selectedGuids.includes(record.guid));
@@ -327,9 +334,9 @@ class ManageCreditCards extends ManageRecords {
    */
   async openEditDialog(creditCard) {
     // Ask for reauth if user is trying to edit an existing credit card.
-    if (!creditCard || await OSKeyStore.ensureLoggedIn(true)) {
+    if (!creditCard || await OSKeyStore.ensureLoggedIn(reauthPasswordPromptMessage)) {
       let decryptedCCNumObj = {};
-      if (creditCard) {
+      if (creditCard && creditCard["cc-number-encrypted"]) {
         try {
           decryptedCCNumObj["cc-number"] = await OSKeyStore.decrypt(creditCard["cc-number-encrypted"]);
         } catch (ex) {
@@ -354,29 +361,16 @@ class ManageCreditCards extends ManageRecords {
 
   /**
    * Get credit card display label. It should display masked numbers and the
-   * cardholder's name, separated by a comma. If `showCreditCards` is set to
-   * true, decrypted credit card numbers are shown instead.
+   * cardholder's name, separated by a comma.
    *
    * @param {object} creditCard
-   * @param {boolean} showCreditCards [optional]
    * @returns {string}
    */
-  async getLabel(creditCard, showCreditCards = false) {
-    let cardObj = new CreditCard({
-      encryptedNumber: creditCard["cc-number-encrypted"],
-      number: creditCard["cc-number"],
+  getLabel(creditCard) {
+    return CreditCard.getLabel({
       name: creditCard["cc-name"],
-      network: creditCard["cc-type"],
+      number: creditCard["cc-number"],
     });
-    return cardObj.getLabel({showNumbers: showCreditCards});
-  }
-
-  async updateLabels(options, isDecrypted) {
-    for (let option of options) {
-      option.text = await this.getLabel(option.record, isDecrypted);
-    }
-    // For testing only: Notify when credit cards labels have been updated
-    this._elements.records.dispatchEvent(new CustomEvent("LabelsUpdated"));
   }
 
   async renderRecordElements(records) {

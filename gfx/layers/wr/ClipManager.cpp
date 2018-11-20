@@ -58,9 +58,14 @@ void
 ClipManager::BeginList(const StackingContextHelper& aStackingContext)
 {
   if (aStackingContext.AffectsClipPositioning()) {
-    PushOverrideForASR(
-        mItemClipStack.empty() ? nullptr : mItemClipStack.top().mASR,
-        aStackingContext.ReferenceFrameId());
+    if (aStackingContext.ReferenceFrameId()) {
+      PushOverrideForASR(
+          mItemClipStack.empty() ? nullptr : mItemClipStack.top().mASR,
+          aStackingContext.ReferenceFrameId().ref());
+    } else {
+      // Start a new cache
+      mCacheStack.emplace();
+    }
   }
 
   ItemClips clips(nullptr, nullptr, false);
@@ -78,21 +83,26 @@ ClipManager::EndList(const StackingContextHelper& aStackingContext)
   mItemClipStack.pop();
 
   if (aStackingContext.AffectsClipPositioning()) {
-    PopOverrideForASR(
+    if (aStackingContext.ReferenceFrameId()) {
+      PopOverrideForASR(
         mItemClipStack.empty() ? nullptr : mItemClipStack.top().mASR);
+    } else {
+      MOZ_ASSERT(!mCacheStack.empty());
+      mCacheStack.pop();
+    }
   }
 }
 
 void
 ClipManager::PushOverrideForASR(const ActiveScrolledRoot* aASR,
-                                const Maybe<wr::WrClipId>& aClipId)
+                                const wr::WrClipId& aClipId)
 {
   Maybe<wr::WrClipId> scrollId = GetScrollLayer(aASR);
   MOZ_ASSERT(scrollId.isSome());
 
   CLIP_LOG("Pushing override %zu -> %s\n", scrollId->id,
-      aClipId ? Stringify(aClipId->id).c_str() : "(none)");
-  auto it = mASROverride.insert({ *scrollId, std::stack<Maybe<wr::WrClipId>>() });
+      Stringify(aClipId.id).c_str());
+  auto it = mASROverride.insert({ *scrollId, std::stack<wr::WrClipId>() });
   it.first->second.push(aClipId);
 
   // Start a new cache
@@ -112,7 +122,7 @@ ClipManager::PopOverrideForASR(const ActiveScrolledRoot* aASR)
   MOZ_ASSERT(it != mASROverride.end());
   MOZ_ASSERT(!(it->second.empty()));
   CLIP_LOG("Popping override %zu -> %s\n", scrollId->id,
-      it->second.top() ? Stringify(it->second.top()->id).c_str() : "(none)");
+      Stringify(it->second.top().id).c_str());
   it->second.pop();
   if (it->second.empty()) {
     mASROverride.erase(it);
@@ -131,8 +141,8 @@ ClipManager::ClipIdAfterOverride(const Maybe<wr::WrClipId>& aClipId)
   }
   MOZ_ASSERT(!it->second.empty());
   CLIP_LOG("Overriding %zu with %s\n", aClipId->id,
-      it->second.top() ? Stringify(it->second.top()->id).c_str() : "(none)");
-  return it->second.top();
+      Stringify(it->second.top().id).c_str());
+  return Some(it->second.top());
 }
 
 void
@@ -221,26 +231,7 @@ ClipManager::BeginItem(nsDisplayItem* aItem,
   // for it.
   clips.mClipChainId = DefineClipChain(clip, auPerDevPixel, aStackingContext);
 
-  if (clip && clip->mASR == asr) {
-    // If the clip's ASR is the same as the item's ASR, then we want to use
-    // the clip as the "scrollframe" for the item, as WR will do the right thing
-    // when building the ClipScrollTree and ensure the item scrolls with the
-    // ASR. Note in particular that we don't want to use scroll id of |asr| here
-    // because we might have a situation where there is a stacking context
-    // between |asr| and |aItem|, and if we used |asr|'s scroll id, then WR
-    // would effectively hoist the item out of the stacking context and attach
-    // it directly to |asr|. This can produce incorrect results. Using the clip
-    // instead of the ASR is strictly better because the clip is usually defined
-    // inside the stacking context, and so the item also stays "inside" the
-    // stacking context rather than geting hoisted out. Note that there might
-    // be cases where the clip is also "outside" the stacking context and in
-    // theory that situation might not be handled correctly, but I haven't seen
-    // it in practice so far.
-    const ClipIdMap& cache = mCacheStack.top();
-    auto it = cache.find(clip);
-    MOZ_ASSERT(it != cache.end());
-    clips.mScrollId = Some(it->second);
-  } else if (clip) {
+if (clip) {
     // If the clip's ASR is different, then we need to set the scroll id
     // explicitly to match the desired ASR.
     Maybe<wr::WrClipId> scrollId = GetScrollLayer(asr);

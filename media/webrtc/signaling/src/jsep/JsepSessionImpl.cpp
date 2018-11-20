@@ -1611,6 +1611,7 @@ JsepSessionImpl::UpdateTransceiversFromRemoteDescription(const Sdp& remote)
         mUsedMids.insert(transceiver->GetMid());
       }
     } else {
+      transceiver->mTransport.Close();
       transceiver->Disassociate();
       // This cannot be rolled back.
       transceiver->Stop();
@@ -2083,50 +2084,33 @@ JsepSessionImpl::SetupDefaultCodecs()
       "109",
       "opus",
       48000,
-      2,
-      960,
-      // TODO Move this elsewhere to be adaptive to rate - Bug 1207925
-      40000
-      ));
+      2));
 
   mSupportedCodecs.emplace_back(new JsepAudioCodecDescription(
       "9",
       "G722",
       8000,
-      1,
-      320,
-      64000));
+      1));
 
-  // packet size and bitrate values below copied from sipcc.
-  // May need reevaluation from a media expert.
   mSupportedCodecs.emplace_back(
       new JsepAudioCodecDescription("0",
                                     "PCMU",
                                     8000,
-                                    1,
-                                    8000 / 50,   // frequency / 50
-                                    8 * 8000 * 1 // 8 * frequency * channels
+                                    1
                                     ));
 
   mSupportedCodecs.emplace_back(
       new JsepAudioCodecDescription("8",
                                     "PCMA",
                                     8000,
-                                    1,
-                                    8000 / 50,   // frequency / 50
-                                    8 * 8000 * 1 // 8 * frequency * channels
+                                    1
                                     ));
 
-  // note: because telephone-event is effectively a marker codec that indicates
-  // that dtmf rtp packets may be passed, the packetSize and bitRate fields
-  // don't make sense here.  For now, use zero. (mjf)
   mSupportedCodecs.emplace_back(
       new JsepAudioCodecDescription("101",
                                     "telephone-event",
                                     8000,
-                                    1,
-                                    0, // packetSize doesn't make sense here
-                                    0  // bitRate doesn't make sense here
+                                    1
                                     ));
 
   // Supported video codecs.
@@ -2225,7 +2209,7 @@ JsepSessionImpl::SetState(JsepSignalingState state)
 nsresult
 JsepSessionImpl::AddRemoteIceCandidate(const std::string& candidate,
                                        const std::string& mid,
-                                       uint16_t level,
+                                       const Maybe<uint16_t>& level,
                                        std::string* transportId)
 {
   mLastError.clear();
@@ -2238,10 +2222,14 @@ JsepSessionImpl::AddRemoteIceCandidate(const std::string& candidate,
   }
 
   JsepTransceiver* transceiver;
-  if (mid.empty()) {
-    transceiver = GetTransceiverForLevel(level);
-  } else {
+  if (!mid.empty()) {
     transceiver = GetTransceiverForMid(mid);
+  } else if (level.isSome()) {
+    transceiver = GetTransceiverForLevel(level.value());
+  } else {
+    JSEP_SET_ERROR("ICE candidate: \'" << candidate
+                   << "\' is missing MID and MLineIndex");
+    return NS_ERROR_TYPE_ERR;
   }
 
   if (!transceiver) {
@@ -2250,15 +2238,15 @@ JsepSessionImpl::AddRemoteIceCandidate(const std::string& candidate,
     return NS_ERROR_INVALID_ARG;
   }
 
-  if (transceiver->GetLevel() != level) {
-    JSEP_SET_ERROR("Mismatch between mid and level - \"" << mid
+  if (level.isSome() &&
+      transceiver->GetLevel() != level.value()) {
+    MOZ_MTLOG(ML_WARNING, "Mismatch between mid and level - \"" << mid
                    << "\" is not the mid for level " << level);
-    return NS_ERROR_INVALID_ARG;
   }
 
   *transportId = transceiver->mTransport.mTransportId;
 
-  return mSdpHelper.AddCandidateToSdp(sdp, candidate, level);
+  return mSdpHelper.AddCandidateToSdp(sdp, candidate, transceiver->GetLevel());
 }
 
 nsresult

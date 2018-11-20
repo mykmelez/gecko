@@ -179,6 +179,9 @@ pref("dom.permissions.revoke.enable", false);
 // Enable exposing timeToNonBlankPaint
 pref("dom.performance.time_to_non_blank_paint.enabled", false);
 
+// Enable exposing timeToContentfulPaint
+pref("dom.performance.time_to_contentful_paint.enabled", false);
+
 // Enable exposing timeToDOMContentFlushed
 pref("dom.performance.time_to_dom_content_flushed.enabled", false);
 
@@ -936,6 +939,7 @@ pref("gfx.webrender.blob.paint-flashing", false);
 
 // WebRender debugging utilities.
 pref("gfx.webrender.debug.texture-cache", false);
+pref("gfx.webrender.debug.texture-cache.clear-evicted", true);
 pref("gfx.webrender.debug.render-targets", false);
 pref("gfx.webrender.debug.alpha-primitives", false);
 pref("gfx.webrender.debug.profiler", false);
@@ -1093,9 +1097,13 @@ pref("toolkit.asyncshutdown.log", false);
 // it being specified, dump is disabled in artifact builds (see Bug 1490412).
 #ifdef MOZILLA_OFFICIAL
 pref("browser.dom.window.dump.enabled", false, sticky);
+pref("devtools.console.stdout.chrome", false, sticky);
 #else
 pref("browser.dom.window.dump.enabled", true, sticky);
+pref("devtools.console.stdout.chrome", true, sticky);
 #endif
+
+pref("devtools.console.stdout.content", false, sticky);
 
 // Controls whether EventEmitter module throws dump message on each emit
 pref("toolkit.dump.emit", false);
@@ -1109,6 +1117,7 @@ pref("devtools.recordreplay.enableRewinding", true);
 pref("devtools.recordreplay.mvp.enabled", false);
 pref("devtools.recordreplay.timeline.enabled", false);
 pref("devtools.recordreplay.allowRepaintFailures", true);
+pref("devtools.recordreplay.includeSystemScripts", false);
 
 // view source
 pref("view_source.syntax_highlight", true);
@@ -1363,6 +1372,13 @@ pref("content.sink.pending_event_mode", 0);
 //   3 = openAbused
 pref("privacy.popups.disable_from_plugins", 3);
 
+// Enable Paritioned LocalStorage for a list of hosts.
+pref("privacy.restrict3rdpartystorage.partitionedHosts", "accounts.google.com/o/oauth2/");
+
+// If a host is contained in this pref list, user-interaction is required
+// before granting the storage access permission.
+pref("privacy.restrict3rdpartystorage.userInteractionRequiredForHosts", "");
+
 // Excessive reporting of blocked popups can be a DOS vector,
 // by overloading the main process as popups get blocked and when
 // users try to restore all popups, which is the most visible
@@ -1421,9 +1437,6 @@ pref("dom.ua_widget.enabled", true);
 #else
 pref("dom.ua_widget.enabled", false);
 #endif
-
-pref("dom.webcomponents.shadowdom.enabled", true);
-pref("dom.webcomponents.customelements.enabled", true);
 
 pref("javascript.enabled",                  true);
 pref("javascript.options.strict",           false);
@@ -1569,6 +1582,9 @@ pref("javascript.options.streams", true);
 pref("javascript.options.streams", false);
 #endif
 
+// BigInt API
+pref("javascript.options.bigint", false);
+
 // advanced prefs
 pref("advanced.mailftp",                    false);
 pref("image.animation_mode",                "normal");
@@ -1612,7 +1628,7 @@ pref("network.tickle-wifi.duration", 400);
 pref("network.tickle-wifi.delay", 16);
 
 // Turn off interprocess security checks. Needed to run xpcshell tests.
-pref("network.disable.ipc.security", false);
+pref("network.disable.ipc.security", true);
 
 // Default action for unlisted external protocol handlers
 pref("network.protocol-handler.external-default", true);      // OK to load
@@ -4701,7 +4717,7 @@ pref("image.decode-immediately.enabled", false);
 pref("image.downscale-during-decode.enabled", true);
 
 // The default Accept header sent for images loaded over HTTP(S)
-pref("image.http.accept", "*/*");
+pref("image.http.accept", "image/webp,*/*");
 
 // The threshold for inferring that changes to an <img> element's |src|
 // attribute by JavaScript represent an animation, in milliseconds. If the |src|
@@ -4784,7 +4800,7 @@ pref("image.multithreaded_decoding.limit", -1);
 pref("image.multithreaded_decoding.idle_timeout", 600000);
 
 // Whether we attempt to decode WebP images or not.
-pref("image.webp.enabled", false);
+pref("image.webp.enabled", true);
 
 // Limit for the canvas image cache. 0 means we don't limit the size of the
 // cache.
@@ -5283,16 +5299,6 @@ pref("dom.idle-observers-api.fuzz_time.disabled", true);
 
 // Activates the activity monitor
 pref("io.activity.enabled", false);
-
-// Minimum delay in milliseconds between I/O activity notifications (0 means
-// no notifications). I/O activity includes socket and disk files.
-//
-// The delay is the same for both read and write, though
-// they are handled separately. This pref is only read once at startup:
-// a restart is required to enable a new value.
-//
-// io.activity.enabled needs to be set to true
-pref("io.activity.intervalMilliseconds", 0);
 
 // If true, reuse the same global for (almost) everything loaded by the component
 // loader (JS components, JSMs, etc). This saves memory, but makes it possible
@@ -5883,6 +5889,7 @@ pref("dom.timeout.max_consecutive_callbacks_ms", 4);
 pref("dom.payments.loglevel", "Warn");
 pref("dom.payments.defaults.saveCreditCard", false);
 pref("dom.payments.defaults.saveAddress", true);
+pref("dom.payments.request.supportedRegions", "US,CA");
 
 #ifdef MOZ_ASAN_REPORTER
 pref("asanreporter.apiurl", "https://anf1.fuzzing.mozilla.org/crashproxy/submit/");

@@ -8,6 +8,7 @@
 #include "GLContext.h"
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/gfx/gfxVars.h"
+#include "mozilla/gfx/Types.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/LayersTypes.h"
@@ -55,7 +56,6 @@ RendererOGL::RendererOGL(RefPtr<RenderThread>&& aThread,
   , mRenderer(aRenderer)
   , mBridge(aBridge)
   , mWindowId(aWindowId)
-  , mDebugFlags({ 0 })
 {
   MOZ_ASSERT(mThread);
   MOZ_ASSERT(mCompositor);
@@ -88,12 +88,6 @@ RendererOGL::GetExternalImageHandler()
 void
 RendererOGL::Update()
 {
-  uint32_t flags = gfx::gfxVars::WebRenderDebugFlags();
-  if (mDebugFlags.mBits != flags) {
-    mDebugFlags.mBits = flags;
-    wr_renderer_set_debug_flags(mRenderer, mDebugFlags);
-  }
-
   if (mCompositor->MakeCurrent()) {
     wr_renderer_update(mRenderer);
   }
@@ -106,19 +100,11 @@ DoNotifyWebRenderContextPurge(layers::CompositorBridgeParent* aBridge)
 }
 
 bool
-RendererOGL::UpdateAndRender(const Maybe<gfx::IntSize>& aReadbackSize, const Maybe<Range<uint8_t>>& aReadbackBuffer, bool aHadSlowFrame)
+RendererOGL::UpdateAndRender(const Maybe<gfx::IntSize>& aReadbackSize,
+                             const Maybe<Range<uint8_t>>& aReadbackBuffer,
+                             bool aHadSlowFrame,
+                             RendererStats* aOutStats)
 {
-  uint32_t flags = gfx::gfxVars::WebRenderDebugFlags();
-  // Disable debug flags during readback
-  if (aReadbackBuffer.isSome()) {
-    flags = 0;
-  }
-
-  if (mDebugFlags.mBits != flags) {
-    mDebugFlags.mBits = flags;
-    wr_renderer_set_debug_flags(mRenderer, mDebugFlags);
-  }
-
   mozilla::widget::WidgetRenderingContext widgetContext;
 
 #if defined(XP_MACOSX)
@@ -143,7 +129,7 @@ RendererOGL::UpdateAndRender(const Maybe<gfx::IntSize>& aReadbackSize, const May
 
   auto size = mCompositor->GetBufferSize();
 
-  if (!wr_renderer_render(mRenderer, size.width, size.height, aHadSlowFrame)) {
+  if (!wr_renderer_render(mRenderer, size.width, size.height, aHadSlowFrame, aOutStats)) {
     NotifyWebRenderError(WebRenderError::RENDER);
   }
 
@@ -246,6 +232,22 @@ RenderTextureHost*
 RendererOGL::GetRenderTexture(wr::WrExternalImageId aExternalImageId)
 {
   return mThread->GetRenderTexture(aExternalImageId);
+}
+
+void
+RendererOGL::AccumulateMemoryReport(MemoryReport* aReport)
+{
+  wr_renderer_accumulate_memory_report(GetRenderer(), aReport);
+
+  LayoutDeviceIntSize size = mCompositor->GetBufferSize();
+
+  // Assume BGRA8 for the format since it's not exposed anywhere,
+  // and all compositor backends should be using that.
+  uintptr_t swapChainSize = size.width * size.height * 
+                            BytesPerPixel(SurfaceFormat::B8G8R8A8) *
+                            (mCompositor->UseTripleBuffering() ? 3 : 2);
+  aReport->swap_chain += swapChainSize;
+  aReport->total_gpu_bytes_allocated += swapChainSize;
 }
 
 static void
