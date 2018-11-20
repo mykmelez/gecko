@@ -15,6 +15,10 @@ use rkv::Value;
 use storage_variant::{IntoVariant, Variant};
 use xpcom::interfaces::nsIVariant;
 
+extern "C" {
+    fn NS_GetDataType(variant: *const nsIVariant) -> uint16_t;
+}
+
 // This is implemented in rkv but is incomplete there.  We implement a subset
 // to give KeyValuePair ownership over its value, so it can #[derive(xpcom)].
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -48,8 +52,7 @@ impl<'a> IntoVariant for OwnedValue {
 }
 
 pub fn variant_to_owned(variant: &nsIVariant) -> Result<Option<OwnedValue>, KeyValueError> {
-    let mut data_type: uint16_t = 0;
-    unsafe { variant.GetDataType(&mut data_type) }.to_result()?;
+    let data_type = unsafe { NS_GetDataType(variant) };
 
     match data_type {
         DATA_TYPE_INT32 => {
