@@ -2251,8 +2251,9 @@ nsGlobalWindowOuter::SetOpenerWindow(nsPIDOMWindowOuter* aOpener,
   nsWeakPtr opener = do_GetWeakReference(aOpener);
   if (opener == mOpener) {
     MOZ_DIAGNOSTIC_ASSERT(
-      !aOpener || (GetBrowsingContext() && GetBrowsingContext()->GetOpener() ==
-                                             aOpener->GetBrowsingContext()));
+      !aOpener || !aOpener->GetDocShell() ||
+      (GetBrowsingContext() &&
+       GetBrowsingContext()->GetOpener() == aOpener->GetBrowsingContext()));
     return;
   }
 
@@ -3111,8 +3112,7 @@ nsGlobalWindowOuter::DevToCSSIntPixels(int32_t px)
   if (!mDocShell)
     return px; // assume 1:1
 
-  RefPtr<nsPresContext> presContext;
-  mDocShell->GetPresContext(getter_AddRefs(presContext));
+  RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
   if (!presContext)
     return px;
 
@@ -3125,8 +3125,7 @@ nsGlobalWindowOuter::CSSToDevIntPixels(int32_t px)
   if (!mDocShell)
     return px; // assume 1:1
 
-  RefPtr<nsPresContext> presContext;
-  mDocShell->GetPresContext(getter_AddRefs(presContext));
+  RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
   if (!presContext)
     return px;
 
@@ -3139,8 +3138,7 @@ nsGlobalWindowOuter::DevToCSSIntPixels(nsIntSize px)
   if (!mDocShell)
     return px; // assume 1:1
 
-  RefPtr<nsPresContext> presContext;
-  mDocShell->GetPresContext(getter_AddRefs(presContext));
+  RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
   if (!presContext)
     return px;
 
@@ -3155,8 +3153,7 @@ nsGlobalWindowOuter::CSSToDevIntPixels(nsIntSize px)
   if (!mDocShell)
     return px; // assume 1:1
 
-  RefPtr<nsPresContext> presContext;
-  mDocShell->GetPresContext(getter_AddRefs(presContext));
+  RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
   if (!presContext)
     return px;
 
@@ -3172,8 +3169,7 @@ nsGlobalWindowOuter::GetInnerSize(CSSIntSize& aSize)
 
   NS_ENSURE_STATE(mDocShell);
 
-  RefPtr<nsPresContext> presContext;
-  mDocShell->GetPresContext(getter_AddRefs(presContext));
+  RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
   RefPtr<nsIPresShell> presShell = mDocShell->GetPresShell();
 
   if (!presContext || !presShell) {
@@ -3401,8 +3397,7 @@ nsGlobalWindowOuter::GetScreenXY(CallerType aCallerType, ErrorResult& aError)
   int32_t x = 0, y = 0;
   aError = treeOwnerAsWin->GetPosition(&x, &y); // LayoutDevice px values
 
-  RefPtr<nsPresContext> presContext;
-  mDocShell->GetPresContext(getter_AddRefs(presContext));
+  RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
   if (!presContext) {
     return CSSIntPoint(x, y);
   }
@@ -3492,8 +3487,7 @@ nsGlobalWindowOuter::GetDevicePixelRatioOuter(CallerType aCallerType)
     return 1.0;
   }
 
-  RefPtr<nsPresContext> presContext;
-  mDocShell->GetPresContext(getter_AddRefs(presContext));
+  RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
   if (!presContext) {
     return 1.0;
   }
@@ -3646,8 +3640,7 @@ nsGlobalWindowOuter::SetDocShellWidthAndHeight(int32_t aInnerWidth, int32_t aInn
 void
 nsGlobalWindowOuter::SetCSSViewportWidthAndHeight(nscoord aInnerWidth, nscoord aInnerHeight)
 {
-  RefPtr<nsPresContext> presContext;
-  mDocShell->GetPresContext(getter_AddRefs(presContext));
+  RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
 
   nsRect shellArea = presContext->GetVisibleArea();
   shellArea.SetHeight(aInnerHeight);
@@ -4837,7 +4830,7 @@ nsGlobalWindowOuter::FocusOuter(ErrorResult& aError)
   }
 
   if (lookForPresShell) {
-    mDocShell->GetEldestPresShell(getter_AddRefs(presShell));
+    presShell = mDocShell->GetEldestPresShell();
   }
 
   nsCOMPtr<nsIDocShellTreeItem> parentDsti;
@@ -7236,7 +7229,7 @@ nsGlobalWindowOuter::MaybeAllowStorageForOpenedWindow(nsIURI* aURI)
   // We don't care when the asynchronous work finishes here.
   Unused << AntiTrackingCommon::AddFirstPartyStorageAccessGrantedFor(principal,
                                                                      inner,
-                                                                     AntiTrackingCommon::eHeuristic);
+                                                                     AntiTrackingCommon::eOpener);
 }
 
 //*****************************************************************************
@@ -7474,7 +7467,7 @@ nsGlobalWindowOuter::SetCursorOuter(const nsAString& aCursor, ErrorResult& aErro
 
   RefPtr<nsPresContext> presContext;
   if (mDocShell) {
-    mDocShell->GetPresContext(getter_AddRefs(presContext));
+    presContext = mDocShell->GetPresContext();
   }
 
   if (presContext) {
@@ -7648,8 +7641,7 @@ void
 nsGlobalWindowOuter::CheckForDPIChange()
 {
   if (mDocShell) {
-    RefPtr<nsPresContext> presContext;
-    mDocShell->GetPresContext(getter_AddRefs(presContext));
+    RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
     if (presContext) {
       if (presContext->DeviceContext()->CheckDPIChange()) {
         presContext->UIResolutionChanged();
