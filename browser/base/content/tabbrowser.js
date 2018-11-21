@@ -280,10 +280,48 @@ window._gBrowser = {
 
   _setupInitialBrowserAndTab() {
     // See browser.js for the meaning of window.arguments.
+    // Bug 1485961 covers making this more sane.
     let userContextId = window.arguments && window.arguments[6];
-    let browser = this._createBrowser({uriIsAboutBlank: false, userContextId});
+
+    // We default to a remote content browser, except if:
+    // - e10s is disabled.
+    // - there's a parent process opener (e.g. parent process about: page) for
+    //   the content tab.
+    let remoteType;
+    if (gMultiProcessBrowser && !window.hasOpenerForInitialContentBrowser) {
+      remoteType = E10SUtils.DEFAULT_REMOTE_TYPE;
+    } else {
+      remoteType = E10SUtils.NOT_REMOTE;
+    }
+
+    // We only need sameProcessAsFrameLoader in the case where we're passed a tab
+    let sameProcessAsFrameLoader;
+    let tabArgument = gBrowserInit.getTabToAdopt();
+    if (tabArgument) {
+      // The window's first argument is a tab if and only if we are swapping tabs.
+      // We must set the browser's usercontextid so that the newly created remote
+      // tab child has the correct usercontextid.
+      if (tabArgument.hasAttribute("usercontextid")) {
+        userContextId = parseInt(tabArgument.getAttribute("usercontextid"), 10);
+      }
+
+      let linkedBrowser = tabArgument.linkedBrowser;
+      if (linkedBrowser) {
+        remoteType = linkedBrowser.remoteType;
+        sameProcessAsFrameLoader = linkedBrowser.frameLoader;
+      }
+    }
+    let createOptions = {
+      uriIsAboutBlank: false,
+      userContextId,
+      sameProcessAsFrameLoader,
+      remoteType,
+    };
+    let browser = this._createBrowser(createOptions);
     browser.setAttribute("primary", "true");
-    browser.setAttribute("blank", "true");
+    if (!tabArgument) {
+      browser.setAttribute("blank", "true");
+    }
     if (gBrowserAllowScriptsToCloseInitialTabs) {
       browser.setAttribute("allowscriptstoclose", "true");
     }
@@ -313,6 +351,8 @@ window._gBrowser = {
 
     this._appendStatusPanel();
 
+    // Only necessary because of pageloader talos tests which access this.
+    // Bug 1508171 covers removing this.
     this.initialBrowser = browser;
 
     let autoScrollPopup = browser._createAutoScrollPopup();
@@ -5439,10 +5479,19 @@ var TabContextMenu = {
     let allSelectedTabsAdjacent = selectedTabs.every((element, index, array) => {
       return array.length > index + 1 ? element._tPos + 1 == array[index + 1]._tPos : true;
     });
-    contextMoveTabToEnd.disabled = selectedTabs[selectedTabs.length - 1]._tPos == gBrowser.visibleTabs.length - 1 &&
+    let contextTabIsSelected = this.contextTab.multiselected;
+    let visibleTabs = gBrowser.visibleTabs;
+    let lastVisibleTab = visibleTabs[visibleTabs.length - 1];
+    let tabsToMove = contextTabIsSelected ? selectedTabs : [this.contextTab];
+    let lastTabToMove = tabsToMove[tabsToMove.length - 1];
+    let isLastPinnedTab = lastTabToMove.pinned &&
+      (!lastTabToMove.nextElementSibling || !lastTabToMove.nextElementSibling.pinned);
+    contextMoveTabToEnd.disabled = (lastTabToMove == lastVisibleTab || isLastPinnedTab) &&
                                    allSelectedTabsAdjacent;
     let contextMoveTabToStart = document.getElementById("context_moveToStart");
-    contextMoveTabToStart.disabled = selectedTabs[0]._tPos == 0 && allSelectedTabsAdjacent;
+    let isFirstTab = tabsToMove[0] == visibleTabs[0] ||
+                     tabsToMove[0] == visibleTabs[gBrowser._numPinnedTabs];
+    contextMoveTabToStart.disabled = isFirstTab && allSelectedTabsAdjacent;
 
     // Only one of "Duplicate Tab"/"Duplicate Tabs" should be visible.
     document.getElementById("context_duplicateTab").hidden = multiselectionContext;

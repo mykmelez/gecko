@@ -679,6 +679,11 @@ nsDocShell::LoadURI(nsDocShellLoadState* aLoadState)
              "Should not have these flags set");
   MOZ_ASSERT(aLoadState->URI(), "Should have a valid URI to load");
 
+  if (mUseStrictSecurityChecks && !aLoadState->TriggeringPrincipal()) {
+    MOZ_ASSERT(false, "LoadURI must have a triggering principal");
+    return NS_ERROR_FAILURE;
+  }
+
   // Note: we allow loads to get through here even if mFiredUnloadEvent is
   // true; that case will get handled in LoadInternal or LoadHistoryEntry,
   // so we pass false as the second parameter to IsNavigationAllowed.
@@ -1495,6 +1500,14 @@ nsDocShell::GetHasForeignCookiesBeenBlocked(bool* aHasForeignCookiesBeenBlocked)
 {
   nsCOMPtr<nsIDocument> doc(GetDocument());
   *aHasForeignCookiesBeenBlocked = doc && doc->GetHasForeignCookiesBlocked();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::GetHasCookiesLoaded(bool* aHasCookiesLoaded)
+{
+  nsCOMPtr<nsIDocument> doc(GetDocument());
+  *aHasCookiesLoaded = doc && doc->GetHasCookiesLoaded();
   return NS_OK;
 }
 
@@ -7291,9 +7304,8 @@ nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
           MaybeNotifyKeywordSearchLoading(keywordProviderName, keywordAsSent);
 
           nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
-          nsCOMPtr<nsIPrincipal> triggeringPrincipal = loadInfo
-            ? loadInfo->TriggeringPrincipal()
-            : nsContentUtils::GetSystemPrincipal();
+          MOZ_ASSERT(loadInfo, "loadInfo is required on all channels");
+          nsCOMPtr<nsIPrincipal> triggeringPrincipal = loadInfo->TriggeringPrincipal();
           return LoadURI(newSpecW,             // URI string
                          LOAD_FLAGS_NONE,      // Load flags
                          nullptr,              // Referring URI
@@ -7555,12 +7567,6 @@ NS_IMETHODIMP
 nsDocShell::CreateAboutBlankContentViewer(nsIPrincipal* aPrincipal)
 {
   return CreateAboutBlankContentViewer(aPrincipal, nullptr);
-}
-
-NS_IMETHODIMP
-nsDocShell::ForceCreateAboutBlankContentViewer(nsIPrincipal* aPrincipal)
-{
-  return CreateAboutBlankContentViewer(aPrincipal, nullptr, true, false);
 }
 
 bool
@@ -9092,17 +9098,6 @@ bool
 nsDocShell::JustStartedNetworkLoad()
 {
   return mDocumentRequest && mDocumentRequest != GetCurrentDocChannel();
-}
-
-nsresult
-nsDocShell::CreatePrincipalFromReferrer(nsIURI* aReferrer,
-                                        nsIPrincipal** aResult)
-{
-  nsCOMPtr<nsIPrincipal> prin =
-    BasePrincipal::CreateCodebasePrincipal(aReferrer, mOriginAttributes);
-  prin.forget(aResult);
-
-  return *aResult ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
