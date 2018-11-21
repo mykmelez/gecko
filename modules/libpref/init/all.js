@@ -228,8 +228,7 @@ pref("dom.keyboardevent.keypress.dispatch_non_printable_keys_only_system_group_i
 // can limit the path.  E.g., "example.com/foo" means "example.com/foo*".  So,
 // if you need to limit under a directory, the path should end with "/" like
 // "example.com/foo/".  Note that this cannot limit port number for now.
-pref("dom.keyboardevent.keypress.hack.dispatch_non_printable_keys",
-     "medium.com/p/");
+pref("dom.keyboardevent.keypress.hack.dispatch_non_printable_keys", "");
 #else
 pref("dom.keyboardevent.keypress.dispatch_non_printable_keys_only_system_group_in_content", false);
 #endif
@@ -1740,7 +1739,7 @@ pref("network.http.request.max-start-delay", 10);
 pref("network.http.request.max-attempts", 10);
 
 // Headers
-pref("network.http.accept.default", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+pref("network.http.accept.default", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8");
 
 // Prefs allowing granular control of referers
 // 0=don't send any, 1=send only on clicks, 2=send on image requests as well
@@ -3313,6 +3312,14 @@ pref("dom.ipc.plugins.hangUIMinDisplaySecs", 0);
 #endif
 #endif
 
+// Whether or not to collect a paired minidump when force-killing a
+// content process.
+#ifdef RELEASE_OR_BETA
+pref("dom.ipc.tabs.createKillHardCrashReports", false);
+#else
+pref("dom.ipc.tabs.createKillHardCrashReports", true);
+#endif
+
 pref("dom.ipc.plugins.flash.disable-protected-mode", false);
 
 pref("dom.ipc.plugins.flash.subprocess.crashreporter.enabled", true);
@@ -4686,7 +4693,7 @@ pref("image.animated.decode-on-demand.recycle", true);
 
 // Whether we should generate full frames at decode time or partial frames which
 // are combined at display time (historical behavior and default).
-pref("image.animated.generate-full-frames", false);
+pref("image.animated.generate-full-frames", true);
 
 // Resume an animated image from the last displayed frame rather than
 // advancing when out of view.
