@@ -66,8 +66,7 @@ public:
 
   void AddWebRenderParentCommand(const WebRenderParentCommand& aCmd);
 
-  void UpdateResources(wr::IpcResourceUpdateQueue& aResources,
-                       bool aScheduleComposite = false);
+  void UpdateResources(wr::IpcResourceUpdateQueue& aResources);
   void BeginTransaction();
   void EndTransaction(const wr::LayoutSize& aContentSize,
                       wr::BuiltDisplayList& dl,
@@ -211,6 +210,7 @@ private:
 
   mozilla::ipc::IPCResult RecvWrUpdated(const wr::IdNamespace& aNewIdNamespace,
                                         const TextureFactoryIdentifier& textureFactoryIdentifier) override;
+  mozilla::ipc::IPCResult RecvWrReleasedImages(nsTArray<wr::ExternalImageKeyPair>&& aPairs) override;
 
   void AddIPDLReference() {
     MOZ_ASSERT(mIPCOpen == false);

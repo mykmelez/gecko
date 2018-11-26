@@ -108,7 +108,7 @@ WebRenderLayerManager::DoDestroy(bool aIsSync)
 
   if (WrBridge()) {
     // Just clear ImageKeys, they are deleted during WebRenderAPI destruction.
-    mImageKeysToDelete.Clear();
+    DiscardLocalImages();
     // CompositorAnimations are cleared by WebRenderBridgeParent.
     mDiscardedCompositorAnimationsIds.Clear();
     WrBridge()->Destroy(aIsSync);
@@ -119,6 +119,8 @@ WebRenderLayerManager::DoDestroy(bool aIsSync)
   // which will put stuff back into mDiscardedCompositorAnimationsIds. If
   // mActiveCompositorAnimationIds is empty that won't happen.
   mActiveCompositorAnimationIds.clear();
+
+  ClearAsyncAnimations();
 
   mWebRenderCommandBuilder.Destroy();
 
@@ -362,17 +364,12 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
       // If we can't just swap the queue, we need to take the slow path and
       // send the update as a separate message. We don't need to schedule a
       // composite however because that will happen with EndTransaction.
-      WrBridge()->UpdateResources(mAsyncResourceUpdates.ref(),
-                                  /* aScheduleComposite */ false);
+      WrBridge()->UpdateResources(mAsyncResourceUpdates.ref());
     }
     mAsyncResourceUpdates.reset();
   }
 
-  for (const auto& key : mImageKeysToDelete) {
-    resourceUpdates.DeleteImage(key);
-  }
-  mImageKeysToDelete.Clear();
-
+  DiscardImagesInTransaction(resourceUpdates);
   WrBridge()->RemoveExpiredFontKeys(resourceUpdates);
 
   // Skip the synchronization for buffer since we also skip the painting during
@@ -482,13 +479,29 @@ WebRenderLayerManager::AddImageKeyForDiscard(wr::ImageKey key)
 }
 
 void
+WebRenderLayerManager::AddBlobImageKeyForDiscard(wr::BlobImageKey key)
+{
+  mBlobImageKeysToDelete.AppendElement(key);
+}
+
+void
+WebRenderLayerManager::DiscardImagesInTransaction(wr::IpcResourceUpdateQueue& aResources)
+{
+  for (const auto& key : mImageKeysToDelete) {
+    aResources.DeleteImage(key);
+  }
+  for (const auto& key : mBlobImageKeysToDelete) {
+    aResources.DeleteBlobImage(key);
+  }
+  mImageKeysToDelete.Clear();
+  mBlobImageKeysToDelete.Clear();
+}
+
+void
 WebRenderLayerManager::DiscardImages()
 {
   wr::IpcResourceUpdateQueue resources(WrBridge());
-  for (const auto& key : mImageKeysToDelete) {
-    resources.DeleteImage(key);
-  }
-  mImageKeysToDelete.Clear();
+  DiscardImagesInTransaction(resources);
   WrBridge()->UpdateResources(resources);
 }
 
@@ -531,6 +544,7 @@ WebRenderLayerManager::DiscardLocalImages()
   // This is useful in empty / failed transactions where we created
   // image keys but didn't tell the parent about them yet.
   mImageKeysToDelete.Clear();
+  mBlobImageKeysToDelete.Clear();
 }
 
 void
@@ -593,6 +607,7 @@ WebRenderLayerManager::ClearCachedResources(Layer* aSubtree)
 void
 WebRenderLayerManager::WrUpdated()
 {
+  ClearAsyncAnimations();
   mWebRenderCommandBuilder.ClearCachedResources();
   DiscardLocalImages();
 
@@ -758,11 +773,53 @@ WebRenderLayerManager::FlushAsyncResourceUpdates()
   }
 
   if (!IsDestroyed() && WrBridge()) {
-    WrBridge()->UpdateResources(mAsyncResourceUpdates.ref(),
-                                /* aScheduleComposite */ true);
+    WrBridge()->UpdateResources(mAsyncResourceUpdates.ref());
   }
 
   mAsyncResourceUpdates.reset();
+}
+
+void
+WebRenderLayerManager::RegisterAsyncAnimation(const wr::ImageKey& aKey,
+                                              SharedSurfacesAnimation* aAnimation)
+{
+  mAsyncAnimations.insert(std::make_pair(wr::AsUint64(aKey), aAnimation));
+}
+
+void
+WebRenderLayerManager::DeregisterAsyncAnimation(const wr::ImageKey& aKey)
+{
+  mAsyncAnimations.erase(wr::AsUint64(aKey));
+}
+
+void
+WebRenderLayerManager::ClearAsyncAnimations()
+{
+  for (const auto& i : mAsyncAnimations) {
+    i.second->Invalidate(this);
+  }
+  mAsyncAnimations.clear();
+}
+
+void
+WebRenderLayerManager::WrReleasedImages(const nsTArray<wr::ExternalImageKeyPair>& aPairs)
+{
+  // A SharedSurfaceAnimation object's lifetime is tied to its owning
+  // ImageContainer. When the ImageContainer is released,
+  // SharedSurfaceAnimation::Destroy is called which should ensure it is removed
+  // from the layer manager. Whenever the namespace for the
+  // WebRenderLayerManager itself is invalidated (e.g. we changed windows, or
+  // were destroyed ourselves), we callback into the SharedSurfaceAnimation
+  // object to remove its image key for us and any bound surfaces. If, for any
+  // reason, we somehow missed an WrReleasedImages call before the animation
+  // was bound to the layer manager, it will free those associated surfaces on
+  // the next ReleasePreviousFrame call.
+  for (const auto& pair : aPairs) {
+    auto i = mAsyncAnimations.find(wr::AsUint64(pair.key));
+    if (i != mAsyncAnimations.end()) {
+      i->second->ReleasePreviousFrame(this, pair.id);
+    }
+  }
 }
 
 } // namespace layers

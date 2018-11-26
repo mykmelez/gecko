@@ -5,6 +5,8 @@
 
 /* eslint-env mozilla/browser-window */
 
+{ // start private scope for gBrowser
+
 /**
  * A set of known icons to use for internal pages. These are hardcoded so we can
  * start loading them faster than ContentLinkHandler would normally find them.
@@ -5252,10 +5254,10 @@ TabProgressListener.prototype.QueryInterface = ChromeUtils.generateQI(
    "nsIWebProgressListener2",
    "nsISupportsWeakReference"]);
 
+} // end private scope for gBrowser
+
 var StatusPanel = {
   get panel() {
-    window.addEventListener("resize", this);
-
     delete this.panel;
     return this.panel = document.getElementById("statuspanel");
   },
@@ -5313,12 +5315,9 @@ var StatusPanel = {
     }
 
     if (val) {
-      this._mouseTargetRect = null;
       this._labelElement.value = val;
+      this.panel.removeAttribute("inactive");
       MousePosTracker.addListener(this);
-      // The inactive state for the panel will be removed in onTrackingStarted,
-      // once the initial position of the mouse relative to the StatusPanel
-      // is figured out (to avoid both flicker and sync flushing).
     } else {
       this.panel.setAttribute("inactive", "true");
       MousePosTracker.removeListener(this);
@@ -5327,15 +5326,18 @@ var StatusPanel = {
     return val;
   },
 
-  onTrackingStarted() {
-    this.panel.removeAttribute("inactive");
-  },
-
   getMouseTargetRect() {
-    if (!this._mouseTargetRect) {
-      this._calcMouseTargetRect();
-    }
-    return this._mouseTargetRect;
+    let container = this.panel.parentNode;
+    let alignRight = document.documentElement.matches(":-moz-locale-dir(rtl)");
+    let panelRect = window.windowUtils.getBoundsWithoutFlushing(this.panel);
+    let containerRect = window.windowUtils.getBoundsWithoutFlushing(container);
+
+    return {
+      top:    panelRect.top,
+      bottom: panelRect.bottom,
+      left:   alignRight ? containerRect.right - panelRect.width : containerRect.left,
+      right:  alignRight ? containerRect.right : containerRect.left + panelRect.width,
+    };
   },
 
   onMouseEnter() {
@@ -5344,31 +5346,6 @@ var StatusPanel = {
 
   onMouseLeave() {
     this._mirror();
-  },
-
-  handleEvent(event) {
-    if (!this.isVisible) {
-      return;
-    }
-    switch (event.type) {
-      case "resize":
-        this._mouseTargetRect = null;
-        break;
-    }
-  },
-
-  _calcMouseTargetRect() {
-    let container = this.panel.parentNode;
-    let alignRight = (getComputedStyle(container).direction == "rtl");
-    let panelRect = this.panel.getBoundingClientRect();
-    let containerRect = container.getBoundingClientRect();
-
-    this._mouseTargetRect = {
-      top:    panelRect.top,
-      bottom: panelRect.bottom,
-      left:   alignRight ? containerRect.right - panelRect.width : containerRect.left,
-      right:  alignRight ? containerRect.right : containerRect.left + panelRect.width,
-    };
   },
 
   _mirror() {
@@ -5380,7 +5357,6 @@ var StatusPanel = {
 
     if (!this.panel.hasAttribute("sizelimit")) {
       this.panel.setAttribute("sizelimit", "true");
-      this._mouseTargetRect = null;
     }
   },
 };

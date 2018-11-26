@@ -96,8 +96,7 @@ WebRenderBridgeChild::BeginTransaction()
 }
 
 void
-WebRenderBridgeChild::UpdateResources(wr::IpcResourceUpdateQueue& aResources,
-                                      bool aScheduleComposite /* = false */)
+WebRenderBridgeChild::UpdateResources(wr::IpcResourceUpdateQueue& aResources)
 {
   if (!IPCOpen()) {
     aResources.Clear();
@@ -114,7 +113,7 @@ WebRenderBridgeChild::UpdateResources(wr::IpcResourceUpdateQueue& aResources,
   aResources.Flush(resourceUpdates, smallShmems, largeShmems);
 
   this->SendUpdateResources(resourceUpdates, smallShmems,
-                            largeShmems, aScheduleComposite);
+                            largeShmems);
 }
 
 void
@@ -568,6 +567,15 @@ WebRenderBridgeChild::RecvWrUpdated(const wr::IdNamespace& aNewIdNamespace,
   // Just clear FontInstaceKeys/FontKeys, they are removed during WebRenderAPI destruction.
   mFontInstanceKeys.Clear();
   mFontKeys.Clear();
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+WebRenderBridgeChild::RecvWrReleasedImages(nsTArray<wr::ExternalImageKeyPair>&& aPairs)
+{
+  if (mManager) {
+    mManager->WrReleasedImages(aPairs);
+  }
   return IPC_OK();
 }
 

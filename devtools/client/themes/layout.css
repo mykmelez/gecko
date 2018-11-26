@@ -107,6 +107,10 @@
   border-block-end: 1px solid var(--theme-splitter-color);
 }
 
+.flex-header-button-prev {
+  cursor: pointer;
+}
+
 .flex-header-button-prev::before {
   background-image: url("chrome://devtools/skin/images/arrowhead-left.svg");
   background-size: 16px;
@@ -177,6 +181,7 @@ html[dir="rtl"] .flex-header-button-prev::before {
 
 .flex-item-list .devtools-button {
   background-color: transparent;
+  cursor: pointer;
   text-overflow: ellipsis;
   overflow: hidden;
   inline-size: 100%;
@@ -225,6 +230,7 @@ html[dir="rtl"] .flex-item-list .devtools-button::after {
 
 #flex-item-selector {
   background-position: right 4px center;
+  cursor: pointer;
   padding-left: 0;
   vertical-align: middle;
   width: 140px;
@@ -486,6 +492,16 @@ html[dir="rtl"] .flex-item-list .devtools-button::after {
   display: grid;
   grid-template-columns: max-content max-content;
   gap: .5em;
+}
+
+.flex-item-sizing .flexibility .name,
+.flex-item-sizing .max .name,
+.flex-item-sizing .min .name {
+  color: var(--theme-highlight-red);
+}
+
+.flex-item-sizing .base .name {
+  color: var(--theme-highlight-blue);
 }
 
 .flex-item-sizing .value {

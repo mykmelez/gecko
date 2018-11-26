@@ -536,6 +536,9 @@ AntiTrackingCommon::AddFirstPartyStorageAccessGrantedFor(nsIPrincipal* aPrincipa
   // Let's store the permission in the current parent window.
   topInnerWindow->SaveStorageAccessGranted(permissionKey);
 
+  // Let's inform the parent window.
+  parentWindow->StorageAccessGranted();
+
   nsIChannel* channel =
     pwin->GetCurrentInnerWindow()->GetExtantDoc()->GetChannel();
 
@@ -1293,7 +1296,7 @@ AntiTrackingCommon::NotifyBlockingDecision(nsIChannel* aChannel,
     // Tell the child process channel to do this instead.
     if (aDecision == BlockingDecision::eBlock) {
       parentChannel->NotifyTrackingCookieBlocked(aRejectedReason);
-    } else {
+    } else if (sendCookieLoadedNotification) {
       // Ignore the code related to fastblock
       parentChannel->NotifyCookieAllowed();
     }

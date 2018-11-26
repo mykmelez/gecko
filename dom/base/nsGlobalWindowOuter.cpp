@@ -842,8 +842,8 @@ nsGlobalWindowOuter::nsGlobalWindowOuter(uint64_t aWindowID)
     mAllowScriptsToClose(false),
     mTopLevelOuterContentWindow(false),
     mHasStorageAccess(false),
-    mSerial(0),
 #ifdef DEBUG
+    mSerial(0),
     mSetOpenerWindowCalled(false),
 #endif
     mCleanedUp(false),
@@ -868,9 +868,9 @@ nsGlobalWindowOuter::nsGlobalWindowOuter(uint64_t aWindowID)
   // to create the entropy collector, so we should
   // try to get one until we succeed.
 
+#ifdef DEBUG
   mSerial = nsContentUtils::InnerOrOuterWindowCreated();
 
-#ifdef DEBUG
   if (!PR_GetEnv("MOZ_QUIET")) {
     printf_stderr("++DOMWINDOW == %d (%p) [pid = %d] [serial = %d] [outer = %p]\n",
                   nsContentUtils::GetCurrentInnerOrOuterWindowCount(),
@@ -4703,6 +4703,7 @@ nsGlobalWindowOuter::PromptOuter(const nsAString& aMessage,
   // string. See bug #310037.
   nsAutoString fixedMessage, fixedInitial;
   nsContentUtils::StripNullChars(aMessage, fixedMessage);
+  nsContentUtils::PlatformToDOMLineBreaks(fixedMessage);
   nsContentUtils::StripNullChars(aInitial, fixedInitial);
 
   nsresult rv;
@@ -5391,6 +5392,11 @@ nsGlobalWindowOuter::NotifyContentBlockingState(unsigned aState,
     state |= aState;
   } else if (unblocked) {
     state &= ~aState;
+  }
+
+  if (state == oldState) {
+    // Avoid dispatching repeated notifications when nothing has changed
+    return;
   }
 
   eventSink->OnSecurityChange(aChannel, oldState, state, doc->GetContentBlockingLog());

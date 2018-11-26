@@ -770,8 +770,8 @@ sitedata-disallow-cookies-option =
 sitedata-block-desc = Type blocked
     .accesskey = T
 
-sitedata-block-trackers-option-recommended =
-    .label = Third-party trackers (recommended)
+sitedata-block-trackers-option =
+    .label = Third-party trackers
 sitedata-block-unvisited-option =
     .label = Cookies from unvisited websites
 sitedata-block-all-third-party-option =
@@ -846,11 +846,11 @@ content-blocking-tracking-protection-trackers-label =
 content-blocking-tracking-protection-all-detected-trackers-label =
   .label = All Detected Trackers
   .accesskey = T
-content-blocking-tracking-protection-option-always =
-  .label = Always
+content-blocking-tracking-protection-option-all-windows =
+  .label = In all windows
   .accesskey = A
 content-blocking-tracking-protection-option-private =
-  .label = Only in private windows
+  .label = Only in Private Windows
   .accesskey = p
 content-blocking-tracking-protection-change-block-list = Change block list
 

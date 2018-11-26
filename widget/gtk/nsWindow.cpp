@@ -3935,12 +3935,14 @@ nsWindow::Create(nsIWidget* aParent,
             gtk_style_context_has_class(style, "csd");
         eventWidget = (drawToContainer) ? container : mShell;
 
-        gtk_widget_add_events(eventWidget, kEvents);
-        if (drawToContainer)
-            gtk_widget_add_events(mShell, GDK_PROPERTY_CHANGE_MASK);
-
         // Prevent GtkWindow from painting a background to avoid flickering.
         gtk_widget_set_app_paintable(eventWidget, TRUE);
+
+        gtk_widget_add_events(eventWidget, kEvents);
+        if (drawToContainer) {
+            gtk_widget_add_events(mShell, GDK_PROPERTY_CHANGE_MASK);
+            gtk_widget_set_app_paintable(mShell, TRUE);
+        }
 
         // If we draw to mContainer window then configure it now because
         // gtk_container_add() realizes the child widget.
@@ -7301,19 +7303,6 @@ void nsWindow::GetCompositorWidgetInitData(mozilla::widget::CompositorWidgetInit
 }
 
 #ifdef MOZ_WAYLAND
-wl_display*
-nsWindow::GetWaylandDisplay()
-{
-  // Available as of GTK 3.8+
-  static auto sGdkWaylandDisplayGetWlDisplay =
-      (wl_display *(*)(GdkDisplay *))
-      dlsym(RTLD_DEFAULT, "gdk_wayland_display_get_wl_display");
-
-  GdkDisplay* gdkDisplay = gdk_display_get_default();
-  return mIsX11Display ? nullptr :
-                         sGdkWaylandDisplayGetWlDisplay(gdkDisplay);
-}
-
 wl_surface*
 nsWindow::GetWaylandSurface()
 {

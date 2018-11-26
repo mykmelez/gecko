@@ -480,6 +480,8 @@ nsDocShell::Create(BrowsingContext* aBrowsingContext)
   // If parent intercept is not enabled then we must forward to
   // the network controller from docshell.  We also enable if we're
   // in the parent process in order to support non-e10s configurations.
+  // Note: This check is duplicated in SharedWorkerInterfaceRequestor's
+  // constructor.
   if (!ServiceWorkerParentInterceptEnabled() || XRE_IsParentProcess()) {
     ds->mInterceptController = new ServiceWorkerInterceptController();
   }
@@ -764,6 +766,7 @@ nsDocShell::LoadURI(nsDocShellLoadState* aLoadState)
                       resultPrincipalURI,
                       aLoadState->KeepResultPrincipalURIIfSet(),
                       aLoadState->LoadReplace(),
+                      aLoadState->GetIsFromProcessingFrameAttributes(),
                       aLoadState->Referrer(),
                       aLoadState->ReferrerPolicy(),
                       aLoadState->TriggeringPrincipal(),
@@ -4814,7 +4817,8 @@ nsDocShell::LoadErrorPage(nsIURI* aErrorURI, nsIURI* aFailedURI, nsIChannel* aFa
     mLSHE->AbandonBFCacheEntry();
   }
 
-  return InternalLoad(aErrorURI, nullptr, Nothing(), false, false, nullptr, RP_Unset,
+  return InternalLoad(aErrorURI, nullptr, Nothing(), false, false,
+                      false, nullptr, RP_Unset,
                       nsContentUtils::GetSystemPrincipal(), nullptr,
                       INTERNAL_LOAD_FLAGS_NONE, EmptyString(),
                       VoidCString(), VoidString(), nullptr, nullptr,
@@ -4914,6 +4918,7 @@ nsDocShell::Reload(uint32_t aReloadFlags)
                       emplacedResultPrincipalURI,
                       false,
                       loadReplace,
+                      false,           // IsFromProcessingFrameAttributes
                       referrerURI,
                       referrerPolicy,
                       triggeringPrincipal,
@@ -9002,6 +9007,7 @@ public:
                     Maybe<nsCOMPtr<nsIURI>> const& aResultPrincipalURI,
                     bool aKeepResultPrincipalURIIfSet,
                     bool aLoadReplace,
+                    bool aIsFromProcessingFrameAttributes,
                     nsIURI* aReferrer, uint32_t aReferrerPolicy,
                     nsIPrincipal* aTriggeringPrincipal,
                     nsIPrincipal* aPrincipalToInherit,
@@ -9024,6 +9030,7 @@ public:
     , mResultPrincipalURI(aResultPrincipalURI)
     , mKeepResultPrincipalURIIfSet(aKeepResultPrincipalURIIfSet)
     , mLoadReplace(aLoadReplace)
+    , mIsFromProcessingFrameAttributes(aIsFromProcessingFrameAttributes)
     , mReferrer(aReferrer)
     , mReferrerPolicy(aReferrerPolicy)
     , mTriggeringPrincipal(aTriggeringPrincipal)
@@ -9048,6 +9055,7 @@ public:
     return mDocShell->InternalLoad(mURI, mOriginalURI, mResultPrincipalURI,
                                    mKeepResultPrincipalURIIfSet,
                                    mLoadReplace,
+                                   mIsFromProcessingFrameAttributes,
                                    mReferrer,
                                    mReferrerPolicy,
                                    mTriggeringPrincipal, mPrincipalToInherit,
@@ -9070,6 +9078,7 @@ private:
   Maybe<nsCOMPtr<nsIURI>> mResultPrincipalURI;
   bool mKeepResultPrincipalURIIfSet;
   bool mLoadReplace;
+  bool mIsFromProcessingFrameAttributes;
   nsCOMPtr<nsIURI> mReferrer;
   uint32_t mReferrerPolicy;
   nsCOMPtr<nsIPrincipal> mTriggeringPrincipal;
@@ -9106,6 +9115,7 @@ nsDocShell::InternalLoad(nsIURI* aURI,
                          Maybe<nsCOMPtr<nsIURI>> const& aResultPrincipalURI,
                          bool aKeepResultPrincipalURIIfSet,
                          bool aLoadReplace,
+                         bool aIsFromProcessingFrameAttributes,
                          nsIURI* aReferrer,
                          uint32_t aReferrerPolicy,
                          nsIPrincipal* aTriggeringPrincipal,
@@ -9458,6 +9468,7 @@ nsDocShell::InternalLoad(nsIURI* aURI,
                                         aResultPrincipalURI,
                                         aKeepResultPrincipalURIIfSet,
                                         aLoadReplace,
+                                        aIsFromProcessingFrameAttributes,
                                         aReferrer,
                                         aReferrerPolicy,
                                         aTriggeringPrincipal,
@@ -9556,7 +9567,8 @@ nsDocShell::InternalLoad(nsIURI* aURI,
       nsCOMPtr<nsIRunnable> ev =
         new InternalLoadEvent(this, aURI, aOriginalURI, aResultPrincipalURI,
                               aKeepResultPrincipalURIIfSet,
-                              aLoadReplace, aReferrer, aReferrerPolicy,
+                              aLoadReplace, aIsFromProcessingFrameAttributes,
+                              aReferrer, aReferrerPolicy,
                               aTriggeringPrincipal, principalToInherit,
                               aFlags, aTypeHint, aPostData,
                               aHeadersData, aLoadType, aSHEntry, aFirstParty,
@@ -10070,6 +10082,7 @@ nsDocShell::InternalLoad(nsIURI* aURI,
   nsCOMPtr<nsIRequest> req;
   rv = DoURILoad(aURI, aOriginalURI, aResultPrincipalURI,
                  aKeepResultPrincipalURIIfSet, aLoadReplace,
+                 aIsFromProcessingFrameAttributes,
                  loadFromExternal,
                  (aFlags & INTERNAL_LOAD_FLAGS_FORCE_ALLOW_DATA_URI),
                  (aFlags & INTERNAL_LOAD_FLAGS_ORIGINAL_FRAME_SRC),
@@ -10218,6 +10231,7 @@ nsDocShell::DoURILoad(nsIURI* aURI,
                       Maybe<nsCOMPtr<nsIURI>> const& aResultPrincipalURI,
                       bool aKeepResultPrincipalURIIfSet,
                       bool aLoadReplace,
+                      bool aIsFromProcessingFrameAttributes,
                       bool aLoadFromExternal,
                       bool aForceAllowDataURI,
                       bool aOriginalFrameSrc,
@@ -10255,6 +10269,23 @@ nsDocShell::DoURILoad(nsIURI* aURI,
   }
 
   if (IsFrame()) {
+    bool doesNotReturnData = false;
+    NS_URIChainHasFlags(aURI, nsIProtocolHandler::URI_DOES_NOT_RETURN_DATA,
+                        &doesNotReturnData);
+
+    if (doesNotReturnData) {
+      // If this is an iframe, it must have a parent. Let's count the
+      // no-data-URL telemetry on the parent document, because probably this one
+      // is an about page.
+      nsCOMPtr<nsIDocShellTreeItem> parent;
+      GetSameTypeParent(getter_AddRefs(parent));
+      MOZ_ASSERT(parent);
+
+      nsIDocument* parentDocument = parent->GetDocument();
+      if (parentDocument) {
+        parentDocument->SetDocumentAndPageUseCounter(eUseCounter_custom_no_data_URL);
+      }
+    }
 
     MOZ_ASSERT(aContentPolicyType == nsIContentPolicy::TYPE_INTERNAL_IFRAME ||
                aContentPolicyType == nsIContentPolicy::TYPE_INTERNAL_FRAME,
@@ -10393,7 +10424,7 @@ nsDocShell::DoURILoad(nsIURI* aURI,
     securityFlags |= nsILoadInfo::SEC_SANDBOXED;
   }
 
-  nsCOMPtr<nsILoadInfo> loadInfo =
+  RefPtr<LoadInfo> loadInfo =
     (aContentPolicyType == nsIContentPolicy::TYPE_DOCUMENT) ?
       new LoadInfo(loadingWindow, aTriggeringPrincipal, topLevelLoadingContext,
                    securityFlags) :
@@ -10438,6 +10469,10 @@ nsDocShell::DoURILoad(nsIURI* aURI,
   // can be exposed on the service worker FetchEvent.
   rv = loadInfo->SetIsDocshellReload(mLoadType & LOAD_CMD_RELOAD);
   NS_ENSURE_SUCCESS(rv, rv);
+
+  if (aIsFromProcessingFrameAttributes) {
+    loadInfo->SetIsFromProcessingFrameAttributes();
+  }
 
   if (!isSrcdoc) {
     rv = NS_NewChannelInternal(getter_AddRefs(channel),
@@ -12149,6 +12184,7 @@ nsDocShell::LoadHistoryEntry(nsISHEntry* aEntry, uint32_t aLoadType)
                     emplacedResultPrincipalURI,
                     false,
                     loadReplace,
+                    false,              // IsFromProcessingFrameAttributes
                     referrerURI,
                     referrerPolicy,
                     triggeringPrincipal,
@@ -13052,7 +13088,7 @@ class OnLinkClickEvent : public Runnable
 public:
   OnLinkClickEvent(nsDocShell* aHandler, nsIContent* aContent,
                    nsIURI* aURI,
-                   const char16_t* aTargetSpec,
+                   const nsAString& aTargetSpec,
                    const nsAString& aFileName,
                    nsIInputStream* aPostDataStream,
                    nsIInputStream* aHeadersDataStream,
@@ -13073,7 +13109,7 @@ public:
     AutoJSAPI jsapi;
     if (mIsTrusted || jsapi.Init(mContent->OwnerDoc()->GetScopeObject())) {
       mHandler->OnLinkClickSync(mContent, mURI,
-                                mTargetSpec.get(), mFileName,
+                                mTargetSpec, mFileName,
                                 mPostDataStream,
                                 mHeadersDataStream, mNoOpenerImplied,
                                 nullptr, nullptr, mIsUserTriggered,
@@ -13100,7 +13136,7 @@ private:
 OnLinkClickEvent::OnLinkClickEvent(nsDocShell* aHandler,
                                    nsIContent* aContent,
                                    nsIURI* aURI,
-                                   const char16_t* aTargetSpec,
+                                   const nsAString& aTargetSpec,
                                    const nsAString& aFileName,
                                    nsIInputStream* aPostDataStream,
                                    nsIInputStream* aHeadersDataStream,
@@ -13127,7 +13163,7 @@ OnLinkClickEvent::OnLinkClickEvent(nsDocShell* aHandler,
 NS_IMETHODIMP
 nsDocShell::OnLinkClick(nsIContent* aContent,
                         nsIURI* aURI,
-                        const char16_t* aTargetSpec,
+                        const nsAString& aTargetSpec,
                         const nsAString& aFileName,
                         nsIInputStream* aPostDataStream,
                         nsIInputStream* aHeadersDataStream,
@@ -13164,10 +13200,9 @@ nsDocShell::OnLinkClick(nsIContent* aContent,
   nsCOMPtr<nsIWebBrowserChrome3> browserChrome3 = do_GetInterface(mTreeOwner);
   bool noOpenerImplied = false;
   if (browserChrome3) {
-    nsAutoString oldTarget(aTargetSpec);
-    rv = browserChrome3->OnBeforeLinkTraversal(oldTarget, aURI,
+    rv = browserChrome3->OnBeforeLinkTraversal(aTargetSpec, aURI,
                                                aContent, mIsAppTab, target);
-    if (!oldTarget.Equals(target)) {
+    if (!aTargetSpec.Equals(target)) {
       noOpenerImplied = true;
     }
   }
@@ -13177,7 +13212,7 @@ nsDocShell::OnLinkClick(nsIContent* aContent,
   }
 
   nsCOMPtr<nsIRunnable> ev =
-    new OnLinkClickEvent(this, aContent, aURI, target.get(), aFileName,
+    new OnLinkClickEvent(this, aContent, aURI, target, aFileName,
                          aPostDataStream, aHeadersDataStream, noOpenerImplied,
                          aIsUserTriggered, aIsTrusted, aTriggeringPrincipal);
   return DispatchToTabGroup(TaskCategory::UI, ev.forget());
@@ -13194,7 +13229,7 @@ IsElementAnchorOrArea(nsIContent* aContent)
 NS_IMETHODIMP
 nsDocShell::OnLinkClickSync(nsIContent* aContent,
                             nsIURI* aURI,
-                            const char16_t* aTargetSpec,
+                            const nsAString& aTargetSpec,
                             const nsAString& aFileName,
                             nsIInputStream* aPostDataStream,
                             nsIInputStream* aHeadersDataStream,
@@ -13307,8 +13342,6 @@ nsDocShell::OnLinkClickSync(nsIContent* aContent,
   // referer could be null here in some odd cases, but that's ok,
   // we'll just load the link w/o sending a referer in those cases.
 
-  nsAutoString target(aTargetSpec);
-
   // If this is an anchor element, grab its type property to use as a hint
   nsAutoString typeHint;
   RefPtr<HTMLAnchorElement> anchor = HTMLAnchorElement::FromNode(aContent);
@@ -13341,12 +13374,13 @@ nsDocShell::OnLinkClickSync(nsIContent* aContent,
                              Nothing(),                 // Let the protocol handler assign it
                              false,
                              false,                     // LoadReplace
+                             false,                     // IsFromProcessingFrameAttributes
                              referer,                   // Referer URI
                              refererPolicy,             // Referer policy
                              triggeringPrincipal,
                              aContent->NodePrincipal(),
                              flags,
-                             target,                    // Window target
+                             aTargetSpec,               // Window target
                              NS_LossyConvertUTF16toASCII(typeHint),
                              aFileName,                 // Download as file
                              aPostDataStream,           // Post data stream
@@ -13368,7 +13402,7 @@ nsDocShell::OnLinkClickSync(nsIContent* aContent,
 NS_IMETHODIMP
 nsDocShell::OnOverLink(nsIContent* aContent,
                        nsIURI* aURI,
-                       const char16_t* aTargetSpec)
+                       const nsAString& aTargetSpec)
 {
   if (aContent->IsEditable()) {
     return NS_OK;

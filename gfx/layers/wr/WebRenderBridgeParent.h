@@ -80,8 +80,7 @@ public:
   mozilla::ipc::IPCResult RecvDeleteCompositorAnimations(InfallibleTArray<uint64_t>&& aIds) override;
   mozilla::ipc::IPCResult RecvUpdateResources(nsTArray<OpUpdateResource>&& aUpdates,
                                               nsTArray<RefCountedShmem>&& aSmallShmems,
-                                              nsTArray<ipc::Shmem>&& aLargeShmems,
-                                              const bool& aScheduleComposite) override;
+                                              nsTArray<ipc::Shmem>&& aLargeShmems) override;
   mozilla::ipc::IPCResult RecvSetDisplayList(const gfx::IntSize& aSize,
                                              InfallibleTArray<WebRenderParentCommand>&& aCommands,
                                              InfallibleTArray<OpDestroy>&& aToDestroy,
@@ -255,6 +254,7 @@ private:
                            const ImageIntRect& aDirtyRect,
                            wr::TransactionBuilder& aResources,
                            UniquePtr<ScheduleSharedSurfaceRelease>& aScheduleRelease);
+  void ObserveSharedSurfaceRelease(const nsTArray<wr::ExternalImageKeyPair>& aPairs);
 
   bool PushExternalImageForTexture(wr::ExternalImageId aExtId,
                                    wr::ImageKey aKey,
@@ -295,6 +295,11 @@ private:
   void SetAPZSampleTime();
 
   wr::Epoch GetNextWrEpoch();
+  // This function is expected to be used when GetNextWrEpoch() is called,
+  // but TransactionBuilder does not have resource updates nor display list.
+  // In this case, ScheduleGenerateFrame is not triggered via SceneBuilder.
+  // Then we want to rollback WrEpoch. See Bug 1490117.
+  void RollbackWrEpoch();
 
   void FlushSceneBuilds();
   void FlushFrameGeneration();

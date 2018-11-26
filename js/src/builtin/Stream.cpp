@@ -173,7 +173,7 @@ inline static MOZ_MUST_USE bool
 SetNewList(JSContext* cx, HandleNativeObject unwrappedContainer, uint32_t slot)
 {
     AutoRealm ar(cx, unwrappedContainer);
-    NativeObject* list = NewList(cx);
+    ListObject* list = ListObject::create(cx);
     if (!list) {
         return false;
     }
@@ -488,60 +488,12 @@ const Class cls::protoClass_ = { \
 
 /*** 3.2. Class ReadableStream **********************************************/
 
-/**
- * Streams spec, 3.2.3., steps 1-4.
- */
-ReadableStream*
-ReadableStream::createStream(JSContext* cx, HandleObject proto /* = nullptr */)
-{
-    Rooted<ReadableStream*> stream(cx, NewObjectWithClassProto<ReadableStream>(cx, proto));
-    if (!stream) {
-        return nullptr;
-    }
-
-    // Step 1: Set this.[[state]] to "readable".
-    // Step 2: Set this.[[reader]] and this.[[storedError]] to
-    //         undefined (implicit).
-    // Step 3: Set this.[[disturbed]] to false (implicit).
-    // Step 4: Set this.[[readableStreamController]] to undefined (implicit).
-    stream->initStateBits(Readable);
-
-    return stream;
-}
-
-static MOZ_MUST_USE ReadableStreamDefaultController*
-CreateReadableStreamDefaultController(JSContext* cx,
-                                      Handle<ReadableStream*> stream,
-                                      HandleValue underlyingSource,
-                                      HandleValue size,
-                                      HandleValue highWaterMarkVal);
-
-/**
- * Streams spec, 3.2.3., steps 1-4, 8.
- */
-ReadableStream*
-ReadableStream::createDefaultStream(JSContext* cx, HandleValue underlyingSource,
-                                    HandleValue size, HandleValue highWaterMark,
-                                    HandleObject proto /* = nullptr */)
-{
-    // Steps 1-4.
-    Rooted<ReadableStream*> stream(cx, createStream(cx));
-    if (!stream) {
-        return nullptr;
-    }
-
-    // Step 8.b: Set this.[[readableStreamController]] to
-    //           ? Construct(ReadableStreamDefaultController,
-    //                       « this, underlyingSource, size,
-    //                         highWaterMark »).
-    ReadableStreamDefaultController* controller =
-        CreateReadableStreamDefaultController(cx, stream, underlyingSource, size, highWaterMark);
-    if (!controller) {
-        return nullptr;
-    }
-    stream->setController(controller);
-    return stream;
-}
+static MOZ_MUST_USE bool
+SetUpReadableStreamDefaultController(JSContext* cx,
+                                     Handle<ReadableStream*> stream,
+                                     HandleValue underlyingSource,
+                                     double highWaterMarkVal,
+                                     HandleValue size);
 
 static MOZ_MUST_USE ReadableByteStreamController*
 CreateExternalReadableByteStreamController(JSContext* cx, Handle<ReadableStream*> stream,
@@ -551,7 +503,7 @@ ReadableStream*
 ReadableStream::createExternalSourceStream(JSContext* cx, void* underlyingSource,
                                            uint8_t flags, HandleObject proto /* = nullptr */)
 {
-    Rooted<ReadableStream*> stream(cx, createStream(cx, proto));
+    Rooted<ReadableStream*> stream(cx, create(cx, proto));
     if (!stream) {
         return nullptr;
     }
@@ -568,93 +520,129 @@ ReadableStream::createExternalSourceStream(JSContext* cx, void* underlyingSource
     return stream;
 }
 
+static MOZ_MUST_USE bool
+MakeSizeAlgorithmFromSizeFunction(JSContext* cx, HandleValue size);
+
+static MOZ_MUST_USE bool
+ValidateAndNormalizeHighWaterMark(JSContext* cx,
+                                  HandleValue highWaterMarkVal,
+                                  double* highWaterMark);
+
 /**
- * Streams spec, 3.2.3.
+ * Streams spec, 3.2.3. new ReadableStream(underlyingSource = {}, strategy = {})
  */
 bool
 ReadableStream::constructor(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    RootedValue underlyingSource(cx, args.get(0));
-    RootedValue options(cx, args.get(1));
-
-    // Do argument handling first to keep the right order of error reporting.
-    if (underlyingSource.isUndefined()) {
-        RootedObject sourceObj(cx, NewBuiltinClassInstance<PlainObject>(cx));
-        if (!sourceObj) {
-            return false;
-        }
-        underlyingSource = ObjectValue(*sourceObj);
-    }
-    RootedValue size(cx);
-    RootedValue highWaterMark(cx);
-
-    if (!options.isUndefined()) {
-        if (!GetProperty(cx, options, cx->names().size, &size)) {
-            return false;
-        }
-
-        if (!GetProperty(cx, options, cx->names().highWaterMark, &highWaterMark)) {
-            return false;
-        }
-    }
-
     if (!ThrowIfNotConstructing(cx, args, "ReadableStream")) {
         return false;
     }
 
-    // Step 5: Let type be ? GetV(underlyingSource, "type").
-    RootedValue typeVal(cx);
-    if (!GetProperty(cx, underlyingSource, cx->names().type, &typeVal)) {
-        return false;
+    // Implicit in the spec: argument default values.
+    RootedValue underlyingSource(cx, args.get(0));
+    if (underlyingSource.isUndefined()) {
+        JSObject* emptyObj = NewBuiltinClassInstance<PlainObject>(cx);
+        if (!emptyObj) {
+            return false;
+        }
+        underlyingSource = ObjectValue(*emptyObj);
     }
 
-    // Step 6: Let typeString be ? ToString(type).
-    RootedString type(cx, ToString<CanGC>(cx, typeVal));
-    if (!type) {
-        return false;
+    RootedValue strategy(cx, args.get(1));
+    if (strategy.isUndefined()) {
+        JSObject* emptyObj = NewBuiltinClassInstance<PlainObject>(cx);
+        if (!emptyObj) {
+            return false;
+        }
+        strategy = ObjectValue(*emptyObj);
     }
 
-    int32_t notByteStream;
-    if (!CompareStrings(cx, type, cx->names().bytes, &notByteStream)) {
+    // Implicit in the spec: Set this to
+    //     OrdinaryCreateFromConstructor(NewTarget, ...).
+    // Step 1: Perform ! InitializeReadableStream(this).
+    RootedObject proto(cx);
+    if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
         return false;
     }
-
-    // Step 7.a & 8.a (reordered): If highWaterMark is undefined, let
-    //                             highWaterMark be 1 (or 0 for byte streams).
-    if (highWaterMark.isUndefined()) {
-        highWaterMark = Int32Value(notByteStream ? 1 : 0);
-    }
-
-    Rooted<ReadableStream*> stream(cx);
-
-    // Step 7: If typeString is "bytes",
-    if (!notByteStream) {
-        // Step 7.b: Set this.[[readableStreamController]] to
-        //           ? Construct(ReadableByteStreamController,
-        //                       « this, underlyingSource, highWaterMark »).
-        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                                  JSMSG_READABLESTREAM_BYTES_TYPE_NOT_IMPLEMENTED);
-        return false;
-    } else if (typeVal.isUndefined()) {
-        // Step 8: Otherwise, if type is undefined,
-        // Step 8.b: Set this.[[readableStreamController]] to
-        //           ? Construct(ReadableStreamDefaultController,
-        //                       « this, underlyingSource, size, highWaterMark »).
-        stream = createDefaultStream(cx, underlyingSource, size, highWaterMark);
-    } else {
-        // Step 9: Otherwise, throw a RangeError exception.
-        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                                  JSMSG_READABLESTREAM_UNDERLYINGSOURCE_TYPE_WRONG);
-        return false;
-    }
+    Rooted<ReadableStream*> stream(cx, ReadableStream::create(cx, proto));
     if (!stream) {
         return false;
     }
 
-    args.rval().setObject(*stream);
-    return true;
+    // Step 2: Let size be ? GetV(strategy, "size").
+    RootedValue size(cx);
+    if (!GetProperty(cx, strategy, cx->names().size, &size)) {
+        return false;
+    }
+
+    // Step 3: Let highWaterMark be ? GetV(strategy, "highWaterMark").
+    RootedValue highWaterMarkVal(cx);
+    if (!GetProperty(cx, strategy, cx->names().highWaterMark, &highWaterMarkVal)) {
+        return false;
+    }
+
+    // Step 4: Let type be ? GetV(underlyingSource, "type").
+    RootedValue type(cx);
+    if (!GetProperty(cx, underlyingSource, cx->names().type, &type)) {
+        return false;
+    }
+
+    // Step 5: Let typeString be ? ToString(type).
+    RootedString typeString(cx, ToString<CanGC>(cx, type));
+    if (!typeString) {
+        return false;
+    }
+
+    // Step 6: If typeString is "bytes",
+    int32_t cmp;
+    if (!CompareStrings(cx, typeString, cx->names().bytes, &cmp)) {
+        return false;
+    }
+    if (cmp == 0) {
+        // The rest of step 6 is unimplemented, since we don't support
+        // user-defined byte streams yet.
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                  JSMSG_READABLESTREAM_BYTES_TYPE_NOT_IMPLEMENTED);
+        return false;
+    }
+
+    // Step 7: Otherwise, if type is undefined,
+    if (type.isUndefined()) {
+        // Step 7.a: Let sizeAlgorithm be ? MakeSizeAlgorithmFromSizeFunction(size).
+        if (!MakeSizeAlgorithmFromSizeFunction(cx, size)) {
+            return false;
+        }
+
+        // Step 7.b: If highWaterMark is undefined, let highWaterMark be 1.
+        double highWaterMark;
+        if (highWaterMarkVal.isUndefined()) {
+            highWaterMark = 1;
+        } else {
+            // Step 7.c: Set highWaterMark to ? ValidateAndNormalizeHighWaterMark(highWaterMark).
+            if (!ValidateAndNormalizeHighWaterMark(cx, highWaterMarkVal, &highWaterMark)) {
+                return false;
+            }
+        }
+
+        // Step 7.d: Perform
+        //           ? SetUpReadableStreamDefaultControllerFromUnderlyingSource(
+        //           this, underlyingSource, highWaterMark, sizeAlgorithm).
+        if (!SetUpReadableStreamDefaultController(cx, stream, underlyingSource,
+                                                  highWaterMark, size))
+        {
+            return false;
+        }
+
+        args.rval().setObject(*stream);
+        return true;
+    }
+
+    // Step 8: Otherwise, throw a RangeError exception.
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                              JSMSG_READABLESTREAM_UNDERLYINGSOURCE_TYPE_WRONG);
+    return false;
 }
 
 /**
@@ -716,7 +704,8 @@ ReadableStream_cancel(JSContext* cx, unsigned argc, Value* vp)
 static MOZ_MUST_USE ReadableStreamDefaultReader*
 CreateReadableStreamDefaultReader(JSContext* cx,
                                   Handle<ReadableStream*> unwrappedStream,
-                                  ForAuthorCodeBool forAuthorCode = ForAuthorCodeBool::No);
+                                  ForAuthorCodeBool forAuthorCode = ForAuthorCodeBool::No,
+                                  HandleObject proto = nullptr);
 
 /**
  * Streams spec, 3.2.5.3. getReader()
@@ -851,18 +840,84 @@ CLASS_SPEC(ReadableStream, 0, SlotCount, 0, 0, JS_NULL_CLASS_OPS);
 // Streams spec, 3.3.2. AcquireReadableStreamDefaultReader ( stream )
 // Always inlined. See CreateReadableStreamDefaultReader.
 
-// Streams spec, 3.3.3. CreateReadableStream (
-//                          startAlgorithm, pullAlgorithm, cancelAlgorithm
-//                          [, highWaterMark [, sizeAlgorithm ] ] )
-// Not implemented.
+/**
+ * Streams spec, 3.3.3. CreateReadableStream (
+ *                          startAlgorithm, pullAlgorithm, cancelAlgorithm
+ *                          [, highWaterMark [, sizeAlgorithm ] ] )
+ *
+ * The start/pull/cancelAlgorithm arguments are represented as a single
+ * underlyingSource argument; see SetUpReadableStreamDefaultController().
+ */
+MOZ_MUST_USE ReadableStream*
+CreateReadableStream(JSContext* cx,
+                     HandleValue underlyingSource,
+                     double highWaterMark = 1,
+                     HandleValue sizeAlgorithm = UndefinedHandleValue,
+                     HandleObject proto = nullptr)
+{
+
+    cx->check(underlyingSource, sizeAlgorithm, proto);
+    MOZ_ASSERT(sizeAlgorithm.isUndefined() || IsCallable(sizeAlgorithm));
+
+    // Step 1: If highWaterMark was not passed, set it to 1 (implicit).
+    // Step 2: If sizeAlgorithm was not passed, set it to an algorithm that returns 1 (implicit).
+    // Step 3: Assert: ! IsNonNegativeNumber(highWaterMark) is true.
+    MOZ_ASSERT(highWaterMark >= 0);
+
+    // Step 4: Let stream be ObjectCreate(the original value of ReadableStream's prototype property).
+    // Step 5: Perform ! InitializeReadableStream(stream).
+    Rooted<ReadableStream*> stream(cx, ReadableStream::create(cx, proto));
+    if (!stream) {
+        return nullptr;
+    }
+
+    // Step 6: Let controller be ObjectCreate(the original value of
+    //         ReadableStreamDefaultController's prototype property).
+    // Step 7: Perform ? SetUpReadableStreamDefaultController(stream,
+    //         controller, startAlgorithm, pullAlgorithm, cancelAlgorithm,
+    //         highWaterMark, sizeAlgorithm).
+    if (!SetUpReadableStreamDefaultController(cx, stream, underlyingSource, highWaterMark,
+                                              sizeAlgorithm))
+    {
+        return nullptr;
+    }
+
+    // Step 8: Return stream.
+    return stream;
+}
 
 // Streams spec, 3.3.4. CreateReadableByteStream (
 //                          startAlgorithm, pullAlgorithm, cancelAlgorithm
 //                          [, highWaterMark [, autoAllocateChunkSize ] ] )
 // Not implemented.
 
-// Streams spec, 3.3.5. InitializeReadableStream ( stream )
-// Not implemented.
+/**
+ * Streams spec, 3.3.5. InitializeReadableStream ( stream )
+ */
+MOZ_MUST_USE /* static */ ReadableStream*
+ReadableStream::create(JSContext* cx, HandleObject proto /* = nullptr */)
+{
+    // In the spec, InitializeReadableStream is always passed a newly created
+    // ReadableStream object. We instead create it here and return it below.
+    Rooted<ReadableStream*> stream(cx, NewObjectWithClassProto<ReadableStream>(cx, proto));
+    if (!stream) {
+        return nullptr;
+    }
+
+    // Step 1: Set stream.[[state]] to "readable".
+    stream->initStateBits(Readable);
+    MOZ_ASSERT(stream->readable());
+
+    // Step 2: Set stream.[[reader]] and stream.[[storedError]] to
+    //         undefined (implicit).
+    MOZ_ASSERT(!stream->hasReader());
+    MOZ_ASSERT(stream->storedError().isUndefined());
+
+    // Step 3: Set stream.[[disturbed]] to false (done in step 1).
+    MOZ_ASSERT(!stream->disturbed());
+
+    return stream;
+}
 
 // Streams spec, 3.3.6. IsReadableStream ( x )
 // Using is<T> instead.
@@ -1237,11 +1292,8 @@ ReadableStreamTee(JSContext* cx,
     // Step 16: Set branch1 to
     //          ! CreateReadableStream(startAlgorithm, pullAlgorithm,
     //                                 cancel1Algorithm).
-    RootedValue hwmValue(cx, NumberValue(1));
     RootedValue underlyingSource(cx, ObjectValue(*teeState));
-    branch1Stream.set(ReadableStream::createDefaultStream(cx, underlyingSource,
-                                                          UndefinedHandleValue,
-                                                          hwmValue));
+    branch1Stream.set(CreateReadableStream(cx, underlyingSource));
     if (!branch1Stream) {
         return false;
     }
@@ -1254,9 +1306,7 @@ ReadableStreamTee(JSContext* cx,
     // Step 17: Set branch2 to
     //          ! CreateReadableStream(startAlgorithm, pullAlgorithm,
     //                                 cancel2Algorithm).
-    branch2Stream.set(ReadableStream::createDefaultStream(cx, underlyingSource,
-                                                          UndefinedHandleValue,
-                                                          hwmValue));
+    branch2Stream.set(CreateReadableStream(cx, underlyingSource));
     if (!branch2Stream) {
         return false;
     }
@@ -1438,8 +1488,8 @@ ReadableStreamCloseInternal(JSContext* cx, Handle<ReadableStream*> unwrappedStre
 
         // Step a: Repeat for each readRequest that is an element of
         //         reader.[[readRequests]],
-        RootedNativeObject unwrappedReadRequests(cx, unwrappedReader->requests());
-        uint32_t len = unwrappedReadRequests->getDenseInitializedLength();
+        Rooted<ListObject*> unwrappedReadRequests(cx, unwrappedReader->requests());
+        uint32_t len = unwrappedReadRequests->length();
         RootedObject readRequest(cx);
         RootedObject resultObj(cx);
         RootedValue resultVal(cx);
@@ -1447,7 +1497,7 @@ ReadableStreamCloseInternal(JSContext* cx, Handle<ReadableStream*> unwrappedStre
             // Step i: Resolve readRequest.[[promise]] with
             //         ! ReadableStreamCreateReadResult(undefined, true,
             //                                          readRequest.[[forAuthorCode]]).
-            readRequest = &unwrappedReadRequests->getDenseElement(i).toObject();
+            readRequest = &unwrappedReadRequests->getAs<JSObject>(i);
             if (!cx->compartment()->wrap(cx, &readRequest)) {
                 return false;
             }
@@ -1565,13 +1615,13 @@ ReadableStreamErrorInternal(JSContext* cx, Handle<ReadableStream*> unwrappedStre
     // Steps 7,8: (Identical in our implementation.)
     // Step a: Repeat for each readRequest that is an element of
     //         reader.[[readRequests]],
-    RootedNativeObject unwrappedReadRequests(cx, unwrappedReader->requests());
+    Rooted<ListObject*> unwrappedReadRequests(cx, unwrappedReader->requests());
     RootedObject readRequest(cx);
     RootedValue val(cx);
-    uint32_t len = unwrappedReadRequests->getDenseInitializedLength();
+    uint32_t len = unwrappedReadRequests->length();
     for (uint32_t i = 0; i < len; i++) {
         // Step i: Reject readRequest.[[promise]] with e.
-        val = unwrappedReadRequests->getDenseElement(i);
+        val = unwrappedReadRequests->get(i);
         readRequest = &val.toObject();
 
         // Responses have to be created in the compartment from which the
@@ -1656,8 +1706,8 @@ ReadableStreamFulfillReadOrReadIntoRequest(JSContext* cx,
     // Step 3: Remove readIntoRequest from reader.[[readIntoRequests]], shifting
     //         all other elements downward (so that the second becomes the first,
     //         and so on).
-    RootedNativeObject unwrappedReadIntoRequests(cx, unwrappedReader->requests());
-    RootedObject readIntoRequest(cx, ShiftFromList<JSObject>(cx, unwrappedReadIntoRequests));
+    Rooted<ListObject*> unwrappedReadIntoRequests(cx, unwrappedReader->requests());
+    RootedObject readIntoRequest(cx, &unwrappedReadIntoRequests->popFirstAs<JSObject>(cx));
     MOZ_ASSERT(readIntoRequest);
     if (!cx->compartment()->wrap(cx, &readIntoRequest)) {
         return false;
@@ -1696,7 +1746,7 @@ ReadableStreamGetNumReadRequests(ReadableStream* stream)
         return 0;
     }
 
-    return reader->requests()->getDenseInitializedLength();
+    return reader->requests()->length();
 }
 
 /**
@@ -1741,10 +1791,11 @@ ReadableStreamReaderGenericInitialize(JSContext* cx,
 static MOZ_MUST_USE ReadableStreamDefaultReader*
 CreateReadableStreamDefaultReader(JSContext* cx,
                                   Handle<ReadableStream*> unwrappedStream,
-                                  ForAuthorCodeBool forAuthorCode)
+                                  ForAuthorCodeBool forAuthorCode,
+                                  HandleObject proto /* = nullptr */)
 {
     Rooted<ReadableStreamDefaultReader*> reader(cx,
-        NewBuiltinClassInstance<ReadableStreamDefaultReader>(cx));
+        NewObjectWithClassProto<ReadableStreamDefaultReader>(cx, proto));
     if (!reader) {
         return nullptr;
     }
@@ -1781,8 +1832,14 @@ ReadableStreamDefaultReader::constructor(JSContext* cx, unsigned argc, Value* vp
         return false;
     }
 
+    // Implicit in the spec: Find the prototype object to use.
+    RootedObject proto(cx);
+    if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+        return false;
+    }
+
     // Step 1: If ! IsReadableStream(stream) is false, throw a TypeError
-    //         exception.
+    // exception.
     Rooted<ReadableStream*> unwrappedStream(cx,
         UnwrapAndTypeCheckArgument<ReadableStream>(cx,
                                                    args,
@@ -1792,7 +1849,8 @@ ReadableStreamDefaultReader::constructor(JSContext* cx, unsigned argc, Value* vp
         return false;
     }
 
-    RootedObject reader(cx, CreateReadableStreamDefaultReader(cx, unwrappedStream));
+    RootedObject reader(cx,
+        CreateReadableStreamDefaultReader(cx, unwrappedStream, ForAuthorCodeBool::Yes, proto));
     if (!reader) {
         return false;
     }
@@ -1925,9 +1983,8 @@ ReadableStreamDefaultReader_releaseLock(JSContext* cx, unsigned argc, Value* vp)
     // Step 3: If this.[[readRequests]] is not empty, throw a TypeError exception.
     Value val = reader->getFixedSlot(ReadableStreamReader::Slot_Requests);
     if (!val.isUndefined()) {
-        NativeObject* readRequests = &val.toObject().as<NativeObject>();
-        uint32_t len = readRequests->getDenseInitializedLength();
-        if (len != 0) {
+        ListObject* readRequests = &val.toObject().as<ListObject>();
+        if (readRequests->length() != 0) {
             JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                                       JSMSG_READABLESTREAMREADER_NOT_EMPTY,
                                       "releaseLock");
@@ -2073,7 +2130,11 @@ ReadableStreamReaderGenericRelease(JSContext* cx, Handle<ReadableStreamReader*> 
     }
 
     // Step 2: Assert: reader.[[ownerReadableStream]].[[reader]] is reader.
-    MOZ_ASSERT(UnwrapReaderFromStreamNoThrow(unwrappedStream) == unwrappedReader);
+#ifdef DEBUG
+    // The assertion is weakened a bit to allow for nuked wrappers.
+    ReadableStreamReader* unwrappedReader2 = UnwrapReaderFromStreamNoThrow(unwrappedStream);
+    MOZ_ASSERT_IF(unwrappedReader2, unwrappedReader2 == unwrappedReader);
+#endif
 
     // Create an exception to reject promises with below. We don't have a
     // clean way to do this, unfortunately.
@@ -2256,101 +2317,6 @@ ControllerStartFailedHandler(JSContext* cx, unsigned argc, Value* vp)
 
     args.rval().setUndefined();
     return true;
-}
-
-static MOZ_MUST_USE bool
-ValidateAndNormalizeHighWaterMark(JSContext* cx,
-                                  HandleValue highWaterMarkVal,
-                                  double* highWaterMark);
-
-static MOZ_MUST_USE bool
-ValidateAndNormalizeQueuingStrategy(JSContext* cx,
-                                    HandleValue size,
-                                    HandleValue highWaterMarkVal,
-                                    double* highWaterMark);
-
-/**
- * Streams spec, 3.8.3
- *      new ReadableStreamDefaultController ( stream, underlyingSource,
- *                                            size, highWaterMark )
- * Steps 3 - 11.
- *
- * Note: All arguments must be same-compartment with cx. ReadableStream
- * controllers are always created in the same compartment as the stream.
- */
-static MOZ_MUST_USE ReadableStreamDefaultController*
-CreateReadableStreamDefaultController(JSContext* cx,
-                                      Handle<ReadableStream*> stream,
-                                      HandleValue underlyingSource,
-                                      HandleValue size,
-                                      HandleValue highWaterMarkVal)
-{
-    cx->check(stream, underlyingSource, size, highWaterMarkVal);
-
-    Rooted<ReadableStreamDefaultController*> controller(cx,
-        NewBuiltinClassInstance<ReadableStreamDefaultController>(cx));
-    if (!controller) {
-        return nullptr;
-    }
-
-    // Step 3: Set this.[[controlledReadableStream]] to stream.
-    controller->setStream(stream);
-
-    // Step 4: Set this.[[underlyingSource]] to underlyingSource.
-    controller->setUnderlyingSource(underlyingSource);
-
-    // Step 5: Perform ! ResetQueue(this).
-    if (!ResetQueue(cx, controller)) {
-        return nullptr;
-    }
-
-    // Step 6: Set this.[[started]], this.[[closeRequested]], this.[[pullAgain]],
-    //         and this.[[pulling]] to false.
-    controller->setFlags(0);
-
-    // Step 7: Let normalizedStrategy be
-    //         ? ValidateAndNormalizeQueuingStrategy(size, highWaterMark).
-    double highWaterMark;
-    if (!ValidateAndNormalizeQueuingStrategy(cx, size, highWaterMarkVal, &highWaterMark)) {
-        return nullptr;
-    }
-
-    // Step 8: Set this.[[strategySize]] to normalizedStrategy.[[size]] and
-    //         this.[[strategyHWM]] to normalizedStrategy.[[highWaterMark]].
-    controller->setStrategySize(size);
-    controller->setStrategyHWM(highWaterMark);
-
-    // Step 9: Let controller be this (implicit).
-
-    // Step 10: Let startResult be
-    //          ? InvokeOrNoop(underlyingSource, "start", « this »).
-    RootedValue startResult(cx);
-    RootedValue controllerVal(cx, ObjectValue(*controller));
-    if (!InvokeOrNoop(cx, underlyingSource, cx->names().start, controllerVal, &startResult)) {
-        return nullptr;
-    }
-
-    // Step 11: Let startPromise be a promise resolved with startResult:
-    RootedObject startPromise(cx, PromiseObject::unforgeableResolve(cx, startResult));
-    if (!startPromise) {
-        return nullptr;
-    }
-
-    RootedObject onStartFulfilled(cx, NewHandler(cx, ControllerStartHandler, controller));
-    if (!onStartFulfilled) {
-        return nullptr;
-    }
-
-    RootedObject onStartRejected(cx, NewHandler(cx, ControllerStartFailedHandler, controller));
-    if (!onStartRejected) {
-        return nullptr;
-    }
-
-    if (!JS::AddPromiseReactions(cx, startPromise, onStartFulfilled, onStartRejected)) {
-        return nullptr;
-    }
-
-    return controller;
 }
 
 /**
@@ -2553,7 +2519,7 @@ const Class ReadableStreamController::class_ = {
     "ReadableStreamController"
 };
 
-CLASS_SPEC(ReadableStreamDefaultController, 4, SlotCount, ClassSpec::DontDefineConstructor, 0,
+CLASS_SPEC(ReadableStreamDefaultController, 0, SlotCount, ClassSpec::DontDefineConstructor, 0,
            JS_NULL_CLASS_OPS);
 
 /**
@@ -2572,15 +2538,15 @@ ReadableStreamControllerCancelSteps(JSContext* cx,
 
     // Step 1 of 3.10.5.1: If this.[[pendingPullIntos]] is not empty,
     if (!unwrappedController->is<ReadableStreamDefaultController>()) {
-        RootedNativeObject unwrappedPendingPullIntos(cx,
+        Rooted<ListObject*> unwrappedPendingPullIntos(cx,
             unwrappedController->as<ReadableByteStreamController>().pendingPullIntos());
 
-        if (unwrappedPendingPullIntos->getDenseInitializedLength() != 0) {
+        if (unwrappedPendingPullIntos->length() != 0) {
             // Step a: Let firstDescriptor be the first element of
             //         this.[[pendingPullIntos]].
             PullIntoDescriptor* unwrappedDescriptor =
                 UnwrapAndDowncastObject<PullIntoDescriptor>(
-                    cx, PeekList<JSObject>(unwrappedPendingPullIntos));
+                    cx, &unwrappedPendingPullIntos->get(0).toObject());
             if (!unwrappedDescriptor) {
                 return nullptr;
             }
@@ -2664,13 +2630,13 @@ ReadableStreamDefaultControllerPullSteps(JSContext* cx,
     Rooted<ReadableStream*> unwrappedStream(cx, unwrappedController->stream());
 
     // Step 2: If this.[[queue]] is not empty,
-    RootedNativeObject unwrappedQueue(cx);
+    Rooted<ListObject*> unwrappedQueue(cx);
     RootedValue val(cx, unwrappedController->getFixedSlot(StreamController::Slot_Queue));
     if (val.isObject()) {
-        unwrappedQueue = &val.toObject().as<NativeObject>();
+        unwrappedQueue = &val.toObject().as<ListObject>();
     }
 
-    if (unwrappedQueue && unwrappedQueue->getDenseInitializedLength() != 0) {
+    if (unwrappedQueue && unwrappedQueue->length() != 0) {
         // Step a: Let chunk be ! DequeueValue(this.[[queue]]).
         RootedValue chunk(cx);
         if (!DequeueValue(cx, unwrappedController, &chunk)) {
@@ -2679,9 +2645,7 @@ ReadableStreamDefaultControllerPullSteps(JSContext* cx,
 
         // Step b: If this.[[closeRequested]] is true and this.[[queue]] is empty,
         //         perform ! ReadableStreamClose(stream).
-        if (unwrappedController->closeRequested() &&
-            unwrappedQueue->getDenseInitializedLength() == 0)
-        {
+        if (unwrappedController->closeRequested() && unwrappedQueue->length() == 0) {
             if (!ReadableStreamCloseInternal(cx, unwrappedStream)) {
                 return nullptr;
             }
@@ -2959,8 +2923,8 @@ ReadableStreamDefaultControllerClose(JSContext* cx,
 
     // Step 5: If controller.[[queue]] is empty, perform
     //         ! ReadableStreamClose(stream).
-    RootedNativeObject unwrappedQueue(cx, unwrappedController->queue());
-    if (unwrappedQueue->getDenseInitializedLength() == 0) {
+    Rooted<ListObject*> unwrappedQueue(cx, unwrappedController->queue());
+    if (unwrappedQueue->length() == 0) {
         return ReadableStreamCloseInternal(cx, unwrappedStream);
     }
 
@@ -3130,6 +3094,110 @@ ReadableStreamControllerGetDesiredSizeUnchecked(ReadableStreamController* contro
 
     // Step 5: Return controller.[[strategyHWM]] − controller.[[queueTotalSize]].
     return controller->strategyHWM() - controller->queueTotalSize();
+}
+
+/**
+ * Streams spec, 3.9.11.
+ *      SetUpReadableStreamDefaultController(stream, controller,
+ *          startAlgorithm, pullAlgorithm, cancelAlgorithm, highWaterMark,
+ *          sizeAlgorithm )
+ *
+ * The standard algorithm takes a `controller` argument which must be a new,
+ * blank object. This implementation creates a new controller instead.
+ *
+ * The standard algorithm takes startAlgorithm, pullAlgorithm, and
+ * cancelAlgorithm as separate arguments. We will do the same, but for now all
+ * of them are passed as a single underlyingSource argument--with a few
+ * user-visible differences in behavior (bug 1507943).
+ *
+ * Note: All arguments must be same-compartment with cx. ReadableStream
+ * controllers are always created in the same compartment as the stream.
+ */
+static MOZ_MUST_USE bool
+SetUpReadableStreamDefaultController(JSContext* cx,
+                                     Handle<ReadableStream*> stream,
+                                     HandleValue underlyingSource,
+                                     double highWaterMark,
+                                     HandleValue size)
+{
+    cx->check(stream, underlyingSource, size);
+    MOZ_ASSERT(highWaterMark >= 0);
+    MOZ_ASSERT(size.isUndefined() || IsCallable(size));
+
+    // Done elsewhere in the standard: Create the new controller.
+    Rooted<ReadableStreamDefaultController*> controller(cx,
+        NewBuiltinClassInstance<ReadableStreamDefaultController>(cx));
+    if (!controller) {
+        return false;
+    }
+
+    // Step 1: Assert: stream.[[readableStreamController]] is undefined.
+    MOZ_ASSERT(!stream->hasController());
+
+    // Step 2: Set controller.[[controlledReadableStream]] to stream.
+    controller->setStream(stream);
+
+    // Step 3: Set controller.[[queue]] and controller.[[queueTotalSize]] to
+    //         undefined (implicit), then perform ! ResetQueue(controller).
+    if (!ResetQueue(cx, controller)) {
+        return false;
+    }
+
+    // Step 4: Set controller.[[started]], controller.[[closeRequested]],
+    //         controller.[[pullAgain]], and controller.[[pulling]] to false.
+    controller->setFlags(0);
+
+    // Step 5: Set controller.[[strategySizeAlgorithm]] to sizeAlgorithm
+    //         and controller.[[strategyHWM]] to highWaterMark.
+    controller->setStrategySize(size);
+    controller->setStrategyHWM(highWaterMark);
+
+    // Step 6: Set controller.[[pullAlgorithm]] to pullAlgorithm.
+    // Step 7: Set controller.[[cancelAlgorithm]] to cancelAlgorithm.
+    //
+    // For the moment, these algorithms are represented using the
+    // underlyingSource (bug 1507943). For example, when the underlying source
+    // is a TeeState, we use the ReadableStreamTee algorithms for pulling and
+    // canceling.
+    controller->setUnderlyingSource(underlyingSource);
+
+    // Step 8: Set stream.[[readableStreamController]] to controller.
+    stream->setController(controller);
+
+    // Step 9: Let startResult be the result of performing startAlgorithm.
+    // If this is a tee stream, the startAlgorithm does nothing and returns
+    // undefined.
+    RootedValue startResult(cx);
+    if (!underlyingSource.isObject() || !underlyingSource.toObject().is<TeeState>()) {
+        RootedValue controllerVal(cx, ObjectValue(*controller));
+        if (!InvokeOrNoop(cx, underlyingSource, cx->names().start, controllerVal, &startResult)) {
+            return false;
+        }
+    }
+
+    // Step 10: Let startPromise be a promise resolved with startResult.
+    RootedObject startPromise(cx, PromiseObject::unforgeableResolve(cx, startResult));
+    if (!startPromise) {
+        return false;
+    }
+
+    // Step 11: Upon fulfillment of startPromise, [...]
+    // Step 12: Upon rejection of startPromise with reason r, [...]
+    RootedObject onStartFulfilled(cx, NewHandler(cx, ControllerStartHandler, controller));
+    if (!onStartFulfilled) {
+        return false;
+    }
+
+    RootedObject onStartRejected(cx, NewHandler(cx, ControllerStartFailedHandler, controller));
+    if (!onStartRejected) {
+        return false;
+    }
+
+    if (!JS::AddPromiseReactions(cx, startPromise, onStartFulfilled, onStartRejected)) {
+        return false;
+    }
+
+    return true;
 }
 
 
@@ -3383,7 +3451,7 @@ static const ClassOps ReadableByteStreamControllerClassOps = {
     nullptr,        /* trace   */
 };
 
-CLASS_SPEC(ReadableByteStreamController, 3, SlotCount, ClassSpec::DontDefineConstructor,
+CLASS_SPEC(ReadableByteStreamController, 0, SlotCount, ClassSpec::DontDefineConstructor,
            JSCLASS_BACKGROUND_FINALIZE, &ReadableByteStreamControllerClassOps);
 
 // Streams spec, 3.10.5.1. [[CancelSteps]] ()
@@ -3449,10 +3517,10 @@ ReadableByteStreamControllerPullSteps(JSContext* cx,
             // Step 3.c: Remove entry from this.[[queue]], shifting all other
             //           elements downward (so that the second becomes the
             //           first, and so on).
-            RootedNativeObject unwrappedQueue(cx, unwrappedController->queue());
+            Rooted<ListObject*> unwrappedQueue(cx, unwrappedController->queue());
             Rooted<ByteStreamChunk*> unwrappedEntry(cx,
                 UnwrapAndDowncastObject<ByteStreamChunk>(
-                    cx, ShiftFromList<JSObject>(cx, unwrappedQueue)));
+                    cx, &unwrappedQueue->popFirstAs<JSObject>(cx)));
             if (!unwrappedEntry) {
                 return nullptr;
             }
@@ -3647,13 +3715,13 @@ ReadableByteStreamControllerClose(JSContext* cx,
     }
 
     // Step 5: If controller.[[pendingPullIntos]] is not empty,
-    RootedNativeObject unwrappedPendingPullIntos(cx, unwrappedController->pendingPullIntos());
-    if (unwrappedPendingPullIntos->getDenseInitializedLength() != 0) {
+    Rooted<ListObject*> unwrappedPendingPullIntos(cx, unwrappedController->pendingPullIntos());
+    if (unwrappedPendingPullIntos->length() != 0) {
         // Step a: Let firstPendingPullInto be the first element of
         //         controller.[[pendingPullIntos]].
         Rooted<PullIntoDescriptor*> unwrappedFirstPendingPullInto(cx,
             UnwrapAndDowncastObject<PullIntoDescriptor>(
-                cx, PeekList<JSObject>(unwrappedPendingPullIntos)));
+                cx, &unwrappedPendingPullIntos->get(0).toObject()));
         if (!unwrappedFirstPendingPullInto) {
             return false;
         }
@@ -3767,28 +3835,53 @@ ReadableByteStreamControllerInvalidateBYOBRequest(JSContext* cx,
 
 /*** 6.1. Queuing strategies ************************************************/
 
+/**
+ * ECMA-262 7.3.4 CreateDataProperty(O, P, V)
+ */
+static MOZ_MUST_USE bool
+CreateDataProperty(JSContext* cx, HandleObject obj, HandlePropertyName key, HandleValue value,
+                   ObjectOpResult& result)
+{
+    RootedId id(cx, NameToId(key));
+    Rooted<PropertyDescriptor> desc(cx);
+    desc.setDataDescriptor(value, JSPROP_ENUMERATE);
+    return DefineProperty(cx, obj, id, desc, result);
+}
+
 // Streams spec, 6.1.2.2. new ByteLengthQueuingStrategy({ highWaterMark })
 bool
 js::ByteLengthQueuingStrategy::constructor(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    RootedObject strategy(cx, NewBuiltinClassInstance<ByteLengthQueuingStrategy>(cx));
+    if (!ThrowIfNotConstructing(cx, args, "ByteLengthQueuingStrategy")) {
+        return false;
+    }
+
+    // Implicit in the spec: Create the new strategy object.
+    RootedObject proto(cx);
+    if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+        return false;
+    }
+    RootedObject strategy(cx, NewObjectWithClassProto<ByteLengthQueuingStrategy>(cx, proto));
     if (!strategy) {
         return false;
     }
 
+    // Implicit in the spec: Argument destructuring.
     RootedObject argObj(cx, ToObject(cx, args.get(0)));
     if (!argObj) {
         return false;
     }
-
     RootedValue highWaterMark(cx);
     if (!GetProperty(cx, argObj, argObj, cx->names().highWaterMark, &highWaterMark)) {
         return false;
     }
 
-    if (!SetProperty(cx, strategy, cx->names().highWaterMark, highWaterMark)) {
+    // Step 1: Perform ! CreateDataProperty(this, "highWaterMark",
+    //                                      highWaterMark).
+    ObjectOpResult ignored;
+    if (!CreateDataProperty(cx, strategy, cx->names().highWaterMark, highWaterMark, ignored)) {
         return false;
     }
 
@@ -3823,22 +3916,34 @@ js::CountQueuingStrategy::constructor(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    Rooted<CountQueuingStrategy*> strategy(cx, NewBuiltinClassInstance<CountQueuingStrategy>(cx));
+    if (!ThrowIfNotConstructing(cx, args, "CountQueuingStrategy")) {
+        return false;
+    }
+
+    // Implicit in the spec: Create the new strategy object.
+    RootedObject proto(cx);
+    if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+        return false;
+    }
+    Rooted<CountQueuingStrategy*> strategy(cx,
+        NewObjectWithClassProto<CountQueuingStrategy>(cx, proto));
     if (!strategy) {
         return false;
     }
 
+    // Implicit in the spec: Argument destructuring.
     RootedObject argObj(cx, ToObject(cx, args.get(0)));
     if (!argObj) {
         return false;
     }
-
     RootedValue highWaterMark(cx);
     if (!GetProperty(cx, argObj, argObj, cx->names().highWaterMark, &highWaterMark)) {
         return false;
     }
 
-    if (!SetProperty(cx, strategy, cx->names().highWaterMark, highWaterMark)) {
+    // Step 1: Perform ! CreateDataProperty(this, "highWaterMark", highWaterMark).
+    ObjectOpResult ignored;
+    if (!CreateDataProperty(cx, strategy, cx->names().highWaterMark, highWaterMark, ignored)) {
         return false;
     }
 
@@ -3882,13 +3987,13 @@ DequeueValue(JSContext* cx, Handle<ReadableStreamController*> unwrappedContainer
     // Step 1: Assert: container has [[queue]] and [[queueTotalSize]] internal
     //         slots (implicit).
     // Step 2: Assert: queue is not empty.
-    RootedNativeObject unwrappedQueue(cx, unwrappedContainer->queue());
-    MOZ_ASSERT(unwrappedQueue->getDenseInitializedLength() > 0);
+    Rooted<ListObject*> unwrappedQueue(cx, unwrappedContainer->queue());
+    MOZ_ASSERT(unwrappedQueue->length() > 0);
 
     // Step 3. Let pair be the first element of queue.
     // Step 4. Remove pair from queue, shifting all other elements downward
     //         (so that the second becomes the first, and so on).
-    Rooted<QueueEntry*> unwrappedPair(cx, ShiftFromList<QueueEntry>(cx, unwrappedQueue));
+    Rooted<QueueEntry*> unwrappedPair(cx, &unwrappedQueue->popFirstAs<QueueEntry>(cx));
     MOZ_ASSERT(unwrappedPair);
 
     // Step 5: Set container.[[queueTotalSize]] to
@@ -3945,7 +4050,7 @@ EnqueueValueWithSize(JSContext* cx,
     //         element of container.[[queue]].
     {
         AutoRealm ar(cx, unwrappedContainer);
-        RootedNativeObject queue(cx, unwrappedContainer->queue());
+        Rooted<ListObject*> queue(cx, unwrappedContainer->queue());
         RootedValue wrappedVal(cx, value);
         if (!cx->compartment()->wrap(cx, &wrappedVal)) {
             return false;
@@ -3956,7 +4061,7 @@ EnqueueValueWithSize(JSContext* cx,
             return false;
         }
         RootedValue val(cx, ObjectValue(*entry));
-        if (!AppendToList(cx, queue, val)) {
+        if (!queue->append(cx, val)) {
             return false;
         }
     }
@@ -4002,15 +4107,15 @@ AppendToListAtSlot(JSContext* cx,
                    uint32_t slot,
                    HandleObject obj)
 {
-    RootedNativeObject list(cx,
-        &unwrappedContainer->getFixedSlot(slot).toObject().as<NativeObject>());
+    Rooted<ListObject*> list(cx,
+        &unwrappedContainer->getFixedSlot(slot).toObject().as<ListObject>());
 
     AutoRealm ar(cx, list);
     RootedValue val(cx, ObjectValue(*obj));
     if (!cx->compartment()->wrap(cx, &val)) {
         return false;
     }
-    return AppendToList(cx, list, val);
+    return list->append(cx, val);
 }
 
 
@@ -4067,47 +4172,59 @@ PromiseInvokeOrNoop(JSContext* cx, HandleValue O, HandlePropertyName P, HandleVa
     return PromiseObject::unforgeableResolve(cx, returnValue);
 }
 
-// Streams spec, 6.3.7. ValidateAndNormalizeHighWaterMark ( highWaterMark )
+
+/**
+ * Streams spec, 6.3.7. ValidateAndNormalizeHighWaterMark ( highWaterMark )
+ */
 static MOZ_MUST_USE bool
-ValidateAndNormalizeHighWaterMark(JSContext* cx, HandleValue highWaterMarkVal, double* highWaterMark)
+ValidateAndNormalizeHighWaterMark(JSContext* cx, HandleValue highWaterMarkVal,
+                                  double* highWaterMark)
 {
     // Step 1: Set highWaterMark to ? ToNumber(highWaterMark).
     if (!ToNumber(cx, highWaterMarkVal, highWaterMark)) {
         return false;
     }
 
-    // Step 2: If highWaterMark is NaN, throw a TypeError exception.
-    // Step 3: If highWaterMark < 0, throw a RangeError exception.
+    // Step 2: If highWaterMark is NaN or highWaterMark < 0, throw a RangeError exception.
     if (mozilla::IsNaN(*highWaterMark) || *highWaterMark < 0) {
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_STREAM_INVALID_HIGHWATERMARK);
         return false;
     }
 
-    // Step 4: Return highWaterMark.
+    // Step 3: Return highWaterMark.
     return true;
 }
 
-// Streams spec, obsolete (previously 6.4.6)
-//      ValidateAndNormalizeQueuingStrategy ( size, highWaterMark )
+/**
+ * Streams spec, 6.3.8. MakeSizeAlgorithmFromSizeFunction ( size )
+ *
+ * The standard makes a big deal of turning JavaScript functions (grubby,
+ * touched by users, covered with germs) into algorithms (pristine,
+ * respectable, purposeful). We don't bother. Here we only check for errors and
+ * leave `size` unchanged. Then, in ReadableStreamDefaultControllerEnqueue,
+ * where this value is used, we have to check for undefined and behave as if we
+ * had "made" an "algorithm" as described below.
+ */
 static MOZ_MUST_USE bool
-ValidateAndNormalizeQueuingStrategy(JSContext* cx, HandleValue size,
-                                    HandleValue highWaterMarkVal, double* highWaterMark)
+MakeSizeAlgorithmFromSizeFunction(JSContext* cx, HandleValue size)
 {
-    // Step 1: If size is not undefined and ! IsCallable(size) is false, throw a
-    //         TypeError exception.
-    if (!size.isUndefined() && !IsCallable(size)) {
+    // Step 1: If size is undefined, return an algorithm that returns 1.
+    if (size.isUndefined()) {
+        // Deferred. Size algorithm users must check for undefined.
+        return true;
+    }
+
+    // Step 2: If ! IsCallable(size) is false, throw a TypeError exception.
+    if (!IsCallable(size)) {
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_NOT_FUNCTION,
                                   "ReadableStream argument options.size");
         return false;
     }
 
-    // Step 2: Let highWaterMark be
-    //         ? ValidateAndNormalizeHighWaterMark(highWaterMark).
-    if (!ValidateAndNormalizeHighWaterMark(cx, highWaterMarkVal, highWaterMark)) {
-        return false;
-    }
-
-    // Step 3: Return Record {[[size]]: size, [[highWaterMark]]: highWaterMark}.
+    // Step 3: Return an algorithm that performs the following steps, taking a
+    //         chunk argument:
+    //     a. Return ? Call(size, undefined, « chunk »).
+    // Deferred. Size algorithm users must know how to call the size function.
     return true;
 }
 
@@ -4173,6 +4290,7 @@ JS::NewReadableDefaultStreamObject(JSContext* cx,
     AssertHeapIsIdle();
     CHECK_THREAD(cx);
     cx->check(underlyingSource, size, proto);
+    MOZ_ASSERT(highWaterMark >= 0);
 
     RootedObject source(cx, underlyingSource);
     if (!source) {
@@ -4183,8 +4301,7 @@ JS::NewReadableDefaultStreamObject(JSContext* cx,
     }
     RootedValue sourceVal(cx, ObjectValue(*source));
     RootedValue sizeVal(cx, size ? ObjectValue(*size) : UndefinedValue());
-    RootedValue highWaterMarkVal(cx, NumberValue(highWaterMark));
-    return ReadableStream::createDefaultStream(cx, sourceVal, sizeVal, highWaterMarkVal, proto);
+    return CreateReadableStream(cx, sourceVal, highWaterMark, sizeVal);
 }
 
 JS_PUBLIC_API JSObject*

@@ -100,11 +100,13 @@ XULButtonAccessible::NativeState() const
     xulButtonElement->GetType(type);
     if (type.EqualsLiteral("checkbox") || type.EqualsLiteral("radio")) {
       state |= states::CHECKABLE;
-      bool checked = false;
-      xulButtonElement->GetChecked(&checked);
-      if (checked) {
-        state |= states::PRESSED;
-      }
+    }
+    // Some buttons can have their checked state set without being of type
+    // checkbox or radio. Expose the pressed state unconditionally.
+    bool checked = false;
+    xulButtonElement->GetChecked(&checked);
+    if (checked) {
+      state |= states::PRESSED;
     }
   }
 
@@ -466,6 +468,20 @@ XULToolbarButtonAccessible::IsSeparator(Accessible* aAccessible)
   return content && content->IsAnyOfXULElements(nsGkAtoms::toolbarseparator,
                                                 nsGkAtoms::toolbarspacer,
                                                 nsGkAtoms::toolbarspring);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// XULToolbarButtonAccessible: Widgets
+
+bool
+XULToolbarButtonAccessible::IsAcceptableChild(nsIContent* aEl) const
+{
+  // In general XUL button has not accessible children. Nevertheless menu
+  // buttons can have popup accessibles (@type="menu" or columnpicker).
+  // Also: Toolbar buttons can have labels as children.
+  return aEl->IsXULElement(nsGkAtoms::menupopup) ||
+         aEl->IsXULElement(nsGkAtoms::popup) ||
+         aEl->IsXULElement(nsGkAtoms::label);
 }
 
 
