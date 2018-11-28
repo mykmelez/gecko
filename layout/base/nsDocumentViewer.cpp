@@ -9,7 +9,6 @@
 #include "gfxContext.h"
 #include "mozilla/RestyleManager.h"
 #include "mozilla/ServoStyleSet.h"
-#include "nsAutoPtr.h"
 #include "nscore.h"
 #include "nsCOMPtr.h"
 #include "nsCRT.h"
@@ -484,7 +483,7 @@ protected:
   RefPtr<nsPrintJob>               mPrintJob;
   float                            mOriginalPrintPreviewScale;
   float                            mPrintPreviewZoom;
-  nsAutoPtr<AutoPrintEventDispatcher> mAutoBeforeAndAfterPrint;
+  UniquePtr<AutoPrintEventDispatcher> mAutoBeforeAndAfterPrint;
 #endif // NS_PRINT_PREVIEW
 
 #endif // NS_PRINTING
@@ -3831,9 +3830,8 @@ nsDocumentViewer::Print(nsIPrintSettings*       aPrintSettings,
   // Check to see if this document is still busy
   // If it is busy and we aren't already "queued" up to print then
   // Indicate there is a print pending and cache the args for later
-  uint32_t busyFlags = nsIDocShell::BUSY_FLAGS_NONE;
-  if ((NS_FAILED(docShell->GetBusyFlags(&busyFlags)) ||
-       (busyFlags != nsIDocShell::BUSY_FLAGS_NONE && busyFlags & nsIDocShell::BUSY_FLAGS_PAGE_LOADING)) &&
+  auto busyFlags = docShell->GetBusyFlags();
+  if (busyFlags != nsIDocShell::BUSY_FLAGS_NONE && busyFlags & nsIDocShell::BUSY_FLAGS_PAGE_LOADING &&
       !mPrintDocIsFullyLoaded) {
     if (!mPrintIsPending) {
       mCachedPrintSettings           = aPrintSettings;
@@ -3869,8 +3867,8 @@ nsDocumentViewer::Print(nsIPrintSettings*       aPrintSettings,
   // Dispatch 'beforeprint' event and ensure 'afterprint' will be dispatched:
   MOZ_ASSERT(!mAutoBeforeAndAfterPrint,
              "We don't want to dispatch nested beforeprint/afterprint");
-  nsAutoPtr<AutoPrintEventDispatcher> autoBeforeAndAfterPrint(
-    new AutoPrintEventDispatcher(mDocument));
+  auto autoBeforeAndAfterPrint =
+    MakeUnique<AutoPrintEventDispatcher>(mDocument);
   NS_ENSURE_STATE(!GetIsPrinting());
   // If we are hosting a full-page plugin, tell it to print
   // first. It shows its own native print UI.
@@ -3899,7 +3897,7 @@ nsDocumentViewer::Print(nsIPrintSettings*       aPrintSettings,
   if (printJob->HasPrintCallbackCanvas()) {
     // Postpone the 'afterprint' event until after the mozPrintCallback
     // callbacks have been called:
-    mAutoBeforeAndAfterPrint = autoBeforeAndAfterPrint;
+    mAutoBeforeAndAfterPrint = std::move(autoBeforeAndAfterPrint);
   }
   dom::Element* root = mDocument->GetRootElement();
   if (root && root->HasAttr(kNameSpaceID_None, nsGkAtoms::mozdisallowselectionprint)) {
@@ -3954,9 +3952,9 @@ nsDocumentViewer::PrintPreview(nsIPrintSettings* aPrintSettings,
   // must avoid creating a new AutoPrintEventDispatcher object here if we
   // already have one saved in mAutoBeforeAndAfterPrint.
   // [1] Until PDF.js is removed (though, maybe after that as well).
-  nsAutoPtr<AutoPrintEventDispatcher> autoBeforeAndAfterPrint;
+  UniquePtr<AutoPrintEventDispatcher> autoBeforeAndAfterPrint;
   if (!mAutoBeforeAndAfterPrint) {
-    autoBeforeAndAfterPrint = new AutoPrintEventDispatcher(doc);
+    autoBeforeAndAfterPrint = MakeUnique<AutoPrintEventDispatcher>(doc);
   }
   NS_ENSURE_STATE(!GetIsPrinting());
   // beforeprint event may have caused ContentViewer to be shutdown.
@@ -3984,7 +3982,7 @@ nsDocumentViewer::PrintPreview(nsIPrintSettings* aPrintSettings,
       printJob->HasPrintCallbackCanvas()) {
     // Postpone the 'afterprint' event until after the mozPrintCallback
     // callbacks have been called:
-    mAutoBeforeAndAfterPrint = autoBeforeAndAfterPrint;
+    mAutoBeforeAndAfterPrint = std::move(autoBeforeAndAfterPrint);
   }
   dom::Element* root = doc->GetRootElement();
   if (root && root->HasAttr(kNameSpaceID_None, nsGkAtoms::mozdisallowselectionprint)) {

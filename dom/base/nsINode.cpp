@@ -173,7 +173,7 @@ nsINode::~nsINode()
 }
 
 void*
-nsINode::GetProperty(nsAtom* aPropertyName, nsresult* aStatus) const
+nsINode::GetProperty(const nsAtom* aPropertyName, nsresult* aStatus) const
 {
   if (!HasProperties()) { // a fast HasFlag() test
     if (aStatus) {
@@ -204,13 +204,13 @@ nsINode::SetProperty(nsAtom* aPropertyName,
 }
 
 void
-nsINode::DeleteProperty(nsAtom* aPropertyName)
+nsINode::DeleteProperty(const nsAtom* aPropertyName)
 {
   OwnerDoc()->PropertyTable().DeleteProperty(this, aPropertyName);
 }
 
 void*
-nsINode::UnsetProperty(nsAtom* aPropertyName, nsresult* aStatus)
+nsINode::UnsetProperty(const nsAtom* aPropertyName, nsresult* aStatus)
 {
   return OwnerDoc()->PropertyTable().UnsetProperty(this, aPropertyName, aStatus);
 }
@@ -2672,8 +2672,8 @@ nsINode::AddSizeOfExcludingThis(nsWindowSizes& aSizes, size_t* aNodeSize) const
   // - mSlots
   //
   // The following members are not measured:
-  // - mParent, mNextSibling, mPreviousOrLastSibling, mFirstChild: because they're
-  //   non-owning, from "exclusive ownership" point of view.
+  // - mParent, mNextSibling, mPreviousOrLastSibling, mFirstChild: because
+  //   they're non-owning, from "exclusive ownership" point of view.
 }
 
 void

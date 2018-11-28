@@ -11,6 +11,7 @@
 #include <stdint.h> // for UINT32_MAX, uintptr_t
 #include "IndexedDatabaseManager.h"
 #include "js/Date.h"
+#include "js/MemoryFunctions.h"
 #include "js/Value.h"
 #include "jsfriendapi.h"
 #include "mozilla/Casting.h"
@@ -53,7 +54,8 @@ namespace indexedDB {
  When encoding strings, we use variable-size encoding per the following table
 
  Chars 0         - 7E           are encoded as 0xxxxxxx with 1 added
- Chars 7F        - (3FFF+7F)    are encoded as 10xxxxxx xxxxxxxx with 7F subtracted
+ Chars 7F        - (3FFF+7F)    are encoded as 10xxxxxx xxxxxxxx with 7F
+                                subtracted
  Chars (3FFF+80) - FFFF         are encoded as 11xxxxxx xxxxxxxx xx000000
 
  This ensures that the first byte is never encoded as 0, which means that the

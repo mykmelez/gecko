@@ -80,7 +80,7 @@ enum class ColorDepth : uint8_t {
   Sentinel /* this must be last for serialization purposes. */
 };
 
-enum class ExtendMode : uint32_t {
+enum class ExtendMode : uint8_t {
   Clamp,
   Repeat,
 
@@ -135,6 +135,8 @@ enum class ImageFormat : uint32_t {
   RG8 = 5,
   // Four channels, signed integer storage.
   RGBAI32 = 6,
+  // Four channels, byte storage.
+  RGBA8 = 7,
 
   Sentinel /* this must be last for serialization purposes. */
 };

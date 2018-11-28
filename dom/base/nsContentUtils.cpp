@@ -2093,9 +2093,18 @@ nsContentUtils::CanCallerAccess(nsIPrincipal* aSubjectPrincipal,
 
 // static
 bool
-nsContentUtils::CanCallerAccess(nsINode* aNode)
+nsContentUtils::CanCallerAccess(const nsINode* aNode)
 {
-  return CanCallerAccess(SubjectPrincipal(), aNode->NodePrincipal());
+  nsIPrincipal* subject = SubjectPrincipal();
+  if (IsSystemPrincipal(subject)) {
+    return true;
+  }
+
+  if (aNode->ChromeOnlyAccess()) {
+    return false;
+  }
+
+  return CanCallerAccess(subject, aNode->NodePrincipal());
 }
 
 // static
@@ -3434,7 +3443,7 @@ nsContentUtils::CanLoadImage(nsIURI* aURI, nsINode* aNode,
 
   nsresult rv;
 
-  uint32_t appType = nsIDocShell::APP_TYPE_UNKNOWN;
+  auto appType = nsIDocShell::APP_TYPE_UNKNOWN;
 
   {
     nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem = aLoadingDocument->GetDocShell();
@@ -3444,8 +3453,8 @@ nsContentUtils::CanLoadImage(nsIURI* aURI, nsINode* aNode,
 
       nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(root));
 
-      if (!docShell || NS_FAILED(docShell->GetAppType(&appType))) {
-        appType = nsIDocShell::APP_TYPE_UNKNOWN;
+      if (docShell) {
+        appType = docShell->GetAppType();
       }
     }
   }
@@ -7660,9 +7669,8 @@ nsContentUtils::PrefetchPreloadEnabled(nsIDocShell* aDocShell)
   nsCOMPtr<nsIDocShellTreeItem> parentItem;
 
   do {
-    uint32_t appType = 0;
-    nsresult rv = docshell->GetAppType(&appType);
-    if (NS_FAILED(rv) || appType == nsIDocShell::APP_TYPE_MAIL) {
+    auto appType = docshell->GetAppType();
+    if (appType == nsIDocShell::APP_TYPE_MAIL) {
       return false; // do not prefetch, preload, preconnect from mailnews
     }
 
@@ -9038,6 +9046,26 @@ nsContentUtils::IsTrackingResourceWindow(nsPIDOMWindowInner* aWindow)
   return httpChannel->GetIsTrackingResource();
 }
 
+// static public
+bool
+nsContentUtils::IsThirdPartyTrackingResourceWindow(nsPIDOMWindowInner* aWindow)
+{
+  MOZ_ASSERT(aWindow);
+
+  nsIDocument* document = aWindow->GetExtantDoc();
+  if (!document) {
+    return false;
+  }
+
+  nsCOMPtr<nsIHttpChannel> httpChannel =
+    do_QueryInterface(document->GetChannel());
+  if (!httpChannel) {
+    return false;
+  }
+
+  return httpChannel->GetIsThirdPartyTrackingResource();
+}
+
 static bool
 StorageDisabledByAntiTrackingInternal(nsPIDOMWindowInner* aWindow,
                                       nsIChannel* aChannel,
@@ -9170,8 +9198,8 @@ nsContentUtils::InternalStorageAllowedForPrincipal(nsIPrincipal* aPrincipal,
   // AFTER:
   // localStorage, caches: allowed in 3rd-party iframes by default. Preference
   //   can be set to disable in 3rd-party, which will not disallow in about: URIs.
-  // IndexedDB: allowed in 3rd-party iframes by default. Preference can be set to
-  //   disable in 3rd-party, which will disallow in about: URIs, unless they are
+  // IndexedDB: allowed in 3rd-party iframes by default. Preference can be set
+  //   to disable in 3rd-party, which will disallow in about: URIs, unless they are
   //   within a specific whitelist.
   //
   // This means that behavior for storage with internal about: URIs should not be

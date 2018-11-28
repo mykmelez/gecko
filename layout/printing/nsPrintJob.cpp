@@ -137,7 +137,7 @@ using namespace mozilla::dom;
 #define DUMP_LAYOUT_LEVEL (static_cast<mozilla::LogLevel>(9))
 
 #ifndef PR_PL
-static mozilla::LazyLogModule gPrintingLog("printing")
+static mozilla::LazyLogModule gPrintingLog("printing");
 
 #define PR_PL(_p1)  MOZ_LOG(gPrintingLog, mozilla::LogLevel::Debug, _p1);
 #endif
@@ -1049,9 +1049,8 @@ nsPrintJob::PrintPreview(nsIPrintSettings* aPrintSettings,
   nsCOMPtr<nsIDocShell> docShell(do_QueryReferent(mContainer));
   NS_ENSURE_STATE(docShell);
 
-  uint32_t busyFlags = nsIDocShell::BUSY_FLAGS_NONE;
-  if (NS_FAILED(docShell->GetBusyFlags(&busyFlags)) ||
-      busyFlags != nsIDocShell::BUSY_FLAGS_NONE) {
+  auto busyFlags = docShell->GetBusyFlags();
+  if (busyFlags != nsIDocShell::BUSY_FLAGS_NONE) {
     CloseProgressDialog(aWebProgressListener);
     FirePrintingErrorEvent(NS_ERROR_GFX_PRINTER_DOC_IS_BUSY);
     return NS_ERROR_FAILURE;

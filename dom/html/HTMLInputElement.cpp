@@ -4694,6 +4694,19 @@ HTMLInputElement::UnbindFromTree(bool aDeep, bool aNullParent)
     WillRemoveFromRadioGroup();
   }
 
+  if (GetShadowRoot() && IsInComposedDoc()) {
+    nsContentUtils::AddScriptRunner(NS_NewRunnableFunction(
+      "HTMLInputElement::UnbindFromTree::UAWidgetUnbindFromTree",
+      [self = RefPtr<Element>(this)]() {
+        nsContentUtils::DispatchChromeEvent(
+          self->OwnerDoc(), self,
+          NS_LITERAL_STRING("UAWidgetUnbindFromTree"),
+          CanBubble::eYes, Cancelable::eNo);
+        self->UnattachShadow();
+      })
+    );
+  }
+
   nsImageLoadingContent::UnbindFromTree(aDeep, aNullParent);
   nsGenericHTMLFormElementWithState::UnbindFromTree(aDeep, aNullParent);
 
@@ -4705,20 +4718,6 @@ HTMLInputElement::UnbindFromTree(bool aDeep, bool aNullParent)
 
   // And now make sure our state is up to date
   UpdateState(false);
-
-  if (GetShadowRoot() && IsInComposedDoc()) {
-    RefPtr<Element> self = this;
-    nsContentUtils::AddScriptRunner(NS_NewRunnableFunction(
-      "HTMLInputElement::UnbindFromTree::UAWidgetUnbindFromTree",
-      [self]() {
-        nsContentUtils::DispatchChromeEvent(
-          self->OwnerDoc(), self,
-          NS_LITERAL_STRING("UAWidgetUnbindFromTree"),
-          CanBubble::eYes, Cancelable::eNo);
-        self->UnattachShadow();
-      })
-    );
-  }
 }
 
 void
@@ -5219,7 +5218,7 @@ HTMLInputElement::ParseDate(const nsAString& aValue, uint32_t* aYear,
                             uint32_t* aMonth, uint32_t* aDay) const
 {
 /*
- * Parse the year, month, day values out a date string formatted as 'yyyy-mm-dd'.
+ * Parse the year, month, day values out a date string formatted as yyyy-mm-dd.
  * -The year must be 4 or more digits long, and year > 0
  * -The month must be exactly 2 digits long, and 01 <= month <= 12
  * -The day must be exactly 2 digit long, and 01 <= day <= maxday

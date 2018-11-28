@@ -634,7 +634,7 @@ public:
                                   const nsINode* unTrustedNode);
 
   // Check if the (JS) caller can access aNode.
-  static bool CanCallerAccess(nsINode* aNode);
+  static bool CanCallerAccess(const nsINode* aNode);
 
   // Check if the (JS) caller can access aWindow.
   // aWindow can be either outer or inner window.
@@ -2729,11 +2729,13 @@ public:
    *
    * @param aRequestedIdleTimeInMS    The idle observer's requested idle time.
    * @param aUserIsIdle               boolean indicating if the user
-   *                                  is currently idle or not.   *
-   * @return NS_OK                    NS_OK returned if the requested idle service and
-   *                                  the current idle time were successfully obtained.
-   *                                  NS_ERROR_FAILURE returned if the the requested
-   *                                  idle service or the current idle were not obtained.
+   *                                  is currently idle or not.
+   * @return NS_OK                    NS_OK returned if the requested idle
+   *                                  service and the current idle time were
+   *                                  successfully obtained.
+   *                                  NS_ERROR_FAILURE returned if the the
+   *                                  requested idle service or the current
+   *                                  idle were not obtained.
    */
   static nsresult IsUserIdle(uint32_t aRequestedIdleTimeInMS, bool* aUserIsIdle);
 
@@ -3121,6 +3123,12 @@ public:
    * resource.
    */
   static bool IsTrackingResourceWindow(nsPIDOMWindowInner* aWindow);
+
+  /*
+   * Returns true if this window's channel has been marked as a third-party
+   * tracking resource.
+   */
+  static bool IsThirdPartyTrackingResourceWindow(nsPIDOMWindowInner* aWindow);
 
   /*
    * Serializes a HTML nsINode into its markup representation.

@@ -6,17 +6,16 @@
 
 #include "ChromeBrowsingContext.h"
 
-#include "mozilla/dom/ContentParent.h"
-
 namespace mozilla {
 namespace dom {
 
 ChromeBrowsingContext::ChromeBrowsingContext(BrowsingContext* aParent,
+                                             BrowsingContext* aOpener,
                                              const nsAString& aName,
                                              uint64_t aBrowsingContextId,
                                              uint64_t aProcessId,
                                              BrowsingContext::Type aType)
-  : BrowsingContext(aParent, aName, aBrowsingContextId, aType)
+  : BrowsingContext(aParent, aOpener, aName, aBrowsingContextId, aType)
   , mProcessId(aProcessId)
 {
   // You are only ever allowed to create ChromeBrowsingContexts in the

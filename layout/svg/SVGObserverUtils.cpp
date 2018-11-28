@@ -13,6 +13,7 @@
 #include "nsCSSFrameConstructor.h"
 #include "nsISupportsImpl.h"
 #include "nsSVGClipPathFrame.h"
+#include "nsSVGMarkerFrame.h"
 #include "nsSVGPaintServerFrame.h"
 #include "nsSVGFilterFrame.h"
 #include "nsSVGMaskFrame.h"
@@ -24,6 +25,7 @@
 #include "ImageLoader.h"
 #include "mozilla/net/ReferrerPolicy.h"
 
+using namespace mozilla;
 using namespace mozilla::dom;
 
 static already_AddRefed<URLAndReferrerInfo>
@@ -370,10 +372,6 @@ public:
     , mValid(true)
   {}
 
-  bool ObservesReflow() override {
-    return false;
-  }
-
 protected:
   void OnRenderingChange() override;
 
@@ -464,7 +462,7 @@ SVGMarkerObserver::OnRenderingChange()
 }
 
 
-class nsSVGPaintingProperty final : public nsSVGRenderingObserverProperty
+class nsSVGPaintingProperty : public nsSVGRenderingObserverProperty
 {
 public:
   nsSVGPaintingProperty(URLAndReferrerInfo* aURI, nsIFrame* aFrame, bool aReferenceImage)
@@ -494,6 +492,24 @@ nsSVGPaintingProperty::OnRenderingChange()
     }
   }
 }
+
+
+class SVGMozElementObserver final : public nsSVGPaintingProperty
+{
+public:
+  SVGMozElementObserver(URLAndReferrerInfo* aURI, nsIFrame* aFrame,
+                        bool aReferenceImage)
+    : nsSVGPaintingProperty(aURI, aFrame, aReferenceImage)
+  {}
+
+  // We only return true here because GetAndObserveBackgroundImage uses us
+  // to implement observing of arbitrary elements (including HTML elements)
+  // that may require us to repaint if the referenced element is reflowed.
+  // Bug 1496065 has been filed to remove that support though.
+  bool ObservesReflow() override {
+    return true;
+  }
+};
 
 
 /**
@@ -1468,10 +1484,10 @@ SVGObserverUtils::GetAndObserveBackgroundImage(nsIFrame* aFrame,
 
   // XXXjwatt: this is broken - we're using the address of a new
   // URLAndReferrerInfo as the hash key every time!
-  nsSVGPaintingProperty* observer =
-    static_cast<nsSVGPaintingProperty*>(hashtable->GetWeak(url));
+  SVGMozElementObserver* observer =
+    static_cast<SVGMozElementObserver*>(hashtable->GetWeak(url));
   if (!observer) {
-    observer = new nsSVGPaintingProperty(url, aFrame, /* aWatchImage */ true);
+    observer = new SVGMozElementObserver(url, aFrame, /* aWatchImage */ true);
     hashtable->Put(url, observer);
   }
   return observer->GetAndObserveReferencedElement();

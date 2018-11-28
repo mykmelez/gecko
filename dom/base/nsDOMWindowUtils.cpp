@@ -287,6 +287,19 @@ nsDOMWindowUtils::GetWebRenderBridge()
 }
 
 NS_IMETHODIMP
+nsDOMWindowUtils::SyncFlushCompositor()
+{
+  if (nsIWidget* widget = GetWidget()) {
+    if (LayerManager* lm = widget->GetLayerManager()) {
+      if (KnowsCompositor* kc = lm->AsKnowsCompositor()) {
+        kc->SyncWithCompositor();
+      }
+    }
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDOMWindowUtils::GetImageAnimationMode(uint16_t *aMode)
 {
   NS_ENSURE_ARG_POINTER(aMode);
@@ -3719,6 +3732,14 @@ nsDOMWindowUtils::GetOMTAStyle(Element* aElement,
                                      GetWebRenderBridge());
       if (value.type() == OMTAValue::TMatrix4x4) {
         cssValue = nsComputedDOMStyle::MatrixToCSSValue(value.get_Matrix4x4());
+      }
+    } else if (aProperty.EqualsLiteral("background-color")) {
+      OMTAValue value = GetOMTAValue(frame,
+                                     DisplayItemType::TYPE_BACKGROUND_COLOR,
+                                     GetWebRenderBridge());
+      if (value.type() == OMTAValue::Tnscolor) {
+        cssValue = new nsROCSSPrimitiveValue;
+        nsComputedDOMStyle::SetToRGBAColor(cssValue, value.get_nscolor());
       }
     }
   }

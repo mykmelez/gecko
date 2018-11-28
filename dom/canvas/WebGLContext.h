@@ -48,15 +48,15 @@
 
 class nsIDocShell;
 
-/*
- * WebGL-only GLenums
- */
-#define LOCAL_GL_BROWSER_DEFAULT_WEBGL                       0x9244
-#define LOCAL_GL_CONTEXT_LOST_WEBGL                          0x9242
-#define LOCAL_GL_MAX_CLIENT_WAIT_TIMEOUT_WEBGL               0x9247
-#define LOCAL_GL_UNPACK_COLORSPACE_CONVERSION_WEBGL          0x9243
-#define LOCAL_GL_UNPACK_FLIP_Y_WEBGL                         0x9240
-#define LOCAL_GL_UNPACK_PREMULTIPLY_ALPHA_WEBGL              0x9241
+// WebGL-only GLenums
+// clang-format off
+#define LOCAL_GL_BROWSER_DEFAULT_WEBGL              0x9244
+#define LOCAL_GL_CONTEXT_LOST_WEBGL                 0x9242
+#define LOCAL_GL_MAX_CLIENT_WAIT_TIMEOUT_WEBGL      0x9247
+#define LOCAL_GL_UNPACK_COLORSPACE_CONVERSION_WEBGL 0x9243
+#define LOCAL_GL_UNPACK_FLIP_Y_WEBGL                0x9240
+#define LOCAL_GL_UNPACK_PREMULTIPLY_ALPHA_WEBGL     0x9241
+// clang-format on
 
 namespace mozilla {
 class ScopedCopyTexImageSource;
@@ -364,7 +364,6 @@ public:
 
     virtual JSObject* WrapObject(JSContext* cx, JS::Handle<JSObject*> givenProto) override = 0;
 
-    virtual void OnVisibilityChange() override;
     virtual void OnMemoryPressure() override;
 
     // nsICanvasRenderingContextInternal
@@ -1493,7 +1492,6 @@ protected:
     bool mIsMesa;
     bool mLoseContextOnMemoryPressure;
     bool mCanLoseContextInForeground;
-    bool mRestoreWhenVisible;
     bool mShouldPresent;
     bool mDisableFragHighP;
     bool mVRReady;
@@ -1505,11 +1503,7 @@ protected:
     GLenum mDefaultFB_DrawBuffer0 = 0;
     GLenum mDefaultFB_ReadBuffer = 0;
 
-    // glGetError sources:
-    bool mEmitContextLostErrorOnce;
     mutable GLenum mWebGLError;
-    mutable GLenum mUnderlyingGLError;
-    GLenum GetAndFlushUnderlyingGLErrors() const;
 
     bool mBypassShaderValidation;
 
@@ -1935,7 +1929,6 @@ protected:
     bool mAllowContextRestore;
     bool mLastLossWasSimulated;
     ContextStatus mContextStatus = ContextStatus::NotLost;
-    bool mContextLostErrorSet;
 
     // Used for some hardware (particularly Tegra 2 and 4) that likes to
     // be Flushed while doing hundreds of draw calls.

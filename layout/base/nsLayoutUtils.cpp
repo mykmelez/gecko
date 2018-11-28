@@ -20,7 +20,6 @@
 #include "mozilla/Likely.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/dom/ContentChild.h"
 #include "mozilla/ServoStyleSetInlines.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/Unused.h"
@@ -10348,10 +10347,10 @@ nsLayoutUtils::ComputeSystemFont(nsFont* aSystemFont, LookAndFeel::FontID aFontI
 /* static */ bool
 nsLayoutUtils::ShouldHandleMetaViewport(nsIDocument* aDocument)
 {
-  uint32_t metaViewportOverride = nsIDocShell::META_VIEWPORT_OVERRIDE_NONE;
+  auto metaViewportOverride = nsIDocShell::META_VIEWPORT_OVERRIDE_NONE;
   if (aDocument) {
     if (nsIDocShell* docShell = aDocument->GetDocShell()) {
-      docShell->GetMetaViewportOverride(&metaViewportOverride);
+      metaViewportOverride = docShell->GetMetaViewportOverride();
     }
   }
   switch (metaViewportOverride) {
