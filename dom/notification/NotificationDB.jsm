@@ -10,17 +10,13 @@ const DEBUG = false;
 function debug(s) { dump("-*- NotificationDB component: " + s + "\n"); }
 
 ChromeUtils.import("resource://gre/modules/kvstore.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
 ChromeUtils.defineModuleGetter(this, "Services",
                                "resource://gre/modules/Services.jsm");
 
-XPCOMUtils.defineLazyServiceGetter(this, "notificationStorage",
-                                   "@mozilla.org/notificationStorage;1",
-                                   "nsINotificationStorage");
-
-const NOTIFICATION_STORE_DIR = OS.Path.join(OS.Constants.Path.profileDir, "notificationstore");
+const NOTIFICATION_STORE_PATH =
+  OS.Path.join(OS.Constants.Path.profileDir, "notificationstore");
 
 const kMessages = [
   "Notification:Save",
@@ -118,10 +114,10 @@ var NotificationDB = {
 
   // Creates the notification directory and gets a handle to the datastore.
   getStore: async function() {
-    await OS.File.makeDir(NOTIFICATION_STORE_DIR, {
+    await OS.File.makeDir(NOTIFICATION_STORE_PATH, {
       ignoreExisting: true
     });
-    this._store = await KeyValueService.getOrCreate(NOTIFICATION_STORE_DIR);
+    this._store = await KeyValueService.getOrCreate(NOTIFICATION_STORE_PATH);
   },
 
   // Helper function: promise will be resolved once file exists and/or is loaded.
