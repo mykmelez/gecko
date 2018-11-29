@@ -299,6 +299,7 @@ var NotificationDB = {
       var oldNotification = this.byTag[origin][notification.tag];
       if (oldNotification) {
         delete this.notifications[origin][oldNotification.id];
+        await this._store.delete(this.getKey(origin, oldNotification.id));
       }
       this.byTag[origin][notification.tag] = notification;
     }
