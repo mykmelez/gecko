@@ -29,6 +29,9 @@ var NotificationDB = {
   // Ensure we won't call init() while xpcom-shutdown is performed
   _shutdownInProgress: false,
 
+  // A handle to the datastore, retrieved lazily when we load the data.
+  _store: null,
+
   init: function() {
     if (this._shutdownInProgress) {
       return;
@@ -85,9 +88,59 @@ var NotificationDB = {
     return notifications;
   },
 
+  async maybeMigrateData() {
+    const OLD_NOTIFICATION_STORE_PATH =
+      OS.Path.join(OS.Constants.Path.profileDir, "notificationstore.json");
+
+    if (! await OS.File.exists(OLD_NOTIFICATION_STORE_PATH)) {
+      if (DEBUG) { debug("Old store doesn't exist; not migrating data."); }
+      return;
+    }
+
+    let data;
+    try {
+      data = await OS.File.read(OLD_NOTIFICATION_STORE_PATH, { encoding: "utf-8"});
+    } catch(ex) {
+      // If read failed, we assume we have no notifications to migrate.
+      if (DEBUG) { debug("Failed to read old store; not migrating data."); }
+      return;
+    } finally {
+      // TODO: consider deleting the file so we don't try (and fail)
+      // to migrate it repeatedly.
+    }
+
+    if (data.length > 0) {
+      // Preprocessing phase intends to cleanly separate any migration-related
+      // tasks from some previous implementation  of the store that contained
+      // "non-app notifications."  This code existed before we migrated data
+      // to kvstore and was run every time we loaded the data from the store.
+      // We moved it into the JSON -> kvstore migration code so that we do it
+      // only once: when we perform that migration.
+      const notifications = this.filterNonAppNotifications(JSON.parse(data));
+      for (const origin in notifications) {
+        for (const id in notifications[origin]) {
+          await this._store.put(this.getKey(origin, id), JSON.stringify(notifications[origin][id]));
+        }
+      }
+    }
+
+    // Finally, remove the old file so we don't try to migrate it again.
+    await OS.File.remove(NOTIFICATION_STORE_PATH);
+  },
+
+  // Get and cache a handle to the datastore.
+  getStore: async function() {
+    await OS.File.makeDir(NOTIFICATION_STORE_PATH, {
+      ignoreExisting: true
+    });
+    this._store = await KeyValueService.getOrCreate(NOTIFICATION_STORE_PATH);
+  },
+
   // Attempt to read notification file, if it's not there we will create it.
   load: async function() {
     await this.getStore();
+
+    await this.maybeMigrateData();
 
     const notifications = {};
     for await (const { key, value } of await this._store.enumerate()) {
@@ -110,14 +163,6 @@ var NotificationDB = {
     }
 
     this.loaded = true;
-  },
-
-  // Creates the notification directory and gets a handle to the datastore.
-  getStore: async function() {
-    await OS.File.makeDir(NOTIFICATION_STORE_PATH, {
-      ignoreExisting: true
-    });
-    this._store = await KeyValueService.getOrCreate(NOTIFICATION_STORE_PATH);
   },
 
   // Helper function: promise will be resolved once file exists and/or is loaded.
