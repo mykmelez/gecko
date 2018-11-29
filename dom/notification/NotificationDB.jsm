@@ -124,12 +124,6 @@ var NotificationDB = {
     this._store = await KeyValueService.getOrCreate(NOTIFICATION_STORE_DIR);
   },
 
-  // Save current notifications to the file.
-  save: function() {
-    var data = JSON.stringify(this.notifications);
-    return OS.File.writeAtomic(NOTIFICATION_STORE_PATH, data, { encoding: "utf-8"});
-  },
-
   // Helper function: promise will be resolved once file exists and/or is loaded.
   ensureLoaded: function() {
     if (!this.loaded) {
