@@ -13,7 +13,6 @@
 #include "nsServiceManagerUtils.h"
 
 #include "mozilla/Preferences.h"
-#include "mozilla/Services.h"
 #include "mozilla/BinarySearch.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/Unused.h"
@@ -270,7 +269,8 @@ gfxFontUtils::ReadCMAPTableFormat4(const uint8_t *aBuf, uint32_t aLength,
                                        endCount);
             }
         } else {
-            // const uint16_t idDelta = ReadShortAt16(idDeltas, i); // Unused: self-documenting.
+            // Unused: self-documenting.
+            // const uint16_t idDelta = ReadShortAt16(idDeltas, i);
             for (uint32_t c = startCount; c <= endCount; ++c) {
                 if (c == 0xFFFF)
                     break;

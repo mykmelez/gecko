@@ -15,7 +15,7 @@ use border::{BorderSegmentCacheKey, NormalBorderAu};
 use clip::{ClipStore};
 use clip_scroll_tree::{ClipScrollTree, SpatialNodeIndex};
 use clip::{ClipDataStore, ClipNodeFlags, ClipChainId, ClipChainInstance, ClipItem, ClipNodeCollector};
-use euclid::{SideOffsets2D, TypedTransform3D, TypedRect, TypedScale};
+use euclid::{SideOffsets2D, TypedTransform3D, TypedRect, TypedScale, TypedSize2D};
 use frame_builder::{FrameBuildingContext, FrameBuildingState, PictureContext, PictureState};
 use frame_builder::PrimitiveContext;
 use glyph_rasterizer::{FontInstance, FontTransform, GlyphKey, FONT_SIZE_LIMIT};
@@ -23,8 +23,9 @@ use gpu_cache::{GpuCache, GpuCacheAddress, GpuCacheHandle, GpuDataRequest, ToGpu
 use gpu_types::BrushFlags;
 use image::{self, Repetition};
 use intern;
+use internal_types::FastHashMap;
 use picture::{PictureCompositeMode, PicturePrimitive, PictureUpdateState};
-use picture::{ClusterRange, PrimitiveList, SurfaceIndex};
+use picture::{ClusterRange, PrimitiveList, SurfaceIndex, TileDescriptor};
 #[cfg(debug_assertions)]
 use render_backend::{FrameId};
 use render_backend::FrameResources;
@@ -38,6 +39,7 @@ use std::{cmp, fmt, hash, mem, ops, u32, usize};
 #[cfg(debug_assertions)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use storage;
+use texture_cache::TextureCacheHandle;
 use tiling::SpecialRenderPasses;
 use util::{ScaleOffset, MatrixHelpers, MaxRect, recycle_vec};
 use util::{pack_as_float, project_rect, raster_rect_to_device_pixels};
@@ -550,11 +552,20 @@ impl From<SizeKey> for LayoutSize {
     }
 }
 
-impl From<LayoutSize> for SizeKey {
-    fn from(size: LayoutSize) -> SizeKey {
+impl<U> From<TypedSize2D<f32, U>> for SizeKey {
+    fn from(size: TypedSize2D<f32, U>) -> SizeKey {
         SizeKey {
             w: size.width,
             h: size.height,
+        }
+    }
+}
+
+impl SizeKey {
+    pub fn zero() -> SizeKey {
+        SizeKey {
+            w: 0.0,
+            h: 0.0,
         }
     }
 }
@@ -2576,10 +2587,6 @@ pub struct PrimitiveStore {
 
     /// List of animated opacity bindings for a primitive.
     pub opacity_bindings: OpacityBindingStorage,
-
-    /// Total count of primitive instances contained in pictures.
-    /// This is used for profile counters only.
-    pub prim_count: usize,
 }
 
 impl PrimitiveStore {
@@ -2589,7 +2596,6 @@ impl PrimitiveStore {
             text_runs: TextRunStorage::new(stats.text_run_count),
             images: ImageInstanceStorage::new(stats.image_count),
             opacity_bindings: OpacityBindingStorage::new(stats.opacity_binding_count),
-            prim_count: 0,
         }
     }
 
@@ -2602,14 +2608,25 @@ impl PrimitiveStore {
         }
     }
 
-    pub fn create_picture(
-        &mut self,
-        prim: PicturePrimitive,
-    ) -> PictureIndex {
-        let index = PictureIndex(self.pictures.len());
-        self.prim_count += prim.prim_list.prim_instances.len();
-        self.pictures.push(prim);
-        index
+    /// Destroy an existing primitive store. This is called just before
+    /// a primitive store is replaced with a newly built scene.
+    pub fn destroy(
+        self,
+        retained_tiles: &mut FastHashMap<TileDescriptor, TextureCacheHandle>,
+    ) {
+        for pic in self.pictures {
+            pic.destroy(
+                retained_tiles,
+            );
+        }
+    }
+
+    /// Returns the total count of primitive instances contained in pictures.
+    pub fn prim_count(&self) -> usize {
+        self.pictures
+            .iter()
+            .map(|p| p.prim_list.prim_instances.len())
+            .sum()
     }
 
     /// Update a picture, determining surface configuration,
@@ -2621,8 +2638,10 @@ impl PrimitiveStore {
         state: &mut PictureUpdateState,
         frame_context: &FrameBuildingContext,
         resource_cache: &mut ResourceCache,
+        gpu_cache: &mut GpuCache,
         prim_data_store: &PrimitiveDataStore,
         clip_store: &ClipStore,
+        retained_tiles: &mut FastHashMap<TileDescriptor, TextureCacheHandle>,
     ) {
         if let Some(children) = self.pictures[pic_index.0].pre_update(
             state,
@@ -2634,8 +2653,10 @@ impl PrimitiveStore {
                     state,
                     frame_context,
                     resource_cache,
+                    gpu_cache,
                     prim_data_store,
                     clip_store,
+                    retained_tiles,
                 );
             }
 
@@ -2655,6 +2676,8 @@ impl PrimitiveStore {
                 state,
                 frame_context,
                 resource_cache,
+                gpu_cache,
+                retained_tiles,
             );
         }
     }

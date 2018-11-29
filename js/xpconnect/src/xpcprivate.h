@@ -308,12 +308,14 @@ private:
 
 class WatchdogManager;
 
+// clang-format off
 MOZ_DEFINE_ENUM(WatchdogTimestampCategory, (
     TimestampWatchdogWakeup,
     TimestampWatchdogHibernateStart,
     TimestampWatchdogHibernateStop,
     TimestampContextStateChange
 ));
+// clang-format on
 
 class AsyncFreeSnowWhite;
 
@@ -1851,6 +1853,10 @@ public:
      * being rooted (or otherwise signaling the stored value to the CC).
      */
     JSObject* GetJSObjectPreserveColor() const { return mJSObj.unbarrieredGet(); }
+
+    JSObject* GetJSObjectGlobalPreserveColor() const {
+        return mJSObjGlobal.unbarrieredGet();
+    }
 
     // Returns true if the wrapper chain contains references to multiple
     // compartments. If the wrapper chain contains references to multiple

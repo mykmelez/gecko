@@ -137,9 +137,8 @@ pref("app.update.elevation.promptMaxAttempts", 2);
 // user can apply updates. This pref is no longer used on Windows, except as the
 // default value to migrate to the new location that this data is now stored
 // (which is in a file in the update directory). Because of this, this pref
-// should no longer be used directly. Instead,
-// nsIUpdateService::getAutoUpdateIsEnabled and
-// nsIUpdateService::setAutoUpdateIsEnabled should be used.
+// should no longer be used directly. Instead, getAppUpdateAutoEnabled and
+// getAppUpdateAutoEnabled from UpdateUtils.jsm should be used.
 #ifndef XP_WIN
 pref("app.update.auto", true);
 #endif
@@ -1298,11 +1297,6 @@ pref("toolkit.startup.max_resumed_crashes", 3);
 pref("toolkit.winRegisterApplicationRestart", true);
 #endif
 
-// Whether we use pdfium to view content with the pdf mime type.
-// Note: if the pref is set to false while Firefox is open, it won't
-// take effect until there are no open pdfium tabs.
-pref("pdfium.enabled", false);
-
 // Completely disable pdf.js as an option to preview pdfs within firefox.
 // Note: if this is not disabled it does not necessarily mean pdf.js is the pdf
 // handler just that it is an option.
@@ -1537,6 +1531,9 @@ pref("browser.contentblocking.allowlist.storage.enabled", true);
 // Enable the Storage Access API in Nightly
 pref("dom.storage_access.enabled", true);
 #endif
+
+pref("dom.storage_access.auto_grants", true);
+pref("dom.storage_access.max_concurrent_auto_grants", 5);
 
 // Define a set of default features for the Content Blocking UI.
 pref("browser.contentblocking.trackingprotection.control-center.ui.enabled", true);
@@ -1801,3 +1798,5 @@ pref("prio.enabled", true);
 pref("browser.discovery.enabled", false);
 pref("browser.discovery.containers.enabled", true);
 pref("browser.discovery.sites", "addons.mozilla.org");
+
+pref("browser.engagement.recent_visited_origins.expiry", 86400); // 24 * 60 * 60 (24 hours in seconds)

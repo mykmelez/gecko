@@ -7632,10 +7632,6 @@ nsGlobalWindowInner::GetSidebar(OwningExternalOrWindowProxy& aResult,
 void
 nsGlobalWindowInner::ClearDocumentDependentSlots(JSContext* aCx)
 {
-  if (js::GetContextCompartment(aCx) != js::GetObjectCompartment(GetWrapperPreserveColor())) {
-    MOZ_CRASH("Looks like bug 1488480/1405521, with ClearDocumentDependentSlots in a bogus compartment");
-  }
-
   // If JSAPI OOMs here, there is basically nothing we can do to recover safely.
   if (!Window_Binding::ClearCachedDocumentValue(aCx, this) ||
       !Window_Binding::ClearCachedPerformanceValue(aCx, this)) {
@@ -7816,8 +7812,9 @@ nsGlobalWindowInner::FireOnNewGlobalObject()
   JS_FireOnNewGlobalObject(aes.cx(), global);
 }
 
-#ifdef _WINDOWS_
-#error "Never include windows.h in this file!"
+#if defined(_WINDOWS_) && !defined(MOZ_WRAPPED_WINDOWS_H)
+#pragma message("wrapper failure reason: " MOZ_WINDOWS_WRAPPER_DISABLED_REASON)
+#error "Never include unwrapped windows.h in this file!"
 #endif
 
 already_AddRefed<Promise>

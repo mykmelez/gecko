@@ -68,7 +68,7 @@
 #include "builtin/RegExp.h"
 #include "builtin/TestingFunctions.h"
 #if defined(JS_BUILD_BINAST)
-# include "frontend/BinSource.h"
+# include "frontend/BinASTParser.h"
 #endif // defined(JS_BUILD_BINAST)
 #include "frontend/ModuleSharedContext.h"
 #include "frontend/Parser.h"
@@ -1244,10 +1244,6 @@ AddIntlExtras(JSContext* cx, unsigned argc, Value* vp)
     }
 
     if (!js::AddMozDateTimeFormatConstructor(cx, intl)) {
-        return false;
-    }
-
-    if (!js::AddRelativeTimeFormatConstructor(cx, intl)) {
         return false;
     }
 
