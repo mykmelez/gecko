@@ -27,7 +27,7 @@ const kMessages = [
   "Notification:GetAll"
 ];
 
-// Given an origin and ID, produce the key that uniquely identifies
+// Given its origin and ID, produce the key that uniquely identifies
 // a notification.
 function key(origin, id) {
   return origin.concat("\t", id);
