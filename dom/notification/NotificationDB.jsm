@@ -15,8 +15,11 @@ ChromeUtils.import("resource://gre/modules/osfile.jsm");
 ChromeUtils.defineModuleGetter(this, "Services",
                                "resource://gre/modules/Services.jsm");
 
+const NOTIFICATION_STORE_DIR = OS.Constants.Path.profileDir;
+const OLD_NOTIFICATION_STORE_PATH =
+        OS.Path.join(NOTIFICATION_STORE_DIR, "notificationstore.json");
 const NOTIFICATION_STORE_PATH =
-  OS.Path.join(OS.Constants.Path.profileDir, "notificationstore");
+        OS.Path.join(NOTIFICATION_STORE_DIR, "notificationstore");
 
 const kMessages = [
   "Notification:Save",
@@ -24,12 +27,18 @@ const kMessages = [
   "Notification:GetAll"
 ];
 
+// Given an origin and ID, produce the key that uniquely identifies
+// a notification.
+function key(origin, id) {
+  return origin.concat("\t", id);
+}
+
 var NotificationDB = {
 
   // Ensure we won't call init() while xpcom-shutdown is performed
   _shutdownInProgress: false,
 
-  // A handle to the datastore, retrieved lazily when we load the data.
+  // A handle to the kvstore, retrieved lazily when we load the data.
   _store: null,
 
   init: function() {
@@ -89,9 +98,6 @@ var NotificationDB = {
   },
 
   async maybeMigrateData() {
-    const OLD_NOTIFICATION_STORE_PATH =
-      OS.Path.join(OS.Constants.Path.profileDir, "notificationstore.json");
-
     if (! await OS.File.exists(OLD_NOTIFICATION_STORE_PATH)) {
       if (DEBUG) { debug("Old store doesn't exist; not migrating data."); }
       return;
@@ -111,47 +117,49 @@ var NotificationDB = {
 
     if (data.length > 0) {
       // Preprocessing phase intends to cleanly separate any migration-related
-      // tasks from some previous implementation  of the store that contained
-      // "non-app notifications."  This code existed before we migrated data
-      // to kvstore and was run every time we loaded the data from the store.
-      // We moved it into the JSON -> kvstore migration code so that we do it
-      // only once: when we perform that migration.
+      // tasks.
+      //
+      // NB: This code existed before we migrated the data to a kvstore,
+      // and the "migration-related tasks" it references are from an earlier
+      // migration.  We used to do it every time we read the JSON file;
+      // now we do it once, when migrating the JSON file to the kvstore.
       const notifications = this.filterNonAppNotifications(JSON.parse(data));
+
+      // Copy the data from the JSON file to the kvstore.
+      // TODO: use a transaction to improve the performance of these operations
+      // once the kvstore API supports it.
       for (const origin in notifications) {
         for (const id in notifications[origin]) {
-          await this._store.put(this.getKey(origin, id), JSON.stringify(notifications[origin][id]));
+          await this._store.put(key(origin, id),
+            JSON.stringify(notifications[origin][id]));
         }
       }
     }
 
     // Finally, remove the old file so we don't try to migrate it again.
-    await OS.File.remove(NOTIFICATION_STORE_PATH);
-  },
-
-  // Get and cache a handle to the datastore.
-  getStore: async function() {
-    await OS.File.makeDir(NOTIFICATION_STORE_PATH, {
-      ignoreExisting: true
-    });
-    this._store = await KeyValueService.getOrCreate(NOTIFICATION_STORE_PATH);
+    await OS.File.remove(OLD_NOTIFICATION_STORE_PATH);
   },
 
   // Attempt to read notification file, if it's not there we will create it.
   load: async function() {
-    await this.getStore();
+    // Get and cache a handle to the kvstore.
+    await OS.File.makeDir(NOTIFICATION_STORE_PATH);
+    this._store = await KeyValueService.getOrCreate(NOTIFICATION_STORE_PATH);
 
+    // Migrate data from the old JSON file to the new kvstore if the old file
+    // is present in the user's profile directory.
     await this.maybeMigrateData();
 
-    const notifications = {};
+    // Read and cache all notification records in the kvstore.
     for await (const { key, value } of await this._store.enumerate()) {
       let [origin, id] = key.split("\t");
-      if (!(origin in notifications)) {
-        notifications[origin] = {};
+      if (!(origin in this.notifications)) {
+        this.notifications[origin] = {};
       }
-      notifications[origin][id] = JSON.parse(value);
+      this.notifications[origin][id] = JSON.parse(value);
     }
-    this.notifications = this.filterNonAppNotifications(notifications);
 
+    // Build an index of notifications by tag origin and name.
     for (var origin in this.notifications) {
       this.byTag[origin] = {};
       for (var id in this.notifications[origin]) {
@@ -320,15 +328,10 @@ var NotificationDB = {
     return Promise.resolve(notifications);
   },
 
-  getKey: function(origin, id) {
-    return origin.concat("\t", id);
-  },
-
   taskSave: async function(data) {
     if (DEBUG) { debug("Task, saving"); }
     var origin = data.origin;
     var notification = data.notification;
-    var id = notification.id;
     if (!this.notifications[origin]) {
       this.notifications[origin] = {};
       this.byTag[origin] = {};
@@ -340,14 +343,15 @@ var NotificationDB = {
       var oldNotification = this.byTag[origin][notification.tag];
       if (oldNotification) {
         delete this.notifications[origin][oldNotification.id];
-        await this._store.delete(this.getKey(origin, oldNotification.id));
+        await this._store.delete(key(origin, oldNotification.id));
       }
       this.byTag[origin][notification.tag] = notification;
     }
 
-    this.notifications[origin][id] = notification;
+    this.notifications[origin][notification.id] = notification;
 
-    await this._store.put(this.getKey(origin, id), JSON.stringify(notification));
+    await this._store.put(key(origin, notification.id),
+      JSON.stringify(notification));
   },
 
   taskDelete: async function(data) {
@@ -371,7 +375,7 @@ var NotificationDB = {
     }
 
     delete this.notifications[origin][id];
-    await this._store.delete(this.getKey(origin, id))
+    await this._store.delete(key(origin, id))
   }
 };
 

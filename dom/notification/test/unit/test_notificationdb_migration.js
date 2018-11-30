@@ -4,6 +4,8 @@ const fooNotification =
   getNotificationObject("foo", "a4f1d54a-98b7-4231-9120-5afc26545bad");
 const barNotification =
   getNotificationObject("bar", "a4f1d54a-98b7-4231-9120-5afc26545bad", "baz");
+const msg = "Notification:GetAll";
+const msgReply = "Notification:GetAll:Return:OK";
 
 let nextRequestID = 0;
 
@@ -21,33 +23,34 @@ async function createOldDatastore() {
     },
   };
 
-  await OS.File.writeAtomic(OLD_NOTIFICATION_STORE_PATH, JSON.stringify(notifications));
+  await OS.File.writeAtomic(OLD_NOTIFICATION_STORE_PATH,
+    JSON.stringify(notifications));
 }
 
 function run_test() {
   do_get_profile();
-  // Create the old datastore before we start the notification database
-  // so it has data to migrate.
+  // Create the old datastore and populate it with data before we initialize
+  // the notification database so it has data to migrate.
   createOldDatastore().then(() => {
     startNotificationDB();
     run_next_test();
   });
 }
 
-add_test(function test_get_system_notifications() {
+add_test(function test_get_system_notification() {
   const requestID = nextRequestID++;
   const msgHandler = function(message) {
     Assert.equal(requestID, message.data.requestID);
     Assert.equal(0, message.data.notifications.length);
   };
 
-  addAndSend("Notification:GetAll", "Notification:GetAll:Return:OK", msgHandler, {
+  addAndSend(msg, msgReply, msgHandler, {
     origin: systemNotification.origin,
     requestID,
   });
 });
 
-add_test(function test_get_foo_notifications() {
+add_test(function test_get_foo_notification() {
   const requestID = nextRequestID++;
   const msgHandler = function(message) {
     Assert.equal(requestID, message.data.requestID);
@@ -56,13 +59,13 @@ add_test(function test_get_foo_notifications() {
       "Notification data migrated");
   };
 
-  addAndSend("Notification:GetAll", "Notification:GetAll:Return:OK", msgHandler, {
+  addAndSend(msg, msgReply, msgHandler, {
     origin: fooNotification.origin,
     requestID,
   });
 });
 
-add_test(function test_get_bar_notifications() {
+add_test(function test_get_bar_notification() {
   const requestID = nextRequestID++;
   const msgHandler = function(message) {
     Assert.equal(requestID, message.data.requestID);
@@ -71,7 +74,7 @@ add_test(function test_get_bar_notifications() {
       "Notification data migrated");
   };
 
-  addAndSend("Notification:GetAll", "Notification:GetAll:Return:OK", msgHandler, {
+  addAndSend(msg, msgReply, msgHandler, {
     origin: barNotification.origin,
     requestID,
   });

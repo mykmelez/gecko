@@ -6,18 +6,23 @@ function run_test() {
 }
 
 // For bug 1024090: test edge case of notificationstore.json
-add_task(async function test_bug1024090_purge() {
+add_test(function test_bug1024090_purge() {
   ChromeUtils.import("resource://gre/modules/osfile.jsm");
   const NOTIFICATION_STORE_PATH =
     OS.Path.join(OS.Constants.Path.profileDir, "notificationstore");
-    try {
-      await OS.File.removeDir(NOTIFICATION_STORE_PATH);
+  let cleanup = OS.File.removeDir(NOTIFICATION_STORE_PATH);
+  cleanup.then(
+    function onSuccess() {
       ok(true, "Notification database cleaned.");
-    } catch (reason) {
+    },
+    function onError(reason) {
       ok(false, "Notification database error when cleaning: " + reason);
     }
+  ).then(function next() {
     info("Cleanup steps completed: " + NOTIFICATION_STORE_PATH);
     startNotificationDB();
+    run_next_test();
+  });
 });
 
 // Store one notification
