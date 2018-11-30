@@ -152,7 +152,7 @@ var NotificationDB = {
 
     // Read and cache all notification records in the kvstore.
     for await (const { key, value } of await this._store.enumerate()) {
-      let [origin, id] = key.split("\t");
+      const [origin, id] = key.split("\t");
       if (!(origin in this.notifications)) {
         this.notifications[origin] = {};
       }
