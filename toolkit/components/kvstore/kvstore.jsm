@@ -21,7 +21,7 @@ function promisify(fn, ...args) {
  * This module wraps the nsIKeyValue* interfaces in a Promise-based API.
  * To use it, import it, then call the KeyValueService.getOrCreate() method
  * with a database's path and (optionally) its name:
- * 
+ *
  * ```
  *     ChromeUtils.import("resource://gre/modules/kvstore.jsm");
  *     let database = await KeyValueService.getOrCreate(path, name);
