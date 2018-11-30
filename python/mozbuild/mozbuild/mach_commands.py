@@ -1313,8 +1313,6 @@ class PackageFrontend(MachCommandBase):
         import requests
         import shutil
 
-        from taskgraph.config import load_graph_config
-        from taskgraph.generator import Kind
         from taskgraph.util.taskcluster import (
             get_artifact_url,
         )
@@ -1433,7 +1431,8 @@ class PackageFrontend(MachCommandBase):
                 strict=False,
             )
 
-            toolchains = load_tasks_for_kind(params, 'toolchain')
+            root_dir = mozpath.join(self.topsrcdir, 'taskcluster/ci')
+            toolchains = load_tasks_for_kind(params, 'toolchain', root_dir=root_dir)
 
             aliases = {}
             for t in toolchains.values():
@@ -1648,7 +1647,7 @@ class StaticAnalysis(MachCommandBase):
     """Utilities for running C++ static analysis checks and format."""
 
     # List of file extension to consider (should start with dot)
-    _format_include_extensions = ('.cpp', '.c', '.h', '.java')
+    _format_include_extensions = ('.cpp', '.c', '.cc', '.h', '.java')
     # File contaning all paths to exclude from formatting
     _format_ignore_file = '.clang-format-ignore'
 
@@ -2814,25 +2813,20 @@ class StaticAnalysis(MachCommandBase):
         return path_list
 
     def _run_clang_format_in_console(self, clang_format, paths, assume_filename):
-        path_list = self._generate_path_list(paths, False)
+        path_list = self._generate_path_list(assume_filename, False)
 
-        if path_list == [] and paths[0].endswith(self._format_include_extensions):
-            # This means we are dealing with a third party so just return it's content
-            with open(paths[0], 'r') as fin:
-                sys.stdout.write(fin.read().decode('utf8'))
-                return 0
+        if path_list == []:
+            return 0
 
         # We use -assume-filename in order to better determine the path for
         # the .clang-format when it is ran outside of the repo, for example
-        # by the extemssion hg-formatsource
+        # by the extension hg-formatsource
         args = [clang_format, "-assume-filename={}".format(assume_filename[0])]
 
-        process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-        with open(path_list[0], 'r') as fin:
+        process = subprocess.Popen(args, stdin=subprocess.PIPE)
+        with open(paths[0], 'r') as fin:
             process.stdin.write(fin.read())
-            output = process.communicate()[0]
             process.stdin.close()
-            sys.stdout.write(output.decode('utf8'))
             return 0
 
     def _run_clang_format_path(self, clang_format, show, paths):
