@@ -64,9 +64,6 @@ class Flexbox extends PureComponent {
 
   renderFlexItemSizing() {
     const {
-      color,
-    } = this.props.flexbox;
-    const {
       flexItems,
       flexItemShown,
       properties,
@@ -79,7 +76,6 @@ class Flexbox extends PureComponent {
 
     return createElement(Fragment, null,
       FlexItemSizingOutline({
-        color,
         flexDirection: properties["flex-direction"],
         flexItem,
       }),
@@ -110,7 +106,6 @@ class Flexbox extends PureComponent {
     }
 
     const {
-      flexItems,
       flexItemShown,
     } = flexContainer;
 
@@ -125,7 +120,7 @@ class Flexbox extends PureComponent {
           onToggleFlexboxHighlighter,
           setSelectedNode,
         }),
-        !flexItemShown && flexItems.length > 0 ? this.renderFlexItemList() : null,
+        !flexItemShown ? this.renderFlexItemList() : null,
         flexItemShown ? this.renderFlexItemSizing() : null,
       )
     );
