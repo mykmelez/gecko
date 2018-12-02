@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sts=4 et sw=4 tw=99:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: set ts=8 sts=2 et sw=2 tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -391,7 +391,8 @@ void jit::CheckLogging() {
         "  bl-bails      Baseline bailouts\n"
         "  bl-dbg-osr    Baseline debug mode on stack recompile messages\n"
         "  bl-all        All baseline spew\n"
-        "  bl-ic-stats   Baseline IC Statistics\n"
+        "\n"
+        "See also SPEW=help for information on the Structured Spewer."
         "\n");
     exit(0);
     /*NOTREACHED*/
@@ -520,9 +521,6 @@ void jit::CheckLogging() {
   }
   if (ContainsFlag(env, "bl-dbg-osr")) {
     EnableChannel(JitSpew_BaselineDebugModeOSR);
-  }
-  if (ContainsFlag(env, "bl-ic-stats")) {
-    EnableChannel(JitSpew_BaselineIC_Statistics);
   }
   if (ContainsFlag(env, "bl-all")) {
     EnableChannel(JitSpew_BaselineAbort);

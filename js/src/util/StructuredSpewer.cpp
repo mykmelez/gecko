@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sts=4 et sw=4 tw=99:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: set ts=8 sts=2 et sw=2 tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -174,6 +174,43 @@ void StructuredSpewer::parseSpewFlags(const char* flags) {
   STRUCTURED_CHANNEL_LIST(CHECK_CHANNEL)
 
 #undef CHECK_CHANNEL
+
+  if (ContainsFlag(flags, "help")) {
+     printf(
+        "\n"
+        "usage: SPEW=option,option,option,... where options can be:\n"
+        "\n"
+        "  help               Dump this help message\n"
+        "  all|*              Enable all the below channels\n"
+        "  channel[,channel]  Enable the selected channels from below\n"
+        "\n"
+        " Channels: \n"
+        "\n"
+        // List Channels
+        "  BaselineICStats    Dump the IC Entry counters during Ion analysis\n"
+        // End Channel list
+        "\n\n"
+        "By default output goes to a file called spew_output.$PID.$THREAD\n"
+        "\n"
+        "Further control of the sepewer can be accomplished with the below\n"
+        "environment variables:\n"
+        "\n"
+        "   SPEW_FILE: Selects the file to write to. An absolute path.\n"
+        "\n"
+        "   SPEW_FILTER: A string which is matched against 'signature'\n"
+        "        constructed from a JSScript, currently connsisting of \n"
+        "        filename:line:col.\n"
+        "\n"
+        "        A JSScript matches the filter string is found in the\n"
+        "        signature\n"
+        "\n"
+        "   SPEW_UPLOAD: If this variable is set as well as MOZ_UPLOAD_DIR,\n"
+        "        output goes to $MOZ_UPLOAD_DIR/spew_output* to ease usage\n"
+        "        with Treeherder.\n"
+
+        );
+    exit(0);
+  }
 }
 
 AutoStructuredSpewer::AutoStructuredSpewer(JSContext* cx, SpewChannel channel,
