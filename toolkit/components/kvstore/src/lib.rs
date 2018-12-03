@@ -22,9 +22,9 @@ mod task;
 
 use error::KeyValueError;
 use libc::c_void;
-use nserror::{nsresult, NS_ERROR_FAILURE, NS_ERROR_NO_AGGREGATION, NS_OK};
+use nserror::{nsresult, NS_ERROR_NO_AGGREGATION, NS_OK};
 use nsstring::{nsACString, nsCString};
-use owned_value::{variant_to_owned, OwnedValue};
+use owned_value::{owned_to_variant, variant_to_owned, OwnedValue};
 use rkv::{Rkv, Store};
 use std::{
     cell::RefCell,
@@ -32,7 +32,6 @@ use std::{
     sync::{Arc, RwLock},
     vec::IntoIter,
 };
-use storage_variant::IntoVariant;
 use task::{
     create_thread, DeleteTask, EnumerateTask, GetNextTask, GetOrCreateTask, GetTask,
     HasMoreElementsTask, HasTask, PutTask, TaskRunnable,
@@ -324,11 +323,6 @@ impl KeyValuePair {
     }
 
     fn get_value(&self) -> Result<RefPtr<nsIVariant>, KeyValueError> {
-        Ok(self
-            .value
-            .clone()
-            .into_variant()
-            .ok_or(KeyValueError::from(NS_ERROR_FAILURE))?
-            .take())
+        owned_to_variant(self.value.clone()).or_else(|e| Err(KeyValueError::from(e)))
     }
 }

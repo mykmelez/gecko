@@ -17,7 +17,7 @@ use std::{
     sync::{Arc, RwLock},
     vec::IntoIter,
 };
-use storage_variant::IntoVariant;
+use storage_variant::VariantType;
 use xpcom::{
     getter_addrefs,
     interfaces::{
@@ -298,7 +298,7 @@ impl Task for GetTask {
                 let reader = env.read()?;
                 let value = reader.get(&self.store, key)?;
 
-                Ok(if let Some(value) = value {
+                (if let Some(value) = value {
                     match value {
                         Value::I64(value) => value.into_variant(),
                         Value::F64(value) => value.into_variant(),
@@ -314,8 +314,7 @@ impl Task for GetTask {
                         Some(OwnedValue::Str(ref value)) => nsString::from(value).into_variant(),
                         None => ().into_variant(),
                     }
-                }.ok_or(KeyValueError::Read)?
-                .take())
+                }).or_else(|e| Err(KeyValueError::from(e)))
             }()));
     }
 
@@ -357,11 +356,10 @@ impl Task for HasTask {
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
                 let value = reader.get(&self.store, key)?;
-                Ok(value
+                value
                     .is_some()
                     .into_variant()
-                    .ok_or(KeyValueError::Read)?
-                    .take())
+                    .or_else(|e| Err(KeyValueError::from(e)))
             }()));
     }
 
@@ -555,10 +553,9 @@ impl Task for HasMoreElementsTask {
         // use the ? operator to simplify the implementation.
         self.result
             .set(Some(|| -> Result<RefPtr<nsIVariant>, KeyValueError> {
-                Ok((!self.iter.borrow().as_slice().is_empty())
+                (!self.iter.borrow().as_slice().is_empty())
                     .into_variant()
-                    .ok_or(KeyValueError::Read)?
-                    .take())
+                    .or_else(|e| Err(KeyValueError::from(e)))
             }()));
     }
 

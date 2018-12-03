@@ -7,7 +7,7 @@ extern crate nserror;
 extern crate nsstring;
 extern crate xpcom;
 
-use nserror::{NsresultExt, NS_OK};
+use nserror::{NsresultExt, NS_OK, nsresult};
 use nsstring::{nsACString, nsAString, nsCString, nsString};
 use xpcom::{getter_addrefs, interfaces::nsIVariant, RefPtr};
 
@@ -20,91 +20,85 @@ extern "C" {
     fn NS_NewStorageUTF8TextVariant(value: *const nsACString, result: *mut *const nsIVariant);
 }
 
-/// A wrapper around `nsIVariant`.
-pub struct Variant(RefPtr<nsIVariant>);
-
-/// A trait to convert a type into a variant. `impl IntoVariant for T` is almost
-/// equivalent to `impl TryFrom<T> for Variant`, but the `TryFrom` trait is
-/// Nightly-only.
-pub trait IntoVariant {
-    fn into_variant(self) -> Option<Variant>;
-}
-
-impl Variant {
-    pub fn wrap(variant: RefPtr<nsIVariant>) -> Variant {
-        Variant(variant)
-    }
-
-    pub fn take(self) -> RefPtr<nsIVariant> {
-        self.0
-    }
+pub trait VariantType {
+    fn into_variant(self) -> Result<RefPtr<nsIVariant>, nsresult>;
+    fn from_variant(variant: &nsIVariant) -> Result<Self, nsresult>
+        where Self: Sized;
 }
 
 /// Implements traits to convert between variants and their types.
 macro_rules! variant {
     ($typ:ident, $constructor:ident, $getter:ident) => {
-        impl From<Variant> for $typ {
-            fn from(variant: Variant) -> Self {
-                let mut result = $typ::default();
-                let rv = unsafe { (variant.0).$getter(&mut result) };
-                if rv.succeeded() {
-                    result
-                } else {
-                    $typ::default()
-                }
-            }
-        }
-
-        impl IntoVariant for $typ {
-            fn into_variant(self) -> Option<Variant> {
-                let v: RefPtr<nsIVariant> = getter_addrefs(|p| unsafe {
+        impl VariantType for $typ {
+            fn into_variant(self) -> Result<RefPtr<nsIVariant>, nsresult> {
+                getter_addrefs(|p| unsafe {
                     $constructor(self.into(), p);
                     NS_OK
-                }).ok()?;
-                Some(Variant::wrap(v))
+                })
+            }
+            fn from_variant(variant: &nsIVariant) -> Result<$typ, nsresult> {
+                let mut result = $typ::default();
+                let rv = unsafe { variant.$getter(&mut result) };
+                if rv.succeeded() {
+                    Ok(result)
+                } else {
+                    Err(rv)
+                }
             }
         }
     };
     (* $typ:ident, $constructor:ident, $getter:ident) => {
-        impl From<Variant> for $typ {
-            fn from(variant: Variant) -> Self {
+        impl VariantType for $typ {
+            fn into_variant(self) -> Result<RefPtr<nsIVariant>, nsresult> {
+                getter_addrefs(|p| unsafe {
+                    $constructor(&*self, p);
+                    NS_OK
+                })
+            }
+            fn from_variant(variant: &nsIVariant) -> Result<$typ, nsresult> {
                 let mut result = $typ::new();
-                let rv = unsafe { (variant.0).$getter(&mut *result) };
+                let rv = unsafe { variant.$getter(&mut *result) };
                 if rv.succeeded() {
-                    result
+                    Ok(result)
                 } else {
-                    $typ::new()
+                    Err(rv)
                 }
             }
         }
-
-        impl IntoVariant for $typ {
-            fn into_variant(self) -> Option<Variant> {
-                let v: RefPtr<nsIVariant> = getter_addrefs(|p| unsafe {
+    };
+    (* $typ:ident, $constructor:ident, $getter:ident) => {
+        impl VariantType for $typ {
+            fn into_variant(self) -> Result<RefPtr<nsIVariant>, nsresult> {
+                getter_addrefs(|p| unsafe {
                     $constructor(&*self, p);
                     NS_OK
-                }).ok()?;
-                Some(Variant::wrap(v))
+                })
+            }
+            fn from_variant(variant: &nsIVariant) -> Result<$typ, nsresult> {
+                let mut result = $typ::new();
+                let rv = unsafe { variant.$getter(&mut *result) };
+                if rv.succeeded() {
+                    Ok(result)
+                } else {
+                    Err(rv)
+                }
             }
         }
     };
 }
 
 // The unit type (()) is a reasonable equivalation of the null variant.
-// The macro can't produce its implementations of From<Variant> and IntoVariant,
-// however, so we implement them concretely.
-impl From<Variant> for () {
-    fn from(_variant: Variant) -> Self {
-        ()
-    }
-}
-impl IntoVariant for () {
-    fn into_variant(self) -> Option<Variant> {
-        let v: RefPtr<nsIVariant> = getter_addrefs(|p| unsafe {
+// The macro can't produce its implementations of VariantType, however,
+// so we implement them concretely.
+impl VariantType for () {
+    fn into_variant(self) -> Result<RefPtr<nsIVariant>, nsresult> {
+        getter_addrefs(|p| unsafe {
             NS_NewStorageNullVariant(p);
             NS_OK
-        }).ok()?;
-        Some(Variant::wrap(v))
+        })
+    }
+    fn from_variant(_variant: &nsIVariant) -> Result<Self, nsresult> {
+        Ok(())
     }
 }
 
