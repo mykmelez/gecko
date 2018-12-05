@@ -298,7 +298,7 @@ impl Task for GetTask {
                 let reader = env.read()?;
                 let value = reader.get(&self.store, key)?;
 
-                (if let Some(value) = value {
+                Ok(if let Some(value) = value {
                     match value {
                         Value::I64(value) => value.into_variant(),
                         Value::F64(value) => value.into_variant(),
@@ -314,7 +314,7 @@ impl Task for GetTask {
                         Some(OwnedValue::Str(ref value)) => nsString::from(value).into_variant(),
                         None => ().into_variant(),
                     }
-                }).or_else(|e| Err(KeyValueError::from(e)))
+                })
             }()));
     }
 
@@ -356,10 +356,9 @@ impl Task for HasTask {
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
                 let value = reader.get(&self.store, key)?;
-                value
+                Ok(value
                     .is_some()
-                    .into_variant()
-                    .or_else(|e| Err(KeyValueError::from(e)))
+                    .into_variant())
             }()));
     }
 
@@ -553,9 +552,7 @@ impl Task for HasMoreElementsTask {
         // use the ? operator to simplify the implementation.
         self.result
             .set(Some(|| -> Result<RefPtr<nsIVariant>, KeyValueError> {
-                (!self.iter.borrow().as_slice().is_empty())
-                    .into_variant()
-                    .or_else(|e| Err(KeyValueError::from(e)))
+                Ok((!self.iter.borrow().as_slice().is_empty()).into_variant())
             }()));
     }
 

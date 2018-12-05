@@ -40,7 +40,7 @@ pub fn value_to_owned<'a>(value: Option<Value<'a>>) -> Result<OwnedValue, KeyVal
     }
 }
 
-pub fn owned_to_variant(owned: OwnedValue) -> Result<RefPtr<nsIVariant>, nsresult> {
+pub fn owned_to_variant(owned: OwnedValue) -> RefPtr<nsIVariant> {
     match owned {
         OwnedValue::Bool(val) => val.into_variant(),
         OwnedValue::I64(val) => val.into_variant(),

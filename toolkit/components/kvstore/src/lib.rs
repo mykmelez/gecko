@@ -323,6 +323,6 @@ impl KeyValuePair {
     }
 
     fn get_value(&self) -> Result<RefPtr<nsIVariant>, KeyValueError> {
-        owned_to_variant(self.value.clone()).or_else(|e| Err(KeyValueError::from(e)))
+        Ok(owned_to_variant(self.value.clone()))
     }
 }
