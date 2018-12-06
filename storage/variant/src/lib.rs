@@ -9,7 +9,7 @@ extern crate xpcom;
 
 use nserror::{NsresultExt, NS_OK, nsresult};
 use nsstring::{nsACString, nsAString, nsCString, nsString};
-use xpcom::{GetterAddrefs, interfaces::nsIVariant, RefPtr};
+use xpcom::{getter_addrefs, interfaces::nsIVariant, RefPtr};
 
 extern "C" {
     fn NS_NewStorageNullVariant(result: *mut *const nsIVariant);
@@ -31,13 +31,13 @@ macro_rules! variant {
     ($typ:ident, $constructor:ident, $getter:ident) => {
         impl VariantType for $typ {
             fn into_variant(self) -> RefPtr<nsIVariant> {
-                let mut ga = GetterAddrefs::<nsIVariant>::new();
-                unsafe { $constructor(self.into(), ga.ptr()) };
-
-                // GetterAddrefs.refptr() returns an Option<RefPtr>,
-                // but the $constructor is infallible, so we can safely unwrap
-                // and return the RefPtr.
-                ga.refptr().unwrap()
+                // getter_addrefs returns a Result<RefPtr<T>, nsresult>,
+                // but we know that our $constructor is infallible, so we can
+                // safely unwrap and return the RefPtr.
+                getter_addrefs(|p| {
+                    unsafe { $constructor(self.into(), p) };
+                    NS_OK
+                }).unwrap()
             }
             fn from_variant(variant: &nsIVariant) -> Result<$typ, nsresult> {
                 let mut result = $typ::default();
@@ -53,13 +53,13 @@ macro_rules! variant {
     (* $typ:ident, $constructor:ident, $getter:ident) => {
         impl VariantType for $typ {
             fn into_variant(self) -> RefPtr<nsIVariant> {
-                let mut ga = GetterAddrefs::<nsIVariant>::new();
-                unsafe { $constructor(&*self, ga.ptr()) };
-
-                // GetterAddrefs.refptr() returns an Option<RefPtr>,
-                // but the $constructor is infallible, so we can safely unwrap
-                // and return the RefPtr.
-                ga.refptr().unwrap()
+                // getter_addrefs returns a Result<RefPtr<T>, nsresult>,
+                // but we know that our $constructor is infallible, so we can
+                // safely unwrap and return the RefPtr.
+                getter_addrefs(|p| {
+                    unsafe { $constructor(&*self, p) };
+                    NS_OK
+                }).unwrap()
             }
             fn from_variant(variant: &nsIVariant) -> Result<$typ, nsresult> {
                 let mut result = $typ::new();
@@ -79,13 +79,13 @@ macro_rules! variant {
 // so we implement them concretely.
 impl VariantType for () {
     fn into_variant(self) -> RefPtr<nsIVariant> {
-        let mut ga = GetterAddrefs::<nsIVariant>::new();
-        unsafe { NS_NewStorageNullVariant(ga.ptr()) };
-
-        // GetterAddrefs.refptr() returns an Option<RefPtr>, but the
-        // constructor is infallible, so we can safely unwrap the Option
-        // and return the RefPtr.
-        ga.refptr().unwrap()
+        // getter_addrefs returns a Result<RefPtr<T>, nsresult>,
+        // but we know that NS_NewStorageNullVariant is infallible, so we can
+        // safely unwrap and return the RefPtr.
+        getter_addrefs(|p| {
+            unsafe { NS_NewStorageNullVariant(p) };
+            NS_OK
+        }).unwrap()
     }
     fn from_variant(_variant: &nsIVariant) -> Result<Self, nsresult> {
         Ok(())
