@@ -126,7 +126,7 @@ add_task(async function extendedCharacterKey() {
   Assert.strictEqual(await database.get("Héllo, wőrld!"), 1);
 
   const enumerator = await database.enumerate();
-  const { key } = await enumerator.getNext();
+  const { key } = enumerator.getNext();
   Assert.strictEqual(key, "Héllo, wőrld!");
 
   await database.delete("Héllo, wőrld!");
@@ -187,15 +187,15 @@ add_task(async function enumeration() {
     const enumerator = await database.enumerate(fromKey, toKey);
 
     for (const pair of pairs) {
-      Assert.strictEqual(await enumerator.hasMoreElements(), true);
-      const element = await enumerator.getNext();
+      Assert.strictEqual(enumerator.hasMoreElements(), true);
+      const element = enumerator.getNext();
       Assert.ok(element);
       Assert.strictEqual(element.key, pair[0]);
       Assert.strictEqual(element.value, pair[1]);
     }
 
-    Assert.strictEqual(await enumerator.hasMoreElements(), false);
-    await Assert.rejects(enumerator.getNext(), /NS_ERROR_FAILURE/);
+    Assert.strictEqual(enumerator.hasMoreElements(), false);
+    Assert.throws(() => enumerator.getNext(), /NS_ERROR_FAILURE/);
   }
 
   // Test enumeration without specifying "from" and "to" keys, which should
@@ -308,7 +308,7 @@ add_task(async function enumeration() {
   await test("ppppp", "int-key", []);
 
   const actual = {};
-  for await (const { key, value } of await database.enumerate()) {
+  for (const { key, value } of await database.enumerate()) {
     actual[key] = value;
   }
   Assert.deepEqual(actual, {
