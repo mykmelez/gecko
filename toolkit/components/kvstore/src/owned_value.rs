@@ -8,7 +8,7 @@ use data_type::{
 };
 use error::KeyValueError;
 use libc::{int32_t, uint16_t};
-use nserror::{nsresult, NsresultExt};
+use nserror::{NsresultExt};
 use nsstring::nsString;
 use ordered_float::OrderedFloat;
 use rkv::Value;
