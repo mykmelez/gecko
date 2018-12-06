@@ -23,7 +23,8 @@ interface nsIKeyValueVoidCallback;
  *
  * The kvstore.jsm module wraps this API in a more idiomatic, Promise-based
  * JS API that supports async/await.  In most cases, you're better off using
- * that API from JS rather than using this one directly.
+ * that API from JS rather than using this one directly.  Bug 1512319 tracks
+ * native support for Promise in Rust-implemented XPCOM methods.
  */
 
 /**
