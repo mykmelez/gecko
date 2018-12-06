@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* vim:set ts=4 sw=4 cindent et: */
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim:set ts=4 sw=2 cindent et: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -259,10 +259,6 @@ nsresult nsIOService::Init() {
 
   SetOffline(false);
 
-  RefPtr<NetworkConnectivityService> ncs =
-      NetworkConnectivityService::GetSingleton();
-  ncs->Init();
-
   return NS_OK;
 }
 
@@ -284,6 +280,10 @@ nsresult nsIOService::InitializeCaptivePortalService() {
     return static_cast<CaptivePortalService *>(mCaptivePortalService.get())
         ->Initialize();
   }
+
+  RefPtr<NetworkConnectivityService> ncs =
+      NetworkConnectivityService::GetSingleton();
+  ncs->Init();
 
   return NS_OK;
 }

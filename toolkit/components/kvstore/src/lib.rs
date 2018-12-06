@@ -24,7 +24,7 @@ use error::KeyValueError;
 use libc::c_void;
 use nserror::{nsresult, NS_ERROR_FAILURE, NS_ERROR_NO_AGGREGATION, NS_OK};
 use nsstring::{nsACString, nsCString};
-use owned_value::{variant_to_owned, OwnedValue};
+use owned_value::{owned_to_variant, variant_to_owned, OwnedValue};
 use rkv::{Rkv, Store};
 use std::{
     cell::RefCell,
@@ -32,14 +32,13 @@ use std::{
     sync::{Arc, RwLock},
     vec::IntoIter,
 };
-use storage_variant::IntoVariant;
 use task::{
-    create_thread, DeleteTask, EnumerateTask, GetNextTask, GetOrCreateTask, GetTask,
-    HasMoreElementsTask, HasTask, PutTask, TaskRunnable,
+    create_thread, DeleteTask, EnumerateTask, GetOrCreateTask, GetTask,
+    HasTask, PutTask, TaskRunnable,
 };
 use xpcom::{
     interfaces::{
-        nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback, nsIKeyValuePairCallback,
+        nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback, nsIKeyValuePair,
         nsIKeyValueVariantCallback, nsIKeyValueVoidCallback, nsISupports, nsIThread, nsIVariant,
     },
     nsIID, Ensure, RefPtr,
@@ -279,27 +278,22 @@ impl KeyValueEnumerator {
         })
     }
 
-    xpcom_method!(HasMoreElements, has_more_elements, {
-        callback: *const nsIKeyValueVariantCallback
-    });
+    xpcom_method!(HasMoreElements, has_more_elements, {}, *mut bool);
 
-    fn has_more_elements(&self, callback: &nsIKeyValueVariantCallback) -> Result<(), nsresult> {
-        let task = Box::new(HasMoreElementsTask::new(
-            RefPtr::new(callback),
-            self.iter.clone(),
-        ));
-
-        TaskRunnable::new("KVEnumerator::HasMoreElements", task)?.dispatch(self.thread.clone())
+    fn has_more_elements(&self) -> Result<bool, KeyValueError> {
+        Ok(!self.iter.borrow().as_slice().is_empty())
     }
 
-    xpcom_method!(GetNext, get_next, {
-        callback: *const nsIKeyValuePairCallback
-    });
+    xpcom_method!(GetNext, get_next, {}, *mut *const nsIKeyValuePair);
 
-    fn get_next(&self, callback: &nsIKeyValuePairCallback) -> Result<(), nsresult> {
-        let task = Box::new(GetNextTask::new(RefPtr::new(callback), self.iter.clone()));
+    fn get_next(&self) -> Result<RefPtr<nsIKeyValuePair>, KeyValueError> {
+        let mut iter = self.iter.borrow_mut();
+        let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
 
-        TaskRunnable::new("KVEnumerator::GetNext", task)?.dispatch(self.thread.clone())
+        // We fail on retrieval of the key/value pair if the key isn't valid
+        // UTF-*, if the value is unexpected, or if we encountered a store error
+        // while retrieving the pair.
+        Ok(RefPtr::new(KeyValuePair::new(key?, value?).coerce::<nsIKeyValuePair>()))
     }
 }
 
@@ -324,11 +318,6 @@ impl KeyValuePair {
     }
 
     fn get_value(&self) -> Result<RefPtr<nsIVariant>, KeyValueError> {
-        Ok(self
-            .value
-            .clone()
-            .into_variant()
-            .ok_or(KeyValueError::from(NS_ERROR_FAILURE))?
-            .take())
+        Ok(owned_to_variant(self.value.clone()))
     }
 }

@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sts=4 et sw=4 tw=99:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: set ts=8 sts=2 et sw=2 tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -2285,6 +2285,9 @@ AbortReasonOr<Ok> IonBuilder::inspectOpcode(JSOp op) {
       return Ok();
     }
 
+    case JSOP_ENVCALLEE:
+      return jsop_envcallee();
+
     case JSOP_SUPERBASE:
       return jsop_superbase();
 
@@ -2541,7 +2544,6 @@ AbortReasonOr<Ok> IonBuilder::inspectOpcode(JSOp op) {
       break;
 
     case JSOP_UNUSED151:
-    case JSOP_UNUSED206:
     case JSOP_LIMIT:
       break;
   }
@@ -10078,14 +10080,20 @@ AbortReasonOr<Ok> IonBuilder::jsop_not() {
   return Ok();
 }
 
-AbortReasonOr<Ok> IonBuilder::jsop_superbase() {
-  JSFunction* fun = info().funMaybeLazy();
-  if (!fun || !fun->allowSuperProperty()) {
-    return abort(AbortReason::Disable,
-                 "super only supported directly in methods");
-  }
+AbortReasonOr<Ok> IonBuilder::jsop_envcallee() {
+  uint8_t numHops = GET_UINT8(pc);
+  MDefinition* env = walkEnvironmentChain(numHops);
+  MInstruction* callee =
+      MLoadFixedSlot::New(alloc(), env, CallObject::calleeSlot());
+  current->add(callee);
+  current->push(callee);
+  return Ok();
+}
 
-  auto* homeObject = MHomeObject::New(alloc(), getCallee());
+AbortReasonOr<Ok> IonBuilder::jsop_superbase() {
+  MDefinition* callee = current->pop();
+
+  auto* homeObject = MHomeObject::New(alloc(), callee);
   current->add(homeObject);
 
   auto* superBase = MHomeObjectSuperBase::New(alloc(), homeObject);

@@ -37,6 +37,7 @@ rayon = "1"
 ron = { optional = true, version = "0.1.7" }
 serde = { optional = true, version = "1.0", features = ["serde_derive"] }
 serde_json = { optional = true, version = "1.0" }
+sha2 = "0.7"
 smallvec = "0.6"
 thread_profiler = "0.1.1"
 time = "0.1"
@@ -67,6 +68,7 @@ optional = true
 
 [dev-dependencies]
 mozangle = "0.1"
+rand = "0.4"
 
 [target.'cfg(any(target_os = "android", all(unix, not(target_os = "macos"))))'.dependencies]
 freetype = { version = "0.4", default-features = false }

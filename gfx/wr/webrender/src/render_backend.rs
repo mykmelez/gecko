@@ -103,7 +103,7 @@ impl FrameId {
     }
 
     /// Advances this FrameId to the next frame.
-    fn advance(&mut self) {
+    pub fn advance(&mut self) {
         self.0 += 1;
     }
 
@@ -410,6 +410,9 @@ impl Document {
         let accumulated_scale_factor = self.view.accumulated_scale_factor();
         let pan = self.view.pan.to_f32() / accumulated_scale_factor;
 
+        // Advance to the next frame.
+        self.stamp.advance();
+
         assert!(self.stamp.frame_id() != FrameId::INVALID,
                 "First frame increment must happen before build_frame()");
 
@@ -532,9 +535,6 @@ impl Document {
         let old_scrolling_states = self.clip_scroll_tree.drain();
         self.clip_scroll_tree = built_scene.clip_scroll_tree;
         self.clip_scroll_tree.finalize_and_apply_pending_scroll_offsets(old_scrolling_states);
-
-        // Advance to the next frame.
-        self.stamp.advance();
     }
 }
 
@@ -1111,6 +1111,9 @@ impl RenderBackend {
         }
 
         if !transaction_msg.use_scene_builder_thread && txn.can_skip_scene_builder() {
+            if let Some(rasterizer) = txn.blob_rasterizer.take() {
+                self.resource_cache.set_blob_rasterizer(rasterizer);
+            }
             self.update_document(
                 txn.document_id,
                 replace(&mut txn.resource_updates, Vec::new()),

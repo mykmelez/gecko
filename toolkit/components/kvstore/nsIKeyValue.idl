@@ -23,7 +23,8 @@ interface nsIKeyValueVoidCallback;
  *
  * The kvstore.jsm module wraps this API in a more idiomatic, Promise-based
  * JS API that supports async/await.  In most cases, you're better off using
- * that API from JS rather than using this one directly.
+ * that API from JS rather than using this one directly.  Bug 1512319 tracks
+ * native support for Promise in Rust-implemented XPCOM methods.
  */
 
 /**
@@ -117,21 +118,27 @@ interface nsIKeyValueDatabase : nsISupports {
 };
 
 /**
- * An enumerator of key/value pairs.  Although its method names are identical
- * to those of nsISimpleEnumerator, this interface differs from that one in that
- * its methods are asynchronous, accepting a callback argument and calling
- * the callback's resolve() method with the result of the operation.
+ * A key/value pair.  Returned by nsIKeyValueEnumerator.getNext().
  */
-[scriptable, uuid(b9ba7116-b7ff-4717-9a28-a08e6879b199)]
-interface nsIKeyValueEnumerator : nsISupports {
-    void hasMoreElements(in nsIKeyValueVariantCallback callback);
-    void getNext(in nsIKeyValuePairCallback callback);
-};
-
 [scriptable, uuid(bc37b06a-23b5-4b32-8281-4b8479601c7e)]
 interface nsIKeyValuePair : nsISupports {
     readonly attribute AUTF8String key;
     readonly attribute nsIVariant value;
+};
+
+/**
+ * An enumerator of key/value pairs.  Although its methods are similar
+ * to those of nsISimpleEnumerator, this interface's getNext() method returns
+ * an nsIKeyValuePair rather than an nsISupports, so consumers don't need
+ * to QI it to that interface; but this interface doesn't implement the JS
+ * iteration protocol (because the Rust-XPCOM bindings don't yet support it),
+ * which is another reason why you should use the kvstore.jsm module from JS
+ * instead of accessing this API directly.
+ */
+[scriptable, uuid(b9ba7116-b7ff-4717-9a28-a08e6879b199)]
+interface nsIKeyValueEnumerator : nsISupports {
+    bool hasMoreElements();
+    nsIKeyValuePair getNext();
 };
 
 /**

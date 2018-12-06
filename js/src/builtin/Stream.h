@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sts=4 et sw=4 tw=99:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: set ts=8 sts=2 et sw=2 tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -265,11 +265,10 @@ class ReadableStreamController : public StreamController {
     Flag_Pulling = 1 << 1,
     Flag_PullAgain = 1 << 2,
     Flag_CloseRequested = 1 << 3,
-    Flag_TeeBranch = 1 << 4,
-    Flag_TeeBranch1 = 1 << 5,
-    Flag_TeeBranch2 = 1 << 6,
-    Flag_ExternalSource = 1 << 7,
-    Flag_SourceLocked = 1 << 8,
+    Flag_TeeBranch1 = 1 << 4,
+    Flag_TeeBranch2 = 1 << 5,
+    Flag_ExternalSource = 1 << 6,
+    Flag_SourceLocked = 1 << 7,
   };
 
   ReadableStream* stream() const {
@@ -315,15 +314,19 @@ class ReadableStreamController : public StreamController {
   bool closeRequested() const { return flags() & Flag_CloseRequested; }
   void setCloseRequested() { addFlags(Flag_CloseRequested); }
   bool isTeeBranch1() const { return flags() & Flag_TeeBranch1; }
-  void setTeeBranch1() { addFlags(Flag_TeeBranch | Flag_TeeBranch1); }
+  void setTeeBranch1() {
+    MOZ_ASSERT(!isTeeBranch2());
+    addFlags(Flag_TeeBranch1);
+  }
   bool isTeeBranch2() const { return flags() & Flag_TeeBranch2; }
-  void setTeeBranch2() { addFlags(Flag_TeeBranch | Flag_TeeBranch2); }
+  void setTeeBranch2() {
+    MOZ_ASSERT(!isTeeBranch1());
+    addFlags(Flag_TeeBranch2);
+  }
   bool hasExternalSource() const { return flags() & Flag_ExternalSource; }
   bool sourceLocked() const { return flags() & Flag_SourceLocked; }
   void setSourceLocked() { addFlags(Flag_SourceLocked); }
   void clearSourceLocked() { removeFlags(Flag_SourceLocked); }
-
-  static const Class class_;
 };
 
 class ReadableStreamDefaultController : public ReadableStreamController {

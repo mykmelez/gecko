@@ -151,7 +151,8 @@ impl AlphaBatchList {
     ) -> &mut Vec<PrimitiveInstanceData> {
         if z_id != self.current_z_id ||
            self.current_batch_index == usize::MAX ||
-           !self.batches[self.current_batch_index].key.is_compatible_with(&key) {
+           !self.batches[self.current_batch_index].key.is_compatible_with(&key)
+        {
             let mut selected_batch_index = None;
 
             match key.blend_mode {
@@ -585,7 +586,7 @@ impl AlphaBatchBuilder {
                 };
 
                 let instance = PrimitiveInstanceData::from(BrushInstance {
-                    segment_index: 0,
+                    segment_index: INVALID_SEGMENT_INDEX,
                     edge_flags: EdgeAaSegmentMask::all(),
                     clip_task_address,
                     brush_flags: BrushFlags::PERSPECTIVE_INTERPOLATION,
@@ -861,7 +862,7 @@ impl AlphaBatchBuilder {
                 };
 
                 let instance = PrimitiveInstanceData::from(BrushInstance {
-                    segment_index: 0,
+                    segment_index: INVALID_SEGMENT_INDEX,
                     edge_flags: EdgeAaSegmentMask::all(),
                     clip_task_address,
                     brush_flags: BrushFlags::PERSPECTIVE_INTERPOLATION,
@@ -1106,7 +1107,7 @@ impl AlphaBatchBuilder {
 
                                         let instance = BrushInstance {
                                             prim_header_index,
-                                            segment_index: 0,
+                                            segment_index: INVALID_SEGMENT_INDEX,
                                             edge_flags: EdgeAaSegmentMask::empty(),
                                             brush_flags: BrushFlags::empty(),
                                             clip_task_address,
@@ -1188,7 +1189,7 @@ impl AlphaBatchBuilder {
                                         let shadow_instance = BrushInstance {
                                             prim_header_index: shadow_prim_header_index,
                                             clip_task_address,
-                                            segment_index: 0,
+                                            segment_index: INVALID_SEGMENT_INDEX,
                                             edge_flags: EdgeAaSegmentMask::empty(),
                                             brush_flags: BrushFlags::empty(),
                                             user_data: shadow_uv_rect_address,
@@ -1197,7 +1198,7 @@ impl AlphaBatchBuilder {
                                         let content_instance = BrushInstance {
                                             prim_header_index: content_prim_header_index,
                                             clip_task_address,
-                                            segment_index: 0,
+                                            segment_index: INVALID_SEGMENT_INDEX,
                                             edge_flags: EdgeAaSegmentMask::empty(),
                                             brush_flags: BrushFlags::empty(),
                                             user_data: content_uv_rect_address,
@@ -1282,7 +1283,7 @@ impl AlphaBatchBuilder {
                                         let instance = BrushInstance {
                                             prim_header_index,
                                             clip_task_address,
-                                            segment_index: 0,
+                                            segment_index: INVALID_SEGMENT_INDEX,
                                             edge_flags: EdgeAaSegmentMask::empty(),
                                             brush_flags: BrushFlags::empty(),
                                             user_data: 0,
@@ -1327,7 +1328,7 @@ impl AlphaBatchBuilder {
                                 let instance = BrushInstance {
                                     prim_header_index,
                                     clip_task_address,
-                                    segment_index: 0,
+                                    segment_index: INVALID_SEGMENT_INDEX,
                                     edge_flags: EdgeAaSegmentMask::empty(),
                                     brush_flags: BrushFlags::empty(),
                                     user_data: 0,
@@ -1367,7 +1368,7 @@ impl AlphaBatchBuilder {
                                 let instance = BrushInstance {
                                     prim_header_index,
                                     clip_task_address,
-                                    segment_index: 0,
+                                    segment_index: INVALID_SEGMENT_INDEX,
                                     edge_flags: EdgeAaSegmentMask::empty(),
                                     brush_flags: BrushFlags::empty(),
                                     user_data: uv_rect_address,
@@ -1970,7 +1971,7 @@ impl AlphaBatchBuilder {
         let base_instance = BrushInstance {
             prim_header_index,
             clip_task_address,
-            segment_index: 0,
+            segment_index: INVALID_SEGMENT_INDEX,
             edge_flags,
             brush_flags: BrushFlags::PERSPECTIVE_INTERPOLATION,
             user_data: uv_rect_address.as_int(),
@@ -2187,7 +2188,7 @@ fn add_gradient_tiles(
             BrushInstance {
                 prim_header_index,
                 clip_task_address,
-                segment_index: 0,
+                segment_index: INVALID_SEGMENT_INDEX,
                 edge_flags: EdgeAaSegmentMask::all(),
                 brush_flags: BrushFlags::PERSPECTIVE_INTERPOLATION,
                 user_data: 0,
@@ -2441,6 +2442,7 @@ impl ClipBatcher {
         &mut self,
         task_address: RenderTaskAddress,
         clip_data_address: GpuCacheAddress,
+        local_pos: LayoutPoint,
     ) {
         let instance = ClipMaskInstance {
             render_task_address: task_address,
@@ -2449,6 +2451,8 @@ impl ClipBatcher {
             segment: 0,
             clip_data_address,
             resource_address: GpuCacheAddress::invalid(),
+            local_pos,
+            tile_rect: LayoutRect::zero(),
         };
 
         self.rectangles.push(instance);
@@ -2489,21 +2493,27 @@ impl ClipBatcher {
                 segment: 0,
                 clip_data_address: GpuCacheAddress::invalid(),
                 resource_address: GpuCacheAddress::invalid(),
+                local_pos: clip_instance.local_pos,
+                tile_rect: LayoutRect::zero(),
             };
 
             match clip_node.item {
-                ClipItem::Image { ref mask, ref visible_tiles } => {
+                ClipItem::Image { image, size, .. } => {
                     let request = ImageRequest {
-                        key: mask.image,
+                        key: image,
                         rendering: ImageRendering::Auto,
                         tile: None,
                     };
-                    let mut add_image = |request: ImageRequest, clip_data_address: GpuCacheAddress| {
+
+                    let clip_data_address =
+                        gpu_cache.get_address(&clip_node.gpu_cache_handle);
+
+                    let mut add_image = |request: ImageRequest, local_tile_rect: LayoutRect| {
                         let cache_item = match resource_cache.get_cached_image(request) {
                             Ok(item) => item,
                             Err(..) => {
                                 warn!("Warnings: skip a image mask");
-                                debug!("Mask: {:?}, request: {:?}", mask, request);
+                                debug!("request: {:?}", request);
                                 return;
                             }
                         };
@@ -2513,23 +2523,23 @@ impl ClipBatcher {
                             .push(ClipMaskInstance {
                                 clip_data_address,
                                 resource_address: gpu_cache.get_address(&cache_item.uv_rect_handle),
+                                tile_rect: local_tile_rect,
                                 ..instance
                             });
                     };
 
-                    match *visible_tiles {
+                    match clip_instance.visible_tiles {
                         Some(ref tiles) => {
                             for tile in tiles {
                                 add_image(
                                     request.with_tile(tile.tile_offset),
-                                    gpu_cache.get_address(&tile.handle),
+                                    tile.tile_rect,
                                 )
                             }
                         }
                         None => {
-                            let gpu_address =
-                                gpu_cache.get_address(&clip_node.gpu_cache_handle);
-                            add_image(request, gpu_address)
+                            let mask_rect = LayoutRect::new(clip_instance.local_pos, size);
+                            add_image(request, mask_rect)
                         }
                     }
                 }

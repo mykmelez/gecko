@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sts=4 et sw=4 tw=99:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: set ts=8 sts=2 et sw=2 tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -39,14 +39,14 @@ bool ExpressionStatementEmitter::emitEnd() {
   MOZ_ASSERT(state_ == State::Expr);
   MOZ_ASSERT(bce_->stackDepth == depth_ + 1);
 
-  //                        [stack] VAL
+  //                [stack] VAL
 
   JSOp op = valueUsage_ == ValueUsage::WantValue ? JSOP_SETRVAL : JSOP_POP;
   if (!bce_->emit1(op)) {
-    //                    [stack] # if WantValue
-    //                    [stack] VAL
-    //                    [stack] # otherwise
-    //                    [stack]
+    //              [stack] # if WantValue
+    //              [stack] VAL
+    //              [stack] # otherwise
+    //              [stack]
     return false;
   }
 

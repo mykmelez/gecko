@@ -17,12 +17,12 @@ use std::{
     sync::{Arc, RwLock},
     vec::IntoIter,
 };
-use storage_variant::IntoVariant;
+use storage_variant::VariantType;
 use xpcom::{
     getter_addrefs,
     interfaces::{
         nsIEventTarget, nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback,
-        nsIKeyValuePairCallback, nsIKeyValueVariantCallback, nsIKeyValueVoidCallback, nsIRunnable,
+        nsIKeyValueVariantCallback, nsIKeyValueVoidCallback, nsIRunnable,
         nsIThread, nsIVariant,
     },
     RefPtr,
@@ -314,8 +314,7 @@ impl Task for GetTask {
                         Some(OwnedValue::Str(ref value)) => nsString::from(value).into_variant(),
                         None => ().into_variant(),
                     }
-                }.ok_or(KeyValueError::Read)?
-                .take())
+                })
             }()));
     }
 
@@ -359,9 +358,7 @@ impl Task for HasTask {
                 let value = reader.get(&self.store, key)?;
                 Ok(value
                     .is_some()
-                    .into_variant()
-                    .ok_or(KeyValueError::Read)?
-                    .take())
+                    .into_variant())
             }()));
     }
 
@@ -511,107 +508,6 @@ impl Task for EnumerateTask {
                 Ok(KeyValueEnumerator::new(get_current_thread()?, pairs))
             }(),
         ));
-    }
-
-    task_done!(value);
-}
-
-pub struct HasMoreElementsTask {
-    callback: Cell<Option<RefPtr<nsIKeyValueVariantCallback>>>,
-    iter: Arc<
-        RefCell<
-            IntoIter<(
-                Result<String, KeyValueError>,
-                Result<OwnedValue, KeyValueError>,
-            )>,
-        >,
-    >,
-    result: Cell<Option<Result<RefPtr<nsIVariant>, KeyValueError>>>,
-}
-
-impl HasMoreElementsTask {
-    pub fn new(
-        callback: RefPtr<nsIKeyValueVariantCallback>,
-        iter: Arc<
-            RefCell<
-                IntoIter<(
-                    Result<String, KeyValueError>,
-                    Result<OwnedValue, KeyValueError>,
-                )>,
-            >,
-        >,
-    ) -> HasMoreElementsTask {
-        HasMoreElementsTask {
-            callback: Cell::new(Some(callback)),
-            iter,
-            result: Cell::default(),
-        }
-    }
-}
-
-impl Task for HasMoreElementsTask {
-    fn run(&self) {
-        // We do the work within a closure that returns a Result so we can
-        // use the ? operator to simplify the implementation.
-        self.result
-            .set(Some(|| -> Result<RefPtr<nsIVariant>, KeyValueError> {
-                Ok((!self.iter.borrow().as_slice().is_empty())
-                    .into_variant()
-                    .ok_or(KeyValueError::Read)?
-                    .take())
-            }()));
-    }
-
-    task_done!(value);
-}
-
-pub struct GetNextTask {
-    callback: Cell<Option<RefPtr<nsIKeyValuePairCallback>>>,
-    iter: Arc<
-        RefCell<
-            IntoIter<(
-                Result<String, KeyValueError>,
-                Result<OwnedValue, KeyValueError>,
-            )>,
-        >,
-    >,
-    result: Cell<Option<Result<RefPtr<KeyValuePair>, KeyValueError>>>,
-}
-
-impl GetNextTask {
-    pub fn new(
-        callback: RefPtr<nsIKeyValuePairCallback>,
-        iter: Arc<
-            RefCell<
-                IntoIter<(
-                    Result<String, KeyValueError>,
-                    Result<OwnedValue, KeyValueError>,
-                )>,
-            >,
-        >,
-    ) -> GetNextTask {
-        GetNextTask {
-            callback: Cell::new(Some(callback)),
-            iter,
-            result: Cell::default(),
-        }
-    }
-}
-
-impl Task for GetNextTask {
-    fn run(&self) {
-        // We do the work within a closure that returns a Result so we can
-        // use the ? operator to simplify the implementation.
-        self.result
-            .set(Some(|| -> Result<RefPtr<KeyValuePair>, KeyValueError> {
-                let mut iter = self.iter.borrow_mut();
-                let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
-
-                // We fail on retrieval of the key/value pair if the key isn't valid
-                // UTF-*, if the value is unexpected, or if we encountered a store error
-                // while retrieving the pair.
-                Ok(KeyValuePair::new(key?, value?))
-            }()));
     }
 
     task_done!(value);

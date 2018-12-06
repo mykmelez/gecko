@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* vim: set sw=4 ts=8 et tw=80 : */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set sw=2 ts=8 et tw=80 : */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -133,6 +133,12 @@ class nsHttpConnectionInfo final : public ARefBase {
   void SetTrrDisabled(bool aNoTrr);
   bool GetTrrDisabled() const { return mTrrDisabled; }
 
+  void SetIPv4Disabled(bool aNoIPv4);
+  bool GetIPv4Disabled() const { return mIPv4Disabled; }
+
+  void SetIPv6Disabled(bool aNoIPv6);
+  bool GetIPv6Disabled() const { return mIPv6Disabled; }
+
   const nsCString &GetNPNToken() { return mNPNToken; }
   const nsCString &GetUsername() { return mUsername; }
 
@@ -190,6 +196,8 @@ class nsHttpConnectionInfo final : public ARefBase {
   uint32_t mTlsFlags;
   uint16_t mTrrUsed : 1;
   uint16_t mTrrDisabled : 1;
+  uint16_t mIPv4Disabled : 1;
+  uint16_t mIPv6Disabled : 1;
 
   bool mLessThanTls13;  // This will be set to true if we negotiate less than
                         // tls1.3. If the tls version is till not know or it

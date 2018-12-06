@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sts=4 et sw=4 tw=99:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: set ts=8 sts=2 et sw=2 tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -606,10 +606,6 @@ bool CreateThis(JSContext* cx, HandleObject callee, HandleObject newTarget,
         return false;
       }
       AutoRealm ar(cx, script);
-      AutoKeepTypeScripts keepTypes(cx);
-      if (!script->ensureHasTypes(cx, keepTypes)) {
-        return false;
-      }
       if (!js::CreateThis(cx, fun, script, newTarget, GenericObject, rval)) {
         return false;
       }

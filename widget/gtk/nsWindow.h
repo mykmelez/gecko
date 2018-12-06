@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim:expandtab:shiftwidth=4:tabstop=4:
  */
 /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -416,6 +416,7 @@ class nsWindow final : public nsBaseWidget {
   static CSDSupportLevel GetSystemCSDSupportLevel();
 
   static bool TopLevelWindowUseARGBVisual();
+  static bool GetTopLevelWindowActiveState(nsIFrame* aFrame);
 
  protected:
   virtual ~nsWindow();
@@ -535,6 +536,8 @@ class nsWindow final : public nsBaseWidget {
   CSDSupportLevel mCSDSupportLevel;
   // If true, draw our own window titlebar.
   bool mDrawInTitlebar;
+  // Draw titlebar with :backdrop css state (inactive/unfocused).
+  bool mTitlebarBackdropState;
   // Draggable titlebar region maintained by UpdateWindowDraggingRegion
   LayoutDeviceIntRegion mDraggableRegion;
 
@@ -621,6 +624,8 @@ class nsWindow final : public nsBaseWidget {
   void CleanLayerManagerRecursive();
 
   virtual int32_t RoundsWidgetCoordinatesTo() override;
+
+  void ForceTitlebarRedraw();
 
   /**
    * |mIMContext| takes all IME related stuff.

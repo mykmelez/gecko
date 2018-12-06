@@ -8,12 +8,12 @@ use data_type::{
 };
 use error::KeyValueError;
 use libc::{int32_t, uint16_t};
-use nserror::NsresultExt;
+use nserror::{NsresultExt};
 use nsstring::nsString;
 use ordered_float::OrderedFloat;
 use rkv::Value;
-use storage_variant::{IntoVariant, Variant};
-use xpcom::interfaces::nsIVariant;
+use storage_variant::VariantType;
+use xpcom::{interfaces::nsIVariant, RefPtr};
 
 extern "C" {
     fn NS_GetDataType(variant: *const nsIVariant) -> uint16_t;
@@ -40,14 +40,12 @@ pub fn value_to_owned<'a>(value: Option<Value<'a>>) -> Result<OwnedValue, KeyVal
     }
 }
 
-impl<'a> IntoVariant for OwnedValue {
-    fn into_variant(self) -> Option<Variant> {
-        match self {
-            OwnedValue::Bool(val) => val.into_variant(),
-            OwnedValue::I64(val) => val.into_variant(),
-            OwnedValue::F64(OrderedFloat(val)) => val.into_variant(),
-            OwnedValue::Str(val) => nsString::from(&val).into_variant(),
-        }
+pub fn owned_to_variant(owned: OwnedValue) -> RefPtr<nsIVariant> {
+    match owned {
+        OwnedValue::Bool(val) => val.into_variant(),
+        OwnedValue::I64(val) => val.into_variant(),
+        OwnedValue::F64(OrderedFloat(val)) => val.into_variant(),
+        OwnedValue::Str(val) => nsString::from(&val).into_variant(),
     }
 }
 

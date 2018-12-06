@@ -1,4 +1,4 @@
-/* -*- mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -212,9 +212,9 @@ nsOfflineCachePendingUpdate::OnStatusChange(nsIWebProgress *aWebProgress,
 }
 
 NS_IMETHODIMP
-nsOfflineCachePendingUpdate::OnSecurityChange(
-    nsIWebProgress *aWebProgress, nsIRequest *aRequest, uint32_t aOldState,
-    uint32_t aState, const nsAString &aContentBlockingLogJSON) {
+nsOfflineCachePendingUpdate::OnSecurityChange(nsIWebProgress *aWebProgress,
+                                              nsIRequest *aRequest,
+                                              uint32_t state) {
   MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }

@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sts=4 et sw=4 tw=99:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: set ts=8 sts=2 et sw=2 tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -3430,9 +3430,16 @@ static bool OriginalPromiseThenBuiltin(JSContext* cx, HandleValue promiseVal,
 
 MOZ_MUST_USE bool js::RejectPromiseWithPendingError(
     JSContext* cx, Handle<PromiseObject*> promise) {
-  // Not much we can do about uncatchable exceptions, just bail.
+  if (!cx->isExceptionPending()) {
+    // Reject the promise, but also propagate this uncatchable error.
+    mozilla::Unused << PromiseObject::reject(cx, promise, UndefinedHandleValue);
+    return false;
+  }
+
   RootedValue exn(cx);
-  if (!GetAndClearException(cx, &exn)) return false;
+  if (!GetAndClearException(cx, &exn)) {
+    return false;
+  }
   return PromiseObject::reject(cx, promise, exn);
 }
 

@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* vim:set expandtab ts=4 sw=4 sts=4 cin: */
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim:set expandtab ts=4 sw=2 sts=2 cin: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -565,6 +565,8 @@ nsresult nsHttpChannel::OnBeforeConnect() {
   mConnectionInfo->SetTlsFlags(mTlsFlags);
   mConnectionInfo->SetTrrUsed(mTRR);
   mConnectionInfo->SetTrrDisabled(mCaps & NS_HTTP_DISABLE_TRR);
+  mConnectionInfo->SetIPv4Disabled(mCaps & NS_HTTP_DISABLE_IPV4);
+  mConnectionInfo->SetIPv6Disabled(mCaps & NS_HTTP_DISABLE_IPV6);
 
   // notify "http-on-before-connect" observers
   gHttpHandler->OnBeforeConnect(this);
@@ -813,7 +815,8 @@ void nsHttpChannel::SpeculativeConnect() {
 
   Unused << gHttpHandler->SpeculativeConnect(
       mConnectionInfo, callbacks,
-      mCaps & (NS_HTTP_DISALLOW_SPDY | NS_HTTP_DISABLE_TRR));
+      mCaps & (NS_HTTP_DISALLOW_SPDY | NS_HTTP_DISABLE_TRR |
+               NS_HTTP_DISABLE_IPV4 | NS_HTTP_DISABLE_IPV6));
 }
 
 void nsHttpChannel::DoNotifyListenerCleanup() {

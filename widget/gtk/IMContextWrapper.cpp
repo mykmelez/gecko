@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* vim: set ts=4 et sw=4 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=4 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -842,8 +842,19 @@ KeyHandlingState IMContextWrapper::OnKeyEvent(
         // ibus won't send back key press events in a dead key sequcne.
         if (mMaybeInDeadKeySequence && aEvent->type == GDK_KEY_PRESS) {
           maybeHandledAsynchronously = false;
-          isUnexpectedAsyncEvent = isHandlingAsyncEvent;
-          break;
+          if (isHandlingAsyncEvent) {
+            isUnexpectedAsyncEvent = true;
+            break;
+          }
+          // Some keyboard layouts which have dead keys may send
+          // "empty" key event to make us call
+          // gtk_im_context_filter_keypress() to commit composed
+          // character during a GDK_KEY_PRESS event dispatching.
+          if (!gdk_keyval_to_unicode(aEvent->keyval) &&
+              !aEvent->hardware_keycode) {
+            isUnexpectedAsyncEvent = true;
+            break;
+          }
         }
         // ibus handles key events synchronously if focused editor is
         // <input type="password"> or |ime-mode: disabled;|.
@@ -878,8 +889,19 @@ KeyHandlingState IMContextWrapper::OnKeyEvent(
         // fcitx won't send back key press events in a dead key sequcne.
         if (mMaybeInDeadKeySequence && aEvent->type == GDK_KEY_PRESS) {
           maybeHandledAsynchronously = false;
-          isUnexpectedAsyncEvent = isHandlingAsyncEvent;
-          break;
+          if (isHandlingAsyncEvent) {
+            isUnexpectedAsyncEvent = true;
+            break;
+          }
+          // Some keyboard layouts which have dead keys may send
+          // "empty" key event to make us call
+          // gtk_im_context_filter_keypress() to commit composed
+          // character during a GDK_KEY_PRESS event dispatching.
+          if (!gdk_keyval_to_unicode(aEvent->keyval) &&
+              !aEvent->hardware_keycode) {
+            isUnexpectedAsyncEvent = true;
+            break;
+          }
         }
 
         // fcitx handles key events asynchronously even if focused

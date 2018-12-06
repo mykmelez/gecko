@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sts=4 et sw=4 tw=99:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: set ts=8 sts=2 et sw=2 tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -210,6 +210,7 @@ namespace jit {
   _(JSOP_FINALYIELDRVAL)              \
   _(JSOP_RESUME)                      \
   _(JSOP_CALLEE)                      \
+  _(JSOP_ENVCALLEE)                   \
   _(JSOP_SUPERBASE)                   \
   _(JSOP_SUPERFUN)                    \
   _(JSOP_GETRVAL)                     \
@@ -402,8 +403,6 @@ class BaselineCodeGen {
   Address getEnvironmentCoordinateAddressFromObject(Register objReg,
                                                     Register reg);
   Address getEnvironmentCoordinateAddress(Register reg);
-
-  void getThisEnvironmentCallee(Register reg);
 };
 
 // Interface used by BaselineCodeGen for BaselineCompiler.

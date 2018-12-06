@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sts=4 et sw=4 tw=99:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: set ts=8 sts=2 et sw=2 tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,7 +9,6 @@
 #include "jsapi.h"
 
 #include "js/CharacterEncoding.h"
-#include "vm/Interpreter.h"  // For InstanceOfOperator
 
 #include "vm/JSObject-inl.h"
 #include "vm/NativeObject-inl.h"
@@ -1373,7 +1372,7 @@ bool ScriptedProxyHandler::nativeCall(JSContext* cx, IsAcceptableThis test,
 
 bool ScriptedProxyHandler::hasInstance(JSContext* cx, HandleObject proxy,
                                        MutableHandleValue v, bool* bp) const {
-  return InstanceOfOperator(cx, proxy, v, bp);
+  return InstanceofOperator(cx, proxy, v, bp);
 }
 
 bool ScriptedProxyHandler::getBuiltinClass(JSContext* cx, HandleObject proxy,

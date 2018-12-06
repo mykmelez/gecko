@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* vim:set ts=4 sw=4 sts=4 et cin: */
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim:set ts=4 sw=2 sts=2 et cin: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -120,6 +120,12 @@ enum class SpdyVersion {
 // http request after CONNECT or setup tls. An http upgrade handler MUST be
 // set. An ALPN header is set using the upgrade protocol.
 #define NS_HTTP_CONNECT_ONLY (1 << 16)
+
+// The connection should not use IPv4.
+#define NS_HTTP_DISABLE_IPV4 (1 << 17)
+
+// The connection should not use IPv6
+#define NS_HTTP_DISABLE_IPV6 (1 << 18)
 
 //-----------------------------------------------------------------------------
 // some default values

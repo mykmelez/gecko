@@ -126,20 +126,16 @@ class KeyValueEnumerator {
   }
 
   hasMoreElements() {
-    return promisify(this.enumerator.hasMoreElements);
+    return this.enumerator.hasMoreElements();
   }
 
   getNext() {
-    return promisify(this.enumerator.getNext);
+    return this.enumerator.getNext();
   }
 
-  [Symbol.asyncIterator]() {
-    return KeyValueIterator(this);
-  }
-}
-
-async function* KeyValueIterator(enumerator) {
-  while (await enumerator.hasMoreElements()) {
-    yield (await enumerator.getNext());
+  *[Symbol.iterator]() {
+    while (this.enumerator.hasMoreElements()) {
+      yield (this.enumerator.getNext());
+    }
   }
 }

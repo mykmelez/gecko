@@ -461,11 +461,13 @@
   box-sizing: border-box;
   min-height: 29px;
 
-  --progress-recording-background: #ffebeb;
-  --progress-playing-background: #ebf6ff;
+  --progress-recording-background: hsl(0, 100%, 97%);
+  --progress-playing-background: hsl(207, 100%, 97%);
 
-  --recording-marker-background: hsl(14.9, 100%, 47.3%);
-  --recording-marker-background-hover: hsl(14.9, 100%, 37.3%);
+  --progress-bar-transition: 200ms;
+
+  --recording-marker-background: hsl(14.9, 100%, 67%);
+  --recording-marker-background-hover: hsl(14.9, 100%, 47%);
   --command-button-size: 14px;
   --command-button-primary-size: 20px;
 }
@@ -481,6 +483,7 @@
   background: #fff;
   margin: 4px 10px 4px 0;
   border: 1px solid #bfc9d2;
+  overflow: hidden;
 }
 
 .webreplay-player .progress {
@@ -488,10 +491,23 @@
   width: 100%;
   height: 100%;
   background: var(--progress-playing-background);
+  transition-duration: var(--progress-bar-transition);
+}
+
+.webreplay-player #overlay:not(.recording) .progress::after {
+  background: var(--purple-50);
+  width: 1px;
+  height: 100%;
+  right: -0.5px;
+  opacity: 0.4;
+  display: block;
+  content: "";
+  position: absolute;
 }
 
 .webreplay-player .recording .progress {
   background: var(--progress-recording-background);
+  transition-duration: var(--progress-bar-transition);
 }
 
 .webreplay-player .message {
@@ -501,7 +517,8 @@
   height: 7px;
   border-radius: 4.5px;
   top: calc(50% - 3.5px);
-  background: var(--blue-50);
+  background: var(--blue-40);
+  transition-duration: 100ms;
 }
 
 .webreplay-player .message.overlayed {
@@ -511,6 +528,16 @@
 
 .webreplay-player .message.overlayed.future {
   border-color: #fff;
+}
+
+.webreplay-player .message.highlighted {
+  background-color: var(--blue-60);
+  transform: scale(1.25);
+  transition-duration: 100ms;
+}
+
+.webreplay-player .recording .message.highlighted {
+  background-color: var(--recording-marker-background-hover);
 }
 
 .webreplay-player .recording .message.overlayed {
@@ -588,11 +615,11 @@
 .webreplay-player .progress-line {
   width: 0%;
   height: 1px;
-  background: #0074e8;
+  background: var(--blue-40);
   position: absolute;
   left: 0;
-  right: 10px;
   top: 50%;
+  transition-duration: var(--progress-bar-transition);
 }
 
 .webreplay-player .progress-line.end {
@@ -602,4 +629,55 @@
 .webreplay-player .recording .progress-line {
   background: #d0021b;
   opacity: 0.3;
+}
+
+.webreplay-player .tick {
+  position: absolute;
+  height: 100%;
+}
+
+.webreplay-player .tick::before,
+.webreplay-player .tick::after {
+  height: 1.5px;
+  width: 1px;
+  right: 0;
+  position: absolute;
+  content: "";
+  display: block;
+}
+
+.webreplay-player .recording .tick::before,
+.webreplay-player .recording .tick::after {
+  background: #d0021b;
+}
+
+.webreplay-player .tick.future::before,
+.webreplay-player .tick.future::after {
+  background: #bfc9d2;
+}
+
+.webreplay-player .tick::before,
+.webreplay-player .tick::after {
+  background: var(--blue-50);
+}
+
+.webreplay-player .tick::after {
+  bottom: 0;
+}
+
+.webreplay-player .tick::before {
+  top: 0;
+}
+
+
+.webreplay-player #overlay:hover .tick {
+  opacity: 1;
+}
+
+.webreplay-player #overlay .tick {
+  opacity: 0.5;
+}
+
+.webreplay-player #overlay .tick:hover ~ .tick {
+ opacity: 0.5; 
 }

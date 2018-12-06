@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sts=4 et sw=4 tw=99:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: set ts=8 sts=2 et sw=2 tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -264,6 +264,11 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
     return Method_Compiled;
   }
 
+  // Check script warm-up counter.
+  if (script->incWarmUpCounter() <= JitOptions.baselineWarmUpThreshold) {
+    return Method_Skipped;
+  }
+
   // Check this before calling ensureJitRealmExists, so we're less
   // likely to report OOM in JSRuntime::createJitRuntime.
   if (!CanLikelyAllocateMoreExecutableMemory()) {
@@ -272,11 +277,6 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
 
   if (!cx->realm()->ensureJitRealmExists(cx)) {
     return Method_Error;
-  }
-
-  // Check script warm-up counter.
-  if (script->incWarmUpCounter() <= JitOptions.baselineWarmUpThreshold) {
-    return Method_Skipped;
   }
 
   // Frames can be marked as debuggee frames independently of its underlying
@@ -1014,7 +1014,19 @@ void BaselineScript::toggleProfilerInstrumentation(bool enable) {
   }
 }
 
-void ICScript::purgeOptimizedStubs(Zone* zone) {
+void ICScript::purgeOptimizedStubs(JSScript* script) {
+  MOZ_ASSERT(script->icScript() == this);
+
+  Zone* zone = script->zone();
+  if (zone->isGCSweeping() && IsAboutToBeFinalizedDuringSweep(*script)) {
+    // We're sweeping and the script is dead. Don't purge optimized stubs
+    // because (1) accessing CacheIRStubInfo pointers in ICStubs is invalid
+    // because we may have swept them already when we started (incremental)
+    // sweeping and (2) it's unnecessary because this script will be finalized
+    // soon anyway.
+    return;
+  }
+
   JitSpew(JitSpew_BaselineIC, "Purging optimized stubs");
 
   for (size_t i = 0; i < numICEntries(); i++) {

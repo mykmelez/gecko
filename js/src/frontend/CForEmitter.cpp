@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sts=4 et sw=4 tw=99:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: set ts=8 sts=2 et sw=2 tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -71,7 +71,7 @@ bool CForEmitter::emitBody(Cond cond, const Maybe<uint32_t>& bodyPos) {
     return false;
   }
   if (!bce_->emit1(JSOP_NOP)) {
-    //                    [stack]
+    //              [stack]
     return false;
   }
 
@@ -85,13 +85,13 @@ bool CForEmitter::emitBody(Cond cond, const Maybe<uint32_t>& bodyPos) {
   }
 
   if (!loopInfo_->emitLoopHead(bce_, bodyPos)) {
-    //                    [stack]
+    //              [stack]
     return false;
   }
 
   if (cond_ == Cond::Missing) {
     if (!loopInfo_->emitLoopEntry(bce_, bodyPos)) {
-      //                [stack]
+      //            [stack]
       return false;
     }
   }
@@ -153,10 +153,10 @@ bool CForEmitter::emitCond(const Maybe<uint32_t>& forPos,
   MOZ_ASSERT(state_ == State::Update);
 
   if (update_ == Update::Present) {
-    //                    [stack] UPDATE
+    //              [stack] UPDATE
 
     if (!bce_->emit1(JSOP_POP)) {
-      //                [stack]
+      //            [stack]
       return false;
     }
 
@@ -181,7 +181,7 @@ bool CForEmitter::emitCond(const Maybe<uint32_t>& forPos,
 
   if (cond_ == Cond::Present) {
     if (!loopInfo_->emitLoopEntry(bce_, condPos)) {
-      //                [stack]
+      //            [stack]
       return false;
     }
   } else if (update_ == Update::Missing) {
@@ -217,7 +217,7 @@ bool CForEmitter::emitEnd() {
   // If no loop condition, just emit a loop-closing jump.
   if (!loopInfo_->emitLoopEnd(bce_,
                               cond_ == Cond::Present ? JSOP_IFNE : JSOP_GOTO)) {
-    //                    [stack]
+    //              [stack]
     return false;
   }
 
@@ -235,7 +235,7 @@ bool CForEmitter::emitEnd() {
   }
 
   if (!loopInfo_->patchBreaksAndContinues(bce_)) {
-    //                    [stack]
+    //              [stack]
     return false;
   }
 

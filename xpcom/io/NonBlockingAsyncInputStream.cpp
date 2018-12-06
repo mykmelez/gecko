@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -168,7 +168,8 @@ NonBlockingAsyncInputStream::Close() {
 NS_IMETHODIMP
 NonBlockingAsyncInputStream::Available(uint64_t* aLength) {
   nsresult rv = mInputStream->Available(aLength);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
+  // Don't issue warnings for legal condition NS_BASE_STREAM_CLOSED.
+  if (rv == NS_BASE_STREAM_CLOSED || NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
