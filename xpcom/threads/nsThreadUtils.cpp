@@ -574,10 +574,7 @@ bool nsIEventTarget::IsOnCurrentThread() {
 }
 
 extern "C" {
-
-nsresult
-NS_GetCurrentThreadEventTarget(nsIEventTarget** aResult)
-{
+nsresult NS_GetCurrentThreadEventTarget(nsIEventTarget** aResult) {
   nsCOMPtr<nsIEventTarget> target = mozilla::GetCurrentThreadEventTarget();
   if (!target) {
     return NS_ERROR_UNEXPECTED;
@@ -592,12 +589,9 @@ NS_GetCurrentThreadEventTarget(nsIEventTarget** aResult)
 // nsIThreadManager::DEFAULT_STACK_SIZE in Rust to pass it explicitly,
 // , since it is defined in a %{C++ ... %} block within nsIThreadManager.idl.
 // So we indirect through this function.
-nsresult
-NS_NewNamedThreadWithDefaultStackSize(const nsACString& aName,
-                                      nsIThread** aResult,
-                                      nsIRunnable* aEvent)
-{
+nsresult NS_NewNamedThreadWithDefaultStackSize(const nsACString& aName,
+                                               nsIThread** aResult,
+                                               nsIRunnable* aEvent) {
   return NS_NewNamedThread(aName, aResult, aEvent);
 }
-
 }

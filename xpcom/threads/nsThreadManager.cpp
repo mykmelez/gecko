@@ -39,9 +39,7 @@ static MOZ_THREAD_LOCAL(PRThread*) gTlsCurrentVirtualThread;
 bool NS_IsMainThreadTLSInitialized() { return sTLSIsMainThread.initialized(); }
 
 extern "C" {
-
 bool NS_IsMainThread() { return sTLSIsMainThread.get(); }
-
 }
 
 void NS_SetMainThread() {
