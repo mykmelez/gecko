@@ -258,28 +258,12 @@ def _abortIfFalse(cond, msg):
         [cond, ExprLiteral.String(msg)]))
 
 
-def _refptr(T, ptr=0, ref=0):
-    return Type('RefPtr', T=T, ptr=ptr, ref=ref)
-
-
-def _refptrGet(expr):
-    return ExprCall(ExprSelect(expr, '.', 'get'))
-
-
-def _refptrForget(expr):
-    return ExprCall(ExprSelect(expr, '.', 'forget'))
-
-
-def _refptrTake(expr):
-    return ExprCall(ExprSelect(expr, '.', 'take'))
+def _refptr(T):
+    return Type('RefPtr', T=T)
 
 
 def _uniqueptr(T):
     return Type('UniquePtr', T=T)
-
-
-def _uniqueptrGet(expr):
-    return ExprCall(ExprSelect(expr, '.', 'get'))
 
 
 def _tuple(types, const=0, ref=0):
@@ -3910,13 +3894,31 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
 
         msgvar, stmts = self.makeMessage(md, errfnSendCtor)
         sendok, sendstmts = self.sendAsync(md, msgvar)
+
+        warnif = StmtIf(ExprNot(sendok))
+        warnif.addifstmt(_printWarningMessage('Error sending constructor'))
+
         method.addstmts(
+            # Build our constructor message & verify it.
             stmts
             + self.genVerifyMessage(md.decl.type.verify, md.params,
                                     errfnSendCtor, ExprVar('msg__'))
+
+            # Notify the other side about the newly created actor.
+            #
+            # If the MessageChannel is closing, and we haven't been told yet,
+            # this send may fail. This error is ignored to treat it like a
+            # message being lost due to the other side shutting down before
+            # processing it.
+            #
+            # NOTE: We don't free the actor here, as our caller may be
+            # depending on it being alive after calling SendConstructor.
             + sendstmts
-            + self.failCtorIf(md, ExprNot(sendok))
-            + [StmtReturn(actor.var())])
+
+            # Warn if the message failed to send, and return our newly created
+            # actor.
+            + [warnif,
+               StmtReturn(actor.var())])
 
         lbl = CaseLabel(md.pqReplyId())
         case = StmtBlock()

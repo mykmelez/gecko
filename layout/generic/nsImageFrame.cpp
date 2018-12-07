@@ -56,7 +56,6 @@
 #include "nsLayoutUtils.h"
 #include "nsDisplayList.h"
 #include "nsIContent.h"
-#include "nsIDocument.h"
 #include "FrameLayerBuilder.h"
 #include "mozilla/dom/Selection.h"
 #include "nsIURIMutator.h"
@@ -1649,12 +1648,11 @@ bool nsDisplayImage::CreateWebRenderCommands(
     return false;
   }
 
-  if (mFrame->IsImageFrame()) {
-    // Image layer doesn't support draw focus ring for image map.
-    nsImageFrame* f = static_cast<nsImageFrame*>(mFrame);
-    if (f->HasImageMap()) {
-      return false;
-    }
+  MOZ_ASSERT(mFrame->IsImageFrame() || mFrame->IsImageControlFrame());
+  // Image layer doesn't support draw focus ring for image map.
+  nsImageFrame* frame = static_cast<nsImageFrame*>(mFrame);
+  if (frame->HasImageMap()) {
+    return false;
   }
 
   uint32_t flags = imgIContainer::FLAG_ASYNC_NOTIFY;
@@ -1710,10 +1708,7 @@ bool nsDisplayImage::CreateWebRenderCommands(
   // display item may get recreated.
   if (updatePrevImage) {
     mPrevImage = mImage;
-    if (mFrame->IsImageFrame()) {
-      nsImageFrame* f = static_cast<nsImageFrame*>(mFrame);
-      f->mPrevImage = f->mImage;
-    }
+    frame->mPrevImage = frame->mImage;
   }
 
   // If the image container is empty, we don't want to fallback. Any other
@@ -1806,7 +1801,7 @@ already_AddRefed<imgIRequest> nsImageFrame::GetCurrentRequest() const {
 
 void nsImageFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
                                     const nsDisplayListSet& aLists) {
-  if (!IsVisibleForPainting(aBuilder)) return;
+  if (!IsVisibleForPainting()) return;
 
   DisplayBorderBackgroundOutline(aBuilder, aLists);
 

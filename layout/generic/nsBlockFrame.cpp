@@ -35,7 +35,6 @@
 #include "nsIPresShell.h"
 #include "nsHTMLParts.h"
 #include "nsGkAtoms.h"
-#include "nsGenericHTMLElement.h"
 #include "nsAttrValueInlines.h"
 #include "mozilla/Sprintf.h"
 #include "nsFloatManager.h"
@@ -6348,15 +6347,6 @@ static void ComputeVisualOverflowArea(nsLineList& aLines, nscoord aWidth,
   aResult.height = yb - ya;
 }
 #endif
-
-bool nsBlockFrame::IsVisibleInSelection(Selection* aSelection) {
-  if (mContent->IsAnyOfHTMLElements(nsGkAtoms::html, nsGkAtoms::body))
-    return true;
-
-  IgnoredErrorResult rv;
-  bool visible = aSelection->ContainsNode(*mContent, true, rv);
-  return !rv.Failed() && visible;
-}
 
 #ifdef DEBUG
 static void DebugOutputDrawLine(int32_t aDepth, nsLineBox* aLine, bool aDrawn) {

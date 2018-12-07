@@ -484,8 +484,11 @@ struct TextRenderedRun {
    * transform.
    *
    *
-   * Assume that we have <text x="100" y="100" rotate="0 0 1 0 0
-   * 1">abcdef</text>. This would result in four text rendered runs:
+   * Assume that we have:
+   *
+   *   <text x="100" y="100" rotate="0 0 1 0 0 * 1">abcdef</text>.
+   *
+   * This would result in four text rendered runs:
    *
    *   - one for "ab"
    *   - one for "c"
@@ -2936,7 +2939,7 @@ void SVGTextFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     // painting.
     return;
   }
-  if (!IsVisibleForPainting(aBuilder) && aBuilder->IsForPainting()) {
+  if (!IsVisibleForPainting() && aBuilder->IsForPainting()) {
     return;
   }
   DisplayOutline(aBuilder, aLists);

@@ -47,7 +47,6 @@
 #include "nsStyleConsts.h"
 #include "nsIPresShell.h"
 #include "mozilla/Logging.h"
-#include "mozilla/Sprintf.h"
 #include "nsLayoutUtils.h"
 #include "LayoutLogging.h"
 #include "mozilla/RestyleManager.h"
@@ -116,9 +115,6 @@
 #include "ActiveLayerTracker.h"
 
 #include "nsITheme.h"
-#include "nsStyleConsts.h"
-
-#include "ImageLoader.h"
 
 using namespace mozilla;
 using namespace mozilla::css;
@@ -2135,7 +2131,7 @@ already_AddRefed<ComputedStyle> nsIFrame::ComputeSelectionStyle() const {
 void nsFrame::DisplaySelectionOverlay(nsDisplayListBuilder* aBuilder,
                                       nsDisplayList* aList,
                                       uint16_t aContentType) {
-  if (!IsSelected() || !IsVisibleForPainting(aBuilder)) {
+  if (!IsSelected() || !IsVisibleForPainting()) {
     return;
   }
 
@@ -2193,14 +2189,14 @@ void nsFrame::DisplayOutlineUnconditional(nsDisplayListBuilder* aBuilder,
 
 void nsFrame::DisplayOutline(nsDisplayListBuilder* aBuilder,
                              const nsDisplayListSet& aLists) {
-  if (!IsVisibleForPainting(aBuilder)) return;
+  if (!IsVisibleForPainting()) return;
 
   DisplayOutlineUnconditional(aBuilder, aLists);
 }
 
 void nsIFrame::DisplayCaret(nsDisplayListBuilder* aBuilder,
                             nsDisplayList* aList) {
-  if (!IsVisibleForPainting(aBuilder)) return;
+  if (!IsVisibleForPainting()) return;
 
   aList->AppendToTop(MakeDisplayItem<nsDisplayCaret>(aBuilder, this));
 }
@@ -2230,7 +2226,7 @@ void nsFrame::DisplayBorderBackgroundOutline(nsDisplayListBuilder* aBuilder,
   // The visibility check belongs here since child elements have the
   // opportunity to override the visibility property and display even if
   // their parent is hidden.
-  if (!IsVisibleForPainting(aBuilder)) {
+  if (!IsVisibleForPainting()) {
     return;
   }
 
@@ -2669,7 +2665,7 @@ void nsIFrame::BuildDisplayListForStackingContext(
 
   // Replaced elements have their visibility handled here, because
   // they're visually atomic
-  if (IsFrameOfType(eReplaced) && !IsVisibleForPainting(aBuilder)) return;
+  if (IsFrameOfType(eReplaced) && !IsVisibleForPainting()) return;
 
   const nsStyleDisplay* disp = StyleDisplay();
   const nsStyleEffects* effects = StyleEffects();
@@ -7346,48 +7342,12 @@ void nsIFrame::RootFrameList(nsPresContext* aPresContext, FILE* out,
 }
 #endif
 
-bool nsIFrame::IsVisibleForPainting(nsDisplayListBuilder* aBuilder) {
-  if (!StyleVisibility()->IsVisible()) return false;
-  Selection* sel = aBuilder->GetBoundingSelection();
-  return !sel || IsVisibleInSelection(sel);
-}
-
 bool nsIFrame::IsVisibleForPainting() {
-  if (!StyleVisibility()->IsVisible()) return false;
-
-  nsPresContext* pc = PresContext();
-  if (!pc->IsRenderingOnlySelection()) return true;
-
-  nsCOMPtr<nsISelectionController> selcon(do_QueryInterface(pc->PresShell()));
-  if (selcon) {
-    RefPtr<Selection> sel =
-        selcon->GetSelection(nsISelectionController::SELECTION_NORMAL);
-    if (sel) {
-      return IsVisibleInSelection(sel);
-    }
-  }
-  return true;
+  return StyleVisibility()->IsVisible();
 }
 
-bool nsIFrame::IsVisibleInSelection(nsDisplayListBuilder* aBuilder) {
-  Selection* sel = aBuilder->GetBoundingSelection();
-  return !sel || IsVisibleInSelection(sel);
-}
-
-bool nsIFrame::IsVisibleOrCollapsedForPainting(nsDisplayListBuilder* aBuilder) {
-  if (!StyleVisibility()->IsVisibleOrCollapsed()) return false;
-  Selection* sel = aBuilder->GetBoundingSelection();
-  return !sel || IsVisibleInSelection(sel);
-}
-
-bool nsIFrame::IsVisibleInSelection(Selection* aSelection) {
-  if (!GetContent() || !GetContent()->IsSelectionDescendant()) {
-    return false;
-  }
-
-  ErrorResult rv;
-  bool vis = aSelection->ContainsNode(*mContent, true, rv);
-  return rv.Failed() || vis;
+bool nsIFrame::IsVisibleOrCollapsedForPainting() {
+  return StyleVisibility()->IsVisibleOrCollapsed();
 }
 
 /* virtual */ bool nsFrame::IsEmpty() { return false; }
@@ -7539,8 +7499,8 @@ nsresult nsFrame::GetNextPrevLineFromeBlockFrame(nsPresContext* aPresContext,
   nsIFrame* resultFrame = nullptr;
   nsIFrame* farStoppingFrame = nullptr;  // we keep searching until we find a
                                          // "this" frame then we go to next line
-  nsIFrame* nearStoppingFrame =
-      nullptr;  // if we are backing up from edge, stop here
+  nsIFrame* nearStoppingFrame = nullptr;  // if we are backing up from edge,
+                                          // stop here
   nsIFrame* firstFrame;
   nsIFrame* lastFrame;
   nsRect rect;
@@ -9543,21 +9503,18 @@ nsFrame::RefreshSizeCache(nsBoxLayoutState& aState) {
 
   // Ok we need to compute our minimum, preferred, and maximum sizes.
   // 1) Maximum size. This is easy. Its infinite unless it is overloaded by CSS.
-  // 2) Preferred size. This is a little harder. This is the size the block
-  // would be
-  //      if it were laid out on an infinite canvas. So we can get this by
-  //      reflowing the block with and INTRINSIC width and height. We can also
-  //      do a nice optimization for incremental reflow. If the reflow is
-  //      incremental then we can pass a flag to have the block compute the
-  //      preferred width for us! Preferred height can just be the minimum
-  //      height;
+  // 2) Preferred size. This is a little harder. This is the size the
+  //    block would be if it were laid out on an infinite canvas. So we can
+  //    get this by reflowing the block with and INTRINSIC width and height. We
+  //    can also do a nice optimization for incremental reflow. If the reflow is
+  //    incremental then we can pass a flag to have the block compute the
+  //    preferred width for us! Preferred height can just be the minimum height;
   // 3) Minimum size. This is a toughy. We can pass the block a flag asking for
-  // the max element
-  //    size. That would give us the width. Unfortunately you can only ask for a
-  //    maxElementSize during an incremental reflow. So on other reflows we will
-  //    just have to use 0. The min height on the other hand is fairly easy we
-  //    need to get the largest line height. This can be done with the line
-  //    iterator.
+  //    the max element size. That would give us the width. Unfortunately you
+  //    can only ask for a maxElementSize during an incremental reflow. So on
+  //    other reflows we will just have to use 0. The min height on the other
+  //    hand is fairly easy we need to get the largest line height. This can be
+  //    done with the line iterator.
 
   // if we do have a rendering context
   gfxContext* rendContext = aState.GetRenderingContext();
