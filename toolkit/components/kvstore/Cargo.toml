@@ -12,6 +12,7 @@ nsstring = { path = "../../../servo/support/gecko/nsstring" }
 ordered-float = "1"
 rkv = "0.5"
 storage_variant = { path = "../../../storage/variant" }
+threadbound = "0.1"
 xpcom = { path = "../../../xpcom/rust/xpcom" }
 
 # Get rid of failure's dependency on backtrace. Eventually
