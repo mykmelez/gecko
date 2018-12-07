@@ -7,17 +7,29 @@ extern crate nserror;
 extern crate nsstring;
 extern crate xpcom;
 
+use libc::{c_double, int64_t, uint16_t};
 use nserror::{NsresultExt, NS_OK, nsresult};
 use nsstring::{nsACString, nsAString, nsCString, nsString};
 use xpcom::{getter_addrefs, interfaces::nsIVariant, RefPtr};
 
 extern "C" {
+    fn NS_GetDataType(variant: *const nsIVariant) -> uint16_t;
     fn NS_NewStorageNullVariant(result: *mut *const nsIVariant);
     fn NS_NewStorageBooleanVariant(value: bool, result: *mut *const nsIVariant);
-    fn NS_NewStorageIntegerVariant(value: libc::int64_t, result: *mut *const nsIVariant);
-    fn NS_NewStorageFloatVariant(value: libc::c_double, result: *mut *const nsIVariant);
+    fn NS_NewStorageIntegerVariant(value: int64_t, result: *mut *const nsIVariant);
+    fn NS_NewStorageFloatVariant(value: c_double, result: *mut *const nsIVariant);
     fn NS_NewStorageTextVariant(value: *const nsAString, result: *mut *const nsIVariant);
     fn NS_NewStorageUTF8TextVariant(value: *const nsACString, result: *mut *const nsIVariant);
+}
+
+pub trait GetDataType {
+    fn get_data_type(&self) -> uint16_t;
+}
+
+impl GetDataType for nsIVariant {
+    fn get_data_type(&self) -> uint16_t {
+        unsafe { NS_GetDataType(self) }
+    }
 }
 
 pub trait VariantType {

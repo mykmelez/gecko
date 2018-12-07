@@ -7,17 +7,13 @@ use data_type::{
     DATA_TYPE_WSTRING,
 };
 use error::KeyValueError;
-use libc::{int32_t, uint16_t};
+use libc::{int32_t};
 use nserror::{NsresultExt};
 use nsstring::nsString;
 use ordered_float::OrderedFloat;
 use rkv::Value;
-use storage_variant::VariantType;
+use storage_variant::{GetDataType, VariantType};
 use xpcom::{interfaces::nsIVariant, RefPtr};
-
-extern "C" {
-    fn NS_GetDataType(variant: *const nsIVariant) -> uint16_t;
-}
 
 // This is implemented in rkv but is incomplete there.  We implement a subset
 // to give KeyValuePair ownership over its value, so it can #[derive(xpcom)].
@@ -50,7 +46,7 @@ pub fn owned_to_variant(owned: OwnedValue) -> RefPtr<nsIVariant> {
 }
 
 pub fn variant_to_owned(variant: &nsIVariant) -> Result<Option<OwnedValue>, KeyValueError> {
-    let data_type = unsafe { NS_GetDataType(variant) };
+    let data_type = variant.get_data_type();
 
     match data_type {
         DATA_TYPE_INT32 => {

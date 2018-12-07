@@ -26,14 +26,3 @@ const mozilla::Module kKeyValueModule = {
     mozilla::Module::kVersion, kKeyValueCIDs, kKeyValueContracts, nullptr};
 
 NSMODULE_DEFN(nsKeyValueModule) = &kKeyValueModule;
-
-extern "C" {
-/**
- * Return the data type of the given variant.  This method used to be exposed
- * to XPCOM, but since bug 1507540 it's marked [notxpcom] in the interface
- * definition, so we need this C function to access it from Rust.
- */
-uint16_t NS_GetDataType(nsIVariant* aVariant) {
-  return aVariant->GetDataType();
-}
-}  // extern "C"
