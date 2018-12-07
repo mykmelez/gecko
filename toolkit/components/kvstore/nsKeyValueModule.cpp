@@ -9,14 +9,14 @@
 
 extern "C" {
 // Implemented in Rust.
-nsresult KeyValueServiceConstructor(nsISupports* aOuter, REFNSIID aIID,
-                                    void** aResult);
+nsresult nsKeyValueServiceConstructor(nsISupports* aOuter, REFNSIID aIID,
+                                      void** aResult);
 }  // extern "C"
 
 NS_DEFINE_NAMED_CID(NS_KEY_VALUE_SERVICE_CID);
 
 const mozilla::Module::CIDEntry kKeyValueCIDs[] = {
-    {&kNS_KEY_VALUE_SERVICE_CID, false, nullptr, KeyValueServiceConstructor},
+    {&kNS_KEY_VALUE_SERVICE_CID, false, nullptr, nsKeyValueServiceConstructor},
     {nullptr}};
 
 const mozilla::Module::ContractIDEntry kKeyValueContracts[] = {
@@ -31,7 +31,6 @@ const mozilla::Module kKeyValueModule = {mozilla::Module::kVersion,
 NSMODULE_DEFN(nsKeyValueModule) = &kKeyValueModule;
 
 extern "C" {
-
 /**
  * Return the data type of the given variant.  This method used to be exposed
  * to XPCOM, but since bug 1507540 it's marked [notxpcom] in the interface
@@ -40,4 +39,4 @@ extern "C" {
 uint16_t NS_GetDataType(nsIVariant* aVariant) {
   return aVariant->GetDataType();
 }
-}
+}  // extern "C"

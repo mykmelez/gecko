@@ -45,7 +45,7 @@ use xpcom::{
 };
 
 #[no_mangle]
-pub extern "C" fn KeyValueServiceConstructor(
+pub extern "C" fn nsKeyValueServiceConstructor(
     outer: *const nsISupports,
     iid: &nsIID,
     result: *mut *mut c_void,
