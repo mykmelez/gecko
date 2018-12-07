@@ -11,11 +11,9 @@ use owned_value::{value_to_owned, OwnedValue};
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
     cell::Cell,
-    cell::RefCell,
     path::Path,
     ptr, str,
     sync::{Arc, RwLock},
-    vec::IntoIter,
 };
 use storage_variant::VariantType;
 use xpcom::{
@@ -29,7 +27,6 @@ use xpcom::{
 };
 use KeyValueDatabase;
 use KeyValueEnumerator;
-use KeyValuePair;
 
 extern "C" {
     fn NS_GetCurrentThreadEventTarget(result: *mut *const nsIThread) -> nsresult;
