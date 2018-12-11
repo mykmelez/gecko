@@ -2,17 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use data_type::{
-    DATA_TYPE_BOOL, DATA_TYPE_DOUBLE, DATA_TYPE_EMPTY, DATA_TYPE_INT32, DATA_TYPE_VOID,
-    DATA_TYPE_WSTRING,
-};
 use error::KeyValueError;
-use libc::{int32_t};
-use nserror::{NsresultExt};
+use libc::int32_t;
+use nserror::NsresultExt;
 use nsstring::nsString;
 use ordered_float::OrderedFloat;
 use rkv::Value;
-use storage_variant::{GetDataType, VariantType};
+use storage_variant::{
+    GetDataType, VariantType, DATA_TYPE_BOOL, DATA_TYPE_DOUBLE, DATA_TYPE_EMPTY, DATA_TYPE_INT32,
+    DATA_TYPE_VOID, DATA_TYPE_WSTRING,
+};
 use xpcom::{interfaces::nsIVariant, RefPtr};
 
 // This is implemented in rkv but is incomplete there.  We implement a subset

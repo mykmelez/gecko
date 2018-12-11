@@ -20,8 +20,7 @@ use xpcom::{
     getter_addrefs,
     interfaces::{
         nsIEventTarget, nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback,
-        nsIKeyValueVariantCallback, nsIKeyValueVoidCallback, nsIRunnable,
-        nsIThread, nsIVariant,
+        nsIKeyValueVariantCallback, nsIKeyValueVoidCallback, nsIRunnable, nsIThread, nsIVariant,
     },
     RefPtr,
 };
@@ -353,9 +352,7 @@ impl Task for HasTask {
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
                 let value = reader.get(&self.store, key)?;
-                Ok(value
-                    .is_some()
-                    .into_variant())
+                Ok(value.is_some().into_variant())
             }()));
     }
 

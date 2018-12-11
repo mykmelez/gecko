@@ -15,7 +15,6 @@ extern crate storage_variant;
 #[macro_use]
 extern crate xpcom;
 
-mod data_type;
 mod error;
 mod owned_value;
 mod task;
@@ -33,8 +32,8 @@ use std::{
     vec::IntoIter,
 };
 use task::{
-    create_thread, DeleteTask, EnumerateTask, GetOrCreateTask, GetTask,
-    HasTask, PutTask, TaskRunnable,
+    create_thread, DeleteTask, EnumerateTask, GetOrCreateTask, GetTask, HasTask, PutTask,
+    TaskRunnable,
 };
 use xpcom::{
     interfaces::{
@@ -293,7 +292,9 @@ impl KeyValueEnumerator {
         // We fail on retrieval of the key/value pair if the key isn't valid
         // UTF-*, if the value is unexpected, or if we encountered a store error
         // while retrieving the pair.
-        Ok(RefPtr::new(KeyValuePair::new(key?, value?).coerce::<nsIKeyValuePair>()))
+        Ok(RefPtr::new(
+            KeyValuePair::new(key?, value?).coerce::<nsIKeyValuePair>(),
+        ))
     }
 }
 
