@@ -41,6 +41,10 @@ pub fn get_current_thread() -> Result<RefPtr<nsIThread>, nsresult> {
     getter_addrefs(|p| unsafe { NS_GetCurrentThreadEventTarget(p) })
 }
 
+pub fn is_main_thread() -> bool {
+    unsafe { NS_IsMainThread() }
+}
+
 pub fn create_thread(name: &str) -> Result<RefPtr<nsIThread>, nsresult> {
     getter_addrefs(|p| unsafe {
         NS_NewNamedThreadWithDefaultStackSize(&*nsCString::from(name), p, ptr::null())
@@ -73,7 +77,7 @@ pub struct InitTaskRunnable {
 
 impl TaskRunnable {
     pub fn new(name: &'static str, task: Box<Task>) -> Result<RefPtr<TaskRunnable>, nsresult> {
-        debug_assert!(unsafe { NS_IsMainThread() });
+        debug_assert!(is_main_thread());
         Ok(TaskRunnable::allocate(InitTaskRunnable {
             name,
             original_thread: get_current_thread()?,
@@ -92,13 +96,13 @@ impl TaskRunnable {
     fn run(&self) -> Result<(), nsresult> {
         match self.has_run.take() {
             false => {
-                debug_assert!(unsafe { !NS_IsMainThread() });
+                debug_assert!(!is_main_thread());
                 self.has_run.set(true);
                 self.task.run();
                 self.dispatch(self.original_thread.clone())
             }
             true => {
-                debug_assert!(unsafe { NS_IsMainThread() });
+                debug_assert!(is_main_thread());
                 self.task.done()
             }
         }
