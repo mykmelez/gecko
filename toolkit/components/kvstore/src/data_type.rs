@@ -7,7 +7,7 @@ use libc::uint16_t;
 // These are the relevant parts of the nsXPTTypeTag enum in xptinfo.h,
 // which nsIVariant.idl reflects into the nsIDataType struct class and uses
 // to constrain the values of nsIVariant::dataType.
-// #[allow(non_camel_case_types)]
+#[repr(u16)]
 pub enum DataType {
     INT32 = 2,
     DOUBLE = 9,
