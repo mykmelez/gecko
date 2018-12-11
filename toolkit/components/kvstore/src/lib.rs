@@ -7,6 +7,7 @@ extern crate failure;
 extern crate libc;
 extern crate lmdb;
 extern crate log;
+extern crate moz_task;
 extern crate nserror;
 extern crate nsstring;
 extern crate ordered_float;
@@ -21,6 +22,7 @@ mod task;
 
 use error::KeyValueError;
 use libc::c_void;
+use moz_task::create_thread;
 use nserror::{nsresult, NS_ERROR_FAILURE, NS_ERROR_NO_AGGREGATION, NS_OK};
 use nsstring::{nsACString, nsCString};
 use owned_value::{owned_to_variant, variant_to_owned, OwnedValue};
@@ -31,10 +33,7 @@ use std::{
     sync::{Arc, RwLock},
     vec::IntoIter,
 };
-use task::{
-    create_thread, DeleteTask, EnumerateTask, GetOrCreateTask, GetTask, HasTask, PutTask,
-    TaskRunnable,
-};
+use task::{DeleteTask, EnumerateTask, GetOrCreateTask, GetTask, HasTask, PutTask, TaskRunnable};
 use xpcom::{
     interfaces::{
         nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback, nsIKeyValuePair,

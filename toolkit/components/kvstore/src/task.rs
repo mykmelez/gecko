@@ -5,6 +5,7 @@
 extern crate xpcom;
 
 use error::KeyValueError;
+use moz_task::{get_current_thread, is_main_thread};
 use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_OK};
 use nsstring::{nsACString, nsCString, nsString};
 use owned_value::{value_to_owned, OwnedValue};
@@ -12,44 +13,19 @@ use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
     cell::Cell,
     path::Path,
-    ptr, str,
+    str,
     sync::{Arc, RwLock},
 };
 use storage_variant::VariantType;
 use xpcom::{
-    getter_addrefs,
     interfaces::{
         nsIEventTarget, nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback,
-        nsIKeyValueVariantCallback, nsIKeyValueVoidCallback, nsIRunnable, nsIThread, nsIVariant,
+        nsIKeyValueVariantCallback, nsIKeyValueVoidCallback, nsIThread, nsIVariant,
     },
     RefPtr,
 };
 use KeyValueDatabase;
 use KeyValueEnumerator;
-
-extern "C" {
-    fn NS_GetCurrentThreadEventTarget(result: *mut *const nsIThread) -> nsresult;
-    fn NS_IsMainThread() -> bool;
-    fn NS_NewNamedThreadWithDefaultStackSize(
-        name: *const nsACString,
-        result: *mut *const nsIThread,
-        event: *const nsIRunnable,
-    ) -> nsresult;
-}
-
-pub fn get_current_thread() -> Result<RefPtr<nsIThread>, nsresult> {
-    getter_addrefs(|p| unsafe { NS_GetCurrentThreadEventTarget(p) })
-}
-
-pub fn is_main_thread() -> bool {
-    unsafe { NS_IsMainThread() }
-}
-
-pub fn create_thread(name: &str) -> Result<RefPtr<nsIThread>, nsresult> {
-    getter_addrefs(|p| unsafe {
-        NS_NewNamedThreadWithDefaultStackSize(&*nsCString::from(name), p, ptr::null())
-    })
-}
 
 /// A database operation that is executed asynchronously on a database thread
 /// and returns its result to the original thread from which it was dispatched.

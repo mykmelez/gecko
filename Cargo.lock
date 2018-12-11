@@ -1263,6 +1263,7 @@ dependencies = [
  "libc 0.2.43 (registry+https://github.com/rust-lang/crates.io-index)",
  "lmdb-rkv 0.8.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "moz_task 0.1.0",
  "nserror 0.1.0",
  "nsstring 0.1.0",
  "ordered-float 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1563,6 +1564,15 @@ dependencies = [
 name = "moz_cbor"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "moz_task"
+version = "0.1.0"
+dependencies = [
+ "nserror 0.1.0",
+ "nsstring 0.1.0",
+ "xpcom 0.1.0",
+]
 
 [[package]]
 name = "mozilla-central-workspace-hack"
