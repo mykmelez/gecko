@@ -95,8 +95,11 @@ impl KeyValueService {
     xpcom_method!(
         GetOrCreate,
         get_or_create,
-        { callback: *const nsIKeyValueDatabaseCallback, path: *const nsACString,
-            name: *const nsACString }
+        {
+            callback: *const nsIKeyValueDatabaseCallback,
+            path: *const nsACString,
+            name: *const nsACString
+        }
     );
 
     fn get_or_create(
@@ -139,8 +142,11 @@ impl KeyValueDatabase {
     xpcom_method!(
         Put,
         put,
-        { callback: *const nsIKeyValueVoidCallback, key: *const nsACString,
-            value: *const nsIVariant }
+        {
+            callback: *const nsIKeyValueVoidCallback,
+            key: *const nsACString,
+            value: *const nsIVariant
+        }
     );
 
     fn put(
@@ -168,8 +174,11 @@ impl KeyValueDatabase {
     xpcom_method!(
         Get,
         get,
-        { callback: *const nsIKeyValueVariantCallback, key: *const nsACString,
-            default_value: *const nsIVariant }
+        {
+            callback: *const nsIKeyValueVariantCallback,
+            key: *const nsACString,
+            default_value: *const nsIVariant
+        }
     );
 
     fn get(
@@ -226,8 +235,11 @@ impl KeyValueDatabase {
     xpcom_method!(
         Enumerate,
         enumerate,
-        { callback: *const nsIKeyValueEnumeratorCallback, from_key: *const nsACString,
-            to_key: *const nsACString }
+        {
+            callback: *const nsIKeyValueEnumeratorCallback,
+            from_key: *const nsACString,
+            to_key: *const nsACString
+        }
     );
 
     fn enumerate(
