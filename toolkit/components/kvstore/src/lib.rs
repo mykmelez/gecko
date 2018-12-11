@@ -44,19 +44,19 @@ use xpcom::{
 };
 
 #[no_mangle]
-pub extern "C" fn nsKeyValueServiceConstructor(
+pub unsafe extern "C" fn nsKeyValueServiceConstructor(
     outer: *const nsISupports,
     iid: &nsIID,
     result: *mut *mut c_void,
 ) -> nsresult {
-    unsafe { *result = ptr::null_mut() };
+    *result = ptr::null_mut();
 
     if !outer.is_null() {
         return NS_ERROR_NO_AGGREGATION;
     }
 
     let service: RefPtr<KeyValueService> = KeyValueService::new();
-    unsafe { service.QueryInterface(iid, result) }
+    service.QueryInterface(iid, result)
 }
 
 // For each public XPCOM method in the nsIKeyValue* interfaces, we implement
