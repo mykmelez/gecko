@@ -54,7 +54,12 @@ pub unsafe extern "C" fn nsKeyValueServiceConstructor(
         return NS_ERROR_NO_AGGREGATION;
     }
 
-    let service: RefPtr<KeyValueService> = KeyValueService::new();
+    let thread: RefPtr<nsIThread> = match create_thread("KeyValDB") {
+        Ok(thread) => thread,
+        Err(error) => return error,
+    };
+
+    let service: RefPtr<KeyValueService> = KeyValueService::new(thread);
     service.QueryInterface(iid, result)
 }
 
@@ -84,11 +89,13 @@ pub unsafe extern "C" fn nsKeyValueServiceConstructor(
 #[derive(xpcom)]
 #[xpimplements(nsIKeyValueService)]
 #[refcnt = "atomic"]
-pub struct InitKeyValueService {}
+pub struct InitKeyValueService {
+    thread: RefPtr<nsIThread>,
+}
 
 impl KeyValueService {
-    fn new() -> RefPtr<KeyValueService> {
-        KeyValueService::allocate(InitKeyValueService {})
+    fn new(thread: RefPtr<nsIThread>) -> RefPtr<KeyValueService> {
+        KeyValueService::allocate(InitKeyValueService { thread })
     }
 
     xpcom_method!(
@@ -107,16 +114,14 @@ impl KeyValueService {
         path: &nsACString,
         name: &nsACString,
     ) -> Result<(), nsresult> {
-        let target = create_thread("KeyValDB")?;
-
         let task = Box::new(GetOrCreateTask::new(
             RefPtr::new(callback),
-            target.clone(),
+            self.thread.clone(),
             nsCString::from(path),
             nsCString::from(name),
         ));
 
-        TaskRunnable::new("KVService::GetOrCreate", task)?.dispatch(target)
+        TaskRunnable::new("KVService::GetOrCreate", task)?.dispatch(self.thread.clone())
     }
 }
 
@@ -263,7 +268,6 @@ impl KeyValueDatabase {
 #[xpimplements(nsIKeyValueEnumerator)]
 #[refcnt = "atomic"]
 pub struct InitKeyValueEnumerator {
-    thread: RefPtr<nsIThread>,
     iter: Arc<
         RefCell<
             IntoIter<(
@@ -276,14 +280,12 @@ pub struct InitKeyValueEnumerator {
 
 impl KeyValueEnumerator {
     fn new(
-        thread: RefPtr<nsIThread>,
         pairs: Vec<(
             Result<String, KeyValueError>,
             Result<OwnedValue, KeyValueError>,
         )>,
     ) -> RefPtr<KeyValueEnumerator> {
         KeyValueEnumerator::allocate(InitKeyValueEnumerator {
-            thread,
             iter: Arc::new(RefCell::new(pairs.into_iter())),
         })
     }

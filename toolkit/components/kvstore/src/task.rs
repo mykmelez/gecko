@@ -479,7 +479,7 @@ impl Task for EnumerateTask {
                         )
                     }).collect();
 
-                Ok(KeyValueEnumerator::new(get_current_thread()?, pairs))
+                Ok(KeyValueEnumerator::new(pairs))
             }(),
         ));
     }
