@@ -41,7 +41,7 @@
   --in-content-link-color-visited: #0a8dff;
   --in-content-button-background: var(--grey-90-a10);
   --in-content-button-background-hover: var(--grey-90-a20);
-  --in-content-button-background-active: var(--grey-30);
+  --in-content-button-background-active: var(--grey-90-a30);
   --in-content-primary-button-background: var(--blue-60);
   --in-content-primary-button-background-hover: var(--blue-70);
   --in-content-primary-button-background-active: var(--blue-80);
@@ -49,6 +49,8 @@
   --in-content-table-border-dark-color: #d1d1d1;
   --in-content-table-header-background: #0a84ff;
 
+  --blue-40: #45a1ff;
+  --blue-40-a10: rgb(69, 161, 255, 0.1);
   --blue-50: #0a84ff;
   --blue-50-a30: rgba(10, 132, 255, 0.3);
   --blue-60: #0060df;
@@ -168,13 +170,12 @@ html|*.numberbox-input::-moz-number-spin-down {
   -moz-appearance: none;
   min-height: 32px;
   /* !important overrides button.css for disabled and default XUL buttons: */
-  color: var(--in-content-text-color) !important;
+  color: inherit !important;
   border: none;
   border-radius: 2px;
   background-color: var(--in-content-button-background);
   font-weight: 400;
   padding: 0 8px;
-  text-align: center;
   text-decoration: none;
   margin: 4px 8px;
   /* Ensure font-size isn't overridden by widget styling (e.g. in forms.css) */

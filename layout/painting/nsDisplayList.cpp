@@ -2500,8 +2500,7 @@ FrameLayerBuilder* nsDisplayList::BuildLayers(nsDisplayListBuilder* aBuilder,
     // Root is being scaled up by the X/Y resolution. Scale it back down.
     root->SetPostScale(1.0f / containerParameters.mXScale,
                        1.0f / containerParameters.mYScale);
-    root->SetScaleToResolution(presShell->ScaleToResolution(),
-                               containerParameters.mXScale);
+    root->SetScaleToResolution(containerParameters.mXScale);
 
     auto callback = [root](ScrollableLayerGuid::ViewID aScrollId) -> bool {
       return nsLayoutUtils::ContainsMetricsWithId(root, aScrollId);
@@ -4510,7 +4509,12 @@ void nsDisplayBackgroundColor::ApplyOpacity(nsDisplayListBuilder* aBuilder,
   IntersectClip(aBuilder, aClip, false);
 }
 
-bool nsDisplayBackgroundColor::CanApplyOpacity() const { return true; }
+bool nsDisplayBackgroundColor::CanApplyOpacity() const {
+  // Don't apply opacity if the background color is animated since the color is
+  // going to be changed on the compositor.
+  return !EffectCompositor::HasAnimationsForCompositor(
+      mFrame, eCSSProperty_background_color);
+}
 
 LayerState nsDisplayBackgroundColor::GetLayerState(
     nsDisplayListBuilder* aBuilder, LayerManager* aManager,
@@ -6552,8 +6556,7 @@ void nsDisplayResolution::HitTest(nsDisplayListBuilder* aBuilder,
                                   const nsRect& aRect, HitTestState* aState,
                                   nsTArray<nsIFrame*>* aOutFrames) {
   nsIPresShell* presShell = mFrame->PresShell();
-  nsRect rect = aRect.RemoveResolution(
-      presShell->ScaleToResolution() ? presShell->GetResolution() : 1.0f);
+  nsRect rect = aRect.RemoveResolution(presShell->GetResolution());
   mList.HitTest(aBuilder, rect, aState, aOutFrames);
 }
 
@@ -6569,8 +6572,7 @@ already_AddRefed<Layer> nsDisplayResolution::BuildLayer(
       nsDisplaySubDocument::BuildLayer(aBuilder, aManager, containerParameters);
   layer->SetPostScale(1.0f / presShell->GetResolution(),
                       1.0f / presShell->GetResolution());
-  layer->AsContainerLayer()->SetScaleToResolution(
-      presShell->ScaleToResolution(), presShell->GetResolution());
+  layer->AsContainerLayer()->SetScaleToResolution(presShell->GetResolution());
   return layer.forget();
 }
 

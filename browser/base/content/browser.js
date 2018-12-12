@@ -5582,6 +5582,10 @@ nsBrowserAccess.prototype = {
   canClose() {
     return CanCloseWindow();
   },
+
+  get tabCount() {
+    return gBrowser.tabs.length;
+  },
 };
 
 function onViewToolbarsPopupShowing(aEvent, aInsertPoint) {
@@ -6825,7 +6829,7 @@ var CanvasPermissionPromptHelper = {
       let contentWindow = aSubject.QueryInterface(Ci.nsIDOMWindow);
       browser = contentWindow.docShell.chromeEventHandler;
     } else {
-      browser = aSubject.QueryInterface(Ci.nsIBrowser);
+      browser = aSubject;
     }
 
     let uri = Services.io.newURI(aData);

@@ -1827,9 +1827,9 @@ nsIScrollableFrame* nsLayoutUtils::GetNearestScrollableFrameForDirection(
       ScrollStyles ss = scrollableFrame->GetScrollStyles();
       uint32_t directions = scrollableFrame->GetPerceivedScrollingDirections();
       if (aDirection == eVertical
-              ? (ss.mVertical != NS_STYLE_OVERFLOW_HIDDEN &&
+              ? (ss.mVertical != StyleOverflow::Hidden &&
                  (directions & nsIScrollableFrame::VERTICAL))
-              : (ss.mHorizontal != NS_STYLE_OVERFLOW_HIDDEN &&
+              : (ss.mHorizontal != StyleOverflow::Hidden &&
                  (directions & nsIScrollableFrame::HORIZONTAL)))
         return scrollableFrame;
     }
@@ -1854,8 +1854,8 @@ nsIScrollableFrame* nsLayoutUtils::GetNearestScrollableFrame(nsIFrame* aFrame,
       } else {
         ScrollStyles ss = scrollableFrame->GetScrollStyles();
         if ((aFlags & SCROLLABLE_INCLUDE_HIDDEN) ||
-            ss.mVertical != NS_STYLE_OVERFLOW_HIDDEN ||
-            ss.mHorizontal != NS_STYLE_OVERFLOW_HIDDEN) {
+            ss.mVertical != StyleOverflow::Hidden ||
+            ss.mHorizontal != StyleOverflow::Hidden) {
           return scrollableFrame;
         }
       }
@@ -4907,8 +4907,9 @@ inline static bool FormControlShrinksForPercentISize(nsIFrame* aFrame) {
   }
 
   LayoutFrameType fType = aFrame->Type();
-  if (fType == LayoutFrameType::Meter || fType == LayoutFrameType::Progress) {
-    // progress and meter do have this shrinking behavior
+  if (fType == LayoutFrameType::Meter || fType == LayoutFrameType::Progress ||
+      fType == LayoutFrameType::Range) {
+    // progress, meter and range do have this shrinking behavior
     // FIXME: Maybe these should be nsIFormControlFrame?
     return true;
   }
@@ -5386,7 +5387,7 @@ static void AddStateBitToAncestors(nsIFrame* aFrame, nsFrameState aBit) {
   nscoord* fixedMinSize = nullptr;
   auto minSizeUnit = size.GetUnit();
   if (minSizeUnit == eStyleUnit_Auto) {
-    if (aFrame->StyleDisplay()->mOverflowX == NS_STYLE_OVERFLOW_VISIBLE) {
+    if (aFrame->StyleDisplay()->mOverflowX == StyleOverflow::Visible) {
       size = aAxis == eAxisHorizontal ? stylePos->mWidth : stylePos->mHeight;
       // This is same as above: keywords should behaves as property's initial
       // values in block axis.
@@ -8339,12 +8340,12 @@ nsLayoutUtils::ScrollbarAreaToExcludeFromCompositionBoundsFor(
 
     nsPoint scrollPosition = aScrollableFrame->GetScrollPosition();
     if (aScrollableFrame->GetScrollStyles().mVertical ==
-        NS_STYLE_OVERFLOW_HIDDEN) {
+        StyleOverflow::Hidden) {
       contentBounds.y = scrollPosition.y;
       contentBounds.height = 0;
     }
     if (aScrollableFrame->GetScrollStyles().mHorizontal ==
-        NS_STYLE_OVERFLOW_HIDDEN) {
+        StyleOverflow::Hidden) {
       contentBounds.x = scrollPosition.x;
       contentBounds.width = 0;
     }

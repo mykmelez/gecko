@@ -945,7 +945,8 @@ static bool IsAccessKeyTarget(nsIContent* aContent, nsIFrame* aFrame,
   if (!aFrame->IsVisibleConsideringAncestors()) return false;
 
   // XUL controls can be activated.
-  nsCOMPtr<nsIDOMXULControlElement> control(do_QueryInterface(aContent));
+  nsCOMPtr<nsIDOMXULControlElement> control =
+      aContent->AsElement()->AsXULControl();
   if (control) return true;
 
   // HTML area, label and legend elements are never focusable, so
@@ -2475,8 +2476,8 @@ nsIFrame* EventStateManager::ComputeScrollTargetAndMayAdjustWheelEvent(
     }
 
     ScrollStyles ss = scrollableFrame->GetScrollStyles();
-    bool hiddenForV = (NS_STYLE_OVERFLOW_HIDDEN == ss.mVertical);
-    bool hiddenForH = (NS_STYLE_OVERFLOW_HIDDEN == ss.mHorizontal);
+    bool hiddenForV = (StyleOverflow::Hidden == ss.mVertical);
+    bool hiddenForH = (StyleOverflow::Hidden == ss.mHorizontal);
     if ((hiddenForV && hiddenForH) ||
         (checkIfScrollableY && !checkIfScrollableX && hiddenForV) ||
         (checkIfScrollableX && !checkIfScrollableY && hiddenForH)) {
@@ -2584,10 +2585,10 @@ void EventStateManager::DoScrollText(nsIScrollableFrame* aScrollableFrame,
 
   // Don't scroll around the axis whose overflow style is hidden.
   ScrollStyles overflowStyle = aScrollableFrame->GetScrollStyles();
-  if (overflowStyle.mHorizontal == NS_STYLE_OVERFLOW_HIDDEN) {
+  if (overflowStyle.mHorizontal == StyleOverflow::Hidden) {
     actualDevPixelScrollAmount.x = 0;
   }
-  if (overflowStyle.mVertical == NS_STYLE_OVERFLOW_HIDDEN) {
+  if (overflowStyle.mVertical == StyleOverflow::Hidden) {
     actualDevPixelScrollAmount.y = 0;
   }
 
@@ -2687,15 +2688,13 @@ void EventStateManager::DoScrollText(nsIScrollableFrame* aScrollableFrame,
   // additional action such as moving history.  In such case, overflowDelta
   // values should stay zero.
   if (scrollFrameWeak.IsAlive()) {
-    if (aEvent->mDeltaX &&
-        overflowStyle.mHorizontal == NS_STYLE_OVERFLOW_HIDDEN &&
+    if (aEvent->mDeltaX && overflowStyle.mHorizontal == StyleOverflow::Hidden &&
         !ComputeScrollTargetAndMayAdjustWheelEvent(
             scrollFrame, aEvent,
             COMPUTE_SCROLLABLE_ANCESTOR_ALONG_X_AXIS_WITH_AUTO_DIR)) {
       aEvent->mOverflowDeltaX = aEvent->mDeltaX;
     }
-    if (aEvent->mDeltaY &&
-        overflowStyle.mVertical == NS_STYLE_OVERFLOW_HIDDEN &&
+    if (aEvent->mDeltaY && overflowStyle.mVertical == StyleOverflow::Hidden &&
         !ComputeScrollTargetAndMayAdjustWheelEvent(
             scrollFrame, aEvent,
             COMPUTE_SCROLLABLE_ANCESTOR_ALONG_Y_AXIS_WITH_AUTO_DIR)) {
@@ -3017,15 +3016,15 @@ nsresult EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
           // an anonymous node of the targeted element.
           suppressBlur = (ui->mUserFocus == StyleUserFocus::Ignore);
 
+          nsCOMPtr<Element> element = do_QueryInterface(aEvent->mTarget);
           if (!suppressBlur) {
-            nsCOMPtr<Element> element = do_QueryInterface(aEvent->mTarget);
             suppressBlur =
                 element && element->State().HasState(NS_EVENT_STATE_DISABLED);
           }
 
-          if (!suppressBlur) {
+          if (!suppressBlur && element) {
             nsCOMPtr<nsIDOMXULControlElement> xulControl =
-                do_QueryInterface(aEvent->mTarget);
+                element->AsXULControl();
             if (xulControl) {
               bool disabled;
               xulControl->GetDisabled(&disabled);

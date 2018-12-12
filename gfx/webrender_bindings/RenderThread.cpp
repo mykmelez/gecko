@@ -325,6 +325,10 @@ static void NotifyDidRender(layers::CompositorBridgeParent* aBridge,
         info.epochs.data[i].pipeline_id, info.epochs.data[i].epoch,
         aCompositeStartId, aCompositeStart, aRenderStart, aEnd, &aStats);
   }
+  
+  if (aBridge->GetWrBridge()) {
+    aBridge->GetWrBridge()->CompositeIfNeeded();
+  }
 }
 
 static void NotifyDidStartRender(layers::CompositorBridgeParent* aBridge) {
@@ -764,7 +768,9 @@ WebRenderProgramCache::WebRenderProgramCache(wr::WrThreadPool* aThreadPool) {
     path.Append(gfx::gfxVars::ProfDirectory());
   }
   mProgramCache = wr_program_cache_new(&path, aThreadPool);
-  wr_try_load_shader_from_disk(mProgramCache);
+  if (gfxVars::UseWebRenderProgramBinaryDisk()) {
+    wr_try_load_shader_from_disk(mProgramCache);
+  }
 }
 
 WebRenderProgramCache::~WebRenderProgramCache() {

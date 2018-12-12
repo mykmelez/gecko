@@ -774,10 +774,10 @@ bool NodeBuilder::newNodeLoc(TokenPos* pos, MutableHandleValue dst) {
 
   uint32_t startLineNum, startColumnIndex;
   uint32_t endLineNum, endColumnIndex;
-  parser->anyChars.srcCoords.lineNumAndColumnIndex(pos->begin, &startLineNum,
-                                                   &startColumnIndex);
-  parser->anyChars.srcCoords.lineNumAndColumnIndex(pos->end, &endLineNum,
-                                                   &endColumnIndex);
+  parser->tokenStream.computeLineAndColumn(pos->begin, &startLineNum,
+                                           &startColumnIndex);
+  parser->tokenStream.computeLineAndColumn(pos->end, &endLineNum,
+                                           &endColumnIndex);
 
   if (!newObject(&to)) {
     return false;
@@ -1869,8 +1869,9 @@ bool ASTSerializer::blockStatement(ListNode* node, MutableHandleValue dst) {
 bool ASTSerializer::program(ListNode* node, MutableHandleValue dst) {
 #ifdef DEBUG
   {
-    const auto& srcCoords = parser->anyChars.srcCoords;
-    MOZ_ASSERT(srcCoords.lineNum(node->pn_pos.begin) == lineno);
+    const TokenStreamAnyChars& anyChars = parser->anyChars;
+    auto lineToken = anyChars.lineToken(node->pn_pos.begin);
+    MOZ_ASSERT(anyChars.lineNumber(lineToken) == lineno);
   }
 #endif
 
@@ -3438,10 +3439,7 @@ bool ASTSerializer::functionBody(ParseNode* pn, TokenPos* pos,
 static bool reflect_parse(JSContext* cx, uint32_t argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  if (args.length() < 1) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, "Reflect.parse", "0",
-                              "s");
+  if (!args.requireAtLeast(cx, "Reflect.parse", 1)) {
     return false;
   }
 

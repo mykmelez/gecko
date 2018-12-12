@@ -51,6 +51,7 @@ class Selection;
 }  // namespace dom
 
 class EventDispatchingCallback;
+class OverflowChangedTracker;
 
 // A set type for tracking visible frames, for use by the visibility code in
 // PresShell. The set contains nsIFrame* pointers.
@@ -194,16 +195,8 @@ class PresShell final : public nsIPresShell,
 
   void SetIgnoreViewportScrolling(bool aIgnore) override;
 
-  nsresult SetResolution(float aResolution) override {
-    return SetResolutionImpl(aResolution, /* aScaleToResolution = */ false,
-                             nsGkAtoms::other);
-  }
   nsresult SetResolutionAndScaleTo(float aResolution,
-                                   nsAtom* aOrigin) override {
-    return SetResolutionImpl(aResolution, /* aScaleToResolution = */ true,
-                             aOrigin);
-  }
-  bool ScaleToResolution() const override;
+                                   nsAtom* aOrigin) override;
   bool IsResolutionUpdated() const override { return mResolutionUpdated; }
   void SetResolutionUpdated(bool aUpdated) override {
     mResolutionUpdated = aUpdated;
@@ -434,7 +427,10 @@ class PresShell final : public nsIPresShell,
   void ScheduleReflow();
 
   // DoReflow returns whether the reflow finished without interruption
-  bool DoReflow(nsIFrame* aFrame, bool aInterruptible);
+  // If aFrame is not the root frame, the caller must pass a non-null
+  // aOverflowTracker.
+  bool DoReflow(nsIFrame* aFrame, bool aInterruptible,
+                mozilla::OverflowChangedTracker* aOverflowTracker);
 #ifdef DEBUG
   void DoVerifyReflow();
   void VerifyHasDirtyRootAncestor(nsIFrame* aFrame);
@@ -819,11 +815,6 @@ class PresShell final : public nsIPresShell,
   bool mNextPaintCompressed : 1;
 
   bool mHasCSSBackgroundColor : 1;
-
-  // Whether content should be scaled by the resolution amount. If this is
-  // not set, a transform that scales by the inverse of the resolution is
-  // applied to rendered layers.
-  bool mScaleToResolution : 1;
 
   // Whether the last chrome-only escape key event is consumed.
   bool mIsLastChromeOnlyEscapeKeyConsumed : 1;
