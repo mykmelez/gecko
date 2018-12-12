@@ -5,7 +5,7 @@
 extern crate xpcom;
 
 use error::KeyValueError;
-use moz_task::{get_current_thread, is_main_thread};
+use moz_task::{get_main_thread, is_main_thread};
 use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_OK};
 use nsstring::{nsACString, nsCString, nsString};
 use owned_value::{value_to_owned, OwnedValue};
@@ -46,7 +46,6 @@ pub trait Task {
 #[refcnt = "atomic"]
 pub struct InitTaskRunnable {
     name: &'static str,
-    original_thread: RefPtr<nsIThread>,
     task: Box<Task>,
     has_run: AtomicBool,
 }
@@ -56,12 +55,10 @@ impl TaskRunnable {
         debug_assert!(is_main_thread());
         Ok(TaskRunnable::allocate(InitTaskRunnable {
             name,
-            original_thread: get_current_thread()?,
             task,
             has_run: AtomicBool::new(false),
         }))
     }
-
     pub fn dispatch(&self, target_thread: RefPtr<nsIThread>) -> Result<(), nsresult> {
         unsafe {
             target_thread.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
@@ -75,7 +72,7 @@ impl TaskRunnable {
                 debug_assert!(!is_main_thread());
                 self.has_run.store(true, Ordering::Release);
                 self.task.run();
-                self.dispatch(self.original_thread.clone())
+                self.dispatch(get_main_thread()?)
             }
             true => {
                 debug_assert!(is_main_thread());

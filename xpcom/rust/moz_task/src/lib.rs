@@ -20,6 +20,7 @@ use xpcom::{
 
 extern "C" {
     fn NS_GetCurrentThreadEventTarget(result: *mut *const nsIThread) -> nsresult;
+    fn NS_GetMainThreadEventTarget(result: *mut *const nsIThread) -> nsresult;
     fn NS_IsMainThread() -> bool;
     fn NS_NewNamedThreadWithDefaultStackSize(
         name: *const nsACString,
@@ -30,6 +31,10 @@ extern "C" {
 
 pub fn get_current_thread() -> Result<RefPtr<nsIThread>, nsresult> {
     getter_addrefs(|p| unsafe { NS_GetCurrentThreadEventTarget(p) })
+}
+
+pub fn get_main_thread() -> Result<RefPtr<nsIThread>, nsresult> {
+    getter_addrefs(|p| unsafe { NS_GetMainThreadEventTarget(p) })
 }
 
 pub fn is_main_thread() -> bool {

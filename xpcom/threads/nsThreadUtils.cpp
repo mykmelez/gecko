@@ -583,6 +583,15 @@ nsresult NS_GetCurrentThreadEventTarget(nsIEventTarget** aResult) {
   return NS_OK;
 }
 
+nsresult NS_GetMainThreadEventTarget(nsIEventTarget** aResult) {
+  nsCOMPtr<nsIEventTarget> target = mozilla::GetMainThreadEventTarget();
+  if (!target) {
+    return NS_ERROR_UNEXPECTED;
+  }
+  target.forget(aResult);
+  return NS_OK;
+}
+
 // NS_NewNamedThread's aStackSize parameter has the default argument
 // nsIThreadManager::DEFAULT_STACK_SIZE, but we can't omit default arguments
 // when calling a C++ function from Rust, and we can't access
