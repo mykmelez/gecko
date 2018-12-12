@@ -14,7 +14,7 @@ use std::{
     cell::Cell,
     path::Path,
     str,
-    sync::{Arc, RwLock},
+    sync::{Arc, atomic::{AtomicBool, Ordering}, RwLock},
 };
 use storage_variant::VariantType;
 use xpcom::{
@@ -48,7 +48,7 @@ pub struct InitTaskRunnable {
     name: &'static str,
     original_thread: RefPtr<nsIThread>,
     task: Box<Task>,
-    has_run: Cell<bool>,
+    has_run: AtomicBool,
 }
 
 impl TaskRunnable {
@@ -58,7 +58,7 @@ impl TaskRunnable {
             name,
             original_thread: get_current_thread()?,
             task,
-            has_run: Cell::new(false),
+            has_run: AtomicBool::new(false),
         }))
     }
 
@@ -70,10 +70,10 @@ impl TaskRunnable {
 
     xpcom_method!(Run, run, {});
     fn run(&self) -> Result<(), nsresult> {
-        match self.has_run.take() {
+        match self.has_run.load(Ordering::Acquire) {
             false => {
                 debug_assert!(!is_main_thread());
-                self.has_run.set(true);
+                self.has_run.store(true, Ordering::Release);
                 self.task.run();
                 self.dispatch(self.original_thread.clone())
             }
