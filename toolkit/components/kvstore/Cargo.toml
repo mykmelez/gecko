@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Myk Melez <myk@mykzilla.org>"]
 
 [dependencies]
+atomic_refcell = "0.1"
 crossbeam-utils = "0.6.3"
 libc = "0.2"
 lmdb-rkv = "0.8"

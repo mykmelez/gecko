@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+extern crate atomic_refcell;
 extern crate crossbeam_utils;
 #[macro_use]
 extern crate failure;
@@ -22,6 +23,7 @@ mod error;
 mod owned_value;
 mod task;
 
+use atomic_refcell::AtomicRefCell;
 use error::KeyValueError;
 use libc::c_void;
 use moz_task::create_thread;
@@ -283,14 +285,12 @@ impl KeyValueDatabase {
 #[xpimplements(nsIKeyValueEnumerator)]
 #[refcnt = "atomic"]
 pub struct InitKeyValueEnumerator {
-    iter: Arc<
-        RefCell<
+    iter: AtomicRefCell<
             IntoIter<(
                 Result<String, KeyValueError>,
                 Result<OwnedValue, KeyValueError>,
             )>,
         >,
-    >,
 }
 
 impl KeyValueEnumerator {
@@ -301,7 +301,7 @@ impl KeyValueEnumerator {
         )>,
     ) -> RefPtr<KeyValueEnumerator> {
         KeyValueEnumerator::allocate(InitKeyValueEnumerator {
-            iter: Arc::new(RefCell::new(pairs.into_iter())),
+            iter: AtomicRefCell::new(pairs.into_iter()),
         })
     }
 

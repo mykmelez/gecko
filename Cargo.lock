@@ -1267,6 +1267,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "kvstore"
 version = "0.1.0"
 dependencies = [
+ "atomic_refcell 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "crossbeam-utils 0.6.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "failure 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.43 (registry+https://github.com/rust-lang/crates.io-index)",
