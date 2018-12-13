@@ -137,7 +137,7 @@ impl TaskRunnable {
 
 pub struct GetOrCreateTask {
     callback: ThreadBound<AtomicCell<Option<RefPtr<nsIKeyValueDatabaseCallback>>>>,
-    thread: RefPtr<nsIThread>,
+    thread: AtomicCell<Option<ThreadBound<RefPtr<nsIThread>>>>,
     path: nsCString,
     name: nsCString,
     result: AtomicCell<Option<Result<RefPtr<KeyValueDatabase>, KeyValueError>>>,
@@ -152,7 +152,7 @@ impl GetOrCreateTask {
     ) -> GetOrCreateTask {
         GetOrCreateTask {
             callback: ThreadBound::new(AtomicCell::new(Some(callback))),
-            thread,
+            thread: AtomicCell::new(Some(ThreadBound::new(thread))),
             path,
             name,
             result: AtomicCell::default(),
@@ -174,7 +174,8 @@ impl Task for GetOrCreateTask {
                     rkv.write()?
                         .open_or_create(Some(str::from_utf8(&self.name)?))
                 }?;
-                Ok(KeyValueDatabase::new(rkv, store, self.thread.clone()))
+                let thread = self.thread.swap(None).ok_or(NS_ERROR_FAILURE)?;
+                Ok(KeyValueDatabase::new(rkv, store, thread))
             }(),
         ));
     }
