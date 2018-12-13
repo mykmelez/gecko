@@ -45,7 +45,8 @@ macro_rules! task_done {
             // But the callback is an nsXPCWrappedJS that isn't safe to release
             // on the database thread.  So we move it out of the Task here to ensure
             // it gets released on the main thread.
-            let callback = self.callback.get_ref().ok_or(NS_ERROR_FAILURE)?.swap(None).ok_or(NS_ERROR_FAILURE)?;
+            let threadbound = self.callback.swap(None).ok_or(NS_ERROR_FAILURE)?;
+            let callback = threadbound.get_ref().ok_or(NS_ERROR_FAILURE)?;
 
             match self.result.swap(None) {
                 Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
@@ -64,7 +65,8 @@ macro_rules! task_done {
             // But the callback is an nsXPCWrappedJS that isn't safe to release
             // on the database thread.  So we move it out of the Task here to ensure
             // it gets released on the main thread.
-            let callback = self.callback.get_ref().ok_or(NS_ERROR_FAILURE)?.swap(None).ok_or(NS_ERROR_FAILURE)?;
+            let threadbound = self.callback.swap(None).ok_or(NS_ERROR_FAILURE)?;
+            let callback = threadbound.get_ref().ok_or(NS_ERROR_FAILURE)?;
 
             match self.result.swap(None) {
                 Some(Ok(())) => unsafe { callback.Resolve() },
@@ -136,7 +138,7 @@ impl TaskRunnable {
 }
 
 pub struct GetOrCreateTask {
-    callback: ThreadBound<AtomicCell<Option<RefPtr<nsIKeyValueDatabaseCallback>>>>,
+    callback: AtomicCell<Option<ThreadBound<RefPtr<nsIKeyValueDatabaseCallback>>>>,
     thread: AtomicCell<Option<ThreadBound<RefPtr<nsIThread>>>>,
     path: nsCString,
     name: nsCString,
@@ -151,7 +153,7 @@ impl GetOrCreateTask {
         name: nsCString,
     ) -> GetOrCreateTask {
         GetOrCreateTask {
-            callback: ThreadBound::new(AtomicCell::new(Some(callback))),
+            callback: AtomicCell::new(Some(ThreadBound::new(callback))),
             thread: AtomicCell::new(Some(ThreadBound::new(thread))),
             path,
             name,
@@ -184,7 +186,7 @@ impl Task for GetOrCreateTask {
 }
 
 pub struct PutTask {
-    callback: ThreadBound<AtomicCell<Option<RefPtr<nsIKeyValueVoidCallback>>>>,
+    callback: AtomicCell<Option<ThreadBound<RefPtr<nsIKeyValueVoidCallback>>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
@@ -201,7 +203,7 @@ impl PutTask {
         value: OwnedValue,
     ) -> PutTask {
         PutTask {
-            callback: ThreadBound::new(AtomicCell::new(Some(callback))),
+            callback: AtomicCell::new(Some(ThreadBound::new(callback))),
             rkv,
             store,
             key,
@@ -238,7 +240,7 @@ impl Task for PutTask {
 }
 
 pub struct GetTask {
-    callback: ThreadBound<AtomicCell<Option<RefPtr<nsIKeyValueVariantCallback>>>>,
+    callback: AtomicCell<Option<ThreadBound<RefPtr<nsIKeyValueVariantCallback>>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
@@ -255,7 +257,7 @@ impl GetTask {
         default_value: Option<OwnedValue>,
     ) -> GetTask {
         GetTask {
-            callback: ThreadBound::new(AtomicCell::new(Some(callback))),
+            callback: AtomicCell::new(Some(ThreadBound::new(callback))),
             rkv,
             store,
             key,
@@ -300,7 +302,7 @@ impl Task for GetTask {
 }
 
 pub struct HasTask {
-    callback: ThreadBound<AtomicCell<Option<RefPtr<nsIKeyValueVariantCallback>>>>,
+    callback: AtomicCell<Option<ThreadBound<RefPtr<nsIKeyValueVariantCallback>>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
@@ -315,7 +317,7 @@ impl HasTask {
         key: nsCString,
     ) -> HasTask {
         HasTask {
-            callback: ThreadBound::new(AtomicCell::new(Some(callback))),
+            callback: AtomicCell::new(Some(ThreadBound::new(callback))),
             rkv,
             store,
             key,
@@ -342,7 +344,7 @@ impl Task for HasTask {
 }
 
 pub struct DeleteTask {
-    callback: ThreadBound<AtomicCell<Option<RefPtr<nsIKeyValueVoidCallback>>>>,
+    callback: AtomicCell<Option<ThreadBound<RefPtr<nsIKeyValueVoidCallback>>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
@@ -357,7 +359,7 @@ impl DeleteTask {
         key: nsCString,
     ) -> DeleteTask {
         DeleteTask {
-            callback: ThreadBound::new(AtomicCell::new(Some(callback))),
+            callback: AtomicCell::new(Some(ThreadBound::new(callback))),
             rkv,
             store,
             key,
@@ -396,7 +398,7 @@ impl Task for DeleteTask {
 }
 
 pub struct EnumerateTask {
-    callback: ThreadBound<AtomicCell<Option<RefPtr<nsIKeyValueEnumeratorCallback>>>>,
+    callback: AtomicCell<Option<ThreadBound<RefPtr<nsIKeyValueEnumeratorCallback>>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     from_key: nsCString,
@@ -413,7 +415,7 @@ impl EnumerateTask {
         to_key: nsCString,
     ) -> EnumerateTask {
         EnumerateTask {
-            callback: ThreadBound::new(AtomicCell::new(Some(callback))),
+            callback: AtomicCell::new(Some(ThreadBound::new(callback))),
             rkv,
             store,
             from_key,
