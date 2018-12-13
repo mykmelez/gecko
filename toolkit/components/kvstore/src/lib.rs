@@ -32,7 +32,6 @@ use nsstring::{nsACString, nsCString};
 use owned_value::{owned_to_variant, variant_to_owned, OwnedValue};
 use rkv::{Rkv, Store};
 use std::{
-    cell::RefCell,
     ptr,
     sync::{Arc, RwLock},
     vec::IntoIter,
