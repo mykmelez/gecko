@@ -13,6 +13,7 @@ extern crate nsstring;
 extern crate ordered_float;
 extern crate rkv;
 extern crate storage_variant;
+extern crate threadbound;
 #[macro_use]
 extern crate xpcom;
 

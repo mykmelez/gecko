@@ -17,6 +17,7 @@ use std::{
     sync::{Arc, atomic::{AtomicBool, Ordering}, RwLock},
 };
 use storage_variant::VariantType;
+use threadbound::ThreadBound;
 use xpcom::{
     interfaces::{
         nsIEventTarget, nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback,
@@ -26,6 +27,50 @@ use xpcom::{
 };
 use KeyValueDatabase;
 use KeyValueEnumerator;
+
+/// A macro to generate a done() implementation for a Task.
+/// Takes one argument that specifies the type of the Task's callback function:
+///   value: a callback function that takes a value
+///   void: the callback function doesn't take a value
+macro_rules! task_done {
+    (value) => {
+        fn done(&self) -> Result<(), nsresult> {
+            // If TaskRunnable.run() calls Task.done() to return a result
+            // on the main thread before TaskRunnable.run() returns on the database
+            // thread, then the Task will get dropped on the database thread.
+            //
+            // But the callback is an nsXPCWrappedJS that isn't safe to release
+            // on the database thread.  So we move it out of the Task here to ensure
+            // it gets released on the main thread.
+            let callback = self.callback.get_ref().unwrap().take().ok_or(NS_ERROR_FAILURE)?;
+
+            match self.result.take() {
+                Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
+                Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
+                None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
+            }.to_result()
+        }
+    };
+
+    (void) => {
+        fn done(&self) -> Result<(), nsresult> {
+            // If TaskRunnable.run() calls Task.done() to return a result
+            // on the main thread before TaskRunnable.run() returns on the database
+            // thread, then the Task will get dropped on the database thread.
+            //
+            // But the callback is an nsXPCWrappedJS that isn't safe to release
+            // on the database thread.  So we move it out of the Task here to ensure
+            // it gets released on the main thread.
+            let callback = self.callback.get_ref().unwrap().take().ok_or(NS_ERROR_FAILURE)?;
+
+            match self.result.take() {
+                Some(Ok(())) => unsafe { callback.Resolve() },
+                Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
+                None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
+            }.to_result()
+        }
+    };
+}
 
 /// A database operation that is executed asynchronously on a database thread
 /// and returns its result to the original thread from which it was dispatched.
@@ -88,7 +133,7 @@ impl TaskRunnable {
 }
 
 pub struct GetOrCreateTask {
-    callback: Cell<Option<RefPtr<nsIKeyValueDatabaseCallback>>>,
+    callback: ThreadBound<Cell<Option<RefPtr<nsIKeyValueDatabaseCallback>>>>,
     thread: RefPtr<nsIThread>,
     path: nsCString,
     name: nsCString,
@@ -103,57 +148,13 @@ impl GetOrCreateTask {
         name: nsCString,
     ) -> GetOrCreateTask {
         GetOrCreateTask {
-            callback: Cell::new(Some(callback)),
+            callback: ThreadBound::new(Cell::new(Some(callback))),
             thread,
             path,
             name,
             result: Cell::default(),
         }
     }
-}
-
-/// A macro to generate a done() implementation for a Task.
-/// Takes one argument that specifies the type of the Task's callback function:
-///   value: a callback function that takes a value
-///   void: the callback function doesn't take a value
-macro_rules! task_done {
-    (value) => {
-        fn done(&self) -> Result<(), nsresult> {
-            // If TaskRunnable.run() calls Task.done() to return a result
-            // on the main thread before TaskRunnable.run() returns on the database
-            // thread, then the Task will get dropped on the database thread.
-            //
-            // But the callback is an nsXPCWrappedJS that isn't safe to release
-            // on the database thread.  So we move it out of the Task here to ensure
-            // it gets released on the main thread.
-            let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
-
-            match self.result.take() {
-                Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
-                Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
-                None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
-            }.to_result()
-        }
-    };
-
-    (void) => {
-        fn done(&self) -> Result<(), nsresult> {
-            // If TaskRunnable.run() calls Task.done() to return a result
-            // on the main thread before TaskRunnable.run() returns on the database
-            // thread, then the Task will get dropped on the database thread.
-            //
-            // But the callback is an nsXPCWrappedJS that isn't safe to release
-            // on the database thread.  So we move it out of the Task here to ensure
-            // it gets released on the main thread.
-            let callback = self.callback.take().ok_or(NS_ERROR_FAILURE)?;
-
-            match self.result.take() {
-                Some(Ok(())) => unsafe { callback.Resolve() },
-                Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
-                None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
-            }.to_result()
-        }
-    };
 }
 
 impl Task for GetOrCreateTask {
@@ -179,7 +180,7 @@ impl Task for GetOrCreateTask {
 }
 
 pub struct PutTask {
-    callback: Cell<Option<RefPtr<nsIKeyValueVoidCallback>>>,
+    callback: ThreadBound<Cell<Option<RefPtr<nsIKeyValueVoidCallback>>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
@@ -196,7 +197,7 @@ impl PutTask {
         value: OwnedValue,
     ) -> PutTask {
         PutTask {
-            callback: Cell::new(Some(callback)),
+            callback: ThreadBound::new(Cell::new(Some(callback))),
             rkv,
             store,
             key,
@@ -233,7 +234,7 @@ impl Task for PutTask {
 }
 
 pub struct GetTask {
-    callback: Cell<Option<RefPtr<nsIKeyValueVariantCallback>>>,
+    callback: ThreadBound<Cell<Option<RefPtr<nsIKeyValueVariantCallback>>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
@@ -250,7 +251,7 @@ impl GetTask {
         default_value: Option<OwnedValue>,
     ) -> GetTask {
         GetTask {
-            callback: Cell::new(Some(callback)),
+            callback: ThreadBound::new(Cell::new(Some(callback))),
             rkv,
             store,
             key,
@@ -295,7 +296,7 @@ impl Task for GetTask {
 }
 
 pub struct HasTask {
-    callback: Cell<Option<RefPtr<nsIKeyValueVariantCallback>>>,
+    callback: ThreadBound<Cell<Option<RefPtr<nsIKeyValueVariantCallback>>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
@@ -310,7 +311,7 @@ impl HasTask {
         key: nsCString,
     ) -> HasTask {
         HasTask {
-            callback: Cell::new(Some(callback)),
+            callback: ThreadBound::new(Cell::new(Some(callback))),
             rkv,
             store,
             key,
@@ -337,7 +338,7 @@ impl Task for HasTask {
 }
 
 pub struct DeleteTask {
-    callback: Cell<Option<RefPtr<nsIKeyValueVoidCallback>>>,
+    callback: ThreadBound<Cell<Option<RefPtr<nsIKeyValueVoidCallback>>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
@@ -352,7 +353,7 @@ impl DeleteTask {
         key: nsCString,
     ) -> DeleteTask {
         DeleteTask {
-            callback: Cell::new(Some(callback)),
+            callback: ThreadBound::new(Cell::new(Some(callback))),
             rkv,
             store,
             key,
@@ -391,7 +392,7 @@ impl Task for DeleteTask {
 }
 
 pub struct EnumerateTask {
-    callback: Cell<Option<RefPtr<nsIKeyValueEnumeratorCallback>>>,
+    callback: ThreadBound<Cell<Option<RefPtr<nsIKeyValueEnumeratorCallback>>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     from_key: nsCString,
@@ -408,7 +409,7 @@ impl EnumerateTask {
         to_key: nsCString,
     ) -> EnumerateTask {
         EnumerateTask {
-            callback: Cell::new(Some(callback)),
+            callback: ThreadBound::new(Cell::new(Some(callback))),
             rkv,
             store,
             from_key,
