@@ -4,6 +4,7 @@
 
 extern crate xpcom;
 
+use crossbeam_utils::atomic::AtomicCell;
 use error::KeyValueError;
 use moz_task::{get_main_thread, is_main_thread};
 use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_OK};
@@ -14,7 +15,10 @@ use std::{
     cell::Cell,
     path::Path,
     str,
-    sync::{Arc, atomic::{AtomicBool, Ordering}, RwLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, RwLock,
+    },
 };
 use storage_variant::VariantType;
 use threadbound::ThreadBound;
@@ -42,9 +46,9 @@ macro_rules! task_done {
             // But the callback is an nsXPCWrappedJS that isn't safe to release
             // on the database thread.  So we move it out of the Task here to ensure
             // it gets released on the main thread.
-            let callback = self.callback.get_ref().unwrap().take().ok_or(NS_ERROR_FAILURE)?;
+            let callback = self.callback.get_ref().ok_or(NS_ERROR_FAILURE)?.swap(None).ok_or(NS_ERROR_FAILURE)?;
 
-            match self.result.take() {
+            match self.result.swap(None) {
                 Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
                 Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
                 None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
@@ -61,9 +65,9 @@ macro_rules! task_done {
             // But the callback is an nsXPCWrappedJS that isn't safe to release
             // on the database thread.  So we move it out of the Task here to ensure
             // it gets released on the main thread.
-            let callback = self.callback.get_ref().unwrap().take().ok_or(NS_ERROR_FAILURE)?;
+            let callback = self.callback.get_ref().ok_or(NS_ERROR_FAILURE)?.swap(None).ok_or(NS_ERROR_FAILURE)?;
 
-            match self.result.take() {
+            match self.result.swap(None) {
                 Some(Ok(())) => unsafe { callback.Resolve() },
                 Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
                 None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
@@ -133,11 +137,11 @@ impl TaskRunnable {
 }
 
 pub struct GetOrCreateTask {
-    callback: ThreadBound<Cell<Option<RefPtr<nsIKeyValueDatabaseCallback>>>>,
+    callback: ThreadBound<AtomicCell<Option<RefPtr<nsIKeyValueDatabaseCallback>>>>,
     thread: RefPtr<nsIThread>,
     path: nsCString,
     name: nsCString,
-    result: Cell<Option<Result<RefPtr<KeyValueDatabase>, KeyValueError>>>,
+    result: AtomicCell<Option<Result<RefPtr<KeyValueDatabase>, KeyValueError>>>,
 }
 
 impl GetOrCreateTask {
@@ -148,11 +152,11 @@ impl GetOrCreateTask {
         name: nsCString,
     ) -> GetOrCreateTask {
         GetOrCreateTask {
-            callback: ThreadBound::new(Cell::new(Some(callback))),
+            callback: ThreadBound::new(AtomicCell::new(Some(callback))),
             thread,
             path,
             name,
-            result: Cell::default(),
+            result: AtomicCell::default(),
         }
     }
 }
@@ -161,7 +165,7 @@ impl Task for GetOrCreateTask {
     fn run(&self) {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
-        self.result.set(Some(
+        self.result.store(Some(
             || -> Result<RefPtr<KeyValueDatabase>, KeyValueError> {
                 let mut writer = Manager::singleton().write()?;
                 let rkv = writer.get_or_create(Path::new(str::from_utf8(&self.path)?), Rkv::new)?;
@@ -180,12 +184,12 @@ impl Task for GetOrCreateTask {
 }
 
 pub struct PutTask {
-    callback: ThreadBound<Cell<Option<RefPtr<nsIKeyValueVoidCallback>>>>,
+    callback: ThreadBound<AtomicCell<Option<RefPtr<nsIKeyValueVoidCallback>>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
     value: OwnedValue,
-    result: Cell<Option<Result<(), KeyValueError>>>,
+    result: AtomicCell<Option<Result<(), KeyValueError>>>,
 }
 
 impl PutTask {
@@ -197,12 +201,12 @@ impl PutTask {
         value: OwnedValue,
     ) -> PutTask {
         PutTask {
-            callback: ThreadBound::new(Cell::new(Some(callback))),
+            callback: ThreadBound::new(AtomicCell::new(Some(callback))),
             rkv,
             store,
             key,
             value,
-            result: Cell::default(),
+            result: AtomicCell::default(),
         }
     }
 }
@@ -211,7 +215,7 @@ impl Task for PutTask {
     fn run(&self) {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
-        self.result.set(Some(|| -> Result<(), KeyValueError> {
+        self.result.store(Some(|| -> Result<(), KeyValueError> {
             let key = str::from_utf8(&self.key)?;
             let env = self.rkv.read()?;
             let mut writer = env.write()?;
@@ -234,12 +238,12 @@ impl Task for PutTask {
 }
 
 pub struct GetTask {
-    callback: ThreadBound<Cell<Option<RefPtr<nsIKeyValueVariantCallback>>>>,
+    callback: ThreadBound<AtomicCell<Option<RefPtr<nsIKeyValueVariantCallback>>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
     default_value: Option<OwnedValue>,
-    result: Cell<Option<Result<RefPtr<nsIVariant>, KeyValueError>>>,
+    result: AtomicCell<Option<Result<RefPtr<nsIVariant>, KeyValueError>>>,
 }
 
 impl GetTask {
@@ -251,12 +255,12 @@ impl GetTask {
         default_value: Option<OwnedValue>,
     ) -> GetTask {
         GetTask {
-            callback: ThreadBound::new(Cell::new(Some(callback))),
+            callback: ThreadBound::new(AtomicCell::new(Some(callback))),
             rkv,
             store,
             key,
             default_value,
-            result: Cell::default(),
+            result: AtomicCell::default(),
         }
     }
 }
@@ -266,7 +270,7 @@ impl Task for GetTask {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
         self.result
-            .set(Some(|| -> Result<RefPtr<nsIVariant>, KeyValueError> {
+            .store(Some(|| -> Result<RefPtr<nsIVariant>, KeyValueError> {
                 let key = str::from_utf8(&self.key)?;
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
@@ -296,11 +300,11 @@ impl Task for GetTask {
 }
 
 pub struct HasTask {
-    callback: ThreadBound<Cell<Option<RefPtr<nsIKeyValueVariantCallback>>>>,
+    callback: ThreadBound<AtomicCell<Option<RefPtr<nsIKeyValueVariantCallback>>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
-    result: Cell<Option<Result<RefPtr<nsIVariant>, KeyValueError>>>,
+    result: AtomicCell<Option<Result<RefPtr<nsIVariant>, KeyValueError>>>,
 }
 
 impl HasTask {
@@ -311,11 +315,11 @@ impl HasTask {
         key: nsCString,
     ) -> HasTask {
         HasTask {
-            callback: ThreadBound::new(Cell::new(Some(callback))),
+            callback: ThreadBound::new(AtomicCell::new(Some(callback))),
             rkv,
             store,
             key,
-            result: Cell::default(),
+            result: AtomicCell::default(),
         }
     }
 }
@@ -325,7 +329,7 @@ impl Task for HasTask {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
         self.result
-            .set(Some(|| -> Result<RefPtr<nsIVariant>, KeyValueError> {
+            .store(Some(|| -> Result<RefPtr<nsIVariant>, KeyValueError> {
                 let key = str::from_utf8(&self.key)?;
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
@@ -338,11 +342,11 @@ impl Task for HasTask {
 }
 
 pub struct DeleteTask {
-    callback: ThreadBound<Cell<Option<RefPtr<nsIKeyValueVoidCallback>>>>,
+    callback: ThreadBound<AtomicCell<Option<RefPtr<nsIKeyValueVoidCallback>>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
-    result: Cell<Option<Result<(), KeyValueError>>>,
+    result: AtomicCell<Option<Result<(), KeyValueError>>>,
 }
 
 impl DeleteTask {
@@ -353,11 +357,11 @@ impl DeleteTask {
         key: nsCString,
     ) -> DeleteTask {
         DeleteTask {
-            callback: ThreadBound::new(Cell::new(Some(callback))),
+            callback: ThreadBound::new(AtomicCell::new(Some(callback))),
             rkv,
             store,
             key,
-            result: Cell::default(),
+            result: AtomicCell::default(),
         }
     }
 }
@@ -366,7 +370,7 @@ impl Task for DeleteTask {
     fn run(&self) {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
-        self.result.set(Some(|| -> Result<(), KeyValueError> {
+        self.result.store(Some(|| -> Result<(), KeyValueError> {
             let key = str::from_utf8(&self.key)?;
             let env = self.rkv.read()?;
             let mut writer = env.write()?;
@@ -392,12 +396,12 @@ impl Task for DeleteTask {
 }
 
 pub struct EnumerateTask {
-    callback: ThreadBound<Cell<Option<RefPtr<nsIKeyValueEnumeratorCallback>>>>,
+    callback: ThreadBound<AtomicCell<Option<RefPtr<nsIKeyValueEnumeratorCallback>>>>,
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     from_key: nsCString,
     to_key: nsCString,
-    result: Cell<Option<Result<RefPtr<KeyValueEnumerator>, KeyValueError>>>,
+    result: AtomicCell<Option<Result<RefPtr<KeyValueEnumerator>, KeyValueError>>>,
 }
 
 impl EnumerateTask {
@@ -409,12 +413,12 @@ impl EnumerateTask {
         to_key: nsCString,
     ) -> EnumerateTask {
         EnumerateTask {
-            callback: ThreadBound::new(Cell::new(Some(callback))),
+            callback: ThreadBound::new(AtomicCell::new(Some(callback))),
             rkv,
             store,
             from_key,
             to_key,
-            result: Cell::default(),
+            result: AtomicCell::default(),
         }
     }
 }
@@ -423,7 +427,7 @@ impl Task for EnumerateTask {
     fn run(&self) {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
-        self.result.set(Some(
+        self.result.store(Some(
             || -> Result<RefPtr<KeyValueEnumerator>, KeyValueError> {
                 let env = self.rkv.read()?;
                 let reader = env.read()?;

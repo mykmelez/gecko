@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Myk Melez <myk@mykzilla.org>"]
 
 [dependencies]
+crossbeam-utils = "0.6.3"
 libc = "0.2"
 lmdb-rkv = "0.8"
 log = "0.4"
