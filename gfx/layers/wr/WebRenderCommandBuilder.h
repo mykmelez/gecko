@@ -42,6 +42,7 @@ class WebRenderCommandBuilder {
         mBuilderDumpIndex(0),
         mDumpIndent(0),
         mDoGrouping(false),
+        mForEventsAndPluginsOnly(false),
         mContainsSVGGroup(false) {}
 
   void Destroy();
@@ -77,7 +78,7 @@ class WebRenderCommandBuilder {
                  mozilla::wr::DisplayListBuilder& aBuilder,
                  mozilla::wr::IpcResourceUpdateQueue& aResources,
                  const StackingContextHelper& aSc,
-                 const LayoutDeviceRect& aRect);
+                 const LayoutDeviceRect& aRect, const LayoutDeviceRect& aClip);
 
   Maybe<wr::WrImageMask> BuildWrMaskImage(
       nsDisplayItem* aItem, wr::DisplayListBuilder& aBuilder,
@@ -198,6 +199,10 @@ class WebRenderCommandBuilder {
   // Whether consecutive inactive display items should be grouped into one
   // blob image.
   bool mDoGrouping;
+
+  // True if we're currently within an opacity:0 container, and only
+  // plugin and hit test items should be considered.
+  bool mForEventsAndPluginsOnly;
 
   // True if the most recently build display list contained an svg that
   // we did grouping for.

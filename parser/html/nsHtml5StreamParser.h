@@ -107,7 +107,7 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
 
   const uint32_t SNIFFING_BUFFER_SIZE = 1024;
   const uint32_t READ_BUFFER_SIZE = 1024;
-  const uint32_t LOCAL_FILE_UTF_8_BUFFER_SIZE = 1024*1024*50; // 50 MB
+  const uint32_t LOCAL_FILE_UTF_8_BUFFER_SIZE = 1024*1024*4; // 4 MB
 
   friend class nsHtml5RequestStopper;
   friend class nsHtml5DataAvailable;
@@ -413,6 +413,11 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
   NotNull<const Encoding*> mEncoding;
 
   /**
+   * The character encoding that is the base expectation for detection.
+   */
+  const Encoding* mFeedChardetIfEncoding;
+
+  /**
    * Whether reparse is forbidden
    */
   bool mReparseForbidden;
@@ -529,11 +534,6 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
    * The chardet instance if chardet is enabled.
    */
   nsCOMPtr<nsICharsetDetector> mChardet;
-
-  /**
-   * If false, don't push data to chardet.
-   */
-  bool mFeedChardet;
 
   /**
    * Whether the initial charset source was kCharsetFromParentFrame
