@@ -12,7 +12,6 @@ use nsstring::{nsACString, nsCString, nsString};
 use owned_value::{value_to_owned, OwnedValue};
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
-    cell::Cell,
     path::Path,
     str,
     sync::{
@@ -95,12 +94,12 @@ pub trait Task {
 #[refcnt = "atomic"]
 pub struct InitTaskRunnable {
     name: &'static str,
-    task: Box<Task>,
+    task: Box<dyn Task>,
     has_run: AtomicBool,
 }
 
 impl TaskRunnable {
-    pub fn new(name: &'static str, task: Box<Task>) -> Result<RefPtr<TaskRunnable>, nsresult> {
+    pub fn new(name: &'static str, task: Box<dyn Task>) -> Result<RefPtr<TaskRunnable>, nsresult> {
         debug_assert!(is_main_thread());
         Ok(TaskRunnable::allocate(InitTaskRunnable {
             name,
