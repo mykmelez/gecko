@@ -40,7 +40,7 @@ pub fn owned_to_variant(owned: OwnedValue) -> RefPtr<nsIVariant> {
         OwnedValue::Bool(val) => val.into_variant(),
         OwnedValue::I64(val) => val.into_variant(),
         OwnedValue::F64(OrderedFloat(val)) => val.into_variant(),
-        OwnedValue::Str(val) => nsString::from(&val).into_variant(),
+        OwnedValue::Str(ref val) => nsString::from(val).into_variant(),
     }
 }
 

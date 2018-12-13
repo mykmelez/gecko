@@ -35,6 +35,10 @@ use KeyValueEnumerator;
 /// Takes one argument that specifies the type of the Task's callback function:
 ///   value: a callback function that takes a value
 ///   void: the callback function doesn't take a value
+///
+/// The "value" variant calls self.convert() to convert a successful result
+/// into the value to pass to the callback function.  So if you generate done()
+/// for a callback that takes a value, ensure you also implement convert()!
 macro_rules! task_done {
     (value) => {
         fn done(&self) -> Result<(), nsresult> {
@@ -49,7 +53,7 @@ macro_rules! task_done {
             let callback = threadbound.get_ref().ok_or(NS_ERROR_FAILURE)?;
 
             match self.result.swap(None) {
-                Some(Ok(value)) => unsafe { callback.Resolve(value.coerce()) },
+                Some(Ok(value)) => unsafe { callback.Resolve(self.convert(value)?.coerce()) },
                 Some(Err(err)) => unsafe { callback.Reject(&*nsCString::from(err.to_string())) },
                 None => unsafe { callback.Reject(&*nsCString::from("unexpected")) },
             }.to_result()
@@ -96,12 +100,12 @@ pub trait Task {
 #[refcnt = "atomic"]
 pub struct InitTaskRunnable {
     name: &'static str,
-    task: Box<dyn Task>,
+    task: Box<dyn Task + Send + Sync>,
     has_run: AtomicBool,
 }
 
 impl TaskRunnable {
-    pub fn new(name: &'static str, task: Box<dyn Task>) -> Result<RefPtr<TaskRunnable>, nsresult> {
+    pub fn new(name: &'static str, task: Box<dyn Task + Send + Sync>) -> Result<RefPtr<TaskRunnable>, nsresult> {
         debug_assert!(is_main_thread());
         Ok(TaskRunnable::allocate(InitTaskRunnable {
             name,
@@ -142,7 +146,7 @@ pub struct GetOrCreateTask {
     thread: AtomicCell<Option<ThreadBound<RefPtr<nsIThread>>>>,
     path: nsCString,
     name: nsCString,
-    result: AtomicCell<Option<Result<RefPtr<KeyValueDatabase>, KeyValueError>>>,
+    result: AtomicCell<Option<Result<(Arc<RwLock<Rkv>>, Store), KeyValueError>>>,
 }
 
 impl GetOrCreateTask {
@@ -160,6 +164,11 @@ impl GetOrCreateTask {
             result: AtomicCell::default(),
         }
     }
+
+    fn convert(&self, result: (Arc<RwLock<Rkv>>, Store)) -> Result<RefPtr<KeyValueDatabase>, KeyValueError> {
+        let thread = self.thread.swap(None).ok_or(NS_ERROR_FAILURE)?;
+        Ok(KeyValueDatabase::new(result.0, result.1, thread))
+    }
 }
 
 impl Task for GetOrCreateTask {
@@ -167,7 +176,7 @@ impl Task for GetOrCreateTask {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
         self.result.store(Some(
-            || -> Result<RefPtr<KeyValueDatabase>, KeyValueError> {
+            || -> Result<(Arc<RwLock<Rkv>>, Store), KeyValueError> {
                 let mut writer = Manager::singleton().write()?;
                 let rkv = writer.get_or_create(Path::new(str::from_utf8(&self.path)?), Rkv::new)?;
                 let store = if self.name.is_empty() {
@@ -176,8 +185,7 @@ impl Task for GetOrCreateTask {
                     rkv.write()?
                         .open_or_create(Some(str::from_utf8(&self.name)?))
                 }?;
-                let thread = self.thread.swap(None).ok_or(NS_ERROR_FAILURE)?;
-                Ok(KeyValueDatabase::new(rkv, store, thread))
+                Ok((rkv, store))
             }(),
         ));
     }
@@ -245,7 +253,7 @@ pub struct GetTask {
     store: Store,
     key: nsCString,
     default_value: Option<OwnedValue>,
-    result: AtomicCell<Option<Result<RefPtr<nsIVariant>, KeyValueError>>>,
+    result: AtomicCell<Option<Result<Option<OwnedValue>, KeyValueError>>>,
 }
 
 impl GetTask {
@@ -265,6 +273,17 @@ impl GetTask {
             result: AtomicCell::default(),
         }
     }
+
+    fn convert(&self, result: Option<OwnedValue>) -> Result<RefPtr<nsIVariant>, KeyValueError> {
+        // TODO: refactor with owned_to_variant in owned_value.rs.
+        Ok(match result {
+            Some(OwnedValue::Bool(val)) => val.into_variant(),
+            Some(OwnedValue::I64(val)) => val.into_variant(),
+            Some(OwnedValue::F64(val)) => val.into_variant(),
+            Some(OwnedValue::Str(ref val)) => nsString::from(val).into_variant(),
+            None => ().into_variant(),
+        })
+    }
 }
 
 impl Task for GetTask {
@@ -272,28 +291,25 @@ impl Task for GetTask {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
         self.result
-            .store(Some(|| -> Result<RefPtr<nsIVariant>, KeyValueError> {
+            .store(Some(|| -> Result<Option<OwnedValue>, KeyValueError> {
                 let key = str::from_utf8(&self.key)?;
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
                 let value = reader.get(&self.store, key)?;
 
-                Ok(if let Some(value) = value {
-                    match value {
-                        Value::I64(value) => value.into_variant(),
-                        Value::F64(value) => value.into_variant(),
-                        Value::Str(value) => nsString::from(value).into_variant(),
-                        Value::Bool(value) => value.into_variant(),
-                        _ => return Err(KeyValueError::UnexpectedValue),
-                    }
-                } else {
-                    match self.default_value {
-                        Some(OwnedValue::Bool(value)) => value.into_variant(),
-                        Some(OwnedValue::I64(value)) => value.into_variant(),
-                        Some(OwnedValue::F64(value)) => value.into_variant(),
-                        Some(OwnedValue::Str(ref value)) => nsString::from(value).into_variant(),
-                        None => ().into_variant(),
-                    }
+                // TODO: refactor with value_to_owned in owned_value.rs.
+                Ok(match value {
+                    Some(Value::Bool(val)) => Some(OwnedValue::Bool(val)),
+                    Some(Value::I64(val)) => Some(OwnedValue::I64(val)),
+                    Some(Value::F64(val)) => Some(OwnedValue::F64(val)),
+                    Some(Value::Str(val)) => Some(OwnedValue::Str(val.to_owned())),
+                    Some(_value) => return Err(KeyValueError::UnexpectedValue),
+                    None => {
+                        match self.default_value {
+                            Some(val) => Some(val),
+                            None => None,
+                        }
+                    },
                 })
             }()));
     }
@@ -306,7 +322,7 @@ pub struct HasTask {
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
     key: nsCString,
-    result: AtomicCell<Option<Result<RefPtr<nsIVariant>, KeyValueError>>>,
+    result: AtomicCell<Option<Result<bool, KeyValueError>>>,
 }
 
 impl HasTask {
@@ -324,6 +340,10 @@ impl HasTask {
             result: AtomicCell::default(),
         }
     }
+
+    fn convert(&self, result: bool) -> Result<RefPtr<nsIVariant>, KeyValueError> {
+        Ok(result.into_variant())
+    }
 }
 
 impl Task for HasTask {
@@ -331,12 +351,12 @@ impl Task for HasTask {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
         self.result
-            .store(Some(|| -> Result<RefPtr<nsIVariant>, KeyValueError> {
+            .store(Some(|| -> Result<bool, KeyValueError> {
                 let key = str::from_utf8(&self.key)?;
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
                 let value = reader.get(&self.store, key)?;
-                Ok(value.is_some().into_variant())
+                Ok(value.is_some())
             }()));
     }
 
@@ -403,7 +423,7 @@ pub struct EnumerateTask {
     store: Store,
     from_key: nsCString,
     to_key: nsCString,
-    result: AtomicCell<Option<Result<RefPtr<KeyValueEnumerator>, KeyValueError>>>,
+    result: AtomicCell<Option<Result<Vec<KeyValuePair>, KeyValueError>>>,
 }
 
 impl EnumerateTask {
@@ -423,14 +443,20 @@ impl EnumerateTask {
             result: AtomicCell::default(),
         }
     }
+
+    fn convert(&self, result: Vec<KeyValuePair>) -> Result<RefPtr<KeyValueEnumerator>, KeyValueError> {
+        Ok(KeyValueEnumerator::new(result))
+    }
 }
+
+type KeyValuePair = (Result<String, KeyValueError>, Result<OwnedValue, KeyValueError>);
 
 impl Task for EnumerateTask {
     fn run(&self) {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
         self.result.store(Some(
-            || -> Result<RefPtr<KeyValueEnumerator>, KeyValueError> {
+            || -> Result<Vec<KeyValuePair>, KeyValueError> {
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
                 let from_key = str::from_utf8(&self.from_key)?;
@@ -452,10 +478,7 @@ impl Task for EnumerateTask {
                 // Our fallback approach is to eagerly collect the iterator
                 // into a collection that KeyValueEnumerator owns.  Fixing this so we
                 // enumerate pairs lazily is bug 1499252.
-                let pairs: Vec<(
-                    Result<String, KeyValueError>,
-                    Result<OwnedValue, KeyValueError>,
-                )> = iterator
+                let pairs: Vec<KeyValuePair> = iterator
                     // Convert the key to a string so we can compare it to the "to" key.
                     // For forward compatibility, we don't fail here if we can't convert
                     // a key to UTF-8.  Instead, we store the Err in the collection
@@ -483,7 +506,7 @@ impl Task for EnumerateTask {
                         )
                     }).collect();
 
-                Ok(KeyValueEnumerator::new(pairs))
+                Ok(pairs)
             }(),
         ));
     }
