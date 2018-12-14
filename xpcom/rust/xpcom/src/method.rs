@@ -87,6 +87,11 @@ use nserror::{nsresult, NS_ERROR_NULL_POINTER};
 /// other type that implements Into<nsresult>.  So you can define and return
 /// a custom error type, which the XPCOM stub will convert to nsresult.
 ///
+/// This macro assumes that all non-null pointer arguments are valid!
+/// It does ensure that they aren't null, returning NS_ERROR_NULL_POINTER
+/// for null pointers.  But it doesn't otherwise check their validity.
+/// That makes the function unsafe, so callers must ensure that they only
+/// call it with valid pointer arguments.
 #[macro_export]
 macro_rules! xpcom_method {
     // A method whose return value is a *mut *const nsISomething type.
