@@ -119,7 +119,7 @@ impl TaskRunnable {
         }.to_result()
     }
 
-    xpcom_method!(Run, run, {});
+    xpcom_method!(run => Run());
     fn run(&self) -> Result<(), nsresult> {
         match self.has_run.load(Ordering::Acquire) {
             false => {
@@ -135,7 +135,7 @@ impl TaskRunnable {
         }
     }
 
-    xpcom_method!(GetName, get_name, {}, *mut nsACString);
+    xpcom_method!(get_name => GetName() -> nsACString);
     fn get_name(&self) -> Result<nsCString, nsresult> {
         Ok(nsCString::from(self.name))
     }

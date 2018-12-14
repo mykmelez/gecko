@@ -103,13 +103,11 @@ impl KeyValueService {
     }
 
     xpcom_method!(
-        GetOrCreate,
-        get_or_create,
-        {
+        get_or_create => GetOrCreate(
             callback: *const nsIKeyValueDatabaseCallback,
             path: *const nsACString,
             name: *const nsACString
-        }
+        )
     );
 
     fn get_or_create(
@@ -150,13 +148,11 @@ impl KeyValueDatabase {
     }
 
     xpcom_method!(
-        Put,
-        put,
-        {
+        put => Put(
             callback: *const nsIKeyValueVoidCallback,
             key: *const nsACString,
             value: *const nsIVariant
-        }
+        )
     );
 
     fn put(
@@ -184,13 +180,11 @@ impl KeyValueDatabase {
     }
 
     xpcom_method!(
-        Get,
-        get,
-        {
+        get => Get(
             callback: *const nsIKeyValueVariantCallback,
             key: *const nsACString,
             default_value: *const nsIVariant
-        }
+        )
     );
 
     fn get(
@@ -213,9 +207,7 @@ impl KeyValueDatabase {
     }
 
     xpcom_method!(
-        Has,
-        has,
-        { callback: *const nsIKeyValueVariantCallback, key: *const nsACString }
+        has => Has(callback: *const nsIKeyValueVariantCallback, key: *const nsACString)
     );
 
     fn has(&self, callback: &nsIKeyValueVariantCallback, key: &nsACString) -> Result<(), nsresult> {
@@ -232,9 +224,7 @@ impl KeyValueDatabase {
     }
 
     xpcom_method!(
-        Delete,
-        delete,
-        { callback: *const nsIKeyValueVoidCallback, key: *const nsACString }
+        delete => Delete(callback: *const nsIKeyValueVoidCallback, key: *const nsACString)
     );
 
     fn delete(&self, callback: &nsIKeyValueVoidCallback, key: &nsACString) -> Result<(), nsresult> {
@@ -251,13 +241,11 @@ impl KeyValueDatabase {
     }
 
     xpcom_method!(
-        Enumerate,
-        enumerate,
-        {
+        enumerate => Enumerate(
             callback: *const nsIKeyValueEnumeratorCallback,
             from_key: *const nsACString,
             to_key: *const nsACString
-        }
+        )
     );
 
     fn enumerate(
@@ -304,13 +292,13 @@ impl KeyValueEnumerator {
         })
     }
 
-    xpcom_method!(HasMoreElements, has_more_elements, {}, *mut bool);
+    xpcom_method!(has_more_elements => HasMoreElements() -> bool);
 
     fn has_more_elements(&self) -> Result<bool, KeyValueError> {
         Ok(!self.iter.borrow().as_slice().is_empty())
     }
 
-    xpcom_method!(GetNext, get_next, {}, *mut *const nsIKeyValuePair);
+    xpcom_method!(get_next => GetNext() -> *const nsIKeyValuePair);
 
     fn get_next(&self) -> Result<RefPtr<nsIKeyValuePair>, KeyValueError> {
         let mut iter = self.iter.borrow_mut();
@@ -338,8 +326,8 @@ impl KeyValuePair {
         KeyValuePair::allocate(InitKeyValuePair { key, value })
     }
 
-    xpcom_method!(GetKey, get_key, {}, *mut nsACString);
-    xpcom_method!(GetValue, get_value, {}, *mut *const nsIVariant);
+    xpcom_method!(get_key => GetKey() -> nsACString);
+    xpcom_method!(get_value => GetValue() -> *const nsIVariant);
 
     fn get_key(&self) -> Result<nsCString, KeyValueError> {
         Ok(nsCString::from(&self.key))
