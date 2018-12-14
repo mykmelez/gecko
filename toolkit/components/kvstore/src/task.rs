@@ -100,12 +100,12 @@ pub trait Task {
 #[refcnt = "atomic"]
 pub struct InitTaskRunnable {
     name: &'static str,
-    task: Box<dyn Task + Send + Sync>,
+    task: Box<dyn Task>,
     has_run: AtomicBool,
 }
 
 impl TaskRunnable {
-    pub fn new(name: &'static str, task: Box<dyn Task + Send + Sync>) -> Result<RefPtr<TaskRunnable>, nsresult> {
+    pub fn new(name: &'static str, task: Box<dyn Task>) -> Result<RefPtr<TaskRunnable>, nsresult> {
         debug_assert!(is_main_thread());
         Ok(TaskRunnable::allocate(InitTaskRunnable {
             name,
@@ -306,7 +306,7 @@ impl Task for GetTask {
                     Some(_value) => return Err(KeyValueError::UnexpectedValue),
                     None => {
                         match self.default_value {
-                            Some(val) => Some(val),
+                            Some(ref val) => Some(val.clone()),
                             None => None,
                         }
                     },
