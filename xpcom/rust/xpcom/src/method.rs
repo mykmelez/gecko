@@ -26,7 +26,7 @@ use nserror::{nsresult, NS_ERROR_NULL_POINTER};
 /// #[xpimplements(nsIFooBarBaz)]
 /// #[refcnt = "atomic"]
 /// struct InitFooBarBaz {
-///     …
+///     // …
 /// }
 /// ```
 ///
@@ -76,7 +76,7 @@ use nserror::{nsresult, NS_ERROR_NULL_POINTER};
 /// ```ignore
 /// impl FooBarBaz {
 ///     fn foo(&self, bar: &nsACString, baz: bool) -> Result<RefPtr<nsIVariant>, nsresult> {
-///         …
+///         // …
 ///     }
 /// }
 /// ```
