@@ -106,7 +106,7 @@ pub struct InitTaskRunnable {
 
 impl TaskRunnable {
     pub fn new(name: &'static str, task: Box<dyn Task>) -> Result<RefPtr<TaskRunnable>, nsresult> {
-        debug_assert!(is_main_thread());
+        assert!(is_main_thread());
         Ok(TaskRunnable::allocate(InitTaskRunnable {
             name,
             task,
@@ -123,13 +123,13 @@ impl TaskRunnable {
     fn run(&self) -> Result<(), nsresult> {
         match self.has_run.load(Ordering::Acquire) {
             false => {
-                debug_assert!(!is_main_thread());
+                assert!(!is_main_thread());
                 self.has_run.store(true, Ordering::Release);
                 self.task.run();
                 self.dispatch(get_main_thread()?)
             }
             true => {
-                debug_assert!(is_main_thread());
+                assert!(is_main_thread());
                 self.task.done()
             }
         }
