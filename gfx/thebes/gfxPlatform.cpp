@@ -716,7 +716,7 @@ WebRenderMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
 
         FinishAsyncMemoryReport();
       },
-      [](mozilla::ipc::ResponseRejectReason aReason) {
+      [](mozilla::ipc::ResponseRejectReason&& aReason) {
         FinishAsyncMemoryReport();
       });
 
@@ -1563,10 +1563,12 @@ bool gfxPlatform::AllowOpenGLCanvas() {
   // The compositor backend is only set correctly in the parent process,
   // so we let content process always assume correct compositor backend.
   // The callers have to do the right thing.
+  //
+  // XXX Disable SkiaGL on WebRender, since there is a case that R8G8B8X8
+  // is used, but WebRender does not support R8G8B8X8.
   bool correctBackend =
       !XRE_IsParentProcess() ||
-      ((mCompositorBackend == LayersBackend::LAYERS_OPENGL ||
-        mCompositorBackend == LayersBackend::LAYERS_WR) &&
+      (mCompositorBackend == LayersBackend::LAYERS_OPENGL &&
        (GetContentBackendFor(mCompositorBackend) == BackendType::SKIA));
 
   if (gfxPrefs::CanvasAzureAccelerated() && correctBackend) {
@@ -2557,6 +2559,11 @@ void gfxPlatform::InitCompositorAccelerationPrefs() {
   return (env && *env == '1');
 }
 
+static bool WebRenderEnvvarDisabled() {
+  const char* env = PR_GetEnv("MOZ_WEBRENDER");
+  return (env && *env == '0');
+}
+
 // If the "gfx.webrender.all.qualified" pref is true we want to enable
 // WebRender for qualifying hardware. The Normandy pref rollout code sets
 // default values on rolled out prefs on every startup, but Gfx starts up
@@ -2710,19 +2717,14 @@ void gfxPlatform::InitWebRenderConfig() {
 #endif
 
     // gfx.webrender.all.qualified works on all channels
-  } else if (wrQualifiedAll) {
-    if (featureWebRenderQualified.IsEnabled()) {
-      featureWebRender.UserEnable("Qualified enabled by pref ");
-    } else {
-      featureWebRender.ForceDisable(FeatureStatus::Blocked,
-                                    "Qualified enable blocked", failureId);
-    }
+  } else if (wrQualifiedAll && featureWebRenderQualified.IsEnabled()) {
+    featureWebRender.UserEnable("Qualified enabled by pref ");
   }
 
   // If the user set the pref to force-disable, let's do that. This will
   // override all the other enabling prefs (gfx.webrender.enabled,
   // gfx.webrender.all, and gfx.webrender.all.qualified).
-  if (gfxPrefs::WebRenderForceDisabled()) {
+  if (gfxPrefs::WebRenderForceDisabled() || WebRenderEnvvarDisabled()) {
     featureWebRender.UserDisable(
         "User force-disabled WR",
         NS_LITERAL_CSTRING("FEATURE_FAILURE_USER_FORCE_DISABLED"));

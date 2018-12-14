@@ -20,12 +20,12 @@
 #include "nsTObserverArray.h"
 #include "nsTArray.h"
 #include "nsTHashtable.h"
-#include "nsTObserverArray.h"
 #include "nsClassHashtable.h"
 #include "nsHashKeys.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/layers/TransactionIdAllocator.h"
+#include "mozilla/VsyncDispatcher.h"
 
 class nsPresContext;
 class nsIPresShell;
@@ -362,6 +362,7 @@ class nsRefreshDriver final : public mozilla::layers::TransactionIdAllocator,
   void ClearPendingTransactions() override;
   void ResetInitialTransactionId(TransactionId aTransactionId) override;
   mozilla::TimeStamp GetTransactionStart() override;
+  mozilla::VsyncId GetVsyncId() override;
 
   bool IsWaitingForPaint(mozilla::TimeStamp aTime);
 
@@ -415,7 +416,7 @@ class nsRefreshDriver final : public mozilla::layers::TransactionIdAllocator,
   void DispatchAnimationEvents();
   void RunFrameRequestCallbacks(mozilla::TimeStamp aNowTime);
   void UpdateIntersectionObservations();
-  void Tick(mozilla::TimeStamp aNowTime);
+  void Tick(mozilla::VsyncId aId, mozilla::TimeStamp aNowTime);
 
   enum EnsureTimerStartedFlags {
     eNone = 0,
@@ -508,6 +509,7 @@ class nsRefreshDriver final : public mozilla::layers::TransactionIdAllocator,
   uint64_t mWarningThreshold;
   mozilla::TimeStamp mMostRecentRefresh;
   mozilla::TimeStamp mTickStart;
+  mozilla::VsyncId mTickVsyncId;
   mozilla::TimeStamp mNextThrottledFrameRequestTick;
   mozilla::TimeStamp mNextRecomputeVisibilityTick;
 

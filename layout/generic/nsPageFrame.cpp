@@ -16,7 +16,6 @@
 #include "nsIPresShell.h"
 #include "nsPageContentFrame.h"
 #include "nsDisplayList.h"
-#include "nsLayoutUtils.h"              // for function BinarySearchForPosition
 #include "nsSimplePageSequenceFrame.h"  // for nsSharedPageData
 #include "nsTextFormatter.h"  // for page number localization formatting
 #include "nsBidiUtils.h"
@@ -36,7 +35,7 @@ nsPageFrame* NS_NewPageFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
 NS_IMPL_FRAMEARENA_HELPERS(nsPageFrame)
 
 NS_QUERYFRAME_HEAD(nsPageFrame)
-NS_QUERYFRAME_ENTRY(nsPageFrame)
+  NS_QUERYFRAME_ENTRY(nsPageFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 nsPageFrame::nsPageFrame(ComputedStyle* aStyle)

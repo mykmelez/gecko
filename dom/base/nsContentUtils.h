@@ -440,6 +440,15 @@ class nsContentUtils {
                                                          Element* aElement2);
 
   /**
+   * Returns the common ancestor under interactive content, if any.
+   * If neither one has interactive content as ancestor, common ancestor will be
+   * returned. If only one has interactive content as ancestor, null will be
+   * returned. If the nodes are the same, that node is returned.
+   */
+  static nsINode* GetCommonAncestorUnderInteractiveContent(nsINode* aNode1,
+                                                           nsINode* aNode2);
+
+  /**
    * Returns true if aNode1 is before aNode2 in the same connected
    * tree.
    * aNode1Index and aNode2Index are in/out arguments. If non-null, and value is
@@ -3292,6 +3301,9 @@ class nsContentUtils {
 
   static PopupControlState GetPopupControlState() { return sPopupControlState; }
 
+  static void PopupStatePusherCreated();
+  static void PopupStatePusherDestroyed();
+
   // Get a serial number for a newly created inner or outer window.
   static uint32_t InnerOrOuterWindowCreated();
   // Record that an inner or outer window has been destroyed.
@@ -3301,7 +3313,14 @@ class nsContentUtils {
     return sInnerOrOuterWindowCount;
   }
 
-  static bool CanShowPopup(nsIPrincipal* aPrincipal);
+  // This method checks if the principal is allowed by open popups by user
+  // permissions. In this case, the caller should not block popups.
+  static bool CanShowPopupByPermission(nsIPrincipal* aPrincipal);
+
+  // This method returns true if the caller is allowed to show a popup, and it
+  // consumes the popup token for the current event. There is just 1 popup
+  // allowed per event.
+  static bool TryUsePopupOpeningToken();
 
   /**
    * Serializes a JSON-like JS::Value into a string.
@@ -3495,6 +3514,11 @@ class nsContentUtils {
   static mozilla::LazyLogModule sDOMDumpLog;
 
   static PopupControlState sPopupControlState;
+  static uint32_t sPopupStatePusherCount;
+
+  // This token is by default set to false. When a popup/filePicker is shown, it
+  // is set to true.
+  static bool sUnusedPopupToken;
 
   static int32_t sInnerOrOuterWindowCount;
   static uint32_t sInnerOrOuterWindowSerialCounter;

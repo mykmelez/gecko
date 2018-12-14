@@ -4,7 +4,7 @@
 
 "use strict";
 
-const { ADB } = require("devtools/shared/adb/adb");
+const { prepareTCPConnection } = require("devtools/shared/adb/commands/index");
 const { DebuggerClient } = require("devtools/shared/client/debugger-client");
 const { DebuggerServer } = require("devtools/server/main");
 const { ClientWrapper } = require("./client-wrapper");
@@ -16,6 +16,8 @@ const { RUNTIMES } = require("../constants");
 async function createLocalClient() {
   DebuggerServer.init();
   DebuggerServer.registerAllActors();
+  DebuggerServer.allowChromeProcess = true;
+
   const client = new DebuggerClient(DebuggerServer.connectPipe());
   await client.connect();
   return new ClientWrapper(client);
@@ -29,7 +31,7 @@ async function createNetworkClient(host, port) {
 }
 
 async function createUSBClient(socketPath) {
-  const port = await ADB.prepareTCPConnection(socketPath);
+  const port = await prepareTCPConnection(socketPath);
   return createNetworkClient("localhost", port);
 }
 
@@ -53,5 +55,3 @@ async function createClientForRuntime(runtime) {
 }
 
 exports.createClientForRuntime = createClientForRuntime;
-
-require("./test-helper").enableMocks(module, "modules/runtime-client-factory");

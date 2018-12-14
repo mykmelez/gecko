@@ -123,6 +123,12 @@ SERIALIZED_PREDEFINED_TYPES = [
     "position::HorizontalPosition",
     "position::VerticalPosition",
     "url::ImageUrlOrNone",
+    "Appearance",
+    "OverscrollBehavior",
+    "OverflowClipBox",
+    "ScrollSnapType",
+    "Float",
+    "Overflow",
 ]
 
 def serialized_by_servo(prop):

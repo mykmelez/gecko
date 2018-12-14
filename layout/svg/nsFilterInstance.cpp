@@ -25,7 +25,6 @@
 #include "nsSVGUtils.h"
 #include "SVGContentUtils.h"
 #include "FilterSupport.h"
-#include "gfx2DGlue.h"
 #include "mozilla/Unused.h"
 
 using namespace mozilla;
@@ -724,7 +723,9 @@ nsRect nsFilterInstance::ComputeSourceNeededRect() {
 
 nsIntRect nsFilterInstance::OutputFilterSpaceBounds() const {
   uint32_t numPrimitives = mFilterDescription.mPrimitives.Length();
-  if (numPrimitives <= 0) return nsIntRect();
+  if (numPrimitives <= 0) {
+    return nsIntRect();
+  }
 
   return mFilterDescription.mPrimitives[numPrimitives - 1].PrimitiveSubregion();
 }

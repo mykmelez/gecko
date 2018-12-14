@@ -914,9 +914,7 @@ pub unsafe extern "C" fn wr_program_cache_delete(program_cache: *mut WrProgramCa
 
 #[no_mangle]
 pub unsafe extern "C" fn wr_try_load_shader_from_disk(program_cache: *mut WrProgramCache) {
-    if !program_cache.is_null() {
-        (*program_cache).try_load_from_disk();
-    }
+    (*program_cache).try_load_from_disk();
 }
 
 #[no_mangle]
@@ -990,6 +988,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
                                 window_width: i32,
                                 window_height: i32,
                                 support_low_priority_transactions: bool,
+                                enable_picture_caching: bool,
                                 gl_context: *mut c_void,
                                 program_cache: Option<&mut WrProgramCache>,
                                 shaders: Option<&mut WrShaders>,
@@ -1070,6 +1069,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         clear_color: Some(ColorF::new(0.0, 0.0, 0.0, 0.0)),
         precache_flags,
         namespace_alloc_by_client: true,
+        enable_picture_caching,
         ..Default::default()
     };
 
@@ -1942,7 +1942,7 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
     if *out_is_reference_frame {
         let ref_frame_id = state.frame_builder
             .dl_builder
-            .push_reference_frame(&prim_info, transform_binding, perspective);
+            .push_reference_frame(&prim_info, transform_style, transform_binding, perspective);
         *out_reference_frame_id = pack_clip_id(ref_frame_id);
 
         prim_info.rect.origin = LayoutPoint::zero();

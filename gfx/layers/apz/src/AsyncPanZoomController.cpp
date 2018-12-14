@@ -3973,11 +3973,16 @@ AsyncTransform AsyncPanZoomController::GetCurrentAsyncViewportTransform(
     }
   }
 
-  CSSToParentLayerScale2D effectiveZoom = GetEffectiveZoom(aMode);
+  // Unlike the visual viewport, the layout viewport does not change size
+  // (in the sense of "number of CSS pixels of page content it covers")
+  // when zooming, so the async transform of the layout viewport does not
+  // have an async zoom component. (The translation still needs to be
+  // multiplied by the non-async zoom, to get it into the correct coordinates.)
+  CSSToParentLayerScale2D effectiveZoom = Metrics().LayersPixelsPerCSSPixel()
+      * LayerToParentLayerScale(1.0f);
   ParentLayerPoint translation =
       (currentViewportOffset - lastPaintViewport.TopLeft()) * effectiveZoom;
-  LayerToParentLayerScale compositedAsyncZoom =
-      (effectiveZoom / Metrics().LayersPixelsPerCSSPixel()).ToScaleFactor();
+  LayerToParentLayerScale compositedAsyncZoom;
 
   return AsyncTransform(compositedAsyncZoom, -translation);
 }
@@ -4418,11 +4423,13 @@ void AsyncPanZoomController::NotifyLayersUpdated(
     // in some things into our local Metrics() because these things are
     // determined by Gecko and our copy in Metrics() may be stale.
 
+    // TODO: Rely entirely on |aScrollMetadata.IsResolutionUpdated()| to
+    //       determine which branch to take, and drop the other conditions.
     if (FuzzyEqualsAdditive(Metrics().GetCompositionBounds().Width(),
                             aLayerMetrics.GetCompositionBounds().Width()) &&
         Metrics().GetDevPixelsPerCSSPixel() ==
             aLayerMetrics.GetDevPixelsPerCSSPixel() &&
-        !viewportUpdated) {
+        !viewportUpdated && !aScrollMetadata.IsResolutionUpdated()) {
       // Any change to the pres shell resolution was requested by APZ and is
       // already included in our zoom; however, other components of the
       // cumulative resolution (a parent document's pres-shell resolution, or

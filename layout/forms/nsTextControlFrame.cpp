@@ -59,10 +59,10 @@ nsIFrame* NS_NewTextControlFrame(nsIPresShell* aPresShell,
 NS_IMPL_FRAMEARENA_HELPERS(nsTextControlFrame)
 
 NS_QUERYFRAME_HEAD(nsTextControlFrame)
-NS_QUERYFRAME_ENTRY(nsIFormControlFrame)
-NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
-NS_QUERYFRAME_ENTRY(nsITextControlFrame)
-NS_QUERYFRAME_ENTRY(nsIStatefulFrame)
+  NS_QUERYFRAME_ENTRY(nsIFormControlFrame)
+  NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
+  NS_QUERYFRAME_ENTRY(nsITextControlFrame)
+  NS_QUERYFRAME_ENTRY(nsIStatefulFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 #ifdef ACCESSIBILITY
@@ -443,14 +443,13 @@ nsresult nsTextControlFrame::CreateRootNode() {
   if (!IsSingleLineTextControl()) {
     // We can't just inherit the overflow because setting visible overflow will
     // crash when the number of lines exceeds the height of the textarea and
-    // setting -moz-hidden-unscrollable overflow (NS_STYLE_OVERFLOW_CLIP)
-    // doesn't paint the caret for some reason.
+    // setting -moz-hidden-unscrollable overflow doesn't paint the caret for
+    // some reason.
     const nsStyleDisplay* disp = StyleDisplay();
-    if (disp->mOverflowX != NS_STYLE_OVERFLOW_VISIBLE &&
-        disp->mOverflowX != NS_STYLE_OVERFLOW_CLIP) {
+    if (disp->mOverflowX != StyleOverflow::Visible &&
+        disp->mOverflowX != StyleOverflow::MozHiddenUnscrollable) {
       classValue.AppendLiteral(" inherit-overflow");
     }
-    classValue.AppendLiteral(" inherit-scroll-behavior");
   }
   nsresult rv = mRootNode->SetAttr(kNameSpaceID_None, nsGkAtoms::_class,
                                    classValue, false);
@@ -761,8 +760,7 @@ void nsTextControlFrame::SetFocus(bool aOn, bool aRepaint) {
 
 nsresult nsTextControlFrame::SetFormProperty(nsAtom* aName,
                                              const nsAString& aValue) {
-  if (!mIsProcessing)  // some kind of lock.
-  {
+  if (!mIsProcessing) {  // some kind of lock.
     mIsProcessing = true;
     if (nsGkAtoms::select == aName) {
       // Select all the text.

@@ -47,7 +47,7 @@ void nsHTMLButtonControlFrame::Init(nsIContent* aContent,
 }
 
 NS_QUERYFRAME_HEAD(nsHTMLButtonControlFrame)
-NS_QUERYFRAME_ENTRY(nsIFormControlFrame)
+  NS_QUERYFRAME_ENTRY(nsIFormControlFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 #ifdef ACCESSIBILITY
@@ -72,7 +72,7 @@ nsresult nsHTMLButtonControlFrame::HandleEvent(nsPresContext* aPresContext,
 }
 
 bool nsHTMLButtonControlFrame::ShouldClipPaintingToBorderBox() {
-  return IsInput() || StyleDisplay()->mOverflowX != NS_STYLE_OVERFLOW_VISIBLE;
+  return IsInput() || StyleDisplay()->mOverflowX != StyleOverflow::Visible;
 }
 
 void nsHTMLButtonControlFrame::BuildDisplayList(
@@ -90,14 +90,16 @@ void nsHTMLButtonControlFrame::BuildDisplayList(
   }
 
   nsDisplayList onTop;
-  if (IsVisibleForPainting(aBuilder)) {
+  if (IsVisibleForPainting()) {
     mRenderer.DisplayButton(aBuilder, aLists.BorderBackground(), &onTop);
   }
 
   nsDisplayListCollection set(aBuilder);
 
-  // Do not allow the child subtree to receive events.
-  if (!isForEventDelivery || aBuilder->HitTestIsForVisibility()) {
+  // Do not allow the child subtree to receive events,
+  // except in case of <button>.
+  if (!isForEventDelivery || mContent->IsHTMLElement(nsGkAtoms::button) ||
+      aBuilder->HitTestIsForVisibility()) {
     DisplayListClipState::AutoSaveRestore clipState(aBuilder);
 
     if (ShouldClipPaintingToBorderBox()) {

@@ -8,22 +8,24 @@
 #include "SVGObserverUtils.h"
 
 // Keep others in (case-insensitive) order:
+#include "mozilla/css/ImageLoader.h"
 #include "mozilla/dom/CanvasRenderingContext2D.h"
+#include "mozilla/net/ReferrerPolicy.h"
 #include "mozilla/RestyleManager.h"
 #include "nsCSSFrameConstructor.h"
+#include "nsCycleCollectionParticipant.h"
+#include "nsIContent.h"
+#include "nsIContentInlines.h"
+#include "nsIReflowCallback.h"
 #include "nsISupportsImpl.h"
 #include "nsSVGClipPathFrame.h"
-#include "nsSVGMarkerFrame.h"
-#include "nsSVGPaintServerFrame.h"
 #include "nsSVGFilterFrame.h"
+#include "nsSVGMarkerFrame.h"
 #include "nsSVGMaskFrame.h"
-#include "nsIReflowCallback.h"
-#include "nsCycleCollectionParticipant.h"
+#include "nsSVGPaintServerFrame.h"
 #include "SVGGeometryElement.h"
 #include "SVGTextPathElement.h"
 #include "SVGUseElement.h"
-#include "ImageLoader.h"
-#include "mozilla/net/ReferrerPolicy.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -134,7 +136,9 @@ nsIFrame* SVGRenderingObserver::GetAndObserveReferencedFrame(
     LayoutFrameType aFrameType, bool* aOK) {
   nsIFrame* frame = GetAndObserveReferencedFrame();
   if (frame) {
-    if (frame->Type() == aFrameType) return frame;
+    if (frame->Type() == aFrameType) {
+      return frame;
+    }
     if (aOK) {
       *aOK = false;
     }
@@ -651,7 +655,9 @@ class SVGFilterObserverListForCSSProp final : public SVGFilterObserverList {
 
 void SVGFilterObserverListForCSSProp::OnRenderingChange() {
   nsIFrame* frame = mFrameReference.Get();
-  if (!frame) return;
+  if (!frame) {
+    return;
+  }
 
   // Repaint asynchronously in case the filter frame is being torn down
   nsChangeHint changeHint = nsChangeHint(nsChangeHint_RepaintFrame);
@@ -990,13 +996,19 @@ template <class T>
 static T* GetEffectProperty(
     URLAndReferrerInfo* aURI, nsIFrame* aFrame,
     const mozilla::FramePropertyDescriptor<T>* aProperty) {
-  if (!aURI) return nullptr;
+  if (!aURI) {
+    return nullptr;
+  }
 
-  T* prop = aFrame->GetProperty(aProperty);
-  if (prop) return prop;
+  bool found;
+  T* prop = aFrame->GetProperty(aProperty, &found);
+  if (found) {
+    MOZ_ASSERT(prop, "this property should only store non-null values");
+    return prop;
+  }
   prop = new T(aURI, aFrame, false);
   NS_ADDREF(prop);
-  aFrame->SetProperty(aProperty, prop);
+  aFrame->AddProperty(aProperty, prop);
   return prop;
 }
 
@@ -1053,14 +1065,17 @@ static SVGFilterObserverListForCSSProp* GetOrCreateFilterObserverListForCSS(
   if (!effects->HasFilters()) {
     return nullptr;
   }
+
+  bool found;
   SVGFilterObserverListForCSSProp* observers =
-      aFrame->GetProperty(FilterProperty());
-  if (observers) {
+      aFrame->GetProperty(FilterProperty(), &found);
+  if (found) {
+    MOZ_ASSERT(observers, "this property should only store non-null values");
     return observers;
   }
   observers = new SVGFilterObserverListForCSSProp(effects->mFilters, aFrame);
   NS_ADDREF(observers);
-  aFrame->SetProperty(FilterProperty(), observers);
+  aFrame->AddProperty(FilterProperty(), observers);
   return observers;
 }
 
@@ -1170,13 +1185,15 @@ static SVGMaskObserverList* GetOrCreateMaskObserverList(
 
   MOZ_ASSERT(style->mMask.mImageCount > 0);
 
-  SVGMaskObserverList* prop = aMaskedFrame->GetProperty(MaskProperty());
-  if (prop) {
+  bool found;
+  SVGMaskObserverList* prop = aMaskedFrame->GetProperty(MaskProperty(), &found);
+  if (found) {
+    MOZ_ASSERT(prop, "this property should only store non-null values");
     return prop;
   }
   prop = new SVGMaskObserverList(aMaskedFrame);
   NS_ADDREF(prop);
-  aMaskedFrame->SetProperty(MaskProperty(), prop);
+  aMaskedFrame->AddProperty(MaskProperty(), prop);
   return prop;
 }
 
@@ -1306,11 +1323,14 @@ void SVGObserverUtils::RemoveTemplateObserver(nsIFrame* aFrame) {
 
 Element* SVGObserverUtils::GetAndObserveBackgroundImage(nsIFrame* aFrame,
                                                         const nsAtom* aHref) {
+  bool found;
   URIObserverHashtable* hashtable =
-      aFrame->GetProperty(BackgroundImageProperty());
-  if (!hashtable) {
+      aFrame->GetProperty(BackgroundImageProperty(), &found);
+  if (!found) {
     hashtable = new URIObserverHashtable();
-    aFrame->SetProperty(BackgroundImageProperty(), hashtable);
+    aFrame->AddProperty(BackgroundImageProperty(), hashtable);
+  } else {
+    MOZ_ASSERT(hashtable, "this property should only store non-null values");
   }
 
   nsAutoString elementId =
@@ -1351,7 +1371,9 @@ nsSVGPaintServerFrame* SVGObserverUtils::GetAndObservePaintServer(
   }
 
   const nsStyleSVG* svgStyle = frame->StyleSVG();
-  if ((svgStyle->*aPaint).Type() != eStyleSVGPaintType_Server) return nullptr;
+  if ((svgStyle->*aPaint).Type() != eStyleSVGPaintType_Server) {
+    return nullptr;
+  }
 
   RefPtr<URLAndReferrerInfo> paintServerURL =
       ResolveURLUsingLocalRef(frame, (svgStyle->*aPaint).GetPaintServer());
@@ -1361,15 +1383,20 @@ nsSVGPaintServerFrame* SVGObserverUtils::GetAndObservePaintServer(
       (aPaint == &nsStyleSVG::mFill) ? FillProperty() : StrokeProperty();
   nsSVGPaintingProperty* property =
       GetPaintingProperty(paintServerURL, frame, propDesc);
-  if (!property) return nullptr;
+  if (!property) {
+    return nullptr;
+  }
   nsIFrame* result = property->GetAndObserveReferencedFrame();
-  if (!result) return nullptr;
+  if (!result) {
+    return nullptr;
+  }
 
   LayoutFrameType type = result->Type();
   if (type != LayoutFrameType::SVGLinearGradient &&
       type != LayoutFrameType::SVGRadialGradient &&
-      type != LayoutFrameType::SVGPattern)
+      type != LayoutFrameType::SVGPattern) {
     return nullptr;
+  }
 
   return static_cast<nsSVGPaintServerFrame*>(result);
 }
@@ -1447,7 +1474,9 @@ void SVGObserverUtils::InvalidateRenderingObservers(nsIFrame* aFrame) {
                "aFrame must be first continuation");
 
   nsIContent* content = aFrame->GetContent();
-  if (!content || !content->IsElement()) return;
+  if (!content || !content->IsElement()) {
+    return;
+  }
 
   // If the rendering has changed, the bounds may well have changed too:
   aFrame->DeleteProperty(nsSVGUtils::ObjectBoundingBoxProperty());

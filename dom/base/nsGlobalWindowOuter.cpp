@@ -68,6 +68,7 @@
 #include "mozilla/intl/LocaleService.h"
 #include "WindowDestroyedEvent.h"
 #include "nsDocShellLoadState.h"
+#include "mozilla/dom/WindowGlobalChild.h"
 
 // Helper Classes
 #include "nsJSUtils.h"
@@ -161,10 +162,6 @@
 #include "nsIXULWindow.h"
 #include "nsITimedChannel.h"
 #include "nsServiceManagerUtils.h"
-#ifdef MOZ_XUL
-#include "nsIDOMXULControlElement.h"
-#include "nsMenuPopupFrame.h"
-#endif
 #include "mozilla/dom/CustomEvent.h"
 #include "nsIJARChannel.h"
 #include "nsIScreenManager.h"
@@ -1961,6 +1958,10 @@ nsresult nsGlobalWindowOuter::SetNewDocument(nsIDocument* aDocument,
   if (handleDocumentOpen) {
     newInnerWindow->MigrateStateForDocumentOpen(currentInner);
   }
+
+  // Tell the WindowGlobalParent that it should become the current window global
+  // for our BrowsingContext if it isn't already.
+  mInnerWindow->GetWindowGlobalChild()->SendBecomeCurrentWindowGlobal();
 
   // We no longer need the old inner window.  Start its destruction if
   // its not being reused and clear our reference.
@@ -5026,6 +5027,7 @@ void nsGlobalWindowOuter::NotifyContentBlockingState(unsigned aState,
   nsAutoString origin;
   nsContentUtils::GetUTFOrigin(aURIHint, origin);
 
+  bool blockedValue = aBlocked;
   bool unblocked = false;
   if (aState == nsIWebProgressListener::STATE_BLOCKED_TRACKING_CONTENT) {
     doc->SetHasTrackingContentBlocked(aBlocked, origin);
@@ -5064,14 +5066,16 @@ void nsGlobalWindowOuter::NotifyContentBlockingState(unsigned aState,
     // Note that the logic in this branch is the logical negation of the logic
     // in other branches, since the nsIDocument API we have is phrased in
     // "loaded" terms as opposed to "blocked" terms.
-    doc->SetHasCookiesLoaded(!aBlocked, origin);
-    aBlocked = true;
-    unblocked = false;
+    blockedValue = !aBlocked;
+    doc->SetHasCookiesLoaded(blockedValue, origin);
+    if (!aBlocked) {
+      unblocked = !doc->GetHasCookiesLoaded();
+    }
   } else {
     // Ignore nsIWebProgressListener::STATE_BLOCKED_UNSAFE_CONTENT;
   }
   const uint32_t oldState = state;
-  if (aBlocked) {
+  if (blockedValue) {
     state |= aState;
   } else if (unblocked) {
     state &= ~aState;
@@ -5125,7 +5129,7 @@ bool nsGlobalWindowOuter::CanSetProperty(const char* aPrefName) {
 }
 
 bool nsGlobalWindowOuter::PopupWhitelisted() {
-  if (mDoc && nsContentUtils::CanShowPopup(mDoc->NodePrincipal())) {
+  if (mDoc && nsContentUtils::CanShowPopupByPermission(mDoc->NodePrincipal())) {
     return true;
   }
 
@@ -5179,8 +5183,9 @@ PopupControlState nsGlobalWindowOuter::RevisePopupAbuseLevel(
   // If this popup is allowed, let's block any other for this event, forcing
   // openBlocked state.
   if ((abuse == openAllowed || abuse == openControlled) &&
-      StaticPrefs::dom_block_multiple_popups() && !PopupWhitelisted()) {
-    nsContentUtils::PushPopupControlState(openBlocked, true);
+      StaticPrefs::dom_block_multiple_popups() && !PopupWhitelisted() &&
+      !nsContentUtils::TryUsePopupOpeningToken()) {
+    abuse = openBlocked;
   }
 
   return abuse;
@@ -7386,10 +7391,13 @@ nsPIDOMWindowOuter::~nsPIDOMWindowOuter() {}
 
 nsAutoPopupStatePusherInternal::nsAutoPopupStatePusherInternal(
     PopupControlState aState, bool aForce)
-    : mOldState(nsContentUtils::PushPopupControlState(aState, aForce)) {}
+    : mOldState(nsContentUtils::PushPopupControlState(aState, aForce)) {
+  nsContentUtils::PopupStatePusherCreated();
+}
 
 nsAutoPopupStatePusherInternal::~nsAutoPopupStatePusherInternal() {
   nsContentUtils::PopPopupControlState(mOldState);
+  nsContentUtils::PopupStatePusherDestroyed();
 }
 
 mozilla::dom::BrowsingContext* nsPIDOMWindowOuter::GetBrowsingContext() const {

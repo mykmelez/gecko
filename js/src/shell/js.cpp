@@ -1080,9 +1080,7 @@ static bool SetPromiseRejectionTrackerCallback(JSContext* cx, unsigned argc,
 static bool BoundToAsyncStack(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  RootedFunction function(cx, (&GetFunctionNativeReserved(&args.callee(), 0)
-                                    .toObject()
-                                    .as<JSFunction>()));
+  RootedValue function(cx, GetFunctionNativeReserved(&args.callee(), 0));
   RootedObject options(
       cx, &GetFunctionNativeReserved(&args.callee(), 1).toObject());
 
@@ -4508,9 +4506,7 @@ static bool Elapsed(JSContext* cx, unsigned argc, Value* vp) {
 
 static bool Compile(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
-  if (args.length() < 1) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, "compile", "0", "s");
+  if (!args.requireAtLeast(cx, "compile", 1)) {
     return false;
   }
   if (!args[0].isString()) {
@@ -4564,9 +4560,7 @@ static ShellCompartmentPrivate* EnsureShellCompartmentPrivate(JSContext* cx) {
 
 static bool ParseModule(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
-  if (args.length() == 0) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, "parseModule", "0", "s");
+  if (!args.requireAtLeast(cx, "parseModule", 1)) {
     return false;
   }
 
@@ -4624,10 +4618,7 @@ static bool ParseModule(JSContext* cx, unsigned argc, Value* vp) {
 
 static bool SetModuleLoadHook(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
-  if (args.length() != 1) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, "setModuleLoadHook", "0",
-                              "s");
+  if (!args.requireAtLeast(cx, "setModuleLoadHook", 1)) {
     return false;
   }
 
@@ -4646,10 +4637,7 @@ static bool SetModuleLoadHook(JSContext* cx, unsigned argc, Value* vp) {
 
 static bool SetModuleResolveHook(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
-  if (args.length() != 1) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, "setModuleResolveHook",
-                              "0", "s");
+  if (!args.requireAtLeast(cx, "setModuleResolveHook", 1)) {
     return false;
   }
 
@@ -4697,10 +4685,7 @@ static JSObject* ShellModuleResolveHook(JSContext* cx,
 
 static bool SetModuleMetadataHook(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
-  if (args.length() != 1) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, "setModuleMetadataHook",
-                              "0", "s");
+  if (!args.requireAtLeast(cx, "setModuleMetadataHook", 1)) {
     return false;
   }
 
@@ -4746,10 +4731,7 @@ static bool ReportArgumentTypeError(JSContext* cx, HandleValue value,
 static bool ShellSetModulePrivate(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  if (args.length() != 2) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, "setModulePrivate", "0",
-                              "s");
+  if (!args.requireAtLeast(cx, "setModulePrivate", 2)) {
     return false;
   }
 
@@ -4765,10 +4747,7 @@ static bool ShellSetModulePrivate(JSContext* cx, unsigned argc, Value* vp) {
 static bool ShellGetModulePrivate(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  if (args.length() != 1) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, "getModulePrivate", "0",
-                              "s");
+  if (!args.requireAtLeast(cx, "getModulePrivate", 1)) {
     return false;
   }
 
@@ -4783,10 +4762,7 @@ static bool ShellGetModulePrivate(JSContext* cx, unsigned argc, Value* vp) {
 static bool SetModuleDynamicImportHook(JSContext* cx, unsigned argc,
                                        Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
-  if (args.length() != 1) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED,
-                              "setModuleDynamicImportHook", "0", "s");
+  if (!args.requireAtLeast(cx, "setModuleDynamicImportHook", 1)) {
     return false;
   }
 
@@ -4805,10 +4781,7 @@ static bool SetModuleDynamicImportHook(JSContext* cx, unsigned argc,
 
 static bool FinishDynamicModuleImport(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
-  if (args.length() != 3) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED,
-                              "finishDynamicModuleImport", "0", "s");
+  if (!args.requireAtLeast(cx, "finishDynamicModuleImport", 3)) {
     return false;
   }
 
@@ -4828,10 +4801,7 @@ static bool FinishDynamicModuleImport(JSContext* cx, unsigned argc, Value* vp) {
 
 static bool AbortDynamicModuleImport(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
-  if (args.length() != 4) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED,
-                              "abortDynamicModuleImport", "0", "s");
+  if (!args.requireAtLeast(cx, "abortDynamicModuleImport", 4)) {
     return false;
   }
 
@@ -4926,9 +4896,7 @@ static bool ParseBinASTData(JSContext* cx, uint8_t* buf_data,
 static bool BinParse(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  if (args.length() < 1) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, "parse", "0", "s");
+  if (!args.requireAtLeast(cx, "parseBin", 1)) {
     return false;
   }
 
@@ -5041,9 +5009,7 @@ static bool Parse(JSContext* cx, unsigned argc, Value* vp) {
 
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  if (args.length() < 1) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, "parse", "0", "s");
+  if (!args.requireAtLeast(cx, "parse", 1)) {
     return false;
   }
   if (!args[0].isString()) {
@@ -5170,9 +5136,7 @@ static bool SyntaxParse(JSContext* cx, unsigned argc, Value* vp) {
 
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  if (args.length() < 1) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, "parse", "0", "s");
+  if (!args.requireAtLeast(cx, "syntaxParse", 1)) {
     return false;
   }
   if (!args[0].isString()) {
@@ -5242,10 +5206,7 @@ static bool OffThreadCompileScript(JSContext* cx, unsigned argc, Value* vp) {
 
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  if (args.length() < 1) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, "offThreadCompileScript",
-                              "0", "s");
+  if (!args.requireAtLeast(cx, "offThreadCompileScript", 1)) {
     return false;
   }
   if (!args[0].isString()) {
@@ -5453,10 +5414,7 @@ static bool OffThreadDecodeScript(JSContext* cx, unsigned argc, Value* vp) {
 
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  if (args.length() < 1) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, "offThreadDecodeScript",
-                              "0", "s");
+  if (!args.requireAtLeast(cx, "offThreadDecodeScript", 1)) {
     return false;
   }
   if (!args[0].isObject() || !CacheEntry_isCacheEntry(&args[0].toObject())) {
@@ -6269,7 +6227,7 @@ static bool NukeAllCCWs(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  NukeCrossCompartmentWrappers(cx, AllCompartments(), cx->compartment(),
+  NukeCrossCompartmentWrappers(cx, AllCompartments(), cx->realm(),
                                NukeWindowReferences, NukeAllReferences);
   args.rval().setUndefined();
   return true;
@@ -8530,7 +8488,7 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
 
     JS_FN_HELP("nukeAllCCWs", NukeAllCCWs, 0, 0,
 "nukeAllCCWs()",
-"  Like nukeCCW, but for all CrossCompartmentWrappers targeting the current compartment."),
+"  Like nukeCCW, but for all CrossCompartmentWrappers targeting the current realm."),
 
     JS_FN_HELP("recomputeWrappers", RecomputeWrappers, 2, 0,
 "recomputeWrappers([src, [target]])",

@@ -4,14 +4,18 @@ version = "0.1.0"
 authors = ["Myk Melez <myk@mykzilla.org>"]
 
 [dependencies]
+atomic_refcell = "0.1"
+crossbeam-utils = "0.6.3"
 libc = "0.2"
 lmdb-rkv = "0.8"
 log = "0.4"
+moz_task = { path = "../../../xpcom/rust/moz_task" }
 nserror = { path = "../../../xpcom/rust/nserror" }
 nsstring = { path = "../../../servo/support/gecko/nsstring" }
 ordered-float = "1"
 rkv = "0.5"
 storage_variant = { path = "../../../storage/variant" }
+threadbound = "0.1"
 xpcom = { path = "../../../xpcom/rust/xpcom" }
 
 # Get rid of failure's dependency on backtrace. Eventually

@@ -7,6 +7,8 @@
 #include "ColumnSetWrapperFrame.h"
 
 #include "nsContentUtils.h"
+#include "nsIFrame.h"
+#include "nsIFrameInlines.h"
 
 using namespace mozilla;
 
@@ -25,7 +27,7 @@ nsBlockFrame* NS_NewColumnSetWrapperFrame(nsIPresShell* aPresShell,
 NS_IMPL_FRAMEARENA_HELPERS(ColumnSetWrapperFrame)
 
 NS_QUERYFRAME_HEAD(ColumnSetWrapperFrame)
-NS_QUERYFRAME_ENTRY(ColumnSetWrapperFrame)
+  NS_QUERYFRAME_ENTRY(ColumnSetWrapperFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsBlockFrame)
 
 ColumnSetWrapperFrame::ColumnSetWrapperFrame(ComputedStyle* aStyle)
@@ -118,9 +120,10 @@ void ColumnSetWrapperFrame::RemoveFrame(ChildListID aListID,
     const nsIFrame* aFrame) {
   MOZ_ASSERT(aFrame->IsColumnSpan(), "aFrame is not column-span?");
 
-  if (!aFrame->Style()->IsAnonBox()) {
-    // aFrame is the primary frame of the element having "column-span: all".
-    // Traverse no further.
+  if (!nsLayoutUtils::GetStyleFrame(const_cast<nsIFrame*>(aFrame))
+           ->Style()
+           ->IsAnonBox()) {
+    // aFrame's style frame has "column-span: all". Traverse no further.
     return;
   }
 

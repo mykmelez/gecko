@@ -176,9 +176,9 @@ def have_nasm(value):
         return True
 
 
-@depends(nasm_asflags, yasm_asflags)
-def have_yasm(nasm_asflags, yasm_asflags):
-    if nasm_asflags or yasm_asflags:
+@depends(yasm_asflags)
+def have_yasm(yasm_asflags):
+    if yasm_asflags:
         return True
 
 set_config('HAVE_NASM', have_nasm)
@@ -191,8 +191,8 @@ add_old_configure_assignment('YASM', have_yasm)
 # ==============================================================
 
 
-@depends('--disable-compile-environment', build_project, '--help')
-def compiling_android(compile_env, build_project, _):
+@depends('--disable-compile-environment', build_project)
+def compiling_android(compile_env, build_project):
     return compile_env and build_project in ('mobile/android', 'js')
 
 

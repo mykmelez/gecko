@@ -308,7 +308,9 @@ nsSVGOuterSVGFrame* nsSVGUtils::GetOuterSVGFrame(nsIFrame* aFrame) {
 nsIFrame* nsSVGUtils::GetOuterSVGFrameAndCoveredRegion(nsIFrame* aFrame,
                                                        nsRect* aRect) {
   nsSVGDisplayableFrame* svg = do_QueryFrame(aFrame);
-  if (!svg) return nullptr;
+  if (!svg) {
+    return nullptr;
+  }
   nsSVGOuterSVGFrame* outer = GetOuterSVGFrame(aFrame);
   if (outer == svg) {
     return nullptr;
@@ -585,7 +587,9 @@ void nsSVGUtils::PaintFrameWithEffects(nsIFrame* aFrame, gfxContext& aContext,
                "SVG should take this code path");
 
   nsSVGDisplayableFrame* svgFrame = do_QueryFrame(aFrame);
-  if (!svgFrame) return;
+  if (!svgFrame) {
+    return;
+  }
 
   MaskUsage maskUsage;
   DetermineMaskUsage(aFrame, true, maskUsage);
@@ -926,8 +930,8 @@ gfxRect nsSVGUtils::GetClipRectForFrame(nsIFrame* aFrame, float aX, float aY,
     return gfxRect(aX, aY, aWidth, aHeight);
   }
 
-  if (disp->mOverflowX == NS_STYLE_OVERFLOW_HIDDEN ||
-      disp->mOverflowY == NS_STYLE_OVERFLOW_HIDDEN) {
+  if (disp->mOverflowX == StyleOverflow::Hidden ||
+      disp->mOverflowY == StyleOverflow::Hidden) {
     nsIntRect clipPxRect = effects->mClip.ToOutsidePixels(
         aFrame->PresContext()->AppUnitsPerDevPixel());
     gfxRect clipRect = gfxRect(clipPxRect.x, clipPxRect.y, clipPxRect.width,
@@ -940,11 +944,11 @@ gfxRect nsSVGUtils::GetClipRectForFrame(nsIFrame* aFrame, float aX, float aY,
       clipRect.height = aHeight - clipRect.Y();
     }
 
-    if (disp->mOverflowX != NS_STYLE_OVERFLOW_HIDDEN) {
+    if (disp->mOverflowX != StyleOverflow::Hidden) {
       clipRect.x = aX;
       clipRect.width = aWidth;
     }
-    if (disp->mOverflowY != NS_STYLE_OVERFLOW_HIDDEN) {
+    if (disp->mOverflowY != StyleOverflow::Hidden) {
       clipRect.y = aY;
       clipRect.height = aHeight;
     }
@@ -956,7 +960,9 @@ gfxRect nsSVGUtils::GetClipRectForFrame(nsIFrame* aFrame, float aX, float aY,
 
 void nsSVGUtils::SetClipRect(gfxContext* aContext, const gfxMatrix& aCTM,
                              const gfxRect& aRect) {
-  if (aCTM.IsSingular()) return;
+  if (aCTM.IsSingular()) {
+    return;
+  }
 
   gfxContextMatrixAutoSaveRestore matrixAutoSaveRestore(aContext);
   aContext->Multiply(aCTM);

@@ -63,6 +63,19 @@ function getLastNonemptyBucket(buckets) {
   return null;
 }
 
+// Takes something like "matrix(1, 0, 0, 1, 234.024, 528.29023)"" and returns a number array
+function parseTransform(transform) {
+  return /matrix\((.*),(.*),(.*),(.*),(.*),(.*)\)/.exec(transform)
+    .slice(1).map(parseFloat);
+}
+
+function isTransformClose(a, b, name) {
+  is(a.length, b.length, `expected transforms ${a} and ${b} to be the same length`);
+  for (let i = 0; i < a.length; i++) {
+    ok(Math.abs(a[i] - b[i]) < .01, name);
+  }
+}
+
 // Given APZ test data for a single paint on the compositor side,
 // reconstruct the APZC tree structure from the 'parentScrollId'
 // entries that were logged. More specifically, the subset of the
@@ -381,6 +394,8 @@ async function waitUntilApzStable() {
 // that the root layer tree is pointing to the content layer tree, but does
 // not guarantee the subsequent paint; this function does that job.
 async function forceLayerTreeToCompositor() {
+  // Modify a style property to force a layout flush
+  document.body.style.left = "1px";
   var utils = SpecialPowers.getDOMWindowUtils(window);
   if (!utils.isMozAfterPaintPending) {
     dump("Forcing a paint since none was pending already...\n");

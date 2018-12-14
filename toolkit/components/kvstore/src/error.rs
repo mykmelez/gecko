@@ -22,6 +22,9 @@ pub enum KeyValueError {
     #[fail(display = "no interface '{}'", _0)]
     NoInterface(&'static str),
 
+    // NB: We can avoid storing the nsCString error description
+    // once nsresult is a real type with a Display implementation
+    // per https://bugzilla.mozilla.org/show_bug.cgi?id=1513350.
     #[fail(display = "error result {}", _0)]
     Nsresult(nsCString, nsresult),
 

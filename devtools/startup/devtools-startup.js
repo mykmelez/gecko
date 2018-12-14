@@ -134,12 +134,6 @@ XPCOMUtils.defineLazyGetter(this, "KeyShortcuts", function() {
       shortcut: KeyShortcutsBundle.GetStringFromName("webconsole.commandkey"),
       modifiers,
     },
-    // Key for opening the Debugger
-    {
-      toolId: "jsdebugger",
-      shortcut: KeyShortcutsBundle.GetStringFromName("debugger.commandkey"),
-      modifiers,
-    },
     // Key for opening the Network Monitor
     {
       toolId: "netmonitor",
@@ -169,6 +163,12 @@ XPCOMUtils.defineLazyGetter(this, "KeyShortcuts", function() {
       toolId: "dom",
       shortcut: KeyShortcutsBundle.GetStringFromName("dom.commandkey"),
       modifiers,
+    },
+    // Key for opening the Accessibility Panel
+    {
+      toolId: "accessibility",
+      shortcut: KeyShortcutsBundle.GetStringFromName("accessibilityF12.commandkey"),
+      modifiers: "shift",
     },
   ];
 

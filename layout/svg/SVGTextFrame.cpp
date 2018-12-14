@@ -484,8 +484,11 @@ struct TextRenderedRun {
    * transform.
    *
    *
-   * Assume that we have <text x="100" y="100" rotate="0 0 1 0 0
-   * 1">abcdef</text>. This would result in four text rendered runs:
+   * Assume that we have:
+   *
+   *   <text x="100" y="100" rotate="0 0 1 0 0 * 1">abcdef</text>.
+   *
+   * This would result in four text rendered runs:
    *
    *   - one for "ab"
    *   - one for "c"
@@ -2901,7 +2904,7 @@ void nsDisplaySVGText::Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) {
 // nsQueryFrame methods
 
 NS_QUERYFRAME_HEAD(SVGTextFrame)
-NS_QUERYFRAME_ENTRY(SVGTextFrame)
+  NS_QUERYFRAME_ENTRY(SVGTextFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsSVGDisplayContainerFrame)
 
 // ---------------------------------------------------------------------
@@ -2936,7 +2939,7 @@ void SVGTextFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     // painting.
     return;
   }
-  if (!IsVisibleForPainting(aBuilder) && aBuilder->IsForPainting()) {
+  if (!IsVisibleForPainting() && aBuilder->IsForPainting()) {
     return;
   }
   DisplayOutline(aBuilder, aLists);
@@ -2946,7 +2949,9 @@ void SVGTextFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
 
 nsresult SVGTextFrame::AttributeChanged(int32_t aNameSpaceID,
                                         nsAtom* aAttribute, int32_t aModType) {
-  if (aNameSpaceID != kNameSpaceID_None) return NS_OK;
+  if (aNameSpaceID != kNameSpaceID_None) {
+    return NS_OK;
+  }
 
   if (aAttribute == nsGkAtoms::transform) {
     // We don't invalidate for transform changes (the layers code does that).
@@ -4483,7 +4488,9 @@ enum TextAnchorSide { eAnchorLeft, eAnchorMiddle, eAnchorRight };
 static TextAnchorSide ConvertLogicalTextAnchorToPhysical(uint8_t aTextAnchor,
                                                          bool aIsRightToLeft) {
   NS_ASSERTION(aTextAnchor <= 3, "unexpected value for aTextAnchor");
-  if (!aIsRightToLeft) return TextAnchorSide(aTextAnchor);
+  if (!aIsRightToLeft) {
+    return TextAnchorSide(aTextAnchor);
+  }
   return TextAnchorSide(2 - aTextAnchor);
 }
 
@@ -5050,7 +5057,9 @@ void SVGTextFrame::MaybeResolveBidiForAnonymousBlockChild() {
 
 void SVGTextFrame::MaybeReflowAnonymousBlockChild() {
   nsIFrame* kid = PrincipalChildList().FirstChild();
-  if (!kid) return;
+  if (!kid) {
+    return;
+  }
 
   NS_ASSERTION(!(kid->GetStateBits() & NS_FRAME_IN_REFLOW),
                "should not be in reflow when about to reflow again");
@@ -5098,7 +5107,9 @@ void SVGTextFrame::DoReflow() {
 
   nsPresContext* presContext = PresContext();
   nsIFrame* kid = PrincipalChildList().FirstChild();
-  if (!kid) return;
+  if (!kid) {
+    return;
+  }
 
   RefPtr<gfxContext> renderingContext =
       presContext->PresShell()->CreateReferenceRenderingContext();

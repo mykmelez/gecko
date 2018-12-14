@@ -46,7 +46,7 @@ using namespace mozilla::layout;
 nsContainerFrame::~nsContainerFrame() {}
 
 NS_QUERYFRAME_HEAD(nsContainerFrame)
-NS_QUERYFRAME_ENTRY(nsContainerFrame)
+  NS_QUERYFRAME_ENTRY(nsContainerFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsSplittableFrame)
 
 void nsContainerFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
@@ -1737,8 +1737,8 @@ bool nsContainerFrame::RenumberList() {
 // add in a sanity check for absurdly deep frame trees.  See bug 42138
 // can't just use IsFrameTreeTooDeep() because that method has side effects we
 // don't want
-#define MAX_DEPTH_FOR_LIST_RENUMBERING \
-  200  // 200 open displayable tags is pretty unrealistic
+// 200 open displayable tags is pretty unrealistic
+#define MAX_DEPTH_FOR_LIST_RENUMBERING 200
 
 bool nsContainerFrame::RenumberFrameAndDescendants(int32_t* aOrdinal,
                                                    int32_t aDepth,

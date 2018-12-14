@@ -63,6 +63,17 @@ class nsDocument;
 class nsDOMStringMap;
 struct ServoNodeData;
 
+class nsIDOMXULButtonElement;
+class nsIDOMXULContainerElement;
+class nsIDOMXULContainerItemElement;
+class nsIDOMXULControlElement;
+class nsIDOMXULMenuListElement;
+class nsIDOMXULMultiSelectControlElement;
+class nsIDOMXULRelatedElement;
+class nsIDOMXULSelectControlElement;
+class nsIDOMXULSelectControlItemElement;
+class nsIBrowser;
+
 namespace mozilla {
 class DeclarationBlock;
 struct MutationClosureData;
@@ -880,6 +891,13 @@ class Element : public FragmentOrElement {
   }
 
   /**
+   * Same as above, but does not do out-of-bounds checks!
+   */
+  const nsAttrName* GetUnsafeAttrNameAt(uint32_t aIndex) const {
+    return mAttrs.AttrNameAt(aIndex);
+  }
+
+  /**
    * Gets the attribute info (name and value) for this element at a given index.
    */
   BorrowedAttrInfo GetAttrInfoAt(uint32_t aIndex) const {
@@ -1560,6 +1578,20 @@ class Element : public FragmentOrElement {
   bool UpdateIntersectionObservation(DOMIntersectionObserver* aObserver,
                                      int32_t threshold);
 
+  // A number of methods to cast to various XUL interfaces. They return a
+  // pointer only if the element implements that interface.
+  already_AddRefed<nsIDOMXULButtonElement> AsXULButton();
+  already_AddRefed<nsIDOMXULContainerElement> AsXULContainer();
+  already_AddRefed<nsIDOMXULContainerItemElement> AsXULContainerItem();
+  already_AddRefed<nsIDOMXULControlElement> AsXULControl();
+  already_AddRefed<nsIDOMXULMenuListElement> AsXULMenuList();
+  already_AddRefed<nsIDOMXULMultiSelectControlElement>
+  AsXULMultiSelectControl();
+  already_AddRefed<nsIDOMXULRelatedElement> AsXULRelated();
+  already_AddRefed<nsIDOMXULSelectControlElement> AsXULSelectControl();
+  already_AddRefed<nsIDOMXULSelectControlItemElement> AsXULSelectControlItem();
+  already_AddRefed<nsIBrowser> AsBrowser();
+
  protected:
   /*
    * Named-bools for use with SetAttrAndNotify to make call sites easier to
@@ -1851,6 +1883,12 @@ class Element : public FragmentOrElement {
       nsAtom* aAtom,
       const DOMTokenListSupportedTokenArray aSupportedTokens = nullptr);
 
+  /**
+   * Copy attributes and state to another element
+   * @param aDest the object to copy to
+   */
+  nsresult CopyInnerTo(Element* aDest);
+
  private:
   /**
    * Slow path for GetClasses, this should only be called for SVG elements.
@@ -1883,6 +1921,10 @@ class Element : public FragmentOrElement {
   // There should not be data on nodes that are in the flattened tree, or
   // descendants of display: none elements.
   mozilla::RustCell<ServoNodeData*> mServoData;
+
+ protected:
+  // Array containing all attributes for this element
+  AttrArray mAttrs;
 };
 
 class RemoveFromBindingManagerRunnable : public mozilla::Runnable {

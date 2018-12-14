@@ -17,14 +17,19 @@ this.DateTimeBoxWidget = class {
     this.element = shadowRoot.host;
     this.document = this.element.ownerDocument;
     this.window = this.document.defaultView;
+  }
 
+  /*
+   * Callback called by UAWidgets right after constructor.
+   */
+  onsetup() {
     this.switchImpl();
   }
 
   /*
    * Callback called by UAWidgets when the "type" property changes.
    */
-  onattributechange() {
+  onchange() {
     this.switchImpl();
   }
 
@@ -52,6 +57,7 @@ this.DateTimeBoxWidget = class {
     }
     if (newImpl) {
       this.impl = new newImpl(this.shadowRoot);
+      this.impl.onsetup();
     } else {
       this.impl = undefined;
     }
@@ -73,12 +79,14 @@ this.DateTimeInputBaseImplWidget = class {
     this.element = shadowRoot.host;
     this.document = this.element.ownerDocument;
     this.window = this.document.defaultView;
+  }
 
+  onsetup() {
     this.generateContent();
 
 
     this.DEBUG = false;
-    this.mDateTimeBoxElement = shadowRoot.firstChild;
+    this.mDateTimeBoxElement = this.shadowRoot.firstChild;
     this.mInputElement = this.element;
     this.mLocales = this.window.getRegionalPrefsLocales();
 
@@ -145,7 +153,7 @@ this.DateTimeInputBaseImplWidget = class {
           </span>
 
           <button class="datetime-reset-button" id="reset-button" tabindex="-1" aria-label="&datetime.reset.label;">
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12">
+            <svg xmlns="http://www.w3.org/2000/svg" class="datetime-reset-button-svg" width="12" height="12">
               <path d="M 3.9,3 3,3.9 5.1,6 3,8.1 3.9,9 6,6.9 8.1,9 9,8.1 6.9,6 9,3.9 8.1,3 6,5.1 Z M 12,6 A 6,6 0 0 1 6,12 6,6 0 0 1 0,6 6,6 0 0 1 6,0 6,6 0 0 1 12,6 Z"/>
             </svg>
           </button>
@@ -628,6 +636,10 @@ this.DateTimeInputBaseImplWidget = class {
 this.DateInputImplWidget = class extends DateTimeInputBaseImplWidget {
   constructor(shadowRoot) {
     super(shadowRoot);
+  }
+
+  onsetup() {
+    super.onsetup();
 
     this.mMinMonth = 1;
     this.mMaxMonth = 12;
@@ -966,6 +978,10 @@ this.DateInputImplWidget = class extends DateTimeInputBaseImplWidget {
 this.TimeInputImplWidget = class extends DateTimeInputBaseImplWidget {
   constructor(shadowRoot) {
     super(shadowRoot);
+  }
+
+  onsetup() {
+    super.onsetup();
 
     const kDefaultAMString = "AM";
     const kDefaultPMString = "PM";

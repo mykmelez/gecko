@@ -613,7 +613,7 @@ struct nsGridContainerFrame::GridItemInfo {
                   aContainerWM.IsOrthogonalTo(mFrame->GetWritingMode()) &&
               minSize.GetUnit() == eStyleUnit_Enumerated);
     return isAuto &&
-           mFrame->StyleDisplay()->mOverflowX == NS_STYLE_OVERFLOW_VISIBLE;
+           mFrame->StyleDisplay()->mOverflowX == StyleOverflow::Visible;
   }
 
 #ifdef DEBUG
@@ -2484,7 +2484,7 @@ static uint16_t GetAlignJustifyFallbackIfAny(uint16_t aAlignment,
 // =======================
 
 NS_QUERYFRAME_HEAD(nsGridContainerFrame)
-NS_QUERYFRAME_ENTRY(nsGridContainerFrame)
+  NS_QUERYFRAME_ENTRY(nsGridContainerFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 NS_IMPL_FRAMEARENA_HELPERS(nsGridContainerFrame)
@@ -3597,7 +3597,7 @@ static nscoord MinSize(const GridItemInfo& aGridItem,
                   : style.GetUnit();
   if (unit == eStyleUnit_Enumerated ||
       (unit == eStyleUnit_Auto &&
-       child->StyleDisplay()->mOverflowX == NS_STYLE_OVERFLOW_VISIBLE)) {
+       child->StyleDisplay()->mOverflowX == StyleOverflow::Visible)) {
     // Now calculate the "content size" part and return whichever is smaller.
     MOZ_ASSERT(unit != eStyleUnit_Enumerated || sz == NS_UNCONSTRAINEDSIZE);
     sz = std::min(

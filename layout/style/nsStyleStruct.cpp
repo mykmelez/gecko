@@ -12,7 +12,6 @@
 #include "nsStyleStruct.h"
 #include "nsStyleStructInlines.h"
 #include "nsStyleConsts.h"
-#include "nsStyleConsts.h"
 #include "nsString.h"
 #include "nsPresContext.h"
 #include "nsIAppShellService.h"
@@ -121,8 +120,7 @@ nsStyleFont::nsStyleFont(const nsPresContext* aContext)
       mScriptLevel(0),
       mMathVariant(NS_MATHML_MATHVARIANT_NONE),
       mMathDisplay(NS_MATHML_DISPLAYSTYLE_INLINE),
-      mMinFontSizeRatio(100)  // 100%
-      ,
+      mMinFontSizeRatio(100),  // 100%
       mExplicitLanguage(false),
       mAllowZoom(true),
       mScriptUnconstrainedSize(mSize),
@@ -653,8 +651,7 @@ nsChangeHint nsStyleColumn::CalcDifference(
 // nsStyleSVG
 //
 nsStyleSVG::nsStyleSVG(const nsPresContext* aContext)
-    : mFill(eStyleSVGPaintType_Color)  // Will be initialized to NS_RGB(0, 0, 0)
-      ,
+    : mFill(eStyleSVGPaintType_Color),  // Will be initialized to NS_RGB(0,0,0)
       mStroke(eStyleSVGPaintType_None),
       mStrokeDashoffset(0, nsStyleCoord::CoordConstructor),
       mStrokeWidth(nsPresContext::CSSPixelsToAppUnits(1),
@@ -2980,11 +2977,11 @@ nsStyleDisplay::nsStyleDisplay(const nsPresContext* aContext)
       mBreakInside(StyleBreakWithin::Auto),
       mBreakBefore(StyleBreakBetween::Auto),
       mBreakAfter(StyleBreakBetween::Auto),
-      mOverflowX(NS_STYLE_OVERFLOW_VISIBLE),
-      mOverflowY(NS_STYLE_OVERFLOW_VISIBLE),
-      mOverflowClipBoxBlock(NS_STYLE_OVERFLOW_CLIP_BOX_PADDING_BOX),
-      mOverflowClipBoxInline(NS_STYLE_OVERFLOW_CLIP_BOX_PADDING_BOX),
-      mResize(NS_STYLE_RESIZE_NONE),
+      mOverflowX(StyleOverflow::Visible),
+      mOverflowY(StyleOverflow::Visible),
+      mOverflowClipBoxBlock(StyleOverflowClipBox::PaddingBox),
+      mOverflowClipBoxInline(StyleOverflowClipBox::PaddingBox),
+      mResize(StyleResize::None),
       mOrient(StyleOrient::Inline),
       mIsolation(NS_STYLE_ISOLATION_AUTO),
       mTopLayer(NS_STYLE_TOP_LAYER_NONE),
@@ -2993,8 +2990,8 @@ nsStyleDisplay::nsStyleDisplay(const nsPresContext* aContext)
       mScrollBehavior(NS_STYLE_SCROLL_BEHAVIOR_AUTO),
       mOverscrollBehaviorX(StyleOverscrollBehavior::Auto),
       mOverscrollBehaviorY(StyleOverscrollBehavior::Auto),
-      mScrollSnapTypeX(NS_STYLE_SCROLL_SNAP_TYPE_NONE),
-      mScrollSnapTypeY(NS_STYLE_SCROLL_SNAP_TYPE_NONE),
+      mScrollSnapTypeX(StyleScrollSnapType::None),
+      mScrollSnapTypeY(StyleScrollSnapType::None),
       mScrollSnapPointsX(eStyleUnit_None),
       mScrollSnapPointsY(eStyleUnit_None),
       mBackfaceVisibility(NS_STYLE_BACKFACE_VISIBILITY_VISIBLE),

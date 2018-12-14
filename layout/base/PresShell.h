@@ -51,6 +51,7 @@ class Selection;
 }  // namespace dom
 
 class EventDispatchingCallback;
+class OverflowChangedTracker;
 
 // A set type for tracking visible frames, for use by the visibility code in
 // PresShell. The set contains nsIFrame* pointers.
@@ -194,13 +195,12 @@ class PresShell final : public nsIPresShell,
 
   void SetIgnoreViewportScrolling(bool aIgnore) override;
 
-  nsresult SetResolution(float aResolution) override {
-    return SetResolutionImpl(aResolution, /* aScaleToResolution = */ false);
+  nsresult SetResolutionAndScaleTo(float aResolution,
+                                   nsAtom* aOrigin) override;
+  bool IsResolutionUpdated() const override { return mResolutionUpdated; }
+  void SetResolutionUpdated(bool aUpdated) override {
+    mResolutionUpdated = aUpdated;
   }
-  nsresult SetResolutionAndScaleTo(float aResolution) override {
-    return SetResolutionImpl(aResolution, /* aScaleToResolution = */ true);
-  }
-  bool ScaleToResolution() const override;
   float GetCumulativeResolution() override;
   float GetCumulativeNonRootScaleResolution() override;
   void SetRestoreResolution(float aResolution,
@@ -427,7 +427,10 @@ class PresShell final : public nsIPresShell,
   void ScheduleReflow();
 
   // DoReflow returns whether the reflow finished without interruption
-  bool DoReflow(nsIFrame* aFrame, bool aInterruptible);
+  // If aFrame is not the root frame, the caller must pass a non-null
+  // aOverflowTracker.
+  bool DoReflow(nsIFrame* aFrame, bool aInterruptible,
+                mozilla::OverflowChangedTracker* aOverflowTracker);
 #ifdef DEBUG
   void DoVerifyReflow();
   void VerifyHasDirtyRootAncestor(nsIFrame* aFrame);
@@ -711,7 +714,8 @@ class PresShell final : public nsIPresShell,
   // that we last did an approximate frame visibility update.
   VisibleFrames mApproximatelyVisibleFrames;
 
-  nsresult SetResolutionImpl(float aResolution, bool aScaleToResolution);
+  nsresult SetResolutionImpl(float aResolution, bool aScaleToResolution,
+                             nsAtom* aOrigin);
 
   nsIContent* GetOverrideClickTarget(WidgetGUIEvent* aEvent, nsIFrame* aFrame);
 #ifdef DEBUG
@@ -812,11 +816,6 @@ class PresShell final : public nsIPresShell,
 
   bool mHasCSSBackgroundColor : 1;
 
-  // Whether content should be scaled by the resolution amount. If this is
-  // not set, a transform that scales by the inverse of the resolution is
-  // applied to rendered layers.
-  bool mScaleToResolution : 1;
-
   // Whether the last chrome-only escape key event is consumed.
   bool mIsLastChromeOnlyEscapeKeyConsumed : 1;
 
@@ -827,6 +826,10 @@ class PresShell final : public nsIPresShell,
 
   // Whether we have ever handled a user input event
   bool mHasHandledUserInput : 1;
+
+  // Whether the most recent change to the pres shell resolution was
+  // originated by the main thread.
+  bool mResolutionUpdated : 1;
 
   // Whether we should dispatch keypress events even for non-printable keys
   // for keeping backward compatibility.

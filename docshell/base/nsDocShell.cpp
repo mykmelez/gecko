@@ -3193,6 +3193,22 @@ nsDocShell::SetTreeOwner(nsIDocShellTreeOwner* aTreeOwner) {
     }
   }
 
+  // If we're in the content process and have had a TreeOwner set on us, extract
+  // our TabChild actor. If we've already had our TabChild set, assert that it
+  // hasn't changed.
+  if (mTreeOwner && XRE_IsContentProcess()) {
+    nsCOMPtr<nsITabChild> newTabChild = do_GetInterface(mTreeOwner);
+    MOZ_ASSERT(newTabChild, "No TabChild actor for tree owner in Content!");
+
+    if (mTabChild) {
+      nsCOMPtr<nsITabChild> oldTabChild = do_QueryReferent(mTabChild);
+      MOZ_RELEASE_ASSERT(oldTabChild == newTabChild,
+                         "Cannot cahnge TabChild during nsDocShell lifetime!");
+    } else {
+      mTabChild = do_GetWeakReference(newTabChild);
+    }
+  }
+
   // Our tree owner has changed. Recompute scriptability.
   //
   // Note that this is near-redundant with the recomputation in
@@ -5044,6 +5060,8 @@ nsDocShell::Destroy() {
   mBrowsingContext->Detach();
 
   SetTreeOwner(nullptr);
+
+  mTabChild = nullptr;
 
   mOnePermittedSandboxedNavigator = nullptr;
 
@@ -9785,28 +9803,17 @@ nsresult nsDocShell::DoURILoad(
   }
 
   if (IsFrame()) {
-    bool doesNotReturnData = false;
-    NS_URIChainHasFlags(aURI, nsIProtocolHandler::URI_DOES_NOT_RETURN_DATA,
-                        &doesNotReturnData);
-
-    if (doesNotReturnData) {
-      // If this is an iframe, it must have a parent. Let's count the
-      // no-data-URL telemetry on the parent document, because probably this one
-      // is an about page.
-      nsCOMPtr<nsIDocShellTreeItem> parent;
-      GetSameTypeParent(getter_AddRefs(parent));
-      MOZ_ASSERT(parent);
-
-      nsIDocument* parentDocument = parent->GetDocument();
-      if (parentDocument) {
-        parentDocument->SetDocumentAndPageUseCounter(
-            eUseCounter_custom_no_data_URL);
-      }
-    }
-
     MOZ_ASSERT(aContentPolicyType == nsIContentPolicy::TYPE_INTERNAL_IFRAME ||
                    aContentPolicyType == nsIContentPolicy::TYPE_INTERNAL_FRAME,
                "DoURILoad thinks this is a frame and InternalLoad does not");
+
+    // Only allow URLs able to return data in iframes.
+    bool doesNotReturnData = false;
+    NS_URIChainHasFlags(aURI, nsIProtocolHandler::URI_DOES_NOT_RETURN_DATA,
+                        &doesNotReturnData);
+    if (doesNotReturnData) {
+      return NS_ERROR_UNKNOWN_PROTOCOL;
+    }
 
     // Only allow view-source scheme in top-level docshells. view-source is
     // the only scheme to which this applies at the moment due to potential
@@ -12656,6 +12663,11 @@ nsDocShell::OnLinkClickSync(nsIContent* aContent, nsIURI* aURI,
     }
   }
 
+  // if the triggeringPrincipal is not passed explicitly, then we
+  // fall back to using doc->NodePrincipal() as the triggeringPrincipal.
+  nsCOMPtr<nsIPrincipal> triggeringPrincipal =
+      aTriggeringPrincipal ? aTriggeringPrincipal : aContent->NodePrincipal();
+
   uint32_t flags = INTERNAL_LOAD_FLAGS_NONE;
   if (IsElementAnchorOrArea(aContent)) {
     MOZ_ASSERT(aContent->IsHTMLElement());
@@ -12693,7 +12705,8 @@ nsDocShell::OnLinkClickSync(nsIContent* aContent, nsIURI* aURI,
     }
 
     if (targetBlank && StaticPrefs::dom_targetBlankNoOpener_enabled() &&
-        !explicitOpenerSet) {
+        !explicitOpenerSet &&
+        !nsContentUtils::IsSystemPrincipal(triggeringPrincipal)) {
       flags |= INTERNAL_LOAD_FLAGS_NO_OPENER;
     }
 
@@ -12748,11 +12761,6 @@ nsDocShell::OnLinkClickSync(nsIContent* aContent, nsIURI* aURI,
     NS_ParseRequestContentType(utf8Hint, type, dummy);
     CopyUTF8toUTF16(type, typeHint);
   }
-
-  // if the triggeringPrincipal is not passed explicitly, then we
-  // fall back to using doc->NodePrincipal() as the triggeringPrincipal.
-  nsCOMPtr<nsIPrincipal> triggeringPrincipal =
-      aTriggeringPrincipal ? aTriggeringPrincipal : aContent->NodePrincipal();
 
   // Link click (or form submission) can be triggered inside an onload handler,
   // and we don't want to add history entry in this case.
@@ -13321,8 +13329,7 @@ nsDocShell::GetScriptableTabChild(nsITabChild** aTabChild) {
 }
 
 already_AddRefed<nsITabChild> nsDocShell::GetTabChild() {
-  nsCOMPtr<nsIDocShellTreeOwner> owner(mTreeOwner);
-  nsCOMPtr<nsITabChild> tc = do_GetInterface(owner);
+  nsCOMPtr<nsITabChild> tc = do_QueryReferent(mTabChild);
   return tc.forget();
 }
 

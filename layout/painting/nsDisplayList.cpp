@@ -99,12 +99,6 @@
 #include "mozilla/layers/WebRenderMessages.h"
 #include "mozilla/layers/WebRenderScrollData.h"
 
-// GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
-// GetTickCount().
-#ifdef GetCurrentTime
-#undef GetCurrentTime
-#endif
-
 using namespace mozilla;
 using namespace mozilla::layers;
 using namespace mozilla::dom;
@@ -515,7 +509,7 @@ static void AddAnimationForProperty(nsIFrame* aFrame,
     animation->startTime() = startTime.Value();
   }
 
-  animation->holdTime() = aAnimation->GetCurrentTime().Value();
+  animation->holdTime() = aAnimation->GetCurrentTimeAsDuration().Value();
 
   const ComputedTiming computedTiming =
       aAnimation->GetEffect()->GetComputedTiming();
@@ -1068,16 +1062,6 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
   MOZ_COUNT_CTOR(nsDisplayListBuilder);
 
   mBuildCompositorHitTestInfo = mAsyncPanZoomEnabled && IsForPainting();
-
-  nsPresContext* pc = aReferenceFrame->PresContext();
-  nsIPresShell* shell = pc->PresShell();
-  if (pc->IsRenderingOnlySelection()) {
-    nsCOMPtr<nsISelectionController> selcon(do_QueryInterface(shell));
-    if (selcon) {
-      mBoundingSelection =
-          selcon->GetSelection(nsISelectionController::SELECTION_NORMAL);
-    }
-  }
 
   static_assert(
       static_cast<uint32_t>(DisplayItemType::TYPE_MAX) < (1 << TYPE_BITS),
@@ -2516,8 +2500,7 @@ FrameLayerBuilder* nsDisplayList::BuildLayers(nsDisplayListBuilder* aBuilder,
     // Root is being scaled up by the X/Y resolution. Scale it back down.
     root->SetPostScale(1.0f / containerParameters.mXScale,
                        1.0f / containerParameters.mYScale);
-    root->SetScaleToResolution(presShell->ScaleToResolution(),
-                               containerParameters.mXScale);
+    root->SetScaleToResolution(containerParameters.mXScale);
 
     auto callback = [root](ScrollableLayerGuid::ViewID aScrollId) -> bool {
       return nsLayoutUtils::ContainsMetricsWithId(root, aScrollId);
@@ -4507,7 +4490,7 @@ bool nsDisplayImageContainer::CanOptimizeToImageLayer(
     return false;
   }
 
-  if (mFrame->IsImageFrame()) {
+  if (mFrame->IsImageFrame() || mFrame->IsImageControlFrame()) {
     // Image layer doesn't support draw focus ring for image map.
     nsImageFrame* f = static_cast<nsImageFrame*>(mFrame);
     if (f->HasImageMap()) {
@@ -4526,7 +4509,12 @@ void nsDisplayBackgroundColor::ApplyOpacity(nsDisplayListBuilder* aBuilder,
   IntersectClip(aBuilder, aClip, false);
 }
 
-bool nsDisplayBackgroundColor::CanApplyOpacity() const { return true; }
+bool nsDisplayBackgroundColor::CanApplyOpacity() const {
+  // Don't apply opacity if the background color is animated since the color is
+  // going to be changed on the compositor.
+  return !EffectCompositor::HasAnimationsForCompositor(
+      mFrame, eCSSProperty_background_color);
+}
 
 LayerState nsDisplayBackgroundColor::GetLayerState(
     nsDisplayListBuilder* aBuilder, LayerManager* aManager,
@@ -6568,8 +6556,7 @@ void nsDisplayResolution::HitTest(nsDisplayListBuilder* aBuilder,
                                   const nsRect& aRect, HitTestState* aState,
                                   nsTArray<nsIFrame*>* aOutFrames) {
   nsIPresShell* presShell = mFrame->PresShell();
-  nsRect rect = aRect.RemoveResolution(
-      presShell->ScaleToResolution() ? presShell->GetResolution() : 1.0f);
+  nsRect rect = aRect.RemoveResolution(presShell->GetResolution());
   mList.HitTest(aBuilder, rect, aState, aOutFrames);
 }
 
@@ -6585,8 +6572,7 @@ already_AddRefed<Layer> nsDisplayResolution::BuildLayer(
       nsDisplaySubDocument::BuildLayer(aBuilder, aManager, containerParameters);
   layer->SetPostScale(1.0f / presShell->GetResolution(),
                       1.0f / presShell->GetResolution());
-  layer->AsContainerLayer()->SetScaleToResolution(
-      presShell->ScaleToResolution(), presShell->GetResolution());
+  layer->AsContainerLayer()->SetScaleToResolution(presShell->GetResolution());
   return layer.forget();
 }
 

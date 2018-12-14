@@ -16,7 +16,6 @@
 
 #include "nsCSSKeywords.h"
 #include "nsLayoutUtils.h"
-#include "nsStyleConsts.h"
 #include "nsIWidget.h"
 #include "nsStyleConsts.h"  // For system widget appearance types
 
@@ -446,32 +445,6 @@ const KTableEntry nsCSSProps::kContainKTable[] = {
     {eCSSKeyword_style, NS_STYLE_CONTAIN_STYLE},
     {eCSSKeyword_paint, NS_STYLE_CONTAIN_PAINT},
     {eCSSKeyword_size, NS_STYLE_CONTAIN_SIZE},
-    {eCSSKeyword_UNKNOWN, -1}};
-
-const KTableEntry nsCSSProps::kOverflowClipBoxKTable[] = {
-    {eCSSKeyword_padding_box, NS_STYLE_OVERFLOW_CLIP_BOX_PADDING_BOX},
-    {eCSSKeyword_content_box, NS_STYLE_OVERFLOW_CLIP_BOX_CONTENT_BOX},
-    {eCSSKeyword_UNKNOWN, -1}};
-
-const KTableEntry nsCSSProps::kOverflowSubKTable[] = {
-    {eCSSKeyword_auto, NS_STYLE_OVERFLOW_AUTO},
-    {eCSSKeyword_visible, NS_STYLE_OVERFLOW_VISIBLE},
-    {eCSSKeyword_hidden, NS_STYLE_OVERFLOW_HIDDEN},
-    {eCSSKeyword_scroll, NS_STYLE_OVERFLOW_SCROLL},
-    // Deprecated:
-    {eCSSKeyword__moz_hidden_unscrollable, NS_STYLE_OVERFLOW_CLIP},
-    {eCSSKeyword_UNKNOWN, -1}};
-
-const KTableEntry nsCSSProps::kOverscrollBehaviorKTable[] = {
-    {eCSSKeyword_auto, StyleOverscrollBehavior::Auto},
-    {eCSSKeyword_contain, StyleOverscrollBehavior::Contain},
-    {eCSSKeyword_none, StyleOverscrollBehavior::None},
-    {eCSSKeyword_UNKNOWN, -1}};
-
-const KTableEntry nsCSSProps::kScrollSnapTypeKTable[] = {
-    {eCSSKeyword_none, NS_STYLE_SCROLL_SNAP_TYPE_NONE},
-    {eCSSKeyword_mandatory, NS_STYLE_SCROLL_SNAP_TYPE_MANDATORY},
-    {eCSSKeyword_proximity, NS_STYLE_SCROLL_SNAP_TYPE_PROXIMITY},
     {eCSSKeyword_UNKNOWN, -1}};
 
 const KTableEntry nsCSSProps::kTextAlignKTable[] = {

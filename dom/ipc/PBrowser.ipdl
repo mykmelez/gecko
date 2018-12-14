@@ -18,6 +18,7 @@ include protocol PParentToChildStream;
 include protocol PFileDescriptorSet;
 include protocol PIPCBlobInputStream;
 include protocol PPaymentRequest;
+include protocol PWindowGlobal;
 
 include DOMTypes;
 include IPCBlob;
@@ -86,6 +87,8 @@ using class mozilla::NativeEventData from "ipc/nsGUIEventIPC.h";
 using mozilla::FontRange from "ipc/nsGUIEventIPC.h";
 using mozilla::a11y::IAccessibleHolder from "mozilla/a11y/IPCTypes.h";
 using mozilla::OriginAttributes from "mozilla/ipc/BackgroundUtils.h";
+using mozilla::dom::BrowsingContextId from "mozilla/dom/ipc/IdType.h";
+using refcounted class nsIURI from "mozilla/ipc/URIUtils.h";
 
 namespace mozilla {
 namespace dom {
@@ -118,6 +121,7 @@ nested(upto inside_cpow) sync protocol PBrowser
     manages PIndexedDBPermissionRequest;
     manages PPluginWidget;
     manages PPaymentRequest;
+    manages PWindowGlobal;
 
 both:
     async AsyncMessage(nsString aMessage, CpowEntry[] aCpows,
@@ -143,6 +147,12 @@ parent:
     sync PPluginWidget();
 
     async PPaymentRequest();
+
+    /**
+     * Construct a new WindowGlobal actor for a window global in the given
+     * BrowsingContext and with the given principal.
+     */
+    async PWindowGlobal(WindowGlobalInit init);
 
     /**
      * Sends an NS_NATIVE_CHILD_OF_SHAREABLE_WINDOW to be adopted by the
@@ -512,6 +522,9 @@ parent:
 
     async SetHasBeforeUnload(bool aHasBeforeUnload);
 
+    async RegisterProtocolHandler(nsString scheme, nsIURI handlerURI, nsString title,
+                                  nsIURI documentURI);
+
 child:
     async NativeSynthesisResponse(uint64_t aObserverId, nsCString aResponse);
 
@@ -578,6 +591,8 @@ parent:
 
     sync SetPrefersReducedMotionOverrideForTest(bool aValue);
     sync ResetPrefersReducedMotionOverrideForTest();
+
+    async RootBrowsingContext(BrowsingContextId aId);
 
 child:
     /**

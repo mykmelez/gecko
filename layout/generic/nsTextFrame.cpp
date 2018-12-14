@@ -82,7 +82,6 @@
 
 #include "nsPrintfCString.h"
 
-#include "gfxContext.h"
 #include "mozilla/gfx/DrawTargetRecording.h"
 
 #include "mozilla/UniquePtr.h"
@@ -436,6 +435,10 @@ class nsTextPaintStyle {
   nsSelectionStyle* GetSelectionStyle(int32_t aIndex);
   void InitSelectionStyle(int32_t aIndex);
 
+  // Ensures sufficient contrast between the frame background color and the
+  // selection background color, and swaps the selection text and background
+  // colors accordingly.
+  // Only used on platforms where mSelectionTextColor != NS_DONT_CHANGE_COLOR
   bool EnsureSufficientContrast(nscolor* aForeColor, nscolor* aBackColor);
 
   nscolor GetResolvedForeColor(nscolor aColor, nscolor aDefaultForeColor,
@@ -2782,7 +2785,7 @@ void BuildTextRunsScanner::AssignTextRun(gfxTextRun* aTextRun,
 }
 
 NS_QUERYFRAME_HEAD(nsTextFrame)
-NS_QUERYFRAME_ENTRY(nsTextFrame)
+  NS_QUERYFRAME_ENTRY(nsTextFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsFrame)
 
 gfxSkipCharsIterator nsTextFrame::EnsureTextRun(
@@ -2933,42 +2936,40 @@ static bool IsJustifiableCharacter(const nsStyleText* aTextStyle,
     return false;
   }
   if (aLangIsCJ) {
-    if ((0x2150u <= ch &&
-         ch <= 0x22ffu) ||  // Number Forms, Arrows, Mathematical Operators
-        (0x2460u <= ch && ch <= 0x24ffu) ||  // Enclosed Alphanumerics
-        (0x2580u <= ch &&
-         ch <= 0x27bfu) ||  // Block Elements, Geometric Shapes, Miscellaneous
-                            // Symbols, Dingbats
-        (0x27f0u <= ch &&
-         ch <= 0x2bffu) ||  // Supplemental Arrows-A, Braille Patterns,
-                            // Supplemental Arrows-B, Miscellaneous Mathematical
-                            // Symbols-B, Supplemental Mathematical Operators,
-                            // Miscellaneous Symbols and Arrows
-        (0x2e80u <= ch &&
-         ch <= 0x312fu) ||  // CJK Radicals Supplement, CJK Radicals Supplement,
-                            // Ideographic Description Characters, CJK Symbols
-                            // and Punctuation, Hiragana, Katakana, Bopomofo
-        (0x3190u <= ch &&
-         ch <= 0xabffu) ||  // Kanbun, Bopomofo Extended, Katakana Phonetic
-                            // Extensions, Enclosed CJK Letters and Months, CJK
-                            // Compatibility, CJK Unified Ideographs Extension
-                            // A, Yijing Hexagram Symbols, CJK Unified
-                            // Ideographs, Yi Syllables, Yi Radicals
-        (0xf900u <= ch && ch <= 0xfaffu) ||  // CJK Compatibility Ideographs
-        (0xff5eu <= ch &&
-         ch <= 0xff9fu)  // Halfwidth and Fullwidth Forms(a part)
-    ) {
+    if (  // Number Forms, Arrows, Mathematical Operators
+        (0x2150u <= ch && ch <= 0x22ffu) ||
+        // Enclosed Alphanumerics
+        (0x2460u <= ch && ch <= 0x24ffu) ||
+        // Block Elements, Geometric Shapes, Miscellaneous Symbols, Dingbats
+        (0x2580u <= ch && ch <= 0x27bfu) ||
+        // Supplemental Arrows-A, Braille Patterns, Supplemental Arrows-B,
+        // Miscellaneous Mathematical Symbols-B,
+        // Supplemental Mathematical Operators, Miscellaneous Symbols and Arrows
+        (0x27f0u <= ch && ch <= 0x2bffu) ||
+        // CJK Radicals Supplement, CJK Radicals Supplement, Ideographic
+        // Description Characters, CJK Symbols and Punctuation, Hiragana,
+        // Katakana, Bopomofo
+        (0x2e80u <= ch && ch <= 0x312fu) ||
+        // Kanbun, Bopomofo Extended, Katakana Phonetic Extensions,
+        // Enclosed CJK Letters and Months, CJK Compatibility,
+        // CJK Unified Ideographs Extension A, Yijing Hexagram Symbols,
+        // CJK Unified Ideographs, Yi Syllables, Yi Radicals
+        (0x3190u <= ch && ch <= 0xabffu) ||
+        // CJK Compatibility Ideographs
+        (0xf900u <= ch && ch <= 0xfaffu) ||
+        // Halfwidth and Fullwidth Forms (a part)
+        (0xff5eu <= ch && ch <= 0xff9fu)) {
       return true;
     }
     char16_t ch2;
     if (NS_IS_HIGH_SURROGATE(ch) && aFrag->GetLength() > uint32_t(aPos) + 1 &&
         NS_IS_LOW_SURROGATE(ch2 = aFrag->CharAt(aPos + 1))) {
       uint32_t u = SURROGATE_TO_UCS4(ch, ch2);
-      if (0x20000u <= u &&
-          u <= 0x2ffffu) {  // CJK Unified Ideographs Extension B,
-                            // CJK Unified Ideographs Extension C,
-                            // CJK Unified Ideographs Extension D,
-                            // CJK Compatibility Ideographs Supplement
+      // CJK Unified Ideographs Extension B,
+      // CJK Unified Ideographs Extension C,
+      // CJK Unified Ideographs Extension D,
+      // CJK Compatibility Ideographs Supplement
+      if (0x20000u <= u && u <= 0x2ffffu) {
         return true;
       }
     }
@@ -3550,10 +3551,11 @@ gfxFloat PropertyProvider::GetHyphenWidth() const {
 }
 
 static inline bool IS_HYPHEN(char16_t u) {
-  return (u == char16_t('-') || u == 0x058A ||  // ARMENIAN HYPHEN
-          u == 0x2010 ||                        // HYPHEN
-          u == 0x2012 ||                        // FIGURE DASH
-          u == 0x2013);                         // EN DASH
+  return u == char16_t('-') ||  // HYPHEN-MINUS
+         u == 0x058A ||         // ARMENIAN HYPHEN
+         u == 0x2010 ||         // HYPHEN
+         u == 0x2012 ||         // FIGURE DASH
+         u == 0x2013;           // EN DASH
 }
 
 void PropertyProvider::GetHyphenationBreaks(Range aRange,
@@ -4020,7 +4022,8 @@ bool nsTextPaintStyle::InitSelectionColorsAndShadow() {
       LookAndFeel::GetColor(LookAndFeel::eColorID_TextSelectForeground);
 
   if (mResolveColors) {
-    // On MacOS X, we don't exchange text color and BG color.
+    // On MacOS X, only the background color gets set,
+    // the text color remains intact.
     if (mSelectionTextColor == NS_DONT_CHANGE_COLOR) {
       nscolor frameColor =
           nsSVGUtils::IsInSVGTextSubtree(mFrame)
@@ -5034,7 +5037,7 @@ void nsDisplayText::RenderToContext(gfxContext* aCtx,
 
 void nsTextFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
                                    const nsDisplayListSet& aLists) {
-  if (!IsVisibleForPainting(aBuilder)) return;
+  if (!IsVisibleForPainting()) return;
 
   DO_GLOBAL_REFLOW_COUNT_DSP("nsTextFrame");
 
@@ -7158,26 +7161,6 @@ int16_t nsTextFrame::GetSelectionStatus(int16_t* aSelectionFlags) {
   selectionController->GetDisplaySelection(&selectionValue);
 
   return selectionValue;
-}
-
-bool nsTextFrame::IsVisibleInSelection(Selection* aSelection) {
-  // Check the quick way first
-  if (!GetContent()->IsSelectionDescendant()) return false;
-
-  UniquePtr<SelectionDetails> details = GetSelectionDetails();
-  bool found = false;
-
-  // where are the selection points "really"
-  for (SelectionDetails* sdptr = details.get(); sdptr;
-       sdptr = sdptr->mNext.get()) {
-    if (sdptr->mEnd > GetContentOffset() && sdptr->mStart < GetContentEnd() &&
-        sdptr->mSelectionType == SelectionType::eNormal) {
-      found = true;
-      break;
-    }
-  }
-
-  return found;
 }
 
 /**

@@ -14,7 +14,6 @@
 #include "nsContentUtils.h"
 #include "nsCheckboxRadioFrame.h"
 #include "nsGkAtoms.h"
-#include "nsContentUtils.h"
 #include "nsContentCreatorFunctions.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/dom/HTMLInputElement.h"
@@ -38,8 +37,8 @@ nsIFrame* NS_NewDateTimeControlFrame(nsIPresShell* aPresShell,
 NS_IMPL_FRAMEARENA_HELPERS(nsDateTimeControlFrame)
 
 NS_QUERYFRAME_HEAD(nsDateTimeControlFrame)
-NS_QUERYFRAME_ENTRY(nsDateTimeControlFrame)
-NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
+  NS_QUERYFRAME_ENTRY(nsDateTimeControlFrame)
+  NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 nsDateTimeControlFrame::nsDateTimeControlFrame(ComputedStyle* aStyle)

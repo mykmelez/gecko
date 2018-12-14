@@ -150,8 +150,8 @@ nsPluginFrame::~nsPluginFrame() {
 }
 
 NS_QUERYFRAME_HEAD(nsPluginFrame)
-NS_QUERYFRAME_ENTRY(nsPluginFrame)
-NS_QUERYFRAME_ENTRY(nsIObjectFrame)
+  NS_QUERYFRAME_ENTRY(nsPluginFrame)
+  NS_QUERYFRAME_ENTRY(nsIObjectFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsFrame)
 
 #ifdef ACCESSIBILITY
@@ -1057,7 +1057,7 @@ bool nsPluginFrame::IsTransparentMode() const {
 void nsPluginFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
                                      const nsDisplayListSet& aLists) {
   // XXX why are we painting collapsed object frames?
-  if (!IsVisibleOrCollapsedForPainting(aBuilder)) return;
+  if (!IsVisibleOrCollapsedForPainting()) return;
 
   DisplayBorderBackgroundOutline(aBuilder, aLists);
 
@@ -1181,8 +1181,7 @@ void nsPluginFrame::PrintPlugin(gfxContext& aRenderingContext,
    * meta surface.
    */
 
-  /* we'll already be translated into the right spot by gfxWindowsNativeDrawing
-   */
+  // we'll already be translated into the right spot by gfxWindowsNativeDrawing
   nsSize contentSize = GetContentRectRelativeToSelf().Size();
   window.x = 0;
   window.y = 0;
@@ -1191,8 +1190,7 @@ void nsPluginFrame::PrintPlugin(gfxContext& aRenderingContext,
 
   aRenderingContext.Save();
 
-  /* Make sure plugins don't do any damage outside of where they're supposed to
-   */
+  // Make sure plugins don't do any damage outside of where they're supposed to
   aRenderingContext.NewPath();
   gfxRect r(window.x, window.y, window.width, window.height);
   aRenderingContext.Rectangle(r);
@@ -1342,7 +1340,7 @@ bool nsPluginFrame::CreateWebRenderCommands(
   // help us. Hence we can ignore the return value from PushImage.
   LayoutDeviceRect dest(r.x, r.y, size.width, size.height);
   aManager->CommandBuilder().PushImage(aItem, container, aBuilder, aResources,
-                                       aSc, dest);
+                                       aSc, dest, dest);
   return true;
 }
 

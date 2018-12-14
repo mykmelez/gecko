@@ -642,7 +642,11 @@ pref("media.cubeb.sandbox", false);
 #endif
 
 #ifdef MOZ_AV1
+#if defined(XP_WIN)
+pref("media.av1.enabled", true);
+#else
 pref("media.av1.enabled", false);
+#endif
 // Use libdav1d instead of libaom
 pref("media.av1.use-dav1d", false);
 #endif
@@ -950,6 +954,7 @@ pref("gfx.webrender.debug.show-overdraw", false);
 pref("gfx.webrender.debug.slow-frame-indicator", false);
 pref("gfx.webrender.dl.dump-parent", false);
 pref("gfx.webrender.dl.dump-content", false);
+pref("gfx.webrender.picture-caching", false);
 
 pref("accessibility.browsewithcaret", false);
 pref("accessibility.warn_on_browsewithcaret", true);
@@ -1895,9 +1900,11 @@ pref("network.http.rcwn.max_wait_before_racing_ms", 500);
 // all available active connections.
 pref("network.http.focused_window_transaction_ratio", "0.9");
 
+// XXX Disable for intranet downloading issue.
 // This is the size of the flow control window (KB) (i.e., the amount of data
-// that the parent can send to the child before getting an ack)
-pref("network.http.send_window_size", 1024);
+// that the parent can send to the child before getting an ack). 0 for disable
+// the flow control.
+pref("network.http.send_window_size", 0);
 
 // Whether or not we give more priority to active tab.
 // Note that this requires restart for changes to take effect.
@@ -2392,7 +2399,6 @@ pref("intl.menuitems.insertseparatorbeforeaccesskeys","chrome://global/locale/in
 pref("intl.charset.detector",               "chrome://global/locale/intl.properties");
 pref("intl.charset.fallback.override",      "");
 pref("intl.charset.fallback.tld",           true);
-pref("intl.charset.fallback.utf8_for_file", false);
 pref("intl.ellipsis",                       "chrome://global-platform/locale/intl.properties");
 // this pref allows user to request that all internationalization formatters
 // like date/time formatting, unit formatting, calendars etc. should use

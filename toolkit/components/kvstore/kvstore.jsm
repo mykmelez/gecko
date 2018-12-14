@@ -133,7 +133,7 @@ class KeyValueEnumerator {
     return this.enumerator.getNext();
   }
 
-  *[Symbol.iterator]() {
+  * [Symbol.iterator]() {
     while (this.enumerator.hasMoreElements()) {
       yield (this.enumerator.getNext());
     }

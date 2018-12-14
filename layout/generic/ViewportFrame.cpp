@@ -32,7 +32,7 @@ ViewportFrame* NS_NewViewportFrame(nsIPresShell* aPresShell,
 
 NS_IMPL_FRAMEARENA_HELPERS(ViewportFrame)
 NS_QUERYFRAME_HEAD(ViewportFrame)
-NS_QUERYFRAME_ENTRY(ViewportFrame)
+  NS_QUERYFRAME_ENTRY(ViewportFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 void ViewportFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
@@ -151,8 +151,8 @@ void ViewportFrame::BuildDisplayListForTopLayer(nsDisplayListBuilder* aBuilder,
       // be handled as top layer element here.
       if (!(frame->GetStateBits() & NS_FRAME_OUT_OF_FLOW)) {
         MOZ_ASSERT(!elem->GetParent()->IsHTMLElement(),
-                   "HTML element "
-                   "should always be out-of-flow if in the top layer");
+                   "HTML element should always be out-of-flow if in the top "
+                   "layer");
         continue;
       }
       if (nsIFrame* backdropPh =

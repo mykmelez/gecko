@@ -627,6 +627,41 @@ var paymentDialogWrapper = {
     this.sendMessageToContent("responseSent");
   },
 
+  async onChangePayerAddress({payerAddressGUID}) {
+    if (payerAddressGUID) {
+      // If a payer address was de-selected e.g. the selected address was deleted, we'll
+      // just wait to send the address change when the payer address is eventually selected
+      // before clicking Pay since it's a required field.
+      let {
+        payerName,
+        payerEmail,
+        payerPhone,
+      } = await this._convertProfileAddressToPayerData(payerAddressGUID);
+      paymentSrv.changePayerDetail(this.request.requestId, payerName, payerEmail, payerPhone);
+    }
+  },
+
+  async onChangePaymentMethod({
+    selectedPaymentCardBillingAddressGUID: billingAddressGUID,
+  }) {
+    const methodName = "basic-card";
+    let methodDetails;
+    try {
+      let billingAddress = await this._convertProfileAddressToPaymentAddress(billingAddressGUID);
+      const basicCardChangeDetails = Cc["@mozilla.org/dom/payments/basiccard-change-details;1"]
+                                       .createInstance(Ci.nsIBasicCardChangeDetails);
+      basicCardChangeDetails.initData(billingAddress);
+      methodDetails = basicCardChangeDetails.QueryInterface(Ci.nsIMethodChangeDetails);
+    } catch (ex) {
+      // TODO (Bug 1498403): Some kind of "credit card storage error" here, perhaps asking user
+      // to re-enter credit card # from management UI.
+      Cu.reportError(ex);
+      return;
+    }
+
+    paymentSrv.changePaymentMethod(this.request.requestId, methodName, methodDetails);
+  },
+
   async onChangeShippingAddress({shippingAddressGUID}) {
     if (shippingAddressGUID) {
       // If a shipping address was de-selected e.g. the selected address was deleted, we'll
@@ -731,6 +766,14 @@ var paymentDialogWrapper = {
       }
       case "initializeRequest": {
         this.initializeFrame();
+        break;
+      }
+      case "changePayerAddress": {
+        this.onChangePayerAddress(data);
+        break;
+      }
+      case "changePaymentMethod": {
+        this.onChangePaymentMethod(data);
         break;
       }
       case "changeShippingAddress": {

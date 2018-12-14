@@ -16,24 +16,27 @@ XPCOMUtils.defineLazyModuleGetters(this, {
  */
 class UrlbarView {
   /**
-   * @param {UrlbarInput} urlbar
+   * @param {UrlbarInput} input
    *   The UrlbarInput instance belonging to this UrlbarView instance.
    */
-  constructor(urlbar) {
-    this.urlbar = urlbar;
-    this.panel = urlbar.panel;
-    this.controller = urlbar.controller;
-    this.document = urlbar.panel.ownerDocument;
+  constructor(input) {
+    this.input = input;
+    this.panel = input.panel;
+    this.controller = input.controller;
+    this.document = this.panel.ownerDocument;
     this.window = this.document.defaultView;
 
     this._mainContainer = this.panel.querySelector(".urlbarView-body-inner");
     this._rows = this.panel.querySelector(".urlbarView-results");
+
+    this._rows.addEventListener("click", this);
 
     // For the horizontal fade-out effect, set the overflow attribute on result
     // rows when they overflow.
     this._rows.addEventListener("overflow", this);
     this._rows.addEventListener("underflow", this);
 
+    this.controller.setView(this);
     this.controller.addQueryListener(this);
   }
 
@@ -44,20 +47,46 @@ class UrlbarView {
   }
 
   /**
-   * Opens the autocomplete results popup.
+   * @returns {boolean}
+   *   Whether the panel is open.
    */
-  open() {
-    this.panel.removeAttribute("hidden");
+  get isOpen() {
+    return this.panel.state == "open" || this.panel.state == "showing";
+  }
 
-    this._alignPanel();
+  /**
+   * Selects the next or previous view item. An item could be an autocomplete
+   * result or a one-off search button.
+   *
+   * @param {boolean} options.reverse
+   *   Set to true to select the previous item. By default the next item
+   *   will be selected.
+   */
+  selectNextItem({reverse = false} = {}) {
+    if (!this.isOpen) {
+      throw new Error("UrlbarView: Cannot select an item if the view isn't open.");
+    }
 
-    // TODO: Search one off buttons are a stub right now.
-    //       We'll need to set them up properly.
-    this.oneOffSearchButtons;
+    // TODO: handle one-off search buttons
 
-    this.panel.openPopup(this.urlbar.textbox.closest("toolbar"), "after_end", 0, -1);
+    let row;
+    if (reverse) {
+      row = this._selected.previousElementSibling ||
+            this._rows.lastElementChild;
+    } else {
+      row = this._selected.nextElementSibling ||
+            this._rows.firstElementChild;
+    }
 
-    this._rows.firstElementChild.toggleAttribute("selected", true);
+    this._selected.toggleAttribute("selected", false);
+    this._selected = row;
+    row.toggleAttribute("selected", true);
+
+    let resultIndex = row.getAttribute("resultIndex");
+    let result = this._queryContext.results[resultIndex];
+    if (result) {
+      this.input.setValueFromResult(result);
+    }
   }
 
   /**
@@ -88,7 +117,7 @@ class UrlbarView {
     for (let resultIndex in queryContext.results) {
       this._addRow(resultIndex);
     }
-    this.open();
+    this._openPanel();
   }
 
   // Private methods below.
@@ -101,6 +130,25 @@ class UrlbarView {
     return this.document.createElementNS("http://www.w3.org/1999/xhtml", name);
   }
 
+  _openPanel() {
+    if (this.isOpen) {
+      return;
+    }
+
+    this.panel.removeAttribute("hidden");
+
+    this._alignPanel();
+
+    // TODO: Search one off buttons are a stub right now.
+    //       We'll need to set them up properly.
+    this.oneOffSearchButtons;
+
+    this.panel.openPopup(this.input.textbox.closest("toolbar"), "after_end", 0, -1);
+
+    this._selected = this._rows.firstElementChild;
+    this._selected.toggleAttribute("selected", true);
+  }
+
   _alignPanel() {
     // Make the panel span the width of the window.
     let documentRect =
@@ -111,12 +159,12 @@ class UrlbarView {
     // Subtract two pixels for left and right borders on the panel.
     this._mainContainer.style.maxWidth = (width - 2) + "px";
 
-    // Keep the popup items' site icons aligned with the urlbar's identity
+    // Keep the popup items' site icons aligned with the input's identity
     // icon if it's not too far from the edge of the window.  We define
     // "too far" as "more than 30% of the window's width AND more than
     // 250px".
     let boundToCheck = this.window.RTL_UI ? "right" : "left";
-    let inputRect = this._getBoundsWithoutFlushing(this.urlbar.textbox);
+    let inputRect = this._getBoundsWithoutFlushing(this.input.textbox);
     let startOffset = Math.abs(inputRect[boundToCheck] - documentRect[boundToCheck]);
     let alignSiteIcons = startOffset / width <= 0.3 || startOffset <= 250;
     if (alignSiteIcons) {
@@ -148,19 +196,21 @@ class UrlbarView {
     let result = this._queryContext.results[resultIndex];
     let item = this._createElement("div");
     item.className = "urlbarView-row";
-    item.addEventListener("click", this);
     item.setAttribute("resultIndex", resultIndex);
-    if (result.type == UrlbarUtils.MATCH_TYPE.TAB_SWITCH) {
-      item.setAttribute("action", "switch-to-tab");
+
+    if (result.source == UrlbarUtils.MATCH_SOURCE.TABS) {
+      item.setAttribute("type", "tab");
+    } else if (result.source == UrlbarUtils.MATCH_SOURCE.BOOKMARKS) {
+      item.setAttribute("type", "bookmark");
     }
 
     let content = this._createElement("span");
     content.className = "urlbarView-row-inner";
     item.appendChild(content);
 
-    let actionIcon = this._createElement("span");
-    actionIcon.className = "urlbarView-action-icon";
-    content.appendChild(actionIcon);
+    let typeIcon = this._createElement("span");
+    typeIcon.className = "urlbarView-type-icon";
+    content.appendChild(typeIcon);
 
     let favicon = this._createElement("img");
     favicon.className = "urlbarView-favicon";
@@ -169,21 +219,64 @@ class UrlbarView {
 
     let title = this._createElement("span");
     title.className = "urlbarView-title";
-    title.textContent = result.title || result.payload.url;
+    this._addTextContentWithHighlights(
+      title,
+      ...(result.title ?
+          [result.title, result.titleHighlights] :
+          [result.payload.url || "", result.payloadHighlights.url || []])
+    );
     content.appendChild(title);
 
     let secondary = this._createElement("span");
     secondary.className = "urlbarView-secondary";
     if (result.type == UrlbarUtils.MATCH_TYPE.TAB_SWITCH) {
       secondary.classList.add("urlbarView-action");
-      secondary.textContent = "Switch to Tab";
+      this._addTextContentWithHighlights(secondary, "Switch to Tab", []);
     } else {
       secondary.classList.add("urlbarView-url");
-      secondary.textContent = result.payload.url;
+      this._addTextContentWithHighlights(secondary, result.payload.url || "",
+                                         result.payloadHighlights.url || []);
     }
     content.appendChild(secondary);
 
     this._rows.appendChild(item);
+  }
+
+  /**
+   * Adds text content to a node, placing substrings that should be highlighted
+   * inside <em> nodes.
+   *
+   * @param {Node} parentNode
+   *   The text content will be added to this node.
+   * @param {string} textContent
+   *   The text content to give the node.
+   * @param {array} highlights
+   *   The matches to highlight in the text.
+   */
+  _addTextContentWithHighlights(parentNode, textContent, highlights) {
+    if (!textContent) {
+      return;
+    }
+    highlights = (highlights || []).concat([[textContent.length, 0]]);
+    let index = 0;
+    for (let [highlightIndex, highlightLength] of highlights) {
+      if (highlightIndex - index > 0) {
+        parentNode.appendChild(
+          this.document.createTextNode(
+            textContent.substring(index, highlightIndex)
+          )
+        );
+      }
+      if (highlightLength > 0) {
+        let strong = this._createElement("strong");
+        strong.textContent = textContent.substring(
+          highlightIndex,
+          highlightIndex + highlightLength
+        );
+        parentNode.appendChild(strong);
+      }
+      index = highlightIndex + highlightLength;
+    }
   }
 
   /**
@@ -208,7 +301,7 @@ class UrlbarView {
     let resultIndex = row.getAttribute("resultIndex");
     let result = this._queryContext.results[resultIndex];
     if (result) {
-      this.urlbar.resultSelected(event, result);
+      this.input.pickResult(event, result);
     }
     this.close();
   }

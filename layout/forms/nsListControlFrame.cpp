@@ -39,8 +39,7 @@ using namespace mozilla;
 using namespace mozilla::dom;
 
 // Constants
-const uint32_t kMaxDropDownRows =
-    20;  // This matches the setting for 4.x browsers
+const uint32_t kMaxDropDownRows = 20;  // matches the setting for 4.x browsers
 const int32_t kNothingSelected = -1;
 
 // Static members
@@ -252,9 +251,9 @@ void nsListControlFrame::InvalidateFocus() {
 }
 
 NS_QUERYFRAME_HEAD(nsListControlFrame)
-NS_QUERYFRAME_ENTRY(nsIFormControlFrame)
-NS_QUERYFRAME_ENTRY(nsISelectControlFrame)
-NS_QUERYFRAME_ENTRY(nsListControlFrame)
+  NS_QUERYFRAME_ENTRY(nsIFormControlFrame)
+  NS_QUERYFRAME_ENTRY(nsISelectControlFrame)
+  NS_QUERYFRAME_ENTRY(nsListControlFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsHTMLScrollFrame)
 
 #ifdef ACCESSIBILITY
@@ -603,12 +602,11 @@ void nsListControlFrame::ReflowAsDropdown(nsPresContext* aPresContext,
 ScrollStyles nsListControlFrame::GetScrollStyles() const {
   // We can't express this in the style system yet; when we can, this can go
   // away and GetScrollStyles can be devirtualized
-  int32_t style =
-      IsInDropDownMode() ? NS_STYLE_OVERFLOW_AUTO : NS_STYLE_OVERFLOW_SCROLL;
+  auto style = IsInDropDownMode() ? StyleOverflow::Auto : StyleOverflow::Scroll;
   if (GetWritingMode().IsVertical()) {
-    return ScrollStyles(style, NS_STYLE_OVERFLOW_HIDDEN);
+    return ScrollStyles(style, StyleOverflow::Hidden);
   } else {
-    return ScrollStyles(NS_STYLE_OVERFLOW_HIDDEN, style);
+    return ScrollStyles(StyleOverflow::Hidden, style);
   }
 }
 

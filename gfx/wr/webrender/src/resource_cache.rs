@@ -213,6 +213,13 @@ struct CachedImageInfo {
     manual_eviction: bool,
 }
 
+impl CachedImageInfo {
+    fn mark_unused(&mut self, texture_cache: &mut TextureCache) {
+        texture_cache.mark_unused(&self.texture_cache_handle);
+        self.manual_eviction = false;
+    }
+}
+
 #[cfg(debug_assertions)]
 impl Drop for CachedImageInfo {
     fn drop(&mut self) {
@@ -354,13 +361,11 @@ impl ImageResult {
     fn drop_from_cache(&mut self, texture_cache: &mut TextureCache) {
         match *self {
             ImageResult::UntiledAuto(ref mut entry) => {
-                texture_cache.mark_unused(&entry.texture_cache_handle);
-                entry.manual_eviction = false;
+                entry.mark_unused(texture_cache);
             },
             ImageResult::Multi(ref mut entries) => {
                 for (_, entry) in &mut entries.resources {
-                    texture_cache.mark_unused(&entry.texture_cache_handle);
-                    entry.manual_eviction = false;
+                    entry.mark_unused(texture_cache);
                 }
             },
             ImageResult::Err(_) => {},
@@ -403,6 +408,9 @@ impl BlobImageResources for Resources {
 
 pub type GlyphDimensionsCache = FastHashMap<(FontInstance, GlyphIndex), Option<GlyphDimensions>>;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BlobImageRasterizerEpoch(usize);
+
 /// High-level container for resources managed by the `RenderBackend`.
 ///
 /// This includes a variety of things, including images, fonts, and glyphs,
@@ -419,26 +427,35 @@ pub struct ResourceCache {
 
     pub texture_cache: TextureCache,
 
-    // TODO(gw): We should expire (parts of) this cache semi-regularly!
+    /// TODO(gw): We should expire (parts of) this cache semi-regularly!
     cached_glyph_dimensions: GlyphDimensionsCache,
     glyph_rasterizer: GlyphRasterizer,
 
-    // The set of images that aren't present or valid in the texture cache,
-    // and need to be rasterized and/or uploaded this frame. This includes
-    // both blobs and regular images.
+    /// The set of images that aren't present or valid in the texture cache,
+    /// and need to be rasterized and/or uploaded this frame. This includes
+    /// both blobs and regular images.
     pending_image_requests: FastHashSet<ImageRequest>,
 
     blob_image_handler: Option<Box<BlobImageHandler>>,
     rasterized_blob_images: FastHashMap<BlobImageKey, RasterizedBlob>,
     blob_image_templates: FastHashMap<BlobImageKey, BlobImageTemplate>,
 
-    // If while building a frame we encounter blobs that we didn't already
-    // rasterize, add them to this list and rasterize them synchronously.
+    /// If while building a frame we encounter blobs that we didn't already
+    /// rasterize, add them to this list and rasterize them synchronously.
     missing_blob_images: Vec<BlobImageParams>,
-    // The rasterizer associated with the current scene.
+    /// The rasterizer associated with the current scene.
     blob_image_rasterizer: Option<Box<AsyncBlobImageRasterizer>>,
-    // A log of the last three frames worth of deleted image keys kept
-    // for debugging purposes.
+    /// An epoch of the stored blob image rasterizer, used to skip the ones
+    /// coming from low-priority scene builds if the current one is newer.
+    /// This is to be removed when we get rid of the whole "missed" blob
+    /// images concept.
+    /// The produced one gets bumped whenever we produce a rasteriezer,
+    /// which then travels through the scene building and eventually gets
+    /// consumed back by us, bumping the consumed epoch.
+    blob_image_rasterizer_produced_epoch: BlobImageRasterizerEpoch,
+    blob_image_rasterizer_consumed_epoch: BlobImageRasterizerEpoch,
+    /// A log of the last three frames worth of deleted image keys kept
+    /// for debugging purposes.
     deleted_blob_keys: VecDeque<Vec<BlobImageKey>>
 }
 
@@ -464,6 +481,8 @@ impl ResourceCache {
             blob_image_templates: FastHashMap::default(),
             missing_blob_images: Vec::new(),
             blob_image_rasterizer: None,
+            blob_image_rasterizer_produced_epoch: BlobImageRasterizerEpoch(0),
+            blob_image_rasterizer_consumed_epoch: BlobImageRasterizerEpoch(0),
             // We want to keep three frames worth of delete blob keys
             deleted_blob_keys: vec![Vec::new(), Vec::new(), Vec::new()].into(),
         }
@@ -640,8 +659,11 @@ impl ResourceCache {
         );
     }
 
-    pub fn set_blob_rasterizer(&mut self, rasterizer: Box<AsyncBlobImageRasterizer>) {
-        self.blob_image_rasterizer = Some(rasterizer);
+    pub fn set_blob_rasterizer(&mut self, rasterizer: Box<AsyncBlobImageRasterizer>, epoch: BlobImageRasterizerEpoch) {
+        if self.blob_image_rasterizer_consumed_epoch.0 < epoch.0 {
+            self.blob_image_rasterizer = Some(rasterizer);
+            self.blob_image_rasterizer_consumed_epoch = epoch;
+        }
     }
 
     pub fn add_rasterized_blob_images(&mut self, images: Vec<(BlobImageRequest, BlobImageResult)>) {
@@ -1081,8 +1103,8 @@ impl ResourceCache {
     pub fn create_blob_scene_builder_requests(
         &mut self,
         keys: &[BlobImageKey]
-    ) -> (Option<Box<AsyncBlobImageRasterizer>>, Vec<BlobImageParams>) {
-        if self.blob_image_handler.is_none() {
+    ) -> (Option<(Box<AsyncBlobImageRasterizer>, BlobImageRasterizerEpoch)>, Vec<BlobImageParams>) {
+        if self.blob_image_handler.is_none() || keys.is_empty() {
             return (None, Vec::new());
         }
 
@@ -1217,9 +1239,11 @@ impl ResourceCache {
             }
             template.dirty_rect = DirtyRect::empty();
         }
+        self.blob_image_rasterizer_produced_epoch.0 += 1;
+        let epoch = self.blob_image_rasterizer_produced_epoch;
         let handler = self.blob_image_handler.as_mut().unwrap();
         handler.prepare_resources(&self.resources, &blob_request_params);
-        (Some(handler.create_blob_rasterizer()), blob_request_params)
+        (Some((handler.create_blob_rasterizer(), epoch)), blob_request_params)
     }
 
     fn discard_tiles_outside_visible_area(
@@ -1258,7 +1282,7 @@ impl ResourceCache {
                     if key.tile.is_none() || tile_range.contains(&key.tile.unwrap()) {
                         return true;
                     }
-                    texture_cache.mark_unused(&entry.texture_cache_handle);
+                    entry.mark_unused(texture_cache);
                     return false;
                 });
             }

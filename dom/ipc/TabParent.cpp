@@ -63,6 +63,7 @@
 #include "nsIURI.h"
 #include "nsIWindowWatcher.h"
 #include "nsIWebBrowserChrome.h"
+#include "nsIWebProtocolHandlerRegistrar.h"
 #include "nsIXULBrowserWindow.h"
 #include "nsIXULWindow.h"
 #include "nsViewManager.h"
@@ -100,6 +101,8 @@
 #include "ProcessPriorityManager.h"
 #include "nsString.h"
 #include "IHistory.h"
+#include "mozilla/dom/WindowGlobalParent.h"
+#include "mozilla/dom/ChromeBrowsingContext.h"
 
 #ifdef XP_WIN
 #include "mozilla/plugins/PluginWidgetParent.h"
@@ -529,7 +532,8 @@ mozilla::ipc::IPCResult TabParent::RecvSizeShellTo(
 }
 
 mozilla::ipc::IPCResult TabParent::RecvDropLinks(nsTArray<nsString>&& aLinks) {
-  nsCOMPtr<nsIBrowser> browser = do_QueryInterface(mFrameElement);
+  nsCOMPtr<nsIBrowser> browser =
+      mFrameElement ? mFrameElement->AsBrowser() : nullptr;
   if (browser) {
     // Verify that links have not been modified by the child. If links have
     // not been modified then it's safe to load those links using the
@@ -986,6 +990,24 @@ bool TabParent::DeallocPIndexedDBPermissionRequestParent(
 
   return mozilla::dom::indexedDB::DeallocPIndexedDBPermissionRequestParent(
       aActor);
+}
+
+IPCResult TabParent::RecvPWindowGlobalConstructor(
+    PWindowGlobalParent* aActor, const WindowGlobalInit& aInit) {
+  static_cast<WindowGlobalParent*>(aActor)->Init(aInit);
+  return IPC_OK();
+}
+
+PWindowGlobalParent* TabParent::AllocPWindowGlobalParent(
+    const WindowGlobalInit& aInit) {
+  // Reference freed in DeallocPWindowGlobalParent.
+  return do_AddRef(new WindowGlobalParent(aInit, /* inproc */ false)).take();
+}
+
+bool TabParent::DeallocPWindowGlobalParent(PWindowGlobalParent* aActor) {
+  // Free reference from AllocPWindowGlobalParent.
+  static_cast<WindowGlobalParent*>(aActor)->Release();
+  return true;
 }
 
 void TabParent::SendMouseEvent(const nsAString& aType, float aX, float aY,
@@ -1558,6 +1580,7 @@ mozilla::ipc::IPCResult TabParent::RecvSyncMessage(
     nsTArray<StructuredCloneData>* aRetVal) {
   AUTO_PROFILER_LABEL_DYNAMIC_LOSSY_NSSTRING("TabParent::RecvSyncMessage",
                                              OTHER, aMessage);
+  MMPrinter::Print("TabParent::RecvSyncMessage", aMessage, aData);
 
   StructuredCloneData data;
   ipc::UnpackClonedMessageDataForParent(aData, data);
@@ -1575,6 +1598,7 @@ mozilla::ipc::IPCResult TabParent::RecvRpcMessage(
     nsTArray<StructuredCloneData>* aRetVal) {
   AUTO_PROFILER_LABEL_DYNAMIC_LOSSY_NSSTRING("TabParent::RecvRpcMessage", OTHER,
                                              aMessage);
+  MMPrinter::Print("TabParent::RecvRpcMessage", aMessage, aData);
 
   StructuredCloneData data;
   ipc::UnpackClonedMessageDataForParent(aData, data);
@@ -1591,6 +1615,7 @@ mozilla::ipc::IPCResult TabParent::RecvAsyncMessage(
     const IPC::Principal& aPrincipal, const ClonedMessageData& aData) {
   AUTO_PROFILER_LABEL_DYNAMIC_LOSSY_NSSTRING("TabParent::RecvAsyncMessage",
                                              OTHER, aMessage);
+  MMPrinter::Print("TabParent::RecvAsyncMessage", aMessage, aData);
 
   StructuredCloneData data;
   ipc::UnpackClonedMessageDataForParent(aData, data);
@@ -1889,7 +1914,8 @@ mozilla::ipc::IPCResult TabParent::RecvRequestFocus(const bool& aCanRaise) {
 mozilla::ipc::IPCResult TabParent::RecvEnableDisableCommands(
     const nsString& aAction, nsTArray<nsCString>&& aEnabledCommands,
     nsTArray<nsCString>&& aDisabledCommands) {
-  nsCOMPtr<nsIBrowser> browser = do_QueryInterface(mFrameElement);
+  nsCOMPtr<nsIBrowser> browser =
+      mFrameElement ? mFrameElement->AsBrowser() : nullptr;
   bool isRemoteBrowser = false;
   if (browser) {
     browser->GetIsRemoteBrowser(&isRemoteBrowser);
@@ -2071,6 +2097,19 @@ mozilla::ipc::IPCResult TabParent::RecvAccessKeyNotHandled(
 mozilla::ipc::IPCResult TabParent::RecvSetHasBeforeUnload(
     const bool& aHasBeforeUnload) {
   mHasBeforeUnload = aHasBeforeUnload;
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult TabParent::RecvRegisterProtocolHandler(
+    const nsString& aScheme, nsIURI* aHandlerURI, const nsString& aTitle,
+    nsIURI* aDocURI) {
+  nsCOMPtr<nsIWebProtocolHandlerRegistrar> registrar =
+      do_GetService(NS_WEBPROTOCOLHANDLERREGISTRAR_CONTRACTID);
+  if (registrar) {
+    registrar->RegisterProtocolHandler(aScheme, aHandlerURI, aTitle, aDocURI,
+                                       mFrameElement);
+  }
+
   return IPC_OK();
 }
 
@@ -2677,14 +2716,14 @@ TabParent::GetContentBlockingLog(Promise** aPromise) {
 
   auto cblPromise = SendGetContentBlockingLog();
   cblPromise->Then(GetMainThreadSerialEventTarget(), __func__,
-                   [jsPromise](Tuple<nsString, bool> aResult) {
+                   [jsPromise](Tuple<nsString, bool>&& aResult) {
                      if (Get<1>(aResult)) {
-                       jsPromise->MaybeResolve(Get<0>(aResult));
+                       jsPromise->MaybeResolve(std::move(Get<0>(aResult)));
                      } else {
                        jsPromise->MaybeRejectWithUndefined();
                      }
                    },
-                   [jsPromise](ResponseRejectReason aReason) {
+                   [jsPromise](ResponseRejectReason&& aReason) {
                      jsPromise->MaybeRejectWithUndefined();
                    });
 
@@ -2796,7 +2835,7 @@ void TabParent::RequestRootPaint(gfx::CrossProcessPaint* aPaint, IntRect aRect,
                 [paint, tabId](PaintFragment&& aFragment) {
                   paint->ReceiveFragment(tabId, std::move(aFragment));
                 },
-                [paint, tabId](ResponseRejectReason aReason) {
+                [paint, tabId](ResponseRejectReason&& aReason) {
                   paint->LostFragment(tabId);
                 });
 }
@@ -2811,7 +2850,7 @@ void TabParent::RequestSubPaint(gfx::CrossProcessPaint* aPaint, float aScale,
                 [paint, tabId](PaintFragment&& aFragment) {
                   paint->ReceiveFragment(tabId, std::move(aFragment));
                 },
-                [paint, tabId](ResponseRejectReason aReason) {
+                [paint, tabId](ResponseRejectReason&& aReason) {
                   paint->LostFragment(tabId);
                 });
 }
@@ -3273,7 +3312,8 @@ mozilla::ipc::IPCResult TabParent::RecvLookUpDictionary(
 
 mozilla::ipc::IPCResult TabParent::RecvShowCanvasPermissionPrompt(
     const nsCString& aFirstPartyURI) {
-  nsCOMPtr<nsIBrowser> browser = do_QueryInterface(mFrameElement);
+  nsCOMPtr<nsIBrowser> browser =
+      mFrameElement ? mFrameElement->AsBrowser() : nullptr;
   if (!browser) {
     // If the tab is being closed, the browser may not be available.
     // In this case we can ignore the request.
@@ -3368,6 +3408,14 @@ mozilla::ipc::IPCResult TabParent::RecvGetSystemFont(nsCString* aFontName) {
   if (widget) {
     widget->GetSystemFont(*aFontName);
   }
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult TabParent::RecvRootBrowsingContext(
+    const BrowsingContextId& aId) {
+  MOZ_ASSERT(!mBrowsingContext, "May only set browsing context once!");
+  mBrowsingContext = ChromeBrowsingContext::Get(aId);
+  MOZ_ASSERT(mBrowsingContext, "Invalid ID!");
   return IPC_OK();
 }
 

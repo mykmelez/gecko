@@ -39,9 +39,9 @@ static MOZ_THREAD_LOCAL(PRThread*) gTlsCurrentVirtualThread;
 bool NS_IsMainThreadTLSInitialized() { return sTLSIsMainThread.initialized(); }
 
 extern "C" {
-
+// This uses the C language linkage because it's exposed to Rust
+// via the xpcom/rust/moz_task crate.
 bool NS_IsMainThread() { return sTLSIsMainThread.get(); }
-
 }
 
 void NS_SetMainThread() {

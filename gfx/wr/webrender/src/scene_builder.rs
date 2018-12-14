@@ -12,9 +12,16 @@ use frame_builder::{FrameBuilderConfig, FrameBuilder};
 use clip::{ClipDataInterner, ClipDataUpdateList};
 use clip_scroll_tree::ClipScrollTree;
 use display_list_flattener::DisplayListFlattener;
+use intern::{Internable, Interner};
 use internal_types::{FastHashMap, FastHashSet};
-use prim_store::{PrimitiveDataInterner, PrimitiveDataUpdateList, PrimitiveStoreStats};
-use resource_cache::FontInstanceMap;
+use prim_store::{PrimitiveDataInterner, PrimitiveDataUpdateList, PrimitiveKeyKind};
+use prim_store::PrimitiveStoreStats;
+use prim_store::gradient::{
+    LinearGradient, LinearGradientDataInterner, LinearGradientDataUpdateList,
+    RadialGradient, RadialGradientDataInterner, RadialGradientDataUpdateList
+};
+use prim_store::text_run::{TextRunDataInterner, TextRun, TextRunDataUpdateList};
+use resource_cache::{BlobImageRasterizerEpoch, FontInstanceMap};
 use render_backend::DocumentView;
 use renderer::{PipelineInfo, SceneBuilderHooks};
 use scene::Scene;
@@ -28,6 +35,9 @@ use std::time::Duration;
 pub struct DocumentResourceUpdates {
     pub clip_updates: ClipDataUpdateList,
     pub prim_updates: PrimitiveDataUpdateList,
+    pub linear_grad_updates: LinearGradientDataUpdateList,
+    pub radial_grad_updates: RadialGradientDataUpdateList,
+    pub text_run_updates: TextRunDataUpdateList,
 }
 
 /// Represents the work associated to a transaction before scene building.
@@ -38,7 +48,7 @@ pub struct Transaction {
     pub epoch_updates: Vec<(PipelineId, Epoch)>,
     pub request_scene_build: Option<SceneRequest>,
     pub blob_requests: Vec<BlobImageParams>,
-    pub blob_rasterizer: Option<Box<AsyncBlobImageRasterizer>>,
+    pub blob_rasterizer: Option<(Box<AsyncBlobImageRasterizer>, BlobImageRasterizerEpoch)>,
     pub rasterized_blobs: Vec<(BlobImageRequest, BlobImageResult)>,
     pub resource_updates: Vec<ResourceUpdate>,
     pub frame_ops: Vec<FrameMsg>,
@@ -62,6 +72,18 @@ impl Transaction {
         !self.display_list_updates.is_empty() ||
             self.set_root_pipeline.is_some()
     }
+
+    fn rasterize_blobs(&mut self, is_low_priority: bool) {
+        if let Some((ref mut rasterizer, _)) = self.blob_rasterizer {
+            let mut rasterized_blobs = rasterizer.rasterize(&self.blob_requests, is_low_priority);
+            // try using the existing allocation if our current list is empty
+            if self.rasterized_blobs.is_empty() {
+                self.rasterized_blobs = rasterized_blobs;
+            } else {
+                self.rasterized_blobs.append(&mut rasterized_blobs);
+            }
+        }
+    }
 }
 
 /// Represent the remaining work associated to a transaction after the scene building
@@ -71,7 +93,7 @@ pub struct BuiltTransaction {
     pub built_scene: Option<BuiltScene>,
     pub resource_updates: Vec<ResourceUpdate>,
     pub rasterized_blobs: Vec<(BlobImageRequest, BlobImageResult)>,
-    pub blob_rasterizer: Option<Box<AsyncBlobImageRasterizer>>,
+    pub blob_rasterizer: Option<(Box<AsyncBlobImageRasterizer>, BlobImageRasterizerEpoch)>,
     pub frame_ops: Vec<FrameMsg>,
     pub removed_pipelines: Vec<PipelineId>,
     pub notifications: Vec<NotificationRequest>,
@@ -159,19 +181,45 @@ pub enum SceneSwapResult {
 //   display lists is (a) fast (b) done during scene building.
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
+#[derive(Default)]
 pub struct DocumentResources {
     pub clip_interner: ClipDataInterner,
     pub prim_interner: PrimitiveDataInterner,
+    pub linear_grad_interner: LinearGradientDataInterner,
+    pub radial_grad_interner: RadialGradientDataInterner,
+    pub text_run_interner: TextRunDataInterner,
 }
 
-impl DocumentResources {
-    fn new() -> Self {
-        DocumentResources {
-            clip_interner: ClipDataInterner::new(),
-            prim_interner: PrimitiveDataInterner::new(),
-        }
+// Access to `DocumentResources` interners by `Internable`
+pub trait InternerMut<I: Internable>
+{
+    fn interner_mut(&mut self) -> &mut Interner<I::Source, I::InternData, I::Marker>;
+}
+
+impl InternerMut<PrimitiveKeyKind> for DocumentResources {
+    fn interner_mut(&mut self) -> &mut PrimitiveDataInterner {
+        &mut self.prim_interner
     }
 }
+
+impl InternerMut<LinearGradient> for DocumentResources {
+    fn interner_mut(&mut self) -> &mut LinearGradientDataInterner {
+        &mut self.linear_grad_interner
+    }
+}
+
+impl InternerMut<RadialGradient> for DocumentResources {
+    fn interner_mut(&mut self) -> &mut RadialGradientDataInterner {
+        &mut self.radial_grad_interner
+    }
+}
+
+impl InternerMut<TextRun> for DocumentResources {
+    fn interner_mut(&mut self) -> &mut TextRunDataInterner {
+        &mut self.text_run_interner
+    }
+}
+
 
 // A document in the scene builder contains the current scene,
 // as well as a persistent clip interner. This allows clips
@@ -187,7 +235,7 @@ impl Document {
     fn new(scene: Scene) -> Self {
         Document {
             scene,
-            resources: DocumentResources::new(),
+            resources: DocumentResources::default(),
             prim_store_stats: PrimitiveStoreStats::empty(),
         }
     }
@@ -331,6 +379,8 @@ impl SceneBuilder {
                     &PrimitiveStoreStats::empty(),
                 );
 
+                // TODO(djg): Can we do better than this?  Use a #[derive] to
+                // write the code for us, or unify updates into one enum/list?
                 let clip_updates = item
                     .doc_resources
                     .clip_interner
@@ -341,10 +391,28 @@ impl SceneBuilder {
                     .prim_interner
                     .end_frame_and_get_pending_updates();
 
+                let linear_grad_updates = item
+                    .doc_resources
+                    .linear_grad_interner
+                    .end_frame_and_get_pending_updates();
+
+                let radial_grad_updates = item
+                    .doc_resources
+                    .radial_grad_interner
+                    .end_frame_and_get_pending_updates();
+
+                let text_run_updates = item
+                    .doc_resources
+                    .text_run_interner
+                    .end_frame_and_get_pending_updates();
+
                 doc_resource_updates = Some(
                     DocumentResourceUpdates {
                         clip_updates,
                         prim_updates,
+                        linear_grad_updates,
+                        radial_grad_updates,
+                        text_run_updates,
                     }
                 );
 
@@ -453,10 +521,28 @@ impl SceneBuilder {
                     .prim_interner
                     .end_frame_and_get_pending_updates();
 
+                let linear_grad_updates = doc
+                    .resources
+                    .linear_grad_interner
+                    .end_frame_and_get_pending_updates();
+
+                let radial_grad_updates = doc
+                    .resources
+                    .radial_grad_interner
+                    .end_frame_and_get_pending_updates();
+
+                let text_run_updates = doc
+                    .resources
+                    .text_run_interner
+                    .end_frame_and_get_pending_updates();
+
                 doc_resource_updates = Some(
                     DocumentResourceUpdates {
                         clip_updates,
                         prim_updates,
+                        linear_grad_updates,
+                        radial_grad_updates,
+                        text_run_updates,
                     }
                 );
 
@@ -469,12 +555,7 @@ impl SceneBuilder {
         }
 
         let is_low_priority = false;
-        let blob_requests = replace(&mut txn.blob_requests, Vec::new());
-        let mut rasterized_blobs = txn.blob_rasterizer.as_mut().map_or(
-            Vec::new(),
-            |rasterizer| rasterizer.rasterize(&blob_requests, is_low_priority),
-        );
-        rasterized_blobs.append(&mut txn.rasterized_blobs);
+        txn.rasterize_blobs(is_low_priority);
 
         drain_filter(
             &mut txn.notifications,
@@ -491,7 +572,7 @@ impl SceneBuilder {
             render_frame: txn.render_frame,
             invalidate_rendered_frame: txn.invalidate_rendered_frame,
             built_scene,
-            rasterized_blobs,
+            rasterized_blobs: replace(&mut txn.rasterized_blobs, Vec::new()),
             resource_updates: replace(&mut txn.resource_updates, Vec::new()),
             blob_rasterizer: replace(&mut txn.blob_rasterizer, None),
             frame_ops: replace(&mut txn.frame_ops, Vec::new()),
@@ -596,13 +677,8 @@ impl LowPrioritySceneBuilder {
     }
 
     fn process_transaction(&mut self, mut txn: Box<Transaction>) -> Box<Transaction> {
-        let blob_requests = replace(&mut txn.blob_requests, Vec::new());
         let is_low_priority = true;
-        let mut more_rasterized_blobs = txn.blob_rasterizer.as_mut().map_or(
-            Vec::new(),
-            |rasterizer| rasterizer.rasterize(&blob_requests, is_low_priority),
-        );
-        txn.rasterized_blobs.append(&mut more_rasterized_blobs);
+        txn.rasterize_blobs(is_low_priority);
 
         if self.simulate_slow_ms > 0 {
             thread::sleep(Duration::from_millis(self.simulate_slow_ms as u64));

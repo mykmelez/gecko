@@ -17,7 +17,6 @@
 #include "gfxContext.h"
 #include "mozilla/ArenaAllocator.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/Attributes.h"
 #include "mozilla/Array.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/EnumSet.h"
@@ -37,7 +36,6 @@
 #include "ImgDrawResult.h"
 #include "mozilla/EffectCompositor.h"
 #include "mozilla/EnumeratedArray.h"
-#include "mozilla/Maybe.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/gfx/UserData.h"
@@ -556,12 +554,6 @@ class nsDisplayListBuilder {
   bool IsAtRootOfPseudoStackingContext() const {
     return mIsAtRootOfPseudoStackingContext;
   }
-
-  /**
-   * @return the selection that painting should be restricted to (or nullptr
-   * in the normal unrestricted case)
-   */
-  mozilla::dom::Selection* GetBoundingSelection() { return mBoundingSelection; }
 
   /**
    * @return the root of given frame's (sub)tree, whose origin
@@ -1867,9 +1859,8 @@ class nsDisplayListBuilder {
 
   nsIFrame* const mReferenceFrame;
   nsIFrame* mIgnoreScrollFrame;
-  nsPresArena mPool;
+  nsPresArena<32768> mPool;
 
-  RefPtr<mozilla::dom::Selection> mBoundingSelection;
   AutoTArray<PresShellState, 8> mPresShellStates;
   AutoTArray<nsIFrame*, 400> mFramesMarkedForDisplay;
   AutoTArray<nsIFrame*, 40> mFramesMarkedForDisplayIfVisible;
@@ -5344,6 +5335,8 @@ class nsDisplayOpacity : public nsDisplayWrapList {
       nsDisplayListBuilder* aDisplayListBuilder) override;
 
   float GetOpacity() const { return mOpacity; }
+
+  bool ForEventsAndPluginsOnly() const { return mForEventsAndPluginsOnly; }
 
  private:
   bool ApplyOpacityToChildren(nsDisplayListBuilder* aBuilder);

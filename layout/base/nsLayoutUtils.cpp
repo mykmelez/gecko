@@ -51,7 +51,6 @@
 #include "ImageRegion.h"
 #include "gfxRect.h"
 #include "gfxContext.h"
-#include "gfxContext.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsCSSRendering.h"
 #include "nsTextFragment.h"
@@ -117,7 +116,6 @@
 #include "mozilla/layers/APZUtils.h"  // for apz::CalculatePendingDisplayPort
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/Telemetry.h"
-#include "mozilla/EventDispatcher.h"
 #include "mozilla/StyleAnimationValue.h"
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/WheelHandlingHelper.h"  // for WheelHandlingUtils
@@ -1138,12 +1136,13 @@ void nsLayoutUtils::InvalidateForDisplayPortChange(
       return;
     }
 
+    bool found;
     nsRect* rect = frame->GetProperty(
-        nsDisplayListBuilder::DisplayListBuildingDisplayPortRect());
+        nsDisplayListBuilder::DisplayListBuildingDisplayPortRect(), &found);
 
-    if (!rect) {
+    if (!found) {
       rect = new nsRect();
-      frame->SetProperty(
+      frame->AddProperty(
           nsDisplayListBuilder::DisplayListBuildingDisplayPortRect(), rect);
       frame->SetHasOverrideDirtyRegion(true);
 
@@ -1153,6 +1152,8 @@ void nsLayoutUtils::InvalidateForDisplayPortChange(
       RetainedDisplayListData* data =
           GetOrSetRetainedDisplayListData(rootFrame);
       data->Flags(frame) |= RetainedDisplayListData::FrameFlags::HasProps;
+    } else {
+      MOZ_ASSERT(rect, "this property should only store non-null values");
     }
 
     if (aHadDisplayPort) {
@@ -1829,9 +1830,9 @@ nsIScrollableFrame* nsLayoutUtils::GetNearestScrollableFrameForDirection(
       ScrollStyles ss = scrollableFrame->GetScrollStyles();
       uint32_t directions = scrollableFrame->GetPerceivedScrollingDirections();
       if (aDirection == eVertical
-              ? (ss.mVertical != NS_STYLE_OVERFLOW_HIDDEN &&
+              ? (ss.mVertical != StyleOverflow::Hidden &&
                  (directions & nsIScrollableFrame::VERTICAL))
-              : (ss.mHorizontal != NS_STYLE_OVERFLOW_HIDDEN &&
+              : (ss.mHorizontal != StyleOverflow::Hidden &&
                  (directions & nsIScrollableFrame::HORIZONTAL)))
         return scrollableFrame;
     }
@@ -1856,8 +1857,8 @@ nsIScrollableFrame* nsLayoutUtils::GetNearestScrollableFrame(nsIFrame* aFrame,
       } else {
         ScrollStyles ss = scrollableFrame->GetScrollStyles();
         if ((aFlags & SCROLLABLE_INCLUDE_HIDDEN) ||
-            ss.mVertical != NS_STYLE_OVERFLOW_HIDDEN ||
-            ss.mHorizontal != NS_STYLE_OVERFLOW_HIDDEN) {
+            ss.mVertical != StyleOverflow::Hidden ||
+            ss.mHorizontal != StyleOverflow::Hidden) {
           return scrollableFrame;
         }
       }
@@ -2206,17 +2207,16 @@ static void ConstrainToCoordValues(gfxFloat& aStart, gfxFloat& aSize) {
 }
 
 nsRect nsLayoutUtils::RoundGfxRectToAppRect(const Rect& aRect, float aFactor) {
-  /* Get a new Rect whose units are app units by scaling by the specified
-   * factor. */
+  // Get a new Rect whose units are app units by scaling by the specified
+  // factor.
   Rect scaledRect = aRect;
   scaledRect.ScaleRoundOut(aFactor);
 
-  /* We now need to constrain our results to the max and min values for coords.
-   */
+  // We now need to constrain our results to the max and min values for coords.
   ConstrainToCoordValues(scaledRect.x, scaledRect.width);
   ConstrainToCoordValues(scaledRect.y, scaledRect.height);
 
-  /* Now typecast everything back.  This is guaranteed to be safe. */
+  // Now typecast everything back.  This is guaranteed to be safe.
   if (aRect.IsEmpty()) {
     return nsRect(nscoord(scaledRect.X()), nscoord(scaledRect.Y()), 0, 0);
   } else {
@@ -2227,17 +2227,16 @@ nsRect nsLayoutUtils::RoundGfxRectToAppRect(const Rect& aRect, float aFactor) {
 
 nsRect nsLayoutUtils::RoundGfxRectToAppRect(const gfxRect& aRect,
                                             float aFactor) {
-  /* Get a new gfxRect whose units are app units by scaling by the specified
-   * factor. */
+  // Get a new gfxRect whose units are app units by scaling by the specified
+  // factor.
   gfxRect scaledRect = aRect;
   scaledRect.ScaleRoundOut(aFactor);
 
-  /* We now need to constrain our results to the max and min values for coords.
-   */
+  // We now need to constrain our results to the max and min values for coords.
   ConstrainToCoordValues(scaledRect.x, scaledRect.width);
   ConstrainToCoordValues(scaledRect.y, scaledRect.height);
 
-  /* Now typecast everything back.  This is guaranteed to be safe. */
+  // Now typecast everything back.  This is guaranteed to be safe.
   if (aRect.IsEmpty()) {
     return nsRect(nscoord(scaledRect.X()), nscoord(scaledRect.Y()), 0, 0);
   } else {
@@ -4911,8 +4910,9 @@ inline static bool FormControlShrinksForPercentISize(nsIFrame* aFrame) {
   }
 
   LayoutFrameType fType = aFrame->Type();
-  if (fType == LayoutFrameType::Meter || fType == LayoutFrameType::Progress) {
-    // progress and meter do have this shrinking behavior
+  if (fType == LayoutFrameType::Meter || fType == LayoutFrameType::Progress ||
+      fType == LayoutFrameType::Range) {
+    // progress, meter and range do have this shrinking behavior
     // FIXME: Maybe these should be nsIFormControlFrame?
     return true;
   }
@@ -5390,7 +5390,7 @@ static void AddStateBitToAncestors(nsIFrame* aFrame, nsFrameState aBit) {
   nscoord* fixedMinSize = nullptr;
   auto minSizeUnit = size.GetUnit();
   if (minSizeUnit == eStyleUnit_Auto) {
-    if (aFrame->StyleDisplay()->mOverflowX == NS_STYLE_OVERFLOW_VISIBLE) {
+    if (aFrame->StyleDisplay()->mOverflowX == StyleOverflow::Visible) {
       size = aAxis == eAxisHorizontal ? stylePos->mWidth : stylePos->mHeight;
       // This is same as above: keywords should behaves as property's initial
       // values in block axis.
@@ -6665,10 +6665,10 @@ static ImgDrawResult DrawImageInternal(
 }
 
 /* static */ void nsLayoutUtils::ComputeSizeForDrawing(
-    imgIContainer* aImage, CSSIntSize& aImageSize, /*outparam*/
-    nsSize& aIntrinsicRatio,                       /*outparam*/
-    bool& aGotWidth,                               /*outparam*/
-    bool& aGotHeight /*outparam*/) {
+    imgIContainer* aImage, /* outparam */ CSSIntSize& aImageSize,
+    /* outparam */ nsSize& aIntrinsicRatio,
+    /* outparam */ bool& aGotWidth,
+    /* outparam */ bool& aGotHeight) {
   aGotWidth = NS_SUCCEEDED(aImage->GetWidth(&aImageSize.width));
   aGotHeight = NS_SUCCEEDED(aImage->GetHeight(&aImageSize.height));
   bool gotRatio = NS_SUCCEEDED(aImage->GetIntrinsicRatio(&aIntrinsicRatio));
@@ -8343,12 +8343,12 @@ nsLayoutUtils::ScrollbarAreaToExcludeFromCompositionBoundsFor(
 
     nsPoint scrollPosition = aScrollableFrame->GetScrollPosition();
     if (aScrollableFrame->GetScrollStyles().mVertical ==
-        NS_STYLE_OVERFLOW_HIDDEN) {
+        StyleOverflow::Hidden) {
       contentBounds.y = scrollPosition.y;
       contentBounds.height = 0;
     }
     if (aScrollableFrame->GetScrollStyles().mHorizontal ==
-        NS_STYLE_OVERFLOW_HIDDEN) {
+        StyleOverflow::Hidden) {
       contentBounds.x = scrollPosition.x;
       contentBounds.width = 0;
     }
@@ -8822,6 +8822,13 @@ static void MaybeReflowForInflationScreenSizeChange(
   } else {
     metrics.SetPresShellResolution(1.0f);
   }
+
+  if (presShell->IsResolutionUpdated()) {
+    metadata.SetResolutionUpdated(true);
+    // We only need to tell APZ about the resolution update once.
+    presShell->SetResolutionUpdated(false);
+  }
+
   // The cumulative resolution is the resolution at which the scroll frame's
   // content is actually rendered. It includes the pres shell resolutions of
   // all the pres shells from here up to the root, as well as any css-driven

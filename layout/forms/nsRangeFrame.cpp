@@ -52,8 +52,8 @@ nsRangeFrame::~nsRangeFrame() {}
 NS_IMPL_FRAMEARENA_HELPERS(nsRangeFrame)
 
 NS_QUERYFRAME_HEAD(nsRangeFrame)
-NS_QUERYFRAME_ENTRY(nsRangeFrame)
-NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
+  NS_QUERYFRAME_ENTRY(nsRangeFrame)
+  NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 void nsRangeFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
@@ -246,7 +246,7 @@ void nsRangeFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
 
   // Draw a focus outline if appropriate:
 
-  if (!aBuilder->IsForPainting() || !IsVisibleForPainting(aBuilder)) {
+  if (!aBuilder->IsForPainting() || !IsVisibleForPainting()) {
     // we don't want the focus ring item for hit-testing or if the item isn't
     // in the area being [re]painted
     return;
@@ -741,7 +741,7 @@ LogicalSize nsRangeFrame::ComputeAutoSize(
 }
 
 nscoord nsRangeFrame::GetMinISize(gfxContext* aRenderingContext) {
-  return nscoord(0);
+  return GetPrefISize(aRenderingContext);
 }
 
 nscoord nsRangeFrame::GetPrefISize(gfxContext* aRenderingContext) {

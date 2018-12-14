@@ -34,6 +34,9 @@ const {
   REQUEST_WORKERS_FAILURE,
   REQUEST_WORKERS_START,
   REQUEST_WORKERS_SUCCESS,
+  TEMPORARY_EXTENSION_INSTALL_FAILURE,
+  TEMPORARY_EXTENSION_INSTALL_START,
+  TEMPORARY_EXTENSION_INSTALL_SUCCESS,
   RUNTIMES,
 } = require("../constants");
 
@@ -66,7 +69,8 @@ function inspectDebugTarget(type, id) {
       }
       case DEBUG_TARGETS.WORKER: {
         // Open worker toolbox in new window.
-        const front = runtimeDetails.client.client.getActor(id);
+        const devtoolsClient = runtimeDetails.clientWrapper.client;
+        const front = devtoolsClient.getActor(id);
         gDevToolsBrowser.openWorkerToolbox(front);
         break;
       }
@@ -82,21 +86,24 @@ function inspectDebugTarget(type, id) {
 function installTemporaryExtension() {
   const message = l10n.getString("about-debugging-tmp-extension-install-message");
   return async (dispatch, getState) => {
+    dispatch({ type: TEMPORARY_EXTENSION_INSTALL_START });
     const file = await openTemporaryExtension(window, message);
     try {
       await AddonManager.installTemporaryAddon(file);
+      dispatch({ type: TEMPORARY_EXTENSION_INSTALL_SUCCESS });
     } catch (e) {
-      console.error(e);
+      dispatch({ type: TEMPORARY_EXTENSION_INSTALL_FAILURE, error: e });
     }
   };
 }
 
-function pushServiceWorker(actor) {
+function pushServiceWorker(id) {
   return async (_, getState) => {
     const clientWrapper = getCurrentClient(getState().runtimes);
 
     try {
-      await clientWrapper.request({ to: actor, type: "push" });
+      const workerActor = await clientWrapper.getServiceWorkerFront({ id });
+      await workerActor.push();
     } catch (e) {
       console.error(e);
     }

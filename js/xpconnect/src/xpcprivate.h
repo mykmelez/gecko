@@ -2788,8 +2788,8 @@ class CompartmentPrivate {
   // True if this compartment is a UA widget compartment.
   bool isUAWidgetCompartment;
 
-  // True if this is a sandbox compartment. See xpc::CreateSandboxObject.
-  bool isSandboxCompartment;
+  // See CompartmentHasExclusiveExpandos.
+  bool hasExclusiveExpandos;
 
   // This is only ever set during mochitest runs when enablePrivilege is called.
   // It's intended as a temporary stopgap measure until we can finish ripping
@@ -2806,10 +2806,6 @@ class CompartmentPrivate {
   //
   // Using it in production is inherently unsafe.
   bool forcePermissiveCOWs;
-
-  // True if this compartment has been nuked. If true, any wrappers into or
-  // out of it should be considered invalid.
-  bool wasNuked;
 
   // Whether we've emitted a warning about a property that was filtered out
   // by a security wrapper. See XrayWrapper.cpp.

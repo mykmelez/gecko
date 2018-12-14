@@ -682,9 +682,7 @@ struct FrameMetrics {
 };
 
 struct ScrollSnapInfo {
-  ScrollSnapInfo()
-      : mScrollSnapTypeX(NS_STYLE_SCROLL_SNAP_TYPE_NONE),
-        mScrollSnapTypeY(NS_STYLE_SCROLL_SNAP_TYPE_NONE) {}
+  ScrollSnapInfo() = default;
 
   bool operator==(const ScrollSnapInfo& aOther) const {
     return mScrollSnapTypeX == aOther.mScrollSnapTypeX &&
@@ -696,14 +694,15 @@ struct ScrollSnapInfo {
   }
 
   bool HasScrollSnapping() const {
-    return mScrollSnapTypeY != NS_STYLE_SCROLL_SNAP_TYPE_NONE ||
-           mScrollSnapTypeX != NS_STYLE_SCROLL_SNAP_TYPE_NONE;
+    return mScrollSnapTypeY != mozilla::StyleScrollSnapType::None ||
+           mScrollSnapTypeX != mozilla::StyleScrollSnapType::None;
   }
 
   // The scroll frame's scroll-snap-type.
-  // One of NS_STYLE_SCROLL_SNAP_{NONE, MANDATORY, PROXIMITY}.
-  uint8_t mScrollSnapTypeX;
-  uint8_t mScrollSnapTypeY;
+  mozilla::StyleScrollSnapType mScrollSnapTypeX =
+      mozilla::StyleScrollSnapType::None;
+  mozilla::StyleScrollSnapType mScrollSnapTypeY =
+      mozilla::StyleScrollSnapType::None;
 
   // The intervals derived from the scroll frame's scroll-snap-points.
   Maybe<nscoord> mScrollSnapIntervalX;
@@ -812,6 +811,7 @@ struct ScrollMetadata {
         mIsAutoDirRootContentRTL(false),
         mUsesContainerScrolling(false),
         mForceDisableApz(false),
+        mResolutionUpdated(false),
         mOverscrollBehavior() {}
 
   bool operator==(const ScrollMetadata& aOther) const {
@@ -827,6 +827,7 @@ struct ScrollMetadata {
            mIsAutoDirRootContentRTL == aOther.mIsAutoDirRootContentRTL &&
            mUsesContainerScrolling == aOther.mUsesContainerScrolling &&
            mForceDisableApz == aOther.mForceDisableApz &&
+           mResolutionUpdated == aOther.mResolutionUpdated &&
            mDisregardedDirection == aOther.mDisregardedDirection &&
            mOverscrollBehavior == aOther.mOverscrollBehavior;
   }
@@ -907,6 +908,8 @@ struct ScrollMetadata {
     mForceDisableApz = aForceDisable;
   }
   bool IsApzForceDisabled() const { return mForceDisableApz; }
+  void SetResolutionUpdated(bool aUpdated) { mResolutionUpdated = aUpdated; }
+  bool IsResolutionUpdated() const { return mResolutionUpdated; }
 
   // For more details about the concept of a disregarded direction, refer to the
   // code which defines mDisregardedDirection.
@@ -982,6 +985,11 @@ struct ScrollMetadata {
   // Whether or not the compositor should actually do APZ-scrolling on this
   // scrollframe.
   bool mForceDisableApz : 1;
+
+  // Whether the pres shell resolution stored in mMetrics reflects a change
+  // originated by the main thread. Plays a similar role for the resolution as
+  // FrameMetrics::mScrollUpdateType) does for the scroll offset.
+  bool mResolutionUpdated : 1;
 
   // The disregarded direction means the direction which is disregarded anyway,
   // even if the scroll frame overflows in that direction and the direction is

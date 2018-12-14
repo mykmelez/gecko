@@ -17,6 +17,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/BackgroundHangMonitor.h"
 #include "mozilla/LookAndFeel.h"
+#include "mozilla/MemoryTelemetry.h"
 #include "mozilla/NullPrincipal.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ProcessHangMonitorIPC.h"
@@ -241,6 +242,7 @@
 #include "VRManagerChild.h"
 #include "private/pprio.h"
 #include "nsString.h"
+#include "MMPrinter.h"
 
 #ifdef MOZ_WIDGET_GTK
 #include "nsAppRunner.h"
@@ -890,9 +892,6 @@ nsresult ContentChild::ProvideWindowCommon(
   TabContext newTabContext = aTabOpener ? *aTabOpener : TabContext();
   RefPtr<TabChild> newChild =
       new TabChild(this, tabId, tabGroup, newTabContext, aChromeFlags);
-  if (NS_FAILED(newChild->Init(aParent))) {
-    return NS_ERROR_ABORT;
-  }
 
   if (aTabOpener) {
     MOZ_ASSERT(ipcContext->type() == IPCTabContext::TPopupIPCTabContext);
@@ -907,6 +906,12 @@ nsresult ContentChild::ProvideWindowCommon(
       // We release this ref in DeallocPBrowserChild
       RefPtr<TabChild>(newChild).forget().take(), tabId, TabId(0), *ipcContext,
       aChromeFlags, GetID(), IsForBrowser());
+
+  // Now that |newChild| has had its IPC link established, call |Init| to set it
+  // up.
+  if (NS_FAILED(newChild->Init(aParent))) {
+    return NS_ERROR_ABORT;
+  }
 
   nsCOMPtr<nsPIDOMWindowInner> parentTopInnerWindow;
   if (aParent) {
@@ -2255,6 +2260,7 @@ mozilla::ipc::IPCResult ContentChild::RecvAsyncMessage(
     const IPC::Principal& aPrincipal, const ClonedMessageData& aData) {
   AUTO_PROFILER_LABEL_DYNAMIC_LOSSY_NSSTRING("ContentChild::RecvAsyncMessage",
                                              OTHER, aMsg);
+  MMPrinter::Print("ContentChild::RecvAsyncMessage", aMsg, aData);
 
   CrossProcessCpowHolder cpows(this, aCpows);
   RefPtr<nsFrameMessageManager> cpm =
@@ -2952,6 +2958,13 @@ uint64_t NextWindowID() {
   MOZ_RELEASE_ASSERT(windowID < (uint64_t(1) << kWindowIDWindowBits));
   uint64_t windowBits = windowID & ((uint64_t(1) << kWindowIDWindowBits) - 1);
 
+  // Make sure that the middleman process doesn't generate WindowIDs which
+  // conflict with the process it's wrapping (which shares a ContentParentID
+  // with it).
+  if (recordreplay::IsMiddleman()) {
+    windowBits |= uint64_t(1) << (kWindowIDWindowBits - 1);
+  }
+
   return (processBits << kWindowIDWindowBits) | windowBits;
 }
 
@@ -3364,6 +3377,12 @@ mozilla::ipc::IPCResult ContentChild::RecvFlushCodeCoverageCounters(
 #else
   MOZ_CRASH("Shouldn't receive this message in non-code coverage builds!");
 #endif
+}
+
+mozilla::ipc::IPCResult ContentChild::RecvGetMemoryUniqueSetSize(
+    GetMemoryUniqueSetSizeResolver&& aResolver) {
+  MemoryTelemetry::Get().GetUniqueSetSize(std::move(aResolver));
+  return IPC_OK();
 }
 
 mozilla::ipc::IPCResult ContentChild::RecvSetInputEventQueueEnabled() {

@@ -2,22 +2,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use data_type::{
-    DATA_TYPE_BOOL, DATA_TYPE_DOUBLE, DATA_TYPE_EMPTY, DATA_TYPE_INT32, DATA_TYPE_VOID,
-    DATA_TYPE_WSTRING,
-};
 use error::KeyValueError;
-use libc::{int32_t, uint16_t};
-use nserror::{NsresultExt};
+use libc::int32_t;
+use nserror::NsresultExt;
 use nsstring::nsString;
 use ordered_float::OrderedFloat;
 use rkv::Value;
-use storage_variant::VariantType;
+use storage_variant::{
+    GetDataType, VariantType, DATA_TYPE_BOOL, DATA_TYPE_DOUBLE, DATA_TYPE_EMPTY, DATA_TYPE_INT32,
+    DATA_TYPE_VOID, DATA_TYPE_WSTRING,
+};
 use xpcom::{interfaces::nsIVariant, RefPtr};
-
-extern "C" {
-    fn NS_GetDataType(variant: *const nsIVariant) -> uint16_t;
-}
 
 // This is implemented in rkv but is incomplete there.  We implement a subset
 // to give KeyValuePair ownership over its value, so it can #[derive(xpcom)].
@@ -45,12 +40,12 @@ pub fn owned_to_variant(owned: OwnedValue) -> RefPtr<nsIVariant> {
         OwnedValue::Bool(val) => val.into_variant(),
         OwnedValue::I64(val) => val.into_variant(),
         OwnedValue::F64(OrderedFloat(val)) => val.into_variant(),
-        OwnedValue::Str(val) => nsString::from(&val).into_variant(),
+        OwnedValue::Str(ref val) => nsString::from(val).into_variant(),
     }
 }
 
 pub fn variant_to_owned(variant: &nsIVariant) -> Result<Option<OwnedValue>, KeyValueError> {
-    let data_type = unsafe { NS_GetDataType(variant) };
+    let data_type = variant.get_data_type();
 
     match data_type {
         DATA_TYPE_INT32 => {

@@ -271,6 +271,8 @@
 
 #include "mozilla/DocLoadingTimelineMarker.h"
 
+#include "mozilla/dom/WindowGlobalChild.h"
+
 #include "nsISpeculativeConnect.h"
 
 #include "mozilla/MediaManager.h"
@@ -2897,6 +2899,13 @@ void nsIDocument::SetDocumentURI(nsIURI* aURI) {
   if (!equalBases) {
     RefreshLinkHrefs();
   }
+
+  // Tell our WindowGlobalParent that the document's URI has been changed.
+  nsPIDOMWindowInner* inner = GetInnerWindow();
+  WindowGlobalChild* wgc = inner ? inner->GetWindowGlobalChild() : nullptr;
+  if (wgc) {
+    Unused << wgc->SendUpdateDocumentURI(mDocumentURI);
+  }
 }
 
 static void GetFormattedTimeString(PRTime aTime,
@@ -3570,6 +3579,9 @@ void nsIDocument::SetHeaderData(nsAtom* aHeaderField, const nsAString& aData) {
 
   if (aHeaderField == nsGkAtoms::headerContentLanguage) {
     CopyUTF16toUTF8(aData, mContentLanguage);
+    if (auto* presContext = GetPresContext()) {
+      presContext->ContentLanguageChanged();
+    }
   }
 
   if (aHeaderField == nsGkAtoms::headerDefaultStyle) {
@@ -6983,7 +6995,7 @@ void nsIDocument::UpdateViewportOverflowType(nscoord aScrolledWidth,
   MOZ_ASSERT(mPresShell);
   nsPresContext* pc = GetPresContext();
   MOZ_ASSERT(pc->GetViewportScrollStylesOverride().mHorizontal ==
-                 NS_STYLE_OVERFLOW_HIDDEN,
+                 StyleOverflow::Hidden,
              "Should only be called when viewport has overflow-x: hidden");
   MOZ_ASSERT(aScrolledWidth > aScrollportWidth,
              "Should only be called when viewport is overflowed");
@@ -9305,15 +9317,15 @@ bool nsIDocument::IsPotentiallyScrollable(HTMLBodyElement* aBody) {
   MOZ_ASSERT(aBody->GetParent() == aBody->OwnerDoc()->GetRootElement());
   nsIFrame* parentFrame = aBody->GetParent()->GetPrimaryFrame();
   if (parentFrame &&
-      parentFrame->StyleDisplay()->mOverflowX == NS_STYLE_OVERFLOW_VISIBLE &&
-      parentFrame->StyleDisplay()->mOverflowY == NS_STYLE_OVERFLOW_VISIBLE) {
+      parentFrame->StyleDisplay()->mOverflowX == StyleOverflow::Visible &&
+      parentFrame->StyleDisplay()->mOverflowY == StyleOverflow::Visible) {
     return false;
   }
 
   // The element's used value of the overflow-x or overflow-y properties is not
   // visible.
-  if (bodyFrame->StyleDisplay()->mOverflowX == NS_STYLE_OVERFLOW_VISIBLE &&
-      bodyFrame->StyleDisplay()->mOverflowY == NS_STYLE_OVERFLOW_VISIBLE) {
+  if (bodyFrame->StyleDisplay()->mOverflowX == StyleOverflow::Visible &&
+      bodyFrame->StyleDisplay()->mOverflowY == StyleOverflow::Visible) {
     return false;
   }
 
@@ -10179,7 +10191,7 @@ void nsIDocument::CleanupFullscreenState() {
   // Restore the zoom level that was in place prior to entering fullscreen.
   if (nsIPresShell* shell = GetShell()) {
     if (shell->GetMobileViewportManager()) {
-      shell->SetResolutionAndScaleTo(mSavedResolution);
+      shell->SetResolutionAndScaleTo(mSavedResolution, nsGkAtoms::restore);
     }
   }
 
@@ -10576,7 +10588,8 @@ bool nsIDocument::ApplyFullscreen(UniquePtr<FullscreenRequest> aRequest) {
               shell->GetMobileViewportManager()) {
         // Save the previous resolution so it can be restored.
         child->mSavedResolution = shell->GetResolution();
-        shell->SetResolutionAndScaleTo(manager->ComputeIntrinsicResolution());
+        shell->SetResolutionAndScaleTo(manager->ComputeIntrinsicResolution(),
+                                       nsGkAtoms::other);
       }
     }
 

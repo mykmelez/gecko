@@ -636,8 +636,8 @@ static void ListMathMLTree(nsIFrame* atLeast) {
   for (; f; f = f->GetParent()) {
     nsIContent* c = f->GetContent();
     if (!c || c->IsMathMLElement(nsGkAtoms::math) ||
-        c->NodeInfo()->NameAtom(
-            nsGkAtoms::body))  // XXXbaku which kind of body tag?
+        // XXXbaku which kind of body tag?
+        c->NodeInfo()->NameAtom(nsGkAtoms::body))
       break;
   }
   if (!f) f = atLeast;
@@ -649,7 +649,7 @@ static void ListMathMLTree(nsIFrame* atLeast) {
 // implementation of nsMathMLmtableWrapperFrame
 
 NS_QUERYFRAME_HEAD(nsMathMLmtableWrapperFrame)
-NS_QUERYFRAME_ENTRY(nsIMathMLFrame)
+  NS_QUERYFRAME_ENTRY(nsIMathMLFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsTableWrapperFrame)
 
 nsContainerFrame* NS_NewMathMLmtableOuterFrame(nsIPresShell* aPresShell,
@@ -1023,7 +1023,7 @@ void nsMathMLmtableFrame::SetUseCSSSpacing() {
 }
 
 NS_QUERYFRAME_HEAD(nsMathMLmtableFrame)
-NS_QUERYFRAME_ENTRY(nsMathMLmtableFrame)
+  NS_QUERYFRAME_ENTRY(nsMathMLmtableFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsTableFrame)
 
 // --------
@@ -1164,7 +1164,7 @@ nsMargin nsMathMLmtdFrame::GetBorderOverflow() {
 // implementation of nsMathMLmtdInnerFrame
 
 NS_QUERYFRAME_HEAD(nsMathMLmtdInnerFrame)
-NS_QUERYFRAME_ENTRY(nsIMathMLFrame)
+  NS_QUERYFRAME_ENTRY(nsIMathMLFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsBlockFrame)
 
 nsContainerFrame* NS_NewMathMLmtdInnerFrame(nsIPresShell* aPresShell,

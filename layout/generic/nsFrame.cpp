@@ -47,7 +47,6 @@
 #include "nsStyleConsts.h"
 #include "nsIPresShell.h"
 #include "mozilla/Logging.h"
-#include "mozilla/Sprintf.h"
 #include "nsLayoutUtils.h"
 #include "LayoutLogging.h"
 #include "mozilla/RestyleManager.h"
@@ -116,9 +115,6 @@
 #include "ActiveLayerTracker.h"
 
 #include "nsITheme.h"
-#include "nsStyleConsts.h"
-
-#include "ImageLoader.h"
 
 using namespace mozilla;
 using namespace mozilla::css;
@@ -212,6 +208,22 @@ static void InitBoxMetrics(nsIFrame* aFrame, bool aClear) {
   static_cast<nsFrame*>(aFrame)->nsFrame::MarkIntrinsicISizesDirty();
   metrics->mBlockAscent = 0;
   metrics->mLastSize.SizeTo(0, 0);
+}
+
+// Utility function to set a nsRect-valued property table entry on aFrame,
+// reusing the existing storage if the property happens to be already set.
+template <typename T>
+static void SetOrUpdateRectValuedProperty(
+    nsIFrame* aFrame, FrameProperties::Descriptor<T> aProperty,
+    const nsRect& aNewValue) {
+  bool found;
+  nsRect* rectStorage = aFrame->GetProperty(aProperty, &found);
+  if (!found) {
+    rectStorage = new nsRect(aNewValue);
+    aFrame->AddProperty(aProperty, rectStorage);
+  } else {
+    *rectStorage = aNewValue;
+  }
 }
 
 static bool IsXULBoxWrapped(const nsIFrame* aFrame) {
@@ -479,7 +491,7 @@ void nsFrame::operator delete(void*, size_t) {
 }
 
 NS_QUERYFRAME_HEAD(nsFrame)
-NS_QUERYFRAME_ENTRY(nsIFrame)
+  NS_QUERYFRAME_ENTRY(nsIFrame)
 NS_QUERYFRAME_TAIL_INHERITANCE_ROOT
 
 /////////////////////////////////////////////////////////////////////////////
@@ -621,6 +633,15 @@ void nsFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
     if (ssc) {
       ssc->AddFrame(this);
     }
+  }
+
+  if (disp->IsContainLayout() && disp->IsContainSize() &&
+      // All frames that support contain:layout also support contain:size.
+      IsFrameOfType(eSupportsContainLayoutAndPaint)) {
+    // Frames that have contain:layout+size can be reflow roots.
+    // Changes to `contain` force frame reconstructions, so this bit can be set
+    // for the whole lifetime of this frame.
+    AddStateBits(NS_FRAME_REFLOW_ROOT);
   }
 
   if (nsLayoutUtils::FontSizeInflationEnabled(PresContext()) ||
@@ -2135,7 +2156,7 @@ already_AddRefed<ComputedStyle> nsIFrame::ComputeSelectionStyle() const {
 void nsFrame::DisplaySelectionOverlay(nsDisplayListBuilder* aBuilder,
                                       nsDisplayList* aList,
                                       uint16_t aContentType) {
-  if (!IsSelected() || !IsVisibleForPainting(aBuilder)) {
+  if (!IsSelected() || !IsVisibleForPainting()) {
     return;
   }
 
@@ -2193,14 +2214,14 @@ void nsFrame::DisplayOutlineUnconditional(nsDisplayListBuilder* aBuilder,
 
 void nsFrame::DisplayOutline(nsDisplayListBuilder* aBuilder,
                              const nsDisplayListSet& aLists) {
-  if (!IsVisibleForPainting(aBuilder)) return;
+  if (!IsVisibleForPainting()) return;
 
   DisplayOutlineUnconditional(aBuilder, aLists);
 }
 
 void nsIFrame::DisplayCaret(nsDisplayListBuilder* aBuilder,
                             nsDisplayList* aList) {
-  if (!IsVisibleForPainting(aBuilder)) return;
+  if (!IsVisibleForPainting()) return;
 
   aList->AppendToTop(MakeDisplayItem<nsDisplayCaret>(aBuilder, this));
 }
@@ -2230,7 +2251,7 @@ void nsFrame::DisplayBorderBackgroundOutline(nsDisplayListBuilder* aBuilder,
   // The visibility check belongs here since child elements have the
   // opportunity to override the visibility property and display even if
   // their parent is hidden.
-  if (!IsVisibleForPainting(aBuilder)) {
+  if (!IsVisibleForPainting()) {
     return;
   }
 
@@ -2326,10 +2347,10 @@ static bool ApplyOverflowClipping(
   auto wm = aFrame->GetWritingMode();
   bool cbH = (wm.IsVertical() ? disp->mOverflowClipBoxBlock
                               : disp->mOverflowClipBoxInline) ==
-             NS_STYLE_OVERFLOW_CLIP_BOX_CONTENT_BOX;
+             StyleOverflowClipBox::ContentBox;
   bool cbV = (wm.IsVertical() ? disp->mOverflowClipBoxInline
                               : disp->mOverflowClipBoxBlock) ==
-             NS_STYLE_OVERFLOW_CLIP_BOX_CONTENT_BOX;
+             StyleOverflowClipBox::ContentBox;
   nsMargin bp = aFrame->GetUsedPadding();
   if (!cbH) {
     bp.left = bp.right = nscoord(0);
@@ -2669,7 +2690,7 @@ void nsIFrame::BuildDisplayListForStackingContext(
 
   // Replaced elements have their visibility handled here, because
   // they're visually atomic
-  if (IsFrameOfType(eReplaced) && !IsVisibleForPainting(aBuilder)) return;
+  if (IsFrameOfType(eReplaced) && !IsVisibleForPainting()) return;
 
   const nsStyleDisplay* disp = StyleDisplay();
   const nsStyleEffects* effects = StyleEffects();
@@ -2678,11 +2699,14 @@ void nsIFrame::BuildDisplayListForStackingContext(
   // we're painting, and we're not animating opacity. Don't do this
   // if we're going to compute plugin geometry, since opacity-0 plugins
   // need to have display items built for them.
+  bool needHitTestInfo = aBuilder->BuildCompositorHitTestInfo() &&
+                         StyleUI()->GetEffectivePointerEvents(this) !=
+                             NS_STYLE_POINTER_EVENTS_NONE;
   bool opacityItemForEventsAndPluginsOnly = false;
   if (effects->mOpacity == 0.0 && aBuilder->IsForPainting() &&
       !(disp->mWillChangeBitField & NS_STYLE_WILL_CHANGE_OPACITY) &&
       !nsLayoutUtils::HasAnimationOfProperty(effectSet, eCSSProperty_opacity)) {
-    if (aBuilder->WillComputePluginGeometry()) {
+    if (needHitTestInfo || aBuilder->WillComputePluginGeometry()) {
       opacityItemForEventsAndPluginsOnly = true;
     } else {
       return;
@@ -6884,7 +6908,8 @@ static nsRect ComputeEffectsRect(nsIFrame* aFrame, const nsRect& aOverflowRect,
     // TODO: We could also take account of clipPath and mask to reduce the
     // visual overflow, but that's not essential.
     if (aFrame->StyleEffects()->HasFilters()) {
-      aFrame->SetProperty(nsIFrame::PreEffectsBBoxProperty(), new nsRect(r));
+      SetOrUpdateRectValuedProperty(aFrame, nsIFrame::PreEffectsBBoxProperty(),
+                                    r);
       r = nsSVGUtils::GetPostFilterVisualOverflowRect(aFrame, aOverflowRect);
     }
     return r;
@@ -6922,7 +6947,8 @@ static nsRect ComputeEffectsRect(nsIFrame* aFrame, const nsRect& aOverflowRect,
   // the frame dies.
 
   if (nsSVGIntegrationUtils::UsingOverflowAffectingEffects(aFrame)) {
-    aFrame->SetProperty(nsIFrame::PreEffectsBBoxProperty(), new nsRect(r));
+    SetOrUpdateRectValuedProperty(aFrame, nsIFrame::PreEffectsBBoxProperty(),
+                                  r);
     r = nsSVGIntegrationUtils::ComputePostEffectsVisualOverflowRect(aFrame, r);
   }
 
@@ -7346,48 +7372,10 @@ void nsIFrame::RootFrameList(nsPresContext* aPresContext, FILE* out,
 }
 #endif
 
-bool nsIFrame::IsVisibleForPainting(nsDisplayListBuilder* aBuilder) {
-  if (!StyleVisibility()->IsVisible()) return false;
-  Selection* sel = aBuilder->GetBoundingSelection();
-  return !sel || IsVisibleInSelection(sel);
-}
+bool nsIFrame::IsVisibleForPainting() { return StyleVisibility()->IsVisible(); }
 
-bool nsIFrame::IsVisibleForPainting() {
-  if (!StyleVisibility()->IsVisible()) return false;
-
-  nsPresContext* pc = PresContext();
-  if (!pc->IsRenderingOnlySelection()) return true;
-
-  nsCOMPtr<nsISelectionController> selcon(do_QueryInterface(pc->PresShell()));
-  if (selcon) {
-    RefPtr<Selection> sel =
-        selcon->GetSelection(nsISelectionController::SELECTION_NORMAL);
-    if (sel) {
-      return IsVisibleInSelection(sel);
-    }
-  }
-  return true;
-}
-
-bool nsIFrame::IsVisibleInSelection(nsDisplayListBuilder* aBuilder) {
-  Selection* sel = aBuilder->GetBoundingSelection();
-  return !sel || IsVisibleInSelection(sel);
-}
-
-bool nsIFrame::IsVisibleOrCollapsedForPainting(nsDisplayListBuilder* aBuilder) {
-  if (!StyleVisibility()->IsVisibleOrCollapsed()) return false;
-  Selection* sel = aBuilder->GetBoundingSelection();
-  return !sel || IsVisibleInSelection(sel);
-}
-
-bool nsIFrame::IsVisibleInSelection(Selection* aSelection) {
-  if (!GetContent() || !GetContent()->IsSelectionDescendant()) {
-    return false;
-  }
-
-  ErrorResult rv;
-  bool vis = aSelection->ContainsNode(*mContent, true, rv);
-  return rv.Failed() || vis;
+bool nsIFrame::IsVisibleOrCollapsedForPainting() {
+  return StyleVisibility()->IsVisibleOrCollapsed();
 }
 
 /* virtual */ bool nsFrame::IsEmpty() { return false; }
@@ -7539,8 +7527,8 @@ nsresult nsFrame::GetNextPrevLineFromeBlockFrame(nsPresContext* aPresContext,
   nsIFrame* resultFrame = nullptr;
   nsIFrame* farStoppingFrame = nullptr;  // we keep searching until we find a
                                          // "this" frame then we go to next line
-  nsIFrame* nearStoppingFrame =
-      nullptr;  // if we are backing up from edge, stop here
+  nsIFrame* nearStoppingFrame = nullptr;  // if we are backing up from edge,
+                                          // stop here
   nsIFrame* firstFrame;
   nsIFrame* lastFrame;
   nsRect rect;
@@ -8813,8 +8801,8 @@ static void ComputeAndIncludeOutlineArea(nsIFrame* aFrame,
   }
 
   // Keep this code in sync with GetOutlineInnerRect in nsCSSRendering.cpp.
-  aFrame->SetProperty(nsIFrame::OutlineInnerRectProperty(),
-                      new nsRect(innerRect));
+  SetOrUpdateRectValuedProperty(aFrame, nsIFrame::OutlineInnerRectProperty(),
+                                innerRect);
   const nscoord offset = outline->mOutlineOffset;
   nsRect outerRect(innerRect);
   bool useOutlineAuto = false;
@@ -8937,8 +8925,8 @@ bool nsIFrame::FinishAndStoreOverflow(nsOverflowAreas& aOverflowAreas,
   // children are actually clipped to the padding-box, but since the
   // overflow area should include the entire border-box, just set it to
   // the border-box here.
-  NS_ASSERTION((disp->mOverflowY == NS_STYLE_OVERFLOW_CLIP) ==
-                   (disp->mOverflowX == NS_STYLE_OVERFLOW_CLIP),
+  NS_ASSERTION((disp->mOverflowY == StyleOverflow::MozHiddenUnscrollable) ==
+                   (disp->mOverflowX == StyleOverflow::MozHiddenUnscrollable),
                "If one overflow is clip, the other should be too");
   if (applyOverflowClipping) {
     // The contents are actually clipped to the padding area
@@ -8959,8 +8947,8 @@ bool nsIFrame::FinishAndStoreOverflow(nsOverflowAreas& aOverflowAreas,
     }
   }
 
-  // Note that NS_STYLE_OVERFLOW_CLIP doesn't clip the frame background,
-  // so we add theme background overflow here so it's not clipped.
+  // Note that StyleOverflow::MozHiddenUnscrollable doesn't clip the frame
+  // background, so we add theme background overflow here so it's not clipped.
   if (!::IsXULBoxWrapped(this) && IsThemed(disp)) {
     nsRect r(bounds);
     nsPresContext* presContext = PresContext();
@@ -9543,21 +9531,18 @@ nsFrame::RefreshSizeCache(nsBoxLayoutState& aState) {
 
   // Ok we need to compute our minimum, preferred, and maximum sizes.
   // 1) Maximum size. This is easy. Its infinite unless it is overloaded by CSS.
-  // 2) Preferred size. This is a little harder. This is the size the block
-  // would be
-  //      if it were laid out on an infinite canvas. So we can get this by
-  //      reflowing the block with and INTRINSIC width and height. We can also
-  //      do a nice optimization for incremental reflow. If the reflow is
-  //      incremental then we can pass a flag to have the block compute the
-  //      preferred width for us! Preferred height can just be the minimum
-  //      height;
+  // 2) Preferred size. This is a little harder. This is the size the
+  //    block would be if it were laid out on an infinite canvas. So we can
+  //    get this by reflowing the block with and INTRINSIC width and height. We
+  //    can also do a nice optimization for incremental reflow. If the reflow is
+  //    incremental then we can pass a flag to have the block compute the
+  //    preferred width for us! Preferred height can just be the minimum height;
   // 3) Minimum size. This is a toughy. We can pass the block a flag asking for
-  // the max element
-  //    size. That would give us the width. Unfortunately you can only ask for a
-  //    maxElementSize during an incremental reflow. So on other reflows we will
-  //    just have to use 0. The min height on the other hand is fairly easy we
-  //    need to get the largest line height. This can be done with the line
-  //    iterator.
+  //    the max element size. That would give us the width. Unfortunately you
+  //    can only ask for a maxElementSize during an incremental reflow. So on
+  //    other reflows we will just have to use 0. The min height on the other
+  //    hand is fairly easy we need to get the largest line height. This can be
+  //    done with the line iterator.
 
   // if we do have a rendering context
   gfxContext* rendContext = aState.GetRenderingContext();

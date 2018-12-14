@@ -97,6 +97,29 @@ linux64-clang-trunk-mingw-x64:
     toolchains:
         - linux64-gcc-4.9
 
+linux64-clang-7-android-cross:
+    description: "Clang 7 toolchain build"
+    treeherder:
+        kind: build
+        platform: toolchains/opt
+        symbol: TL(clang7-android)
+        tier: 1
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux-xlarge
+    worker:
+        max-run-time: 7200
+    run:
+        using: toolchain-script
+        script: build-clang-7-android.sh
+        resources:
+            - 'build/build-clang/build-clang.py'
+            - 'build/build-clang/clang-7-android.json'
+            - 'taskcluster/scripts/misc/tooltool-download.sh'
+        toolchain-alias: linux64-clang-android-cross
+        toolchain-artifact: public/build/clang.tar.xz
+    toolchains:
+        - linux64-gcc-4.9
+        - linux64-android-ndk-linux-repack
+
 linux64-clang-7-macosx-cross:
     description: "Clang 7 toolchain build with MacOS Compiler RT libs"
     treeherder:
@@ -493,7 +516,7 @@ linux64-rust-1.30:
     treeherder:
         kind: build
         platform: toolchains/opt
-        symbol: TL(rust)
+        symbol: TL(rust-1.30)
         tier: 1
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
@@ -505,6 +528,29 @@ linux64-rust-1.30:
         script: repack_rust.py
         arguments: [
             '--channel', '1.30.0',
+            '--host', 'x86_64-unknown-linux-gnu',
+            '--target', 'x86_64-unknown-linux-gnu',
+            '--target', 'i686-unknown-linux-gnu',
+        ]
+        toolchain-artifact: public/build/rustc.tar.xz
+
+linux64-rust-1.31:
+    description: "rust repack"
+    treeherder:
+        kind: build
+        platform: toolchains/opt
+        symbol: TL(rust)
+        tier: 1
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+    worker:
+        max-run-time: 7200
+        env:
+            UPLOAD_DIR: artifacts
+    run:
+        using: toolchain-script
+        script: repack_rust.py
+        arguments: [
+            '--channel', '1.31.0',
             '--host', 'x86_64-unknown-linux-gnu',
             '--target', 'x86_64-unknown-linux-gnu',
             '--target', 'i686-unknown-linux-gnu',
@@ -535,7 +581,7 @@ linux64-rust-nightly:
         ]
         toolchain-artifact: public/build/rustc.tar.xz
 
-linux64-rust-macos-1.30:
+linux64-rust-macos-1.31:
     description: "rust repack with macos-cross support"
     treeherder:
         kind: build
@@ -551,7 +597,7 @@ linux64-rust-macos-1.30:
         using: toolchain-script
         script: repack_rust.py
         arguments: [
-            '--channel', '1.30.0',
+            '--channel', '1.31.0',
             '--host', 'x86_64-unknown-linux-gnu',
             '--target', 'x86_64-unknown-linux-gnu',
             '--target', 'x86_64-apple-darwin',
@@ -582,7 +628,7 @@ linux64-rust-nightly-macos:
         ]
         toolchain-artifact: public/build/rustc.tar.xz
 
-linux64-rust-android-1.30:
+linux64-rust-android-1.31:
     description: "rust repack with android-cross support"
     treeherder:
         kind: build
@@ -598,7 +644,7 @@ linux64-rust-android-1.30:
         using: toolchain-script
         script: repack_rust.py
         arguments: [
-            '--channel', '1.30.0',
+            '--channel', '1.31.0',
             '--host', 'x86_64-unknown-linux-gnu',
             '--target', 'x86_64-unknown-linux-gnu',
             '--target', 'armv7-linux-androideabi',

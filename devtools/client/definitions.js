@@ -139,9 +139,7 @@ Tools.jsdebugger = {
   label: l10n("ToolboxDebugger.label"),
   panelLabel: l10n("ToolboxDebugger.panelLabel"),
   get tooltip() {
-    return l10n("ToolboxDebugger.tooltip2",
-    (osString == "Darwin" ? "Cmd+Opt+" : "Ctrl+Shift+") +
-    l10n("debugger.commandkey"));
+    return l10n("ToolboxDebugger.tooltip2");
   },
   inMenu: true,
   isTargetSupported: function() {
@@ -412,7 +410,8 @@ Tools.accessibility = {
   label: l10n("accessibility.label"),
   panelLabel: l10n("accessibility.panelLabel"),
   get tooltip() {
-    return l10n("accessibility.tooltip2");
+    return l10n("accessibility.tooltip3",
+                "Shift+" + functionkey(l10n("accessibilityF12.commandkey")));
   },
   inMenu: true,
 

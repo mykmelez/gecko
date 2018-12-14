@@ -22,11 +22,9 @@
 #include "nsITimer.h"
 #include "nsICharsetDetector.h"
 #include "mozilla/dom/DocGroup.h"
+#include "mozilla/Buffer.h"
 
 class nsHtml5Parser;
-
-#define NS_HTML5_STREAM_PARSER_READ_BUFFER_SIZE 1024
-#define NS_HTML5_STREAM_PARSER_SNIFFING_BUFFER_SIZE 1024
 
 enum eParserMode {
   /**
@@ -106,6 +104,10 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
   template <typename T>
   using NotNull = mozilla::NotNull<T>;
   using Encoding = mozilla::Encoding;
+
+  const uint32_t SNIFFING_BUFFER_SIZE = 1024;
+  const uint32_t READ_BUFFER_SIZE = 1024;
+  const uint32_t LOCAL_FILE_UTF_8_BUFFER_SIZE = 1024*1024*4; // 4 MB
 
   friend class nsHtml5RequestStopper;
   friend class nsHtml5DataAvailable;
@@ -243,7 +245,9 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
 
   void DoStopRequest();
 
-  void DoDataAvailable(const uint8_t* aBuffer, uint32_t aLength);
+  void DoDataAvailableBuffer(mozilla::Buffer<uint8_t>&& aBuffer);
+
+  void DoDataAvailable(mozilla::Span<const uint8_t> aBuffer);
 
   static nsresult CopySegmentsToParser(nsIInputStream* aInStream,
                                        void* aClosure, const char* aFromSegment,
@@ -268,51 +272,38 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
   /**
    * Push bytes from network when there is no Unicode decoder yet
    */
-  nsresult SniffStreamBytes(const uint8_t* aFromSegment, uint32_t aCount,
-                            uint32_t* aWriteCount);
+  nsresult SniffStreamBytes(mozilla::Span<const uint8_t> aFromSegment);
 
   /**
    * Push bytes from network when there is a Unicode decoder already
    */
-  nsresult WriteStreamBytes(const uint8_t* aFromSegment, uint32_t aCount,
-                            uint32_t* aWriteCount);
+  nsresult WriteStreamBytes(mozilla::Span<const uint8_t> aFromSegment);
 
   /**
    * Check whether every other byte in the sniffing buffer is zero.
    */
-  void SniffBOMlessUTF16BasicLatin(const uint8_t* aFromSegment,
-                                   uint32_t aCountToSniffingLimit);
+  void SniffBOMlessUTF16BasicLatin(mozilla::Span<const uint8_t> aFromSegment);
 
   /**
    * <meta charset> scan failed. Try chardet if applicable. After this, the
    * the parser will have some encoding even if a last resolt fallback.
    *
-   * @param aFromSegment The current network buffer or null if the sniffing
-   *                     buffer is being flushed due to network stream ending.
-   * @param aCount       The number of bytes in aFromSegment (ignored if
-   *                     aFromSegment is null)
-   * @param aWriteCount  Return value for how many bytes got read from the
-   *                     buffer.
+   * @param aFromSegment The current network buffer
    * @param aCountToSniffingLimit The number of unfilled slots in
    *                              mSniffingBuffer
+   * @param aEof true iff called upon end of stream
    */
-  nsresult FinalizeSniffing(const uint8_t* aFromSegment, uint32_t aCount,
-                            uint32_t* aWriteCount,
-                            uint32_t aCountToSniffingLimit);
+  nsresult FinalizeSniffing(mozilla::Span<const uint8_t> aFromSegment,
+                            uint32_t aCountToSniffingLimit, bool aEof);
 
   /**
    * Set up the Unicode decoder and write the sniffing buffer into it
    * followed by the current network buffer.
    *
-   * @param aFromSegment The current network buffer or null if the sniffing
-   *                     buffer is being flushed due to network stream ending.
-   * @param aCount       The number of bytes in aFromSegment (ignored if
-   *                     aFromSegment is null)
-   * @param aWriteCount  Return value for how many bytes got read from the
-   *                     buffer.
+   * @param aFromSegment The current network buffer
    */
   nsresult SetupDecodingAndWriteSniffingBufferAndCurrentSegment(
-      const uint8_t* aFromSegment, uint32_t aCount, uint32_t* aWriteCount);
+      mozilla::Span<const uint8_t> aFromSegment);
 
   /**
    * Initialize the Unicode decoder, mark the BOM as the source and
@@ -323,6 +314,19 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
    *                            been swallowed)
    */
   nsresult SetupDecodingFromBom(NotNull<const Encoding*> aEncoding);
+
+  /**
+   * When speculatively decoding from file: URL as UTF-8, commit
+   * to UTF-8 as the non-speculative encoding and start processing
+   * the decoded data.
+   */
+  void CommitLocalFileToUTF8();
+
+  /**
+   * When speculatively decoding from file: URL as UTF-8, redecode
+   * using fallback and then continue normally with the fallback.
+   */
+  void ReDecodeLocalFile();
 
   /**
    * Become confident or resolve and encoding name to its preferred form.
@@ -407,6 +411,11 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
    * The character encoding in use
    */
   NotNull<const Encoding*> mEncoding;
+
+  /**
+   * The character encoding that is the base expectation for detection.
+   */
+  const Encoding* mFeedChardetIfEncoding;
 
   /**
    * Whether reparse is forbidden
@@ -498,6 +507,14 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
   uint32_t mSpeculationFailureCount;
 
   /**
+   * Number of bytes already buffered into mBufferedLocalFileData.
+   * Never counts above LOCAL_FILE_UTF_8_BUFFER_SIZE.
+   */
+  uint32_t mLocalFileBytesBuffered;
+
+  nsTArray<mozilla::Buffer<uint8_t>> mBufferedLocalFileData;
+
+  /**
    * True to terminate early; protected by mTerminatedMutex
    */
   bool mTerminated;
@@ -519,16 +536,17 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
   nsCOMPtr<nsICharsetDetector> mChardet;
 
   /**
-   * If false, don't push data to chardet.
-   */
-  bool mFeedChardet;
-
-  /**
    * Whether the initial charset source was kCharsetFromParentFrame
    */
   bool mInitialEncodingWasFromParentFrame;
 
   bool mHasHadErrors;
+
+  /**
+   * If true, we are decoding a local file that lacks an encoding
+   * declaration as UTF-8 and we are not tokenizing yet.
+   */
+  bool mDecodingLocalFileAsUTF8;
 
   /**
    * Timer for flushing tree ops once in a while when not speculating.

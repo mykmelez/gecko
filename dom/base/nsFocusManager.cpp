@@ -337,7 +337,8 @@ Element* nsFocusManager::GetRedirectedFocus(nsIContent* aContent) {
       return aContent->OwnerDoc()->GetAnonymousElementByAttribute(
           aContent, nsGkAtoms::anonid, NS_LITERAL_STRING("input"));
     } else {
-      nsCOMPtr<nsIDOMXULMenuListElement> menulist = do_QueryInterface(aContent);
+      nsCOMPtr<nsIDOMXULMenuListElement> menulist =
+          aContent->AsElement()->AsXULMenuList();
       if (menulist) {
         RefPtr<Element> inputField;
         menulist->GetInputField(getter_AddRefs(inputField));
@@ -1556,6 +1557,7 @@ bool nsFocusManager::Blur(nsPIDOMWindowOuter* aWindowToClear,
 
   nsCOMPtr<nsIDocShell> docShell = window->GetDocShell();
   if (!docShell) {
+    mFocusedWindow = nullptr;
     mFocusedElement = nullptr;
     return true;
   }
@@ -1565,6 +1567,7 @@ bool nsFocusManager::Blur(nsPIDOMWindowOuter* aWindowToClear,
   nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
   if (!presShell) {
     mFocusedElement = nullptr;
+    mFocusedWindow = nullptr;
     return true;
   }
 
@@ -2839,6 +2842,10 @@ nsresult nsFocusManager::DetermineElementToMoveFocus(
   return NS_OK;
 }
 
+static bool IsHostOrSlot(const nsIContent* aContent) {
+  return aContent->GetShadowRoot() || aContent->IsHTMLElement(nsGkAtoms::slot);
+}
+
 // Helper class to iterate contents in scope by traversing flattened tree
 // in tree order
 class MOZ_STACK_CLASS ScopedContentTraversal {
@@ -2853,7 +2860,7 @@ class MOZ_STACK_CLASS ScopedContentTraversal {
 
   void Reset() { SetCurrent(mOwner); }
 
-  nsIContent* GetCurrent() { return mCurrent; }
+  nsIContent* GetCurrent() const { return mCurrent; }
 
  private:
   void SetCurrent(nsIContent* aContent) { mCurrent = aContent; }
@@ -2866,9 +2873,7 @@ void ScopedContentTraversal::Next() {
   MOZ_ASSERT(mCurrent);
 
   // Get mCurrent's first child if it's in the same scope.
-  if (!(mCurrent->GetShadowRoot() ||
-        mCurrent->IsHTMLElement(nsGkAtoms::slot)) ||
-      mCurrent == mOwner) {
+  if (!IsHostOrSlot(mCurrent) || mCurrent == mOwner) {
     StyleChildrenIterator iter(mCurrent);
     nsIContent* child = iter.GetNextChild();
     if (child) {
@@ -2929,7 +2934,7 @@ void ScopedContentTraversal::Prev() {
 
   while (last) {
     parent = last;
-    if (parent->GetShadowRoot() || parent->IsHTMLElement(nsGkAtoms::slot)) {
+    if (IsHostOrSlot(parent)) {
       // Skip contents in other scopes
       break;
     }
@@ -2966,11 +2971,6 @@ nsIContent* nsFocusManager::FindOwner(nsIContent* aContent) {
   }
 
   return nullptr;
-}
-
-bool nsFocusManager::IsHostOrSlot(nsIContent* aContent) {
-  return aContent->GetShadowRoot() ||               // shadow host
-         aContent->IsHTMLElement(nsGkAtoms::slot);  // slot
 }
 
 int32_t nsFocusManager::HostOrSlotTabIndexValue(nsIContent* aContent,
@@ -3035,7 +3035,7 @@ nsIContent* nsFocusManager::GetNextTabbableContentInScope(
       iterContent = contentTraversal.GetCurrent();
 
       if (firstNonChromeOnly && firstNonChromeOnly == iterContent) {
-        // We just broke out from the native anonynous content, so move
+        // We just broke out from the native anonymous content, so move
         // to the previous/next node of the native anonymous owner.
         if (aForward) {
           contentTraversal.Next();
@@ -3361,8 +3361,8 @@ nsresult nsFocusManager::GetNextTabbableContent(
         bool focusableHostSlot;
         int32_t tabIndex =
             HostOrSlotTabIndexValue(currentContent, &focusableHostSlot);
-        // Host or slot itself isn't focusable, enter its scope.
-        if (!focusableHostSlot && tabIndex >= 0 &&
+        // Host or slot itself isn't focusable or going backwards, enter its scope.
+        if ((!aForward || !focusableHostSlot) && tabIndex >= 0 &&
             (aIgnoreTabIndex || aCurrentTabIndex == tabIndex)) {
           nsIContent* contentToFocus = GetNextTabbableContentInScope(
               currentContent, currentContent, aOriginalStartContent, aForward,
@@ -3458,19 +3458,6 @@ nsresult nsFocusManager::GetNextTabbableContent(
             else if (currentContent == aRootContent ||
                      (currentContent != startContent &&
                       (aForward || !GetRedirectedFocus(currentContent)))) {
-              // If currentContent is a shadow host in backward
-              // navigation, search in scope owned by currentContent
-              if (!aForward && currentContent->GetShadowRoot()) {
-                nsIContent* contentToFocus = GetNextTabbableContentInScope(
-                    currentContent, currentContent, aOriginalStartContent,
-                    aForward, aForward ? 1 : 0, aIgnoreTabIndex,
-                    aForDocumentNavigation, true /* aSkipOwner */);
-                if (contentToFocus) {
-                  NS_ADDREF(*aResultContent = contentToFocus);
-                  return NS_OK;
-                }
-              }
-
               NS_ADDREF(*aResultContent = currentContent);
               return NS_OK;
             }

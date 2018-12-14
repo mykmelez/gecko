@@ -2001,8 +2001,7 @@ FlexItem::FlexItem(nsIFrame* aChildFrame, nscoord aCrossSize,
       mHadMeasuringReflow(false),
       mIsStretched(false),
       mIsStrut(true),  // (this is the constructor for making struts, after all)
-      mIsInlineAxisMainAxis(
-          true),  // (doesn't matter b/c we're not doing layout)
+      mIsInlineAxisMainAxis(true),  // (doesn't matter, we're not doing layout)
       mNeedsMinSizeAutoResolution(false),
       mHasAnyAutoMargin(false),
       mAlignSelf(NS_STYLE_ALIGN_FLEX_START) {
@@ -2037,7 +2036,7 @@ void FlexItem::CheckForMinSizeAuto(const ReflowInput& aFlexItemReflowInput,
   // non-'visible' due to the way the subproperties interact.
   mNeedsMinSizeAutoResolution =
       IsAutoOrEnumOnBSize(mainMinSize, IsInlineAxisMainAxis()) &&
-      disp->mOverflowX == NS_STYLE_OVERFLOW_VISIBLE;
+      disp->mOverflowX == StyleOverflow::Visible;
 }
 
 nscoord FlexItem::GetBaselineOffsetFromOuterCrossEdge(
@@ -2319,7 +2318,7 @@ class MOZ_STACK_CLASS SingleLineCrossAxisPositionTracker
 // =======================
 
 NS_QUERYFRAME_HEAD(nsFlexContainerFrame)
-NS_QUERYFRAME_ENTRY(nsFlexContainerFrame)
+  NS_QUERYFRAME_ENTRY(nsFlexContainerFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 NS_IMPL_FRAMEARENA_HELPERS(nsFlexContainerFrame)
@@ -2867,8 +2866,8 @@ MainAxisPositionTracker::MainAxisPositionTracker(
     uint8_t aJustifyContent, nscoord aContentBoxMainSize)
     : PositionTracker(aAxisTracker.GetMainAxis(),
                       aAxisTracker.IsMainAxisReversed()),
-      mPackingSpaceRemaining(
-          aContentBoxMainSize),  // we chip away at this below
+      // we chip away at this below
+      mPackingSpaceRemaining(aContentBoxMainSize),
       mNumAutoMarginsInMainAxis(0),
       mNumPackingSpacesRemaining(0),
       mJustifyContent(aJustifyContent) {
@@ -3849,8 +3848,8 @@ void nsFlexContainerFrame::GenerateFlexLines(
     // Check if we need to wrap |item| to a new line
     // (i.e. check if its outer hypothetical main size pushes our line over
     // the threshold)
-    if (wrapThreshold !=
-            NS_UNCONSTRAINEDSIZE &&  // Don't wrap if unconstrained.
+    if (wrapThreshold != NS_UNCONSTRAINEDSIZE &&  // Don't wrap if
+                                                  // unconstrained.
         !curLine->IsEmpty()) {  // Don't wrap if this will be line's first item.
       // If the line will be longer than wrapThreshold after adding this item,
       // then wrap to a new line before inserting this item.

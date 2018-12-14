@@ -26,11 +26,11 @@ use nserror::{nsresult, NS_ERROR_NULL_POINTER};
 /// #[xpimplements(nsIFooBarBaz)]
 /// #[refcnt = "atomic"]
 /// struct InitFooBarBaz {
-///     …
+///     // …
 /// }
 /// ```
 ///
-/// Given the appropriate extern crate and use declarations (which include
+/// With the appropriate extern crate and use declarations (which include
 /// using the Ensure trait from this module):
 ///
 /// ```ignore
@@ -39,12 +39,15 @@ use nserror::{nsresult, NS_ERROR_NULL_POINTER};
 /// use xpcom::Ensure;
 /// ```
 ///
-/// And invoking the macro with the name of the XPCOM method, the name of its
+/// Invoking the macro with the name of the XPCOM method, the name of its
 /// Rustic implementation, the set of its arguments, and its return value:
 ///
 /// ```ignore
 /// impl FooBarBaz {
 ///   xpcom_method(Foo, foo, { bar: *const nsACString, baz: bool }, *mut *const nsIVariant);
+///   xpcom_method!(
+///       foo => Foo(bar: *const nsACString, baz: bool) -> *const nsIVariant
+///   );
 /// }
 /// ```
 ///
@@ -73,7 +76,7 @@ use nserror::{nsresult, NS_ERROR_NULL_POINTER};
 /// ```ignore
 /// impl FooBarBaz {
 ///     fn foo(&self, bar: &nsACString, baz: bool) -> Result<RefPtr<nsIVariant>, nsresult> {
-///         …
+///         // …
 ///     }
 /// }
 /// ```
@@ -81,12 +84,19 @@ use nserror::{nsresult, NS_ERROR_NULL_POINTER};
 /// Notes:
 ///
 /// On error, the Rustic implementation can return an Err(nsresult) or any
-/// other type that implements From<nsresult>.  So you can define and return
+/// other type that implements Into<nsresult>.  So you can define and return
 /// a custom error type, which the XPCOM stub will convert to nsresult.
 ///
+/// This macro assumes that all non-null pointer arguments are valid!
+/// It does ensure that they aren't null, returning NS_ERROR_NULL_POINTER
+/// for null pointers.  But it doesn't otherwise check their validity.
+/// That makes the function unsafe, so callers must ensure that they only
+/// call it with valid pointer arguments.
 #[macro_export]
 macro_rules! xpcom_method {
-    ($xpcom_name:ident, $rust_name:ident, {$($param_name:ident: $param_type:ty),*}, *mut *const $retval:ty) => {
+    // A method whose return value is a *mut *const nsISomething type.
+    // Example: foo => Foo(bar: *const nsACString, baz: bool) -> *const nsIVariant
+    ($rust_name:ident => $xpcom_name:ident($($param_name:ident: $param_type:ty),*) -> *const $retval:ty) => {
         unsafe fn $xpcom_name(&self, $($param_name: $param_type,)* retval: *mut *const $retval) -> nsresult {
             $(ensure_param!($param_name);)*
             match self.$rust_name($($param_name, )*) {
@@ -102,7 +112,8 @@ macro_rules! xpcom_method {
     };
 
     // A method whose return value is a *mut nsAString type.
-    ($xpcom_name:ident, $rust_name:ident, {$($param_name:ident: $param_type:ty),*}, *mut nsAString) => {
+    // Example: foo => Foo(bar: *const nsACString, baz: bool) -> nsAString
+    ($rust_name:ident => $xpcom_name:ident($($param_name:ident: $param_type:ty),*) -> nsAString) => {
         unsafe fn $xpcom_name(&self, $($param_name: $param_type,)* retval: *mut nsAString) -> nsresult {
             $(ensure_param!($param_name);)*
             match self.$rust_name($($param_name, )*) {
@@ -118,7 +129,8 @@ macro_rules! xpcom_method {
     };
 
     // A method whose return value is a *mut nsACString type.
-    ($xpcom_name:ident, $rust_name:ident, {$($param_name:ident: $param_type:ty),*}, *mut nsACString) => {
+    // Example: foo => Foo(bar: *const nsACString, baz: bool) -> nsACString
+    ($rust_name:ident => $xpcom_name:ident($($param_name:ident: $param_type:ty),*) -> nsACString) => {
         unsafe fn $xpcom_name(&self, $($param_name: $param_type,)* retval: *mut nsACString) -> nsresult {
             $(ensure_param!($param_name);)*
             match self.$rust_name($($param_name, )*) {
@@ -134,7 +146,8 @@ macro_rules! xpcom_method {
     };
 
     // A method whose return value is a non-nsA[C]String *mut type.
-    ($xpcom_name:ident, $rust_name:ident, {$($param_name:ident: $param_type:ty),*}, *mut $retval:ty) => {
+    // Example: foo => Foo(bar: *const nsACString, baz: bool) -> bool
+    ($rust_name:ident => $xpcom_name:ident($($param_name:ident: $param_type:ty),*) -> $retval:ty) => {
         unsafe fn $xpcom_name(&self, $($param_name: $param_type,)* retval: *mut $retval) -> nsresult {
             $(ensure_param!($param_name);)*
             match self.$rust_name($($param_name, )*) {
@@ -150,7 +163,8 @@ macro_rules! xpcom_method {
     };
 
     // A method that doesn't have a return value.
-    ($xpcom_name:ident, $rust_name:ident, {$($param_name:ident: $param_type:ty),*}) => {
+    // Example: foo => Foo(bar: *const nsACString, baz: bool)
+    ($rust_name:ident => $xpcom_name:ident($($param_name:ident: $param_type:ty),*)) => {
         unsafe fn $xpcom_name(&self, $($param_name: $param_type,)*) -> nsresult {
             $(ensure_param!($param_name);)*
             match self.$rust_name($($param_name, )*) {
@@ -205,10 +219,11 @@ macro_rules! xpcom_method {
 /// (yet?) support outparameters (*mut nsIFoo).  The xpcom_method macro itself
 /// does, however, support the return value outparameter.
 ///
+#[doc(hidden)]
 #[macro_export]
 macro_rules! ensure_param {
     ($name:ident) => {
-        let $name = match Ensure::ensure($name) {
+        let $name = match $crate::Ensure::ensure($name) {
             Ok(val) => val,
             Err(result) => return result,
         };
@@ -219,6 +234,7 @@ macro_rules! ensure_param {
 /// a reference.  Because of limitations in declarative macros (see the docs
 /// for the ensure_param macro), this includes an implementation for types
 /// that are Copy, which simply returns the value itself.
+#[doc(hidden)]
 pub trait Ensure<T> {
     unsafe fn ensure(T) -> Self;
 }

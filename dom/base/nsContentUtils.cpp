@@ -235,6 +235,7 @@
 #include "mozilla/HangAnnotations.h"
 #include "mozilla/Encoding.h"
 #include "nsXULElement.h"
+#include "mozilla/RecordReplay.h"
 
 #include "nsIBidiKeyboard.h"
 
@@ -351,6 +352,8 @@ bool nsContentUtils::sAntiTrackingControlCenterUIEnabled = false;
 mozilla::LazyLogModule nsContentUtils::sDOMDumpLog("Dump");
 
 PopupControlState nsContentUtils::sPopupControlState = openAbused;
+uint32_t nsContentUtils::sPopupStatePusherCount = 0;
+bool nsContentUtils::sUnusedPopupToken = false;
 
 int32_t nsContentUtils::sInnerOrOuterWindowCount = 0;
 uint32_t nsContentUtils::sInnerOrOuterWindowSerialCounter = 0;
@@ -2548,6 +2551,56 @@ int32_t nsContentUtils::ComparePoints(nsINode* aParent1, int32_t aOffset1,
                             ? aParent1Cache->ComputeIndexOf(parent, child1)
                             : parent->ComputeIndexOf(child1);
   return child1index < aOffset2 ? -1 : 1;
+}
+
+// static
+nsINode*
+nsContentUtils::GetCommonAncestorUnderInteractiveContent(nsINode* aNode1,
+                                                         nsINode* aNode2)
+{
+  if (!aNode1 || !aNode2) {
+    return nullptr;
+  }
+
+  if (aNode1 == aNode2) {
+    return aNode1;
+  }
+
+  // Build the chain of parents
+  AutoTArray<nsINode*, 30> parents1;
+  do {
+    parents1.AppendElement(aNode1);
+    if (aNode1->IsElement() &&
+        aNode1->AsElement()->IsInteractiveHTMLContent(true)) {
+      break;
+    }
+    aNode1 = aNode1->GetFlattenedTreeParentNode();
+  } while (aNode1);
+
+  AutoTArray<nsINode*, 30> parents2;
+  do {
+    parents2.AppendElement(aNode2);
+    if (aNode2->IsElement() &&
+        aNode2->AsElement()->IsInteractiveHTMLContent(true)) {
+      break;
+    }
+    aNode2 = aNode2->GetFlattenedTreeParentNode();
+  } while (aNode2);
+
+  // Find where the parent chain differs
+  uint32_t pos1 = parents1.Length();
+  uint32_t pos2 = parents2.Length();
+  nsINode* parent = nullptr;
+  for (uint32_t len = std::min(pos1, pos2); len > 0; --len) {
+    nsINode* child1 = parents1.ElementAt(--pos1);
+    nsINode* child2 = parents2.ElementAt(--pos2);
+    if (child1 != child2) {
+      break;
+    }
+    parent = child1;
+  }
+
+  return parent;
 }
 
 /* static */
@@ -9903,8 +9956,12 @@ static void AppendNativeAnonymousChildrenFromFrame(nsIFrame* aFrame,
 /* static */
 bool nsContentUtils::ShouldBlockReservedKeys(WidgetKeyboardEvent* aKeyEvent) {
   nsCOMPtr<nsIPrincipal> principal;
-  nsCOMPtr<nsIBrowser> targetBrowser =
+  nsCOMPtr<Element> targetElement =
       do_QueryInterface(aKeyEvent->mOriginalTarget);
+  nsCOMPtr<nsIBrowser> targetBrowser;
+  if (targetElement) {
+    targetBrowser = targetElement->AsBrowser();
+  }
   bool isRemoteBrowser = false;
   if (targetBrowser) {
     targetBrowser->GetIsRemoteBrowser(&isRemoteBrowser);
@@ -10095,6 +10152,12 @@ static const uint64_t kIdBits = 64 - kIdProcessBits;
   uint64_t id = aId;
   MOZ_RELEASE_ASSERT(id < (uint64_t(1) << kIdBits));
   uint64_t bits = id & ((uint64_t(1) << kIdBits) - 1);
+
+  // Set the high bit for middleman processes so it doesn't conflict with the
+  // content process's generated IDs.
+  if (recordreplay::IsMiddleman()) {
+    bits |= uint64_t(1) << (kIdBits - 1);
+  }
 
   return (processBits << kIdBits) | bits;
 }
@@ -10354,7 +10417,8 @@ nsContentUtils::TryGetTabChildGlobal(nsISupports* aFrom) {
   --sInnerOrOuterWindowCount;
 }
 
-/* static */ bool nsContentUtils::CanShowPopup(nsIPrincipal* aPrincipal) {
+/* static */ bool nsContentUtils::CanShowPopupByPermission(
+    nsIPrincipal* aPrincipal) {
   MOZ_ASSERT(aPrincipal);
   uint32_t permit;
   nsCOMPtr<nsIPermissionManager> permissionManager =
@@ -10372,6 +10436,17 @@ nsContentUtils::TryGetTabChildGlobal(nsISupports* aFrom) {
   }
 
   return !sDisablePopups;
+}
+
+/* static */ bool nsContentUtils::TryUsePopupOpeningToken() {
+  MOZ_ASSERT(sPopupStatePusherCount);
+
+  if (!sUnusedPopupToken) {
+    sUnusedPopupToken = true;
+    return true;
+  }
+
+  return false;
 }
 
 static bool JSONCreator(const char16_t* aBuf, uint32_t aLen, void* aData) {
@@ -10474,5 +10549,17 @@ static bool JSONCreator(const char16_t* aBuf, uint32_t aLen, void* aData) {
     }
     host = NS_LITERAL_CSTRING("*") +
            nsDependentCSubstring(host, startIndexOfNextLevel);
+  }
+}
+
+/* static */ void nsContentUtils::PopupStatePusherCreated() {
+  ++sPopupStatePusherCount;
+}
+
+/* static */ void nsContentUtils::PopupStatePusherDestroyed() {
+  MOZ_ASSERT(sPopupStatePusherCount);
+
+  if (!--sPopupStatePusherCount) {
+    sUnusedPopupToken = false;
   }
 }

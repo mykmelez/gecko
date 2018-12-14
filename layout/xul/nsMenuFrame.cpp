@@ -156,7 +156,7 @@ nsIFrame* NS_NewMenuItemFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
 NS_IMPL_FRAMEARENA_HELPERS(nsMenuFrame)
 
 NS_QUERYFRAME_HEAD(nsMenuFrame)
-NS_QUERYFRAME_ENTRY(nsMenuFrame)
+  NS_QUERYFRAME_ENTRY(nsMenuFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsBoxFrame)
 
 nsMenuFrame::nsMenuFrame(ComputedStyle* aStyle)
@@ -879,8 +879,7 @@ void nsMenuFrame::UpdateMenuSpecialState() {
         /* uncheck the old item */
         sib->GetContent()->AsElement()->UnsetAttr(kNameSpaceID_None,
                                                   nsGkAtoms::checked, true);
-        /* XXX in DEBUG, check to make sure that there aren't two checked items
-         */
+        // XXX in DEBUG, check to make sure that there aren't two checked items
         return;
       }
     }

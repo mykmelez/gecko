@@ -244,6 +244,9 @@ class MozPromise : public MozPromiseBase {
   template <typename ResolveValueType_>
   static RefPtr<MozPromise> CreateAndResolve(ResolveValueType_&& aResolveValue,
                                              const char* aResolveSite) {
+    static_assert(IsConvertible<ResolveValueType_, ResolveValueT>::value,
+                  "Resolve() argument must be implicitly convertible to "
+                  "MozPromise's ResolveValueT");
     RefPtr<typename MozPromise::Private> p =
         new MozPromise::Private(aResolveSite);
     p->Resolve(std::forward<ResolveValueType_>(aResolveValue), aResolveSite);
@@ -253,6 +256,9 @@ class MozPromise : public MozPromiseBase {
   template <typename RejectValueType_>
   static RefPtr<MozPromise> CreateAndReject(RejectValueType_&& aRejectValue,
                                             const char* aRejectSite) {
+    static_assert(IsConvertible<RejectValueType_, RejectValueT>::value,
+                  "Reject() argument must be implicitly convertible to "
+                  "MozPromise's RejectValueT");
     RefPtr<typename MozPromise::Private> p =
         new MozPromise::Private(aRejectSite);
     p->Reject(std::forward<RejectValueType_>(aRejectValue), aRejectSite);
@@ -799,7 +805,9 @@ class MozPromise : public MozPromiseBase {
                    mMagic3 == sMagic && mMagic4 == &mMutex);
     RefPtr<ThenValueBase> thenValue = aThenValue;
     MutexAutoLock lock(mMutex);
-    MOZ_DIAGNOSTIC_ASSERT(!IsExclusive || !mHaveRequest);
+    MOZ_DIAGNOSTIC_ASSERT(
+        !IsExclusive || !mHaveRequest,
+        "Using an exclusive promise in a non-exclusive fashion");
     mHaveRequest = true;
     PROMISE_LOG("%s invoking Then() [this=%p, aThenValue=%p, isPending=%d]",
                 aCallSite, this, thenValue.get(), (int)IsPending());
@@ -910,7 +918,9 @@ class MozPromise : public MozPromiseBase {
   void ChainTo(already_AddRefed<Private> aChainedPromise,
                const char* aCallSite) {
     MutexAutoLock lock(mMutex);
-    MOZ_DIAGNOSTIC_ASSERT(!IsExclusive || !mHaveRequest);
+    MOZ_DIAGNOSTIC_ASSERT(
+        !IsExclusive || !mHaveRequest,
+        "Using an exclusive promise in a non-exclusive fashion");
     mHaveRequest = true;
     RefPtr<Private> chainedPromise = aChainedPromise;
     PROMISE_LOG(
@@ -1075,7 +1085,12 @@ class MozPromise<ResolveValueT, RejectValueT, IsExclusive>::Private
 };
 
 // A generic promise type that does the trick for simple use cases.
-typedef MozPromise<bool, nsresult, /* IsExclusive = */ false> GenericPromise;
+typedef MozPromise<bool, nsresult, /* IsExclusive = */ true> GenericPromise;
+
+// A generic, non-exclusive promise type that does the trick for simple use
+// cases.
+typedef MozPromise<bool, nsresult, /* IsExclusive = */ false>
+    GenericNonExclusivePromise;
 
 /*
  * Class to encapsulate a promise for a particular role. Use this as the member
@@ -1130,10 +1145,10 @@ class MozPromiseHolder {
 
   template <typename ResolveValueType_>
   void Resolve(ResolveValueType_&& aResolveValue, const char* aMethodName) {
-    static_assert(
-        IsConvertible<ResolveValueType_,
-                      typename PromiseType::ResolveValueType>::value,
-        "Resolve() argument must be convertible to MozPromise's ResolveValueT");
+    static_assert(IsConvertible<ResolveValueType_,
+                                typename PromiseType::ResolveValueType>::value,
+                  "Resolve() argument must be implicitly convertible to "
+                  "MozPromise's ResolveValueT");
 
     if (mMonitor) {
       mMonitor->AssertCurrentThreadOwns();
@@ -1154,10 +1169,10 @@ class MozPromiseHolder {
 
   template <typename RejectValueType_>
   void Reject(RejectValueType_&& aRejectValue, const char* aMethodName) {
-    static_assert(
-        IsConvertible<RejectValueType_,
-                      typename PromiseType::RejectValueType>::value,
-        "Reject() argument must be convertible to MozPromise's RejectValueT");
+    static_assert(IsConvertible<RejectValueType_,
+                                typename PromiseType::RejectValueType>::value,
+                  "Reject() argument must be implicitly convertible to "
+                  "MozPromise's RejectValueT");
 
     if (mMonitor) {
       mMonitor->AssertCurrentThreadOwns();

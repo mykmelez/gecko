@@ -124,19 +124,17 @@ using JS::SourceText;
 #define JS_ADDRESSOF_VA_LIST(ap) (&(ap))
 #endif
 
-JS_PUBLIC_API bool JS::CallArgs::requireAtLeast(JSContext* cx,
-                                                const char* fnname,
-                                                unsigned required) const {
-  if (length() < required) {
-    char numArgsStr[40];
-    SprintfLiteral(numArgsStr, "%u", required - 1);
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, fnname, numArgsStr,
-                              required == 2 ? "" : "s");
-    return false;
-  }
-
-  return true;
+JS_PUBLIC_API void JS::CallArgs::reportMoreArgsNeeded(JSContext* cx,
+                                                      const char* fnname,
+                                                      unsigned required,
+                                                      unsigned actual) {
+  char requiredArgsStr[40];
+  SprintfLiteral(requiredArgsStr, "%u", required);
+  char actualArgsStr[40];
+  SprintfLiteral(actualArgsStr, "%u", actual);
+  JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                            JSMSG_MORE_ARGS_NEEDED, fnname, requiredArgsStr,
+                            required == 1 ? "" : "s", actualArgsStr);
 }
 
 static bool ErrorTakesArguments(unsigned msg) {
@@ -4034,26 +4032,18 @@ JS_PUBLIC_API bool JS::RejectPromise(JSContext* cx, JS::HandleObject promiseObj,
   return ResolveOrRejectPromise(cx, promiseObj, rejectionValue, true);
 }
 
-static bool CallOriginalPromiseThenImpl(
-    JSContext* cx, JS::HandleObject promiseObj, JS::HandleObject onResolvedObj_,
-    JS::HandleObject onRejectedObj_, JS::MutableHandleObject resultObj,
+static MOZ_MUST_USE bool CallOriginalPromiseThenImpl(
+    JSContext* cx, JS::HandleObject promiseObj, JS::HandleObject onFulfilledObj,
+    JS::HandleObject onRejectedObj, JS::MutableHandleObject resultObj,
     CreateDependentPromise createDependent) {
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
-  cx->check(promiseObj, onResolvedObj_, onRejectedObj_);
+  cx->check(promiseObj, onFulfilledObj, onRejectedObj);
 
-  MOZ_ASSERT_IF(onResolvedObj_, IsCallable(onResolvedObj_));
-  MOZ_ASSERT_IF(onRejectedObj_, IsCallable(onRejectedObj_));
-  RootedObject onResolvedObj(cx, onResolvedObj_);
-  RootedObject onRejectedObj(cx, onRejectedObj_);
+  MOZ_ASSERT_IF(onFulfilledObj, IsCallable(onFulfilledObj));
+  MOZ_ASSERT_IF(onRejectedObj, IsCallable(onRejectedObj));
 
-  if (IsWrapper(promiseObj) && !CheckedUnwrap(promiseObj)) {
-    ReportAccessDenied(cx);
-    return false;
-  }
-  MOZ_ASSERT(CheckedUnwrap(promiseObj)->is<PromiseObject>());
-
-  RootedValue onFulfilled(cx, ObjectOrNullValue(onResolvedObj));
+  RootedValue onFulfilled(cx, ObjectOrNullValue(onFulfilledObj));
   RootedValue onRejected(cx, ObjectOrNullValue(onRejectedObj));
   return OriginalPromiseThen(cx, promiseObj, onFulfilled, onRejected, resultObj,
                              createDependent);

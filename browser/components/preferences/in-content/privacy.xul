@@ -13,7 +13,7 @@
       class="subcategory"
       hidden="true"
       data-category="panePrivacy">
-  <label class="header-name" flex="1" data-l10n-id="privacy-header"/>
+  <html:h1 data-l10n-id="privacy-header"/>
 </hbox>
 
 <!-- Tracking / Content Blocking -->
@@ -96,7 +96,7 @@
                   </hbox>
                   <hbox class="extra-information-label">
                     <image class="content-blocking-cookies-image"/>
-                    <label data-l10n-id="content-blocking-all-third-party-cookies"/>
+                    <label data-l10n-id="content-blocking-third-party-cookies"/>
                   </hbox>
                 </vbox>
                 <vbox class="content-blocking-warning">
@@ -198,7 +198,7 @@
       data-l10n-id="do-not-track-learn-more"></label></label>
       <radiogroup id="doNotTrackRadioGroup" aria-labelledby="doNotTrackDesc" preference="privacy.donottrackheader.enabled">
         <radio value="true" data-l10n-id="do-not-track-option-always"/>
-        <radio value="false" data-l10n-id="do-not-track-option-default-content-blocking"/>
+        <radio value="false" data-l10n-id="do-not-track-option-default-content-blocking-known"/>
       </radiogroup>
     </vbox>
   </vbox>
@@ -440,7 +440,7 @@
       class="subcategory"
       hidden="true"
       data-category="panePrivacy">
-  <label class="header-name" flex="1" data-l10n-id="permissions-header"/>
+  <html:h1 data-l10n-id="permissions-header"/>
 </hbox>
 
 <!-- Permissions -->
@@ -671,7 +671,7 @@
       class="subcategory"
       hidden="true"
       data-category="panePrivacy">
-  <label class="header-name" flex="1" data-l10n-id="collection-header"/>
+  <html:h1 data-l10n-id="collection-header"/>
 </hbox>
 
 <groupbox id="dataCollectionGroup" data-category="panePrivacy" hidden="true">
@@ -750,7 +750,7 @@
       class="subcategory"
       hidden="true"
       data-category="panePrivacy">
-  <label class="header-name" flex="1" data-l10n-id="security-header"/>
+  <html:h1 data-l10n-id="security-header"/>
 </hbox>
 
 <!-- addons, forgery (phishing) UI Security -->
