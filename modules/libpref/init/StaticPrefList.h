@@ -179,7 +179,7 @@ VARCACHE_PREF(
 )
 #undef PREF_VALUE
 
-// Whehter Mozilla specific "text" event should be dispatched only in the
+// Whether Mozilla specific "text" event should be dispatched only in the
 // system group or not in content.
 VARCACHE_PREF(
   "dom.compositionevent.text.dispatch_only_system_group_in_content",
@@ -857,6 +857,13 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "layout.css.step-position-jump.enabled",
    layout_css_step_position_jump_enabled,
+  bool, true
+)
+
+// Are dynamic reflow roots enabled?
+VARCACHE_PREF(
+   "layout.dynamic-reflow-roots.enabled",
+   layout_dynamic_reflow_roots_enabled,
   bool, true
 )
 
