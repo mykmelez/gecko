@@ -43,7 +43,7 @@ use xpcom::{
         nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback, nsIKeyValuePair,
         nsIKeyValueVariantCallback, nsIKeyValueVoidCallback, nsISupports, nsIThread, nsIVariant,
     },
-    nsIID, Ensure, RefPtr,
+    nsIID, RefPtr,
 };
 
 #[no_mangle]

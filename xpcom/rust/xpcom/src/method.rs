@@ -223,7 +223,7 @@ macro_rules! xpcom_method {
 #[macro_export]
 macro_rules! ensure_param {
     ($name:ident) => {
-        let $name = match Ensure::ensure($name) {
+        let $name = match $crate::Ensure::ensure($name) {
             Ok(val) => val,
             Err(result) => return result,
         };
