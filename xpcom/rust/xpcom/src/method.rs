@@ -84,7 +84,7 @@ use nserror::{nsresult, NS_ERROR_NULL_POINTER};
 /// Notes:
 ///
 /// On error, the Rustic implementation can return an Err(nsresult) or any
-/// other type that implements From<nsresult>.  So you can define and return
+/// other type that implements Into<nsresult>.  So you can define and return
 /// a custom error type, which the XPCOM stub will convert to nsresult.
 ///
 #[macro_export]
