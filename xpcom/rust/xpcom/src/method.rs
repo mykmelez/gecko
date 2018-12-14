@@ -219,6 +219,7 @@ macro_rules! xpcom_method {
 /// (yet?) support outparameters (*mut nsIFoo).  The xpcom_method macro itself
 /// does, however, support the return value outparameter.
 ///
+#[doc(hidden)]
 #[macro_export]
 macro_rules! ensure_param {
     ($name:ident) => {
@@ -233,6 +234,7 @@ macro_rules! ensure_param {
 /// a reference.  Because of limitations in declarative macros (see the docs
 /// for the ensure_param macro), this includes an implementation for types
 /// that are Copy, which simply returns the value itself.
+#[doc(hidden)]
 pub trait Ensure<T> {
     unsafe fn ensure(T) -> Self;
 }
