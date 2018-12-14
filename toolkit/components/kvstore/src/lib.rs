@@ -99,7 +99,9 @@ pub struct InitKeyValueService {
 
 impl KeyValueService {
     fn new(thread: RefPtr<nsIThread>) -> RefPtr<KeyValueService> {
-        KeyValueService::allocate(InitKeyValueService { thread: ThreadBound::new(thread) })
+        KeyValueService::allocate(InitKeyValueService {
+            thread: ThreadBound::new(thread),
+        })
     }
 
     xpcom_method!(
@@ -273,11 +275,11 @@ impl KeyValueDatabase {
 #[refcnt = "atomic"]
 pub struct InitKeyValueEnumerator {
     iter: AtomicRefCell<
-            IntoIter<(
-                Result<String, KeyValueError>,
-                Result<OwnedValue, KeyValueError>,
-            )>,
-        >,
+        IntoIter<(
+            Result<String, KeyValueError>,
+            Result<OwnedValue, KeyValueError>,
+        )>,
+    >,
 }
 
 impl KeyValueEnumerator {

@@ -165,7 +165,10 @@ impl GetOrCreateTask {
         }
     }
 
-    fn convert(&self, result: (Arc<RwLock<Rkv>>, Store)) -> Result<RefPtr<KeyValueDatabase>, KeyValueError> {
+    fn convert(
+        &self,
+        result: (Arc<RwLock<Rkv>>, Store),
+    ) -> Result<RefPtr<KeyValueDatabase>, KeyValueError> {
         let thread = self.thread.swap(None).ok_or(NS_ERROR_FAILURE)?;
         Ok(KeyValueDatabase::new(result.0, result.1, thread))
     }
@@ -304,11 +307,9 @@ impl Task for GetTask {
                     Some(Value::F64(val)) => Some(OwnedValue::F64(val)),
                     Some(Value::Str(val)) => Some(OwnedValue::Str(val.to_owned())),
                     Some(_value) => return Err(KeyValueError::UnexpectedValue),
-                    None => {
-                        match self.default_value {
-                            Some(ref val) => Some(val.clone()),
-                            None => None,
-                        }
+                    None => match self.default_value {
+                        Some(ref val) => Some(val.clone()),
+                        None => None,
                     },
                 })
             }()));
@@ -350,14 +351,13 @@ impl Task for HasTask {
     fn run(&self) {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
-        self.result
-            .store(Some(|| -> Result<bool, KeyValueError> {
-                let key = str::from_utf8(&self.key)?;
-                let env = self.rkv.read()?;
-                let reader = env.read()?;
-                let value = reader.get(&self.store, key)?;
-                Ok(value.is_some())
-            }()));
+        self.result.store(Some(|| -> Result<bool, KeyValueError> {
+            let key = str::from_utf8(&self.key)?;
+            let env = self.rkv.read()?;
+            let reader = env.read()?;
+            let value = reader.get(&self.store, key)?;
+            Ok(value.is_some())
+        }()));
     }
 
     task_done!(value);
@@ -444,19 +444,25 @@ impl EnumerateTask {
         }
     }
 
-    fn convert(&self, result: Vec<KeyValuePair>) -> Result<RefPtr<KeyValueEnumerator>, KeyValueError> {
+    fn convert(
+        &self,
+        result: Vec<KeyValuePair>,
+    ) -> Result<RefPtr<KeyValueEnumerator>, KeyValueError> {
         Ok(KeyValueEnumerator::new(result))
     }
 }
 
-type KeyValuePair = (Result<String, KeyValueError>, Result<OwnedValue, KeyValueError>);
+type KeyValuePair = (
+    Result<String, KeyValueError>,
+    Result<OwnedValue, KeyValueError>,
+);
 
 impl Task for EnumerateTask {
     fn run(&self) {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
-        self.result.store(Some(
-            || -> Result<Vec<KeyValuePair>, KeyValueError> {
+        self.result
+            .store(Some(|| -> Result<Vec<KeyValuePair>, KeyValueError> {
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
                 let from_key = str::from_utf8(&self.from_key)?;
@@ -507,8 +513,7 @@ impl Task for EnumerateTask {
                     }).collect();
 
                 Ok(pairs)
-            }(),
-        ));
+            }()));
     }
 
     task_done!(value);
