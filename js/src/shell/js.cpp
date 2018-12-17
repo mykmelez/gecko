@@ -52,6 +52,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
+#ifdef XP_LINUX
+#include <sys/prctl.h>
+#endif
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
@@ -7674,13 +7677,6 @@ static bool AddMarkObservers(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-#ifdef ENABLE_WASM_GC
-  if (gc::GCRuntime::temporaryAbortIfWasmGc(cx)) {
-    JS_ReportErrorASCII(cx, "API temporarily unavailable under wasm gc");
-    return false;
-  }
-#endif
-
   // WeakCaches are not swept during a minor GC. To prevent nursery-allocated
   // contents from having the mark bits be deceptively black until the second
   // GC, they would need to be marked weakly (cf NurseryAwareHashMap). It is
@@ -10941,6 +10937,16 @@ int main(int argc, char** argv, char** envp) {
   if (op.getHelpOption()) {
     return EXIT_SUCCESS;
   }
+
+  /*
+   * Allow dumping on Linux with the fuzzing flag set, even when running with
+   * the suid/sgid flag set on the shell.
+   */
+#ifdef XP_LINUX
+  if (op.getBoolOption("fuzzing-safe")) {
+    prctl(PR_SET_DUMPABLE, 1);
+  }
+#endif
 
 #ifdef DEBUG
   /*

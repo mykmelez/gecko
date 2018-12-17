@@ -25,7 +25,7 @@
 #include "nsCSSRendering.h"
 #include "nsGenericHTMLFrameElement.h"
 #include "mozilla/dom/Attr.h"
-#include "mozilla/EventListenerManager.h"
+#include "mozilla/dom/PopupBlocker.h"
 #include "nsFrame.h"
 #include "nsFrameState.h"
 #include "nsGlobalWindow.h"
@@ -115,6 +115,7 @@
 #include "mozilla/dom/RemoteWorkerService.h"
 #include "mozilla/dom/BlobURLProtocolHandler.h"
 #include "mozilla/dom/ReportingHeader.h"
+#include "mozilla/net/UrlClassifierFeatureFactory.h"
 #include "nsThreadManager.h"
 #include "mozilla/css/ImageLoader.h"
 
@@ -191,6 +192,8 @@ nsresult nsLayoutStatics::Initialize() {
   nsFrame::DisplayReflowStartup();
 #endif
   Attr::Initialize();
+
+  PopupBlocker::Initialize();
 
   rv = txMozillaXSLTProcessor::Startup();
   if (NS_FAILED(rv)) {
@@ -292,6 +295,8 @@ nsresult nsLayoutStatics::Initialize() {
   // Reporting API.
   ReportingHeader::Initialize();
 
+  mozilla::net::UrlClassifierFeatureFactory::Initialize();
+
   return NS_OK;
 }
 
@@ -312,7 +317,7 @@ void nsLayoutStatics::Shutdown() {
   StorageObserver::Shutdown();
   txMozillaXSLTProcessor::Shutdown();
   Attr::Shutdown();
-  EventListenerManager::Shutdown();
+  PopupBlocker::Shutdown();
   IMEStateManager::Shutdown();
   nsMediaFeatures::Shutdown();
   nsHTMLDNSPrefetch::Shutdown();
@@ -397,4 +402,6 @@ void nsLayoutStatics::Shutdown() {
   BlobURLProtocolHandler::RemoveDataEntries();
 
   css::ImageLoader::Shutdown();
+
+  mozilla::net::UrlClassifierFeatureFactory::Shutdown();
 }

@@ -4866,11 +4866,6 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery : public Debugger::QueryBase {
                                         Value* vp) {
   THIS_DEBUGGER(cx, argc, vp, "findScripts", args, dbg);
 
-  if (gc::GCRuntime::temporaryAbortIfWasmGc(cx)) {
-    JS_ReportErrorASCII(cx, "API temporarily unavailable under wasm gc");
-    return false;
-  }
-
   ScriptQuery query(cx, dbg);
 
   if (args.length() >= 1) {
@@ -5057,11 +5052,6 @@ static inline DebuggerSourceReferent AsSourceReferent(JSObject* obj) {
 /* static */ bool Debugger::findSources(JSContext* cx, unsigned argc,
                                         Value* vp) {
   THIS_DEBUGGER(cx, argc, vp, "findSources", args, dbg);
-
-  if (gc::GCRuntime::temporaryAbortIfWasmGc(cx)) {
-    JS_ReportErrorASCII(cx, "API temporarily unavailable under wasm gc");
-    return false;
-  }
 
   SourceQuery query(cx, dbg);
   if (!query.findSources()) {
@@ -7805,7 +7795,7 @@ static bool DebuggerSource_getDisplayURL(JSContext* cx, unsigned argc,
 struct DebuggerSourceGetElementMatcher {
   using ReturnType = JSObject*;
   ReturnType match(HandleScriptSourceObject sourceObject) {
-    return sourceObject->element();
+    return sourceObject->unwrappedElement();
   }
   ReturnType match(Handle<WasmInstanceObject*> wasmInstance) { return nullptr; }
 };
@@ -7828,7 +7818,7 @@ static bool DebuggerSource_getElement(JSContext* cx, unsigned argc, Value* vp) {
 struct DebuggerSourceGetElementPropertyMatcher {
   using ReturnType = Value;
   ReturnType match(HandleScriptSourceObject sourceObject) {
-    return sourceObject->elementAttributeName();
+    return sourceObject->unwrappedElementAttributeName();
   }
   ReturnType match(Handle<WasmInstanceObject*> wasmInstance) {
     return UndefinedValue();
@@ -7857,7 +7847,7 @@ class DebuggerSourceGetIntroductionScriptMatcher {
   using ReturnType = bool;
 
   ReturnType match(HandleScriptSourceObject sourceObject) {
-    RootedScript script(cx_, sourceObject->introductionScript());
+    RootedScript script(cx_, sourceObject->unwrappedIntroductionScript());
     if (script) {
       RootedObject scriptDO(cx_, dbg_->wrapScript(cx_, script));
       if (!scriptDO) {
@@ -7896,7 +7886,8 @@ struct DebuggerGetIntroductionOffsetMatcher {
     // ScriptSource, only hand out the introduction offset if we also have
     // the script within which it applies.
     ScriptSource* ss = sourceObject->source();
-    if (ss->hasIntroductionOffset() && sourceObject->introductionScript()) {
+    if (ss->hasIntroductionOffset() &&
+        sourceObject->unwrappedIntroductionScript()) {
       return Int32Value(ss->introductionOffset());
     }
     return UndefinedValue();

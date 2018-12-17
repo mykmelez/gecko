@@ -195,6 +195,7 @@ CompartmentPrivate::CompartmentPrivate(JS::Compartment* c,
       hasExclusiveExpandos(false),
       universalXPConnectEnabled(false),
       forcePermissiveCOWs(false),
+      wasShutdown(false),
       mWrappedJSMap(JSObject2WrappedJSMap::newMap(XPC_JS_MAP_LENGTH)) {
   MOZ_COUNT_CTOR(xpc::CompartmentPrivate);
   mozilla::PodArrayZero(wrapperDenialWarnings);
@@ -206,7 +207,12 @@ CompartmentPrivate::~CompartmentPrivate() {
 }
 
 void CompartmentPrivate::SystemIsBeingShutDown() {
-  mWrappedJSMap->ShutdownMarker();
+  // We may call this multiple times when the compartment contains more than one
+  // realm.
+  if (!wasShutdown) {
+    mWrappedJSMap->ShutdownMarker();
+    wasShutdown = true;
+  }
 }
 
 RealmPrivate::RealmPrivate(JS::Realm* realm)
@@ -2647,6 +2653,9 @@ static void AccumulateTelemetryCallback(int id, uint32_t sample,
       break;
     case JS_TELEMETRY_GC_NURSERY_PROMOTION_RATE:
       Telemetry::Accumulate(Telemetry::GC_NURSERY_PROMOTION_RATE, sample);
+      break;
+    case JS_TELEMETRY_GC_MARK_RATE:
+      Telemetry::Accumulate(Telemetry::GC_MARK_RATE, sample);
       break;
     default:
       MOZ_ASSERT_UNREACHABLE("Unexpected JS_TELEMETRY id");

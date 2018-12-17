@@ -336,18 +336,6 @@ DebuggerClient.prototype = {
     return deferred.promise;
   },
 
-  /*
-   * This function exists only to preserve DebuggerClient's interface;
-   * new code should say 'client.mainRoot.listTabs()'.
-   */
-  listTabs: function(options) {
-    return this.mainRoot.listTabs(options);
-  },
-
-  getTab: function(filter) {
-    return this.mainRoot.getTab(filter);
-  },
-
   /**
    * Attach to a target actor:
    *
@@ -423,7 +411,6 @@ DebuggerClient.prototype = {
    *        The actor ID for the thread to attach.
    * @param object options
    *        Configuration options.
-   *        - useSourceMaps: whether to use source maps or not.
    */
   attachThread: function(threadActor, options = {}) {
     if (this._clients.has(threadActor)) {

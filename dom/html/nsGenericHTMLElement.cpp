@@ -2289,8 +2289,8 @@ bool nsGenericHTMLElement::PerformAccesskey(bool aKeyCausesActivation,
 
   if (aKeyCausesActivation) {
     // Click on it if the users prefs indicate to do so.
-    nsAutoPopupStatePusher popupStatePusher(aIsTrustedEvent ? openAllowed
-                                                            : openAbused);
+    nsAutoPopupStatePusher popupStatePusher(
+        aIsTrustedEvent ? PopupBlocker::openAllowed : PopupBlocker::openAbused);
     DispatchSimulatedClick(this, aIsTrustedEvent, presContext);
   }
 
@@ -2567,19 +2567,6 @@ nsSize nsGenericHTMLElement::GetWidthHeightForImage(
 
 bool nsGenericHTMLElement::IsEventAttributeNameInternal(nsAtom* aName) {
   return nsContentUtils::IsEventAttributeName(aName, EventNameType_HTML);
-}
-
-void nsGenericHTMLElement::AttachAndSetUAShadowRoot() {
-  MOZ_DIAGNOSTIC_ASSERT(!CanAttachShadowDOM(),
-                        "Cannot be used to attach UI shadow DOM");
-  if (GetShadowRoot()) {
-    MOZ_ASSERT(GetShadowRoot()->IsUAWidget());
-    return;
-  }
-
-  RefPtr<ShadowRoot> shadowRoot =
-      AttachShadowWithoutNameChecks(ShadowRootMode::Closed);
-  shadowRoot->SetIsUAWidget();
 }
 
 /**

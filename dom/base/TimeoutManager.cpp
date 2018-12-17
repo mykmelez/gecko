@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "TimeoutManager.h"
-#include "nsContentUtils.h"
 #include "nsGlobalWindow.h"
 #include "mozilla/Logging.h"
 #include "mozilla/PerformanceCounter.h"
@@ -17,6 +16,7 @@
 #include "nsINamed.h"
 #include "nsITimeoutHandler.h"
 #include "mozilla/dom/DocGroup.h"
+#include "mozilla/dom/PopupBlocker.h"
 #include "mozilla/dom/TabGroup.h"
 #include "TimeoutExecutor.h"
 #include "TimeoutBudgetManager.h"
@@ -40,7 +40,6 @@ static int32_t gMinBackgroundTimeoutValue = 0;
 static int32_t gMinTrackingTimeoutValue = 0;
 static int32_t gMinTrackingBackgroundTimeoutValue = 0;
 static int32_t gTimeoutThrottlingDelay = 0;
-static bool gAnnotateTrackingChannels = false;
 
 #define DEFAULT_BACKGROUND_BUDGET_REGENERATION_FACTOR 100  // 1ms per 100ms
 #define DEFAULT_FOREGROUND_BUDGET_REGENERATION_FACTOR 1    // 1ms per 1ms
@@ -398,7 +397,9 @@ TimeoutManager::TimeoutManager(nsGlobalWindowInner& aWindow)
       mBudgetThrottleTimeouts(false) {
   MOZ_LOG(gLog, LogLevel::Debug,
           ("TimeoutManager %p created, tracking bucketing %s\n", this,
-           gAnnotateTrackingChannels ? "enabled" : "disabled"));
+           StaticPrefs::privacy_trackingprotection_annotate_channels()
+               ? "enabled"
+               : "disabled"));
 }
 
 TimeoutManager::~TimeoutManager() {
@@ -426,10 +427,6 @@ void TimeoutManager::Initialize() {
   Preferences::AddIntVarCache(&gTimeoutThrottlingDelay,
                               "dom.timeout.throttling_delay",
                               DEFAULT_TIMEOUT_THROTTLING_DELAY);
-
-  Preferences::AddBoolVarCache(&gAnnotateTrackingChannels,
-                               "privacy.trackingprotection.annotate_channels",
-                               false);
 
   Preferences::AddUintVarCache(&gMaxConsecutiveCallbacksMilliseconds,
                                "dom.timeout.max_consecutive_callbacks_ms",
@@ -499,7 +496,7 @@ nsresult TimeoutManager::SetTimeout(nsITimeoutHandler* aHandler,
   timeout->mReason = aReason;
 
   // No popups from timeouts by default
-  timeout->mPopupState = openAbused;
+  timeout->mPopupState = PopupBlocker::openAbused;
 
   timeout->mNestingLevel = sNestingLevel < DOM_CLAMP_TIMEOUT_NESTING_LEVEL
                                ? sNestingLevel + 1
@@ -519,7 +516,7 @@ nsresult TimeoutManager::SetTimeout(nsITimeoutHandler* aHandler,
   }
 
   if (gRunningTimeoutDepth == 0 &&
-      nsContentUtils::GetPopupControlState() < openBlocked) {
+      PopupBlocker::GetPopupControlState() < PopupBlocker::openBlocked) {
     // This timeout is *not* set from another timeout and it's set
     // while popups are enabled. Propagate the state to the timeout if
     // its delay (interval) is equal to or less than what
@@ -529,7 +526,7 @@ nsresult TimeoutManager::SetTimeout(nsITimeoutHandler* aHandler,
     // because our lower bound for |realInterval| could be pretty high
     // in some cases.
     if (interval <= gDisableOpenClickDelay) {
-      timeout->mPopupState = nsContentUtils::GetPopupControlState();
+      timeout->mPopupState = PopupBlocker::GetPopupControlState();
     }
   }
 

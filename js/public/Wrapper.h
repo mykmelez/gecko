@@ -133,7 +133,6 @@ class JS_FRIEND_API Wrapper : public ForwardingProxyHandler {
         mFlags(aFlags) {}
 
   virtual bool finalizeInBackground(const Value& priv) const override;
-  virtual JSObject* weakmapKeyDelegate(JSObject* proxy) const override;
 
   using BaseProxyHandler::Action;
 
@@ -150,6 +149,10 @@ class JS_FRIEND_API Wrapper : public ForwardingProxyHandler {
   static JSObject* wrappedObject(JSObject* wrapper);
 
   unsigned flags() const { return mFlags; }
+
+  bool isCrossCompartmentWrapper() const {
+    return !!(mFlags & CROSS_COMPARTMENT);
+  }
 
   static const char family;
   static const Wrapper singleton;

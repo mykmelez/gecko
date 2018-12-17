@@ -63,10 +63,10 @@ function startupAddonsManager() {
 async function createTargetForFakeTab(title) {
   const client = await startTestDebuggerServer(title);
 
-  const { tabs } = await listTabs(client);
-  const tab = findTab(tabs, title);
+  const tabs = await listTabs(client);
+  const front = findTab(tabs, title);
   const options = {
-    form: tab,
+    activeTab: front,
     client,
     chrome: false,
   };
@@ -198,7 +198,7 @@ function close(client) {
 
 function listTabs(client) {
   dump("Listing tabs.\n");
-  return client.listTabs();
+  return client.mainRoot.listTabs();
 }
 
 function findTab(tabs, title) {
@@ -376,7 +376,7 @@ function addTestGlobal(name, server = DebuggerServer) {
 // List the DebuggerClient |client|'s tabs, look for one whose title is
 // |title|, and apply |callback| to the packet's entry for that tab.
 async function getTestTab(client, title) {
-  const { tabs } = await client.mainRoot.listTabs();
+  const tabs = await client.mainRoot.listTabs();
   for (const tab of tabs) {
     if (tab.title === title) {
       return tab;
@@ -388,8 +388,8 @@ async function getTestTab(client, title) {
 // Attach to |client|'s tab whose title is |title|; and return the targetFront instance
 // referring to that tab.
 async function attachTestTab(client, title) {
-  const tab = await getTestTab(client, title);
-  const [, targetFront] = await client.attachTarget(tab);
+  const targetFront = await getTestTab(client, title);
+  await targetFront.attach();
   const response = await targetFront.attach();
   Assert.equal(response.type, "tabAttached");
   Assert.ok(typeof response.threadActor === "string");
@@ -403,7 +403,6 @@ async function attachTestTab(client, title) {
 async function attachTestThread(client, title, callback = () => {}) {
   const targetFront = await attachTestTab(client, title);
   const [response, threadClient] = await targetFront.attachThread({
-    useSourceMaps: true,
     autoBlackBox: true,
   });
   Assert.equal(threadClient.state, "paused", "Thread client is paused");
@@ -871,9 +870,9 @@ async function setupTestFromUrl(url) {
   const debuggerClient = new DebuggerClient(DebuggerServer.connectPipe());
   await connect(debuggerClient);
 
-  const { tabs } = await listTabs(debuggerClient);
-  const tab = findTab(tabs, "test");
-  const [, targetFront] = await attachTarget(debuggerClient, tab);
+  const tabs = await listTabs(debuggerClient);
+  const targetFront = findTab(tabs, "test");
+  await targetFront.attach();
 
   const [, threadClient] = await attachThread(targetFront);
   await resume(threadClient);
@@ -920,8 +919,9 @@ function threadClientTest(test, options = {}) {
     initTestDebuggerServer(server);
 
     // Create a custom debuggee and register it to the server.
-    // We are using a custom Sandbox as debuggee.
-    const debuggee = Cu.Sandbox(principal);
+    // We are using a custom Sandbox as debuggee. Create a new zone because
+    // debugger and debuggee must be in different compartments.
+    const debuggee = Cu.Sandbox(principal, {freshZone: true});
     const scriptName = "debuggee.js";
     debuggee.__name = scriptName;
     server.addTestGlobal(debuggee);
