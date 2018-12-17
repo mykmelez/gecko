@@ -153,7 +153,7 @@ JS_FRIEND_API bool JS::GetIsSecureContext(JS::Realm* realm) {
   return realm->creationOptions().secureContext();
 }
 
-JS_FRIEND_API JSPrincipals* JS_GetCompartmentPrincipals(
+JS_FRIEND_API JSPrincipals* JS_DeprecatedGetCompartmentPrincipals(
     JS::Compartment* compartment) {
   // Note: for now we assume a single realm per compartment. This API will go
   // away after we remove the remaining callers. See bug 1465700.
@@ -573,13 +573,6 @@ JS_FRIEND_API void js::VisitGrayWrapperTargets(Zone* zone,
           VisitGrayCallbackFunctor(callback, closure));
     }
   }
-}
-
-JS_FRIEND_API JSObject* js::GetWeakmapKeyDelegate(JSObject* key) {
-  if (JSWeakmapKeyDelegateOp op = key->getClass()->extWeakmapKeyDelegateOp()) {
-    return op(key);
-  }
-  return nullptr;
 }
 
 JS_FRIEND_API JSLinearString* js::StringToLinearStringSlow(JSContext* cx,
@@ -1046,7 +1039,7 @@ struct DumpHeapTracer : public JS::CallbackTracer, public WeakMapTracer {
   void trace(JSObject* map, JS::GCCellPtr key, JS::GCCellPtr value) override {
     JSObject* kdelegate = nullptr;
     if (key.is<JSObject>()) {
-      kdelegate = js::GetWeakmapKeyDelegate(&key.as<JSObject>());
+      kdelegate = UncheckedUnwrapWithoutExpose(&key.as<JSObject>());
     }
 
     fprintf(output, "WeakMapEntry map=%p key=%p keyDelegate=%p value=%p\n", map,

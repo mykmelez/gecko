@@ -16,6 +16,7 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/ReverseIterator.h"
+#include "mozilla/Sprintf.h"
 
 #include <string.h>
 
@@ -5526,7 +5527,7 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitFunction(CodeNode* funNode,
       const JS::TransitiveCompileOptions& transitiveOptions = parser->options();
       JS::CompileOptions options(cx, transitiveOptions);
 
-      Rooted<JSObject*> sourceObject(cx, script->sourceObject());
+      Rooted<ScriptSourceObject*> sourceObject(cx, script->sourceObject());
       Rooted<JSScript*> script(
           cx, JSScript::Create(cx, options, sourceObject, funbox->bufStart,
                                funbox->bufEnd, funbox->toStringStart,

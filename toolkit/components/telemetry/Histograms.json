@@ -870,6 +870,17 @@
     "bug_numbers": [1485299],
     "description": "The percentage of nursery objects that were promoted to tenured heap."
   },
+  "GC_MARK_RATE": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org", "jcoppeard@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "linear",
+    "low": 1000,
+    "high": 1000000,
+    "n_buckets": 100,
+    "bug_numbers": [1475896],
+    "description": "The number of objects marked per ms during GC."
+  },
   "GEOLOCATION_ACCURACY_EXPONENTIAL": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
@@ -8107,16 +8118,6 @@
     "alert_emails": ["adw@mozilla.com"],
     "bug_numbers": [1089670, 1482158, 1499193],
     "description": "Records search counts for search access points and in content searches. For search access points in general and for the urlbar when an internal @engine shorcut is not used, the format is: <engine-name>.<search-access-point> For the urlbar when an internal @engine shortcut is used, the format is: <engine-name>.alias For in content searches, the format is <provider>.in-content:[sap|sap-follow-on|organic]:[code|none]"
-  },
-  "SEARCH_RESET_RESULT": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["fqueze@mozilla.com"],
-    "bug_numbers": [1203168],
-    "expires_in_version": "65",
-    "kind": "enumerated",
-    "n_values": 5,
-    "releaseChannelCollection": "opt-out",
-    "description": "Result of showing the search reset prompt to the user. 0=restored original default, 1=kept current engine, 2=changed engine, 3=closed the page, 4=opened search settings"
   },
   "SEARCH_SERVICE_INIT_MS": {
     "record_in_processes": ["main"],

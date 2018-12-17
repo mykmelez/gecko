@@ -161,18 +161,18 @@ XPCOMUtils.defineLazyGetter(this, "RTL_UI", () => {
   return Services.locale.isAppLocaleRTL;
 });
 
-XPCOMUtils.defineLazyGetter(this, "gBrowserBundle", function() {
+XPCOMUtils.defineLazyGetter(this, "gBrowserBundle", () => {
   return Services.strings.createBundle("chrome://browser/locale/browser.properties");
 });
 
-XPCOMUtils.defineLazyGetter(this, "gTabBrowserBundle", function() {
+XPCOMUtils.defineLazyGetter(this, "gTabBrowserBundle", () => {
   return Services.strings.createBundle("chrome://browser/locale/tabbrowser.properties");
 });
 
-XPCOMUtils.defineLazyGetter(this, "gCustomizeMode", function() {
-  let scope = {};
-  ChromeUtils.import("resource:///modules/CustomizeMode.jsm", scope);
-  return new scope.CustomizeMode(window);
+XPCOMUtils.defineLazyGetter(this, "gCustomizeMode", () => {
+  let { CustomizeMode } =
+    ChromeUtils.import("resource:///modules/CustomizeMode.jsm", {});
+  return new CustomizeMode(window);
 });
 
 XPCOMUtils.defineLazyGetter(this, "gNavToolbox", () => {
@@ -218,21 +218,23 @@ XPCOMUtils.defineLazyGetter(this, "gNotificationBox", () => {
   });
 });
 
-XPCOMUtils.defineLazyGetter(this, "InlineSpellCheckerUI", function() {
-  let tmp = {};
-  ChromeUtils.import("resource://gre/modules/InlineSpellChecker.jsm", tmp);
-  return new tmp.InlineSpellChecker();
+XPCOMUtils.defineLazyGetter(this, "InlineSpellCheckerUI", () => {
+  let { InlineSpellChecker } =
+    ChromeUtils.import("resource://gre/modules/InlineSpellChecker.jsm", {});
+  return new InlineSpellChecker();
 });
 
-XPCOMUtils.defineLazyGetter(this, "PageMenuParent", function() {
-  let tmp = {};
-  ChromeUtils.import("resource://gre/modules/PageMenu.jsm", tmp);
-  return new tmp.PageMenuParent();
+XPCOMUtils.defineLazyGetter(this, "PageMenuParent", () => {
+  // eslint-disable-next-line no-shadow
+  let { PageMenuParent } =
+    ChromeUtils.import("resource://gre/modules/PageMenu.jsm", {});
+  return new PageMenuParent();
 });
 
-XPCOMUtils.defineLazyGetter(this, "PopupNotifications", function() {
-  let tmp = {};
-  ChromeUtils.import("resource://gre/modules/PopupNotifications.jsm", tmp);
+XPCOMUtils.defineLazyGetter(this, "PopupNotifications", () => {
+  // eslint-disable-next-line no-shadow
+  let { PopupNotifications } =
+    ChromeUtils.import("resource://gre/modules/PopupNotifications.jsm", {});
   try {
     // Hide all notifications while the URL is being edited and the address bar
     // has focus, including the virtual focus in the results popup.
@@ -244,24 +246,25 @@ XPCOMUtils.defineLazyGetter(this, "PopupNotifications", function() {
              (gURLBar.getAttribute("pageproxystate") != "valid" &&
              gURLBar.focused);
     };
-    return new tmp.PopupNotifications(gBrowser,
-                                      document.getElementById("notification-popup"),
-                                      document.getElementById("notification-popup-box"),
-                                      { shouldSuppress });
+    return new PopupNotifications(gBrowser,
+                                  document.getElementById("notification-popup"),
+                                  document.getElementById("notification-popup-box"),
+                                  { shouldSuppress });
   } catch (ex) {
     Cu.reportError(ex);
     return null;
   }
 });
 
-XPCOMUtils.defineLazyGetter(this, "Win7Features", function() {
+XPCOMUtils.defineLazyGetter(this, "Win7Features", () => {
   if (AppConstants.platform != "win")
     return null;
 
   const WINTASKBAR_CONTRACTID = "@mozilla.org/windows-taskbar;1";
   if (WINTASKBAR_CONTRACTID in Cc &&
       Cc[WINTASKBAR_CONTRACTID].getService(Ci.nsIWinTaskbar).available) {
-    let AeroPeek = ChromeUtils.import("resource:///modules/WindowsPreviewPerTab.jsm", {}).AeroPeek;
+    let { AeroPeek } =
+      ChromeUtils.import("resource:///modules/WindowsPreviewPerTab.jsm", {});
     return {
       onOpenWindow() {
         AeroPeek.onOpenWindow(window);
@@ -6772,20 +6775,24 @@ var IndexedDBPromptHelper = {
 
 var CanvasPermissionPromptHelper = {
   _permissionsPrompt: "canvas-permissions-prompt",
+  _permissionsPromptHideDoorHanger: "canvas-permissions-prompt-hide-doorhanger",
   _notificationIcon: "canvas-notification-icon",
 
   init() {
     Services.obs.addObserver(this, this._permissionsPrompt);
+    Services.obs.addObserver(this, this._permissionsPromptHideDoorHanger);
   },
 
   uninit() {
     Services.obs.removeObserver(this, this._permissionsPrompt);
+    Services.obs.removeObserver(this, this._permissionsPromptHideDoorHanger);
   },
 
   // aSubject is an nsIBrowser (e10s) or an nsIDOMWindow (non-e10s).
   // aData is an URL string.
   observe(aSubject, aTopic, aData) {
-    if (aTopic != this._permissionsPrompt) {
+    if (aTopic != this._permissionsPrompt &&
+        aTopic != this._permissionsPromptHideDoorHanger) {
       return;
     }
 
@@ -6842,9 +6849,11 @@ var CanvasPermissionPromptHelper = {
       checkbox,
       name: uri.asciiHost,
       learnMoreURL: Services.urlFormatter.formatURLPref("app.support.baseURL") + "fingerprint-permission",
+      dismissed: aTopic == this._permissionsPromptHideDoorHanger,
     };
-    PopupNotifications.show(browser, aTopic, message, this._notificationIcon,
-                            mainAction, secondaryActions, options);
+    PopupNotifications.show(browser, this._permissionsPrompt, message,
+                            this._notificationIcon, mainAction,
+                            secondaryActions, options);
   },
 };
 

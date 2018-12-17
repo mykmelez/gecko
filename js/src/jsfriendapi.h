@@ -151,6 +151,7 @@ enum {
   JS_TELEMETRY_GC_NURSERY_BYTES,
   JS_TELEMETRY_GC_PRETENURE_COUNT,
   JS_TELEMETRY_GC_NURSERY_PROMOTION_RATE,
+  JS_TELEMETRY_GC_MARK_RATE,
   JS_TELEMETRY_PRIVILEGED_PARSER_COMPILE_LAZY_AFTER_MS,
   JS_TELEMETRY_WEB_PARSER_COMPILE_LAZY_AFTER_MS,
   JS_TELEMETRY_END
@@ -176,7 +177,7 @@ typedef void (*JSSetUseCounterCallback)(JSObject* obj, JSUseCounter counter);
 extern JS_FRIEND_API void JS_SetSetUseCounterCallback(
     JSContext* cx, JSSetUseCounterCallback callback);
 
-extern JS_FRIEND_API JSPrincipals* JS_GetCompartmentPrincipals(
+extern JS_FRIEND_API JSPrincipals* JS_DeprecatedGetCompartmentPrincipals(
     JS::Compartment* compartment);
 
 extern JS_FRIEND_API JSPrincipals* JS_GetScriptPrincipals(JSScript* script);
@@ -493,8 +494,6 @@ typedef void (*GCThingCallback)(void* closure, JS::GCCellPtr thing);
 extern JS_FRIEND_API void VisitGrayWrapperTargets(JS::Zone* zone,
                                                   GCThingCallback callback,
                                                   void* closure);
-
-extern JS_FRIEND_API JSObject* GetWeakmapKeyDelegate(JSObject* key);
 
 /**
  * Invoke cellCallback on every gray JSObject in the given zone.
@@ -1168,14 +1167,6 @@ struct SingleCompartment : public CompartmentFilter {
   JS::Compartment* ours;
   explicit SingleCompartment(JS::Compartment* c) : ours(c) {}
   virtual bool match(JS::Compartment* c) const override { return c == ours; }
-};
-
-struct CompartmentsWithPrincipals : public CompartmentFilter {
-  JSPrincipals* principals;
-  explicit CompartmentsWithPrincipals(JSPrincipals* p) : principals(p) {}
-  virtual bool match(JS::Compartment* c) const override {
-    return JS_GetCompartmentPrincipals(c) == principals;
-  }
 };
 
 extern JS_FRIEND_API bool NukeCrossCompartmentWrappers(
@@ -2606,7 +2597,8 @@ extern JS_FRIEND_API JSObject* GetJSMEnvironmentOfScriptedCaller(JSContext* cx);
 // other embedding such as a Gecko FrameScript. Caller can check compartment.
 extern JS_FRIEND_API bool IsJSMEnvironment(JSObject* obj);
 
-#if defined(XP_WIN) && defined(_WIN64)
+// Matches the condition in js/src/jit/ProcessExecutableMemory.cpp
+#if defined(XP_WIN) && defined(HAVE_64BIT_BUILD) && defined(_M_X64)
 // Parameters use void* types to avoid #including windows.h. The return value of
 // this function is returned from the exception handler.
 typedef long (*JitExceptionHandler)(void* exceptionRecord,  // PEXECTION_RECORD

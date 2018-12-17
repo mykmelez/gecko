@@ -956,6 +956,14 @@ pref("gfx.webrender.dl.dump-parent", false);
 pref("gfx.webrender.dl.dump-content", false);
 pref("gfx.webrender.picture-caching", false);
 
+#ifdef EARLY_BETA_OR_EARLIER
+pref("performance.adjust_to_machine", true);
+#else
+pref("performance.adjust_to_machine", false);
+#endif
+
+pref("performance.low_end_machine", false);
+
 pref("accessibility.browsewithcaret", false);
 pref("accessibility.warn_on_browsewithcaret", true);
 
@@ -1268,7 +1276,6 @@ pref("dom.allow_scripts_to_close_windows",          false);
 
 pref("dom.require_user_interaction_for_beforeunload", true);
 
-pref("dom.disable_open_during_load",                false);
 pref("dom.popup_maximum",                           20);
 pref("dom.popup_allowed_events", "change click dblclick mouseup pointerup notificationclick reset submit touchend");
 
@@ -1405,8 +1412,6 @@ pref("privacy.permissionPrompts.showCloseButton", false);
 pref("privacy.trackingprotection.enabled",  false);
 // Enforce tracking protection in Private Browsing mode
 pref("privacy.trackingprotection.pbmode.enabled",  true);
-// Annotate channels based on the tracking protection list in all modes
-pref("privacy.trackingprotection.annotate_channels",  true);
 // First Party Isolation (double keying), disabled by default
 pref("privacy.firstparty.isolate",                        false);
 // If false, two windows in the same domain with different first party domains
@@ -1427,13 +1432,6 @@ pref("privacy.reduceTimerPrecision", true);
 pref("privacy.resistFingerprinting.reduceTimerPrecision.microseconds", 1000);
 // Enable jittering the clock one precision value forward
 pref("privacy.resistFingerprinting.reduceTimerPrecision.jitter", true);
-// Lower the priority of network loads for resources on the tracking protection list.
-// Note that this requires the privacy.trackingprotection.annotate_channels pref to be on in order to have any effect.
-#ifdef NIGHTLY_BUILD
-pref("privacy.trackingprotection.lower_network_priority", true);
-#else
-pref("privacy.trackingprotection.lower_network_priority", false);
-#endif
 
 pref("dom.event.contextmenu.enabled",       true);
 pref("dom.event.clipboardevents.enabled",   true);
@@ -2665,6 +2663,7 @@ pref("csp.overrule_about_uris_without_csp_whitelist", false);
 pref("csp.skip_about_page_has_csp_assert", false);
 // assertion flag will be set to false after fixing Bug 1473549
 pref("security.allow_eval_with_system_principal", true);
+pref("security.uris_using_eval_with_system_principal", "autocomplete.xml,redux.js,react-redux.js,content-task.js,content-task.js,tree.xml,dialog.xml,preferencesbindings.js,wizard.xml,lodash.js,jszip.js,ajv-4.1.1.js,updates.js,setup,jsol.js");
 #endif
 
 // Default Content Security Policy to apply to signed contents.
@@ -5598,9 +5597,6 @@ pref("browser.safebrowsing.downloads.remote.block_dangerous",            true);
 pref("browser.safebrowsing.downloads.remote.block_dangerous_host",       true);
 pref("browser.safebrowsing.downloads.remote.block_potentially_unwanted", true);
 pref("browser.safebrowsing.downloads.remote.block_uncommon",             true);
-
-// Password protection
-pref("browser.safebrowsing.passwords.enabled", false);
 
 // Google Safe Browsing provider (legacy)
 pref("browser.safebrowsing.provider.google.pver", "2.2");

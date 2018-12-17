@@ -8,7 +8,7 @@
 
 const Services = require("Services");
 const { Cr, Ci } = require("chrome");
-const { ActorPool, GeneratedLocation } = require("devtools/server/actors/common");
+const { ActorPool } = require("devtools/server/actors/common");
 const { createValueGrip } = require("devtools/server/actors/object/utils");
 const { longStringGrip } = require("devtools/server/actors/object/long-string");
 const { ActorClassWithSpec, Actor } = require("devtools/shared/protocol");
@@ -67,7 +67,6 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     this._observingNetwork = false;
 
     this._options = {
-      useSourceMaps: false,
       autoBlackBox: false,
     };
 
@@ -79,6 +78,10 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     // A map of actorID -> actor for breakpoints created and managed by the
     // server.
     this._hiddenBreakpoints = new Map();
+
+    // A Set of URLs string to watch for when new sources are found by
+    // the debugger instance.
+    this._onLoadBreakpointURLs = new Set();
 
     this.global = global;
 
@@ -96,9 +99,12 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     this._onOpeningRequest = this._onOpeningRequest.bind(this);
     EventEmitter.on(this._parent, "window-ready", this._onWindowReady);
 
-    // Set a wrappedJSObject property so |this| can be sent via the observer svc
-    // for the xpcshell harness.
-    this.wrappedJSObject = this;
+    if (Services.obs) {
+      // Set a wrappedJSObject property so |this| can be sent via the observer svc
+      // for the xpcshell harness.
+      this.wrappedJSObject = this;
+      Services.obs.notifyObservers(this, "devtools-thread-instantiated");
+    }
   },
 
   // Used by the ObjectActor to keep track of the depth of grip() calls.
@@ -306,6 +312,17 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     }
   },
 
+  /**
+   * Tell the thread to automatically add a breakpoint on the first line of
+   * a given file, when it is first loaded.
+   *
+   * This is currently only used by the xpcshell test harness, and unless
+   * we decide to expand the scope of this feature, we should keep it that way.
+   */
+  setBreakpointOnLoad(urls) {
+    this._onLoadBreakpointURLs = new Set(urls);
+  },
+
   _findXHRBreakpointIndex(p, m) {
     return this._xhrBreakpoints.findIndex(
       ({ path, method }) => path === p && method === m);
@@ -453,40 +470,36 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       }
       packet.why = reason;
 
-      const generatedLocation = this.sources.getFrameLocation(frame);
-      this.sources.getOriginalLocation(generatedLocation).then((originalLocation) => {
-        if (!originalLocation.originalSourceActor) {
-          // The only time the source actor will be null is if there
-          // was a sourcemap and it tried to look up the original
-          // location but there was no original URL. This is a strange
-          // scenario so we simply don't pause.
-          DevToolsUtils.reportException(
-            "ThreadActor",
-            new Error("Attempted to pause in a script with a sourcemap but " +
-                      "could not find original location.")
-          );
-          return;
-        }
+      const {
+        generatedSourceActor,
+        generatedLine,
+        generatedColumn,
+      } = this.sources.getFrameLocation(frame);
 
-        packet.frame.where = {
-          source: originalLocation.originalSourceActor.form(),
-          line: originalLocation.originalLine,
-          column: originalLocation.originalColumn,
-        };
+      if (!generatedSourceActor) {
+        // If the frame location is in a source that not pass the 'allowSource'
+        // check and thus has no actor, we do not bother pausing.
+        return undefined;
+      }
 
-        Promise.resolve(onPacket(packet))
-          .catch(error => {
-            reportError(error);
-            return {
-              error: "unknownError",
-              message: error.message + "\n" + error.stack,
-            };
-          })
-          .then(pkt => {
-            this.conn.send(pkt);
-          });
+      packet.frame.where = {
+        source: generatedSourceActor.form(),
+        line: generatedLine,
+        column: generatedColumn,
+      };
+      const pkt = onPacket(packet);
+
+      this.conn.send(pkt);
+    } catch (error) {
+      reportError(error);
+      this.conn.send({
+        error: "unknownError",
+        message: error.message + "\n" + error.stack,
       });
+      return undefined;
+    }
 
+    try {
       this._pushThreadPause();
     } catch (e) {
       reportError(e, "Got an exception during TA__pauseAndRespond: ");
@@ -500,12 +513,9 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
 
   _makeOnEnterFrame: function({ pauseAndRespond, rewinding }) {
     return frame => {
-      const generatedLocation = this.sources.getFrameLocation(frame);
-      const { originalSourceActor } = this.unsafeSynchronize(
-        this.sources.getOriginalLocation(generatedLocation)
-      );
+      const { generatedSourceActor } = this.sources.getFrameLocation(frame);
 
-      const url = originalSourceActor.url;
+      const url = generatedSourceActor.url;
 
       // When rewinding into a frame, we end up at the point when it is being popped.
       if (rewinding) {
@@ -524,12 +534,9 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     const result = function(completion) {
       // onPop is called with 'this' set to the current frame.
       const generatedLocation = thread.sources.getFrameLocation(this);
-      const originalLocation = thread.unsafeSynchronize(
-        thread.sources.getOriginalLocation(generatedLocation)
-      );
 
-      const { originalSourceActor } = originalLocation;
-      const url = originalSourceActor.url;
+      const { generatedSourceActor } = generatedLocation;
+      const url = generatedSourceActor.url;
 
       if (thread.sources.isBlackBoxed(url)) {
         return undefined;
@@ -546,15 +553,12 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
           // replaying, as we can't use its contents after resuming.
           const ncompletion = thread.dbg.replaying ? null : completion;
           const { onStep, onPop } = thread._makeSteppingHooks(
-            originalLocation, "next", false, ncompletion
+            generatedLocation, "next", false, ncompletion
           );
           if (thread.dbg.replaying) {
             const parentGeneratedLocation = thread.sources.getFrameLocation(parentFrame);
-            const parentOriginalLocation = thread.unsafeSynchronize(
-              thread.sources.getOriginalLocation(parentGeneratedLocation)
-            );
             const offsets =
-              thread._findReplayingStepOffsets(parentOriginalLocation, parentFrame,
+              thread._findReplayingStepOffsets(parentGeneratedLocation, parentFrame,
                                                /* rewinding = */ false);
             parentFrame.setReplayingOnStep(onStep, offsets);
           } else {
@@ -582,12 +586,12 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
 
     // When stepping out, we don't want to stop at a breakpoint that
     // happened to be set exactly at the spot where we stepped out.
-    // See bug 970469.  We record the original location here and check
+    // See bug 970469.  We record the generated location here and check
     // it when a breakpoint is hit.  Furthermore we store this on the
     // function because, while we could store it directly on the
     // frame, if we did we'd also have to find the appropriate spot to
     // clear it.
-    result.originalLocation = startLocation;
+    result.generatedLocation = startLocation;
 
     return result;
   },
@@ -609,17 +613,16 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     // 3. The source does not have pause points and we change lines.
 
     const generatedLocation = this.sources.getScriptOffsetLocation(script, offset);
-    const newLocation = this.unsafeSynchronize(this.sources.getOriginalLocation(
-      generatedLocation));
 
     // Case 1.
-    if (startLocation.originalUrl !== newLocation.originalUrl) {
+    if (startLocation.generatedUrl !== generatedLocation.generatedUrl) {
       return true;
     }
 
-    const pausePoints = newLocation.originalSourceActor.pausePoints;
-    const lineChanged = startLocation.originalLine !== newLocation.originalLine;
-    const columnChanged = startLocation.originalColumn !== newLocation.originalColumn;
+    const pausePoints = generatedLocation.generatedSourceActor.pausePoints;
+    const lineChanged = startLocation.generatedLine !== generatedLocation.generatedLine;
+    const columnChanged =
+      startLocation.generatedColumn !== generatedLocation.generatedColumn;
 
     if (!pausePoints) {
       // Case 3.
@@ -633,7 +636,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
 
     // When pause points are specified for the source,
     // we should pause when we are at a stepOver pause point
-    const pausePoint = findPausePointForLocation(pausePoints, newLocation);
+    const pausePoint = findPausePointForLocation(pausePoints, generatedLocation);
 
     if (pausePoint) {
       return pausePoint.step;
@@ -656,17 +659,14 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       // onStep is called with 'this' set to the current frame.
 
       const generatedLocation = thread.sources.getFrameLocation(this);
-      const newLocation = thread.unsafeSynchronize(
-        thread.sources.getOriginalLocation(generatedLocation)
-      );
 
       // Always continue execution if either:
       //
       // 1. We are in a source mapped region, but inside a null mapping
-      //    (doesn't correlate to any region of original source)
+      //    (doesn't correlate to any region of generated source)
       // 2. The source we are in is black boxed.
-      if (newLocation.originalUrl == null
-          || thread.sources.isBlackBoxed(newLocation.originalUrl)) {
+      if (generatedLocation.generatedUrl == null
+          || thread.sources.isBlackBoxed(generatedLocation.generatedUrl)) {
         return undefined;
       }
 
@@ -793,9 +793,8 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     }
 
     const generatedLocation = this.sources.getFrameLocation(this.youngestFrame);
-    const originalLocation = await this.sources.getOriginalLocation(generatedLocation);
     const { onEnterFrame, onPop, onStep } = this._makeSteppingHooks(
-      originalLocation,
+      generatedLocation,
       steppingType,
       rewinding
     );
@@ -817,7 +816,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
           if (stepFrame.script) {
             if (this.dbg.replaying) {
               const offsets =
-                this._findReplayingStepOffsets(originalLocation, stepFrame, rewinding);
+                this._findReplayingStepOffsets(generatedLocation, stepFrame, rewinding);
               stepFrame.setReplayingOnStep(onStep, offsets);
             } else {
               stepFrame.onStep = onStep;
@@ -1183,36 +1182,29 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
 
     // Return request.count frames, or all remaining
     // frames if count is not defined.
-    const promises = [];
+    const frames = [];
     for (; frame && (!count || i < (start + count)); i++, frame = frame.older) {
       const form = this._createFrameActor(frame).form();
       form.depth = i;
 
-      const framePromise = this.sources.getOriginalLocation(new GeneratedLocation(
-        this.sources.createNonSourceMappedActor(frame.script.source),
-        form.where.line,
-        form.where.column
-      )).then((originalLocation) => {
-        if (!originalLocation.originalSourceActor) {
-          return null;
-        }
+      let frameItem = null;
 
-        const sourceForm = originalLocation.originalSourceActor.form();
+      const frameSourceActor = this.sources.createSourceActor(frame.script.source);
+      if (frameSourceActor) {
+        const sourceForm = frameSourceActor.form();
         form.where = {
           source: sourceForm,
-          line: originalLocation.originalLine,
-          column: originalLocation.originalColumn,
+          line: form.where.line,
+          column: form.where.column,
         };
         form.source = sourceForm;
-        return form;
-      });
-      promises.push(framePromise);
+        frameItem = form;
+      }
+      frames.push(frameItem);
     }
 
-    return Promise.all(promises).then(function(frames) {
-      // Filter null values because sourcemapping may have failed.
-      return { frames: frames.filter(x => !!x) };
-    });
+    // Filter null values because sourcemapping may have failed.
+    return { frames: frames.filter(x => !!x) };
   },
 
   onReleaseMany: function(request) {
@@ -1243,27 +1235,19 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     return res ? res : {};
   },
 
-  /**
-   * Get the source lists from the debugger.
-   */
-  _discoverSources: function() {
-    const sources = this.dbg.findSources();
-    return Promise.all(sources.map(source => {
-      return this.sources.createSourceActors(source);
-    }));
-  },
-
   onSources: function(request) {
-    return this._discoverSources().then(() => {
-      // No need to flush the new source packets here, as we are sending the
-      // list of sources out immediately and we don't need to invoke the
-      // overhead of an RDP packet for every source right now. Let the default
-      // timeout flush the buffered packets.
+    for (const source of this.dbg.findSources()) {
+      this.sources.createSourceActor(source);
+    }
 
-      return {
-        sources: this.sources.iter().map(s => s.form()),
-      };
-    });
+    // No need to flush the new source packets here, as we are sending the
+    // list of sources out immediately and we don't need to invoke the
+    // overhead of an RDP packet for every source right now. Let the default
+    // timeout flush the buffered packets.
+
+    return {
+      sources: this.sources.iter().map(s => s.form()),
+    };
   },
 
   /**
@@ -1760,10 +1744,8 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
   onDebuggerStatement: function(frame) {
     // Don't pause if we are currently stepping (in or over) or the frame is
     // black-boxed.
-    const generatedLocation = this.sources.getFrameLocation(frame);
-    const { originalSourceActor } = this.unsafeSynchronize(
-      this.sources.getOriginalLocation(generatedLocation));
-    const url = originalSourceActor ? originalSourceActor.url : null;
+    const { generatedSourceActor } = this.sources.getFrameLocation(frame);
+    const url = generatedSourceActor ? generatedSourceActor.url : null;
 
     if (this.skipBreakpoints || this.sources.isBlackBoxed(url) || frame.onStep) {
       return undefined;
@@ -1840,10 +1822,8 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       return undefined;
     }
 
-    const generatedLocation = this.sources.getFrameLocation(youngestFrame);
-    const { originalSourceActor } = this.unsafeSynchronize(
-      this.sources.getOriginalLocation(generatedLocation));
-    const url = originalSourceActor ? originalSourceActor.url : null;
+    const { generatedSourceActor } = this.sources.getFrameLocation(youngestFrame);
+    const url = generatedSourceActor ? generatedSourceActor.url : null;
 
     // We ignore sources without a url because we do not
     // want to pause at console evaluations or watch expressions.
@@ -1950,71 +1930,35 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       }
       sourceActor = this.sources.getSourceActor(source);
     } else {
-      sourceActor = this.sources.createNonSourceMappedActor(source);
+      sourceActor = this.sources.createSourceActor(source);
     }
 
     const bpActors = [...this.breakpointActorMap.findActors()];
 
-    if (this._options.useSourceMaps) {
-      const promises = [];
-
-      // Go ahead and establish the source actors for this script, which
-      // fetches sourcemaps if available and sends onNewSource
-      // notifications.
-      const sourceActorsCreated = this.sources._createSourceMappedActors(source);
-
-      if (bpActors.length) {
-        // We need to use unsafeSynchronize here because if the page is being reloaded,
-        // this call will replace the previous set of source actors for this source
-        // with a new one. If the source actors have not been replaced by the time
-        // we try to reset the breakpoints below, their location objects will still
-        // point to the old set of source actors, which point to different
-        // scripts.
-        this.unsafeSynchronize(sourceActorsCreated);
+    // Bug 1225160: If addSource is called in response to a new script
+    // notification, and this notification was triggered by loading a JSM from
+    // chrome code, calling unsafeSynchronize could cause a debuggee timer to
+    // fire. If this causes the JSM to be loaded a second time, the browser
+    // will crash, because loading JSMS is not reentrant, and the first load
+    // has not completed yet.
+    //
+    // The root of the problem is that unsafeSynchronize can cause debuggee
+    // code to run. Unfortunately, fixing that is prohibitively difficult. The
+    // best we can do at the moment is disable source maps for the browser
+    // debugger, and carefully avoid the use of unsafeSynchronize in this
+    // function when source maps are disabled.
+    for (const actor of bpActors) {
+      if (actor.isPending) {
+        actor.generatedLocation.generatedSourceActor._setBreakpoint(actor);
+      } else {
+        actor.generatedLocation.generatedSourceActor._setBreakpointAtGeneratedLocation(
+          actor, actor.generatedLocation
+        );
       }
+    }
 
-      for (const actor of bpActors) {
-        if (actor.isPending) {
-          promises.push(actor.originalLocation.originalSourceActor._setBreakpoint(actor));
-        } else {
-          promises.push(
-            this.sources.getAllGeneratedLocations(actor.originalLocation).then(
-              (generatedLocations) => {
-                if (generatedLocations.length > 0 &&
-                    generatedLocations[0].generatedSourceActor
-                                         .actorID === sourceActor.actorID) {
-                  sourceActor._setBreakpointAtAllGeneratedLocations(
-                    actor, generatedLocations);
-                }
-              }));
-        }
-      }
-
-      if (promises.length > 0) {
-        this.unsafeSynchronize(Promise.all(promises));
-      }
-    } else {
-      // Bug 1225160: If addSource is called in response to a new script
-      // notification, and this notification was triggered by loading a JSM from
-      // chrome code, calling unsafeSynchronize could cause a debuggee timer to
-      // fire. If this causes the JSM to be loaded a second time, the browser
-      // will crash, because loading JSMS is not reentrant, and the first load
-      // has not completed yet.
-      //
-      // The root of the problem is that unsafeSynchronize can cause debuggee
-      // code to run. Unfortunately, fixing that is prohibitively difficult. The
-      // best we can do at the moment is disable source maps for the browser
-      // debugger, and carefully avoid the use of unsafeSynchronize in this
-      // function when source maps are disabled.
-      for (const actor of bpActors) {
-        if (actor.isPending) {
-          actor.originalLocation.originalSourceActor._setBreakpoint(actor);
-        } else {
-          actor.originalLocation.originalSourceActor._setBreakpointAtGeneratedLocation(
-            actor, GeneratedLocation.fromOriginalLocation(actor.originalLocation)
-          );
-        }
-      }
+    if (this._onLoadBreakpointURLs.has(source.url)) {
+      sourceActor.setBreakpoint(1);
     }
 
     this._debuggerSourcesSeen.add(source);
@@ -2183,7 +2127,7 @@ function findEntryPointsForLine(scripts, line) {
 }
 
 function findPausePointForLocation(pausePoints, location) {
-  const { originalLine: line, originalColumn: column } = location;
+  const { generatedLine: line, generatedColumn: column } = location;
   return pausePoints[line] && pausePoints[line][column];
 }
 
