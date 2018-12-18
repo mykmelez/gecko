@@ -348,6 +348,12 @@ static const bool CompactingEnabled = true;
 static const uint32_t NurseryFreeThresholdForIdleCollection =
     Nursery::NurseryChunkUsableSize / 4;
 
+/* JSGC_PRETENURE_THRESHOLD */
+static const float PretenureThreashold = 0.6f;
+
+/* JSGC_PRETENURE_GROUP_THRESHOLD */
+static const float PretenureGroupThreshold = 3000;
+
 }  // namespace TuningDefaults
 }  // namespace gc
 }  // namespace js
@@ -1260,6 +1266,17 @@ bool GCRuntime::init(uint32_t maxbytes, uint32_t maxNurseryBytes) {
     if (!nursery().init(maxNurseryBytes, lock)) {
       return false;
     }
+
+    const char* pretenureThresholdStr = getenv("JSGC_PRETENURE_THRESHOLD");
+    if (pretenureThresholdStr && pretenureThresholdStr[0]) {
+      char* last;
+      long pretenureThreshold = strtol(pretenureThresholdStr, &last, 10);
+      if (last[0] || !tunables.setParameter(JSGC_PRETENURE_THRESHOLD,
+                                            pretenureThreshold, lock)) {
+        fprintf(stderr, "Invalid value for JSGC_PRETENURE_THRESHOLD: %s\n",
+                pretenureThresholdStr);
+      }
+    }
   }
 
 #ifdef JS_GC_ZEAL
@@ -1464,6 +1481,20 @@ bool GCSchedulingTunables::setParameter(JSGCParamKey key, uint32_t value,
       }
       nurseryFreeThresholdForIdleCollection_ = value;
       break;
+    case JSGC_PRETENURE_THRESHOLD: {
+      // 100 disables pretenuring
+      if (value == 0 || value > 100) {
+        return false;
+      }
+      pretenureThreshold_ = value / 100.0f;
+      break;
+    }
+    case JSGC_PRETENURE_GROUP_THRESHOLD:
+      if (value <= 0) {
+        return false;
+      }
+      pretenureGroupThreshold_ = value;
+      break;
     default:
       MOZ_CRASH("Unknown GC parameter.");
   }
@@ -1551,7 +1582,9 @@ GCSchedulingTunables::GCSchedulingTunables()
       minEmptyChunkCount_(TuningDefaults::MinEmptyChunkCount),
       maxEmptyChunkCount_(TuningDefaults::MaxEmptyChunkCount),
       nurseryFreeThresholdForIdleCollection_(
-          TuningDefaults::NurseryFreeThresholdForIdleCollection) {}
+          TuningDefaults::NurseryFreeThresholdForIdleCollection),
+      pretenureThreshold_(TuningDefaults::PretenureThreashold),
+      pretenureGroupThreshold_(TuningDefaults::PretenureGroupThreshold) {}
 
 void GCRuntime::resetParameter(JSGCParamKey key, AutoLockGC& lock) {
   switch (key) {
@@ -1633,6 +1666,12 @@ void GCSchedulingTunables::resetParameter(JSGCParamKey key,
       nurseryFreeThresholdForIdleCollection_ =
           TuningDefaults::NurseryFreeThresholdForIdleCollection;
       break;
+    case JSGC_PRETENURE_THRESHOLD:
+      pretenureThreshold_ = TuningDefaults::PretenureThreashold;
+      break;
+    case JSGC_PRETENURE_GROUP_THRESHOLD:
+      pretenureGroupThreshold_ = TuningDefaults::PretenureGroupThreshold;
+      break;
     default:
       MOZ_CRASH("Unknown GC parameter.");
   }
@@ -1691,6 +1730,10 @@ uint32_t GCRuntime::getParameter(JSGCParamKey key, const AutoLockGC& lock) {
       return tunables.maxEmptyChunkCount();
     case JSGC_COMPACTING_ENABLED:
       return compactingEnabled;
+    case JSGC_PRETENURE_THRESHOLD:
+      return uint32_t(tunables.pretenureThreshold() * 100);
+    case JSGC_PRETENURE_GROUP_THRESHOLD:
+      return tunables.pretenureGroupThreshold();
     default:
       MOZ_ASSERT(key == JSGC_NUMBER);
       return uint32_t(number);
@@ -5090,12 +5133,10 @@ void js::gc::DelayCrossCompartmentGrayMarking(JSObject* src) {
 }
 
 void GCRuntime::markIncomingCrossCompartmentPointers(MarkColor color) {
-  MOZ_ASSERT(color == MarkColor::Black || color == MarkColor::Gray);
-
-  static const gcstats::PhaseKind statsPhases[] = {
-      gcstats::PhaseKind::SWEEP_MARK_INCOMING_BLACK,
-      gcstats::PhaseKind::SWEEP_MARK_INCOMING_GRAY};
-  gcstats::AutoPhase ap1(stats(), statsPhases[unsigned(color)]);
+  gcstats::AutoPhase ap(
+    stats(),
+    color == MarkColor::Black ? gcstats::PhaseKind::SWEEP_MARK_INCOMING_BLACK
+                              : gcstats::PhaseKind::SWEEP_MARK_INCOMING_GRAY);
 
   bool unlinkList = color == MarkColor::Gray;
 
@@ -5282,7 +5323,7 @@ IncrementalProgress GCRuntime::markGrayReferencesInCurrentGroup(
   }
 #endif
 
-  return marker.markUntilBudgetExhausted(budget) ? Finished : NotFinished;
+  return markUntilBudgetExhausted(budget, gcstats::PhaseKind::SWEEP_MARK_GRAY);
 }
 
 IncrementalProgress GCRuntime::endMarkingSweepGroup(FreeOp* fop,
@@ -7883,8 +7924,13 @@ Realm* js::NewRealm(JSContext* cx, JSPrincipals* principals,
     zone = zoneHolder.get();
   }
 
-  if (!comp) {
-    compHolder = cx->make_unique<JS::Compartment>(zone);
+  bool invisibleToDebugger = options.creationOptions().invisibleToDebugger();
+  if (comp) {
+    // Debugger visibility is per-compartment, not per-realm, so make sure the
+    // new realm's visibility matches its compartment's.
+    MOZ_ASSERT(comp->invisibleToDebugger() == invisibleToDebugger);
+  } else {
+    compHolder = cx->make_unique<JS::Compartment>(zone, invisibleToDebugger);
     if (!compHolder) {
       return nullptr;
     }
