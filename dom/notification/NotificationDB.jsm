@@ -26,8 +26,12 @@ const kMessages = [
 
 // Given its origin and ID, produce the key that uniquely identifies
 // a notification.
-function key(origin, id) {
+function makeKey(origin, id) {
   return origin.concat("\t", id);
+}
+
+function parseKey(key) {
+  return key.split("\t");
 }
 
 var NotificationDB = {
@@ -131,7 +135,7 @@ var NotificationDB = {
       // once the kvstore API supports it (bug 1515096).
       for (const origin in notifications) {
         for (const id in notifications[origin]) {
-          await this._store.put(key(origin, id),
+          await this._store.put(makeKey(origin, id),
             JSON.stringify(notifications[origin][id]));
         }
       }
@@ -150,7 +154,7 @@ var NotificationDB = {
 
     // Read and cache all notification records in the kvstore.
     for (const { key, value } of await this._store.enumerate()) {
-      const [origin, id] = key.split("\t");
+      const [origin, id] = parseKey(key);
       if (!(origin in this.notifications)) {
         this.notifications[origin] = {};
       }
@@ -334,14 +338,14 @@ var NotificationDB = {
       var oldNotification = this.byTag[origin][notification.tag];
       if (oldNotification) {
         delete this.notifications[origin][oldNotification.id];
-        await this._store.delete(key(origin, oldNotification.id));
+        await this._store.delete(makeKey(origin, oldNotification.id));
       }
       this.byTag[origin][notification.tag] = notification;
     }
 
     this.notifications[origin][notification.id] = notification;
 
-    await this._store.put(key(origin, notification.id),
+    await this._store.put(makeKey(origin, notification.id),
       JSON.stringify(notification));
   },
 
@@ -366,7 +370,7 @@ var NotificationDB = {
     }
 
     delete this.notifications[origin][id];
-    await this._store.delete(key(origin, id));
+    await this._store.delete(makeKey(origin, id));
   },
 };
 
