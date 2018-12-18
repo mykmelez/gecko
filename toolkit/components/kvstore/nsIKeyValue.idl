@@ -105,11 +105,11 @@ interface nsIKeyValueDatabase : nsISupports {
 
     /**
      * Enumerate key/value pairs, starting with the first key equal to
-     * or greater than the "from" key and ending with the first key equal to
-     * or greater than the "to" key (inclusive) sorted lexicographically.
+     * or greater than the "from" key (inclusive) and ending with the last key
+     * less than the "to" key (exclusive) sorted lexicographically.
      *
-     * If either or both key is omitted, the range extends to the first
-     * and/or last key in the database.
+     * If either key is omitted, the range extends to the first and/or last key
+     * in the database.
      */
     void enumerate(
         in nsIKeyValueEnumeratorCallback callback,

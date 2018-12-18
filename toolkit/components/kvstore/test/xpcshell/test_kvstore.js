@@ -225,7 +225,7 @@ add_task(async function enumeration() {
     ["string-key", "Héllo, wőrld!"],
   ]);
 
-  // Await test enumeration from a key that doesn't exist and is lexicographically
+  // Test enumeration from a key that doesn't exist and is lexicographically
   // less than the least key in the database, which should enumerate
   // all of the pairs in the database.
   await test("aaaaa", null, [
@@ -235,7 +235,7 @@ add_task(async function enumeration() {
     ["string-key", "Héllo, wőrld!"],
   ]);
 
-  // Await test enumeration from a key that doesn't exist and is lexicographically
+  // Test enumeration from a key that doesn't exist and is lexicographically
   // greater than the first key in the database, which should enumerate pairs
   // whose key is greater than or equal to the specified key.
   await test("ccccc", null, [
@@ -244,20 +244,20 @@ add_task(async function enumeration() {
     ["string-key", "Héllo, wőrld!"],
   ]);
 
-  // Await test enumeration from a key that does exist, which should enumerate pairs
+  // Test enumeration from a key that does exist, which should enumerate pairs
   // whose key is greater than or equal to that key.
   await test("int-key", null, [
     ["int-key", 1234],
     ["string-key", "Héllo, wőrld!"],
   ]);
 
-  // Await test enumeration from a key that doesn't exist and is lexicographically
-  // greater than the greaawait test key in the database, which should enumerate
+  // Test enumeration from a key that doesn't exist and is lexicographically
+  // greater than the greatest test key in the database, which should enumerate
   // none of the pairs in the database.
   await test("zzzzz", null, []);
 
-  // Await test enumeration to a key that doesn't exist and is lexicographically
-  // greater than the greaawait test key in the database, which should enumerate
+  // Test enumeration to a key that doesn't exist and is lexicographically
+  // greater than the greatest test key in the database, which should enumerate
   // all of the pairs in the database.
   await test(null, "zzzzz", [
     ["bool-key", true],
@@ -266,38 +266,38 @@ add_task(async function enumeration() {
     ["string-key", "Héllo, wőrld!"],
   ]);
 
-  // Await test enumeration to a key that doesn't exist and is lexicographically
-  // less than the greaawait test key in the database, which should enumerate pairs
-  // whose key is less than or equal to the specified key.
+  // Test enumeration to a key that doesn't exist and is lexicographically
+  // less than the greatest test key in the database, which should enumerate
+  // pairs whose key is less than the specified key.
   await test(null, "ppppp", [
     ["bool-key", true],
     ["double-key", 56.78],
     ["int-key", 1234],
   ]);
 
-  // Await test enumeration to a key that does exist, which should enumerate pairs
-  // whose key is less than or equal to that key.
+  // Test enumeration to a key that does exist, which should enumerate pairs
+  // whose key is less than that key.
   await test(null, "int-key", [
     ["bool-key", true],
     ["double-key", 56.78],
-    ["int-key", 1234],
   ]);
 
-  // Await test enumeration to a key that doesn't exist and is lexicographically
+  // Test enumeration to a key that doesn't exist and is lexicographically
   // less than the least key in the database, which should enumerate
   // none of the pairs in the database.
   await test(null, "aaaaa", []);
 
-  // Await test enumeration between intermediate keys, which should enumerate
-  // the pairs whose keys lie in between them.
-  await test("int-key", "int-key", [
-    ["int-key", 1234],
-  ]);
+  // Test enumeration between intermediate keys that don't exist, which should
+  // enumerate the pairs whose keys lie in between them.
   await test("ggggg", "ppppp", [
     ["int-key", 1234],
   ]);
 
-  // Await test enumeration from a greater key to a lesser one, which should
+  // Test enumeration from a key that exists to the same key, which shouldn't
+  // enumerate any pairs, because the "to" key is exclusive.
+  await test("int-key", "int-key", []);
+
+  // Test enumeration from a greater key to a lesser one, which should
   // enumerate none of the pairs in the database, even if the reverse ordering
   // would enumerate some pairs.  Consumers are responsible for ordering
   // the "from" and "to" keys such that "from" is less than or equal to "to".
