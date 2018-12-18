@@ -28,10 +28,6 @@ async function createOldDatastore() {
   await OS.File.writeAtomic(OLD_STORE_PATH, JSON.stringify(notifications));
 }
 
-function run_test() {
-  run_next_test();
-}
-
 // Create the old datastore and populate it with data before we initialize
 // the notification database so it has data to migrate.  This is a setup step,
 // not a test, but it seems like we need to do it in a test function

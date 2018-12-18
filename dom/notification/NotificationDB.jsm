@@ -30,10 +30,6 @@ function makeKey(origin, id) {
   return origin.concat("\t", id);
 }
 
-function parseKey(key) {
-  return key.split("\t");
-}
-
 var NotificationDB = {
 
   // Ensure we won't call init() while xpcom-shutdown is performed
