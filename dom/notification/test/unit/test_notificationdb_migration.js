@@ -1,9 +1,9 @@
 "use strict";
 
 const fooNotification =
-  getNotificationObject("foo", "a4f1d54a-98b7-4231-9120-5afc26545bad");
+  getNotificationObject("foo", "a4f1d54a-98b7-4231-9120-5afc26545bad", null, true);
 const barNotification =
-  getNotificationObject("bar", "a4f1d54a-98b7-4231-9120-5afc26545bad", "baz");
+  getNotificationObject("bar", "a4f1d54a-98b7-4231-9120-5afc26545bad", "baz", true);
 const msg = "Notification:GetAll";
 const msgReply = "Notification:GetAll:Return:OK";
 
@@ -29,13 +29,20 @@ async function createOldDatastore() {
 
 function run_test() {
   do_get_profile();
-  // Create the old datastore and populate it with data before we initialize
-  // the notification database so it has data to migrate.
+  run_next_test();
+}
+
+// Create the old datastore and populate it with data before we initialize
+// the notification database so it has data to migrate.  This is a setup step,
+// not a test, but it seems like we need to do it in a test function
+// rather than in run_test() because the test runner doesn't handle async steps
+// in run_test().
+add_test(function test_create_old_datastore() {
   createOldDatastore().then(() => {
     startNotificationDB();
     run_next_test();
   });
-}
+});
 
 add_test(function test_get_system_notification() {
   const requestID = nextRequestID++;
