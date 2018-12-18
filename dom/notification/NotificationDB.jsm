@@ -52,9 +52,6 @@ var NotificationDB = {
       return;
     }
 
-    this.notifications = {};
-    this.byTag = {};
-
     this.tasks = []; // read/write operation queue
     this.runningTask = null;
 
@@ -155,26 +152,6 @@ var NotificationDB = {
     // Migrate data from the old JSON file to the new kvstore if the old file
     // is present in the user's profile directory.
     await this.maybeMigrateData();
-
-    // Read and cache all notification records in the kvstore.
-    for (const { key, value } of await this._store.enumerate()) {
-      const [origin, id] = parseKey(key);
-      if (!(origin in this.notifications)) {
-        this.notifications[origin] = {};
-      }
-      this.notifications[origin][id] = JSON.parse(value);
-    }
-
-    // Build an index of notifications by tag origin and name.
-    for (var origin in this.notifications) {
-      this.byTag[origin] = {};
-      for (var id in this.notifications[origin]) {
-        var curNotification = this.notifications[origin][id];
-        if (curNotification.tag) {
-          this.byTag[origin][curNotification.tag] = curNotification;
-        }
-      }
-    }
   },
 
   // Helper function: promise will be resolved once file exists and/or is loaded.
@@ -312,47 +289,46 @@ var NotificationDB = {
     });
   },
 
-  taskGetAll(data) {
+  enumerate(origin) {
+    // The "from" and "to" key parameters to nsIKeyValueStore.enumerate()
+    // are inclusive and exclusive, respectively, and keys are tuples
+    // of origin and ID joined by a tab (\t), which is character code 9;
+    // so enumerating ["origin", "origin\n"), where the line feed (\n)
+    // is character code 10, enumerates all pairs with the given origin.
+    return this._store.enumerate(origin, `${origin}\n`);
+  },
+
+  async taskGetAll(data) {
     if (DEBUG) { debug("Task, getting all"); }
     var origin = data.origin;
     var notifications = [];
-    // Grab only the notifications for specified origin.
-    if (this.notifications[origin]) {
-      if (data.tag) {
-        let n;
-        if ((n = this.byTag[origin][data.tag])) {
-          notifications.push(n);
-        }
-      } else {
-        for (var i in this.notifications[origin]) {
-          notifications.push(this.notifications[origin][i]);
-        }
-      }
+
+    for (const {value} of await this.enumerate(origin)) {
+      notifications.push(JSON.parse(value));
     }
-    return Promise.resolve(notifications);
+
+    if (data.tag) {
+      notifications = notifications.filter(n => n.tag === data.tag);
+    }
+
+    return notifications;
   },
 
   async taskSave(data) {
     if (DEBUG) { debug("Task, saving"); }
     var origin = data.origin;
     var notification = data.notification;
-    if (!this.notifications[origin]) {
-      this.notifications[origin] = {};
-      this.byTag[origin] = {};
-    }
 
     // We might have existing notification with this tag,
     // if so we need to remove it before saving the new one.
     if (notification.tag) {
-      var oldNotification = this.byTag[origin][notification.tag];
-      if (oldNotification) {
-        delete this.notifications[origin][oldNotification.id];
-        await this._store.delete(makeKey(origin, oldNotification.id));
+      for (const {key, value} of await this.enumerate(origin)) {
+        const oldNotification = JSON.parse(value);
+        if (oldNotification.tag === notification.tag) {
+          await this._store.delete(key);
+        }
       }
-      this.byTag[origin][notification.tag] = notification;
     }
-
-    this.notifications[origin][notification.id] = notification;
 
     await this._store.put(makeKey(origin, notification.id),
       JSON.stringify(notification));
@@ -360,26 +336,7 @@ var NotificationDB = {
 
   async taskDelete(data) {
     if (DEBUG) { debug("Task, deleting"); }
-    var origin = data.origin;
-    var id = data.id;
-    if (!this.notifications[origin]) {
-      if (DEBUG) { debug("No notifications found for origin: " + origin); }
-      return;
-    }
-
-    // Make sure we can find the notification to delete.
-    var oldNotification = this.notifications[origin][id];
-    if (!oldNotification) {
-      if (DEBUG) { debug("No notification found with id: " + id); }
-      return;
-    }
-
-    if (oldNotification.tag) {
-      delete this.byTag[origin][oldNotification.tag];
-    }
-
-    delete this.notifications[origin][id];
-    await this._store.delete(makeKey(origin, id));
+    await this._store.delete(makeKey(data.origin, data.id));
   },
 };
 
