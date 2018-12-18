@@ -240,7 +240,7 @@ impl Task for PutTask {
                 OwnedValue::Str(ref val) => Value::Str(&val),
             };
 
-            writer.put(&self.store, key, &value)?;
+            writer.put(self.store, key, &value)?;
             writer.commit()?;
 
             Ok(())
@@ -298,7 +298,7 @@ impl Task for GetTask {
                 let key = str::from_utf8(&self.key)?;
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
-                let value = reader.get(&self.store, key)?;
+                let value = reader.get(self.store, key)?;
 
                 // TODO: refactor with value_to_owned in owned_value.rs.
                 Ok(match value {
@@ -355,7 +355,7 @@ impl Task for HasTask {
             let key = str::from_utf8(&self.key)?;
             let env = self.rkv.read()?;
             let reader = env.read()?;
-            let value = reader.get(&self.store, key)?;
+            let value = reader.get(self.store, key)?;
             Ok(value.is_some())
         }()));
     }
@@ -397,7 +397,7 @@ impl Task for DeleteTask {
             let env = self.rkv.read()?;
             let mut writer = env.write()?;
 
-            match writer.delete(&self.store, key) {
+            match writer.delete(self.store, key) {
                 Ok(_) => (),
 
                 // LMDB fails with an error if the key to delete wasn't found,
@@ -469,9 +469,9 @@ impl Task for EnumerateTask {
                 let to_key = str::from_utf8(&self.to_key)?;
 
                 let iterator = if from_key.is_empty() {
-                    reader.iter_start(&self.store)?
+                    reader.iter_start(self.store)?
                 } else {
-                    reader.iter_from(&self.store, &from_key)?
+                    reader.iter_from(self.store, &from_key)?
                 };
 
                 // Ideally, we'd enumerate pairs lazily, as the consumer calls
