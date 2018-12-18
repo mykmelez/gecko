@@ -199,7 +199,7 @@ dom/media/webspeech/**
 dom/messagechannel/**
 dom/midi/**
 dom/network/**
-dom/notification/Notification*.*
+dom/notification/NotificationStorage.js
 dom/notification/test/browser/**
 dom/notification/test/mochitest/**
 dom/payments/**
