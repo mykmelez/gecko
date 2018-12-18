@@ -1735,6 +1735,19 @@ telemetry:
     record_in_processes:
       - 'main'
 
+  about_telemetry_pageload:
+    bug_numbers:
+      - 1512503
+    description: >
+      The number of times about:telemetry was loaded.
+    expires: "70"
+    kind: uint
+    notification_emails:
+      - chutten@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
 telemetry.discarded:
   accumulations:
     bug_numbers:
@@ -2321,6 +2334,22 @@ browser.search:
     release_channel_collection: opt-out
     record_in_processes:
       - main
+
+encoding:
+  override_used:
+    bug_numbers:
+      - 840476
+      - 1513473
+    description: >-
+      Whether the Text Encoding menu was used to override an encoding in this subsession.
+    expires: "69"
+    kind: boolean
+    notification_emails:
+      - hsivonen@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+      - content
 
 # The following section is for probes testing the Telemetry system. They will not be
 # submitted in pings and are only used for testing.

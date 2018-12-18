@@ -4,8 +4,8 @@
 
 use api::{AlphaType, BorderRadius, ClipMode, ColorF, PictureRect, ColorU, LayoutVector2D};
 use api::{DeviceIntRect, DeviceIntSize, DevicePixelScale, DeviceRect, LayoutSideOffsetsAu};
-use api::{FilterOp, ImageKey, ImageRendering, TileOffset, RepeatMode};
-use api::{LayoutPoint, LayoutRect, LayoutSideOffsets, LayoutSize};
+use api::{FilterOp, ImageKey, ImageRendering, TileOffset, RepeatMode, MixBlendMode};
+use api::{LayoutPoint, LayoutRect, LayoutSideOffsets, LayoutSize, PropertyBindingId};
 use api::{PremultipliedColorF, PropertyBinding, Shadow, YuvColorSpace, YuvFormat};
 use api::{DeviceIntSideOffsets, WorldPixel, BoxShadowClipMode, NormalBorder, WorldRect, LayoutToWorldScale};
 use api::{PicturePixel, RasterPixel, ColorDepth, LineStyle, LineOrientation, LayoutSizeAu, AuHelpers};
@@ -26,7 +26,7 @@ use gpu_types::BrushFlags;
 use image::{self, Repetition};
 use intern;
 use picture::{PictureCompositeMode, PicturePrimitive, PictureUpdateState, TileCacheUpdateState};
-use picture::{ClusterRange, PrimitiveList, SurfaceIndex, SurfaceInfo, RetainedTiles};
+use picture::{ClusterRange, PrimitiveList, SurfaceIndex, SurfaceInfo, RetainedTiles, RasterConfig};
 use prim_store::gradient::{LinearGradientDataHandle, RadialGradientDataHandle};
 use prim_store::text_run::{TextRunDataHandle, TextRunPrimitive};
 #[cfg(debug_assertions)]
@@ -342,17 +342,122 @@ pub struct PrimitiveSceneData {
     pub is_backface_visible: bool,
 }
 
+/// Represents a hashable description of how a picture primitive
+/// will be composited into its parent.
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
+pub enum PictureCompositeKey {
+    // No visual compositing effect
+    Identity,
+
+    // FilterOp
+    Blur(Au),
+    Brightness(Au),
+    Contrast(Au),
+    Grayscale(Au),
+    HueRotate(Au),
+    Invert(Au),
+    Opacity(Au),
+    OpacityBinding(PropertyBindingId, Au),
+    Saturate(Au),
+    Sepia(Au),
+    DropShadow(VectorKey, Au, ColorU),
+    ColorMatrix([Au; 20]),
+    SrgbToLinear,
+    LinearToSrgb,
+
+    // MixBlendMode
+    Multiply,
+    Screen,
+    Overlay,
+    Darken,
+    Lighten,
+    ColorDodge,
+    ColorBurn,
+    HardLight,
+    SoftLight,
+    Difference,
+    Exclusion,
+    Hue,
+    Saturation,
+    Color,
+    Luminosity,
+}
+
+impl From<Option<PictureCompositeMode>> for PictureCompositeKey {
+    fn from(mode: Option<PictureCompositeMode>) -> Self {
+        match mode {
+            Some(PictureCompositeMode::MixBlend(mode)) => {
+                match mode {
+                    MixBlendMode::Normal => PictureCompositeKey::Identity,
+                    MixBlendMode::Multiply => PictureCompositeKey::Multiply,
+                    MixBlendMode::Screen => PictureCompositeKey::Screen,
+                    MixBlendMode::Overlay => PictureCompositeKey::Overlay,
+                    MixBlendMode::Darken => PictureCompositeKey::Darken,
+                    MixBlendMode::Lighten => PictureCompositeKey::Lighten,
+                    MixBlendMode::ColorDodge => PictureCompositeKey::ColorDodge,
+                    MixBlendMode::ColorBurn => PictureCompositeKey::ColorBurn,
+                    MixBlendMode::HardLight => PictureCompositeKey::HardLight,
+                    MixBlendMode::SoftLight => PictureCompositeKey::SoftLight,
+                    MixBlendMode::Difference => PictureCompositeKey::Difference,
+                    MixBlendMode::Exclusion => PictureCompositeKey::Exclusion,
+                    MixBlendMode::Hue => PictureCompositeKey::Hue,
+                    MixBlendMode::Saturation => PictureCompositeKey::Saturation,
+                    MixBlendMode::Color => PictureCompositeKey::Color,
+                    MixBlendMode::Luminosity => PictureCompositeKey::Luminosity,
+                }
+            }
+            Some(PictureCompositeMode::Filter(op)) => {
+                match op {
+                    FilterOp::Blur(value) => PictureCompositeKey::Blur(Au::from_f32_px(value)),
+                    FilterOp::Brightness(value) => PictureCompositeKey::Brightness(Au::from_f32_px(value)),
+                    FilterOp::Contrast(value) => PictureCompositeKey::Contrast(Au::from_f32_px(value)),
+                    FilterOp::Grayscale(value) => PictureCompositeKey::Grayscale(Au::from_f32_px(value)),
+                    FilterOp::HueRotate(value) => PictureCompositeKey::HueRotate(Au::from_f32_px(value)),
+                    FilterOp::Invert(value) => PictureCompositeKey::Invert(Au::from_f32_px(value)),
+                    FilterOp::Saturate(value) => PictureCompositeKey::Saturate(Au::from_f32_px(value)),
+                    FilterOp::Sepia(value) => PictureCompositeKey::Sepia(Au::from_f32_px(value)),
+                    FilterOp::SrgbToLinear => PictureCompositeKey::SrgbToLinear,
+                    FilterOp::LinearToSrgb => PictureCompositeKey::LinearToSrgb,
+                    FilterOp::Identity => PictureCompositeKey::Identity,
+                    FilterOp::DropShadow(offset, radius, color) => {
+                        PictureCompositeKey::DropShadow(offset.into(), Au::from_f32_px(radius), color.into())
+                    }
+                    FilterOp::Opacity(binding, _) => {
+                        match binding {
+                            PropertyBinding::Value(value) => {
+                                PictureCompositeKey::Opacity(Au::from_f32_px(value))
+                            }
+                            PropertyBinding::Binding(key, default) => {
+                                PictureCompositeKey::OpacityBinding(key.id, Au::from_f32_px(default))
+                            }
+                        }
+                    }
+                    FilterOp::ColorMatrix(values) => {
+                        let mut quantized_values: [Au; 20] = [Au(0); 20];
+                        for (value, result) in values.iter().zip(quantized_values.iter_mut()) {
+                            *result = Au::from_f32_px(*value);
+                        }
+                        PictureCompositeKey::ColorMatrix(quantized_values)
+                    }
+                }
+            }
+            Some(PictureCompositeMode::Blit) |
+            Some(PictureCompositeMode::TileCache { .. }) |
+            None => {
+                PictureCompositeKey::Identity
+            }
+        }
+    }
+}
+
 /// Information specific to a primitive type that
 /// uniquely identifies a primitive template by key.
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum PrimitiveKeyKind {
-    /// Pictures and old style (non-interned) primitives specify the
-    /// Unused primitive key kind. In the future it might make sense
-    /// to instead have Option<PrimitiveKeyKind>. It should become
-    /// clearer as we port more primitives to be interned.
-    Unused,
     /// Identifying key for a line decoration.
     LineDecoration {
         // If the cache_key is Some(..) it is a line decoration
@@ -390,6 +495,9 @@ pub enum PrimitiveKeyKind {
         sub_rect: Option<DeviceIntRect>,
         image_rendering: ImageRendering,
         alpha_type: AlphaType,
+    },
+    Picture {
+        composite_mode_key: PictureCompositeKey,
     },
 }
 
@@ -645,6 +753,8 @@ impl PrimitiveKey {
     }
 }
 
+impl intern::InternDebug for PrimitiveKey {}
+
 impl AsInstanceKind<PrimitiveDataHandle> for PrimitiveKey {
     /// Construct a primitive instance that matches the type
     /// of primitive key.
@@ -703,9 +813,9 @@ impl AsInstanceKind<PrimitiveDataHandle> for PrimitiveKey {
                     image_instance_index,
                 }
             }
-            PrimitiveKeyKind::Unused => {
+            PrimitiveKeyKind::Picture { .. } => {
                 // Should never be hit as this method should not be
-                // called for old style primitives.
+                // called for pictures.
                 unreachable!();
             }
         }
@@ -758,7 +868,9 @@ pub enum PrimitiveTemplateKind {
         alpha_type: AlphaType,
     },
     Clear,
-    Unused,
+    Picture {
+
+    },
 }
 
 /// Construct the primitive template data from a primitive key. This
@@ -770,7 +882,11 @@ impl PrimitiveKeyKind {
         size: LayoutSize,
     ) -> PrimitiveTemplateKind {
         match self {
-            PrimitiveKeyKind::Unused => PrimitiveTemplateKind::Unused,
+            PrimitiveKeyKind::Picture { .. } => {
+                PrimitiveTemplateKind::Picture {
+
+                }
+            }
             PrimitiveKeyKind::Clear => {
                 PrimitiveTemplateKind::Clear
             }
@@ -962,11 +1078,11 @@ impl PrimitiveTemplateKind {
                     }
                 }
             }
-            PrimitiveTemplateKind::YuvImage { color_depth, .. } => {
+            PrimitiveTemplateKind::YuvImage { color_depth, format, color_space, .. } => {
                 request.push([
                     color_depth.rescaling_factor(),
-                    0.0,
-                    0.0,
+                    pack_as_float(color_space as u32),
+                    pack_as_float(format as u32),
                     0.0
                 ]);
             }
@@ -982,7 +1098,7 @@ impl PrimitiveTemplateKind {
                     0.0,
                 ]);
             }
-            PrimitiveTemplateKind::Unused => {}
+            PrimitiveTemplateKind::Picture { .. } => {}
         }
     }
 
@@ -1014,7 +1130,7 @@ impl PrimitiveTemplateKind {
             PrimitiveTemplateKind::Image { .. } |
             PrimitiveTemplateKind::Rectangle { .. } |
             PrimitiveTemplateKind::YuvImage { .. } |
-            PrimitiveTemplateKind::Unused => {}
+            PrimitiveTemplateKind::Picture { .. } => {}
         }
     }
 }
@@ -1223,7 +1339,7 @@ impl PrimitiveTemplate {
                     }
                 }
             }
-            PrimitiveTemplateKind::Unused => {
+            PrimitiveTemplateKind::Picture { .. } => {
                 PrimitiveOpacity::translucent()
             }
         };
@@ -1719,7 +1835,7 @@ impl IsVisible for PrimitiveKeyKind {
             PrimitiveKeyKind::YuvImage { .. } |
             PrimitiveKeyKind::Image { .. } |
             PrimitiveKeyKind::Clear |
-            PrimitiveKeyKind::Unused => {
+            PrimitiveKeyKind::Picture { .. } => {
                 true
             }
             PrimitiveKeyKind::Rectangle { ref color, .. } |
@@ -1770,7 +1886,7 @@ impl CreateShadow for PrimitiveKeyKind {
             }
             PrimitiveKeyKind::ImageBorder { .. } |
             PrimitiveKeyKind::YuvImage { .. } |
-            PrimitiveKeyKind::Unused |
+            PrimitiveKeyKind::Picture { .. } |
             PrimitiveKeyKind::Clear => {
                 panic!("bug: this prim is not supported in shadow contexts");
             }
@@ -2120,6 +2236,13 @@ impl PrimitiveStore {
         }
     }
 
+    #[allow(unused)]
+    pub fn print_picture_tree(&self, root: PictureIndex) {
+        use print_tree::PrintTree;
+        let mut pt = PrintTree::new("picture tree");
+        self.pictures[root.0].print(&self.pictures, root, &mut pt);
+    }
+
     /// Destroy an existing primitive store. This is called just before
     /// a primitive store is replaced with a newly built scene.
     pub fn destroy(
@@ -2194,7 +2317,12 @@ impl PrimitiveStore {
     ) {
         let children = {
             let pic = &mut self.pictures[pic_index.0];
-            if let Some(PictureCompositeMode::TileCache { .. }) = pic.requested_composite_mode {
+            // Only update the tile cache if we ended up selecting tile caching for the
+            // composite mode of this picture. In some cases, even if the requested
+            // composite mode was tile caching, WR may choose not to draw this picture
+            // with tile cache enabled. For now, this is only in the case of very large
+            // picture rects, but in future we may do it for performance reasons too.
+            if let Some(RasterConfig { composite_mode: PictureCompositeMode::TileCache { .. }, .. }) = pic.raster_config {
                 debug_assert!(state.tile_cache.is_none());
                 let mut tile_cache = pic.tile_cache.take().unwrap();
 
@@ -2246,7 +2374,7 @@ impl PrimitiveStore {
         }
 
         let pic = &mut self.pictures[pic_index.0];
-        if let Some(PictureCompositeMode::TileCache { .. }) = pic.requested_composite_mode {
+        if let Some(RasterConfig { composite_mode: PictureCompositeMode::TileCache { .. }, .. }) = pic.raster_config {
             let mut tile_cache = state.tile_cache.take().unwrap().0;
 
             // Build the dirty region(s) for this tile cache.
@@ -2561,7 +2689,7 @@ impl PrimitiveStore {
                     frame_state.resource_cache,
                     frame_context.device_pixel_scale,
                     &pic_context.dirty_world_rect,
-                    &clip_node_collector,
+                    clip_node_collector.as_ref(),
                     &mut resources.clip_data_store,
                 );
 
@@ -2621,7 +2749,7 @@ impl PrimitiveStore {
                 pic_state,
                 frame_context,
                 frame_state,
-                &clip_node_collector,
+                clip_node_collector.as_ref(),
                 self,
                 resources,
                 scratch,
@@ -3580,7 +3708,7 @@ impl PrimitiveInstance {
         pic_state: &mut PictureState,
         frame_context: &FrameBuildingContext,
         frame_state: &mut FrameBuildingState,
-        clip_node_collector: &Option<ClipNodeCollector>,
+        clip_node_collector: Option<&ClipNodeCollector>,
         prim_store: &PrimitiveStore,
         resources: &mut FrameResources,
         scratch: &mut PrimitiveScratchBuffer,
@@ -3748,7 +3876,7 @@ impl PrimitiveInstance {
         pic_state: &mut PictureState,
         frame_context: &FrameBuildingContext,
         frame_state: &mut FrameBuildingState,
-        clip_node_collector: &Option<ClipNodeCollector>,
+        clip_node_collector: Option<&ClipNodeCollector>,
         prim_store: &mut PrimitiveStore,
         resources: &mut FrameResources,
         scratch: &mut PrimitiveScratchBuffer,

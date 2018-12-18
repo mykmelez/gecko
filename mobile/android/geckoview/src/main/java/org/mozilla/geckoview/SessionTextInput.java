@@ -499,6 +499,7 @@ public final class SessionTextInput {
      *              AUTOFILL_FLAG_*} constants.
      */
     @TargetApi(23)
+    @UiThread
     public void onProvideAutofillVirtualStructure(@NonNull final ViewStructure structure,
                                                   final int flags) {
         final View view = getView();
@@ -532,6 +533,7 @@ public final class SessionTextInput {
      *
      * @param values Map of auto-fill IDs to values.
      */
+    @UiThread
     public void autofill(final SparseArray<CharSequence> values) {
         if (mAutoFillRoots == null) {
             return;
@@ -652,6 +654,7 @@ public final class SessionTextInput {
         }
 
         if (Build.VERSION.SDK_INT >= 26 && "INPUT".equals(tag)) {
+            // LastPass will fill password to the feild that setAutofillHints is unset and setInputType is set.
             switch (type) {
                 case "email":
                     structure.setAutofillHints(new String[] { View.AUTOFILL_HINT_EMAIL_ADDRESS });
@@ -670,13 +673,17 @@ public final class SessionTextInput {
                     structure.setAutofillHints(new String[] { View.AUTOFILL_HINT_PHONE });
                     structure.setInputType(InputType.TYPE_CLASS_PHONE);
                     break;
-                case "text":
-                    structure.setInputType(InputType.TYPE_CLASS_TEXT |
-                                           InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT);
-                    break;
                 case "url":
                     structure.setInputType(InputType.TYPE_CLASS_TEXT |
                                            InputType.TYPE_TEXT_VARIATION_URI);
+                    break;
+                case "text":
+                    final String autofillhint = bundle.getString("autofillhint", "");
+                    if (autofillhint.equals("username")) {
+                        structure.setAutofillHints(new String[] { View.AUTOFILL_HINT_USERNAME });
+                        structure.setInputType(InputType.TYPE_CLASS_TEXT |
+                                               InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT);
+                    }
                     break;
             }
         }
