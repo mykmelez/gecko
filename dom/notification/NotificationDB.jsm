@@ -112,8 +112,8 @@ var NotificationDB = {
       if (DEBUG) { debug("Failed to read old store; not migrating data."); }
       return;
     } finally {
-      // TODO: consider deleting the file so we don't try (and fail)
-      // to migrate it repeatedly.
+      // Finally, delete the old file so we don't try to migrate it again.
+      await OS.File.remove(oldStore.path);
     }
 
     if (data.length > 0) {
@@ -136,9 +136,6 @@ var NotificationDB = {
         }
       }
     }
-
-    // Finally, remove the old file so we don't try to migrate it again.
-    await OS.File.remove(oldStore.path);
   },
 
   // Attempt to read notification file, if it's not there we will create it.

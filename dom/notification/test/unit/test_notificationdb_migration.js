@@ -1,5 +1,7 @@
 "use strict";
 
+ChromeUtils.import("resource://gre/modules/osfile.jsm");
+
 const fooNotification =
   getNotificationObject("foo", "a4f1d54a-98b7-4231-9120-5afc26545bad", null, true);
 const barNotification =
@@ -7,13 +9,13 @@ const barNotification =
 const msg = "Notification:GetAll";
 const msgReply = "Notification:GetAll:Return:OK";
 
+do_get_profile();
+const OLD_STORE_PATH =
+    OS.Path.join(OS.Constants.Path.profileDir, "notificationstore.json");
+
 let nextRequestID = 0;
 
 async function createOldDatastore() {
-  ChromeUtils.import("resource://gre/modules/osfile.jsm");
-  const OLD_NOTIFICATION_STORE_PATH =
-    OS.Path.join(OS.Constants.Path.profileDir, "notificationstore.json");
-
   const notifications = {
     [fooNotification.origin]: {
       [fooNotification.id]: fooNotification,
@@ -23,12 +25,10 @@ async function createOldDatastore() {
     },
   };
 
-  await OS.File.writeAtomic(OLD_NOTIFICATION_STORE_PATH,
-    JSON.stringify(notifications));
+  await OS.File.writeAtomic(OLD_STORE_PATH, JSON.stringify(notifications));
 }
 
 function run_test() {
-  do_get_profile();
   run_next_test();
 }
 
@@ -37,11 +37,9 @@ function run_test() {
 // not a test, but it seems like we need to do it in a test function
 // rather than in run_test() because the test runner doesn't handle async steps
 // in run_test().
-add_test(function test_create_old_datastore() {
-  createOldDatastore().then(() => {
-    startNotificationDB();
-    run_next_test();
-  });
+add_task(async function test_create_old_datastore() {
+  await createOldDatastore();
+  startNotificationDB();
 });
 
 add_test(function test_get_system_notification() {
@@ -85,4 +83,9 @@ add_test(function test_get_bar_notification() {
     origin: barNotification.origin,
     requestID,
   });
+});
+
+add_task(async function test_old_datastore_deleted() {
+    Assert.ok(!await OS.File.exists(OLD_STORE_PATH),
+      "old datastore no longer exists");
 });
