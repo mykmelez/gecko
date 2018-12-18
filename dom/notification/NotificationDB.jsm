@@ -9,21 +9,14 @@ var EXPORTED_SYMBOLS = [];
 const DEBUG = false;
 function debug(s) { dump("-*- NotificationDB component: " + s + "\n"); }
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-XPCOMUtils.defineLazyModuleGetters(this, {
-  KeyValueService: "resource://gre/modules/kvstore.jsm",
-});
+// Import Services eagerly because we use it immediately to add an observer
+// for xpcom-shutdown.
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-ChromeUtils.import("resource://gre/modules/osfile.jsm");
-
-ChromeUtils.defineModuleGetter(this, "Services",
-                               "resource://gre/modules/Services.jsm");
-
-const NOTIFICATION_STORE_DIR = OS.Constants.Path.profileDir;
-const OLD_NOTIFICATION_STORE_PATH =
-        OS.Path.join(NOTIFICATION_STORE_DIR, "notificationstore.json");
-const NOTIFICATION_STORE_PATH =
-        OS.Path.join(NOTIFICATION_STORE_DIR, "notificationstore");
+// Import all other modules lazily.
+ChromeUtils.defineModuleGetter(this, "FileUtils", "resource://gre/modules/FileUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "KeyValueService", "resource://gre/modules/kvstore.jsm");
+ChromeUtils.defineModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
 
 const kMessages = [
   "Notification:Save",
@@ -102,14 +95,18 @@ var NotificationDB = {
   },
 
   async maybeMigrateData() {
-    if (!await OS.File.exists(OLD_NOTIFICATION_STORE_PATH)) {
+    // We avoid using OS.File until we know we're going to migrate data
+    // to avoid the performance cost of loading that module.
+    const oldStore = FileUtils.getFile("ProfD", ["notificationstore.json"]);
+
+    if (!oldStore.exists()) {
       if (DEBUG) { debug("Old store doesn't exist; not migrating data."); }
       return;
     }
 
     let data;
     try {
-      data = await OS.File.read(OLD_NOTIFICATION_STORE_PATH, { encoding: "utf-8"});
+      data = await OS.File.read(oldStore.path, { encoding: "utf-8"});
     } catch (ex) {
       // If read failed, we assume we have no notifications to migrate.
       if (DEBUG) { debug("Failed to read old store; not migrating data."); }
@@ -141,14 +138,14 @@ var NotificationDB = {
     }
 
     // Finally, remove the old file so we don't try to migrate it again.
-    await OS.File.remove(OLD_NOTIFICATION_STORE_PATH);
+    await OS.File.remove(oldStore.path);
   },
 
   // Attempt to read notification file, if it's not there we will create it.
   async load() {
     // Get and cache a handle to the kvstore.
-    await OS.File.makeDir(NOTIFICATION_STORE_PATH);
-    this._store = await KeyValueService.getOrCreate(NOTIFICATION_STORE_PATH);
+    const dir = FileUtils.getDir("ProfD", ["notificationstore"], true);
+    this._store = await KeyValueService.getOrCreate(dir.path);
 
     // Migrate data from the old JSON file to the new kvstore if the old file
     // is present in the user's profile directory.
