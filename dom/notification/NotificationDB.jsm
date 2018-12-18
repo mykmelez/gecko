@@ -42,6 +42,11 @@ var NotificationDB = {
   // A handle to the kvstore, retrieved lazily when we load the data.
   _store: null,
 
+  // A promise that resolves once the store has been loaded.
+  // The promise doesn't resolve to a value; it merely captures the state
+  // of the load via its resolution.
+  _loadPromise: null,
+
   init() {
     if (this._shutdownInProgress) {
       return;
@@ -49,7 +54,6 @@ var NotificationDB = {
 
     this.notifications = {};
     this.byTag = {};
-    this.loaded = false;
 
     this.tasks = []; // read/write operation queue
     this.runningTask = null;
@@ -171,16 +175,14 @@ var NotificationDB = {
         }
       }
     }
-
-    this.loaded = true;
   },
 
   // Helper function: promise will be resolved once file exists and/or is loaded.
   ensureLoaded() {
-    if (!this.loaded) {
-      return this.load();
+    if (!this._loadPromise) {
+      this._loadPromise = this.load();
     }
-    return Promise.resolve();
+    return this._loadPromise;
   },
 
   receiveMessage(message) {
