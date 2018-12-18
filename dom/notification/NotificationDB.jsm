@@ -128,7 +128,7 @@ var NotificationDB = {
 
       // Copy the data from the JSON file to the kvstore.
       // TODO: use a transaction to improve the performance of these operations
-      // once the kvstore API supports it.
+      // once the kvstore API supports it (bug 1515096).
       for (const origin in notifications) {
         for (const id in notifications[origin]) {
           await this._store.put(key(origin, id),
