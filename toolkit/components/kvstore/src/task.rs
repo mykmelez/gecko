@@ -495,7 +495,7 @@ impl Task for EnumerateTask {
                             true
                         } else {
                             match *key {
-                                Ok(key) => key <= to_key,
+                                Ok(key) => key < to_key,
                                 Err(_err) => true,
                             }
                         }
