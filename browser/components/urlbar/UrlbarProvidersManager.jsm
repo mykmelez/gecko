@@ -15,7 +15,9 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
   Log: "resource://gre/modules/Log.jsm",
   PlacesUtils: "resource://modules/PlacesUtils.jsm",
+  UrlbarMuxer: "resource:///modules/UrlbarUtils.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
+  UrlbarProvider: "resource:///modules/UrlbarUtils.jsm",
   UrlbarTokenizer: "resource:///modules/UrlbarTokenizer.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
 });
@@ -81,9 +83,7 @@ class ProvidersManager {
    * @param {object} provider
    */
   registerProvider(provider) {
-    if (!provider || !provider.name ||
-        (typeof provider.startQuery != "function") ||
-        (typeof provider.cancelQuery != "function")) {
+    if (!provider || !(provider instanceof UrlbarProvider)) {
       throw new Error(`Trying to register an invalid provider`);
     }
     if (!Object.values(UrlbarUtils.PROVIDER_TYPE).includes(provider.type)) {
@@ -107,7 +107,7 @@ class ProvidersManager {
    * @param {object} muxer a UrlbarMuxer object
    */
   registerMuxer(muxer) {
-    if (!muxer || !muxer.name || (typeof muxer.sort != "function")) {
+    if (!muxer || !(muxer instanceof UrlbarMuxer)) {
       throw new Error(`Trying to register an invalid muxer`);
     }
     logger.info(`Registering muxer ${muxer.name}`);
@@ -304,6 +304,9 @@ class Query {
    * @param {object} match
    */
   add(provider, match) {
+    if (!(provider instanceof UrlbarProvider)) {
+      throw new Error("Invalid provider passed to the add callback");
+    }
     // Stop returning results as soon as we've been canceled.
     if (this.canceled || !this.acceptableSources.includes(match.source)) {
       return;
@@ -325,8 +328,9 @@ class Query {
         delete this._chunkTimer;
       }
       this.muxer.sort(this.context);
+
       // Crop results to the requested number.
-      logger.debug(`Cropping ${this.context.results.length} matches to ${this.context.maxResults.length}`);
+      logger.debug(`Cropping ${this.context.results.length} matches to ${this.context.maxResults}`);
       this.context.results = this.context.results.slice(0, this.context.maxResults);
       this.controller.receiveResults(this.context);
     };
@@ -460,13 +464,15 @@ function getAcceptableMatchSources(context) {
         }
         break;
       case UrlbarUtils.MATCH_SOURCE.OTHER_NETWORK:
-        if (!context.isPrivate) {
+        if (!context.isPrivate && !restrictTokenType) {
           acceptedSources.push(source);
         }
         break;
       case UrlbarUtils.MATCH_SOURCE.OTHER_LOCAL:
       default:
-        acceptedSources.push(source);
+        if (!restrictTokenType) {
+          acceptedSources.push(source);
+        }
         break;
     }
   }

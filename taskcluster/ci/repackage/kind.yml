@@ -32,6 +32,7 @@ only-for-build-platforms:
     - win32/opt
     - win64-nightly/opt
     - win64-devedition-nightly/opt
+    - win64-aarch64-msvc-nightly/opt
     - win64/opt
     - win64-asan-reporter-nightly/opt
 
@@ -55,9 +56,8 @@ job-template:
                     - repackage/base.py
                     - repackage/win64_signed.py
     package-formats:
-        by-project:
-            # Build bz2 mar's on try to excerise the code
-            (mozilla-esr60|try):
+        by-release-type:
+            esr60:
                 by-build-platform:
                     linux.*: [mar, mar-bz2]
                     linux4\b.*: [mar, mar-bz2]

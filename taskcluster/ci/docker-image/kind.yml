@@ -38,6 +38,7 @@ jobs:
       - deb7-python3.5
       - deb7-python3-defaults
       - deb7-python-zstandard
+      - deb7-sqlite3
       - deb7-xz-utils
   toolchain-build:
     symbol: I(toolchain)
@@ -45,6 +46,9 @@ jobs:
     packages:
       - deb7-cmake
       - deb7-ninja
+  custom-v8:
+    symbol: I(custom-v8)
+    parent: debian9-base
   debian7-amd64-build-base:
     symbol: I(deb7-bb)
     parent: debian7-base
@@ -149,3 +153,6 @@ jobs:
     symbol: I(pip)
   firefox-snap:
     symbol: I(snap)
+  webrender:
+    symbol: I(webrender)
+    parent: debian9-base

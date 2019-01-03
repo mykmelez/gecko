@@ -220,7 +220,7 @@ interface nsIDOMWindowUtils : nsISupports {
    */
   void setResolutionAndScaleTo(in float aResolution);
 
-  void getResolution(out float aResolution);
+  float getResolution();
 
   /**
    * Set a resolution on the presShell which is the "restored" from history.
@@ -233,15 +233,6 @@ interface nsIDOMWindowUtils : nsISupports {
   void setRestoreResolution(in float aResolution,
                             in uint32_t aDisplayWidth,
                             in uint32_t aDisplayHeight);
-
-  /**
-   * Whether the resolution has been set by the user.
-   * This gives a way to check whether the provided resolution is the default
-   * value or restored from a previous session.
-   *
-   * Can only be accessed with chrome privileges.
-   */
-  readonly attribute boolean isResolutionSet;
 
   /**
    * Whether the next paint should be flagged as the first paint for a document.

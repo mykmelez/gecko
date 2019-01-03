@@ -2491,12 +2491,13 @@ ResumeMode Debugger::firePromiseHook(JSContext* cx, Hook hook,
     JSContext* cx, Hook hook, Handle<PromiseObject*> promise) {
   MOZ_ASSERT(hook == OnNewPromise || hook == OnPromiseSettled);
 
-  Maybe<AutoRealm> ar;
-  if (hook == OnNewPromise) {
-    ar.emplace(cx, promise);
+  if (hook == OnPromiseSettled) {
+    // We should be in the right compartment, but for simplicity always enter
+    // the promise's realm below.
+    cx->check(promise);
   }
 
-  cx->check(promise);
+  AutoRealm ar(cx, promise);
 
   RootedValue rval(cx);
   ResumeMode resumeMode = dispatchHook(
@@ -3037,7 +3038,10 @@ void Debugger::updateObservesAsmJSOnDebuggees(IsObserving observing) {
     const GlobalObject& debuggee) {
   if (auto* v = debuggee.getDebuggers()) {
     for (auto p = v->begin(); p != v->end(); p++) {
-      if ((*p)->trackingAllocationSites && (*p)->enabled) {
+      // Use unbarrieredGet() to prevent triggering read barrier while
+      // collecting, this is safe as long as dbg does not escape.
+      Debugger* dbg = p->unbarrieredGet();
+      if (dbg->trackingAllocationSites && dbg->enabled) {
         return true;
       }
     }
@@ -3175,6 +3179,8 @@ void Debugger::traceCrossCompartmentEdges(JSTracer* trc) {
  * returns false.
  */
 /* static */ bool Debugger::markIteratively(GCMarker* marker) {
+  MOZ_ASSERT(JS::RuntimeHeapIsCollecting(),
+             "This method should be called during GC.");
   bool markedAny = false;
 
   // Find all Debugger objects in danger of GC. This code is a little
@@ -3192,7 +3198,7 @@ void Debugger::traceCrossCompartmentEdges(JSTracer* trc) {
       const GlobalObject::DebuggerVector* debuggers = global->getDebuggers();
       MOZ_ASSERT(debuggers);
       for (auto p = debuggers->begin(); p != debuggers->end(); p++) {
-        Debugger* dbg = *p;
+        Debugger* dbg = p->unbarrieredGet();
 
         // dbg is a Debugger with at least one debuggee. Check three things:
         //   - dbg is actually in a compartment that is being marked
@@ -4196,6 +4202,21 @@ static T* findDebuggerInVector(Debugger* dbg,
   T* p;
   for (p = vec->begin(); p != vec->end(); p++) {
     if (*p == dbg) {
+      break;
+    }
+  }
+  MOZ_ASSERT(p != vec->end());
+  return p;
+}
+
+// a ReadBarriered version for findDebuggerInVector
+// TODO: Bug 1515934 - findDebuggerInVector<T> triggers read barriers.
+static ReadBarriered<Debugger*>*
+findDebuggerInVector(Debugger* dbg,
+                     Vector<ReadBarriered<Debugger*>, 0, js::SystemAllocPolicy>* vec) {
+  ReadBarriered<Debugger*>* p;
+  for (p = vec->begin(); p != vec->end(); p++) {
+    if (p->unbarrieredGet() == dbg) {
       break;
     }
   }
@@ -10239,7 +10260,10 @@ static JSObject* IdVectorToArray(JSContext* cx, Handle<IdVector> ids) {
     return false;
   }
 
-  if (!DebuggerObject::getProperty(cx, object, id, args.rval())) {
+  RootedValue receiver(cx,
+                       args.length() < 2 ? ObjectValue(*object) : args.get(1));
+
+  if (!DebuggerObject::getProperty(cx, object, id, receiver, args.rval())) {
     return false;
   }
 
@@ -10257,7 +10281,11 @@ static JSObject* IdVectorToArray(JSContext* cx, Handle<IdVector> ids) {
 
   RootedValue value(cx, args.get(1));
 
-  if (!DebuggerObject::setProperty(cx, object, id, value, args.rval())) {
+  RootedValue receiver(cx,
+                       args.length() < 3 ? ObjectValue(*object) : args.get(2));
+
+  if (!DebuggerObject::setProperty(cx, object, id, value, receiver,
+                                   args.rval())) {
     return false;
   }
 
@@ -11196,38 +11224,15 @@ double DebuggerObject::promiseTimeToResolution() const {
 /* static */ bool DebuggerObject::getProperty(JSContext* cx,
                                               HandleDebuggerObject object,
                                               HandleId id,
-                                              MutableHandleValue result) {
-  RootedObject referent(cx, object->referent());
-  Debugger* dbg = object->owner();
-
-  // Enter the debuggee compartment and rewrap all input value for that
-  // compartment. (Rewrapping always takes place in the destination
-  // compartment.)
-  Maybe<AutoRealm> ar;
-  EnterDebuggeeObjectRealm(cx, ar, referent);
-  if (!cx->compartment()->wrap(cx, &referent)) {
-    return false;
-  }
-  cx->markId(id);
-
-  LeaveDebuggeeNoExecute nnx(cx);
-
-  bool ok = GetProperty(cx, referent, referent, id, result);
-
-  return dbg->receiveCompletionValue(ar, ok, result, result);
-}
-
-/* static */ bool DebuggerObject::setProperty(JSContext* cx,
-                                              HandleDebuggerObject object,
-                                              HandleId id, HandleValue value_,
+                                              HandleValue receiver_,
                                               MutableHandleValue result) {
   RootedObject referent(cx, object->referent());
   Debugger* dbg = object->owner();
 
   // Unwrap Debugger.Objects. This happens in the debugger's compartment since
   // that is where any exceptions must be reported.
-  RootedValue value(cx, value_);
-  if (!dbg->unwrapDebuggeeValue(cx, &value)) {
+  RootedValue receiver(cx, receiver_);
+  if (!dbg->unwrapDebuggeeValue(cx, &receiver)) {
     return false;
   }
 
@@ -11237,14 +11242,49 @@ double DebuggerObject::promiseTimeToResolution() const {
   Maybe<AutoRealm> ar;
   EnterDebuggeeObjectRealm(cx, ar, referent);
   if (!cx->compartment()->wrap(cx, &referent) ||
-      !cx->compartment()->wrap(cx, &value)) {
+      !cx->compartment()->wrap(cx, &receiver)) {
     return false;
   }
   cx->markId(id);
 
   LeaveDebuggeeNoExecute nnx(cx);
 
-  RootedValue receiver(cx, ObjectValue(*referent));
+  bool ok = GetProperty(cx, referent, receiver, id, result);
+
+  return dbg->receiveCompletionValue(ar, ok, result, result);
+}
+
+/* static */ bool DebuggerObject::setProperty(JSContext* cx,
+                                              HandleDebuggerObject object,
+                                              HandleId id, HandleValue value_,
+                                              HandleValue receiver_,
+                                              MutableHandleValue result) {
+  RootedObject referent(cx, object->referent());
+  Debugger* dbg = object->owner();
+
+  // Unwrap Debugger.Objects. This happens in the debugger's compartment since
+  // that is where any exceptions must be reported.
+  RootedValue value(cx, value_);
+  RootedValue receiver(cx, receiver_);
+  if (!dbg->unwrapDebuggeeValue(cx, &value) ||
+      !dbg->unwrapDebuggeeValue(cx, &receiver)) {
+    return false;
+  }
+
+  // Enter the debuggee compartment and rewrap all input value for that
+  // compartment. (Rewrapping always takes place in the destination
+  // compartment.)
+  Maybe<AutoRealm> ar;
+  EnterDebuggeeObjectRealm(cx, ar, referent);
+  if (!cx->compartment()->wrap(cx, &referent) ||
+      !cx->compartment()->wrap(cx, &value) ||
+      !cx->compartment()->wrap(cx, &receiver)) {
+    return false;
+  }
+  cx->markId(id);
+
+  LeaveDebuggeeNoExecute nnx(cx);
+
   ObjectOpResult opResult;
   bool ok = SetProperty(cx, referent, id, value, receiver, opResult);
 

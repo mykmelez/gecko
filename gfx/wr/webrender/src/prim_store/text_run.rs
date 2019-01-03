@@ -15,7 +15,6 @@ use prim_store::{PrimitiveStore, PrimKeyCommonData, PrimTemplateCommonData, Vect
 use render_task::{RenderTaskTree};
 use renderer::{MAX_VERTEX_TEXTURE_WIDTH};
 use resource_cache::{ResourceCache};
-use tiling::SpecialRenderPasses;
 use util::{MatrixHelpers};
 use prim_store::PrimitiveInstanceKind;
 use std::ops;
@@ -298,7 +297,6 @@ impl TextRunPrimitive {
         resource_cache: &mut ResourceCache,
         gpu_cache: &mut GpuCache,
         render_tasks: &mut RenderTaskTree,
-        special_render_passes: &mut SpecialRenderPasses,
         scratch: &mut PrimitiveScratchBuffer,
     ) {
         let cache_dirty = self.update_font_instance(
@@ -326,11 +324,11 @@ impl TextRunPrimitive {
             &scratch.glyph_keys[self.glyph_keys_range],
             gpu_cache,
             render_tasks,
-            special_render_passes,
         );
     }
 }
 
+/// These are linux only because FontInstancePlatformOptions varies in size by platform.
 #[test]
 #[cfg(target_os = "linux")]
 fn test_struct_sizes() {
@@ -342,7 +340,7 @@ fn test_struct_sizes() {
     // (b) You made a structure larger. This is not necessarily a problem, but should only
     //     be done with care, and after checking if talos performance regresses badly.
     assert_eq!(mem::size_of::<TextRun>(), 112, "TextRun size changed");
-    assert_eq!(mem::size_of::<TextRunTemplate>(), 160, "TextRunTemplate size changed");
+    assert_eq!(mem::size_of::<TextRunTemplate>(), 144, "TextRunTemplate size changed");
     assert_eq!(mem::size_of::<TextRunKey>(), 136, "TextRunKey size changed");
     assert_eq!(mem::size_of::<TextRunPrimitive>(), 88, "TextRunPrimitive size changed");
 }

@@ -22,21 +22,19 @@ class nsIDocument;
 class nsIFrame;
 class nsPresContext;
 class nsStyleCoord;
-class nsSVGElement;
 
 namespace mozilla {
 class ComputedStyle;
-class nsSVGAnimatedTransformList;
+class SVGAnimatedTransformList;
 class SVGAnimatedPreserveAspectRatio;
 class SVGContextPaint;
 class SVGPreserveAspectRatio;
 namespace dom {
 class Element;
+class SVGElement;
 class SVGSVGElement;
 class SVGViewportElement;
 }  // namespace dom
-
-}  // namespace mozilla
 
 #define SVG_ZERO_LENGTH_PATH_FIX_FACTOR 512
 
@@ -75,20 +73,15 @@ enum SVGTransformTypes {
  */
 class SVGContentUtils {
  public:
-  typedef mozilla::ComputedStyle ComputedStyle;
   typedef mozilla::gfx::Float Float;
   typedef mozilla::gfx::Matrix Matrix;
   typedef mozilla::gfx::Rect Rect;
   typedef mozilla::gfx::StrokeOptions StrokeOptions;
-  typedef mozilla::SVGAnimatedPreserveAspectRatio
-      SVGAnimatedPreserveAspectRatio;
-  typedef mozilla::SVGPreserveAspectRatio SVGPreserveAspectRatio;
 
   /*
    * Get the outer SVG element of an nsIContent
    */
-  static mozilla::dom::SVGSVGElement* GetOuterSVGElement(
-      nsSVGElement* aSVGElement);
+  static dom::SVGSVGElement* GetOuterSVGElement(dom::SVGElement* aSVGElement);
 
   /**
    * Activates the animation element aContent as a result of navigation to the
@@ -155,7 +148,7 @@ class SVGContentUtils {
    * whether or not the stroke is dashed.
    */
   static void GetStrokeOptions(AutoStrokeOptions* aStrokeOptions,
-                               nsSVGElement* aElement,
+                               dom::SVGElement* aElement,
                                ComputedStyle* aComputedStyle,
                                mozilla::SVGContextPaint* aContextPaint,
                                StrokeOptionFlags aFlags = eAllStrokeOptions);
@@ -169,7 +162,7 @@ class SVGContentUtils {
    * and 'stroke-opacity' properties to, say, return zero if they are "none" or
    * "0", respectively.
    */
-  static Float GetStrokeWidth(nsSVGElement* aElement,
+  static Float GetStrokeWidth(dom::SVGElement* aElement,
                               ComputedStyle* aComputedStyle,
                               mozilla::SVGContextPaint* aContextPaint);
 
@@ -201,7 +194,7 @@ class SVGContentUtils {
                                   const char16_t** aParams,
                                   uint32_t aParamsLength);
 
-  static Matrix GetCTM(nsSVGElement* aElement, bool aScreenCTM);
+  static Matrix GetCTM(dom::SVGElement* aElement, bool aScreenCTM);
 
   /**
    * Gets the tight bounds-space stroke bounds of the non-scaling-stroked rect
@@ -328,7 +321,8 @@ class SVGContentUtils {
    * Factor (straight userspace), Coord (dimensioned), and Percent (of
    * aContent's SVG viewport)
    */
-  static float CoordToFloat(nsSVGElement* aContent, const nsStyleCoord& aCoord);
+  static float CoordToFloat(dom::SVGElement* aContent,
+                            const nsStyleCoord& aCoord);
   /**
    * Parse the SVG path string
    * Returns a path
@@ -343,5 +337,7 @@ class SVGContentUtils {
    */
   static bool ShapeTypeHasNoCorners(const nsIContent* aContent);
 };
+
+}  // namespace mozilla
 
 #endif

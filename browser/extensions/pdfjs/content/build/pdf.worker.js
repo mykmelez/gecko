@@ -123,8 +123,8 @@ return /******/ (function(modules) { // webpackBootstrap
 "use strict";
 
 
-var pdfjsVersion = '2.1.117';
-var pdfjsBuild = '417c234c';
+var pdfjsVersion = '2.1.145';
+var pdfjsBuild = 'd8f201ea';
 
 var pdfjsCoreWorker = __w_pdfjs_require__(1);
 
@@ -375,7 +375,7 @@ var WorkerMessageHandler = {
     var cancelXHRs = null;
     var WorkerTasks = [];
     let apiVersion = docParams.apiVersion;
-    let workerVersion = '2.1.117';
+    let workerVersion = '2.1.145';
 
     if (apiVersion !== workerVersion) {
       throw new Error(`The API version "${apiVersion}" does not match ` + `the Worker version "${workerVersion}".`);
@@ -403,28 +403,20 @@ var WorkerMessageHandler = {
       WorkerTasks.splice(i, 1);
     }
 
-    function loadDocument(recoveryMode) {
-      var loadDocumentCapability = (0, _util.createPromiseCapability)();
+    async function loadDocument(recoveryMode) {
+      await pdfManager.ensureDoc('checkHeader');
+      await pdfManager.ensureDoc('parseStartXRef');
+      await pdfManager.ensureDoc('parse', [recoveryMode]);
 
-      var parseSuccess = function parseSuccess() {
-        Promise.all([pdfManager.ensureDoc('numPages'), pdfManager.ensureDoc('fingerprint')]).then(function ([numPages, fingerprint]) {
-          loadDocumentCapability.resolve({
-            numPages,
-            fingerprint
-          });
-        }, parseFailure);
+      if (!recoveryMode) {
+        await pdfManager.ensureDoc('checkFirstPage');
+      }
+
+      const [numPages, fingerprint] = await Promise.all([pdfManager.ensureDoc('numPages'), pdfManager.ensureDoc('fingerprint')]);
+      return {
+        numPages,
+        fingerprint
       };
-
-      var parseFailure = function parseFailure(e) {
-        loadDocumentCapability.reject(e);
-      };
-
-      pdfManager.ensureDoc('checkHeader', []).then(function () {
-        pdfManager.ensureDoc('parseStartXRef', []).then(function () {
-          pdfManager.ensureDoc('parse', [recoveryMode]).then(parseSuccess, parseFailure);
-        }, parseFailure);
-      }, parseFailure);
-      return loadDocumentCapability.promise;
     }
 
     function getPdfManager(data, evaluatorOptions) {
@@ -462,7 +454,6 @@ var WorkerMessageHandler = {
         var disableAutoFetch = source.disableAutoFetch || fullRequest.isStreamingSupported;
         pdfManager = new _pdf_manager.NetworkPdfManager(docId, pdfStream, {
           msgHandler: handler,
-          url: source.url,
           password: source.password,
           length: fullRequest.contentLength,
           disableAutoFetch,
@@ -652,6 +643,9 @@ var WorkerMessageHandler = {
     });
     handler.on('GetPageMode', function wphSetupGetPageMode(data) {
       return pdfManager.ensureCatalog('pageMode');
+    });
+    handler.on('getOpenActionDestination', function (data) {
+      return pdfManager.ensureCatalog('openActionDestination');
     });
     handler.on('GetAttachments', function wphSetupGetAttachments(data) {
       return pdfManager.ensureCatalog('attachments');
@@ -878,7 +872,7 @@ Object.defineProperty(exports, "URL", {
     return _url_polyfill.URL;
   }
 });
-exports.createObjectURL = exports.FormatError = exports.XRefParseException = exports.Util = exports.UnknownErrorException = exports.UnexpectedResponseException = exports.TextRenderingMode = exports.StreamType = exports.PermissionFlag = exports.PasswordResponses = exports.PasswordException = exports.NativeImageDecoding = exports.MissingPDFException = exports.MissingDataException = exports.InvalidPDFException = exports.AbortException = exports.CMapCompressionType = exports.ImageKind = exports.FontType = exports.AnnotationType = exports.AnnotationFlag = exports.AnnotationFieldFlag = exports.AnnotationBorderStyleType = exports.UNSUPPORTED_FEATURES = exports.VerbosityLevel = exports.OPS = exports.IDENTITY_MATRIX = exports.FONT_IDENTITY_MATRIX = void 0;
+exports.createObjectURL = exports.FormatError = exports.XRefParseException = exports.XRefEntryException = exports.Util = exports.UnknownErrorException = exports.UnexpectedResponseException = exports.TextRenderingMode = exports.StreamType = exports.PermissionFlag = exports.PasswordResponses = exports.PasswordException = exports.NativeImageDecoding = exports.MissingPDFException = exports.MissingDataException = exports.InvalidPDFException = exports.AbortException = exports.CMapCompressionType = exports.ImageKind = exports.FontType = exports.AnnotationType = exports.AnnotationFlag = exports.AnnotationFieldFlag = exports.AnnotationBorderStyleType = exports.UNSUPPORTED_FEATURES = exports.VerbosityLevel = exports.OPS = exports.IDENTITY_MATRIX = exports.FONT_IDENTITY_MATRIX = void 0;
 
 __w_pdfjs_require__(3);
 
@@ -1337,6 +1331,19 @@ var MissingDataException = function MissingDataExceptionClosure() {
 }();
 
 exports.MissingDataException = MissingDataException;
+
+const XRefEntryException = function XRefEntryExceptionClosure() {
+  function XRefEntryException(msg) {
+    this.message = msg;
+  }
+
+  XRefEntryException.prototype = new Error();
+  XRefEntryException.prototype.name = 'XRefEntryException';
+  XRefEntryException.constructor = XRefEntryException;
+  return XRefEntryException;
+}();
+
+exports.XRefEntryException = XRefEntryException;
 
 var XRefParseException = function XRefParseExceptionClosure() {
   function XRefParseException(msg) {
@@ -5719,7 +5726,6 @@ class NetworkPdfManager extends BasePdfManager {
     this.evaluatorOptions = evaluatorOptions;
     this.streamManager = new _chunked_stream.ChunkedStreamManager(pdfNetworkStream, {
       msgHandler: args.msgHandler,
-      url: args.url,
       length: args.length,
       disableAutoFetch: args.disableAutoFetch,
       rangeChunkSize: args.rangeChunkSize
@@ -5786,8 +5792,8 @@ exports.ChunkedStreamManager = exports.ChunkedStream = void 0;
 
 var _util = __w_pdfjs_require__(2);
 
-var ChunkedStream = function ChunkedStreamClosure() {
-  function ChunkedStream(length, chunkSize, manager) {
+class ChunkedStream {
+  constructor(length, chunkSize, manager) {
     this.bytes = new Uint8Array(length);
     this.start = 0;
     this.pos = 0;
@@ -5801,247 +5807,252 @@ var ChunkedStream = function ChunkedStreamClosure() {
     this.lastSuccessfulEnsureByteChunk = -1;
   }
 
-  ChunkedStream.prototype = {
-    getMissingChunks: function ChunkedStream_getMissingChunks() {
-      var chunks = [];
+  getMissingChunks() {
+    const chunks = [];
 
-      for (var chunk = 0, n = this.numChunks; chunk < n; ++chunk) {
-        if (!this.loadedChunks[chunk]) {
-          chunks.push(chunk);
-        }
+    for (let chunk = 0, n = this.numChunks; chunk < n; ++chunk) {
+      if (!this.loadedChunks[chunk]) {
+        chunks.push(chunk);
       }
+    }
 
-      return chunks;
-    },
-    getBaseStreams: function ChunkedStream_getBaseStreams() {
-      return [this];
-    },
-    allChunksLoaded: function ChunkedStream_allChunksLoaded() {
-      return this.numChunksLoaded === this.numChunks;
-    },
-    onReceiveData: function ChunkedStream_onReceiveData(begin, chunk) {
-      var end = begin + chunk.byteLength;
+    return chunks;
+  }
 
-      if (begin % this.chunkSize !== 0) {
-        throw new Error(`Bad begin offset: ${begin}`);
+  getBaseStreams() {
+    return [this];
+  }
+
+  allChunksLoaded() {
+    return this.numChunksLoaded === this.numChunks;
+  }
+
+  onReceiveData(begin, chunk) {
+    const chunkSize = this.chunkSize;
+
+    if (begin % chunkSize !== 0) {
+      throw new Error(`Bad begin offset: ${begin}`);
+    }
+
+    const end = begin + chunk.byteLength;
+
+    if (end % chunkSize !== 0 && end !== this.bytes.length) {
+      throw new Error(`Bad end offset: ${end}`);
+    }
+
+    this.bytes.set(new Uint8Array(chunk), begin);
+    const beginChunk = Math.floor(begin / chunkSize);
+    const endChunk = Math.floor((end - 1) / chunkSize) + 1;
+
+    for (let curChunk = beginChunk; curChunk < endChunk; ++curChunk) {
+      if (!this.loadedChunks[curChunk]) {
+        this.loadedChunks[curChunk] = true;
+        ++this.numChunksLoaded;
       }
+    }
+  }
 
-      var length = this.bytes.length;
+  onReceiveProgressiveData(data) {
+    let position = this.progressiveDataLength;
+    const beginChunk = Math.floor(position / this.chunkSize);
+    this.bytes.set(new Uint8Array(data), position);
+    position += data.byteLength;
+    this.progressiveDataLength = position;
+    const endChunk = position >= this.end ? this.numChunks : Math.floor(position / this.chunkSize);
 
-      if (end % this.chunkSize !== 0 && end !== length) {
-        throw new Error(`Bad end offset: ${end}`);
+    for (let curChunk = beginChunk; curChunk < endChunk; ++curChunk) {
+      if (!this.loadedChunks[curChunk]) {
+        this.loadedChunks[curChunk] = true;
+        ++this.numChunksLoaded;
       }
+    }
+  }
 
-      this.bytes.set(new Uint8Array(chunk), begin);
-      var chunkSize = this.chunkSize;
-      var beginChunk = Math.floor(begin / chunkSize);
-      var endChunk = Math.floor((end - 1) / chunkSize) + 1;
-      var curChunk;
+  ensureByte(pos) {
+    const chunk = Math.floor(pos / this.chunkSize);
 
-      for (curChunk = beginChunk; curChunk < endChunk; ++curChunk) {
-        if (!this.loadedChunks[curChunk]) {
-          this.loadedChunks[curChunk] = true;
-          ++this.numChunksLoaded;
-        }
+    if (chunk === this.lastSuccessfulEnsureByteChunk) {
+      return;
+    }
+
+    if (!this.loadedChunks[chunk]) {
+      throw new _util.MissingDataException(pos, pos + 1);
+    }
+
+    this.lastSuccessfulEnsureByteChunk = chunk;
+  }
+
+  ensureRange(begin, end) {
+    if (begin >= end) {
+      return;
+    }
+
+    if (end <= this.progressiveDataLength) {
+      return;
+    }
+
+    const chunkSize = this.chunkSize;
+    const beginChunk = Math.floor(begin / chunkSize);
+    const endChunk = Math.floor((end - 1) / chunkSize) + 1;
+
+    for (let chunk = beginChunk; chunk < endChunk; ++chunk) {
+      if (!this.loadedChunks[chunk]) {
+        throw new _util.MissingDataException(begin, end);
       }
-    },
-    onReceiveProgressiveData: function ChunkedStream_onReceiveProgressiveData(data) {
-      var position = this.progressiveDataLength;
-      var beginChunk = Math.floor(position / this.chunkSize);
-      this.bytes.set(new Uint8Array(data), position);
-      position += data.byteLength;
-      this.progressiveDataLength = position;
-      var endChunk = position >= this.end ? this.numChunks : Math.floor(position / this.chunkSize);
-      var curChunk;
+    }
+  }
 
-      for (curChunk = beginChunk; curChunk < endChunk; ++curChunk) {
-        if (!this.loadedChunks[curChunk]) {
-          this.loadedChunks[curChunk] = true;
-          ++this.numChunksLoaded;
-        }
-      }
-    },
-    ensureByte: function ChunkedStream_ensureByte(pos) {
-      var chunk = Math.floor(pos / this.chunkSize);
+  nextEmptyChunk(beginChunk) {
+    const numChunks = this.numChunks;
 
-      if (chunk === this.lastSuccessfulEnsureByteChunk) {
-        return;
-      }
+    for (let i = 0; i < numChunks; ++i) {
+      const chunk = (beginChunk + i) % numChunks;
 
       if (!this.loadedChunks[chunk]) {
-        throw new _util.MissingDataException(pos, pos + 1);
+        return chunk;
       }
-
-      this.lastSuccessfulEnsureByteChunk = chunk;
-    },
-    ensureRange: function ChunkedStream_ensureRange(begin, end) {
-      if (begin >= end) {
-        return;
-      }
-
-      if (end <= this.progressiveDataLength) {
-        return;
-      }
-
-      var chunkSize = this.chunkSize;
-      var beginChunk = Math.floor(begin / chunkSize);
-      var endChunk = Math.floor((end - 1) / chunkSize) + 1;
-
-      for (var chunk = beginChunk; chunk < endChunk; ++chunk) {
-        if (!this.loadedChunks[chunk]) {
-          throw new _util.MissingDataException(begin, end);
-        }
-      }
-    },
-    nextEmptyChunk: function ChunkedStream_nextEmptyChunk(beginChunk) {
-      var chunk,
-          numChunks = this.numChunks;
-
-      for (var i = 0; i < numChunks; ++i) {
-        chunk = (beginChunk + i) % numChunks;
-
-        if (!this.loadedChunks[chunk]) {
-          return chunk;
-        }
-      }
-
-      return null;
-    },
-    hasChunk: function ChunkedStream_hasChunk(chunk) {
-      return !!this.loadedChunks[chunk];
-    },
-
-    get length() {
-      return this.end - this.start;
-    },
-
-    get isEmpty() {
-      return this.length === 0;
-    },
-
-    getByte: function ChunkedStream_getByte() {
-      var pos = this.pos;
-
-      if (pos >= this.end) {
-        return -1;
-      }
-
-      this.ensureByte(pos);
-      return this.bytes[this.pos++];
-    },
-    getUint16: function ChunkedStream_getUint16() {
-      var b0 = this.getByte();
-      var b1 = this.getByte();
-
-      if (b0 === -1 || b1 === -1) {
-        return -1;
-      }
-
-      return (b0 << 8) + b1;
-    },
-    getInt32: function ChunkedStream_getInt32() {
-      var b0 = this.getByte();
-      var b1 = this.getByte();
-      var b2 = this.getByte();
-      var b3 = this.getByte();
-      return (b0 << 24) + (b1 << 16) + (b2 << 8) + b3;
-    },
-
-    getBytes(length, forceClamped = false) {
-      var bytes = this.bytes;
-      var pos = this.pos;
-      var strEnd = this.end;
-
-      if (!length) {
-        this.ensureRange(pos, strEnd);
-        let subarray = bytes.subarray(pos, strEnd);
-        return forceClamped ? new Uint8ClampedArray(subarray) : subarray;
-      }
-
-      var end = pos + length;
-
-      if (end > strEnd) {
-        end = strEnd;
-      }
-
-      this.ensureRange(pos, end);
-      this.pos = end;
-      let subarray = bytes.subarray(pos, end);
-      return forceClamped ? new Uint8ClampedArray(subarray) : subarray;
-    },
-
-    peekByte: function ChunkedStream_peekByte() {
-      var peekedByte = this.getByte();
-      this.pos--;
-      return peekedByte;
-    },
-
-    peekBytes(length, forceClamped = false) {
-      var bytes = this.getBytes(length, forceClamped);
-      this.pos -= bytes.length;
-      return bytes;
-    },
-
-    getByteRange: function ChunkedStream_getBytes(begin, end) {
-      this.ensureRange(begin, end);
-      return this.bytes.subarray(begin, end);
-    },
-    skip: function ChunkedStream_skip(n) {
-      if (!n) {
-        n = 1;
-      }
-
-      this.pos += n;
-    },
-    reset: function ChunkedStream_reset() {
-      this.pos = this.start;
-    },
-    moveStart: function ChunkedStream_moveStart() {
-      this.start = this.pos;
-    },
-    makeSubStream: function ChunkedStream_makeSubStream(start, length, dict) {
-      this.ensureRange(start, start + length);
-
-      function ChunkedStreamSubstream() {}
-
-      ChunkedStreamSubstream.prototype = Object.create(this);
-
-      ChunkedStreamSubstream.prototype.getMissingChunks = function () {
-        var chunkSize = this.chunkSize;
-        var beginChunk = Math.floor(this.start / chunkSize);
-        var endChunk = Math.floor((this.end - 1) / chunkSize) + 1;
-        var missingChunks = [];
-
-        for (var chunk = beginChunk; chunk < endChunk; ++chunk) {
-          if (!this.loadedChunks[chunk]) {
-            missingChunks.push(chunk);
-          }
-        }
-
-        return missingChunks;
-      };
-
-      var subStream = new ChunkedStreamSubstream();
-      subStream.pos = subStream.start = start;
-      subStream.end = start + length || this.end;
-      subStream.dict = dict;
-      return subStream;
     }
-  };
-  return ChunkedStream;
-}();
+
+    return null;
+  }
+
+  hasChunk(chunk) {
+    return !!this.loadedChunks[chunk];
+  }
+
+  get length() {
+    return this.end - this.start;
+  }
+
+  get isEmpty() {
+    return this.length === 0;
+  }
+
+  getByte() {
+    const pos = this.pos;
+
+    if (pos >= this.end) {
+      return -1;
+    }
+
+    this.ensureByte(pos);
+    return this.bytes[this.pos++];
+  }
+
+  getUint16() {
+    const b0 = this.getByte();
+    const b1 = this.getByte();
+
+    if (b0 === -1 || b1 === -1) {
+      return -1;
+    }
+
+    return (b0 << 8) + b1;
+  }
+
+  getInt32() {
+    const b0 = this.getByte();
+    const b1 = this.getByte();
+    const b2 = this.getByte();
+    const b3 = this.getByte();
+    return (b0 << 24) + (b1 << 16) + (b2 << 8) + b3;
+  }
+
+  getBytes(length, forceClamped = false) {
+    const bytes = this.bytes;
+    const pos = this.pos;
+    const strEnd = this.end;
+
+    if (!length) {
+      this.ensureRange(pos, strEnd);
+      const subarray = bytes.subarray(pos, strEnd);
+      return forceClamped ? new Uint8ClampedArray(subarray) : subarray;
+    }
+
+    let end = pos + length;
+
+    if (end > strEnd) {
+      end = strEnd;
+    }
+
+    this.ensureRange(pos, end);
+    this.pos = end;
+    const subarray = bytes.subarray(pos, end);
+    return forceClamped ? new Uint8ClampedArray(subarray) : subarray;
+  }
+
+  peekByte() {
+    const peekedByte = this.getByte();
+    this.pos--;
+    return peekedByte;
+  }
+
+  peekBytes(length, forceClamped = false) {
+    const bytes = this.getBytes(length, forceClamped);
+    this.pos -= bytes.length;
+    return bytes;
+  }
+
+  getByteRange(begin, end) {
+    this.ensureRange(begin, end);
+    return this.bytes.subarray(begin, end);
+  }
+
+  skip(n) {
+    if (!n) {
+      n = 1;
+    }
+
+    this.pos += n;
+  }
+
+  reset() {
+    this.pos = this.start;
+  }
+
+  moveStart() {
+    this.start = this.pos;
+  }
+
+  makeSubStream(start, length, dict) {
+    this.ensureRange(start, start + length);
+
+    function ChunkedStreamSubstream() {}
+
+    ChunkedStreamSubstream.prototype = Object.create(this);
+
+    ChunkedStreamSubstream.prototype.getMissingChunks = function () {
+      const chunkSize = this.chunkSize;
+      const beginChunk = Math.floor(this.start / chunkSize);
+      const endChunk = Math.floor((this.end - 1) / chunkSize) + 1;
+      const missingChunks = [];
+
+      for (let chunk = beginChunk; chunk < endChunk; ++chunk) {
+        if (!this.loadedChunks[chunk]) {
+          missingChunks.push(chunk);
+        }
+      }
+
+      return missingChunks;
+    };
+
+    const subStream = new ChunkedStreamSubstream();
+    subStream.pos = subStream.start = start;
+    subStream.end = start + length || this.end;
+    subStream.dict = dict;
+    return subStream;
+  }
+
+}
 
 exports.ChunkedStream = ChunkedStream;
 
-var ChunkedStreamManager = function ChunkedStreamManagerClosure() {
-  function ChunkedStreamManager(pdfNetworkStream, args) {
-    var chunkSize = args.rangeChunkSize;
-    var length = args.length;
-    this.stream = new ChunkedStream(length, chunkSize, this);
-    this.length = length;
-    this.chunkSize = chunkSize;
+class ChunkedStreamManager {
+  constructor(pdfNetworkStream, args) {
+    this.length = args.length;
+    this.chunkSize = args.rangeChunkSize;
+    this.stream = new ChunkedStream(this.length, this.chunkSize, this);
     this.pdfNetworkStream = pdfNetworkStream;
-    this.url = args.url;
     this.disableAutoFetch = args.disableAutoFetch;
     this.msgHandler = args.msgHandler;
     this.currRequestId = 0;
@@ -6053,284 +6064,284 @@ var ChunkedStreamManager = function ChunkedStreamManagerClosure() {
     this._loadedStreamCapability = (0, _util.createPromiseCapability)();
   }
 
-  ChunkedStreamManager.prototype = {
-    onLoadedStream: function ChunkedStreamManager_getLoadedStream() {
-      return this._loadedStreamCapability.promise;
-    },
-    sendRequest: function ChunkedStreamManager_sendRequest(begin, end) {
-      var rangeReader = this.pdfNetworkStream.getRangeReader(begin, end);
+  onLoadedStream() {
+    return this._loadedStreamCapability.promise;
+  }
 
-      if (!rangeReader.isStreamingSupported) {
-        rangeReader.onProgress = this.onProgress.bind(this);
-      }
+  sendRequest(begin, end) {
+    const rangeReader = this.pdfNetworkStream.getRangeReader(begin, end);
 
-      var chunks = [],
-          loaded = 0;
-      var manager = this;
-      var promise = new Promise(function (resolve, reject) {
-        var readChunk = function (chunk) {
-          try {
-            if (!chunk.done) {
-              var data = chunk.value;
-              chunks.push(data);
-              loaded += (0, _util.arrayByteLength)(data);
+    if (!rangeReader.isStreamingSupported) {
+      rangeReader.onProgress = this.onProgress.bind(this);
+    }
 
-              if (rangeReader.isStreamingSupported) {
-                manager.onProgress({
-                  loaded
-                });
-              }
+    let chunks = [],
+        loaded = 0;
+    const promise = new Promise((resolve, reject) => {
+      const readChunk = chunk => {
+        try {
+          if (!chunk.done) {
+            const data = chunk.value;
+            chunks.push(data);
+            loaded += (0, _util.arrayByteLength)(data);
 
-              rangeReader.read().then(readChunk, reject);
-              return;
+            if (rangeReader.isStreamingSupported) {
+              this.onProgress({
+                loaded
+              });
             }
 
-            var chunkData = (0, _util.arraysToBytes)(chunks);
-            chunks = null;
-            resolve(chunkData);
-          } catch (e) {
-            reject(e);
-          }
-        };
-
-        rangeReader.read().then(readChunk, reject);
-      });
-      promise.then(data => {
-        if (this.aborted) {
-          return;
-        }
-
-        this.onReceiveData({
-          chunk: data,
-          begin
-        });
-      });
-    },
-    requestAllChunks: function ChunkedStreamManager_requestAllChunks() {
-      var missingChunks = this.stream.getMissingChunks();
-
-      this._requestChunks(missingChunks);
-
-      return this._loadedStreamCapability.promise;
-    },
-    _requestChunks: function ChunkedStreamManager_requestChunks(chunks) {
-      var requestId = this.currRequestId++;
-      var i, ii;
-      var chunksNeeded = Object.create(null);
-      this.chunksNeededByRequest[requestId] = chunksNeeded;
-
-      for (i = 0, ii = chunks.length; i < ii; i++) {
-        if (!this.stream.hasChunk(chunks[i])) {
-          chunksNeeded[chunks[i]] = true;
-        }
-      }
-
-      if ((0, _util.isEmptyObj)(chunksNeeded)) {
-        return Promise.resolve();
-      }
-
-      var capability = (0, _util.createPromiseCapability)();
-      this.promisesByRequest[requestId] = capability;
-      var chunksToRequest = [];
-
-      for (var chunk in chunksNeeded) {
-        chunk = chunk | 0;
-
-        if (!(chunk in this.requestsByChunk)) {
-          this.requestsByChunk[chunk] = [];
-          chunksToRequest.push(chunk);
-        }
-
-        this.requestsByChunk[chunk].push(requestId);
-      }
-
-      if (!chunksToRequest.length) {
-        return capability.promise;
-      }
-
-      var groupedChunksToRequest = this.groupChunks(chunksToRequest);
-
-      for (i = 0; i < groupedChunksToRequest.length; ++i) {
-        var groupedChunk = groupedChunksToRequest[i];
-        var begin = groupedChunk.beginChunk * this.chunkSize;
-        var end = Math.min(groupedChunk.endChunk * this.chunkSize, this.length);
-        this.sendRequest(begin, end);
-      }
-
-      return capability.promise;
-    },
-    getStream: function ChunkedStreamManager_getStream() {
-      return this.stream;
-    },
-    requestRange: function ChunkedStreamManager_requestRange(begin, end) {
-      end = Math.min(end, this.length);
-      var beginChunk = this.getBeginChunk(begin);
-      var endChunk = this.getEndChunk(end);
-      var chunks = [];
-
-      for (var chunk = beginChunk; chunk < endChunk; ++chunk) {
-        chunks.push(chunk);
-      }
-
-      return this._requestChunks(chunks);
-    },
-    requestRanges: function ChunkedStreamManager_requestRanges(ranges) {
-      ranges = ranges || [];
-      var chunksToRequest = [];
-
-      for (var i = 0; i < ranges.length; i++) {
-        var beginChunk = this.getBeginChunk(ranges[i].begin);
-        var endChunk = this.getEndChunk(ranges[i].end);
-
-        for (var chunk = beginChunk; chunk < endChunk; ++chunk) {
-          if (!chunksToRequest.includes(chunk)) {
-            chunksToRequest.push(chunk);
-          }
-        }
-      }
-
-      chunksToRequest.sort(function (a, b) {
-        return a - b;
-      });
-      return this._requestChunks(chunksToRequest);
-    },
-    groupChunks: function ChunkedStreamManager_groupChunks(chunks) {
-      var groupedChunks = [];
-      var beginChunk = -1;
-      var prevChunk = -1;
-
-      for (var i = 0; i < chunks.length; ++i) {
-        var chunk = chunks[i];
-
-        if (beginChunk < 0) {
-          beginChunk = chunk;
-        }
-
-        if (prevChunk >= 0 && prevChunk + 1 !== chunk) {
-          groupedChunks.push({
-            beginChunk,
-            endChunk: prevChunk + 1
-          });
-          beginChunk = chunk;
-        }
-
-        if (i + 1 === chunks.length) {
-          groupedChunks.push({
-            beginChunk,
-            endChunk: chunk + 1
-          });
-        }
-
-        prevChunk = chunk;
-      }
-
-      return groupedChunks;
-    },
-    onProgress: function ChunkedStreamManager_onProgress(args) {
-      var bytesLoaded = this.stream.numChunksLoaded * this.chunkSize + args.loaded;
-      this.msgHandler.send('DocProgress', {
-        loaded: bytesLoaded,
-        total: this.length
-      });
-    },
-    onReceiveData: function ChunkedStreamManager_onReceiveData(args) {
-      var chunk = args.chunk;
-      var isProgressive = args.begin === undefined;
-      var begin = isProgressive ? this.progressiveDataLength : args.begin;
-      var end = begin + chunk.byteLength;
-      var beginChunk = Math.floor(begin / this.chunkSize);
-      var endChunk = end < this.length ? Math.floor(end / this.chunkSize) : Math.ceil(end / this.chunkSize);
-
-      if (isProgressive) {
-        this.stream.onReceiveProgressiveData(chunk);
-        this.progressiveDataLength = end;
-      } else {
-        this.stream.onReceiveData(begin, chunk);
-      }
-
-      if (this.stream.allChunksLoaded()) {
-        this._loadedStreamCapability.resolve(this.stream);
-      }
-
-      var loadedRequests = [];
-      var i, requestId;
-
-      for (chunk = beginChunk; chunk < endChunk; ++chunk) {
-        var requestIds = this.requestsByChunk[chunk] || [];
-        delete this.requestsByChunk[chunk];
-
-        for (i = 0; i < requestIds.length; ++i) {
-          requestId = requestIds[i];
-          var chunksNeeded = this.chunksNeededByRequest[requestId];
-
-          if (chunk in chunksNeeded) {
-            delete chunksNeeded[chunk];
+            rangeReader.read().then(readChunk, reject);
+            return;
           }
 
-          if (!(0, _util.isEmptyObj)(chunksNeeded)) {
-            continue;
-          }
-
-          loadedRequests.push(requestId);
+          const chunkData = (0, _util.arraysToBytes)(chunks);
+          chunks = null;
+          resolve(chunkData);
+        } catch (e) {
+          reject(e);
         }
+      };
+
+      rangeReader.read().then(readChunk, reject);
+    });
+    promise.then(data => {
+      if (this.aborted) {
+        return;
       }
 
-      if (!this.disableAutoFetch && (0, _util.isEmptyObj)(this.requestsByChunk)) {
-        var nextEmptyChunk;
-
-        if (this.stream.numChunksLoaded === 1) {
-          var lastChunk = this.stream.numChunks - 1;
-
-          if (!this.stream.hasChunk(lastChunk)) {
-            nextEmptyChunk = lastChunk;
-          }
-        } else {
-          nextEmptyChunk = this.stream.nextEmptyChunk(endChunk);
-        }
-
-        if (Number.isInteger(nextEmptyChunk)) {
-          this._requestChunks([nextEmptyChunk]);
-        }
-      }
-
-      for (i = 0; i < loadedRequests.length; ++i) {
-        requestId = loadedRequests[i];
-        var capability = this.promisesByRequest[requestId];
-        delete this.promisesByRequest[requestId];
-        capability.resolve();
-      }
-
-      this.msgHandler.send('DocProgress', {
-        loaded: this.stream.numChunksLoaded * this.chunkSize,
-        total: this.length
+      this.onReceiveData({
+        chunk: data,
+        begin
       });
-    },
-    onError: function ChunkedStreamManager_onError(err) {
-      this._loadedStreamCapability.reject(err);
-    },
-    getBeginChunk: function ChunkedStreamManager_getBeginChunk(begin) {
-      var chunk = Math.floor(begin / this.chunkSize);
-      return chunk;
-    },
-    getEndChunk: function ChunkedStreamManager_getEndChunk(end) {
-      var chunk = Math.floor((end - 1) / this.chunkSize) + 1;
-      return chunk;
-    },
-    abort: function ChunkedStreamManager_abort() {
-      this.aborted = true;
+    });
+  }
 
-      if (this.pdfNetworkStream) {
-        this.pdfNetworkStream.cancelAllRequests('abort');
-      }
+  requestAllChunks() {
+    const missingChunks = this.stream.getMissingChunks();
 
-      for (var requestId in this.promisesByRequest) {
-        var capability = this.promisesByRequest[requestId];
-        capability.reject(new Error('Request was aborted'));
+    this._requestChunks(missingChunks);
+
+    return this._loadedStreamCapability.promise;
+  }
+
+  _requestChunks(chunks) {
+    const requestId = this.currRequestId++;
+    const chunksNeeded = Object.create(null);
+    this.chunksNeededByRequest[requestId] = chunksNeeded;
+
+    for (const chunk of chunks) {
+      if (!this.stream.hasChunk(chunk)) {
+        chunksNeeded[chunk] = true;
       }
     }
-  };
-  return ChunkedStreamManager;
-}();
+
+    if ((0, _util.isEmptyObj)(chunksNeeded)) {
+      return Promise.resolve();
+    }
+
+    const capability = (0, _util.createPromiseCapability)();
+    this.promisesByRequest[requestId] = capability;
+    const chunksToRequest = [];
+
+    for (let chunk in chunksNeeded) {
+      chunk = chunk | 0;
+
+      if (!(chunk in this.requestsByChunk)) {
+        this.requestsByChunk[chunk] = [];
+        chunksToRequest.push(chunk);
+      }
+
+      this.requestsByChunk[chunk].push(requestId);
+    }
+
+    if (!chunksToRequest.length) {
+      return capability.promise;
+    }
+
+    const groupedChunksToRequest = this.groupChunks(chunksToRequest);
+
+    for (const groupedChunk of groupedChunksToRequest) {
+      const begin = groupedChunk.beginChunk * this.chunkSize;
+      const end = Math.min(groupedChunk.endChunk * this.chunkSize, this.length);
+      this.sendRequest(begin, end);
+    }
+
+    return capability.promise;
+  }
+
+  getStream() {
+    return this.stream;
+  }
+
+  requestRange(begin, end) {
+    end = Math.min(end, this.length);
+    const beginChunk = this.getBeginChunk(begin);
+    const endChunk = this.getEndChunk(end);
+    const chunks = [];
+
+    for (let chunk = beginChunk; chunk < endChunk; ++chunk) {
+      chunks.push(chunk);
+    }
+
+    return this._requestChunks(chunks);
+  }
+
+  requestRanges(ranges = []) {
+    const chunksToRequest = [];
+
+    for (const range of ranges) {
+      const beginChunk = this.getBeginChunk(range.begin);
+      const endChunk = this.getEndChunk(range.end);
+
+      for (let chunk = beginChunk; chunk < endChunk; ++chunk) {
+        if (!chunksToRequest.includes(chunk)) {
+          chunksToRequest.push(chunk);
+        }
+      }
+    }
+
+    chunksToRequest.sort(function (a, b) {
+      return a - b;
+    });
+    return this._requestChunks(chunksToRequest);
+  }
+
+  groupChunks(chunks) {
+    const groupedChunks = [];
+    let beginChunk = -1;
+    let prevChunk = -1;
+
+    for (let i = 0, ii = chunks.length; i < ii; ++i) {
+      const chunk = chunks[i];
+
+      if (beginChunk < 0) {
+        beginChunk = chunk;
+      }
+
+      if (prevChunk >= 0 && prevChunk + 1 !== chunk) {
+        groupedChunks.push({
+          beginChunk,
+          endChunk: prevChunk + 1
+        });
+        beginChunk = chunk;
+      }
+
+      if (i + 1 === chunks.length) {
+        groupedChunks.push({
+          beginChunk,
+          endChunk: chunk + 1
+        });
+      }
+
+      prevChunk = chunk;
+    }
+
+    return groupedChunks;
+  }
+
+  onProgress(args) {
+    this.msgHandler.send('DocProgress', {
+      loaded: this.stream.numChunksLoaded * this.chunkSize + args.loaded,
+      total: this.length
+    });
+  }
+
+  onReceiveData(args) {
+    let chunk = args.chunk;
+    const isProgressive = args.begin === undefined;
+    const begin = isProgressive ? this.progressiveDataLength : args.begin;
+    const end = begin + chunk.byteLength;
+    const beginChunk = Math.floor(begin / this.chunkSize);
+    const endChunk = end < this.length ? Math.floor(end / this.chunkSize) : Math.ceil(end / this.chunkSize);
+
+    if (isProgressive) {
+      this.stream.onReceiveProgressiveData(chunk);
+      this.progressiveDataLength = end;
+    } else {
+      this.stream.onReceiveData(begin, chunk);
+    }
+
+    if (this.stream.allChunksLoaded()) {
+      this._loadedStreamCapability.resolve(this.stream);
+    }
+
+    const loadedRequests = [];
+
+    for (let chunk = beginChunk; chunk < endChunk; ++chunk) {
+      const requestIds = this.requestsByChunk[chunk] || [];
+      delete this.requestsByChunk[chunk];
+
+      for (const requestId of requestIds) {
+        const chunksNeeded = this.chunksNeededByRequest[requestId];
+
+        if (chunk in chunksNeeded) {
+          delete chunksNeeded[chunk];
+        }
+
+        if (!(0, _util.isEmptyObj)(chunksNeeded)) {
+          continue;
+        }
+
+        loadedRequests.push(requestId);
+      }
+    }
+
+    if (!this.disableAutoFetch && (0, _util.isEmptyObj)(this.requestsByChunk)) {
+      let nextEmptyChunk;
+
+      if (this.stream.numChunksLoaded === 1) {
+        const lastChunk = this.stream.numChunks - 1;
+
+        if (!this.stream.hasChunk(lastChunk)) {
+          nextEmptyChunk = lastChunk;
+        }
+      } else {
+        nextEmptyChunk = this.stream.nextEmptyChunk(endChunk);
+      }
+
+      if (Number.isInteger(nextEmptyChunk)) {
+        this._requestChunks([nextEmptyChunk]);
+      }
+    }
+
+    for (const requestId of loadedRequests) {
+      const capability = this.promisesByRequest[requestId];
+      delete this.promisesByRequest[requestId];
+      capability.resolve();
+    }
+
+    this.msgHandler.send('DocProgress', {
+      loaded: this.stream.numChunksLoaded * this.chunkSize,
+      total: this.length
+    });
+  }
+
+  onError(err) {
+    this._loadedStreamCapability.reject(err);
+  }
+
+  getBeginChunk(begin) {
+    return Math.floor(begin / this.chunkSize);
+  }
+
+  getEndChunk(end) {
+    return Math.floor((end - 1) / this.chunkSize) + 1;
+  }
+
+  abort() {
+    this.aborted = true;
+
+    if (this.pdfNetworkStream) {
+      this.pdfNetworkStream.cancelAllRequests('abort');
+    }
+
+    for (const requestId in this.promisesByRequest) {
+      this.promisesByRequest[requestId].reject(new Error('Request was aborted'));
+    }
+  }
+
+}
 
 exports.ChunkedStreamManager = ChunkedStreamManager;
 
@@ -6366,15 +6377,15 @@ var _evaluator = __w_pdfjs_require__(28);
 
 var _function = __w_pdfjs_require__(42);
 
-var Page = function PageClosure() {
-  var DEFAULT_USER_UNIT = 1.0;
-  var LETTER_SIZE_MEDIABOX = [0, 0, 612, 792];
+const DEFAULT_USER_UNIT = 1.0;
+const LETTER_SIZE_MEDIABOX = [0, 0, 612, 792];
 
-  function isAnnotationRenderable(annotation, intent) {
-    return intent === 'display' && annotation.viewable || intent === 'print' && annotation.printable;
-  }
+function isAnnotationRenderable(annotation, intent) {
+  return intent === 'display' && annotation.viewable || intent === 'print' && annotation.printable;
+}
 
-  function Page({
+class Page {
+  constructor({
     pdfManager,
     xref,
     pageIndex,
@@ -6394,8 +6405,8 @@ var Page = function PageClosure() {
     this.pdfFunctionFactory = pdfFunctionFactory;
     this.evaluatorOptions = pdfManager.evaluatorOptions;
     this.resourcesPromise = null;
-    var uniquePrefix = 'p' + this.pageIndex + '_';
-    var idCounters = {
+    const uniquePrefix = `p${this.pageIndex}_`;
+    const idCounters = {
       obj: 0
     };
     this.idFactory = {
@@ -6406,134 +6417,199 @@ var Page = function PageClosure() {
     };
   }
 
-  Page.prototype = {
-    _getInheritableProperty(key, getArray = false) {
-      let value = (0, _util.getInheritableProperty)({
-        dict: this.pageDict,
-        key,
-        getArray,
-        stopWhenFound: false
-      });
+  _getInheritableProperty(key, getArray = false) {
+    const value = (0, _util.getInheritableProperty)({
+      dict: this.pageDict,
+      key,
+      getArray,
+      stopWhenFound: false
+    });
 
-      if (!Array.isArray(value)) {
-        return value;
-      }
+    if (!Array.isArray(value)) {
+      return value;
+    }
 
-      if (value.length === 1 || !(0, _primitives.isDict)(value[0])) {
-        return value[0];
-      }
+    if (value.length === 1 || !(0, _primitives.isDict)(value[0])) {
+      return value[0];
+    }
 
-      return _primitives.Dict.merge(this.xref, value);
-    },
+    return _primitives.Dict.merge(this.xref, value);
+  }
 
-    get content() {
-      return this.pageDict.get('Contents');
-    },
+  get content() {
+    return this.pageDict.get('Contents');
+  }
 
-    get resources() {
-      return (0, _util.shadow)(this, 'resources', this._getInheritableProperty('Resources') || _primitives.Dict.empty);
-    },
+  get resources() {
+    return (0, _util.shadow)(this, 'resources', this._getInheritableProperty('Resources') || _primitives.Dict.empty);
+  }
 
-    get mediaBox() {
-      var mediaBox = this._getInheritableProperty('MediaBox', true);
+  get mediaBox() {
+    const mediaBox = this._getInheritableProperty('MediaBox', true);
 
-      if (!Array.isArray(mediaBox) || mediaBox.length !== 4) {
-        return (0, _util.shadow)(this, 'mediaBox', LETTER_SIZE_MEDIABOX);
-      }
+    if (!Array.isArray(mediaBox) || mediaBox.length !== 4) {
+      return (0, _util.shadow)(this, 'mediaBox', LETTER_SIZE_MEDIABOX);
+    }
 
-      return (0, _util.shadow)(this, 'mediaBox', mediaBox);
-    },
+    return (0, _util.shadow)(this, 'mediaBox', mediaBox);
+  }
 
-    get cropBox() {
-      var cropBox = this._getInheritableProperty('CropBox', true);
+  get cropBox() {
+    const cropBox = this._getInheritableProperty('CropBox', true);
 
-      if (!Array.isArray(cropBox) || cropBox.length !== 4) {
-        return (0, _util.shadow)(this, 'cropBox', this.mediaBox);
-      }
+    if (!Array.isArray(cropBox) || cropBox.length !== 4) {
+      return (0, _util.shadow)(this, 'cropBox', this.mediaBox);
+    }
 
-      return (0, _util.shadow)(this, 'cropBox', cropBox);
-    },
+    return (0, _util.shadow)(this, 'cropBox', cropBox);
+  }
 
-    get userUnit() {
-      var obj = this.pageDict.get('UserUnit');
+  get userUnit() {
+    let obj = this.pageDict.get('UserUnit');
 
-      if (!(0, _util.isNum)(obj) || obj <= 0) {
-        obj = DEFAULT_USER_UNIT;
-      }
+    if (!(0, _util.isNum)(obj) || obj <= 0) {
+      obj = DEFAULT_USER_UNIT;
+    }
 
-      return (0, _util.shadow)(this, 'userUnit', obj);
-    },
+    return (0, _util.shadow)(this, 'userUnit', obj);
+  }
 
-    get view() {
-      var mediaBox = this.mediaBox,
+  get view() {
+    const mediaBox = this.mediaBox,
           cropBox = this.cropBox;
 
-      if (mediaBox === cropBox) {
-        return (0, _util.shadow)(this, 'view', mediaBox);
+    if (mediaBox === cropBox) {
+      return (0, _util.shadow)(this, 'view', mediaBox);
+    }
+
+    const intersection = _util.Util.intersect(cropBox, mediaBox);
+
+    return (0, _util.shadow)(this, 'view', intersection || mediaBox);
+  }
+
+  get rotate() {
+    let rotate = this._getInheritableProperty('Rotate') || 0;
+
+    if (rotate % 90 !== 0) {
+      rotate = 0;
+    } else if (rotate >= 360) {
+      rotate = rotate % 360;
+    } else if (rotate < 0) {
+      rotate = (rotate % 360 + 360) % 360;
+    }
+
+    return (0, _util.shadow)(this, 'rotate', rotate);
+  }
+
+  getContentStream() {
+    const content = this.content;
+    let stream;
+
+    if (Array.isArray(content)) {
+      const xref = this.xref;
+      const streams = [];
+
+      for (const stream of content) {
+        streams.push(xref.fetchIfRef(stream));
       }
 
-      var intersection = _util.Util.intersect(cropBox, mediaBox);
+      stream = new _stream.StreamsSequenceStream(streams);
+    } else if ((0, _primitives.isStream)(content)) {
+      stream = content;
+    } else {
+      stream = new _stream.NullStream();
+    }
 
-      return (0, _util.shadow)(this, 'view', intersection || mediaBox);
-    },
+    return stream;
+  }
 
-    get rotate() {
-      var rotate = this._getInheritableProperty('Rotate') || 0;
+  loadResources(keys) {
+    if (!this.resourcesPromise) {
+      this.resourcesPromise = this.pdfManager.ensure(this, 'resources');
+    }
 
-      if (rotate % 90 !== 0) {
-        rotate = 0;
-      } else if (rotate >= 360) {
-        rotate = rotate % 360;
-      } else if (rotate < 0) {
-        rotate = (rotate % 360 + 360) % 360;
+    return this.resourcesPromise.then(() => {
+      const objectLoader = new _obj.ObjectLoader(this.resources, keys, this.xref);
+      return objectLoader.load();
+    });
+  }
+
+  getOperatorList({
+    handler,
+    task,
+    intent,
+    renderInteractiveForms
+  }) {
+    const contentStreamPromise = this.pdfManager.ensure(this, 'getContentStream');
+    const resourcesPromise = this.loadResources(['ExtGState', 'ColorSpace', 'Pattern', 'Shading', 'XObject', 'Font']);
+    const partialEvaluator = new _evaluator.PartialEvaluator({
+      pdfManager: this.pdfManager,
+      xref: this.xref,
+      handler,
+      pageIndex: this.pageIndex,
+      idFactory: this.idFactory,
+      fontCache: this.fontCache,
+      builtInCMapCache: this.builtInCMapCache,
+      options: this.evaluatorOptions,
+      pdfFunctionFactory: this.pdfFunctionFactory
+    });
+    const dataPromises = Promise.all([contentStreamPromise, resourcesPromise]);
+    const pageListPromise = dataPromises.then(([contentStream]) => {
+      const opList = new _operator_list.OperatorList(intent, handler, this.pageIndex);
+      handler.send('StartRenderPage', {
+        transparency: partialEvaluator.hasBlendModes(this.resources),
+        pageIndex: this.pageIndex,
+        intent
+      });
+      return partialEvaluator.getOperatorList({
+        stream: contentStream,
+        task,
+        resources: this.resources,
+        operatorList: opList
+      }).then(function () {
+        return opList;
+      });
+    });
+    return Promise.all([pageListPromise, this._parsedAnnotations]).then(function ([pageOpList, annotations]) {
+      if (annotations.length === 0) {
+        pageOpList.flush(true);
+        return pageOpList;
       }
 
-      return (0, _util.shadow)(this, 'rotate', rotate);
-    },
+      const opListPromises = [];
 
-    getContentStream: function Page_getContentStream() {
-      var content = this.content;
-      var stream;
+      for (const annotation of annotations) {
+        if (isAnnotationRenderable(annotation, intent)) {
+          opListPromises.push(annotation.getOperatorList(partialEvaluator, task, renderInteractiveForms));
+        }
+      }
 
-      if (Array.isArray(content)) {
-        var xref = this.xref;
-        var i,
-            n = content.length;
-        var streams = [];
+      return Promise.all(opListPromises).then(function (opLists) {
+        pageOpList.addOp(_util.OPS.beginAnnotations, []);
 
-        for (i = 0; i < n; ++i) {
-          streams.push(xref.fetchIfRef(content[i]));
+        for (const opList of opLists) {
+          pageOpList.addOpList(opList);
         }
 
-        stream = new _stream.StreamsSequenceStream(streams);
-      } else if ((0, _primitives.isStream)(content)) {
-        stream = content;
-      } else {
-        stream = new _stream.NullStream();
-      }
-
-      return stream;
-    },
-    loadResources: function Page_loadResources(keys) {
-      if (!this.resourcesPromise) {
-        this.resourcesPromise = this.pdfManager.ensure(this, 'resources');
-      }
-
-      return this.resourcesPromise.then(() => {
-        let objectLoader = new _obj.ObjectLoader(this.resources, keys, this.xref);
-        return objectLoader.load();
+        pageOpList.addOp(_util.OPS.endAnnotations, []);
+        pageOpList.flush(true);
+        return pageOpList;
       });
-    },
+    });
+  }
 
-    getOperatorList({
-      handler,
-      task,
-      intent,
-      renderInteractiveForms
-    }) {
-      var contentStreamPromise = this.pdfManager.ensure(this, 'getContentStream');
-      var resourcesPromise = this.loadResources(['ExtGState', 'ColorSpace', 'Pattern', 'Shading', 'XObject', 'Font']);
-      var partialEvaluator = new _evaluator.PartialEvaluator({
+  extractTextContent({
+    handler,
+    task,
+    normalizeWhitespace,
+    sink,
+    combineTextItems
+  }) {
+    const contentStreamPromise = this.pdfManager.ensure(this, 'getContentStream');
+    const resourcesPromise = this.loadResources(['ExtGState', 'XObject', 'Font']);
+    const dataPromises = Promise.all([contentStreamPromise, resourcesPromise]);
+    return dataPromises.then(([contentStream]) => {
+      const partialEvaluator = new _evaluator.PartialEvaluator({
         pdfManager: this.pdfManager,
         xref: this.xref,
         handler,
@@ -6544,137 +6620,91 @@ var Page = function PageClosure() {
         options: this.evaluatorOptions,
         pdfFunctionFactory: this.pdfFunctionFactory
       });
-      var dataPromises = Promise.all([contentStreamPromise, resourcesPromise]);
-      var pageListPromise = dataPromises.then(([contentStream]) => {
-        var opList = new _operator_list.OperatorList(intent, handler, this.pageIndex);
-        handler.send('StartRenderPage', {
-          transparency: partialEvaluator.hasBlendModes(this.resources),
-          pageIndex: this.pageIndex,
-          intent
-        });
-        return partialEvaluator.getOperatorList({
-          stream: contentStream,
-          task,
-          resources: this.resources,
-          operatorList: opList
-        }).then(function () {
-          return opList;
-        });
+      return partialEvaluator.getTextContent({
+        stream: contentStream,
+        task,
+        resources: this.resources,
+        normalizeWhitespace,
+        combineTextItems,
+        sink
       });
-      return Promise.all([pageListPromise, this._parsedAnnotations]).then(function ([pageOpList, annotations]) {
-        if (annotations.length === 0) {
-          pageOpList.flush(true);
-          return pageOpList;
+    });
+  }
+
+  getAnnotationsData(intent) {
+    return this._parsedAnnotations.then(function (annotations) {
+      const annotationsData = [];
+
+      for (let i = 0, ii = annotations.length; i < ii; i++) {
+        if (!intent || isAnnotationRenderable(annotations[i], intent)) {
+          annotationsData.push(annotations[i].data);
         }
+      }
 
-        var i,
-            ii,
-            opListPromises = [];
+      return annotationsData;
+    });
+  }
 
-        for (i = 0, ii = annotations.length; i < ii; i++) {
-          if (isAnnotationRenderable(annotations[i], intent)) {
-            opListPromises.push(annotations[i].getOperatorList(partialEvaluator, task, renderInteractiveForms));
-          }
-        }
+  get annotations() {
+    return (0, _util.shadow)(this, 'annotations', this._getInheritableProperty('Annots') || []);
+  }
 
-        return Promise.all(opListPromises).then(function (opLists) {
-          pageOpList.addOp(_util.OPS.beginAnnotations, []);
+  get _parsedAnnotations() {
+    const parsedAnnotations = this.pdfManager.ensure(this, 'annotations').then(() => {
+      const annotationRefs = this.annotations;
+      const annotationPromises = [];
 
-          for (i = 0, ii = opLists.length; i < ii; i++) {
-            pageOpList.addOpList(opLists[i]);
-          }
+      for (let i = 0, ii = annotationRefs.length; i < ii; i++) {
+        annotationPromises.push(_annotation.AnnotationFactory.create(this.xref, annotationRefs[i], this.pdfManager, this.idFactory));
+      }
 
-          pageOpList.addOp(_util.OPS.endAnnotations, []);
-          pageOpList.flush(true);
-          return pageOpList;
+      return Promise.all(annotationPromises).then(function (annotations) {
+        return annotations.filter(function isDefined(annotation) {
+          return !!annotation;
         });
+      }, function (reason) {
+        (0, _util.warn)(`_parsedAnnotations: "${reason}".`);
+        return [];
       });
-    },
+    });
+    return (0, _util.shadow)(this, '_parsedAnnotations', parsedAnnotations);
+  }
 
-    extractTextContent({
-      handler,
-      task,
-      normalizeWhitespace,
-      sink,
-      combineTextItems
-    }) {
-      var contentStreamPromise = this.pdfManager.ensure(this, 'getContentStream');
-      var resourcesPromise = this.loadResources(['ExtGState', 'XObject', 'Font']);
-      var dataPromises = Promise.all([contentStreamPromise, resourcesPromise]);
-      return dataPromises.then(([contentStream]) => {
-        var partialEvaluator = new _evaluator.PartialEvaluator({
-          pdfManager: this.pdfManager,
-          xref: this.xref,
-          handler,
-          pageIndex: this.pageIndex,
-          idFactory: this.idFactory,
-          fontCache: this.fontCache,
-          builtInCMapCache: this.builtInCMapCache,
-          options: this.evaluatorOptions,
-          pdfFunctionFactory: this.pdfFunctionFactory
-        });
-        return partialEvaluator.getTextContent({
-          stream: contentStream,
-          task,
-          resources: this.resources,
-          normalizeWhitespace,
-          combineTextItems,
-          sink
-        });
-      });
-    },
-
-    getAnnotationsData(intent) {
-      return this._parsedAnnotations.then(function (annotations) {
-        let annotationsData = [];
-
-        for (let i = 0, ii = annotations.length; i < ii; i++) {
-          if (!intent || isAnnotationRenderable(annotations[i], intent)) {
-            annotationsData.push(annotations[i].data);
-          }
-        }
-
-        return annotationsData;
-      });
-    },
-
-    get annotations() {
-      return (0, _util.shadow)(this, 'annotations', this._getInheritableProperty('Annots') || []);
-    },
-
-    get _parsedAnnotations() {
-      const parsedAnnotations = this.pdfManager.ensure(this, 'annotations').then(() => {
-        const annotationRefs = this.annotations;
-        const annotationPromises = [];
-
-        for (let i = 0, ii = annotationRefs.length; i < ii; i++) {
-          annotationPromises.push(_annotation.AnnotationFactory.create(this.xref, annotationRefs[i], this.pdfManager, this.idFactory));
-        }
-
-        return Promise.all(annotationPromises).then(function (annotations) {
-          return annotations.filter(function isDefined(annotation) {
-            return !!annotation;
-          });
-        }, function (reason) {
-          (0, _util.warn)(`_parsedAnnotations: "${reason}".`);
-          return [];
-        });
-      });
-      return (0, _util.shadow)(this, '_parsedAnnotations', parsedAnnotations);
-    }
-
-  };
-  return Page;
-}();
+}
 
 exports.Page = Page;
+const FINGERPRINT_FIRST_BYTES = 1024;
+const EMPTY_FINGERPRINT = '\x00\x00\x00\x00\x00\x00\x00' + '\x00\x00\x00\x00\x00\x00\x00\x00\x00';
 
-var PDFDocument = function PDFDocumentClosure() {
-  var FINGERPRINT_FIRST_BYTES = 1024;
-  var EMPTY_FINGERPRINT = '\x00\x00\x00\x00\x00\x00\x00' + '\x00\x00\x00\x00\x00\x00\x00\x00\x00';
+function find(stream, needle, limit, backwards) {
+  const pos = stream.pos;
+  const end = stream.end;
 
-  function PDFDocument(pdfManager, arg) {
-    var stream;
+  if (pos + limit > end) {
+    limit = end - pos;
+  }
+
+  const strBuf = [];
+
+  for (let i = 0; i < limit; ++i) {
+    strBuf.push(String.fromCharCode(stream.getByte()));
+  }
+
+  const str = strBuf.join('');
+  stream.pos = pos;
+  const index = backwards ? str.lastIndexOf(needle) : str.indexOf(needle);
+
+  if (index === -1) {
+    return false;
+  }
+
+  stream.pos += index;
+  return true;
+}
+
+class PDFDocument {
+  constructor(pdfManager, arg) {
+    let stream;
 
     if ((0, _primitives.isStream)(arg)) {
       stream = arg;
@@ -6685,308 +6715,308 @@ var PDFDocument = function PDFDocumentClosure() {
     }
 
     if (stream.length <= 0) {
-      throw new Error('PDFDocument: stream must have data');
+      throw new Error('PDFDocument: Stream must have data');
     }
 
     this.pdfManager = pdfManager;
     this.stream = stream;
     this.xref = new _obj.XRef(stream, pdfManager);
-    let evaluatorOptions = pdfManager.evaluatorOptions;
     this.pdfFunctionFactory = new _function.PDFFunctionFactory({
       xref: this.xref,
-      isEvalSupported: evaluatorOptions.isEvalSupported
+      isEvalSupported: pdfManager.evaluatorOptions.isEvalSupported
     });
     this._pagePromises = [];
   }
 
-  function find(stream, needle, limit, backwards) {
-    var pos = stream.pos;
-    var end = stream.end;
-    var strBuf = [];
+  parse(recoveryMode) {
+    this.setup(recoveryMode);
+    const version = this.catalog.catDict.get('Version');
 
-    if (pos + limit > end) {
-      limit = end - pos;
+    if ((0, _primitives.isName)(version)) {
+      this.pdfFormatVersion = version.name;
     }
 
-    for (var n = 0; n < limit; ++n) {
-      strBuf.push(String.fromCharCode(stream.getByte()));
+    try {
+      this.acroForm = this.catalog.catDict.get('AcroForm');
+
+      if (this.acroForm) {
+        this.xfa = this.acroForm.get('XFA');
+        const fields = this.acroForm.get('Fields');
+
+        if ((!fields || !Array.isArray(fields) || fields.length === 0) && !this.xfa) {
+          this.acroForm = null;
+        }
+      }
+    } catch (ex) {
+      if (ex instanceof _util.MissingDataException) {
+        throw ex;
+      }
+
+      (0, _util.info)('Cannot fetch AcroForm entry; assuming no AcroForms are present');
+      this.acroForm = null;
     }
-
-    var str = strBuf.join('');
-    stream.pos = pos;
-    var index = backwards ? str.lastIndexOf(needle) : str.indexOf(needle);
-
-    if (index === -1) {
-      return false;
-    }
-
-    stream.pos += index;
-    return true;
   }
 
-  const DocumentInfoValidators = {
-    Title: _util.isString,
-    Author: _util.isString,
-    Subject: _util.isString,
-    Keywords: _util.isString,
-    Creator: _util.isString,
-    Producer: _util.isString,
-    CreationDate: _util.isString,
-    ModDate: _util.isString,
-    Trapped: _primitives.isName
-  };
-  PDFDocument.prototype = {
-    parse: function PDFDocument_parse(recoveryMode) {
-      this.setup(recoveryMode);
-      var version = this.catalog.catDict.get('Version');
+  get linearization() {
+    let linearization = null;
 
-      if ((0, _primitives.isName)(version)) {
-        this.pdfFormatVersion = version.name;
+    try {
+      linearization = _parser.Linearization.create(this.stream);
+    } catch (err) {
+      if (err instanceof _util.MissingDataException) {
+        throw err;
       }
 
-      try {
-        this.acroForm = this.catalog.catDict.get('AcroForm');
+      (0, _util.info)(err);
+    }
 
-        if (this.acroForm) {
-          this.xfa = this.acroForm.get('XFA');
-          var fields = this.acroForm.get('Fields');
+    return (0, _util.shadow)(this, 'linearization', linearization);
+  }
 
-          if ((!fields || !Array.isArray(fields) || fields.length === 0) && !this.xfa) {
-            this.acroForm = null;
-          }
-        }
-      } catch (ex) {
-        if (ex instanceof _util.MissingDataException) {
-          throw ex;
-        }
+  get startXRef() {
+    const stream = this.stream;
+    let startXRef = 0;
 
-        (0, _util.info)('Something wrong with AcroForm entry');
-        this.acroForm = null;
-      }
-    },
-
-    get linearization() {
-      let linearization = null;
-
-      try {
-        linearization = _parser.Linearization.create(this.stream);
-      } catch (err) {
-        if (err instanceof _util.MissingDataException) {
-          throw err;
-        }
-
-        (0, _util.info)(err);
-      }
-
-      return (0, _util.shadow)(this, 'linearization', linearization);
-    },
-
-    get startXRef() {
-      var stream = this.stream;
-      var startXRef = 0;
-      var linearization = this.linearization;
-
-      if (linearization) {
-        stream.reset();
-
-        if (find(stream, 'endobj', 1024)) {
-          startXRef = stream.pos + 6;
-        }
-      } else {
-        var step = 1024;
-        var found = false,
-            pos = stream.end;
-
-        while (!found && pos > 0) {
-          pos -= step - 'startxref'.length;
-
-          if (pos < 0) {
-            pos = 0;
-          }
-
-          stream.pos = pos;
-          found = find(stream, 'startxref', step, true);
-        }
-
-        if (found) {
-          stream.skip(9);
-          var ch;
-
-          do {
-            ch = stream.getByte();
-          } while ((0, _util.isSpace)(ch));
-
-          var str = '';
-
-          while (ch >= 0x20 && ch <= 0x39) {
-            str += String.fromCharCode(ch);
-            ch = stream.getByte();
-          }
-
-          startXRef = parseInt(str, 10);
-
-          if (isNaN(startXRef)) {
-            startXRef = 0;
-          }
-        }
-      }
-
-      return (0, _util.shadow)(this, 'startXRef', startXRef);
-    },
-
-    checkHeader: function PDFDocument_checkHeader() {
-      var stream = this.stream;
+    if (this.linearization) {
       stream.reset();
 
-      if (find(stream, '%PDF-', 1024)) {
-        stream.moveStart();
-        var MAX_VERSION_LENGTH = 12;
-        var version = '',
-            ch;
+      if (find(stream, 'endobj', 1024)) {
+        startXRef = stream.pos + 6;
+      }
+    } else {
+      const step = 1024;
+      const startXRefLength = 'startxref'.length;
+      let found = false,
+          pos = stream.end;
 
-        while ((ch = stream.getByte()) > 0x20) {
-          if (version.length >= MAX_VERSION_LENGTH) {
-            break;
-          }
+      while (!found && pos > 0) {
+        pos -= step - startXRefLength;
 
-          version += String.fromCharCode(ch);
+        if (pos < 0) {
+          pos = 0;
         }
 
-        if (!this.pdfFormatVersion) {
-          this.pdfFormatVersion = version.substring(5);
+        stream.pos = pos;
+        found = find(stream, 'startxref', step, true);
+      }
+
+      if (found) {
+        stream.skip(9);
+        let ch;
+
+        do {
+          ch = stream.getByte();
+        } while ((0, _util.isSpace)(ch));
+
+        let str = '';
+
+        while (ch >= 0x20 && ch <= 0x39) {
+          str += String.fromCharCode(ch);
+          ch = stream.getByte();
         }
 
-        return;
-      }
-    },
-    parseStartXRef: function PDFDocument_parseStartXRef() {
-      var startXRef = this.startXRef;
-      this.xref.setStartXRef(startXRef);
-    },
-    setup: function PDFDocument_setup(recoveryMode) {
-      this.xref.parse(recoveryMode);
-      this.catalog = new _obj.Catalog(this.pdfManager, this.xref);
-    },
+        startXRef = parseInt(str, 10);
 
-    get numPages() {
-      var linearization = this.linearization;
-      var num = linearization ? linearization.numPages : this.catalog.numPages;
-      return (0, _util.shadow)(this, 'numPages', num);
-    },
-
-    get documentInfo() {
-      const docInfo = {
-        PDFFormatVersion: this.pdfFormatVersion,
-        IsLinearized: !!this.linearization,
-        IsAcroFormPresent: !!this.acroForm,
-        IsXFAPresent: !!this.xfa
-      };
-      let infoDict;
-
-      try {
-        infoDict = this.xref.trailer.get('Info');
-      } catch (err) {
-        if (err instanceof _util.MissingDataException) {
-          throw err;
-        }
-
-        (0, _util.info)('The document information dictionary is invalid.');
-      }
-
-      if ((0, _primitives.isDict)(infoDict)) {
-        for (let key in DocumentInfoValidators) {
-          if (infoDict.has(key)) {
-            const value = infoDict.get(key);
-
-            if (DocumentInfoValidators[key](value)) {
-              docInfo[key] = typeof value !== 'string' ? value : (0, _util.stringToPDFString)(value);
-            } else {
-              (0, _util.info)('Bad value in document info for "' + key + '"');
-            }
-          }
+        if (isNaN(startXRef)) {
+          startXRef = 0;
         }
       }
-
-      return (0, _util.shadow)(this, 'documentInfo', docInfo);
-    },
-
-    get fingerprint() {
-      var xref = this.xref,
-          hash,
-          fileID = '';
-      var idArray = xref.trailer.get('ID');
-
-      if (Array.isArray(idArray) && idArray[0] && (0, _util.isString)(idArray[0]) && idArray[0] !== EMPTY_FINGERPRINT) {
-        hash = (0, _util.stringToBytes)(idArray[0]);
-      } else {
-        if (this.stream.ensureRange) {
-          this.stream.ensureRange(0, Math.min(FINGERPRINT_FIRST_BYTES, this.stream.end));
-        }
-
-        hash = (0, _crypto.calculateMD5)(this.stream.bytes.subarray(0, FINGERPRINT_FIRST_BYTES), 0, FINGERPRINT_FIRST_BYTES);
-      }
-
-      for (var i = 0, n = hash.length; i < n; i++) {
-        var hex = hash[i].toString(16);
-        fileID += hex.length === 1 ? '0' + hex : hex;
-      }
-
-      return (0, _util.shadow)(this, 'fingerprint', fileID);
-    },
-
-    _getLinearizationPage(pageIndex) {
-      const {
-        catalog,
-        linearization
-      } = this;
-      (0, _util.assert)(linearization && linearization.pageFirst === pageIndex);
-      const ref = new _primitives.Ref(linearization.objectNumberFirst, 0);
-      return this.xref.fetchAsync(ref).then(obj => {
-        if ((0, _primitives.isDict)(obj, 'Page') || (0, _primitives.isDict)(obj) && !obj.has('Type') && obj.has('Contents')) {
-          if (ref && !catalog.pageKidsCountCache.has(ref)) {
-            catalog.pageKidsCountCache.put(ref, 1);
-          }
-
-          return [obj, ref];
-        }
-
-        throw new _util.FormatError('The Linearization dictionary doesn\'t point ' + 'to a valid Page dictionary.');
-      }).catch(reason => {
-        (0, _util.info)(reason);
-        return catalog.getPageDict(pageIndex);
-      });
-    },
-
-    getPage(pageIndex) {
-      if (this._pagePromises[pageIndex] !== undefined) {
-        return this._pagePromises[pageIndex];
-      }
-
-      const {
-        catalog,
-        linearization
-      } = this;
-      const promise = linearization && linearization.pageFirst === pageIndex ? this._getLinearizationPage(pageIndex) : catalog.getPageDict(pageIndex);
-      return this._pagePromises[pageIndex] = promise.then(([pageDict, ref]) => {
-        return new Page({
-          pdfManager: this.pdfManager,
-          xref: this.xref,
-          pageIndex,
-          pageDict,
-          ref,
-          fontCache: catalog.fontCache,
-          builtInCMapCache: catalog.builtInCMapCache,
-          pdfFunctionFactory: this.pdfFunctionFactory
-        });
-      });
-    },
-
-    cleanup: function PDFDocument_cleanup() {
-      return this.catalog.cleanup();
     }
-  };
-  return PDFDocument;
-}();
+
+    return (0, _util.shadow)(this, 'startXRef', startXRef);
+  }
+
+  checkHeader() {
+    const stream = this.stream;
+    stream.reset();
+
+    if (!find(stream, '%PDF-', 1024)) {
+      return;
+    }
+
+    stream.moveStart();
+    const MAX_PDF_VERSION_LENGTH = 12;
+    let version = '',
+        ch;
+
+    while ((ch = stream.getByte()) > 0x20) {
+      if (version.length >= MAX_PDF_VERSION_LENGTH) {
+        break;
+      }
+
+      version += String.fromCharCode(ch);
+    }
+
+    if (!this.pdfFormatVersion) {
+      this.pdfFormatVersion = version.substring(5);
+    }
+  }
+
+  parseStartXRef() {
+    this.xref.setStartXRef(this.startXRef);
+  }
+
+  setup(recoveryMode) {
+    this.xref.parse(recoveryMode);
+    this.catalog = new _obj.Catalog(this.pdfManager, this.xref);
+  }
+
+  get numPages() {
+    const linearization = this.linearization;
+    const num = linearization ? linearization.numPages : this.catalog.numPages;
+    return (0, _util.shadow)(this, 'numPages', num);
+  }
+
+  get documentInfo() {
+    const DocumentInfoValidators = {
+      Title: _util.isString,
+      Author: _util.isString,
+      Subject: _util.isString,
+      Keywords: _util.isString,
+      Creator: _util.isString,
+      Producer: _util.isString,
+      CreationDate: _util.isString,
+      ModDate: _util.isString,
+      Trapped: _primitives.isName
+    };
+    const docInfo = {
+      PDFFormatVersion: this.pdfFormatVersion,
+      IsLinearized: !!this.linearization,
+      IsAcroFormPresent: !!this.acroForm,
+      IsXFAPresent: !!this.xfa
+    };
+    let infoDict;
+
+    try {
+      infoDict = this.xref.trailer.get('Info');
+    } catch (err) {
+      if (err instanceof _util.MissingDataException) {
+        throw err;
+      }
+
+      (0, _util.info)('The document information dictionary is invalid.');
+    }
+
+    if ((0, _primitives.isDict)(infoDict)) {
+      for (const key of infoDict.getKeys()) {
+        const value = infoDict.get(key);
+
+        if (DocumentInfoValidators[key]) {
+          if (DocumentInfoValidators[key](value)) {
+            docInfo[key] = typeof value !== 'string' ? value : (0, _util.stringToPDFString)(value);
+          } else {
+            (0, _util.info)(`Bad value in document info for "${key}".`);
+          }
+        } else if (typeof key === 'string') {
+          let customValue;
+
+          if ((0, _util.isString)(value)) {
+            customValue = (0, _util.stringToPDFString)(value);
+          } else if ((0, _primitives.isName)(value) || (0, _util.isNum)(value) || (0, _util.isBool)(value)) {
+            customValue = value;
+          } else {
+            (0, _util.info)(`Unsupported value in document info for (custom) "${key}".`);
+            continue;
+          }
+
+          if (!docInfo['Custom']) {
+            docInfo['Custom'] = Object.create(null);
+          }
+
+          docInfo['Custom'][key] = customValue;
+        }
+      }
+    }
+
+    return (0, _util.shadow)(this, 'documentInfo', docInfo);
+  }
+
+  get fingerprint() {
+    let hash;
+    const idArray = this.xref.trailer.get('ID');
+
+    if (Array.isArray(idArray) && idArray[0] && (0, _util.isString)(idArray[0]) && idArray[0] !== EMPTY_FINGERPRINT) {
+      hash = (0, _util.stringToBytes)(idArray[0]);
+    } else {
+      if (this.stream.ensureRange) {
+        this.stream.ensureRange(0, Math.min(FINGERPRINT_FIRST_BYTES, this.stream.end));
+      }
+
+      hash = (0, _crypto.calculateMD5)(this.stream.bytes.subarray(0, FINGERPRINT_FIRST_BYTES), 0, FINGERPRINT_FIRST_BYTES);
+    }
+
+    let fingerprint = '';
+
+    for (const hashPart of hash) {
+      const hex = hashPart.toString(16);
+      fingerprint += hex.length === 1 ? '0' + hex : hex;
+    }
+
+    return (0, _util.shadow)(this, 'fingerprint', fingerprint);
+  }
+
+  _getLinearizationPage(pageIndex) {
+    const {
+      catalog,
+      linearization
+    } = this;
+    (0, _util.assert)(linearization && linearization.pageFirst === pageIndex);
+    const ref = new _primitives.Ref(linearization.objectNumberFirst, 0);
+    return this.xref.fetchAsync(ref).then(obj => {
+      if ((0, _primitives.isDict)(obj, 'Page') || (0, _primitives.isDict)(obj) && !obj.has('Type') && obj.has('Contents')) {
+        if (ref && !catalog.pageKidsCountCache.has(ref)) {
+          catalog.pageKidsCountCache.put(ref, 1);
+        }
+
+        return [obj, ref];
+      }
+
+      throw new _util.FormatError('The Linearization dictionary doesn\'t point ' + 'to a valid Page dictionary.');
+    }).catch(reason => {
+      (0, _util.info)(reason);
+      return catalog.getPageDict(pageIndex);
+    });
+  }
+
+  getPage(pageIndex) {
+    if (this._pagePromises[pageIndex] !== undefined) {
+      return this._pagePromises[pageIndex];
+    }
+
+    const {
+      catalog,
+      linearization
+    } = this;
+    const promise = linearization && linearization.pageFirst === pageIndex ? this._getLinearizationPage(pageIndex) : catalog.getPageDict(pageIndex);
+    return this._pagePromises[pageIndex] = promise.then(([pageDict, ref]) => {
+      return new Page({
+        pdfManager: this.pdfManager,
+        xref: this.xref,
+        pageIndex,
+        pageDict,
+        ref,
+        fontCache: catalog.fontCache,
+        builtInCMapCache: catalog.builtInCMapCache,
+        pdfFunctionFactory: this.pdfFunctionFactory
+      });
+    });
+  }
+
+  checkFirstPage() {
+    return this.getPage(0).catch(reason => {
+      if (reason instanceof _util.XRefEntryException) {
+        this._pagePromises.length = 0;
+        this.cleanup();
+        throw new _util.XRefParseException();
+      }
+    });
+  }
+
+  cleanup() {
+    return this.catalog.cleanup();
+  }
+
+}
 
 exports.PDFDocument = PDFDocument;
 
@@ -7415,6 +7445,32 @@ class Catalog {
     }
 
     return (0, _util.shadow)(this, 'pageMode', pageMode);
+  }
+
+  get openActionDestination() {
+    const obj = this.catDict.get('OpenAction');
+    let openActionDest = null;
+
+    if ((0, _primitives.isDict)(obj)) {
+      const destDict = new _primitives.Dict(this.xref);
+      destDict.set('A', obj);
+      const resultObj = {
+        url: null,
+        dest: null
+      };
+      Catalog.parseDestDictionary({
+        destDict,
+        resultObj
+      });
+
+      if (Array.isArray(resultObj.dest)) {
+        openActionDest = resultObj.dest;
+      }
+    } else if (Array.isArray(obj)) {
+      openActionDest = obj;
+    }
+
+    return (0, _util.shadow)(this, 'openActionDestination', openActionDest);
   }
 
   get attachments() {
@@ -8454,7 +8510,7 @@ var XRef = function XRefClosure() {
       if (xrefEntry.uncompressed) {
         xrefEntry = this.fetchUncompressed(ref, xrefEntry, suppressEncryption);
       } else {
-        xrefEntry = this.fetchCompressed(xrefEntry, suppressEncryption);
+        xrefEntry = this.fetchCompressed(ref, xrefEntry, suppressEncryption);
       }
 
       if ((0, _primitives.isDict)(xrefEntry)) {
@@ -8465,12 +8521,13 @@ var XRef = function XRefClosure() {
 
       return xrefEntry;
     },
-    fetchUncompressed: function XRef_fetchUncompressed(ref, xrefEntry, suppressEncryption) {
+
+    fetchUncompressed(ref, xrefEntry, suppressEncryption = false) {
       var gen = ref.gen;
       var num = ref.num;
 
       if (xrefEntry.gen !== gen) {
-        throw new _util.FormatError('inconsistent generation in XRef');
+        throw new _util.XRefEntryException(`Inconsistent generation in XRef: ${ref}`);
       }
 
       var stream = this.stream.makeSubStream(xrefEntry.offset + this.stream.start);
@@ -8488,7 +8545,7 @@ var XRef = function XRefClosure() {
       }
 
       if (obj1 !== num || obj2 !== gen || !(0, _primitives.isCmd)(obj3)) {
-        throw new _util.FormatError('bad XRef entry');
+        throw new _util.XRefEntryException(`Bad (uncompressed) XRef entry: ${ref}`);
       }
 
       if (obj3.cmd !== 'obj') {
@@ -8500,7 +8557,7 @@ var XRef = function XRefClosure() {
           }
         }
 
-        throw new _util.FormatError('bad XRef entry');
+        throw new _util.XRefEntryException(`Bad (uncompressed) XRef entry: ${ref}`);
       }
 
       if (this.encrypt && !suppressEncryption) {
@@ -8515,7 +8572,8 @@ var XRef = function XRefClosure() {
 
       return xrefEntry;
     },
-    fetchCompressed: function XRef_fetchCompressed(xrefEntry, suppressEncryption) {
+
+    fetchCompressed(ref, xrefEntry, suppressEncryption = false) {
       var tableOffset = xrefEntry.offset;
       var stream = this.fetch(new _primitives.Ref(tableOffset, 0));
 
@@ -8570,7 +8628,7 @@ var XRef = function XRefClosure() {
       xrefEntry = entries[xrefEntry.gen];
 
       if (xrefEntry === undefined) {
-        throw new _util.FormatError('bad XRef entry for compressed object');
+        throw new _util.XRefEntryException(`Bad (compressed) XRef entry: ${ref}`);
       }
 
       return xrefEntry;
@@ -9191,13 +9249,11 @@ var Ref = function RefClosure() {
 
   Ref.prototype = {
     toString: function Ref_toString() {
-      var str = this.num + 'R';
-
       if (this.gen !== 0) {
-        str += this.gen;
+        return `${this.num}R${this.gen}`;
       }
 
-      return str;
+      return `${this.num}R`;
     }
   };
   return Ref;
@@ -21928,13 +21984,17 @@ class AnnotationBorderStyle {
   }
 
   setWidth(width) {
+    if ((0, _primitives.isName)(width)) {
+      width = parseFloat(width.name);
+    }
+
     if (Number.isInteger(width)) {
       this.width = width;
     }
   }
 
   setStyle(style) {
-    if (!style) {
+    if (!(0, _primitives.isName)(style)) {
       return;
     }
 

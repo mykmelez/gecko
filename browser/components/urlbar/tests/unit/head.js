@@ -12,9 +12,9 @@ if (commonFile) {
 }
 
 // Put any other stuff relative to this test folder below.
-
-ChromeUtils.import("resource:///modules/UrlbarController.jsm");
+ChromeUtils.import("resource:///modules/UrlbarUtils.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
+  HttpServer: "resource://testing-common/httpd.js",
   PlacesTestUtils: "resource://testing-common/PlacesTestUtils.jsm",
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
   UrlbarController: "resource:///modules/UrlbarController.jsm",
@@ -24,7 +24,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   UrlbarProviderOpenTabs: "resource:///modules/UrlbarProviderOpenTabs.jsm",
   UrlbarProvidersManager: "resource:///modules/UrlbarProvidersManager.jsm",
   UrlbarTokenizer: "resource:///modules/UrlbarTokenizer.jsm",
-  UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
 });
 
 // ================================================
@@ -82,38 +81,122 @@ function promiseControllerNotification(controller, notification, expected = true
 }
 
 /**
+ * A basic test provider, returning all the provided matches.
+ */
+class TestProvider extends UrlbarProvider {
+  constructor(matches, cancelCallback) {
+    super();
+    this._name = "TestProvider" + Math.floor(Math.random() * 100000);
+    this._cancel = cancelCallback;
+    this._matches = matches;
+  }
+  get name() {
+    return this._name;
+  }
+  get type() {
+    return UrlbarUtils.PROVIDER_TYPE.PROFILE;
+  }
+  get sources() {
+    return this._matches.map(r => r.source);
+  }
+  async startQuery(context, add) {
+    Assert.ok(context, "context is passed-in");
+    Assert.equal(typeof add, "function", "add is a callback");
+    this._context = context;
+    for (const match of this._matches) {
+      add(this, match);
+    }
+  }
+  cancelQuery(context) {
+    // If the query was created but didn't run, this_context will be undefined.
+    if (this._context) {
+      Assert.equal(this._context, context, "context is the same");
+    }
+    if (this._cancelCallback) {
+      this._cancelCallback();
+    }
+  }
+}
+
+/**
  * Helper function to clear the existing providers and register a basic provider
  * that returns only the results given.
  *
- * @param {array} results The results for the provider to return.
+ * @param {array} matches The matches for the provider to return.
  * @param {function} [cancelCallback] Optional, called when the query provider
  *                                    receives a cancel instruction.
  * @returns {string} name of the registered provider
  */
-function registerBasicTestProvider(results, cancelCallback) {
-  let name = "TestProvider" + Math.floor(Math.random() * 100000);
-  UrlbarProvidersManager.registerProvider({
-    name,
-    get type() {
-      return UrlbarUtils.PROVIDER_TYPE.PROFILE;
-    },
-    get sources() {
-      return results.map(r => r.source);
-    },
-    async startQuery(context, add) {
-      Assert.ok(context, "context is passed-in");
-      Assert.equal(typeof add, "function", "add is a callback");
-      this._context = context;
-      for (const result of results) {
-        add(this, result);
+function registerBasicTestProvider(matches, cancelCallback) {
+  let provider = new TestProvider(matches, cancelCallback);
+  UrlbarProvidersManager.registerProvider(provider);
+  return provider.name;
+}
+
+// Creates an HTTP server for the test.
+function makeTestServer(port = -1) {
+  let httpServer = new HttpServer();
+  httpServer.start(port);
+  registerCleanupFunction(() => httpServer.stop(() => {}));
+  return httpServer;
+}
+
+/**
+ * Adds a search engine to the Search Service.
+ *
+ * @param {string} basename
+ *        Basename for the engine.
+ * @param {object} httpServer [optional] HTTP Server to use.
+ * @returns {Promise} Resolved once the addition is complete.
+ */
+async function addTestEngine(basename, httpServer = undefined) {
+  httpServer = httpServer || makeTestServer();
+  httpServer.registerDirectory("/", do_get_cwd());
+  let dataUrl =
+    "http://localhost:" + httpServer.identity.primaryPort + "/data/";
+
+  info("Adding engine: " + basename);
+  await new Promise(resolve => Services.search.init(resolve));
+  return new Promise(resolve => {
+    Services.obs.addObserver(function obs(subject, topic, data) {
+      let engine = subject.QueryInterface(Ci.nsISearchEngine);
+      info("Observed " + data + " for " + engine.name);
+      if (data != "engine-added" || engine.name != basename) {
+        return;
       }
-    },
-    cancelQuery(context) {
-      Assert.equal(this._context, context, "context is the same");
-      if (cancelCallback) {
-        cancelCallback();
-      }
-    },
+
+      Services.obs.removeObserver(obs, "browser-search-engine-modified");
+      registerCleanupFunction(() => Services.search.removeEngine(engine));
+      resolve(engine);
+    }, "browser-search-engine-modified");
+
+    info("Adding engine from URL: " + dataUrl + basename);
+    Services.search.addEngine(dataUrl + basename, null, false);
   });
-  return name;
+}
+
+/**
+ * Sets up a search engine that provides some suggestions by appending strings
+ * onto the search query.
+ *
+ * @param {function} suggestionsFn
+ *        A function that returns an array of suggestion strings given a
+ *        search string.  If not given, a default function is used.
+ * @returns {nsISearchEngine} The new engine.
+ */
+function addTestSuggestionsEngine(suggestionsFn = null) {
+  // This port number should match the number in engine-suggestions.xml.
+  let server = makeTestServer(9000);
+  server.registerPathHandler("/suggest", (req, resp) => {
+    // URL query params are x-www-form-urlencoded, which converts spaces into
+    // plus signs, so un-convert any plus signs back to spaces.
+    let searchStr = decodeURIComponent(req.queryString.replace(/\+/g, " "));
+    let suggestions =
+      suggestionsFn ? suggestionsFn(searchStr) :
+      [searchStr].concat(["foo", "bar"].map(s => searchStr + " " + s));
+    let data = [searchStr, suggestions];
+    resp.setHeader("Content-Type", "application/json", false);
+    resp.write(JSON.stringify(data));
+  });
+  return addTestEngine("engine-suggestions.xml", server);
 }

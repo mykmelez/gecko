@@ -153,11 +153,15 @@ JS_FRIEND_API bool JS::GetIsSecureContext(JS::Realm* realm) {
   return realm->creationOptions().secureContext();
 }
 
+JS_FRIEND_API void js::AssertCompartmentHasSingleRealm(JS::Compartment* comp) {
+  MOZ_RELEASE_ASSERT(comp->realms().length() == 1);
+}
+
 JS_FRIEND_API JSPrincipals* JS_DeprecatedGetCompartmentPrincipals(
     JS::Compartment* compartment) {
   // Note: for now we assume a single realm per compartment. This API will go
   // away after we remove the remaining callers. See bug 1465700.
-  MOZ_RELEASE_ASSERT(compartment->realms().length() == 1);
+  js::AssertCompartmentHasSingleRealm(compartment);
 
   return compartment->realms()[0]->principals();
 }
@@ -543,9 +547,10 @@ JS_FRIEND_API bool js::ZoneGlobalsAreAllGray(JS::Zone* zone) {
   return true;
 }
 
-JS_FRIEND_API bool js::IsObjectZoneSweepingOrCompacting(JSObject* obj) {
-  MOZ_ASSERT(obj);
-  return MaybeForwarded(obj)->zone()->isGCSweepingOrCompacting();
+JS_FRIEND_API bool js::IsCompartmentZoneSweepingOrCompacting(
+    JS::Compartment* comp) {
+  MOZ_ASSERT(comp);
+  return comp->zone()->isGCSweepingOrCompacting();
 }
 
 namespace {
@@ -1152,6 +1157,12 @@ JS_FRIEND_API JS::Realm* js::GetAnyRealmInZone(JS::Zone* zone) {
   return realm.get();
 }
 
+JS_FRIEND_API JSObject* js::GetFirstGlobalInCompartment(JS::Compartment* comp) {
+  JSObject* global = comp->firstRealm()->maybeGlobal();
+  MOZ_ASSERT(global);
+  return global;
+}
+
 void JS::ObjectPtr::finalize(JSRuntime* rt) {
   if (IsIncrementalBarrierNeeded(rt->mainContextFromOwnThread())) {
     IncrementalPreWriteBarrier(value);
@@ -1391,6 +1402,14 @@ JS_FRIEND_API void js::LogDtor(void* self, const char* type, uint32_t sz) {
   if (LogCtorDtor fun = sLogDtor) {
     fun(self, type, sz);
   }
+}
+
+JS_FRIEND_API JS::Value js::MaybeGetScriptPrivate(JSObject* object) {
+  if (!object->is<ScriptSourceObject>()) {
+    return UndefinedValue();
+  }
+
+  return object->as<ScriptSourceObject>().canonicalPrivate();
 }
 
 JS_FRIEND_API uint64_t js::GetGCHeapUsageForObjectZone(JSObject* obj) {

@@ -111,7 +111,7 @@
 #include "nsCycleCollector.h"
 #include "nsDataHashtable.h"
 #include "nsDocShellCID.h"
-#include "nsDocument.h"
+#include "nsIDocument.h"
 #include "nsDOMCID.h"
 #include "mozilla/dom/DataTransfer.h"
 #include "nsDOMJSUtils.h"
@@ -2541,10 +2541,8 @@ int32_t nsContentUtils::ComparePoints(nsINode* aParent1, int32_t aOffset1,
 }
 
 // static
-nsINode*
-nsContentUtils::GetCommonAncestorUnderInteractiveContent(nsINode* aNode1,
-                                                         nsINode* aNode2)
-{
+nsINode* nsContentUtils::GetCommonAncestorUnderInteractiveContent(
+    nsINode* aNode1, nsINode* aNode2) {
   if (!aNode1 || !aNode2) {
     return nullptr;
   }
@@ -8202,7 +8200,7 @@ bool nsContentUtils::IsThirdPartyWindowOrChannel(nsPIDOMWindowInner* aWindow,
   if (aWindow) {
     nsresult rv = thirdPartyUtil->IsThirdPartyWindow(aWindow->GetOuterWindow(),
                                                      aURI, &thirdParty);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
+    if (NS_FAILED(rv)) {
       // Ideally we would do something similar to the channel code path here,
       // but existing code depends on this behaviour.
       return false;
@@ -8591,8 +8589,11 @@ class StringBuilder {
   }
 
   bool ToString(nsAString& aOut) {
+    if (!mLength.isValid()) {
+      return false;
+    }
     nsresult rv;
-    BulkAppender appender(aOut.BulkWrite(mLength, 0, true, rv));
+    BulkAppender appender(aOut.BulkWrite(mLength.value(), 0, true, rv));
     if (NS_FAILED(rv)) {
       return false;
     }
@@ -8727,7 +8728,7 @@ class StringBuilder {
   nsAutoPtr<StringBuilder> mNext;
   StringBuilder* mLast;
   // mLength is used only in the first StringBuilder object in the linked list.
-  uint32_t mLength;
+  CheckedInt<uint32_t> mLength;
 };
 
 }  // namespace

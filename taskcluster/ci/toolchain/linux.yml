@@ -511,29 +511,6 @@ linux64-rust-1.28:
         ]
         toolchain-artifact: public/build/rustc.tar.xz
 
-linux64-rust-1.30:
-    description: "rust repack"
-    treeherder:
-        kind: build
-        platform: toolchains/opt
-        symbol: TL(rust-1.30)
-        tier: 1
-    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
-    worker:
-        max-run-time: 7200
-        env:
-            UPLOAD_DIR: artifacts
-    run:
-        using: toolchain-script
-        script: repack_rust.py
-        arguments: [
-            '--channel', '1.30.0',
-            '--host', 'x86_64-unknown-linux-gnu',
-            '--target', 'x86_64-unknown-linux-gnu',
-            '--target', 'i686-unknown-linux-gnu',
-        ]
-        toolchain-artifact: public/build/rustc.tar.xz
-
 linux64-rust-1.31:
     description: "rust repack"
     treeherder:
@@ -880,3 +857,46 @@ linux64-mingw-fxc2-x86:
         toolchain-artifact: public/build/fxc2.tar.xz
     toolchains:
         - linux64-clang-trunk-mingw-x86
+
+linux64-custom-v8:
+    description: "Custom v8 build"
+    treeherder:
+        kind: build
+        platform: toolchains/opt
+        symbol: TL(custom-v8)
+        tier: 1
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+    worker:
+        docker-image: {in-tree: custom-v8}
+        max-run-time: 3600
+    run:
+        using: toolchain-script
+        script: build-custom-v8.sh
+        arguments: [
+            d8.zip,
+            is_debug=false,
+            target_cpu="x64"
+        ]
+        toolchain-artifact: public/build/d8.zip
+
+wrench-deps:
+    description: "Downloads all the crates needed for building wrench"
+    treeherder:
+        kind: build
+        platform: toolchains/opt
+        symbol: WR(wrench-deps)
+        tier: 2
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+    worker:
+        docker-image: {in-tree: webrender}
+        max-run-time: 1800
+    run:
+        using: toolchain-script
+        script: wrench-deps-vendoring.sh
+        sparse-profile: null  # need all of gfx/wr checked out for this script
+        resources:
+            - 'gfx/wr/Cargo.lock'
+            - 'taskcluster/scripts/misc/tooltool-download.sh'
+        toolchain-artifact: public/build/wrench-deps.tar.bz2
+    toolchains:
+        - linux64-rust-1.31  # whatever m-c is built with

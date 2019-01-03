@@ -20,10 +20,6 @@ docshell/test/mochitest/**
 extensions/cookie/**
 extensions/spellcheck/**
 extensions/universalchardet/**
-gfx/layers/**
-gfx/tests/browser/**
-gfx/tests/chrome/**
-gfx/tests/mochitest/**
 image/**
 layout/**
 modules/**
@@ -166,22 +162,17 @@ devtools/server/tests/unit/sourcemapped.js
 devtools/server/tests/unit/xpcshell_debugging_script.js
 
 # dom/ exclusions
-dom/abort/**
 dom/animation/**
-dom/asmjscache/**
-dom/battery/**
 dom/base/*.*
 dom/base/test/*.*
 dom/base/test/unit/test_serializers_entities*.js
 dom/base/test/unit_ipc/**
 dom/base/test/jsmodules/**
 dom/bindings/**
-dom/broadcastchannel/**
 dom/browser-element/**
 dom/cache/test/mochitest/**
 dom/cache/test/xpcshell/**
 dom/canvas/**
-dom/console/**
 dom/encoding/**
 dom/events/**
 dom/fetch/**
@@ -190,8 +181,6 @@ dom/flex/**
 dom/grid/**
 dom/html/**
 dom/jsurl/**
-dom/localstorage/**
-dom/manifest/**
 dom/media/test/**
 dom/media/tests/**
 dom/media/webaudio/**

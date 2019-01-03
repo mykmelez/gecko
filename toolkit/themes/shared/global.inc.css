@@ -1,0 +1,87 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+/* Close icon */
+
+.close-icon {
+  -moz-appearance: none;
+  -moz-context-properties: fill, fill-opacity;
+  list-style-image: url(chrome://global/skin/icons/close.svg);
+  color: inherit !important;
+  fill: currentColor;
+  fill-opacity: 0;
+}
+
+.close-icon:hover {
+  fill-opacity: 0.1;
+}
+
+.close-icon:hover:active {
+  fill-opacity: 0.2;
+}
+
+.close-icon > .button-icon,
+.close-icon > .button-box > .button-icon,
+.close-icon > .toolbarbutton-icon {
+  width: 20px;
+  height: 20px;
+}
+
+/* Autoscroll popup */
+
+.autoscroller {
+  border: none;
+  padding: 0;
+  background-image: url("chrome://global/skin/icons/autoscroll.svg");
+  background-size: contain;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  -moz-appearance: none;
+  -moz-window-shadow: none;
+}
+
+.autoscroller[scrolldir="NS"] {
+  background-image: url("chrome://global/skin/icons/autoscroll-vertical.svg");
+}
+
+.autoscroller[scrolldir="EW"] {
+  background-image: url("chrome://global/skin/icons/autoscroll-horizontal.svg");
+}
+
+/* Panel footers */
+
+.panel-footer {
+  background-color: var(--arrowpanel-dimmed);
+}
+
+.panel-footer > button {
+  -moz-appearance: none;
+  /* !important overrides :hover and :active colors from button.css: */
+  color: inherit !important;
+}
+
+.panel-footer > button[disabled] {
+  color: var(--panel-disabled-color) !important;
+}
+
+.panel-footer > button:not([disabled]):hover {
+  background-color: var(--arrowpanel-dimmed);
+}
+
+.panel-footer > button:not([disabled]):hover:active {
+  background-color: var(--arrowpanel-dimmed-further);
+}
+
+.panel-footer > button:not([disabled])[default] {
+  color: white !important;
+  background-color: #0060df;
+}
+
+.panel-footer > button:not([disabled])[default]:hover {
+  background-color: #003eaa;
+}
+
+.panel-footer > button:not([disabled])[default]:hover:active {
+  background-color: #002275;
+}

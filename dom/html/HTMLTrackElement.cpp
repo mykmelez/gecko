@@ -305,7 +305,11 @@ void HTMLTrackElement::LoadResource(RefPtr<WebVTTListener>&& aWebVTTListener) {
   // 9. End the synchronous section, continuing the remaining steps in parallel.
   nsCOMPtr<nsIRunnable> runnable = NS_NewRunnableFunction(
       "dom::HTMLTrackElement::LoadResource",
-      [ self = RefPtr<HTMLTrackElement>(this), uri, secFlags ]() {
+      [self = RefPtr<HTMLTrackElement>(this), uri, secFlags]() {
+        if (!self->mListener) {
+          // Shutdown got called, abort.
+          return;
+        }
         nsCOMPtr<nsIChannel> channel;
         nsCOMPtr<nsILoadGroup> loadGroup =
             self->OwnerDoc()->GetDocumentLoadGroup();

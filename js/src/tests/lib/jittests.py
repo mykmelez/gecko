@@ -512,6 +512,11 @@ def check_output(out, err, rc, timed_out, test, options):
         if rc == 1 and ("Hit MOZ_CRASH" in err or "Assertion failure:" in err):
             return True
 
+        # When running jittests on Android, SEGV results in a return code
+        # of 128+11=139.
+        if rc == 139:
+            return True
+
     if rc != test.expect_status:
         # Tests which expect a timeout check for exit code 6.
         # Sometimes 0 is returned on Windows for unknown reasons.
@@ -799,9 +804,9 @@ def init_remote_dir(device, path, root=True):
 
 def run_tests_remote(tests, num_tests, prefix, options, slog):
     # Setup device with everything needed to run our tests.
-    from mozdevice import ADBAndroid
-    device = ADBAndroid(device=options.device_serial,
-                        test_root=options.remote_test_root)
+    from mozdevice import ADBDevice
+    device = ADBDevice(device=options.device_serial,
+                       test_root=options.remote_test_root)
 
     init_remote_dir(device, options.remote_test_root)
 

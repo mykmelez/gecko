@@ -13,8 +13,11 @@
 #include "mozilla/OriginAttributes.h"
 #include "mozilla/NullPrincipal.h"
 
-nsDocShellLoadState::nsDocShellLoadState()
-    : mResultPrincipalURIIsSome(false),
+#include "mozilla/dom/PContent.h"
+
+nsDocShellLoadState::nsDocShellLoadState(nsIURI* aURI)
+    : mURI(aURI),
+      mResultPrincipalURIIsSome(false),
       mKeepResultPrincipalURIIfSet(false),
       mLoadReplace(false),
       mInheritPrincipal(false),
@@ -24,13 +27,42 @@ nsDocShellLoadState::nsDocShellLoadState()
       mSendReferrer(true),
       mReferrerPolicy(mozilla::net::RP_Unset),
       mLoadType(LOAD_NORMAL),
-      mIsSrcdocLoad(false),
+      mTarget(),
+      mSrcdocData(VoidString()),
       mLoadFlags(0),
       mFirstParty(false),
       mTypeHint(VoidCString()),
       mFileName(VoidString()),
-      mDocShellInternalLoadFlags(0),
-      mIsFromProcessingFrameAttributes(false) {}
+      mIsFromProcessingFrameAttributes(false) {
+  MOZ_ASSERT(aURI, "Cannot create a LoadState with a null URI!");
+}
+
+nsDocShellLoadState::nsDocShellLoadState(DocShellLoadStateInit& aLoadState) {
+  MOZ_ASSERT(aLoadState.URI(), "Cannot create a LoadState with a null URI!");
+  mResultPrincipalURIIsSome = aLoadState.ResultPrincipalURIIsSome();
+  mKeepResultPrincipalURIIfSet = aLoadState.KeepResultPrincipalURIIfSet();
+  mLoadReplace = aLoadState.LoadReplace();
+  mInheritPrincipal = aLoadState.InheritPrincipal();
+  mPrincipalIsExplicit = aLoadState.PrincipalIsExplicit();
+  mForceAllowDataURI = aLoadState.ForceAllowDataURI();
+  mOriginalFrameSrc = aLoadState.OriginalFrameSrc();
+  mSendReferrer = aLoadState.SendReferrer();
+  mReferrerPolicy = (mozilla::net::ReferrerPolicy)aLoadState.ReferrerPolicy();
+  mLoadType = aLoadState.LoadType();
+  mTarget = aLoadState.Target();
+  mLoadFlags = aLoadState.LoadFlags();
+  mFirstParty = aLoadState.FirstParty();
+  mTypeHint = aLoadState.TypeHint();
+  mFileName = aLoadState.FileName();
+  mIsFromProcessingFrameAttributes =
+      aLoadState.IsFromProcessingFrameAttributes();
+  mReferrer = aLoadState.Referrer();
+  mURI = aLoadState.URI();
+  mOriginalURI = aLoadState.OriginalURI();
+  mBaseURI = aLoadState.BaseURI();
+  mTriggeringPrincipal = aLoadState.TriggeringPrincipal();
+  mPrincipalToInherit = aLoadState.PrincipalToInherit();
+}
 
 nsDocShellLoadState::~nsDocShellLoadState() {}
 
@@ -166,20 +198,19 @@ void nsDocShellLoadState::SetSendReferrer(bool aSendReferrer) {
   mSendReferrer = aSendReferrer;
 }
 
-uint32_t nsDocShellLoadState::ReferrerPolicy() const { return mReferrerPolicy; }
+mozilla::net::ReferrerPolicy nsDocShellLoadState::ReferrerPolicy() const {
+  return mReferrerPolicy;
+}
 
 void nsDocShellLoadState::SetReferrerPolicy(
     mozilla::net::ReferrerPolicy aReferrerPolicy) {
   mReferrerPolicy = aReferrerPolicy;
 }
 
-bool nsDocShellLoadState::IsSrcdocLoad() const { return mIsSrcdocLoad; }
-
 const nsString& nsDocShellLoadState::SrcdocData() const { return mSrcdocData; }
 
 void nsDocShellLoadState::SetSrcdocData(const nsAString& aSrcdocData) {
   mSrcdocData = aSrcdocData;
-  mIsSrcdocLoad = true;
 }
 
 nsIDocShell* nsDocShellLoadState::SourceDocShell() const {
@@ -219,6 +250,16 @@ void nsDocShellLoadState::SetLoadFlags(uint32_t aLoadFlags) {
   mLoadFlags = aLoadFlags;
 }
 
+void nsDocShellLoadState::SetLoadFlag(uint32_t aFlag) { mLoadFlags |= aFlag; }
+
+void nsDocShellLoadState::UnsetLoadFlag(uint32_t aFlag) {
+  mLoadFlags &= ~aFlag;
+}
+
+bool nsDocShellLoadState::HasLoadFlags(uint32_t aFlags) {
+  return (mLoadFlags & aFlags) == aFlags;
+}
+
 bool nsDocShellLoadState::FirstParty() const { return mFirstParty; }
 
 void nsDocShellLoadState::SetFirstParty(bool aFirstParty) {
@@ -235,14 +276,6 @@ const nsString& nsDocShellLoadState::FileName() const { return mFileName; }
 
 void nsDocShellLoadState::SetFileName(const nsAString& aFileName) {
   mFileName = aFileName;
-}
-
-uint32_t nsDocShellLoadState::DocShellInternalLoadFlags() const {
-  return mDocShellInternalLoadFlags;
-}
-
-void nsDocShellLoadState::SetDocShellInternalLoadFlags(uint32_t aFlags) {
-  mDocShellInternalLoadFlags = aFlags;
 }
 
 nsresult nsDocShellLoadState::SetupInheritingPrincipal(
@@ -339,52 +372,73 @@ nsresult nsDocShellLoadState::SetupTriggeringPrincipal(
   return NS_OK;
 }
 
-void nsDocShellLoadState::CalculateDocShellInternalLoadFlags() {
-  MOZ_ASSERT(mDocShellInternalLoadFlags == 0,
-             "Shouldn't have any load flags set at this point.");
+void nsDocShellLoadState::CalculateLoadURIFlags() {
+  uint32_t oldLoadFlags = mLoadFlags;
+  mLoadFlags = 0;
 
   if (mInheritPrincipal) {
     MOZ_ASSERT(!nsContentUtils::IsSystemPrincipal(mPrincipalToInherit),
                "Should not inherit SystemPrincipal");
-    mDocShellInternalLoadFlags |=
-        nsDocShell::INTERNAL_LOAD_FLAGS_INHERIT_PRINCIPAL;
+    mLoadFlags |= nsDocShell::INTERNAL_LOAD_FLAGS_INHERIT_PRINCIPAL;
   }
 
   if (!mSendReferrer) {
-    mDocShellInternalLoadFlags |=
-        nsDocShell::INTERNAL_LOAD_FLAGS_DONT_SEND_REFERRER;
+    mLoadFlags |= nsDocShell::INTERNAL_LOAD_FLAGS_DONT_SEND_REFERRER;
   }
 
-  if (mLoadFlags & nsIWebNavigation::LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP) {
-    mDocShellInternalLoadFlags |=
-        nsDocShell::INTERNAL_LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP;
+  if (oldLoadFlags & nsIWebNavigation::LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP) {
+    mLoadFlags |= nsDocShell::INTERNAL_LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP;
   }
 
-  if (mLoadFlags & nsIWebNavigation::LOAD_FLAGS_FIRST_LOAD) {
-    mDocShellInternalLoadFlags |= nsDocShell::INTERNAL_LOAD_FLAGS_FIRST_LOAD;
+  if (oldLoadFlags & nsIWebNavigation::LOAD_FLAGS_FIRST_LOAD) {
+    mLoadFlags |= nsDocShell::INTERNAL_LOAD_FLAGS_FIRST_LOAD;
   }
 
-  if (mLoadFlags & nsIWebNavigation::LOAD_FLAGS_BYPASS_CLASSIFIER) {
-    mDocShellInternalLoadFlags |=
-        nsDocShell::INTERNAL_LOAD_FLAGS_BYPASS_CLASSIFIER;
+  if (oldLoadFlags & nsIWebNavigation::LOAD_FLAGS_BYPASS_CLASSIFIER) {
+    mLoadFlags |= nsDocShell::INTERNAL_LOAD_FLAGS_BYPASS_CLASSIFIER;
   }
 
-  if (mLoadFlags & nsIWebNavigation::LOAD_FLAGS_FORCE_ALLOW_COOKIES) {
-    mDocShellInternalLoadFlags |=
-        nsDocShell::INTERNAL_LOAD_FLAGS_FORCE_ALLOW_COOKIES;
+  if (oldLoadFlags & nsIWebNavigation::LOAD_FLAGS_FORCE_ALLOW_COOKIES) {
+    mLoadFlags |= nsDocShell::INTERNAL_LOAD_FLAGS_FORCE_ALLOW_COOKIES;
   }
 
-  if (mIsSrcdocLoad) {
-    mDocShellInternalLoadFlags |= nsDocShell::INTERNAL_LOAD_FLAGS_IS_SRCDOC;
+  if (!mSrcdocData.IsVoid()) {
+    mLoadFlags |= nsDocShell::INTERNAL_LOAD_FLAGS_IS_SRCDOC;
   }
 
   if (mForceAllowDataURI) {
-    mDocShellInternalLoadFlags |=
-        nsDocShell::INTERNAL_LOAD_FLAGS_FORCE_ALLOW_DATA_URI;
+    mLoadFlags |= nsDocShell::INTERNAL_LOAD_FLAGS_FORCE_ALLOW_DATA_URI;
   }
 
   if (mOriginalFrameSrc) {
-    mDocShellInternalLoadFlags |=
-        nsDocShell::INTERNAL_LOAD_FLAGS_ORIGINAL_FRAME_SRC;
+    mLoadFlags |= nsDocShell::INTERNAL_LOAD_FLAGS_ORIGINAL_FRAME_SRC;
   }
+}
+
+DocShellLoadStateInit nsDocShellLoadState::Serialize() {
+  DocShellLoadStateInit loadState;
+  loadState.ResultPrincipalURIIsSome() = mResultPrincipalURIIsSome;
+  loadState.KeepResultPrincipalURIIfSet() = mKeepResultPrincipalURIIfSet;
+  loadState.LoadReplace() = mLoadReplace;
+  loadState.InheritPrincipal() = mInheritPrincipal;
+  loadState.PrincipalIsExplicit() = mPrincipalIsExplicit;
+  loadState.ForceAllowDataURI() = mForceAllowDataURI;
+  loadState.OriginalFrameSrc() = mOriginalFrameSrc;
+  loadState.SendReferrer() = mSendReferrer;
+  loadState.ReferrerPolicy() = mReferrerPolicy;
+  loadState.LoadType() = mLoadType;
+  loadState.Target() = mTarget;
+  loadState.LoadFlags() = mLoadFlags;
+  loadState.FirstParty() = mFirstParty;
+  loadState.TypeHint() = mTypeHint;
+  loadState.FileName() = mFileName;
+  loadState.IsFromProcessingFrameAttributes() =
+      mIsFromProcessingFrameAttributes;
+  loadState.Referrer() = mReferrer;
+  loadState.URI() = mURI;
+  loadState.OriginalURI() = mOriginalURI;
+  loadState.BaseURI() = mBaseURI;
+  loadState.TriggeringPrincipal() = mTriggeringPrincipal;
+  loadState.PrincipalToInherit() = mPrincipalToInherit;
+  return loadState;
 }

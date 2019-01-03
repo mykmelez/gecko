@@ -14,6 +14,7 @@
 #include "frontend/SourceNotes.h"
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineInspector.h"
+#include "jit/CacheIR.h"
 #include "jit/Ion.h"
 #include "jit/IonControlFlow.h"
 #include "jit/IonOptimizationLevels.h"
@@ -1874,7 +1875,7 @@ AbortReasonOr<Ok> IonBuilder::inspectOpcode(JSOp op) {
   switch (op) {
     case JSOP_NOP:
     case JSOP_NOP_DESTRUCTURING:
-    case JSOP_TRY_DESTRUCTURING_ITERCLOSE:
+    case JSOP_TRY_DESTRUCTURING:
     case JSOP_LINENO:
     case JSOP_JUMPTARGET:
     case JSOP_LABEL:
@@ -8360,6 +8361,10 @@ AbortReasonOr<Ok> IonBuilder::getElemTryReferenceElemOfTypedObject(
     return Ok();
   }
 
+  if (elemType == ReferenceType::TYPE_WASM_ANYREF) {
+    return Ok();
+  }
+
   trackOptimizationSuccess();
   *emitted = true;
 
@@ -8457,6 +8462,9 @@ AbortReasonOr<Ok> IonBuilder::pushReferenceLoadFromTypedObject(
           MLoadUnboxedString::New(alloc(), elements, scaledOffset, adjustment);
       observedTypes->addType(TypeSet::StringType(), alloc().lifoAlloc());
       break;
+    }
+    case ReferenceType::TYPE_WASM_ANYREF: {
+      MOZ_CRASH();
     }
   }
 
@@ -9335,6 +9343,10 @@ AbortReasonOr<Ok> IonBuilder::setElemTryReferenceElemOfTypedObject(
   LinearSum indexAsByteOffset(alloc());
   if (!checkTypedObjectIndexInBounds(elemSize, index, objPrediction,
                                      &indexAsByteOffset)) {
+    return Ok();
+  }
+
+  if (elemType == ReferenceType::TYPE_WASM_ANYREF) {
     return Ok();
   }
 
@@ -11039,6 +11051,10 @@ AbortReasonOr<Ok> IonBuilder::getPropTryReferencePropOfTypedObject(
     return Ok();
   }
 
+  if (fieldType == ReferenceType::TYPE_WASM_ANYREF) {
+    return Ok();
+  }
+
   trackOptimizationSuccess();
   *emitted = true;
 
@@ -11849,8 +11865,8 @@ MDefinition* IonBuilder::tryInnerizeWindow(MDefinition* obj) {
   // Try to optimize accesses on outer window proxies (window.foo, for
   // example) to go directly to the inner window, the global.
   //
-  // Callers should be careful not to pass the inner object to getters or
-  // setters that require outerization.
+  // Callers should be careful not to pass the global object to getters or
+  // setters that require the WindowProxy.
 
   if (obj->type() != MIRType::Object) {
     return obj;
@@ -11866,13 +11882,9 @@ MDefinition* IonBuilder::tryInnerizeWindow(MDefinition* obj) {
     return obj;
   }
 
-  if (!IsWindowProxy(singleton)) {
+  if (!IsWindowProxyForScriptGlobal(script(), singleton)) {
     return obj;
   }
-
-  // This must be a WindowProxy for the current Window/global. Else it'd be
-  // a cross-compartment wrapper and IsWindowProxy returns false for those.
-  MOZ_ASSERT(ToWindowIfWindowProxy(singleton) == &script()->global());
 
   // When we navigate, the WindowProxy is brain transplanted and we'll mark
   // its ObjectGroup as having unknown properties. The type constraint we add
@@ -12220,6 +12232,10 @@ AbortReasonOr<Ok> IonBuilder::setPropTryReferencePropOfTypedObject(
   TypeSet::ObjectKey* globalKey = TypeSet::ObjectKey::get(&script()->global());
   if (globalKey->hasFlags(constraints(),
                           OBJECT_FLAG_TYPED_OBJECT_HAS_DETACHED_BUFFER)) {
+    return Ok();
+  }
+
+  if (fieldType == ReferenceType::TYPE_WASM_ANYREF) {
     return Ok();
   }
 
@@ -14114,6 +14130,8 @@ AbortReasonOr<Ok> IonBuilder::setPropTryReferenceTypedObjectValue(
       store = MStoreUnboxedString::New(alloc(), elements, scaledOffset, value,
                                        typedObj, adjustment);
       break;
+    case ReferenceType::TYPE_WASM_ANYREF:
+      MOZ_CRASH();
   }
 
   current->add(store);

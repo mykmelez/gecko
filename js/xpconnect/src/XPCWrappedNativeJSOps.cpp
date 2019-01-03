@@ -662,8 +662,7 @@ static const js::ClassOps XPC_WN_NoHelper_JSClassOps = {
     XPCWrappedNative::Trace,            // trace
 };
 
-const js::ClassExtension XPC_WN_JSClassExtension = {
-    WrappedNativeObjectMoved};
+const js::ClassExtension XPC_WN_JSClassExtension = {WrappedNativeObjectMoved};
 
 const js::Class XPC_WN_NoHelper_JSClass = {
     "XPCWrappedNative_NoHelper",
@@ -1042,14 +1041,6 @@ static size_t XPC_WN_Proto_ObjectMoved(JSObject* obj, JSObject* old) {
   return 0;
 }
 
-static void XPC_WN_Proto_Trace(JSTracer* trc, JSObject* obj) {
-  // This can be null if xpc shutdown has already happened
-  XPCWrappedNativeProto* p = (XPCWrappedNativeProto*)xpc_GetJSPrivate(obj);
-  if (p) {
-    p->TraceInside(trc);
-  }
-}
-
 /*****************************************************/
 
 static bool XPC_WN_OnlyIWrite_Proto_AddPropertyStub(JSContext* cx,
@@ -1109,7 +1100,7 @@ static const js::ClassOps XPC_WN_Proto_JSClassOps = {
     nullptr,                                  // call
     nullptr,                                  // construct
     nullptr,                                  // hasInstance
-    XPC_WN_Proto_Trace,                       // trace
+    nullptr,                                  // trace
 };
 
 static const js::ClassExtension XPC_WN_Proto_ClassExtension = {

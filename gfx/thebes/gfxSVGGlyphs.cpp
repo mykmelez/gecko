@@ -25,10 +25,10 @@
 #include "mozilla/dom/SVGDocument.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/NullPrincipal.h"
+#include "mozilla/SMILAnimationController.h"
 #include "nsSVGUtils.h"
 #include "nsContentUtils.h"
 #include "gfxFont.h"
-#include "nsSMILAnimationController.h"
 #include "gfxContext.h"
 #include "harfbuzz/hb.h"
 #include "mozilla/dom/ImageTracker.h"
@@ -156,8 +156,7 @@ nsresult gfxSVGGlyphsDocument::SetupPresentation() {
   mDocument->FlushPendingNotifications(FlushType::Layout);
 
   if (mDocument->HasAnimationController()) {
-    mDocument->GetAnimationController()->Resume(
-        nsSMILTimeContainer::PAUSE_IMAGE);
+    mDocument->GetAnimationController()->Resume(SMILTimeContainer::PAUSE_IMAGE);
   }
   mDocument->ImageTracker()->SetAnimatingState(true);
 

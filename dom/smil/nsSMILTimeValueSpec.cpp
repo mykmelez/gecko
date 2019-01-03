@@ -5,14 +5,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/EventListenerManager.h"
+#include "mozilla/SMILTimeContainer.h"
+#include "mozilla/SMILTimedElement.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/SVGAnimationElement.h"
 #include "mozilla/dom/TimeEvent.h"
 #include "nsSMILTimeValueSpec.h"
 #include "nsSMILInterval.h"
-#include "nsSMILTimeContainer.h"
 #include "nsSMILTimeValue.h"
-#include "nsSMILTimedElement.h"
 #include "nsSMILInstanceTime.h"
 #include "nsSMILParserUtils.h"
 #include "nsString.h"
@@ -37,7 +37,7 @@ nsSMILTimeValueSpec::EventListener::HandleEvent(Event* aEvent) {
 //----------------------------------------------------------------------
 // Implementation
 
-nsSMILTimeValueSpec::nsSMILTimeValueSpec(nsSMILTimedElement& aOwner,
+nsSMILTimeValueSpec::nsSMILTimeValueSpec(SMILTimedElement& aOwner,
                                          bool aIsBegin)
     : mOwner(&aOwner), mIsBegin(aIsBegin), mReferencedElement(this) {}
 
@@ -108,7 +108,7 @@ bool nsSMILTimeValueSpec::IsEventBased() const {
 }
 
 void nsSMILTimeValueSpec::HandleNewInterval(
-    nsSMILInterval& aInterval, const nsSMILTimeContainer* aSrcContainer) {
+    nsSMILInterval& aInterval, const SMILTimeContainer* aSrcContainer) {
   const nsSMILInstanceTime& baseInstance =
       mParams.mSyncBegin ? *aInterval.Begin() : *aInterval.End();
   nsSMILTimeValue newTime =
@@ -133,8 +133,7 @@ void nsSMILTimeValueSpec::HandleTargetElementChange(Element* aNewTarget) {
 }
 
 void nsSMILTimeValueSpec::HandleChangedInstanceTime(
-    const nsSMILInstanceTime& aBaseTime,
-    const nsSMILTimeContainer* aSrcContainer,
+    const nsSMILInstanceTime& aBaseTime, const SMILTimeContainer* aSrcContainer,
     nsSMILInstanceTime& aInstanceTimeToUpdate, bool aObjectChanged) {
   // If the instance time is fixed (e.g. because it's being used as the begin
   // time of an active or postactive interval) we just ignore the change.
@@ -184,7 +183,7 @@ void nsSMILTimeValueSpec::UpdateReferencedElement(Element* aFrom,
 
   switch (mParams.mType) {
     case nsSMILTimeValueSpecParams::SYNCBASE: {
-      nsSMILTimedElement* to = GetTimedElement(aTo);
+      SMILTimedElement* to = GetTimedElement(aTo);
       if (to) {
         to->AddDependent(*this);
       }
@@ -205,7 +204,7 @@ void nsSMILTimeValueSpec::UnregisterFromReferencedElement(Element* aElement) {
   if (!aElement) return;
 
   if (mParams.mType == nsSMILTimeValueSpecParams::SYNCBASE) {
-    nsSMILTimedElement* timedElement = GetTimedElement(aElement);
+    SMILTimedElement* timedElement = GetTimedElement(aElement);
     if (timedElement) {
       timedElement->RemoveDependent(*this);
     }
@@ -215,7 +214,7 @@ void nsSMILTimeValueSpec::UnregisterFromReferencedElement(Element* aElement) {
   }
 }
 
-nsSMILTimedElement* nsSMILTimeValueSpec::GetTimedElement(Element* aElement) {
+SMILTimedElement* nsSMILTimeValueSpec::GetTimedElement(Element* aElement) {
   return aElement && aElement->IsNodeOfType(nsINode::eANIMATION)
              ? &static_cast<SVGAnimationElement*>(aElement)->TimedElement()
              : nullptr;
@@ -294,7 +293,7 @@ void nsSMILTimeValueSpec::HandleEvent(Event* aEvent) {
   // XXX In the long run we should get the time from the event itself which will
   // store the time in global document time which we'll need to convert to our
   // time container
-  nsSMILTimeContainer* container = mOwner->GetTimeContainer();
+  SMILTimeContainer* container = mOwner->GetTimeContainer();
   if (!container) return;
 
   if (mParams.mType == nsSMILTimeValueSpecParams::REPEAT &&
@@ -302,7 +301,7 @@ void nsSMILTimeValueSpec::HandleEvent(Event* aEvent) {
     return;
   }
 
-  nsSMILTime currentTime = container->GetCurrentTime();
+  nsSMILTime currentTime = container->GetCurrentTimeAsSMILTime();
   nsSMILTimeValue newTime(currentTime);
   if (!ApplyOffset(newTime)) {
     NS_WARNING("New time generated from event overflows nsSMILTime, ignoring");
@@ -326,13 +325,13 @@ bool nsSMILTimeValueSpec::CheckRepeatEventDetail(Event* aEvent) {
 }
 
 nsSMILTimeValue nsSMILTimeValueSpec::ConvertBetweenTimeContainers(
-    const nsSMILTimeValue& aSrcTime, const nsSMILTimeContainer* aSrcContainer) {
+    const nsSMILTimeValue& aSrcTime, const SMILTimeContainer* aSrcContainer) {
   // If the source time is either indefinite or unresolved the result is going
   // to be the same
   if (!aSrcTime.IsDefinite()) return aSrcTime;
 
   // Convert from source time container to our parent time container
-  const nsSMILTimeContainer* dstContainer = mOwner->GetTimeContainer();
+  const SMILTimeContainer* dstContainer = mOwner->GetTimeContainer();
   if (dstContainer == aSrcContainer) return aSrcTime;
 
   // If one of the elements is not attached to a time container then we can't do

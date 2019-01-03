@@ -43,7 +43,7 @@
 #include "nsContentList.h"
 #include "nsContentUtils.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsDocument.h"
+#include "nsIDocument.h"
 #include "mozilla/dom/Attr.h"
 #include "nsDOMAttributeMap.h"
 #include "nsDOMCID.h"
@@ -1047,7 +1047,7 @@ EventListenerManager* nsINode::GetExistingListenerManager() const {
   return nsContentUtils::GetExistingListenerManagerForNode(this);
 }
 
-nsPIDOMWindowOuter* nsINode::GetOwnerGlobalForBindings() {
+nsPIDOMWindowOuter* nsINode::GetOwnerGlobalForBindingsInternal() {
   bool dummy;
   auto* window = static_cast<nsGlobalWindowInner*>(
       OwnerDoc()->GetScriptHandlingObject(dummy));
@@ -1189,12 +1189,12 @@ static void CheckForOutdatedParent(nsINode* aParent, nsINode* aNode,
 
     if (JS::GetNonCCWObjectGlobal(existingObj) != global->GetGlobalJSObject()) {
       JSAutoRealm ar(cx, existingObj);
-      ReparentWrapper(cx, existingObj, aError);
+      UpdateReflectorGlobal(cx, existingObj, aError);
     }
   }
 }
 
-static nsresult ReparentWrappersInSubtree(nsIContent* aRoot) {
+static nsresult UpdateGlobalsInSubtree(nsIContent* aRoot) {
   MOZ_ASSERT(ShouldUseXBLScope(aRoot));
   // Start off with no global so we don't fire any error events on failure.
   AutoJSAPI jsapi;
@@ -1207,7 +1207,7 @@ static nsresult ReparentWrappersInSubtree(nsIContent* aRoot) {
   for (nsIContent* cur = aRoot; cur; cur = cur->GetNextNode(aRoot)) {
     if ((reflector = cur->GetWrapper())) {
       JSAutoRealm ar(cx, reflector);
-      ReparentWrapper(cx, reflector, rv);
+      UpdateReflectorGlobal(cx, reflector, rv);
       rv.WouldReportJSException();
       if (rv.Failed()) {
         // We _could_ consider BlastSubtreeToPieces here, but it's not really
@@ -1279,7 +1279,7 @@ nsresult nsINode::InsertChildBefore(nsIContent* aKid,
   if (NS_SUCCEEDED(rv) && !wasInXBLScope && ShouldUseXBLScope(aKid)) {
     MOZ_ASSERT(ShouldUseXBLScope(this),
                "Why does the kid need to use an XBL scope?");
-    rv = ReparentWrappersInSubtree(aKid);
+    rv = UpdateGlobalsInSubtree(aKid);
   }
   if (NS_FAILED(rv)) {
     DisconnectChild(aKid);
@@ -1791,7 +1791,7 @@ void nsINode::RemoveChildNode(nsIContent* aKid, bool aNotify) {
   // nsIDocument::GetRootElement() calls until *after* it has removed aKid from
   // aChildArray. Any calls before then could potentially restore a stale
   // value for our cached root element, per note in
-  // nsDocument::RemoveChildNode().
+  // nsIDocument::RemoveChildNode().
   MOZ_ASSERT(aKid && aKid->GetParentNode() == this, "Bogus aKid");
   MOZ_ASSERT(!IsAttr());
 

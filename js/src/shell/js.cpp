@@ -492,6 +492,7 @@ static bool wasmForceCranelift = false;
 #ifdef ENABLE_WASM_GC
 static bool enableWasmGc = false;
 #endif
+static bool enableWasmVerbose = false;
 static bool enableTestWasmAwaitTier2 = false;
 static bool enableAsyncStacks = false;
 static bool enableStreams = false;
@@ -1032,6 +1033,24 @@ static bool DrainJobQueue(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   args.rval().setUndefined();
+  return true;
+}
+
+static bool GlobalOfFirstJobInQueue(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+
+  if (cx->jobQueue->empty()) {
+    JS_ReportErrorASCII(cx, "Job queue is empty");
+    return false;
+  }
+
+  RootedObject job(cx, cx->jobQueue->front());
+  RootedObject global(cx, &job->nonCCWGlobal());
+  if (!cx->compartment()->wrap(cx, &global)) {
+    return false;
+  }
+
+  args.rval().setObject(*global);
   return true;
 }
 
@@ -3045,8 +3064,8 @@ static const char* TryNoteName(JSTryNoteKind kind) {
       return "loop";
     case JSTRY_FOR_OF_ITERCLOSE:
       return "for-of-iterclose";
-    case JSTRY_DESTRUCTURING_ITERCLOSE:
-      return "dstr-iterclose";
+    case JSTRY_DESTRUCTURING:
+      return "destructuring";
   }
 
   MOZ_CRASH("Bad JSTryNoteKind");
@@ -4928,8 +4947,6 @@ static bool BinParse(JSContext* cx, unsigned argc, Value* vp) {
 
   // Extract argument 2: Options.
 
-  bool useMultipart = true;
-
   if (args.length() >= 2) {
     if (!args[1].isObject()) {
       const char* typeName = InformalValueTypeName(args[1]);
@@ -4944,20 +4961,14 @@ static bool BinParse(JSContext* cx, unsigned argc, Value* vp) {
       return false;
     }
 
-    if (optionFormat.isUndefined()) {
-      // By default, `useMultipart` is `true`.
-      useMultipart = true;
-    } else if (optionFormat.isString()) {
+    if (!optionFormat.isUndefined()) {
       RootedLinearString linearFormat(
           cx, optionFormat.toString()->ensureLinear(cx));
       if (!linearFormat) {
         return false;
       }
-      if (StringEqualsAscii(linearFormat, "multipart")) {
-        useMultipart = true;
-      } else if (StringEqualsAscii(linearFormat, "simple")) {
-        useMultipart = false;
-      } else {
+      // Currently not used, reserved for future.
+      if (!StringEqualsAscii(linearFormat, "multipart")) {
         UniqueChars printable = JS_EncodeStringToUTF8(cx, linearFormat);
         if (!printable) {
           return false;
@@ -4965,8 +4976,7 @@ static bool BinParse(JSContext* cx, unsigned argc, Value* vp) {
 
         JS_ReportErrorUTF8(
             cx,
-            "Unknown value for option `format`, expected 'multipart' or "
-            "'simple', got %s",
+            "Unknown value for option `format`, expected 'multipart', got %s",
             printable.get());
         return false;
       }
@@ -4993,9 +5003,7 @@ static bool BinParse(JSContext* cx, unsigned argc, Value* vp) {
   Directives directives(false);
   GlobalSharedContext globalsc(cx, ScopeKind::Global, directives, false);
 
-  auto parseFunc = useMultipart
-                       ? ParseBinASTData<frontend::BinTokenReaderMultipart>
-                       : ParseBinASTData<frontend::BinTokenReaderTester>;
+  auto parseFunc = ParseBinASTData<frontend::BinTokenReaderMultipart>;
   if (!parseFunc(cx, buf_data, buf_length, &globalsc, usedNames, options,
                  sourceObj)) {
     return false;
@@ -8627,6 +8635,11 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
 "enqueueJob(fn)",
 "  Enqueue 'fn' on the shell's job queue."),
 
+    JS_FN_HELP("globalOfFirstJobInQueue", GlobalOfFirstJobInQueue, 0, 0,
+"globalOfFirstJobInQueue()",
+"  Returns the global of the first item in the job queue. Throws an exception\n"
+"  if the queue is empty.\n"),
+
     JS_FN_HELP("drainJobQueue", DrainJobQueue, 0, 0,
 "drainJobQueue()",
 "Take jobs from the shell's job queue in FIFO order and run them until the\n"
@@ -10100,6 +10113,7 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
   enableWasmGc = enableWasmGc && !wasmForceCranelift;
 #endif
 #endif
+  enableWasmVerbose = op.getBoolOption("wasm-verbose");
   enableTestWasmAwaitTier2 = op.getBoolOption("test-wasm-await-tier2");
   enableAsyncStacks = !op.getBoolOption("no-async-stacks");
   enableStreams = !op.getBoolOption("no-streams");
@@ -10120,6 +10134,7 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
 #ifdef ENABLE_WASM_GC
       .setWasmGc(enableWasmGc)
 #endif
+      .setWasmVerbose(enableWasmVerbose)
       .setTestWasmAwaitTier2(enableTestWasmAwaitTier2)
       .setNativeRegExp(enableNativeRegExp)
       .setAsyncStack(enableAsyncStacks);
@@ -10446,6 +10461,7 @@ static void SetWorkerContextOptions(JSContext* cx) {
 #ifdef ENABLE_WASM_GC
       .setWasmGc(enableWasmGc)
 #endif
+      .setWasmVerbose(enableWasmVerbose)
       .setTestWasmAwaitTier2(enableTestWasmAwaitTier2)
       .setNativeRegExp(enableNativeRegExp);
 
@@ -10734,9 +10750,11 @@ int main(int argc, char** argv, char** envp) {
       || !op.addBoolOption('\0', "wasm-force-cranelift",
                            "Enable wasm Cranelift compiler")
 #endif
-      || !op.addBoolOption('\0', "test-wasm-await-tier2",
-                           "Forcibly activate tiering and block "
-                           "instantiation on completion of tier2")
+      || !op.addBoolOption('\0', "wasm-verbose",
+                           "Enable WebAssembly verbose logging") ||
+      !op.addBoolOption('\0', "test-wasm-await-tier2",
+                        "Forcibly activate tiering and block "
+                        "instantiation on completion of tier2")
 #ifdef ENABLE_WASM_GC
       || !op.addBoolOption('\0', "wasm-gc", "Enable wasm GC features")
 #else

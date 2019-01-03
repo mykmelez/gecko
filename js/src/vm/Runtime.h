@@ -562,12 +562,8 @@ struct JSRuntime : public js::MallocProvider<JSRuntime> {
   JSFunction* getUnclonedSelfHostedFunction(JSContext* cx,
                                             js::HandlePropertyName name);
 
-  js::jit::JitRuntime* createJitRuntime(JSContext* cx);
-
  public:
-  js::jit::JitRuntime* getJitRuntime(JSContext* cx) {
-    return jitRuntime_ ? jitRuntime_.ref() : createJitRuntime(cx);
-  }
+  MOZ_MUST_USE bool createJitRuntime(JSContext* cx);
   js::jit::JitRuntime* jitRuntime() const { return jitRuntime_.ref(); }
   bool hasJitRuntime() const { return !!jitRuntime_; }
 
@@ -978,6 +974,9 @@ struct JSRuntime : public js::MallocProvider<JSRuntime> {
   // HostImportModuleDynamically. This is also used to enable/disable dynamic
   // module import and can accessed by off-thread parsing.
   mozilla::Atomic<JS::ModuleDynamicImportHook> moduleDynamicImportHook;
+
+  // A hook called on script finalization.
+  js::MainThreadData<JS::ScriptPrivateFinalizeHook> scriptPrivateFinalizeHook;
 
  public:
 #if defined(JS_BUILD_BINAST)

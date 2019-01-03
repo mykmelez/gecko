@@ -8,9 +8,9 @@
 
 #include "mozilla/dom/SVGSVGElement.h"
 #include "mozilla/dom/SVGViewElement.h"
-#include "nsContentUtils.h"  // for nsCharSeparatedTokenizerTemplate
-#include "nsSVGAnimatedTransformList.h"
 #include "nsCharSeparatedTokenizer.h"
+#include "nsContentUtils.h"  // for nsCharSeparatedTokenizerTemplate
+#include "SVGAnimatedTransformList.h"
 
 namespace mozilla {
 
@@ -88,7 +88,7 @@ class MOZ_RAII AutoSVGViewHandler {
       if (mSVGView->mTransforms) {
         return false;
       }
-      mSVGView->mTransforms = new nsSVGAnimatedTransformList();
+      mSVGView->mTransforms = new SVGAnimatedTransformList();
       if (NS_FAILED(
               mSVGView->mTransforms->SetBaseValueString(aParams, mRoot))) {
         return false;

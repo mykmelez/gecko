@@ -14,13 +14,13 @@
 
 #include "nsString.h"
 
-class nsSVGAngle;
 class nsSVGIntegerPair;
 class nsSVGLength2;
 class nsSVGNumberPair;
 class nsSVGViewBox;
 
 namespace mozilla {
+class SVGAngle;
 class SVGLengthList;
 class SVGNumberList;
 class SVGPathData;
@@ -34,7 +34,7 @@ namespace mozilla {
 
 class SVGAttrValueWrapper {
  public:
-  static void ToString(const nsSVGAngle* aAngle, nsAString& aResult);
+  static void ToString(const SVGAngle* aAngle, nsAString& aResult);
   static void ToString(const nsSVGIntegerPair* aIntegerPair,
                        nsAString& aResult);
   static void ToString(const nsSVGLength2* aLength, nsAString& aResult);

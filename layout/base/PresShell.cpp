@@ -107,7 +107,7 @@
 #include "nsThreadUtils.h"
 #include "nsStyleSheetService.h"
 #include "gfxUtils.h"
-#include "nsSMILAnimationController.h"
+#include "mozilla/SMILAnimationController.h"
 #include "SVGContentUtils.h"
 #include "SVGObserverUtils.h"
 #include "SVGFragmentIdentifier.h"
@@ -187,6 +187,7 @@
 #include "nsBindingManager.h"
 #include "nsClassHashtable.h"
 #include "nsHashKeys.h"
+#include "VisualViewport.h"
 
 #ifdef MOZ_TASK_TRACER
 #include "GeckoTaskTracer.h"
@@ -519,8 +520,8 @@ class nsBeforeFirstPaintDispatcher : public Runnable {
     nsCOMPtr<nsIObserverService> observerService =
         mozilla::services::GetObserverService();
     if (observerService) {
-      observerService->NotifyObservers(mDocument, "before-first-paint",
-                                       nullptr);
+      observerService->NotifyObservers(ToSupports(mDocument),
+                                       "before-first-paint", nullptr);
     }
     return NS_OK;
   }
@@ -795,15 +796,16 @@ nsIPresShell::nsIPresShell()
       mObservingLayoutFlushes(false),
       mResizeEventPending(false),
       mNeedThrottledAnimationFlush(true),
-      mPresShellId(0),
-      mFontSizeInflationEmPerLine(0),
-      mFontSizeInflationMinTwips(0),
-      mFontSizeInflationLineThreshold(0),
       mFontSizeInflationForceEnabled(false),
       mFontSizeInflationDisabledInMasterProcess(false),
       mFontSizeInflationEnabled(false),
       mPaintingIsFrozen(false),
       mIsNeverPainting(false),
+      mResolutionUpdated(false),
+      mPresShellId(0),
+      mFontSizeInflationEmPerLine(0),
+      mFontSizeInflationMinTwips(0),
+      mFontSizeInflationLineThreshold(0),
       mInFlush(false),
       mCurrentEventFrame(nullptr) {
 }
@@ -838,7 +840,6 @@ PresShell::PresShell()
       mHasReceivedPaintMessage(false),
       mIsLastKeyDownCanceled(false),
       mHasHandledUserInput(false),
-      mResolutionUpdated(false),
       mForceDispatchKeyPressEventsForNonPrintableKeys(false),
       mForceUseLegacyKeyCodeAndCharCodeValues(false),
       mInitializedWithKeyPressEventDispatchingBlacklist(false) {
@@ -1034,7 +1035,7 @@ void PresShell::Init(nsIDocument* aDocument, nsPresContext* aPresContext,
 #endif
 
   if (mDocument->HasAnimationController()) {
-    nsSMILAnimationController* animCtrl = mDocument->GetAnimationController();
+    SMILAnimationController* animCtrl = mDocument->GetAnimationController();
     animCtrl->NotifyRefreshDriverCreated(GetPresContext()->RefreshDriver());
   }
 
@@ -1443,7 +1444,7 @@ void nsIPresShell::SetAuthorStyleDisabled(bool aStyleDisabled) {
         mozilla::services::GetObserverService();
     if (observerService) {
       observerService->NotifyObservers(
-          mDocument, "author-style-disabled-changed", nullptr);
+          ToSupports(mDocument), "author-style-disabled-changed", nullptr);
     }
   }
 }
@@ -2027,6 +2028,18 @@ nsresult PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight,
 
 void PresShell::FireResizeEvent() {
   if (mIsDocumentGone) {
+    return;
+  }
+
+  // If event handling is suppressed, repost the resize event to the refresh
+  // driver. The event is marked as delayed so that the refresh driver does not
+  // continue ticking.
+  if (mDocument->EventHandlingSuppressed()) {
+    if (MOZ_LIKELY(!mDocument->GetBFCacheEntry())) {
+      mDocument->SetHasDelayedRefreshEvent();
+      mPresContext->RefreshDriver()->AddResizeEventFlushObserver(
+          this, /* aDelayed = */ true);
+    }
     return;
   }
 
@@ -4022,7 +4035,7 @@ void PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush) {
   bool didLayoutFlush = false;
   if (isSafeToFlush) {
     // Record that we are in a flush, so that our optimization in
-    // nsDocument::FlushPendingNotifications doesn't skip any re-entrant
+    // nsIDocument::FlushPendingNotifications doesn't skip any re-entrant
     // calls to us.  Otherwise, we might miss some needed flushes, since
     // we clear mNeedStyleFlush / mNeedLayoutFlush here at the top of
     // the function but we might not have done the work yet.
@@ -4034,7 +4047,7 @@ void PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush) {
     // need the frames in the external document to be constructed for the
     // filter to work). We only need external resources to be flushed when the
     // main document is flushing >= FlushType::Frames, so we flush external
-    // resources here instead of nsDocument::FlushPendingNotifications.
+    // resources here instead of nsIDocument::FlushPendingNotifications.
     mDocument->FlushExternalResources(flushType);
 
     // Force flushing of any pending content notifications that might have
@@ -5144,7 +5157,7 @@ void PresShell::SetIgnoreViewportScrolling(bool aIgnore) {
 }
 
 nsresult PresShell::SetResolutionAndScaleTo(float aResolution,
-                                            nsAtom* aOrigin) {
+                                            ChangeOrigin aOrigin) {
   if (!(aResolution > 0.0)) {
     return NS_ERROR_ILLEGAL_VALUE;
   }
@@ -5158,8 +5171,11 @@ nsresult PresShell::SetResolutionAndScaleTo(float aResolution,
   if (mMobileViewportManager) {
     mMobileViewportManager->ResolutionUpdated();
   }
-  if (aOrigin != nsGkAtoms::apz) {
+  if (aOrigin != ChangeOrigin::eApz) {
     mResolutionUpdated = true;
+  }
+  if (auto* window = nsGlobalWindowInner::Cast(mDocument->GetInnerWindow())) {
+    window->VisualViewport()->PostResizeEvent();
   }
 
   return NS_OK;
@@ -5563,11 +5579,11 @@ void PresShell::MarkFramesInSubtreeApproximatelyVisible(
   bool preserves3DChildren = aFrame->Extend3DContext();
 
   // We assume all frames in popups are visible, so we skip them here.
-  const nsIFrame::ChildListIDs skip(nsIFrame::kPopupList |
-                                    nsIFrame::kSelectPopupList);
+  const nsIFrame::ChildListIDs skip = {nsIFrame::kPopupList,
+                                       nsIFrame::kSelectPopupList};
   for (nsIFrame::ChildListIterator childLists(aFrame); !childLists.IsDone();
        childLists.Next()) {
-    if (skip.Contains(childLists.CurrentID())) {
+    if (skip.contains(childLists.CurrentID())) {
       continue;
     }
 
@@ -10019,13 +10035,34 @@ void nsIPresShell::SetVisualViewportSize(nscoord aWidth, nscoord aHeight) {
       rootScrollFrame->MarkScrollbarsDirtyForReflow();
     }
     MarkFixedFramesForReflow(nsIPresShell::eResize);
+
+    if (auto* window = nsGlobalWindowInner::Cast(mDocument->GetInnerWindow())) {
+      window->VisualViewport()->PostResizeEvent();
+    }
+  }
+}
+
+void nsIPresShell::SetVisualViewportOffset(
+    const nsPoint& aScrollOffset, const nsPoint& aPrevLayoutScrollPos) {
+  if (mVisualViewportOffset != aScrollOffset) {
+    nsPoint prevOffset = mVisualViewportOffset;
+    mVisualViewportOffset = aScrollOffset;
+
+    if (auto* window = nsGlobalWindowInner::Cast(mDocument->GetInnerWindow())) {
+      window->VisualViewport()->PostScrollEvent(prevOffset,
+                                                aPrevLayoutScrollPos);
+    }
   }
 }
 
 nsPoint nsIPresShell::GetVisualViewportOffsetRelativeToLayoutViewport() const {
+  return GetVisualViewportOffset() - GetLayoutViewportOffset();
+}
+
+nsPoint nsIPresShell::GetLayoutViewportOffset() const {
   nsPoint result;
   if (nsIScrollableFrame* sf = GetRootScrollFrameAsScrollable()) {
-    result = GetVisualViewportOffset() - sf->GetScrollPosition();
+    result = sf->GetScrollPosition();
   }
   return result;
 }

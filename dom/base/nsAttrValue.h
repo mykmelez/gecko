@@ -22,13 +22,13 @@
 #include "nsMargin.h"
 #include "nsCOMPtr.h"
 #include "nsStringFwd.h"
-#include "SVGAttrValueWrapper.h"
 #include "nsTArrayForwardDeclare.h"
 #include "nsAtom.h"
-#include "mozilla/AtomArray.h"
-#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/AtomArray.h"
 #include "mozilla/EnumTypeTraits.h"
+#include "mozilla/MemoryReporting.h"
+#include "mozilla/SVGAttrValueWrapper.h"
 
 class nsIDocument;
 class nsIURI;
@@ -152,7 +152,7 @@ class nsAttrValue {
              const nsAString* aSerialized);
   void SetTo(nsIURI* aValue, const nsAString* aSerialized);
   void SetTo(const nsIntMargin& aValue);
-  void SetTo(const nsSVGAngle& aValue, const nsAString* aSerialized);
+  void SetTo(const mozilla::SVGAngle& aValue, const nsAString* aSerialized);
   void SetTo(const nsSVGIntegerPair& aValue, const nsAString* aSerialized);
   void SetTo(const nsSVGLength2& aValue, const nsAString* aSerialized);
   void SetTo(const mozilla::SVGLengthList& aValue,

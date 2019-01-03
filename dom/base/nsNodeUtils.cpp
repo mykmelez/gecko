@@ -18,7 +18,7 @@
 #include "PLDHashTable.h"
 #include "nsCOMArray.h"
 #include "nsPIDOMWindow.h"
-#include "nsDocument.h"
+#include "nsIDocument.h"
 #ifdef MOZ_XUL
 #include "nsXULElement.h"
 #endif
@@ -35,6 +35,7 @@
 #include "nsObjectLoadingContent.h"
 #include "nsDOMMutationObserver.h"
 #include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/CustomElementRegistry.h"
 #include "mozilla/dom/HTMLTemplateElement.h"
 #include "mozilla/dom/ShadowRoot.h"
 
@@ -516,7 +517,7 @@ already_AddRefed<nsINode> nsNodeUtils::CloneAndAdopt(
       if ((wrapper = aNode->GetWrapper())) {
         MOZ_ASSERT(IsDOMObject(wrapper));
         JSAutoRealm ar(cx, wrapper);
-        ReparentWrapper(cx, wrapper, aError);
+        UpdateReflectorGlobal(cx, wrapper, aError);
         if (aError.Failed()) {
           if (wasRegistered) {
             aNode->OwnerDoc()->UnregisterActivityObserver(aNode->AsElement());

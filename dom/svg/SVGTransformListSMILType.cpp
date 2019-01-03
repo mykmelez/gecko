@@ -6,7 +6,7 @@
 
 #include "SVGTransformListSMILType.h"
 #include "SVGTransformList.h"
-#include "nsSVGTransform.h"
+#include "SVGTransform.h"
 #include "nsSMILValue.h"
 #include "nsCRT.h"
 #include <math.h>
@@ -32,7 +32,7 @@ void SVGTransformListSMILType::Destroy(nsSMILValue& aValue) const {
   TransformArray* params = static_cast<TransformArray*>(aValue.mU.mPtr);
   delete params;
   aValue.mU.mPtr = nullptr;
-  aValue.mType = nsSMILNullType::Singleton();
+  aValue.mType = SMILNullType::Singleton();
 }
 
 nsresult SVGTransformListSMILType::Assign(nsSMILValue& aDest,
@@ -320,7 +320,7 @@ bool SVGTransformListSMILType::AppendTransforms(const SVGTransformList& aList,
 
 // static
 bool SVGTransformListSMILType::GetTransforms(
-    const nsSMILValue& aValue, FallibleTArray<nsSVGTransform>& aTransforms) {
+    const nsSMILValue& aValue, FallibleTArray<SVGTransform>& aTransforms) {
   MOZ_ASSERT(aValue.mType == Singleton(), "Unexpected SMIL value type");
 
   const TransformArray& smilTransforms =

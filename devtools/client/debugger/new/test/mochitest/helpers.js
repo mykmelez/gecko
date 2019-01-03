@@ -405,6 +405,34 @@ function isPaused(dbg) {
   return !!isPaused(getState());
 }
 
+// Make sure the debugger is paused at a certain source ID and line.
+function assertPausedAtSourceAndLine(dbg, expectedSourceId, expectedLine) {
+  assertPaused(dbg);
+
+  const {
+    selectors: { getWorkers, getFrames },
+    getState
+  } = dbg;
+
+  const frames = getFrames(getState());
+  ok(frames.length >= 1, "Got at least one frame");
+  const { sourceId, line } = frames[0].location;
+  ok(sourceId == expectedSourceId, "Frame has correct source");
+  ok(line == expectedLine, "Frame has correct line");
+}
+
+// Get any workers associated with the debugger.
+async function getWorkers(dbg) {
+  await dbg.actions.updateWorkers();
+
+  const {
+    selectors: { getWorkers },
+    getState
+  } = dbg;
+
+  return getWorkers(getState()).toJS();
+}
+
 async function waitForLoadedScopes(dbg) {
   const scopes = await waitForElement(dbg, "scopes");
   // Since scopes auto-expand, we can assume they are loaded when there is a tree node
@@ -728,6 +756,23 @@ function disableBreakpoint(dbg, source, line, column) {
   return waitForDispatch(dbg, "DISABLE_BREAKPOINT");
 }
 
+function findBreakpoint(dbg, url, line) {
+  const {
+    selectors: { getBreakpoint },
+    getState
+  } = dbg;
+  const source = findSource(dbg, url);
+  let column;
+  if(
+    Services.prefs.getBoolPref("devtools.debugger.features.column-breakpoints")
+    ) {
+    column = dbg.selectors.getFirstPausePointLocation(
+      dbg.store.getState(), { sourceId: source.id, line }
+    ).column;
+  }
+  return getBreakpoint(getState(), { sourceId: source.id, line, column });
+}
+
 async function loadAndAddBreakpoint(dbg, filename, line, column) {
   const {
     selectors: { getBreakpoint, getBreakpointCount, getBreakpointsMap },
@@ -1032,6 +1077,7 @@ const selectors = {
     `.expressions-list .expression-container:nth-child(${i}) .close`,
   expressionInput: ".expressions-list  input.input-expression",
   expressionNodes: ".expressions-list .tree-node",
+  expressionPlus: ".watch-expressions-pane button.plus",
   scopesHeader: ".scopes-pane ._header",
   breakpointItem: i => `.breakpoints-list div:nth-of-type(${i})`,
   breakpointItems: `.breakpoints-list .breakpoint`,
@@ -1052,9 +1098,10 @@ const selectors = {
   frame: i => `.frames ul li:nth-child(${i})`,
   frames: ".frames ul li",
   gutter: i => `.CodeMirror-code *:nth-child(${i}) .CodeMirror-linenumber`,
+  // These work for bobth the breakpoint listing and gutter marker
   gutterContextMenu: {
-    addConditionalBreakpoint: "#node-menu-add-conditional-breakpoint",
-    editBreakpoint: "#node-menu-edit-conditional-breakpoint"
+    addConditionalBreakpoint: "#node-menu-add-condition, #node-menu-add-conditional-breakpoint",
+    editConditionalBreakpoint: "#node-menu-edit-condition, #node-menu-edit-conditional-breakpoint"
   },
   menuitem: i => `menupopup menuitem:nth-child(${i})`,
   pauseOnExceptions: ".pause-exceptions",
@@ -1089,7 +1136,10 @@ const selectors = {
     `.outline-list__element:nth-child(${i}) .function-signature`,
   outlineItems: ".outline-list__element",
   conditionalPanelInput: ".conditional-breakpoint-panel input",
-  searchField: ".search-field"
+  searchField: ".search-field",
+  blackbox: ".action.black-box",
+  projectSearchCollapsed: ".project-text-search .arrow:not(.expanded)",
+  projectSerchExpandedResults: ".project-text-search .result",
 };
 
 function getSelector(elementName, ...args) {
@@ -1116,6 +1166,10 @@ function findElementWithSelector(dbg, selector) {
 
 function findAllElements(dbg, elementName, ...args) {
   const selector = getSelector(elementName, ...args);
+  return findAllElementsWithSelector(dbg, selector)
+}
+
+function findAllElementsWithSelector(dbg, selector) {
   return dbg.win.document.querySelectorAll(selector);
 }
 
@@ -1159,6 +1213,7 @@ function dblClickElement(dbg, elementName, ...args) {
 function rightClickElement(dbg, elementName, ...args) {
   const selector = getSelector(elementName, ...args);
   const doc = dbg.win.document;
+
   return EventUtils.synthesizeMouseAtCenter(
     doc.querySelector(selector),
     { type: "contextmenu" },
@@ -1381,4 +1436,29 @@ async function assertNodeIsFocused(dbg, index) {
   await waitForNodeToGainFocus(dbg, index);
   const node = findElement(dbg, "sourceNode", index);
   ok(node.classList.contains("focused"), `node ${index} is focused`);
+}
+
+async function addExpression(dbg, input) {
+  info("Adding an expression");
+
+  const plusIcon = findElementWithSelector(dbg, selectors.expressionPlus);
+  if (plusIcon) {
+    plusIcon.click();
+  }
+  findElementWithSelector(dbg, selectors.expressionInput).focus();
+  type(dbg, input);
+  pressKey(dbg, "Enter");
+
+  await waitForDispatch(dbg, "EVALUATE_EXPRESSION");
+}
+
+async function editExpression(dbg, input) {
+  info("Updating the expression");
+  dblClickElement(dbg, "expressionNode", 1);
+  // Position cursor reliably at the end of the text.
+  pressKey(dbg, "End");
+  type(dbg, input);
+  const evaluated = waitForDispatch(dbg, "EVALUATE_EXPRESSIONS");
+  pressKey(dbg, "Enter");
+  await evaluated;
 }

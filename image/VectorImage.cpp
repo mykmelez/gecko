@@ -17,6 +17,7 @@
 #include "mozilla/dom/SVGSVGElement.h"
 #include "mozilla/dom/SVGDocument.h"
 #include "mozilla/gfx/2D.h"
+#include "mozilla/PendingAnimationTracker.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/Tuple.h"
 #include "nsIPresShell.h"
@@ -36,10 +37,7 @@
 #include "SVGDrawingParameters.h"
 #include "nsIDOMEventListener.h"
 #include "SurfaceCache.h"
-#include "nsDocument.h"
-
-// undef the GetCurrentTime macro defined in WinBase.h from the MS Platform SDK
-#undef GetCurrentTime
+#include "nsIDocument.h"
 
 namespace mozilla {
 
@@ -766,8 +764,8 @@ VectorImage::GetFrameInternal(const IntSize& aSize,
   // cannot cache.
   SVGDrawingParameters params(
       nullptr, decodeSize, aSize, ImageRegion::Create(decodeSize),
-      SamplingFilter::POINT, aSVGContext, mSVGDocumentWrapper->GetCurrentTime(),
-      aFlags, 1.0);
+      SamplingFilter::POINT, aSVGContext,
+      mSVGDocumentWrapper->GetCurrentTimeAsFloat(), aFlags, 1.0);
 
   bool didCache;  // Was the surface put into the cache?
   bool contextPaint = aSVGContext && aSVGContext->GetContextPaint();
@@ -948,7 +946,7 @@ VectorImage::Draw(gfxContext* aContext, const nsIntSize& aSize,
 
   float animTime = (aWhichFrame == FRAME_FIRST)
                        ? 0.0f
-                       : mSVGDocumentWrapper->GetCurrentTime();
+                       : mSVGDocumentWrapper->GetCurrentTimeAsFloat();
 
   Maybe<SVGImageContext> newSVGContext;
   bool contextPaint =
@@ -1314,8 +1312,9 @@ VectorImage::ResetAnimation() {
 NS_IMETHODIMP_(float)
 VectorImage::GetFrameIndex(uint32_t aWhichFrame) {
   MOZ_ASSERT(aWhichFrame <= FRAME_MAX_VALUE, "Invalid argument");
-  return aWhichFrame == FRAME_FIRST ? 0.0f
-                                    : mSVGDocumentWrapper->GetCurrentTime();
+  return aWhichFrame == FRAME_FIRST
+             ? 0.0f
+             : mSVGDocumentWrapper->GetCurrentTimeAsFloat();
 }
 
 //------------------------------------------------------------------------------
@@ -1481,9 +1480,8 @@ void VectorImage::PropagateUseCounters(nsIDocument* aParentDocument) {
 }
 
 void VectorImage::ReportUseCounters() {
-  nsIDocument* doc = mSVGDocumentWrapper->GetDocument();
-  if (doc) {
-    static_cast<nsDocument*>(doc)->ReportUseCounters();
+  if (nsIDocument* doc = mSVGDocumentWrapper->GetDocument()) {
+    doc->ReportUseCounters();
   }
 }
 

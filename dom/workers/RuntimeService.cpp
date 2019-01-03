@@ -289,6 +289,7 @@ void LoadContextOptions(const char* aPrefName, void* /* aClosure */) {
 #ifdef ENABLE_WASM_GC
       .setWasmGc(GetWorkerPref<bool>(NS_LITERAL_CSTRING("wasm_gc")))
 #endif
+      .setWasmVerbose(GetWorkerPref<bool>(NS_LITERAL_CSTRING("wasm_verbose")))
       .setThrowOnAsmJSValidationFailure(GetWorkerPref<bool>(
           NS_LITERAL_CSTRING("throw_on_asmjs_validation_failure")))
       .setBaseline(GetWorkerPref<bool>(NS_LITERAL_CSTRING("baselinejit")))
@@ -1405,10 +1406,10 @@ void RuntimeService::UnregisterWorker(WorkerPrivate* aWorkerPrivate) {
                                    aWorkerPrivate->CreationTimeStamp());
   }
 
-  if (aWorkerPrivate->IsSharedWorker()) {
-    AssertIsOnMainThread();
-    aWorkerPrivate->GetRemoteWorkerController()->CloseWorkerOnMainThread();
-  }
+  // NB: For Shared Workers we used to call ShutdownOnMainThread on the
+  // RemoteWorkerController; however, that was redundant because
+  // RemoteWorkerChild uses a WeakWorkerRef which notifies at about the
+  // same time as us calling into the code here and would race with us.
 
   if (parent) {
     parent->RemoveChildWorker(aWorkerPrivate);

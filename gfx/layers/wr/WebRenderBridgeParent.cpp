@@ -13,6 +13,7 @@
 #include "GeckoProfiler.h"
 #include "GLContext.h"
 #include "GLContextProvider.h"
+#include "nsExceptionHandler.h"
 #include "mozilla/Range.h"
 #include "mozilla/layers/AnimationHelper.h"
 #include "mozilla/layers/APZSampler.h"
@@ -716,25 +717,26 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvValidateFontDescriptor(
   remaining -= familyLength + 1;
   wchar_t* files = family + familyLength + 1;
   BOOL exists = FALSE;
-  if (RefPtr<IDWriteFontCollection> systemFonts = Factory::GetDWriteSystemFonts()) {
+  if (RefPtr<IDWriteFontCollection> systemFonts =
+          Factory::GetDWriteSystemFonts()) {
     UINT32 idx;
     systemFonts->FindFamilyName(family, &idx, &exists);
   }
   if (!remaining) {
-    gfxCriticalNote << (exists ? "found" : "MISSING")
-                    << " font family \"" << family
-                    << "\" has no files!";
+    gfxCriticalNote << (exists ? "found" : "MISSING") << " font family \""
+                    << family << "\" has no files!";
   }
   while (remaining > 0) {
     size_t fileLength = wcsnlen_s(files, remaining);
     MOZ_ASSERT(fileLength < remaining && files[fileLength] == 0);
     DWORD attribs = GetFileAttributesW(files);
     if (!exists || attribs == INVALID_FILE_ATTRIBUTES) {
-      gfxCriticalNote << (exists ? "found" : "MISSING")
-                      << " font family \"" << family
-                      << "\" has " << (attribs == INVALID_FILE_ATTRIBUTES ? "INVALID" : "valid")
-                      << " file \"" << files
-                      << "\"";
+      gfxCriticalNote << (exists ? "found" : "MISSING") << " font family \""
+                      << family << "\" has "
+                      << (attribs == INVALID_FILE_ATTRIBUTES ? "INVALID"
+                                                             : "valid")
+                      << "(" << hexa(attribs) << ")"
+                      << " file \"" << files << "\"";
     }
     remaining -= fileLength + 1;
     files += fileLength + 1;
@@ -912,6 +914,10 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvSetDisplayList(
     return IPC_OK();
   }
 
+  if (!IsRootWebRenderBridgeParent()) {
+    CrashReporter::AnnotateCrashReport(CrashReporter::Annotation::URL, aTxnURL);
+  }
+
   AUTO_PROFILER_TRACING("Paint", "SetDisplayList");
   UpdateFwdTransactionId(aFwdTransactionId);
 
@@ -1030,6 +1036,10 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvEmptyTransaction(
       DestroyActor(op);
     }
     return IPC_OK();
+  }
+
+  if (!IsRootWebRenderBridgeParent()) {
+    CrashReporter::AnnotateCrashReport(CrashReporter::Annotation::URL, aTxnURL);
   }
 
   AUTO_PROFILER_TRACING("Paint", "EmptyTransaction");
@@ -1693,7 +1703,7 @@ bool WebRenderBridgeParent::SampleAnimations(
 void WebRenderBridgeParent::CompositeIfNeeded() {
   if (mSkippedComposite) {
     mSkippedComposite = false;
-    CompositeToTarget(VsyncId(), nullptr, nullptr);
+    CompositeToTarget(mSkippedCompositeId, nullptr, nullptr);
   }
 }
 
@@ -1717,7 +1727,13 @@ void WebRenderBridgeParent::CompositeToTarget(VsyncId aId,
   if (mSkippedComposite ||
       wr::RenderThread::Get()->TooManyPendingFrames(mApi->GetId())) {
     // Render thread is busy, try next time.
-    mSkippedComposite = true;
+    if (!mSkippedComposite) {
+      // Only record the vsync id for the first skipped composite,
+      // since this matches what we do for compressing messages
+      // in CompositorVsyncScheduler::PostCompositeTask.
+      mSkippedComposite = true;
+      mSkippedCompositeId = aId;
+    }
     mPreviousFrameTimeStamp = TimeStamp();
 
     // Record that we skipped presenting a frame for
@@ -1800,6 +1816,7 @@ void WebRenderBridgeParent::MaybeGenerateFrame(VsyncId aId,
   fastTxn.GenerateFrame();
 
   mApi->SendTransaction(fastTxn);
+  mMostRecentComposite = TimeStamp::Now();
 }
 
 void WebRenderBridgeParent::HoldPendingTransactionId(
@@ -1830,6 +1847,54 @@ void WebRenderBridgeParent::NotifySceneBuiltForEpoch(
       break;
     }
   }
+}
+
+void WebRenderBridgeParent::NotifyDidSceneBuild(
+    RefPtr<wr::WebRenderPipelineInfo> aInfo) {
+  MOZ_ASSERT(IsRootWebRenderBridgeParent());
+  if (!mCompositorScheduler) {
+    return;
+  }
+
+  mAsyncImageManager->SetWillGenerateFrame();
+
+  // If the scheduler has a composite more recent than our last composite (which
+  // we missed), and we're within the threshold ms of the last vsync, then
+  // kick of a late composite.
+  TimeStamp lastVsync = mCompositorScheduler->GetLastVsyncTime();
+  VsyncId lastVsyncId = mCompositorScheduler->GetLastVsyncId();
+  if (lastVsyncId == VsyncId() || !mMostRecentComposite ||
+      mMostRecentComposite >= lastVsync ||
+      ((TimeStamp::Now() - lastVsync).ToMilliseconds() >
+       gfxPrefs::WebRenderLateSceneBuildThreshold())) {
+    mCompositorScheduler->ScheduleComposition();
+    return;
+  }
+
+  // Look through all the pipelines contained within the built scene
+  // and check which vsync they initiated from.
+  auto info = aInfo->Raw();
+  for (uintptr_t i = 0; i < info.epochs.length; i++) {
+    auto epoch = info.epochs.data[i];
+
+    WebRenderBridgeParent* wrBridge = this;
+    if (!(epoch.pipeline_id == PipelineId())) {
+      wrBridge = mAsyncImageManager->GetWrBridge(epoch.pipeline_id);
+    }
+
+    if (wrBridge) {
+      VsyncId startId = wrBridge->GetVsyncIdForEpoch(epoch.epoch);
+      // If any of the pipelines started building on the current vsync (i.e
+      // we did all of display list building and scene building within the
+      // threshold), then don't do an early composite.
+      if (startId == lastVsyncId) {
+        mCompositorScheduler->ScheduleComposition();
+        return;
+      }
+    }
+  }
+
+  CompositeToTarget(mCompositorScheduler->GetLastVsyncId(), nullptr, nullptr);
 }
 
 TransactionId WebRenderBridgeParent::FlushTransactionIdsForEpoch(
@@ -1912,10 +1977,6 @@ TransactionId WebRenderBridgeParent::FlushTransactionIdsForEpoch(
 
       // Record CONTENT_FRAME_TIME_REASON.
       //
-      // This uses the refresh start time (CONTENT_FRAME_TIME uses the start of
-      // display list building), since that includes layout/style time, and 200
-      // should correlate more closely with missing a vsync.
-      //
       // Also of note is that when the root WebRenderBridgeParent decides to
       // skip a composite (due to the Renderer being busy), that won't notify
       // child WebRenderBridgeParents. That failure will show up as the
@@ -1928,9 +1989,6 @@ TransactionId WebRenderBridgeParent::FlushTransactionIdsForEpoch(
       // child pipelines contained within a render, after it finishes, but I
       // can't see how to query what child pipeline would have been rendered,
       // when we choose to not do it.
-      latencyMs = (aEndTime - transactionId.mRefreshStartTime).ToMilliseconds();
-      latencyNorm = latencyMs / mVsyncRate.ToMilliseconds();
-      fracLatencyNorm = lround(latencyNorm * 100.0);
       if (fracLatencyNorm < 200) {
         // Success
         Telemetry::AccumulateCategorical(
@@ -1944,9 +2002,24 @@ TransactionId WebRenderBridgeParent::FlushTransactionIdsForEpoch(
           Telemetry::AccumulateCategorical(
               LABELS_CONTENT_FRAME_TIME_REASON::NoVsync);
         } else if (aCompositeStartId - transactionId.mVsyncId > 1) {
+          auto fullPaintTime =
+              transactionId.mSceneBuiltTime
+                  ? transactionId.mSceneBuiltTime - transactionId.mTxnStartTime
+                  : TimeDuration::FromMilliseconds(0);
           // Composite started late (and maybe took too long as well)
-          Telemetry::AccumulateCategorical(
-              LABELS_CONTENT_FRAME_TIME_REASON::MissedComposite);
+          if (fullPaintTime >= TimeDuration::FromMilliseconds(20)) {
+            Telemetry::AccumulateCategorical(
+                LABELS_CONTENT_FRAME_TIME_REASON::MissedCompositeLong);
+          } else if (fullPaintTime >= TimeDuration::FromMilliseconds(10)) {
+            Telemetry::AccumulateCategorical(
+                LABELS_CONTENT_FRAME_TIME_REASON::MissedCompositeMid);
+          } else if (fullPaintTime >= TimeDuration::FromMilliseconds(5)) {
+            Telemetry::AccumulateCategorical(
+                LABELS_CONTENT_FRAME_TIME_REASON::MissedCompositeLow);
+          } else {
+            Telemetry::AccumulateCategorical(
+                LABELS_CONTENT_FRAME_TIME_REASON::MissedComposite);
+          }
         } else {
           // Composite start on time, but must have taken too long.
           Telemetry::AccumulateCategorical(

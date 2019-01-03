@@ -370,6 +370,7 @@ MSG_DEF(JSMSG_USE_ASM_LINK_FAIL,       1, JSEXN_TYPEERR, "asm.js link error: {0}
 MSG_DEF(JSMSG_USE_ASM_TYPE_OK,         1, JSEXN_WARN,    "Successfully compiled asm.js code ({0})")
 
 // wasm
+MSG_DEF(JSMSG_WASM_VERBOSE,            1, JSEXN_WARN,    "WebAssembly verbose: {0}")
 MSG_DEF(JSMSG_WASM_COMPILE_WARNING,    1, JSEXN_WARN,    "WebAssembly module validated with warning: {0}")
 MSG_DEF(JSMSG_WASM_COMPILE_ERROR,      1, JSEXN_WASMCOMPILEERROR, "{0}")
 MSG_DEF(JSMSG_WASM_NO_SHMEM_COMPILE,   0, JSEXN_WASMCOMPILEERROR, "shared memory is disabled")
@@ -618,7 +619,8 @@ MSG_DEF(JSMSG_MISSING_NAMESPACE_EXPORT,  0, JSEXN_SYNTAXERR, "export not found f
 MSG_DEF(JSMSG_MISSING_EXPORT,            1, JSEXN_SYNTAXERR, "local binding for export '{0}' not found")
 MSG_DEF(JSMSG_BAD_MODULE_STATUS,         0, JSEXN_INTERNALERR, "module record has unexpected status")
 MSG_DEF(JSMSG_NO_DYNAMIC_IMPORT,         0, JSEXN_SYNTAXERR, "dynamic module import is not implemented")
-MSG_DEF(JSMSG_IMPORT_SCRIPT_NOT_FOUND,   0, JSEXN_TYPEERR, "can't find referencing script for dynamic module import")
+MSG_DEF(JSMSG_DYNAMIC_IMPORT_FAILED,     0, JSEXN_TYPEERR, "error loading dynamically imported module")
+MSG_DEF(JSMSG_BAD_MODULE_SPECIFIER,      1, JSEXN_TYPEERR, "error resolving module specifier '{0}'")
 
 // Promise
 MSG_DEF(JSMSG_CANNOT_RESOLVE_PROMISE_WITH_ITSELF,       0, JSEXN_TYPEERR, "A promise cannot be resolved with itself.")

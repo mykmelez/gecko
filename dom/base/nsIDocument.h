@@ -25,6 +25,8 @@
 #include "nsIPresShell.h"
 #include "nsIChannelEventSink.h"
 #include "nsIProgressEventSink.h"
+#include "nsIRadioGroupContainer.h"
+#include "nsIScriptObjectPrincipal.h"
 #include "nsISecurityEventSink.h"
 #include "nsIScriptGlobalObject.h"  // for member (in nsCOMPtr)
 #include "nsIServiceManager.h"
@@ -35,6 +37,7 @@
 #include "nsPIDOMWindow.h"           // for use in inline functions
 #include "nsPropertyTable.h"         // for member
 #include "nsStringFwd.h"
+#include "nsStubMutationObserver.h"
 #include "nsTHashtable.h"  // for member
 #include "nsURIHashKey.h"
 #include "mozilla/net/ReferrerPolicy.h"  // for member
@@ -45,6 +48,7 @@
 #include "nsExpirationTracker.h"
 #include "nsClassHashtable.h"
 #include "mozilla/CORSMode.h"
+#include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/ContentBlockingLog.h"
 #include "mozilla/dom/DispatcherTrait.h"
 #include "mozilla/dom/DocumentOrShadowRoot.h"
@@ -82,6 +86,7 @@ class nsDOMNavigationTiming;
 class nsDOMStyleSheetSetList;
 class nsFrameLoader;
 class nsGlobalWindowInner;
+class nsHtml5TreeOpExecutor;
 class nsHTMLCSSStyleSheet;
 class nsHTMLDocument;
 class nsHTMLStyleSheet;
@@ -112,8 +117,6 @@ class nsViewManager;
 class nsPresContext;
 class nsRange;
 class nsSimpleContentList;
-class nsSMILAnimationController;
-class nsSVGElement;
 class nsTextNode;
 class nsUnblockOnloadEvent;
 class nsWindowSizes;
@@ -133,6 +136,7 @@ class FullscreenExit;
 class FullscreenRequest;
 class PendingAnimationTracker;
 class ServoStyleSet;
+class SMILAnimationController;
 template <typename>
 class OwningNonNull;
 struct URLExtraData;
@@ -189,6 +193,7 @@ class Selection;
 class ServiceWorkerDescriptor;
 class StyleSheetList;
 class SVGDocument;
+class SVGElement;
 class SVGSVGElement;
 class SVGUseElement;
 class Touch;
@@ -213,8 +218,8 @@ enum class CallerType : uint32_t;
 namespace mozilla {
 namespace net {
 class ChannelEventQueue;
-} // namespace net
-} // namespace mozilla
+}  // namespace net
+}  // namespace mozilla
 
 // Must be kept in sync with xpcom/rust/xpcom/src/interfaces/nonidl.rs
 #define NS_IDOCUMENT_IID                             \
@@ -434,6 +439,11 @@ class PrincipalFlashClassifier;
 // Gecko.
 class nsIDocument : public nsINode,
                     public mozilla::dom::DocumentOrShadowRoot,
+                    public nsSupportsWeakReference,
+                    public nsIRadioGroupContainer,
+                    public nsIScriptObjectPrincipal,
+                    public nsIApplicationCacheContainer,
+                    public nsStubMutationObserver,
                     public mozilla::dom::DispatcherTrait {
   typedef mozilla::dom::GlobalObject GlobalObject;
 
@@ -442,17 +452,94 @@ class nsIDocument : public nsINode,
   template <typename T>
   using NotNull = mozilla::NotNull<T>;
 
+  explicit nsIDocument(const char* aContentType);
+  virtual ~nsIDocument();
+
+  nsIDocument(const nsIDocument&) = delete;
+  nsIDocument& operator=(const nsIDocument&) = delete;
+
  public:
   typedef nsExternalResourceMap::ExternalResourceLoad ExternalResourceLoad;
   typedef mozilla::FullscreenRequest FullscreenRequest;
   typedef mozilla::net::ReferrerPolicy ReferrerPolicyEnum;
   typedef mozilla::dom::Element Element;
+  typedef mozilla::dom::SVGElement SVGElement;
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_IDOCUMENT_IID)
 
-#ifdef MOZILLA_INTERNAL_API
-  nsIDocument();
-#endif
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+
+  NS_DECL_ADDSIZEOFEXCLUDINGTHIS
+
+  NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS_AMBIGUOUS(nsIDocument,
+                                                                   nsINode)
+
+#define NS_DOCUMENT_NOTIFY_OBSERVERS(func_, params_)                          \
+  do {                                                                        \
+    NS_OBSERVER_ARRAY_NOTIFY_XPCOM_OBSERVERS(mObservers, nsIDocumentObserver, \
+                                             func_, params_);                 \
+    /* FIXME(emilio): Apparently we can keep observing from the BFCache? That \
+       looks bogus. */                                                        \
+    if (nsIPresShell* shell = GetObservingShell()) {                          \
+      shell->func_ params_;                                                   \
+    }                                                                         \
+  } while (0)
+
+  // nsIApplicationCacheContainer
+  NS_DECL_NSIAPPLICATIONCACHECONTAINER
+
+  // nsIRadioGroupContainer
+  NS_IMETHOD WalkRadioGroup(const nsAString& aName, nsIRadioVisitor* aVisitor,
+                            bool aFlushContent) final {
+    return DocumentOrShadowRoot::WalkRadioGroup(aName, aVisitor, aFlushContent);
+  }
+
+  void SetCurrentRadioButton(const nsAString& aName,
+                             mozilla::dom::HTMLInputElement* aRadio) final {
+    DocumentOrShadowRoot::SetCurrentRadioButton(aName, aRadio);
+  }
+
+  mozilla::dom::HTMLInputElement* GetCurrentRadioButton(
+      const nsAString& aName) final {
+    return DocumentOrShadowRoot::GetCurrentRadioButton(aName);
+  }
+
+  NS_IMETHOD
+  GetNextRadioButton(const nsAString& aName, const bool aPrevious,
+                     mozilla::dom::HTMLInputElement* aFocusedRadio,
+                     mozilla::dom::HTMLInputElement** aRadioOut) final {
+    return DocumentOrShadowRoot::GetNextRadioButton(aName, aPrevious,
+                                                    aFocusedRadio, aRadioOut);
+  }
+  void AddToRadioGroup(const nsAString& aName,
+                       mozilla::dom::HTMLInputElement* aRadio) final {
+    DocumentOrShadowRoot::AddToRadioGroup(aName, aRadio);
+  }
+  void RemoveFromRadioGroup(const nsAString& aName,
+                            mozilla::dom::HTMLInputElement* aRadio) final {
+    DocumentOrShadowRoot::RemoveFromRadioGroup(aName, aRadio);
+  }
+  uint32_t GetRequiredRadioCount(const nsAString& aName) const final {
+    return DocumentOrShadowRoot::GetRequiredRadioCount(aName);
+  }
+  void RadioRequiredWillChange(const nsAString& aName,
+                               bool aRequiredAdded) final {
+    DocumentOrShadowRoot::RadioRequiredWillChange(aName, aRequiredAdded);
+  }
+  bool GetValueMissingState(const nsAString& aName) const final {
+    return DocumentOrShadowRoot::GetValueMissingState(aName);
+  }
+  void SetValueMissingState(const nsAString& aName, bool aValue) final {
+    return DocumentOrShadowRoot::SetValueMissingState(aName, aValue);
+  }
+
+  // nsIScriptObjectPrincipal
+  nsIPrincipal* GetPrincipal() final { return NodePrincipal(); }
+
+  // EventTarget
+  void GetEventTargetParent(mozilla::EventChainPreVisitor& aVisitor) override;
+  mozilla::EventListenerManager* GetOrCreateListenerManager() override;
+  mozilla::EventListenerManager* GetExistingListenerManager() const override;
 
   // This helper class must be set when we dispatch beforeunload and unload
   // events in order to avoid unterminate sync XHRs.
@@ -509,6 +596,9 @@ class nsIDocument : public nsINode,
    * MayStartLayout() until SetMayStartLayout(true) is called on it.  Making
    * sure this happens is the responsibility of the caller of
    * StartDocumentLoad().
+   *
+   * This function has an implementation, and does some setup, but does NOT set
+   * *aDocListener; this is the job of subclasses.
    */
   virtual nsresult StartDocumentLoad(const char* aCommand, nsIChannel* aChannel,
                                      nsILoadGroup* aLoadGroup,
@@ -516,7 +606,7 @@ class nsIDocument : public nsINode,
                                      nsIStreamListener** aDocListener,
                                      bool aReset,
                                      nsIContentSink* aSink = nullptr) = 0;
-  virtual void StopDocumentLoad() = 0;
+  virtual void StopDocumentLoad();
 
   virtual void SetSuppressParserErrorElement(bool aSuppress) {}
   virtual bool SuppressParserErrorElement() { return false; }
@@ -533,10 +623,11 @@ class nsIDocument : public nsINode,
                  nsINode** aResult) const override {
     return NS_ERROR_NOT_IMPLEMENTED;
   }
+  nsresult CloneDocHelper(nsIDocument* clone) const;
 
   /**
    * Signal that the document title may have changed
-   * (see nsDocument::GetTitle).
+   * (see nsIDocument::GetTitle).
    * @param aBoundTitleElement true if an HTML or SVG <title> element
    * has just been bound to the document.
    */
@@ -785,6 +876,11 @@ class nsIDocument : public nsINode,
    */
   void SetIsInitialDocument(bool aIsInitialDocument) {
     mIsInitialDocumentInWindow = aIsInitialDocument;
+  }
+
+  void SetLoadedAsData(bool aLoadedAsData) { mLoadedAsData = aLoadedAsData; }
+  void SetLoadedAsInteractiveData(bool aLoadedAsInteractiveData) {
+    mLoadedAsInteractiveData = aLoadedAsInteractiveData;
   }
 
   /**
@@ -1253,13 +1349,13 @@ class nsIDocument : public nsINode,
    * These are weak pointers, please manually unschedule them when an element
    * is removed.
    */
-  void ScheduleSVGForPresAttrEvaluation(nsSVGElement* aSVG) {
+  void ScheduleSVGForPresAttrEvaluation(SVGElement* aSVG) {
     mLazySVGPresElements.PutEntry(aSVG);
   }
 
   // Unschedule an element scheduled by ScheduleFrameRequestCallback (e.g. for
   // when it is destroyed)
-  void UnscheduleSVGForPresAttrEvaluation(nsSVGElement* aSVG) {
+  void UnscheduleSVGForPresAttrEvaluation(SVGElement* aSVG) {
     mLazySVGPresElements.RemoveEntry(aSVG);
   }
 
@@ -1298,6 +1394,10 @@ class nsIDocument : public nsINode,
   //
   already_AddRefed<nsSimpleContentList> BlockedTrackingNodes() const;
 
+  // Helper method that returns true if the document has storage-access sandbox
+  // flag.
+  bool StorageAccessSandboxed() const;
+
  protected:
   friend class nsUnblockOnloadEvent;
 
@@ -1312,6 +1412,12 @@ class nsIDocument : public nsINode,
   void ClearAllBoxObjects();
 
   void MaybeEndOutermostXBLUpdate();
+
+  void RetrieveRelevantHeaders(nsIChannel* aChannel);
+
+  void TryChannelCharset(nsIChannel* aChannel, int32_t& aCharsetSource,
+                         NotNull<const Encoding*>& aEncoding,
+                         nsHtml5TreeOpExecutor* aExecutor);
 
   void DispatchContentLoadedEvents();
 
@@ -1777,11 +1883,11 @@ class nsIDocument : public nsINode,
   // content model or of style data, EndUpdate must be called afterward.
   // To make this easy and painless, use the mozAutoDocUpdate helper class.
   void BeginUpdate();
-  virtual void EndUpdate() = 0;
+  virtual void EndUpdate();
   uint32_t UpdateNestingLevel() { return mUpdateNestLevel; }
 
-  virtual void BeginLoad() = 0;
-  virtual void EndLoad() = 0;
+  virtual void BeginLoad();
+  virtual void EndLoad();
 
   enum ReadyState {
     READYSTATE_UNINITIALIZED = 0,
@@ -1799,7 +1905,7 @@ class nsIDocument : public nsINode,
 
   // Notify that a document state has changed.
   // This should only be called by callers whose state is also reflected in the
-  // implementation of nsDocument::GetDocumentState.
+  // implementation of nsIDocument::GetDocumentState.
   void DocumentStatesChanged(mozilla::EventStates aStateMask);
 
   // Observation hooks for style data to propagate notifications
@@ -2031,12 +2137,14 @@ class nsIDocument : public nsINode,
    */
   virtual bool CanSavePresentation(nsIRequest* aNewRequest);
 
+  virtual nsresult Init();
+
   /**
    * Notify the document that its associated ContentViewer is being destroyed.
    * This releases circular references so that the document can go away.
    * Destroy() is only called on documents that have a content viewer.
    */
-  virtual void Destroy() = 0;
+  virtual void Destroy();
 
   /**
    * Notify the document that its associated ContentViewer is no longer
@@ -2044,7 +2152,7 @@ class nsIDocument : public nsINode,
    * be rendered in "zombie state" until the next document is ready.
    * The document should save form control state.
    */
-  virtual void RemovedFromDocShell() = 0;
+  virtual void RemovedFromDocShell();
 
   /**
    * Get the layout history state that should be used to save and restore state
@@ -2060,14 +2168,17 @@ class nsIDocument : public nsINode,
    * UnblockOnload() or the load has been stopped altogether (by the user
    * pressing the Stop button, say).
    */
-  virtual void BlockOnload() = 0;
+  void BlockOnload();
   /**
    * @param aFireSync whether to fire onload synchronously.  If false,
    * onload will fire asynchronously after all onload blocks have been
    * removed.  It will NOT fire from inside UnblockOnload.  If true,
    * onload may fire from inside UnblockOnload.
    */
-  virtual void UnblockOnload(bool aFireSync) = 0;
+  void UnblockOnload(bool aFireSync);
+
+  // Only BlockOnload should call this!
+  void AsyncBlockOnload();
 
   void BlockDOMContentLoaded() { ++mBlockDOMContentLoaded; }
 
@@ -2182,11 +2293,6 @@ class nsIDocument : public nsINode,
   Element* GetAnonymousElementByAttribute(nsIContent* aElement,
                                           nsAtom* aAttrName,
                                           const nsAString& aAttrValue) const;
-
-  nsresult NodesFromRectHelper(float aX, float aY, float aTopSize,
-                               float aRightSize, float aBottomSize,
-                               float aLeftSize, bool aIgnoreRootScrollFrame,
-                               bool aFlushLayout, nsINodeList** aReturn);
 
   /**
    * See FlushSkinBindings on nsBindingManager
@@ -2408,7 +2514,7 @@ class nsIDocument : public nsINode,
   // mAnimationController isn't yet initialized.
   //
   // If HasAnimationController is true, this is guaranteed to return non-null.
-  nsSMILAnimationController* GetAnimationController();
+  mozilla::SMILAnimationController* GetAnimationController();
 
   // Gets the tracker for animations that are waiting to start.
   // Returns nullptr if there is no pending animation tracker for this document
@@ -2455,6 +2561,8 @@ class nsIDocument : public nsINode,
    * event handling is unsuppressed.
    */
   void AddSuspendedChannelEventQueue(mozilla::net::ChannelEventQueue* aQueue);
+
+  void SetHasDelayedRefreshEvent() { mHasDelayedRefreshEvent = true; }
 
   /**
    * Increment https://html.spec.whatwg.org/#ignore-destructive-writes-counter
@@ -2972,7 +3080,8 @@ class nsIDocument : public nsINode,
     return GetFuncStringContentList<nsCachableElementsByNameNodeList>(
         this, MatchNameAttribute, nullptr, UseExistingNameString, aName);
   }
-  nsPIDOMWindowOuter* GetDefaultView() const { return GetWindow(); }
+  mozilla::dom::Nullable<mozilla::dom::WindowProxyHolder> GetDefaultView()
+      const;
   Element* GetActiveElement();
   bool HasFocus(mozilla::ErrorResult& rv) const;
   nsIHTMLCollection* Applets();
@@ -2993,6 +3102,17 @@ class nsIDocument : public nsINode,
   void ExitPointerLock() { UnlockPointer(this); }
 
   static bool IsUnprefixedFullscreenEnabled(JSContext* aCx, JSObject* aObject);
+  static bool DocumentSupportsL10n(JSContext* aCx, JSObject* aObject);
+  static bool IsWebAnimationsEnabled(JSContext* aCx, JSObject* aObject);
+  static bool IsWebAnimationsEnabled(mozilla::dom::CallerType aCallerType);
+  static bool IsWebAnimationsGetAnimationsEnabled(JSContext* aCx,
+                                                  JSObject* aObject);
+  static bool AreWebAnimationsImplicitKeyframesEnabled(JSContext* aCx,
+                                                       JSObject* aObject);
+  static bool AreWebAnimationsTimelinesEnabled(JSContext* aCx,
+                                               JSObject* aObject);
+  // Checks that the caller is either chrome or some addon.
+  static bool IsCallerChromeOrAddon(JSContext* aCx, JSObject* aObject);
 
 #ifdef MOZILLA_INTERNAL_API
   bool Hidden() const {
@@ -3321,6 +3441,10 @@ class nsIDocument : public nsINode,
 
   nsTArray<nsString> mL10nResources;
 
+  // The application cache that this document is associated with, if
+  // any.  This can change during the lifetime of the document.
+  nsCOMPtr<nsIApplicationCache> mApplicationCache;
+
  public:
   bool IsThirdParty();
 
@@ -3504,8 +3628,6 @@ class nsIDocument : public nsINode,
     }
   }
 
-  ~nsIDocument();
-
   // Never ever call this. Only call GetWindow!
   nsPIDOMWindowOuter* GetWindowInternal() const;
 
@@ -3644,7 +3766,7 @@ class nsIDocument : public nsINode,
   LinksToUpdateList mLinksToUpdate;
 
   // SMIL Animation Controller, lazily-initialized in GetAnimationController
-  RefPtr<nsSMILAnimationController> mAnimationController;
+  RefPtr<mozilla::SMILAnimationController> mAnimationController;
 
   // Table of element properties for this document.
   nsPropertyTable mPropertyTable;
@@ -3693,7 +3815,7 @@ class nsIDocument : public nsINode,
 
   // This flag is only set in XMLDocument, for e.g. documents used in XBL. We
   // don't want animations to play in such documents, so we need to store the
-  // flag here so that we can check it in nsDocument::GetAnimationController.
+  // flag here so that we can check it in nsIDocument::GetAnimationController.
   bool mLoadedAsInteractiveData : 1;
 
   // If true, whoever is creating the document has gotten it to the
@@ -3921,6 +4043,10 @@ class nsIDocument : public nsINode,
  protected:
 #endif
 
+  // Whether an event triggered by the refresh driver was delayed because this
+  // document has suppressed events.
+  bool mHasDelayedRefreshEvent : 1;
+
   uint8_t mPendingFullscreenRequests;
 
   uint8_t mXMLDeclarationBits;
@@ -3984,7 +4110,7 @@ class nsIDocument : public nsINode,
 
   nsCString mContentLanguage;
 
-  // The channel that got passed to nsDocument::StartDocumentLoad(), if any.
+  // The channel that got passed to nsIDocument::StartDocumentLoad(), if any.
   nsCOMPtr<nsIChannel> mChannel;
 
  private:
@@ -4189,6 +4315,8 @@ class nsIDocument : public nsINode,
 
   nsDocHeaderData* mHeaderData;
 
+  // For determining if this is a flash document which should be
+  // blocked based on its principal.
   RefPtr<PrincipalFlashClassifier> mPrincipalFlashClassifier;
   mozilla::dom::FlashClassification mFlashClassification;
   // Do not use this value directly. Call the |IsThirdParty()| method, which
@@ -4299,7 +4427,7 @@ class nsIDocument : public nsINode,
   // We lazily calculate declaration blocks for SVG elements with mapped
   // attributes in Servo mode. This list contains all elements which need lazy
   // resolution.
-  nsTHashtable<nsPtrHashKey<nsSVGElement>> mLazySVGPresElements;
+  nsTHashtable<nsPtrHashKey<SVGElement>> mLazySVGPresElements;
 
   // Restyle root for servo's style system.
   //
@@ -4332,6 +4460,10 @@ class nsIDocument : public nsINode,
 
   // Pres shell resolution saved before entering fullscreen mode.
   float mSavedResolution;
+
+ public:
+  // Needs to be public because the bindings code pokes at it.
+  js::ExpandoAndGeneration mExpandoAndGeneration;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIDocument, NS_IDOCUMENT_IID)
@@ -4378,7 +4510,7 @@ class MOZ_STACK_CLASS nsAutoSyncOperation {
   ~nsAutoSyncOperation();
 
  private:
-  nsCOMArray<nsIDocument> mDocuments;
+  nsTArray<nsCOMPtr<nsIDocument>> mDocuments;
   uint32_t mMicroTaskLevel;
 };
 
@@ -4489,6 +4621,10 @@ inline nsIDocument* nsINode::AsDocument() {
 inline const nsIDocument* nsINode::AsDocument() const {
   MOZ_ASSERT(IsDocument());
   return static_cast<const nsIDocument*>(this);
+}
+
+inline nsISupports* ToSupports(nsIDocument* aDoc) {
+  return static_cast<nsINode*>(aDoc);
 }
 
 #endif /* nsIDocument_h___ */

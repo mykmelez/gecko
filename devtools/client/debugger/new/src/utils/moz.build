@@ -17,6 +17,7 @@ DebuggerModules(
     'bootstrap.js',
     'build-query.js',
     'clipboard.js',
+    'connect.js',
     'dbg.js',
     'defer.js',
     'DevToolsUtils.js',

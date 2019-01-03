@@ -123,8 +123,8 @@ return /******/ (function(modules) { // webpackBootstrap
 "use strict";
 
 
-var pdfjsVersion = '2.1.117';
-var pdfjsBuild = '417c234c';
+var pdfjsVersion = '2.1.145';
+var pdfjsBuild = 'd8f201ea';
 
 var pdfjsSharedUtil = __w_pdfjs_require__(1);
 
@@ -235,7 +235,7 @@ Object.defineProperty(exports, "URL", {
     return _url_polyfill.URL;
   }
 });
-exports.createObjectURL = exports.FormatError = exports.XRefParseException = exports.Util = exports.UnknownErrorException = exports.UnexpectedResponseException = exports.TextRenderingMode = exports.StreamType = exports.PermissionFlag = exports.PasswordResponses = exports.PasswordException = exports.NativeImageDecoding = exports.MissingPDFException = exports.MissingDataException = exports.InvalidPDFException = exports.AbortException = exports.CMapCompressionType = exports.ImageKind = exports.FontType = exports.AnnotationType = exports.AnnotationFlag = exports.AnnotationFieldFlag = exports.AnnotationBorderStyleType = exports.UNSUPPORTED_FEATURES = exports.VerbosityLevel = exports.OPS = exports.IDENTITY_MATRIX = exports.FONT_IDENTITY_MATRIX = void 0;
+exports.createObjectURL = exports.FormatError = exports.XRefParseException = exports.XRefEntryException = exports.Util = exports.UnknownErrorException = exports.UnexpectedResponseException = exports.TextRenderingMode = exports.StreamType = exports.PermissionFlag = exports.PasswordResponses = exports.PasswordException = exports.NativeImageDecoding = exports.MissingPDFException = exports.MissingDataException = exports.InvalidPDFException = exports.AbortException = exports.CMapCompressionType = exports.ImageKind = exports.FontType = exports.AnnotationType = exports.AnnotationFlag = exports.AnnotationFieldFlag = exports.AnnotationBorderStyleType = exports.UNSUPPORTED_FEATURES = exports.VerbosityLevel = exports.OPS = exports.IDENTITY_MATRIX = exports.FONT_IDENTITY_MATRIX = void 0;
 
 __w_pdfjs_require__(2);
 
@@ -694,6 +694,19 @@ var MissingDataException = function MissingDataExceptionClosure() {
 }();
 
 exports.MissingDataException = MissingDataException;
+
+const XRefEntryException = function XRefEntryExceptionClosure() {
+  function XRefEntryException(msg) {
+    this.message = msg;
+  }
+
+  XRefEntryException.prototype = new Error();
+  XRefEntryException.prototype.name = 'XRefEntryException';
+  XRefEntryException.constructor = XRefEntryException;
+  return XRefEntryException;
+}();
+
+exports.XRefEntryException = XRefEntryException;
 
 var XRefParseException = function XRefParseExceptionClosure() {
   function XRefParseException(msg) {
@@ -5141,7 +5154,7 @@ function _fetchDocument(worker, source, pdfDataRangeTransport, docId) {
 
   return worker.messageHandler.sendWithPromise('GetDocRequest', {
     docId,
-    apiVersion: '2.1.117',
+    apiVersion: '2.1.145',
     source: {
       data: source.data,
       url: source.url,
@@ -5307,6 +5320,10 @@ class PDFDocumentProxy {
     return this._transport.getPageMode();
   }
 
+  getOpenActionDestination() {
+    return this._transport.getOpenActionDestination();
+  }
+
   getAttachments() {
     return this._transport.getAttachments();
   }
@@ -5390,11 +5407,15 @@ class PDFPageProxy {
     return this._pageInfo.view;
   }
 
-  getViewport(scale, rotate = this.rotate, dontFlip = false) {
+  getViewport({
+    scale,
+    rotation = this.rotate,
+    dontFlip = false
+  } = {}) {
     return new _dom_utils.PageViewport({
       viewBox: this.view,
       scale,
-      rotation: rotate,
+      rotation,
       dontFlip
     });
   }
@@ -6564,6 +6585,10 @@ class WorkerTransport {
     return this.messageHandler.sendWithPromise('GetPageMode', null);
   }
 
+  getOpenActionDestination() {
+    return this.messageHandler.sendWithPromise('getOpenActionDestination', null);
+  }
+
   getAttachments() {
     return this.messageHandler.sendWithPromise('GetAttachments', null);
   }
@@ -6860,9 +6885,9 @@ const InternalRenderTask = function InternalRenderTaskClosure() {
   return InternalRenderTask;
 }();
 
-const version = '2.1.117';
+const version = '2.1.145';
 exports.version = version;
-const build = '417c234c';
+const build = 'd8f201ea';
 exports.build = build;
 
 /***/ }),
@@ -8772,11 +8797,10 @@ var CanvasGraphics = function CanvasGraphicsClosure() {
       var name = fontObj.loadedName || 'sans-serif';
       var bold = fontObj.black ? '900' : fontObj.bold ? 'bold' : 'normal';
       var italic = fontObj.italic ? 'italic' : 'normal';
-      var typeface = '"' + name + '", ' + fontObj.fallbackName;
+      var typeface = `"${name}", ${fontObj.fallbackName}`;
       var browserFontSize = size < MIN_FONT_SIZE ? MIN_FONT_SIZE : size > MAX_FONT_SIZE ? MAX_FONT_SIZE : size;
       this.current.fontSizeScale = size / browserFontSize;
-      var rule = italic + ' ' + bold + ' ' + browserFontSize + 'px ' + typeface;
-      this.ctx.font = rule;
+      this.ctx.font = `${italic} ${bold} ${browserFontSize}px ${typeface}`;
     },
     setTextRenderingMode: function CanvasGraphics_setTextRenderingMode(mode) {
       this.current.textRenderingMode = mode;
@@ -12332,14 +12356,14 @@ var renderTextLayer = function renderTextLayerClosure() {
 
       if (textDivProperties.canvasWidth !== 0 && width > 0) {
         textDivProperties.scale = textDivProperties.canvasWidth / width;
-        transform = 'scaleX(' + textDivProperties.scale + ')';
+        transform = `scaleX(${textDivProperties.scale})`;
       }
 
       if (textDivProperties.angle !== 0) {
-        transform = 'rotate(' + textDivProperties.angle + 'deg) ' + transform;
+        transform = `rotate(${textDivProperties.angle}deg) ${transform}`;
       }
 
-      if (transform !== '') {
+      if (transform.length > 0) {
         textDivProperties.originalTransform = transform;
         textDiv.style.transform = transform;
       }

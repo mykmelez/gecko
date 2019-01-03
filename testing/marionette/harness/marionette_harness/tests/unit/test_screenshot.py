@@ -8,7 +8,9 @@ import base64
 import hashlib
 import imghdr
 import struct
+import sys
 import tempfile
+import unittest
 import urllib
 
 from marionette_driver import By
@@ -205,6 +207,7 @@ class TestScreenCaptureChrome(WindowManagerMixin, ScreenCaptureTestCase):
         self.marionette.switch_to_window(self.start_window)
 
     @skip_if_mobile("Fennec doesn't support other chrome windows")
+    @unittest.skipIf(sys.platform.startswith("linux"), "Bug 1504201")
     def test_formats(self):
         dialog = self.open_dialog()
         self.marionette.switch_to_window(dialog)
@@ -253,8 +256,7 @@ class TestScreenCaptureChrome(WindowManagerMixin, ScreenCaptureTestCase):
 
         chrome_document_element = self.document_element
         with self.marionette.using_context('content'):
-            self.assertRaisesRegexp(NoSuchElementException,
-                                    "Web element reference not seen before",
+            self.assertRaisesRegexp(NoSuchElementException, "Web element reference not seen before",
                                     self.marionette.screenshot,
                                     highlights=[chrome_document_element])
 
@@ -275,9 +277,10 @@ class TestScreenCaptureContent(WindowManagerMixin, ScreenCaptureTestCase):
             return [document.body.scrollWidth, document.body.scrollHeight]
             """))
 
+    @skip_if_mobile("Needs application independent method to open a new tab")
     def test_capture_tab_already_closed(self):
-        new_tab = self.open_tab()
-        self.marionette.switch_to_window(new_tab)
+        tab = self.open_tab()
+        self.marionette.switch_to_window(tab)
         self.marionette.close()
 
         self.assertRaises(NoSuchWindowException, self.marionette.screenshot)

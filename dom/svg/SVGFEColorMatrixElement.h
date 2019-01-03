@@ -7,9 +7,9 @@
 #ifndef mozilla_dom_SVGFEColorMatrixElement_h
 #define mozilla_dom_SVGFEColorMatrixElement_h
 
-#include "nsSVGEnum.h"
-#include "nsSVGFilters.h"
 #include "SVGAnimatedNumberList.h"
+#include "SVGEnum.h"
+#include "SVGFilters.h"
 
 nsresult NS_NewSVGFEColorMatrixElement(
     nsIContent** aResult, already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
@@ -17,7 +17,9 @@ nsresult NS_NewSVGFEColorMatrixElement(
 namespace mozilla {
 namespace dom {
 
-typedef nsSVGFE SVGFEColorMatrixElementBase;
+class DOMSVGAnimatedNumberList;
+
+typedef SVGFE SVGFEColorMatrixElementBase;
 
 class SVGFEColorMatrixElement : public SVGFEColorMatrixElementBase {
   friend nsresult(::NS_NewSVGFEColorMatrixElement(
@@ -41,8 +43,7 @@ class SVGFEColorMatrixElement : public SVGFEColorMatrixElementBase {
   virtual nsSVGString& GetResultImageName() override {
     return mStringAttributes[RESULT];
   }
-  virtual void GetSourceImageNames(
-      nsTArray<nsSVGStringInfo>& aSources) override;
+  virtual void GetSourceImageNames(nsTArray<SVGStringInfo>& aSources) override;
 
   virtual nsresult Clone(dom::NodeInfo*, nsINode** aResult) const override;
 
@@ -57,8 +58,8 @@ class SVGFEColorMatrixElement : public SVGFEColorMatrixElementBase {
   virtual NumberListAttributesInfo GetNumberListInfo() override;
 
   enum { TYPE };
-  nsSVGEnum mEnumAttributes[1];
-  static nsSVGEnumMapping sTypeMap[];
+  SVGEnum mEnumAttributes[1];
+  static SVGEnumMapping sTypeMap[];
   static EnumInfo sEnumInfo[1];
 
   enum { RESULT, IN1 };

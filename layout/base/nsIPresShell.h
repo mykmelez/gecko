@@ -1371,12 +1371,16 @@ class nsIPresShell : public nsStubDocumentObserver {
    * The resolution defaults to 1.0.
    *
    * |aOrigin| specifies who originated the resolution change. For changes
-   * sent by APZ, pass nsGkAtoms::apz. For changes sent by the main thread,
-   * use pass nsGkAtoms::other or nsGkAtoms::restore (similar to the |aOrigin|
-   * parameter of nsIScrollableFrame::ScrollToCSSPixels()).
+   * sent by APZ, pass ChangeOrigin::eApz. For changes sent by the main thread,
+   * use pass ChangeOrigin::eMainThread (similar to the |aOrigin| parameter of
+   * nsIScrollableFrame::ScrollToCSSPixels()).
    */
+  enum class ChangeOrigin : uint8_t {
+    eApz,
+    eMainThread,
+  };
   virtual nsresult SetResolutionAndScaleTo(float aResolution,
-                                           nsAtom* aOrigin) = 0;
+                                           ChangeOrigin aOrigin) = 0;
   float GetResolution() const { return mResolution.valueOr(1.0); }
   virtual float GetCumulativeResolution() = 0;
 
@@ -1384,19 +1388,14 @@ class nsIPresShell : public nsStubDocumentObserver {
    * Accessors for a flag that tracks whether the most recent change to
    * the pres shell's resolution was originated by the main thread.
    */
-  virtual bool IsResolutionUpdated() const = 0;
-  virtual void SetResolutionUpdated(bool aUpdated) = 0;
+  bool IsResolutionUpdated() const { return mResolutionUpdated; }
+  void SetResolutionUpdated(bool aUpdated) { mResolutionUpdated = aUpdated; }
 
   /**
    * Calculate the cumulative scale resolution from this document up to
    * but not including the root document.
    */
   virtual float GetCumulativeNonRootScaleResolution() = 0;
-
-  /**
-   * Was the current resolution set by the user or just default initialized?
-   */
-  bool IsResolutionSet() { return mResolution.isSome(); }
 
   /**
    * Used by session restore code to restore a resolution before the first
@@ -1647,13 +1646,14 @@ class nsIPresShell : public nsStubDocumentObserver {
     return mVisualViewportSize;
   }
 
-  void SetVisualViewportOffset(const nsPoint& aScrollOffset) {
-    mVisualViewportOffset = aScrollOffset;
-  }
+  void SetVisualViewportOffset(const nsPoint& aScrollOffset,
+                               const nsPoint& aPrevLayoutScrollPos);
 
   nsPoint GetVisualViewportOffset() const { return mVisualViewportOffset; }
 
   nsPoint GetVisualViewportOffsetRelativeToLayoutViewport() const;
+
+  nsPoint GetLayoutViewportOffset() const;
 
   virtual void WindowSizeMoveDone() = 0;
   virtual void SysColorChanged() = 0;
@@ -1856,6 +1856,21 @@ class nsIPresShell : public nsStubDocumentObserver {
   // performing a flush with mFlushAnimations == true.
   bool mNeedThrottledAnimationFlush : 1;
 
+  bool mFontSizeInflationForceEnabled : 1;
+  bool mFontSizeInflationDisabledInMasterProcess : 1;
+  bool mFontSizeInflationEnabled : 1;
+
+  bool mPaintingIsFrozen : 1;
+
+  // If a document belongs to an invisible DocShell, this flag must be set
+  // to true, so we can avoid any paint calls for widget related to this
+  // presshell.
+  bool mIsNeverPainting : 1;
+
+  // Whether the most recent change to the pres shell resolution was
+  // originated by the main thread.
+  bool mResolutionUpdated : 1;
+
   uint32_t mPresShellId;
 
   static nsIContent* gKeyDownTarget;
@@ -1865,19 +1880,11 @@ class nsIPresShell : public nsStubDocumentObserver {
   uint32_t mFontSizeInflationEmPerLine;
   uint32_t mFontSizeInflationMinTwips;
   uint32_t mFontSizeInflationLineThreshold;
-  bool mFontSizeInflationForceEnabled;
-  bool mFontSizeInflationDisabledInMasterProcess;
-  bool mFontSizeInflationEnabled;
-
-  bool mPaintingIsFrozen;
-
-  // If a document belongs to an invisible DocShell, this flag must be set
-  // to true, so we can avoid any paint calls for widget related to this
-  // presshell.
-  bool mIsNeverPainting;
 
   // Whether we're currently under a FlushPendingNotifications.
   // This is used to handle flush reentry correctly.
+  // NOTE: This can't be a bitfield since AutoRestore has a reference to this
+  // variable.
   bool mInFlush;
 
   nsIFrame* mCurrentEventFrame;

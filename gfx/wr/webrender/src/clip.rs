@@ -18,12 +18,12 @@ use image::{self, Repetition};
 use intern;
 use internal_types::FastHashSet;
 use prim_store::{ClipData, ImageMaskData, SpaceMapper, VisibleMaskImageTile};
-use prim_store::{PointKey, SizeKey, RectangleKey};
+use prim_store::{PointKey, PrimitiveInstance, SizeKey, RectangleKey};
 use render_task::to_cache_size;
 use resource_cache::{ImageRequest, ResourceCache};
 use std::{cmp, u32};
 use std::os::raw::c_void;
-use util::{extract_inner_rect_safe, project_rect, ScaleOffset};
+use util::{extract_inner_rect_safe, project_rect, ScaleOffset, MaxRect};
 
 /*
 
@@ -103,7 +103,7 @@ pub struct ClipDataMarker;
 pub type ClipDataStore = intern::DataStore<ClipItemKey, ClipNode, ClipDataMarker>;
 pub type ClipDataHandle = intern::Handle<ClipDataMarker>;
 pub type ClipDataUpdateList = intern::UpdateList<ClipItemKey>;
-pub type ClipDataInterner = intern::Interner<ClipItemKey, ClipItemSceneData, ClipDataMarker>;
+pub type ClipDataInterner = intern::Interner<ClipItemKey, (), ClipDataMarker>;
 
 // Result of comparing a clip node instance against a local rect.
 #[derive(Debug)]
@@ -198,7 +198,7 @@ impl ClipChainId {
 
 // A clip chain node is an id for a range of clip sources,
 // and a link to a parent clip chain node, or ClipChainId::NONE.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ClipChainNode {
     pub handle: ClipDataHandle,
     pub local_pos: LayoutPoint,
@@ -516,7 +516,7 @@ impl ClipStore {
     // information, and a clip chain id, build an optimized clip chain instance.
     pub fn build_clip_chain_instance(
         &mut self,
-        clip_chain_id: ClipChainId,
+        prim_instance: &PrimitiveInstance,
         local_prim_rect: LayoutRect,
         local_prim_clip_rect: LayoutRect,
         spatial_node_index: SpatialNodeIndex,
@@ -536,7 +536,7 @@ impl ClipStore {
         // smallest possible local/device clip area.
 
         self.clip_node_info.clear();
-        let mut current_clip_chain_id = clip_chain_id;
+        let mut current_clip_chain_id = prim_instance.clip_chain_id;
 
         // for each clip chain node
         while current_clip_chain_id != ClipChainId::NONE {
@@ -551,10 +551,12 @@ impl ClipStore {
                     collector.insert(current_clip_chain_id);
                 }
                 None => {
+                    if prim_instance.is_chased() {
+                        println!("\t\tclip node (from chain) {:?} at {:?}",
+                            clip_chain_node.spatial_node_index, clip_chain_node.local_pos);
+                    }
                     if !add_clip_node_to_current_chain(
-                        clip_chain_node.handle,
-                        clip_chain_node.spatial_node_index,
-                        clip_chain_node.local_pos,
+                        clip_chain_node,
                         spatial_node_index,
                         &mut local_clip_rect,
                         &mut self.clip_node_info,
@@ -573,15 +575,14 @@ impl ClipStore {
         // handled as part of this rasterization root.
         if let Some(clip_node_collector) = clip_node_collector {
             for clip_chain_id in &clip_node_collector.clips {
-                let (handle, clip_spatial_node_index, local_pos) = {
-                    let clip_chain_node = &self.clip_chain_nodes[clip_chain_id.0 as usize];
-                    (clip_chain_node.handle, clip_chain_node.spatial_node_index, clip_chain_node.local_pos)
-                };
+                let clip_chain_node = &self.clip_chain_nodes[clip_chain_id.0 as usize];
+                if prim_instance.is_chased() {
+                    println!("\t\tclip node (from collector) {:?} at {:?}",
+                        clip_chain_node.spatial_node_index, clip_chain_node.local_pos);
+                }
 
                 if !add_clip_node_to_current_chain(
-                    handle,
-                    clip_spatial_node_index,
-                    local_pos,
+                    clip_chain_node,
                     spatial_node_index,
                     &mut local_clip_rect,
                     &mut self.clip_node_info,
@@ -655,6 +656,10 @@ impl ClipStore {
                         resource_cache,
                     );
 
+                    if prim_instance.is_chased() {
+                        println!("\t\tpartial {:?}", node.item);
+                    }
+
                     // As a special case, a partial accept of a clip rect that is
                     // in the same coordinate system as the primitive doesn't need
                     // a clip mask. Instead, it can be handled by the primitive
@@ -698,53 +703,6 @@ impl ClipStore {
 
     pub fn clear_old_instances(&mut self) {
         self.clip_node_instances.clear();
-    }
-
-
-    /// Walk the clip chain of a primitive, and calculate a minimal
-    /// local clip rect for the primitive.
-    #[allow(dead_code)]
-    pub fn build_local_clip_rect(
-        &self,
-        prim_clip_rect: LayoutRect,
-        spatial_node_index: SpatialNodeIndex,
-        clip_chain_id: ClipChainId,
-        clip_interner: &ClipDataInterner,
-    ) -> LayoutRect {
-        let mut clip_rect = prim_clip_rect;
-        let mut current_clip_chain_id = clip_chain_id;
-
-        // for each clip chain node
-        while current_clip_chain_id != ClipChainId::NONE {
-            let clip_chain_node = &self.clip_chain_nodes[current_clip_chain_id.0 as usize];
-
-            // If the clip chain node and the primitive share a spatial node,
-            // then by definition the clip can't move relative to the primitive,
-            // due to scrolling or transform animation. When that constraint
-            // holds, it's fine to include the local clip rect of this
-            // clip node in the local clip rect of the primitive itself. This
-            // is used to minimize the size of any render target allocations
-            // if this primitive ends up being part of an off-screen surface.
-
-            if clip_chain_node.spatial_node_index == spatial_node_index {
-                let clip_data = &clip_interner[clip_chain_node.handle];
-
-                // TODO(gw): For now, if a clip results in the local
-                //           rect of this primitive becoming zero, just
-                //           ignore and continue (it will be culled later
-                //           on). Technically, we could add a code path
-                //           here to drop the primitive immediately, but
-                //           that complicates some of the existing callers
-                //           of build_local_clip_rect.
-                clip_rect = clip_rect
-                    .intersection(&clip_data.clip_rect)
-                    .unwrap_or(LayoutRect::zero());
-            }
-
-            current_clip_chain_id = clip_chain_node.parent_clip_chain_id;
-        }
-
-        clip_rect
     }
 
     /// Reports the heap usage of this clip store.
@@ -819,15 +777,6 @@ impl ClipRegion<Option<ComplexClipRegion>> {
             complex_clips: None,
         }
     }
-}
-
-/// The information about an interned clip item that
-/// is stored and available in the scene builder
-/// thread.
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-pub struct ClipItemSceneData {
-    pub clip_rect: LayoutRect,
 }
 
 // The ClipItemKey is a hashable representation of the contents
@@ -1356,83 +1305,119 @@ impl ClipNodeCollector {
     ) {
         self.clips.insert(clip_chain_id);
     }
+
+    pub fn clear(
+        &mut self,
+    ) {
+        self.clips.clear();
+    }
+
+    /// Build the world clip rect for this clip node collector.
+    // NOTE: This ignores any complex clips that may be present.
+    pub fn get_world_clip_rect(
+        &self,
+        clip_store: &ClipStore,
+        clip_data_store: &ClipDataStore,
+        clip_scroll_tree: &ClipScrollTree,
+    ) -> Option<WorldRect> {
+        let mut clip_rect = WorldRect::max_rect();
+
+        let mut map_local_to_world = SpaceMapper::new(
+            ROOT_SPATIAL_NODE_INDEX,
+            WorldRect::zero(),
+        );
+
+        for clip_chain_id in &self.clips {
+            let clip_chain_node = clip_store.get_clip_chain(*clip_chain_id);
+            let clip_node = &clip_data_store[clip_chain_node.handle];
+
+            if let Some(local_rect) = clip_node.item.get_local_clip_rect(clip_chain_node.local_pos) {
+                map_local_to_world.set_target_spatial_node(
+                    clip_chain_node.spatial_node_index,
+                    clip_scroll_tree,
+                );
+
+                if let Some(world_rect) = map_local_to_world.map(&local_rect) {
+                    clip_rect = clip_rect.intersection(&world_rect)?;
+                }
+            }
+        }
+
+        Some(clip_rect)
+    }
 }
 
 // Add a clip node into the list of clips to be processed
 // for the current clip chain. Returns false if the clip
 // results in the entire primitive being culled out.
 fn add_clip_node_to_current_chain(
-    handle: ClipDataHandle,
-    clip_spatial_node_index: SpatialNodeIndex,
-    local_pos: LayoutPoint,
+    node: &ClipChainNode,
     spatial_node_index: SpatialNodeIndex,
     local_clip_rect: &mut LayoutRect,
     clip_node_info: &mut Vec<ClipNodeInfo>,
     clip_data_store: &ClipDataStore,
     clip_scroll_tree: &ClipScrollTree,
 ) -> bool {
-    let clip_node = &clip_data_store[handle];
-    let clip_spatial_node = &clip_scroll_tree.spatial_nodes[clip_spatial_node_index.0];
-    let ref_spatial_node = &clip_scroll_tree.spatial_nodes[spatial_node_index.0];
+    let clip_node = &clip_data_store[node.handle];
+    let clip_spatial_node = &clip_scroll_tree.spatial_nodes[node.spatial_node_index.0 as usize];
+    let ref_spatial_node = &clip_scroll_tree.spatial_nodes[spatial_node_index.0 as usize];
 
     // Determine the most efficient way to convert between coordinate
     // systems of the primitive and clip node.
-    let conversion = if spatial_node_index == clip_spatial_node_index {
-        Some(ClipSpaceConversion::Local)
+    let conversion = if spatial_node_index == node.spatial_node_index {
+        ClipSpaceConversion::Local
     } else if ref_spatial_node.coordinate_system_id == clip_spatial_node.coordinate_system_id {
         let scale_offset = ref_spatial_node.coordinate_system_relative_scale_offset
             .inverse()
             .accumulate(&clip_spatial_node.coordinate_system_relative_scale_offset);
-        Some(ClipSpaceConversion::ScaleOffset(scale_offset))
+        ClipSpaceConversion::ScaleOffset(scale_offset)
     } else {
-        let xf = clip_scroll_tree.get_relative_transform(
-            clip_spatial_node_index,
+        match clip_scroll_tree.get_relative_transform(
+            node.spatial_node_index,
             ROOT_SPATIAL_NODE_INDEX,
-        );
-
-        xf.map(|xf| {
-            ClipSpaceConversion::Transform(xf.with_destination::<WorldPixel>())
-        })
+        ) {
+            None => return true,
+            Some(xf) => ClipSpaceConversion::Transform(xf.with_destination::<WorldPixel>()),
+        }
     };
 
     // If we can convert spaces, try to reduce the size of the region
     // requested, and cache the conversion information for the next step.
-    if let Some(conversion) = conversion {
-        if let Some(clip_rect) = clip_node.item.get_local_clip_rect(local_pos) {
-            match conversion {
-                ClipSpaceConversion::Local => {
-                    *local_clip_rect = match local_clip_rect.intersection(&clip_rect) {
-                        Some(rect) => rect,
-                        None => return false,
-                    };
-                }
-                ClipSpaceConversion::ScaleOffset(ref scale_offset) => {
-                    let clip_rect = scale_offset.map_rect(&clip_rect);
-                    *local_clip_rect = match local_clip_rect.intersection(&clip_rect) {
-                        Some(rect) => rect,
-                        None => return false,
-                    };
-                }
-                ClipSpaceConversion::Transform(..) => {
-                    // TODO(gw): In the future, we can reduce the size
-                    //           of the pic_clip_rect here. To do this,
-                    //           we can use project_rect or the
-                    //           inverse_rect_footprint method, depending
-                    //           on the relationship of the clip, pic
-                    //           and primitive spatial nodes.
-                    //           I have left this for now until we
-                    //           find some good test cases where this
-                    //           would be a worthwhile perf win.
-                }
+    if let Some(clip_rect) = clip_node.item.get_local_clip_rect(node.local_pos) {
+        match conversion {
+            ClipSpaceConversion::Local => {
+                *local_clip_rect = match local_clip_rect.intersection(&clip_rect) {
+                    Some(rect) => rect,
+                    None => return false,
+                };
+            }
+            ClipSpaceConversion::ScaleOffset(ref scale_offset) => {
+                let clip_rect = scale_offset.map_rect(&clip_rect);
+                *local_clip_rect = match local_clip_rect.intersection(&clip_rect) {
+                    Some(rect) => rect,
+                    None => return false,
+                };
+            }
+            ClipSpaceConversion::Transform(..) => {
+                // TODO(gw): In the future, we can reduce the size
+                //           of the pic_clip_rect here. To do this,
+                //           we can use project_rect or the
+                //           inverse_rect_footprint method, depending
+                //           on the relationship of the clip, pic
+                //           and primitive spatial nodes.
+                //           I have left this for now until we
+                //           find some good test cases where this
+                //           would be a worthwhile perf win.
             }
         }
-        clip_node_info.push(ClipNodeInfo {
-            conversion,
-            local_pos,
-            handle,
-            spatial_node_index: clip_spatial_node_index,
-        })
     }
+
+    clip_node_info.push(ClipNodeInfo {
+        conversion,
+        local_pos: node.local_pos,
+        handle: node.handle,
+        spatial_node_index: node.spatial_node_index,
+    });
 
     true
 }

@@ -130,13 +130,19 @@ export function createBreakpoint(
     astLocation,
     id,
     text,
-    originalText
+    originalText,
+    log
   } = overrides;
 
-  const defaultASTLocation = { name: undefined, offset: location };
+  const defaultASTLocation = {
+    name: undefined,
+    offset: location,
+    index: 0
+  };
   const properties = {
     id,
     condition: condition || null,
+    log: log || false,
     disabled: disabled || false,
     hidden: hidden || false,
     loading: false,
@@ -179,6 +185,7 @@ export function createPendingBreakpoint(bp: Breakpoint) {
 
   return {
     condition: bp.condition,
+    log: bp.log,
     disabled: bp.disabled,
     location: pendingLocation,
     astLocation: bp.astLocation,
@@ -186,10 +193,27 @@ export function createPendingBreakpoint(bp: Breakpoint) {
   };
 }
 
-export function sortBreakpoints(breakpoints: FormattedBreakpoint[]) {
-  return sortBy(breakpoints, [
-    "selectedLocation.line",
-    ({ selectedLocation }) =>
-      selectedLocation.column === undefined || selectedLocation.column
-  ]);
+export function sortFormattedBreakpoints(breakpoints: FormattedBreakpoint[]) {
+  return _sortBreakpoints(breakpoints, "selectedLocation");
+}
+
+export function sortBreakpoints(breakpoints: Breakpoint[]) {
+  return _sortBreakpoints(breakpoints, "location");
+}
+
+function _sortBreakpoints(
+  breakpoints: Array<Object>,
+  property: string
+): Array<Object> {
+  // prettier-ignore
+  return sortBy(
+    breakpoints,
+    [
+      // Priority: line number, undefined column, column number
+      `${property}.line`,
+      bp => {
+        return bp[property].column === undefined || bp[property].column;
+      }
+    ]
+  );
 }

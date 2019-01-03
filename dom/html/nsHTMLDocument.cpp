@@ -165,7 +165,7 @@ nsresult NS_NewHTMLDocument(nsIDocument** aInstancePtrResult,
 }
 
 nsHTMLDocument::nsHTMLDocument()
-    : nsDocument("text/html"),
+    : nsIDocument("text/html"),
       mContentListHolder(nullptr),
       mNumForms(0),
       mWriteLevel(0),
@@ -184,10 +184,10 @@ nsHTMLDocument::nsHTMLDocument()
 
 nsHTMLDocument::~nsHTMLDocument() {}
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(nsHTMLDocument, nsDocument, mAll,
+NS_IMPL_CYCLE_COLLECTION_INHERITED(nsHTMLDocument, nsIDocument, mAll,
                                    mWyciwygChannel, mMidasCommandManager)
 
-NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(nsHTMLDocument, nsDocument,
+NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(nsHTMLDocument, nsIDocument,
                                              nsIHTMLDocument)
 
 JSObject* nsHTMLDocument::WrapNode(JSContext* aCx,
@@ -196,7 +196,7 @@ JSObject* nsHTMLDocument::WrapNode(JSContext* aCx,
 }
 
 nsresult nsHTMLDocument::Init() {
-  nsresult rv = nsDocument::Init();
+  nsresult rv = nsIDocument::Init();
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Now reset the compatibility mode of the CSSLoader
@@ -207,7 +207,7 @@ nsresult nsHTMLDocument::Init() {
 }
 
 void nsHTMLDocument::Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup) {
-  nsDocument::Reset(aChannel, aLoadGroup);
+  nsIDocument::Reset(aChannel, aLoadGroup);
 
   if (aChannel) {
     aChannel->GetLoadFlags(&mLoadFlags);
@@ -218,7 +218,7 @@ void nsHTMLDocument::ResetToURI(nsIURI* aURI, nsILoadGroup* aLoadGroup,
                                 nsIPrincipal* aPrincipal) {
   mLoadFlags = nsIRequest::LOAD_NORMAL;
 
-  nsDocument::ResetToURI(aURI, aLoadGroup, aPrincipal);
+  nsIDocument::ResetToURI(aURI, aLoadGroup, aPrincipal);
 
   mImages = nullptr;
   mApplets = nullptr;
@@ -443,7 +443,7 @@ void nsHTMLDocument::TryFallback(int32_t& aCharsetSource,
 
 void nsHTMLDocument::SetDocumentCharacterSet(
     NotNull<const Encoding*> aEncoding) {
-  nsDocument::SetDocumentCharacterSet(aEncoding);
+  nsIDocument::SetDocumentCharacterSet(aEncoding);
   // Make sure to stash this charset on our channel as needed if it's a wyciwyg
   // channel.
   nsCOMPtr<nsIWyciwygChannel> wyciwygChannel = do_QueryInterface(mChannel);
@@ -526,7 +526,7 @@ nsresult nsHTMLDocument::StartDocumentLoad(const char* aCommand,
 
   CSSLoader()->SetCompatibilityMode(mCompatMode);
 
-  nsresult rv = nsDocument::StartDocumentLoad(aCommand, aChannel, aLoadGroup,
+  nsresult rv = nsIDocument::StartDocumentLoad(aCommand, aChannel, aLoadGroup,
                                               aContainer, aDocListener, aReset);
   if (NS_FAILED(rv)) {
     return rv;
@@ -771,7 +771,7 @@ void nsHTMLDocument::StopDocumentLoad() {
                "nsHTMLDocument::StopDocumentLoad(): "
                "nsIWyciwygChannel could not be removed!");
 
-  nsDocument::StopDocumentLoad();
+  nsIDocument::StopDocumentLoad();
   UnblockOnload(false);
 }
 
@@ -785,14 +785,14 @@ void nsHTMLDocument::BeginLoad() {
     TurnEditingOff();
     EditingStateChanged();
   }
-  nsDocument::BeginLoad();
+  nsIDocument::BeginLoad();
 }
 
 void nsHTMLDocument::EndLoad() {
   bool turnOnEditing =
       mParser && (HasFlag(NODE_IS_EDITABLE) || mContentEditableCount > 0);
-  // Note: nsDocument::EndLoad nulls out mParser.
-  nsDocument::EndLoad();
+  // Note: nsIDocument::EndLoad nulls out mParser.
+  nsIDocument::EndLoad();
   if (turnOnEditing) {
     EditingStateChanged();
   }
@@ -816,7 +816,7 @@ nsIContent* nsHTMLDocument::GetUnfocusedKeyEventTarget() {
   if (nsGenericHTMLElement* body = GetBody()) {
     return body;
   }
-  return nsDocument::GetUnfocusedKeyEventTarget();
+  return nsIDocument::GetUnfocusedKeyEventTarget();
 }
 
 already_AddRefed<nsIURI> nsHTMLDocument::GetDomainURI() {
@@ -1138,7 +1138,7 @@ void nsHTMLDocument::SetCookie(const nsAString& aCookie, ErrorResult& rv) {
   }
 }
 
-already_AddRefed<nsPIDOMWindowOuter> nsHTMLDocument::Open(
+mozilla::dom::Nullable<mozilla::dom::WindowProxyHolder> nsHTMLDocument::Open(
     JSContext* /* unused */, const nsAString& aURL, const nsAString& aName,
     const nsAString& aFeatures, bool aReplace, ErrorResult& rv) {
   MOZ_ASSERT(nsContentUtils::CanCallerAccess(this),
@@ -1159,7 +1159,10 @@ already_AddRefed<nsPIDOMWindowOuter> nsHTMLDocument::Open(
   nsCOMPtr<nsPIDOMWindowOuter> newWindow;
   // XXXbz We ignore aReplace for now.
   rv = win->OpenJS(aURL, aName, aFeatures, getter_AddRefs(newWindow));
-  return newWindow.forget();
+  if (!newWindow) {
+    return nullptr;
+  }
+  return WindowProxyHolder(newWindow->GetBrowsingContext());
 }
 
 already_AddRefed<nsIDocument> nsHTMLDocument::Open(
@@ -1449,7 +1452,7 @@ already_AddRefed<nsIDocument> nsHTMLDocument::Open(
     JS::Rooted<JSObject*> wrapper(cx, GetWrapper());
     if (oldScope && newScope != oldScope && wrapper) {
       JSAutoRealm ar(cx, wrapper);
-      mozilla::dom::ReparentWrapper(cx, wrapper, aError);
+      UpdateReflectorGlobal(cx, wrapper, aError);
       if (aError.Failed()) {
         return nullptr;
       }
@@ -1460,7 +1463,7 @@ already_AddRefed<nsIDocument> nsHTMLDocument::Open(
         JS::Rooted<JSObject*> contentsOwnerWrapper(
             cx, mTemplateContentsOwner->GetWrapper());
         if (contentsOwnerWrapper) {
-          mozilla::dom::ReparentWrapper(cx, contentsOwnerWrapper, aError);
+          UpdateReflectorGlobal(cx, contentsOwnerWrapper, aError);
           if (aError.Failed()) {
             return nullptr;
           }
@@ -2022,7 +2025,7 @@ void nsHTMLDocument::MaybeEditingStateChanged() {
 void nsHTMLDocument::EndUpdate() {
   const bool reset = !mPendingMaybeEditingStateChanged;
   mPendingMaybeEditingStateChanged = true;
-  nsDocument::EndUpdate();
+  nsIDocument::EndUpdate();
   if (reset) {
     mPendingMaybeEditingStateChanged = false;
   }
@@ -3100,12 +3103,12 @@ bool nsHTMLDocument::IsEditingOnAfterFlush() {
 
 void nsHTMLDocument::RemovedFromDocShell() {
   mEditingState = eOff;
-  nsDocument::RemovedFromDocShell();
+  nsIDocument::RemovedFromDocShell();
 }
 
 /* virtual */ void nsHTMLDocument::DocAddSizeOfExcludingThis(
     nsWindowSizes& aWindowSizes) const {
-  nsDocument::DocAddSizeOfExcludingThis(aWindowSizes);
+  nsIDocument::DocAddSizeOfExcludingThis(aWindowSizes);
 
   // Measurement of the following members may be added later if DMD finds it is
   // worthwhile:

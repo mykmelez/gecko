@@ -576,6 +576,7 @@ void WebRenderDebugPrefChangeCallback(const char* aPrefName, void*) {
   GFX_WEBRENDER_DEBUG(".new-frame-indicator", 1 << 9)
   GFX_WEBRENDER_DEBUG(".new-scene-indicator", 1 << 10)
   GFX_WEBRENDER_DEBUG(".show-overdraw", 1 << 11)
+  GFX_WEBRENDER_DEBUG(".gpu-cache", 1 << 12)
   GFX_WEBRENDER_DEBUG(".slow-frame-indicator", 1 << 13)
   GFX_WEBRENDER_DEBUG(".texture-cache.clear-evicted", 1 << 14)
 #undef GFX_WEBRENDER_DEBUG
@@ -707,6 +708,8 @@ WebRenderMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
         helper.Report(aReport.rasterized_blobs,
                       "resource-cache/rasterized-blobs");
         helper.Report(aReport.shader_cache, "shader-cache");
+        helper.Report(aReport.data_stores, "interning/data-stores");
+        helper.Report(aReport.interners, "interning/interners");
 
         // GPU Memory.
         helper.ReportTexture(aReport.gpu_cache_textures, "gpu-cache");
@@ -914,9 +917,9 @@ void gfxPlatform::Init() {
   gPlatform->InitAcceleration();
   gPlatform->InitWebRenderConfig();
   // When using WebRender, we defer initialization of the D3D11 devices until
-  // the (rare) cases where they're used. Note that the GPU process where WebRender
-  // runs doesn't initialize gfxPlatform and performs explicit initialization of
-  // the bits it needs.
+  // the (rare) cases where they're used. Note that the GPU process where
+  // WebRender runs doesn't initialize gfxPlatform and performs explicit
+  // initialization of the bits it needs.
   if (!gfxVars::UseWebRender()) {
     gPlatform->EnsureDevicesInitialized();
   }

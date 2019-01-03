@@ -149,8 +149,14 @@ pref("app.update.silent", false);
 // app.update.badgeWaitTime is in branding section
 
 // If set to true, the Update Service will apply updates in the background
-// when it finishes downloading them. Disabled in bug 1397562.
+// when it finishes downloading them.
+#if defined(XP_WIN)
+pref("app.update.staging.enabled", true);
+#elif defined(EARLY_BETA_OR_EARLIER)
+pref("app.update.staging.enabled", true);
+#else
 pref("app.update.staging.enabled", false);
+#endif
 
 // Update service URL:
 pref("app.update.url", "https://aus5.mozilla.org/update/6/%PRODUCT%/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%SYSTEM_CAPABILITIES%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
@@ -1011,7 +1017,7 @@ pref("dom.ipc.plugins.sandbox-level.flash", 0);
 // See - security/sandbox/win/src/sandboxbroker/sandboxBroker.cpp
 // SetSecurityLevelForContentProcess() for what the different settings mean.
 #if defined(_ARM64_)
-pref("security.sandbox.content.level", 0);
+pref("security.sandbox.content.level", 2);
 #else
 pref("security.sandbox.content.level", 5);
 #endif
@@ -1162,6 +1168,8 @@ pref("services.sync.prefs.sync.addons.ignoreUserEnabledChanges", true);
 // could weaken the pref locally, install an add-on from an untrusted
 // source, and this would propagate automatically to other,
 // uncompromised Sync-connected devices.
+pref("services.sync.prefs.sync.browser.contentblocking.category", true);
+pref("services.sync.prefs.sync.browser.contentblocking.introCount", true);
 pref("services.sync.prefs.sync.browser.ctrlTab.recentlyUsedOrder", true);
 pref("services.sync.prefs.sync.browser.download.useDownloadDir", true);
 pref("services.sync.prefs.sync.browser.formfill.enable", true);
@@ -1461,10 +1469,13 @@ pref("media.autoplay.enabled.user-gestures-needed", true);
 pref("media.autoplay.ask-permission", false);
 // Set Firefox to block autoplay, asking for permission by default.
 pref("media.autoplay.default", 1); // 0=Allowed, 1=Blocked, 2=Prompt
+// Block WebAudio from playing automatically.
+pref("media.autoplay.block-webaudio", true);
 #else
 pref("media.autoplay.default", 0); // 0=Allowed, 1=Blocked, 2=Prompt
 pref("media.autoplay.enabled.user-gestures-needed", false);
 pref("media.autoplay.ask-permission", false);
+pref("media.autoplay.block-webaudio", false);
 #endif
 
 
@@ -1507,15 +1518,15 @@ pref("browser.ping-centre.production.endpoint", "https://tiles.services.mozilla.
 // Enable GMP support in the addon manager.
 pref("media.gmp-provider.enabled", true);
 
-// Enable blocking access to storage from tracking resources by default
+// Enable blocking access to storage from tracking resources only in nightly
+// and early beta. By default the value is 0: BEHAVIOR_ACCEPT
+#ifdef EARLY_BETA_OR_EARLIER
 pref("network.cookie.cookieBehavior", 4 /* BEHAVIOR_REJECT_TRACKER */);
+#endif
 
 pref("browser.contentblocking.allowlist.storage.enabled", true);
 
-#ifdef NIGHTLY_BUILD
-// Enable the Storage Access API in Nightly
 pref("dom.storage_access.enabled", true);
-#endif
 
 pref("dom.storage_access.auto_grants", true);
 pref("dom.storage_access.max_concurrent_auto_grants", 5);
@@ -1524,7 +1535,7 @@ pref("dom.storage_access.max_concurrent_auto_grants", 5);
 pref("browser.contentblocking.trackingprotection.control-center.ui.enabled", true);
 pref("browser.contentblocking.rejecttrackers.control-center.ui.enabled", true);
 
-pref("browser.contentblocking.control-center.ui.showBlockedLabels", false);
+pref("browser.contentblocking.control-center.ui.showBlockedLabels", true);
 pref("browser.contentblocking.control-center.ui.showAllowedLabels", false);
 
 // Enable the Report Breakage UI on Nightly and Beta but not on Release yet.
@@ -1640,8 +1651,10 @@ pref("browser.migrate.chrome.history.maxAgeInDays", 180);
 // Enable browser frames for use on desktop.  Only exposed to chrome callers.
 pref("dom.mozBrowserFramesEnabled", true);
 
+pref("extensions.pocket.api", "api.getpocket.com");
 pref("extensions.pocket.enabled", true);
 pref("extensions.pocket.oAuthConsumerKey", "40249-e88c401e1b1f2242d9e441c4");
+pref("extensions.pocket.site", "getpocket.com");
 
 pref("signon.schemeUpgrades", true);
 

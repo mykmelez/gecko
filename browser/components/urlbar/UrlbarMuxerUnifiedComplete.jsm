@@ -14,6 +14,7 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
   Log: "resource://gre/modules/Log.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
+  UrlbarMuxer: "resource:///modules/UrlbarUtils.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
 });
 
@@ -33,9 +34,9 @@ const MATCH_TYPE_TO_GROUP = new Map([
  * Class used to create a muxer.
  * The muxer receives and sorts matches in a QueryContext.
  */
-class MuxerUnifiedComplete {
+class MuxerUnifiedComplete extends UrlbarMuxer {
   constructor() {
-    // Nothing.
+    super();
   }
 
   get name() {
@@ -58,6 +59,7 @@ class MuxerUnifiedComplete {
                     UrlbarPrefs.get("matchBuckets");
     logger.debug(`Buckets: ${buckets}`);
     let sortedMatches = [];
+    let handled = new Set();
     for (let [group, count] of buckets) {
       // Search all the available matches and fill this bucket.
       for (let match of context.results) {
@@ -65,14 +67,20 @@ class MuxerUnifiedComplete {
           // There's no more space in this bucket.
           break;
         }
+        if (handled.has(match)) {
+          // Already handled.
+          continue;
+        }
 
         // Handle the heuristic result.
         if (group == UrlbarUtils.MATCH_GROUP.HEURISTIC &&
             match == firstMatch && context.preselected) {
           sortedMatches.push(match);
+          handled.add(match);
           count--;
         } else if (group == MATCH_TYPE_TO_GROUP.get(match.type)) {
           sortedMatches.push(match);
+          handled.add(match);
           count--;
         } else if (!MATCH_TYPE_TO_GROUP.has(match.type)) {
           let errorMsg = `Match type ${match.type} is not mapped to a match group.`;
@@ -81,6 +89,7 @@ class MuxerUnifiedComplete {
         }
       }
     }
+    context.results = sortedMatches;
   }
 }
 

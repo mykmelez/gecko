@@ -624,7 +624,7 @@ html|input.urlbar-input {
 
 /* Never show a scrollbar for the Location Bar popup.  This overrides the
    richlistbox inline overflow: auto style.*/
-#PopupAutoCompleteRichResult > richlistbox > scrollbox {
+#PopupAutoCompleteRichResult > richlistbox {
   overflow: hidden !important;
 }
 
@@ -737,10 +737,6 @@ html|input.urlbar-input {
 
 #PopupAutoCompleteRichResult.showSearchSuggestionsNotification > richlistbox {
   transition: none;
-}
-
-#DateTimePickerPanel[active="true"] {
-  -moz-binding: url("chrome://global/content/bindings/datetimepopup.xml#datetime-popup");
 }
 
 #urlbar[pageproxystate=invalid] > #page-action-buttons > .urlbar-page-action,
@@ -928,7 +924,7 @@ html|*.pointerlockfswarning {
   top: 0; left: 50%;
   transform: translate(-50%, -100%);
   box-sizing: border-box;
-  width: -moz-max-content;
+  width: max-content;
   max-width: 95%;
   pointer-events: none;
 }

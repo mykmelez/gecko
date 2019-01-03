@@ -5,7 +5,7 @@
 // @flow
 
 import React, { PureComponent } from "react";
-import { connect } from "react-redux";
+import { connect } from "../../../utils/connect";
 import { createSelector } from "reselect";
 import classnames from "classnames";
 
@@ -28,8 +28,7 @@ import type {
   SourceLocation
 } from "../../../types";
 
-type FormattedFrame = {
-  ...Frame,
+type FormattedFrame = Frame & {
   selectedLocation: SourceLocation
 };
 
@@ -43,7 +42,7 @@ type Props = {
   breakpoint: FormattedBreakpoint,
   breakpoints: BreakpointType[],
   source: Source,
-  frame: ?FormattedFrame,
+  frame: FormattedFrame,
   enableBreakpoint: typeof actions.enableBreakpoint,
   removeBreakpoint: typeof actions.removeBreakpoint,
   removeBreakpoints: typeof actions.removeBreakpoints,
@@ -136,20 +135,21 @@ class Breakpoint extends PureComponent<Props> {
   /* eslint-disable react/no-danger */
   render() {
     const { breakpoint } = this.props;
-
     return (
       <div
         className={classnames({
           breakpoint,
           paused: this.isCurrentlyPausedAtBreakpoint(),
           disabled: breakpoint.disabled,
-          "is-conditional": !!breakpoint.condition
+          "is-conditional": !!breakpoint.condition,
+          log: breakpoint.log
         })}
         onClick={this.selectBreakpoint}
         onDoubleClick={this.onDoubleClick}
         onContextMenu={this.onContextMenu}
       >
         <input
+          id={breakpoint.id}
           type="checkbox"
           className="breakpoint-checkbox"
           checked={!breakpoint.disabled}
@@ -157,10 +157,12 @@ class Breakpoint extends PureComponent<Props> {
           onClick={ev => ev.stopPropagation()}
         />
         <label
+          htmlFor={breakpoint.id}
           className="breakpoint-label cm-s-mozilla"
           title={this.getBreakpointText()}
-          dangerouslySetInnerHTML={this.highlightText()}
-        />
+        >
+          <span dangerouslySetInnerHTML={this.highlightText()} />
+        </label>
         <div className="breakpoint-line-close">
           <div className="breakpoint-line">{this.getBreakpointLocation()}</div>
           <CloseButton
@@ -176,7 +178,7 @@ class Breakpoint extends PureComponent<Props> {
 const getFormattedFrame = createSelector(
   getSelectedSource,
   getSelectedFrame,
-  (selectedSource: Source, frame: Frame) => {
+  (selectedSource: ?Source, frame: ?Frame): ?FormattedFrame => {
     if (!frame) {
       return null;
     }
@@ -202,7 +204,6 @@ export default connect(
     removeAllBreakpoints: actions.removeAllBreakpoints,
     disableBreakpoint: actions.disableBreakpoint,
     selectSpecificLocation: actions.selectSpecificLocation,
-    selectLocation: actions.selectLocation,
     setBreakpointCondition: actions.setBreakpointCondition,
     toggleAllBreakpoints: actions.toggleAllBreakpoints,
     toggleBreakpoints: actions.toggleBreakpoints,

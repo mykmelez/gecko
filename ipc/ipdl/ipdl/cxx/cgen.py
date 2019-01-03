@@ -55,14 +55,15 @@ class CxxCodeGen(CodePrinter, Visitor):
         ts = ''
         if t.ptr:
             ts += '*'
-        elif t.ptrconst:
-            ts += '* const'
         elif t.ptrptr:
             ts += '**'
         elif t.ptrconstptr:
             ts += '* const*'
 
-        ts += '&' * t.ref
+        if t.ref:
+            ts += '&'
+        elif t.rvalref:
+            ts += '&&'
 
         self.write(ts)
 
@@ -355,12 +356,6 @@ class CxxCodeGen(CodePrinter, Visitor):
         self.write(' : ')
         c.elsee.accept(self)
         self.write(')')
-
-    def visitExprIndex(self, ei):
-        ei.arr.accept(self)
-        self.write('[')
-        ei.idx.accept(self)
-        self.write(']')
 
     def visitExprSelect(self, es):
         self.write('(')

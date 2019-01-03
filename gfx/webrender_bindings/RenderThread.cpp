@@ -325,7 +325,7 @@ static void NotifyDidRender(layers::CompositorBridgeParent* aBridge,
         info.epochs.data[i].pipeline_id, info.epochs.data[i].epoch,
         aCompositeStartId, aCompositeStart, aRenderStart, aEnd, &aStats);
   }
-  
+
   if (aBridge->GetWrBridge()) {
     aBridge->GetWrBridge()->CompositeIfNeeded();
   }
@@ -860,6 +860,22 @@ void wr_schedule_render(mozilla::wr::WrWindowId aWindowId) {
       CompositorBridgeParent::GetCompositorBridgeParentFromWindowId(aWindowId);
   if (cbp) {
     cbp->ScheduleRenderOnCompositorThread();
+  }
+}
+
+static void NotifyDidSceneBuild(RefPtr<layers::CompositorBridgeParent> aBridge,
+                                RefPtr<wr::WebRenderPipelineInfo> aInfo) {
+  aBridge->NotifyDidSceneBuild(aInfo);
+}
+
+void wr_finished_scene_build(mozilla::wr::WrWindowId aWindowId,
+                             mozilla::wr::WrPipelineInfo aInfo) {
+  RefPtr<mozilla::layers::CompositorBridgeParent> cbp = mozilla::layers::
+      CompositorBridgeParent::GetCompositorBridgeParentFromWindowId(aWindowId);
+  RefPtr<wr::WebRenderPipelineInfo> info = new wr::WebRenderPipelineInfo(aInfo);
+  if (cbp) {
+    layers::CompositorThreadHolder::Loop()->PostTask(NewRunnableFunction(
+        "NotifyDidSceneBuild", &NotifyDidSceneBuild, cbp, info));
   }
 }
 

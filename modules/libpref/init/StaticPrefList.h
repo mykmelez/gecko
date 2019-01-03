@@ -246,18 +246,12 @@ VARCACHE_PREF(
 // Note, this is not currently safe to use for normal browsing yet.
 PREF("dom.serviceWorkers.parent_intercept", bool, false)
 
-// Enable PaymentRequest API
-#if defined(NIGHTLY_BUILD) && (defined(XP_WIN) || defined(XP_MACOSX))
-# define PREF_VALUE  true
-#else
-# define PREF_VALUE  false
-#endif
+// Enable/disable the PaymentRequest API
 VARCACHE_PREF(
   "dom.payments.request.enabled",
    dom_payments_request_enabled,
-  bool, PREF_VALUE
+  bool, false
 )
-#undef PREF_VALUE
 
 // Whether a user gesture is required to call PaymentRequest.prototype.show().
 VARCACHE_PREF(
@@ -471,6 +465,13 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "dom.disable_open_during_load",
    dom_disable_open_during_load,
+  bool, false
+)
+
+// Storage-access API.
+VARCACHE_PREF(
+  "dom.storage_access.enabled",
+   dom_storage_access_enabled,
   bool, false
 )
 
@@ -1561,6 +1562,12 @@ VARCACHE_PREF(
   "media.benchmark.timeout",
    MediaBenchmarkTimeout,
   RelaxedAtomicUint32, 1000
+)
+
+VARCACHE_PREF(
+  "media.test.video-suspend",
+   MediaTestVideoSuspend,
+  RelaxedAtomicBool, false
 )
 
 //---------------------------------------------------------------------------

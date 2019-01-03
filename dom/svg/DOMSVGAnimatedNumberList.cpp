@@ -7,7 +7,7 @@
 #include "DOMSVGAnimatedNumberList.h"
 #include "DOMSVGNumberList.h"
 #include "SVGAnimatedNumberList.h"
-#include "nsSVGElement.h"
+#include "SVGElement.h"
 #include "nsCOMPtr.h"
 #include "nsSVGAttrTearoffTable.h"
 #include "mozilla/dom/SVGAnimatedNumberListBinding.h"
@@ -15,6 +15,7 @@
 // See the architecture comment in this file's header.
 
 namespace mozilla {
+namespace dom {
 
 static inline nsSVGAttrTearoffTable<SVGAnimatedNumberList,
                                     DOMSVGAnimatedNumberList>&
@@ -59,7 +60,7 @@ already_AddRefed<DOMSVGNumberList> DOMSVGAnimatedNumberList::AnimVal() {
 
 /* static */ already_AddRefed<DOMSVGAnimatedNumberList>
 DOMSVGAnimatedNumberList::GetDOMWrapper(SVGAnimatedNumberList* aList,
-                                        nsSVGElement* aElement,
+                                        dom::SVGElement* aElement,
                                         uint8_t aAttrEnum) {
   RefPtr<DOMSVGAnimatedNumberList> wrapper =
       SVGAnimatedNumberListTearoffTable().GetTearoff(aList);
@@ -129,4 +130,5 @@ const SVGAnimatedNumberList& DOMSVGAnimatedNumberList::InternalAList() const {
   return *mElement->GetAnimatedNumberList(mAttrEnum);
 }
 
+}  // namespace dom
 }  // namespace mozilla

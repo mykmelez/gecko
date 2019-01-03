@@ -1352,15 +1352,12 @@ void CompositorBridgeParent::SetTestAsyncZoom(
 }
 
 void CompositorBridgeParent::FlushApzRepaints(const LayersId& aLayersId) {
-  MOZ_ASSERT(mApzcTreeManager);
   MOZ_ASSERT(mApzUpdater);
   MOZ_ASSERT(aLayersId.IsValid());
-  RefPtr<CompositorBridgeParent> self = this;
   mApzUpdater->RunOnControllerThread(
       aLayersId, NS_NewRunnableFunction(
-                     "layers::CompositorBridgeParent::FlushApzRepaints", [=]() {
-                       self->mApzcTreeManager->FlushApzRepaints(aLayersId);
-                     }));
+                     "layers::CompositorBridgeParent::FlushApzRepaints",
+                     [=]() { APZCTreeManager::FlushApzRepaints(aLayersId); }));
 }
 
 void CompositorBridgeParent::GetAPZTestData(const LayersId& aLayersId,
@@ -2008,6 +2005,20 @@ void CompositorBridgeParent::DidComposite(const VsyncId& aId,
     mFwdTime = TimeStamp();
 #endif
     mPendingTransaction = TransactionId{0};
+  }
+}
+
+void CompositorBridgeParent::NotifyDidSceneBuild(
+    RefPtr<wr::WebRenderPipelineInfo> aInfo) {
+  MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
+  if (mPaused) {
+    return;
+  }
+
+  if (mWrBridge) {
+    mWrBridge->NotifyDidSceneBuild(aInfo);
+  } else {
+    mCompositorScheduler->ScheduleComposition();
   }
 }
 

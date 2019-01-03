@@ -7,7 +7,7 @@
 #ifndef mozilla_dom_SVGFEFloodElement_h
 #define mozilla_dom_SVGFEFloodElement_h
 
-#include "nsSVGFilters.h"
+#include "SVGFilters.h"
 
 nsresult NS_NewSVGFEFloodElement(
     nsIContent** aResult, already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
@@ -15,7 +15,7 @@ nsresult NS_NewSVGFEFloodElement(
 namespace mozilla {
 namespace dom {
 
-typedef nsSVGFE SVGFEFloodElementBase;
+typedef SVGFE SVGFEFloodElementBase;
 
 class SVGFEFloodElement : public SVGFEFloodElementBase {
   friend nsresult(::NS_NewSVGFEFloodElement(

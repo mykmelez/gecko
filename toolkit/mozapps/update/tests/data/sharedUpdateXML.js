@@ -118,7 +118,6 @@ function getRemoteUpdatesXMLString(aUpdates) {
 function getRemoteUpdateString(aUpdateProps, aPatches) {
   const updateProps = {
     appVersion: DEFAULT_UPDATE_VERSION,
-    backgroundInterval: null,
     buildID: "20080811053724",
     custom1: null,
     custom2: null,
@@ -163,6 +162,8 @@ function getRemotePatchString(aPatchProps) {
     set url(val) {
       this._url = val;
     },
+    custom1: null,
+    custom2: null,
     size: SIZE_SIMPLE_MAR,
   };
 
@@ -215,7 +216,6 @@ function getLocalUpdateString(aUpdateProps, aPatches) {
     set appVersion(val) {
       this._appVersion = val;
     },
-    backgroundInterval: null,
     buildID: "20080811053724",
     channel: gDefaultPrefBranch.getCharPref(PREF_APP_UPDATE_CHANNEL),
     custom1: null,
@@ -276,6 +276,8 @@ function getLocalPatchString(aPatchProps) {
     type: "complete",
     url: gURLData + FILE_SIMPLE_MAR,
     size: SIZE_SIMPLE_MAR,
+    custom1: null,
+    custom2: null,
     selected: "true",
     state: STATE_SUCCEEDED,
   };
@@ -310,8 +312,6 @@ function getUpdateString(aUpdateProps) {
   let detailsURL = "detailsURL=\"" + aUpdateProps.detailsURL + "\" ";
   let promptWaitTime = aUpdateProps.promptWaitTime ?
     "promptWaitTime=\"" + aUpdateProps.promptWaitTime + "\" " : "";
-  let backgroundInterval = aUpdateProps.backgroundInterval ?
-    "backgroundInterval=\"" + aUpdateProps.backgroundInterval + "\" " : "";
   let custom1 = aUpdateProps.custom1 ? aUpdateProps.custom1 + " " : "";
   let custom2 = aUpdateProps.custom2 ? aUpdateProps.custom2 + " " : "";
   let buildID = "buildID=\"" + aUpdateProps.buildID + "\"";
@@ -322,7 +322,6 @@ function getUpdateString(aUpdateProps) {
                       appVersion +
                       detailsURL +
                       promptWaitTime +
-                      backgroundInterval +
                       custom1 +
                       custom2 +
                       buildID;
@@ -340,8 +339,12 @@ function getPatchString(aPatchProps) {
   let type = "type=\"" + aPatchProps.type + "\" ";
   let url = "URL=\"" + aPatchProps.url + "\" ";
   let size = "size=\"" + aPatchProps.size + "\"";
+  let custom1 = aPatchProps.custom1 ? aPatchProps.custom1 + " " : "";
+  let custom2 = aPatchProps.custom2 ? aPatchProps.custom2 + " " : "";
   return "<patch " +
          type +
          url +
+         custom1 +
+         custom2 +
          size;
 }

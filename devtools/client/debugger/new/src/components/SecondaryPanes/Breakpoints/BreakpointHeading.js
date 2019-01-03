@@ -4,7 +4,7 @@
 
 // @flow
 import React, { PureComponent } from "react";
-import { connect } from "react-redux";
+import { connect } from "../../../utils/connect";
 import actions from "../../../actions";
 import {
   getTruncatedFileName,
@@ -12,22 +12,42 @@ import {
   getSourceQueryString,
   getFileURL
 } from "../../../utils/source";
-import { getHasSiblingOfSameName } from "../../../selectors";
+import {
+  getHasSiblingOfSameName,
+  getBreakpointsForSource,
+  getWorkerDisplayName
+} from "../../../selectors";
 
 import SourceIcon from "../../shared/SourceIcon";
 
-import type { Source } from "../../../types";
+import type { Source, Breakpoint } from "../../../types";
+import showContextMenu from "./BreakpointHeadingsContextMenu";
 
 type Props = {
   sources: Source[],
   source: Source,
   hasSiblingOfSameName: boolean,
-  selectSource: string => void
+  breakpointsForSource: Breakpoint[],
+  disableBreakpointsInSource: typeof actions.disableBreakpointsInSource,
+  enableBreakpointsInSource: typeof actions.enableBreakpointsInSource,
+  removeBreakpointsInSource: typeof actions.removeBreakpointsInSource,
+  selectSource: typeof actions.selectSource,
+  threadName: string
 };
 
 class BreakpointHeading extends PureComponent<Props> {
+  onContextMenu = e => {
+    showContextMenu({ ...this.props, contextMenuEvent: e });
+  };
+
   render() {
-    const { sources, source, hasSiblingOfSameName, selectSource } = this.props;
+    const {
+      sources,
+      source,
+      hasSiblingOfSameName,
+      selectSource,
+      threadName
+    } = this.props;
 
     const path = getDisplayPath(source, sources);
     const query = hasSiblingOfSameName ? getSourceQueryString(source) : "";
@@ -37,13 +57,16 @@ class BreakpointHeading extends PureComponent<Props> {
         className="breakpoint-heading"
         title={getFileURL(source, false)}
         onClick={() => selectSource(source.id)}
+        onContextMenu={this.onContextMenu}
       >
         <SourceIcon
           source={source}
           shouldHide={icon => ["file", "javascript"].includes(icon)}
         />
         <div className="filename">
-          {getTruncatedFileName(source, query)}
+          {threadName +
+            (threadName ? ": " : "") +
+            getTruncatedFileName(source, query)}
           {path && <span>{`../${path}/..`}</span>}
         </div>
       </div>
@@ -52,10 +75,17 @@ class BreakpointHeading extends PureComponent<Props> {
 }
 
 const mapStateToProps = (state, { source }) => ({
-  hasSiblingOfSameName: getHasSiblingOfSameName(state, source)
+  hasSiblingOfSameName: getHasSiblingOfSameName(state, source),
+  breakpointsForSource: getBreakpointsForSource(state, source.id),
+  threadName: getWorkerDisplayName(state, source.thread)
 });
 
 export default connect(
   mapStateToProps,
-  { selectSource: actions.selectSource }
+  {
+    selectSource: actions.selectSource,
+    enableBreakpointsInSource: actions.enableBreakpointsInSource,
+    disableBreakpointsInSource: actions.disableBreakpointsInSource,
+    removeBreakpointsInSource: actions.removeBreakpointsInSource
+  }
 )(BreakpointHeading);

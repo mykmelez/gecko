@@ -183,9 +183,11 @@ class AsyncFreeSnowWhite : public Runnable {
 namespace xpc {
 
 CompartmentPrivate::CompartmentPrivate(JS::Compartment* c,
+                                       XPCWrappedNativeScope* scope,
                                        mozilla::BasePrincipal* origin,
                                        const SiteIdentifier& site)
     : originInfo(origin, site),
+      scope(scope),
       wantXrays(false),
       allowWaivers(true),
       isWebExtensionContentScript(false),
@@ -194,7 +196,6 @@ CompartmentPrivate::CompartmentPrivate(JS::Compartment* c,
       isUAWidgetCompartment(false),
       hasExclusiveExpandos(false),
       universalXPConnectEnabled(false),
-      forcePermissiveCOWs(false),
       wasShutdown(false),
       mWrappedJSMap(JSObject2WrappedJSMap::newMap(XPC_JS_MAP_LENGTH)) {
   MOZ_COUNT_CTOR(xpc::CompartmentPrivate);
@@ -215,8 +216,36 @@ void CompartmentPrivate::SystemIsBeingShutDown() {
   }
 }
 
-RealmPrivate::RealmPrivate(JS::Realm* realm)
-    : scriptability(realm), scope(nullptr) {}
+RealmPrivate::RealmPrivate(JS::Realm* realm) : scriptability(realm) {}
+
+/* static */ void RealmPrivate::Init(HandleObject aGlobal,
+                                     const SiteIdentifier& aSite) {
+  MOZ_ASSERT(aGlobal);
+  DebugOnly<const js::Class*> clasp = js::GetObjectClass(aGlobal);
+  MOZ_ASSERT(clasp->flags &
+                 (JSCLASS_PRIVATE_IS_NSISUPPORTS | JSCLASS_HAS_PRIVATE) ||
+             dom::IsDOMClass(clasp));
+
+  Realm* realm = GetObjectRealmOrNull(aGlobal);
+
+  // Create the realm private.
+  RealmPrivate* realmPriv = new RealmPrivate(realm);
+  MOZ_ASSERT(!GetRealmPrivate(realm));
+  SetRealmPrivate(realm, realmPriv);
+
+  nsIPrincipal* principal = GetRealmPrincipal(realm);
+  Compartment* c = js::GetObjectCompartment(aGlobal);
+
+  // Create the compartment private if needed.
+  if (CompartmentPrivate* priv = CompartmentPrivate::Get(c)) {
+    MOZ_ASSERT(priv->originInfo.IsSameOrigin(principal));
+  } else {
+    auto* scope = new XPCWrappedNativeScope(c, aGlobal);
+    priv =
+        new CompartmentPrivate(c, scope, BasePrincipal::Cast(principal), aSite);
+    JS_SetCompartmentPrivate(c, priv);
+  }
+}
 
 static bool TryParseLocationURICandidate(
     const nsACString& uristr, RealmPrivate::LocationHint aLocationHint,
@@ -383,6 +412,49 @@ static bool PrincipalImmuneToScriptPolicy(nsIPrincipal* aPrincipal) {
   return false;
 }
 
+void RealmPrivate::RegisterStackFrame(JSStackFrameBase* aFrame) {
+  mJSStackFrames.PutEntry(aFrame);
+}
+
+void RealmPrivate::UnregisterStackFrame(JSStackFrameBase* aFrame) {
+  mJSStackFrames.RemoveEntry(aFrame);
+}
+
+void RealmPrivate::NukeJSStackFrames() {
+  for (auto iter = mJSStackFrames.Iter(); !iter.Done(); iter.Next()) {
+    iter.Get()->GetKey()->Clear();
+  }
+
+  mJSStackFrames.Clear();
+}
+
+void RegisterJSStackFrame(JS::Realm* aRealm, JSStackFrameBase* aStackFrame) {
+  RealmPrivate* realmPrivate = RealmPrivate::Get(aRealm);
+  if (!realmPrivate) {
+    return;
+  }
+
+  realmPrivate->RegisterStackFrame(aStackFrame);
+}
+
+void UnregisterJSStackFrame(JS::Realm* aRealm, JSStackFrameBase* aStackFrame) {
+  RealmPrivate* realmPrivate = RealmPrivate::Get(aRealm);
+  if (!realmPrivate) {
+    return;
+  }
+
+  realmPrivate->UnregisterStackFrame(aStackFrame);
+}
+
+void NukeJSStackFrames(JS::Realm* aRealm) {
+  RealmPrivate* realmPrivate = RealmPrivate::Get(aRealm);
+  if (!realmPrivate) {
+    return;
+  }
+
+  realmPrivate->NukeJSStackFrames();
+}
+
 Scriptability::Scriptability(JS::Realm* realm)
     : mScriptBlocks(0),
       mDocShellAllowsScript(true),
@@ -516,8 +588,8 @@ bool EnableUniversalXPConnect(JSContext* cx) {
   // The Components object normally isn't defined for unprivileged web content,
   // but we define it when UniversalXPConnect is enabled to support legacy
   // tests.
-  Realm* realm = GetCurrentRealmOrNull(cx);
-  XPCWrappedNativeScope* scope = RealmPrivate::Get(realm)->scope;
+  Compartment* comp = js::GetContextCompartment(cx);
+  XPCWrappedNativeScope* scope = CompartmentPrivate::Get(comp)->scope;
   if (!scope) {
     return true;
   }
@@ -897,6 +969,7 @@ void XPCJSRuntime::CustomGCCallback(JSGCStatus status) {
 }
 
 void CompartmentPrivate::UpdateWeakPointersAfterGC() {
+  mRemoteProxies.sweep();
   mWrappedJSMap->UpdateWeakPointersAfterGC();
 }
 
@@ -2276,7 +2349,7 @@ void JSReporter::CollectReports(WindowPaths* windowPaths,
       xpcrt->GetMultiCompartmentWrappedJSMap()->SizeOfWrappedJS(JSMallocSizeOf);
 
   XPCWrappedNativeScope::ScopeSizeInfo sizeInfo(JSMallocSizeOf);
-  XPCWrappedNativeScope::AddSizeOfAllScopesIncludingThis(&sizeInfo);
+  XPCWrappedNativeScope::AddSizeOfAllScopesIncludingThis(cx, &sizeInfo);
 
   mozJSComponentLoader* loader = mozJSComponentLoader::Get();
   size_t jsComponentLoaderSize =
@@ -2780,7 +2853,8 @@ static nsresult ReadSourceFromFilename(JSContext* cx, const char* filename,
   }
 
   rv = ScriptLoader::ConvertToUTF16(scriptChannel, buf.get(), rawLen,
-                                    EmptyString(), nullptr, *src, *len);
+                                    NS_LITERAL_STRING("UTF-8"), nullptr, *src,
+                                    *len);
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (!*src) {

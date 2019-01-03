@@ -195,11 +195,8 @@ class PresShell final : public nsIPresShell,
 
   void SetIgnoreViewportScrolling(bool aIgnore) override;
 
-  nsresult SetResolutionAndScaleTo(float aResolution, nsAtom* aOrigin) override;
-  bool IsResolutionUpdated() const override { return mResolutionUpdated; }
-  void SetResolutionUpdated(bool aUpdated) override {
-    mResolutionUpdated = aUpdated;
-  }
+  nsresult SetResolutionAndScaleTo(float aResolution,
+                                   ChangeOrigin aOrigin) override;
   float GetCumulativeResolution() override;
   float GetCumulativeNonRootScaleResolution() override;
   void SetRestoreResolution(float aResolution,
@@ -825,10 +822,6 @@ class PresShell final : public nsIPresShell,
 
   // Whether we have ever handled a user input event
   bool mHasHandledUserInput : 1;
-
-  // Whether the most recent change to the pres shell resolution was
-  // originated by the main thread.
-  bool mResolutionUpdated : 1;
 
   // Whether we should dispatch keypress events even for non-printable keys
   // for keeping backward compatibility.

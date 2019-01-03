@@ -117,20 +117,26 @@ bool Realm::init(JSContext* cx, JSPrincipals* principals) {
   return true;
 }
 
-jit::JitRuntime* JSRuntime::createJitRuntime(JSContext* cx) {
+bool JSRuntime::createJitRuntime(JSContext* cx) {
   using namespace js::jit;
 
   MOZ_ASSERT(!jitRuntime_);
 
   if (!CanLikelyAllocateMoreExecutableMemory()) {
-    // Report OOM instead of potentially hitting the MOZ_CRASH below.
-    ReportOutOfMemory(cx);
-    return nullptr;
+    // Report OOM instead of potentially hitting the MOZ_CRASH below, but first
+    // try to release memory.
+    if (OnLargeAllocationFailure) {
+      OnLargeAllocationFailure();
+    }
+    if (!CanLikelyAllocateMoreExecutableMemory()) {
+      ReportOutOfMemory(cx);
+      return false;
+    }
   }
 
   jit::JitRuntime* jrt = cx->new_<jit::JitRuntime>();
   if (!jrt) {
-    return nullptr;
+    return false;
   }
 
   // Unfortunately, initialization depends on jitRuntime_ being non-null, so
@@ -145,7 +151,7 @@ jit::JitRuntime* JSRuntime::createJitRuntime(JSContext* cx) {
     noOOM.crash("OOM in createJitRuntime");
   }
 
-  return jitRuntime_;
+  return true;
 }
 
 bool Realm::ensureJitRealmExists(JSContext* cx) {
@@ -796,7 +802,9 @@ void Realm::updateDebuggerObservesFlag(unsigned flag) {
           : maybeGlobal();
   const GlobalObject::DebuggerVector* v = global->getDebuggers();
   for (auto p = v->begin(); p != v->end(); p++) {
-    Debugger* dbg = *p;
+    // Use unbarrieredGet() to prevent triggering read barrier while collecting,
+    // this is safe as long as dbg does not escape.
+    Debugger* dbg = p->unbarrieredGet();
     if (flag == DebuggerObservesAllExecution
             ? dbg->observesAllExecution()
             : flag == DebuggerObservesCoverage
@@ -1005,6 +1013,19 @@ JS_PUBLIC_API void gc::TraceRealm(JSTracer* trc, JS::Realm* realm,
 
 JS_PUBLIC_API bool gc::RealmNeedsSweep(JS::Realm* realm) {
   return realm->globalIsAboutToBeFinalized();
+}
+
+JS_PUBLIC_API bool gc::AllRealmsNeedSweep(JS::Compartment* comp) {
+  MOZ_ASSERT(comp);
+  if (!comp->zone()->isGCSweeping()) {
+    return false;
+  }
+  for (Realm* r : comp->realms()) {
+    if (!gc::RealmNeedsSweep(r)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 JS_PUBLIC_API JS::Realm* JS::GetCurrentRealmOrNull(JSContext* cx) {

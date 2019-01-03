@@ -177,7 +177,7 @@ class MediaManager final : public nsIMediaManagerService,
   NS_DECL_NSIMEDIAMANAGERSERVICE
 
   media::Parent<media::NonE10s>* GetNonE10sParent();
-  MediaEngine* GetBackend(uint64_t aWindowId = 0);
+  MediaEngine* GetBackend();
 
   WindowTable* GetActiveWindows() {
     MOZ_ASSERT(NS_IsMainThread());
@@ -237,6 +237,11 @@ class MediaManager final : public nsIMediaManagerService,
   nsresult EnumerateDevices(nsPIDOMWindowInner* aWindow,
                             dom::Promise& aPromise);
 
+  RefPtr<StreamPromise> GetDisplayMedia(
+      nsPIDOMWindowInner* aWindow,
+      const dom::DisplayMediaStreamConstraints& aConstraintsPassedIn,
+      dom::CallerType aCallerType);
+
   // Get the sink that corresponds to the given device id.
   // It is resposible to check if an application is
   // authorized to play audio through the requested device.
@@ -286,14 +291,14 @@ class MediaManager final : public nsIMediaManagerService,
       uint64_t aWindowId, dom::MediaSourceEnum aVideoInputType,
       dom::MediaSourceEnum aAudioInputType, MediaSinkEnum aAudioOutputType,
       DeviceEnumerationType aVideoInputEnumType,
-      DeviceEnumerationType aAudioInputEnumType,
+      DeviceEnumerationType aAudioInputEnumType, bool aForceNoPermRequest,
       const RefPtr<MediaDeviceSetRefCnt>& aOutDevices);
 
   RefPtr<MgrPromise> EnumerateDevicesImpl(
       uint64_t aWindowId, dom::MediaSourceEnum aVideoInputType,
       dom::MediaSourceEnum aAudioInputType, MediaSinkEnum aAudioOutputType,
       DeviceEnumerationType aVideoInputEnumType,
-      DeviceEnumerationType aAudioInputEnumType,
+      DeviceEnumerationType aAudioInputEnumType, bool aForceNoPermRequest,
       const RefPtr<MediaDeviceSetRefCnt>& aOutDevices);
 
   RefPtr<BadConstraintsPromise> SelectSettings(

@@ -12,8 +12,8 @@
 #include "nsAttrValue.h"
 #include "nsAttrValueInlines.h"
 #include "nsSMILParserUtils.h"
-#include "nsSVGAngle.h"
-#include "nsSVGPathDataParser.h"
+#include "SVGAngle.h"
+#include "SVGPathDataParser.h"
 #include "SVGMotionSMILType.h"
 #include "SVGMotionSMILPathUtils.h"
 
@@ -79,8 +79,8 @@ bool SVGMotionSMILAnimationFunction::SetAttr(nsAtom* aAttribute,
     }
   } else {
     // Defer to superclass method
-    return nsSMILAnimationFunction::SetAttr(aAttribute, aValue, aResult,
-                                            aParseResult);
+    return SMILAnimationFunction::SetAttr(aAttribute, aValue, aResult,
+                                          aParseResult);
   }
 
   return true;
@@ -97,13 +97,13 @@ bool SVGMotionSMILAnimationFunction::UnsetAttr(nsAtom* aAttribute) {
     MarkStaleIfAttributeAffectsPath(aAttribute);
   } else {
     // Defer to superclass method
-    return nsSMILAnimationFunction::UnsetAttr(aAttribute);
+    return SMILAnimationFunction::UnsetAttr(aAttribute);
   }
 
   return true;
 }
 
-nsSMILAnimationFunction::nsSMILCalcMode
+SMILAnimationFunction::nsSMILCalcMode
 SVGMotionSMILAnimationFunction::GetCalcMode() const {
   const nsAttrValue* value = GetAttr(nsGkAtoms::calcMode);
   if (!value) {
@@ -145,7 +145,7 @@ void SVGMotionSMILAnimationFunction::RebuildPathAndVerticesFromBasicAttrs(
   }
 
   SVGMotionSMILPathUtils::PathGenerator pathGenerator(
-      static_cast<const nsSVGElement*>(aContextElem));
+      static_cast<const SVGElement*>(aContextElem));
 
   bool success = false;
   if (HasAttr(nsGkAtoms::values)) {
@@ -164,7 +164,7 @@ void SVGMotionSMILAnimationFunction::RebuildPathAndVerticesFromBasicAttrs(
     } else {
       // Create dummy 'from' value at 0,0, if we're doing by-animation.
       // (NOTE: We don't add the dummy 0-point to our list for *to-animation*,
-      // because the nsSMILAnimationFunction logic for to-animation doesn't
+      // because the SMILAnimationFunction logic for to-animation doesn't
       // expect a dummy value. It only expects one value: the final 'to' value.)
       pathGenerator.MoveToOrigin();
       if (!HasAttr(nsGkAtoms::to)) {
@@ -224,7 +224,7 @@ void SVGMotionSMILAnimationFunction::RebuildPathAndVerticesFromPathAttr() {
 
   // Generate Path from |path| attr
   SVGPathData path;
-  nsSVGPathDataParser pathParser(pathSpec, &path);
+  SVGPathDataParser pathParser(pathSpec, &path);
 
   // We ignore any failure returned from Parse() since the SVG spec says to
   // accept all segments up to the first invalid token. Instead we must
@@ -320,7 +320,7 @@ nsresult SVGMotionSMILAnimationFunction::GetValues(const nsISMILAttr& aSMILAttr,
 void SVGMotionSMILAnimationFunction::CheckValueListDependentAttrs(
     uint32_t aNumValues) {
   // Call superclass method.
-  nsSMILAnimationFunction::CheckValueListDependentAttrs(aNumValues);
+  SMILAnimationFunction::CheckValueListDependentAttrs(aNumValues);
 
   // Added behavior: Do checks specific to keyPoints.
   CheckKeyPoints();
@@ -332,7 +332,7 @@ bool SVGMotionSMILAnimationFunction::IsToAnimation() const {
   // NOTE: We can't rely on mPathSourceType, because it might not have been
   // set to a useful value yet (or it might be stale).
   return !GetFirstMPathChild(mAnimationElement) && !HasAttr(nsGkAtoms::path) &&
-         nsSMILAnimationFunction::IsToAnimation();
+         SMILAnimationFunction::IsToAnimation();
 }
 
 void SVGMotionSMILAnimationFunction::CheckKeyPoints() {
@@ -390,7 +390,7 @@ nsresult SVGMotionSMILAnimationFunction::SetRotate(const nsAString& aRotate,
     mRotateType = eRotateType_Explicit;
 
     uint16_t angleUnit;
-    if (!nsSVGAngle::GetValueFromString(aRotate, mRotateAngle, &angleUnit)) {
+    if (!SVGAngle::GetValueFromString(aRotate, mRotateAngle, &angleUnit)) {
       mRotateAngle = 0.0f;  // set default rotate angle
       // XXX report to console?
       return NS_ERROR_DOM_SYNTAX_ERR;
@@ -398,8 +398,8 @@ nsresult SVGMotionSMILAnimationFunction::SetRotate(const nsAString& aRotate,
 
     // Convert to radian units, if we're not already in radians.
     if (angleUnit != SVG_ANGLETYPE_RAD) {
-      mRotateAngle *= nsSVGAngle::GetDegreesPerUnit(angleUnit) /
-                      nsSVGAngle::GetDegreesPerUnit(SVG_ANGLETYPE_RAD);
+      mRotateAngle *= SVGAngle::GetDegreesPerUnit(angleUnit) /
+                      SVGAngle::GetDegreesPerUnit(SVG_ANGLETYPE_RAD);
     }
   }
   return NS_OK;

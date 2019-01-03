@@ -13,7 +13,7 @@ use api::{PropertyBinding, ReferenceFrame, ScrollFrameDisplayItem, ScrollSensiti
 use api::{Shadow, SpecificDisplayItem, StackingContext, StickyFrameDisplayItem, TexelRect};
 use api::{ClipMode, TransformStyle, YuvColorSpace, YuvData};
 use app_units::Au;
-use clip::{ClipChainId, ClipRegion, ClipItemKey, ClipStore, ClipItemSceneData};
+use clip::{ClipChainId, ClipRegion, ClipItemKey, ClipStore};
 use clip_scroll_tree::{ROOT_SPATIAL_NODE_INDEX, ClipScrollTree, SpatialNodeIndex};
 use frame_builder::{ChasePrimitive, FrameBuilder, FrameBuilderConfig};
 use glyph_rasterizer::FontInstance;
@@ -22,11 +22,15 @@ use image::simplify_repeated_primitive;
 use intern::{Handle, Internable, InternDebug};
 use internal_types::{FastHashMap, FastHashSet};
 use picture::{Picture3DContext, PictureCompositeMode, PicturePrimitive, PrimitiveList};
-use prim_store::{PrimitiveInstance, PrimitiveKeyKind, PictureCompositeKey};
-use prim_store::{PrimitiveKey, PrimitiveSceneData, PrimitiveInstanceKind, NinePatchDescriptor};
-use prim_store::{PrimitiveStore, PrimitiveStoreStats, LineDecorationCacheKey};
-use prim_store::{ScrollNodeAndClipChain, PictureIndex, register_prim_chase_id, get_line_decoration_sizes};
+use prim_store::{PrimitiveInstance, PrimitiveKeyKind, PrimitiveSceneData};
+use prim_store::{PrimitiveInstanceKind, NinePatchDescriptor, PrimitiveStore};
+use prim_store::{PrimitiveStoreStats, ScrollNodeAndClipChain, PictureIndex};
+use prim_store::{register_prim_chase_id, get_line_decoration_sizes};
+use prim_store::borders::{ImageBorder, NormalBorderPrim};
 use prim_store::gradient::{GradientStopKey, LinearGradient, RadialGradient, RadialGradientParams};
+use prim_store::image::{Image, YuvImage};
+use prim_store::line_dec::{LineDecoration, LineDecorationCacheKey};
+use prim_store::picture::{Picture, PictureCompositeKey, PictureKey};
 use prim_store::text_run::TextRun;
 use render_backend::{DocumentView};
 use resource_cache::{FontInstanceMap, ImageRequest};
@@ -259,21 +263,36 @@ impl<'a> DisplayListFlattener<'a> {
         //
 
         // Find the first primitive which has the desired scroll root.
+        let mut first_index = None;
         let mut main_scroll_root = None;
 
-        let first_index = primitives.iter().position(|instance| {
+        for (i, instance) in primitives.iter().enumerate() {
             let scroll_root = self.find_scroll_root(
                 instance.spatial_node_index,
             );
 
-            if scroll_root == ROOT_SPATIAL_NODE_INDEX {
-                false
-            } else {
-                debug_assert!(main_scroll_root.is_none());
-                main_scroll_root = Some(scroll_root);
-                true
+            if scroll_root != ROOT_SPATIAL_NODE_INDEX {
+                // If we find multiple scroll roots in this page, then skip
+                // picture caching for now. In future, we can handle picture
+                // caching on these sites by creating a tile cache per
+                // scroll root, or (more likely) selecting the common parent
+                // scroll root between the detected scroll roots.
+                match main_scroll_root {
+                    Some(main_scroll_root) => {
+                        if main_scroll_root != scroll_root {
+                            return;
+                        }
+                    }
+                    None => {
+                        main_scroll_root = Some(scroll_root);
+                    }
+                }
+
+                if first_index.is_none() {
+                    first_index = Some(i);
+                }
             }
-        });
+        }
 
         let main_scroll_root = match main_scroll_root {
             Some(main_scroll_root) => main_scroll_root,
@@ -326,18 +345,18 @@ impl<'a> DisplayListFlattener<'a> {
 
         // Now, create a picture with tile caching enabled that will hold all
         // of the primitives selected as belonging to the main scroll root.
-        let prim_key = PrimitiveKey::new(
+        let pic_key = PictureKey::new(
             true,
             LayoutSize::zero(),
             LayoutRect::max_rect(),
-            PrimitiveKeyKind::Picture {
+            Picture {
                 composite_mode_key: PictureCompositeKey::Identity,
             },
         );
 
-        let primitive_data_handle = self.resources
-            .prim_interner
-            .intern(&prim_key, || {
+        let pic_data_handle = self.resources
+            .picture_interner
+            .intern(&pic_key, || {
                 PrimitiveSceneData {
                     prim_relative_clip_rect: LayoutRect::max_rect(),
                     prim_size: LayoutSize::zero(),
@@ -362,7 +381,7 @@ impl<'a> DisplayListFlattener<'a> {
         let instance = PrimitiveInstance::new(
             LayoutPoint::zero(),
             PrimitiveInstanceKind::Picture {
-                data_handle: primitive_data_handle,
+                data_handle: pic_data_handle,
                 pic_index: PictureIndex(pic_index)
             },
             ClipChainId::NONE,
@@ -386,7 +405,7 @@ impl<'a> DisplayListFlattener<'a> {
         let mut node_index = spatial_node_index;
 
         while node_index != ROOT_SPATIAL_NODE_INDEX {
-            let node = &self.clip_scroll_tree.spatial_nodes[node_index.0];
+            let node = &self.clip_scroll_tree.spatial_nodes[node_index.0 as usize];
             match node.node_type {
                 SpatialNodeType::ReferenceFrame(..) |
                 SpatialNodeType::StickyFrame(..) => {
@@ -1009,16 +1028,7 @@ impl<'a> DisplayListFlattener<'a> {
                 // in the clip chain node.
                 let handle = self.resources
                     .clip_interner
-                    .intern(&item, || {
-                        ClipItemSceneData {
-                            // The only type of clip items that exist in the per-primitive
-                            // clip items are box shadows, and they don't contribute a
-                            // local clip rect, so just provide max_rect here. In the future,
-                            // we intend to make box shadows a primitive effect, in which
-                            // case the entire clip_items API on primitives can be removed.
-                            clip_rect: LayoutRect::max_rect(),
-                        }
-                    });
+                    .intern(&item, || ());
 
                 clip_chain_id = self.clip_store
                                     .add_clip_chain_node(
@@ -1321,7 +1331,14 @@ impl<'a> DisplayListFlattener<'a> {
                 parent_sc,
                 self.clip_scroll_tree,
             ) {
-                parent_sc.primitives.extend(stacking_context.primitives);
+                // If the parent context primitives list is empty, it's faster
+                // to assign the storage of the popped context instead of paying
+                // the copying cost for extend.
+                if parent_sc.primitives.is_empty() {
+                    parent_sc.primitives = stacking_context.primitives;
+                } else {
+                    parent_sc.primitives.extend(stacking_context.primitives);
+                }
                 return;
             }
         }
@@ -1665,11 +1682,7 @@ impl<'a> DisplayListFlattener<'a> {
         let handle = self
             .resources
             .clip_interner
-            .intern(&ClipItemKey::rectangle(clip_region.main.size, ClipMode::Clip), || {
-                ClipItemSceneData {
-                    clip_rect: clip_region.main,
-                }
-            });
+            .intern(&ClipItemKey::rectangle(clip_region.main.size, ClipMode::Clip), || ());
 
         parent_clip_chain_index = self
             .clip_store
@@ -1685,11 +1698,7 @@ impl<'a> DisplayListFlattener<'a> {
             let handle = self
                 .resources
                 .clip_interner
-                .intern(&ClipItemKey::image_mask(image_mask), || {
-                    ClipItemSceneData {
-                        clip_rect: image_mask.get_local_clip_rect().unwrap_or(LayoutRect::max_rect()),
-                    }
-                });
+                .intern(&ClipItemKey::image_mask(image_mask), || ());
 
             parent_clip_chain_index = self
                 .clip_store
@@ -1706,11 +1715,7 @@ impl<'a> DisplayListFlattener<'a> {
             let handle = self
                 .resources
                 .clip_interner
-                .intern(&ClipItemKey::rounded_rect(region.rect.size, region.radii, region.mode), || {
-                    ClipItemSceneData {
-                        clip_rect: region.get_local_clip_rect().unwrap_or(LayoutRect::max_rect()),
-                    }
-                });
+                .intern(&ClipItemKey::rounded_rect(region.rect.size, region.radii, region.mode), || ());
 
             parent_clip_chain_index = self
                 .clip_store
@@ -1820,7 +1825,15 @@ impl<'a> DisplayListFlattener<'a> {
 
                     for item in &items {
                         match item {
-                            // TODO(djg): ugh. de-duplicate this code.
+                            ShadowItem::Image(ref pending_image) => {
+                                self.add_shadow_prim(&pending_shadow, pending_image, &mut prims)
+                            }
+                            ShadowItem::LineDecoration(ref pending_line_dec) => {
+                                self.add_shadow_prim(&pending_shadow, pending_line_dec, &mut prims)
+                            }
+                            ShadowItem::NormalBorder(ref pending_border) => {
+                                self.add_shadow_prim(&pending_shadow, pending_border, &mut prims)
+                            }
                             ShadowItem::Primitive(ref pending_primitive) => {
                                 self.add_shadow_prim(&pending_shadow, pending_primitive, &mut prims)
                             }
@@ -1862,18 +1875,16 @@ impl<'a> DisplayListFlattener<'a> {
                             ))
                         );
 
-                        let shadow_prim_key = PrimitiveKey::new(
+                        let shadow_pic_key = PictureKey::new(
                             true,
                             LayoutSize::zero(),
                             LayoutRect::max_rect(),
-                            PrimitiveKeyKind::Picture {
-                                composite_mode_key,
-                            },
+                            Picture { composite_mode_key },
                         );
 
                         let shadow_prim_data_handle = self.resources
-                            .prim_interner
-                            .intern(&shadow_prim_key, || {
+                            .picture_interner
+                            .intern(&shadow_pic_key, || {
                                 PrimitiveSceneData {
                                     prim_relative_clip_rect: LayoutRect::max_rect(),
                                     prim_size: LayoutSize::zero(),
@@ -1897,6 +1908,15 @@ impl<'a> DisplayListFlattener<'a> {
                         self.add_primitive_to_draw_list(shadow_prim_instance);
                     }
                 }
+                ShadowItem::Image(pending_image) => {
+                    self.add_shadow_prim_to_draw_list(pending_image)
+                },
+                ShadowItem::LineDecoration(pending_line_dec) => {
+                    self.add_shadow_prim_to_draw_list(pending_line_dec)
+                },
+                ShadowItem::NormalBorder(pending_border) => {
+                    self.add_shadow_prim_to_draw_list(pending_border)
+                },
                 ShadowItem::Primitive(pending_primitive) => {
                     self.add_shadow_prim_to_draw_list(pending_primitive)
                 },
@@ -2079,7 +2099,7 @@ impl<'a> DisplayListFlattener<'a> {
             clip_and_scroll,
             &info,
             Vec::new(),
-            PrimitiveKeyKind::LineDecoration {
+            LineDecoration {
                 cache_key,
                 color: color.into(),
             },
@@ -2109,7 +2129,7 @@ impl<'a> DisplayListFlattener<'a> {
 
                 match border.source {
                     NinePatchBorderSource::Image(image_key) => {
-                        let prim = PrimitiveKeyKind::ImageBorder {
+                        let prim = ImageBorder {
                             request: ImageRequest {
                                 key: image_key,
                                 rendering: ImageRendering::Auto,
@@ -2118,7 +2138,7 @@ impl<'a> DisplayListFlattener<'a> {
                             nine_patch,
                         };
 
-                        self.add_primitive(
+                        self.add_nonshadowable_primitive(
                             clip_and_scroll,
                             info,
                             Vec::new(),
@@ -2415,7 +2435,7 @@ impl<'a> DisplayListFlattener<'a> {
             clip_and_scroll,
             &info,
             Vec::new(),
-            PrimitiveKeyKind::Image {
+            Image {
                 key: image_key,
                 tile_spacing: tile_spacing.into(),
                 stretch_size: stretch_size.into(),
@@ -2443,11 +2463,11 @@ impl<'a> DisplayListFlattener<'a> {
             YuvData::InterleavedYCbCr(plane_0) => [plane_0, ImageKey::DUMMY, ImageKey::DUMMY],
         };
 
-        self.add_primitive(
+        self.add_nonshadowable_primitive(
             clip_and_scroll,
             info,
             Vec::new(),
-            PrimitiveKeyKind::YuvImage {
+            YuvImage {
                 color_depth,
                 yuv_key,
                 format,
@@ -2669,8 +2689,29 @@ pub struct PendingShadow {
 
 pub enum ShadowItem {
     Shadow(PendingShadow),
+    Image(PendingPrimitive<Image>),
+    LineDecoration(PendingPrimitive<LineDecoration>),
+    NormalBorder(PendingPrimitive<NormalBorderPrim>),
     Primitive(PendingPrimitive<PrimitiveKeyKind>),
     TextRun(PendingPrimitive<TextRun>),
+}
+
+impl From<PendingPrimitive<Image>> for ShadowItem {
+    fn from(image: PendingPrimitive<Image>) -> Self {
+        ShadowItem::Image(image)
+    }
+}
+
+impl From<PendingPrimitive<LineDecoration>> for ShadowItem {
+    fn from(line_dec: PendingPrimitive<LineDecoration>) -> Self {
+        ShadowItem::LineDecoration(line_dec)
+    }
+}
+
+impl From<PendingPrimitive<NormalBorderPrim>> for ShadowItem {
+    fn from(border: PendingPrimitive<NormalBorderPrim>) -> Self {
+        ShadowItem::NormalBorder(border)
+    }
 }
 
 impl From<PendingPrimitive<PrimitiveKeyKind>> for ShadowItem {
@@ -2693,18 +2734,16 @@ fn create_prim_instance(
     spatial_node_index: SpatialNodeIndex,
     resources: &mut DocumentResources,
 ) -> PrimitiveInstance {
-    let prim_key = PrimitiveKey::new(
+    let pic_key = PictureKey::new(
         is_backface_visible,
         LayoutSize::zero(),
         LayoutRect::max_rect(),
-        PrimitiveKeyKind::Picture {
-            composite_mode_key,
-        },
+        Picture { composite_mode_key },
     );
 
     let data_handle = resources
-        .prim_interner
-        .intern(&prim_key, || {
+        .picture_interner
+        .intern(&pic_key, || {
             PrimitiveSceneData {
                 prim_relative_clip_rect: LayoutRect::max_rect(),
                 prim_size: LayoutSize::zero(),
