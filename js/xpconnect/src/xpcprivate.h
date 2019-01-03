@@ -15,11 +15,11 @@
  * holds pointers to the C++ object and the flat JS object.
  *
  * All XPCWrappedNative objects belong to an XPCWrappedNativeScope. These scopes
- * are essentially in 1:1 correspondence with JS global objects. The
- * XPCWrappedNativeScope has a pointer to the JS global object. The parent of a
- * flattened JS object is, by default, the global JS object corresponding to the
- * wrapper's XPCWrappedNativeScope (the exception to this rule is when a
- * PreCreate hook asks for a different parent; see nsIXPCScriptable below).
+ * are essentially in 1:1 correspondence with JS compartments. The
+ * XPCWrappedNativeScope has a pointer to the JS compartment. The global of a
+ * flattened JS object is one of the globals in this compartment (the exception
+ * to this rule is when a PreCreate hook asks for a different global; see
+ * nsIXPCScriptable below).
  *
  * Some C++ objects (notably DOM objects) have information associated with them
  * that lists the interfaces implemented by these objects. A C++ object exposes
@@ -130,7 +130,6 @@
 #include "nsIConsoleService.h"
 
 #include "nsVariant.h"
-#include "nsIPropertyBag.h"
 #include "nsIProperty.h"
 #include "nsCOMArray.h"
 #include "nsTArray.h"
@@ -805,7 +804,7 @@ extern bool XPC_WN_CallMethod(JSContext* cx, unsigned argc, JS::Value* vp);
 extern bool XPC_WN_GetterSetter(JSContext* cx, unsigned argc, JS::Value* vp);
 
 /***************************************************************************/
-// XPCWrappedNativeScope is one-to-one with a JS global object.
+// XPCWrappedNativeScope is one-to-one with a JS compartment.
 
 class nsXPCComponentsBase;
 class XPCWrappedNativeScope final {
@@ -831,17 +830,6 @@ class XPCWrappedNativeScope final {
   // Returns the JS object reflection of the Components object.
   bool GetComponentsJSObject(JS::MutableHandleObject obj);
 
-  JSObject* GetGlobalJSObject() const { return mGlobalJSObject; }
-
-  JSObject* GetGlobalJSObjectPreserveColor() const {
-    return mGlobalJSObject.unbarrieredGet();
-  }
-
-  nsIPrincipal* GetPrincipal() const {
-    JS::Realm* r = js::GetNonCCWObjectRealm(mGlobalJSObject);
-    return nsJSPrincipals::get(JS::GetRealmPrincipals(r));
-  }
-
   JSObject* GetExpandoChain(JS::HandleObject target);
 
   JSObject* DetachExpandoChain(JS::HandleObject target);
@@ -852,11 +840,6 @@ class XPCWrappedNativeScope final {
   static void SystemIsBeingShutDown();
 
   static void TraceWrappedNativesInAllScopes(JSTracer* trc);
-
-  void TraceSelf(JSTracer* trc) {
-    MOZ_ASSERT(mGlobalJSObject);
-    mGlobalJSObject.trace(trc, "XPCWrappedNativeScope::mGlobalJSObject");
-  }
 
   void TraceInside(JSTracer* trc) {
     if (mContentXBLScope) {
@@ -901,30 +884,37 @@ class XPCWrappedNativeScope final {
     size_t mProtoAndIfaceCacheSize;
   };
 
-  static void AddSizeOfAllScopesIncludingThis(ScopeSizeInfo* scopeSizeInfo);
+  static void AddSizeOfAllScopesIncludingThis(JSContext* cx,
+                                              ScopeSizeInfo* scopeSizeInfo);
 
-  void AddSizeOfIncludingThis(ScopeSizeInfo* scopeSizeInfo);
+  void AddSizeOfIncludingThis(JSContext* cx, ScopeSizeInfo* scopeSizeInfo);
 
   static bool IsDyingScope(XPCWrappedNativeScope* scope);
 
-  // Gets the appropriate scope object for XBL in this scope. The context
-  // must be same-compartment with the global upon entering, and the scope
-  // object is wrapped into the compartment of the global.
+  // Gets the appropriate scope object for XBL in this compartment. This method
+  // relies on compartment-per-global still (and release-asserts this). The
+  // context must be same-realm with this compartment's single global upon
+  // entering, and the scope object is wrapped into this compartment.
   JSObject* EnsureContentXBLScope(JSContext* cx);
 
-  XPCWrappedNativeScope(JSContext* cx, JS::HandleObject aGlobal,
-                        const mozilla::SiteIdentifier& aSite);
+  XPCWrappedNativeScope(JS::Compartment* aCompartment,
+                        JS::HandleObject aFirstGlobal);
 
   nsAutoPtr<JSObject2JSObjectMap> mWaiverWrapperMap;
 
-  JS::Compartment* Compartment() const {
-    return js::GetObjectCompartment(mGlobalJSObject);
+  JS::Compartment* Compartment() const { return mCompartment; }
+
+  // Returns the global to use for new WrappedNative objects allocated in this
+  // compartment. This is better than using arbitrary globals we happen to be in
+  // because it prevents leaks (objects keep their globals alive).
+  JSObject* GetGlobalForWrappedNatives() {
+    return js::GetFirstGlobalInCompartment(Compartment());
   }
 
   bool IsContentXBLScope() {
     return xpc::IsContentXBLCompartment(Compartment());
   }
-  bool AllowContentXBLScope();
+  bool AllowContentXBLScope(JS::Realm* aRealm);
   bool UseContentXBLScope() { return mUseContentXBLScope; }
   void ClearContentXBLScope() { mContentXBLScope = nullptr; }
 
@@ -946,11 +936,7 @@ class XPCWrappedNativeScope final {
   ClassInfo2WrappedNativeProtoMap* mWrappedNativeProtoMap;
   RefPtr<nsXPCComponentsBase> mComponents;
   XPCWrappedNativeScope* mNext;
-  // The JS global object for this scope.  If non-null, this will be the
-  // default parent for the XPCWrappedNatives that have us as the scope,
-  // unless a PreCreate hook overrides it.  Note that this _may_ be null (see
-  // constructor).
-  JS::ObjectPtr mGlobalJSObject;
+  JS::Compartment* mCompartment;
 
   // XBL Scope. This is is a lazily-created sandbox for non-system scopes.
   // EnsureContentXBLScope() decides whether it needs to be created or not.
@@ -1290,12 +1276,7 @@ class XPCWrappedNativeProto final {
     }
   }
 
-  void TraceInside(JSTracer* trc) { GetScope()->TraceSelf(trc); }
-
-  void TraceJS(JSTracer* trc) {
-    TraceSelf(trc);
-    TraceInside(trc);
-  }
+  void TraceJS(JSTracer* trc) { TraceSelf(trc); }
 
   void WriteBarrierPre(JSContext* cx) {
     if (JS::IsIncrementalBarrierNeeded(cx) && mJSProtoObject) {
@@ -1531,8 +1512,6 @@ class XPCWrappedNative final : public nsIXPConnectWrappedNative {
   inline void TraceInside(JSTracer* trc) {
     if (HasProto()) {
       GetProto()->TraceSelf(trc);
-    } else {
-      GetScope()->TraceSelf(trc);
     }
 
     JSObject* obj = mFlatJSObject.unbarrieredGetPtr();
@@ -1671,23 +1650,16 @@ class nsXPCWrappedJSClass final : public nsIXPCWrappedJSClass {
   JSObject* CallQueryInterfaceOnJSObject(JSContext* cx, JSObject* jsobj,
                                          JS::HandleObject scope, REFNSIID aIID);
 
-  static nsresult BuildPropertyEnumerator(XPCCallContext& ccx, JSObject* aJSObj,
-                                          JS::HandleObject scope,
-                                          nsISimpleEnumerator** aEnumerate);
-
-  static nsresult GetNamedPropertyAsVariant(XPCCallContext& ccx,
-                                            JSObject* aJSObj,
-                                            JS::HandleObject scope,
-                                            const nsAString& aName,
-                                            nsIVariant** aResult);
-
  private:
+  // aObj is the nsXPCWrappedJS's object. We used this as the callee (or |this|
+  // if getter or setter).
   // aSyntheticException, if not null, is the exception we should be using.
   // If null, look for an exception on the JSContext hanging off the
   // XPCCallContext.
   static nsresult CheckForException(
       XPCCallContext& ccx, mozilla::dom::AutoEntryScript& aes,
-      const char* aPropertyName, const char* anInterfaceName,
+      JS::HandleObject aObj, const char* aPropertyName,
+      const char* anInterfaceName,
       mozilla::dom::Exception* aSyntheticException = nullptr);
   virtual ~nsXPCWrappedJSClass();
 
@@ -1732,7 +1704,6 @@ class nsXPCWrappedJSClass final : public nsIXPCWrappedJSClass {
 class nsXPCWrappedJS final : protected nsAutoXPTCStub,
                              public nsIXPConnectWrappedJSUnmarkGray,
                              public nsSupportsWeakReference,
-                             public nsIPropertyBag,
                              public XPCRootSetElem {
  public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -1740,7 +1711,6 @@ class nsXPCWrappedJS final : protected nsAutoXPTCStub,
   NS_DECL_NSIXPCONNECTWRAPPEDJS
   NS_DECL_NSIXPCONNECTWRAPPEDJSUNMARKGRAY
   NS_DECL_NSISUPPORTSWEAKREFERENCE
-  NS_DECL_NSIPROPERTYBAG
 
   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_CLASS_AMBIGUOUS(nsXPCWrappedJS,
                                                      nsIXPConnectWrappedJS)
@@ -1768,10 +1738,6 @@ class nsXPCWrappedJS final : protected nsAutoXPTCStub,
    * being rooted (or otherwise signaling the stored value to the CC).
    */
   JSObject* GetJSObjectPreserveColor() const { return mJSObj.unbarrieredGet(); }
-
-  JSObject* GetJSObjectGlobalPreserveColor() const {
-    return mJSObjGlobal.unbarrieredGet();
-  }
 
   // Returns true if the wrapper chain contains references to multiple
   // compartments. If the wrapper chain contains references to multiple
@@ -1808,11 +1774,6 @@ class nsXPCWrappedJS final : protected nsAutoXPTCStub,
   void UpdateObjectPointerAfterGC() {
     MOZ_ASSERT(IsRootWrapper());
     JS_UpdateWeakPointerAfterGC(&mJSObj);
-    JS_UpdateWeakPointerAfterGC(&mJSObjGlobal);
-    // Note: this is a root wrapper, so mJSObj is never a CCW. Therefore,
-    // if mJSObj is still alive, mJSObjGlobal must also still be alive,
-    // because marking a JSObject will also mark its global.
-    MOZ_ASSERT_IF(mJSObj, mJSObjGlobal);
   }
 
   bool IsAggregatedToNative() const { return mRoot->mOuter != nullptr; }
@@ -1835,9 +1796,8 @@ class nsXPCWrappedJS final : protected nsAutoXPTCStub,
 
  protected:
   nsXPCWrappedJS() = delete;
-  nsXPCWrappedJS(JSContext* cx, JSObject* aJSObj, JSObject* aJSObjGlobal,
-                 nsXPCWrappedJSClass* aClass, nsXPCWrappedJS* root,
-                 nsresult* rv);
+  nsXPCWrappedJS(JSContext* cx, JSObject* aJSObj, nsXPCWrappedJSClass* aClass,
+                 nsXPCWrappedJS* root, nsresult* rv);
 
   bool CanSkip();
   void Destroy();
@@ -1849,13 +1809,6 @@ class nsXPCWrappedJS final : protected nsAutoXPTCStub,
   }
 
   JS::Heap<JSObject*> mJSObj;
-  // A global object that must be same-compartment with mJSObj. This is the
-  // global/realm we enter when making calls into JS. Note that we cannot
-  // simply use mJSObj's global here because mJSObj might be a
-  // cross-compartment wrapper and CCWs are not associated with a single
-  // global. After removing in-content XBL, we no longer need this field
-  // because we can then assert against CCWs. See bug 1480121.
-  JS::Heap<JSObject*> mJSObjGlobal;
   RefPtr<nsXPCWrappedJSClass> mClass;
   nsXPCWrappedJS* mRoot;  // If mRoot != this, it is an owning pointer.
   nsXPCWrappedJS* mNext;
@@ -1869,20 +1822,6 @@ class nsXPCWrappedJS final : protected nsAutoXPTCStub,
 *
 ****************************************************************************
 ***************************************************************************/
-
-class xpcProperty : public nsIProperty {
- public:
-  NS_DECL_ISUPPORTS
-  NS_DECL_NSIPROPERTY
-
-  xpcProperty(const char16_t* aName, uint32_t aNameLen, nsIVariant* aValue);
-
- private:
-  virtual ~xpcProperty() {}
-
-  nsString mName;
-  nsCOMPtr<nsIVariant> mValue;
-};
 
 namespace xpc {
 
@@ -2475,6 +2414,7 @@ class MOZ_STACK_CLASS SandboxOptions : public OptionsBase {
         isWebExtensionContentScript(false),
         proto(cx),
         sameZoneAs(cx),
+        freshCompartment(false),
         freshZone(false),
         isContentXBLScope(false),
         isUAWidgetScope(false),
@@ -2494,6 +2434,7 @@ class MOZ_STACK_CLASS SandboxOptions : public OptionsBase {
   JS::RootedObject proto;
   nsCString sandboxName;
   JS::RootedObject sameZoneAs;
+  bool freshCompartment;
   bool freshZone;
   bool isContentXBLScope;
   bool isUAWidgetScope;
@@ -2741,7 +2682,8 @@ class CompartmentPrivate {
   CompartmentPrivate(const CompartmentPrivate&) = delete;
 
  public:
-  CompartmentPrivate(JS::Compartment* c, mozilla::BasePrincipal* origin,
+  CompartmentPrivate(JS::Compartment* c, XPCWrappedNativeScope* scope,
+                     mozilla::BasePrincipal* origin,
                      const mozilla::SiteIdentifier& site);
 
   ~CompartmentPrivate();
@@ -2758,6 +2700,9 @@ class CompartmentPrivate {
   }
 
   CompartmentOriginInfo originInfo;
+
+  // Our XPCWrappedNativeScope.
+  XPCWrappedNativeScope* scope;
 
   // Controls whether this compartment gets Xrays to same-origin. This behavior
   // is deprecated, but is still the default for sandboxes for compatibity
@@ -2799,14 +2744,6 @@ class CompartmentPrivate {
   // Using it in production is inherently unsafe.
   bool universalXPConnectEnabled;
 
-  // This is only ever set during mochitest runs when enablePrivilege is called.
-  // It allows the SpecialPowers scope to waive the normal chrome security
-  // wrappers and expose properties directly to content. This lets us avoid a
-  // bunch of overhead and complexity in our SpecialPowers automation glue.
-  //
-  // Using it in production is inherently unsafe.
-  bool forcePermissiveCOWs;
-
   // Whether SystemIsBeingShutDown has been called on this compartment.
   bool wasShutdown;
 
@@ -2821,8 +2758,25 @@ class CompartmentPrivate {
 
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
+  struct SweepPolicy {
+    static bool needsSweep(const void* /* unused */,
+                           JS::Heap<JSObject*>* value) {
+      return JS::GCPolicy<JS::Heap<JSObject*>>::needsSweep(value);
+    }
+  };
+
+  typedef JS::GCHashMap<const void*, JS::Heap<JSObject*>,
+                        mozilla::PointerHasher<const void*>,
+                        js::SystemAllocPolicy, SweepPolicy>
+      RemoteProxyMap;
+  RemoteProxyMap& GetRemoteProxyMap() { return mRemoteProxies; }
+
  private:
   JSObject2WrappedJSMap* mWrappedJSMap;
+
+  // Cache holding proxy objects for Window objects (and their Location oject)
+  // that are loaded in a different process.
+  RemoteProxyMap mRemoteProxies;
 };
 
 bool IsUniversalXPConnectEnabled(JS::Compartment* compartment);
@@ -2847,6 +2801,11 @@ class RealmPrivate {
 
   explicit RealmPrivate(JS::Realm* realm);
 
+  // Creates the RealmPrivate and CompartmentPrivate (if needed) for a new
+  // global.
+  static void Init(JS::HandleObject aGlobal,
+                   const mozilla::SiteIdentifier& aSite);
+
   static RealmPrivate* Get(JS::Realm* realm) {
     MOZ_ASSERT(realm);
     void* priv = JS::GetRealmPrivate(realm);
@@ -2864,9 +2823,13 @@ class RealmPrivate {
   // The scriptability of this realm.
   Scriptability scriptability;
 
-  // Our XPCWrappedNativeScope. This is non-null if and only if this is an
-  // XPConnect realm.
-  XPCWrappedNativeScope* scope;
+  // This is only ever set during mochitest runs when enablePrivilege is called.
+  // It allows the SpecialPowers scope to waive the normal chrome security
+  // wrappers and expose properties directly to content. This lets us avoid a
+  // bunch of overhead and complexity in our SpecialPowers automation glue.
+  //
+  // Using it in production is inherently unsafe.
+  bool forcePermissiveCOWs = false;
 
   const nsACString& GetLocation() {
     if (location.IsEmpty() && locationURI) {
@@ -2913,15 +2876,23 @@ class RealmPrivate {
     locationURI = aLocationURI;
   }
 
+  // JSStackFrames are tracked on a per-realm basis so they
+  // can be cleared when the associated window goes away.
+  void RegisterStackFrame(JSStackFrameBase* aFrame);
+  void UnregisterStackFrame(JSStackFrameBase* aFrame);
+  void NukeJSStackFrames();
+
  private:
   nsCString location;
   nsCOMPtr<nsIURI> locationURI;
 
   bool TryParseLocationURI(LocationHint aType, nsIURI** aURI);
+
+  nsTHashtable<nsPtrHashKey<JSStackFrameBase>> mJSStackFrames;
 };
 
 inline XPCWrappedNativeScope* ObjectScope(JSObject* obj) {
-  return RealmPrivate::Get(obj)->scope;
+  return CompartmentPrivate::Get(obj)->scope;
 }
 
 JSObject* NewOutObject(JSContext* cx);

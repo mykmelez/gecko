@@ -1091,15 +1091,27 @@ def check_for_midl(target, compile_environment):
 midl = check_prog('MIDL', midl_names, when=check_for_midl, allow_missing=True)
 
 
-@depends(c_compiler, target, when=depends(midl, target)(lambda m, t: m and t.kernel == 'WINNT'))
-def midl_flags(c_compiler, target):
+@depends(c_compiler, target, vc_compiler_path,
+         when=depends(midl, target)(lambda m, t: m and t.kernel == 'WINNT'))
+@imports(_from='mozbuild.shellutil', _import='quote')
+def midl_flags(c_compiler, target, vc_compiler_path):
     if c_compiler and c_compiler.type in ('msvc', 'clang-cl'):
         env = {
             'x86': 'win32',
             'x86_64': 'x64',
             'aarch64': 'arm64',
         }[target.cpu]
-        return ['-env', env]
+        flags = ['-env', env]
+        if c_compiler.type == 'msvc':
+            flags += ['-cpp_cmd', c_compiler.compiler]
+            if c_compiler.flags:
+                flags += ['-cpp_opt', quote(' '.join(list(c_compiler.flags) + ['-E']))]
+        else:
+            # Ideally, we'd use the same flags setup as for msvc, but clang-cl
+            # currently doesn't work as a preprocessor for midl, so we need to
+            # find cl. https://bugs.llvm.org/show_bug.cgi?id=40140
+            flags += ['-cpp_cmd', find_program('cl', paths=vc_compiler_path)]
+        return flags
 
     # mingw
     return {
@@ -1278,3 +1290,207 @@ with only_when(compile_environment):
                      (lambda t: t.kernel == 'WINNT'))
     wine = check_prog('WINE', ['wine'], when=depends(target, host)
                       (lambda t, h: t.kernel == 'WINNT' and h.kernel == 'Linux'))
+
+
+# VPX
+# ===
+
+with only_when(compile_environment):
+    option('--with-system-libvpx',
+           help='Use system libvpx (located with pkgconfig)')
+
+    with only_when('--with-system-libvpx'):
+        vpx = pkg_check_modules('MOZ_LIBVPX', 'vpx >= 1.5.0')
+
+        check_header('vpx/vpx_decoder.h', flags=vpx.cflags, onerror=lambda: die(
+            "Couldn't find vpx/vpx_decoder.h, which is required to build "
+            "with system libvpx. Use --without-system-libvpx to build "
+            "with in-tree libvpx."))
+
+        check_symbol('vpx_codec_dec_init_ver', flags=vpx.libs, onerror=lambda: die(
+            "--with-system-libvpx requested but symbol vpx_codec_dec_init_ver "
+            "not found"
+        ))
+
+        set_config('MOZ_SYSTEM_LIBVPX', True)
+
+
+    @depends('--with-system-libvpx', target, gnu_as)
+    def in_tree_vpx(system_libvpx, target, gnu_as):
+        if system_libvpx:
+            return
+
+        use_yasm = (target.cpu in ('x86', 'x86_64')) or None
+        need_yasm = False
+        arm_asm = (target.cpu == 'arm' and gnu_as) or None
+
+        if use_yasm:
+            need_yasm = True
+            if target.kernel == 'WINNT':
+                need_yasm = Version('1.1')
+
+        return namespace(arm_asm=arm_asm, use_yasm=use_yasm, need_yasm=need_yasm)
+
+
+    # Building with -mfpu=neon requires either the "softfp" or the
+    # "hardfp" ABI. Depending on the compiler's default target, and the
+    # CFLAGS, the default ABI might be neither, in which case it is the
+    # "softfloat" ABI.
+    # The "softfloat" ABI is binary-compatible with the "softfp" ABI, so
+    # we can safely mix code built with both ABIs. So, if we detect
+    # that compiling uses the "softfloat" ABI, force the use of the
+    # "softfp" ABI instead.
+    # Confusingly, the __SOFTFP__ preprocessor variable indicates the
+    # "softfloat" ABI, not the "softfp" ABI.
+    # Note: VPX_ASFLAGS is also used in CFLAGS.
+    softfp = cxx_compiler.try_compile(body='''
+        #ifndef __SOFTFP__
+        #error "compiler target supports -mfpu=neon, so we don't have to add extra flags"
+        #endif''', when=in_tree_vpx.arm_asm)
+
+
+    @depends(in_tree_vpx, softfp, target)
+    def vpx_as_flags(vpx, softfp, target):
+        flags = []
+        if vpx and vpx.arm_asm:
+            # These flags are a lie; they're just used to enable the requisite
+            # opcodes; actual arch detection is done at runtime.
+            flags = ['-march=armv7-a', '-mfpu=neon']
+            if softfp:
+                flags.append('-mfloat-abi=softfp')
+        elif vpx and vpx.use_yasm and target.os != 'WINNT' and target.cpu != 'x86_64':
+            flags = ['-DPIC']
+        return flags
+
+
+    set_config('VPX_USE_YASM', in_tree_vpx.use_yasm)
+    set_config('VPX_ASFLAGS', vpx_as_flags)
+    add_old_configure_assignment('VPX_ASFLAGS', vpx_as_flags)
+
+
+# JPEG
+# ====
+
+with only_when(compile_environment):
+    option('--with-system-jpeg', nargs='?',
+           help='Use system libjpeg (installed at given prefix)')
+
+    @depends_if('--with-system-jpeg')
+    def jpeg_flags(value):
+        if len(value):
+            return namespace(
+                cflags=('-I%s/include' % value[0],),
+                ldflags=('-L%s/lib' % value[0], '-ljpeg'),
+            )
+        return namespace(
+            ldflags=('-ljpeg',),
+        )
+
+    with only_when('--with-system-jpeg'):
+        check_symbol('jpeg_destroy_compress', flags=jpeg_flags.ldflags,
+                     onerror=lambda: die('--with-system-jpeg requested but symbol '
+                                         'jpeg_destroy_compress not found.'))
+
+        c_compiler.try_compile(
+            includes=[
+                'stdio.h',
+                'sys/types.h',
+                'jpeglib.h',
+            ],
+            body='''
+                #if JPEG_LIB_VERSION < 62
+                #error Insufficient JPEG library version
+                #endif
+            ''',
+            flags=jpeg_flags.cflags,
+            check_msg='for sufficient jpeg library version',
+            onerror=lambda: die('Insufficient JPEG library version for '
+                                '--with-system-jpeg (62 required)'),
+        )
+
+        c_compiler.try_compile(
+            includes=[
+                'stdio.h',
+                'sys/types.h',
+                'jpeglib.h',
+            ],
+            body='''
+                #ifndef JCS_EXTENSIONS
+                #error libjpeg-turbo JCS_EXTENSIONS required
+                #endif
+            ''',
+            flags=jpeg_flags.cflags,
+            check_msg='for sufficient libjpeg-turbo JCS_EXTENSIONS',
+            onerror=lambda: die('libjpeg-turbo JCS_EXTENSIONS required for '
+                                 '--with-system-jpeg'),
+        )
+
+        set_config('MOZ_JPEG_CFLAGS', jpeg_flags.cflags)
+        set_config('MOZ_JPEG_LIBS', jpeg_flags.ldflags)
+
+    @depends('--with-system-jpeg', target)
+    def in_tree_jpeg(system_jpeg, target):
+        if system_jpeg:
+            return
+
+        flags = ()
+        use_yasm = None
+        need_yasm = False
+        if target.kernel == 'Darwin':
+            if target.cpu == 'x86':
+                flags = ('-DPIC', '-DMACHO')
+            elif target.cpu == 'x86_64':
+                flags = ('-D__x86_64__', '-DPIC', '-DMACHO')
+        elif target.kernel == 'WINNT':
+            if target.cpu == 'x86':
+                flags = ('-DPIC', '-DWIN32')
+            elif target.cpu == 'x86_64':
+                flags = ('-D__x86_64__', '-DPIC', '-DWIN64', '-DMSVC')
+        elif target.cpu == 'arm':
+            flags = ('-march=armv7-a', '-mfpu=neon')
+        elif target.cpu == 'aarch64':
+            flags = ('-march=armv8-a',)
+        elif target.cpu == 'mips32':
+            flags = ('-mdspr2',)
+        elif target.cpu == 'x86':
+            flags = ('-DPIC', '-DELF')
+        elif target.cpu == 'x86_64':
+            flags = ('-D__x86_64__', '-DPIC', '-DELF')
+
+        if target.cpu in ('x86', 'x86_64'):
+            use_yasm = True
+            if target.kernel == 'Linux' and target.os == 'GNU':
+                need_yasm = Version('1.0.1')
+            else:
+                need_yasm = Version('1.1')
+
+        return namespace(flags=flags, use_yasm=use_yasm, need_yasm=need_yasm)
+
+    set_config('LIBJPEG_TURBO_USE_YASM', in_tree_jpeg.use_yasm)
+    set_config('LIBJPEG_TURBO_ASFLAGS', in_tree_jpeg.flags)
+
+
+@depends(yasm_version, in_tree_vpx.need_yasm, in_tree_jpeg.use_yasm)
+@imports(_from='__builtin__', _import='sorted')
+def valid_yasm_version(yasm_version, for_vpx, for_jpeg):
+    requires = {
+        'vpx': for_vpx,
+        'jpeg': for_jpeg,
+    }
+    requires = {k: v for (k, v) in requires.items() if v}
+    if requires and not yasm_version:
+        items = sorted(requires.keys())
+        if len(items) > 1:
+            what = ' and '.join((', '.join(items[:-1]), items[-1]))
+        else:
+            what = items[0]
+        die('Yasm is required to build with %s, but you do not appear to have '
+            'Yasm installed.' % what)
+
+    versioned = {k: v for (k, v) in requires.items() if v is not True}
+    by_version = sorted(versioned.items(), key=lambda x: x[1])
+    if by_version:
+        what, version = by_version[-1]
+        if yasm_version < version:
+            die('Yasm version %s or greater is required to build with %s.'
+                % (version, what))

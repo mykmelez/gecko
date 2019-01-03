@@ -769,7 +769,13 @@ host = help_host_target | host
 def target(value, host, shell):
     if not value:
         return host
-    return split_triplet(config_sub(shell, value[0]))
+    # If --target was only given a cpu arch, expand it with the
+    # non-cpu part of the host.
+    target = value[0]
+    if '-' not in target:
+        cpu, rest = host.alias.split('-', 1)
+        target = '-'.join((target, rest))
+    return split_triplet(config_sub(shell, target))
 
 
 target = help_host_target | target
@@ -1086,7 +1092,7 @@ def milestone(build_env, build_project, _):
             'browser/config/version_display.txt',
         ]
     for f in ('version.txt', 'version_display.txt'):
-        f = os.path.join(build_project, f)
+        f = os.path.join(build_project, 'config', f)
         if not os.path.exists(os.path.join(build_env.topsrcdir, f)):
             break
         paths.append(f)

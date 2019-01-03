@@ -1467,6 +1467,11 @@ html[dir='rtl'] .verticalToolbarSeparator {
   overflow: auto;
 }
 
+#thumbnailView > a:active,
+#thumbnailView > a:focus {
+  outline: 0;
+}
+
 .thumbnail {
   margin: 0 10px 5px 10px;
 }

@@ -43,6 +43,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   PlacesUIUtils: "resource:///modules/PlacesUIUtils.jsm",
   PlacesTransactions: "resource://gre/modules/PlacesTransactions.jsm",
   PluralForm: "resource://gre/modules/PluralForm.jsm",
+  Pocket: "chrome://pocket/content/Pocket.jsm",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
   ProcessHangMonitor: "resource:///modules/ProcessHangMonitor.jsm",
   PromiseUtils: "resource://gre/modules/PromiseUtils.jsm",
@@ -138,6 +139,8 @@ if (AppConstants.NIGHTLY_BUILD) {
   XPCOMUtils.defineLazyScriptGetter(this, "gWebRender",
                                     "chrome://browser/content/browser-webrender.js");
 }
+
+XPCOMUtils.defineLazyScriptGetter(this, "pktUI", "chrome://pocket/content/main.js");
 
 // lazy service getters
 
@@ -474,6 +477,15 @@ const gClickAndHoldListenersOnElement = {
     aButton.removeEventListener("mouseup", this);
   },
 
+  _keypressHandler(aEvent) {
+    if (aEvent.key == " " || aEvent.key == "Enter") {
+      // Normally, command events get fired for keyboard activation. However,
+      // we've set type="menu", so that doesn't happen. Handle this the same
+      // way we handle clicks.
+      aEvent.target.click();
+    }
+  },
+
   handleEvent(e) {
     switch (e.type) {
       case "mouseout":
@@ -488,12 +500,16 @@ const gClickAndHoldListenersOnElement = {
       case "mouseup":
         this._mouseupHandler(e);
         break;
+      case "keypress":
+        this._keypressHandler(e);
+        break;
     }
   },
 
   remove(aButton) {
     aButton.removeEventListener("mousedown", this, true);
     aButton.removeEventListener("click", this, true);
+    aButton.removeEventListener("keypress", this, true);
   },
 
   add(aElm) {
@@ -501,6 +517,7 @@ const gClickAndHoldListenersOnElement = {
 
     aElm.addEventListener("mousedown", this, true);
     aElm.addEventListener("click", this, true);
+    aElm.addEventListener("keypress", this, true);
   },
 };
 
@@ -800,38 +817,7 @@ var gPopupBlockerObserver = {
   },
 
   editPopupSettings() {
-    let prefillValue = "";
-    try {
-      // We use contentPrincipal rather than currentURI to get the right
-      // value in case this is a data: URI that's inherited off something else.
-      // Some principals don't have URIs, so fall back in case URI is not present.
-      let principalURI = gBrowser.contentPrincipal.URI || gBrowser.currentURI;
-      if (principalURI) {
-        // asciiHost conveniently doesn't throw.
-        if (principalURI.asciiHost) {
-          prefillValue = principalURI.prePath;
-        } else {
-          // For host-less URIs like file://, prePath would effectively allow
-          // popups everywhere on file://. Use the full spec:
-          prefillValue = principalURI.spec;
-        }
-      }
-    } catch (e) { }
-
-    var params = { blockVisible: false,
-                   sessionVisible: false,
-                   allowVisible: true,
-                   prefilledHost: prefillValue,
-                   permissionType: "popup",
-    };
-
-    var existingWindow = Services.wm.getMostRecentWindow("Browser:Permissions");
-    if (existingWindow) {
-      existingWindow.initWithParams(params);
-      existingWindow.focus();
-    } else
-      window.openDialog("chrome://browser/content/preferences/permissions.xul",
-                        "_blank", "resizable,dialog=no,centerscreen", params);
+    openPreferences("privacy-permissions-block-popups");
   },
 
   dontShowMessage() {
@@ -1331,7 +1317,6 @@ var gBrowserInit = {
     gPageStyleMenu.init();
     LanguageDetectionListener.init();
     BrowserOnClick.init();
-    ContentBlocking.init();
     CaptivePortalWatcher.init();
     ZoomUI.init(window);
 
@@ -1477,6 +1462,7 @@ var gBrowserInit = {
     BookmarkingUI.init();
     BrowserSearch.delayedStartupInit();
     AutoShowBookmarksToolbar.init();
+    ContentBlocking.init();
 
     let safeMode = document.getElementById("helpSafeMode");
     if (Services.appinfo.inSafeMode) {
@@ -1914,8 +1900,6 @@ var gBrowserInit = {
 
     BrowserOnClick.uninit();
 
-    ContentBlocking.uninit();
-
     CaptivePortalWatcher.uninit();
 
     SidebarUI.uninit();
@@ -1941,6 +1925,7 @@ var gBrowserInit = {
       Services.prefs.removeObserver(ctrlTab.prefName, ctrlTab);
       ctrlTab.uninit();
       gBrowserThumbnails.uninit();
+      ContentBlocking.uninit();
       FullZoom.destroy();
 
       Services.obs.removeObserver(gIdentityHandler, "perm-changed");
@@ -3983,13 +3968,14 @@ const BrowserSearch = {
   },
 
   /**
-   * Gives focus to the search bar, if it is present on the toolbar, or loads
-   * the default engine's search form otherwise. For Mac, opens a new window
-   * or focuses an existing window, if necessary.
+   * Focuses the search bar if present on the toolbar, or the address bar,
+   * putting it in search mode. Will do so in an existing non-popup browser
+   * window or open a new one if necessary.
    */
   webSearch: function BrowserSearch_webSearch() {
-    if (window.location.href != AppConstants.BROWSER_CHROME_URL) {
-      var win = getTopWin();
+    if (window.location.href != AppConstants.BROWSER_CHROME_URL ||
+        gURLBar.readOnly) {
+      let win = getTopWin(true);
       if (win) {
         // If there's an open browser window, it should handle this command
         win.focus();

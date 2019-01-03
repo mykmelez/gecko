@@ -4,9 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsSVGInteger.h"
+
 #include "nsError.h"
 #include "nsSVGAttrTearoffTable.h"
-#include "nsSVGInteger.h"
 #include "nsSMILValue.h"
 #include "SMILIntegerType.h"
 #include "SVGContentUtils.h"
@@ -20,7 +21,7 @@ static nsSVGAttrTearoffTable<nsSVGInteger, nsSVGInteger::DOMAnimatedInteger>
     sSVGAnimatedIntegerTearoffTable;
 
 nsresult nsSVGInteger::SetBaseValueString(const nsAString &aValueAsString,
-                                          nsSVGElement *aSVGElement) {
+                                          SVGElement *aSVGElement) {
   int32_t value;
 
   if (!SVGContentUtils::ParseInteger(aValueAsString, value)) {
@@ -42,7 +43,7 @@ void nsSVGInteger::GetBaseValueString(nsAString &aValueAsString) {
   aValueAsString.AppendInt(mBaseVal);
 }
 
-void nsSVGInteger::SetBaseValue(int aValue, nsSVGElement *aSVGElement) {
+void nsSVGInteger::SetBaseValue(int aValue, SVGElement *aSVGElement) {
   // We can't just rely on SetParsedAttrValue (as called by DidChangeInteger)
   // detecting redundant changes since it will compare false if the existing
   // attribute value has an associated serialized version (a string value) even
@@ -61,7 +62,7 @@ void nsSVGInteger::SetBaseValue(int aValue, nsSVGElement *aSVGElement) {
   aSVGElement->DidChangeInteger(mAttrEnum);
 }
 
-void nsSVGInteger::SetAnimValue(int aValue, nsSVGElement *aSVGElement) {
+void nsSVGInteger::SetAnimValue(int aValue, SVGElement *aSVGElement) {
   if (mIsAnimated && aValue == mAnimVal) {
     return;
   }
@@ -71,7 +72,7 @@ void nsSVGInteger::SetAnimValue(int aValue, nsSVGElement *aSVGElement) {
 }
 
 already_AddRefed<SVGAnimatedInteger> nsSVGInteger::ToDOMAnimatedInteger(
-    nsSVGElement *aSVGElement) {
+    SVGElement *aSVGElement) {
   RefPtr<DOMAnimatedInteger> domAnimatedInteger =
       sSVGAnimatedIntegerTearoffTable.GetTearoff(this);
   if (!domAnimatedInteger) {
@@ -86,7 +87,7 @@ nsSVGInteger::DOMAnimatedInteger::~DOMAnimatedInteger() {
   sSVGAnimatedIntegerTearoffTable.RemoveTearoff(mVal);
 }
 
-UniquePtr<nsISMILAttr> nsSVGInteger::ToSMILAttr(nsSVGElement *aSVGElement) {
+UniquePtr<nsISMILAttr> nsSVGInteger::ToSMILAttr(SVGElement *aSVGElement) {
   return MakeUnique<SMILInteger>(this, aSVGElement);
 }
 

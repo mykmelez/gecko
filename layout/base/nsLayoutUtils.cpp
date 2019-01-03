@@ -24,7 +24,7 @@
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/Unused.h"
 #include "nsCharTraits.h"
-#include "nsDocument.h"
+#include "nsIDocument.h"
 #include "nsFontMetrics.h"
 #include "nsPresContext.h"
 #include "nsIContent.h"
@@ -522,11 +522,12 @@ void nsLayoutUtils::UnionChildOverflow(nsIFrame* aFrame,
                                        nsOverflowAreas& aOverflowAreas,
                                        FrameChildListIDs aSkipChildLists) {
   // Iterate over all children except pop-ups.
-  FrameChildListIDs skip =
-      aSkipChildLists | nsIFrame::kSelectPopupList | nsIFrame::kPopupList;
+  FrameChildListIDs skip(aSkipChildLists);
+  skip += {nsIFrame::kSelectPopupList, nsIFrame::kPopupList};
+
   for (nsIFrame::ChildListIterator childLists(aFrame); !childLists.IsDone();
        childLists.Next()) {
-    if (skip.Contains(childLists.CurrentID())) {
+    if (skip.contains(childLists.CurrentID())) {
       continue;
     }
 
@@ -2960,20 +2961,20 @@ struct AutoNestedPaintCount {
 
 #endif
 
-nsIFrame* nsLayoutUtils::GetFrameForPoint(nsIFrame* aFrame, nsPoint aPt,
-                                          uint32_t aFlags) {
+nsIFrame* nsLayoutUtils::GetFrameForPoint(
+    nsIFrame* aFrame, nsPoint aPt, EnumSet<FrameForPointOption> aOptions) {
   AUTO_PROFILER_LABEL("nsLayoutUtils::GetFrameForPoint", LAYOUT);
 
   nsresult rv;
   AutoTArray<nsIFrame*, 8> outFrames;
-  rv = GetFramesForArea(aFrame, nsRect(aPt, nsSize(1, 1)), outFrames, aFlags);
+  rv = GetFramesForArea(aFrame, nsRect(aPt, nsSize(1, 1)), outFrames, aOptions);
   NS_ENSURE_SUCCESS(rv, nullptr);
   return outFrames.Length() ? outFrames.ElementAt(0) : nullptr;
 }
 
-nsresult nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
-                                         nsTArray<nsIFrame*>& aOutFrames,
-                                         uint32_t aFlags) {
+nsresult nsLayoutUtils::GetFramesForArea(
+    nsIFrame* aFrame, const nsRect& aRect, nsTArray<nsIFrame*>& aOutFrames,
+    EnumSet<FrameForPointOption> aOptions) {
   AUTO_PROFILER_LABEL("nsLayoutUtils::GetFramesForArea", LAYOUT);
 
   nsDisplayListBuilder builder(aFrame, nsDisplayListBuilderMode::EVENT_DELIVERY,
@@ -2981,21 +2982,21 @@ nsresult nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
   builder.BeginFrame();
   nsDisplayList list;
 
-  if (aFlags & IGNORE_PAINT_SUPPRESSION) {
+  if (aOptions.contains(FrameForPointOption::IgnorePaintSuppression)) {
     builder.IgnorePaintSuppression();
   }
-
-  if (aFlags & IGNORE_ROOT_SCROLL_FRAME) {
+  if (aOptions.contains(FrameForPointOption::IgnoreRootScrollFrame)) {
     nsIFrame* rootScrollFrame = aFrame->PresShell()->GetRootScrollFrame();
     if (rootScrollFrame) {
       builder.SetIgnoreScrollFrame(rootScrollFrame);
     }
   }
-  if (aFlags & IGNORE_CROSS_DOC) {
+  if (aOptions.contains(FrameForPointOption::IgnoreCrossDoc)) {
     builder.SetDescendIntoSubdocuments(false);
   }
 
-  builder.SetHitTestIsForVisibility(aFlags & ONLY_VISIBLE);
+  builder.SetHitTestIsForVisibility(
+      aOptions.contains(FrameForPointOption::OnlyVisible));
 
   builder.EnterPresShell(aFrame);
 
@@ -4848,7 +4849,7 @@ static nscoord GetDefiniteSizeTakenByBoxSizing(
   return sizeTakenByBoxSizing;
 }
 
-// Handles only -moz-max-content and -moz-min-content, and
+// Handles only max-content and min-content, and
 // -moz-fit-content for min-width and max-width, since the others
 // (-moz-fit-content for width, and -moz-available) have no effect on
 // intrinsic widths.
@@ -4870,10 +4871,10 @@ static bool GetIntrinsicCoord(const nsStyleCoord& aStyle,
   if (val == NS_STYLE_WIDTH_FIT_CONTENT) {
     if (aProperty == PROP_WIDTH) return false;  // handle like 'width: auto'
     if (aProperty == PROP_MAX_WIDTH)
-      // constrain large 'width' values down to -moz-max-content
+      // constrain large 'width' values down to max-content
       val = NS_STYLE_WIDTH_MAX_CONTENT;
     else
-      // constrain small 'width' or 'max-width' values up to -moz-min-content
+      // constrain small 'width' or 'max-width' values up to min-content
       val = NS_STYLE_WIDTH_MIN_CONTENT;
   }
 
@@ -5166,7 +5167,7 @@ static void AddStateBitToAncestors(nsIFrame* aFrame, nsFrameState aBit) {
     MOZ_ASSERT(isInlineAxis);
     // -moz-fit-content and -moz-available enumerated widths compute intrinsic
     // widths just like auto.
-    // For -moz-max-content and -moz-min-content, we handle them like
+    // For max-content and min-content, we handle them like
     // specified widths, but ignore box-sizing.
     boxSizing = StyleBoxSizing::Content;
   } else if (!styleISize.ConvertsToLength() &&
@@ -6168,18 +6169,18 @@ static nscoord CalculateBlockContentBEnd(WritingMode aWM,
   // calculation is intended to affect layout.
   LogicalSize overflowSize(aWM, aFrame->GetScrollableOverflowRect().Size());
   if (overflowSize.BSize(aWM) > contentBEnd) {
-    nsIFrame::ChildListIDs skip(nsIFrame::kOverflowList |
-                                nsIFrame::kExcessOverflowContainersList |
-                                nsIFrame::kOverflowOutOfFlowList);
+    nsIFrame::ChildListIDs skip = {nsIFrame::kOverflowList,
+                                   nsIFrame::kExcessOverflowContainersList,
+                                   nsIFrame::kOverflowOutOfFlowList};
     nsBlockFrame* blockFrame = GetAsBlock(aFrame);
     if (blockFrame) {
       contentBEnd =
           std::max(contentBEnd, CalculateBlockContentBEnd(aWM, blockFrame));
-      skip |= nsIFrame::kPrincipalList;
+      skip += nsIFrame::kPrincipalList;
     }
     nsIFrame::ChildListIterator lists(aFrame);
     for (; !lists.IsDone(); lists.Next()) {
-      if (!skip.Contains(lists.CurrentID())) {
+      if (!skip.contains(lists.CurrentID())) {
         nsFrameList::Enumerator childFrames(lists.CurrentList());
         for (; !childFrames.AtEnd(); childFrames.Next()) {
           nsIFrame* child = childFrames.get();
@@ -8571,8 +8572,8 @@ void MaybeSetupTransactionIdAllocator(layers::LayerManager* aManager,
   if (nsIDocument* doc = aShell->GetDocument()) {
     WidgetEvent event(true, eVoidEvent);
     nsTArray<EventTarget*> targets;
-    nsresult rv = EventDispatcher::Dispatch(doc, nullptr, &event, nullptr,
-                                            nullptr, nullptr, &targets);
+    nsresult rv = EventDispatcher::Dispatch(
+        ToSupports(doc), nullptr, &event, nullptr, nullptr, nullptr, &targets);
     NS_ENSURE_SUCCESS(rv, false);
     for (size_t i = 0; i < targets.Length(); i++) {
       if (targets[i]->IsApzAware()) {
@@ -9437,7 +9438,7 @@ static nsRect ComputeSVGReferenceRect(nsIFrame* aFrame,
     }
     case StyleGeometryBox::ViewBox: {
       nsIContent* content = aFrame->GetContent();
-      nsSVGElement* element = static_cast<nsSVGElement*>(content);
+      SVGElement* element = static_cast<SVGElement*>(content);
       SVGViewportElement* svgElement = element->GetCtx();
       MOZ_ASSERT(svgElement);
 

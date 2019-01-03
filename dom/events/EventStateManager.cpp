@@ -343,12 +343,13 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(EventStateManager)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(EventStateManager)
 
-NS_IMPL_CYCLE_COLLECTION(
-    EventStateManager, mCurrentTargetContent, mGestureDownContent,
-    mGestureDownFrameOwner, mLastLeftMouseDownContent,
-    mLastMiddleMouseDownContent, mLastRightMouseDownContent, mActiveContent,
-    mHoverContent, mURLTargetContent, mMouseEnterLeaveHelper,
-    mPointersEnterLeaveHelper, mDocument, mIMEContentObserver, mAccessKeys)
+NS_IMPL_CYCLE_COLLECTION(EventStateManager, mCurrentTargetContent,
+                         mGestureDownContent, mGestureDownFrameOwner,
+                         mLastLeftMouseDownContent, mLastMiddleMouseDownContent,
+                         mLastRightMouseDownContent, mActiveContent,
+                         mHoverContent, mURLTargetContent,
+                         mMouseEnterLeaveHelper, mPointersEnterLeaveHelper,
+                         mDocument, mIMEContentObserver, mAccessKeys)
 
 void EventStateManager::ReleaseCurrentIMEContentObserver() {
   if (mIMEContentObserver) {
@@ -2101,7 +2102,7 @@ void EventStateManager::DoScrollZoom(nsIFrame* aTargetFrame,
       ChangeTextSize(change);
     }
     nsContentUtils::DispatchChromeEvent(
-        mDocument, static_cast<nsIDocument*>(mDocument),
+        mDocument, ToSupports(mDocument),
         NS_LITERAL_STRING("ZoomChangeUsingMouseWheel"), CanBubble::eYes,
         Cancelable::eYes);
   }
@@ -2952,7 +2953,8 @@ nsresult EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
   // Most of the events we handle below require a frame.
   // Add special cases here.
   if (!mCurrentTarget && aEvent->mMessage != eMouseUp &&
-      aEvent->mMessage != eMouseDown) {
+      aEvent->mMessage != eMouseDown && aEvent->mMessage != eDragEnter &&
+      aEvent->mMessage != eDragOver) {
     return NS_OK;
   }
 
@@ -4607,8 +4609,8 @@ nsresult EventStateManager::SetClickCount(WidgetMouseEvent* aEvent,
         mLastLeftMouseDownContent = mouseContent;
       } else if (aEvent->mMessage == eMouseUp) {
         aEvent->mClickTarget =
-          nsContentUtils::GetCommonAncestorUnderInteractiveContent(
-            mouseContent, mLastLeftMouseDownContent);
+            nsContentUtils::GetCommonAncestorUnderInteractiveContent(
+                mouseContent, mLastLeftMouseDownContent);
         if (aEvent->mClickTarget) {
           aEvent->mClickCount = mLClickCount;
           mLClickCount = 0;
@@ -4624,9 +4626,9 @@ nsresult EventStateManager::SetClickCount(WidgetMouseEvent* aEvent,
         mLastMiddleMouseDownContent = mouseContent;
       } else if (aEvent->mMessage == eMouseUp) {
         aEvent->mClickTarget =
-          nsContentUtils::GetCommonAncestorUnderInteractiveContent(
-            mouseContent, mLastMiddleMouseDownContent);
-      if (aEvent->mClickTarget) {
+            nsContentUtils::GetCommonAncestorUnderInteractiveContent(
+                mouseContent, mLastMiddleMouseDownContent);
+        if (aEvent->mClickTarget) {
           aEvent->mClickCount = mMClickCount;
           mMClickCount = 0;
         } else {
@@ -4641,8 +4643,8 @@ nsresult EventStateManager::SetClickCount(WidgetMouseEvent* aEvent,
         mLastRightMouseDownContent = mouseContent;
       } else if (aEvent->mMessage == eMouseUp) {
         aEvent->mClickTarget =
-          nsContentUtils::GetCommonAncestorUnderInteractiveContent(
-            mouseContent, mLastRightMouseDownContent);
+            nsContentUtils::GetCommonAncestorUnderInteractiveContent(
+                mouseContent, mLastRightMouseDownContent);
         if (aEvent->mClickTarget) {
           aEvent->mClickCount = mRClickCount;
           mRClickCount = 0;
@@ -4752,7 +4754,7 @@ nsresult EventStateManager::PostHandleMouseUp(
   }
 
   nsCOMPtr<nsIContent> clickTarget =
-    do_QueryInterface(aMouseUpEvent->mClickTarget);
+      do_QueryInterface(aMouseUpEvent->mClickTarget);
   NS_ENSURE_STATE(clickTarget);
 
   // Fire click events if the event target is still available.

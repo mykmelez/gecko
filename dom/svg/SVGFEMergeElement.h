@@ -7,7 +7,7 @@
 #ifndef mozilla_dom_SVGFEMergeElement_h
 #define mozilla_dom_SVGFEMergeElement_h
 
-#include "nsSVGFilters.h"
+#include "SVGFilters.h"
 
 nsresult NS_NewSVGFEMergeElement(
     nsIContent** aResult, already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
@@ -15,7 +15,7 @@ nsresult NS_NewSVGFEMergeElement(
 namespace mozilla {
 namespace dom {
 
-typedef nsSVGFE SVGFEMergeElementBase;
+typedef SVGFE SVGFEMergeElementBase;
 
 class SVGFEMergeElement : public SVGFEMergeElementBase {
   friend nsresult(::NS_NewSVGFEMergeElement(
@@ -37,8 +37,7 @@ class SVGFEMergeElement : public SVGFEMergeElementBase {
   virtual nsSVGString& GetResultImageName() override {
     return mStringAttributes[RESULT];
   }
-  virtual void GetSourceImageNames(
-      nsTArray<nsSVGStringInfo>& aSources) override;
+  virtual void GetSourceImageNames(nsTArray<SVGStringInfo>& aSources) override;
 
   // nsIContent
   virtual nsresult Clone(dom::NodeInfo*, nsINode** aResult) const override;

@@ -39,7 +39,6 @@ ChromeUtils.defineModuleGetter(this, "Downloads",
 ChromeUtils.defineModuleGetter(this, "UserAgentOverrides",
                                "resource://gre/modules/UserAgentOverrides.jsm");
 
-ChromeUtils.defineModuleGetter(this, "Task", "resource://gre/modules/Task.jsm");
 ChromeUtils.defineModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
 
 ChromeUtils.defineModuleGetter(this, "SafeBrowsing",
@@ -489,11 +488,11 @@ var BrowserApp = {
     }
 
     InitLater(() => {
-      Task.spawn(function* () {
-        let downloadsDir = yield Downloads.getPreferredDownloadsDirectory();
+      (async () => {
+        let downloadsDir = await Downloads.getPreferredDownloadsDirectory();
         let logsDir = OS.Path.join(downloadsDir, "memory-reports");
-        yield OS.File.removeDir(logsDir);
-      });
+        await OS.File.removeDir(logsDir);
+      })();
     });
 
     // Don't delay loading content.js because when we restore reader mode tabs,
@@ -650,6 +649,7 @@ var BrowserApp = {
         UITelemetry.addEvent("action.1", "contextmenu", null, "web_copy_link");
 
         let url = NativeWindow.contextmenus._getLinkURL(aTarget);
+        url = NativeWindow.contextmenus._stripViewSource(url);
         NativeWindow.contextmenus._copyStringToDefaultClipboard(url);
       });
 
@@ -678,9 +678,11 @@ var BrowserApp = {
       order: NativeWindow.contextmenus.DEFAULT_HTML5_ORDER - 1, // Show above HTML5 menu items
       selector: NativeWindow.contextmenus._disableRestricted("SHARE", NativeWindow.contextmenus.linkShareableContext),
       showAsActions: function(aElement) {
+        let uri = NativeWindow.contextmenus._getLinkURL(aElement);
+        uri = NativeWindow.contextmenus._stripViewSource(uri);
         return {
           title: aElement.textContent.trim() || aElement.title.trim(),
-          uri: NativeWindow.contextmenus._getLinkURL(aElement),
+          uri,
         };
       },
       icon: "drawable://ic_menu_share",
@@ -839,7 +841,7 @@ var BrowserApp = {
     NativeWindow.contextmenus.add(stringGetter("contextmenu.viewImage"),
       NativeWindow.contextmenus.imageLocationCopyableContext,
       function(aTarget) {
-        let url = aTarget.src;
+        let url = aTarget.currentSrc || aTarget.src;
         ContentAreaUtils.urlSecurityCheck(url, aTarget.ownerDocument.nodePrincipal,
                                           Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
 
@@ -853,7 +855,8 @@ var BrowserApp = {
       function(aTarget) {
         UITelemetry.addEvent("action.1", "contextmenu", null, "web_copy_image");
 
-        let url = aTarget.src;
+        let url = aTarget.currentSrc || aTarget.src;
+        url = NativeWindow.contextmenus._stripViewSource(url);
         NativeWindow.contextmenus._copyStringToDefaultClipboard(url);
       });
 
@@ -862,7 +865,8 @@ var BrowserApp = {
       selector: NativeWindow.contextmenus._disableRestricted("SHARE", NativeWindow.contextmenus.imageShareableContext),
       order: NativeWindow.contextmenus.DEFAULT_HTML5_ORDER - 1, // Show above HTML5 menu items
       showAsActions: function(aTarget) {
-        let src = aTarget.src;
+        let src = aTarget.currentSrc || aTarget.src;
+        src = NativeWindow.contextmenus._stripViewSource(src);
         return {
           title: src,
           uri: src,
@@ -903,7 +907,7 @@ var BrowserApp = {
       function(aTarget) {
         UITelemetry.addEvent("action.1", "contextmenu", null, "web_background_image");
 
-        let src = aTarget.src;
+        let src = aTarget.currentSrc || aTarget.src;
         GlobalEventDispatcher.sendRequest({
           type: "Image:SetAs",
           url: src
@@ -1501,29 +1505,29 @@ var BrowserApp = {
         return;
       }
 
-      Task.spawn(function* () {
+      (async () => {
         let fileName = ContentAreaUtils.getDefaultFileName(aBrowser.contentTitle, aBrowser.currentURI, null, null);
         fileName = fileName.trim() + ".pdf";
 
-        let downloadsDir = yield Downloads.getPreferredDownloadsDirectory();
+        let downloadsDir = await Downloads.getPreferredDownloadsDirectory();
         let file = OS.Path.join(downloadsDir, fileName);
 
         // Force this to have a unique name.
-        let openedFile = yield OS.File.openUnique(file, { humanReadable: true });
+        let openedFile = await OS.File.openUnique(file, { humanReadable: true });
         file = openedFile.path;
-        yield openedFile.file.close();
+        await openedFile.file.close();
 
-        let download = yield Downloads.createDownload({
+        let download = await Downloads.createDownload({
           source: aBrowser.contentWindow,
           target: file,
           saver: "pdf",
           startTime: Date.now(),
         });
 
-        let list = yield Downloads.getList(download.source.isPrivate ? Downloads.PRIVATE : Downloads.PUBLIC)
-        yield list.add(download);
-        yield download.start();
-      });
+        let list = await Downloads.getList(download.source.isPrivate ? Downloads.PRIVATE : Downloads.PUBLIC);
+        await list.add(download);
+        await download.start();
+      })();
     });
   },
 
@@ -3233,6 +3237,11 @@ var NativeWindow = {
     _stripScheme: function(aString) {
       let index = aString.indexOf(":");
       return aString.slice(index + 1);
+    },
+
+    _stripViewSource: function(aString) {
+      // If we're in a view source tab, remove the view-source: prefix
+      return aString.replace(/^view-source:/, "");
     }
   }
 };
@@ -6627,26 +6636,29 @@ var Distribution = {
   // aFile is an nsIFile
   // aCallback takes the parsed JSON object as a parameter
   readJSON: function dc_readJSON(aFile, aCallback) {
-    Task.spawn(function*() {
-      let bytes = yield OS.File.read(aFile.path);
-      let raw = new TextDecoder().decode(bytes) || "";
+    (async () => {
+      try {
+        let bytes = await OS.File.read(aFile.path);
+        let raw = new TextDecoder().decode(bytes) || "";
+      } catch (e) {
+        if (!(e instanceof OS.File.Error && reason.becauseNoSuchFile)) {
+          Cu.reportError("Distribution: Could not read from " + aFile.leafName + " file");
+        }
+        return;
+      }
 
       try {
         aCallback(JSON.parse(raw));
       } catch (e) {
         Cu.reportError("Distribution: Could not parse JSON: " + e);
       }
-    }).catch(function onError(reason) {
-      if (!(reason instanceof OS.File.Error && reason.becauseNoSuchFile)) {
-        Cu.reportError("Distribution: Could not read from " + aFile.leafName + " file");
-      }
-    });
+    })();
   },
 
   // Track pending installs so we can avoid showing notifications for them.
   pendingAddonInstalls: new Set(),
 
-  installDistroAddons: Task.async(function* () {
+  async installDistroAddons() {
     const PREF_ADDONS_INSTALLED = "distribution.addonsInstalled";
     try {
       let installed = Services.prefs.getBoolPref(PREF_ADDONS_INSTALLED);
@@ -6661,7 +6673,7 @@ var Distribution = {
     try {
       distroPath = FileUtils.getDir("XREAppDist", ["extensions"]).path;
 
-      let info = yield OS.File.stat(distroPath);
+      let info = await OS.File.stat(distroPath);
       if (!info.isDir) {
         return;
       }
@@ -6671,7 +6683,7 @@ var Distribution = {
 
     let it = new OS.File.DirectoryIterator(distroPath);
     try {
-      yield it.forEach(entry => {
+      await it.forEach(entry => {
         // Only support extensions that are zipped in .xpi files.
         if (entry.isDir || !entry.name.endsWith(".xpi")) {
           dump("Ignoring distribution add-on that isn't an XPI: " + entry.path);
@@ -6694,7 +6706,7 @@ var Distribution = {
     } finally {
       it.close();
     }
-  })
+  },
 };
 
 var Tabs = {

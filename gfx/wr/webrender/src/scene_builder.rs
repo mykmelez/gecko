@@ -5,6 +5,7 @@
 use api::{AsyncBlobImageRasterizer, BlobImageRequest, BlobImageParams, BlobImageResult};
 use api::{DocumentId, PipelineId, ApiMsg, FrameMsg, ResourceUpdate, ExternalEvent, Epoch};
 use api::{BuiltDisplayList, ColorF, LayoutSize, NotificationRequest, Checkpoint, IdNamespace};
+use api::{MemoryReport, VoidPtrToSizeFn};
 use api::channel::MsgSender;
 #[cfg(feature = "capture")]
 use capture::CaptureConfig;
@@ -16,10 +17,22 @@ use intern::{Internable, Interner};
 use internal_types::{FastHashMap, FastHashSet};
 use prim_store::{PrimitiveDataInterner, PrimitiveDataUpdateList, PrimitiveKeyKind};
 use prim_store::PrimitiveStoreStats;
+use prim_store::borders::{
+    ImageBorder, ImageBorderDataInterner, ImageBorderDataUpdateList,
+    NormalBorderPrim, NormalBorderDataInterner, NormalBorderDataUpdateList
+};
 use prim_store::gradient::{
     LinearGradient, LinearGradientDataInterner, LinearGradientDataUpdateList,
     RadialGradient, RadialGradientDataInterner, RadialGradientDataUpdateList
 };
+use prim_store::image::{
+    Image, ImageDataInterner, ImageDataUpdateList,
+    YuvImage, YuvImageDataInterner, YuvImageDataUpdateList,
+};
+use prim_store::line_dec::{
+    LineDecoration, LineDecorationDataInterner, LineDecorationDataUpdateList
+};
+use prim_store::picture::{PictureDataInterner, Picture, PictureDataUpdateList};
 use prim_store::text_run::{TextRunDataInterner, TextRun, TextRunDataUpdateList};
 use resource_cache::{BlobImageRasterizerEpoch, FontInstanceMap};
 use render_backend::DocumentView;
@@ -35,9 +48,15 @@ use std::time::Duration;
 pub struct DocumentResourceUpdates {
     pub clip_updates: ClipDataUpdateList,
     pub prim_updates: PrimitiveDataUpdateList,
+    pub image_updates: ImageDataUpdateList,
+    pub image_border_updates: ImageBorderDataUpdateList,
+    pub line_decoration_updates: LineDecorationDataUpdateList,
     pub linear_grad_updates: LinearGradientDataUpdateList,
+    pub normal_border_updates: NormalBorderDataUpdateList,
+    pub picture_updates: PictureDataUpdateList,
     pub radial_grad_updates: RadialGradientDataUpdateList,
     pub text_run_updates: TextRunDataUpdateList,
+    pub yuv_image_updates: YuvImageDataUpdateList,
 }
 
 /// Represents the work associated to a transaction before scene building.
@@ -150,6 +169,7 @@ pub enum SceneBuilderRequest {
     SimulateLongSceneBuild(u32),
     SimulateLongLowPrioritySceneBuild(u32),
     Stop,
+    ReportMemory(MemoryReport, MsgSender<MemoryReport>),
     #[cfg(feature = "capture")]
     SaveScene(CaptureConfig),
     #[cfg(feature = "replay")]
@@ -185,9 +205,31 @@ pub enum SceneSwapResult {
 pub struct DocumentResources {
     pub clip_interner: ClipDataInterner,
     pub prim_interner: PrimitiveDataInterner,
+    pub image_interner: ImageDataInterner,
+    pub image_border_interner: ImageBorderDataInterner,
+    pub line_decoration_interner: LineDecorationDataInterner,
     pub linear_grad_interner: LinearGradientDataInterner,
+    pub normal_border_interner: NormalBorderDataInterner,
+    pub picture_interner: PictureDataInterner,
     pub radial_grad_interner: RadialGradientDataInterner,
     pub text_run_interner: TextRunDataInterner,
+    pub yuv_image_interner: YuvImageDataInterner,
+}
+
+impl DocumentResources {
+    /// Reports CPU heap memory used by the interners.
+    fn report_memory(
+        &self,
+        op: VoidPtrToSizeFn,
+        eop: VoidPtrToSizeFn,
+        r: &mut MemoryReport,
+    ) {
+        r.interners += self.clip_interner.malloc_size_of(op, eop);
+        r.interners += self.prim_interner.malloc_size_of(op, eop);
+        r.interners += self.linear_grad_interner.malloc_size_of(op, eop);
+        r.interners += self.radial_grad_interner.malloc_size_of(op, eop);
+        r.interners += self.text_run_interner.malloc_size_of(op, eop);
+    }
 }
 
 // Access to `DocumentResources` interners by `Internable`
@@ -196,30 +238,32 @@ pub trait InternerMut<I: Internable>
     fn interner_mut(&mut self) -> &mut Interner<I::Source, I::InternData, I::Marker>;
 }
 
-impl InternerMut<PrimitiveKeyKind> for DocumentResources {
-    fn interner_mut(&mut self) -> &mut PrimitiveDataInterner {
-        &mut self.prim_interner
+macro_rules! impl_internet_mut {
+    ($($ty:ident: $mem:ident,)*) => {
+        $(impl InternerMut<$ty> for DocumentResources {
+            fn interner_mut(&mut self) -> &mut Interner<
+                <$ty as Internable>::Source,
+                <$ty as Internable>::InternData,
+                <$ty as Internable>::Marker
+            > {
+                &mut self.$mem
+            }
+        })*
     }
 }
 
-impl InternerMut<LinearGradient> for DocumentResources {
-    fn interner_mut(&mut self) -> &mut LinearGradientDataInterner {
-        &mut self.linear_grad_interner
-    }
+impl_internet_mut! {
+    Image: image_interner,
+    ImageBorder: image_border_interner,
+    LineDecoration: line_decoration_interner,
+    LinearGradient: linear_grad_interner,
+    NormalBorderPrim: normal_border_interner,
+    Picture: picture_interner,
+    PrimitiveKeyKind: prim_interner,
+    RadialGradient: radial_grad_interner,
+    TextRun: text_run_interner,
+    YuvImage: yuv_image_interner,
 }
-
-impl InternerMut<RadialGradient> for DocumentResources {
-    fn interner_mut(&mut self) -> &mut RadialGradientDataInterner {
-        &mut self.radial_grad_interner
-    }
-}
-
-impl InternerMut<TextRun> for DocumentResources {
-    fn interner_mut(&mut self) -> &mut TextRunDataInterner {
-        &mut self.text_run_interner
-    }
-}
-
 
 // A document in the scene builder contains the current scene,
 // as well as a persistent clip interner. This allows clips
@@ -249,6 +293,8 @@ pub struct SceneBuilder {
     config: FrameBuilderConfig,
     hooks: Option<Box<SceneBuilderHooks + Send>>,
     simulate_slow_ms: u32,
+    size_of_op: Option<VoidPtrToSizeFn>,
+    enclosing_size_of_op: Option<VoidPtrToSizeFn>,
 }
 
 impl SceneBuilder {
@@ -256,6 +302,8 @@ impl SceneBuilder {
         config: FrameBuilderConfig,
         api_tx: MsgSender<ApiMsg>,
         hooks: Option<Box<SceneBuilderHooks + Send>>,
+        size_of_op: Option<VoidPtrToSizeFn>,
+        enclosing_size_of_op: Option<VoidPtrToSizeFn>,
     ) -> (Self, Sender<SceneBuilderRequest>, Receiver<SceneBuilderResult>) {
         let (in_tx, in_rx) = channel();
         let (out_tx, out_rx) = channel();
@@ -267,6 +315,8 @@ impl SceneBuilder {
                 api_tx,
                 config,
                 hooks,
+                size_of_op,
+                enclosing_size_of_op,
                 simulate_slow_ms: 0,
             },
             in_tx,
@@ -325,6 +375,10 @@ impl SceneBuilder {
                     // We don't need to send a WakeUp to api_tx because we only
                     // get the Stop when the RenderBackend loop is exiting.
                     break;
+                }
+                Ok(SceneBuilderRequest::ReportMemory(mut report, tx)) => {
+                    report += self.report_memory();
+                    tx.send(report).unwrap();
                 }
                 Ok(SceneBuilderRequest::SimulateLongSceneBuild(time_ms)) => {
                     self.simulate_slow_ms = time_ms
@@ -391,9 +445,34 @@ impl SceneBuilder {
                     .prim_interner
                     .end_frame_and_get_pending_updates();
 
+                let image_updates = item
+                    .doc_resources
+                    .image_interner
+                    .end_frame_and_get_pending_updates();
+
+                let image_border_updates = item
+                    .doc_resources
+                    .image_border_interner
+                    .end_frame_and_get_pending_updates();
+
+                let line_decoration_updates = item
+                    .doc_resources
+                    .line_decoration_interner
+                    .end_frame_and_get_pending_updates();
+
                 let linear_grad_updates = item
                     .doc_resources
                     .linear_grad_interner
+                    .end_frame_and_get_pending_updates();
+
+                let normal_border_updates = item
+                    .doc_resources
+                    .normal_border_interner
+                    .end_frame_and_get_pending_updates();
+
+                let picture_updates = item
+                    .doc_resources
+                    .picture_interner
                     .end_frame_and_get_pending_updates();
 
                 let radial_grad_updates = item
@@ -406,13 +485,24 @@ impl SceneBuilder {
                     .text_run_interner
                     .end_frame_and_get_pending_updates();
 
+                let yuv_image_updates = item
+                    .doc_resources
+                    .yuv_image_interner
+                    .end_frame_and_get_pending_updates();
+
                 doc_resource_updates = Some(
                     DocumentResourceUpdates {
                         clip_updates,
                         prim_updates,
+                        image_updates,
+                        image_border_updates,
+                        line_decoration_updates,
                         linear_grad_updates,
+                        normal_border_updates,
+                        picture_updates,
                         radial_grad_updates,
                         text_run_updates,
+                        yuv_image_updates,
                     }
                 );
 
@@ -521,9 +611,34 @@ impl SceneBuilder {
                     .prim_interner
                     .end_frame_and_get_pending_updates();
 
+                let image_updates = doc
+                    .resources
+                    .image_interner
+                    .end_frame_and_get_pending_updates();
+
+                let image_border_updates = doc
+                    .resources
+                    .image_border_interner
+                    .end_frame_and_get_pending_updates();
+
+                let line_decoration_updates = doc
+                    .resources
+                    .line_decoration_interner
+                    .end_frame_and_get_pending_updates();
+
                 let linear_grad_updates = doc
                     .resources
                     .linear_grad_interner
+                    .end_frame_and_get_pending_updates();
+
+                let normal_border_updates = doc
+                    .resources
+                    .normal_border_interner
+                    .end_frame_and_get_pending_updates();
+
+                let picture_updates = doc
+                    .resources
+                    .picture_interner
                     .end_frame_and_get_pending_updates();
 
                 let radial_grad_updates = doc
@@ -536,13 +651,24 @@ impl SceneBuilder {
                     .text_run_interner
                     .end_frame_and_get_pending_updates();
 
+                let yuv_image_updates = doc
+                    .resources
+                    .yuv_image_interner
+                    .end_frame_and_get_pending_updates();
+
                 doc_resource_updates = Some(
                     DocumentResourceUpdates {
                         clip_updates,
                         prim_updates,
+                        image_updates,
+                        image_border_updates,
+                        line_decoration_updates,
                         linear_grad_updates,
+                        normal_border_updates,
+                        picture_updates,
                         radial_grad_updates,
                         text_run_updates,
+                        yuv_image_updates,
                     }
                 );
 
@@ -634,6 +760,18 @@ impl SceneBuilder {
                 hooks.post_empty_scene_build();
             }
         }
+    }
+
+    /// Reports CPU heap memory used by the SceneBuilder.
+    fn report_memory(&self) -> MemoryReport {
+        let op = self.size_of_op.unwrap();
+        let eop = self.enclosing_size_of_op.unwrap();
+        let mut report = MemoryReport::default();
+        for doc in self.documents.values() {
+            doc.resources.report_memory(op, eop, &mut report);
+        }
+
+        report
     }
 }
 

@@ -773,11 +773,6 @@ module.exports = overArg;
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
-                                                                                                                                                                                                                                                                   * License, v. 2.0. If a copy of the MPL was not distributed with this
-                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
 exports.parse = parse;
 exports.parseConsoleScript = parseConsoleScript;
 exports.parseScript = parseScript;
@@ -808,12 +803,15 @@ function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj;
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-let ASTs = new Map();
+let ASTs = new Map(); /* This Source Code Form is subject to the terms of the Mozilla Public
+                       * License, v. 2.0. If a copy of the MPL was not distributed with this
+                       * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 function _parse(code, opts) {
-  return babelParser.parse(code, _extends({}, opts, {
+  return babelParser.parse(code, {
+    ...opts,
     tokens: true
-  }));
+  });
 }
 
 const sourceOptions = {
@@ -853,9 +851,10 @@ function htmlParser({ source, line }) {
 
 const VUE_COMPONENT_START = /^\s*</;
 function vueParser({ source, line }) {
-  return parse(source, _extends({
-    startLine: line
-  }, sourceOptions.original));
+  return parse(source, {
+    startLine: line,
+    ...sourceOptions.original
+  });
 }
 function parseVueScript(code) {
   if (typeof code !== "string") {
@@ -881,11 +880,11 @@ function parseVueScript(code) {
 }
 
 function parseConsoleScript(text, opts) {
-  return _parse(text, _extends({
-    plugins: ["objectRestSpread"]
-  }, opts, {
+  return _parse(text, {
+    plugins: ["objectRestSpread"],
+    ...opts,
     allowAwaitOutsideFunction: true
-  }));
+  });
 }
 
 function parseScript(text, opts) {
@@ -914,9 +913,10 @@ function getAst(sourceId) {
     const options = sourceOptions[type];
     ast = parse(source.text, options);
   } else if (contentType && contentType.match(/typescript/)) {
-    const options = _extends({}, sourceOptions.original, {
+    const options = {
+      ...sourceOptions.original,
       plugins: [...sourceOptions.original.plugins.filter(p => p !== "flow" && p !== "decorators" && p !== "decorators2" && (p !== "jsx" || contentType.match(/typescript-jsx/))), "decorators-legacy", "typescript"]
-    });
+    };
     ast = parse(source.text, options);
   }
 
@@ -1015,6 +1015,9 @@ exports.getMemberExpression = getMemberExpression;
 exports.getVariables = getVariables;
 exports.getPatternIdentifiers = getPatternIdentifiers;
 exports.isTopLevel = isTopLevel;
+exports.nodeHasSameLocation = nodeHasSameLocation;
+exports.sameLocation = sameLocation;
+exports.getFunctionParameterNames = getFunctionParameterNames;
 
 var _types = __webpack_require__(2268);
 
@@ -1057,7 +1060,7 @@ function getObjectExpressionValue(node) {
     return value.name;
   }
 
-  if (t.isCallExpression(value)) {
+  if (t.isCallExpression(value) || t.isFunctionExpression(value)) {
     return "";
   }
   const code = (0, _generator2.default)(value).code;
@@ -1178,6 +1181,38 @@ function isTopLevel(ancestors) {
   return ancestors.filter(ancestor => ancestor.key == "body").length == 1;
 }
 
+function nodeHasSameLocation(a, b) {
+  return sameLocation(a.location, b.location);
+}
+
+function sameLocation(a, b) {
+  return a.start.line == b.start.line && a.start.column == b.start.column && a.end.line == b.end.line && a.end.column == b.end.column;
+}
+
+function getFunctionParameterNames(path) {
+  if (path.node.params != null) {
+    return path.node.params.map(param => {
+      if (param.type !== "AssignmentPattern") {
+        return param.name;
+      }
+
+      // Parameter with default value
+      if (param.left.type === "Identifier" && param.right.type === "Identifier") {
+        return `${param.left.name} = ${param.right.name}`;
+      } else if (param.left.type === "Identifier" && param.right.type === "StringLiteral") {
+        return `${param.left.name} = ${param.right.value}`;
+      } else if (param.left.type === "Identifier" && param.right.type === "ObjectExpression") {
+        return `${param.left.name} = {}`;
+      } else if (param.left.type === "Identifier" && param.right.type === "ArrayExpression") {
+        return `${param.left.name} = []`;
+      } else if (param.left.type === "Identifier" && param.right.type === "NullLiteral") {
+        return `${param.left.name} = null`;
+      }
+    });
+  }
+  return [];
+}
+
 /***/ }),
 
 /***/ 1455:
@@ -1282,11 +1317,6 @@ function nodeContainsPosition(node, position) {
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
-                                                                                                                                                                                                                                                                   * License, v. 2.0. If a copy of the MPL was not distributed with this
-                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
 exports.clearSymbols = clearSymbols;
 exports.getSymbols = getSymbols;
 
@@ -1312,41 +1342,37 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 
 function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
 let symbolDeclarations = new Map();
 
-function getFunctionParameterNames(path) {
-  if (path.node.params != null) {
-    return path.node.params.map(param => {
-      if (param.type !== "AssignmentPattern") {
-        return param.name;
-      }
-
-      // Parameter with default value
-      if (param.left.type === "Identifier" && param.right.type === "Identifier") {
-        return `${param.left.name} = ${param.right.name}`;
-      } else if (param.left.type === "Identifier" && param.right.type === "StringLiteral") {
-        return `${param.left.name} = ${param.right.value}`;
-      } else if (param.left.type === "Identifier" && param.right.type === "ObjectExpression") {
-        return `${param.left.name} = {}`;
-      } else if (param.left.type === "Identifier" && param.right.type === "ArrayExpression") {
-        return `${param.left.name} = []`;
-      } else if (param.left.type === "Identifier" && param.right.type === "NullLiteral") {
-        return `${param.left.name} = null`;
-      }
-    });
+function getUniqueIdentifiers(identifiers) {
+  const newIdentifiers = [];
+  for (const newId of identifiers) {
+    if (!newIdentifiers.find(id => (0, _helpers.nodeHasSameLocation)(id, newId))) {
+      newIdentifiers.push(newId);
+    }
   }
-  return [];
+
+  return newIdentifiers;
 }
 
 /* eslint-disable complexity */
 function extractSymbol(path, symbols) {
   if ((0, _helpers.isFunction)(path)) {
+    const name = (0, _getFunctionName2.default)(path.node, path.parent);
     symbols.functions.push({
-      name: (0, _getFunctionName2.default)(path.node, path.parent),
+      name,
       klass: (0, _inferClassName.inferClassName)(path),
       location: path.node.loc,
-      parameterNames: getFunctionParameterNames(path),
-      identifier: path.node.id
+      parameterNames: (0, _helpers.getFunctionParameterNames)(path),
+      identifier: path.node.id,
+      // indicates the occurence of the function in a file
+      // e.g { name: foo, ... index: 4 } is the 4th foo function
+      // in the file
+      index: symbols.functions.filter(f => f.name === name).length
     });
   }
 
@@ -1438,7 +1464,7 @@ function extractSymbol(path, symbols) {
     });
   }
 
-  if (t.isIdentifier(path) && !t.isGenericTypeAnnotation(path.parent) && !t.isObjectProperty(path.parent) && !t.isArrayPattern(path.parent)) {
+  if (t.isIdentifier(path) && !t.isGenericTypeAnnotation(path.parent)) {
     let { start, end } = path.node.loc;
 
     // We want to include function params, but exclude the function name
@@ -1456,7 +1482,7 @@ function extractSymbol(path, symbols) {
 
     if (path.node.typeAnnotation) {
       const column = path.node.typeAnnotation.loc.start.column;
-      end = _extends({}, end, { column });
+      end = { ...end, column };
     }
 
     symbols.identifiers.push({
@@ -1516,6 +1542,7 @@ function extractSymbols(sourceId) {
 
   // comments are extracted separately from the AST
   symbols.comments = (0, _helpers.getComments)(ast);
+  symbols.identifiers = getUniqueIdentifiers(symbols.identifiers);
 
   return symbols;
 }
@@ -1987,10 +2014,6 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
-                                                                                                                                                                                                                                                                   * License, v. 2.0. If a copy of the MPL was not distributed with this
-                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
 var _get = __webpack_require__(67);
 
 var _get2 = _interopRequireDefault(_get);
@@ -2009,6 +2032,10 @@ var _getSymbols = __webpack_require__(1457);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
 function findSymbols(source) {
   const { functions, comments } = (0, _getSymbols.getSymbols)(source);
   return { functions, comments };
@@ -2021,7 +2048,7 @@ function findSymbols(source) {
  */
 
 function getLocation(func) {
-  const location = _extends({}, func.location);
+  const location = { ...func.location };
 
   // if the function has an identifier, start the block after it so the
   // identifier is included in the "scope" of its parent
@@ -2125,11 +2152,6 @@ exports.default = findOutOfScopeLocations;
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
-                                                                                                                                                                                                                                                                   * License, v. 2.0. If a copy of the MPL was not distributed with this
-                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
 exports.getNextStep = getNextStep;
 
 var _types = __webpack_require__(2268);
@@ -2157,7 +2179,9 @@ function getNextStep(sourceId, pausedPosition) {
   }
 
   return _getNextStep(currentStatement, sourceId, pausedPosition);
-}
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 function getSteppableExpression(sourceId, pausedPosition) {
   const closestPath = (0, _closest.getClosestPath)(sourceId, pausedPosition);
@@ -2176,9 +2200,10 @@ function getSteppableExpression(sourceId, pausedPosition) {
 function _getNextStep(statement, sourceId, position) {
   const nextStatement = statement.getSibling(1);
   if (nextStatement) {
-    return _extends({}, nextStatement.node.loc.start, {
+    return {
+      ...nextStatement.node.loc.start,
       sourceId: sourceId
-    });
+    };
   }
 
   return null;
@@ -23058,6 +23083,13 @@ function mapOriginalExpression(expression, mappings) {
       return;
     }
 
+    const ancestor = ancestors[ancestors.length - 1];
+    // Shorthand properties can have a key and value with `node.loc.start` value
+    // and we only want to replace the value.
+    if (t.isObjectProperty(ancestor.node) && ancestor.key !== "value") {
+      return;
+    }
+
     const replacement = replacements.get(locationKey(node.loc.start));
     if (replacement) {
       replaceNode(ancestors, t.cloneNode(replacement));
@@ -23110,6 +23142,7 @@ const getAllGeneratedLocations = dispatcher.task("getAllGeneratedLocations", {
   queue: true
 });
 const getOriginalLocation = dispatcher.task("getOriginalLocation");
+const getFileGeneratedRange = dispatcher.task("getFileGeneratedRange");
 const getLocationScopes = dispatcher.task("getLocationScopes");
 const getOriginalSourceText = dispatcher.task("getOriginalSourceText");
 const applySourceMap = dispatcher.task("applySourceMap");
@@ -23129,6 +23162,7 @@ module.exports = {
   getGeneratedLocation,
   getAllGeneratedLocations,
   getOriginalLocation,
+  getFileGeneratedRange,
   getLocationScopes,
   getOriginalSourceText,
   applySourceMap,
@@ -23213,7 +23247,8 @@ const contentMap = {
   vue: "text/vue",
   coffee: "text/coffeescript",
   elm: "text/elm",
-  cljs: "text/x-clojure"
+  cljc: "text/x-clojure",
+  cljs: "text/x-clojurescript"
 };
 
 /**

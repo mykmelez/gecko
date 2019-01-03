@@ -189,11 +189,19 @@ html|button {
   margin-right: 4px;
 }
 
-*|button::-moz-focus-inner {
+html|button::-moz-focus-inner,
+html|select::-moz-focus-inner,
+html|input[type="color"]::-moz-focus-inner {
   border: none;
 }
 
-*|button:-moz-focusring {
+*|button:-moz-focusring,
+html|select:-moz-focusring,
+html|input[type="color"]:-moz-focusring,
+xul|menulist:-moz-focusring,
+html|input[type="number"]:-moz-focusring::-moz-number-spin-up,
+html|input[type="number"]:-moz-focusring::-moz-number-spin-down {
+  outline: none;
   box-shadow: 0 0 0 1px var(--in-content-border-active) inset,
     0 0 0 1px var(--in-content-border-active),
     0 0 0 4px var(--in-content-border-active-shadow);
@@ -595,8 +603,7 @@ xul|*.radio-label-box {
 *|*#categories {
   -moz-appearance: none;
   background-color: initial; /* override the background-color set on all richlistboxes in common.inc.css */
-  padding-top: 70px;
-  margin: 0;
+  margin: 70px 0 0;
   border-width: 0;
   width: 240px;
 }
@@ -706,13 +713,30 @@ xul|*.radio-label-box {
 /* List boxes */
 
 html|select[size][multiple],
+xul|listheader,
 xul|richlistbox {
   -moz-appearance: none;
-  margin-inline-start: 0;
+  margin-left: 0;
+  margin-right: 0;
   background-color: var(--in-content-box-background);
   border: 1px solid var(--in-content-box-border-color);
   border-radius: 2px;
   color: var(--in-content-text-color);
+}
+
+xul|listheader {
+  border-bottom: none;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-bottom: 1px;
+  box-shadow: inset 0 -1px var(--in-content-border-color);
+}
+
+xul|listheader + xul|richlistbox {
+  margin-top: 0;
+  border-top: none;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 
 html|select[size][multiple] > html|option,
@@ -753,7 +777,6 @@ xul|richlistbox:-moz-focusring {
   border: 1px dotted var(--in-content-border-focus);
 }
 
-xul|listheader,
 xul|treecols {
   -moz-appearance: none;
   border: none;

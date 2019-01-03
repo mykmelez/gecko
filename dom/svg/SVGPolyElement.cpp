@@ -9,8 +9,10 @@
 #include "mozilla/gfx/2D.h"
 #include "SVGContentUtils.h"
 
-using namespace mozilla;
 using namespace mozilla::gfx;
+
+namespace mozilla {
+namespace dom {
 
 //----------------------------------------------------------------------
 // Implementation
@@ -47,7 +49,7 @@ SVGPolyElement::IsAttributeMapped(const nsAtom* name) const {
 }
 
 //----------------------------------------------------------------------
-// nsSVGElement methods
+// SVGElement methods
 
 /* virtual */ bool SVGPolyElement::HasValidDimensions() const {
   return !mPoints.GetAnimValue().IsEmpty();
@@ -128,3 +130,5 @@ bool SVGPolyElement::GetGeometryBounds(Rect* aBounds,
   }
   return true;
 }
+}  // namespace dom
+}  // namespace mozilla

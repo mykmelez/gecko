@@ -45,7 +45,6 @@ use std::os::raw::c_void;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use texture_cache::{TextureCache, TextureCacheHandle, Eviction};
-use tiling::SpecialRenderPasses;
 use util::drain_filter;
 
 const DEFAULT_TILE_SIZE: TileSize = 512;
@@ -1151,6 +1150,19 @@ impl ResourceCache {
                 // nonsensical blob image requests.
                 // Constant here definitely needs to be tweaked.
                 const MAX_TILES_PER_REQUEST: i32 = 64;
+                // For truly nonsensical requests, we might run into overflow
+                // when computing width * height. Even if we don't, the loop
+                // below to reduce the number of tiles is linear and can take
+                // a long time to complete. These preliminary conditions help
+                // get us there faster and avoid the overflow.
+                if tiles.size.width > MAX_TILES_PER_REQUEST {
+                    tiles.origin.x += (tiles.size.width - MAX_TILES_PER_REQUEST) / 2;
+                    tiles.size.width = MAX_TILES_PER_REQUEST;
+                }
+                if tiles.size.height > MAX_TILES_PER_REQUEST {
+                    tiles.origin.y += (tiles.size.height - MAX_TILES_PER_REQUEST) / 2;
+                    tiles.size.height = MAX_TILES_PER_REQUEST;
+                }
                 while tiles.size.width as i32 * tiles.size.height as i32 > MAX_TILES_PER_REQUEST {
                     // Remove tiles in the largest dimension.
                     if tiles.size.width > tiles.size.height {
@@ -1296,7 +1308,6 @@ impl ResourceCache {
         glyph_keys: &[GlyphKey],
         gpu_cache: &mut GpuCache,
         render_task_tree: &mut RenderTaskTree,
-        render_passes: &mut SpecialRenderPasses,
     ) {
         debug_assert_eq!(self.state, State::AddResources);
 
@@ -1309,7 +1320,6 @@ impl ResourceCache {
             gpu_cache,
             &mut self.cached_render_tasks,
             render_task_tree,
-            render_passes,
         );
     }
 

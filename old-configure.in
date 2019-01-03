@@ -45,7 +45,6 @@ _SUBDIR_CONFIG_ARGS="$ac_configure_args"
 
 dnl Set the version number of the libs included with mozilla
 dnl ========================================================
-MOZJPEG=62
 MOZPNG=10635
 NSPR_VERSION=4
 NSPR_MINVER=4.19
@@ -61,12 +60,11 @@ CAIRO_VERSION=1.10
 GTK2_VERSION=2.18.0
 GTK3_VERSION=3.4.0
 GDK_VERSION_MAX_ALLOWED=GDK_VERSION_3_4
-WINDRES_VERSION=2.14.90
 W32API_VERSION=3.14
 GCONF_VERSION=1.2.1
 STARTUP_NOTIFICATION_VERSION=0.8
 DBUS_VERSION=0.60
-SQLITE_VERSION=3.25.3
+SQLITE_VERSION=3.26.0
 
 dnl Set various checks
 dnl ========================================================
@@ -107,9 +105,6 @@ dnl ========================================================
 dnl Checks for compilers.
 dnl ========================================================
 
-dnl AR_FLAGS set here so HOST_AR_FLAGS can be set correctly (see bug 538269)
-AR_FLAGS='crs $@'
-
 if test "$COMPILE_ENVIRONMENT"; then
 
 if test "$target" != "$host"; then
@@ -124,19 +119,8 @@ else
     AC_PROG_CXX
     AC_PROG_RANLIB
     MOZ_PATH_PROGS(AS, $AS as, $CC)
-    AC_CHECK_PROGS(AR, ar, :)
     AC_CHECK_PROGS(STRIP, strip, :)
-    AC_CHECK_PROGS(WINDRES, windres, :)
     AC_CHECK_PROGS(OTOOL, otool, :)
-    if test -z "$HOST_RANLIB"; then
-        HOST_RANLIB="$RANLIB"
-    fi
-    if test -z "$HOST_AR"; then
-        HOST_AR="$AR"
-    fi
-    if test -z "$HOST_AR_FLAGS"; then
-        HOST_AR_FLAGS="$AR_FLAGS"
-    fi
 fi
 
 if test -n "$MOZ_WINCONSOLE"; then
@@ -285,26 +269,6 @@ case "$target" in
         if test "$res" != "yes"; then
             AC_MSG_ERROR([w32api version $W32API_VERSION or higher required.])
         fi
-        # Check windres version
-        AC_MSG_CHECKING([for windres version >= $WINDRES_VERSION])
-        _WINDRES_VERSION=`${WINDRES} --version 2>&1 | grep -i windres 2>/dev/null | $AWK '{ print $3 }'`
-        AC_MSG_RESULT([$_WINDRES_VERSION])
-        _WINDRES_MAJOR_VERSION=`echo $_WINDRES_VERSION | $AWK -F\. '{ print $1 }'`
-        _WINDRES_MINOR_VERSION=`echo $_WINDRES_VERSION | $AWK -F\. '{ print $2 }'`
-        _WINDRES_RELEASE_VERSION=`echo $_WINDRES_VERSION | $AWK -F\. '{ print $3 }'`
-        WINDRES_MAJOR_VERSION=`echo $WINDRES_VERSION | $AWK -F\. '{ print $1 }'`
-        WINDRES_MINOR_VERSION=`echo $WINDRES_VERSION | $AWK -F\. '{ print $2 }'`
-        WINDRES_RELEASE_VERSION=`echo $WINDRES_VERSION | $AWK -F\. '{ print $3 }'`
-        if test "$_WINDRES_MAJOR_VERSION" -lt "$WINDRES_MAJOR_VERSION" -o \
-                "$_WINDRES_MAJOR_VERSION" -eq "$WINDRES_MAJOR_VERSION" -a \
-                "$_WINDRES_MINOR_VERSION" -lt "$WINDRES_MINOR_VERSION" -o \
-                "$_WINDRES_MAJOR_VERSION" -eq "$WINDRES_MAJOR_VERSION" -a \
-                "$_WINDRES_MINOR_VERSION" -eq "$WINDRES_MINOR_VERSION" -a \
-                "$_WINDRES_RELEASE_VERSION" -lt "$WINDRES_RELEASE_VERSION"
-        then
-            AC_MSG_ERROR([windres version $WINDRES_VERSION or higher is required to build.])
-        fi
-
         # strsafe.h on mingw uses macros for function deprecation that pollutes namespace
         # causing problems with local implementations with the same name.
         AC_DEFINE(STRSAFE_NO_DEPRECATE)
@@ -353,7 +317,6 @@ fi # COMPILE_ENVIRONMENT
 dnl ========================================================
 dnl set the defaults first
 dnl ========================================================
-AR_EXTRACT='$(AR) x'
 MOZ_USER_DIR=".mozilla"
 
 MOZ_FIX_LINK_PATHS="-Wl,-rpath-link,${DIST}/bin -Wl,-rpath-link,${prefix}/lib"
@@ -587,10 +550,7 @@ dnl ========================================================
 case "$host" in
 *mingw*)
     if test -n "$_WIN32_MSVC"; then
-        HOST_AR=lib
-        HOST_AR_FLAGS='-NOLOGO -OUT:$@'
         HOST_CFLAGS="$HOST_CFLAGS -nologo"
-        HOST_RANLIB='echo ranlib'
     else
         HOST_CFLAGS="$HOST_CFLAGS -mwindows"
     fi
@@ -731,7 +691,6 @@ case "$target" in
 *-mingw*)
     DSO_CFLAGS=
     DSO_PIC_CFLAGS=
-    RC=rc.exe
     # certain versions of cygwin's makedepend barf on the
     # #include <string> vs -I./dist/include/string issue so don't use it
     if test -n "$GNU_CC" -o -n "$CLANG_CC"; then
@@ -741,7 +700,6 @@ case "$target" in
         CFLAGS="$CFLAGS -mms-bitfields"
         CXXFLAGS="$CXXFLAGS -mms-bitfields"
         DSO_LDOPTS='-shared'
-        RC='$(WINDRES)'
         # Use temp file for windres (bug 213281)
         RCFLAGS='-O coff --use-temp-file'
         # mingw doesn't require kernel32, user32, and advapi32 explicitly
@@ -768,17 +726,6 @@ case "$target" in
         fi
     else
         TARGET_COMPILER_ABI=msvc
-        case "$LINKER" in
-        *lld*)
-            AR='llvm-lib'
-            AR_FLAGS='-llvmlibthin -out:$@'
-            ;;
-        *)
-            AR='lib'
-            AR_FLAGS='-NOLOGO -OUT:$@'
-            ;;
-        esac
-        AR_EXTRACT=
         RANLIB='echo not_ranlib'
         STRIP='echo not_strip'
         PKG_SKIP_STRIP=1
@@ -1691,51 +1638,6 @@ if test -z "$MOZ_SYSTEM_NSS"; then
    esac
 fi
 
-if test -z "$SKIP_LIBRARY_CHECKS"; then
-dnl system JPEG support
-dnl ========================================================
-MOZ_ARG_WITH_STRING(system-jpeg,
-[  --with-system-jpeg[=PFX]
-                          Use system libjpeg [installed at prefix PFX]],
-    JPEG_DIR=$withval)
-
-_SAVE_CFLAGS=$CFLAGS
-_SAVE_LDFLAGS=$LDFLAGS
-_SAVE_LIBS=$LIBS
-if test -n "${JPEG_DIR}" -a "${JPEG_DIR}" != "yes"; then
-    CFLAGS="-I${JPEG_DIR}/include $CFLAGS"
-    LDFLAGS="-L${JPEG_DIR}/lib $LDFLAGS"
-fi
-if test -z "$JPEG_DIR" -o "$JPEG_DIR" = no; then
-    MOZ_SYSTEM_JPEG=
-else
-    AC_CHECK_LIB(jpeg, jpeg_destroy_compress, [MOZ_SYSTEM_JPEG=1 MOZ_JPEG_LIBS="-ljpeg"], MOZ_SYSTEM_JPEG=)
-fi
-
-if test "$MOZ_SYSTEM_JPEG" = 1; then
-    AC_TRY_COMPILE([ #include <stdio.h>
-                     #include <sys/types.h>
-                     #include <jpeglib.h> ],
-                   [ #if JPEG_LIB_VERSION < $MOZJPEG
-                     #error "Insufficient JPEG library version ($MOZJPEG required)."
-                     #endif
-                     #ifndef JCS_EXTENSIONS
-                     #error "libjpeg-turbo JCS_EXTENSIONS required"
-                     #endif
-                     ],
-                   MOZ_SYSTEM_JPEG=1,
-                   AC_MSG_ERROR([Insufficient JPEG library version for --with-system-jpeg]))
-fi
-CFLAGS=$_SAVE_CFLAGS
-LDFLAGS=$_SAVE_LDFLAGS
-LIBS=$_SAVE_LIBS
-
-if test -n "${JPEG_DIR}" -a -d "${JPEG_DIR}" -a "$MOZ_SYSTEM_JPEG" = 1; then
-    MOZ_JPEG_CFLAGS="-I${JPEG_DIR}/include"
-    MOZ_JPEG_LIBS="-L${JPEG_DIR}/lib ${MOZ_JPEG_LIBS}"
-fi
-fi # SKIP_LIBRARY_CHECKS
-
 dnl system ZLIB support
 dnl ========================================================
 MOZ_ZLIB_CHECK([1.2.3])
@@ -1800,18 +1702,10 @@ MOZ_ARG_HEADER(Application)
 ENABLE_SYSTEM_EXTENSION_DIRS=1
 MOZ_BRANDING_DIRECTORY=
 MOZ_OFFICIAL_BRANDING=
-MOZ_FEEDS=1
 MOZ_AUTH_EXTENSION=1
 if test "$MOZ_IOS"; then
    MOZ_AUTH_EXTENSION=
 fi
-VPX_USE_YASM=
-VPX_ASFLAGS=
-VPX_AS_CONVERSION=
-VPX_X86_ASM=
-VPX_ARM_ASM=
-LIBJPEG_TURBO_AS=
-LIBJPEG_TURBO_ASFLAGS=
 MOZ_PREF_EXTENSIONS=1
 MOZ_SPELLCHECK=1
 MOZ_TOOLKIT_SEARCH=1
@@ -2216,129 +2110,6 @@ if test -n "$MOZ_APPLEMEDIA"; then
 fi
 fi # COMPILE_ENVIRONMENT
 
-dnl system libvpx Support
-dnl ========================================================
-MOZ_ARG_WITH_BOOL(system-libvpx,
-[  --with-system-libvpx    Use system libvpx (located with pkgconfig)],
-    MOZ_SYSTEM_LIBVPX=1)
-
-MOZ_LIBVPX_CFLAGS=
-MOZ_LIBVPX_LIBS=
-
-_SAVE_CFLAGS=$CFLAGS
-_SAVE_LIBS=$LIBS
-if test -n "$MOZ_SYSTEM_LIBVPX"; then
-    dnl ============================
-    dnl === libvpx Version check ===
-    dnl ============================
-    dnl Check to see if we have a system libvpx package.
-    PKG_CHECK_MODULES(MOZ_LIBVPX, vpx >= 1.5.0)
-
-    CFLAGS="$CFLAGS $MOZ_LIBVPX_CFLAGS"
-    LIBS="$LIBS $MOZ_LIBVPX_LIBS"
-
-    MOZ_CHECK_HEADER([vpx/vpx_decoder.h], [],
-     [AC_MSG_ERROR([Couldn't find vpx/vpx_decoder.h which is required for build with system libvpx. Use --without-system-libvpx to build with in-tree libvpx.])])
-
-    AC_CHECK_LIB(vpx, vpx_codec_dec_init_ver, [],
-     [AC_MSG_ERROR([--with-system-libvpx requested but symbol vpx_codec_dec_init_ver not found])])
-fi
-CFLAGS=$_SAVE_CFLAGS
-LIBS=$_SAVE_LIBS
-
-AC_SUBST(MOZ_SYSTEM_LIBVPX)
-AC_SUBST_LIST(MOZ_LIBVPX_CFLAGS)
-AC_SUBST_LIST(MOZ_LIBVPX_LIBS)
-
-if test -z "$MOZ_SYSTEM_LIBVPX"; then
-
-    dnl Detect if we can use an assembler to compile optimized assembly for libvpx.
-    dnl We currently require yasm on all x86 platforms and require yasm 1.1.0 on Win32.
-    dnl We currently require gcc on all arm platforms.
-
-    dnl See if we have assembly on this platform.
-    case "$OS_ARCH:$CPU_ARCH" in
-    Darwin:x86)
-      VPX_USE_YASM=1
-      VPX_X86_ASM=1
-    ;;
-    Darwin:x86_64)
-      VPX_USE_YASM=1
-      VPX_X86_ASM=1
-    ;;
-    WINNT:x86_64)
-      VPX_USE_YASM=1
-      VPX_X86_ASM=1
-    ;;
-    WINNT:x86)
-      dnl Check for yasm 1.1 or greater.
-      if test -n "$COMPILE_ENVIRONMENT" -a -z "$YASM"; then
-        AC_MSG_ERROR([yasm 1.1 or greater is required to build libvpx on Win32, but it appears not to be installed.  Install it (included in MozillaBuild 1.5.1 and newer) or configure with --disable-webm (which disables the WebM video format). See https://developer.mozilla.org/en/YASM for more details.])
-      elif test -n "$COMPILE_ENVIRONMENT" -a "$_YASM_MAJOR_VERSION" -lt "1" -o \( "$_YASM_MAJOR_VERSION" -eq "1" -a "$_YASM_MINOR_VERSION" -lt "1" \) ; then
-        AC_MSG_ERROR([yasm 1.1 or greater is required to build libvpx on Win32, but you appear to have version $_YASM_MAJOR_VERSION.$_YASM_MINOR_VERSION.  Upgrade to the newest version (included in MozillaBuild 1.5.1 and newer) or configure with --disable-webm (which disables the WebM video format). See https://developer.mozilla.org/en/YASM for more details.])
-      else
-        VPX_USE_YASM=1
-        VPX_X86_ASM=1
-        dnl The encoder needs obj_int_extract to get asm offsets.
-      fi # COMPILE_ENVIRONMENT and others
-    ;;
-    *:arm*)
-      if test -n "$GNU_AS" ; then
-        dnl These flags are a lie; they're just used to enable the requisite
-        dnl opcodes; actual arch detection is done at runtime.
-        VPX_ASFLAGS="-march=armv7-a -mfpu=neon"
-        VPX_AS_CONVERSION='$(PERL) $(topsrcdir)/media/libvpx/libvpx/build/make/ads2gas.pl'
-        VPX_ARM_ASM=1
-        dnl Building with -mfpu=neon requires either the "softfp" or the
-        dnl "hardfp" ABI. Depending on the compiler's default target, and the
-        dnl CFLAGS, the default ABI might be neither, in which case it is the
-        dnl "softfloat" ABI.
-        dnl The "softfloat" ABI is binary-compatible with the "softfp" ABI, so
-        dnl we can safely mix code built with both ABIs. So, if we detect
-        dnl that compiling uses the "softfloat" ABI, force the use of the
-        dnl "softfp" ABI instead.
-        dnl Confusingly, the __SOFTFP__ preprocessor variable indicates the
-        dnl "softfloat" ABI, not the "softfp" ABI.
-        dnl Note: VPX_ASFLAGS is also used in CFLAGS.
-        AC_TRY_COMPILE([],
-          [#ifndef __SOFTFP__
-           #error "compiler target supports -mfpu=neon, so we don't have to add extra flags"
-           #endif],
-           VPX_ASFLAGS="$VPX_ASFLAGS -mfloat-abi=softfp"
-           )
-      fi
-    ;;
-    *:x86)
-      if $CC -E -dM -</dev/null | grep -q __ELF__; then
-        VPX_USE_YASM=1
-        VPX_X86_ASM=1
-      fi
-    ;;
-    *:x86_64)
-      if $CC -E -dM -</dev/null | grep -q __ELF__; then
-        VPX_USE_YASM=1
-        VPX_X86_ASM=1
-      fi
-    ;;
-    esac
-
-    if test -n "$COMPILE_ENVIRONMENT" -a -n "$VPX_USE_YASM" -a -z "$YASM"; then
-      AC_MSG_ERROR([yasm is a required build tool for this architecture when webm is enabled. You may either install yasm or --disable-webm (which disables the WebM video format). See https://developer.mozilla.org/en/YASM for more details.])
-    fi # COMPILE_ENVIRONMENT and others
-
-    if test -n "$VPX_USE_YASM" && test "$OS_ARCH:$CPU_ARCH" != "WINNT:x86_64"; then
-      VPX_ASFLAGS="-DPIC"
-    fi
-
-    if test -n "$VPX_X86_ASM"; then
-      AC_DEFINE(VPX_X86_ASM)
-    elif test -n "$VPX_ARM_ASM"; then
-      AC_DEFINE(VPX_ARM_ASM)
-    else
-      AC_MSG_WARN([No assembler or assembly support for libvpx. Using unoptimized C routines.])
-    fi
-fi
-
 dnl ========================================================
 dnl = Handle dependent MEDIA defines
 dnl ========================================================
@@ -2565,96 +2336,6 @@ if test -n "$MOZ_CRASHREPORTER"; then
       AC_DEFINE(MOZ_CRASHREPORTER_INJECTOR)
     fi
   fi
-fi
-
-dnl ========================================================
-dnl = libjpeg-turbo configuration
-dnl ========================================================
-MOZ_LIBJPEG_TURBO=
-LIBJPEG_TURBO_USE_YASM=
-if test -z "$MOZ_SYSTEM_JPEG"; then
-    MOZ_LIBJPEG_TURBO=1
-fi
-
-MOZ_ARG_DISABLE_BOOL(libjpeg_turbo,
-[ --disable-libjpeg-turbo  Disable optimized jpeg decoding routines],
-    MOZ_LIBJPEG_TURBO=,
-    MOZ_LIBJPEG_TURBO=1)
-
-if test "$MOZ_SYSTEM_JPEG" = 1 -a "$MOZ_LIBJPEG_TURBO" = 1; then
-    AC_MSG_ERROR([cannot use --with-system-jpeg with --enable-libjpeg-turbo.])
-fi
-
-dnl Detect if we can use yasm to compile libjpeg-turbo's optimized assembly
-dnl files.
-
-if test -n "$MOZ_LIBJPEG_TURBO" -a -n "$COMPILE_ENVIRONMENT"; then
-
-  dnl Do we support libjpeg-turbo on this platform?
-  case "$OS_ARCH:$CPU_ARCH" in
-  Darwin:x86)
-    LIBJPEG_TURBO_ASFLAGS="-DPIC -DMACHO"
-  ;;
-  Darwin:x86_64)
-    LIBJPEG_TURBO_ASFLAGS="-D__x86_64__ -DPIC -DMACHO"
-  ;;
-  Darwin:arm*)
-  ;;
-  WINNT:x86)
-    LIBJPEG_TURBO_ASFLAGS="-DPIC -DWIN32"
-  ;;
-  WINNT:x86_64)
-    LIBJPEG_TURBO_ASFLAGS="-D__x86_64__ -DPIC -DWIN64 -DMSVC"
-  ;;
-  WINNT:*)
-  ;;
-  *:arm)
-    LIBJPEG_TURBO_ASFLAGS="-march=armv7-a -mfpu=neon"
-  ;;
-  *:aarch64)
-    LIBJPEG_TURBO_ASFLAGS="-march=armv8-a"
-  ;;
-  *:mips32)
-    LIBJPEG_TURBO_ASFLAGS="-mdspr2"
-  ;;
-  *:x86)
-    if $CC -E -dM -</dev/null | grep -q __ELF__; then
-      LIBJPEG_TURBO_ASFLAGS="-DPIC -DELF"
-    fi
-  ;;
-  *:x86_64)
-    if $CC -E -dM -</dev/null | grep -q __ELF__; then
-      LIBJPEG_TURBO_ASFLAGS="-D__x86_64__ -DPIC -DELF"
-    fi
-  ;;
-  esac
-fi
-
-if test -n "$LIBJPEG_TURBO_ASFLAGS"; then
-  case "$CPU_ARCH" in
-dnl If we're on an x86 or x64 system which supports libjpeg-turbo's asm routines
-dnl and --disable-libjpeg-turbo wasn't passed, check for Yasm, and error out if
-dnl it doesn't exist or we have too old of a version.
-  x86_64|x86)
-    LIBJPEG_TURBO_USE_YASM=1
-
-    if test -z "$YASM" ; then
-        AC_MSG_ERROR([Yasm is required to build with libjpeg-turbo's optimized JPEG decoding routines, but you do not appear to have Yasm installed.  Either install it or configure with --disable-libjpeg-turbo to use the pure C JPEG decoder.  See https://developer.mozilla.org/en/YASM for more details.])
-    fi
-
-    dnl Check that we have the right yasm version.  We require 1.0.1 or newer
-    dnl on Linux and 1.1 or newer everywhere else.
-    if test "$OS_ARCH" = "Linux" ; then
-        if test "$_YASM_MAJOR_VERSION" -lt "1" -o \( "$_YASM_MAJOR_VERSION" -eq "1" -a "$_YASM_MINOR_VERSION" -eq "0" -a "$_YASM_RELEASE" -lt "1" \) ; then
-            AC_MSG_ERROR([Yasm 1.0.1 or greater is required to build with libjpeg-turbo's optimized JPEG decoding routines, but you appear to have version $_YASM_MAJOR_VERSION.$_YASM_MINOR_VERSION.$_YASM_RELEASE.  Upgrade to the newest version or configure with --disable-libjpeg-turbo to use the pure C JPEG decoder.  See https://developer.mozilla.org/en/YASM for more details.])
-        fi
-    else
-        if test "$_YASM_MAJOR_VERSION" -lt "1" -o \( "$_YASM_MAJOR_VERSION" -eq "1" -a "$_YASM_MINOR_VERSION" -lt "1" \) ; then
-            AC_MSG_ERROR([Yasm 1.1 or greater is required to build with libjpeg-turbo's optimized JPEG decoding routines, but you appear to have version $_YASM_MAJOR_VERSION.$_YASM_MINOR_VERSION.  Upgrade to the newest version or configure with --disable-libjpeg-turbo to use the pure C JPEG decoder.  See https://developer.mozilla.org/en/YASM for more details.])
-        fi
-    fi
-  ;;
-  esac
 fi
 
 dnl ========================================================
@@ -2969,21 +2650,6 @@ dnl = Module specific options
 dnl =
 dnl ========================================================
 MOZ_ARG_HEADER(Individual module options)
-
-dnl ========================================================
-dnl = Disable feed handling components
-dnl ========================================================
-MOZ_ARG_DISABLE_BOOL(feeds,
-[  --disable-feeds         Disable feed handling and processing components],
-    MOZ_FEEDS=,
-    MOZ_FEEDS=1 )
-if test -n "$MOZ_FEEDS"; then
-    AC_DEFINE(MOZ_FEEDS)
-else
-    if test "$MOZ_BUILD_APP" = "browser"; then
-        AC_MSG_ERROR([Cannot build Firefox with --disable-feeds.])
-    fi
-fi
 
 dnl ========================================================
 dnl Check for sqlite
@@ -3622,18 +3288,12 @@ case "$MOZ_WIDGET_TOOLKIT" in
     QUARTZ_FONT_FEATURE="#define CAIRO_HAS_QUARTZ_FONT 1"
     ;;
   windows)
-    WIN32_D2D_SURFACE_FEATURE="#define CAIRO_HAS_D2D_SURFACE 1"
     WIN32_DWRITE_FONT_FEATURE="#define CAIRO_HAS_DWRITE_FONT 1"
     WIN32_FONT_FEATURE="#define CAIRO_HAS_WIN32_FONT 1"
     WIN32_SURFACE_FEATURE="#define CAIRO_HAS_WIN32_SURFACE 1"
-    MOZ_ENABLE_D2D_SURFACE=1
 
     if test "$COMPILE_ENVIRONMENT"; then
-
-      dnl D3D10 Layers depend on D2D Surfaces.
-      if test -n "$WIN32_D2D_SURFACE_FEATURE"; then
-        MOZ_CHECK_HEADER(d3d10.h, MOZ_ENABLE_D3D10_LAYER=1)
-      fi
+      MOZ_CHECK_HEADER(d3d10.h, MOZ_ENABLE_D3D10_LAYER=1)
     fi
     ;;
 esac
@@ -3641,7 +3301,6 @@ if test "$USE_FC_FREETYPE"; then
     FC_FONT_FEATURE="#define CAIRO_HAS_FC_FONT 1"
 fi
 AC_SUBST(MOZ_ENABLE_CAIRO_FT)
-AC_SUBST(MOZ_ENABLE_D2D_SURFACE)
 AC_SUBST(MOZ_ENABLE_D3D10_LAYER)
 
 AC_SUBST(PS_SURFACE_FEATURE)
@@ -3657,7 +3316,6 @@ AC_SUBST(FT_FONT_FEATURE)
 AC_SUBST(FC_FONT_FEATURE)
 AC_SUBST(WIN32_FONT_FEATURE)
 AC_SUBST(WIN32_DWRITE_FONT_FEATURE)
-AC_SUBST(WIN32_D2D_SURFACE_FEATURE)
 AC_SUBST(QUARTZ_FONT_FEATURE)
 AC_SUBST(PNG_FUNCTIONS_FEATURE)
 AC_SUBST(QT_SURFACE_FEATURE)
@@ -3763,14 +3421,9 @@ dnl = Maintainer debug option (no --enable equivalent)
 dnl =
 dnl ========================================================
 
-AC_SUBST(AR)
-AC_SUBST(AR_FLAGS)
-AC_SUBST(AR_EXTRACT)
 AC_SUBST(NM)
 AC_SUBST_LIST(ASFLAGS)
-AC_SUBST(RC)
 AC_SUBST(RCFLAGS)
-AC_SUBST(WINDRES)
 AC_SUBST(IMPLIB)
 AC_SUBST(FILTER)
 AC_SUBST(MOZ_AUTH_EXTENSION)
@@ -3780,7 +3433,6 @@ AC_SUBST(WARNINGS_AS_ERRORS)
 AC_SUBST_LIST(WARNINGS_CFLAGS)
 AC_SUBST_SET(MOZ_EXTENSIONS)
 AC_SUBST(MOZ_TOOLKIT_SEARCH)
-AC_SUBST(MOZ_FEEDS)
 
 AC_SUBST(MOZ_UNIVERSALCHARDET)
 AC_SUBST(MOZ_SPELLCHECK)
@@ -4067,11 +3719,8 @@ HOST_CXXFLAGS=`echo \
     $_COMPILATION_HOST_CXXFLAGS \
     $HOST_CXXFLAGS`
 
-AC_SUBST(MOZ_SYSTEM_JPEG)
 AC_SUBST(MOZ_SYSTEM_PNG)
 
-AC_SUBST_LIST(MOZ_JPEG_CFLAGS)
-AC_SUBST_LIST(MOZ_JPEG_LIBS)
 AC_SUBST_LIST(MOZ_PNG_CFLAGS)
 AC_SUBST_LIST(MOZ_PNG_LIBS)
 
@@ -4114,9 +3763,6 @@ AC_SUBST_LIST(HOST_CPPFLAGS)
 AC_SUBST_LIST(HOST_CXXFLAGS)
 AC_SUBST(HOST_LDFLAGS)
 AC_SUBST_LIST(HOST_OPTIMIZE_FLAGS)
-AC_SUBST(HOST_AR)
-AC_SUBST(HOST_AR_FLAGS)
-AC_SUBST(HOST_RANLIB)
 AC_SUBST(HOST_BIN_SUFFIX)
 
 AC_SUBST(TARGET_XPCOM_ABI)
@@ -4138,13 +3784,6 @@ AC_SUBST(WIN32_GUI_EXE_LDFLAGS)
 AC_SUBST(MOZ_FFVPX)
 AC_SUBST(MOZ_FFVPX_FLACONLY)
 AC_SUBST_LIST(FFVPX_ASFLAGS)
-AC_SUBST(VPX_USE_YASM)
-AC_SUBST_LIST(VPX_ASFLAGS)
-AC_SUBST(VPX_AS_CONVERSION)
-AC_SUBST(VPX_X86_ASM)
-AC_SUBST(VPX_ARM_ASM)
-AC_SUBST(LIBJPEG_TURBO_USE_YASM)
-AC_SUBST_LIST(LIBJPEG_TURBO_ASFLAGS)
 AC_SUBST(MOZ_LIBAV_FFT)
 AC_SUBST_LIST(LIBAV_FFT_ASFLAGS)
 AC_SUBST(MOZ_DEVTOOLS)
@@ -4264,7 +3903,6 @@ if test -z "$direct_nspr_config"; then
     HOST_CFLAGS="$_SUBDIR_HOST_CFLAGS"
     HOST_CXXFLAGS="$_SUBDIR_HOST_CXXFLAGS"
     HOST_LDFLAGS="$_SUBDIR_HOST_LDFLAGS"
-    RC=
 fi
 
 unset MAKEFILES
@@ -4298,7 +3936,6 @@ HOST_CC="$_SUBDIR_HOST_CC"
 HOST_CFLAGS="$_SUBDIR_HOST_CFLAGS"
 HOST_CXXFLAGS="$_SUBDIR_HOST_CXXFLAGS"
 HOST_LDFLAGS="$_SUBDIR_HOST_LDFLAGS"
-RC=
 
 # Run the SpiderMonkey 'configure' script.
 dist=$MOZ_BUILD_ROOT/dist
@@ -4335,12 +3972,10 @@ unset MOZ_BUILD_APP
 export DIST
 export MOZ_LINKER
 export ZLIB_IN_MOZGLUE
-export AR
 export RANLIB
 export CPP
 export CC
 export CXX
-export ARFLAGS
 export CPPFLAGS
 export CFLAGS
 export CXXFLAGS

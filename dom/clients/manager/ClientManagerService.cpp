@@ -253,7 +253,6 @@ void ClientManagerService::RemoveManager(ClientManagerParent* aManager) {
 
 RefPtr<ClientOpPromise> ClientManagerService::Navigate(
     const ClientNavigateArgs& aArgs) {
-
   ClientSourceParent* source =
       FindSource(aArgs.target().id(), aArgs.target().principalInfo());
   if (!source) {
@@ -578,6 +577,16 @@ class OpenWindowRunnable final : public Runnable {
 
     ClientOpenWindowOpParent* actor =
         new ClientOpenWindowOpParent(mArgs, mPromise);
+
+    // Normally, we call TransmitPermissionsForPrincipal for the first http
+    // load, but in this case, ClientOpenWindowOpChild will cause the initial
+    // about:blank load in the child to have this principal. That causes us to
+    // assert because the child process doesn't know that it's loading this
+    // principal.
+    nsCOMPtr<nsIPrincipal> principal =
+        PrincipalInfoToPrincipal(mArgs.principalInfo());
+    nsresult rv = targetProcess->TransmitPermissionsForPrincipal(principal);
+    Unused << NS_WARN_IF(NS_FAILED(rv));
 
     // If this fails the actor will be automatically destroyed which will
     // reject the promise.

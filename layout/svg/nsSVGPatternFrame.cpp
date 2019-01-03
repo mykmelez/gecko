@@ -23,7 +23,7 @@
 #include "mozilla/dom/SVGPatternElement.h"
 #include "mozilla/dom/SVGUnitTypesBinding.h"
 #include "nsSVGUtils.h"
-#include "nsSVGAnimatedTransformList.h"
+#include "SVGAnimatedTransformList.h"
 #include "SVGContentUtils.h"
 
 using namespace mozilla;
@@ -359,7 +359,7 @@ already_AddRefed<SourceSurface> nsSVGPatternFrame::PaintPattern(
       }
       gfxMatrix tm = *(patternWithChildren->mCTM);
       if (kid->GetContent()->IsSVGElement()) {
-        tm = static_cast<nsSVGElement *>(kid->GetContent())
+        tm = static_cast<SVGElement *>(kid->GetContent())
                  ->PrependLocalTransformsTo(tm, eUserSpaceToParent);
       }
 
@@ -410,7 +410,7 @@ nsSVGPatternFrame *nsSVGPatternFrame::GetPatternWithChildren() {
 
 uint16_t nsSVGPatternFrame::GetEnumValue(uint32_t aIndex,
                                          nsIContent *aDefault) {
-  nsSVGEnum &thisEnum =
+  SVGEnum &thisEnum =
       static_cast<SVGPatternElement *>(GetContent())->mEnumAttributes[aIndex];
 
   if (thisEnum.IsExplicitlySet()) {
@@ -436,9 +436,9 @@ uint16_t nsSVGPatternFrame::GetEnumValue(uint32_t aIndex,
                     .GetAnimValue();
 }
 
-nsSVGAnimatedTransformList *nsSVGPatternFrame::GetPatternTransformList(
+SVGAnimatedTransformList *nsSVGPatternFrame::GetPatternTransformList(
     nsIContent *aDefault) {
-  nsSVGAnimatedTransformList *thisTransformList =
+  SVGAnimatedTransformList *thisTransformList =
       static_cast<SVGPatternElement *>(GetContent())
           ->GetAnimatedTransformList();
 
@@ -462,7 +462,7 @@ nsSVGAnimatedTransformList *nsSVGPatternFrame::GetPatternTransformList(
 }
 
 gfxMatrix nsSVGPatternFrame::GetPatternTransform() {
-  nsSVGAnimatedTransformList *animTransformList =
+  SVGAnimatedTransformList *animTransformList =
       GetPatternTransformList(GetContent());
   if (!animTransformList) {
     return gfxMatrix();
@@ -626,7 +626,7 @@ gfxMatrix nsSVGPatternFrame::ConstructCTM(const nsSVGViewBox &aViewBox,
     scaleY = callerBBox.Height();
   } else {
     if (targetContent->IsSVGElement()) {
-      ctx = static_cast<nsSVGElement *>(targetContent)->GetCtx();
+      ctx = static_cast<SVGElement *>(targetContent)->GetCtx();
     }
     scaleX = scaleY = MaxExpansion(callerCTM);
   }

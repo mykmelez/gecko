@@ -51,7 +51,7 @@
 #include "nsIServiceManager.h"
 #include "nsError.h"
 #include "nsIEditor.h"
-#include "nsDocument.h"
+#include "nsIDocument.h"
 #include "nsAttrValueOrString.h"
 #include "nsDateTimeControlFrame.h"
 
@@ -135,10 +135,10 @@ namespace dom {
 #define NS_PRE_HANDLE_BLUR_EVENT (1 << 13)
 #define NS_PRE_HANDLE_INPUT_EVENT (1 << 14)
 #define NS_IN_SUBMIT_CLICK (1 << 15)
-#define NS_CONTROL_TYPE(bits)                                             \
-  ((bits) & ~(NS_OUTER_ACTIVATE_EVENT | NS_ORIGINAL_CHECKED_VALUE |       \
-              NS_NO_CONTENT_DISPATCH |  NS_ORIGINAL_INDETERMINATE_VALUE | \
-              NS_PRE_HANDLE_BLUR_EVENT | NS_PRE_HANDLE_INPUT_EVENT |      \
+#define NS_CONTROL_TYPE(bits)                                            \
+  ((bits) & ~(NS_OUTER_ACTIVATE_EVENT | NS_ORIGINAL_CHECKED_VALUE |      \
+              NS_NO_CONTENT_DISPATCH | NS_ORIGINAL_INDETERMINATE_VALUE | \
+              NS_PRE_HANDLE_BLUR_EVENT | NS_PRE_HANDLE_INPUT_EVENT |     \
               NS_IN_SUBMIT_CLICK))
 
 // whether textfields should be selected once focused:
@@ -675,7 +675,6 @@ nsresult HTMLInputElement::InitColorPicker() {
   }
 
   if (IsPopupBlocked()) {
-    win->FirePopupBlockedEvent(doc, nullptr, EmptyString(), EmptyString());
     return NS_OK;
   }
 
@@ -721,7 +720,6 @@ nsresult HTMLInputElement::InitFilePicker(FilePickerType aType) {
   }
 
   if (IsPopupBlocked()) {
-    win->FirePopupBlockedEvent(doc, nullptr, EmptyString(), EmptyString());
     return NS_OK;
   }
 
@@ -969,6 +967,7 @@ HTMLInputElement::HTMLInputElement(
       mPickerRunning(false),
       mSelectionCached(true),
       mIsPreviewEnabled(false),
+      mHasBeenTypePassword(false),
       mHasPatternAttribute(false) {
   // If size is above 512, mozjemalloc allocates 1kB, see
   // memory/build/mozjemalloc.cpp
@@ -4387,6 +4386,9 @@ void HTMLInputElement::HandleTypeChange(uint8_t aNewType, bool aNotify) {
   uint8_t oldType = mType;
   MOZ_ASSERT(oldType != aNewType);
 
+  mHasBeenTypePassword =
+      mHasBeenTypePassword || aNewType == NS_FORM_INPUT_PASSWORD;
+
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
   if (fm) {
     // Input element can represent very different kinds of UIs, and we may
@@ -5822,11 +5824,11 @@ HTMLInputElement::SaveState() {
     case VALUE_MODE_VALUE:
     case VALUE_MODE_DEFAULT:
       // VALUE_MODE_DEFAULT shouldn't have their value saved except 'hidden',
-      // mType shouldn't be NS_FORM_INPUT_PASSWORD and value should have
-      // changed.
+      // mType should have never been NS_FORM_INPUT_PASSWORD and value should
+      // have changed.
       if ((GetValueMode() == VALUE_MODE_DEFAULT &&
            mType != NS_FORM_INPUT_HIDDEN) ||
-          mType == NS_FORM_INPUT_PASSWORD || !mValueChanged) {
+          mHasBeenTypePassword || !mValueChanged) {
         break;
       }
 

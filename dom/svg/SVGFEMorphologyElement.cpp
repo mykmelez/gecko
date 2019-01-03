@@ -8,7 +8,7 @@
 #include "mozilla/dom/SVGFEMorphologyElementBinding.h"
 #include "nsSVGFilterInstance.h"
 
-NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(FEMorphology)
+NS_IMPL_NS_NEW_SVG_ELEMENT(FEMorphology)
 
 using namespace mozilla::gfx;
 
@@ -20,18 +20,18 @@ JSObject* SVGFEMorphologyElement::WrapNode(JSContext* aCx,
   return SVGFEMorphologyElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-nsSVGElement::NumberPairInfo SVGFEMorphologyElement::sNumberPairInfo[1] = {
+SVGElement::NumberPairInfo SVGFEMorphologyElement::sNumberPairInfo[1] = {
     {nsGkAtoms::radius, 0, 0}};
 
-nsSVGEnumMapping SVGFEMorphologyElement::sOperatorMap[] = {
+SVGEnumMapping SVGFEMorphologyElement::sOperatorMap[] = {
     {nsGkAtoms::erode, SVG_OPERATOR_ERODE},
     {nsGkAtoms::dilate, SVG_OPERATOR_DILATE},
     {nullptr, 0}};
 
-nsSVGElement::EnumInfo SVGFEMorphologyElement::sEnumInfo[1] = {
+SVGElement::EnumInfo SVGFEMorphologyElement::sEnumInfo[1] = {
     {nsGkAtoms::_operator, sOperatorMap, SVG_OPERATOR_ERODE}};
 
-nsSVGElement::StringInfo SVGFEMorphologyElement::sStringInfo[2] = {
+SVGElement::StringInfo SVGFEMorphologyElement::sStringInfo[2] = {
     {nsGkAtoms::result, kNameSpaceID_None, true},
     {nsGkAtoms::in, kNameSpaceID_None, true}};
 
@@ -66,8 +66,8 @@ void SVGFEMorphologyElement::SetRadius(float rx, float ry) {
 }
 
 void SVGFEMorphologyElement::GetSourceImageNames(
-    nsTArray<nsSVGStringInfo>& aSources) {
-  aSources.AppendElement(nsSVGStringInfo(&mStringAttributes[IN1], this));
+    nsTArray<SVGStringInfo>& aSources) {
+  aSources.AppendElement(SVGStringInfo(&mStringAttributes[IN1], this));
 }
 
 #define MORPHOLOGY_EPSILON 0.0001
@@ -110,19 +110,19 @@ bool SVGFEMorphologyElement::AttributeAffectsRendering(
 }
 
 //----------------------------------------------------------------------
-// nsSVGElement methods
+// SVGElement methods
 
-nsSVGElement::NumberPairAttributesInfo
+SVGElement::NumberPairAttributesInfo
 SVGFEMorphologyElement::GetNumberPairInfo() {
   return NumberPairAttributesInfo(mNumberPairAttributes, sNumberPairInfo,
                                   ArrayLength(sNumberPairInfo));
 }
 
-nsSVGElement::EnumAttributesInfo SVGFEMorphologyElement::GetEnumInfo() {
+SVGElement::EnumAttributesInfo SVGFEMorphologyElement::GetEnumInfo() {
   return EnumAttributesInfo(mEnumAttributes, sEnumInfo, ArrayLength(sEnumInfo));
 }
 
-nsSVGElement::StringAttributesInfo SVGFEMorphologyElement::GetStringInfo() {
+SVGElement::StringAttributesInfo SVGFEMorphologyElement::GetStringInfo() {
   return StringAttributesInfo(mStringAttributes, sStringInfo,
                               ArrayLength(sStringInfo));
 }

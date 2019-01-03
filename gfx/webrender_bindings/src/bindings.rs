@@ -543,6 +543,7 @@ extern "C" {
     fn wr_notifier_external_event(window_id: WrWindowId,
                                   raw_event: usize);
     fn wr_schedule_render(window_id: WrWindowId);
+    fn wr_finished_scene_build(window_id: WrWindowId, pipeline_info: WrPipelineInfo);
 
     fn wr_transaction_notification_notified(handler: usize, when: Checkpoint);
 }
@@ -683,11 +684,11 @@ pub struct WrPipelineEpoch {
     epoch: WrEpoch,
 }
 
-impl From<(WrPipelineId, WrEpoch)> for WrPipelineEpoch {
-    fn from(tuple: (WrPipelineId, WrEpoch)) -> WrPipelineEpoch {
+impl<'a> From<(&'a WrPipelineId, &'a WrEpoch)> for WrPipelineEpoch {
+    fn from(tuple: (&WrPipelineId, &WrEpoch)) -> WrPipelineEpoch {
         WrPipelineEpoch {
-            pipeline_id: tuple.0,
-            epoch: tuple.1
+            pipeline_id: *tuple.0,
+            epoch: *tuple.1
         }
     }
 }
@@ -709,10 +710,10 @@ pub struct WrPipelineInfo {
 }
 
 impl WrPipelineInfo {
-    fn new(info: PipelineInfo) -> Self {
+    fn new(info: &PipelineInfo) -> Self {
         WrPipelineInfo {
-            epochs: FfiVec::from_vec(info.epochs.into_iter().map(WrPipelineEpoch::from).collect()),
-            removed_pipelines: FfiVec::from_vec(info.removed_pipelines),
+            epochs: FfiVec::from_vec(info.epochs.iter().map(WrPipelineEpoch::from).collect()),
+            removed_pipelines: FfiVec::from_vec(info.removed_pipelines.clone()),
         }
     }
 }
@@ -720,7 +721,7 @@ impl WrPipelineInfo {
 #[no_mangle]
 pub unsafe extern "C" fn wr_renderer_flush_pipeline_info(renderer: &mut Renderer) -> WrPipelineInfo {
     let info = renderer.flush_pipeline_info();
-    WrPipelineInfo::new(info)
+    WrPipelineInfo::new(&info)
 }
 
 /// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
@@ -783,16 +784,17 @@ impl SceneBuilderHooks for APZCallbacks {
     }
 
     fn post_scene_swap(&self, info: PipelineInfo, sceneswap_time: u64) {
-        let info = WrPipelineInfo::new(info);
         unsafe {
+            let info = WrPipelineInfo::new(&info);
             record_telemetry_time(TelemetryProbe::SceneSwapTime, sceneswap_time);
             apz_post_scene_swap(self.window_id, info);
         }
+        let info = WrPipelineInfo::new(&info);
 
         // After a scene swap we should schedule a render for the next vsync,
         // otherwise there's no guarantee that the new scene will get rendered
         // anytime soon
-        unsafe { wr_schedule_render(self.window_id) }
+        unsafe { wr_finished_scene_build(self.window_id, info) }
         unsafe { gecko_profiler_end_marker(b"SceneBuilding\0".as_ptr() as *const c_char); }
     }
 
@@ -994,6 +996,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
                                 shaders: Option<&mut WrShaders>,
                                 thread_pool: *mut WrThreadPool,
                                 size_of_op: VoidPtrToSizeFn,
+                                enclosing_size_of_op: VoidPtrToSizeFn,
                                 out_handle: &mut *mut DocumentHandle,
                                 out_renderer: &mut *mut Renderer,
                                 out_max_texture_size: *mut i32)
@@ -1049,6 +1052,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         workers: Some(workers.clone()),
         thread_listener: Some(Box::new(GeckoProfilerThreadListener::new())),
         size_of_op: Some(size_of_op),
+        enclosing_size_of_op: Some(enclosing_size_of_op),
         cached_programs,
         resource_override_path: unsafe {
             let override_charptr = gfx_wr_resource_path_override();
@@ -1650,6 +1654,10 @@ pub extern "C" fn wr_api_capture(
         Ok(mut file) => {
             let revision = include_bytes!("../revision.txt");
             file.write(revision).unwrap();
+            // The Gecko HG revision is available at compile time
+            if let Some(moz_revision) = option_env!("GECKO_HEAD_REV") {
+                writeln!(file, "mozilla-central {}", moz_revision).unwrap();
+            }
         }
         Err(e) => {
             warn!("Unable to create path '{:?}' for capture: {:?}", path, e);
@@ -1850,7 +1858,7 @@ pub extern "C" fn wr_dp_clear_save(state: &mut WrState) {
 
 #[no_mangle]
 pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
-                                              bounds: LayoutRect,
+                                              mut bounds: LayoutRect,
                                               clip_node_id: *const WrClipId,
                                               animation: *const WrAnimationProperty,
                                               opacity: *const f32,
@@ -1936,22 +1944,22 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
         None => None,
     };
 
-    let mut prim_info = LayoutPrimitiveInfo::new(bounds);
-
     *out_is_reference_frame = transform_binding.is_some() || perspective.is_some();
     if *out_is_reference_frame {
         let ref_frame_id = state.frame_builder
             .dl_builder
-            .push_reference_frame(&prim_info, transform_style, transform_binding, perspective);
+            .push_reference_frame(&bounds, transform_style, transform_binding, perspective);
         *out_reference_frame_id = pack_clip_id(ref_frame_id);
 
-        prim_info.rect.origin = LayoutPoint::zero();
-        prim_info.clip_rect.origin = LayoutPoint::zero();
+        bounds.origin = LayoutPoint::zero();
         state.frame_builder.dl_builder.push_clip_id(ref_frame_id);
     }
 
-    prim_info.is_backface_visible = is_backface_visible;
-    prim_info.tag = state.current_tag;
+    let prim_info = LayoutPrimitiveInfo {
+        is_backface_visible,
+        tag: state.current_tag,
+        .. LayoutPrimitiveInfo::new(bounds)
+    };
 
     state.frame_builder
          .dl_builder

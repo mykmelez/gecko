@@ -234,6 +234,7 @@
 #include "mozilla/dom/PrimitiveConversions.h"
 #include "mozilla/dom/WindowBinding.h"
 #include "nsITabChild.h"
+#include "mozilla/dom/LoadedScript.h"
 #include "mozilla/dom/MediaQueryList.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/NavigatorBinding.h"
@@ -299,19 +300,28 @@ using mozilla::dom::cache::CacheStorage;
   return outer->method args;                                         \
   PR_END_MACRO
 
-#define FORWARD_TO_OUTER_OR_THROW(method, args, errorresult, err_rval) \
-  PR_BEGIN_MACRO                                                       \
-  nsGlobalWindowOuter* outer = GetOuterWindowInternal();               \
-  if (MOZ_LIKELY(HasActiveDocument())) {                               \
-    return outer->method args;                                         \
-  }                                                                    \
-  if (!outer) {                                                        \
-    NS_WARNING("No outer window available!");                          \
-    errorresult.Throw(NS_ERROR_NOT_INITIALIZED);                       \
-  } else {                                                             \
-    errorresult.Throw(NS_ERROR_XPC_SECURITY_MANAGER_VETO);             \
-  }                                                                    \
-  return err_rval;                                                     \
+static nsGlobalWindowOuter* GetOuterWindowForForwarding(
+    nsGlobalWindowInner* aInner, ErrorResult& aError) {
+  nsGlobalWindowOuter* outer = aInner->GetOuterWindowInternal();
+  if (MOZ_LIKELY(aInner->HasActiveDocument())) {
+    return outer;
+  }
+  if (!outer) {
+    NS_WARNING("No outer window available!");
+    aError.Throw(NS_ERROR_NOT_INITIALIZED);
+  } else {
+    aError.Throw(NS_ERROR_XPC_SECURITY_MANAGER_VETO);
+  }
+  return nullptr;
+}
+
+#define FORWARD_TO_OUTER_OR_THROW(method, args, errorresult, err_rval)         \
+  PR_BEGIN_MACRO                                                               \
+  nsGlobalWindowOuter* outer = GetOuterWindowForForwarding(this, errorresult); \
+  if (MOZ_LIKELY(outer)) {                                                     \
+    return outer->method args;                                                 \
+  }                                                                            \
+  return err_rval;                                                             \
   PR_END_MACRO
 
 #define FORWARD_TO_OUTER_VOID(method, args)                          \
@@ -1999,7 +2009,7 @@ nsresult nsGlobalWindowInner::PostHandleEvent(EventChainPostVisitor& aVisitor) {
   } else if (aVisitor.mEvent->mMessage == eLoad &&
              aVisitor.mEvent->IsTrusted()) {
     // This is page load event since load events don't propagate to |window|.
-    // @see nsDocument::GetEventTargetParent.
+    // @see nsIDocument::GetEventTargetParent.
     mIsDocumentLoaded = true;
 
     mTimeoutManager->OnDocumentLoaded();
@@ -2112,9 +2122,9 @@ void nsPIDOMWindowInner::UnmuteAudioContexts() {
   }
 }
 
-nsGlobalWindowInner* nsGlobalWindowInner::Window() { return this; }
-
-nsGlobalWindowInner* nsGlobalWindowInner::Self() { return this; }
+BrowsingContext* nsGlobalWindowInner::Window() {
+  return mOuterWindow ? mOuterWindow->GetBrowsingContext() : nullptr;
+}
 
 Navigator* nsPIDOMWindowInner::Navigator() {
   if (!mNavigator) {
@@ -2546,7 +2556,7 @@ bool nsGlobalWindowInner::HasActiveSpeechSynthesis() {
 
 #endif
 
-already_AddRefed<nsPIDOMWindowOuter> nsGlobalWindowInner::GetParent(
+Nullable<WindowProxyHolder> nsGlobalWindowInner::GetParent(
     ErrorResult& aError) {
   FORWARD_TO_OUTER_OR_THROW(GetParentOuter, (), aError, nullptr);
 }
@@ -3306,12 +3316,12 @@ double nsGlobalWindowInner::GetScrollY(ErrorResult& aError) {
 
 uint32_t nsGlobalWindowInner::Length() { FORWARD_TO_OUTER(Length, (), 0); }
 
-already_AddRefed<nsPIDOMWindowOuter> nsGlobalWindowInner::GetTop(
+Nullable<WindowProxyHolder> nsGlobalWindowInner::GetTop(
     mozilla::ErrorResult& aError) {
   FORWARD_TO_OUTER_OR_THROW(GetTopOuter, (), aError, nullptr);
 }
 
-nsPIDOMWindowOuter* nsGlobalWindowInner::GetChildWindow(
+already_AddRefed<BrowsingContext> nsGlobalWindowInner::GetChildWindow(
     const nsAString& aName) {
   if (GetOuterWindowInternal()) {
     return GetOuterWindowInternal()->GetChildWindow(aName);
@@ -3419,7 +3429,7 @@ void nsGlobalWindowInner::Prompt(const nsAString& aMessage,
 }
 
 void nsGlobalWindowInner::Focus(ErrorResult& aError) {
-  FORWARD_TO_OUTER_OR_THROW(FocusOuter, (aError), aError, );
+  FORWARD_TO_OUTER_OR_THROW(FocusOuter, (), aError, );
 }
 
 nsresult nsGlobalWindowInner::Focus() {
@@ -3684,14 +3694,15 @@ void nsGlobalWindowInner::ReleaseEvents() {
   }
 }
 
-already_AddRefed<nsPIDOMWindowOuter> nsGlobalWindowInner::Open(
-    const nsAString& aUrl, const nsAString& aName, const nsAString& aOptions,
-    ErrorResult& aError) {
+Nullable<WindowProxyHolder> nsGlobalWindowInner::Open(const nsAString& aUrl,
+                                                      const nsAString& aName,
+                                                      const nsAString& aOptions,
+                                                      ErrorResult& aError) {
   FORWARD_TO_OUTER_OR_THROW(OpenOuter, (aUrl, aName, aOptions, aError), aError,
                             nullptr);
 }
 
-already_AddRefed<nsPIDOMWindowOuter> nsGlobalWindowInner::OpenDialog(
+Nullable<WindowProxyHolder> nsGlobalWindowInner::OpenDialog(
     JSContext* aCx, const nsAString& aUrl, const nsAString& aName,
     const nsAString& aOptions, const Sequence<JS::Value>& aExtraArgument,
     ErrorResult& aError) {
@@ -3700,8 +3711,7 @@ already_AddRefed<nsPIDOMWindowOuter> nsGlobalWindowInner::OpenDialog(
       aError, nullptr);
 }
 
-already_AddRefed<nsPIDOMWindowOuter> nsGlobalWindowInner::GetFrames(
-    ErrorResult& aError) {
+BrowsingContext* nsGlobalWindowInner::GetFrames(ErrorResult& aError) {
   FORWARD_TO_OUTER_OR_THROW(GetFramesOuter, (), aError, nullptr);
 }
 
@@ -3751,8 +3761,8 @@ void nsGlobalWindowInner::PostMessageMoz(
                  aSubjectPrincipal, aRv);
 }
 
-void nsGlobalWindowInner::Close(ErrorResult& aError) {
-  FORWARD_TO_OUTER_OR_THROW(CloseOuter, (nsContentUtils::IsCallerChrome()),
+void nsGlobalWindowInner::Close(CallerType aCallerType, ErrorResult& aError) {
+  FORWARD_TO_OUTER_OR_THROW(CloseOuter, (aCallerType == CallerType::System),
                             aError, );
 }
 
@@ -3881,7 +3891,7 @@ void nsGlobalWindowInner::Btoa(const nsAString& aBinaryData,
 // EventTarget
 //*****************************************************************************
 
-nsPIDOMWindowOuter* nsGlobalWindowInner::GetOwnerGlobalForBindings() {
+nsPIDOMWindowOuter* nsGlobalWindowInner::GetOwnerGlobalForBindingsInternal() {
   return nsPIDOMWindowOuter::GetFromCurrentInner(this);
 }
 
@@ -3934,7 +3944,7 @@ EventListenerManager* nsGlobalWindowInner::GetExistingListenerManager() const {
 // nsGlobalWindowInner::nsPIDOMWindow
 //*****************************************************************************
 
-Location* nsGlobalWindowInner::GetLocation() {
+Location* nsGlobalWindowInner::Location() {
   if (!mLocation) {
     mLocation = new dom::Location(this, GetDocShell());
   }
@@ -5803,7 +5813,7 @@ nsIPrincipal* nsGlobalWindowInner::GetTopLevelPrincipal() {
 }
 
 nsIPrincipal* nsGlobalWindowInner::GetTopLevelStorageAreaPrincipal() {
-  if (mDoc && ((mDoc->GetSandboxFlags() & SANDBOXED_STORAGE_ACCESS) != 0 ||
+  if (mDoc && (mDoc->StorageAccessSandboxed() ||
                nsContentUtils::IsInPrivateBrowsing(mDoc))) {
     // Storage access is disabled
     return nullptr;
@@ -5974,8 +5984,6 @@ bool nsGlobalWindowInner::RunTimeoutHandler(Timeout* aTimeout,
 
     if (!callback) {
       // Evaluate the timeout expression.
-      const nsAString& script = handler->GetHandlerText();
-
       const char* filename = nullptr;
       uint32_t lineNo = 0, dummyColumn = 0;
       handler->GetLocation(&filename, &lineNo, &dummyColumn);
@@ -5992,7 +6000,16 @@ bool nsGlobalWindowInner::RunTimeoutHandler(Timeout* aTimeout,
       nsresult rv;
       {
         nsJSUtils::ExecutionContext exec(aes.cx(), global);
-        rv = exec.CompileAndExec(options, script);
+        rv = exec.Compile(options, handler->GetHandlerText());
+
+        if (rv == NS_OK) {
+          LoadedScript* initiatingScript = handler->GetInitiatingScript();
+          if (initiatingScript) {
+            initiatingScript->AssociateWithScript(exec.GetScript());
+          }
+
+          rv = exec.ExecScript();
+        }
       }
 
       if (rv == NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW_UNCATCHABLE) {
@@ -6910,7 +6927,7 @@ void nsGlobalWindowInner::GetSidebar(OwningExternalOrWindowProxy& aResult,
                                      ErrorResult& aRv) {
 #ifdef HAVE_SIDEBAR
   // First check for a named frame named "sidebar"
-  nsCOMPtr<nsPIDOMWindowOuter> domWindow =
+  RefPtr<BrowsingContext> domWindow =
       GetChildWindow(NS_LITERAL_STRING("sidebar"));
   if (domWindow) {
     aResult.SetAsWindowProxy() = domWindow.forget();

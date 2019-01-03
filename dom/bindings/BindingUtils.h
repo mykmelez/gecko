@@ -54,12 +54,10 @@ class CustomElementReactionsStack;
 class MessageManagerGlobal;
 template <typename KeyType, typename ValueType>
 class Record;
+class WindowProxyHolder;
 
 nsresult UnwrapArgImpl(JSContext* cx, JS::Handle<JSObject*> src,
                        const nsIID& iid, void** ppArg);
-
-nsresult UnwrapWindowProxyImpl(JSContext* cx, JS::Handle<JSObject*> src,
-                               nsPIDOMWindowOuter** ppArg);
 
 /** Convert a jsval to an XPCOM pointer. Caller must not assume that src will
     keep the XPCOM pointer rooted. */
@@ -70,12 +68,8 @@ inline nsresult UnwrapArg(JSContext* cx, JS::Handle<JSObject*> src,
                        reinterpret_cast<void**>(ppArg));
 }
 
-template <>
-inline nsresult UnwrapArg<nsPIDOMWindowOuter>(JSContext* cx,
-                                              JS::Handle<JSObject*> src,
-                                              nsPIDOMWindowOuter** ppArg) {
-  return UnwrapWindowProxyImpl(cx, src, ppArg);
-}
+nsresult UnwrapWindowProxyArg(JSContext* cx, JS::Handle<JSObject*> src,
+                              WindowProxyHolder& ppArg);
 
 bool ThrowInvalidThis(JSContext* aCx, const JS::CallArgs& aArgs,
                       bool aSecurityError, const char* aInterfaceName);
@@ -1424,6 +1418,9 @@ inline bool WrapObject(JSContext* cx, JSObject& p,
   return true;
 }
 
+bool WrapObject(JSContext* cx, const WindowProxyHolder& p,
+                JS::MutableHandle<JS::Value> rval);
+
 // Given an object "p" that inherits from nsISupports, wrap it and return the
 // result.  Null is returned on wrapping failure.  This is somewhat similar to
 // WrapObject() above, but does NOT allow Xrays around the result, since we
@@ -2326,10 +2323,16 @@ const nsAString& NonNullHelper(const binding_detail::FakeString& aArg) {
   return aArg;
 }
 
-// Reparent the wrapper of aObj to whatever its native now thinks its
-// parent should be.
-void ReparentWrapper(JSContext* aCx, JS::Handle<JSObject*> aObj,
-                     ErrorResult& aError);
+// Given a DOM reflector aObj, give its underlying DOM object a reflector in
+// whatever global that underlying DOM object now thinks it should be in.  If
+// this is in a different compartment from aObj, aObj will become a
+// cross-compatment wrapper for the new object.  Otherwise, aObj will become the
+// new object (via a brain transplant).  If the new global is the same as the
+// old global, we just keep using the same object.
+//
+// On entry to this method, aCx and aObj must be same-compartment.
+void UpdateReflectorGlobal(JSContext* aCx, JS::Handle<JSObject*> aObj,
+                           ErrorResult& aError);
 
 /**
  * Used to implement the Symbol.hasInstance property of an interface object.

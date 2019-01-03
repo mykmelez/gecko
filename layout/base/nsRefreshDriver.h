@@ -24,6 +24,7 @@
 #include "nsHashKeys.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/dom/VisualViewport.h"
 #include "mozilla/layers/TransactionIdAllocator.h"
 #include "mozilla/VsyncDispatcher.h"
 
@@ -92,6 +93,10 @@ class nsAPostRefreshObserver {
 class nsRefreshDriver final : public mozilla::layers::TransactionIdAllocator,
                               public nsARefreshObserver {
   using TransactionId = mozilla::layers::TransactionId;
+  using VVPResizeEvent =
+      mozilla::dom::VisualViewport::VisualViewportResizeEvent;
+  using VVPScrollEvent =
+      mozilla::dom::VisualViewport::VisualViewportScrollEvent;
 
  public:
   explicit nsRefreshDriver(nsPresContext* aPresContext);
@@ -146,8 +151,14 @@ class nsRefreshDriver final : public mozilla::layers::TransactionIdAllocator,
   void AddTimerAdjustmentObserver(nsATimerAdjustmentObserver* aObserver);
   void RemoveTimerAdjustmentObserver(nsATimerAdjustmentObserver* aObserver);
 
-  void PostScrollEvent(mozilla::Runnable* aScrollEvent);
+  void PostVisualViewportResizeEvent(VVPResizeEvent* aResizeEvent);
+  void DispatchVisualViewportResizeEvents();
+
+  void PostScrollEvent(mozilla::Runnable* aScrollEvent, bool aDelayed = false);
   void DispatchScrollEvents();
+
+  void PostVisualViewportScrollEvent(VVPScrollEvent* aScrollEvent);
+  void DispatchVisualViewportScrollEvents();
 
   /**
    * Add an observer that will be called after each refresh. The caller
@@ -177,15 +188,23 @@ class nsRefreshDriver final : public mozilla::layers::TransactionIdAllocator,
   /**
    * Add / remove presshells which have pending resize event.
    */
-  void AddResizeEventFlushObserver(nsIPresShell* aShell) {
-    MOZ_DIAGNOSTIC_ASSERT(!mResizeEventFlushObservers.Contains(aShell),
-                          "Double-adding resize event flush observer");
-    mResizeEventFlushObservers.AppendElement(aShell);
-    EnsureTimerStarted();
+  void AddResizeEventFlushObserver(nsIPresShell* aShell,
+                                   bool aDelayed = false) {
+    MOZ_DIAGNOSTIC_ASSERT(
+        !mResizeEventFlushObservers.Contains(aShell) &&
+            !mDelayedResizeEventFlushObservers.Contains(aShell),
+        "Double-adding resize event flush observer");
+    if (aDelayed) {
+      mDelayedResizeEventFlushObservers.AppendElement(aShell);
+    } else {
+      mResizeEventFlushObservers.AppendElement(aShell);
+      EnsureTimerStarted();
+    }
   }
 
   void RemoveResizeEventFlushObserver(nsIPresShell* aShell) {
     mResizeEventFlushObservers.RemoveElement(aShell);
+    mDelayedResizeEventFlushObservers.RemoveElement(aShell);
   }
 
   /**
@@ -400,9 +419,14 @@ class nsRefreshDriver final : public mozilla::layers::TransactionIdAllocator,
 
   void NotifyDOMContentLoaded();
 
+  // Schedule a refresh so that any delayed events will run soon.
+  void RunDelayedEventsSoon();
+
  private:
   typedef nsTObserverArray<nsARefreshObserver*> ObserverArray;
+  typedef nsTArray<RefPtr<VVPResizeEvent>> VisualViewportResizeEventArray;
   typedef nsTArray<RefPtr<mozilla::Runnable>> ScrollEventArray;
+  typedef nsTArray<RefPtr<VVPScrollEvent>> VisualViewportScrollEventArray;
   typedef nsTHashtable<nsISupportsHashKey> RequestTable;
   struct ImageStartData {
     ImageStartData() {}
@@ -524,9 +548,15 @@ class nsRefreshDriver final : public mozilla::layers::TransactionIdAllocator,
   RequestTable mRequests;
   ImageStartTable mStartTable;
   AutoTArray<nsCOMPtr<nsIRunnable>, 16> mEarlyRunners;
+  VisualViewportResizeEventArray mVisualViewportResizeEvents;
   ScrollEventArray mScrollEvents;
+  VisualViewportScrollEventArray mVisualViewportScrollEvents;
+
+  // Scroll events on documents that might have events suppressed.
+  ScrollEventArray mDelayedScrollEvents;
 
   AutoTArray<nsIPresShell*, 16> mResizeEventFlushObservers;
+  AutoTArray<nsIPresShell*, 16> mDelayedResizeEventFlushObservers;
   AutoTArray<nsIPresShell*, 16> mStyleFlushObservers;
   AutoTArray<nsIPresShell*, 16> mLayoutFlushObservers;
   // nsTArray on purpose, because we want to be able to swap.

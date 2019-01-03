@@ -1943,10 +1943,13 @@ nsXPCComponents_Utils::PermitCPOWsInScope(HandleValue obj) {
   }
 
   JSObject* scopeObj = js::UncheckedUnwrap(&obj.toObject());
-  MOZ_DIAGNOSTIC_ASSERT(
-      !mozJSComponentLoader::Get()->IsLoaderGlobal(scopeObj),
-      "Don't call Cu.PermitCPOWsInScope() in a JSM that shares its global");
-  CompartmentPrivate::Get(scopeObj)->allowCPOWs = true;
+  JS::Compartment* scopeComp = js::GetObjectCompartment(scopeObj);
+  JS::Compartment* systemComp =
+      js::GetObjectCompartment(xpc::PrivilegedJunkScope());
+  MOZ_RELEASE_ASSERT(scopeComp != systemComp,
+                     "Don't call Cu.PermitCPOWsInScope() on scopes in the "
+                     "shared system compartment");
+  CompartmentPrivate::Get(scopeComp)->allowCPOWs = true;
   return NS_OK;
 }
 
@@ -1978,9 +1981,8 @@ nsXPCComponents_Utils::SetWantXrays(HandleValue vscope, JSContext* cx) {
     return NS_ERROR_INVALID_ARG;
   }
   JSObject* scopeObj = js::UncheckedUnwrap(&vscope.toObject());
-  MOZ_DIAGNOSTIC_ASSERT(
-      !mozJSComponentLoader::Get()->IsLoaderGlobal(scopeObj),
-      "Don't call Cu.setWantXrays() in a JSM that shares its global");
+  MOZ_RELEASE_ASSERT(!AccessCheck::isChrome(scopeObj),
+                     "Don't call setWantXrays on system-principal scopes");
   JS::Compartment* compartment = js::GetObjectCompartment(scopeObj);
   CompartmentPrivate::Get(scopeObj)->wantXrays = true;
   bool ok = js::RecomputeWrappers(cx, js::SingleCompartment(compartment),
@@ -1992,11 +1994,12 @@ nsXPCComponents_Utils::SetWantXrays(HandleValue vscope, JSContext* cx) {
 NS_IMETHODIMP
 nsXPCComponents_Utils::ForcePermissiveCOWs(JSContext* cx) {
   xpc::CrashIfNotInAutomation();
-  JSObject* currentGlobal = CurrentGlobalOrNull(cx);
+  RootedObject global(cx, GetScriptedCallerGlobal(cx));
+  MOZ_ASSERT(global);
   MOZ_DIAGNOSTIC_ASSERT(
-      !mozJSComponentLoader::Get()->IsLoaderGlobal(currentGlobal),
+      !mozJSComponentLoader::Get()->IsLoaderGlobal(global),
       "Don't call Cu.forcePermissiveCOWs() in a JSM that shares its global");
-  CompartmentPrivate::Get(currentGlobal)->forcePermissiveCOWs = true;
+  RealmPrivate::Get(global)->forcePermissiveCOWs = true;
   return NS_OK;
 }
 
@@ -2676,6 +2679,6 @@ ComponentsSH::PreCreate(nsISupports* nativeObj, JSContext* cx,
         "mScope must not be null when nsXPCComponents::PreCreate is called");
     return NS_ERROR_FAILURE;
   }
-  *parentObj = self->GetScope()->GetGlobalJSObject();
+  *parentObj = self->GetScope()->GetGlobalForWrappedNatives();
   return NS_OK;
 }

@@ -17,7 +17,7 @@
 #include "nsIContentInlines.h"
 #include "nsIURI.h"
 
-NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(A)
+NS_IMPL_NS_NEW_SVG_ELEMENT(A)
 
 namespace mozilla {
 namespace dom {
@@ -27,7 +27,7 @@ JSObject* SVGAElement::WrapNode(JSContext* aCx,
   return SVGAElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-nsSVGElement::StringInfo SVGAElement::sStringInfo[3] = {
+SVGElement::StringInfo SVGAElement::sStringInfo[3] = {
     {nsGkAtoms::href, kNameSpaceID_None, true},
     {nsGkAtoms::href, kNameSpaceID_XLink, true},
     {nsGkAtoms::target, kNameSpaceID_None, true}};
@@ -211,9 +211,10 @@ static bool IsNodeInEditableRegion(nsINode* aNode) {
   return false;
 }
 
-bool SVGAElement::IsSVGFocusable(bool* aIsFocusable, int32_t* aTabIndex) {
-  if (SVGGraphicsElement::IsSVGFocusable(aIsFocusable, aTabIndex)) {
-    return true;
+bool SVGAElement::IsFocusableInternal(int32_t* aTabIndex, bool aWithMouse) {
+  bool isFocusable = false;
+  if (IsSVGFocusable(&isFocusable, aTabIndex)) {
+    return isFocusable;
   }
 
   // cannot focus links if there is no link handler
@@ -221,7 +222,6 @@ bool SVGAElement::IsSVGFocusable(bool* aIsFocusable, int32_t* aTabIndex) {
   if (doc) {
     nsPresContext* presContext = doc->GetPresContext();
     if (presContext && !presContext->GetLinkHandler()) {
-      *aIsFocusable = false;
       return false;
     }
   }
@@ -232,10 +232,7 @@ bool SVGAElement::IsSVGFocusable(bool* aIsFocusable, int32_t* aTabIndex) {
     if (aTabIndex) {
       *aTabIndex = -1;
     }
-
-    *aIsFocusable = false;
-
-    return true;
+    return false;
   }
 
   if (!HasAttr(kNameSpaceID_None, nsGkAtoms::tabindex)) {
@@ -246,9 +243,6 @@ bool SVGAElement::IsSVGFocusable(bool* aIsFocusable, int32_t* aTabIndex) {
       if (aTabIndex) {
         *aTabIndex = -1;
       }
-
-      *aIsFocusable = false;
-
       return false;
     }
   }
@@ -257,9 +251,7 @@ bool SVGAElement::IsSVGFocusable(bool* aIsFocusable, int32_t* aTabIndex) {
     *aTabIndex = -1;
   }
 
-  *aIsFocusable = true;
-
-  return false;
+  return true;
 }
 
 bool SVGAElement::IsLink(nsIURI** aURI) const {
@@ -349,9 +341,9 @@ nsresult SVGAElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
 }
 
 //----------------------------------------------------------------------
-// nsSVGElement methods
+// SVGElement methods
 
-nsSVGElement::StringAttributesInfo SVGAElement::GetStringInfo() {
+SVGElement::StringAttributesInfo SVGAElement::GetStringInfo() {
   return StringAttributesInfo(mStringAttributes, sStringInfo,
                               ArrayLength(sStringInfo));
 }

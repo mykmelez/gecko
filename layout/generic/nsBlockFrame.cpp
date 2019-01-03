@@ -415,9 +415,9 @@ void nsBlockFrame::List(FILE* out, const char* aPrefix, uint32_t aFlags) const {
   // skip the principal list - we printed the lines above
   // skip the overflow list - we printed the overflow lines above
   ChildListIterator lists(this);
-  ChildListIDs skip(kPrincipalList | kOverflowList);
+  ChildListIDs skip = {kPrincipalList, kOverflowList};
   for (; !lists.IsDone(); lists.Next()) {
-    if (skip.Contains(lists.CurrentID())) {
+    if (skip.contains(lists.CurrentID())) {
       continue;
     }
     fprintf_stderr(out, "%s%s %p <\n", pfx.get(),
@@ -1820,7 +1820,7 @@ void nsBlockFrame::UnionChildOverflow(nsOverflowAreas& aOverflowAreas) {
   // Union with child frames, skipping the principal and float lists
   // since we already handled those using the line boxes.
   nsLayoutUtils::UnionChildOverflow(this, aOverflowAreas,
-                                    kPrincipalList | kFloatList);
+                                    {kPrincipalList, kFloatList});
 }
 
 bool nsBlockFrame::ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) {
@@ -6717,12 +6717,16 @@ void nsBlockFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
   //   If the box is a block container, then it establishes a new block
   //   formatting context.
   // (http://dev.w3.org/csswg/css-writing-modes/#block-flow)
+  //
   // If the box has contain: paint or contain:layout (or contain:strict),
   // then it should also establish a formatting context.
+  //
+  // Per spec, a column-span always establishes a new block formatting context.
   if (StyleDisplay()->mDisplay == mozilla::StyleDisplay::FlowRoot ||
       (GetParent() && StyleVisibility()->mWritingMode !=
                           GetParent()->StyleVisibility()->mWritingMode) ||
-      StyleDisplay()->IsContainPaint() || StyleDisplay()->IsContainLayout()) {
+      StyleDisplay()->IsContainPaint() || StyleDisplay()->IsContainLayout() ||
+      (StaticPrefs::layout_css_column_span_enabled() && IsColumnSpan())) {
     AddStateBits(NS_BLOCK_FORMATTING_CONTEXT_STATE_BITS);
   }
 

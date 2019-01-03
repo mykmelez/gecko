@@ -7,8 +7,8 @@
 #ifndef mozilla_dom_SVGFETurbulenceElement_h
 #define mozilla_dom_SVGFETurbulenceElement_h
 
-#include "nsSVGEnum.h"
-#include "nsSVGFilters.h"
+#include "SVGEnum.h"
+#include "SVGFilters.h"
 #include "nsSVGNumber2.h"
 #include "nsSVGInteger.h"
 #include "nsSVGString.h"
@@ -19,7 +19,7 @@ nsresult NS_NewSVGFETurbulenceElement(
 namespace mozilla {
 namespace dom {
 
-typedef nsSVGFE SVGFETurbulenceElementBase;
+typedef SVGFE SVGFETurbulenceElementBase;
 
 class SVGFETurbulenceElement : public SVGFETurbulenceElementBase {
   friend nsresult(::NS_NewSVGFETurbulenceElement(
@@ -76,9 +76,9 @@ class SVGFETurbulenceElement : public SVGFETurbulenceElementBase {
   static IntegerInfo sIntegerInfo[1];
 
   enum { TYPE, STITCHTILES };
-  nsSVGEnum mEnumAttributes[2];
-  static nsSVGEnumMapping sTypeMap[];
-  static nsSVGEnumMapping sStitchTilesMap[];
+  SVGEnum mEnumAttributes[2];
+  static SVGEnumMapping sTypeMap[];
+  static SVGEnumMapping sStitchTilesMap[];
   static EnumInfo sEnumInfo[2];
 
   enum { RESULT };

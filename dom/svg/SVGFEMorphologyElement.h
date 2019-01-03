@@ -7,8 +7,8 @@
 #ifndef mozilla_dom_SVGFEMorphologyElement_h
 #define mozilla_dom_SVGFEMorphologyElement_h
 
-#include "nsSVGEnum.h"
-#include "nsSVGFilters.h"
+#include "SVGEnum.h"
+#include "SVGFilters.h"
 #include "nsSVGNumberPair.h"
 #include "nsSVGString.h"
 
@@ -18,7 +18,7 @@ nsresult NS_NewSVGFEMorphologyElement(
 namespace mozilla {
 namespace dom {
 
-typedef nsSVGFE SVGFEMorphologyElementBase;
+typedef SVGFE SVGFEMorphologyElementBase;
 
 class SVGFEMorphologyElement : public SVGFEMorphologyElementBase {
   friend nsresult(::NS_NewSVGFEMorphologyElement(
@@ -42,8 +42,7 @@ class SVGFEMorphologyElement : public SVGFEMorphologyElementBase {
   virtual nsSVGString& GetResultImageName() override {
     return mStringAttributes[RESULT];
   }
-  virtual void GetSourceImageNames(
-      nsTArray<nsSVGStringInfo>& aSources) override;
+  virtual void GetSourceImageNames(nsTArray<SVGStringInfo>& aSources) override;
 
   virtual nsresult Clone(dom::NodeInfo*, nsINode** aResult) const override;
 
@@ -66,8 +65,8 @@ class SVGFEMorphologyElement : public SVGFEMorphologyElementBase {
   static NumberPairInfo sNumberPairInfo[1];
 
   enum { OPERATOR };
-  nsSVGEnum mEnumAttributes[1];
-  static nsSVGEnumMapping sOperatorMap[];
+  SVGEnum mEnumAttributes[1];
+  static SVGEnumMapping sOperatorMap[];
   static EnumInfo sEnumInfo[1];
 
   enum { RESULT, IN1 };

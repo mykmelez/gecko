@@ -30,6 +30,7 @@ namespace wr {
 using layers::Stringify;
 
 MOZ_DEFINE_MALLOC_SIZE_OF(WebRenderMallocSizeOf)
+MOZ_DEFINE_MALLOC_ENCLOSING_SIZE_OF(WebRenderMallocEnclosingSizeOf)
 
 class NewRenderer : public RendererEvent {
  public:
@@ -80,7 +81,8 @@ class NewRenderer : public RendererEvent {
             aRenderThread.Shaders() ? aRenderThread.Shaders()->RawShaders()
                                     : nullptr,
             aRenderThread.ThreadPool().Raw(), &WebRenderMallocSizeOf,
-            mDocHandle, &wrRenderer, mMaxTextureSize)) {
+            &WebRenderMallocEnclosingSizeOf, mDocHandle, &wrRenderer,
+            mMaxTextureSize)) {
       // wr_window_new puts a message into gfxCriticalNote if it returns false
       return;
     }

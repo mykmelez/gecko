@@ -1,5 +1,5 @@
 import {INITIAL_STATE, insertPinned, reducers} from "common/Reducers.jsm";
-const {TopSites, App, Snippets, Prefs, Dialog, Sections, Pocket} = reducers;
+const {TopSites, App, Snippets, Prefs, Dialog, Sections, Pocket, DiscoveryStream, Search} = reducers;
 import {actionTypes as at} from "common/Actions.jsm";
 
 describe("Reducers", () => {
@@ -653,6 +653,37 @@ describe("Reducers", () => {
       assert.equal(state.pocketCta.ctaText, data.cta_text);
       assert.equal(state.pocketCta.ctaUrl, data.cta_url);
       assert.equal(state.pocketCta.useCta, data.use_cta);
+    });
+  });
+  describe("DiscoveryStream", () => {
+    it("should return INITIAL_STATE by default", () => {
+      assert.equal(DiscoveryStream(undefined, {type: "some_action"}), INITIAL_STATE.DiscoveryStream);
+    });
+    it("should set layout data with DISCOVERY_STREAM_LAYOUT_UPDATE", () => {
+      const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_LAYOUT_UPDATE, data: ["test"]});
+      assert.equal(state.layout[0], "test");
+    });
+    it("should set config data with DISCOVERY_STREAM_CONFIG_CHANGE", () => {
+      const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_CONFIG_CHANGE, data: {enabled: true}});
+      assert.deepEqual(state.config, {enabled: true});
+    });
+  });
+  describe("Search", () => {
+    it("should return INITIAL_STATE by default", () => {
+      assert.equal(Search(undefined, {type: "some_action"}), INITIAL_STATE.Search);
+    });
+    it("should set hide to true on HIDE_SEARCH", () => {
+      const nextState = Search(undefined, {type: "HIDE_SEARCH"});
+      assert.propertyVal(nextState, "hide", true);
+    });
+    it("should set focus to true on FOCUS_SEARCH", () => {
+      const nextState = Search(undefined, {type: "FOCUS_SEARCH"});
+      assert.propertyVal(nextState, "focus", true);
+    });
+    it("should set focus and hide to false on SHOW_SEARCH", () => {
+      const nextState = Search(undefined, {type: "SHOW_SEARCH"});
+      assert.propertyVal(nextState, "focus", false);
+      assert.propertyVal(nextState, "hide", false);
     });
   });
 });

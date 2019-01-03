@@ -9,10 +9,10 @@
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "nsPresContext.h"
+#include "nsContentList.h"
 #include "nsError.h"
 #include "nsQueryContentEventResult.h"
 #include "nsGlobalWindow.h"
-#include "nsIDocument.h"
 #include "nsFocusManager.h"
 #include "nsFrameManager.h"
 #include "nsRefreshDriver.h"
@@ -103,7 +103,7 @@
 #include "nsContentPermissionHelper.h"
 #include "nsCSSPseudoElements.h"  // for CSSPseudoElementType
 #include "nsNetUtil.h"
-#include "nsDocument.h"
+#include "nsIDocument.h"
 #include "HTMLImageElement.h"
 #include "HTMLCanvasElement.h"
 #include "mozilla/css/ImageLoader.h"
@@ -548,7 +548,8 @@ nsDOMWindowUtils::SetResolutionAndScaleTo(float aResolution) {
     return NS_ERROR_FAILURE;
   }
 
-  presShell->SetResolutionAndScaleTo(aResolution, nsGkAtoms::other);
+  presShell->SetResolutionAndScaleTo(aResolution,
+                                     nsIPresShell::ChangeOrigin::eMainThread);
 
   return NS_OK;
 }
@@ -576,18 +577,6 @@ nsDOMWindowUtils::GetResolution(float* aResolution) {
   }
 
   *aResolution = presShell->GetResolution();
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDOMWindowUtils::GetIsResolutionSet(bool* aIsResolutionSet) {
-  nsIPresShell* presShell = GetPresShell();
-  if (!presShell) {
-    return NS_ERROR_FAILURE;
-  }
-
-  *aIsResolutionSet = presShell->IsResolutionSet();
 
   return NS_OK;
 }
@@ -1153,9 +1142,18 @@ nsDOMWindowUtils::NodesFromRect(float aX, float aY, float aTopSize,
   nsCOMPtr<nsIDocument> doc = GetDocument();
   NS_ENSURE_STATE(doc);
 
-  return doc->NodesFromRectHelper(aX, aY, aTopSize, aRightSize, aBottomSize,
-                                  aLeftSize, aIgnoreRootScrollFrame,
-                                  aFlushLayout, aReturn);
+  nsSimpleContentList* list = new nsSimpleContentList(doc);
+  NS_ADDREF(list);
+  *aReturn = list;
+
+  AutoTArray<RefPtr<nsINode>, 8> nodes;
+  doc->NodesFromRect(aX, aY, aTopSize, aRightSize, aBottomSize, aLeftSize,
+                     aIgnoreRootScrollFrame, aFlushLayout, nodes);
+  list->SetCapacity(nodes.Length());
+  for (auto& node : nodes) {
+    list->AppendElement(node->AsContent());
+  }
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -3794,8 +3792,8 @@ nsDOMWindowUtils::ForceUseCounterFlush(nsINode* aNode) {
 
     // Flush the document and any external documents that it depends on.
     const auto reportKind =
-        nsDocument::UseCounterReportKind::eIncludeExternalResources;
-    static_cast<nsDocument*>(doc.get())->ReportUseCounters(reportKind);
+        nsIDocument::UseCounterReportKind::eIncludeExternalResources;
+    doc->ReportUseCounters(reportKind);
     return NS_OK;
   }
 

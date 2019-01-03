@@ -1440,8 +1440,8 @@ void nsCSSRendering::PaintBoxShadowOuter(nsPresContext* aPresContext,
     // by optimizing box-shadow drawing more for the cases where we don't have a
     // skip-rect.
     useSkipGfxRect = !aForFrame->IsLeaf();
-    nsRect paddingRect = aForFrame->GetPaddingRect() -
-                         aForFrame->GetPosition() + aFrameArea.TopLeft();
+    nsRect paddingRect =
+        aForFrame->GetPaddingRectRelativeToSelf() + aFrameArea.TopLeft();
     skipGfxRect = nsLayoutUtils::RectToGfxRect(paddingRect, oneDevPixel);
   } else if (hasBorderRadius) {
     skipGfxRect.Deflate(gfxMargin(
@@ -2334,7 +2334,7 @@ nscolor nsCSSRendering::DetermineBackgroundColor(nsPresContext* aPresContext,
 
   const nsStyleVisibility* visibility = aComputedStyle->StyleVisibility();
 
-  if (visibility->mColorAdjust != NS_STYLE_COLOR_ADJUST_EXACT &&
+  if (visibility->mColorAdjust != StyleColorAdjust::Exact &&
       aFrame->HonorPrintBackgroundSettings()) {
     aDrawBackgroundImage = aPresContext->GetBackgroundImageDraw();
     aDrawBackgroundColor = aPresContext->GetBackgroundColorDraw();

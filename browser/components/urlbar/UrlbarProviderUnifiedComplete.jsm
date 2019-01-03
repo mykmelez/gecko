@@ -17,6 +17,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   Log: "resource://gre/modules/Log.jsm",
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
   UrlbarMatch: "resource:///modules/UrlbarMatch.jsm",
+  UrlbarProvider: "resource:///modules/UrlbarUtils.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
 });
@@ -34,8 +35,9 @@ const TITLE_TAGS_SEPARATOR = " \u2013 ";
 /**
  * Class used to create the provider.
  */
-class ProviderUnifiedComplete {
+class ProviderUnifiedComplete extends UrlbarProvider {
   constructor() {
+    super();
     // Maps the running queries by queryContext.
     this.queries = new Map();
   }
@@ -62,7 +64,12 @@ class ProviderUnifiedComplete {
    */
   get sources() {
     return [
+      UrlbarUtils.MATCH_SOURCE.BOOKMARKS,
+      UrlbarUtils.MATCH_SOURCE.HISTORY,
+      UrlbarUtils.MATCH_SOURCE.SEARCH,
       UrlbarUtils.MATCH_SOURCE.TABS,
+      UrlbarUtils.MATCH_SOURCE.OTHER_LOCAL,
+      UrlbarUtils.MATCH_SOURCE.OTHER_NETWORK,
     ];
   }
 
@@ -86,6 +93,9 @@ class ProviderUnifiedComplete {
     //  * "user-context-id:#": the userContextId to use.
     let params = ["enable-actions"];
     params.push(`max-results:${queryContext.maxResults}`);
+    // This is necessary because we insert matches one by one, thus we don't
+    // want UnifiedComplete to reuse results.
+    params.push(`insert-method:${UrlbarUtils.INSERTMETHOD.APPEND}`);
     if (queryContext.isPrivate) {
       params.push("private-window");
       if (!PrivateBrowsingUtils.permanentPrivateBrowsing) {
@@ -102,7 +112,7 @@ class ProviderUnifiedComplete {
         onSearchResult(_, result) {
           let {done, matches} = convertResultToMatches(queryContext, result, urls);
           for (let match of matches) {
-            addCallback(this, match);
+            addCallback(UrlbarProviderUnifiedComplete, match);
           }
           if (done) {
             resolve();
@@ -248,6 +258,17 @@ function makeUrlbarMatch(tokens, info) {
             icon: [info.icon, false],
           })
         );
+      case "switchtab":
+        return new UrlbarMatch(
+          UrlbarUtils.MATCH_TYPE.TAB_SWITCH,
+          UrlbarUtils.MATCH_SOURCE.TABS,
+          ...UrlbarMatch.payloadAndSimpleHighlights(tokens, {
+            url: [action.params.url, true],
+            title: [info.comment, true],
+            device: [action.params.deviceName, true],
+            icon: [info.icon, false],
+          })
+        );
       case "visiturl":
         return new UrlbarMatch(
           UrlbarUtils.MATCH_TYPE.URL,
@@ -259,7 +280,7 @@ function makeUrlbarMatch(tokens, info) {
           })
         );
       default:
-        Cu.reportError("Unexpected action type");
+        Cu.reportError(`Unexpected action type: ${action.type}`);
         return null;
     }
   }

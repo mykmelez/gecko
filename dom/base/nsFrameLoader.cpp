@@ -376,7 +376,7 @@ nsresult nsFrameLoader::ReallyStartLoadingInternal() {
   rv = CheckURILoad(mURIToLoad, mTriggeringPrincipal);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  RefPtr<nsDocShellLoadState> loadState = new nsDocShellLoadState();
+  RefPtr<nsDocShellLoadState> loadState = new nsDocShellLoadState(mURIToLoad);
 
   loadState->SetOriginalFrameSrc(mLoadingOriginalSrc);
   mLoadingOriginalSrc = false;
@@ -456,7 +456,6 @@ nsresult nsFrameLoader::ReallyStartLoadingInternal() {
   // Kick off the load...
   bool tmpState = mNeedsAsyncDestroy;
   mNeedsAsyncDestroy = true;
-  loadState->SetURI(mURIToLoad);
   loadState->SetLoadFlags(flags);
   loadState->SetFirstParty(false);
   rv = mDocShell->LoadURI(loadState);
@@ -504,7 +503,7 @@ nsresult nsFrameLoader::CheckURILoad(nsIURI* aURI,
   return CheckForRecursiveLoad(aURI);
 }
 
-nsIDocShell* nsFrameLoader::GetDocShell(ErrorResult& aRv) {
+nsDocShell* nsFrameLoader::GetDocShell(ErrorResult& aRv) {
   if (IsRemoteFrame()) {
     return nullptr;
   }
@@ -676,13 +675,10 @@ bool nsFrameLoader::Show(int32_t marginWidth, int32_t marginHeight,
   mDocShell->SetMarginWidth(marginWidth);
   mDocShell->SetMarginHeight(marginHeight);
 
-  nsCOMPtr<nsIScrollable> sc = do_QueryInterface(mDocShell);
-  if (sc) {
-    sc->SetDefaultScrollbarPreferences(nsIScrollable::ScrollOrientation_X,
-                                       scrollbarPrefX);
-    sc->SetDefaultScrollbarPreferences(nsIScrollable::ScrollOrientation_Y,
-                                       scrollbarPrefY);
-  }
+  mDocShell->SetDefaultScrollbarPreferences(nsIScrollable::ScrollOrientation_X,
+                                            scrollbarPrefX);
+  mDocShell->SetDefaultScrollbarPreferences(nsIScrollable::ScrollOrientation_Y,
+                                            scrollbarPrefY);
 
   nsCOMPtr<nsIPresShell> presShell = mDocShell->GetPresShell();
   if (presShell) {
@@ -699,8 +695,7 @@ bool nsFrameLoader::Show(int32_t marginWidth, int32_t marginHeight,
   nsView* view = frame->EnsureInnerView();
   if (!view) return false;
 
-  nsCOMPtr<nsIBaseWindow> baseWindow = do_QueryInterface(mDocShell);
-  NS_ASSERTION(baseWindow, "Found a nsIDocShell that isn't a nsIBaseWindow.");
+  RefPtr<nsDocShell> baseWindow = mDocShell;
   baseWindow->InitWindow(nullptr, view->GetWidget(), 0, 0, size.width,
                          size.height);
   // This is kinda whacky, this "Create()" call doesn't really
@@ -859,9 +854,7 @@ void nsFrameLoader::Hide() {
   mDocShell->GetContentViewer(getter_AddRefs(contentViewer));
   if (contentViewer) contentViewer->SetSticky(false);
 
-  nsCOMPtr<nsIBaseWindow> baseWin = do_QueryInterface(mDocShell);
-  NS_ASSERTION(baseWin,
-               "Found an nsIDocShell which doesn't implement nsIBaseWindow.");
+  RefPtr<nsDocShell> baseWin = mDocShell;
   baseWin->SetVisibility(false);
   baseWin->SetParentWidget(nullptr);
 }
@@ -1678,9 +1671,8 @@ void nsFrameLoader::DestroyDocShell() {
   }
 
   // Destroy the docshell.
-  nsCOMPtr<nsIBaseWindow> base_win(do_QueryInterface(mDocShell));
-  if (base_win) {
-    base_win->Destroy();
+  if (mDocShell) {
+    mDocShell->Destroy();
   }
   mDocShell = nullptr;
 
@@ -1740,7 +1732,7 @@ void nsFrameLoader::SetOwnerContent(Element* aContent) {
   if (wrapper) {
     JSAutoRealm ar(jsapi.cx(), wrapper);
     IgnoredErrorResult rv;
-    ReparentWrapper(jsapi.cx(), wrapper, rv);
+    UpdateReflectorGlobal(jsapi.cx(), wrapper, rv);
     Unused << NS_WARN_IF(rv.Failed());
   }
 
@@ -1978,8 +1970,8 @@ nsresult nsFrameLoader::MaybeCreateDocShell() {
   // This is kinda whacky, this call doesn't really create anything,
   // but it must be called to make sure things are properly
   // initialized.
-  nsCOMPtr<nsIBaseWindow> baseWin = do_QueryInterface(mDocShell);
-  if (NS_FAILED(baseWin->Create())) {
+  RefPtr<nsDocShell> docShell = mDocShell;
+  if (NS_FAILED(docShell->Create())) {
     // Do not call Destroy() here. See bug 472312.
     NS_WARNING("Something wrong when creating the docshell for a frameloader!");
     return NS_ERROR_FAILURE;
@@ -2298,8 +2290,7 @@ nsresult nsFrameLoader::UpdatePositionAndSize(nsSubDocumentFrame* aIFrame) {
 
 void nsFrameLoader::UpdateBaseWindowPositionAndSize(
     nsSubDocumentFrame* aIFrame) {
-  nsCOMPtr<nsIBaseWindow> baseWindow =
-      do_QueryInterface(GetDocShell(IgnoreErrors()));
+  nsCOMPtr<nsIBaseWindow> baseWindow = GetDocShell(IgnoreErrors());
 
   // resize the sub document
   if (baseWindow) {
@@ -3018,7 +3009,7 @@ already_AddRefed<nsILoadContext> nsFrameLoader::LoadContext() {
   if (IsRemoteFrame() && (mRemoteBrowser || TryRemoteBrowser())) {
     loadContext = mRemoteBrowser->GetLoadContext();
   } else {
-    loadContext = do_GetInterface(GetDocShell(IgnoreErrors()));
+    loadContext = do_GetInterface(ToSupports(GetDocShell(IgnoreErrors())));
   }
   return loadContext.forget();
 }

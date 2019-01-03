@@ -19,6 +19,7 @@
 #include "mozilla/dom/Attr.h"
 #include "mozilla/dom/Flex.h"
 #include "mozilla/dom/Grid.h"
+#include "mozilla/dom/ScriptLoader.h"
 #include "mozilla/dom/Text.h"
 #include "mozilla/gfx/Matrix.h"
 #include "nsAtom.h"
@@ -75,7 +76,7 @@
 #include "mozilla/TextEvents.h"
 #include "nsNodeUtils.h"
 #include "mozilla/dom/DirectionalityUtils.h"
-#include "nsDocument.h"
+#include "nsIDocument.h"
 #include "nsAttrValueOrString.h"
 #include "nsAttrValueInlines.h"
 #include "nsCSSPseudoElements.h"
@@ -83,7 +84,7 @@
 #ifdef MOZ_XUL
 #include "nsXULElement.h"
 #endif /* MOZ_XUL */
-#include "nsSVGElement.h"
+#include "SVGElement.h"
 #include "nsFrameSelection.h"
 #ifdef DEBUG
 #include "nsRange.h"
@@ -213,7 +214,7 @@ nsAtom* nsIContent::DoGetID() const {
 
 const nsAttrValue* Element::GetSVGAnimatedClass() const {
   MOZ_ASSERT(MayHaveClass() && IsSVGElement(), "Unexpected call");
-  return static_cast<const nsSVGElement*>(this)->GetAnimatedClassName();
+  return static_cast<const SVGElement*>(this)->GetAnimatedClassName();
 }
 
 NS_IMETHODIMP

@@ -138,10 +138,6 @@ class Visitor:
     def visitExprCast(self, ec):
         ec.expr.accept(self)
 
-    def visitExprIndex(self, ei):
-        ei.arr.accept(self)
-        ei.idx.accept(self)
-
     def visitExprSelect(self, es):
         es.obj.accept(self)
 
@@ -168,9 +164,6 @@ class Visitor:
 
     def visitExprMemberInit(self, minit):
         self.visitExprCall(minit)
-
-    def visitExprSizeof(self, es):
-        self.visitExprCall(es)
 
     def visitExprLambda(self, l):
         self.visitBlock(l)
@@ -237,7 +230,7 @@ class Node:
 class Whitespace(Node):
     # yes, this is silly.  but we need to stick comments in the
     # generated code without resorting to more serious hacks
-    def __init__(self, ws, indent=0):
+    def __init__(self, ws, indent=False):
         Node.__init__(self)
         self.ws = ws
         self.indent = indent
@@ -311,8 +304,8 @@ class Namespace(Block):
 
 class Type(Node):
     def __init__(self, name, const=False,
-                 ptr=False, ptrconst=False, ptrptr=False, ptrconstptr=False,
-                 ref=0,
+                 ptr=False, ptrptr=False, ptrconstptr=False,
+                 ref=False, rvalref=False,
                  hasimplicitcopyctor=True,
                  T=None,
                  inner=None):
@@ -324,31 +317,30 @@ To avoid getting fancy with recursive types, we limit the kinds
 of pointer types that can be be constructed.
 
   ptr            => T*
-  ptrconst       => T* const
   ptrptr         => T**
   ptrconstptr    => T* const*
+  ref            => T&
+  rvalref        => T&&
 
 Any type, naked or pointer, can be const (const T) or ref (T&).
-
-ref is an integer, indicating how many "levels" of references exist. So ref=2
-indicates T&&.
 """
         assert isinstance(name, str)
         assert isinstance(const, bool)
         assert isinstance(ptr, bool)
-        assert isinstance(ptrconst, bool)
         assert isinstance(ptrptr, bool)
         assert isinstance(ptrconstptr, bool)
+        assert isinstance(ref, bool)
+        assert isinstance(rvalref, bool)
         assert not isinstance(T, str)
 
         Node.__init__(self)
         self.name = name
         self.const = const
         self.ptr = ptr
-        self.ptrconst = ptrconst
         self.ptrptr = ptrptr
         self.ptrconstptr = ptrconstptr
         self.ref = ref
+        self.rvalref = rvalref
         self.hasimplicitcopyctor = hasimplicitcopyctor
         self.T = T
         self.inner = inner
@@ -358,9 +350,9 @@ indicates T&&.
     def __deepcopy__(self, memo):
         return Type(self.name,
                     const=self.const,
-                    ptr=self.ptr, ptrconst=self.ptrconst,
+                    ptr=self.ptr,
                     ptrptr=self.ptrptr, ptrconstptr=self.ptrconstptr,
-                    ref=self.ref,
+                    ref=self.ref, rvalref=self.rvalref,
                     T=copy.deepcopy(self.T, memo),
                     inner=copy.deepcopy(self.inner, memo))
 
@@ -440,8 +432,9 @@ class Using(Node):
 
 
 class ForwardDecl(Node):
-    def __init__(self, pqname, cls=0, struct=0):
-        assert (not cls and struct) or (cls and not struct)
+    def __init__(self, pqname, cls=False, struct=False):
+        # Exactly one of cls and struct must be set
+        assert cls ^ struct
 
         self.pqname = pqname
         self.cls = cls
@@ -479,8 +472,8 @@ class Param(Decl):
 
 class Class(Block):
     def __init__(self, name, inherits=[],
-                 interface=0, abstract=0, final=0,
-                 specializes=None, struct=0):
+                 interface=False, abstract=False, final=False,
+                 specializes=None, struct=False):
         assert not (interface and abstract)
         assert not (abstract and final)
         assert not (interface and final)
@@ -515,10 +508,8 @@ class FriendClassDecl(Node):
 def make_enum(name, members_str):
     members_list = members_str.split()
     members_dict = {}
-    member_value = 1
-    for member in members_list:
+    for member_value, member in enumerate(members_list, start=1):
         members_dict[member] = member_value
-        member_value += 1
     return type(name, (), members_dict)
 
 
@@ -527,7 +518,7 @@ MethodSpec = make_enum('MethodSpec', 'NONE VIRTUAL PURE OVERRIDE STATIC')
 
 class MethodDecl(Node):
     def __init__(self, name, params=[], ret=Type('void'),
-                 methodspec=MethodSpec.NONE, const=False, warn_unused=0,
+                 methodspec=MethodSpec.NONE, const=False, warn_unused=False,
                  force_inline=False, typeop=None, T=None, cls=None):
         assert not (name and typeop)
         assert name is None or isinstance(name, str)
@@ -536,6 +527,7 @@ class MethodDecl(Node):
             assert not isinstance(decl, str)
         assert not isinstance(T, int)
         assert isinstance(const, bool)
+        assert isinstance(warn_unused, bool)
         assert isinstance(force_inline, bool)
 
         if typeop is not None:
@@ -576,7 +568,7 @@ class MethodDefn(Block):
 
 class FunctionDecl(MethodDecl):
     def __init__(self, name, params=[], ret=Type('void'),
-                 methodspec=MethodSpec.NONE, warn_unused=0,
+                 methodspec=MethodSpec.NONE, warn_unused=False,
                  force_inline=False, T=None):
         assert methodspec == MethodSpec.NONE or methodspec == MethodSpec.STATIC
         MethodDecl.__init__(self, name, params=params, ret=ret,
@@ -590,7 +582,7 @@ class FunctionDefn(MethodDefn):
 
 
 class ConstructorDecl(MethodDecl):
-    def __init__(self, name, params=[], explicit=0, force_inline=False):
+    def __init__(self, name, params=[], explicit=False, force_inline=False):
         MethodDecl.__init__(self, name, params=params, ret=None,
                             force_inline=force_inline)
         self.explicit = explicit
@@ -650,9 +642,6 @@ class ExprLiteral(Node):
 
     @staticmethod
     def String(s): return ExprLiteral('"' + s + '"', 's')
-
-    @staticmethod
-    def WString(s): return ExprLiteral('L"' + s + '"', 's')
 
     def __str__(self):
         return ('%' + self.type) % (self.value)
@@ -716,13 +705,6 @@ class ExprConditional(Node):
         self.elsee = elsee
 
 
-class ExprIndex(Node):
-    def __init__(self, arr, idx):
-        Node.__init__(self)
-        self.arr = arr
-        self.idx = idx
-
-
 class ExprSelect(Node):
     def __init__(self, obj, op, field):
         assert obj and op and field
@@ -766,7 +748,7 @@ class ExprMove(ExprCall):
 class ExprNew(Node):
     # XXX taking some poetic license ...
     def __init__(self, ctype, args=[], newargs=None):
-        assert not (ctype.const or ctype.ref)
+        assert not (ctype.const or ctype.ref or ctype.rvalref)
 
         Node.__init__(self)
         self.ctype = ctype
@@ -783,11 +765,6 @@ class ExprDelete(Node):
 class ExprMemberInit(ExprCall):
     def __init__(self, member, args=[]):
         ExprCall.__init__(self, member, args)
-
-
-class ExprSizeof(ExprCall):
-    def __init__(self, t):
-        ExprCall.__init__(self, ExprVar('sizeof'), [t])
 
 
 class ExprLambda(Block):
@@ -903,10 +880,6 @@ class StmtSwitch(Block):
                          or isinstance(block.stmts[-1], StmtReturn))))
         self.addstmt(case)
         self.addstmt(block)
-        self.nr_cases += 1
-
-    def addfallthrough(self, case):
-        self.addstmt(case)
         self.nr_cases += 1
 
 

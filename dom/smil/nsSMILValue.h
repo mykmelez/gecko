@@ -7,8 +7,8 @@
 #ifndef NS_SMILVALUE_H_
 #define NS_SMILVALUE_H_
 
-#include "nsISMILType.h"
-#include "nsSMILNullType.h"
+#include "SMILType.h"
+#include "SMILNullType.h"
 
 /**
  * Although objects of this type are generally only created on the stack and
@@ -21,8 +21,11 @@
  */
 class nsSMILValue {
  public:
-  nsSMILValue() : mU(), mType(nsSMILNullType::Singleton()) {}
-  explicit nsSMILValue(const nsISMILType* aType);
+  typedef mozilla::SMILNullType SMILNullType;
+  typedef mozilla::SMILType SMILType;
+
+  nsSMILValue() : mU(), mType(SMILNullType::Singleton()) {}
+  explicit nsSMILValue(const SMILType* aType);
   nsSMILValue(const nsSMILValue& aVal);
 
   ~nsSMILValue() { mType->Destroy(*this); }
@@ -34,11 +37,11 @@ class nsSMILValue {
   nsSMILValue& operator=(nsSMILValue&& aVal);
 
   // Equality operators. These are allowed to be conservative (return false
-  // more than you'd expect) - see comment above nsISMILType::IsEqual.
+  // more than you'd expect) - see comment above SMILType::IsEqual.
   bool operator==(const nsSMILValue& aVal) const;
   bool operator!=(const nsSMILValue& aVal) const { return !(*this == aVal); }
 
-  bool IsNull() const { return (mType == nsSMILNullType::Singleton()); }
+  bool IsNull() const { return (mType == SMILNullType::Singleton()); }
 
   nsresult Add(const nsSMILValue& aValueToAdd, uint32_t aCount = 1);
   nsresult SandwichAdd(const nsSMILValue& aValueToAdd);
@@ -60,12 +63,12 @@ class nsSMILValue {
     float mNumberPair[2];
     void* mPtr;
   } mU;
-  const nsISMILType* mType;
+  const SMILType* mType;
 
  protected:
-  void InitAndCheckPostcondition(const nsISMILType* aNewType);
+  void InitAndCheckPostcondition(const SMILType* aNewType);
   void DestroyAndCheckPostcondition();
-  void DestroyAndReinit(const nsISMILType* aNewType);
+  void DestroyAndReinit(const SMILType* aNewType);
 };
 
 #endif  // NS_SMILVALUE_H_

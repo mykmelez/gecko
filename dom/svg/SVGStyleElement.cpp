@@ -4,12 +4,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/dom/Element.h"
 #include "mozilla/dom/SVGStyleElement.h"
+
+#include "mozilla/dom/Element.h"
 #include "nsContentUtils.h"
 #include "mozilla/dom/SVGStyleElementBinding.h"
 
-NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Style)
+NS_IMPL_NS_NEW_SVG_ELEMENT(Style)
 
 namespace mozilla {
 namespace dom {

@@ -7,18 +7,18 @@
 #ifndef mozilla_dom_SVGViewportElement_h
 #define mozilla_dom_SVGViewportElement_h
 
+#include "mozilla/Attributes.h"
 #include "mozilla/dom/FromParser.h"
 #include "nsAutoPtr.h"
 #include "nsIContentInlines.h"
-#include "nsISVGPoint.h"
-#include "nsSVGEnum.h"
-#include "nsSVGLength2.h"
+#include "SVGAnimatedPreserveAspectRatio.h"
+#include "SVGEnum.h"
 #include "SVGGraphicsElement.h"
 #include "SVGImageContext.h"
-#include "nsSVGViewBox.h"
+#include "nsSVGLength2.h"
+#include "nsISVGPoint.h"
 #include "SVGPreserveAspectRatio.h"
-#include "SVGAnimatedPreserveAspectRatio.h"
-#include "mozilla/Attributes.h"
+#include "nsSVGViewBox.h"
 
 class nsSVGOuterSVGFrame;
 class nsSVGViewportFrame;
@@ -29,7 +29,6 @@ class DOMSVGAnimatedPreserveAspectRatio;
 
 namespace dom {
 class SVGAnimatedRect;
-class SVGTransform;
 class SVGViewElement;
 class SVGViewportElement;
 
@@ -55,7 +54,7 @@ class SVGViewportElement : public SVGGraphicsElement {
   // nsIContent interface
   NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
 
-  // nsSVGElement specializations:
+  // SVGElement specializations:
   virtual gfxMatrix PrependLocalTransformsTo(
       const gfxMatrix& aMatrix,
       SVGTransformTypes aWhich = eAllTransforms) const override;
@@ -180,7 +179,7 @@ class SVGViewportElement : public SVGGraphicsElement {
   virtual SVGAnimatedPreserveAspectRatio* GetPreserveAspectRatio() override;
 
   virtual const nsSVGViewBox& GetViewBoxInternal() const { return mViewBox; }
-  virtual nsSVGAnimatedTransformList* GetTransformInternal() const {
+  virtual SVGAnimatedTransformList* GetTransformInternal() const {
     return mTransforms;
   }
   nsSVGViewBox mViewBox;

@@ -383,10 +383,21 @@ class nsDocShell final : public nsDocLoader,
   // shift while triggering reload)
   bool IsForceReloading();
 
+  mozilla::dom::BrowsingContext* GetBrowsingContext() const {
+    return mBrowsingContext;
+  }
+  mozilla::dom::BrowsingContext* GetWindowProxy() {
+    EnsureScriptEnvironment();
+    return mBrowsingContext;
+  }
+
   /**
-   * Native getter for a DocShell's BrowsingContext.
+   * Loads the given URI. See comments on nsDocShellLoadState members for more
+   * information on information used. aDocShell and aRequest come from
+   * onLinkClickSync, which is triggered during form submission.
    */
-  mozilla::dom::BrowsingContext* GetBrowsingContext() const;
+  nsresult InternalLoad(nsDocShellLoadState* aLoadState,
+                        nsIDocShell** aDocShell, nsIRequest** aRequest);
 
  private:  // member functions
   friend class nsDSURIContentListener;
@@ -526,19 +537,10 @@ class nsDocShell final : public nsDocLoader,
   // aOriginalURI will be set as the originalURI on the channel that does the
   // load. If aOriginalURI is null, aURI will be set as the originalURI.
   // If aLoadReplace is true, LOAD_REPLACE flag will be set to the nsIChannel.
-  nsresult DoURILoad(
-      nsIURI* aURI, nsIURI* aOriginalURI,
-      mozilla::Maybe<nsCOMPtr<nsIURI>> const& aResultPrincipalURI,
-      bool aKeepResultPrincipalURIIfSet, bool aLoadReplace,
-      bool aIsFromProcessingFrameAttributes, bool aLoadFromExternal,
-      bool aForceAllowDataURI, bool aOriginalFrameSrc, nsIURI* aReferrer,
-      bool aSendReferrer, uint32_t aReferrerPolicy,
-      nsIPrincipal* aTriggeringPrincipal, nsIPrincipal* aPrincipalToInherit,
-      const nsACString& aTypeHint, const nsAString& aFileName,
-      nsIInputStream* aPostData, nsIInputStream* aHeadersData, bool aFirstParty,
-      nsIDocShell** aDocShell, nsIRequest** aRequest, bool aIsNewWindowTarget,
-      bool aBypassClassifier, bool aForceAllowCookies, const nsAString& aSrcdoc,
-      nsIURI* aBaseURI, nsContentPolicyType aContentPolicyType);
+  nsresult DoURILoad(nsDocShellLoadState* aLoadState, bool aLoadFromExternal,
+                     nsIDocShell** aDocShell, nsIRequest** aRequest,
+                     const nsAString& aSrcdoc,
+                     nsContentPolicyType aContentPolicyType);
 
   nsresult AddHeadersToChannel(nsIInputStream* aHeadersData,
                                nsIChannel* aChannel);

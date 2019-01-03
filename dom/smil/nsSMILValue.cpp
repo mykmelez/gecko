@@ -11,8 +11,8 @@
 //----------------------------------------------------------------------
 // Public methods
 
-nsSMILValue::nsSMILValue(const nsISMILType* aType)
-    : mType(nsSMILNullType::Singleton()) {
+nsSMILValue::nsSMILValue(const SMILType* aType)
+    : mType(SMILNullType::Singleton()) {
   mU.mBool = false;
   if (!aType) {
     NS_ERROR("Trying to construct nsSMILValue with null mType pointer");
@@ -23,7 +23,7 @@ nsSMILValue::nsSMILValue(const nsISMILType* aType)
 }
 
 nsSMILValue::nsSMILValue(const nsSMILValue& aVal)
-    : mType(nsSMILNullType::Singleton()) {
+    : mType(SMILNullType::Singleton()) {
   InitAndCheckPostcondition(aVal.mType);
   mType->Assign(*this, aVal);
 }
@@ -47,7 +47,7 @@ nsSMILValue::nsSMILValue(nsSMILValue&& aVal)
       mType(aVal.mType) {
   // Leave aVal with a null type, so that it's safely destructible (and won't
   // mess with anything referenced by its union, which we've copied).
-  aVal.mType = nsSMILNullType::Singleton();
+  aVal.mType = SMILNullType::Singleton();
 }
 
 nsSMILValue& nsSMILValue::operator=(nsSMILValue&& aVal) {
@@ -62,7 +62,7 @@ nsSMILValue& nsSMILValue::operator=(nsSMILValue&& aVal) {
 
   // Leave aVal with a null type, so that it's safely destructible (and won't
   // mess with anything referenced by its union, which we've now copied).
-  aVal.mType = nsSMILNullType::Singleton();
+  aVal.mType = SMILNullType::Singleton();
 
   return *this;
 }
@@ -120,8 +120,8 @@ nsresult nsSMILValue::Interpolate(const nsSMILValue& aEndVal,
 //----------------------------------------------------------------------
 // Helper methods
 
-// Wrappers for nsISMILType::Init & ::Destroy that verify their postconditions
-void nsSMILValue::InitAndCheckPostcondition(const nsISMILType* aNewType) {
+// Wrappers for SMILType::Init & ::Destroy that verify their postconditions
+void nsSMILValue::InitAndCheckPostcondition(const SMILType* aNewType) {
   aNewType->Init(*this);
   MOZ_ASSERT(mType == aNewType,
              "Post-condition of Init failed. nsSMILValue is invalid");
@@ -134,7 +134,7 @@ void nsSMILValue::DestroyAndCheckPostcondition() {
              "nsSMILValue not null after destroying");
 }
 
-void nsSMILValue::DestroyAndReinit(const nsISMILType* aNewType) {
+void nsSMILValue::DestroyAndReinit(const SMILType* aNewType) {
   DestroyAndCheckPostcondition();
   InitAndCheckPostcondition(aNewType);
 }

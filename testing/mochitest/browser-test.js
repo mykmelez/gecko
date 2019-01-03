@@ -382,8 +382,12 @@ function Tester(aTests, structuredLogger, aCallback) {
 
   // In order to allow existing tests to continue using unsafe CPOWs
   // with EventUtils, we need to load a separate copy into a sandbox
-  // which has unsafe CPOW usage whitelisted.
-  this.cpowSandbox = Cu.Sandbox(window, {sandboxPrototype: window});
+  // which has unsafe CPOW usage whitelisted. We need to create a new
+  // compartment for Cu.permitCPOWsInScope.
+  this.cpowSandbox = Cu.Sandbox(window, {
+    freshCompartment: true,
+    sandboxPrototype: window,
+  });
   Cu.permitCPOWsInScope(this.cpowSandbox);
 
   this.cpowEventUtils = new this.cpowSandbox.Object();
@@ -435,10 +439,10 @@ function Tester(aTests, structuredLogger, aCallback) {
       configurable: true,
       writable: true,
       value: {
-        loadSubScript: (url, obj, charset) => {
+        loadSubScript: (url, obj) => {
           let before = Object.keys(window);
           try {
-            return this._scriptLoader.loadSubScript(url, obj, charset);
+            return this._scriptLoader.loadSubScript(url, obj);
           } finally {
             for (let property of Object.keys(window)) {
               if (!before.includes(property) && !this._globalProperties.includes(property)) {
@@ -1454,7 +1458,13 @@ testScope.prototype = {
   Assert: null,
 
   _createSandbox() {
-    let sandbox = Cu.Sandbox(window, {sandboxPrototype: window});
+    // Force this sandbox to be in its own compartment because we call
+    // Cu.permitCPOWsInScope on it and we can't call that on objects in the
+    // shared system compartment.
+    let sandbox = Cu.Sandbox(window, {
+      freshCompartment: true,
+      sandboxPrototype: window,
+    });
 
     for (let prop in this) {
       if (typeof this[prop] == "function") {

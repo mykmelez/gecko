@@ -16,7 +16,6 @@ XPCOMUtils.defineLazyGlobalGetters(this, ["DOMParser", "XMLHttpRequest"]);
 const UPDATESERVICE_CID = Components.ID("{B3C290A6-3943-4B89-8BBE-C01EB7B3B311}");
 
 const PREF_APP_UPDATE_ALTWINDOWTYPE        = "app.update.altwindowtype";
-const PREF_APP_UPDATE_BACKGROUNDINTERVAL   = "app.update.download.backgroundInterval";
 const PREF_APP_UPDATE_BACKGROUNDERRORS     = "app.update.backgroundErrors";
 const PREF_APP_UPDATE_BACKGROUNDMAXERRORS  = "app.update.backgroundMaxErrors";
 const PREF_APP_UPDATE_CANCELATIONS         = "app.update.cancelations";
@@ -156,8 +155,6 @@ const NETWORK_ERROR_OFFLINE             = 111;
 const HTTP_ERROR_OFFSET                 = 1000;
 
 const DOWNLOAD_CHUNK_SIZE           = 300000; // bytes
-const DOWNLOAD_BACKGROUND_INTERVAL  = 600; // seconds
-const DOWNLOAD_FOREGROUND_INTERVAL  = 0;
 
 const UPDATE_WINDOW_NAME      = "Update:Wizard";
 
@@ -1192,6 +1189,9 @@ function UpdatePatch(patch) {
   for (var i = 0; i < patch.attributes.length; ++i) {
     var attr = patch.attributes.item(i);
     switch (attr.name) {
+      case "xmlns":
+        // Don't save the XML namespace.
+        break;
       case "selected":
         this.selected = attr.value == "true";
         break;
@@ -1201,8 +1201,19 @@ function UpdatePatch(patch) {
           throw Cr.NS_ERROR_ILLEGAL_VALUE;
         }
         // fall through
+      case "type":
+      case "URL":
+      case "finalURL":
+      case "state":
+      case "errorCode":
+        this[attr.name] = attr.value;
+        break;
       default:
         this[attr.name] = attr.value;
+        // Save custom attributes when serializing to the local xml file but
+        // don't use this method for the expected attributes which are already
+        // handled in serialize.
+        this.setProperty(attr.name, attr.value);
         break;
     }
   }
@@ -1263,16 +1274,22 @@ UpdatePatch.prototype = {
 
   /**
    * See nsIPropertyBag.idl
+   *
+   * Note: this only contains the nsIPropertyBag name / value pairs and not the
+   *       nsIUpdatePatch name / value pairs.
    */
   get enumerator() {
     return this.enumerate();
   },
 
   * enumerate() {
-    for (var p in this._properties) {
-      let prop = this.properties[p].data;
-      if (prop) {
-        yield prop;
+    for (let propName in this._properties) {
+      if (this._properties[propName].present) {
+        // The nsIPropertyBag enumerator returns a nsISimpleEnumerator whose
+        // elements are nsIProperty objects.
+        yield { name: propName,
+                value: this._properties[propName].data,
+                QueryInterface: ChromeUtils.generateQI([Ci.nsIProperty])};
       }
     }
   },
@@ -1330,8 +1347,6 @@ function Update(update) {
   this.unsupported = false;
   this.channel = "default";
   this.promptWaitTime = Services.prefs.getIntPref(PREF_APP_UPDATE_PROMPTWAITTIME, 43200);
-  this.backgroundInterval = Services.prefs.getIntPref(PREF_APP_UPDATE_BACKGROUNDINTERVAL,
-                                                      DOWNLOAD_BACKGROUND_INTERVAL);
 
   // Null <update>, assume this is a message container and do no
   // further initialization
@@ -1366,7 +1381,8 @@ function Update(update) {
 
   for (let i = 0; i < update.attributes.length; ++i) {
     var attr = update.attributes.item(i);
-    if (attr.value == "undefined") {
+    if (attr.name == "xmlns" || attr.value == "undefined") {
+      // Don't save the XML namespace or undefined values.
       continue;
     } else if (attr.name == "detailsURL") {
       this._detailsURL = attr.value;
@@ -1385,10 +1401,6 @@ function Update(update) {
     } else if (attr.name == "promptWaitTime") {
       if (!isNaN(attr.value)) {
         this.promptWaitTime = parseInt(attr.value);
-      }
-    } else if (attr.name == "backgroundInterval") {
-      if (!isNaN(attr.value)) {
-        this.backgroundInterval = parseInt(attr.value);
       }
     } else if (attr.name == "unsupported") {
       this.unsupported = attr.value == "true";
@@ -1419,9 +1431,6 @@ function Update(update) {
   if (!this.displayVersion) {
     this.displayVersion = this.appVersion;
   }
-
-  // Don't allow the background download interval to be greater than 10 minutes.
-  this.backgroundInterval = Math.min(this.backgroundInterval, 600);
 
   // The Update Name is either the string provided by the <update> element, or
   // the string: "<App Name> <Update App Version>"
@@ -1528,7 +1537,6 @@ Update.prototype = {
     }
     var update = updates.createElementNS(URI_UPDATE_NS, "update");
     update.setAttribute("appVersion", this.appVersion);
-    update.setAttribute("backgroundInterval", this.backgroundInterval);
     update.setAttribute("buildID", this.buildID);
     update.setAttribute("channel", this.channel);
     update.setAttribute("displayVersion", this.displayVersion);
@@ -1590,16 +1598,22 @@ Update.prototype = {
 
   /**
    * See nsIPropertyBag.idl
+   *
+   * Note: this only contains the nsIPropertyBag name value / pairs and not the
+   *       nsIUpdate name / value pairs.
    */
   get enumerator() {
     return this.enumerate();
   },
 
   * enumerate() {
-    for (var p in this._properties) {
-      let prop = this.properties[p].data;
-      if (prop) {
-        yield prop;
+    for (let propName in this._properties) {
+      if (this._properties[propName].present) {
+        // The nsIPropertyBag enumerator returns a nsISimpleEnumerator whose
+        // elements are nsIProperty objects.
+        yield { name: propName,
+                value: this._properties[propName].data,
+                QueryInterface: ChromeUtils.generateQI([Ci.nsIProperty])};
       }
     }
   },
@@ -3552,9 +3566,9 @@ Downloader.prototype = {
 
     let patchFile = getUpdatesDir().clone();
     patchFile.append(FILE_UPDATE_MAR);
-    update.QueryInterface(Ci.nsIPropertyBag);
-    let interval = this.background ? update.getProperty("backgroundInterval")
-                                   : DOWNLOAD_FOREGROUND_INTERVAL;
+
+    // The interval is 0 since there is no need to throttle downloads.
+    let interval = 0;
 
     LOG("Downloader:downloadUpdate - url: " + this._patch.URL + ", path: " +
         patchFile.path + ", interval: " + interval);
@@ -3903,6 +3917,7 @@ Downloader.prototype = {
         // downloading) and if at any point this was a foreground download
         // notify the user about the error. If the update was a background
         // update there is no notification since the user won't be expecting it.
+        this._update.QueryInterface(Ci.nsIWritablePropertyBag);
         if (!Services.wm.getMostRecentWindow(UPDATE_WINDOW_NAME) &&
             this._update.getProperty("foregroundDownload") == "true") {
           let prompter = Cc["@mozilla.org/updates/update-prompt;1"].

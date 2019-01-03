@@ -14,6 +14,7 @@ import type { Record } from "../utils/makeRecord";
 import type { Worker } from "../types";
 import type { Action } from "../actions/types";
 import makeRecord from "../utils/makeRecord";
+import { getMainThread } from "./pause";
 
 export type WorkersList = List<Worker>;
 
@@ -21,11 +22,9 @@ type DebuggeeState = {
   workers: WorkersList
 };
 
-export const createDebuggeeState = makeRecord(
-  ({
-    workers: List()
-  }: DebuggeeState)
-);
+export const createDebuggeeState: () => Record<DebuggeeState> = makeRecord({
+  workers: List()
+});
 
 export default function debuggee(
   state: Record<DebuggeeState> = createDebuggeeState(),
@@ -41,8 +40,27 @@ export default function debuggee(
 
 export const getWorkers = (state: OuterState) => state.debuggee.workers;
 
-type OuterState = { debuggee: DebuggeeState };
+export const getWorkerDisplayName = (state: OuterState, thread: string) => {
+  let index = 1;
+  for (const { actor } of state.debuggee.workers) {
+    if (actor == thread) {
+      return `Worker #${index}`;
+    }
+    index++;
+  }
+  return "";
+};
 
-export function getWorker(state: OuterState, url: string) {
-  return getWorkers(state).find(value => url);
-}
+export const isValidThread = (state: OuterState, thread: string) => {
+  if (thread == getMainThread((state: any))) {
+    return true;
+  }
+  for (const { actor } of state.debuggee.workers) {
+    if (actor == thread) {
+      return true;
+    }
+  }
+  return false;
+};
+
+type OuterState = { debuggee: DebuggeeState };

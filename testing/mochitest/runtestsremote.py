@@ -16,7 +16,7 @@ from automation import Automation
 from remoteautomation import RemoteAutomation, fennecLogcatFilters
 from runtests import MochitestDesktop, MessageLogger
 from mochitest_options import MochitestArgumentParser
-from mozdevice import ADBAndroid, ADBTimeoutError
+from mozdevice import ADBDevice, ADBTimeoutError
 from mozscreenshot import dump_screen, dump_device_screen
 import mozinfo
 
@@ -40,10 +40,10 @@ class MochiRemote(MochitestDesktop):
         self.chromePushed = False
         self.mozLogName = "moz.log"
 
-        self.device = ADBAndroid(adb=options.adbPath or 'adb',
-                                 device=options.deviceSerial,
-                                 test_root=options.remoteTestRoot,
-                                 verbose=verbose)
+        self.device = ADBDevice(adb=options.adbPath or 'adb',
+                                device=options.deviceSerial,
+                                test_root=options.remoteTestRoot,
+                                verbose=verbose)
 
         if options.remoteTestRoot is None:
             options.remoteTestRoot = self.device.test_root
@@ -103,6 +103,7 @@ class MochiRemote(MochitestDesktop):
             str(self.device.version))
         mozinfo.info['android_version'] = str(self.device.version)
         mozinfo.info['isFennec'] = not ('geckoview' in options.app)
+        mozinfo.info['is_emulator'] = self.device._device_serial.startswith('emulator-')
 
     def cleanup(self, options, final=False):
         if final:

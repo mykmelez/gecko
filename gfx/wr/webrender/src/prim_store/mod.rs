@@ -2,17 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{AlphaType, BorderRadius, ClipMode, ColorF, PictureRect, ColorU, LayoutVector2D};
-use api::{DeviceIntRect, DeviceIntSize, DevicePixelScale, DeviceRect, LayoutSideOffsetsAu};
-use api::{FilterOp, ImageKey, ImageRendering, TileOffset, RepeatMode, MixBlendMode};
-use api::{LayoutPoint, LayoutRect, LayoutSideOffsets, LayoutSize, PropertyBindingId};
-use api::{PremultipliedColorF, PropertyBinding, Shadow, YuvColorSpace, YuvFormat};
-use api::{DeviceIntSideOffsets, WorldPixel, BoxShadowClipMode, NormalBorder, WorldRect, LayoutToWorldScale};
-use api::{PicturePixel, RasterPixel, ColorDepth, LineStyle, LineOrientation, LayoutSizeAu, AuHelpers};
+use api::{BorderRadius, ClipMode, ColorF, PictureRect, ColorU, LayoutVector2D};
+use api::{DeviceIntRect, DevicePixelScale, DeviceRect};
+use api::{FilterOp, ImageRendering, TileOffset, RepeatMode};
+use api::{LayoutPoint, LayoutRect, LayoutSideOffsets, LayoutSize};
+use api::{PremultipliedColorF, PropertyBinding, Shadow};
+use api::{WorldPixel, BoxShadowClipMode, WorldRect, LayoutToWorldScale};
+use api::{PicturePixel, RasterPixel, LineStyle, LineOrientation, AuHelpers};
 use api::LayoutPrimitiveInfo;
-use app_units::Au;
-use border::{get_max_scale_for_border, build_border_instances, create_border_segments};
-use border::{BorderSegmentCacheKey, NormalBorderAu};
+use border::{get_max_scale_for_border, build_border_instances};
+use border::BorderSegmentCacheKey;
 use clip::{ClipStore};
 use clip_scroll_tree::{ClipScrollTree, SpatialNodeIndex};
 use clip::{ClipDataStore, ClipNodeFlags, ClipChainId, ClipChainInstance, ClipItem, ClipNodeCollector};
@@ -23,16 +22,20 @@ use frame_builder::PrimitiveContext;
 use glyph_rasterizer::GlyphKey;
 use gpu_cache::{GpuCache, GpuCacheAddress, GpuCacheHandle, GpuDataRequest, ToGpuBlocks};
 use gpu_types::BrushFlags;
-use image::{self, Repetition};
+use image::{Repetition};
 use intern;
 use picture::{PictureCompositeMode, PicturePrimitive, PictureUpdateState, TileCacheUpdateState};
-use picture::{ClusterRange, PrimitiveList, SurfaceIndex, SurfaceInfo, RetainedTiles, RasterConfig};
+use picture::{ClusterIndex, PrimitiveList, SurfaceIndex, SurfaceInfo, RetainedTiles, RasterConfig};
+use prim_store::borders::{ImageBorderDataHandle, NormalBorderDataHandle};
 use prim_store::gradient::{LinearGradientDataHandle, RadialGradientDataHandle};
+use prim_store::image::{ImageDataHandle, ImageInstance, VisibleImageTile, YuvImageDataHandle};
+use prim_store::line_dec::LineDecorationDataHandle;
+use prim_store::picture::PictureDataHandle;
 use prim_store::text_run::{TextRunDataHandle, TextRunPrimitive};
 #[cfg(debug_assertions)]
 use render_backend::{FrameId};
 use render_backend::FrameResources;
-use render_task::{BlitSource, RenderTask, RenderTaskCacheKey, to_cache_size};
+use render_task::{RenderTask, RenderTaskCacheKey, to_cache_size};
 use render_task::{RenderTaskCacheKeyKind, RenderTaskId, RenderTaskCacheEntryHandle};
 use renderer::{MAX_VERTEX_TEXTURE_WIDTH};
 use resource_cache::{ImageProperties, ImageRequest, ResourceCache};
@@ -46,7 +49,11 @@ use util::{ScaleOffset, MatrixHelpers, MaxRect, recycle_vec};
 use util::{pack_as_float, project_rect, raster_rect_to_device_pixels};
 use smallvec::SmallVec;
 
+pub mod borders;
 pub mod gradient;
+pub mod image;
+pub mod line_dec;
+pub mod picture;
 pub mod text_run;
 
 /// Counter for unique primitive IDs for debug tracing.
@@ -145,8 +152,8 @@ impl<F, T> CoordinateSpaceMapping<F, T> {
         clip_scroll_tree: &ClipScrollTree,
     ) -> Option<Self> {
         let spatial_nodes = &clip_scroll_tree.spatial_nodes;
-        let ref_spatial_node = &spatial_nodes[ref_spatial_node_index.0];
-        let target_spatial_node = &spatial_nodes[target_node_index.0];
+        let ref_spatial_node = &spatial_nodes[ref_spatial_node_index.0 as usize];
+        let target_spatial_node = &spatial_nodes[target_node_index.0 as usize];
 
         if ref_spatial_node_index == target_node_index {
             Some(CoordinateSpaceMapping::Local)
@@ -305,7 +312,7 @@ pub struct DeferredResolve {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub struct ClipTaskIndex(pub u32);
+pub struct ClipTaskIndex(pub u16);
 
 impl ClipTaskIndex {
     pub const INVALID: ClipTaskIndex = ClipTaskIndex(0);
@@ -342,162 +349,16 @@ pub struct PrimitiveSceneData {
     pub is_backface_visible: bool,
 }
 
-/// Represents a hashable description of how a picture primitive
-/// will be composited into its parent.
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug, Clone, PartialEq, Hash, Eq)]
-pub enum PictureCompositeKey {
-    // No visual compositing effect
-    Identity,
-
-    // FilterOp
-    Blur(Au),
-    Brightness(Au),
-    Contrast(Au),
-    Grayscale(Au),
-    HueRotate(Au),
-    Invert(Au),
-    Opacity(Au),
-    OpacityBinding(PropertyBindingId, Au),
-    Saturate(Au),
-    Sepia(Au),
-    DropShadow(VectorKey, Au, ColorU),
-    ColorMatrix([Au; 20]),
-    SrgbToLinear,
-    LinearToSrgb,
-
-    // MixBlendMode
-    Multiply,
-    Screen,
-    Overlay,
-    Darken,
-    Lighten,
-    ColorDodge,
-    ColorBurn,
-    HardLight,
-    SoftLight,
-    Difference,
-    Exclusion,
-    Hue,
-    Saturation,
-    Color,
-    Luminosity,
-}
-
-impl From<Option<PictureCompositeMode>> for PictureCompositeKey {
-    fn from(mode: Option<PictureCompositeMode>) -> Self {
-        match mode {
-            Some(PictureCompositeMode::MixBlend(mode)) => {
-                match mode {
-                    MixBlendMode::Normal => PictureCompositeKey::Identity,
-                    MixBlendMode::Multiply => PictureCompositeKey::Multiply,
-                    MixBlendMode::Screen => PictureCompositeKey::Screen,
-                    MixBlendMode::Overlay => PictureCompositeKey::Overlay,
-                    MixBlendMode::Darken => PictureCompositeKey::Darken,
-                    MixBlendMode::Lighten => PictureCompositeKey::Lighten,
-                    MixBlendMode::ColorDodge => PictureCompositeKey::ColorDodge,
-                    MixBlendMode::ColorBurn => PictureCompositeKey::ColorBurn,
-                    MixBlendMode::HardLight => PictureCompositeKey::HardLight,
-                    MixBlendMode::SoftLight => PictureCompositeKey::SoftLight,
-                    MixBlendMode::Difference => PictureCompositeKey::Difference,
-                    MixBlendMode::Exclusion => PictureCompositeKey::Exclusion,
-                    MixBlendMode::Hue => PictureCompositeKey::Hue,
-                    MixBlendMode::Saturation => PictureCompositeKey::Saturation,
-                    MixBlendMode::Color => PictureCompositeKey::Color,
-                    MixBlendMode::Luminosity => PictureCompositeKey::Luminosity,
-                }
-            }
-            Some(PictureCompositeMode::Filter(op)) => {
-                match op {
-                    FilterOp::Blur(value) => PictureCompositeKey::Blur(Au::from_f32_px(value)),
-                    FilterOp::Brightness(value) => PictureCompositeKey::Brightness(Au::from_f32_px(value)),
-                    FilterOp::Contrast(value) => PictureCompositeKey::Contrast(Au::from_f32_px(value)),
-                    FilterOp::Grayscale(value) => PictureCompositeKey::Grayscale(Au::from_f32_px(value)),
-                    FilterOp::HueRotate(value) => PictureCompositeKey::HueRotate(Au::from_f32_px(value)),
-                    FilterOp::Invert(value) => PictureCompositeKey::Invert(Au::from_f32_px(value)),
-                    FilterOp::Saturate(value) => PictureCompositeKey::Saturate(Au::from_f32_px(value)),
-                    FilterOp::Sepia(value) => PictureCompositeKey::Sepia(Au::from_f32_px(value)),
-                    FilterOp::SrgbToLinear => PictureCompositeKey::SrgbToLinear,
-                    FilterOp::LinearToSrgb => PictureCompositeKey::LinearToSrgb,
-                    FilterOp::Identity => PictureCompositeKey::Identity,
-                    FilterOp::DropShadow(offset, radius, color) => {
-                        PictureCompositeKey::DropShadow(offset.into(), Au::from_f32_px(radius), color.into())
-                    }
-                    FilterOp::Opacity(binding, _) => {
-                        match binding {
-                            PropertyBinding::Value(value) => {
-                                PictureCompositeKey::Opacity(Au::from_f32_px(value))
-                            }
-                            PropertyBinding::Binding(key, default) => {
-                                PictureCompositeKey::OpacityBinding(key.id, Au::from_f32_px(default))
-                            }
-                        }
-                    }
-                    FilterOp::ColorMatrix(values) => {
-                        let mut quantized_values: [Au; 20] = [Au(0); 20];
-                        for (value, result) in values.iter().zip(quantized_values.iter_mut()) {
-                            *result = Au::from_f32_px(*value);
-                        }
-                        PictureCompositeKey::ColorMatrix(quantized_values)
-                    }
-                }
-            }
-            Some(PictureCompositeMode::Blit) |
-            Some(PictureCompositeMode::TileCache { .. }) |
-            None => {
-                PictureCompositeKey::Identity
-            }
-        }
-    }
-}
-
 /// Information specific to a primitive type that
 /// uniquely identifies a primitive template by key.
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum PrimitiveKeyKind {
-    /// Identifying key for a line decoration.
-    LineDecoration {
-        // If the cache_key is Some(..) it is a line decoration
-        // that relies on a render task (e.g. wavy). If the
-        // cache key is None, it uses a fast path to draw the
-        // line decoration as a solid rect.
-        cache_key: Option<LineDecorationCacheKey>,
-        color: ColorU,
-    },
     /// Clear an existing rect, used for special effects on some platforms.
     Clear,
-    NormalBorder {
-        border: NormalBorderAu,
-        widths: LayoutSideOffsetsAu,
-    },
-    ImageBorder {
-        request: ImageRequest,
-        nine_patch: NinePatchDescriptor,
-    },
     Rectangle {
         color: ColorU,
-    },
-    YuvImage {
-        color_depth: ColorDepth,
-        yuv_key: [ImageKey; 3],
-        format: YuvFormat,
-        color_space: YuvColorSpace,
-        image_rendering: ImageRendering,
-    },
-    Image {
-        key: ImageKey,
-        stretch_size: SizeKey,
-        tile_spacing: SizeKey,
-        color: ColorU,
-        sub_rect: Option<DeviceIntRect>,
-        image_rendering: ImageRendering,
-        alpha_type: AlphaType,
-    },
-    Picture {
-        composite_mode_key: PictureCompositeKey,
     },
 }
 
@@ -644,8 +505,8 @@ impl SizeKey {
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 #[derive(Copy, Debug, Clone, PartialEq)]
 pub struct VectorKey {
-    x: f32,
-    y: f32,
+    pub x: f32,
+    pub y: f32,
 }
 
 impl Eq for VectorKey {}
@@ -677,8 +538,8 @@ impl From<LayoutVector2D> for VectorKey {
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct PointKey {
-    x: f32,
-    y: f32,
+    pub x: f32,
+    pub y: f32,
 }
 
 impl Eq for PointKey {}
@@ -730,6 +591,14 @@ impl PrimKeyCommonData {
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct PrimKey<T> {
+    pub common: PrimKeyCommonData,
+    pub kind: T,
+}
+
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct PrimitiveKey {
     pub common: PrimKeyCommonData,
     pub kind: PrimitiveKeyKind,
@@ -761,28 +630,11 @@ impl AsInstanceKind<PrimitiveDataHandle> for PrimitiveKey {
     fn as_instance_kind(
         &self,
         data_handle: PrimitiveDataHandle,
-        prim_store: &mut PrimitiveStore,
+        _: &mut PrimitiveStore,
     ) -> PrimitiveInstanceKind {
         match self.kind {
-            PrimitiveKeyKind::LineDecoration { .. } => {
-                PrimitiveInstanceKind::LineDecoration {
-                    data_handle,
-                    cache_handle: None,
-                }
-            }
             PrimitiveKeyKind::Clear => {
                 PrimitiveInstanceKind::Clear {
-                    data_handle
-                }
-            }
-            PrimitiveKeyKind::NormalBorder { .. } => {
-                PrimitiveInstanceKind::NormalBorder {
-                    data_handle,
-                    cache_handles: storage::Range::empty(),
-                }
-            }
-            PrimitiveKeyKind::ImageBorder { .. } => {
-                PrimitiveInstanceKind::ImageBorder {
                     data_handle
                 }
             }
@@ -793,42 +645,8 @@ impl AsInstanceKind<PrimitiveDataHandle> for PrimitiveKey {
                     segment_instance_index: SegmentInstanceIndex::INVALID,
                 }
             }
-            PrimitiveKeyKind::YuvImage { .. } => {
-                PrimitiveInstanceKind::YuvImage {
-                    data_handle,
-                    segment_instance_index: SegmentInstanceIndex::INVALID
-                }
-            }
-            PrimitiveKeyKind::Image { .. } => {
-                // TODO(gw): Refactor this to not need a separate image
-                //           instance (see ImageInstance struct).
-                let image_instance_index = prim_store.images.push(ImageInstance {
-                    opacity_binding_index: OpacityBindingIndex::INVALID,
-                    segment_instance_index: SegmentInstanceIndex::INVALID,
-                    visible_tiles: Vec::new(),
-                });
-
-                PrimitiveInstanceKind::Image {
-                    data_handle,
-                    image_instance_index,
-                }
-            }
-            PrimitiveKeyKind::Picture { .. } => {
-                // Should never be hit as this method should not be
-                // called for pictures.
-                unreachable!();
-            }
         }
     }
-}
-
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-pub struct NormalBorderTemplate {
-    pub brush_segments: Vec<BrushSegment>,
-    pub border_segments: Vec<BorderSegmentInfo>,
-    pub border: NormalBorder,
-    pub widths: LayoutSideOffsets,
 }
 
 /// The shared information for a given primitive. This is interned and retained
@@ -836,128 +654,23 @@ pub struct NormalBorderTemplate {
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub enum PrimitiveTemplateKind {
-    LineDecoration {
-        cache_key: Option<LineDecorationCacheKey>,
-        color: ColorF,
-    },
-    NormalBorder {
-        template: Box<NormalBorderTemplate>,
-    },
-    ImageBorder {
-        request: ImageRequest,
-        brush_segments: Vec<BrushSegment>,
-    },
     Rectangle {
         color: ColorF,
     },
-    YuvImage {
-        color_depth: ColorDepth,
-        yuv_key: [ImageKey; 3],
-        format: YuvFormat,
-        color_space: YuvColorSpace,
-        image_rendering: ImageRendering,
-    },
-    Image {
-        key: ImageKey,
-        stretch_size: LayoutSize,
-        tile_spacing: LayoutSize,
-        color: ColorF,
-        source: ImageSource,
-        image_rendering: ImageRendering,
-        sub_rect: Option<DeviceIntRect>,
-        alpha_type: AlphaType,
-    },
     Clear,
-    Picture {
-
-    },
 }
 
 /// Construct the primitive template data from a primitive key. This
 /// is invoked when a primitive key is created and the interner
 /// doesn't currently contain a primitive with this key.
 impl PrimitiveKeyKind {
-    fn into_template(
-        self,
-        size: LayoutSize,
-    ) -> PrimitiveTemplateKind {
+    fn into_template(self) -> PrimitiveTemplateKind {
         match self {
-            PrimitiveKeyKind::Picture { .. } => {
-                PrimitiveTemplateKind::Picture {
-
-                }
-            }
             PrimitiveKeyKind::Clear => {
                 PrimitiveTemplateKind::Clear
             }
-            PrimitiveKeyKind::NormalBorder { widths, border, .. } => {
-                let mut border: NormalBorder = border.into();
-                let widths = LayoutSideOffsets::from_au(widths);
-
-                // FIXME(emilio): Is this the best place to do this?
-                border.normalize(&widths);
-
-                let mut brush_segments = Vec::new();
-                let mut border_segments = Vec::new();
-
-                create_border_segments(
-                    size,
-                    &border,
-                    &widths,
-                    &mut border_segments,
-                    &mut brush_segments,
-                );
-
-                PrimitiveTemplateKind::NormalBorder {
-                    template: Box::new(NormalBorderTemplate {
-                        border,
-                        widths,
-                        border_segments,
-                        brush_segments,
-                    })
-                }
-            }
-            PrimitiveKeyKind::ImageBorder {
-                request,
-                ref nine_patch,
-                ..
-            } => {
-                let brush_segments = nine_patch.create_segments(size);
-
-                PrimitiveTemplateKind::ImageBorder {
-                    request,
-                    brush_segments,
-                }
-            }
             PrimitiveKeyKind::Rectangle { color, .. } => {
                 PrimitiveTemplateKind::Rectangle {
-                    color: color.into(),
-                }
-            }
-            PrimitiveKeyKind::YuvImage { color_depth, yuv_key, format, color_space, image_rendering, .. } => {
-                PrimitiveTemplateKind::YuvImage {
-                    color_depth,
-                    yuv_key,
-                    format,
-                    color_space,
-                    image_rendering,
-                }
-            }
-            PrimitiveKeyKind::Image { alpha_type, key, color, stretch_size, tile_spacing, image_rendering, sub_rect, .. } => {
-                PrimitiveTemplateKind::Image {
-                    key,
-                    color: color.into(),
-                    stretch_size: stretch_size.into(),
-                    tile_spacing: tile_spacing.into(),
-                    source: ImageSource::Default,
-                    sub_rect,
-                    image_rendering,
-                    alpha_type,
-                }
-            }
-            PrimitiveKeyKind::LineDecoration { cache_key, color } => {
-                PrimitiveTemplateKind::LineDecoration {
-                    cache_key,
                     color: color.into(),
                 }
             }
@@ -993,6 +706,13 @@ impl PrimTemplateCommonData {
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
+pub struct PrimTemplate<T> {
+    pub common: PrimTemplateCommonData,
+    pub kind: T,
+}
+
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct PrimitiveTemplate {
     pub common: PrimTemplateCommonData,
     pub kind: PrimitiveTemplateKind,
@@ -1014,7 +734,7 @@ impl ops::DerefMut for PrimitiveTemplate {
 impl From<PrimitiveKey> for PrimitiveTemplate {
     fn from(item: PrimitiveKey) -> Self {
         let common = PrimTemplateCommonData::with_key_common(item.common);
-        let kind = item.kind.into_template(common.prim_size);
+        let kind = item.kind.into_template();
 
         PrimitiveTemplate { common, kind, }
     }
@@ -1024,8 +744,7 @@ impl PrimitiveTemplateKind {
     /// Write any GPU blocks for the primitive template to the given request object.
     fn write_prim_gpu_blocks(
         &self,
-        request: &mut GpuDataRequest,
-        prim_size: LayoutSize,
+        request: &mut GpuDataRequest
     ) {
         match *self {
             PrimitiveTemplateKind::Clear => {
@@ -1035,102 +754,6 @@ impl PrimitiveTemplateKind {
             PrimitiveTemplateKind::Rectangle { ref color, .. } => {
                 request.push(color.premultiplied());
             }
-            PrimitiveTemplateKind::NormalBorder { .. } => {
-                // Border primitives currently used for
-                // image borders, and run through the
-                // normal brush_image shader.
-                request.push(PremultipliedColorF::WHITE);
-                request.push(PremultipliedColorF::WHITE);
-                request.push([
-                    prim_size.width,
-                    prim_size.height,
-                    0.0,
-                    0.0,
-                ]);
-            }
-            PrimitiveTemplateKind::ImageBorder { .. } => {
-                // Border primitives currently used for
-                // image borders, and run through the
-                // normal brush_image shader.
-                request.push(PremultipliedColorF::WHITE);
-                request.push(PremultipliedColorF::WHITE);
-                request.push([
-                    prim_size.width,
-                    prim_size.height,
-                    0.0,
-                    0.0,
-                ]);
-            }
-            PrimitiveTemplateKind::LineDecoration { ref cache_key, ref color } => {
-                match cache_key {
-                    Some(cache_key) => {
-                        request.push(color.premultiplied());
-                        request.push(PremultipliedColorF::WHITE);
-                        request.push([
-                            cache_key.size.width.to_f32_px(),
-                            cache_key.size.height.to_f32_px(),
-                            0.0,
-                            0.0,
-                        ]);
-                    }
-                    None => {
-                        request.push(color.premultiplied());
-                    }
-                }
-            }
-            PrimitiveTemplateKind::YuvImage { color_depth, format, color_space, .. } => {
-                request.push([
-                    color_depth.rescaling_factor(),
-                    pack_as_float(color_space as u32),
-                    pack_as_float(format as u32),
-                    0.0
-                ]);
-            }
-            PrimitiveTemplateKind::Image { stretch_size, tile_spacing, color, .. } => {
-                // Images are drawn as a white color, modulated by the total
-                // opacity coming from any collapsed property bindings.
-                request.push(color.premultiplied());
-                request.push(PremultipliedColorF::WHITE);
-                request.push([
-                    stretch_size.width + tile_spacing.width,
-                    stretch_size.height + tile_spacing.height,
-                    0.0,
-                    0.0,
-                ]);
-            }
-            PrimitiveTemplateKind::Picture { .. } => {}
-        }
-    }
-
-    fn write_segment_gpu_blocks(
-        &self,
-        request: &mut GpuDataRequest,
-    ) {
-        match *self {
-            PrimitiveTemplateKind::NormalBorder { ref template, .. } => {
-                for segment in &template.brush_segments {
-                    // has to match VECS_PER_SEGMENT
-                    request.write_segment(
-                        segment.local_rect,
-                        segment.extra_data,
-                    );
-                }
-            }
-            PrimitiveTemplateKind::ImageBorder { ref brush_segments, .. } => {
-                for segment in brush_segments {
-                    // has to match VECS_PER_SEGMENT
-                    request.write_segment(
-                        segment.local_rect,
-                        segment.extra_data,
-                    );
-                }
-            }
-            PrimitiveTemplateKind::Clear |
-            PrimitiveTemplateKind::LineDecoration { .. } |
-            PrimitiveTemplateKind::Image { .. } |
-            PrimitiveTemplateKind::Rectangle { .. } |
-            PrimitiveTemplateKind::YuvImage { .. } |
-            PrimitiveTemplateKind::Picture { .. } => {}
         }
     }
 }
@@ -1142,20 +765,10 @@ impl PrimitiveTemplate {
     /// done if the cache entry is invalid (due to first use or eviction).
     pub fn update(
         &mut self,
-        // TODO(gw): Passing in surface_index here is not ideal. The primitive template
-        //           code shouldn't depend on current surface state. This is due to a
-        //           limitation in how render task caching works. We should fix this by
-        //           allowing render task caching to assign to surfaces implicitly
-        //           during pass allocation.
-        surface_index: SurfaceIndex,
         frame_state: &mut FrameBuildingState,
     ) {
         if let Some(mut request) = frame_state.gpu_cache.request(&mut self.common.gpu_cache_handle) {
-            self.kind.write_prim_gpu_blocks(
-                &mut request,
-                self.common.prim_size,
-            );
-            self.kind.write_segment_gpu_blocks(&mut request);
+            self.kind.write_prim_gpu_blocks(&mut request);
         }
 
         self.opacity = match self.kind {
@@ -1164,183 +777,6 @@ impl PrimitiveTemplate {
             }
             PrimitiveTemplateKind::Rectangle { ref color, .. } => {
                 PrimitiveOpacity::from_alpha(color.a)
-            }
-            PrimitiveTemplateKind::NormalBorder { .. } => {
-                // Shouldn't matter, since the segment opacity is used instead
-                PrimitiveOpacity::translucent()
-            }
-            PrimitiveTemplateKind::ImageBorder { request, .. } => {
-                let image_properties = frame_state
-                    .resource_cache
-                    .get_image_properties(request.key);
-
-                if let Some(image_properties) = image_properties {
-                    frame_state.resource_cache.request_image(
-                        request,
-                        frame_state.gpu_cache,
-                    );
-                    PrimitiveOpacity {
-                        is_opaque: image_properties.descriptor.is_opaque,
-                    }
-                } else {
-                    PrimitiveOpacity::opaque()
-                }
-            }
-            PrimitiveTemplateKind::LineDecoration { ref cache_key, ref color } => {
-                match cache_key {
-                    Some(..) => PrimitiveOpacity::translucent(),
-                    None => PrimitiveOpacity::from_alpha(color.a),
-                }
-            }
-            PrimitiveTemplateKind::YuvImage { format, yuv_key, image_rendering, .. } => {
-                let channel_num = format.get_plane_num();
-                debug_assert!(channel_num <= 3);
-                for channel in 0 .. channel_num {
-                    frame_state.resource_cache.request_image(
-                        ImageRequest {
-                            key: yuv_key[channel],
-                            rendering: image_rendering,
-                            tile: None,
-                        },
-                        frame_state.gpu_cache,
-                    );
-                }
-
-                PrimitiveOpacity::translucent()
-            }
-            PrimitiveTemplateKind::Image { key, stretch_size, ref color, tile_spacing, ref mut source, sub_rect, image_rendering, .. } => {
-                let image_properties = frame_state
-                    .resource_cache
-                    .get_image_properties(key);
-
-                match image_properties {
-                    Some(image_properties) => {
-                        let is_tiled = image_properties.tiling.is_some();
-
-                        if tile_spacing != LayoutSize::zero() && !is_tiled {
-                            *source = ImageSource::Cache {
-                                // Size in device-pixels we need to allocate in render task cache.
-                                size: image_properties.descriptor.size.to_i32(),
-                                handle: None,
-                            };
-                        }
-
-                        // Work out whether this image is a normal / simple type, or if
-                        // we need to pre-render it to the render task cache.
-                        if let Some(rect) = sub_rect {
-                            // We don't properly support this right now.
-                            debug_assert!(!is_tiled);
-                            *source = ImageSource::Cache {
-                                // Size in device-pixels we need to allocate in render task cache.
-                                size: rect.size,
-                                handle: None,
-                            };
-                        }
-
-                        let mut request_source_image = false;
-                        let mut is_opaque = image_properties.descriptor.is_opaque;
-                        let request = ImageRequest {
-                            key,
-                            rendering: image_rendering,
-                            tile: None,
-                        };
-
-                        // Every frame, for cached items, we need to request the render
-                        // task cache item. The closure will be invoked on the first
-                        // time through, and any time the render task output has been
-                        // evicted from the texture cache.
-                        match *source {
-                            ImageSource::Cache { ref mut size, ref mut handle } => {
-                                let padding = DeviceIntSideOffsets::new(
-                                    0,
-                                    (tile_spacing.width * size.width as f32 / stretch_size.width) as i32,
-                                    (tile_spacing.height * size.height as f32 / stretch_size.height) as i32,
-                                    0,
-                                );
-
-                                let inner_size = *size;
-                                size.width += padding.horizontal();
-                                size.height += padding.vertical();
-
-                                is_opaque &= padding == DeviceIntSideOffsets::zero();
-
-                                let image_cache_key = ImageCacheKey {
-                                    request,
-                                    texel_rect: sub_rect,
-                                };
-                                let surfaces = &mut frame_state.surfaces;
-
-                                // Request a pre-rendered image task.
-                                *handle = Some(frame_state.resource_cache.request_render_task(
-                                    RenderTaskCacheKey {
-                                        size: *size,
-                                        kind: RenderTaskCacheKeyKind::Image(image_cache_key),
-                                    },
-                                    frame_state.gpu_cache,
-                                    frame_state.render_tasks,
-                                    None,
-                                    image_properties.descriptor.is_opaque,
-                                    |render_tasks| {
-                                        // We need to render the image cache this frame,
-                                        // so will need access to the source texture.
-                                        request_source_image = true;
-
-                                        // Create a task to blit from the texture cache to
-                                        // a normal transient render task surface. This will
-                                        // copy only the sub-rect, if specified.
-                                        let cache_to_target_task = RenderTask::new_blit_with_padding(
-                                            inner_size,
-                                            &padding,
-                                            BlitSource::Image { key: image_cache_key },
-                                        );
-                                        let cache_to_target_task_id = render_tasks.add(cache_to_target_task);
-
-                                        // Create a task to blit the rect from the child render
-                                        // task above back into the right spot in the persistent
-                                        // render target cache.
-                                        let target_to_cache_task = RenderTask::new_blit(
-                                            *size,
-                                            BlitSource::RenderTask {
-                                                task_id: cache_to_target_task_id,
-                                            },
-                                        );
-                                        let target_to_cache_task_id = render_tasks.add(target_to_cache_task);
-
-                                        // Hook this into the render task tree at the right spot.
-                                        surfaces[surface_index.0].tasks.push(target_to_cache_task_id);
-
-                                        // Pass the image opacity, so that the cached render task
-                                        // item inherits the same opacity properties.
-                                        target_to_cache_task_id
-                                    }
-                                ));
-                            }
-                            ImageSource::Default => {
-                                // Normal images just reference the source texture each frame.
-                                request_source_image = true;
-                            }
-                        }
-
-                        if request_source_image && !is_tiled {
-                            frame_state.resource_cache.request_image(
-                                request,
-                                frame_state.gpu_cache,
-                            );
-                        }
-
-                        if is_opaque {
-                            PrimitiveOpacity::from_alpha(color.a)
-                        } else {
-                            PrimitiveOpacity::translucent()
-                        }
-                    }
-                    None => {
-                        PrimitiveOpacity::opaque()
-                    }
-                }
-            }
-            PrimitiveTemplateKind::Picture { .. } => {
-                PrimitiveOpacity::translucent()
             }
         };
     }
@@ -1413,17 +849,6 @@ impl OpacityBinding {
 
         self.current = new_opacity;
     }
-}
-
-#[derive(Debug)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-pub struct VisibleImageTile {
-    pub tile_offset: TileOffset,
-    pub handle: GpuCacheHandle,
-    pub edge_flags: EdgeAaSegmentMask,
-    pub local_rect: LayoutRect,
-    pub local_clip_rect: LayoutRect,
 }
 
 #[derive(Debug)]
@@ -1560,41 +985,6 @@ impl BrushSegment {
             }
         }
     }
-}
-
-// Key that identifies a unique (partial) image that is being
-// stored in the render task cache.
-#[derive(Debug, Copy, Clone, Eq, Hash, PartialEq)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-pub struct ImageCacheKey {
-    pub request: ImageRequest,
-    pub texel_rect: Option<DeviceIntRect>,
-}
-
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-pub struct LineDecorationCacheKey {
-    pub style: LineStyle,
-    pub orientation: LineOrientation,
-    pub wavy_line_thickness: Au,
-    pub size: LayoutSizeAu,
-}
-
-// Where to find the texture data for an image primitive.
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug)]
-pub enum ImageSource {
-    // A normal image - just reference the texture cache.
-    Default,
-    // An image that is pre-rendered into the texture cache
-    // via a render task.
-    Cache {
-        size: DeviceIntSize,
-        handle: Option<RenderTaskCacheEntryHandle>,
-    },
 }
 
 #[derive(Debug)]
@@ -1830,16 +1220,10 @@ impl IsVisible for PrimitiveKeyKind {
     //           primitive types to use this.
     fn is_visible(&self) -> bool {
         match *self {
-            PrimitiveKeyKind::NormalBorder { .. } |
-            PrimitiveKeyKind::ImageBorder { .. } |
-            PrimitiveKeyKind::YuvImage { .. } |
-            PrimitiveKeyKind::Image { .. } |
-            PrimitiveKeyKind::Clear |
-            PrimitiveKeyKind::Picture { .. } => {
+            PrimitiveKeyKind::Clear => {
                 true
             }
-            PrimitiveKeyKind::Rectangle { ref color, .. } |
-            PrimitiveKeyKind::LineDecoration { ref color, .. } => {
+            PrimitiveKeyKind::Rectangle { ref color, .. } => {
                 color.a > 0
             }
         }
@@ -1855,62 +1239,16 @@ impl CreateShadow for PrimitiveKeyKind {
         shadow: &Shadow,
     ) -> PrimitiveKeyKind {
         match *self {
-            PrimitiveKeyKind::LineDecoration { ref cache_key, .. } => {
-                PrimitiveKeyKind::LineDecoration {
-                    color: shadow.color.into(),
-                    cache_key: cache_key.clone(),
-                }
-            }
             PrimitiveKeyKind::Rectangle { .. } => {
                 PrimitiveKeyKind::Rectangle {
                     color: shadow.color.into(),
                 }
             }
-            PrimitiveKeyKind::NormalBorder { ref border, widths, .. } => {
-                let border = border.with_color(shadow.color.into());
-                PrimitiveKeyKind::NormalBorder {
-                    border,
-                    widths,
-                }
-            }
-            PrimitiveKeyKind::Image { alpha_type, image_rendering, tile_spacing, stretch_size, key, sub_rect, .. } => {
-                PrimitiveKeyKind::Image {
-                    tile_spacing,
-                    stretch_size,
-                    key,
-                    sub_rect,
-                    image_rendering,
-                    alpha_type,
-                    color: shadow.color.into(),
-                }
-            }
-            PrimitiveKeyKind::ImageBorder { .. } |
-            PrimitiveKeyKind::YuvImage { .. } |
-            PrimitiveKeyKind::Picture { .. } |
             PrimitiveKeyKind::Clear => {
                 panic!("bug: this prim is not supported in shadow contexts");
             }
         }
     }
-}
-
-/// Instance specific fields for an image primitive. These are
-/// currently stored in a separate array to avoid bloating the
-/// size of PrimitiveInstance. In the future, we should be able
-/// to remove this and store the information inline, by:
-/// (a) Removing opacity collapse / binding support completely.
-///     Once we have general picture caching, we don't need this.
-/// (b) Change visible_tiles to use Storage in the primitive
-///     scratch buffer. This will reduce the size of the
-///     visible_tiles field here, and save memory allocation
-///     when image tiling is used. I've left it as a Vec for
-///     now to reduce the number of changes, and because image
-///     tiling is very rare on real pages.
-#[derive(Debug)]
-pub struct ImageInstance {
-    pub opacity_binding_index: OpacityBindingIndex,
-    pub segment_instance_index: SegmentInstanceIndex,
-    pub visible_tiles: Vec<VisibleImageTile>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1923,7 +1261,7 @@ pub enum PrimitiveInstanceKind {
     /// Direct reference to a Picture
     Picture {
         /// Handle to the common interned data for this primitive.
-        data_handle: PrimitiveDataHandle,
+        data_handle: PictureDataHandle,
         pic_index: PictureIndex,
     },
     /// A run of glyphs, with associated font parameters.
@@ -1937,7 +1275,7 @@ pub enum PrimitiveInstanceKind {
     /// task handle, if this line decoration is not a simple solid.
     LineDecoration {
         /// Handle to the common interned data for this primitive.
-        data_handle: PrimitiveDataHandle,
+        data_handle: LineDecorationDataHandle,
         // TODO(gw): For now, we need to store some information in
         //           the primitive instance that is created during
         //           prepare_prims and read during the batching pass.
@@ -1950,12 +1288,12 @@ pub enum PrimitiveInstanceKind {
     },
     NormalBorder {
         /// Handle to the common interned data for this primitive.
-        data_handle: PrimitiveDataHandle,
+        data_handle: NormalBorderDataHandle,
         cache_handles: storage::Range<RenderTaskCacheEntryHandle>,
     },
     ImageBorder {
         /// Handle to the common interned data for this primitive.
-        data_handle: PrimitiveDataHandle,
+        data_handle: ImageBorderDataHandle,
     },
     Rectangle {
         /// Handle to the common interned data for this primitive.
@@ -1965,12 +1303,12 @@ pub enum PrimitiveInstanceKind {
     },
     YuvImage {
         /// Handle to the common interned data for this primitive.
-        data_handle: PrimitiveDataHandle,
+        data_handle: YuvImageDataHandle,
         segment_instance_index: SegmentInstanceIndex,
     },
     Image {
         /// Handle to the common interned data for this primitive.
-        data_handle: PrimitiveDataHandle,
+        data_handle: ImageDataHandle,
         image_instance_index: ImageInstanceIndex,
     },
     LinearGradient {
@@ -2026,14 +1364,16 @@ pub struct PrimitiveInstance {
     /// a list of clip task ids (one per segment).
     pub clip_task_index: ClipTaskIndex,
 
+    /// The cluster that this primitive belongs to. This is used
+    /// for quickly culling out groups of primitives during the
+    /// initial picture traversal pass.
+    pub cluster_index: ClusterIndex,
+
     /// ID of the clip chain that this primitive is clipped by.
     pub clip_chain_id: ClipChainId,
 
     /// ID of the spatial node that this primitive is positioned by.
     pub spatial_node_index: SpatialNodeIndex,
-
-    /// A range of clusters that this primitive instance belongs to.
-    pub cluster_range: ClusterRange,
 }
 
 impl PrimitiveInstance {
@@ -2055,8 +1395,14 @@ impl PrimitiveInstance {
             clip_task_index: ClipTaskIndex::INVALID,
             clip_chain_id,
             spatial_node_index,
-            cluster_range: ClusterRange { start: 0, end: 0 },
+            cluster_index: ClusterIndex::INVALID,
         }
+    }
+
+    // Reset any pre-frame state for this primitive.
+    pub fn reset(&mut self) {
+        self.bounding_rect = None;
+        self.clip_task_index = ClipTaskIndex::INVALID;
     }
 
     #[cfg(debug_assertions)]
@@ -2071,23 +1417,35 @@ impl PrimitiveInstance {
 
     pub fn uid(&self) -> intern::ItemUid {
         match &self.kind {
-            PrimitiveInstanceKind::Picture { data_handle, .. } |
-            PrimitiveInstanceKind::LineDecoration { data_handle, .. } |
             PrimitiveInstanceKind::Clear { data_handle, .. } |
-            PrimitiveInstanceKind::NormalBorder { data_handle, .. } |
-            PrimitiveInstanceKind::ImageBorder { data_handle, .. } |
-            PrimitiveInstanceKind::Rectangle { data_handle, .. } |
-            PrimitiveInstanceKind::YuvImage { data_handle, .. } |
+            PrimitiveInstanceKind::Rectangle { data_handle, .. } => {
+                data_handle.uid()
+            }
             PrimitiveInstanceKind::Image { data_handle, .. } => {
                 data_handle.uid()
             }
+            PrimitiveInstanceKind::ImageBorder { data_handle, .. } => {
+                data_handle.uid()
+            }
+            PrimitiveInstanceKind::LineDecoration { data_handle, .. } => {
+                data_handle.uid()
+            }
             PrimitiveInstanceKind::LinearGradient { data_handle, .. } => {
+                data_handle.uid()
+            }
+            PrimitiveInstanceKind::NormalBorder { data_handle, .. } => {
+                data_handle.uid()
+            }
+            PrimitiveInstanceKind::Picture { data_handle, .. } => {
                 data_handle.uid()
             }
             PrimitiveInstanceKind::RadialGradient { data_handle, .. } => {
                 data_handle.uid()
             }
             PrimitiveInstanceKind::TextRun { data_handle, .. } => {
+                data_handle.uid()
+            }
+            PrimitiveInstanceKind::YuvImage { data_handle, .. } => {
                 data_handle.uid()
             }
         }
@@ -2326,29 +1684,24 @@ impl PrimitiveStore {
                 debug_assert!(state.tile_cache.is_none());
                 let mut tile_cache = pic.tile_cache.take().unwrap();
 
-                let surface_index = pic.raster_config.as_ref().unwrap().surface_index;
-                let surface = &surfaces[surface_index.0];
-
                 // If we have a tile cache for this picture, see if any of the
                 // relative transforms have changed, which means we need to
                 // re-map the dependencies of any child primitives.
-                tile_cache.update_transforms(
-                    surface.surface_spatial_node_index,
-                    surface.raster_spatial_node_index,
-                    pic.requested_raster_space,
-                    frame_context,
+                tile_cache.pre_update(
                     pic.local_rect,
+                    frame_context,
+                    resource_cache,
+                    retained_tiles,
                 );
 
-                state.tile_cache = Some((tile_cache, pic.spatial_node_index));
+                state.tile_cache = Some(tile_cache);
             }
             mem::replace(&mut pic.prim_list.pictures, SmallVec::new())
         };
 
-        if let Some((ref mut tile_cache, surface_spatial_node_index)) = state.tile_cache {
+        if let Some(ref mut tile_cache) = state.tile_cache {
             self.pictures[pic_index.0].update_prim_dependencies(
                 tile_cache,
-                surface_spatial_node_index,
                 frame_context,
                 resource_cache,
                 resources,
@@ -2375,19 +1728,20 @@ impl PrimitiveStore {
 
         let pic = &mut self.pictures[pic_index.0];
         if let Some(RasterConfig { composite_mode: PictureCompositeMode::TileCache { .. }, .. }) = pic.raster_config {
-            let mut tile_cache = state.tile_cache.take().unwrap().0;
+            let mut tile_cache = state.tile_cache.take().unwrap();
 
             // Build the dirty region(s) for this tile cache.
-            tile_cache.build_dirty_regions(
-                pic.spatial_node_index,
-                frame_context,
+            pic.local_clip_rect = tile_cache.post_update(
                 resource_cache,
                 gpu_cache,
-                retained_tiles,
+                clip_store,
+                frame_context,
+                resources,
             );
 
             pic.tile_cache = Some(tile_cache);
         }
+
         pic.prim_list.pictures = children;
     }
 
@@ -2546,6 +1900,7 @@ impl PrimitiveStore {
                         pic_context.allow_subpixel_aa,
                         frame_state,
                         frame_context,
+                        pic_context.dirty_world_rect,
                     ) {
                         Some(info) => Some(info),
                         None => {
@@ -2678,7 +2033,7 @@ impl PrimitiveStore {
             let clip_chain = frame_state
                 .clip_store
                 .build_clip_chain_instance(
-                    prim_instance.clip_chain_id,
+                    prim_instance,
                     local_rect,
                     prim_local_clip_rect,
                     prim_context.spatial_node_index,
@@ -2766,7 +2121,7 @@ impl PrimitiveStore {
         }
 
         pic_state.is_cacheable &= prim_instance.is_cacheable(
-            &resources.prim_data_store,
+            &resources,
             frame_state.resource_cache,
         );
 
@@ -2844,7 +2199,7 @@ impl PrimitiveStore {
         scratch: &mut PrimitiveScratchBuffer,
     ) {
         for (plane_split_anchor, prim_instance) in prim_list.prim_instances.iter_mut().enumerate() {
-            prim_instance.bounding_rect = None;
+            prim_instance.reset();
 
             if prim_instance.is_chased() {
                 #[cfg(debug_assertions)]
@@ -2852,46 +2207,14 @@ impl PrimitiveStore {
                     prim_instance.id, pic_context.pipeline_id);
             }
 
-            // Run through the list of cluster(s) this primitive belongs
-            // to. As soon as we find one visible cluster that this
-            // primitive belongs to, then the primitive itself can be
-            // considered visible.
-            // TODO(gw): Initially, primitive clusters are only used
-            //           to group primitives by backface visibility and
-            //           whether a spatial node is invertible or not.
-            //           In the near future, clusters will also act as
-            //           a simple spatial hash for grouping.
-            // TODO(gw): For now, walk the primitive list and check if
-            //           it is visible in any clusters, as this is a
-            //           simple way to retain correct render order. In
-            //           the future, it might make sense to invert this
-            //           and have the cluster visibility pass produce
-            //           an index buffer / set of primitive instances
-            //           that we sort into render order.
-            let mut in_visible_cluster = false;
-            for ci in prim_instance.cluster_range.start .. prim_instance.cluster_range.end {
-                // Map from the cluster range index to a cluster index
-                let cluster_index = prim_list.prim_cluster_map[ci as usize];
-
-                // Get the cluster and see if is visible
-                let cluster = &prim_list.clusters[cluster_index.0 as usize];
-                in_visible_cluster |= cluster.is_visible;
-
-                // As soon as a primitive is in a visible cluster, it's considered
-                // visible and we don't need to consult other clusters.
-                if cluster.is_visible {
-                    break;
-                }
-            }
-
-            // If the primitive wasn't in any visible clusters, it can be skipped.
-            if !in_visible_cluster {
+            // Get the cluster and see if is visible
+            if !prim_list.clusters[prim_instance.cluster_index.0 as usize].is_visible {
                 continue;
             }
 
             let spatial_node = &frame_context
                 .clip_scroll_tree
-                .spatial_nodes[prim_instance.spatial_node_index.0];
+                .spatial_nodes[prim_instance.spatial_node_index.0 as usize];
 
             // TODO(gw): Although constructing these is cheap, they are often
             //           the same for many consecutive primitives, so it may
@@ -2940,61 +2263,52 @@ impl PrimitiveStore {
 
         match &mut prim_instance.kind {
             PrimitiveInstanceKind::LineDecoration { data_handle, ref mut cache_handle, .. } => {
-                let prim_data = &mut resources.prim_data_store[*data_handle];
+                let prim_data = &mut resources.line_decoration_data_store[*data_handle];
+                let common_data = &mut prim_data.common;
+                let line_dec_data = &mut prim_data.kind;
 
                 // Update the template this instane references, which may refresh the GPU
                 // cache with any shared template data.
-                prim_data.update(
-                    pic_context.surface_index,
-                    frame_state,
-                );
+                line_dec_data.update(common_data, frame_state);
 
-                match &prim_data.kind {
-                    PrimitiveTemplateKind::LineDecoration { ref cache_key, .. } => {
-                        // Work out the device pixel size to be used to cache this line decoration.
-                        if is_chased {
-                            println!("\tline decoration key={:?}", cache_key);
+                // Work out the device pixel size to be used to cache this line decoration.
+                if is_chased {
+                    println!("\tline decoration key={:?}", line_dec_data.cache_key);
+                }
+
+                // If we have a cache key, it's a wavy / dashed / dotted line. Otherwise, it's
+                // a simple solid line.
+                if let Some(cache_key) = line_dec_data.cache_key.as_ref() {
+                    // TODO(gw): Do we ever need / want to support scales for text decorations
+                    //           based on the current transform?
+                    let scale_factor = TypedScale::new(1.0) * frame_context.device_pixel_scale;
+                    let task_size = (LayoutSize::from_au(cache_key.size) * scale_factor).ceil().to_i32();
+
+                    // Request a pre-rendered image task.
+                    // TODO(gw): This match is a bit untidy, but it should disappear completely
+                    //           once the prepare_prims and batching are unified. When that
+                    //           happens, we can use the cache handle immediately, and not need
+                    //           to temporarily store it in the primitive instance.
+                    *cache_handle = Some(frame_state.resource_cache.request_render_task(
+                        RenderTaskCacheKey {
+                            size: task_size,
+                            kind: RenderTaskCacheKeyKind::LineDecoration(cache_key.clone()),
+                        },
+                        frame_state.gpu_cache,
+                        frame_state.render_tasks,
+                        None,
+                        false,
+                        |render_tasks| {
+                            let task = RenderTask::new_line_decoration(
+                                task_size,
+                                cache_key.style,
+                                cache_key.orientation,
+                                cache_key.wavy_line_thickness.to_f32_px(),
+                                LayoutSize::from_au(cache_key.size),
+                            );
+                            render_tasks.add(task)
                         }
-
-                        // If we have a cache key, it's a wavy / dashed / dotted line. Otherwise, it's
-                        // a simple solid line.
-                        if let Some(cache_key) = cache_key {
-                            // TODO(gw): Do we ever need / want to support scales for text decorations
-                            //           based on the current transform?
-                            let scale_factor = TypedScale::new(1.0) * frame_context.device_pixel_scale;
-                            let task_size = (LayoutSize::from_au(cache_key.size) * scale_factor).ceil().to_i32();
-                            let surfaces = &mut frame_state.surfaces;
-
-                            // Request a pre-rendered image task.
-                            // TODO(gw): This match is a bit untidy, but it should disappear completely
-                            //           once the prepare_prims and batching are unified. When that
-                            //           happens, we can use the cache handle immediately, and not need
-                            //           to temporarily store it in the primitive instance.
-                            *cache_handle = Some(frame_state.resource_cache.request_render_task(
-                                RenderTaskCacheKey {
-                                    size: task_size,
-                                    kind: RenderTaskCacheKeyKind::LineDecoration(cache_key.clone()),
-                                },
-                                frame_state.gpu_cache,
-                                frame_state.render_tasks,
-                                None,
-                                false,
-                                |render_tasks| {
-                                    let task = RenderTask::new_line_decoration(
-                                        task_size,
-                                        cache_key.style,
-                                        cache_key.orientation,
-                                        cache_key.wavy_line_thickness.to_f32_px(),
-                                        LayoutSize::from_au(cache_key.size),
-                                    );
-                                    let task_id = render_tasks.add(task);
-                                    surfaces[pic_context.surface_index.0].tasks.push(task_id);
-                                    task_id
-                                }
-                            ));
-                        }
-                    },
-                    _ => unreachable!(),
+                    ));
                 }
             }
             PrimitiveInstanceKind::TextRun { data_handle, run_index, .. } => {
@@ -3023,7 +2337,6 @@ impl PrimitiveStore {
                     frame_state.resource_cache,
                     frame_state.gpu_cache,
                     frame_state.render_tasks,
-                    frame_state.special_render_passes,
                     scratch,
                 );
             }
@@ -3032,41 +2345,32 @@ impl PrimitiveStore {
 
                 // Update the template this instane references, which may refresh the GPU
                 // cache with any shared template data.
-                prim_data.update(
-                    pic_context.surface_index,
-                    frame_state,
-                );
+                prim_data.update(frame_state);
             }
             PrimitiveInstanceKind::NormalBorder { data_handle, ref mut cache_handles, .. } => {
-                let prim_data = &mut resources.prim_data_store[*data_handle];
+                let prim_data = &mut resources.normal_border_data_store[*data_handle];
+                let common_data = &mut prim_data.common;
+                let border_data = &mut prim_data.kind;
 
                 // Update the template this instane references, which may refresh the GPU
                 // cache with any shared template data.
-                prim_data.update(
-                    pic_context.surface_index,
-                    frame_state,
-                );
-
-                let template = match prim_data.kind {
-                    PrimitiveTemplateKind::NormalBorder { ref template, .. } => template,
-                    _ => unreachable!()
-                };
+                border_data.update(common_data, frame_state);
 
                 // TODO(gw): When drawing in screen raster mode, we should also incorporate a
                 //           scale factor from the world transform to get an appropriately
                 //           sized border task.
                 let world_scale = LayoutToWorldScale::new(1.0);
                 let mut scale = world_scale * frame_context.device_pixel_scale;
-                let max_scale = get_max_scale_for_border(&template.border.radius, &template.widths);
+                let max_scale = get_max_scale_for_border(&border_data.border.radius,
+                                                         &border_data.widths);
                 scale.0 = scale.0.min(max_scale.0);
 
                 // For each edge and corner, request the render task by content key
                 // from the render task cache. This ensures that the render task for
                 // this segment will be available for batching later in the frame.
                 let mut handles: SmallVec<[RenderTaskCacheEntryHandle; 8]> = SmallVec::new();
-                let surfaces = &mut frame_state.surfaces;
 
-                for segment in &template.border_segments {
+                for segment in &border_data.border_segments {
                     // Update the cache key device size based on requested scale.
                     let cache_size = to_cache_size(segment.local_task_size * scale);
                     let cache_key = RenderTaskCacheKey {
@@ -3086,16 +2390,12 @@ impl PrimitiveStore {
                                 build_border_instances(
                                     &segment.cache_key,
                                     cache_size,
-                                    &template.border,
+                                    &border_data.border,
                                     scale,
                                 ),
                             );
 
-                            let task_id = render_tasks.add(task);
-
-                            surfaces[pic_context.surface_index.0].tasks.push(task_id);
-
-                            task_id
+                            render_tasks.add(task)
                         }
                     ));
                 }
@@ -3105,24 +2405,18 @@ impl PrimitiveStore {
                     .extend(handles);
             }
             PrimitiveInstanceKind::ImageBorder { data_handle, .. } => {
-                let prim_data = &mut resources.prim_data_store[*data_handle];
+                let prim_data = &mut resources.image_border_data_store[*data_handle];
 
                 // Update the template this instane references, which may refresh the GPU
                 // cache with any shared template data.
-                prim_data.update(
-                    pic_context.surface_index,
-                    frame_state,
-                );
+                prim_data.kind.update(&mut prim_data.common, frame_state);
             }
             PrimitiveInstanceKind::Rectangle { data_handle, segment_instance_index, opacity_binding_index, .. } => {
                 let prim_data = &mut resources.prim_data_store[*data_handle];
 
                 // Update the template this instane references, which may refresh the GPU
                 // cache with any shared template data.
-                prim_data.update(
-                    pic_context.surface_index,
-                    frame_state,
-                );
+                prim_data.update(frame_state);
 
                 update_opacity_binding(
                     &mut self.opacity_bindings,
@@ -3130,36 +2424,31 @@ impl PrimitiveStore {
                     frame_context.scene_properties,
                 );
 
-                write_segment(prim_data, *segment_instance_index, frame_state, scratch);
+                write_segment(*segment_instance_index, frame_state, scratch, |request| {
+                    prim_data.kind.write_prim_gpu_blocks(
+                        request,
+                    );
+                });
             }
             PrimitiveInstanceKind::YuvImage { data_handle, segment_instance_index, .. } => {
-                let prim_data = &mut resources.prim_data_store[*data_handle];
+                let yuv_image_data = &mut resources.yuv_image_data_store[*data_handle];
 
                 // Update the template this instane references, which may refresh the GPU
                 // cache with any shared template data.
-                prim_data.update(
-                    pic_context.surface_index,
-                    frame_state,
-                );
+                yuv_image_data.kind.update(&mut yuv_image_data.common, frame_state);
 
-                write_segment(prim_data, *segment_instance_index, frame_state, scratch);
+                write_segment(*segment_instance_index, frame_state, scratch, |request| {
+                    yuv_image_data.kind.write_prim_gpu_blocks(request);
+                });
             }
             PrimitiveInstanceKind::Image { data_handle, image_instance_index, .. } => {
-                let prim_data = &mut resources.prim_data_store[*data_handle];
+                let prim_data = &mut resources.image_data_store[*data_handle];
+                let common_data = &mut prim_data.common;
+                let image_data = &mut prim_data.kind;
 
                 // Update the template this instane references, which may refresh the GPU
                 // cache with any shared template data.
-                prim_data.update(
-                    pic_context.surface_index,
-                    frame_state,
-                );
-
-                let (key, stretch_size, tile_spacing, image_rendering) = match prim_data.kind {
-                    PrimitiveTemplateKind::Image { ref key, ref stretch_size, ref tile_spacing, ref image_rendering, .. } => {
-                        (key, stretch_size, tile_spacing, image_rendering)
-                    }
-                    _ => unreachable!()
-                };
+                image_data.update(common_data, frame_state);
 
                 let image_instance = &mut self.images[*image_instance_index];
 
@@ -3173,7 +2462,7 @@ impl PrimitiveStore {
 
                 let image_properties = frame_state
                     .resource_cache
-                    .get_image_properties(*key);
+                    .get_image_properties(image_data.key);
 
                 if let Some(image_properties) = image_properties {
                     if let Some(tile_size) = image_properties.tiling {
@@ -3192,19 +2481,19 @@ impl PrimitiveStore {
                             &tight_clip_rect
                         );
 
-                        let base_edge_flags = edge_flags_for_tile_spacing(tile_spacing);
+                        let base_edge_flags = edge_flags_for_tile_spacing(&image_data.tile_spacing);
 
-                        let stride = *stretch_size + *tile_spacing;
+                        let stride = image_data.stretch_size + image_data.tile_spacing;
 
-                        let repetitions = image::repetitions(
+                        let repetitions = ::image::repetitions(
                             &prim_local_rect,
                             &visible_rect,
                             stride,
                         );
 
                         let request = ImageRequest {
-                            key: *key,
-                            rendering: *image_rendering,
+                            key: image_data.key,
+                            rendering: image_data.image_rendering,
                             tile: None,
                         };
 
@@ -3213,10 +2502,10 @@ impl PrimitiveStore {
 
                             let image_rect = LayoutRect {
                                 origin,
-                                size: *stretch_size,
+                                size: image_data.stretch_size,
                             };
 
-                            let tiles = image::tiles(
+                            let tiles = ::image::tiles(
                                 &image_rect,
                                 &visible_rect,
                                 &device_image_size,
@@ -3257,7 +2546,9 @@ impl PrimitiveStore {
                     }
                 }
 
-                write_segment(prim_data, image_instance.segment_instance_index, frame_state, scratch);
+                write_segment(image_instance.segment_instance_index, frame_state, scratch, |request| {
+                    image_data.write_prim_gpu_blocks(request);
+                });
             }
             PrimitiveInstanceKind::LinearGradient { data_handle, ref mut visible_tiles_range, .. } => {
                 let prim_data = &mut resources.linear_grad_data_store[*data_handle];
@@ -3348,12 +2639,12 @@ impl PrimitiveStore {
     }
 }
 
-fn write_segment(
-    prim_data: &PrimitiveTemplate,
+fn write_segment<F>(
     segment_instance_index: SegmentInstanceIndex,
     frame_state: &mut FrameBuildingState,
     scratch: &mut PrimitiveScratchBuffer,
-) {
+    f: F,
+) where F: Fn(&mut GpuDataRequest) {
     debug_assert!(segment_instance_index != SegmentInstanceIndex::INVALID);
     if segment_instance_index != SegmentInstanceIndex::UNUSED {
         let segment_instance = &mut scratch.segment_instances[segment_instance_index];
@@ -3361,10 +2652,7 @@ fn write_segment(
         if let Some(mut request) = frame_state.gpu_cache.request(&mut segment_instance.gpu_cache_handle) {
             let segments = &scratch.segments[segment_instance.segments_range];
 
-            prim_data.kind.write_prim_gpu_blocks(
-                &mut request,
-                prim_data.prim_size,
-            );
+            f(&mut request);
 
             for segment in segments {
                 request.write_segment(
@@ -3402,7 +2690,7 @@ fn decompose_repeated_primitive(
     );
     let stride = *stretch_size + *tile_spacing;
 
-    let repetitions = image::repetitions(prim_local_rect, &visible_rect, stride);
+    let repetitions = ::image::repetitions(prim_local_rect, &visible_rect, stride);
     for Repetition { origin, .. } in repetitions {
         let mut handle = GpuCacheHandle::new();
         let rect = LayoutRect {
@@ -3622,22 +2910,17 @@ impl PrimitiveInstance {
                 segment_instance_index
             }
             PrimitiveInstanceKind::Image { data_handle, image_instance_index, .. } => {
-                let prim_data = &resources.prim_data_store[data_handle];
+                let image_data = &resources.image_data_store[data_handle].kind;
                 let image_instance = &mut prim_store.images[image_instance_index];
-                match prim_data.kind {
-                    PrimitiveTemplateKind::Image { key, .. } => {
-                        // tiled images don't support segmentation
-                        if frame_state
-                            .resource_cache
-                            .get_image_properties(key)
-                            .and_then(|properties| properties.tiling)
-                            .is_some() {
-                            image_instance.segment_instance_index = SegmentInstanceIndex::UNUSED;
-                            return;
-                        }
+                // tiled images don't support segmentation
+                if frame_state
+                    .resource_cache
+                    .get_image_properties(image_data.key)
+                    .and_then(|properties| properties.tiling)
+                    .is_some() {
+                        image_instance.segment_instance_index = SegmentInstanceIndex::UNUSED;
+                        return;
                     }
-                    _ => unreachable!(),
-                }
                 &mut image_instance.segment_instance_index
             }
             PrimitiveInstanceKind::Picture { .. } |
@@ -3746,32 +3029,18 @@ impl PrimitiveInstance {
                 &scratch.segments[segment_instance.segments_range]
             }
             PrimitiveInstanceKind::ImageBorder { data_handle, .. } => {
-                let prim_data = &resources.prim_data_store[data_handle];
+                let border_data = &resources.image_border_data_store[data_handle].kind;
 
                 // TODO: This is quite messy - once we remove legacy primitives we
                 //       can change this to be a tuple match on (instance, template)
-                match prim_data.kind {
-                    PrimitiveTemplateKind::ImageBorder { ref brush_segments, .. } => {
-                        brush_segments.as_slice()
-                    }
-                    _ => {
-                        unreachable!();
-                    }
-                }
+                border_data.brush_segments.as_slice()
             }
             PrimitiveInstanceKind::NormalBorder { data_handle, .. } => {
-                let prim_data = &resources.prim_data_store[data_handle];
+                let border_data = &resources.normal_border_data_store[data_handle].kind;
 
                 // TODO: This is quite messy - once we remove legacy primitives we
                 //       can change this to be a tuple match on (instance, template)
-                match prim_data.kind {
-                    PrimitiveTemplateKind::NormalBorder { ref template, .. } => {
-                        template.brush_segments.as_slice()
-                    }
-                    _ => {
-                        unreachable!();
-                    }
-                }
+                border_data.brush_segments.as_slice()
             }
             PrimitiveInstanceKind::LinearGradient { data_handle, .. } => {
                 let prim_data = &resources.linear_grad_data_store[data_handle];
@@ -3832,7 +3101,7 @@ impl PrimitiveInstance {
                 let segment_clip_chain = frame_state
                     .clip_store
                     .build_clip_chain_instance(
-                        self.clip_chain_id,
+                        self,
                         segment.local_rect.translate(&LayoutVector2D::new(prim_origin.x, prim_origin.y)),
                         prim_local_clip_rect,
                         prim_context.spatial_node_index,
@@ -3884,9 +3153,6 @@ impl PrimitiveInstance {
         if self.is_chased() {
             println!("\tupdating clip task with pic rect {:?}", clip_chain.pic_clip_rect);
         }
-
-        // Reset clips from previous frames since we may clip differently each frame.
-        self.clip_task_index = ClipTaskIndex::INVALID;
 
         self.build_segments_if_needed(
             prim_local_rect,
@@ -3982,6 +3248,11 @@ pub fn get_raster_rects(
         device_pixel_scale,
     );
 
+    // Ensure that we won't try to allocate a zero-sized clip render task.
+    if clipped.is_empty() {
+        return None;
+    }
+
     Some((clipped.to_i32(), unclipped))
 }
 
@@ -4045,7 +3316,7 @@ fn update_opacity_binding(
 }
 
 #[test]
-#[cfg(target_os = "linux")]
+#[cfg(target_pointer_width = "64")]
 fn test_struct_sizes() {
     use std::mem;
     // The sizes of these structures are critical for performance on a number of
@@ -4054,10 +3325,10 @@ fn test_struct_sizes() {
     //     test expectations and move on.
     // (b) You made a structure larger. This is not necessarily a problem, but should only
     //     be done with care, and after checking if talos performance regresses badly.
-    assert_eq!(mem::size_of::<PrimitiveInstance>(), 128, "PrimitiveInstance size changed");
+    assert_eq!(mem::size_of::<PrimitiveInstance>(), 112, "PrimitiveInstance size changed");
     assert_eq!(mem::size_of::<PrimitiveInstanceKind>(), 40, "PrimitiveInstanceKind size changed");
-    assert_eq!(mem::size_of::<PrimitiveTemplate>(), 144, "PrimitiveTemplate size changed");
-    assert_eq!(mem::size_of::<PrimitiveTemplateKind>(), 88, "PrimitiveTemplateKind size changed");
-    assert_eq!(mem::size_of::<PrimitiveKey>(), 124, "PrimitiveKey size changed");
-    assert_eq!(mem::size_of::<PrimitiveKeyKind>(), 96, "PrimitiveKeyKind size changed");
+    assert_eq!(mem::size_of::<PrimitiveTemplate>(), 56, "PrimitiveTemplate size changed");
+    assert_eq!(mem::size_of::<PrimitiveTemplateKind>(), 20, "PrimitiveTemplateKind size changed");
+    assert_eq!(mem::size_of::<PrimitiveKey>(), 36, "PrimitiveKey size changed");
+    assert_eq!(mem::size_of::<PrimitiveKeyKind>(), 5, "PrimitiveKeyKind size changed");
 }

@@ -74,6 +74,7 @@
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "mozilla/layers/ScrollLinkedEffectDetector.h"
 #include "mozilla/Unused.h"
+#include "VisualViewport.h"
 #include "LayersLogging.h"  // for Stringify
 #include <algorithm>
 #include <cstdlib>  // for std::abs(int/long)
@@ -866,10 +867,10 @@ static void GetScrollableOverflowForPerspective(
     nsIFrame* aScrolledFrame, nsIFrame* aCurrentFrame, const nsRect aScrollPort,
     nsPoint aOffset, nsRect& aScrolledFrameOverflowArea) {
   // Iterate over all children except pop-ups.
-  FrameChildListIDs skip = nsIFrame::kSelectPopupList | nsIFrame::kPopupList;
+  FrameChildListIDs skip = {nsIFrame::kSelectPopupList, nsIFrame::kPopupList};
   for (nsIFrame::ChildListIterator childLists(aCurrentFrame);
        !childLists.IsDone(); childLists.Next()) {
-    if (skip.Contains(childLists.CurrentID())) {
+    if (skip.contains(childLists.CurrentID())) {
       continue;
     }
 
@@ -1950,7 +1951,6 @@ ScrollFrameHelper::ScrollFrameHelper(nsContainerFrame* aOuter, bool aIsRoot)
       mAsyncScroll(nullptr),
       mAsyncSmoothMSDScroll(nullptr),
       mLastScrollOrigin(nsGkAtoms::other),
-      mAllowScrollOriginDowngrade(false),
       mLastSmoothScrollOrigin(nullptr),
       mScrollGeneration(++sScrollGenerationCounter),
       mDestination(0, 0),
@@ -1959,9 +1959,10 @@ ScrollFrameHelper::ScrollFrameHelper(nsContainerFrame* aOuter, bool aIsRoot)
       mApzScrollPos(0, 0),
       mScrollPosForLayerPixelAlignment(-1, -1),
       mLastUpdateFramesPos(-1, -1),
-      mHadDisplayPortAtLastFrameUpdate(false),
       mDisplayPortAtLastFrameUpdate(),
       mScrollParentID(mozilla::layers::ScrollableLayerGuid::NULL_SCROLL_ID),
+      mAllowScrollOriginDowngrade(false),
+      mHadDisplayPortAtLastFrameUpdate(false),
       mNeverHasVerticalScrollbar(false),
       mNeverHasHorizontalScrollbar(false),
       mHasVerticalScrollbar(false),
@@ -2736,7 +2737,7 @@ void ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange,
     // offset (e.g. by using nsIDOMWindowUtils.getVisualViewportOffset()
     // in chrome JS code) before it's updated by the next APZ repaint,
     // we could get incorrect results.
-    presContext->PresShell()->SetVisualViewportOffset(pt);
+    presContext->PresShell()->SetVisualViewportOffset(pt, curPos);
   }
 
   ScrollVisual();
@@ -2856,6 +2857,16 @@ void ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange,
       nsPresContext::InteractionType::eScrollInteraction, TimeStamp::Now());
 
   PostScrollEvent();
+  // If this is a viewport scroll, this could affect the relative offset
+  // between layout and visual viewport, so we might have to fire a visual
+  // viewport scroll event as well.
+  if (mIsRoot) {
+    if (auto* window = nsGlobalWindowInner::Cast(
+            mOuter->PresContext()->Document()->GetInnerWindow())) {
+      window->VisualViewport()->PostScrollEvent(
+          presContext->PresShell()->GetVisualViewportOffset(), curPos);
+    }
+  }
 
   // notify the listeners.
   for (uint32_t i = 0; i < mListeners.Length(); i++) {
@@ -4845,9 +4856,11 @@ void ScrollFrameHelper::CurPosAttributeChanged(nsIContent* aContent,
 
 /* ============= Scroll events ========== */
 
-ScrollFrameHelper::ScrollEvent::ScrollEvent(ScrollFrameHelper* aHelper)
+ScrollFrameHelper::ScrollEvent::ScrollEvent(ScrollFrameHelper* aHelper,
+                                            bool aDelayed)
     : Runnable("ScrollFrameHelper::ScrollEvent"), mHelper(aHelper) {
-  mHelper->mOuter->PresContext()->RefreshDriver()->PostScrollEvent(this);
+  mHelper->mOuter->PresContext()->RefreshDriver()->PostScrollEvent(this,
+                                                                   aDelayed);
 }
 
 NS_IMETHODIMP
@@ -4883,6 +4896,16 @@ void ScrollFrameHelper::FireScrollEvent() {
   mScrollEvent->Revoke();
   mScrollEvent = nullptr;
 
+  // If event handling is suppressed, keep posting the scroll event to the
+  // refresh driver until it is unsuppressed. The event is marked as delayed so
+  // that the refresh driver does not continue ticking.
+  if (content->GetComposedDoc() &&
+      content->GetComposedDoc()->EventHandlingSuppressed()) {
+    content->GetComposedDoc()->SetHasDelayedRefreshEvent();
+    PostScrollEvent(/* aDelayed = */ true);
+    return;
+  }
+
   ActiveLayerTracker::SetCurrentScrollHandlerFrame(mOuter);
   WidgetGUIEvent event(true, eScroll, nullptr);
   nsEventStatus status = nsEventStatus_eIgnore;
@@ -4891,9 +4914,9 @@ void ScrollFrameHelper::FireScrollEvent() {
   mozilla::layers::ScrollLinkedEffectDetector detector(
       content->GetComposedDoc());
   if (mIsRoot) {
-    nsIDocument* doc = content->GetUncomposedDoc();
-    if (doc) {
-      EventDispatcher::Dispatch(doc, prescontext, &event, nullptr, &status);
+    if (nsIDocument* doc = content->GetUncomposedDoc()) {
+      EventDispatcher::Dispatch(ToSupports(doc), prescontext, &event, nullptr,
+                                &status);
     }
   } else {
     // scroll events fired at elements don't bubble (although scroll events
@@ -4904,13 +4927,13 @@ void ScrollFrameHelper::FireScrollEvent() {
   ActiveLayerTracker::SetCurrentScrollHandlerFrame(nullptr);
 }
 
-void ScrollFrameHelper::PostScrollEvent() {
+void ScrollFrameHelper::PostScrollEvent(bool aDelayed) {
   if (mScrollEvent) {
     return;
   }
 
   // The ScrollEvent constructor registers itself with the refresh driver.
-  mScrollEvent = new ScrollEvent(this);
+  mScrollEvent = new ScrollEvent(this, aDelayed);
 }
 
 NS_IMETHODIMP
@@ -5443,8 +5466,6 @@ bool ScrollFrameHelper::ReflowFinished() {
   mUpdateScrollbarAttributes = false;
 
   // Update scrollbar attributes.
-  nsPresContext* presContext = mOuter->PresContext();
-
   if (mMayHaveDirtyFixedChildren) {
     mMayHaveDirtyFixedChildren = false;
     nsIFrame* parentFrame = mOuter->GetParent();
@@ -5452,8 +5473,8 @@ bool ScrollFrameHelper::ReflowFinished() {
              parentFrame->GetChildList(nsIFrame::kFixedList).FirstChild();
          fixedChild; fixedChild = fixedChild->GetNextSibling()) {
       // force a reflow of the fixed child
-      presContext->PresShell()->FrameNeedsReflow(
-          fixedChild, nsIPresShell::eResize, NS_FRAME_HAS_DIRTY_CHILDREN);
+      mOuter->PresShell()->FrameNeedsReflow(fixedChild, nsIPresShell::eResize,
+                                            NS_FRAME_HAS_DIRTY_CHILDREN);
     }
   }
 
@@ -6033,7 +6054,7 @@ nsRect ScrollFrameHelper::GetUnsnappedScrolledRectInternal(
 }
 
 nsMargin ScrollFrameHelper::GetActualScrollbarSizes() const {
-  nsRect r = mOuter->GetPaddingRect() - mOuter->GetPosition();
+  nsRect r = mOuter->GetPaddingRectRelativeToSelf();
 
   return nsMargin(mScrollPort.y - r.y, r.XMost() - mScrollPort.XMost(),
                   r.YMost() - mScrollPort.YMost(), mScrollPort.x - r.x);
@@ -6141,7 +6162,7 @@ void ScrollFrameHelper::RestoreState(PresState* aState) {
   if (mIsRoot) {
     nsIPresShell* presShell = mOuter->PresShell();
     presShell->SetResolutionAndScaleTo(aState->resolution(),
-                                       nsGkAtoms::restore);
+                                       nsIPresShell::ChangeOrigin::eMainThread);
   }
 }
 
@@ -6172,10 +6193,8 @@ void ScrollFrameHelper::FireScrolledAreaEvent() {
   nsIContent* content = mOuter->GetContent();
 
   event.mArea = mScrolledFrame->GetScrollableOverflowRectRelativeToParent();
-
-  nsIDocument* doc = content->GetUncomposedDoc();
-  if (doc) {
-    EventDispatcher::Dispatch(doc, prescontext, &event, nullptr);
+  if (nsIDocument* doc = content->GetUncomposedDoc()) {
+    EventDispatcher::Dispatch(ToSupports(doc), prescontext, &event, nullptr);
   }
 }
 

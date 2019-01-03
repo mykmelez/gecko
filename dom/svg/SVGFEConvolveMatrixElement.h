@@ -7,25 +7,25 @@
 #ifndef mozilla_dom_SVGFEConvolveMatrixElement_h
 #define mozilla_dom_SVGFEConvolveMatrixElement_h
 
+#include "SVGAnimatedNumberList.h"
 #include "nsSVGBoolean.h"
-#include "nsSVGEnum.h"
-#include "nsSVGFilters.h"
+#include "SVGEnum.h"
+#include "SVGFilters.h"
 #include "nsSVGInteger.h"
 #include "nsSVGIntegerPair.h"
 #include "nsSVGNumber2.h"
 #include "nsSVGString.h"
-#include "SVGAnimatedNumberList.h"
 
 nsresult NS_NewSVGFEConvolveMatrixElement(
     nsIContent** aResult, already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
 
 namespace mozilla {
-class DOMSVGAnimatedNumberList;
 
 namespace dom {
+class DOMSVGAnimatedNumberList;
 class SVGAnimatedBoolean;
 
-typedef nsSVGFE SVGFEConvolveMatrixElementBase;
+typedef SVGFE SVGFEConvolveMatrixElementBase;
 
 class SVGFEConvolveMatrixElement : public SVGFEConvolveMatrixElementBase {
   friend nsresult(::NS_NewSVGFEConvolveMatrixElement(
@@ -49,8 +49,7 @@ class SVGFEConvolveMatrixElement : public SVGFEConvolveMatrixElementBase {
   virtual nsSVGString& GetResultImageName() override {
     return mStringAttributes[RESULT];
   }
-  virtual void GetSourceImageNames(
-      nsTArray<nsSVGStringInfo>& aSources) override;
+  virtual void GetSourceImageNames(nsTArray<SVGStringInfo>& aSources) override;
 
   virtual nsresult Clone(dom::NodeInfo*, nsINode** aResult) const override;
 
@@ -99,8 +98,8 @@ class SVGFEConvolveMatrixElement : public SVGFEConvolveMatrixElementBase {
   static BooleanInfo sBooleanInfo[1];
 
   enum { EDGEMODE };
-  nsSVGEnum mEnumAttributes[1];
-  static nsSVGEnumMapping sEdgeModeMap[];
+  SVGEnum mEnumAttributes[1];
+  static SVGEnumMapping sEdgeModeMap[];
   static EnumInfo sEnumInfo[1];
 
   enum { RESULT, IN1 };

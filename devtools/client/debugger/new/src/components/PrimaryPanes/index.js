@@ -5,14 +5,17 @@
 // @flow
 
 import React, { Component } from "react";
-import { connect } from "react-redux";
+import { sortBy } from "lodash";
+import { connect } from "../../utils/connect";
 import { Tab, Tabs, TabList, TabPanels } from "react-aria-components/src/tabs";
 import { formatKeyShortcut } from "../../utils/text";
 import actions from "../../actions";
 import {
-  getSources,
+  getRelativeSources,
   getActiveSearch,
-  getSelectedPrimaryPaneTab
+  getSelectedPrimaryPaneTab,
+  getWorkerDisplayName,
+  isValidThread
 } from "../../selectors";
 import { features, prefs } from "../../utils/prefs";
 import "./Sources.css";
@@ -21,20 +24,23 @@ import classnames from "classnames";
 import Outline from "./Outline";
 import SourcesTree from "./SourcesTree";
 
-import type { SourcesMap } from "../../reducers/types";
+import type { SourcesMapByThread } from "../../reducers/types";
+import type { SelectedPrimaryPaneTabType } from "../../selectors";
 
 type State = {
   alphabetizeOutline: boolean
 };
 
 type Props = {
-  selectedTab: string,
-  sources: SourcesMap,
+  selectedTab: SelectedPrimaryPaneTabType,
+  sources: SourcesMapByThread,
   horizontal: boolean,
   sourceSearchOn: boolean,
-  setPrimaryPaneTab: string => void,
-  setActiveSearch: string => void,
-  closeActiveSearch: () => void
+  setPrimaryPaneTab: typeof actions.setPrimaryPaneTab,
+  setActiveSearch: typeof actions.setActiveSearch,
+  closeActiveSearch: typeof actions.closeActiveSearch,
+  getWorkerDisplayName: string => string,
+  isValidThread: string => boolean
 };
 
 class PrimaryPanes extends Component<Props, State> {
@@ -46,7 +52,7 @@ class PrimaryPanes extends Component<Props, State> {
     };
   }
 
-  showPane = (selectedPane: string) => {
+  showPane = (selectedPane: SelectedPrimaryPaneTabType) => {
     this.props.setPrimaryPaneTab(selectedPane);
   };
 
@@ -90,6 +96,17 @@ class PrimaryPanes extends Component<Props, State> {
     ];
   }
 
+  renderThreadSources() {
+    const threads = sortBy(
+      Object.getOwnPropertyNames(this.props.sources).filter(
+        this.props.isValidThread
+      ),
+      this.props.getWorkerDisplayName
+    );
+
+    return threads.map(thread => <SourcesTree thread={thread} key={thread} />);
+  }
+
   render() {
     const { selectedTab } = this.props;
     const activeIndex = selectedTab === "sources" ? 0 : 1;
@@ -104,7 +121,7 @@ class PrimaryPanes extends Component<Props, State> {
           {this.renderOutlineTabs()}
         </TabList>
         <TabPanels className="source-outline-panel" hasFocusableContent>
-          <SourcesTree />
+          <div>{this.renderThreadSources()}</div>
           <Outline
             alphabetizeOutline={this.state.alphabetizeOutline}
             onAlphabetizeClick={this.onAlphabetizeClick}
@@ -117,15 +134,19 @@ class PrimaryPanes extends Component<Props, State> {
 
 const mapStateToProps = state => ({
   selectedTab: getSelectedPrimaryPaneTab(state),
-  sources: getSources(state),
-  sourceSearchOn: getActiveSearch(state) === "source"
+  sources: getRelativeSources(state),
+  sourceSearchOn: getActiveSearch(state) === "source",
+  getWorkerDisplayName: thread => getWorkerDisplayName(state, thread),
+  isValidThread: thread => isValidThread(state, thread)
 });
 
-export default connect(
+const connector = connect(
   mapStateToProps,
   {
     setPrimaryPaneTab: actions.setPrimaryPaneTab,
     setActiveSearch: actions.setActiveSearch,
     closeActiveSearch: actions.closeActiveSearch
   }
-)(PrimaryPanes);
+);
+
+export default connector(PrimaryPanes);

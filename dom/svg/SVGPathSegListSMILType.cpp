@@ -4,12 +4,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/DebugOnly.h"
-
 #include "SVGPathSegListSMILType.h"
+
+#include "mozilla/DebugOnly.h"
 #include "nsSMILValue.h"
 #include "SVGPathSegUtils.h"
 #include "SVGPathData.h"
+
+using namespace mozilla::dom::SVGPathSeg_Binding;
 
 // Indices of boolean flags within 'arc' segment chunks in path-data arrays
 // (where '0' would correspond to the index of the encoded segment type):
@@ -31,7 +33,7 @@ void SVGPathSegListSMILType::Destroy(nsSMILValue& aValue) const {
   MOZ_ASSERT(aValue.mType == this, "Unexpected SMIL value type");
   delete static_cast<SVGPathDataAndInfo*>(aValue.mU.mPtr);
   aValue.mU.mPtr = nullptr;
-  aValue.mType = nsSMILNullType::Singleton();
+  aValue.mType = SMILNullType::Singleton();
 }
 
 nsresult SVGPathSegListSMILType::Assign(nsSMILValue& aDest,

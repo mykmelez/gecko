@@ -39,6 +39,8 @@ var prefs = [
   // they too need to be disabled for now.
   ["layout.display-list.retain", false],
   ["layout.display-list.retain.chrome", false],
+  // The VisualViewport API currently isn't enabled by default.
+  ["dom.visualviewport.enabled", true],
 ];
 
 // Increase the tap timeouts so the double-tap is still detected in case of
@@ -50,11 +52,11 @@ var doubletap_prefs = [
 ];
 
 var subtests = [
-  {'file': 'helper_bug1280013.html', 'prefs': prefs},
-  {'file': 'helper_basic_zoom.html', 'prefs': prefs},
-  {'file': 'helper_zoomed_pan.html', 'prefs': prefs},
-  {'file': 'helper_fixed_position_scroll_hittest.html', 'prefs': prefs},
-  {'file': 'helper_basic_doubletap_zoom.html', 'prefs': doubletap_prefs},
+  {"file": "helper_bug1280013.html", "prefs": prefs},
+  {"file": "helper_basic_zoom.html", "prefs": prefs},
+  {"file": "helper_zoomed_pan.html", "prefs": prefs},
+  {"file": "helper_fixed_position_scroll_hittest.html", "prefs": prefs},
+  {"file": "helper_basic_doubletap_zoom.html", "prefs": doubletap_prefs},
 ];
 
 if (isApzEnabled()) {

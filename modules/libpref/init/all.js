@@ -674,7 +674,6 @@ pref("layers.geometry.d3d11.enabled", true);
 
 // APZ preferences. For documentation/details on what these prefs do, check
 // gfx/layers/apz/src/AsyncPanZoomController.cpp.
-pref("apz.allow_checkerboarding", true);
 pref("apz.allow_double_tap_zooming", true);
 pref("apz.allow_immediate_handoff", true);
 pref("apz.allow_zooming", false);
@@ -940,6 +939,7 @@ pref("gfx.webrender.blob.paint-flashing", false);
 pref("gfx.webrender.debug.texture-cache", false);
 pref("gfx.webrender.debug.texture-cache.clear-evicted", true);
 pref("gfx.webrender.debug.render-targets", false);
+pref("gfx.webrender.debug.gpu-cache", false);
 pref("gfx.webrender.debug.alpha-primitives", false);
 pref("gfx.webrender.debug.profiler", false);
 pref("gfx.webrender.debug.gpu-time-queries", false);
@@ -1455,6 +1455,7 @@ pref("javascript.options.ion.threshold",    1000);
 pref("javascript.options.ion.frequent_bailout_threshold", 10);
 pref("javascript.options.asmjs",            true);
 pref("javascript.options.wasm",             true);
+pref("javascript.options.wasm_verbose",     false);
 pref("javascript.options.wasm_ionjit",      true);
 pref("javascript.options.wasm_baselinejit", true);
 #ifdef ENABLE_WASM_CRANELIFT
@@ -1583,6 +1584,9 @@ pref("javascript.options.streams", true);
 // BigInt API
 pref("javascript.options.bigint", false);
 
+// Dynamic module import.
+pref("javascript.options.dynamicImport", false);
+
 // advanced prefs
 pref("advanced.mailftp",                    false);
 pref("image.animation_mode",                "normal");
@@ -1602,11 +1606,6 @@ pref("logging.config.clear_on_startup", true);
 //   pref("network.security.ports.banned", "1,2,3,4,5");
 // prevents necko connecting to ports 1-5 unless the protocol
 // overrides.
-
-// Allow necko to do A/B testing. Will generally only happen if
-// telemetry is also enabled as otherwise there is no way to report
-// the results
-pref("network.allow-experiments", true);
 
 // Allow the network changed event to get sent when a network topology or
 // setup change is noticed while running.
@@ -5432,7 +5431,9 @@ pref("dom.vr.poseprediction.enabled", true);
 // tests or in a headless kiosk system.
 pref("dom.vr.require-gesture", true);
 // Enable a separate process for VR module.
+#if defined(XP_WIN)
 pref("dom.vr.process.enabled", false);
+#endif
 // Puppet device, used for simulating VR hardware within tests and dev tools
 pref("dom.vr.puppet.enabled", false);
 // Allow displaying the result of vr submitframe (0: disable, 1: store the
