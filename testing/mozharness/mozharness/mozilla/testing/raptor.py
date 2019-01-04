@@ -57,7 +57,7 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
           }],
         [["--app"],
          {"default": "firefox",
-          "choices": ["firefox", "chrome", "geckoview"],
+          "choices": ["firefox", "chrome", "geckoview", "fennec"],
           "dest": "app",
           "help": "name of the application we are testing (default: firefox)"
           }],
@@ -180,7 +180,7 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             # check each cmd line arg individually
             self.app = "firefox"
             if 'raptor_cmd_line_args' in self.config:
-                for app in ['chrome', 'geckoview']:
+                for app in ['chrome', 'geckoview', 'fennec']:
                     for next_arg in self.config['raptor_cmd_line_args']:
                         if app in next_arg:
                             self.app = app
@@ -331,7 +331,7 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
         # binary path; if testing on firefox the binary path already came from mozharness/pro;
         # otherwise the binary path is forwarded from cmd line arg (raptor_cmd_line_args)
         kw_options['app'] = self.app
-        if self.app == "firefox" or (self.app == "geckoview" and not self.run_local):
+        if self.app == "firefox" or (self.app in["geckoview", "fennec"] and not self.run_local):
             binary_path = self.binary_path or self.config.get('binary_path')
             if not binary_path:
                 self.fatal("Raptor requires a path to the binary.")
@@ -455,7 +455,7 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             self._install_view_gecko_profile_req()
 
     def install(self):
-        if self.app == "geckoview":
+        if self.app in ["geckoview", "fennec"]:
             self.install_apk(self.installer_path)
         else:
             super(Raptor, self).install()
@@ -576,7 +576,7 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
 
             return bool(debug_opts.intersection(cmdline))
 
-        if self.app == "geckoview":
+        if self.app in ["geckoview", "fennec"]:
             self.logcat_start()
 
         command = [python, run_tests] + options + mozlog_opts
@@ -589,7 +589,7 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
                                                 output_parser=parser,
                                                 env=env)
 
-        if self.app == "geckoview":
+        if self.app in ["geckoview", "fennec"]:
             self.logcat_stop()
 
         if parser.minidump_output:
@@ -603,12 +603,20 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             if not self.run_local:
                 # copy results to upload dir so they are included as an artifact
                 self.info("copying raptor results to upload dir:")
+
+                src = os.path.join(self.query_abs_dirs()['abs_work_dir'], 'raptor.json')
                 dest = os.path.join(env['MOZ_UPLOAD_DIR'], 'perfherder-data.json')
                 self.info(str(dest))
-                src = os.path.join(self.query_abs_dirs()['abs_work_dir'], 'raptor.json')
                 self._artifact_perf_data(src, dest)
+
                 if self.power_test:
                     src = os.path.join(self.query_abs_dirs()['abs_work_dir'], 'raptor-power.json')
+                    self._artifact_perf_data(src, dest)
+
+                src = os.path.join(self.query_abs_dirs()['abs_work_dir'], 'screenshots.html')
+                if os.path.exists(src):
+                    dest = os.path.join(env['MOZ_UPLOAD_DIR'], 'screenshots.html')
+                    self.info(str(dest))
                     self._artifact_perf_data(src, dest)
 
 

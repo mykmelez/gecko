@@ -163,7 +163,7 @@ class TabChildBase : public nsISupports,
   virtual ScreenIntSize GetInnerSize() = 0;
 
   // Get the Document for the top-level window in this tab.
-  already_AddRefed<nsIDocument> GetDocument() const;
+  already_AddRefed<Document> GetDocument() const;
 
   // Get the pres-shell of the document for the top-level window in this tab.
   already_AddRefed<nsIPresShell> GetPresShell() const;
@@ -332,7 +332,7 @@ class TabChild final : public TabChildBase,
 
   virtual mozilla::ipc::IPCResult RecvRealDragEvent(
       const WidgetDragEvent& aEvent, const uint32_t& aDragAction,
-      const uint32_t& aDropEffect, const nsCString& aPrincipalURISpec) override;
+      const uint32_t& aDropEffect, const IPC::Principal& aPrincipal) override;
 
   virtual mozilla::ipc::IPCResult RecvRealKeyEvent(
       const mozilla::WidgetKeyboardEvent& aEvent) override;

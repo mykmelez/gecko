@@ -40,7 +40,7 @@
 #include "nsIClipboard.h"
 #include "nsIContent.h"
 #include "nsIContentInlines.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIFrame.h"
 #include "nsITextControlElement.h"
 #include "nsIWidget.h"
@@ -196,7 +196,7 @@ int32_t EventStateManager::sUserInputEventDepth = 0;
 int32_t EventStateManager::sUserKeyboardEventDepth = 0;
 bool EventStateManager::sNormalLMouseEventInProcess = false;
 EventStateManager* EventStateManager::sActiveESM = nullptr;
-nsIDocument* EventStateManager::sMouseOverDocument = nullptr;
+Document* EventStateManager::sMouseOverDocument = nullptr;
 AutoWeakFrame EventStateManager::sLastDragOverFrame = nullptr;
 LayoutDeviceIntPoint EventStateManager::sPreLockPoint =
     LayoutDeviceIntPoint(0, 0);
@@ -449,7 +449,7 @@ nsresult EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
     if (node && (aEvent->mMessage == eKeyUp || aEvent->mMessage == eMouseUp ||
                  aEvent->mMessage == eWheel || aEvent->mMessage == eTouchEnd ||
                  aEvent->mMessage == ePointerUp)) {
-      nsIDocument* doc = node->OwnerDoc();
+      Document* doc = node->OwnerDoc();
       while (doc) {
         doc->SetUserHasInteracted();
         doc = nsContentUtils::IsChildOfSameType(doc) ? doc->GetParentDocument()
@@ -813,7 +813,7 @@ void EventStateManager::NotifyTargetUserActivation(WidgetEvent* aEvent,
     return;
   }
 
-  nsIDocument* doc = node->OwnerDoc();
+  Document* doc = node->OwnerDoc();
   if (!doc || doc->HasBeenUserGestureActivated()) {
     return;
   }
@@ -1250,11 +1250,11 @@ void EventStateManager::DispatchCrossProcessEvent(WidgetEvent* aEvent,
       nsCOMPtr<nsIDragSession> dragSession = nsContentUtils::GetDragSession();
       uint32_t dropEffect = nsIDragService::DRAGDROP_ACTION_NONE;
       uint32_t action = nsIDragService::DRAGDROP_ACTION_NONE;
-      nsCString principalURISpec;
+      nsCOMPtr<nsIPrincipal> principal;
       if (dragSession) {
         dragSession->DragEventDispatchedToChildProcess();
         dragSession->GetDragAction(&action);
-        dragSession->GetTriggeringPrincipalURISpec(principalURISpec);
+        dragSession->GetTriggeringPrincipal(getter_AddRefs(principal));
         RefPtr<DataTransfer> initialDataTransfer =
             dragSession->GetDataTransfer();
         if (initialDataTransfer) {
@@ -1263,7 +1263,7 @@ void EventStateManager::DispatchCrossProcessEvent(WidgetEvent* aEvent,
       }
 
       tabParent->SendRealDragEvent(*aEvent->AsDragEvent(), action, dropEffect,
-                                   principalURISpec);
+                                   IPC::Principal(principal));
       return;
     }
     case ePluginEventClass: {
@@ -1521,7 +1521,7 @@ void EventStateManager::FireContextClick() {
         }
       }
 
-      nsIDocument* doc = mGestureDownContent->GetComposedDoc();
+      Document* doc = mGestureDownContent->GetComposedDoc();
       AutoHandlingUserInputStatePusher userInpStatePusher(true, &event, doc);
 
       // dispatch to DOM
@@ -1748,12 +1748,12 @@ void EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
 
       RefPtr<Selection> selection;
       nsCOMPtr<nsIContent> eventContent, targetContent;
-      nsCString principalURISpec;
+      nsCOMPtr<nsIPrincipal> principal;
       mCurrentTarget->GetContentForEvent(aEvent, getter_AddRefs(eventContent));
       if (eventContent)
         DetermineDragTargetAndDefaultData(
             window, eventContent, dataTransfer, getter_AddRefs(selection),
-            getter_AddRefs(targetContent), principalURISpec);
+            getter_AddRefs(targetContent), getter_AddRefs(principal));
 
       // Stop tracking the drag gesture now. This should stop us from
       // reentering GenerateDragGesture inside DOM event processing.
@@ -1816,7 +1816,7 @@ void EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
       if (status != nsEventStatus_eConsumeNoDefault) {
         bool dragStarted =
             DoDefaultDragStart(aPresContext, event, dataTransfer, targetContent,
-                               selection, principalURISpec);
+                               selection, principal);
         if (dragStarted) {
           sActiveESM = nullptr;
           MaybeFirePointerCancel(aEvent);
@@ -1837,7 +1837,7 @@ void EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
 void EventStateManager::DetermineDragTargetAndDefaultData(
     nsPIDOMWindowOuter* aWindow, nsIContent* aSelectionTarget,
     DataTransfer* aDataTransfer, Selection** aSelection,
-    nsIContent** aTargetNode, nsACString& aPrincipalURISpec) {
+    nsIContent** aTargetNode, nsIPrincipal** aPrincipal) {
   *aTargetNode = nullptr;
 
   // GetDragData determines if a selection, link or image in the content
@@ -1850,7 +1850,7 @@ void EventStateManager::DetermineDragTargetAndDefaultData(
   bool wasAlt = (mGestureModifiers & MODIFIER_ALT) != 0;
   nsresult rv = nsContentAreaDragDrop::GetDragData(
       aWindow, mGestureDownContent, aSelectionTarget, wasAlt, aDataTransfer,
-      &canDrag, aSelection, getter_AddRefs(dragDataNode), aPrincipalURISpec);
+      &canDrag, aSelection, getter_AddRefs(dragDataNode), aPrincipal);
   if (NS_FAILED(rv) || !canDrag) return;
 
   // if GetDragData returned a node, use that as the node being dragged.
@@ -1906,10 +1906,12 @@ void EventStateManager::DetermineDragTargetAndDefaultData(
   }
 }
 
-bool EventStateManager::DoDefaultDragStart(
-    nsPresContext* aPresContext, WidgetDragEvent* aDragEvent,
-    DataTransfer* aDataTransfer, nsIContent* aDragTarget, Selection* aSelection,
-    const nsACString& aPrincipalURISpec) {
+bool EventStateManager::DoDefaultDragStart(nsPresContext* aPresContext,
+                                           WidgetDragEvent* aDragEvent,
+                                           DataTransfer* aDataTransfer,
+                                           nsIContent* aDragTarget,
+                                           Selection* aSelection,
+                                           nsIPrincipal* aPrincipal) {
   nsCOMPtr<nsIDragService> dragService =
       do_GetService("@mozilla.org/widget/dragservice;1");
   if (!dragService) return false;
@@ -1982,11 +1984,11 @@ bool EventStateManager::DoDefaultDragStart(
   // other than a selection is being dragged.
   if (!dragImage && aSelection) {
     dragService->InvokeDragSessionWithSelection(
-        aSelection, aPrincipalURISpec, transArray, action, event, dataTransfer);
+        aSelection, aPrincipal, transArray, action, event, dataTransfer);
   } else {
-    dragService->InvokeDragSessionWithImage(
-        dragTarget, aPrincipalURISpec, transArray, action, dragImage, imageX,
-        imageY, event, dataTransfer);
+    dragService->InvokeDragSessionWithImage(dragTarget, aPrincipal, transArray,
+                                            action, dragImage, imageX, imageY,
+                                            event, dataTransfer);
   }
 
   return true;
@@ -2016,7 +2018,7 @@ nsresult EventStateManager::GetContentViewer(nsIContentViewer** aCv) {
       nsGlobalWindowOuter::Cast(rootWindow)->GetContent();
   if (!contentWindow) return NS_ERROR_FAILURE;
 
-  nsIDocument* doc = contentWindow->GetDoc();
+  Document* doc = contentWindow->GetDoc();
   if (!doc) return NS_ERROR_FAILURE;
 
   nsCOMPtr<nsISupports> container = doc->GetContainer();
@@ -3045,7 +3047,7 @@ nsresult EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
         // NOTE: The newFocus isn't editable that also means it's not in
         // designMode.  In designMode, all contents are not focusable.
         if (newFocus && !newFocus->IsEditable()) {
-          nsIDocument* doc = newFocus->GetComposedDoc();
+          Document* doc = newFocus->GetComposedDoc();
           if (doc && newFocus == doc->GetRootElement()) {
             nsIContent* bodyContent =
                 nsLayoutUtils::GetEditableRootContentByContentEditable(doc);
@@ -3155,7 +3157,7 @@ nsresult EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
             nsCOMPtr<nsPIDOMWindowOuter> newTop;
             currentTop = currentWindow->GetTop();
             newTop = mDocument->GetWindow()->GetTop();
-            nsCOMPtr<nsIDocument> currentDoc = currentWindow->GetExtantDoc();
+            nsCOMPtr<Document> currentDoc = currentWindow->GetExtantDoc();
             if (nsContentUtils::IsChromeDoc(currentDoc) ||
                 (currentTop && newTop && currentTop != newTop)) {
               fm->SetFocusedWindow(mDocument->GetWindow());
@@ -4149,7 +4151,7 @@ void EventStateManager::NotifyMouseOver(WidgetMouseEvent* aMouseEvent,
   // document's ESM state to indicate that the mouse is over the
   // content associated with our subdocument.
   EnsureDocument(mPresContext);
-  if (nsIDocument* parentDoc = mDocument->GetParentDocument()) {
+  if (Document* parentDoc = mDocument->GetParentDocument()) {
     if (nsCOMPtr<nsIContent> docContent =
             parentDoc->FindContentForSubDocument(mDocument)) {
       if (nsIPresShell* parentShell = parentDoc->GetShell()) {
@@ -4873,7 +4875,7 @@ nsresult EventStateManager::HandleMiddleClickPaste(
       return NS_ERROR_FAILURE;
     }
   } else {
-    nsIDocument* document = aPresShell->GetDocument();
+    Document* document = aPresShell->GetDocument();
     if (NS_WARN_IF(!document)) {
       return NS_ERROR_FAILURE;
     }
@@ -5267,7 +5269,7 @@ void EventStateManager::NativeAnonymousContentRemoved(nsIContent* aContent) {
   RemoveNodeFromChainIfNeeded(NS_EVENT_STATE_ACTIVE, aContent, false);
 }
 
-void EventStateManager::ContentRemoved(nsIDocument* aDocument,
+void EventStateManager::ContentRemoved(Document* aDocument,
                                        nsIContent* aContent) {
   /*
    * Anchor and area elements when focused or hovered might make the UI to show
@@ -6097,7 +6099,7 @@ void EventStateManager::Prefs::Init() {
 /******************************************************************/
 
 AutoHandlingUserInputStatePusher::AutoHandlingUserInputStatePusher(
-    bool aIsHandlingUserInput, WidgetEvent* aEvent, nsIDocument* aDocument)
+    bool aIsHandlingUserInput, WidgetEvent* aEvent, Document* aDocument)
     : mMessage(aEvent ? aEvent->mMessage : eVoidEvent),
       mIsHandlingUserInput(aIsHandlingUserInput) {
   if (!aIsHandlingUserInput) {
@@ -6134,7 +6136,7 @@ AutoHandlingUserInputStatePusher::~AutoHandlingUserInputStatePusher() {
   if (NeedsToResetFocusManagerMouseButtonHandlingState()) {
     nsFocusManager* fm = nsFocusManager::GetFocusManager();
     NS_ENSURE_TRUE_VOID(fm);
-    nsCOMPtr<nsIDocument> handlingDocument =
+    nsCOMPtr<Document> handlingDocument =
         fm->SetMouseButtonHandlingDocument(mMouseButtonEventHandlingDocument);
   }
 }

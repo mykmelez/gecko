@@ -93,8 +93,11 @@ endif
 
 MAKE_JSSHELL  = $(call py_action,zip,-C $(DIST)/bin --strip $(abspath $(PKG_JSSHELL)) $(JSSHELL_BINS))
 
-JARLOG_DIR = $(topobjdir)/jarlog/
-JARLOG_FILE_AB_CD = $(JARLOG_DIR)/$(AB_CD).log
+ifneq (,$(PGO_JARLOG_PATH))
+  JARLOG_FILE_AB_CD = $(PGO_JARLOG_PATH)
+else
+  JARLOG_FILE_AB_CD = $(topobjdir)/jarlog/$(AB_CD).log
+endif
 
 TAR_CREATE_FLAGS := --exclude=.mkdir.done $(TAR_CREATE_FLAGS)
 CREATE_FINAL_TAR = $(TAR) -c --owner=0 --group=0 --numeric-owner \
@@ -405,6 +408,8 @@ UPLOAD_FILES= \
   $(call QUOTED_WILDCARD,$(topobjdir)/$(MOZ_BUILD_APP)/installer/windows/instgen/setup.exe) \
   $(call QUOTED_WILDCARD,$(topobjdir)/$(MOZ_BUILD_APP)/installer/windows/instgen/setup-stub.exe) \
   $(call QUOTED_WILDCARD,$(topsrcdir)/toolchains.json) \
+  $(call QUOTED_WILDCARD,$(topobjdir)/profile-run-1.log) \
+  $(call QUOTED_WILDCARD,$(topobjdir)/profile-run-2.log) \
   $(if $(UPLOAD_EXTRA_FILES), $(foreach f, $(UPLOAD_EXTRA_FILES), $(wildcard $(DIST)/$(f))))
 
 ifneq ($(filter-out en-US x-test,$(AB_CD)),)

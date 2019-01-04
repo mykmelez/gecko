@@ -13,6 +13,7 @@
 #include "MediaStreamGraphImpl.h"
 #include "MediaStreamListener.h"
 #include "VideoStreamTrack.h"
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/dom/AudioNode.h"
 #include "mozilla/dom/AudioTrack.h"
 #include "mozilla/dom/AudioTrackList.h"
@@ -443,7 +444,7 @@ void DOMMediaStream::AddTrack(MediaStreamTrack& aTrack) {
     aTrack.GetId(trackId);
     const char16_t* params[] = {trackId.get()};
     nsCOMPtr<nsPIDOMWindowInner> pWindow = GetParentObject();
-    nsIDocument* document = pWindow ? pWindow->GetExtantDoc() : nullptr;
+    Document* document = pWindow ? pWindow->GetExtantDoc() : nullptr;
     nsContentUtils::ReportToConsole(nsIScriptError::errorFlag,
                                     NS_LITERAL_CSTRING("Media"), document,
                                     nsContentUtils::eDOM_PROPERTIES,
@@ -732,7 +733,7 @@ void DOMMediaStream::NotifyPrincipalChanged() {
                          this, mPrincipal->GetIsNullPrincipal(),
                          mPrincipal->GetIsCodebasePrincipal(),
                          mPrincipal->GetIsExpandedPrincipal(),
-                         mPrincipal->GetIsSystemPrincipal()));
+                         mPrincipal->IsSystemPrincipal()));
   }
 
   for (uint32_t i = 0; i < mPrincipalChangeObservers.Length(); ++i) {

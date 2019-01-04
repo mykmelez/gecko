@@ -21,6 +21,9 @@ class nsIURI;
 class ExpandedPrincipal;
 
 namespace mozilla {
+namespace dom {
+class Document;
+}
 namespace extensions {
 class WebExtensionPolicy;
 }
@@ -105,10 +108,10 @@ class BasePrincipal : public nsJSPrincipals {
   NS_IMETHOD GetAddonPolicy(nsISupports** aResult) final;
   NS_IMETHOD GetCsp(nsIContentSecurityPolicy** aCsp) override;
   NS_IMETHOD SetCsp(nsIContentSecurityPolicy* aCsp) override;
-  NS_IMETHOD EnsureCSP(nsIDocument* aDocument,
+  NS_IMETHOD EnsureCSP(dom::Document* aDocument,
                        nsIContentSecurityPolicy** aCSP) override;
   NS_IMETHOD GetPreloadCsp(nsIContentSecurityPolicy** aPreloadCSP) override;
-  NS_IMETHOD EnsurePreloadCSP(nsIDocument* aDocument,
+  NS_IMETHOD EnsurePreloadCSP(dom::Document* aDocument,
                               nsIContentSecurityPolicy** aCSP) override;
   NS_IMETHOD GetCspJSON(nsAString& outCSPinJSON) override;
   NS_IMETHOD GetIsNullPrincipal(bool* aResult) override;
@@ -132,6 +135,10 @@ class BasePrincipal : public nsJSPrincipals {
 
   static BasePrincipal* Cast(nsIPrincipal* aPrin) {
     return static_cast<BasePrincipal*>(aPrin);
+  }
+
+  static const BasePrincipal* Cast(const nsIPrincipal* aPrin) {
+    return static_cast<const BasePrincipal*>(aPrin);
   }
 
   static already_AddRefed<BasePrincipal> CreateCodebasePrincipal(
@@ -178,6 +185,9 @@ class BasePrincipal : public nsJSPrincipals {
   inline bool FastSubsumesConsideringDomain(nsIPrincipal* aOther);
   inline bool FastSubsumesIgnoringFPD(nsIPrincipal* aOther);
   inline bool FastSubsumesConsideringDomainIgnoringFPD(nsIPrincipal* aOther);
+
+  // Fast way to check whether we have a system principal.
+  inline bool IsSystemPrincipal() const;
 
   // Returns the principal to inherit when a caller with this principal loads
   // the given URI.
@@ -342,6 +352,14 @@ inline bool BasePrincipal::FastSubsumesConsideringDomainIgnoringFPD(
   return FastSubsumesIgnoringFPD(aOther, ConsiderDocumentDomain);
 }
 
+inline bool BasePrincipal::IsSystemPrincipal() const {
+  return Kind() == eSystemPrincipal;
+}
+
 }  // namespace mozilla
+
+inline bool nsIPrincipal::IsSystemPrincipal() const {
+  return mozilla::BasePrincipal::Cast(this)->IsSystemPrincipal();
+}
 
 #endif /* mozilla_BasePrincipal_h */

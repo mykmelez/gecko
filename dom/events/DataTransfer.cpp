@@ -26,7 +26,7 @@
 #include "nsCRT.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsIScriptContext.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsVariant.h"
 #include "mozilla/dom/ContentChild.h"
@@ -244,9 +244,28 @@ void DataTransfer::GetMozTriggeringPrincipalURISpec(
     return;
   }
 
-  nsCString principalURISpec;
-  dragSession->GetTriggeringPrincipalURISpec(principalURISpec);
-  CopyUTF8toUTF16(principalURISpec, aPrincipalURISpec);
+  nsCOMPtr<nsIPrincipal> principal;
+  dragSession->GetTriggeringPrincipal(getter_AddRefs(principal));
+  if (!principal) {
+    aPrincipalURISpec.Truncate(0);
+    return;
+  }
+
+  nsCOMPtr<nsIURI> uri;
+  principal->GetURI(getter_AddRefs(uri));
+  if (!uri) {
+    aPrincipalURISpec.Truncate(0);
+    return;
+  }
+
+  nsAutoCString spec;
+  nsresult rv = uri->GetSpec(spec);
+  if (NS_FAILED(rv)) {
+    aPrincipalURISpec.Truncate(0);
+    return;
+  }
+
+  CopyUTF8toUTF16(spec, aPrincipalURISpec);
 }
 
 already_AddRefed<FileList> DataTransfer::GetFiles(
@@ -789,7 +808,7 @@ already_AddRefed<nsIArray> DataTransfer::GetTransferables(
     nsINode* aDragTarget) {
   MOZ_ASSERT(aDragTarget);
 
-  nsIDocument* doc = aDragTarget->GetComposedDoc();
+  Document* doc = aDragTarget->GetComposedDoc();
   if (!doc) {
     return nullptr;
   }

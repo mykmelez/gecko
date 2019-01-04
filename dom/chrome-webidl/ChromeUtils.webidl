@@ -105,6 +105,18 @@ namespace ChromeUtils {
   ArrayBuffer base64URLDecode(ByteString string,
                               Base64URLDecodeOptions options);
 
+  /**
+   * Cause the current process to fatally crash unless the given condition is
+   * true. This is similar to MOZ_RELEASE_ASSERT in C++ code.
+   *
+   * WARNING: This message is included publicly in the crash report, and must
+   * not contain private information.
+   *
+   * Crash report will be augmented with the current JS stack information.
+   */
+  void releaseAssert(boolean condition,
+                     optional DOMString message = "<no message>");
+
 #ifdef NIGHTLY_BUILD
 
   /**
@@ -367,6 +379,9 @@ partial namespace ChromeUtils {
 
   [ChromeOnly, Throws]
   boolean hasReportingHeaderForOrigin(DOMString aOrigin);
+
+  [ChromeOnly, Throws]
+  void registerWindowActor(DOMString aName, WindowActorOptions aOptions);
 };
 
 /**
@@ -501,6 +516,17 @@ dictionary HeapSnapshotBoundaries {
 dictionary Base64URLEncodeOptions {
   /** Specifies whether the output should be padded with "=" characters. */
   required boolean pad;
+};
+
+dictionary WindowActorOptions {
+  /** This fields are used for configuring individual sides of the actor. */
+  required WindowActorSidedOptions parent;
+  required WindowActorSidedOptions child;
+};
+
+dictionary WindowActorSidedOptions {
+  /** The module path which should be loaded for the actor on this side. */
+  required DOMString moduleURI;
 };
 
 enum Base64URLDecodePadding {

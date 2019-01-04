@@ -27,6 +27,7 @@ struct IdleRequestOptions;
 class MozQueryInterface;
 class PrecompiledScript;
 class Promise;
+struct WindowActorOptions;
 
 class ChromeUtils {
  private:
@@ -68,6 +69,9 @@ class ChromeUtils {
                               const Base64URLDecodeOptions& aOptions,
                               JS::MutableHandle<JSObject*> aRetval,
                               ErrorResult& aRv);
+
+  static void ReleaseAssert(GlobalObject& aGlobal, bool aCondition,
+                            const nsAString& aMessage);
 
   static void OriginAttributesToSuffix(
       GlobalObject& aGlobal, const dom::OriginAttributesDictionary& aAttrs,
@@ -169,6 +173,11 @@ class ChromeUtils {
   static bool HasReportingHeaderForOrigin(GlobalObject& global,
                                           const nsAString& aOrigin,
                                           ErrorResult& aRv);
+
+  static void RegisterWindowActor(const GlobalObject& aGlobal,
+                                  const nsAString& aName,
+                                  const WindowActorOptions& aOptions,
+                                  ErrorResult& aRv);
 };
 
 }  // namespace dom

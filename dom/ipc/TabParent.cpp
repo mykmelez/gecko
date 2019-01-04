@@ -1103,7 +1103,7 @@ void TabParent::SendRealMouseEvent(WidgetMouseEvent& aEvent) {
 }
 
 LayoutDeviceToCSSScale TabParent::GetLayoutDeviceToCSSScale() {
-  nsIDocument* doc = (mFrameElement ? mFrameElement->OwnerDoc() : nullptr);
+  Document* doc = (mFrameElement ? mFrameElement->OwnerDoc() : nullptr);
   nsPresContext* ctx = (doc ? doc->GetPresContext() : nullptr);
   return LayoutDeviceToCSSScale(
       ctx ? (float)ctx->AppUnitsPerDevPixel() / AppUnitsPerCSSPixel() : 0.0f);
@@ -1180,7 +1180,7 @@ bool TabParent::QueryDropLinksForVerification() {
 
 void TabParent::SendRealDragEvent(WidgetDragEvent& aEvent, uint32_t aDragAction,
                                   uint32_t aDropEffect,
-                                  const nsCString& aPrincipalURISpec) {
+                                  const IPC::Principal& aPrincipal) {
   if (mIsDestroyed || !mIsReadyToHandleInputEvents) {
     return;
   }
@@ -1192,7 +1192,7 @@ void TabParent::SendRealDragEvent(WidgetDragEvent& aEvent, uint32_t aDragAction,
     }
   }
   DebugOnly<bool> ret = PBrowserParent::SendRealDragEvent(
-      aEvent, aDragAction, aDropEffect, aPrincipalURISpec);
+      aEvent, aDragAction, aDropEffect, aPrincipal);
   NS_WARNING_ASSERTION(ret, "PBrowserParent::SendRealDragEvent() failed");
   MOZ_ASSERT(!ret || aEvent.HasBeenPostedToRemoteProcess());
 }
@@ -2025,7 +2025,7 @@ mozilla::ipc::IPCResult TabParent::RecvReplyKeyEvent(
 
   // Here we convert the WidgetEvent that we received to an Event
   // to be able to dispatch it to the <browser> element as the target element.
-  nsIDocument* doc = mFrameElement->OwnerDoc();
+  Document* doc = mFrameElement->OwnerDoc();
   nsPresContext* presContext = doc->GetPresContext();
   NS_ENSURE_TRUE(presContext, IPC_OK());
 
@@ -2080,7 +2080,7 @@ mozilla::ipc::IPCResult TabParent::RecvAccessKeyNotHandled(
 
   // Here we convert the WidgetEvent that we received to an Event
   // to be able to dispatch it to the <browser> element as the target element.
-  nsIDocument* doc = mFrameElement->OwnerDoc();
+  Document* doc = mFrameElement->OwnerDoc();
   nsIPresShell* presShell = doc->GetShell();
   NS_ENSURE_TRUE(presShell, IPC_OK());
 
@@ -3080,7 +3080,7 @@ mozilla::ipc::IPCResult TabParent::RecvInvokeDragSession(
     nsTArray<IPCDataTransfer>&& aTransfers, const uint32_t& aAction,
     const OptionalShmem& aVisualDnDData, const uint32_t& aStride,
     const gfx::SurfaceFormat& aFormat, const LayoutDeviceIntRect& aDragRect,
-    const nsCString& aPrincipalURISpec) {
+    const IPC::Principal& aPrincipal) {
   mInitialDataTransferItems.Clear();
   nsIPresShell* shell = mFrameElement->OwnerDoc()->GetShell();
   if (!shell) {
@@ -3118,7 +3118,7 @@ mozilla::ipc::IPCResult TabParent::RecvInvokeDragSession(
 
   mDragValid = true;
   mDragRect = aDragRect;
-  mDragPrincipalURISpec = aPrincipalURISpec;
+  mDragPrincipal = aPrincipal;
 
   esm->BeginTrackingRemoteDragGesture(mFrameElement);
 
@@ -3130,19 +3130,8 @@ mozilla::ipc::IPCResult TabParent::RecvInvokeDragSession(
 }
 
 void TabParent::AddInitialDnDDataTo(DataTransfer* aDataTransfer,
-                                    nsACString& aPrincipalURISpec) {
-  aPrincipalURISpec.Assign(mDragPrincipalURISpec);
-
-  nsCOMPtr<nsIPrincipal> principal;
-  if (!mDragPrincipalURISpec.IsEmpty()) {
-    // If principal is given, try using it first.
-    principal = BasePrincipal::CreateCodebasePrincipal(mDragPrincipalURISpec);
-  }
-  if (!principal) {
-    // Fallback to system principal, to handle like the data is from browser
-    // chrome or OS.
-    principal = nsContentUtils::GetSystemPrincipal();
-  }
+                                    nsIPrincipal** aPrincipal) {
+  NS_IF_ADDREF(*aPrincipal = mDragPrincipal);
 
   for (uint32_t i = 0; i < mInitialDataTransferItems.Length(); ++i) {
     nsTArray<IPCDataTransferItem>& itemArray = mInitialDataTransferItems[i];
@@ -3183,12 +3172,12 @@ void TabParent::AddInitialDnDDataTo(DataTransfer* aDataTransfer,
       // from content in the parent process where there is no content.
       // XXX: Nested Content Processes may change this
       aDataTransfer->SetDataWithPrincipalFromOtherProcess(
-          NS_ConvertUTF8toUTF16(item.flavor()), variant, i, principal,
+          NS_ConvertUTF8toUTF16(item.flavor()), variant, i, mDragPrincipal,
           /* aHidden = */ false);
     }
   }
   mInitialDataTransferItems.Clear();
-  mDragPrincipalURISpec.Truncate(0);
+  mDragPrincipal = nullptr;
 }
 
 bool TabParent::TakeDragVisualization(

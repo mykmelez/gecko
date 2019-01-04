@@ -147,7 +147,7 @@ typedef enum {
 } CornerStyle;
 
 nsCSSBorderRenderer::nsCSSBorderRenderer(
-    nsPresContext* aPresContext, const nsIDocument* aDocument,
+    nsPresContext* aPresContext, const Document* aDocument,
     DrawTarget* aDrawTarget, const Rect& aDirtyRect, Rect& aOuterRect,
     const StyleBorderStyle* aBorderStyles, const Float* aBorderWidths,
     RectCornerRadii& aBorderRadii, const nscolor* aBorderColors,
@@ -3771,6 +3771,9 @@ nsCSSBorderImageRenderer::nsCSSBorderImageRenderer(
         break;
       case eStyleUnit_Auto:  // same as the slice value, in CSS pixels
         value = mSlice.Side(s);
+        break;
+      case eStyleUnit_Calc:
+        value = std::max(0, coord.ComputeComputedCalc(borderDimension));
         break;
       default:
         MOZ_ASSERT_UNREACHABLE(

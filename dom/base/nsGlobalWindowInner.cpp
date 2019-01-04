@@ -37,6 +37,7 @@
 #include "mozilla/dom/TimeoutHandler.h"
 #include "mozilla/dom/TimeoutManager.h"
 #include "mozilla/dom/VisualViewport.h"
+#include "mozilla/dom/WindowProxyHolder.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #if defined(MOZ_WIDGET_ANDROID)
 #include "mozilla/dom/WindowOrientationObserver.h"
@@ -116,7 +117,7 @@
 #include "nsIDeviceSensors.h"
 #include "nsIContent.h"
 #include "nsIDocShell.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "Crypto.h"
 #include "nsDOMString.h"
 #include "nsIEmbeddingSiteWindow.h"
@@ -1605,7 +1606,7 @@ void nsGlobalWindowInner::TraceGlobalJSObject(JSTracer* aTrc) {
   TraceWrapper(aTrc, "active window global");
 }
 
-nsresult nsGlobalWindowInner::SetNewDocument(nsIDocument* aDocument,
+nsresult nsGlobalWindowInner::SetNewDocument(Document* aDocument,
                                              nsISupports* aState,
                                              bool aForceReuseInnerWindow) {
   MOZ_ASSERT(mDocumentPrincipal == nullptr,
@@ -1627,7 +1628,7 @@ nsresult nsGlobalWindowInner::SetNewDocument(nsIDocument* aDocument,
 }
 
 void nsGlobalWindowInner::InnerSetNewDocument(JSContext* aCx,
-                                              nsIDocument* aDocument) {
+                                              Document* aDocument) {
   MOZ_ASSERT(aDocument);
 
   if (MOZ_LOG_TEST(gDOMLeakPRLogInner, LogLevel::Debug)) {
@@ -2009,7 +2010,7 @@ nsresult nsGlobalWindowInner::PostHandleEvent(EventChainPostVisitor& aVisitor) {
   } else if (aVisitor.mEvent->mMessage == eLoad &&
              aVisitor.mEvent->IsTrusted()) {
     // This is page load event since load events don't propagate to |window|.
-    // @see nsIDocument::GetEventTargetParent.
+    // @see Document::GetEventTargetParent.
     mIsDocumentLoaded = true;
 
     mTimeoutManager->OnDocumentLoaded();
@@ -2687,9 +2688,9 @@ bool nsGlobalWindowInner::ResolveComponentsShim(
   Telemetry::Accumulate(Telemetry::COMPONENTS_SHIM_ACCESSED_BY_CONTENT, true);
 
   // Warn once.
-  nsCOMPtr<nsIDocument> doc = GetExtantDoc();
+  nsCOMPtr<Document> doc = GetExtantDoc();
   if (doc) {
-    doc->WarnOnceAbout(nsIDocument::eComponents, /* asError = */ true);
+    doc->WarnOnceAbout(Document::eComponents, /* asError = */ true);
   }
 
   // Create a fake Components object.
@@ -2799,7 +2800,7 @@ bool nsGlobalWindowInner::DoResolve(
       !nsContentUtils::IsSystemPrincipal(
           nsContentUtils::ObjectPrincipal(aObj))) {
     if (GetExtantDoc()) {
-      GetExtantDoc()->WarnOnceAbout(nsIDocument::eWindow_Cc_ontrollers);
+      GetExtantDoc()->WarnOnceAbout(Document::eWindow_Cc_ontrollers);
     }
     const JSClass* clazz;
     if (aId ==
@@ -3684,13 +3685,13 @@ void nsGlobalWindowInner::SetResizable(bool aResizable) const {
 
 void nsGlobalWindowInner::CaptureEvents() {
   if (mDoc) {
-    mDoc->WarnOnceAbout(nsIDocument::eUseOfCaptureEvents);
+    mDoc->WarnOnceAbout(Document::eUseOfCaptureEvents);
   }
 }
 
 void nsGlobalWindowInner::ReleaseEvents() {
   if (mDoc) {
-    mDoc->WarnOnceAbout(nsIDocument::eUseOfReleaseEvents);
+    mDoc->WarnOnceAbout(Document::eUseOfReleaseEvents);
   }
 }
 
@@ -7272,7 +7273,7 @@ void nsPIDOMWindowInner::MaybeCreateDoc() {
     // Note that |document| here is the same thing as our mDoc, but we
     // don't have to explicitly set the member variable because the docshell
     // has already called SetNewDocument().
-    nsCOMPtr<nsIDocument> document = docShell->GetDocument();
+    nsCOMPtr<Document> document = docShell->GetDocument();
     Unused << document;
   }
 }
@@ -7314,7 +7315,7 @@ void nsGlobalWindowInner::PropagateClearSiteDataReload(
 }
 
 mozilla::dom::DocGroup* nsPIDOMWindowInner::GetDocGroup() const {
-  nsIDocument* doc = GetExtantDoc();
+  Document* doc = GetExtantDoc();
   if (doc) {
     return doc->GetDocGroup();
   }
