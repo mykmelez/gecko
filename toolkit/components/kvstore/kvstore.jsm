@@ -37,7 +37,6 @@ class KeyValueService {
       await promisify(gKeyValueService.getOrCreate, dir, name)
     );
   }
-
 }
 
 /**
