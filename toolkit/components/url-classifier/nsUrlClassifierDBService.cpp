@@ -47,6 +47,7 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/PermissionMessageUtils.h"
 #include "mozilla/dom/URLClassifierChild.h"
+#include "mozilla/net/UrlClassifierFeatureFactory.h"
 #include "mozilla/net/UrlClassifierFeatureResult.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/SyncRunnable.h"
@@ -127,11 +128,12 @@ class FeatureHolder final {
   };
 
   static already_AddRefed<FeatureHolder> Create(
-      const nsTArray<RefPtr<nsIUrlClassifierFeature>>& aFeatures,
+      nsIURI* aURI, const nsTArray<RefPtr<nsIUrlClassifierFeature>>& aFeatures,
       nsIUrlClassifierFeature::listType aListType) {
     MOZ_ASSERT(NS_IsMainThread());
+    MOZ_ASSERT(aURI);
 
-    RefPtr<FeatureHolder> holder = new FeatureHolder();
+    RefPtr<FeatureHolder> holder = new FeatureHolder(aURI);
 
     for (nsIUrlClassifierFeature* feature : aFeatures) {
       FeatureData* featureData = holder->mFeatureData.AppendElement();
@@ -202,20 +204,24 @@ class FeatureHolder final {
       }
 
       RefPtr<mozilla::net::UrlClassifierFeatureResult> result =
-          new mozilla::net::UrlClassifierFeatureResult(featureData.mFeature,
-                                                       list);
+          new mozilla::net::UrlClassifierFeatureResult(
+              mURI, featureData.mFeature, list);
       aResults.AppendElement(result);
     }
   }
 
  private:
-  FeatureHolder() { MOZ_ASSERT(NS_IsMainThread()); }
+  explicit FeatureHolder(nsIURI* aURI) : mURI(aURI) {
+    MOZ_ASSERT(NS_IsMainThread());
+  }
 
   ~FeatureHolder() {
     for (FeatureData& featureData : mFeatureData) {
       NS_ReleaseOnMainThreadSystemGroup("FeatureHolder:mFeatureData",
                                         featureData.mFeature.forget());
     }
+
+    NS_ReleaseOnMainThreadSystemGroup("FeatureHolder:mURI", mURI.forget());
   }
 
   TableData* GetOrCreateTableData(const nsACString& aTable) {
@@ -230,127 +236,10 @@ class FeatureHolder final {
     return tableData;
   }
 
+  nsCOMPtr<nsIURI> mURI;
   nsTArray<FeatureData> mFeatureData;
   nsTArray<RefPtr<TableData>> mTableData;
 };
-
-// Simple feature which wraps preferences and tables received by
-// AsyncClassifyLocalWithTables() as arguments.
-class DummyFeature final : public nsIUrlClassifierFeature {
- public:
-  NS_DECL_ISUPPORTS
-
-  enum Type { ePreference, eTable };
-
-  explicit DummyFeature(const nsACString& aName)
-      : mType(eTable), mName(aName) {}
-
-  explicit DummyFeature(const nsACString& aPreference,
-                        nsTArray<nsCString>& aHostsFromPreference)
-      : mType(ePreference),
-        mName(aPreference),
-        mHostsFromPreference(aHostsFromPreference) {}
-
-  NS_IMETHOD
-  GetName(nsACString& aName) override {
-    aName = mName;
-    return NS_OK;
-  }
-
-  NS_IMETHOD
-  GetTables(nsIUrlClassifierFeature::listType,
-            nsTArray<nsCString>& aTables) override {
-    if (mType == eTable) {
-      aTables.AppendElement(mName);
-    }
-    return NS_OK;
-  }
-
-  NS_IMETHOD
-  HasTable(const nsACString& aTable, nsIUrlClassifierFeature::listType,
-           bool* aResult) override {
-    NS_ENSURE_ARG_POINTER(aResult);
-    *aResult = mType == eTable && aTable == mName;
-    return NS_OK;
-  }
-
-  NS_IMETHOD
-  HasHostInPreferences(const nsACString& aHost,
-                       nsIUrlClassifierFeature::listType,
-                       nsACString& aPrefTableName, bool* aResult) override {
-    NS_ENSURE_ARG_POINTER(aResult);
-    *aResult = mHostsFromPreference.Contains(aHost);
-    aPrefTableName = mName;
-    return NS_OK;
-  }
-
-  NS_IMETHOD
-  GetSkipHostList(nsACString& aList) override {
-    // Nothing to do here.
-    return NS_OK;
-  }
-
-  NS_IMETHOD
-  ProcessChannel(nsIChannel* aChannel, const nsACString& aList,
-                 bool* aShouldContinue) override {
-    NS_ENSURE_ARG_POINTER(aShouldContinue);
-    *aShouldContinue = true;
-
-    // Nothing to do here.
-    return NS_OK;
-  }
-
- private:
-  ~DummyFeature() = default;
-
-  Type mType;
-  nsCString mName;
-  nsTArray<nsCString> mHostsFromPreference;
-};
-
-NS_IMPL_ISUPPORTS(DummyFeature, nsIUrlClassifierFeature)
-
-// This class is a proxy from nsIUrlClassifierFeatureCallback to
-// nsIUrlClassifierCallback.
-class CallbackWrapper final : public nsIUrlClassifierFeatureCallback {
- public:
-  NS_DECL_ISUPPORTS
-
-  explicit CallbackWrapper(nsIURIClassifierCallback* aCallback)
-      : mCallback(aCallback) {
-    MOZ_ASSERT(aCallback);
-  }
-
-  NS_IMETHOD
-  OnClassifyComplete(const nsTArray<RefPtr<nsIUrlClassifierFeatureResult>>&
-                         aResults) override {
-    nsAutoCString finalList;
-
-    for (nsIUrlClassifierFeatureResult* result : aResults) {
-      const nsCString& list =
-          static_cast<mozilla::net::UrlClassifierFeatureResult*>(result)
-              ->List();
-      MOZ_ASSERT(!list.IsEmpty());
-
-      if (!finalList.IsEmpty()) {
-        finalList.AppendLiteral(",");
-      }
-
-      finalList.Append(list);
-    }
-
-    mCallback->OnClassifyComplete(NS_OK, finalList, EmptyCString(),
-                                  EmptyCString());
-    return NS_OK;
-  }
-
- private:
-  ~CallbackWrapper() = default;
-
-  nsCOMPtr<nsIURIClassifierCallback> mCallback;
-};
-
-NS_IMPL_ISUPPORTS(CallbackWrapper, nsIUrlClassifierFeatureCallback)
 
 }  // namespace
 
@@ -475,19 +364,6 @@ nsresult nsUrlClassifierDBServiceWorker::DoLocalLookupWithURI(
   }
 
   LOG(("Found %zu results.", aResults.Length()));
-  return NS_OK;
-}
-
-static nsresult ProcessLookupResults(const LookupResultArray& aResults,
-                                     nsTArray<nsCString>& aTables) {
-  // Build the result array, eliminating any duplicate tables.
-  for (const RefPtr<const LookupResult> result : aResults) {
-    MOZ_ASSERT(!result->mNoise, "Lookup results should not have noise added");
-    LOG(("Found result from table %s", result->mTableName.get()));
-    if (aTables.IndexOf(result->mTableName) == nsTArray<nsCString>::NoIndex) {
-      aTables.AppendElement(result->mTableName);
-    }
-  }
   return NS_OK;
 }
 
@@ -2003,123 +1879,6 @@ nsUrlClassifierDBService::Classify(nsIPrincipal* aPrincipal,
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsUrlClassifierDBService::ClassifyLocal(nsIURI* aURI, const nsACString& aTables,
-                                        nsACString& aTableResults) {
-  nsTArray<nsCString> results;
-  ClassifyLocalWithTables(aURI, aTables, results);
-
-  // Convert the result array to a comma separated string
-  aTableResults.AssignLiteral("");
-  bool first = true;
-  for (nsCString& result : results) {
-    if (first) {
-      first = false;
-    } else {
-      aTableResults.AppendLiteral(",");
-    }
-    aTableResults.Append(result);
-  }
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsUrlClassifierDBService::AsyncClassifyLocalWithTables(
-    nsIURI* aURI, const nsACString& aTables,
-    const nsTArray<nsCString>& aExtraTablesByPrefs,
-    const nsTArray<nsCString>& aExtraEntriesByPrefs,
-    nsIURIClassifierCallback* aCallback) {
-  MOZ_ASSERT(NS_IsMainThread(),
-             "AsyncClassifyLocalWithTables must be called "
-             "on main thread");
-
-  if (aExtraTablesByPrefs.Length() != aExtraEntriesByPrefs.Length()) {
-    return NS_ERROR_FAILURE;
-  }
-
-  if (gShuttingDownThread) {
-    return NS_ERROR_ABORT;
-  }
-
-  // Let's convert the current params in a list of features.
-  nsTArray<RefPtr<nsIUrlClassifierFeature>> features;
-
-  for (uint32_t i = 0; i < aExtraTablesByPrefs.Length(); ++i) {
-    nsTArray<nsCString> hosts;
-    Classifier::SplitTables(aExtraEntriesByPrefs[i], hosts);
-    RefPtr<DummyFeature> feature =
-        new DummyFeature(aExtraTablesByPrefs[i], hosts);
-    features.AppendElement(feature);
-  }
-
-  nsTArray<nsCString> tables;
-  Classifier::SplitTables(aTables, tables);
-  for (uint32_t i = 0; i < tables.Length(); ++i) {
-    RefPtr<DummyFeature> feature = new DummyFeature(tables[i]);
-    features.AppendElement(feature);
-  }
-
-  RefPtr<CallbackWrapper> callback = new CallbackWrapper(aCallback);
-
-  // Doesn't really matter if we pass blacklist, whitelist or any other list
-  // here because the DummyFeature returns always the same values.
-  return AsyncClassifyLocalWithFeatures(
-      aURI, features, nsIUrlClassifierFeature::blacklist, callback);
-}
-
-NS_IMETHODIMP
-nsUrlClassifierDBService::ClassifyLocalWithTables(
-    nsIURI* aURI, const nsACString& aTables,
-    nsTArray<nsCString>& aTableResults) {
-  MOZ_ASSERT(NS_IsMainThread(),
-             "ClassifyLocalWithTables must be on main thread");
-  if (gShuttingDownThread) {
-    return NS_ERROR_ABORT;
-  }
-
-  nsresult rv;
-  if (XRE_IsContentProcess()) {
-    using namespace mozilla::dom;
-    using namespace mozilla::ipc;
-    URIParams uri;
-    SerializeURI(aURI, uri);
-    nsAutoCString tables(aTables);
-    bool result = ContentChild::GetSingleton()->SendClassifyLocal(
-        uri, tables, &rv, &aTableResults);
-    if (result) {
-      return rv;
-    }
-    return NS_ERROR_FAILURE;
-  }
-
-  AUTO_PROFILER_LABEL("nsUrlClassifierDBService::ClassifyLocalWithTables",
-                      OTHER);
-  Telemetry::AutoTimer<Telemetry::URLCLASSIFIER_CLASSIFYLOCAL_TIME> timer;
-
-  nsCOMPtr<nsIURI> uri = NS_GetInnermostURI(aURI);
-  NS_ENSURE_TRUE(uri, NS_ERROR_FAILURE);
-
-  nsAutoCString key;
-  // Canonicalize the url
-  nsCOMPtr<nsIUrlClassifierUtils> utilsService =
-      do_GetService(NS_URLCLASSIFIERUTILS_CONTRACTID);
-  rv = utilsService->GetKeyForURI(uri, key);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsTArray<nsCString> tables;
-  Classifier::SplitTables(aTables, tables);
-
-  LookupResultArray results;
-  rv = mWorkerProxy->DoLocalLookupWithURI(key, tables, results);
-  // In unittests, we may not have been initalized, so don't crash.
-  if (NS_SUCCEEDED(rv)) {
-    rv = ProcessLookupResults(results, aTableResults);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  return NS_OK;
-}
-
 class ThreatHitReportListener final : public nsIStreamListener {
  public:
   NS_DECL_ISUPPORTS
@@ -2390,7 +2149,7 @@ nsresult nsUrlClassifierDBService::LookupURI(
         nsCString table = aExtraTablesByPrefs[i];
         nsCOMPtr<nsIUrlClassifierCallback> callback(c);
         nsCOMPtr<nsIRunnable> cbRunnable = NS_NewRunnableFunction(
-            "nsUrlClassifierDBService::AsyncClassifyLocalWithTables",
+            "nsUrlClassifierDBService::LookupURI",
             [callback, table]() -> void { callback->HandleEvent(table); });
 
         NS_DispatchToMainThread(cbRunnable);
@@ -2839,7 +2598,8 @@ nsUrlClassifierDBService::AsyncClassifyLocalWithFeatures(
   auto startTime = TimeStamp::Now();  // For telemetry.
 
   // Let's keep the features alive and release them on the correct thread.
-  RefPtr<FeatureHolder> holder = FeatureHolder::Create(aFeatures, aListType);
+  RefPtr<FeatureHolder> holder =
+      FeatureHolder::Create(aURI, aFeatures, aListType);
   if (NS_WARN_IF(!holder)) {
     return NS_ERROR_FAILURE;
   }
@@ -2905,7 +2665,8 @@ bool nsUrlClassifierDBService::AsyncClassifyLocalWithFeaturesUsingPreferences(
       LOG(("URI found in preferences. Table: %s", tableName.get()));
 
       RefPtr<mozilla::net::UrlClassifierFeatureResult> result =
-          new mozilla::net::UrlClassifierFeatureResult(feature, tableName);
+          new mozilla::net::UrlClassifierFeatureResult(aURI, feature,
+                                                       tableName);
       results.AppendElement(result);
     }
   }
@@ -2922,4 +2683,35 @@ bool nsUrlClassifierDBService::AsyncClassifyLocalWithFeaturesUsingPreferences(
 
   NS_DispatchToMainThread(cbRunnable);
   return true;
+}
+
+NS_IMETHODIMP
+nsUrlClassifierDBService::GetFeatureByName(const nsACString& aFeatureName,
+                                           nsIUrlClassifierFeature** aFeature) {
+  NS_ENSURE_ARG_POINTER(aFeature);
+  nsCOMPtr<nsIUrlClassifierFeature> feature =
+      mozilla::net::UrlClassifierFeatureFactory::GetFeatureByName(aFeatureName);
+  if (NS_WARN_IF(!feature)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  feature.forget(aFeature);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsUrlClassifierDBService::CreateFeatureWithTables(
+    const nsACString& aName, const nsTArray<nsCString>& aBlacklistTables,
+    const nsTArray<nsCString>& aWhitelistTables,
+    nsIUrlClassifierFeature** aFeature) {
+  NS_ENSURE_ARG_POINTER(aFeature);
+  nsCOMPtr<nsIUrlClassifierFeature> feature =
+      mozilla::net::UrlClassifierFeatureFactory::CreateFeatureWithTables(
+          aName, aBlacklistTables, aWhitelistTables);
+  if (NS_WARN_IF(!feature)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  feature.forget(aFeature);
+  return NS_OK;
 }

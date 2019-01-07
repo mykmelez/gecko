@@ -427,9 +427,6 @@ class ExternalResourceMap {
 
 //----------------------------------------------------------------------
 
-// For classifying a flash document based on its principal.
-class PrincipalFlashClassifier;
-
 // Document interface.  This is implemented by all document objects in
 // Gecko.
 class Document : public nsINode,
@@ -2449,6 +2446,12 @@ class Document : public nsINode,
    */
   bool IsVisibleConsideringAncestors() const;
 
+  void SetSuppressedEventListener(EventListener* aListener);
+
+  EventListener* GetSuppressedEventListener() {
+    return mSuppressedEventListener;
+  }
+
   /**
    * Return true when this document is active, i.e., an active document
    * in a content viewer.  Note that this will return true for bfcached
@@ -3412,6 +3415,8 @@ class Document : public nsINode,
                                          const nsAString& aHeightString,
                                          const nsAString& aScaleString);
 
+  mozilla::dom::FlashClassification DocumentFlashClassificationInternal();
+
   nsTArray<nsString> mL10nResources;
 
   // The application cache that this document is associated with, if
@@ -3419,7 +3424,7 @@ class Document : public nsINode,
   nsCOMPtr<nsIApplicationCache> mApplicationCache;
 
  public:
-  bool IsThirdParty();
+  bool IsThirdPartyForFlashClassifier();
 
   bool IsScopedStyleEnabled();
 
@@ -3485,6 +3490,10 @@ class Document : public nsINode,
 
   void ReportShadowDOMUsage();
 
+  // When the doc is blocked permanantly, we would dispatch event to notify
+  // front-end side to show blocking icon.
+  void MaybeNotifyAutoplayBlocked();
+
   // Sets flags for media autoplay telemetry.
   void SetDocTreeHadAudibleMedia();
   void SetDocTreeHadPlayRevoked();
@@ -3515,14 +3524,6 @@ class Document : public nsINode,
    * in the document.
    */
   Element* GetTitleElement();
-
-  // Retrieves the classification of the Flash plugins in the document based on
-  // the classification lists.
-  mozilla::dom::FlashClassification PrincipalFlashClassification();
-
-  // Attempts to determine the Flash classification of this page based on the
-  // the classification lists and the classification of parent documents.
-  mozilla::dom::FlashClassification ComputeFlashClassification();
 
   void RecordNavigationTiming(ReadyState aReadyState);
 
@@ -4142,6 +4143,8 @@ class Document : public nsINode,
   // events were suppressed.
   nsTArray<RefPtr<mozilla::net::ChannelEventQueue>> mSuspendedQueues;
 
+  RefPtr<EventListener> mSuppressedEventListener;
+
   /**
    * https://html.spec.whatwg.org/#ignore-destructive-writes-counter
    */
@@ -4290,11 +4293,11 @@ class Document : public nsINode,
 
   // For determining if this is a flash document which should be
   // blocked based on its principal.
-  RefPtr<PrincipalFlashClassifier> mPrincipalFlashClassifier;
   mozilla::dom::FlashClassification mFlashClassification;
-  // Do not use this value directly. Call the |IsThirdParty()| method, which
-  // caches its result here.
-  mozilla::Maybe<bool> mIsThirdParty;
+
+  // Do not use this value directly. Call the |IsThirdPartyForFlashClassifier()|
+  // method, which caches its result here.
+  mozilla::Maybe<bool> mIsThirdPartyForFlashClassifier;
 
   nsRevocableEventPtr<nsRunnableMethod<Document, void, false>>
       mPendingTitleChangeEvent;

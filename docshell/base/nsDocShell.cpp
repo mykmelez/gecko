@@ -2545,7 +2545,7 @@ void nsDocShell::RecomputeCanExecuteScripts() {
   RefPtr<nsDocShell> parent = GetParentDocshell();
 
   // If we have no tree owner, that means that we've been detached from the
-  // docshell tree (this is distinct from having no parent dochshell, which
+  // docshell tree (this is distinct from having no parent docshell, which
   // is the case for root docshells). It would be nice to simply disallow
   // script in detached docshells, but bug 986542 demonstrates that this
   // behavior breaks at least one website.
@@ -9752,7 +9752,24 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
                         nsIProtocolHandler::URI_DOES_NOT_RETURN_DATA,
                         &doesNotReturnData);
     if (doesNotReturnData) {
-      return NS_ERROR_UNKNOWN_PROTOCOL;
+      bool popupBlocked = true;
+
+      // Let's consider external protocols as popups and let's check if the page
+      // is allowed to open them without abuse regardless of allowed events
+      if (PopupBlocker::GetPopupControlState() <= PopupBlocker::openBlocked) {
+        popupBlocked = !PopupBlocker::TryUsePopupOpeningToken();
+      } else {
+        nsCOMPtr<nsINode> loadingNode =
+            mScriptGlobal->AsOuter()->GetFrameElementInternal();
+        if (loadingNode) {
+          popupBlocked = !PopupBlocker::CanShowPopupByPermission(
+              loadingNode->NodePrincipal());
+        }
+      }
+
+      if (popupBlocked) {
+        return NS_ERROR_UNKNOWN_PROTOCOL;
+      }
     }
 
     // Only allow view-source scheme in top-level docshells. view-source is

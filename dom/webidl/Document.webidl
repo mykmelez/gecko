@@ -505,6 +505,14 @@ partial interface Document {
   void notifyUserGestureActivation();
 };
 
+// Extension to give chrome JS the ability to set an event handler which is
+// called with certain events that happened while events were suppressed in the
+// document or one of its subdocuments.
+partial interface Document {
+  [ChromeOnly]
+  void setSuppressedEventListener(EventListener? aListener);
+};
+
 // Extension to give chrome and XBL JS the ability to determine whether
 // the document is sandboxed without permission to run scripts
 // and whether inline scripts are blocked by the document's CSP.
@@ -516,8 +524,6 @@ partial interface Document {
 // For more information on Flash classification, see
 // toolkit/components/url-classifier/flash-block-lists.rst
 enum FlashClassification {
-  "unclassified",   // Denotes a classification that has not yet been computed.
-                    // Allows for lazy classification.
   "unknown",        // Site is not on the whitelist or blacklist
   "allowed",        // Site is on the Flash whitelist
   "denied"          // Site is on the Flash blacklist

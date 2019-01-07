@@ -21,6 +21,9 @@ class UrlClassifierFeatureLoginReputation final
 
   static nsIUrlClassifierFeature* MaybeGetOrCreate();
 
+  static already_AddRefed<nsIUrlClassifierFeature> GetIfNameMatches(
+      const nsACString& aName);
+
   NS_IMETHOD
   GetTables(nsIUrlClassifierFeature::listType aListType,
             nsTArray<nsCString>& aResult) override;
@@ -36,6 +39,10 @@ class UrlClassifierFeatureLoginReputation final
 
   NS_IMETHOD ProcessChannel(nsIChannel* aChannel, const nsACString& aList,
                             bool* aShouldContinue) override;
+
+  NS_IMETHOD GetURIByListType(nsIChannel* aChannel,
+                              nsIUrlClassifierFeature::listType aListType,
+                              nsIURI** aURI) override;
 
  private:
   UrlClassifierFeatureLoginReputation();

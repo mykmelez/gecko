@@ -29,12 +29,8 @@
 
 class nsSVGBoolean;
 class nsSVGInteger;
-class nsSVGIntegerPair;
 class nsSVGLength2;
 class nsSVGNumber2;
-class nsSVGNumberPair;
-class nsSVGString;
-class nsSVGViewBox;
 
 nsresult NS_NewSVGElement(mozilla::dom::Element** aResult,
                           already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
@@ -44,16 +40,20 @@ class DeclarationBlock;
 
 class SVGAngle;
 class SVGAnimatedNumberList;
-class SVGNumberList;
+class SVGAnimatedPathSegList;
+class SVGAnimatedPointList;
+class SVGAnimatedPreserveAspectRatio;
+class SVGAnimatedTransformList;
 class SVGAnimatedLengthList;
 class SVGEnum;
 class SVGUserUnitList;
-class SVGAnimatedPointList;
-class SVGAnimatedPathSegList;
-class SVGAnimatedPreserveAspectRatio;
-class SVGAnimatedTransformList;
+class SVGIntegerPair;
+class SVGNumberList;
+class SVGNumberPair;
+class SVGString;
 class SVGStringList;
 class DOMSVGStringList;
+class SVGViewBox;
 
 struct SVGEnumMapping;
 
@@ -389,11 +389,11 @@ class SVGElement : public SVGElementBase  // nsIContent
   };
 
   struct NumberPairAttributesInfo {
-    nsSVGNumberPair* const mNumberPairs;
+    SVGNumberPair* const mNumberPairs;
     const NumberPairInfo* const mNumberPairInfo;
     const uint32_t mNumberPairCount;
 
-    NumberPairAttributesInfo(nsSVGNumberPair* aNumberPairs,
+    NumberPairAttributesInfo(SVGNumberPair* aNumberPairs,
                              NumberPairInfo* aNumberPairInfo,
                              uint32_t aNumberPairCount)
         : mNumberPairs(aNumberPairs),
@@ -429,11 +429,11 @@ class SVGElement : public SVGElementBase  // nsIContent
   };
 
   struct IntegerPairAttributesInfo {
-    nsSVGIntegerPair* const mIntegerPairs;
+    SVGIntegerPair* const mIntegerPairs;
     const IntegerPairInfo* const mIntegerPairInfo;
     const uint32_t mIntegerPairCount;
 
-    IntegerPairAttributesInfo(nsSVGIntegerPair* aIntegerPairs,
+    IntegerPairAttributesInfo(SVGIntegerPair* aIntegerPairs,
                               IntegerPairInfo* aIntegerPairInfo,
                               uint32_t aIntegerPairCount)
         : mIntegerPairs(aIntegerPairs),
@@ -556,11 +556,11 @@ class SVGElement : public SVGElementBase  // nsIContent
   };
 
   struct StringAttributesInfo {
-    nsSVGString* const mStrings;
+    SVGString* const mStrings;
     const StringInfo* const mStringInfo;
     const uint32_t mStringCount;
 
-    StringAttributesInfo(nsSVGString* aStrings, StringInfo* aStringInfo,
+    StringAttributesInfo(SVGString* aStrings, StringInfo* aStringInfo,
                          uint32_t aStringCount)
         : mStrings(aStrings),
           mStringInfo(aStringInfo),
@@ -600,7 +600,7 @@ class SVGElement : public SVGElementBase  // nsIContent
   virtual EnumAttributesInfo GetEnumInfo();
   // We assume all viewboxes and preserveAspectRatios are alike
   // so we don't need to wrap the class
-  virtual nsSVGViewBox* GetViewBox();
+  virtual SVGViewBox* GetViewBox();
   virtual SVGAnimatedPreserveAspectRatio* GetPreserveAspectRatio();
   virtual NumberListAttributesInfo GetNumberListInfo();
   virtual LengthListAttributesInfo GetLengthListInfo();
