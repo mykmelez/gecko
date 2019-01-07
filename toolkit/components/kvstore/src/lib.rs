@@ -26,7 +26,7 @@ mod task;
 use atomic_refcell::AtomicRefCell;
 use error::KeyValueError;
 use libc::c_void;
-use moz_task::create_thread;
+use moz_task::{create_thread, TaskRunnable};
 use nserror::{nsresult, NS_ERROR_FAILURE, NS_ERROR_NO_AGGREGATION, NS_OK};
 use nsstring::{nsACString, nsCString};
 use owned_value::{owned_to_variant, variant_to_owned, OwnedValue};
@@ -36,7 +36,7 @@ use std::{
     sync::{Arc, RwLock},
     vec::IntoIter,
 };
-use task::{DeleteTask, EnumerateTask, GetOrCreateTask, GetTask, HasTask, PutTask, TaskRunnable};
+use task::{DeleteTask, EnumerateTask, GetOrCreateTask, GetTask, HasTask, PutTask};
 use threadbound::ThreadBound;
 use xpcom::{
     interfaces::{

@@ -6,25 +6,22 @@ extern crate xpcom;
 
 use crossbeam_utils::atomic::AtomicCell;
 use error::KeyValueError;
-use moz_task::{get_main_thread, is_main_thread};
-use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_OK};
-use nsstring::{nsACString, nsCString, nsString};
+use moz_task::Task;
+use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE};
+use nsstring::{nsCString, nsString};
 use owned_value::{value_to_owned, OwnedValue};
 use rkv::{Manager, Rkv, Store, StoreError, Value};
 use std::{
     path::Path,
     str,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, RwLock,
-    },
+    sync::{Arc, RwLock},
 };
 use storage_variant::VariantType;
 use threadbound::ThreadBound;
 use xpcom::{
     interfaces::{
-        nsIEventTarget, nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback,
-        nsIKeyValueVariantCallback, nsIKeyValueVoidCallback, nsIThread, nsIVariant,
+        nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback, nsIKeyValueVariantCallback,
+        nsIKeyValueVoidCallback, nsIThread, nsIVariant,
     },
     RefPtr,
 };
@@ -79,66 +76,6 @@ macro_rules! task_done {
             }.to_result()
         }
     };
-}
-
-/// A database operation that is executed asynchronously on a database thread
-/// and returns its result to the original thread from which it was dispatched.
-pub trait Task {
-    fn run(&self);
-    fn done(&self) -> Result<(), nsresult>;
-}
-
-/// The struct responsible for dispatching a Task by calling its run() method
-/// on the target thread and returning its result by calling its done() method
-/// on the original thread.
-///
-/// The struct uses its has_run field to determine whether it should call
-/// run() or done().  It could instead check if task.result is Some or None,
-/// but if run() failed to set task.result, then it would loop infinitely.
-#[derive(xpcom)]
-#[xpimplements(nsIRunnable, nsINamed)]
-#[refcnt = "atomic"]
-pub struct InitTaskRunnable {
-    name: &'static str,
-    task: Box<dyn Task>,
-    has_run: AtomicBool,
-}
-
-impl TaskRunnable {
-    pub fn new(name: &'static str, task: Box<dyn Task>) -> Result<RefPtr<TaskRunnable>, nsresult> {
-        assert!(is_main_thread());
-        Ok(TaskRunnable::allocate(InitTaskRunnable {
-            name,
-            task,
-            has_run: AtomicBool::new(false),
-        }))
-    }
-    pub fn dispatch(&self, target_thread: RefPtr<nsIThread>) -> Result<(), nsresult> {
-        unsafe {
-            target_thread.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
-        }.to_result()
-    }
-
-    xpcom_method!(run => Run());
-    fn run(&self) -> Result<(), nsresult> {
-        match self.has_run.load(Ordering::Acquire) {
-            false => {
-                assert!(!is_main_thread());
-                self.has_run.store(true, Ordering::Release);
-                self.task.run();
-                self.dispatch(get_main_thread()?)
-            }
-            true => {
-                assert!(is_main_thread());
-                self.task.done()
-            }
-        }
-    }
-
-    xpcom_method!(get_name => GetName() -> nsACString);
-    fn get_name(&self) -> Result<nsCString, nsresult> {
-        Ok(nsCString::from(self.name))
-    }
 }
 
 pub struct GetOrCreateTask {
@@ -499,7 +436,8 @@ impl Task for EnumerateTask {
                                 Err(_err) => true,
                             }
                         }
-                    }).map(|(key, val)| {
+                    })
+                    .map(|(key, val)| {
                         (
                             match key {
                                 Ok(key) => Ok(key.to_owned()),
@@ -510,7 +448,8 @@ impl Task for EnumerateTask {
                                 Err(err) => Err(KeyValueError::StoreError(err)),
                             },
                         )
-                    }).collect();
+                    })
+                    .collect();
 
                 Ok(pairs)
             }()));
