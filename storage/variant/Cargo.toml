@@ -9,5 +9,5 @@ authors = [
 [dependencies]
 libc = "0.2"
 nserror = { path = "../../xpcom/rust/nserror" }
-nsstring = { path = "../../servo/support/gecko/nsstring" }
+nsstring = { path = "../../xpcom/rust/nsstring" }
 xpcom = { path = "../../xpcom/rust/xpcom" }

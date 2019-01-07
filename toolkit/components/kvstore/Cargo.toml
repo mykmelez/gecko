@@ -11,7 +11,7 @@ lmdb-rkv = "0.9"
 log = "0.4"
 moz_task = { path = "../../../xpcom/rust/moz_task" }
 nserror = { path = "../../../xpcom/rust/nserror" }
-nsstring = { path = "../../../servo/support/gecko/nsstring" }
+nsstring = { path = "../../../xpcom/rust/nsstring" }
 ordered-float = "1"
 rkv = "0.7"
 storage_variant = { path = "../../../storage/variant" }
