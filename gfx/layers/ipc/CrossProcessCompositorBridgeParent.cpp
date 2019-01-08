@@ -391,7 +391,7 @@ void CrossProcessCompositorBridgeParent::ShadowLayersUpdated(
 
   aLayerTree->SetPendingTransactionId(
       aInfo.id(), aInfo.vsyncId(), aInfo.vsyncStart(), aInfo.refreshStart(),
-      aInfo.transactionStart(), aInfo.url(), aInfo.fwdTime());
+      aInfo.transactionStart(), endTime, aInfo.url(), aInfo.fwdTime());
 }
 
 void CrossProcessCompositorBridgeParent::DidCompositeLocked(
@@ -623,6 +623,21 @@ void CrossProcessCompositorBridgeParent::UpdatePaintTime(
   }
 
   state->mParent->UpdatePaintTime(aLayerTree, aPaintTime);
+}
+
+void CrossProcessCompositorBridgeParent::RegisterPayload(
+    LayerTransactionParent* aLayerTree,
+    const InfallibleTArray<CompositionPayload>& aPayload) {
+  LayersId id = aLayerTree->GetId();
+  MOZ_ASSERT(id.IsValid());
+
+  CompositorBridgeParent::LayerTreeState* state =
+      CompositorBridgeParent::GetIndirectShadowTree(id);
+  if (!state || !state->mParent) {
+    return;
+  }
+
+  state->mParent->RegisterPayload(aLayerTree, aPayload);
 }
 
 void CrossProcessCompositorBridgeParent::ObserveLayersUpdate(

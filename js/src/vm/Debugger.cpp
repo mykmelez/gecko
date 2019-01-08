@@ -27,6 +27,8 @@
 #include "jit/BaselineJIT.h"
 #include "js/CharacterEncoding.h"
 #include "js/Date.h"
+#include "js/PropertyDescriptor.h"
+#include "js/PropertySpec.h"
 #include "js/SourceText.h"
 #include "js/StableStringChars.h"
 #include "js/UbiNodeBreadthFirst.h"
@@ -4243,7 +4245,7 @@ void Debugger::removeDebuggeeGlobal(FreeOp* fop, GlobalObject* global,
   for (FrameMap::Enum e(frames); !e.empty(); e.popFront()) {
     AbstractFramePtr frame = e.front().key();
     DebuggerFrame* frameobj = e.front().value();
-    if (frame.global() == global) {
+    if (frame.hasGlobal(global)) {
       frameobj->freeFrameIterData(fop);
       DebuggerFrame_maybeDecrementFrameScriptStepModeCount(fop, frame,
                                                            frameobj);

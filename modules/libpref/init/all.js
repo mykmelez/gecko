@@ -233,6 +233,9 @@ pref("dom.keyboardevent.keypress.hack.dispatch_non_printable_keys", "");
 // check its explanation for the detail.
 pref("dom.keyboardevent.keypress.hack.use_legacy_keycode_and_charcode", "");
 
+// Whether InputEvent.inputType is enabled.
+pref("dom.inputevent.inputtype.enabled", true);
+
 // Whether the WebMIDI API is enabled
 pref("dom.webmidi.enabled", false);
 
@@ -588,7 +591,7 @@ pref("media.recorder.audio_node.enabled", false);
 pref("media.recorder.video.frame_drops", true);
 
 // Whether to autostart a media element with an |autoplay| attribute.
-// ALLOWED=0, BLOCKED=1, PROMPT=2, defined in dom/media/Autoplay.idl
+// ALLOWED=0, BLOCKED=1, defined in dom/media/Autoplay.idl
 pref("media.autoplay.default", 0);
 
 // By default, don't block WebAudio from playing automatically.

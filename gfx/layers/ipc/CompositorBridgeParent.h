@@ -133,6 +133,9 @@ class CompositorBridgeParentBase : public PCompositorBridgeParent,
       const nsTArray<ScrollableLayerGuid>& aTargets) = 0;
   virtual void UpdatePaintTime(LayerTransactionParent* aLayerTree,
                                const TimeDuration& aPaintTime) {}
+  virtual void RegisterPayload(
+      LayerTransactionParent* aLayerTree,
+      const InfallibleTArray<CompositionPayload>& aPayload) {}
 
   ShmemAllocator* AsShmemAllocator() override { return this; }
 
@@ -362,6 +365,9 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
 
   void UpdatePaintTime(LayerTransactionParent* aLayerTree,
                        const TimeDuration& aPaintTime) override;
+  void RegisterPayload(
+      LayerTransactionParent* aLayerTree,
+      const InfallibleTArray<CompositionPayload>& aPayload) override;
 
   /**
    * Check rotation info and schedule a rendering task if needed.
@@ -703,6 +709,13 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
 
   DISALLOW_EVIL_CONSTRUCTORS(CompositorBridgeParent);
 };
+
+int32_t RecordContentFrameTime(
+    const VsyncId& aTxnId, const TimeStamp& aVsyncStart,
+    const TimeStamp& aTxnStart, const VsyncId& aCompositeId,
+    const TimeStamp& aCompositeEnd, const TimeDuration& aFullPaintTime,
+    const TimeDuration& aVsyncRate, bool aContainsSVGGroup,
+    bool aRecordUploadStats, wr::RendererStats* aStats = nullptr);
 
 }  // namespace layers
 }  // namespace mozilla

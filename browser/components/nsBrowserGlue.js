@@ -1454,7 +1454,6 @@ BrowserGlue.prototype = {
     AboutPrivateBrowsingHandler.uninit();
     AutoCompletePopup.uninit();
     DateTimePickerParent.uninit();
-    SaveToPocket.uninit();
 
     // Browser errors are only collected on Nightly, but telemetry for
     // them is collected on all channels.
@@ -3170,9 +3169,6 @@ const ContentPermissionIntegration = {
       }
       case "midi": {
         return new PermissionUI.MIDIPermissionPrompt(request);
-      }
-      case "autoplay-media": {
-        return new PermissionUI.AutoplayPermissionPrompt(request);
       }
       case "storage-access": {
         return new PermissionUI.StorageAccessPermissionPrompt(request);
