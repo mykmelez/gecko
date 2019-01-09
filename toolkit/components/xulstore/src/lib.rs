@@ -195,6 +195,15 @@ pub extern "C" fn xulstore_set_value_c(
         unsafe { CStr::from_ptr(id) }.to_str().unwrap(),
         unsafe { CStr::from_ptr(attr) }.to_str().unwrap(),
     );
+
+    // A hack to ensure STORE is initialized before we open a write transaction,
+    // since STORE initialization itself requires a write transaction,
+    // which would block if another one is extant.
+    // TODO: fix this in the general case, not just for this one function
+    // (which happens to be the first function that the unit tests call).
+    let reader = RKV.read().expect("reader");
+    reader.get(&STORE, &key).expect("read");
+
     let mut writer = RKV.write().expect("writer");
     // TODO: store (and retrieve) values as blobs instead of converting them
     // to Value::Str (and back).

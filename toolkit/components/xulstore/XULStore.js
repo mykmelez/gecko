@@ -183,7 +183,11 @@ nsStringEnumerator.prototype = {
   QueryInterface: ChromeUtils.generateQI([Ci.nsIStringEnumerator]),
   _nextIndex: 0,
   [Symbol.iterator]() {
-    return this._items.values();
+    const items = [];
+    while (this.hasMore()) {
+      items.push(this.getNext());
+    }
+    return items.values();
   },
   hasMore() {
     return XULStoreStore.iterHasMore(this._iterPtr);
