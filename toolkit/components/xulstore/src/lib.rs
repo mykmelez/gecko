@@ -57,7 +57,7 @@ extern crate xpcom;
 use itertools::Itertools;
 use nserror::{nsresult, NS_OK};
 use nsstring::{nsAString, nsString};
-use rkv::{Rkv, StoreError, Value};
+use rkv::{Rkv, Store, StoreError, Value};
 use std::ffi::{CStr, CString};
 use std::fs;
 use std::ops::DerefMut;
@@ -134,7 +134,7 @@ lazy_static! {
     };
 
     #[derive(Debug)]
-    static ref STORE: rkv::Store = {
+    static ref STORE: Store = {
         // NB: an implementation that migrates data from the legacy JSON store
         // might check for the existence of the store in rkv and migrate data
         // before opening the store if it doesn't exist yet.
@@ -163,13 +163,14 @@ pub extern "C" fn xulstore_set_value_ns(
         &String::from_utf16_lossy(id),
         &String::from_utf16_lossy(attr),
     );
+    let store = STORE.clone();
     let mut writer = RKV.write().expect("writer");
 
     // TODO: store (and retrieve) values as blobs instead of converting them
     // to Value::Str (and back).
     // TODO: handle errors by returning NS_ERROR_FAILURE or another nsresult.
     writer
-        .put(&STORE, &key, &Value::Str(&String::from_utf16_lossy(value)))
+        .put(store, &key, &Value::Str(&String::from_utf16_lossy(value)))
         .expect("put");
     writer.commit().expect("commit");
 
@@ -196,21 +197,14 @@ pub extern "C" fn xulstore_set_value_c(
         unsafe { CStr::from_ptr(attr) }.to_str().unwrap(),
     );
 
-    // A hack to ensure STORE is initialized before we open a write transaction,
-    // since STORE initialization itself requires a write transaction,
-    // which would block if another one is extant.
-    // TODO: fix this in the general case, not just for this one function
-    // (which happens to be the first function that the unit tests call).
-    let reader = RKV.read().expect("reader");
-    reader.get(&STORE, &key).expect("read");
-
+    let store = STORE.clone();
     let mut writer = RKV.write().expect("writer");
     // TODO: store (and retrieve) values as blobs instead of converting them
     // to Value::Str (and back).
     let val = Value::Str(unsafe { CStr::from_ptr(value) }.to_str().unwrap());
 
     // TODO: handle errors by returning NS_ERROR_FAILURE or another nsresult.
-    writer.put(&STORE, &key, &val).expect("put");
+    writer.put(store, &key, &val).expect("put");
     writer.commit().expect("commit");
 
     NS_OK
@@ -223,8 +217,9 @@ pub extern "C" fn xulstore_has_value_ns(doc: &nsAString, id: &nsAString, attr: &
         &String::from_utf16_lossy(id),
         &String::from_utf16_lossy(attr),
     );
+    let store = STORE.clone();
     let reader = RKV.read().expect("reader");
-    let value = reader.get(&STORE, &key);
+    let value = reader.get(store, &key);
 
     // TODO: distinguish between a value not found and an error retrieving it.
     match value {
@@ -251,8 +246,9 @@ pub extern "C" fn xulstore_has_value_c(
         unsafe { CStr::from_ptr(id) }.to_str().unwrap(),
         unsafe { CStr::from_ptr(attr) }.to_str().unwrap(),
     );
+    let store = STORE.clone();
     let reader = RKV.read().expect("reader");
-    let value = reader.get(&STORE, &key);
+    let value = reader.get(store, &key);
 
     // TODO: distinguish between a value not found and an error retrieving it.
     match value {
@@ -274,9 +270,10 @@ pub extern "C" fn xulstore_get_value_ns(
         &String::from_utf16_lossy(id),
         &String::from_utf16_lossy(attr),
     );
+    let store = STORE.clone();
     let reader = RKV.read().expect("reader");
 
-    let retrieved_value = reader.get(&STORE, &key);
+    let retrieved_value = reader.get(store, &key);
 
     // TODO: distinguish between a value not found and an error retrieving it.
     // For the former, continue to return an empty string, per the XULStore API.
@@ -311,8 +308,9 @@ pub extern "C" fn xulstore_get_value_c(
         unsafe { CStr::from_ptr(id) }.to_str().unwrap(),
         unsafe { CStr::from_ptr(attr) }.to_str().unwrap(),
     );
+    let store = STORE.clone();
     let reader = RKV.read().expect("reader");
-    let retrieved_value = reader.get(&STORE, &key);
+    let retrieved_value = reader.get(store, &key);
 
     let return_value = match retrieved_value {
         Ok(Some(Value::Str(value))) => value,
@@ -343,10 +341,11 @@ pub extern "C" fn xulstore_remove_value_ns(
         &String::from_utf16_lossy(id),
         &String::from_utf16_lossy(attr),
     );
+    let store = STORE.clone();
     let mut writer = RKV.write().expect("writer");
 
     // TODO: handle errors by returning NS_ERROR_FAILURE or another nsresult.
-    match writer.delete(&STORE, &key) {
+    match writer.delete(store, &key) {
         Ok(ok) => Ok(ok),
         // The XULStore API doesn't care if a consumer tries to remove a value
         // that doesn't actually exist, so we ignore that error.
@@ -379,9 +378,10 @@ pub extern "C" fn xulstore_remove_value_c(
         unsafe { CStr::from_ptr(id) }.to_str().unwrap(),
         unsafe { CStr::from_ptr(attr) }.to_str().unwrap(),
     );
+    let store = STORE.clone();
     let mut writer = RKV.write().expect("writer");
 
-    match writer.delete(&STORE, &key) {
+    match writer.delete(store, &key) {
         // The XULStore API doesn't care if a consumer tries to remove a value
         // that doesn't actually exist, so we ignore that error.
         Err(StoreError::LmdbError(lmdb::Error::NotFound)) => Ok(()),
@@ -397,8 +397,9 @@ pub extern "C" fn xulstore_remove_value_c(
 #[no_mangle]
 pub extern "C" fn xulstore_get_ids_iterator_ns(doc: &nsAString) -> *const StringIterator {
     let doc_url = String::from_utf16_lossy(doc);
+    let store = STORE.clone();
     let reader = RKV.read().expect("reader");
-    let iterator = reader.iter_from(&STORE, &doc_url).expect("iter");
+    let iterator = reader.iter_from(store, &doc_url).expect("iter");
 
     let collection: Vec<String> = iterator
         .map(|(key, _val)| key)
@@ -420,8 +421,9 @@ pub extern "C" fn xulstore_get_ids_iterator_c<'a>(doc: *const c_char) -> *const 
     assert!(!doc.is_null());
 
     let doc_url = unsafe { CStr::from_ptr(doc) }.to_str().unwrap();
+    let store = STORE.clone();
     let reader = RKV.read::<&str>().expect("reader");
-    let iterator = reader.iter_start(&STORE).expect("iter");
+    let iterator = reader.iter_start(store).expect("iter");
 
     let collection: Vec<String> = iterator
         .map(|(key, _val)| key)
@@ -446,8 +448,9 @@ pub extern "C" fn xulstore_get_attribute_iterator_ns<'a>(
     let doc_url = String::from_utf16_lossy(doc);
     let element_id = String::from_utf16_lossy(id);
     let key_prefix = doc_url.to_owned() + "\u{0009}" + &element_id;
+    let store = STORE.clone();
     let reader = RKV.read().expect("reader");
-    let iterator = reader.iter_from(&STORE, &key_prefix).expect("iter");
+    let iterator = reader.iter_from(store, &key_prefix).expect("iter");
 
     let collection: Vec<String> = iterator
         .map(|(key, _val)| key)
@@ -472,8 +475,9 @@ pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(
     let doc_url = unsafe { CStr::from_ptr(doc) }.to_str().unwrap();
     let element_id = unsafe { CStr::from_ptr(id) }.to_str().unwrap();
     let key_prefix = doc_url.to_owned() + "\u{0009}" + element_id;
+    let store = STORE.clone();
     let reader = RKV.read().expect("reader");
-    let iterator = reader.iter_from(&STORE, &key_prefix).expect("iter");
+    let iterator = reader.iter_from(store, &key_prefix).expect("iter");
 
     let collection: Vec<String> = iterator
         .map(|(key, _val)| key)
