@@ -12,14 +12,6 @@
 
 [package]
 name = "rkv"
-<<<<<<< HEAD
-version = "0.3.0"
-authors = ["Richard Newman <rnewman@twinql.com>"]
-description = "A humane key-value store built on LMDB."
-homepage = "https://github.com/mozilla-prototypes/rkv"
-license = "Apache-2.0"
-repository = "https://github.com/mozilla-prototypes/rkv"
-=======
 version = "0.5.1"
 authors = ["Richard Newman <rnewman@twinql.com>"]
 description = "a simple, humane, typed Rust interface to LMDB"
@@ -29,35 +21,18 @@ keywords = ["lmdb", "database", "storage"]
 categories = ["database"]
 license = "Apache-2.0"
 repository = "https://github.com/mozilla/rkv"
->>>>>>> central
 [dependencies.arrayref]
 version = "0.3"
 
 [dependencies.bincode]
-<<<<<<< HEAD
-version = "1.0.0"
-
-[dependencies.failure]
-version = "0.1"
-=======
 version = "1.0"
 
 [dependencies.failure]
 version = "0.1.2"
->>>>>>> central
 features = ["derive"]
 default_features = false
 
 [dependencies.lazy_static]
-<<<<<<< HEAD
-version = "1"
-
-[dependencies.lmdb]
-version = "0.8"
-
-[dependencies.ordered-float]
-version = "0.5"
-=======
 version = "1.0"
 
 [dependencies.lmdb-rkv]
@@ -65,22 +40,10 @@ version = "0.8"
 
 [dependencies.ordered-float]
 version = "1.0"
->>>>>>> central
 
 [dependencies.serde]
 version = "1.0"
 
-<<<<<<< HEAD
-[dependencies.uuid]
-version = "0.5"
-features = ["v4"]
-
-[dev-dependencies.byteorder]
-version = "1"
-
-[dev-dependencies.tempdir]
-version = "0.3"
-=======
 [dependencies.url]
 version = "1.7.0"
 
@@ -91,7 +54,6 @@ version = "1"
 
 [dev-dependencies.tempfile]
 version = "3"
->>>>>>> central
 
 [features]
 backtrace = ["failure/backtrace", "failure/std"]

@@ -1,7 +1,4 @@
-<<<<<<< HEAD
-=======
 #!/bin/bash
->>>>>>> central
 mkdir public
 cargo doc --no-deps
 cargo install mdbook --no-default-features

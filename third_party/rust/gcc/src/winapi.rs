@@ -67,8 +67,8 @@ pub trait Interface {
     fn uuidof() -> GUID;
 }
 
-#[link(name = "ole32")]
-#[link(name = "oleaut32")]
+#[link(name = "Ole32")]
+#[link(name = "OleAut32")]
 extern { }
 
 extern "system" {

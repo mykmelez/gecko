@@ -1,5 +1,3 @@
-<<<<<<< HEAD
-=======
 # Version 0.1.3
 
 - Added `Context::map`
@@ -26,7 +24,6 @@ The original plan to release 1.0.0 was changed so that version 0.1.1 is released
 - Implement `Error: AsRef<Fail>`.
 - Fix `Debug` implementation of `SyncFailure`.
 
->>>>>>> central
 # Version 0.1.1
 
 - Add a `Causes` iterator, which iterates over the causes of a failure. Can be

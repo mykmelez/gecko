@@ -2,19 +2,6 @@
 
 Provides several wrapper types for Ord and Eq implementations on f64.
 
-<<<<<<< HEAD
-See `src/lib.rs` for documentation and details.
-
-## License
-
-MIT
-
-## Tools
-
-Built using Cargo
-Tested using Stainless
-
-=======
 ## Usage
 
 Use the crates.io repository; add this to your `Cargo.toml` along
@@ -40,4 +27,3 @@ ordered-float = { version = "1.0", default-features = false }
 ## License
 
 MIT
->>>>>>> central

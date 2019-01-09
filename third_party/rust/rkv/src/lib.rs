@@ -8,13 +8,6 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
-<<<<<<< HEAD
-#![allow(dead_code)]
-
-#[macro_use] extern crate arrayref;
-#[macro_use] extern crate failure;
-#[macro_use] extern crate lazy_static;
-=======
 //! a simple, humane, typed Rust interface to [LMDB](http://www.lmdb.tech/doc/)
 //!
 //! It aims to achieve the following:
@@ -181,17 +174,12 @@ extern crate arrayref;
 extern crate failure;
 #[macro_use]
 extern crate lazy_static;
->>>>>>> central
 
 extern crate bincode;
 extern crate lmdb;
 extern crate ordered_float;
-<<<<<<< HEAD
-extern crate serde;               // So we can specify trait bounds. Everything else is bincode.
-=======
 extern crate serde; // So we can specify trait bounds. Everything else is bincode.
 extern crate url;
->>>>>>> central
 extern crate uuid;
 
 pub use lmdb::{
@@ -201,18 +189,6 @@ pub use lmdb::{
     WriteFlags,
 };
 
-<<<<<<< HEAD
-pub mod value;
-pub mod error;
-mod env;
-mod readwrite;
-mod integer;
-mod manager;
-
-pub use env::{
-    Rkv,
-};
-=======
 mod env;
 pub mod error;
 mod integer;
@@ -221,7 +197,6 @@ mod readwrite;
 pub mod value;
 
 pub use env::Rkv;
->>>>>>> central
 
 pub use error::{
     DataError,
@@ -229,25 +204,6 @@ pub use error::{
 };
 
 pub use integer::{
-<<<<<<< HEAD
-    IntegerStore,
-    PrimitiveInt,
-};
-
-pub use manager::{
-    Manager
-};
-
-pub use readwrite::{
-    Reader,
-    Writer,
-    Store,
-};
-
-pub use value::{
-    Value,
-};
-=======
     IntegerReader,
     IntegerStore,
     IntegerWriter,
@@ -263,4 +219,3 @@ pub use readwrite::{
 };
 
 pub use value::Value;
->>>>>>> central

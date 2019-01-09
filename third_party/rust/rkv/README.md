@@ -1,25 +1,3 @@
-<<<<<<< HEAD
-# rkv
-
-<a href="https://crates.io/crates/rkv">
-    <img src="https://img.shields.io/crates/v/rkv.svg">
-</a>
-
-rkv is a usable Rust wrapper around LMDB.
-
-It aims to achieve the following:
-
-- Avoid LMDB's sharp edges (e.g., obscure error codes for common situations).
-- Report errors via `failure`.
-- Correctly restrict to one handle per process via a 'manager'.
-- Use Rust's type system to make single-typed key stores (including LMDB's own integer-keyed stores) safe and ergonomic.
-- Encode and decode values via `bincode`/`serde` and type tags, achieving platform-independent storage and input/output flexibility.
-
-## Feature choices
-
-If you specify the `backtrace` feature, backtraces will be enabled in `failure`
-errors. This feature is disabled by default.
-=======
 [![Travis CI Build Status](https://travis-ci.org/mozilla/rkv.svg?branch=master)](https://travis-ci.org/mozilla/rkv)
 [![Appveyor Build Status](https://ci.appveyor.com/api/projects/status/lk936u5y5bi6qafb/branch/master?svg=true)](https://ci.appveyor.com/project/mykmelez/rkv/branch/master)
 [![Documentation](https://docs.rs/rkv/badge.svg)](https://docs.rs/rkv/)
@@ -73,4 +51,3 @@ We follow Mozilla's [Community Participation Guidelines](https://www.mozilla.org
 ## License
 
 The rkv source code is licensed under the Apache License, Version 2.0, as described in the [LICENSE](https://github.com/mozilla/rkv/blob/master/LICENSE) file.
->>>>>>> central

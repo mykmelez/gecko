@@ -1,9 +1,5 @@
-<<<<<<< HEAD
-//! An experimental new error-handling library.
-=======
 //! An experimental new error-handling library. Guide-style introduction
 //! is available [here](https://boats.gitlab.io/failure/).
->>>>>>> central
 //!
 //! The primary items exported by this library are:
 //!
@@ -16,10 +12,6 @@
 //! deal with the `Error` type. There are exceptions to this rule, though, in
 //! both directions, and users should do whatever seems most appropriate to
 //! their situation.
-<<<<<<< HEAD
-#![cfg_attr(not(feature = "std"), no_std)]
-#![deny(missing_docs)]
-=======
 //!
 //! ## Backtraces
 //!
@@ -35,14 +27,10 @@
     feature = "small-error",
     feature(extern_types, allocator_api)
 )]
->>>>>>> central
 
 macro_rules! with_std { ($($i:item)*) => ($(#[cfg(feature = "std")]$i)*) }
 macro_rules! without_std { ($($i:item)*) => ($(#[cfg(not(feature = "std"))]$i)*) }
 
-<<<<<<< HEAD
-mod backtrace;
-=======
 // Re-export libcore using an alias so that the macros can work without
 // requiring `extern crate core` downstream.
 #[doc(hidden)]
@@ -52,7 +40,6 @@ mod as_fail;
 mod backtrace;
 #[cfg(feature = "std")]
 mod box_std;
->>>>>>> central
 mod compat;
 mod context;
 mod result_ext;
@@ -60,29 +47,18 @@ mod result_ext;
 use core::any::TypeId;
 use core::fmt::{Debug, Display};
 
-<<<<<<< HEAD
-=======
 pub use as_fail::AsFail;
->>>>>>> central
 pub use backtrace::Backtrace;
 pub use compat::Compat;
 pub use context::Context;
 pub use result_ext::ResultExt;
 
-<<<<<<< HEAD
-#[cfg(feature = "derive")]
-=======
 #[cfg(feature = "failure_derive")]
->>>>>>> central
 #[allow(unused_imports)]
 #[macro_use]
 extern crate failure_derive;
 
-<<<<<<< HEAD
-#[cfg(feature = "derive")]
-=======
 #[cfg(feature = "failure_derive")]
->>>>>>> central
 #[doc(hidden)]
 pub use failure_derive::*;
 
@@ -98,21 +74,14 @@ with_std! {
 
     pub use error::Error;
 
-<<<<<<< HEAD
-=======
     /// A common result with an `Error`.
     pub type Fallible<T> = Result<T, Error>;
 
->>>>>>> central
     mod macros;
     mod error_message;
     pub use error_message::err_msg;
 }
 
-<<<<<<< HEAD
-
-=======
->>>>>>> central
 /// The `Fail` trait.
 ///
 /// Implementors of this trait are called 'failures'.
@@ -176,12 +145,8 @@ pub trait Fail: Display + Debug + Send + Sync + 'static {
     /// `Send`/`Sync`/`'static`. In practice, this means it can take a `String`
     /// or a string literal, or another failure, or some other custom context-carrying
     /// type.
-<<<<<<< HEAD
-    fn context<D>(self, context: D) -> Context<D> where
-=======
     fn context<D>(self, context: D) -> Context<D>
     where
->>>>>>> central
         D: Display + Send + Sync + 'static,
         Self: Sized,
     {
@@ -193,31 +158,13 @@ pub trait Fail: Display + Debug + Send + Sync + 'static {
     ///
     /// This allows failures  to be compatible with older crates that
     /// expect types that implement the `Error` trait from `std::error`.
-<<<<<<< HEAD
-    fn compat(self) -> Compat<Self> where
-=======
     fn compat(self) -> Compat<Self>
     where
->>>>>>> central
         Self: Sized,
     {
         Compat { error: self }
     }
 
-<<<<<<< HEAD
-    /// Returns a iterator over the causes of this `Fail` with itself
-    /// as the first item and the `root_cause` as the final item.
-    fn causes(&self) -> Causes where Self: Sized {
-        Causes { fail: Some(self) }
-    }
-
-    /// Returns the "root cause" of this `Fail` - the last value in the
-    /// cause chain which does not return an underlying `cause`.
-    ///
-    /// If this type does not have a cause, `self` is returned, because
-    /// it is its own root cause.
-    fn root_cause(&self) -> &Fail where
-=======
     #[doc(hidden)]
     #[deprecated(
         since = "0.1.2",
@@ -237,7 +184,6 @@ pub trait Fail: Display + Debug + Send + Sync + 'static {
     )]
     fn root_cause(&self) -> &Fail
     where
->>>>>>> central
         Self: Sized,
     {
         find_root_cause(self)
@@ -273,17 +219,11 @@ impl Fail {
         }
     }
 
-<<<<<<< HEAD
-
-=======
->>>>>>> central
     /// Returns the "root cause" of this `Fail` - the last value in the
     /// cause chain which does not return an underlying `cause`.
     ///
     /// If this type does not have a cause, `self` is returned, because
     /// it is its own root cause.
-<<<<<<< HEAD
-=======
     ///
     /// This is equivalent to iterating over `iter_causes()` and taking
     /// the last item.
@@ -314,21 +254,15 @@ impl Fail {
         since = "0.1.2",
         note = "please use the 'find_root_cause()' method instead"
     )]
->>>>>>> central
     pub fn root_cause(&self) -> &Fail {
         find_root_cause(self)
     }
 
-<<<<<<< HEAD
-    /// Returns a iterator over the causes of this `Fail` with itself
-    /// as the first item and the `root_cause` as the final item.
-=======
     /// Deprecated alias to `iter_chain`.
     #[deprecated(
         since = "0.1.2",
         note = "please use the 'iter_chain()' method instead"
     )]
->>>>>>> central
     pub fn causes(&self) -> Causes {
         Causes { fail: Some(self) }
     }
@@ -337,8 +271,6 @@ impl Fail {
 #[cfg(feature = "std")]
 impl<E: StdError + Send + Sync + 'static> Fail for E {}
 
-<<<<<<< HEAD
-=======
 #[cfg(feature = "std")]
 impl Fail for Box<Fail> {
     fn cause(&self) -> Option<&Fail> {
@@ -350,7 +282,6 @@ impl Fail for Box<Fail> {
     }
 }
 
->>>>>>> central
 /// A iterator over the causes of a `Fail`
 pub struct Causes<'f> {
     fail: Option<&'f Fail>,

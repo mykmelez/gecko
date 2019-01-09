@@ -8,19 +8,6 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
-<<<<<<< HEAD
-use std::collections::{
-    BTreeMap,
-};
-
-use std::collections::btree_map::{
-    Entry,
-};
-
-use std::os::raw::{
-    c_uint,
-};
-=======
 use std::collections::BTreeMap;
 
 use std::io::{
@@ -32,7 +19,6 @@ use std::io::{
 use std::collections::btree_map::Entry;
 
 use std::os::raw::c_uint;
->>>>>>> central
 
 use std::path::{
     Path,
@@ -44,28 +30,15 @@ use std::sync::{
     RwLock,
 };
 
-<<<<<<< HEAD
-use error::{
-    StoreError,
-};
-
-use ::Rkv;
-=======
 use url::Url;
 
 use error::StoreError;
 
 use Rkv;
->>>>>>> central
 
 /// A process is only permitted to have one open handle to each Rkv environment.
 /// This manager exists to enforce that constraint: don't open environments directly.
 lazy_static! {
-<<<<<<< HEAD
-    static ref MANAGER: RwLock<Manager> = {
-        RwLock::new(Manager::new())
-    };
-=======
     static ref MANAGER: RwLock<Manager> = RwLock::new(Manager::new());
 }
 
@@ -81,7 +54,6 @@ where
         return url.to_file_path().map_err(|_e| Error::new(ErrorKind::Other, "path canonicalization error"));
     }
     Ok(canonical)
->>>>>>> central
 }
 
 pub struct Manager {
@@ -101,52 +73,31 @@ impl Manager {
 
     /// Return the open env at `path`, returning `None` if it has not already been opened.
     pub fn get<'p, P>(&self, path: P) -> Result<Option<Arc<RwLock<Rkv>>>, ::std::io::Error>
-<<<<<<< HEAD
-    where P: Into<&'p Path> {
-        let canonical = path.into().canonicalize()?;
-=======
     where
         P: Into<&'p Path>,
     {
         let canonical = canonicalize_path(path)?;
->>>>>>> central
         Ok(self.environments.get(&canonical).cloned())
     }
 
     /// Return the open env at `path`, or create it by calling `f`.
     pub fn get_or_create<'p, F, P>(&mut self, path: P, f: F) -> Result<Arc<RwLock<Rkv>>, StoreError>
-<<<<<<< HEAD
-    where F: FnOnce(&Path) -> Result<Rkv, StoreError>,
-          P: Into<&'p Path> {
-        let canonical = path.into().canonicalize()?;
-=======
     where
         F: FnOnce(&Path) -> Result<Rkv, StoreError>,
         P: Into<&'p Path>,
     {
         let canonical = canonicalize_path(path)?;
->>>>>>> central
         Ok(match self.environments.entry(canonical) {
             Entry::Occupied(e) => e.get().clone(),
             Entry::Vacant(e) => {
                 let k = Arc::new(RwLock::new(f(e.key().as_path())?));
                 e.insert(k).clone()
-<<<<<<< HEAD
-            }
-=======
             },
->>>>>>> central
         })
     }
 
     /// Return the open env at `path` with capacity `capacity`,
     /// or create it by calling `f`.
-<<<<<<< HEAD
-    pub fn get_or_create_with_capacity<'p, F, P>(&mut self, path: P, capacity: c_uint, f: F) -> Result<Arc<RwLock<Rkv>>, StoreError>
-    where F: FnOnce(&Path, c_uint) -> Result<Rkv, StoreError>,
-          P: Into<&'p Path> {
-        let canonical = path.into().canonicalize()?;
-=======
     pub fn get_or_create_with_capacity<'p, F, P>(
         &mut self,
         path: P,
@@ -158,32 +109,21 @@ impl Manager {
         P: Into<&'p Path>,
     {
         let canonical = canonicalize_path(path)?;
->>>>>>> central
         Ok(match self.environments.entry(canonical) {
             Entry::Occupied(e) => e.get().clone(),
             Entry::Vacant(e) => {
                 let k = Arc::new(RwLock::new(f(e.key().as_path(), capacity)?));
                 e.insert(k).clone()
-<<<<<<< HEAD
-            }
-=======
             },
->>>>>>> central
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
-<<<<<<< HEAD
-    extern crate tempdir;
-
-    use self::tempdir::TempDir;
-=======
     extern crate tempfile;
 
     use self::tempfile::Builder;
->>>>>>> central
     use std::fs;
 
     use super::*;
@@ -191,11 +131,7 @@ mod tests {
     /// Test that the manager will return the same Rkv instance each time for each path.
     #[test]
     fn test_same() {
-<<<<<<< HEAD
-        let root = TempDir::new("test_same").expect("tempdir");
-=======
         let root = Builder::new().prefix("test_same").tempdir().expect("tempdir");
->>>>>>> central
         fs::create_dir_all(root.path()).expect("dir created");
 
         let mut manager = Manager::new();
@@ -211,11 +147,7 @@ mod tests {
     /// Test that the manager will return the same Rkv instance each time for each path.
     #[test]
     fn test_same_with_capacity() {
-<<<<<<< HEAD
-        let root = TempDir::new("test_same").expect("tempdir");
-=======
         let root = Builder::new().prefix("test_same").tempdir().expect("tempdir");
->>>>>>> central
         fs::create_dir_all(root.path()).expect("dir created");
 
         let mut manager = Manager::new();
