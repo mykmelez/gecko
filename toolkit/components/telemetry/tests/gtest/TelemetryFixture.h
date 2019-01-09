@@ -6,12 +6,12 @@
 #define TelemetryFixture_h_
 
 #include "gtest/gtest.h"
-#include "nsITelemetry.h"
 #include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "nsITelemetry.h"
 
-class TelemetryTestFixture: public ::testing::Test {
-protected:
+class TelemetryTestFixture : public ::testing::Test {
+ protected:
   TelemetryTestFixture() : mCleanGlobal(nullptr) {}
   virtual void SetUp();
 
@@ -27,13 +27,13 @@ protected:
 // Note: this is very similar to AutoJSContext, but it allows to pass a
 // global JS object in.
 class MOZ_RAII AutoJSContextWithGlobal {
-public:
+ public:
   explicit AutoJSContextWithGlobal(JSObject* aGlobalObject);
   JSContext* GetJSContext() const;
 
-protected:
+ protected:
   mozilla::dom::AutoJSAPI mJsAPI;
   JSContext* mCx;
 };
 
-#endif //TelemetryFixture_h_
+#endif  // TelemetryFixture_h_

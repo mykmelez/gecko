@@ -14,13 +14,14 @@ add_task(async function setup() {
   Services.prefs.setBoolPref(PREF_TRIMURL, true);
   Services.prefs.setBoolPref(PREF_AUTOFILL, true);
 
+  await PlacesUtils.bookmarks.eraseEverything();
+  await PlacesUtils.history.clear();
+
   // Adding a tab would hit switch-to-tab, so it's safer to just add a visit.
   await PlacesTestUtils.addVisits([{
     uri: "http://www.autofilltrimurl.com/whatever",
-    transition: Ci.nsINavHistoryService.TRANSITION_TYPED,
   }, {
     uri: "https://www.secureautofillurl.com/whatever",
-    transition: Ci.nsINavHistoryService.TRANSITION_TYPED,
   }]);
 });
 
@@ -50,8 +51,15 @@ async function promiseTestResult(test) {
   is(result.getAttribute("type"), test.resultListType,
      `Autocomplete result should have searchengine for the type for search '${test.search}'`);
 
-  is(gURLBar.mController.getFinalCompleteValueAt(0), test.finalCompleteValue,
-     `Autocomplete item should go to the expected final value for search '${test.search}'`);
+  let actualValue = gURLBar.mController.getFinalCompleteValueAt(0);
+  let actualAction = PlacesUtils.parseActionUrl(actualValue);
+  let expectedAction = PlacesUtils.parseActionUrl(test.finalCompleteValue);
+  Assert.equal(!!actualAction, !!expectedAction);
+  if (actualAction) {
+    Assert.deepEqual(actualAction, expectedAction);
+  } else {
+    Assert.equal(actualValue, test.finalCompleteValue);
+  }
 }
 
 const tests = [{
@@ -60,7 +68,7 @@ const tests = [{
     resultListDisplayTitle: "http://",
     resultListActionText: "Search with Google",
     resultListType: "searchengine",
-    finalCompleteValue: 'moz-action:searchengine,{"engineName":"Google","input":"http%3A%2F%2F","searchQuery":"http%3A%2F%2F"}'
+    finalCompleteValue: 'moz-action:searchengine,{"engineName":"Google","input":"http%3A%2F%2F","searchQuery":"http%3A%2F%2F"}',
   },
   {
     search: "https://",
@@ -68,7 +76,7 @@ const tests = [{
     resultListDisplayTitle: "https://",
     resultListActionText: "Search with Google",
     resultListType: "searchengine",
-    finalCompleteValue: 'moz-action:searchengine,{"engineName":"Google","input":"https%3A%2F%2F","searchQuery":"https%3A%2F%2F"}'
+    finalCompleteValue: 'moz-action:searchengine,{"engineName":"Google","input":"https%3A%2F%2F","searchQuery":"https%3A%2F%2F"}',
   },
   {
     search: "au",
@@ -76,7 +84,7 @@ const tests = [{
     resultListDisplayTitle: "www.autofilltrimurl.com",
     resultListActionText: "Visit",
     resultListType: "",
-    finalCompleteValue: "http://www.autofilltrimurl.com/"
+    finalCompleteValue: "http://www.autofilltrimurl.com/",
   },
   {
     search: "http://au",
@@ -84,7 +92,7 @@ const tests = [{
     resultListDisplayTitle: "www.autofilltrimurl.com",
     resultListActionText: "Visit",
     resultListType: "",
-    finalCompleteValue: "http://www.autofilltrimurl.com/"
+    finalCompleteValue: "http://www.autofilltrimurl.com/",
   },
   {
     search: "sec",
@@ -92,7 +100,7 @@ const tests = [{
     resultListDisplayTitle: "https://www.secureautofillurl.com",
     resultListActionText: "Visit",
     resultListType: "",
-    finalCompleteValue: "https://www.secureautofillurl.com/"
+    finalCompleteValue: "https://www.secureautofillurl.com/",
   },
   {
     search: "https://sec",
@@ -100,7 +108,7 @@ const tests = [{
     resultListDisplayTitle: "https://www.secureautofillurl.com",
     resultListActionText: "Visit",
     resultListType: "",
-    finalCompleteValue: "https://www.secureautofillurl.com/"
+    finalCompleteValue: "https://www.secureautofillurl.com/",
   },
 ];
 

@@ -18,30 +18,25 @@
 
 #include <string>
 
-using std::vector;
 using std::string;
+using std::vector;
 
 using mozilla::gmp::GMPProcessParent;
 using mozilla::ipc::GeckoChildProcessHost;
+
+static const int kInvalidFd = -1;
 
 namespace mozilla {
 namespace gmp {
 
 GMPProcessParent::GMPProcessParent(const std::string& aGMPPath)
-: GeckoChildProcessHost(GeckoProcessType_GMPlugin),
-  mGMPPath(aGMPPath)
-{
+    : GeckoChildProcessHost(GeckoProcessType_GMPlugin), mGMPPath(aGMPPath) {
   MOZ_COUNT_CTOR(GMPProcessParent);
 }
 
-GMPProcessParent::~GMPProcessParent()
-{
-  MOZ_COUNT_DTOR(GMPProcessParent);
-}
+GMPProcessParent::~GMPProcessParent() { MOZ_COUNT_DTOR(GMPProcessParent); }
 
-bool
-GMPProcessParent::Launch(int32_t aTimeoutMs)
-{
+bool GMPProcessParent::Launch(int32_t aTimeoutMs) {
   vector<string> args;
 
 #if defined(XP_WIN) && defined(MOZ_SANDBOX)
@@ -77,20 +72,22 @@ GMPProcessParent::Launch(int32_t aTimeoutMs)
   args.push_back(mGMPPath);
 #endif
 
+#ifdef MOZ_WIDGET_ANDROID
+  // Add dummy values for pref and pref map to the file descriptors remapping
+  // table. See bug 1440207 and 1481139.
+  AddFdToRemap(kInvalidFd, kInvalidFd);
+  AddFdToRemap(kInvalidFd, kInvalidFd);
+#endif
   return SyncLaunch(args, aTimeoutMs);
 }
 
-void
-GMPProcessParent::Delete(nsCOMPtr<nsIRunnable> aCallback)
-{
+void GMPProcessParent::Delete(nsCOMPtr<nsIRunnable> aCallback) {
   mDeletedCallback = aCallback;
   XRE_GetIOMessageLoop()->PostTask(NewNonOwningRunnableMethod(
-    "gmp::GMPProcessParent::DoDelete", this, &GMPProcessParent::DoDelete));
+      "gmp::GMPProcessParent::DoDelete", this, &GMPProcessParent::DoDelete));
 }
 
-void
-GMPProcessParent::DoDelete()
-{
+void GMPProcessParent::DoDelete() {
   MOZ_ASSERT(MessageLoop::current() == XRE_GetIOMessageLoop());
   Join();
 
@@ -101,5 +98,5 @@ GMPProcessParent::DoDelete()
   delete this;
 }
 
-} // namespace gmp
-} // namespace mozilla
+}  // namespace gmp
+}  // namespace mozilla

@@ -1,7 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "42");
 
@@ -15,27 +14,16 @@ const ADDONS = {
       "manifest_version": 2,
       "applications": {
         "gecko": {
-          "id": ID
-        }
+          "id": ID,
+        },
       },
       "icons": {
         "48": "icon48.png",
-        "64": "icon64.png"
-      }
+        "64": "icon64.png",
+      },
     },
-    "chrome.manifest": "content webex ./\n"
+    "chrome.manifest": "content webex ./\n",
   },
-};
-
-const manifestSample = {
-  id: "bootstrap1@tests.mozilla.org",
-  version: "1.0",
-  bootstrap: true,
-  targetApplications: [{
-    id: "xpcshell@tests.mozilla.org",
-    minVersion: "1",
-    maxVersion: "1"
-  }],
 };
 
 async function tearDownAddon(addon) {
@@ -44,8 +32,6 @@ async function tearDownAddon(addon) {
 }
 
 add_task(async function test_reloading_a_temp_addon() {
-  if (AppConstants.MOZ_APP_NAME == "thunderbird")
-    return;
   await promiseRestartManager();
   let xpi = AddonTestUtils.createTempXPIFile(ADDONS.webextension_1);
   const addon = await AddonManager.installTemporaryAddon(xpi);
@@ -110,7 +96,7 @@ add_task(async function test_can_reload_permanent_addon() {
     onEnabled: (aAddon) => {
       Assert.ok(disabledCalled);
       enabledCalled = true;
-    }
+    },
   });
 
   await addon.reload();
@@ -139,7 +125,7 @@ add_task(async function test_reload_to_invalid_version_fails() {
     applications: {
       gecko: {
         id: addonId,
-      }
+      },
     },
   };
 
@@ -176,67 +162,4 @@ add_task(async function test_reload_to_invalid_version_fails() {
 
   await tearDownAddon(reloadedAddon);
   addonDir.remove(true);
-});
-
-add_task(async function test_manifest_changes_are_refreshed() {
-  if (!AppConstants.MOZ_ALLOW_LEGACY_EXTENSIONS) {
-    return;
-  }
-  await promiseRestartManager();
-  let tempdir = gTmpD.clone();
-
-  const unpackedAddon = await promiseWriteInstallRDFToDir(
-    Object.assign({}, manifestSample, {
-      name: "Test Bootstrap 1",
-    }), tempdir, manifestSample.id, "bootstrap.js");
-
-  await AddonManager.installTemporaryAddon(unpackedAddon);
-  const addon = await promiseAddonByID(manifestSample.id);
-  notEqual(addon, null);
-  equal(addon.name, "Test Bootstrap 1");
-
-  await promiseWriteInstallRDFToDir(Object.assign({}, manifestSample, {
-    name: "Test Bootstrap 1 (reloaded)",
-  }), tempdir, manifestSample.id);
-
-  await addon.reload();
-
-  const reloadedAddon = await promiseAddonByID(manifestSample.id);
-  notEqual(reloadedAddon, null);
-  equal(reloadedAddon.name, "Test Bootstrap 1 (reloaded)");
-
-  await tearDownAddon(reloadedAddon);
-  unpackedAddon.remove(true);
-});
-
-add_task(async function test_reload_fails_on_installation_errors() {
-  if (!AppConstants.MOZ_ALLOW_LEGACY_EXTENSIONS) {
-    return;
-  }
-  await promiseRestartManager();
-  let tempdir = gTmpD.clone();
-
-  const unpackedAddon = await promiseWriteInstallRDFToDir(
-    Object.assign({}, manifestSample, {
-      name: "Test Bootstrap 1",
-    }), tempdir, manifestSample.id, "bootstrap.js");
-
-  await AddonManager.installTemporaryAddon(unpackedAddon);
-  const addon = await promiseAddonByID(manifestSample.id);
-  notEqual(addon, null);
-
-  // Trigger an installation error with an empty manifest.
-  await promiseWriteInstallRDFToDir({}, tempdir, manifestSample.id);
-
-  await Assert.rejects(addon.reload(), /No ID in install manifest/);
-
-  // The old add-on should be active. I.E. the broken reload will not
-  // disturb it.
-  const oldAddon = await promiseAddonByID(manifestSample.id);
-  notEqual(oldAddon, null);
-  equal(oldAddon.isActive, true);
-  equal(oldAddon.name, "Test Bootstrap 1");
-
-  await tearDownAddon(addon);
-  unpackedAddon.remove(true);
 });

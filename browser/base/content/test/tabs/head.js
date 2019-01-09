@@ -5,7 +5,7 @@ function updateTabContextMenu(tab) {
   var evt = new Event("");
   tab.dispatchEvent(evt);
   menu.openPopup(tab, "end_after", 0, 0, true, false, evt);
-  is(TabContextMenu.contextTab, tab, "TabContextMenu context is the expected tab");
+  is(window.TabContextMenu.contextTab, tab, "TabContextMenu context is the expected tab");
   menu.hidePopup();
 }
 
@@ -14,16 +14,16 @@ function triggerClickOn(target, options) {
   if (AppConstants.platform == "macosx") {
       options = {
           metaKey: options.ctrlKey,
-          shiftKey: options.shiftKey
+          shiftKey: options.shiftKey,
       };
   }
   EventUtils.synthesizeMouseAtCenter(target, options);
   return promise;
 }
 
-async function addTab() {
-  const tab = BrowserTestUtils.addTab(gBrowser,
-      "http://mochi.test:8888/", { skipAnimation: true });
+async function addTab(url = "http://mochi.test:8888/", params = {}) {
+  params.skipAnimation = true;
+  const tab = BrowserTestUtils.addTab(gBrowser, url, params);
   const browser = gBrowser.getBrowserForTab(tab);
   await BrowserTestUtils.browserLoaded(browser);
   return tab;
@@ -89,8 +89,7 @@ async function play(tab, expectPlaying = true) {
 }
 
 function disable_non_test_mouse(disable) {
-  let utils = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                    .getInterface(Ci.nsIDOMWindowUtils);
+  let utils = window.windowUtils;
   utils.disableNonTestMouseEvents(disable);
 }
 
@@ -157,4 +156,36 @@ async function test_mute_tab(tab, icon, expectMuted) {
   }
 
   return mutedPromise;
+}
+
+async function dragAndDrop(tab1, tab2, copy, destWindow = window) {
+  let rect = tab2.getBoundingClientRect();
+  let event = {
+    ctrlKey: copy,
+    altKey: copy,
+    clientX: rect.left + rect.width / 2 + 10,
+    clientY: rect.top + rect.height / 2,
+  };
+
+  if (destWindow != window) {
+    // Make sure that both tab1 and tab2 are visible
+    window.focus();
+    window.moveTo(rect.left, rect.top + rect.height * 3);
+  }
+
+  let originalTPos = tab1._tPos;
+  EventUtils.synthesizeDrop(tab1, tab2, null, copy ? "copy" : "move", window, destWindow, event);
+  // Ensure dnd suppression is cleared.
+  EventUtils.synthesizeMouseAtCenter(tab2, { type: "mouseup" }, destWindow);
+  if (!copy && destWindow == window) {
+    await BrowserTestUtils.waitForCondition(() => tab1._tPos != originalTPos,
+      "Waiting for tab position to be updated");
+  } else if (destWindow != window) {
+    await BrowserTestUtils.waitForCondition(() => tab1.closing,
+      "Waiting for tab closing");
+  }
+}
+
+function getUrl(tab) {
+  return tab.linkedBrowser.currentURI.spec;
 }

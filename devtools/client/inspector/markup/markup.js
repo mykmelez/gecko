@@ -6,6 +6,7 @@
 
 const promise = require("promise");
 const Services = require("Services");
+const flags = require("devtools/shared/flags");
 const nodeConstants = require("devtools/shared/dom-node-constants");
 const nodeFilterConstants = require("devtools/shared/dom-node-filter-constants");
 const EventEmitter = require("devtools/shared/event-emitter");
@@ -14,17 +15,18 @@ const {PluralForm} = require("devtools/shared/plural-form");
 const AutocompletePopup = require("devtools/client/shared/autocomplete-popup");
 const KeyShortcuts = require("devtools/client/shared/key-shortcuts");
 const {scrollIntoViewIfNeeded} = require("devtools/client/shared/scroll");
-const {UndoStack} = require("devtools/client/shared/undo");
-const {HTMLTooltip} = require("devtools/client/shared/widgets/tooltip/HTMLTooltip");
 const {PrefObserver} = require("devtools/client/shared/prefs");
 const MarkupElementContainer = require("devtools/client/inspector/markup/views/element-container");
 const MarkupReadOnlyContainer = require("devtools/client/inspector/markup/views/read-only-container");
 const MarkupTextContainer = require("devtools/client/inspector/markup/views/text-container");
-const SlottedNodeContainer = require("devtools/client/inspector/markup/views/slotted-node-container");
 const RootContainer = require("devtools/client/inspector/markup/views/root-container");
 
+loader.lazyRequireGetter(this, "SlottedNodeContainer", "devtools/client/inspector/markup/views/slotted-node-container");
+loader.lazyRequireGetter(this, "HTMLTooltip", "devtools/client/shared/widgets/tooltip/HTMLTooltip", true);
+loader.lazyRequireGetter(this, "UndoStack", "devtools/client/shared/undo", true);
+
 const INSPECTOR_L10N =
-      new LocalizationHelper("devtools/client/locales/inspector.properties");
+  new LocalizationHelper("devtools/client/locales/inspector.properties");
 
 // Page size for pageup/pagedown
 const PAGE_SIZE = 10;
@@ -64,13 +66,14 @@ const ATTR_COLLAPSE_LENGTH_PREF = "devtools.markup.collapseAttributeLength";
 function MarkupView(inspector, frame, controllerWindow) {
   EventEmitter.decorate(this);
 
+  this.controllerWindow = controllerWindow;
   this.inspector = inspector;
   this.highlighters = inspector.highlighters;
   this.walker = this.inspector.walker;
   this._frame = frame;
   this.win = this._frame.contentWindow;
   this.doc = this._frame.contentDocument;
-  this._elt = this.doc.querySelector("#root");
+  this._elt = this.doc.getElementById("root");
   this.telemetry = this.inspector.telemetry;
 
   this.maxChildren = Services.prefs.getIntPref("devtools.markup.pagesize",
@@ -83,11 +86,7 @@ function MarkupView(inspector, frame, controllerWindow) {
   // The popup will be attached to the toolbox document.
   this.popup = new AutocompletePopup(inspector.toolbox.doc, {
     autoSelect: true,
-    theme: "auto",
   });
-
-  this.undo = new UndoStack();
-  this.undo.installController(controllerWindow);
 
   this._containers = new Map();
   // This weakmap will hold keys used with the _containers map, in order to retrieve the
@@ -122,11 +121,24 @@ function MarkupView(inspector, frame, controllerWindow) {
   this.walker.on("mutations", this._mutationObserver);
   this.win.addEventListener("copy", this._onCopy);
   this.win.addEventListener("mouseup", this._onMouseUp);
-  this.toolbox.on("picker-canceled", this._onToolboxPickerCanceled);
-  this.toolbox.on("picker-node-hovered", this._onToolboxPickerHover);
+  this.inspector.inspector.nodePicker.on(
+    "picker-node-canceled", this._onToolboxPickerCanceled
+  );
+  this.inspector.inspector.nodePicker.on(
+    "picker-node-hovered", this._onToolboxPickerHover
+  );
+
+  if (flags.testing) {
+    // In tests, we start listening immediately to avoid having to simulate a mousemove.
+    this._initTooltips();
+  } else {
+    this._elt.addEventListener("mousemove", () => {
+      this._initTooltips();
+    }, { once: true });
+  }
 
   this._onNewSelection();
-  this._initTooltips();
+  this.expandNode(this.inspector.selection.nodeFront);
 
   this._prefObserver = new PrefObserver("devtools.markup");
   this._prefObserver.on(ATTR_COLLAPSE_ENABLED_PREF, this._onCollapseAttributesPrefChange);
@@ -143,8 +155,29 @@ MarkupView.prototype = {
 
   _selectedContainer: null,
 
+  get eventDetailsTooltip() {
+    if (!this._eventDetailsTooltip) {
+      // This tooltip will be attached to the toolbox document.
+      this._eventDetailsTooltip = new HTMLTooltip(this.toolbox.doc, {
+        type: "arrow",
+        consumeOutsideClicks: false,
+      });
+    }
+
+    return this._eventDetailsTooltip;
+  },
+
   get toolbox() {
     return this.inspector.toolbox;
+  },
+
+  get undo() {
+    if (!this._undo) {
+      this._undo = new UndoStack();
+      this._undo.installController(this.controllerWindow);
+    }
+
+    return this._undo;
   },
 
   /**
@@ -161,10 +194,6 @@ MarkupView.prototype = {
 
   _initTooltips: function() {
     // The tooltips will be attached to the toolbox document.
-    this.eventDetailsTooltip = new HTMLTooltip(this.toolbox.doc, {
-      type: "arrow",
-      consumeOutsideClicks: false,
-    });
     this.imagePreviewTooltip = new HTMLTooltip(this.toolbox.doc, {
       type: "arrow",
       useXulWrapper: true,
@@ -173,8 +202,7 @@ MarkupView.prototype = {
   },
 
   _enableImagePreviewTooltip: function() {
-    this.imagePreviewTooltip.startTogglingOnHover(this._elt,
-      this._isImagePreviewTarget);
+    this.imagePreviewTooltip.startTogglingOnHover(this._elt, this._isImagePreviewTarget);
   },
 
   _disableImagePreviewTooltip: function() {
@@ -431,7 +459,7 @@ MarkupView.prototype = {
    *         requests queued up
    */
   _showBoxModel: function(nodeFront) {
-    return this.toolbox.highlighterUtils.highlightNodeFront(nodeFront)
+    return this.toolbox.highlighter.highlight(nodeFront)
       .catch(this._handleRejectionIfNotDestroyed);
   },
 
@@ -439,13 +467,13 @@ MarkupView.prototype = {
    * Hide the box model highlighter on a given node front
    *
    * @param  {Boolean} forceHide
-   *         See toolbox-highlighter-utils/unhighlight
+   *         See highlighterFront method `unhighlight`
    * @return {Promise} Resolves when the highlighter for this nodeFront is
    *         hidden, taking into account that there could already be highlighter
    *         requests queued up
    */
   _hideBoxModel: function(forceHide) {
-    return this.toolbox.highlighterUtils.unhighlight(forceHide)
+    return this.toolbox.highlighter.unhighlight(forceHide)
       .catch(this._handleRejectionIfNotDestroyed);
   },
 
@@ -620,7 +648,7 @@ MarkupView.prototype = {
       "inspector-open",
       "navigateaway",
       "nodeselected",
-      "test"
+      "test",
     ];
 
     const isHighlight = this._isContainerSelected(this._hoveredContainer);
@@ -632,7 +660,7 @@ MarkupView.prototype = {
    * Highlights the node if needed, and make sure it is shown and selected in
    * the view.
    */
-  _onNewSelection: function() {
+  _onNewSelection: function(nodeFront, reason) {
     const selection = this.inspector.selection;
 
     if (this.htmlEditor) {
@@ -657,20 +685,22 @@ MarkupView.prototype = {
     }
 
     const slotted = selection.isSlotted();
-    const onShow = this.showNode(selection.nodeFront, { slotted }).then(() => {
-      // We could be destroyed by now.
-      if (this._destroyer) {
-        return promise.reject("markupview destroyed");
-      }
+    const smoothScroll = reason === "reveal-from-slot";
+    const onShow = this.showNode(selection.nodeFront, { slotted, smoothScroll })
+      .then(() => {
+        // We could be destroyed by now.
+        if (this._destroyer) {
+          return promise.reject("markupview destroyed");
+        }
 
-      // Mark the node as selected.
-      const container = this.getContainer(selection.nodeFront, slotted);
-      this._markContainerAsSelected(container);
+        // Mark the node as selected.
+        const container = this.getContainer(selection.nodeFront, slotted);
+        this._markContainerAsSelected(container);
 
-      // Make sure the new selection is navigated to.
-      this.maybeNavigateToNewSelection();
-      return undefined;
-    }).catch(this._handleRejectionIfNotDestroyed);
+        // Make sure the new selection is navigated to.
+        this.maybeNavigateToNewSelection();
+        return undefined;
+      }).catch(this._handleRejectionIfNotDestroyed);
 
     promise.all([onShowBoxModel, onShow]).then(done);
   },
@@ -691,7 +721,7 @@ MarkupView.prototype = {
       // If the user selected an element with the browser context menu.
       "browser-context-menu",
       // If the user added a new node by clicking in the inspector toolbar.
-      "node-inserted"
+      "node-inserted",
     ];
 
     // If the user performed an action with a keyboard, move keyboard focus to
@@ -1090,11 +1120,20 @@ MarkupView.prototype = {
         continue;
       }
 
-      if (type === "attributes" || type === "characterData"
-        || type === "events" || type === "pseudoClassLock") {
+      if (
+        type === "attributes" ||
+        type === "characterData" ||
+        type === "customElementDefined" ||
+        type === "events" ||
+        type === "pseudoClassLock"
+      ) {
         container.update();
-      } else if (type === "childList" || type === "nativeAnonymousChildList"
-        || type === "slotchange") {
+      } else if (
+        type === "childList" ||
+        type === "nativeAnonymousChildList" ||
+        type === "slotchange" ||
+        type === "shadowRootAttached"
+      ) {
         container.childrenDirty = true;
         // Update the children to take care of changes in the markup view DOM
         // and update container (and its subtree) DOM tree depth level for
@@ -1195,7 +1234,7 @@ MarkupView.prototype = {
    * Make sure the given node's parents are expanded and the
    * node is scrolled on to screen.
    */
-  showNode: function(node, {centered = true, slotted} = {}) {
+  showNode: function(node, {centered = true, slotted, smoothScroll = false} = {}) {
     if (slotted && !this.hasContainer(node, slotted)) {
       throw new Error("Tried to show a slotted node not previously imported");
     } else {
@@ -1209,7 +1248,7 @@ MarkupView.prototype = {
       return this._ensureVisible(node);
     }).then(() => {
       const container = this.getContainer(node, slotted);
-      scrollIntoViewIfNeeded(container.editor.elt, centered);
+      scrollIntoViewIfNeeded(container.editor.elt, centered, smoothScroll);
     }, this._handleRejectionIfNotDestroyed);
   },
 
@@ -1218,7 +1257,7 @@ MarkupView.prototype = {
 
     this.importNode(node);
 
-    while ((parent = parent.parentNode())) {
+    while ((parent = this._getParentInTree(parent))) {
       this.importNode(parent);
       this.expandNode(parent);
     }
@@ -1540,10 +1579,10 @@ MarkupView.prototype = {
         }
 
         const end = this.telemetry.msSystemNow();
-        this.telemetry.recordEvent("devtools.main", "edit_html", "inspector", null, {
+        this.telemetry.recordEvent("edit_html", "inspector", null, {
           "made_changes": commit,
           "time_open": end - start,
-          "session_id": this.toolbox.sessionId
+          "session_id": this.toolbox.sessionId,
         });
       });
 
@@ -1626,7 +1665,7 @@ MarkupView.prototype = {
   _ensureVisible: function(node) {
     while (node) {
       const container = this.getContainer(node);
-      const parent = node.parentNode();
+      const parent = this._getParentInTree(node);
       if (!container.elt.parentNode) {
         const parentContainer = this.getContainer(parent);
         if (parentContainer) {
@@ -1661,11 +1700,11 @@ MarkupView.prototype = {
     let centered = null;
     let node = this.inspector.selection.nodeFront;
     while (node) {
-      if (node.parentNode() === container.node) {
+      if (this._getParentInTree(node) === container.node) {
         centered = node;
         break;
       }
-      node = node.parentNode();
+      node = this._getParentInTree(node);
     }
 
     return centered;
@@ -1855,8 +1894,20 @@ MarkupView.prototype = {
 
     return this.walker.children(container.node, {
       maxNodes: maxChildren,
-      center: centered
+      center: centered,
     });
+  },
+
+  /**
+   * The parent of a given node as rendered in the markup view is not necessarily
+   * node.parentNode(). For instance, shadow roots don't have a parentNode, but a host
+   * element. However they are represented as parent and children in the markup view.
+   *
+   * Use this method when you are interested in the parent of a node from the perspective
+   * of the markup-view tree, and not from the perspective of the actual DOM.
+   */
+  _getParentInTree: function(node) {
+    return node.parentOrHost();
   },
 
   /**
@@ -1873,13 +1924,25 @@ MarkupView.prototype = {
 
     this._hoveredContainer = null;
 
+    if (this._eventDetailsTooltip) {
+      this._eventDetailsTooltip.destroy();
+      this._eventDetailsTooltip = null;
+    }
+
     if (this.htmlEditor) {
       this.htmlEditor.destroy();
       this.htmlEditor = null;
     }
 
-    this.undo.destroy();
-    this.undo = null;
+    if (this.imagePreviewTooltip) {
+      this.imagePreviewTooltip.destroy();
+      this.imagePreviewTooltip = null;
+    }
+
+    if (this._undo) {
+      this._undo.destroy();
+      this._undo = null;
+    }
 
     this.popup.destroy();
     this.popup = null;
@@ -1890,7 +1953,9 @@ MarkupView.prototype = {
     this._elt.removeEventListener("mouseout", this._onMouseOut);
     this._frame.removeEventListener("focus", this._onFocus);
     this.inspector.selection.off("new-node-front", this._onNewSelection);
-    this.toolbox.off("picker-node-hovered", this._onToolboxPickerHover);
+    this.inspector.inspector.nodePicker.off(
+      "picker-node-hovered", this._onToolboxPickerHover
+    );
     this.walker.off("display-change", this._onDisplayChange);
     this.walker.off("mutations", this._mutationObserver);
     this.win.removeEventListener("copy", this._onCopy);
@@ -1902,19 +1967,15 @@ MarkupView.prototype = {
                            this._onCollapseAttributesPrefChange);
     this._prefObserver.destroy();
 
-    this._elt = null;
-
     for (const [, container] of this._containers) {
       container.destroy();
     }
     this._containers = null;
 
-    this.eventDetailsTooltip.destroy();
-    this.eventDetailsTooltip = null;
+    this._elt.innerHTML = "";
+    this._elt = null;
 
-    this.imagePreviewTooltip.destroy();
-    this.imagePreviewTooltip = null;
-
+    this.controllerWindow = null;
     this.doc = null;
     this.highlighters = null;
     this.win = null;
@@ -2012,7 +2073,7 @@ MarkupView.prototype = {
     }
 
     return {parent, nextSibling};
-  }
+  },
 };
 
 /**

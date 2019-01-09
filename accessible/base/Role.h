@@ -201,8 +201,8 @@ enum Role {
   ROW = 28,
 
   /**
-   * Represents a cell within a table. It is used for html:td,
-   * xul:tree cell and xul:listcell. Also, see TABLE.
+   * Represents a cell within a table. It is used for html:td and xul:tree cell.
+   * Also, see TABLE.
    */
   CELL = 29,
 
@@ -319,7 +319,7 @@ enum Role {
 
   /**
    * Represents a progress bar, dynamically showing the user the percent
-   * complete of an operation in progress. It is used for xul:progressmeter,
+   * complete of an operation in progress. It is used for html:progress,
    * role="progressbar".
    */
   PROGRESSBAR = 48,
@@ -362,7 +362,8 @@ enum Role {
 
   /**
    * Represents a mathematical equation. It is used by MATHML, where there is a
-   * rich DOM subtree for an equation. Use FLAT_EQUATION for <img role="math" alt="[TeX]"/>
+   * rich DOM subtree for an equation. Use FLAT_EQUATION for <img role="math"
+   * alt="[TeX]"/>
    */
   EQUATION = 55,
 
@@ -418,7 +419,7 @@ enum Role {
   /**
    * Represents an arrow in one of the four cardinal directions.
    */
-  ARROW  = 65,
+  ARROW = 65,
 
   /**
    * Represents a control that can be drawn into and is used to trap events.
@@ -434,7 +435,7 @@ enum Role {
   /**
    * Represents a specialized dialog that lets the user choose a color.
    */
-  COLOR_CHOOSER  = 68,
+  COLOR_CHOOSER = 68,
 
   /**
    * Represents control whose purpose is to allow a user to edit a date.
@@ -1025,14 +1026,33 @@ enum Role {
    */
   BLOCKQUOTE = 175,
 
-  LAST_ROLE = BLOCKQUOTE
+  /**
+   * Content previously deleted or proposed for deletion, e.g. in revision
+   * history or a content view providing suggestions from reviewers.
+   */
+  CONTENT_DELETION = 176,
+
+  /**
+   * Content previously inserted or proposed for insertion, e.g. in revision
+   * history or a content view providing suggestions from reviewers.
+   */
+  CONTENT_INSERTION = 177,
+
+  /**
+   * An html:form element with a label provided by WAI-ARIA.
+   * This may also be used if role="form" with a label should be exposed
+   * differently in the future.
+   */
+  FORM_LANDMARK = 178,
+
+  LAST_ROLE = FORM_LANDMARK
 };
 
-} // namespace role
+}  // namespace roles
 
 typedef enum mozilla::a11y::roles::Role role;
 
-} // namespace a11y
-} // namespace mozilla
+}  // namespace a11y
+}  // namespace mozilla
 
 #endif

@@ -10,6 +10,7 @@ const breakdown = {
   scripts: { by: "count", count: true, bytes: true },
   strings: { by: "count", count: true, bytes: true },
   other: { by: "count", count: true, bytes: true },
+  domNode: { by: "count", count: true, bytes: true },
 };
 
 add_task(async function() {
@@ -25,7 +26,7 @@ add_task(async function() {
 
   const partialTree = await client.getDominatorTree({
     dominatorTreeId,
-    breakdown
+    breakdown,
   });
   ok(partialTree, "Should get a partial tree");
   equal(typeof partialTree, "object",

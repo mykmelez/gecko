@@ -1,16 +1,16 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Resolution values:
 //!
 //! https://drafts.csswg.org/css-values/#resolution
 
+use crate::values::computed::{Context, ToComputedValue};
+use crate::values::specified;
+use crate::values::CSSFloat;
 use std::fmt::{self, Write};
 use style_traits::{CssWriter, ToCss};
-use values::CSSFloat;
-use values::computed::{Context, ToComputedValue};
-use values::specified;
 
 /// A computed `<resolution>`.
 pub struct Resolution(CSSFloat);
@@ -20,6 +20,12 @@ impl Resolution {
     #[inline]
     pub fn dppx(&self) -> CSSFloat {
         self.0
+    }
+
+    /// Return a computed `resolution` value from a dppx float value.
+    #[inline]
+    pub fn from_dppx(dppx: CSSFloat) -> Self {
+        Resolution(dppx)
     }
 }
 

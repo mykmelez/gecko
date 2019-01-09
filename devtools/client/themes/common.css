@@ -6,17 +6,23 @@
 @namespace html url("http://www.w3.org/1999/xhtml");
 
 :root {
+  /* Bug 1458224: the initial `font-size` is different on Mac/Windows
+   * (appears fixed to 11px) and Linux (bigger, depends on user settings).
+   * Workaround: specify font-size on root, on form inputs, and whenever
+   * we're using the `font` shorthand. */
   font: message-box;
+  font-size: var(--theme-body-font-size);
 
-  --tab-line-selected-color: var(--blue-50);
-}
-
-:root.theme-light {
   --tab-line-hover-color: rgba(0,0,0,.2);
+  --tab-line-selected-color: var(--blue-50);
+  --toggle-thumb-color: white;
+  --toggle-track-color: var(--grey-30);
 }
 
 :root.theme-dark {
   --tab-line-hover-color: rgba(255,255,255,.2);
+  --toggle-thumb-color: var(--grey-40);
+  --toggle-track-color: var(--grey-60);
 }
 
 :root[platform="mac"] {
@@ -31,25 +37,43 @@
   --monospace-font-family: monospace;
 }
 
+/**
+ * Customize the dark theme's scrollbar colors to avoid excessive contrast.
+ */
+:root.theme-dark {
+  scrollbar-color: var(--theme-body-color-inactive) var(--theme-splitter-color);
+}
+
+/**
+ * Customize scrollbar colors on Linux + light theme, to avoid visual conflicts
+ * between the light theme and the selected GTK theme (see bug 1471163).
+ * This removes GTK scrollbars and uses a fallback design (see bug 1464723).
+ */
+:root[platform="linux"].theme-light {
+  scrollbar-color: var(--theme-body-color-inactive) var(--grey-20);
+}
+
 .devtools-monospace {
   font-family: var(--monospace-font-family);
+  font-size: var(--theme-code-font-size);
 }
 
-:root[platform="linux"] .devtools-monospace {
-  font-size: 11px;
-}
-
-/* Override wrong system font from forms.css */
-html|button, html|select {
+/**
+ * Override wrong system font from forms.css
+ * Bug 1458224: buttons use a wrong default font-size on Linux
+ */
+html|button, html|select, html|input {
   font: message-box;
+  font-size: var(--theme-body-font-size);
+}
+
+/* Devtools rely on the old Gecko/HTML4 button hit testing */
+html|button > * {
+  pointer-events: none;
 }
 
 /* Autocomplete Popup */
-
 .devtools-autocomplete-popup {
-  box-shadow: 0 1px 0 hsla(209,29%,72%,.25) inset;
-  background-color: transparent;
-  border-radius: 3px;
   overflow: hidden;
 
   /* Devtools autocompletes display technical english keywords and should be displayed
@@ -67,17 +91,13 @@ html|button, html|select {
   margin: 0;
 }
 
-:root[platform="linux"] .devtools-autocomplete-listbox {
-  /* Root font size is bigger on Linux, adjust rem-based values. */
-  max-height: 16rem;
-}
-
 .devtools-autocomplete-listbox {
+  --autocomplete-item-padding-inline: 8px;
   -moz-appearance: none !important;
   background-color: transparent;
   border-width: 0px !important;
   margin: 0;
-  padding: 2px;
+  padding: 0;
   overflow-x: hidden;
   max-height: 20rem;
   height: 100%;
@@ -87,8 +107,8 @@ html|button, html|select {
 .devtools-autocomplete-listbox .autocomplete-item {
   width: 100%;
   background-color: transparent;
-  border-radius: 4px;
-  padding: 1px 0;
+  color: var(--theme-popup-color);
+  padding: 1px var(--autocomplete-item-padding-inline);
   cursor: default;
   text-overflow: ellipsis;
   white-space: pre;
@@ -142,40 +162,22 @@ html|button, html|select {
 }
 
 /* Rest of the dark and light theme */
-
 .devtools-autocomplete-popup,
+.tooltip-panel.devtools-autocomplete-popup,
 .CodeMirror-hints,
 .CodeMirror-Tern-tooltip {
-  border: 1px solid hsl(210,24%,90%);
-  background-image: linear-gradient(to bottom, hsla(209,18%,100%,0.9), hsl(210,24%,95%));
-}
-
-.theme-dark .devtools-autocomplete-popup,
-.theme-dark .CodeMirror-hints,
-.theme-dark .CodeMirror-Tern-tooltip {
-  border: 1px solid hsl(210,11%,10%);
-  background-image: linear-gradient(to bottom, hsla(209,18%,18%,0.9), hsl(210,11%,16%));
+  border: 1px solid var(--theme-popup-border-color);
+  background-color: var(--theme-popup-background);
+  color: var(--theme-popup-color);
 }
 
 .devtools-autocomplete-listbox .autocomplete-item:hover {
-  background: var(--theme-selection-background-hover);
-}
-
-.devtools-autocomplete-listbox .autocomplete-item > span {
-  color: #666;
-}
-
-.theme-dark .devtools-autocomplete-listbox .autocomplete-item > span {
-  color: #ccc;
+  background-color: var(--theme-popup-dimmed);
 }
 
 .devtools-autocomplete-listbox .autocomplete-selected,
 .devtools-autocomplete-listbox .autocomplete-selected:hover {
   background-color: var(--theme-selection-background);
-  color: var(--theme-selection-color);
-}
-
-.devtools-autocomplete-listbox .autocomplete-selected > span {
   color: var(--theme-selection-color);
 }
 
@@ -293,8 +295,7 @@ checkbox:-moz-focusring {
   height: 16px;
   margin: 0 3px;
   transition: opacity 0.05s ease-in-out;
-
-  color: var(--theme-toolbar-color);
+  color: var(--theme-toolbar-icon-color);
   direction: ltr;
   font-size: 11px;
 }
@@ -358,7 +359,7 @@ checkbox:-moz-focusring {
 }
 
 .devtools-toolbarbutton:not([label]):hover,
-.devtools-button:empty:not(:disabled):hover {
+.devtools-button:empty:not(:disabled):not([aria-expanded="true"]):hover {
   background: var(--toolbarbutton-background);
 }
 
@@ -371,8 +372,9 @@ checkbox:-moz-focusring {
 .devtools-button:not(:empty):not(:disabled):not(.checked):hover,
 .devtools-toolbarbutton[label]:not(:-moz-any([checked=true],[disabled])):hover,
 .devtools-button:empty:not(:disabled):-moz-any(:hover:active,.checked),
-.devtools-toolbarbutton:not([label]):-moz-any([checked],[open],:hover:active) {
-  background: var(--toolbarbutton-hover-background);
+.devtools-toolbarbutton:not([label]):-moz-any([checked],[open],:hover:active),
+.devtools-button[aria-haspopup="menu"][aria-expanded="true"] {
+  background-color: var(--toolbarbutton-hover-background);
   border-color: var(--toolbarbutton-hover-border-color);
 }
 
@@ -404,24 +406,21 @@ checkbox:-moz-focusring {
 }
 
 /* Icons */
-:root {
-  --clear-icon-url: url("chrome://devtools/skin/images/clear.svg");
-}
 
 .devtools-button.devtools-clear-icon::before {
-  background-image: var(--clear-icon-url);
+  background-image: url("chrome://devtools/skin/images/clear.svg");
 }
 
 .devtools-button.devtools-filter-icon::before {
-  background-image: var(--filter-image);
+  background-image: url("chrome://devtools/skin/images/filter.svg");
 }
 
 .devtools-toolbarbutton.devtools-clear-icon {
-  list-style-image: var(--clear-icon-url);
+  list-style-image: url("chrome://devtools/skin/images/clear.svg");
 }
 
 .devtools-option-toolbarbutton {
-  list-style-image: var(--tool-options-image);
+  list-style-image: url("chrome://devtools/skin/images/settings.svg");
 }
 
 .devtools-toolbarbutton-group > .devtools-toolbarbutton:last-child {
@@ -444,6 +443,17 @@ checkbox:-moz-focusring {
   padding: 4px 6px;
   border-color: var(--theme-splitter-color);
   font: message-box;
+  font-size: var(--theme-body-font-size);
+  background-color: white;
+  color: var(--grey-90);
+}
+
+.theme-dark .devtools-textinput,
+.theme-dark .devtools-searchinput,
+.theme-dark .devtools-filterinput {
+  /* in between grey-85 and grey-90 */
+  background-color: #141416;
+  color: var(--grey-20);
 }
 
 :root[platform="mac"] .devtools-textinput,
@@ -473,7 +483,7 @@ checkbox:-moz-focusring {
 }
 
 .devtools-searchinput {
-  background-image: var(--magnifying-glass-image);
+  background-image: url(chrome://devtools/skin/images/search.svg);
 }
 
 .devtools-filterinput {
@@ -503,12 +513,13 @@ checkbox:-moz-focusring {
 }
 
 .devtools-plaininput {
+  color: var(--grey-90);
   border-color: transparent;
   background-color: transparent;
 }
 
 .theme-dark .devtools-plaininput {
-  color: var(--theme-highlight-gray);
+  color: var(--grey-20);
 }
 
 /* Searchbox is a div container element for a search input element */
@@ -540,6 +551,7 @@ checkbox:-moz-focusring {
 
 .devtools-searchbox .devtools-autocomplete-popup {
   position: absolute;
+  left: 0;
   top: 100%;
   width: 100%;
   line-height: initial !important;
@@ -599,7 +611,7 @@ checkbox:-moz-focusring {
 
 .devtools-searchinput-clear {
   position: absolute;
-  top: 3.5px;
+  top: calc(50% - 8px);
   inset-inline-end: 7px;
   padding: 0;
   border: 0;
@@ -608,11 +620,6 @@ checkbox:-moz-focusring {
   background-position: 0 0;
   background-repeat: no-repeat;
   background-color: transparent;
-}
-
-.devtools-searchinput-clear:dir(rtl) {
-  right: unset;
-  left: 7px;
 }
 
 .theme-dark .devtools-searchinput-clear {
@@ -654,71 +661,70 @@ checkbox:-moz-focusring {
 }
 
 /* Twisty and checkbox controls */
-.theme-twisty, .theme-checkbox {
-  width: 14px;
-  height: 14px;
-  background-repeat: no-repeat;
-  background-image: url("chrome://devtools/skin/images/controls.png");
-  background-size: 56px 28px;
-}
 
 .theme-twisty {
+  width: 14px;
+  height: 14px;
   cursor: pointer;
-  background-position: 0 -14px;
+  background-image: url("chrome://devtools/skin/images/arrow.svg");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 10px;
+  -moz-context-properties: fill;
+  fill: var(--theme-twisty-fill);
+  transform: rotate(-90deg);
 }
 
-.theme-selected ~ .theme-twisty,
-.theme-dark .theme-twisty {
-  background-position: -28px -14px;
+/* Mirror the twisty for rtl direction */
+.theme-twisty:dir(rtl),
+.theme-twisty:-moz-locale-dir(rtl) {
+  transform: rotate(90deg);
+}
+
+.theme-selected ~ .theme-twisty {
+  fill: var(--theme-twisty-selected-fill);
 }
 
 .theme-twisty:-moz-focusring {
   outline-style: none;
 }
 
-.theme-twisty[open], .theme-twisty.open {
-  background-position: -14px -14px;
-}
-
-.theme-selected ~ .theme-twisty[open],
-.theme-dark .theme-twisty[open], .theme-dark .theme-twisty.open  {
-  background-position: -42px -14px;
+.theme-twisty[open],
+.theme-twisty.open {
+  transform: none;
 }
 
 .theme-twisty[invisible] {
   visibility: hidden;
 }
 
-/* Mirror the twisty for rtl direction */
-.theme-twisty:dir(rtl),
-.theme-twisty:-moz-locale-dir(rtl) {
-  transform: scaleX(-1);
-}
-
 .theme-checkbox {
   display: inline-block;
+  width: 14px;
+  height: 14px;
   border: 0;
   padding: 0;
   outline: none;
-  background-position: 0 0;
+  background-image: url("chrome://devtools/skin/images/checkbox.svg");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 14px 14px;
+  /* Using fill to paint the border, and stroke for the tick */
+  -moz-context-properties: fill, stroke;
+  fill: rgba(0,0,0,.3);
+  stroke: transparent;
 }
 
 .theme-dark .theme-checkbox {
-  background-position: -28px 0;
+  fill: rgba(255,255,255,.4);
 }
 
 .theme-checkbox[checked] {
-  background-position: -14px 0;
+  stroke: rgba(0,0,0,.6);
 }
 
 .theme-dark .theme-checkbox[checked] {
-  background-position: -42px 0;
-}
-
-@media (min-resolution: 1.1dppx) {
-  .theme-twisty, .theme-checkbox {
-    background-image: url("chrome://devtools/skin/images/controls@2x.png");
-  }
+  stroke: rgba(255,255,255,.8);
 }
 
 /* Throbbers */
@@ -754,12 +760,24 @@ checkbox:-moz-focusring {
   width: 15px;
   height: 100%;
 
+  padding: 0;
+  border: none;
   border-inline-start: 1px solid var(--theme-splitter-color);
 
   background: var(--theme-tab-toolbar-background);
   background-image: url("chrome://devtools/skin/images/dropmarker.svg");
   background-repeat: no-repeat;
   background-position: center;
+  -moz-context-properties: fill;
+  fill: var(--theme-toolbar-icon-color);
+}
+
+.all-tabs-menu:hover {
+  background-color: var(--theme-toolbar-hover);
+}
+
+.all-tabs-menu:hover:active {
+  background-color: var(--theme-toolbar-hover-active);
 }
 
 .devtools-tab-line {
@@ -769,7 +787,7 @@ checkbox:-moz-focusring {
   width: 100%;
   height: 2px;
   background: transparent;
-  transition: transform 250ms var(--animation-easing-function), opacity 250ms var(--animation-easing-function);
+  transition: transform 250ms var(--animation-curve), opacity 250ms var(--animation-curve);
   opacity: 0;
   transform: scaleX(0);
 }
@@ -788,6 +806,12 @@ checkbox:-moz-focusring {
   transform: scaleX(1);
 }
 
+@media (prefers-reduced-motion) {
+  .devtools-tab-line {
+    transition: none;
+  }
+}
+
 .devtools-tab:not(.selected):focus .devtools-tab-line {
   background: var(--tab-line-hover-color);
   opacity: 1;
@@ -801,4 +825,60 @@ checkbox:-moz-focusring {
   padding: 0.5em 21px;
   -moz-user-select: none;
   font-size: 12px;
+}
+
+/* Checkbox Toggle */
+
+.devtools-checkbox-toggle {
+  --x-pos: .15em;
+  /* Reset native checkbox styling. */
+  -moz-appearance: none;
+  background-color: var(--toggle-track-color);
+  cursor: pointer;
+  /* Change font-size to scale. */
+  font-size: 16px;
+  width: 2em;
+  height: 1em;
+  border-radius: 1em;
+  /* Animate the thumb position between states of the checkbox. */
+  transition: background-color .1s ease-out;
+}
+
+/* For right-to-left layout, the toggle thumb goes in the opposite direction. */
+html[dir="rtl"] .devtools-checkbox-toggle {
+  --x-pos: -.15em;
+}
+
+.devtools-checkbox-toggle:focus {
+  box-shadow: 0 0 0 1px var(--blue-55);
+}
+
+.devtools-checkbox-toggle:checked:focus {
+  background-color: var(--blue-40);
+  box-shadow: none;
+}
+
+.devtools-checkbox-toggle:checked {
+  --x-pos: 1.15em;
+  background-color: var(--blue-55);
+}
+
+html[dir="rtl"] .devtools-checkbox-toggle:checked {
+  --x-pos: -1.15em;
+}
+
+.devtools-checkbox-toggle::before {
+  position: relative;
+  width: calc(1em - .3em);
+  height: calc(1em - .3em);
+  transform: translateY(.15em) translateX(var(--x-pos));
+  border-radius: 100%;
+  display: block;
+  content: "";
+  background-color: var(--toggle-thumb-color);
+  transition: transform .1s ease-out;
+}
+
+.devtools-checkbox-toggle:checked::before {
+  background-color: white;
 }

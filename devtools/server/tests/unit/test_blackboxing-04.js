@@ -18,7 +18,7 @@ function run_test() {
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect().then(function() {
     attachTestTabAndResume(gClient, "test-black-box",
-                           function(response, tabClient, threadClient) {
+                           function(response, targetFront, threadClient) {
                              gThreadClient = threadClient;
                              test_black_box();
                            });
@@ -41,7 +41,7 @@ function test_black_box() {
     function runWithSource(packet) {
       const source = gThreadClient.source(packet.source);
       source.setBreakpoint({
-        line: 2
+        line: 2,
       }).then(test_black_box_paused);
     }
   });
@@ -76,17 +76,15 @@ function test_black_box() {
 }
 
 function test_black_box_paused() {
-  gThreadClient.getSources(function({error, sources}) {
+  gThreadClient.getSources(async function({error, sources}) {
     Assert.ok(!error, "Should not get an error: " + error);
     const sourceClient = gThreadClient.source(
       sources.filter(s => s.url == BLACK_BOXED_URL)[0]
     );
 
-    sourceClient.blackBox(function({error, pausedInSource}) {
-      Assert.ok(!error, "Should not get an error: " + error);
-      Assert.ok(pausedInSource,
-                "We should be notified that we are currently paused in this source");
-      finishClient(gClient);
-    });
+    const {pausedInSource} = await blackBox(sourceClient);
+    Assert.ok(pausedInSource,
+      "We should be notified that we are currently paused in this source");
+    finishClient(gClient);
   });
 }

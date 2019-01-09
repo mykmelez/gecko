@@ -23,9 +23,7 @@ NS_IMPL_ISUPPORTS(OSPreferences, mozIOSPreferences)
 
 mozilla::StaticRefPtr<OSPreferences> OSPreferences::sInstance;
 
-OSPreferences*
-OSPreferences::GetInstance()
-{
+OSPreferences* OSPreferences::GetInstance() {
   if (!sInstance) {
     sInstance = new OSPreferences();
     ClearOnShutdown(&sInstance);
@@ -33,45 +31,7 @@ OSPreferences::GetInstance()
   return sInstance;
 }
 
-bool
-OSPreferences::GetSystemLocales(nsTArray<nsCString>& aRetVal)
-{
-  if (!mSystemLocales.IsEmpty()) {
-    aRetVal = mSystemLocales;
-    return true;
-  }
-
-  if (ReadSystemLocales(aRetVal)) {
-    mSystemLocales = aRetVal;
-    return true;
-  }
-
-  // If we failed to get the system locale, we still need
-  // to return something because there are tests out there that
-  // depend on system locale to be set.
-  aRetVal.AppendElement(NS_LITERAL_CSTRING("en-US"));
-  return false;
-}
-
-bool
-OSPreferences::GetRegionalPrefsLocales(nsTArray<nsCString>& aRetVal)
-{
-  if (!mRegionalPrefsLocales.IsEmpty()) {
-    aRetVal = mRegionalPrefsLocales;
-    return true;
-  }
-
-  if (ReadRegionalPrefsLocales(aRetVal)) {
-    mRegionalPrefsLocales = aRetVal;
-    return true;
-  }
-
-  return false;
-}
-
-void
-OSPreferences::Refresh()
-{
+void OSPreferences::Refresh() {
   nsTArray<nsCString> newLocales;
   ReadSystemLocales(newLocales);
 
@@ -93,15 +53,13 @@ OSPreferences::Refresh()
  *
  * It returns true if the canonicalization was successful.
  */
-bool
-OSPreferences::CanonicalizeLanguageTag(nsCString& aLoc)
-{
+bool OSPreferences::CanonicalizeLanguageTag(nsCString& aLoc) {
   char langTag[512];
 
   UErrorCode status = U_ZERO_ERROR;
 
-  int32_t langTagLen =
-    uloc_toLanguageTag(aLoc.get(), langTag, sizeof(langTag) - 1, false, &status);
+  int32_t langTagLen = uloc_toLanguageTag(aLoc.get(), langTag,
+                                          sizeof(langTag) - 1, false, &status);
 
   if (U_FAILURE(status)) {
     return false;
@@ -114,12 +72,10 @@ OSPreferences::CanonicalizeLanguageTag(nsCString& aLoc)
 /**
  * This method retrieves from ICU the best pattern for a given date/time style.
  */
-bool
-OSPreferences::GetDateTimePatternForStyle(DateTimeFormatStyle aDateStyle,
-                                          DateTimeFormatStyle aTimeStyle,
-                                          const nsACString& aLocale,
-                                          nsAString& aRetVal)
-{
+bool OSPreferences::GetDateTimePatternForStyle(DateTimeFormatStyle aDateStyle,
+                                               DateTimeFormatStyle aTimeStyle,
+                                               const nsACString& aLocale,
+                                               nsAString& aRetVal) {
   UDateFormatStyle timeStyle = UDAT_NONE;
   UDateFormatStyle dateStyle = UDAT_NONE;
 
@@ -178,9 +134,8 @@ OSPreferences::GetDateTimePatternForStyle(DateTimeFormatStyle aDateStyle,
   }
 
   UErrorCode status = U_ZERO_ERROR;
-  UDateFormat* df = udat_open(timeStyle, dateStyle,
-                              locale.get(),
-                              nullptr, -1, nullptr, -1, &status);
+  UDateFormat* df = udat_open(timeStyle, dateStyle, locale.get(), nullptr, -1,
+                              nullptr, -1, &status);
   if (U_FAILURE(status)) {
     return false;
   }
@@ -194,7 +149,6 @@ OSPreferences::GetDateTimePatternForStyle(DateTimeFormatStyle aDateStyle,
   return true;
 }
 
-
 /**
  * This method retrieves from ICU the best skeleton for a given date/time style.
  *
@@ -203,12 +157,10 @@ OSPreferences::GetDateTimePatternForStyle(DateTimeFormatStyle aDateStyle,
  *
  * The returned value is a skeleton that matches the styles.
  */
-bool
-OSPreferences::GetDateTimeSkeletonForStyle(DateTimeFormatStyle aDateStyle,
-                                           DateTimeFormatStyle aTimeStyle,
-                                           const nsACString& aLocale,
-                                           nsAString& aRetVal)
-{
+bool OSPreferences::GetDateTimeSkeletonForStyle(DateTimeFormatStyle aDateStyle,
+                                                DateTimeFormatStyle aTimeStyle,
+                                                const nsACString& aLocale,
+                                                nsAString& aRetVal) {
   nsAutoString pattern;
   if (!GetDateTimePatternForStyle(aDateStyle, aTimeStyle, aLocale, pattern)) {
     return false;
@@ -218,10 +170,9 @@ OSPreferences::GetDateTimeSkeletonForStyle(DateTimeFormatStyle aDateStyle,
   UChar skeleton[kSkeletonMax];
 
   UErrorCode status = U_ZERO_ERROR;
-  int32_t skelsize = udatpg_getSkeleton(
-    nullptr, (const UChar*)pattern.BeginReading(), pattern.Length(),
-    skeleton, kSkeletonMax, &status
-  );
+  int32_t skelsize =
+      udatpg_getSkeleton(nullptr, (const UChar*)pattern.BeginReading(),
+                         pattern.Length(), skeleton, kSkeletonMax, &status);
   if (U_FAILURE(status)) {
     return false;
   }
@@ -239,21 +190,20 @@ OSPreferences::GetDateTimeSkeletonForStyle(DateTimeFormatStyle aDateStyle,
  * For example:
  * "Hm" skeleton for "en-US" will return "H:m"
  */
-bool
-OSPreferences::GetPatternForSkeleton(const nsAString& aSkeleton,
-                                     const nsACString& aLocale,
-                                     nsAString& aRetVal)
-{
+bool OSPreferences::GetPatternForSkeleton(const nsAString& aSkeleton,
+                                          const nsACString& aLocale,
+                                          nsAString& aRetVal) {
   UErrorCode status = U_ZERO_ERROR;
-  UDateTimePatternGenerator* pg = udatpg_open(PromiseFlatCString(aLocale).get(), &status);
+  UDateTimePatternGenerator* pg =
+      udatpg_open(PromiseFlatCString(aLocale).get(), &status);
   if (U_FAILURE(status)) {
     return false;
   }
 
   int32_t len =
-    udatpg_getBestPattern(pg, (const UChar*)aSkeleton.BeginReading(),
-                          aSkeleton.Length(), nullptr, 0, &status);
-  if (status == U_BUFFER_OVERFLOW_ERROR) { // expected
+      udatpg_getBestPattern(pg, (const UChar*)aSkeleton.BeginReading(),
+                            aSkeleton.Length(), nullptr, 0, &status);
+  if (status == U_BUFFER_OVERFLOW_ERROR) {  // expected
     aRetVal.SetLength(len);
     status = U_ZERO_ERROR;
     udatpg_getBestPattern(pg, (const UChar*)aSkeleton.BeginReading(),
@@ -275,13 +225,12 @@ OSPreferences::GetPatternForSkeleton(const nsAString& aSkeleton,
  *
  * An example output is "{1}, {0}".
  */
-bool
-OSPreferences::GetDateTimeConnectorPattern(const nsACString& aLocale,
-                                           nsAString& aRetVal)
-{
+bool OSPreferences::GetDateTimeConnectorPattern(const nsACString& aLocale,
+                                                nsAString& aRetVal) {
   bool result = false;
   UErrorCode status = U_ZERO_ERROR;
-  UDateTimePatternGenerator* pg = udatpg_open(PromiseFlatCString(aLocale).get(), &status);
+  UDateTimePatternGenerator* pg =
+      udatpg_open(PromiseFlatCString(aLocale).get(), &status);
   if (U_SUCCESS(status)) {
     int32_t resultSize;
     const UChar* value = udatpg_getDateTimeFormat(pg, &resultSize);
@@ -298,36 +247,30 @@ OSPreferences::GetDateTimeConnectorPattern(const nsACString& aLocale,
  * mozIOSPreferences methods
  */
 NS_IMETHODIMP
-OSPreferences::GetSystemLocales(uint32_t* aCount, char*** aOutArray)
-{
-  AutoTArray<nsCString,10> tempLocales;
-  nsTArray<nsCString>* systemLocalesPtr;
-
+OSPreferences::GetSystemLocales(nsTArray<nsCString>& aRetVal) {
   if (!mSystemLocales.IsEmpty()) {
-    // use cached value
-    systemLocalesPtr = &mSystemLocales;
-  } else {
-    // get a (perhaps temporary/fallback/hack) value
-    GetSystemLocales(tempLocales);
-    systemLocalesPtr = &tempLocales;
-  }
-  *aCount = systemLocalesPtr->Length();
-  *aOutArray = static_cast<char**>(moz_xmalloc(*aCount * sizeof(char*)));
-
-  for (uint32_t i = 0; i < *aCount; i++) {
-    (*aOutArray)[i] = moz_xstrdup((*systemLocalesPtr)[i].get());
+    aRetVal = mSystemLocales;
+    return NS_OK;
   }
 
-  return NS_OK;
+  if (ReadSystemLocales(aRetVal)) {
+    mSystemLocales = aRetVal;
+    return NS_OK;
+  }
+
+  // If we failed to get the system locale, we still need
+  // to return something because there are tests out there that
+  // depend on system locale to be set.
+  aRetVal.AppendElement(NS_LITERAL_CSTRING("en-US"));
+  return NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
-OSPreferences::GetSystemLocale(nsACString& aRetVal)
-{
+OSPreferences::GetSystemLocale(nsACString& aRetVal) {
   if (!mSystemLocales.IsEmpty()) {
     aRetVal = mSystemLocales[0];
   } else {
-    AutoTArray<nsCString,10> locales;
+    AutoTArray<nsCString, 10> locales;
     GetSystemLocales(locales);
     if (!locales.IsEmpty()) {
       aRetVal = locales[0];
@@ -337,32 +280,22 @@ OSPreferences::GetSystemLocale(nsACString& aRetVal)
 }
 
 NS_IMETHODIMP
-OSPreferences::GetRegionalPrefsLocales(uint32_t* aCount, char*** aOutArray)
-{
-  AutoTArray<nsCString,10> tempLocales;
-  nsTArray<nsCString>* regionalPrefsLocalesPtr;
-
+OSPreferences::GetRegionalPrefsLocales(nsTArray<nsCString>& aRetVal) {
   if (!mRegionalPrefsLocales.IsEmpty()) {
-    // use cached value
-    regionalPrefsLocalesPtr = &mRegionalPrefsLocales;
-  } else {
-    // get a (perhaps temporary/fallback/hack) value
-    GetRegionalPrefsLocales(tempLocales);
-    regionalPrefsLocalesPtr = &tempLocales;
-  }
-  *aCount = regionalPrefsLocalesPtr->Length();
-  *aOutArray = static_cast<char**>(moz_xmalloc(*aCount * sizeof(char*)));
-
-  for (uint32_t i = 0; i < *aCount; i++) {
-    (*aOutArray)[i] = moz_xstrdup((*regionalPrefsLocalesPtr)[i].get());
+    aRetVal = mRegionalPrefsLocales;
+    return NS_OK;
   }
 
-  return NS_OK;
+  if (ReadRegionalPrefsLocales(aRetVal)) {
+    mRegionalPrefsLocales = aRetVal;
+    return NS_OK;
+  }
+
+  return NS_ERROR_FAILURE;
 }
 
-static OSPreferences::DateTimeFormatStyle
-ToDateTimeFormatStyle(int32_t aTimeFormat)
-{
+static OSPreferences::DateTimeFormatStyle ToDateTimeFormatStyle(
+    int32_t aTimeFormat) {
   switch (aTimeFormat) {
     // See mozIOSPreferences.idl for the integer values here.
     case 0:
@@ -383,8 +316,7 @@ NS_IMETHODIMP
 OSPreferences::GetDateTimePattern(int32_t aDateFormatStyle,
                                   int32_t aTimeFormatStyle,
                                   const nsACString& aLocale,
-                                  nsAString& aRetVal)
-{
+                                  nsAString& aRetVal) {
   DateTimeFormatStyle dateStyle = ToDateTimeFormatStyle(aDateFormatStyle);
   if (dateStyle == DateTimeFormatStyle::Invalid) {
     return NS_ERROR_INVALID_ARG;
@@ -401,11 +333,34 @@ OSPreferences::GetDateTimePattern(int32_t aDateFormatStyle,
     return NS_OK;
   }
 
-  if (!ReadDateTimePattern(dateStyle, timeStyle, aLocale, aRetVal)) {
-    if (!GetDateTimePatternForStyle(dateStyle, timeStyle, aLocale, aRetVal)) {
+  // Create a cache key from the locale + style options
+  nsAutoCString key(aLocale);
+  key.Append(':');
+  key.AppendInt(aDateFormatStyle);
+  key.Append(':');
+  key.AppendInt(aTimeFormatStyle);
+
+  nsString pattern;
+  if (mPatternCache.Get(key, &pattern)) {
+    aRetVal = pattern;
+    return NS_OK;
+  }
+
+  if (!ReadDateTimePattern(dateStyle, timeStyle, aLocale, pattern)) {
+    if (!GetDateTimePatternForStyle(dateStyle, timeStyle, aLocale, pattern)) {
       return NS_ERROR_FAILURE;
     }
   }
 
+  if (mPatternCache.Count() == kMaxCachedPatterns) {
+    // Don't allow unlimited cache growth; just throw it away in the case of
+    // pathological behavior where a page keeps requesting different formats
+    // and locales.
+    NS_WARNING("flushing DateTimePattern cache");
+    mPatternCache.Clear();
+  }
+  mPatternCache.Put(key, pattern);
+
+  aRetVal = pattern;
   return NS_OK;
 }

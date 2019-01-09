@@ -10,9 +10,10 @@
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Move.h"
+#include "mozilla/RecordReplay.h"
 
 #if !defined(XP_WIN)
-# include <pthread.h>
+#include <pthread.h>
 #endif
 
 namespace mozilla {
@@ -21,27 +22,24 @@ namespace detail {
 
 class ConditionVariableImpl;
 
-class MutexImpl
-{
-public:
+class MutexImpl {
+ public:
   struct PlatformData;
 
-  MFBT_API MutexImpl();
+  explicit MFBT_API MutexImpl(
+      recordreplay::Behavior aRecorded = recordreplay::Behavior::Preserve);
   MFBT_API ~MutexImpl();
 
-  bool operator==(const MutexImpl& rhs) {
-    return platformData_ == rhs.platformData_;
-  }
-
-protected:
+ protected:
   MFBT_API void lock();
   MFBT_API void unlock();
 
-private:
+ private:
   MutexImpl(const MutexImpl&) = delete;
   void operator=(const MutexImpl&) = delete;
   MutexImpl(MutexImpl&&) = delete;
   void operator=(MutexImpl&&) = delete;
+  bool operator==(const MutexImpl& rhs) = delete;
 
   void mutexLock();
 #ifdef XP_DARWIN
@@ -53,13 +51,15 @@ private:
 #if !defined(XP_WIN)
   void* platformData_[sizeof(pthread_mutex_t) / sizeof(void*)];
   static_assert(sizeof(pthread_mutex_t) / sizeof(void*) != 0 &&
-                sizeof(pthread_mutex_t) % sizeof(void*) == 0,
+                    sizeof(pthread_mutex_t) % sizeof(void*) == 0,
                 "pthread_mutex_t must have pointer alignment");
 #ifdef XP_DARWIN
   // Moving average of the number of spins it takes to acquire the mutex if we
   // have to wait. May be accessed by multiple threads concurrently. Getting the
   // latest value is not essential hence relaxed memory ordering is sufficient.
-  mozilla::Atomic<int32_t, mozilla::MemoryOrdering::Relaxed> averageSpins;
+  mozilla::Atomic<int32_t, mozilla::MemoryOrdering::Relaxed,
+                  recordreplay::Behavior::DontPreserve>
+      averageSpins;
 #endif
 #else
   void* platformData_[6];
@@ -68,8 +68,8 @@ private:
   friend class mozilla::detail::ConditionVariableImpl;
 };
 
-} // namespace detail
+}  // namespace detail
 
-} // namespace mozilla
+}  // namespace mozilla
 
-#endif // mozilla_PlatformMutex_h
+#endif  // mozilla_PlatformMutex_h

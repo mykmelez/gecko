@@ -196,6 +196,7 @@ EXPORTS.mozilla.layers += [
     'ipc/SharedPlanarYCbCrImage.h',
     'ipc/SharedRGBImage.h',
     'ipc/SharedSurfacesChild.h',
+    'ipc/SharedSurfacesMemoryReport.h',
     'ipc/SharedSurfacesParent.h',
     'ipc/SynchronousTask.h',
     'ipc/TextureForwarder.h',
@@ -208,6 +209,7 @@ EXPORTS.mozilla.layers += [
     'LayerMetricsWrapper.h',
     'LayersHelpers.h',
     'LayersTypes.h',
+    'MemoryPressureObserver.h',
     'mlgpu/LayerManagerMLGPU.h',
     'mlgpu/LayerMLGPU.h',
     'mlgpu/MemoryReportingMLGPU.h',
@@ -225,7 +227,9 @@ EXPORTS.mozilla.layers += [
     'PersistentBufferProvider.h',
     'ProfilerScreenshots.h',
     'RenderTrace.h',
+    'RepaintRequest.h',
     'RotatedBuffer.h',
+    'ScrollableLayerGuid.h',
     'ShareableCanvasRenderer.h',
     'SourceSurfaceSharedData.h',
     'SourceSurfaceVolatileData.h',
@@ -237,6 +241,7 @@ EXPORTS.mozilla.layers += [
     'wr/AsyncImagePipelineManager.h',
     'wr/ClipManager.h',
     'wr/IpcResourceUpdateQueue.h',
+    'wr/RenderRootStateManager.h',
     'wr/StackingContextHelper.h',
     'wr/WebRenderBridgeChild.h',
     'wr/WebRenderBridgeParent.h',
@@ -250,7 +255,9 @@ EXPORTS.mozilla.layers += [
     'wr/WebRenderScrollData.h',
     'wr/WebRenderScrollDataWrapper.h',
     'wr/WebRenderTextureHost.h',
+    'wr/WebRenderTextureHostWrapper.h',
     'wr/WebRenderUserData.h',
+    'ZoomConstraints.h',
 ]
 
 if CONFIG['MOZ_X11']:
@@ -273,6 +280,7 @@ if CONFIG['MOZ_X11']:
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     EXPORTS.mozilla.layers += [
         'opengl/GLManager.h',
+        'TextureSync.h',
     ]
     EXPORTS += [
         'MacIOSurfaceHelpers.h',
@@ -280,6 +288,7 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     ]
     UNIFIED_SOURCES += [
         'opengl/GLManager.cpp',
+        'TextureSync.cpp',
     ]
     SOURCES += [
         'ipc/ShadowLayerUtilsMac.cpp',
@@ -292,6 +301,7 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
         'apz/src/AndroidAPZ.cpp',
         'apz/src/AndroidDynamicToolbarAnimator.cpp',
         'apz/src/AndroidFlingPhysics.cpp',
+        'apz/src/AndroidVelocityTracker.cpp',
     ]
     EXPORTS.mozilla.layers += [
         'apz/src/AndroidDynamicToolbarAnimator.h',
@@ -323,6 +333,7 @@ UNIFIED_SOURCES += [
     'apz/src/OverscrollHandoffState.cpp',
     'apz/src/PotentialCheckerboardDurationTracker.cpp',
     'apz/src/QueuedInput.cpp',
+    'apz/src/SimpleVelocityTracker.cpp',
     'apz/src/TouchCounter.cpp',
     'apz/src/WheelScrollAnimation.cpp',
     'apz/testutil/APZTestData.cpp',
@@ -340,7 +351,6 @@ UNIFIED_SOURCES += [
     'AsyncCanvasRenderer.cpp',
     'AxisPhysicsModel.cpp',
     'AxisPhysicsMSDModel.cpp',
-    'basic/BasicBorderLayer.cpp',
     'basic/BasicCanvasLayer.cpp',
     'basic/BasicColorLayer.cpp',
     'basic/BasicCompositor.cpp',
@@ -352,10 +362,8 @@ UNIFIED_SOURCES += [
     'basic/TextureHostBasic.cpp',
     'BSPTree.cpp',
     'BufferTexture.cpp',
-    'BufferUnrotate.cpp',
     'CanvasRenderer.cpp',
     'client/CanvasClient.cpp',
-    'client/ClientBorderLayer.cpp',
     'client/ClientCanvasLayer.cpp',
     'client/ClientCanvasRenderer.cpp',
     'client/ClientColorLayer.cpp',
@@ -440,6 +448,7 @@ UNIFIED_SOURCES += [
     'LayerSorter.cpp',
     'LayersTypes.cpp',
     'LayerTreeInvalidation.cpp',
+    'MemoryPressureObserver.cpp',
     'mlgpu/BufferCache.cpp',
     'mlgpu/CanvasLayerMLGPU.cpp',
     'mlgpu/ContainerLayerMLGPU.cpp',
@@ -477,6 +486,7 @@ UNIFIED_SOURCES += [
     'wr/AsyncImagePipelineManager.cpp',
     'wr/ClipManager.cpp',
     'wr/IpcResourceUpdateQueue.cpp',
+    'wr/RenderRootStateManager.cpp',
     'wr/StackingContextHelper.cpp',
     'wr/WebRenderBridgeChild.cpp',
     'wr/WebRenderBridgeParent.cpp',
@@ -487,6 +497,7 @@ UNIFIED_SOURCES += [
     'wr/WebRenderLayerManager.cpp',
     'wr/WebRenderLayersLogging.cpp',
     'wr/WebRenderScrollData.cpp',
+    'wr/WebRenderTextureHostWrapper.cpp',
     'wr/WebRenderUserData.cpp',
     # XXX here are some unified build error.
     #'wr/WebRenderTextureHost.cpp'

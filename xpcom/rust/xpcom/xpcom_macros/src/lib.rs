@@ -131,7 +131,6 @@
 #[macro_use]
 extern crate quote;
 
-#[macro_use]
 extern crate syn;
 
 extern crate proc_macro;
@@ -563,7 +562,9 @@ fn xpcom(init: DeriveInput) -> Result<Tokens, Box<Error>> {
                 #[allow(unused_imports)]
                 use ::xpcom::interfaces::*;
                 #[allow(unused_imports)]
-                use ::xpcom::reexports::{libc, nsACString, nsAString, nsresult};
+                use ::xpcom::reexports::{
+                    libc, nsACString, nsAString, nsCString, nsString, nsresult
+                };
 
                 unsafe {
                     // NOTE: This is split into multiple lines to make the

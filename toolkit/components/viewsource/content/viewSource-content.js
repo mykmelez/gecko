@@ -184,18 +184,17 @@ var ViewSourceContent = {
 
     if (outerWindowID) {
       let contentWindow = Services.wm.getOuterWindowWithId(outerWindowID);
-      let requestor = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor);
+      let otherDocShell = contentWindow.docShell;
 
       try {
-        let otherWebNav = requestor.getInterface(Ci.nsIWebNavigation);
-        pageDescriptor = otherWebNav.QueryInterface(Ci.nsIWebPageDescriptor)
-                                    .currentDescriptor;
+        pageDescriptor = otherDocShell.QueryInterface(Ci.nsIWebPageDescriptor)
+                                      .currentDescriptor;
       } catch (e) {
         // We couldn't get the page descriptor, so we'll probably end up re-retrieving
         // this document off of the network.
       }
 
-      let utils = requestor.getInterface(Ci.nsIDOMWindowUtils);
+      let utils = contentWindow.windowUtils;
       let doc = contentWindow.document;
       forcedCharSet = utils.docCharsetIsForced ? doc.characterSet
                                                : null;
@@ -261,16 +260,15 @@ var ViewSourceContent = {
     let shEntrySource = pageDescriptor.QueryInterface(Ci.nsISHEntry);
     let shEntry = Cc["@mozilla.org/browser/session-history-entry;1"]
                     .createInstance(Ci.nsISHEntry);
-    shEntry.setURI(Services.io.newURI(viewSrcURL));
-    shEntry.setTitle(viewSrcURL);
+    shEntry.URI = Services.io.newURI(viewSrcURL);
+    shEntry.title = viewSrcURL;
     let systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
     shEntry.triggeringPrincipal = systemPrincipal;
-    shEntry.loadType = Ci.nsIDocShellLoadInfo.loadHistory;
+    shEntry.setLoadTypeAsHistory();
     shEntry.cacheKey = shEntrySource.cacheKey;
     docShell.QueryInterface(Ci.nsIWebNavigation)
             .sessionHistory
             .legacySHistory
-            .QueryInterface(Ci.nsISHistoryInternal)
             .addEntry(shEntry, true);
   },
 
@@ -283,7 +281,7 @@ var ViewSourceContent = {
   loadSourceFromURL(URL) {
     let loadFlags = Ci.nsIWebNavigation.LOAD_FLAGS_NONE;
     let webNav = docShell.QueryInterface(Ci.nsIWebNavigation);
-    webNav.loadURI(URL, loadFlags, null, null, null);
+    webNav.loadURI(URL, loadFlags, null, null, null, Services.scriptSecurityManager.getSystemPrincipal());
   },
 
   /**
@@ -606,7 +604,8 @@ var ViewSourceContent = {
     webNav.loadURIWithOptions(uri, loadFlags,
                               null, referrerPolicy, // referrer
                               null, null, // postData, headers
-                              Services.io.newURI(baseURI));
+                              Services.io.newURI(baseURI),
+                              Services.scriptSecurityManager.getSystemPrincipal());
   },
 
   /**
@@ -712,7 +711,7 @@ var ViewSourceContent = {
       accesskey: true,
       handler() {
         sendAsyncMessage("ViewSource:PromptAndGoToLine");
-      }
+      },
     },
     {
       id: "wrapLongLines",
@@ -721,7 +720,7 @@ var ViewSourceContent = {
       },
       handler() {
         this.toggleWrapping();
-      }
+      },
     },
     {
       id: "highlightSyntax",
@@ -730,7 +729,7 @@ var ViewSourceContent = {
       },
       handler() {
         this.toggleSyntaxHighlighting();
-      }
+      },
     },
   ],
 

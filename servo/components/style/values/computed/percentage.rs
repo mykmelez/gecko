@@ -1,20 +1,33 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Computed percentages.
 
+use crate::values::animated::ToAnimatedValue;
+use crate::values::generics::NonNegative;
+use crate::values::{serialize_percentage, CSSFloat};
 use std::fmt;
 use style_traits::{CssWriter, ToCss};
-use values::{serialize_percentage, CSSFloat};
-use values::animated::ToAnimatedValue;
-use values::generics::NonNegative;
 
 /// A computed percentage.
 #[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
-#[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug, Default,
-         MallocSizeOf, PartialEq, PartialOrd, SpecifiedValueInfo,
-         ToAnimatedValue, ToAnimatedZero, ToComputedValue)]
+#[derive(
+    Animate,
+    Clone,
+    ComputeSquaredDistance,
+    Copy,
+    Debug,
+    Default,
+    MallocSizeOf,
+    PartialEq,
+    PartialOrd,
+    SpecifiedValueInfo,
+    ToAnimatedValue,
+    ToAnimatedZero,
+    ToComputedValue,
+)]
+#[repr(C)]
 pub struct Percentage(pub CSSFloat);
 
 impl Percentage {

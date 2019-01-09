@@ -44,7 +44,7 @@ function createExceptionInfoResult(props) {
 
       // Apply the passed properties.
       ...props,
-    }
+    },
   };
 }
 
@@ -70,8 +70,7 @@ function logAccessDeniedWarning(window, callerInfo, extensionPolicy) {
 
   const msg = `The extension "${name}" is not allowed to access ${reportedURI.spec}`;
 
-  const innerWindowId = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                              .getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
+  const innerWindowId = window.windowUtils.currentInnerWindowID;
 
   const errorFlag = 0;
 
@@ -93,9 +92,7 @@ function logAccessDeniedWarning(window, callerInfo, extensionPolicy) {
 }
 
 function CustomizedReload(params) {
-  this.docShell = params.targetActor.window
-                        .QueryInterface(Ci.nsIInterfaceRequestor)
-                        .getInterface(Ci.nsIDocShell);
+  this.docShell = params.targetActor.window.docShell;
   this.docShell.QueryInterface(Ci.nsIWebProgress);
 
   this.inspectedWindowEval = params.inspectedWindowEval;
@@ -174,9 +171,7 @@ CustomizedReload.prototype = {
       return;
     }
 
-    const subjectDocShell = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                                .getInterface(Ci.nsIWebNavigation)
-                                .QueryInterface(Ci.nsIDocShell);
+    const subjectDocShell = window.docShell;
 
     // Keep track of the set of window objects where we are going to inject
     // the injectedScript: the top level window and all its descendant
@@ -184,9 +179,7 @@ CustomizedReload.prototype = {
     if (window == this.window) {
       this.customizedReloadWindows.add(window);
     } else if (subjectDocShell.sameTypeParent) {
-      const parentWindow = subjectDocShell.sameTypeParent
-                                        .QueryInterface(Ci.nsIInterfaceRequestor)
-                                        .getInterface(Ci.nsIDOMWindow);
+      const parentWindow = subjectDocShell.sameTypeParent.domWindow;
       if (parentWindow && this.customizedReloadWindows.has(parentWindow)) {
         this.customizedReloadWindows.add(window);
       }
@@ -194,7 +187,7 @@ CustomizedReload.prototype = {
 
     if (this.customizedReloadWindows.has(window)) {
       const {
-        apiErrorResult
+        apiErrorResult,
       } = this.inspectedWindowEval(this.callerInfo, this.injectedScript, {}, window);
 
       // Log only apiErrorResult, because no one is waiting for the
@@ -254,7 +247,7 @@ CustomizedReload.prototype = {
     }
 
     this.stopped = true;
-  }
+  },
 };
 
 var WebExtensionInspectedWindowActor = protocol.ActorClassWithSpec(
@@ -481,7 +474,7 @@ var WebExtensionInspectedWindowActor = protocol.ActorClassWithSpec(
           description: "Inspector protocol error: %s %s",
           details: [
             "Caller extension not found for",
-            callerInfo.url
+            callerInfo.url,
           ],
         });
       }
@@ -645,7 +638,7 @@ var WebExtensionInspectedWindowActor = protocol.ActorClassWithSpec(
       }
 
       return {value: evalResult};
-    }
+    },
   }
 );
 

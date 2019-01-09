@@ -19,20 +19,16 @@ XPCOMUtils.defineLazyGetter(this, "log", () => {
   });
 });
 
-XPCOMUtils.defineLazyModuleGetters(this, {
-  schema: "resource:///modules/policies/schema.jsm",
-});
-
 var EXPORTED_SYMBOLS = ["WindowsGPOParser"];
 
 var WindowsGPOParser = {
-  readPolicies(wrk, policies, isMachineRoot) {
+  readPolicies(wrk, policies) {
     let childWrk = wrk.openChild("Mozilla\\Firefox", wrk.ACCESS_READ);
     if (!policies) {
       policies = {};
     }
     try {
-      policies = registryToObject(childWrk, policies, isMachineRoot);
+      policies = registryToObject(childWrk, policies);
     } catch (e) {
       log.error(e);
     } finally {
@@ -41,14 +37,13 @@ var WindowsGPOParser = {
     // Need an extra check here so we don't
     // JSON.stringify if we aren't in debug mode
     if (log._maxLogLevel == "debug") {
-      log.debug("root = " + isMachineRoot ? "HKEY_LOCAL_MACHINE" : "HKEY_CURRENT_USER");
       log.debug(JSON.stringify(policies, null, 2));
     }
     return policies;
-  }
+  },
 };
 
-function registryToObject(wrk, policies, isMachineRoot) {
+function registryToObject(wrk, policies) {
   if (!policies) {
     policies = {};
   }
@@ -65,14 +60,6 @@ function registryToObject(wrk, policies, isMachineRoot) {
     for (let i = 0; i < wrk.valueCount; i++) {
       let name = wrk.getValueName(i);
       let value = readRegistryValue(wrk, name);
-
-      if (!isMachineRoot &&
-          schema.properties[name] &&
-          schema.properties[name].machine_only) {
-        log.error(`Policy ${name} is only allowed under the HKEY_LOCAL_MACHINE root`);
-        continue;
-      }
-
       policies[name] = value;
     }
   }

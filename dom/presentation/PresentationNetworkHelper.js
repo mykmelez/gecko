@@ -16,11 +16,11 @@ PresentationNetworkHelper.prototype = {
   classID: NETWORKHELPER_CID,
   QueryInterface: ChromeUtils.generateQI([Ci.nsIPresentationNetworkHelper]),
 
-  getWifiIPAddress: function(aListener) {
+  getWifiIPAddress(aListener) {
     EventDispatcher.instance.sendRequestForResult({type: "Wifi:GetIPAddress"})
              .then(result => aListener.onGetWifiIPAddress(result),
                    err => aListener.onError(err));
-  }
+  },
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([PresentationNetworkHelper]);

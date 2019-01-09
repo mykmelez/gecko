@@ -123,7 +123,7 @@ class LocationBar(UIBaseLib):
         :returns: Reference to the urlbar context menu.
         """
         # TODO: This method should be implemented via the menu API.
-        parent = self.urlbar.find_element(By.ANON_ATTRIBUTE, {'anonid': 'textbox-input-box'})
+        parent = self.urlbar.find_element(By.ANON_ATTRIBUTE, {'anonid': 'moz-input-box'})
         return parent.find_element(By.ANON_ATTRIBUTE, {'anonid': 'input-box-contextmenu'})
 
     @property
@@ -524,12 +524,12 @@ class IdentityPopupMainView(IdentityPopupView):
         return self.element.find_element(By.CLASS_NAME, 'identity-popup-expander')
 
     @property
-    def host(self):
-        """The DOM element which represents the identity-popup content host.
+    def header(self):
+        """The DOM element which represents the identity-popup header.
 
-        :returns: Reference to the identity-popup content host.
+        :returns: Reference to the identity-popup header.
         """
-        return self.element.find_element(By.CLASS_NAME, 'identity-popup-host')
+        return self.element.find_element(By.ID, 'identity-popup-mainView-panel-header-span')
 
     @property
     def insecure_connection_label(self):
@@ -590,7 +590,7 @@ class IdentityPopupSecurityView(IdentityPopupView):
 
         :returns: Reference to the identity-popup content host.
         """
-        return self.element.find_element(By.CLASS_NAME, 'identity-popup-host')
+        return self.element.find_element(By.ID, 'identity-popup-host')
 
     @property
     def insecure_connection_label(self):

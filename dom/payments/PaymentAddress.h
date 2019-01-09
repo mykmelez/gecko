@@ -13,30 +13,20 @@
 namespace mozilla {
 namespace dom {
 
-class PaymentAddress final : public nsISupports,
-                             public nsWrapperCache
-{
-public:
+class PaymentAddress final : public nsISupports, public nsWrapperCache {
+ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(PaymentAddress)
 
-  PaymentAddress(nsPIDOMWindowInner* aWindow,
-                 const nsAString& aCountry,
+  PaymentAddress(nsPIDOMWindowInner* aWindow, const nsAString& aCountry,
                  const nsTArray<nsString>& aAddressLine,
-                 const nsAString& aRegion,
-                 const nsAString& aCity,
-                 const nsAString& aDependentLocality,
-                 const nsAString& aPostalCode,
-                 const nsAString& aSortingCode,
-                 const nsAString& aLanguageCode,
-                 const nsAString& aOrganization,
-                 const nsAString& aRecipient,
+                 const nsAString& aRegion, const nsAString& aRegionCode,
+                 const nsAString& aCity, const nsAString& aDependentLocality,
+                 const nsAString& aPostalCode, const nsAString& aSortingCode,
+                 const nsAString& aOrganization, const nsAString& aRecipient,
                  const nsAString& aPhone);
 
-  nsPIDOMWindowInner* GetParentObject() const
-  {
-    return mOwner;
-  }
+  nsPIDOMWindowInner* GetParentObject() const { return mOwner; }
 
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override;
@@ -48,6 +38,8 @@ public:
 
   void GetRegion(nsAString& aRetVal) const;
 
+  void GetRegionCode(nsAString& aRetVal) const;
+
   void GetCity(nsAString& aRetVal) const;
 
   void GetDependentLocality(nsAString& aRetVal) const;
@@ -56,25 +48,23 @@ public:
 
   void GetSortingCode(nsAString& aRetVal) const;
 
-  void GetLanguageCode(nsAString& aRetVal) const;
-
   void GetOrganization(nsAString& aRetVal) const;
 
   void GetRecipient(nsAString& aRetVal) const;
 
   void GetPhone(nsAString& aRetVal) const;
 
-private:
+ private:
   ~PaymentAddress();
 
   nsString mCountry;
   nsTArray<nsString> mAddressLine;
   nsString mRegion;
+  nsString mRegionCode;
   nsString mCity;
   nsString mDependentLocality;
   nsString mPostalCode;
   nsString mSortingCode;
-  nsString mLanguageCode;
   nsString mOrganization;
   nsString mRecipient;
   nsString mPhone;
@@ -82,7 +72,7 @@ private:
   nsCOMPtr<nsPIDOMWindowInner> mOwner;
 };
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla
 
-#endif // mozilla_dom_PaymentAddress_h
+#endif  // mozilla_dom_PaymentAddress_h

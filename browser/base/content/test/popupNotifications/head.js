@@ -36,7 +36,7 @@ function promiseTabLoadEvent(tab, url) {
   let browser = tab.linkedBrowser;
 
   if (url) {
-    browser.loadURI(url);
+    BrowserTestUtils.loadURI(browser, url);
   }
 
   return BrowserTestUtils.browserLoaded(browser, false, url);
@@ -114,14 +114,20 @@ function BasicNotification(testId) {
   this.mainAction = {
     label: "Main Action",
     accessKey: "M",
-    callback: () => this.mainActionClicked = true
+    callback: ({source}) => {
+      this.mainActionClicked = true;
+      this.mainActionSource = source;
+    },
   };
   this.secondaryActions = [
     {
       label: "Secondary Action",
       accessKey: "S",
-      callback: () => this.secondaryActionClicked = true
-    }
+      callback: ({source}) => {
+        this.secondaryActionClicked = true;
+        this.secondaryActionSource = source;
+      },
+    },
   ];
   this.options = {
     name: "http://example.com",
@@ -143,7 +149,7 @@ function BasicNotification(testId) {
           this.swappingCallbackTriggered = true;
           break;
       }
-    }
+    },
   };
 }
 
@@ -199,8 +205,8 @@ function checkPopup(popup, notifyObj) {
        "main action label matches");
     is(notification.getAttribute("buttonaccesskey"),
        notifyObj.mainAction.accessKey, "main action accesskey matches");
-    is(notification.getAttribute("buttonhighlight"),
-       (!notifyObj.mainAction.disableHighlight).toString(),
+    is(notification.hasAttribute("buttonhighlight"),
+       !notifyObj.mainAction.disableHighlight,
        "main action highlight matches");
   }
   if (notifyObj.secondaryActions && notifyObj.secondaryActions.length > 0) {
@@ -283,7 +289,7 @@ function triggerSecondaryCommand(popup, index) {
   }
 
   // Extra secondary actions appear in a menu.
-  notification.secondaryButton.nextSibling.nextSibling.focus();
+  notification.secondaryButton.nextElementSibling.nextElementSibling.focus();
 
   popup.addEventListener("popupshown", function() {
     info("Command popup open for notification " + notification.id);

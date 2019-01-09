@@ -14,16 +14,12 @@ service('ToolkitChromeRegistryService', 'nsIToolkitChromeRegistry',
         "@mozilla.org/chrome/chrome-registry;1")
 service('XULChromeRegistryService', 'nsIXULChromeRegistry',
         "@mozilla.org/chrome/chrome-registry;1")
-service('XULOverlayProviderService', 'nsIXULOverlayProvider',
-        "@mozilla.org/chrome/chrome-registry;1")
 service('IOService', 'nsIIOService',
         "@mozilla.org/network/io-service;1")
 service('ObserverService', 'nsIObserverService',
         "@mozilla.org/observer-service;1")
 service('StringBundleService', 'nsIStringBundleService',
         "@mozilla.org/intl/stringbundle;1")
-service('XPConnect', 'nsIXPConnect',
-        "@mozilla.org/js/xpc/XPConnect;1")
 service('PermissionManager', 'nsIPermissionManager',
         "@mozilla.org/permissionmanager;1")
 service('ServiceWorkerManager', 'nsIServiceWorkerManager',
@@ -50,6 +46,8 @@ service('DirectoryService', 'nsIProperties',
         "@mozilla.org/file/directory_service;1")
 service('ThirdPartyUtil', 'mozIThirdPartyUtil',
         "@mozilla.org/thirdpartyutil;1")
+service('URIFixup', 'nsIURIFixup',
+        "@mozilla.org/docshell/urifixup;1")
 
 # The definition file needs access to the definitions of the particular
 # interfaces. If you add a new interface here, make sure the necessary includes
@@ -68,7 +66,6 @@ CPP_INCLUDES = """
 #include "nsIChromeRegistry.h"
 #include "nsIStringBundle.h"
 #include "nsIToolkitChromeRegistry.h"
-#include "nsIXULOverlayProvider.h"
 #include "IHistory.h"
 #include "nsIXPConnect.h"
 #include "nsIPermissionManager.h"
@@ -81,6 +78,7 @@ CPP_INCLUDES = """
 #include "nsIAsyncShutdown.h"
 #include "nsIUUIDGenerator.h"
 #include "nsIGfxInfo.h"
+#include "nsIURIFixup.h"
 """
 
 #####
@@ -118,7 +116,7 @@ def services_h(output):
 #ifdef MOZILLA_INTERNAL_API
 extern "C" {
 /**
- * NOTE: Don't call this method directly, instead call mozilla::services::Get{0}.
+ * NOTE: Don't call this method directly, instead call mozilla::services::Get%(name)s.
  * It is used to expose XPCOM services to rust code. The return value is already addrefed.
  */
 %(type)s* XPCOMService_Get%(name)s();
@@ -158,7 +156,7 @@ static %(type)s* g%(name)s = nullptr;
 
 extern "C" {
 /**
- * NOTE: Don't call this method directly, instead call `mozilla::services::Get{0}`.
+ * NOTE: Don't call this method directly, instead call `mozilla::services::Get%(name)s`.
  * This method is extern "C" to expose XPCOM services to rust code.
  * The return value is already addrefed.
  */

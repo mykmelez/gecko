@@ -7,50 +7,40 @@
 #ifndef mozilla_plugins_PluginBridge_h
 #define mozilla_plugins_PluginBridge_h
 
-#include <functional>
-
 #include "base/process.h"
 
 namespace mozilla {
 
 namespace dom {
 class ContentParent;
-} // namespace dom
+}  // namespace dom
 
 namespace ipc {
-template<class PFooSide>
+template <class PFooSide>
 class Endpoint;
-} // namespace ipc
+}  // namespace ipc
 
 namespace plugins {
 
 class PPluginModuleParent;
 
-bool
-SetupBridge(uint32_t aPluginId, dom::ContentParent* aContentParent,
-            nsresult* aResult, uint32_t* aRunID,
-            ipc::Endpoint<PPluginModuleParent>* aEndpoint);
+bool SetupBridge(uint32_t aPluginId, dom::ContentParent* aContentParent,
+                 nsresult* aResult, uint32_t* aRunID,
+                 ipc::Endpoint<PPluginModuleParent>* aEndpoint);
 
-nsresult
-FindPluginsForContent(uint32_t aPluginEpoch,
-                      nsTArray<PluginTag>* aPlugins,
-                      nsTArray<FakePluginTag>* aFakePlugins,
-                      uint32_t* aNewPluginEpoch);
+nsresult FindPluginsForContent(uint32_t aPluginEpoch,
+                               nsTArray<PluginTag>* aPlugins,
+                               nsTArray<FakePluginTag>* aFakePlugins,
+                               uint32_t* aNewPluginEpoch);
 
-void
-TakeFullMinidump(uint32_t aPluginId,
-                 base::ProcessId aContentProcessId,
-                 const nsAString& aBrowserDumpId,
-                 std::function<void(nsString)>&& aCallback,
-                 bool aAsync);
+void TakeFullMinidump(uint32_t aPluginId, base::ProcessId aContentProcessId,
+                      const nsAString& aBrowserDumpId, nsString& aDumpId);
 
-void
-TerminatePlugin(uint32_t aPluginId,
-                base::ProcessId aContentProcessId,
-                const nsCString& aMonitorDescription,
-                const nsAString& aDumpId,
-                std::function<void(bool)>&& aCallback);
-} // namespace plugins
-} // namespace mozilla
+void TerminatePlugin(uint32_t aPluginId, base::ProcessId aContentProcessId,
+                     const nsCString& aMonitorDescription,
+                     const nsAString& aDumpId);
 
-#endif // mozilla_plugins_PluginBridge_h
+}  // namespace plugins
+}  // namespace mozilla
+
+#endif  // mozilla_plugins_PluginBridge_h

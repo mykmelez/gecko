@@ -1,19 +1,19 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! A cache from rule node to computed values, in order to cache reset
 //! properties.
 
-use fnv::FnvHashMap;
-use logical_geometry::WritingMode;
-use properties::{ComputedValues, StyleBuilder};
-use rule_tree::StrongRuleNode;
-use selector_parser::PseudoElement;
+use crate::logical_geometry::WritingMode;
+use crate::properties::{ComputedValues, StyleBuilder};
+use crate::rule_tree::StrongRuleNode;
+use crate::selector_parser::PseudoElement;
+use crate::shared_lock::StylesheetGuards;
+use crate::values::computed::NonNegativeLength;
+use fxhash::FxHashMap;
 use servo_arc::Arc;
-use shared_lock::StylesheetGuards;
 use smallvec::SmallVec;
-use values::computed::NonNegativeLength;
 
 /// The conditions for caching and matching a style in the rule cache.
 #[derive(Clone, Debug, Default)]
@@ -71,14 +71,14 @@ impl RuleCacheConditions {
 /// A TLS cache from rules matched to computed values.
 pub struct RuleCache {
     // FIXME(emilio): Consider using LRUCache or something like that?
-    map: FnvHashMap<StrongRuleNode, SmallVec<[(RuleCacheConditions, Arc<ComputedValues>); 1]>>,
+    map: FxHashMap<StrongRuleNode, SmallVec<[(RuleCacheConditions, Arc<ComputedValues>); 1]>>,
 }
 
 impl RuleCache {
     /// Creates an empty `RuleCache`.
     pub fn new() -> Self {
         Self {
-            map: FnvHashMap::default(),
+            map: FxHashMap::default(),
         }
     }
 
@@ -124,11 +124,6 @@ impl RuleCache {
         guards: &StylesheetGuards,
         builder_with_early_props: &StyleBuilder,
     ) -> Option<&ComputedValues> {
-        if builder_with_early_props.is_style_if_visited() {
-            // FIXME(emilio): We can probably do better, does it matter much?
-            return None;
-        }
-
         // A pseudo-element with property restrictions can result in different
         // computed values if it's also used for a non-pseudo.
         if builder_with_early_props
@@ -163,11 +158,6 @@ impl RuleCache {
         conditions: &RuleCacheConditions,
     ) -> bool {
         if !conditions.cacheable() {
-            return false;
-        }
-
-        if style.is_style_if_visited() {
-            // FIXME(emilio): We can probably do better, does it matter much?
             return false;
         }
 

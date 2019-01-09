@@ -4,13 +4,15 @@
 
 "use strict";
 
-const {Ci} = require("chrome");
 const Services = require("Services");
-const {Devices} = require("resource://devtools/shared/apps/Devices.jsm");
 const {DebuggerServer} = require("devtools/server/main");
 const discovery = require("devtools/shared/discovery/discovery");
 const EventEmitter = require("devtools/shared/event-emitter");
+const {RuntimeTypes} = require("devtools/client/webide/modules/runtime-types");
 const promise = require("promise");
+
+loader.lazyRequireGetter(this, "adb", "devtools/shared/adb/adb", true);
+
 loader.lazyRequireGetter(this, "AuthenticationResult",
   "devtools/shared/security/auth", true);
 loader.lazyRequireGetter(this, "DevToolsUtils",
@@ -193,34 +195,29 @@ exports.RuntimeScanners = RuntimeScanners;
 
 /* SCANNERS */
 
-/**
- * This is a lazy ADB scanner shim which only tells the ADB Helper to start and
- * stop as needed.  The real scanner that lists devices lives in ADB Helper.
- * ADB Helper 0.8.0 and later wait until these signals are received before
- * starting ADB polling.  For earlier versions, they have no effect.
- */
-var LazyAdbScanner = {
-
+var UsbScanner = {
+  init() {
+    this._emitUpdated = this._emitUpdated.bind(this);
+  },
   enable() {
-    Devices.emit("adb-start-polling");
+    adb.registerListener(this._emitUpdated);
   },
-
   disable() {
-    Devices.emit("adb-stop-polling");
+    adb.unregisterListener(this._emitUpdated);
   },
-
   scan() {
-    return promise.resolve();
+    return adb.updateRuntimes();
   },
-
-  listRuntimes: function() {
-    return [];
-  }
-
+  listRuntimes() {
+    return adb.getRuntimes().filter(r => !r.isUnknown());
+  },
+  _emitUpdated() {
+    this.emit("runtime-list-updated");
+  },
 };
-
-EventEmitter.decorate(LazyAdbScanner);
-RuntimeScanners.add(LazyAdbScanner);
+EventEmitter.decorate(UsbScanner);
+UsbScanner.init();
+RuntimeScanners.add(UsbScanner);
 
 var WiFiScanner = {
 
@@ -286,7 +283,7 @@ var WiFiScanner = {
       return;
     }
     WiFiScanner.updateRegistration();
-  }
+  },
 
 };
 
@@ -307,23 +304,13 @@ var StaticScanner = {
       runtimes.push(gLocalRuntime);
     }
     return runtimes;
-  }
+  },
 };
 
 EventEmitter.decorate(StaticScanner);
 RuntimeScanners.add(StaticScanner);
 
-/* RUNTIMES */
-
-// These type strings are used for logging events to Telemetry.
-// You must update Histograms.json if new types are added.
-var RuntimeTypes = exports.RuntimeTypes = {
-  USB: "USB",
-  WIFI: "WIFI",
-  REMOTE: "REMOTE",
-  LOCAL: "LOCAL",
-  OTHER: "OTHER"
-};
+exports.RuntimeTypes = RuntimeTypes;
 
 function WiFiRuntime(deviceName) {
   this.deviceName = deviceName;
@@ -391,8 +378,7 @@ WiFiRuntime.prototype = {
     let promptWindow;
     const windowListener = {
       onOpenWindow(xulWindow) {
-        const win = xulWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                           .getInterface(Ci.nsIDOMWindow);
+        const win = xulWindow.docShell.domWindow;
         win.addEventListener("load", function() {
           if (win.document.documentElement.getAttribute("id") != WINDOW_ID) {
             return;
@@ -426,9 +412,9 @@ WiFiRuntime.prototype = {
         }
         promptWindow.close();
         promptWindow = null;
-      }
+      },
     };
-  }
+  },
 };
 
 // For testing use only

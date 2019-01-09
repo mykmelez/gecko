@@ -76,17 +76,19 @@
 #include "mozHunspellAllocator.h"
 
 #define MOZ_HUNSPELL_CONTRACTID "@mozilla.org/spellchecker/engine;1"
-#define MOZ_HUNSPELL_CID         \
-/* 56c778e4-1bee-45f3-a689-886692a97fe7 */   \
-{ 0x56c778e4, 0x1bee, 0x45f3, \
-  { 0xa6, 0x89, 0x88, 0x66, 0x92, 0xa9, 0x7f, 0xe7 } }
+#define MOZ_HUNSPELL_CID                             \
+  /* 56c778e4-1bee-45f3-a689-886692a97fe7 */         \
+  {                                                  \
+    0x56c778e4, 0x1bee, 0x45f3, {                    \
+      0xa6, 0x89, 0x88, 0x66, 0x92, 0xa9, 0x7f, 0xe7 \
+    }                                                \
+  }
 
 class mozHunspell final : public mozISpellCheckingEngine,
                           public nsIObserver,
                           public nsSupportsWeakReference,
-                          public nsIMemoryReporter
-{
-public:
+                          public nsIMemoryReporter {
+ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_MOZISPELLCHECKINGENGINE
   NS_DECL_NSIOBSERVER
@@ -99,11 +101,11 @@ public:
   void LoadDictionaryList(bool aNotifyChildProcesses);
 
   // helper method for converting a word to the charset of the dictionary
-  nsresult ConvertCharset(const char16_t* aStr, std::string* aDst);
+  nsresult ConvertCharset(const nsAString& aStr, std::string& aDst);
 
   NS_DECL_NSIMEMORYREPORTER
 
-protected:
+ protected:
   virtual ~mozHunspell();
 
   void DictionariesChanged(bool aNotifyChildProcesses);
@@ -114,15 +116,14 @@ protected:
 
   // Hashtable matches dictionary name to .aff file
   nsInterfaceHashtable<nsStringHashKey, nsIURI> mDictionaries;
-  nsString  mDictionary;
-  nsString  mLanguage;
+  nsString mDictionary;
   nsCString mAffixFileName;
 
   // dynamic dirs used to search for dictionaries
   nsCOMArray<nsIFile> mDynamicDirectories;
   nsInterfaceHashtable<nsStringHashKey, nsIURI> mDynamicDictionaries;
 
-  Hunspell  *mHunspell;
+  Hunspell* mHunspell;
 };
 
 #endif

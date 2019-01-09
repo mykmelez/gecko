@@ -10,6 +10,7 @@ const breakdown = {
   scripts: { by: "count", count: true, bytes: true },
   strings: { by: "count", count: true, bytes: true },
   other: { by: "count", count: true, bytes: true },
+  domNode: { by: "count", count: true, bytes: true },
 };
 
 async function createSnapshotAndDominatorTree(client) {
@@ -25,7 +26,7 @@ add_task(async function() {
   const savedSnapshots = [
     await createSnapshotAndDominatorTree(client),
     await createSnapshotAndDominatorTree(client),
-    await createSnapshotAndDominatorTree(client)
+    await createSnapshotAndDominatorTree(client),
   ];
   ok(true, "Create 3 snapshots and dominator trees");
 
@@ -34,7 +35,7 @@ add_task(async function() {
 
   let tree = await client.getDominatorTree({
     dominatorTreeId: savedSnapshots[0].dominatorTreeId,
-    breakdown
+    breakdown,
   });
   ok(tree, "Should get a valid tree for first snapshot");
 
@@ -42,7 +43,7 @@ add_task(async function() {
   try {
     await client.getDominatorTree({
       dominatorTreeId: savedSnapshots[1].dominatorTreeId,
-      breakdown
+      breakdown,
     });
   } catch (_) {
     threw = true;
@@ -51,7 +52,7 @@ add_task(async function() {
 
   tree = await client.getDominatorTree({
     dominatorTreeId: savedSnapshots[2].dominatorTreeId,
-    breakdown
+    breakdown,
   });
   ok(tree, "Should get a valid tree for third snapshot");
 

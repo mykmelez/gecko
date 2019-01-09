@@ -11,17 +11,11 @@
 // time in ms
 const WAIT_TIME = 1000;
 
-const { PerformanceFront } = require("devtools/shared/fronts/performance");
-
 add_task(async function() {
   await SpecialPowers.pushPrefEnv({"set": [["privacy.reduceTimerPrecision", false]]});
-  await addTab(MAIN_DOMAIN + "doc_perf.html");
+  const target = await addTabTarget(MAIN_DOMAIN + "doc_perf.html");
 
-  initDebuggerServer();
-  const client = new DebuggerClient(DebuggerServer.connectPipe());
-  const form = await connectDebuggerClient(client);
-  const front = PerformanceFront(client, form);
-  await front.connect();
+  const front = await target.getFront("performance");
 
   // Perform the first recording...
 
@@ -64,7 +58,6 @@ add_task(async function() {
     "There should be no samples from the first recording in the second one, " +
     "even though the total number of frames did not overflow.");
 
-  await front.destroy();
-  await client.close();
+  await target.destroy();
   gBrowser.removeCurrentTab();
 });

@@ -4,11 +4,11 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 // Constants
 
 const PREFILTER_INVISIBLE = nsIAccessibleTraversalRule.PREFILTER_INVISIBLE;
-const PREFILTER_ARIA_HIDDEN = nsIAccessibleTraversalRule.PREFILTER_ARIA_HIDDEN;
 const PREFILTER_TRANSPARENT = nsIAccessibleTraversalRule.PREFILTER_TRANSPARENT;
 const FILTER_MATCH = nsIAccessibleTraversalRule.FILTER_MATCH;
 const FILTER_IGNORE = nsIAccessibleTraversalRule.FILTER_IGNORE;
 const FILTER_IGNORE_SUBTREE = nsIAccessibleTraversalRule.FILTER_IGNORE_SUBTREE;
+const NO_BOUNDARY = nsIAccessiblePivot.NO_BOUNDARY;
 const CHAR_BOUNDARY = nsIAccessiblePivot.CHAR_BOUNDARY;
 const WORD_BOUNDARY = nsIAccessiblePivot.WORD_BOUNDARY;
 
@@ -34,7 +34,7 @@ var HeadersTraversalRule =
     return FILTER_MATCH;
   },
 
-  QueryInterface: ChromeUtils.generateQI([nsIAccessibleTraversalRule])
+  QueryInterface: ChromeUtils.generateQI([nsIAccessibleTraversalRule]),
 };
 
 /**
@@ -47,7 +47,7 @@ var ObjectTraversalRule =
     return 0;
   },
 
-  preFilter: PREFILTER_INVISIBLE | PREFILTER_ARIA_HIDDEN | PREFILTER_TRANSPARENT,
+  preFilter: PREFILTER_INVISIBLE | PREFILTER_TRANSPARENT,
 
   match(aAccessible) {
     var rv = FILTER_IGNORE;
@@ -62,7 +62,7 @@ var ObjectTraversalRule =
     return rv;
   },
 
-  QueryInterface: ChromeUtils.generateQI([nsIAccessibleTraversalRule])
+  QueryInterface: ChromeUtils.generateQI([nsIAccessibleTraversalRule]),
 };
 
 // //////////////////////////////////////////////////////////////////////////////
@@ -72,7 +72,7 @@ var ObjectTraversalRule =
  * A checker for virtual cursor changed events.
  */
 function VCChangedChecker(aDocAcc, aIdOrNameOrAcc, aTextOffsets, aPivotMoveMethod,
-                          aIsFromUserInput) {
+                          aIsFromUserInput, aBoundaryType = NO_BOUNDARY) {
   this.__proto__ = new invokerChecker(EVENT_VIRTUALCURSOR_CHANGED, aDocAcc);
 
   this.match = function VCChangedChecker_match(aEvent) {
@@ -86,7 +86,8 @@ function VCChangedChecker(aDocAcc, aIdOrNameOrAcc, aTextOffsets, aPivotMoveMetho
     var expectedReason = VCChangedChecker.methodReasonMap[aPivotMoveMethod] ||
       nsIAccessiblePivot.REASON_NONE;
 
-    return event.reason == expectedReason;
+    return event.reason == expectedReason &&
+           event.boundaryType == aBoundaryType;
   };
 
   this.check = function VCChangedChecker_check(aEvent) {
@@ -104,9 +105,9 @@ function VCChangedChecker(aDocAcc, aIdOrNameOrAcc, aTextOffsets, aPivotMoveMetho
     var nameMatches = position && position.name == aIdOrNameOrAcc;
     var accMatches = position == aIdOrNameOrAcc;
 
-    SimpleTest.ok(idMatches || nameMatches || accMatches, "id or name matches",
-                  "expecting " + aIdOrNameOrAcc + ", got '" +
-                  prettyName(position));
+    SimpleTest.ok(idMatches || nameMatches || accMatches,
+                  "id or name matches - expecting " +
+                  prettyName(aIdOrNameOrAcc) + ", got '" + prettyName(position));
 
     SimpleTest.is(aEvent.isFromUserInput, aIsFromUserInput,
                   "Expected user input is " + aIsFromUserInput + "\n");
@@ -159,10 +160,10 @@ VCChangedChecker.methodReasonMap = {
   "movePrevious": nsIAccessiblePivot.REASON_PREV,
   "moveFirst": nsIAccessiblePivot.REASON_FIRST,
   "moveLast": nsIAccessiblePivot.REASON_LAST,
-  "setTextRange": nsIAccessiblePivot.REASON_TEXT,
-  "moveNextByText": nsIAccessiblePivot.REASON_TEXT,
-  "movePreviousByText": nsIAccessiblePivot.REASON_TEXT,
-  "moveToPoint": nsIAccessiblePivot.REASON_POINT
+  "setTextRange": nsIAccessiblePivot.REASON_NONE,
+  "moveNextByText": nsIAccessiblePivot.REASON_NEXT,
+  "movePreviousByText": nsIAccessiblePivot.REASON_PREV,
+  "moveToPoint": nsIAccessiblePivot.REASON_POINT,
 };
 
 /**
@@ -189,7 +190,7 @@ function setVCRangeInvoker(aDocAcc, aTextAccessible, aTextOffsets) {
   };
 
   this.eventSeq = [
-    new VCChangedChecker(aDocAcc, aTextAccessible, aTextOffsets, "setTextRange", true)
+    new VCChangedChecker(aDocAcc, aTextAccessible, aTextOffsets, "setTextRange", true),
   ];
 }
 
@@ -242,12 +243,12 @@ function setVCPosInvoker(aDocAcc, aPivotMoveMethod, aRule, aIdOrNameOrAcc,
   if (expectMove) {
     this.eventSeq = [
       new VCChangedChecker(aDocAcc, aIdOrNameOrAcc, null, aPivotMoveMethod,
-        aIsFromUserInput === undefined ? !!aPivotMoveMethod : aIsFromUserInput)
+        aIsFromUserInput === undefined ? !!aPivotMoveMethod : aIsFromUserInput),
     ];
   } else {
     this.eventSeq = [];
     this.unexpectedEventSeq = [
-      new invokerChecker(EVENT_VIRTUALCURSOR_CHANGED, aDocAcc)
+      new invokerChecker(EVENT_VIRTUALCURSOR_CHANGED, aDocAcc),
     ];
   }
 }
@@ -289,12 +290,12 @@ function setVCTextInvoker(aDocAcc, aPivotMoveMethod, aBoundary, aTextOffsets,
   if (expectMove) {
     this.eventSeq = [
       new VCChangedChecker(aDocAcc, aIdOrNameOrAcc, aTextOffsets, aPivotMoveMethod,
-        aIsFromUserInput === undefined ? true : aIsFromUserInput)
+        aIsFromUserInput === undefined ? true : aIsFromUserInput, aBoundary),
     ];
   } else {
     this.eventSeq = [];
     this.unexpectedEventSeq = [
-      new invokerChecker(EVENT_VIRTUALCURSOR_CHANGED, aDocAcc)
+      new invokerChecker(EVENT_VIRTUALCURSOR_CHANGED, aDocAcc),
     ];
   }
 }
@@ -332,12 +333,12 @@ function moveVCCoordInvoker(aDocAcc, aX, aY, aIgnoreNoMatch,
 
   if (expectMove) {
     this.eventSeq = [
-      new VCChangedChecker(aDocAcc, aIdOrNameOrAcc, null, "moveToPoint", true)
+      new VCChangedChecker(aDocAcc, aIdOrNameOrAcc, null, "moveToPoint", true),
     ];
   } else {
     this.eventSeq = [];
     this.unexpectedEventSeq = [
-      new invokerChecker(EVENT_VIRTUALCURSOR_CHANGED, aDocAcc)
+      new invokerChecker(EVENT_VIRTUALCURSOR_CHANGED, aDocAcc),
     ];
   }
 }
@@ -370,7 +371,7 @@ function setModalRootInvoker(aDocAcc, aModalRootAcc, aExpectedResult) {
 
   this.eventSeq = [];
   this.unexpectedEventSeq = [
-    new invokerChecker(EVENT_VIRTUALCURSOR_CHANGED, aDocAcc)
+    new invokerChecker(EVENT_VIRTUALCURSOR_CHANGED, aDocAcc),
   ];
 }
 
@@ -466,7 +467,7 @@ function removeVCPositionInvoker(aDocAcc, aPosNode) {
   };
 
   this.eventSeq = [
-    new removeVCPositionChecker(aDocAcc, this.accessible.parent)
+    new removeVCPositionChecker(aDocAcc, this.accessible.parent),
   ];
 }
 
@@ -509,7 +510,7 @@ function removeVCRootInvoker(aRootNode) {
   };
 
   this.eventSeq = [
-    new removeVCRootChecker(this.pivot)
+    new removeVCRootChecker(this.pivot),
   ];
 }
 

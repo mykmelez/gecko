@@ -23,6 +23,8 @@ XPCOMUtils.defineLazyGetter(this, "log", Log.get);
 XPCOMUtils.defineLazyServiceGetter(
     this, "env", "@mozilla.org/process/environment;1", "nsIEnvironment");
 
+const XMLURI_PARSE_ERROR = "http://www.mozilla.org/newlayout/xml/parsererror.xml";
+
 const NOTIFY_RUNNING = "remote-active";
 
 // Complements -marionette flag for starting the Marionette server.
@@ -44,27 +46,30 @@ const PREF_ENABLED = "marionette.enabled";
 // pref being set to 4444.
 const ENV_PRESERVE_PREFS = "MOZ_MARIONETTE_PREF_STATE_ACROSS_RESTARTS";
 
+// ALL CHANGES TO THIS LIST MUST HAVE REVIEW FROM A MARIONETTE PEER!
+//
 // Marionette sets preferences recommended for automation when it starts,
 // unless marionette.prefs.recommended has been set to false.
-// Where noted, some prefs should also be set in the profile passed to
-// Marionette to prevent them from affecting startup, since some of these
-// are checked before Marionette initialises.
+//
+// All prefs as added here have immediate effect, and don't require a restart
+// nor have to be set in the profile before the application starts. If such a
+// latter preference has to be added, it needs to be done for the client like
+// Marionette client (geckoinstance.py), or geckodriver (prefs.rs).
+//
+// Note: Clients do not always use the latest version of the application. As
+// such backward compatibility has to be ensured at least for the last three
+// releases.
 const RECOMMENDED_PREFS = new Map([
 
   // Make sure Shield doesn't hit the network.
   ["app.normandy.api_url", ""],
 
-  // Disable automatic downloading of new releases.
+  // Disable automatically upgrading Firefox
   //
-  // This should also be set in the profile prior to starting Firefox,
-  // as it is picked up at runtime.
-  ["app.update.auto", false],
-
-  // Disable automatically upgrading Firefox.
-  //
-  // This should also be set in the profile prior to starting Firefox,
-  // as it is picked up at runtime.
-  ["app.update.enabled", false],
+  // Note: This preference should have already been set by the client when
+  // creating the profile. But if not and to absolutely make sure that updates
+  // of Firefox aren't downloaded and applied, enforce its presence.
+  ["app.update.disabledForTesting", true],
 
   // Increase the APZ content response timeout in tests to 1 minute.
   // This is to accommodate the fact that test environments tends to be
@@ -75,10 +80,17 @@ const RECOMMENDED_PREFS = new Map([
   // (bug 1176798, bug 1177018, bug 1210465)
   ["apz.content_response_timeout", 60000],
 
+  // Don't show the content blocking introduction panel.
+  // We use a larger number than the default 22 to have some buffer
+  ["browser.contentblocking.introCount", 99],
+
   // Indicate that the download panel has been shown once so that
   // whichever download test runs first doesn't show the popup
   // inconsistently.
   ["browser.download.panel.shown", true],
+
+  // Always display a blank page
+  ["browser.newtabpage.enabled", false],
 
   // Background thumbnails in particular cause grief, and disabling
   // thumbnails in general cannot hurt
@@ -110,9 +122,6 @@ const RECOMMENDED_PREFS = new Map([
 
   // Do not redirect user when a milstone upgrade of Firefox is detected
   ["browser.startup.homepage_override.mstone", "ignore"],
-
-  // Disable browser animations (tabs, fullscreen, sliding alerts)
-  ["toolkit.cosmeticAnimations.enabled", false],
 
   // Do not close the window when the last tab gets closed
   ["browser.tabs.closeWindowWithLastTab", false],
@@ -254,6 +263,9 @@ const RECOMMENDED_PREFS = new Map([
   ["startup.homepage_welcome_url", "about:blank"],
   ["startup.homepage_welcome_url.additional", ""],
 
+  // Disable browser animations (tabs, fullscreen, sliding alerts)
+  ["toolkit.cosmeticAnimations.enabled", false],
+
   // Prevent starting into safe mode after application crashes
   ["toolkit.startup.max_resumed_crashes", -1],
 
@@ -305,7 +317,7 @@ class MarionetteParentProcess {
   }
 
   observe(subject, topic) {
-    log.debug(`Received observer notification ${topic}`);
+    log.trace(`Received observer notification ${topic}`);
 
     switch (topic) {
       case "nsPref:changed":
@@ -319,6 +331,8 @@ class MarionetteParentProcess {
       case "profile-after-change":
         Services.obs.addObserver(this, "command-line-startup");
         Services.obs.addObserver(this, "sessionstore-windows-restored");
+        Services.obs.addObserver(this, "mail-startup-done");
+        Services.obs.addObserver(this, "toplevel-window-ready");
 
         for (let [pref, value] of EnvironmentPrefs.from(ENV_PRESERVE_PREFS)) {
           Preferences.set(pref, value);
@@ -359,15 +373,33 @@ class MarionetteParentProcess {
         this.suppressSafeModeDialog(subject);
         break;
 
+      case "toplevel-window-ready":
+        subject.addEventListener("load", ev => {
+          if (ev.target.documentElement.namespaceURI == XMLURI_PARSE_ERROR) {
+            Services.obs.removeObserver(this, topic);
+
+            let parserError = ev.target.querySelector("parsererror");
+            log.fatal(parserError.textContent);
+            this.uninit();
+            Services.startup.quit(Ci.nsIAppStartup.eForceQuit);
+          }
+        }, {once: true});
+        break;
+
+      // Thunderbird only, instead of sessionstore-windows-restored.
+      case "mail-startup-done":
+        this.finalUIStartup = true;
+        this.init();
+        break;
+
       case "sessionstore-windows-restored":
         Services.obs.removeObserver(this, topic);
+        Services.obs.removeObserver(this, "toplevel-window-ready");
 
         // When Firefox starts on Windows, an additional GFX sanity test
         // window may appear off-screen.  Marionette should wait for it
         // to close.
-        let winEn = Services.wm.getEnumerator(null);
-        while (winEn.hasMoreElements()) {
-          let win = winEn.getNext();
+        for (let win of Services.wm.getEnumerator(null)) {
           if (win.document.documentURI == "chrome://gfxsanity/content/sanityparent.html") {
             this.gfxWindow = win;
             break;
@@ -375,7 +407,7 @@ class MarionetteParentProcess {
         }
 
         if (this.gfxWindow) {
-          log.debug("GFX sanity window detected, waiting until it has been closed...");
+          log.trace("GFX sanity window detected, waiting until it has been closed...");
           Services.obs.addObserver(this, "domwindowclosed");
         } else {
           Services.obs.addObserver(this, "xpcom-will-shutdown");
@@ -396,7 +428,7 @@ class MarionetteParentProcess {
     win.addEventListener("load", () => {
       if (win.document.getElementById("safeModeDialog")) {
         // accept the dialog to start in safe-mode
-        log.debug("Safe mode detected, supressing dialog");
+        log.trace("Safe mode detected, supressing dialog");
         win.setTimeout(() => {
           win.document.documentElement.getButton("accept").click();
         });
@@ -411,15 +443,15 @@ class MarionetteParentProcess {
       return;
     }
 
-    log.debug(`Waiting for delayed startup...`);
+    log.trace(`Waiting until startup recorder finished recording startup scripts...`);
     Services.tm.idleDispatchToMainThread(async () => {
       let startupRecorder = Promise.resolve();
       if ("@mozilla.org/test/startuprecorder;1" in Cc) {
-        log.debug(`Waiting for startup tests...`);
         startupRecorder = Cc["@mozilla.org/test/startuprecorder;1"]
             .getService().wrappedJSObject.done;
       }
       await startupRecorder;
+      log.trace(`All scripts recorded.`);
 
       if (MarionettePrefs.recommendedPrefs) {
         for (let [k, v] of RECOMMENDED_PREFS) {
@@ -514,14 +546,8 @@ Marionette.prototype = {
   classID: Components.ID("{786a1369-dca5-4adc-8486-33d23c88010a}"),
   contractID: "@mozilla.org/remote/marionette;1",
 
-  /* eslint-disable camelcase */
+  /* eslint-disable-next-line camelcase */
   _xpcom_factory: MarionetteFactory,
-
-  _xpcom_categories: [
-    {category: "command-line-handler", entry: "b-marionette"},
-    {category: "profile-after-change", service: true},
-  ],
-  /* eslint-enable camelcase */
 
   helpInfo: "  --marionette       Enable remote control server.\n",
 };

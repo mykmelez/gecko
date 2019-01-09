@@ -13,6 +13,8 @@ from os import path
 
 TELEMETRY_ROOT_PATH = path.abspath(path.join(path.dirname(__file__), path.pardir, path.pardir))
 sys.path.append(TELEMETRY_ROOT_PATH)
+# The generators live in "build_scripts", account for that.
+sys.path.append(path.join(TELEMETRY_ROOT_PATH, "build_scripts"))
 import gen_scalar_data   # noqa: E402
 
 
@@ -49,13 +51,15 @@ newscalar:
                     "kind": "nsITelemetry::SCALAR_TYPE_STRING",
                     "expired": False,
                     "record_on_release": True,
-                    "keyed": False
+                    "keyed": False,
+                    "stores": ["main"],
                 },
                 "withoptin": {
                     "kind": "nsITelemetry::SCALAR_TYPE_COUNT",
                     "expired": False,
                     "record_on_release": False,
-                    "keyed": False
+                    "keyed": False,
+                    "stores": ["main"],
                 }
             }
         }

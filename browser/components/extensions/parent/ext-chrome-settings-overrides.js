@@ -20,27 +20,6 @@ const HOMEPAGE_CONFIRMED_TYPE = "homepageNotification";
 const HOMEPAGE_SETTING_TYPE = "prefs";
 const HOMEPAGE_SETTING_NAME = "homepage_override";
 
-// This promise is used to wait for the search service to be initialized.
-// None of the code in this module requests that initialization. It is assumed
-// that it is started at some point. If tests start to fail because this
-// promise never resolves, that's likely the cause.
-const searchInitialized = () => {
-  if (Services.search.isInitialized) {
-    return;
-  }
-  return new Promise(resolve => {
-    const SEARCH_SERVICE_TOPIC = "browser-search-service";
-    Services.obs.addObserver(function observer(subject, topic, data) {
-      if (data != "init-complete") {
-        return;
-      }
-
-      Services.obs.removeObserver(observer, SEARCH_SERVICE_TOPIC);
-      resolve();
-    }, SEARCH_SERVICE_TOPIC);
-  });
-};
-
 XPCOMUtils.defineLazyGetter(this, "homepagePopup", () => {
   return new ExtensionControlledPopup({
     confirmedType: HOMEPAGE_CONFIRMED_TYPE,
@@ -64,7 +43,7 @@ XPCOMUtils.defineLazyGetter(this, "homepagePopup", () => {
       Services.prefs.addObserver(HOMEPAGE_PREF, async function prefObserver() {
         Services.prefs.removeObserver(HOMEPAGE_PREF, prefObserver);
         let loaded = waitForTabLoaded(tab);
-        win.BrowserGoHome();
+        win.BrowserHome();
         await loaded;
         // Manually trigger an event in case this is controlled again.
         popup.open();
@@ -107,8 +86,8 @@ this.chrome_settings_overrides = class extends ExtensionAPI {
     if (!item) {
       return;
     }
-    if (Services.search.currentEngine.name != item.value &&
-        Services.search.currentEngine.name != item.initialValue) {
+    if (Services.search.defaultEngine.name != item.value &&
+        Services.search.defaultEngine.name != item.initialValue) {
       // The current engine is not the same as the value that the ExtensionSettingsStore has.
       // This means that the user changed the engine, so we shouldn't control it anymore.
       // Do nothing and remove our entry from the ExtensionSettingsStore.
@@ -120,7 +99,7 @@ this.chrome_settings_overrides = class extends ExtensionAPI {
       try {
         let engine = Services.search.getEngineByName(item.value || item.initialValue);
         if (engine) {
-          Services.search.currentEngine = engine;
+          Services.search.defaultEngine = engine;
         }
       } catch (e) {
         Cu.reportError(e);
@@ -135,7 +114,7 @@ this.chrome_settings_overrides = class extends ExtensionAPI {
     if (item) {
       ExtensionSettingsStore.removeSetting(
         id, DEFAULT_SEARCH_STORE_TYPE, ENGINE_ADDED_SETTING_NAME);
-      await searchInitialized();
+      await searchInitialized;
       let engine = Services.search.getEngineByName(item.value);
       try {
         Services.search.removeEngine(engine);
@@ -211,7 +190,7 @@ this.chrome_settings_overrides = class extends ExtensionAPI {
       });
     }
     if (manifest.chrome_settings_overrides.search_provider) {
-      await searchInitialized();
+      await searchInitialized;
       extension.callOnClose({
         close: () => {
           if (extension.shutdownReason == "ADDON_DISABLE") {
@@ -233,12 +212,12 @@ this.chrome_settings_overrides = class extends ExtensionAPI {
           return;
         }
       }
-      await this.addSearchEngine(searchProvider);
+      await this.addSearchEngine();
       if (searchProvider.is_default) {
         if (extension.startupReason === "ADDON_INSTALL") {
           // Don't ask if it already the current engine
           let engine = Services.search.getEngineByName(engineName);
-          if (Services.search.currentEngine != engine) {
+          if (Services.search.defaultEngine != engine) {
             let allow = await new Promise(resolve => {
               let subject = {
                 wrappedJSObject: {
@@ -248,7 +227,7 @@ this.chrome_settings_overrides = class extends ExtensionAPI {
                   browser: windowTracker.topWindow.gBrowser.selectedBrowser,
                   name: this.extension.name,
                   icon: this.extension.iconURL,
-                  currentEngine: Services.search.currentEngine.name,
+                  currentEngine: Services.search.defaultEngine.name,
                   newEngine: engineName,
                   resolve,
                 },
@@ -277,15 +256,15 @@ this.chrome_settings_overrides = class extends ExtensionAPI {
     if (extension.startupReason === "ADDON_INSTALL") {
       let item = await ExtensionSettingsStore.addSetting(
         extension.id, DEFAULT_SEARCH_STORE_TYPE, DEFAULT_SEARCH_SETTING_NAME, engineName, () => {
-          return Services.search.currentEngine.name;
+          return Services.search.defaultEngine.name;
         });
-      Services.search.currentEngine = Services.search.getEngineByName(item.value);
+      Services.search.defaultEngine = Services.search.getEngineByName(item.value);
     } else if (extension.startupReason === "ADDON_ENABLE") {
       chrome_settings_overrides.processDefaultSearchSetting("enable", extension.id);
     }
   }
 
-  async addSearchEngine(searchProvider) {
+  async addSearchEngine() {
     let {extension} = this;
     let isCurrent = false;
     let index = -1;
@@ -293,29 +272,24 @@ this.chrome_settings_overrides = class extends ExtensionAPI {
       let engines = Services.search.getEnginesByExtensionID(extension.id);
       if (engines.length > 0) {
         // There can be only one engine right now
-        isCurrent = Services.search.currentEngine == engines[0];
+        isCurrent = Services.search.defaultEngine == engines[0];
         // Get position of engine and store it
         index = Services.search.getEngines().indexOf(engines[0]);
         Services.search.removeEngine(engines[0]);
       }
     }
     try {
-      let params = {
-        template: searchProvider.search_url,
-        iconURL: searchProvider.favicon_url,
-        alias: searchProvider.keyword,
-        extensionID: extension.id,
-        suggestURL: searchProvider.suggest_url,
-        queryCharset: "UTF-8",
-      };
-      Services.search.addEngineWithDetails(searchProvider.name.trim(), params);
+      Services.search.addEnginesFromExtension(extension);
+      // Bug 1488516.  Preparing to support multiple engines per extension so
+      // multiple locales can be loaded.
+      let engines = Services.search.getEnginesByExtensionID(extension.id);
       await ExtensionSettingsStore.addSetting(
         extension.id, DEFAULT_SEARCH_STORE_TYPE, ENGINE_ADDED_SETTING_NAME,
-        searchProvider.name.trim());
+        engines[0].name);
       if (extension.startupReason === "ADDON_UPGRADE") {
-        let engine = Services.search.getEngineByName(searchProvider.name.trim());
+        let engine = Services.search.getEngineByName(engines[0].name);
         if (isCurrent) {
-          Services.search.currentEngine = engine;
+          Services.search.defaultEngine = engine;
         }
         if (index != -1) {
           Services.search.moveEngine(engine, index);

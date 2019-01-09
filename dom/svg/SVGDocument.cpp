@@ -17,7 +17,7 @@
 #include "nsString.h"
 #include "nsLiteralString.h"
 #include "mozilla/dom/Element.h"
-#include "nsSVGElement.h"
+#include "SVGElement.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/StyleSheetInlines.h"
 
@@ -30,29 +30,25 @@ namespace dom {
 //----------------------------------------------------------------------
 // Implementation
 
-nsresult
-SVGDocument::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
-                   bool aPreallocateChildren) const
-{
+nsresult SVGDocument::Clone(dom::NodeInfo* aNodeInfo, nsINode** aResult) const {
   NS_ASSERTION(aNodeInfo->NodeInfoManager() == mNodeInfoManager,
                "Can't import this document into another document!");
 
   RefPtr<SVGDocument> clone = new SVGDocument();
-  nsresult rv = CloneDocHelper(clone.get(), aPreallocateChildren);
+  nsresult rv = CloneDocHelper(clone.get());
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return CallQueryInterface(clone.get(), aResult);
+  clone.forget(aResult);
+  return NS_OK;
 }
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla
 
 ////////////////////////////////////////////////////////////////////////
 // Exported creation functions
 
-nsresult
-NS_NewSVGDocument(nsIDocument** aInstancePtrResult)
-{
+nsresult NS_NewSVGDocument(Document** aInstancePtrResult) {
   RefPtr<SVGDocument> doc = new SVGDocument();
 
   nsresult rv = doc->Init();

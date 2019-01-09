@@ -28,7 +28,7 @@ function expectCommandUpdate(count, testWindow = window) {
           testWindow.gBrowser.selectedBrowser.controllers.removeControllerAt(0, overrideController);
           resolve(true);
         }
-      }
+      },
     };
 
     if (!count) {
@@ -91,7 +91,7 @@ add_task(async function test_panelui_opened() {
 add_task(async function test_panelui_customize_to_toolbar() {
   await startCustomizing();
   let navbar = document.getElementById("nav-bar");
-  simulateItemDrag(document.getElementById("edit-controls"), navbar.customizationTarget, "end");
+  simulateItemDrag(document.getElementById("edit-controls"), CustomizableUI.getCustomizationTarget(navbar), "end");
   await endCustomizing();
 
   // updateEditUIVisibility should be called when customization ends but isn't. See bug 1359790.
@@ -201,6 +201,11 @@ add_task(async function finish() {
 add_task(async function test_initial_state() {
   let testWindow = await BrowserTestUtils.openNewBrowserWindow();
   await SimpleTest.promiseFocus(testWindow);
+
+  // For focusing the URL bar to have an effect, we need to ensure the URL bar isn't
+  // initially focused:
+  testWindow.gBrowser.selectedTab.focus();
+  await TestUtils.waitForCondition(() => !testWindow.gURLBar.focused);
 
   let overridePromise = expectCommandUpdate(isMac, testWindow);
 

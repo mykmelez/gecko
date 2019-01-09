@@ -21,6 +21,7 @@ import org.json.JSONObject;
 
 import android.os.Bundle;
 import android.os.Handler;
+import android.support.annotation.AnyThread;
 import android.util.Log;
 
 import java.util.ArrayList;
@@ -76,7 +77,7 @@ public final class EventDispatcher extends JNIObject {
         return mNativeQueue.isReady();
     }
 
-    @WrapForJNI(dispatchTo = "gecko") @Override // JNIObject
+    @WrapForJNI @Override // JNIObject
     protected native void disposeNative();
 
     @WrapForJNI private static final int DETACHED = 0;
@@ -86,13 +87,25 @@ public final class EventDispatcher extends JNIObject {
     @WrapForJNI(calledFrom = "gecko")
     private synchronized void setAttachedToGecko(final int state) {
         if (mAttachedToGecko && state == DETACHED) {
-            if (GeckoThread.isRunning()) {
-                disposeNative();
-            } else {
-                GeckoThread.queueNativeCall(this, "disposeNative");
-            }
+            dispose(false);
         }
         mAttachedToGecko = (state == ATTACHED);
+    }
+
+    private void dispose(boolean force) {
+        final Handler geckoHandler = ThreadUtils.sGeckoHandler;
+        if (geckoHandler == null) {
+            return;
+        }
+
+        geckoHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (force || !mAttachedToGecko) {
+                    disposeNative();
+                }
+            }
+        });
     }
 
     private <T> void registerListener(final Class<?> listType,
@@ -234,6 +247,7 @@ public final class EventDispatcher extends JNIObject {
      * @param message Bundle message
      * @param callback Optional object for callbacks from events.
      */
+    @AnyThread
     public void dispatch(final String type, final GeckoBundle message,
                          final EventCallback callback) {
         final boolean isGeckoReady;
@@ -313,6 +327,21 @@ public final class EventDispatcher extends JNIObject {
         return false;
     }
 
+    @WrapForJNI
+    public boolean hasListener(final String event) {
+        for (final Map<String, ?> listenersMap : Arrays.asList(mGeckoThreadListeners,
+                mUiThreadListeners,
+                mBackgroundThreadListeners)) {
+            synchronized (listenersMap) {
+                if (listenersMap.get(event) != null) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private boolean dispatchToThread(final String type,
                                      final GeckoBundle message,
                                      final EventCallback callback,
@@ -347,6 +376,11 @@ public final class EventDispatcher extends JNIObject {
             }
             return true;
         }
+    }
+
+    @Override
+    protected void finalize() throws Throwable {
+        dispose(true);
     }
 
     private static class NativeCallbackDelegate extends JNIObject implements EventCallback {

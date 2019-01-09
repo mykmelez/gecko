@@ -15,6 +15,8 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=1223372
 ChromeUtils.import("resource://testing-common/TestUtils.jsm");
 
 function go() {
+    SpecialPowers.pushPrefEnv({"set": [["security.allow_eval_with_system_principal",
+                                        true]]});
     SimpleTest.waitForExplicitFinish();
 
     var frame = $('subframe');
@@ -41,9 +43,7 @@ function go() {
             return;
         }
 
-        let winID = w.QueryInterface(Ci.nsIInterfaceRequestor)
-                     .getInterface(Ci.nsIDOMWindowUtils)
-                     .outerWindowID;
+        let winID = w.windowUtils.outerWindowID;
         // Remove the frame. This will nuke the WindowProxy wrapper from our chrome
         // document's global, so evaluating 'this' in it will return a dead wrapper
         // once the window is destroyed.

@@ -9,6 +9,12 @@ var {
   ExtensionError,
 } = ExtensionUtils;
 
+const SAME_SITE_STATUSES = [
+  "no_restriction", // Index 0 = Ci.nsICookie2.SAMESITE_UNSET
+  "lax",            // Index 1 = Ci.nsICookie2.SAMESITE_LAX
+  "strict",         // Index 2 = Ci.nsICookie2.SAMESITE_STRICT
+];
+
 const convertCookie = ({cookie, isPrivate}) => {
   let result = {
     name: cookie.name,
@@ -18,6 +24,7 @@ const convertCookie = ({cookie, isPrivate}) => {
     path: cookie.path,
     secure: cookie.isSecure,
     httpOnly: cookie.isHttpOnly,
+    sameSite: SAME_SITE_STATUSES[cookie.sameSite],
     session: cookie.isSession,
     firstPartyDomain: cookie.originAttributes.firstPartyDomain || "",
   };
@@ -131,9 +138,13 @@ const checkSetCookiePermissions = (extension, uri, cookie) => {
   return true;
 };
 
+/**
+ * Query the cookie store for matching cookies.
+ * @param {Object} detailsIn
+ * @param {Array} props          Properties the extension is interested in matching against.
+ * @param {BaseContext} context  The context making the query.
+ */
 const query = function* (detailsIn, props, context) {
-  // Different callers want to filter on different properties. |props|
-  // tells us which ones they're interested in.
   let details = {};
   props.forEach(property => {
     if (detailsIn[property] !== null) {
@@ -170,6 +181,9 @@ const query = function* (detailsIn, props, context) {
     storeId = PRIVATE_STORE;
   } else if ("storeId" in details) {
     storeId = details.storeId;
+  }
+  if (storeId == PRIVATE_STORE && !context.privateBrowsingAllowed) {
+    throw new ExtensionError("Extension disallowed access to the private cookies storeId.");
   }
 
   // We can use getCookiesFromHost for faster searching.
@@ -271,7 +285,7 @@ const query = function* (detailsIn, props, context) {
     return true;
   }
 
-  for (const cookie of XPCOMUtils.IterSimpleEnumerator(enumerator, Ci.nsICookie2)) {
+  for (const cookie of enumerator) {
     if (matches(cookie)) {
       yield {cookie, isPrivate, storeId};
     }
@@ -353,6 +367,9 @@ this.cookies = class extends ExtensionAPI {
           if (isDefaultCookieStoreId(details.storeId)) {
             isPrivate = false;
           } else if (isPrivateCookieStoreId(details.storeId)) {
+            if (!context.privateBrowsingAllowed) {
+              return Promise.reject({message: "Extension disallowed access to the private cookies storeId."});
+            }
             isPrivate = true;
           } else if (isContainerCookieStoreId(details.storeId)) {
             let containerId = getContainerForCookieStoreId(details.storeId);
@@ -376,10 +393,13 @@ this.cookies = class extends ExtensionAPI {
             firstPartyDomain: details.firstPartyDomain,
           };
 
+          let sameSite = SAME_SITE_STATUSES.indexOf(details.sameSite);
+
           // The permission check may have modified the domain, so use
           // the new value instead.
           Services.cookies.add(cookieAttrs.host, path, name, value,
-                               secure, httpOnly, isSession, expiry, originAttributes);
+                               secure, httpOnly, isSession, expiry,
+                               originAttributes, sameSite);
 
           return self.cookies.get(details);
         },
@@ -389,6 +409,10 @@ this.cookies = class extends ExtensionAPI {
 
           let allowed = ["url", "name", "storeId", "firstPartyDomain"];
           for (let {cookie, storeId} of query(details, allowed, context)) {
+            if (isPrivateCookieStoreId(details.storeId) &&
+                !context.privateBrowsingAllowed) {
+              return Promise.reject({message: "Unknown storeId"});
+            }
             Services.cookies.remove(cookie.host, cookie.name, cookie.path, false, cookie.originAttributes);
 
             // TODO Bug 1387957: could there be multiple per subdomain?
@@ -459,10 +483,14 @@ this.cookies = class extends ExtensionAPI {
             };
 
             Services.obs.addObserver(observer, "cookie-changed");
-            Services.obs.addObserver(observer, "private-cookie-changed");
+            if (context.privateBrowsingAllowed) {
+              Services.obs.addObserver(observer, "private-cookie-changed");
+            }
             return () => {
               Services.obs.removeObserver(observer, "cookie-changed");
-              Services.obs.removeObserver(observer, "private-cookie-changed");
+              if (context.privateBrowsingAllowed) {
+                Services.obs.removeObserver(observer, "private-cookie-changed");
+              }
             };
           },
         }).api(),

@@ -11,14 +11,11 @@ import re
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.task import task_description_schema
-from taskgraph.util.schema import optionally_keyed_by, resolve_keyed_by, Schema, validate_schema
+from taskgraph.util.schema import optionally_keyed_by, resolve_keyed_by, Schema
 from taskgraph.util.scriptworker import get_push_apk_scope
 from taskgraph.util.taskcluster import get_artifact_prefix
 
 from voluptuous import Optional, Required
-
-
-transforms = TransformSequence()
 
 # Voluptuous uses marker objects as dictionary *keys*, but they are not
 # comparable, so we cast all of the keys back to regular strings
@@ -34,7 +31,7 @@ push_apk_description_schema = Schema({
     Required('attributes'): task_description_schema['attributes'],
     Required('treeherder'): task_description_schema['treeherder'],
     Required('run-on-projects'): task_description_schema['run-on-projects'],
-    Required('worker-type'): optionally_keyed_by('project', basestring),
+    Required('worker-type'): optionally_keyed_by('release-level', basestring),
     Required('worker'): object,
     Required('scopes'): None,
     Required('requires'): task_description_schema['requires'],
@@ -51,16 +48,8 @@ REQUIRED_ARCHITECTURES = {
 }
 PLATFORM_REGEX = re.compile(r'build-signing-android-(\S+)-nightly')
 
-
-@transforms.add
-def validate_jobs_schema_transform_partial(config, jobs):
-    for job in jobs:
-        label = job.get('label', '?no-label?')
-        validate_schema(
-            push_apk_description_schema, job,
-            "In PushApk ({!r} kind) task for {!r}:".format(config.kind, label)
-        )
-        yield job
+transforms = TransformSequence()
+transforms.add_validate(push_apk_description_schema)
 
 
 @transforms.add
@@ -90,30 +79,25 @@ def make_task_description(config, jobs):
             job, job['dependencies']
         )
 
-        # Use the rc-google-play-track and rc-rollout-percentage in RC relpro flavors
-        if config.params['release_type'] == 'rc':
-            job['worker']['google-play-track'] = job['worker']['rc-google-play-track']
-            job['worker']['rollout-percentage'] = job['worker']['rc-rollout-percentage']
-
         resolve_keyed_by(
             job, 'worker.google-play-track', item_name=job['name'],
-            project=config.params['project']
+            **{'release-type': config.params['release_type']}
         )
         resolve_keyed_by(
             job, 'worker.commit', item_name=job['name'],
-            project=config.params['project']
+            **{'release-level': config.params.release_level()}
         )
 
         resolve_keyed_by(
             job, 'worker.rollout-percentage', item_name=job['name'],
-            project=config.params['project']
+            **{'release-type': config.params['release_type']}
         )
 
         job['scopes'] = [get_push_apk_scope(config)]
 
         resolve_keyed_by(
             job, 'worker-type', item_name=job['name'],
-            project=config.params['project']
+            **{'release-level': config.params.release_level()}
         )
 
         yield job
@@ -138,7 +122,7 @@ def generate_upstream_artifacts(job, dependencies):
         'taskType': 'signing',
         'paths': ['{}/target.apk'.format(artifact_prefix)],
     } for task_kind in dependencies.keys()
-      if task_kind not in ('google-play-strings', 'beetmover-checksums')
+      if 'google-play-strings' not in task_kind
     ]
 
     google_play_strings = [{
@@ -158,8 +142,4 @@ def delete_non_required_fields(_, jobs):
     for job in jobs:
         del job['name']
         del job['dependent-tasks']
-
-        del(job['worker']['rc-google-play-track'])
-        del(job['worker']['rc-rollout-percentage'])
-
         yield job

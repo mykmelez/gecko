@@ -14,19 +14,8 @@ function promiseNotification(aBrowser, value, expected, input) {
     let notificationBox = aBrowser.getNotificationBox(aBrowser.selectedBrowser);
     if (expected) {
       info("Waiting for " + value + " notification");
-      let checkForNotification = function() {
-        if (notificationBox.getNotificationWithValue(value)) {
-          info("Saw the notification");
-          notificationObserver.disconnect();
-          notificationObserver = null;
-          resolve();
-        }
-      };
-      if (notificationObserver) {
-        notificationObserver.disconnect();
-      }
-      notificationObserver = new MutationObserver(checkForNotification);
-      notificationObserver.observe(notificationBox, {childList: true});
+      resolve(BrowserTestUtils.waitForNotificationInNotificationBox(
+        notificationBox, value));
     } else {
       setTimeout(() => {
         is(notificationBox.getNotificationWithValue(value), null,
@@ -54,7 +43,7 @@ async function runURLBarSearchTest({valueToOpen, expectSearch, expectNotificatio
 
   await Promise.all([
     docLoadPromise,
-    promiseNotification(aWindow.gBrowser, "keyword-uri-fixup", expectNotification, valueToOpen)
+    promiseNotification(aWindow.gBrowser, "keyword-uri-fixup", expectNotification, valueToOpen),
   ]);
 }
 
@@ -97,7 +86,7 @@ add_task(async function test_navigate_large_number() {
   await runURLBarSearchTest({
     valueToOpen: "123456789012345",
     expectSearch: true,
-    expectNotification: false
+    expectNotification: false,
   });
   gBrowser.removeTab(tab);
 });
@@ -108,7 +97,7 @@ add_task(async function test_navigate_small_hex_number() {
   await runURLBarSearchTest({
     valueToOpen: "0x1f00ffff",
     expectSearch: true,
-    expectNotification: false
+    expectNotification: false,
   });
   gBrowser.removeTab(tab);
 });
@@ -119,7 +108,7 @@ add_task(async function test_navigate_large_hex_number() {
   await runURLBarSearchTest({
     valueToOpen: "0x7f0000017f000001",
     expectSearch: true,
-    expectNotification: false
+    expectNotification: false,
   });
   gBrowser.removeTab(tab);
 });
@@ -152,7 +141,7 @@ function get_test_function_for_localhost_with_hostname(hostName, isPrivate) {
     let notificationBox = browser.getNotificationBox(tab.linkedBrowser);
     let notification = notificationBox.getNotificationWithValue("keyword-uri-fixup");
     let docLoadPromise = waitForDocLoadAndStopIt("http://" + hostName + "/", tab.linkedBrowser);
-    notification.querySelector(".notification-button-default").click();
+    notification.querySelector("button").click();
 
     // check pref value
     let prefValue = Services.prefs.getBoolPref(pref);
@@ -162,7 +151,7 @@ function get_test_function_for_localhost_with_hostname(hostName, isPrivate) {
     browser.removeTab(tab);
 
     // Now try again with the pref set.
-    tab = browser.selectedTab = browser.addTab("about:blank");
+    tab = browser.selectedTab = BrowserTestUtils.addTab(browser, "about:blank");
     await BrowserTestUtils.browserLoaded(tab.linkedBrowser);
     // In a private window, the notification should appear again.
     await runURLBarSearchTest({

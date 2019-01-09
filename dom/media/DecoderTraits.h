@@ -7,7 +7,9 @@
 #ifndef DecoderTraits_h_
 #define DecoderTraits_h_
 
+#include "mozilla/UniquePtr.h"
 #include "nsStringFwd.h"
+#include "nsTArray.h"
 
 namespace mozilla {
 
@@ -15,18 +17,16 @@ class DecoderDoctorDiagnostics;
 class MediaContainerType;
 struct MediaFormatReaderInit;
 class MediaFormatReader;
+class TrackInfo;
 
-enum CanPlayStatus {
-  CANPLAY_NO,
-  CANPLAY_MAYBE,
-  CANPLAY_YES
-};
+enum CanPlayStatus { CANPLAY_NO, CANPLAY_MAYBE, CANPLAY_YES };
 
 class DecoderTraits {
-public:
+ public:
   // Returns the CanPlayStatus indicating if we can handle this container type.
-  static CanPlayStatus CanHandleContainerType(const MediaContainerType& aContainerType,
-                                              DecoderDoctorDiagnostics* aDiagnostics);
+  static CanPlayStatus CanHandleContainerType(
+      const MediaContainerType& aContainerType,
+      DecoderDoctorDiagnostics* aDiagnostics);
 
   // Returns true if we should handle this MIME type when it appears
   // as an <object> or as a toplevel page. If, in practice, our support
@@ -57,9 +57,12 @@ public:
   static bool IsMatroskaType(const MediaContainerType& aType);
 
   static bool IsSupportedType(const MediaContainerType& aType);
+
+  // Returns an array of all TrackInfo objects described by this type.
+  static nsTArray<UniquePtr<TrackInfo>> GetTracksInfo(
+      const MediaContainerType& aType);
 };
 
-} // namespace mozilla
+}  // namespace mozilla
 
 #endif
-

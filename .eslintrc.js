@@ -40,14 +40,17 @@ module.exports = {
       "mozilla/browser-window": true
     }
   }, {
-    // XXX Bug 1452706. These directories are still being fixed, so turn off
-    //  mozilla/require-expected-throws-or-rejects for now.
-    "files": [
-      "services/fxaccounts/**",
-      "toolkit/components/**",
-    ],
+    // TODO: Bug 1513639. Temporarily turn off reject-importGlobalProperties
+    // due to other ESLint enabling happening in DOM.
+    "files": "dom/**",
     "rules": {
-      "mozilla/rejects-requires-await": "off",
+      "mozilla/reject-importGlobalProperties": "off",
+    }
+  }, {
+    // TODO: Bug 1515949. Enable no-undef for gfx/
+    "files": "gfx/layers/apz/test/mochitest/**",
+    "rules": {
+      "no-undef": "off",
     }
   }]
 };

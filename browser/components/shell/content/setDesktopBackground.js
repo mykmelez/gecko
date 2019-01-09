@@ -74,7 +74,7 @@ var gSetBackground = {
 
   setDesktopBackground() {
     if (AppConstants.platform != "macosx") {
-      document.persist("menuPosition", "value");
+      Services.xulStore.persist(document.getElementById("menuPosition"), "value");
       this._shell.desktopBackgroundColor = this._hexStringToLong(this._backgroundColor);
     } else {
       Services.obs.addObserver(this, "shell:desktop-background-changed");
@@ -149,7 +149,7 @@ var gSetBackground = {
         break;
       }
     }
-  }
+  },
 };
 
 if (AppConstants.platform != "macosx") {
@@ -165,7 +165,7 @@ if (AppConstants.platform != "macosx") {
     this.updateColor(this._rgbToHex(r, g, b));
 
     var colorpicker = document.getElementById("desktopColor");
-    colorpicker.color = this._backgroundColor;
+    colorpicker.value = this._backgroundColor;
   };
 
   gSetBackground.updateColor = function(aColor) {

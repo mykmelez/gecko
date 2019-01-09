@@ -9,6 +9,7 @@ import logging
 import os
 import sys
 import tempfile
+from multiprocessing import cpu_count
 
 from concurrent.futures import (
     ThreadPoolExecutor,
@@ -39,8 +40,11 @@ class MachCommands(MachCommandBase):
              description='Run Python.')
     @CommandArgument('--no-virtualenv', action='store_true',
                      help='Do not set up a virtualenv')
+    @CommandArgument('--exec-file',
+                     default=None,
+                     help='Execute this Python file using `execfile`')
     @CommandArgument('args', nargs=argparse.REMAINDER)
-    def python(self, no_virtualenv, args):
+    def python(self, no_virtualenv, exec_file, args):
         # Avoid logging the command
         self.log_manager.terminal_handler.setLevel(logging.CRITICAL)
 
@@ -56,6 +60,10 @@ class MachCommands(MachCommandBase):
             self._activate_virtualenv()
             python_path = self.virtualenv_manager.python_path
 
+        if exec_file:
+            execfile(exec_file)
+            return 0
+
         return self.run_process([python_path] + args,
                                 pass_thru=True,  # Allow user to run Python interactively.
                                 ensure_exit_code=False,  # Don't throw on non-zero exit code.
@@ -68,13 +76,15 @@ class MachCommands(MachCommandBase):
                      action='store_true',
                      help='Verbose output.')
     @CommandArgument('--python',
+                     default='2.7',
                      help='Version of Python for Pipenv to use. When given a '
                           'Python version, Pipenv will automatically scan your '
                           'system for a Python that matches that given version.')
     @CommandArgument('-j', '--jobs',
-                     default=1,
+                     default=None,
                      type=int,
-                     help='Number of concurrent jobs to run. Default is 1.')
+                     help='Number of concurrent jobs to run. Default is the number of CPUs '
+                          'in the system.')
     @CommandArgument('--subsuite',
                      default=None,
                      help=('Python subsuite to run. If not specified, all subsuites are run. '
@@ -96,11 +106,10 @@ class MachCommands(MachCommandBase):
                          test_objects=None,
                          subsuite=None,
                          verbose=False,
-                         jobs=1,
+                         jobs=None,
                          python=None,
                          **kwargs):
-        python = python or self.virtualenv_manager.python_path
-        self.activate_pipenv(pipfile=None, args=['--python', python], populate=True)
+        self.activate_pipenv(pipfile=None, populate=True, python=python)
 
         if test_objects is None:
             from moztest.resolve import TestResolver
@@ -143,7 +152,7 @@ class MachCommands(MachCommandBase):
             else:
                 parallel.append(test)
 
-        self.jobs = jobs
+        self.jobs = jobs or cpu_count()
         self.terminate = False
         self.verbose = verbose
 

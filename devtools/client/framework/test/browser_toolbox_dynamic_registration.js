@@ -8,8 +8,8 @@ const TEST_URL = "data:text/html,test for dynamically registering and unregister
 var toolbox;
 
 function test() {
-  addTab(TEST_URL).then(tab => {
-    const target = TargetFactory.forTab(tab);
+  addTab(TEST_URL).then(async tab => {
+    const target = await TargetFactory.forTab(tab);
     gDevTools.showToolbox(target).then(testRegister);
   });
 }
@@ -19,7 +19,7 @@ function testRegister(aToolbox) {
   gDevTools.once("tool-registered", toolRegistered);
 
   gDevTools.registerTool({
-    id: "test-tool",
+    id: "testTool",
     label: "Test Tool",
     inMenu: true,
     isTargetSupported: () => true,
@@ -28,7 +28,7 @@ function testRegister(aToolbox) {
 }
 
 function toolRegistered(toolId) {
-  is(toolId, "test-tool", "tool-registered event handler sent tool id");
+  is(toolId, "testTool", "tool-registered event handler sent tool id");
 
   ok(gDevTools.getToolDefinitionMap().has(toolId), "tool added to map");
 
@@ -50,22 +50,17 @@ function toolRegistered(toolId) {
 }
 
 function getAllBrowserWindows() {
-  const wins = [];
-  const enumerator = Services.wm.getEnumerator("navigator:browser");
-  while (enumerator.hasMoreElements()) {
-    wins.push(enumerator.getNext());
-  }
-  return wins;
+  return Array.from(Services.wm.getEnumerator("navigator:browser"));
 }
 
 function testUnregister() {
   gDevTools.once("tool-unregistered", toolUnregistered);
 
-  gDevTools.unregisterTool("test-tool");
+  gDevTools.unregisterTool("testTool");
 }
 
 function toolUnregistered(toolId) {
-  is(toolId, "test-tool", "tool-unregistered event handler sent tool id");
+  is(toolId, "testTool", "tool-unregistered event handler sent tool id");
 
   ok(!gDevTools.getToolDefinitionMap().has(toolId), "tool removed from map");
 

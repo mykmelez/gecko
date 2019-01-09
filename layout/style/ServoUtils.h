@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* some utilities for stylo */
+/* some utilities for Gecko to use for Servo initialization and assertions */
 
 #ifndef mozilla_ServoUtils_h
 #define mozilla_ServoUtils_h
@@ -15,13 +15,14 @@
 
 namespace mozilla {
 
-// Defined in ServoBindings.cpp.
+// Defined in GeckoBindings.cpp.
+void InitializeServo();
+void ShutdownServo();
 void AssertIsMainThreadOrServoFontMetricsLocked();
 
 class ServoStyleSet;
 extern ServoStyleSet* sInServoTraversal;
-inline bool IsInServoTraversal()
-{
+inline bool IsInServoTraversal() {
   // The callers of this function are generally main-thread-only _except_
   // for potentially running during the Servo traversal, in which case they may
   // take special paths that avoid writing to caches and the like. In order
@@ -33,6 +34,6 @@ inline bool IsInServoTraversal()
   MOZ_ASSERT(sInServoTraversal || NS_IsMainThread());
   return sInServoTraversal;
 }
-} // namespace mozilla
+}  // namespace mozilla
 
-#endif // mozilla_ServoUtils_h
+#endif  // mozilla_ServoUtils_h

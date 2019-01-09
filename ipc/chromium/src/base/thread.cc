@@ -10,8 +10,11 @@
 #include "base/thread_local.h"
 #include "base/waitable_event.h"
 #include "GeckoProfiler.h"
+#include "mozilla/EventQueue.h"
 #include "mozilla/IOInterposer.h"
+#include "mozilla/ThreadEventQueue.h"
 #include "nsThreadUtils.h"
+#include "nsThreadManager.h"
 
 #ifdef MOZ_TASK_TRACER
 #include "GeckoTaskTracer.h"
@@ -40,11 +43,10 @@ struct Thread::StartupData {
   WaitableEvent event;
 
   explicit StartupData(const Options& opt)
-      : options(opt),
-        event(false, false) {}
+      : options(opt), event(false, false) {}
 };
 
-Thread::Thread(const char *name)
+Thread::Thread(const char* name)
     : startup_data_(NULL),
       thread_(0),
       message_loop_(NULL),
@@ -72,9 +74,7 @@ static base::ThreadLocalBoolean& get_tls_bool() {
 
 }  // namespace
 
-void Thread::SetThreadWasQuitProperly(bool flag) {
-  get_tls_bool().Set(flag);
-}
+void Thread::SetThreadWasQuitProperly(bool flag) { get_tls_bool().Set(flag); }
 
 bool Thread::GetThreadWasQuitProperly() {
   bool quit_properly = true;
@@ -84,9 +84,7 @@ bool Thread::GetThreadWasQuitProperly() {
   return quit_properly;
 }
 
-bool Thread::Start() {
-  return StartWithOptions(Options());
-}
+bool Thread::Start() { return StartWithOptions(Options()); }
 
 bool Thread::StartWithOptions(const Options& options) {
   DCHECK(!message_loop_);
@@ -110,8 +108,7 @@ bool Thread::StartWithOptions(const Options& options) {
 }
 
 void Thread::Stop() {
-  if (!thread_was_started())
-    return;
+  if (!thread_was_started()) return;
 
   // We should only be called on the same thread that started us.
   DCHECK_NE(thread_id_, PlatformThread::CurrentId());
@@ -138,8 +135,7 @@ void Thread::Stop() {
 }
 
 void Thread::StopSoon() {
-  if (!message_loop_)
-    return;
+  if (!message_loop_) return;
 
   // We should only be called on the same thread that started us.
   DCHECK_NE(thread_id_, PlatformThread::CurrentId());
@@ -154,12 +150,27 @@ void Thread::StopSoon() {
 }
 
 void Thread::ThreadMain() {
+  nsCOMPtr<nsIThread> xpcomThread;
+  auto loopType = startup_data_->options.message_loop_type;
+  if (loopType == MessageLoop::TYPE_MOZILLA_NONMAINTHREAD ||
+      loopType == MessageLoop::TYPE_MOZILLA_NONMAINUITHREAD) {
+    auto queue =
+        mozilla::MakeRefPtr<mozilla::ThreadEventQueue<mozilla::EventQueue>>(
+            mozilla::MakeUnique<mozilla::EventQueue>());
+    xpcomThread = nsThreadManager::get().CreateCurrentThread(
+        queue, nsThread::NOT_MAIN_THREAD);
+  } else {
+    xpcomThread = NS_GetCurrentThread();
+  }
+
   AUTO_PROFILER_REGISTER_THREAD(name_.c_str());
   mozilla::IOInterposer::RegisterCurrentThread();
 
   // The message loop for this thread.
   MessageLoop message_loop(startup_data_->options.message_loop_type,
-                           NS_GetCurrentThread());
+                           xpcomThread);
+
+  xpcomThread = nullptr;
 
   // Complete the initialization of our Thread object.
   thread_id_ = PlatformThread::CurrentId();

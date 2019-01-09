@@ -12,7 +12,7 @@ const { UiState } = require("devtools/client/webconsole/reducers/ui");
 const {
   applyMiddleware,
   compose,
-  createStore
+  createStore,
 } = require("devtools/client/shared/vendor/redux");
 
 // Prefs
@@ -23,6 +23,7 @@ const { getPrefsService } = require("devtools/client/webconsole/utils/prefs");
 const { reducers } = require("./reducers/index");
 
 // Middleware
+const eventTelemetry = require("./middleware/event-telemetry");
 const historyPersistence = require("./middleware/history-persistence");
 const thunk = require("./middleware/thunk");
 
@@ -71,13 +72,25 @@ function configureStore(hud, options = {}) {
       filterBarVisible: getBoolPref(PREFS.UI.FILTER_BAR),
       networkMessageActiveTabId: "headers",
       persistLogs: getBoolPref(PREFS.UI.PERSIST),
-    })
+    }),
   };
 
   // Prepare middleware.
+  const services = (options.services || {});
+
   const middleware = applyMiddleware(
-    thunk.bind(null, {prefsService}),
+    thunk.bind(null, {
+      prefsService,
+      services,
+      // Needed for the ObjectInspector
+      client: {
+        createObjectClient: services.createObjectClient,
+        createLongStringClient: services.createLongStringClient,
+        releaseActor: services.releaseActor,
+      },
+    }),
     historyPersistence,
+    eventTelemetry.bind(null, options.telemetry, options.sessionId),
   );
 
   return createStore(

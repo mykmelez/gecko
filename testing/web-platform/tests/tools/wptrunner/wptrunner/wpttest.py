@@ -67,7 +67,11 @@ def get_run_info(metadata_root, product, **kwargs):
 
 
 class RunInfo(dict):
-    def __init__(self, metadata_root, product, debug, browser_version=None, extras=None):
+    def __init__(self, metadata_root, product, debug,
+                 browser_version=None,
+                 browser_channel=None,
+                 verify=None,
+                 extras=None):
         import mozinfo
         self._update_mozinfo(metadata_root)
         self.update(mozinfo.info)
@@ -89,6 +93,12 @@ class RunInfo(dict):
             self["debug"] = False
         if browser_version:
             self["browser_version"] = browser_version
+        if browser_channel:
+            self["browser_channel"] = browser_channel
+
+        self["verify"] = verify
+        if "wasm" not in self:
+            self["wasm"] = False
         if extras is not None:
             self.update(extras)
 
@@ -136,7 +146,7 @@ class Test(object):
         return metadata
 
     @classmethod
-    def from_manifest(cls, manifest_item, inherit_metadata, test_metadata):
+    def from_manifest(cls, manifest_file, manifest_item, inherit_metadata, test_metadata):
         timeout = cls.long_timeout if manifest_item.timeout == "long" else cls.default_timeout
         protocol = "https" if hasattr(manifest_item, "https") and manifest_item.https else "http"
         return cls(manifest_item.source_file.tests_root,
@@ -215,6 +225,44 @@ class Test(object):
         return 0
 
     @property
+    def lsan_allowed(self):
+        lsan_allowed = set()
+        for meta in self.itermeta():
+            lsan_allowed |= meta.lsan_allowed
+            if atom_reset in lsan_allowed:
+                lsan_allowed.remove(atom_reset)
+                break
+        return lsan_allowed
+
+    @property
+    def lsan_max_stack_depth(self):
+        for meta in self.itermeta(None):
+            depth = meta.lsan_max_stack_depth
+            if depth is not None:
+                return depth
+        return None
+
+    @property
+    def mozleak_allowed(self):
+        mozleak_allowed = set()
+        for meta in self.itermeta():
+            mozleak_allowed |= meta.leak_allowed
+            if atom_reset in mozleak_allowed:
+                mozleak_allowed.remove(atom_reset)
+                break
+        return mozleak_allowed
+
+    @property
+    def mozleak_threshold(self):
+        rv = {}
+        for meta in self.itermeta(None):
+            threshold = meta.leak_threshold
+            for key, value in threshold.iteritems():
+                if key not in rv:
+                    rv[key] = value
+        return rv
+
+    @property
     def tags(self):
         tags = set()
         for meta in self.itermeta():
@@ -265,19 +313,22 @@ class TestharnessTest(Test):
 
     def __init__(self, tests_root, url, inherit_metadata, test_metadata,
                  timeout=None, path=None, protocol="http", testdriver=False,
-                 jsshell=False):
+                 jsshell=False, scripts=None):
         Test.__init__(self, tests_root, url, inherit_metadata, test_metadata, timeout,
                       path, protocol)
 
         self.testdriver = testdriver
         self.jsshell = jsshell
+        self.scripts = scripts or []
 
     @classmethod
-    def from_manifest(cls, manifest_item, inherit_metadata, test_metadata):
+    def from_manifest(cls, manifest_file, manifest_item, inherit_metadata, test_metadata):
         timeout = cls.long_timeout if manifest_item.timeout == "long" else cls.default_timeout
         protocol = "https" if hasattr(manifest_item, "https") and manifest_item.https else "http"
         testdriver = manifest_item.testdriver if hasattr(manifest_item, "testdriver") else False
         jsshell = manifest_item.jsshell if hasattr(manifest_item, "jsshell") else False
+        script_metadata = manifest_item.source_file.script_metadata or []
+        scripts = [v for (k, v) in script_metadata if k == b"script"]
         return cls(manifest_item.source_file.tests_root,
                    manifest_item.url,
                    inherit_metadata,
@@ -286,7 +337,8 @@ class TestharnessTest(Test):
                    path=manifest_item.source_file.path,
                    protocol=protocol,
                    testdriver=testdriver,
-                   jsshell=jsshell)
+                   jsshell=jsshell,
+                   scripts=scripts)
 
     @property
     def id(self):
@@ -320,6 +372,7 @@ class ReftestTest(Test):
 
     @classmethod
     def from_manifest(cls,
+                      manifest_file,
                       manifest_test,
                       inherit_metadata,
                       test_metadata,
@@ -362,9 +415,10 @@ class ReftestTest(Test):
 
             references_seen.add(comparison_key)
 
-            manifest_node = manifest_test.manifest.get_reference(ref_url)
+            manifest_node = manifest_file.get_reference(ref_url)
             if manifest_node:
-                reference = ReftestTest.from_manifest(manifest_node,
+                reference = ReftestTest.from_manifest(manifest_file,
+                                                      manifest_node,
                                                       [],
                                                       None,
                                                       nodes,
@@ -407,7 +461,7 @@ class WdspecTest(Test):
     test_type = "wdspec"
 
     default_timeout = 25
-    long_timeout = 120
+    long_timeout = 180  # 3 minutes
 
 
 manifest_test_cls = {"reftest": ReftestTest,
@@ -416,6 +470,6 @@ manifest_test_cls = {"reftest": ReftestTest,
                      "wdspec": WdspecTest}
 
 
-def from_manifest(manifest_test, inherit_metadata, test_metadata):
+def from_manifest(manifest_file, manifest_test, inherit_metadata, test_metadata):
     test_cls = manifest_test_cls[manifest_test.item_type]
-    return test_cls.from_manifest(manifest_test, inherit_metadata, test_metadata)
+    return test_cls.from_manifest(manifest_file, manifest_test, inherit_metadata, test_metadata)

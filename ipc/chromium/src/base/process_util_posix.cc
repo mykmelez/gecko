@@ -36,13 +36,9 @@ const int kMicrosecondsPerSecond = 1000000;
 
 namespace base {
 
-ProcessId GetCurrentProcId() {
-  return getpid();
-}
+ProcessId GetCurrentProcId() { return getpid(); }
 
-ProcessHandle GetCurrentProcessHandle() {
-  return GetCurrentProcId();
-}
+ProcessHandle GetCurrentProcessHandle() { return GetCurrentProcId(); }
 
 bool OpenProcessHandle(ProcessId pid, ProcessHandle* handle) {
   // On Posix platforms, process handles are the same as PIDs, so we
@@ -62,9 +58,7 @@ void CloseProcessHandle(ProcessHandle process) {
   return;
 }
 
-ProcessId GetProcId(ProcessHandle process) {
-  return process;
-}
+ProcessId GetProcId(ProcessHandle process) { return process; }
 
 // Attempts to kill the process identified by the given process
 // entry structure.  Ignores specified exit_code; posix can't force that.
@@ -99,8 +93,7 @@ bool KillProcess(ProcessHandle process_id, int exit_code, bool wait) {
     }
   }
 
-  if (!result)
-    DLOG(ERROR) << "Unable to terminate process.";
+  if (!result) DLOG(ERROR) << "Unable to terminate process.";
 
   return result;
 }
@@ -120,8 +113,7 @@ class ScopedDIRClose {
 };
 typedef mozilla::UniquePtr<DIR, ScopedDIRClose> ScopedDIR;
 
-
-void CloseSuperfluousFds(std::function<bool(int)>&& should_preserve) {
+void CloseSuperfluousFds(void* aCtx, bool (*aShouldPreserve)(void*, int)) {
   // DANGER: no calls to malloc (or locks, etc.) are allowed from now on:
   // https://crbug.com/36678
   // Also, beware of STL iterators: https://crbug.com/331459
@@ -152,8 +144,7 @@ void CloseSuperfluousFds(std::function<bool(int)>&& should_preserve) {
     max_fds = nofile.rlim_cur;
   }
 
-  if (max_fds > INT_MAX)
-    max_fds = INT_MAX;
+  if (max_fds > INT_MAX) max_fds = INT_MAX;
 
   DirReaderPosix fd_dir(kFDDir);
 
@@ -162,7 +153,7 @@ void CloseSuperfluousFds(std::function<bool(int)>&& should_preserve) {
     for (rlim_t i = 0; i < max_fds; ++i) {
       const int fd = static_cast<int>(i);
       if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO ||
-          should_preserve(fd)) {
+          aShouldPreserve(aCtx, fd)) {
         continue;
       }
 
@@ -175,20 +166,17 @@ void CloseSuperfluousFds(std::function<bool(int)>&& should_preserve) {
 
   const int dir_fd = fd_dir.fd();
 
-  for ( ; fd_dir.Next(); ) {
+  for (; fd_dir.Next();) {
     // Skip . and .. entries.
-    if (fd_dir.name()[0] == '.')
-      continue;
+    if (fd_dir.name()[0] == '.') continue;
 
-    char *endptr;
+    char* endptr;
     errno = 0;
     const long int fd = strtol(fd_dir.name(), &endptr, 10);
-    if (fd_dir.name()[0] == 0 || *endptr || fd < 0 || errno)
-      continue;
-    if (fd == dir_fd)
-      continue;
+    if (fd_dir.name()[0] == 0 || *endptr || fd < 0 || errno) continue;
+    if (fd == dir_fd) continue;
     if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO ||
-        should_preserve(fd)) {
+        aShouldPreserve(aCtx, fd)) {
       continue;
     }
 
@@ -201,40 +189,6 @@ void CloseSuperfluousFds(std::function<bool(int)>&& should_preserve) {
       if (ret != 0) {
         DLOG(ERROR) << "Problem closing fd";
       }
-    }
-  }
-}
-
-// Sets all file descriptors to close on exec except for stdin, stdout
-// and stderr.
-// TODO(agl): Remove this function. It's fundamentally broken for multithreaded
-// apps.
-void SetAllFDsToCloseOnExec() {
-#if defined(OS_LINUX) || defined(OS_SOLARIS)
-  const char fd_dir[] = "/proc/self/fd";
-#elif defined(OS_MACOSX) || defined(OS_BSD)
-  const char fd_dir[] = "/dev/fd";
-#endif
-  ScopedDIR dir_closer(opendir(fd_dir));
-  DIR *dir = dir_closer.get();
-  if (NULL == dir) {
-    DLOG(ERROR) << "Unable to open " << fd_dir;
-    return;
-  }
-
-  struct dirent *ent;
-  while ((ent = readdir(dir))) {
-    // Skip . and .. entries.
-    if (ent->d_name[0] == '.')
-      continue;
-    int i = atoi(ent->d_name);
-    // We don't close stdin, stdout or stderr.
-    if (i <= STDERR_FILENO)
-      continue;
-
-    int flags = fcntl(i, F_GETFD);
-    if ((flags == -1) || (fcntl(i, F_SETFD, flags | FD_CLOEXEC) == -1)) {
-      DLOG(ERROR) << "fcntl failure.";
     }
   }
 }
@@ -253,22 +207,20 @@ bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
     // So, lacking reliable information, we indicate that the process
     // is dead, in the hope that the caller will give up and stop
     // calling us.  See also bug 943174 and bug 933680.
-    CHROMIUM_LOG(ERROR) << "waitpid failed pid:" << handle << " errno:" << errno;
-    if (child_exited)
-      *child_exited = true;
+    CHROMIUM_LOG(ERROR) << "waitpid failed pid:" << handle
+                        << " errno:" << errno;
+    if (child_exited) *child_exited = true;
     return false;
   } else if (result == 0) {
     // the child hasn't exited yet.
-    if (child_exited)
-      *child_exited = false;
+    if (child_exited) *child_exited = false;
     return false;
   }
 
-  if (child_exited)
-    *child_exited = true;
+  if (child_exited) *child_exited = true;
 
   if (WIFSIGNALED(status)) {
-    switch(WTERMSIG(status)) {
+    switch (WTERMSIG(status)) {
       case SIGSYS:
       case SIGSEGV:
       case SIGILL:
@@ -280,26 +232,21 @@ bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
     }
   }
 
-  if (WIFEXITED(status))
-    return WEXITSTATUS(status) != 0;
+  if (WIFEXITED(status)) return WEXITSTATUS(status) != 0;
 
   return false;
 }
 
-void
-FreeEnvVarsArray::operator()(char** array)
-{
+void FreeEnvVarsArray::operator()(char** array) {
   for (char** varPtr = array; *varPtr != nullptr; ++varPtr) {
     free(*varPtr);
   }
   delete[] array;
 }
 
-EnvironmentArray
-BuildEnvironmentArray(const environment_map& env_vars_to_set)
-{
+EnvironmentArray BuildEnvironmentArray(const environment_map& env_vars_to_set) {
   base::environment_map combined_env_vars = env_vars_to_set;
-  char **environ = PR_DuplicateEnvironment();
+  char** environ = PR_DuplicateEnvironment();
   for (char** varPtr = environ; *varPtr != nullptr; ++varPtr) {
     std::string varString = *varPtr;
     size_t equalPos = varString.find_first_of('=');
@@ -308,9 +255,9 @@ BuildEnvironmentArray(const environment_map& env_vars_to_set)
     if (combined_env_vars.find(varName) == combined_env_vars.end()) {
       combined_env_vars[varName] = varValue;
     }
-    PR_Free(*varPtr); // PR_DuplicateEnvironment() uses PR_Malloc().
+    PR_Free(*varPtr);  // PR_DuplicateEnvironment() uses PR_Malloc().
   }
-  PR_Free(environ); // PR_DuplicateEnvironment() uses PR_Malloc().
+  PR_Free(environ);  // PR_DuplicateEnvironment() uses PR_Malloc().
 
   EnvironmentArray array(new char*[combined_env_vars.size() + 1]);
   size_t i = 0;

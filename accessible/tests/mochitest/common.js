@@ -8,6 +8,8 @@ const nsIAccessibleStateChangeEvent =
   Ci.nsIAccessibleStateChangeEvent;
 const nsIAccessibleCaretMoveEvent =
   Ci.nsIAccessibleCaretMoveEvent;
+const nsIAccessibleScrollingEvent =
+  Ci.nsIAccessibleScrollingEvent;
 const nsIAccessibleTextChangeEvent =
   Ci.nsIAccessibleTextChangeEvent;
 const nsIAccessibleVirtualCursorChangeEvent =
@@ -47,24 +49,6 @@ const nsIObserverService = Ci.nsIObserverService;
 const nsIDOMWindow = Ci.nsIDOMWindow;
 
 const nsIPropertyElement = Ci.nsIPropertyElement;
-
-// Testing "'Node' in this" doesn't do the right thing because there are cases
-// when our "this" is not the global even though we're at toplevel.  In those
-// cases, the import could fail because our global is a Window and we in fact
-// have a Node all along.
-//
-// We could get the global via the (function() { return this; })() trick, but
-// that might break any time if people switch us to strict mode.  So let's just
-// test the thing we care about directly: does bareword Node exist?
-let needToImportNode = false;
-try {
-    Node;
-} catch (e) {
-    needToImportNode = true;
-}
-if (needToImportNode) {
-    Cu.importGlobalProperties(["Node"]);
-}
 
 // //////////////////////////////////////////////////////////////////////////////
 // OS detect
@@ -712,9 +696,7 @@ function relationTypeToString(aRelationType) {
 }
 
 function getLoadContext() {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIWebNavigation)
-               .QueryInterface(Ci.nsILoadContext);
+  return window.docShell.QueryInterface(Ci.nsILoadContext);
 }
 
 /**
@@ -731,13 +713,12 @@ function getTextFromClipboard() {
   Services.clipboard.getData(trans, Services.clipboard.kGlobalClipboard);
 
   var str = {};
-  var strLength = {};
-  trans.getTransferData("text/unicode", str, strLength);
+  trans.getTransferData("text/unicode", str);
 
   if (str)
     str = str.value.QueryInterface(Ci.nsISupportsString);
   if (str)
-    return str.data.substring(0, strLength.value / 2);
+    return str.data;
 
   return "";
 }
@@ -857,12 +838,7 @@ function shortenString(aString, aMaxLength) {
  * Return main chrome window (crosses chrome boundary)
  */
 function getMainChromeWindow(aWindow) {
-  return aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                .getInterface(Ci.nsIWebNavigation)
-                .QueryInterface(Ci.nsIDocShellTreeItem)
-                .rootTreeItem
-                .QueryInterface(Ci.nsIInterfaceRequestor)
-                .getInterface(Ci.nsIDOMWindow);
+  return aWindow.docShell.rootTreeItem.domWindow;
 }
 
 /** Sets the test plugin(s) initially expected enabled state.
@@ -934,7 +910,7 @@ function normalizeAccTreeObj(aObj) {
   if (roleName in nsIAccessibleRole) {
     return {
       role: nsIAccessibleRole[roleName],
-      children: aObj[key]
+      children: aObj[key],
     };
   }
   return aObj;

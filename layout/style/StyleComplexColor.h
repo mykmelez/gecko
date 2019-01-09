@@ -26,17 +26,24 @@ class ComputedStyle;
  * It can also represent an "auto" value, which is valid for some
  * properties. See comment of `Tag::eAuto`.
  */
-class StyleComplexColor final
-{
-public:
+class StyleComplexColor final {
+ public:
   static StyleComplexColor FromColor(nscolor aColor) {
     return {aColor, 0, eNumeric};
   }
   static StyleComplexColor CurrentColor() {
     return {NS_RGBA(0, 0, 0, 0), 1, eForeground};
   }
-  static StyleComplexColor Auto() {
-    return {NS_RGBA(0, 0, 0, 0), 1, eAuto};
+  static StyleComplexColor Auto() { return {NS_RGBA(0, 0, 0, 0), 1, eAuto}; }
+
+  static StyleComplexColor Black() {
+    return StyleComplexColor::FromColor(NS_RGB(0, 0, 0));
+  }
+  static StyleComplexColor White() {
+    return StyleComplexColor::FromColor(NS_RGB(255, 255, 255));
+  }
+  static StyleComplexColor Transparent() {
+    return StyleComplexColor::FromColor(NS_RGBA(0, 0, 0, 0));
   }
 
   bool IsAuto() const { return mTag == eAuto; }
@@ -48,18 +55,17 @@ public:
     }
 
     switch (mTag) {
-    case eAuto:
-    case eForeground:
-      return true;
-    case eNumeric:
-      return mColor == aOther.mColor;
-    case eComplex:
-      return (mBgRatio == aOther.mBgRatio &&
-              mFgRatio == aOther.mFgRatio &&
-              mColor == aOther.mColor);
-    default:
-      MOZ_ASSERT_UNREACHABLE("Unexpected StyleComplexColor type.");
-      return false;
+      case eAuto:
+      case eForeground:
+        return true;
+      case eNumeric:
+        return mColor == aOther.mColor;
+      case eComplex:
+        return (mBgRatio == aOther.mBgRatio && mFgRatio == aOther.mFgRatio &&
+                mColor == aOther.mColor);
+      default:
+        MOZ_ASSERT_UNREACHABLE("Unexpected StyleComplexColor type.");
+        return false;
     }
   }
 
@@ -90,7 +96,7 @@ public:
    */
   nscolor CalcColor(const nsIFrame* aFrame) const;
 
-private:
+ private:
   enum Tag : uint8_t {
     // This represents a computed-value time auto value. This
     // indicates that this value should not be interpolatable with
@@ -108,14 +114,11 @@ private:
     eComplex,
   };
 
-  StyleComplexColor(nscolor aColor,
-                    float aFgRatio,
-                    Tag aTag)
-    : mColor(aColor)
-    , mBgRatio(1.f - aFgRatio)
-    , mFgRatio(aFgRatio)
-    , mTag(aTag)
-  {
+  StyleComplexColor(nscolor aColor, float aFgRatio, Tag aTag)
+      : mColor(aColor),
+        mBgRatio(1.f - aFgRatio),
+        mFgRatio(aFgRatio),
+        mTag(aTag) {
     MOZ_ASSERT(mTag != eNumeric || aFgRatio == 0.);
     MOZ_ASSERT(!(mTag == eAuto || mTag == eForeground) || aFgRatio == 1.);
   }
@@ -126,6 +129,6 @@ private:
   Tag mTag;
 };
 
-} // namespace mozilla
+}  // namespace mozilla
 
-#endif // mozilla_StyleComplexColor_h_
+#endif  // mozilla_StyleComplexColor_h_

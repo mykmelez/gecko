@@ -4,7 +4,7 @@
 "use strict";
 
 /**
- * Unit tests for tabbrowser._isLocalAboutURI to make sure it returns the
+ * Unit tests for tabbrowser.isLocalAboutURI to make sure it returns the
  * appropriate values for various URIs as well as optional resolved URI.
  */
 
@@ -12,9 +12,9 @@ add_task(function test_URI() {
   const check = (spec, expect, description) => {
     const URI = Services.io.newURI(spec);
     try {
-      is(gBrowser._isLocalAboutURI(URI), expect, description);
+      is(gBrowser.isLocalAboutURI(URI), expect, description);
     } catch (ex) {
-      ok(false, "_isLocalAboutURI should not throw");
+      ok(false, "isLocalAboutURI should not throw");
     }
   };
   check("https://www.mozilla.org/", false, "https is not about");
@@ -30,10 +30,10 @@ add_task(function test_URI_with_resolved() {
   const check = (spec, resolvedSpec, expect, description) => {
     const URI = Services.io.newURI(spec);
     const resolvedURI = Services.io.newURI(resolvedSpec);
-    is(gBrowser._isLocalAboutURI(URI, resolvedURI), expect, description);
+    is(gBrowser.isLocalAboutURI(URI, resolvedURI), expect, description);
   };
   check("about:newtab",
-    "jar:file:///Applications/Firefox.app/Contents/Resources/browser/features/activity-stream@mozilla.org.xpi!/chrome/content/data/content/activity-stream.html",
+    "jar:file:///Applications/Firefox.app/Contents/Resources/browser/omni.ja!/chrome/browser/res/activity-stream/prerendered/en-US/activity-stream.html",
     true,
     "about:newtab with jar is local");
   check("about:newtab",

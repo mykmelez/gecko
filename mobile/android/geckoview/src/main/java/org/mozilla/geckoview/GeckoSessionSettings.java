@@ -10,6 +10,7 @@ import org.mozilla.gecko.util.GeckoBundle;
 
 import android.os.Parcel;
 import android.os.Parcelable;
+import android.support.annotation.AnyThread;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.util.Log;
@@ -17,6 +18,7 @@ import android.util.Log;
 import java.util.Arrays;
 import java.util.Collection;
 
+@AnyThread
 public final class GeckoSessionSettings implements Parcelable {
     private static final String LOGTAG = "GeckoSessionSettings";
     private static final boolean DEBUG = false;
@@ -26,6 +28,15 @@ public final class GeckoSessionSettings implements Parcelable {
     public static final int DISPLAY_MODE_MINIMAL_UI = 1;
     public static final int DISPLAY_MODE_STANDALONE = 2;
     public static final int DISPLAY_MODE_FULLSCREEN = 3;
+
+    // This needs to match GeckoViewSettingsChild.js and GeckoViewSettings.jsm
+    public static final int USER_AGENT_MODE_MOBILE = 0;
+    public static final int USER_AGENT_MODE_DESKTOP = 1;
+    public static final int USER_AGENT_MODE_VR = 2;
+
+    // This needs to match GeckoViewSettingsChild.js
+    public static final int VIEWPORT_MODE_MOBILE = 0;
+    public static final int VIEWPORT_MODE_DESKTOP = 1;
 
     public static class Key<T> {
         /* package */ final String name;
@@ -57,38 +68,70 @@ public final class GeckoSessionSettings implements Parcelable {
     public static final Key<Integer> SCREEN_ID =
         new Key<Integer>("screenId", /* initOnly */ true, /* values */ null);
 
-    /*
+    /**
      * Key to enable and disable tracking protection.
      */
     public static final Key<Boolean> USE_TRACKING_PROTECTION =
         new Key<Boolean>("useTrackingProtection");
-    /*
+    /**
      * Key to enable and disable private mode browsing.
      * Read-only once session is open.
      */
     public static final Key<Boolean> USE_PRIVATE_MODE =
         new Key<Boolean>("usePrivateMode", /* initOnly */ true, /* values */ null);
 
-    /*
+    /**
      * Key to enable and disable multiprocess browsing (e10s).
      * Read-only once session is open.
      */
     public static final Key<Boolean> USE_MULTIPROCESS =
         new Key<Boolean>("useMultiprocess", /* initOnly */ true, /* values */ null);
 
-    /*
-     * Key to enable and disable desktop mode browsing.
+    /**
+     * Key to specify which user agent mode we should use.
      */
-    public static final Key<Boolean> USE_DESKTOP_MODE =
-        new Key<Boolean>("useDesktopMode");
+    public static final Key<Integer> USER_AGENT_MODE =
+        new Key<Integer>("userAgentMode", /* initOnly */ false,
+                         Arrays.asList(USER_AGENT_MODE_MOBILE, USER_AGENT_MODE_DESKTOP, USER_AGENT_MODE_VR));
 
-    /*
-     * Key to specify which display-mode we should use
+    /**
+     * Key to specify the user agent override string.
+     * Set value to null to use the user agent specified by USER_AGENT_MODE.
+     */
+    public static final Key<String> USER_AGENT_OVERRIDE =
+        new Key<String>("userAgentOverride", /* initOnly */ false, /* values */ null);
+
+    /**
+     * Key to specify which viewport mode we should use.
+     */
+    public static final Key<Integer> VIEWPORT_MODE =
+        new Key<Integer>("viewportMode", /* initOnly */ false,
+                         Arrays.asList(VIEWPORT_MODE_MOBILE, VIEWPORT_MODE_DESKTOP));
+
+    /**
+     * Key to specify which display-mode we should use.
      */
     public static final Key<Integer> DISPLAY_MODE =
         new Key<Integer>("displayMode", /* initOnly */ false,
                          Arrays.asList(DISPLAY_MODE_BROWSER, DISPLAY_MODE_MINIMAL_UI,
                                        DISPLAY_MODE_STANDALONE, DISPLAY_MODE_FULLSCREEN));
+
+    /**
+     * Key to specify if media should be suspended when the session is inactive.
+     */
+    public static final Key<Boolean> SUSPEND_MEDIA_WHEN_INACTIVE =
+        new Key<Boolean>("suspendMediaWhenInactive", /* initOnly */ false, /* values */ null);
+
+    /**
+     * Key to specify if JavaScript should be allowed on this session.
+     */
+    public static final Key<Boolean> ALLOW_JAVASCRIPT =
+            new Key<Boolean>("allowJavascript", /* initOnly */ false, /* values */ null);
+    /**
+     * Key to specify if entire accessible tree should be exposed with no caching.
+     */
+    public static final Key<Boolean> FULL_ACCESSIBILITY_TREE =
+            new Key<Boolean>("fullAccessibilityTree", /* initOnly */ false, /* values */ null);
 
     private final GeckoSession mSession;
     private final GeckoBundle mBundle;
@@ -116,11 +159,16 @@ public final class GeckoSessionSettings implements Parcelable {
         mBundle.putBoolean(USE_TRACKING_PROTECTION.name, false);
         mBundle.putBoolean(USE_PRIVATE_MODE.name, false);
         mBundle.putBoolean(USE_MULTIPROCESS.name, true);
-        mBundle.putBoolean(USE_DESKTOP_MODE.name, false);
+        mBundle.putBoolean(SUSPEND_MEDIA_WHEN_INACTIVE.name, false);
+        mBundle.putBoolean(ALLOW_JAVASCRIPT.name, true);
+        mBundle.putBoolean(FULL_ACCESSIBILITY_TREE.name, false);
+        mBundle.putInt(USER_AGENT_MODE.name, USER_AGENT_MODE_MOBILE);
+        mBundle.putString(USER_AGENT_OVERRIDE.name, null);
+        mBundle.putInt(VIEWPORT_MODE.name, VIEWPORT_MODE_MOBILE);
         mBundle.putInt(DISPLAY_MODE.name, DISPLAY_MODE_BROWSER);
     }
 
-    public void setBoolean(final Key<Boolean> key, final boolean value) {
+    public void setBoolean(final @NonNull Key<Boolean> key, final boolean value) {
         synchronized (mBundle) {
             if (valueChangedLocked(key, value)) {
                 mBundle.putBoolean(key.name, value);
@@ -129,13 +177,13 @@ public final class GeckoSessionSettings implements Parcelable {
         }
     }
 
-    public boolean getBoolean(final Key<Boolean> key) {
+    public boolean getBoolean(final @NonNull Key<Boolean> key) {
         synchronized (mBundle) {
             return mBundle.getBoolean(key.name);
         }
     }
 
-    public void setInt(final Key<Integer> key, final int value) {
+    public void setInt(final @NonNull Key<Integer> key, final int value) {
         synchronized (mBundle) {
             if (valueChangedLocked(key, value)) {
                 mBundle.putInt(key.name, value);
@@ -144,13 +192,13 @@ public final class GeckoSessionSettings implements Parcelable {
         }
     }
 
-    public int getInt(final Key<Integer> key) {
+    public int getInt(final @NonNull Key<Integer> key) {
         synchronized (mBundle) {
             return mBundle.getInt(key.name);
         }
     }
 
-    public void setString(final Key<String> key, final String value) {
+    public void setString(final @NonNull Key<String> key, final @Nullable String value) {
         synchronized (mBundle) {
             if (valueChangedLocked(key, value)) {
                 mBundle.putString(key.name, value);
@@ -159,7 +207,7 @@ public final class GeckoSessionSettings implements Parcelable {
         }
     }
 
-    public String getString(final Key<String> key) {
+    public String getString(final @NonNull Key<String> key) {
         synchronized (mBundle) {
             return mBundle.getString(key.name);
         }
@@ -208,12 +256,12 @@ public final class GeckoSessionSettings implements Parcelable {
     }
 
     @Override // Parcelable
-    public void writeToParcel(Parcel out, int flags) {
+    public void writeToParcel(@NonNull Parcel out, int flags) {
         mBundle.writeToParcel(out, flags);
     }
 
     // AIDL code may call readFromParcel even though it's not part of Parcelable.
-    public void readFromParcel(final Parcel source) {
+    public void readFromParcel(final @NonNull Parcel source) {
         mBundle.readFromParcel(source);
     }
 

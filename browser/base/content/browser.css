@@ -10,28 +10,40 @@
   --lwt-additional-images: none;
   --lwt-background-alignment: right top;
   --lwt-background-tiling: no-repeat;
+
+  --toolbar-bgcolor: var(--toolbar-non-lwt-bgcolor);
+  --toolbar-bgimage: var(--toolbar-non-lwt-bgimage);
+  --toolbar-color: var(--toolbar-non-lwt-textcolor);
 }
 
 :root:-moz-lwtheme {
-  color: var(--lwt-text-color) !important;
-}
+  --toolbar-bgcolor: rgba(255,255,255,.4);
+  --toolbar-bgimage: none;
+  --toolbar-color: var(--lwt-text-color, inherit);
 
-:root:-moz-lwtheme {
-  background-color: var(--lwt-accent-color) !important;
-  background-image: var(--lwt-additional-images) !important;
-  background-position: var(--lwt-background-alignment) !important;
-  background-repeat: var(--lwt-background-tiling) !important;
+  background-color: var(--lwt-accent-color);
+  color: var(--lwt-text-color);
 }
 
 :root:-moz-lwtheme[lwtheme-image] {
-  background-image: var(--lwt-header-image), var(--lwt-additional-images) !important;
+  background-image: var(--lwt-header-image) !important;
+  background-repeat: no-repeat;
+  background-position: right top !important;
 }
 
 :root:-moz-lwtheme:-moz-window-inactive {
-  background-color: var(--lwt-accent-color-inactive, var(--lwt-accent-color)) !important;
+  background-color: var(--lwt-accent-color-inactive, var(--lwt-accent-color));
 }
 
-#main-window:not([chromehidden~="toolbar"]) {
+/* Set additional backgrounds alignment relative to toolbox */
+
+#navigator-toolbox:-moz-lwtheme {
+  background-image: var(--lwt-additional-images);
+  background-position: var(--lwt-background-alignment);
+  background-repeat: var(--lwt-background-tiling);
+}
+
+:root:not([chromehidden~="toolbar"]) {
 %ifdef XP_MACOSX
   min-width: 335px;
 %else
@@ -39,24 +51,16 @@
 %endif
 }
 
-#main-window[customize-entered] {
+:root[customize-entered] {
   min-width: -moz-fit-content;
-}
-
-searchbar {
-  -moz-binding: url("chrome://browser/content/search/search.xml#searchbar");
 }
 
 .searchbar-textbox {
   -moz-binding: url("chrome://browser/content/search/search.xml#searchbar-textbox");
 }
 
-.search-one-offs {
-  -moz-binding: url("chrome://browser/content/search/search.xml#search-one-offs");
-}
-
-.search-setting-button[compact=true],
-.search-setting-button-compact:not([compact=true]) {
+.search-one-offs[compact=true] .search-setting-button,
+.search-one-offs:not([compact=true]) .search-setting-button-compact {
   display: none;
 }
 
@@ -66,27 +70,24 @@ searchbar {
   min-width: 25px;
 }
 
-.browserStack > browser {
-  -moz-binding: url("chrome://browser/content/tabbrowser.xml#tabbrowser-browser");
+%ifdef MENUBAR_CAN_AUTOHIDE
+#toolbar-menubar[autohide="true"] {
+  overflow: hidden;
 }
 
-.browserStack > browser[remote="true"] {
-  -moz-binding: url("chrome://browser/content/tabbrowser.xml#tabbrowser-remote-browser");
-}
-
-toolbar[customizable="true"] {
-  -moz-binding: url("chrome://browser/content/customizableui/toolbar.xml#toolbar");
-}
-
-%ifdef XP_MACOSX
-#toolbar-menubar {
-  -moz-binding: url("chrome://browser/content/customizableui/toolbar.xml#toolbar-menubar-stub");
+#toolbar-menubar[autohide="true"][inactive="true"]:not([customizing="true"]) {
+  min-height: 0 !important;
+  height: 0 !important;
+  -moz-appearance: none !important;
 }
 %endif
 
-#toolbar-menubar[autohide="true"] {
-  -moz-binding: url("chrome://browser/content/customizableui/toolbar.xml#toolbar-menubar-autohide");
+%ifdef XP_MACOSX
+#toolbar-menubar {
+  -moz-binding: none;
+  visibility: collapse;
 }
+%endif
 
 panelmultiview {
   -moz-box-align: start;
@@ -149,7 +150,7 @@ panelview[mainview] > .panel-header {
 #tabbrowser-tabs[hasadjacentnewtabbutton]:not([overflow="true"]) ~ #new-tab-button,
 #tabbrowser-tabs[overflow="true"] > .tabbrowser-arrowscrollbox > .tabs-newtab-button,
 #tabbrowser-tabs:not([hasadjacentnewtabbutton]) > .tabbrowser-arrowscrollbox > .tabs-newtab-button,
-#TabsToolbar[customizing="true"] > #tabbrowser-tabs > .tabbrowser-arrowscrollbox > .tabs-newtab-button {
+#TabsToolbar[customizing="true"] #tabbrowser-tabs > .tabbrowser-arrowscrollbox > .tabs-newtab-button {
   visibility: collapse;
 }
 
@@ -189,6 +190,7 @@ panelview[mainview] > .panel-header {
   transition: visibility 0ms 25ms;
 }
 
+.tab-icon-pending:not([fadein]),
 .tab-icon-image:not([fadein]),
 .tab-close-button:not([fadein]),
 .tabbrowser-tab:not([fadein])::after,
@@ -197,16 +199,14 @@ panelview[mainview] > .panel-header {
 }
 
 .tab-label:not([fadein]),
-.tab-throbber:not([fadein]),
-.tab-throbber-fallback:not([fadein]) {
+.tab-throbber:not([fadein]) {
   display: none;
 }
 
 %ifdef NIGHTLY_BUILD
 @supports -moz-bool-pref("browser.tabs.hideThrobber") {
-  .tab-throbber,
-  .tab-throbber-fallback {
-    display: none;
+  .tab-throbber {
+    display: none !important;
   }
 }
 %endif
@@ -216,43 +216,45 @@ panelview[mainview] > .panel-header {
   display: block; /* position:fixed already does this (bug 579776), but let's be explicit */
 }
 
-#tabbrowser-tabs[movingtab] > .tabbrowser-tab[selected] {
+#tabbrowser-tabs[movingtab] > .tabbrowser-tab[selected],
+#tabbrowser-tabs[movingtab] > .tabbrowser-tab[multiselected] {
   position: relative;
   z-index: 2;
   pointer-events: none; /* avoid blocking dragover events on scroll buttons */
 }
 
+.tabbrowser-tab[tab-grouping],
 .tabbrowser-tab[tabdrop-samewindow],
-#tabbrowser-tabs[movingtab] > .tabbrowser-tab[fadein]:not([selected]) {
+#tabbrowser-tabs[movingtab] > .tabbrowser-tab[fadein]:not([selected]):not([multiselected]) {
   transition: transform 200ms var(--animation-easing-function);
+}
+
+.tabbrowser-tab[tab-grouping][multiselected]:not([selected]) {
+  z-index: 2;
 }
 
 /* The next 3 rules allow dragging tabs slightly outside of the tabstrip
  * to make it easier to drag tabs. */
-#TabsToolbar[movingtab] {
+#navigator-toolbox[movingtab] > #titlebar > #TabsToolbar {
   padding-bottom: 15px;
 }
 
-#TabsToolbar[movingtab] > #tabbrowser-tabs {
+#navigator-toolbox[movingtab] #tabbrowser-tabs {
   padding-bottom: 15px;
   margin-bottom: -15px;
 }
 
-#TabsToolbar[movingtab] + #nav-bar {
+#navigator-toolbox[movingtab] > #nav-bar {
   margin-top: -15px;
   pointer-events: none;
 }
 
 /* Allow dropping a tab on buttons with associated drop actions. */
-#TabsToolbar[movingtab] + #nav-bar > #nav-bar-customization-target > #personal-bookmarks,
-#TabsToolbar[movingtab] + #nav-bar > #nav-bar-customization-target > #home-button,
-#TabsToolbar[movingtab] + #nav-bar > #nav-bar-customization-target > #downloads-button,
-#TabsToolbar[movingtab] + #nav-bar > #nav-bar-customization-target > #bookmarks-menu-button {
+#navigator-toolbox[movingtab] > #nav-bar > #nav-bar-customization-target > #personal-bookmarks,
+#navigator-toolbox[movingtab] > #nav-bar > #nav-bar-customization-target > #home-button,
+#navigator-toolbox[movingtab] > #nav-bar > #nav-bar-customization-target > #downloads-button,
+#navigator-toolbox[movingtab] > #nav-bar > #nav-bar-customization-target > #bookmarks-menu-button {
   pointer-events: auto;
-}
-
-toolbar[printpreview="true"] {
-  -moz-binding: url("chrome://global/content/printPreviewBindings.xml#printpreviewtoolbar");
 }
 
 toolbar[overflowable] > .customization-target {
@@ -279,32 +281,40 @@ window:not([chromehidden~="toolbar"]) #nav-bar[nonemptyoverflow] > .overflow-but
 
 
 %ifdef MENUBAR_CAN_AUTOHIDE
-#toolbar-menubar:not([autohide=true]) + #TabsToolbar > .titlebar-placeholder,
+#toolbar-menubar:not([autohide=true]) + #TabsToolbar > .titlebar-buttonbox-container,
+#toolbar-menubar:not([autohide=true]) + #TabsToolbar .titlebar-spacer,
 %endif
 %ifndef MOZ_WIDGET_COCOA
-#main-window:not([sizemode=normal]) .titlebar-placeholder[type="pre-tabs"],
+:root:not([sizemode=normal]) .titlebar-spacer[type="pre-tabs"],
 %endif
-#main-window:not([chromemargin]) > #titlebar,
-#main-window[inFullscreen] > #titlebar,
-#main-window[inFullscreen] .titlebar-placeholder,
-#main-window:not([tabsintitlebar]) .titlebar-placeholder {
+:root:not([chromemargin]) .titlebar-buttonbox-container,
+:root[inFullscreen] .titlebar-buttonbox-container,
+:root[inFullscreen] .titlebar-spacer,
+:root:not([tabsintitlebar]) .titlebar-spacer {
   display: none;
 }
+
+%ifdef MENUBAR_CAN_AUTOHIDE
+#toolbar-menubar[autohide=true]:not([inactive]) + #TabsToolbar > .titlebar-buttonbox-container {
+  visibility: hidden;
+}
+%endif
 
 #titlebar {
   -moz-window-dragging: drag;
 }
 
-#titlebar-spacer {
-  pointer-events: none;
-}
-
-#main-window[tabsintitlebar] #titlebar-buttonbox {
+:root[tabsintitlebar] .titlebar-buttonbox {
   position: relative;
 }
 
-#titlebar-buttonbox {
+:root:not([tabsintitlebar]) .titlebar-buttonbox {
+  display: none;
+}
+
+.titlebar-buttonbox {
   -moz-appearance: -moz-window-button-box;
+  position: relative;
 }
 
 #personal-bookmarks {
@@ -313,6 +323,11 @@ window:not([chromehidden~="toolbar"]) #nav-bar[nonemptyoverflow] > .overflow-but
 
 toolbarpaletteitem {
   -moz-window-dragging: no-drag;
+  -moz-box-pack: start;
+}
+
+.titlebar-buttonbox-container {
+  -moz-box-ordinal-group: 1000;
 }
 
 %ifdef XP_MACOSX
@@ -320,45 +335,33 @@ toolbarpaletteitem {
   -moz-appearance: -moz-mac-fullscreen-button;
 }
 
-/* Fullscreen and caption buttons don't move with RTL on OS X so override the automatic ordering. */
-#titlebar-secondary-buttonbox:-moz-locale-dir(ltr),
-#titlebar-buttonbox-container:-moz-locale-dir(rtl),
-.titlebar-placeholder[type="fullscreen-button"]:-moz-locale-dir(ltr),
-.titlebar-placeholder[type="caption-buttons"]:-moz-locale-dir(rtl) {
+/**
+ * On macOS, the window caption buttons are on the left side of the window titlebar,
+ * even when using the RTL UI direction. Similarly, the fullscreen button is on the
+ * right side of the window titlebar, even when using the RTL UI direction. These
+ * next rules enforce that ordering.
+ */
+#titlebar-secondary-buttonbox:-moz-locale-dir(ltr) {
   -moz-box-ordinal-group: 1000;
 }
 
 #titlebar-secondary-buttonbox:-moz-locale-dir(rtl),
-#titlebar-buttonbox-container:-moz-locale-dir(ltr),
-.titlebar-placeholder[type="caption-buttons"]:-moz-locale-dir(ltr),
-.titlebar-placeholder[type="fullscreen-button"]:-moz-locale-dir(rtl) {
+.titlebar-buttonbox-container:-moz-locale-dir(ltr) {
   -moz-box-ordinal-group: 0;
 }
 %endif
 
-%ifdef XP_WIN
-#main-window[sizemode="maximized"] #titlebar-buttonbox {
-  -moz-appearance: -moz-window-button-box-maximized;
-}
-
-#main-window[tabletmode] #titlebar-min,
-#main-window[tabletmode] #titlebar-max {
-  display: none !important;
-}
-%endif
-
-#main-window[inFullscreen][inDOMFullscreen] #navigator-toolbox,
-#main-window[inFullscreen][inDOMFullscreen] #fullscr-toggler,
-#main-window[inFullscreen][inDOMFullscreen] #sidebar-box,
-#main-window[inFullscreen][inDOMFullscreen] #sidebar-splitter,
-#main-window[inFullscreen]:not([OSXLionFullscreen]) toolbar:not([fullscreentoolbar=true]),
-#main-window[inFullscreen] #global-notificationbox,
-#main-window[inFullscreen] #high-priority-global-notificationbox {
+:root[inDOMFullscreen] #navigator-toolbox,
+:root[inDOMFullscreen] #fullscr-toggler,
+:root[inDOMFullscreen] #sidebar-box,
+:root[inDOMFullscreen] #sidebar-splitter,
+:root[inFullscreen]:not([OSXLionFullscreen]) toolbar:not([fullscreentoolbar=true]),
+:root[inFullscreen] .global-notificationbox {
   visibility: collapse;
 }
 
 #navigator-toolbox[fullscreenShouldAnimate] {
-  transition: 1.5s margin-top ease-out;
+  transition: 0.8s margin-top ease-out;
 }
 
 /* Rules to help integrate WebExtension buttons */
@@ -373,25 +376,23 @@ toolbarpaletteitem {
     list-style-image: var(--webextension-toolbar-image, inherit);
   }
 
-  .webextension-browser-action:-moz-lwtheme-brighttext {
+  toolbar[brighttext] .webextension-browser-action {
     list-style-image: var(--webextension-toolbar-image-light, inherit);
   }
 
-  .webextension-browser-action:-moz-lwtheme-darktext {
+  toolbar:not([brighttext]) .webextension-browser-action:-moz-lwtheme {
     list-style-image: var(--webextension-toolbar-image-dark, inherit);
   }
 
-  .webextension-browser-action[cui-areatype="menu-panel"],
-  toolbarpaletteitem[place="palette"] > .webextension-browser-action {
+  .webextension-browser-action[cui-areatype="menu-panel"] {
     list-style-image: var(--webextension-menupanel-image, inherit);
   }
 
-  toolbarpaletteitem[place="palette"] > .webextension-browser-action:-moz-lwtheme-brighttext {
+  :root[lwt-popup-brighttext] .webextension-browser-action[cui-areatype="menu-panel"] {
     list-style-image: var(--webextension-menupanel-image-light, inherit);
   }
 
-  .webextension-browser-action[cui-areatype="menu-panel"]:-moz-lwtheme-darktext,
-  toolbarpaletteitem[place="palette"] > .webextension-browser-action:-moz-lwtheme-darktext {
+  :root:not([lwt-popup-brighttext]) .webextension-browser-action[cui-areatype="menu-panel"]:-moz-lwtheme {
     list-style-image: var(--webextension-menupanel-image-dark, inherit);
   }
 
@@ -405,25 +406,23 @@ toolbarpaletteitem {
     list-style-image: var(--webextension-toolbar-image-2x, inherit);
   }
 
-  .webextension-browser-action:-moz-lwtheme-brighttext {
+  toolbar[brighttext] .webextension-browser-action {
     list-style-image: var(--webextension-toolbar-image-2x-light, inherit);
   }
 
-  .webextension-browser-action:-moz-lwtheme-darktext {
+  toolbar:not([brighttext]) .webextension-browser-action:-moz-lwtheme {
     list-style-image: var(--webextension-toolbar-image-2x-dark, inherit);
   }
 
-  .webextension-browser-action[cui-areatype="menu-panel"],
-  toolbarpaletteitem[place="palette"] > .webextension-browser-action {
+  .webextension-browser-action[cui-areatype="menu-panel"] {
     list-style-image: var(--webextension-menupanel-image-2x, inherit);
   }
 
-  toolbarpaletteitem[place="palette"] > .webextension-browser-action:-moz-lwtheme-brighttext {
+  :root[lwt-popup-brighttext] .webextension-browser-action[cui-areatype="menu-panel"] {
     list-style-image: var(--webextension-menupanel-image-2x-light, inherit);
   }
 
-  .webextension-browser-action[cui-areatype="menu-panel"]:-moz-lwtheme-darktext,
-  toolbarpaletteitem[place="palette"] > .webextension-browser-action:-moz-lwtheme-darktext {
+  :root:not([lwt-popup-brighttext]) .webextension-browser-action[cui-areatype="menu-panel"]:-moz-lwtheme {
     list-style-image: var(--webextension-menupanel-image-2x-dark, inherit);
   }
 
@@ -498,10 +497,6 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   -moz-box-flex: 1;
 }
 
-#PanelUI-feeds > .feed-toolbarbutton:-moz-locale-dir(rtl) {
-  direction: rtl;
-}
-
 #appMenu_historyMenu > .bookmark-item,
 #appMenu-library-recentlyClosedTabs > .panel-subview-body > .bookmark-item,
 #appMenu-library-recentlyClosedWindows > .panel-subview-body > .bookmark-item,
@@ -510,23 +505,11 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   max-width: none;
 }
 
-#main-window:-moz-lwtheme {
-  background-repeat: no-repeat;
-  background-position: top right;
-}
-
 %ifdef XP_MACOSX
-#main-window[inFullscreen="true"] {
+:root[inFullscreen="true"] {
   padding-top: 0; /* override drawintitlebar="true" */
 }
 %endif
-
-:root[lwthemefooter=true] #browser-bottombox:-moz-lwtheme {
-  background-repeat: no-repeat;
-  background-position: bottom left;
-  background-color: var(--lwt-accent-color);
-  background-image: var(--lwt-footer-image);
-}
 
 /* Hide menu elements intended for keyboard access support */
 #main-menubar[openedwithkey=false] .show-only-for-keyboard {
@@ -551,6 +534,10 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 }
 
 #urlbar {
+  -moz-binding: url(chrome://browser/content/urlbarBindings.xml#legacy-urlbar);
+}
+
+#urlbar[quantumbar] {
   -moz-binding: url(chrome://browser/content/urlbarBindings.xml#urlbar);
 }
 
@@ -574,7 +561,7 @@ html|input.urlbar-input[dir=ltr]:-moz-locale-dir(rtl) {
  *
  * Attribute is controlled by browser.js:/gRemoteControl.
  */
-#main-window[remotecontrol] #urlbar {
+:root[remotecontrol] #urlbar {
   background: repeating-linear-gradient(
     -45deg,
     transparent,
@@ -584,15 +571,42 @@ html|input.urlbar-input[dir=ltr]:-moz-locale-dir(rtl) {
   background-color: rgba(255,170,68,.8);
   color: black;
 }
-#main-window[remotecontrol] #urlbar #identity-box {
+:root[remotecontrol] #urlbar #identity-box {
   background: white;
 }
 
-/* Fade out URL on overflow */
-html|input.urlbar-input[textoverflow]:not([focused]) {
-  /* Don't need to worry about RTL here since we use direction:ltr for the
-     input field. */
-  mask-image: linear-gradient(to left, transparent, black 3em);
+/* Show the url scheme in a static box when overflowing to the left */
+moz-input-box.urlbar-input-box {
+  position: relative;
+  direction: ltr;
+}
+html|input.urlbar-scheme {
+  position: absolute;
+  height: 100%;
+  visibility: hidden;
+  direction: ltr;
+  pointer-events: none;
+}
+
+/* Visible if the urlbar is not focused and it overflows at the start.
+   Uses the required-valid trick to check if it contains a value */
+html|input.urlbar-scheme[textoverflow="start"]:not([focused]):valid {
+  visibility: visible;
+}
+
+/* Fade out URL on overflow
+   This mask may be overriden when a Contextual Feature Recommendation is shown,
+   see browser/themes/shared/urlbar-searchbar.inc.css for details */
+html|input.urlbar-input[textoverflow="end"]:not([focused]) {
+  mask-image: linear-gradient(to left, transparent, black 3ch);
+}
+
+html|input.urlbar-input[textoverflow="start"]:not([focused]) {
+  mask-image: linear-gradient(to right, transparent var(--urlbar-scheme-size), black calc(var(--urlbar-scheme-size) + 3ch));
+}
+
+html|input.urlbar-input {
+  mask-repeat: no-repeat;
 }
 
 /* Apply crisp rendering for favicons at exactly 2dppx resolution */
@@ -610,7 +624,7 @@ html|input.urlbar-input[textoverflow]:not([focused]) {
 
 /* Never show a scrollbar for the Location Bar popup.  This overrides the
    richlistbox inline overflow: auto style.*/
-#PopupAutoCompleteRichResult > richlistbox > scrollbox {
+#PopupAutoCompleteRichResult > richlistbox {
   overflow: hidden !important;
 }
 
@@ -633,9 +647,21 @@ html|input.urlbar-input[textoverflow]:not([focused]) {
   display: none;
 }
 
-/* Only show the "Search with" label on hover or selection. */
-#PopupAutoCompleteRichResult > richlistbox > richlistitem:not([selected]):not(:hover) > .ac-action[actiontype=searchengine],
-#PopupAutoCompleteRichResult > richlistbox > richlistitem:not([selected]):not(:hover) > .ac-separator[actiontype=searchengine] {
+/* Normally we want to show the "Search with Engine" label only on hover or
+   selection, but we also want to show it for "alias offer" results -- that is,
+   non-heuristic search engine results that have an alias and empty query.
+   These results tell the user that they can be used to search. */
+#PopupAutoCompleteRichResult > richlistbox > richlistitem:not([selected]):not(:hover):not(.aliasOffer) > .ac-action[actiontype=searchengine],
+#PopupAutoCompleteRichResult > richlistbox > richlistitem:not([selected]):not(:hover):not(.aliasOffer) > .ac-separator[actiontype=searchengine] {
+  display: none;
+}
+
+/* Hide the em-dash separator between the search query description (.ac-title)
+   and the "Search with Foo" description (.ac-url) if the search query is the
+   empty string.  Also hide .ac-title itself because it has a margin-inline-end;
+   alternatively we would need to remove that margin in this case. */
+#PopupAutoCompleteRichResult > richlistbox > richlistitem.emptySearchQuery > .ac-separator,
+#PopupAutoCompleteRichResult > richlistbox > richlistitem.emptySearchQuery > .ac-title {
   display: none;
 }
 
@@ -711,10 +737,6 @@ html|input.urlbar-input[textoverflow]:not([focused]) {
 
 #PopupAutoCompleteRichResult.showSearchSuggestionsNotification > richlistbox {
   transition: none;
-}
-
-#DateTimePickerPanel[active="true"] {
-  -moz-binding: url("chrome://global/content/bindings/datetimepopup.xml#datetime-popup");
 }
 
 #urlbar[pageproxystate=invalid] > #page-action-buttons > .urlbar-page-action,
@@ -853,16 +875,8 @@ toolbarspring {
   }
 }
 
-#editBMPanel_tagsSelector {
-  /* override default listbox width from xul.css */
-  width: auto;
-}
-
 menupopup[emptyplacesresult="true"] > .hide-if-empty-places-result {
   display: none;
-}
-menuitem.spell-suggestion {
-  font-weight: bold;
 }
 
 /* Hide extension toolbars that neglected to set the proper class */
@@ -910,7 +924,7 @@ html|*.pointerlockfswarning {
   top: 0; left: 50%;
   transform: translate(-50%, -100%);
   box-sizing: border-box;
-  width: -moz-max-content;
+  width: max-content;
   max-width: 95%;
   pointer-events: none;
 }
@@ -925,7 +939,7 @@ html|*.pointerlockfswarning[ontop] {
   /* Use -10px to hide the border and border-radius on the top */
   transform: translate(-50%, -10px);
 }
-#main-window[OSXLionFullscreen] html|*.pointerlockfswarning[ontop] {
+:root[OSXLionFullscreen] html|*.pointerlockfswarning[ontop] {
   transform: translate(-50%, 80px);
 }
 
@@ -942,13 +956,6 @@ html|*.pointerlockfswarning-domain-text:not([hidden]) + html|*.pointerlockfswarn
 html|*#fullscreen-exit-button {
   pointer-events: auto;
 }
-
-/* ::::: Ctrl-Tab Panel ::::: */
-
-.ctrlTab-preview {
-  -moz-binding: url("chrome://global/content/bindings/button.xml#button-base");
-}
-
 
 /* notification anchors should only be visible when their associated
    notifications are */
@@ -1029,11 +1036,6 @@ browser[tabmodalPromptShowing] {
   height: 3em;
   width: 100%;
   -moz-box-align: end;
-}
-
-/* Translation */
-notification[value="translation"] {
-  -moz-binding: url("chrome://browser/content/translation-infobar.xml#translationbar");
 }
 
 /*** Visibility of downloads indicator controls ***/
@@ -1242,13 +1244,10 @@ toolbarpaletteitem[dragover] {
   display: -moz-box;
 }
 
-toolbarpaletteitem {
-  -moz-binding: url("chrome://browser/content/customizableui/toolbar.xml#toolbarpaletteitem");
-}
-
 toolbarpaletteitem[place="palette"] {
   -moz-box-orient: vertical;
   width: 7em;
+  max-width: 7em;
   /* icon (16) + margin (9 + 12) + 3 lines of text: */
   height: calc(39px + 3em);
   margin-bottom: 5px;
@@ -1258,28 +1257,18 @@ toolbarpaletteitem[place="palette"] {
   vertical-align: top;
 }
 
-toolbarpaletteitem:not([place="palette"]) > .toolbarpaletteitem-label,
 toolbarpaletteitem[place="palette"][hidden] {
   display: none;
 }
 
-.toolbarpaletteitem-box {
+toolbarpaletteitem > toolbarbutton,
+toolbarpaletteitem > toolbaritem {
   /* Prevent children from getting events */
   pointer-events: none;
 }
 
-toolbarpaletteitem[place="palette"] > .toolbarpaletteitem-box {
-  -moz-box-pack: center;
-  width: 7em;
-  max-width: 7em;
-}
-
-toolbarpaletteitem:not([place="palette"]) > .toolbarpaletteitem-box {
-  -moz-box-flex: 1;
-}
-
-#main-window[customizing=true] .addon-banner-item,
-#main-window[customizing=true] .panel-banner-item {
+:root[customizing=true] .addon-banner-item,
+:root[customizing=true] .panel-banner-item {
   display: none;
 }
 

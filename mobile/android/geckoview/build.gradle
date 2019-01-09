@@ -43,6 +43,12 @@ def computeVersionCode() {
     return code;
 }
 
+def computeVersionNumber() {
+  def appVersion = getAppVersionWithoutMilestone()
+  def parts = appVersion.split('\\.')
+  return parts[0] + "." + parts[1] + "." + getBuildId()
+}
+
 // Mimic Python: open(os.path.join(buildconfig.topobjdir, 'buildid.h')).readline().split()[2]
 def getBuildId() {
     return file("${topobjdir}/buildid.h").getText('utf-8').split()[2]
@@ -63,8 +69,6 @@ android {
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
 
         buildConfigField 'String', "GRE_MILESTONE", "\"${mozconfig.substs.GRE_MILESTONE}\""
-        // This should really come from the included binaries, but that's not easy.
-        buildConfigField 'String', "MOZ_APP_ABI", mozconfig.substs['COMPILE_ENVIRONMENT'] ? "\"${ mozconfig.substs.TARGET_XPCOM_ABI}\"" : '"arm-eabi-gcc3"';
         buildConfigField 'String', "MOZ_APP_BASENAME", "\"${mozconfig.substs.MOZ_APP_BASENAME}\"";
 
         // For the benefit of future archaeologists:
@@ -85,8 +89,6 @@ android {
 
         buildConfigField 'String', "USER_AGENT_GECKOVIEW_MOBILE", "\"Mozilla/5.0 (Android \" + android.os.Build.VERSION.RELEASE + \"; Mobile; rv: ${mozconfig.substs.MOZ_APP_VERSION}) Gecko/${mozconfig.substs.MOZ_APP_VERSION} GeckoView/${mozconfig.substs.MOZ_APP_VERSION}\"";
         buildConfigField 'String', "USER_AGENT_GECKOVIEW_TABLET", "\"Mozilla/5.0 (Android \" + android.os.Build.VERSION.RELEASE + \"; Tablet; rv: ${mozconfig.substs.MOZ_APP_VERSION}) Gecko/${mozconfig.substs.MOZ_APP_VERSION} GeckoView/${mozconfig.substs.MOZ_APP_VERSION}\"";
-
-        buildConfigField 'String', "ANDROID_CPU_ARCH", "\"${mozconfig.substs.ANDROID_CPU_ARCH}\"";
 
         buildConfigField 'int', 'MIN_SDK_VERSION', mozconfig.substs.MOZ_ANDROID_MIN_SDK_VERSION;
 
@@ -113,8 +115,8 @@ android {
     project.configureProductFlavors()
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_7
-        targetCompatibility JavaVersion.VERSION_1_7
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
     }
 
     dexOptions {
@@ -139,13 +141,8 @@ android {
                     exclude 'org/mozilla/gecko/media/Utils.java'
                 }
 
-                if (!mozconfig.substs.MOZ_CRASHREPORTER) {
-                    exclude 'org/mozilla/gecko/CrashReporterService.java'
-                }
-
                 if (mozconfig.substs.MOZ_WEBRTC) {
                     srcDir "${topsrcdir}/media/webrtc/trunk/webrtc/base/java/src"
-                    srcDir "${topsrcdir}/media/webrtc/trunk/webrtc/modules/audio_device/android/java/src"
                     srcDir "${topsrcdir}/media/webrtc/trunk/webrtc/modules/video_capture/android/java/src"
                 }
             }
@@ -190,6 +187,26 @@ tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile) {
     }
 }
 
+tasks.withType(Javadoc) {
+    // Implement warning-as-error for javadoc.
+    def warnings = 0
+    def listener = {
+        if (it.contains(': warning')) {
+            warnings++
+        }
+    } as StandardOutputListener
+
+    doFirst {
+        logging.addStandardErrorListener(listener)
+    }
+    doLast {
+        logging.removeStandardErrorListener(listener)
+        if (warnings > 0) {
+            throw new GradleException("Treating $warnings javadoc warning(s) as error(s)")
+        }
+    }
+}
+
 dependencies {
     implementation "com.android.support:support-v4:$support_library_version"
     implementation "com.android.support:palette-v7:$support_library_version"
@@ -200,10 +217,12 @@ dependencies {
     testImplementation 'org.mockito:mockito-core:1.10.19'
 
     androidTestImplementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
-    androidTestImplementation 'com.android.support.test:runner:0.5'
-    androidTestImplementation 'com.android.support.test:rules:0.5'
-    androidTestImplementation 'com.android.support.test.espresso:espresso-core:2.2.2'
+    androidTestImplementation 'com.android.support.test:runner:1.0.1'
+    androidTestImplementation 'com.android.support.test:rules:1.0.1'
+    androidTestImplementation 'com.android.support.test.espresso:espresso-core:3.0.1'
     androidTestImplementation "com.android.support:support-annotations:$support_library_version"
+
+    androidTestImplementation 'org.eclipse.jetty:jetty-server:7.6.21.v20160908'
 }
 
 apply from: "${topsrcdir}/mobile/android/gradle/with_gecko_binaries.gradle"
@@ -224,7 +243,9 @@ android.libraryVariants.all { variant ->
     def javadoc = task "javadoc${name.capitalize()}"(type: Javadoc) {
         description = "Generate Javadoc for build variant $name"
         destinationDir = new File(destinationDir, variant.baseName)
-        classpath = files(variant.javaCompile.classpath.files)
+        doFirst {
+            classpath = files(variant.javaCompile.classpath.files)
+        }
 
         source = files(variant.javaCompile.source)
         exclude '**/R.java', '**/BuildConfig.java'
@@ -239,7 +260,7 @@ android.libraryVariants.all { variant ->
         options.bootClasspath = [
             file("${System.properties['java.home']}/lib/rt.jar")] + android.bootClasspath
         options.memberLevel = JavadocMemberLevel.PROTECTED
-        options.source = 7
+        options.source = 8
         options.links("https://d.android.com/reference/")
 
         options.docTitle = "GeckoView ${mozconfig.substs.MOZ_APP_VERSION} API"
@@ -255,6 +276,16 @@ android.libraryVariants.all { variant ->
         from javadoc.destinationDir
     }
 
+    // This task is used by `mach android geckoview-docs`.
+    task("javadocCopyJar${name.capitalize()}", type: Copy) {
+        from(javadocJar.destinationDir) {
+            include 'geckoview-*-javadoc.jar'
+            rename { _ -> 'geckoview-javadoc.jar' }
+        }
+        into javadocJar.destinationDir
+        dependsOn javadocJar
+    }
+
     def sourcesJar = task("sourcesJar${name.capitalize()}", type: Jar) {
         classifier 'sources'
         description = "Generate Javadoc for build variant $name"
@@ -267,29 +298,70 @@ android.libraryVariants.all { variant ->
     configureLibraryVariantWithJNIWrappers(variant, "Generated")
 }
 
-apply plugin: 'maven'
+apply plugin: 'maven-publish'
 
-uploadArchives {
-    repositories.mavenDeployer {
-        pom.groupId = 'org.mozilla'
-        pom.artifactId = "geckoview-${mozconfig.substs.MOZ_UPDATE_CHANNEL}-${mozconfig.substs.ANDROID_CPU_ARCH}"
+version = computeVersionNumber()
 
-        if (mozconfig.substs.RELEASE_OR_BETA == 'true') {
-            pom.version = mozconfig.substs.MOZ_APP_VERSION
-        } else {
-            pom.version = getAppVersionWithoutMilestone() + "." + getBuildId()
-        }
+publishing {
+    publications {
+        android.libraryVariants.all { variant ->
+            "${variant.name}"(MavenPublication) {
+                pom {
+                    groupId = 'org.mozilla.geckoview'
 
-        pom.project {
-            licenses {
-                license {
-                    name 'The Mozilla Public License, v. 2.0'
-                    url 'http://mozilla.org/MPL/2.0/'
-                    distribution 'repo'
+                    if (mozconfig.substs.MOZ_UPDATE_CHANNEL == 'release') {
+                        // release artifacts don't specify the channel, for the sake of simplicity
+                        artifactId = "geckoview-${mozconfig.substs.ANDROID_CPU_ARCH}"
+                    } else {
+                        artifactId = "geckoview-${mozconfig.substs.MOZ_UPDATE_CHANNEL}-${mozconfig.substs.ANDROID_CPU_ARCH}"
+                    }
+
+                    url = 'https://wiki.mozilla.org/Mobile/GeckoView'
+
+                    licenses {
+                        license {
+                            name = 'The Mozilla Public License, v. 2.0'
+                            url = 'http://mozilla.org/MPL/2.0/'
+                            distribution = 'repo'
+                        }
+                    }
+
+                    scm {
+                        connection = 'scm::hg::https://hg.mozilla.org/mozilla-central/'
+                        url = 'https://hg.mozilla.org/mozilla-central/'
+                    }
+
+                    // Unfortunately Gradle does not provide a way to expose dependencies for custom
+                    // project types like Android plugins. So we need to add them manually to the POM
+                    // XML here, or use a plugin that achieves the same (like
+                    // https://github.com/wupdigital/android-maven-publish). We elect to do this
+                    // manually since our dependencies are simple and plugins increase our complexity
+                    // surface. This workaround can be removed after this issue is fixed:
+                    // https://github.com/gradle/gradle/issues/1842
+                    withXml {
+                        def dependenciesNode = asNode().appendNode('dependencies')
+
+                        configurations.getByName("implementation").dependencies.each {
+                            def dependencyNode = dependenciesNode.appendNode('dependency')
+                            dependencyNode.appendNode('groupId', it.group)
+                            dependencyNode.appendNode('artifactId', it.name)
+                            dependencyNode.appendNode('version', it.version)
+                        }
+                    }
                 }
+
+                artifact tasks["bundle${variant.name.capitalize()}"]
+
+                // Javadoc and sources for developer ergononomics.
+                artifact tasks["javadocJar${variant.name.capitalize()}"]
+                artifact tasks["sourcesJar${variant.name.capitalize()}"]
             }
         }
-        repository(url: "file://${project.buildDir}/maven")
+    }
+    repositories {
+        maven {
+            url = "${project.buildDir}/maven"
+        }
     }
 }
 
@@ -299,7 +371,7 @@ afterEvaluate {
     // The bundle tasks are only present when the particular configuration is
     // being built, so this task might not exist.  (This is due to the way the
     // Android Gradle plugin defines things during configuration.)
-    def bundleWithGeckoBinaries = tasks.findByName('bundleOfficialWithGeckoBinariesNoMinApiRelease')
+    def bundleWithGeckoBinaries = tasks.findByName('bundleWithGeckoBinariesRelease')
     if (!bundleWithGeckoBinaries) {
         return
     }
@@ -310,14 +382,6 @@ afterEvaluate {
     // are withoutGeckoBinaries and not suitable for distribution.)
     def Configuration archivesConfig = project.getConfigurations().getByName('archives')
     archivesConfig.artifacts.removeAll { it.extension.equals('aar') }
-
-    artifacts {
-        // Instead of default (release) configuration, publish one with Gecko binaries.
-        archives bundleOfficialWithGeckoBinariesNoMinApiRelease
-        // Javadoc and sources for developer ergononomics.
-        archives javadocJarOfficialWithGeckoBinariesNoMinApiRelease
-        archives sourcesJarOfficialWithGeckoBinariesNoMinApiRelease
-    }
 
     // For now, ensure Kotlin is only used in tests.
     android.sourceSets.all { sourceSet ->
@@ -357,11 +421,91 @@ task("generateSDKBindings", type: JavaExec) {
 
     // Configure the arguments at evaluation-time, not at configuration-time.
     doFirst {
-        // From -Pgenerate_sdk_bindings_args=... on command line.
-        args project.generate_sdk_bindings_args.split(':')
+        // From -Pgenerate_sdk_bindings_args=... on command line; missing in
+        // `android-gradle-dependencies` toolchain task.
+        if (project.hasProperty('generate_sdk_bindings_args')) {
+            args project.generate_sdk_bindings_args.split(':')
+        }
     }
 
     workingDir "${topsrcdir}/widget/android/bindings"
 
     dependsOn project(':annotations').jar
+}
+
+apply from: "${topsrcdir}/mobile/android/gradle/jacoco_dependencies.gradle"
+if (project.hasProperty('enable_code_coverage')) {
+    apply from: "${topsrcdir}/mobile/android/gradle/jacoco_for_junit.gradle"
+}
+
+// Set up code coverage for tests on emulators.
+if (mozconfig.substs.MOZ_JAVA_CODE_COVERAGE) {
+    android {
+        jacoco {
+            version = "$jacoco_version"
+        }
+        buildTypes {
+            debug {
+                testCoverageEnabled true
+            }
+        }
+    }
+
+    configurations {
+        // This configuration is used for dependencies that are not needed at compilation or
+        // runtime, but need to be exported as artifacts of the build for usage on the testing
+        // machines.
+        coverageDependency
+    }
+
+    dependencies {
+        // This is required both in the instrumented application classes and the test classes,
+        // so `api` has to be used instead of `androidTestImplementation`.
+        api "org.jacoco:org.jacoco.agent:$jacoco_version:runtime"
+
+        coverageDependency ("org.jacoco:org.jacoco.cli:$jacoco_version:nodeps") {
+            exclude group: 'org.ow2.asm', module: '*'
+        }
+    }
+
+    // This task is used by `mach android archive-coverage-artifacts`.
+    task copyCoverageDependencies(type: Copy) {
+        from(configurations.coverageDependency) {
+            include 'org.jacoco.cli-*-nodeps.jar'
+            rename { _ -> 'target.jacoco-cli.jar' }
+        }
+        into "$buildDir/coverage"
+    }
+
+    // Generate tasks to archive compiled classfiles for later use with JaCoCo report generation.
+    // One of these tasks is used by `mach android archive-coverage-artifacts`.
+    android.libraryVariants.all { variant ->
+        def name = variant.name
+        def compileTask = tasks.getByName("compile${name.capitalize()}JavaWithJavac")
+        task "archiveClassfiles${name.capitalize()}"(type: Zip, dependsOn: compileTask) {
+            description = "Archive compiled classfiles for $name in order to export them as code coverage artifacts."
+            def fileFilter = ['**/androidTest/**',
+                              '**/test/**',
+                              '**/R.class',
+                              '**/R$*.class',
+                              '**/BuildConfig.*',
+                              '**/Manifest*.*',
+                              '**/*Test*.*',
+                              'android/**/*.*']
+            from fileTree(dir: compileTask.destinationDir, excludes: fileFilter)
+            destinationDir = file("${buildDir}/coverage")
+            // Note: This task assumes only one variant of archiveClassfiles* will be used.
+            // Running multiple variants of this task will overwrite the output archive.
+            archiveName = 'target.geckoview_classfiles.zip'
+        }
+    }
+}
+
+apply plugin: 'org.mozilla.apilint'
+
+apiLint {
+    // TODO: Change this to `org` after hiding org.mozilla.gecko
+    packageFilter = 'org.mozilla.geckoview'
+    changelogFileName = 'src/main/java/org/mozilla/geckoview/doc-files/CHANGELOG.md'
+    lintFilters = ['GV']
 }

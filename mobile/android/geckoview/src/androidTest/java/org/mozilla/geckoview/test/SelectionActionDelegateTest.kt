@@ -8,6 +8,7 @@ import org.mozilla.geckoview.GeckoResponse
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSession.SelectionActionDelegate.*
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.AssertCalled
+import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.NullDelegate
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.WithDevToolsAPI
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.WithDisplay
 import org.mozilla.geckoview.test.util.Callbacks
@@ -78,11 +79,12 @@ class SelectionActionDelegateTest : BaseSessionTest() {
                 testThat(selectedContent, {}, hasShowActionRequest(
                         FLAG_IS_EDITABLE, arrayOf(ACTION_COLLAPSE_TO_START, ACTION_COLLAPSE_TO_END,
                                                   ACTION_COPY, ACTION_CUT, ACTION_DELETE,
-                                                  ACTION_PASTE, ACTION_SELECT_ALL)))
+                                                  ACTION_HIDE, ACTION_PASTE, ACTION_SELECT_ALL)))
             }
         } else {
             testThat(selectedContent, {}, hasShowActionRequest(
-                    0, arrayOf(ACTION_COPY, ACTION_SELECT_ALL, ACTION_UNSELECT)))
+                    0, arrayOf(ACTION_COPY, ACTION_HIDE, ACTION_SELECT_ALL,
+                                           ACTION_UNSELECT)))
         }
     }
 
@@ -90,16 +92,19 @@ class SelectionActionDelegateTest : BaseSessionTest() {
         withClipboard ("text") {
             testThat(collapsedContent, {}, hasShowActionRequest(
                     FLAG_IS_EDITABLE or FLAG_IS_COLLAPSED,
-                    arrayOf(ACTION_PASTE, ACTION_SELECT_ALL)))
+                    arrayOf(ACTION_HIDE, ACTION_PASTE, ACTION_SELECT_ALL)))
         }
     }
 
     @Test fun request_noClipboard() = assumingEditable(true) {
         withClipboard("") {
             testThat(collapsedContent, {}, hasShowActionRequest(
-                    FLAG_IS_EDITABLE or FLAG_IS_COLLAPSED, arrayOf(ACTION_SELECT_ALL)))
+                    FLAG_IS_EDITABLE or FLAG_IS_COLLAPSED,
+                    arrayOf(ACTION_HIDE, ACTION_SELECT_ALL)))
         }
     }
+
+    @Test fun hide() = testThat(selectedContent, withResponse(ACTION_HIDE), clearsSelection())
 
     @Test fun cut() = assumingEditable(true) {
         withClipboard("") {
@@ -152,6 +157,31 @@ class SelectionActionDelegateTest : BaseSessionTest() {
     @Test fun collapseToEnd() = assumingEditable(true) {
         testThat(selectedContent, withResponse(ACTION_COLLAPSE_TO_END),
                  hasSelectionAt(selectedContent.initialContent.length))
+    }
+
+    @Test fun pagehide() {
+        // Navigating to another page should hide selection action.
+        testThat(selectedContent, { mainSession.loadTestPath(HELLO_HTML_PATH) }, clearsSelection())
+    }
+
+    @Test fun deactivate() {
+        // Blurring the window should hide selection action.
+        testThat(selectedContent, { mainSession.setFocused(false) }, clearsSelection())
+        mainSession.setFocused(true)
+    }
+
+    @NullDelegate(GeckoSession.SelectionActionDelegate::class)
+    @Test fun clearDelegate() {
+        var counter = 0
+        mainSession.selectionActionDelegate = object : Callbacks.SelectionActionDelegate {
+            override fun onHideAction(session: GeckoSession, reason: Int) {
+                counter++
+            }
+        }
+
+        mainSession.selectionActionDelegate = null
+        assertThat("Hide action should be called when clearing delegate",
+                   counter, equalTo(1))
     }
 
 

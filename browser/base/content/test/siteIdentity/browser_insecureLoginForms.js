@@ -18,7 +18,11 @@ function waitForInsecureLoginFormsStateChange(browser, count) {
  */
 add_task(async function test_simple() {
   await SpecialPowers.pushPrefEnv({
-    "set": [["security.insecure_password.ui.enabled", true]],
+    "set": [
+      ["security.insecure_password.ui.enabled", true],
+      // By default, proxies don't apply to 127.0.0.1. We need them to for this test, though:
+      ["network.proxy.no_proxies_on", ""],
+    ],
   });
 
   for (let [origin, expectWarning] of [
@@ -75,10 +79,8 @@ add_task(async function test_simple() {
       is(securityContentBG,
          "url(\"chrome://browser/skin/controlcenter/mcb-disabled.svg\")",
          "Using expected icon image in the Control Center subview");
-      is(Array.filter(document.getElementById("identity-popup-securityView")
-                              .querySelectorAll("[observes=identity-popup-insecure-login-forms-learn-more]"),
-                      element => !BrowserTestUtils.is_hidden(element)).length, 1,
-         "The 'Learn more' link should be visible once.");
+      ok(!BrowserTestUtils.is_hidden(document.getElementById("identity-popup-insecure-login-forms-learn-more")),
+         "The 'Learn more' link should be visible.");
     }
 
     // Messages should be visible when the scheme is HTTP, and invisible when

@@ -86,8 +86,8 @@ function getPromptState(ui) {
   state.textHidden  = ui.loginContainer.hidden;
   state.passHidden  = ui.password1Container.hidden;
   state.checkHidden = ui.checkboxContainer.hidden;
-  state.checkMsg    = ui.checkbox.label;
-  state.checked     = ui.checkbox.checked;
+  state.checkMsg    = state.checkHidden ? "" : ui.checkbox.label;
+  state.checked     = state.checkHidden ? false : ui.checkbox.checked;
   // tab-modal prompts don't have an infoIcon
   state.iconClass   = ui.infoIcon ? ui.infoIcon.className : null;
   state.textValue   = ui.loginTextbox.getAttribute("value");
@@ -119,9 +119,9 @@ function getPromptState(ui) {
     state.focused = "button1";
   } else if (ui.button2.isSameNode(e)) {
     state.focused = "button2";
-  } else if (ui.loginTextbox.inputField.isSameNode(e)) {
+  } else if (e.isSameNode(ui.loginTextbox.inputField)) {
     state.focused = "textField";
-  } else if (ui.password1Textbox.inputField.isSameNode(e)) {
+  } else if (e.isSameNode(ui.password1Textbox.inputField)) {
     state.focused = "passField";
   } else if (ui.infoBody.isSameNode(e)) {
     state.focused = "infoBody";
@@ -200,24 +200,16 @@ function getDialogDoc() {
   // Trudge through all the open windows, until we find the one
   // that has either commonDialog.xul or selectDialog.xul loaded.
   // var enumerator = Services.wm.getEnumerator("navigator:browser");
-  var enumerator = Services.wm.getXULWindowEnumerator(null);
-
-  while (enumerator.hasMoreElements()) {
-    var win = enumerator.getNext();
-    var windowDocShell = win.QueryInterface(Ci.nsIXULWindow).docShell;
-
-    var containedDocShells = windowDocShell.getDocShellEnumerator(
-                                      Ci.nsIDocShellTreeItem.typeChrome,
-                                      Ci.nsIDocShell.ENUMERATE_FORWARDS);
-    while (containedDocShells.hasMoreElements()) {
+  for (let {docShell} of Services.wm.getEnumerator(null)) {
+    var containedDocShells = docShell.getDocShellEnumerator(
+                                      docShell.typeChrome,
+                                      docShell.ENUMERATE_FORWARDS);
+    for (let childDocShell of containedDocShells) {
         // Get the corresponding document for this docshell
-        var childDocShell = containedDocShells.getNext();
         // We don't want it if it's not done loading.
         if (childDocShell.busyFlags != Ci.nsIDocShell.BUSY_FLAGS_NONE)
           continue;
-        var childDoc = childDocShell.QueryInterface(Ci.nsIDocShell)
-                                    .contentViewer
-                                    .DOMDocument;
+        var childDoc = childDocShell.contentViewer.DOMDocument;
 
         if (childDoc.location.href != "chrome://global/content/commonDialog.xul" &&
             childDoc.location.href != "chrome://global/content/selectDialog.xul")

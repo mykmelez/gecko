@@ -8,26 +8,25 @@
 #define MOZILLA_SMILBOOLTYPE_H_
 
 #include "mozilla/Attributes.h"
-#include "nsISMILType.h"
+#include "SMILType.h"
 
 namespace mozilla {
 
-class SMILBoolType : public nsISMILType
-{
-public:
+class SMILBoolType : public SMILType {
+ public:
   // Singleton for nsSMILValue objects to hold onto.
-  static SMILBoolType* Singleton()
-  {
+  static SMILBoolType* Singleton() {
     static SMILBoolType sSingleton;
     return &sSingleton;
   }
 
-protected:
-  // nsISMILType Methods
+ protected:
+  // SMILType Methods
   // -------------------
   virtual void Init(nsSMILValue& aValue) const override;
   virtual void Destroy(nsSMILValue& aValue) const override;
-  virtual nsresult Assign(nsSMILValue& aDest, const nsSMILValue& aSrc) const override;
+  virtual nsresult Assign(nsSMILValue& aDest,
+                          const nsSMILValue& aSrc) const override;
   virtual nsresult Add(nsSMILValue& aDest, const nsSMILValue& aValueToAdd,
                        uint32_t aCount) const override;
   virtual bool IsEqual(const nsSMILValue& aLeft,
@@ -36,15 +35,14 @@ protected:
                                    const nsSMILValue& aTo,
                                    double& aDistance) const override;
   virtual nsresult Interpolate(const nsSMILValue& aStartVal,
-                               const nsSMILValue& aEndVal,
-                               double aUnitDistance,
+                               const nsSMILValue& aEndVal, double aUnitDistance,
                                nsSMILValue& aResult) const override;
 
-private:
+ private:
   // Private constructor: prevent instances beyond my singleton.
   constexpr SMILBoolType() {}
 };
 
-} // namespace mozilla
+}  // namespace mozilla
 
-#endif // MOZILLA_SMILBOOLTYPE_H_
+#endif  // MOZILLA_SMILBOOLTYPE_H_

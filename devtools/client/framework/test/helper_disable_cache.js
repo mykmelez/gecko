@@ -17,27 +17,27 @@ var tabs = [
   {
     title: "Tab 0",
     desc: "Toggles cache on.",
-    startToolbox: true
+    startToolbox: true,
   },
   {
     title: "Tab 1",
     desc: "Toolbox open before Tab 1 toggles cache.",
-    startToolbox: true
+    startToolbox: true,
   },
   {
     title: "Tab 2",
     desc: "Opens toolbox after Tab 1 has toggled cache. Also closes and opens.",
-    startToolbox: false
+    startToolbox: false,
   },
   {
     title: "Tab 3",
     desc: "No toolbox",
-    startToolbox: false
+    startToolbox: false,
   }];
 
 async function initTab(tabX, startToolbox) {
   tabX.tab = await addTab(TEST_URI);
-  tabX.target = TargetFactory.forTab(tabX.tab);
+  tabX.target = await TargetFactory.forTab(tabX.tab);
 
   if (startToolbox) {
     tabX.toolbox = await gDevTools.showToolbox(tabX.target, "options");
@@ -85,28 +85,27 @@ async function setDisableCacheCheckboxChecked(tabX, state) {
 
   if (cbx.checked !== state) {
     info("Setting disable cache checkbox to " + state + " for " + tabX.title);
+    const onReconfigured = tabX.toolbox.once("cache-reconfigured");
     cbx.click();
 
-    // We need to wait for all checkboxes to be updated and the docshells to
-    // apply the new cache settings.
-    await waitForTick();
+    // We have to wait for the reconfigure request to be finished before reloading
+    // the page.
+    await onReconfigured;
   }
 }
 
 function reloadTab(tabX) {
-  const def = defer();
   const browser = gBrowser.selectedBrowser;
 
-  BrowserTestUtils.browserLoaded(browser).then(function() {
+  const reloadTabPromise = BrowserTestUtils.browserLoaded(browser).then(function() {
     info("Reloaded tab " + tabX.title);
-    def.resolve();
   });
 
   info("Reloading tab " + tabX.title);
   const mm = loadFrameScriptUtils();
   mm.sendAsyncMessage("devtools:test:reload");
 
-  return def.promise;
+  return reloadTabPromise;
 }
 
 async function destroyTab(tabX) {

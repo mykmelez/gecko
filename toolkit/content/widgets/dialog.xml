@@ -14,9 +14,6 @@
           xmlns:xbl="http://www.mozilla.org/xbl">
 
   <binding id="dialog">
-    <resources>
-      <stylesheet src="chrome://global/skin/dialog.css"/>
-    </resources>
     <content>
       <xul:vbox class="box-inherit dialog-content-box" flex="1">
         <children/>
@@ -292,6 +289,8 @@
                 var accessKey = this.mStrBundle.GetStringFromName("accesskey-" + dlgtype);
                 if (accessKey)
                   button.setAttribute("accesskey", accessKey);
+              } else if (this.hasAttribute("buttonid" + dlgtype)) {
+                document.l10n.setAttributes(button, this.getAttribute("buttonid" + dlgtype));
               }
             }
             // allow specifying alternate icons in the dialog header
@@ -459,7 +458,9 @@
       <handler event="focus" phase="capturing">
         var btn = this.getButton(this.defaultButton);
         if (btn)
-          btn.setAttribute("default", event.originalTarget == btn || !(event.originalTarget instanceof Ci.nsIDOMXULButtonElement));
+          btn.setAttribute("default", event.originalTarget == btn ||
+                           !(event.originalTarget.localName == "button" ||
+                             event.originalTarget.localName == "toolbarbutton"));
       </handler>
 #endif
     </handlers>

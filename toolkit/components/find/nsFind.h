@@ -20,21 +20,24 @@ class nsRange;
 
 #define NS_FIND_CONTRACTID "@mozilla.org/embedcomp/rangefind;1"
 
-#define NS_FIND_CID \
-  {0x471f4944, 0x1dd2, 0x11b2, {0x87, 0xac, 0x90, 0xbe, 0x0a, 0x51, 0xd6, 0x09}}
+#define NS_FIND_CID                                  \
+  {                                                  \
+    0x471f4944, 0x1dd2, 0x11b2, {                    \
+      0x87, 0xac, 0x90, 0xbe, 0x0a, 0x51, 0xd6, 0x09 \
+    }                                                \
+  }
 
 class nsFindContentIterator;
 
-class nsFind : public nsIFind
-{
-public:
+class nsFind : public nsIFind {
+ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_NSIFIND
   NS_DECL_CYCLE_COLLECTION_CLASS(nsFind)
 
   nsFind();
 
-protected:
+ protected:
   virtual ~nsFind();
 
   // Parameters set from the interface:
@@ -48,26 +51,10 @@ protected:
   struct State;
   class StateRestorer;
 
-  // Move in the right direction for our search:
-  nsresult NextNode(State&,
-                    const nsRange* aSearchRange,
-                    const nsRange* aStartPoint,
-                    const nsRange* aEndPoint) const;
-
   // Get the first character from the next node (last if mFindBackward).
   //
   // This will mutate the state, but then restore it afterwards.
-  char16_t PeekNextChar(State&,
-                        const nsRange* aSearchRange,
-                        const nsRange* aStartPoint,
-                        const nsRange* aEndPoint) const;
-
-  // The iterator we use to move through the document:
-  nsresult InitIterator(State&,
-                        nsINode* aStartNode,
-                        int32_t aStartOffset,
-                        nsINode* aEndNode,
-                        int32_t aEndOffset) const;
+  char16_t PeekNextChar(State&) const;
 };
 
-#endif // nsFind_h__
+#endif  // nsFind_h__

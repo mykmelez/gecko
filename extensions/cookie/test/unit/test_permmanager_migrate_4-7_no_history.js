@@ -45,6 +45,7 @@ function GetPermissionsFile(profile)
 add_task(function test() {
   /* Create and set up the permissions database */
   let profile = do_get_profile();
+  Services.prefs.setCharPref("permissions.manager.defaultsUrl", "");
 
   // Make sure that we can't resolve the nsINavHistoryService
   try {
@@ -176,9 +177,7 @@ add_task(function test() {
   let found = expected.map((it) => 0);
 
   // Force initialization of the nsPermissionManager
-  let enumerator = Services.perms.enumerator;
-  while (enumerator.hasMoreElements()) {
-    let permission = enumerator.getNext().QueryInterface(Ci.nsIPermission);
+  for (let permission of Services.perms.enumerator) {
     let isExpected = false;
 
     expected.forEach((it, i) => {

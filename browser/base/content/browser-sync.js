@@ -26,7 +26,7 @@ var gSync = {
   _obs: [
     "weave:engine:sync:finish",
     "quit-application",
-    UIState.ON_UPDATE
+    UIState.ON_UPDATE,
   ],
 
   get fxaStrings() {
@@ -49,20 +49,21 @@ var gSync = {
     return Cc["@mozilla.org/weave/service;1"].getService().wrappedJSObject.ready;
   },
 
-  // Returns true if sync is configured but hasn't loaded or is yet to determine
-  // if any remote clients exist.
-  get syncConfiguredAndLoading() {
+  // Returns true if sync is configured but hasn't loaded or the send tab
+  // targets list isn't ready yet.
+  get sendTabConfiguredAndLoading() {
     return UIState.get().status == UIState.STATUS_SIGNED_IN &&
-           (!this.syncReady || Weave.Service.clientsEngine.isFirstSync);
+           (!this.syncReady || !Weave.Service.clientsEngine.hasSyncedThisSession);
   },
 
   get isSignedIn() {
     return UIState.get().status == UIState.STATUS_SIGNED_IN;
   },
 
-  get remoteClients() {
-    return Weave.Service.clientsEngine.remoteClients
-           .sort((a, b) => a.name.localeCompare(b.name));
+  get sendTabTargets() {
+    return Weave.Service.clientsEngine.fxaDevices
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .filter(d => !d.isCurrentDevice && (fxAccounts.commands.sendTab.isDeviceCompatible(d) || d.clientRecord));
   },
 
   get offline() {
@@ -121,18 +122,20 @@ var gSync = {
       return;
     }
 
-    // initial label for the sync buttons.
-    let statusBroadcaster = document.getElementById("sync-status");
-    if (!statusBroadcaster) {
+    // Label for the sync buttons, also set on the icon for accessibility.
+    let syncIcon = document.getElementById("appMenu-fxa-icon");
+    if (!syncIcon) {
       // We are in a window without our elements - just abort now, without
       // setting this._initialized, so we don't attempt to remove observers.
       return;
     }
-    statusBroadcaster.setAttribute("label", this.syncStrings.GetStringFromName("syncnow.label"));
-    // We start with every broadcasters hidden, so that we don't need to init
+    let syncNow = document.getElementById("PanelUI-remotetabs-syncnow");
+    let label = this.syncStrings.GetStringFromName("syncnow.label");
+    syncIcon.setAttribute("label", label);
+    syncNow.setAttribute("label", label);
+    // We start with every menuitem hidden, so that we don't need to init
     // the sync UI on windows like pageInfo.xul (see bug 1384856).
-    let setupBroadcaster = document.getElementById("sync-setup-state");
-    setupBroadcaster.hidden = false;
+    document.getElementById("sync-setup").hidden = false;
 
     for (let topic of this._obs) {
       Services.obs.addObserver(this, topic, true);
@@ -185,7 +188,7 @@ var gSync = {
 
   updateAllUI(state) {
     this.updatePanelPopup(state);
-    this.updateStateBroadcasters(state);
+    this.updateState(state);
     this.updateSyncButtonsTooltip(state);
     this.updateSyncStatus(state);
   },
@@ -243,30 +246,25 @@ var gSync = {
     }
   },
 
-  updateStateBroadcasters(state) {
-    const status = state.status;
-
-    // Start off with a clean slate
-    document.getElementById("sync-reauth-state").hidden = true;
-    document.getElementById("sync-setup-state").hidden = true;
-    document.getElementById("sync-syncnow-state").hidden = true;
-    document.getElementById("sync-unverified-state").hidden = true;
-
-    if (status == UIState.STATUS_LOGIN_FAILED) {
-      // unhiding this element makes the menubar show the login failure state.
-      document.getElementById("sync-reauth-state").hidden = false;
-    } else if (status == UIState.STATUS_NOT_CONFIGURED) {
-      document.getElementById("sync-setup-state").hidden = false;
-    } else if (status == UIState.STATUS_NOT_VERIFIED) {
-      document.getElementById("sync-unverified-state").hidden = false;
-    } else {
-      document.getElementById("sync-syncnow-state").hidden = false;
+  updateState(state) {
+    for (let [status, menuId, boxId] of [
+      [UIState.STATUS_NOT_CONFIGURED, "sync-setup",
+                                      "PanelUI-remotetabs-setupsync"],
+      [UIState.STATUS_LOGIN_FAILED,   "sync-reauthitem",
+                                      "PanelUI-remotetabs-reauthsync"],
+      [UIState.STATUS_NOT_VERIFIED,   "sync-unverifieditem",
+                                      "PanelUI-remotetabs-unverified"],
+      [UIState.STATUS_SIGNED_IN,      "sync-syncnowitem",
+                                      "PanelUI-remotetabs-main"],
+    ]) {
+      document.getElementById(menuId).hidden =
+        document.getElementById(boxId).hidden = (status != state.status);
     }
   },
 
   updateSyncStatus(state) {
-    const broadcaster = document.getElementById("sync-status");
-    const syncingUI = broadcaster.getAttribute("syncstatus") == "active";
+    let syncNow = document.getElementById("PanelUI-remotetabs-syncnow");
+    const syncingUI = syncNow.getAttribute("syncstatus") == "active";
     if (state.syncing != syncingUI) { // Do we need to update the UI?
       state.syncing ? this.onActivityStart() : this.onActivityStop();
     }
@@ -319,53 +317,58 @@ var gSync = {
     switchToTabHavingURI(url, true, { replaceQueryString: true });
   },
 
-  async sendTabToDevice(url, clients, title) {
-    let devices;
-    try {
-      devices = await fxAccounts.getDeviceList();
-    } catch (e) {
-      console.error("Could not get the FxA device list", e);
-      devices = []; // We can still run in degraded mode.
-    }
-    const toSendMessages = [];
-    for (const client of clients) {
-      const device = devices.find(d => d.id == client.fxaDeviceId);
-      if (device && fxAccounts.messages.canReceiveSendTabMessages(device)) {
-        toSendMessages.push(device);
+  async sendTabToDevice(url, targets, title) {
+    const fxaCommandsDevices = [];
+    const oldSendTabClients = [];
+    for (const target of targets) {
+      if (fxAccounts.commands.sendTab.isDeviceCompatible(target)) {
+        fxaCommandsDevices.push(target);
+      } else if (target.clientRecord) {
+        oldSendTabClients.push(target.clientRecord);
       } else {
-        try {
-          await Weave.Service.clientsEngine.sendURIToClientForDisplay(url, client.id, title);
-        } catch (e) {
-          console.error("Could not send tab to device", e);
-        }
+        console.error(`Target ${target.id} unsuitable for send tab.`);
       }
     }
-    if (toSendMessages.length) {
+    if (fxaCommandsDevices.length) {
+      console.log(`Sending a tab to ${fxaCommandsDevices.map(d => d.name).join(", ")} using FxA commands.`);
+      const report = await fxAccounts.commands.sendTab.send(fxaCommandsDevices, {url, title});
+      for (let {device, error} of report.failed) {
+        console.error(`Failed to send a tab with FxA commands for ${device.name}.
+                       Falling back on the Sync back-end`, error);
+        if (!device.clientRecord) {
+          console.error(`Could not find associated Sync device for ${device.name}`);
+          continue;
+        }
+        oldSendTabClients.push(device.clientRecord);
+      }
+    }
+    for (let client of oldSendTabClients) {
       try {
-        await fxAccounts.messages.sendTab(toSendMessages, {url, title});
+        console.log(`Sending a tab to ${client.name} using Sync.`);
+        await Weave.Service.clientsEngine.sendURIToClientForDisplay(url, client.id, title);
       } catch (e) {
-        console.error("Could not send tab to device", e);
+        console.error("Could not send tab to device.", e);
       }
     }
   },
 
-  populateSendTabToDevicesMenu(devicesPopup, url, title, createDeviceNodeFn) {
+  populateSendTabToDevicesMenu(devicesPopup, url, title, multiselected, createDeviceNodeFn) {
     if (!createDeviceNodeFn) {
-      createDeviceNodeFn = (clientId, name, clientType, lastModified) => {
+      createDeviceNodeFn = (targetId, name, targetType, lastModified) => {
         let eltName = name ? "menuitem" : "menuseparator";
-        return document.createElement(eltName);
+        return document.createXULElement(eltName);
       };
     }
 
     // remove existing menu items
-    for (let i = devicesPopup.childNodes.length - 1; i >= 0; --i) {
-      let child = devicesPopup.childNodes[i];
+    for (let i = devicesPopup.children.length - 1; i >= 0; --i) {
+      let child = devicesPopup.children[i];
       if (child.classList.contains("sync-menuitem")) {
         child.remove();
       }
     }
 
-    if (gSync.syncConfiguredAndLoading) {
+    if (gSync.sendTabConfiguredAndLoading) {
       // We can only be in this case in the page action menu.
       return;
     }
@@ -373,8 +376,8 @@ var gSync = {
     const fragment = document.createDocumentFragment();
 
     const state = UIState.get();
-    if (state.status == UIState.STATUS_SIGNED_IN && this.remoteClients.length > 0) {
-      this._appendSendTabDeviceList(fragment, createDeviceNodeFn, url, title);
+    if (state.status == UIState.STATUS_SIGNED_IN && this.sendTabTargets.length > 0) {
+      this._appendSendTabDeviceList(fragment, createDeviceNodeFn, url, title, multiselected);
     } else if (state.status == UIState.STATUS_SIGNED_IN) {
       this._appendSendTabSingleDevice(fragment, createDeviceNodeFn);
     } else if (state.status == UIState.STATUS_NOT_VERIFIED ||
@@ -390,35 +393,55 @@ var gSync = {
   // TODO: once our transition from the old-send tab world is complete,
   // this list should be built using the FxA device list instead of the client
   // collection.
-  _appendSendTabDeviceList(fragment, createDeviceNodeFn, url, title) {
+  _appendSendTabDeviceList(fragment, createDeviceNodeFn, url, title, multiselected) {
+    const targets = this.sendTabTargets;
+
+    let tabsToSend = multiselected ?
+      gBrowser.selectedTabs.map(t => {
+        return {
+          url: t.linkedBrowser.currentURI.spec,
+          title: t.linkedBrowser.contentTitle,
+        };
+      }) : [{url, title}];
+
     const onSendAllCommand = (event) => {
-      this.sendTabToDevice(url, this.remoteClients, title);
+      for (let t of tabsToSend) {
+        this.sendTabToDevice(t.url, targets, t.title);
+      }
     };
     const onTargetDeviceCommand = (event) => {
-      const clientId = event.target.getAttribute("clientId");
-      const client = this.remoteClients.find(c => c.id == clientId);
-      this.sendTabToDevice(url, [client], title);
+      const targetId = event.target.getAttribute("clientId");
+      const target = targets.find(t => t.id == targetId);
+      for (let t of tabsToSend) {
+        this.sendTabToDevice(t.url, [target], t.title);
+      }
     };
 
-    function addTargetDevice(clientId, name, clientType, lastModified) {
-      const targetDevice = createDeviceNodeFn(clientId, name, clientType, lastModified);
-      targetDevice.addEventListener("command", clientId ? onTargetDeviceCommand :
+    function addTargetDevice(targetId, name, targetType, lastModified) {
+      const targetDevice = createDeviceNodeFn(targetId, name, targetType, lastModified);
+      targetDevice.addEventListener("command", targetId ? onTargetDeviceCommand :
                                                           onSendAllCommand, true);
       targetDevice.classList.add("sync-menuitem", "sendtab-target");
-      targetDevice.setAttribute("clientId", clientId);
-      targetDevice.setAttribute("clientType", clientType);
+      targetDevice.setAttribute("clientId", targetId);
+      targetDevice.setAttribute("clientType", targetType);
       targetDevice.setAttribute("label", name);
       fragment.appendChild(targetDevice);
     }
 
-    const clients = this.remoteClients;
-    for (let client of clients) {
-      const type = Weave.Service.clientsEngine.getClientType(client.id);
-      addTargetDevice(client.id, client.name, type, new Date(client.serverLastModified * 1000));
+    for (let target of targets) {
+      let type, lastModified;
+      if (target.clientRecord) {
+        type = Weave.Service.clientsEngine.getClientType(target.clientRecord.id);
+        lastModified = new Date(target.clientRecord.serverLastModified * 1000);
+      } else {
+        type = target.type === "desktop" ? "desktop" : "phone"; // Normalizing the FxA types just in case.
+        lastModified = null;
+      }
+      addTargetDevice(target.id, target.name, type, lastModified);
     }
 
     // "Send to All Devices" menu item
-    if (clients.length > 1) {
+    if (targets.length > 1) {
       const separator = createDeviceNodeFn();
       separator.classList.add("sync-menuitem");
       fragment.appendChild(separator);
@@ -461,7 +484,7 @@ var gSync = {
     signInItem.addEventListener("command", () => {
       this.openPrefs("sendtab");
     });
-    fragment.insertBefore(signInItem, fragment.lastChild);
+    fragment.insertBefore(signInItem, fragment.lastElementChild);
   },
 
   _appendSendTabInfoItems(fragment, createDeviceNodeFn, statusLabel, actions) {
@@ -504,14 +527,31 @@ var gSync = {
 
   // "Send Tab to Device" menu item
   updateTabContextMenu(aPopupMenu, aTargetTab) {
+    // We may get here before initialisation. This situation
+    // can lead to a empty label for 'Send To Device' Menu.
+    this.init();
+
     if (!this.SYNC_ENABLED) {
       // These items are hidden in onSyncDisabled(). No need to do anything.
       return;
     }
-    const enabled = !this.syncConfiguredAndLoading &&
-                    this.isSendableURI(aTargetTab.linkedBrowser.currentURI.spec);
+    let hasASendableURI = false;
+    for (let tab of aTargetTab.multiselected ? gBrowser.selectedTabs : [aTargetTab]) {
+      if (this.isSendableURI(tab.linkedBrowser.currentURI.spec)) {
+        hasASendableURI = true;
+        break;
+      }
+    }
+    const enabled = !this.sendTabConfiguredAndLoading && hasASendableURI;
 
-    document.getElementById("context_sendTabToDevice").disabled = !enabled;
+    let sendTabsToDevice = document.getElementById("context_sendTabToDevice");
+    sendTabsToDevice.disabled = !enabled;
+
+    let tabCount = aTargetTab.multiselected ? gBrowser.multiSelectedTabsCount : 1;
+    sendTabsToDevice.label = PluralForm.get(tabCount,
+                                           gNavigatorBundle.getString("sendTabsToDevice.label"))
+                                      .replace("#1", tabCount.toLocaleString());
+    sendTabsToDevice.accessKey = gNavigatorBundle.getString("sendTabsToDevice.accesskey");
   },
 
   // "Send Page to Device" and "Send Link to Device" menu items
@@ -542,7 +582,7 @@ var gSync = {
 
     const targetURI = showSendLink ? contextMenu.linkURL :
                                      contextMenu.browser.currentURI.spec;
-    const enabled = !this.syncConfiguredAndLoading && this.isSendableURI(targetURI);
+    const enabled = !this.sendTabConfiguredAndLoading && this.isSendableURI(targetURI);
     contextMenu.setItemAttr(showSendPage ? "context-sendpagetodevice" :
                                            "context-sendlinktodevice",
                                            "disabled", !enabled || null);
@@ -553,19 +593,29 @@ var gSync = {
     clearTimeout(this._syncAnimationTimer);
     this._syncStartTime = Date.now();
 
-    let broadcaster = document.getElementById("sync-status");
-    broadcaster.setAttribute("syncstatus", "active");
-    broadcaster.setAttribute("label", this.syncStrings.GetStringFromName("syncingtabs.label"));
-    broadcaster.setAttribute("disabled", "true");
+    let label = this.syncStrings.GetStringFromName("syncingtabs.label");
+    let syncIcon = document.getElementById("appMenu-fxa-icon");
+    let syncNow = document.getElementById("PanelUI-remotetabs-syncnow");
+    syncIcon.setAttribute("syncstatus", "active");
+    syncIcon.setAttribute("label", label);
+    syncIcon.setAttribute("disabled", "true");
+    syncNow.setAttribute("syncstatus", "active");
+    syncNow.setAttribute("label", label);
+    syncNow.setAttribute("disabled", "true");
   },
 
   _onActivityStop() {
     if (!gBrowser)
       return;
-    let broadcaster = document.getElementById("sync-status");
-    broadcaster.removeAttribute("syncstatus");
-    broadcaster.removeAttribute("disabled");
-    broadcaster.setAttribute("label", this.syncStrings.GetStringFromName("syncnow.label"));
+    let label = this.syncStrings.GetStringFromName("syncnow.label");
+    let syncIcon = document.getElementById("appMenu-fxa-icon");
+    let syncNow = document.getElementById("PanelUI-remotetabs-syncnow");
+    syncIcon.removeAttribute("syncstatus");
+    syncIcon.removeAttribute("disabled");
+    syncIcon.setAttribute("label", label);
+    syncNow.removeAttribute("syncstatus");
+    syncNow.removeAttribute("disabled");
+    syncNow.setAttribute("label", label);
     Services.obs.notifyObservers(null, "test:browser-sync:activity-stop");
   },
 
@@ -591,7 +641,15 @@ var gSync = {
     const state = UIState.get();
     if (state.status == UIState.STATUS_SIGNED_IN) {
       this.updateSyncStatus({ syncing: true });
-      Services.tm.dispatchToMainThread(() => Weave.Service.sync());
+      Services.tm.dispatchToMainThread(() => {
+        // We are pretty confident that push helps us pick up all FxA commands,
+        // but some users might have issues with push, so let's unblock them
+        // by fetching the missed FxA commands on manual sync.
+        fxAccounts.commands.fetchMissedRemoteCommands().catch(e => {
+          console.error("Fetching missed remote commands failed.", e);
+        });
+        Weave.Service.sync();
+      });
     }
   },
 
@@ -622,8 +680,7 @@ var gSync = {
     this.updateSyncButtonsTooltip(state);
   },
 
-  /* Update the tooltip for the sync-status broadcaster (which will update the
-     Sync Toolbar button and the Sync spinner in the FxA hamburger area.)
+  /* Update the tooltip for the sync icon in the main menu and in Synced Tabs.
      If Sync is configured, the tooltip is when the last sync occurred,
      otherwise the tooltip reflects the fact that Sync needs to be
      (re-)configured.
@@ -649,19 +706,22 @@ var gSync = {
       tooltiptext = this.formatLastSyncDate(state.lastSync);
     }
 
-    let broadcaster = document.getElementById("sync-status");
-    if (broadcaster) {
+    let syncIcon = document.getElementById("appMenu-fxa-icon");
+    if (syncIcon) {
+      let syncNow = document.getElementById("PanelUI-remotetabs-syncnow");
       if (tooltiptext) {
-        broadcaster.setAttribute("tooltiptext", tooltiptext);
+        syncIcon.setAttribute("tooltiptext", tooltiptext);
+        syncNow.setAttribute("tooltiptext", tooltiptext);
       } else {
-        broadcaster.removeAttribute("tooltiptext");
+        syncIcon.removeAttribute("tooltiptext");
+        syncNow.removeAttribute("tooltiptext");
       }
     }
   },
 
   get relativeTimeFormat() {
     delete this.relativeTimeFormat;
-    return this.relativeTimeFormat = new Services.intl.RelativeTimeFormat(undefined, {style: "short"});
+    return this.relativeTimeFormat = new Services.intl.RelativeTimeFormat(undefined, {style: "long"});
   },
 
   formatLastSyncDate(date) {
@@ -673,12 +733,12 @@ var gSync = {
   },
 
   onClientsSynced() {
-    let broadcaster = document.getElementById("sync-syncnow-state");
-    if (broadcaster) {
+    let element = document.getElementById("PanelUI-remotetabs-main");
+    if (element) {
       if (Weave.Service.clientsEngine.stats.numClients > 1) {
-        broadcaster.setAttribute("devices-status", "multi");
+        element.setAttribute("devices-status", "multi");
       } else {
-        broadcaster.setAttribute("devices-status", "single");
+        element.setAttribute("devices-status", "single");
       }
     }
   },
@@ -692,6 +752,6 @@ var gSync = {
 
   QueryInterface: ChromeUtils.generateQI([
     Ci.nsIObserver,
-    Ci.nsISupportsWeakReference
-  ])
+    Ci.nsISupportsWeakReference,
+  ]),
 };

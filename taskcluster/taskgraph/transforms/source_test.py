@@ -1,4 +1,3 @@
-# This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 """
@@ -16,7 +15,6 @@ from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.job import job_description_schema
 from taskgraph.util.attributes import keymatch
 from taskgraph.util.schema import (
-    validate_schema,
     resolve_keyed_by,
 )
 from taskgraph.util.treeherder import join_symbol, split_symbol
@@ -28,8 +26,6 @@ from voluptuous import (
     Required,
     Schema,
 )
-
-ARTIFACT_URL = 'https://queue.taskcluster.net/v1/task/{}/artifacts/{}'
 
 job_description_schema = {str(k): v for k, v in job_description_schema.schema.iteritems()}
 
@@ -72,12 +68,7 @@ def set_defaults(config, jobs):
         yield job
 
 
-@transforms.add
-def validate(config, jobs):
-    for job in jobs:
-        validate_schema(source_test_description_schema, job,
-                        "In job {!r}:".format(job['name']))
-        yield job
+transforms.add_validate(source_test_description_schema)
 
 
 @transforms.add
@@ -128,6 +119,36 @@ def split_python(config, jobs):
             yield pyjob
 
 
+@transforms.add
+def split_jsshell(config, jobs):
+    all_shells = {
+        'sm': "Spidermonkey",
+        'v8': "Google V8"
+    }
+
+    for job in jobs:
+        if not job['name'].startswith('jsshell'):
+            yield job
+            continue
+
+        test = job.pop('test')
+        for shell in job.get('shell', all_shells.keys()):
+            assert shell in all_shells
+
+            new_job = copy.deepcopy(job)
+            new_job['name'] = '{}-{}'.format(new_job['name'], shell)
+            new_job['description'] = '{} on {}'.format(new_job['description'], all_shells[shell])
+            new_job['shell'] = shell
+
+            group = 'js-bench-{}'.format(shell)
+            symbol = split_symbol(new_job['treeherder']['symbol'])[1]
+            new_job['treeherder']['symbol'] = join_symbol(group, symbol)
+
+            run = new_job['run']
+            run['mach'] = run['mach'].format(shell=shell, SHELL=shell.upper(), test=test)
+            yield new_job
+
+
 def add_build_dependency(config, job):
     """
     Add build dependency to the job and installer_url to env.
@@ -171,4 +192,26 @@ def handle_platform(config, jobs):
             add_build_dependency(config, job)
 
         del job['platform']
+        yield job
+
+
+@transforms.add
+def handle_shell(config, jobs):
+    """
+    Handle the 'shell' property.
+    """
+    fields = [
+        'run-on-projects',
+        'worker.env',
+    ]
+
+    for job in jobs:
+        if not job.get('shell'):
+            yield job
+            continue
+
+        for field in fields:
+            resolve_keyed_by(job, field, item_name=job['name'])
+
+        del job['shell']
         yield job

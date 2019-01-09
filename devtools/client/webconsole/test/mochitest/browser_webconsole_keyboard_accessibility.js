@@ -17,13 +17,23 @@ const TEST_URI =
   `;
 
 add_task(async function() {
+  // Run in legacy JsTerm.
+  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
+  await performTests();
+
+  // And then in codeMirror JsTerm.
+  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
+  await performTests();
+});
+
+async function performTests() {
   const hud = await openNewTabAndConsole(TEST_URI);
   info("Web Console opened");
   const outputScroller = hud.ui.outputScroller;
   await waitFor(() => findMessages(hud, "").length == 100);
   let currentPosition = outputScroller.scrollTop;
   const bottom = currentPosition;
-  hud.jsterm.inputNode.focus();
+  hud.jsterm.focus();
   // Page up.
   EventUtils.synthesizeKey("KEY_PageUp");
   isnot(outputScroller.scrollTop, currentPosition,
@@ -54,12 +64,17 @@ add_task(async function() {
   }
   synthesizeKeyShortcut(clearShortcut);
   await waitFor(() => findMessages(hud, "").length == 0);
-  ok(hasFocus(hud.jsterm.inputNode), "jsterm input is focused");
+  ok(isJstermFocused(hud.jsterm), "jsterm input is focused");
 
   // Focus filter
   info("try ctrl-f to focus filter");
   synthesizeKeyShortcut(WCUL10n.getStr("webconsole.find.key"));
-  ok(!hasFocus(hud.jsterm.inputNode), "jsterm input is not focused");
+  ok(!isJstermFocused(hud.jsterm), "jsterm input is not focused");
+  ok(hasFocus(hud.ui.filterBox), "filter input is focused");
+
+  info("try ctrl-f when filter is already focused");
+  synthesizeKeyShortcut(WCUL10n.getStr("webconsole.find.key"));
+  ok(!isJstermFocused(hud.jsterm), "jsterm input is not focused");
   is(hud.ui.filterBox, outputScroller.ownerDocument.activeElement,
     "filter input is focused");
-});
+}

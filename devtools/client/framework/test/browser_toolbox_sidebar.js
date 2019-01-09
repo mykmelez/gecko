@@ -21,24 +21,24 @@ function test() {
     label: "FAKE TOOL!!!",
     isTargetSupported: () => true,
     build: function(iframeWindow, toolbox) {
-      const deferred = defer();
-      executeSoon(() => {
-        deferred.resolve({
-          target: toolbox.target,
-          toolbox: toolbox,
-          isReady: true,
-          destroy: function() {},
-          panelDoc: iframeWindow.document,
+      return new Promise(resolve => {
+        executeSoon(() => {
+          resolve({
+            target: toolbox.target,
+            toolbox: toolbox,
+            isReady: true,
+            destroy: function() {},
+            panelDoc: iframeWindow.document,
+          });
         });
       });
-      return deferred.promise;
     },
   };
 
   gDevTools.registerTool(toolDefinition);
 
-  addTab("about:blank").then(function(aTab) {
-    const target = TargetFactory.forTab(aTab);
+  addTab("about:blank").then(async function(aTab) {
+    const target = await TargetFactory.forTab(aTab);
     gDevTools.showToolbox(target, toolDefinition.id).then(function(toolbox) {
       const panel = toolbox.getPanel(toolDefinition.id);
       panel.toolbox = toolbox;

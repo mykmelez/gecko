@@ -172,14 +172,8 @@ var AssociatedToNode = class {
     return this.node.ownerGlobal;
   }
 
-  /**
-   * nsIDOMWindowUtils for the window of this node.
-   */
-  get _dwu() {
-    if (this.__dwu)
-      return this.__dwu;
-    return this.__dwu = this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-                                   .getInterface(Ci.nsIDOMWindowUtils);
+  _getBoundsWithoutFlushing(element) {
+    return this.window.windowUtils.getBoundsWithoutFlushing(element);
   }
 
   /**
@@ -373,18 +367,18 @@ var PanelMultiView = class extends AssociatedToNode {
     PanelMultiView.ensureUnloadHandlerRegistered(this.window);
 
     let viewContainer = this._viewContainer =
-      this.document.createElement("box");
+      this.document.createXULElement("box");
     viewContainer.classList.add("panel-viewcontainer");
 
-    let viewStack = this._viewStack = this.document.createElement("box");
+    let viewStack = this._viewStack = this.document.createXULElement("box");
     viewStack.classList.add("panel-viewstack");
     viewContainer.append(viewStack);
 
-    let offscreenViewContainer = this.document.createElement("box");
+    let offscreenViewContainer = this.document.createXULElement("box");
     offscreenViewContainer.classList.add("panel-viewcontainer", "offscreen");
 
     let offscreenViewStack = this._offscreenViewStack =
-      this.document.createElement("box");
+      this.document.createXULElement("box");
     offscreenViewStack.classList.add("panel-viewstack");
     offscreenViewContainer.append(offscreenViewStack);
 
@@ -397,17 +391,13 @@ var PanelMultiView = class extends AssociatedToNode {
     this._panel.addEventListener("popuppositioned", this);
     this._panel.addEventListener("popuphidden", this);
     this._panel.addEventListener("popupshown", this);
-    let cs = this.window.getComputedStyle(this.document.documentElement);
-    // Set CSS-determined attributes now to prevent a layout flush when we do
-    // it when transitioning between panels.
-    this._dir = cs.direction;
 
     // Proxy these public properties and methods, as used elsewhere by various
     // parts of the browser, to this instance.
     ["goBack", "showSubView"].forEach(method => {
       Object.defineProperty(this.node, method, {
         enumerable: true,
-        value: (...args) => this[method](...args)
+        value: (...args) => this[method](...args),
       });
     });
   }
@@ -424,8 +414,7 @@ var PanelMultiView = class extends AssociatedToNode {
     this._panel.removeEventListener("popuphidden", this);
     this.window.removeEventListener("keydown", this);
     this.node = this._openPopupPromise = this._openPopupCancelCallback =
-      this._viewContainer = this._viewStack = this.__dwu =
-      this._transitionDetails = null;
+      this._viewContainer = this._viewStack = this._transitionDetails = null;
   }
 
   /**
@@ -450,8 +439,14 @@ var PanelMultiView = class extends AssociatedToNode {
    * this method is called, but the containing panel must have its display
    * turned on, for example it shouldn't have the "hidden" attribute.
    *
+   * @param anchor
+   *        The node to anchor the popup to.
+   * @param options
+   *        Either options to use or a string position. This is forwarded to
+   *        the openPopup method of the panel.
    * @param args
-   *        Arguments to be forwarded to the openPopup method of the panel.
+   *        Additional arguments to be forwarded to the openPopup method of the
+   *        panel.
    *
    * @resolves With true as soon as the request to display the panel has been
    *           sent, or with false if the operation was canceled. The state of
@@ -460,7 +455,7 @@ var PanelMultiView = class extends AssociatedToNode {
    * @rejects If an exception is thrown at any point in the process before the
    *          request to display the panel is sent.
    */
-  async openPopup(...args) {
+  async openPopup(anchor, options, ...args) {
     // Set up the function that allows hidePopup or a second call to showPopup
     // to cancel the specific panel opening operation that we're starting below.
     // This function must be synchronous, meaning we can't use Promise.race,
@@ -522,7 +517,23 @@ var PanelMultiView = class extends AssociatedToNode {
       // "popuphidden" event even if canCancel was set to false.
       try {
         canCancel = false;
-        this._panel.openPopup(...args);
+        this._panel.openPopup(anchor, options, ...args);
+
+        // On Windows, if another popup is hiding while we call openPopup, the
+        // call won't fail but the popup won't open. In this case, we have to
+        // dispatch an artificial "popuphidden" event to reset our state.
+        if (this._panel.state == "closed" && this.openViews.length) {
+          this.dispatchCustomEvent("popuphidden");
+          return false;
+        }
+
+        if (options && typeof options == "object" && options.triggerEvent &&
+            options.triggerEvent.type == "keypress" &&
+            this.openViews.length) {
+          // This was opened via the keyboard, so focus the first item.
+          this.openViews[0].focusWhenActive = true;
+        }
+
         return true;
       } catch (ex) {
         this.dispatchCustomEvent("popuphidden");
@@ -573,9 +584,9 @@ var PanelMultiView = class extends AssociatedToNode {
       return;
     }
 
-    // Node.children and Node.childNodes is live to DOM changes like the
+    // Node.children and Node.children is live to DOM changes like the
     // ones we're about to do, so iterate over a static copy:
-    let subviews = Array.from(this._viewStack.childNodes);
+    let subviews = Array.from(this._viewStack.children);
     let viewCache = this.document.getElementById(viewCacheId);
     for (let subview of subviews) {
       viewCache.appendChild(subview);
@@ -791,6 +802,10 @@ var PanelMultiView = class extends AssociatedToNode {
   _activateView(panelView) {
     if (panelView.isOpenIn(this)) {
       panelView.active = true;
+      if (panelView.focusWhenActive) {
+        panelView.focusFirstNavigableElement();
+        panelView.focusWhenActive = false;
+      }
       panelView.dispatchCustomEvent("ViewShown");
     }
   }
@@ -876,10 +891,10 @@ var PanelMultiView = class extends AssociatedToNode {
       nextPanelView.visible = true;
       // Until the header is visible, it has 0 height.
       // Wait for layout before measuring it
-      let header = viewNode.firstChild;
+      let header = viewNode.firstElementChild;
       if (header && header.classList.contains("panel-header")) {
         viewRect.height += await window.promiseDocumentFlushed(() => {
-          return this._dwu.getBoundsWithoutFlushing(header).height;
+          return this._getBoundsWithoutFlushing(header).height;
         });
       }
       await nextPanelView.descriptionHeightWorkaround();
@@ -893,7 +908,7 @@ var PanelMultiView = class extends AssociatedToNode {
       await nextPanelView.descriptionHeightWorkaround();
 
       viewRect = await window.promiseDocumentFlushed(() => {
-        return this._dwu.getBoundsWithoutFlushing(viewNode);
+        return this._getBoundsWithoutFlushing(viewNode);
       });
       // Bail out if the panel was closed in the meantime.
       if (!nextPanelView.isOpenIn(this)) {
@@ -911,7 +926,7 @@ var PanelMultiView = class extends AssociatedToNode {
     details.phase = TRANSITION_PHASES.PREPARE;
 
     // The 'magic' part: build up the amount of pixels to move right or left.
-    let moveToLeft = (this._dir == "rtl" && !reverse) || (this._dir == "ltr" && reverse);
+    let moveToLeft = (this.window.RTL_UI && !reverse) || (!this.window.RTL_UI && reverse);
     let deltaX = prevPanelView.knownWidth;
     let deepestNode = reverse ? previousViewNode : viewNode;
 
@@ -1063,8 +1078,10 @@ var PanelMultiView = class extends AssociatedToNode {
   }
 
   handleEvent(aEvent) {
-    if (aEvent.type.startsWith("popup") && aEvent.target != this._panel) {
-      // Shouldn't act on e.g. context menus being shown from within the panel.
+    // Only process actual popup events from the panel or events we generate
+    // ourselves, but not from menus being shown from within the panel.
+    if (aEvent.type.startsWith("popup") && aEvent.target != this._panel &&
+                                           aEvent.target != this.node) {
       return;
     }
     switch (aEvent.type) {
@@ -1073,7 +1090,7 @@ var PanelMultiView = class extends AssociatedToNode {
         // already showing and stop listening when the panel is hidden, we
         // always have at least one view open.
         let currentView = this.openViews[this.openViews.length - 1];
-        currentView.keyNavigation(aEvent, this._dir);
+        currentView.keyNavigation(aEvent);
         break;
       case "mousemove":
         this.openViews.forEach(panelView => panelView.clearNavigation());
@@ -1149,6 +1166,15 @@ var PanelView = class extends AssociatedToNode {
      * wait for the ViewShown event to know when the view becomes active.
      */
     this.active = false;
+
+    /**
+     * Specifies whether the view should be focused when active. When this
+     * is true, the first navigable element in the view will be focused
+     * when the view becomes active. This should be set to true when the view
+     * is activated from the keyboard. It will be set to false once the view
+     * is active.
+     */
+    this.focusWhenActive = false;
   }
 
   /**
@@ -1182,6 +1208,7 @@ var PanelView = class extends AssociatedToNode {
     } else {
       this.node.removeAttribute("visible");
       this.active = false;
+      this.focusWhenActive = false;
     }
   }
 
@@ -1204,7 +1231,7 @@ var PanelView = class extends AssociatedToNode {
    */
   set headerText(value) {
     // If the header already exists, update or remove it as requested.
-    let header = this.node.firstChild;
+    let header = this.node.firstElementChild;
     if (header && header.classList.contains("panel-header")) {
       if (value) {
         header.querySelector("label").setAttribute("value", value);
@@ -1219,10 +1246,10 @@ var PanelView = class extends AssociatedToNode {
       return;
     }
 
-    header = this.document.createElement("box");
+    header = this.document.createXULElement("box");
     header.classList.add("panel-header");
 
-    let backButton = this.document.createElement("toolbarbutton");
+    let backButton = this.document.createXULElement("toolbarbutton");
     backButton.className =
       "subviewbutton subviewbutton-iconic subviewbutton-back";
     backButton.setAttribute("closemenu", "none");
@@ -1235,7 +1262,7 @@ var PanelView = class extends AssociatedToNode {
       backButton.blur();
     });
 
-    let label = this.document.createElement("label");
+    let label = this.document.createXULElement("label");
     label.setAttribute("value", value);
 
     header.append(backButton, label);
@@ -1258,7 +1285,7 @@ var PanelView = class extends AssociatedToNode {
    * navigation if the view is still open but is invisible.
    */
   captureKnownSize() {
-    let rect = this._dwu.getBoundsWithoutFlushing(this.node);
+    let rect = this._getBoundsWithoutFlushing(this.node);
     this.knownWidth = rect.width;
     this.knownHeight = rect.height;
   }
@@ -1358,17 +1385,28 @@ var PanelView = class extends AssociatedToNode {
   }
 
   /**
-   * Retrieves the button elements that can be used for navigation using the
-   * keyboard, that is all enabled buttons including the back button if visible.
+   * Array of enabled elements that can be selected with the keyboard. This
+   * means all buttons, menulists, and text links including the back button.
    *
-   * @return {Array}
+   * This list is cached until the view is closed, so elements that become
+   * enabled later may not be navigable.
    */
-  getNavigableElements() {
-    let buttons = Array.from(this.node.querySelectorAll(
-      ".subviewbutton:not([disabled]), .subviewkeynav:not([disabled])"));
-    let dwu = this._dwu;
-    return buttons.filter(button => {
-      let bounds = dwu.getBoundsWithoutFlushing(button);
+  get _navigableElements() {
+    if (this.__navigableElements) {
+      return this.__navigableElements;
+    }
+
+    let navigableElements = Array.from(this.node.querySelectorAll(
+      ":-moz-any(button,toolbarbutton,menulist,.text-link,.navigable):not([disabled])"));
+    return this.__navigableElements = navigableElements.filter(element => {
+      // Set the "tabindex" attribute to make sure the element is focusable.
+      if (!element.hasAttribute("tabindex")) {
+        element.setAttribute("tabindex", "0");
+      }
+      if (element.hasAttribute("disabled")) {
+        return false;
+      }
+      let bounds = this._getBoundsWithoutFlushing(element);
       return bounds.width > 0 && bounds.height > 0;
     });
   }
@@ -1378,8 +1416,7 @@ var PanelView = class extends AssociatedToNode {
    * is selected. Since the reference is held weakly, it can become null or
    * undefined at any time.
    *
-   * The element is usually, but not necessarily, in the "buttons" property
-   * which in turn is initialized from the getNavigableElements list.
+   * The element is usually, but not necessarily, among the _navigableElements.
    */
   get selectedElement() {
     return this._selectedElement && this._selectedElement.get();
@@ -1393,14 +1430,32 @@ var PanelView = class extends AssociatedToNode {
   }
 
   /**
-   * Based on going up or down, select the previous or next focusable button.
+   * Focuses and moves keyboard selection to the first navigable element.
+   * This is a no-op if there are no navigable elements.
+   */
+  focusFirstNavigableElement() {
+    this.selectedElement = this._navigableElements[0];
+    this.focusSelectedElement();
+  }
+
+  /**
+   * Focuses and moves keyboard selection to the last navigable element.
+   * This is a no-op if there are no navigable elements.
+   */
+  focusLastNavigableElement() {
+    this.selectedElement = this._navigableElements[this._navigableElements.length - 1];
+    this.focusSelectedElement();
+  }
+
+  /**
+   * Based on going up or down, select the previous or next focusable element.
    *
    * @param {Boolean} isDown   whether we're going down (true) or up (false).
    *
-   * @return {DOMNode} the button we selected.
+   * @return {DOMNode} the element we selected.
    */
   moveSelection(isDown) {
-    let buttons = this.buttons;
+    let buttons = this._navigableElements;
     let lastSelected = this.selectedElement;
     let newButton = null;
     let maxIdx = buttons.length - 1;
@@ -1462,27 +1517,16 @@ var PanelView = class extends AssociatedToNode {
    * method will return early if it is invoked during a sliding transition.
    *
    * @param {KeyEvent} event
-   * @param {String} dir
-   *        Direction for arrow navigation, either "ltr" or "rtl".
    */
-  keyNavigation(event, dir) {
+  keyNavigation(event) {
     if (!this.active) {
       return;
     }
 
-    let buttons = this.buttons;
-    if (!buttons || !buttons.length) {
-      buttons = this.buttons = this.getNavigableElements();
-      // Set the 'tabindex' attribute on the buttons to make sure they're focussable.
-      for (let button of buttons) {
-        if (!button.classList.contains("subviewbutton-back") &&
-            !button.hasAttribute("tabindex")) {
-          button.setAttribute("tabindex", 0);
-        }
-      }
-    }
-    if (!buttons.length)
+    let buttons = this._navigableElements;
+    if (!buttons.length) {
       return;
+    }
 
     let stop = () => {
       event.stopPropagation();
@@ -1501,11 +1545,19 @@ var PanelView = class extends AssociatedToNode {
         button.focus();
         break;
       }
+      case "Home":
+        stop();
+        this.focusFirstNavigableElement();
+        break;
+      case "End":
+        stop();
+        this.focusLastNavigableElement();
+        break;
       case "ArrowLeft":
       case "ArrowRight": {
         stop();
-        if ((dir == "ltr" && keyCode == "ArrowLeft") ||
-            (dir == "rtl" && keyCode == "ArrowRight")) {
+        if ((!this.window.RTL_UI && keyCode == "ArrowLeft") ||
+            (this.window.RTL_UI && keyCode == "ArrowRight")) {
           this.node.panelMultiView.goBack();
           break;
         }
@@ -1551,7 +1603,7 @@ var PanelView = class extends AssociatedToNode {
    * Clear all traces of keyboard navigation happening right now.
    */
   clearNavigation() {
-    delete this.buttons;
+    delete this.__navigableElements;
     let selected = this.selectedElement;
     if (selected) {
       selected.blur();

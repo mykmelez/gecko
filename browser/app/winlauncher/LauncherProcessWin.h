@@ -7,12 +7,23 @@
 #ifndef mozilla_LauncherProcessWin_h
 #define mozilla_LauncherProcessWin_h
 
+#include "mozilla/TypedEnumBits.h"
+
+#include <stdint.h>
+
 namespace mozilla {
 
 bool RunAsLauncherProcess(int& argc, wchar_t* argv[]);
 int LauncherMain(int argc, wchar_t* argv[]);
 
-} // namespace mozilla
+enum class LauncherFlags : uint32_t {
+  eNone = 0,
+  eWaitForBrowser = (1 << 0),  // Launcher should block until browser finishes
+  eNoDeelevate = (1 << 1),     // If elevated, do not attempt to de-elevate
+};
 
-#endif // mozilla_LauncherProcessWin_h
+MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(LauncherFlags)
 
+}  // namespace mozilla
+
+#endif  // mozilla_LauncherProcessWin_h

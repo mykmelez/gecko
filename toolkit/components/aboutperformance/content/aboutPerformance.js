@@ -9,8 +9,14 @@
 const { PerformanceStats } = ChromeUtils.import("resource://gre/modules/PerformanceStats.jsm", {});
 const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm", {});
 const { ObjectUtils } = ChromeUtils.import("resource://gre/modules/ObjectUtils.jsm", {});
-const { Memory } = ChromeUtils.import("resource://gre/modules/Memory.jsm", {});
-const { DownloadUtils } = ChromeUtils.import("resource://gre/modules/DownloadUtils.jsm", {});
+const { AddonManager } = ChromeUtils.import("resource://gre/modules/AddonManager.jsm", {});
+const { ExtensionParent } = ChromeUtils.import("resource://gre/modules/ExtensionParent.jsm", {});
+
+const {WebExtensionPolicy} = Cu.getGlobalForObject(Services);
+
+// Time in ms before we start changing the sort order again after receiving a
+// mousemove event.
+const TIME_BEFORE_SORTING_AGAIN = 5000;
 
 // about:performance observes notifications on this topic.
 // if a notification is sent, this causes the page to be updated immediately,
@@ -28,7 +34,7 @@ const BUFFER_SAMPLING_RATE_MS = 1000;
 const BUFFER_DURATION_MS = 10000;
 
 // How often we should update
-const UPDATE_INTERVAL_MS = 5000;
+const UPDATE_INTERVAL_MS = 2000;
 
 // The name of the application
 const BRAND_BUNDLE = Services.strings.createBundle(
@@ -66,18 +72,38 @@ const MIN_PROPORTION_FOR_NOTICEABLE_IMPACT = .1;
 const MODE_GLOBAL = "global";
 const MODE_RECENT = "recent";
 
+// Decide if we show the old style about:performance or if we can show data
+// based on the new performance counters.
+function performanceCountersEnabled() {
+  return Services.prefs.getBoolPref("dom.performance.enable_scheduler_timing", false);
+}
+
+function extensionCountersEnabled() {
+  return Services.prefs.getBoolPref("extensions.webextensions.enablePerformanceCounters", false);
+}
+
+// The ids of system add-ons, so that we can hide them when the
+// toolkit.aboutPerformance.showInternals pref is false.
+// The API to access addons is async, so we cache the list during init.
+// The list is unlikely to change while the about:performance
+// tab is open, so not updating seems fine.
+var gSystemAddonIds = new Set();
+
 let tabFinder = {
   update() {
     this._map = new Map();
-    let windows = Services.wm.getEnumerator("navigator:browser");
-    while (windows.hasMoreElements()) {
-      let win = windows.getNext();
+    for (let win of Services.wm.getEnumerator("navigator:browser")) {
       let tabbrowser = win.gBrowser;
       for (let browser of tabbrowser.browsers) {
         let id = browser.outerWindowID; // May be `null` if the browser isn't loaded yet
         if (id != null) {
           this._map.set(id, browser);
         }
+      }
+      if (tabbrowser._preloadedBrowser) {
+        let browser = tabbrowser._preloadedBrowser;
+        if (browser.outerWindowID)
+          this._map.set(browser.outerWindowID, browser);
       }
     }
   },
@@ -98,6 +124,10 @@ let tabFinder = {
       return null;
     }
     let tabbrowser = browser.getTabBrowser();
+    if (!tabbrowser)
+      return {tabbrowser: null,
+              tab: {getAttribute() { return ""; },
+                    linkedBrowser: browser}};
     return {tabbrowser, tab: tabbrowser.getTabForBrowser(browser)};
   },
 
@@ -109,7 +139,7 @@ let tabFinder = {
       }
     }
     return null;
-  }
+  },
 };
 
 /**
@@ -273,7 +303,7 @@ Delta.prototype = {
   },
   toString() {
     return `[Delta] ${this.diff.key} => ${this.readableName}, ${this.fullName}`;
-  }
+  },
 };
 
 Delta.compare = function(a, b) {
@@ -302,12 +332,12 @@ Delta.MAX_DELTA_FOR_GOOD_RECENT_PERFORMANCE = {
     jank: {
       longestDuration: 3,
       totalUserTime: Number.POSITIVE_INFINITY,
-      totalSystemTime: Number.POSITIVE_INFINITY
+      totalSystemTime: Number.POSITIVE_INFINITY,
     },
     ticks: {
       ticks: Number.POSITIVE_INFINITY,
-    }
-  }
+    },
+  },
 };
 
 /**
@@ -321,12 +351,12 @@ Delta.MAX_DELTA_FOR_AVERAGE_RECENT_PERFORMANCE = {
     jank: {
       longestDuration: 7,
       totalUserTime: Number.POSITIVE_INFINITY,
-      totalSystemTime: Number.POSITIVE_INFINITY
+      totalSystemTime: Number.POSITIVE_INFINITY,
     },
     ticks: {
       ticks: Number.POSITIVE_INFINITY,
-    }
-  }
+    },
+  },
 };
 
 /**
@@ -382,6 +412,85 @@ var State = {
    */
   _firstSeen: new Map(),
 
+  async _promiseSnapshot() {
+    if (!performanceCountersEnabled()) {
+      return this._monitor.promiseSnapshot();
+    }
+
+    let addons = WebExtensionPolicy.getActiveExtensions();
+    let addonHosts = new Map();
+    for (let addon of addons)
+      addonHosts.set(addon.mozExtensionHostname, addon.id);
+
+    let counters = await ChromeUtils.requestPerformanceMetrics();
+    let tabs = {};
+    for (let counter of counters) {
+      let {items, host, pid, counterId, windowId, duration, isWorker,
+           memoryInfo, isTopLevel} = counter;
+      // If a worker has a windowId of 0 or max uint64, attach it to the
+      // browser UI (doc group with id 1).
+      if (isWorker && (windowId == 18446744073709552000 || !windowId))
+        windowId = 1;
+      let dispatchCount = 0;
+      for (let {count} of items) {
+        dispatchCount += count;
+      }
+
+      let memory = 0;
+      for (let field in memoryInfo) {
+        if (field == "media") {
+          for (let mediaField of ["audioSize", "videoSize", "resourcesSize"]) {
+            memory += memoryInfo.media[mediaField];
+          }
+          continue;
+        }
+        memory += memoryInfo[field];
+      }
+
+      let tab;
+      let id = windowId;
+      if (addonHosts.has(host)) {
+        id = addonHosts.get(host);
+      }
+      if (id in tabs) {
+        tab = tabs[id];
+      } else {
+        tab = {windowId, host, dispatchCount: 0, duration: 0, memory: 0, children: []};
+        tabs[id] = tab;
+      }
+      tab.dispatchCount += dispatchCount;
+      tab.duration += duration;
+      tab.memory += memory;
+      if (!isTopLevel || isWorker) {
+        tab.children.push({host, isWorker, dispatchCount, duration, memory,
+                           counterId: pid + ":" + counterId});
+      }
+    }
+
+    if (extensionCountersEnabled()) {
+      let extCounters = await ExtensionParent.ParentAPIManager.retrievePerformanceCounters();
+      for (let [id, apiMap] of extCounters) {
+        let dispatchCount = 0, duration = 0;
+        for (let [, counter] of apiMap) {
+          dispatchCount += counter.calls;
+          duration += counter.duration;
+        }
+
+        let tab;
+        if (id in tabs) {
+          tab = tabs[id];
+        } else {
+          tab = {windowId: 0, host: id, dispatchCount: 0, duration: 0, memory: 0, children: []};
+          tabs[id] = tab;
+        }
+        tab.dispatchCount += dispatchCount;
+        tab.duration += duration;
+      }
+    }
+
+    return {tabs, date: Cu.now()};
+  },
+
   /**
    * Update the internal state.
    *
@@ -393,7 +502,7 @@ var State = {
       if (this._oldest) {
         throw new Error("Internal Error, we shouldn't have a `_oldest` value yet.");
       }
-      this._latest = this._oldest = await this._monitor.promiseSnapshot();
+      this._latest = this._oldest = await this._promiseSnapshot();
       this._buffer.push(this._oldest);
       await wait(BUFFER_SAMPLING_RATE_MS * 1.1);
     }
@@ -405,7 +514,7 @@ var State = {
     let latestInBuffer = this._buffer[this._buffer.length - 1];
     let deltaT = now - latestInBuffer.date;
     if (deltaT > BUFFER_SAMPLING_RATE_MS) {
-      this._latest = await this._monitor.promiseSnapshot();
+      this._latest = await this._promiseSnapshot();
       this._buffer.push(this._latest);
     }
 
@@ -460,7 +569,7 @@ var State = {
     let result = {
       webpages: [],
       deltas: new Set(),
-      duration: current.date - oldest.date
+      duration: current.date - oldest.date,
     };
 
     for (let kind of ["webpages"]) {
@@ -484,6 +593,145 @@ var State = {
     this._firstSeen = cleanedUpFirstSeen;
     this._alerts = cleanedUpAlerts;
     return result;
+  },
+
+  // We can only know asynchronously if an origin is matched by the tracking
+  // protection list, so we cache the result for faster future lookups.
+  _trackingState: new Map(),
+  isTracker(host) {
+    if (!this._trackingState.has(host)) {
+      // Temporarily set to false to avoid doing several lookups if a site has
+      // several subframes on the same domain.
+      this._trackingState.set(host, false);
+      if (host.startsWith("about:") || host.startsWith("moz-nullprincipal"))
+        return false;
+
+      let principal =
+        Services.scriptSecurityManager.createCodebasePrincipalFromOrigin("http://" + host);
+      let classifier =
+        Cc["@mozilla.org/url-classifier/dbservice;1"].getService(Ci.nsIURIClassifier);
+      classifier.classify(principal, null, true,
+                          (aErrorCode, aList, aProvider, aFullHash) => {
+        this._trackingState.set(host, aErrorCode == Cr.NS_ERROR_TRACKING_URI);
+      });
+    }
+    return this._trackingState.get(host);
+  },
+
+  getCounters() {
+    tabFinder.update();
+    // We rebuild the maps during each iteration to make sure that
+    // we do not maintain references to groups that has been removed
+    // (e.g. pages that have been closed).
+
+    let previous = this._buffer[Math.max(this._buffer.length - 2, 0)].tabs;
+    let current = this._latest.tabs;
+    let counters = [];
+    for (let id of Object.keys(current)) {
+      let tab = current[id];
+      let oldest;
+      for (let index = 0; index <= this._buffer.length - 2; ++index) {
+        if (id in this._buffer[index].tabs) {
+          oldest = this._buffer[index].tabs[id];
+          break;
+        }
+      }
+      let prev = previous[id];
+      let host = tab.host;
+
+      let type = "other";
+      let name = `${host} (${id})`;
+      let image = "chrome://mozapps/skin/places/defaultFavicon.svg";
+      let found = tabFinder.get(parseInt(id));
+      if (found) {
+        if (found.tabbrowser) {
+          name = found.tab.getAttribute("label");
+          image = found.tab.getAttribute("image");
+          type = "tab";
+        } else {
+          name = {id: "preloaded-tab",
+                  title: found.tab.linkedBrowser.contentTitle};
+        }
+      } else if (id == 1) {
+        name = BRAND_NAME;
+        image = "chrome://branding/content/icon32.png";
+        type = "browser";
+      } else if (/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(host)) {
+        let addon = WebExtensionPolicy.getByHostname(host);
+        name = `${addon.name} (${addon.id})`;
+        image = "chrome://mozapps/skin/extensions/extensionGeneric-16.svg";
+        type = gSystemAddonIds.has(addon.id) ? "system-addon" : "addon";
+      } else if (id == 0 && !tab.isWorker) {
+        name = {id: "ghost-windows"};
+      }
+
+      if (type != "tab" && type != "addon" &&
+          !Services.prefs.getBoolPref("toolkit.aboutPerformance.showInternals", false)) {
+        continue;
+      }
+
+      // Create a map of all the child items from the previous time we read the
+      // counters, indexed by counterId so that we can quickly find the previous
+      // value for any subitem.
+      let prevChildren = new Map();
+      if (prev) {
+        for (let child of prev.children) {
+          prevChildren.set(child.counterId, child);
+        }
+      }
+      // For each subitem, create a new object including the deltas since the previous time.
+      let children = tab.children.map(child => {
+        let {host, dispatchCount, duration, memory, isWorker, counterId} = child;
+        let dispatchesSincePrevious = dispatchCount;
+        let durationSincePrevious = duration;
+        if (prevChildren.has(counterId)) {
+          let prevCounter = prevChildren.get(counterId);
+          dispatchesSincePrevious -= prevCounter.dispatchCount;
+          durationSincePrevious -= prevCounter.duration;
+          prevChildren.delete(counterId);
+        }
+
+        return {host, dispatchCount, duration, isWorker, memory,
+                dispatchesSincePrevious, durationSincePrevious};
+      });
+
+      // Any item that remains in prevChildren is a subitem that no longer
+      // exists in the current sample; remember the values of its counters
+      // so that the values don't go down for the parent item.
+      tab.dispatchesFromFormerChildren = prev && prev.dispatchesFromFormerChildren || 0;
+      tab.durationFromFormerChildren = prev && prev.durationFromFormerChildren || 0;
+      for (let [, counter] of prevChildren) {
+        tab.dispatchesFromFormerChildren += counter.dispatchCount;
+        tab.durationFromFormerChildren += counter.duration;
+      }
+
+      // Create the object representing the counters of the parent item including
+      // the deltas from the previous times.
+      let dispatches = tab.dispatchCount + tab.dispatchesFromFormerChildren;
+      let duration = tab.duration + tab.durationFromFormerChildren;
+      let durationSincePrevious = NaN;
+      let dispatchesSincePrevious = NaN;
+      let dispatchesSinceStartOfBuffer = NaN;
+      let durationSinceStartOfBuffer = NaN;
+      if (prev) {
+        durationSincePrevious =
+          duration - prev.duration - (prev.durationFromFormerChildren || 0);
+        dispatchesSincePrevious =
+          dispatches - prev.dispatchCount - (prev.dispatchesFromFormerChildren || 0);
+      }
+      if (oldest) {
+        dispatchesSinceStartOfBuffer =
+          dispatches - oldest.dispatchCount - (oldest.dispatchesFromFormerChildren || 0);
+        durationSinceStartOfBuffer =
+          duration - oldest.duration - (oldest.durationFromFormerChildren || 0);
+      }
+      counters.push({id, name, image, type, memory: tab.memory,
+                     totalDispatches: dispatches, totalDuration: duration,
+                     durationSincePrevious, dispatchesSincePrevious,
+                     durationSinceStartOfBuffer, dispatchesSinceStartOfBuffer,
+                     children});
+    }
+    return counters;
   },
 };
 
@@ -522,7 +770,7 @@ var View = {
       for (let key of remove) {
         this._map.delete(key);
       }
-    }
+    },
   },
   /**
    * Display the items in a category.
@@ -773,37 +1021,383 @@ var View = {
 
     return cachedElements;
   },
+
+  _fragment: document.createDocumentFragment(),
+  async commit() {
+    let tbody = document.getElementById("dispatch-tbody");
+
+    // Force translation to happen before we insert the new content in the DOM
+    // to avoid flicker when resizing.
+    await document.l10n.translateFragment(this._fragment);
+
+    while (tbody.firstChild)
+      tbody.firstChild.remove();
+    tbody.appendChild(this._fragment);
+    this._fragment = document.createDocumentFragment();
+  },
+  insertAfterRow(row) {
+    row.parentNode.insertBefore(this._fragment, row.nextSibling);
+    this._fragment = document.createDocumentFragment();
+  },
+  displayEnergyImpact(elt, energyImpact) {
+    if (!energyImpact)
+      elt.textContent = "–";
+    else {
+      let impact = "high";
+      if (energyImpact < 1)
+        impact = "low";
+      else if (energyImpact < 25)
+        impact = "medium";
+      document.l10n.setAttributes(elt, "energy-impact-" + impact,
+                                  {value: energyImpact});
+    }
+  },
+  appendRow(name, energyImpact, memory, tooltip, type, image = "") {
+    let row = document.createElement("tr");
+
+    let elt = document.createElement("td");
+    if (typeof name == "string") {
+      elt.textContent = name;
+    } else if (name.title) {
+      document.l10n.setAttributes(elt, name.id, {title: name.title});
+    } else {
+      document.l10n.setAttributes(elt, name.id);
+    }
+    if (image)
+      elt.style.backgroundImage = `url('${image}')`;
+
+    if (["subframe", "tracker", "worker"].includes(type))
+      elt.classList.add("indent");
+    else
+      elt.classList.add("root");
+    if (["tracker", "worker"].includes(type))
+      elt.classList.add(type);
+    row.appendChild(elt);
+
+    elt = document.createElement("td");
+    if (type == "system-addon")
+      type = "addon";
+    document.l10n.setAttributes(elt, "type-" + type);
+    row.appendChild(elt);
+
+    elt = document.createElement("td");
+    this.displayEnergyImpact(elt, energyImpact);
+    row.appendChild(elt);
+
+    elt = document.createElement("td");
+    if (!memory) {
+      elt.textContent = "–";
+    } else {
+      let unit = "KB";
+      memory = Math.ceil(memory / 1024);
+      if (memory > 1024) {
+        memory = Math.ceil(memory / 1024 * 10) / 10;
+        unit = "MB";
+        if (memory > 1024) {
+          memory = Math.ceil(memory / 1024 * 100) / 100;
+          unit = "GB";
+        }
+      }
+      document.l10n.setAttributes(elt, "size-" + unit, {value: memory});
+    }
+    row.appendChild(elt);
+
+    if (tooltip)
+      document.l10n.setAttributes(row, "item", tooltip);
+
+    elt = document.createElement("td");
+    if (type == "tab") {
+      let img = document.createElement("span");
+      img.className = "action-icon close-icon";
+      document.l10n.setAttributes(img, "close-tab");
+      elt.appendChild(img);
+    } else if (type == "addon") {
+      let img = document.createElement("span");
+      img.className = "action-icon addon-icon";
+      document.l10n.setAttributes(img, "show-addon");
+      elt.appendChild(img);
+    }
+    row.appendChild(elt);
+
+    this._fragment.appendChild(row);
+    return row;
+  },
 };
 
 var Control = {
+  _openItems: new Set(),
+  _removeSubtree(row) {
+    while (row.nextSibling &&
+           row.nextSibling.firstChild.classList.contains("indent")) {
+      row.nextSibling.remove();
+    }
+  },
   init() {
     this._initAutorefresh();
     this._initDisplayMode();
+    let tbody = document.getElementById("dispatch-tbody");
+    tbody.addEventListener("click", event => {
+      this._updateLastMouseEvent();
+
+      // Handle showing or hiding subitems of a row.
+      let target = event.target;
+      if (target.classList.contains("twisty")) {
+        let row = target.parentNode.parentNode;
+        let id = row.windowId;
+        if (target.classList.toggle("open")) {
+          this._openItems.add(id);
+          this._showChildren(row);
+          View.insertAfterRow(row);
+        } else {
+          this._openItems.delete(id);
+          this._removeSubtree(row);
+        }
+        return;
+      }
+
+      // Handle closing a tab.
+      if (target.classList.contains("close-icon")) {
+        let row = target.parentNode.parentNode;
+        let id = parseInt(row.windowId);
+        let found = tabFinder.get(id);
+        if (!found || !found.tabbrowser)
+          return;
+        let {tabbrowser, tab} = found;
+        tabbrowser.removeTab(tab);
+        this._removeSubtree(row);
+        row.remove();
+        return;
+      }
+
+      if (target.classList.contains("addon-icon")) {
+        let row = target.parentNode.parentNode;
+        let id = row.windowId;
+        let parentWin = window.docShell.rootTreeItem.domWindow;
+        parentWin.BrowserOpenAddonsMgr("addons://detail/" + encodeURIComponent(id));
+        return;
+      }
+
+      // Handle selection changes
+      let row = target.parentNode;
+      if (this.selectedRow) {
+        this.selectedRow.removeAttribute("selected");
+      }
+      if (row.windowId) {
+        row.setAttribute("selected", "true");
+        this.selectedRow = row;
+      } else if (this.selectedRow) {
+        this.selectedRow = null;
+      }
+    });
+
+    // Select the tab of double clicked items.
+    tbody.addEventListener("dblclick", event => {
+      let id = parseInt(event.target.parentNode.windowId);
+      if (isNaN(id))
+        return;
+      let found = tabFinder.get(id);
+      if (!found || !found.tabbrowser)
+        return;
+      let {tabbrowser, tab} = found;
+      tabbrowser.selectedTab = tab;
+      tabbrowser.ownerGlobal.focus();
+    });
+
+    tbody.addEventListener("mousemove", () => {
+      this._updateLastMouseEvent();
+    });
+
+    window.addEventListener("visibilitychange", event => {
+      if (!document.hidden) {
+        this._updateDisplay(true);
+      }
+    });
+  },
+  _lastMouseEvent: 0,
+  _updateLastMouseEvent() {
+    this._lastMouseEvent = Date.now();
   },
   async update() {
-    let mode = this._displayMode;
     if (this._autoRefreshInterval || !State._buffer[0]) {
       // Update the state only if we are not on pause.
       await State.update();
-    }
-    await wait(0);
-    let state = await (mode == MODE_GLOBAL ?
-      State.promiseDeltaSinceStartOfTime() :
-      State.promiseDeltaSinceStartOfBuffer());
-
-    for (let category of ["webpages"]) {
-      await wait(0);
-      await View.updateCategory(state[category], category, category, mode);
+      if (document.hidden)
+        return;
     }
     await wait(0);
 
-    // Make sure that we do not keep obsolete stuff around.
-    View.DOMCache.trimTo(state.deltas);
-
-    await wait(0);
+    await this._updateDisplay();
 
     // Inform watchers
-    Services.obs.notifyObservers(null, UPDATE_COMPLETE_TOPIC, mode);
+    Services.obs.notifyObservers(null, UPDATE_COMPLETE_TOPIC, this._displayMode);
+  },
+  // The force parameter can force a full update even when the mouse has been
+  // moved recently.
+  async _updateDisplay(force = false) {
+    if (!performanceCountersEnabled()) {
+      let mode = this._displayMode;
+      let state = await (mode == MODE_GLOBAL ?
+        State.promiseDeltaSinceStartOfTime() :
+        State.promiseDeltaSinceStartOfBuffer());
+
+      for (let category of ["webpages"]) {
+        await wait(0);
+        await View.updateCategory(state[category], category, category, mode);
+      }
+      await wait(0);
+
+      // Make sure that we do not keep obsolete stuff around.
+      View.DOMCache.trimTo(state.deltas);
+
+      await wait(0);
+    } else {
+      // If the mouse has been moved recently, update the data displayed
+      // without moving any item to avoid the risk of users clicking an action
+      // button for the wrong item.
+      // Memory use is unlikely to change dramatically within a few seconds, so
+      // it's probably fine to not update the Memory column in this case.
+      if (!force && Date.now() - this._lastMouseEvent < TIME_BEFORE_SORTING_AGAIN) {
+        let energyImpactPerId = new Map();
+        for (let {id, dispatchesSincePrevious,
+                  durationSincePrevious} of State.getCounters()) {
+          let energyImpact = this._computeEnergyImpact(dispatchesSincePrevious,
+                                                       durationSincePrevious);
+          energyImpactPerId.set(id, energyImpact);
+        }
+
+        let row = document.getElementById("dispatch-tbody").firstChild;
+        while (row) {
+          if (row.windowId && energyImpactPerId.has(row.windowId)) {
+            // We update the value in the Energy Impact column, but don't
+            // update the children, as if the child count changes there's a
+            // risk of making other rows move up or down.
+            const kEnergyImpactColumn = 2;
+            let elt = row.childNodes[kEnergyImpactColumn];
+            View.displayEnergyImpact(elt, energyImpactPerId.get(row.windowId));
+          }
+          row = row.nextSibling;
+        }
+        return;
+      }
+
+      let selectedId = -1;
+      // Reset the selectedRow field and the _openItems set each time we redraw
+      // to avoid keeping forever references to closed window ids.
+      if (this.selectedRow) {
+        selectedId = this.selectedRow.windowId;
+        this.selectedRow = null;
+      }
+      let openItems = this._openItems;
+      this._openItems = new Set();
+
+      let counters = this._sortCounters(State.getCounters());
+      for (let {id, name, image, type, totalDispatches, dispatchesSincePrevious,
+                memory, totalDuration, durationSincePrevious, children} of counters) {
+        let row =
+          View.appendRow(name,
+                         this._computeEnergyImpact(dispatchesSincePrevious,
+                                                   durationSincePrevious),
+                         memory,
+                         {totalDispatches, totalDuration: Math.ceil(totalDuration / 1000),
+                          dispatchesSincePrevious,
+                          durationSincePrevious: Math.ceil(durationSincePrevious / 1000)},
+                         type, image);
+        row.windowId = id;
+        if (id == selectedId) {
+          row.setAttribute("selected", "true");
+          this.selectedRow = row;
+        }
+
+        if (!children.length)
+          continue;
+
+        // Show the twisty image.
+        let elt = row.firstChild;
+        let img = document.createElement("span");
+        img.className = "twisty";
+        let open = openItems.has(id);
+        if (open) {
+          img.classList.add("open");
+          this._openItems.add(id);
+        }
+
+        // If there's an l10n id on our <td> node, any image we add will be
+        // removed during localization, so move the l10n id to a <span>
+        let l10nAttrs = document.l10n.getAttributes(elt);
+        if (l10nAttrs.id) {
+          let span = document.createElement("span");
+          document.l10n.setAttributes(span, l10nAttrs.id, l10nAttrs.args);
+          elt.removeAttribute("data-l10n-id");
+          elt.removeAttribute("data-l10n-args");
+          elt.insertBefore(span, elt.firstChild);
+        }
+
+        elt.insertBefore(img, elt.firstChild);
+
+        row._children = children;
+        if (open)
+          this._showChildren(row);
+      }
+
+      await View.commit();
+    }
+  },
+  _showChildren(row) {
+    let children = row._children;
+    children.sort((a, b) => b.dispatchesSincePrevious - a.dispatchesSincePrevious);
+    for (let row of children) {
+      let host = row.host.replace(/^blob:https?:\/\//, "");
+      let type = "subframe";
+      if (State.isTracker(host))
+        type = "tracker";
+      if (row.isWorker)
+        type = "worker";
+      View.appendRow(row.host,
+                     this._computeEnergyImpact(row.dispatchesSincePrevious,
+                                               row.durationSincePrevious),
+                     row.memory,
+                     {totalDispatches: row.dispatchCount,
+                      totalDuration: Math.ceil(row.duration / 1000),
+                      dispatchesSincePrevious: row.dispatchesSincePrevious,
+                      durationSincePrevious: Math.ceil(row.durationSincePrevious / 1000)},
+                     type);
+    }
+  },
+  _computeEnergyImpact(dispatches, duration) {
+    // 'Dispatches' doesn't make sense to users, and it's difficult to present
+    // two numbers in a meaningful way, so we need to somehow aggregate the
+    // dispatches and duration values we have.
+    // The current formula to aggregate the numbers assumes that the cost of
+    // a dispatch is equivalent to 1ms of CPU time.
+    // Dividing the result by the sampling interval and by 10 gives a number that
+    // looks like a familiar percentage to users, as fullying using one core will
+    // result in a number close to 100.
+    let energyImpact =
+      Math.max(duration || 0, dispatches * 1000) / UPDATE_INTERVAL_MS / 10;
+    // Keep only 2 digits after the decimal point.
+    return Math.ceil(energyImpact * 100) / 100;
+  },
+  _sortCounters(counters) {
+    return counters.sort((a, b) => {
+      // Force 'Recently Closed Tabs' to be always at the bottom, because it'll
+      // never be actionable.
+      if (a.name.id && a.name.id == "ghost-windows")
+        return 1;
+
+      // Note: _computeEnergyImpact uses UPDATE_INTERVAL_MS which doesn't match
+      // the time between the most recent sample and the start of the buffer,
+      // BUFFER_DURATION_MS would be better, but the values is never displayed
+      // so this is OK.
+      let aEI = this._computeEnergyImpact(a.dispatchesSinceStartOfBuffer,
+                                          a.durationSinceStartOfBuffer);
+      let bEI = this._computeEnergyImpact(b.dispatchesSinceStartOfBuffer,
+                                          b.durationSinceStartOfBuffer);
+      if (aEI != bEI)
+        return bEI - aEI;
+
+      // a.name is sometimes an object, so we can't use a.name.localeCompare.
+      return String.prototype.localeCompare.call(a.name, b.name);
+    });
   },
   _setOptions(options) {
     dump(`about:performance _setOptions ${JSON.stringify(options)}\n`);
@@ -862,124 +1456,24 @@ var Control = {
   _displayMode: MODE_GLOBAL,
 };
 
-/**
- * This functionality gets memory related information of sub-processes and
- * updates the performance table regularly.
- * If the page goes hidden, it also handles visibility change by not
- * querying the content processes unnecessarily.
- */
-var SubprocessMonitor = {
-  _timeout: null,
-
-  /**
-   * Init will start the process of updating the table if the page is not hidden,
-   * and set up an event listener for handling visibility changes.
-   */
-  init() {
-    if (!document.hidden) {
-      SubprocessMonitor.updateTable();
-    }
-    document.addEventListener("visibilitychange", SubprocessMonitor.handleVisibilityChange);
-  },
-
-  /**
-   * This function updates the table after an interval if the page is visible
-   * and clears the interval otherwise.
-   */
-  handleVisibilityChange() {
-    if (!document.hidden) {
-      SubprocessMonitor.queueUpdate();
-    } else {
-      clearTimeout(this._timeout);
-      this._timeout = null;
-    }
-  },
-
-  /**
-   * This function queues a timer to request the next summary using updateTable
-   * after some delay.
-   */
-  queueUpdate() {
-    this._timeout = setTimeout(() => this.updateTable(), UPDATE_INTERVAL_MS);
-  },
-
-  /**
-   * This is a helper function for updateTable, which updates a particular row.
-   * @param {<tr> node} row The row to be updated.
-   * @param {object} summaries The object with the updated RSS and USS values.
-   * @param {string} pid The pid represented by the row for which we update.
-   */
-  updateRow(row, summaries, pid) {
-    row.cells[0].textContent = pid;
-    let RSSval = DownloadUtils.convertByteUnits(summaries[pid].rss);
-    row.cells[1].textContent = RSSval.join(" ");
-    let USSval = DownloadUtils.convertByteUnits(summaries[pid].uss);
-    row.cells[2].textContent = USSval.join(" ");
-  },
-
-  /**
-   * This function adds a row to the subprocess-performance table for every new pid
-   * and populates and regularly updates it with RSS/USS measurements.
-   */
-  updateTable() {
-    if (!document.hidden) {
-      Memory.summary().then((summaries) => {
-        if (!(Object.keys(summaries).length)) {
-          // The summaries list was empty, which means we timed out getting
-          // the memory reports. We'll try again later.
-          SubprocessMonitor.queueUpdate();
-          return;
-        }
-        let resultTable = document.getElementById("subprocess-reports");
-        let recycle = [];
-        // We first iterate the table to check if summaries exist for rowPids,
-        // if yes, update them and delete the pid's summary or else hide the row
-        // for recycling it. Start at row 1 instead of 0 (to skip the header row).
-        for (let i = 1, row; (row = resultTable.rows[i]); i++) {
-          let rowPid = row.dataset.pid;
-          let summary = summaries[rowPid];
-          if (summary) {
-            // Now we update the values in the row, which is hardcoded for now,
-            // but we might want to make this more adaptable in the future.
-            SubprocessMonitor.updateRow(row, summaries, rowPid);
-            delete summaries[rowPid];
-          } else {
-            // Take this unnecessary row, hide it and stash it for potential re-use.
-            row.hidden = true;
-            recycle.push(row);
-          }
-        }
-        // For the remaining pids in summaries, we choose from the recyclable
-        // (hidden) nodes, and if they get exhausted, append a row to the table.
-        for (let pid in summaries) {
-          let row = recycle.pop();
-          if (row) {
-            row.hidden = false;
-          } else {
-            // We create a new row here, and set it to row
-            row = document.createElement("tr");
-            // Insert cell for pid
-            row.insertCell();
-            // Insert a cell for USS.
-            row.insertCell();
-            // Insert another cell for RSS.
-            row.insertCell();
-          }
-          row.dataset.pid = pid;
-          // Update the row and put it at the bottom
-          SubprocessMonitor.updateRow(row, summaries, pid);
-          resultTable.appendChild(row);
-        }
-      });
-      SubprocessMonitor.queueUpdate();
-    }
-  },
-};
-
 var go = async function() {
 
-  SubprocessMonitor.init();
   Control.init();
+
+  if (performanceCountersEnabled()) {
+    let opt = document.querySelector(".options");
+    opt.style.display = "none";
+    opt.nextElementSibling.style.display = "none";
+
+    let addons = await AddonManager.getAddonsByTypes(["extension"]);
+    for (let addon of addons) {
+      if (addon.isSystem) {
+        gSystemAddonIds.add(addon.id);
+      }
+    }
+  } else {
+    document.getElementById("dispatch-table").parentNode.style.display = "none";
+  }
 
   // Setup a hook to allow tests to configure and control this page
   let testUpdate = function(subject, topic, value) {

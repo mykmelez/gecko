@@ -7,41 +7,63 @@
 var EXPORTED_SYMBOLS = ["GeckoViewSettings"];
 
 ChromeUtils.import("resource://gre/modules/GeckoViewModule.jsm");
-ChromeUtils.import("resource://gre/modules/GeckoViewUtils.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
-  Services: "resource://gre/modules/Services.jsm",
+  SafeBrowsing: "resource://gre/modules/SafeBrowsing.jsm",
 });
 
-/* global SafeBrowsing:false */
-GeckoViewUtils.addLazyGetter(this, "SafeBrowsing", {
-  module: "resource://gre/modules/SafeBrowsing.jsm",
-  init: sb => sb.init(),
-});
+XPCOMUtils.defineLazyGetter(
+  this, "MOBILE_USER_AGENT",
+  function() {
+    return Cc["@mozilla.org/network/protocol;1?name=http"]
+           .getService(Ci.nsIHttpProtocolHandler).userAgent;
+  });
 
 XPCOMUtils.defineLazyGetter(
   this, "DESKTOP_USER_AGENT",
   function() {
-    return Cc["@mozilla.org/network/protocol;1?name=http"]
-           .getService(Ci.nsIHttpProtocolHandler).userAgent
+    return MOBILE_USER_AGENT
            .replace(/Android \d.+?; [a-zA-Z]+/, "X11; Linux x86_64")
            .replace(/Gecko\/[0-9\.]+/, "Gecko/20100101");
   });
+
+XPCOMUtils.defineLazyGetter(
+  this, "VR_USER_AGENT",
+  function() {
+    return MOBILE_USER_AGENT.replace(/Mobile/, "Mobile VR");
+  });
+
+// This needs to match GeckoSessionSettings.java
+const USER_AGENT_MODE_MOBILE = 0;
+const USER_AGENT_MODE_DESKTOP = 1;
+const USER_AGENT_MODE_VR = 2;
 
 // Handles GeckoView settings including:
 // * multiprocess
 // * user agent override
 class GeckoViewSettings extends GeckoViewModule {
-  onInitBrowser() {
-    if (this.settings.useMultiprocess) {
-      this.browser.setAttribute("remote", "true");
-    }
+  onInit() {
+    debug `onInit`;
+    this._useTrackingProtection = false;
+    this._userAgentMode = USER_AGENT_MODE_MOBILE;
+    this._userAgentOverride = null;
+    // Required for safe browsing and tracking protection.
+    SafeBrowsing.init();
+
+    this.registerListener([
+      "GeckoView:GetUserAgent",
+    ]);
   }
 
-  onInit() {
-    this._useTrackingProtection = false;
-    this._useDesktopMode = false;
+  onEvent(aEvent, aData, aCallback) {
+    debug `onEvent ${aEvent} ${aData}`;
+
+    switch (aEvent) {
+      case "GeckoView:GetUserAgent": {
+        aCallback.onSuccess(this.userAgent);
+      }
+    }
   }
 
   onSettingsUpdate() {
@@ -49,66 +71,51 @@ class GeckoViewSettings extends GeckoViewModule {
     debug `onSettingsUpdate: ${settings}`;
 
     this.displayMode = settings.displayMode;
-    this.useTrackingProtection = !!settings.useTrackingProtection;
-    this.useDesktopMode = !!settings.useDesktopMode;
+    this.userAgentMode = settings.userAgentMode;
+    this.userAgentOverride = settings.userAgentOverride;
   }
 
   get useMultiprocess() {
     return this.browser.isRemoteBrowser;
   }
 
-  get useTrackingProtection() {
-    return this._useTrackingProtection;
+  get userAgent() {
+    if (this.userAgentOverride !== null) {
+      return this.userAgentOverride;
+    }
+    if (this.userAgentMode === USER_AGENT_MODE_DESKTOP) {
+      return DESKTOP_USER_AGENT;
+    }
+    if (this.userAgentMode === USER_AGENT_MODE_VR) {
+      return VR_USER_AGENT;
+    }
+    return MOBILE_USER_AGENT;
   }
 
-  set useTrackingProtection(aUse) {
-    aUse && SafeBrowsing;
-    this._useTrackingProtection = aUse;
+  get userAgentMode() {
+    return this._userAgentMode;
   }
 
-  onUserAgentRequest(aSubject, aTopic, aData) {
-    debug `onUserAgentRequest`;
-
-    let channel = aSubject.QueryInterface(Ci.nsIHttpChannel);
-
-    if (this.browser.outerWindowID !== channel.topLevelOuterContentWindowId) {
+  set userAgentMode(aMode) {
+    if (this.userAgentMode === aMode) {
       return;
     }
-
-    if (this.useDesktopMode) {
-      channel.setRequestHeader("User-Agent", DESKTOP_USER_AGENT, false);
-    }
+    this._userAgentMode = aMode;
   }
 
-  get useDesktopMode() {
-    return this._useDesktopMode;
+  get userAgentOverride() {
+    return this._userAgentOverride;
   }
 
-  set useDesktopMode(aUse) {
-    if (this.useDesktopMode === aUse) {
-      return;
-    }
-    if (aUse) {
-      this._userAgentObserver = this.onUserAgentRequest.bind(this);
-      Services.obs.addObserver(this._userAgentObserver,
-                               "http-on-useragent-request");
-    } else if (this._userAgentObserver) {
-      Services.obs.removeObserver(this._userAgentObserver,
-                                  "http-on-useragent-request");
-      this._userAgentObserver = undefined;
-    }
-    this._useDesktopMode = aUse;
+  set userAgentOverride(aUserAgent) {
+    this._userAgentOverride = aUserAgent;
   }
 
   get displayMode() {
-    return this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-                      .getInterface(Ci.nsIDocShell)
-                      .displayMode;
+    return this.window.docShell.displayMode;
   }
 
   set displayMode(aMode) {
-    this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIDocShell)
-               .displayMode = aMode;
+    this.window.docShell.displayMode = aMode;
   }
 }

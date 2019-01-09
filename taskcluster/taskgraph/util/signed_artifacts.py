@@ -31,7 +31,7 @@ def generate_specifications_of_artifacts_to_sign(
             'artifacts': [
                 get_artifact_path(task, '{locale}/target.apk'),
             ],
-            'formats': ['jar'],
+            'formats': ['autograph_apk_fennec_sha1'],
         }]
     # XXX: Mars aren't signed here (on any platform) because internals will be
     # signed at after this stage of the release
@@ -97,3 +97,18 @@ def _strip_widevine_for_partners(artifacts_specifications):
             spec['formats'].remove('widevine')
 
     return artifacts_specifications
+
+
+def get_signed_artifacts(input, formats):
+    """
+    Get the list of signed artifacts for the given input and formats.
+    """
+    artifacts = set()
+    if input.endswith('.dmg'):
+        artifacts.add(input.replace('.dmg', '.tar.gz'))
+    else:
+        artifacts.add(input)
+    if 'gpg' in formats:
+        artifacts.add('{}.asc'.format(input))
+
+    return artifacts

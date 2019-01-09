@@ -1,56 +1,156 @@
-"use strict";
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.updateFrameLocation = updateFrameLocation;
-exports.mapDisplayNames = mapDisplayNames;
-exports.mapFrames = mapFrames;
+// @flow
 
-var _selectors = require("../../selectors/index");
+import {
+  getCurrentThread,
+  getFrames,
+  getSymbols,
+  getSource,
+  getSelectedFrame
+} from "../../selectors";
 
-var _ast = require("../../utils/ast");
+import assert from "../../utils/assert";
+import { findClosestFunction } from "../../utils/ast";
 
-function _objectSpread(target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i] != null ? arguments[i] : {}; var ownKeys = Object.keys(source); if (typeof Object.getOwnPropertySymbols === 'function') { ownKeys = ownKeys.concat(Object.getOwnPropertySymbols(source).filter(function (sym) { return Object.getOwnPropertyDescriptor(source, sym).enumerable; })); } ownKeys.forEach(function (key) { _defineProperty(target, key, source[key]); }); } return target; }
+import type { Frame } from "../../types";
+import type { State } from "../../reducers/types";
+import type { ThunkArgs } from "../types";
 
-function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
+import { isGeneratedId } from "devtools-source-map";
 
-function updateFrameLocation(frame, sourceMaps) {
-  return sourceMaps.getOriginalLocation(frame.location).then(loc => _objectSpread({}, frame, {
+function isFrameBlackboxed(state, frame) {
+  const source = getSource(state, frame.location.sourceId);
+  return source && source.isBlackBoxed;
+}
+
+function getSelectedFrameId(state, frames) {
+  let selectedFrame = getSelectedFrame(state);
+  if (selectedFrame && !isFrameBlackboxed(state, selectedFrame)) {
+    return selectedFrame.id;
+  }
+
+  selectedFrame = frames.find(frame => !isFrameBlackboxed(state, frame));
+  return selectedFrame && selectedFrame.id;
+}
+
+export function updateFrameLocation(frame: Frame, sourceMaps: any) {
+  if (frame.isOriginal) {
+    return Promise.resolve(frame);
+  }
+  return sourceMaps.getOriginalLocation(frame.location).then(loc => ({
+    ...frame,
     location: loc,
     generatedLocation: frame.generatedLocation || frame.location
   }));
 }
 
-function updateFrameLocations(frames, sourceMaps) {
+function updateFrameLocations(
+  frames: Frame[],
+  sourceMaps: any
+): Promise<Frame[]> {
   if (!frames || frames.length == 0) {
     return Promise.resolve(frames);
   }
 
-  return Promise.all(frames.map(frame => updateFrameLocation(frame, sourceMaps)));
+  return Promise.all(
+    frames.map(frame => updateFrameLocation(frame, sourceMaps))
+  );
 }
 
-function mapDisplayNames(frames, getState) {
+export function mapDisplayNames(
+  frames: Frame[],
+  getState: () => State
+): Frame[] {
   return frames.map(frame => {
-    const source = (0, _selectors.getSource)(getState(), frame.location.sourceId);
-    const symbols = (0, _selectors.getSymbols)(getState(), source);
+    if (frame.isOriginal) {
+      return frame;
+    }
+    const source = getSource(getState(), frame.location.sourceId);
+
+    if (!source) {
+      return frame;
+    }
+
+    const symbols = getSymbols(getState(), source);
 
     if (!symbols || !symbols.functions) {
       return frame;
     }
 
-    const originalFunction = (0, _ast.findClosestFunction)(symbols, frame.location);
+    const originalFunction = findClosestFunction(symbols, frame.location);
 
     if (!originalFunction) {
       return frame;
     }
 
     const originalDisplayName = originalFunction.name;
-    return _objectSpread({}, frame, {
-      originalDisplayName
-    });
+    return { ...frame, originalDisplayName };
   });
 }
+
+function isWasmOriginalSourceFrame(frame, getState: () => State): boolean {
+  if (isGeneratedId(frame.location.sourceId)) {
+    return false;
+  }
+  const generatedSource = getSource(
+    getState(),
+    frame.generatedLocation.sourceId
+  );
+
+  return Boolean(generatedSource && generatedSource.isWasm);
+}
+
+async function expandFrames(
+  frames: Frame[],
+  sourceMaps: any,
+  getState: () => State
+): Promise<Frame[]> {
+  const result = [];
+  for (let i = 0; i < frames.length; ++i) {
+    const frame = frames[i];
+    if (frame.isOriginal || !isWasmOriginalSourceFrame(frame, getState)) {
+      result.push(frame);
+      continue;
+    }
+    const originalFrames = await sourceMaps.getOriginalStackFrames(
+      frame.generatedLocation
+    );
+    if (!originalFrames) {
+      result.push(frame);
+      continue;
+    }
+
+    assert(originalFrames.length > 0, "Expected at least one original frame");
+    // First entry has not specific location -- use one from original frame.
+    originalFrames[0] = {
+      ...originalFrames[0],
+      location: frame.location
+    };
+
+    originalFrames.forEach((originalFrame, j) => {
+      // Keep outer most frame with true actor ID, and generate uniquie
+      // one for the nested frames.
+      const id = j == 0 ? frame.id : `${frame.id}-originalFrame${j}`;
+      result.push({
+        id,
+        displayName: originalFrame.displayName,
+        location: originalFrame.location,
+        scope: frame.scope,
+        this: frame.this,
+        isOriginal: true,
+        // More fields that will be added by the mapDisplayNames and
+        // updateFrameLocation.
+        generatedLocation: frame.generatedLocation,
+        originalDisplayName: originalFrame.displayName
+      });
+    });
+  }
+  return result;
+}
+
 /**
  * Map call stack frame locations and display names to originals.
  * e.g.
@@ -60,25 +160,24 @@ function mapDisplayNames(frames, getState) {
  * @memberof actions/pause
  * @static
  */
-
-
-function mapFrames() {
-  return async function ({
-    dispatch,
-    getState,
-    sourceMaps
-  }) {
-    const frames = (0, _selectors.getFrames)(getState());
-
+export function mapFrames() {
+  return async function({ dispatch, getState, sourceMaps }: ThunkArgs) {
+    const frames = getFrames(getState());
     if (!frames) {
       return;
     }
 
     let mappedFrames = await updateFrameLocations(frames, sourceMaps);
+    mappedFrames = await expandFrames(mappedFrames, sourceMaps, getState);
     mappedFrames = mapDisplayNames(mappedFrames, getState);
+
+    const thread = getCurrentThread(getState());
+    const selectedFrameId = getSelectedFrameId(getState(), mappedFrames);
     dispatch({
       type: "MAP_FRAMES",
-      frames: mappedFrames
+      thread,
+      frames: mappedFrames,
+      selectedFrameId
     });
   };
 }

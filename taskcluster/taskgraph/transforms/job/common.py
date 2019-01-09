@@ -9,8 +9,7 @@ consistency.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-import json
-from taskgraph.util.taskcluster import get_artifact_url, get_artifact_prefix
+from taskgraph.util.taskcluster import get_artifact_prefix
 
 SECRET_SCOPE = 'secrets:get:project/releng/gecko/{}/level-{}/{}'
 
@@ -65,11 +64,29 @@ def support_vcs_checkout(config, job, taskdesc, sparse=False):
     This can only be used with ``run-task`` tasks, as the cache name is
     reserved for ``run-task`` tasks.
     """
-    level = config.params['level']
+    worker = job['worker']
+    is_mac = worker['os'] == 'macosx'
+    is_win = worker['os'] == 'windows'
+    is_linux = worker['os'] == 'linux'
+    assert is_mac or is_win or is_linux
 
-    # native-engine does not support caches (yet), so we just do a full clone
-    # every time :(
-    if job['worker']['implementation'] in ('docker-worker', 'docker-engine'):
+    if is_win:
+        checkoutdir = './build'
+        geckodir = '{}/src'.format(checkoutdir)
+        hgstore = 'y:/hg-shared'
+    elif is_mac:
+        checkoutdir = './checkouts'
+        geckodir = '{}/gecko'.format(checkoutdir)
+        hgstore = '{}/hg-shared'.format(checkoutdir)
+    else:
+        checkoutdir = '{workdir}/checkouts'.format(**job['run'])
+        geckodir = '{}/gecko'.format(checkoutdir)
+        hgstore = '{}/hg-store'.format(checkoutdir)
+
+    level = config.params['level']
+    # native-engine and generic-worker do not support caches (yet), so we just
+    # do a full clone every time :(
+    if worker['implementation'] in ('docker-worker', 'docker-engine'):
         name = 'level-%s-checkouts' % level
 
         # comm-central checkouts need their own cache, because clobber won't
@@ -85,15 +102,15 @@ def support_vcs_checkout(config, job, taskdesc, sparse=False):
         taskdesc['worker'].setdefault('caches', []).append({
             'type': 'persistent',
             'name': name,
-            'mount-point': '{workdir}/checkouts'.format(**job['run']),
+            'mount-point': checkoutdir,
         })
 
     taskdesc['worker'].setdefault('env', {}).update({
         'GECKO_BASE_REPOSITORY': config.params['base_repository'],
         'GECKO_HEAD_REPOSITORY': config.params['head_repository'],
         'GECKO_HEAD_REV': config.params['head_rev'],
-        'GECKO_PATH': '{workdir}/checkouts/gecko'.format(**job['run']),
-        'HG_STORE_PATH': '{workdir}/checkouts/hg-store'.format(**job['run']),
+        'GECKO_PATH': geckodir,
+        'HG_STORE_PATH': hgstore,
     })
 
     if 'comm_base_repository' in config.params:
@@ -193,26 +210,3 @@ def docker_worker_add_tooltool(config, job, taskdesc, internal=False):
         taskdesc['scopes'].extend([
             'docker-worker:relengapi-proxy:tooltool.download.internal',
         ])
-
-
-def support_use_artifacts(config, job, taskdesc, use_artifacts):
-    """Set a JSON object of artifact URLs in an environment variable.
-
-    This will tell the run-task script to download the artifacts.
-    """
-    urls = {}
-    prefix = get_artifact_prefix(taskdesc)
-    for kind, artifacts in use_artifacts.items():
-        if kind not in taskdesc['dependencies']:
-            raise Exception("{label} can't use '{kind}' artifacts because it has no '{kind}' "
-                            "dependency!".format(label=job['label'], kind=kind))
-        task_id = '<{}>'.format(kind)
-        urls[kind] = []
-
-        for artifact in artifacts:
-            path = '/'.join([prefix, artifact])
-            urls[kind].append(get_artifact_url(task_id, path))
-
-    env = taskdesc['worker'].setdefault('env', {})
-    env['USE_ARTIFACT_URLS'] = {'task-reference': json.dumps(urls)}
-    env['USE_ARTIFACT_PATH'] = '{workdir}/use-artifacts'.format(**job['run'])

@@ -10,7 +10,7 @@ const {
   EXPAND_TAB,
   TAB_SIZE,
   DETECT_INDENT,
-  getIndentationFromIteration
+  getIndentationFromIteration,
 } = require("devtools/shared/indentation");
 
 const ENABLE_CODE_FOLDING = "devtools.editor.enableCodeFolding";
@@ -28,6 +28,7 @@ const MAX_VERTICAL_OFFSET = 3;
 // line in text selection.
 const RE_SCRATCHPAD_ERROR = /(?:@Scratchpad\/\d+:|\()(\d+):?(\d+)?(?:\)|\n)/;
 const RE_JUMP_TO_LINE = /^(\d+):?(\d+)?/;
+const AUTOCOMPLETE_MARK_CLASSNAME = "cm-auto-complete-shadow-text";
 
 const Services = require("Services");
 const EventEmitter = require("devtools/shared/event-emitter");
@@ -40,7 +41,6 @@ const L10N = new LocalizationHelper("devtools/client/locales/sourceeditor.proper
 
 const {
   getWasmText,
-  getWasmLineNumberFormatter,
   isWasm,
   lineToWasmOffset,
   wasmOffsetToLine,
@@ -58,27 +58,30 @@ const CM_SCRIPTS = [
 const CM_IFRAME = "chrome://devtools/content/sourceeditor/codemirror/cmiframe.html";
 
 const CM_MAPPING = [
+  "clearHistory",
+  "defaultCharWidth",
+  "extendSelection",
   "focus",
+  "getCursor",
+  "getLine",
+  "getScrollInfo",
+  "getSelection",
+  "getViewport",
   "hasFocus",
   "lineCount",
-  "somethingSelected",
-  "getCursor",
-  "setSelection",
-  "getSelection",
-  "replaceSelection",
-  "extendSelection",
-  "undo",
-  "redo",
-  "clearHistory",
   "openDialog",
+  "redo",
   "refresh",
-  "getScrollInfo",
-  "getViewport"
+  "replaceSelection",
+  "setSelection",
+  "somethingSelected",
+  "undo",
 ];
 
 const editors = new WeakMap();
 
 Editor.modes = {
+  cljs: { name: "text/x-clojure" },
   css: { name: "css" },
   fs: { name: "x-shader/x-fragment" },
   haxe: { name: "haxe" },
@@ -132,7 +135,9 @@ function Editor(config) {
     theme: "mozilla",
     themeSwitching: true,
     autocomplete: false,
-    autocompleteOpts: {}
+    autocompleteOpts: {},
+    // Set to true to prevent the search addon to be activated.
+    disableSearchAddon: false,
   };
 
   // Additional shortcuts.
@@ -146,6 +151,12 @@ function Editor(config) {
   // Disable ctrl-[ and ctrl-] because toolbox uses those shortcuts.
   this.config.extraKeys[Editor.keyFor("indentLess")] = false;
   this.config.extraKeys[Editor.keyFor("indentMore")] = false;
+
+  // Disable Alt-B and Alt-F to navigate groups (respectively previous and next) since:
+  // - it's not standard in input fields
+  // - it also inserts a character which feels weird
+  this.config.extraKeys["Alt-B"] = false;
+  this.config.extraKeys["Alt-F"] = false;
 
   // Overwrite default config with user-provided, if needed.
   Object.keys(config).forEach(k => {
@@ -179,6 +190,16 @@ function Editor(config) {
   // indenting with tabs, insert one tab. Otherwise insert N
   // whitespaces where N == indentUnit option.
   this.config.extraKeys.Tab = cm => {
+    if (config.extraKeys && config.extraKeys.Tab) {
+      // If a consumer registers its own extraKeys.Tab, we execute it before doing
+      // anything else. If it returns false, that mean that all the key handling work is
+      // done, so we can do an early return.
+      const res = config.extraKeys.Tab(cm);
+      if (res === false) {
+        return;
+      }
+    }
+
     if (cm.somethingSelected()) {
       cm.indentSelection("add");
       return;
@@ -275,7 +296,7 @@ Editor.prototype = {
 
         Services.scriptloader.loadSubScript(
           "chrome://devtools/content/shared/theme-switching.js",
-          win, "utf8"
+          win
         );
         this.container = env;
         this._setup(win.document.body, el.ownerDocument);
@@ -308,7 +329,7 @@ Editor.prototype = {
     const scriptsToInject = CM_SCRIPTS.concat(this.config.externalScripts);
     scriptsToInject.forEach(url => {
       if (url.startsWith("chrome://")) {
-        Services.scriptloader.loadSubScript(url, win, "utf8");
+        Services.scriptloader.loadSubScript(url, win);
       }
     });
 
@@ -318,7 +339,7 @@ Editor.prototype = {
     const {
       propertyKeywords,
       colorKeywords,
-      valueKeywords
+      valueKeywords,
     } = getCSSKeywords(this.config.cssProperties);
 
     const cssSpec = win.CodeMirror.resolveMode("text/css");
@@ -382,8 +403,17 @@ Editor.prototype = {
       popup.openPopupAtScreen(ev.screenX, ev.screenY, true);
     });
 
-    cm.on("focus", () => this.emit("focus"));
-    cm.on("scroll", () => this.emit("scroll"));
+    const pipedEvents = [
+      "beforeChange",
+      "changes",
+      "cursorActivity",
+      "focus",
+      "scroll",
+    ];
+    for (const eventName of pipedEvents) {
+      cm.on(eventName, () => this.emit(eventName));
+    }
+
     cm.on("change", () => {
       this.emit("change");
       if (!this._lastDirty) {
@@ -391,19 +421,9 @@ Editor.prototype = {
         this.emit("dirty-change");
       }
     });
-    cm.on("cursorActivity", () => this.emit("cursorActivity"));
 
     cm.on("gutterClick", (cmArg, line, gutter, ev) => {
       const lineOrOffset = !this.isWasm ? line : this.lineToWasmOffset(line);
-      const head = { line: line, ch: 0 };
-      const tail = { line: line, ch: this.getText(lineOrOffset).length };
-
-      // Shift-click on a gutter selects the whole line.
-      if (ev.shiftKey) {
-        cmArg.setSelection(head, tail);
-        return;
-      }
-
       this.emit("gutterClick", lineOrOffset, ev.button);
     });
 
@@ -411,7 +431,9 @@ Editor.prototype = {
       return L10N.getStr(name);
     });
 
-    this._initShortcuts(win);
+    if (!this.config.disableSearchAddon) {
+      this._initSearchShortcuts(win);
+    }
 
     editors.set(this, cm);
 
@@ -456,7 +478,7 @@ Editor.prototype = {
       throw new Error("Can't load a script until the editor is loaded.");
     }
     const win = this.container.contentWindow.wrappedJSObject;
-    Services.scriptloader.loadSubScript(url, win, "utf8");
+    Services.scriptloader.loadSubScript(url, win);
   },
 
   /**
@@ -473,9 +495,6 @@ Editor.prototype = {
   replaceDocument: function(doc) {
     const cm = editors.get(this);
     cm.swapDoc(doc);
-    if (!Services.prefs.getBoolPref("devtools.debugger.new-debugger-frontend")) {
-      this._updateLineNumberFormat();
-    }
   },
 
   /**
@@ -555,16 +574,6 @@ Editor.prototype = {
     return this.isWasm ? this.lineToWasmOffset(line) : line;
   },
 
-  _updateLineNumberFormat: function() {
-    const cm = editors.get(this);
-    if (this.isWasm) {
-      const formatter = getWasmLineNumberFormatter(this.getDoc());
-      cm.setOption("lineNumberFormatter", formatter);
-    } else {
-      cm.setOption("lineNumberFormatter", (number) => number);
-    }
-  },
-
   /**
    * Replaces whatever is in the text area with the contents of
    * the 'value' argument.
@@ -590,10 +599,6 @@ Editor.prototype = {
       }
       // cm will try to split into lines anyway, saving memory
       value = { split: () => lines };
-    }
-
-    if (!Services.prefs.getBoolPref("devtools.debugger.new-debugger-frontend")) {
-      this._updateLineNumberFormat();
     }
 
     cm.setValue(value);
@@ -750,7 +755,7 @@ Editor.prototype = {
     let topLine = {
       "center": Math.max(line - halfVisible, 0),
       "bottom": Math.max(line - linesVisible + offset, 0),
-      "top": Math.max(line - offset, 0)
+      "top": Math.max(line - offset, 0),
     }[align || "top"] || offset;
 
     // Bringing down the topLine to total lines in the editor if exceeding.
@@ -932,7 +937,7 @@ Editor.prototype = {
     const mark = cm.markText(from, to, { replacedWith: span });
     return {
       anchor: span,
-      clear: () => mark.clear()
+      clear: () => mark.clear(),
     };
   },
 
@@ -1164,7 +1169,7 @@ Editor.prototype = {
         posFrom: null,
         posTo: null,
         overlay: null,
-        query
+        query,
       };
     }
 
@@ -1262,6 +1267,34 @@ Editor.prototype = {
     }
   },
 
+  getAutoCompletionText() {
+    const cm = editors.get(this);
+    const mark = cm.getAllMarks().find(m => m.className === AUTOCOMPLETE_MARK_CLASSNAME);
+    if (!mark) {
+      return "";
+    }
+
+    return mark.title || "";
+  },
+
+  setAutoCompletionText: function(text) {
+    const cursor = this.getCursor();
+    const cm = editors.get(this);
+    const className = AUTOCOMPLETE_MARK_CLASSNAME;
+
+    cm.operation(() => {
+      cm.getAllMarks().forEach(mark => {
+        if (mark.className === className) {
+          mark.clear();
+        }
+      });
+
+      if (text) {
+        cm.markText({...cursor, ch: cursor.ch - 1}, cursor, { className, title: text });
+      }
+    });
+  },
+
   /**
    * Extends an instance of the Editor object with additional
    * functions. Each function will be called with context as
@@ -1291,6 +1324,10 @@ Editor.prototype = {
 
       this[name] = funcs[name].bind(null, ctx);
     });
+  },
+
+  isDestroyed: function() {
+    return !editors.get(this);
   },
 
   destroy: function() {
@@ -1356,15 +1393,15 @@ Editor.prototype = {
   /**
    * Register all key shortcuts.
    */
-  _initShortcuts: function(win) {
+  _initSearchShortcuts: function(win) {
     const shortcuts = new KeyShortcuts({
-      window: win
+      window: win,
     });
-    this._onShortcut = this._onShortcut.bind(this);
+    this._onSearchShortcut = this._onSearchShortcut.bind(this);
     const keys = [
       "find.key",
       "findNext.key",
-      "findPrev.key"
+      "findPrev.key",
     ];
 
     if (OS === "Darwin") {
@@ -1375,13 +1412,13 @@ Editor.prototype = {
     // Process generic keys:
     keys.forEach(name => {
       const key = L10N.getStr(name);
-      shortcuts.on(key, event => this._onShortcut(name, event));
+      shortcuts.on(key, event => this._onSearchShortcut(name, event));
     });
   },
     /**
    * Key shortcut listener.
    */
-  _onShortcut: function(name, event) {
+  _onSearchShortcut: function(name, event) {
     if (!this._isInputOrTextarea(event.target)) {
       return;
     }
@@ -1421,7 +1458,7 @@ Editor.prototype = {
   _isInputOrTextarea: function(element) {
     const name = element.tagName.toLowerCase();
     return name === "input" || name === "textarea";
-  }
+  },
 };
 
 // Since Editor is a thin layer over CodeMirror some methods
@@ -1496,7 +1533,7 @@ function getCSSKeywords(cssProperties) {
   return {
     propertyKeywords: keySet(propertyKeywords),
     colorKeywords: colorKeywords,
-    valueKeywords: valueKeywords
+    valueKeywords: valueKeywords,
   };
 }
 

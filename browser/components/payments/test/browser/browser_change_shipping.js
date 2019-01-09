@@ -2,11 +2,22 @@
 
 async function setup() {
   await setupFormAutofillStorage();
-  await addSampleAddressesAndBasicCard();
+  let prefilledGuids = await addSampleAddressesAndBasicCard();
+
+  info("associating the card with the billing address");
+  await formAutofillStorage.creditCards.update(prefilledGuids.card1GUID, {
+    billingAddressGUID: prefilledGuids.address1GUID,
+  }, true);
+
+  return prefilledGuids;
 }
 
 add_task(async function test_change_shipping() {
-  await setup();
+  if (!OSKeyStoreTestUtils.canTestOSKeyStoreLogin()) {
+    todo(false, "Cannot test OS key store login on official builds.");
+    return;
+  }
+  let prefilledGuids = await setup();
   await BrowserTestUtils.withNewTab({
     gBrowser,
     url: BLANK_PAGE_URL,
@@ -19,6 +30,12 @@ add_task(async function test_change_shipping() {
         merchantTaskFn: PTU.ContentTasks.createAndShowRequest,
       }
     );
+
+    await spawnPaymentDialogTask(frame, async ({prefilledGuids: guids}) => {
+      let paymentMethodPicker = content.document.querySelector("payment-method-picker");
+      content.fillField(Cu.waiveXrays(paymentMethodPicker).dropdown.popupBox,
+                        guids.card1GUID);
+    }, {prefilledGuids});
 
     let shippingOptions =
       await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.getShippingOptions);
@@ -49,7 +66,7 @@ add_task(async function test_change_shipping() {
 
     await ContentTask.spawn(browser, {
       eventName: "shippingaddresschange",
-    }, PTU.ContentTasks.awaitPaymentRequestEventPromise);
+    }, PTU.ContentTasks.awaitPaymentEventPromise);
     info("got shippingaddresschange event");
 
     // verify update of shippingOptions
@@ -69,7 +86,7 @@ add_task(async function test_change_shipping() {
       // Note: The update includes a modifier, and modifiers must include a total
       // so the expected total is that one
       is(content.document.querySelector("#total > currency-amount").textContent,
-         "\u20AC2.50",
+         "\u20AC2.50 EUR",
          "Check updated total currency amount");
 
       let btn = content.document.querySelector("#view-all");
@@ -95,10 +112,15 @@ add_task(async function test_change_shipping() {
       is(items.length, 1, "1 additional display item");
       is(items[0].amountCurrency, "EUR", "First display item is in Euros");
       is(items[0].amountValue, "1.00", "First display item has 1.00 value");
+      btn.click();
+    });
+
+    await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.setSecurityCode, {
+      securityCode: "123",
     });
 
     info("clicking pay");
-    spawnPaymentDialogTask(frame, PTU.DialogContentTasks.completePayment);
+    await loginAndCompletePayment(frame);
 
     // Add a handler to complete the payment above.
     info("acknowledging the completion from the merchant page");
@@ -139,10 +161,9 @@ add_task(async function test_default_shippingOptions_noneSelected() {
     );
 
     let shippingOptions =
-      await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.getShippingOptions);
-    is(shippingOptions.selectedOptionCurrency, "USD", "Shipping options should be in USD");
+        await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.getShippingOptions);
     is(shippingOptions.optionCount, 2, "there should be two shipping options");
-    is(shippingOptions.selectedOptionID, "1", "default selected should be the first");
+    is(shippingOptions.selectedOptionIndex, "-1", "no options should be selected");
 
     let shippingOptionDetailsEUR = deepClone(PTU.Details.twoShippingOptionsEUR);
     info("prepare EUR options by deselecting all and giving unique IDs");
@@ -150,6 +171,8 @@ add_task(async function test_default_shippingOptions_noneSelected() {
       opt.selected = false;
       opt.id += "-EUR";
     });
+
+    await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.selectShippingOptionById, "1");
 
     await ContentTask.spawn(browser, {
       eventName: "shippingaddresschange",
@@ -162,15 +185,13 @@ add_task(async function test_default_shippingOptions_noneSelected() {
 
     await ContentTask.spawn(browser, {
       eventName: "shippingaddresschange",
-    }, PTU.ContentTasks.awaitPaymentRequestEventPromise);
+    }, PTU.ContentTasks.awaitPaymentEventPromise);
     info("got shippingaddresschange event");
 
     shippingOptions =
       await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.getShippingOptions);
-    is(shippingOptions.selectedOptionCurrency, "EUR", "Shipping options should be in EUR");
     is(shippingOptions.optionCount, 2, "there should be two shipping options");
-    is(shippingOptions.selectedOptionID, "1-EUR",
-       "default selected should be the first");
+    is(shippingOptions.selectedOptionIndex, "-1", "no options should be selected again");
 
     spawnPaymentDialogTask(frame, PTU.DialogContentTasks.manuallyClickCancel);
     await BrowserTestUtils.waitForCondition(() => win.closed, "dialog should be closed");
@@ -223,7 +244,7 @@ add_task(async function test_default_shippingOptions_allSelected() {
 
     await ContentTask.spawn(browser, {
       eventName: "shippingaddresschange",
-    }, PTU.ContentTasks.awaitPaymentRequestEventPromise);
+    }, PTU.ContentTasks.awaitPaymentEventPromise);
     info("got shippingaddresschange event");
 
     shippingOptions =
@@ -240,7 +261,11 @@ add_task(async function test_default_shippingOptions_allSelected() {
 });
 
 add_task(async function test_no_shippingchange_without_shipping() {
-  await setup();
+  if (!OSKeyStoreTestUtils.canTestOSKeyStoreLogin()) {
+    todo(false, "Cannot test OS key store login on official builds.");
+    return;
+  }
+  let prefilledGuids = await setup();
   await BrowserTestUtils.withNewTab({
     gBrowser,
     url: BLANK_PAGE_URL,
@@ -253,13 +278,23 @@ add_task(async function test_no_shippingchange_without_shipping() {
       }
     );
 
+    await spawnPaymentDialogTask(frame, async ({prefilledGuids: guids}) => {
+      let paymentMethodPicker = content.document.querySelector("payment-method-picker");
+      content.fillField(Cu.waiveXrays(paymentMethodPicker).dropdown.popupBox,
+                        guids.card1GUID);
+    }, {prefilledGuids});
+
     ContentTask.spawn(browser, {
       eventName: "shippingaddresschange",
     }, PTU.ContentTasks.ensureNoPaymentRequestEvent);
     info("added shipping change handler");
 
+    await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.setSecurityCode, {
+      securityCode: "456",
+    });
+
     info("clicking pay");
-    spawnPaymentDialogTask(frame, PTU.DialogContentTasks.completePayment);
+    await loginAndCompletePayment(frame);
 
     // Add a handler to complete the payment above.
     info("acknowledging the completion from the merchant page");
@@ -309,16 +344,18 @@ add_task(async function test_address_edit() {
 
     await ContentTask.spawn(browser, {
       eventName: "shippingaddresschange",
-    }, PTU.ContentTasks.awaitPaymentRequestEventPromise);
+    }, PTU.ContentTasks.awaitPaymentEventPromise);
 
     addressOptions =
       await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.getShippingAddresses);
     info("initial addressOptions: " + JSON.stringify(addressOptions));
     selectedIndex = addressOptions.selectedOptionIndex;
     let selectedAddressGuid = addressOptions.options[selectedIndex].guid;
-    let selectedAddress = formAutofillStorage.addresses.get(selectedAddressGuid);
+    let selectedAddress = await formAutofillStorage.addresses.get(selectedAddressGuid);
 
-    is(selectedIndex, 0, "First address should be selected");
+    // US address is inserted first, then German address, so German address
+    // has more recent timeLastModified and will appear at the top of the list.
+    is(selectedIndex, 1, "Second address should be selected");
     ok(selectedAddress, "Selected address does exist in the address collection");
     is(selectedAddress.country, "US", "Expected initial country value");
 
@@ -334,9 +371,9 @@ add_task(async function test_address_edit() {
     let newSelectedAddressGuid = addressOptions.options[selectedIndex].guid;
 
     is(newSelectedAddressGuid, selectedAddressGuid, "Selected guid hasnt changed");
-    selectedAddress = formAutofillStorage.addresses.get(selectedAddressGuid);
+    selectedAddress = await formAutofillStorage.addresses.get(selectedAddressGuid);
 
-    is(selectedIndex, 0, "First address should be selected");
+    is(selectedIndex, 1, "Second address should be selected");
     is(selectedAddress.country, "CA", "Expected changed country value");
 
     spawnPaymentDialogTask(frame, PTU.DialogContentTasks.manuallyClickCancel);
@@ -370,7 +407,9 @@ add_task(async function test_address_removal() {
     let selectedIndex = addressOptions.selectedOptionIndex;
     let selectedAddressGuid = addressOptions.options[selectedIndex].guid;
 
-    is(selectedIndex, 0, "First address should be selected");
+    // US address is inserted first, then German address, so German address
+    // has more recent timeLastModified and will appear at the top of the list.
+    is(selectedIndex, 1, "Second address should be selected");
     is(addressOptions.options.length, 2, "Should be 2 address options initially");
 
     info("Remove the selected address from the store");

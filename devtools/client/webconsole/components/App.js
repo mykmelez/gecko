@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
+const Services = require("Services");
 const { Component, createFactory } = require("devtools/client/shared/vendor/react");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
@@ -12,7 +13,9 @@ const actions = require("devtools/client/webconsole/actions/index");
 const ConsoleOutput = createFactory(require("devtools/client/webconsole/components/ConsoleOutput"));
 const FilterBar = createFactory(require("devtools/client/webconsole/components/FilterBar"));
 const SideBar = createFactory(require("devtools/client/webconsole/components/SideBar"));
+const ReverseSearchInput = createFactory(require("devtools/client/webconsole/components/ReverseSearchInput"));
 const JSTerm = createFactory(require("devtools/client/webconsole/components/JSTerm"));
+const ConfirmDialog = createFactory(require("devtools/client/webconsole/components/ConfirmDialog"));
 const NotificationBox = createFactory(require("devtools/client/shared/components/NotificationBox").NotificationBox);
 
 const l10n = require("devtools/client/webconsole/webconsole-l10n");
@@ -27,8 +30,8 @@ const {
 } = require("devtools/client/shared/components/NotificationBox");
 
 const { getAllNotifications } = require("devtools/client/webconsole/selectors/notifications");
-
 const { div } = dom;
+const isMacOS = Services.appinfo.OS === "Darwin";
 
 /**
  * Console root Application component.
@@ -44,13 +47,83 @@ class App extends Component {
       serviceContainer: PropTypes.object.isRequired,
       closeSplitConsole: PropTypes.func.isRequired,
       jstermCodeMirror: PropTypes.bool,
+      currentReverseSearchEntry: PropTypes.string,
+      reverseSearchInputVisible: PropTypes.bool,
     };
   }
 
   constructor(props) {
     super(props);
 
+    this.onClick = this.onClick.bind(this);
     this.onPaste = this.onPaste.bind(this);
+    this.onKeyDown = this.onKeyDown.bind(this);
+  }
+
+  onKeyDown(event) {
+    const {
+      dispatch,
+    } = this.props;
+
+    if (
+      (!isMacOS && event.key === "F9") ||
+      (isMacOS && event.key === "r" && event.ctrlKey === true)
+    ) {
+      dispatch(actions.reverseSearchInputToggle());
+      event.stopPropagation();
+    }
+  }
+
+  onClick(event) {
+    const target = event.originalTarget || event.target;
+    const {
+      reverseSearchInputVisible,
+      dispatch,
+      hud,
+    } = this.props;
+
+    if (reverseSearchInputVisible === true && !target.closest(".reverse-search")) {
+      event.preventDefault();
+      event.stopPropagation();
+      dispatch(actions.reverseSearchInputToggle());
+      return;
+    }
+
+    // Do not focus on middle/right-click or 2+ clicks.
+    if (event.detail !== 1 || event.button !== 0) {
+      return;
+    }
+
+    // Do not focus if a link was clicked
+    if (target.closest("a")) {
+      return;
+    }
+
+    // Do not focus if an input field was clicked
+    if (target.closest("input")) {
+      return;
+    }
+
+    // Do not focus if the click happened in the reverse search toolbar.
+    if (target.closest(".reverse-search")) {
+      return;
+    }
+
+    // Do not focus if something other than the output region was clicked
+    // (including e.g. the clear messages button in toolbar)
+    if (!target.closest(".webconsole-output-wrapper")) {
+      return;
+    }
+
+    // Do not focus if something is selected
+    const selection = hud.document.defaultView.getSelection();
+    if (selection && !selection.isCollapsed) {
+      return;
+    }
+
+    if (hud && hud.jsterm) {
+      hud.jsterm.focus();
+    }
   }
 
   onPaste(event) {
@@ -62,7 +135,7 @@ class App extends Component {
 
     const {
       usageCount,
-      CONSOLE_ENTRY_THRESHOLD
+      CONSOLE_ENTRY_THRESHOLD,
     } = WebConsoleUtils;
 
     // Bail out if self-xss notification is suppressed.
@@ -79,12 +152,12 @@ class App extends Component {
       return;
     }
 
-    const inputField = this.node.querySelector(".jsterm-input-node");
+    const input = event.target;
 
     // Cleanup function if notification is closed by the user.
     const removeCallback = (eventType) => {
       if (eventType == "removed") {
-        inputField.removeEventListener("keyup", pasteKeyUpHandler);
+        input.removeEventListener("keyup", pasteKeyUpHandler);
         dispatch(actions.removeNotification("selfxss-notification"));
       }
     };
@@ -99,18 +172,17 @@ class App extends Component {
       removeCallback
     ));
 
-    // Remove notification automatically when the user
-    // types "allow pasting".
-    function pasteKeyUpHandler() {
-      const value = inputField.value || inputField.textContent;
+    // Remove notification automatically when the user types "allow pasting".
+    const pasteKeyUpHandler = (e) => {
+      const value = e.target.value;
       if (value.includes(SELF_XSS_OK)) {
         dispatch(actions.removeNotification("selfxss-notification"));
-        inputField.removeEventListener("keyup", pasteKeyUpHandler);
+        input.removeEventListener("keyup", pasteKeyUpHandler);
         WebConsoleUtils.usageCount = WebConsoleUtils.CONSOLE_ENTRY_THRESHOLD;
       }
-    }
+    };
 
-    inputField.addEventListener("keyup", pasteKeyUpHandler);
+    input.addEventListener("keyup", pasteKeyUpHandler);
   }
 
   // Rendering
@@ -135,36 +207,50 @@ class App extends Component {
     // from the following parts:
     // * FilterBar - Buttons & free text for content filtering
     // * Content - List of logs & messages
-    // * SideBar - Object inspector
     // * NotificationBox - Notifications for JSTerm (self-xss warning at the moment)
     // * JSTerm - Input command line.
+    // * ReverseSearchInput - Reverse search input.
+    // * SideBar - Object inspector
     return (
       div({
         className: classNames.join(" "),
+        onKeyDown: this.onKeyDown,
+        onClick: this.onClick,
         ref: node => {
           this.node = node;
         }},
-        FilterBar({
-          hidePersistLogsCheckbox: hud.isBrowserConsole,
-          serviceContainer: {
-            attachRefToHud
-          },
-          closeSplitConsole
-        }),
-        ConsoleOutput({
-          serviceContainer,
-          onFirstMeaningfulPaint,
-        }),
+        div({className: "webconsole-flex-wrapper"},
+          FilterBar({
+            hidePersistLogsCheckbox: hud.isBrowserConsole,
+            serviceContainer: {
+              attachRefToHud,
+            },
+            closeSplitConsole,
+          }),
+          ConsoleOutput({
+            serviceContainer,
+            onFirstMeaningfulPaint,
+          }),
+          NotificationBox({
+            id: "webconsole-notificationbox",
+            notifications,
+          }),
+          JSTerm({
+            hud,
+            serviceContainer,
+            onPaste: this.onPaste,
+            codeMirrorEnabled: jstermCodeMirror,
+          }),
+          ReverseSearchInput({
+            hud,
+          })
+        ),
         SideBar({
           serviceContainer,
         }),
-        NotificationBox({
-          id: "webconsole-notificationbox",
-          notifications,
-        }),
-        JSTerm({
+        ConfirmDialog({
           hud,
-          onPaste: this.onPaste,
+          serviceContainer,
           codeMirrorEnabled: jstermCodeMirror,
         }),
       )
@@ -174,6 +260,7 @@ class App extends Component {
 
 const mapStateToProps = state => ({
   notifications: getAllNotifications(state),
+  reverseSearchInputVisible: state.ui.reverseSearchInputVisible,
 });
 
 const mapDispatchToProps = dispatch => ({

@@ -20,6 +20,14 @@ impl<E> Compat<E> {
     pub fn into_inner(self) -> E {
         self.error
     }
+<<<<<<< HEAD
+=======
+
+    /// Gets a reference to the inner error.
+    pub fn get_ref(&self) -> &E {
+        &self.error
+    }
+>>>>>>> central
 }
 
 with_std! {

@@ -19,7 +19,7 @@ add_task(async function setup() {
 async function testUpdateNoPrompt(filename, id,
                                   initialVersion = "1.0", updateVersion = "2.0") {
   // Navigate away to ensure that BrowserOpenAddonMgr() opens a new tab
-  gBrowser.selectedBrowser.loadURI("about:robots");
+  BrowserTestUtils.loadURI(gBrowser.selectedBrowser, "about:robots");
   await BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
 
   // Install initial version of the test extension
@@ -50,11 +50,6 @@ async function testUpdateNoPrompt(filename, id,
   BrowserTestUtils.removeTab(gBrowser.selectedTab);
   await addon.uninstall();
 }
-
-// Test that we don't see a prompt when updating from a legacy
-// extension to a webextension.
-add_task(() => testUpdateNoPrompt("browser_legacy.xpi",
-                                  "legacy_update@tests.mozilla.org", "1.1"));
 
 // Test that we don't see a prompt when no new promptable permissions
 // are added.

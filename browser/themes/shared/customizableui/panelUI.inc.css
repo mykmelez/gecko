@@ -109,6 +109,11 @@
   stroke: transparent;
 }
 
+.cui-widget-panel,
+#widget-overflow {
+  font: menu;
+}
+
 panelview {
   -moz-box-orient: vertical;
   -moz-box-flex: 1;
@@ -220,8 +225,8 @@ panel[photon] > .panel-arrowcontainer > .panel-arrowcontent {
 }
 
 #confirmation-hint {
-  --arrowpanel-background: #058b00;
-  --arrowpanel-border-color: #046b00;
+  --arrowpanel-background: #0060df;
+  --arrowpanel-border-color: #0060df;
   --arrowpanel-color: #fff;
 }
 
@@ -591,51 +596,23 @@ toolbarbutton[constrain-size="true"][cui-areatype="menu-panel"] > .toolbarbutton
 #appMenu-tp-label {
   -moz-context-properties: fill;
   fill: currentColor;
+  -moz-box-flex: 1;
+  padding: 0;
+  padding-inline-start: 8px;
+  margin: 0;
+}
+
+#appMenu-tp-icon {
   list-style-image: url(chrome://browser/skin/tracking-protection.svg);
+}
+
+#appMenu-tp-button {
   -moz-box-flex: 1;
 }
 
-#appMenu-tp-toggle {
-  -moz-appearance: none;
-  box-sizing: border-box;
-  min-width: 26px;
-  height: 10px;
-  border-radius: 10px;
-  background-color: var(--arrowpanel-dimmed-even-further);
-  border: 1px solid transparent;
-  margin-top: 4px;
-  margin-bottom: 4px;
-  margin-inline-start: 1px;
-  margin-inline-end: 7px;
-  padding: 2px;
-  transition: padding .2s ease;
-}
-
-#appMenu-tp-toggle::before {
-  position: relative;
-  display: block;
-  content: "";
-  width: 10px;
-  height: 10px;
-  border-radius: 10px;
-  background: white;
-}
-
-#appMenu-tp-toggle[enabled=true] {
-  background-color: #0a84ff;
-  border: 1px solid #0a84ff;
-  /* Push the toggle to the right. */
-  padding-inline-start: 12px;
-}
-
-#appMenu-tp-toggle:hover,
-#appMenu-tp-toggle:-moz-focusring {
-  border: 1px solid var(--panel-separator-color);
-}
-
-#appMenu-tp-toggle[enabled=true]:hover,
-#appMenu-tp-toggle[enabled=true]:-moz-focusring {
-  background-color: #45a1ff;
+#appMenu-tp-category {
+  color: var(--panel-disabled-color);
+  margin-inline-end: 0;
 }
 
 .addon-banner-item > .toolbarbutton-text,
@@ -815,7 +792,7 @@ toolbarbutton[constrain-size="true"][cui-areatype="menu-panel"] > .toolbarbutton
 }
 
 .panel-banner-item {
-  color: black;
+  color: black !important /* !important overrides the toolbarbutton:hover default style on Linux */;
   background-color: hsla(96,65%,75%,.5);
 }
 
@@ -829,7 +806,7 @@ toolbarbutton[constrain-size="true"][cui-areatype="menu-panel"] > .toolbarbutton
 
 :root[lwt-popup-brighttext] .panel-banner-item:not([disabled]) {
   background-color: rgba(48,230,11,.1);
-  color: #F9F9FA;
+  color: #F9F9FA !important;
 }
 
 :root[lwt-popup-brighttext] .panel-banner-item:not([disabled]):hover {
@@ -858,6 +835,10 @@ panelview .toolbarbutton-1,
 
 .subviewbutton:focus {
   outline: 0;
+}
+
+.subviewbutton[disabled="true"] {
+  color: var(--panel-disabled-color);
 }
 
 .subviewbutton > .toolbarbutton-text {
@@ -902,7 +883,6 @@ panelview .toolbarbutton-1,
 }
 
 .panel-banner-item > .toolbarbutton-multiline-text {
-  font: menu;
   margin: 0;
   padding: 0;
   padding-inline-start: 8px; /* See '.subviewbutton-iconic > .toolbarbutton-text' rule above. */
@@ -940,16 +920,6 @@ panelview .toolbarbutton-1,
 .subviewbutton > .menu-accel-container > .menu-iconic-accel,
 .subviewbutton > .menu-accel-container > .menu-accel {
   margin-inline-end: 0 !important; /* to override menu.css on Windows */
-}
-
-#widget-overflow-fixed-list .toolbarbutton-1 > .toolbarbutton-text,
-#widget-overflow-list .toolbarbutton-1 > .toolbarbutton-text,
-.subviewbutton:not(.panel-subview-footer) > .toolbarbutton-text,
-.addon-banner-item > .toolbarbutton-text,
-/* Bookmark items need a more specific selector. */
-.PanelUI-subView .subviewbutton:not(.panel-subview-footer) > .menu-text,
-.PanelUI-subView .subviewbutton:not(.panel-subview-footer) > .menu-iconic-text {
-  font: menu;
 }
 
 .subviewbutton[shortcut]::after {
@@ -999,14 +969,8 @@ panelview .toolbarbutton-1,
   transform: translateY(2px) scaleX(.75);
 }
 
-/* This is a <label> but it should fit in with the menu font- and colorwise. */
-#PanelUI-characterEncodingView-autodetect-label {
-  font: menu;
-  color: inherit;
-}
-
 .subviewbutton[checked="true"] {
-  list-style-image: url(chrome://browser/skin/check.svg);
+  list-style-image: url(chrome://global/skin/icons/check.svg);
   -moz-context-properties: fill;
   fill: currentColor;
   color: inherit;
@@ -1022,7 +986,6 @@ panelview .toolbarbutton-1,
 
 panelmultiview .toolbaritem-combined-buttons > label {
   -moz-box-flex: 1;
-  font: menu;
   margin: 0;
   padding: 4px 0px;
 }
@@ -1081,17 +1044,11 @@ panelmultiview .toolbaritem-combined-buttons > spacer.after-label {
 }
 
 .toolbaritem-combined-buttons > .subviewbutton:not(.subviewbutton-iconic) > .toolbarbutton-text {
-  font-size: 1em;
   padding-inline-start: 0;
 }
 
 .subview-subheader {
   color: var(--panel-disabled-color);
-}
-
-.subview-subheader,
-.panel-subview-footer {
-  font: menu;
 }
 
 panelview .toolbarbutton-1 {
@@ -1100,6 +1057,7 @@ panelview .toolbarbutton-1 {
 
 panelview .toolbarbutton-1@buttonStateHover@,
 toolbarbutton.subviewbutton@buttonStateHover@,
+.navigable.subviewbutton@buttonStateHover@,
 menu.subviewbutton@menuStateHover@,
 menuitem.subviewbutton@menuStateHover@,
 .widget-overflow-list .toolbarbutton-1@buttonStateHover@,
@@ -1110,6 +1068,7 @@ menuitem.subviewbutton@menuStateHover@,
 
 panelview .toolbarbutton-1@buttonStateActive@,
 toolbarbutton.subviewbutton@buttonStateActive@,
+.navigable.subviewbutton@buttonStateActive@,
 menu.subviewbutton@menuStateActive@,
 menuitem.subviewbutton@menuStateActive@,
 .widget-overflow-list .toolbarbutton-1@buttonStateActive@,
@@ -1135,11 +1094,6 @@ menuitem.panel-subview-footer@menuStateActive@,
 .subviewbutton.panel-subview-footer@buttonStateActive@ {
   background-color: var(--arrowpanel-dimmed-even-further);
   box-shadow: 0 1px 0 hsla(210,4%,10%,.05) inset;
-}
-
-#BMB_bookmarksPopup .subviewbutton {
-  font: menu;
-  font-weight: normal;
 }
 
 #BMB_bookmarksPopup .subviewbutton:not([disabled="true"]) {
@@ -1266,6 +1220,7 @@ toolbarpaletteitem[place="palette"] > #search-container {
   min-width: 7em;
   width: 7em;
   min-height: 37px;
+  max-height: 37px;
 }
 
 .toolbaritem-combined-buttons@inAnyPanel@ > toolbarbutton {
@@ -1655,19 +1610,19 @@ toolbarpaletteitem[place="menu-panel"] > .subviewbutton-nav::after {
   padding: 4px;
 }
 
-.subviewbutton.download[retryLabel] > .action-button {
+.subviewbutton.download[canRetry] > .action-button {
   list-style-image: url("chrome://browser/skin/reload.svg");
 }
 
-.subviewbutton.download:not([openLabel]):not([retryLabel]) > .action-button {
+.subviewbutton.download:not([canShow]):not([canRetry]) > .action-button {
   fill: currentColor;
   fill-opacity: 0.4;
 }
 
-.subviewbutton.download:-moz-any([openLabel],[retryLabel]) > .action-button@buttonStateHover@ {
+.subviewbutton.download:-moz-any([canShow],[canRetry]) > .action-button@buttonStateHover@ {
   background-color: var(--arrowpanel-dimmed-further);
 }
 
-.subviewbutton.download:-moz-any([openLabel],[retryLabel]) > .action-button@buttonStateActive@ {
+.subviewbutton.download:-moz-any([canShow],[canRetry]) > .action-button@buttonStateActive@ {
   background-color: var(--arrowpanel-dimmed-even-further);
 }

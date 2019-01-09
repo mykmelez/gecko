@@ -21,12 +21,7 @@ loader.lazyRequireGetter(this, "AppConstants", "resource://gre/modules/AppConsta
 const ZoomKeys = require("devtools/client/shared/zoom-keys");
 
 const PREF_MESSAGE_TIMESTAMP = "devtools.webconsole.timestampMessages";
-const PREF_PERSISTLOG = "devtools.webconsole.persistlog";
 const PREF_SIDEBAR_ENABLED = "devtools.webconsole.sidebarToggle";
-
-// XXX: This file is incomplete (see bug 1326937).
-// It's used when loading the webconsole with devtools-launchpad, but will ultimately be
-// the entry point for the new frontend
 
 /**
  * A WebConsoleFrame instance is an interactive console initialized *per target*
@@ -62,19 +57,6 @@ WebConsoleFrame.prototype = {
   },
 
   /**
-   * Getter for the persistent logging preference.
-   * @type boolean
-   */
-  get persistLog() {
-    // For the browser console, we receive tab navigation
-    // when the original top level window we attached to is closed,
-    // but we don't want to reset console history and just switch to
-    // the next available window.
-    return this.isBrowserConsole ||
-           Services.prefs.getBoolPref(PREF_PERSISTLOG);
-  },
-
-  /**
    * Initialize the WebConsoleFrame instance.
    * @return object
    *         A promise object that resolves once the frame is ready to use.
@@ -83,6 +65,9 @@ WebConsoleFrame.prototype = {
     this._initUI();
     await this._initConnection();
     await this.consoleOutput.init();
+    // Toggle the timestamp on preference change
+    Services.prefs.addObserver(PREF_MESSAGE_TIMESTAMP, this._onToolboxPrefChanged);
+    this._onToolboxPrefChanged();
 
     const id = WebConsoleUtils.supportsString(this.hudId);
     if (Services.obs) {
@@ -140,7 +125,6 @@ WebConsoleFrame.prototype = {
     if (clearStorage) {
       this.webConsoleClient.clearMessagesCache();
     }
-    this.jsterm.focus();
     this.emit("messages-cleared");
   },
 
@@ -154,6 +138,16 @@ WebConsoleFrame.prototype = {
       this.consoleOutput.dispatchPrivateMessagesClear();
       this.emit("private-messages-cleared");
     }
+  },
+
+  inspectObjectActor(objectActor) {
+    this.consoleOutput.dispatchMessageAdd({
+      helperResult: {
+        type: "inspectObject",
+        object: objectActor,
+      },
+    }, true);
+    return this.consoleOutput;
   },
 
   _onUpdateListeners() {
@@ -232,19 +226,16 @@ WebConsoleFrame.prototype = {
     this.document = this.window.document;
     this.rootElement = this.document.documentElement;
 
-    this.outputNode = this.document.getElementById("output-container");
+    this.outputNode = this.document.getElementById("app-wrapper");
 
     const toolbox = gDevTools.getToolbox(this.owner.target);
 
-    // Handle both launchpad and toolbox loading
-    const Wrapper = this.owner.WebConsoleOutputWrapper || this.window.WebConsoleOutput;
-    this.consoleOutput =
-      new Wrapper(this.outputNode, this, toolbox, this.owner, this.document);
-    // Toggle the timestamp on preference change
-    Services.prefs.addObserver(PREF_MESSAGE_TIMESTAMP, this._onToolboxPrefChanged);
-    this._onToolboxPrefChanged();
+    this.consoleOutput = new this.window.WebConsoleOutput(
+      this.outputNode, this, toolbox, this.owner, this.document
+    );
 
     this._initShortcuts();
+    this._initOutputSyntaxHighlighting();
 
     if (toolbox) {
       toolbox.on("webconsole-selected", this._onPanelSelected);
@@ -253,9 +244,33 @@ WebConsoleFrame.prototype = {
     }
   },
 
+  _initOutputSyntaxHighlighting: function() {
+    // Given a DOM node, we syntax highlight identically to how the input field
+    // looks. See https://codemirror.net/demo/runmode.html;
+    const syntaxHighlightNode = node => {
+      const editor = this.jsterm && this.jsterm.editor;
+      if (node && editor) {
+        node.classList.add("cm-s-mozilla");
+        editor.CodeMirror.runMode(node.textContent, "application/javascript", node);
+      }
+    };
+
+    // Use a Custom Element to handle syntax highlighting to avoid
+    // dealing with refs or innerHTML from React.
+    const win = this.window;
+    win.customElements.define("syntax-highlighted", class extends win.HTMLElement {
+      connectedCallback() {
+        if (!this.connected) {
+          this.connected = true;
+          syntaxHighlightNode(this);
+        }
+      }
+    });
+  },
+
   _initShortcuts: function() {
     const shortcuts = new KeyShortcuts({
-      window: this.window
+      window: this.window,
     });
 
     shortcuts.on(l10n.getStr("webconsole.find.key"),
@@ -366,18 +381,11 @@ WebConsoleFrame.prototype = {
   },
 
   handleTabWillNavigate: function(packet) {
-    if (this.persistLog) {
-      // Add a _type to hit convertCachedPacket.
-      packet._type = true;
-      this.consoleOutput.dispatchMessageAdd(packet);
-    } else {
-      this.clearOutput(false);
-    }
-
+    this.consoleOutput.dispatchTabWillNavigate(packet);
     if (packet.url) {
       this.onLocationChange(packet.url, packet.title);
     }
-  }
+  },
 };
 
 /* This is the same as DevelopmentHelpers.quickRestart, but it runs in all

@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15,135 +15,114 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/MemoryReporting.h"
 
-struct nsXPTCMiniVariant
-{
-// No ctors or dtors so that we can use arrays of these on the stack
-// with no penalty.
-    union Union
-    {
-        int8_t    i8;
-        int16_t   i16;
-        int32_t   i32;
-        int64_t   i64;
-        uint8_t   u8;
-        uint16_t  u16;
-        uint32_t  u32;
-        uint64_t  u64;
-        float     f;
-        double    d;
-        bool      b;
-        char      c;
-        char16_t wc;
-        void*     p;
-    };
+struct nsXPTCMiniVariant {
+  // No ctors or dtors so that we can use arrays of these on the stack
+  // with no penalty.
+  union Union {
+    int8_t i8;
+    int16_t i16;
+    int32_t i32;
+    int64_t i64;
+    uint8_t u8;
+    uint16_t u16;
+    uint32_t u32;
+    uint64_t u64;
+    float f;
+    double d;
+    bool b;
+    char c;
+    char16_t wc;
+    void* p;
+  };
 
-    Union val;
+  Union val;
 };
 
 static_assert(offsetof(nsXPTCMiniVariant, val) == 0,
               "nsXPTCMiniVariant must be a thin wrapper");
 
-struct nsXPTCVariant
-{
-// No ctors or dtors so that we can use arrays of these on the stack with no
-// penalty.
-    union ExtendedVal
-    {
+struct nsXPTCVariant {
+  union ExtendedVal {
     // ExtendedVal is an extension on nsXPTCMiniVariant. It contains types
     // unknown to the assembly implementations which must be passed by indirect
     // semantics.
     //
     // nsXPTCVariant contains enough space to store ExtendedVal inline, which
     // can be used to store these types when IsIndirect() is true.
-        nsXPTCMiniVariant mini;
+    nsXPTCMiniVariant mini;
 
-        nsCString  nscstr;
-        nsString   nsstr;
-        JS::Value  jsval;
+    nsCString nscstr;
+    nsString nsstr;
+    JS::Value jsval;
+    xpt::detail::UntypedTArray array;
 
-        // This type contains non-standard-layout types, so needs an explicit
-        // Ctor/Dtor - we'll just delete them.
-        ExtendedVal() = delete;
-        ~ExtendedVal() = delete;
-    };
+    // This type contains non-standard-layout types, so needs an explicit
+    // Ctor/Dtor - we'll just delete them.
+    ExtendedVal() = delete;
+    ~ExtendedVal() = delete;
+  };
 
-    union
-    {
-        // The `val` field from nsXPTCMiniVariant.
-        nsXPTCMiniVariant::Union val;
+  union {
+    // The `val` field from nsXPTCMiniVariant.
+    nsXPTCMiniVariant::Union val;
 
-        // Storage for any extended variants.
-        ExtendedVal ext;
-    };
+    // Storage for any extended variants.
+    ExtendedVal ext;
+  };
 
-    void*     ptr;
-    nsXPTType type;
-    uint8_t   flags;
+  nsXPTType type;
+  uint8_t flags;
 
-    enum
-    {
-        //
-        // Bitflag definitions
-        //
+  // Clear to a valid, null state.
+  nsXPTCVariant() {
+    memset(this, 0, sizeof(nsXPTCVariant));
+    type = nsXPTType::T_VOID;
+  }
 
-        // Indicates that ptr (above, and distinct from val.p) is the value that
-        // should be passed on the stack.
-        //
-        // In theory, ptr could point anywhere. But in practice it always points
-        // to &val. So this flag is used to pass 'val' by reference, letting us
-        // avoid the extra allocation we would incur if we were to use val.p.
-        //
-        // Various parts of XPConnect assume that ptr==&val, so we enforce it
-        // explicitly with SetIndirect() and IsIndirect().
-        //
-        // Since ptr always points to &val, the semantics of this flag are kind of
-        // dumb, since the ptr field is unnecessary. But changing them would
-        // require changing dozens of assembly files, so they're likely to stay
-        // the way they are.
-        PTR_IS_DATA    = 0x1,
+  enum {
+    //
+    // Bitflag definitions
+    //
 
-        // Indicates that the value we hold requires some sort of cleanup (memory
-        // deallocation, interface release, JS::Value unrooting, etc). The precise
-        // cleanup that is performed depends on the 'type' field above.
-        // If the value is an array, this flag specifies whether the elements
-        // within the array require cleanup (we always clean up the array itself,
-        // so this flag would be redundant for that purpose).
-        VAL_NEEDS_CLEANUP = 0x2
-    };
+    // Indicates that we &val.p should be passed n the stack, i.e. that
+    // val should be passed by reference.
+    IS_INDIRECT = 0x1,
+  };
 
-    void ClearFlags()         {flags = 0;}
-    void SetIndirect()        {ptr = &val; flags |= PTR_IS_DATA;}
-    void SetValNeedsCleanup() {flags |= VAL_NEEDS_CLEANUP;}
+  void ClearFlags() { flags = 0; }
+  void SetIndirect() { flags |= IS_INDIRECT; }
 
-    bool IsIndirect()         const  {return 0 != (flags & PTR_IS_DATA);}
-    bool DoesValNeedCleanup() const  {return 0 != (flags & VAL_NEEDS_CLEANUP);}
+  bool IsIndirect() const { return 0 != (flags & IS_INDIRECT); }
 
-    // Internal use only. Use IsIndirect() instead.
-    bool IsPtrData()       const  {return 0 != (flags & PTR_IS_DATA);}
+  // Implicitly convert to nsXPTCMiniVariant.
+  operator nsXPTCMiniVariant&() { return *(nsXPTCMiniVariant*)&val; }
+  operator const nsXPTCMiniVariant&() const {
+    return *(const nsXPTCMiniVariant*)&val;
+  }
 
-    // Implicitly convert to nsXPTCMiniVariant.
-    operator nsXPTCMiniVariant&() {
-        return *(nsXPTCMiniVariant*) &val;
-    }
-    operator const nsXPTCMiniVariant&() const {
-        return *(const nsXPTCMiniVariant*) &val;
-    }
-
-    // As this type contains an anonymous union, we need to provide explicit
-    // constructors & destructors.
-    nsXPTCVariant() { }
-    ~nsXPTCVariant() { }
+  // As this type contains an anonymous union, we need to provide an explicit
+  // destructor.
+  ~nsXPTCVariant() {}
 };
 
 static_assert(offsetof(nsXPTCVariant, val) == offsetof(nsXPTCVariant, ext),
               "nsXPTCVariant::{ext,val} must have matching offsets");
 
-class nsIXPTCProxy : public nsISupports
-{
-public:
-    NS_IMETHOD CallMethod(uint16_t aMethodIndex,
-                          const nsXPTMethodInfo *aInfo,
-                          nsXPTCMiniVariant *aParams) = 0;
+// static_assert that nsXPTCVariant::ExtendedVal is large enough and
+// well-aligned enough for every XPT-supported type.
+#define XPT_CHECK_SIZEOF(xpt, type)                                            \
+  static_assert(sizeof(nsXPTCVariant::ExtendedVal) >= sizeof(type),            \
+                "nsXPTCVariant::ext not big enough for " #xpt " (" #type ")"); \
+  static_assert(MOZ_ALIGNOF(nsXPTCVariant::ExtendedVal) >= MOZ_ALIGNOF(type),  \
+                "nsXPTCVariant::ext not aligned enough for " #xpt " (" #type   \
+                ")");
+XPT_FOR_EACH_TYPE(XPT_CHECK_SIZEOF)
+#undef XPT_CHECK_SIZEOF
+
+class nsIXPTCProxy : public nsISupports {
+ public:
+  NS_IMETHOD CallMethod(uint16_t aMethodIndex, const nsXPTMethodInfo* aInfo,
+                        nsXPTCMiniVariant* aParams) = 0;
 };
 
 /**
@@ -170,7 +149,7 @@ typedef nsISupports nsISomeInterface;
  */
 XPCOM_API(nsresult)
 NS_GetXPTCallStub(REFNSIID aIID, nsIXPTCProxy* aOuter,
-                  nsISomeInterface* *aStub);
+                  nsISomeInterface** aStub);
 
 /**
  * Destroys an XPTCall stub previously created with NS_GetXPTCallStub.
@@ -179,14 +158,16 @@ XPCOM_API(void)
 NS_DestroyXPTCallStub(nsISomeInterface* aStub);
 
 /**
- * Measures the size of an XPTCall stub previously created with NS_GetXPTCallStub.
+ * Measures the size of an XPTCall stub previously created with
+ * NS_GetXPTCallStub.
  */
 XPCOM_API(size_t)
-NS_SizeOfIncludingThisXPTCallStub(const nsISomeInterface* aStub, mozilla::MallocSizeOf aMallocSizeOf);
+NS_SizeOfIncludingThisXPTCallStub(const nsISomeInterface* aStub,
+                                  mozilla::MallocSizeOf aMallocSizeOf);
 
 // this is extern "C" because on some platforms it is implemented in assembly
-extern "C" nsresult
-NS_InvokeByIndex(nsISupports* that, uint32_t methodIndex,
-                 uint32_t paramCount, nsXPTCVariant* params);
+extern "C" nsresult NS_InvokeByIndex(nsISupports* that, uint32_t methodIndex,
+                                     uint32_t paramCount,
+                                     nsXPTCVariant* params);
 
 #endif /* xptcall_h___ */

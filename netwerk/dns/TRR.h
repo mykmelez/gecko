@@ -12,7 +12,8 @@
 #include "nsIInterfaceRequestor.h"
 #include "nsIStreamListener.h"
 
-namespace mozilla { namespace net {
+namespace mozilla {
+namespace net {
 
 // the values map to RFC1035 type identifiers
 enum TrrType {
@@ -20,10 +21,11 @@ enum TrrType {
   TRRTYPE_NS = 2,
   TRRTYPE_CNAME = 5,
   TRRTYPE_AAAA = 28,
+  TRRTYPE_TXT = 16,
 };
 
 class DOHaddr : public LinkedListElement<DOHaddr> {
-public:
+ public:
   NetAddr mNet;
   uint32_t mTtl;
 };
@@ -32,7 +34,7 @@ class TRRService;
 extern TRRService *gTRRService;
 
 class DOHresp {
-public:
+ public:
   ~DOHresp() {
     DOHaddr *el;
     while ((el = mAddresses.popLast())) {
@@ -44,14 +46,12 @@ public:
   LinkedList<DOHaddr> mAddresses;
 };
 
-class TRR
-  : public Runnable
-  , public nsITimerCallback
-  , public nsIHttpPushListener
-  , public nsIInterfaceRequestor
-  , public nsIStreamListener
-{
-public:
+class TRR : public Runnable,
+            public nsITimerCallback,
+            public nsIHttpPushListener,
+            public nsIInterfaceRequestor,
+            public nsIStreamListener {
+ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIHTTPPUSHLISTENER
   NS_DECL_NSIINTERFACEREQUESTOR
@@ -67,70 +67,64 @@ public:
   static const unsigned int kCnameChaseMax = 64;
 
   // when firing off a normal A or AAAA query
-  explicit TRR(AHostResolver *aResolver,
-               nsHostRecord *aRec,
-               enum TrrType aType)
-    : mozilla::Runnable("TRR")
-    , mRec(aRec)
-    , mHostResolver(aResolver)
-    , mType(aType)
-    , mBodySize(0)
-    , mFailed(false)
-    , mCnameLoop(kCnameChaseMax)
-    , mAllowRFC1918(false)
-  {
+  explicit TRR(AHostResolver *aResolver, nsHostRecord *aRec, enum TrrType aType)
+      : mozilla::Runnable("TRR"),
+        mRec(aRec),
+        mHostResolver(aResolver),
+        mType(aType),
+        mBodySize(0),
+        mFailed(false),
+        mCnameLoop(kCnameChaseMax),
+        mAllowRFC1918(false),
+        mTxtTtl(UINT32_MAX),
+        mOriginSuffix(aRec->originSuffix) {
     mHost = aRec->host;
     mPB = aRec->pb;
   }
 
   // when following CNAMEs
-  explicit TRR(AHostResolver *aResolver,
-               nsHostRecord *aRec,
-               nsCString &aHost,
-               enum TrrType & aType,
-               unsigned int aLoopCount,
-               bool aPB)
-    : mozilla::Runnable("TRR")
-    , mHost(aHost)
-    , mRec(aRec)
-    , mHostResolver(aResolver)
-    , mType(aType)
-    , mBodySize(0)
-    , mFailed(false)
-    , mPB(aPB)
-    , mCnameLoop(aLoopCount)
-    , mAllowRFC1918(false)
-  {
-
-  }
+  explicit TRR(AHostResolver *aResolver, nsHostRecord *aRec, nsCString &aHost,
+               enum TrrType &aType, unsigned int aLoopCount, bool aPB)
+      : mozilla::Runnable("TRR"),
+        mHost(aHost),
+        mRec(aRec),
+        mHostResolver(aResolver),
+        mType(aType),
+        mBodySize(0),
+        mFailed(false),
+        mPB(aPB),
+        mCnameLoop(aLoopCount),
+        mAllowRFC1918(false),
+        mTxtTtl(UINT32_MAX),
+        mOriginSuffix(aRec ? aRec->originSuffix : EmptyCString()) {}
 
   // used on push
   explicit TRR(AHostResolver *aResolver, bool aPB)
-    : mozilla::Runnable("TRR")
-    , mHostResolver(aResolver)
-    , mType(TRRTYPE_A)
-    , mBodySize(0)
-    , mFailed(false)
-    , mPB(aPB)
-    , mCnameLoop(kCnameChaseMax)
-    , mAllowRFC1918(false)
-  { }
+      : mozilla::Runnable("TRR"),
+        mHostResolver(aResolver),
+        mType(TRRTYPE_A),
+        mBodySize(0),
+        mFailed(false),
+        mPB(aPB),
+        mCnameLoop(kCnameChaseMax),
+        mAllowRFC1918(false),
+        mTxtTtl(UINT32_MAX) {}
 
   // to verify a domain
-  explicit TRR(AHostResolver *aResolver,
-               nsACString &aHost,
-               enum TrrType aType,
-               bool aPB)
-    : mozilla::Runnable("TRR")
-    , mHost(aHost)
-    , mHostResolver(aResolver)
-    , mType(aType)
-    , mBodySize(0)
-    , mFailed(false)
-    , mPB(aPB)
-    , mCnameLoop(kCnameChaseMax)
-    , mAllowRFC1918(false)
-  { }
+  explicit TRR(AHostResolver *aResolver, nsACString &aHost, enum TrrType aType,
+               const nsACString &aOriginSuffix, bool aPB)
+      : mozilla::Runnable("TRR"),
+        mHost(aHost),
+        mRec(nullptr),
+        mHostResolver(aResolver),
+        mType(aType),
+        mBodySize(0),
+        mFailed(false),
+        mPB(aPB),
+        mCnameLoop(kCnameChaseMax),
+        mAllowRFC1918(false),
+        mTxtTtl(UINT32_MAX),
+        mOriginSuffix(aOriginSuffix) {}
 
   NS_IMETHOD Run() override;
   void Cancel();
@@ -139,10 +133,10 @@ public:
   RefPtr<nsHostRecord> mRec;
   RefPtr<AHostResolver> mHostResolver;
 
-private:
+ private:
   ~TRR() = default;
   nsresult SendHTTPRequest();
-  nsresult DohEncode(nsCString &target);
+  nsresult DohEncode(nsCString &target, bool aDisableECS);
   nsresult PassQName(unsigned int &index);
   nsresult GetQname(nsAutoCString &aQname, unsigned int &aIndex);
   nsresult DohDecode(nsCString &aHost);
@@ -155,8 +149,8 @@ private:
   // other error codes must be used. This distinction is important for the
   // subsequent logic to separate the error reasons.
   nsresult FailData(nsresult error);
-  nsresult DohDecodeQuery(const nsCString &query,
-                          nsCString &host, enum TrrType &type);
+  nsresult DohDecodeQuery(const nsCString &query, nsCString &host,
+                          enum TrrType &type);
   nsresult ReceivePush(nsIHttpChannel *pushed, nsHostRecord *pushedRec);
   nsresult On200Response();
 
@@ -170,11 +164,16 @@ private:
   DOHresp mDNS;
   nsCOMPtr<nsITimer> mTimeout;
   nsCString mCname;
-  uint32_t mCnameLoop; // loop detection counter
+  uint32_t mCnameLoop;  // loop detection counter
   bool mAllowRFC1918;
+  nsTArray<nsCString> mTxt;
+  uint32_t mTxtTtl;
+
+  // keep a copy of the originSuffix for the cases where mRec == nullptr */
+  const nsCString mOriginSuffix;
 };
 
-} // namespace net
-} // namespace mozilla
+}  // namespace net
+}  // namespace mozilla
 
-#endif // include guard
+#endif  // include guard

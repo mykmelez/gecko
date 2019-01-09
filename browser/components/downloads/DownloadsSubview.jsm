@@ -20,6 +20,8 @@ ChromeUtils.defineModuleGetter(this, "DownloadsViewUI",
                                "resource:///modules/DownloadsViewUI.jsm");
 ChromeUtils.defineModuleGetter(this, "FileUtils",
                                "resource://gre/modules/FileUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "PlacesUtils",
+                               "resource://gre/modules/PlacesUtils.jsm");
 
 let gPanelViewInstances = new WeakMap();
 const kRefreshBatchSize = 10;
@@ -61,7 +63,7 @@ class DownloadsSubview extends DownloadsViewUI.BaseView {
       contextMenu.setAttribute("onpopuphidden", "DownloadsSubview.onContextMenuHidden(this);");
       let clearButton = contextMenu.querySelector("menuitem[command='downloadsCmd_clearDownloads']");
       clearButton.hidden = false;
-      clearButton.previousSibling.hidden = true;
+      clearButton.previousElementSibling.hidden = true;
       contextMenu.querySelector("menuitem[command='cmd_delete']")
         .setAttribute("command", "downloadsCmd_delete");
     }
@@ -85,7 +87,6 @@ class DownloadsSubview extends DownloadsViewUI.BaseView {
    * usually when this instance is added as a view in the constructor.
    */
   onDownloadBatchStarting() {
-    this.batchFragment = this.document.createDocumentFragment();
     this.window.clearTimeout(this._batchTimeout);
   }
 
@@ -96,19 +97,12 @@ class DownloadsSubview extends DownloadsViewUI.BaseView {
   onDownloadBatchEnded() {
     let {window} = this;
     window.clearTimeout(this._batchTimeout);
-    let waitForMs = 200;
-    if (this.batchFragment.childElementCount) {
-      // Prepend the batch fragment.
-      this.container.insertBefore(this.batchFragment, this.container.firstChild || null);
-      waitForMs = 0;
-    }
-    // Wait a wee bit to dispatch the event, because another batch may start
-    // right away.
+    // If there are no downloads to display, wait a bit to dispatch the load
+    // completion event, because another batch may start right away.
     this._batchTimeout = window.setTimeout(() => {
       this._updateStatsFromDisk();
       this.panelview.dispatchEvent(new window.CustomEvent("DownloadsLoaded"));
-    }, waitForMs);
-    this.batchFragment = null;
+    }, this.container.childElementCount ? 0 : 200);
   }
 
   /**
@@ -118,20 +112,22 @@ class DownloadsSubview extends DownloadsViewUI.BaseView {
    * @param {DOMNode}  [options.insertBefore]
    */
   onDownloadAdded(download, { insertBefore } = {}) {
-    let shell = new DownloadsSubview.Button(download, this.document);
+    let element = this.document.createXULElement("hbox");
+    let shell = new DownloadsSubview.Button(download, element);
     this._viewItemsForDownloads.set(download, shell);
-    // Triggger the code that update all attributes to match the downloads'
-    // current state.
-    shell.onChanged();
 
     // Since newest downloads are displayed at the top, either prepend the new
     // element or insert it after the one indicated by the insertBefore option.
     if (insertBefore) {
       this._viewItemsForDownloads.get(insertBefore)
-          .element.insertAdjacentElement("afterend", shell.element);
+          .element.insertAdjacentElement("afterend", element);
     } else {
-      (this.batchFragment || this.container).prepend(shell.element);
+      this.container.prepend(element);
     }
+
+    // After connecting to the document, trigger the code that updates all
+    // attributes to match the current state of the downloads.
+    shell.ensureActive();
   }
 
   /**
@@ -172,7 +168,7 @@ class DownloadsSubview extends DownloadsViewUI.BaseView {
         return;
 
       let count = 0;
-      for (let button of this.container.childNodes) {
+      for (let button of this.container.children) {
         if (this.destroyed)
           return;
         if (!button._shell)
@@ -240,9 +236,9 @@ class DownloadsSubview extends DownloadsViewUI.BaseView {
     if (!instance)
       return;
     instance._downloadsData.removeFinished();
-    Cc["@mozilla.org/browser/download-history;1"]
-      .getService(Ci.nsIDownloadHistory)
-      .removeAllDownloads();
+    PlacesUtils.history.removeVisitsByFilter({
+      transition: PlacesUtils.history.TRANSITIONS.DOWNLOAD,
+    }).catch(Cu.reportError);
   }
 
   /**
@@ -327,47 +323,59 @@ class DownloadsSubview extends DownloadsViewUI.BaseView {
     if (event.button > 1)
       return;
 
-    let button = event.originalTarget;
-    if (!button.hasAttribute || button.classList.contains("subviewbutton-back"))
+    let button =
+        event.target.closest(".subviewbutton,toolbarbutton,menuitem,panelview");
+    if (!button || button.localName == "panelview") {
       return;
+    }
+
+    let item = button.closest(".subviewbutton.download");
 
     let command = "downloadsCmd_open";
     if (button.classList.contains("action-button")) {
-      button = button.parentNode;
-      command = button.hasAttribute("showLabel") ? "downloadsCmd_show" : "downloadsCmd_retry";
+      command = item.hasAttribute("canShow") ? "downloadsCmd_show"
+                                             : "downloadsCmd_retry";
     } else if (button.localName == "menuitem") {
       command = button.getAttribute("command");
-      button = button.parentNode._anchorNode;
-    }
-    while (button && !button._shell && button != this.panelview &&
-           (!button.hasAttribute || !button.hasAttribute("oncommand"))) {
-      button = button.parentNode;
+      if (command == "downloadsCmd_clearDownloads") {
+        DownloadsSubview.onClearDownloads(button);
+        return;
+      }
+      item = button.parentNode._anchorNode;
     }
 
-    // We don't need to do anything when no button was clicked, like a separator
-    // or a blank panel area. Also, when 'oncommand' is set, the button will invoke
-    // its own, custom command handler.
-    if (!button || button == this.panelview || button.hasAttribute("oncommand"))
-      return;
-
-    if (command == "downloadsCmd_clearDownloads") {
-      DownloadsSubview.onClearDownloads(button);
-    } else if (button._shell.isCommandEnabled(command)) {
-      button._shell[command]();
+    if (item && item._shell.isCommandEnabled(command)) {
+      item._shell[command]();
     }
   }
 }
 
+/**
+ * Associates each document with a pre-built DOM fragment representing the
+ * download list item. This is then cloned to create each individual list item.
+ * This is stored on the document to prevent leaks that would occur if a single
+ * instance created by one document's DOMParser was stored globally.
+ */
+var gDownloadsSubviewItemFragments = new WeakMap();
+
 DownloadsSubview.Button = class extends DownloadsViewUI.DownloadElementShell {
-  constructor(download, document) {
+  constructor(download, element) {
     super();
     this.download = download;
-
-    this.element = document.createElement("toolbarbutton");
+    this.element = element;
     this.element._shell = this;
 
-    this.element.classList.add("subviewbutton", "subviewbutton-iconic", "download",
-      "download-state");
+    this.element.classList.add("subviewbutton", "subviewbutton-iconic",
+      "download", "download-state", "navigable");
+
+    let hover = event => {
+      if (event.originalTarget.classList.contains("action-button")) {
+        this.element.classList.toggle("downloadHoveringButton",
+                                      event.type == "mouseover");
+      }
+    };
+    this.element.addEventListener("mouseover", hover);
+    this.element.addEventListener("mouseout", hover);
   }
 
   get browserWindow() {
@@ -408,52 +416,105 @@ DownloadsSubview.Button = class extends DownloadsViewUI.DownloadElementShell {
     } else {
       this._updateState();
     }
-
-    // This cannot be placed within onStateChanged because when a download goes
-    // from hasBlockedData to !hasBlockedData it will still remain in the same state.
-    this.element.classList.toggle("temporary-block",
-                                  !!this.download.hasBlockedData);
   }
 
-  /**
-   * Update the DOM representation of this download to match the current, recently
-   * updated, state.
-   */
-  _updateState() {
-    super._updateState();
-    this.element.setAttribute("label", this.element.getAttribute("displayName"));
-    this.element.setAttribute("tooltiptext", this.element.getAttribute("fullStatus"));
-
-    if (this.isCommandEnabled("downloadsCmd_show")) {
-      this.element.setAttribute("openLabel", kButtonLabels.open);
-      this.element.setAttribute("showLabel", kButtonLabels.show);
-      this.element.removeAttribute("retryLabel");
-    } else if (this.isCommandEnabled("downloadsCmd_retry")) {
-      this.element.setAttribute("retryLabel", kButtonLabels.retry);
-      this.element.removeAttribute("openLabel");
-      this.element.removeAttribute("showLabel");
-    } else {
-      this.element.removeAttribute("openLabel");
-      this.element.removeAttribute("retryLabel");
-      this.element.removeAttribute("showLabel");
+  // DownloadElementShell
+  connect() {
+    let document = this.element.ownerDocument;
+    let downloadsSubviewItemFragment =
+        gDownloadsSubviewItemFragments.get(document);
+    if (!downloadsSubviewItemFragment) {
+      let MozXULElement = document.defaultView.MozXULElement;
+      downloadsSubviewItemFragment = MozXULElement.parseXULToFragment(`
+        <image class="toolbarbutton-icon" validate="always"/>
+        <vbox class="toolbarbutton-text" flex="1">
+          <label crop="end"/>
+          <label class="status-text status-full" crop="end"/>
+          <label class="status-text status-open" crop="end"/>
+          <label class="status-text status-retry" crop="end"/>
+          <label class="status-text status-show" crop="end"/>
+        </vbox>
+        <toolbarbutton class="action-button"/>
+      `);
+      gDownloadsSubviewItemFragments.set(document,
+                                         downloadsSubviewItemFragment);
+    }
+    this.element.appendChild(downloadsSubviewItemFragment.cloneNode(true));
+    for (let [propertyName, selector] of [
+      ["_downloadTypeIcon", ".toolbarbutton-icon"],
+      ["_downloadTarget", "label"],
+      ["_downloadStatus", ".status-full"],
+      ["_downloadButton", ".action-button"],
+    ]) {
+      this[propertyName] = this.element.querySelector(selector);
     }
 
-    this._updateVisibility();
+    for (let [label, selector] of [
+      [kButtonLabels.open, ".status-open"],
+      [kButtonLabels.retry, ".status-retry"],
+      [kButtonLabels.show, ".status-show"],
+    ]) {
+      this.element.querySelector(selector).value = label;
+    }
   }
 
-  _updateVisibility() {
-    let state = this.element.getAttribute("state");
+  // DownloadElementShell
+  showDisplayNameAndIcon(displayName, icon) {
+    this._downloadTarget.value = displayName;
+    this._downloadTypeIcon.src = icon;
+  }
+
+  // DownloadElementShell
+  showProgress() {}
+
+  // DownloadElementShell
+  showStatus(status) {
+    this._downloadStatus.value = status;
+    this.element.tooltipText = status;
+  }
+
+  // DownloadElementShell
+  showButton() {}
+
+  // DownloadElementShell
+  hideButton() {}
+
+  // DownloadElementShell
+  _updateState() {
     // This view only show completed and failed downloads.
-    this.element.hidden = !(state == DownloadsCommon.DOWNLOAD_FINISHED ||
-      state == DownloadsCommon.DOWNLOAD_FAILED);
+    let state = DownloadsCommon.stateOfDownload(this.download);
+    let shouldDisplay = state == DownloadsCommon.DOWNLOAD_FINISHED ||
+                        state == DownloadsCommon.DOWNLOAD_FAILED;
+    this.element.hidden = !shouldDisplay;
+    if (!shouldDisplay) {
+      return;
+    }
+
+    super._updateState();
+
+    if (this.isCommandEnabled("downloadsCmd_show")) {
+      this.element.setAttribute("canShow", "true");
+      this.element.removeAttribute("canRetry");
+    } else if (this.isCommandEnabled("downloadsCmd_retry")) {
+      this.element.setAttribute("canRetry", "true");
+      this.element.removeAttribute("canShow");
+    } else {
+      this.element.removeAttribute("canRetry");
+      this.element.removeAttribute("canShow");
+    }
+  }
+
+  // DownloadElementShell
+  _updateStateInner() {
+    if (!this.element.hidden) {
+      super._updateStateInner();
+    }
   }
 
   /**
    * Command handler; copy the download URL to the OS general clipboard.
    */
   downloadsCmd_copyLocation() {
-    let clipboard = Cc["@mozilla.org/widget/clipboardhelper;1"]
-                      .getService(Ci.nsIClipboardHelper);
-    clipboard.copyString(this.download.source.url);
+    DownloadsCommon.copyDownloadLink(this.download);
   }
 };

@@ -3,24 +3,25 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef PerformanceCollector_h
-#define PerformanceCollector_h
+#ifndef PerformanceUtils_h
+#define PerformanceUtils_h
 
-#include "mozilla/dom/DOMTypes.h"   // defines PerformanceInfo
+#include "mozilla/PerformanceTypes.h"
 
 namespace mozilla {
 
 /**
- * Collects all performance info in the current process
- * and adds then in the aMetrics arrey
+ * Returns an array of promises to asynchronously collect all performance
+ * info in the current process.
  */
-void CollectPerformanceInfo(nsTArray<dom::PerformanceInfo>& aMetrics);
+nsTArray<RefPtr<PerformanceInfoPromise>> CollectPerformanceInfo();
 
 /**
- * Converts a PerformanceInfo array into a nsIPerformanceMetricsData and
- * sends a performance-metrics notification with it
+ * Asynchronously collects memory info for a given window
  */
-nsresult NotifyPerformanceInfo(const nsTArray<dom::PerformanceInfo>& aMetrics);
+RefPtr<MemoryPromise> CollectMemoryInfo(
+    const nsCOMPtr<nsPIDOMWindowOuter>& aWindow,
+    const RefPtr<AbstractThread>& aEventTarget);
 
-} // namespace mozilla
-#endif   // PerformanceCollector_h
+}  // namespace mozilla
+#endif  // PerformanceUtils_h

@@ -808,7 +808,7 @@ bool ValidateES3CopyTexImageParametersBase(Context *context,
     gl::Framebuffer *framebuffer = state.getReadFramebuffer();
     GLuint readFramebufferID     = framebuffer->id();
 
-    if (!ValidateFramebufferComplete(context, framebuffer, true))
+    if (!ValidateFramebufferComplete(context, framebuffer))
     {
         return false;
     }
@@ -819,6 +819,14 @@ bool ValidateES3CopyTexImageParametersBase(Context *context,
     }
 
     const FramebufferAttachment *source = framebuffer->getReadColorbuffer();
+
+    // According to ES 3.x spec, if the internalformat of the texture
+    // is RGB9_E5 and copy to such a texture, generate INVALID_OPERATION.
+    if (textureFormat.info->internalFormat == GL_RGB9_E5)
+    {
+        context->handleError(InvalidOperation());
+        return false;
+    }
 
     if (isSubImage)
     {
@@ -1063,7 +1071,7 @@ bool ValidateES3TexStorage3DParameters(Context *context,
                                                height, depth);
 }
 
-bool ValidateBeginQuery(gl::Context *context, GLenum target, GLuint id)
+bool ValidateBeginQuery(gl::Context *context, QueryType target, GLuint id)
 {
     if (context->getClientMajorVersion() < 3)
     {
@@ -1074,7 +1082,7 @@ bool ValidateBeginQuery(gl::Context *context, GLenum target, GLuint id)
     return ValidateBeginQueryBase(context, target, id);
 }
 
-bool ValidateEndQuery(gl::Context *context, GLenum target)
+bool ValidateEndQuery(gl::Context *context, QueryType target)
 {
     if (context->getClientMajorVersion() < 3)
     {
@@ -1085,7 +1093,7 @@ bool ValidateEndQuery(gl::Context *context, GLenum target)
     return ValidateEndQueryBase(context, target);
 }
 
-bool ValidateGetQueryiv(Context *context, GLenum target, GLenum pname, GLint *params)
+bool ValidateGetQueryiv(Context *context, QueryType target, GLenum pname, GLint *params)
 {
     if (context->getClientMajorVersion() < 3)
     {
@@ -1244,7 +1252,7 @@ bool ValidateClearBuffer(Context *context)
         return false;
     }
 
-    if (!ValidateFramebufferComplete(context, context->getGLState().getDrawFramebuffer(), true))
+    if (!ValidateFramebufferComplete(context, context->getGLState().getDrawFramebuffer()))
     {
         return false;
     }
@@ -1253,7 +1261,7 @@ bool ValidateClearBuffer(Context *context)
 }
 
 bool ValidateDrawRangeElements(Context *context,
-                               GLenum mode,
+                               PrimitiveMode mode,
                                GLuint start,
                                GLuint end,
                                GLsizei count,
@@ -1397,13 +1405,14 @@ bool ValidateCompressedTexImage3D(Context *context,
         return false;
     }
 
-    auto blockSizeOrErr = formatInfo.computeCompressedImageSize(gl::Extents(width, height, depth));
-    if (blockSizeOrErr.isError())
+    GLuint blockSize = 0;
+    if (!formatInfo.computeCompressedImageSize(gl::Extents(width, height, depth), &blockSize))
     {
         context->handleError(InvalidValue());
         return false;
     }
-    if (imageSize < 0 || static_cast<GLuint>(imageSize) != blockSizeOrErr.getResult())
+
+    if (imageSize < 0 || static_cast<GLuint>(imageSize) != blockSize)
     {
         context->handleError(InvalidValue());
         return false;
@@ -1535,6 +1544,7 @@ static bool ValidateBindBufferCommon(Context *context,
                 return false;
             }
 
+            ASSERT(caps.uniformBufferOffsetAlignment);
             if (buffer != 0 && (offset % caps.uniformBufferOffsetAlignment) != 0)
             {
                 context->handleError(
@@ -1581,6 +1591,7 @@ static bool ValidateBindBufferCommon(Context *context,
                                                        "indexed binding points.");
                 return false;
             }
+            ASSERT(caps.shaderStorageBufferOffsetAlignment);
             if (buffer != 0 && (offset % caps.shaderStorageBufferOffsetAlignment) != 0)
             {
                 context->handleError(InvalidValue() << "offset must be multiple of value of "
@@ -2016,13 +2027,14 @@ bool ValidateCompressedTexSubImage3D(Context *context,
         return false;
     }
 
-    auto blockSizeOrErr = formatInfo.computeCompressedImageSize(gl::Extents(width, height, depth));
-    if (blockSizeOrErr.isError())
+    GLuint blockSize = 0;
+    if (!formatInfo.computeCompressedImageSize(gl::Extents(width, height, depth), &blockSize))
     {
-        context->handleError(blockSizeOrErr.getError());
+        ANGLE_VALIDATION_ERR(context, InvalidOperation(), IntegerOverflow);
         return false;
     }
-    if (imageSize < 0 || static_cast<GLuint>(imageSize) != blockSizeOrErr.getResult())
+
+    if (imageSize < 0 || static_cast<GLuint>(imageSize) != blockSize)
     {
         context->handleError(InvalidValue());
         return false;
@@ -2122,7 +2134,7 @@ bool ValidateDeleteVertexArrays(Context *context, GLint n, const GLuint *)
     return ValidateGenOrDeleteES3(context, n);
 }
 
-bool ValidateBeginTransformFeedback(Context *context, GLenum primitiveMode)
+bool ValidateBeginTransformFeedback(Context *context, PrimitiveMode primitiveMode)
 {
     if (context->getClientMajorVersion() < 3)
     {
@@ -2131,9 +2143,9 @@ bool ValidateBeginTransformFeedback(Context *context, GLenum primitiveMode)
     }
     switch (primitiveMode)
     {
-        case GL_TRIANGLES:
-        case GL_LINES:
-        case GL_POINTS:
+        case PrimitiveMode::Triangles:
+        case PrimitiveMode::Lines:
+        case PrimitiveMode::Points:
             break;
 
         default:
@@ -2782,7 +2794,7 @@ bool ValidateGetSynciv(Context *context,
 }
 
 bool ValidateDrawElementsInstanced(Context *context,
-                                   GLenum mode,
+                                   PrimitiveMode mode,
                                    GLsizei count,
                                    GLenum type,
                                    const void *indices,
@@ -3335,7 +3347,14 @@ bool ValidateGetActiveUniformsiv(Context *context,
     {
         case GL_UNIFORM_TYPE:
         case GL_UNIFORM_SIZE:
+            break;
         case GL_UNIFORM_NAME_LENGTH:
+            if (context->getExtensions().webglCompatibility)
+            {
+                ANGLE_VALIDATION_ERR(context, InvalidEnum(), EnumNotSupported);
+                return false;
+            }
+            break;
         case GL_UNIFORM_BLOCK_INDEX:
         case GL_UNIFORM_OFFSET:
         case GL_UNIFORM_ARRAY_STRIDE:
@@ -3456,7 +3475,7 @@ bool ValidateUniformBlockBinding(Context *context,
 }
 
 bool ValidateDrawArraysInstanced(Context *context,
-                                 GLenum mode,
+                                 PrimitiveMode mode,
                                  GLint first,
                                  GLsizei count,
                                  GLsizei primcount)

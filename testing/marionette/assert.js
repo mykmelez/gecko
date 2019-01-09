@@ -19,9 +19,9 @@ const {
 } = ChromeUtils.import("chrome://marionette/content/error.js", {});
 const {pprint} = ChromeUtils.import("chrome://marionette/content/format.js", {});
 
-XPCOMUtils.defineLazyGetter(this, "browser", () => {
-  const {browser} = ChromeUtils.import("chrome://marionette/content/browser.js", {});
-  return browser;
+XPCOMUtils.defineLazyModuleGetters(this, {
+  evaluate: "chrome://marionette/content/evaluate.js",
+  browser: "chrome://marionette/content/browser.js",
 });
 
 this.EXPORTED_SYMBOLS = ["assert"];
@@ -29,6 +29,8 @@ this.EXPORTED_SYMBOLS = ["assert"];
 const isFennec = () => AppConstants.platform == "android";
 const isFirefox = () =>
     Services.appinfo.ID == "{ec8030f7-c20a-464f-9b0e-13a3a9e97384}";
+const isThunderbird = () =>
+    Services.appinfo.ID == "{3550f703-e582-4d05-9a08-453d09bdfdc6}";
 
 /**
  * Shorthands for common assertions made in Marionette.
@@ -38,26 +40,22 @@ const isFirefox = () =>
 this.assert = {};
 
 /**
- * Asserts that an arbitrary object, <var>obj</var> is not acyclic.
+ * Asserts that an arbitrary object is not acyclic.
  *
  * @param {*} obj
- *     Object test.  This assertion is only meaningful if passed
+ *     Object to test.  This assertion is only meaningful if passed
  *     an actual object or array.
  * @param {Error=} [error=JavaScriptError] error
  *     Error to throw if assertion fails.
  * @param {string=} message
- *     Message to use for <var>error</var> if assertion fails.  By default
- *     it will use the error message provided by
- *     <code>JSON.stringify</code>.
+ *     Custom message to use for `error` if assertion fails.
  *
  * @throws {JavaScriptError}
- *     If <var>obj</var> is cyclic.
+ *     If the object is cyclic.
  */
 assert.acyclic = function(obj, msg = "", error = JavaScriptError) {
-  try {
-    JSON.stringify(obj);
-  } catch (e) {
-    throw new error(msg || e);
+  if (evaluate.isCyclic(obj)) {
+    throw new error(msg || "Cyclic object value");
   }
 };
 
@@ -93,6 +91,21 @@ assert.session = function(driver, msg = "") {
 assert.firefox = function(msg = "") {
   msg = msg || "Only supported in Firefox";
   assert.that(isFirefox, msg, UnsupportedOperationError)();
+};
+
+/**
+ * Asserts that the current browser is Firefox Desktop or Thunderbird.
+ *
+ * @param {string=} msg
+ *     Custom error message.
+ *
+ * @throws {UnsupportedOperationError}
+ *     If current browser is not Firefox or Thunderbird.
+ */
+assert.desktop = function(msg = "") {
+  msg = msg || "Only supported in desktop applications";
+  assert.that(obj => isFirefox(obj) || isThunderbird(obj),
+      msg, UnsupportedOperationError)();
 };
 
 /**

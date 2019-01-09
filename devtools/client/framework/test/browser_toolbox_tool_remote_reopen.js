@@ -6,7 +6,6 @@
 "use strict";
 
 const { DebuggerServer } = require("devtools/server/main");
-const { DebuggerClient } = require("devtools/shared/client/debugger-client");
 
 // Bug 1277805: Too slow for debug runs
 requestLongerTimeout(2);
@@ -60,39 +59,16 @@ function runTools(target) {
   })();
 }
 
-function getClient() {
-  DebuggerServer.init();
-  DebuggerServer.registerAllActors();
-
-  const transport = DebuggerServer.connectPipe();
-  const client = new DebuggerClient(transport);
-
-  return client.connect().then(() => client);
-}
-
-function getTarget(client) {
-  const deferred = defer();
-
-  client.listTabs().then(tabList => {
-    const target = TargetFactory.forRemoteTab({
-      client: client,
-      form: tabList.tabs[tabList.selected],
-      chrome: false
-    });
-    deferred.resolve(target);
-  });
-
-  return deferred.promise;
-}
-
 function test() {
   (async function() {
     toggleAllTools(true);
-    await addTab("about:blank");
+    const tab = await addTab("about:blank");
 
-    const client = await getClient();
-    const target = await getTarget(client);
+    const target = await TargetFactory.forTab(tab);
+    const { client } = target;
     await runTools(target);
+
+    const rootFronts = [...client.mainRoot.fronts.values()];
 
     // Actor fronts should be destroyed now that the toolbox has closed, but
     // look for any that remain.
@@ -100,16 +76,23 @@ function test() {
       if (!pool.__poolMap) {
         continue;
       }
+
+      // Ignore the root fronts, which are top-level pools and aren't released
+      // on toolbox destroy, but on client close.
+      if (rootFronts.includes(pool)) {
+        continue;
+      }
+
       for (const actor of pool.__poolMap.keys()) {
+        // Ignore the root front as it is only release on client close
+        if (actor == "root") {
+          continue;
+        }
         // Bug 1056342: Profiler fails today because of framerate actor, but
         // this appears more complex to rework, so leave it for that bug to
         // resolve.
         if (actor.includes("framerateActor")) {
           todo(false, "Front for " + actor + " still held in pool!");
-          continue;
-        }
-        // gcliActor is for the commandline which is separate to the toolbox
-        if (actor.includes("gcliActor")) {
           continue;
         }
         ok(false, "Front for " + actor + " still held in pool!");

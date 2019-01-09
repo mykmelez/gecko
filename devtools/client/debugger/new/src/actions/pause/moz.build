@@ -7,11 +7,10 @@ DIRS += [
 
 ]
 
-DevToolsModules(
+DebuggerModules(
     'breakOnNext.js',
     'commands.js',
     'continueToHere.js',
-    'extra.js',
     'fetchScopes.js',
     'index.js',
     'mapFrames.js',
@@ -19,7 +18,6 @@ DevToolsModules(
     'paused.js',
     'pauseOnExceptions.js',
     'resumed.js',
-    'selectComponent.js',
     'selectFrame.js',
     'setPopupObjectProperties.js',
     'skipPausing.js',

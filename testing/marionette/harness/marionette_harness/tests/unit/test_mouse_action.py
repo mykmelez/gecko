@@ -35,7 +35,7 @@ class Actions(object):
             "type": "pointer"
         }]}
 
-        return self.marionette._send_message("performActions", params=params)
+        return self.marionette._send_message("WebDriver:PerformActions", params=params)
 
     def move(self, element, x=0, y=0, duration=250):
         self.action_chain.append({
@@ -65,7 +65,7 @@ class BaseMouseAction(MarionetteTestCase):
     def setUp(self):
         super(BaseMouseAction, self).setUp()
 
-        if self.marionette.session_capabilities["platformName"] == "darwin":
+        if self.marionette.session_capabilities["platformName"] == "mac":
             self.mod_key = Keys.META
         else:
             self.mod_key = Keys.CONTROL

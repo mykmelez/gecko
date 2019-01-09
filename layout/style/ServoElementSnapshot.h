@@ -20,28 +20,10 @@
 namespace mozilla {
 
 /**
- * A structure representing a single attribute name and value.
- *
- * This is pretty similar to the private nsAttrAndChildArray::InternalAttr.
- */
-struct ServoAttrSnapshot
-{
-  nsAttrName mName;
-  nsAttrValue mValue;
-
-  ServoAttrSnapshot(const nsAttrName& aName, const nsAttrValue& aValue)
-    : mName(aName)
-    , mValue(aValue)
-  {
-  }
-};
-
-/**
  * A bitflags enum class used to determine what data does a ServoElementSnapshot
  * contains.
  */
-enum class ServoElementSnapshotFlags : uint8_t
-{
+enum class ServoElementSnapshotFlags : uint8_t {
   State = 1 << 0,
   Attributes = 1 << 1,
   Id = 1 << 2,
@@ -58,19 +40,18 @@ MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(ServoElementSnapshotFlags)
  * This means the attributes, and the element state, such as :hover, :active,
  * etc...
  */
-class ServoElementSnapshot
-{
+class ServoElementSnapshot {
   typedef dom::BorrowedAttrInfo BorrowedAttrInfo;
   typedef dom::Element Element;
   typedef EventStates::ServoType ServoStateType;
 
-public:
+ public:
   typedef ServoElementSnapshotFlags Flags;
 
-  explicit ServoElementSnapshot(const Element* aElement);
+  explicit ServoElementSnapshot(const Element&);
 
-  ~ServoElementSnapshot()
-  {
+  ~ServoElementSnapshot() {
+    MOZ_ASSERT(NS_IsMainThread());
     MOZ_COUNT_DTOR(ServoElementSnapshot);
   }
 
@@ -78,16 +59,14 @@ public:
 
   bool HasState() const { return HasAny(Flags::State); }
 
-  bool HasOtherPseudoClassState() const
-  {
+  bool HasOtherPseudoClassState() const {
     return HasAny(Flags::OtherPseudoClassState);
   }
 
   /**
    * Captures the given state (if not previously captured).
    */
-  void AddState(EventStates aState)
-  {
+  void AddState(EventStates aState) {
     if (!HasAny(Flags::State)) {
       mState = aState.ServoValue();
       mContains |= Flags::State;
@@ -100,19 +79,19 @@ public:
    * The attribute name and namespace are used to note which kind of attribute
    * has changed.
    */
-  inline void AddAttrs(Element*, int32_t aNameSpaceID, nsAtom* aAttribute);
+  inline void AddAttrs(const Element&, int32_t aNameSpaceID,
+                       nsAtom* aAttribute);
 
   /**
    * Captures some other pseudo-class matching state not included in
    * EventStates.
    */
-  void AddOtherPseudoClassState(Element* aElement);
+  void AddOtherPseudoClassState(const Element&);
 
   /**
    * Needed methods for attribute matching.
    */
-  BorrowedAttrInfo GetAttrInfoAt(uint32_t aIndex) const
-  {
+  BorrowedAttrInfo GetAttrInfoAt(uint32_t aIndex) const {
     MOZ_ASSERT(HasAttrs());
     if (aIndex >= mAttrs.Length()) {
       return BorrowedAttrInfo(nullptr, nullptr);
@@ -120,14 +99,12 @@ public:
     return BorrowedAttrInfo(&mAttrs[aIndex].mName, &mAttrs[aIndex].mValue);
   }
 
-  const nsAttrValue* GetParsedAttr(nsAtom* aLocalName) const
-  {
+  const nsAttrValue* GetParsedAttr(nsAtom* aLocalName) const {
     return GetParsedAttr(aLocalName, kNameSpaceID_None);
   }
 
   const nsAttrValue* GetParsedAttr(nsAtom* aLocalName,
-                                   int32_t aNamespaceID) const
-  {
+                                   int32_t aNamespaceID) const {
     MOZ_ASSERT(HasAttrs());
     uint32_t i, len = mAttrs.Length();
     if (aNamespaceID == kNameSpaceID_None) {
@@ -150,35 +127,27 @@ public:
     return nullptr;
   }
 
-  const nsAttrValue* DoGetClasses() const
-  {
-    MOZ_ASSERT(HasAttrs());
-    return &mClass;
-  }
-
   bool IsInChromeDocument() const { return mIsInChromeDocument; }
   bool SupportsLangAttr() const { return mSupportsLangAttr; }
 
   bool HasAny(Flags aFlags) const { return bool(mContains & aFlags); }
 
-  bool IsTableBorderNonzero() const
-  {
+  bool IsTableBorderNonzero() const {
     MOZ_ASSERT(HasOtherPseudoClassState());
     return mIsTableBorderNonzero;
   }
 
-  bool IsMozBrowserFrame() const
-  {
+  bool IsMozBrowserFrame() const {
     MOZ_ASSERT(HasOtherPseudoClassState());
     return mIsMozBrowserFrame;
   }
 
-private:
+ private:
   // TODO: Profile, a 1 or 2 element AutoTArray could be worth it, given we know
   // we're dealing with attribute changes when we take snapshots of attributes,
   // though it can be wasted space if we deal with a lot of state-only
   // snapshots.
-  nsTArray<ServoAttrSnapshot> mAttrs;
+  nsTArray<AttrArray::InternalAttr> mAttrs;
   nsAttrValue mClass;
   ServoStateType mState;
   Flags mContains;
@@ -192,12 +161,9 @@ private:
   bool mOtherAttributeChanged : 1;
 };
 
-
-inline void
-ServoElementSnapshot::AddAttrs(mozilla::dom::Element* aElement,
-                               int32_t aNameSpaceID,
-                               nsAtom* aAttribute)
-{
+inline void ServoElementSnapshot::AddAttrs(const Element& aElement,
+                                           int32_t aNameSpaceID,
+                                           nsAtom* aAttribute) {
   if (aNameSpaceID == kNameSpaceID_None) {
     if (aAttribute == nsGkAtoms::_class) {
       mClassAttributeChanged = true;
@@ -214,20 +180,20 @@ ServoElementSnapshot::AddAttrs(mozilla::dom::Element* aElement,
     return;
   }
 
-  uint32_t attrCount = aElement->GetAttrCount();
+  uint32_t attrCount = aElement.GetAttrCount();
   mAttrs.SetCapacity(attrCount);
   for (uint32_t i = 0; i < attrCount; ++i) {
-    const BorrowedAttrInfo info = aElement->GetAttrInfoAt(i);
+    const BorrowedAttrInfo info = aElement.GetAttrInfoAt(i);
     MOZ_ASSERT(info);
-    mAttrs.AppendElement(ServoAttrSnapshot { *info.mName, *info.mValue });
+    mAttrs.AppendElement(AttrArray::InternalAttr{*info.mName, *info.mValue});
   }
 
   mContains |= Flags::Attributes;
-  if (aElement->HasID()) {
+  if (aElement.HasID()) {
     mContains |= Flags::Id;
   }
 
-  if (const nsAttrValue* classValue = aElement->GetClasses()) {
+  if (const nsAttrValue* classValue = aElement.GetClasses()) {
     // FIXME(emilio): It's pretty unfortunate that this is only relevant for
     // SVG, yet it's a somewhat expensive copy. We should be able to do
     // better!
@@ -236,6 +202,6 @@ ServoElementSnapshot::AddAttrs(mozilla::dom::Element* aElement,
   }
 }
 
-} // namespace mozilla
+}  // namespace mozilla
 
 #endif

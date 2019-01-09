@@ -20,13 +20,12 @@ namespace mozilla {
 
 class DXVA2Manager;
 
-class WMFVideoMFTManager : public MFTManager
-{
-public:
+class WMFVideoMFTManager : public MFTManager {
+ public:
   WMFVideoMFTManager(const VideoInfo& aConfig,
                      layers::KnowsCompositor* aKnowsCompositor,
-                     layers::ImageContainer* aImageContainer,
-                     float aFramerate,
+                     layers::ImageContainer* aImageContainer, float aFramerate,
+                     const CreateDecoderParams::OptionSet& aOptions,
                      bool aDXVAEnabled);
   ~WMFVideoMFTManager();
 
@@ -44,39 +43,34 @@ public:
 
   nsCString GetDescriptionName() const override;
 
-  void Flush() override
-  {
+  void Flush() override {
     MFTManager::Flush();
     mDraining = false;
     mSamplesCount = 0;
   }
 
-  void Drain() override
-  {
+  void Drain() override {
     MFTManager::Drain();
     mDraining = true;
   }
 
-  MediaDataDecoder::ConversionRequired NeedsConversion() const override
-  {
+  MediaDataDecoder::ConversionRequired NeedsConversion() const override {
     return mStreamType == H264
-           ? MediaDataDecoder::ConversionRequired::kNeedAnnexB
-           : MediaDataDecoder::ConversionRequired::kNeedNone;
+               ? MediaDataDecoder::ConversionRequired::kNeedAnnexB
+               : MediaDataDecoder::ConversionRequired::kNeedNone;
   }
 
-private:
+ private:
   MediaResult ValidateVideoInfo();
 
   bool InitializeDXVA();
 
   MediaResult InitInternal();
 
-  HRESULT CreateBasicVideoFrame(IMFSample* aSample,
-                                int64_t aStreamOffset,
+  HRESULT CreateBasicVideoFrame(IMFSample* aSample, int64_t aStreamOffset,
                                 VideoData** aOutVideoData);
 
-  HRESULT CreateD3DVideoFrame(IMFSample* aSample,
-                              int64_t aStreamOffset,
+  HRESULT CreateD3DVideoFrame(IMFSample* aSample, int64_t aStreamOffset,
                               VideoData** aOutVideoData);
 
   HRESULT SetDecoderMediaTypes();
@@ -104,13 +98,7 @@ private:
 
   nsCString mDXVAFailureReason;
 
-  enum StreamType
-  {
-    Unknown,
-    H264,
-    VP8,
-    VP9
-  };
+  enum StreamType { Unknown, H264, VP8, VP9 };
 
   StreamType mStreamType;
 
@@ -123,8 +111,9 @@ private:
   bool mIsValid = true;
   bool mIMFUsable = false;
   const float mFramerate;
+  const bool mLowLatency;
 };
 
-} // namespace mozilla
+}  // namespace mozilla
 
-#endif // WMFVideoMFTManager_h_
+#endif  // WMFVideoMFTManager_h_

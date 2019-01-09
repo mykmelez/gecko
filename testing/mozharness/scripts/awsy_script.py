@@ -51,11 +51,23 @@ class AWSY(TestingMixin, MercurialScript, TooltoolMixin, CodeCoverageMixin):
           "default": False,
           "help": "Tries to enable the WebRender compositor.",
           }],
+        [["--disable-webrender"],
+         {"action": "store_true",
+          "dest": "disable_webrender",
+          "default": False,
+          "help": "Force-disables the WebRender compositor.",
+          }],
         [["--base"],
          {"action": "store_true",
           "dest": "test_about_blank",
           "default": False,
           "help": "Runs the about:blank base case memory test.",
+          }],
+        [["--dmd"],
+         {"action": "store_true",
+          "dest": "dmd",
+          "default": False,
+          "help": "Runs tests with DMD enabled.",
           }]
     ] + testing_config_options + copy.deepcopy(code_coverage_config_options)
 
@@ -137,7 +149,7 @@ class AWSY(TestingMixin, MercurialScript, TooltoolMixin, CodeCoverageMixin):
         archive = os.path.join(page_load_test_dir, 'tp5n.zip')
         unzip = self.query_exe('unzip')
         unzip_cmd = [unzip, '-q', '-o', archive, '-d', page_load_test_dir]
-        self.run_command(unzip_cmd, halt_on_failure=True)
+        self.run_command(unzip_cmd, halt_on_failure=False)
         self.run_command("ls %s" % page_load_test_dir)
 
     def run_tests(self, args=None, **kw):
@@ -162,7 +174,7 @@ class AWSY(TestingMixin, MercurialScript, TooltoolMixin, CodeCoverageMixin):
             dmd_py_lib_dir = os.path.join(dmd_py_lib_dir, "../Resources/")
 
         dmd_path = os.path.join(dmd_py_lib_dir, "dmd.py")
-        if os.path.isfile(dmd_path):
+        if self.config['dmd'] and os.path.isfile(dmd_path):
             dmd_enabled = True
             runtime_testvars['dmd'] = True
 
@@ -225,6 +237,11 @@ class AWSY(TestingMixin, MercurialScript, TooltoolMixin, CodeCoverageMixin):
         if self.config['enable_webrender']:
             env['MOZ_WEBRENDER'] = '1'
             env['MOZ_ACCELERATED'] = '1'
+
+        # Allow explicitly disabling webrender, so that we don't run WR on non-QR
+        # test platforms just because they run on qualified hardware.
+        if self.config['disable_webrender']:
+            env['MOZ_WEBRENDER'] = '0'
 
         env['MOZ_UPLOAD_DIR'] = dirs['abs_blob_upload_dir']
         if not os.path.isdir(env['MOZ_UPLOAD_DIR']):

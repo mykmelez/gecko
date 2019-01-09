@@ -4,7 +4,6 @@
 "use strict";
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 var EXPORTED_SYMBOLS = ["TelemetryEvents"];
 
@@ -22,7 +21,7 @@ const TelemetryEvents = {
     enroll_failed: {
       methods: ["enrollFailed"],
       objects: ["addon_study", "preference_rollout", "preference_study"],
-      extra_keys: ["reason", "preference"],
+      extra_keys: ["reason", "preference", "detail"],
       record_on_release: true,
     },
 

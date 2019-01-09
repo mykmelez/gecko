@@ -22,13 +22,15 @@ namespace mozilla {
 namespace dom {
 class ContentParent;
 class TabParent;
-} // namespace dom
+}  // namespace dom
+
+namespace layers {
+struct LayersObserverEpoch;
+}  // namespace layers
 
 class PProcessHangMonitorParent;
 
-class ProcessHangMonitor final
-  : public nsIObserver
-{
+class ProcessHangMonitor final : public nsIObserver {
  private:
   ProcessHangMonitor();
   virtual ~ProcessHangMonitor();
@@ -40,16 +42,17 @@ class ProcessHangMonitor final
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOBSERVER
 
-  static PProcessHangMonitorParent* AddProcess(dom::ContentParent* aContentParent);
+  static PProcessHangMonitorParent* AddProcess(
+      dom::ContentParent* aContentParent);
   static void RemoveProcess(PProcessHangMonitorParent* aParent);
 
   static void ClearHang();
 
-  static void PaintWhileInterruptingJS(PProcessHangMonitorParent* aParent,
-                                       dom::TabParent* aTab,
-                                       bool aForceRepaint,
-                                       uint64_t aLayerObserverEpoch);
-  static void ClearPaintWhileInterruptingJS(uint64_t aLayerObserverEpoch);
+  static void PaintWhileInterruptingJS(
+      PProcessHangMonitorParent* aParent, dom::TabParent* aTab,
+      bool aForceRepaint, const layers::LayersObserverEpoch& aEpoch);
+  static void ClearPaintWhileInterruptingJS(
+      const layers::LayersObserverEpoch& aEpoch);
   static void MaybeStartPaintWhileInterruptingJS();
 
   enum SlowScriptAction {
@@ -80,6 +83,6 @@ class ProcessHangMonitor final
   nsCOMPtr<nsIThread> mThread;
 };
 
-} // namespace mozilla
+}  // namespace mozilla
 
-#endif // mozilla_ProcessHangMonitor_h
+#endif  // mozilla_ProcessHangMonitor_h

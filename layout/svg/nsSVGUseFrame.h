@@ -8,41 +8,38 @@
 #define __NS_SVGUSEFRAME_H__
 
 // Keep in (case-insensitive) order:
-#include "nsIAnonymousContentCreator.h"
 #include "nsSVGGFrame.h"
 
-class nsSVGUseFrame final
-  : public nsSVGGFrame
-  , public nsIAnonymousContentCreator
-{
+class nsSVGUseFrame final : public nsSVGGFrame {
   friend nsIFrame* NS_NewSVGUseFrame(nsIPresShell* aPresShell,
                                      ComputedStyle* aStyle);
 
-protected:
+ protected:
   explicit nsSVGUseFrame(ComputedStyle* aStyle)
-    : nsSVGGFrame(aStyle, kClassID)
-    , mHasValidDimensions(true)
-  {
-  }
+      : nsSVGGFrame(aStyle, kClassID), mHasValidDimensions(true) {}
 
-public:
-  NS_DECL_QUERYFRAME
+ public:
   NS_DECL_FRAMEARENA_HELPERS(nsSVGUseFrame)
 
   // nsIFrame interface:
-  void Init(nsIContent* aContent,
-            nsContainerFrame* aParent,
+  void Init(nsIContent* aContent, nsContainerFrame* aParent,
             nsIFrame* aPrevInFlow) override;
 
-  nsresult AttributeChanged(int32_t aNameSpaceID,
-                            nsAtom* aAttribute,
-                            int32_t aModType) override;
+  // Called when the x or y attributes changed.
+  void PositionAttributeChanged();
 
-  void DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData) override;
+  // Called when the href attributes changed.
+  void HrefChanged();
+
+  // Called when the width or height attributes changed.
+  void DimensionAttributeChanged(bool aHadValidDimensions,
+                                 bool aAttributeIsUsed);
+
+  nsresult AttributeChanged(int32_t aNamespaceID, nsAtom* aAttribute,
+                            int32_t aModType) final;
 
 #ifdef DEBUG_FRAME_DUMP
-  nsresult GetFrameName(nsAString& aResult) const override
-  {
+  nsresult GetFrameName(nsAString& aResult) const override {
     return MakeFrameName(NS_LITERAL_STRING("SVGUse"), aResult);
   }
 #endif
@@ -51,16 +48,8 @@ public:
   void ReflowSVG() override;
   void NotifySVGChanged(uint32_t aFlags) override;
 
-  // nsIAnonymousContentCreator
-  nsresult CreateAnonymousContent(nsTArray<ContentInfo>& aElements) override;
-  void AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
-                                uint32_t aFilter) override;
-
-  nsIContent* GetContentClone() { return mContentClone.get(); }
-
-private:
+ private:
   bool mHasValidDimensions;
-  nsCOMPtr<nsIContent> mContentClone;
 };
 
-#endif // __NS_SVGUSEFRAME_H__
+#endif  // __NS_SVGUSEFRAME_H__

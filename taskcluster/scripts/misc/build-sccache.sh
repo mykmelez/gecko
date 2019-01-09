@@ -1,8 +1,8 @@
 #!/bin/bash
 set -x -e -v
 
-# 0.2.6 + a few fixes
-SCCACHE_REVISION=9f4c18b4a6300e3a9250a09811cc985311c20217
+# 0.2.7 + a number of changes
+SCCACHE_REVISION=8f295c09cfdd4cff4f4a0c6f0e057979eeb8842d
 
 # This script is for building sccache
 
@@ -11,6 +11,7 @@ Linux)
     WORKSPACE=$HOME/workspace
     UPLOAD_DIR=$HOME/artifacts
     COMPRESS_EXT=xz
+    PATH="$WORKSPACE/build/src/binutils/bin:$PATH"
     ;;
 MINGW*)
     WORKSPACE=$PWD

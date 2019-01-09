@@ -1,5 +1,3 @@
-import sys
-
 import pytest
 
 from webdriver.transport import HTTPWireProtocol
@@ -11,6 +9,20 @@ def product(a, b):
 
 def flatten(l):
     return [item for x in l for item in x]
+
+
+@pytest.fixture(name="add_browser_capabilities")
+def fixture_add_browser_capabilities(configuration):
+
+    def add_browser_capabilities(capabilities):
+        # Make sure there aren't keys in common.
+        assert not set(configuration["capabilities"]).intersection(set(capabilities))
+        result = dict(configuration["capabilities"])
+        result.update(capabilities)
+
+        return result
+
+    return add_browser_capabilities
 
 
 @pytest.fixture(name="new_session")
@@ -52,13 +64,3 @@ def fixture_new_session(request, configuration, current_session):
     if custom_session.get("session") is not None:
         _delete_session(custom_session["session"]["sessionId"])
         custom_session = None
-
-
-@pytest.fixture(scope="session")
-def platform_name():
-    return {
-        "linux2": "linux",
-        "win32": "windows",
-        "cygwin": "windows",
-        "darwin": "mac"
-    }.get(sys.platform)

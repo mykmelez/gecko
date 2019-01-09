@@ -1,38 +1,41 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! The pseudo-classes and pseudo-elements supported by the style system.
 
 #![deny(missing_docs)]
 
+use crate::element_state::ElementState;
+use crate::stylesheets::{Namespaces, Origin, UrlExtraData};
+use crate::values::serialize_atom_identifier;
+use crate::Atom;
 use cssparser::{Parser as CssParser, ParserInput};
 use selectors::parser::SelectorList;
 use std::fmt::{self, Debug, Write};
 use style_traits::{CssWriter, ParseError, ToCss};
-use stylesheets::{Namespaces, Origin, UrlExtraData};
 
 /// A convenient alias for the type that represents an attribute value used for
 /// selector parser implementation.
 pub type AttrValue = <SelectorImpl as ::selectors::SelectorImpl>::AttrValue;
 
 #[cfg(feature = "servo")]
-pub use servo::selector_parser::*;
+pub use crate::servo::selector_parser::*;
 
 #[cfg(feature = "gecko")]
-pub use gecko::selector_parser::*;
+pub use crate::gecko::selector_parser::*;
 
 #[cfg(feature = "servo")]
-pub use servo::selector_parser::ServoElementSnapshot as Snapshot;
+pub use crate::servo::selector_parser::ServoElementSnapshot as Snapshot;
 
 #[cfg(feature = "gecko")]
-pub use gecko::snapshot::GeckoElementSnapshot as Snapshot;
+pub use crate::gecko::snapshot::GeckoElementSnapshot as Snapshot;
 
 #[cfg(feature = "servo")]
-pub use servo::restyle_damage::ServoRestyleDamage as RestyleDamage;
+pub use crate::servo::restyle_damage::ServoRestyleDamage as RestyleDamage;
 
 #[cfg(feature = "gecko")]
-pub use gecko::restyle_damage::GeckoRestyleDamage as RestyleDamage;
+pub use crate::gecko::restyle_damage::GeckoRestyleDamage as RestyleDamage;
 
 /// Servo's selector parser.
 #[cfg_attr(feature = "servo", derive(MallocSizeOf))]
@@ -172,27 +175,49 @@ impl<T> PerPseudoElementMap<T> {
 }
 
 /// Values for the :dir() pseudo class
+///
+/// "ltr" and "rtl" values are normalized to lowercase.
+#[derive(Clone, Debug, Eq, MallocSizeOf, PartialEq)]
+pub struct Direction(pub Atom);
+
+/// Horizontal values for the :dir() pseudo class
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Direction {
-    /// left-to-right semantic directionality
+pub enum HorizontalDirection {
+    /// :dir(ltr)
     Ltr,
-    /// right-to-left semantic directionality
+    /// :dir(rtl)
     Rtl,
-    /// Some other provided directionality value
-    ///
-    /// TODO(emilio): If we atomize we can then unbox in NonTSPseudoClass.
-    Other(Box<str>),
 }
 
 impl Direction {
     /// Parse a direction value.
     pub fn parse<'i, 't>(parser: &mut CssParser<'i, 't>) -> Result<Self, ParseError<'i>> {
         let ident = parser.expect_ident()?;
-        Ok(match_ignore_ascii_case! { &ident,
-            "rtl" => Direction::Rtl,
-            "ltr" => Direction::Ltr,
-            _ => Direction::Other(Box::from(ident.as_ref())),
-        })
+        Ok(Direction(match_ignore_ascii_case! { &ident,
+            "rtl" => atom!("rtl"),
+            "ltr" => atom!("ltr"),
+            _ => Atom::from(ident.as_ref()),
+        }))
+    }
+
+    /// Convert this Direction into a HorizontalDirection, if applicable
+    pub fn as_horizontal_direction(&self) -> Option<HorizontalDirection> {
+        if self.0 == atom!("ltr") {
+            Some(HorizontalDirection::Ltr)
+        } else if self.0 == atom!("rtl") {
+            Some(HorizontalDirection::Rtl)
+        } else {
+            None
+        }
+    }
+
+    /// Gets the element state relevant to this :dir() selector.
+    pub fn element_state(&self) -> ElementState {
+        match self.as_horizontal_direction() {
+            Some(HorizontalDirection::Ltr) => ElementState::IN_LTR_STATE,
+            Some(HorizontalDirection::Rtl) => ElementState::IN_RTL_STATE,
+            None => ElementState::empty(),
+        }
     }
 }
 
@@ -201,12 +226,6 @@ impl ToCss for Direction {
     where
         W: Write,
     {
-        let dir_str = match *self {
-            Direction::Rtl => "rtl",
-            Direction::Ltr => "ltr",
-            // FIXME: This should be escaped as an identifier; see #19231
-            Direction::Other(ref other) => other,
-        };
-        dest.write_str(dir_str)
+        serialize_atom_identifier(&self.0, dest)
     }
 }

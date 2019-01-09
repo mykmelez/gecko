@@ -18,13 +18,13 @@ TestActor.prototype = {
 
   start: function() {
     this.conn.sendActorEvent(this.actorID, "foo", {
-      hello: "world"
+      hello: "world",
     });
     return {};
-  }
+  },
 };
 TestActor.prototype.requestTypes = {
-  "start": TestActor.prototype.start
+  "start": TestActor.prototype.start,
 };
 
 function TestClient(client, form) {
@@ -40,18 +40,18 @@ TestClient.prototype = {
   start: function() {
     this.client.request({
       to: this.actor,
-      type: "start"
+      type: "start",
     });
   },
 
   detach: function(onDone) {
     this.detached = true;
     onDone();
-  }
+  },
 };
 
 function run_test() {
-  DebuggerServer.addGlobalActor({
+  ActorRegistry.addGlobalActor({
     constructorName: "TestActor",
     constructorFun: TestActor,
   }, "test");
@@ -68,7 +68,7 @@ function run_test() {
 function init() {
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect()
-    .then(() => gClient.listTabs())
+    .then(() => gClient.mainRoot.rootForm)
     .then(response => {
       gTestClient = new TestClient(gClient, response);
       run_next_test();

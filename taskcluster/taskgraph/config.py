@@ -10,8 +10,8 @@ import attr
 import yaml
 from mozpack import path
 
-from .util.schema import validate_schema, Schema
-from voluptuous import Required, Optional
+from .util.schema import validate_schema, Schema, optionally_keyed_by
+from voluptuous import Required, Optional, Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,26 +24,29 @@ graph_config_schema = Schema({
     # (See http://firefox-source-docs.mozilla.org/taskcluster/taskcluster/parameters.html#push-information  # noqa
     # and http://firefox-source-docs.mozilla.org/taskcluster/taskcluster/parameters.html#comm-push-information)  # noqa
     Required('project-repo-param-prefix'): basestring,
+    # This specifies the top level directory of the application being built.
+    # ie. "browser/" for Firefox, "comm/mail/" for Thunderbird.
+    Required('product-dir'): basestring,
     Required('treeherder'): {
         # Mapping of treeherder group symbols to descriptive names
         Required('group-names'): {basestring: basestring}
     },
     Required('index'): {
-        Required('products'): [basestring],
+        Required('products'): [basestring]
     },
     Required('try'): {
         # We have a few platforms for which we want to do some "extra" builds, or at
         # least build-ish things.  Sort of.  Anyway, these other things are implemented
         # as different "platforms".  These do *not* automatically ride along with "-p
         # all"
-        Required('ridealong-builds', default={}): {basestring: [basestring]},
+        Required('ridealong-builds'): {basestring: [basestring]},
     },
     Required('release-promotion'): {
         Required('products'): [basestring],
         Required('flavors'): {basestring: {
             Required('product'): basestring,
             Required('target-tasks-method'): basestring,
-            Optional('release-type'): basestring,
+            Optional('is-rc'): bool,
             Optional('rebuild-kinds'): [basestring],
             Optional('version-bump'): bool,
             Optional('partial-updates'): bool,
@@ -55,11 +58,13 @@ graph_config_schema = Schema({
         # Mapping of scriptworker types to scopes they accept
         Required('worker-types'): {basestring: [basestring]}
     },
-    Required('partner'): {
-        # Release config for partner repacks
-        Required('release'): {basestring: basestring},
-        # Staging config for partner repacks
-        Required('staging'): {basestring: basestring},
+    Required('partner-urls'): {
+        Required('release-partner-repack'):
+            optionally_keyed_by('release-product', 'release-level', 'release-type',
+                                Any(basestring, None)),
+        Required('release-eme-free-repack'):
+            optionally_keyed_by('release-product', 'release-level', 'release-type',
+                                Any(basestring, None)),
     },
 })
 
@@ -86,7 +91,7 @@ class GraphConfig(object):
 
 
 def validate_graph_config(config):
-    return validate_schema(graph_config_schema, config, "Invalid graph configuration:")
+    validate_schema(graph_config_schema, config, "Invalid graph configuration:")
 
 
 def load_graph_config(root_dir):

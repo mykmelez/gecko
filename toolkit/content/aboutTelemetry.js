@@ -10,7 +10,7 @@ ChromeUtils.import("resource://gre/modules/TelemetryTimestamps.jsm");
 ChromeUtils.import("resource://gre/modules/TelemetryController.jsm");
 ChromeUtils.import("resource://gre/modules/TelemetryArchive.jsm");
 ChromeUtils.import("resource://gre/modules/TelemetryUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Preferences.jsm");
+ChromeUtils.import("resource://gre/modules/TelemetrySend.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "AppConstants",
@@ -128,12 +128,7 @@ function sectionalizeObject(obj) {
  * Obtain the main DOMWindow for the current context.
  */
 function getMainWindow() {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIWebNavigation)
-               .QueryInterface(Ci.nsIDocShellTreeItem)
-               .rootTreeItem
-               .QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIDOMWindow);
+  return window.docShell.rootTreeItem.domWindow;
 }
 
 /**
@@ -206,8 +201,7 @@ var Settings = {
     }
   },
 
-  getStatusStringForSetting(setting) {
-    let enabled = Preferences.get(setting.pref, setting.defaultPrefValue);
+  getStatusString(enabled) {
     let status = bundle.GetStringFromName(enabled ? "telemetryUploadEnabled" : "telemetryUploadDisabled");
     return status;
   },
@@ -217,7 +211,7 @@ var Settings = {
    */
   render() {
     let settingsExplanation = document.getElementById("settings-explanation");
-    let uploadEnabled = this.getStatusStringForSetting(this.SETTINGS[0]);
+    let uploadEnabled = this.getStatusString(TelemetrySend.sendingEnabled());
     let extendedEnabled = Services.telemetry.canRecordExtended;
     let collectedData = bundle.GetStringFromName(extendedEnabled ? "prereleaseData" : "releaseData");
     let explanation = bundle.GetStringFromName("settingsExplanation");
@@ -379,10 +373,58 @@ var PingPicker = {
 
   _updateCurrentPingData() {
     const subsession = document.getElementById("show-subsession-data").checked;
-    const ping = TelemetryController.getCurrentPingData(subsession);
+    let ping = TelemetryController.getCurrentPingData(subsession);
     if (!ping) {
       return;
     }
+
+    let stores = Telemetry.getAllStores();
+    let getData = {
+      "histograms": Telemetry.getSnapshotForHistograms,
+      "keyedHistograms": Telemetry.getSnapshotForKeyedHistograms,
+      "scalars": Telemetry.getSnapshotForScalars,
+      "keyedScalars": Telemetry.getSnapshotForKeyedScalars,
+    };
+
+    let data = {};
+    for (const [name, fn] of Object.entries(getData)) {
+      for (const store of stores) {
+        if (!data[store]) {
+          data[store] = {};
+        }
+        let measurement = fn(store, /* clear */ false, /* filterTest */ true);
+        let processes = Object.keys(measurement);
+
+        for (const process of processes) {
+          if (!data[store][process]) {
+            data[store][process] = {};
+          }
+
+          data[store][process][name] = measurement[process];
+        }
+      }
+    }
+    ping.payload.stores = data;
+
+    // Delete the unused data from the payload of the current ping.
+    // It's included in the above `stores` attribute.
+    for (const data of Object.values(ping.payload.processes)) {
+      delete data.scalars;
+      delete data.keyedScalars;
+      delete data.histograms;
+      delete data.keyedHistograms;
+    }
+    delete ping.payload.histograms;
+    delete ping.payload.keyedHistograms;
+
+    // augment ping payload with event telemetry
+    let eventSnapshot = Telemetry.snapshotEvents(Telemetry.DATASET_RELEASE_CHANNEL_OPTIN, false);
+    for (let process of Object.keys(eventSnapshot)) {
+      if (process in ping.payload.processes) {
+        ping.payload.processes[process].events = eventSnapshot[process].filter(e => !e[1].startsWith("telemetry.test"));
+      }
+    }
+
     displayPingData(ping, true);
   },
 
@@ -424,7 +466,7 @@ var PingPicker = {
       const pingDate = new Date(p.timestampCreated);
       const datetimeText = new Services.intl.DateTimeFormat(undefined, {
           dateStyle: "short",
-          timeStyle: "medium"
+          timeStyle: "medium",
         }).format(pingDate);
       const pingName = `${datetimeText}, ${p.type}`;
 
@@ -822,7 +864,7 @@ var SlowSQL = {
     let colTextElement = document.createTextNode(aColText);
     colElement.appendChild(colTextElement);
     aRowElement.appendChild(colElement);
-  }
+  },
 };
 
 var StackRenderer = {
@@ -909,7 +951,7 @@ var StackRenderer = {
 
     div.appendChild(titleElement);
     div.appendChild(document.createElement("br"));
-  }
+  },
 };
 
 var RawPayloadData = {
@@ -926,7 +968,7 @@ var RawPayloadData = {
     document.getElementById("payload-json-viewer").addEventListener("click", (e) => {
       openJsonInFirefoxJsonViewer(JSON.stringify(gPingData.payload, null, 2));
     });
-  }
+  },
 };
 
 function SymbolicationRequest(aPrefix, aRenderHeader,
@@ -1026,7 +1068,7 @@ var CapturedStacks = {
     let key = captures[index][0];
     let cardinality = captures[index][2];
     StackRenderer.renderHeader("captured-stacks", [key, cardinality]);
-  }
+  },
 };
 
 var Histogram = {
@@ -1101,7 +1143,7 @@ var Histogram = {
         pretty_average: 0,
         max: 0,
         sample_count: 0,
-        sum: 0
+        sum: 0,
       };
     }
 
@@ -1117,7 +1159,7 @@ var Histogram = {
       pretty_average: average,
       max: max_value,
       sample_count,
-      sum: aHgram.sum
+      sum: aHgram.sum,
     };
 
     return result;
@@ -1201,7 +1243,7 @@ var Search = {
   // A list of ids of sections that do not support search.
   blacklist: [
     "late-writes-section",
-    "raw-payload-section"
+    "raw-payload-section",
   ],
 
   // Pass if: all non-empty array items match (case-sensitive)
@@ -1406,7 +1448,7 @@ var Search = {
       }
     });
     this.updateNoResults(text, noSearchResults);
-  }
+  },
 };
 
 /*
@@ -1501,7 +1543,7 @@ var GenericTable = {
 
   defaultHeadings: [
     bundle.GetStringFromName("keysHeader"),
-    bundle.GetStringFromName("valuesHeader")
+    bundle.GetStringFromName("valuesHeader"),
   ],
 
   /**
@@ -1634,26 +1676,62 @@ var Scalars = {
     let processesSelect = document.getElementById("processes");
     let selectedProcess = processesSelect.selectedOptions.item(0).getAttribute("value");
 
-    if (!aPayload.processes ||
-        !selectedProcess ||
-        !(selectedProcess in aPayload.processes)) {
+    if (!selectedProcess) {
       return;
     }
 
-    let scalars = aPayload.processes[selectedProcess].scalars || {};
-    let hasData = Array.from(processesSelect.options).some((option) => {
-      let value = option.getAttribute("value");
-      let sclrs = aPayload.processes[value].scalars;
-      return sclrs && Object.keys(sclrs).length > 0;
-    });
-    setHasData("scalars-section", hasData);
-    if (Object.keys(scalars).length > 0) {
-      const headings = [
-        "namesHeader",
-        "valuesHeader",
-      ].map(h => bundle.GetStringFromName(h));
-      const table = GenericTable.render(explodeObject(scalars), headings);
-      scalarsSection.appendChild(table);
+    let payload = aPayload.stores;
+    if (payload) { // Check for stores in the current ping data first
+      let hasData = false;
+      for (const store of Object.keys(payload)) {
+        if (!(selectedProcess in payload[store])) {
+          continue;
+        }
+
+        let scalars = payload[store][selectedProcess].scalars || {};
+        hasData = hasData || Array.from(processesSelect.options).some((option) => {
+          let value = option.getAttribute("value");
+          let sclrs = payload[store][value] && payload[store][value].scalars;
+          return sclrs && Object.keys(sclrs).length > 0;
+        });
+        if (Object.keys(scalars).length > 0) {
+          const headings = [
+            "namesHeader",
+            "valuesHeader",
+          ].map(h => bundle.GetStringFromName(h));
+
+          let s = GenericSubsection.renderSubsectionHeader(store, true, "scalars-section");
+          let table = GenericTable.render(explodeObject(scalars), headings);
+          let caption = document.createElement("caption");
+          caption.textContent = store;
+          table.appendChild(caption);
+          s.appendChild(table);
+          scalarsSection.appendChild(s);
+        }
+      }
+      setHasData("scalars-section", hasData);
+    } else { // Handle archived pings
+      if (!aPayload.processes ||
+        !(selectedProcess in aPayload.processes)) {
+        return;
+      }
+
+      let scalars = aPayload.processes[selectedProcess].scalars || {};
+      let hasData = Array.from(processesSelect.options).some((option) => {
+        let value = option.getAttribute("value");
+        let sclrs = aPayload.processes[value].scalars;
+        return sclrs && Object.keys(sclrs).length > 0;
+      });
+
+      setHasData("scalars-section", hasData);
+      if (Object.keys(scalars).length > 0) {
+        const headings = [
+          "namesHeader",
+          "valuesHeader",
+        ].map(h => bundle.GetStringFromName(h));
+        const table = GenericTable.render(explodeObject(scalars), headings);
+        scalarsSection.appendChild(table);
+      }
     }
   },
 };
@@ -1670,40 +1748,132 @@ var KeyedScalars = {
     let processesSelect = document.getElementById("processes");
     let selectedProcess = processesSelect.selectedOptions.item(0).getAttribute("value");
 
+    if (!selectedProcess) {
+      return;
+    }
+
+    let payload = aPayload.stores;
+    if (payload) { // Check for stores in the current ping data first
+      let hasData = false;
+      for (const store of Object.keys(payload)) {
+        if (!(selectedProcess in payload[store])) {
+          continue;
+        }
+
+        let keyedScalars = payload[store][selectedProcess].keyedScalars || {};
+        hasData = hasData || Array.from(processesSelect.options).some((option) => {
+          let value = option.getAttribute("value");
+          let keyedS = payload[store][value] && payload[store][value].keyedScalars;
+          return keyedS && Object.keys(keyedS).length > 0;
+        });
+        if (!Object.keys(keyedScalars).length > 0) {
+          continue;
+        }
+
+        let s = GenericSubsection.renderSubsectionHeader(store, true, "keyed-scalars-section");
+        let heading = document.createElement("h2");
+        heading.textContent = store;
+        s.appendChild(heading);
+
+        const headings = [
+          "namesHeader",
+          "valuesHeader",
+        ].map(h => bundle.GetStringFromName(h));
+        for (let scalar in keyedScalars) {
+          // Add the name of the scalar.
+          let container = document.createElement("div");
+          container.classList.add("keyed-scalar");
+          container.id = scalar;
+          let scalarNameSection = document.createElement("p");
+          scalarNameSection.classList.add("keyed-title");
+          scalarNameSection.appendChild(document.createTextNode(scalar));
+          container.appendChild(scalarNameSection);
+          // Populate the section with the key-value pairs from the scalar.
+          const table = GenericTable.render(explodeObject(keyedScalars[scalar]), headings);
+          container.appendChild(table);
+          s.appendChild(container);
+        }
+
+        scalarsSection.appendChild(s);
+      }
+      setHasData("keyed-scalars-section", hasData);
+    } else { // Handle archived pings
+      if (!aPayload.processes ||
+        !(selectedProcess in aPayload.processes)) {
+        return;
+      }
+
+      let keyedScalars = aPayload.processes[selectedProcess].keyedScalars || {};
+      let hasData = Array.from(processesSelect.options).some((option) => {
+        let value = option.getAttribute("value");
+        let keyedS = aPayload.processes[value].keyedScalars;
+        return keyedS && Object.keys(keyedS).length > 0;
+      });
+
+      setHasData("keyed-scalars-section", hasData);
+      if (!Object.keys(keyedScalars).length > 0) {
+        return;
+      }
+
+      const headings = [
+        "namesHeader",
+        "valuesHeader",
+      ].map(h => bundle.GetStringFromName(h));
+      for (let scalar in keyedScalars) {
+        // Add the name of the scalar.
+        let container = document.createElement("div");
+        container.classList.add("keyed-scalar");
+        container.id = scalar;
+        let scalarNameSection = document.createElement("p");
+        scalarNameSection.classList.add("keyed-title");
+        scalarNameSection.appendChild(document.createTextNode(scalar));
+        container.appendChild(scalarNameSection);
+        // Populate the section with the key-value pairs from the scalar.
+        const table = GenericTable.render(explodeObject(keyedScalars[scalar]), headings);
+        container.appendChild(table);
+        scalarsSection.appendChild(container);
+      }
+    }
+  },
+};
+
+var Events = {
+  /**
+   * Render the event data - if present - from the payload in a simple table.
+   * @param aPayload A payload object to render the data from.
+   */
+  render(aPayload) {
+    let eventsSection = document.getElementById("events");
+    removeAllChildNodes(eventsSection);
+
+    let processesSelect = document.getElementById("processes");
+    let selectedProcess = processesSelect.selectedOptions.item(0).getAttribute("value");
+
     if (!aPayload.processes ||
         !selectedProcess ||
         !(selectedProcess in aPayload.processes)) {
       return;
     }
 
-    let keyedScalars = aPayload.processes[selectedProcess].keyedScalars || {};
+    let events = aPayload.processes[selectedProcess].events || {};
     let hasData = Array.from(processesSelect.options).some((option) => {
       let value = option.getAttribute("value");
-      let keyedS = aPayload.processes[value].keyedScalars;
-      return keyedS && Object.keys(keyedS).length > 0;
+      let evts = aPayload.processes[value].events;
+      return evts && Object.keys(evts).length > 0;
     });
-    setHasData("keyed-scalars-section", hasData);
-    if (!Object.keys(keyedScalars).length > 0) {
-      return;
-    }
+    setHasData("events-section", hasData);
+    if (Object.keys(events).length > 0) {
+      const headings = [
+        "timestampHeader",
+        "categoryHeader",
+        "methodHeader",
+        "objectHeader",
+        "valuesHeader",
+        "extraHeader",
+      ].map(h => bundle.GetStringFromName(h));
 
-    const headings = [
-      "namesHeader",
-      "valuesHeader",
-    ].map(h => bundle.GetStringFromName(h));
-    for (let scalar in keyedScalars) {
-      // Add the name of the scalar.
-      let container = document.createElement("div");
-      container.classList.add("keyed-scalar");
-      container.id = scalar;
-      let scalarNameSection = document.createElement("p");
-      scalarNameSection.classList.add("keyed-title");
-      scalarNameSection.appendChild(document.createTextNode(scalar));
-      container.appendChild(scalarNameSection);
-      // Populate the section with the key-value pairs from the scalar.
-      const table = GenericTable.render(explodeObject(keyedScalars[scalar]), headings);
-      container.appendChild(table);
-      scalarsSection.appendChild(container);
+      const table = GenericTable.render(events, headings);
+      eventsSection.appendChild(table);
     }
   },
 };
@@ -1739,6 +1909,7 @@ function setupPageHeader() {
     "https://docs.telemetry.mozilla.org/",
     "https://firefox-source-docs.mozilla.org/toolkit/components/telemetry/telemetry/index.html",
     "https://telemetry.mozilla.org/",
+    "https://telemetry.mozilla.org/probe-dictionary/",
   ];
   let htmlLink = document.querySelectorAll("#home-section > ul > li > a");
   htmlLink.forEach((a, index) => {
@@ -1752,7 +1923,7 @@ function displayProcessesSelector(selectedSection) {
     "keyed-scalars-section",
     "histograms-section",
     "keyed-histograms-section",
-    "events-section"
+    "events-section",
   ];
   let processes = document.getElementById("processes");
   processes.hidden = !whitelist.includes(selectedSection);
@@ -2018,6 +2189,7 @@ function openJsonInFirefoxJsonViewer(json) {
 
 function onLoad() {
   window.removeEventListener("load", onLoad);
+  Telemetry.scalarAdd("telemetry.about_telemetry_pageload", 1);
 
   // Set the text in the page header
   setupPageHeader();
@@ -2030,10 +2202,11 @@ function onLoad() {
 
   adjustHeaderState();
 
+  urlStateRestore();
+
   // Update ping data when async Telemetry init is finished.
   Telemetry.asyncFetchTelemetryData(async () => {
     await PingPicker.update();
-    urlStateRestore();
   });
 }
 
@@ -2065,26 +2238,59 @@ var HistogramSection = {
     let hgramsOption = hgramsSelect.selectedOptions.item(0);
     let hgramsProcess = hgramsOption.getAttribute("value");
 
-    if (hgramsProcess === "parent") {
-      histograms = aPayload.histograms;
-    } else if ("processes" in aPayload && hgramsProcess in aPayload.processes &&
-               "histograms" in aPayload.processes[hgramsProcess]) {
-      histograms = aPayload.processes[hgramsProcess].histograms;
-    }
+    let payload = aPayload.stores;
+    if (payload) { // Check for stores in the current ping data first
+      let hasData = false;
+      for (const store of Object.keys(payload)) {
+        if (store in payload && hgramsProcess in payload[store] &&
+          "histograms" in payload[store][hgramsProcess]) {
+          histograms = payload[store][hgramsProcess].histograms;
+        }
 
-    let hasData = Array.from(hgramsSelect.options).some((option) => {
-      let value = option.getAttribute("value");
-      if (value == "parent") {
-        return Object.keys(aPayload.histograms).length > 0;
+        hasData = hasData || Array.from(hgramsSelect.options).some((option) => {
+          let value = option.getAttribute("value");
+          let histos = payload[store][value].histograms;
+          return histos && Object.keys(histos).length > 0;
+        });
+
+        if (Object.keys(histograms).length > 0) {
+          let s = GenericSubsection.renderSubsectionHeader(store, true, "histograms-section");
+          let heading = document.createElement("h2");
+          heading.textContent = store;
+          s.appendChild(heading);
+          for (let [name, hgram] of Object.entries(histograms)) {
+            Histogram.render(s, name, hgram, {unpacked: true});
+          }
+          hgramDiv.appendChild(s);
+          let separator = document.createElement("div");
+          separator.classList.add("clearfix");
+          hgramDiv.appendChild(separator);
+        }
       }
-      let histos = aPayload.processes[value].histograms;
-      return histos && Object.keys(histos).length > 0;
-    });
-    setHasData("histograms-section", hasData);
 
-    if (Object.keys(histograms).length > 0) {
-      for (let [name, hgram] of Object.entries(histograms)) {
-        Histogram.render(hgramDiv, name, hgram, {unpacked: true});
+      setHasData("histograms-section", hasData);
+    } else { // Handle archived pings
+      if (hgramsProcess === "parent") {
+        histograms = aPayload.histograms;
+      } else if ("processes" in aPayload && hgramsProcess in aPayload.processes &&
+        "histograms" in aPayload.processes[hgramsProcess]) {
+        histograms = aPayload.processes[hgramsProcess].histograms;
+      }
+
+      let hasData = Array.from(hgramsSelect.options).some((option) => {
+        let value = option.getAttribute("value");
+        if (value == "parent") {
+          return Object.keys(aPayload.histograms).length > 0;
+        }
+        let histos = aPayload.processes[value].histograms;
+        return histos && Object.keys(histos).length > 0;
+      });
+      setHasData("histograms-section", hasData);
+
+      if (Object.keys(histograms).length > 0) {
+        for (let [name, hgram] of Object.entries(histograms)) {
+          Histogram.render(hgramDiv, name, hgram, {unpacked: true});
+        }
       }
     }
   },
@@ -2099,26 +2305,60 @@ var KeyedHistogramSection = {
     let keyedHgramsSelect = document.getElementById("processes");
     let keyedHgramsOption = keyedHgramsSelect.selectedOptions.item(0);
     let keyedHgramsProcess = keyedHgramsOption.getAttribute("value");
-    if (keyedHgramsProcess === "parent") {
-      keyedHistograms = aPayload.keyedHistograms;
-    } else if ("processes" in aPayload && keyedHgramsProcess in aPayload.processes &&
-               "keyedHistograms" in aPayload.processes[keyedHgramsProcess]) {
-      keyedHistograms = aPayload.processes[keyedHgramsProcess].keyedHistograms;
-    }
 
-    let hasData = Array.from(keyedHgramsSelect.options).some((option) => {
-      let value = option.getAttribute("value");
-      if (value == "parent") {
-        return Object.keys(aPayload.keyedHistograms).length > 0;
+    let payload = aPayload.stores;
+    if (payload) { // Check for stores in the current ping data first
+      let hasData = false;
+      for (const store of Object.keys(payload)) {
+        if (store in payload && keyedHgramsProcess in payload[store] &&
+          "keyedHistograms" in payload[store][keyedHgramsProcess]) {
+          keyedHistograms = payload[store][keyedHgramsProcess].keyedHistograms;
+        }
+
+        hasData = hasData || Array.from(keyedHgramsSelect.options).some((option) => {
+          let value = option.getAttribute("value");
+          let keyedHistos = payload[store][value].keyedHistograms;
+          return keyedHistos && Object.keys(keyedHistos).length > 0;
+        });
+
+        if (Object.keys(keyedHistograms).length > 0) {
+          let s = GenericSubsection.renderSubsectionHeader(store, true, "keyed-histograms-section");
+          let heading = document.createElement("h2");
+          heading.textContent = store;
+          s.appendChild(heading);
+          for (let [id, keyed] of Object.entries(keyedHistograms)) {
+            KeyedHistogram.render(s, id, keyed, {unpacked: true});
+          }
+          keyedDiv.appendChild(s);
+          let separator = document.createElement("div");
+          separator.classList.add("clearfix");
+          keyedDiv.appendChild(separator);
+        }
       }
-      let keyedHistos = aPayload.processes[value].keyedHistograms;
-      return keyedHistos && Object.keys(keyedHistos).length > 0;
-    });
-    setHasData("keyed-histograms-section", hasData);
-    if (Object.keys(keyedHistograms).length > 0) {
-      for (let [id, keyed] of Object.entries(keyedHistograms)) {
-        if (Object.keys(keyed).length > 0) {
-          KeyedHistogram.render(keyedDiv, id, keyed, {unpacked: true});
+
+      setHasData("keyed-histograms-section", hasData);
+    } else { // Handle archived pings
+      if (keyedHgramsProcess === "parent") {
+        keyedHistograms = aPayload.keyedHistograms;
+      } else if ("processes" in aPayload && keyedHgramsProcess in aPayload.processes &&
+        "keyedHistograms" in aPayload.processes[keyedHgramsProcess]) {
+        keyedHistograms = aPayload.processes[keyedHgramsProcess].keyedHistograms;
+      }
+
+      let hasData = Array.from(keyedHgramsSelect.options).some((option) => {
+        let value = option.getAttribute("value");
+        if (value == "parent") {
+          return Object.keys(aPayload.keyedHistograms).length > 0;
+        }
+        let keyedHistos = aPayload.processes[value].keyedHistograms;
+        return keyedHistos && Object.keys(keyedHistos).length > 0;
+      });
+      setHasData("keyed-histograms-section", hasData);
+      if (Object.keys(keyedHistograms).length > 0) {
+        for (let [id, keyed] of Object.entries(keyedHistograms)) {
+          if (Object.keys(keyed).length > 0) {
+            KeyedHistogram.render(keyedDiv, id, keyed, {unpacked: true});
+          }
         }
       }
     }
@@ -2305,6 +2545,9 @@ function displayRichPingData(ping, updatePayloadList) {
 
   // Show keyed histogram data
   KeyedHistogramSection.render(payload);
+
+  // Show event data.
+  Events.render(payload);
 
   // Show captured stacks.
   CapturedStacks.render(payload);

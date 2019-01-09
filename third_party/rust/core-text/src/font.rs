@@ -14,9 +14,10 @@ use font_descriptor::{CTFontDescriptor, CTFontDescriptorRef, CTFontOrientation};
 use font_descriptor::{CTFontSymbolicTraits, CTFontTraits, SymbolicTraitAccessors, TraitAccessors};
 
 use core_foundation::array::{CFArray, CFArrayRef};
-use core_foundation::base::{CFIndex, CFOptionFlags, CFTypeID, CFTypeRef, TCFType};
+use core_foundation::base::{CFIndex, CFOptionFlags, CFType, CFTypeID, CFTypeRef, TCFType};
 use core_foundation::data::{CFData, CFDataRef};
 use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
+use core_foundation::number::CFNumber;
 use core_foundation::string::{CFString, CFStringRef, UniChar};
 use core_foundation::url::{CFURL, CFURLRef};
 use core_graphics::base::CGFloat;
@@ -26,7 +27,8 @@ use core_graphics::geometry::{CGAffineTransform, CGPoint, CGRect, CGSize};
 use core_graphics::path::CGPath;
 
 use foreign_types::ForeignType;
-use libc::{self, size_t, c_void};
+use libc::{self, size_t};
+use std::os::raw::c_void;
 use std::ptr;
 
 type CGContextRef = *mut <CGContext as ForeignType>::CType;
@@ -98,7 +100,7 @@ pub fn new_from_CGFont(cgfont: &CGFont, pt_size: f64) -> CTFont {
 
 pub fn new_from_CGFont_with_variations(cgfont: &CGFont,
                                        pt_size: f64,
-                                       variations: &CFDictionary)
+                                       variations: &CFDictionary<CFString, CFNumber>)
                                        -> CTFont {
     unsafe {
         let font_desc = font_descriptor::new_from_variations(variations);
@@ -161,6 +163,24 @@ impl CTFont {
         }
     }
 
+    pub fn clone_with_symbolic_traits(&self,
+                                      trait_value: CTFontSymbolicTraits,
+                                      trait_mask: CTFontSymbolicTraits)
+                                      -> Option<CTFont> {
+        unsafe {
+            let font_ref = CTFontCreateCopyWithSymbolicTraits(self.0,
+                                                              0.0,
+                                                              ptr::null(),
+                                                              trait_value,
+                                                              trait_mask);
+            if font_ref.is_null() {
+                None
+            } else {
+                Some(CTFont::wrap_under_create_rule(font_ref))
+            }
+        }
+    }
+
     // Names
     pub fn family_name(&self) -> String {
         unsafe {
@@ -187,6 +207,20 @@ impl CTFont {
         unsafe {
             let value = get_string_by_name_key(self, kCTFontPostScriptNameKey);
             value.expect("Fonts should always have a PostScript name.")
+        }
+    }
+
+    pub fn display_name(&self) -> String {
+        unsafe {
+            let value = get_string_by_name_key(self, kCTFontFullNameKey);
+            value.expect("Fonts should always have a PostScript name.")
+        }
+    }
+
+    pub fn style_name(&self) -> String {
+        unsafe {
+            let value = get_string_by_name_key(self, kCTFontStyleNameKey);
+            value.expect("Fonts should always have a style name.")
         }
     }
 
@@ -221,6 +255,18 @@ impl CTFont {
         }
     }
 
+    pub fn slant_angle(&self) -> CGFloat {
+        unsafe {
+            CTFontGetSlantAngle(self.0)
+        }
+    }
+
+    pub fn cap_height(&self) -> CGFloat {
+        unsafe {
+            CTFontGetCapHeight(self.0)
+        }
+    }
+
     pub fn bounding_box(&self) -> CGRect {
         unsafe {
             CTFontGetBoundingBox(self.0)
@@ -251,22 +297,33 @@ impl CTFont {
         }
     }
 
-    pub fn get_glyphs_for_characters(&self, characters: *const UniChar, glyphs: *mut CGGlyph, count: CFIndex)
-                                     -> bool {
-        unsafe {
-            CTFontGetGlyphsForCharacters(self.0, characters, glyphs, count)
-        }
+    pub unsafe fn get_glyphs_for_characters(&self,
+                                            characters: *const UniChar,
+                                            glyphs: *mut CGGlyph,
+                                            count: CFIndex)
+                                            -> bool {
+        CTFontGetGlyphsForCharacters(self.0, characters, glyphs, count)
     }
 
-    pub fn get_advances_for_glyphs(&self,
-                                   orientation: CTFontOrientation,
-                                   glyphs: *const CGGlyph,
-                                   advances: *mut CGSize,
-                                   count: CFIndex)
-                                   -> f64 {
-        unsafe {
-            CTFontGetAdvancesForGlyphs(self.0, orientation, glyphs, advances, count) as f64
-        }
+    pub unsafe fn get_advances_for_glyphs(&self,
+                                          orientation: CTFontOrientation,
+                                          glyphs: *const CGGlyph,
+                                          advances: *mut CGSize,
+                                          count: CFIndex)
+                                          -> f64 {
+        CTFontGetAdvancesForGlyphs(self.0, orientation, glyphs, advances, count) as f64
+    }
+
+    pub unsafe fn get_vertical_translations_for_glyphs(&self,
+                                                       orientation: CTFontOrientation,
+                                                       glyphs: *const CGGlyph,
+                                                       translations: *mut CGSize,
+                                                       count: CFIndex) {
+        CTFontGetVerticalTranslationsForGlyphs(self.0,
+                                               orientation,
+                                               glyphs,
+                                               translations,
+                                               count)
     }
 
     pub fn get_font_table(&self, tag: u32) -> Option<CFData> {
@@ -285,12 +342,11 @@ impl CTFont {
     pub fn get_bounding_rects_for_glyphs(&self, orientation: CTFontOrientation, glyphs: &[CGGlyph])
                                          -> CGRect {
         unsafe {
-            let result = CTFontGetBoundingRectsForGlyphs(self.as_concrete_TypeRef(),
-                                                         orientation,
-                                                         glyphs.as_ptr(),
-                                                         ptr::null_mut(),
-                                                         glyphs.len() as CFIndex);
-            result
+            CTFontGetBoundingRectsForGlyphs(self.as_concrete_TypeRef(),
+                                            orientation,
+                                            glyphs.as_ptr(),
+                                            ptr::null_mut(),
+                                            glyphs.len() as CFIndex)
         }
     }
 
@@ -316,6 +372,16 @@ impl CTFont {
         }
     }
 
+    pub fn get_variation_axes(&self) -> Option<CFArray<CFDictionary<CFString, CFType>>> {
+        unsafe {
+            let axes = CTFontCopyVariationAxes(self.0);
+            if axes.is_null() {
+                return None;
+            }
+            Some(TCFType::wrap_under_create_rule(axes))
+        }
+    }
+
     pub fn create_path_for_glyph(&self, glyph: CGGlyph, matrix: &CGAffineTransform)
                                  -> Result<CGPath, ()> {
         unsafe {
@@ -325,6 +391,13 @@ impl CTFont {
             } else {
                 Ok(CGPath::from_ptr(path))
             }
+        }
+    }
+
+    #[inline]
+    pub fn glyph_count(&self) -> CFIndex {
+        unsafe {
+            CTFontGetGlyphCount(self.0)
         }
     }
 }
@@ -366,7 +439,7 @@ pub fn debug_font_traits(font: &CTFont) {
 
     let traits = font.all_traits();
     println!("kCTFontWeightTrait: {}", traits.normalized_weight());
-//    println!("kCTFontWidthTrait: {}", traits.normalized_width());
+    println!("kCTFontWidthTrait: {}", traits.normalized_width());
 //    println!("kCTFontSlantTrait: {}", traits.normalized_slant());
 }
 
@@ -435,7 +508,12 @@ extern {
     //fn CTFontCreateUIFontForLanguage
     fn CTFontCreateCopyWithAttributes(font: CTFontRef, size: CGFloat, matrix: *const CGAffineTransform,
                                       attributes: CTFontDescriptorRef) -> CTFontRef;
-    //fn CTFontCreateCopyWithSymbolicTraits
+    fn CTFontCreateCopyWithSymbolicTraits(font: CTFontRef,
+                                          size: CGFloat,
+                                          matrix: *const CGAffineTransform,
+                                          symTraitValue: CTFontSymbolicTraits,
+                                          symTraitMask: CTFontSymbolicTraits)
+                                          -> CTFontRef;
     //fn CTFontCreateCopyWithFamily
     //fn CTFontCreateForString
 
@@ -469,12 +547,12 @@ extern {
     fn CTFontGetDescent(font: CTFontRef) -> CGFloat;
     fn CTFontGetLeading(font: CTFontRef) -> CGFloat;
     fn CTFontGetUnitsPerEm(font: CTFontRef) -> libc::c_uint;
-    //fn CTFontGetGlyphCount
+    fn CTFontGetGlyphCount(font: CTFontRef) -> CFIndex;
     fn CTFontGetBoundingBox(font: CTFontRef) -> CGRect;
     fn CTFontGetUnderlinePosition(font: CTFontRef) -> CGFloat;
     fn CTFontGetUnderlineThickness(font: CTFontRef) -> CGFloat;
-    //fn CTFontGetSlantAngle
-    //fn CTFontGetCapHeight
+    fn CTFontGetSlantAngle(font: CTFontRef) -> CGFloat;
+    fn CTFontGetCapHeight(font: CTFontRef) -> CGFloat;
     fn CTFontGetXHeight(font: CTFontRef) -> CGFloat;
 
     /* Getting Glyph Data */
@@ -487,11 +565,20 @@ extern {
                                        boundingRects: *mut CGRect,
                                        count: CFIndex)
                                        -> CGRect;
-    fn CTFontGetAdvancesForGlyphs(font: CTFontRef, orientation: CTFontOrientation, glyphs: *const CGGlyph, advances: *mut CGSize, count: CFIndex) -> libc::c_double;
-    //fn CTFontGetVerticalTranslationsForGlyphs
+    fn CTFontGetAdvancesForGlyphs(font: CTFontRef,
+                                  orientation: CTFontOrientation,
+                                  glyphs: *const CGGlyph,
+                                  advances: *mut CGSize,
+                                  count: CFIndex)
+                                  -> libc::c_double;
+    fn CTFontGetVerticalTranslationsForGlyphs(font: CTFontRef,
+                                              orientation: CTFontOrientation,
+                                              glyphs: *const CGGlyph,
+                                              translations: *mut CGSize,
+                                              count: CFIndex);
 
     /* Working With Font Variations */
-    //fn CTFontCopyVariationAxes
+    fn CTFontCopyVariationAxes(font: CTFontRef) -> CFArrayRef;
     //fn CTFontCopyVariation
 
     /* Getting Font Features */

@@ -209,6 +209,7 @@ CONFIGS = defaultdict(lambda: {
         'defines': {},
         'non_global_defines': [],
         'substs': {
+            'CC_TYPE': 'clang',
             'COMPILE_ENVIRONMENT': '1',
             'LIB_SUFFIX': 'a',
             'BIN_SUFFIX': '.exe',
@@ -236,12 +237,16 @@ class BackendTester(unittest.TestCase):
         environment is cleaned up automatically when the test finishes.
         """
         config = CONFIGS[name]
-
-        objdir = mkdtemp()
-        self.addCleanup(rmtree, objdir)
+        config['substs']['MOZ_UI_LOCALE'] = 'en-US'
 
         srcdir = mozpath.join(test_data_path, name)
         config['substs']['top_srcdir'] = srcdir
+
+        # Create the objdir in the srcdir to ensure that they share the
+        # same drive on Windows.
+        objdir = mkdtemp(dir=srcdir)
+        self.addCleanup(rmtree, objdir)
+
         return ConfigEnvironment(srcdir, objdir, **config)
 
     def _emit(self, name, env=None):

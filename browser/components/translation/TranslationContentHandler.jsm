@@ -7,7 +7,6 @@
 var EXPORTED_SYMBOLS = [ "TranslationContentHandler" ];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "LanguageDetector",
   "resource:///modules/translation/LanguageDetector.jsm");
 
@@ -65,17 +64,21 @@ TranslationContentHandler.prototype = {
         !this.global.content)
       return;
 
-    let url = aRequest.name;
-    if (!url.startsWith("http://") && !url.startsWith("https://"))
+    try {
+      let url = aRequest.name;
+      if (!url.startsWith("http://") && !url.startsWith("https://"))
+        return;
+    } catch (e) {
+      // nsIRequest.name throws NS_ERROR_NOT_IMPLEMENTED for view-source: tabs.
       return;
+    }
 
     let content = this.global.content;
     if (content.detectedLanguage)
       return;
 
     // Grab a 60k sample of text from the page.
-    let encoder = Cc["@mozilla.org/layout/documentEncoder;1?type=text/plain"]
-                    .createInstance(Ci.nsIDocumentEncoder);
+    let encoder = Cu.createDocumentEncoder("text/plain");
     encoder.init(content.document, "text/plain", encoder.SkipInvisibleContent);
     let string = encoder.encodeToStringWithMaxLength(60 * 1024);
 
@@ -99,7 +102,7 @@ TranslationContentHandler.prototype = {
       let data = {
         state: STATE_OFFER,
         originalShown: true,
-        detectedLanguage: result.language
+        detectedLanguage: result.language,
       };
       this.global.sendAsyncMessage("Translation:DocumentState", data);
     });
@@ -121,19 +124,12 @@ TranslationContentHandler.prototype = {
         let translationDocument = this.global.content.translationDocument ||
                                   new TranslationDocument(this.global.content.document);
 
-        let preferredEngine = Services.prefs.getCharPref("browser.translation.engine");
-        let translator = null;
-        if (preferredEngine == "yandex") {
-          ChromeUtils.import("resource:///modules/translation/YandexTranslator.jsm");
-          translator = new YandexTranslator(translationDocument,
-                                            msg.data.from,
-                                            msg.data.to);
-        } else {
-          ChromeUtils.import("resource:///modules/translation/BingTranslator.jsm");
-          translator = new BingTranslator(translationDocument,
-                                          msg.data.from,
-                                          msg.data.to);
-        }
+        let engine = Services.prefs.getCharPref("browser.translation.engine");
+        let importScope =
+          ChromeUtils.import(`resource:///modules/translation/${engine}Translator.jsm`, {});
+        let translator = new importScope[engine + "Translator"](translationDocument,
+                                                                msg.data.from,
+                                                                msg.data.to);
 
         this.global.content.translationDocument = translationDocument;
         translationDocument.translatedFrom = msg.data.from;
@@ -146,7 +142,7 @@ TranslationContentHandler.prototype = {
               characterCount: result.characterCount,
               from: msg.data.from,
               to: msg.data.to,
-              success: true
+              success: true,
             });
             translationDocument.showTranslation();
           },
@@ -169,5 +165,5 @@ TranslationContentHandler.prototype = {
         this.global.content.translationDocument.showTranslation();
         break;
     }
-  }
+  },
 };

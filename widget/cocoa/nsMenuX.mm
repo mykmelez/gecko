@@ -25,7 +25,7 @@
 #include "nsCRT.h"
 #include "nsBaseWidget.h"
 
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIContent.h"
 #include "nsIDocumentObserver.h"
 #include "nsIComponentManager.h"
@@ -419,19 +419,15 @@ void nsMenuX::MenuConstruct()
 
   // bug 365405: Manually wrap the menupopup node to make sure it's bounded
   if (!mXBLAttached) {
-    nsresult rv;
-    nsCOMPtr<nsIXPConnect> xpconnect =
-      do_GetService(nsIXPConnect::GetCID(), &rv);
-    if (NS_SUCCEEDED(rv)) {
-      nsIDocument* ownerDoc = menuPopup->OwnerDoc();
-      dom::AutoJSAPI jsapi;
-      if (ownerDoc && jsapi.Init(ownerDoc->GetInnerWindow())) {
-        JSContext* cx = jsapi.cx();
-        JS::RootedObject ignoredObj(cx);
-        xpconnect->WrapNative(cx, JS::CurrentGlobalOrNull(cx), menuPopup,
-                              NS_GET_IID(nsISupports), ignoredObj.address());
-        mXBLAttached = true;
-      }
+    nsCOMPtr<nsIXPConnect> xpconnect = nsIXPConnect::XPConnect();
+    dom::Document* ownerDoc = menuPopup->OwnerDoc();
+    dom::AutoJSAPI jsapi;
+    if (ownerDoc && jsapi.Init(ownerDoc->GetInnerWindow())) {
+      JSContext* cx = jsapi.cx();
+      JS::RootedObject ignoredObj(cx);
+      xpconnect->WrapNative(cx, JS::CurrentGlobalOrNull(cx), menuPopup,
+                            NS_GET_IID(nsISupports), ignoredObj.address());
+      mXBLAttached = true;
     }
   }
 
@@ -519,7 +515,7 @@ void nsMenuX::LoadMenuItem(nsIContent* inMenuItemContent)
     itemType = eSeparatorMenuItemType;
   } else if (inMenuItemContent->IsElement()) {
     static Element::AttrValuesArray strings[] =
-  {&nsGkAtoms::checkbox, &nsGkAtoms::radio, nullptr};
+  {nsGkAtoms::checkbox, nsGkAtoms::radio, nullptr};
     switch (inMenuItemContent->AsElement()->FindAttrValueIn(kNameSpaceID_None,
                                                             nsGkAtoms::type,
                                                             strings, eCaseMatters)) {
@@ -676,7 +672,7 @@ bool nsMenuX::IsXULHelpMenu(nsIContent* aMenuContent)
 // nsChangeObserver
 //
 
-void nsMenuX::ObserveAttributeChanged(nsIDocument *aDocument, nsIContent *aContent,
+void nsMenuX::ObserveAttributeChanged(dom::Document *aDocument, nsIContent *aContent,
                                       nsAtom *aAttribute)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
@@ -757,7 +753,7 @@ void nsMenuX::ObserveAttributeChanged(nsIDocument *aDocument, nsIContent *aConte
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
-void nsMenuX::ObserveContentRemoved(nsIDocument* aDocument,
+void nsMenuX::ObserveContentRemoved(dom::Document* aDocument,
                                     nsIContent* aContainer,
                                     nsIContent* aChild,
                                     nsIContent* aPreviousSibling)
@@ -769,7 +765,7 @@ void nsMenuX::ObserveContentRemoved(nsIDocument* aDocument,
   mMenuGroupOwner->UnregisterForContentChanges(aChild);
 }
 
-void nsMenuX::ObserveContentInserted(nsIDocument *aDocument, nsIContent* aContainer,
+void nsMenuX::ObserveContentInserted(dom::Document *aDocument, nsIContent* aContainer,
                                      nsIContent *aChild)
 {
   if (gConstructingMenu)

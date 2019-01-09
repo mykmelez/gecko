@@ -16,10 +16,7 @@ var EXPORTED_SYMBOLS = ["Subprocess"];
 
 /* exported Subprocess */
 
-Cu.importGlobalProperties(["TextEncoder"]);
-
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/subprocess/subprocess_common.jsm");
 
 if (AppConstants.platform == "win") {

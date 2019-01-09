@@ -20,11 +20,11 @@ for example - use `all_tests.py` instead.
 from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.util.attributes import match_run_on_projects
 from taskgraph.util.schema import resolve_keyed_by, OptimizationSchema
 from taskgraph.util.treeherder import split_symbol, join_symbol, add_suffix
 from taskgraph.util.platforms import platform_family
 from taskgraph.util.schema import (
-    validate_schema,
     optionally_keyed_by,
     Schema,
 )
@@ -107,6 +107,11 @@ WINDOWS_WORKER_TYPES = {
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
+    'windows10-64-ux': {
+      'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
+      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
+      'hardware': 'releng-hardware/gecko-t-win10-64-ux',
+    },
 }
 
 # os x worker types keyed by test-platform
@@ -135,6 +140,11 @@ test_description_schema = Schema({
     Required('suite'): optionally_keyed_by(
         'test-platform',
         basestring),
+
+    # base work directory used to set up the task.
+    Optional('workdir'): optionally_keyed_by(
+        'test-platform',
+        Any(basestring, 'default')),
 
     # the name by which this test suite is addressed in try syntax; defaults to
     # the test-name.  This will translate to the `unittest_try_name` or
@@ -187,7 +197,15 @@ test_description_schema = Schema({
     # the branch (see below)
     Optional('expires-after'): basestring,
 
-    # Whether to run this task with e10s (desktop-test only).  If false, run
+    # Whether to run this task with the serviceworker e10s redesign enabled
+    # (desktop-test only).  If 'both', run one task with and one task without.
+    # Tasks with this enabled have have "-sw" appended to the test name and
+    # treeherder group.
+    Optional('serviceworker-e10s'): optionally_keyed_by(
+        'test-platform', 'project',
+        Any(bool, 'both')),
+
+    # Whether to run this task with e10s.  If false, run
     # without e10s; if true, run with e10s; if 'both', run one task with and
     # one task without e10s.  E10s tasks have "-e10s" appended to the test name
     # and treeherder group.
@@ -328,6 +346,10 @@ test_description_schema = Schema({
         'test-platform',
         [basestring]),
 
+    Optional('run-as-administrator'): optionally_keyed_by(
+        'test-platform',
+        bool),
+
     # -- values supplied by the task-generation infrastructure
 
     # the platform of the build this task is testing
@@ -353,9 +375,9 @@ test_description_schema = Schema({
     Optional('product'): basestring,
 
     # conditional files to determine when these tests should be run
-    Exclusive(Optional('when'), 'optimization'): Any({
+    Exclusive(Optional('when'), 'optimization'): {
         Optional('files-changed'): [basestring],
-    }),
+    },
 
     # Optimization to perform on this task during the optimization phase.
     # Optimizations are defined in taskcluster/taskgraph/optimize.py.
@@ -370,6 +392,11 @@ test_description_schema = Schema({
         Any(basestring, None),
     ),
 
+    Optional(
+        'require-signed-extensions',
+        description="Whether the build being tested requires extensions be signed.",
+    ): optionally_keyed_by('release-type', 'test-platform', bool),
+
     # The target name, specifying the build artifact to be tested.
     # If None or not specified, a transform sets the target based on OS:
     # target.dmg (Mac), target.apk (Android), target.tar.bz2 (Linux),
@@ -378,6 +405,11 @@ test_description_schema = Schema({
         'test-platform',
         Any(basestring, None),
     ),
+
+    # A list of artifacts to install from 'fetch' tasks.
+    Optional('fetches'): {
+        basestring: [basestring],
+    },
 }, required=True)
 
 
@@ -397,7 +429,7 @@ def set_defaults(config, tests):
             # all Android test tasks download internal objects from tooltool
             test['mozharness']['tooltool-downloads'] = True
             test['mozharness']['actions'] = ['get-secrets']
-            # Android doesn't do e10s
+            # Fennec is non-e10s; geckoview handled in set_target
             test['e10s'] = False
             # loopback-video is always true for Android, but false for other
             # platform phyla
@@ -425,6 +457,7 @@ def set_defaults(config, tests):
         test.setdefault('try-name', test['test-name'])
 
         test.setdefault('os-groups', [])
+        test.setdefault('run-as-administrator', False)
         test.setdefault('chunks', 1)
         test.setdefault('run-on-projects', 'built-projects')
         test.setdefault('instance-size', 'default')
@@ -435,6 +468,8 @@ def set_defaults(config, tests):
         test.setdefault('loopback-video', False)
         test.setdefault('docker-image', {'in-tree': 'desktop1604-test'})
         test.setdefault('checkout', False)
+        test.setdefault('serviceworker-e10s', False)
+        test.setdefault('require-signed-extensions', False)
 
         test['mozharness'].setdefault('extra-options', [])
         test['mozharness'].setdefault('requires-signed-builds', False)
@@ -445,11 +480,19 @@ def set_defaults(config, tests):
         yield test
 
 
+transforms.add_validate(test_description_schema)
+
+
 @transforms.add
-def validate(config, tests):
+def resolve_keys(config, tests):
     for test in tests:
-        validate_schema(test_description_schema, test,
-                        "In test {!r}:".format(test['test-name']))
+        resolve_keyed_by(
+            test, 'require-signed-extensions',
+            item_name=test['test-name'],
+            **{
+                'release-type': config.params['release_type'],
+            }
+        )
         yield test
 
 
@@ -457,22 +500,18 @@ def validate(config, tests):
 def setup_talos(config, tests):
     """Add options that are specific to talos jobs (identified by suite=talos)"""
     for test in tests:
-        if test['suite'] != 'talos':
+        if test['suite'] not in ['talos', 'raptor']:
             yield test
             continue
 
-        extra_options = test.setdefault('mozharness', {}).setdefault('extra-options', [])
-        extra_options.append('--use-talos-json')
+        if test['suite'] == 'talos':
+            extra_options = test.setdefault('mozharness', {}).setdefault('extra-options', [])
+            extra_options.append('--use-talos-json')
+
         # win7 needs to test skip
         if test['build-platform'].startswith('win32'):
             extra_options.append('--add-option')
             extra_options.append('--setpref,gfx.direct2d.disabled=true')
-
-        # Per https://bugzilla.mozilla.org/show_bug.cgi?id=1357753#c3, branch
-        # name is only required for try
-        if config.params.is_try():
-            extra_options.append('--branch-name')
-            extra_options.append('try')
 
         yield test
 
@@ -487,11 +526,8 @@ def setup_raptor(config, tests):
 
         extra_options = test.setdefault('mozharness', {}).setdefault('extra-options', [])
 
-        # Per https://bugzilla.mozilla.org/show_bug.cgi?id=1357753#c3, branch
-        # name is only required for try
-        if config.params.is_try():
-            extra_options.append('--branch-name')
-            extra_options.append('try')
+        if test['require-signed-extensions']:
+            extra_options.append('--is-release-build')
 
         yield test
 
@@ -515,6 +551,8 @@ def set_target(config, tests):
         if 'target' in test:
             resolve_keyed_by(test, 'target', item_name=test['test-name'])
             target = test['target']
+            if target and 'geckoview' in target:
+                test['e10s'] = True
         if not target:
             if build_platform.startswith('macosx'):
                 target = 'target.dmg'
@@ -545,6 +583,7 @@ def set_treeherder_machine_platform(config, tests):
         # The build names for Android platforms have partially evolved over the
         # years and need to be translated.
         'android-api-16/debug': 'android-em-4-3-armv7-api16/debug',
+        'android-api-16-ccov/debug': 'android-em-4-3-armv7-api16-ccov/debug',
         'android-api-16/opt': 'android-em-4-3-armv7-api16/opt',
         'android-x86/opt': 'android-em-4-2-x86/opt',
         'android-api-16-gradle/opt': 'android-api-16-gradle/opt',
@@ -561,6 +600,9 @@ def set_treeherder_machine_platform(config, tests):
             test['treeherder-machine-platform'] = test['test-platform']
         elif 'android-hw' in test['test-platform']:
             test['treeherder-machine-platform'] = test['test-platform']
+        elif 'android-em-7.0-x86' in test['test-platform']:
+            opt = test['test-platform'].split('/')[1]
+            test['treeherder-machine-platform'] = 'android-em-7-0-x86/'+opt
         else:
             test['treeherder-machine-platform'] = translation.get(
                 test['build-platform'], test['test-platform'])
@@ -587,6 +629,8 @@ def set_tier(config, tests):
                                          'linux64-pgo/opt',
                                          'linux64-devedition/opt',
                                          'linux64-asan/opt',
+                                         'linux64-qr/opt',
+                                         'linux64-qr/debug',
                                          'windows7-32/debug',
                                          'windows7-32/opt',
                                          'windows7-32-pgo/opt',
@@ -598,13 +642,18 @@ def set_tier(config, tests):
                                          'windows10-64-devedition/opt',
                                          'windows10-64-nightly/opt',
                                          'windows10-64-asan/opt',
+                                         'windows10-64-qr/opt',
+                                         'windows10-64-qr/debug',
                                          'macosx64/opt',
                                          'macosx64/debug',
                                          'macosx64-nightly/opt',
                                          'macosx64-devedition/opt',
+                                         'macosx64-qr/opt',
+                                         'macosx64-qr/debug',
                                          'android-em-4.3-arm7-api-16/opt',
                                          'android-em-4.3-arm7-api-16/debug',
-                                         'android-em-4.2-x86/opt']:
+                                         'android-em-4.2-x86/opt',
+                                         'android-em-7.0-x86/opt']:
                 test['tier'] = 1
             else:
                 test['tier'] = 2
@@ -650,15 +699,18 @@ def handle_keyed_by(config, tests):
         'docker-image',
         'max-run-time',
         'chunks',
+        'serviceworker-e10s',
         'e10s',
         'suite',
         'run-on-projects',
         'os-groups',
+        'run-as-administrator',
         'mozharness.chunked',
         'mozharness.config',
         'mozharness.extra-options',
         'mozharness.requires-signed-builds',
         'mozharness.script',
+        'workdir',
         'worker-type',
         'virtualization',
     ]
@@ -703,15 +755,26 @@ def handle_suite_category(config, tests):
 
 @transforms.add
 def enable_code_coverage(config, tests):
-    """Enable code coverage for the ccov and jsdcov build-platforms"""
+    """Enable code coverage for the ccov build-platforms"""
     for test in tests:
         if 'ccov' in test['build-platform']:
-            # do not run tests on fuzzing or opt build
+            # Do not run tests on fuzzing or opt build
             if 'opt' in test['build-platform'] or 'fuzzing' in test['build-platform']:
                 test['run-on-projects'] = []
                 continue
+            # Skip this transform for android code coverage builds.
+            if 'android' in test['build-platform']:
+                test.setdefault('fetches', {}).setdefault('toolchain', []).append('linux64-grcov')
+                test['mozharness'].setdefault('extra-options', []).append('--java-code-coverage')
+                yield test
+                continue
             test['mozharness'].setdefault('extra-options', []).append('--code-coverage')
             test['instance-size'] = 'xlarge'
+
+            # Temporarily disable Mac tests on mozilla-central
+            if 'mac' in test['build-platform']:
+                test['run-on-projects'] = ['try']
+
             # Ensure we always run on the projects defined by the build, unless the test
             # is try only or shouldn't run at all.
             if test['run-on-projects'] not in [[], ['try']]:
@@ -722,6 +785,19 @@ def enable_code_coverage(config, tests):
             test.pop('schedules-component', None)
             test.pop('when', None)
             test['optimization'] = None
+
+            # Add a toolchain and a fetch task for the grcov binary.
+            if any(p in test['build-platform'] for p in ('linux', 'osx', 'win')):
+                test.setdefault('fetches', {})
+                test['fetches'].setdefault('fetch', [])
+                test['fetches'].setdefault('toolchain', [])
+
+            if 'linux' in test['build-platform']:
+                test['fetches']['toolchain'].append('linux64-grcov')
+            elif 'osx' in test['build-platform']:
+                test['fetches']['fetch'].append('grcov-osx-x86_64')
+            elif 'win' in test['build-platform']:
+                test['fetches']['toolchain'].append('win64-grcov')
 
             if 'talos' in test['test-name']:
                 test['max-run-time'] = 7200
@@ -739,12 +815,6 @@ def enable_code_coverage(config, tests):
                 test['max-run-time'] = 1800
                 if 'linux' in test['build-platform']:
                     test['docker-image'] = {"in-tree": "desktop1604-test"}
-        elif test['build-platform'] == 'linux64-jsdcov/opt':
-            # Ensure we always run on the projects defined by the build, unless the test
-            # is try only or shouldn't run at all.
-            if test['run-on-projects'] not in [[], ['try']]:
-                test['run-on-projects'] = 'built-projects'
-            test['mozharness'].setdefault('extra-options', []).append('--jsd-code-coverage')
         yield test
 
 
@@ -754,6 +824,40 @@ def handle_run_on_projects(config, tests):
     for test in tests:
         if test['run-on-projects'] == 'built-projects':
             test['run-on-projects'] = test['build-attributes'].get('run_on_projects', ['all'])
+        yield test
+
+
+@transforms.add
+def split_serviceworker_e10s(config, tests):
+    for test in tests:
+        sw = test.pop('serviceworker-e10s')
+
+        test['serviceworker-e10s'] = False
+        test['attributes']['serviceworker_e10s'] = False
+
+        if sw == 'both':
+            yield copy.deepcopy(test)
+            sw = True
+        if sw:
+            if not match_run_on_projects('mozilla-central', test['run-on-projects']):
+                continue
+
+            test['description'] += " with serviceworker-e10s redesign enabled"
+            test['run-on-projects'] = ['mozilla-central']
+            test['test-name'] += '-sw'
+            test['try-name'] += '-sw'
+            test['attributes']['serviceworker_e10s'] = True
+            group, symbol = split_symbol(test['treeherder-symbol'])
+            if group != '?':
+                group += '-sw'
+            else:
+                symbol += '-sw'
+            test['treeherder-symbol'] = join_symbol(group, symbol)
+            test['mozharness']['extra-options'].append(
+                '--setpref="dom.serviceWorkers.parent_intercept=true"')
+
+            if 'web-platform' in test['suite']:
+                test['tier'] = 2
         yield test
 
 
@@ -796,7 +900,8 @@ def split_chunks(config, tests):
            test['suite'].startswith('test-coverage'):
             env = config.params.get('try_task_config', {}) or {}
             env = env.get('templates', {}).get('env', {})
-            test['chunks'] = perfile_number_of_chunks(env.get('MOZHARNESS_TEST_PATHS', ''),
+            test['chunks'] = perfile_number_of_chunks(config.params.is_try(),
+                                                      env.get('MOZHARNESS_TEST_PATHS', ''),
                                                       config.params.get('head_repository', ''),
                                                       config.params.get('head_rev', ''),
                                                       test['test-name'])
@@ -851,6 +956,11 @@ def enable_webrender(config, tests):
         if test.get('webrender'):
             test['mozharness'].setdefault('extra-options', [])\
                               .append("--enable-webrender")
+        # Explicitly disable WebRender on non-WR AWSY, since that job runs on
+        # virtual-with-gpu and thus is considered qualified hardware.
+        elif test['suite'] == 'awsy':
+            test['mozharness'].setdefault('extra-options', [])\
+                              .append("--disable-webrender")
 
         yield test
 
@@ -871,7 +981,7 @@ def set_profile(config, tests):
     if config.params['try_mode'] == 'try_option_syntax':
         profile = config.params['try_options']['profile']
     for test in tests:
-        if profile and test['suite'] == 'talos':
+        if profile and test['suite'] in ['talos', 'raptor']:
             test['mozharness']['extra-options'].append('--geckoProfile')
         yield test
 
@@ -891,7 +1001,7 @@ def set_tag(config, tests):
 @transforms.add
 def set_test_type(config, tests):
     for test in tests:
-        for test_type in ['mochitest', 'reftest']:
+        for test_type in ['mochitest', 'reftest', 'talos', 'raptor']:
             if test_type in test['suite'] and 'web-platform' not in test['suite']:
                 test.setdefault('tags', {})['test-type'] = test_type
         yield test
@@ -928,7 +1038,10 @@ def set_worker_type(config, tests):
             # figure out what platform the job needs to run on
             if test['virtualization'] == 'hardware':
                 # some jobs like talos and reftest run on real h/w - those are all win10
-                win_worker_type_platform = WINDOWS_WORKER_TYPES['windows10-64']
+                if test_platform.startswith('windows10-64-ux'):
+                    win_worker_type_platform = WINDOWS_WORKER_TYPES['windows10-64-ux']
+                else:
+                    win_worker_type_platform = WINDOWS_WORKER_TYPES['windows10-64']
             else:
                 # the other jobs run on a vm which may or may not be a win10 vm
                 win_worker_type_platform = WINDOWS_WORKER_TYPES[
@@ -937,17 +1050,23 @@ def set_worker_type(config, tests):
             # now we have the right platform set the worker type accordingly
             test['worker-type'] = win_worker_type_platform[test['virtualization']]
         elif test_platform.startswith('android-hw-g5'):
-            if test['suite'] == 'raptor':
-                test['worker-type'] = 'proj-autophone/gecko-t-ap-perf-g5'
-            else:
+            if test['suite'] != 'raptor':
                 test['worker-type'] = 'proj-autophone/gecko-t-ap-unit-g5'
-        elif test_platform.startswith('android-hw-p2'):
-            if test['suite'] == 'raptor':
-                test['worker-type'] = 'proj-autophone/gecko-t-ap-perf-p2'
+            elif '--power-test' in test['mozharness']['extra-options']:
+                test['worker-type'] = 'proj-autophone/gecko-t-ap-batt-g5'
             else:
+                test['worker-type'] = 'proj-autophone/gecko-t-ap-perf-g5'
+        elif test_platform.startswith('android-hw-p2'):
+            if test['suite'] != 'raptor':
                 test['worker-type'] = 'proj-autophone/gecko-t-ap-unit-p2'
+            elif '--power-test' in test['mozharness']['extra-options']:
+                test['worker-type'] = 'proj-autophone/gecko-t-ap-batt-p2'
+            else:
+                test['worker-type'] = 'proj-autophone/gecko-t-ap-perf-p2'
+        elif test_platform.startswith('android-em-7.0-x86'):
+            test['worker-type'] = 'terraform-packet/gecko-t-linux'
         elif test_platform.startswith('linux') or test_platform.startswith('android'):
-            if test.get('suite', '') == 'talos' and \
+            if test.get('suite', '') in ['talos', 'raptor'] and \
                  not test['build-platform'].startswith('linux64-ccov'):
                 test['worker-type'] = 'releng-hardware/gecko-t-linux-talos'
             else:
@@ -998,6 +1117,9 @@ def make_job_description(config, tests):
         jobdesc['dependencies'] = {'build': build_label}
         jobdesc['job-from'] = test['job-from']
 
+        if test.get('fetches'):
+            jobdesc['fetches'] = test['fetches']
+
         if test['mozharness']['requires-signed-builds'] is True:
             jobdesc['dependencies']['build-signing'] = test['build-signing-label']
 
@@ -1047,7 +1169,12 @@ def make_job_description(config, tests):
         run['using'] = 'mozharness-test'
         run['test'] = test
 
+        if 'workdir' in test:
+            run['workdir'] = test.pop('workdir')
+
         jobdesc['worker-type'] = test.pop('worker-type')
+        if test.get('fetches'):
+            jobdesc['fetches'] = test.pop('fetches')
 
         yield jobdesc
 

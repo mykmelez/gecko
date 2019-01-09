@@ -8,9 +8,6 @@ const Cm = Components.manager;
 
 const CONTRACT_ID = "@mozilla.org/colorpicker;1";
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-
 // Allow stuff from this scope to be accessed from non-privileged scopes. This
 // would crash if used outside of automation.
 Cu.forcePermissiveCOWs();
@@ -28,7 +25,7 @@ var newFactory = function(window) {
     lockFactory(aLock) {
       throw Cr.NS_ERROR_NOT_IMPLEMENTED;
     },
-    QueryInterface: ChromeUtils.generateQI([Ci.nsIFactory])
+    QueryInterface: ChromeUtils.generateQI([Ci.nsIFactory]),
   };
 };
 
@@ -69,7 +66,7 @@ var MockColorPicker = {
     if (oldClassID != "" && oldFactory != null) {
       registrar.registerFactory(oldClassID, "", CONTRACT_ID, oldFactory);
     }
-  }
+  },
 };
 
 function MockColorPickerInstance(window) {
@@ -110,5 +107,5 @@ MockColorPickerInstance.prototype = {
         aColorPickerShownCallback.done(result);
       }
     }, 0);
-  }
+  },
 };

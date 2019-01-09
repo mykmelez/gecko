@@ -2,10 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import AddressForm from "./address-form.js";
 import AddressOption from "../components/address-option.js";
-import PaymentStateSubscriberMixin from "../mixins/PaymentStateSubscriberMixin.js";
-import RichSelect from "../components/rich-select.js";
+import RichPicker from "./rich-picker.js";
 import paymentRequest from "../paymentRequest.js";
+import HandleEventMixin from "../mixins/HandleEventMixin.js";
 
 /**
  * <address-picker></address-picker>
@@ -13,39 +14,50 @@ import paymentRequest from "../paymentRequest.js";
  * <address-option> listening to savedAddresses & tempAddresses.
  */
 
-export default class AddressPicker extends PaymentStateSubscriberMixin(HTMLElement) {
+export default class AddressPicker extends HandleEventMixin(RichPicker) {
+  static get pickerAttributes() {
+    return [
+      "address-fields",
+      "break-after-nth-field",
+      "data-field-separator",
+    ];
+  }
+
   static get observedAttributes() {
-    return ["address-fields"];
+    return RichPicker.observedAttributes.concat(AddressPicker.pickerAttributes);
   }
 
   constructor() {
     super();
-    this.dropdown = new RichSelect();
-    this.dropdown.addEventListener("change", this);
-    this.addLink = document.createElement("a");
-    this.addLink.className = "add-link";
-    this.addLink.href = "javascript:void(0)";
-    this.addLink.textContent = this.dataset.addLinkLabel;
-    this.addLink.addEventListener("click", this);
-    this.editLink = document.createElement("a");
-    this.editLink.className = "edit-link";
-    this.editLink.href = "javascript:void(0)";
-    this.editLink.textContent = this.dataset.editLinkLabel;
-    this.editLink.addEventListener("click", this);
-  }
-
-  connectedCallback() {
-    this.appendChild(this.dropdown);
-    this.appendChild(this.addLink);
-    this.append(" ");
-    this.appendChild(this.editLink);
-    super.connectedCallback();
+    this.dropdown.setAttribute("option-type", "address-option");
   }
 
   attributeChangedCallback(name, oldValue, newValue) {
-    if (oldValue !== newValue) {
+    super.attributeChangedCallback(name, oldValue, newValue);
+    // connectedCallback may add and adjust elements & values
+    // so avoid calling render before the element is connected
+    if (this.isConnected &&
+        AddressPicker.pickerAttributes.includes(name) && oldValue !== newValue) {
       this.render(this.requestStore.getState());
     }
+  }
+
+  get fieldNames() {
+    if (this.hasAttribute("address-fields")) {
+      let names = this.getAttribute("address-fields").trim().split(/\s+/);
+      if (names.length) {
+        return names;
+      }
+    }
+
+    return [
+      // "address-level1", // TODO: bug 1481481 - not required for some countries e.g. DE
+      "address-level2",
+      "country",
+      "name",
+      "postal-code",
+      "street-address",
+    ];
   }
 
   /**
@@ -56,14 +68,7 @@ export default class AddressPicker extends PaymentStateSubscriberMixin(HTMLEleme
    *                              de-duping and excluding entries
    * @returns {object} filtered copy of given addresses
    */
-  filterAddresses(addresses, fieldNames = [
-    "address-level1",
-    "address-level2",
-    "country",
-    "name",
-    "postal-code",
-    "street-address",
-  ]) {
+  filterAddresses(addresses, fieldNames = this.fieldNames) {
     let uniques = new Set();
     let result = {};
     for (let [guid, address] of Object.entries(addresses)) {
@@ -88,22 +93,33 @@ export default class AddressPicker extends PaymentStateSubscriberMixin(HTMLEleme
     return result;
   }
 
+  get options() {
+    return this.dropdown.popupBox.options;
+  }
+
+  /**
+   * @param {object} state - See `PaymentsStore.setState`
+   * The value of the picker is retrieved from state store rather than the DOM
+   * @returns {string} guid
+   */
+  getCurrentValue(state) {
+    let [selectedKey, selectedLeaf] = this.selectedStateKey.split("|");
+    let guid = state[selectedKey];
+    if (selectedLeaf) {
+      guid = guid[selectedLeaf];
+    }
+    return guid;
+  }
+
   render(state) {
+    let selectedAddressGUID = this.getCurrentValue(state) || "";
     let addresses = paymentRequest.getAddresses(state);
     let desiredOptions = [];
-    let fieldNames;
-    if (this.hasAttribute("address-fields")) {
-      let names = this.getAttribute("address-fields").split(/\s+/);
-      if (names.length) {
-        fieldNames = names;
-      }
-    }
-    let filteredAddresses = this.filterAddresses(addresses, fieldNames);
-
+    let filteredAddresses = this.filterAddresses(addresses, this.fieldNames);
     for (let [guid, address] of Object.entries(filteredAddresses)) {
       let optionEl = this.dropdown.getOptionByValue(guid);
       if (!optionEl) {
-        optionEl = new AddressOption();
+        optionEl = document.createElement("option");
         optionEl.value = guid;
       }
 
@@ -116,76 +132,125 @@ export default class AddressPicker extends PaymentStateSubscriberMixin(HTMLEleme
         }
       }
 
+      optionEl.dataset.fieldSeparator = this.dataset.fieldSeparator;
+
+      if (this.hasAttribute("address-fields")) {
+        optionEl.setAttribute("address-fields", this.getAttribute("address-fields"));
+      } else {
+        optionEl.removeAttribute("address-fields");
+      }
+
+      if (this.hasAttribute("break-after-nth-field")) {
+        optionEl.setAttribute("break-after-nth-field", this.getAttribute("break-after-nth-field"));
+      } else {
+        optionEl.removeAttribute("break-after-nth-field");
+      }
+
+      // fieldNames getter is not used here because it returns a default array with
+      // attributes even when "address-fields" observed attribute is null.
+      let addressFields = this.getAttribute("address-fields");
+      optionEl.textContent = AddressOption.formatSingleLineLabel(address, addressFields);
       desiredOptions.push(optionEl);
     }
 
-    let el = null;
-    while ((el = this.dropdown.popupBox.querySelector(":scope > address-option"))) {
-      el.remove();
+    this.dropdown.popupBox.textContent = "";
+
+    if (this._allowEmptyOption) {
+      let optionEl = document.createElement("option");
+      optionEl.value = "";
+      desiredOptions.unshift(optionEl);
     }
+
     for (let option of desiredOptions) {
       this.dropdown.popupBox.appendChild(option);
     }
 
     // Update selectedness after the options are updated
-    let selectedAddressGUID = state[this.selectedStateKey];
-    let optionWithGUID = this.dropdown.getOptionByValue(selectedAddressGUID);
-    this.dropdown.selectedOption = optionWithGUID;
+    this.dropdown.value = selectedAddressGUID;
 
-    if (selectedAddressGUID && !optionWithGUID) {
-      throw new Error(`${this.selectedStateKey} option ${selectedAddressGUID}` +
-                      `does not exist in options`);
+    if (selectedAddressGUID && selectedAddressGUID !== this.dropdown.value) {
+      throw new Error(`${this.selectedStateKey} option ${selectedAddressGUID} ` +
+                      `does not exist in the address picker`);
     }
+
+    super.render(state);
   }
 
   get selectedStateKey() {
     return this.getAttribute("selected-state-key");
   }
 
-  handleEvent(event) {
-    switch (event.type) {
-      case "change": {
-        this.onChange(event);
-        break;
-      }
-      case "click": {
-        this.onClick(event);
-      }
+  errorForSelectedOption(state) {
+    let superError = super.errorForSelectedOption(state);
+    if (superError) {
+      return superError;
     }
+
+    if (!this.selectedOption) {
+      return "";
+    }
+
+    let merchantFieldErrors = AddressForm.merchantFieldErrorsForForm(
+          state, this.selectedStateKey.split("|"));
+    // TODO: errors in priority order.
+    return Object.values(merchantFieldErrors).find(msg => {
+      return typeof(msg) == "string" && msg.length;
+    }) || "";
   }
 
   onChange(event) {
-    let select = event.target;
-    let selectedKey = this.selectedStateKey;
-    if (selectedKey) {
-      this.requestStore.setState({
-        [selectedKey]: select.selectedOption && select.selectedOption.guid,
-      });
+    let [selectedKey, selectedLeaf] = this.selectedStateKey.split("|");
+    if (!selectedKey) {
+      return;
     }
+    // selectedStateKey can be a '|' delimited string indicating a path into the state object
+    // to update with the new value
+    let newState = {};
+
+    if (selectedLeaf) {
+      let currentState = this.requestStore.getState();
+      newState[selectedKey] = Object.assign({},
+                                            currentState[selectedKey],
+                                            { [selectedLeaf]: this.dropdown.value });
+    } else {
+      newState[selectedKey] = this.dropdown.value;
+    }
+    this.requestStore.setState(newState);
   }
 
   onClick({target}) {
+    let pageId;
+    let currentState = this.requestStore.getState();
     let nextState = {
-      page: {
-        id: "address-page",
-      },
-      "address-page": {
-        addressFields: this.getAttribute("address-fields"),
-        selectedStateKey: this.selectedStateKey,
-      },
+      page: {},
     };
+
+    switch (this.selectedStateKey) {
+      case "selectedShippingAddress":
+        pageId = "shipping-address-page";
+        break;
+      case "selectedPayerAddress":
+        pageId = "payer-address-page";
+        break;
+      case "basic-card-page|billingAddressGUID":
+        pageId = "billing-address-page";
+        break;
+      default: {
+        throw new Error("onClick, un-matched selectedStateKey: " +
+                        this.selectedStateKey);
+      }
+    }
+    nextState.page.id = pageId;
+    let addressFields = this.getAttribute("address-fields");
+    nextState[pageId] = { addressFields };
 
     switch (target) {
       case this.addLink: {
-        nextState["address-page"].guid = null;
-        nextState["address-page"].title = this.dataset.addAddressTitle;
+        nextState[pageId].guid = null;
         break;
       }
       case this.editLink: {
-        let state = this.requestStore.getState();
-        let selectedAddressGUID = state[this.selectedStateKey];
-        nextState["address-page"].guid = selectedAddressGUID;
-        nextState["address-page"].title = this.dataset.editAddressTitle;
+        nextState[pageId].guid = this.getCurrentValue(currentState);
         break;
       }
       default: {

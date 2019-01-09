@@ -13,23 +13,27 @@
   <panelmultiview mainViewId="allTabsMenu-allTabsView" disablekeynav="true">
     <panelview id="allTabsMenu-allTabsView" class="PanelUI-subView">
       <vbox class="panel-subview-body">
-        <toolbarbutton id="allTabsUndoCloseButton"
-                       class="undo-close-tab subviewbutton subviewbutton-iconic"
+        <toolbarbutton id="allTabsMenu-undoCloseTab"
+                       class="subviewbutton subviewbutton-iconic"
                        label="&undoCloseTab.label;"
                        key="key_undoCloseTab"
                        command="History:UndoCloseTab"/>
-        <toolbarseparator/>
-        <toolbarbutton class="container-tabs-button subviewbutton subviewbutton-nav"
+        <toolbarbutton id="allTabsMenu-searchTabs"
+                       class="subviewbutton subviewbutton-iconic"
+                       oncommand="gTabsPanel.searchTabs();"
+                       label="&allTabsMenu.searchTabs.label;"/>
+        <toolbarbutton id="allTabsMenu-containerTabsButton"
+                       class="subviewbutton subviewbutton-nav"
                        closemenu="none"
                        oncommand="PanelUI.showSubView('allTabsMenu-containerTabsView', this);"
                        label="&newUserContext.label;"/>
-        <toolbarseparator class="container-tabs-separator"/>
+        <toolbarseparator id="allTabsMenu-hiddenTabsSeparator"/>
         <toolbarbutton id="allTabsMenu-hiddenTabsButton"
-                       class="hidden-tabs-button subviewbutton subviewbutton-nav"
+                       class="subviewbutton subviewbutton-nav"
                        closemenu="none"
                        oncommand="PanelUI.showSubView('allTabsMenu-hiddenTabsView', this);"
                        label="&hiddenTabs.label;" />
-        <toolbarseparator class="hidden-tabs-separator"/>
+        <toolbarseparator id="allTabsMenu-tabsSeparator"/>
         <vbox id="allTabsMenu-allTabsViewTabs" class="panel-subview-body"/>
       </vbox>
     </panelview>

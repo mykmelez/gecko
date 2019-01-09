@@ -7,11 +7,11 @@ package org.mozilla.gecko.fxa.devices;
 import android.content.Context;
 import android.content.Intent;
 import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
 import android.support.annotation.VisibleForTesting;
 import android.text.TextUtils;
 import android.util.Log;
 
+import org.mozilla.gecko.GeckoServicesCreatorService;
 import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.background.fxa.FxAccountClient;
 import org.mozilla.gecko.background.fxa.FxAccountClient20;
@@ -27,12 +27,9 @@ import org.mozilla.gecko.util.BundleEventListener;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoBundle;
 
-import java.io.IOException;
-import java.io.UnsupportedEncodingException;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.security.GeneralSecurityException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -62,7 +59,7 @@ public class FxAccountDeviceRegistrator implements BundleEventListener {
   // The current version of the device registration, we use this to re-register
   // devices after we update what we send on device registration.
   @VisibleForTesting
-  static final Integer DEVICE_REGISTRATION_VERSION = 2;
+  static final Integer DEVICE_REGISTRATION_VERSION = 3;
 
   private static FxAccountDeviceRegistrator instance;
   private final WeakReference<Context> context;
@@ -123,21 +120,20 @@ public class FxAccountDeviceRegistrator implements BundleEventListener {
     // We create the Intent ourselves instead of using GeckoService.getIntentToCreateServices
     // because we can't import these modules (circular dependency between browser and services)
     final Intent geckoIntent = buildCreatePushServiceIntent(context, "android-fxa-subscribe");
-    context.startService(geckoIntent);
+    GeckoServicesCreatorService.enqueueWork(context, geckoIntent);
     // -> handleMessage()
   }
 
   private void beginRegistrationRenewal(Context context) {
     // Same as registration, but unsubscribe first to get a fresh subscription.
     final Intent geckoIntent = buildCreatePushServiceIntent(context, "android-fxa-resubscribe");
-    context.startService(geckoIntent);
+    GeckoServicesCreatorService.enqueueWork(context, geckoIntent);
     // -> handleMessage()
   }
 
   private Intent buildCreatePushServiceIntent(final Context context, final String data) {
     final Intent intent = new Intent();
     intent.setAction("create-services");
-    intent.setClassName(context, "org.mozilla.gecko.GeckoService");
     intent.putExtra("category", "android-push-service");
     intent.putExtra("data", data);
     final AndroidFxAccount fxAccount = AndroidFxAccount.fromContext(context);
@@ -225,16 +221,15 @@ public class FxAccountDeviceRegistrator implements BundleEventListener {
 
         if (error.httpStatusCode == 400) {
           if (error.apiErrorNumber == FxAccountRemoteError.UNKNOWN_DEVICE) {
-            recoverFromUnknownDevice(fxAccount);
+            recoverFromUnknownDevice(context, fxAccount, device);
           } else if (error.apiErrorNumber == FxAccountRemoteError.DEVICE_SESSION_CONFLICT) {
             // This can happen if a device was already registered using our session token, and we
             // tried to create a new one (no id field).
             recoverFromDeviceSessionConflict(error, fxAccountClient, sessionToken, fxAccount, device,
                     context, allowRecursion);
           }
-        } else
-        if (error.httpStatusCode == 401
-                && error.apiErrorNumber == FxAccountRemoteError.INVALID_AUTHENTICATION_TOKEN) {
+        } else if (error.httpStatusCode == 401
+                   && error.apiErrorNumber == FxAccountRemoteError.INVALID_AUTHENTICATION_TOKEN) {
           handleTokenError(error, fxAccountClient, fxAccount);
         } else {
           logErrorAndResetDeviceRegistrationVersionAndTimestamp(error, fxAccount);
@@ -247,6 +242,8 @@ public class FxAccountDeviceRegistrator implements BundleEventListener {
         Logger.pii(LOG_TAG, "Registered device ID: " + result.id);
         Log.i(LOG_TAG, "Setting DEVICE_REGISTRATION_VERSION to " + DEVICE_REGISTRATION_VERSION);
         fxAccount.setFxAUserData(result.id, DEVICE_REGISTRATION_VERSION, System.currentTimeMillis());
+        // Ask for a re-upload of the local client record to account for the FxA device ID change.
+        fxAccount.requestImmediateSync(new String[] { "clients" }, null, true);
       }
     });
   }
@@ -334,9 +331,15 @@ public class FxAccountDeviceRegistrator implements BundleEventListener {
     });
   }
 
-  private static void recoverFromUnknownDevice(final AndroidFxAccount fxAccount) {
+  private static void recoverFromUnknownDevice(final Context context, final AndroidFxAccount fxAccount, final FxAccountDevice device) {
     Log.i(LOG_TAG, "unknown device id, clearing the cached device id");
     fxAccount.setDeviceId(null);
+    // Same device but without a device ID.
+    final FxAccountDevice newDevice = new FxAccountDevice(device.name, null, device.type,
+            null, null,
+            device.pushCallback, device.pushPublicKey,
+            device.pushAuthKey, null);
+    doFxaRegistration(context, fxAccount, newDevice, true);
   }
 
   /**

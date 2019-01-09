@@ -1,13 +1,13 @@
 (function webpackUniversalModuleDefinition(root, factory) {
 	if(typeof exports === 'object' && typeof module === 'object')
-		module.exports = factory();
+		module.exports = factory(require("devtools/shared/flags"));
 	else if(typeof define === 'function' && define.amd)
-		define([], factory);
+		define(["devtools/shared/flags"], factory);
 	else {
-		var a = factory();
+		var a = typeof exports === 'object' ? factory(require("devtools/shared/flags")) : factory(root["devtools/shared/flags"]);
 		for(var i in a) (typeof exports === 'object' ? exports : root)[i] = a[i];
 	}
-})(typeof self !== 'undefined' ? self : this, function() {
+})(typeof self !== 'undefined' ? self : this, function(__WEBPACK_EXTERNAL_MODULE_52__) {
 return /******/ (function(modules) { // webpackBootstrap
 /******/ 	// The module cache
 /******/ 	var installedModules = {};
@@ -264,6 +264,197 @@ module.exports = arrayMap;
 
 /***/ }),
 
+/***/ 120:
+/***/ (function(module, exports) {
+
+// shim for using process in browser
+var process = module.exports = {};
+
+// cached from whatever global is present so that test runners that stub it
+// don't break things.  But we need to wrap it in a try catch in case it is
+// wrapped in strict mode code which doesn't define any globals.  It's inside a
+// function because try/catches deoptimize in certain engines.
+
+var cachedSetTimeout;
+var cachedClearTimeout;
+
+function defaultSetTimout() {
+    throw new Error('setTimeout has not been defined');
+}
+function defaultClearTimeout () {
+    throw new Error('clearTimeout has not been defined');
+}
+(function () {
+    try {
+        if (typeof setTimeout === 'function') {
+            cachedSetTimeout = setTimeout;
+        } else {
+            cachedSetTimeout = defaultSetTimout;
+        }
+    } catch (e) {
+        cachedSetTimeout = defaultSetTimout;
+    }
+    try {
+        if (typeof clearTimeout === 'function') {
+            cachedClearTimeout = clearTimeout;
+        } else {
+            cachedClearTimeout = defaultClearTimeout;
+        }
+    } catch (e) {
+        cachedClearTimeout = defaultClearTimeout;
+    }
+} ())
+function runTimeout(fun) {
+    if (cachedSetTimeout === setTimeout) {
+        //normal enviroments in sane situations
+        return setTimeout(fun, 0);
+    }
+    // if setTimeout wasn't available but was latter defined
+    if ((cachedSetTimeout === defaultSetTimout || !cachedSetTimeout) && setTimeout) {
+        cachedSetTimeout = setTimeout;
+        return setTimeout(fun, 0);
+    }
+    try {
+        // when when somebody has screwed with setTimeout but no I.E. maddness
+        return cachedSetTimeout(fun, 0);
+    } catch(e){
+        try {
+            // When we are in I.E. but the script has been evaled so I.E. doesn't trust the global object when called normally
+            return cachedSetTimeout.call(null, fun, 0);
+        } catch(e){
+            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error
+            return cachedSetTimeout.call(this, fun, 0);
+        }
+    }
+
+
+}
+function runClearTimeout(marker) {
+    if (cachedClearTimeout === clearTimeout) {
+        //normal enviroments in sane situations
+        return clearTimeout(marker);
+    }
+    // if clearTimeout wasn't available but was latter defined
+    if ((cachedClearTimeout === defaultClearTimeout || !cachedClearTimeout) && clearTimeout) {
+        cachedClearTimeout = clearTimeout;
+        return clearTimeout(marker);
+    }
+    try {
+        // when when somebody has screwed with setTimeout but no I.E. maddness
+        return cachedClearTimeout(marker);
+    } catch (e){
+        try {
+            // When we are in I.E. but the script has been evaled so I.E. doesn't  trust the global object when called normally
+            return cachedClearTimeout.call(null, marker);
+        } catch (e){
+            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error.
+            // Some versions of I.E. have different rules for clearTimeout vs setTimeout
+            return cachedClearTimeout.call(this, marker);
+        }
+    }
+
+
+
+}
+var queue = [];
+var draining = false;
+var currentQueue;
+var queueIndex = -1;
+
+function cleanUpNextTick() {
+    if (!draining || !currentQueue) {
+        return;
+    }
+    draining = false;
+    if (currentQueue.length) {
+        queue = currentQueue.concat(queue);
+    } else {
+        queueIndex = -1;
+    }
+    if (queue.length) {
+        drainQueue();
+    }
+}
+
+function drainQueue() {
+    if (draining) {
+        return;
+    }
+    var timeout = runTimeout(cleanUpNextTick);
+    draining = true;
+
+    var len = queue.length;
+    while(len) {
+        currentQueue = queue;
+        queue = [];
+        while (++queueIndex < len) {
+            if (currentQueue) {
+                currentQueue[queueIndex].run();
+            }
+        }
+        queueIndex = -1;
+        len = queue.length;
+    }
+    currentQueue = null;
+    draining = false;
+    runClearTimeout(timeout);
+}
+
+process.nextTick = function (fun) {
+    var args = new Array(arguments.length - 1);
+    if (arguments.length > 1) {
+        for (var i = 1; i < arguments.length; i++) {
+            args[i - 1] = arguments[i];
+        }
+    }
+    queue.push(new Item(fun, args));
+    if (queue.length === 1 && !draining) {
+        runTimeout(drainQueue);
+    }
+};
+
+// v8 likes predictible objects
+function Item(fun, array) {
+    this.fun = fun;
+    this.array = array;
+}
+Item.prototype.run = function () {
+    this.fun.apply(null, this.array);
+};
+process.title = 'browser';
+process.browser = true;
+process.env = {};
+process.argv = [];
+process.version = ''; // empty string to avoid regexp issues
+process.versions = {};
+
+function noop() {}
+
+process.on = noop;
+process.addListener = noop;
+process.once = noop;
+process.off = noop;
+process.removeListener = noop;
+process.removeAllListeners = noop;
+process.emit = noop;
+process.prependListener = noop;
+process.prependOnceListener = noop;
+
+process.listeners = function (name) { return [] }
+
+process.binding = function (name) {
+    throw new Error('process.binding is not supported');
+};
+
+process.cwd = function () { return '/' };
+process.chdir = function (dir) {
+    throw new Error('process.chdir is not supported');
+};
+process.umask = function() { return 0; };
+
+
+/***/ }),
+
 /***/ 1284:
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -272,15 +463,279 @@ module.exports = __webpack_require__(1631);
 
 /***/ }),
 
-/***/ 1363:
+/***/ 1384:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.default = assert;
+
+var _devtoolsEnvironment = __webpack_require__(3721);
+
+function assert(condition, message) {
+  if ((0, _devtoolsEnvironment.isDevelopment)() && !condition) {
+    throw new Error(`Assertion failure: ${message}`);
+  }
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+/***/ }),
+
+/***/ 14:
+/***/ (function(module, exports) {
+
+/**
+ * Checks if `value` is object-like. A value is object-like if it's not `null`
+ * and has a `typeof` result of "object".
+ *
+ * @static
+ * @memberOf _
+ * @since 4.0.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is object-like, else `false`.
+ * @example
+ *
+ * _.isObjectLike({});
+ * // => true
+ *
+ * _.isObjectLike([1, 2, 3]);
+ * // => true
+ *
+ * _.isObjectLike(_.noop);
+ * // => false
+ *
+ * _.isObjectLike(null);
+ * // => false
+ */
+function isObjectLike(value) {
+  return value != null && typeof value == 'object';
+}
+
+module.exports = isObjectLike;
+
+
+/***/ }),
+
+/***/ 1631:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _getMatches = __webpack_require__(1632);
+
+var _getMatches2 = _interopRequireDefault(_getMatches);
+
+var _projectSearch = __webpack_require__(1633);
+
+var _devtoolsUtils = __webpack_require__(3651);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+const { workerHandler } = _devtoolsUtils.workerUtils; /* This Source Code Form is subject to the terms of the Mozilla Public
+                                                       * License, v. 2.0. If a copy of the MPL was not distributed with this
+                                                       * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+self.onmessage = workerHandler({ getMatches: _getMatches2.default, findSourceMatches: _projectSearch.findSourceMatches });
+
+/***/ }),
+
+/***/ 1632:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.default = getMatches;
+
+var _assert = __webpack_require__(1384);
+
+var _assert2 = _interopRequireDefault(_assert);
+
+var _buildQuery = __webpack_require__(3761);
+
+var _buildQuery2 = _interopRequireDefault(_buildQuery);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+function getMatches(query, text, modifiers) {
+  if (!query || !text || !modifiers) {
+    return [];
+  }
+  const regexQuery = (0, _buildQuery2.default)(query, modifiers, {
+    isGlobal: true
+  });
+  const matchedLocations = [];
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    let singleMatch;
+    const line = lines[i];
+    while ((singleMatch = regexQuery.exec(line)) !== null) {
+      matchedLocations.push({ line: i, ch: singleMatch.index });
+
+      // When the match is an empty string the regexQuery.lastIndex will not
+      // change resulting in an infinite loop so we need to check for this and
+      // increment it manually in that case.  See issue #7023
+      if (singleMatch[0] === "") {
+        (0, _assert2.default)(!regexQuery.unicode, "lastIndex++ can cause issues in unicode mode");
+        regexQuery.lastIndex++;
+      }
+    }
+  }
+  return matchedLocations;
+}
+
+/***/ }),
+
+/***/ 1633:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.findSourceMatches = findSourceMatches;
+
+var _getMatches = __webpack_require__(1632);
+
+var _getMatches2 = _interopRequireDefault(_getMatches);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function findSourceMatches(source, queryText) {
+  const { id, loadedState, text } = source;
+  if (loadedState != "loaded" || !text || queryText == "") {
+    return [];
+  }
+
+  const modifiers = {
+    caseSensitive: false,
+    regexMatch: false,
+    wholeWord: false
+  };
+
+  const lines = text.split("\n");
+
+  return (0, _getMatches2.default)(queryText, text, modifiers).map(({ line, ch }) => {
+    const { value, matchIndex } = truncateLine(lines[line], ch);
+    return {
+      sourceId: id,
+      line: line + 1,
+      column: ch,
+      matchIndex,
+      match: queryText,
+      value
+    };
+  });
+}
+
+// This is used to find start of a word, so that cropped string look nice
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Maybe reuse file search's functions?
+
+const startRegex = /([ !@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])/g;
+// Similarly, find
+const endRegex = new RegExp(["([ !@#$%^&*()_+-=[]{};':\"\\|,.<>/?])", '[^ !@#$%^&*()_+-=[]{};\':"\\|,.<>/?]*$"/'].join(""));
+
+function truncateLine(text, column) {
+  if (text.length < 100) {
+    return {
+      matchIndex: column,
+      value: text
+    };
+  }
+
+  // Initially take 40 chars left to the match
+  const offset = Math.max(column - 40, 0);
+  // 400 characters should be enough to figure out the context of the match
+  const truncStr = text.slice(offset, column + 400);
+  let start = truncStr.search(startRegex);
+  let end = truncStr.search(endRegex);
+
+  if (start > column) {
+    // No word separator found before the match, so we take all characters
+    // before the match
+    start = -1;
+  }
+  if (end < column) {
+    end = truncStr.length;
+  }
+  const value = truncStr.slice(start + 1, end);
+
+  return {
+    matchIndex: column - start - offset - 1,
+    value
+  };
+}
+
+/***/ }),
+
+/***/ 259:
+/***/ (function(module, exports, __webpack_require__) {
+
+var toString = __webpack_require__(108);
+
+/**
+ * Used to match `RegExp`
+ * [syntax characters](http://ecma-international.org/ecma-262/7.0/#sec-patterns).
+ */
+var reRegExpChar = /[\\^$.*+?()[\]{}|]/g,
+    reHasRegExpChar = RegExp(reRegExpChar.source);
+
+/**
+ * Escapes the `RegExp` special characters "^", "$", "\", ".", "*", "+",
+ * "?", "(", ")", "[", "]", "{", "}", and "|" in `string`.
+ *
+ * @static
+ * @memberOf _
+ * @since 3.0.0
+ * @category String
+ * @param {string} [string=''] The string to escape.
+ * @returns {string} Returns the escaped string.
+ * @example
+ *
+ * _.escapeRegExp('[lodash](https://lodash.com/)');
+ * // => '\[lodash\]\(https://lodash\.com/\)'
+ */
+function escapeRegExp(string) {
+  string = toString(string);
+  return (string && reHasRegExpChar.test(string))
+    ? string.replace(reRegExpChar, '\\$&')
+    : string;
+}
+
+module.exports = escapeRegExp;
+
+
+/***/ }),
+
+/***/ 3651:
 /***/ (function(module, exports, __webpack_require__) {
 
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const networkRequest = __webpack_require__(1367);
-const workerUtils = __webpack_require__(1368);
+const networkRequest = __webpack_require__(3653);
+const workerUtils = __webpack_require__(3654);
 
 module.exports = {
   networkRequest,
@@ -289,18 +744,24 @@ module.exports = {
 
 /***/ }),
 
-/***/ 1367:
+/***/ 3653:
 /***/ (function(module, exports) {
 
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 function networkRequest(url, opts) {
   return fetch(url, {
     cache: opts.loadFromCache ? "default" : "no-cache"
   }).then(res => {
     if (res.status >= 200 && res.status < 300) {
+      if (res.headers.get("Content-Type") === "application/wasm") {
+        return res.arrayBuffer().then(buffer => ({
+          content: buffer,
+          isDwarf: true
+        }));
+      }
       return res.text().then(text => ({ content: text }));
     }
     return Promise.reject(`request failed with status ${res.status}`);
@@ -311,7 +772,7 @@ module.exports = networkRequest;
 
 /***/ }),
 
-/***/ 1368:
+/***/ 3654:
 /***/ (function(module, exports) {
 
 function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
@@ -321,11 +782,11 @@ function WorkerDispatcher() {
   this.worker = null;
 } /* This Source Code Form is subject to the terms of the Mozilla Public
    * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 WorkerDispatcher.prototype = {
-  start(url) {
-    this.worker = new Worker(url);
+  start(url, win = window) {
+    this.worker = new win.Worker(url);
     this.worker.onerror = () => {
       console.error(`Error in worker ${url}`);
     };
@@ -360,8 +821,16 @@ WorkerDispatcher.prototype = {
       const items = calls.slice();
       calls.length = 0;
 
+      if (!this.worker) {
+        return;
+      }
+
       const id = this.msgId++;
-      this.worker.postMessage({ id, method, calls: items.map(item => item[0]) });
+      this.worker.postMessage({
+        id,
+        method,
+        calls: items.map(item => item[0])
+      });
 
       const listener = ({ data: result }) => {
         if (result.id !== id) {
@@ -389,6 +858,10 @@ WorkerDispatcher.prototype = {
     };
 
     return (...args) => push(args);
+  },
+
+  invoke(method, ...args) {
+    return this.task(method)(...args);
   }
 };
 
@@ -404,9 +877,8 @@ function workerHandler(publicInterface) {
           // Error can't be sent via postMessage, so be sure to
           // convert to string.
           err => ({ error: err.toString() }));
-        } else {
-          return { response };
         }
+        return { response };
       } catch (error) {
         // Error can't be sent via postMessage, so be sure to convert to
         // string.
@@ -423,7 +895,7 @@ function streamingWorkerHandler(publicInterface, { timeout = 100 } = {}, worker 
     var _ref = _asyncToGenerator(function* (id, tasks) {
       let isWorking = true;
 
-      const intervalId = setTimeout(function () {
+      const timeoutId = setTimeout(function () {
         isWorking = false;
       }, timeout);
 
@@ -434,7 +906,7 @@ function streamingWorkerHandler(publicInterface, { timeout = 100 } = {}, worker 
         results.push(result);
       }
       worker.postMessage({ id, status: "pending", data: results });
-      clearInterval(intervalId);
+      clearTimeout(timeoutId);
 
       if (tasks.length !== 0) {
         yield streamingWorker(id, tasks);
@@ -478,43 +950,59 @@ module.exports = {
 
 /***/ }),
 
-/***/ 14:
-/***/ (function(module, exports) {
+/***/ 3721:
+/***/ (function(module, exports, __webpack_require__) {
 
-/**
- * Checks if `value` is object-like. A value is object-like if it's not `null`
- * and has a `typeof` result of "object".
- *
- * @static
- * @memberOf _
- * @since 4.0.0
- * @category Lang
- * @param {*} value The value to check.
- * @returns {boolean} Returns `true` if `value` is object-like, else `false`.
- * @example
- *
- * _.isObjectLike({});
- * // => true
- *
- * _.isObjectLike([1, 2, 3]);
- * // => true
- *
- * _.isObjectLike(_.noop);
- * // => false
- *
- * _.isObjectLike(null);
- * // => false
- */
-function isObjectLike(value) {
-  return value != null && typeof value == 'object';
+"use strict";
+/* WEBPACK VAR INJECTION */(function(process) {
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const flag = __webpack_require__(52);
+
+function isBrowser() {
+  return typeof window == "object";
 }
 
-module.exports = isObjectLike;
+function isNode() {
+  return process && process.release && process.release.name == 'node';
+}
 
+function isDevelopment() {
+  if (!isNode() && isBrowser()) {
+    const href = window.location ? window.location.href : "";
+    return href.match(/^file:/) || href.match(/localhost:/);
+  }
+
+  return "production" != "production";
+}
+
+function isTesting() {
+  return flag.testing;
+}
+
+function isFirefoxPanel() {
+  return !isDevelopment();
+}
+
+function isFirefox() {
+  return (/firefox/i.test(navigator.userAgent)
+  );
+}
+
+module.exports = {
+  isDevelopment,
+  isTesting,
+  isFirefoxPanel,
+  isFirefox
+};
+/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(120)))
 
 /***/ }),
 
-/***/ 1402:
+/***/ 3761:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -596,153 +1084,10 @@ function buildQuery(originalQuery, modifiers, { isGlobal = false, ignoreSpaces =
 
 /***/ }),
 
-/***/ 1631:
-/***/ (function(module, exports, __webpack_require__) {
+/***/ 52:
+/***/ (function(module, exports) {
 
-"use strict";
-
-
-var _getMatches = __webpack_require__(1632);
-
-var _getMatches2 = _interopRequireDefault(_getMatches);
-
-var _projectSearch = __webpack_require__(1633);
-
-var _devtoolsUtils = __webpack_require__(1363);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-const { workerHandler } = _devtoolsUtils.workerUtils; /* This Source Code Form is subject to the terms of the Mozilla Public
-                                                       * License, v. 2.0. If a copy of the MPL was not distributed with this
-                                                       * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-self.onmessage = workerHandler({ getMatches: _getMatches2.default, findSourceMatches: _projectSearch.findSourceMatches });
-
-/***/ }),
-
-/***/ 1632:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.default = getMatches;
-
-var _buildQuery = __webpack_require__(1402);
-
-var _buildQuery2 = _interopRequireDefault(_buildQuery);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-function getMatches(query, text, modifiers) {
-  if (!query || !text || !modifiers) {
-    return [];
-  }
-  const regexQuery = (0, _buildQuery2.default)(query, modifiers, {
-    isGlobal: true
-  });
-  const matchedLocations = [];
-  const lines = text.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    let singleMatch;
-    const line = lines[i];
-    while ((singleMatch = regexQuery.exec(line)) !== null) {
-      matchedLocations.push({ line: i, ch: singleMatch.index });
-    }
-  }
-  return matchedLocations;
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-/***/ }),
-
-/***/ 1633:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.findSourceMatches = findSourceMatches;
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-// Maybe reuse file search's functions?
-
-function findSourceMatches(source, queryText) {
-  const { id, loadedState, text } = source;
-  if (loadedState != "loaded" || !text || queryText == "") {
-    return [];
-  }
-
-  const lines = text.split("\n");
-  let result = undefined;
-  const query = new RegExp(queryText, "g");
-
-  const matches = lines.map((_text, line) => {
-    const indices = [];
-
-    while (result = query.exec(_text)) {
-      indices.push({
-        sourceId: id,
-        line: line + 1,
-        column: result.index,
-        match: result[0],
-        value: _text,
-        text: result.input
-      });
-    }
-    return indices;
-  }).filter(_matches => _matches.length > 0);
-
-  return [].concat(...matches);
-}
-
-/***/ }),
-
-/***/ 259:
-/***/ (function(module, exports, __webpack_require__) {
-
-var toString = __webpack_require__(108);
-
-/**
- * Used to match `RegExp`
- * [syntax characters](http://ecma-international.org/ecma-262/7.0/#sec-patterns).
- */
-var reRegExpChar = /[\\^$.*+?()[\]{}|]/g,
-    reHasRegExpChar = RegExp(reRegExpChar.source);
-
-/**
- * Escapes the `RegExp` special characters "^", "$", "\", ".", "*", "+",
- * "?", "(", ")", "[", "]", "{", "}", and "|" in `string`.
- *
- * @static
- * @memberOf _
- * @since 3.0.0
- * @category String
- * @param {string} [string=''] The string to escape.
- * @returns {string} Returns the escaped string.
- * @example
- *
- * _.escapeRegExp('[lodash](https://lodash.com/)');
- * // => '\[lodash\]\(https://lodash\.com/\)'
- */
-function escapeRegExp(string) {
-  string = toString(string);
-  return (string && reHasRegExpChar.test(string))
-    ? string.replace(reRegExpChar, '\\$&')
-    : string;
-}
-
-module.exports = escapeRegExp;
-
+module.exports = __WEBPACK_EXTERNAL_MODULE_52__;
 
 /***/ }),
 

@@ -79,7 +79,6 @@
 #include "nsIInputStream.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsILineInputStream.h"
-#include "nsIMemory.h"
 #include "nsIMutable.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
@@ -142,7 +141,6 @@
 #include "nsComponentManagerUtils.h"
 #include "nsServiceManagerUtils.h"
 
-#include "nsIWeakReferenceUtils.h"
 #include "nsWeakReference.h"
 
 #include "nsArrayEnumerator.h"
@@ -174,4 +172,4 @@
 #include "nsDirectoryServiceDefs.h"
 #include "nsDirectoryServiceUtils.h"
 
-#endif // mozilla_XPCOM_h
+#endif  // mozilla_XPCOM_h

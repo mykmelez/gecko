@@ -50,7 +50,7 @@ function getCleanedPacket(key, packet) {
   if (stubPackets.has(safeKey)) {
     const existingPacket = stubPackets.get(safeKey);
     res = Object.assign({}, packet, {
-      from: existingPacket.from
+      from: existingPacket.from,
     });
 
     // Clean root timestamp.
@@ -373,7 +373,7 @@ async function generateCssMessageStubs() {
       gBrowser.selectedBrowser,
       [key, code],
       function([subKey, subCode]) {
-        content.document.docShell.cssErrorReportingEnabled = true;
+        content.docShell.cssErrorReportingEnabled = true;
         const style = content.document.createElement("style");
         // eslint-disable-next-line no-unsanitized/property
         style.innerHTML = subCode;
@@ -448,7 +448,7 @@ async function generateNetworkEventStubs() {
             request: res.networkInfo.request,
             response: res.networkInfo.response,
             totalTime: res.networkInfo.totalTime,
-          }
+          },
         };
 
         stubs.packets.push(formatPacket(updateKey, packet));

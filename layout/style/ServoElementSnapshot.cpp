@@ -5,42 +5,38 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/ServoElementSnapshot.h"
-#include "mozilla/ServoBindings.h"
+#include "mozilla/GeckoBindings.h"
 #include "mozilla/dom/Element.h"
 #include "nsIContentInlines.h"
 #include "nsContentUtils.h"
 
 namespace mozilla {
 
-ServoElementSnapshot::ServoElementSnapshot(const Element* aElement)
-  : mState(0)
-  , mContains(Flags(0))
-  , mIsTableBorderNonzero(false)
-  , mIsMozBrowserFrame(false)
-  , mClassAttributeChanged(false)
-  , mIdAttributeChanged(false)
-  , mOtherAttributeChanged(false)
-{
+ServoElementSnapshot::ServoElementSnapshot(const Element& aElement)
+    : mState(0),
+      mContains(Flags(0)),
+      mIsTableBorderNonzero(false),
+      mIsMozBrowserFrame(false),
+      mClassAttributeChanged(false),
+      mIdAttributeChanged(false),
+      mOtherAttributeChanged(false) {
   MOZ_COUNT_CTOR(ServoElementSnapshot);
+  MOZ_ASSERT(NS_IsMainThread());
   mIsHTMLElementInHTMLDocument =
-    aElement->IsHTMLElement() && aElement->IsInHTMLDocument();
-  mIsInChromeDocument = nsContentUtils::IsChromeDoc(aElement->OwnerDoc());
-  mSupportsLangAttr = aElement->SupportsLangAttr();
+      aElement.IsHTMLElement() && aElement.IsInHTMLDocument();
+  mIsInChromeDocument = nsContentUtils::IsChromeDoc(aElement.OwnerDoc());
+  mSupportsLangAttr = aElement.SupportsLangAttr();
 }
 
-void
-ServoElementSnapshot::AddOtherPseudoClassState(Element* aElement)
-{
-  MOZ_ASSERT(aElement);
-
+void ServoElementSnapshot::AddOtherPseudoClassState(const Element& aElement) {
   if (HasOtherPseudoClassState()) {
     return;
   }
 
-  mIsTableBorderNonzero = Gecko_IsTableBorderNonzero(aElement);
-  mIsMozBrowserFrame = Gecko_IsBrowserFrame(aElement);
+  mIsTableBorderNonzero = Gecko_IsTableBorderNonzero(&aElement);
+  mIsMozBrowserFrame = Gecko_IsBrowserFrame(&aElement);
 
   mContains |= Flags::OtherPseudoClassState;
 }
 
-} // namespace mozilla
+}  // namespace mozilla

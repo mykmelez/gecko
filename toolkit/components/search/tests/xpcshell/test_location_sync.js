@@ -1,9 +1,9 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-function getCountryCodePref() {
+function getRegionPref() {
   try {
-    return Services.prefs.getCharPref("browser.search.countryCode");
+    return Services.prefs.getCharPref("browser.search.region");
   } catch (_) {
     return undefined;
   }
@@ -12,7 +12,7 @@ function getCountryCodePref() {
 // Force a sync init and ensure the right thing happens (ie, that no xhr
 // request is made )
 add_task(async function test_simple() {
-  deepEqual(getCountryCodePref(), undefined, "no countryCode pref");
+  deepEqual(getRegionPref(), undefined, "no region pref");
 
   // Still set a geoip pref so we can (indirectly) check it wasn't used.
   Services.prefs.setCharPref("browser.search.geoip.url", 'data:application/json,{"country_code": "AU"}');
@@ -28,7 +28,7 @@ add_task(async function test_simple() {
     do_timeout(500, resolve);
   });
 
-  deepEqual(getCountryCodePref(), undefined, "didn't do the geoip xhr");
+  deepEqual(getRegionPref(), undefined, "didn't do the geoip xhr");
   // and no telemetry evidence of geoip.
   for (let hid of [
     "SEARCH_SERVICE_COUNTRY_FETCH_RESULT",
@@ -45,15 +45,13 @@ add_task(async function test_simple() {
         case Ci.nsITelemetry.HISTOGRAM_FLAG:
           // flags are a special case in that they are initialized with a default
           // of one |0|.
-          deepEqual(snapshot.counts, [1, 0, 0], hid);
+          deepEqual(snapshot.values, {0: 1, 1: 0}, hid);
           break;
         case Ci.nsITelemetry.HISTOGRAM_BOOLEAN:
-          // booleans aren't initialized at all, so should have all zeros.
-          deepEqual(snapshot.counts, [0, 0, 0], hid);
-          break;
         case Ci.nsITelemetry.HISTOGRAM_EXPONENTIAL:
         case Ci.nsITelemetry.HISTOGRAM_LINEAR:
-          equal(snapshot.counts.reduce((a, b) => a + b), 0, hid);
+          // booleans, exponential and linear aren't initialized at all, so should be empty.
+          deepEqual(snapshot.values, {}, hid);
           break;
         default:
           ok(false, "unknown histogram type " + snapshot.histogram_type + " for " + hid);

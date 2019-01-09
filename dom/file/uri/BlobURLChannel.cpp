@@ -5,13 +5,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "BlobURLChannel.h"
+#include "mozilla/dom/BlobImpl.h"
 
 using namespace mozilla::dom;
 
-BlobURLChannel::BlobURLChannel(nsIURI* aURI,
-                               nsILoadInfo* aLoadInfo)
-  : mInitialized(false)
-{
+BlobURLChannel::BlobURLChannel(nsIURI* aURI, nsILoadInfo* aLoadInfo)
+    : mInitialized(false) {
   SetURI(aURI);
   SetOriginalURI(aURI);
   SetLoadInfo(aLoadInfo);
@@ -25,17 +24,13 @@ BlobURLChannel::BlobURLChannel(nsIURI* aURI,
 
 BlobURLChannel::~BlobURLChannel() = default;
 
-void
-BlobURLChannel::InitFailed()
-{
+void BlobURLChannel::InitFailed() {
   MOZ_ASSERT(!mInitialized);
   MOZ_ASSERT(!mInputStream);
   mInitialized = true;
 }
 
-void
-BlobURLChannel::Initialize(BlobImpl* aBlobImpl)
-{
+void BlobURLChannel::Initialize(BlobImpl* aBlobImpl) {
   MOZ_ASSERT(!mInitialized);
 
   nsAutoString contentType;
@@ -67,10 +62,9 @@ BlobURLChannel::Initialize(BlobImpl* aBlobImpl)
   mInitialized = true;
 }
 
-nsresult
-BlobURLChannel::OpenContentStream(bool aAsync, nsIInputStream** aResult,
-                                  nsIChannel** aChannel)
-{
+nsresult BlobURLChannel::OpenContentStream(bool aAsync,
+                                           nsIInputStream** aResult,
+                                           nsIChannel** aChannel) {
   MOZ_ASSERT(mInitialized);
 
   if (!mInputStream) {
@@ -85,8 +79,4 @@ BlobURLChannel::OpenContentStream(bool aAsync, nsIInputStream** aResult,
   return NS_OK;
 }
 
-void
-BlobURLChannel::OnChannelDone()
-{
-  mInputStream = nullptr;
-}
+void BlobURLChannel::OnChannelDone() { mInputStream = nullptr; }

@@ -8,7 +8,6 @@
 
 using namespace mozilla::intl;
 
-
 TEST(Intl_Locale_Locale, Locale) {
   Locale loc = Locale("en-US");
 
@@ -73,7 +72,7 @@ TEST(Intl_Locale_Locale, Variants) {
 TEST(Intl_Locale_Locale, PrivateUse) {
   Locale loc = Locale("x-test");
 
-  ASSERT_TRUE(loc.IsValid());
+  ASSERT_TRUE(loc.IsWellFormed());
   ASSERT_TRUE(loc.GetLanguage().Equals(""));
   ASSERT_TRUE(loc.GetScript().Equals(""));
   ASSERT_TRUE(loc.GetRegion().Equals(""));
@@ -83,7 +82,7 @@ TEST(Intl_Locale_Locale, PrivateUse) {
 
   Locale loc2 = Locale("fr-x-test");
 
-  ASSERT_TRUE(loc2.IsValid());
+  ASSERT_TRUE(loc2.IsWellFormed());
   ASSERT_TRUE(loc2.GetLanguage().Equals("fr"));
   ASSERT_TRUE(loc2.GetScript().Equals(""));
   ASSERT_TRUE(loc2.GetRegion().Equals(""));
@@ -95,16 +94,16 @@ TEST(Intl_Locale_Locale, PrivateUse) {
   // and preserve their order.
   Locale loc3 = Locale("fr-x-foo-bAr-BaZ");
 
-  ASSERT_TRUE(loc3.IsValid());
+  ASSERT_TRUE(loc3.IsWellFormed());
   ASSERT_TRUE(loc3.AsString().Equals("fr-x-foo-bar-baz"));
 }
 
 TEST(Intl_Locale_Locale, InvalidLocale) {
   Locale loc = Locale("en-verylongsubtag");
-  ASSERT_FALSE(loc.IsValid());
+  ASSERT_FALSE(loc.IsWellFormed());
 
   Locale loc2 = Locale("p-te");
-  ASSERT_FALSE(loc2.IsValid());
+  ASSERT_FALSE(loc2.IsWellFormed());
 }
 
 TEST(Intl_Locale_Locale, ClearRegion) {

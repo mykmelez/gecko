@@ -14,7 +14,8 @@
 <bindings id="addonBindings"
           xmlns="http://www.mozilla.org/xbl"
           xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
-          xmlns:xbl="http://www.mozilla.org/xbl">
+          xmlns:xbl="http://www.mozilla.org/xbl"
+          xmlns:html="http://www.w3.org/1999/xhtml">
 
 
   <!-- Rating - displays current/average rating, allows setting user rating -->
@@ -129,8 +130,7 @@
       <xul:stack flex="1">
         <xul:hbox flex="1">
           <xul:hbox class="start-cap"/>
-          <xul:progressmeter anonid="progress" class="progress" flex="1"
-                             min="0" max="100"/>
+          <html:progress anonid="progress" class="progress" max="100"/>
           <xul:hbox class="end-cap"/>
         </xul:hbox>
         <xul:hbox class="status-container">
@@ -163,11 +163,11 @@
       </field>
 
       <property name="progress">
-        <getter><![CDATA[
-          return this._progress.value;
-        ]]></getter>
         <setter><![CDATA[
-          this._progress.value = val;
+          // This property is always updated after maxProgress.
+          if (this.getAttribute("mode") == "determined") {
+            this._progress.value = val;
+          }
           if (val == this._progress.max)
             this.setAttribute("complete", true);
           else
@@ -176,17 +176,14 @@
       </property>
 
       <property name="maxProgress">
-        <getter><![CDATA[
-          return this._progress.max;
-        ]]></getter>
         <setter><![CDATA[
           if (val == -1) {
-            this._progress.mode = "undetermined";
+            this.setAttribute("mode", "undetermined");
+            this._progress.removeAttribute("value");
           } else {
-            this._progress.mode = "determined";
-            this._progress.max = val;
+            this.setAttribute("mode", "determined");
+            this._progress.setAttribute("max", val);
           }
-          this.setAttribute("mode", this._progress.mode);
         ]]></setter>
       </property>
 
@@ -206,28 +203,6 @@
       </method>
     </implementation>
   </binding>
-
-  <!-- Categories list - displays the list of categories on the left pane. -->
-  <binding id="categories-list"
-           extends="chrome://global/content/bindings/richlistbox.xml#richlistbox">
-    <implementation>
-      <!-- This needs to be overridden to allow the fancy animation while not
-           allowing that item to be selected when hiding.  -->
-      <method name="_canUserSelect">
-        <parameter name="aItem"/>
-        <body>
-        <![CDATA[
-          if (aItem.hasAttribute("disabled") &&
-              aItem.getAttribute("disabled") == "true")
-            return false;
-          var style = document.defaultView.getComputedStyle(aItem);
-          return style.display != "none" && style.visibility == "visible";
-        ]]>
-        </body>
-      </method>
-    </implementation>
-  </binding>
-
 
   <!-- Category item - an item in the category list. -->
   <binding id="category"
@@ -317,7 +292,7 @@
   <binding id="install-status">
     <content>
       <xul:label anonid="message"/>
-      <xul:progressmeter anonid="progress" class="download-progress"/>
+      <xul:box anonid="progress" class="download-progress"/>
       <xul:button anonid="install-remote-btn" hidden="true"
                   class="addon-control install" label="&addon.install.label;"
                   tooltiptext="&addon.install.tooltip;"
@@ -436,17 +411,6 @@
           if (this.mControl.getAttribute("remote") != "true")
             return;
 
-          if (this.mControl.mAddon.eula) {
-            var data = {
-              addon: this.mControl.mAddon,
-              accepted: false
-            };
-            window.openDialog("chrome://mozapps/content/extensions/eula.xul", "_blank",
-                              "chrome,dialog,modal,centerscreen,resizable=no", data);
-            if (!data.accepted)
-              return;
-          }
-
           delete this.mControl.mAddon;
           this.mControl.mInstall = this.mInstall;
           this.mControl.setAttribute("status", "installing");
@@ -460,8 +424,7 @@
               }
               let subject = {
                 wrappedJSObject: {
-                  target: window.QueryInterface(Ci.nsIInterfaceRequestor)
-                                .getInterface(Ci.nsIDocShell).chromeEventHandler,
+                  target: window.docShell.chromeEventHandler,
                   info: {
                     addon: info.addon,
                     source: "AMO",
@@ -579,7 +542,7 @@
   <!-- Addon - generic - A normal addon item, or an update to one -->
   <binding id="addon-generic"
            extends="chrome://mozapps/content/extensions/extensions.xml#addon-base">
-    <content>
+    <content tooltiptext="&addon.details.tooltip;">
       <xul:hbox anonid="warning-container"
                 class="warning">
         <xul:image class="warning-icon"/>
@@ -606,6 +569,8 @@
         <xul:spacer flex="5000"/> <!-- Necessary to allow the message to wrap -->
       </xul:hbox>
 
+      <xul:image class="card-heading-image" anonid="theme-screenshot" xbl:inherits="src=previewURL"/>
+
       <xul:hbox class="content-container" align="center">
         <xul:vbox class="icon-container">
           <xul:image anonid="icon" class="icon"/>
@@ -614,7 +579,7 @@
           <xul:hbox class="basicinfo-container">
               <xul:hbox class="name-container">
                 <xul:label anonid="name" class="name" crop="end" flex="1"
-                           tooltip="addonitem-tooltip" xbl:inherits="value=name"/>
+                           tooltip="addonitem-tooltip" xbl:inherits="xbl:text=name"/>
                 <xul:label anonid="legacy" class="legacy-warning text-link" value="&addon.legacy.label;"/>
                 <xul:label class="disabled-postfix" value="&addon.disabled.postfix;"/>
                 <xul:label class="update-postfix" value="&addon.update.postfix;"/>
@@ -628,19 +593,8 @@
             <xul:vbox class="description-outer-container" flex="1">
               <xul:hbox class="description-container">
                 <xul:label anonid="description" class="description" crop="end" flex="1"/>
-                <xul:button anonid="details-btn" class="details button-link"
-                            label="&addon.details.label;"
-                            tooltiptext="&addon.details.tooltip;"
-                            oncommand="document.getBindingParent(this).showInDetailView();"/>
                 <xul:spacer flex="5000"/> <!-- Necessary to make the description crop -->
               </xul:hbox>
-              <xul:vbox anonid="relnotes-container" class="relnotes-container">
-                <xul:label class="relnotes-header" value="&addon.releaseNotes.label;"/>
-                <xul:label anonid="relnotes-loading" value="&addon.loadingReleaseNotes.label;"/>
-                <xul:label anonid="relnotes-error" hidden="true"
-                           value="&addon.errorLoadingReleaseNotes.label;"/>
-                <xul:vbox anonid="relnotes" class="relnotes"/>
-              </xul:vbox>
               <xul:hbox class="relnotes-toggle-container">
                 <xul:button anonid="relnotes-toggle-btn" class="relnotes-toggle"
                             hidden="true" label="&cmd.showReleaseNotes.label;"
@@ -651,6 +605,13 @@
                             hidetooltip="&cmd.hideReleaseNotes.tooltip;"
                             oncommand="document.getBindingParent(this).toggleReleaseNotes();"/>
               </xul:hbox>
+              <xul:vbox anonid="relnotes-container" class="relnotes-container">
+                <xul:label class="relnotes-header" value="&addon.releaseNotes.label;"/>
+                <xul:label anonid="relnotes-loading" value="&addon.loadingReleaseNotes.label;"/>
+                <xul:label anonid="relnotes-error" hidden="true"
+                           value="&addon.errorLoadingReleaseNotes.label;"/>
+                <xul:vbox anonid="relnotes" class="relnotes"/>
+              </xul:vbox>
             </xul:vbox>
           </xul:hbox>
         </xul:vbox>
@@ -677,7 +638,7 @@
             <xul:hbox anonid="install-status" class="install-status"
                       hidden="true"/>
           </xul:hbox>
-          <xul:hbox anonid="control-container" class="control-container">
+          <xul:hbox anonid="control-container" class="control-container" flex="1">
             <xul:button anonid="preferences-btn"
                         class="addon-control preferences"
 #ifdef XP_WIN
@@ -702,6 +663,7 @@
                         oncommand="document.getBindingParent(this).uninstall();"/>
             <xul:menulist anonid="state-menulist"
                           class="addon-control state"
+                          flex="1"
                           tooltiptext="&cmd.stateMenu.tooltip;">
               <xul:menupopup>
                 <xul:menuitem anonid="ask-to-activate-menuitem"
@@ -914,7 +876,7 @@
 
           this.setAttribute("name", aAddon.name);
 
-          var iconURL = AddonManager.getPreferredIconURL(aAddon, 48, window);
+          var iconURL = AddonManager.getPreferredIconURL(aAddon, 24, window);
           if (iconURL)
             this._icon.src = iconURL;
           else
@@ -924,6 +886,14 @@
             this._description.value = this.mAddon.description;
           else
             this._description.hidden = true;
+
+          // Set a previewURL for themes if one exists.
+          let previewURL = this.mAddon.type == "theme" &&
+            this.mAddon.screenshots &&
+            this.mAddon.screenshots[0] &&
+            this.mAddon.screenshots[0].url;
+          this.setAttribute("previewURL", previewURL ? previewURL : "");
+          this.setAttribute("hasPreview", previewURL ? "true" : "fase");
 
           let legacyWarning = legacyExtensionsEnabled && !this.mAddon.install &&
             isLegacyExtension(this.mAddon);
@@ -1312,10 +1282,10 @@
 
             // We must set userDisabled to true first, this will call
             // _updateState which will clear any pending attribute set.
-            this.mAddon.disable();
-
-            // This won't update any other add-on manager views (bug 582002)
-            this.setAttribute("pending", "uninstall");
+            this.mAddon.disable().then(() => {
+              // This won't update any other add-on manager views (bug 582002)
+              this.setAttribute("pending", "uninstall");
+            });
           }
         ]]></body>
       </method>
@@ -1506,18 +1476,11 @@
 
     <handlers>
       <handler event="click" button="0"><![CDATA[
-        switch (event.detail) {
-        case 1:
-          // Prevent double-click where the UI changes on the first click
-          this._lastClickTarget = event.originalTarget;
-          break;
-        case 2:
-          if (event.originalTarget.localName != "button" &&
-              !event.originalTarget.classList.contains("text-link") &&
-              event.originalTarget == this._lastClickTarget) {
-            this.showInDetailView();
-          }
-          break;
+        if (!["button", "checkbox", "menulist", "menuitem"].includes(event.originalTarget.localName) &&
+            !event.originalTarget.classList.contains("text-link") &&
+            // Treat the relnotes container as embedded text instead of a click target.
+            !event.originalTarget.closest(".relnotes-container")) {
+          this.showInDetailView();
         }
       ]]></handler>
     </handlers>

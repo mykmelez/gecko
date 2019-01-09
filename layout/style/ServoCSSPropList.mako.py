@@ -40,14 +40,6 @@ class Alias(object):
         return "alias"
 
 <%!
-# nsCSSPropertyID of longhands and shorthands is ordered alphabetically
-# with vendor prefixes removed. Note that aliases use their alias name
-# as order key directly because they may be duplicate without prefix.
-def order_key(prop):
-    if prop.name.startswith("-"):
-        return prop.name[prop.name.find("-", 1) + 1:]
-    return prop.name
-
 # See bug 1454823 for situation of internal flag.
 def is_internal(prop):
     # A property which is not controlled by pref and not enabled in
@@ -74,24 +66,86 @@ def method(prop):
 # moved or perhaps using a blacklist for the ones with non-layout-dependence
 # but other non-trivial dependence like scrollbar colors.
 SERIALIZED_PREDEFINED_TYPES = [
+    "Appearance",
+    "AlignContent",
+    "AlignItems",
+    "AlignSelf",
+    "BackgroundRepeat",
+    "BackgroundSize",
+    "BorderImageRepeat",
+    "BorderStyle",
+    "BreakBetween",
+    "BreakWithin",
+    "Clear",
+    "ClipRectOrAuto",
     "Color",
     "Content",
     "CounterIncrement",
     "CounterReset",
+    "FillRule",
+    "Float",
+    "FontFamily",
+    "FontFeatureSettings",
+    "FontLanguageOverride",
+    "FontSize",
+    "FontSizeAdjust",
+    "FontStretch",
+    "FontStyle",
+    "FontSynthesis",
+    "FontVariant",
+    "FontVariantAlternates",
+    "FontVariantEastAsian",
+    "FontVariantLigatures",
+    "FontVariantNumeric",
+    "FontVariationSettings",
+    "FontWeight",
     "Integer",
+    "ImageLayer",
+    "JustifyContent",
+    "JustifyItems",
+    "JustifySelf",
     "Length",
+    "LengthPercentage",
+    "NonNegativeLength",
+    "NonNegativeLengthPercentage",
     "ListStyleType",
+    "OffsetPath",
     "Opacity",
+    "OutlineStyle",
+    "OverflowWrap",
+    "Position",
+    "Quotes",
+    "Resize",
+    "Rotate",
+    "Scale",
+    "TextAlign",
+    "Translate",
+    "TimingFunction",
+    "TransformStyle",
+    "UserSelect",
+    "background::BackgroundSize",
+    "basic_shape::ClippingShape",
+    "basic_shape::FloatAreaShape",
+    "position::HorizontalPosition",
+    "position::VerticalPosition",
     "url::ImageUrlOrNone",
+    "Appearance",
+    "OverscrollBehavior",
+    "OverflowClipBox",
+    "ScrollSnapType",
+    "Float",
+    "Overflow",
 ]
 
 def serialized_by_servo(prop):
     # If the property requires layout information, no such luck.
     if "GETCS_NEEDS_LAYOUT_FLUSH" in prop.flags:
         return False
-    # No shorthands yet.
     if prop.type() == "shorthand":
-        return False
+        # FIXME: Need to serialize a value interpolated with currentcolor
+        # properly to be able to use text-decoration, and figure out what to do
+        # with relative mask urls.
+        return prop.name != "text-decoration" and prop.name != "mask"
     # Keywords are all fine, except -moz-osx-font-smoothing, which does
     # resistfingerprinting stuff.
     if prop.keyword and prop.name != "-moz-osx-font-smoothing":
@@ -124,8 +178,8 @@ def flags(prop):
         result.append("CanAnimateOnCompositor")
     if exposed_on_getcs(prop):
         result.append("ExposedOnGetCS")
-    if serialized_by_servo(prop):
-        result.append("SerializedByServo")
+        if serialized_by_servo(prop):
+            result.append("SerializedByServo")
     if prop.type() == "longhand" and prop.logical:
         result.append("IsLogical")
     return ", ".join('"{}"'.format(flag) for flag in result)
@@ -140,16 +194,16 @@ def sub_properties(prop):
 %>
 
 data = [
-    % for prop in sorted(data.longhands, key=order_key):
+    % for prop in data.longhands:
     Longhand("${prop.name}", "${method(prop)}", "${prop.ident}", [${flags(prop)}], ${pref(prop)}),
     % endfor
 
-    % for prop in sorted(data.shorthands, key=order_key):
+    % for prop in data.shorthands:
     Shorthand("${prop.name}", "${prop.camel_case}", "${prop.ident}", [${flags(prop)}], ${pref(prop)},
               [${sub_properties(prop)}]),
     % endfor
 
-    % for prop in sorted(data.all_aliases(), key=lambda x: x.name):
+    % for prop in data.all_aliases():
     Alias("${prop.name}", "${prop.camel_case}", "${prop.ident}", "${prop.original.ident}", [], ${pref(prop)}),
     % endfor
 ]

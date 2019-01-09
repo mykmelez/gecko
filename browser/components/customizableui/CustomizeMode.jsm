@@ -167,8 +167,8 @@ CustomizeMode.prototype = {
     let lwthemeButton = this.$("customization-lwtheme-button");
     let lwthemeIcon = this.document.getAnonymousElementByAttribute(lwthemeButton,
                         "class", "button-icon");
-    lwthemeIcon.style.backgroundImage = LightweightThemeManager.currentTheme ?
-      "url(" + LightweightThemeManager.currentTheme.iconURL + ")" : "";
+    let theme = LightweightThemeManager.currentTheme;
+    lwthemeIcon.style.backgroundImage = theme ? "url(" + theme.iconURL + ")" : "";
   },
 
   setTab(aTab) {
@@ -344,6 +344,7 @@ CustomizeMode.prototype = {
       this._updateEmptyPaletteNotice();
 
       this._updateLWThemeButtonIcon();
+      Services.obs.addObserver(this, "lightweight-theme-changed");
 
       this._setupDownloadAutoHideToggle();
 
@@ -386,6 +387,7 @@ CustomizeMode.prototype = {
 
     this._teardownDownloadAutoHideToggle();
 
+    Services.obs.removeObserver(this, "lightweight-theme-changed");
     CustomizableUI.removeListener(this);
 
     this.document.removeEventListener("keypress", this);
@@ -425,14 +427,6 @@ CustomizeMode.prototype = {
 
       await this._unwrapToolbarItems();
 
-      if (this._changed) {
-        // XXXmconley: At first, it seems strange to also persist the old way with
-        //             currentset - but this might actually be useful for switching
-        //             to old builds. We might want to keep this around for a little
-        //             bit.
-        this.persistCurrentSets();
-      }
-
       // And drop all area references.
       this.areas.clear();
 
@@ -441,7 +435,7 @@ CustomizeMode.prototype = {
       CustomizableUI.dispatchToolboxEvent("customizationending", {}, window);
 
       window.PanelUI.menuButton.disabled = false;
-      let overflowContainer = document.getElementById("widget-overflow-mainView").firstChild;
+      let overflowContainer = document.getElementById("widget-overflow-mainView").firstElementChild;
       overflowContainer.appendChild(window.PanelUI.overflowFixedList);
       document.getElementById("nav-bar-overflow-button").disabled = false;
       let panelContextMenu = document.getElementById(kPanelItemContextMenu);
@@ -518,7 +512,7 @@ CustomizeMode.prototype = {
     for (let i = 0; i < numberOfAreas; i++) {
       let area = areas[i];
       let areaNode = aNode.ownerDocument.getElementById(area);
-      let customizationTarget = areaNode && areaNode.customizationTarget;
+      let customizationTarget = CustomizableUI.getCustomizationTarget(areaNode);
       if (customizationTarget && customizationTarget != areaNode) {
         areas.push(customizationTarget.id);
       }
@@ -584,8 +578,8 @@ CustomizeMode.prototype = {
 
   async addToToolbar(aNode) {
     aNode = this._getCustomizableChildForNode(aNode);
-    if (aNode.localName == "toolbarpaletteitem" && aNode.firstChild) {
-      aNode = aNode.firstChild;
+    if (aNode.localName == "toolbarpaletteitem" && aNode.firstElementChild) {
+      aNode = aNode.firstElementChild;
     }
     let widgetAnimationPromise = this._promiseWidgetAnimationOut(aNode);
     if (widgetAnimationPromise) {
@@ -621,8 +615,8 @@ CustomizeMode.prototype = {
 
   async addToPanel(aNode) {
     aNode = this._getCustomizableChildForNode(aNode);
-    if (aNode.localName == "toolbarpaletteitem" && aNode.firstChild) {
-      aNode = aNode.firstChild;
+    if (aNode.localName == "toolbarpaletteitem" && aNode.firstElementChild) {
+      aNode = aNode.firstElementChild;
     }
     let widgetAnimationPromise = this._promiseWidgetAnimationOut(aNode);
     if (widgetAnimationPromise) {
@@ -669,8 +663,8 @@ CustomizeMode.prototype = {
 
   async removeFromArea(aNode) {
     aNode = this._getCustomizableChildForNode(aNode);
-    if (aNode.localName == "toolbarpaletteitem" && aNode.firstChild) {
-      aNode = aNode.firstChild;
+    if (aNode.localName == "toolbarpaletteitem" && aNode.firstElementChild) {
+      aNode = aNode.firstElementChild;
     }
     let widgetAnimationPromise = this._promiseWidgetAnimationOut(aNode);
     if (widgetAnimationPromise) {
@@ -746,11 +740,11 @@ CustomizeMode.prototype = {
   depopulatePalette() {
     return (async () => {
       this.visiblePalette.hidden = true;
-      let paletteChild = this.visiblePalette.firstChild;
+      let paletteChild = this.visiblePalette.firstElementChild;
       let nextChild;
       while (paletteChild) {
         nextChild = paletteChild.nextElementSibling;
-        let itemId = paletteChild.firstChild.id;
+        let itemId = paletteChild.firstElementChild.id;
         if (CustomizableUI.isSpecialWidget(itemId)) {
           this.visiblePalette.removeChild(paletteChild);
         } else {
@@ -816,7 +810,7 @@ CustomizeMode.prototype = {
       wrapper = aNode.parentNode;
       aPlace = wrapper.getAttribute("place");
     } else {
-      wrapper = this.document.createElement("toolbarpaletteitem");
+      wrapper = this.document.createXULElement("toolbarpaletteitem");
       // "place" is used to show the label when it's sitting in the palette.
       wrapper.setAttribute("place", aPlace);
     }
@@ -925,7 +919,7 @@ CustomizeMode.prototype = {
 
     let place = aWrapper.getAttribute("place");
 
-    let toolbarItem = aWrapper.firstChild;
+    let toolbarItem = aWrapper.firstElementChild;
     if (!toolbarItem) {
       log.error("no toolbarItem child for " + aWrapper.tagName + "#" + aWrapper.id);
       aWrapper.remove();
@@ -1065,19 +1059,6 @@ CustomizeMode.prototype = {
     })().catch(log.error);
   },
 
-  persistCurrentSets(aSetBeforePersisting) {
-    let document = this.document;
-    let toolbars = document.querySelectorAll("toolbar[customizable='true'][currentset]");
-    for (let toolbar of toolbars) {
-      if (aSetBeforePersisting) {
-        let set = toolbar.currentSet;
-        toolbar.setAttribute("currentset", set);
-      }
-      // Persist the currentset attribute directly on hardcoded toolbars.
-      document.persist(toolbar.id, "currentset");
-    }
-  },
-
   reset() {
     this.resetting = true;
     // Disable the reset button temporarily while resetting:
@@ -1089,12 +1070,8 @@ CustomizeMode.prototype = {
 
       CustomizableUI.reset();
 
-      this._updateLWThemeButtonIcon();
-
       await this._wrapToolbarItems();
       this.populatePalette();
-
-      this.persistCurrentSets(true);
 
       this._updateResetButton();
       this._updateUndoResetButton();
@@ -1116,12 +1093,8 @@ CustomizeMode.prototype = {
 
       CustomizableUI.undoReset();
 
-      this._updateLWThemeButtonIcon();
-
       await this._wrapToolbarItems();
       this.populatePalette();
-
-      this.persistCurrentSets(true);
 
       this._updateResetButton();
       this._updateUndoResetButton();
@@ -1353,15 +1326,16 @@ CustomizeMode.prototype = {
     }
 
     let onThemeSelected = panel => {
-      this._updateLWThemeButtonIcon();
-      this._onUIChange();
+      // This causes us to call _onUIChange when the LWT actually changes,
+      // so the restore defaults / undo reset button is updated correctly.
+      this._nextThemeChangeUserTriggered = true;
       panel.hidePopup();
     };
 
     let doc = this.window.document;
 
     function buildToolbarButton(aTheme) {
-      let tbb = doc.createElement("toolbarbutton");
+      let tbb = doc.createXULElement("toolbarbutton");
       tbb.theme = aTheme;
       tbb.setAttribute("label", aTheme.name);
       tbb.setAttribute("image", aTheme.iconURL);
@@ -1459,7 +1433,7 @@ CustomizeMode.prototype = {
       });
       panel.insertBefore(button, footer);
     }
-    let hideRecommendedLabel = (footer.previousSibling == recommendedLabel);
+    let hideRecommendedLabel = (footer.previousElementSibling == recommendedLabel);
     recommendedLabel.hidden = hideRecommendedLabel;
   },
 
@@ -1467,9 +1441,9 @@ CustomizeMode.prototype = {
     let footer = this.$("customization-lwtheme-menu-footer");
     let recommendedLabel = this.$("customization-lwtheme-menu-recommended");
     for (let element of [footer, recommendedLabel]) {
-      while (element.previousSibling &&
-             element.previousSibling.localName == "toolbarbutton") {
-        element.previousSibling.remove();
+      while (element.previousElementSibling &&
+             element.previousElementSibling.localName == "toolbarbutton") {
+        element.previousElementSibling.remove();
       }
     }
 
@@ -1593,6 +1567,13 @@ CustomizeMode.prototype = {
           this._updateDragSpaceCheckbox();
         }
         break;
+      case "lightweight-theme-changed":
+        this._updateLWThemeButtonIcon();
+        if (this._nextThemeChangeUserTriggered) {
+          this._onUIChange();
+        }
+        this._nextThemeChangeUserTriggered = false;
+        break;
     }
   },
 
@@ -1645,18 +1626,8 @@ CustomizeMode.prototype = {
     Services.prefs.setBoolPref(kExtraDragSpacePref, aShouldShowDragSpace);
   },
 
-  get _dwu() {
-    if (!this.__dwu) {
-      this.__dwu = this.window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
-    }
-    return this.__dwu;
-  },
-
-  get _dir() {
-    if (!this.__dir) {
-      this.__dir = this.window.getComputedStyle(this.document.documentElement).direction;
-    }
-    return this.__dir;
+  _getBoundsWithoutFlushing(element) {
+    return this.window.windowUtils.getBoundsWithoutFlushing(element);
   },
 
   _onDragStart(aEvent) {
@@ -1670,7 +1641,7 @@ CustomizeMode.prototype = {
       item = item.parentNode;
     }
 
-    let draggedItem = item.firstChild;
+    let draggedItem = item.firstElementChild;
     let placeForItem = CustomizableUI.getPlaceForItem(item);
 
     let dt = aEvent.dataTransfer;
@@ -1679,7 +1650,7 @@ CustomizeMode.prototype = {
     dt.mozSetDataAt(kDragDataTypePrefix + documentId, draggedItem.id, 0);
     dt.effectAllowed = "move";
 
-    let itemRect = this._dwu.getBoundsWithoutFlushing(draggedItem);
+    let itemRect = this._getBoundsWithoutFlushing(draggedItem);
     let itemCenter = {x: itemRect.left + itemRect.width / 2,
                       y: itemRect.top + itemRect.height / 2};
     this._dragOffset = {x: aEvent.clientX - itemCenter.x,
@@ -1687,7 +1658,7 @@ CustomizeMode.prototype = {
 
     let toolbarParent = draggedItem.closest("toolbar");
     if (toolbarParent) {
-      let toolbarRect = this._dwu.getBoundsWithoutFlushing(toolbarParent);
+      let toolbarRect = this._getBoundsWithoutFlushing(toolbarParent);
       toolbarParent.style.minHeight = toolbarRect.height + "px";
     }
 
@@ -1703,12 +1674,12 @@ CustomizeMode.prototype = {
         item.hidden = true;
         DragPositionManager.start(this.window);
         let canUsePrevSibling = placeForItem == "toolbar" || placeForItem == "menu-panel";
-        if (item.nextSibling) {
-          this._setDragActive(item.nextSibling, "before", draggedItem.id, placeForItem);
-          this._dragOverItem = item.nextSibling;
-        } else if (canUsePrevSibling && item.previousSibling) {
-          this._setDragActive(item.previousSibling, "after", draggedItem.id, placeForItem);
-          this._dragOverItem = item.previousSibling;
+        if (item.nextElementSibling) {
+          this._setDragActive(item.nextElementSibling, "before", draggedItem.id, placeForItem);
+          this._dragOverItem = item.nextElementSibling;
+        } else if (canUsePrevSibling && item.previousElementSibling) {
+          this._setDragActive(item.previousElementSibling, "after", draggedItem.id, placeForItem);
+          this._dragOverItem = item.previousElementSibling;
         }
         let currentArea = this._getCustomizableParent(item);
         currentArea.setAttribute("draggingover", "true");
@@ -1764,12 +1735,12 @@ CustomizeMode.prototype = {
     // We need to determine the place that the widget is being dropped in
     // the target.
     let dragOverItem, dragValue;
-    if (targetNode == targetArea.customizationTarget) {
+    if (targetNode == CustomizableUI.getCustomizationTarget(targetArea)) {
       // We'll assume if the user is dragging directly over the target, that
       // they're attempting to append a child to that target.
       dragOverItem = (targetAreaType == "toolbar"
-                        ? this._findVisiblePreviousSiblingNode(targetNode.lastChild)
-                        : targetNode.lastChild) ||
+                        ? this._findVisiblePreviousSiblingNode(targetNode.lastElementChild)
+                        : targetNode.lastElementChild) ||
                      targetNode;
       dragValue = "after";
     } else {
@@ -1777,26 +1748,26 @@ CustomizeMode.prototype = {
       let position = Array.indexOf(targetParent.children, targetNode);
       if (position == -1) {
         dragOverItem = (targetAreaType == "toolbar"
-                          ? this._findVisiblePreviousSiblingNode(targetNode.lastChild)
-                          : targetNode.lastChild);
+                          ? this._findVisiblePreviousSiblingNode(targetNode.lastElementChild)
+                          : targetNode.lastElementChild);
         dragValue = "after";
       } else {
         dragOverItem = targetParent.children[position];
         if (targetAreaType == "toolbar") {
           // Check if the aDraggedItem is hovered past the first half of dragOverItem
-          let itemRect = this._dwu.getBoundsWithoutFlushing(dragOverItem);
+          let itemRect = this._getBoundsWithoutFlushing(dragOverItem);
           let dropTargetCenter = itemRect.left + (itemRect.width / 2);
           let existingDir = dragOverItem.getAttribute("dragover");
-          let dirFactor = this._dir == "ltr" ? 1 : -1;
+          let dirFactor = this.window.RTL_UI ? -1 : 1;
           if (existingDir == "before") {
             dropTargetCenter += (parseInt(dragOverItem.style.borderInlineStartWidth) || 0) / 2 * dirFactor;
           } else {
             dropTargetCenter -= (parseInt(dragOverItem.style.borderInlineEndWidth) || 0) / 2 * dirFactor;
           }
-          let before = this._dir == "ltr" ? aEvent.clientX < dropTargetCenter : aEvent.clientX > dropTargetCenter;
+          let before = this.window.RTL_UI ? aEvent.clientX > dropTargetCenter : aEvent.clientX < dropTargetCenter;
           dragValue = before ? "before" : "after";
         } else if (targetAreaType == "menu-panel") {
-          let itemRect = this._dwu.getBoundsWithoutFlushing(dragOverItem);
+          let itemRect = this._getBoundsWithoutFlushing(dragOverItem);
           let dropTargetCenter = itemRect.top + (itemRect.height / 2);
           let existingDir = dragOverItem.getAttribute("dragover");
           if (existingDir == "before") {
@@ -1816,7 +1787,7 @@ CustomizeMode.prototype = {
     }
 
     if (dragOverItem != this._dragOverItem || dragValue != dragOverItem.getAttribute("dragover")) {
-      if (dragOverItem != targetArea.customizationTarget) {
+      if (dragOverItem != CustomizableUI.getCustomizationTarget(targetArea)) {
         this._setDragActive(dragOverItem, dragValue, draggedItemId, targetAreaType);
       }
       this._dragOverItem = dragOverItem;
@@ -1854,14 +1825,14 @@ CustomizeMode.prototype = {
     let dropDir = targetNode.getAttribute("dragover");
     // Need to insert *after* this node if we promised the user that:
     if (targetNode != targetArea && dropDir == "after") {
-      if (targetNode.nextSibling) {
-        targetNode = targetNode.nextSibling;
+      if (targetNode.nextElementSibling) {
+        targetNode = targetNode.nextElementSibling;
       } else {
         targetNode = targetArea;
       }
     }
     if (targetNode.tagName == "toolbarpaletteitem") {
-      targetNode = targetNode.firstChild;
+      targetNode = targetNode.firstElementChild;
     }
 
     this._cancelDragActive(this._dragOverItem, null, true);
@@ -1919,10 +1890,7 @@ CustomizeMode.prototype = {
         // The items in the palette are wrapped, so we need the target node's parent here:
         this.visiblePalette.insertBefore(draggedItem, aTargetNode.parentNode);
       }
-      if (aOriginArea.id !== kPaletteId) {
-        // The dragend event already fires when the item moves within the palette.
-        this._onDragEnd(aEvent);
-      }
+      this._onDragEnd(aEvent);
       return;
     }
 
@@ -1931,6 +1899,8 @@ CustomizeMode.prototype = {
     }
 
     // Skipintoolbarset items won't really be moved:
+    let areaCustomizationTarget =
+      CustomizableUI.getCustomizationTarget(aTargetArea);
     if (draggedItem.getAttribute("skipintoolbarset") == "true") {
       // These items should never leave their area:
       if (aTargetArea != aOriginArea) {
@@ -1938,11 +1908,11 @@ CustomizeMode.prototype = {
       }
       let place = draggedItem.parentNode.getAttribute("place");
       this.unwrapToolbarItem(draggedItem.parentNode);
-      if (aTargetNode == aTargetArea.customizationTarget) {
-        aTargetArea.customizationTarget.appendChild(draggedItem);
+      if (aTargetNode == areaCustomizationTarget) {
+        areaCustomizationTarget.appendChild(draggedItem);
       } else {
         this.unwrapToolbarItem(aTargetNode.parentNode);
-        aTargetArea.customizationTarget.insertBefore(draggedItem, aTargetNode);
+        areaCustomizationTarget.insertBefore(draggedItem, aTargetNode);
         this.wrapToolbarItem(aTargetNode, place);
       }
       this.wrapToolbarItem(draggedItem, place);
@@ -1951,7 +1921,7 @@ CustomizeMode.prototype = {
 
     // Is the target the customization area itself? If so, we just add the
     // widget to the end of the area.
-    if (aTargetNode == aTargetArea.customizationTarget) {
+    if (aTargetNode == areaCustomizationTarget) {
       CustomizableUI.addWidgetToArea(aDraggedItemId, aTargetArea.id);
       this._onDragEnd(aEvent);
       return;
@@ -1965,14 +1935,14 @@ CustomizeMode.prototype = {
     while (itemForPlacement && itemForPlacement.getAttribute("skipintoolbarset") == "true" &&
            itemForPlacement.parentNode &&
            itemForPlacement.parentNode.nodeName == "toolbarpaletteitem") {
-      itemForPlacement = itemForPlacement.parentNode.nextSibling;
+      itemForPlacement = itemForPlacement.parentNode.nextElementSibling;
       if (itemForPlacement && itemForPlacement.nodeName == "toolbarpaletteitem") {
-        itemForPlacement = itemForPlacement.firstChild;
+        itemForPlacement = itemForPlacement.firstElementChild;
       }
     }
     if (itemForPlacement) {
       let targetNodeId = (itemForPlacement.nodeName == "toolbarpaletteitem") ?
-                            itemForPlacement.firstChild && itemForPlacement.firstChild.id :
+                            itemForPlacement.firstElementChild && itemForPlacement.firstElementChild.id :
                             itemForPlacement.id;
       placement = CustomizableUI.getPlacementOfWidget(targetNodeId);
     }
@@ -2025,6 +1995,8 @@ CustomizeMode.prototype = {
 
   /**
    * To workaround bug 460801 we manually forward the drop event here when dragend wouldn't be fired.
+   *
+   * Note that that means that this function may be called multiple times by a single drag operation.
    */
   _onDragEnd(aEvent) {
     if (this._isUnwantedDragDrop(aEvent)) {
@@ -2197,7 +2169,7 @@ CustomizeMode.prototype = {
 
     // Calculate size of the item when it'd be dropped in this position.
     let currentParent = aDraggedItem.parentNode;
-    let currentSibling = aDraggedItem.nextSibling;
+    let currentSibling = aDraggedItem.nextElementSibling;
     const kAreaType = "cui-areatype";
     let areaType, currentType;
 
@@ -2256,7 +2228,8 @@ CustomizeMode.prototype = {
   },
 
   _getDragOverNode(aEvent, aAreaElement, aAreaType, aDraggedItemId) {
-    let expectedParent = aAreaElement.customizationTarget || aAreaElement;
+    let expectedParent =
+      CustomizableUI.getCustomizationTarget(aAreaElement) || aAreaElement;
     if (!expectedParent.contains(aEvent.target)) {
       return expectedParent;
     }
@@ -2267,7 +2240,7 @@ CustomizeMode.prototype = {
 
     // Ensure this is within the container
     let boundsContainer = expectedParent;
-    let bounds = this._dwu.getBoundsWithoutFlushing(boundsContainer);
+    let bounds = this._getBoundsWithoutFlushing(boundsContainer);
     dragX = Math.min(bounds.right, Math.max(dragX, bounds.left));
     dragY = Math.min(bounds.bottom, Math.max(dragY, bounds.top));
 
@@ -2326,8 +2299,8 @@ CustomizeMode.prototype = {
   _findVisiblePreviousSiblingNode(aReferenceNode) {
     while (aReferenceNode &&
            aReferenceNode.localName == "toolbarpaletteitem" &&
-           aReferenceNode.firstChild.hidden) {
-      aReferenceNode = aReferenceNode.previousSibling;
+           aReferenceNode.firstElementChild.hidden) {
+      aReferenceNode = aReferenceNode.previousElementSibling;
     }
     return aReferenceNode;
   },
@@ -2405,8 +2378,8 @@ CustomizeMode.prototype = {
       if (!this._customizing || !this._wantToBeInCustomizeMode) {
         return;
       }
-      let buttonBounds = this._dwu.getBoundsWithoutFlushing(button);
-      let windowBounds = this._dwu.getBoundsWithoutFlushing(doc.documentElement);
+      let buttonBounds = this._getBoundsWithoutFlushing(button);
+      let windowBounds = this._getBoundsWithoutFlushing(doc.documentElement);
       panelOnTheLeft = (buttonBounds.left + buttonBounds.width / 2) > windowBounds.width / 2;
     }
     let position;
@@ -2502,8 +2475,8 @@ CustomizeMode.prototype = {
     function updatePlayers() {
       if (keydown) {
         let p1Adj = 1;
-        if ((keydown == 37 && !isRTL) ||
-            (keydown == 39 && isRTL)) {
+        if ((keydown == 37 && !window.RTL_UI) ||
+            (keydown == 39 && window.RTL_UI)) {
           p1Adj = -1;
         }
         p1 += p1Adj * 10 * keydownAdj;
@@ -2538,7 +2511,7 @@ CustomizeMode.prototype = {
     }
 
     function draw() {
-      let xAdj = isRTL ? -1 : 1;
+      let xAdj = window.RTL_UI ? -1 : 1;
       elements["wp-player1"].style.transform = "translate(" + (xAdj * p1) + "px, -37px)";
       elements["wp-player2"].style.transform = "translate(" + (xAdj * p2) + "px, " + gameSide + "px)";
       elements["wp-ball"].style.transform = "translate(" + (xAdj * ball[0]) + "px, " + ball[1] + "px)";
@@ -2547,7 +2520,7 @@ CustomizeMode.prototype = {
       if (score >= winScore) {
         let arena = elements.arena;
         let image = "url(chrome://browser/skin/customizableui/whimsy.png)";
-        let position = `${(isRTL ? gameSide : 0) + (xAdj * ball[0]) - 10}px ${ball[1] - 10}px`;
+        let position = `${(window.RTL_UI ? gameSide : 0) + (xAdj * ball[0]) - 10}px ${ball[1] - 10}px`;
         let repeat = "no-repeat";
         let size = "20px";
         if (arena.style.backgroundImage) {
@@ -2646,15 +2619,14 @@ CustomizeMode.prototype = {
     let document = this.document;
     let rAFHandle = 0;
     let elements = {
-      arena: document.getElementById("customization-pong-arena")
+      arena: document.getElementById("customization-pong-arena"),
     };
-    let isRTL = document.documentElement.matches(":-moz-locale-dir(rtl)");
 
     document.addEventListener("keydown", onkeydown);
     document.addEventListener("keyup", onkeyup);
 
     for (let id of ["player1", "player2", "ball", "score", "lives"]) {
-      let el = document.createElement("box");
+      let el = document.createXULElement("box");
       el.id = "wp-" + id;
       elements[el.id] = elements.arena.appendChild(el);
     }

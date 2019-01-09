@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Code related to the style sharing cache, an optimization that allows similar
 //! nodes to share style without having to run selector matching twice.
@@ -64,26 +64,27 @@
 //! selectors are effectively stripped off, so that matching them all against
 //! elements makes sense.
 
-use Atom;
-use applicable_declarations::ApplicableDeclarationBlock;
+use crate::applicable_declarations::ApplicableDeclarationBlock;
+use crate::bloom::StyleBloom;
+use crate::context::{SelectorFlagsMap, SharedStyleContext, StyleContext};
+use crate::dom::{SendElement, TElement};
+use crate::matching::MatchMethods;
+use crate::properties::ComputedValues;
+use crate::rule_tree::StrongRuleNode;
+use crate::style_resolver::{PrimaryStyle, ResolvedElementStyles};
+use crate::stylist::Stylist;
+use crate::Atom;
 use atomic_refcell::{AtomicRefCell, AtomicRefMut};
-use bloom::StyleBloom;
-use context::{SelectorFlagsMap, SharedStyleContext, StyleContext};
-use dom::{SendElement, TElement};
-use matching::MatchMethods;
 use owning_ref::OwningHandle;
-use properties::ComputedValues;
-use rule_tree::StrongRuleNode;
-use selectors::NthIndexCache;
 use selectors::matching::{ElementSelectorFlags, VisitedHandlingMode};
-use servo_arc::{Arc, NonZeroPtrMut};
+use selectors::NthIndexCache;
+use servo_arc::Arc;
 use smallbitvec::SmallBitVec;
 use smallvec::SmallVec;
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::Deref;
-use style_resolver::{PrimaryStyle, ResolvedElementStyles};
-use stylist::Stylist;
+use std::ptr::NonNull;
 use uluru::{Entry, LRUCache};
 
 mod checks;
@@ -112,10 +113,15 @@ pub enum StyleSharingBehavior {
 
 /// Opaque pointer type to compare ComputedValues identities.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OpaqueComputedValues(NonZeroPtrMut<()>);
+pub struct OpaqueComputedValues(NonNull<()>);
+
+unsafe impl Send for OpaqueComputedValues {}
+unsafe impl Sync for OpaqueComputedValues {}
+
 impl OpaqueComputedValues {
     fn from(cv: &ComputedValues) -> Self {
-        let p = NonZeroPtrMut::new(cv as *const ComputedValues as *const () as *mut ());
+        let p =
+            unsafe { NonNull::new_unchecked(cv as *const ComputedValues as *const () as *mut ()) };
         OpaqueComputedValues(p)
     }
 

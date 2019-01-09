@@ -4,7 +4,9 @@
 
 "use strict";
 
-ChromeUtils.import("resource://formautofill/FormAutofillHandler.jsm");
+add_task(async function seutp() {
+  ChromeUtils.import("resource://formautofill/FormAutofillHandler.jsm");
+});
 
 const TESTCASES = [
   {
@@ -67,11 +69,8 @@ const TESTCASES = [
       "country": "United States",
     },
     expectedRecord: {
-      address: [{
-        "given-name": "John",
-        "organization": "Mozilla",
-        "country": "United States",
-      }],
+      // "United States" is not a valid country, only country-name. See isRecordCreatable.
+      address: [],
       creditCard: [],
     },
   },
@@ -130,14 +129,14 @@ const TESTCASES = [
     formValue: {
       "given-name": "John",
       "organization": "Mozilla",
-      "country": "United States",
+      "country": "US",
       "tel": "1234",
     },
     expectedRecord: {
       address: [{
         "given-name": "John",
         "organization": "Mozilla",
-        "country": "United States",
+        "country": "US",
         "tel": "",
       }],
       creditCard: [],
@@ -154,14 +153,14 @@ const TESTCASES = [
     formValue: {
       "given-name": "John",
       "organization": "Mozilla",
-      "country": "United States",
+      "country": "US",
       "tel": "1234567890123456",
     },
     expectedRecord: {
       address: [{
         "given-name": "John",
         "organization": "Mozilla",
-        "country": "United States",
+        "country": "US",
         "tel": "",
       }],
       creditCard: [],
@@ -178,14 +177,14 @@ const TESTCASES = [
     formValue: {
       "given-name": "John",
       "organization": "Mozilla",
-      "country": "United States",
+      "country": "US",
       "tel": "12345###!!!",
     },
     expectedRecord: {
       address: [{
         "given-name": "John",
         "organization": "Mozilla",
-        "country": "United States",
+        "country": "US",
         "tel": "",
       }],
       creditCard: [],
@@ -235,14 +234,14 @@ const TESTCASES = [
                 <input id="cc-exp" autocomplete="cc-exp">
                </form>`,
     formValue: {
-      "cc-number": "4444000022220000",
+      "cc-number": "5105105105105100",
       "cc-name": "Foo Bar",
       "cc-exp": "2022-06",
     },
     expectedRecord: {
       address: [],
       creditCard: [{
-        "cc-number": "4444000022220000",
+        "cc-number": "5105105105105100",
         "cc-name": "Foo Bar",
         "cc-exp": "2022-06",
       }],
@@ -254,12 +253,12 @@ const TESTCASES = [
                 <input id="cc-number" autocomplete="cc-number">
                </form>`,
     formValue: {
-      "cc-number": "4444000022220000",
+      "cc-number": "4111111111111111",
     },
     expectedRecord: {
       address: [],
       creditCard: [{
-        "cc-number": "4444000022220000",
+        "cc-number": "4111111111111111",
       }],
     },
   },
@@ -332,10 +331,10 @@ const TESTCASES = [
       "organization-billing": "Bar",
       "country-billing": "US",
 
-      "cc-number-section-one": "4444000022220000",
+      "cc-number-section-one": "4111111111111111",
       "cc-name-section-one": "John",
 
-      "cc-number-section-two": "4444000022221111",
+      "cc-number-section-two": "5105105105105100",
       "cc-name-section-two": "Foo Bar",
       "cc-exp-section-two": "2026-26",
     },
@@ -355,10 +354,10 @@ const TESTCASES = [
         "country": "US",
       }],
       creditCard: [{
-        "cc-number": "4444000022220000",
+        "cc-number": "4111111111111111",
         "cc-name": "John",
       }, {
-        "cc-number": "4444000022221111",
+        "cc-number": "5105105105105100",
         "cc-name": "Foo Bar",
         "cc-exp": "2026-26",
       }],

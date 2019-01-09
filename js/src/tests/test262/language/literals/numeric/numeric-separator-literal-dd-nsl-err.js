@@ -18,12 +18,12 @@ info: |
     DecimalDigits NumericLiteralSeparator DecimalDigit
 
 negative:
-  phase: early
+  phase: parse
   type: SyntaxError
 
 features: [numeric-separator-literal]
 ---*/
 
-throw "Test262: This statement should not be evaluated.";
+$DONOTEVALUATE();
 
 1_

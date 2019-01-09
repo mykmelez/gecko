@@ -3,12 +3,6 @@
 // This test checks whether applied WebExtension themes that attempt to change
 // the toolbar and toolbar_field properties also theme the findbar.
 
-add_task(async function setup() {
-  await SpecialPowers.pushPrefEnv({
-    set: [["extensions.webextensions.themes.enabled", true]],
-  });
-});
-
 add_task(async function test_support_toolbar_properties_on_findbar() {
   const TOOLBAR_COLOR = "#ff00ff";
   const TOOLBAR_TEXT_COLOR = "#9400ff";
@@ -16,13 +10,13 @@ add_task(async function test_support_toolbar_properties_on_findbar() {
     manifest: {
       "theme": {
         "images": {
-          "headerURL": "image1.png",
+          "theme_frame": "image1.png",
         },
         "colors": {
-          "accentcolor": ACCENT_COLOR,
-          "textcolor": TEXT_COLOR,
+          "frame": ACCENT_COLOR,
+          "tab_background_text": TEXT_COLOR,
           "toolbar": TOOLBAR_COLOR,
-          "toolbar_text": TOOLBAR_TEXT_COLOR,
+          "bookmark_text": TOOLBAR_TEXT_COLOR,
         },
       },
     },
@@ -34,11 +28,11 @@ add_task(async function test_support_toolbar_properties_on_findbar() {
   await extension.startup();
   await gBrowser.getFindBar();
 
-  let findbar_button = document.getAnonymousElementByAttribute(gFindBar, "anonid", "highlight");
+  let findbar_button = gFindBar.getElement("highlight");
 
   info("Checking findbar background is set as toolbar color");
   Assert.equal(window.getComputedStyle(gFindBar).backgroundColor,
-               hexToCSS(TOOLBAR_COLOR),
+               hexToCSS(ACCENT_COLOR),
                "Findbar background color should be the same as toolbar background color.");
 
   info("Checking findbar and button text color is set as toolbar text color");
@@ -60,11 +54,11 @@ add_task(async function test_support_toolbar_field_properties_on_findbar() {
     manifest: {
       "theme": {
         "images": {
-          "headerURL": "image1.png",
+          "theme_frame": "image1.png",
         },
         "colors": {
-          "accentcolor": ACCENT_COLOR,
-          "textcolor": TEXT_COLOR,
+          "frame": ACCENT_COLOR,
+          "tab_background_text": TEXT_COLOR,
           "toolbar_field": TOOLBAR_FIELD_COLOR,
           "toolbar_field_text": TOOLBAR_FIELD_TEXT_COLOR,
           "toolbar_field_border": TOOLBAR_FIELD_BORDER_COLOR,
@@ -79,14 +73,11 @@ add_task(async function test_support_toolbar_field_properties_on_findbar() {
   await extension.startup();
   await gBrowser.getFindBar();
 
-  let findbar_textbox =
-    document.getAnonymousElementByAttribute(gFindBar, "anonid", "findbar-textbox");
+  let findbar_textbox = gFindBar.getElement("findbar-textbox");
 
-  let findbar_prev_button =
-    document.getAnonymousElementByAttribute(gFindBar, "anonid", "find-previous");
+  let findbar_prev_button = gFindBar.getElement("find-previous");
 
-  let findbar_next_button =
-    document.getAnonymousElementByAttribute(gFindBar, "anonid", "find-next");
+  let findbar_next_button = gFindBar.getElement("find-next");
 
   info("Checking findbar textbox background is set as toolbar field background color");
   Assert.equal(window.getComputedStyle(findbar_textbox).backgroundColor,

@@ -22,12 +22,17 @@ const {
   button,
   div,
   input,
+  label,
   textarea,
 } = dom;
 
 const CUSTOM_CANCEL = L10N.getStr("netmonitor.custom.cancel");
 const CUSTOM_HEADERS = L10N.getStr("netmonitor.custom.headers");
 const CUSTOM_NEW_REQUEST = L10N.getStr("netmonitor.custom.newRequest");
+const CUSTOM_NEW_REQUEST_METHOD_LABEL =
+    L10N.getStr("netmonitor.custom.newRequestMethodLabel");
+const CUSTOM_NEW_REQUEST_URL_LABEL =
+    L10N.getStr("netmonitor.custom.newRequestUrlLabel");
 const CUSTOM_POSTDATA = L10N.getStr("netmonitor.custom.postData");
 const CUSTOM_QUERY = L10N.getStr("netmonitor.custom.query");
 const CUSTOM_SEND = L10N.getStr("netmonitor.custom.send");
@@ -35,7 +40,7 @@ const CUSTOM_SEND = L10N.getStr("netmonitor.custom.send");
 /*
  * Custom request panel component
  * A network request editor which simply provide edit and resend interface
- * for netowrk development.
+ * for network development.
  */
 class CustomRequestPanel extends Component {
   static get propTypes() {
@@ -50,6 +55,7 @@ class CustomRequestPanel extends Component {
 
   componentDidMount() {
     const { request, connector } = this.props;
+    this.initialRequestMethod = request.method;
     fetchNetworkUpdatePacket(connector.requestData, request, [
       "requestHeaders",
       "responseHeaders",
@@ -74,7 +80,7 @@ class CustomRequestPanel extends Component {
    * @return {array} array of headers info {name, value}
    */
   parseRequestText(text, namereg, divider) {
-    const regex = new RegExp(`(${namereg})\\${divider}\\s*(.+)`);
+    const regex = new RegExp(`(${namereg})\\${divider}\\s*(\\S.*)`);
     const pairs = [];
 
     for (const line of text.split("\n")) {
@@ -100,29 +106,26 @@ class CustomRequestPanel extends Component {
 
     switch (evt.target.id) {
       case "custom-headers-value":
-        let customHeadersValue = val || "";
-        // Parse text representation of multiple HTTP headers
-        const headersArray = this.parseRequestText(customHeadersValue, "\\S+?", ":");
-        // Remove temp customHeadersValue while query string is parsable
-        if (customHeadersValue === "" ||
-          headersArray.length === customHeadersValue.split("\n").length) {
-          customHeadersValue = null;
-        }
         data = {
           requestHeaders: {
-            customHeadersValue,
-            headers: headersArray,
+            customHeadersValue: val || "",
+            // Parse text representation of multiple HTTP headers
+            headers: this.parseRequestText(val, "\\S+?", ":"),
           },
         };
         break;
       case "custom-method-value":
-        data = { method: val.trim() };
+        // If val is empty when leaving the "method" field, set the method to
+        // its original value
+        data = (evt.type === "blur" && val === "") ?
+          { method: this.initialRequestMethod } :
+          { method: val.trim() };
         break;
       case "custom-postdata-value":
         data = {
           requestPostData: {
             postData: { text: val },
-          }
+          },
         };
         break;
       case "custom-query-value":
@@ -148,7 +151,7 @@ class CustomRequestPanel extends Component {
       case "custom-url-value":
         data = {
           customQueryValue: null,
-          url: val
+          url: val,
         };
         break;
       default:
@@ -214,13 +217,27 @@ class CustomRequestPanel extends Component {
           className: "tabpanel-summary-container custom-method-and-url",
           id: "custom-method-and-url",
         },
+          label({
+            className: "custom-method-value-label custom-request-label",
+            htmlFor: "custom-method-value",
+          },
+            CUSTOM_NEW_REQUEST_METHOD_LABEL,
+          ),
           input({
             className: "custom-method-value",
             id: "custom-method-value",
             onChange: (evt) =>
               this.updateCustomRequestFields(evt, request, updateRequest),
-            value: method || "GET",
+            onBlur: (evt) =>
+              this.updateCustomRequestFields(evt, request, updateRequest),
+            value: method,
           }),
+          label({
+            className: "custom-url-value-label custom-request-label",
+            htmlFor: "custom-url-value",
+          },
+            CUSTOM_NEW_REQUEST_URL_LABEL,
+          ),
           input({
             className: "custom-url-value",
             id: "custom-url-value",
@@ -234,7 +251,10 @@ class CustomRequestPanel extends Component {
           className: "tabpanel-summary-container custom-section",
           id: "custom-query",
         },
-          div({ className: "custom-request-label" }, CUSTOM_QUERY),
+          label({
+            className: "custom-request-label",
+            htmlFor: "custom-query-value",
+          }, CUSTOM_QUERY),
           textarea({
             className: "tabpanel-summary-input",
             id: "custom-query-value",
@@ -249,7 +269,10 @@ class CustomRequestPanel extends Component {
           id: "custom-headers",
           className: "tabpanel-summary-container custom-section",
         },
-          div({ className: "custom-request-label" }, CUSTOM_HEADERS),
+          label({
+            className: "custom-request-label",
+            htmlFor: "custom-headers-value",
+          }, CUSTOM_HEADERS),
           textarea({
             className: "tabpanel-summary-input",
             id: "custom-headers-value",
@@ -264,7 +287,10 @@ class CustomRequestPanel extends Component {
           id: "custom-postdata",
           className: "tabpanel-summary-container custom-section",
         },
-          div({ className: "custom-request-label" }, CUSTOM_POSTDATA),
+          label({
+            className: "custom-request-label",
+            htmlFor: "custom-postdata-value",
+          }, CUSTOM_POSTDATA),
           textarea({
             className: "tabpanel-summary-input",
             id: "custom-postdata-value",

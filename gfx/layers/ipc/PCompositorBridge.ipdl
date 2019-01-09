@@ -23,10 +23,9 @@ include "mozilla/layers/WebRenderMessageUtils.h";
 using struct mozilla::null_t from "ipc/IPCMessageUtils.h";
 using struct mozilla::layers::LayersId from "mozilla/layers/LayersTypes.h";
 using struct mozilla::layers::TextureFactoryIdentifier from "mozilla/layers/CompositorTypes.h";
-using struct mozilla::layers::FrameMetrics from "FrameMetrics.h";
-using mozilla::layers::FrameMetrics::ViewID from "FrameMetrics.h";
-using mozilla::layers::MaybeZoomConstraints from "FrameMetrics.h";
-using struct mozilla::layers::ScrollableLayerGuid from "FrameMetrics.h";
+using struct mozilla::layers::ScrollableLayerGuid from "mozilla/layers/ScrollableLayerGuid.h";
+using mozilla::layers::ScrollableLayerGuid::ViewID from "mozilla/layers/ScrollableLayerGuid.h";
+using mozilla::layers::MaybeZoomConstraints from "mozilla/layers/ZoomConstraints.h";
 using mozilla::layers::LayersBackend from "mozilla/layers/LayersTypes.h";
 using mozilla::CrossProcessMutexHandle from "mozilla/ipc/CrossProcessMutex.h";
 using mozilla::ipc::SharedMemoryBasic::Handle from "mozilla/ipc/SharedMemoryBasic.h";
@@ -43,10 +42,27 @@ using mozilla::wr::IdNamespace from "mozilla/webrender/WebRenderTypes.h";
 using base::ProcessId from "base/process.h";
 using mozilla::wr::MaybeExternalImageId from "mozilla/webrender/WebRenderTypes.h";
 using mozilla::wr::WebRenderError from "mozilla/webrender/WebRenderTypes.h";
+using mozilla::layers::LayersObserverEpoch from "mozilla/layers/LayersTypes.h";
 using mozilla::layers::TransactionId from "mozilla/layers/LayersTypes.h";
 
 namespace mozilla {
 namespace layers {
+
+struct FrameStats {
+  TransactionId id;
+  TimeStamp compositeStart;
+  TimeStamp renderStart;
+  TimeStamp compositeEnd;
+  int32_t contentFrameTime;
+  double resourceUploadTime;
+  double gpuCacheUploadTime;
+  TimeStamp transactionStart;
+  TimeStamp refreshStart;
+  TimeStamp fwdTime;
+  TimeStamp sceneBuiltTime;
+  uint32_t skippedComposites;
+  nsCString url;
+};
 
 
 /**
@@ -100,6 +116,8 @@ child:
   async DidComposite(LayersId id, TransactionId transactionId,
                      TimeStamp compositeStart, TimeStamp compositeEnd);
 
+  async NotifyFrameStats(FrameStats[] aFrameStats);
+
   /**
    * Parent informs the child that the graphics objects are ready for
    * compositing.  This usually means that the graphics objects (textures
@@ -133,7 +151,7 @@ child:
 
   async ParentAsyncMessages(AsyncParentMessageData[] aMessages);
 
-  async ObserveLayerUpdate(LayersId aLayersId, uint64_t aEpoch, bool aActive);
+  async ObserveLayersUpdate(LayersId aLayersId, LayersObserverEpoch aEpoch, bool aActive);
 
 parent:
   async __delete__();
@@ -163,7 +181,6 @@ parent:
   // the compositor needs to pause/resume in lockstep with the application.
   sync Pause();
   sync Resume();
-  async ForceIsFirstPaint();
 
   // See bug 1316632 comment #33 for why this has to be sync. Otherwise,
   // there are ordering issues with SendPLayerTransactionConstructor.
@@ -242,8 +259,7 @@ parent:
   sync SyncWithCompositor();
 
   // The pipelineId is the same as the layersId
-  sync PWebRenderBridge(PipelineId pipelineId, LayoutDeviceIntSize aSize)
-    returns (TextureFactoryIdentifier textureFactoryIdentifier, IdNamespace idNamespace);
+  async PWebRenderBridge(PipelineId pipelineId, LayoutDeviceIntSize aSize);
 
   sync CheckContentOnlyTDR(uint32_t sequenceNum)
     returns (bool isContentOnlyTDR);

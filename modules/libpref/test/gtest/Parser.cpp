@@ -13,25 +13,24 @@ using namespace mozilla;
 // Keep this in sync with the declaration in Preferences.cpp.
 //
 // It's declared here to avoid polluting Preferences.h with test-only stuff.
-void
-TestParseError(PrefValueKind aKind, const char* aText, nsCString& aErrorMsg);
+void TestParseError(PrefValueKind aKind, const char* aText,
+                    nsCString& aErrorMsg);
 
-TEST(PrefsParser, Errors)
-{
+TEST(PrefsParser, Errors) {
   nsAutoCStringN<128> actualErrorMsg;
 
 // Use a macro rather than a function so that the line number reported by
 // gtest on failure is useful.
-#define P(kind_, text_, expectedErrorMsg_)                                     \
-  do {                                                                         \
-    TestParseError(kind_, text_, actualErrorMsg);                              \
-    ASSERT_STREQ(expectedErrorMsg_, actualErrorMsg.get());                     \
+#define P(kind_, text_, expectedErrorMsg_)                 \
+  do {                                                     \
+    TestParseError(kind_, text_, actualErrorMsg);          \
+    ASSERT_STREQ(expectedErrorMsg_, actualErrorMsg.get()); \
   } while (0)
 
-#define DEFAULT(text_, expectedErrorMsg_)                                      \
+#define DEFAULT(text_, expectedErrorMsg_) \
   P(PrefValueKind::Default, text_, expectedErrorMsg_)
 
-#define USER(text_, expectedErrorMsg_)                                         \
+#define USER(text_, expectedErrorMsg_) \
   P(PrefValueKind::User, text_, expectedErrorMsg_)
 
   // clang-format off
@@ -51,16 +50,19 @@ user_pref("string", "value");
   );
 
   // Totally empty input.
-  DEFAULT("",
-    ""
-  );
+  DEFAULT("", "");
 
   // Whitespace-only input.
-  DEFAULT(R"(   
-		
+  DEFAULT(R"(
+
     )" "\v \t \v \f",
     ""
   );
+
+  // Comment-only inputs.
+  DEFAULT(R"(// blah)", "");
+  DEFAULT(R"(# blah)", "");
+  DEFAULT(R"(/* blah */)", "");
 
   //-------------------------------------------------------------------------
   // All the lexing errors. (To be pedantic, some of the integer literal
@@ -196,14 +198,24 @@ pref("int.ok", 0);
     "test:2: prefs parse error: expected low surrogate after high surrogate\n"
   );
 
-  // High surrogate followed by invalid low surrogate value.
+  // High surrogate followed by invalid low surrogate.
   // (The string literal is broken in two so that MSVC doesn't complain about
   // an invalid universal-character-name.)
   DEFAULT(R"(
 pref("string.bad-u-surrogate", "foo\)" R"(ud83c\u1234");
 pref("int.ok", 0);
     )",
-    "test:2: prefs parse error: invalid low surrogate value after high surrogate\n"
+    "test:2: prefs parse error: invalid low surrogate after high surrogate\n"
+  );
+
+  // Low surrogate not preceded by high surrogate.
+  // (The string literal is broken in two so that MSVC doesn't complain about
+  // an invalid universal-character-name.)
+  DEFAULT(R"(
+pref("string.bad-u-surrogate", "foo\)" R"(udc00");
+pref("int.ok", 0);
+    )",
+    "test:2: prefs parse error: expected high surrogate before low surrogate\n"
   );
 
   // Unlike in JavaScript, \b, \f, \t, \v aren't allowed.
@@ -293,11 +305,14 @@ pref("string.bad-keyword", TRUE);
     "test:3: prefs parse error: unterminated /* comment\n"
   );
 
-  // Malformed comment.
+  // Malformed comments (single slashes), followed by whitespace, newline, EOF.
   DEFAULT(R"(
-/ comment
-    )",
+/ comment;
+/
+; /)",
     "test:2: prefs parse error: expected '/' or '*' after '/'\n"
+    "test:3: prefs parse error: expected '/' or '*' after '/'\n"
+    "test:4: prefs parse error: expected '/' or '*' after '/'\n"
   );
 
   // C++-style comment ending in EOF (1).

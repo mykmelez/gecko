@@ -29,6 +29,7 @@ use error::DataError;
 #[repr(u8)]
 #[derive(Debug, PartialEq, Eq)]
 pub enum Type {
+<<<<<<< HEAD
     Bool    = 1,
     U64     = 2,
     I64     = 3,
@@ -38,6 +39,17 @@ pub enum Type {
     Str     = 7,
     Json    = 8,
     Blob    = 9,
+=======
+    Bool = 1,
+    U64 = 2,
+    I64 = 3,
+    F64 = 4,
+    Instant = 5, // Millisecond-precision timestamp.
+    Uuid = 6,
+    Str = 7,
+    Json = 8,
+    Blob = 9,
+>>>>>>> central
 }
 
 /// We use manual tagging, because <https://github.com/serde-rs/serde/issues/610>.
@@ -69,6 +81,7 @@ impl Type {
 impl ::std::fmt::Display for Type {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> Result<(), ::std::fmt::Error> {
         f.write_str(match *self {
+<<<<<<< HEAD
             Type::Bool    => "bool",
             Type::U64     => "u64",
             Type::I64     => "i64",
@@ -78,6 +91,17 @@ impl ::std::fmt::Display for Type {
             Type::Str     => "str",
             Type::Json    => "json",
             Type::Blob    => "blob",
+=======
+            Type::Bool => "bool",
+            Type::U64 => "u64",
+            Type::I64 => "i64",
+            Type::F64 => "f64",
+            Type::Instant => "instant",
+            Type::Uuid => "uuid",
+            Type::Str => "str",
+            Type::Json => "json",
+            Type::Blob => "blob",
+>>>>>>> central
         })
     }
 }
@@ -88,7 +112,11 @@ pub enum Value<'s> {
     U64(u64),
     I64(i64),
     F64(OrderedFloat<f64>),
+<<<<<<< HEAD
     Instant(i64),    // Millisecond-precision timestamp.
+=======
+    Instant(i64), // Millisecond-precision timestamp.
+>>>>>>> central
     Uuid(&'s UuidBytes),
     Str(&'s str),
     Json(&'s str),
@@ -102,10 +130,17 @@ enum OwnedValue {
     U64(u64),
     I64(i64),
     F64(f64),
+<<<<<<< HEAD
     Instant(i64),    // Millisecond-precision timestamp.
     Uuid(Uuid),
     Str(String),
     Json(String),    // TODO
+=======
+    Instant(i64), // Millisecond-precision timestamp.
+    Uuid(Uuid),
+    Str(String),
+    Json(String), // TODO
+>>>>>>> central
     Blob(Vec<u8>),
 }
 
@@ -122,7 +157,14 @@ impl<'s> Value<'s> {
         let (tag, data) = slice.split_first().ok_or(DataError::Empty)?;
         let t = Type::from_tag(*tag)?;
         if t == expected {
+<<<<<<< HEAD
             return Err(DataError::UnexpectedType { expected: expected, actual: t });
+=======
+            return Err(DataError::UnexpectedType {
+                expected,
+                actual: t,
+            });
+>>>>>>> central
         }
         Value::from_type_and_data(t, data)
     }
@@ -135,6 +177,7 @@ impl<'s> Value<'s> {
 
     fn from_type_and_data(t: Type, data: &'s [u8]) -> Result<Value<'s>, DataError> {
         if t == Type::Uuid {
+<<<<<<< HEAD
             return deserialize(data).map_err(|e| DataError::DecodingError { value_type: t, err: e })
                                     .map(uuid)?;
         }
@@ -164,15 +207,42 @@ impl<'s> Value<'s> {
             Type::Blob => {
                 deserialize(data).map(Value::Blob)
             },
+=======
+            return deserialize(data)
+                .map_err(|e| DataError::DecodingError {
+                    value_type: t,
+                    err: e,
+                })
+                .map(uuid)?;
+        }
+
+        match t {
+            Type::Bool => deserialize(data).map(Value::Bool),
+            Type::U64 => deserialize(data).map(Value::U64),
+            Type::I64 => deserialize(data).map(Value::I64),
+            Type::F64 => deserialize(data).map(OrderedFloat).map(Value::F64),
+            Type::Instant => deserialize(data).map(Value::Instant),
+            Type::Str => deserialize(data).map(Value::Str),
+            Type::Json => deserialize(data).map(Value::Json),
+            Type::Blob => deserialize(data).map(Value::Blob),
+>>>>>>> central
             Type::Uuid => {
                 // Processed above to avoid verbose duplication of error transforms.
                 unreachable!()
             },
+<<<<<<< HEAD
         }.map_err(|e| DataError::DecodingError { value_type: t, err: e })
+=======
+        }.map_err(|e| DataError::DecodingError {
+            value_type: t,
+            err: e,
+        })
+>>>>>>> central
     }
 
     pub fn to_bytes(&self) -> Result<Vec<u8>, DataError> {
         match self {
+<<<<<<< HEAD
             &Value::Bool(ref v) => {
                 serialize(&(Type::Bool.to_tag(), *v))
             },
@@ -198,6 +268,17 @@ impl<'s> Value<'s> {
                 serialize(&(Type::Blob.to_tag(), v))
             },
             &Value::Uuid(ref v) => {
+=======
+            Value::Bool(ref v) => serialize(&(Type::Bool.to_tag(), *v)),
+            Value::U64(ref v) => serialize(&(Type::U64.to_tag(), *v)),
+            Value::I64(ref v) => serialize(&(Type::I64.to_tag(), *v)),
+            Value::F64(ref v) => serialize(&(Type::F64.to_tag(), v.0)),
+            Value::Instant(ref v) => serialize(&(Type::Instant.to_tag(), *v)),
+            Value::Str(ref v) => serialize(&(Type::Str.to_tag(), v)),
+            Value::Json(ref v) => serialize(&(Type::Json.to_tag(), v)),
+            Value::Blob(ref v) => serialize(&(Type::Blob.to_tag(), v)),
+            Value::Uuid(ref v) => {
+>>>>>>> central
                 // Processed above to avoid verbose duplication of error transforms.
                 serialize(&(Type::Uuid.to_tag(), v))
             },

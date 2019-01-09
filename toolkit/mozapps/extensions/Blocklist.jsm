@@ -95,13 +95,6 @@ ChromeUtils.defineModuleGetter(this, "ServiceRequest",
 const BlocklistClients = {};
 ChromeUtils.defineModuleGetter(BlocklistClients, "initialize",
                                "resource://services-common/blocklist-clients.js");
-XPCOMUtils.defineLazyGetter(this, "RemoteSettings", function() {
-  // Instantiate blocklist clients.
-  BlocklistClients.initialize();
-  // Import RemoteSettings for ``pollChanges()``
-  const { RemoteSettings } = ChromeUtils.import("resource://services-settings/remote-settings.js", {});
-  return RemoteSettings;
-});
 
 const TOOLKIT_ID                      = "toolkit@mozilla.org";
 const KEY_PROFILEDIR                  = "ProfD";
@@ -116,7 +109,6 @@ const PREF_BLOCKLIST_LEVEL            = "extensions.blocklist.level";
 const PREF_BLOCKLIST_PINGCOUNTTOTAL   = "extensions.blocklist.pingCountTotal";
 const PREF_BLOCKLIST_PINGCOUNTVERSION = "extensions.blocklist.pingCountVersion";
 const PREF_BLOCKLIST_SUPPRESSUI       = "extensions.blocklist.suppressUI";
-const PREF_BLOCKLIST_UPDATE_ENABLED   = "services.blocklist.update_enabled";
 const PREF_APP_DISTRIBUTION           = "distribution.id";
 const PREF_APP_DISTRIBUTION_VERSION   = "distribution.version";
 const PREF_EM_LOGGING_ENABLED         = "extensions.logging.enabled";
@@ -281,7 +273,7 @@ function matchesOSABI(blocklistElement) {
  * @returns {string} The current requested locale.
  */
 function getLocale() {
-  return Services.locale.getRequestedLocale();
+  return Services.locale.requestedLocale;
 }
 
 /* Get the distribution pref values, from defaults only */
@@ -305,6 +297,13 @@ var Blocklist = {
                                MAX_BLOCK_LEVEL);
     Services.prefs.addObserver("extensions.blocklist.", this);
     Services.prefs.addObserver(PREF_EM_LOGGING_ENABLED, this);
+
+    // Instantiate Remote Settings clients for blocklists.
+    // Their initialization right here serves two purposes:
+    // - Make sure they are instantiated (it's cheap) in order to be included in the synchronization process;
+    // - Pave the way for Bug 1257565 which will leverage remote settings instead of the XML file
+    //   to manage the blocklists state.
+    BlocklistClients.initialize();
 
     // If the stub blocklist service deferred any queries because we
     // weren't loaded yet, execute them now.
@@ -685,14 +684,6 @@ var Blocklist = {
     request.addEventListener("error", event => this.onXMLError(event));
     request.addEventListener("load", event => this.onXMLLoad(event));
     request.send(null);
-
-    // If blocklist update via Kinto is enabled, poll for changes and sync.
-    // Currently certificates blocklist relies on it by default.
-    if (Services.prefs.getBoolPref(PREF_BLOCKLIST_UPDATE_ENABLED)) {
-      RemoteSettings.pollChanges().catch(() => {
-        // Bug 1254099 - Telemetry (success or errors) will be collected during this process.
-      });
-    }
   },
 
   async onXMLLoad(aEvent) {
@@ -1336,7 +1327,7 @@ var Blocklist = {
           addonList.push({
             name: plugin.name,
             version: plugin.version,
-            icon: "chrome://mozapps/skin/plugins/pluginGeneric.svg",
+            icon: "chrome://global/skin/plugins/pluginGeneric.svg",
             disable: false,
             blocked: state == Ci.nsIBlocklistService.STATE_BLOCKED,
             item: plugin,
@@ -1365,7 +1356,7 @@ var Blocklist = {
 
     var args = {
       restart: false,
-      list: addonList
+      list: addonList,
     };
     // This lets the dialog get the raw js object
     args.wrappedJSObject = args;
@@ -1576,7 +1567,7 @@ BlocklistItemData.prototype = {
     let maxVersion = versionRangeElement.getAttribute("maxVersion");
 
     return { minVersion, maxVersion };
-  }
+  },
 };
 
 Blocklist._init();

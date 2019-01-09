@@ -135,7 +135,7 @@ async function openTabAndSetupStorage(url, options = {}) {
  */
 var openStoragePanel = async function(cb) {
   info("Opening the storage inspector");
-  const target = TargetFactory.forTab(gBrowser.selectedTab);
+  const target = await TargetFactory.forTab(gBrowser.selectedTab);
 
   let storage, toolbox;
 
@@ -156,7 +156,7 @@ var openStoragePanel = async function(cb) {
 
       return {
         toolbox: toolbox,
-        storage: storage
+        storage: storage,
       };
     }
   }
@@ -183,7 +183,7 @@ var openStoragePanel = async function(cb) {
 
   return {
     toolbox: toolbox,
-    storage: storage
+    storage: storage,
   };
 };
 
@@ -411,7 +411,7 @@ function findVariableViewProperties(ruleArray, parsed) {
 
       const expandOptions = {
         rootVariable: gUI.view.getScopeAtIndex(parsed ? 1 : 0),
-        expandTo: rule.name
+        expandTo: rule.name,
       };
 
       variablesViewExpandTo(expandOptions).then(function onSuccess(prop) {
@@ -562,7 +562,7 @@ function once(target, eventName, useCapture = false) {
     for (const [add, remove] of [
       ["addEventListener", "removeEventListener"],
       ["addListener", "removeListener"],
-      ["on", "off"]
+      ["on", "off"],
     ]) {
       if ((add in target) && (remove in target)) {
         target[add](eventName, function onEvent(...aArgs) {
@@ -1002,4 +1002,22 @@ async function performAdd(store) {
   const value = getCellValue(rowId, key);
 
   is(rowId, value, `Row '${rowId}' was successfully added.`);
+}
+
+function checkCellLength(len) {
+  const cells = gPanelWindow.document.querySelectorAll("#name .table-widget-cell");
+  const msg = `Table should initially display ${len} items`;
+
+  is(cells.length, len, msg);
+}
+
+async function scroll() {
+  const $ = id => gPanelWindow.document.querySelector(id);
+  const table = $("#storage-table .table-widget-body");
+  const cell = $("#name .table-widget-cell");
+  const cellHeight = cell.getBoundingClientRect().height;
+
+  const onStoresUpdate = gUI.once("store-objects-updated");
+  table.scrollTop += cellHeight * 50;
+  await onStoresUpdate;
 }

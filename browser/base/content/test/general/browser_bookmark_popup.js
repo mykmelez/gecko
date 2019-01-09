@@ -26,6 +26,14 @@ add_task(async function setup() {
   });
 });
 
+function mouseout() {
+  let mouseOutPromise = BrowserTestUtils.waitForEvent(bookmarkPanel, "mouseout");
+  EventUtils.synthesizeMouse(bookmarkPanel, 0, 0, {type: "mouseout"});
+  EventUtils.synthesizeMouseAtCenter(gURLBar, {type: "mousemove"});
+  info("Waiting for mouseout event");
+  return mouseOutPromise;
+}
+
 async function test_bookmarks_popup({isNewBookmark, popupShowFn, popupEditFn,
                                 shouldAutoClose, popupHideFn, isBookmarkRemoved}) {
   await BrowserTestUtils.withNewTab({gBrowser, url: TEST_URL}, async function(browser) {
@@ -34,7 +42,7 @@ async function test_bookmarks_popup({isNewBookmark, popupShowFn, popupEditFn,
         await PlacesUtils.bookmarks.insert({
           parentGuid: PlacesUtils.bookmarks.unfiledGuid,
           url: TEST_URL,
-          title: "Home Page"
+          title: "Home Page",
         });
       }
 
@@ -79,7 +87,8 @@ async function test_bookmarks_popup({isNewBookmark, popupShowFn, popupEditFn,
       let onItemRemovedPromise = Promise.resolve();
       if (isBookmarkRemoved) {
         onItemRemovedPromise = PlacesTestUtils.waitForNotification("onItemRemoved",
-          (id, parentId, index, type, itemUrl) => TEST_URL == itemUrl.spec);
+          (id, parentId, index, type, uri, guid, parentGuid) =>
+            parentGuid == PlacesUtils.bookmarks.unfiledGuid && TEST_URL == uri.spec);
       }
 
       let hiddenPromise = promisePopupHidden(bookmarkPanel);
@@ -129,11 +138,11 @@ add_task(async function panel_shown_once_for_slow_doubleclick_on_new_bookmark_st
               "browser-places.js for this.");
 
   /*
-  yield test_bookmarks_popup({
+  await test_bookmarks_popup({
     isNewBookmark: true,
     *popupShowFn() {
       EventUtils.synthesizeMouse(bookmarkStar, 10, 10, window);
-      yield new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise(resolve => setTimeout(resolve, 300));
       EventUtils.synthesizeMouse(bookmarkStar, 10, 10, window);
     },
     shouldAutoClose: true,
@@ -170,11 +179,7 @@ add_task(async function panel_shown_for_new_bookmarks_mousemove_mouseout() {
       is(bookmarkPanel.state, "open", "Panel should still be open on mousemove");
     },
     async popupHideFn() {
-      let mouseOutPromise = BrowserTestUtils.waitForEvent(bookmarkPanel, "mouseout");
-      EventUtils.synthesizeMouse(bookmarkPanel, 0, 0, {type: "mouseout"});
-      EventUtils.synthesizeMouseAtCenter(document.documentElement, {type: "mousemove"});
-      info("Waiting for mouseout event");
-      await mouseOutPromise;
+      await mouseout();
       info("Got mouseout event, should autoclose now");
     },
     shouldAutoClose: false,
@@ -269,11 +274,7 @@ add_task(async function panel_shown_for_new_bookmark_compositionstart_mouseout_n
       await compositionStartPromise;
       info("Got compositionstart event");
 
-      let mouseOutPromise = BrowserTestUtils.waitForEvent(bookmarkPanel, "mouseout");
-      EventUtils.synthesizeMouse(bookmarkPanel, 0, 0, {type: "mouseout"});
-      EventUtils.synthesizeMouseAtCenter(document.documentElement, {type: "mousemove"});
-      info("Waiting for mouseout event");
-      await mouseOutPromise;
+      await mouseout();
       info("Got mouseout event, but shouldn't run autoclose");
     },
     shouldAutoClose: false,
@@ -319,7 +320,7 @@ add_task(async function contextmenu_new_bookmark_keypress_no_autoclose() {
                                                            "popuphidden");
       await BrowserTestUtils.synthesizeMouseAtCenter("body", {
         type: "contextmenu",
-        button: 2
+        button: 2,
       }, browser);
       await awaitPopupShown;
       document.getElementById("context-bookmarkpage").click();
@@ -433,11 +434,7 @@ add_task(async function ctrl_d_new_bookmark_mousedown_mouseout_no_autoclose() {
 
       EventUtils.synthesizeMouseAtCenter(bookmarkPanelTitle, {button: 1, type: "mousedown"});
 
-      let mouseOutPromise = BrowserTestUtils.waitForEvent(bookmarkPanel, "mouseout");
-      EventUtils.synthesizeMouse(bookmarkPanel, 0, 0, {type: "mouseout"});
-      EventUtils.synthesizeMouseAtCenter(document.documentElement, {type: "mousemove"});
-      info("Waiting for mouseout event");
-      await mouseOutPromise;
+      await mouseout();
     },
     shouldAutoClose: false,
     popupHideFn() {
@@ -484,7 +481,7 @@ add_task(async function enter_during_autocomplete_should_prevent_autoclose() {
     popupHideFn() {
       EventUtils.synthesizeKey("KEY_Escape", {}, window);
     },
-    isBookmarkRemoved: false,
+    isBookmarkRemoved: true,
   });
 });
 
@@ -515,17 +512,20 @@ add_task(async function escape_during_autocomplete_should_prevent_autoclose() {
       // Select first candidate.
       EventUtils.synthesizeKey("KEY_ArrowDown", {}, window);
 
-      // Type Enter key to choose the item.
+      // Type Escape key to close autocomplete.
       EventUtils.synthesizeKey("KEY_Escape", {}, window);
 
-      Assert.equal(tagsField.value, "Abc",
-        "Autocomplete should've inserted the selected item and shouldn't clear it");
+      // The text reverts to what was typed.
+      // Note, it's important that this is different from the previously
+      // inserted tag, since it will test an untag/tag undo condition.
+      Assert.equal(tagsField.value, "a",
+        "Autocomplete should revert to what was typed");
     },
     shouldAutoClose: false,
     popupHideFn() {
       EventUtils.synthesizeKey("KEY_Escape", {}, window);
     },
-    isBookmarkRemoved: false,
+    isBookmarkRemoved: true,
   });
 });
 

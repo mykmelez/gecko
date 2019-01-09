@@ -87,10 +87,17 @@ ifdef MOZ_CLANG_RT_ASAN_LIB_PATH
   JSSHELL_BINS += $(notdir $(MOZ_CLANG_RT_ASAN_LIB_PATH))
 endif
 
+ifdef FUZZING_INTERFACES
+  JSSHELL_BINS += fuzz-tests$(BIN_SUFFIX)
+endif
+
 MAKE_JSSHELL  = $(call py_action,zip,-C $(DIST)/bin --strip $(abspath $(PKG_JSSHELL)) $(JSSHELL_BINS))
 
-JARLOG_DIR = $(topobjdir)/jarlog/
-JARLOG_FILE_AB_CD = $(JARLOG_DIR)/$(AB_CD).log
+ifneq (,$(PGO_JARLOG_PATH))
+  JARLOG_FILE_AB_CD = $(PGO_JARLOG_PATH)
+else
+  JARLOG_FILE_AB_CD = $(topobjdir)/jarlog/$(AB_CD).log
+endif
 
 TAR_CREATE_FLAGS := --exclude=.mkdir.done $(TAR_CREATE_FLAGS)
 CREATE_FINAL_TAR = $(TAR) -c --owner=0 --group=0 --numeric-owner \
@@ -386,9 +393,7 @@ endif
 UPLOAD_FILES= \
   $(call QUOTED_WILDCARD,$(DIST)/$(PACKAGE)) \
   $(call QUOTED_WILDCARD,$(INSTALLER_PACKAGE)) \
-  $(call QUOTED_WILDCARD,$(DIST)/$(COMPLETE_MAR)) \
   $(call QUOTED_WILDCARD,$(DIST)/$(LANGPACK)) \
-  $(call QUOTED_WILDCARD,$(wildcard $(DIST)/$(PARTIAL_MAR))) \
   $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(MOZHARNESS_PACKAGE)) \
   $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(SYMBOL_ARCHIVE_BASENAME).zip) \
   $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(GENERATED_SOURCE_FILE_PACKAGE)) \
@@ -403,6 +408,8 @@ UPLOAD_FILES= \
   $(call QUOTED_WILDCARD,$(topobjdir)/$(MOZ_BUILD_APP)/installer/windows/instgen/setup.exe) \
   $(call QUOTED_WILDCARD,$(topobjdir)/$(MOZ_BUILD_APP)/installer/windows/instgen/setup-stub.exe) \
   $(call QUOTED_WILDCARD,$(topsrcdir)/toolchains.json) \
+  $(call QUOTED_WILDCARD,$(topobjdir)/profile-run-1.log) \
+  $(call QUOTED_WILDCARD,$(topobjdir)/profile-run-2.log) \
   $(if $(UPLOAD_EXTRA_FILES), $(foreach f, $(UPLOAD_EXTRA_FILES), $(wildcard $(DIST)/$(f))))
 
 ifneq ($(filter-out en-US x-test,$(AB_CD)),)
@@ -423,6 +430,7 @@ endif
 ifdef ENABLE_MOZSEARCH_PLUGIN
   UPLOAD_FILES += $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(MOZSEARCH_ARCHIVE_BASENAME).zip)
   UPLOAD_FILES += $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(MOZSEARCH_RUST_ANALYSIS_BASENAME).zip)
+  UPLOAD_FILES += $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(MOZSEARCH_INCLUDEMAP_BASENAME).map)
 endif
 
 SIGN_CHECKSUM_CMD=
@@ -432,8 +440,6 @@ ifdef MOZ_SIGN_CMD
   SIGN_CHECKSUM_CMD=$(MOZ_SIGN_CMD) -f gpg $(CHECKSUM_FILE)
 
   CHECKSUM_FILES += $(CHECKSUM_FILE).asc
-  UPLOAD_FILES += $(call QUOTED_WILDCARD,$(DIST)/$(COMPLETE_MAR).asc)
-  UPLOAD_FILES += $(call QUOTED_WILDCARD,$(wildcard $(DIST)/$(PARTIAL_MAR).asc))
   UPLOAD_FILES += $(call QUOTED_WILDCARD,$(INSTALLER_PACKAGE).asc)
   UPLOAD_FILES += $(call QUOTED_WILDCARD,$(DIST)/$(PACKAGE).asc)
 endif

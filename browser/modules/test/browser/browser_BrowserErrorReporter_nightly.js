@@ -106,6 +106,15 @@ add_task(async function testSampling() {
     "A missing sourceName doesn't break reporting.",
   );
 
+  await reporter.handleMessage(createScriptError({
+    message: "mozextension",
+    sourceName: "moz-extension://Bar/Foo.jsm",
+  }));
+  ok(
+    !fetchPassedError(fetchSpy, "mozextension"),
+    "moz-extension:// paths are sampled at 0% even if the default rate is 1.0.",
+  );
+
   await SpecialPowers.pushPrefEnv({set: [
     [PREF_SAMPLE_RATE, "0.0"],
   ]});
@@ -320,11 +329,10 @@ add_task(async function testFetchArguments() {
 
 add_task(async function testAddonIDMangle() {
   const fetchSpy = sinon.spy();
-  // Passing false here disables category checks on errors, which would
-  // otherwise block errors directly from extensions.
   const reporter = new BrowserErrorReporter({
     fetch: fetchSpy,
     chromeOnly: false,
+    sampleRates: new Map(),
     now: BrowserErrorReporter.getAppBuildIdDate(),
   });
   await SpecialPowers.pushPrefEnv({set: [
@@ -366,11 +374,10 @@ add_task(async function testAddonIDMangle() {
 
 add_task(async function testExtensionTag() {
   const fetchSpy = sinon.spy();
-  // Passing false here disables category checks on errors, which would
-  // otherwise block errors directly from extensions.
   const reporter = new BrowserErrorReporter({
     fetch: fetchSpy,
     chromeOnly: false,
+    sampleRates: new Map(),
     now: BrowserErrorReporter.getAppBuildIdDate(),
   });
   await SpecialPowers.pushPrefEnv({set: [
@@ -412,6 +419,11 @@ add_task(async function testExtensionTag() {
 });
 
 add_task(async function testScalars() {
+  // Do not bother testing telemetry scalars if they're already expired.
+  if (SCALARS_EXPIRED) {
+    return;
+  }
+
   const fetchStub = sinon.stub();
   const reporter = new BrowserErrorReporter({
     fetch: fetchStub,
@@ -436,8 +448,7 @@ add_task(async function testScalars() {
   fetchStub.rejects(new Error("Could not report"));
   await reporter.handleMessage(createScriptError({message: "Maybe name?"}));
 
-  const optin = Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN;
-  const scalars = Services.telemetry.snapshotScalars(optin, false).parent;
+  const scalars = Services.telemetry.getSnapshotForScalars("main", false).parent;
   is(
     scalars[TELEMETRY_ERROR_COLLECTED],
     3,

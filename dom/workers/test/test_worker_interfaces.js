@@ -33,8 +33,8 @@ var ecmaGlobals =
     {name: "ArrayBuffer", insecureContext: true},
     {name: "Atomics", insecureContext: true, disabled: true},
     {name: "Boolean", insecureContext: true},
-    {name: "ByteLengthQueuingStrategy", insecureContext: true, disabled: true},
-    {name: "CountQueuingStrategy", insecureContext: true, disabled: true},
+    {name: "ByteLengthQueuingStrategy", insecureContext: true},
+    {name: "CountQueuingStrategy", insecureContext: true},
     {name: "DataView", insecureContext: true},
     {name: "Date", insecureContext: true},
     {name: "Error", insecureContext: true},
@@ -50,6 +50,8 @@ var ecmaGlobals =
     {name: "Intl", insecureContext: true},
     {name: "JSON", insecureContext: true},
     {name: "Map", insecureContext: true},
+    {name: "MediaCapabilities", insecureContext: true},
+    {name: "MediaCapabilitiesInfo", insecureContext: true},
     {name: "Math", insecureContext: true},
     {name: "NaN", insecureContext: true},
     {name: "Number", insecureContext: true},
@@ -57,13 +59,12 @@ var ecmaGlobals =
     {name: "Promise", insecureContext: true},
     {name: "Proxy", insecureContext: true},
     {name: "RangeError", insecureContext: true},
-    {name: "ReadableStream", insecureContext: true, disabled: true},
+    {name: "ReadableStream", insecureContext: true},
     {name: "ReferenceError", insecureContext: true},
     {name: "Reflect", insecureContext: true},
     {name: "RegExp", insecureContext: true},
     {name: "Set", insecureContext: true},
     {name: "SharedArrayBuffer", insecureContext: true, disabled: true},
-    {name: "SIMD", insecureContext: true, nightly: true},
     {name: "String", insecureContext: true},
     {name: "Symbol", insecureContext: true},
     {name: "SyntaxError", insecureContext: true},
@@ -193,11 +194,11 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "ProgressEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "PushManager", insecureContext: true},
+    {name: "PushManager", insecureContext: true, fennecOrDesktop: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "PushSubscription", insecureContext: true},
+    {name: "PushSubscription", insecureContext: true, fennecOrDesktop: true },
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "PushSubscriptionOptions", insecureContext: true},
+    {name: "PushSubscriptionOptions", insecureContext: true, fennecOrDesktop: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "Request", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -258,13 +259,7 @@ var interfaceNamesInGlobalScope =
   ];
 // IMPORTANT: Do not change the list above without review from a DOM peer!
 
-function createInterfaceMap(version, userAgent) {
-  var isNightly = version.endsWith("a1");
-  var isRelease = !version.includes("a");
-  var isDesktop = !/Mobile|Tablet/.test(userAgent);
-  var isAndroid = !!navigator.userAgent.includes("Android");
-  var isInsecureContext = !self.isSecureContext;
-
+function createInterfaceMap({ version, isNightly, isRelease, isDesktop, isAndroid, isInsecureContext, isFennec }) {
   var interfaceMap = {};
 
   function addInterfaces(interfaces)
@@ -278,6 +273,7 @@ function createInterfaceMap(version, userAgent) {
             (entry.nightlyAndroid === !(isAndroid && isNightly) && isAndroid) ||
             (entry.desktop === !isDesktop) ||
             (entry.android === !isAndroid && !entry.nightlyAndroid) ||
+            (entry.fennecOrDesktop === (isAndroid && !isFennec)) ||
             (entry.release === !isRelease) ||
 	    // The insecureContext test is very purposefully converting
 	    // entry.insecureContext to boolean, so undefined will convert to
@@ -300,8 +296,8 @@ function createInterfaceMap(version, userAgent) {
   return interfaceMap;
 }
 
-function runTest(version, userAgent) {
-  var interfaceMap = createInterfaceMap(version, userAgent);
+function runTest(data) {
+  var interfaceMap = createInterfaceMap(data);
   for (var name of Object.getOwnPropertyNames(self)) {
     // An interface name should start with an upper case character.
     if (!/^[A-Z]/.test(name)) {
@@ -324,9 +320,7 @@ function runTest(version, userAgent) {
      "The following interface(s) are not enumerated: " + Object.keys(interfaceMap).join(", "));
 }
 
-workerTestGetVersion(function(version) {
-  workerTestGetUserAgent(function(userAgent) {
-    runTest(version, userAgent);
-    workerTestDone();
-  });
+workerTestGetHelperData(function(data) {
+  runTest(data);
+  workerTestDone();
 });

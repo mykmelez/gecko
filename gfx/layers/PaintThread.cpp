@@ -21,7 +21,7 @@
 #include "mozilla/SyncRunnable.h"
 #include "nsIPropertyBag2.h"
 #include "nsServiceManagerUtils.h"
-#include "nsSystemInfo.h"
+#include "prsystem.h"
 
 // Uncomment the following line to dispatch sync runnables when
 // painting so that rasterization happens synchronously from
@@ -33,104 +33,20 @@ namespace layers {
 
 using namespace gfx;
 
-bool
-CapturedBufferState::Copy::CopyBuffer()
-{
-  if (mSource->Lock(OpenMode::OPEN_READ_ONLY)) {
-    mDestination->UpdateDestinationFrom(*mSource, mBounds);
-    mSource->Unlock();
-    return true;
-  }
-  return false;
-}
-
-bool
-CapturedBufferState::Unrotate::UnrotateBuffer()
-{
-  return mBuffer->UnrotateBufferTo(mParameters);
-}
-
-bool
-CapturedBufferState::PrepareBuffer()
-{
-  return (!mBufferFinalize || mBufferFinalize->CopyBuffer()) &&
-         (!mBufferUnrotate || mBufferUnrotate->UnrotateBuffer()) &&
-         (!mBufferInitialize || mBufferInitialize->CopyBuffer());
-}
-
-bool
-CapturedTiledPaintState::Copy::CopyBuffer()
-{
-  RefPtr<gfx::SourceSurface> source = mSource->Snapshot();
-
-  // This operation requires the destination draw target to be untranslated,
-  // but the destination will have a transform from being part of a tiled draw
-  // target. However in this case, CopySurface ignores transforms so we don't
-  // need to do anything.
-  mDestination->CopySurface(source,
-                            mSourceBounds,
-                            mDestinationPoint);
-  return true;
-}
-
-void
-CapturedTiledPaintState::Clear::ClearBuffer()
-{
-  // See the comment in CopyBuffer for why we need to temporarily reset
-  // the transform of the draw target.
-  Matrix oldTransform = mTarget->GetTransform();
-  mTarget->SetTransform(Matrix());
-
-  if (mTargetOnWhite) {
-    mTargetOnWhite->SetTransform(Matrix());
-    for (auto iter = mDirtyRegion.RectIter(); !iter.Done(); iter.Next()) {
-      const gfx::Rect drawRect(iter.Get().X(), iter.Get().Y(),
-                               iter.Get().Width(), iter.Get().Height());
-      mTarget->FillRect(drawRect, ColorPattern(Color(0.0, 0.0, 0.0, 1.0)));
-      mTargetOnWhite->FillRect(drawRect, ColorPattern(Color(1.0, 1.0, 1.0, 1.0)));
-    }
-    mTargetOnWhite->SetTransform(oldTransform);
-  } else {
-    for (auto iter = mDirtyRegion.RectIter(); !iter.Done(); iter.Next()) {
-      const gfx::Rect drawRect(iter.Get().X(), iter.Get().Y(),
-                               iter.Get().Width(), iter.Get().Height());
-      mTarget->ClearRect(drawRect);
-    }
-  }
-
-  mTarget->SetTransform(oldTransform);
-}
+void PaintTask::DropTextureClients() { mClients.Clear(); }
 
 StaticAutoPtr<PaintThread> PaintThread::sSingleton;
 StaticRefPtr<nsIThread> PaintThread::sThread;
 PlatformThreadId PaintThread::sThreadId;
 
-PaintThread::PaintThread()
-{
-}
+PaintThread::PaintThread() {}
 
-void
-PaintThread::Release()
-{
-}
+void PaintThread::Release() {}
 
-void
-PaintThread::AddRef()
-{
-}
+void PaintThread::AddRef() {}
 
-/* static */ int32_t
-PaintThread::CalculatePaintWorkerCount()
-{
-  int32_t cpuCores = 1;
-  nsCOMPtr<nsIPropertyBag2> systemInfo = do_GetService(NS_SYSTEMINFO_CONTRACTID);
-  if (systemInfo) {
-    nsresult rv = systemInfo->GetPropertyAsInt32(NS_LITERAL_STRING("cpucores"), &cpuCores);
-    if (NS_FAILED(rv)) {
-      cpuCores = 1;
-    }
-  }
-
+/* static */ int32_t PaintThread::CalculatePaintWorkerCount() {
+  int32_t cpuCores = PR_GetNumberOfProcessors();
   int32_t workerCount = gfxPrefs::LayersOMTPPaintWorkers();
 
   // If not manually specified, default to (cpuCores * 3) / 4, and clamp
@@ -142,9 +58,7 @@ PaintThread::CalculatePaintWorkerCount()
   return workerCount;
 }
 
-/* static */ void
-PaintThread::Start()
-{
+/* static */ void PaintThread::Start() {
   PaintThread::sSingleton = new PaintThread();
 
   if (!PaintThread::sSingleton->Init()) {
@@ -153,9 +67,7 @@ PaintThread::Start()
   }
 }
 
-bool
-PaintThread::Init()
-{
+bool PaintThread::Init() {
   MOZ_ASSERT(NS_IsMainThread());
 
   RefPtr<nsIThread> thread;
@@ -171,38 +83,32 @@ PaintThread::Init()
     InitPaintWorkers();
   }
 
-  nsCOMPtr<nsIRunnable> paintInitTask =
-    NewRunnableMethod("PaintThread::InitOnPaintThread",
-                      this, &PaintThread::InitOnPaintThread);
+  nsCOMPtr<nsIRunnable> paintInitTask = NewRunnableMethod(
+      "PaintThread::InitOnPaintThread", this, &PaintThread::InitOnPaintThread);
   SyncRunnable::DispatchToThread(sThread, paintInitTask);
   return true;
 }
 
-void
-PaintThread::InitOnPaintThread()
-{
+void PaintThread::InitOnPaintThread() {
   MOZ_ASSERT(!NS_IsMainThread());
   sThreadId = PlatformThread::CurrentId();
 }
 
-void
-PaintThread::InitPaintWorkers()
-{
+void PaintThread::InitPaintWorkers() {
   MOZ_ASSERT(NS_IsMainThread());
   int32_t count = PaintThread::CalculatePaintWorkerCount();
-  mPaintWorkers = SharedThreadPool::Get(NS_LITERAL_CSTRING("PaintWorker"), count);
+  if (count != 1) {
+    mPaintWorkers =
+        SharedThreadPool::Get(NS_LITERAL_CSTRING("PaintWorker"), count);
+  }
 }
 
-void
-DestroyPaintThread(UniquePtr<PaintThread>&& pt)
-{
+void DestroyPaintThread(UniquePtr<PaintThread>&& pt) {
   MOZ_ASSERT(PaintThread::IsOnPaintThread());
   pt->ShutdownOnPaintThread();
 }
 
-/* static */ void
-PaintThread::Shutdown()
-{
+/* static */ void PaintThread::Shutdown() {
   MOZ_ASSERT(NS_IsMainThread());
 
   UniquePtr<PaintThread> pt(sSingleton.forget());
@@ -211,40 +117,35 @@ PaintThread::Shutdown()
   }
 
   sThread->Dispatch(NewRunnableFunction("DestroyPaintThreadRunnable",
-                                        DestroyPaintThread,
-                                        std::move(pt)));
+                                        DestroyPaintThread, std::move(pt)));
   sThread->Shutdown();
   sThread = nullptr;
 }
 
-void
-PaintThread::ShutdownOnPaintThread()
-{
-  MOZ_ASSERT(IsOnPaintThread());
-}
+void PaintThread::ShutdownOnPaintThread() { MOZ_ASSERT(IsOnPaintThread()); }
 
-/* static */ PaintThread*
-PaintThread::Get()
-{
-  MOZ_ASSERT(NS_IsMainThread());
+/* static */ PaintThread* PaintThread::Get() {
   return PaintThread::sSingleton.get();
 }
 
-/* static */ bool
-PaintThread::IsOnPaintThread()
-{
+/* static */ bool PaintThread::IsOnPaintThread() {
   return sThreadId == PlatformThread::CurrentId();
 }
 
-bool
-PaintThread::IsOnPaintWorkerThread()
-{
-  return mPaintWorkers && mPaintWorkers->IsOnCurrentThread();
+bool PaintThread::IsOnPaintWorkerThread() {
+  return (mPaintWorkers && mPaintWorkers->IsOnCurrentThread()) ||
+         (sThreadId == PlatformThread::CurrentId());
 }
 
-void
-PaintThread::UpdateRenderMode()
-{
+void PaintThread::Dispatch(RefPtr<Runnable>& aRunnable) {
+#ifndef OMTP_FORCE_SYNC
+  sThread->Dispatch(aRunnable.forget());
+#else
+  SyncRunnable::DispatchToThread(sThread, aRunnable);
+#endif
+}
+
+void PaintThread::UpdateRenderMode() {
   if (!!mPaintWorkers != gfxPlatform::GetPlatform()->UsesTiling()) {
     if (mPaintWorkers) {
       mPaintWorkers = nullptr;
@@ -254,312 +155,88 @@ PaintThread::UpdateRenderMode()
   }
 }
 
-void
-PaintThread::PrepareBuffer(CapturedBufferState* aState)
-{
+void PaintThread::QueuePaintTask(UniquePtr<PaintTask>&& aTask) {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aState);
+  MOZ_ASSERT(aTask);
 
-  // If painting asynchronously, we need to acquire the compositor bridge which
-  // owns the underlying MessageChannel. Otherwise we leave it null and use
-  // synchronous dispatch.
+  if (gfxPrefs::LayersOMTPDumpCapture() && aTask->mCapture) {
+    aTask->mCapture->Dump();
+  }
+
+  MOZ_RELEASE_ASSERT(aTask->mCapture->hasOneRef());
+
   RefPtr<CompositorBridgeChild> cbc(CompositorBridgeChild::Get());
-  RefPtr<CapturedBufferState> state(aState);
-
-  cbc->NotifyBeginAsyncPaint(state);
+  cbc->NotifyBeginAsyncPaint(aTask.get());
 
   RefPtr<PaintThread> self = this;
-  RefPtr<Runnable> task = NS_NewRunnableFunction("PaintThread::PrepareBuffer",
-    [self, cbc, state]() -> void
-  {
-    self->AsyncPrepareBuffer(cbc,
-                             state);
-  });
+  RefPtr<Runnable> task =
+      NS_NewRunnableFunction("PaintThread::AsyncPaintTask",
+                             [self, cbc, task = std::move(aTask)]() -> void {
+                               self->AsyncPaintTask(cbc, task.get());
+                             });
+
+  nsIEventTarget* paintThread =
+      mPaintWorkers ? static_cast<nsIEventTarget*>(mPaintWorkers.get())
+                    : static_cast<nsIEventTarget*>(sThread.get());
 
 #ifndef OMTP_FORCE_SYNC
-  sThread->Dispatch(task.forget());
+  paintThread->Dispatch(task.forget());
 #else
-  SyncRunnable::DispatchToThread(sThread, task);
+  SyncRunnable::DispatchToThread(paintThread, task);
 #endif
 }
 
-void
-PaintThread::AsyncPrepareBuffer(CompositorBridgeChild* aBridge,
-                                CapturedBufferState* aState)
-{
-  AUTO_PROFILER_LABEL("PaintThread::AsyncPrepareBuffer", GRAPHICS);
+void PaintThread::AsyncPaintTask(CompositorBridgeChild* aBridge,
+                                 PaintTask* aTask) {
+  AUTO_PROFILER_LABEL("PaintThread::AsyncPaintTask", GRAPHICS);
 
-  MOZ_ASSERT(IsOnPaintThread());
-  MOZ_ASSERT(aState);
-
-  if (!aState->PrepareBuffer()) {
-    gfxCriticalNote << "Failed to prepare buffers on the paint thread.";
-  }
-
-  if (aBridge->NotifyFinishedAsyncWorkerPaint(aState)) {
-    // We need to dispatch this task to ourselves so it runs after
-    // AsyncEndLayer
-    DispatchEndLayerTransaction(aBridge);
-  }
-}
-
-void
-PaintThread::PaintContents(CapturedPaintState* aState,
-                           PrepDrawTargetForPaintingCallback aCallback)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aState);
-
-  if (gfxPrefs::LayersOMTPDumpCapture() && aState->mCapture) {
-    aState->mCapture->Dump();
-  }
-
-  RefPtr<CompositorBridgeChild> cbc(CompositorBridgeChild::Get());
-  RefPtr<CapturedPaintState> state(aState);
-
-  cbc->NotifyBeginAsyncPaint(state);
-
-  RefPtr<PaintThread> self = this;
-  RefPtr<Runnable> task = NS_NewRunnableFunction("PaintThread::PaintContents",
-    [self, cbc, state, aCallback]() -> void
-  {
-    self->AsyncPaintContents(cbc,
-                             state,
-                             aCallback);
-  });
-
-#ifndef OMTP_FORCE_SYNC
-  sThread->Dispatch(task.forget());
-#else
-  SyncRunnable::DispatchToThread(sThread, task);
-#endif
-}
-
-void
-PaintThread::AsyncPaintContents(CompositorBridgeChild* aBridge,
-                                CapturedPaintState* aState,
-                                PrepDrawTargetForPaintingCallback aCallback)
-{
-  AUTO_PROFILER_LABEL("PaintThread::AsyncPaintContents", GRAPHICS);
-
-  MOZ_ASSERT(IsOnPaintThread());
-  MOZ_ASSERT(aState);
-
-  DrawTarget* target = aState->mTargetDual;
-  DrawTargetCapture* capture = aState->mCapture;
-
-  Matrix oldTransform = target->GetTransform();
-  bool oldPermitsSubpixelAA = target->GetPermitSubpixelAA();
-
-  target->SetTransform(capture->GetTransform());
-  target->SetPermitSubpixelAA(capture->GetPermitSubpixelAA());
-
-  if (aCallback(aState)) {
-    // Draw all the things into the actual dest target.
-    target->DrawCapturedDT(capture, Matrix());
-
-    if (!mDrawTargetsToFlush.Contains(target)) {
-      mDrawTargetsToFlush.AppendElement(target);
-    }
-
-    if (gfxPrefs::LayersOMTPReleaseCaptureOnMainThread()) {
-      // This should ensure the capture drawtarget, which may hold on to UnscaledFont objects,
-      // gets destroyed on the main thread (See bug 1404742). This assumes (unflushed) target
-      // DrawTargets do not themselves hold on to UnscaledFonts.
-      NS_ReleaseOnMainThreadSystemGroup("CapturePaintState::DrawTargetCapture", aState->mCapture.forget());
-    }
-  }
-
-  target->SetTransform(oldTransform);
-  target->SetPermitSubpixelAA(oldPermitsSubpixelAA);
-
-  if (aBridge->NotifyFinishedAsyncWorkerPaint(aState)) {
-    // We need to dispatch this task to ourselves so it runs after
-    // AsyncEndLayer
-    DispatchEndLayerTransaction(aBridge);
-  }
-}
-
-void
-PaintThread::PaintTiledContents(CapturedTiledPaintState* aState)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aState);
-  MOZ_ASSERT(mPaintWorkers);
-
-  if (gfxPrefs::LayersOMTPDumpCapture() && aState->mCapture) {
-    aState->mCapture->Dump();
-  }
-
-  RefPtr<CompositorBridgeChild> cbc(CompositorBridgeChild::Get());
-  RefPtr<CapturedTiledPaintState> state(aState);
-
-  cbc->NotifyBeginAsyncPaint(state);
-
-  RefPtr<PaintThread> self = this;
-  RefPtr<Runnable> task = NS_NewRunnableFunction("PaintThread::PaintTiledContents",
-    [self, cbc, state]() -> void
-  {
-    self->AsyncPaintTiledContents(cbc, state);
-  });
-
-#ifndef OMTP_FORCE_SYNC
-  mPaintWorkers->Dispatch(task.forget());
-#else
-  SyncRunnable::DispatchToThread(mPaintWorkers, task);
-#endif
-}
-
-void
-PaintThread::AsyncPaintTiledContents(CompositorBridgeChild* aBridge,
-                                     CapturedTiledPaintState* aState)
-{
-  AUTO_PROFILER_LABEL("PaintThread::AsyncPaintTiledContents", GRAPHICS);
-  
   MOZ_ASSERT(IsOnPaintWorkerThread());
-  MOZ_ASSERT(aState);
+  MOZ_ASSERT(aTask);
 
-  for (auto& copy : aState->mCopies) {
-    copy.CopyBuffer();
-  }
+  gfx::DrawTargetCapture* capture = aTask->mCapture;
+  gfx::DrawTarget* target = aTask->mTarget;
 
-  for (auto& clear : aState->mClears) {
-    clear.ClearBuffer();
-  }
-
-  DrawTarget* target = aState->mTarget;
-  DrawTargetCapture* capture = aState->mCapture;
-
-  // Draw all the things into the actual dest target.
   target->DrawCapturedDT(capture, Matrix());
   target->Flush();
 
   if (gfxPrefs::LayersOMTPReleaseCaptureOnMainThread()) {
-    // This should ensure the capture drawtarget, which may hold on to UnscaledFont objects,
-    // gets destroyed on the main thread (See bug 1404742). This assumes (unflushed) target
-    // DrawTargets do not themselves hold on to UnscaledFonts.
-    NS_ReleaseOnMainThreadSystemGroup("CapturePaintState::DrawTargetCapture", aState->mCapture.forget());
+    // This should ensure the capture drawtarget, which may hold on to
+    // UnscaledFont objects, gets destroyed on the main thread (See bug
+    // 1404742). This assumes (unflushed) target DrawTargets do not themselves
+    // hold on to UnscaledFonts.
+    NS_ReleaseOnMainThreadSystemGroup("PaintTask::DrawTargetCapture",
+                                      aTask->mCapture.forget());
   }
 
-  {
-    RefPtr<CompositorBridgeChild> cbc(aBridge);
-    RefPtr<CapturedTiledPaintState> state(aState);
-
-    RefPtr<PaintThread> self = this;
-    RefPtr<Runnable> task = NS_NewRunnableFunction("PaintThread::AsyncPaintTiledContentsFinished",
-      [self, cbc, state]() -> void
-    {
-      self->AsyncPaintTiledContentsFinished(cbc, state);
-    });
-
-  #ifndef OMTP_FORCE_SYNC
-    sThread->Dispatch(task.forget());
-  #else
-    SyncRunnable::DispatchToThread(sThread, task);
-  #endif
+  if (aBridge->NotifyFinishedAsyncWorkerPaint(aTask)) {
+    AsyncEndLayerTransaction(aBridge);
   }
 }
 
-void
-PaintThread::AsyncPaintTiledContentsFinished(CompositorBridgeChild* aBridge,
-                                             CapturedTiledPaintState* aState)
-{
-  MOZ_ASSERT(IsOnPaintThread());
-  if (aBridge->NotifyFinishedAsyncWorkerPaint(aState)) {
-    aBridge->NotifyFinishedAsyncEndLayerTransaction();
-  }
-}
-
-void
-PaintThread::EndLayer()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  RefPtr<PaintThread> self = this;
-  RefPtr<Runnable> task = NS_NewRunnableFunction("PaintThread::AsyncEndLayer",
-  [self]() -> void
-  {
-    self->AsyncEndLayer();
-  });
-
-#ifndef OMTP_FORCE_SYNC
-  sThread->Dispatch(task.forget());
-#else
-  SyncRunnable::DispatchToThread(sThread, task);
-#endif
-}
-
-void
-PaintThread::Dispatch(RefPtr<Runnable>& aRunnable)
-{
-#ifndef OMTP_FORCE_SYNC
-  sThread->Dispatch(aRunnable.forget());
-#else
-  SyncRunnable::DispatchToThread(sThread, aRunnable);
-#endif
-}
-
-void
-PaintThread::AsyncEndLayer()
-{
-  MOZ_ASSERT(IsOnPaintThread());
-
-  // Textureclient forces a flush once we "end paint", so
-  // users of this texture expect all the drawing to be complete.
-  // Force a flush now.
-  for (size_t i = 0; i < mDrawTargetsToFlush.Length(); i++) {
-    mDrawTargetsToFlush[i]->Flush();
-  }
-
-  mDrawTargetsToFlush.Clear();
-}
-
-void
-PaintThread::EndLayerTransaction(SyncObjectClient* aSyncObject)
-{
+void PaintThread::QueueEndLayerTransaction(SyncObjectClient* aSyncObject) {
   MOZ_ASSERT(NS_IsMainThread());
 
   RefPtr<CompositorBridgeChild> cbc(CompositorBridgeChild::Get());
 
   if (cbc->NotifyBeginAsyncEndLayerTransaction(aSyncObject)) {
     RefPtr<PaintThread> self = this;
-    RefPtr<Runnable> task = NS_NewRunnableFunction("PaintThread::AsyncEndLayerTransaction",
-      [self, cbc]() -> void
-    {
-      self->AsyncEndLayerTransaction(cbc);
-    });
+    RefPtr<Runnable> task = NS_NewRunnableFunction(
+        "PaintThread::AsyncEndLayerTransaction",
+        [self, cbc]() -> void { self->AsyncEndLayerTransaction(cbc); });
 
-  #ifndef OMTP_FORCE_SYNC
+#ifndef OMTP_FORCE_SYNC
     sThread->Dispatch(task.forget());
-  #else
+#else
     SyncRunnable::DispatchToThread(sThread, task);
-  #endif
+#endif
   }
 }
 
-void
-PaintThread::AsyncEndLayerTransaction(CompositorBridgeChild* aBridge)
-{
-  MOZ_ASSERT(IsOnPaintThread());
+void PaintThread::AsyncEndLayerTransaction(CompositorBridgeChild* aBridge) {
+  MOZ_ASSERT(IsOnPaintWorkerThread());
 
   aBridge->NotifyFinishedAsyncEndLayerTransaction();
 }
 
-void
-PaintThread::DispatchEndLayerTransaction(CompositorBridgeChild* aBridge)
-{
-  MOZ_ASSERT(IsOnPaintThread());
-
-  RefPtr<CompositorBridgeChild> cbc = aBridge;
-  RefPtr<PaintThread> self = this;
-  RefPtr<Runnable> task = NS_NewRunnableFunction("PaintThread::AsyncEndLayerTransaction",
-    [self, cbc]() -> void
-  {
-    self->AsyncEndLayerTransaction(cbc);
-  });
-
-  sThread->Dispatch(task.forget());
-}
-
-} // namespace layers
-} // namespace mozilla
+}  // namespace layers
+}  // namespace mozilla

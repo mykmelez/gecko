@@ -236,7 +236,7 @@ AbstractTreeItem.prototype = {
    */
   get bounds() {
     const win = this.document.defaultView;
-    const utils = win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+    const utils = win.windowUtils;
     return utils.getBoundsWithoutFlushing(this._containerNode);
   },
 
@@ -486,8 +486,7 @@ AbstractTreeItem.prototype = {
 
   _getHeight: function(elem) {
     const win = this.document.defaultView;
-    const utils = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                   .getInterface(Ci.nsIDOMWindowUtils);
+    const utils = win.windowUtils;
     return utils.getBoundsWithoutFlushing(elem).height;
   },
 
@@ -654,5 +653,5 @@ AbstractTreeItem.prototype = {
    */
   _onBlur: function(e) {
     this._rootItem.emit("blur", this);
-  }
+  },
 };

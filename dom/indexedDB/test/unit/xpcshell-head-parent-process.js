@@ -10,8 +10,6 @@ var { "classes": Cc, "interfaces": Ci, "utils": Cu } = Components;
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-Cu.importGlobalProperties(["Blob"]);
-
 if (!("self" in this)) {
   this.self = this;
 }
@@ -49,7 +47,7 @@ if (!this.runTest) {
       enableExperimental();
     }
 
-    Cu.importGlobalProperties(["indexedDB", "Blob", "File", "FileReader"]);
+    Cu.importGlobalProperties(["indexedDB"]);
 
     do_test_pending();
     testGenerator.next();
@@ -61,9 +59,6 @@ function finishTest()
   if (SpecialPowers.isMainProcess()) {
     resetExperimental();
     resetTesting();
-
-    SpecialPowers.notifyObserversInParentProcess(null, "disk-space-watcher",
-                                                 "free");
   }
 
   SpecialPowers.removeFiles();
@@ -132,7 +127,7 @@ ExpectError.prototype = {
       event.stopPropagation();
     }
     grabEventAndContinueHandler(event);
-  }
+  },
 };
 
 function continueToNextStepSync()
@@ -226,7 +221,7 @@ function setTimeout(fun, timeout) {
   var event = {
     notify(timer) {
       fun();
-    }
+    },
   };
   timer.initWithCallback(event, timeout,
                          Ci.nsITimer.TYPE_ONE_SHOT);
@@ -289,9 +284,7 @@ function installPackagedProfile(packageName)
   zipReader.open(packageFile);
 
   let entryNames = [];
-  let entries = zipReader.findEntries(null);
-  while (entries.hasMore()) {
-    let entry = entries.getNext();
+  for (let entry of zipReader.findEntries(null)) {
     if (entry != "create_db.html") {
       entryNames.push(entry);
     }
@@ -646,7 +639,3 @@ var SpecialPowers = {
     }
   },
 };
-
-// This can be removed soon when on by default.
-if (SpecialPowers.isMainProcess())
-  SpecialPowers.setBoolPref("javascript.options.wasm_baselinejit", true);

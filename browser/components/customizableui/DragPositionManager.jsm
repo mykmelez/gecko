@@ -4,9 +4,6 @@
 
 "use strict";
 
-ChromeUtils.import("resource:///modules/CustomizableUI.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-
 var gManagers = new WeakMap();
 
 const kPaletteId = "customization-palette";
@@ -15,14 +12,13 @@ var EXPORTED_SYMBOLS = ["DragPositionManager"];
 
 function AreaPositionManager(aContainer) {
   // Caching the direction and bounds of the container for quick access later:
-  let window = aContainer.ownerGlobal;
-  this._dir = window.getComputedStyle(aContainer).direction;
+  this._rtl = aContainer.ownerGlobal.RTL_UI;
   let containerRect = aContainer.getBoundingClientRect();
   this._containerInfo = {
     left: containerRect.left,
     right: containerRect.right,
     top: containerRect.top,
-    width: containerRect.width
+    width: containerRect.width,
   };
   this._horizontalDistance = null;
   this.update(aContainer);
@@ -87,14 +83,14 @@ AreaPositionManager.prototype = {
     // Now correct this node based on what we're dragging
     if (closest) {
       let targetBounds = this._lazyStoreGet(closest);
-      let farSide = this._dir == "ltr" ? "right" : "left";
+      let farSide = this._rtl ? "left" : "right";
       let outsideX = targetBounds[farSide];
       // Check if we're closer to the next target than to this one:
       // Only move if we're not targeting a node in a different row:
       if (aY > targetBounds.top && aY < targetBounds.bottom) {
-        if ((this._dir == "ltr" && aX > outsideX) ||
-            (this._dir == "rtl" && aX < outsideX)) {
-          return closest.nextSibling || aContainer;
+        if ((!this._rtl && aX > outsideX) ||
+            (this._rtl && aX < outsideX)) {
+          return closest.nextElementSibling || aContainer;
         }
       }
     }
@@ -131,10 +127,10 @@ AreaPositionManager.prototype = {
         child.style.transform = "";
       }
     }
-    if (aContainer.lastChild && aIsFromThisArea &&
+    if (aContainer.lastElementChild && aIsFromThisArea &&
         !this._lastPlaceholderInsertion) {
       // Flush layout:
-      aContainer.lastChild.getBoundingClientRect();
+      aContainer.lastElementChild.getBoundingClientRect();
       // then remove all the [notransition]
       for (let child of aContainer.children) {
         child.removeAttribute("notransition");
@@ -173,7 +169,7 @@ AreaPositionManager.prototype = {
     let xDiff;
     let yDiff = null;
     let nodeBounds = this._lazyStoreGet(aNode);
-    let side = this._dir == "ltr" ? "left" : "right";
+    let side = this._rtl ? "right" : "left";
     let next = this._getVisibleSiblingForDirection(aNode, "next");
     // First we determine the transform along the x axis.
     // Usually, there will be a next node to base this on:
@@ -191,7 +187,7 @@ AreaPositionManager.prototype = {
       if (aNode == firstNode) {
         // Maybe we stored the horizontal distance between nodes,
         // if not, we'll use the width of the incoming node as a proxy:
-        xDiff = this._horizontalDistance || (this._dir == "ltr" ? 1 : -1) * aSize.width;
+        xDiff = this._horizontalDistance || (this._rtl ? -1 : 1) * aSize.width;
       } else {
         // If not, we should be able to get the distance to the previous node
         // and use the inverse, unless there's no room for another node (ie we
@@ -204,7 +200,7 @@ AreaPositionManager.prototype = {
     if (yDiff === null) {
       // If the next node is behind rather than in front, we must have moved
       // vertically:
-      if ((xDiff > 0 && this._dir == "rtl") || (xDiff < 0 && this._dir == "ltr")) {
+      if ((xDiff > 0 && this._rtl) || (xDiff < 0 && !this._rtl)) {
         yDiff = aSize.height;
       } else {
         // Otherwise, we haven't
@@ -224,14 +220,14 @@ AreaPositionManager.prototype = {
   _moveNextBasedOnPrevious(aNode, aNodeBounds, aFirstNodeInRow) {
     let next = this._getVisibleSiblingForDirection(aNode, "previous");
     let otherBounds = this._lazyStoreGet(next);
-    let side = this._dir == "ltr" ? "left" : "right";
+    let side = this._rtl ? "right" : "left";
     let xDiff = aNodeBounds[side] - otherBounds[side];
     // If, however, this means we move outside the container's box
     // (i.e. the row in which this item is placed is full)
     // we should move it to align with the first item in the next row instead
-    let bound = this._containerInfo[this._dir == "ltr" ? "right" : "left"];
-    if ((this._dir == "ltr" && xDiff + aNodeBounds.right > bound) ||
-        (this._dir == "rtl" && xDiff + aNodeBounds.left < bound)) {
+    let bound = this._containerInfo[this._rtl ? "left" : "right"];
+    if ((!this._rtl && xDiff + aNodeBounds.right > bound) ||
+        (this._rtl && xDiff + aNodeBounds.left < bound)) {
       xDiff = this._lazyStoreGet(aFirstNodeInRow)[side] - aNodeBounds[side];
     }
     return xDiff;
@@ -286,10 +282,10 @@ AreaPositionManager.prototype = {
   _getVisibleSiblingForDirection(aNode, aDirection) {
     let rv = aNode;
     do {
-      rv = rv[aDirection + "Sibling"];
+      rv = rv[aDirection + "ElementSibling"];
     } while (rv && rv.getAttribute("hidden") == "true");
     return rv;
-  }
+  },
 };
 
 var DragPositionManager = {
@@ -311,7 +307,7 @@ var DragPositionManager = {
 
   getManagerForArea(aArea) {
     return gManagers.get(aArea);
-  }
+  },
 };
 
 Object.freeze(DragPositionManager);

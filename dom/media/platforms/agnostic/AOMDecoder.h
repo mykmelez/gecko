@@ -16,11 +16,9 @@ namespace mozilla {
 
 DDLoggedTypeDeclNameAndBase(AOMDecoder, MediaDataDecoder);
 
-class AOMDecoder
-  : public MediaDataDecoder
-  , public DecoderDoctorLifeLogger<AOMDecoder>
-{
-public:
+class AOMDecoder : public MediaDataDecoder,
+                   public DecoderDoctorLifeLogger<AOMDecoder> {
+ public:
   explicit AOMDecoder(const CreateDecoderParams& aParams);
 
   RefPtr<InitPromise> Init() override;
@@ -28,8 +26,7 @@ public:
   RefPtr<DecodePromise> Drain() override;
   RefPtr<FlushPromise> Flush() override;
   RefPtr<ShutdownPromise> Shutdown() override;
-  nsCString GetDescriptionName() const override
-  {
+  nsCString GetDescriptionName() const override {
     return NS_LITERAL_CSTRING("av1 libaom video decoder");
   }
 
@@ -37,16 +34,13 @@ public:
   // by our demuxers to identify AV1 streams.
   static bool IsAV1(const nsACString& aMimeType);
 
-  // Return true if aCodecType is a supported codec description.
-  static bool IsSupportedCodec(const nsAString& aCodecType);
-
   // Return true if a sample is a keyframe.
   static bool IsKeyframe(Span<const uint8_t> aBuffer);
 
   // Return the frame dimensions for a sample.
   static gfx::IntSize GetFrameSize(Span<const uint8_t> aBuffer);
 
-private:
+ private:
   ~AOMDecoder();
   RefPtr<DecodePromise> ProcessDecode(MediaRawData* aSample);
 
@@ -59,6 +53,6 @@ private:
   const VideoInfo& mInfo;
 };
 
-} // namespace mozilla
+}  // namespace mozilla
 
-#endif // AOMDecoder_h_
+#endif  // AOMDecoder_h_

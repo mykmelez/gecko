@@ -9,7 +9,6 @@ Test the currency-amount component
   <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
   <script type="application/javascript" src="/tests/SimpleTest/AddTask.js"></script>
   <script src="payments_common.js"></script>
-  <script src="../../res/vendor/custom-elements.min.js"></script>
 
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
 </head>
@@ -79,6 +78,26 @@ add_task(async function test_valid_currency_amount_cad() {
   is(amount1.currency, "CAD", "Check .currency");
   is(amount1.textContent, "CA$12.34", "Check output format");
 });
+
+add_task(async function test_valid_currency_amount_displayCode() {
+  amount1.value = 12.34;
+  info("showing the currency code");
+  await asyncElementRendered();
+  amount1.currency = "CAD";
+  await asyncElementRendered();
+  amount1.displayCode = true;
+  await asyncElementRendered();
+
+  is(amount1.getAttribute("value"), "12.34", "Check @value");
+  is(amount1.value, "12.34", "Check .value");
+  is(amount1.getAttribute("currency"), "CAD", "Check @currency");
+  is(amount1.currency, "CAD", "Check .currency");
+  is(amount1.textContent, "CA$12.34 CAD", "Check output format");
+
+  amount1.displayCode = false;
+  await asyncElementRendered();
+});
+
 
 add_task(async function test_valid_currency_amount_eur_batched_prop() {
   info("setting two properties in a row synchronously");

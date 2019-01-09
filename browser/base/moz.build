@@ -13,10 +13,6 @@ SPHINX_TREES['tabbrowser'] = 'content/docs/tabbrowser'
 with Files('content/docs/sslerrorreport/**'):
     SCHEDULES.exclusive = ['docs']
 
-MOCHITEST_MANIFESTS += [
-    'content/test/general/mochitest.ini',
-]
-
 MOCHITEST_CHROME_MANIFESTS += [
     'content/test/chrome/chrome.ini',
 ]
@@ -34,6 +30,7 @@ BROWSER_CHROME_MANIFESTS += [
     'content/test/forms/browser.ini',
     'content/test/general/browser.ini',
     'content/test/historySwipeAnimation/browser.ini',
+    'content/test/keyboard/browser.ini',
     'content/test/metaTags/browser.ini',
     'content/test/pageinfo/browser.ini',
     'content/test/performance/browser.ini',
@@ -41,6 +38,7 @@ BROWSER_CHROME_MANIFESTS += [
     'content/test/performance/lowdpi/browser.ini',
     'content/test/permissions/browser.ini',
     'content/test/plugins/browser.ini',
+    'content/test/plugins/xbl/browser.ini',
     'content/test/popupNotifications/browser.ini',
     'content/test/popups/browser.ini',
     'content/test/referrer/browser.ini',
@@ -62,6 +60,7 @@ BROWSER_CHROME_MANIFESTS += [
 
 DEFINES['MOZ_APP_VERSION'] = CONFIG['MOZ_APP_VERSION']
 DEFINES['MOZ_APP_VERSION_DISPLAY'] = CONFIG['MOZ_APP_VERSION_DISPLAY']
+DEFINES['MOZ_BROWSER_XHTML'] = CONFIG['MOZ_BROWSER_XHTML']
 
 DEFINES['APP_LICENSE_BLOCK'] = '%s/content/overrides/app-license.html' % SRCDIR
 

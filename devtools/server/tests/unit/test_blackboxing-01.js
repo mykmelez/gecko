@@ -17,7 +17,7 @@ function run_test() {
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect().then(function() {
     attachTestTabAndResume(gClient, "test-black-box",
-                           function(response, tabClient, threadClient) {
+                           function(response, targetFront, threadClient) {
                              gThreadClient = threadClient;
                              testBlackBox();
                            });
@@ -33,13 +33,15 @@ const testBlackBox = async function() {
   const source = gThreadClient.source(packet.frame.where.source);
 
   await setBreakpoint(source, {
-    line: 2
+    line: 2,
   });
   await resume(gThreadClient);
 
   const { sources } = await getSources(gThreadClient);
   const sourceClient = gThreadClient.source(
-    sources.filter(s => s.url == BLACK_BOXED_URL)[0]);
+    sources.filter(s => s.url == BLACK_BOXED_URL)[0]
+  );
+
   Assert.ok(!sourceClient.isBlackBoxed,
             "By default the source is not black boxed.");
 

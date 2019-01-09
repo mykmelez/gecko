@@ -80,7 +80,7 @@ exports.ReflowActor = protocol.ActorClassWithSpec(reflowSpec, {
     if (this._isStarted) {
       this.emit("reflows", reflows);
     }
-  }
+  },
 });
 
 /**
@@ -176,7 +176,7 @@ Observable.prototype = {
    */
   notifyCallback: function(...args) {
     this.isObserving && this.callback && this.callback.apply(null, args);
-  }
+  },
 };
 
 /**
@@ -353,7 +353,7 @@ LayoutChangesObserver.prototype = {
     this.reflows.push({
       start: start,
       end: end,
-      isInterruptible: isInterruptible
+      isInterruptible: isInterruptible,
     });
   },
 
@@ -368,7 +368,7 @@ LayoutChangesObserver.prototype = {
     }
 
     this.hasResized = true;
-  }
+  },
 };
 
 /**
@@ -390,7 +390,7 @@ function getLayoutChangesObserver(targetActor) {
     observer: obs,
     // counting references allows to stop the observer when no targetActor owns an
     // instance.
-    refCounting: 1
+    refCounting: 1,
   });
   obs.start();
   return obs;
@@ -430,20 +430,14 @@ class ReflowObserver extends Observable {
 
   _startListeners(windows) {
     for (const window of windows) {
-      const docshell = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                     .getInterface(Ci.nsIWebNavigation)
-                     .QueryInterface(Ci.nsIDocShell);
-      docshell.addWeakReflowObserver(this);
+      window.docShell.addWeakReflowObserver(this);
     }
   }
 
   _stopListeners(windows) {
     for (const window of windows) {
       try {
-        const docshell = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                       .getInterface(Ci.nsIWebNavigation)
-                       .QueryInterface(Ci.nsIDocShell);
-        docshell.removeWeakReflowObserver(this);
+        window.docShell.removeWeakReflowObserver(this);
       } catch (e) {
         // Corner cases where a global has already been freed may happen, in
         // which case, no need to remove the observer.
@@ -472,7 +466,11 @@ ReflowObserver.prototype.QueryInterface = ChromeUtils
 class WindowResizeObserver extends Observable {
   constructor(targetActor, callback) {
     super(targetActor, callback);
+
+    this.onNavigate = this.onNavigate.bind(this);
     this.onResize = this.onResize.bind(this);
+
+    this.targetActor.on("navigate", this.onNavigate);
   }
 
   _startListeners() {
@@ -483,8 +481,19 @@ class WindowResizeObserver extends Observable {
     this.listenerTarget.removeEventListener("resize", this.onResize);
   }
 
+  onNavigate() {
+    if (this.isObserving) {
+      this._stopListeners();
+      this._startListeners();
+    }
+  }
+
   onResize() {
     this.notifyCallback();
+  }
+
+  destroy() {
+    this.targetActor.off("navigate", this.onNavigate);
   }
 
   get listenerTarget() {

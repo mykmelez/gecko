@@ -23,13 +23,16 @@ class TickLabels extends PureComponent {
 
     return dom.div(
       {
-        className: "tick-labels"
+        className: "tick-labels",
       },
       ticks.map(tick =>
         dom.div(
           {
             className: "tick-label",
-            style: { marginInlineStart: `${ tick.position }%` },
+            style: {
+              marginInlineStart: `${ tick.position }%`,
+              maxWidth: `${ tick.width }px`,
+            },
           },
           tick.label
         )

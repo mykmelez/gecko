@@ -14,27 +14,24 @@
 
 #include "nsIURI.h"
 
-class nsCSSRuleProcessor;
 class nsIPrincipal;
 
 namespace mozilla {
 class StyleSheet;
+struct URLExtraData;
 
 /**
  * Struct for data common to CSSStyleSheetInner and ServoStyleSheet.
  */
-struct StyleSheetInfo final
-{
+struct StyleSheetInfo final {
   typedef net::ReferrerPolicy ReferrerPolicy;
 
-  StyleSheetInfo(CORSMode aCORSMode,
-                 ReferrerPolicy aReferrerPolicy,
+  StyleSheetInfo(CORSMode aCORSMode, ReferrerPolicy aReferrerPolicy,
                  const dom::SRIMetadata& aIntegrity,
                  css::SheetParsingMode aParsingMode);
 
   // FIXME(emilio): aCopy should be const.
   StyleSheetInfo(StyleSheetInfo& aCopy, StyleSheet* aPrimarySheet);
-
 
   ~StyleSheetInfo();
 
@@ -47,23 +44,22 @@ struct StyleSheetInfo final
 
   // FIXME(emilio): most of this struct should be const, then we can remove the
   // duplication with the UrlExtraData member and such.
-  nsCOMPtr<nsIURI>       mSheetURI; // for error reports, etc.
-  nsCOMPtr<nsIURI>       mOriginalSheetURI;  // for GetHref.  Can be null.
-  nsCOMPtr<nsIURI>       mBaseURI; // for resolving relative URIs
+  nsCOMPtr<nsIURI> mSheetURI;          // for error reports, etc.
+  nsCOMPtr<nsIURI> mOriginalSheetURI;  // for GetHref.  Can be null.
+  nsCOMPtr<nsIURI> mBaseURI;           // for resolving relative URIs
   nsCOMPtr<nsIPrincipal> mPrincipal;
-  CORSMode               mCORSMode;
+  CORSMode mCORSMode;
   // The Referrer Policy of a stylesheet is used for its child sheets, so it is
   // stored here.
-  ReferrerPolicy         mReferrerPolicy;
-  dom::SRIMetadata       mIntegrity;
-  bool                   mComplete;
+  ReferrerPolicy mReferrerPolicy;
+  dom::SRIMetadata mIntegrity;
 
   // Pointer to start of linked list of child sheets. This is all fundamentally
   // broken, because each of the child sheets has a unique parent... We can
   // only hope (and currently this is the case) that any time page JS can get
   // its hands on a child sheet that means we've already ensured unique infos
   // throughout its parent chain and things are good.
-  RefPtr<StyleSheet>     mFirstChild;
+  RefPtr<StyleSheet> mFirstChild;
   AutoTArray<StyleSheet*, 8> mSheets;
 
   // If a SourceMap or X-SourceMap response header is seen, this is
@@ -91,10 +87,10 @@ struct StyleSheetInfo final
   RefPtr<URLExtraData> mURLData;
 
 #ifdef DEBUG
-  bool                   mPrincipalSet;
+  bool mPrincipalSet;
 #endif
 };
 
-} // namespace mozilla
+}  // namespace mozilla
 
-#endif // mozilla_StyleSheetInfo_h
+#endif  // mozilla_StyleSheetInfo_h

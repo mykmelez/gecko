@@ -24,8 +24,7 @@
  * interfaces and does not guarantee ability to get any particular
  * interfaces via the nsIInterfaceRequestor implementation.
  */
-#define NS_WEBBROWSER_CONTRACTID \
-  "@mozilla.org/embedding/browser/nsWebBrowser;1"
+#define NS_WEBBROWSER_CONTRACTID "@mozilla.org/embedding/browser/nsWebBrowser;1"
 
 /**
  * Prompt Service ContractID
@@ -40,18 +39,6 @@
  * want more control over the way prompts, alerts, and confirmation dialogs are
  * presented to the user.
  */
-#define NS_PROMPTSERVICE_CONTRACTID \
- "@mozilla.org/embedcomp/prompt-service;1"
+#define NS_PROMPTSERVICE_CONTRACTID "@mozilla.org/embedcomp/prompt-service;1"
 
-/**
- * This contract ID should be implemented by password managers to be able to
- * override the standard implementation of nsIAuthPrompt2. It will be used as
- * a service.
- *
- * This contract implements the following interfaces:
- * nsIPromptFactory
- */
-#define NS_PWMGR_AUTHPROMPTFACTORY \
- "@mozilla.org/passwordmanager/authpromptfactory;1"
-
-#endif // NSEMBEDCID_H
+#endif  // NSEMBEDCID_H

@@ -20,6 +20,7 @@ from mozharness.base.python import (
     virtualenv_config_options,
 )
 from mozharness.mozilla.automation import AutomationMixin, TBPL_WARNING
+from mozharness.mozilla.fetches import FetchesMixin
 from mozharness.mozilla.structuredlog import StructuredOutputParser
 from mozharness.mozilla.testing.unittest import DesktopUnittestOutputParser
 from mozharness.mozilla.testing.try_tools import TryToolsMixin, try_config_options
@@ -102,7 +103,7 @@ testing_config_options = [
 
 # TestingMixin {{{1
 class TestingMixin(VirtualenvMixin, AutomationMixin, ResourceMonitoringMixin,
-                   TooltoolMixin, TryToolsMixin, VerifyToolsMixin):
+                   TooltoolMixin, TryToolsMixin, VerifyToolsMixin, FetchesMixin):
     """
     The steps to identify + download the proper bits for [browser] unit
     tests and Talos.
@@ -359,7 +360,7 @@ You can set this by specifying --test-url URL
                                   ]
                 for req_file in required_files:
                     if req_file not in unpack_dirs:
-                        self.info("Adding '{}' for extraction from common.tests zip file"
+                        self.info("Adding '{}' for extraction from common.tests archive"
                                   .format(req_file))
                         unpack_dirs.append(req_file)
 
@@ -411,7 +412,6 @@ You can set this by specifying --test-url URL
                                     parent_dir=dirs['abs_work_dir'],
                                     error_level=FATAL)
         self.installer_path = os.path.realpath(source)
-        self.set_property("build_url", self.installer_url)
 
     def _download_and_extract_symbols(self):
         dirs = self.query_abs_dirs()
@@ -434,7 +434,6 @@ You can set this by specifying --test-url URL
             if not self.symbols_path:
                 self.symbols_path = os.path.join(dirs['abs_work_dir'], 'symbols')
 
-            self.set_property("symbols_url", self.symbols_url)
             if self.symbols_url:
                 self.download_unpack(self.symbols_url, self.symbols_path)
 
@@ -646,35 +645,32 @@ Did you run with --create-virtualenv? Is mozinstall in virtualenv_modules?""")
         # This is the path where we either download to or is already on the host
         minidump_stackwalk_path = self.query_minidump_filename()
 
-        if not c.get('download_minidump_stackwalk'):
-            self.minidump_stackwalk_path = minidump_stackwalk_path
+        if not manifest:
+            tooltool_manifest_path = self.query_minidump_tooltool_manifest()
+            manifest = os.path.join(dirs.get('abs_test_install_dir',
+                                             os.path.join(dirs['abs_work_dir'], 'tests')),
+                                    tooltool_manifest_path)
+
+        self.info('grabbing minidump binary from tooltool')
+        try:
+            self.tooltool_fetch(
+                manifest=manifest,
+                output_dir=dirs['abs_work_dir'],
+                cache=c.get('tooltool_cache')
+            )
+        except KeyError:
+            self.error('missing a required key.')
+
+        abs_minidump_path = os.path.join(dirs['abs_work_dir'],
+                                         minidump_stackwalk_path)
+        if os.path.exists(abs_minidump_path):
+            self.chmod(abs_minidump_path, 0755)
+            self.minidump_stackwalk_path = abs_minidump_path
         else:
-            if not manifest:
-                tooltool_manifest_path = self.query_minidump_tooltool_manifest()
-                manifest = os.path.join(dirs.get('abs_test_install_dir',
-                                                 os.path.join(dirs['abs_work_dir'], 'tests')),
-                                        tooltool_manifest_path)
-
-            self.info('grabbing minidump binary from tooltool')
-            try:
-                self.tooltool_fetch(
-                    manifest=manifest,
-                    output_dir=dirs['abs_work_dir'],
-                    cache=c.get('tooltool_cache')
-                )
-            except KeyError:
-                self.error('missing a required key.')
-
-            abs_minidump_path = os.path.join(dirs['abs_work_dir'],
-                                             minidump_stackwalk_path)
-            if os.path.exists(abs_minidump_path):
-                self.chmod(abs_minidump_path, 0755)
-                self.minidump_stackwalk_path = abs_minidump_path
-            else:
-                self.warning("minidump stackwalk path was given but couldn't be found. "
-                             "Tried looking in '%s'" % abs_minidump_path)
-                # don't burn the job but we should at least turn them orange so it is caught
-                self.record_status(TBPL_WARNING, WARNING)
+            self.warning("minidump stackwalk path was given but couldn't be found. "
+                         "Tried looking in '%s'" % abs_minidump_path)
+            # don't burn the job but we should at least turn them orange so it is caught
+            self.record_status(TBPL_WARNING, WARNING)
 
         return self.minidump_stackwalk_path
 

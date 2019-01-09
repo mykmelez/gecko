@@ -407,6 +407,9 @@ function setupEnvironment() {
 
   var defaultMochitestPrefs = {
     'set': [
+      // We can't use the Fake H.264 GMP encoder with a real decoder until
+      // bug 1509012 is done. So force using the Fake H.264 GMP decoder for now.
+      ['media.navigator.mediadatadecoder_h264_enabled', false],
       ['media.peerconnection.enabled', true],
       ['media.peerconnection.identity.enabled', true],
       ['media.peerconnection.identity.timeout', 120000],
@@ -426,12 +429,6 @@ function setupEnvironment() {
     ]
   };
 
-  if (!WANT_FAKE_AUDIO) {
-    defaultMochitestPrefs.set.push(
-      ["media.volume_scale", "1"],
-    );
-  }
-
   const isAndroid = !!navigator.userAgent.includes("Android");
 
   if (isAndroid) {
@@ -439,7 +436,7 @@ function setupEnvironment() {
       ["media.navigator.video.default_width", 320],
       ["media.navigator.video.default_height", 240],
       ["media.navigator.video.max_fr", 10],
-      ["media.autoplay.enabled", true]
+      ["media.autoplay.default", Ci.nsIAutoplay.ALLOWED]
     );
   }
 
@@ -1027,6 +1024,8 @@ class VideoFrameEmitter {
     }
     this._helper = new CaptureStreamTestHelper2D(width, height);
     this._canvas = this._helper.createAndAppendElement('canvas', 'source_canvas');
+    this._canvas.width = width;
+    this._canvas.height = height;
     this._color1 = color1 ? color1 : this._helper.green;
     this._color2 = color2 ? color2 : this._helper.red;
     // Make sure this is initted
@@ -1051,6 +1050,11 @@ class VideoFrameEmitter {
     } catch (e) {
       // ignore; stream might have shut down
     }
+  }
+
+  size(width, height) {
+    this._canvas.width = width;
+    this._canvas.height = height;
   }
 
   start() {
@@ -1137,21 +1141,6 @@ class VideoStreamHelper {
       is(e, "timeout", "Frame shouldn't change for " + time/1000 + " seconds");
     }
   }
-}
-
-
-function IsMacOSX10_6orOlder() {
-  if (navigator.platform.indexOf("Mac") !== 0) {
-    return false;
-  }
-
-  var version = Cc["@mozilla.org/system-info;1"]
-      .getService(Ci.nsIPropertyBag2)
-      .getProperty("version");
-  // the next line is correct: Mac OS 10.6 corresponds to Darwin version 10.x !
-  // Mac OS 10.7 is Darwin version 11.x. the |version| string we've got here
-  // is the Darwin version.
-  return (parseFloat(version) < 11.0);
 }
 
 (function(){

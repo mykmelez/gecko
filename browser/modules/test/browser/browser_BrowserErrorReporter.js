@@ -76,9 +76,15 @@ add_task(async function testEnabledPrefWatcher() {
 });
 
 add_task(async function testScalars() {
+  // Do not bother testing telemetry scalars if they're already expired.
+  if (SCALARS_EXPIRED) {
+    return;
+  }
+
   const fetchStub = sinon.stub();
   const reporter = new BrowserErrorReporter({
     fetch: fetchStub,
+    sampleRates: new Map(),
     now: BrowserErrorReporter.getAppBuildIdDate(),
   });
   await SpecialPowers.pushPrefEnv({set: [
@@ -107,8 +113,7 @@ add_task(async function testScalars() {
     await reporter.handleMessage(message);
   }
 
-  const optin = Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN;
-  const scalars = Services.telemetry.snapshotScalars(optin, false).parent;
+  const scalars = Services.telemetry.getSnapshotForScalars("main", false).parent;
   is(
     scalars[TELEMETRY_ERROR_COLLECTED],
     7,
@@ -120,7 +125,7 @@ add_task(async function testScalars() {
     `${TELEMETRY_ERROR_REPORTED_FAIL} is incremented when an error with a stack trace is collected.`,
   );
 
-  const keyedScalars = Services.telemetry.snapshotKeyedScalars(optin, false).parent;
+  const keyedScalars = Services.telemetry.getSnapshotForKeyedScalars("main", false).parent;
   Assert.deepEqual(
     keyedScalars[TELEMETRY_ERROR_COLLECTED_FILENAME],
     {
@@ -138,6 +143,11 @@ add_task(async function testScalars() {
 });
 
 add_task(async function testCollectedFilenameScalar() {
+  // Do not bother testing telemetry scalars if they're already expired.
+  if (SCALARS_EXPIRED) {
+    return;
+  }
+
   const fetchStub = sinon.stub();
   const reporter = new BrowserErrorReporter({
     fetch: fetchStub,
@@ -170,7 +180,7 @@ add_task(async function testCollectedFilenameScalar() {
     }));
 
     const keyedScalars = (
-      Services.telemetry.snapshotKeyedScalars(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN, false).parent
+      Services.telemetry.getSnapshotForKeyedScalars("main", false).parent
     );
 
     let matched = null;

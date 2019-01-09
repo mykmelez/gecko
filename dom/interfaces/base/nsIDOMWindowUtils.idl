@@ -42,14 +42,15 @@ interface nsITranslationNodeList;
 interface nsIJSRAIIHelper;
 interface nsIContentPermissionRequest;
 interface nsIObserver;
-interface nsIDOMStorage;
 
+webidl Animation;
 webidl DOMRect;
 webidl Element;
 webidl EventTarget;
 webidl Event;
 webidl Node;
 webidl NodeList;
+webidl Storage;
 
 [scriptable, uuid(4d6732ca-9da7-4176-b8a1-8dde15cd0bf9)]
 interface nsIDOMWindowUtils : nsISupports {
@@ -114,7 +115,7 @@ interface nsIDOMWindowUtils : nsISupports {
 
   /**
    * Information retrieved from the <meta name="viewport"> tag.
-   * See nsContentUtils::GetViewportInfo for more information.
+   * See Document::GetViewportInfo for more information.
    */
   void getViewportInfo(in uint32_t aDisplayWidth, in uint32_t aDisplayHeight,
                        out double aDefaultZoom, out boolean aAllowZoom,
@@ -206,20 +207,11 @@ interface nsIDOMWindowUtils : nsISupports {
    *
    * The effect of this API is for gfx code to allocate more or fewer
    * pixels for rescalable content by a factor of |resolution| in
-   * both dimensions.  The scale at which the content is displayed does
-   * not change; if that is desired, use setResolutionAndScaleTo() instead.
-   *
-   * The caller of this method must have chrome privileges.
-   */
-  void setResolution(in float aResolution);
-
-  void getResolution(out float aResolution);
-
-  /**
-   * Similar to setResolution(), but also scales the content by the
-   * amount of the resolution, so that it is displayed at a
-   * correspondingly larger or smaller size, without the need for
-   * the caller to set an additional transform.
+   * both dimensions.
+   * 
+   * In addition, the content is scaled by the amount of the resolution,
+   * so that it is displayed at a correspondingly larger or smaller size, 
+   * without the need for the caller to set an additional transform.
    *
    * This can be used to implement a non-reflowing scale-zoom, e.g.
    * for pinch-zoom on mobile platforms.
@@ -227,6 +219,8 @@ interface nsIDOMWindowUtils : nsISupports {
    * The caller of this method must have chrome privileges.
    */
   void setResolutionAndScaleTo(in float aResolution);
+
+  float getResolution();
 
   /**
    * Set a resolution on the presShell which is the "restored" from history.
@@ -239,15 +233,6 @@ interface nsIDOMWindowUtils : nsISupports {
   void setRestoreResolution(in float aResolution,
                             in uint32_t aDisplayWidth,
                             in uint32_t aDisplayHeight);
-
-  /**
-   * Whether the resolution has been set by the user.
-   * This gives a way to check whether the provided resolution is the default
-   * value or restored from a previous session.
-   *
-   * Can only be accessed with chrome privileges.
-   */
-  readonly attribute boolean isResolutionSet;
 
   /**
    * Whether the next paint should be flagged as the first paint for a document.
@@ -686,8 +671,6 @@ interface nsIDOMWindowUtils : nsISupports {
    * non-debug builds. Available to all callers in debug builds.
    *
    * @param aListener listener that receives information about the CC graph
-   *                  (see @mozilla.org/cycle-collector-logger;1 for a logger
-   *                   component)
    */
   void garbageCollect([optional] in nsICycleCollectorListener aListener);
 
@@ -698,8 +681,6 @@ interface nsIDOMWindowUtils : nsISupports {
    * non-debug builds. Available to all callers in debug builds.
    *
    * @param aListener listener that receives information about the CC graph
-   *                  (see @mozilla.org/cycle-collector-logger;1 for a logger
-   *                   component)
    */
   void cycleCollect([optional] in nsICycleCollectorListener aListener);
 
@@ -846,6 +827,13 @@ interface nsIDOMWindowUtils : nsISupports {
    * Returns the given element's bounds without flushing pending layout changes.
    */
   DOMRect getBoundsWithoutFlushing(in Element aElement);
+
+  /**
+   * Returns the offset of the window's visual viewport relative to the
+   * layout viewport.
+   */
+  void getVisualViewportOffsetRelativeToLayoutViewport(out float aOffsetX,
+                                                       out float aOffsetY);
 
   const long FLUSH_NONE = -1;
   const long FLUSH_STYLE = 0;
@@ -1353,11 +1341,6 @@ interface nsIDOMWindowUtils : nsISupports {
    */
   readonly attribute Element containerElement;
 
-  [noscript] void RenderDocument(in nsConstRect aRect,
-                                 in uint32_t aFlags,
-                                 in nscolor aBackgroundColor,
-                                 in gfxContext aThebesContext);
-
   /**
    * advanceTimeAndRefresh allows the caller to take over the refresh
    * driver timing for a window.  A call to advanceTimeAndRefresh does
@@ -1590,12 +1573,12 @@ interface nsIDOMWindowUtils : nsISupports {
   readonly attribute jsval plugins;
 
   /**
-   * Set the scrollport size for the purposes of clamping scroll positions for
+   * Set the viewport size for the purposes of clamping scroll positions for
    * the root scroll frame of this document to be (aWidth,aHeight) in CSS pixels.
    *
    * The caller of this method must have chrome privileges.
    */
-  void setScrollPositionClampingScrollPortSize(in float aWidth, in float aHeight);
+  void setVisualViewportSize(in float aWidth, in float aHeight);
 
   /**
    * These are used to control whether dialogs (alert, prompt, confirm) are
@@ -1706,6 +1689,12 @@ interface nsIDOMWindowUtils : nsISupports {
    */
   AString getOMTCTransform(in Element aElement,
                            [optional] in AString aPseudoElement);
+
+  /*
+   * Returns true if the given animation is being tracked by the pending
+   * animation tracker for the current document.
+   */
+  bool isAnimationInPendingTracker(in Animation aAnimation);
 
   /**
    * If aHandlingInput is true, this informs the event state manager that
@@ -1867,12 +1856,6 @@ interface nsIDOMWindowUtils : nsISupports {
   readonly attribute int32_t gpuProcessPid;
 
   /**
-   * Returns true if the given timeout ID is in the list of tracking
-   * timeouts.
-   */
-  boolean isTimeoutTracking(in unsigned long timeoutId);
-
-  /**
    * Adds an EventStates bit to the element.
    *
    * The state string must be one of the following:
@@ -1898,7 +1881,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * @param aStorage
    *    The storage object to get usage data for.
    */
-  int64_t getStorageUsage(in nsIDOMStorage aStorage);
+  int64_t getStorageUsage(in Storage aStorage);
 
   /**
    * Returns the directionality of a string using the first-strong character
@@ -1923,6 +1906,32 @@ interface nsIDOMWindowUtils : nsISupports {
    * save them to a folder relative to the current working directory.
    */
   void wrCapture();
+
+  /**
+   * Returns whether the document we're associated to has recorded a given CSS
+   * property via the use counter mechanism.
+   *
+   * Throws if there's no document or the property is invalid.
+   */
+  bool isCssPropertyRecordedInUseCounter(in ACString aProperty);
+
+  /**
+   * NOTE: Currently works only on GTK+.
+   */
+  attribute ACString systemFont;
+
+
+  /**
+   * Simulate the system setting corresponding to 'prefers-reduced-motion'
+   * media queries feature is changed to 'on' or 'off'.
+   *
+   * Currently this function is available only on MacOSX.
+   */
+  void setPrefersReducedMotionOverrideForTest(in boolean aValue);
+  /**
+   * Reset the internal state to be used for above setPrefersReducedMotion.
+   */
+  void resetPrefersReducedMotionOverrideForTest();
 
   // These consts are only for testing purposes.
   const long DEFAULT_MOUSE_POINTER_ID = 0;
@@ -1952,6 +1961,8 @@ interface nsIDOMWindowUtils : nsISupports {
   const long DIRECTION_LTR = 0;
   const long DIRECTION_RTL = 1;
   const long DIRECTION_NOT_SET = 2;
+
+  void syncFlushCompositor();
 };
 
 [scriptable, uuid(c694e359-7227-4392-a138-33c0cc1f15a6)]

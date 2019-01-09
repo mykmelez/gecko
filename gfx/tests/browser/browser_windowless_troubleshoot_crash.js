@@ -4,30 +4,26 @@ add_task(async function test_windowlessBrowserTroubleshootCrash() {
   let webNav = Services.appShell.createWindowlessBrowser(false);
 
   let onLoaded = new Promise((resolve, reject) => {
-    let docShell = webNav.QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIDocShell);
+    let docShell = webNav.docShell;
     let listener = {
       observe(contentWindow, topic, data) {
-        let observedDocShell = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                                            .getInterface(Ci.nsIWebNavigation)
-                                            .QueryInterface(Ci.nsIDocShellTreeItem)
+        let observedDocShell = contentWindow.docShell
                                             .sameTypeRootTreeItem
                                             .QueryInterface(Ci.nsIDocShell);
           if (docShell === observedDocShell) {
             Services.obs.removeObserver(listener, "content-document-global-created");
             resolve();
           }
-        }
-    }
+        },
+    };
     Services.obs.addObserver(listener, "content-document-global-created");
   });
-  webNav.loadURI("about:blank", 0, null, null, null);
+  let triggeringPrincipal = Services.scriptSecurityManager.createNullPrincipal({});
+  webNav.loadURI("about:blank", 0, null, null, null, triggeringPrincipal);
 
   await onLoaded;
 
-  let winUtils = webNav.document.defaultView.
-                        QueryInterface(Ci.nsIInterfaceRequestor).
-                        getInterface(Ci.nsIDOMWindowUtils);
+  let winUtils = webNav.document.defaultView.windowUtils;
   try {
     is(winUtils.layerManagerType, "Basic", "windowless browser's layerManagerType should be 'Basic'");
   } catch (e) {

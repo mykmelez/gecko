@@ -7,36 +7,36 @@
 
 #ifndef __nsmimeheaderparamimpl_h___
 #define __nsmimeheaderparamimpl_h___
-class nsMIMEHeaderParamImpl : public nsIMIMEHeaderParam
-{
-public:
+class nsMIMEHeaderParamImpl : public nsIMIMEHeaderParam {
+ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIMIMEHEADERPARAM
 
   nsMIMEHeaderParamImpl() = default;
-private:
+
+  /**
+   * Identical to calling
+   * GetParameterHTTP(aHeaderVal, aParameterName, EmptyCString(), false,
+   * nullptr, aResult) See nsIMIMEHeaderParam.idl for more information.
+   */
+  static nsresult GetParameterHTTP(const nsACString &aHeaderVal,
+                                   const char *aParamName, nsAString &aResult);
+
+ private:
   virtual ~nsMIMEHeaderParamImpl() = default;
-  enum ParamDecoding {
-    MIME_FIELD_ENCODING = 1,
-    HTTP_FIELD_ENCODING
-  };
+  enum ParamDecoding { MIME_FIELD_ENCODING = 1, HTTP_FIELD_ENCODING };
 
-  nsresult DoGetParameter(const nsACString& aHeaderVal,
-                          const char *aParamName,
-                          ParamDecoding aDecoding,
-                          const nsACString& aFallbackCharset,
-                          bool aTryLocaleCharset,
-                          char **aLang,
-                          nsAString& aResult);
+  static nsresult DoGetParameter(const nsACString &aHeaderVal,
+                                 const char *aParamName,
+                                 ParamDecoding aDecoding,
+                                 const nsACString &aFallbackCharset,
+                                 bool aTryLocaleCharset, char **aLang,
+                                 nsAString &aResult);
 
-  nsresult DoParameterInternal(const char *aHeaderValue,
-                               const char *aParamName,
-                               ParamDecoding aDecoding,
-                               char **aCharset,
-                               char **aLang,
-                               char **aResult);
-
+  static nsresult DoParameterInternal(const char *aHeaderValue,
+                                      const char *aParamName,
+                                      ParamDecoding aDecoding, char **aCharset,
+                                      char **aLang, char **aResult);
 };
 
 #endif
-

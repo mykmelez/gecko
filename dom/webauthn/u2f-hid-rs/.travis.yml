@@ -20,7 +20,11 @@ before_install:
   - pkg-config --list-all
   - pkg-config --libs libudev
   - pkg-config --modversion libudev
-  - cargo install rustfmt || true
+
+install:
+  - rustup install nightly
+  - rustup component add rustfmt-preview
+  - rustup component add clippy-preview
 
 script:
 - |
@@ -29,6 +33,8 @@ script:
     export RUSTFLAGS="-Z sanitizer=address"
   fi
 - |
-  cargo fmt -- --write-mode=diff &&
-  cargo build &&
-  cargo test
+  if [ "$TRAVIS_RUST_VERSION" == "stable" ] ; then
+    cargo fmt --all -- --check
+    cargo clippy --all-targets -- -A renamed_and_removed_lints -A new-ret-no-self -D warnings
+  fi
+- cargo test

@@ -18,7 +18,7 @@ addMessageListener(TEST_MSG, msg => {
 var messageHandlers = {
 
   init() {
-    Services.search.currentEngine = Services.search.getEngineByName(ENGINE_NAME);
+    Services.search.defaultEngine = Services.search.getEngineByName(ENGINE_NAME);
     let input = content.document.querySelector("input");
     gController =
       new content.ContentSearchUIController(input, input.parentNode, "test", "test");
@@ -49,10 +49,10 @@ var messageHandlers = {
       composition: {
         string: data,
         clauses: [
-          { length: data.length, attr: content.COMPOSITION_ATTR_RAW_CLAUSE }
-        ]
+          { length: data.length, attr: content.COMPOSITION_ATTR_RAW_CLAUSE },
+        ],
       },
-      caret: { start: data.length, length: 0 }
+      caret: { start: data.length, length: 0 },
     });
     let wait = arg.waitForSuggestions ? waitForSuggestions : cb => cb();
     wait(ack.bind(null, "changeComposition"));

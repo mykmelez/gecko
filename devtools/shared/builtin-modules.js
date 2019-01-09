@@ -20,8 +20,12 @@ const { Services } = jsmScope;
 // Steal various globals only available in JSM scope (and not Sandbox one)
 const {
   console,
+  DOMPoint,
+  DOMQuad,
+  DOMRect,
   HeapSnapshot,
   StructuredCloneHolder,
+  TelemetryStopwatch,
 } = Cu.getGlobalForObject(jsmScope);
 
 // Create a single Sandbox to access global properties needed in this module.
@@ -29,6 +33,7 @@ const {
 const {
   atob,
   btoa,
+  Blob,
   ChromeUtils,
   CSS,
   CSSRule,
@@ -48,6 +53,7 @@ const {
   wantGlobalProperties: [
     "atob",
     "btoa",
+    "Blob",
     "ChromeUtils",
     "CSS",
     "CSSRule",
@@ -63,7 +69,7 @@ const {
     "TextEncoder",
     "URL",
     "XMLHttpRequest",
-  ]
+  ],
 });
 
 /**
@@ -90,12 +96,12 @@ function defineLazyGetter(object, name, lambda) {
         value,
         writable: true,
         configurable: true,
-        enumerable: true
+        enumerable: true,
       });
       return value;
     },
     configurable: true,
-    enumerable: true
+    enumerable: true,
   });
 }
 
@@ -197,19 +203,18 @@ function lazyRequireGetter(obj, property, module, destructure) {
         value,
         writable: true,
         configurable: true,
-        enumerable: true
+        enumerable: true,
       });
       return value;
     },
     configurable: true,
-    enumerable: true
+    enumerable: true,
   });
 }
 
 // List of pseudo modules exposed to all devtools modules.
 exports.modules = {
   ChromeUtils,
-  FileReader,
   HeapSnapshot,
   InspectorUtils,
   promise,
@@ -218,19 +223,30 @@ exports.modules = {
   // pull it is destroyed. See bug 1402779.
   Promise,
   Services: Object.create(Services),
+  TelemetryStopwatch,
 };
 
 defineLazyGetter(exports.modules, "Debugger", () => {
-  // addDebuggerToGlobal only allows adding the Debugger object to a global. The
-  // this object is not guaranteed to be a global (in particular on B2G, due to
-  // compartment sharing), so add the Debugger object to a sandbox instead.
-  const sandbox = Cu.Sandbox(CC("@mozilla.org/systemprincipal;1", "nsIPrincipal")());
-  Cu.evalInSandbox(
-    "Components.utils.import('resource://gre/modules/jsdebugger.jsm');" +
-    "addDebuggerToGlobal(this);",
-    sandbox
-  );
-  return sandbox.Debugger;
+  const global = Cu.getGlobalForObject(this);
+  // Debugger may already have been added by RecordReplayControl getter
+  if (global.Debugger) {
+    return global.Debugger;
+  }
+  const { addDebuggerToGlobal } = ChromeUtils.import("resource://gre/modules/jsdebugger.jsm", {});
+  addDebuggerToGlobal(global);
+  return global.Debugger;
+});
+
+defineLazyGetter(exports.modules, "RecordReplayControl", () => {
+  // addDebuggerToGlobal also adds the RecordReplayControl object.
+  const global = Cu.getGlobalForObject(this);
+  // RecordReplayControl may already have been added by Debugger getter
+  if (global.RecordReplayControl) {
+    return global.RecordReplayControl;
+  }
+  const { addDebuggerToGlobal } = ChromeUtils.import("resource://gre/modules/jsdebugger.jsm", {});
+  addDebuggerToGlobal(global);
+  return global.RecordReplayControl;
 });
 
 defineLazyGetter(exports.modules, "Timer", () => {
@@ -238,7 +254,7 @@ defineLazyGetter(exports.modules, "Timer", () => {
   // Do not return Cu.import result, as DevTools loader would freeze Timer.jsm globals...
   return {
     setTimeout,
-    clearTimeout
+    clearTimeout,
   };
 });
 
@@ -250,6 +266,7 @@ defineLazyGetter(exports.modules, "xpcInspector", () => {
 // Changes here should be mirrored to devtools/.eslintrc.
 exports.globals = {
   atob,
+  Blob,
   btoa,
   console,
   CSS,
@@ -271,8 +288,12 @@ exports.globals = {
     factory(this.require, this.exports, this.module);
   },
   DOMParser,
+  DOMPoint,
+  DOMQuad,
+  DOMRect,
   Element,
   Event,
+  FileReader,
   FormData,
   isWorker: false,
   loader: {
@@ -281,7 +302,7 @@ exports.globals = {
     lazyServiceGetter: defineLazyServiceGetter,
     lazyRequireGetter: lazyRequireGetter,
     // Defined by Loader.jsm
-    id: null
+    id: null,
   },
   Node,
   reportError: Cu.reportError,
@@ -304,7 +325,7 @@ function lazyGlobal(name, getter) {
       return globals[name];
     },
     configurable: true,
-    enumerable: true
+    enumerable: true,
   });
 }
 

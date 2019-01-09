@@ -14,21 +14,15 @@ namespace mozilla {
 namespace layout {
 
 VsyncChild::VsyncChild()
-  : mObservingVsync(false)
-  , mIsShutdown(false)
-  , mVsyncRate(TimeDuration::Forever())
-{
+    : mObservingVsync(false),
+      mIsShutdown(false),
+      mVsyncRate(TimeDuration::Forever()) {
   MOZ_ASSERT(NS_IsMainThread());
 }
 
-VsyncChild::~VsyncChild()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-}
+VsyncChild::~VsyncChild() { MOZ_ASSERT(NS_IsMainThread()); }
 
-bool
-VsyncChild::SendObserve()
-{
+bool VsyncChild::SendObserve() {
   MOZ_ASSERT(NS_IsMainThread());
   if (!mObservingVsync && !mIsShutdown) {
     mObservingVsync = true;
@@ -37,9 +31,7 @@ VsyncChild::SendObserve()
   return true;
 }
 
-bool
-VsyncChild::SendUnobserve()
-{
+bool VsyncChild::SendUnobserve() {
   MOZ_ASSERT(NS_IsMainThread());
   if (mObservingVsync && !mIsShutdown) {
     mObservingVsync = false;
@@ -48,38 +40,43 @@ VsyncChild::SendUnobserve()
   return true;
 }
 
-void
-VsyncChild::ActorDestroy(ActorDestroyReason aActorDestroyReason)
-{
+void VsyncChild::ActorDestroy(ActorDestroyReason aActorDestroyReason) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!mIsShutdown);
   mIsShutdown = true;
   mObserver = nullptr;
+
+  if (recordreplay::IsRecordingOrReplaying()) {
+    recordreplay::child::SetVsyncObserver(nullptr);
+  }
 }
 
-mozilla::ipc::IPCResult
-VsyncChild::RecvNotify(const TimeStamp& aVsyncTimestamp)
-{
+mozilla::ipc::IPCResult VsyncChild::RecvNotify(const VsyncEvent& aVsync) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!mIsShutdown);
 
   SchedulerGroup::MarkVsyncRan();
   if (mObservingVsync && mObserver) {
-    mObserver->NotifyVsync(aVsyncTimestamp);
+    if (recordreplay::IsRecordingOrReplaying() &&
+        !recordreplay::child::OnVsync()) {
+      return IPC_OK();
+    }
+
+    mObserver->NotifyVsync(aVsync);
   }
   return IPC_OK();
 }
 
-void
-VsyncChild::SetVsyncObserver(VsyncObserver* aVsyncObserver)
-{
+void VsyncChild::SetVsyncObserver(VsyncObserver* aVsyncObserver) {
   MOZ_ASSERT(NS_IsMainThread());
   mObserver = aVsyncObserver;
+
+  if (recordreplay::IsRecordingOrReplaying()) {
+    recordreplay::child::SetVsyncObserver(mObserver);
+  }
 }
 
-TimeDuration
-VsyncChild::GetVsyncRate()
-{
+TimeDuration VsyncChild::GetVsyncRate() {
   if (mVsyncRate == TimeDuration::Forever()) {
     PVsyncChild::SendRequestVsyncRate();
   }
@@ -87,18 +84,12 @@ VsyncChild::GetVsyncRate()
   return mVsyncRate;
 }
 
-TimeDuration
-VsyncChild::VsyncRate()
-{
-  return mVsyncRate;
-}
+TimeDuration VsyncChild::VsyncRate() { return mVsyncRate; }
 
-mozilla::ipc::IPCResult
-VsyncChild::RecvVsyncRate(const float& aVsyncRate)
-{
+mozilla::ipc::IPCResult VsyncChild::RecvVsyncRate(const float& aVsyncRate) {
   mVsyncRate = TimeDuration::FromMilliseconds(aVsyncRate);
   return IPC_OK();
 }
 
-} // namespace layout
-} // namespace mozilla
+}  // namespace layout
+}  // namespace mozilla

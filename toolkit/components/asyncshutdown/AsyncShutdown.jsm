@@ -43,8 +43,6 @@ ChromeUtils.import("resource://gre/modules/Services.jsm", this);
 
 ChromeUtils.defineModuleGetter(this, "PromiseUtils",
   "resource://gre/modules/PromiseUtils.jsm");
-ChromeUtils.defineModuleGetter(this, "Task",
-  "resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyServiceGetter(this, "gDebug",
   "@mozilla.org/xpcom/debug;1", "nsIDebug2");
 Object.defineProperty(this, "gCrashReporter", {
@@ -58,7 +56,7 @@ Object.defineProperty(this, "gCrashReporter", {
       return this.gCrashReporter = null;
     }
   },
-  configurable: true
+  configurable: true,
 });
 
 // `true` if this is a content process, `false` otherwise.
@@ -313,17 +311,11 @@ function getOrigin(topFrame, filename = null, lineNumber = null, stack = null) {
     if (stack == null) {
       // Now build the rest of the stack as a string, using Task.jsm's rewriting
       // to ensure that we do not lose information at each call to `Task.spawn`.
-      let frames = [];
+      stack = [];
       while (frame != null) {
-        frames.push(frame.filename + ":" + frame.name + ":" + frame.lineNumber);
+        stack.push(frame.filename + ":" + frame.name + ":" + frame.lineNumber);
         frame = frame.caller;
       }
-      stack = frames.join("\n");
-      // Avoid loading Task.jsm if there's no task on the stack.
-      if (stack.includes("/Task.jsm:")) {
-        stack = Task.Debugging.generateReadableStack(stack);
-      }
-      stack = stack.split("\n");
     }
 
     return {
@@ -366,7 +358,7 @@ var AsyncShutdown = {
    */
   get DELAY_CRASH_MS() {
     return DELAY_CRASH_MS;
-  }
+  },
 };
 
 /**
@@ -465,7 +457,7 @@ function getPhase(topic) {
         return () => spinner.observe();
       }
       return undefined;
-    }
+    },
   });
   gPhases.set(topic, phase);
   return phase;
@@ -523,7 +515,7 @@ Spinner.prototype = {
     try {
       promise = this._barrier.wait({
         warnAfterMS: DELAY_WARNING_MS,
-        crashAfterMS: DELAY_CRASH_MS
+        crashAfterMS: DELAY_CRASH_MS,
       }).catch(
         // Additional precaution to be entirely sure that we cannot reject.
       );
@@ -546,7 +538,7 @@ Spinner.prototype = {
       }
     }
     debug(`Finished phase ${ topic }`);
-  }
+  },
 };
 
 /**
@@ -671,7 +663,7 @@ function Barrier(name) {
       }
       if (details && typeof details == "function") {
         details = {
-          fetchState: details
+          fetchState: details,
         };
       } else if (!details) {
         details = {};
@@ -781,7 +773,7 @@ function Barrier(name) {
      */
     removeBlocker: (condition) => {
       return this._removeBlocker(condition);
-    }
+    },
   };
 }
 Barrier.prototype = Object.freeze({
@@ -805,7 +797,7 @@ Barrier.prototype = Object.freeze({
         state: safeGetState(fetchState),
         filename,
         lineNumber,
-        stack
+        stack,
       });
     }
     return frozen;
@@ -947,7 +939,7 @@ Barrier.prototype = Object.freeze({
           if (gCrashReporter && gCrashReporter.enabled) {
             let data = {
               phase: topic,
-              conditions: state
+              conditions: state,
             };
             gCrashReporter.annotateCrashReport("AsyncShutdownTimeout",
               JSON.stringify(data));

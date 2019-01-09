@@ -10,9 +10,11 @@
 use core_foundation::base::{CFRelease, CFRetain, CFTypeID, TCFType};
 use core_foundation::data::{CFData, CFDataRef};
 
-use libc::{c_void, size_t, off_t};
+use libc::{size_t, off_t};
 use std::mem;
+use std::ptr;
 use std::sync::Arc;
+use std::os::raw::c_void;
 
 use foreign_types::{ForeignType, ForeignTypeRef};
 
@@ -61,6 +63,30 @@ impl CGDataProvider {
             drop(mem::transmute::<*mut c_void, Arc<Vec<u8>>>(info))
         }
     }
+
+    /// Creates a data prvider from a given slice. The data provider does not own the slice in this
+    /// case, so it's up to the user to ensure the memory safety here.
+    pub unsafe fn from_slice(buffer: &[u8]) -> Self {
+        let ptr = buffer.as_ptr() as *const c_void;
+        let len = buffer.len() as size_t;
+        let result = CGDataProviderCreateWithData(ptr::null_mut(), ptr, len, None);
+        CGDataProvider::from_ptr(result)
+    }
+
+    /// Creates a data provider from the given raw pointer, length, and destructor function.
+    ///
+    /// This is double-boxed because the Core Text API requires that the userdata be a single
+    /// pointer.
+    pub unsafe fn from_custom_data(custom_data: Box<Box<CustomData>>) -> Self {
+        let (ptr, len) = (custom_data.ptr() as *const c_void, custom_data.len());
+        let userdata = mem::transmute::<Box<Box<CustomData>>, &mut c_void>(custom_data);
+        let data_provider = CGDataProviderCreateWithData(userdata, ptr, len, Some(release));
+        return CGDataProvider::from_ptr(data_provider);
+
+        unsafe extern "C" fn release(info: *mut c_void, _: *const c_void, _: size_t) {
+            drop(mem::transmute::<*mut c_void, Box<Box<CustomData>>>(info))
+        }
+    }
 }
 
 impl CGDataProviderRef {
@@ -68,6 +94,16 @@ impl CGDataProviderRef {
     pub fn copy_data(&self) -> CFData {
         unsafe { CFData::wrap_under_create_rule(CGDataProviderCopyData(self.as_ptr())) }
     }
+}
+
+/// Encapsulates custom data that can be wrapped.
+pub trait CustomData {
+    /// Returns a pointer to the start of the custom data. This pointer *must not change* during
+    /// the lifespan of this CustomData.
+    unsafe fn ptr(&self) -> *const u8;
+    /// Returns the length of this custom data. This value must not change during the lifespan of
+    /// this CustomData.
+    unsafe fn len(&self) -> usize;
 }
 
 #[link(name = "CoreGraphics", kind = "framework")]

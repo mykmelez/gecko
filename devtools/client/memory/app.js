@@ -55,7 +55,21 @@ const { app: appModel } = require("./models");
 
 class MemoryApp extends Component {
   static get propTypes() {
-    return appModel;
+    return {
+      allocations: appModel.allocations,
+      censusDisplay: appModel.censusDisplay,
+      diffing: appModel.diffing,
+      dispatch: appModel.dispatch,
+      filter: appModel.filter,
+      front: appModel.front,
+      heapWorker: appModel.heapWorker,
+      individuals: appModel.individuals,
+      labelDisplay: appModel.labelDisplay,
+      sizes: appModel.sizes,
+      snapshots: appModel.snapshots,
+      toolbox: appModel.toolbox,
+      view: appModel.view,
+    };
   }
 
   static get childContextTypes() {
@@ -155,7 +169,7 @@ class MemoryApp extends Component {
     }, []);
 
     return [
-      treeMapDisplays.coarseType
+      treeMapDisplays.coarseType,
     ].concat(custom);
   }
 
@@ -185,7 +199,7 @@ class MemoryApp extends Component {
     return (
       dom.div(
         {
-          id: "memory-tool"
+          id: "memory-tool",
         },
 
         Toolbar({
@@ -218,7 +232,7 @@ class MemoryApp extends Component {
 
         dom.div(
           {
-            id: "memory-tool-container"
+            id: "memory-tool-container",
           },
 
           List({

@@ -11,25 +11,22 @@
 #include "signaling/src/sdp/RsdparsaSdpInc.h"
 #include "signaling/src/sdp/SdpAttributeList.h"
 
-namespace mozilla
-{
+namespace mozilla {
 
 class RsdparsaSdp;
 class RsdparsaSdpMediaSection;
 class SdpErrorHolder;
 
-class RsdparsaSdpAttributeList : public SdpAttributeList
-{
+class RsdparsaSdpAttributeList : public SdpAttributeList {
   friend class RsdparsaSdpMediaSection;
   friend class RsdparsaSdp;
 
-public:
+ public:
   // Make sure we don't hide the default arg thunks
-  using SdpAttributeList::HasAttribute;
   using SdpAttributeList::GetAttribute;
+  using SdpAttributeList::HasAttribute;
 
-  bool HasAttribute(AttributeType type,
-                    bool sessionFallback) const override;
+  bool HasAttribute(AttributeType type, bool sessionFallback) const override;
   const SdpAttribute* GetAttribute(AttributeType type,
                                    bool sessionFallback) const override;
   void SetAttribute(SdpAttribute* attr) override;
@@ -45,7 +42,6 @@ public:
   const SdpRemoteCandidatesAttribute& GetRemoteCandidates() const override;
   const SdpSetupAttribute& GetSetup() const override;
   const SdpSsrcAttributeList& GetSsrc() const override;
-  const SdpSsrcGroupAttributeList& GetSsrcGroup() const override;
   const SdpDtlsMessageAttribute& GetDtlsMessage() const override;
 
   // These attributes can appear multiple times, so the returned
@@ -80,13 +76,12 @@ public:
 
   virtual ~RsdparsaSdpAttributeList();
 
-private:
+ private:
   explicit RsdparsaSdpAttributeList(RsdparsaSessionHandle session)
-    : mSession(std::move(session))
-    , mSessionAttributes(nullptr)
-    , mIsVideo(false)
-    , mAttributes()
-  {
+      : mSession(std::move(session)),
+        mSessionAttributes(nullptr),
+        mIsVideo(false),
+        mAttributes() {
     RustAttributeList* attributes = get_sdp_session_attributes(mSession.get());
     LoadAll(attributes);
   }
@@ -94,11 +89,11 @@ private:
   RsdparsaSdpAttributeList(RsdparsaSessionHandle session,
                            const RustMediaSection* const msection,
                            const RsdparsaSdpAttributeList* sessionAttributes)
-    : mSession(std::move(session))
-    , mSessionAttributes(sessionAttributes)
-    , mAttributes()
-  {
-    mIsVideo = sdp_rust_get_media_type(msection) == RustSdpMediaValue::kRustVideo;
+      : mSession(std::move(session)),
+        mSessionAttributes(sessionAttributes),
+        mAttributes() {
+    mIsVideo =
+        sdp_rust_get_media_type(msection) == RustSdpMediaValue::kRustVideo;
     RustAttributeList* attributes = sdp_get_media_attribute_list(msection);
     LoadAll(attributes);
   }
@@ -110,11 +105,7 @@ private:
   const RsdparsaSdpAttributeList* mSessionAttributes;
   bool mIsVideo;
 
-  bool
-  AtSessionLevel() const
-  {
-    return !mSessionAttributes;
-  }
+  bool AtSessionLevel() const { return !mSessionAttributes; }
 
   bool IsAllowedHere(SdpAttribute::AttributeType type);
   void LoadAll(RustAttributeList* attributeList);
@@ -124,6 +115,7 @@ private:
   void LoadIdentity(RustAttributeList* attributeList);
   void LoadIceOptions(RustAttributeList* attributeList);
   void LoadFingerprint(RustAttributeList* attributeList);
+  void LoadDtlsMessage(RustAttributeList* attributeList);
   void LoadSetup(RustAttributeList* attributeList);
   void LoadSsrc(RustAttributeList* attributeList);
   void LoadRtpmap(RustAttributeList* attributeList);
@@ -145,18 +137,20 @@ private:
   void LoadRemoteCandidates(RustAttributeList* attributeList);
   void LoadRids(RustAttributeList* attributeList);
   void LoadExtmap(RustAttributeList* attributeList);
+  void LoadMaxPtime(RustAttributeList* attributeList);
+  void LoadCandidate(RustAttributeList* attributeList);
 
   void WarnAboutMisplacedAttribute(SdpAttribute::AttributeType type,
                                    uint32_t lineNumber,
                                    SdpErrorHolder& errorHolder);
 
-
   SdpAttribute* mAttributes[kNumAttributeTypes];
 
   RsdparsaSdpAttributeList(const RsdparsaSdpAttributeList& orig) = delete;
-  RsdparsaSdpAttributeList& operator=(const RsdparsaSdpAttributeList& rhs) = delete;
+  RsdparsaSdpAttributeList& operator=(const RsdparsaSdpAttributeList& rhs) =
+      delete;
 };
 
-} // namespace mozilla
+}  // namespace mozilla
 
 #endif

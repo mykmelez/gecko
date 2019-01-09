@@ -5,14 +5,25 @@
 
 /* import-globals-from editBookmark.js */
 /* import-globals-from ../../../../toolkit/content/contentAreaUtils.js */
-/* import-globals-from ../PlacesUIUtils.jsm */
-/* import-globals-from ../../../../toolkit/components/places/PlacesUtils.jsm */
 /* import-globals-from ../../downloads/content/allDownloadsView.js */
 
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/TelemetryStopwatch.jsm");
+/* Shared Places Import - change other consumers if you change this: */
 ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
+  PlacesUIUtils: "resource:///modules/PlacesUIUtils.jsm",
+  PlacesTransactions: "resource://gre/modules/PlacesTransactions.jsm",
+  PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
+});
+XPCOMUtils.defineLazyScriptGetter(this, "PlacesTreeView",
+                                  "chrome://browser/content/places/treeView.js");
+XPCOMUtils.defineLazyScriptGetter(this, ["PlacesInsertionPoint", "PlacesController",
+                                         "PlacesControllerDragHelper"],
+                                  "chrome://browser/content/places/controller.js");
+/* End Shared Places Import */
+
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 ChromeUtils.defineModuleGetter(this, "MigrationUtils",
                                "resource:///modules/MigrationUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "BookmarkJSONUtils",
@@ -58,19 +69,19 @@ var PlacesOrganizer = {
       case "BookmarksMenu":
         this.selectLeftPaneContainerByHierarchy([
           PlacesUtils.virtualAllBookmarksGuid,
-          PlacesUtils.bookmarks.virtualMenuGuid
+          PlacesUtils.bookmarks.virtualMenuGuid,
         ]);
         break;
       case "BookmarksToolbar":
         this.selectLeftPaneContainerByHierarchy([
           PlacesUtils.virtualAllBookmarksGuid,
-          PlacesUtils.bookmarks.virtualToolbarGuid
+          PlacesUtils.bookmarks.virtualToolbarGuid,
         ]);
         break;
       case "UnfiledBookmarks":
         this.selectLeftPaneContainerByHierarchy([
           PlacesUtils.virtualAllBookmarksGuid,
-          PlacesUtils.bookmarks.virtualUnfiledGuid
+          PlacesUtils.bookmarks.virtualUnfiledGuid,
         ]);
         break;
       default:
@@ -342,7 +353,7 @@ var PlacesOrganizer = {
         // The command execution function will take care of seeing if the
         // selection is a folder or a different container type, and will
         // load its contents in tabs.
-        PlacesUIUtils.openContainerNodeInTabs(node, aEvent, this._places);
+        PlacesUIUtils.openMultipleLinksInTabs(node, aEvent, this._places);
       }
     }
   },
@@ -434,7 +445,7 @@ var PlacesOrganizer = {
     let restorePopup = document.getElementById("fileRestorePopup");
 
     const dtOptions = {
-      dateStyle: "long"
+      dateStyle: "long",
     };
     let dateFormatter = new Services.intl.DateTimeFormat(undefined, dtOptions);
 
@@ -868,7 +879,7 @@ var PlacesQueryBuilder = {
     var searchStr = PlacesSearchBox.searchFilter.value;
     if (searchStr)
       PlacesSearchBox.search(searchStr);
-  }
+  },
 };
 
 /**
@@ -1113,7 +1124,7 @@ var ViewMenu = {
 
     var sortConst = "SORT_BY_" + colLookupTable[columnId].key + "_" + aDirection;
     result.sortingMode = Ci.nsINavHistoryQueryOptions[sortConst];
-  }
+  },
 };
 
 var ContentArea = {
@@ -1248,7 +1259,7 @@ var ContentArea = {
 
   focus() {
     this._deck.selectedPanel.focus();
-  }
+  },
 };
 
 var ContentTree = {
@@ -1263,7 +1274,7 @@ var ContentTree = {
   get viewOptions() {
     return Object.seal({
       showDetailsPane: true,
-      toolbarSet: "back-button, forward-button, organizeButton, viewMenu, maintenanceButton, libraryToolbarSpacer, searchFilter"
+      toolbarSet: "back-button, forward-button, organizeButton, viewMenu, maintenanceButton, libraryToolbarSpacer, searchFilter",
     });
   },
 
@@ -1284,7 +1295,7 @@ var ContentTree = {
         // The command execution function will take care of seeing if the
         // selection is a folder or a different container type, and will
         // load its contents in tabs.
-        PlacesUIUtils.openContainerNodeInTabs(node, aEvent, this.view);
+        PlacesUIUtils.openMultipleLinksInTabs(node, aEvent, this.view);
       }
     }
   },
@@ -1292,5 +1303,5 @@ var ContentTree = {
   onKeyPress: function CT_onKeyPress(aEvent) {
     if (aEvent.keyCode == KeyEvent.DOM_VK_RETURN)
       this.openSelectedNode(aEvent);
-  }
+  },
 };

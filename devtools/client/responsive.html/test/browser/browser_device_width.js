@@ -23,9 +23,7 @@ addRDMTask(TEST_URL, async function({ ui, manager }) {
 
   info("Setting docShell.deviceSizeIsPageSize to false");
   await ContentTask.spawn(ui.getViewportBrowser(), {}, async function() {
-    const docShell = content.QueryInterface(Ci.nsIInterfaceRequestor)
-                          .getInterface(Ci.nsIWebNavigation)
-                          .QueryInterface(Ci.nsIDocShell);
+    const docShell = content.docShell;
     docShell.deviceSizeIsPageSize = false;
   });
 
@@ -97,10 +95,10 @@ function grabContentInfo(ui) {
     return {
       screen: {
         width: content.screen.width,
-        height: content.screen.height
+        height: content.screen.height,
       },
       innerWidth: content.innerWidth,
-      matchesMedia: content.matchMedia("(max-device-width:100px)").matches
+      matchesMedia: content.matchMedia("(max-device-width:100px)").matches,
     };
   });
 }

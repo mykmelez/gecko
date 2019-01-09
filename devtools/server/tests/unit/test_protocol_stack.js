@@ -27,8 +27,8 @@ const rootSpec = protocol.generateActorSpec({
   methods: {
     simpleReturn: {
       response: { value: RetVal() },
-    }
-  }
+    },
+  },
 });
 
 var RootActor = protocol.ActorClassWithSpec(rootSpec, {
@@ -44,17 +44,17 @@ var RootActor = protocol.ActorClassWithSpec(rootSpec, {
 
   simpleReturn: function() {
     return this.sequence++;
-  }
+  },
 });
 
-var RootFront = protocol.FrontClassWithSpec(rootSpec, {
-  initialize: function(client) {
+class RootFront extends protocol.FrontClassWithSpec(rootSpec) {
+  constructor(client) {
+    super(client);
     this.actorID = "root";
-    protocol.Front.prototype.initialize.call(this, client);
     // Root owns itself.
     this.manage(this);
   }
-});
+}
 
 function run_test() {
   if (!Services.prefs.getBoolPref("javascript.options.asyncstack")) {
@@ -67,12 +67,12 @@ function run_test() {
 
   const trace = connectPipeTracing();
   const client = new DebuggerClient(trace);
-  let rootClient;
+  let rootFront;
 
   client.connect().then(function onConnect() {
-    rootClient = RootFront(client);
+    rootFront = new RootFront(client);
 
-    rootClient.simpleReturn().then(() => {
+    rootFront.simpleReturn().then(() => {
       let stack = Components.stack;
       while (stack) {
         info(stack.name);

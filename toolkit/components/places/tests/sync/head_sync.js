@@ -18,6 +18,7 @@ ChromeUtils.import("resource://gre/modules/Log.jsm");
 ChromeUtils.import("resource://gre/modules/ObjectUtils.jsm");
 ChromeUtils.import("resource://gre/modules/PlacesSyncUtils.jsm");
 ChromeUtils.import("resource://gre/modules/SyncedBookmarksMirror.jsm");
+ChromeUtils.import("resource://services-common/utils.js");
 ChromeUtils.import("resource://testing-common/FileTestUtils.jsm");
 ChromeUtils.import("resource://testing-common/httpd.js");
 
@@ -100,6 +101,16 @@ async function storeRecords(buf, records, options) {
   await buf.store(records.map(makeRecord), options);
 }
 
+async function storeChangesInMirror(buf, changesToUpload) {
+  let cleartexts = [];
+  for (let recordId in changesToUpload) {
+    changesToUpload[recordId].synced = true;
+    cleartexts.push(changesToUpload[recordId].cleartext);
+  }
+  await storeRecords(buf, cleartexts, { needsMerge: false });
+  await PlacesSyncUtils.bookmarks.pushChanges(changesToUpload);
+}
+
 function inspectChangeRecords(changeRecords) {
   let results = { updated: [], deleted: [] };
   for (let [id, record] of Object.entries(changeRecords)) {
@@ -135,7 +146,6 @@ async function fetchLocalTree(rootGuid) {
     let itemInfo = { guid, index, title, type };
     if (node.annos) {
       let syncableAnnos = node.annos.filter(anno => [
-        PlacesSyncUtils.bookmarks.SMART_BOOKMARKS_ANNO,
         PlacesUtils.LMANNO_FEEDURI,
         PlacesUtils.LMANNO_SITEURI,
       ].includes(anno.name));
@@ -217,21 +227,34 @@ function BookmarkObserver({ ignoreDates = true, skipTags = false } = {}) {
   this.notifications = [];
   this.ignoreDates = ignoreDates;
   this.skipTags = skipTags;
+  this.handlePlacesEvents = this.handlePlacesEvents.bind(this);
 }
 
 BookmarkObserver.prototype = {
+  handlePlacesEvents(events) {
+    for (let event of events) {
+      if (this.skipTags && event.isTagging) {
+        continue;
+      }
+      let params = {
+        itemId: event.id,
+        parentId: event.parentId,
+        index: event.index,
+        type: event.itemType,
+        urlHref: event.url,
+        title: event.title,
+        guid: event.guid,
+        parentGuid: event.parentGuid,
+        source: event.source,
+      };
+      if (!this.ignoreDates) {
+        params.dateAdded = event.dateAdded * 1000;
+      }
+      this.notifications.push({ name: "bookmark-added", params });
+    }
+  },
   onBeginUpdateBatch() {},
   onEndUpdateBatch() {},
-  onItemAdded(itemId, parentId, index, type, uri, title, dateAdded, guid,
-              parentGuid, source) {
-    let urlHref = uri ? uri.spec : null;
-    let params = { itemId, parentId, index, type, urlHref, title, guid,
-                   parentGuid, source };
-    if (!this.ignoreDates) {
-      params.dateAdded = dateAdded;
-    }
-    this.notifications.push({ name: "onItemAdded", params });
-  },
   onItemRemoved(itemId, parentId, index, type, uri, guid, parentGuid, source) {
     let urlHref = uri ? uri.spec : null;
     this.notifications.push({
@@ -251,11 +274,11 @@ BookmarkObserver.prototype = {
   },
   onItemVisited() {},
   onItemMoved(itemId, oldParentId, oldIndex, newParentId, newIndex, type, guid,
-              oldParentGuid, newParentGuid, source, uri) {
+              oldParentGuid, newParentGuid, source, urlHref) {
     this.notifications.push({
       name: "onItemMoved",
       params: { itemId, oldParentId, oldIndex, newParentId, newIndex, type,
-                guid, oldParentGuid, newParentGuid, source, uri },
+                guid, oldParentGuid, newParentGuid, source, urlHref },
     });
   },
 
@@ -265,6 +288,7 @@ BookmarkObserver.prototype = {
 
   check(expectedNotifications) {
     PlacesUtils.bookmarks.removeObserver(this);
+    PlacesUtils.observers.removeListener(["bookmark-added"], this.handlePlacesEvents);
     if (!ObjectUtils.deepEqual(this.notifications, expectedNotifications)) {
       info(`Expected notifications: ${JSON.stringify(expectedNotifications)}`);
       info(`Actual notifications: ${JSON.stringify(this.notifications)}`);
@@ -279,6 +303,7 @@ BookmarkObserver.prototype = {
 function expectBookmarkChangeNotifications(options) {
   let observer = new BookmarkObserver(options);
   PlacesUtils.bookmarks.addObserver(observer);
+  PlacesUtils.observers.addListener(["bookmark-added"], observer.handlePlacesEvents);
   return observer;
 }
 

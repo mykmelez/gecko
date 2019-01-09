@@ -88,7 +88,8 @@ class AnimationTarget extends Component {
     await this.ensureNodeFront();
 
     if (this.state.nodeFront) {
-      this.props.onShowBoxModelHighlighterForNode(this.state.nodeFront);
+      this.props.onShowBoxModelHighlighterForNode(
+        this.state.nodeFront, { hideInfoBar: true, hideGuides: true });
     }
   }
 
@@ -113,7 +114,7 @@ class AnimationTarget extends Component {
     if (!nodeFront) {
       return dom.div(
         {
-          className: "animation-target"
+          className: "animation-target",
         }
       );
     }
@@ -153,7 +154,7 @@ class AnimationTarget extends Component {
             }
 
             setHighlightedNode(isHighlighted ? null : nodeFront);
-          }
+          },
         }
       )
     );

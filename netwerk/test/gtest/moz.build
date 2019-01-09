@@ -8,8 +8,10 @@ UNIFIED_SOURCES += [
     'TestBufferedInputStream.cpp',
     'TestHeaders.cpp',
     'TestHttpAuthUtils.cpp',
+    'TestIsValidIp.cpp',
     'TestMIMEInputStream.cpp',
     'TestMozURL.cpp',
+    'TestPACMan.cpp',
     'TestPartiallySeekableInputStream.cpp',
     'TestProtocolProxyService.cpp',
     'TestReadStreamToString.cpp',
@@ -30,3 +32,8 @@ LOCAL_INCLUDES += [
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul-gtest'
+
+LOCAL_INCLUDES += [
+    '!/xpcom',
+    '/xpcom/components'
+]

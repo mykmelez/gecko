@@ -42,37 +42,31 @@ NS_IMPL_ADDREF_INHERITED(IDBWrapperCache, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(IDBWrapperCache, DOMEventTargetHelper)
 
 IDBWrapperCache::IDBWrapperCache(DOMEventTargetHelper* aOwner)
-  : DOMEventTargetHelper(aOwner), mScriptOwner(nullptr)
-{ }
+    : DOMEventTargetHelper(aOwner), mScriptOwner(nullptr) {}
 
 IDBWrapperCache::IDBWrapperCache(nsPIDOMWindowInner* aOwner)
-  : DOMEventTargetHelper(aOwner), mScriptOwner(nullptr)
-{ }
+    : DOMEventTargetHelper(aOwner), mScriptOwner(nullptr) {}
 
-IDBWrapperCache::~IDBWrapperCache()
-{
+IDBWrapperCache::~IDBWrapperCache() {
   mScriptOwner = nullptr;
   ReleaseWrapper(this);
   mozilla::DropJSObjects(this);
 }
 
-void
-IDBWrapperCache::SetScriptOwner(JSObject* aScriptOwner)
-{
+void IDBWrapperCache::SetScriptOwner(JSObject* aScriptOwner) {
   MOZ_ASSERT(aScriptOwner);
+  MOZ_ASSERT(JS_IsGlobalObject(aScriptOwner));
 
   mScriptOwner = aScriptOwner;
   mozilla::HoldJSObjects(this);
 }
 
 #ifdef DEBUG
-void
-IDBWrapperCache::AssertIsRooted() const
-{
+void IDBWrapperCache::AssertIsRooted() const {
   MOZ_ASSERT(IsJSHolder(const_cast<IDBWrapperCache*>(this)),
              "Why aren't we rooted?!");
 }
 #endif
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla

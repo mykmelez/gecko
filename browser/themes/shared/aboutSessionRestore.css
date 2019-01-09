@@ -17,16 +17,19 @@
   background-image: none;
 }
 
-body[dir="rtl"] .description-wrapper {
+.description-wrapper:dir(rtl) {
   background-position: right center;
 }
-body[dir="rtl"] #tabsToggle:after {
+
+#tabsToggle:dir(rtl):after {
   background-position: left center;
 }
 
 #tabsToggle {
   cursor: pointer;
-  color: #0a84ff;
+  /* Override button background-color and color from common.css */
+  background-color: transparent;
+  color: #0a84ff !important;
   -moz-context-properties: fill;
   fill: currentColor;
   border: none;
@@ -52,10 +55,6 @@ body[dir="rtl"] #tabsToggle:after {
 
 #tabsToggle:not(.show-tabs):after {
   transform: scaleY(-1);
-}
-
-#tabsToggle:hover {
-  background-color: transparent;
 }
 
 #tabsToggle.show-tabs > #hideTabs,
@@ -89,10 +88,9 @@ treechildren::-moz-tree-image(container, noicon) {
 }
 
 treechildren::-moz-tree-image(checked) {
-  list-style-image: url("chrome://global/skin/in-content/check.svg");
+  list-style-image: url("chrome://global/skin/icons/check.svg");
   -moz-context-properties: fill, stroke;
   fill: #2292d0;
-  stroke: none;
 }
 treechildren::-moz-tree-image(checked, selected) {
   fill: white;
@@ -100,10 +98,9 @@ treechildren::-moz-tree-image(checked, selected) {
 }
 
 treechildren::-moz-tree-image(partial) {
-  list-style-image: url("chrome://global/skin/in-content/check-partial.svg");
+  list-style-image: url("chrome://global/skin/icons/check-partial.svg");
   -moz-context-properties: fill, stroke;
   fill: #2292d0;
-  stroke: none;
 }
 treechildren::-moz-tree-image(partial, selected) {
   fill: white;

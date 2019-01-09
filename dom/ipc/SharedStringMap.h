@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,7 +9,7 @@
 
 #include "mozilla/AutoMemMap.h"
 #include "mozilla/Result.h"
-#include "mozilla/TypeTraits.h"
+#include "mozilla/dom/ipc/StringTable.h"
 #include "nsDataHashtable.h"
 
 namespace mozilla {
@@ -31,11 +31,10 @@ class SharedStringMapBuilder;
  * instance has been initialized, the memory that it allocates can never be
  * freed before process shutdown. Do not use it for short-lived mappings.
  */
-class SharedStringMap
-{
+class SharedStringMap {
   using FileDescriptor = mozilla::ipc::FileDescriptor;
 
-public:
+ public:
   /**
    * The header at the beginning of the shared memory region describing its
    * layout. The layout of the shared memory is as follows:
@@ -76,24 +75,15 @@ public:
   };
 
   /**
-   * Contains the character offset and character length of an entry in a string
-   * table. This may be used for either 8-bit or 16-bit strings, and is required
-   * to retrieve an entry from a string table.
-   */
-  struct StringEntry {
-    uint32_t mOffset;
-    uint32_t mLength;
-  };
-
-  /**
    * Describes a value in the string map, as offsets into the key and value
    * string tables.
    */
   struct Entry {
     // The offset and size of the entry's UTF-8 key in the key string table.
-    StringEntry mKey;
-    // The offset and size of the entry's UTF-16 value in the value string table.
-    StringEntry mValue;
+    StringTableEntry mKey;
+    // The offset and size of the entry's UTF-16 value in the value string
+    // table.
+    StringTableEntry mValue;
   };
 
   NS_INLINE_DECL_REFCOUNTING(SharedStringMap)
@@ -118,14 +108,14 @@ public:
    */
   bool Get(const nsCString& aKey, nsAString& aValue);
 
-private:
+ private:
   /**
    * Searches for an entry for the given key. If found, returns true, and
    * places its index in the entry array in aIndex.
    */
   bool Find(const nsCString& aKey, size_t* aIndex);
 
-public:
+ public:
   /**
    * Returns the number of entries in the map.
    */
@@ -140,8 +130,7 @@ public:
    * The returned value is a literal string which references the mapped memory
    * region.
    */
-  nsCString GetKeyAt(uint32_t aIndex) const
-  {
+  nsCString GetKeyAt(uint32_t aIndex) const {
     MOZ_ASSERT(aIndex < Count());
     return KeyTable().Get(Entries()[aIndex].mKey);
   }
@@ -154,8 +143,7 @@ public:
    * The returned value is a literal string which references the mapped memory
    * region.
    */
-  nsString GetValueAt(uint32_t aIndex) const
-  {
+  nsString GetValueAt(uint32_t aIndex) const {
     MOZ_ASSERT(aIndex < Count());
     return ValueTable().Get(Entries()[aIndex].mValue);
   }
@@ -170,71 +158,30 @@ public:
 
   size_t MapSize() const { return mMap.size(); }
 
-protected:
+ protected:
   ~SharedStringMap() = default;
 
-private:
-  template <typename StringType>
-  class StringTable
-  {
-    using ElemType = decltype(DeclVal<StringType>()[0]);
-
-  public:
-    MOZ_IMPLICIT StringTable(const RangedPtr<uint8_t>& aBuffer)
-      : mBuffer(aBuffer.ReinterpretCast<ElemType>())
-    {
-      MOZ_ASSERT(uintptr_t(aBuffer.get()) % alignof(ElemType) == 0,
-                 "Got misalinged buffer");
-    }
-
-    StringType Get(const StringEntry& aEntry) const
-    {
-      StringType res;
-      res.AssignLiteral(GetBare(aEntry), aEntry.mLength);
-      return res;
-    }
-
-    const ElemType* GetBare(const StringEntry& aEntry) const
-    {
-      return &mBuffer[aEntry.mOffset];
-    }
-
-  private:
-    RangedPtr<ElemType> mBuffer;
-  };
-
-
+ private:
   // Type-safe getters for values in the shared memory region:
-  const Header& GetHeader() const
-  {
-    return mMap.get<Header>()[0];
+  const Header& GetHeader() const { return mMap.get<Header>()[0]; }
+
+  RangedPtr<const Entry> Entries() const {
+    return {reinterpret_cast<const Entry*>(&GetHeader() + 1), EntryCount()};
   }
 
-  RangedPtr<const Entry> Entries() const
-  {
-    return { reinterpret_cast<const Entry*>(&GetHeader() + 1),
-             EntryCount() };
-  }
+  uint32_t EntryCount() const { return GetHeader().mEntryCount; }
 
-  uint32_t EntryCount() const
-  {
-    return GetHeader().mEntryCount;
-  }
-
-  StringTable<nsCString> KeyTable() const
-  {
+  StringTable<nsCString> KeyTable() const {
     auto& header = GetHeader();
-    return { { &mMap.get<uint8_t>()[header.mKeyStringsOffset],
-               header.mKeyStringsSize } };
+    return {{&mMap.get<uint8_t>()[header.mKeyStringsOffset],
+             header.mKeyStringsSize}};
   }
 
-  StringTable<nsString> ValueTable() const
-  {
+  StringTable<nsString> ValueTable() const {
     auto& header = GetHeader();
-    return { { &mMap.get<uint8_t>()[header.mValueStringsOffset],
-               header.mValueStringsSize } };
+    return {{&mMap.get<uint8_t>()[header.mValueStringsOffset],
+             header.mValueStringsSize}};
   }
-
 
   loader::AutoMemMap mMap;
 };
@@ -244,9 +191,8 @@ private:
  * SharedStringMap. Each key-value pair in the final map is added to the
  * builder, before it is finalized and transformed into a snapshot.
  */
-class MOZ_RAII SharedStringMapBuilder
-{
-public:
+class MOZ_RAII SharedStringMapBuilder {
+ public:
   SharedStringMapBuilder() = default;
 
   /**
@@ -261,53 +207,7 @@ public:
    */
   Result<Ok, nsresult> Finalize(loader::AutoMemMap& aMap);
 
-private:
-  template <typename KeyType, typename StringType>
-  class StringTableBuilder
-  {
-  public:
-    using ElemType = typename StringType::char_type;
-
-    uint32_t Add(const StringType& aKey)
-    {
-      auto entry = mEntries.LookupForAdd(aKey).OrInsert([&] () {
-        Entry newEntry { mSize, aKey };
-        mSize += aKey.Length() + 1;
-
-        return newEntry;
-      });
-
-      return entry.mOffset;
-    }
-
-    void Write(const RangedPtr<uint8_t>& aBuffer)
-    {
-      auto buffer = aBuffer.ReinterpretCast<ElemType>();
-
-      for (auto iter = mEntries.Iter(); !iter.Done(); iter.Next()) {
-        auto& entry = iter.Data();
-        memcpy(&buffer[entry.mOffset], entry.mValue.BeginReading(),
-               sizeof(ElemType) * (entry.mValue.Length() + 1));
-      }
-    }
-
-    uint32_t Count() const { return mEntries.Count(); }
-
-    uint32_t Size() const { return mSize * sizeof(ElemType); }
-
-    void Clear() { mEntries.Clear(); }
-
-  private:
-    struct Entry
-    {
-      uint32_t mOffset;
-      StringType mValue;
-    };
-
-    nsDataHashtable<KeyType, Entry> mEntries;
-    uint32_t mSize = 0;
-  };
-
+ private:
   using Entry = SharedStringMap::Entry;
 
   StringTableBuilder<nsCStringHashKey, nsCString> mKeyTable;
@@ -316,9 +216,8 @@ private:
   nsDataHashtable<nsCStringHashKey, Entry> mEntries;
 };
 
-} // ipc
-} // dom
-} // mozilla
+}  // namespace ipc
+}  // namespace dom
+}  // namespace mozilla
 
-#endif // dom_ipc_SharedStringMap_h
-
+#endif  // dom_ipc_SharedStringMap_h

@@ -75,6 +75,8 @@ interface XULElement : Element {
   [Throws]
   readonly attribute BoxObject?                 boxObject;
 
+  [SetterThrows]
+  attribute long tabIndex;
   [Throws]
   void                      focus();
   [Throws]
@@ -83,35 +85,18 @@ interface XULElement : Element {
   void                      click();
   void                      doCommand();
 
-  // XXXbz this isn't really a nodelist!  See bug 818548
-  NodeList            getElementsByAttribute(DOMString name,
-                                             DOMString value);
-  // XXXbz this isn't really a nodelist!  See bug 818548
-  [Throws]
-  NodeList            getElementsByAttributeNS(DOMString namespaceURI,
-                                               DOMString name,
-                                               DOMString value);
   [Constant]
   readonly attribute CSSStyleDeclaration style;
-};
 
-// And the things from nsIFrameLoaderOwner
-[NoInterfaceObject]
-interface MozFrameLoaderOwner {
-  [ChromeOnly]
-  readonly attribute FrameLoader? frameLoader;
+  // Returns true if this is a menu-type element that has a menu
+  // frame associated with it.
+  boolean hasMenu();
 
-  [ChromeOnly, Throws]
-  void presetOpenerWindow(WindowProxy? window);
-
-  [ChromeOnly, Throws]
-  void swapFrameLoaders(XULElement aOtherLoaderOwner);
-
-  [ChromeOnly, Throws]
-  void swapFrameLoaders(HTMLIFrameElement aOtherLoaderOwner);
+  // If this is a menu-type element, opens or closes the menu
+  // depending on the argument passed.
+  void openMenu(boolean open);
 };
 
 XULElement implements GlobalEventHandlers;
 XULElement implements TouchEventHandlers;
-XULElement implements MozFrameLoaderOwner;
 XULElement implements OnErrorEventHandlerForNodes;

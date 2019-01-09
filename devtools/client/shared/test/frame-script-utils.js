@@ -117,7 +117,7 @@ addMessageListener("devtools:test:profiler", function({ data }) {
   const result = Services.profiler[method](...args);
   sendAsyncMessage("devtools:test:profiler:response", {
     data: result,
-    id: id
+    id: id,
   });
 });
 
@@ -125,7 +125,7 @@ addMessageListener("devtools:test:profiler", function({ data }) {
 addMessageListener("devtools:test:eval", function({ data }) {
   sendAsyncMessage("devtools:test:eval:response", {
     value: content.eval(data.script),
-    id: data.id
+    id: data.id,
   });
 });
 
@@ -151,6 +151,33 @@ addMessageListener("devtools:test:setStyle", function(msg) {
   node.style[propertyName] = propertyValue;
 
   sendAsyncMessage("devtools:test:setStyle");
+});
+
+/**
+ * Set multiple styles to the node for the given selector at once.
+ * @param {Object} data
+ * - {String} selector The CSS selector to get the node (can be a "super"
+ *   selector).
+ * - {Object} properties
+ *            e.g. {
+ *              opacity: 0,
+ *              color: "red",
+ *              animationTimingFunction: "linear",
+ *            }
+ */
+addMessageListener("devtools:test:setMultipleStyles", function(msg) {
+  const {selector, properties} = msg.data;
+  const node = superQuerySelector(selector);
+  if (!node) {
+    return;
+  }
+
+  for (const propertyName in properties) {
+    const propertyValue = properties[propertyName];
+    node.style[propertyName] = propertyValue;
+  }
+
+  sendAsyncMessage("devtools:test:setMultipleStyles");
 });
 
 /**

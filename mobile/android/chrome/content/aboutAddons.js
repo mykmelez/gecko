@@ -16,12 +16,7 @@ const UPDATE_INDICATOR = "chrome://browser/skin/images/extension-update.svg";
 var gStringBundle = Services.strings.createBundle("chrome://browser/locale/aboutAddons.properties");
 
 XPCOMUtils.defineLazyGetter(window, "gChromeWin", function() {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-           .getInterface(Ci.nsIWebNavigation)
-           .QueryInterface(Ci.nsIDocShellTreeItem)
-           .rootTreeItem
-           .QueryInterface(Ci.nsIInterfaceRequestor)
-           .getInterface(Ci.nsIDOMWindow)
+  return window.docShell.rootTreeItem.domWindow
            .QueryInterface(Ci.nsIDOMChromeWindow);
 });
 ChromeUtils.defineModuleGetter(window, "Preferences",
@@ -93,7 +88,7 @@ var ContextMenus = {
   uninstall: function(event) {
     Addons.uninstall(this.target.addon);
     this.target = null;
-  }
+  },
 };
 
 function sendEMPong() {
@@ -134,7 +129,7 @@ function openOptionsInTab(url) {
   BrowserApp.selectOrAddTab(url, {
     startsWith: true,
     selected: true,
-    parentId: BrowserApp.selectedTab.id
+    parentId: BrowserApp.selectedTab.id,
   });
 }
 
@@ -526,20 +521,33 @@ var Addons = {
       return addon.enable();
     }
 
+    function updateOtherThemeStateInUI(item) {
+      if (aValue) {
+        // Mark the previously enabled theme as disabled.
+        if (item.addon.isActive) {
+          item.setAttribute("isDisabled", true);
+          return true;
+        }
+      // The current theme is being disabled - enable the default theme.
+      } else if (item.addon.id == "default-theme@mozilla.org") {
+        item.removeAttribute("isDisabled");
+        return true;
+      }
+      return false;
+    }
+
     let opType;
     if (addon.type == "theme") {
-      if (aValue) {
-        // We can have only one theme enabled, so disable the current one if any
-        let list = document.getElementById("addons-list");
-        let item = list.firstElementChild;
-        while (item) {
-          if (item.addon && (item.addon.type == "theme") && (item.addon.isActive)) {
-            item.addon.disable();
-            item.setAttribute("isDisabled", true);
-            break;
-          }
-          item = item.nextSibling;
+      // Themes take care of themselves to make sure only one is active at the
+      // same time, but we need to fix up the state of other themes in the UI.
+      let list = document.getElementById("addons-list");
+      let item = list.firstElementChild;
+      while (item) {
+        if (item.addon && (item.addon.type == "theme") &&
+            updateOtherThemeStateInUI(item)) {
+          break;
         }
+        item = item.nextSibling;
       }
       setDisabled(addon, !aValue);
     } else if (addon.type == "locale") {
@@ -751,7 +759,7 @@ var Addons = {
   },
 
   onDownloadCancelled: function(aInstall) {
-  }
+  },
 };
 
 window.addEventListener("load", init);

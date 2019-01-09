@@ -16,7 +16,7 @@ import runxpcshelltests as xpcshell
 import tempfile
 from zipfile import ZipFile
 
-from mozdevice import ADBAndroid, ADBDevice
+from mozdevice import ADBDevice, ADBTimeoutError
 import mozfile
 import mozinfo
 from mozlog import commandline
@@ -129,19 +129,17 @@ class RemoteXPCShellTestThread(xpcshell.XPCShellTestThread):
         self.httpdManifest = posixpath.join(self.remoteComponentsDir, 'httpd.manifest')
         self.testingModulesDir = self.remoteModulesDir
         self.testharnessdir = self.remoteScriptsDir
-        xpcshell.XPCShellTestThread.buildXpcsCmd(self)
+        xpcsCmd = xpcshell.XPCShellTestThread.buildXpcsCmd(self)
         # remove "-g <dir> -a <dir>" and add "--greomni <apk>"
-        del(self.xpcsCmd[1:5])
+        del xpcsCmd[1:5]
         if self.options['localAPK']:
-            self.xpcsCmd.insert(3, '--greomni')
-            self.xpcsCmd.insert(4, self.remoteAPK)
+            xpcsCmd.insert(3, '--greomni')
+            xpcsCmd.insert(4, self.remoteAPK)
 
         if self.remoteDebugger:
             # for example, "/data/local/gdbserver" "localhost:12345"
-            self.xpcsCmd = [
-              self.remoteDebugger,
-              self.remoteDebuggerArgs,
-              self.xpcsCmd]
+            xpcsCmd = [self.remoteDebugger, self.remoteDebuggerArgs] + xpcsCmd
+        return xpcsCmd
 
     def killTimeout(self, proc):
         self.kill(proc)
@@ -156,6 +154,8 @@ class RemoteXPCShellTestThread(xpcshell.XPCShellTestThread):
             adb_process = self.device.shell(cmd, timeout=timeout+10, root=True)
             output_file = adb_process.stdout_file
             self.shellReturnCode = adb_process.exitcode
+        except ADBTimeoutError:
+            raise
         except Exception as e:
             if self.timedout:
                 # If the test timed out, there is a good chance the shell
@@ -214,6 +214,8 @@ class RemoteXPCShellTestThread(xpcshell.XPCShellTestThread):
     def removeDir(self, dirname):
         try:
             self.device.rm(dirname, recursive=True, root=True)
+        except ADBTimeoutError:
+            raise
         except Exception as e:
             self.log.warning(str(e))
 
@@ -241,10 +243,10 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
         verbose = False
         if options['log_tbpl_level'] == 'debug' or options['log_mach_level'] == 'debug':
             verbose = True
-        self.device = ADBAndroid(adb=options['adbPath'] or 'adb',
-                                 device=options['deviceSerial'],
-                                 test_root=options['remoteTestRoot'],
-                                 verbose=verbose)
+        self.device = ADBDevice(adb=options['adbPath'] or 'adb',
+                                device=options['deviceSerial'],
+                                test_root=options['remoteTestRoot'],
+                                verbose=verbose)
         self.remoteTestRoot = posixpath.join(self.device.test_root, "xpc")
         # Add Android version (SDK level) to mozinfo so that manifest entries
         # can be conditional on android_version.
@@ -346,6 +348,16 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
         self.device.chmod(remoteWrapper, root=True)
         os.remove(localWrapper)
 
+    def buildPrefsFile(self, extraPrefs):
+        prefs = super(XPCShellRemote, self).buildPrefsFile(extraPrefs)
+
+        remotePrefsFile = posixpath.join(self.remoteTestRoot, 'user.js')
+        self.device.push(self.prefsFile, remotePrefsFile)
+        self.device.chmod(remotePrefsFile, root=True)
+        os.remove(self.prefsFile)
+        self.prefsFile = remotePrefsFile
+        return prefs
+
     def buildEnvironment(self):
         self.buildCoreEnvironment()
         self.setLD_LIBRARY_PATH()
@@ -428,12 +440,9 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
         self.pushLibs()
 
     def pushLibs(self):
-        elfhack = None
-        xrePath = self.options.get('xrePath')
-        if xrePath:
-            elfhack = os.path.join(xrePath, 'elfhack')
-            if not os.path.exists(elfhack):
-                elfhack = None
+        elfhack = os.path.join(self.localBin, 'elfhack')
+        if not os.path.exists(elfhack):
+            elfhack = None
         pushed_libs_count = 0
         if self.options['localAPK']:
             try:
@@ -533,7 +542,7 @@ def verifyRemoteOptions(parser, options):
         elif options['objdir']:
             options['localLib'] = os.path.join(options['objdir'], 'dist/bin')
         elif os.path.isfile(os.path.join(here, '..', 'bin', 'xpcshell')):
-            # assume tests are being run from a tests.zip
+            # assume tests are being run from a tests archive
             options['localLib'] = os.path.abspath(os.path.join(here, '..', 'bin'))
         else:
             parser.error("Couldn't find local library dir, specify --local-lib-dir")
@@ -547,7 +556,7 @@ def verifyRemoteOptions(parser, options):
             else:
                 parser.error("Couldn't find local binary dir, specify --local-bin-dir")
         elif os.path.isfile(os.path.join(here, '..', 'bin', 'xpcshell')):
-            # assume tests are being run from a tests.zip
+            # assume tests are being run from a tests archive
             options['localBin'] = os.path.abspath(os.path.join(here, '..', 'bin'))
         else:
             parser.error("Couldn't find local binary dir, specify --local-bin-dir")

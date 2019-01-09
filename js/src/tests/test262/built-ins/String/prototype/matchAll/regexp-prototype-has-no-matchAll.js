@@ -1,4 +1,4 @@
-// |reftest| skip -- Symbol.matchAll,String.prototype.matchAll is not supported
+// |reftest| skip-if(!Symbol.hasOwnProperty('matchAll')||!String.prototype.hasOwnProperty('matchAll')) -- Symbol.matchAll,String.prototype.matchAll is not enabled unconditionally
 // Copyright (C) 2018 Peter Wong. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 /*---
@@ -11,17 +11,19 @@ info: |
       a. Let matcher be ? GetMethod(regexp, @@matchAll).
       b. If matcher is not undefined, then
         [...]
-    3. Return ? MatchAllIterator(regexp, O).
+    [...]
+    4. Let rx be ? RegExpCreate(R, "g").
+    5. Return ? Invoke(rx, @@matchAll, « S »).
+
 features: [Symbol.matchAll, String.prototype.matchAll]
 includes: [compareArray.js, compareIterator.js, regExpUtils.js]
 ---*/
 
 delete RegExp.prototype[Symbol.matchAll];
-var str = 'a*b';
+var str = '/a/g*/b/g';
 
-assert.compareIterator(str.matchAll(/\w/g), [
-  matchValidator(['a'], 0, str),
-  matchValidator(['b'], 2, str)
-]);
+assert.throws(TypeError, function() {
+  str.matchAll(/\w/g);
+});
 
 reportCompare(0, 0);

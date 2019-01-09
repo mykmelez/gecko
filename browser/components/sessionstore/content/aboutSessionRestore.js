@@ -69,22 +69,25 @@ function isTreeViewVisible() {
   return tabList.hasAttribute("available");
 }
 
-function initTreeView() {
+async function initTreeView() {
   // If we aren't visible we initialize as we are made visible (and it's OK
   // to initialize multiple times)
   if (!isTreeViewVisible()) {
     return;
   }
   var tabList = document.getElementById("tabList");
-  var winLabel = tabList.getAttribute("_window_label");
-
+  let l10nIds = [];
+  for (let labelIndex = 0; labelIndex < gStateObject.windows.length; labelIndex++) {
+      l10nIds.push({id: "restore-page-window-label", args: { windowNumber: (labelIndex + 1)}});
+  }
+  let winLabels = await document.l10n.formatValues(l10nIds);
   gTreeData = [];
   gStateObject.windows.forEach(function(aWinData, aIx) {
     var winState = {
-      label: winLabel.replace("%S", (aIx + 1)),
+      label: winLabels[aIx],
       open: true,
       checked: true,
-      ix: aIx
+      ix: aIx,
     };
     winState.tabs = aWinData.tabs.map(function(aTabData) {
       var entry = aTabData.entries[aTabData.index - 1] || { url: "about:blank" };
@@ -96,7 +99,7 @@ function initTreeView() {
         label: entry.title || entry.url,
         checked: true,
         src: iconURL,
-        parent: winState
+        parent: winState,
       };
     });
     gTreeData.push(winState);
@@ -172,15 +175,18 @@ function restoreSession() {
     Services.obs.removeObserver(observe, topic);
     SessionStore.setWindowState(newWindow, stateString, true);
 
-    var tabbrowser = top.gBrowser;
-    var tabIndex = tabbrowser.getBrowserIndexForDocument(document);
-    tabbrowser.removeTab(tabbrowser.tabs[tabIndex]);
+    let tabbrowser = top.gBrowser;
+    let browser = window.docShell.chromeEventHandler;
+    let tab = tabbrowser.getTabForBrowser(browser);
+    tabbrowser.removeTab(tab);
   }, "browser-delayed-startup-finished");
 }
 
 function startNewSession() {
   if (Services.prefs.getIntPref("browser.startup.page") == 0)
-    getBrowserWindow().gBrowser.loadURI("about:blank");
+    getBrowserWindow().gBrowser.loadURI("about:blank", {
+      triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal({}),
+    });
   else
     getBrowserWindow().BrowserHome();
 }
@@ -225,9 +231,7 @@ function onListKeyDown(aEvent) {
 // Helper functions
 
 function getBrowserWindow() {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIWebNavigation)
-               .QueryInterface(Ci.nsIDocShellTreeItem).rootTreeItem
-               .QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindow);
+  return window.docShell.rootTreeItem.domWindow;
 }
 
 function toggleRowChecked(aIx) {
@@ -266,7 +270,7 @@ function toggleRowChecked(aIx) {
 
 function restoreSingleTab(aIx, aShifted) {
   var tabbrowser = getBrowserWindow().gBrowser;
-  var newTab = tabbrowser.addTab();
+  var newTab = tabbrowser.addWebTab();
   var item = gTreeData[aIx];
 
   var tabState = gStateObject.windows[item.parent.ix]
@@ -365,5 +369,5 @@ var treeView = {
   selectionChanged() { },
   performAction(action) { },
   performActionOnCell(action, index, column) { },
-  getColumnProperties(column) { return ""; }
+  getColumnProperties(column) { return ""; },
 };

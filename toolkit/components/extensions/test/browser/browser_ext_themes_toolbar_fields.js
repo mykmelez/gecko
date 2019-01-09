@@ -7,10 +7,6 @@ ChromeUtils.import("resource://testing-common/CustomizableUITestUtils.jsm", this
 let gCUITestUtils = new CustomizableUITestUtils(window);
 
 add_task(async function setup() {
-  await SpecialPowers.pushPrefEnv({set: [
-    ["extensions.webextensions.themes.enabled", true],
-  ]});
-
   await gCUITestUtils.addSearchBar();
   registerCleanupFunction(() => {
     gCUITestUtils.removeSearchBar();
@@ -27,11 +23,11 @@ add_task(async function test_support_toolbar_field_properties() {
     manifest: {
       "theme": {
         "images": {
-          "headerURL": "image1.png",
+          "theme_frame": "image1.png",
         },
         "colors": {
-          "accentcolor": ACCENT_COLOR,
-          "textcolor": TEXT_COLOR,
+          "frame": ACCENT_COLOR,
+          "tab_background_text": TEXT_COLOR,
           "toolbar_field": TOOLBAR_FIELD_BACKGROUND,
           "toolbar_field_text": TOOLBAR_FIELD_COLOR,
           "toolbar_field_border": TOOLBAR_FIELD_BORDER,
@@ -55,7 +51,7 @@ add_task(async function test_support_toolbar_field_properties() {
   let toolbox = document.querySelector("#navigator-toolbox");
   let fields = [
     toolbox.querySelector("#urlbar"),
-    document.getAnonymousElementByAttribute(searchbar, "anonid", "searchbar-textbox"),
+    searchbar.querySelector(".searchbar-textbox"),
   ].filter(field => {
     let bounds = field.getBoundingClientRect();
     return bounds.width > 0 && bounds.height > 0;
@@ -92,8 +88,8 @@ add_task(async function test_support_toolbar_field_brighttext() {
     manifest: {
       "theme": {
         "colors": {
-          "accentcolor": ACCENT_COLOR,
-          "textcolor": TEXT_COLOR,
+          "frame": ACCENT_COLOR,
+          "tab_background_text": TEXT_COLOR,
           "toolbar_field": "#fff",
           "toolbar_field_text": "#000",
         },
@@ -114,8 +110,8 @@ add_task(async function test_support_toolbar_field_brighttext() {
     manifest: {
       "theme": {
         "colors": {
-          "accentcolor": ACCENT_COLOR,
-          "textcolor": TEXT_COLOR,
+          "frame": ACCENT_COLOR,
+          "tab_background_text": TEXT_COLOR,
           "toolbar_field": "#000",
           "toolbar_field_text": "#fff",
         },

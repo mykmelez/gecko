@@ -6,20 +6,33 @@
 
 package org.mozilla.geckoview;
 
+import android.app.ActivityManager;
+import android.content.ComponentName;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ServiceInfo;
+import android.os.Build;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.content.Context;
+import android.os.Process;
+import android.support.annotation.AnyThread;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.annotation.UiThread;
+import android.text.TextUtils;
 import android.util.Log;
 
 import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.GeckoAppShell;
+import org.mozilla.gecko.GeckoSystemStateListener;
+import org.mozilla.gecko.GeckoScreenOrientation;
 import org.mozilla.gecko.GeckoThread;
 import org.mozilla.gecko.PrefsHelper;
 import org.mozilla.gecko.util.BundleEventListener;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoBundle;
+import org.mozilla.gecko.util.StringUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import java.io.File;
@@ -27,6 +40,53 @@ import java.io.File;
 public final class GeckoRuntime implements Parcelable {
     private static final String LOGTAG = "GeckoRuntime";
     private static final boolean DEBUG = false;
+
+    /**
+     * Intent action sent to the crash handler when a crash is encountered.
+     * @see GeckoRuntimeSettings.Builder#crashHandler(Class)
+     */
+    public static final String ACTION_CRASHED = "org.mozilla.gecko.ACTION_CRASHED";
+
+    /**
+     * This is a key for extra data sent with {@link #ACTION_CRASHED}. It refers
+     * to a String with the path to a Breakpad minidump file containing information about
+     * the crash. Several crash reporters are able to ingest this in a
+     * crash report, including <a href="https://sentry.io">Sentry</a>
+     * and Mozilla's <a href="https://wiki.mozilla.org/Socorro">Socorro</a>.
+     * <br><br>
+     * Be aware, the minidump can contain personally identifiable information.
+     * Ensure you are obeying all applicable laws and policies before sending
+     * this to a remote server.
+     * @see GeckoRuntimeSettings.Builder#crashHandler(Class)
+     */
+    public static final String EXTRA_MINIDUMP_PATH = "minidumpPath";
+
+    /**
+     * This is a key for extra data sent with {@link #ACTION_CRASHED}. It refers
+     * to a string with the path to a file containing extra metadata about the crash. The file
+     * contains key-value pairs in the form
+     * <pre>Key=Value</pre>
+     * Be aware, it may contain sensitive data such
+     * as the URI that was loaded at the time of the crash.
+     */
+    public static final String EXTRA_EXTRAS_PATH = "extrasPath";
+
+    /**
+     * This is a key for extra data sent with {@link #ACTION_CRASHED}. The value is
+     * a boolean indicating whether or not the crash dump was succcessfully
+     * retrieved. If this is false, the dump file referred to in
+     * {@link #EXTRA_MINIDUMP_PATH} may be corrupted or incomplete.
+     */
+    public static final String EXTRA_MINIDUMP_SUCCESS = "minidumpSuccess";
+
+    /**
+     * This is a key for extra data sent with {@link #ACTION_CRASHED}. The value is
+     * a boolean indicating whether or not the crash was fatal or not. If true, the
+     * main application process was affected by the crash. If false, only an internal
+     * process used by Gecko has crashed and the application may be able to recover.
+     * @see GeckoSession.ContentDelegate#onCrash(GeckoSession)
+     */
+    public static final String EXTRA_CRASH_FATAL = "fatal";
 
     private static GeckoRuntime sDefaultRuntime;
 
@@ -40,6 +100,7 @@ public final class GeckoRuntime implements Parcelable {
      * @param context An application context for the default runtime.
      * @return The (static) default runtime for the context.
      */
+    @UiThread
     public static synchronized @NonNull GeckoRuntime getDefault(final @NonNull Context context) {
         ThreadUtils.assertOnUiThread();
         if (DEBUG) {
@@ -48,7 +109,7 @@ public final class GeckoRuntime implements Parcelable {
         if (sDefaultRuntime == null) {
             sDefaultRuntime = new GeckoRuntime();
             sDefaultRuntime.attachTo(context);
-            sDefaultRuntime.init(new GeckoRuntimeSettings());
+            sDefaultRuntime.init(context, new GeckoRuntimeSettings());
         }
 
         return sDefaultRuntime;
@@ -63,7 +124,9 @@ public final class GeckoRuntime implements Parcelable {
      *
      * @param context The new context to attach to.
      */
+    @UiThread
     public void attachTo(final @NonNull Context context) {
+        ThreadUtils.assertOnUiThread();
         if (DEBUG) {
             Log.d(LOGTAG, "attachTo " + context.getApplicationContext());
         }
@@ -77,14 +140,41 @@ public final class GeckoRuntime implements Parcelable {
         @Override
         public void handleMessage(final String event, final GeckoBundle message,
                                   final EventCallback callback) {
+            final Class<?> crashHandler = GeckoRuntime.this.getSettings().mCrashHandler;
+
             if ("Gecko:Exited".equals(event) && mDelegate != null) {
                 mDelegate.onShutdown();
                 EventDispatcher.getInstance().unregisterUiThreadListener(mEventListener, "Gecko:Exited");
+            } else if ("GeckoView:ContentCrash".equals(event) && crashHandler != null) {
+                final Context context = GeckoAppShell.getApplicationContext();
+                Intent i = new Intent(ACTION_CRASHED, null,
+                        context, crashHandler);
+                i.putExtra(EXTRA_MINIDUMP_PATH, message.getString(EXTRA_MINIDUMP_PATH));
+                i.putExtra(EXTRA_EXTRAS_PATH, message.getString(EXTRA_EXTRAS_PATH));
+                i.putExtra(EXTRA_MINIDUMP_SUCCESS, true);
+                i.putExtra(EXTRA_CRASH_FATAL, message.getBoolean(EXTRA_CRASH_FATAL, true));
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(i);
+                } else {
+                    context.startService(i);
+                }
             }
         }
     };
 
-    /* package */ boolean init(final @NonNull GeckoRuntimeSettings settings) {
+    private static final String getProcessName(Context context) {
+        final ActivityManager manager = (ActivityManager)context.getSystemService(Context.ACTIVITY_SERVICE);
+        for (final ActivityManager.RunningAppProcessInfo info : manager.getRunningAppProcesses()) {
+            if (info.pid == Process.myPid()) {
+                return info.processName;
+            }
+        }
+
+        return null;
+    }
+
+    /* package */ boolean init(final @NonNull Context context, final @NonNull GeckoRuntimeSettings settings) {
         if (DEBUG) {
             Log.d(LOGTAG, "init");
         }
@@ -93,20 +183,39 @@ public final class GeckoRuntime implements Parcelable {
             flags |= GeckoThread.FLAG_PRELOAD_CHILD;
         }
 
-        if (settings.getNativeCrashReportingEnabled()) {
-            flags |= GeckoThread.FLAG_ENABLE_NATIVE_CRASHREPORTER;
-        }
-
-        if (settings.getJavaCrashReportingEnabled()) {
-            flags |= GeckoThread.FLAG_ENABLE_JAVA_CRASHREPORTER;
-        }
-
         if (settings.getPauseForDebuggerEnabled()) {
             flags |= GeckoThread.FLAG_DEBUGGING;
         }
 
-        if (!GeckoThread.initMainProcess(/* profile */ null, settings.getArguments(),
-                                         settings.getExtras(), flags)) {
+        final Class<?> crashHandler = settings.getCrashHandler();
+        if (crashHandler != null) {
+            try {
+                final ServiceInfo info = context.getPackageManager().getServiceInfo(new ComponentName(context, crashHandler), 0);
+                if (info.processName.equals(getProcessName(context))) {
+                    throw new IllegalArgumentException("Crash handler service must run in a separate process");
+                }
+
+                EventDispatcher.getInstance().registerUiThreadListener(mEventListener, "GeckoView:ContentCrash");
+
+                flags |= GeckoThread.FLAG_ENABLE_NATIVE_CRASHREPORTER;
+            } catch (PackageManager.NameNotFoundException e) {
+                throw new IllegalArgumentException("Crash handler must be registered as a service");
+            }
+        }
+
+        GeckoAppShell.useMaxScreenDepth(settings.getUseMaxScreenDepth());
+        GeckoAppShell.setDisplayDensityOverride(settings.getDisplayDensityOverride());
+        GeckoAppShell.setDisplayDpiOverride(settings.getDisplayDpiOverride());
+        GeckoAppShell.setScreenSizeOverride(settings.getScreenSizeOverride());
+        GeckoAppShell.setCrashHandlerService(settings.getCrashHandler());
+
+        final GeckoThread.InitInfo info = new GeckoThread.InitInfo();
+        info.args = settings.getArguments();
+        info.extras = settings.getExtras();
+        info.flags = flags;
+        info.prefs = settings.getPrefsMap();
+
+        if (!GeckoThread.init(info)) {
             Log.w(LOGTAG, "init failed (could not initiate GeckoThread)");
             return false;
         }
@@ -129,6 +238,10 @@ public final class GeckoRuntime implements Parcelable {
         return true;
     }
 
+    /* package */ void setDefaultPrefs(GeckoBundle prefs) {
+        EventDispatcher.getInstance().dispatch("GeckoView:SetDefaultPrefs", prefs);
+    }
+
     /**
      * Create a new runtime with default settings and attach it to the given
      * context.
@@ -140,7 +253,9 @@ public final class GeckoRuntime implements Parcelable {
      * @param context The context of the runtime.
      * @return An initialized runtime.
      */
+    @UiThread
     public static @NonNull GeckoRuntime create(final @NonNull Context context) {
+        ThreadUtils.assertOnUiThread();
         return create(context, new GeckoRuntimeSettings());
     }
 
@@ -156,6 +271,7 @@ public final class GeckoRuntime implements Parcelable {
      * @param settings The settings for the runtime.
      * @return An initialized runtime.
      */
+    @UiThread
     public static @NonNull GeckoRuntime create(final @NonNull Context context,
                                                final @NonNull GeckoRuntimeSettings settings) {
         ThreadUtils.assertOnUiThread();
@@ -166,7 +282,7 @@ public final class GeckoRuntime implements Parcelable {
         final GeckoRuntime runtime = new GeckoRuntime();
         runtime.attachTo(context);
 
-        if (!runtime.init(settings)) {
+        if (!runtime.init(context, settings)) {
             throw new IllegalStateException("Failed to initialize GeckoRuntime");
         }
 
@@ -176,11 +292,13 @@ public final class GeckoRuntime implements Parcelable {
     /**
      * Shutdown the runtime. This will invalidate all attached sessions.
      */
+    @AnyThread
     public void shutdown() {
         if (DEBUG) {
             Log.d(LOGTAG, "shutdown");
         }
 
+        GeckoSystemStateListener.getInstance().shutdown();
         GeckoThread.forceQuit();
     }
 
@@ -189,6 +307,7 @@ public final class GeckoRuntime implements Parcelable {
          * This is called when the runtime shuts down. Any GeckoSession instances that were
          * opened with this instance are now considered closed.
          **/
+        @UiThread
         void onShutdown();
     }
 
@@ -197,7 +316,9 @@ public final class GeckoRuntime implements Parcelable {
      *
      * @param delegate an implementation of {@link GeckoRuntime.Delegate}.
      */
-    public void setDelegate(final Delegate delegate) {
+    @UiThread
+    public void setDelegate(final @Nullable Delegate delegate) {
+        ThreadUtils.assertOnUiThread();
         mDelegate = delegate;
     }
 
@@ -206,11 +327,13 @@ public final class GeckoRuntime implements Parcelable {
      *
      * @return an instance of {@link GeckoRuntime.Delegate} or null if no delegate has been set.
      */
+    @UiThread
     public @Nullable Delegate getDelegate() {
         return mDelegate;
     }
 
-    public GeckoRuntimeSettings getSettings() {
+    @AnyThread
+    public @NonNull GeckoRuntimeSettings getSettings() {
         return mSettings;
     }
 
@@ -228,7 +351,8 @@ public final class GeckoRuntime implements Parcelable {
      *
      * @return The telemetry object.
      */
-    public RuntimeTelemetry getTelemetry() {
+    @UiThread
+    public @NonNull RuntimeTelemetry getTelemetry() {
         ThreadUtils.assertOnUiThread();
 
         if (mTelemetry == null) {
@@ -241,29 +365,57 @@ public final class GeckoRuntime implements Parcelable {
     /**
      * Get the profile directory for this runtime. This is where Gecko stores
      * internal data.
+     *
+     * @return Profile directory
      */
-    public File getProfileDir() {
+    @UiThread
+    public @Nullable File getProfileDir() {
+        ThreadUtils.assertOnUiThread();
         return GeckoThread.getActiveProfile().getDir();
     }
 
+    /**
+     * Notify Gecko that the screen orientation has changed.
+     */
+    @UiThread
+    public void orientationChanged() {
+        ThreadUtils.assertOnUiThread();
+        GeckoScreenOrientation.getInstance().update();
+    }
+
+    /**
+     * Notify Gecko that the screen orientation has changed.
+     * @param newOrientation The new screen orientation, as retrieved e.g. from the current
+     *                       {@link android.content.res.Configuration}.
+     */
+    @UiThread
+    public void orientationChanged(int newOrientation) {
+        ThreadUtils.assertOnUiThread();
+        GeckoScreenOrientation.getInstance().update(newOrientation);
+    }
+
     @Override // Parcelable
+    @AnyThread
     public int describeContents() {
         return 0;
     }
 
     @Override // Parcelable
+    @AnyThread
     public void writeToParcel(Parcel out, int flags) {
         out.writeParcelable(mSettings, flags);
     }
 
     // AIDL code may call readFromParcel even though it's not part of Parcelable.
-    public void readFromParcel(final Parcel source) {
+    @AnyThread
+    public void readFromParcel(final @NonNull Parcel source) {
         mSettings = source.readParcelable(getClass().getClassLoader());
     }
 
     public static final Parcelable.Creator<GeckoRuntime> CREATOR
         = new Parcelable.Creator<GeckoRuntime>() {
         @Override
+        @AnyThread
         public GeckoRuntime createFromParcel(final Parcel in) {
             final GeckoRuntime runtime = new GeckoRuntime();
             runtime.readFromParcel(in);
@@ -271,6 +423,7 @@ public final class GeckoRuntime implements Parcelable {
         }
 
         @Override
+        @AnyThread
         public GeckoRuntime[] newArray(final int size) {
             return new GeckoRuntime[size];
         }

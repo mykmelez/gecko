@@ -4,6 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/Atomics.h"
 #include "mozilla/Logging.h"
 #include "mozilla/PerformanceCounter.h"
 
@@ -13,63 +14,56 @@ static mozilla::LazyLogModule sPerformanceCounter("PerformanceCounter");
 #endif
 #define LOG(args) MOZ_LOG(sPerformanceCounter, mozilla::LogLevel::Debug, args)
 
+// Global counter used by PerformanceCounter CTOR via NextCounterID().
+static Atomic<uint64_t> gNextCounterID(0);
+
+static uint64_t NextCounterID() {
+  // This can return the same value on different processes but
+  // we're fine with this behavior because consumers can use a (pid, counter_id)
+  // tuple to make instances globally unique in a browser session.
+  return ++gNextCounterID;
+}
+
 // this instance is the extension for the worker
-const DispatchCategory DispatchCategory::Worker = DispatchCategory((uint32_t)TaskCategory::Count);
+const DispatchCategory DispatchCategory::Worker =
+    DispatchCategory((uint32_t)TaskCategory::Count);
 
 PerformanceCounter::PerformanceCounter(const nsACString& aName)
-  : mExecutionDuration(0),
-    mTotalDispatchCount(0),
-    mDispatchCounter(),
-    mName(aName)
-{
-  ResetPerformanceCounters();
+    : mExecutionDuration(0),
+      mTotalDispatchCount(0),
+      mDispatchCounter(),
+      mName(aName),
+      mID(NextCounterID()) {
+  LOG(("PerformanceCounter created with ID %" PRIu64, mID));
 }
 
-void
-PerformanceCounter::IncrementDispatchCounter(DispatchCategory aCategory)
-{
+void PerformanceCounter::IncrementDispatchCounter(DispatchCategory aCategory) {
   mDispatchCounter[aCategory.GetValue()] += 1;
   mTotalDispatchCount += 1;
-  LOG(("[%s] Total dispatch %" PRIu64, mName.get(), uint64_t(mTotalDispatchCount)));
+  LOG(("[%s][%" PRIu64 "] Total dispatch %" PRIu64, mName.get(), GetID(),
+       uint64_t(mTotalDispatchCount)));
 }
 
-void
-PerformanceCounter::IncrementExecutionDuration(uint32_t aMicroseconds)
-{
+void PerformanceCounter::IncrementExecutionDuration(uint32_t aMicroseconds) {
   mExecutionDuration += aMicroseconds;
-  LOG(("[%s] Total duration %" PRIu64, mName.get(), uint64_t(mExecutionDuration)));
+  LOG(("[%s][%" PRIu64 "] Total duration %" PRIu64, mName.get(), GetID(),
+       uint64_t(mExecutionDuration)));
 }
 
-const DispatchCounter&
-PerformanceCounter::GetDispatchCounter()
-{
+const DispatchCounter& PerformanceCounter::GetDispatchCounter() {
   return mDispatchCounter;
 }
 
-uint64_t
-PerformanceCounter::GetExecutionDuration()
-{
+uint64_t PerformanceCounter::GetExecutionDuration() {
   return mExecutionDuration;
 }
 
-uint64_t
-PerformanceCounter::GetTotalDispatchCount()
-{
+uint64_t PerformanceCounter::GetTotalDispatchCount() {
   return mTotalDispatchCount;
 }
 
-uint32_t
-PerformanceCounter::GetDispatchCount(DispatchCategory aCategory)
-{
+uint32_t PerformanceCounter::GetDispatchCount(DispatchCategory aCategory) {
   return mDispatchCounter[aCategory.GetValue()];
 }
 
-void
-PerformanceCounter::ResetPerformanceCounters()
-{
-  for (auto& cnt : mDispatchCounter) {
-    cnt = 0;
-  }
-  mExecutionDuration = 0;
-  mTotalDispatchCount = 0;
-}
+uint64_t PerformanceCounter::GetID() const { return mID; }

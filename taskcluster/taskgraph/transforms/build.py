@@ -9,8 +9,12 @@ kind.
 from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.util.attributes import RELEASE_PROJECTS
 from taskgraph.util.schema import resolve_keyed_by
 from taskgraph.util.workertypes import worker_type_implementation
+
+import logging
+logger = logging.getLogger(__name__)
 
 transforms = TransformSequence()
 
@@ -49,6 +53,36 @@ def stub_installer(config, jobs):
 
 
 @transforms.add
+def update_channel(config, jobs):
+    for job in jobs:
+        resolve_keyed_by(
+            job, 'run.update-channel', item_name=job['name'],
+            **{
+                'release-type': config.params['release_type'],
+            }
+        )
+        update_channel = job['run'].pop('update-channel', None)
+        if update_channel:
+            job['run'].setdefault('extra-config', {})['update_channel'] = update_channel
+        yield job
+
+
+@transforms.add
+def mozconfig(config, jobs):
+    for job in jobs:
+        resolve_keyed_by(
+            job, 'run.mozconfig-variant', item_name=job['name'],
+            **{
+                'release-type': config.params['release_type'],
+            }
+        )
+        mozconfig_variant = job['run'].pop('mozconfig-variant', None)
+        if mozconfig_variant:
+            job['run'].setdefault('extra-config', {})['mozconfig_variant'] = mozconfig_variant
+        yield job
+
+
+@transforms.add
 def set_env(config, jobs):
     """Set extra environment variables from try command line."""
     env = []
@@ -57,4 +91,20 @@ def set_env(config, jobs):
     for job in jobs:
         if env:
             job['worker']['env'].update(dict(x.split('=') for x in env))
+        yield job
+
+
+@transforms.add
+def enable_full_crashsymbols(config, jobs):
+    """Enable full crashsymbols on jobs with
+    'enable-full-crashsymbols' set to True and on release branches, or
+    on try"""
+    branches = RELEASE_PROJECTS | {'try', }
+    for job in jobs:
+        enable_full_crashsymbols = job['attributes'].get('enable-full-crashsymbols')
+        if enable_full_crashsymbols and config.params['project'] in branches:
+            logger.debug("Enabling full symbol generation for %s", job['name'])
+        else:
+            logger.debug("Disabling full symbol generation for %s", job['name'])
+            job['worker']['env']['MOZ_DISABLE_FULL_SYMBOLS'] = '1'
         yield job

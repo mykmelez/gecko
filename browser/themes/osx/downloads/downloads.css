@@ -6,8 +6,7 @@
 
 /*** Panel and outer controls ***/
 
-@keyfocus@ #downloadsSummary:focus,
-@keyfocus@ .downloadsPanelFooterButton:focus {
+@keyfocus@ #downloadsSummary:focus {
   outline: 2px -moz-mac-focusring solid;
   outline-offset: -2px;
 }
@@ -33,11 +32,11 @@
   color: #ff0039;
 }
 
-.downloadProgress > .progress-bar {
+.downloadProgress::-moz-progress-bar {
   background-color: #3c9af8;
 }
 
-.downloadProgress[paused="true"] > .progress-bar {
+.downloadProgress[paused]::-moz-progress-bar {
   background-color: #a6a6a6;
 }
 

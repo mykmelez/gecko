@@ -91,7 +91,7 @@ var WebrtcUI = {
         title: Strings.brand.GetStringFromName("brandShortName"),
         when: null, // hide the date row
         light: [0xFF9500FF, 1000, 1000],
-        ongoing: true
+        ongoing: true,
       };
 
       let cameraActive = false;
@@ -166,7 +166,7 @@ var WebrtcUI = {
       label: Strings.browser.GetStringFromName("getUserMedia.denyRequest.label"),
       callback: function() {
         Services.obs.notifyObservers(null, "getUserMedia:response:deny", aCallID);
-      }
+      },
     },
     {
       label: Strings.browser.GetStringFromName("getUserMedia.shareRequest.label"),
@@ -192,7 +192,7 @@ var WebrtcUI = {
 
         Services.obs.notifyObservers(allowedDevices, "getUserMedia:response:allow", aCallID);
       },
-      positive: true
+      positive: true,
     }];
   },
 
@@ -250,7 +250,7 @@ var WebrtcUI = {
           id: aType,
           type: "menulist",
           label: Strings.browser.GetStringFromName("getUserMedia." + aType + ".prompt"),
-          values: list
+          values: list,
         });
 
       }
@@ -263,9 +263,9 @@ var WebrtcUI = {
 
     for (let device of aDevices) {
       device = device.QueryInterface(Ci.nsIMediaDevice);
-      if (device.type == "audio") {
+      if (device.type == "audioinput") {
         microphone = true;
-      } else if (device.type == "video") {
+      } else if (device.type == "videoinput") {
         camera = true;
       }
     }
@@ -283,12 +283,7 @@ var WebrtcUI = {
   },
 
   getChromeWindow: function getChromeWindow(aWindow) {
-     let chromeWin = aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                            .getInterface(Ci.nsIWebNavigation)
-                            .QueryInterface(Ci.nsIDocShellTreeItem)
-                            .rootTreeItem
-                            .QueryInterface(Ci.nsIInterfaceRequestor)
-                            .getInterface(Ci.nsIDOMWindow)
+     let chromeWin = aWindow.docShell.rootTreeItem.domWindow
                             .QueryInterface(Ci.nsIDOMChromeWindow);
      return chromeWin;
   },
@@ -300,11 +295,11 @@ var WebrtcUI = {
     for (let device of aDevices) {
       device = device.QueryInterface(Ci.nsIMediaDevice);
       switch (device.type) {
-      case "audio":
+      case "audioinput":
         if (aAudioRequested)
           audioDevices.push(device);
         break;
-      case "video":
+      case "videoinput":
         if (aVideoRequested)
           videoDevices.push(device);
         break;
@@ -341,5 +336,5 @@ var WebrtcUI = {
     let buttons = this.getDeviceButtons(audioDevices, videoDevices, aCallID, uri);
 
     DoorHanger.show(aContentWindow, message, "webrtc-request", buttons, options, "WEBRTC");
-  }
+  },
 };

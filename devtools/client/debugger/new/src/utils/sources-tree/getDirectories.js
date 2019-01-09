@@ -1,63 +1,50 @@
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.getDirectories = getDirectories;
-
-var _utils = require("./utils");
-
-var _getURL = require("./getURL");
-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-function findSource(sourceTree, sourceUrl) {
-  let returnTarget = null;
 
-  function _traverse(subtree) {
-    if ((0, _utils.nodeHasChildren)(subtree)) {
-      for (const child of subtree.contents) {
-        _traverse(child);
-      }
-    } else if (!returnTarget) {
-      if (subtree.path.replace(/http(s)?:\//, "") == sourceUrl) {
-        returnTarget = subtree;
-        return;
-      }
+// @flow
+
+import { createParentMap } from "./utils";
+import type { TreeNode, TreeDirectory } from "./types";
+import type { Source } from "../../types";
+
+function _traverse(subtree: TreeNode, source: Source) {
+  if (subtree.type === "source") {
+    if (subtree.contents.id === source.id) {
+      return subtree;
     }
+
+    return null;
   }
 
-  sourceTree.contents.forEach(_traverse);
-
-  if (!returnTarget) {
-    return sourceTree;
-  }
-
-  return returnTarget;
+  const matches = subtree.contents.map(child => _traverse(child, source));
+  return matches && matches.filter(Boolean)[0];
 }
 
-function getDirectories(sourceUrl, sourceTree) {
-  const url = (0, _getURL.getURL)(sourceUrl);
-  const fullUrl = `${url.group}${url.path}`;
-  const parentMap = (0, _utils.createParentMap)(sourceTree);
-  const source = findSource(sourceTree, fullUrl);
+function findSourceItem(sourceTree: TreeDirectory, source: Source): ?TreeNode {
+  return _traverse(sourceTree, source);
+}
 
-  if (!source) {
-    return [];
+function getAncestors(sourceTree: TreeDirectory, item: ?TreeNode) {
+  if (!item) {
+    return null;
   }
 
-  let node = source;
+  const parentMap = createParentMap(sourceTree);
   const directories = [];
-  directories.push(source);
 
+  directories.push(item);
   while (true) {
-    node = parentMap.get(node);
-
-    if (!node) {
+    item = parentMap.get(item);
+    if (!item) {
       return directories;
     }
-
-    directories.push(node);
+    directories.push(item);
   }
+}
+
+export function getDirectories(source: Source, sourceTree: TreeDirectory) {
+  const item = findSourceItem(sourceTree, source);
+  const ancestors = getAncestors(sourceTree, item);
+  return ancestors || [sourceTree];
 }

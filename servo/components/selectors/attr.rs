@@ -1,26 +1,26 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use crate::parser::SelectorImpl;
 use cssparser::ToCss;
-use parser::SelectorImpl;
 use std::fmt;
 
 #[derive(Clone, Eq, PartialEq)]
-pub struct AttrSelectorWithNamespace<Impl: SelectorImpl> {
-    pub namespace: NamespaceConstraint<(Impl::NamespacePrefix, Impl::NamespaceUrl)>,
+pub struct AttrSelectorWithOptionalNamespace<Impl: SelectorImpl> {
+    pub namespace: Option<NamespaceConstraint<(Impl::NamespacePrefix, Impl::NamespaceUrl)>>,
     pub local_name: Impl::LocalName,
     pub local_name_lower: Impl::LocalName,
     pub operation: ParsedAttrSelectorOperation<Impl::AttrValue>,
     pub never_matches: bool,
 }
 
-impl<Impl: SelectorImpl> AttrSelectorWithNamespace<Impl> {
-    pub fn namespace(&self) -> NamespaceConstraint<&Impl::NamespaceUrl> {
-        match self.namespace {
+impl<Impl: SelectorImpl> AttrSelectorWithOptionalNamespace<Impl> {
+    pub fn namespace(&self) -> Option<NamespaceConstraint<&Impl::NamespaceUrl>> {
+        self.namespace.as_ref().map(|ns| match ns {
             NamespaceConstraint::Any => NamespaceConstraint::Any,
             NamespaceConstraint::Specific((_, ref url)) => NamespaceConstraint::Specific(url),
-        }
+        })
     }
 }
 
@@ -134,8 +134,13 @@ pub static SELECTOR_WHITESPACE: &'static [char] = &[' ', '\t', '\n', '\r', '\x0C
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ParsedCaseSensitivity {
-    CaseSensitive,
+    // 's' was specified.
+    ExplicitCaseSensitive,
+    // 'i' was specified.
     AsciiCaseInsensitive,
+    // No flags were specified and HTML says this is a case-sensitive attribute.
+    CaseSensitive,
+    // No flags were specified and HTML says this is a case-insensitive attribute.
     AsciiCaseInsensitiveIfInHtmlElementInHtmlDocument,
 }
 
@@ -150,7 +155,9 @@ impl ParsedCaseSensitivity {
             ParsedCaseSensitivity::AsciiCaseInsensitiveIfInHtmlElementInHtmlDocument => {
                 CaseSensitivity::CaseSensitive
             },
-            ParsedCaseSensitivity::CaseSensitive => CaseSensitivity::CaseSensitive,
+            ParsedCaseSensitivity::CaseSensitive | ParsedCaseSensitivity::ExplicitCaseSensitive => {
+                CaseSensitivity::CaseSensitive
+            },
             ParsedCaseSensitivity::AsciiCaseInsensitive => CaseSensitivity::AsciiCaseInsensitive,
         }
     }

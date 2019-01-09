@@ -1,22 +1,22 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! A style rule.
 
+use crate::properties::PropertyDeclarationBlock;
+use crate::selector_parser::SelectorImpl;
+use crate::shared_lock::{DeepCloneParams, DeepCloneWithLock, Locked};
+use crate::shared_lock::{SharedRwLock, SharedRwLockReadGuard, ToCssWithGuard};
+use crate::str::CssStringWriter;
 use cssparser::SourceLocation;
 #[cfg(feature = "gecko")]
-use malloc_size_of::{MallocShallowSizeOf, MallocSizeOf, MallocSizeOfOps};
-#[cfg(feature = "gecko")]
 use malloc_size_of::MallocUnconditionalShallowSizeOf;
-use properties::PropertyDeclarationBlock;
-use selector_parser::SelectorImpl;
+#[cfg(feature = "gecko")]
+use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
 use selectors::SelectorList;
 use servo_arc::Arc;
-use shared_lock::{DeepCloneParams, DeepCloneWithLock, Locked};
-use shared_lock::{SharedRwLock, SharedRwLockReadGuard, ToCssWithGuard};
 use std::fmt::{self, Write};
-use str::CssStringWriter;
 
 /// A style rule, with selectors and declarations.
 #[derive(Debug)]
@@ -50,20 +50,9 @@ impl StyleRule {
     #[cfg(feature = "gecko")]
     pub fn size_of(&self, guard: &SharedRwLockReadGuard, ops: &mut MallocSizeOfOps) -> usize {
         let mut n = 0;
-
-        // We may add measurement of things hanging off the embedded Components
-        // later.
-        n += self.selectors.0.shallow_size_of(ops);
-        for selector in self.selectors.0.iter() {
-            // It's safe to measure this ThinArc directly because it's the
-            // "primary" reference. (The secondary references are on the
-            // Stylist.)
-            n += unsafe { ops.malloc_size_of(selector.thin_arc_heap_ptr()) };
-        }
-
+        n += self.selectors.0.size_of(ops);
         n += self.block.unconditional_shallow_size_of(ops) +
             self.block.read_with(guard).size_of(ops);
-
         n
     }
 }

@@ -8,12 +8,11 @@ include('../templates.mozbuild')
 
 DIRS += [
     'acorn',
-    'apps',
+    'adb',
     'client',
     'css',
     'discovery',
     'fronts',
-    'gcli',
     'heapsnapshot',
     'inspector',
     'jsbeautify',
@@ -22,10 +21,10 @@ DIRS += [
     'node-properties',
     'performance',
     'platform',
-    'pretty-fast',
+    'protocol',
     'qrcode',
+    'screenshot',
     'security',
-    'sourcemap',
     'sprintfjs',
     'specs',
     'transport',
@@ -37,7 +36,9 @@ DIRS += [
 if not CONFIG['MOZILLA_OFFICIAL']:
     DIRS += ['test-helpers']
 
-BROWSER_CHROME_MANIFESTS += ['tests/browser/browser.ini']
+if CONFIG['MOZ_BUILD_APP'] != 'mobile/android':
+    BROWSER_CHROME_MANIFESTS += ['tests/browser/browser.ini']
+
 MOCHITEST_CHROME_MANIFESTS += ['tests/mochitest/chrome.ini']
 XPCSHELL_TESTS_MANIFESTS += ['tests/unit/xpcshell.ini']
 
@@ -72,7 +73,6 @@ DevToolsModules(
     'task.js',
     'ThreadSafeDevToolsUtils.js',
     'throttle.js',
-    'wasm-source-map.js',
 )
 
 with Files('**'):

@@ -26,7 +26,7 @@ button {
 }
 
 .button-text {
-  margin: 0 !important;
+  margin: 0;
   text-align: center;
 }
 
@@ -53,17 +53,6 @@ button:-moz-focusring {
   }
 }
 
-/* .......... active/open/checked state .......... */
-
-@media (-moz-windows-classic) {
-  button:-moz-any(:hover:active,[open="true"],[checked="true"]):not([disabled="true"]) > .button-box {
-    padding-top: 3px;
-    padding-bottom: 2px;
-    padding-inline-start: 5px;
-    padding-inline-end: 4px;
-  }
-}
-
 /* .......... disabled state .......... */
 
 button[disabled="true"] {
@@ -77,25 +66,15 @@ button[disabled="true"] {
   }
 }
 
-/* ::::: menu/menu-button buttons ::::: */
+/* ::::: menu buttons ::::: */
 
-button[type="menu-button"] {
-  margin: 0;
-}
-
-.button-menu-dropmarker,
-.button-menubutton-dropmarker {
-  -moz-appearance: none !important;
-  margin: 1px;
-  width: 11px;
-  height: 11px;
-}
-
-.button-menubutton-dropmarker[open="true"] {
-  margin-top: 2px;
-  margin-bottom: 0px;
-  margin-inline-start: 2px;
-  margin-inline-end: 0px;
+.button-menu-dropmarker {
+  -moz-appearance: none;
+  list-style-image: url("chrome://global/skin/icons/arrow-dropdown-12.svg");
+  -moz-context-properties: fill;
+  fill: currentColor;
+  width: 12px;
+  height: 12px;
 }
 
 /* ::::: plain buttons ::::: */
@@ -108,12 +87,12 @@ button.plain {
 button[type="disclosure"] {
   margin: 0;
   -moz-appearance: none;
-  list-style-image: url("chrome://global/skin/tree/twisty-collapsed.svg");
+  list-style-image: url("chrome://global/skin/icons/twisty-collapsed.svg");
   -moz-context-properties: fill;
   fill: currentColor;
   min-width: 0;
 }
 
 button[type="disclosure"][open="true"] {
-  list-style-image: url("chrome://global/skin/tree/twisty-expanded.svg");
+  list-style-image: url("chrome://global/skin/icons/twisty-expanded.svg");
 }

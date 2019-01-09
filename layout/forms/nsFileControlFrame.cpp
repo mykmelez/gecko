@@ -8,10 +8,9 @@
 
 #include "nsGkAtoms.h"
 #include "nsCOMPtr.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/dom/NodeInfo.h"
 #include "mozilla/dom/Element.h"
-#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/DOMStringList.h"
 #include "mozilla/dom/DataTransfer.h"
 #include "mozilla/dom/Directory.h"
@@ -22,44 +21,170 @@
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/MutationEventBinding.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs.h"
 #include "nsNodeInfoManager.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsContentUtils.h"
 #include "mozilla/EventStates.h"
 #include "nsTextNode.h"
+#include "nsTextFrame.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
-nsIFrame*
-NS_NewFileControlFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
-{
+nsIFrame* NS_NewFileControlFrame(nsIPresShell* aPresShell,
+                                 ComputedStyle* aStyle) {
   return new (aPresShell) nsFileControlFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsFileControlFrame)
 
 nsFileControlFrame::nsFileControlFrame(ComputedStyle* aStyle)
-  : nsBlockFrame(aStyle, kClassID)
-{
+    : nsBlockFrame(aStyle, kClassID) {
   AddStateBits(NS_BLOCK_FLOAT_MGR);
 }
 
-
-void
-nsFileControlFrame::Init(nsIContent*       aContent,
-                         nsContainerFrame* aParent,
-                         nsIFrame*         aPrevInFlow)
-{
+void nsFileControlFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
+                              nsIFrame* aPrevInFlow) {
   nsBlockFrame::Init(aContent, aParent, aPrevInFlow);
 
   mMouseListener = new DnDListener(this);
 }
 
-void
-nsFileControlFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData)
-{
-  ENSURE_TRUE(mContent);
+bool nsFileControlFrame::CropTextToWidth(gfxContext& aRenderingContext,
+                                         const nsIFrame* aFrame, nscoord aWidth,
+                                         nsString& aText) {
+  if (aText.IsEmpty()) {
+    return false;
+  }
+
+  RefPtr<nsFontMetrics> fm =
+      nsLayoutUtils::GetFontMetricsForFrame(aFrame, 1.0f);
+
+  // see if the text will completely fit in the width given
+  nscoord textWidth = nsLayoutUtils::AppUnitWidthOfStringBidi(
+      aText, aFrame, *fm, aRenderingContext);
+  if (textWidth <= aWidth) {
+    return false;
+  }
+
+  DrawTarget* drawTarget = aRenderingContext.GetDrawTarget();
+  const nsDependentString& kEllipsis = nsContentUtils::GetLocalizedEllipsis();
+
+  // see if the width is even smaller than the ellipsis
+  fm->SetTextRunRTL(false);
+  textWidth = nsLayoutUtils::AppUnitWidthOfString(kEllipsis, *fm, drawTarget);
+  if (textWidth >= aWidth) {
+    aText = kEllipsis;
+    return true;
+  }
+
+  // determine how much of the string will fit in the max width
+  nscoord totalWidth = textWidth;
+  using mozilla::unicode::ClusterIterator;
+  using mozilla::unicode::ClusterReverseIterator;
+  ClusterIterator leftIter(aText.Data(), aText.Length());
+  ClusterReverseIterator rightIter(aText.Data(), aText.Length());
+  const char16_t* leftPos = leftIter;
+  const char16_t* rightPos = rightIter;
+  const char16_t* pos;
+  ptrdiff_t length;
+  nsAutoString leftString, rightString;
+
+  while (leftPos < rightPos) {
+    leftIter.Next();
+    pos = leftIter;
+    length = pos - leftPos;
+    textWidth =
+        nsLayoutUtils::AppUnitWidthOfString(leftPos, length, *fm, drawTarget);
+    if (totalWidth + textWidth > aWidth) {
+      break;
+    }
+
+    leftString.Append(leftPos, length);
+    leftPos = pos;
+    totalWidth += textWidth;
+
+    if (leftPos >= rightPos) {
+      break;
+    }
+
+    rightIter.Next();
+    pos = rightIter;
+    length = rightPos - pos;
+    textWidth =
+        nsLayoutUtils::AppUnitWidthOfString(pos, length, *fm, drawTarget);
+    if (totalWidth + textWidth > aWidth) {
+      break;
+    }
+
+    rightString.Insert(pos, 0, length);
+    rightPos = pos;
+    totalWidth += textWidth;
+  }
+
+  aText = leftString + kEllipsis + rightString;
+  return true;
+}
+
+void nsFileControlFrame::Reflow(nsPresContext* aPresContext,
+                                ReflowOutput& aMetrics,
+                                const ReflowInput& aReflowInput,
+                                nsReflowStatus& aStatus) {
+  // Restore the uncropped filename.
+  nsAutoString filename;
+  HTMLInputElement::FromNode(mContent)->GetDisplayFileName(filename);
+
+  bool done = false;
+  while (true) {
+    UpdateDisplayedValue(filename, false);  // update the text node
+    AddStateBits(NS_BLOCK_NEEDS_BIDI_RESOLUTION);
+    LinesBegin()->MarkDirty();
+    nsBlockFrame::Reflow(aPresContext, aMetrics, aReflowInput, aStatus);
+    if (done) {
+      break;
+    }
+    nscoord lineISize = LinesBegin()->ISize();
+    const auto cbWM = aMetrics.GetWritingMode();
+    const auto wm = GetWritingMode();
+    nscoord iSize =
+        wm.IsOrthogonalTo(cbWM) ? aMetrics.BSize(cbWM) : aMetrics.ISize(cbWM);
+    auto bp = GetLogicalUsedBorderAndPadding(wm);
+    nscoord contentISize = iSize - bp.IStartEnd(wm);
+    if (lineISize > contentISize) {
+      // The filename overflows - crop it and reflow again (once).
+      // NOTE: the label frame might have bidi-continuations
+      auto* labelFrame = mTextContent->GetPrimaryFrame();
+      nscoord labelBP =
+          labelFrame->GetLogicalUsedBorderAndPadding(wm).IStartEnd(wm);
+      auto* lastLabelCont = labelFrame->LastContinuation();
+      if (lastLabelCont != labelFrame) {
+        labelBP +=
+            lastLabelCont->GetLogicalUsedBorderAndPadding(wm).IStartEnd(wm);
+      }
+      auto* buttonFrame = mBrowseFilesOrDirs->GetPrimaryFrame();
+      nscoord availableISizeForLabel =
+          contentISize - buttonFrame->ISize(wm) -
+          buttonFrame->GetLogicalUsedMargin(wm).IStartEnd(wm);
+      if (CropTextToWidth(*aReflowInput.mRenderingContext, labelFrame,
+                          availableISizeForLabel - labelBP, filename)) {
+        nsBlockFrame::DidReflow(aPresContext, &aReflowInput);
+        aStatus.Reset();
+        labelFrame->AddStateBits(NS_FRAME_IS_DIRTY |
+                                 NS_BLOCK_NEEDS_BIDI_RESOLUTION);
+        mMinWidth = NS_INTRINSIC_WIDTH_UNKNOWN;
+        mPrefWidth = NS_INTRINSIC_WIDTH_UNKNOWN;
+        done = true;
+        continue;
+      }
+    }
+    break;
+  }
+}
+
+void nsFileControlFrame::DestroyFrom(nsIFrame* aDestructRoot,
+                                     PostDestroyData& aPostDestroyData) {
+  NS_ENSURE_TRUE_VOID(mContent);
 
   // Remove the events.
   if (mContent) {
@@ -76,11 +201,10 @@ nsFileControlFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostD
   nsBlockFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
 }
 
-static already_AddRefed<Element>
-MakeAnonButton(nsIDocument* aDoc, const char* labelKey,
-               HTMLInputElement* aInputElement,
-               const nsAString& aAccessKey)
-{
+static already_AddRefed<Element> MakeAnonButton(Document* aDoc,
+                                                const char* labelKey,
+                                                HTMLInputElement* aInputElement,
+                                                const nsAString& aAccessKey) {
   RefPtr<Element> button = aDoc->CreateHTMLElement(nsGkAtoms::button);
   // NOTE: SetIsNativeAnonymousRoot() has to be called before setting any
   // attribute.
@@ -96,7 +220,7 @@ MakeAnonButton(nsIDocument* aDoc, const char* labelKey,
   // Set the browse button text. It's a bit of a pain to do because we want to
   // make sure we are not notifying.
   RefPtr<nsTextNode> textContent =
-    new nsTextNode(button->NodeInfo()->NodeInfoManager());
+      new nsTextNode(button->NodeInfo()->NodeInfoManager());
 
   textContent->SetText(buttonTxt, false);
 
@@ -108,7 +232,7 @@ MakeAnonButton(nsIDocument* aDoc, const char* labelKey,
   // Make sure access key and tab order for the element actually redirect to the
   // file picking button.
   RefPtr<HTMLButtonElement> buttonElement =
-    HTMLButtonElement::FromNodeOrNull(button);
+      HTMLButtonElement::FromNodeOrNull(button);
 
   if (!aAccessKey.IsEmpty()) {
     buttonElement->SetAccessKey(aAccessKey, IgnoreErrors());
@@ -122,12 +246,12 @@ MakeAnonButton(nsIDocument* aDoc, const char* labelKey,
   return button.forget();
 }
 
-nsresult
-nsFileControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
-{
-  nsCOMPtr<nsIDocument> doc = mContent->GetComposedDoc();
+nsresult nsFileControlFrame::CreateAnonymousContent(
+    nsTArray<ContentInfo>& aElements) {
+  nsCOMPtr<Document> doc = mContent->GetComposedDoc();
 
-  RefPtr<HTMLInputElement> fileContent = HTMLInputElement::FromNodeOrNull(mContent);
+  RefPtr<HTMLInputElement> fileContent =
+      HTMLInputElement::FromNodeOrNull(mContent);
 
   // The access key is transferred to the "Choose files..." button only. In
   // effect that access key allows access to the control via that button, then
@@ -141,29 +265,23 @@ nsFileControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
   }
 
   // Create and setup the text showing the selected files.
-  RefPtr<NodeInfo> nodeInfo;
-  nodeInfo = doc->NodeInfoManager()->GetNodeInfo(nsGkAtoms::label, nullptr,
-                                                 kNameSpaceID_XUL,
-                                                 nsINode::ELEMENT_NODE);
-  NS_TrustedNewXULElement(getter_AddRefs(mTextContent), nodeInfo.forget());
+  mTextContent = doc->CreateHTMLElement(nsGkAtoms::label);
   // NOTE: SetIsNativeAnonymousRoot() has to be called before setting any
   // attribute.
   mTextContent->SetIsNativeAnonymousRoot();
-  mTextContent->SetAttr(kNameSpaceID_None, nsGkAtoms::crop,
-                        NS_LITERAL_STRING("center"), false);
+  RefPtr<nsTextNode> text = new nsTextNode(doc->NodeInfoManager());
+  mTextContent->AppendChildTo(text, false);
 
   // Update the displayed text to reflect the current element's value.
   nsAutoString value;
   HTMLInputElement::FromNode(mContent)->GetDisplayFileName(value);
   UpdateDisplayedValue(value, false);
 
-  if (!aElements.AppendElement(mTextContent)) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+  aElements.AppendElement(mTextContent);
 
   // We should be able to interact with the element by doing drag and drop.
-  mContent->AddSystemEventListener(NS_LITERAL_STRING("drop"),
-                                   mMouseListener, false);
+  mContent->AddSystemEventListener(NS_LITERAL_STRING("drop"), mMouseListener,
+                                   false);
   mContent->AddSystemEventListener(NS_LITERAL_STRING("dragover"),
                                    mMouseListener, false);
 
@@ -172,10 +290,8 @@ nsFileControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
   return NS_OK;
 }
 
-void
-nsFileControlFrame::AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
-                                             uint32_t aFilter)
-{
+void nsFileControlFrame::AppendAnonymousContentTo(
+    nsTArray<nsIContent*>& aElements, uint32_t aFilter) {
   if (mBrowseFilesOrDirs) {
     aElements.AppendElement(mBrowseFilesOrDirs);
   }
@@ -190,16 +306,11 @@ NS_QUERYFRAME_HEAD(nsFileControlFrame)
   NS_QUERYFRAME_ENTRY(nsIFormControlFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsBlockFrame)
 
-void
-nsFileControlFrame::SetFocus(bool aOn, bool aRepaint)
-{
-}
+void nsFileControlFrame::SetFocus(bool aOn, bool aRepaint) {}
 
-static void
-AppendBlobImplAsDirectory(nsTArray<OwningFileOrDirectory>& aArray,
-                          BlobImpl* aBlobImpl,
-                          nsIContent* aContent)
-{
+static void AppendBlobImplAsDirectory(nsTArray<OwningFileOrDirectory>& aArray,
+                                      BlobImpl* aBlobImpl,
+                                      nsIContent* aContent) {
   MOZ_ASSERT(aBlobImpl);
   MOZ_ASSERT(aBlobImpl->IsDirectory());
 
@@ -222,8 +333,7 @@ AppendBlobImplAsDirectory(nsTArray<OwningFileOrDirectory>& aArray,
     return;
   }
 
-  RefPtr<Directory> directory =
-    Directory::Create(inner, file);
+  RefPtr<Directory> directory = Directory::Create(inner, file);
   MOZ_ASSERT(directory);
 
   OwningFileOrDirectory* element = aArray.AppendElement();
@@ -234,8 +344,7 @@ AppendBlobImplAsDirectory(nsTArray<OwningFileOrDirectory>& aArray,
  * This is called when we receive a drop or a dragover.
  */
 NS_IMETHODIMP
-nsFileControlFrame::DnDListener::HandleEvent(Event* aEvent)
-{
+nsFileControlFrame::DnDListener::HandleEvent(Event* aEvent) {
   NS_ASSERTION(mFrame, "We should have been unregistered");
 
   if (aEvent->DefaultPrevented()) {
@@ -252,11 +361,10 @@ nsFileControlFrame::DnDListener::HandleEvent(Event* aEvent)
     return NS_OK;
   }
 
-
   RefPtr<HTMLInputElement> inputElement =
-    HTMLInputElement::FromNode(mFrame->GetContent());
+      HTMLInputElement::FromNode(mFrame->GetContent());
   bool supportsMultiple =
-    inputElement->HasAttr(kNameSpaceID_None, nsGkAtoms::multiple);
+      inputElement->HasAttr(kNameSpaceID_None, nsGkAtoms::multiple);
   if (!CanDropTheseFiles(dataTransfer, supportsMultiple)) {
     dataTransfer->SetDropEffect(NS_LITERAL_STRING("none"));
     aEvent->StopPropagation();
@@ -276,11 +384,11 @@ nsFileControlFrame::DnDListener::HandleEvent(Event* aEvent)
     aEvent->PreventDefault();
 
     RefPtr<FileList> fileList =
-      dataTransfer->GetFiles(*nsContentUtils::GetSystemPrincipal());
+        dataTransfer->GetFiles(*nsContentUtils::GetSystemPrincipal());
 
     RefPtr<BlobImpl> webkitDir;
     nsresult rv =
-      GetBlobImplForWebkitDirectory(fileList, getter_AddRefs(webkitDir));
+        GetBlobImplForWebkitDirectory(fileList, getter_AddRefs(webkitDir));
     NS_ENSURE_SUCCESS(rv, NS_OK);
 
     nsTArray<OwningFileOrDirectory> array;
@@ -289,9 +397,9 @@ nsFileControlFrame::DnDListener::HandleEvent(Event* aEvent)
       inputElement->MozSetDndFilesAndDirectories(array);
     } else {
       bool blinkFileSystemEnabled =
-        Preferences::GetBool("dom.webkitBlink.filesystem.enabled", false);
+          Preferences::GetBool("dom.webkitBlink.filesystem.enabled", false);
       bool dirPickerEnabled =
-        Preferences::GetBool("dom.input.dirpicker", false);
+          Preferences::GetBool("dom.input.dirpicker", false);
       if (blinkFileSystemEnabled || dirPickerEnabled) {
         FileList* files = static_cast<FileList*>(fileList.get());
         if (files) {
@@ -326,33 +434,29 @@ nsFileControlFrame::DnDListener::HandleEvent(Event* aEvent)
         inputElement->SetFiles(fileList, true);
       }
 
-      nsContentUtils::DispatchTrustedEvent(inputElement->OwnerDoc(),
-                                           static_cast<nsINode*>(inputElement),
-                                           NS_LITERAL_STRING("input"),
-                                           CanBubble::eYes,
-                                           Cancelable::eNo);
-      nsContentUtils::DispatchTrustedEvent(inputElement->OwnerDoc(),
-                                           static_cast<nsINode*>(inputElement),
-                                           NS_LITERAL_STRING("change"),
-                                           CanBubble::eYes,
-                                           Cancelable::eNo);
+      RefPtr<TextEditor> textEditor;
+      DebugOnly<nsresult> rvIgnored =
+          nsContentUtils::DispatchInputEvent(inputElement);
+      NS_WARNING_ASSERTION(NS_SUCCEEDED(rvIgnored),
+                           "Failed to dispatch input event");
+      nsContentUtils::DispatchTrustedEvent(
+          inputElement->OwnerDoc(), static_cast<nsINode*>(inputElement),
+          NS_LITERAL_STRING("change"), CanBubble::eYes, Cancelable::eNo);
     }
   }
 
   return NS_OK;
 }
 
-nsresult
-nsFileControlFrame::DnDListener::GetBlobImplForWebkitDirectory(FileList* aFileList,
-                                                               BlobImpl** aBlobImpl)
-{
+nsresult nsFileControlFrame::DnDListener::GetBlobImplForWebkitDirectory(
+    FileList* aFileList, BlobImpl** aBlobImpl) {
   *aBlobImpl = nullptr;
 
   HTMLInputElement* inputElement =
-    HTMLInputElement::FromNode(mFrame->GetContent());
+      HTMLInputElement::FromNode(mFrame->GetContent());
   bool webkitDirPicker =
-    DOMPrefs::WebkitBlinkDirectoryPickerEnabled() &&
-    inputElement->HasAttr(kNameSpaceID_None, nsGkAtoms::webkitdirectory);
+      StaticPrefs::dom_webkitBlink_dirPicker_enabled() &&
+      inputElement->HasAttr(kNameSpaceID_None, nsGkAtoms::webkitdirectory);
   if (!webkitDirPicker) {
     return NS_OK;
   }
@@ -379,9 +483,8 @@ nsFileControlFrame::DnDListener::GetBlobImplForWebkitDirectory(FileList* aFileLi
   return NS_ERROR_FAILURE;
 }
 
-bool
-nsFileControlFrame::DnDListener::IsValidDropData(DataTransfer* aDataTransfer)
-{
+bool nsFileControlFrame::DnDListener::IsValidDropData(
+    DataTransfer* aDataTransfer) {
   if (!aDataTransfer) {
     return false;
   }
@@ -393,16 +496,14 @@ nsFileControlFrame::DnDListener::IsValidDropData(DataTransfer* aDataTransfer)
   return types.Contains(NS_LITERAL_STRING("Files"));
 }
 
-bool
-nsFileControlFrame::DnDListener::CanDropTheseFiles(DataTransfer* aDataTransfer,
-                                                   bool aSupportsMultiple)
-{
+bool nsFileControlFrame::DnDListener::CanDropTheseFiles(
+    DataTransfer* aDataTransfer, bool aSupportsMultiple) {
   RefPtr<FileList> fileList =
-    aDataTransfer->GetFiles(*nsContentUtils::GetSystemPrincipal());
+      aDataTransfer->GetFiles(*nsContentUtils::GetSystemPrincipal());
 
   RefPtr<BlobImpl> webkitDir;
   nsresult rv =
-    GetBlobImplForWebkitDirectory(fileList, getter_AddRefs(webkitDir));
+      GetBlobImplForWebkitDirectory(fileList, getter_AddRefs(webkitDir));
   // Just check if either there isn't webkitdirectory attribute, or
   // fileList has a directory which can be dropped to the element.
   // No need to use webkitDir for anything here.
@@ -415,20 +516,31 @@ nsFileControlFrame::DnDListener::CanDropTheseFiles(DataTransfer* aDataTransfer,
   return listLength <= 1 || aSupportsMultiple;
 }
 
-nscoord
-nsFileControlFrame::GetMinISize(gfxContext *aRenderingContext)
-{
+nscoord nsFileControlFrame::GetMinISize(gfxContext* aRenderingContext) {
   nscoord result;
-  DISPLAY_MIN_WIDTH(this, result);
+  DISPLAY_MIN_INLINE_SIZE(this, result);
 
-  // Our min width is our pref width
+  // Our min inline size is our pref inline size
   result = GetPrefISize(aRenderingContext);
   return result;
 }
 
-void
-nsFileControlFrame::SyncDisabledState()
-{
+nscoord nsFileControlFrame::GetPrefISize(gfxContext* aRenderingContext) {
+  nscoord result;
+  DISPLAY_MIN_INLINE_SIZE(this, result);
+
+  // Make sure we measure with the uncropped filename.
+  if (mPrefWidth == NS_INTRINSIC_WIDTH_UNKNOWN) {
+    nsAutoString filename;
+    HTMLInputElement::FromNode(mContent)->GetDisplayFileName(filename);
+    UpdateDisplayedValue(filename, false);
+  }
+
+  result = nsBlockFrame::GetPrefISize(aRenderingContext);
+  return result;
+}
+
+void nsFileControlFrame::SyncDisabledState() {
   EventStates eventStates = mContent->AsElement()->State();
   if (eventStates.HasState(NS_EVENT_STATE_DISABLED)) {
     mBrowseFilesOrDirs->SetAttr(kNameSpaceID_None, nsGkAtoms::disabled,
@@ -438,11 +550,9 @@ nsFileControlFrame::SyncDisabledState()
   }
 }
 
-nsresult
-nsFileControlFrame::AttributeChanged(int32_t  aNameSpaceID,
-                                     nsAtom* aAttribute,
-                                     int32_t  aModType)
-{
+nsresult nsFileControlFrame::AttributeChanged(int32_t aNameSpaceID,
+                                              nsAtom* aAttribute,
+                                              int32_t aModType) {
   if (aNameSpaceID == kNameSpaceID_None && aAttribute == nsGkAtoms::tabindex) {
     if (aModType == MutationEvent_Binding::REMOVAL) {
       mBrowseFilesOrDirs->UnsetAttr(aNameSpaceID, aAttribute, true);
@@ -456,49 +566,52 @@ nsFileControlFrame::AttributeChanged(int32_t  aNameSpaceID,
   return nsBlockFrame::AttributeChanged(aNameSpaceID, aAttribute, aModType);
 }
 
-void
-nsFileControlFrame::ContentStatesChanged(EventStates aStates)
-{
+void nsFileControlFrame::ContentStatesChanged(EventStates aStates) {
   if (aStates.HasState(NS_EVENT_STATE_DISABLED)) {
     nsContentUtils::AddScriptRunner(new SyncDisabledStateEvent(this));
   }
 }
 
 #ifdef DEBUG_FRAME_DUMP
-nsresult
-nsFileControlFrame::GetFrameName(nsAString& aResult) const
-{
+nsresult nsFileControlFrame::GetFrameName(nsAString& aResult) const {
   return MakeFrameName(NS_LITERAL_STRING("FileControl"), aResult);
 }
 #endif
 
-void
-nsFileControlFrame::UpdateDisplayedValue(const nsAString& aValue, bool aNotify)
-{
-  mTextContent->SetAttr(kNameSpaceID_None, nsGkAtoms::value, aValue, aNotify);
+void nsFileControlFrame::UpdateDisplayedValue(const nsAString& aValue,
+                                              bool aNotify) {
+  auto* text = Text::FromNode(mTextContent->GetFirstChild());
+  uint32_t oldLength = aNotify ? 0 : text->TextLength();
+  text->SetText(aValue, aNotify);
+  if (!aNotify) {
+    // We can't notify during Reflow so we need to tell the text frame
+    // about the text content change we just did.
+    if (auto* textFrame = static_cast<nsTextFrame*>(text->GetPrimaryFrame())) {
+      textFrame->NotifyNativeAnonymousTextnodeChange(oldLength);
+    }
+    nsBlockFrame* label = do_QueryFrame(mTextContent->GetPrimaryFrame());
+    if (label && label->LinesBegin() != label->LinesEnd()) {
+      label->AddStateBits(NS_BLOCK_NEEDS_BIDI_RESOLUTION);
+      label->LinesBegin()->MarkDirty();
+    }
+  }
 }
 
-nsresult
-nsFileControlFrame::SetFormProperty(nsAtom* aName,
-                                    const nsAString& aValue)
-{
+nsresult nsFileControlFrame::SetFormProperty(nsAtom* aName,
+                                             const nsAString& aValue) {
   if (nsGkAtoms::value == aName) {
     UpdateDisplayedValue(aValue, true);
   }
   return NS_OK;
 }
 
-void
-nsFileControlFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                     const nsDisplayListSet& aLists)
-{
+void nsFileControlFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
+                                          const nsDisplayListSet& aLists) {
   BuildDisplayListForInline(aBuilder, aLists);
 }
 
 #ifdef ACCESSIBILITY
-a11y::AccType
-nsFileControlFrame::AccessibleType()
-{
+a11y::AccType nsFileControlFrame::AccessibleType() {
   return a11y::eHTMLFileInputType;
 }
 #endif
@@ -506,5 +619,4 @@ nsFileControlFrame::AccessibleType()
 ////////////////////////////////////////////////////////////
 // Mouse listener implementation
 
-NS_IMPL_ISUPPORTS(nsFileControlFrame::MouseListener,
-                  nsIDOMEventListener)
+NS_IMPL_ISUPPORTS(nsFileControlFrame::MouseListener, nsIDOMEventListener)

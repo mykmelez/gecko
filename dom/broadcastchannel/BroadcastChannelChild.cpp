@@ -23,27 +23,20 @@ using namespace ipc;
 namespace dom {
 
 BroadcastChannelChild::BroadcastChannelChild(const nsACString& aOrigin)
-  : mBC(nullptr)
-  , mActorDestroyed(false)
-{
+    : mBC(nullptr), mActorDestroyed(false) {
   CopyUTF8toUTF16(aOrigin, mOrigin);
 }
 
-BroadcastChannelChild::~BroadcastChannelChild()
-{
-  MOZ_ASSERT(!mBC);
-}
+BroadcastChannelChild::~BroadcastChannelChild() { MOZ_ASSERT(!mBC); }
 
-mozilla::ipc::IPCResult
-BroadcastChannelChild::RecvNotify(const ClonedMessageData& aData)
-{
+mozilla::ipc::IPCResult BroadcastChannelChild::RecvNotify(
+    const ClonedMessageData& aData) {
   // Make sure to retrieve all blobs from the message before returning to avoid
   // leaking their actors.
   ipc::StructuredCloneDataNoTransfers cloneData;
   cloneData.BorrowFromClonedMessageDataForBackgroundChild(aData);
 
-  nsCOMPtr<DOMEventTargetHelper> helper = mBC;
-  nsCOMPtr<EventTarget> eventTarget = do_QueryInterface(helper);
+  nsCOMPtr<EventTarget> eventTarget = mBC;
 
   // The object is going to be deleted soon. No notify is required.
   if (!eventTarget) {
@@ -62,7 +55,7 @@ BroadcastChannelChild::RecvNotify(const ClonedMessageData& aData)
   nsCOMPtr<nsIGlobalObject> globalObject;
 
   if (NS_IsMainThread()) {
-    globalObject = do_QueryInterface(mBC->GetParentObject());
+    globalObject = mBC->GetParentObject();
   } else {
     WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
     MOZ_ASSERT(workerPrivate);
@@ -92,7 +85,7 @@ BroadcastChannelChild::RecvNotify(const ClonedMessageData& aData)
   init.mData = value;
 
   RefPtr<MessageEvent> event =
-    MessageEvent::Constructor(mBC, NS_LITERAL_STRING("message"), init);
+      MessageEvent::Constructor(mBC, NS_LITERAL_STRING("message"), init);
 
   event->SetTrusted(true);
 
@@ -101,26 +94,22 @@ BroadcastChannelChild::RecvNotify(const ClonedMessageData& aData)
   return IPC_OK();
 }
 
-void
-BroadcastChannelChild::ActorDestroy(ActorDestroyReason aWhy)
-{
+void BroadcastChannelChild::ActorDestroy(ActorDestroyReason aWhy) {
   mActorDestroyed = true;
 }
 
-void
-BroadcastChannelChild::DispatchError(JSContext* aCx)
-{
+void BroadcastChannelChild::DispatchError(JSContext* aCx) {
   RootedDictionary<MessageEventInit> init(aCx);
   init.mBubbles = false;
   init.mCancelable = false;
   init.mOrigin = mOrigin;
 
   RefPtr<Event> event =
-    MessageEvent::Constructor(mBC, NS_LITERAL_STRING("messageerror"), init);
+      MessageEvent::Constructor(mBC, NS_LITERAL_STRING("messageerror"), init);
   event->SetTrusted(true);
 
   mBC->DispatchEvent(*event);
 }
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla

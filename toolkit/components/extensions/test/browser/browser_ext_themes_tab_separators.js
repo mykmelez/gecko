@@ -7,8 +7,8 @@ add_task(async function test_support_tab_separators() {
     manifest: {
       "theme": {
         "colors": {
-          "accentcolor": "#000",
-          "textcolor": "#9400ff",
+          "frame": "#000",
+          "tab_background_text": "#9400ff",
           "tab_background_separator":  TAB_SEPARATOR_COLOR,
         },
       },
@@ -18,7 +18,7 @@ add_task(async function test_support_tab_separators() {
 
   info("Checking background tab separator color");
 
-  let tab = gBrowser.addTab("about:blank");
+  let tab = BrowserTestUtils.addTab(gBrowser, "about:blank");
 
   Assert.equal(window.getComputedStyle(tab, "::before").borderLeftColor,
                `rgb(${hexToRGB(TAB_SEPARATOR_COLOR).join(", ")})`,

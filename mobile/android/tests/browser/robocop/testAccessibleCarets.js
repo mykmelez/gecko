@@ -4,11 +4,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-/* eslint-disable mozilla/use-chromeutils-import */
-
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Messaging.jsm");
-Cu.import("resource://gre/modules/Geometry.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Messaging.jsm");
+ChromeUtils.import("resource://gre/modules/Geometry.jsm");
 
 const ACCESSIBLECARET_PREF = "layout.accessiblecaret.enabled";
 const BASE_TEST_URL = "http://mochi.test:8888/tests/robocop/testAccessibleCarets.html";
@@ -46,10 +44,8 @@ function do_promiseTabChangeEvent(tabId, eventType) {
  * or if we have basic content.
  */
 function isInputOrTextarea(element) {
-  // ChromeUtils isn't included in robocop tests, so we have to use a different
-  // way to test elements.
-  return (element.namespaceURI === "http://www.w3.org/1999/xhtml" &&
-         (element.localName === "input" || element.localName === "textarea"));
+  return (ChromeUtils.getClassName(element) === "HTMLInputElement" ||
+          ChromeUtils.getClassName(element) === "HTMLTextAreaElement");
 }
 
 /**
@@ -109,8 +105,7 @@ function getCharPressPoint(doc, element, char, expected) {
  * @return Selection state helper-result object.
  */
 function getLongPressResult(browser, midPoint) {
-  let domWinUtils = browser.contentWindow.
-    QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+  let domWinUtils = browser.contentWindow.windowUtils;
 
   // AccessibleCarets expect longtap between touchstart/end.
   domWinUtils.sendTouchEventToWindow("touchstart", [0], [midPoint.x], [midPoint.y],

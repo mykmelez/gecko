@@ -5,6 +5,12 @@
 include protocol PAsmJSCacheEntry;
 include protocol PBackgroundIDBFactory;
 include protocol PBackgroundIndexedDBUtils;
+include protocol PBackgroundSDBConnection;
+include protocol PBackgroundLSDatabase;
+include protocol PBackgroundLSObserver;
+include protocol PBackgroundLSRequest;
+include protocol PBackgroundLSSimpleRequest;
+include protocol PBackgroundLocalStorageCache;
 include protocol PBackgroundStorage;
 include protocol PBackgroundTest;
 include protocol PBroadcastChannel;
@@ -12,6 +18,7 @@ include protocol PCache;
 include protocol PCacheStorage;
 include protocol PCacheStreamControl;
 include protocol PClientManager;
+include protocol PEndpointForReport;
 include protocol PFileDescriptorSet;
 include protocol PFileSystemRequest;
 include protocol PGamepadEventChannel;
@@ -19,6 +26,9 @@ include protocol PGamepadTestChannel;
 include protocol PHttpBackgroundChannel;
 include protocol PIPCBlobInputStream;
 include protocol PPendingIPCBlob;
+include protocol PRemoteWorker;
+include protocol PRemoteWorkerService;
+include protocol PSharedWorker;
 include protocol PTemporaryIPCBlob;
 include protocol PMessagePort;
 include protocol PCameras;
@@ -27,20 +37,28 @@ include protocol PMIDIPort;
 include protocol PQuota;
 include protocol PChildToParentStream;
 include protocol PParentToChildStream;
+include protocol PServiceWorker;
+include protocol PServiceWorkerContainer;
 include protocol PServiceWorkerManager;
+include protocol PServiceWorkerRegistration;
 include protocol PWebAuthnTransaction;
 include protocol PUDPSocket;
 include protocol PVsync;
 
 include DOMTypes;
 include IPCBlob;
+include IPCServiceWorkerDescriptor;
+include IPCServiceWorkerRegistrationDescriptor;
+include PBackgroundLSSharedTypes;
 include PBackgroundSharedTypes;
 include PBackgroundIDBSharedTypes;
 include PFileSystemParams;
 include ProtocolTypes;
+include RemoteWorkerTypes;
 include MIDITypes;
 
 include "mozilla/dom/cache/IPCUtils.h";
+include "mozilla/layers/LayersMessageUtils.h";
 
 using mozilla::dom::cache::Namespace
   from "mozilla/dom/cache/Types.h";
@@ -59,6 +77,12 @@ sync protocol PBackground
   manages PAsmJSCacheEntry;
   manages PBackgroundIDBFactory;
   manages PBackgroundIndexedDBUtils;
+  manages PBackgroundSDBConnection;
+  manages PBackgroundLSDatabase;
+  manages PBackgroundLSObserver;
+  manages PBackgroundLSRequest;
+  manages PBackgroundLSSimpleRequest;
+  manages PBackgroundLocalStorageCache;
   manages PBackgroundStorage;
   manages PBackgroundTest;
   manages PBroadcastChannel;
@@ -66,6 +90,7 @@ sync protocol PBackground
   manages PCacheStorage;
   manages PCacheStreamControl;
   manages PClientManager;
+  manages PEndpointForReport;
   manages PFileDescriptorSet;
   manages PFileSystemRequest;
   manages PGamepadEventChannel;
@@ -73,6 +98,9 @@ sync protocol PBackground
   manages PHttpBackgroundChannel;
   manages PIPCBlobInputStream;
   manages PPendingIPCBlob;
+  manages PRemoteWorker;
+  manages PRemoteWorkerService;
+  manages PSharedWorker;
   manages PTemporaryIPCBlob;
   manages PMessagePort;
   manages PCameras;
@@ -81,7 +109,10 @@ sync protocol PBackground
   manages PQuota;
   manages PChildToParentStream;
   manages PParentToChildStream;
+  manages PServiceWorker;
+  manages PServiceWorkerContainer;
   manages PServiceWorkerManager;
+  manages PServiceWorkerRegistration;
   manages PWebAuthnTransaction;
   manages PUDPSocket;
   manages PVsync;
@@ -97,14 +128,34 @@ parent:
   // Use only for testing!
   async FlushPendingFileDeletions();
 
-  async PBackgroundStorage(nsString profilePath);
+  async PBackgroundSDBConnection(PrincipalInfo principalInfo);
 
-  async BroadcastLocalStorageChange(nsString documentURI,
-                                    nsString key,
-                                    nsString oldValue,
-                                    nsString newValue,
-                                    PrincipalInfo principalInfo,
-                                    bool isPrivate);
+  async PBackgroundLSDatabase(PrincipalInfo principalInfo,
+                              uint32_t privateBrowsingId,
+                              uint64_t datastoreId);
+
+  async PBackgroundLSObserver(uint64_t observerId);
+
+  /**
+   * Issue an asynchronous request that will be used in a synchronous fashion
+   * through complex machinations described in `PBackgroundLSRequest.ipdl` and
+   * `LSObject.h`.
+   */
+  async PBackgroundLSRequest(LSRequestParams params);
+
+  /**
+   * Issues a simple, non-cancelable asynchronous request that's used in an
+   * asynchronous fashion by callers.  (LSRequest is not simple because it used
+   * in a synchronous fashion which leads to complexities regarding cancelation,
+   * see `PBackgroundLSRequest.ipdl` for details.)
+   */
+  async PBackgroundLSSimpleRequest(LSSimpleRequestParams params);
+
+  async PBackgroundLocalStorageCache(PrincipalInfo principalInfo,
+                                     nsCString originKey,
+                                     uint32_t privateBrowsingId);
+
+  async PBackgroundStorage(nsString profilePath);
 
   async PVsync();
 
@@ -141,6 +192,10 @@ parent:
 
   async PWebAuthnTransaction();
 
+  async PSharedWorker(RemoteWorkerData data,
+                      uint64_t windowID,
+                      MessagePortIdentifier portIdentifier);
+
   async PTemporaryIPCBlob();
 
   async PClientManager();
@@ -152,6 +207,19 @@ parent:
   // to the parent actor. See StorageActivityService.
   async StorageActivity(PrincipalInfo principalInfo);
 
+  async PServiceWorker(IPCServiceWorkerDescriptor aDescriptor);
+
+  async PRemoteWorkerService();
+
+  async PServiceWorkerContainer();
+
+  async PServiceWorkerRegistration(IPCServiceWorkerRegistrationDescriptor aDescriptor);
+
+  async PEndpointForReport(nsString aGroupName, PrincipalInfo aPrincipalInfo);
+
+  async RemoveEndpoint(nsString aGroupName, nsCString aEndpointURL,
+                       PrincipalInfo aPrincipalInfo);
+
 child:
   async PCache();
   async PCacheStreamControl();
@@ -160,13 +228,7 @@ child:
 
   async PPendingIPCBlob(IPCBlob blob);
 
-  async DispatchLocalStorageChange(nsString documentURI,
-                                   nsString key,
-                                   nsString oldValue,
-                                   nsString newValue,
-                                   PrincipalInfo principalInfo,
-                                   bool isPrivate);
-
+  async PRemoteWorker(RemoteWorkerData data);
 both:
   // PIPCBlobInputStream is created on the parent side only if the child starts
   // a migration.

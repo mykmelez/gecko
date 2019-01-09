@@ -127,6 +127,10 @@ function getAndClearKeyedHistogram(name) {
  */
 function checkKeyedHistogram(h, key, expectedValue) {
   const snapshot = h.snapshot();
+  if (expectedValue === undefined) {
+    Assert.ok(!(key in snapshot), `The histogram must not contain ${key}.`);
+    return;
+  }
   Assert.ok(key in snapshot, `The histogram must contain ${key}.`);
   Assert.equal(snapshot[key].sum, expectedValue, `The key ${key} must contain ${expectedValue}.`);
 }
@@ -135,9 +139,13 @@ function checkKeyedHistogram(h, key, expectedValue) {
  * Return the scalars from the parent-process.
  */
 function getParentProcessScalars(aChannel, aKeyed = false, aClear = false) {
+  const extended = aChannel == Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN;
+  const currentExtended = Services.telemetry.canRecordExtended;
+  Services.telemetry.canRecordExtended = extended;
   const scalars = aKeyed ?
-    Services.telemetry.snapshotKeyedScalars(aChannel, aClear).parent :
-    Services.telemetry.snapshotScalars(aChannel, aClear).parent;
+    Services.telemetry.getSnapshotForKeyedScalars("main", aClear).parent :
+    Services.telemetry.getSnapshotForScalars("main", aClear).parent;
+  Services.telemetry.canRecordExtended = currentExtended;
   return scalars || {};
 }
 
@@ -169,7 +177,7 @@ function checkEvents(events, expectedEvents) {
  */
 function makeMockPermissionRequest(browser) {
   let type = {
-    options: [],
+    options: Cc["@mozilla.org/array;1"].createInstance(Ci.nsIArray),
     QueryInterface: ChromeUtils.generateQI([Ci.nsIContentPermissionType]),
   };
   let types = Cc["@mozilla.org/array;1"].createInstance(Ci.nsIMutableArray);
@@ -177,6 +185,7 @@ function makeMockPermissionRequest(browser) {
   let result = {
     types,
     principal: browser.contentPrincipal,
+    topLevelPrincipal: browser.contentPrincipal,
     requester: null,
     _cancelled: false,
     cancel() {
@@ -278,7 +287,7 @@ function getPopupNotificationNode() {
  * @return void
  */
 async function disableNonReleaseActions() {
-  if (AppConstants.MOZ_DEV_EDITION || AppConstants.NIGHTLY_BUILD) {
-    await SpecialPowers.pushPrefEnv({set: [["extensions.webcompat-reporter.enabled", false]]});
+  if (!["release", "esr"].includes(AppConstants.MOZ_UPDATE_CHANNEL)) {
+    SpecialPowers.Services.prefs.setBoolPref("extensions.webcompat-reporter.enabled", false);
   }
 }

@@ -18,9 +18,10 @@ ChromeUtils.import("resource://gre/modules/TelemetrySend.jsm", this);
 ChromeUtils.import("resource://gre/modules/TelemetryArchive.jsm", this);
 ChromeUtils.import("resource://gre/modules/TelemetryUtils.jsm", this);
 ChromeUtils.import("resource://gre/modules/Preferences.jsm");
+ChromeUtils.import("resource://testing-common/ContentTaskUtils.jsm", this);
 
 const PING_FORMAT_VERSION = 4;
-const DELETION_PING_TYPE = "deletion";
+const OPTOUT_PING_TYPE = "optout";
 const TEST_PING_TYPE = "test-ping-type";
 
 const PLATFORM_VERSION = "1.9.2";
@@ -49,7 +50,7 @@ function sendPing(aSendClientId, aSendEnvironment) {
 
 function checkPingFormat(aPing, aType, aHasClientId, aHasEnvironment) {
   const MANDATORY_PING_FIELDS = [
-    "type", "id", "creationDate", "version", "application", "payload"
+    "type", "id", "creationDate", "version", "application", "payload",
   ];
 
   const APPLICATION_TEST_DATA = {
@@ -137,31 +138,57 @@ add_task(async function test_simplePing() {
 });
 
 add_task(async function test_disableDataUpload() {
+  const OPTIN_PROBE = "telemetry.data_upload_optin";
   const isUnified = Preferences.get(TelemetryUtils.Preferences.Unified, false);
   if (!isUnified) {
-    // Skipping the test if unified telemetry is off, as no deletion ping will
+    // Skipping the test if unified telemetry is off, as no optout ping will
     // be generated.
     return;
   }
 
-  // Disable FHR upload: this should trigger a deletion ping.
+  // Check that the optin probe is not set, there should be other data in the snapshot though
+  let snapshot = Telemetry.getSnapshotForScalars("main", false).parent;
+  Assert.ok(!(OPTIN_PROBE in snapshot), "Data optin scalar should not be set at start");
+
+  // Send a first ping to get the current used client id
+  await sendPing(true, false);
+  let ping = await PingServer.promiseNextPing();
+  checkPingFormat(ping, TEST_PING_TYPE, true, false);
+  let firstClientId = ping.clientId;
+  Assert.ok(firstClientId, "Test ping needs a client ID");
+  Assert.notEqual(TelemetryUtils.knownClientID, firstClientId, "Client ID should be valid and random");
+
+  // Disable FHR upload: this should trigger a optout ping.
   Preferences.set(TelemetryUtils.Preferences.FhrUploadEnabled, false);
 
-  let ping = await PingServer.promiseNextPing();
-  checkPingFormat(ping, DELETION_PING_TYPE, true, false);
+  ping = await PingServer.promiseNextPing();
+  checkPingFormat(ping, OPTOUT_PING_TYPE, false, false);
   // Wait on ping activity to settle.
   await TelemetrySend.testWaitOnOutgoingPings();
+
+  snapshot = Telemetry.getSnapshotForScalars("main", false).parent;
+  Assert.ok(!(OPTIN_PROBE in snapshot), "Data optin scalar should not be set after optout");
 
   // Restore FHR Upload.
   Preferences.set(TelemetryUtils.Preferences.FhrUploadEnabled, true);
 
-  // Simulate a failure in sending the deletion ping by disabling the HTTP server.
+  // We need to wait until the scalar is set
+  await ContentTaskUtils.waitForCondition(() => {
+    const scalarSnapshot = Telemetry.getSnapshotForScalars("main", false);
+    return Object.keys(scalarSnapshot).includes("parent") &&
+           OPTIN_PROBE in scalarSnapshot.parent;
+  });
+
+  snapshot = Telemetry.getSnapshotForScalars("main", false).parent;
+  Assert.ok(snapshot[OPTIN_PROBE], "Enabling data upload should set optin probe");
+
+  // Simulate a failure in sending the optout ping by disabling the HTTP server.
   await PingServer.stop();
 
   // Try to send a ping. It will be saved as pending  and get deleted when disabling upload.
   TelemetryController.submitExternalPing(TEST_PING_TYPE, {});
 
-  // Disable FHR upload to send a deletion ping again.
+  // Disable FHR upload to send a optout ping again.
   Preferences.set(TelemetryUtils.Preferences.FhrUploadEnabled, false);
 
   // Wait on sending activity to settle, as |TelemetryController.testReset()| doesn't do that.
@@ -174,8 +201,8 @@ add_task(async function test_disableDataUpload() {
 
   // Disabling Telemetry upload must clear out all the pending pings.
   let pendingPings = await TelemetryStorage.loadPendingPingList();
-  Assert.equal(pendingPings.length, 1,
-               "All the pending pings but the deletion ping should have been deleted");
+  Assert.equal(pendingPings.length, 0,
+               "All the pending pings should have been deleted, including the optout ping");
 
   // Enable the ping server again.
   PingServer.start();
@@ -187,8 +214,20 @@ add_task(async function test_disableDataUpload() {
   await TelemetrySend.shutdown();
   // Reset the controller to spin the ping sending task.
   await TelemetryController.testReset();
+
+  // Re-enable Telemetry
+  Preferences.set(TelemetryUtils.Preferences.FhrUploadEnabled, true);
+
+  // Send a test ping
+  await sendPing(true, false);
+
+  // We should have only received the test ping
   ping = await PingServer.promiseNextPing();
-  checkPingFormat(ping, DELETION_PING_TYPE, true, false);
+  checkPingFormat(ping, TEST_PING_TYPE, true, false);
+
+  // The data in the test ping should be different than before
+  Assert.notEqual(TelemetryUtils.knownClientID, ping.clientId, "Client ID should be reset to a random value");
+  Assert.notEqual(firstClientId, ping.clientId, "Client ID should be different from the previous value");
 
   // Wait on ping activity to settle before moving on to the next test. If we were
   // to shut down telemetry, even though the PingServer caught the expected pings,
@@ -196,8 +235,6 @@ add_task(async function test_disableDataUpload() {
   // a couple of ticks). Shutting down would cancel the request and save them as
   // pending pings.
   await TelemetrySend.testWaitOnOutgoingPings();
-  // Restore FHR Upload.
-  Preferences.set(TelemetryUtils.Preferences.FhrUploadEnabled, true);
 });
 
 add_task(async function test_pingHasClientId() {
@@ -293,11 +330,11 @@ add_task(async function test_archivePings() {
   const uploadPref = isUnified ? TelemetryUtils.Preferences.FhrUploadEnabled : TelemetryUtils.Preferences.TelemetryEnabled;
   Preferences.set(uploadPref, false);
 
-  // If we're using unified telemetry, disabling ping upload will generate a "deletion"
+  // If we're using unified telemetry, disabling ping upload will generate a "optout"
   // ping. Catch it.
   if (isUnified) {
     let ping = await PingServer.promiseNextPing();
-    checkPingFormat(ping, DELETION_PING_TYPE, true, false);
+    checkPingFormat(ping, OPTOUT_PING_TYPE, false, false);
   }
 
   // Register a new Ping Handler that asserts if a ping is received, then send a ping.
@@ -605,6 +642,44 @@ add_task(async function test_newCanRecordsMatchTheOld() {
                "Release Data is the new way to say Base Collection");
   Assert.equal(Telemetry.canRecordExtended, Telemetry.canRecordPrereleaseData,
                "Prerelease Data is the new way to say Extended Collection");
+});
+
+add_task(function test_histogram_filtering() {
+  const COUNT_ID = "TELEMETRY_TEST_COUNT";
+  const KEYED_ID = "TELEMETRY_TEST_KEYED_COUNT";
+  const count = Telemetry.getHistogramById(COUNT_ID);
+  const keyed = Telemetry.getKeyedHistogramById(KEYED_ID);
+
+  count.add(1);
+  keyed.add("a", 1);
+
+  let snapshot = Telemetry.getSnapshotForHistograms("main", false, /* filter */ false).parent;
+  let keyedSnapshot = Telemetry.getSnapshotForKeyedHistograms("main", false, /* filter */ false).parent;
+  Assert.ok(COUNT_ID in snapshot, "test histogram should be snapshotted");
+  Assert.ok(KEYED_ID in keyedSnapshot, "test keyed histogram should be snapshotted");
+
+  snapshot = Telemetry.getSnapshotForHistograms("main", false, /* filter */ true).parent;
+  keyedSnapshot = Telemetry.getSnapshotForKeyedHistograms("main", false, /* filter */ true).parent;
+  Assert.ok(!(COUNT_ID in snapshot), "test histogram should not be snapshotted");
+  Assert.ok(!(KEYED_ID in keyedSnapshot), "test keyed histogram should not be snapshotted");
+});
+
+add_task(function test_scalar_filtering() {
+  const COUNT_ID = "telemetry.test.unsigned_int_kind";
+  const KEYED_ID = "telemetry.test.keyed_unsigned_int";
+
+  Telemetry.scalarSet(COUNT_ID, 2);
+  Telemetry.keyedScalarSet(KEYED_ID, "a", 2);
+
+  let snapshot = Telemetry.getSnapshotForScalars("main", false, /* filter */ false).parent;
+  let keyedSnapshot = Telemetry.getSnapshotForKeyedScalars("main", false, /* filter */ false).parent;
+  Assert.ok(COUNT_ID in snapshot, "test scalars should be snapshotted");
+  Assert.ok(KEYED_ID in keyedSnapshot, "test keyed scalars should be snapshotted");
+
+  snapshot = Telemetry.getSnapshotForScalars("main", false, /* filter */ true).parent;
+  keyedSnapshot = Telemetry.getSnapshotForKeyedScalars("main", false, /* filter */ true).parent;
+  Assert.ok(!(COUNT_ID in snapshot), "test scalars should not be snapshotted");
+  Assert.ok(!(KEYED_ID in keyedSnapshot), "test keyed scalars should not be snapshotted");
 });
 
 add_task(async function stopServer() {

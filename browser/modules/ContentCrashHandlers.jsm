@@ -17,9 +17,9 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   clearTimeout: "resource://gre/modules/Timer.jsm",
   CrashSubmit: "resource://gre/modules/CrashSubmit.jsm",
   PluralForm: "resource://gre/modules/PluralForm.jsm",
-  RemotePages: "resource://gre/modules/RemotePageManager.jsm",
+  RemotePages: "resource://gre/modules/remotepagemanager/RemotePageManagerParent.jsm",
   SessionStore: "resource:///modules/sessionstore/SessionStore.jsm",
-  setTimeout: "resource://gre/modules/Timer.jsm"
+  setTimeout: "resource://gre/modules/Timer.jsm",
 });
 
 XPCOMUtils.defineLazyGetter(this, "gNavigatorBundle", function() {
@@ -458,9 +458,7 @@ var TabCrashHandler = {
   },
 
   removeSubmitCheckboxesForSameCrash(childID) {
-    let enumerator = Services.wm.getEnumerator("navigator:browser");
-    while (enumerator.hasMoreElements()) {
-      let window = enumerator.getNext();
+    for (let window of Services.wm.getEnumerator("navigator:browser")) {
       if (!window.gMultiProcessBrowser)
         continue;
 
@@ -497,6 +495,10 @@ var TabCrashHandler = {
     });
 
     let browser = message.target.browser;
+    let window = browser.ownerGlobal;
+
+    // Reset the zoom for the tabcrashed page.
+    window.ZoomManager.setZoomForBrowser(browser, 1);
 
     let childID = this.browserMap.get(browser);
     let index = this.unseenCrashedChildIDs.indexOf(childID);
@@ -865,8 +867,8 @@ var UnsubmittedCrashHandler = {
       return null;
     }
 
-    let nb =  chromeWin.document.getElementById("global-notificationbox");
-    let notification = nb.getNotificationWithValue(notificationID);
+    let notification = chromeWin.gNotificationBox
+                                .getNotificationWithValue(notificationID);
     if (notification) {
       return null;
     }
@@ -913,10 +915,9 @@ var UnsubmittedCrashHandler = {
       }
     };
 
-    return nb.appendNotification(message, notificationID,
-                                 "chrome://browser/skin/tab-crashed.svg",
-                                 nb.PRIORITY_INFO_HIGH, buttons,
-                                 eventCallback);
+    return chromeWin.gNotificationBox.appendNotification(message,
+      notificationID, "chrome://browser/skin/tab-crashed.svg",
+      chromeWin.gNotificationBox.PRIORITY_INFO_HIGH, buttons, eventCallback);
   },
 
   get autoSubmit() {
@@ -1069,9 +1070,7 @@ var PluginCrashReporter = {
   },
 
   broadcastState(runID, state) {
-    let enumerator = Services.wm.getEnumerator("navigator:browser");
-    while (enumerator.hasMoreElements()) {
-      let window = enumerator.getNext();
+    for (let window of Services.wm.getEnumerator("navigator:browser")) {
       let mm = window.messageManager;
       mm.broadcastAsyncMessage("BrowserPlugins:CrashReportSubmitted",
                                { runID, state });

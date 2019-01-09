@@ -45,21 +45,22 @@ enum class CommandType : int8_t {
   SETTRANSFORM,
   SETPERMITSUBPIXELAA,
   FLUSH,
-  BLUR
+  BLUR,
+  PADEDGES,
 };
 
-class DrawingCommand
-{
-public:
+class DrawingCommand {
+ public:
   virtual ~DrawingCommand() {}
 
   virtual CommandType GetType() const = 0;
-  virtual void ExecuteOnDT(DrawTarget* aDT, const Matrix* aTransform = nullptr) const = 0;
+  virtual void ExecuteOnDT(DrawTarget* aDT,
+                           const Matrix* aTransform = nullptr) const = 0;
   virtual void CloneInto(CaptureCommandList* aList) = 0;
   virtual void Log(TreeLog& aLog) const = 0;
 };
 
-} // namespace gfx
-} // namespace mozilla
+}  // namespace gfx
+}  // namespace mozilla
 
 #endif /* MOZILLA_GFX_DRAWCOMMAND_H_ */

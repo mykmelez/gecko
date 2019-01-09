@@ -12,7 +12,7 @@
 #ifndef nsMappedAttributes_h___
 #define nsMappedAttributes_h___
 
-#include "nsAttrAndChildArray.h"
+#include "AttrArray.h"
 #include "nsMappedAttributeElement.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/ServoBindingTypes.h"
@@ -21,9 +21,8 @@
 class nsAtom;
 class nsHTMLStyleSheet;
 
-class nsMappedAttributes final
-{
-public:
+class nsMappedAttributes final {
+ public:
   nsMappedAttributes(nsHTMLStyleSheet* aSheet,
                      nsMapRuleToAttributesFunc aMapRuleFunc);
 
@@ -35,34 +34,27 @@ public:
 
   void SetAndSwapAttr(nsAtom* aAttrName, nsAttrValue& aValue,
                       bool* aValueWasSet);
-  const nsAttrValue* GetAttr(nsAtom* aAttrName) const;
+  const nsAttrValue* GetAttr(const nsAtom* aAttrName) const;
   const nsAttrValue* GetAttr(const nsAString& aAttrName) const;
 
-  uint32_t Count() const
-  {
-    return mAttrCount;
-  }
+  uint32_t Count() const { return mAttrCount; }
 
   bool Equals(const nsMappedAttributes* aAttributes) const;
   PLDHashNumber HashValue() const;
 
-  void DropStyleSheetReference()
-  {
-    mSheet = nullptr;
-  }
+  void DropStyleSheetReference() { mSheet = nullptr; }
   void SetStyleSheet(nsHTMLStyleSheet* aSheet);
-  nsHTMLStyleSheet* GetStyleSheet()
-  {
-    return mSheet;
+  nsHTMLStyleSheet* GetStyleSheet() { return mSheet; }
+
+  void SetRuleMapper(nsMapRuleToAttributesFunc aRuleMapper) {
+    mRuleMapper = aRuleMapper;
   }
 
-  const nsAttrName* NameAt(uint32_t aPos) const
-  {
+  const nsAttrName* NameAt(uint32_t aPos) const {
     NS_ASSERTION(aPos < mAttrCount, "out-of-bounds");
     return &Attrs()[aPos].mName;
   }
-  const nsAttrValue* AttrAt(uint32_t aPos) const
-  {
+  const nsAttrValue* AttrAt(uint32_t aPos) const {
     NS_ASSERTION(aPos < mAttrCount, "out-of-bounds");
     return &Attrs()[aPos].mValue;
   }
@@ -70,17 +62,16 @@ public:
   // aValue; any value that was already in aValue is destroyed.
   void RemoveAttrAt(uint32_t aPos, nsAttrValue& aValue);
   const nsAttrName* GetExistingAttrNameFromQName(const nsAString& aName) const;
-  int32_t IndexOfAttr(nsAtom* aLocalName) const;
+  int32_t IndexOfAttr(const nsAtom* aLocalName) const;
 
   // Apply the contained mapper to the contained set of servo rules,
   // unless the servo rules have already been initialized.
-  void LazilyResolveServoDeclaration(nsIDocument* aDocument);
+  void LazilyResolveServoDeclaration(mozilla::dom::Document* aDocument);
 
   // Obtain the contained servo declaration block
   // May return null if called before the inner block
   // has been (lazily) resolved
-  const RefPtr<RawServoDeclarationBlock>& GetServoStyle() const
-  {
+  const RefPtr<RawServoDeclarationBlock>& GetServoStyle() const {
     return mServoStyle;
   }
 
@@ -89,19 +80,17 @@ public:
     mServoStyle = nullptr;
   }
 
-
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
   static void Shutdown();
-private:
 
+ private:
   void LastRelease();
 
   nsMappedAttributes(const nsMappedAttributes& aCopy);
   ~nsMappedAttributes();
 
-  struct InternalAttr
-  {
+  struct InternalAttr {
     nsAttrName mName;
     nsAttrValue mValue;
   };
@@ -113,12 +102,10 @@ private:
    *
    * See Bug 231104 for more information.
    */
-  const InternalAttr* Attrs() const
-  {
+  const InternalAttr* Attrs() const {
     return reinterpret_cast<const InternalAttr*>(&(mAttrs[0]));
   }
-  InternalAttr* Attrs()
-  {
+  InternalAttr* Attrs() {
     return reinterpret_cast<InternalAttr*>(&(mAttrs[0]));
   }
 
@@ -126,7 +113,7 @@ private:
 #ifdef DEBUG
   uint16_t mBufferSize;
 #endif
-  nsHTMLStyleSheet* mSheet; //weak
+  nsHTMLStyleSheet* mSheet;  // weak
   nsMapRuleToAttributesFunc mRuleMapper;
   RefPtr<RawServoDeclarationBlock> mServoStyle;
   void* mAttrs[1];

@@ -67,6 +67,7 @@ public class Tabs implements BundleEventListener {
     // All writes to mSelectedTab must be synchronized on the Tabs instance.
     // In general, it's preferred to always use selectTab()).
     private volatile Tab mSelectedTab;
+    private volatile int mPreviouslySelectedTabId = INVALID_TAB_ID;
 
     // All accesses to mTabs must be synchronized on the Tabs instance.
     private final HashMap<Integer, Tab> mTabs = new HashMap<Integer, Tab>();
@@ -337,12 +338,16 @@ public class Tabs implements BundleEventListener {
         notifyListeners(tab, TabEvents.SELECTED);
 
         if (oldTab != null) {
+            mPreviouslySelectedTabId = oldTab.getId();
             notifyListeners(oldTab, TabEvents.UNSELECTED);
         }
 
         // Pass a message to Gecko to update tab state in BrowserApp.
-        final GeckoBundle data = new GeckoBundle(1);
+        final GeckoBundle data = new GeckoBundle(2);
         data.putInt("id", tab.getId());
+        if (oldTab != null && mTabs.containsKey(oldTab.getId())) {
+            data.putInt("previousTabId", oldTab.getId());
+        }
         mEventDispatcher.dispatch("Tab:Selected", data);
         EventDispatcher.getInstance().dispatch("Tab:Selected", data);
         return tab;
@@ -492,15 +497,12 @@ public class Tabs implements BundleEventListener {
             }
         }
 
-        Tab parent = getTab(tab.getParentId());
-        if (parent != null) {
-            // If the next tab is a sibling, switch to it. Otherwise go back to the parent.
-            if (nextTab != null && nextTab.getParentId() == tab.getParentId())
-                return nextTab;
-            else
-                return parent;
+        final Tab parentTab = getTab(tab.getParentId());
+        if (tab.getParentId() == mPreviouslySelectedTabId && tab.getParentId() != INVALID_TAB_ID && parentTab != null) {
+            return parentTab;
+        } else {
+            return nextTab;
         }
-        return nextTab;
     }
 
     public Iterable<Tab> getTabsInOrder() {

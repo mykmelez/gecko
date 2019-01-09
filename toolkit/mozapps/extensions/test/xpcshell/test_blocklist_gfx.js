@@ -1,4 +1,3 @@
-ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["DOMParser"]);
@@ -18,7 +17,7 @@ const SAMPLE_GFX_RECORD = {
   "last_modified": 1458035931837,
   "os": "WINNT 6.1",
   "id": "3f947f16-37c2-4e96-d356-78b26363729b",
-  "versionRange": {"minVersion": 0, "maxVersion": "*"}
+  "versionRange": {"minVersion": 0, "maxVersion": "*"},
 };
 
 

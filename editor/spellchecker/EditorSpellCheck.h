@@ -6,44 +6,32 @@
 #ifndef mozilla_EditorSpellCheck_h
 #define mozilla_EditorSpellCheck_h
 
-
-#include "nsCOMPtr.h"                   // for nsCOMPtr
+#include "nsCOMPtr.h"  // for nsCOMPtr
 #include "nsCycleCollectionParticipant.h"
-#include "nsIEditorSpellCheck.h"        // for NS_DECL_NSIEDITORSPELLCHECK, etc
+#include "nsIEditorSpellCheck.h"  // for NS_DECL_NSIEDITORSPELLCHECK, etc
 #include "nsISupportsImpl.h"
-#include "nsString.h"                   // for nsString
-#include "nsTArray.h"                   // for nsTArray
-#include "nscore.h"                     // for nsresult
+#include "nsString.h"  // for nsString
+#include "nsTArray.h"  // for nsTArray
+#include "nscore.h"    // for nsresult
 
 class mozSpellChecker;
-class nsComposeTxtSrvFilter;
 class nsIEditor;
-class nsISpellChecker;
-class nsITextServicesFilter;
-
-#define NS_EDITORSPELLCHECK_CID                     \
-{ /* {75656ad9-bd13-4c5d-939a-ec6351eea0cc} */        \
-    0x75656ad9, 0xbd13, 0x4c5d,                       \
-    { 0x93, 0x9a, 0xec, 0x63, 0x51, 0xee, 0xa0, 0xcc }\
-}
 
 namespace mozilla {
 
 class DictionaryFetcher;
 class EditorBase;
 
-enum dictCompare
-{
+enum dictCompare {
   DICT_NORMAL_COMPARE,
   DICT_COMPARE_CASE_INSENSITIVE,
   DICT_COMPARE_DASHMATCH
 };
 
-class EditorSpellCheck final : public nsIEditorSpellCheck
-{
+class EditorSpellCheck final : public nsIEditorSpellCheck {
   friend class DictionaryFetcher;
 
-public:
+ public:
   EditorSpellCheck();
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -54,21 +42,21 @@ public:
 
   mozSpellChecker* GetSpellChecker();
 
-protected:
+ protected:
   virtual ~EditorSpellCheck();
 
   RefPtr<mozSpellChecker> mSpellChecker;
-  RefPtr<nsComposeTxtSrvFilter> mTxtSrvFilter;
   RefPtr<EditorBase> mEditor;
 
   nsTArray<nsString> mSuggestedWordList;
 
   // these are the words in the current personal dictionary,
   // GetPersonalDictionary must be called to load them.
-  nsTArray<nsString>  mDictionaryList;
+  nsTArray<nsString> mDictionaryList;
 
   nsString mPreferredLang;
 
+  uint32_t mTxtSrvFilterType;
   int32_t mSuggestedWordIndex;
   int32_t mDictionaryIndex;
   uint32_t mDictionaryFetcherGroup;
@@ -86,12 +74,11 @@ protected:
 
   void SetFallbackDictionary(DictionaryFetcher* aFetcher);
 
-
-public:
-  void BeginUpdateDictionary() { mUpdateDictionaryRunning = true ;}
-  void EndUpdateDictionary() { mUpdateDictionaryRunning = false ;}
+ public:
+  void BeginUpdateDictionary() { mUpdateDictionaryRunning = true; }
+  void EndUpdateDictionary() { mUpdateDictionaryRunning = false; }
 };
 
-} // namespace mozilla
+}  // namespace mozilla
 
-#endif // mozilla_EditorSpellCheck_h
+#endif  // mozilla_EditorSpellCheck_h

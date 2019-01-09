@@ -5,26 +5,37 @@
 
 package org.mozilla.geckoview.test;
 
-import org.mozilla.geckoview.GeckoResponse;
+import org.mozilla.geckoview.AllowOrDeny;
+import org.mozilla.geckoview.GeckoDisplay;
+import org.mozilla.geckoview.GeckoResult;
 import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.GeckoView;
 import org.mozilla.geckoview.GeckoRuntime;
 import org.mozilla.geckoview.GeckoRuntimeSettings;
+import org.mozilla.geckoview.WebRequestError;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.SurfaceTexture;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.Surface;
+
+import java.util.HashMap;
 
 public class TestRunnerActivity extends Activity {
     private static final String LOGTAG = "TestRunnerActivity";
+    private static final String ERROR_PAGE =
+            "<!DOCTYPE html><head><title>Error</title></head><body>Error!</body></html>";
 
     static GeckoRuntime sRuntime;
 
     private GeckoSession mSession;
     private GeckoView mView;
     private boolean mKillProcessOnDestroy;
+
+    private HashMap<GeckoSession, GeckoDisplay> mDisplays = new HashMap<>();
 
     private GeckoSession.NavigationDelegate mNavigationDelegate = new GeckoSession.NavigationDelegate() {
         @Override
@@ -43,16 +54,21 @@ public class TestRunnerActivity extends Activity {
         }
 
         @Override
-        public void onLoadRequest(GeckoSession session, String uri, int target,
-                                  int flags,
-                                  GeckoResponse<Boolean> response) {
+        public GeckoResult<AllowOrDeny> onLoadRequest(GeckoSession session,
+                                                  LoadRequest request) {
             // Allow Gecko to load all URIs
-            response.respond(false);
+            return GeckoResult.fromValue(AllowOrDeny.ALLOW);
         }
 
         @Override
-        public void onNewSession(GeckoSession session, String uri, GeckoResponse<GeckoSession> response) {
-            response.respond(createSession(session.getSettings()));
+        public GeckoResult<GeckoSession> onNewSession(GeckoSession session, String uri) {
+            return GeckoResult.fromValue(createBackgroundSession(session.getSettings()));
+        }
+
+        @Override
+        public GeckoResult<String> onLoadError(GeckoSession session, String uri, WebRequestError error) {
+
+            return GeckoResult.fromValue("data:text/html," + ERROR_PAGE);
         }
     };
 
@@ -69,7 +85,7 @@ public class TestRunnerActivity extends Activity {
 
         @Override
         public void onCloseRequest(GeckoSession session) {
-            session.close();
+            closeSession(session);
         }
 
         @Override
@@ -78,7 +94,8 @@ public class TestRunnerActivity extends Activity {
         }
 
         @Override
-        public void onContextMenu(GeckoSession session, int screenX, int screenY, String uri, int elementType, String elementSrc) {
+        public void onContextMenu(GeckoSession session, int screenX, int screenY,
+                                  ContextElement element) {
 
         }
 
@@ -88,6 +105,13 @@ public class TestRunnerActivity extends Activity {
 
         @Override
         public void onCrash(GeckoSession session) {
+            if (System.getenv("MOZ_CRASHREPORTER_SHUTDOWN") != null) {
+                sRuntime.shutdown();
+            }
+        }
+
+        @Override
+        public void onFirstComposite(final GeckoSession session) {
         }
     };
 
@@ -102,7 +126,31 @@ public class TestRunnerActivity extends Activity {
 
         final GeckoSession session = new GeckoSession(settings);
         session.setNavigationDelegate(mNavigationDelegate);
+        session.setContentDelegate(mContentDelegate);
         return session;
+    }
+
+    private GeckoSession createBackgroundSession(final GeckoSessionSettings settings) {
+        final GeckoSession session = createSession(settings);
+
+        final SurfaceTexture texture  = new SurfaceTexture(0);
+        final Surface surface = new Surface(texture);
+
+        final GeckoDisplay display = session.acquireDisplay();
+        display.surfaceChanged(surface, mView.getWidth(), mView.getHeight());
+        mDisplays.put(session, display);
+
+        return session;
+    }
+
+    private void closeSession(GeckoSession session) {
+        if (mDisplays.containsKey(session)) {
+            final GeckoDisplay display = mDisplays.remove(session);
+            display.surfaceDestroyed();
+
+            session.releaseDisplay(display);
+        }
+        session.close();
     }
 
     @Override
@@ -114,24 +162,27 @@ public class TestRunnerActivity extends Activity {
         if (sRuntime == null) {
             final GeckoRuntimeSettings.Builder runtimeSettingsBuilder =
                 new GeckoRuntimeSettings.Builder();
-            runtimeSettingsBuilder.arguments(new String[] { "-purgecaches" });
+
+            // Mochitest and reftest encounter rounding errors if we have a
+            // a window.devicePixelRation like 3.625, so simplify that here.
+            runtimeSettingsBuilder
+                    .arguments(new String[] { "-purgecaches" })
+                    .displayDpiOverride(160)
+                    .displayDensityOverride(1.0f);
+
             final Bundle extras = intent.getExtras();
             if (extras != null) {
                 runtimeSettingsBuilder.extras(extras);
             }
 
             runtimeSettingsBuilder
-                    .nativeCrashReportingEnabled(true)
-                    .javaCrashReportingEnabled(true)
-                    .consoleOutput(true);
+                    .consoleOutput(true)
+                    .crashHandler(TestCrashHandler.class);
 
             sRuntime = GeckoRuntime.create(this, runtimeSettingsBuilder.build());
-            sRuntime.setDelegate(new GeckoRuntime.Delegate() {
-                @Override
-                public void onShutdown() {
-                    mKillProcessOnDestroy = true;
-                    finish();
-                }
+            sRuntime.setDelegate(() -> {
+                mKillProcessOnDestroy = true;
+                finish();
             });
         }
 

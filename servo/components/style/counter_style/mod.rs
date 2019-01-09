@@ -1,27 +1,27 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! The [`@counter-style`][counter-style] at-rule.
 //!
 //! [counter-style]: https://drafts.csswg.org/css-counter-styles/
 
-use Atom;
+use crate::error_reporting::ContextualParseError;
+use crate::parser::{Parse, ParserContext};
+use crate::shared_lock::{SharedRwLockReadGuard, ToCssWithGuard};
+use crate::str::CssStringWriter;
+use crate::values::specified::Integer;
+use crate::values::CustomIdent;
+use crate::Atom;
 use cssparser::{AtRuleParser, DeclarationListParser, DeclarationParser};
 use cssparser::{CowRcStr, Parser, SourceLocation, Token};
-use error_reporting::ContextualParseError;
-use parser::{Parse, ParserContext};
 use selectors::parser::SelectorParseErrorKind;
-use shared_lock::{SharedRwLockReadGuard, ToCssWithGuard};
 use std::fmt::{self, Write};
 use std::mem;
 use std::num::Wrapping;
 use std::ops::Range;
-use str::CssStringWriter;
 use style_traits::{Comma, CssWriter, OneOrMoreSeparated, ParseError};
 use style_traits::{StyleParseErrorKind, ToCss};
-use values::CustomIdent;
-use values::specified::Integer;
 
 /// Parse a counter style name reference.
 ///
@@ -91,8 +91,7 @@ pub fn parse_counter_style_body<'i, 't>(
             if let Err((error, slice)) = declaration {
                 let location = error.location;
                 let error = ContextualParseError::UnsupportedCounterStyleDescriptorDeclaration(
-                    slice,
-                    error,
+                    slice, error,
                 );
                 context.log_css_error(location, error)
             }
@@ -103,7 +102,8 @@ pub fn parse_counter_style_body<'i, 't>(
         ref system @ System::Fixed { .. } |
         ref system @ System::Symbolic |
         ref system @ System::Alphabetic |
-        ref system @ System::Numeric if rule.symbols.is_none() =>
+        ref system @ System::Numeric
+            if rule.symbols.is_none() =>
         {
             let system = system.to_css_string();
             Some(ContextualParseError::InvalidCounterStyleWithoutSymbols(
@@ -496,7 +496,9 @@ impl Parse for Ranges {
                         (opt_start, opt_end)
                     {
                         if start > end {
-                            return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError));
+                            return Err(
+                                input.new_custom_error(StyleParseErrorKind::UnspecifiedError)
+                            );
                         }
                     }
                     Ok(opt_start..opt_end)

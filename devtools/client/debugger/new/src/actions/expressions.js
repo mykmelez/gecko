@@ -1,33 +1,28 @@
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.addExpression = addExpression;
-exports.autocomplete = autocomplete;
-exports.clearExpressionError = clearExpressionError;
-exports.updateExpression = updateExpression;
-exports.deleteExpression = deleteExpression;
-exports.evaluateExpressions = evaluateExpressions;
-exports.getMappedExpression = getMappedExpression;
-
-var _selectors = require("../selectors/index");
-
-var _promise = require("./utils/middleware/promise");
-
-var _devtoolsSourceMap = require("devtools/client/shared/source-map/index.js");
-
-var _expressions = require("../utils/expressions");
-
-var _parser = require("../workers/parser/index");
-
-var parser = _interopRequireWildcard(_parser);
-
-function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) { var desc = Object.defineProperty && Object.getOwnPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : {}; if (desc.get || desc.set) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } } newObj.default = obj; return newObj; } }
-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// @flow
+
+import {
+  getCurrentThread,
+  getExpression,
+  getExpressions,
+  getSelectedFrame,
+  getSelectedFrameId,
+  getSourceFromId,
+  getSelectedSource,
+  getSelectedScopeMappings,
+  getSelectedFrameBindings
+} from "../selectors";
+import { PROMISE } from "./utils/middleware/promise";
+import { wrapExpression } from "../utils/expressions";
+import { features } from "../utils/prefs";
+import { isOriginal } from "../utils/source";
+
+import * as parser from "../workers/parser";
+import type { Expression } from "../types";
+import type { ThunkArgs } from "./types";
 
 /**
  * Add expression for debugger to watch
@@ -37,66 +32,49 @@ function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj;
  * @memberof actions/pause
  * @static
  */
-function addExpression(input) {
-  return async ({
-    dispatch,
-    getState
-  }) => {
+export function addExpression(input: string) {
+  return async ({ dispatch, getState }: ThunkArgs) => {
     if (!input) {
       return;
     }
 
     const expressionError = await parser.hasSyntaxError(input);
-    const expression = (0, _selectors.getExpression)(getState(), input);
 
+    const expression = getExpression(getState(), input);
     if (expression) {
       return dispatch(evaluateExpression(expression));
     }
 
-    dispatch({
-      type: "ADD_EXPRESSION",
-      input,
-      expressionError
-    });
-    const newExpression = (0, _selectors.getExpression)(getState(), input);
+    dispatch({ type: "ADD_EXPRESSION", input, expressionError });
 
+    const newExpression = getExpression(getState(), input);
     if (newExpression) {
       return dispatch(evaluateExpression(newExpression));
     }
   };
 }
 
-function autocomplete(input, cursor) {
-  return async ({
-    dispatch,
-    getState,
-    client
-  }) => {
+export function autocomplete(input: string, cursor: number) {
+  return async ({ dispatch, getState, client }: ThunkArgs) => {
     if (!input) {
       return;
     }
-
-    const frameId = (0, _selectors.getSelectedFrameId)(getState());
+    const frameId = getSelectedFrameId(getState());
     const result = await client.autocomplete(input, cursor, frameId);
-    await dispatch({
-      type: "AUTOCOMPLETE",
-      input,
-      result
-    });
+    await dispatch({ type: "AUTOCOMPLETE", input, result });
   };
 }
 
-function clearExpressionError() {
-  return {
-    type: "CLEAR_EXPRESSION_ERROR"
-  };
+export function clearAutocomplete() {
+  return { type: "CLEAR_AUTOCOMPLETE" };
 }
 
-function updateExpression(input, expression) {
-  return async ({
-    dispatch,
-    getState
-  }) => {
+export function clearExpressionError() {
+  return { type: "CLEAR_EXPRESSION_ERROR" };
+}
+
+export function updateExpression(input: string, expression: Expression) {
+  return async ({ dispatch, getState }: ThunkArgs) => {
     if (!input) {
       return;
     }
@@ -108,9 +86,11 @@ function updateExpression(input, expression) {
       input: expressionError ? expression.input : input,
       expressionError
     });
+
     dispatch(evaluateExpressions());
   };
 }
+
 /**
  *
  * @param {object} expression
@@ -118,101 +98,100 @@ function updateExpression(input, expression) {
  * @memberof actions/pause
  * @static
  */
-
-
-function deleteExpression(expression) {
-  return ({
-    dispatch
-  }) => {
+export function deleteExpression(expression: Expression) {
+  return ({ dispatch }: ThunkArgs) => {
     dispatch({
       type: "DELETE_EXPRESSION",
       input: expression.input
     });
   };
 }
+
 /**
  *
  * @memberof actions/pause
  * @param {number} selectedFrameId
  * @static
  */
-
-
-function evaluateExpressions() {
-  return async function ({
-    dispatch,
-    getState,
-    client
-  }) {
-    const expressions = (0, _selectors.getExpressions)(getState()).toJS();
-    const inputs = expressions.map(({
-      input
-    }) => input);
-    const frameId = (0, _selectors.getSelectedFrameId)(getState());
-    const results = await client.evaluateExpressions(inputs, frameId);
-    dispatch({
-      type: "EVALUATE_EXPRESSIONS",
-      inputs,
-      results
+export function evaluateExpressions() {
+  return async function({ dispatch, getState, client }: ThunkArgs) {
+    const expressions = getExpressions(getState()).toJS();
+    const inputs = expressions.map(({ input }) => input);
+    const frameId = getSelectedFrameId(getState());
+    const thread = getCurrentThread(getState());
+    const results = await client.evaluateExpressions(inputs, {
+      frameId,
+      thread
     });
+    dispatch({ type: "EVALUATE_EXPRESSIONS", inputs, results });
   };
 }
 
-function evaluateExpression(expression) {
-  return async function ({
-    dispatch,
-    getState,
-    client,
-    sourceMaps
-  }) {
+function evaluateExpression(expression: Expression) {
+  return async function({ dispatch, getState, client, sourceMaps }: ThunkArgs) {
     if (!expression.input) {
       console.warn("Expressions should not be empty");
       return;
     }
 
     let input = expression.input;
-    const frame = (0, _selectors.getSelectedFrame)(getState());
+    const frame = getSelectedFrame(getState());
 
     if (frame) {
-      const {
-        location
-      } = frame;
-      const source = (0, _selectors.getSource)(getState(), location.sourceId);
-      const sourceId = source.get("id");
-      const selectedSource = (0, _selectors.getSelectedSource)(getState());
+      const { location } = frame;
+      const source = getSourceFromId(getState(), location.sourceId);
 
-      if (selectedSource && !(0, _devtoolsSourceMap.isGeneratedId)(sourceId) && !(0, _devtoolsSourceMap.isGeneratedId)(selectedSource.get("id"))) {
-        input = await dispatch(getMappedExpression(input));
+      const selectedSource = getSelectedSource(getState());
+
+      if (selectedSource && isOriginal(source) && isOriginal(selectedSource)) {
+        const mapResult = await dispatch(getMappedExpression(input));
+        if (mapResult) {
+          input = mapResult.expression;
+        }
       }
     }
 
-    const frameId = (0, _selectors.getSelectedFrameId)(getState());
+    const frameId = getSelectedFrameId(getState());
+    const thread = getCurrentThread(getState());
+
     return dispatch({
       type: "EVALUATE_EXPRESSION",
+      thread,
       input: expression.input,
-      [_promise.PROMISE]: client.evaluateInFrame((0, _expressions.wrapExpression)(input), frameId)
+      [PROMISE]: client.evaluateInFrame(wrapExpression(input), {
+        frameId,
+        thread
+      })
     });
   };
 }
+
 /**
  * Gets information about original variable names from the source map
  * and replaces all posible generated names.
  */
+export function getMappedExpression(expression: string) {
+  return async function({ dispatch, getState, client, sourceMaps }: ThunkArgs) {
+    const mappings = getSelectedScopeMappings(getState());
+    const bindings = getSelectedFrameBindings(getState());
 
-
-function getMappedExpression(expression) {
-  return async function ({
-    dispatch,
-    getState,
-    client,
-    sourceMaps
-  }) {
-    const mappings = (0, _selectors.getSelectedScopeMappings)(getState());
-
-    if (!mappings) {
-      return expression;
+    // We bail early if we do not need to map the expression. This is important
+    // because mapping an expression can be slow if the parser worker is
+    // busy doing other work.
+    //
+    // 1. there are no mappings - we do not need to map original expressions
+    // 2. does not contain `await` - we do not need to map top level awaits
+    // 3. does not contain `=` - we do not need to map assignments
+    if (!mappings && !expression.match(/(await|=)/)) {
+      return null;
     }
 
-    return parser.mapOriginalExpression(expression, mappings);
+    return parser.mapExpression(
+      expression,
+      mappings,
+      bindings || [],
+      features.mapExpressionBindings,
+      features.mapAwaitExpression
+    );
   };
 }

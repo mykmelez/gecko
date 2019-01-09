@@ -9,8 +9,6 @@ const PREF_APP_DISTRIBUTION           = "distribution.id";
 const PREF_APP_DISTRIBUTION_VERSION   = "distribution.version";
 const PREF_APP_UPDATE_CHANNEL         = "app.update.channel";
 
-Cu.importGlobalProperties(["URLSearchParams"]);
-
 // Get the HTTP server.
 var testserver = AddonTestUtils.createHttpServer({hosts: ["example.com"]});
 
@@ -84,7 +82,7 @@ add_task(async function test_blocklist_disabled() {
   defaults.setCharPref(PREF_APP_UPDATE_CHANNEL, EXPECTED.channel);
   defaults.setCharPref(PREF_APP_DISTRIBUTION, EXPECTED.distribution);
   defaults.setCharPref(PREF_APP_DISTRIBUTION_VERSION, EXPECTED.distribution_version);
-  Services.locale.setRequestedLocales([EXPECTED.locale]);
+  Services.locale.requestedLocales = [EXPECTED.locale];
 
   // This should correctly escape everything
   Services.prefs.setCharPref(PREF_BLOCKLIST_URL, "http://example.com/2?" + PARAMS);

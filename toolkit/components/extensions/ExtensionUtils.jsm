@@ -92,8 +92,7 @@ class DefaultMap extends Map {
 }
 
 const _winUtils = new DefaultWeakMap(win => {
-  return win.QueryInterface(Ci.nsIInterfaceRequestor)
-            .getInterface(Ci.nsIDOMWindowUtils);
+  return win.windowUtils;
 });
 const getWinUtils = win => _winUtils.get(win);
 
@@ -267,6 +266,7 @@ const chromeModifierKeyMap = {
   "MacCtrl": "control",
   "Shift": "shift",
 };
+
 
 var ExtensionUtils = {
   chromeModifierKeyMap,

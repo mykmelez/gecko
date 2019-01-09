@@ -8,20 +8,19 @@
 #define mozilla_dom_PaymentRequestService_h
 
 #include "nsInterfaceHashtable.h"
-#include "nsIPaymentRequest.h"
 #include "nsIPaymentRequestService.h"
 #include "nsISimpleEnumerator.h"
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
+#include "PaymentRequestData.h"
 
 namespace mozilla {
 namespace dom {
 
 // The implmentation of nsIPaymentRequestService
 
-class PaymentRequestService final : public nsIPaymentRequestService
-{
-public:
+class PaymentRequestService final : public nsIPaymentRequestService {
+ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIPAYMENTREQUESTSERVICE
 
@@ -29,40 +28,37 @@ public:
 
   static already_AddRefed<PaymentRequestService> GetSingleton();
 
-  already_AddRefed<nsIPaymentRequest>
-  GetPaymentRequestByIndex(const uint32_t index);
+  already_AddRefed<payments::PaymentRequest> GetPaymentRequestByIndex(
+      const uint32_t index);
 
   uint32_t NumPayments() const;
 
-private:
+  nsresult RequestPayment(const nsAString& aRequestId,
+                          const IPCPaymentActionRequest& aAction,
+                          PaymentRequestParent* aCallback);
+
+ private:
   ~PaymentRequestService() = default;
 
-  nsresult
-  SetActionCallback(const nsAString& aRequestId,
-                    nsIPaymentActionCallback* aCallback);
-  nsresult
-  RemoveActionCallback(const nsAString& aRequestId);
+  nsresult GetPaymentRequestById(const nsAString& aRequestId,
+                                 payments::PaymentRequest** aRequest);
 
-  // this method is only used for testing
-  nsresult
-  LaunchUIAction(const nsAString& aRequestId, uint32_t aActionType);
+  nsresult LaunchUIAction(const nsAString& aRequestId, uint32_t aActionType);
 
-  bool
-  CanMakePayment(const nsAString& aRequestId);
+  bool CanMakePayment(const nsAString& aRequestId);
 
-  bool
-  IsBasicCardPayment(const nsAString& aRequestId);
+  nsresult ShowPayment(const nsAString& aRequestId, bool aIsUpdating);
 
-  FallibleTArray<nsCOMPtr<nsIPaymentRequest>> mRequestQueue;
+  bool IsBasicCardPayment(const nsAString& aRequestId);
 
-  nsInterfaceHashtable<nsStringHashKey, nsIPaymentActionCallback> mCallbackHashtable;
+  FallibleTArray<RefPtr<payments::PaymentRequest>> mRequestQueue;
 
   nsCOMPtr<nsIPaymentUIService> mTestingUIService;
 
-  nsCOMPtr<nsIPaymentRequest> mShowingRequest;
+  RefPtr<payments::PaymentRequest> mShowingRequest;
 };
 
-} // end of namespace dom
-} // end of namespace mozilla
+}  // end of namespace dom
+}  // end of namespace mozilla
 
 #endif

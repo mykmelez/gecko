@@ -12,8 +12,6 @@ const FRAME_SCRIPT_URL = "chrome://global/content/backgroundPageThumbsContent.js
 
 const TELEMETRY_HISTOGRAM_ID_PREFIX = "FX_THUMBNAILS_BG_";
 
-const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-
 const ABOUT_NEWTAB_SEGREGATION_PREF = "privacy.usercontext.about_newtab_segregation.enabled";
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", this);
@@ -210,7 +208,9 @@ const BackgroundPageThumbs = {
       }
     };
     webProgress.addProgressListener(this._listener, Ci.nsIWebProgress.NOTIFY_STATE_ALL);
-    wlBrowser.loadURI("chrome://global/content/backgroundPageThumbs.xhtml", 0, null, null, null);
+    let triggeringPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
+    wlBrowser.loadURI("chrome://global/content/backgroundPageThumbs.xhtml",
+                      0, null, null, null, triggeringPrincipal);
     this._windowlessContainer = wlBrowser;
 
     return false;
@@ -256,7 +256,7 @@ const BackgroundPageThumbs = {
     this._destroyBrowser();
     this._renewThumbBrowser = false;
 
-    let browser = this._parentWin.document.createElementNS(XUL_NS, "browser");
+    let browser = this._parentWin.document.createXULElement("browser");
     browser.setAttribute("type", "content");
     browser.setAttribute("remote", "true");
     browser.setAttribute("disableglobalhistory", "true");
@@ -375,7 +375,7 @@ BackgroundPageThumbs._init();
 Object.defineProperty(this, "BackgroundPageThumbs", {
   value: BackgroundPageThumbs,
   enumerable: true,
-  writable: false
+  writable: false,
 });
 
 /**
@@ -428,7 +428,7 @@ Capture.prototype = {
       url: this.url,
       isImage: this.options.isImage,
       targetWidth: this.options.targetWidth,
-      backgroundColor: this.options.backgroundColor
+      backgroundColor: this.options.backgroundColor,
     });
     this._msgMan.addMessageListener("BackgroundPageThumbs:didCapture", this);
   },
@@ -512,8 +512,9 @@ Capture.prototype = {
         // Clear the data in the private container for thumbnails.
         let privateIdentity =
           ContextualIdentityService.getPrivateIdentity("userContextIdInternal.thumbnail");
-        Services.obs.notifyObservers(null, "clear-origin-attributes-data",
-          JSON.stringify({ userContextId: privateIdentity.userContextId }));
+        if (privateIdentity) {
+          Services.clearData.deleteDataFromOriginAttributesPattern({ userContextId: privateIdentity.userContextId });
+        }
       }
     };
 

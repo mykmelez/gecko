@@ -38,7 +38,6 @@ features: [Intl.Locale]
 ---*/
 
 const validCollationOptions = [
-  ["", "en-u-co"],
   ["abc", "en-u-co-abc"],
   ["abcd", "en-u-co-abcd"],
   ["abcde", "en-u-co-abcde"],
@@ -50,16 +49,16 @@ const validCollationOptions = [
   ["1234abcd-abc123", "en-u-co-1234abcd-abc123"],
 ];
 for (const [collation, expected] of validCollationOptions) {
-  let options = { collation };
   assert.sameValue(
-    new Intl.Locale('en', options).toString(),
+    new Intl.Locale('en', {collation}).toString(),
     expected,
-    `new Intl.Locale('en', options).toString() equals the value of ${expected}`
+    `new Intl.Locale('en', {collation: "${collation}"}).toString() returns "${expected}"`
   );
+
   assert.sameValue(
-    new Intl.Locale('en-u-co-gregory', options).toString(),
+    new Intl.Locale('en-u-co-gregory', {collation}).toString(),
     expected,
-    `new Intl.Locale('en-u-co-gregory', options).toString() equals the value of ${expected}`
+    `new Intl.Locale('en-u-co-gregory', {collation: "${collation}"}).toString() returns "${expected}"`
   );
 }
 

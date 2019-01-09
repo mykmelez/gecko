@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Style sheets and their CSS rules.
 
@@ -23,15 +23,15 @@ mod stylesheet;
 pub mod supports_rule;
 pub mod viewport_rule;
 
+use crate::parser::ParserContext;
+use crate::shared_lock::{DeepCloneParams, DeepCloneWithLock, Locked};
+use crate::shared_lock::{SharedRwLock, SharedRwLockReadGuard, ToCssWithGuard};
+use crate::str::CssStringWriter;
 use cssparser::{parse_one_rule, Parser, ParserInput};
 #[cfg(feature = "gecko")]
 use malloc_size_of::{MallocSizeOfOps, MallocUnconditionalShallowSizeOf};
-use parser::ParserContext;
 use servo_arc::Arc;
-use shared_lock::{DeepCloneParams, DeepCloneWithLock, Locked};
-use shared_lock::{SharedRwLock, SharedRwLockReadGuard, ToCssWithGuard};
 use std::fmt;
-use str::CssStringWriter;
 use style_traits::ParsingMode;
 
 pub use self::counter_style_rule::CounterStyleRule;
@@ -45,13 +45,13 @@ pub use self::media_rule::MediaRule;
 pub use self::namespace_rule::NamespaceRule;
 pub use self::origin::{Origin, OriginSet, OriginSetIterator, PerOrigin, PerOriginIter};
 pub use self::page_rule::PageRule;
-pub use self::rule_parser::{State, TopLevelRuleParser, InsertRuleContext};
 pub use self::rule_list::{CssRules, CssRulesHelpers};
+pub use self::rule_parser::{InsertRuleContext, State, TopLevelRuleParser};
 pub use self::rules_iterator::{AllRules, EffectiveRules};
 pub use self::rules_iterator::{NestedRuleIterationCondition, RulesIterator};
+pub use self::style_rule::StyleRule;
 pub use self::stylesheet::{DocumentStyleSheet, Namespaces, Stylesheet};
 pub use self::stylesheet::{StylesheetContents, StylesheetInDocument, UserAgentStylesheets};
-pub use self::style_rule::StyleRule;
 pub use self::supports_rule::SupportsRule;
 pub use self::viewport_rule::ViewportRule;
 
@@ -63,7 +63,7 @@ pub type UrlExtraData = ::servo_url::ServoUrl;
 #[cfg(feature = "gecko")]
 #[derive(Clone, PartialEq)]
 pub struct UrlExtraData(
-    pub ::gecko_bindings::sugar::refptr::RefPtr<::gecko_bindings::structs::URLExtraData>
+    pub crate::gecko_bindings::sugar::refptr::RefPtr<crate::gecko_bindings::structs::URLExtraData>,
 );
 
 #[cfg(feature = "gecko")]
@@ -80,7 +80,7 @@ impl UrlExtraData {
     ///
     /// This method doesn't touch refcount.
     #[inline]
-    pub unsafe fn from_ptr_ref(ptr: &*mut ::gecko_bindings::structs::URLExtraData) -> &Self {
+    pub unsafe fn from_ptr_ref(ptr: &*mut crate::gecko_bindings::structs::URLExtraData) -> &Self {
         ::std::mem::transmute(ptr)
     }
 }
@@ -88,7 +88,7 @@ impl UrlExtraData {
 #[cfg(feature = "gecko")]
 impl fmt::Debug for UrlExtraData {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        use gecko_bindings::{structs, bindings};
+        use crate::gecko_bindings::{bindings, structs};
 
         struct DebugURI(*mut structs::nsIURI);
         impl fmt::Debug for DebugURI {
@@ -102,10 +102,14 @@ impl fmt::Debug for UrlExtraData {
             }
         }
 
-        formatter.debug_struct("URLExtraData")
+        formatter
+            .debug_struct("URLExtraData")
             .field("is_chrome", &self.is_chrome())
             .field("base", &DebugURI(self.0.mBaseURI.raw::<structs::nsIURI>()))
-            .field("referrer", &DebugURI(self.0.mReferrer.raw::<structs::nsIURI>()))
+            .field(
+                "referrer",
+                &DebugURI(self.0.mReferrer.raw::<structs::nsIURI>()),
+            )
             .finish()
     }
 }
@@ -264,6 +268,7 @@ impl CssRule {
             ParsingMode::DEFAULT,
             parent_stylesheet_contents.quirks_mode,
             None,
+            None,
         );
 
         let mut input = ParserInput::new(css);
@@ -273,7 +278,6 @@ impl CssRule {
 
         // nested rules are in the body state
         let mut rule_parser = TopLevelRuleParser {
-            stylesheet_origin: parent_stylesheet_contents.origin,
             context,
             shared_lock: &shared_lock,
             loader,
@@ -284,9 +288,7 @@ impl CssRule {
         };
 
         parse_one_rule(&mut input, &mut rule_parser)
-            .map_err(|_| {
-                rule_parser.dom_error.unwrap_or(RulesMutateError::Syntax)
-            })
+            .map_err(|_| rule_parser.dom_error.unwrap_or(RulesMutateError::Syntax))
     }
 }
 
@@ -304,25 +306,22 @@ impl DeepCloneWithLock for CssRule {
                 CssRule::Namespace(Arc::new(lock.wrap(rule.clone())))
             },
             CssRule::Import(ref arc) => {
-                let rule = arc.read_with(guard)
+                let rule = arc
+                    .read_with(guard)
                     .deep_clone_with_lock(lock, guard, params);
                 CssRule::Import(Arc::new(lock.wrap(rule)))
             },
             CssRule::Style(ref arc) => {
                 let rule = arc.read_with(guard);
-                CssRule::Style(Arc::new(lock.wrap(rule.deep_clone_with_lock(
-                    lock,
-                    guard,
-                    params,
-                ))))
+                CssRule::Style(Arc::new(
+                    lock.wrap(rule.deep_clone_with_lock(lock, guard, params)),
+                ))
             },
             CssRule::Media(ref arc) => {
                 let rule = arc.read_with(guard);
-                CssRule::Media(Arc::new(lock.wrap(rule.deep_clone_with_lock(
-                    lock,
-                    guard,
-                    params,
-                ))))
+                CssRule::Media(Arc::new(
+                    lock.wrap(rule.deep_clone_with_lock(lock, guard, params)),
+                ))
             },
             CssRule::FontFace(ref arc) => {
                 let rule = arc.read_with(guard);
@@ -342,35 +341,27 @@ impl DeepCloneWithLock for CssRule {
             },
             CssRule::Keyframes(ref arc) => {
                 let rule = arc.read_with(guard);
-                CssRule::Keyframes(Arc::new(lock.wrap(rule.deep_clone_with_lock(
-                    lock,
-                    guard,
-                    params,
-                ))))
+                CssRule::Keyframes(Arc::new(
+                    lock.wrap(rule.deep_clone_with_lock(lock, guard, params)),
+                ))
             },
             CssRule::Supports(ref arc) => {
                 let rule = arc.read_with(guard);
-                CssRule::Supports(Arc::new(lock.wrap(rule.deep_clone_with_lock(
-                    lock,
-                    guard,
-                    params,
-                ))))
+                CssRule::Supports(Arc::new(
+                    lock.wrap(rule.deep_clone_with_lock(lock, guard, params)),
+                ))
             },
             CssRule::Page(ref arc) => {
                 let rule = arc.read_with(guard);
-                CssRule::Page(Arc::new(lock.wrap(rule.deep_clone_with_lock(
-                    lock,
-                    guard,
-                    params,
-                ))))
+                CssRule::Page(Arc::new(
+                    lock.wrap(rule.deep_clone_with_lock(lock, guard, params)),
+                ))
             },
             CssRule::Document(ref arc) => {
                 let rule = arc.read_with(guard);
-                CssRule::Document(Arc::new(lock.wrap(rule.deep_clone_with_lock(
-                    lock,
-                    guard,
-                    params,
-                ))))
+                CssRule::Document(Arc::new(
+                    lock.wrap(rule.deep_clone_with_lock(lock, guard, params)),
+                ))
             },
         }
     }

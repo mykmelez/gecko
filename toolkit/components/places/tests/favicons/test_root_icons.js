@@ -67,7 +67,7 @@ add_task(async function test_removePagesByTimeframe() {
 
   await PlacesUtils.history.removeByFilter({
     beginDate: new Date(Date.now() - 14400000),
-    endDate: new Date()
+    endDate: new Date(),
   });
 
   // Check database entries.
@@ -83,7 +83,7 @@ add_task(async function test_removePagesByTimeframe() {
 
   await PlacesUtils.history.removeByFilter({
     beginDate: new Date(0),
-    endDt: new Date()
+    endDt: new Date(),
   });
   await PlacesTestUtils.promiseAsyncUpdates();
   rows = await db.execute("SELECT * FROM moz_icons");
@@ -104,6 +104,11 @@ add_task(async function test_different_host() {
 
   Assert.equal(await getFaviconUrlForPage(pageURI),
                faviconURI.spec, "Should get the png icon");
+  // Check the icon is not marked as a root icon in the database.
+  let db = await PlacesUtils.promiseDBConnection();
+  let rows = await db.execute("SELECT root FROM moz_icons WHERE icon_url = :url",
+                              {url: faviconURI.spec});
+  Assert.strictEqual(rows[0].getResultByName("root"), 0);
 });
 
 add_task(async function test_same_size() {

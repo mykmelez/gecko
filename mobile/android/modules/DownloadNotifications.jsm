@@ -34,7 +34,7 @@ const kButtons = {
                                          "alertDownloadsResume"),
   CANCEL: new DownloadNotificationButton("cancel",
                                          "drawable://close",
-                                         "alertDownloadsCancel")
+                                         "alertDownloadsCancel"),
 };
 
 var notifications = new Map();
@@ -101,7 +101,7 @@ var DownloadNotifications = {
             if (notification) {
               notification.hide();
             }
-          }
+          },
         }});
     }
 
@@ -160,7 +160,7 @@ var DownloadNotifications = {
           this.showInAboutDownloads(download);
         }
       } else {
-        ConfirmCancelPrompt.show(download);
+        this.showInAboutDownloads(download);
       }
     }).catch(Cu.reportError);
   },
@@ -180,8 +180,10 @@ var DownloadNotifications = {
 };
 
 function getCookieFromDownload(download) {
+  // Arbitrary value used to truncate long Data URLs. See bug 1497526
+  const maxUrlLength = 1024;
   return download.target.path +
-         download.source.url +
+         download.source.url.slice(-maxUrlLength) +
          download.startTime;
 }
 
@@ -209,7 +211,7 @@ DownloadNotification.prototype = {
     let options = {
       icon: "drawable://alert_download",
       cookie: getCookieFromDownload(this.download),
-      handlerKey: DownloadNotifications._notificationKey
+      handlerKey: DownloadNotifications._notificationKey,
     };
 
     if (this._downloading) {
@@ -271,19 +273,6 @@ DownloadNotification.prototype = {
       this.id = null;
     }
   },
-};
-
-var ConfirmCancelPrompt = {
-  show: function(download) {
-    // Open a prompt that offers a choice to cancel the download
-    let title = strings.GetStringFromName("downloadCancelPromptTitle1");
-    let message = strings.GetStringFromName("downloadCancelPromptMessage1");
-
-    if (Services.prompt.confirm(null, title, message)) {
-      download.cancel().catch(Cu.reportError);
-      download.removePartialData().catch(Cu.reportError);
-    }
-  }
 };
 
 function DownloadNotificationButton(buttonId, iconUrl, titleStringName, onClicked) {

@@ -11,112 +11,131 @@
 #include <string>
 #include <vector>
 #include "base/string16.h"
-#include "base/singleton.h"
 #include "nsDebug.h"
 #include "nsTArray.h"
 
+#ifdef IsLoggingEnabled
+// This is defined in the Windows SDK urlmon.h
+#undef IsLoggingEnabled
+#endif
+
 #define FAULTY_DEFAULT_PROBABILITY 1000
 #define FAULTY_DEFAULT_MUTATION_FACTOR 10
-#define FAULTY_LOG(fmt, args...) \
-  if (mozilla::ipc::Faulty::IsLoggingEnabled()) { \
-    printf_stderr("[Faulty] (%10u) " fmt "\n", getpid(), ## args); \
+#define FAULTY_LOG(fmt, args...)                                  \
+  if (mozilla::ipc::Faulty::IsLoggingEnabled()) {                 \
+    printf_stderr("[Faulty] (%10u) " fmt "\n", getpid(), ##args); \
   }
 
 namespace IPC {
-  // Needed for blacklisting messages.
-  class Message;
-}
+// Needed for blacklisting messages.
+class Message;
+}  // namespace IPC
 
 namespace mozilla {
 namespace ipc {
 
-class Faulty
-{
-  public:
-    // Used as a default argument for the Fuzz|datatype| methods.
-    static const unsigned int sDefaultProbability;
+class Faulty {
+ public:
+  // Used as a default argument for the Fuzz|datatype| methods.
+  static const unsigned int sDefaultProbability;
 
-    static unsigned int DefaultProbability(void);
-    static bool Logging(void);
-    static bool IsLoggingEnabled(void) { return sIsLoggingEnabled; }
-    static std::vector<uint8_t> GetDataFromIPCMessage(IPC::Message* aMsg);
-    static nsresult CreateOutputDirectory(const char *aPathname);
-    static nsresult ReadFile(const char* aPathname, nsTArray<nsCString> &aArray);
-    static void CopyFDs(IPC::Message* aDstMsg, IPC::Message* aSrcMsg);
+  static unsigned int DefaultProbability(void);
+  static bool Logging(void);
+  static bool IsLoggingEnabled(void) { return sIsLoggingEnabled; }
+  static std::vector<uint8_t> GetDataFromIPCMessage(IPC::Message* aMsg);
+  static nsresult CreateOutputDirectory(const char* aPathname);
+  static nsresult ReadFile(const char* aPathname, nsTArray<nsCString>& aArray);
+  static void CopyFDs(IPC::Message* aDstMsg, IPC::Message* aSrcMsg);
 
-    // Fuzzing methods for Pickle.
-    void FuzzBool(bool* aValue, unsigned int aProbability=sDefaultProbability);
-    void FuzzChar(char* aValue, unsigned int aProbability=sDefaultProbability);
-    void FuzzUChar(unsigned char* aValue, unsigned int aProbability=sDefaultProbability);
-    void FuzzInt16(int16_t* aValue, unsigned int aProbability=sDefaultProbability);
-    void FuzzUInt16(uint16_t* aValue, unsigned int aProbability=sDefaultProbability);
-    void FuzzInt(int* aValue, unsigned int aProbability=sDefaultProbability);
-    void FuzzUInt32(uint32_t* aValue, unsigned int aProbability=sDefaultProbability);
-    void FuzzLong(long* aValue, unsigned int aProbability=sDefaultProbability);
-    void FuzzULong(unsigned long* aValue, unsigned int aProbability=sDefaultProbability);
-    void FuzzInt64(int64_t* aValue, unsigned int aProbability=sDefaultProbability);
-    void FuzzUInt64(uint64_t* aValue, unsigned int aProbability=sDefaultProbability);
-    void FuzzSize(size_t* aValue, unsigned int aProbability=sDefaultProbability);
-    void FuzzFloat(float* aValue, unsigned int aProbability=sDefaultProbability);
-    void FuzzDouble(double* aValue, unsigned int aProbability=sDefaultProbability);
-    void FuzzString(std::string& aValue, unsigned int aProbability=sDefaultProbability);
-    void FuzzWString(std::wstring& aValue, unsigned int aProbability=sDefaultProbability);
-    void FuzzBytes(void* aData, int aLength, unsigned int aProbability=sDefaultProbability);
+  static Faulty& instance();
 
-    // Fuzzing methods for pipe fuzzing.
-    void MaybeCollectAndClosePipe(int aPipe, unsigned int aProbability=sDefaultProbability);
+  // Fuzzing methods for Pickle.
+  void FuzzBool(bool* aValue, unsigned int aProbability = sDefaultProbability);
+  void FuzzChar(char* aValue, unsigned int aProbability = sDefaultProbability);
+  void FuzzUChar(unsigned char* aValue,
+                 unsigned int aProbability = sDefaultProbability);
+  void FuzzInt16(int16_t* aValue,
+                 unsigned int aProbability = sDefaultProbability);
+  void FuzzUInt16(uint16_t* aValue,
+                  unsigned int aProbability = sDefaultProbability);
+  void FuzzInt(int* aValue, unsigned int aProbability = sDefaultProbability);
+  void FuzzUInt32(uint32_t* aValue,
+                  unsigned int aProbability = sDefaultProbability);
+  void FuzzLong(long* aValue, unsigned int aProbability = sDefaultProbability);
+  void FuzzULong(unsigned long* aValue,
+                 unsigned int aProbability = sDefaultProbability);
+  void FuzzInt64(int64_t* aValue,
+                 unsigned int aProbability = sDefaultProbability);
+  void FuzzUInt64(uint64_t* aValue,
+                  unsigned int aProbability = sDefaultProbability);
+  void FuzzSize(size_t* aValue,
+                unsigned int aProbability = sDefaultProbability);
+  void FuzzFloat(float* aValue,
+                 unsigned int aProbability = sDefaultProbability);
+  void FuzzDouble(double* aValue,
+                  unsigned int aProbability = sDefaultProbability);
+  void FuzzString(std::string& aValue,
+                  unsigned int aProbability = sDefaultProbability);
+  void FuzzWString(std::wstring& aValue,
+                   unsigned int aProbability = sDefaultProbability);
+  void FuzzBytes(void* aData, int aLength,
+                 unsigned int aProbability = sDefaultProbability);
 
-    // Fuzzing methods for message blob fuzzing.
-    void DumpMessage(const char *aChannel, IPC::Message* aMsg, std::string aAppendix=nullptr);
-    bool IsMessageNameBlacklisted(const char* aMessageName);
-    IPC::Message* MutateIPCMessage(const char *aChannel, IPC::Message* aMsg,
-      unsigned int aProbability=sDefaultProbability);
+  // Fuzzing methods for pipe fuzzing.
+  void MaybeCollectAndClosePipe(
+      int aPipe, unsigned int aProbability = sDefaultProbability);
 
-    void LogMessage(const char* aChannel, IPC::Message* aMsg);
+  // Fuzzing methods for message blob fuzzing.
+  void DumpMessage(const char* aChannel, IPC::Message* aMsg,
+                   std::string aAppendix = nullptr);
+  bool IsMessageNameBlacklisted(const char* aMessageName);
+  IPC::Message* MutateIPCMessage(
+      const char* aChannel, IPC::Message* aMsg,
+      unsigned int aProbability = sDefaultProbability);
 
-  private:
-    std::set<int> mFds;
+  void LogMessage(const char* aChannel, IPC::Message* aMsg);
 
-    const bool mFuzzMessages;
-    const bool mFuzzPipes;
-    const bool mFuzzPickle;
-    const bool mUseLargeValues;
-    const bool mUseAsWhitelist;
-    const bool mIsValidProcessType;
+ private:
+  std::set<int> mFds;
 
-    const char* mMessagePath;
-    const char* mBlacklistPath;
+  const bool mFuzzMessages;
+  const bool mFuzzPipes;
+  const bool mFuzzPickle;
+  const bool mUseLargeValues;
+  const bool mUseAsWhitelist;
+  const bool mIsValidProcessType;
 
-    size_t sMsgCounter;
+  const char* mMessagePath;
+  const char* mBlacklistPath;
 
-    static const bool sIsLoggingEnabled;
+  size_t sMsgCounter;
 
-    Faulty();
-    friend struct DefaultSingletonTraits<Faulty>;
-    DISALLOW_EVIL_CONSTRUCTORS(Faulty);
+  static const bool sIsLoggingEnabled;
 
-    static bool IsValidProcessType(void);
-    static uint32_t MutationFactor();
+  Faulty();
+  DISALLOW_EVIL_CONSTRUCTORS(Faulty);
 
-    // Fuzzing methods for Pickle
-    void MutateBool(bool* aValue);
-    void MutateChar(char* aValue);
-    void MutateUChar(unsigned char* aValue);
-    void MutateInt16(int16_t* aValue);
-    void MutateUInt16(uint16_t* aValue);
-    void MutateInt(int* aValue);
-    void MutateUInt32(uint32_t* aValue);
-    void MutateLong(long* aValue);
-    void MutateULong(unsigned long* aValue);
-    void MutateInt64(int64_t* aValue);
-    void MutateUInt64(uint64_t* aValue);
-    void MutateSize(size_t* aValue);
-    void MutateFloat(float* aValue);
-    void MutateDouble(double* aValue);
+  static bool IsValidProcessType(void);
+  static uint32_t MutationFactor();
+
+  // Fuzzing methods for Pickle
+  void MutateBool(bool* aValue);
+  void MutateChar(char* aValue);
+  void MutateUChar(unsigned char* aValue);
+  void MutateInt16(int16_t* aValue);
+  void MutateUInt16(uint16_t* aValue);
+  void MutateInt(int* aValue);
+  void MutateUInt32(uint32_t* aValue);
+  void MutateLong(long* aValue);
+  void MutateULong(unsigned long* aValue);
+  void MutateInt64(int64_t* aValue);
+  void MutateUInt64(uint64_t* aValue);
+  void MutateSize(size_t* aValue);
+  void MutateFloat(float* aValue);
+  void MutateDouble(double* aValue);
 };
 
-} // namespace ipc
-} // namespace mozilla
+}  // namespace ipc
+}  // namespace mozilla
 
 #endif
-

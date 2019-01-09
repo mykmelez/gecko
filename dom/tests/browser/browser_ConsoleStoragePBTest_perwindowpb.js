@@ -16,9 +16,7 @@ function test() {
                             .getService(Ci.nsIConsoleAPIStorage);
 
   function getInnerWindowId(aWindow) {
-    return aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                  .getInterface(Ci.nsIDOMWindowUtils)
-                  .currentInnerWindowID;
+    return aWindow.windowUtils.currentInnerWindowID;
   }
 
   function whenNewWindowLoaded(aOptions, aCallback) {
@@ -54,7 +52,7 @@ function test() {
     storageShouldOccur = true;
     innerID = getInnerWindowId(aWindow);
     beforeEvents = ConsoleAPIStorage.getEvents(innerID);
-    aWindow.gBrowser.selectedBrowser.loadURI(testURI);
+    BrowserTestUtils.loadURI(aWindow.gBrowser.selectedBrowser, testURI);
   }
 
   function testOnWindow(aOptions, aCallback) {

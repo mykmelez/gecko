@@ -1,4 +1,4 @@
-// |reftest| skip -- Symbol.matchAll is not supported
+// |reftest| skip-if(!Symbol.hasOwnProperty('matchAll')) -- Symbol.matchAll is not enabled unconditionally
 // Copyright (C) 2018 Peter Wong. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 /*---
@@ -14,7 +14,8 @@ info: |
     2. If ? IsRegExp(R) is true, then
       [...]
     3. Else,
-      a. Let R be RegExpCreate(R, "g").
+      a. Let flags be "g".
+      b. Let matcher be ? RegExpCreate(R, flags).
 features: [Symbol.matchAll]
 ---*/
 

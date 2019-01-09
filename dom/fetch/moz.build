@@ -27,6 +27,7 @@ EXPORTS.mozilla.dom += [
 UNIFIED_SOURCES += [
     'BodyExtractor.cpp',
     'ChannelInfo.cpp',
+    'EmptyBody.cpp',
     'Fetch.cpp',
     'FetchConsumer.cpp',
     'FetchDriver.cpp',
@@ -57,6 +58,8 @@ LOCAL_INCLUDES += [
     # For HttpBaseChannel.h
     '/netwerk/protocol/http',
 ]
+
+BROWSER_CHROME_MANIFESTS += [ 'tests/browser.ini' ]
 
 FINAL_LIBRARY = 'xul'
 

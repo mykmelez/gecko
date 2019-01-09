@@ -6,8 +6,6 @@
 
 var EXPORTED_SYMBOLS = ["StartupPerformance"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", this);
-
 ChromeUtils.defineModuleGetter(this, "Services",
   "resource://gre/modules/Services.jsm");
 ChromeUtils.defineModuleGetter(this, "setTimeout",
@@ -78,6 +76,9 @@ var StartupPerformance = {
   // Record the start timestamp, setup the timer and `this._promiseFinished`.
   // Behavior is unspecified if there was already an ongoing measure.
   _onRestorationStarts(isAutoRestore) {
+    if (Services.profiler) {
+      Services.profiler.AddMarker("_onRestorationStarts");
+    }
     this._latestRestoredTimeStamp = this._startTimeStamp = Date.now();
     this._totalNumberOfEagerTabs = 0;
     this._totalNumberOfTabs = 0;
@@ -200,6 +201,9 @@ var StartupPerformance = {
             // to the user switching to a lazily restored tab, or for tabs
             // that are restoring eagerly.
             if (!event.detail.isRemotenessUpdate) {
+              if (Services.profiler) {
+                Services.profiler.AddMarker("SSTabRestored");
+              }
               this._latestRestoredTimeStamp = Date.now();
               this._totalNumberOfEagerTabs += 1;
             }
@@ -224,5 +228,5 @@ var StartupPerformance = {
       console.error("StartupPerformance error", ex, ex.stack);
       throw ex;
     }
-  }
+  },
 };

@@ -8,13 +8,17 @@
 #define mozilla_dom_DocumentOrShadowRoot_h__
 
 #include "mozilla/dom/NameSpaceConstants.h"
+#include "mozilla/IdentifierMapEntry.h"
+#include "nsClassHashtable.h"
 #include "nsContentListDeclarations.h"
 #include "nsTArray.h"
-#include "nsIdentifierMapEntry.h"
 
 class nsContentList;
-class nsIDocument;
+class nsCycleCollectionTraversalCallback;
 class nsINode;
+class nsINodeList;
+class nsIRadioVisitor;
+class nsWindowSizes;
 
 namespace mozilla {
 class StyleSheet;
@@ -22,6 +26,9 @@ class StyleSheet;
 namespace dom {
 
 class Element;
+class DocumentOrShadowRoot;
+class HTMLInputElement;
+struct nsRadioGroupStruct;
 class StyleSheetList;
 class ShadowRoot;
 
@@ -32,40 +39,32 @@ class ShadowRoot;
  * TODO(emilio, bug 1418159): In the future this should hold most of the
  * relevant style state, this should allow us to fix bug 548397.
  */
-class DocumentOrShadowRoot
-{
-  enum class Kind
-  {
+class DocumentOrShadowRoot {
+  enum class Kind {
     Document,
     ShadowRoot,
   };
 
-public:
-  explicit DocumentOrShadowRoot(nsIDocument&);
-  explicit DocumentOrShadowRoot(mozilla::dom::ShadowRoot&);
+ public:
+  explicit DocumentOrShadowRoot(Document&);
+  explicit DocumentOrShadowRoot(ShadowRoot&);
 
-  nsINode& AsNode()
-  {
-    return mAsNode;
-  }
+  // Unusual argument naming is because of cycle collection macros.
+  static void Traverse(DocumentOrShadowRoot* tmp,
+                       nsCycleCollectionTraversalCallback& cb);
+  static void Unlink(DocumentOrShadowRoot* tmp);
 
-  const nsINode& AsNode() const
-  {
-    return mAsNode;
-  }
+  nsINode& AsNode() { return mAsNode; }
 
-  StyleSheet* SheetAt(size_t aIndex) const
-  {
+  const nsINode& AsNode() const { return mAsNode; }
+
+  StyleSheet* SheetAt(size_t aIndex) const {
     return mStyleSheets.SafeElementAt(aIndex);
   }
 
-  size_t SheetCount() const
-  {
-    return mStyleSheets.Length();
-  }
+  size_t SheetCount() const { return mStyleSheets.Length(); }
 
-  int32_t IndexOfSheet(const StyleSheet& aSheet) const
-  {
+  int32_t IndexOfSheet(const StyleSheet& aSheet) const {
     return mStyleSheets.IndexOf(&aSheet);
   }
 
@@ -79,35 +78,34 @@ public:
    *
    * This is useful for stuff like QuerySelector optimization and such.
    */
-  inline const nsTArray<Element*>*
-  GetAllElementsForId(const nsAString& aElementId) const;
+  inline const nsTArray<Element*>* GetAllElementsForId(
+      const nsAString& aElementId) const;
 
-  already_AddRefed<nsContentList>
-  GetElementsByTagName(const nsAString& aTagName)
-  {
+  already_AddRefed<nsContentList> GetElementsByTagName(
+      const nsAString& aTagName) {
     return NS_GetContentList(&AsNode(), kNameSpaceID_Unknown, aTagName);
   }
 
-  already_AddRefed<nsContentList>
-  GetElementsByTagNameNS(const nsAString& aNamespaceURI,
-                         const nsAString& aLocalName);
+  already_AddRefed<nsContentList> GetElementsByTagNameNS(
+      const nsAString& aNamespaceURI, const nsAString& aLocalName);
 
-  already_AddRefed<nsContentList>
-  GetElementsByTagNameNS(const nsAString& aNamespaceURI,
-                         const nsAString& aLocalName,
-                         mozilla::ErrorResult&);
+  already_AddRefed<nsContentList> GetElementsByTagNameNS(
+      const nsAString& aNamespaceURI, const nsAString& aLocalName,
+      mozilla::ErrorResult&);
 
-  already_AddRefed<nsContentList>
-  GetElementsByClassName(const nsAString& aClasses);
+  already_AddRefed<nsContentList> GetElementsByClassName(
+      const nsAString& aClasses);
 
-  ~DocumentOrShadowRoot() = default;
+  ~DocumentOrShadowRoot();
 
   Element* GetPointerLockElement();
   Element* GetFullscreenElement();
 
   Element* ElementFromPoint(float aX, float aY);
-  void ElementsFromPoint(float aX, float aY,
-                         nsTArray<RefPtr<mozilla::dom::Element>>& aElements);
+  nsINode* NodeFromPoint(float aX, float aY);
+
+  void ElementsFromPoint(float aX, float aY, nsTArray<RefPtr<Element>>&);
+  void NodesFromPoint(float aX, float aY, nsTArray<RefPtr<nsINode>>&);
 
   /**
    * Helper for elementFromPoint implementation that allows
@@ -118,15 +116,11 @@ public:
   Element* ElementFromPointHelper(float aX, float aY,
                                   bool aIgnoreRootScrollFrame,
                                   bool aFlushLayout);
-  enum ElementsFromPointFlags
-  {
-    IGNORE_ROOT_SCROLL_FRAME = 1,
-    FLUSH_LAYOUT = 2,
-    IS_ELEMENT_FROM_POINT = 4
-  };
 
-  void ElementsFromPointHelper(float aX, float aY, uint32_t aFlags,
-                               nsTArray<RefPtr<mozilla::dom::Element>>& aElements);
+  void NodesFromRect(float aX, float aY, float aTopSize, float aRightSize,
+                     float aBottomSize, float aLeftSize,
+                     bool aIgnoreRootScrollFrame, bool aFlushLayout,
+                     nsTArray<RefPtr<nsINode>>&);
 
   /**
    * This gets fired when the element that an id refers to changes.
@@ -136,8 +130,8 @@ public:
    * @return true to keep the callback in the callback set, false
    * to remove it.
    */
-  typedef bool (* IDTargetObserver)(Element* aOldElement,
-                                    Element* aNewelement, void* aData);
+  typedef bool (*IDTargetObserver)(Element* aOldElement, Element* aNewelement,
+                                   void* aData);
 
   /**
    * Add an IDTargetObserver for a specific ID. The IDTargetObserver
@@ -161,12 +155,20 @@ public:
                               void* aData, bool aForImage);
 
   /**
+   * Lookup an image element using its associated ID, which is usually provided
+   * by |-moz-element()|. Similar to GetElementById, with the difference that
+   * elements set using mozSetImageElement have higher priority.
+   * @param aId the ID associated the element we want to lookup
+   * @return the element associated with |aId|
+   */
+  Element* LookupImageElement(const nsAString& aElementId);
+
+  /**
    * Check that aId is not empty and log a message to the console
    * service if it is.
    * @returns true if aId looks correct, false otherwise.
    */
-  inline bool CheckGetElementByIdArg(const nsAString& aId)
-  {
+  inline bool CheckGetElementByIdArg(const nsAString& aId) {
     if (aId.IsEmpty()) {
       ReportEmptyGetElementByIdArg();
       return false;
@@ -176,12 +178,35 @@ public:
 
   void ReportEmptyGetElementByIdArg();
 
-protected:
+  // nsIRadioGroupContainer
+  NS_IMETHOD WalkRadioGroup(const nsAString& aName, nsIRadioVisitor* aVisitor,
+                            bool aFlushContent);
+  void SetCurrentRadioButton(const nsAString& aName, HTMLInputElement* aRadio);
+  HTMLInputElement* GetCurrentRadioButton(const nsAString& aName);
+  nsresult GetNextRadioButton(const nsAString& aName, const bool aPrevious,
+                              HTMLInputElement* aFocusedRadio,
+                              HTMLInputElement** aRadioOut);
+  void AddToRadioGroup(const nsAString& aName, HTMLInputElement* aRadio);
+  void RemoveFromRadioGroup(const nsAString& aName, HTMLInputElement* aRadio);
+  uint32_t GetRequiredRadioCount(const nsAString& aName) const;
+  void RadioRequiredWillChange(const nsAString& aName, bool aRequiredAdded);
+  bool GetValueMissingState(const nsAString& aName) const;
+  void SetValueMissingState(const nsAString& aName, bool aValue);
+
+  // for radio group
+  nsRadioGroupStruct* GetRadioGroup(const nsAString& aName) const;
+  nsRadioGroupStruct* GetOrCreateRadioGroup(const nsAString& aName);
+
+  nsIContent* Retarget(nsIContent* aContent) const;
+
+ protected:
   // Returns the reference to the sheet, if found in mStyleSheets.
   already_AddRefed<StyleSheet> RemoveSheet(StyleSheet& aSheet);
   void InsertSheetAt(size_t aIndex, StyleSheet& aSheet);
 
-  nsIContent* Retarget(nsIContent* aContent) const;
+  void AddSizeOfExcludingThis(nsWindowSizes&) const;
+  void AddSizeOfOwnedSheetArrayExcludingThis(
+      nsWindowSizes&, const nsTArray<RefPtr<StyleSheet>>&) const;
 
   /**
    * If focused element's subtree root is this document or shadow root, return
@@ -190,8 +215,8 @@ protected:
    */
   Element* GetRetargetedFocusedElement();
 
-  nsTArray<RefPtr<mozilla::StyleSheet>> mStyleSheets;
-  RefPtr<mozilla::dom::StyleSheetList> mDOMStyleSheets;
+  nsTArray<RefPtr<StyleSheet>> mStyleSheets;
+  RefPtr<StyleSheetList> mDOMStyleSheets;
 
   /*
    * mIdentifierMap works as follows for IDs:
@@ -201,25 +226,26 @@ protected:
    * 3) Additions to the DOM always update existing entries for names, and add
    *    new ones for IDs.
    */
-  nsTHashtable<nsIdentifierMapEntry> mIdentifierMap;
+  nsTHashtable<IdentifierMapEntry> mIdentifierMap;
+
+  nsClassHashtable<nsStringHashKey, nsRadioGroupStruct> mRadioGroups;
 
   nsINode& mAsNode;
   const Kind mKind;
 };
 
-inline const nsTArray<Element*>*
-DocumentOrShadowRoot::GetAllElementsForId(const nsAString& aElementId) const
-{
+inline const nsTArray<Element*>* DocumentOrShadowRoot::GetAllElementsForId(
+    const nsAString& aElementId) const {
   if (aElementId.IsEmpty()) {
     return nullptr;
   }
 
-  nsIdentifierMapEntry* entry = mIdentifierMap.GetEntry(aElementId);
+  IdentifierMapEntry* entry = mIdentifierMap.GetEntry(aElementId);
   return entry ? &entry->GetIdElements() : nullptr;
 }
 
-}
+}  // namespace dom
 
-}
+}  // namespace mozilla
 
 #endif

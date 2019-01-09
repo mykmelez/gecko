@@ -33,8 +33,8 @@ function garbageCollect() {
 }
 exports.garbageCollect = garbageCollect;
 
-function runTest(label) {
-  return damp.runTest(label);
+function runTest(label, record) {
+  return damp.runTest(label, record);
 }
 exports.runTest = runTest;
 
@@ -60,9 +60,9 @@ function getActiveTab() {
 }
 exports.getActiveTab = getActiveTab;
 
-exports.getToolbox = function() {
+exports.getToolbox = async function() {
   let tab = getActiveTab();
-  let target = TargetFactory.forTab(tab);
+  let target = await TargetFactory.forTab(tab);
   return gDevTools.getToolbox(target);
 };
 
@@ -80,7 +80,7 @@ async function waitForPendingPaints(toolbox) {
 
 const openToolbox = async function(tool = "webconsole", onLoad) {
   let tab = getActiveTab();
-  let target = TargetFactory.forTab(tab);
+  let target = await TargetFactory.forTab(tab);
   let onToolboxCreated = gDevTools.once("toolbox-created");
   let showPromise = gDevTools.showToolbox(target, tool);
   let toolbox = await onToolboxCreated;
@@ -97,17 +97,18 @@ exports.openToolbox = openToolbox;
 
 exports.closeToolbox =  async function() {
   let tab = getActiveTab();
-  let target = TargetFactory.forTab(tab);
+  let target = await TargetFactory.forTab(tab);
   await target.client.waitForRequestsToSettle();
   await gDevTools.closeToolbox(target);
 };
 
 exports.openToolboxAndLog = async function(name, tool, onLoad) {
-  let test = runTest(name + ".open.DAMP");
+  let test = runTest(`${name}.open.DAMP`);
   let toolbox = await openToolbox(tool, onLoad);
   test.done();
 
-  test = runTest(name + ".open.settle.DAMP");
+  // Settle test isn't recorded, it only prints the pending duration
+  test = runTest(`${name}.open.settle.DAMP`, false);
   await waitForPendingPaints(toolbox);
   test.done();
 
@@ -120,22 +121,23 @@ exports.openToolboxAndLog = async function(name, tool, onLoad) {
 
 exports.closeToolboxAndLog = async function(name, toolbox) {
   let { target } = toolbox;
-  dump("Close toolbox on '" + name + "'\n");
+  dump(`Close toolbox on '${name}'\n`);
   await target.client.waitForRequestsToSettle();
 
-  let test = runTest(name + ".close.DAMP");
+  let test = runTest(`${name}.close.DAMP`);
   await gDevTools.closeToolbox(target);
   test.done();
 };
 
 exports.reloadPageAndLog = async function(name, toolbox, onReload) {
-  dump("Reload page on '" + name + "'\n");
-  let test = runTest(name + ".reload.DAMP");
+  dump(`Reload page on '${name}'\n`);
+  let test = runTest(`${name}.reload.DAMP`);
   await damp.reloadPage(onReload);
   test.done();
 
-  dump("Wait for pending paints on '" + name + "'\n");
-  test = runTest(name + ".reload.settle.DAMP");
+  // Settle test isn't recorded, it only prints the pending duration
+  dump(`Wait for pending paints on '${name}'\n`);
+  test = runTest(`${name}.reload.settle.DAMP`, false);
   await waitForPendingPaints(toolbox);
   test.done();
 };

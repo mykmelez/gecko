@@ -16,7 +16,7 @@ add_task(async function() {
 
   const {
     panel,
-    toolbox
+    toolbox,
   } = await openNewTabAndApplicationPanel(TAB_URL);
 
   const doc = panel.panelWin.document;
@@ -34,6 +34,12 @@ add_task(async function() {
   // We only need to check that newTab is truthy since
   // BrowserTestUtils.waitForNewTab checks the URL.
   ok(newTab, "The expected tab was opened.");
+
+  info("Wait until the main about debugging container is available");
+  await waitUntil(() => {
+    const aboutDebuggingDoc = newTab.linkedBrowser.contentDocument;
+    return aboutDebuggingDoc.querySelector(".app");
+  });
 
   // close the tab
   info("Closing the tab.");

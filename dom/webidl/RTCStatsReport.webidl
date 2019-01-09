@@ -11,6 +11,8 @@
 enum RTCStatsType {
   "inbound-rtp",
   "outbound-rtp",
+  "remote-inbound-rtp",
+  "remote-outbound-rtp",
   "csrc",
   "session",
   "track",
@@ -26,11 +28,12 @@ dictionary RTCStats {
   DOMString id;
 };
 
-dictionary RTCRTPStreamStats : RTCStats {
-  DOMString ssrc;
+dictionary RTCRtpStreamStats : RTCStats {
+  unsigned long ssrc;
   DOMString mediaType;
-  DOMString remoteId;
-  boolean isRemote = false;
+  DOMString kind;
+  DOMString remoteId; // See Bug 1515716
+  DOMString localId;  // See Bug 1515716
   DOMString mediaTrackId;
   DOMString transportId;
   DOMString codecId;
@@ -48,13 +51,11 @@ dictionary RTCRTPStreamStats : RTCStats {
   unsigned long nackCount;
 };
 
-dictionary RTCInboundRTPStreamStats : RTCRTPStreamStats {
+dictionary RTCInboundRTPStreamStats : RTCRtpStreamStats {
   unsigned long packetsReceived;
   unsigned long long bytesReceived;
   double jitter;
   unsigned long packetsLost;
-  long mozAvSyncDelay;
-  long mozJitterBufferDelay;
   long roundTripTime;
 
   // Video decoder measurement, not present in RTCP case
@@ -62,7 +63,8 @@ dictionary RTCInboundRTPStreamStats : RTCRTPStreamStats {
   unsigned long framesDecoded;
 };
 
-dictionary RTCOutboundRTPStreamStats : RTCRTPStreamStats {
+
+dictionary RTCOutboundRTPStreamStats : RTCRtpStreamStats {
   unsigned long packetsSent;
   unsigned long long bytesSent;
   double targetBitrate;  // config encoder bitrate target of this SSRC in bits/s
@@ -142,21 +144,24 @@ dictionary RTCIceCandidatePairStats : RTCStats {
   unsigned long componentId; // moz
 };
 
-enum RTCStatsIceCandidateType {
+enum RTCIceCandidateType {
   "host",
-  "serverreflexive",
-  "peerreflexive",
-  "relayed"
+  "srflx",
+  "prflx",
+  "relay"
 };
 
 dictionary RTCIceCandidateStats : RTCStats {
-  DOMString componentId;
-  DOMString candidateId;
-  DOMString ipAddress;
-  DOMString transport;
-  DOMString mozLocalTransport; // needs standardization
-  long portNumber;
-  RTCStatsIceCandidateType candidateType;
+  DOMString address;
+  long port;
+  DOMString protocol;
+  RTCIceCandidateType candidateType;
+  long priority;
+  DOMString relayProtocol;
+  // Because we use this internally but don't support RTCIceCandidateStats,
+  // we need to keep the field as ChromeOnly. Bug 1225723
+  [ChromeOnly]
+  DOMString transportId;
 };
 
 dictionary RTCCodecStats : RTCStats {
@@ -195,8 +200,6 @@ dictionary RTCStatsReportInternal {
 };
 
 [Pref="media.peerconnection.enabled",
-// TODO: Use MapClass here once it's available (Bug 928114)
-// MapClass(DOMString, object)
  JSImplementation="@mozilla.org/dom/rtcstatsreport;1"]
 interface RTCStatsReport {
   readonly maplike<DOMString, object>;

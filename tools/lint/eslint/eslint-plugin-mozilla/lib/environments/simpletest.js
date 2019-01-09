@@ -24,7 +24,8 @@ const simpleTestFiles = [
   "EventUtils.js",
   "MockObjects.js",
   "SimpleTest.js",
-  "WindowSnapshot.js"
+  "WindowSnapshot.js",
+  "paint_listener.js",
 ];
 const simpleTestPath = "testing/mochitest/tests/SimpleTest";
 
@@ -55,5 +56,5 @@ function mapGlobals(fileGlobals) {
 module.exports = {
   globals: helpers.isMozillaCentralBased() ?
     mapGlobals(getScriptGlobals()) :
-    helpers.getSavedEnvironmentItems("simpletest").globals
+    helpers.getSavedEnvironmentItems("simpletest").globals,
 };

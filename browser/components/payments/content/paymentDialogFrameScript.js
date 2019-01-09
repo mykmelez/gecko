@@ -18,12 +18,19 @@
 "use strict";
 
 /* eslint-env mozilla/frame-script */
+/* global Services */
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
+ChromeUtils.defineModuleGetter(this, "FormAutofill",
+                               "resource://formautofill/FormAutofill.jsm");
 ChromeUtils.defineModuleGetter(this, "FormAutofillUtils",
                                "resource://formautofill/FormAutofillUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "AppConstants",
+                               "resource://gre/modules/AppConstants.jsm");
+
+const SAVE_CREDITCARD_DEFAULT_PREF = "dom.payments.defaults.saveCreditCard";
+const SAVE_ADDRESS_DEFAULT_PREF = "dom.payments.defaults.saveAddress";
 
 let PaymentFrameScript = {
   init() {
@@ -68,11 +75,16 @@ let PaymentFrameScript = {
   exposeUtilityFunctions() {
     let waivedContent = Cu.waiveXrays(content);
     let PaymentDialogUtils = {
-      DEFAULT_REGION: FormAutofillUtils.DEFAULT_REGION,
-      supportedCountries: FormAutofillUtils.supportedCountries,
+      DEFAULT_REGION: FormAutofill.DEFAULT_REGION,
+      countries: FormAutofill.countries,
 
-      getAddressLabel(address) {
-        return FormAutofillUtils.getAddressLabel(address);
+      getAddressLabel(address, addressFields = null) {
+        return FormAutofillUtils.getAddressLabel(address, addressFields);
+      },
+
+      getCreditCardNetworks() {
+        let networks = FormAutofillUtils.getCreditCardNetworks();
+        return Cu.cloneInto(networks, waivedContent);
       },
 
       isCCNumber(value) {
@@ -82,6 +94,24 @@ let PaymentFrameScript = {
       getFormFormat(country) {
         let format = FormAutofillUtils.getFormFormat(country);
         return Cu.cloneInto(format, waivedContent);
+      },
+
+      findAddressSelectOption(selectEl, address, fieldName) {
+        return FormAutofillUtils.findAddressSelectOption(selectEl, address, fieldName);
+      },
+
+      getDefaultPreferences() {
+        let prefValues = Cu.cloneInto({
+          saveCreditCardDefaultChecked:
+            Services.prefs.getBoolPref(SAVE_CREDITCARD_DEFAULT_PREF, false),
+          saveAddressDefaultChecked:
+            Services.prefs.getBoolPref(SAVE_ADDRESS_DEFAULT_PREF, false),
+        }, waivedContent);
+        return Cu.cloneInto(prefValues, waivedContent);
+      },
+
+      isOfficialBranding() {
+        return AppConstants.MOZILLA_OFFICIAL;
       },
     };
     waivedContent.PaymentDialogUtils = Cu.cloneInto(PaymentDialogUtils, waivedContent, {

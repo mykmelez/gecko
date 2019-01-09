@@ -242,14 +242,14 @@ def make_non_bmp_convert_macro(out_file, name, convert_map, codepoint_table):
         from_trail = entry['trail']
         to_trail = entry['trail'] + entry['length'] - 1
 
-        lines.append('    macro(0x{:x}, 0x{:x}, 0x{:x}, 0x{:x}, 0x{:x}, {:d})'.format(
+        lines.append('    MACRO(0x{:x}, 0x{:x}, 0x{:x}, 0x{:x}, 0x{:x}, {:d})'.format(
             from_code, to_code, lead, from_trail, to_trail, diff))
         comment.append('// {} .. {}'.format(codepoint_table.full_name(from_code),
                                             codepoint_table.full_name(to_code)))
 
     out_file.write('\n'.join(comment))
     out_file.write('\n')
-    out_file.write('#define FOR_EACH_NON_BMP_{}(macro) \\\n'.format(name))
+    out_file.write('#define FOR_EACH_NON_BMP_{}(MACRO) \\\n'.format(name))
     out_file.write(' \\\n'.join(lines))
     out_file.write('\n')
 
@@ -643,8 +643,8 @@ def make_non_bmp_file(version,
 #ifndef util_UnicodeNonBMP_h
 #define util_UnicodeNonBMP_h
 
-// |macro| receives the following arguments
-//   macro(FROM, TO, LEAD, TRAIL_FROM, TRAIL_TO, DIFF)
+// |MACRO| receives the following arguments
+//   MACRO(FROM, TO, LEAD, TRAIL_FROM, TRAIL_TO, DIFF)
 //     FROM:       code point where the range starts
 //     TO:         code point where the range ends
 //     LEAD:       common lead surrogate of FROM and TO
@@ -725,8 +725,9 @@ def write_special_casing_methods(unconditional_toupper, codepoint_table, println
         if len(child_ranges) == 1:
             describe_range(child_ranges, depth)
             if has_successor:
-                println(indent, 'if (ch <= {})'.format(hexlit(max_child)))
+                println(indent, 'if (ch <= {}) {{'.format(hexlit(max_child)))
                 println(indent, '    return ch >= {};'.format(hexlit(min_child)))
+                println(indent, '}')
             else:
                 println(indent, 'return {};'.format(in_range(min_child, max_child)))
             return
@@ -739,8 +740,9 @@ def write_special_casing_methods(unconditional_toupper, codepoint_table, println
         range_test_expr = in_any_range(child_ranges, spaces)
 
         if min_child != min_parent:
-            println(indent, 'if (ch < {})'.format(hexlit(min_child)))
+            println(indent, 'if (ch < {}) {{'.format(hexlit(min_child)))
             println(indent, '    return false;')
+            println(indent, '}')
 
         # If there's no successor block, we can omit the |input <= max_child| check,
         # because it was already checked when we emitted the parent range test.
@@ -765,8 +767,9 @@ def write_special_casing_methods(unconditional_toupper, codepoint_table, println
         code_list = sorted(unconditional_toupper.keys())
 
         # Fail-fast if the input character isn't a special casing character.
-        println('    if ({})'.format(out_range(code_list[0], code_list[-1])))
+        println('    if ({}) {{'.format(out_range(code_list[0], code_list[-1])))
         println('        return false;')
+        println('    }')
 
         for i in range(0, 16):
             # Check if the input characters is in the range:
@@ -793,8 +796,9 @@ def write_special_casing_methods(unconditional_toupper, codepoint_table, println
             if not is_last_block:
                 println('    if (ch <= {}) {{'.format(hexlit(matches[-1])))
             else:
-                println('    if (ch < {})'.format(hexlit(matches[0])))
+                println('    if (ch < {}) {{'.format(hexlit(matches[0])))
                 println('        return false;')
+                println('    }')
 
             for j in range(0, 16):
                 inner_start = start_point + (j << 8)
@@ -1206,12 +1210,13 @@ def make_unicode_file(version,
         println('js::unicode::{}(uint32_t codePoint)'.format(name))
         println('{')
         for (from_code, to_code) in int_ranges(group_set.keys()):
-            println('    if (codePoint >= 0x{:X} && codePoint <= 0x{:X}) // {} .. {}'
+            println('    if (codePoint >= 0x{:X} && codePoint <= 0x{:X}) {{ // {} .. {}'
                     .format(from_code,
                             to_code,
                             codepoint_table.name(from_code),
                             codepoint_table.name(to_code)))
             println('        return true;')
+            println('    }')
         println('    return false;')
         println('}')
         println('')
@@ -1439,16 +1444,18 @@ def make_irregexp_tables(version,
                 continue
             println('        // "{}" case folds to "{}".'.format(char_name(ch),
                                                                  char_name(casefolded)))
-            println('        if ({})'.format(test(ch)))
+            println('        if ({}) {{'.format(test(ch)))
             println('            return {};'.format(consequent(casefolded)))
+            println('        }')
         println('    }')
         println('')
         for (ch, casemapped_chars) in casemap_for_latin1.items():
             for casemapped in casemapped_chars:
                 println('    // "{}" case maps to "{}".'.format(char_name(casemapped),
                                                                 char_name(ch)))
-            println('    if ({})'.format(' || '.join(map(test, casemapped_chars))))
+            println('    if ({}) {{'.format(' || '.join(map(test, casemapped_chars))))
             println('        return {};'.format(consequent(ch)))
+            println('    }')
         println('    return {};'.format(default))
 
     with io.open('../irregexp/RegExpCharacters-inl.h', 'w', encoding='utf-8') as chars_file:

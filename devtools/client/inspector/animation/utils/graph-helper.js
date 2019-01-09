@@ -155,6 +155,30 @@ function createPathSegments(startTime, endTime, minSegmentDuration,
 }
 
 /**
+ * Create a function which is used as parameter (toPathStringFunc) in constructor
+ * of SummaryGraphHelper.
+ *
+ * @param {Number} endTime
+ *        end time of animation
+ *        e.g. 200
+ * @param {Number} playbackRate
+ *        playback rate of animation
+ *        e.g. -1
+ * @return {Function}
+ */
+function createSummaryGraphPathStringFunction(endTime, playbackRate) {
+  return segments => {
+    segments = mapSegmentsToPlaybackRate(segments, endTime, playbackRate);
+    const firstSegment = segments[0];
+    let pathString = `M${ firstSegment.x },0 `;
+    pathString += toPathString(segments);
+    const lastSegment = segments[segments.length - 1];
+    pathString += `L${ lastSegment.x },0 Z`;
+    return pathString;
+  };
+}
+
+/**
  * Return preferred duration resolution.
  * This corresponds to narrow interval keyframe offset.
  *
@@ -192,20 +216,14 @@ function getPreferredDurationResolution(keyframes) {
  *         Preferred threshold.
  */
 function getPreferredProgressThreshold(state, keyframes) {
-  let threshold = DEFAULT_MIN_PROGRESS_THRESHOLD;
-  let stepsOrFrames;
-
-  if ((stepsOrFrames = getStepsOrFramesCount(state.easing))) {
-    threshold = Math.min(threshold, (1 / (stepsOrFrames + 1)));
-  }
+  const steps = getStepsCount(state.easing);
+  const threshold = Math.min(DEFAULT_MIN_PROGRESS_THRESHOLD, (1 / (steps + 1)));
 
   if (!keyframes) {
     return threshold;
   }
 
-  threshold = Math.min(threshold, getPreferredProgressThresholdByKeyframes(keyframes));
-
-  return threshold;
+  return Math.min(threshold, getPreferredProgressThresholdByKeyframes(keyframes));
 }
 
 /**
@@ -218,7 +236,6 @@ function getPreferredProgressThreshold(state, keyframes) {
  */
 function getPreferredProgressThresholdByKeyframes(keyframes) {
   let threshold = DEFAULT_MIN_PROGRESS_THRESHOLD;
-  let stepsOrFrames;
 
   for (let i = 0; i < keyframes.length - 1; i++) {
     const keyframe = keyframes[i];
@@ -227,20 +244,32 @@ function getPreferredProgressThresholdByKeyframes(keyframes) {
       continue;
     }
 
-    if ((stepsOrFrames = getStepsOrFramesCount(keyframe.easing))) {
+    const steps = getStepsCount(keyframe.easing);
+
+    if (steps) {
       const nextKeyframe = keyframes[i + 1];
       threshold =
-        Math.min(threshold,
-                 1 / (stepsOrFrames + 1) * (nextKeyframe.offset - keyframe.offset));
+        Math.min(threshold, 1 / (steps + 1) * (nextKeyframe.offset - keyframe.offset));
     }
   }
 
   return threshold;
 }
 
-function getStepsOrFramesCount(easing) {
-  const stepsOrFramesFunction = easing.match(/(steps|frames)\((\d+)/);
-  return stepsOrFramesFunction ? parseInt(stepsOrFramesFunction[2], 10) : 0;
+function getStepsCount(easing) {
+  const stepsFunction = easing.match(/(steps)\((\d+)/);
+  return stepsFunction ? parseInt(stepsFunction[2], 10) : 0;
+}
+
+function mapSegmentsToPlaybackRate(segments, endTime, playbackRate) {
+  if (playbackRate > 0) {
+    return segments;
+  }
+
+  return segments.map(segment => {
+    segment.x = endTime - segment.x;
+    return segment;
+  });
 }
 
 /**
@@ -261,6 +290,7 @@ function toPathString(segments) {
 }
 
 exports.createPathSegments = createPathSegments;
+exports.createSummaryGraphPathStringFunction = createSummaryGraphPathStringFunction;
 exports.DEFAULT_DURATION_RESOLUTION = DEFAULT_DURATION_RESOLUTION;
 exports.DEFAULT_EASING_HINT_STROKE_WIDTH = DEFAULT_EASING_HINT_STROKE_WIDTH;
 exports.DEFAULT_GRAPH_HEIGHT = DEFAULT_GRAPH_HEIGHT;

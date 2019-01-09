@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -21,7 +21,7 @@
 // This file lives in a seperate module (libplugin_child_interpose.dylib),
 // which will get loaded by the OS before any other modules when the plugin
 // child process is launched (from GeckoChildProcessHost::
-// PerformAsyncLaunchInternal()).  For this reason it shouldn't link in other
+// PerformAsyncLaunch()).  For this reason it shouldn't link in other
 // browser modules when loaded.  Instead it should use dlsym() to load
 // pointers to the methods it wants to call in other modules.
 

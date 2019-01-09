@@ -13,9 +13,10 @@ const {
   JSTERM_COMMANDS,
 } = require("../constants");
 const { getObjectInspector } = require("devtools/client/webconsole/utils/object-inspector");
+const actions = require("devtools/client/webconsole/actions/index");
 
 const reps = require("devtools/client/shared/components/reps/reps");
-const { MODE } = reps;
+const { MODE, objectInspector: {utils} } = reps;
 
 GripMessageBody.displayName = "GripMessageBody";
 
@@ -35,6 +36,7 @@ GripMessageBody.propTypes = {
   escapeWhitespace: PropTypes.bool,
   type: PropTypes.string,
   helperType: PropTypes.string,
+  maybeScrollToBottom: PropTypes.func,
 };
 
 GripMessageBody.defaultProps = {
@@ -49,6 +51,8 @@ function GripMessageBody(props) {
     useQuotes,
     escapeWhitespace,
     mode = MODE.LONG,
+    dispatch,
+    maybeScrollToBottom,
   } = props;
 
   let styleObject;
@@ -59,17 +63,24 @@ function GripMessageBody(props) {
   const objectInspectorProps = {
     autoExpandDepth: shouldAutoExpandObjectInspector(props) ? 1 : 0,
     mode,
+    maybeScrollToBottom,
     // TODO: we disable focus since the tabbing trail is a bit weird in the output (e.g.
     // location links are not focused). Let's remove the property below when we found and
     // fixed the issue (See Bug 1456060).
     focusable: false,
+    onCmdCtrlClick: (node, { depth, event, focused, expanded }) => {
+      const value = utils.node.getValue(node);
+      if (value) {
+        dispatch(actions.showObjectInSidebar(value));
+      }
+    },
   };
 
   if (typeof grip === "string" || (grip && grip.type === "longString")) {
     Object.assign(objectInspectorProps, {
       useQuotes,
       escapeWhitespace,
-      style: styleObject
+      style: styleObject,
     });
   }
 
@@ -107,7 +118,7 @@ function cleanupStyle(userProvidedStyle, createElement) {
     })
     .reduce((object, name) => {
       return Object.assign({
-        [name]: dummy.style[name]
+        [name]: dummy.style[name],
       }, object);
     }, {});
 }

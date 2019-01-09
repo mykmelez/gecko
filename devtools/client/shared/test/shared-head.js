@@ -84,7 +84,7 @@ const ConsoleObserver = {
     if (message && /Failed propType/.test(message.toString())) {
       ok(false, message);
     }
-  }
+  },
 };
 
 Services.obs.addObserver(ConsoleObserver, "console-api-log-event");
@@ -123,11 +123,9 @@ function loadFrameScriptUtils(browser = gBrowser.selectedBrowser) {
 }
 
 Services.prefs.setBoolPref("devtools.inspector.three-pane-enabled", true);
-Services.prefs.setBoolPref("devtools.inspector.show-three-pane-tooltip", false);
 registerCleanupFunction(() => {
   Services.prefs.clearUserPref("devtools.dump.emit");
   Services.prefs.clearUserPref("devtools.inspector.three-pane-enabled");
-  Services.prefs.clearUserPref("devtools.inspector.show-three-pane-tooltip");
   Services.prefs.clearUserPref("devtools.toolbox.host");
   Services.prefs.clearUserPref("devtools.toolbox.previousHost");
   Services.prefs.clearUserPref("devtools.toolbox.splitconsoleEnabled");
@@ -234,7 +232,7 @@ function synthesizeKeyFromKeyTag(key) {
     ctrlKey: !!modifiersAttr.match("control"),
     altKey: !!modifiersAttr.match("alt"),
     metaKey: !!modifiersAttr.match("meta"),
-    accelKey: !!modifiersAttr.match("accel")
+    accelKey: !!modifiersAttr.match("accel"),
   };
 
   info("Synthesizing key " + name + " " + JSON.stringify(modifiers));
@@ -257,7 +255,7 @@ function synthesizeKeyShortcut(key, target) {
     altKey: shortcut.alt,
     ctrlKey: shortcut.ctrl,
     metaKey: shortcut.meta,
-    shiftKey: shortcut.shift
+    shiftKey: shortcut.shift,
   };
   if (shortcut.keyCode) {
     keyEvent.keyCode = shortcut.keyCode;
@@ -290,6 +288,7 @@ function waitForNEvents(target, eventName, numTimes, useCapture = false) {
       ["on", "off"],
       ["addEventListener", "removeEventListener"],
       ["addListener", "removeListener"],
+      ["addMessageListener", "removeMessageListener"],
     ]) {
       if ((add in target) && (remove in target)) {
         target[add](eventName, function onEvent(...args) {
@@ -367,7 +366,6 @@ function once(target, eventName, useCapture = false) {
  * @param {String} filePath The file path, relative to the current directory.
  *                 Examples:
  *                 - "helper_attributes_test_runner.js"
- *                 - "../../../commandline/test/helpers.js"
  */
 function loadHelperScript(filePath) {
   const testDir = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
@@ -408,8 +406,7 @@ var openToolboxForTab = async function(tab, toolId, hostType) {
   info("Opening the toolbox");
 
   let toolbox;
-  const target = TargetFactory.forTab(tab);
-  await target.makeRemote();
+  const target = await TargetFactory.forTab(tab);
 
   // Check if the toolbox is already loaded.
   toolbox = gDevTools.getToolbox(target);
@@ -451,7 +448,7 @@ var openNewTabAndToolbox = async function(url, toolId, hostType) {
  * closed.
  */
 var closeTabAndToolbox = async function(tab = gBrowser.selectedTab) {
-  const target = TargetFactory.forTab(tab);
+  const target = await TargetFactory.forTab(tab);
   if (target) {
     await gDevTools.closeToolbox(target);
   }
@@ -618,7 +615,7 @@ function lookupPath(obj, path) {
 }
 
 var closeToolbox = async function() {
-  const target = TargetFactory.forTab(gBrowser.selectedTab);
+  const target = await TargetFactory.forTab(gBrowser.selectedTab);
   await gDevTools.closeToolbox(target);
 };
 
@@ -720,5 +717,34 @@ async function injectEventUtilsInContentTask(browser) {
 
     Services.scriptloader.loadSubScript(
       "chrome://mochikit/content/tests/SimpleTest/EventUtils.js", EventUtils);
+  });
+}
+
+/*
+ * Register an actor in the content process of the current tab.
+ *
+ * Calling ActorRegistry.registerModule only registers the actor in the current process.
+ * As all test scripts are ran in the parent process, it is only registered here.
+ * This function helps register them in the content process used for the current tab.
+ *
+ * @param {string} url
+ *        Actor module URL or absolute require path
+ * @param {json} options
+ *        Arguments to be passed to DebuggerServer.registerModule
+ */
+async function registerActorInContentProcess(url, options) {
+  function convertChromeToFile(uri) {
+    return Cc["@mozilla.org/chrome/chrome-registry;1"]
+             .getService(Ci.nsIChromeRegistry)
+             .convertChromeURL(Services.io.newURI(uri)).spec;
+  }
+  // chrome://mochitests URI is registered only in the parent process, so convert these
+  // URLs to file:// one in order to work in the content processes
+  url = url.startsWith("chrome://mochitests") ? convertChromeToFile(url) : url;
+  return ContentTask.spawn(gBrowser.selectedBrowser, { url, options }, args => {
+    // eslint-disable-next-line no-shadow
+    const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+    const { ActorRegistry } = require("devtools/server/actors/utils/actor-registry");
+    ActorRegistry.registerModule(args.url, args.options);
   });
 }

@@ -59,9 +59,8 @@ function preparePlugin(browser, pluginFallbackState) {
     // state.
     let statusDiv;
     await ContentTaskUtils.waitForCondition(() => {
-      statusDiv = plugin.ownerDocument
-                        .getAnonymousElementByAttribute(plugin, "anonid",
-                                                        "submitStatus");
+      statusDiv = plugin.openOrClosedShadowRoot.getElementById("submitStatus");
+
       return statusDiv && statusDiv.getAttribute("status") == "please";
     }, "Timed out waiting for plugin to be in crash report state");
 
@@ -72,7 +71,7 @@ function preparePlugin(browser, pluginFallbackState) {
     Object.defineProperty(plugin, "pluginFallbackType", {
       get() {
         return contentPluginFallbackState;
-      }
+      },
     });
     return plugin.runID;
   }).then((runID) => {
@@ -136,7 +135,7 @@ add_task(async function testChromeHearsPluginCrashFirst() {
   let win = await BrowserTestUtils.openNewBrowserWindow({remote: true});
   let browser = win.gBrowser.selectedBrowser;
 
-  browser.loadURI(CRASH_URL);
+  BrowserTestUtils.loadURI(browser, CRASH_URL);
   await BrowserTestUtils.browserLoaded(browser);
 
   // In this case, we want the <object> to match the -moz-handler-crashed
@@ -158,9 +157,7 @@ add_task(async function testChromeHearsPluginCrashFirst() {
     // the PluginCrashed event.
     let plugin = content.document.getElementById("plugin");
     plugin.QueryInterface(Ci.nsIObjectLoadingContent);
-    let statusDiv = plugin.ownerDocument
-                          .getAnonymousElementByAttribute(plugin, "anonid",
-                                                          "submitStatus");
+    let statusDiv = plugin.openOrClosedShadowRoot.getElementById("submitStatus");
 
     if (statusDiv.getAttribute("status") == "please") {
       Assert.ok(false, "Did not expect plugin to be in crash report mode yet.");
@@ -205,7 +202,7 @@ add_task(async function testContentHearsCrashFirst() {
   let win = await BrowserTestUtils.openNewBrowserWindow({remote: true});
   let browser = win.gBrowser.selectedBrowser;
 
-  browser.loadURI(CRASH_URL);
+  BrowserTestUtils.loadURI(browser, CRASH_URL);
   await BrowserTestUtils.browserLoaded(browser);
 
   // In this case, we want the <object> to match the -moz-handler-crashed
@@ -220,9 +217,7 @@ add_task(async function testContentHearsCrashFirst() {
     // we're not showing the plugin crash report UI.
     let plugin = content.document.getElementById("plugin");
     plugin.QueryInterface(Ci.nsIObjectLoadingContent);
-    let statusDiv = plugin.ownerDocument
-                          .getAnonymousElementByAttribute(plugin, "anonid",
-                                                          "submitStatus");
+    let statusDiv = plugin.openOrClosedShadowRoot.getElementById("submitStatus");
 
     if (statusDiv.getAttribute("status") == "please") {
       Assert.ok(false, "Did not expect plugin to be in crash report mode yet.");
@@ -255,9 +250,7 @@ add_task(async function testContentHearsCrashFirst() {
     // crash report UI now.
     let plugin = content.document.getElementById("plugin");
     plugin.QueryInterface(Ci.nsIObjectLoadingContent);
-    let statusDiv = plugin.ownerDocument
-                          .getAnonymousElementByAttribute(plugin, "anonid",
-                                                          "submitStatus");
+    let statusDiv = plugin.openOrClosedShadowRoot.getElementById("submitStatus");
 
     Assert.equal(statusDiv.getAttribute("status"), "please",
       "Should have been showing crash report UI");

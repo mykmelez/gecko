@@ -11,6 +11,7 @@
 /* import-globals-from unprivileged-fallbacks.js */
 
 var paymentRequest = {
+  _nextMessageID: 1,
   domReadyPromise: null,
 
   init() {
@@ -54,15 +55,23 @@ var paymentRequest = {
     }
   },
 
+  /**
+   * @param {string} messageType
+   * @param {[object]} detail
+   * @returns {number} message ID to be able to identify a reply (where applicable).
+   */
   sendMessageToChrome(messageType, detail = {}) {
-    log.debug("sendMessageToChrome:", messageType, detail);
+    let messageID = this._nextMessageID++;
+    log.debug("sendMessageToChrome:", messageType, messageID, detail);
     let event = new CustomEvent("paymentContentToChrome", {
       bubbles: true,
       detail: Object.assign({
         messageType,
+        messageID,
       }, detail),
     });
     document.dispatchEvent(event);
+    return messageID;
   },
 
   toggleDebuggingConsole() {
@@ -79,9 +88,10 @@ var paymentRequest = {
 
     switch (messageType) {
       case "responseSent": {
+        let {request} = document.querySelector("payment-dialog").requestStore.getState();
         document.querySelector("payment-dialog").requestStore.setState({
           changesPrevented: true,
-          completionState: "processing",
+          request: Object.assign({}, request, { completeStatus: "processing" }),
         });
         break;
       }
@@ -99,7 +109,6 @@ var paymentRequest = {
   onPaymentRequestLoad() {
     log.debug("onPaymentRequestLoad");
     window.addEventListener("unload", this, {once: true});
-    this.sendMessageToChrome("paymentDialogReady");
 
     // Automatically show the debugging console if loaded with a truthy `debug` query parameter.
     if (new URLSearchParams(location.search).get("debug")) {
@@ -116,50 +125,59 @@ var paymentRequest = {
     log.debug("onShowPaymentRequest, isPrivate?", detail.isPrivate);
 
     let paymentDialog = document.querySelector("payment-dialog");
-    let hasSavedAddresses = Object.keys(detail.savedAddresses).length != 0;
-    let hasSavedCards = Object.keys(detail.savedBasicCards).length != 0;
-    let shippingRequested = detail.request.paymentOptions.requestShipping;
     let state = {
       request: detail.request,
       savedAddresses: detail.savedAddresses,
       savedBasicCards: detail.savedBasicCards,
+      // Temp records can exist upon a reload during development.
+      tempAddresses: detail.tempAddresses,
+      tempBasicCards: detail.tempBasicCards,
       isPrivate: detail.isPrivate,
       page: {
         id: "payment-summary",
       },
     };
 
+    let hasSavedAddresses = Object.keys(this.getAddresses(state)).length != 0;
+    let hasSavedCards = Object.keys(this.getBasicCards(state)).length != 0;
+    let shippingRequested = state.request.paymentOptions.requestShipping;
+
     // Onboarding wizard flow.
-    if (!hasSavedAddresses && (shippingRequested || !hasSavedCards)) {
+    if (!hasSavedAddresses && shippingRequested) {
       state.page = {
-        id: "address-page",
+        id: "shipping-address-page",
         onboardingWizard: true,
       };
 
-      state["address-page"] = {
-        addressFields: null,
+      state["shipping-address-page"] = {
         guid: null,
       };
+    } else if (!hasSavedAddresses && !hasSavedCards) {
+      state.page = {
+        id: "billing-address-page",
+        onboardingWizard: true,
+      };
 
-      if (shippingRequested) {
-        Object.assign(state["address-page"], {
-          title: paymentDialog.dataset.shippingAddressTitleAdd,
-        });
-        state.page.selectedStateKey = ["selectedShippingAddress"];
-      } else {
-        Object.assign(state["address-page"], {
-          title: paymentDialog.dataset.billingAddressTitleAdd,
-        });
-        state.page.selectedStateKey = ["basic-card-page", "billingAddressGUID"];
-      }
+      state["billing-address-page"] = {
+        guid: null,
+      };
     } else if (!hasSavedCards) {
       state.page = {
         id: "basic-card-page",
         onboardingWizard: true,
       };
+      state["basic-card-page"] = {
+        selectedStateKey: "selectedPaymentCard",
+      };
     }
 
-    paymentDialog.setStateFromParent(state);
+    await paymentDialog.setStateFromParent(state);
+
+    this.sendMessageToChrome("paymentDialogReady");
+  },
+
+  openPreferences() {
+    this.sendMessageToChrome("openPreferences");
   },
 
   cancel() {
@@ -170,12 +188,24 @@ var paymentRequest = {
     this.sendMessageToChrome("pay", data);
   },
 
+  closeDialog() {
+    this.sendMessageToChrome("closeDialog");
+  },
+
+  changePaymentMethod(data) {
+    this.sendMessageToChrome("changePaymentMethod", data);
+  },
+
   changeShippingAddress(data) {
     this.sendMessageToChrome("changeShippingAddress", data);
   },
 
   changeShippingOption(data) {
     this.sendMessageToChrome("changeShippingOption", data);
+  },
+
+  changePayerAddress(data) {
+    this.sendMessageToChrome("changePayerAddress", data);
   },
 
   /**
@@ -185,44 +215,58 @@ var paymentRequest = {
    * @param {string} collectionName The autofill collection that record belongs to.
    * @param {object} record The autofill record to add/update
    * @param {string} [guid] The guid of the autofill record to update
+   * @returns {Promise} when the update response is received
    */
-  updateAutofillRecord(collectionName, record, guid, {
-    errorStateChange,
-    preserveOldProperties,
-    selectedStateKey,
-    successStateChange,
-  }) {
-    this.sendMessageToChrome("updateAutofillRecord", {
-      collectionName,
-      guid,
-      record,
-      errorStateChange,
-      preserveOldProperties,
-      selectedStateKey,
-      successStateChange,
+  updateAutofillRecord(collectionName, record, guid) {
+    return new Promise((resolve, reject) => {
+      let messageID = this.sendMessageToChrome("updateAutofillRecord", {
+        collectionName,
+        guid,
+        record,
+      });
+
+      window.addEventListener("paymentChromeToContent", function onMsg({detail}) {
+        if (detail.messageType != "updateAutofillRecord:Response"
+            || detail.messageID != messageID) {
+          return;
+        }
+        log.debug("updateAutofillRecord: response:", detail);
+        window.removeEventListener("paymentChromeToContent", onMsg);
+        document.querySelector("payment-dialog").setStateFromParent(detail.stateChange);
+        if (detail.error) {
+          reject(detail);
+        } else {
+          resolve(detail);
+        }
+      });
     });
   },
 
   /**
    * @param {object} state object representing the UI state
-   * @param {string} methodID (GUID) uniquely identifying the selected payment method
+   * @param {string} selectedMethodID (GUID) uniquely identifying the selected payment method
    * @returns {object?} the applicable modifier for the payment method
    */
-  getModifierForPaymentMethod(state, methodID) {
-    let method = state.savedBasicCards[methodID] || null;
-    if (method && method.methodName !== "basic-card") {
-      throw new Error(`${method.methodName} (${methodID}) is not a supported payment method`);
+  getModifierForPaymentMethod(state, selectedMethodID) {
+    let basicCards = this.getBasicCards(state);
+    let selectedMethod = basicCards[selectedMethodID] || null;
+    if (selectedMethod && selectedMethod.methodName !== "basic-card") {
+      throw new Error(`${selectedMethod.methodName} (${selectedMethodID}) ` +
+                      `is not a supported payment method`);
     }
     let modifiers = state.request.paymentDetails.modifiers;
-    if (!modifiers || !modifiers.length) {
+    if (!selectedMethod || !modifiers || !modifiers.length) {
       return null;
     }
-    let modifier = modifiers.find(m => {
+    let appliedModifier = modifiers.find(modifier => {
       // take the first matching modifier
-      // TODO (bug 1429198): match on supportedTypes and supportedNetworks
-      return m.supportedMethods == "basic-card";
+      if (modifier.supportedMethods && modifier.supportedMethods != selectedMethod.methodName) {
+        return false;
+      }
+      let supportedNetworks = modifier.data && modifier.data.supportedNetworks || [];
+      return supportedNetworks.length == 0 || supportedNetworks.includes(selectedMethod["cc-type"]);
     });
-    return modifier || null;
+    return appliedModifier || null;
   },
 
   /**
@@ -246,14 +290,37 @@ var paymentRequest = {
     window.removeEventListener("paymentChromeToContent", this);
   },
 
+  _sortObjectsByTimeLastUsed(objects) {
+    let sortedValues = Object.values(objects).sort((a, b) => {
+      let aLastUsed = a.timeLastUsed || a.timeLastModified;
+      let bLastUsed = b.timeLastUsed || b.timeLastModified;
+      return bLastUsed - aLastUsed;
+    });
+    let sortedObjects = {};
+    for (let obj of sortedValues) {
+      sortedObjects[obj.guid] = obj;
+    }
+    return sortedObjects;
+  },
+
   getAddresses(state) {
     let addresses = Object.assign({}, state.savedAddresses, state.tempAddresses);
-    return addresses;
+    return this._sortObjectsByTimeLastUsed(addresses);
   },
 
   getBasicCards(state) {
     let cards = Object.assign({}, state.savedBasicCards, state.tempBasicCards);
-    return cards;
+    return this._sortObjectsByTimeLastUsed(cards);
+  },
+
+  maybeCreateFieldErrorElement(container) {
+    let span = container.querySelector(".error-text");
+    if (!span) {
+      span = document.createElement("span");
+      span.className = "error-text";
+      container.appendChild(span);
+    }
+    return span;
   },
 };
 

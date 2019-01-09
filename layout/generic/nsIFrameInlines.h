@@ -7,106 +7,89 @@
 #ifndef nsIFrameInlines_h___
 #define nsIFrameInlines_h___
 
+#include "mozilla/dom/ElementInlines.h"
 #include "nsContainerFrame.h"
 #include "nsPlaceholderFrame.h"
 #include "nsStyleStructInlines.h"
 #include "nsCSSAnonBoxes.h"
 #include "nsFrameManager.h"
 
-bool
-nsIFrame::IsFlexItem() const
-{
+bool nsIFrame::IsFlexItem() const {
   return GetParent() && GetParent()->IsFlexContainerFrame() &&
          !(GetStateBits() & NS_FRAME_OUT_OF_FLOW);
 }
 
-bool
-nsIFrame::IsFlexOrGridContainer() const
-{
+bool nsIFrame::IsFlexOrGridContainer() const {
   return IsFlexContainerFrame() || IsGridContainerFrame();
 }
 
-bool
-nsIFrame::IsFlexOrGridItem() const
-{
-  return !(GetStateBits() & NS_FRAME_OUT_OF_FLOW) &&
-         GetParent() &&
+bool nsIFrame::IsFlexOrGridItem() const {
+  return !(GetStateBits() & NS_FRAME_OUT_OF_FLOW) && GetParent() &&
          GetParent()->IsFlexOrGridContainer();
 }
 
-bool
-nsIFrame::IsTableCaption() const
-{
+bool nsIFrame::IsTableCaption() const {
   return StyleDisplay()->mDisplay == mozilla::StyleDisplay::TableCaption &&
-    GetParent()->Style()->GetPseudo() == nsCSSAnonBoxes::tableWrapper;
+         GetParent()->Style()->GetPseudo() == nsCSSAnonBoxes::tableWrapper();
 }
 
-bool
-nsIFrame::IsFloating() const
-{
-  return StyleDisplay()->IsFloating(this);
-}
+bool nsIFrame::IsFloating() const { return StyleDisplay()->IsFloating(this); }
 
-bool
-nsIFrame::IsAbsPosContainingBlock() const
-{
+bool nsIFrame::IsAbsPosContainingBlock() const {
   return StyleDisplay()->IsAbsPosContainingBlock(this);
 }
 
-bool
-nsIFrame::IsFixedPosContainingBlock() const
-{
+bool nsIFrame::IsFixedPosContainingBlock() const {
   return StyleDisplay()->IsFixedPosContainingBlock(this);
 }
 
-bool
-nsIFrame::IsRelativelyPositioned() const
-{
+bool nsIFrame::IsRelativelyPositioned() const {
   return StyleDisplay()->IsRelativelyPositioned(this);
 }
 
-bool
-nsIFrame::IsAbsolutelyPositioned(const nsStyleDisplay* aStyleDisplay) const
-{
+bool nsIFrame::IsAbsolutelyPositioned(
+    const nsStyleDisplay* aStyleDisplay) const {
   const nsStyleDisplay* disp = StyleDisplayWithOptionalParam(aStyleDisplay);
   return disp->IsAbsolutelyPositioned(this);
 }
 
-bool
-nsIFrame::IsBlockInside() const
-{
+bool nsIFrame::IsBlockInside() const {
   return StyleDisplay()->IsBlockInside(this);
 }
 
-bool
-nsIFrame::IsBlockOutside() const
-{
+bool nsIFrame::IsBlockOutside() const {
   return StyleDisplay()->IsBlockOutside(this);
 }
 
-bool
-nsIFrame::IsInlineOutside() const
-{
+bool nsIFrame::IsInlineOutside() const {
   return StyleDisplay()->IsInlineOutside(this);
 }
 
-mozilla::StyleDisplay
-nsIFrame::GetDisplay() const
-{
+bool nsIFrame::IsColumnSpan() const {
+  return IsBlockOutside() && StyleColumn()->IsColumnSpanStyle();
+}
+
+bool nsIFrame::IsColumnSpanInMulticolSubtree() const {
+  return IsColumnSpan() &&
+         (HasAnyStateBits(NS_FRAME_HAS_MULTI_COLUMN_ANCESTOR) ||
+          // A frame other than inline and block won't have
+          // NS_FRAME_HAS_MULTI_COLUMN_ANCESTOR. We instead test its parent.
+          (GetParent() && GetParent()->Style()->GetPseudo() ==
+                              nsCSSAnonBoxes::columnSpanWrapper()));
+}
+
+mozilla::StyleDisplay nsIFrame::GetDisplay() const {
   return StyleDisplay()->GetDisplay(this);
 }
 
-nscoord
-nsIFrame::SynthesizeBaselineBOffsetFromMarginBox(
-            mozilla::WritingMode aWM,
-            BaselineSharingGroup aGroup) const
-{
+nscoord nsIFrame::SynthesizeBaselineBOffsetFromMarginBox(
+    mozilla::WritingMode aWM, BaselineSharingGroup aGroup) const {
   MOZ_ASSERT(!aWM.IsOrthogonalTo(GetWritingMode()));
   auto margin = GetLogicalUsedMargin(aWM);
   if (aGroup == BaselineSharingGroup::eFirst) {
     if (aWM.IsAlphabeticalBaseline()) {
-      // First baseline for inverted-line content is the block-start margin edge,
-      // as the frame is in effect "flipped" for alignment purposes.
+      // First baseline for inverted-line content is the block-start margin
+      // edge, as the frame is in effect "flipped" for alignment purposes.
       return MOZ_UNLIKELY(aWM.IsLineInverted()) ? -margin.BStart(aWM)
                                                 : BSize(aWM) + margin.BEnd(aWM);
     }
@@ -126,11 +109,8 @@ nsIFrame::SynthesizeBaselineBOffsetFromMarginBox(
   return marginBoxCenter - margin.BEnd(aWM);
 }
 
-nscoord
-nsIFrame::SynthesizeBaselineBOffsetFromBorderBox(
-            mozilla::WritingMode aWM,
-            BaselineSharingGroup aGroup) const
-{
+nscoord nsIFrame::SynthesizeBaselineBOffsetFromBorderBox(
+    mozilla::WritingMode aWM, BaselineSharingGroup aGroup) const {
   MOZ_ASSERT(!aWM.IsOrthogonalTo(GetWritingMode()));
   nscoord borderBoxSize = BSize(aWM);
   if (aGroup == BaselineSharingGroup::eFirst) {
@@ -143,11 +123,9 @@ nsIFrame::SynthesizeBaselineBOffsetFromBorderBox(
   return MOZ_LIKELY(aWM.IsAlphabeticalBaseline()) ? 0 : borderBoxCenter;
 }
 
-nscoord
-nsIFrame::BaselineBOffset(mozilla::WritingMode aWM,
-                          BaselineSharingGroup aBaselineGroup,
-                          AlignmentContext     aAlignmentContext) const
-{
+nscoord nsIFrame::BaselineBOffset(mozilla::WritingMode aWM,
+                                  BaselineSharingGroup aBaselineGroup,
+                                  AlignmentContext aAlignmentContext) const {
   MOZ_ASSERT(!aWM.IsOrthogonalTo(GetWritingMode()));
   nscoord baseline;
   if (GetNaturalBaselineBOffset(aWM, aBaselineGroup, &baseline)) {
@@ -160,24 +138,58 @@ nsIFrame::BaselineBOffset(mozilla::WritingMode aWM,
   return SynthesizeBaselineBOffsetFromBorderBox(aWM, aBaselineGroup);
 }
 
-void
-nsIFrame::PropagateRootElementWritingMode(mozilla::WritingMode aRootElemWM)
-{
+void nsIFrame::PropagateRootElementWritingMode(
+    mozilla::WritingMode aRootElemWM) {
   MOZ_ASSERT(IsCanvasFrame());
   for (auto f = this; f; f = f->GetParent()) {
     f->mWritingMode = aRootElemWM;
   }
 }
 
-nsContainerFrame*
-nsIFrame::GetInFlowParent() const
-{
+nsContainerFrame* nsIFrame::GetInFlowParent() const {
   if (GetStateBits() & NS_FRAME_OUT_OF_FLOW) {
-    nsIFrame* ph = FirstContinuation()->GetProperty(nsIFrame::PlaceholderFrameProperty());
+    nsIFrame* ph =
+        FirstContinuation()->GetProperty(nsIFrame::PlaceholderFrameProperty());
     return ph->GetParent();
   }
 
   return GetParent();
+}
+
+// We generally want to follow the style tree for preserve-3d, jumping through
+// display: contents.
+//
+// There are various fun mismatches between the flattened tree and the frame
+// tree which makes this non-trivial to do looking at the frame tree state:
+//
+//  - Anon boxes. You'd have to step through them, because you generally want to
+//    ignore them.
+//
+//  - IB-splits, which produce a frame tree where frames for the block inside
+//    the inline are not children of any frame from the inline.
+//
+//  - display: contents, which makes DOM ancestors not have frames even when a
+//    descendant does.
+//
+// See GetFlattenedTreeParentElementForStyle for the difference between it and
+// plain GetFlattenedTreeParentElement.
+nsIFrame* nsIFrame::GetClosestFlattenedTreeAncestorPrimaryFrame() const {
+  if (!mContent) {
+    return nullptr;
+  }
+  Element* parent = mContent->GetFlattenedTreeParentElementForStyle();
+  while (parent) {
+    if (nsIFrame* frame = parent->GetPrimaryFrame()) {
+      return frame;
+    }
+    // NOTE(emilio): This should be an assert except we have code in tree which
+    // violates invariants like the <frameset> frame construction code.
+    if (MOZ_UNLIKELY(!parent->IsDisplayContents())) {
+      return nullptr;
+    }
+    parent = parent->GetFlattenedTreeParentElementForStyle();
+  }
+  return nullptr;
 }
 
 #endif

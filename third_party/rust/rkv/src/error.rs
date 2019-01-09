@@ -8,16 +8,24 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
+<<<<<<< HEAD
 use std::path::{
     PathBuf,
 };
+=======
+use std::path::PathBuf;
+>>>>>>> central
 
 use bincode;
 use lmdb;
 
+<<<<<<< HEAD
 use value::{
     Type,
 };
+=======
+use value::Type;
+>>>>>>> central
 
 #[derive(Debug, Fail)]
 pub enum DataError {
@@ -83,7 +91,11 @@ impl From<lmdb::Error> for StoreError {
     fn from(e: lmdb::Error) -> StoreError {
         match e {
             lmdb::Error::BadRslot => StoreError::ReadTransactionAlreadyExists(::std::thread::current().id()),
+<<<<<<< HEAD
             e @ _ => StoreError::LmdbError(e),
+=======
+            e => StoreError::LmdbError(e),
+>>>>>>> central
         }
     }
 }

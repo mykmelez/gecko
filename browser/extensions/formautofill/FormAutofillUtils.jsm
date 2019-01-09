@@ -12,20 +12,13 @@ const ADDRESS_REFERENCES_EXT = "addressReferencesExt.js";
 
 const ADDRESSES_COLLECTION_NAME = "addresses";
 const CREDITCARDS_COLLECTION_NAME = "creditCards";
-const ADDRESSES_FIRST_TIME_USE_PREF = "extensions.formautofill.firstTimeUse";
-const ENABLED_AUTOFILL_ADDRESSES_PREF = "extensions.formautofill.addresses.enabled";
-const CREDITCARDS_USED_STATUS_PREF = "extensions.formautofill.creditCards.used";
-const AUTOFILL_CREDITCARDS_AVAILABLE_PREF = "extensions.formautofill.creditCards.available";
-const ENABLED_AUTOFILL_CREDITCARDS_PREF = "extensions.formautofill.creditCards.enabled";
-const DEFAULT_REGION_PREF = "browser.search.region";
-const SUPPORTED_COUNTRIES_PREF = "extensions.formautofill.supportedCountries";
 const MANAGE_ADDRESSES_KEYWORDS = ["manageAddressesTitle", "addNewAddressTitle"];
 const EDIT_ADDRESS_KEYWORDS = [
   "givenName", "additionalName", "familyName", "organization2", "streetAddress",
   "state", "province", "city", "country", "zip", "postalCode", "email", "tel",
 ];
-const MANAGE_CREDITCARDS_KEYWORDS = ["manageCreditCardsTitle", "addNewCreditCardTitle", "showCreditCardsBtnLabel"];
-const EDIT_CREDITCARD_KEYWORDS = ["cardNumber", "nameOnCard", "cardExpires"];
+const MANAGE_CREDITCARDS_KEYWORDS = ["manageCreditCardsTitle", "addNewCreditCardTitle"];
+const EDIT_CREDITCARD_KEYWORDS = ["cardNumber", "nameOnCard", "cardExpiresMonth", "cardExpiresYear", "cardNetwork"];
 const FIELD_STATES = {
   NORMAL: "NORMAL",
   AUTO_FILLED: "AUTO_FILLED",
@@ -42,6 +35,7 @@ const MAX_FIELD_VALUE_LENGTH = 200;
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://formautofill/FormAutofill.jsm");
 ChromeUtils.defineModuleGetter(this, "CreditCard",
   "resource://gre/modules/CreditCard.jsm");
 
@@ -78,7 +72,12 @@ let AddressDataLoader = {
 
     if (extSandbox.addressDataExt) {
       for (let key in extSandbox.addressDataExt) {
-        Object.assign(sandbox.addressData[key], extSandbox.addressDataExt[key]);
+        let addressDataForKey = sandbox.addressData[key];
+        if (!addressDataForKey) {
+          addressDataForKey = sandbox.addressData[key] = {};
+        }
+
+        Object.assign(addressDataForKey, extSandbox.addressDataExt[key]);
       }
     }
     return sandbox;
@@ -95,7 +94,7 @@ let AddressDataLoader = {
       return null;
     }
 
-    const properties = ["languages", "sub_keys", "sub_names", "sub_lnames"];
+    const properties = ["languages", "sub_keys", "sub_isoids", "sub_names", "sub_lnames"];
     for (let key of properties) {
       if (!data[key]) {
         continue;
@@ -169,15 +168,9 @@ let AddressDataLoader = {
 
 this.FormAutofillUtils = {
   get AUTOFILL_FIELDS_THRESHOLD() { return 3; },
-  get isAutofillEnabled() { return this.isAutofillAddressesEnabled || this.isAutofillCreditCardsEnabled; },
-  get isAutofillCreditCardsEnabled() { return this.isAutofillCreditCardsAvailable && this._isAutofillCreditCardsEnabled; },
 
   ADDRESSES_COLLECTION_NAME,
   CREDITCARDS_COLLECTION_NAME,
-  ENABLED_AUTOFILL_ADDRESSES_PREF,
-  ENABLED_AUTOFILL_CREDITCARDS_PREF,
-  ADDRESSES_FIRST_TIME_USE_PREF,
-  CREDITCARDS_USED_STATUS_PREF,
   MANAGE_ADDRESSES_KEYWORDS,
   EDIT_ADDRESS_KEYWORDS,
   MANAGE_CREDITCARDS_KEYWORDS,
@@ -218,6 +211,7 @@ this.FormAutofillUtils = {
     "cc-exp-month": "creditCard",
     "cc-exp-year": "creditCard",
     "cc-exp": "creditCard",
+    "cc-type": "creditCard",
   },
 
   _collators: {},
@@ -232,8 +226,16 @@ this.FormAutofillUtils = {
   },
 
   isCCNumber(ccNumber) {
-    let card = new CreditCard({number: ccNumber});
-    return !!card.number;
+    return CreditCard.isValidNumber(ccNumber);
+  },
+
+  /**
+   * Get the array of credit card network ids ("types") we expect and offer as valid choices
+   *
+   * @returns {Array}
+   */
+  getCreditCardNetworks() {
+    return CreditCard.SUPPORTED_NETWORKS;
   },
 
   getCategoryFromFieldName(fieldName) {
@@ -258,19 +260,21 @@ this.FormAutofillUtils = {
   },
 
   /**
-   * Get address display label. It should display up to two pieces of
-   * information, separated by a comma.
+   * Get address display label. It should display information separated
+   * by a comma.
    *
    * @param  {object} address
+   * @param  {string?} addressFields Override the fields which can be displayed, but not the order.
    * @returns {string}
    */
-  getAddressLabel(address) {
+  getAddressLabel(address, addressFields = null) {
     // TODO: Implement a smarter way for deciding what to display
     //       as option text. Possibly improve the algorithm in
     //       ProfileAutoCompleteResult.jsm and reuse it here.
-    const fieldOrder = [
+    let fieldOrder = [
       "name",
       "-moz-street-address-one-line",  // Street address
+      "address-level3",  // Townland / Neighborhood / Village
       "address-level2",  // City/Town
       "organization",    // Company or organization name
       "address-level1",  // Province/State (Standardized code if possible)
@@ -282,6 +286,10 @@ this.FormAutofillUtils = {
 
     address = {...address};
     let parts = [];
+    if (addressFields) {
+      let requiredFields = addressFields.trim().split(/\s+/);
+      fieldOrder = fieldOrder.filter(name => requiredFields.includes(name));
+    }
     if (address["street-address"]) {
       address["-moz-street-address-one-line"] = this.toOneLineAddress(
         address["street-address"]
@@ -292,23 +300,54 @@ this.FormAutofillUtils = {
       if (string) {
         parts.push(string);
       }
-      if (parts.length == 2) {
+      if (parts.length == 2 && !addressFields) {
         break;
       }
     }
     return parts.join(", ");
   },
 
-  toOneLineAddress(address, delimiter = "\n") {
+  /**
+   * Internal method to split an address to multiple parts per the provided delimiter,
+   * removing blank parts.
+   * @param {string} address The address the split
+   * @param {string} [delimiter] The separator that is used between lines in the address
+   * @returns {string[]}
+   */
+  _toStreetAddressParts(address, delimiter = "\n") {
     let array = typeof address == "string" ? address.split(delimiter) : address;
 
     if (!Array.isArray(array)) {
-      return "";
+      return [];
     }
     return array
       .map(s => s ? s.trim() : "")
-      .filter(s => s)
-      .join(this.getAddressSeparator());
+      .filter(s => s);
+  },
+
+  /**
+   * Converts a street address to a single line, removing linebreaks marked by the delimiter
+   * @param {string} address The address the convert
+   * @param {string} [delimiter] The separator that is used between lines in the address
+   * @returns {string}
+   */
+  toOneLineAddress(address, delimiter = "\n") {
+    let addressParts = this._toStreetAddressParts(address, delimiter);
+    return addressParts.join(this.getAddressSeparator());
+  },
+
+  /**
+   * Compares two addresses, removing internal whitespace
+   * @param {string} a The first address to compare
+   * @param {string} b The second address to compare
+   * @param {array} collators Search collators that will be used for comparison
+   * @param {string} [delimiter="\n"] The separator that is used between lines in the address
+   * @returns {boolean} True if the addresses are equal, false otherwise
+   */
+  compareStreetAddress(a, b, collators, delimiter = "\n") {
+    let oneLineA = this._toStreetAddressParts(a, delimiter).map(p => p.replace(/\s/g, "")).join("");
+    let oneLineB = this._toStreetAddressParts(b, delimiter).map(p => p.replace(/\s/g, "")).join("");
+    return this.strCompare(oneLineA, oneLineB, collators);
   },
 
   /**
@@ -337,16 +376,6 @@ this.FormAutofillUtils = {
     }
   },
 
-  defineLazyLogGetter(scope, logPrefix) {
-    XPCOMUtils.defineLazyGetter(scope, "log", () => {
-      let ConsoleAPI = ChromeUtils.import("resource://gre/modules/Console.jsm", {}).ConsoleAPI;
-      return new ConsoleAPI({
-        maxLogLevelPref: "extensions.formautofill.loglevel",
-        prefix: logPrefix,
-      });
-    });
-  },
-
   autofillFieldSelector(doc) {
     return doc.querySelectorAll("input, select");
   },
@@ -367,32 +396,32 @@ this.FormAutofillUtils = {
   },
 
   loadDataFromScript(url, sandbox = {}) {
-    Services.scriptloader.loadSubScript(url, sandbox, "utf-8");
+    Services.scriptloader.loadSubScript(url, sandbox);
     return sandbox;
   },
 
   /**
    * Get country address data and fallback to US if not found.
    * See AddressDataLoader._loadData for more details of addressData structure.
-   * @param {string} [country=FormAutofillUtils.DEFAULT_REGION]
+   * @param {string} [country=FormAutofill.DEFAULT_REGION]
    *        The country code for requesting specific country's metadata. It'll be
    *        default region if parameter is not set.
    * @param {string} [level1=null]
-   *        Retrun address level 1/level 2 metadata if parameter is set.
+   *        Return address level 1/level 2 metadata if parameter is set.
    * @returns {object|null}
    *          Return metadata of specific region with default locale and other supported
-   *          locales. We need to return a deafult country metadata for layout format
+   *          locales. We need to return a default country metadata for layout format
    *          and collator, but for sub-region metadata we'll just return null if not found.
    */
-  getCountryAddressRawData(country = FormAutofillUtils.DEFAULT_REGION, level1 = null) {
+  getCountryAddressRawData(country = FormAutofill.DEFAULT_REGION, level1 = null) {
     let metadata = AddressDataLoader.getData(country, level1);
     if (!metadata) {
       if (level1) {
         return null;
       }
       // Fallback to default region if we couldn't get data from given country.
-      if (country != FormAutofillUtils.DEFAULT_REGION) {
-        metadata = AddressDataLoader.getData(FormAutofillUtils.DEFAULT_REGION);
+      if (country != FormAutofill.DEFAULT_REGION) {
+        metadata = AddressDataLoader.getData(FormAutofill.DEFAULT_REGION);
       }
     }
 
@@ -409,6 +438,9 @@ this.FormAutofillUtils = {
    * @param {string} country
    * @param {string} level1
    * @returns {object|null} Return metadata of specific region with default locale.
+   *          NOTE: The returned data may be for a default region if the
+   *          specified one cannot be found. Callers who only want the specific
+   *          region should check the returned country code.
    */
   getCountryAddressData(country, level1) {
     let metadata = this.getCountryAddressRawData(country, level1);
@@ -421,6 +453,9 @@ this.FormAutofillUtils = {
    * @param {string} level1
    * @returns {array<object>|null}
    *          Return metadata of specific region with all the locales.
+   *          NOTE: The returned data may be for a default region if the
+   *          specified one cannot be found. Callers who only want the specific
+   *          region should check the returned country code.
    */
   getCountryAddressDataWithLocales(country, level1) {
     let metadata = this.getCountryAddressRawData(country, level1);
@@ -432,7 +467,7 @@ this.FormAutofillUtils = {
    * @param   {string} country The specified country.
    * @returns {array} An array containing several collator objects.
    */
-  getCollators(country) {
+  getSearchCollators(country) {
     // TODO: Only one language should be used at a time per country. The locale
     //       of the page should be taken into account to do this properly.
     //       We are going to support more countries in bug 1370193 and this
@@ -441,9 +476,27 @@ this.FormAutofillUtils = {
     if (!this._collators[country]) {
       let dataset = this.getCountryAddressData(country);
       let languages = dataset.languages || [dataset.lang];
-      this._collators[country] = languages.map(lang => new Intl.Collator(lang, {sensitivity: "base", ignorePunctuation: true}));
+      let options = {
+        ignorePunctuation: true,
+        sensitivity: "base",
+        usage: "search",
+      };
+      this._collators[country] = languages.map(lang => new Intl.Collator(lang, options));
     }
     return this._collators[country];
+  },
+
+  // Based on the list of fields abbreviations in
+  // https://github.com/googlei18n/libaddressinput/wiki/AddressValidationMetadata
+  FIELDS_LOOKUP: {
+    N: "name",
+    O: "organization",
+    A: "street-address",
+    S: "address-level1",
+    C: "address-level2",
+    D: "address-level3",
+    Z: "postal-code",
+    n: "newLine",
   },
 
   /**
@@ -463,21 +516,10 @@ this.FormAutofillUtils = {
     if (!fmt) {
       throw new Error("fmt string is missing.");
     }
-    // Based on the list of fields abbreviations in
-    // https://github.com/googlei18n/libaddressinput/wiki/AddressValidationMetadata
-    const fieldsLookup = {
-      N: "name",
-      O: "organization",
-      A: "street-address",
-      S: "address-level1",
-      C: "address-level2",
-      Z: "postal-code",
-      n: "newLine",
-    };
 
     return fmt.match(/%[^%]/g).reduce((parsed, part) => {
       // Take the first letter of each segment and try to identify it
-      let fieldId = fieldsLookup[part[1]];
+      let fieldId = this.FIELDS_LOOKUP[part[1]];
       // Early return if cannot identify part.
       if (!fieldId) {
         return parsed;
@@ -495,6 +537,57 @@ this.FormAutofillUtils = {
   },
 
   /**
+   * Used to populate dropdowns in the UI (e.g. FormAutofill preferences, Web Payments).
+   * Use findAddressSelectOption for matching a value to a region.
+   *
+   * @param {string[]} subKeys An array of regionCode strings
+   * @param {string[]} subIsoids An array of ISO ID strings, if provided will be preferred over the key
+   * @param {string[]} subNames An array of regionName strings
+   * @param {string[]} subLnames An array of latinised regionName strings
+   * @returns {Map?} Returns null if subKeys or subNames are not truthy.
+   *                   Otherwise, a Map will be returned mapping keys -> names.
+   */
+  buildRegionMapIfAvailable(subKeys, subIsoids, subNames, subLnames) {
+    // Not all regions have sub_keys. e.g. DE
+    if (!subKeys || !subKeys.length ||
+        (!subNames && !subLnames) ||
+        (subNames && subKeys.length != subNames.length ||
+         subLnames && subKeys.length != subLnames.length)) {
+      return null;
+    }
+
+    // Overwrite subKeys with subIsoids, when available
+    if (subIsoids && subIsoids.length && subIsoids.length == subKeys.length) {
+      for (let i = 0; i < subIsoids.length; i++) {
+        if (subIsoids[i]) {
+          subKeys[i] = subIsoids[i];
+        }
+      }
+    }
+
+    // Apply sub_lnames if sub_names does not exist
+    let names = subNames || subLnames;
+    return new Map(subKeys.map((key, index) => [key, names[index]]));
+  },
+
+  /**
+   * Parse a require string and outputs an array of fields.
+   * Spaces, commas, and other literals are ignored in this implementation.
+   * For example, a require string "ACS" should return:
+   * ["street-address", "address-level2", "address-level1"]
+   *
+   * @param   {string} requireString Country address require string
+   * @returns {array<string>} List of fields
+   */
+  parseRequireString(requireString) {
+    if (!requireString) {
+      throw new Error("requireString string is missing.");
+    }
+
+    return requireString.split("").map(fieldId => this.FIELDS_LOOKUP[fieldId]);
+  },
+
+  /**
    * Use alternative country name list to identify a country code from a
    * specified country name.
    * @param   {string} countryName A country name to be identified
@@ -503,12 +596,20 @@ this.FormAutofillUtils = {
    * @returns {string} The matching country code.
    */
   identifyCountryCode(countryName, countrySpecified) {
-    let countries = countrySpecified ? [countrySpecified] : this.supportedCountries;
+    let countries = countrySpecified ? [countrySpecified] : [...FormAutofill.countries.keys()];
 
     for (let country of countries) {
-      let collators = this.getCollators(country);
-
+      let collators = this.getSearchCollators(country);
       let metadata = this.getCountryAddressData(country);
+      if (country != metadata.key) {
+        // We hit the fallback logic in getCountryAddressRawData so ignore it as
+        // it's not related to `country` and use the name from l10n instead.
+        metadata = {
+          id: `data/${country}`,
+          key: country,
+          name: FormAutofill.countries.get(country),
+        };
+      }
       let alternativeCountryNames = metadata.alternative_names || [metadata.name];
       let reAlternativeCountryNames = this._reAlternativeCountryNames[country];
       if (!reAlternativeCountryNames) {
@@ -550,7 +651,7 @@ this.FormAutofillUtils = {
   getAbbreviatedSubregionName(subregionValues, country) {
     let values = Array.isArray(subregionValues) ? subregionValues : [subregionValues];
 
-    let collators = this.getCollators(country);
+    let collators = this.getSearchCollators(country);
     for (let metadata of this.getCountryAddressDataWithLocales(country)) {
       let {sub_keys: subKeys, sub_names: subNames, sub_lnames: subLnames} = metadata;
       if (!subKeys) {
@@ -601,7 +702,7 @@ this.FormAutofillUtils = {
       return null;
     }
 
-    let collators = this.getCollators(address.country);
+    let collators = this.getSearchCollators(address.country);
 
     for (let option of selectEl.options) {
       if (this.strCompare(value, option.value, collators) ||
@@ -719,6 +820,17 @@ this.FormAutofillUtils = {
         }
         break;
       }
+      case "cc-type": {
+        let network = creditCard["cc-type"] || "";
+        for (let option of options) {
+          if ([option.text, option.label, option.value].some(
+            s => s.trim().toLowerCase() == network
+          )) {
+            return option;
+          }
+        }
+        break;
+      }
     }
 
     return null;
@@ -772,18 +884,27 @@ this.FormAutofillUtils = {
    * @param   {string} country
    * @returns {object}
    *         {
+   *           {string} addressLevel3Label
+   *           {string} addressLevel2Label
    *           {string} addressLevel1Label
    *           {string} postalCodeLabel
    *           {object} fieldsOrder
+   *           {string} postalCodePattern
    *         }
    */
   getFormFormat(country) {
     const dataset = this.getCountryAddressData(country);
     return {
-      "addressLevel1Label": dataset.state_name_type || "province",
-      "postalCodeLabel": dataset.zip_name_type || "postalCode",
-      "fieldsOrder": this.parseAddressFormat(dataset.fmt || "%N%n%O%n%A%n%C, %S %Z"),
-      "postalCodePattern": dataset.zip,
+      // When particular values are missing for a country, the
+      // data/ZZ value should be used instead.
+      addressLevel3Label: dataset.sublocality_name_type || "suburb",
+      addressLevel2Label: dataset.locality_name_type || "city",
+      addressLevel1Label: dataset.state_name_type || "province",
+      addressLevel1Options: this.buildRegionMapIfAvailable(dataset.sub_keys, dataset.sub_isoids, dataset.sub_names, dataset.sub_lnames),
+      countryRequiredFields: this.parseRequireString(dataset.require || "AC"),
+      fieldsOrder: this.parseAddressFormat(dataset.fmt || "%N%n%O%n%A%n%C"),
+      postalCodeLabel: dataset.zip_name_type || "postalCode",
+      postalCodePattern: dataset.zip,
     };
   },
 
@@ -829,7 +950,7 @@ this.FormAutofillUtils = {
 };
 
 this.log = null;
-this.FormAutofillUtils.defineLazyLogGetter(this, EXPORTED_SYMBOLS[0]);
+this.FormAutofill.defineLazyLogGetter(this, EXPORTED_SYMBOLS[0]);
 
 XPCOMUtils.defineLazyGetter(FormAutofillUtils, "stringBundle", function() {
   return Services.strings.createBundle("chrome://formautofill/locale/formautofill.properties");
@@ -838,19 +959,3 @@ XPCOMUtils.defineLazyGetter(FormAutofillUtils, "stringBundle", function() {
 XPCOMUtils.defineLazyGetter(FormAutofillUtils, "brandBundle", function() {
   return Services.strings.createBundle("chrome://branding/locale/brand.properties");
 });
-
-XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
-                                      "DEFAULT_REGION", DEFAULT_REGION_PREF, "US");
-XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
-                                      "isAutofillAddressesEnabled", ENABLED_AUTOFILL_ADDRESSES_PREF);
-XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
-                                      "isAutofillCreditCardsAvailable", AUTOFILL_CREDITCARDS_AVAILABLE_PREF);
-XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
-                                      "_isAutofillCreditCardsEnabled", ENABLED_AUTOFILL_CREDITCARDS_PREF);
-XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
-                                      "isAutofillAddressesFirstTimeUse", ADDRESSES_FIRST_TIME_USE_PREF);
-XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
-                                      "AutofillCreditCardsUsedStatus", CREDITCARDS_USED_STATUS_PREF);
-XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
-                                      "supportedCountries", SUPPORTED_COUNTRIES_PREF, null, null,
-                                      val => val.split(","));

@@ -1,13 +1,13 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! The restyle damage is a hint that tells layout which kind of operations may
 //! be needed in presence of incremental style changes.
 
-use computed_values::display::T as Display;
-use matching::{StyleChange, StyleDifference};
-use properties::ComputedValues;
+use crate::computed_values::display::T as Display;
+use crate::matching::{StyleChange, StyleDifference};
+use crate::properties::ComputedValues;
 use std::fmt;
 
 bitflags! {
@@ -80,9 +80,12 @@ impl ServoRestyleDamage {
     /// FIXME(bholley): Do we ever actually need this? Shouldn't
     /// RECONSTRUCT_FLOW imply everything else?
     pub fn rebuild_and_reflow() -> ServoRestyleDamage {
-        ServoRestyleDamage::REPAINT | ServoRestyleDamage::REPOSITION |
-            ServoRestyleDamage::STORE_OVERFLOW | ServoRestyleDamage::BUBBLE_ISIZES |
-            ServoRestyleDamage::REFLOW_OUT_OF_FLOW | ServoRestyleDamage::REFLOW |
+        ServoRestyleDamage::REPAINT |
+            ServoRestyleDamage::REPOSITION |
+            ServoRestyleDamage::STORE_OVERFLOW |
+            ServoRestyleDamage::BUBBLE_ISIZES |
+            ServoRestyleDamage::REFLOW_OUT_OF_FLOW |
+            ServoRestyleDamage::REFLOW |
             ServoRestyleDamage::RECONSTRUCT_FLOW
     }
 
@@ -95,12 +98,14 @@ impl ServoRestyleDamage {
     /// returns the damage that we should add to the *parent* of this flow.
     pub fn damage_for_parent(self, child_is_absolutely_positioned: bool) -> ServoRestyleDamage {
         if child_is_absolutely_positioned {
-            self & (ServoRestyleDamage::REPAINT | ServoRestyleDamage::REPOSITION |
+            self & (ServoRestyleDamage::REPAINT |
+                ServoRestyleDamage::REPOSITION |
                 ServoRestyleDamage::STORE_OVERFLOW |
                 ServoRestyleDamage::REFLOW_OUT_OF_FLOW |
                 ServoRestyleDamage::RESOLVE_GENERATED_CONTENT)
         } else {
-            self & (ServoRestyleDamage::REPAINT | ServoRestyleDamage::REPOSITION |
+            self & (ServoRestyleDamage::REPAINT |
+                ServoRestyleDamage::REPOSITION |
                 ServoRestyleDamage::STORE_OVERFLOW |
                 ServoRestyleDamage::REFLOW |
                 ServoRestyleDamage::REFLOW_OUT_OF_FLOW |
@@ -136,7 +141,8 @@ impl ServoRestyleDamage {
             },
             _ => {
                 // TODO(pcwalton): Take floatedness into account.
-                self & (ServoRestyleDamage::REPAINT | ServoRestyleDamage::REPOSITION |
+                self & (ServoRestyleDamage::REPAINT |
+                    ServoRestyleDamage::REPOSITION |
                     ServoRestyleDamage::REFLOW)
             },
         }
@@ -189,7 +195,7 @@ fn compute_damage(old: &ComputedValues, new: &ComputedValues) -> ServoRestyleDam
     let mut damage = ServoRestyleDamage::empty();
 
     // This should check every CSS property, as enumerated in the fields of
-    // http://doc.servo.org/style/properties/struct.ComputedValues.html
+    // https://doc.servo.org/style/properties/struct.ComputedValues.html
 
     // This uses short-circuiting boolean OR for its side effects and ignores the result.
     let _ = restyle_damage_rebuild_and_reflow!(
@@ -205,22 +211,21 @@ fn compute_damage(old: &ComputedValues, new: &ComputedValues) -> ServoRestyleDam
             ServoRestyleDamage::REFLOW,
             ServoRestyleDamage::RECONSTRUCT_FLOW
         ]
-    ) ||
-        (new.get_box().display == Display::Inline &&
-            restyle_damage_rebuild_and_reflow_inline!(
-                old,
-                new,
-                damage,
-                [
-                    ServoRestyleDamage::REPAINT,
-                    ServoRestyleDamage::REPOSITION,
-                    ServoRestyleDamage::STORE_OVERFLOW,
-                    ServoRestyleDamage::BUBBLE_ISIZES,
-                    ServoRestyleDamage::REFLOW_OUT_OF_FLOW,
-                    ServoRestyleDamage::REFLOW,
-                    ServoRestyleDamage::RECONSTRUCT_FLOW
-                ]
-            )) ||
+    ) || (new.get_box().display == Display::Inline &&
+        restyle_damage_rebuild_and_reflow_inline!(
+            old,
+            new,
+            damage,
+            [
+                ServoRestyleDamage::REPAINT,
+                ServoRestyleDamage::REPOSITION,
+                ServoRestyleDamage::STORE_OVERFLOW,
+                ServoRestyleDamage::BUBBLE_ISIZES,
+                ServoRestyleDamage::REFLOW_OUT_OF_FLOW,
+                ServoRestyleDamage::REFLOW,
+                ServoRestyleDamage::RECONSTRUCT_FLOW
+            ]
+        )) ||
         restyle_damage_reflow!(
             old,
             new,
@@ -244,7 +249,8 @@ fn compute_damage(old: &ComputedValues, new: &ComputedValues) -> ServoRestyleDam
                 ServoRestyleDamage::STORE_OVERFLOW,
                 ServoRestyleDamage::REFLOW_OUT_OF_FLOW
             ]
-        ) || restyle_damage_repaint!(old, new, damage, [ServoRestyleDamage::REPAINT]);
+        ) ||
+        restyle_damage_repaint!(old, new, damage, [ServoRestyleDamage::REPAINT]);
 
     // Paint worklets may depend on custom properties,
     // so if they have changed we should repaint.

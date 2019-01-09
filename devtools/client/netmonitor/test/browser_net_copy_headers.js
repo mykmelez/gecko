@@ -37,13 +37,13 @@ add_task(async function() {
     `${method} ${SIMPLE_URL} ${httpVersion}`,
     "Host: example.com",
     "User-Agent: " + navigator.userAgent + "",
-    "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
     "Accept-Language: " + navigator.languages.join(",") + ";q=0.5",
     "Accept-Encoding: gzip, deflate",
     "Connection: keep-alive",
     "Upgrade-Insecure-Requests: 1",
     "Pragma: no-cache",
-    "Cache-Control: no-cache"
+    "Cache-Control: no-cache",
   ].join("\n");
 
   await waitForClipboardPromise(function setup() {
@@ -63,7 +63,7 @@ add_task(async function() {
     "content-length: 465",
     "connection: close",
     "server: httpd.js",
-    "date: Sun, 3 May 2015 11:11:11 GMT"
+    "date: Sun, 3 May 2015 11:11:11 GMT",
   ].join("\n");
 
   EventUtils.sendMouseEvent({ type: "contextmenu" },

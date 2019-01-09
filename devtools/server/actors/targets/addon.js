@@ -36,7 +36,7 @@ function AddonTargetActor(connection, addon) {
 
   this.makeDebugger = makeDebugger.bind(null, {
     findDebuggees: this._findDebuggees.bind(this),
-    shouldAddNewGlobalAsDebuggee: this._shouldAddNewGlobalAsDebuggee
+    shouldAddNewGlobalAsDebuggee: this._shouldAddNewGlobalAsDebuggee,
   });
 
   AddonManager.addAddonListener(this);
@@ -50,7 +50,7 @@ AddonTargetActor.prototype = {
     return !this._addon;
   },
 
-  get id() {
+  get addonId() {
     return this._addon.id;
   },
 
@@ -83,10 +83,11 @@ AddonTargetActor.prototype = {
 
     return {
       actor: this.actorID,
-      id: this.id,
+      id: this.addonId,
       name: this._addon.name,
       url: this.url,
       iconURL: this._addon.iconURL,
+      isSystem: this._addon.isSystem,
       debuggable: this._addon.isDebuggable,
       temporarilyInstalled: this._addon.temporarilyInstalled,
       type: this._addon.type,
@@ -95,7 +96,6 @@ AddonTargetActor.prototype = {
       consoleActor: this._consoleActor.actorID,
 
       traits: {
-        highlightable: false,
         networkMonitor: false,
       },
     };
@@ -183,23 +183,19 @@ AddonTargetActor.prototype = {
       });
   },
 
+  // A no-op function to enable this actor to be handled as same as WebExtensionActor.
+  loadIconDataURL() {
+  },
+
   preNest: function() {
-    const e = Services.wm.getEnumerator(null);
-    while (e.hasMoreElements()) {
-      const win = e.getNext();
-      const windowUtils = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                           .getInterface(Ci.nsIDOMWindowUtils);
+    for (const {windowUtils} of Services.wm.getEnumerator(null)) {
       windowUtils.suppressEventHandling(true);
       windowUtils.suspendTimeouts();
     }
   },
 
   postNest: function() {
-    const e = Services.wm.getEnumerator(null);
-    while (e.hasMoreElements()) {
-      const win = e.getNext();
-      const windowUtils = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                           .getInterface(Ci.nsIDOMWindowUtils);
+    for (const {windowUtils} of Services.wm.getEnumerator(null)) {
       windowUtils.resumeTimeouts();
       windowUtils.suppressEventHandling(false);
     }
@@ -215,14 +211,14 @@ AddonTargetActor.prototype = {
       // This will fail for non-Sandbox objects, hence the try-catch block.
       const metadata = Cu.getSandboxMetadata(global);
       if (metadata) {
-        return metadata.addonID === this.id;
+        return metadata.addonID === this.addonId;
       }
     } catch (e) {
       // ignore
     }
 
     if (global instanceof Ci.nsIDOMWindow) {
-      return global.document.nodePrincipal.addonId == this.id;
+      return global.document.nodePrincipal.addonId == this.addonId;
     }
 
     return false;
@@ -248,12 +244,11 @@ AddonTargetActor.prototype = {
    */
   _findDebuggees: function(dbg) {
     return dbg.findAllGlobals().filter(this._shouldAddNewGlobalAsDebuggee);
-  }
+  },
 };
 
 AddonTargetActor.prototype.requestTypes = {
   "attach": AddonTargetActor.prototype.onAttach,
   "detach": AddonTargetActor.prototype.onDetach,
-  "reload": AddonTargetActor.prototype.onReload
+  "reload": AddonTargetActor.prototype.onReload,
 };
-

@@ -82,7 +82,7 @@ DistributionCustomizer.prototype = {
   },
 
   get _locale() {
-    const locale = Services.locale.getRequestedLocale() || "en-US";
+    const locale = Services.locale.requestedLocale || "en-US";
     this.__defineGetter__("_locale", () => locale);
     return this._locale;
   },
@@ -94,7 +94,7 @@ DistributionCustomizer.prototype = {
   },
 
   async _parseBookmarksSection(parentGuid, section) {
-    let keys = Array.from(enumerate(this._ini.getKeys(section))).sort();
+    let keys = Array.from(this._ini.getKeys(section)).sort();
     let re = /^item\.(\d+)\.(\w+)\.?(\w*)/;
     let items = {};
     let defaultIndex = -1;
@@ -147,7 +147,7 @@ DistributionCustomizer.prototype = {
 
         let folder = await PlacesUtils.bookmarks.insert({
           type: PlacesUtils.bookmarks.TYPE_FOLDER,
-          parentGuid, index, title: item.title
+          parentGuid, index, title: item.title,
         });
 
         await this._parseBookmarksSection(folder.guid,
@@ -160,20 +160,22 @@ DistributionCustomizer.prototype = {
 
         await PlacesUtils.bookmarks.insert({
           type: PlacesUtils.bookmarks.TYPE_SEPARATOR,
-          parentGuid, index
+          parentGuid, index,
         });
         break;
 
       case "livemark":
-        if (itemIndex < defaultIndex)
+        // Livemarks are no more supported, instead of a livemark we'll insert
+        // a bookmark pointing to the site uri, if available.
+        if (!item.siteLink) {
+          break;
+        }
+        if (itemIndex < defaultIndex) {
           index = prependIndex++;
+        }
 
-        // Don't bother updating the livemark contents on creation.
-        let parentId = await PlacesUtils.promiseItemId(parentGuid);
-        await PlacesUtils.livemarks.addLivemark({
-          feedURI: Services.io.newURI(item.feedLink),
-          siteURI: Services.io.newURI(item.siteLink),
-          parentId, index, title: item.title
+        await PlacesUtils.bookmarks.insert({
+          parentGuid, index, title: item.title, url: item.siteLink,
         });
         break;
 
@@ -183,7 +185,7 @@ DistributionCustomizer.prototype = {
           index = prependIndex++;
 
         await PlacesUtils.bookmarks.insert({
-          parentGuid, index, title: item.title, url: item.link
+          parentGuid, index, title: item.title, url: item.link,
         });
 
         if (item.icon && item.iconData) {
@@ -227,11 +229,9 @@ DistributionCustomizer.prototype = {
     if (!this._ini)
       return this._checkCustomizationComplete();
 
-    // nsPrefService loads very early.  Reload prefs so we can set
-    // distribution defaults during the prefservice:after-app-defaults
-    // notification (see applyPrefDefaults below)
-    Services.prefs.QueryInterface(Ci.nsIObserver)
-      .observe(null, "reload-default-prefs", null);
+    if (!this._prefDefaultsApplied) {
+      this.applyPrefDefaults();
+    }
   },
 
   _bookmarksApplied: false,
@@ -319,7 +319,7 @@ DistributionCustomizer.prototype = {
     var usedPreferences = [];
 
     if (sections["Preferences-" + this._locale]) {
-      for (let key of enumerate(this._ini.getKeys("Preferences-" + this._locale))) {
+      for (let key of this._ini.getKeys("Preferences-" + this._locale)) {
         try {
           let value = this._ini.getString("Preferences-" + this._locale, key);
           if (value) {
@@ -331,7 +331,7 @@ DistributionCustomizer.prototype = {
     }
 
     if (sections["Preferences-" + this._language]) {
-      for (let key of enumerate(this._ini.getKeys("Preferences-" + this._language))) {
+      for (let key of this._ini.getKeys("Preferences-" + this._language)) {
         if (usedPreferences.indexOf(key) > -1) {
           continue;
         }
@@ -346,7 +346,7 @@ DistributionCustomizer.prototype = {
     }
 
     if (sections.Preferences) {
-      for (let key of enumerate(this._ini.getKeys("Preferences"))) {
+      for (let key of this._ini.getKeys("Preferences")) {
         if (usedPreferences.indexOf(key) > -1) {
           continue;
         }
@@ -371,7 +371,7 @@ DistributionCustomizer.prototype = {
     var usedLocalizablePreferences = [];
 
     if (sections["LocalizablePreferences-" + this._locale]) {
-      for (let key of enumerate(this._ini.getKeys("LocalizablePreferences-" + this._locale))) {
+      for (let key of this._ini.getKeys("LocalizablePreferences-" + this._locale)) {
         try {
           let value = this._ini.getString("LocalizablePreferences-" + this._locale, key);
           if (value) {
@@ -385,7 +385,7 @@ DistributionCustomizer.prototype = {
     }
 
     if (sections["LocalizablePreferences-" + this._language]) {
-      for (let key of enumerate(this._ini.getKeys("LocalizablePreferences-" + this._language))) {
+      for (let key of this._ini.getKeys("LocalizablePreferences-" + this._language)) {
         if (usedLocalizablePreferences.indexOf(key) > -1) {
           continue;
         }
@@ -402,7 +402,7 @@ DistributionCustomizer.prototype = {
     }
 
     if (sections.LocalizablePreferences) {
-      for (let key of enumerate(this._ini.getKeys("LocalizablePreferences"))) {
+      for (let key of this._ini.getKeys("LocalizablePreferences")) {
         if (usedLocalizablePreferences.indexOf(key) > -1) {
           continue;
         }
@@ -423,10 +423,10 @@ DistributionCustomizer.prototype = {
   },
 
   _checkCustomizationComplete: function DIST__checkCustomizationComplete() {
-    const BROWSER_DOCURL = "chrome://browser/content/browser.xul";
+    const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     if (this._newProfile) {
-      let xulStore = Cc["@mozilla.org/xul/xulstore;1"].getService(Ci.nsIXULStore);
+      let xulStore = Services.xulStore;
 
       try {
         var showPersonalToolbar = Services.prefs.getBoolPref("browser.showPersonalToolbar");
@@ -447,7 +447,7 @@ DistributionCustomizer.prototype = {
         prefDefaultsApplied) {
       Services.obs.notifyObservers(null, DISTRIBUTION_CUSTOMIZATION_COMPLETE_TOPIC);
     }
-  }
+  },
 };
 
 function parseValue(value) {
@@ -463,14 +463,9 @@ function parseValue(value) {
   return value;
 }
 
-function* enumerate(UTF8Enumerator) {
-  while (UTF8Enumerator.hasMore())
-    yield UTF8Enumerator.getNext();
-}
-
 function enumToObject(UTF8Enumerator) {
   let ret = {};
-  for (let i of enumerate(UTF8Enumerator))
+  for (let i of UTF8Enumerator)
     ret[i] = 1;
   return ret;
 }

@@ -37,7 +37,7 @@ const KEY_STATES = [
     [".bb", 1],
     ["#ba", 1],
     ["#bb", 1],
-    ["#bc", 1]
+    ["#bc", 1],
   ]],
 ];
 
@@ -72,7 +72,6 @@ add_task(async function() {
     const actualSuggestions = popup.getItems();
     is(popup.isOpen ? actualSuggestions.length : 0, expectedSuggestions.length,
        "There are expected number of suggestions");
-    actualSuggestions.reverse();
 
     for (let i = 0; i < expectedSuggestions.length; i++) {
       is(expectedSuggestions[i][0], actualSuggestions[i].label,

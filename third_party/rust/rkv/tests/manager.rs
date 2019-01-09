@@ -9,6 +9,7 @@
 // specific language governing permissions and limitations under the License.
 
 extern crate rkv;
+<<<<<<< HEAD
 extern crate tempdir;
 
 use rkv::{
@@ -23,12 +24,30 @@ use std::fs;
 use std::sync::{
     Arc,
 };
+=======
+extern crate tempfile;
+
+use rkv::{
+    Manager,
+    Rkv,
+};
+
+use self::tempfile::Builder;
+
+use std::fs;
+
+use std::sync::Arc;
+>>>>>>> central
 
 #[test]
 // Identical to the same-named unit test, but this one confirms that it works
 // via the public MANAGER singleton.
 fn test_same() {
+<<<<<<< HEAD
     let root = TempDir::new("test_same_singleton").expect("tempdir");
+=======
+    let root = Builder::new().prefix("test_same_singleton").tempdir().expect("tempdir");
+>>>>>>> central
     fs::create_dir_all(root.path()).expect("dir created");
 
     let p = root.path();

@@ -592,7 +592,16 @@ def split_triplet(triplet, allow_unknown=False):
     # There is also a quartet form:
     #   CPU_TYPE-MANUFACTURER-KERNEL-OPERATING_SYSTEM
     # But we can consider the "KERNEL-OPERATING_SYSTEM" as one.
-    cpu, manufacturer, os = triplet.split('-', 2)
+    # Additionally, some may omit "unknown" when the manufacturer
+    # is not specified and emit
+    #   CPU_TYPE-OPERATING_SYSTEM
+    parts = triplet.split('-', 2)
+    if len(parts) == 3:
+        cpu, _, os = parts
+    elif len(parts) == 2:
+        cpu, os = parts
+    else:
+        die("Unexpected triplet string: %s" % triplet)
 
     # Autoconf uses config.sub to validate and canonicalize those triplets,
     # but the granularity of its results has never been satisfying to our
@@ -760,7 +769,13 @@ host = help_host_target | host
 def target(value, host, shell):
     if not value:
         return host
-    return split_triplet(config_sub(shell, value[0]))
+    # If --target was only given a cpu arch, expand it with the
+    # non-cpu part of the host.
+    target = value[0]
+    if '-' not in target:
+        cpu, rest = host.alias.split('-', 1)
+        target = '-'.join((target, rest))
+    return split_triplet(config_sub(shell, target))
 
 
 target = help_host_target | target
@@ -863,6 +878,7 @@ add_old_configure_assignment('CPU_ARCH', target.cpu)
 set_config('INTEL_ARCHITECTURE', target_variables.INTEL_ARCHITECTURE)
 set_config('TARGET_CPU', target.raw_cpu)
 set_config('TARGET_OS', target.raw_os)
+set_config('TARGET_ENDIANNESS', target.endianness)
 
 
 @depends(host)
@@ -940,6 +956,30 @@ set_define('XP_LINUX', target_is_linux)
 
 
 @depends(target)
+def target_is_openbsd(target):
+    if target.kernel == 'OpenBSD':
+        return True
+
+
+set_define('XP_OPENBSD', target_is_openbsd)
+
+@depends(target)
+def target_is_netbsd(target):
+    if target.kernel == 'NetBSD':
+        return True
+
+
+set_define('XP_NETBSD', target_is_netbsd)
+
+@depends(target)
+def target_is_freebsd(target):
+    if target.kernel == 'FreeBSD':
+        return True
+
+
+set_define('XP_FREEBSD', target_is_freebsd)
+
+@depends(target)
 def target_is_solaris(target):
     if target.kernel == 'SunOS':
         return True
@@ -953,8 +993,8 @@ option('--enable-application', nargs=1, env='MOZ_BUILD_APP',
        help='Application to build. Same as --enable-project.')
 
 
-@depends('--enable-application', '--help')
-def application(app, help):
+@depends('--enable-application')
+def application(app):
     if app:
         return app
 
@@ -962,8 +1002,8 @@ def application(app, help):
 imply_option('--enable-project', application)
 
 
-@depends(check_build_environment, '--help')
-def default_project(build_env, help):
+@depends(check_build_environment)
+def default_project(build_env):
     if build_env.topobjdir.endswith('/js/src'):
         return 'js'
     return 'browser'
@@ -990,8 +1030,8 @@ def include_project_configure(project, external_source_dir, build_env, help):
     return path
 
 
-@depends(include_project_configure, check_build_environment, '--help')
-def build_project(include_project_configure, build_env, help):
+@depends(include_project_configure, check_build_environment)
+def build_project(include_project_configure, build_env):
     ret = os.path.dirname(os.path.relpath(include_project_configure,
                                           build_env.topsrcdir))
     return ret
@@ -1002,20 +1042,77 @@ set_define('MOZ_BUILD_APP', build_project)
 add_old_configure_assignment('MOZ_BUILD_APP', build_project)
 
 
+# This is temporary until js/src/configure and configure are merged.
+# Use instead of option() in js/moz.configure and more generally, for
+# options that are shared between configure and js/src/configure.
+@template
+def js_option(*args, **kwargs):
+    opt = option(*args, **kwargs)
+
+    @depends(opt.option, build_project, when=kwargs.get('when'))
+    def js_option(value, build_project):
+        if build_project != 'js':
+            return value.format(opt.option)
+
+    add_old_configure_arg(js_option)
+
+
+js_option(env='MOZILLA_OFFICIAL',
+          help='Build an official release')
+
+
+@depends('MOZILLA_OFFICIAL')
+def mozilla_official(official):
+    if official:
+        return True
+
+
+set_config('MOZILLA_OFFICIAL', mozilla_official)
+set_define('MOZILLA_OFFICIAL', mozilla_official)
+add_old_configure_assignment('MOZILLA_OFFICIAL', mozilla_official)
+
+
 # set RELEASE_OR_BETA and NIGHTLY_BUILD variables depending on the cycle we're in
 # The logic works like this:
 # - if we have "a1" in GRE_MILESTONE, we're building Nightly (define NIGHTLY_BUILD)
 # - otherwise, if we have "a" in GRE_MILESTONE, we're building Nightly or Aurora
 # - otherwise, we're building Release/Beta (define RELEASE_OR_BETA)
-@depends(check_build_environment, '--help')
+@depends(check_build_environment, build_project, '--help')
 @imports(_from='__builtin__', _import='open')
+@imports('os')
 @imports('re')
-def milestone(build_env, _):
-    milestone_path = os.path.join(build_env.topsrcdir,
-                                  'config',
-                                  'milestone.txt')
-    with open(milestone_path, 'r') as fh:
-        milestone = fh.read().splitlines()[-1]
+def milestone(build_env, build_project, _):
+    versions = []
+    paths = ['config/milestone.txt']
+    if build_project == 'js':
+        paths = paths * 3
+    else:
+        paths += [
+            'browser/config/version.txt',
+            'browser/config/version_display.txt',
+        ]
+    for f in ('version.txt', 'version_display.txt'):
+        f = os.path.join(build_project, 'config', f)
+        if not os.path.exists(os.path.join(build_env.topsrcdir, f)):
+            break
+        paths.append(f)
+
+    for p in paths:
+        with open(os.path.join(build_env.topsrcdir, p), 'r') as fh:
+            content = fh.read().splitlines()
+            if not content:
+                die('Could not find a version number in {}'.format(p))
+            versions.append(content[-1])
+
+    milestone, firefox_version, firefox_version_display = versions[:3]
+
+    # version.txt content from the project directory if there is one, otherwise
+    # the firefox version.
+    app_version = versions[3] if len(versions) > 3 else firefox_version
+    # version_display.txt content from the project directory if there is one,
+    # otherwise version.txt content from the project directory, otherwise the
+    # firefox version for display.
+    app_version_display = versions[-1] if len(versions) > 3 else firefox_version_display
 
     is_nightly = is_release_or_beta = None
 
@@ -1037,7 +1134,9 @@ def milestone(build_env, _):
                      uaversion='%s.0' % major_version,
                      symbolversion='%s%s' % (major_version, ab_patch),
                      is_nightly=is_nightly,
-                     is_release_or_beta=is_release_or_beta)
+                     is_release_or_beta=is_release_or_beta,
+                     app_version=app_version,
+                     app_version_display=app_version_display)
 
 
 set_config('GRE_MILESTONE', milestone.version)
@@ -1056,6 +1155,10 @@ set_config('MOZILLA_SYMBOLVERSION', milestone.symbolversion)
 # JS configure still wants to look at these.
 add_old_configure_assignment('MOZILLA_VERSION', milestone.version)
 add_old_configure_assignment('MOZILLA_SYMBOLVERSION', milestone.symbolversion)
+
+set_config('MOZ_APP_VERSION', milestone.app_version)
+set_config('MOZ_APP_VERSION_DISPLAY', milestone.app_version_display)
+add_old_configure_assignment('MOZ_APP_VERSION', milestone.app_version)
 
 # The app update channel is 'default' when not supplied. The value is used in
 # the application's confvars.sh (and is made available to a project specific
@@ -1112,8 +1215,8 @@ def project_flag(env=None, set_for_old_configure=False,
 # milestone.is_nightly corresponds to cases NIGHTLY_BUILD is set.
 
 
-@depends(milestone, '--help')
-def enabled_in_nightly(milestone, _):
+@depends(milestone)
+def enabled_in_nightly(milestone):
     return milestone.is_nightly
 
 # Set the MOZ_CONFIGURE_OPTIONS variable with all the options that
@@ -1153,18 +1256,3 @@ def all_configure_options():
 
 
 set_config('MOZ_CONFIGURE_OPTIONS', all_configure_options)
-
-
-# This is temporary until js/src/configure and configure are merged.
-# Use instead of option() in js/moz.configure and more generally, for
-# options that are shared between configure and js/src/configure.
-@template
-def js_option(*args, **kwargs):
-    opt = option(*args, **kwargs)
-
-    @depends(opt.option, build_project, when=kwargs.get('when'))
-    def js_option(value, build_project):
-        if build_project != 'js':
-            return value.format(opt.option)
-
-    add_old_configure_arg(js_option)

@@ -22,32 +22,23 @@ namespace gfx {
 
 // On Linux and Android our "platform" font is a cairo_scaled_font_t and we use
 // an SkFontHost implementation that allows Skia to render using this.
-// This is mainly because FT_Face is not good for sharing between libraries, which
-// is a requirement when we consider runtime switchable backends and so on
-ScaledFontFreeType::ScaledFontFreeType(cairo_scaled_font_t* aScaledFont,
-                                       FT_Face aFace,
-                                       const RefPtr<UnscaledFont>& aUnscaledFont,
-                                       Float aSize)
-  : ScaledFontBase(aUnscaledFont, aSize)
-  , mFace(aFace)
-{
+// This is mainly because FT_Face is not good for sharing between libraries,
+// which is a requirement when we consider runtime switchable backends and so on
+ScaledFontFreeType::ScaledFontFreeType(
+    cairo_scaled_font_t* aScaledFont, FT_Face aFace,
+    const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize)
+    : ScaledFontBase(aUnscaledFont, aSize), mFace(aFace) {
   SetCairoScaledFont(aScaledFont);
 }
 
 #ifdef USE_SKIA
-SkTypeface* ScaledFontFreeType::GetSkTypeface()
-{
-  if (!mTypeface) {
-    mTypeface = SkCreateTypefaceFromCairoFTFont(mScaledFont);
-  }
-
-  return mTypeface;
+SkTypeface* ScaledFontFreeType::CreateSkTypeface() {
+  return SkCreateTypefaceFromCairoFTFont(mScaledFont);
 }
 #endif
 
-bool
-ScaledFontFreeType::GetFontInstanceData(FontInstanceDataOutput aCb, void* aBaton)
-{
+bool ScaledFontFreeType::GetFontInstanceData(FontInstanceDataOutput aCb,
+                                             void* aBaton) {
   std::vector<FontVariation> variations;
   if (HasVariationSettings()) {
     UnscaledFontFreeType::GetVariationSettingsFromFace(&variations, mFace);
@@ -57,17 +48,18 @@ ScaledFontFreeType::GetFontInstanceData(FontInstanceDataOutput aCb, void* aBaton
   return true;
 }
 
-bool
-ScaledFontFreeType::GetWRFontInstanceOptions(Maybe<wr::FontInstanceOptions>* aOutOptions,
-                                             Maybe<wr::FontInstancePlatformOptions>* aOutPlatformOptions,
-                                             std::vector<FontVariation>* aOutVariations)
-{
+bool ScaledFontFreeType::GetWRFontInstanceOptions(
+    Maybe<wr::FontInstanceOptions>* aOutOptions,
+    Maybe<wr::FontInstancePlatformOptions>* aOutPlatformOptions,
+    std::vector<FontVariation>* aOutVariations) {
   wr::FontInstanceOptions options;
   options.render_mode = wr::FontRenderMode::Alpha;
   // FIXME: Cairo-FT metrics are not compatible with subpixel positioning.
   // options.flags = wr::FontInstanceFlags::SUBPIXEL_POSITION;
   options.flags = 0;
   options.bg_color = wr::ToColorU(Color());
+  options.synthetic_italics =
+      wr::DegreesToSyntheticItalics(GetSyntheticObliqueAngle());
 
   wr::FontInstancePlatformOptions platformOptions;
   platformOptions.lcd_filter = wr::FontLCDFilter::None;
@@ -85,34 +77,29 @@ ScaledFontFreeType::GetWRFontInstanceOptions(Maybe<wr::FontInstanceOptions>* aOu
 
 static cairo_user_data_key_t sNativeFontResourceKey;
 
-static void
-ReleaseNativeFontResource(void* aData)
-{
+static void ReleaseNativeFontResource(void* aData) {
   static_cast<NativeFontResource*>(aData)->Release();
 }
 
 static cairo_user_data_key_t sFaceKey;
 
-static void
-ReleaseFace(void* aData)
-{
+static void ReleaseFace(void* aData) {
   Factory::ReleaseFTFace(static_cast<FT_Face>(aData));
 }
 
-already_AddRefed<ScaledFont>
-UnscaledFontFreeType::CreateScaledFont(Float aGlyphSize,
-                                       const uint8_t* aInstanceData,
-                                       uint32_t aInstanceDataLength,
-                                       const FontVariation* aVariations,
-                                       uint32_t aNumVariations)
-{
+already_AddRefed<ScaledFont> UnscaledFontFreeType::CreateScaledFont(
+    Float aGlyphSize, const uint8_t* aInstanceData,
+    uint32_t aInstanceDataLength, const FontVariation* aVariations,
+    uint32_t aNumVariations) {
   FT_Face face = GetFace();
   if (!face) {
-    gfxWarning() << "Attempted to deserialize FreeType scaled font without FreeType face";
+    gfxWarning() << "Attempted to deserialize FreeType scaled font without "
+                    "FreeType face";
     return nullptr;
   }
 
-  NativeFontResourceFreeType* nfr = static_cast<NativeFontResourceFreeType*>(mNativeFontResource.get());
+  NativeFontResourceFreeType* nfr =
+      static_cast<NativeFontResourceFreeType*>(mNativeFontResource.get());
   FT_Face varFace = nullptr;
   if (nfr && aNumVariations > 0) {
     varFace = nfr->CloneFace();
@@ -129,8 +116,8 @@ UnscaledFontFreeType::CreateScaledFont(Float aGlyphSize,
   }
 
   int flags = FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING;
-  cairo_font_face_t* font =
-    cairo_ft_font_face_create_for_ft_face(face, flags, coords.data(), aNumVariations);
+  cairo_font_face_t* font = cairo_ft_font_face_create_for_ft_face(
+      face, flags, coords.data(), aNumVariations);
   if (cairo_font_face_status(font) != CAIRO_STATUS_SUCCESS) {
     gfxWarning() << "Failed creating Cairo font face for FreeType face";
     if (varFace) {
@@ -139,35 +126,25 @@ UnscaledFontFreeType::CreateScaledFont(Float aGlyphSize,
     return nullptr;
   }
 
-
   if (nfr) {
-    // Bug 1362117 - Cairo may keep the font face alive after the owning NativeFontResource
-    // was freed. To prevent this, we must bind the NativeFontResource to the font face so that
-    // it stays alive at least as long as the font face.
+    // Bug 1362117 - Cairo may keep the font face alive after the owning
+    // NativeFontResource was freed. To prevent this, we must bind the
+    // NativeFontResource to the font face so that it stays alive at least as
+    // long as the font face.
     nfr->AddRef();
-    // Bug 1412545 - Setting Cairo font user data is not thread-safe. If FT_Faces match,
-    // cairo_ft_font_face_create_for_ft_face may share Cairo faces. We need to lock setting user data
-    // to prevent races if multiple threads are thus sharing the same Cairo face.
-    FT_Library library = face->glyph->library;
-    Factory::LockFTLibrary(library);
     cairo_status_t err = CAIRO_STATUS_SUCCESS;
     bool cleanupFace = false;
     if (varFace) {
-      err = cairo_font_face_set_user_data(font,
-                                          &sFaceKey,
-                                          varFace,
-                                          ReleaseFace);
+      err =
+          cairo_font_face_set_user_data(font, &sFaceKey, varFace, ReleaseFace);
     }
 
     if (err != CAIRO_STATUS_SUCCESS) {
       cleanupFace = true;
     } else {
-      err = cairo_font_face_set_user_data(font,
-                                          &sNativeFontResourceKey,
-                                          nfr,
+      err = cairo_font_face_set_user_data(font, &sNativeFontResourceKey, nfr,
                                           ReleaseNativeFontResource);
     }
-    Factory::UnlockFTLibrary(library);
     if (err != CAIRO_STATUS_SUCCESS) {
       gfxWarning() << "Failed binding NativeFontResource to Cairo font face";
       if (varFace && cleanupFace) {
@@ -185,11 +162,11 @@ UnscaledFontFreeType::CreateScaledFont(Float aGlyphSize,
   cairo_matrix_t identityMatrix;
   cairo_matrix_init_identity(&identityMatrix);
 
-  cairo_font_options_t *fontOptions = cairo_font_options_create();
+  cairo_font_options_t* fontOptions = cairo_font_options_create();
   cairo_font_options_set_hint_metrics(fontOptions, CAIRO_HINT_METRICS_OFF);
 
   cairo_scaled_font_t* cairoScaledFont =
-    cairo_scaled_font_create(font, &sizeMatrix, &identityMatrix, fontOptions);
+      cairo_scaled_font_create(font, &sizeMatrix, &identityMatrix, fontOptions);
 
   cairo_font_options_destroy(fontOptions);
 
@@ -201,7 +178,7 @@ UnscaledFontFreeType::CreateScaledFont(Float aGlyphSize,
   }
 
   RefPtr<ScaledFontFreeType> scaledFont =
-    new ScaledFontFreeType(cairoScaledFont, face, this, aGlyphSize);
+      new ScaledFontFreeType(cairoScaledFont, face, this, aGlyphSize);
 
   cairo_scaled_font_destroy(cairoScaledFont);
 
@@ -214,13 +191,12 @@ UnscaledFontFreeType::CreateScaledFont(Float aGlyphSize,
   return scaledFont.forget();
 }
 
-bool
-ScaledFontFreeType::HasVariationSettings()
-{
+bool ScaledFontFreeType::HasVariationSettings() {
   // Check if the FT face has been cloned.
   return mFace && mFace->face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS &&
-         mFace != static_cast<UnscaledFontFreeType*>(mUnscaledFont.get())->GetFace();
+         mFace !=
+             static_cast<UnscaledFontFreeType*>(mUnscaledFont.get())->GetFace();
 }
 
-} // namespace gfx
-} // namespace mozilla
+}  // namespace gfx
+}  // namespace mozilla

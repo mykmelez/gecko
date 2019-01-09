@@ -4,23 +4,22 @@
 
 package org.mozilla.gecko.tests;
 
+import android.app.Notification;
+import android.app.NotificationManager;
+import android.content.Context;
+import android.os.Build;
+import android.service.notification.StatusBarNotification;
+
+import com.robotium.solo.Condition;
+
+import org.mozilla.gecko.Actions;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Tab;
 import org.mozilla.gecko.Tabs;
 import org.mozilla.gecko.media.AudioFocusAgent;
 import org.mozilla.gecko.media.AudioFocusAgent.State;
-import org.mozilla.gecko.media.MediaControlService;
+import org.mozilla.gecko.media.GeckoMediaControlAgent;
 import org.mozilla.gecko.tests.helpers.JavascriptBridge;
-
-import android.content.Intent;
-import android.content.Context;
-
-import android.app.Notification;
-import android.app.NotificationManager;
-import android.os.Build;
-import android.service.notification.StatusBarNotification;
-
-import com.robotium.solo.Condition;
 
 abstract class MediaPlaybackTest extends OldBaseTest {
     private Context mContext;
@@ -40,6 +39,25 @@ abstract class MediaPlaybackTest extends OldBaseTest {
             mContext = getInstrumentation().getTargetContext();
         }
         return mContext;
+    }
+
+    /**
+     * Wait until app's instance of AudioManager that will handle the audio focus operations
+     * is fully initialized.
+     */
+    final void blockForAudioFocusAgentReady() {
+        Actions.EventExpecter audioManagerExpector =
+                mActions.expectGlobalEvent(Actions.EventType.UI, AudioFocusAgent.READY);
+
+        // AudioFocusAgent is only initialized after Gecko:Ready
+        blockForGeckoReady();
+
+        try {
+            audioManagerExpector.blockForEvent(MAX_WAIT_MS, true);
+            audioManagerExpector.unregisterListener();
+        } catch (Exception e) {
+            mAsserter.dumpLog("Exception in blockForAudioFocusAgentReady", e);
+        }
     }
 
     /**
@@ -145,10 +163,10 @@ abstract class MediaPlaybackTest extends OldBaseTest {
      * Since we can't testing media control via clicking the media control, we
      * directly send intent to service to simulate the behavior.
      */
-    protected final void notifyMediaControlService(String action) {
-        Intent intent = new Intent(getContext(), MediaControlService.class);
-        intent.setAction(action);
-        getContext().startService(intent);
+    protected final void notifyMediaControlAgent(String action) {
+        GeckoMediaControlAgent geckoMediaControlAgent = GeckoMediaControlAgent.getInstance();
+        geckoMediaControlAgent.attachToContext(getContext());
+        geckoMediaControlAgent.handleAction(action);
     }
 
     /**

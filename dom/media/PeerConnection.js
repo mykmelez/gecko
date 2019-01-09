@@ -40,6 +40,8 @@ const PC_TRANSCEIVER_CID = Components.ID("{09475754-103a-41f5-a2d0-e1f27eb0b537}
 const PC_COREQUEST_CID = Components.ID("{74b2122d-65a8-4824-aa9e-3d664cb75dc2}");
 const PC_DTMF_SENDER_CID = Components.ID("{3610C242-654E-11E6-8EC0-6D1BE389A607}");
 
+const TELEMETRY_PC_CONNECTED = "webrtc.peerconnection.connected";
+const TELEMETRY_PC_PROMISE_GETSTATS = "webrtc.peerconnection.promise_stats_used";
 function logMsg(msg, file, line, flag, winID) {
   let scriptErrorClass = Cc["@mozilla.org/scripterror;1"];
   let scriptError = scriptErrorClass.createInstance(Ci.nsIScriptError);
@@ -212,8 +214,8 @@ setupPrototype(GlobalPCList, {
         throw Cr.NS_ERROR_NO_AGGREGATION;
       }
       return _globalPCList.QueryInterface(iid);
-    }
-  }
+    },
+  },
 });
 
 var _globalPCList = new GlobalPCList();
@@ -230,14 +232,13 @@ class RTCIceCandidate {
 setupPrototype(RTCIceCandidate, {
   classID: PC_ICE_CID,
   contractID: PC_ICE_CONTRACT,
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer]),
 });
 
 class RTCSessionDescription {
   init(win) {
     this._win = win;
-    this._winID = this._win.QueryInterface(Ci.nsIInterfaceRequestor)
-    .getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
+    this._winID = this._win.windowUtils.currentInnerWindowID;
   }
 
   __init({ type, sdp }) {
@@ -274,12 +275,13 @@ class RTCSessionDescription {
 setupPrototype(RTCSessionDescription, {
   classID: PC_SESSION_CID,
   contractID: PC_SESSION_CONTRACT,
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer]),
 });
 
 class RTCStatsReport {
-  constructor(win, dict) {
-    this._win = win;
+  constructor(pc, dict) {
+    this._pc = pc;
+    this._win = pc._win;
     this._pcid = dict.pcid;
     this._report = convertToRTCStatsReport(dict);
   }
@@ -288,55 +290,43 @@ class RTCStatsReport {
     return this.__DOM_IMPL__.__set(aKey, aObj);
   }
 
-  // TODO: Remove legacy API eventually
-  // see Bug 1328194
-  //
-  // Since maplike is recent, we still also make the stats available as legacy
-  // enumerable read-only properties directly on our content-facing object.
   // Must be called after our webidl sandwich is made.
 
-  makeStatsPublic(warnNullable, isLegacy) {
-    let legacyProps = {};
-    for (let key in this._report) {
-      let internal = Cu.cloneInto(this._report[key], this._win);
-      if (isLegacy) {
-        internal.type = this._specToLegacyFieldMapping[internal.type] || internal.type;
+  makeStatsPublic() {
+    for (const key in this._report) {
+      const value = this._report[key];
+      if (value.type == "local-candidate" || value.type == "remote-candidate") {
+        delete value.transportId;
       }
-      this.setInternal(key, internal);
-      let value = Cu.cloneInto(this._report[key], this._win);
-      value.type = this._specToLegacyFieldMapping[value.type] || value.type;
-      legacyProps[key] = {
-        enumerable: true, configurable: false,
-        get: Cu.exportFunction(function() {
-          if (warnNullable.warn) {
-            warnNullable.warn();
-            warnNullable.warn = null;
-          }
-          return value;
-        }, this.__DOM_IMPL__.wrappedJSObject)
-      };
+      this.setInternal(key, Cu.cloneInto(value, this._win));
     }
-    Object.defineProperties(this.__DOM_IMPL__.wrappedJSObject, legacyProps);
   }
 
   get mozPcid() { return this._pcid; }
 
-  __onget(key, value) {
-    /* Do whatever here */
+  __onget(key, stat) {
+    return stat;
   }
 }
 setupPrototype(RTCStatsReport, {
   classID: PC_STATS_CID,
   contractID: PC_STATS_CONTRACT,
   QueryInterface: ChromeUtils.generateQI([]),
-  _specToLegacyFieldMapping: {
-        "inbound-rtp": "inboundrtp",
-        "outbound-rtp": "outboundrtp",
-        "candidate-pair": "candidatepair",
-        "local-candidate": "localcandidate",
-        "remote-candidate": "remotecandidate"
-  }
 });
+
+// This is its own class so that it does not need to be exposed to the client.
+class PeerConnectionTelemetry {
+  // Record which style(s) of invocation for getStats are used
+  recordGetStats() {
+    Services.telemetry.scalarAdd(TELEMETRY_PC_PROMISE_GETSTATS, 1);
+    this.recordGetStats = () => {};
+  }
+  // ICE connection state enters connected or completed.
+  recordConnected() {
+    Services.telemetry.scalarAdd(TELEMETRY_PC_CONNECTED, 1);
+    this.recordConnected = () => {};
+  }
+}
 
 // Cache for RTPSourceEntries
 // Note: each cache is only valid for one JS event loop execution
@@ -379,11 +369,10 @@ class RTCPeerConnection {
     this._iceGatheredRelayCandidates = false;
     // Stored webrtc timing information
     this._storedRtpSourceReferenceTime = null;
-    // TODO: Remove legacy API eventually
-    // see Bug 1328194
-    this._onGetStatsIsLegacy = false;
     // Stores cached RTP sources state
     this._rtpSourceCache = new RTCRtpSourceCache();
+    // Records telemetry
+    this._pcTelemetry = new PeerConnectionTelemetry();
   }
 
   init(win) {
@@ -391,8 +380,7 @@ class RTCPeerConnection {
   }
 
   __init(rtcConfig) {
-    this._winID = this._win.QueryInterface(Ci.nsIInterfaceRequestor)
-    .getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
+    this._winID = this._win.windowUtils.currentInnerWindowID;
     // TODO: Update this code once we support pc.setConfiguration, to track
     // setting from content independently from pref (Bug 1181768).
     if (rtcConfig.iceTransportPolicy == "all" &&
@@ -453,14 +441,9 @@ class RTCPeerConnection {
     this.__DOM_IMPL__._innerObject = this;
     this._observer = new this._win.PeerConnectionObserver(this.__DOM_IMPL__);
 
-    // Warn just once per PeerConnection about deprecated getStats usage.
-    this._warnDeprecatedStatsAccessNullable = { warn: () =>
-      this.logWarning("non-maplike pc.getStats access is deprecated, and will be removed in the near future! " +
-                      "See http://w3c.github.io/webrtc-pc/#getstats-example for usage.") };
-
-    this._warnDeprecatedStatsCallbacksNullable = { warn: () =>
-      this.logWarning("Callback-based pc.getStats is deprecated, and will be removed in the near future! Use promise-version! " +
-                      "See http://w3c.github.io/webrtc-pc/#getstats-example for usage.") };
+    this._warnDeprecatedStatsRemoteAccessNullable = { warn: (key) =>
+      this.logWarning(`Detected soon-to-break getStats() use with key="${key}"! stat.isRemote goes away in Firefox 66, but won't warn there!\
+ - See https://blog.mozilla.org/webrtc/getstats-isremote-66/`) };
 
     // Add a reference to the PeerConnection to global list (before init).
     _globalPCList.addPC(this);
@@ -504,10 +487,13 @@ class RTCPeerConnection {
 
     if (!certificate) {
       certificate = await this._win.RTCPeerConnection.generateCertificate({
-        name: "ECDSA", namedCurve: "P-256"
+        name: "ECDSA", namedCurve: "P-256",
       });
     }
-    this._impl.certificate = certificate;
+    // Is the PC still around after the await?
+    if (!this._closed) {
+      this._impl.certificate = certificate;
+    }
   }
 
   _resetPeerIdentityPromise() {
@@ -645,8 +631,7 @@ class RTCPeerConnection {
         return Services.io.newURI(uriStr);
       } catch (e) {
         if (e.result == Cr.NS_ERROR_MALFORMED_URI) {
-          throw new this._win.DOMException(msg + " - malformed URI: " + uriStr,
-                                           "SyntaxError");
+          throw new this._win.SyntaxError(`${msg} - malformed URI: ${uriStr}`);
         }
         throw e;
       }
@@ -656,27 +641,30 @@ class RTCPeerConnection {
 
     iceServers.forEach(({ urls, username, credential, credentialType }) => {
       if (!urls) {
-        throw new this._win.DOMException(msg + " - missing urls", "InvalidAccessError");
+        // TODO: Remove once url is deprecated (Bug 1369563)
+        throw new this._win.TypeError("Missing required 'urls' member of RTCIceServer");
+      }
+      if (urls.length == 0) {
+        throw new this._win.SyntaxError(`${msg} - urls is empty`);
       }
       urls.map(url => nicerNewURI(url)).forEach(({ scheme, spec }) => {
         if (scheme in { turn: 1, turns: 1 }) {
           if (username == undefined) {
-            throw new this._win.DOMException(msg + " - missing username: " + spec,
+            throw new this._win.DOMException(`${msg} - missing username: ${spec}`,
                                              "InvalidAccessError");
           }
           if (username.length > 512) {
-            throw new this._win.DOMException(msg +
-                                             " - username longer then 512 bytes: "
-                                             + username, "InvalidAccessError");
+            throw new this._win.DOMException(
+                `${msg} - username longer then 512 bytes: ${username}`,
+                "InvalidAccessError");
           }
           if (credential == undefined) {
-            throw new this._win.DOMException(msg + " - missing credential: " + spec,
+            throw new this._win.DOMException(`${msg} - missing credential: ${spec}`,
                                              "InvalidAccessError");
           }
           if (credentialType != "password") {
-            this.logWarning("RTCConfiguration TURN credentialType \"" +
-                            credentialType +
-                            "\" is not yet implemented. Treating as password." +
+            this.logWarning(`RTCConfiguration TURN credentialType \"${credentialType}\"` +
+                            " is not yet implemented. Treating as password." +
                             " https://bugzil.la/1247616");
           }
           this._hasTurnServer = true;
@@ -685,8 +673,7 @@ class RTCPeerConnection {
           this._hasStunServer = true;
           stunServers += 1;
         } else {
-          throw new this._win.DOMException(msg + " - improper scheme: " + scheme,
-                                           "SyntaxError");
+          throw new this._win.SyntaxError(`${msg} - improper scheme: ${scheme}`);
         }
         if (scheme in { stuns: 1 }) {
           this.logWarning(scheme.toUpperCase() + " is not yet supported.");
@@ -765,7 +752,7 @@ class RTCPeerConnection {
     Object.defineProperty(this, name,
                           {
                             get() { return this.getEH(name); },
-                            set(h) { return this.setEH(name, h); }
+                            set(h) { return this.setEH(name, h); },
                           });
   }
 
@@ -776,7 +763,7 @@ class RTCPeerConnection {
                             set(h) {
                               this.logWarning(name + " is deprecated! " + msg);
                               return this.setEH(name, h);
-                            }
+                            },
                           });
   }
 
@@ -914,8 +901,7 @@ class RTCPeerConnection {
       } else {
         this._havePermission = new Promise((resolve, reject) => {
           this._settlePermission = { allow: resolve, deny: reject };
-          let outerId = this._win.QueryInterface(Ci.nsIInterfaceRequestor).
-              getInterface(Ci.nsIDOMWindowUtils).outerWindowID;
+          let outerId = this._win.windowUtils.outerWindowID;
 
           let chrome = new CreateOfferRequest(outerId, this._winID,
                                               this._globalPCListId, false);
@@ -1003,7 +989,7 @@ class RTCPeerConnection {
           this._impl.peerIdentity = msg.identity;
           this._resolvePeerIdentity(Cu.cloneInto({
             idp: this._remoteIdp.provider,
-            name: msg.identity
+            name: msg.identity,
           }, this._win));
         }
       } catch (e) {
@@ -1115,22 +1101,17 @@ class RTCPeerConnection {
 
   // TODO: Implement processing for end-of-candidates (bug 1318167)
   addIceCandidate(cand, onSucc, onErr) {
+    if (cand === null) {
+      throw new this._win.DOMException(
+        "Empty candidate can not be added.",
+        "TypeError");
+    }
     return this._auto(onSucc, onErr, () => cand && this._addIceCandidate(cand));
   }
 
   async _addIceCandidate({ candidate, sdpMid, sdpMLineIndex }) {
     this._checkClosed();
-    if (sdpMid === null && sdpMLineIndex === null) {
-      throw new this._win.DOMException(
-          "Invalid candidate (both sdpMid and sdpMLineIndex are null).",
-          "TypeError");
-    }
     return this._chain(() => {
-      if (!this.remoteDescription) {
-        throw new this._win.DOMException(
-            "setRemoteDescription needs to called before addIceCandidate",
-            "InvalidStateError");
-      }
       return new Promise((resolve, reject) => {
         this._onAddIceCandidateSuccess = resolve;
         this._onAddIceCandidateError = reject;
@@ -1144,9 +1125,6 @@ class RTCPeerConnection {
   }
 
   addTrack(track, stream) {
-    if (stream.currentTime === undefined) {
-      throw new this._win.DOMException("invalid stream.", "InvalidParameterError");
-    }
     this._checkClosed();
 
     if (this._transceivers.some(
@@ -1173,7 +1151,7 @@ class RTCPeerConnection {
     } else {
       transceiver = this._addTransceiverNoEvents(track, {
         streams: [stream],
-        direction: "sendrecv"
+        direction: "sendrecv",
       });
     }
 
@@ -1282,6 +1260,7 @@ class RTCPeerConnection {
   }
 
   addTransceiver(sendTrackOrKind, init) {
+    this._checkClosed();
     let transceiver = this._addTransceiverNoEvents(sendTrackOrKind, init);
     this.updateNegotiationNeeded();
     return transceiver;
@@ -1319,7 +1298,7 @@ class RTCPeerConnection {
     let postProcessing = {
       updateStreamFunctions: [],
       muteTracks: [],
-      trackEvents: []
+      trackEvents: [],
     };
 
     for (let transceiver of this._transceivers) {
@@ -1378,8 +1357,12 @@ class RTCPeerConnection {
     }
     this._closed = true;
     this.changeIceConnectionState("closed");
-    this._localIdp.close();
-    this._remoteIdp.close();
+    if (this._localIdp) {
+        this._localIdp.close();
+    }
+    if (this._remoteIdp) {
+        this._remoteIdp.close();
+    }
     this._impl.close();
     this._suppressEvents = true;
     delete this._pc;
@@ -1526,7 +1509,7 @@ class RTCPeerConnection {
       "SignalingHaveRemoteOffer":    "have-remote-offer",
       "SignalingHaveLocalPranswer":  "have-local-pranswer",
       "SignalingHaveRemotePranswer": "have-remote-pranswer",
-      "SignalingClosed":             "closed"
+      "SignalingClosed":             "closed",
     }[this._impl.signalingState];
   }
 
@@ -1545,19 +1528,16 @@ class RTCPeerConnection {
   }
 
   getStats(selector, onSucc, onErr) {
-    let isLegacy = (typeof onSucc) == "function";
-    if (isLegacy &&
-        this._warnDeprecatedStatsCallbacksNullable.warn) {
-      this._warnDeprecatedStatsCallbacksNullable.warn();
-      this._warnDeprecatedStatsCallbacksNullable.warn = null;
+    if (this._iceConnectionState === "completed" ||
+        this._iceConnectionState === "connected") {
+      this._pcTelemetry.recordGetStats();
     }
-    return this._auto(onSucc, onErr, () => this._getStats(selector, isLegacy));
+    return this._auto(onSucc, onErr, () => this._getStats(selector));
   }
 
-  async _getStats(selector, isLegacy) {
+  async _getStats(selector) {
     // getStats is allowed even in closed state.
     return this._chain(() => new Promise((resolve, reject) => {
-      this._onGetStatsIsLegacy = isLegacy;
       this._onGetStatsSuccess = resolve;
       this._onGetStatsFailure = reject;
       this._impl.getStats(selector);
@@ -1567,7 +1547,7 @@ class RTCPeerConnection {
   createDataChannel(label, {
                       maxRetransmits, ordered, negotiated, id = 0xFFFF,
                       maxRetransmitTime, maxPacketLifeTime = maxRetransmitTime,
-                      protocol
+                      protocol,
                     } = {}) {
     this._checkClosed();
 
@@ -1630,14 +1610,16 @@ class PeerConnectionObserver {
     const reasonName = [
       "",
       "InternalError",
-      "InvalidCandidateError",
+      "InternalError",
       "InvalidParameterError",
       "InvalidStateError",
       "InvalidSessionDescriptionError",
       "IncompatibleSessionDescriptionError",
       "InternalError",
       "IncompatibleMediaStreamTrackError",
-      "InternalError"
+      "InternalError",
+      "TypeError",
+      "OperationError",
     ];
     let name = reasonName[Math.min(code, reasonName.length - 1)];
     return new this._dompc._win.DOMException(message, name);
@@ -1751,6 +1733,7 @@ class PeerConnectionObserver {
       if (iceConnectionState === "completed" ||
           iceConnectionState === "connected") {
         success_histogram.add(true);
+        pc._pcTelemetry.recordConnected();
       } else if (iceConnectionState === "failed") {
         success_histogram.add(false);
       }
@@ -1795,11 +1778,20 @@ class PeerConnectionObserver {
   }
 
   onStateChange(state) {
-    switch (state) {
-      case "SignalingState":
-        this.dispatchEvent(new this._win.Event("signalingstatechange"));
-        break;
+    if (!this._dompc) {
+      return;
+    }
 
+    if (state == "SignalingState") {
+      this.dispatchEvent(new this._win.Event("signalingstatechange"));
+      return;
+    }
+
+    if (!this._dompc._pc) {
+      return;
+    }
+
+    switch (state) {
       case "IceConnectionState":
         let connState = this._dompc._pc.iceConnectionState;
         this._dompc._queueTaskWithClosedCheck(() => {
@@ -1819,11 +1811,9 @@ class PeerConnectionObserver {
 
   onGetStatsSuccess(dict) {
     let pc = this._dompc;
-    let chromeobj = new RTCStatsReport(pc._win, dict);
+    let chromeobj = new RTCStatsReport(pc, dict);
     let webidlobj = pc._win.RTCStatsReport._create(pc._win, chromeobj);
-    chromeobj.makeStatsPublic(pc._warnDeprecatedStatsCallbacksNullable &&
-                              pc._warnDeprecatedStatsAccessNullable,
-                              pc._onGetStatsIsLegacy);
+    chromeobj.makeStatsPublic();
     pc._onGetStatsSuccess(webidlobj);
   }
 
@@ -1866,13 +1856,12 @@ class PeerConnectionObserver {
 setupPrototype(PeerConnectionObserver, {
   classID: PC_OBS_CID,
   contractID: PC_OBS_CONTRACT,
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer]),
 });
 
 class RTCPeerConnectionStatic {
   init(win) {
-    this._winID = win.QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
+    this._winID = win.windowUtils.currentInnerWindowID;
   }
 
   registerPeerConnectionLifecycleCallback(cb) {
@@ -1882,7 +1871,7 @@ class RTCPeerConnectionStatic {
 setupPrototype(RTCPeerConnectionStatic, {
   classID: PC_STATIC_CID,
   contractID: PC_STATIC_CONTRACT,
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer]),
 });
 
 class RTCDTMFSender {
@@ -1910,7 +1899,7 @@ class RTCDTMFSender {
 setupPrototype(RTCDTMFSender, {
   classID: PC_DTMF_SENDER_CID,
   contractID: PC_DTMF_SENDER_CONTRACT,
-  QueryInterface: ChromeUtils.generateQI([])
+  QueryInterface: ChromeUtils.generateQI([]),
 });
 
 class RTCRtpSender {
@@ -2052,7 +2041,7 @@ class RTCRtpSender {
 setupPrototype(RTCRtpSender, {
   classID: PC_SENDER_CID,
   contractID: PC_SENDER_CONTRACT,
-  QueryInterface: ChromeUtils.generateQI([])
+  QueryInterface: ChromeUtils.generateQI([]),
 });
 
 class RTCRtpReceiver {
@@ -2222,7 +2211,7 @@ class RTCRtpReceiver {
 setupPrototype(RTCRtpReceiver, {
   classID: PC_RECEIVER_CID,
   contractID: PC_RECEIVER_CONTRACT,
-  QueryInterface: ChromeUtils.generateQI([])
+  QueryInterface: ChromeUtils.generateQI([]),
 });
 
 class RTCRtpTransceiver {
@@ -2249,7 +2238,7 @@ class RTCRtpTransceiver {
           _hasBeenUsedToSend: false,
           // the receiver starts out without a track, so record this here
           _kind: kind,
-          _transceiverImpl: transceiverImpl
+          _transceiverImpl: transceiverImpl,
         });
   }
 
@@ -2385,7 +2374,7 @@ class RTCRtpTransceiver {
 setupPrototype(RTCRtpTransceiver, {
   classID: PC_TRANSCEIVER_CID,
   contractID: PC_TRANSCEIVER_CONTRACT,
-  QueryInterface: ChromeUtils.generateQI([])
+  QueryInterface: ChromeUtils.generateQI([]),
 });
 
 class CreateOfferRequest {
@@ -2396,7 +2385,7 @@ class CreateOfferRequest {
 setupPrototype(CreateOfferRequest, {
   classID: PC_COREQUEST_CID,
   contractID: PC_COREQUEST_CONTRACT,
-  QueryInterface: ChromeUtils.generateQI([])
+  QueryInterface: ChromeUtils.generateQI([]),
 });
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory(

@@ -10,7 +10,7 @@ topsrcdir="$SOURCE"
 # Tooltool installs in parent of topsrcdir for spidermonkey builds.
 # Resolve that path since the mozconfigs assume tooltool installs in
 # topsrcdir.
-export VSPATH="$(cd ${topsrcdir}/.. && pwd)/vs2017_15.6.6"
+export VSPATH="$(cd ${topsrcdir}/.. && pwd)/vs2017_15.8.4"
 
 # When running on a developer machine, several variables will already
 # have the right settings and we will need to keep them since the
@@ -24,6 +24,10 @@ if [ -n "$USE_64BIT" ]; then
 else
   . $topsrcdir/build/win32/mozconfig.vs-latest
 fi
+
+mk_export_correct_style CC
+mk_export_correct_style CXX
+mk_export_correct_style LINKER
 
 # PATH also needs to point to mozmake.exe, which can come from either
 # newer mozilla-build or tooltool.

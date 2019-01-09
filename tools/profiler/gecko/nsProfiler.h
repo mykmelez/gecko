@@ -16,9 +16,8 @@
 #include "nsServiceManagerUtils.h"
 #include "ProfileJSONWriter.h"
 
-class nsProfiler final : public nsIProfiler, public nsIObserver
-{
-public:
+class nsProfiler final : public nsIProfiler, public nsIObserver {
+ public:
   nsProfiler();
 
   NS_DECL_ISUPPORTS
@@ -27,25 +26,41 @@ public:
 
   nsresult Init();
 
-  static nsProfiler* GetOrCreate()
-  {
+  static nsProfiler* GetOrCreate() {
     nsCOMPtr<nsIProfiler> iprofiler =
-      do_GetService("@mozilla.org/tools/profiler;1");
+        do_GetService("@mozilla.org/tools/profiler;1");
     return static_cast<nsProfiler*>(iprofiler.get());
   }
 
   void GatheredOOPProfile(const nsACString& aProfile);
 
-private:
+  // This SymbolTable struct, and the CompactSymbolTable struct in the
+  // profiler rust module, have the exact same memory layout.
+  // nsTArray and ThinVec are FFI-compatible, because the thin-vec crate is
+  // being compiled with the "gecko-ffi" feature enabled.
+  struct SymbolTable {
+    SymbolTable() = default;
+    SymbolTable(SymbolTable&& aOther) = default;
+
+    nsTArray<uint32_t> mAddrs;
+    nsTArray<uint32_t> mIndex;
+    nsTArray<uint8_t> mBuffer;
+  };
+
+ private:
   ~nsProfiler();
 
   typedef mozilla::MozPromise<nsCString, nsresult, false> GatheringPromise;
+  typedef mozilla::MozPromise<SymbolTable, nsresult, true> SymbolTablePromise;
 
   RefPtr<GatheringPromise> StartGathering(double aSinceTime);
   void FinishGathering();
   void ResetGathering();
 
   void ClearExpiredExitProfiles();
+
+  RefPtr<SymbolTablePromise> GetSymbolTableMozPromise(
+      const nsACString& aDebugPath, const nsACString& aBreakpadID);
 
   bool mLockedForPrivateBrowsing;
 
@@ -57,10 +72,10 @@ private:
   // These fields are all related to profile gathering.
   nsTArray<ExitProfile> mExitProfiles;
   mozilla::Maybe<mozilla::MozPromiseHolder<GatheringPromise>> mPromiseHolder;
+  nsCOMPtr<nsIThread> mSymbolTableThread;
   mozilla::Maybe<SpliceableChunkedJSONWriter> mWriter;
   uint32_t mPendingProfiles;
   bool mGathering;
 };
 
-#endif // nsProfiler_h
-
+#endif  // nsProfiler_h

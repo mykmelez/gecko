@@ -27,7 +27,7 @@ the correct arguments.
 ## Authoring Tests
 
 Test cases are expressed as `.html` files located within the `tests/unit/` and
-`tests/funtional/` sub-directories. Each test should include the
+`tests/functional/` sub-directories. Each test should include the
 `testharness.js` library with the following markup:
 
     <script src="/resources/testharness.js"></script>
@@ -81,3 +81,10 @@ must include a summary of the expected results as a JSON string within a
       "type": "complete"
     }
     </script>
+
+`testharness.js` is expected to function consistently in a number of
+distinct environments. In order to verify this expectation, each functional
+test may be executed under a number of distinct conditions. These conditions
+are applied using WPT's "test variants" pattern. The available variants are
+defined in the `variants.js` file; this file must be included before
+`testharness.js`. Every test must specify at least one variant.

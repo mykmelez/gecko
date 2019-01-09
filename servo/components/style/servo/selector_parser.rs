@@ -1,22 +1,23 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #![deny(missing_docs)]
 
 //! Servo's selector parser.
 
-use {Atom, CaseSensitivityExt, LocalName, Namespace, Prefix};
-use attr::{AttrIdentifier, AttrValue};
+use crate::attr::{AttrIdentifier, AttrValue};
+use crate::dom::{OpaqueNode, TElement, TNode};
+use crate::element_state::{DocumentState, ElementState};
+use crate::invalidation::element::document_state::InvalidationMatchingData;
+use crate::invalidation::element::element_wrapper::ElementSnapshot;
+use crate::properties::longhands::display::computed_value::T as Display;
+use crate::properties::{ComputedValues, PropertyFlags};
+use crate::selector_parser::AttrValue as SelectorAttrValue;
+use crate::selector_parser::{PseudoElementCascadeType, SelectorParser};
+use crate::{Atom, CaseSensitivityExt, LocalName, Namespace, Prefix};
 use cssparser::{serialize_identifier, CowRcStr, Parser as CssParser, SourceLocation, ToCss};
-use dom::{OpaqueNode, TElement, TNode};
-use element_state::{DocumentState, ElementState};
-use fnv::FnvHashMap;
-use invalidation::element::document_state::InvalidationMatchingData;
-use invalidation::element::element_wrapper::ElementSnapshot;
-use properties::{CascadeFlags, ComputedValues, PropertyFlags};
-use properties::longhands::display::computed_value::T as Display;
-use selector_parser::{AttrValue as SelectorAttrValue, PseudoElementCascadeType, SelectorParser};
+use fxhash::FxHashMap;
 use selectors::attr::{AttrSelectorOperation, CaseSensitivity, NamespaceConstraint};
 use selectors::parser::{SelectorParseErrorKind, Visit};
 use selectors::visitor::SelectorVisitor;
@@ -135,6 +136,12 @@ impl PseudoElement {
         self.is_before() || self.is_after()
     }
 
+    /// Whether this is an unknown ::-webkit- pseudo-element.
+    #[inline]
+    pub fn is_unknown_webkit_pseudo_element(&self) -> bool {
+        false
+    }
+
     /// Whether this pseudo-element is the ::before pseudo.
     #[inline]
     pub fn is_before(&self) -> bool {
@@ -215,43 +222,6 @@ impl PseudoElement {
         }
     }
 
-    /// For most (but not all) anon-boxes, we inherit all values from the
-    /// parent, this is the hook in the style system to allow this.
-    ///
-    /// FIXME(emilio): It's likely that this is broken in a variety of
-    /// situations, and what it really wants is just inherit some reset
-    /// properties...  Also, I guess it just could do all: inherit on the
-    /// stylesheet, though chances are that'd be kinda slow if we don't cache
-    /// them...
-    pub fn cascade_flags(&self) -> CascadeFlags {
-        match *self {
-            PseudoElement::After |
-            PseudoElement::Before |
-            PseudoElement::Selection |
-            PseudoElement::DetailsContent |
-            PseudoElement::DetailsSummary => CascadeFlags::empty(),
-            // Anonymous table flows shouldn't inherit their parents properties in order
-            // to avoid doubling up styles such as transformations.
-            PseudoElement::ServoAnonymousTableCell |
-            PseudoElement::ServoAnonymousTableRow |
-            PseudoElement::ServoText |
-            PseudoElement::ServoInputText => CascadeFlags::empty(),
-
-            // For tables, we do want style to inherit, because TableWrapper is
-            // responsible for handling clipping and scrolling, while Table is
-            // responsible for creating stacking contexts.
-            //
-            // StackingContextCollectionFlags makes sure this is processed
-            // properly.
-            PseudoElement::ServoAnonymousTable |
-            PseudoElement::ServoAnonymousTableWrapper |
-            PseudoElement::ServoTableWrapper |
-            PseudoElement::ServoAnonymousBlock |
-            PseudoElement::ServoInlineBlockWrapper |
-            PseudoElement::ServoInlineAbsolute => CascadeFlags::INHERIT_ALL,
-        }
-    }
-
     /// Covert non-canonical pseudo-element to canonical one, and keep a
     /// canonical one as it is.
     pub fn canonical(&self) -> PseudoElement {
@@ -284,8 +254,8 @@ impl PseudoElement {
     }
 }
 
-/// The type used for storing pseudo-class string arguments.
-pub type PseudoClassStringArg = Box<str>;
+/// The type used for storing `:lang` arguments.
+pub type Lang = Box<str>;
 
 /// A non tree-structural pseudo-class.
 /// See https://drafts.csswg.org/selectors-4/#structural-pseudos
@@ -302,7 +272,7 @@ pub enum NonTSPseudoClass {
     Fullscreen,
     Hover,
     Indeterminate,
-    Lang(PseudoClassStringArg),
+    Lang(Lang),
     Link,
     PlaceholderShown,
     ReadWrite,
@@ -379,8 +349,8 @@ impl NonTSPseudoClass {
     /// Gets a given state flag for this pseudo-class. This is used to do
     /// selector matching, and it's set from the DOM.
     pub fn state_flag(&self) -> ElementState {
-        use element_state::ElementState;
         use self::NonTSPseudoClass::*;
+        use crate::element_state::ElementState;
         match *self {
             Active => ElementState::IN_ACTIVE_STATE,
             Focus => ElementState::IN_FOCUS_STATE,
@@ -487,7 +457,7 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
         parser: &mut CssParser<'i, 't>,
     ) -> Result<NonTSPseudoClass, ParseError<'i>> {
         use self::NonTSPseudoClass::*;
-        let pseudo_class = match_ignore_ascii_case!{ &name,
+        let pseudo_class = match_ignore_ascii_case! { &name,
             "lang" => {
                 Lang(parser.expect_ident_or_string()?.as_ref().into())
             }
@@ -579,7 +549,7 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
                 }
                 ServoInlineBlockWrapper
             },
-            "-servo-input-absolute" => {
+            "-servo-inline-absolute" => {
                 if !self.in_user_agent_stylesheet() {
                     return Err(location.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(name.clone())))
                 }
@@ -617,12 +587,12 @@ impl SelectorImpl {
 
 /// A map from elements to snapshots for the Servo style back-end.
 #[derive(Debug)]
-pub struct SnapshotMap(FnvHashMap<OpaqueNode, ServoElementSnapshot>);
+pub struct SnapshotMap(FxHashMap<OpaqueNode, ServoElementSnapshot>);
 
 impl SnapshotMap {
     /// Create a new empty `SnapshotMap`.
     pub fn new() -> Self {
-        SnapshotMap(FnvHashMap::default())
+        SnapshotMap(FxHashMap::default())
     }
 
     /// Get a snapshot given an element.
@@ -632,7 +602,7 @@ impl SnapshotMap {
 }
 
 impl Deref for SnapshotMap {
-    type Target = FnvHashMap<OpaqueNode, ServoElementSnapshot>;
+    type Target = FxHashMap<OpaqueNode, ServoElementSnapshot>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -762,7 +732,8 @@ impl ServoElementSnapshot {
         operation: &AttrSelectorOperation<&String>,
     ) -> bool {
         match *ns {
-            NamespaceConstraint::Specific(ref ns) => self.get_attr(ns, local_name)
+            NamespaceConstraint::Specific(ref ns) => self
+                .get_attr(ns, local_name)
                 .map_or(false, |value| value.eval_selector(operation)),
             NamespaceConstraint::Any => {
                 self.any_attr_ignore_ns(local_name, |value| value.eval_selector(operation))

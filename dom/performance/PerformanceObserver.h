@@ -29,17 +29,14 @@ class PerformanceObserverCallback;
 struct PerformanceObserverInit;
 class WorkerPrivate;
 
-class PerformanceObserver final : public nsISupports,
-                                  public nsWrapperCache
-{
-public:
+class PerformanceObserver final : public nsISupports, public nsWrapperCache {
+ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(PerformanceObserver)
 
-  static already_AddRefed<PerformanceObserver>
-  Constructor(const GlobalObject& aGlobal,
-              PerformanceObserverCallback& aCb,
-              ErrorResult& aRv);
+  static already_AddRefed<PerformanceObserver> Constructor(
+      const GlobalObject& aGlobal, PerformanceObserverCallback& aCb,
+      ErrorResult& aRv);
 
   PerformanceObserver(nsPIDOMWindowInner* aOwner,
                       PerformanceObserverCallback& aCb);
@@ -52,8 +49,7 @@ public:
 
   nsISupports* GetParentObject() const { return mOwner; }
 
-  void Observe(const PerformanceObserverInit& aOptions,
-               mozilla::ErrorResult& aRv);
+  void Observe(const PerformanceObserverInit& aOptions);
 
   void Disconnect();
 
@@ -62,7 +58,7 @@ public:
   void Notify();
   void QueueEntry(PerformanceEntry* aEntry);
 
-private:
+ private:
   ~PerformanceObserver();
 
   nsCOMPtr<nsISupports> mOwner;
@@ -73,7 +69,7 @@ private:
   nsTArray<RefPtr<PerformanceEntry>> mQueuedEntries;
 };
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla
 
 #endif

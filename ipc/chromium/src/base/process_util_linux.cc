@@ -16,6 +16,9 @@
 #include "mozilla/ipc/FileDescriptorShuffle.h"
 #include "mozilla/UniquePtr.h"
 
+// WARNING: despite the name, this file is also used on the BSDs and
+// Solaris (basically, Unixes that aren't Mac OS), not just Linux.
+
 namespace {
 
 static mozilla::EnvironmentLog gProcessLog("MOZ_PROCESS_LOG");
@@ -25,9 +28,7 @@ static mozilla::EnvironmentLog gProcessLog("MOZ_PROCESS_LOG");
 namespace base {
 
 bool LaunchApp(const std::vector<std::string>& argv,
-               const LaunchOptions& options,
-               ProcessHandle* process_handle)
-{
+               const LaunchOptions& options, ProcessHandle* process_handle) {
   mozilla::UniquePtr<char*[]> argv_cstr(new char*[argv.size() + 1]);
 
   EnvironmentArray envp = BuildEnvironmentArray(options.env_map);
@@ -36,9 +37,18 @@ bool LaunchApp(const std::vector<std::string>& argv,
     return false;
   }
 
+#ifdef OS_LINUX
   pid_t pid = options.fork_delegate ? options.fork_delegate->Fork() : fork();
-  if (pid < 0)
-    return false;
+  // WARNING: if pid == 0, only async signal safe operations are permitted from
+  // here until exec or _exit.
+  //
+  // Specifically, heap allocation is not safe: the sandbox's fork substitute
+  // won't run the pthread_atfork handlers that fix up the malloc locks.
+#else
+  pid_t pid = fork();
+#endif
+
+  if (pid < 0) return false;
 
   if (pid == 0) {
     // In the child:
@@ -51,7 +61,9 @@ bool LaunchApp(const std::vector<std::string>& argv,
       }
     }
 
-    CloseSuperfluousFds(shuffle.MapsToFunc());
+    CloseSuperfluousFds(&shuffle, [](void* aCtx, int aFd) {
+      return static_cast<decltype(&shuffle)>(aCtx)->MapsTo(aFd);
+    });
 
     for (size_t i = 0; i < argv.size(); i++)
       argv_cstr[i] = const_cast<char*>(argv[i].c_str());
@@ -68,17 +80,14 @@ bool LaunchApp(const std::vector<std::string>& argv,
   // In the parent:
   gProcessLog.print("==> process %d launched child process %d\n",
                     GetCurrentProcId(), pid);
-  if (options.wait)
-    HANDLE_EINTR(waitpid(pid, 0, 0));
+  if (options.wait) HANDLE_EINTR(waitpid(pid, 0, 0));
 
-  if (process_handle)
-    *process_handle = pid;
+  if (process_handle) *process_handle = pid;
 
   return true;
 }
 
-bool LaunchApp(const CommandLine& cl,
-               const LaunchOptions& options,
+bool LaunchApp(const CommandLine& cl, const LaunchOptions& options,
                ProcessHandle* process_handle) {
   return LaunchApp(cl.argv(), options, process_handle);
 }

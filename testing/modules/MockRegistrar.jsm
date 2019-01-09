@@ -10,7 +10,6 @@ var EXPORTED_SYMBOLS = [
 
 const Cm = Components.manager;
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Log.jsm");
 var logger = Log.repository.getLogger("MockRegistrar");
 
@@ -71,7 +70,7 @@ var MockRegistrar = Object.freeze({
       lockFactory(lock) {
         throw Cr.NS_ERROR_NOT_IMPLEMENTED;
       },
-      QueryInterface: ChromeUtils.generateQI([Ci.nsIFactory])
+      QueryInterface: ChromeUtils.generateQI([Ci.nsIFactory]),
     };
 
     this.registrar.unregisterFactory(originalCID, originalFactory);
@@ -83,7 +82,7 @@ var MockRegistrar = Object.freeze({
     this._registeredComponents.set(originalCID, {
       contractID,
       factory,
-      originalFactory
+      originalFactory,
     });
 
     return originalCID;
@@ -118,6 +117,6 @@ var MockRegistrar = Object.freeze({
     for (let cid of this._registeredComponents.keys()) {
       this.unregister(cid);
     }
-  }
+  },
 
 });

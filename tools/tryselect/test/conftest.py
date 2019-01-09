@@ -4,6 +4,31 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import pytest
+from mock import MagicMock
+from moztest.resolve import TestResolver
+
+from tryselect import push
+
+
+@pytest.fixture
+def patch_resolver(monkeypatch):
+    def inner(suites, tests):
+        def fake_test_metadata(*args, **kwargs):
+            return suites, tests
+        monkeypatch.setattr(TestResolver, 'resolve_metadata', fake_test_metadata)
+    return inner
+
+
+@pytest.fixture(autouse=True)
+def patch_vcs(monkeypatch):
+    attrs = {
+        'path': push.vcs.path,
+    }
+    mock = MagicMock()
+    mock.configure_mock(**attrs)
+    monkeypatch.setattr(push, 'vcs', mock)
+
 
 def pytest_generate_tests(metafunc):
     if all(fixture in metafunc.fixturenames for fixture in ('template', 'args', 'expected')):

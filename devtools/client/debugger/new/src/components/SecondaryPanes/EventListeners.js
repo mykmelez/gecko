@@ -1,66 +1,69 @@
-"use strict";
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
+// @flow
+import React, { Component } from "react";
+import { connect } from "react-redux";
+import actions from "../../actions";
+import { getEventListeners, getBreakpoint } from "../../selectors";
+import { CloseButton } from "../shared/Button";
+import "./EventListeners.css";
 
-var _react = require("devtools/client/shared/vendor/react");
+import type { Breakpoint, Location, SourceId } from "../../types";
 
-var _react2 = _interopRequireDefault(_react);
+type Listener = {
+  selector: string,
+  type: string,
+  sourceId: SourceId,
+  line: number,
+  breakpoint: ?Breakpoint
+};
 
-var _reactRedux = require("devtools/client/shared/vendor/react-redux");
+type Props = {
+  listeners: Array<Listener>,
+  selectLocation: ({ sourceId: SourceId, line: number }) => void,
+  addBreakpoint: ({ sourceId: SourceId, line: number }) => void,
+  enableBreakpoint: Location => void,
+  disableBreakpoint: Location => void,
+  removeBreakpoint: Location => void
+};
 
-var _actions = require("../../actions/index");
+class EventListeners extends Component<Props> {
+  renderListener: Function;
 
-var _actions2 = _interopRequireDefault(_actions);
-
-var _selectors = require("../../selectors/index");
-
-var _Button = require("../shared/Button/index");
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-function _objectSpread(target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i] != null ? arguments[i] : {}; var ownKeys = Object.keys(source); if (typeof Object.getOwnPropertySymbols === 'function') { ownKeys = ownKeys.concat(Object.getOwnPropertySymbols(source).filter(function (sym) { return Object.getOwnPropertyDescriptor(source, sym).enumerable; })); } ownKeys.forEach(function (key) { _defineProperty(target, key, source[key]); }); } return target; }
-
-function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
-
-class EventListeners extends _react.Component {
   constructor(...args) {
     super(...args);
-
-    this.renderListener = ({
-      type,
-      selector,
-      line,
-      sourceId,
-      breakpoint
-    }) => {
-      const checked = breakpoint && !breakpoint.disabled;
-      const location = {
-        sourceId,
-        line
-      };
-      return _react2.default.createElement("div", {
-        className: "listener",
-        onClick: () => this.props.selectLocation({
-          sourceId,
-          line
-        }),
-        key: `${type}.${selector}.${sourceId}.${line}`
-      }, _react2.default.createElement("input", {
-        type: "checkbox",
-        className: "listener-checkbox",
-        checked: checked,
-        onChange: () => this.handleCheckbox(breakpoint, location)
-      }), _react2.default.createElement("span", {
-        className: "type"
-      }, type), _react2.default.createElement("span", {
-        className: "selector"
-      }, selector), breakpoint ? _react2.default.createElement(_Button.CloseButton, {
-        handleClick: ev => this.removeBreakpoint(ev, breakpoint)
-      }) : "");
-    };
   }
+
+  renderListener = ({ type, selector, line, sourceId, breakpoint }) => {
+    const checked = breakpoint && !breakpoint.disabled;
+    const location = { sourceId, line };
+
+    return (
+      <div
+        className="listener"
+        onClick={() => this.props.selectLocation({ sourceId, line })}
+        key={`${type}.${selector}.${sourceId}.${line}`}
+      >
+        <input
+          type="checkbox"
+          className="listener-checkbox"
+          checked={checked}
+          onChange={() => this.handleCheckbox(breakpoint, location)}
+        />
+        <span className="type">{type}</span>
+        <span className="selector">{selector}</span>
+        {breakpoint ? (
+          <CloseButton
+            handleClick={ev => this.removeBreakpoint(ev, breakpoint)}
+          />
+        ) : (
+          ""
+        )}
+      </div>
+    );
+  };
 
   handleCheckbox(breakpoint, location) {
     if (!breakpoint) {
@@ -80,36 +83,42 @@ class EventListeners extends _react.Component {
 
   removeBreakpoint(event, breakpoint) {
     event.stopPropagation();
-
     if (breakpoint) {
       this.props.removeBreakpoint(breakpoint.location);
     }
   }
 
   render() {
-    const {
-      listeners
-    } = this.props;
-    return _react2.default.createElement("div", {
-      className: "pane event-listeners"
-    }, listeners.map(this.renderListener));
+    const { listeners } = this.props;
+    return (
+      <div className="pane event-listeners">
+        {listeners.map(this.renderListener)}
+      </div>
+    );
   }
-
 }
 
 const mapStateToProps = state => {
-  const listeners = (0, _selectors.getEventListeners)(state).map(listener => {
-    return _objectSpread({}, listener, {
-      breakpoint: (0, _selectors.getBreakpoint)(state, {
+  const listeners = getEventListeners(state).map(listener => {
+    return {
+      ...listener,
+      breakpoint: getBreakpoint(state, {
         sourceId: listener.sourceId,
-        line: listener.line,
-        column: null
+        line: listener.line
       })
-    });
+    };
   });
-  return {
-    listeners
-  };
+
+  return { listeners };
 };
 
-exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(EventListeners);
+export default connect(
+  mapStateToProps,
+  {
+    selectLocation: actions.selectLocation,
+    addBreakpoint: actions.addBreakpoint,
+    enableBreakpoint: actions.enableBreakpoint,
+    disableBreakpoint: actions.disableBreakpoint,
+    removeBreakpoint: actions.removeBreakpoint
+  }
+)(EventListeners);

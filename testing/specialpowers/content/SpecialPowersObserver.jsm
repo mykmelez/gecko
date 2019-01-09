@@ -13,12 +13,9 @@
 
 var EXPORTED_SYMBOLS = ["SpecialPowersObserver"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-Cu.importGlobalProperties(["File"]);
 
-const CHILD_SCRIPT = "resource://specialpowers/specialpowers.js";
-const CHILD_SCRIPT_API = "resource://specialpowers/specialpowersAPI.js";
+const CHILD_SCRIPT_API = "resource://specialpowers/specialpowersFrameScript.js";
 const CHILD_LOGGER_SCRIPT = "resource://specialpowers/MozillaLogger.js";
 
 
@@ -29,6 +26,7 @@ Services.scriptloader.loadSubScript("resource://specialpowers/SpecialPowersObser
 function SpecialPowersObserver() {
   this._isFrameScriptLoaded = false;
   this._messageManager = Services.mm;
+  this._serviceWorkerListener = null;
 }
 
 
@@ -80,10 +78,12 @@ SpecialPowersObserver.prototype._loadFrameScript = function() {
     this._messageManager.addMessageListener("SPCleanUpSTSData", this);
     this._messageManager.addMessageListener("SPRequestDumpCoverageCounters", this);
     this._messageManager.addMessageListener("SPRequestResetCoverageCounters", this);
+    this._messageManager.addMessageListener("SPCheckServiceWorkers", this);
+    this._messageManager.addMessageListener("SPRemoveAllServiceWorkers", this);
+    this._messageManager.addMessageListener("SPRemoveServiceWorkerDataForExampleDomain", this);
 
     this._messageManager.loadFrameScript(CHILD_LOGGER_SCRIPT, true);
     this._messageManager.loadFrameScript(CHILD_SCRIPT_API, true);
-    this._messageManager.loadFrameScript(CHILD_SCRIPT, true);
     this._isFrameScriptLoaded = true;
     this._createdFiles = null;
   }
@@ -112,6 +112,28 @@ SpecialPowersObserver.prototype.init = function() {
 
   obs.addObserver(this, "http-on-modify-request");
 
+  // We would like to check that tests don't leave service workers around
+  // after they finish, but that information lives in the parent process.
+  // Ideally, we'd be able to tell the child processes whenever service
+  // workers are registered or unregistered so they would know at all times,
+  // but service worker lifetimes are complicated enough to make that
+  // difficult. For the time being, let the child process know when a test
+  // registers a service worker so it can ask, synchronously, at the end if
+  // the service worker had unregister called on it.
+  let swm = Cc["@mozilla.org/serviceworkers/manager;1"]
+              .getService(Ci.nsIServiceWorkerManager);
+  let self = this;
+  this._serviceWorkerListener = {
+    onRegister() {
+      self.onRegister();
+    },
+
+    onUnregister() {
+      // no-op
+    },
+  };
+  swm.addListener(this._serviceWorkerListener);
+
   this._loadFrameScript();
 };
 
@@ -123,6 +145,10 @@ SpecialPowersObserver.prototype.uninit = function() {
     obs.removeObserver(this._registerObservers, element);
   });
   this._removeProcessCrashObservers();
+
+  let swm = Cc["@mozilla.org/serviceworkers/manager;1"]
+              .getService(Ci.nsIServiceWorkerManager);
+  swm.removeListener(this._serviceWorkerListener);
 
   if (this._isFrameScriptLoaded) {
     this._messageManager.removeMessageListener("SPPrefService", this);
@@ -147,10 +173,12 @@ SpecialPowersObserver.prototype.uninit = function() {
     this._messageManager.removeMessageListener("SPCleanUpSTSData", this);
     this._messageManager.removeMessageListener("SPRequestDumpCoverageCounters", this);
     this._messageManager.removeMessageListener("SPRequestResetCoverageCounters", this);
+    this._messageManager.removeMessageListener("SPCheckServiceWorkers", this);
+    this._messageManager.removeMessageListener("SPRemoveAllServiceWorkers", this);
+    this._messageManager.removeMessageListener("SPRemoveServiceWorkerDataForExampleDomain", this);
 
     this._messageManager.removeDelayedFrameScript(CHILD_LOGGER_SCRIPT);
     this._messageManager.removeDelayedFrameScript(CHILD_SCRIPT_API);
-    this._messageManager.removeDelayedFrameScript(CHILD_SCRIPT);
     this._isFrameScriptLoaded = false;
   }
 };
@@ -197,14 +225,14 @@ SpecialPowersObserver.prototype._registerObservers = {
         // so we fake these properties.
         msg.permission = {
           principal: {
-            originAttributes: {appId: permission.principal.appId}
+            originAttributes: {appId: permission.principal.appId},
           },
-          type: permission.type
+          type: permission.type,
         };
       default:
         this._self._sendAsyncMessage("specialpowers-" + aTopic, msg);
     }
-  }
+  },
 };
 
 /**
@@ -285,4 +313,9 @@ SpecialPowersObserver.prototype.receiveMessage = function(aMessage) {
       return this._receiveMessage(aMessage);
   }
   return undefined;
+};
+
+SpecialPowersObserver.prototype.onRegister = function() {
+  this._sendAsyncMessage("SPServiceWorkerRegistered",
+    { registered: true });
 };

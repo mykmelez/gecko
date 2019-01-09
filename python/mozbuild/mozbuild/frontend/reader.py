@@ -394,6 +394,11 @@ class TemplateFunction(object):
         code = func.func_code
         firstlineno = code.co_firstlineno
         lines = sandbox._current_source.splitlines(True)
+        if lines:
+            # Older versions of python 2.7 had a buggy inspect.getblock() that
+            # would ignore the last line if it didn't terminate with a newline.
+            if not lines[-1].endswith('\n'):
+                lines[-1] += '\n'
         lines = inspect.getblock(lines[firstlineno - 1:])
 
         # The code lines we get out of inspect.getsourcelines look like
@@ -1342,6 +1347,15 @@ class BuildReader(object):
 
         r = {}
 
+        # Only do wildcard matching if the '*' character is present.
+        # Otherwise, mozpath.match will match directories, which we've
+        # arbitrarily chosen to not allow.
+        def path_matches_pattern(relpath, pattern):
+            if pattern == relpath:
+                return True
+
+            return '*' in pattern and mozpath.match(relpath, pattern)
+
         for path, ctxs in paths.items():
             # Should be normalized by read_relevant_mozbuilds.
             assert '\\' not in path
@@ -1364,13 +1378,7 @@ class BuildReader(object):
                 else:
                     relpath = path
 
-                pattern = ctx.pattern
-
-                # Only do wildcard matching if the '*' character is present.
-                # Otherwise, mozpath.match will match directories, which we've
-                # arbitrarily chosen to not allow.
-                if pattern == relpath or \
-                        ('*' in pattern and mozpath.match(relpath, pattern)):
+                if any(path_matches_pattern(relpath, p) for p in ctx.patterns):
                     flags += ctx
 
             if not any([flags.test_tags, flags.test_files, flags.test_flavors]):

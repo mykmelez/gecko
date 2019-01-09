@@ -34,17 +34,10 @@ add_task(async function alt_left_click_test() {
 add_task(async function shift_left_click_test() {
   info("Running test: Shift left click");
 
-  let newWindowPromise = BrowserTestUtils.waitForNewWindow();
+  let destinationURL = "http://" + TEST_VALUE + "/";
+  let newWindowPromise = BrowserTestUtils.waitForNewWindow({url: destinationURL});
   triggerCommand(true, {shiftKey: true});
   let win = await newWindowPromise;
-
-  // Wait for the initial browser to load.
-  let browser = win.gBrowser.selectedBrowser;
-  let destinationURL = "http://" + TEST_VALUE + "/";
-  await Promise.all([
-    BrowserTestUtils.browserLoaded(browser),
-    BrowserTestUtils.waitForLocationChange(win.gBrowser, destinationURL)
-  ]);
 
   info("URL should be loaded in a new window");
   is(gURLBar.value, "", "Urlbar reverted to original value");
@@ -53,7 +46,12 @@ add_task(async function shift_left_click_test() {
   is(win.gURLBar.textValue, TEST_VALUE, "New URL is loaded in new window");
 
   // Cleanup.
+  let ourWindowRefocusedPromise = Promise.all([
+    BrowserTestUtils.waitForEvent(window, "activate"),
+    BrowserTestUtils.waitForEvent(window, "focus", true),
+  ]);
   await BrowserTestUtils.closeWindow(win);
+  await ourWindowRefocusedPromise;
 });
 
 add_task(async function right_click_test() {
@@ -88,7 +86,7 @@ add_task(async function shift_accel_left_click_test() {
   is(gBrowser.selectedTab, tab, "Focus did not change to the new tab");
 
   // Select the new background tab
-  gBrowser.selectedTab = gBrowser.selectedTab.nextSibling;
+  gBrowser.selectedTab = gBrowser.selectedTab.nextElementSibling;
   is(gURLBar.value, TEST_VALUE, "New URL is loaded in new tab");
 
   // Cleanup.
@@ -101,7 +99,7 @@ add_task(async function load_in_current_tab_test() {
     {desc: "Simple return keypress"},
     {desc: "Left click on go button", click: true},
     {desc: "Ctrl/Cmd+Return keypress", event: {accelKey: true}},
-    {desc: "Alt+Return keypress in a blank tab", event: {altKey: true}}
+    {desc: "Alt+Return keypress in a blank tab", event: {altKey: true}},
   ];
 
   for (let test of tests) {
@@ -129,7 +127,7 @@ add_task(async function load_in_current_tab_test() {
 add_task(async function load_in_new_tab_test() {
   let tests = [
     {desc: "Ctrl/Cmd left click on go button", click: true, event: {accelKey: true}},
-    {desc: "Alt+Return keypress in a dirty tab", event: {altKey: true}, url: START_VALUE}
+    {desc: "Alt+Return keypress in a dirty tab", event: {altKey: true}, url: START_VALUE},
   ];
 
   for (let test of tests) {
@@ -179,7 +177,7 @@ function promiseLoadStarted() {
           gBrowser.removeTabsProgressListener(this);
           resolve();
         }
-      }
+      },
     });
   });
 }

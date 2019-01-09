@@ -16,7 +16,6 @@
 
 #include "nsWrapperCache.h"
 
-class nsIDocument;
 class nsPresContext;
 class nsMediaQueryResultCacheKey;
 
@@ -25,29 +24,17 @@ class StyleSheet;
 
 namespace dom {
 
-// XXX This class doesn't use the branch dispatch approach that we use
-//     elsewhere for stylo, but instead just relies on virtual call.
-//     That's because this class should not be critical to performance,
-//     and using branch dispatch would make it much more complicated.
-//     Performance critical path should hold a subclass of this class
-//     directly. We may want to determine in the future whether the
-//     above is correct.
-
-class MediaList final : public nsISupports
-                      , public nsWrapperCache
-{
-public:
+class MediaList final : public nsISupports, public nsWrapperCache {
+ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(MediaList)
 
   // Needed for CSSOM, but please don't use it outside of that :)
   explicit MediaList(already_AddRefed<RawServoMediaList> aRawList)
-    : mRawList(aRawList)
-  { }
+      : mRawList(aRawList) {}
 
-  static already_AddRefed<MediaList> Create(const nsAString& aMedia,
-                                            CallerType aCallerType =
-                                              CallerType::NonSystem);
+  static already_AddRefed<MediaList> Create(
+      const nsAString& aMedia, CallerType aCallerType = CallerType::NonSystem);
 
   already_AddRefed<MediaList> Clone();
 
@@ -61,10 +48,7 @@ public:
   void SetStyleSheet(StyleSheet* aSheet);
 
   // WebIDL
-  void Stringify(nsAString& aString)
-  {
-    GetMediaText(aString);
-  }
+  void Stringify(nsAString& aString) { GetMediaText(aString); }
   void GetMediaText(nsAString& aMediaText);
   void SetMediaText(const nsAString& aMediaText);
   uint32_t Length();
@@ -73,7 +57,13 @@ public:
   void DeleteMedium(const nsAString& aMedium, ErrorResult& aRv);
   void AppendMedium(const nsAString& aMedium, ErrorResult& aRv);
 
-protected:
+  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const;
+
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
+
+ protected:
   MediaList(const nsAString& aMedia, CallerType);
   MediaList();
 
@@ -82,8 +72,7 @@ protected:
   nsresult Delete(const nsAString& aOldMedium);
   nsresult Append(const nsAString& aNewMedium);
 
-  ~MediaList()
-  {
+  ~MediaList() {
     MOZ_ASSERT(!mStyleSheet, "Backpointer should have been cleared");
   }
 
@@ -92,13 +81,13 @@ protected:
   // medialist changes
   StyleSheet* mStyleSheet = nullptr;
 
-private:
-  template<typename Func>
+ private:
+  template <typename Func>
   inline nsresult DoMediaChange(Func aCallback);
   RefPtr<RawServoMediaList> mRawList;
 };
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla
 
-#endif // mozilla_dom_MediaList_h
+#endif  // mozilla_dom_MediaList_h

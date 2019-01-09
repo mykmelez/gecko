@@ -58,10 +58,6 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'uikit':
     DEFINES['SQLITE_ENABLE_LOCKING_STYLE'] = 0
 
-# Thunderbird needs the 2-argument version of fts3_tokenizer()
-if CONFIG['MOZ_THUNDERBIRD'] or CONFIG['MOZ_SUITE']:
-    DEFINES['SQLITE_ENABLE_FTS3_TOKENIZER'] = 1
-
 # Turn on SQLite's assertions in debug builds.
 if CONFIG['MOZ_DEBUG']:
     DEFINES['SQLITE_DEBUG'] = 1
@@ -97,6 +93,11 @@ elif CONFIG['HAVE_64BIT_BUILD']:
 # vs files created by other Sqlite instances in the system.
 # This has obviously no effect in case of System Sqlite.
 DEFINES['SQLITE_TEMP_FILE_PREFIX'] = '"mz_etilqs_"'
+
+# Our copy of sqlite3 doesn't know about AArch64 + Windows's endianness yet,
+# help it out.  (This does non-Windows too, but that's OK.)
+if CONFIG['CPU_ARCH'] == 'aarch64':
+    DEFINES['SQLITE_BYTEORDER'] = 1234
 
 # Suppress warnings in third-party code.
 if CONFIG['CC_TYPE'] in ('clang', 'gcc'):

@@ -60,16 +60,12 @@ var Components_ = this.require ? require("chrome").components : Components;
 if (Cu) {
   // If we're in a devtools module environment, ChromeUtils won't exist.
   /* eslint "mozilla/use-chromeutils-import": ["error", {allowCu: true}] */
-  Cu.import("resource://gre/modules/Services.jsm");
-  Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+  Cu.import("resource://gre/modules/Services.jsm", this);
+  Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
 
   XPCOMUtils.defineLazyServiceGetter(this, "FinalizationWitnessService",
                                      "@mozilla.org/toolkit/finalizationwitness;1",
                                      "nsIFinalizationWitnessService");
-
-  // For now, we're worried about add-ons using Promises with CPOWs, so we'll
-  // permit them in this scope, but this support will go away soon.
-  Cu.permitCPOWsInScope(this);
 }
 
 const STATUS_PENDING = 0;
@@ -159,7 +155,7 @@ var PendingErrors = {
       message: "" + error,
       fileName: null,
       stack: null,
-      lineNumber: null
+      lineNumber: null,
     };
     try { // Defend against non-enumerable values
       if (error && error instanceof Ci.nsIException) {
@@ -287,7 +283,7 @@ var PendingErrors = {
    */
   removeAllObservers() {
     this._observers.clear();
-  }
+  },
 };
 
 // Initialize the warn-upon-finalization mechanism if and only if Cu is defined.
@@ -382,7 +378,7 @@ this.Promise = function Promise(aExecutor) {
      * - {FinalizationWitness} witness A witness broadcasting |id| on
      *   notification "promise-finalization-witness".
      */
-    witness: undefined
+    witness: undefined,
   }});
 
   Object.seal(this);

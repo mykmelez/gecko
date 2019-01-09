@@ -10,8 +10,8 @@ Test the paymentOptions address-picker
   <script type="application/javascript" src="/tests/SimpleTest/AddTask.js"></script>
   <script src="payments_common.js"></script>
 
-  <script src="../../res/vendor/custom-elements.min.js"></script>
   <script src="../../res/unprivileged-fallbacks.js"></script>
+  <script src="autofillEditForms.js"></script>
 
   <link rel="stylesheet" type="text/css" href="../../res/components/rich-select.css"/>
   <link rel="stylesheet" type="text/css" href="../../res/components/address-option.css"/>
@@ -19,8 +19,10 @@ Test the paymentOptions address-picker
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
 </head>
 <body>
-  <p id="display">
-    <iframe id="templateFrame" src="../../res/paymentRequest.xhtml" width="0" height="0"></iframe>
+  <p id="display" style="height: 100vh; margin: 0;">
+    <iframe id="templateFrame" src="../../res/paymentRequest.xhtml" width="0" height="0"
+            sandbox="allow-same-origin"
+            style="float: left;"></iframe>
   </p>
 <div id="content" style="display: none">
 
@@ -31,13 +33,6 @@ Test the paymentOptions address-picker
 /** Test the payer requested details functionality **/
 
 import PaymentDialog from "../../res/containers/payment-dialog.js";
-
-function getVisiblePickerOptions(picker) {
-  let select = picker.querySelector(":scope > rich-select");
-  let options = select.querySelectorAll("address-option");
-  let visibleOptions = Array.from(options).filter(isVisible);
-  return visibleOptions;
-}
 
 function isVisible(elem) {
   let result = elem.getBoundingClientRect().height > 0;
@@ -125,23 +120,26 @@ let elDialog;
 let initialState;
 
 add_task(async function setup_once() {
+  registerConsoleFilter(function consoleFilter(msg) {
+    return msg.errorMessage &&
+      msg.errorMessage.toString().includes("selectedPayerAddress option a9e830667189 " +
+                                           "does not exist");
+  });
+
   let templateFrame = document.getElementById("templateFrame");
   await SimpleTest.promiseFocus(templateFrame.contentWindow);
 
   let displayEl = document.getElementById("display");
-  // Import the templates from the real shipping dialog to avoid duplication.
-  for (let template of templateFrame.contentDocument.querySelectorAll("template")) {
-    let imported = document.importNode(template, true);
-    displayEl.appendChild(imported);
-  }
+  importDialogDependencies(templateFrame, displayEl);
 
   elDialog = new PaymentDialog();
   displayEl.appendChild(elDialog);
   elPicker = elDialog.querySelector("address-picker.payer-related");
 
-  initialState = Object.assign({}, elDialog.requestStore.getState(), {
+  let {request} = elDialog.requestStore.getState();
+  initialState = Object.assign({}, {
     changesPrevented: false,
-    completionState: "initial",
+    request: Object.assign({}, request, { completeStatus: "" }),
     orderDetailsShowing: false,
   });
 });
@@ -186,19 +184,16 @@ add_task(async function test_visible_fields() {
 
   await asyncElementRendered();
 
-  let visibleOptions = getVisiblePickerOptions(elPicker);
-  let visibleOption = visibleOptions[0];
-
+  let closedRichOption = elPicker.dropdown.querySelector(".rich-select-selected-option");
   is(elPicker.dropdown.popupBox.children.length, 2, "Check dropdown has 2 addresses");
-  is(visibleOptions.length, 1, "One option should be visible");
-  is(visibleOption.getAttribute("guid"), "48bnds6854t", "expected option is visible");
+  is(closedRichOption.getAttribute("guid"), "48bnds6854t", "expected option is visible");
 
   for (let fieldName of ["name", "email", "tel"]) {
-    let elem = visibleOption.querySelector(`.${fieldName}`);
+    let elem = closedRichOption.querySelector(`.${fieldName}`);
     ok(elem, `field ${fieldName} exists`);
     ok(isVisible(elem), `field ${fieldName} is visible`);
   }
-  ok(!isVisible(visibleOption.querySelector(".street-address")), "street-address is not visible");
+  ok(!closedRichOption.querySelector(".street-address"), "street-address element is not present");
 });
 
 add_task(async function test_selective_fields() {
@@ -211,6 +206,7 @@ add_task(async function test_selective_fields() {
   });
 
   let payerFieldVariations = [
+    {requestPayerName: true, requestPayerEmail: true, requestPayerPhone: true },
     {requestPayerName: true, requestPayerEmail: false, requestPayerPhone: false },
     {requestPayerName: false, requestPayerEmail: true, requestPayerPhone: false },
     {requestPayerName: false, requestPayerEmail: false, requestPayerPhone: true },
@@ -223,17 +219,27 @@ add_task(async function test_selective_fields() {
     setPaymentOptions(requestStore, payerFields);
     await asyncElementRendered();
 
-    let visibleOption = getVisiblePickerOptions(elPicker)[0];
-    let elName = visibleOption.querySelector(".name");
-    let elEmail = visibleOption.querySelector(".email");
-    let elPhone = visibleOption.querySelector(".tel");
+    let closedRichOption = elPicker.dropdown.querySelector(".rich-select-selected-option");
+    let elName = closedRichOption.querySelector(".name");
+    let elEmail = closedRichOption.querySelector(".email");
+    let elPhone = closedRichOption.querySelector(".tel");
 
-    is(isVisible(elName), payerFields.requestPayerName,
+    is(!!elName && isVisible(elName), payerFields.requestPayerName,
        "name field is correctly toggled");
-    is(isVisible(elEmail), payerFields.requestPayerEmail,
+    is(!!elEmail && isVisible(elEmail), payerFields.requestPayerEmail,
        "email field is correctly toggled");
-    is(isVisible(elPhone), payerFields.requestPayerPhone,
+    is(!!elPhone && isVisible(elPhone), payerFields.requestPayerPhone,
        "tel field is correctly toggled");
+
+    let numPayerFieldsRequested = [...Object.values(payerFields)].filter(val => val).length;
+    is(elPicker.getAttribute("break-after-nth-field"), numPayerFieldsRequested == 3 ? "1" : null,
+       "Check @break-after-nth-field");
+    if (numPayerFieldsRequested == 3) {
+      is(closedRichOption.breakAfterNthField, "1",
+         "Make sure @break-after-nth-field was propagated to <address-option>");
+    } else {
+      is(closedRichOption.breakAfterNthField, null, "Make sure @break-after-nth-field was cleared");
+    }
   }
 });
 
@@ -252,18 +258,19 @@ add_task(async function test_filtered_options() {
 
   await asyncElementRendered();
 
-  let visibleOptions = getVisiblePickerOptions(elPicker);
-  let visibleOption = visibleOptions[0];
-
-  is(elPicker.dropdown.popupBox.children.length, 4, "Check dropdown has 3 addresses");
-  is(visibleOptions.length, 1, "One option should be visible");
-  is(visibleOption.getAttribute("guid"), "a9e830667189", "expected option is visible");
+  let closedRichOption = elPicker.dropdown.querySelector(".rich-select-selected-option");
+  is(elPicker.dropdown.popupBox.children.length, 4, "Check dropdown has 4 addresses");
+  is(closedRichOption.getAttribute("guid"), "a9e830667189", "expected option is visible");
 
   for (let fieldName of ["name", "email"]) {
-    let elem = visibleOption.querySelector(`.${fieldName}`);
+    let elem = closedRichOption.querySelector(`.${fieldName}`);
     ok(elem, `field ${fieldName} exists`);
     ok(isVisible(elem), `field ${fieldName} is visible`);
   }
+
+  // The selectedPayerAddress (a9e830667189) doesn't have a phone number and
+  // therefore will cause an error.
+  SimpleTest.expectUncaughtException(true);
 
   setPaymentOptions(requestStore, {
     requestPayerPhone: true,
@@ -271,13 +278,11 @@ add_task(async function test_filtered_options() {
   await asyncElementRendered();
 
   is(elPicker.dropdown.popupBox.children.length, 1, "Check dropdown has 1 addresses");
-  is(visibleOptions.length, 1, "One option should be visible");
 
   setPaymentOptions(requestStore, {});
   await asyncElementRendered();
 
   is(elPicker.dropdown.popupBox.children.length, 4, "Check dropdown has 4 addresses");
-  is(visibleOptions.length, 1, "One option should be visible");
 });
 
 add_task(async function test_no_matches() {
@@ -286,6 +291,10 @@ add_task(async function test_no_matches() {
   setPaymentOptions(requestStore, {
     requestPayerPhone: true,
   });
+
+  // The selectedPayerAddress (a9e830667189) doesn't have a phone number and
+  // therefore will cause an error.
+  SimpleTest.expectUncaughtException(true);
 
   requestStore.setState({
     savedAddresses: {
@@ -304,9 +313,9 @@ add_task(async function test_no_matches() {
 
   await asyncElementRendered();
 
-  let visibleOptions = getVisiblePickerOptions(elPicker);
+  let closedRichOption = elPicker.dropdown.querySelector(".rich-select-selected-option");
   is(elPicker.dropdown.popupBox.children.length, 0, "Check dropdown is empty");
-  is(visibleOptions.length, 0, "No options should be visible");
+  ok(closedRichOption.localName !== "address-option", "No option is selected and visible");
 });
 
 </script>

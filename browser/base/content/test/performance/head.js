@@ -14,8 +14,7 @@ ChromeUtils.defineModuleGetter(this, "PlacesTestUtils",
  *        The window in which the frame tree needs to be marked as dirty.
  */
 function dirtyFrame(win) {
-  let dwu = win.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIDOMWindowUtils);
+  let dwu = win.windowUtils;
   try {
     dwu.ensureDirtyRootFrame();
   } catch (e) {
@@ -55,12 +54,10 @@ async function recordReflows(testPromise, win = window) {
     },
 
     QueryInterface: ChromeUtils.generateQI([Ci.nsIReflowObserver,
-                                            Ci.nsISupportsWeakReference])
+                                            Ci.nsISupportsWeakReference]),
   };
 
-  let docShell = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                    .getInterface(Ci.nsIWebNavigation)
-                    .QueryInterface(Ci.nsIDocShell);
+  let docShell = win.docShell;
   docShell.addWeakReflowObserver(observer);
 
   let dirtyFrameFn = event => {
@@ -133,6 +130,13 @@ function reportUnexpectedReflows(reflows, expectedReflows = []) {
             actualStacks: new Map()};
   });
   let unexpectedReflows = new Map();
+
+  if (knownReflows.some(r => r.path.includes("*"))) {
+    Assert.ok(false,
+              "Do not include async frames in the stack, as " +
+              "that feature is not available on all trees.");
+  }
+
   for (let stack of reflows) {
     let path =
       stack.split("\n").slice(1) // the first frame which is our test code.
@@ -145,9 +149,10 @@ function reportUnexpectedReflows(reflows, expectedReflows = []) {
       continue;
     }
 
-    // synthesizeKey from EventUtils.js causes us to reflow. That's the test
+    // Functions from EventUtils.js calculate coordinates and
+    // dimensions, causing us to reflow. That's the test
     // harness and we don't care about that, so we'll filter that out.
-    if (path.startsWith("synthesizeKey@chrome://mochikit/content/tests/SimpleTest/EventUtils.js")) {
+    if (/^(synthesize|send|createDragEventObject).*?@chrome:\/\/mochikit.*?EventUtils\.js/.test(path)) {
       continue;
     }
 
@@ -235,8 +240,7 @@ function forceImmediateToolbarOverflowHandling(win) {
     overflowableToolbar._lazyResizeHandler.disarm();
     // Ensure the root frame is dirty before resize so that, if we're
     // in the middle of a reflow test, we record the reflows deterministically.
-    let dwu = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                 .getInterface(Ci.nsIDOMWindowUtils);
+    let dwu = win.windowUtils;
     dwu.ensureDirtyRootFrame();
     overflowableToolbar._onLazyResize();
   }
@@ -307,7 +311,10 @@ async function createTabs(howMany) {
     uris.push("about:blank");
   }
 
-  gBrowser.loadTabs(uris, true, false);
+  gBrowser.loadTabs(uris, {
+    inBackground: true,
+    triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+  });
 
   await BrowserTestUtils.waitForCondition(() => {
     return Array.from(gBrowser.tabs).every(tab => tab._fullyOpen);

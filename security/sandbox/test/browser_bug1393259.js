@@ -21,8 +21,6 @@ const kPageURL =
 const environment = Cc["@mozilla.org/process/environment;1"]
                     .getService(Ci.nsIEnvironment);
 
-const InspectorUtils = SpecialPowers.InspectorUtils;
-
 // Parameters for running the python script that registers/unregisters fonts.
 const kPythonPath = "/usr/bin/python";
 const kFontInstallerPath = "browser/security/sandbox/test/mac_register_font.py";
@@ -45,7 +43,7 @@ add_task(async function() {
 
   await BrowserTestUtils.withNewTab({
     gBrowser,
-    url: kPageURL
+    url: kPageURL,
   }, async function(aBrowser) {
     function runProcess(aCmd, aArgs, blocking = true) {
       let cmdFile = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);

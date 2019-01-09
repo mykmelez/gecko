@@ -1,9 +1,9 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use fnv::FnvHashMap;
-use tree::OpaqueElement;
+use crate::tree::OpaqueElement;
+use fxhash::FxHashMap;
 
 /// A cache to speed up matching of nth-index-like selectors.
 ///
@@ -32,7 +32,7 @@ impl NthIndexCache {
 
 /// The concrete per-pseudo-class cache.
 #[derive(Default)]
-pub struct NthIndexCacheInner(FnvHashMap<OpaqueElement, i32>);
+pub struct NthIndexCacheInner(FxHashMap<OpaqueElement, i32>);
 
 impl NthIndexCacheInner {
     /// Does a lookup for a given element in the cache.

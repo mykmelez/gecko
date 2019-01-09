@@ -34,22 +34,27 @@ var EXPORTED_SYMBOLS = ["formAutofillParent"];
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-ChromeUtils.import("resource://formautofill/FormAutofillUtils.jsm");
+ChromeUtils.import("resource://formautofill/FormAutofill.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
   CreditCard: "resource://gre/modules/CreditCard.jsm",
   FormAutofillPreferences: "resource://formautofill/FormAutofillPreferences.jsm",
   FormAutofillDoorhanger: "resource://formautofill/FormAutofillDoorhanger.jsm",
-  MasterPassword: "resource://formautofill/MasterPassword.jsm",
+  FormAutofillUtils: "resource://formautofill/FormAutofillUtils.jsm",
+  OSKeyStore: "resource://formautofill/OSKeyStore.jsm",
 });
 
 this.log = null;
-FormAutofillUtils.defineLazyLogGetter(this, EXPORTED_SYMBOLS[0]);
+FormAutofill.defineLazyLogGetter(this, EXPORTED_SYMBOLS[0]);
 
 const {
   ENABLED_AUTOFILL_ADDRESSES_PREF,
   ENABLED_AUTOFILL_CREDITCARDS_PREF,
+} = FormAutofill;
+
+const {
+  ADDRESSES_COLLECTION_NAME,
   CREDITCARDS_COLLECTION_NAME,
 } = FormAutofillUtils;
 
@@ -114,7 +119,7 @@ FormAutofillParent.prototype = {
     Services.obs.addObserver(this, "formautofill-storage-changed");
 
     // Only listen to credit card related messages if it is available
-    if (FormAutofillUtils.isAutofillCreditCardsAvailable) {
+    if (FormAutofill.isAutofillCreditCardsAvailable) {
       Services.ppmm.addMessageListener("FormAutofill:SaveCreditCard", this);
       Services.ppmm.addMessageListener("FormAutofill:RemoveCreditCards", this);
       Services.ppmm.addMessageListener("FormAutofill:GetDecryptedString", this);
@@ -128,10 +133,9 @@ FormAutofillParent.prototype = {
       case "sync-pane-loaded": {
         let formAutofillPreferences = new FormAutofillPreferences();
         let document = subject.document;
-        let prefGroup = formAutofillPreferences.init(document);
-        let parentNode = document.getElementById("passwordsGroup");
-        let insertBeforeNode = document.getElementById("masterPasswordRow");
-        parentNode.insertBefore(prefGroup, insertBeforeNode);
+        let prefFragment = formAutofillPreferences.init(document);
+        let formAutofillGroupBox = document.getElementById("formAutofillGroupBox");
+        formAutofillGroupBox.appendChild(prefFragment);
         break;
       }
 
@@ -187,6 +191,7 @@ FormAutofillParent.prototype = {
    * Update the status and trigger _onStatusChanged, if necessary.
    */
   _updateStatus() {
+    log.debug("_updateStatus");
     let wasActive = this._active;
     this._active = this._computeStatus();
     if (this._active !== wasActive) {
@@ -204,29 +209,27 @@ FormAutofillParent.prototype = {
   async receiveMessage({name, data, target}) {
     switch (name) {
       case "FormAutofill:InitStorage": {
-        this.formAutofillStorage.initialize();
+        await this.formAutofillStorage.initialize();
         break;
       }
       case "FormAutofill:GetRecords": {
-        this._getRecords(data, target);
+        await this._getRecords(data, target);
         break;
       }
       case "FormAutofill:SaveAddress": {
         if (data.guid) {
-          this.formAutofillStorage.addresses.update(data.guid, data.address);
+          await this.formAutofillStorage.addresses.update(data.guid, data.address);
         } else {
-          this.formAutofillStorage.addresses.add(data.address);
+          await this.formAutofillStorage.addresses.add(data.address);
         }
         break;
       }
       case "FormAutofill:SaveCreditCard": {
-        // TODO: "MasterPassword.ensureLoggedIn" can be removed after the storage
-        // APIs are refactored to be async functions (bug 1399367).
-        if (!await MasterPassword.ensureLoggedIn()) {
-          log.warn("User canceled master password entry");
+        if (!await OSKeyStore.ensureLoggedIn()) {
+          log.warn("User canceled encryption login");
           return;
         }
-        this.formAutofillStorage.creditCards.add(data.creditcard);
+        await this.formAutofillStorage.creditCards.add(data.creditcard);
         break;
       }
       case "FormAutofill:RemoveAddresses": {
@@ -238,24 +241,24 @@ FormAutofillParent.prototype = {
         break;
       }
       case "FormAutofill:OnFormSubmit": {
-        this._onFormSubmit(data, target);
+        await this._onFormSubmit(data, target);
         break;
       }
       case "FormAutofill:OpenPreferences": {
         const win = BrowserWindowTracker.getTopWindow();
-        win.openPreferences("panePrivacy", {origin: "autofillFooter"});
+        win.openPreferences("privacy-form-autofill", {origin: "autofillFooter"});
         break;
       }
       case "FormAutofill:GetDecryptedString": {
         let {cipherText, reauth} = data;
         let string;
         try {
-          string = await MasterPassword.decrypt(cipherText, reauth);
+          string = await OSKeyStore.decrypt(cipherText, reauth);
         } catch (e) {
           if (e.result != Cr.NS_ERROR_ABORT) {
             throw e;
           }
-          log.warn("User canceled master password entry");
+          log.warn("User canceled encryption login");
         }
         target.sendAsyncMessage("FormAutofill:DecryptedString", string);
         break;
@@ -278,7 +281,7 @@ FormAutofillParent.prototype = {
     Services.obs.removeObserver(this, "sync-pane-loaded");
     Services.prefs.removeObserver(ENABLED_AUTOFILL_ADDRESSES_PREF, this);
 
-    if (FormAutofillUtils.isAutofillCreditCardsAvailable) {
+    if (FormAutofill.isAutofillCreditCardsAvailable) {
       Services.ppmm.removeMessageListener("FormAutofill:SaveCreditCard", this);
       Services.ppmm.removeMessageListener("FormAutofill:RemoveCreditCards", this);
       Services.ppmm.removeMessageListener("FormAutofill:GetDecryptedString", this);
@@ -289,7 +292,7 @@ FormAutofillParent.prototype = {
   /**
    * Get the records from profile store and return results back to content
    * process. It will decrypt the credit card number and append
-   * "cc-number-decrypted" to each record if MasterPassword isn't set.
+   * "cc-number-decrypted" to each record if OSKeyStore isn't set.
    *
    * @private
    * @param  {string} data.collectionName
@@ -308,15 +311,15 @@ FormAutofillParent.prototype = {
       return;
     }
 
-    let recordsInCollection = collection.getAll();
+    let recordsInCollection = await collection.getAll();
     if (!info || !info.fieldName || !recordsInCollection.length) {
       target.sendAsyncMessage("FormAutofill:Records", recordsInCollection);
       return;
     }
 
-    let isCCAndMPEnabled = collectionName == CREDITCARDS_COLLECTION_NAME && MasterPassword.isEnabled;
-    // We don't filter "cc-number" when MasterPassword is set.
-    if (isCCAndMPEnabled && info.fieldName == "cc-number") {
+    let isCC = collectionName == CREDITCARDS_COLLECTION_NAME;
+    // We don't filter "cc-number"
+    if (isCC && info.fieldName == "cc-number") {
       recordsInCollection = recordsInCollection.filter(record => !!record["cc-number"]);
       target.sendAsyncMessage("FormAutofill:Records", recordsInCollection);
       return;
@@ -331,20 +334,17 @@ FormAutofillParent.prototype = {
         continue;
       }
 
-      // Cache the decrypted "cc-number" in each record for content to preview
-      // when MasterPassword isn't set.
-      if (!isCCAndMPEnabled && record["cc-number-encrypted"]) {
-        record["cc-number-decrypted"] = await MasterPassword.decrypt(record["cc-number-encrypted"]);
+      if (collectionName == ADDRESSES_COLLECTION_NAME && record.country
+          && !FormAutofill.supportedCountries.includes(record.country)) {
+        // Address autofill isn't supported for the record's country so we don't
+        // want to attempt to potentially incorrectly fill the address fields.
+        continue;
       }
 
-      // Filter "cc-number" based on the decrypted one.
-      if (info.fieldName == "cc-number") {
-        fieldValue = record["cc-number-decrypted"];
+      if (lcSearchString && !String(fieldValue).toLowerCase().startsWith(lcSearchString)) {
+        continue;
       }
-
-      if (!lcSearchString || String(fieldValue).toLowerCase().startsWith(lcSearchString)) {
-        records.push(record);
-      }
+      records.push(record);
     }
 
     target.sendAsyncMessage("FormAutofill:Records", records);
@@ -352,60 +352,49 @@ FormAutofillParent.prototype = {
 
   _updateSavedFieldNames() {
     log.debug("_updateSavedFieldNames");
-    if (!Services.ppmm.initialProcessData.autofillSavedFieldNames) {
-      Services.ppmm.initialProcessData.autofillSavedFieldNames = new Set();
+
+    // Don't access the credit cards store unless it is enabled.
+    if (FormAutofill.isAutofillCreditCardsAvailable) {
+      Services.ppmm.initialProcessData.autofillSavedFieldNames =
+        new Set([...this.formAutofillStorage.addresses.getSavedFieldNames(),
+          ...this.formAutofillStorage.creditCards.getSavedFieldNames()]);
     } else {
-      Services.ppmm.initialProcessData.autofillSavedFieldNames.clear();
+      Services.ppmm.initialProcessData.autofillSavedFieldNames =
+        this.formAutofillStorage.addresses.getSavedFieldNames();
     }
-
-    ["addresses", "creditCards"].forEach(c => {
-      this.formAutofillStorage[c].getAll().forEach((record) => {
-        Object.keys(record).forEach((fieldName) => {
-          if (!record[fieldName]) {
-            return;
-          }
-          Services.ppmm.initialProcessData.autofillSavedFieldNames.add(fieldName);
-        });
-      });
-    });
-
-    // Remove the internal guid and metadata fields.
-    this.formAutofillStorage.INTERNAL_FIELDS.forEach((fieldName) => {
-      Services.ppmm.initialProcessData.autofillSavedFieldNames.delete(fieldName);
-    });
 
     Services.ppmm.broadcastAsyncMessage("FormAutofill:savedFieldNames",
                                         Services.ppmm.initialProcessData.autofillSavedFieldNames);
     this._updateStatus();
   },
 
-  _onAddressSubmit(address, target, timeStartedFillingMS) {
+  async _onAddressSubmit(address, target, timeStartedFillingMS) {
     let showDoorhanger = null;
     if (address.guid) {
       // Avoid updating the fields that users don't modify.
-      let originalAddress = this.formAutofillStorage.addresses.get(address.guid);
+      let originalAddress = await this.formAutofillStorage.addresses.get(address.guid);
       for (let field in address.record) {
         if (address.untouchedFields.includes(field) && originalAddress[field]) {
           address.record[field] = originalAddress[field];
         }
       }
 
-      if (!this.formAutofillStorage.addresses.mergeIfPossible(address.guid, address.record, true)) {
+      if (!await this.formAutofillStorage.addresses.mergeIfPossible(address.guid, address.record, true)) {
         this._recordFormFillingTime("address", "autofill-update", timeStartedFillingMS);
 
         showDoorhanger = async () => {
           const description = FormAutofillUtils.getAddressLabel(address.record);
           const state = await FormAutofillDoorhanger.show(target, "updateAddress", description);
-          let changedGUIDs = this.formAutofillStorage.addresses.mergeToStorage(address.record, true);
+          let changedGUIDs = await this.formAutofillStorage.addresses.mergeToStorage(address.record, true);
           switch (state) {
             case "create":
               if (!changedGUIDs.length) {
-                changedGUIDs.push(this.formAutofillStorage.addresses.add(address.record));
+                changedGUIDs.push(await this.formAutofillStorage.addresses.add(address.record));
               }
               break;
             case "update":
               if (!changedGUIDs.length) {
-                this.formAutofillStorage.addresses.update(address.guid, address.record, true);
+                await this.formAutofillStorage.addresses.update(address.guid, address.record, true);
                 changedGUIDs.push(address.guid);
               } else {
                 this.formAutofillStorage.addresses.remove(address.guid);
@@ -423,16 +412,16 @@ FormAutofillParent.prototype = {
         Services.telemetry.scalarAdd("formautofill.addresses.fill_type_autofill", 1);
       }
     } else {
-      let changedGUIDs = this.formAutofillStorage.addresses.mergeToStorage(address.record);
+      let changedGUIDs = await this.formAutofillStorage.addresses.mergeToStorage(address.record);
       if (!changedGUIDs.length) {
-        changedGUIDs.push(this.formAutofillStorage.addresses.add(address.record));
+        changedGUIDs.push(await this.formAutofillStorage.addresses.add(address.record));
       }
       changedGUIDs.forEach(guid => this.formAutofillStorage.addresses.notifyUsed(guid));
       this._recordFormFillingTime("address", "manual", timeStartedFillingMS);
 
       // Show first time use doorhanger
-      if (FormAutofillUtils.isAutofillAddressesFirstTimeUse) {
-        Services.prefs.setBoolPref(FormAutofillUtils.ADDRESSES_FIRST_TIME_USE_PREF, false);
+      if (FormAutofill.isAutofillAddressesFirstTimeUse) {
+        Services.prefs.setBoolPref(FormAutofill.ADDRESSES_FIRST_TIME_USE_PREF, false);
         showDoorhanger = async () => {
           const description = FormAutofillUtils.getAddressLabel(address.record);
           const state = await FormAutofillDoorhanger.show(target, "firstTimeUse", description);
@@ -451,14 +440,19 @@ FormAutofillParent.prototype = {
     return showDoorhanger;
   },
 
-  _onCreditCardSubmit(creditCard, target, timeStartedFillingMS) {
+  async _onCreditCardSubmit(creditCard, target, timeStartedFillingMS) {
     // Updates the used status for shield/heartbeat to recognize users who have
     // used Credit Card Autofill.
     let setUsedStatus = status => {
-      if (FormAutofillUtils.AutofillCreditCardsUsedStatus < status) {
-        Services.prefs.setIntPref(FormAutofillUtils.CREDITCARDS_USED_STATUS_PREF, status);
+      if (FormAutofill.AutofillCreditCardsUsedStatus < status) {
+        Services.prefs.setIntPref(FormAutofill.CREDITCARDS_USED_STATUS_PREF, status);
       }
     };
+
+    // Remove invalid cc-type values
+    if (creditCard.record["cc-type"] && !CreditCard.isValidNetwork(creditCard.record["cc-type"])) {
+      delete creditCard.record["cc-type"];
+    }
 
     // We'll show the credit card doorhanger if:
     //   - User applys autofill and changed
@@ -467,7 +461,7 @@ FormAutofillParent.prototype = {
       // Indicate that the user has used Credit Card Autofill to fill in a form.
       setUsedStatus(3);
 
-      let originalCCData = this.formAutofillStorage.creditCards.get(creditCard.guid);
+      let originalCCData = await this.formAutofillStorage.creditCards.get(creditCard.guid);
       let recordUnchanged = true;
       for (let field in creditCard.record) {
         if (creditCard.record[field] === "" && !originalCCData[field]) {
@@ -505,7 +499,7 @@ FormAutofillParent.prototype = {
     }
 
     // Early return if it's a duplicate data
-    let dupGuid = this.formAutofillStorage.creditCards.getDuplicateGuid(creditCard.record);
+    let dupGuid = await this.formAutofillStorage.creditCards.getDuplicateGuid(creditCard.record);
     if (dupGuid) {
       this.formAutofillStorage.creditCards.notifyUsed(dupGuid);
       return false;
@@ -516,16 +510,13 @@ FormAutofillParent.prototype = {
 
     return async () => {
       // Suppress the pending doorhanger from showing up if user disabled credit card in previous doorhanger.
-      if (!FormAutofillUtils.isAutofillCreditCardsEnabled) {
+      if (!FormAutofill.isAutofillCreditCardsEnabled) {
         return;
       }
 
-      const card = new CreditCard({
-        number: creditCard.record["cc-number"] || creditCard.record["cc-number-decrypted"],
-        encryptedNumber: creditCard.record["cc-number-encrypted"],
-        name: creditCard.record["cc-name"],
-      });
-      const description = await card.getLabel();
+      let number = creditCard.record["cc-number"] || creditCard.record["cc-number-decrypted"];
+      let name = creditCard.record["cc-name"];
+      const description = await CreditCard.getLabel({name, number});
       const state = await FormAutofillDoorhanger.show(target,
                                                       creditCard.guid ? "updateCreditCard" : "addCreditCard",
                                                       description);
@@ -538,25 +529,23 @@ FormAutofillParent.prototype = {
         return;
       }
 
-      // TODO: "MasterPassword.ensureLoggedIn" can be removed after the storage
-      // APIs are refactored to be async functions (bug 1399367).
-      if (!await MasterPassword.ensureLoggedIn()) {
-        log.warn("User canceled master password entry");
+      if (!await OSKeyStore.ensureLoggedIn()) {
+        log.warn("User canceled encryption login");
         return;
       }
 
       let changedGUIDs = [];
       if (creditCard.guid) {
         if (state == "update") {
-          this.formAutofillStorage.creditCards.update(creditCard.guid, creditCard.record, true);
+          await this.formAutofillStorage.creditCards.update(creditCard.guid, creditCard.record, true);
           changedGUIDs.push(creditCard.guid);
         } else if ("create") {
-          changedGUIDs.push(this.formAutofillStorage.creditCards.add(creditCard.record));
+          changedGUIDs.push(await this.formAutofillStorage.creditCards.add(creditCard.record));
         }
       } else {
-        changedGUIDs.push(...this.formAutofillStorage.creditCards.mergeToStorage(creditCard.record));
+        changedGUIDs.push(...await this.formAutofillStorage.creditCards.mergeToStorage(creditCard.record));
         if (!changedGUIDs.length) {
-          changedGUIDs.push(this.formAutofillStorage.creditCards.add(creditCard.record));
+          changedGUIDs.push(await this.formAutofillStorage.creditCards.add(creditCard.record));
         }
       }
       changedGUIDs.forEach(guid => this.formAutofillStorage.creditCards.notifyUsed(guid));
@@ -578,8 +567,8 @@ FormAutofillParent.prototype = {
     // Transmit the telemetry immediately in the meantime form submitted, and handle these pending
     // doorhangers at a later.
     await Promise.all([
-      address.map(addrRecord => this._onAddressSubmit(addrRecord, target, timeStartedFillingMS)),
-      creditCard.map(ccRecord => this._onCreditCardSubmit(ccRecord, target, timeStartedFillingMS)),
+      await Promise.all(address.map(addrRecord => this._onAddressSubmit(addrRecord, target, timeStartedFillingMS))),
+      await Promise.all(creditCard.map(ccRecord => this._onCreditCardSubmit(ccRecord, target, timeStartedFillingMS))),
     ].map(pendingDoorhangers => {
       return pendingDoorhangers.filter(pendingDoorhanger => !!pendingDoorhanger &&
                                                             typeof pendingDoorhanger == "function");

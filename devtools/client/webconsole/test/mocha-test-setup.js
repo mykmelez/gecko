@@ -20,11 +20,11 @@ pref("devtools.webconsole.filter.css", false);
 pref("devtools.webconsole.filter.net", false);
 pref("devtools.webconsole.filter.netxhr", false);
 pref("devtools.webconsole.ui.filterbar", false);
-pref("devtools.webconsole.inputHistoryCount", 50);
+pref("devtools.webconsole.inputHistoryCount", 300);
 pref("devtools.webconsole.persistlog", false);
 pref("devtools.webconsole.timestampMessages", false);
 pref("devtools.webconsole.sidebarToggle", true);
-pref("devtools.webconsole.jsterm.codeMirror", false);
+pref("devtools.webconsole.jsterm.codeMirror", true);
 
 global.loader = {
   lazyServiceGetter: () => {},
@@ -32,7 +32,7 @@ global.loader = {
     if (path === "devtools/shared/async-storage") {
       global[name] = require("devtools/client/webconsole/test/fixtures/async-storage");
     }
-  }
+  },
 };
 
 // Point to vendored-in files and mocks when needed.
@@ -75,7 +75,9 @@ requireHacker.global_hook("default", (path, module) => {
     case "devtools/client/webconsole/utils/context-menu":
       return "{}";
     case "devtools/client/shared/telemetry":
-      return `module.exports = function() {}`;
+      return `module.exports = function() {
+        this.recordEvent = () => {};
+      }`;
     case "devtools/shared/event-emitter":
       return `module.exports = require("devtools-modules/src/utils/event-emitter")`;
     case "devtools/client/shared/unicode-url":

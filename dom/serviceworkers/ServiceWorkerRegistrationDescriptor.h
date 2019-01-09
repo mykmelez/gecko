@@ -14,7 +14,7 @@ namespace mozilla {
 
 namespace ipc {
 class PrincipalInfo;
-} // namespace ipc
+}  // namespace ipc
 
 namespace dom {
 
@@ -26,93 +26,79 @@ enum class ServiceWorkerUpdateViaCache : uint8_t;
 // This class represents a snapshot of a particular
 // ServiceWorkerRegistrationInfo object. It is threadsafe and can be
 // transferred across processes.
-class ServiceWorkerRegistrationDescriptor final
-{
+class ServiceWorkerRegistrationDescriptor final {
   // This class is largely a wrapper wround an IPDL generated struct.  We
   // need the wrapper class since IPDL generated code includes windows.h
   // which is in turn incompatible with bindings code.
   UniquePtr<IPCServiceWorkerRegistrationDescriptor> mData;
 
-  Maybe<IPCServiceWorkerDescriptor>
-  NewestInternal() const;
+  Maybe<IPCServiceWorkerDescriptor> NewestInternal() const;
 
-public:
-  ServiceWorkerRegistrationDescriptor(uint64_t aId,
-                                      nsIPrincipal* aPrincipal,
-                                      const nsACString& aScope,
-                                      ServiceWorkerUpdateViaCache aUpdateViaCache);
+ public:
+  ServiceWorkerRegistrationDescriptor(
+      uint64_t aId, uint64_t aVersion, nsIPrincipal* aPrincipal,
+      const nsACString& aScope, ServiceWorkerUpdateViaCache aUpdateViaCache);
 
-  ServiceWorkerRegistrationDescriptor(uint64_t aId,
-                                      const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
-                                      const nsACString& aScope,
-                                      ServiceWorkerUpdateViaCache aUpdateViaCache);
+  ServiceWorkerRegistrationDescriptor(
+      uint64_t aId, uint64_t aVersion,
+      const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
+      const nsACString& aScope, ServiceWorkerUpdateViaCache aUpdateViaCache);
 
-  explicit ServiceWorkerRegistrationDescriptor(const IPCServiceWorkerRegistrationDescriptor& aDescriptor);
+  explicit ServiceWorkerRegistrationDescriptor(
+      const IPCServiceWorkerRegistrationDescriptor& aDescriptor);
 
-  ServiceWorkerRegistrationDescriptor(const ServiceWorkerRegistrationDescriptor& aRight);
+  ServiceWorkerRegistrationDescriptor(
+      const ServiceWorkerRegistrationDescriptor& aRight);
 
-  ServiceWorkerRegistrationDescriptor&
-  operator=(const ServiceWorkerRegistrationDescriptor& aRight);
+  ServiceWorkerRegistrationDescriptor& operator=(
+      const ServiceWorkerRegistrationDescriptor& aRight);
 
-  ServiceWorkerRegistrationDescriptor(ServiceWorkerRegistrationDescriptor&& aRight);
+  ServiceWorkerRegistrationDescriptor(
+      ServiceWorkerRegistrationDescriptor&& aRight);
 
-  ServiceWorkerRegistrationDescriptor&
-  operator=(ServiceWorkerRegistrationDescriptor&& aRight);
+  ServiceWorkerRegistrationDescriptor& operator=(
+      ServiceWorkerRegistrationDescriptor&& aRight);
 
   ~ServiceWorkerRegistrationDescriptor();
 
-  bool
-  operator==(const ServiceWorkerRegistrationDescriptor& aRight) const;
+  bool operator==(const ServiceWorkerRegistrationDescriptor& aRight) const;
 
-  uint64_t
-  Id() const;
+  uint64_t Id() const;
 
-  ServiceWorkerUpdateViaCache
-  UpdateViaCache() const;
+  uint64_t Version() const;
 
-  const mozilla::ipc::PrincipalInfo&
-  PrincipalInfo() const;
+  ServiceWorkerUpdateViaCache UpdateViaCache() const;
 
-  nsCOMPtr<nsIPrincipal>
-  GetPrincipal() const;
+  const mozilla::ipc::PrincipalInfo& PrincipalInfo() const;
 
-  const nsCString&
-  Scope() const;
+  nsCOMPtr<nsIPrincipal> GetPrincipal() const;
 
-  Maybe<ServiceWorkerDescriptor>
-  GetInstalling() const;
+  const nsCString& Scope() const;
 
-  Maybe<ServiceWorkerDescriptor>
-  GetWaiting() const;
+  Maybe<ServiceWorkerDescriptor> GetInstalling() const;
 
-  Maybe<ServiceWorkerDescriptor>
-  GetActive() const;
+  Maybe<ServiceWorkerDescriptor> GetWaiting() const;
 
-  Maybe<ServiceWorkerDescriptor>
-  Newest() const;
+  Maybe<ServiceWorkerDescriptor> GetActive() const;
 
-  bool
-  IsValid() const;
+  Maybe<ServiceWorkerDescriptor> Newest() const;
 
-  void
-  SetUpdateViaCache(ServiceWorkerUpdateViaCache aUpdateViaCache);
+  bool HasWorker(const ServiceWorkerDescriptor& aDescriptor) const;
 
-  void
-  SetWorkers(ServiceWorkerInfo* aInstalling,
-             ServiceWorkerInfo* aWaiting,
-             ServiceWorkerInfo* aActive);
+  bool IsValid() const;
 
-  void
-  SetWorkers(const OptionalIPCServiceWorkerDescriptor& aInstalling,
-             const OptionalIPCServiceWorkerDescriptor& aWaiting,
-             const OptionalIPCServiceWorkerDescriptor& aActive);
+  void SetUpdateViaCache(ServiceWorkerUpdateViaCache aUpdateViaCache);
+
+  void SetWorkers(ServiceWorkerInfo* aInstalling, ServiceWorkerInfo* aWaiting,
+                  ServiceWorkerInfo* aActive);
+
+  void SetVersion(uint64_t aVersion);
 
   // Expose the underlying IPC type so that it can be passed via IPC.
-  const IPCServiceWorkerRegistrationDescriptor&
-  ToIPC() const;
+  const IPCServiceWorkerRegistrationDescriptor& ToIPC() const;
 };
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla
 
-#endif // _mozilla_dom_ServiceWorkerRegistrationDescriptor_h
+#endif  // _mozilla_dom_ServiceWorkerRegistrationDescriptor_h

@@ -7,12 +7,12 @@
 
 /* globals EventEmitter */
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-
 ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
                                "resource://gre/modules/PrivateBrowsingUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "Services",
                                "resource://gre/modules/Services.jsm");
+XPCOMUtils.defineLazyPreferenceGetter(this, "containersEnabled",
+                                      "privacy.userContext.enabled");
 
 var {
   DefaultMap,
@@ -66,6 +66,10 @@ class TabBase {
     this.id = id;
     this.nativeTab = nativeTab;
     this.activeTabWindowID = null;
+
+    if (!extension.privateBrowsingAllowed && this._incognito) {
+      throw new ExtensionError(`Invalid tab ID: ${id}`);
+    }
   }
 
   /**
@@ -298,7 +302,7 @@ class TabBase {
    *        @readonly
    */
   get frameLoader() {
-    return this.browser.frameLoader;
+    return this.browser && this.browser.frameLoader;
   }
 
   /**
@@ -463,6 +467,17 @@ class TabBase {
   }
 
   /**
+   * @property {boolean} attention
+   *          Returns true if the tab is drawing attention.
+   *          @readonly
+   *          @abstract
+   */
+  get attention() {
+    throw new Error("Not implemented");
+  }
+
+
+  /**
    * @property {boolean} isArticle
    *        Returns true if the document in the tab can be rendered in reader
    *        mode.
@@ -481,6 +496,15 @@ class TabBase {
    *        @abstract
    */
   get isInReaderMode() {
+    throw new Error("Not implemented");
+  }
+
+  /**
+   * @property {integer} successorTabId
+   *        @readonly
+   *        @abstract
+   */
+  get successorTabId() {
     throw new Error("Not implemented");
   }
 
@@ -572,18 +596,19 @@ class TabBase {
    * of its properties which the extension is permitted to access, in the format
    * required to be returned by WebExtension APIs.
    *
-   * @param {Tab} [fallbackTab]
-   *        A tab to retrieve geometry data from if the lazy geometry data for
-   *        this tab hasn't been initialized yet.
+   * @param {Object} [fallbackTabSize]
+   *        A geometry data if the lazy geometry data for this tab hasn't been
+   *        initialized yet.
    * @returns {object}
    */
-  convert(fallbackTab = null) {
+  convert(fallbackTabSize = null) {
     let result = {
       id: this.id,
       index: this.index,
       windowId: this.windowId,
       highlighted: this.highlighted,
       active: this.active,
+      attention: this.attention,
       pinned: this.pinned,
       status: this.status,
       hidden: this.hidden,
@@ -597,13 +622,14 @@ class TabBase {
       isArticle: this.isArticle,
       isInReaderMode: this.isInReaderMode,
       sharingState: this.sharingState,
+      successorTabId: this.successorTabId,
     };
 
     // If the tab has not been fully layed-out yet, fallback to the geometry
     // from a different tab (usually the currently active tab).
-    if (fallbackTab && (!result.width || !result.height)) {
-      result.width = fallbackTab.width;
-      result.height = fallbackTab.height;
+    if (fallbackTabSize && (!result.width || !result.height)) {
+      result.width = fallbackTabSize.width;
+      result.height = fallbackTabSize.height;
     }
 
     let opener = this.openerTabId;
@@ -650,9 +676,9 @@ class TabBase {
    */
   _execute(context, details, kind, method) {
     let options = {
-      js: [],
-      css: [],
-      remove_css: method == "removeCSS",
+      jsPaths: [],
+      cssPaths: [],
+      removeCSS: method == "removeCSS",
     };
 
     // We require a `code` or a `file` property, but we can't accept both.
@@ -675,26 +701,26 @@ class TabBase {
       if (!this.extension.isExtensionURL(url)) {
         return Promise.reject({message: "Files to be injected must be within the extension"});
       }
-      options[kind].push(url);
+      options[`${kind}Paths`].push(url);
     }
     if (details.allFrames) {
-      options.all_frames = details.allFrames;
+      options.allFrames = details.allFrames;
     }
     if (details.frameId !== null) {
-      options.frame_id = details.frameId;
+      options.frameID = details.frameId;
     }
     if (details.matchAboutBlank) {
-      options.match_about_blank = details.matchAboutBlank;
+      options.matchAboutBlank = details.matchAboutBlank;
     }
     if (details.runAt !== null) {
-      options.run_at = details.runAt;
+      options.runAt = details.runAt;
     } else {
-      options.run_at = "document_idle";
+      options.runAt = "document_idle";
     }
     if (details.cssOrigin !== null) {
-      options.css_origin = details.cssOrigin;
+      options.cssOrigin = details.cssOrigin;
     } else {
-      options.css_origin = "author";
+      options.cssOrigin = "author";
     }
 
     options.wantReturnValue = true;
@@ -777,6 +803,9 @@ const WINDOW_ID_CURRENT = -2;
  */
 class WindowBase {
   constructor(extension, window, id) {
+    if (!extension.canAccessWindow(window)) {
+      throw new ExtensionError("extension cannot access window");
+    }
     this.extension = extension;
     this.window = window;
     this.id = id;
@@ -788,7 +817,7 @@ class WindowBase {
    *        @readonly
    */
   get xulWindow() {
-    return this.window.document.docShell.treeOwner
+    return this.window.docShell.treeOwner
                .QueryInterface(Ci.nsIInterfaceRequestor)
                .getInterface(Ci.nsIXULWindow);
   }
@@ -1356,10 +1385,7 @@ class WindowTrackerBase extends EventEmitter {
     // fires for browser windows when they're in that in-between state, and just
     // before we register our own "domwindowcreated" listener.
 
-    let e = Services.wm.getEnumerator("");
-    while (e.hasMoreElements()) {
-      let window = e.getNext();
-
+    for (let window of Services.wm.getEnumerator("")) {
       let ok = includeIncomplete;
       if (window.document.readyState === "complete") {
         ok = this.isBrowserWindow(window);
@@ -1379,6 +1405,31 @@ class WindowTrackerBase extends EventEmitter {
    */
   get topWindow() {
     return Services.wm.getMostRecentWindow("navigator:browser");
+  }
+
+  /**
+   * @property {DOMWindow|null} topWindow
+   *        The currently active, or topmost, browser window that is not
+   *        private browsing, or null if no browser window is currently open.
+   *        @readonly
+   */
+  get topNonPBWindow() {
+    return Services.wm.getMostRecentNonPBWindow("navigator:browser");
+  }
+
+  /**
+   * Returns the top window accessible by the extension.
+   *
+   * @param {BaseContext} context
+   *        The extension context for which to return the current window.
+   *
+   * @returns {DOMWindow|null}
+   */
+  getTopWindow(context) {
+    if (context && !context.privateBrowsingAllowed) {
+      return this.topNonPBWindow;
+    }
+    return this.topWindow;
   }
 
   /**
@@ -1404,7 +1455,7 @@ class WindowTrackerBase extends EventEmitter {
    * @returns {DOMWindow|null}
    */
   getCurrentWindow(context) {
-    return (context && context.currentWindow) || this.topWindow;
+    return (context && context.currentWindow) || this.getTopWindow(context);
   }
 
   /**
@@ -1431,9 +1482,11 @@ class WindowTrackerBase extends EventEmitter {
     let window = Services.wm.getOuterWindowWithId(id);
     if (window && !window.closed && (window.document.readyState !== "complete"
         || this.isBrowserWindow(window))) {
-      // Tolerate incomplete windows because isBrowserWindow is only reliable
-      // once the window is fully loaded.
-      return window;
+      if (!context || context.canAccessWindow(window)) {
+        // Tolerate incomplete windows because isBrowserWindow is only reliable
+        // once the window is fully loaded.
+        return window;
+      }
     }
 
     if (strict) {
@@ -1810,11 +1863,27 @@ class TabManagerBase {
    * @param {NativeTab} nativeTab
    *        The tab for which to return a wrapper.
    *
-   * @returns {TabBase}
+   * @returns {TabBase|undefined}
    *        The wrapper for this tab.
    */
   getWrapper(nativeTab) {
-    return this._tabs.get(nativeTab);
+    if (this.canAccessTab(nativeTab)) {
+      return this._tabs.get(nativeTab);
+    }
+  }
+
+  /**
+   * Determines access using extension context.
+   *
+   * @param {NativeTab} nativeTab
+   *        The tab to check access on.
+   * @returns {boolean}
+   *        True if the extension has permissions for this tab.
+   * @protected
+   * @abstract
+   */
+  canAccessTab(nativeTab) {
+    throw new Error("Not implemented");
   }
 
   /**
@@ -1824,15 +1893,15 @@ class TabManagerBase {
    *
    * @param {NativeTab} nativeTab
    *        The native tab to convert.
-   * @param {NativeTab} [fallbackTab]
-   *        A tab to retrieve geometry data from if the lazy geometry data for
-   *        this tab hasn't been initialized yet.
+   * @param {Object} [fallbackTabSize]
+   *        A geometry data if the lazy geometry data for this tab hasn't been
+   *        initialized yet.
    *
    * @returns {Object}
    */
-  convert(nativeTab, fallbackTab = null) {
+  convert(nativeTab, fallbackTabSize = null) {
     return this.getWrapper(nativeTab)
-               .convert(fallbackTab && this.getWrapper(fallbackTab));
+               .convert(fallbackTabSize);
   }
 
   // The JSDoc validator does not support @returns tags in abstract functions or
@@ -1951,11 +2020,13 @@ class WindowManagerBase {
    * @param {DOMWindow} window
    *        The browser window for which to return a wrapper.
    *
-   * @returns {WindowBase}
+   * @returns {WindowBase|undefined}
    *        The wrapper for this tab.
    */
   getWrapper(window) {
-    return this._windows.get(window);
+    if (this.extension.canAccessWindow(window)) {
+      return this._windows.get(window);
+    }
   }
 
   // The JSDoc validator does not support @returns tags in abstract functions or
@@ -1989,11 +2060,14 @@ class WindowManagerBase {
           return;
         }
         if (lastFocusedWindow === true) {
-          yield windowManager.getWrapper(global.windowTracker.topWindow);
+          let window = global.windowTracker.getTopWindow(context);
+          if (window) {
+            yield windowManager.getWrapper(window);
+          }
           return;
         }
       }
-      yield* windowManager.getAll();
+      yield* windowManager.getAll(context);
     }
     for (let windowWrapper of candidates(this)) {
       if (!queryInfo || windowWrapper.matches(queryInfo, context)) {
@@ -2047,4 +2121,39 @@ class WindowManagerBase {
   /* eslint-enable valid-jsdoc */
 }
 
-Object.assign(global, {TabTrackerBase, TabManagerBase, TabBase, WindowTrackerBase, WindowManagerBase, WindowBase});
+function getUserContextIdForCookieStoreId(extension, cookieStoreId, isPrivateBrowsing) {
+  if (!extension.hasPermission("cookies")) {
+    throw new ExtensionError(`No permission for cookieStoreId: ${cookieStoreId}`);
+  }
+
+  if (!isValidCookieStoreId(cookieStoreId)) {
+    throw new ExtensionError(`Illegal cookieStoreId: ${cookieStoreId}`);
+  }
+
+  if (isPrivateBrowsing && !isPrivateCookieStoreId(cookieStoreId)) {
+    throw new ExtensionError(`Illegal to set non-private cookieStoreId in a private window`);
+  }
+
+  if (!isPrivateBrowsing && isPrivateCookieStoreId(cookieStoreId)) {
+    throw new ExtensionError(`Illegal to set private cookieStoreId in a non-private window`);
+  }
+
+  if (isContainerCookieStoreId(cookieStoreId)) {
+    if (PrivateBrowsingUtils.permanentPrivateBrowsing) {
+      // Container tabs are not supported in perma-private browsing mode - bug 1320757
+      throw new ExtensionError(`Contextual identities are unavailable in permanent private browsing mode`);
+    }
+    if (!containersEnabled) {
+      throw new ExtensionError(`Contextual identities are currently disabled`);
+    }
+    let userContextId = getContainerForCookieStoreId(cookieStoreId);
+    if (!userContextId) {
+      throw new ExtensionError(`No cookie store exists with ID ${cookieStoreId}`);
+    }
+    return userContextId;
+  }
+
+  return Services.scriptSecurityManager.DEFAULT_USER_CONTEXT_ID;
+}
+
+Object.assign(global, {TabTrackerBase, TabManagerBase, TabBase, WindowTrackerBase, WindowManagerBase, WindowBase, getUserContextIdForCookieStoreId});

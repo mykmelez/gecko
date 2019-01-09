@@ -22,6 +22,7 @@ config = {
 
     "vcs_share_base": "/builds/hg-shared",
     "version_path": "browser/config/version.txt",
+    "status_path": ".l10n_bumper_status",
 
     "bump_configs": [{
         "path": "mobile/locales/l10n-changesets.json",
@@ -43,13 +44,14 @@ config = {
             "ja-JP-mac": [
                 "linux", "linux-devedition", "linux64", "linux64-devedition",
                 "win32", "win32-devedition", "win64", "win64-devedition",
+                "win64-aarch64-msvc", "win64-aarch64-msvc-devedition",
             ],
         },
         "platform_configs": [{
             "platforms": [
                 "linux", "linux-devedition", "linux64", "linux64-devedition",
                 "macosx64", "macosx64-devedition", "win32", "win32-devedition",
-                "win64", "win64-devedition",
+                "win64", "win64-devedition", "win64-aarch64-msvc", "win64-aarch64-msvc-devedition",
             ],
             "path": "browser/locales/all-locales",
         }],

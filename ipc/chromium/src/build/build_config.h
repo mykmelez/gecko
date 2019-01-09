@@ -42,14 +42,15 @@
 
 // For access to standard BSD features, use OS_BSD instead of a
 // more specific macro.
-#if defined(OS_DRAGONFLY) || defined(OS_FREEBSD)	\
-  || defined(OS_NETBSD) || defined(OS_OPENBSD)
+#if defined(OS_DRAGONFLY) || defined(OS_FREEBSD) || defined(OS_NETBSD) || \
+    defined(OS_OPENBSD)
 #define OS_BSD 1
 #endif
 
 // For access to standard POSIX features, use OS_POSIX instead of a more
 // specific macro.
-#if defined(OS_MACOSX) || defined(OS_LINUX) || defined(OS_BSD) || defined(OS_SOLARIS)
+#if defined(OS_MACOSX) || defined(OS_LINUX) || defined(OS_BSD) || \
+    defined(OS_SOLARIS)
 #define OS_POSIX 1
 #endif
 
@@ -117,7 +118,7 @@
 #elif defined(__alpha__)
 #define ARCH_CPU_ALPHA 1
 #define ARCH_CPU_64_BITS 1
-#elif defined(__aarch64__)
+#elif defined(__aarch64__) || defined(_M_ARM64)
 #define ARCH_CPU_ARM_FAMILY 1
 #define ARCH_CPU_ARM64 1
 #define ARCH_CPU_64_BITS 1

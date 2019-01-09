@@ -2,6 +2,13 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/
 
+# ALL CHANGES TO THIS FILE MUST HAVE REVIEW FROM A MARIONETTE PEER!
+#
+# The Marionette Python client is used out-of-tree with various builds of
+# Firefox. Removing a preference from this file will cause regressions,
+# so please be careful and get review from a Testing :: Marionette peer
+# before you make any changes to this file.
+
 from __future__ import absolute_import
 
 import os
@@ -19,14 +26,6 @@ from mozrunner import Runner, FennecEmulatorRunner
 from six import reraise
 
 from . import errors
-
-
-# ALL CHANGES TO THIS FILE MUST HAVE REVIEW FROM A MARIONETTE PEER!
-#
-# The Marionette Python client is used out-of-tree with release
-# channel builds of Firefox.  Removing a preference from this file
-# will cause regressions, so please be careful and get review from
-# a Testing :: Marionette peer before you make any changes to this file.
 
 
 class GeckoInstance(object):
@@ -269,7 +268,7 @@ class GeckoInstance(object):
             args["preferences"].update(self.prefs)
 
         if self.verbose:
-            level = "TRACE" if self.verbose >= 2 else "DEBUG"
+            level = "Trace" if self.verbose >= 2 else "Debug"
             args["preferences"]["marionette.log.level"] = level
             args["preferences"]["marionette.logging"] = level
 
@@ -376,8 +375,9 @@ class GeckoInstance(object):
 
 class FennecInstance(GeckoInstance):
     fennec_prefs = {
-        # Enable output of dump()
+        # Enable output for dump() and chrome console API
         "browser.dom.window.dump.enabled": True,
+        "devtools.console.stdout.chrome": True,
 
         # Disable Android snippets
         "browser.snippets.enabled": False,
@@ -405,8 +405,11 @@ class FennecInstance(GeckoInstance):
     def __init__(self, emulator_binary=None, avd_home=None, avd=None,
                  adb_path=None, serial=None, connect_to_running_emulator=False,
                  package_name=None, *args, **kwargs):
+        required_prefs = deepcopy(FennecInstance.fennec_prefs)
+        required_prefs.update(kwargs.get("prefs", {}))
+
         super(FennecInstance, self).__init__(*args, **kwargs)
-        self.required_prefs.update(FennecInstance.fennec_prefs)
+        self.required_prefs.update(required_prefs)
 
         self.runner_class = FennecEmulatorRunner
         # runner args
@@ -443,18 +446,8 @@ class FennecInstance(GeckoInstance):
             exc, val, tb = sys.exc_info()
             message = "Error possibly due to runner or device args: {}"
             reraise(exc, message.format(e.message), tb)
-        # gecko_log comes from logcat when running with device/emulator
-        logcat_args = {
-            "filterspec": "Gecko",
-            "serial": self.runner.device.app_ctx.device_serial
-        }
-        if self.gecko_log == "-":
-            logcat_args["stream"] = sys.stdout
-        else:
-            logcat_args["logfile"] = self.gecko_log
-        self.runner.device.start_logcat(**logcat_args)
 
-        # forward marionette port (localhost:2828)
+        # forward marionette port
         self.runner.device.device.forward(
             local="tcp:{}".format(self.marionette_port),
             remote="tcp:{}".format(self.marionette_port))
@@ -503,11 +496,25 @@ class FennecInstance(GeckoInstance):
 
 class DesktopInstance(GeckoInstance):
     desktop_prefs = {
-        # Disable application updates
-        "app.update.enabled": False,
+        # Disable Firefox old build background check
+        "app.update.checkInstallTime": False,
 
-        # Enable output of dump()
+        # Disable automatically upgrading Firefox
+        #
+        # Note: Possible update tests could reset or flip the value to allow
+        # updates to be downloaded and applied.
+        "app.update.disabledForTesting": True,
+        # !!! For backward compatibility up to Firefox 64. Only remove
+        # when this Firefox version is no longer supported by the client !!!
+        "app.update.auto": False,
+
+        # Don't show the content blocking introduction panel
+        # We use a larger number than the default 22 to have some buffer
+        "browser.contentblocking.introCount": 99,
+
+        # Enable output for dump() and chrome console API
         "browser.dom.window.dump.enabled": True,
+        "devtools.console.stdout.chrome": True,
 
         # Indicate that the download panel has been shown once so that whichever
         # download test runs first doesn"t show the popup inconsistently
@@ -515,6 +522,9 @@ class DesktopInstance(GeckoInstance):
 
         # Do not show the EULA notification which can interfer with tests
         "browser.EULA.override": True,
+
+        # Always display a blank page
+        "browser.newtabpage.enabled": False,
 
         # Background thumbnails in particular cause grief, and disabling thumbnails
         # in general can"t hurt - we re-enable them when tests need them
@@ -565,14 +575,20 @@ class DesktopInstance(GeckoInstance):
         # tests that don't expect it to be there.
         "browser.urlbar.userMadeSearchSuggestionsChoice": True,
 
+        # Don't warn when exiting the browser
+        "browser.warnOnQuit": False,
+
         # Disable first-run welcome page
         "startup.homepage_welcome_url": "about:blank",
         "startup.homepage_welcome_url.additional": "",
     }
 
     def __init__(self, *args, **kwargs):
+        required_prefs = deepcopy(DesktopInstance.desktop_prefs)
+        required_prefs.update(kwargs.get("prefs", {}))
+
         super(DesktopInstance, self).__init__(*args, **kwargs)
-        self.required_prefs.update(DesktopInstance.desktop_prefs)
+        self.required_prefs.update(required_prefs)
 
 
 class NullOutput(object):

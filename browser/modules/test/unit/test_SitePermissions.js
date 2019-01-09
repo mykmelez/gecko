@@ -12,7 +12,7 @@ const MIDI_ENABLED = Services.prefs.getBoolPref("dom.webmidi.enabled");
 add_task(async function testPermissionsListing() {
   let expectedPermissions = ["autoplay-media", "camera", "cookie", "desktop-notification", "focus-tab-by-prompt",
      "geo", "image", "install", "microphone", "plugin:flash", "popup", "screen", "shortcuts",
-     "persistent-storage"];
+     "persistent-storage", "storage-access"];
   if (RESIST_FINGERPRINTING_ENABLED) {
     // Canvas permission should be hidden unless privacy.resistFingerprinting
     // is true.
@@ -38,7 +38,7 @@ add_task(async function testGetAllByURI() {
 
   SitePermissions.set(uri, "camera", SitePermissions.ALLOW);
   Assert.deepEqual(SitePermissions.getAllByURI(uri), [
-      { id: "camera", state: SitePermissions.ALLOW, scope: SitePermissions.SCOPE_PERSISTENT }
+      { id: "camera", state: SitePermissions.ALLOW, scope: SitePermissions.SCOPE_PERSISTENT },
   ]);
 
   SitePermissions.set(uri, "microphone", SitePermissions.ALLOW, SitePermissions.SCOPE_SESSION);
@@ -47,13 +47,13 @@ add_task(async function testGetAllByURI() {
   Assert.deepEqual(SitePermissions.getAllByURI(uri), [
       { id: "camera", state: SitePermissions.ALLOW, scope: SitePermissions.SCOPE_PERSISTENT },
       { id: "microphone", state: SitePermissions.ALLOW, scope: SitePermissions.SCOPE_SESSION },
-      { id: "desktop-notification", state: SitePermissions.BLOCK, scope: SitePermissions.SCOPE_PERSISTENT }
+      { id: "desktop-notification", state: SitePermissions.BLOCK, scope: SitePermissions.SCOPE_PERSISTENT },
   ]);
 
   SitePermissions.remove(uri, "microphone");
   Assert.deepEqual(SitePermissions.getAllByURI(uri), [
       { id: "camera", state: SitePermissions.ALLOW, scope: SitePermissions.SCOPE_PERSISTENT },
-      { id: "desktop-notification", state: SitePermissions.BLOCK, scope: SitePermissions.SCOPE_PERSISTENT }
+      { id: "desktop-notification", state: SitePermissions.BLOCK, scope: SitePermissions.SCOPE_PERSISTENT },
   ]);
 
   SitePermissions.remove(uri, "camera");
@@ -119,7 +119,8 @@ add_task(async function testExactHostMatch() {
     exactHostMatched.push("midi");
     exactHostMatched.push("midi-sysex");
   }
-  let nonExactHostMatched = ["image", "cookie", "plugin:flash", "popup", "install", "shortcuts"];
+  let nonExactHostMatched = ["image", "cookie", "plugin:flash", "popup", "install", "shortcuts",
+                             "storage-access"];
 
   let permissions = SitePermissions.listPermissions();
   for (let permission of permissions) {

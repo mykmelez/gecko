@@ -20,23 +20,19 @@ namespace layers {
 using namespace gfx;
 
 ContainerLayerMLGPU::ContainerLayerMLGPU(LayerManagerMLGPU* aManager)
- : ContainerLayer(aManager, nullptr),
-   LayerMLGPU(aManager),
-   mInvalidateEntireSurface(false),
-   mSurfaceCopyNeeded(false)
-{
-}
+    : ContainerLayer(aManager, nullptr),
+      LayerMLGPU(aManager),
+      mInvalidateEntireSurface(false),
+      mSurfaceCopyNeeded(false),
+      mView(nullptr) {}
 
-ContainerLayerMLGPU::~ContainerLayerMLGPU()
-{
+ContainerLayerMLGPU::~ContainerLayerMLGPU() {
   while (mFirstChild) {
     RemoveChild(mFirstChild);
   }
 }
 
-bool
-ContainerLayerMLGPU::OnPrepareToRender(FrameBuilder* aBuilder)
-{
+bool ContainerLayerMLGPU::OnPrepareToRender(FrameBuilder* aBuilder) {
   mView = nullptr;
 
   if (!UseIntermediateSurface()) {
@@ -46,22 +42,6 @@ ContainerLayerMLGPU::OnPrepareToRender(FrameBuilder* aBuilder)
     return true;
   }
 
-  if ((!mRenderTarget || mChildrenChanged) &&
-      gfxPrefs::AdvancedLayersEnableContainerResizing())
-  {
-    // Try to compute a more accurate visible region.
-    AL_LOG("Computing new surface size for container %p:\n", GetLayer());
-
-    Maybe<IntRect> bounds = ComputeIntermediateSurfaceBounds();
-    if (bounds) {
-      LayerIntRegion region = std::move(GetShadowVisibleRegion());
-      region.AndWith(LayerIntRect::FromUnknownRect(bounds.value()));
-      AL_LOG("  computed bounds: %s\n", Stringify(bounds.value()).c_str());
-      AL_LOG("  new visible: %s\n", Stringify(region).c_str());
-
-      SetShadowVisibleRegion(std::move(region));
-    }
-  }
   mChildrenChanged = false;
 
   mTargetOffset = GetIntermediateSurfaceRect().TopLeft().ToUnknownPoint();
@@ -77,18 +57,14 @@ ContainerLayerMLGPU::OnPrepareToRender(FrameBuilder* aBuilder)
   // do much more complicated invalidation.
   bool surfaceCopyNeeded = false;
   DefaultComputeSupportsComponentAlphaChildren(&surfaceCopyNeeded);
-  if (surfaceCopyNeeded != mSurfaceCopyNeeded ||
-      surfaceCopyNeeded)
-  {
+  if (surfaceCopyNeeded != mSurfaceCopyNeeded || surfaceCopyNeeded) {
     mInvalidateEntireSurface = true;
   }
   mSurfaceCopyNeeded = surfaceCopyNeeded;
 
   gfx::IntRect viewport(gfx::IntPoint(0, 0), mTargetSize);
-  if (!mRenderTarget ||
-      !gfxPrefs::AdvancedLayersUseInvalidation() ||
-      mInvalidateEntireSurface)
-  {
+  if (!mRenderTarget || !gfxPrefs::AdvancedLayersUseInvalidation() ||
+      mInvalidateEntireSurface) {
     // Fine-grained invalidation is disabled, invalidate everything.
     mInvalidRect = viewport;
   } else {
@@ -101,56 +77,64 @@ ContainerLayerMLGPU::OnPrepareToRender(FrameBuilder* aBuilder)
   return true;
 }
 
-static IntRect
-GetTransformedBounds(Layer* aLayer)
-{
+static IntRect GetTransformedBounds(Layer* aLayer) {
   IntRect bounds = aLayer->GetLocalVisibleRegion().GetBounds().ToUnknownRect();
   if (bounds.IsEmpty()) {
     return bounds;
   }
 
   const Matrix4x4& transform = aLayer->GetEffectiveTransform();
-  Rect rect = transform.TransformAndClipBounds(Rect(bounds), Rect::MaxIntRect());
+  Rect rect =
+      transform.TransformAndClipBounds(Rect(bounds), Rect::MaxIntRect());
   rect.RoundOut();
   rect.ToIntRect(&bounds);
   return bounds;
 }
 
-static Maybe<IntRect>
-FindVisibleBounds(Layer* aLayer, const Maybe<RenderTargetIntRect>& aClip)
-{
+/* static */ Maybe<IntRect> ContainerLayerMLGPU::FindVisibleBounds(
+    Layer* aLayer, const Maybe<RenderTargetIntRect>& aClip) {
   AL_LOG("  visiting child %p\n", aLayer);
   AL_LOG_IF(aClip, "  parent clip: %s\n", Stringify(aClip.value()).c_str());
 
   ContainerLayer* container = aLayer->AsContainerLayer();
-  if (container && !container->UseIntermediateSurface()) {
-    Maybe<IntRect> accumulated = Some(IntRect());
+  if (container) {
+    if (container->UseIntermediateSurface()) {
+      container->AsHostLayer()
+          ->AsLayerMLGPU()
+          ->AsContainerLayerMLGPU()
+          ->ComputeIntermediateSurfaceBounds();
+    } else {
+      Maybe<IntRect> accumulated = Some(IntRect());
 
-    // Traverse children.
-    for (Layer* child = container->GetFirstChild(); child; child = child->GetNextSibling()) {
-      Maybe<RenderTargetIntRect> clip = aClip;
-      if (const Maybe<ParentLayerIntRect>& childClip = child->AsHostLayer()->GetShadowClipRect()) {
-        RenderTargetIntRect rtChildClip =
-          TransformBy(ViewAs<ParentLayerToRenderTargetMatrix4x4>(
-                        aLayer->GetEffectiveTransform(),
-                        PixelCastJustification::RenderTargetIsParentLayerForRoot),
-                      childClip.value());
-        clip = IntersectMaybeRects(clip, Some(rtChildClip));
-        AL_LOG("    target clip: %s\n", Stringify(rtChildClip).c_str());
-        AL_LOG_IF(clip, "    full clip: %s\n", Stringify(clip.value()).c_str());
-      }
+      // Traverse children.
+      for (Layer* child = container->GetFirstChild(); child;
+           child = child->GetNextSibling()) {
+        Maybe<RenderTargetIntRect> clip = aClip;
+        if (const Maybe<ParentLayerIntRect>& childClip =
+                child->AsHostLayer()->GetShadowClipRect()) {
+          RenderTargetIntRect rtChildClip = TransformBy(
+              ViewAs<ParentLayerToRenderTargetMatrix4x4>(
+                  aLayer->GetEffectiveTransform(),
+                  PixelCastJustification::RenderTargetIsParentLayerForRoot),
+              childClip.value());
+          clip = IntersectMaybeRects(clip, Some(rtChildClip));
+          AL_LOG("    target clip: %s\n", Stringify(rtChildClip).c_str());
+          AL_LOG_IF(clip, "    full clip: %s\n",
+                    Stringify(clip.value()).c_str());
+        }
 
-      Maybe<IntRect> childBounds = FindVisibleBounds(child, clip);
-      if (!childBounds) {
-        return Nothing();
-      }
+        Maybe<IntRect> childBounds = FindVisibleBounds(child, clip);
+        if (!childBounds) {
+          return Nothing();
+        }
 
-      accumulated = accumulated->SafeUnion(childBounds.value());
-      if (!accumulated) {
-        return Nothing();
+        accumulated = accumulated->SafeUnion(childBounds.value());
+        if (!accumulated) {
+          return Nothing();
+        }
       }
+      return accumulated;
     }
-    return accumulated;
   }
 
   IntRect bounds = GetTransformedBounds(aLayer);
@@ -163,52 +147,47 @@ FindVisibleBounds(Layer* aLayer, const Maybe<RenderTargetIntRect>& aClip)
   return Some(bounds);
 }
 
-Maybe<IntRect>
-ContainerLayerMLGPU::ComputeIntermediateSurfaceBounds()
-{
+void ContainerLayerMLGPU::ComputeIntermediateSurfaceBounds() {
   Maybe<IntRect> bounds = Some(IntRect());
   for (Layer* child = GetFirstChild(); child; child = child->GetNextSibling()) {
-    Maybe<RenderTargetIntRect> clip =
-       ViewAs<RenderTargetPixel>(child->AsHostLayer()->GetShadowClipRect(),
-                                 PixelCastJustification::RenderTargetIsParentLayerForRoot);
+    Maybe<RenderTargetIntRect> clip = ViewAs<RenderTargetPixel>(
+        child->AsHostLayer()->GetShadowClipRect(),
+        PixelCastJustification::RenderTargetIsParentLayerForRoot);
     Maybe<IntRect> childBounds = FindVisibleBounds(child, clip);
     if (!childBounds) {
-      return Nothing();
+      return;
     }
 
     bounds = bounds->SafeUnion(childBounds.value());
     if (!bounds) {
-      return Nothing();
+      return;
     }
   }
-  return bounds;
+
+  SetShadowVisibleRegion(LayerIntRect::FromUnknownRect(bounds.value()));
 }
 
-void
-ContainerLayerMLGPU::OnLayerManagerChange(LayerManagerMLGPU* aManager)
-{
+void ContainerLayerMLGPU::OnLayerManagerChange(LayerManagerMLGPU* aManager) {
   ClearCachedResources();
 }
 
-RefPtr<MLGRenderTarget>
-ContainerLayerMLGPU::UpdateRenderTarget(MLGDevice* aDevice, MLGRenderTargetFlags aFlags)
-{
+RefPtr<MLGRenderTarget> ContainerLayerMLGPU::UpdateRenderTarget(
+    MLGDevice* aDevice, MLGRenderTargetFlags aFlags) {
   if (mRenderTarget) {
     return mRenderTarget;
   }
 
   mRenderTarget = aDevice->CreateRenderTarget(mTargetSize, aFlags);
   if (!mRenderTarget) {
-    gfxWarning() << "Failed to create an intermediate render target for ContainerLayer";
+    gfxWarning()
+        << "Failed to create an intermediate render target for ContainerLayer";
     return nullptr;
   }
 
   return mRenderTarget;
 }
 
-void
-ContainerLayerMLGPU::SetInvalidCompositeRect(const gfx::IntRect* aRect)
-{
+void ContainerLayerMLGPU::SetInvalidCompositeRect(const gfx::IntRect* aRect) {
   // For simplicity we only track the bounds of the invalid area, since regions
   // are expensive.
   //
@@ -227,15 +206,9 @@ ContainerLayerMLGPU::SetInvalidCompositeRect(const gfx::IntRect* aRect)
   }
 }
 
-void
-ContainerLayerMLGPU::ClearCachedResources()
-{
-  mRenderTarget = nullptr;
-}
+void ContainerLayerMLGPU::ClearCachedResources() { mRenderTarget = nullptr; }
 
-bool
-ContainerLayerMLGPU::IsContentOpaque()
-{
+bool ContainerLayerMLGPU::IsContentOpaque() {
   if (GetMixBlendMode() != gfx::CompositionOp::OP_OVER) {
     // We need to read from what's underneath us, so we consider our content to
     // be not opaque.
@@ -244,9 +217,7 @@ ContainerLayerMLGPU::IsContentOpaque()
   return LayerMLGPU::IsContentOpaque();
 }
 
-const LayerIntRegion&
-ContainerLayerMLGPU::GetShadowVisibleRegion()
-{
+const LayerIntRegion& ContainerLayerMLGPU::GetShadowVisibleRegion() {
   if (!UseIntermediateSurface()) {
     RecomputeShadowVisibleRegionFromChildren();
   }
@@ -254,9 +225,7 @@ ContainerLayerMLGPU::GetShadowVisibleRegion()
   return mShadowVisibleRegion;
 }
 
-const LayerIntRegion&
-RefLayerMLGPU::GetShadowVisibleRegion()
-{
+const LayerIntRegion& RefLayerMLGPU::GetShadowVisibleRegion() {
   if (!UseIntermediateSurface()) {
     RecomputeShadowVisibleRegionFromChildren();
   }
@@ -264,5 +233,5 @@ RefLayerMLGPU::GetShadowVisibleRegion()
   return mShadowVisibleRegion;
 }
 
-} // namespace layers
-} // namespace mozilla
+}  // namespace layers
+}  // namespace mozilla

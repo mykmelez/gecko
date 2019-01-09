@@ -97,8 +97,9 @@ PlacesItem.prototype = {
     let clear = await CryptoWrapper.prototype.decrypt.call(this, keyBundle);
 
     // Convert the abstract places item to the actual object type
-    if (!this.deleted)
+    if (!this.deleted) {
       this.__proto__ = this.getTypeObject(this.type).prototype;
+    }
 
     return clear;
   },
@@ -321,34 +322,6 @@ BaseBookmarksEngine.prototype = {
   syncPriority: 4,
   allowSkippedRecord: false,
 
-  _migratedSyncMetadata: false,
-  async _migrateSyncMetadata({ migrateLastSync = true } = {}) {
-    if (this._migratedSyncMetadata) {
-      return;
-    }
-    let shouldWipeRemote = await PlacesSyncUtils.bookmarks.shouldWipeRemote();
-    if (!shouldWipeRemote) {
-      // Migrate the bookmarks sync ID and last sync time from prefs, to avoid
-      // triggering a full sync on upgrade. This can be removed in bug 1443021.
-      let existingSyncID = await super.getSyncID();
-      if (existingSyncID) {
-        this._log.debug("Migrating existing sync ID ${existingSyncID} from " +
-                        "prefs", { existingSyncID });
-        await this._ensureCurrentSyncID(existingSyncID);
-      }
-      if (migrateLastSync) {
-        let existingLastSync = await super.getLastSync();
-        if (existingLastSync) {
-          this._log.debug("Migrating existing last sync time " +
-                          "${existingLastSync} from prefs",
-                          { existingLastSync });
-          await PlacesSyncUtils.bookmarks.setLastSync(existingLastSync);
-        }
-      }
-    }
-    this._migratedSyncMetadata = true;
-  },
-
   // Exposed so that the buffered engine can override to store the sync ID in
   // the mirror.
   _ensureCurrentSyncID(newSyncID) {
@@ -401,8 +374,10 @@ BaseBookmarksEngine.prototype = {
           "bookmarks");
       }
     } catch (ex) {
-      if (Async.isShutdownException(ex) || ex.status > 0) {
-        // Don't run maintenance on shutdown or HTTP errors.
+      if (Async.isShutdownException(ex) || ex.status > 0 ||
+          ex.name == "MergeConflictError") {
+        // Don't run maintenance on shutdown or HTTP errors, or if we aborted
+        // the sync because the user changed their bookmarks during merging.
         throw ex;
       }
       // Run Places maintenance periodically to try to recover from corruption
@@ -478,7 +453,7 @@ BaseBookmarksEngine.prototype = {
 
   getValidator() {
     return new BookmarkValidator();
-  }
+  },
 };
 
 /**
@@ -533,16 +508,7 @@ BookmarksEngine.prototype = {
       switch (placeType) {
         case PlacesUtils.TYPE_X_MOZ_PLACE:
           // Bookmark
-          let query = null;
-          if (node.annos && node.uri.startsWith("place:")) {
-            query = node.annos.find(({name}) =>
-              name === PlacesSyncUtils.bookmarks.SMART_BOOKMARKS_ANNO);
-          }
-          if (query && query.value) {
-            key = "q" + query.value;
-          } else {
-            key = "b" + node.uri + ":" + (node.title || "");
-          }
+          key = "b" + node.uri + ":" + (node.title || "");
           break;
         case PlacesUtils.TYPE_X_MOZ_PLACE_CONTAINER:
           // Folder
@@ -558,8 +524,9 @@ BookmarksEngine.prototype = {
       }
 
       let parentName = parent.title || "";
-      if (guidMap[parentName] == null)
+      if (guidMap[parentName] == null) {
         guidMap[parentName] = {};
+      }
 
       // If the entry already exists, remember that there are explicit dupes.
       let entry = {
@@ -579,18 +546,9 @@ BookmarksEngine.prototype = {
   async _mapDupe(item) {
     // Figure out if we have something to key with.
     let key;
-    let altKey;
     switch (item.type) {
       case "query":
-        // Prior to Bug 610501, records didn't carry their Smart Bookmark
-        // anno, so we won't be able to dupe them correctly. This altKey
-        // hack should get them to dupe correctly.
-        if (item.queryId) {
-          key = "q" + item.queryId;
-          altKey = "b" + item.bmkUri + ":" + (item.title || "");
-          break;
-        }
-        // No queryID? Fall through to the regular bookmark case.
+        // Fallthrough, treat the same as a bookmark.
       case "bookmark":
         key = "b" + item.bmkUri + ":" + (item.title || "");
         break;
@@ -626,20 +584,11 @@ BookmarksEngine.prototype = {
       return dupe;
     }
 
-    if (altKey) {
-      dupe = parent[altKey];
-      if (dupe) {
-        this._log.trace("Mapped dupe using altKey " + altKey, dupe);
-        return dupe;
-      }
-    }
-
-    this._log.trace("No dupe found for key " + key + "/" + altKey + ".");
+    this._log.trace("No dupe found for key " + key + ".");
     return undefined;
   },
 
   async _syncStartup() {
-    await this._migrateSyncMetadata();
     await SyncEngine.prototype._syncStartup.call(this);
 
     try {
@@ -816,13 +765,6 @@ BufferedBookmarksEngine.prototype = {
   // Needed to ensure we don't miss items when resuming a sync that failed or
   // aborted early.
   _defaultSort: "oldest",
-
-  async _syncStartup() {
-    await this._migrateSyncMetadata({
-      migrateLastSync: false,
-    });
-    await super._syncStartup();
-  },
 
   async _ensureCurrentSyncID(newSyncID) {
     await super._ensureCurrentSyncID(newSyncID);
@@ -1015,20 +957,23 @@ BaseBookmarksStore.prototype = {
 
   async _calculateIndex(record) {
     // Ensure folders have a very high sort index so they're not synced last.
-    if (record.type == "folder")
+    if (record.type == "folder") {
       return FOLDER_SORTINDEX;
+    }
 
     // For anything directly under the toolbar, give it a boost of more than an
     // unvisited bookmark
     let index = 0;
-    if (record.parentid == "toolbar")
+    if (record.parentid == "toolbar") {
       index += 150;
+    }
 
     // Add in the bookmark's frecency if we have something.
     if (record.bmkUri != null) {
       let frecency = await PlacesSyncUtils.history.fetchURLFrecency(record.bmkUri);
-      if (frecency != -1)
+      if (frecency != -1) {
         index += frecency;
+      }
     }
 
     return index;
@@ -1038,7 +983,7 @@ BaseBookmarksStore.prototype = {
     // Save a backup before clearing out all bookmarks.
     await PlacesBackups.create(null, true);
     await PlacesSyncUtils.bookmarks.wipe();
-  }
+  },
 };
 
 /**
@@ -1094,6 +1039,19 @@ BookmarksStore.prototype = {
           `Record ${record.id} has invalid parentid: ${parentGUID}`);
     }
     this._log.debug("Remote parent is " + parentGUID);
+
+    if (record.type == "livemark") {
+      // Places no longer supports livemarks, so we replace new and updated
+      // livemarks with tombstones, and insert new change records for the engine
+      // to upload.
+      let livemarkInfo = record.toSyncBookmark();
+      let newChanges = await PlacesSyncUtils.bookmarks.removeLivemark(
+        livemarkInfo);
+      if (newChanges) {
+        this.engine._modified.insert(newChanges);
+        return;
+      }
+    }
 
     // Do the normal processing of incoming records
     await Store.prototype.applyIncoming.call(this, record);
@@ -1188,11 +1146,6 @@ BookmarksStore.prototype = {
     this._itemsToDelete.clear();
   },
 
-  async GUIDForId(id) {
-    let guid = await PlacesUtils.promiseItemGuid(id);
-    return PlacesSyncUtils.bookmarks.guidToRecordId(guid);
-  },
-
   async idForGUID(guid) {
     // guid might be a String object rather than a string.
     guid = PlacesSyncUtils.bookmarks.recordIdToGuid(guid.toString());
@@ -1207,7 +1160,7 @@ BookmarksStore.prototype = {
   async wipe() {
     this.clearPendingDeletions();
     await super.wipe();
-  }
+  },
 };
 
 /**
@@ -1313,6 +1266,8 @@ BookmarksTracker.prototype = {
 
   onStart() {
     PlacesUtils.bookmarks.addObserver(this, true);
+    this._placesListener = new PlacesWeakCallbackWrapper(this.handlePlacesEvents.bind(this));
+    PlacesUtils.observers.addListener(["bookmark-added"], this._placesListener);
     Svc.Obs.add("bookmarks-restore-begin", this);
     Svc.Obs.add("bookmarks-restore-success", this);
     Svc.Obs.add("bookmarks-restore-failed", this);
@@ -1320,6 +1275,7 @@ BookmarksTracker.prototype = {
 
   onStop() {
     PlacesUtils.bookmarks.removeObserver(this);
+    PlacesUtils.observers.removeListener(["bookmark-added"], this._placesListener);
     Svc.Obs.remove("bookmarks-restore-begin", this);
     Svc.Obs.remove("bookmarks-restore-success", this);
     Svc.Obs.remove("bookmarks-restore-failed", this);
@@ -1374,7 +1330,7 @@ BookmarksTracker.prototype = {
   QueryInterface: ChromeUtils.generateQI([
     Ci.nsINavBookmarkObserver,
     Ci.nsINavBookmarkObserver_MOZILLA_1_9_1_ADDITIONS,
-    Ci.nsISupportsWeakReference
+    Ci.nsISupportsWeakReference,
   ]),
 
   /* Every add/remove/change will trigger a sync for MULTI_DEVICE (except in
@@ -1387,15 +1343,15 @@ BookmarksTracker.prototype = {
     }
   },
 
-  onItemAdded: function BMT_onItemAdded(itemId, folder, index,
-                                        itemType, uri, title, dateAdded,
-                                        guid, parentGuid, source) {
-    if (IGNORED_SOURCES.includes(source)) {
-      return;
-    }
+  handlePlacesEvents(events) {
+    for (let event of events) {
+      if (IGNORED_SOURCES.includes(event.source)) {
+        continue;
+      }
 
-    this._log.trace("onItemAdded: " + itemId);
-    this._upScore();
+      this._log.trace("'bookmark-added': " + event.id);
+      this._upScore();
+    }
   },
 
   onItemRemoved(itemId, parentId, index, type, uri,
@@ -1419,13 +1375,15 @@ BookmarksTracker.prototype = {
       return;
     }
 
-    if (isAnno && (!ANNOS_TO_TRACK.includes(property)))
+    if (isAnno && (!ANNOS_TO_TRACK.includes(property))) {
       // Ignore annotations except for the ones that we sync.
       return;
+    }
 
     // Ignore favicon changes to avoid unnecessary churn.
-    if (property == "favicon")
+    if (property == "favicon") {
       return;
+    }
 
     this._log.trace("onItemChanged: " + itemId +
                     (", " + property + (isAnno ? " (anno)" : "")) +
@@ -1454,7 +1412,7 @@ BookmarksTracker.prototype = {
       this._batchSawScoreIncrement = false;
     }
   },
-  onItemVisited() {}
+  onItemVisited() {},
 };
 
 /**

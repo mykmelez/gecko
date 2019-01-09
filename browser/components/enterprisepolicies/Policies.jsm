@@ -6,9 +6,12 @@
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-XPCOMUtils.defineLazyServiceGetter(this, "gXulStore",
-                                   "@mozilla.org/xul/xulstore;1",
-                                   "nsIXULStore");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+
+XPCOMUtils.defineLazyServiceGetters(this, {
+  gCertDB: ["@mozilla.org/security/x509certdb;1", "nsIX509CertDB"],
+  gXulStore: ["@mozilla.org/xul/xulstore;1", "nsIXULStore"],
+});
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   AddonManager: "resource://gre/modules/AddonManager.jsm",
@@ -18,8 +21,10 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   WebsiteFilter: "resource:///modules/policies/WebsiteFilter.jsm",
 });
 
+XPCOMUtils.defineLazyGlobalGetters(this, ["File", "FileReader"]);
+
 const PREF_LOGLEVEL           = "browser.policies.loglevel";
-const BROWSER_DOCUMENT_URL    = "chrome://browser/content/browser.xul";
+const BROWSER_DOCUMENT_URL    = AppConstants.BROWSER_CHROME_URL;
 
 XPCOMUtils.defineLazyGetter(this, "log", () => {
   let { ConsoleAPI } = ChromeUtils.import("resource://gre/modules/Console.jsm", {});
@@ -61,6 +66,12 @@ var EXPORTED_SYMBOLS = ["Policies"];
  * The callbacks will be bound to their parent policy object.
  */
 var Policies = {
+  "AppUpdateURL": {
+    onBeforeAddons(manager, param) {
+      setDefaultPref("app.update.url", param.href);
+    },
+  },
+
   "Authentication": {
     onBeforeAddons(manager, param) {
       if ("SPNEGO" in param) {
@@ -80,7 +91,7 @@ var Policies = {
           setAndLockPref("network.negotiate-auth.allow-non-fqdn", param.AllowNonFQDN.SPNEGO);
         }
       }
-    }
+    },
   },
 
   "BlockAboutAddons": {
@@ -88,46 +99,108 @@ var Policies = {
       if (param) {
         blockAboutPage(manager, "about:addons", true);
       }
-    }
+    },
   },
 
   "BlockAboutConfig": {
     onBeforeUIStartup(manager, param) {
       if (param) {
-        blockAboutPage(manager, "about:config", true);
+        blockAboutPage(manager, "about:config");
         setAndLockPref("devtools.chrome.enabled", false);
       }
-    }
+    },
   },
 
   "BlockAboutProfiles": {
     onBeforeUIStartup(manager, param) {
       if (param) {
-        blockAboutPage(manager, "about:profiles", true);
+        blockAboutPage(manager, "about:profiles");
       }
-    }
+    },
   },
 
   "BlockAboutSupport": {
     onBeforeUIStartup(manager, param) {
       if (param) {
-        blockAboutPage(manager, "about:support", true);
+        blockAboutPage(manager, "about:support");
       }
-    }
+    },
   },
 
   "Bookmarks": {
     onAllWindowsRestored(manager, param) {
       BookmarksPolicies.processBookmarks(param);
-    }
+    },
   },
 
   "Certificates": {
     onBeforeAddons(manager, param) {
       if ("ImportEnterpriseRoots" in param) {
-        setAndLockPref("security.enterprise_roots.enabled", true);
+        setAndLockPref("security.enterprise_roots.enabled", param.ImportEnterpriseRoots);
       }
-    }
+      if ("Install" in param) {
+        (async () => {
+          let dirs = [];
+          let platform = AppConstants.platform;
+          if (platform == "win") {
+            dirs = [
+              // Ugly, but there is no official way to get %USERNAME\AppData\Roaming\Mozilla.
+              Services.dirsvc.get("XREUSysExt", Ci.nsIFile).parent,
+              // Even more ugly, but there is no official way to get %USERNAME\AppData\Local\Mozilla.
+              Services.dirsvc.get("DefProfLRt", Ci.nsIFile).parent.parent,
+            ];
+          } else if (platform == "macosx" || platform == "linux") {
+            dirs = [
+              // These two keys are named wrong. They return the Mozilla directory.
+              Services.dirsvc.get("XREUserNativeManifests", Ci.nsIFile),
+              Services.dirsvc.get("XRESysNativeManifests", Ci.nsIFile),
+            ];
+          }
+          dirs.unshift(Services.dirsvc.get("XREAppDist", Ci.nsIFile));
+          for (let certfilename of param.Install) {
+            let certfile;
+            try {
+              certfile = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+              certfile.initWithPath(certfilename);
+            } catch (e) {
+              for (let dir of dirs) {
+                certfile = dir.clone();
+                certfile.append(platform == "linux" ? "certificates" : "Certificates");
+                certfile.append(certfilename);
+                if (certfile.exists()) {
+                  break;
+                }
+              }
+            }
+            let file;
+            try {
+              file = await File.createFromNsIFile(certfile);
+            } catch (e) {
+              log.error(`Unable to find certificate - ${certfilename}`);
+              continue;
+            }
+            let reader = new FileReader();
+            reader.onloadend = function() {
+              if (reader.readyState != reader.DONE) {
+                log.error(`Unable to read certificate - ${certfile.path}`);
+                return;
+              }
+              let cert = reader.result;
+              try {
+                if (/-----BEGIN CERTIFICATE-----/.test(cert)) {
+                  gCertDB.addCertFromBase64(pemToBase64(cert), "CTu,CTu,");
+                } else {
+                  gCertDB.addCert(cert, "CTu,CTu,");
+                }
+              } catch (e) {
+                log.error(`Unable to add certificate - ${certfile.path}`);
+              }
+            };
+            reader.readAsBinaryString(file);
+          }
+        })();
+      }
+    },
   },
 
   "Cookies": {
@@ -145,11 +218,13 @@ var Policies = {
 
       if (param.Default !== undefined ||
           param.AcceptThirdParty !== undefined ||
+          param.RejectTracker !== undefined ||
           param.Locked) {
         const ACCEPT_COOKIES = 0;
         const REJECT_THIRD_PARTY_COOKIES = 1;
         const REJECT_ALL_COOKIES = 2;
         const REJECT_UNVISITED_THIRD_PARTY = 3;
+        const REJECT_TRACKER = 4;
 
         let newCookieBehavior = ACCEPT_COOKIES;
         if (param.Default !== undefined && !param.Default) {
@@ -160,6 +235,8 @@ var Policies = {
           } else if (param.AcceptThirdParty == "from-visited") {
             newCookieBehavior = REJECT_UNVISITED_THIRD_PARTY;
           }
+        } else if (param.RejectTracker !== undefined && param.RejectTracker) {
+          newCookieBehavior = REJECT_TRACKER;
         }
 
         if (param.Locked) {
@@ -184,7 +261,27 @@ var Policies = {
           setDefaultPref("network.cookie.lifetimePolicy", newLifetimePolicy);
         }
       }
-    }
+    },
+  },
+
+  "DNSOverHTTPS": {
+    onBeforeAddons(manager, param) {
+      if ("Enabled" in param) {
+        let mode = param.Enabled ? 2 : 5;
+        if (param.Locked) {
+          setAndLockPref("network.trr.mode", mode);
+        } else {
+          setDefaultPref("network.trr.mode", mode);
+        }
+      }
+      if (param.ProviderURL) {
+        if (param.Locked) {
+          setAndLockPref("network.trr.uri", param.ProviderURL.href);
+        } else {
+          setDefaultPref("network.trr.uri", param.ProviderURL.href);
+        }
+      }
+    },
   },
 
   "DisableAppUpdate": {
@@ -192,15 +289,15 @@ var Policies = {
       if (param) {
         manager.disallowFeature("appUpdate");
       }
-    }
+    },
   },
 
   "DisableBuiltinPDFViewer": {
-    onBeforeUIStartup(manager, param) {
+    onBeforeAddons(manager, param) {
       if (param) {
-        manager.disallowFeature("PDF.js");
+        setAndLockPref("pdfjs.disabled", true);
       }
-    }
+    },
   },
 
   "DisableDeveloperTools": {
@@ -214,7 +311,7 @@ var Policies = {
         blockAboutPage(manager, "about:debugging");
         blockAboutPage(manager, "about:devtools-toolbox");
       }
-    }
+    },
   },
 
   "DisableFeedbackCommands": {
@@ -222,7 +319,7 @@ var Policies = {
       if (param) {
         manager.disallowFeature("feedbackCommands");
       }
-    }
+    },
   },
 
   "DisableFirefoxAccounts": {
@@ -230,7 +327,7 @@ var Policies = {
       if (param) {
         setAndLockPref("identity.fxaccounts.enabled", false);
       }
-    }
+    },
   },
 
   "DisableFirefoxScreenshots": {
@@ -238,7 +335,7 @@ var Policies = {
       if (param) {
         setAndLockPref("extensions.screenshots.disabled", true);
       }
-    }
+    },
   },
 
   "DisableFirefoxStudies": {
@@ -246,7 +343,7 @@ var Policies = {
       if (param) {
         manager.disallowFeature("Shield");
       }
-    }
+    },
   },
 
   "DisableForgetButton": {
@@ -254,7 +351,7 @@ var Policies = {
       if (param) {
         setAndLockPref("privacy.panicButton.enabled", false);
       }
-    }
+    },
   },
 
   "DisableFormHistory": {
@@ -262,7 +359,7 @@ var Policies = {
       if (param) {
         setAndLockPref("browser.formfill.enable", false);
       }
-    }
+    },
   },
 
   "DisableMasterPasswordCreation": {
@@ -270,7 +367,7 @@ var Policies = {
       if (param) {
         manager.disallowFeature("createMasterPassword");
       }
-    }
+    },
   },
 
   "DisablePocket": {
@@ -278,7 +375,7 @@ var Policies = {
       if (param) {
         setAndLockPref("extensions.pocket.enabled", false);
       }
-    }
+    },
   },
 
   "DisablePrivateBrowsing": {
@@ -288,7 +385,7 @@ var Policies = {
         blockAboutPage(manager, "about:privatebrowsing", true);
         setAndLockPref("browser.privatebrowsing.autostart", false);
       }
-    }
+    },
   },
 
   "DisableProfileImport": {
@@ -297,7 +394,7 @@ var Policies = {
         manager.disallowFeature("profileImport");
         setAndLockPref("browser.newtabpage.activity-stream.migrationExpired", true);
       }
-    }
+    },
   },
 
   "DisableProfileRefresh": {
@@ -306,7 +403,7 @@ var Policies = {
         manager.disallowFeature("profileRefresh");
         setAndLockPref("browser.disableResetPrompt", true);
       }
-    }
+    },
   },
 
   "DisableSafeMode": {
@@ -314,7 +411,7 @@ var Policies = {
       if (param) {
         manager.disallowFeature("safeMode");
       }
-    }
+    },
   },
 
   "DisableSecurityBypass": {
@@ -326,15 +423,15 @@ var Policies = {
       if ("SafeBrowsing" in param) {
         setAndLockPref("browser.safebrowsing.allowOverride", !param.SafeBrowsing);
       }
-    }
+    },
   },
 
   "DisableSetDesktopBackground": {
     onBeforeUIStartup(manager, param) {
       if (param) {
-        manager.disallowFeature("setDesktopBackground", true);
+        manager.disallowFeature("setDesktopBackground");
       }
-    }
+    },
   },
 
   "DisableSystemAddonUpdate": {
@@ -342,7 +439,7 @@ var Policies = {
       if (param) {
         manager.disallowFeature("SysAddonUpdate");
       }
-    }
+    },
   },
 
   "DisableTelemetry": {
@@ -352,7 +449,7 @@ var Policies = {
         setAndLockPref("datareporting.policy.dataSubmissionEnabled", false);
         blockAboutPage(manager, "about:telemetry");
       }
-    }
+    },
   },
 
   "DisplayBookmarksToolbar": {
@@ -364,7 +461,7 @@ var Policies = {
       runOncePerModification("displayBookmarksToolbar", value, () => {
         gXulStore.setValue(BROWSER_DOCUMENT_URL, "PersonalToolbar", "collapsed", value);
       });
-    }
+    },
   },
 
   "DisplayMenuBar": {
@@ -376,13 +473,13 @@ var Policies = {
       runOncePerModification("displayMenuBar", value, () => {
         gXulStore.setValue(BROWSER_DOCUMENT_URL, "toolbar-menubar", "autohide", value);
       });
-    }
+    },
   },
 
   "DontCheckDefaultBrowser": {
     onBeforeUIStartup(manager, param) {
       setAndLockPref("browser.shell.checkDefaultBrowser", false);
-    }
+    },
   },
 
   "EnableTrackingProtection": {
@@ -399,13 +496,33 @@ var Policies = {
         setAndLockPref("privacy.trackingprotection.enabled", false);
         setAndLockPref("privacy.trackingprotection.pbmode.enabled", false);
       }
-    }
+    },
   },
 
   "Extensions": {
     onBeforeUIStartup(manager, param) {
+      let uninstallingPromise = Promise.resolve();
+      if ("Uninstall" in param) {
+        uninstallingPromise = runOncePerModification("extensionsUninstall", JSON.stringify(param.Uninstall), async () => {
+          // If we're uninstalling add-ons, re-run the extensionsInstall runOnce even if it hasn't
+          // changed, which will allow add-ons to be updated.
+          Services.prefs.clearUserPref("browser.policies.runOncePerModification.extensionsInstall");
+          let addons = await AddonManager.getAddonsByIDs(param.Uninstall);
+          for (let addon of addons) {
+            if (addon) {
+              try {
+                await addon.uninstall();
+              } catch (e) {
+                // This can fail for add-ons that can't be uninstalled.
+                // Just ignore.
+              }
+            }
+          }
+        });
+      }
       if ("Install" in param) {
-        runOncePerModification("extensionsInstall", JSON.stringify(param.Install), () => {
+        runOncePerModification("extensionsInstall", JSON.stringify(param.Install), async () => {
+          await uninstallingPromise;
           for (let location of param.Install) {
             let url;
             if (location.includes("://")) {
@@ -422,7 +539,8 @@ var Policies = {
               }
               url = Services.io.newFileURI(xpiFile).spec;
             }
-            AddonManager.getInstallForURL(url, "application/x-xpinstall").then(install => {
+            AddonManager.getInstallForURL(url, "application/x-xpinstall", null, null, null, null, null,
+                                          {source: "enterprise-policy"}).then(install => {
               if (install.addon && install.addon.appDisabled) {
                 log.error(`Incompatible add-on - ${location}`);
                 install.cancel();
@@ -448,26 +566,11 @@ var Policies = {
                 onInstallEnded: () => {
                   install.removeListener(listener);
                   log.debug(`Installation succeeded - ${location}`);
-                }
+                },
               };
               install.addListener(listener);
               install.install();
             });
-          }
-        });
-      }
-      if ("Uninstall" in param) {
-        runOncePerModification("extensionsUninstall", JSON.stringify(param.Uninstall), async () => {
-          let addons = await AddonManager.getAddonsByIDs(param.Uninstall);
-          for (let addon of addons) {
-            if (addon) {
-              try {
-                addon.uninstall();
-              } catch (e) {
-                // This can fail for add-ons that can't be uninstalled.
-                // Just ignore.
-              }
-            }
           }
         });
       }
@@ -476,7 +579,7 @@ var Policies = {
           manager.disallowFeature(`modify-extension:${ID}`);
         }
       }
-    }
+    },
   },
 
   "FlashPlugin": {
@@ -500,7 +603,7 @@ var Policies = {
       } else if (param.Default !== undefined) {
         setDefaultPref("plugin.state.flash", flashPrefVal);
       }
-    }
+    },
   },
 
   "HardwareAcceleration": {
@@ -508,7 +611,7 @@ var Policies = {
       if (!param) {
         setAndLockPref("layers.acceleration.disabled", true);
       }
-    }
+    },
   },
 
   "Homepage": {
@@ -516,29 +619,43 @@ var Policies = {
       // |homepages| will be a string containing a pipe-separated ('|') list of
       // URLs because that is what the "Home page" section of about:preferences
       // (and therefore what the pref |browser.startup.homepage|) accepts.
-      let homepages = param.URL.href;
-      if (param.Additional && param.Additional.length > 0) {
-        homepages += "|" + param.Additional.map(url => url.href).join("|");
+      if (param.URL) {
+        let homepages = param.URL.href;
+        if (param.Additional && param.Additional.length > 0) {
+          homepages += "|" + param.Additional.map(url => url.href).join("|");
+        }
+        if (param.Locked) {
+          setAndLockPref("browser.startup.homepage", homepages);
+          setAndLockPref("pref.browser.homepage.disable_button.current_page", true);
+          setAndLockPref("pref.browser.homepage.disable_button.bookmark_page", true);
+          setAndLockPref("pref.browser.homepage.disable_button.restore_default", true);
+        } else {
+          setDefaultPref("browser.startup.homepage", homepages);
+          runOncePerModification("setHomepage", homepages, () => {
+            Services.prefs.clearUserPref("browser.startup.homepage");
+          });
+        }
       }
-      if (param.Locked) {
-        setAndLockPref("browser.startup.homepage", homepages);
-        setAndLockPref("browser.startup.page", 1);
-        setAndLockPref("pref.browser.homepage.disable_button.current_page", true);
-        setAndLockPref("pref.browser.homepage.disable_button.bookmark_page", true);
-        setAndLockPref("pref.browser.homepage.disable_button.restore_default", true);
-      } else {
-        // The default pref for homepage is actually a complex pref. We need to
-        // set it in a special way such that it works properly
-        let homepagePrefVal = "data:text/plain,browser.startup.homepage=" +
-                               homepages;
-        setDefaultPref("browser.startup.homepage", homepagePrefVal);
-        setDefaultPref("browser.startup.page", 1);
-        runOncePerModification("setHomepage", homepages, () => {
-          Services.prefs.clearUserPref("browser.startup.homepage");
-          Services.prefs.clearUserPref("browser.startup.page");
-        });
+      if (param.StartPage) {
+        let prefValue;
+        switch (param.StartPage) {
+          case "none":
+            prefValue = 0;
+            break;
+          case "homepage":
+            prefValue = 1;
+            break;
+          case "previous-session":
+            prefValue = 3;
+            break;
+        }
+        if (param.Locked) {
+          setAndLockPref("browser.startup.page", prefValue);
+        } else {
+          setDefaultPref("browser.startup.page", prefValue);
+        }
       }
-    }
+    },
   },
 
   "InstallAddonsPermission": {
@@ -552,7 +669,7 @@ var Policies = {
           blockAboutPage(manager, "about:debugging");
         }
       }
-    }
+    },
   },
 
   "NoDefaultBookmarks": {
@@ -560,20 +677,20 @@ var Policies = {
       if (param) {
         manager.disallowFeature("defaultBookmarks");
       }
-    }
+    },
   },
 
   "OfferToSaveLogins": {
     onBeforeUIStartup(manager, param) {
       setAndLockPref("signon.rememberSignons", param);
-    }
+    },
   },
 
   "OverrideFirstRunPage": {
     onProfileAfterChange(manager, param) {
       let url = param ? param.href : "";
       setAndLockPref("startup.homepage_welcome_url", url);
-    }
+    },
   },
 
   "OverridePostUpdatePage": {
@@ -584,7 +701,7 @@ var Policies = {
       // as a fallback when the update.xml file hasn't provided
       // a specific post-update URL.
       manager.disallowFeature("postUpdateCustomPage");
-    }
+    },
   },
 
   "Permissions": {
@@ -608,7 +725,7 @@ var Policies = {
         addAllowDenyPermissions("desktop-notification", param.Notifications.Allow, param.Notifications.Block);
         setDefaultPermission("desktop-notification", param.Notifications);
       }
-    }
+    },
   },
 
   "PopupBlocking": {
@@ -624,7 +741,7 @@ var Policies = {
       } else if (param.Default !== undefined) {
         setDefaultPref("dom.disable_open_during_load", !!param.Default);
       }
-    }
+    },
   },
 
   "Proxy": {
@@ -635,7 +752,13 @@ var Policies = {
       } else {
         ProxyPolicies.configureProxySettings(param, setDefaultPref);
       }
-    }
+    },
+  },
+
+  "RequestedLocales": {
+    onBeforeAddons(manager, param) {
+      Services.locale.requestedLocales = param;
+    },
   },
 
   "SanitizeOnShutdown": {
@@ -651,7 +774,7 @@ var Policies = {
         setAndLockPref("privacy.clearOnShutdown.siteSettings", true);
         setAndLockPref("privacy.clearOnShutdown.offlineApps", true);
       }
-    }
+    },
   },
 
   "SearchBar": {
@@ -667,7 +790,7 @@ var Policies = {
           CustomizableUI.removeWidgetFromArea("search-container");
         }
       });
-    }
+    },
   },
 
   "SearchEngines": {
@@ -704,12 +827,13 @@ var Policies = {
             for (let newEngine of param.Add) {
               let newEngineParameters = {
                 template:    newEngine.URLTemplate,
-                iconURL:     newEngine.IconURL,
+                iconURL:     newEngine.IconURL ? newEngine.IconURL.href : null,
                 alias:       newEngine.Alias,
                 description: newEngine.Description,
                 method:      newEngine.Method,
                 suggestURL:  newEngine.SuggestURLTemplate,
-                extensionID: "set-via-policy"
+                extensionID: "set-via-policy",
+                queryCharset: "UTF-8",
               };
               try {
                 Services.search.addEngineWithDetails(newEngine.Name,
@@ -735,7 +859,7 @@ var Policies = {
             }
             if (defaultEngine) {
               try {
-                Services.search.currentEngine = defaultEngine;
+                Services.search.defaultEngine = defaultEngine;
               } catch (ex) {
                 log.error("Unable to set the default search engine", ex);
               }
@@ -743,13 +867,39 @@ var Policies = {
           });
         }
       });
-    }
+    },
+  },
+
+  "SecurityDevices": {
+    onProfileAfterChange(manager, param) {
+      let securityDevices = param;
+      let pkcs11db = Cc["@mozilla.org/security/pkcs11moduledb;1"].getService(Ci.nsIPKCS11ModuleDB);
+      let moduleList = pkcs11db.listModules();
+      for (let deviceName in securityDevices) {
+        let foundModule = false;
+        for (let module of moduleList) {
+          if (module && module.libName === securityDevices[deviceName]) {
+            foundModule = true;
+            break;
+          }
+        }
+        if (foundModule) {
+          continue;
+        }
+        try {
+          pkcs11db.addModule(deviceName, securityDevices[deviceName], 0, 0);
+        } catch (ex) {
+          log.error(`Unable to add security device ${deviceName}`);
+          log.debug(ex);
+        }
+      }
+    },
   },
 
   "WebsiteFilter": {
     onBeforeUIStartup(manager, param) {
       this.filter = new WebsiteFilter(param.Block || [], param.Exceptions || []);
-    }
+    },
   },
 
 };
@@ -911,6 +1061,8 @@ function runOnce(actionName, callback) {
  * callback once when the policy is set, then never again.
  * runOncePerModification runs the callback once each time the policy value
  * changes from its previous value.
+ * If the callback that was passed is an async function, you can await on this
+ * function to await for the callback.
  *
  * @param {string} actionName
  *        A given name which will be used to track if this callback has run.
@@ -922,16 +1074,19 @@ function runOnce(actionName, callback) {
  *        string.
  * @param {Function} callback
  *        The callback to be run when the pref value changes
+ * @returns Promise
+ *        A promise that will resolve once the callback finishes running.
+ *
  */
-function runOncePerModification(actionName, policyValue, callback) {
+async function runOncePerModification(actionName, policyValue, callback) {
   let prefName = `browser.policies.runOncePerModification.${actionName}`;
   let oldPolicyValue = Services.prefs.getStringPref(prefName, undefined);
   if (policyValue === oldPolicyValue) {
     log.debug(`Not running action ${actionName} again because the policy's value is unchanged`);
-    return;
+    return Promise.resolve();
   }
   Services.prefs.setStringPref(prefName, policyValue);
-  callback();
+  return callback();
 }
 
 let gChromeURLSBlocked = false;
@@ -952,8 +1107,9 @@ let ChromeURLBlockPolicy = {
     if (contentLocation.scheme == "chrome" &&
         contentType == Ci.nsIContentPolicy.TYPE_DOCUMENT &&
         loadInfo.loadingContext &&
-        loadInfo.loadingContext.baseURI == "chrome://browser/content/browser.xul" &&
-        contentLocation.host != "mochitests") {
+        loadInfo.loadingContext.baseURI == AppConstants.BROWSER_CHROME_URL &&
+        contentLocation.host != "mochitests" &&
+        contentLocation.host != "devtools") {
       return Ci.nsIContentPolicy.REJECT_REQUEST;
     }
     return Ci.nsIContentPolicy.ACCEPT;
@@ -978,6 +1134,13 @@ function blockAllChromeURLs() {
                             ChromeURLBlockPolicy.contractID,
                             ChromeURLBlockPolicy);
 
-  let cm = Cc["@mozilla.org/categorymanager;1"].getService(Ci.nsICategoryManager);
-  cm.addCategoryEntry("content-policy", ChromeURLBlockPolicy.contractID, ChromeURLBlockPolicy.contractID, false, true);
+  Services.catMan.addCategoryEntry("content-policy",
+                                   ChromeURLBlockPolicy.contractID,
+                                   ChromeURLBlockPolicy.contractID, false, true);
+}
+
+function pemToBase64(pem) {
+  return pem.replace(/-----BEGIN CERTIFICATE-----/, "")
+            .replace(/-----END CERTIFICATE-----/, "")
+            .replace(/[\r\n]/g, "");
 }

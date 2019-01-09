@@ -4,11 +4,11 @@
 
 /* eslint-env mozilla/frame-script */
 /* global XPCNativeWrapper */
+/* eslint-disable no-restricted-globals */
 
 "use strict";
 
-const winUtil = content.QueryInterface(Ci.nsIInterfaceRequestor)
-    .getInterface(Ci.nsIDOMWindowUtils);
+const winUtil = content.windowUtils;
 
 ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
@@ -17,6 +17,10 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("chrome://marionette/content/accessibility.js");
 ChromeUtils.import("chrome://marionette/content/action.js");
 ChromeUtils.import("chrome://marionette/content/atom.js");
+const {
+  Capabilities,
+  PageLoadStrategy,
+} = ChromeUtils.import("chrome://marionette/content/capabilities.js", {});
 ChromeUtils.import("chrome://marionette/content/capture.js");
 const {
   element,
@@ -41,7 +45,6 @@ ChromeUtils.import("chrome://marionette/content/legacyaction.js");
 const {Log} = ChromeUtils.import("chrome://marionette/content/log.js", {});
 ChromeUtils.import("chrome://marionette/content/navigate.js");
 ChromeUtils.import("chrome://marionette/content/proxy.js");
-ChromeUtils.import("chrome://marionette/content/session.js");
 
 XPCOMUtils.defineLazyGetter(this, "logger", () => Log.getWithPrefix(outerWindowID));
 XPCOMUtils.defineLazyGlobalGetters(this, ["URL"]);
@@ -70,7 +73,7 @@ const SUPPORTED_STRATEGIES = new Set([
 Object.defineProperty(this, "capabilities", {
   get() {
     let payload = sendSyncMessage("Marionette:WebDriver:GetCapabilities");
-    return session.Capabilities.fromJSON(payload[0]);
+    return Capabilities.fromJSON(payload[0]);
   },
   configurable: true,
 });
@@ -89,8 +92,8 @@ const eventObservers = new ContentEventObserverService(
 /**
  * The load listener singleton helps to keep track of active page load
  * activities, and can be used by any command which might cause a navigation
- * to happen. In the specific case of a reload of the frame script it allows
- * to continue observing the current page load.
+ * to happen. In the specific case of a process change of the frame script it
+ * allows to continue observing the current page load.
  */
 const loadListener = {
   commandID: null,
@@ -126,7 +129,8 @@ const loadListener = {
         .createInstance(Ci.nsITimer);
     this.timerPageUnload = null;
 
-    // In case the frame script has been reloaded, wait the remaining time
+    // In case the frame script has been moved to a differnt process,
+    // wait the remaining time
     timeout = startTime + timeout - new Date().getTime();
 
     if (timeout <= 0) {
@@ -144,14 +148,14 @@ const loadListener = {
       Services.obs.addObserver(this, "outer-window-destroyed");
 
     } else {
-      // The frame script got reloaded due to a new content process.
+      // The frame script has been moved to a differnt content process.
       // Due to the time it takes to re-register the browser in Marionette,
       // it can happen that page load events are missed before the listeners
       // are getting attached again. By checking the document readyState the
       // command can return immediately if the page load is already done.
       let readyState = content.document.readyState;
       let documentURI = content.document.documentURI;
-      logger.debug(truncate`Check readyState ${readyState} for ${documentURI}`);
+      logger.trace(truncate`Check readyState ${readyState} for ${documentURI}`);
       // If the page load has already finished, don't setup listeners and
       // timers but return immediatelly.
       if (this.handleReadyState(readyState, documentURI)) {
@@ -186,8 +190,9 @@ const loadListener = {
     removeEventListener("pageshow", this, true);
     removeEventListener("unload", this, true);
 
-    // In case the observer was added before the frame script has been
-    // reloaded, it will no longer be available. Exceptions can be ignored.
+    // In case the observer was added before the frame script has been moved
+    // to a different process, it will no longer be available. Exceptions can
+    // be ignored.
     try {
       Services.obs.removeObserver(this, "outer-window-destroyed");
     } catch (e) {}
@@ -205,7 +210,7 @@ const loadListener = {
     }
 
     let location = event.target.documentURI || event.target.location.href;
-    logger.debug(truncate`Received DOM event ${event.type} for ${location}`);
+    logger.trace(truncate`Received DOM event ${event.type} for ${location}`);
 
     switch (event.type) {
       case "beforeunload":
@@ -278,8 +283,7 @@ const loadListener = {
         // is also treaded specifically here, because it gets temporary
         // loaded for new content processes, and we only want to rely on
         // complete loads for it.
-        } else if ((capabilities.get("pageLoadStrategy") ===
-            session.PageLoadStrategy.Eager &&
+        } else if ((capabilities.get("pageLoadStrategy") === PageLoadStrategy.Eager &&
             documentURI != "about:blank") ||
             /about:blocked\?/.exec(documentURI)) {
           this.stop();
@@ -341,10 +345,9 @@ const loadListener = {
   observe(subject, topic) {
     const win = curContainer.frame;
     const winID = subject.QueryInterface(Ci.nsISupportsPRUint64).data;
-    const curWinID = win.QueryInterface(Ci.nsIInterfaceRequestor)
-        .getInterface(Ci.nsIDOMWindowUtils).outerWindowID;
+    const curWinID = win.windowUtils.outerWindowID;
 
-    logger.debug(`Received observer notification ${topic} for ${winID}`);
+    logger.trace(`Received observer notification ${topic}`);
 
     switch (topic) {
       // In the case when the currently selected frame is closed,
@@ -360,7 +363,7 @@ const loadListener = {
 
   /**
    * Continue to listen for page load events after the frame script has been
-   * reloaded.
+   * moved to a different content process.
    *
    * @param {number} commandID
    *     ID of the currently handled message between the driver and
@@ -397,8 +400,7 @@ const loadListener = {
 
     // Only wait if the page load strategy is not `none`
     loadEventExpected = loadEventExpected &&
-        (capabilities.get("pageLoadStrategy") !==
-        session.PageLoadStrategy.None);
+        (capabilities.get("pageLoadStrategy") !== PageLoadStrategy.None);
 
     if (loadEventExpected) {
       let startTime = new Date().getTime();
@@ -438,7 +440,7 @@ const loadListener = {
  * an ID, we start the listeners. Otherwise, nothing happens.
  */
 function registerSelf() {
-  logger.debug("Frame script loaded");
+  logger.trace("Frame script loaded");
 
   sandboxes.clear();
   curContainer = {
@@ -455,7 +457,7 @@ function registerSelf() {
   }
 
   if (reply[0].outerWindowID === outerWindowID) {
-    logger.debug("Frame script registered");
+    logger.trace("Frame script registered");
     startListeners();
     sendAsyncMessage("Marionette:ListenersAttached", {outerWindowID});
   }
@@ -622,10 +624,10 @@ function deleteSession() {
  *     JSON serialisable object to accompany the message.  Defaults to
  *     an empty dictionary.
  */
-function sendToServer(uuid, data = undefined) {
+let sendToServer = (uuid, data = undefined) => {
   let channel = new proxy.AsyncMessageChannel(sendAsyncMessage.bind(this));
   channel.reply(uuid, data);
-}
+};
 
 /**
  * Send asynchronous reply with value to chrome.
@@ -680,9 +682,7 @@ function emitTouchEvent(type, touch) {
       `${touch.clientY}) relative to the viewport`);
 
   const win = curContainer.frame;
-  let docShell = win.QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIWebNavigation)
-      .QueryInterface(Ci.nsIDocShell);
+  let docShell = win.docShell;
   if (docShell.asyncPanZoomEnabled && legacyactions.scrolling) {
     let ev = {
       index: 0,
@@ -703,9 +703,7 @@ function emitTouchEvent(type, touch) {
 
   // we get here if we're not in asyncPacZoomEnabled land, or if we're
   // the main process
-  let domWindowUtils = win.QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIDOMWindowUtils);
-  domWindowUtils.sendTouchEvent(
+  win.windowUtils.sendTouchEvent(
       type,
       [touch.identifier],
       [touch.clientX],
@@ -793,6 +791,8 @@ async function releaseActions() {
       action.inputsToCancel.reverse(), 0, curContainer.frame);
   action.inputsToCancel.length = 0;
   action.inputStateMap.clear();
+
+  event.DoubleClickTracker.resetClick();
 }
 
 /**
@@ -995,9 +995,9 @@ function cancelRequest() {
 
 /**
  * This implements the latter part of a get request (for the case we need
- * to resume one when the frame script has been reloaded in the middle of a
- * navigate request). This is most of of the work of a navigate request,
- * but doesn't assume DOMContentLoaded is yet to fire.
+ * to resume one when the frame script has been moved to a different content
+ * process in the middle of a navigate request). This is most of of the work
+ * of a navigate request, but doesn't assume DOMContentLoaded is yet to fire.
  *
  * @param {number} commandID
  *     ID of the currently handled message between the driver and
@@ -1006,7 +1006,7 @@ function cancelRequest() {
  *     Timeout in seconds the method has to wait for the page being
  *     finished loading.
  * @param {number} startTime
- *     Unix timestap when the navitation request got triggred.
+ *     Unix timestap when the navitation request got triggered.
  */
 function waitForPageLoaded(msg) {
   let {commandID, pageTimeout, startTime} = msg.json;
@@ -1307,11 +1307,12 @@ function isElementSelected(el) {
 }
 
 async function sendKeysToElement(el, val) {
-  await interaction.sendKeysToElement(
-      el, val,
-      capabilities.get("moz:accessibilityChecks"),
-      capabilities.get("moz:webdriverClick"),
-  );
+  let opts = {
+    strictFileInteractability: capabilities.get("strictFileInteractability"),
+    accessibilityChecks: capabilities.get("moz:accessibilityChecks"),
+    webdriverClick: capabilities.get("moz:webdriverClick"),
+  };
+  await interaction.sendKeysToElement(el, val, opts);
 }
 
 /** Clear the text of an element. */
@@ -1568,12 +1569,10 @@ function flushRendering() {
   let content = curContainer.frame;
   let anyPendingPaintsGeneratedInDescendants = false;
 
-  let windowUtils = content.QueryInterface(Ci.nsIInterfaceRequestor)
-    .getInterface(Ci.nsIDOMWindowUtils);
+  let windowUtils = content.windowUtils;
 
   function flushWindow(win) {
-    let utils = win.QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIDOMWindowUtils);
+    let utils = win.windowUtils;
     let afterPaintWasPending = utils.isMozAfterPaintPending;
 
     let root = win.document.documentElement;
@@ -1610,8 +1609,7 @@ async function reftestWait(url, remote) {
   let win = curContainer.frame;
   let document = curContainer.frame.document;
 
-  let windowUtils = content.QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIDOMWindowUtils);
+  let windowUtils = content.windowUtils;
 
   let reftestWait = false;
 
@@ -1653,22 +1651,20 @@ async function reftestWait(url, remote) {
         observer.observe(root, {attributes: true});
       });
     }
-
-    logger.debug("Waiting for rendering");
-
-    await new Promise(resolve => {
-      let maybeResolve = () => {
-        if (flushRendering()) {
-          win.addEventListener("MozAfterPaint", maybeResolve, {once: true});
-        } else {
-          win.setTimeout(resolve, 0);
-        }
-      };
-      maybeResolve();
-    });
-  } else {
-    flushRendering();
   }
+
+  logger.debug("Waiting for rendering");
+
+  await new Promise(resolve => {
+    let maybeResolve = () => {
+      if (flushRendering()) {
+        win.addEventListener("MozAfterPaint", maybeResolve, {once: true});
+      } else {
+        win.setTimeout(resolve, 0);
+      }
+    };
+    maybeResolve();
+  });
 
   if (remote) {
     windowUtils.updateLayerTree();

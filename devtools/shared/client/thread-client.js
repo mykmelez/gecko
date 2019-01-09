@@ -1,3 +1,4 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -24,7 +25,7 @@ const noop = () => {};
  * is a front to the thread actor created in the server side, hiding the
  * protocol details in a traditional JavaScript API.
  *
- * @param client DebuggerClient|TabClient
+ * @param client DebuggerClient, WorkerTargetFront or BrowsingContextTargetFront
  *        The parent of the thread (tab for target-scoped debuggers,
  *        DebuggerClient for chrome debuggers).
  * @param actor string
@@ -77,12 +78,17 @@ ThreadClient.prototype = {
    *        An object with a type property set to the appropriate limit (next,
    *        step, or finish) per the remote debugging protocol specification.
    *        Use null to specify no limit.
+   * @param bool aRewind
+   *        Whether execution should rewind until the limit is reached, rather
+   *        than proceeding forwards. This parameter has no effect if the
+   *        server does not support rewinding.
    * @param function onResponse
    *        Called with the response packet.
    */
   _doResume: DebuggerClient.requester({
     type: "resume",
-    resumeLimit: arg(0)
+    resumeLimit: arg(0),
+    rewind: arg(1),
   }, {
     before: function(packet) {
       this._assertPaused("resume");
@@ -129,14 +135,14 @@ ThreadClient.prototype = {
    */
   reconfigure: DebuggerClient.requester({
     type: "reconfigure",
-    options: arg(0)
+    options: arg(0),
   }),
 
   /**
    * Resume a paused thread.
    */
   resume: function(onResponse) {
-    return this._doResume(null, onResponse);
+    return this._doResume(null, false, onResponse);
   },
 
   /**
@@ -146,7 +152,17 @@ ThreadClient.prototype = {
    *        Called with the response packet.
    */
   resumeThenPause: function(onResponse) {
-    return this._doResume({ type: "break" }, onResponse);
+    return this._doResume({ type: "break" }, false, onResponse);
+  },
+
+  /**
+   * Rewind a thread until a breakpoint is hit.
+   *
+   * @param function aOnResponse
+   *        Called with the response packet.
+   */
+  rewind: function(onResponse) {
+    this._doResume(null, true, onResponse);
   },
 
   /**
@@ -156,7 +172,7 @@ ThreadClient.prototype = {
    *        Called with the response packet.
    */
   stepOver: function(onResponse) {
-    return this._doResume({ type: "next" }, onResponse);
+    return this._doResume({ type: "next" }, false, onResponse);
   },
 
   /**
@@ -166,7 +182,7 @@ ThreadClient.prototype = {
    *        Called with the response packet.
    */
   stepIn: function(onResponse) {
-    return this._doResume({ type: "step" }, onResponse);
+    return this._doResume({ type: "step" }, false, onResponse);
   },
 
   /**
@@ -176,7 +192,37 @@ ThreadClient.prototype = {
    *        Called with the response packet.
    */
   stepOut: function(onResponse) {
-    return this._doResume({ type: "finish" }, onResponse);
+    return this._doResume({ type: "finish" }, false, onResponse);
+  },
+
+  /**
+   * Rewind step over a function call.
+   *
+   * @param function aOnResponse
+   *        Called with the response packet.
+   */
+  reverseStepOver: function(onResponse) {
+    return this._doResume({ type: "next" }, true, onResponse);
+  },
+
+  /**
+   * Rewind step into a function call.
+   *
+   * @param function aOnResponse
+   *        Called with the response packet.
+   */
+  reverseStepIn: function(onResponse) {
+    return this._doResume({ type: "step" }, true, onResponse);
+  },
+
+  /**
+   * Rewind step out of a function call.
+   *
+   * @param function aOnResponse
+   *        Called with the response packet.
+   */
+  reverseStepOut: function(onResponse) {
+    return this._doResume({ type: "finish" }, true, onResponse);
   },
 
   /**
@@ -200,6 +246,25 @@ ThreadClient.prototype = {
   },
 
   /**
+   * Warp through time to an execution point in the past or future.
+   *
+   * @param object aTarget
+   *        Description of the warp destination.
+   * @param function aOnResponse
+   *        Called with the response packet.
+   */
+  timeWarp: function(target, onResponse) {
+    const warp = () => {
+      this._doResume({ type: "warp", target }, true, onResponse);
+    };
+    if (this.paused) {
+      warp();
+    } else {
+      this.interrupt(warp);
+    }
+  },
+
+  /**
    * Interrupt a running thread.
    *
    * @param function onResponse
@@ -207,7 +272,7 @@ ThreadClient.prototype = {
    */
   _doInterrupt: DebuggerClient.requester({
     type: "interrupt",
-    when: arg(0)
+    when: arg(0),
   }),
 
   /**
@@ -288,7 +353,7 @@ ThreadClient.prototype = {
   eval: DebuggerClient.requester({
     type: "clientEvaluate",
     frame: arg(0),
-    expression: arg(1)
+    expression: arg(1),
   }, {
     before: function(packet) {
       this._assertPaused("eval");
@@ -313,7 +378,7 @@ ThreadClient.prototype = {
    *        Called with the response packet.
    */
   detach: DebuggerClient.requester({
-    type: "detach"
+    type: "detach",
   }, {
     after: function(response) {
       this.client.unregisterClient(this);
@@ -343,7 +408,7 @@ ThreadClient.prototype = {
    */
   threadGrips: DebuggerClient.requester({
     type: "threadGrips",
-    actors: arg(0)
+    actors: arg(0),
   }),
 
   /**
@@ -353,7 +418,7 @@ ThreadClient.prototype = {
    *        Called with the thread's response.
    */
   eventListeners: DebuggerClient.requester({
-    type: "eventListeners"
+    type: "eventListeners",
   }),
 
   /**
@@ -363,7 +428,7 @@ ThreadClient.prototype = {
    *        Called with the thread's response.
    */
   getSources: DebuggerClient.requester({
-    type: "sources"
+    type: "sources",
   }),
 
   /**
@@ -392,7 +457,7 @@ ThreadClient.prototype = {
   getFrames: DebuggerClient.requester({
     type: "frames",
     start: arg(0),
-    count: arg(1)
+    count: arg(1),
   }),
 
   /**
@@ -634,6 +699,30 @@ ThreadClient.prototype = {
   },
 
   /**
+   * Requests to set XHR breakpoint
+   * @param string path
+   *        pause when url contains `path`
+   * @param string method
+   *        pause when method of request is `method`
+   */
+  setXHRBreakpoint: DebuggerClient.requester({
+    type: "setXHRBreakpoint",
+    path: arg(0),
+    method: arg(1),
+  }),
+
+  /**
+   * Request to remove XHR breakpoint
+   * @param string path
+   * @param string method
+   */
+  removeXHRBreakpoint: DebuggerClient.requester({
+    type: "removeXHRBreakpoint",
+    path: arg(0),
+    method: arg(1),
+  }),
+
+  /**
    * Return an EnvironmentClient instance for the given environment actor form.
    */
   environment: function(form) {
@@ -662,10 +751,10 @@ ThreadClient.prototype = {
    */
   getPrototypesAndProperties: DebuggerClient.requester({
     type: "prototypesAndProperties",
-    actors: arg(0)
+    actors: arg(0),
   }),
 
-  events: ["newSource"]
+  events: ["newSource", "progress"],
 };
 
 eventSource(ThreadClient.prototype);

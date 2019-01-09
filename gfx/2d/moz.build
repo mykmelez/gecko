@@ -24,6 +24,7 @@ EXPORTS.mozilla.gfx += [
     'CriticalSection.h',
     'DataSurfaceHelpers.h',
     'DrawEventRecorder.h',
+    'DrawTargetOffset.h',
     'DrawTargetRecording.h',
     'DrawTargetTiled.h',
     'DrawTargetWrapAndRecord.h',
@@ -162,6 +163,8 @@ elif CONFIG['CPU_ARCH'].startswith('mips'):
 UNIFIED_SOURCES += [
     'BezierUtils.cpp',
     'Blur.cpp',
+    'BufferEdgePad.cpp',
+    'BufferUnrotate.cpp',
     'CaptureCommandList.cpp',
     'DataSourceSurface.cpp',
     'DataSurfaceHelpers.cpp',
@@ -171,6 +174,7 @@ UNIFIED_SOURCES += [
     'DrawTargetCairo.cpp',
     'DrawTargetCapture.cpp',
     'DrawTargetDual.cpp',
+    'DrawTargetOffset.cpp',
     'DrawTargetRecording.cpp',
     'DrawTargetTiled.cpp',
     'DrawTargetWrapAndRecord.cpp',
@@ -217,12 +221,14 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
         'QuartzSupport.mm',
     ]
 
-if CONFIG['CPU_ARCH'] == 'arm' and CONFIG['BUILD_ARM_NEON']:
+if CONFIG['CC_TYPE'] in ('clang', 'gcc') and (CONFIG['CPU_ARCH'] == 'aarch64' or CONFIG['BUILD_ARM_NEON']):
+    # MSVC cannot use arm_neon.h.
     SOURCES += [
         'BlurNEON.cpp',
         'LuminanceNEON.cpp',
         'SwizzleNEON.cpp',
     ]
+    DEFINES['USE_NEON'] = True
     SOURCES['BlurNEON.cpp'].flags += CONFIG['NEON_FLAGS']
     SOURCES['LuminanceNEON.cpp'].flags += CONFIG['NEON_FLAGS']
     SOURCES['SwizzleNEON.cpp'].flags += CONFIG['NEON_FLAGS']
@@ -255,3 +261,5 @@ if CONFIG['MOZ_ENABLE_SKIA_GPU']:
         '/gfx/skia/skia/src/gpu',
     ]
 
+if CONFIG['CC_TYPE'] == 'clang-cl':
+    AllowCompilerWarnings()  # workaround for bug 1090497

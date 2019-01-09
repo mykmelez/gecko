@@ -8,38 +8,51 @@
 #define mozilla_dom_PaymentRequestParent_h
 
 #include "mozilla/dom/PPaymentRequestParent.h"
-#include "nsIPaymentActionRequest.h"
+#include "nsIPaymentAddress.h"
+#include "nsIPaymentActionResponse.h"
 
 namespace mozilla {
 namespace dom {
 
-class PaymentRequestParent final : public nsIPaymentActionCallback
-                                 , public PPaymentRequestParent
-{
-  NS_DECL_THREADSAFE_ISUPPORTS
-  NS_DECL_NSIPAYMENTACTIONCALLBACK
+class PaymentRequestParent final : public PPaymentRequestParent {
+  NS_INLINE_DECL_REFCOUNTING(PaymentRequestParent)
+ public:
+  PaymentRequestParent();
 
-  explicit PaymentRequestParent(uint64_t aTabId);
+  nsresult RespondPayment(nsIPaymentActionResponse* aResponse);
+  nsresult ChangeShippingAddress(const nsAString& aRequestId,
+                                 nsIPaymentAddress* aAddress);
+  nsresult ChangeShippingOption(const nsAString& aRequestId,
+                                const nsAString& aOption);
+  nsresult ChangePayerDetail(const nsAString& aRequestId,
+                             const nsAString& aPayerName,
+                             const nsAString& aPayerEmail,
+                             const nsAString& aPayerPhone);
+  nsresult ChangePaymentMethod(const nsAString& aRequestId,
+                               const nsAString& aMethodName,
+                               nsIMethodChangeDetails* aMethodDetails);
 
-protected:
-  mozilla::ipc::IPCResult
-  RecvRequestPayment(const IPCPaymentActionRequest& aRequest) override;
+ protected:
+  mozilla::ipc::IPCResult RecvRequestPayment(
+      const IPCPaymentActionRequest& aRequest) override;
 
   mozilla::ipc::IPCResult Recv__delete__() override;
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
-private:
+
+ private:
   ~PaymentRequestParent() = default;
 
-  nsresult CreateActionRequest(const nsAString& aRequestId,
-                               uint32_t aActionType,
-                               nsIPaymentActionRequest** aAction);
+  nsresult SerializeAddress(IPCPaymentAddress& ipcAddress,
+                            nsIPaymentAddress* aAddress);
+  nsresult SerializeResponseData(IPCPaymentResponseData& ipcData,
+                                 nsIPaymentResponseData* aData);
 
   bool mActorAlive;
-  uint64_t mTabId;
+  nsString mRequestId;
 };
 
-} // end of namespace dom
-} // end of namespace mozilla
+}  // end of namespace dom
+}  // end of namespace mozilla
 
 #endif

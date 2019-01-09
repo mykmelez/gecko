@@ -5,8 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const defer = require("devtools/shared/defer");
-
 loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
 
 function PerformancePanel(iframeWindow, toolbox) {
@@ -30,8 +28,6 @@ PerformancePanel.prototype = {
     if (this._opening) {
       return this._opening;
     }
-    const deferred = defer();
-    this._opening = deferred.promise;
 
     this.panelWin.gToolbox = this.toolbox;
     this.panelWin.gTarget = this.target;
@@ -41,7 +37,7 @@ PerformancePanel.prototype = {
     // the same front, and the toolbox will also initialize the front,
     // but redo it here so we can hook into the same event to prevent race conditions
     // in the case of the front still being in the process of opening.
-    const front = await this.panelWin.gToolbox.initPerformance();
+    const front = await this.target.getFront("performance");
 
     // This should only happen if this is completely unsupported (when profiler
     // does not exist), and in that case, the tool shouldn't be available,
@@ -64,7 +60,9 @@ PerformancePanel.prototype = {
     this.isReady = true;
     this.emit("ready");
 
-    deferred.resolve(this);
+    this._opening = new Promise(resolve => {
+      resolve(this);
+    });
     return this._opening;
   },
 
@@ -94,5 +92,5 @@ PerformancePanel.prototype = {
     } else {
       this.toolbox.unhighlightTool("performance");
     }
-  }
+  },
 };

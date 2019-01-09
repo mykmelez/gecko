@@ -30,8 +30,6 @@ function promiseNextTick() {
 }
 
 add_task(async function() {
-  await waitOneEvent(window, "load");
-
   var iframe = document.getElementById("subdoc");
   var subdoc = iframe.contentDocument;
   var style = subdoc.getElementById("style");
@@ -52,9 +50,7 @@ add_task(async function() {
   }
 
   function setDisplayMode(mode) {
-    win.QueryInterface(Ci.nsIInterfaceRequestor)
-                 .getInterface(Ci.nsIDocShell)
-                 .displayMode = mode;
+    win.docShell.displayMode = mode;
   }
 
   shouldApply("all and (display-mode: browser)");

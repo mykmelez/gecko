@@ -4,45 +4,33 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* types defined to pass values through Gecko_* and Servo_* FFI functions */
+
 #ifndef mozilla_ServoTypes_h
 #define mozilla_ServoTypes_h
 
+#include "mozilla/RefPtr.h"
+#include "mozilla/SheetType.h"
 #include "mozilla/TypedEnumBits.h"
+#include "nsCoord.h"
 
-/*
- * Type definitions used to interact with Servo. This gets included by nsINode,
- * so don't add significant include dependencies to this file.
- */
+struct RawServoFontFaceRule;
 
-class nsWindowSizes;
-struct ServoNodeData;
+namespace mozilla {
+struct LangGroupFontPrefs;
+}
+
+// used for associating sheet type with specific @font-face rules
+struct nsFontFaceRuleContainer {
+  RefPtr<RawServoFontFaceRule> mRule;
+  mozilla::SheetType mSheetType;
+};
+
 namespace mozilla {
 
-class SizeOfState;
-
-/*
- * Replaced types. These get mapped to associated Servo types in bindgen.
- */
-
-template<typename T>
-struct ServoUnsafeCell {
-  T value;
-
-  // Ensure that primitive types (i.e. pointers) get zero-initialized.
-  ServoUnsafeCell() : value() {};
-};
-
-template<typename T>
-struct ServoCell {
-  ServoUnsafeCell<T> value;
-  T Get() const { return value.value; }
-  void Set(T arg) { value.value = arg; }
-  ServoCell() : value() {};
-};
-
-// Indicates whether the Servo style system should expect the style on an element
-// to have already been resolved (i.e. via a parallel traversal), or whether it
-// may be lazily computed.
+// Indicates whether the Servo style system should expect the style on an
+// element to have already been resolved (i.e. via a parallel traversal), or
+// whether it may be lazily computed.
 enum class LazyComputeBehavior {
   Allow,
   Assert,
@@ -60,9 +48,9 @@ enum class ServoTraversalFlags : uint32_t {
   // pre-traversal. A forgetful traversal is usually the right thing if you
   // aren't going to do a post-traversal.
   Forgetful = 1 << 3,
-  // Clears all the dirty bits (dirty descendants, animation-only dirty-descendants,
-  // needs frame, descendants need frames) on the elements traversed.
-  // in the subtree.
+  // Clears all the dirty bits (dirty descendants, animation-only
+  // dirty-descendants, needs frame, descendants need frames) on the elements
+  // traversed. in the subtree.
   ClearDirtyBits = 1 << 5,
   // Clears only the animation-only dirty descendants bit in the subtree.
   ClearAnimationOnlyDirtyDescendants = 1 << 6,
@@ -88,10 +76,10 @@ enum class StyleRuleInclusion {
 
 // Represents which tasks are performed in a SequentialTask of UpdateAnimations.
 enum class UpdateAnimationsTasks : uint8_t {
-  CSSAnimations          = 1 << 0,
-  CSSTransitions         = 1 << 1,
-  EffectProperties       = 1 << 2,
-  CascadeResults         = 1 << 3,
+  CSSAnimations = 1 << 0,
+  CSSTransitions = 1 << 1,
+  EffectProperties = 1 << 2,
+  CascadeResults = 1 << 3,
   DisplayChangedFromNone = 1 << 4,
 };
 
@@ -125,35 +113,62 @@ enum class InheritTarget {
   PlaceholderFrame,
 };
 
+// Represents values for interaction media features.
+// https://drafts.csswg.org/mediaqueries-4/#mf-interaction
+enum class PointerCapabilities : uint8_t {
+  None = 0,
+  Coarse = 1 << 0,
+  Fine = 1 << 1,
+  Hover = 1 << 2,
+};
+
+MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(PointerCapabilities)
+
 // These measurements are obtained for both the UA cache and the Stylist, but
 // not all the fields are used in both cases.
-class ServoStyleSetSizes
-{
-public:
-  size_t mRuleTree;                // Stylist-only
-  size_t mPrecomputedPseudos;      // UA cache-only
-  size_t mElementAndPseudosMaps;   // Used for both
-  size_t mInvalidationMap;         // Used for both
-  size_t mRevalidationSelectors;   // Used for both
-  size_t mOther;                   // Used for both
+class ServoStyleSetSizes {
+ public:
+  size_t mRuleTree;               // Stylist-only
+  size_t mPrecomputedPseudos;     // UA cache-only
+  size_t mElementAndPseudosMaps;  // Used for both
+  size_t mInvalidationMap;        // Used for both
+  size_t mRevalidationSelectors;  // Used for both
+  size_t mOther;                  // Used for both
 
   ServoStyleSetSizes()
-    : mRuleTree(0)
-    , mPrecomputedPseudos(0)
-    , mElementAndPseudosMaps(0)
-    , mInvalidationMap(0)
-    , mRevalidationSelectors(0)
-    , mOther(0)
-  {}
+      : mRuleTree(0),
+        mPrecomputedPseudos(0),
+        mElementAndPseudosMaps(0),
+        mInvalidationMap(0),
+        mRevalidationSelectors(0),
+        mOther(0) {}
 };
 
-template <typename T>
-struct ServoRawOffsetArc {
-  // Again, a strong reference, but
-  // managed by the Rust code
-  T* mPtr;
+// A callback that can be sent via FFI which will be invoked _right before_
+// being mutated, and at most once.
+struct DeclarationBlockMutationClosure {
+  // The callback function. The argument is `data`.
+  void (*function)(void*) = nullptr;
+  void* data = nullptr;
 };
 
-} // namespace mozilla
+struct MediumFeaturesChangedResult {
+  bool mAffectsDocumentRules;
+  bool mAffectsNonDocumentRules;
+  bool mUsesViewportUnits;
+};
 
-#endif // mozilla_ServoTypes_h
+struct FontSizePrefs {
+  void CopyFrom(const mozilla::LangGroupFontPrefs&);
+  nscoord mDefaultVariableSize;
+  nscoord mDefaultFixedSize;
+  nscoord mDefaultSerifSize;
+  nscoord mDefaultSansSerifSize;
+  nscoord mDefaultMonospaceSize;
+  nscoord mDefaultCursiveSize;
+  nscoord mDefaultFantasySize;
+};
+
+}  // namespace mozilla
+
+#endif  // mozilla_ServoTypes_h

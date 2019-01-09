@@ -1,5 +1,11 @@
 "use strict";
 
+// This test tends to trigger a race in the fullscreen time telemetry,
+// where the fullscreen enter and fullscreen exit events (which use the
+// same histogram ID) overlap. That causes TelemetryStopwatch to log an
+// error.
+SimpleTest.ignoreAllUncaughtExceptions(true);
+
 /** Test for Bug 545812 **/
 
 // List of key codes which should exit full-screen mode.
@@ -18,7 +24,7 @@ function frameScript() {
   });
   addMessageListener("Test:DispatchUntrustedKeyEvents", msg => {
     var evt = new content.CustomEvent("Test:DispatchKeyEvents", {
-      detail: { code: msg.data }
+      detail: Cu.cloneInto({ code: msg.data }, content),
     });
     content.dispatchEvent(evt);
   });
@@ -38,7 +44,7 @@ function frameScript() {
   doc.addEventListener("keypress", keyHandler, true);
 
   function waitUntilActive() {
-    if (doc.docShell.isActive && doc.hasFocus()) {
+    if (docShell.isActive && doc.hasFocus()) {
       sendAsyncMessage("Test:Activated");
     } else {
       setTimeout(waitUntilActive, 10);

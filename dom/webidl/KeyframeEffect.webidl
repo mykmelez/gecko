@@ -22,7 +22,7 @@ dictionary KeyframeEffectOptions : EffectTiming {
 
 // KeyframeEffect should run in the caller's compartment to do custom
 // processing on the `keyframes` object.
-[Func="nsDocument::IsWebAnimationsEnabled",
+[Func="Document::IsWebAnimationsEnabled",
  RunConstructorInCallerCompartment,
  Constructor ((Element or CSSPseudoElement)? target,
               object? keyframes,
@@ -30,8 +30,9 @@ dictionary KeyframeEffectOptions : EffectTiming {
  Constructor (KeyframeEffect source)]
 interface KeyframeEffect : AnimationEffect {
   attribute (Element or CSSPseudoElement)?  target;
-  [NeedsCallerType]
+  [Pref="dom.animations-api.compositing.enabled"]
   attribute IterationCompositeOperation     iterationComposite;
+  [Pref="dom.animations-api.compositing.enabled"]
   attribute CompositeOperation              composite;
   [Throws] sequence<object> getKeyframes ();
   [Throws] void             setKeyframes (object? keyframes);

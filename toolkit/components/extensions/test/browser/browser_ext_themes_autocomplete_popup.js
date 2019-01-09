@@ -47,12 +47,12 @@ async function promiseAutocompleteResultPopup(inputText) {
 async function waitForAutocompleteResultAt(index) {
   let searchString = gURLBar.controller.searchString;
   await BrowserTestUtils.waitForCondition(
-    () => gURLBar.popup.richlistbox.children.length > index &&
-          gURLBar.popup.richlistbox.children[index].getAttribute("ac-text") == searchString,
+    () => gURLBar.popup.richlistbox.itemChildren.length > index &&
+          gURLBar.popup.richlistbox.itemChildren[index].getAttribute("ac-text") == searchString,
     `Waiting for the autocomplete result for "${searchString}" at [${index}] to appear`);
   // Ensure the addition is complete, for proper mouse events on the entries.
   await new Promise(resolve => window.requestIdleCallback(resolve, {timeout: 1000}));
-  return gURLBar.popup.richlistbox.children[index];
+  return gURLBar.popup.richlistbox.itemChildren[index];
 }
 
 add_task(async function setup() {
@@ -80,11 +80,11 @@ add_task(async function test_popup_url() {
     manifest: {
       "theme": {
         "images": {
-          "headerURL": "image1.png",
+          "theme_frame": "image1.png",
         },
         "colors": {
-          "accentcolor": ACCENT_COLOR,
-          "textcolor": TEXT_COLOR,
+          "frame": ACCENT_COLOR,
+          "tab_background_text": TEXT_COLOR,
           "popup": POPUP_COLOR,
           "popup_border": POPUP_BORDER_COLOR,
           "popup_text": POPUP_TEXT_COLOR_DARK,
@@ -120,7 +120,7 @@ add_task(async function test_popup_url() {
   await waitForAutocompleteResultAt(maxResults - 1);
 
   let popup = gURLBar.popup;
-  let results = popup.richlistbox.children;
+  let results = popup.richlistbox.itemChildren;
   is(results.length, maxResults,
      "Should get maxResults=" + maxResults + " results");
 
@@ -179,11 +179,11 @@ add_task(async function test_popup_url() {
     manifest: {
       "theme": {
         "images": {
-          "headerURL": "image1.png",
+          "theme_frame": "image1.png",
         },
         "colors": {
-          "accentcolor": ACCENT_COLOR,
-          "textcolor": TEXT_COLOR,
+          "frame": ACCENT_COLOR,
+          "tab_background_text": TEXT_COLOR,
           "popup": POPUP_COLOR,
           "popup_text": POPUP_TEXT_COLOR_BRIGHT,
           "popup_highlight": POPUP_SELECTED_COLOR,
@@ -239,9 +239,11 @@ add_task(async function test_popup_url() {
                "darktext should not be set!");
 
   // Calculate what GrayText should be. May differ between platforms.
-  let span = document.createElement("span");
+  let span = document.createXULElement("span");
   span.style.color = "GrayText";
+  document.documentElement.appendChild(span);
   let GRAY_TEXT = window.getComputedStyle(span).color;
+  span.remove();
 
   separator = document.getAnonymousElementByAttribute(results[1], "anonid", "separator");
   Assert.equal(window.getComputedStyle(separator).color,

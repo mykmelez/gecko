@@ -22,7 +22,7 @@ var gTests = [
 
     let indicator = promiseIndicatorWindow();
     await promiseMessage("ok", () => {
-      PopupNotifications.panel.firstChild.button.click();
+      PopupNotifications.panel.firstElementChild.button.click();
     });
     await expectObserverCalled("getUserMedia:response:allow");
     await expectObserverCalled("recording-device-events");
@@ -68,7 +68,7 @@ var gTests = [
     checkDeviceSelectors(false, true);
 
     await promiseMessage("ok", () => {
-      PopupNotifications.panel.firstChild.button.click();
+      PopupNotifications.panel.firstElementChild.button.click();
     });
     await expectObserverCalled("getUserMedia:response:allow");
     await expectObserverCalled("recording-device-events");
@@ -110,7 +110,7 @@ var gTests = [
 
     ok(!webrtcUI.showGlobalIndicator, "webrtcUI wants the global indicator hidden");
     is(webrtcUI.getActiveStreams(true, true, true).length, 0, "0 active streams");
-  }
+  },
 },
 
 {
@@ -127,7 +127,7 @@ var gTests = [
 
     let indicator = promiseIndicatorWindow();
     await promiseMessage("ok", () => {
-      PopupNotifications.panel.firstChild.button.click();
+      PopupNotifications.panel.firstElementChild.button.click();
     });
     await expectObserverCalled("getUserMedia:response:allow");
     await expectObserverCalled("recording-device-events");
@@ -173,7 +173,7 @@ var gTests = [
     checkDeviceSelectors(false, true);
 
     await promiseMessage("ok", () => {
-      PopupNotifications.panel.firstChild.button.click();
+      PopupNotifications.panel.firstElementChild.button.click();
     });
     await expectObserverCalled("getUserMedia:response:allow");
     await expectObserverCalled("recording-device-events");
@@ -212,7 +212,7 @@ var gTests = [
 
     ok(!webrtcUI.showGlobalIndicator, "webrtcUI wants the global indicator hidden");
     is(webrtcUI.getActiveStreams(true, true, true).length, 0, "0 active streams");
-  }
+  },
 },
 
 {
@@ -229,12 +229,13 @@ var gTests = [
        "webRTC-shareScreen-notification-icon", "anchored to device icon");
     checkDeviceSelectors(false, false, true);
 
-    // Select the first screen so that we can have a stream.
-    document.getElementById("webRTC-selectWindow-menulist").getItemAtIndex(2).doCommand();
+    // Select the last screen so that we can have a stream.
+    let menulist = document.getElementById("webRTC-selectWindow-menulist");
+    menulist.getItemAtIndex(menulist.itemCount - 1).doCommand();
 
     let indicator = promiseIndicatorWindow();
     await promiseMessage("ok", () => {
-      PopupNotifications.panel.firstChild.button.click();
+      PopupNotifications.panel.firstElementChild.button.click();
     });
     await expectObserverCalled("getUserMedia:response:allow");
     await expectObserverCalled("recording-device-events");
@@ -282,11 +283,11 @@ var gTests = [
        "webRTC-shareScreen-notification-icon", "anchored to device icon");
     checkDeviceSelectors(false, false, true);
 
-    // Select the first screen so that we can have a stream.
-    document.getElementById("webRTC-selectWindow-menulist").getItemAtIndex(2).doCommand();
+    // Select the last screen so that we can have a stream.
+    menulist.getItemAtIndex(menulist.itemCount - 1).doCommand();
 
     await promiseMessage("ok", () => {
-      PopupNotifications.panel.firstChild.button.click();
+      PopupNotifications.panel.firstElementChild.button.click();
     });
     await expectObserverCalled("getUserMedia:response:allow");
     await expectObserverCalled("recording-device-events");
@@ -317,7 +318,7 @@ var gTests = [
 
     ok(!webrtcUI.showGlobalIndicator, "webrtcUI wants the global indicator hidden");
     is(webrtcUI.getActiveStreams(true, true, true).length, 0, "0 active streams");
-  }
+  },
 },
 
 ];

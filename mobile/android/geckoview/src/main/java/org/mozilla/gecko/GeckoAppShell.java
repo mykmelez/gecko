@@ -13,6 +13,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.lang.IllegalStateException;
 import java.net.MalformedURLException;
 import java.net.Proxy;
 import java.net.URLConnection;
@@ -28,39 +29,30 @@ import java.util.TreeMap;
 import org.mozilla.gecko.annotation.JNITarget;
 import org.mozilla.gecko.annotation.RobocopTarget;
 import org.mozilla.gecko.annotation.WrapForJNI;
-import org.mozilla.gecko.permissions.Permissions;
-import org.mozilla.gecko.process.GeckoProcessManager;
-import org.mozilla.gecko.SysInfo;
 import org.mozilla.gecko.util.BitmapUtils;
 import org.mozilla.gecko.util.HardwareCodecCapabilityUtils;
 import org.mozilla.gecko.util.HardwareUtils;
+import org.mozilla.gecko.util.InputDeviceUtils;
 import org.mozilla.gecko.util.IOUtils;
 import org.mozilla.gecko.util.ProxySelector;
+import org.mozilla.gecko.util.StrictModeContext;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.geckoview.BuildConfig;
 
-import android.Manifest;
 import android.annotation.SuppressLint;
-import android.app.Activity;
 import android.app.ActivityManager;
+import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
-import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.pm.ResolveInfo;
-import android.content.pm.ServiceInfo;
-import android.content.pm.Signature;
 import android.content.res.TypedArray;
 import android.graphics.Bitmap;
 import android.graphics.ImageFormat;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
-import android.graphics.RectF;
-import android.graphics.SurfaceTexture;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.hardware.Camera;
@@ -78,33 +70,22 @@ import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.LocaleList;
 import android.os.Looper;
-import android.os.ParcelFileDescriptor;
 import android.os.PowerManager;
-import android.os.StrictMode;
-import android.os.SystemClock;
 import android.os.Vibrator;
 import android.provider.Settings;
-import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v4.util.SimpleArrayMap;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
-import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.ContextThemeWrapper;
 import android.view.Display;
 import android.view.HapticFeedbackConstants;
-import android.view.Surface;
-import android.view.SurfaceView;
-import android.view.TextureView;
-import android.view.View;
+import android.view.InputDevice;
 import android.view.WindowManager;
-import android.view.inputmethod.InputMethodManager;
 import android.webkit.MimeTypeMap;
-import android.widget.AbsoluteLayout;
 
 public class GeckoAppShell
 {
@@ -114,6 +95,11 @@ public class GeckoAppShell
     private GeckoAppShell() { }
 
     private static class GeckoCrashHandler extends CrashHandler {
+
+        public GeckoCrashHandler(final Class<? extends Service> handlerService) {
+            super(handlerService);
+        }
+
         @Override
         protected String getAppPackageName() {
             final Context appContext = getAppContext();
@@ -178,12 +164,21 @@ public class GeckoAppShell
     private static String sAppNotes;
     private static CrashHandler sCrashHandler;
 
-    public static synchronized CrashHandler ensureCrashHandling() {
+    public static synchronized CrashHandler ensureCrashHandling(final Class<? extends Service> handler) {
         if (sCrashHandler == null) {
-            sCrashHandler = new GeckoCrashHandler();
+            sCrashHandler = new GeckoCrashHandler(handler);
         }
 
         return sCrashHandler;
+    }
+
+    private static Class<? extends Service> sCrashHandlerService;
+    public static synchronized void setCrashHandlerService(final Class<? extends Service> handlerService) {
+        sCrashHandlerService = handlerService;
+    }
+
+    public static synchronized Class<? extends Service> getCrashHandlerService() {
+        return sCrashHandlerService;
     }
 
     public static synchronized boolean isCrashHandlingEnabled() {
@@ -209,7 +204,9 @@ public class GeckoAppShell
     private static final int HIGH_MEMORY_DEVICE_THRESHOLD_MB = 768;
 
     static private int sDensityDpi;
+    static private Float sDensity;
     static private int sScreenDepth;
+    static private boolean sUseMaxScreenDepth;
 
     /* Is the value in sVibrationEndTime valid? */
     private static boolean sVibrationMaybePlaying;
@@ -260,7 +257,7 @@ public class GeckoAppShell
     @WrapForJNI(dispatchTo = "gecko")
     public static native void notifyUriVisited(String uri);
 
-    private static Rect sScreenSize;
+    private static Rect sScreenSizeOverride;
 
     @WrapForJNI(stubName = "NotifyObservers", dispatchTo = "gecko")
     private static native void nativeNotifyObservers(String topic, String data);
@@ -935,20 +932,7 @@ public class GeckoAppShell
         return type + "/" + subType;
     }
 
-    static boolean isUriSafeForScheme(Uri aUri) {
-        // Bug 794034 - We don't want to pass MWI or USSD codes to the
-        // dialer, and ensure the Uri class doesn't parse a URI
-        // containing a fragment ('#')
-        final String scheme = aUri.getScheme();
-        if ("tel".equals(scheme) || "sms".equals(scheme)) {
-            final String number = aUri.getSchemeSpecificPart();
-            if (number.contains("#") || number.contains("*") || aUri.getFragment() != null) {
-                return false;
-            }
-        }
-        return true;
-    }
-
+    @SuppressWarnings("try")
     @WrapForJNI(calledFrom = "gecko")
     private static boolean openUriExternal(String targetURI,
                                            String mimeType,
@@ -963,11 +947,9 @@ public class GeckoAppShell
         // Bug 1450449 - Downloaded files already are already in a public directory and aren't
         // really owned exclusively by Firefox, so there's no real benefit to using
         // content:// URIs here.
-        StrictMode.VmPolicy prevPolicy = StrictMode.getVmPolicy();
-        StrictMode.setVmPolicy(StrictMode.VmPolicy.LAX);
-        boolean success = geckoInterface.openUriExternal(targetURI, mimeType, packageName, className, action, title);
-        StrictMode.setVmPolicy(prevPolicy);
-        return success;
+        try (StrictModeContext unused = StrictModeContext.allowAllVmPolicies()) {
+            return geckoInterface.openUriExternal(targetURI, mimeType, packageName, className, action, title);
+        }
     }
 
     @WrapForJNI(dispatchTo = "gecko")
@@ -1021,27 +1003,56 @@ public class GeckoAppShell
         getNotificationListener().closeNotification(name);
     }
 
-    @WrapForJNI(calledFrom = "gecko")
-    public static int getDpi() {
-        if (sDensityDpi == 0) {
-            sDensityDpi = getApplicationContext().getResources().getDisplayMetrics().densityDpi;
+    public static synchronized void setDisplayDpiOverride(@Nullable final Integer dpi) {
+        if (dpi == null) {
+            return;
         }
-
-        return sDensityDpi;
+        if (sDensityDpi != 0) {
+            Log.e(LOGTAG, "Tried to override screen DPI after it's already been set");
+            return;
+        }
+        sDensityDpi = dpi;
     }
 
     @WrapForJNI(calledFrom = "gecko")
-    private static float getDensity() {
-        return getApplicationContext().getResources().getDisplayMetrics().density;
+    public static synchronized int getDpi() {
+        if (sDensityDpi == 0) {
+            sDensityDpi = getApplicationContext().getResources().getDisplayMetrics().densityDpi;
+        }
+        return sDensityDpi;
+    }
+
+    public static synchronized void setDisplayDensityOverride(@Nullable final Float density) {
+        if (density == null) {
+            return;
+        }
+        if (sDensity != null) {
+            Log.e(LOGTAG, "Tried to override screen density after it's already been set");
+            return;
+        }
+        sDensity = density;
+    }
+
+    @WrapForJNI(calledFrom = "gecko")
+    private static synchronized float getDensity() {
+        if (sDensity == null) {
+            sDensity =  new Float(getApplicationContext().getResources().getDisplayMetrics().density);
+        }
+
+        return sDensity;
     }
 
     private static boolean isHighMemoryDevice() {
         return HardwareUtils.getMemSize() > HIGH_MEMORY_DEVICE_THRESHOLD_MB;
     }
 
+    public static synchronized void useMaxScreenDepth(final boolean enable) {
+        sUseMaxScreenDepth = enable;
+    }
+
     /**
      * Returns the colour depth of the default screen. This will either be
-     * 24 or 16.
+     * 32, 24 or 16.
      */
     @WrapForJNI(calledFrom = "gecko")
     public static synchronized int getScreenDepth() {
@@ -1052,21 +1063,11 @@ public class GeckoAppShell
                     getApplicationContext().getSystemService(Context.WINDOW_SERVICE);
             PixelFormat.getPixelFormatInfo(wm.getDefaultDisplay().getPixelFormat(), info);
             if (info.bitsPerPixel >= 24 && isHighMemoryDevice()) {
-                sScreenDepth = 24;
+                sScreenDepth = sUseMaxScreenDepth ? info.bitsPerPixel : 24;
             }
         }
 
         return sScreenDepth;
-    }
-
-    @WrapForJNI(calledFrom = "gecko")
-    private static synchronized void setScreenDepthOverride(int aScreenDepth) {
-        if (sScreenDepth != 0) {
-            Log.e(LOGTAG, "Tried to override screen depth after it's already been set");
-            return;
-        }
-
-        sScreenDepth = aScreenDepth;
     }
 
     @WrapForJNI(calledFrom = "gecko")
@@ -1107,13 +1108,19 @@ public class GeckoAppShell
         }
     }
 
+    @SuppressLint("MissingPermission")
     @WrapForJNI(calledFrom = "gecko")
     private static void vibrate(long milliseconds) {
         sVibrationEndTime = System.nanoTime() + milliseconds * 1000000;
         sVibrationMaybePlaying = true;
-        vibrator().vibrate(milliseconds);
+        try {
+            vibrator().vibrate(milliseconds);
+        } catch (final SecurityException ignore) {
+            Log.w(LOGTAG, "No VIBRATE permission");
+        }
     }
 
+    @SuppressLint("MissingPermission")
     @WrapForJNI(calledFrom = "gecko")
     private static void vibrate(long[] pattern, int repeat) {
         // If pattern.length is odd, the last element in the pattern is a
@@ -1126,14 +1133,23 @@ public class GeckoAppShell
 
         sVibrationEndTime = System.nanoTime() + vibrationDuration * 1000000;
         sVibrationMaybePlaying = true;
-        vibrator().vibrate(pattern, repeat);
+        try {
+            vibrator().vibrate(pattern, repeat);
+        } catch (final SecurityException ignore) {
+            Log.w(LOGTAG, "No VIBRATE permission");
+        }
     }
 
+    @SuppressLint("MissingPermission")
     @WrapForJNI(calledFrom = "gecko")
     private static void cancelVibrate() {
         sVibrationMaybePlaying = false;
         sVibrationEndTime = 0;
-        vibrator().cancel();
+        try {
+            vibrator().cancel();
+        } catch (final SecurityException ignore) {
+            Log.w(LOGTAG, "No VIBRATE permission");
+        }
     }
 
     @WrapForJNI(calledFrom = "gecko")
@@ -1711,7 +1727,7 @@ public class GeckoAppShell
         final GeckoProfile profile = GeckoThread.getActiveProfile();
         if (profile != null) {
             File lock = profile.getFile(".parentlock");
-            return lock.exists() && lock.delete();
+            return lock != null && lock.exists() && lock.delete();
         }
         return false;
     }
@@ -1853,26 +1869,101 @@ public class GeckoAppShell
         return 0;
     }
 
-    public static synchronized void resetScreenSize() {
-        sScreenSize = null;
+    /*
+     * Keep in sync with PointerCapabilities in ServoTypes.h
+    */
+    static private final int NO_POINTER            = 0x00000000;
+    static private final int COARSE_POINTER        = 0x00000001;
+    static private final int FINE_POINTER          = 0x00000002;
+    static private final int HOVER_CAPABLE_POINTER = 0x00000004;
+    private static int getPointerCapabilities(InputDevice inputDevice) {
+        int result = NO_POINTER;
+        int sources = inputDevice.getSources();
+
+        if (hasInputDeviceSource(sources, InputDevice.SOURCE_TOUCHSCREEN) ||
+            hasInputDeviceSource(sources, InputDevice.SOURCE_JOYSTICK)) {
+            result |= COARSE_POINTER;
+        } else if (hasInputDeviceSource(sources, InputDevice.SOURCE_MOUSE) ||
+                   hasInputDeviceSource(sources, InputDevice.SOURCE_STYLUS) ||
+                   hasInputDeviceSource(sources, InputDevice.SOURCE_TOUCHPAD) ||
+                   hasInputDeviceSource(sources, InputDevice.SOURCE_TRACKBALL)) {
+            result |= FINE_POINTER;
+        }
+
+        if (hasInputDeviceSource(sources, InputDevice.SOURCE_MOUSE) ||
+            hasInputDeviceSource(sources, InputDevice.SOURCE_TOUCHPAD) ||
+            hasInputDeviceSource(sources, InputDevice.SOURCE_TRACKBALL) ||
+            hasInputDeviceSource(sources, InputDevice.SOURCE_JOYSTICK)) {
+            result |= HOVER_CAPABLE_POINTER;
+        }
+
+        return result;
+    }
+
+    @WrapForJNI(calledFrom = "gecko")
+    // For any-pointer and any-hover media queries features.
+    private static int getAllPointerCapabilities() {
+        int result = NO_POINTER;
+
+        for (int deviceId : InputDevice.getDeviceIds()) {
+            InputDevice inputDevice = InputDevice.getDevice(deviceId);
+            if (inputDevice == null ||
+                !InputDeviceUtils.isPointerTypeDevice(inputDevice)) {
+                continue;
+            }
+
+            result |= getPointerCapabilities(inputDevice);
+        }
+
+        return result;
+    }
+
+    @WrapForJNI(calledFrom = "gecko")
+    // For pointer and hover media queries features.
+    private static int getPrimaryPointerCapabilities() {
+        int result = NO_POINTER;
+
+        for (int deviceId : InputDevice.getDeviceIds()) {
+            InputDevice inputDevice = InputDevice.getDevice(deviceId);
+            if (inputDevice == null ||
+                !InputDeviceUtils.isPointerTypeDevice(inputDevice)) {
+                continue;
+            }
+
+            result = getPointerCapabilities(inputDevice);
+
+            // We need information only for the primary pointer.
+            // (Assumes that the primary pointer appears first in the list)
+            break;
+        }
+
+        return result;
+    }
+
+    private static boolean hasInputDeviceSource(int sources, int inputDeviceSource) {
+        return (sources & inputDeviceSource) == inputDeviceSource;
+    }
+
+    public static synchronized void setScreenSizeOverride(final Rect size) {
+        sScreenSizeOverride = size;
     }
 
     @WrapForJNI(calledFrom = "gecko")
     private static synchronized Rect getScreenSize() {
-        if (sScreenSize == null) {
-            final WindowManager wm = (WindowManager)
-                    getApplicationContext().getSystemService(Context.WINDOW_SERVICE);
-            final Display disp = wm.getDefaultDisplay();
-            sScreenSize = new Rect(0, 0, disp.getWidth(), disp.getHeight());
+        if (sScreenSizeOverride != null) {
+            return sScreenSizeOverride;
         }
-        return sScreenSize;
+        final WindowManager wm = (WindowManager)
+                getApplicationContext().getSystemService(Context.WINDOW_SERVICE);
+        final Display disp = wm.getDefaultDisplay();
+        return new Rect(0, 0, disp.getWidth(), disp.getHeight());
     }
 
     @WrapForJNI(calledFrom = "any")
     public static int getAudioOutputFramesPerBuffer() {
         final int DEFAULT = 512;
 
-        if (SysInfo.getVersion() < 17) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1) {
             return DEFAULT;
         }
         final AudioManager am = (AudioManager)getApplicationContext()
@@ -1891,7 +1982,7 @@ public class GeckoAppShell
     public static int getAudioOutputSampleRate() {
         final int DEFAULT = 44100;
 
-        if (SysInfo.getVersion() < 17) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1) {
             return DEFAULT;
         }
         final AudioManager am = (AudioManager)getApplicationContext()

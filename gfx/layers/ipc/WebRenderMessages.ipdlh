@@ -22,10 +22,12 @@ using mozilla::wr::MaybeFontInstancePlatformOptions from "mozilla/webrender/WebR
 using mozilla::wr::FontInstanceKey from "mozilla/webrender/WebRenderTypes.h";
 using mozilla::wr::FontKey from "mozilla/webrender/WebRenderTypes.h";
 using mozilla::wr::ImageKey from "mozilla/webrender/WebRenderTypes.h";
+using mozilla::wr::BlobImageKey from "mozilla/webrender/WebRenderTypes.h";
 using mozilla::wr::PipelineId from "mozilla/webrender/WebRenderTypes.h";
 using mozilla::gfx::MaybeIntSize from "mozilla/gfx/Point.h";
 using mozilla::LayoutDeviceRect from "Units.h";
 using mozilla::ImageIntRect from "Units.h";
+using mozilla::gfx::Rect from "mozilla/gfx/Rect.h";
 using class mozilla::gfx::Matrix4x4 from "mozilla/gfx/Matrix.h";
 using struct mozilla::void_t from "ipc/IPCMessageUtils.h";
 
@@ -51,6 +53,13 @@ struct OpAddExternalImage {
   ImageKey key;
 };
 
+struct OpPushExternalImageForTexture {
+  ExternalImageId externalImageId;
+  ImageKey key;
+  PTexture texture;
+  bool isUpdate;
+};
+
 struct OpAddCompositorAnimations {
   CompositorAnimations data;
 };
@@ -65,13 +74,8 @@ struct OpRemovePipelineIdForCompositable {
   PipelineId pipelineId;
 };
 
-struct OpAddExternalImageIdForCompositable {
-  ExternalImageId externalImageId;
-  CompositableHandle handle;
-};
-
-struct OpRemoveExternalImageId {
-  ExternalImageId externalImageId;
+struct OpReleaseTextureOfImage {
+  ImageKey key;
 };
 
 struct OpUpdateAsyncImagePipeline {
@@ -83,12 +87,16 @@ struct OpUpdateAsyncImagePipeline {
   MixBlendMode mixBlendMode;
 };
 
+struct OpUpdatedAsyncImagePipeline {
+  PipelineId pipelineId;
+};
+
 union WebRenderParentCommand {
   OpAddPipelineIdForCompositable;
   OpRemovePipelineIdForCompositable;
-  OpAddExternalImageIdForCompositable;
-  OpRemoveExternalImageId;
+  OpReleaseTextureOfImage;
   OpUpdateAsyncImagePipeline;
+  OpUpdatedAsyncImagePipeline;
   CompositableOperation;
   OpAddCompositorAnimations;
 };
@@ -110,7 +118,7 @@ struct OpAddBlobImage {
   ImageDescriptor descriptor;
   OffsetRange bytes;
   uint16_t tiling;
-  ImageKey key;
+  BlobImageKey key;
 };
 
 struct OpUpdateImage {
@@ -122,12 +130,27 @@ struct OpUpdateImage {
 struct OpUpdateBlobImage {
   ImageDescriptor descriptor;
   OffsetRange bytes;
+  BlobImageKey key;
+  ImageIntRect dirtyRect;
+};
+
+struct OpSetImageVisibleArea {
+  ImageIntRect area;
+  BlobImageKey key;
+};
+
+struct OpUpdateExternalImage {
+  ExternalImageId externalImageId;
   ImageKey key;
   ImageIntRect dirtyRect;
 };
 
 struct OpDeleteImage {
   ImageKey key;
+};
+
+struct OpDeleteBlobImage {
+  BlobImageKey key;
 };
 
 struct OpAddRawFont {
@@ -164,13 +187,17 @@ union OpUpdateResource {
   OpAddBlobImage;
   OpUpdateImage;
   OpUpdateBlobImage;
+  OpSetImageVisibleArea;
   OpDeleteImage;
+  OpDeleteBlobImage;
   OpAddRawFont;
   OpAddFontDescriptor;
   OpDeleteFont;
   OpAddFontInstance;
   OpDeleteFontInstance;
   OpAddExternalImage;
+  OpPushExternalImageForTexture;
+  OpUpdateExternalImage;
 };
 
 } // namespace

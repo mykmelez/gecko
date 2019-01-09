@@ -3,11 +3,10 @@
 module.exports = {
   "rules": {
     "mozilla/no-aArgs": "error",
-    "mozilla/reject-importGlobalProperties": "error",
+    "mozilla/reject-importGlobalProperties": ["error", "everything"],
     "mozilla/var-only-at-top-level": "error",
     "block-scoped-var": "error",
     "camelcase": "error",
-    "comma-dangle": "off",
     "complexity": ["error", {"max": 20}],
     "curly": "error",
     "dot-location": ["error", "property"],
@@ -24,7 +23,6 @@ module.exports = {
     "no-multi-str": "error",
     "no-multiple-empty-lines": ["error", {"max": 1}],
     "no-return-assign": "error",
-    "no-sequences": "error",
     "no-shadow": "error",
     "no-throw-literal": "error",
     "padded-blocks": ["error", "never"],

@@ -23,6 +23,7 @@ module.exports = {
     "do_load_child_test_harness": false,
     "do_load_manifest": false,
     "do_load_module": false,
+    "do_note_exception": false,
     "do_parse_document": false,
     "do_report_unexpected_exception": false,
     "do_send_remote_message": false,
@@ -61,14 +62,28 @@ module.exports = {
     // Firefox specific function.
     // eslint-disable-next-line max-len
     // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/uneval
-    "uneval": false
+    "uneval": false,
   },
+
+  "overrides": [{
+    // If it is a head file, we turn off global unused variable checks, as it
+    // would require searching the other test files to know if they are used or not.
+    // This would be expensive and slow, and it isn't worth it for head files.
+    // We could get developers to declare as exported, but that doesn't seem worth it.
+    "files": "head*.js",
+    "rules": {
+      "no-unused-vars": ["error", {
+        "args": "none",
+        "vars": "local",
+      }],
+    },
+  }],
 
   rules: {
     "mozilla/import-headjs-globals": "error",
     "mozilla/mark-test-function-used": "error",
     "mozilla/no-arbitrary-setTimeout": "error",
     "mozilla/no-useless-run-test": "error",
-    "no-shadow": "error"
-  }
+    "no-shadow": "error",
+  },
 };

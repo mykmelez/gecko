@@ -83,7 +83,7 @@ PromptService.prototype = {
   },
   asyncPromptAuth: function() {
     return this.callProxy("asyncPromptAuth", arguments);
-  }
+  },
 };
 
 function InternalPrompt(aDomWin) {
@@ -103,8 +103,8 @@ InternalPrompt.prototype = {
       message: aText,
       buttons: aButtons || [
         PromptUtils.getLocaleString("OK"),
-        PromptUtils.getLocaleString("Cancel")
-      ]
+        PromptUtils.getLocaleString("Cancel"),
+      ],
     });
     return p;
   },
@@ -116,7 +116,7 @@ InternalPrompt.prototype = {
     if (aCheckMsg) {
       aPrompt.addCheckbox({
         label: PromptUtils.cleanUpLabel(aCheckMsg),
-        checked: aCheckState.value
+        checked: aCheckState.value,
       });
     }
 
@@ -127,7 +127,7 @@ InternalPrompt.prototype = {
     prompt.addTextbox({
       value: (value !== null) ? value : "",
       autofocus: autofocus,
-      hint: hint
+      hint: hint,
     });
   },
 
@@ -135,7 +135,7 @@ InternalPrompt.prototype = {
     prompt.addPassword({
       value: (value !== null) ? value : "",
       autofocus: autofocus,
-      hint: hint
+      hint: hint,
     });
   },
 
@@ -145,7 +145,7 @@ InternalPrompt.prototype = {
   showPrompt: function showPrompt(aPrompt) {
     if (this._domWin) {
       PromptUtils.fireDialogEvent(this._domWin, "DOMWillOpenModalDialog");
-      let winUtils = this._domWin.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+      let winUtils = this._domWin.windowUtils;
       winUtils.enterModalState();
     }
 
@@ -158,7 +158,7 @@ InternalPrompt.prototype = {
     Services.tm.spinEventLoopUntil(() => retval != null);
 
     if (this._domWin) {
-      let winUtils = this._domWin.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+      let winUtils = this._domWin.windowUtils;
       winUtils.leaveModalState();
       PromptUtils.fireDialogEvent(this._domWin, "DOMModalDialogClosed");
     }
@@ -478,7 +478,7 @@ InternalPrompt.prototype = {
           } catch (e) { /* Throw away exceptions caused by callback */ }
         }
         self._doAsyncPrompt();
-      }
+      },
     };
 
     Services.tm.dispatchToMainThread(runnable);
@@ -500,7 +500,7 @@ InternalPrompt.prototype = {
           this.callback.onAuthCancelled(this.context, false);
           this.callback = null;
           this.context = null;
-        }
+        },
       };
       let [hostname, httpRealm] = PromptUtils.getAuthTarget(aChannel, aAuthInfo);
       let hashKey = aLevel + "|" + hostname + "|" + httpRealm;
@@ -516,7 +516,7 @@ InternalPrompt.prototype = {
         authInfo: aAuthInfo,
         level: aLevel,
         inProgress: false,
-        prompter: this
+        prompter: this,
       };
 
       this._asyncPrompts[hashKey] = asyncPrompt;
@@ -526,7 +526,7 @@ InternalPrompt.prototype = {
       throw e;
     }
     return cancelable;
-  }
+  },
 };
 
 var PromptUtils = {
@@ -793,12 +793,11 @@ var PromptUtils = {
         return;
       let event = aDomWin.document.createEvent("Events");
       event.initEvent(aEventName, true, true);
-      let winUtils = aDomWin.QueryInterface(Ci.nsIInterfaceRequestor)
-                           .getInterface(Ci.nsIDOMWindowUtils);
+      let winUtils = aDomWin.windowUtils;
       winUtils.dispatchEventToChromeOnly(aDomWin, event);
     } catch (ex) {
     }
-  }
+  },
 };
 
 XPCOMUtils.defineLazyGetter(PromptUtils, "passwdBundle", function() {
@@ -823,7 +822,7 @@ AuthPromptAdapterFactory.prototype = {
 
   createAdapter: function(aPrompt) {
     return new AuthPromptAdapter(aPrompt);
-  }
+  },
 };
 
 
@@ -861,7 +860,7 @@ AuthPromptAdapter.prototype = {
 
   asyncPromptAuth: function(aChannel, aCallback, aContext, aLevel, aAuthInfo, aCheckLabel, aCheckValue) {
     throw Cr.NS_ERROR_NOT_IMPLEMENTED;
-  }
+  },
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([PromptService, AuthPromptAdapterFactory]);

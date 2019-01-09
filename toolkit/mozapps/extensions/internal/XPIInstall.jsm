@@ -43,7 +43,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   UpdateUtils: "resource://gre/modules/UpdateUtils.jsm",
 
   AddonInternal: "resource://gre/modules/addons/XPIDatabase.jsm",
-  InstallRDF: "resource://gre/modules/addons/RDFManifestConverter.jsm",
   XPIDatabase: "resource://gre/modules/addons/XPIDatabase.jsm",
   XPIInternal: "resource://gre/modules/addons/XPIProvider.jsm",
 });
@@ -75,8 +74,6 @@ XPCOMUtils.defineLazyServiceGetters(this, {
   gCertDB: ["@mozilla.org/security/x509certdb;1", "nsIX509CertDB"],
 });
 
-const hasOwnProperty = Function.call.bind(Object.prototype.hasOwnProperty);
-
 const PREF_INSTALL_REQUIRESECUREORIGIN = "extensions.install.requireSecureOrigin";
 const PREF_PENDING_OPERATIONS         = "extensions.pendingOperations";
 const PREF_SYSTEM_ADDON_UPDATE_URL    = "extensions.systemAddon.update.url";
@@ -87,7 +84,7 @@ const PREF_XPI_WHITELIST_REQUIRED     = "xpinstall.whitelist.required";
 
 const TOOLKIT_ID                      = "toolkit@mozilla.org";
 
-/* globals BOOTSTRAP_REASONS, KEY_APP_SYSTEM_ADDONS, KEY_APP_SYSTEM_DEFAULTS, PREF_BRANCH_INSTALLED_ADDON, PREF_SYSTEM_ADDON_SET, TEMPORARY_ADDON_SUFFIX, XPI_PERMISSION, XPIStates, isWebExtension, iterDirectory */
+/* globals BOOTSTRAP_REASONS, KEY_APP_SYSTEM_ADDONS, KEY_APP_SYSTEM_DEFAULTS, PREF_BRANCH_INSTALLED_ADDON, PREF_SYSTEM_ADDON_SET, TEMPORARY_ADDON_SUFFIX, XPI_PERMISSION, XPIStates, iterDirectory */
 const XPI_INTERNAL_SYMBOLS = [
   "BOOTSTRAP_REASONS",
   "KEY_APP_SYSTEM_ADDONS",
@@ -97,16 +94,11 @@ const XPI_INTERNAL_SYMBOLS = [
   "TEMPORARY_ADDON_SUFFIX",
   "XPI_PERMISSION",
   "XPIStates",
-  "isWebExtension",
   "iterDirectory",
 ];
 
 for (let name of XPI_INTERNAL_SYMBOLS) {
   XPCOMUtils.defineLazyGetter(this, name, () => XPIInternal[name]);
-}
-
-function isTheme(type) {
-  return XPIDatabase.isTheme(type);
 }
 
 /**
@@ -161,31 +153,6 @@ const KEY_APP_PROFILE                 = "app-profile";
 
 const DIR_STAGE                       = "staged";
 const DIR_TRASH                       = "trash";
-
-// Properties that exist in the install manifest
-const PROP_METADATA      = ["id", "version", "type", "internalName", "updateURL",
-                            "optionsURL", "optionsType", "aboutURL",
-                            "iconURL", "icon64URL"];
-const PROP_LOCALE_SINGLE = ["name", "description", "creator", "homepageURL"];
-const PROP_LOCALE_MULTI  = ["developers", "translators", "contributors"];
-
-// Map new string type identifiers to old style nsIUpdateItem types.
-// Retired values:
-// 32 = multipackage xpi file
-// 8 = locale
-// 256 = apiextension
-// 128 = experiment
-// theme = 4
-const TYPES = {
-  extension: 2,
-  dictionary: 64,
-};
-
-const COMPATIBLE_BY_DEFAULT_TYPES = {
-  extension: true,
-  dictionary: true,
-  "webextension-dictionary": true,
-};
 
 // This is a random number array that can be used as "salt" when generating
 // an automatic ID based on the directory path of an add-on. It will prevent
@@ -261,7 +228,7 @@ class Package {
     if (!shouldVerifySignedState(addon)) {
       return {
         signedState: AddonManager.SIGNEDSTATE_NOT_REQUIRED,
-        cert: null
+        cert: null,
       };
     }
 
@@ -339,7 +306,7 @@ XPIPackage = class XPIPackage extends Package {
   }
 
   async iterFiles(callback) {
-    for (let path of XPCOMUtils.IterStringEnumerator(this.zipReader.findEntries("*"))) {
+    for (let path of this.zipReader.findEntries("*")) {
       let entry = this.zipReader.getEntry(path);
       callback({
         path,
@@ -361,9 +328,9 @@ XPIPackage = class XPIPackage extends Package {
             aZipReader.close();
           resolve({
             signedState: getSignedStatus(aRv, aCert, addon.id),
-            cert: aCert
+            cert: aCert,
           });
-        }
+        },
       };
       // This allows the certificate DB to get the raw JS callback object so the
       // test code can pass through objects that XPConnect would reject.
@@ -413,7 +380,7 @@ function waitForAllPromises(promises) {
 }
 
 /**
- * Reads an AddonInternal object from a manifest stream.
+ * Reads an AddonInternal object from a webextension manifest.json
  *
  * @param {nsIURI} aUri
  *        A |file:| or |jar:| URL for the manifest
@@ -455,8 +422,8 @@ async function loadManifestFromWebManifest(aUri, aPackage) {
   let addon = new AddonInternal();
   addon.id = bss.id;
   addon.version = manifest.version;
-  addon.type = extension.type === "extension" ?
-               "webextension" : `webextension-${extension.type}`;
+  addon.type = extension.type === "langpack" ? "locale" : extension.type;
+  addon.loader = null;
   addon.strictCompatibility = true;
   addon.internalName = null;
   addon.updateURL = bss.update_url;
@@ -466,8 +433,9 @@ async function loadManifestFromWebManifest(aUri, aPackage) {
   addon.aboutURL = null;
   addon.dependencies = Object.freeze(Array.from(extension.dependencies));
   addon.startupData = extension.startupData;
+  addon.hidden = manifest.hidden;
 
-  if (isTheme(addon.type) && await aPackage.hasResource("preview.png")) {
+  if (addon.type === "theme" && await aPackage.hasResource("preview.png")) {
     addon.previewImage = "preview.png";
   }
 
@@ -485,7 +453,6 @@ async function loadManifestFromWebManifest(aUri, aPackage) {
 
   // WebExtensions don't use iconURLs
   addon.iconURL = null;
-  addon.icon64URL = null;
   addon.icons = manifest.icons || {};
   addon.userPermissions = extension.manifestPermissions;
 
@@ -543,214 +510,6 @@ async function loadManifestFromWebManifest(aUri, aPackage) {
   return addon;
 }
 
-/**
- * Reads an AddonInternal object from an RDF stream.
- *
- * @param {nsIURI} aUri
- *        The URI that the manifest is being read from
- * @param {string} aData
- *        The manifest text
- * @param {InstallPackage} aPackage
- *        An install package instance for the extension.
- * @returns {AddonInternal}
- * @throws if the install manifest in the RDF stream is corrupt or could not
- *         be read
- */
-async function loadManifestFromRDF(aUri, aData, aPackage) {
-  /**
-   * Reads locale properties from either the main install manifest root or
-   * an em:localized section in the install manifest.
-   *
-   * @param {Object} aSource
-   *        The resource to read the properties from.
-   * @param {boolean} isDefault
-   *        True if the locale is to be read from the main install manifest
-   *        root
-   * @param {string[]} aSeenLocales
-   *        An array of locale names already seen for this install manifest.
-   *        Any locale names seen as a part of this function will be added to
-   *        this array
-   * @returns {Object}
-   *        an object containing the locale properties
-   */
-  function readLocale(aSource, isDefault, aSeenLocales) {
-    let locale = {};
-    if (!isDefault) {
-      locale.locales = [];
-      for (let localeName of aSource.locales || []) {
-        if (!localeName) {
-          logger.warn("Ignoring empty locale in localized properties");
-          continue;
-        }
-        if (aSeenLocales.includes(localeName)) {
-          logger.warn("Ignoring duplicate locale in localized properties");
-          continue;
-        }
-        aSeenLocales.push(localeName);
-        locale.locales.push(localeName);
-      }
-
-      if (locale.locales.length == 0) {
-        logger.warn("Ignoring localized properties with no listed locales");
-        return null;
-      }
-    }
-
-    for (let prop of [...PROP_LOCALE_SINGLE, ...PROP_LOCALE_MULTI]) {
-      if (hasOwnProperty(aSource, prop)) {
-        locale[prop] = aSource[prop];
-      }
-    }
-
-    return locale;
-  }
-
-  let manifest = InstallRDF.loadFromString(aData).decode();
-
-  let addon = new AddonInternal();
-  for (let prop of PROP_METADATA) {
-    if (hasOwnProperty(manifest, prop)) {
-      addon[prop] = manifest[prop];
-    }
-  }
-
-  if (!addon.type) {
-    addon.type = "extension";
-  } else {
-    let type = addon.type;
-    addon.type = null;
-    for (let name in TYPES) {
-      if (TYPES[name] == type) {
-        addon.type = name;
-        break;
-      }
-    }
-  }
-
-  if (!(addon.type in TYPES))
-    throw new Error("Install manifest specifies unknown type: " + addon.type);
-
-  if (!addon.id)
-    throw new Error("No ID in install manifest");
-  if (!gIDTest.test(addon.id))
-    throw new Error("Illegal add-on ID " + addon.id);
-  if (!addon.version)
-    throw new Error("No version in install manifest");
-
-  addon.strictCompatibility = (!(addon.type in COMPATIBLE_BY_DEFAULT_TYPES) ||
-                               manifest.strictCompatibility == "true");
-
-  // Only read these properties for extensions.
-  if (addon.type == "extension") {
-    if (manifest.bootstrap != "true") {
-      throw new Error("Non-restartless extensions no longer supported");
-    }
-
-    addon.hasEmbeddedWebExtension = manifest.hasEmbeddedWebExtension == "true";
-
-    if (addon.optionsType &&
-        addon.optionsType != AddonManager.OPTIONS_INLINE_BROWSER &&
-        addon.optionsType != AddonManager.OPTIONS_TYPE_TAB) {
-      throw new Error("Install manifest specifies unknown optionsType: " + addon.optionsType);
-    }
-
-    if (addon.hasEmbeddedWebExtension) {
-      let uri = Services.io.newURI("webextension/manifest.json", null, aUri);
-      let embeddedAddon = await loadManifestFromWebManifest(uri, aPackage);
-      if (embeddedAddon.optionsURL) {
-        if (addon.optionsType || addon.optionsURL)
-          logger.warn(`Addon ${addon.id} specifies optionsType or optionsURL ` +
-                      `in both install.rdf and manifest.json`);
-
-        addon.optionsURL = embeddedAddon.optionsURL;
-        addon.optionsType = embeddedAddon.optionsType;
-      }
-    }
-  } else {
-    // Convert legacy dictionaries into a format the WebExtension
-    // dictionary loader can process.
-    if (addon.type === "dictionary") {
-      addon.type = "webextension-dictionary";
-      let dictionaries = {};
-      await aPackage.iterFiles(({path}) => {
-        let match = /^dictionaries\/([^\/]+)\.dic$/.exec(path);
-        if (match) {
-          let lang = match[1].replace(/_/g, "-");
-          dictionaries[lang] = match[0];
-        }
-      });
-      addon.startupData = {dictionaries};
-    }
-
-    // Only extensions are allowed to provide an optionsURL, optionsType,
-    // optionsBrowserStyle, or aboutURL. For all other types they are silently ignored
-    addon.aboutURL = null;
-    addon.optionsBrowserStyle = null;
-    addon.optionsType = null;
-    addon.optionsURL = null;
-  }
-
-  addon.defaultLocale = readLocale(manifest, true);
-
-  let seenLocales = [];
-  addon.locales = [];
-  for (let localeData of manifest.localized || []) {
-    let locale = readLocale(localeData, false, seenLocales);
-    if (locale)
-      addon.locales.push(locale);
-  }
-
-  let dependencies = new Set(manifest.dependencies);
-  addon.dependencies = Object.freeze(Array.from(dependencies));
-
-  let seenApplications = [];
-  addon.targetApplications = [];
-  for (let targetApp of manifest.targetApplications || []) {
-    if (!targetApp.id || !targetApp.minVersion ||
-        !targetApp.maxVersion) {
-      logger.warn("Ignoring invalid targetApplication entry in install manifest");
-      continue;
-    }
-    if (seenApplications.includes(targetApp.id)) {
-      logger.warn("Ignoring duplicate targetApplication entry for " + targetApp.id +
-           " in install manifest");
-      continue;
-    }
-    seenApplications.push(targetApp.id);
-    addon.targetApplications.push(targetApp);
-  }
-
-  // Note that we don't need to check for duplicate targetPlatform entries since
-  // the RDF service coalesces them for us.
-  addon.targetPlatforms = [];
-  for (let targetPlatform of manifest.targetPlatforms || []) {
-    let platform = {
-      os: null,
-      abi: null
-    };
-
-    let pos = targetPlatform.indexOf("_");
-    if (pos != -1) {
-      platform.os = targetPlatform.substring(0, pos);
-      platform.abi = targetPlatform.substring(pos + 1);
-    } else {
-      platform.os = targetPlatform;
-    }
-
-    addon.targetPlatforms.push(platform);
-  }
-
-  addon.userDisabled = false;
-  addon.softDisabled = addon.blocklistState == nsIBlocklistService.STATE_SOFTBLOCKED;
-  addon.applyBackgroundUpdates = AddonManager.AUTOUPDATE_DEFAULT;
-
-  // icons will be filled by the calling function
-  addon.icons = {};
-  addon.userPermissions = null;
-
-  return addon;
-}
-
 function defineSyncGUID(aAddon) {
   // Define .syncGUID as a lazy property which is also settable
   Object.defineProperty(aAddon, "syncGUID", {
@@ -781,43 +540,37 @@ function generateTemporaryInstallID(aFile) {
 }
 
 var loadManifest = async function(aPackage, aLocation, aOldAddon) {
-  async function loadFromRDF(aUri) {
-    let manifest = await aPackage.readString("install.rdf");
-    let addon = await loadManifestFromRDF(aUri, manifest, aPackage);
-
-    if (await aPackage.hasResource("icon.png")) {
-      addon.icons[32] = "icon.png";
-      addon.icons[48] = "icon.png";
+  let addon;
+  if (await aPackage.hasResource("manifest.json")) {
+    addon = await loadManifestFromWebManifest(aPackage.rootURI, aPackage);
+  } else {
+    for (let loader of AddonManagerPrivate.externalExtensionLoaders.values()) {
+      if (await aPackage.hasResource(loader.manifestFile)) {
+        addon = await loader.loadManifest(aPackage);
+        addon.loader = loader.name;
+        break;
+      }
     }
-
-    if (await aPackage.hasResource("icon64.png")) {
-      addon.icons[64] = "icon64.png";
-    }
-
-    return addon;
   }
 
-  let entry = await aPackage.getManifestFile();
-  if (!entry) {
+  if (!addon) {
     throw new Error(`File ${aPackage.filePath} does not contain a valid manifest`);
   }
-
-  let isWebExtension = entry == "manifest.json";
-  let addon = isWebExtension ?
-              await loadManifestFromWebManifest(aPackage.rootURI, aPackage) :
-              await loadFromRDF(aPackage.getURI("install.rdf"));
 
   addon._sourceBundle = aPackage.file;
   addon.location = aLocation;
 
   let {signedState, cert} = await aPackage.verifySignedState(addon);
   addon.signedState = signedState;
+  if (signedState != AddonManager.SIGNEDSTATE_PRIVILEGED) {
+    addon.hidden = false;
+  }
 
-  if (isWebExtension && !addon.id) {
+  if (!addon.id) {
     if (cert) {
       addon.id = cert.commonName;
       if (!gIDTest.test(addon.id)) {
-        throw new Error(`Webextension is signed with an invalid id (${addon.id})`);
+        throw new Error(`Extension is signed with an invalid id (${addon.id})`);
       }
     }
     if (!addon.id && aLocation.isTemporary) {
@@ -825,7 +578,8 @@ var loadManifest = async function(aPackage, aLocation, aOldAddon) {
     }
   }
 
-  await addon.updateBlocklistState({oldAddon: aOldAddon});
+  addon.propagateDisabledState(aOldAddon);
+  await addon.updateBlocklistState();
   addon.appDisabled = !XPIDatabase.isUsableAddon(addon);
 
   defineSyncGUID(addon);
@@ -957,6 +711,9 @@ function shouldVerifySignedState(aAddon) {
 
   // We don't care about signatures for default system add-ons
   if (aAddon.location.name == KEY_APP_SYSTEM_DEFAULTS)
+    return false;
+
+  if (aAddon.location.scope & AppConstants.MOZ_UNSIGNED_SCOPES)
     return false;
 
   // Otherwise only check signatures if the add-on is one of the signed
@@ -1268,7 +1025,7 @@ SafeInstallOperation.prototype = {
 
     while (this._createdDirs.length > 0)
       recursiveRemove(this._createdDirs.pop());
-  }
+  },
 };
 
 function getHashStringForCrypto(aCrypto) {
@@ -1308,6 +1065,11 @@ class AddonInstall {
    *        Optional icons for the add-on
    * @param {string} [options.version]
    *        An optional version for the add-on
+   * @param {Object?} [options.installTelemetryInfo]
+   *        An optional object which provides details about the installation source
+   *        included in the addon manager telemetry events.
+   * @param {boolean} [options.isUserRequestedUpdate]
+   *        An optional boolean, true if the install object is related to a user triggered update.
    * @param {function(string) : Promise<void>} [options.promptHandler]
    *        A callback to prompt the user before installing.
    */
@@ -1320,7 +1082,7 @@ class AddonInstall {
       let hashSplit = options.hash.toLowerCase().split(":");
       this.originalHash = {
         algorithm: hashSplit[0],
-        data: hashSplit[1]
+        data: hashSplit[1],
       };
     }
     this.hash = this.originalHash;
@@ -1350,6 +1112,16 @@ class AddonInstall {
     this.name = options.name || null;
     this.type = options.type || null;
     this.version = options.version || null;
+    this.isUserRequestedUpdate = options.isUserRequestedUpdate;
+    this.installTelemetryInfo = null;
+
+    if (options.installTelemetryInfo) {
+      this.installTelemetryInfo = options.installTelemetryInfo;
+    } else if (this.existingAddon) {
+      // Inherits the installTelemetryInfo on updates (so that the source of the original
+      // installation telemetry data is being preserved across the extension updates).
+      this.installTelemetryInfo = this.existingAddon.installTelemetryInfo;
+    }
 
     this.file = null;
     this.ownsTempFile = null;
@@ -1506,13 +1278,18 @@ class AddonInstall {
   }
 
   /**
-   * Updates the sourceURI and releaseNotesURI values on the Addon being
-   * installed by this AddonInstall instance.
+   * Updates the addon metadata that has to be propagated across restarts.
    */
-  updateAddonURIs() {
+  updatePersistedMetadata() {
     this.addon.sourceURI = this.sourceURI.spec;
-    if (this.releaseNotesURI)
+
+    if (this.releaseNotesURI) {
       this.addon.releaseNotesURI = this.releaseNotesURI.spec;
+    }
+
+    if (this.installTelemetryInfo) {
+      this.addon.installTelemetryInfo = this.installTelemetryInfo;
+    }
   }
 
   /**
@@ -1550,7 +1327,7 @@ class AddonInstall {
                                  `Refusing to upgrade addon ${this.existingAddon.id} to different ID ${this.addon.id}`]);
         }
 
-        if (isWebExtension(this.existingAddon.type) && !isWebExtension(this.addon.type)) {
+        if (this.existingAddon.isWebExtension && !this.addon.isWebExtension) {
           return Promise.reject([AddonManager.ERROR_UNEXPECTED_ADDON_TYPE,
                                  "WebExtensions may not be updated to other extension types"]);
         }
@@ -1575,7 +1352,7 @@ class AddonInstall {
       pkg.close();
     }
 
-    this.updateAddonURIs();
+    this.updatePersistedMetadata();
 
     this.addon._install = this;
     this.name = this.addon.selectedLocale.name;
@@ -1629,6 +1406,8 @@ class AddonInstall {
           existingAddon: this.existingAddon ? this.existingAddon.wrapper : null,
           addon: this.addon.wrapper,
           icon: this.getIcon(),
+          // Used in AMTelemetry to detect the install flow related to this prompt.
+          install: this.wrapper,
         };
 
         try {
@@ -1676,7 +1455,7 @@ class AddonInstall {
   /**
    * Installs the add-on into the install location.
    */
-  startInstall() {
+  async startInstall() {
     this.state = AddonManager.STATE_INSTALLING;
     if (!this._callInstallListeners("onInstallStarted")) {
       this.state = AddonManager.STATE_DOWNLOADED;
@@ -1697,6 +1476,19 @@ class AddonInstall {
       }
     }
 
+    // Reinstall existing user-disabled addon (of the same installed version).
+    // If addon is marked to be uninstalled - don't reinstall it.
+    if (this.existingAddon &&
+        this.existingAddon.location === this.location &&
+        this.existingAddon.version === this.addon.version &&
+        this.existingAddon.userDisabled &&
+        !this.existingAddon.pendingUninstall) {
+      await XPIDatabase.updateAddonDisabledState(this.existingAddon, false);
+      this.state = AddonManager.STATE_INSTALLED;
+      this._callInstallListeners("onInstallEnded", this.existingAddon.wrapper);
+      return;
+    }
+
     let isUpgrade = this.existingAddon &&
                     this.existingAddon.location == this.location;
 
@@ -1707,7 +1499,7 @@ class AddonInstall {
 
     let stagedAddon = this.location.installer.getStagingDir();
 
-    (async () => {
+    try {
       await this.location.installer.requestStagingDir();
 
       // remove any previously staged files
@@ -1730,7 +1522,7 @@ class AddonInstall {
         let file = await this.location.installer.installAddon({
           id: this.addon.id,
           source: stagedAddon,
-          existingAddonID
+          existingAddonID,
         });
 
         // Update the metadata in the database
@@ -1738,8 +1530,7 @@ class AddonInstall {
         this.addon.visible = true;
 
         if (isUpgrade) {
-          this.addon =  XPIDatabase.updateAddonMetadata(this.existingAddon, this.addon,
-                                                        file.path);
+          this.addon = XPIDatabase.updateAddonMetadata(this.existingAddon, this.addon, file.path);
           let state = this.location.get(this.addon.id);
           if (state) {
             state.syncWithDB(this.addon, true);
@@ -1765,7 +1556,7 @@ class AddonInstall {
         XPIDatabase.recordAddonTelemetry(this.addon);
 
         // Notify providers that a new theme has been enabled.
-        if (isTheme(this.addon.type) && this.addon.active)
+        if (this.addon.type === "theme" && this.addon.active)
           AddonManagerPrivate.notifyAddonChanged(this.addon.id, this.addon.type);
       };
 
@@ -1773,6 +1564,10 @@ class AddonInstall {
         if (this.existingAddon) {
           await XPIInternal.BootstrapScope.get(this.existingAddon).update(
             this.addon, !this.addon.disabled, install);
+
+          if (this.addon.disabled) {
+            flushJarCache(this.file);
+          }
         } else {
           await install();
           await XPIInternal.BootstrapScope.get(this.addon).install(undefined, true);
@@ -1780,7 +1575,7 @@ class AddonInstall {
       })();
 
       await this._startupPromise;
-    })().catch((e) => {
+    } catch (e) {
       logger.warn(`Failed to install ${this.file.path} from ${this.sourceURI.spec} to ${stagedAddon.path}`, e);
 
       if (stagedAddon.exists())
@@ -1791,10 +1586,10 @@ class AddonInstall {
       AddonManagerPrivate.callAddonListeners("onOperationCancelled",
                                              this.addon.wrapper);
       this._callInstallListeners("onInstallFailed");
-    }).then(() => {
+    } finally {
       this.removeTemporaryFile();
-      return this.location.installer.releaseStagingDir();
-    });
+      this.location.installer.releaseStagingDir();
+    }
   }
 
   /**
@@ -1970,7 +1765,8 @@ var LocalAddonInstall = class extends AddonInstall {
     let addon = await XPIDatabase.getVisibleAddonForID(this.addon.id);
 
     this.existingAddon = addon;
-    await this.addon.updateBlocklistState({oldAddon: this.existingAddon});
+    this.addon.propagateDisabledState(this.existingAddon);
+    await this.addon.updateBlocklistState();
     this.addon.updateDate = Date.now();
     this.addon.installDate = addon ? addon.installDate : this.addon.updateDate;
 
@@ -1983,7 +1779,7 @@ var LocalAddonInstall = class extends AddonInstall {
             this.state = AddonManager.STATE_DOWNLOADED;
             this._callInstallListeners("onNewInstall");
             resolve();
-          }
+          },
         }, AddonManager.UPDATE_WHEN_ADDON_INSTALLED);
       });
     } else {
@@ -2045,6 +1841,7 @@ var DownloadAddonInstall = class extends AddonInstall {
     this.crypto = null;
     this.badCertHandler = null;
     this.restartDownload = false;
+    this.downloadStartedAt = null;
 
     this._callInstallListeners("onNewInstall", this.listeners, this.wrapper);
   }
@@ -2091,6 +1888,8 @@ var DownloadAddonInstall = class extends AddonInstall {
    * Starts downloading the add-on's XPI file.
    */
   startDownload() {
+    this.downloadStartedAt = Cu.now();
+
     this.state = AddonManager.STATE_DOWNLOADING;
     if (!this._callInstallListeners("onDownloadStarted")) {
       logger.debug("onDownloadStarted listeners cancelled installation of addon " + this.sourceURI.spec);
@@ -2142,7 +1941,7 @@ var DownloadAddonInstall = class extends AddonInstall {
 
       this.channel = NetUtil.newChannel({
         uri: this.sourceURI,
-        loadUsingSystemPrincipal: true
+        loadUsingSystemPrincipal: true,
       });
       this.channel.notificationCallbacks = this;
       if (this.channel instanceof Ci.nsIHttpChannel) {
@@ -2189,7 +1988,7 @@ var DownloadAddonInstall = class extends AddonInstall {
         let hashSplit = hashStr.toLowerCase().split(":");
         this.hash = {
           algorithm: hashSplit[0],
-          data: hashSplit[1]
+          data: hashSplit[1],
         };
       } catch (e) {
       }
@@ -2362,7 +2161,8 @@ var DownloadAddonInstall = class extends AddonInstall {
     } else {
       this.addon.installDate = this.addon.updateDate;
     }
-    await this.addon.updateBlocklistState({oldAddon: this.existingAddon});
+    this.addon.propagateDisabledState(this.existingAddon);
+    await this.addon.updateBlocklistState();
 
     if (this._callInstallListeners("onDownloadEnded")) {
       // If a listener changed our state then do not proceed with the install
@@ -2405,8 +2205,10 @@ var DownloadAddonInstall = class extends AddonInstall {
  *        The add-on being updated
  * @param {Object} aUpdate
  *        The metadata about the new version from the update manifest
+ * @param {boolean} isUserRequested
+ *        An optional boolean, true if the install object is related to a user triggered update.
  */
-function createUpdate(aCallback, aAddon, aUpdate) {
+function createUpdate(aCallback, aAddon, aUpdate, isUserRequested) {
   let url = Services.io.newURI(aUpdate.updateURL);
 
   (async function() {
@@ -2417,7 +2219,9 @@ function createUpdate(aCallback, aAddon, aUpdate) {
       type: aAddon.type,
       icons: aAddon.icons,
       version: aUpdate.version,
+      isUserRequestedUpdate: isUserRequested,
     };
+
     let install;
     if (url instanceof Ci.nsIFileURL) {
       install = new LocalAddonInstall(aAddon.location, url, opts);
@@ -2440,6 +2244,10 @@ function createUpdate(aCallback, aAddon, aUpdate) {
 const wrapperMap = new WeakMap();
 let installFor = wrapper => wrapperMap.get(wrapper);
 
+// Numeric id included in the install telemetry events to correlate multiple events related
+// to the same install or update flow.
+let nextInstallId = 0;
+
 /**
  * Creates a wrapper for an AddonInstall that only exposes the public API
  *
@@ -2448,6 +2256,7 @@ let installFor = wrapper => wrapperMap.get(wrapper);
  */
 function AddonInstallWrapper(aInstall) {
   wrapperMap.set(this, aInstall);
+  this.installId = ++nextInstallId;
 }
 
 AddonInstallWrapper.prototype = {
@@ -2456,7 +2265,7 @@ AddonInstallWrapper.prototype = {
   },
 
   get type() {
-    return XPIDatabase.getExternalType(installFor(this).type);
+    return installFor(this).type;
   },
 
   get iconURL() {
@@ -2479,6 +2288,18 @@ AddonInstallWrapper.prototype = {
 
   set promptHandler(handler) {
     installFor(this).promptHandler = handler;
+  },
+
+  get installTelemetryInfo() {
+    return installFor(this).installTelemetryInfo;
+  },
+
+  get isUserRequestedUpdate() {
+    return Boolean(installFor(this).isUserRequestedUpdate);
+  },
+
+  get downloadStartedAt() {
+    return installFor(this).downloadStartedAt;
   },
 
   install() {
@@ -2536,6 +2357,7 @@ var UpdateChecker = function(aAddon, aListener, aReason, aAppVersion, aPlatformV
   this.appVersion = aAppVersion;
   this.platformVersion = aPlatformVersion;
   this.syncCompatibility = (aReason == AddonManager.UPDATE_WHEN_NEW_APP_INSTALLED);
+  this.isUserRequested = (aReason == AddonManager.UPDATE_WHEN_USER_REQUESTED);
 
   let updateURL = aAddon.updateURL;
   if (!updateURL) {
@@ -2595,14 +2417,13 @@ UpdateChecker.prototype = {
     XPIInstall.done(this.addon._updateCheck);
     this.addon._updateCheck = null;
     let AUC = AddonUpdateChecker;
-
     let ignoreMaxVersion = false;
-    let ignoreStrictCompat = false;
+    // Ignore strict compatibility for dictionaries by default.
+    let ignoreStrictCompat = (this.addon.type == "dictionary");
     if (!AddonManager.checkCompatibility) {
       ignoreMaxVersion = true;
       ignoreStrictCompat = true;
-    } else if (this.addon.type in COMPATIBLE_BY_DEFAULT_TYPES &&
-               !AddonManager.strictCompatibility &&
+    } else if (!AddonManager.strictCompatibility &&
                !this.addon.strictCompatibility) {
       ignoreMaxVersion = true;
     }
@@ -2676,7 +2497,7 @@ UpdateChecker.prototype = {
 
       createUpdate(aInstall => {
         sendUpdateAvailableMessages(this, aInstall);
-      }, this.addon, update);
+      }, this.addon, update, this.isUserRequested);
     } else {
       sendUpdateAvailableMessages(this, null);
     }
@@ -2706,7 +2527,7 @@ UpdateChecker.prototype = {
       // This will call back to onUpdateCheckError with a CANCELLED error
       parser.cancel();
     }
-  }
+  },
 };
 
 /**
@@ -2716,17 +2537,22 @@ UpdateChecker.prototype = {
  *        The file to install
  * @param {XPIStateLocation} location
  *        The location to install to
+ * @param {Object?} [telemetryInfo]
+ *        An optional object which provides details about the installation source
+ *        included in the addon manager telemetry events.
  * @returns {Promise<AddonInstall>}
  *        A Promise that resolves with the new install object.
  */
-function createLocalInstall(file, location) {
+function createLocalInstall(file, location, telemetryInfo) {
   if (!location) {
     location = XPIStates.getLocation(KEY_APP_PROFILE);
   }
   let url = Services.io.newFileURI(file);
 
   try {
-    let install = new LocalAddonInstall(location, url);
+    let install = new LocalAddonInstall(location, url, {
+      installTelemetryInfo: telemetryInfo,
+    });
     return install.init().then(() => install);
   } catch (e) {
     logger.error("Error creating install", e);
@@ -3247,7 +3073,7 @@ class SystemAddonInstaller extends DirectoryInstaller {
       state = { schema: 1, directory: newDir.leafName, addons: {} };
       for (let addon of aAddons) {
         state.addons[addon.id] = {
-          version: addon.version
+          version: addon.version,
         };
       }
 
@@ -3425,6 +3251,7 @@ var XPIInstall = {
    */
   async installDistributionAddon(id, file, location) {
     let addon = await loadManifestFromFile(file, location);
+    addon.installTelemetryInfo = {source: "distribution"};
 
     if (addon.id != id) {
       throw new Error(`File file ${file.path} contains an add-on with an incorrect ID`);
@@ -3740,9 +3567,12 @@ var XPIInstall = {
    *        A version for the install
    * @param {XULElement?} [aBrowser]
    *        The browser performing the install
+   * @param {Object?} [aInstallTelemetryInfo]
+   *        An optional object which provides details about the installation source
+   *        included in the addon manager telemetry events.
    * @returns {AddonInstall}
    */
-  async getInstallForURL(aUrl, aHash, aName, aIcons, aVersion, aBrowser) {
+  async getInstallForURL(aUrl, aHash, aName, aIcons, aVersion, aBrowser, aInstallTelemetryInfo) {
     let location = XPIStates.getLocation(KEY_APP_PROFILE);
     let url = Services.io.newURI(aUrl);
 
@@ -3752,6 +3582,7 @@ var XPIInstall = {
       name: aName,
       icons: aIcons,
       version: aVersion,
+      installTelemetryInfo: aInstallTelemetryInfo,
     };
 
     if (url instanceof Ci.nsIFileURL) {
@@ -3769,10 +3600,13 @@ var XPIInstall = {
    *
    * @param {nsIFile} aFile
    *        The file to be installed
+   * @param {Object?} [aInstallTelemetryInfo]
+   *        An optional object which provides details about the installation source
+   *        included in the addon manager telemetry events.
    * @returns {AddonInstall?}
    */
-  async getInstallForFile(aFile) {
-    let install = await createLocalInstall(aFile);
+  async getInstallForFile(aFile, aInstallTelemetryInfo) {
+    let install = await createLocalInstall(aFile, null, aInstallTelemetryInfo);
     return install ? install.wrapper : null;
   },
 
@@ -3788,7 +3622,7 @@ var XPIInstall = {
     let results = [...this.installs];
     if (aTypes) {
       results = results.filter(install => {
-        return aTypes.includes(XPIDatabase.getExternalType(install.type));
+        return aTypes.includes(install.type);
       });
     }
 
@@ -3883,7 +3717,7 @@ var XPIInstall = {
     AddonManagerPrivate.callAddonListeners("onInstalled", addon.wrapper);
 
     // Notify providers that a new theme has been enabled.
-    if (isTheme(addon.type))
+    if (addon.type === "theme")
       AddonManagerPrivate.notifyAddonChanged(addon.id, addon.type, false);
 
     return addon.wrapper;
@@ -3932,7 +3766,7 @@ var XPIInstall = {
       }
 
       XPIDatabase.setAddonProperties(aAddon, {
-        pendingUninstall: true
+        pendingUninstall: true,
       });
       Services.prefs.setBoolPref(PREF_PENDING_OPERATIONS, true);
       let xpiState = aAddon.location.get(aAddon.id);
@@ -4000,7 +3834,7 @@ var XPIInstall = {
     }
 
     // Notify any other providers that a new theme has been enabled
-    if (isTheme(aAddon.type) && aAddon.active)
+    if (aAddon.type === "theme" && aAddon.active)
       AddonManagerPrivate.notifyAddonChanged(null, aAddon.type);
   },
 
@@ -4020,7 +3854,7 @@ var XPIInstall = {
       aAddon.location.installer.cleanStagingDir([aAddon.id]);
 
     XPIDatabase.setAddonProperties(aAddon, {
-      pendingUninstall: false
+      pendingUninstall: false,
     });
 
     if (!aAddon.visible)
@@ -4041,7 +3875,7 @@ var XPIInstall = {
     }
 
     // Notify any other providers that this theme is now enabled again.
-    if (isTheme(aAddon.type) && aAddon.active)
+    if (aAddon.type === "theme" && aAddon.active)
       AddonManagerPrivate.notifyAddonChanged(aAddon.id, aAddon.type, false);
   },
 

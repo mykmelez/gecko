@@ -19,9 +19,8 @@
 namespace mozilla {
 namespace wr {
 
-/* static */ UniquePtr<RenderCompositor>
-RenderCompositor::Create(RefPtr<widget::CompositorWidget>&& aWidget)
-{
+/* static */ UniquePtr<RenderCompositor> RenderCompositor::Create(
+    RefPtr<widget::CompositorWidget>&& aWidget) {
 #ifdef XP_WIN
   if (gfx::gfxVars::UseWebRenderANGLE()) {
     return RenderCompositorANGLE::Create(std::move(aWidget));
@@ -31,13 +30,11 @@ RenderCompositor::Create(RefPtr<widget::CompositorWidget>&& aWidget)
 }
 
 RenderCompositor::RenderCompositor(RefPtr<widget::CompositorWidget>&& aWidget)
-  : mWidget(aWidget)
-{
-}
+    : mWidget(aWidget) {}
 
-RenderCompositor::~RenderCompositor()
-{
-}
+RenderCompositor::~RenderCompositor() {}
 
-} // namespace wr
-} // namespace mozilla
+bool RenderCompositor::MakeCurrent() { return gl()->MakeCurrent(); }
+
+}  // namespace wr
+}  // namespace mozilla

@@ -11,9 +11,8 @@ const {AppProjects} = require("devtools/client/webide/modules/app-projects");
 const TabStore = require("devtools/client/webide/modules/tab-store");
 const {AppValidator} = require("devtools/client/webide/modules/app-validator");
 const {ConnectionManager, Connection} = require("devtools/shared/client/connection-manager");
-const {getDeviceFront} = require("devtools/shared/fronts/device");
-const {getPreferenceFront} = require("devtools/shared/fronts/preference");
-const {RuntimeScanners, RuntimeTypes} = require("devtools/client/webide/modules/runtimes");
+const {RuntimeScanners} = require("devtools/client/webide/modules/runtimes");
+const {RuntimeTypes} = require("devtools/client/webide/modules/runtime-types");
 const {NetUtil} = require("resource://gre/modules/NetUtil.jsm");
 const Telemetry = require("devtools/client/shared/telemetry");
 
@@ -71,7 +70,7 @@ var AppManager = exports.AppManager = {
     this.tabStore.destroy();
     this.tabStore = null;
     this.connection.off(Connection.Events.STATUS_CHANGED, this.onConnectionChanged);
-    this._listTabsResponse = null;
+    this._rootForm = null;
     this.connection.disconnect();
     this.connection = null;
   },
@@ -140,7 +139,7 @@ var AppManager = exports.AppManager = {
     }
   },
 
-  onConnectionChanged: function() {
+  onConnectionChanged: async function() {
     console.log("Connection status changed: " + this.connection.status);
 
     if (this.connection.status == Connection.Status.DISCONNECTED) {
@@ -148,13 +147,25 @@ var AppManager = exports.AppManager = {
     }
 
     if (!this.connected) {
-      this._listTabsResponse = null;
+      this._rootForm = null;
+      this.deviceFront = null;
+      this.preferenceFront = null;
+      this.perfFront = null;
     } else {
-      this.connection.client.listTabs().then((response) => {
-        this._listTabsResponse = response;
+      const response = await this.connection.client.mainRoot.rootForm;
+      this._rootForm = response;
+      try {
+        this.deviceFront = await this.connection.client.mainRoot.getFront("device");
+        this.preferenceFront = await this.connection.client.mainRoot.getFront("preference");
+        this.perfFront = await this.connection.client.mainRoot.getFront("perf");
         this._recordRuntimeInfo();
-        this.update("runtime-global-actors");
-      });
+      } catch (e) {
+        // This may fail on <FF55 (because of lack of bug 1352157) but we will want to
+        // emit runtime-global-actors in order to call checkRuntimeVersion and display
+        // the compatibility popup.
+        console.error(e);
+      }
+      this.update("runtime-global-actors");
     }
 
     this.update("connection");
@@ -241,23 +252,12 @@ var AppManager = exports.AppManager = {
 
   getTarget: function() {
     if (this.selectedProject.type == "mainProcess") {
-      // Fx >=39 exposes a ParentProcessTargetActor to debug the main process
-      if (this.connection.client.mainRoot.traits.allowChromeProcess) {
-        return this.connection.client.getProcess()
-                   .then(aResponse => {
-                     return TargetFactory.forRemoteTab({
-                       form: aResponse.form,
-                       client: this.connection.client,
-                       chrome: true
-                     });
-                   });
-      }
-      // Fx <39 exposes chrome target actors on the root actor
-      return TargetFactory.forRemoteTab({
-          form: this._listTabsResponse,
+      return this.connection.client.mainRoot.getMainProcess().then(front => {
+        return TargetFactory.forRemoteTab({
+          activeTab: front,
           client: this.connection.client,
           chrome: true,
-          isBrowsingContext: false
+        });
       });
     }
 
@@ -500,26 +500,8 @@ var AppManager = exports.AppManager = {
     return this.connection.client &&
            this.connection.client.mainRoot &&
            this.connection.client.mainRoot.traits.allowChromeProcess ||
-           (this._listTabsResponse &&
-            this._listTabsResponse.consoleActor);
-  },
-
-  get listTabsForm() {
-    return this._listTabsResponse;
-  },
-
-  get deviceFront() {
-    if (!this._listTabsResponse) {
-      return null;
-    }
-    return getDeviceFront(this.connection.client, this._listTabsResponse);
-  },
-
-  get preferenceFront() {
-    if (!this._listTabsResponse) {
-      return null;
-    }
-    return getPreferenceFront(this.connection.client, this._listTabsResponse);
+           (this._rootForm &&
+            this._rootForm.consoleActor);
   },
 
   disconnectRuntime: function() {
@@ -564,7 +546,7 @@ var AppManager = exports.AppManager = {
       return Promise.reject("Can't install");
     }
 
-    if (!this._listTabsResponse) {
+    if (!this._rootForm) {
       this.reportError("error_cantInstallNotFullyConnected");
       return Promise.reject("Can't install");
     }
@@ -610,7 +592,7 @@ var AppManager = exports.AppManager = {
         const appId = origin.host;
         const metadata = {
           origin: origin.spec,
-          manifestURL: project.location
+          manifestURL: project.location,
         };
         response = await self._appsFront.installHosted(appId,
                                             metadata,
@@ -658,7 +640,7 @@ var AppManager = exports.AppManager = {
       const validation = new AppValidator({
         type: project.type,
         // Build process may place the manifest in a non-root directory
-        location: packageDir
+        location: packageDir,
       });
 
       await validation.validate();
@@ -738,7 +720,7 @@ var AppManager = exports.AppManager = {
     this.runtimeList = {
       usb: [],
       wifi: [],
-      other: []
+      other: [],
     };
   },
 

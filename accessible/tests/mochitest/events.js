@@ -70,6 +70,11 @@ function isHTMLElement(aNode) {
          aNode.namespaceURI == "http://www.w3.org/1999/xhtml";
 }
 
+function isXULElement(aNode) {
+  return aNode.nodeType == aNode.ELEMENT_NODE &&
+         aNode.namespaceURI == "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+}
+
 /**
  * Executes the function when requested event is handled.
  *
@@ -107,10 +112,32 @@ function waitForEvent(aEventType, aTargetOrFunc, aFunc, aContext, aArg1, aArg2) 
         },
         0
       );
-    }
+    },
   };
 
   registerA11yEventListener(aEventType, handler);
+}
+
+/**
+ * A promise based version of waitForEvent function.
+ */
+function waitForEventPromise(eventType, target) {
+  return new Promise(resolve => {
+    let eventObserver = {
+      observe(subject, topic, data) {
+        let event = subject.QueryInterface(nsIAccessibleEvent);
+        if (event.eventType !== eventType) {
+          return;
+        }
+
+        if (event.accessible == getAccessible(target)) {
+          Services.obs.removeObserver(this, "accessible-event");
+          resolve(event);
+        }
+      },
+    };
+    Services.obs.addObserver(eventObserver, "accessible-event");
+  });
 }
 
 /**
@@ -1070,17 +1097,18 @@ function synthClick(aNodeOrID, aCheckerOrEventSeq, aArgs) {
     // Scroll the node into view, otherwise synth click may fail.
     if (isHTMLElement(targetNode)) {
       targetNode.scrollIntoView(true);
-    } else if (ChromeUtils.getClassName(targetNode) == "XULElement") {
+    } else if (isXULElement(targetNode)) {
       var targetAcc = getAccessible(targetNode);
       targetAcc.scrollTo(SCROLL_TYPE_ANYWHERE);
     }
 
     var x = 1, y = 1;
     if (aArgs && ("where" in aArgs) && aArgs.where == "right") {
-      if (isHTMLElement(targetNode))
+      if (isHTMLElement(targetNode)) {
         x = targetNode.offsetWidth - 1;
-    else if (ChromeUtils.getClassName(targetNode) == "XULElement")
+      } else if (isXULElement(targetNode)) {
         x = targetNode.boxObject.width - 1;
+      }
     }
     synthesizeMouse(targetNode, x, y, aArgs ? aArgs : {});
   };
@@ -1383,7 +1411,7 @@ function synthContextMenu(aID, aCheckerOrEventSeq) {
  */
 function openCombobox(aComboboxID) {
   this.eventSeq = [
-    new stateChangeChecker(STATE_EXPANDED, false, true, aComboboxID)
+    new stateChangeChecker(STATE_EXPANDED, false, true, aComboboxID),
   ];
 
   this.invoke = function openCombobox_invoke() {
@@ -1401,7 +1429,7 @@ function openCombobox(aComboboxID) {
  */
 function closeCombobox(aComboboxID) {
   this.eventSeq = [
-    new stateChangeChecker(STATE_EXPANDED, false, false, aComboboxID)
+    new stateChangeChecker(STATE_EXPANDED, false, false, aComboboxID),
   ];
 
   this.invoke = function closeCombobox_invoke() {
@@ -1541,7 +1569,7 @@ function moveCaretToDOMPoint(aID, aDOMPointNodeID, aDOMPointOffset,
   };
 
   this.eventSeq = [
-    new caretMoveChecker(aExpectedOffset, this.target)
+    new caretMoveChecker(aExpectedOffset, this.target),
   ];
 
   if (this.focus)
@@ -1565,7 +1593,7 @@ function setCaretOffset(aID, aOffset, aFocusTargetID) {
   };
 
   this.eventSeq = [
-    new caretMoveChecker(this.offset, this.target)
+    new caretMoveChecker(this.offset, this.target),
   ];
 
   if (this.focus)
@@ -1876,7 +1904,7 @@ function selChangeSeq(aUnselectedID, aSelectedID) {
   if (!aUnselectedID) {
     return [
       new stateChangeChecker(STATE_SELECTED, false, true, aSelectedID),
-      new invokerChecker(EVENT_SELECTION, aSelectedID)
+      new invokerChecker(EVENT_SELECTION, aSelectedID),
     ];
   }
 
@@ -1886,13 +1914,13 @@ function selChangeSeq(aUnselectedID, aSelectedID) {
     [
       new stateChangeChecker(STATE_SELECTED, false, false, aUnselectedID),
       new stateChangeChecker(STATE_SELECTED, false, true, aSelectedID),
-      new invokerChecker(EVENT_SELECTION, aSelectedID)
+      new invokerChecker(EVENT_SELECTION, aSelectedID),
     ],
     [
       new stateChangeChecker(STATE_SELECTED, false, true, aSelectedID),
       new stateChangeChecker(STATE_SELECTED, false, false, aUnselectedID),
-      new invokerChecker(EVENT_SELECTION, aSelectedID)
-    ]
+      new invokerChecker(EVENT_SELECTION, aSelectedID),
+    ],
   ];
 }
 
@@ -1902,7 +1930,7 @@ function selChangeSeq(aUnselectedID, aSelectedID) {
 function selRemoveSeq(aUnselectedID) {
   return [
     new stateChangeChecker(STATE_SELECTED, false, false, aUnselectedID),
-    new invokerChecker(EVENT_SELECTION_REMOVE, aUnselectedID)
+    new invokerChecker(EVENT_SELECTION_REMOVE, aUnselectedID),
   ];
 }
 
@@ -1912,7 +1940,7 @@ function selRemoveSeq(aUnselectedID) {
 function selAddSeq(aSelectedID) {
   return [
     new stateChangeChecker(STATE_SELECTED, false, true, aSelectedID),
-    new invokerChecker(EVENT_SELECTION_ADD, aSelectedID)
+    new invokerChecker(EVENT_SELECTION_ADD, aSelectedID),
   ];
 }
 
@@ -1999,7 +2027,7 @@ var gA11yEventObserver =
 
     for (var index = 0; index < listenersArray.length; index++)
       listenersArray[index].handleEvent(event);
-  }
+  },
 };
 
 function listenA11yEvents(aStartToListen) {
@@ -2136,7 +2164,7 @@ var gLogger =
     var endIdx = startIdx + aFeature.length;
     return endIdx == gA11yEventDumpFeature.length ||
       gA11yEventDumpFeature[endIdx] == ";";
-  }
+  },
 };
 
 
@@ -2166,7 +2194,7 @@ function sequenceItem(aProcessor, aEventType, aTarget, aItemID) {
     getID: function invoker_getID() {
       return aItemID;
     },
-    eventSeq: [ new invokerChecker(aEventType, aTarget) ]
+    eventSeq: [ new invokerChecker(aEventType, aTarget) ],
   };
 
   this.queue.push(invoker);

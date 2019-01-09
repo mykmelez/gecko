@@ -54,13 +54,11 @@ function childFocused() {
 }
 
 function childResized() {
-    const isOSXLion = navigator.userAgent.includes("Mac OS X 10.7");
-    const isOSXMtnLion = navigator.userAgent.includes("Mac OS X 10.8");
     const isOSXMavericks = navigator.userAgent.includes("Mac OS X 10.9");
     const isOSXYosemite = navigator.userAgent.includes("Mac OS X 10.10");
-    if (isOSXLion || isOSXMtnLion || isOSXMavericks || isOSXYosemite) {
+    if (isOSXMavericks || isOSXYosemite) {
         todo_is(win.windowState, win.STATE_MAXIMIZED,
-                "A resize before being maximized breaks this test on 10.7 and 10.8 and 10.9 and 10.10");
+                "A resize before being maximized breaks this test on 10.9 and 10.10");
         finish();
         return;
     }
@@ -81,9 +79,7 @@ function openContextMenu() {
     menu = win.document.getElementById("menu");
     var screenX = menu.boxObject.screenX;
     var screenY = menu.boxObject.screenY;
-    var utils =
-        win.QueryInterface(Ci.nsIInterfaceRequestor).
-            getInterface(Ci.nsIDOMWindowUtils);
+    var utils = win.windowUtils;
 
     utils.sendMouseEvent("contextmenu", mouseX, mouseY, 2, 0, 0);
 

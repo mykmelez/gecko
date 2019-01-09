@@ -1,29 +1,31 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use {Namespace, Prefix};
-use context::QuirksMode;
+use crate::context::QuirksMode;
+use crate::error_reporting::{ContextualParseError, ParseErrorReporter};
+use crate::invalidation::media_queries::{MediaListKey, ToMediaListKey};
+use crate::media_queries::{Device, MediaList};
+use crate::parser::ParserContext;
+use crate::shared_lock::{DeepCloneParams, DeepCloneWithLock, Locked};
+use crate::shared_lock::{SharedRwLock, SharedRwLockReadGuard};
+use crate::stylesheets::loader::StylesheetLoader;
+use crate::stylesheets::rule_parser::{State, TopLevelRuleParser};
+use crate::stylesheets::rules_iterator::{EffectiveRules, EffectiveRulesIterator};
+use crate::stylesheets::rules_iterator::{NestedRuleIterationCondition, RulesIterator};
+use crate::stylesheets::{CssRule, CssRules, Origin, UrlExtraData};
+use crate::use_counters::UseCounters;
+use crate::{Namespace, Prefix};
 use cssparser::{Parser, ParserInput, RuleListParser};
-use error_reporting::{ContextualParseError, ParseErrorReporter};
 use fallible::FallibleVec;
-use fnv::FnvHashMap;
-use invalidation::media_queries::{MediaListKey, ToMediaListKey};
+use fxhash::FxHashMap;
 #[cfg(feature = "gecko")]
 use malloc_size_of::{MallocSizeOfOps, MallocUnconditionalShallowSizeOf};
-use media_queries::{Device, MediaList};
 use parking_lot::RwLock;
-use parser::ParserContext;
 use servo_arc::Arc;
-use shared_lock::{DeepCloneParams, DeepCloneWithLock, Locked, SharedRwLock, SharedRwLockReadGuard};
 use std::mem;
 use std::sync::atomic::{AtomicBool, Ordering};
 use style_traits::ParsingMode;
-use stylesheets::{CssRule, CssRules, Origin, UrlExtraData};
-use stylesheets::loader::StylesheetLoader;
-use stylesheets::rule_parser::{State, TopLevelRuleParser};
-use stylesheets::rules_iterator::{EffectiveRules, EffectiveRulesIterator};
-use stylesheets::rules_iterator::{NestedRuleIterationCondition, RulesIterator};
 
 /// This structure holds the user-agent and user stylesheets.
 pub struct UserAgentStylesheets {
@@ -42,7 +44,7 @@ pub struct UserAgentStylesheets {
 #[allow(missing_docs)]
 pub struct Namespaces {
     pub default: Option<Namespace>,
-    pub prefixes: FnvHashMap<Prefix, Namespace>,
+    pub prefixes: FxHashMap<Prefix, Namespace>,
 }
 
 /// The contents of a given stylesheet. This effectively maps to a
@@ -78,6 +80,7 @@ impl StylesheetContents {
         error_reporter: Option<&ParseErrorReporter>,
         quirks_mode: QuirksMode,
         line_number_offset: u32,
+        use_counters: Option<&UseCounters>,
     ) -> Self {
         let namespaces = RwLock::new(Namespaces::default());
         let (rules, source_map_url, source_url) = Stylesheet::parse_rules(
@@ -90,6 +93,7 @@ impl StylesheetContents {
             error_reporter,
             quirks_mode,
             line_number_offset,
+            use_counters,
         );
 
         Self {
@@ -126,7 +130,8 @@ impl DeepCloneWithLock for StylesheetContents {
         params: &DeepCloneParams,
     ) -> Self {
         // Make a deep clone of the rules, using the new lock.
-        let rules = self.rules
+        let rules = self
+            .rules
             .read_with(guard)
             .deep_clone_with_lock(lock, guard, params);
 
@@ -160,9 +165,9 @@ macro_rules! rule_filter {
         $(
             #[allow(missing_docs)]
             fn $method<F>(&self, device: &Device, guard: &SharedRwLockReadGuard, mut f: F)
-                where F: FnMut(&::stylesheets::$rule_type),
+                where F: FnMut(&crate::stylesheets::$rule_type),
             {
-                use stylesheets::CssRule;
+                use crate::stylesheets::CssRule;
 
                 for rule in self.effective_rules(device, guard) {
                     if let CssRule::$variant(ref lock) = *rule {
@@ -176,7 +181,7 @@ macro_rules! rule_filter {
 }
 
 /// A trait to represent a given stylesheet in a document.
-pub trait StylesheetInDocument : ::std::fmt::Debug {
+pub trait StylesheetInDocument: ::std::fmt::Debug {
     /// Get the stylesheet origin.
     fn origin(&self, guard: &SharedRwLockReadGuard) -> Origin;
 
@@ -315,6 +320,8 @@ impl Stylesheet {
         line_number_offset: u32,
     ) {
         let namespaces = RwLock::new(Namespaces::default());
+
+        // FIXME: Consider adding use counters to Servo?
         let (rules, source_map_url, source_url) = Self::parse_rules(
             css,
             &url_data,
@@ -325,6 +332,7 @@ impl Stylesheet {
             error_reporter,
             existing.contents.quirks_mode,
             line_number_offset,
+            /* use_counters = */ None,
         );
 
         *existing.contents.url_data.write() = url_data;
@@ -350,6 +358,7 @@ impl Stylesheet {
         error_reporter: Option<&ParseErrorReporter>,
         quirks_mode: QuirksMode,
         line_number_offset: u32,
+        use_counters: Option<&UseCounters>,
     ) -> (Vec<CssRule>, Option<String>, Option<String>) {
         let mut rules = Vec::new();
         let mut input = ParserInput::new_with_line_number_offset(css, line_number_offset);
@@ -362,10 +371,10 @@ impl Stylesheet {
             ParsingMode::DEFAULT,
             quirks_mode,
             error_reporter,
+            use_counters,
         );
 
         let rule_parser = TopLevelRuleParser {
-            stylesheet_origin: origin,
             shared_lock,
             loader: stylesheet_loader,
             context,
@@ -391,10 +400,7 @@ impl Stylesheet {
                     Err((error, slice)) => {
                         let location = error.location;
                         let error = ContextualParseError::InvalidRule(slice, error);
-                        iter.parser.context.log_css_error(
-                            location,
-                            error,
-                        );
+                        iter.parser.context.log_css_error(location, error);
                     },
                 }
             }
@@ -421,6 +427,7 @@ impl Stylesheet {
         quirks_mode: QuirksMode,
         line_number_offset: u32,
     ) -> Self {
+        // FIXME: Consider adding use counters to Servo?
         let contents = StylesheetContents::from_str(
             css,
             url_data,
@@ -430,6 +437,7 @@ impl Stylesheet {
             error_reporter,
             quirks_mode,
             line_number_offset,
+            /* use_counters = */ None,
         );
 
         Stylesheet {
@@ -468,7 +476,8 @@ impl Clone for Stylesheet {
         // Make a deep clone of the media, using the new lock.
         let media = self.media.read_with(&guard).clone();
         let media = Arc::new(lock.wrap(media));
-        let contents = self.contents
+        let contents = self
+            .contents
             .deep_clone_with_lock(&lock, &guard, &DeepCloneParams);
 
         Stylesheet {

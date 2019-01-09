@@ -34,7 +34,6 @@ const SWAPPED_BROWSER_STATE = [
   "_textZoom",
   "_isSyntheticDocument",
   "_innerWindowID",
-  "_manifestURI",
 ];
 
 /**
@@ -65,9 +64,9 @@ const PROPERTIES_FROM_BROWSER_WINDOW = [
  *
  * The inner <iframe mozbrowser> element is _just_ the page content.  It is not
  * enough to to replace <xul:browser> on its own.  <xul:browser> comes along
- * with lots of associated functionality via XBL bindings defined for such
- * elements in browser.xml and remote-browser.xml, and the Firefox UI depends on
- * these various things to make the UI function.
+ * with lots of associated functionality via XBL binding defined for such
+ * elements in browser.xml, and the Firefox UI depends on these various things
+ * to make the UI function.
  *
  * By mapping various methods, properties, and messages from the outer browser
  * to the inner browser, we can control the content inside the inner browser
@@ -104,9 +103,9 @@ function tunnelToInnerBrowser(outer, inner) {
 
       // Various browser methods access the `frameLoader` property, including:
       //   * `saveBrowser` from contentAreaUtils.js
-      //   * `docShellIsActive` from remote-browser.xml
-      //   * `hasContentOpener` from remote-browser.xml
-      //   * `preserveLayers` from remote-browser.xml
+      //   * `docShellIsActive` from browser.xml
+      //   * `hasContentOpener` from browser.xml
+      //   * `preserveLayers` from browser.xml
       //   * `receiveMessage` from SessionStore.jsm
       // In general, these methods are interested in the `frameLoader` for the content,
       // so we redirect them to the inner browser's `frameLoader`.
@@ -159,31 +158,26 @@ function tunnelToInnerBrowser(outer, inner) {
       // so this has the effect of overriding the message manager for browser UI code.
       mmTunnel = new MessageManagerTunnel(outer, inner);
 
+      // Clear out any cached state that references the XBL binding's non-remote state,
+      // such as form fill controllers.  Otherwise they will remain in place and leak the
+      // outer docshell.
+      outer.destroy();
+
       // We are tunneling to an inner browser with a specific remoteness, so it is simpler
       // for the logic of the browser UI to assume this tab has taken on that remoteness,
       // even though it's not true.  Since the actions the browser UI performs are sent
       // down to the inner browser by this tunnel, the tab's remoteness effectively is the
       // remoteness of the inner browser.
-      // Setting this attribute changes the browser to the remote XBL binding via CSS.
-      // The XBL binding for remote browsers uses the message manager for many actions in
-      // the UI and that works well here, since it gives us one main thing we need to
+      // By setting this attribute and then forcibly reinitializing the binding state,
+      // we start using the remote browser message manager which is used for many actions
+      // in the UI. This works well here, since it gives us one main thing we need to
       // route to the inner browser (the messages), instead of having to tweak many
-      // different browser properties.  It is safe to alter a XBL binding dynamically.
+      // different browser properties.
       // The content within is not reloaded.
       outer.setAttribute("remote", "true");
       outer.setAttribute("remoteType", inner.remoteType);
+      outer.construct();
 
-      // Clear out any cached state that references the current non-remote XBL binding,
-      // such as form fill controllers.  Otherwise they will remain in place and leak the
-      // outer docshell.
-      outer.destroy();
-
-      // The constructor of the new XBL binding is run asynchronously and there is no
-      // event to signal its completion.  Spin an event loop to watch for properties that
-      // are set by the contructor.
-      Services.tm.spinEventLoopUntil(() => {
-        return outer._remoteWebNavigation;
-      });
       // Verify that we indeed have the correct binding.
       if (!outer.isRemoteBrowser) {
         throw new Error("Browser failed to switch to remote browser binding");
@@ -191,9 +185,9 @@ function tunnelToInnerBrowser(outer, inner) {
 
       // Replace the `webNavigation` object with our own version which tries to use
       // mozbrowser APIs where possible.  This replaces the webNavigation object that the
-      // remote-browser.xml binding creates.  We do not care about it's original value
-      // because stop() will remove the remote-browser.xml binding and these will no
-      // longer be used.
+      // remote browser binding creates.  We do not care about it's original value
+      // because stop() will remove the browser binding and these will no longer bee
+      // used.
       const webNavigation = new BrowserElementWebNavigation(inner);
       webNavigation.copyStateFrom(inner._remoteWebNavigationImpl);
       outer._remoteWebNavigation = webNavigation;
@@ -236,13 +230,21 @@ function tunnelToInnerBrowser(outer, inner) {
 
       // Add mozbrowser event handlers
       inner.addEventListener("mozbrowseropenwindow", this);
+      inner.addEventListener("mozbrowsershowmodalprompt", this);
     },
 
     handleEvent(event) {
-      if (event.type != "mozbrowseropenwindow") {
-        return;
+      switch (event.type) {
+        case "mozbrowseropenwindow":
+          this.handleOpenWindowEvent(event);
+          break;
+        case "mozbrowsershowmodalprompt":
+          this.handleModalPromptEvent(event);
+          break;
       }
+    },
 
+    handleOpenWindowEvent(event) {
       // Minimal support for <a target/> and window.open() which just ensures we at
       // least open them somewhere (in a new tab).  The following things are ignored:
       //   * Specific target names (everything treated as _blank)
@@ -263,6 +265,29 @@ function tunnelToInnerBrowser(outer, inner) {
                  outer.contentPrincipal);
     },
 
+    handleModalPromptEvent({ detail }) {
+      // Relay window.alert(), window.prompt() and window.confirm() dialogs through the
+      // outer window and make sure the return value is passed back to the inner window.
+      // When this event handler is called, the inner iframe is spinning in a nested event
+      // loop waiting to be unblocked.
+      // If we were calling preventDefault() here, then we would have to call
+      // detail.unblock() to unblock the inner iframe.
+      // But since we aren't the inner iframe will be unblocked automatically as soon as
+      // the mozbrowsershowmodalprompt event is done dispatching (i.e. as soon as this
+      // handler completes).
+      // See _handleShowModelPrompt in /dom/browser-element/BrowserElementParent.js
+
+      if (!["alert", "prompt", "confirm"].includes(detail.promptType)) {
+        return;
+      }
+
+      const promptFunction = outer.contentWindow[detail.promptType];
+      // Passing the initial value is useful for window.prompt() and doesn't hurt
+      // window.alert() and window.confirm(). See the Window webidl:
+      // https://searchfox.org/mozilla-central/source/dom/webidl/Window.webidl#77-80
+      detail.returnValue = promptFunction(detail.message, detail.initialValue);
+    },
+
     stop() {
       const tab = gBrowser.getTabForBrowser(outer);
       const filteredProgressListener = gBrowser._tabFilters.get(tab);
@@ -280,12 +305,13 @@ function tunnelToInnerBrowser(outer, inner) {
       // Remove the progress listener we added manually.
       outer.webProgress.removeProgressListener(filteredProgressListener);
 
-      // Reset the XBL binding back to the default.
+      // Reset the XBL binding back to the original state.
       outer.destroy();
 
       // Reset @remote since this is now back to a regular, non-remote browser
       outer.setAttribute("remote", "false");
       outer.removeAttribute("remoteType");
+      outer.construct();
 
       // Delete browser window properties exposed on content's owner global
       for (const property of PROPERTIES_FROM_BROWSER_WINDOW) {
@@ -294,6 +320,7 @@ function tunnelToInnerBrowser(outer, inner) {
 
       // Remove mozbrowser event handlers
       inner.removeEventListener("mozbrowseropenwindow", this);
+      inner.removeEventListener("mozbrowsershowmodalprompt", this);
 
       mmTunnel.destroy();
       mmTunnel = null;
@@ -367,6 +394,8 @@ MessageManagerTunnel.prototype = {
     "PermitUnload",
     // Messages sent from browser.js
     "Browser:Reload",
+    "PageStyle:Disable",
+    "PageStyle:Switch",
     // Messages sent from SelectParentHelper.jsm
     "Forms:DismissedDropDown",
     "Forms:MouseOut",
@@ -381,6 +410,11 @@ MessageManagerTunnel.prototype = {
   INNER_TO_OUTER_MESSAGES: [
     // Messages sent to browser.js
     "Browser:LoadURI",
+    "Link:SetIcon",
+    "Link:SetFailedIcon",
+    "Link:AddFeed",
+    "Link:AddSearch",
+    "PageStyle:StyleSheets",
     // Messages sent to RemoteWebProgress.jsm
     "Content:LoadURIResult",
     "Content:LocationChange",
@@ -424,7 +458,6 @@ MessageManagerTunnel.prototype = {
     "PageInfo:",
     // Messages sent from printUtils.js
     "Printing:",
-    "PageMetadata:",
     // Messages sent from viewSourceUtils.js
     "ViewSource:",
   ],
@@ -446,14 +479,13 @@ MessageManagerTunnel.prototype = {
     "PageInfo:",
     // Messages sent to printUtils.js
     "Printing:",
-    "PageMetadata:",
     // Messages sent to viewSourceUtils.js
     "ViewSource:",
   ],
 
   OUTER_TO_INNER_FRAME_SCRIPTS: [
     // DevTools server for OOP frames
-    "resource://devtools/server/startup/frame.js"
+    "resource://devtools/server/startup/frame.js",
   ],
 
   get outer() {
@@ -472,8 +504,7 @@ MessageManagerTunnel.prototype = {
     // non-remote, so we're able to reach into its window and use the child
     // side message manager there.
     const docShell = this.outer[FRAME_LOADER].docShell;
-    return docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                   .getInterface(Ci.nsIContentFrameMessageManager);
+    return docShell.messageManager;
   },
 
   get inner() {

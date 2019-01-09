@@ -247,14 +247,14 @@
         // as an XPCOM interface.  But elements are losing all their XPCOM
         // interfaces, so let's use an object that will likely stay an XPCOM
         // one.
-        let docshell = savedElement.ownerDocument.docShell;
+        let docshell = savedElement.ownerGlobal.docShell;
         ok(docshell, "We should have a docshell here!");
 
         let secureUI = Cc['@mozilla.org/secure_browser_ui;1']
                          .createInstance(Ci.nsISecureBrowserUI);
 
         try {
-          secureUI.setDocShell(docshell);
+          secureUI.init(docshell);
           ok(false, "expected exception passing CPOW to C++");
         } catch (e) {
           is(e.result, Cr.NS_ERROR_XPC_CANT_PASS_CPOW_TO_NATIVE,
@@ -447,6 +447,11 @@
       }, 0);
     }
 
+    function recvLocalStorage(msg) {
+      msg.objects.f();
+      msg.target.messageManager.sendAsyncMessage("cpows:localStorage_done");
+    }
+
     function run_tests(type) {
       info("Running tests: " + type);
       var node = document.getElementById('cpowbrowser_' + type);
@@ -489,10 +494,17 @@
       mm.addMessageListener("cpows:unsafe", recvUnsafe);
       mm.addMessageListener("cpows:safe", recvSafe);
       mm.addMessageListener("cpows:dead", recvDead);
+      mm.addMessageListener("cpows:localStorage", recvLocalStorage);
       mm.loadFrameScript("chrome://mochitests/content/chrome/dom/base/test/chrome/cpows_child.js", true);
     }
 
-    function start() {
+    async function start() {
+      ChromeUtils.import("resource://testing-common/BrowserTestUtils.jsm");
+
+      let browser = document.getElementById("cpowbrowser_remote");
+      BrowserTestUtils.loadURI(browser, "http://mochi.test:8888/tests/dom/base/test/chrome/cpows_child.html");
+      await BrowserTestUtils.browserLoaded(browser);
+
       run_tests('remote');
     }
 

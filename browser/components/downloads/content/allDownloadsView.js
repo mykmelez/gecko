@@ -13,7 +13,8 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   FileUtils: "resource://gre/modules/FileUtils.jsm",
   NetUtil: "resource://gre/modules/NetUtil.jsm",
   OS: "resource://gre/modules/osfile.jsm",
-  Services: "resource://gre/modules/Services.jsm"
+  Services: "resource://gre/modules/Services.jsm",
+  PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
 });
 
 /**
@@ -37,7 +38,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 function HistoryDownloadElementShell(download) {
   this._download = download;
 
-  this.element = document.createElement("richlistitem");
+  this.element = document.createXULElement("richlistitem");
   this.element._shell = this;
 
   this.element.classList.add("download");
@@ -46,22 +47,6 @@ function HistoryDownloadElementShell(download) {
 
 HistoryDownloadElementShell.prototype = {
   __proto__: DownloadsViewUI.DownloadElementShell.prototype,
-
-  /**
-   * Manages the "active" state of the shell.  By default all the shells are
-   * inactive, thus their UI is not updated.  They must be activated when
-   * entering the visible area.
-   */
-  ensureActive() {
-    if (!this._active) {
-      this._active = true;
-      this.element.setAttribute("active", true);
-      this.onChanged();
-    }
-  },
-  get active() {
-    return !!this._active;
-  },
 
   /**
    * Overrides the base getter to return the Download or HistoryDownload object
@@ -96,14 +81,9 @@ HistoryDownloadElementShell.prototype = {
     if (this._downloadState !== newState) {
       this._downloadState = newState;
       this.onStateChanged();
+    } else {
+      this._updateStateInner();
     }
-
-    // This cannot be placed within onStateChanged because
-    // when a download goes from hasBlockedData to !hasBlockedData
-    // it will still remain in the same state.
-    this.element.classList.toggle("temporary-block",
-                                  !!this.download.hasBlockedData);
-    this._updateProgress();
   },
   _downloadState: null,
 
@@ -136,7 +116,8 @@ HistoryDownloadElementShell.prototype = {
       return true;
     }
     aTerm = aTerm.toLowerCase();
-    return this.displayName.toLowerCase().includes(aTerm) ||
+    let displayName = DownloadsViewUI.getDisplayName(this.download);
+    return displayName.toLowerCase().includes(aTerm) ||
            this.download.source.url.toLowerCase().includes(aTerm);
   },
 
@@ -181,8 +162,8 @@ HistoryDownloadElementShell.prototype = {
  * Relays commands from the download.xml binding to the selected items.
  */
 const DownloadsView = {
-  onDownloadCommand(event, command) {
-    goDoCommand(command);
+  onDownloadButton(event) {
+    event.target.closest("richlistitem")._shell.onButton();
   },
 
   onDownloadClick() {},
@@ -264,8 +245,7 @@ DownloadsPlacesView.prototype = {
       }
 
       let rlbRect = this._richlistbox.getBoundingClientRect();
-      let winUtils = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                           .getInterface(Ci.nsIDOMWindowUtils);
+      let winUtils = window.windowUtils;
       let nodes = winUtils.nodesFromRect(rlbRect.left, rlbRect.top,
                                          0, rlbRect.width, rlbRect.height, 0,
                                          true, false);
@@ -548,7 +528,7 @@ DownloadsPlacesView.prototype = {
     // Getting the data or creating the nsIURI might fail.
     try {
       let data = {};
-      trans.getAnyTransferData({}, data, {});
+      trans.getAnyTransferData({}, data);
       let [url, name] = data.value.QueryInterface(Ci.nsISupportsString)
                             .data.split("\n");
       if (url) {
@@ -612,9 +592,9 @@ DownloadsPlacesView.prototype = {
   downloadsCmd_clearDownloads() {
     this._downloadsData.removeFinished();
     if (this._place) {
-      Cc["@mozilla.org/browser/download-history;1"]
-        .getService(Ci.nsIDownloadHistory)
-        .removeAllDownloads();
+      PlacesUtils.history.removeVisitsByFilter({
+        transition: PlacesUtils.history.TRANSITIONS.DOWNLOAD,
+      }).catch(Cu.reportError);
     }
     // There may be no selection or focus change as a result
     // of these change, and we want the command updated immediately.

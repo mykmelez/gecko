@@ -38,6 +38,7 @@
 #include "mozilla/ipc/BrowserProcessSubThread.h"
 #include "mozilla/ipc/EnvironmentMap.h"
 #include "mozilla/Omnijar.h"
+#include "mozilla/Scoped.h"
 #include "mozilla/Telemetry.h"
 #include "ProtocolUtils.h"
 #include <sys/stat.h>
@@ -62,11 +63,18 @@
 #include "nsClassHashtable.h"
 #include "nsHashKeys.h"
 #include "nsNativeCharsetUtils.h"
-#include "nscore.h" // for NS_FREE_PERMANENT_DATA
+#include "nscore.h"  // for NS_FREE_PERMANENT_DATA
 #include "private/pprio.h"
 
 using mozilla::MonitorAutoLock;
 using mozilla::ipc::GeckoChildProcessHost;
+
+namespace mozilla {
+MOZ_TYPE_SPECIFIC_SCOPED_POINTER_TEMPLATE(ScopedPRFileDesc, PRFileDesc,
+                                          PR_Close)
+}
+
+using mozilla::ScopedPRFileDesc;
 
 #ifdef MOZ_WIDGET_ANDROID
 #include "AndroidBridge.h"
@@ -75,32 +83,31 @@ using mozilla::ipc::GeckoChildProcessHost;
 #include "mozilla/jni/Utils.h"
 #endif
 
-static bool
-ShouldHaveDirectoryService()
-{
+static bool ShouldHaveDirectoryService() {
   return GeckoProcessType_Default == XRE_GetProcessType();
 }
 
 GeckoChildProcessHost::GeckoChildProcessHost(GeckoProcessType aProcessType,
                                              bool aIsFileContent)
-  : mProcessType(aProcessType),
-    mIsFileContent(aIsFileContent),
-    mMonitor("mozilla.ipc.GeckChildProcessHost.mMonitor"),
-    mLaunchOptions(MakeUnique<base::LaunchOptions>()),
-    mProcessState(CREATING_CHANNEL),
+    : mProcessType(aProcessType),
+      mIsFileContent(aIsFileContent),
+      mMonitor("mozilla.ipc.GeckChildProcessHost.mMonitor"),
+      mLaunchOptions(MakeUnique<base::LaunchOptions>()),
+      mProcessState(CREATING_CHANNEL),
 #ifdef XP_WIN
-    mGroupId(u"-"),
+      mGroupId(u"-"),
 #endif
 #if defined(MOZ_SANDBOX) && defined(XP_WIN)
-    mEnableSandboxLogging(false),
-    mSandboxLevel(0),
+      mEnableSandboxLogging(false),
+      mSandboxLevel(0),
 #endif
-    mChildProcessHandle(0)
+      mChildProcessHandle(0)
 #if defined(MOZ_WIDGET_COCOA)
-  , mChildTask(MACH_PORT_NULL)
+      ,
+      mChildTask(MACH_PORT_NULL)
 #endif
 {
-    MOZ_COUNT_CTOR(GeckoChildProcessHost);
+  MOZ_COUNT_CTOR(GeckoChildProcessHost);
 }
 
 GeckoChildProcessHost::~GeckoChildProcessHost()
@@ -114,10 +121,12 @@ GeckoChildProcessHost::~GeckoChildProcessHost()
 #if defined(MOZ_WIDGET_COCOA)
     SharedMemoryBasic::CleanupForPid(mChildProcessHandle);
 #endif
-    ProcessWatcher::EnsureProcessTerminated(mChildProcessHandle
+    ProcessWatcher::EnsureProcessTerminated(
+        mChildProcessHandle
 #ifdef NS_FREE_PERMANENT_DATA
-    // If we're doing leak logging, shutdown can be slow.
-                                            , false // don't "force"
+        // If we're doing leak logging, shutdown can be slow.
+        ,
+        false  // don't "force"
 #endif
     );
   }
@@ -130,20 +139,22 @@ GeckoChildProcessHost::~GeckoChildProcessHost()
   if (mChildProcessHandle != 0) {
 #if defined(XP_WIN)
     CrashReporter::DeregisterChildCrashAnnotationFileDescriptor(
-      base::GetProcId(mChildProcessHandle));
+        base::GetProcId(mChildProcessHandle));
 #else
     CrashReporter::DeregisterChildCrashAnnotationFileDescriptor(
-      mChildProcessHandle);
+        mChildProcessHandle);
 #endif
   }
 }
 
-//static
-auto
-GeckoChildProcessHost::GetPathToBinary(FilePath& exePath, GeckoProcessType processType) -> BinaryPathType
-{
-  if (sRunSelfAsContentProc &&
-      (processType == GeckoProcessType_Content || processType == GeckoProcessType_GPU)) {
+// static
+auto GeckoChildProcessHost::GetPathToBinary(FilePath& exePath,
+                                            GeckoProcessType processType)
+    -> BinaryPathType {
+  if (sRunSelfAsContentProc && (processType == GeckoProcessType_Content ||
+                                processType == GeckoProcessType_GPU ||
+                                processType == GeckoProcessType_VR ||
+                                processType == GeckoProcessType_RDD)) {
 #if defined(OS_WIN)
     wchar_t exePathBuf[MAXPATHLEN];
     if (!::GetModuleFileNameW(nullptr, exePathBuf, MAXPATHLEN)) {
@@ -164,7 +175,7 @@ GeckoChildProcessHost::GetPathToBinary(FilePath& exePath, GeckoProcessType proce
 #elif defined(OS_POSIX)
     exePath = FilePath(CommandLine::ForCurrentProcess()->argv()[0]);
 #else
-#  error Sorry; target OS not supported yet.
+#error Sorry; target OS not supported yet.
 #endif
     return BinaryPathType::Self;
   }
@@ -195,7 +206,8 @@ GeckoChildProcessHost::GetPathToBinary(FilePath& exePath, GeckoProcessType proce
 
   if (exePath.empty()) {
 #ifdef OS_WIN
-    exePath = FilePath::FromWStringHack(CommandLine::ForCurrentProcess()->program());
+    exePath =
+        FilePath::FromWStringHack(CommandLine::ForCurrentProcess()->program());
 #else
     exePath = FilePath(CommandLine::ForCurrentProcess()->argv()[0]);
 #endif
@@ -209,16 +221,11 @@ GeckoChildProcessHost::GetPathToBinary(FilePath& exePath, GeckoProcessType proce
 
 #ifdef MOZ_WIDGET_COCOA
 class AutoCFTypeObject {
-public:
-  explicit AutoCFTypeObject(CFTypeRef object)
-  {
-    mObject = object;
-  }
-  ~AutoCFTypeObject()
-  {
-    ::CFRelease(mObject);
-  }
-private:
+ public:
+  explicit AutoCFTypeObject(CFTypeRef object) { mObject = object; }
+  ~AutoCFTypeObject() { ::CFRelease(mObject); }
+
+ private:
   CFTypeRef mObject;
 };
 #endif
@@ -228,15 +235,9 @@ private:
 uint32_t GeckoChildProcessHost::sNextUniqueID = 1;
 
 /* static */
-uint32_t
-GeckoChildProcessHost::GetUniqueID()
-{
-  return sNextUniqueID++;
-}
+uint32_t GeckoChildProcessHost::GetUniqueID() { return sNextUniqueID++; }
 
-void
-GeckoChildProcessHost::PrepareLaunch()
-{
+void GeckoChildProcessHost::PrepareLaunch() {
   if (CrashReporter::GetEnabled()) {
     CrashReporter::OOPInit();
   }
@@ -255,14 +256,13 @@ GeckoChildProcessHost::PrepareLaunch()
   if (mProcessType == GeckoProcessType_Content) {
     mSandboxLevel = GetEffectiveContentSandboxLevel();
     mEnableSandboxLogging =
-      Preferences::GetBool("security.sandbox.logging.enabled");
+        Preferences::GetBool("security.sandbox.logging.enabled");
 
     // We currently have to whitelist certain paths for tests to work in some
     // development configurations.
     nsAutoString readPaths;
-    nsresult rv =
-      Preferences::GetString("security.sandbox.content.read_path_whitelist",
-                             readPaths);
+    nsresult rv = Preferences::GetString(
+        "security.sandbox.content.read_path_whitelist", readPaths);
     if (NS_SUCCEEDED(rv)) {
       for (const nsAString& readPath : readPaths.Split(',')) {
         nsString trimmedPath(readPath);
@@ -289,8 +289,8 @@ GeckoChildProcessHost::PrepareLaunch()
   // For other process types we can't rely on them being launched on main
   // thread and they may not have access to prefs in the child process, so allow
   // them to turn on logging via an environment variable.
-  mEnableSandboxLogging = mEnableSandboxLogging
-                          || !!PR_GetEnv("MOZ_SANDBOX_LOGGING");
+  mEnableSandboxLogging =
+      mEnableSandboxLogging || !!PR_GetEnv("MOZ_SANDBOX_LOGGING");
 #endif
 #elif defined(XP_LINUX)
 #if defined(MOZ_CONTENT_SANDBOX)
@@ -308,13 +308,11 @@ GeckoChildProcessHost::PrepareLaunch()
 }
 
 #ifdef XP_WIN
-void GeckoChildProcessHost::InitWindowsGroupID()
-{
+void GeckoChildProcessHost::InitWindowsGroupID() {
   // On Win7+, pass the application user model to the child, so it can
   // register with it. This insures windows created by the container
   // properly group with the parent app on the Win7 taskbar.
-  nsCOMPtr<nsIWinTaskbar> taskbarInfo =
-    do_GetService(NS_TASKBAR_CONTRACTID);
+  nsCOMPtr<nsIWinTaskbar> taskbarInfo = do_GetService(NS_TASKBAR_CONTRACTID);
   if (taskbarInfo) {
     bool isSupported = false;
     taskbarInfo->GetAvailable(&isSupported);
@@ -327,55 +325,40 @@ void GeckoChildProcessHost::InitWindowsGroupID()
 }
 #endif
 
-bool
-GeckoChildProcessHost::SyncLaunch(std::vector<std::string> aExtraOpts, int aTimeoutMs)
-{
-  PrepareLaunch();
-
-  MessageLoop* ioLoop = XRE_GetIOMessageLoop();
-  NS_ASSERTION(MessageLoop::current() != ioLoop, "sync launch from the IO thread NYI");
-
-  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>>(
-    "ipc::GeckoChildProcessHost::RunPerformAsyncLaunch",
-    this,
-    &GeckoChildProcessHost::RunPerformAsyncLaunch,
-    aExtraOpts));
-
+bool GeckoChildProcessHost::SyncLaunch(std::vector<std::string> aExtraOpts,
+                                       int aTimeoutMs) {
+  if (!AsyncLaunch(std::move(aExtraOpts))) {
+    return false;
+  }
   return WaitUntilConnected(aTimeoutMs);
 }
 
-bool
-GeckoChildProcessHost::AsyncLaunch(std::vector<std::string> aExtraOpts)
-{
+bool GeckoChildProcessHost::AsyncLaunch(std::vector<std::string> aExtraOpts) {
   PrepareLaunch();
 
   MessageLoop* ioLoop = XRE_GetIOMessageLoop();
 
-  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>>(
-    "ipc::GeckoChildProcessHost::RunPerformAsyncLaunch",
-    this,
-    &GeckoChildProcessHost::RunPerformAsyncLaunch,
-    aExtraOpts));
+  MOZ_ASSERT(mHandlePromise == nullptr);
+  mHandlePromise = new HandlePromise::Private(__func__);
 
-  // This may look like the sync launch wait, but we only delay as
-  // long as it takes to create the channel.
-  MonitorAutoLock lock(mMonitor);
-  while (mProcessState < CHANNEL_INITIALIZED) {
-    lock.Wait();
-  }
+  // Currently this can't fail (see the MOZ_ALWAYS_SUCCEEDS in
+  // MessageLoop::PostTask_Helper), but in the future it possibly
+  // could, in which case this method could return false.
+  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>>(
+      "ipc::GeckoChildProcessHost::RunPerformAsyncLaunch", this,
+      &GeckoChildProcessHost::RunPerformAsyncLaunch, aExtraOpts));
 
   return true;
 }
 
-bool
-GeckoChildProcessHost::WaitUntilConnected(int32_t aTimeoutMs)
-{
+bool GeckoChildProcessHost::WaitUntilConnected(int32_t aTimeoutMs) {
   AUTO_PROFILER_LABEL("GeckoChildProcessHost::WaitUntilConnected", OTHER);
 
   // NB: this uses a different mechanism than the chromium parent
   // class.
-  TimeDuration timeout = (aTimeoutMs > 0) ?
-    TimeDuration::FromMilliseconds(aTimeoutMs) : TimeDuration::Forever();
+  TimeDuration timeout = (aTimeoutMs > 0)
+                             ? TimeDuration::FromMilliseconds(aTimeoutMs)
+                             : TimeDuration::Forever();
 
   MonitorAutoLock lock(mMonitor);
   TimeStamp waitStart = TimeStamp::Now();
@@ -404,17 +387,11 @@ GeckoChildProcessHost::WaitUntilConnected(int32_t aTimeoutMs)
   return mProcessState == PROCESS_CONNECTED;
 }
 
-bool
-GeckoChildProcessHost::LaunchAndWaitForProcessHandle(StringVector aExtraOpts)
-{
-  PrepareLaunch();
-
-  MessageLoop* ioLoop = XRE_GetIOMessageLoop();
-  ioLoop->PostTask(NewNonOwningRunnableMethod<std::vector<std::string>>(
-    "ipc::GeckoChildProcessHost::RunPerformAsyncLaunch",
-    this,
-    &GeckoChildProcessHost::RunPerformAsyncLaunch,
-    aExtraOpts));
+bool GeckoChildProcessHost::LaunchAndWaitForProcessHandle(
+    StringVector aExtraOpts) {
+  if (!AsyncLaunch(std::move(aExtraOpts))) {
+    return false;
+  }
 
   MonitorAutoLock lock(mMonitor);
   while (mProcessState < PROCESS_CREATED) {
@@ -425,9 +402,7 @@ GeckoChildProcessHost::LaunchAndWaitForProcessHandle(StringVector aExtraOpts)
   return mProcessState < PROCESS_ERROR;
 }
 
-void
-GeckoChildProcessHost::InitializeChannel()
-{
+void GeckoChildProcessHost::InitializeChannel() {
   CreateChannel();
 
   MonitorAutoLock lock(mMonitor);
@@ -435,9 +410,7 @@ GeckoChildProcessHost::InitializeChannel()
   lock.Notify();
 }
 
-void
-GeckoChildProcessHost::Join()
-{
+void GeckoChildProcessHost::Join() {
   AssertIOThread();
 
   if (!mChildProcessHandle) {
@@ -445,15 +418,12 @@ GeckoChildProcessHost::Join()
   }
 
   // If this fails, there's nothing we can do.
-  base::KillProcess(mChildProcessHandle, 0, /*wait*/true);
+  base::KillProcess(mChildProcessHandle, 0, /*wait*/ true);
   SetAlreadyDead();
 }
 
-void
-GeckoChildProcessHost::SetAlreadyDead()
-{
-  if (mChildProcessHandle &&
-      mChildProcessHandle != kInvalidProcessHandle) {
+void GeckoChildProcessHost::SetAlreadyDead() {
+  if (mChildProcessHandle && mChildProcessHandle != kInvalidProcessHandle) {
     base::CloseProcessHandle(mChildProcessHandle);
   }
 
@@ -462,10 +432,8 @@ GeckoChildProcessHost::SetAlreadyDead()
 
 int32_t GeckoChildProcessHost::mChildCounter = 0;
 
-void
-GeckoChildProcessHost::GetChildLogName(const char* origLogName,
-                                       nsACString &buffer)
-{
+void GeckoChildProcessHost::GetChildLogName(const char* origLogName,
+                                            nsACString& buffer) {
 #ifdef XP_WIN
   // On Windows we must expand relative paths because sandboxing rules
   // bound only to full paths.  fopen fowards to NtCreateFile which checks
@@ -477,7 +445,10 @@ GeckoChildProcessHost::GetChildLogName(const char* origLogName,
     // points or symlinks or the sandbox will reject rules to allow writing.
     std::wstring resolvedPath(NS_ConvertUTF8toUTF16(absPath).get());
     if (widget::WinUtils::ResolveJunctionPointsAndSymLinks(resolvedPath)) {
-      AppendUTF16toUTF8(resolvedPath.c_str(), buffer);
+      AppendUTF16toUTF8(
+          MakeSpan(reinterpret_cast<const char16_t*>(resolvedPath.data()),
+                   resolvedPath.size()),
+          buffer);
     } else
 #endif
     {
@@ -494,58 +465,8 @@ GeckoChildProcessHost::GetChildLogName(const char* origLogName,
   buffer.AppendInt(mChildCounter);
 }
 
-bool
-GeckoChildProcessHost::PerformAsyncLaunch(std::vector<std::string> aExtraOpts)
-{
-#ifdef MOZ_GECKO_PROFILER
-  AutoSetProfilerEnvVarsForChildProcess profilerEnvironment;
-#endif
-
-  // - Note: this code is not called re-entrantly, nor are restoreOrig*LogName
-  //   or mChildCounter touched by any other thread, so this is safe.
-  ++mChildCounter;
-
-  const char* origNSPRLogName = PR_GetEnv("NSPR_LOG_FILE");
-  const char* origMozLogName = PR_GetEnv("MOZ_LOG_FILE");
-
-  if (origNSPRLogName) {
-    nsAutoCString nsprLogName;
-    GetChildLogName(origNSPRLogName, nsprLogName);
-    mLaunchOptions->env_map[ENVIRONMENT_LITERAL("NSPR_LOG_FILE")]
-        = ENVIRONMENT_STRING(nsprLogName);
-  }
-  if (origMozLogName) {
-    nsAutoCString mozLogName;
-    GetChildLogName(origMozLogName, mozLogName);
-    mLaunchOptions->env_map[ENVIRONMENT_LITERAL("MOZ_LOG_FILE")]
-        = ENVIRONMENT_STRING(mozLogName);
-  }
-
-  // `RUST_LOG_CHILD` is meant for logging child processes only.
-  nsAutoCString childRustLog(PR_GetEnv("RUST_LOG_CHILD"));
-  if (!childRustLog.IsEmpty()) {
-    mLaunchOptions->env_map[ENVIRONMENT_LITERAL("RUST_LOG")]
-        = ENVIRONMENT_STRING(childRustLog);
-  }
-
-#if defined(XP_LINUX) && defined(MOZ_CONTENT_SANDBOX)
-  if (!mTmpDirName.IsEmpty()) {
-    // Point a bunch of things that might want to write from content to our
-    // shiny new content-process specific tmpdir
-    mLaunchOptions->env_map[ENVIRONMENT_LITERAL("TMPDIR")] =
-      ENVIRONMENT_STRING(mTmpDirName);
-    // Partial fix for bug 1380051 (not persistent - should be)
-    mLaunchOptions->env_map[ENVIRONMENT_LITERAL("MESA_GLSL_CACHE_DIR")] =
-      ENVIRONMENT_STRING(mTmpDirName);
-  }
-#endif
-
-  return PerformAsyncLaunchInternal(aExtraOpts);
-}
-
-bool
-GeckoChildProcessHost::RunPerformAsyncLaunch(std::vector<std::string> aExtraOpts)
-{
+bool GeckoChildProcessHost::RunPerformAsyncLaunch(
+    std::vector<std::string> aExtraOpts) {
   InitializeChannel();
 
   bool ok = PerformAsyncLaunch(aExtraOpts);
@@ -554,18 +475,14 @@ GeckoChildProcessHost::RunPerformAsyncLaunch(std::vector<std::string> aExtraOpts
     // If something failed let's set the error state and notify.
     MonitorAutoLock lock(mMonitor);
     mProcessState = PROCESS_ERROR;
+    mHandlePromise->Reject(LaunchError{}, __func__);
     lock.Notify();
-#ifdef ASYNC_CONTENTPROC_LAUNCH
-    OnProcessLaunchError();
-#endif
-    CHROMIUM_LOG(ERROR) << "Failed to launch " <<
-      XRE_ChildProcessTypeToString(mProcessType) << " subprocess";
-    Telemetry::Accumulate(Telemetry::SUBPROCESS_LAUNCH_FAILURE,
-      nsDependentCString(XRE_ChildProcessTypeToString(mProcessType)));
-#ifdef ASYNC_CONTENTPROC_LAUNCH
-  } else {
-    OnProcessHandleReady(mChildProcessHandle);
-#endif
+    CHROMIUM_LOG(ERROR) << "Failed to launch "
+                        << XRE_ChildProcessTypeToString(mProcessType)
+                        << " subprocess";
+    Telemetry::Accumulate(
+        Telemetry::SUBPROCESS_LAUNCH_FAILURE,
+        nsDependentCString(XRE_ChildProcessTypeToString(mProcessType)));
   }
   return ok;
 }
@@ -580,15 +497,16 @@ AddAppDirToCommandLine(std::vector<std::string>& aCmdLine)
   // Content processes need access to application resources, so pass
   // the full application directory path to the child process.
   if (ShouldHaveDirectoryService()) {
-    nsCOMPtr<nsIProperties> directoryService(do_GetService(NS_DIRECTORY_SERVICE_CONTRACTID));
+    nsCOMPtr<nsIProperties> directoryService(
+        do_GetService(NS_DIRECTORY_SERVICE_CONTRACTID));
     NS_ASSERTION(directoryService, "Expected XPCOM to be available");
     if (directoryService) {
       nsCOMPtr<nsIFile> appDir;
       // NS_XPCOM_CURRENT_PROCESS_DIR really means the app dir, not the
       // current process dir.
-      nsresult rv = directoryService->Get(NS_XPCOM_CURRENT_PROCESS_DIR,
-                                          NS_GET_IID(nsIFile),
-                                          getter_AddRefs(appDir));
+      nsresult rv =
+          directoryService->Get(NS_XPCOM_CURRENT_PROCESS_DIR,
+                                NS_GET_IID(nsIFile), getter_AddRefs(appDir));
       if (NS_SUCCEEDED(rv)) {
 #if defined(XP_WIN)
         nsString path;
@@ -607,10 +525,16 @@ AddAppDirToCommandLine(std::vector<std::string>& aCmdLine)
 #if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
       // Full path to the profile dir
       nsCOMPtr<nsIFile> profileDir;
-      rv = directoryService->Get(NS_APP_USER_PROFILE_50_DIR,
-                                 NS_GET_IID(nsIFile),
-                                 getter_AddRefs(profileDir));
+      rv =
+          directoryService->Get(NS_APP_USER_PROFILE_50_DIR, NS_GET_IID(nsIFile),
+                                getter_AddRefs(profileDir));
       if (NS_SUCCEEDED(rv)) {
+        // If the profile doesn't exist, normalization will
+        // fail. But we don't return an error here because some
+        // tests require startup with a missing profile dir.
+        // For users, almost universally, the profile will be in
+        // the home directory and normalization isn't required.
+        mozilla::Unused << profileDir->Normalize();
         nsAutoCString path;
         MOZ_ALWAYS_SUCCEEDS(profileDir->GetNativePath(path));
         aCmdLine.push_back("-profile");
@@ -621,15 +545,56 @@ AddAppDirToCommandLine(std::vector<std::string>& aCmdLine)
   }
 }
 
-bool
-GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExtraOpts)
-{
+bool GeckoChildProcessHost::PerformAsyncLaunch(
+    std::vector<std::string> aExtraOpts) {
+#ifdef MOZ_GECKO_PROFILER
+  AutoSetProfilerEnvVarsForChildProcess profilerEnvironment;
+#endif
+
+  const auto startTS = TimeStamp::Now();
+
+  // - Note: this code is not called re-entrantly, nor are restoreOrig*LogName
+  //   or mChildCounter touched by any other thread, so this is safe.
+  ++mChildCounter;
+
+  const char* origNSPRLogName = PR_GetEnv("NSPR_LOG_FILE");
+  const char* origMozLogName = PR_GetEnv("MOZ_LOG_FILE");
+
+  if (origNSPRLogName) {
+    nsAutoCString nsprLogName;
+    GetChildLogName(origNSPRLogName, nsprLogName);
+    mLaunchOptions->env_map[ENVIRONMENT_LITERAL("NSPR_LOG_FILE")] =
+        ENVIRONMENT_STRING(nsprLogName);
+  }
+  if (origMozLogName) {
+    nsAutoCString mozLogName;
+    GetChildLogName(origMozLogName, mozLogName);
+    mLaunchOptions->env_map[ENVIRONMENT_LITERAL("MOZ_LOG_FILE")] =
+        ENVIRONMENT_STRING(mozLogName);
+  }
+
+  // `RUST_LOG_CHILD` is meant for logging child processes only.
+  nsAutoCString childRustLog(PR_GetEnv("RUST_LOG_CHILD"));
+  if (!childRustLog.IsEmpty()) {
+    mLaunchOptions->env_map[ENVIRONMENT_LITERAL("RUST_LOG")] =
+        ENVIRONMENT_STRING(childRustLog);
+  }
+
+#if defined(XP_LINUX) && defined(MOZ_CONTENT_SANDBOX)
+  if (!mTmpDirName.IsEmpty()) {
+    // Point a bunch of things that might want to write from content to our
+    // shiny new content-process specific tmpdir
+    mLaunchOptions->env_map[ENVIRONMENT_LITERAL("TMPDIR")] =
+        ENVIRONMENT_STRING(mTmpDirName);
+    // Partial fix for bug 1380051 (not persistent - should be)
+    mLaunchOptions->env_map[ENVIRONMENT_LITERAL("MESA_GLSL_CACHE_DIR")] =
+        ENVIRONMENT_STRING(mTmpDirName);
+  }
+#endif
+
   // We rely on the fact that InitializeChannel() has already been processed
   // on the IO thread before this point is reached.
   if (!GetChannel()) {
-#ifdef ASYNC_CONTENTPROC_LAUNCH
-    MOZ_RELEASE_ASSERT(1 == 2);
-#endif
     return false;
   }
 
@@ -643,12 +608,10 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   const char* const childProcessType =
       XRE_ChildProcessTypeToString(mProcessType);
 
-  PRFileDesc* crashAnnotationReadPipe;
-  PRFileDesc* crashAnnotationWritePipe;
-  if (PR_CreatePipe(&crashAnnotationReadPipe, &crashAnnotationWritePipe) != PR_SUCCESS) {
-#ifdef ASYNC_CONTENTPROC_LAUNCH
-    MOZ_RELEASE_ASSERT(2 == 3);
-#endif
+  ScopedPRFileDesc crashAnnotationReadPipe;
+  ScopedPRFileDesc crashAnnotationWritePipe;
+  if (PR_CreatePipe(&crashAnnotationReadPipe.rwget(),
+                    &crashAnnotationWritePipe.rwget()) != PR_SUCCESS) {
     return false;
   }
 
@@ -660,8 +623,8 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   // and passing wstrings from one config to the other is unsafe.  So
   // we split the logic here.
 
-# if defined(OS_POSIX)
-#  if defined(MOZ_WIDGET_GTK)
+#if defined(OS_POSIX)
+#if defined(MOZ_WIDGET_GTK)
   if (mProcessType == GeckoProcessType_Content) {
     // disable IM module to avoid sandbox violation
     mLaunchOptions->env_map["GTK_IM_MODULE"] = "gtk-im-context-simple";
@@ -671,7 +634,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
     // anyway.
     mLaunchOptions->env_map["NO_AT_BRIDGE"] = "1";
   }
-#  endif // defined(MOZ_WIDGET_GTK)
+#endif  // defined(MOZ_WIDGET_GTK)
 
   // XPCOM may not be initialized in some subprocesses.  We don't want
   // to initialize XPCOM just for the directory service, especially
@@ -681,23 +644,23 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
     MOZ_ASSERT(gGREBinPath);
     nsCString path;
     NS_CopyUnicodeToNative(nsDependentString(gGREBinPath), path);
-#  if defined(OS_LINUX) || defined(OS_BSD)
-    const char *ld_library_path = PR_GetEnv("LD_LIBRARY_PATH");
+#if defined(OS_LINUX) || defined(OS_BSD)
+    const char* ld_library_path = PR_GetEnv("LD_LIBRARY_PATH");
     nsCString new_ld_lib_path(path.get());
 
-#   ifdef MOZ_WIDGET_GTK
+#ifdef MOZ_WIDGET_GTK
     if (mProcessType == GeckoProcessType_Plugin) {
       new_ld_lib_path.AppendLiteral("/gtk2:");
       new_ld_lib_path.Append(path.get());
     }
-#   endif // MOZ_WIDGET_GTK
+#endif  // MOZ_WIDGET_GTK
     if (ld_library_path && *ld_library_path) {
       new_ld_lib_path.Append(':');
       new_ld_lib_path.Append(ld_library_path);
     }
     mLaunchOptions->env_map["LD_LIBRARY_PATH"] = new_ld_lib_path.get();
 
-#  elif OS_MACOSX // defined(OS_LINUX) || defined(OS_BSD)
+#elif OS_MACOSX  // defined(OS_LINUX) || defined(OS_BSD)
     mLaunchOptions->env_map["DYLD_LIBRARY_PATH"] = path.get();
     // XXX DYLD_INSERT_LIBRARIES should only be set when launching a plugin
     //     process, and has no effect on other subprocesses (the hooks in
@@ -718,9 +681,9 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
     interpose.Append(path.get());
     interpose.AppendLiteral("/libplugin_child_interpose.dylib");
     mLaunchOptions->env_map["DYLD_INSERT_LIBRARIES"] = interpose.get();
-#  endif // defined(OS_LINUX) || defined(OS_BSD)
+#endif           // defined(OS_LINUX) || defined(OS_BSD)
   }
-# endif // defined(OS_POSIX)
+#endif  // defined(OS_POSIX)
 
   FilePath exePath;
   BinaryPathType pathType = GetPathToBinary(exePath, mProcessType);
@@ -729,8 +692,8 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   // STDOUT_FILENO, for example
   int srcChannelFd, dstChannelFd;
   channel().GetClientFileDescriptorMapping(&srcChannelFd, &dstChannelFd);
-  mLaunchOptions->fds_to_remap
-    .push_back(std::pair<int,int>(srcChannelFd, dstChannelFd));
+  mLaunchOptions->fds_to_remap.push_back(
+      std::pair<int, int>(srcChannelFd, dstChannelFd));
 
   // no need for kProcessChannelID, the child process inherits the
   // other end of the socketpair() from us
@@ -764,9 +727,12 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   // Add the application directory path (-appdir path)
   AddAppDirToCommandLine(childArgv);
 
-  // Tmp dir that the GPU process should use for crash reports. This arg is
-  // always populated (but possibly with an empty value) for a GPU child process.
-  if (mProcessType == GeckoProcessType_GPU) {
+  // Tmp dir that the GPU or RDD process should use for crash reports.
+  // This arg is always populated (but possibly with an empty value) for
+  // a GPU or RDD child process.
+  if (mProcessType == GeckoProcessType_GPU ||
+      mProcessType == GeckoProcessType_RDD ||
+      mProcessType == GeckoProcessType_VR) {
     nsCOMPtr<nsIFile> file;
     CrashReporter::GetChildProcessTmpDir(getter_AddRefs(file));
     nsAutoCString path;
@@ -787,78 +753,78 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
     }
 
     if (0 <= childCrashFd) {
-      mLaunchOptions->fds_to_remap
-        .push_back(std::pair<int,int>(childCrashFd, childCrashRemapFd));
+      mLaunchOptions->fds_to_remap.push_back(
+          std::pair<int, int>(childCrashFd, childCrashRemapFd));
       // "true" == crash reporting enabled
       childArgv.push_back("true");
     } else {
       // "false" == crash reporting disabled
       childArgv.push_back("false");
     }
-#elif defined(MOZ_WIDGET_COCOA) // defined(OS_LINUX) || defined(OS_BSD) || defined(OS_SOLARIS)
+#elif defined(MOZ_WIDGET_COCOA) /* defined(OS_LINUX) || defined(OS_BSD) || \
+                                   defined(OS_SOLARIS) */
     childArgv.push_back(CrashReporter::GetChildNotificationPipe());
 #endif  // defined(OS_LINUX) || defined(OS_BSD) || defined(OS_SOLARIS)
   }
 
   int fd = PR_FileDesc2NativeHandle(crashAnnotationWritePipe);
   mLaunchOptions->fds_to_remap.push_back(
-    std::make_pair(fd, CrashReporter::GetAnnotationTimeCrashFd()));
+      std::make_pair(fd, CrashReporter::GetAnnotationTimeCrashFd()));
 
-# ifdef MOZ_WIDGET_COCOA
+#ifdef MOZ_WIDGET_COCOA
   // Add a mach port to the command line so the child can communicate its
   // 'task_t' back to the parent.
   //
   // Put a random number into the channel name, so that a compromised renderer
   // can't pretend being the child that's forked off.
-  std::string mach_connection_name = StringPrintf("org.mozilla.machname.%d",
-                                                  base::RandInt(0, std::numeric_limits<int>::max()));
+  std::string mach_connection_name =
+      StringPrintf("org.mozilla.machname.%d",
+                   base::RandInt(0, std::numeric_limits<int>::max()));
   childArgv.push_back(mach_connection_name.c_str());
-# endif // MOZ_WIDGET_COCOA
+#endif  // MOZ_WIDGET_COCOA
 
   childArgv.push_back(childProcessType);
 
-# if defined(MOZ_WIDGET_ANDROID)
+#ifdef MOZ_WIDGET_COCOA
+  // Register the listening port before launching the child, to ensure
+  // that it's there when the child tries to look it up.
+  ReceivePort parent_recv_port(mach_connection_name.c_str());
+#endif  // MOZ_WIDGET_COCOA
+
+#if defined(MOZ_WIDGET_ANDROID)
   LaunchAndroidService(childProcessType, childArgv,
                        mLaunchOptions->fds_to_remap, &process);
-# else // goes with defined(MOZ_WIDGET_ANDROID)
+#else   // goes with defined(MOZ_WIDGET_ANDROID)
   base::LaunchApp(childArgv, *mLaunchOptions, &process);
-# endif // defined(MOZ_WIDGET_ANDROID)
+#endif  // defined(MOZ_WIDGET_ANDROID)
 
   // We're in the parent and the child was launched. Close the child FD in the
   // parent as soon as possible, which will allow the parent to detect when the
   // child closes its FD (either due to normal exit or due to crash).
   GetChannel()->CloseClientFileDescriptor();
 
-# ifdef MOZ_WIDGET_COCOA
+#ifdef MOZ_WIDGET_COCOA
   // Wait for the child process to send us its 'task_t' data.
   const int kTimeoutMs = 10000;
 
   MachReceiveMessage child_message;
-  ReceivePort parent_recv_port(mach_connection_name.c_str());
-  kern_return_t err = parent_recv_port.WaitForMessage(&child_message, kTimeoutMs);
+  kern_return_t err =
+      parent_recv_port.WaitForMessage(&child_message, kTimeoutMs);
   if (err != KERN_SUCCESS) {
-    std::string errString = StringPrintf("0x%x %s", err, mach_error_string(err));
+    std::string errString =
+        StringPrintf("0x%x %s", err, mach_error_string(err));
     CHROMIUM_LOG(ERROR) << "parent WaitForMessage() failed: " << errString;
-#ifdef ASYNC_CONTENTPROC_LAUNCH
-    MOZ_RELEASE_ASSERT(3 == 4);
-#endif
     return false;
   }
 
   task_t child_task = child_message.GetTranslatedPort(0);
   if (child_task == MACH_PORT_NULL) {
     CHROMIUM_LOG(ERROR) << "parent GetTranslatedPort(0) failed.";
-#ifdef ASYNC_CONTENTPROC_LAUNCH
-    MOZ_RELEASE_ASSERT(4 == 5);
-#endif
     return false;
   }
 
   if (child_message.GetTranslatedPort(1) == MACH_PORT_NULL) {
     CHROMIUM_LOG(ERROR) << "parent GetTranslatedPort(1) failed.";
-#ifdef ASYNC_CONTENTPROC_LAUNCH
-    MOZ_RELEASE_ASSERT(5 == 6);
-#endif
     return false;
   }
   MachPortSender parent_sender(child_message.GetTranslatedPort(1));
@@ -866,57 +832,55 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   if (child_message.GetTranslatedPort(2) == MACH_PORT_NULL) {
     CHROMIUM_LOG(ERROR) << "parent GetTranslatedPort(2) failed.";
   }
-  auto* parent_recv_port_memory_ack = new MachPortSender(child_message.GetTranslatedPort(2));
+  auto* parent_recv_port_memory_ack =
+      new MachPortSender(child_message.GetTranslatedPort(2));
 
   if (child_message.GetTranslatedPort(3) == MACH_PORT_NULL) {
     CHROMIUM_LOG(ERROR) << "parent GetTranslatedPort(3) failed.";
   }
-  auto* parent_send_port_memory = new MachPortSender(child_message.GetTranslatedPort(3));
+  auto* parent_send_port_memory =
+      new MachPortSender(child_message.GetTranslatedPort(3));
 
-  MachSendMessage parent_message(/* id= */0);
+  MachSendMessage parent_message(/* id= */ 0);
   if (!parent_message.AddDescriptor(MachMsgPortDescriptor(bootstrap_port))) {
-    CHROMIUM_LOG(ERROR) << "parent AddDescriptor(" << bootstrap_port << ") failed.";
-#ifdef ASYNC_CONTENTPROC_LAUNCH
-    MOZ_RELEASE_ASSERT(6 == 7);
-#endif
+    CHROMIUM_LOG(ERROR) << "parent AddDescriptor(" << bootstrap_port
+                        << ") failed.";
     return false;
   }
 
   auto* parent_recv_port_memory = new ReceivePort();
-  if (!parent_message.AddDescriptor(MachMsgPortDescriptor(parent_recv_port_memory->GetPort()))) {
-    CHROMIUM_LOG(ERROR) << "parent AddDescriptor(" << parent_recv_port_memory->GetPort() << ") failed.";
-#ifdef ASYNC_CONTENTPROC_LAUNCH
-    MOZ_RELEASE_ASSERT(7 == 8);
-#endif
+  if (!parent_message.AddDescriptor(
+          MachMsgPortDescriptor(parent_recv_port_memory->GetPort()))) {
+    CHROMIUM_LOG(ERROR) << "parent AddDescriptor("
+                        << parent_recv_port_memory->GetPort() << ") failed.";
     return false;
   }
 
   auto* parent_send_port_memory_ack = new ReceivePort();
-  if (!parent_message.AddDescriptor(MachMsgPortDescriptor(parent_send_port_memory_ack->GetPort()))) {
-    CHROMIUM_LOG(ERROR) << "parent AddDescriptor(" << parent_send_port_memory_ack->GetPort() << ") failed.";
-#ifdef ASYNC_CONTENTPROC_LAUNCH
-    MOZ_RELEASE_ASSERT(8 == 9);
-#endif
+  if (!parent_message.AddDescriptor(
+          MachMsgPortDescriptor(parent_send_port_memory_ack->GetPort()))) {
+    CHROMIUM_LOG(ERROR) << "parent AddDescriptor("
+                        << parent_send_port_memory_ack->GetPort()
+                        << ") failed.";
     return false;
   }
 
   err = parent_sender.SendMessage(parent_message, kTimeoutMs);
   if (err != KERN_SUCCESS) {
-    std::string errString = StringPrintf("0x%x %s", err, mach_error_string(err));
+    std::string errString =
+        StringPrintf("0x%x %s", err, mach_error_string(err));
     CHROMIUM_LOG(ERROR) << "parent SendMessage() failed: " << errString;
-#ifdef ASYNC_CONTENTPROC_LAUNCH
-    MOZ_RELEASE_ASSERT(9 == 10);
-#endif
     return false;
   }
 
-  SharedMemoryBasic::SetupMachMemory(process, parent_recv_port_memory, parent_recv_port_memory_ack,
-                                     parent_send_port_memory, parent_send_port_memory_ack, false);
+  SharedMemoryBasic::SetupMachMemory(
+      process, parent_recv_port_memory, parent_recv_port_memory_ack,
+      parent_send_port_memory, parent_send_port_memory_ack, false);
 
-# endif // MOZ_WIDGET_COCOA
+#endif  // MOZ_WIDGET_COCOA
 
 //--------------------------------------------------
-#elif defined(OS_WIN) // defined(OS_POSIX)
+#elif defined(OS_WIN)  // defined(OS_POSIX)
 
   FilePath exePath;
   BinaryPathType pathType = GetPathToBinary(exePath, mProcessType);
@@ -930,9 +894,8 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   cmdLine.AppendSwitchWithValue(switches::kProcessChannelID, channel_id());
 
   for (std::vector<std::string>::iterator it = aExtraOpts.begin();
-       it != aExtraOpts.end();
-       ++it) {
-      cmdLine.AppendLooseValue(UTF8ToWide(*it));
+       it != aExtraOpts.end(); ++it) {
+    cmdLine.AppendLooseValue(UTF8ToWide(*it));
   }
 
   if (Omnijar::IsInitialized()) {
@@ -951,7 +914,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
     }
   }
 
-# if defined(MOZ_SANDBOX)
+#if defined(MOZ_SANDBOX)
   bool shouldSandboxCurrentProcess = false;
 
   // XXX: Bug 1124167: We should get rid of the process specific logic for
@@ -959,44 +922,28 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   // of reorganizing so I don't think this patch is the right time.
   switch (mProcessType) {
     case GeckoProcessType_Content:
-#  if defined(MOZ_CONTENT_SANDBOX)
+#if defined(MOZ_CONTENT_SANDBOX)
       if (mSandboxLevel > 0) {
-        // For now we treat every failure as fatal in SetSecurityLevelForContentProcess
-        // and just crash there right away. Should this change in the future then we
-        // should also handle the error here.
+        // For now we treat every failure as fatal in
+        // SetSecurityLevelForContentProcess and just crash there right away.
+        // Should this change in the future then we should also handle the error
+        // here.
         mSandboxBroker.SetSecurityLevelForContentProcess(mSandboxLevel,
                                                          mIsFileContent);
         shouldSandboxCurrentProcess = true;
       }
-#  endif // defined(MOZ_CONTENT_SANDBOX)
+#endif  // defined(MOZ_CONTENT_SANDBOX)
       break;
     case GeckoProcessType_Plugin:
-      if (mSandboxLevel > 0 &&
-          !PR_GetEnv("MOZ_DISABLE_NPAPI_SANDBOX")) {
-        bool ok = mSandboxBroker.SetSecurityLevelForPluginProcess(mSandboxLevel);
+      if (mSandboxLevel > 0 && !PR_GetEnv("MOZ_DISABLE_NPAPI_SANDBOX")) {
+        bool ok =
+            mSandboxBroker.SetSecurityLevelForPluginProcess(mSandboxLevel);
         if (!ok) {
-#ifdef ASYNC_CONTENTPROC_LAUNCH
-          MOZ_RELEASE_ASSERT(10 == 11);
-#endif
           return false;
         }
         shouldSandboxCurrentProcess = true;
       }
       break;
-#ifdef MOZ_ENABLE_SKIA_PDF
-    case GeckoProcessType_PDFium:
-      if (!PR_GetEnv("MOZ_DISABLE_PDFIUM_SANDBOX")) {
-        bool ok = mSandboxBroker.SetSecurityLevelForPDFiumProcess();
-        if (!ok) {
-#ifdef ASYNC_CONTENTPROC_LAUNCH
-          MOZ_RELEASE_ASSERT(11 == 12);
-#endif
-          return false;
-        }
-        shouldSandboxCurrentProcess = true;
-      }
-      break;
-#endif
     case GeckoProcessType_IPDLUnitTest:
       // XXX: We don't sandbox this process type yet
       break;
@@ -1006,14 +953,14 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
         // not at USER_LOCKDOWN. So look in the command line arguments
         // to see if we're loading the path to the Widevine CDM, and if
         // so use sandbox level USER_RESTRICTED instead of USER_LOCKDOWN.
-        bool isWidevine = std::any_of(aExtraOpts.begin(), aExtraOpts.end(),
-          [](const std::string arg) { return arg.find("gmp-widevinecdm") != std::string::npos; });
-        auto level = isWidevine ? SandboxBroker::Restricted : SandboxBroker::LockDown;
+        bool isWidevine = std::any_of(
+            aExtraOpts.begin(), aExtraOpts.end(), [](const std::string arg) {
+              return arg.find("gmp-widevinecdm") != std::string::npos;
+            });
+        auto level =
+            isWidevine ? SandboxBroker::Restricted : SandboxBroker::LockDown;
         bool ok = mSandboxBroker.SetSecurityLevelForGMPlugin(level);
         if (!ok) {
-#ifdef ASYNC_CONTENTPROC_LAUNCH
-          MOZ_RELEASE_ASSERT(12 == 13);
-#endif
           return false;
         }
         shouldSandboxCurrentProcess = true;
@@ -1021,10 +968,23 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
       break;
     case GeckoProcessType_GPU:
       if (mSandboxLevel > 0 && !PR_GetEnv("MOZ_DISABLE_GPU_SANDBOX")) {
-        // For now we treat every failure as fatal in SetSecurityLevelForGPUProcess
-        // and just crash there right away. Should this change in the future then we
-        // should also handle the error here.
+        // For now we treat every failure as fatal in
+        // SetSecurityLevelForGPUProcess and just crash there right away. Should
+        // this change in the future then we should also handle the error here.
         mSandboxBroker.SetSecurityLevelForGPUProcess(mSandboxLevel);
+        shouldSandboxCurrentProcess = true;
+      }
+      break;
+    case GeckoProcessType_VR:
+      if (mSandboxLevel > 0 && !PR_GetEnv("MOZ_DISABLE_VR_SANDBOX")) {
+        // TODO: Implement sandbox for VR process, Bug 1430043.
+      }
+      break;
+    case GeckoProcessType_RDD:
+      if (!PR_GetEnv("MOZ_DISABLE_RDD_SANDBOX")) {
+        if (!mSandboxBroker.SetSecurityLevelForRDDProcess()) {
+          return false;
+        }
         shouldSandboxCurrentProcess = true;
       }
       break;
@@ -1035,13 +995,12 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   };
 
   if (shouldSandboxCurrentProcess) {
-    for (auto it = mAllowedFilesRead.begin();
-         it != mAllowedFilesRead.end();
+    for (auto it = mAllowedFilesRead.begin(); it != mAllowedFilesRead.end();
          ++it) {
       mSandboxBroker.AllowReadFile(it->c_str());
     }
   }
-# endif // defined(MOZ_SANDBOX)
+#endif  // defined(MOZ_SANDBOX)
 
   // Add the application directory path (-appdir path)
   AddAppDirToCommandLine(cmdLine);
@@ -1053,9 +1012,11 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   // Win app model id
   cmdLine.AppendLooseValue(mGroupId.get());
 
-  // Tmp dir that the GPU process should use for crash reports. This arg is
-  // always populated (but possibly with an empty value) for a GPU child process.
-  if (mProcessType == GeckoProcessType_GPU) {
+  // Tmp dir that the GPU or RDD process should use for crash reports.
+  // This arg is always populated (but possibly with an empty value) for
+  // a GPU or RDD child process.
+  if (mProcessType == GeckoProcessType_GPU ||
+      mProcessType == GeckoProcessType_RDD) {
     nsCOMPtr<nsIFile> file;
     CrashReporter::GetChildProcessTmpDir(getter_AddRefs(file));
     nsString path;
@@ -1070,7 +1031,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   cmdLine.AppendLooseValue(UTF8ToWide(pidstring));
 
   cmdLine.AppendLooseValue(
-    UTF8ToWide(CrashReporter::GetChildNotificationPipe()));
+      UTF8ToWide(CrashReporter::GetChildNotificationPipe()));
 
   if (!CrashReporter::IsDummy()) {
     PROsfd h = PR_FileDesc2NativeHandle(crashAnnotationWritePipe);
@@ -1082,7 +1043,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   // Process type
   cmdLine.AppendLooseValue(UTF8ToWide(childProcessType));
 
-# if defined(MOZ_SANDBOX)
+#if defined(MOZ_SANDBOX)
   if (shouldSandboxCurrentProcess) {
     // Mark the handles to inherit as inheritable.
     for (HANDLE h : mLaunchOptions->handles_to_inherit) {
@@ -1091,41 +1052,38 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
 
     if (mSandboxBroker.LaunchApp(cmdLine.program().c_str(),
                                  cmdLine.command_line_string().c_str(),
-                                 mLaunchOptions->env_map,
-                                 mProcessType,
-                                 mEnableSandboxLogging,
-                                 &process)) {
-      EnvironmentLog("MOZ_PROCESS_LOG").print(
-        "==> process %d launched child process %d (%S)\n",
-        base::GetCurrentProcId(), base::GetProcId(process),
-        cmdLine.command_line_string().c_str());
+                                 mLaunchOptions->env_map, mProcessType,
+                                 mEnableSandboxLogging, &process)) {
+      EnvironmentLog("MOZ_PROCESS_LOG")
+          .print("==> process %d launched child process %d (%S)\n",
+                 base::GetCurrentProcId(), base::GetProcId(process),
+                 cmdLine.command_line_string().c_str());
     }
   } else
-# endif // defined(MOZ_SANDBOX)
+#endif  // defined(MOZ_SANDBOX)
   {
     base::LaunchApp(cmdLine, *mLaunchOptions, &process);
 
-# ifdef MOZ_SANDBOX
+#ifdef MOZ_SANDBOX
     // We need to be able to duplicate handles to some types of non-sandboxed
     // child processes.
     if (mProcessType == GeckoProcessType_Content ||
         mProcessType == GeckoProcessType_GPU ||
+        mProcessType == GeckoProcessType_RDD ||
+        mProcessType == GeckoProcessType_VR ||
         mProcessType == GeckoProcessType_GMPlugin) {
       if (!mSandboxBroker.AddTargetPeer(process)) {
         NS_WARNING("Failed to add content process as target peer.");
       }
     }
-# endif // MOZ_SANDBOX
+#endif  // MOZ_SANDBOX
   }
 
-#else // goes with defined(OS_POSIX)
-#  error Sorry
-#endif // defined(OS_POSIX)
+#else  // goes with defined(OS_POSIX)
+#error Sorry
+#endif  // defined(OS_POSIX)
 
   if (!process) {
-#ifdef ASYNC_CONTENTPROC_LAUNCH
-    MOZ_RELEASE_ASSERT(13 == 14);
-#endif
     return false;
   }
   // NB: on OS X, we block much longer than we need to in order to
@@ -1133,7 +1091,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   // best way to fix that is to refactor this file, hard.
 #if defined(MOZ_WIDGET_COCOA)
   mChildTask = child_task;
-#endif // defined(MOZ_WIDGET_COCOA)
+#endif  // defined(MOZ_WIDGET_COCOA)
 
   if (!OpenPrivilegedHandle(base::GetProcId(process))
 #ifdef XP_WIN
@@ -1142,33 +1100,30 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
       && !::DuplicateHandle(::GetCurrentProcess(), process,
                             ::GetCurrentProcess(), &mChildProcessHandle,
                             PROCESS_DUP_HANDLE | PROCESS_TERMINATE |
-                            PROCESS_QUERY_INFORMATION | PROCESS_VM_READ |
-                            SYNCHRONIZE,
+                                PROCESS_QUERY_INFORMATION | PROCESS_VM_READ |
+                                SYNCHRONIZE,
                             FALSE, 0)
-#endif // XP_WIN
-     ) {
+#endif  // XP_WIN
+  ) {
     MOZ_CRASH("cannot open handle to child process");
   }
-#if defined(XP_WIN)
+
   CrashReporter::RegisterChildCrashAnnotationFileDescriptor(
-    base::GetProcId(process), crashAnnotationReadPipe);
-#else
-  CrashReporter::RegisterChildCrashAnnotationFileDescriptor(process,
-                                                            crashAnnotationReadPipe);
-#endif
-  PR_Close(crashAnnotationWritePipe);
+      base::GetProcId(process), crashAnnotationReadPipe.forget());
 
   MonitorAutoLock lock(mMonitor);
   mProcessState = PROCESS_CREATED;
+  mHandlePromise->Resolve(process, __func__);
   lock.Notify();
 
   mLaunchOptions = nullptr;
+
+  Telemetry::AccumulateTimeDelta(Telemetry::CHILD_PROCESS_LAUNCH_MS, startTS);
+
   return true;
 }
 
-bool
-GeckoChildProcessHost::OpenPrivilegedHandle(base::ProcessId aPid)
-{
+bool GeckoChildProcessHost::OpenPrivilegedHandle(base::ProcessId aPid) {
   if (mChildProcessHandle) {
     MOZ_ASSERT(aPid == base::GetProcId(mChildProcessHandle));
     return true;
@@ -1177,51 +1132,43 @@ GeckoChildProcessHost::OpenPrivilegedHandle(base::ProcessId aPid)
   return base::OpenPrivilegedProcessHandle(aPid, &mChildProcessHandle);
 }
 
-void
-GeckoChildProcessHost::OnProcessHandleReady(ProcessHandle aProcessHandle)
-{}
-
-void
-GeckoChildProcessHost::OnProcessLaunchError()
-{}
-
-void
-GeckoChildProcessHost::OnChannelConnected(int32_t peer_pid)
-{
+void GeckoChildProcessHost::OnChannelConnected(int32_t peer_pid) {
   if (!OpenPrivilegedHandle(peer_pid)) {
     MOZ_CRASH("can't open handle to child process");
   }
   MonitorAutoLock lock(mMonitor);
+  MOZ_DIAGNOSTIC_ASSERT(mProcessState == PROCESS_CREATED);
   mProcessState = PROCESS_CONNECTED;
   lock.Notify();
 }
 
-void
-GeckoChildProcessHost::OnMessageReceived(IPC::Message&& aMsg)
-{
+void GeckoChildProcessHost::OnMessageReceived(IPC::Message&& aMsg) {
   // We never process messages ourself, just save them up for the next
   // listener.
   mQueue.push(std::move(aMsg));
 }
 
-void
-GeckoChildProcessHost::OnChannelError()
-{
+void GeckoChildProcessHost::OnChannelError() {
   // Update the process state to an error state if we have a channel
   // error before we're connected. This fixes certain failures,
   // but does not address the full range of possible issues described
   // in the FIXME comment below.
   MonitorAutoLock lock(mMonitor);
   if (mProcessState < PROCESS_CONNECTED) {
+    MOZ_DIAGNOSTIC_ASSERT(mProcessState == PROCESS_CREATED);
     mProcessState = PROCESS_ERROR;
     lock.Notify();
   }
   // FIXME/bug 773925: save up this error for the next listener.
 }
 
-void
-GeckoChildProcessHost::GetQueuedMessages(std::queue<IPC::Message>& queue)
-{
+RefPtr<GeckoChildProcessHost::HandlePromise>
+GeckoChildProcessHost::WhenProcessHandleReady() {
+  MOZ_ASSERT(mHandlePromise != nullptr);
+  return mHandlePromise;
+}
+
+void GeckoChildProcessHost::GetQueuedMessages(std::queue<IPC::Message>& queue) {
   // If this is called off the IO thread, bad things will happen.
   DCHECK(MessageLoopForIO::current());
   swap(queue, mQueue);
@@ -1231,40 +1178,41 @@ GeckoChildProcessHost::GetQueuedMessages(std::queue<IPC::Message>& queue)
 bool GeckoChildProcessHost::sRunSelfAsContentProc(false);
 
 #ifdef MOZ_WIDGET_ANDROID
-void
-GeckoChildProcessHost::LaunchAndroidService(const char* type,
-                                            const std::vector<std::string>& argv,
-                                            const base::file_handle_mapping_vector& fds_to_remap,
-                                            ProcessHandle* process_handle)
-{
-  MOZ_RELEASE_ASSERT((2 <= fds_to_remap.size()) && (fds_to_remap.size() <= 4));
+void GeckoChildProcessHost::LaunchAndroidService(
+    const char* type, const std::vector<std::string>& argv,
+    const base::file_handle_mapping_vector& fds_to_remap,
+    ProcessHandle* process_handle) {
+  MOZ_RELEASE_ASSERT((2 <= fds_to_remap.size()) && (fds_to_remap.size() <= 5));
   JNIEnv* const env = mozilla::jni::GetEnvForThread();
   MOZ_ASSERT(env);
 
   const int argvSize = argv.size();
-  jni::ObjectArray::LocalRef jargs = jni::ObjectArray::New<jni::String>(argvSize);
+  jni::ObjectArray::LocalRef jargs =
+      jni::ObjectArray::New<jni::String>(argvSize);
   for (int ix = 0; ix < argvSize; ix++) {
     jargs->SetElement(ix, jni::StringParam(argv[ix].c_str(), env));
   }
 
   // XXX: this processing depends entirely on the internals of
   // ContentParent::LaunchSubprocess()
-  // GeckoChildProcessHost::PerformAsyncLaunchInternal(), and the order in
+  // GeckoChildProcessHost::PerformAsyncLaunch(), and the order in
   // which they append to fds_to_remap. There must be a better way to do it.
   // See bug 1440207.
   int32_t prefsFd = fds_to_remap[0].first;
-  int32_t ipcFd = fds_to_remap[1].first;
+  int32_t prefMapFd = fds_to_remap[1].first;
+  int32_t ipcFd = fds_to_remap[2].first;
   int32_t crashFd = -1;
   int32_t crashAnnotationFd = -1;
-  if (fds_to_remap.size() == 3) {
-    crashAnnotationFd = fds_to_remap[2].first;
-  }
   if (fds_to_remap.size() == 4) {
-    crashFd = fds_to_remap[2].first;
     crashAnnotationFd = fds_to_remap[3].first;
   }
+  if (fds_to_remap.size() == 5) {
+    crashFd = fds_to_remap[3].first;
+    crashAnnotationFd = fds_to_remap[4].first;
+  }
 
-  int32_t handle = java::GeckoProcessManager::Start(type, jargs, prefsFd, ipcFd, crashFd, crashAnnotationFd);
+  int32_t handle = java::GeckoProcessManager::Start(
+      type, jargs, prefsFd, prefMapFd, ipcFd, crashFd, crashAnnotationFd);
 
   if (process_handle) {
     *process_handle = handle;

@@ -8,8 +8,9 @@ VOLUME /builds/worker/tooltool-cache
 
 ENV XZ_OPT=-T0
 
+# %ARG TASKCLUSTER_ROOT_URL
 # %ARG DOCKER_IMAGE_PACKAGES
-RUN /usr/local/sbin/setup_packages.sh $DOCKER_IMAGE_PACKAGES
+RUN /usr/local/sbin/setup_packages.sh $TASKCLUSTER_ROOT_URL $DOCKER_IMAGE_PACKAGES
 
 # %ARG ARCH
 RUN dpkg --add-architecture $ARCH
@@ -17,7 +18,12 @@ RUN dpkg --add-architecture $ARCH
 # Ideally, we wouldn't need gcc-multilib and the extra linux-libc-dev,
 # but the latter is required to make the former installable, and the former
 # because of bug 1409276.
+# We exclude /usr/share/doc/*/changelog.Debian* files because they might differ
+# between i386 and amd64 variants of the packages we build on automation
+# because of dates stored in them by debchange (and both might end up installed
+# in some cases).
 RUN apt-get update && \
+    echo path-exclude=/usr/share/doc/*/changelog.Debian* > /etc/dpkg/dpkg.cfg.d/excludes && \
     apt-get install \
       autoconf2.13 \
       automake \
@@ -27,6 +33,7 @@ RUN apt-get update && \
       gawk \
       gcc-multilib \
       gnupg \
+      nasm \
       p7zip-full \
       procps \
       python-pip \

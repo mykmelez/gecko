@@ -11,6 +11,11 @@ const { Component, createFactory } = require("devtools/client/shared/vendor/reac
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const Services = require("Services");
+const {
+  addMultiE10sListener,
+  isMultiE10s,
+  removeMultiE10sListener,
+} = require("devtools/client/shared/multi-e10s-helper");
 
 const PanelHeader = createFactory(require("../PanelHeader"));
 const TargetList = createFactory(require("../TargetList"));
@@ -30,14 +35,12 @@ const Strings = Services.strings.createBundle(
 const WorkerIcon = "chrome://devtools/skin/images/debugging-workers.svg";
 const MORE_INFO_URL = "https://developer.mozilla.org/en-US/docs/Tools/about%3Adebugging" +
                       "#Service_workers_not_compatible";
-const PROCESS_COUNT_PREF = "dom.ipc.processCount";
-const MULTI_OPTOUT_PREF = "dom.ipc.multiOptOut";
 
 class WorkersPanel extends Component {
   static get propTypes() {
     return {
       client: PropTypes.instanceOf(DebuggerClient).isRequired,
-      id: PropTypes.string.isRequired
+      id: PropTypes.string.isRequired,
     };
   }
 
@@ -54,25 +57,19 @@ class WorkersPanel extends Component {
 
   componentDidMount() {
     const client = this.props.client;
-    client.addListener("workerListChanged", this.updateWorkers);
-    client.addListener("serviceWorkerRegistrationListChanged", this.updateWorkers);
-    client.addListener("processListChanged", this.updateWorkers);
+    // When calling RootFront.listAllWorkers, ContentProcessTargetActor are created
+    // for each content process, which sends `workerListChanged` events.
+    client.mainRoot.onFront("contentProcessTarget", front => {
+      front.on("workerListChanged", this.updateWorkers);
+      this.state.contentProcessFronts.push(front);
+    });
+    client.mainRoot.on("workerListChanged", this.updateWorkers);
+
+    client.mainRoot.on("serviceWorkerRegistrationListChanged", this.updateWorkers);
+    client.mainRoot.on("processListChanged", this.updateWorkers);
     client.addListener("registration-changed", this.updateWorkers);
 
-    // Some notes about these observers:
-    // - nsIPrefBranch.addObserver observes prefixes. In reality, watching
-    //   PROCESS_COUNT_PREF watches two separate prefs:
-    //   dom.ipc.processCount *and* dom.ipc.processCount.web. Because these
-    //   are the two ways that we control the number of content processes,
-    //   that works perfectly fine.
-    // - The user might opt in or out of multi by setting the multi opt out
-    //   pref. That affects whether we need to show our warning, so we need to
-    //   update our state when that pref changes.
-    // - In all cases, we don't have to manually check which pref changed to
-    //   what. The platform code in nsIXULRuntime.maxWebProcessCount does all
-    //   of that for us.
-    Services.prefs.addObserver(PROCESS_COUNT_PREF, this.updateMultiE10S);
-    Services.prefs.addObserver(MULTI_OPTOUT_PREF, this.updateMultiE10S);
+    addMultiE10sListener(this.updateMultiE10S);
 
     this.updateMultiE10S();
     this.updateWorkers();
@@ -80,13 +77,15 @@ class WorkersPanel extends Component {
 
   componentWillUnmount() {
     const client = this.props.client;
-    client.removeListener("processListChanged", this.updateWorkers);
-    client.removeListener("serviceWorkerRegistrationListChanged", this.updateWorkers);
-    client.removeListener("workerListChanged", this.updateWorkers);
+    client.mainRoot.off("processListChanged", this.updateWorkers);
+    client.mainRoot.off("serviceWorkerRegistrationListChanged", this.updateWorkers);
+    client.mainRoot.off("workerListChanged", this.updateWorkers);
+    for (const front of this.state.contentProcessFronts) {
+      front.off("workerListChanged", this.updateWorkers);
+    }
     client.removeListener("registration-changed", this.updateWorkers);
 
-    Services.prefs.removeObserver(PROCESS_COUNT_PREF, this.updateMultiE10S);
-    Services.prefs.removeObserver(MULTI_OPTOUT_PREF, this.updateMultiE10S);
+    removeMultiE10sListener(this.updateMultiE10S);
   }
 
   get initialState() {
@@ -94,17 +93,18 @@ class WorkersPanel extends Component {
       workers: {
         service: [],
         shared: [],
-        other: []
+        other: [],
       },
-      processCount: 1,
+      isMultiE10S: isMultiE10s(),
+
+      // List of ContentProcessTargetFront registered from componentWillMount
+      // from which we listen for worker list changes
+      contentProcessFronts: [],
     };
   }
 
   updateMultiE10S() {
-    // We watch the pref but set the state based on
-    // nsIXULRuntime.maxWebProcessCount.
-    const processCount = Services.appinfo.maxWebProcessCount;
-    this.setState({ processCount });
+    this.setState({ isMultiE10S: isMultiE10s() });
   }
 
   updateWorkers() {
@@ -140,7 +140,7 @@ class WorkersPanel extends Component {
     }
     return dom.p(
       {
-        className: "service-worker-disabled"
+        className: "service-worker-disabled",
       },
       dom.div({ className: "warning" }),
       dom.span(
@@ -152,7 +152,7 @@ class WorkersPanel extends Component {
       dom.a(
         {
           href: MORE_INFO_URL,
-          target: "_blank"
+          target: "_blank",
         },
         Strings.GetStringFromName("configurationIsNotCompatible.learnMore")
       ),
@@ -161,27 +161,24 @@ class WorkersPanel extends Component {
 
   render() {
     const { client, id } = this.props;
-    const { workers, processCount } = this.state;
-
-    const isE10S = Services.appinfo.browserTabsRemoteAutostart;
-    const isMultiE10S = isE10S && processCount > 1;
+    const { workers, isMultiE10S } = this.state;
 
     return dom.div(
       {
         id: id + "-panel",
         className: "panel",
         role: "tabpanel",
-        "aria-labelledby": id + "-header"
+        "aria-labelledby": id + "-header",
       },
       PanelHeader({
         id: id + "-header",
-        name: Strings.GetStringFromName("workers")
+        name: Strings.GetStringFromName("workers"),
       }),
       isMultiE10S ? MultiE10SWarning() : "",
       dom.div(
         {
           id: "workers",
-          className: "inverted-icons"
+          className: "inverted-icons",
         },
         TargetList({
           client,
@@ -191,7 +188,7 @@ class WorkersPanel extends Component {
           name: Strings.GetStringFromName("serviceWorkers"),
           sort: true,
           targetClass: ServiceWorkerTarget,
-          targets: workers.service
+          targets: workers.service,
         }),
         TargetList({
           client,
@@ -199,7 +196,7 @@ class WorkersPanel extends Component {
           name: Strings.GetStringFromName("sharedWorkers"),
           sort: true,
           targetClass: WorkerTarget,
-          targets: workers.shared
+          targets: workers.shared,
         }),
         TargetList({
           client,
@@ -207,7 +204,7 @@ class WorkersPanel extends Component {
           name: Strings.GetStringFromName("otherWorkers"),
           sort: true,
           targetClass: WorkerTarget,
-          targets: workers.other
+          targets: workers.other,
         })
       )
     );

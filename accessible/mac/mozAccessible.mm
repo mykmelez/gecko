@@ -22,7 +22,6 @@
 #include "mozilla/a11y/PDocAccessible.h"
 #include "OuterDocAccessible.h"
 
-#include "mozilla/Services.h"
 #include "nsRect.h"
 #include "nsCocoaUtils.h"
 #include "nsCoord.h"
@@ -713,7 +712,7 @@ ConvertToNSArray(nsTArray<ProxyAccessible*>& aArray)
     return nil;
   }
 
-#define ROLE(geckoRole, stringRole, atkRole, macRole, msaaRole, ia2Role, nameRule) \
+#define ROLE(geckoRole, stringRole, atkRole, macRole, msaaRole, ia2Role, androidClass, nameRule) \
   case roles::geckoRole: \
     return macRole;
 
@@ -770,10 +769,10 @@ ConvertToNSArray(nsTArray<ProxyAccessible*>& aArray)
     return @"AXLandmarkRegion";
 
   // Now, deal with widget roles
-  nsAtom* roleAtom = nullptr;
+  nsStaticAtom* roleAtom = nullptr;
   if (accWrap && accWrap->HasARIARole()) {
     const nsRoleMapEntry* roleMap = accWrap->ARIARoleMap();
-    roleAtom = *roleMap->roleAtom;
+    roleAtom = roleMap->roleAtom;
   }
   if (proxy)
     roleAtom = proxy->ARIARoleAtom();
@@ -928,6 +927,12 @@ ConvertToNSArray(nsTArray<ProxyAccessible*>& aArray)
       if (roleAtom)
         return @"AXApplicationGroup";
       break;
+
+    case roles::CONTENT_DELETION:
+      return @"AXDeleteStyleGroup";
+
+    case roles::CONTENT_INSERTION:
+      return @"AXInsertStyleGroup";
 
     default:
       break;

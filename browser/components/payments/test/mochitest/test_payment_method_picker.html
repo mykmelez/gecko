@@ -10,9 +10,9 @@ Test the payment-method-picker component
   <script type="application/javascript" src="/tests/SimpleTest/AddTask.js"></script>
   <script type="application/javascript" src="/tests/SimpleTest/EventUtils.js"></script>
   <script src="payments_common.js"></script>
-  <script src="../../res/vendor/custom-elements.min.js"></script>
   <script src="../../res/unprivileged-fallbacks.js"></script>
 
+  <link rel="stylesheet" type="text/css" href="../../res/containers/rich-picker.css"/>
   <link rel="stylesheet" type="text/css" href="../../res/components/rich-select.css"/>
   <link rel="stylesheet" type="text/css" href="../../res/components/basic-card-option.css"/>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
@@ -20,6 +20,7 @@ Test the payment-method-picker component
 <body>
   <p id="display">
     <payment-method-picker id="picker1"
+                           data-invalid-label="picker1: Missing or invalid"
                            selected-state-key="selectedPaymentCard"></payment-method-picker>
   </p>
 <div id="content" style="display: none">
@@ -43,7 +44,7 @@ add_task(async function test_empty() {
 });
 
 add_task(async function test_initialSet() {
-  picker1.requestStore.setState({
+  await picker1.requestStore.setState({
     savedBasicCards: {
       "48bnds6854t": {
         "cc-exp": "2017-02",
@@ -51,7 +52,9 @@ add_task(async function test_initialSet() {
         "cc-exp-year": 2017,
         "cc-name": "John Doe",
         "cc-number": "************9999",
+        "cc-type": "mastercard",
         "guid": "48bnds6854t",
+        timeLastUsed: 300,
       },
       "68gjdh354j": {
         "cc-exp": "2017-08",
@@ -59,19 +62,31 @@ add_task(async function test_initialSet() {
         "cc-exp-year": 2017,
         "cc-name": "J Smith",
         "cc-number": "***********1234",
+        "cc-type": "visa",
         "guid": "68gjdh354j",
+        timeLastUsed: 100,
+      },
+      "123456789abc": {
+        "cc-name": "Jane Fields",
+        "cc-given-name": "Jane",
+        "cc-additional-name": "",
+        "cc-family-name": "Fields",
+        "cc-number": "************9876",
+        "guid": "123456789abc",
+        timeLastUsed: 200,
       },
     },
   });
   await asyncElementRendered();
   let options = picker1.dropdown.popupBox.children;
-  is(options.length, 2, "Check dropdown has both cards");
-  ok(options[0].textContent.includes("John Doe"), "Check first card");
-  ok(options[1].textContent.includes("J Smith"), "Check second card");
+  is(options.length, 3, "Check dropdown has all three cards");
+  ok(options[0].textContent.includes("John Doe"), "Check first card based on timeLastUsed");
+  ok(options[1].textContent.includes("Jane Fields"), "Check second card based on timeLastUsed");
+  ok(options[2].textContent.includes("J Smith"), "Check third card based on timeLastUsed");
 });
 
 add_task(async function test_update() {
-  picker1.requestStore.setState({
+  await picker1.requestStore.setState({
     savedBasicCards: {
       "48bnds6854t": {
         // Same GUID, different values to trigger an update
@@ -80,6 +95,7 @@ add_task(async function test_update() {
         "cc-exp-year": 2017,
         // cc-name was cleared which means it's not returned
         "cc-number": "************9876",
+        "cc-type": "amex",
         "guid": "48bnds6854t",
       },
       "68gjdh354j": {
@@ -88,60 +104,89 @@ add_task(async function test_update() {
         "cc-exp-year": 2017,
         "cc-name": "J Smith",
         "cc-number": "***********1234",
+        "cc-type": "visa",
         "guid": "68gjdh354j",
+      },
+      "123456789abc": {
+        "cc-name": "Jane Fields",
+        "cc-given-name": "Jane",
+        "cc-additional-name": "",
+        "cc-family-name": "Fields",
+        "cc-number": "************9876",
+        "guid": "123456789abc",
       },
     },
   });
   await asyncElementRendered();
   let options = picker1.dropdown.popupBox.children;
-  is(options.length, 2, "Check dropdown still has both cards");
+  is(options.length, 3, "Check dropdown still has three cards");
   ok(!options[0].textContent.includes("John Doe"), "Check cleared first cc-name");
   ok(options[0].textContent.includes("9876"), "Check updated first cc-number");
   ok(options[0].textContent.includes("09"), "Check updated first exp-month");
 
   ok(options[1].textContent.includes("J Smith"), "Check second card is the same");
+  ok(options[2].textContent.includes("Jane Fields"), "Check third card is the same");
 });
 
 add_task(async function test_change_selected_card() {
   let options = picker1.dropdown.popupBox.children;
-  let selectedOption = picker1.dropdown.selectedOption;
-  is(selectedOption, null, "Should default to no selected option");
+  is(picker1.dropdown.selectedOption, null, "Should default to no selected option");
   let {
     selectedPaymentCard,
     selectedPaymentCardSecurityCode,
   } = picker1.requestStore.getState();
   is(selectedPaymentCard, null, "store should have no option selected");
   is(selectedPaymentCardSecurityCode, null, "store should have no security code");
+  ok(!picker1.classList.contains("invalid-selected-option"), "No validation on an empty selection");
+  ok(isHidden(picker1.invalidLabel), "The invalid label should be hidden");
 
   await SimpleTest.promiseFocus();
-  let codeFocusPromise = new Promise(resolve => {
-    picker1.securityCodeInput.addEventListener("focus", resolve, {once: true});
-  });
-  picker1.dropdown.click();
-  options[1].click();
+  picker1.dropdown.popupBox.focus();
+  synthesizeKey("************9876", {});
   await asyncElementRendered();
-  await codeFocusPromise;
+  ok(true, "Focused the security code field");
+  ok(!picker1.open, "Picker should be closed");
+
+  let selectedOption = picker1.dropdown.selectedOption;
+  is(selectedOption, options[2], "Selected option should now be the third option");
+  selectedPaymentCard = picker1.requestStore.getState().selectedPaymentCard;
+  is(selectedPaymentCard, selectedOption.getAttribute("guid"),
+     "store should have third option selected");
+  selectedPaymentCardSecurityCode = picker1.requestStore.getState().selectedPaymentCardSecurityCode;
+  is(selectedPaymentCardSecurityCode, null, "store should have empty security code");
+  ok(picker1.classList.contains("invalid-selected-option"), "Missing fields for the third option");
+  ok(!isHidden(picker1.invalidLabel), "The invalid label should be visible");
+  is(picker1.invalidLabel.innerText, picker1.dataset.invalidLabel, "Check displayed error text");
+
+  await SimpleTest.promiseFocus();
+  picker1.dropdown.popupBox.focus();
+  synthesizeKey("visa", {});
+  await asyncElementRendered();
   ok(true, "Focused the security code field");
   ok(!picker1.open, "Picker should be closed");
 
   selectedOption = picker1.dropdown.selectedOption;
   is(selectedOption, options[1], "Selected option should now be the second option");
   selectedPaymentCard = picker1.requestStore.getState().selectedPaymentCard;
-  is(selectedPaymentCard, selectedOption.guid, "store should have second option selected");
+  is(selectedPaymentCard, selectedOption.getAttribute("guid"),
+     "store should have second option selected");
   selectedPaymentCardSecurityCode = picker1.requestStore.getState().selectedPaymentCardSecurityCode;
   is(selectedPaymentCardSecurityCode, null, "store should have empty security code");
+  ok(!picker1.classList.contains("invalid-selected-option"), "The second option has all fields");
+  ok(isHidden(picker1.invalidLabel), "The invalid label should be hidden");
 
   let stateChangePromise = promiseStateChange(picker1.requestStore);
 
   // Type in the security code field
+  picker1.securityCodeInput.querySelector("input").focus();
   sendString("836");
   sendKey("Tab");
   let state = await stateChangePromise;
-  ok(state.selectedPaymentCardSecurityCode, "836", "Check security code in state");
+  is(state.selectedPaymentCardSecurityCode, "836", "Check security code in state");
 });
 
 add_task(async function test_delete() {
-  picker1.requestStore.setState({
+  await picker1.requestStore.setState({
     savedBasicCards: {
       // 48bnds6854t was deleted
       "68gjdh354j": {
@@ -150,14 +195,84 @@ add_task(async function test_delete() {
         "cc-exp-year": 2017,
         "cc-name": "J Smith",
         "cc-number": "***********1234",
+        "cc-type": "visa",
+        "guid": "68gjdh354j",
+      },
+      "123456789abc": {
+        "cc-name": "Jane Fields",
+        "cc-given-name": "Jane",
+        "cc-additional-name": "",
+        "cc-family-name": "Fields",
+        "cc-number": "************9876",
+        "guid": "123456789abc",
+      },
+    },
+  });
+  await asyncElementRendered();
+  let options = picker1.dropdown.popupBox.children;
+  is(options.length, 2, "Check dropdown has two remaining cards");
+  ok(options[0].textContent.includes("J Smith"), "Check remaining card #1");
+  ok(options[1].textContent.includes("Jane Fields"), "Check remaining card #2");
+});
+
+add_task(async function test_supportedNetworks_tempCards() {
+  await picker1.requestStore.reset();
+
+  let request = Object.assign({}, picker1.requestStore.getState().request);
+  request.paymentMethods = [
+    {
+      supportedMethods: "basic-card",
+      data: {
+        supportedNetworks: [
+          "mastercard",
+          "visa",
+        ],
+      },
+    },
+  ];
+
+  await picker1.requestStore.setState({
+    request,
+    selectedPaymentCard: "68gjdh354j",
+    tempBasicCards: {
+      "68gjdh354j": {
+        "cc-exp": "2017-08",
+        "cc-exp-month": 8,
+        "cc-exp-year": 2017,
+        "cc-name": "J Smith",
+        "cc-number": "***********1234",
+        "cc-type": "discover",
         "guid": "68gjdh354j",
       },
     },
   });
   await asyncElementRendered();
   let options = picker1.dropdown.popupBox.children;
-  is(options.length, 1, "Check dropdown has one remaining card");
-  ok(options[0].textContent.includes("J Smith"), "Check remaining card");
+  is(options.length, 1, "Check dropdown has one card");
+  ok(options[0].textContent.includes("J Smith"), "Check remaining card #1");
+
+  ok(picker1.classList.contains("invalid-selected-option"),
+     "Check discover is recognized as not supported");
+  is(picker1.invalidLabel.innerText, picker1.dataset.invalidLabel, "Check displayed error text");
+
+  info("change the card to be a visa");
+  await picker1.requestStore.setState({
+    tempBasicCards: {
+      "68gjdh354j": {
+        "cc-exp": "2017-08",
+        "cc-exp-month": 8,
+        "cc-exp-year": 2017,
+        "cc-name": "J Smith",
+        "cc-number": "***********1234",
+        "cc-type": "visa",
+        "guid": "68gjdh354j",
+      },
+    },
+  });
+  await asyncElementRendered();
+
+  ok(!picker1.classList.contains("invalid-selected-option"),
+     "Check visa is recognized as supported");
 });
 </script>
 

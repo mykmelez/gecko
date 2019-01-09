@@ -107,13 +107,33 @@ interface nsIPermissionManager : nsISupports
            [optional] in int64_t expireTime);
 
   /**
+   * Deprecated! Use getAllForPrincipal!
    * Get all custom permissions for a given URI. This will return
    * an enumerator of all permissions which are not set to default
-   * and which belong to the matching prinicpal of the given URI.
+   * and which belong to the matching principal of the given URI.
    *
    * @param uri  the URI to get all permissions for
    */
   nsISimpleEnumerator getAllForURI(in nsIURI uri);
+
+  /**
+   * Get all custom permissions for a given nsIPrincipal. This will return an
+   * enumerator of all permissions which are not set to default and which
+   * belong to the matching principal of the given nsIPrincipal.
+   *
+   * @param principal  the URI to get all permissions for
+   */
+  nsISimpleEnumerator getAllForPrincipal(in nsIPrincipal principal);
+
+  /**
+   * Get all custom permissions of a specific type, specified with a prefix
+   * string.  This will return an array of all permissions which are not set to
+   * default.  Also the passed type argument is either equal to or a prefix of
+   * the type of the returned permissions.
+   *
+   * @param prefix  the type prefix string
+   */
+  Array<nsIPermission> getAllWithTypePrefix(in ACString prefix);
 
   /**
    * Add permission information for a given principal.
@@ -122,7 +142,7 @@ interface nsIPermissionManager : nsISupports
    * Passing a system principal will be a no-op because they will always be
    * granted permissions.
    */
-  void addFromPrincipal(in nsIPrincipal principal, in string typed,
+  void addFromPrincipal(in nsIPrincipal principal, in string type,
                         in uint32_t permission,
                         [optional] in uint32_t expireType,
                         [optional] in int64_t expireTime);
@@ -166,6 +186,11 @@ interface nsIPermissionManager : nsISupports
   void removeAllSince(in int64_t since);
 
   /**
+   * Clear all permissions of the passed type.
+   */
+  void removeByType(in string type);
+
+  /**
    * Test whether a website has permission to perform the given action.
    * This function will perform a pref lookup to permissions.default.<type>
    * if the specific permission type is part of the whitelist for that functionality.
@@ -185,6 +210,21 @@ interface nsIPermissionManager : nsISupports
    */
   uint32_t testPermissionFromPrincipal(in nsIPrincipal principal,
                                        in string type);
+
+  /**
+   * Test whether a website specified by a given origin string has permission
+   * to perform the given action.  This function is similar to testPermission()
+   * and is intended to be used where the cost of parsing a URI in the common
+   * case is to be avoided.
+   * @param originNoSuffix the origin string to be tested.
+   * @param type           a case-sensitive ASCII string, identifying the
+   *                       permission.
+   * @param return         see add(), param permission. returns UNKNOWN_ACTION
+   *                       when there is no stored permission for this uri and/
+   *                       or type.
+   */
+  uint32_t testPermissionOriginNoSuffix(in ACString originNoSuffix,
+                                        in string type);
 
   /**
    * Test whether the principal associated with the window's document has the
@@ -277,7 +317,7 @@ interface nsIPermissionManager : nsISupports
   /**
    * Remove all permissions that will match the origin pattern.
    */
-  void removePermissionsWithAttributes(in DOMString patternAsJSON);
+  void removePermissionsWithAttributes(in AString patternAsJSON);
 
   /**
    * If the current permission is set to expire, reset the expiration time. If

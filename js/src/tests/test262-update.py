@@ -21,20 +21,30 @@ from itertools import chain
 UNSUPPORTED_FEATURES = set([
     "tail-call-optimization",
     "class-fields-public",
+    "class-static-fields-public",
     "class-fields-private",
+    "class-static-fields-private",
+    "class-methods-private",
+    "class-static-methods-private",
     "regexp-dotall",
     "regexp-lookbehind",
     "regexp-named-groups",
     "regexp-unicode-property-escapes",
     "numeric-separator-literal",
     "Intl.Locale",
-    "String.prototype.matchAll",
-    "Symbol.matchAll",
+    "global",
+    "export-star-as-namespace-from-module",
+    "Intl.ListFormat",
+    "Intl.Segmenter",
+    "Intl.NumberFormat-unified",
 ])
 FEATURE_CHECK_NEEDED = {
     "Atomics": "!this.hasOwnProperty('Atomics')",
     "BigInt": "!this.hasOwnProperty('BigInt')",
     "SharedArrayBuffer": "!this.hasOwnProperty('SharedArrayBuffer')",
+    "dynamic-import": "!xulRuntime.shell",
+    "String.prototype.matchAll": "!String.prototype.hasOwnProperty('matchAll')",
+    "Symbol.matchAll": "!Symbol.hasOwnProperty('matchAll')",
 }
 RELEASE_OR_BETA = set()
 
@@ -258,14 +268,15 @@ def convertTestFile(test262parser, testSource, testName, includeSet, strictTests
     if "CanBlockIsFalse" in testRec:
         refTestSkipIf.append(("xulRuntime.shell", "shell can block main thread"))
 
+    # CanBlockIsTrue is set when the test expects that the implementation
+    # can block on the main thread.
+    if "CanBlockIsTrue" in testRec:
+        refTestSkipIf.append(("!xulRuntime.shell", "browser cannot block main thread"))
+
     # Skip non-test files.
     isSupportFile = fileNameEndsWith(testName, "FIXTURE")
     if isSupportFile:
         refTestSkip.append("not a test file")
-
-    # Temporary workaround for <https://github.com/tc39/test262/issues/1527>.
-    if testName.startswith("built-ins/Atomics") and "BigInt" in testRec["features"]:
-        testRec["features"].remove("BigInt")
 
     # Skip tests with unsupported features.
     if "features" in testRec:

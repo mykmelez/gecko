@@ -7,8 +7,12 @@
 
 var EXPORTED_SYMBOLS = ["ExtensionTestUtils"];
 
+ChromeUtils.import("resource://gre/modules/ActorManagerParent.jsm");
 ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+
+// Windowless browsers can create documents that rely on XUL Custom Elements:
+ChromeUtils.import("resource://gre/modules/CustomElementsListener.jsm", null);
 
 ChromeUtils.defineModuleGetter(this, "AddonManager",
                                "resource://gre/modules/AddonManager.jsm");
@@ -33,6 +37,10 @@ XPCOMUtils.defineLazyGetter(this, "Management", () => {
   const {Management} = ChromeUtils.import("resource://gre/modules/Extension.jsm", {});
   return Management;
 });
+
+Services.mm.loadFrameScript("chrome://global/content/browser-content.js", true, true);
+
+ActorManagerParent.flush();
 
 /* exported ExtensionTestUtils */
 
@@ -106,9 +114,10 @@ function promiseBrowserLoaded(browser, url, redirectUrl) {
 }
 
 class ContentPage {
-  constructor(remote = REMOTE_CONTENT_SCRIPTS, extension = null) {
+  constructor(remote = REMOTE_CONTENT_SCRIPTS, extension = null, privateBrowsing = false) {
     this.remote = remote;
     this.extension = extension;
+    this.privateBrowsing = privateBrowsing;
 
     this.browserReady = this._initBrowser();
   }
@@ -116,15 +125,20 @@ class ContentPage {
   async _initBrowser() {
     this.windowlessBrowser = Services.appShell.createWindowlessBrowser(true);
 
+    if (this.privateBrowsing) {
+      let loadContext = this.windowlessBrowser.docShell
+                            .QueryInterface(Ci.nsILoadContext);
+      loadContext.usePrivateBrowsing = true;
+    }
+
     let system = Services.scriptSecurityManager.getSystemPrincipal();
 
-    let chromeShell = this.windowlessBrowser.QueryInterface(Ci.nsIInterfaceRequestor)
-                                            .getInterface(Ci.nsIDocShell)
-                                            .QueryInterface(Ci.nsIWebNavigation);
+    let chromeShell = this.windowlessBrowser.docShell
+                          .QueryInterface(Ci.nsIWebNavigation);
 
     chromeShell.createAboutBlankContentViewer(system);
     chromeShell.useGlobalHistory = false;
-    chromeShell.loadURI("chrome://extensions/content/dummy.xul", 0, null, null, null);
+    chromeShell.loadURI("chrome://extensions/content/dummy.xul", 0, null, null, null, system);
 
     await promiseObserved("chrome-document-global-created",
                           win => win.document == chromeShell.document);
@@ -164,13 +178,20 @@ class ContentPage {
 
   loadFrameScript(func) {
     let frameScript = `data:text/javascript,(${encodeURI(func)}).call(this)`;
-    this.browser.messageManager.loadFrameScript(frameScript, true);
+    this.browser.messageManager.loadFrameScript(frameScript, true, true);
+  }
+
+  addFrameScriptHelper(func) {
+    let frameScript = `data:text/javascript,${encodeURI(func)}`;
+    this.browser.messageManager.loadFrameScript(frameScript, false, true);
   }
 
   async loadURL(url, redirectUrl = undefined) {
     await this.browserReady;
 
-    this.browser.loadURI(url);
+    this.browser.loadURI(url, {
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+    });
     return promiseBrowserLoaded(this.browser, url, redirectUrl);
   }
 
@@ -418,15 +439,10 @@ class ExtensionWrapper {
 }
 
 class AOMExtensionWrapper extends ExtensionWrapper {
-  constructor(testScope, xpiFile, installType) {
+  constructor(testScope) {
     super(testScope);
 
     this.onEvent = this.onEvent.bind(this);
-
-    this.file = xpiFile;
-    this.installType = installType;
-
-    this.cleanupFiles = [xpiFile];
 
     Management.on("ready", this.onEvent);
     Management.on("shutdown", this.onEvent);
@@ -450,23 +466,6 @@ class AOMExtensionWrapper extends ExtensionWrapper {
     AddonTestUtils.off("addon-manager-started", this.onEvent);
 
     AddonManager.removeAddonListener(this);
-
-    for (let file of this.cleanupFiles.splice(0)) {
-      try {
-        Services.obs.notifyObservers(file, "flush-cache-entry");
-        file.remove(false);
-      } catch (e) {
-        Cu.reportError(e);
-      }
-    }
-  }
-
-  maybeSetID(uri, id) {
-    if (!this.id && uri instanceof Ci.nsIJARURI &&
-        uri.JARFile.QueryInterface(Ci.nsIFileURL)
-           .file.equals(this.file)) {
-      this.id = id;
-    }
   }
 
   setRestarting() {
@@ -549,38 +548,6 @@ class AOMExtensionWrapper extends ExtensionWrapper {
     }
   }
 
-  _install(xpiFile) {
-    if (this.installType === "temporary") {
-      return AddonManager.installTemporaryAddon(xpiFile).then(addon => {
-        this.id = addon.id;
-        this.addon = addon;
-
-        return this.startupPromise;
-      }).catch(e => {
-        this.state = "unloaded";
-        return Promise.reject(e);
-      });
-    } else if (this.installType === "permanent") {
-      return AddonManager.getInstallForFile(xpiFile).then(install => {
-        let listener = {
-          onInstallFailed: () => {
-            this.state = "unloaded";
-            this.resolveStartup(Promise.reject(new Error("Install failed")));
-          },
-          onInstallEnded: (install, newAddon) => {
-            this.id = newAddon.id;
-            this.addon = newAddon;
-          },
-        };
-
-        install.addListener(listener);
-        install.install();
-
-        return this.startupPromise;
-      });
-    }
-  }
-
   async _flushCache() {
     if (this.extension && this.extension.rootURI instanceof Ci.nsIJARURI) {
       let file = this.extension.rootURI.JARFile.QueryInterface(Ci.nsIFileURL).file;
@@ -590,19 +557,6 @@ class AOMExtensionWrapper extends ExtensionWrapper {
 
   get version() {
     return this.addon && this.addon.version;
-  }
-
-  startup() {
-    if (this.state != "uninitialized") {
-      throw new Error("Extension already started");
-    }
-
-    this.state = "pending";
-    this.startupPromise = new Promise(resolve => {
-      this.resolveStartup = resolve;
-    });
-
-    return this._install(this.file);
   }
 
   async unload() {
@@ -624,6 +578,99 @@ class AOMExtensionWrapper extends ExtensionWrapper {
 
     return this._install(xpiFile);
   }
+}
+
+class InstallableWrapper extends AOMExtensionWrapper {
+  constructor(testScope, xpiFile, installType, installTelemetryInfo) {
+    super(testScope);
+
+    this.file = xpiFile;
+    this.installType = installType;
+    this.installTelemetryInfo = installTelemetryInfo;
+
+    this.cleanupFiles = [xpiFile];
+  }
+
+  destroy() {
+    super.destroy();
+
+    for (let file of this.cleanupFiles.splice(0)) {
+      try {
+        Services.obs.notifyObservers(file, "flush-cache-entry");
+        file.remove(false);
+      } catch (e) {
+        Cu.reportError(e);
+      }
+    }
+  }
+
+  maybeSetID(uri, id) {
+    if (!this.id && uri instanceof Ci.nsIJARURI &&
+        uri.JARFile.QueryInterface(Ci.nsIFileURL)
+           .file.equals(this.file)) {
+      this.id = id;
+    }
+  }
+
+  _install(xpiFile) {
+    if (this.installType === "temporary") {
+      return AddonManager.installTemporaryAddon(xpiFile).then(addon => {
+        this.id = addon.id;
+        this.addon = addon;
+
+        return this.startupPromise;
+      }).catch(e => {
+        this.state = "unloaded";
+        return Promise.reject(e);
+      });
+    } else if (this.installType === "permanent") {
+      return AddonManager.getInstallForFile(xpiFile, null, this.installTelemetryInfo).then(install => {
+        let listener = {
+          onInstallFailed: () => {
+            this.state = "unloaded";
+            this.resolveStartup(Promise.reject(new Error("Install failed")));
+          },
+          onInstallEnded: (install, newAddon) => {
+            this.id = newAddon.id;
+            this.addon = newAddon;
+          },
+        };
+
+        install.addListener(listener);
+        install.install();
+
+        return this.startupPromise;
+      });
+    }
+  }
+
+  startup() {
+    if (this.state != "uninitialized") {
+      throw new Error("Extension already started");
+    }
+
+    this.state = "pending";
+    this.startupPromise = new Promise(resolve => {
+      this.resolveStartup = resolve;
+    });
+
+    return this._install(this.file);
+  }
+}
+
+class ExternallyInstalledWrapper extends AOMExtensionWrapper {
+  constructor(testScope, id) {
+    super(testScope);
+
+    this.id = id;
+    this.startupPromise = new Promise(resolve => {
+      this.resolveStartup = resolve;
+    });
+
+    this.state = "restarting";
+  }
+
+  maybeSetID(uri, id) { }
 }
 
 var ExtensionTestUtils = {
@@ -669,7 +716,7 @@ var ExtensionTestUtils = {
     // fail sanity checks on debug builds the first time we try to
     // create a wrapper, because we should never have a global without a
     // cached wrapper.
-    Services.mm.loadFrameScript("data:text/javascript,//", true);
+    Services.mm.loadFrameScript("data:text/javascript,//", true, true);
 
 
     let tmpD = this.profileDir.clone();
@@ -733,7 +780,7 @@ var ExtensionTestUtils = {
     if (data.useAddonManager) {
       let xpiFile = Extension.generateXPI(data);
 
-      return this.loadExtensionXPI(xpiFile, data.useAddonManager);
+      return this.loadExtensionXPI(xpiFile, data.useAddonManager, data.amInstallTelemetryInfo);
     }
 
     let extension = Extension.generate(data);
@@ -741,8 +788,14 @@ var ExtensionTestUtils = {
     return new ExtensionWrapper(this.currentScope, extension);
   },
 
-  loadExtensionXPI(xpiFile, useAddonManager = "temporary") {
-    return new AOMExtensionWrapper(this.currentScope, xpiFile, useAddonManager);
+  loadExtensionXPI(xpiFile, useAddonManager = "temporary", installTelemetryInfo) {
+    return new InstallableWrapper(this.currentScope, xpiFile, useAddonManager, installTelemetryInfo);
+  },
+
+  // Create a wrapper for a webextension that will be installed
+  // by some external process (e.g., Normandy)
+  expectExtension(id) {
+    return new ExternallyInstalledWrapper(this.currentScope, id);
   },
 
   get remoteContentScripts() {
@@ -782,10 +835,10 @@ var ExtensionTestUtils = {
    *
    * @returns {ContentPage}
    */
-  loadContentPage(url, {extension = undefined, remote = undefined, redirectUrl = undefined} = {}) {
+  loadContentPage(url, {extension = undefined, remote = undefined, redirectUrl = undefined, privateBrowsing = false} = {}) {
     ContentTask.setTestScope(this.currentScope);
 
-    let contentPage = new ContentPage(remote, extension && extension.extension);
+    let contentPage = new ContentPage(remote, extension && extension.extension, privateBrowsing);
 
     return contentPage.loadURL(url, redirectUrl).then(() => {
       return contentPage;

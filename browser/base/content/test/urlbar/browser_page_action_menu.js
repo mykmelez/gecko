@@ -8,10 +8,11 @@ registerCleanupFunction(function() {
 });
 
 const lastModifiedFixture = 1507655615.87; // Approx Oct 10th 2017
-const mockRemoteClients = [
-  { id: "0", name: "foo", type: "mobile", serverLastModified: lastModifiedFixture },
-  { id: "1", name: "bar", type: "desktop", serverLastModified: lastModifiedFixture },
-  { id: "2", name: "baz", type: "mobile", serverLastModified: lastModifiedFixture },
+const mockTargets = [
+  { id: "0", name: "foo", type: "phone", clientRecord: {id: "cli0", serverLastModified: lastModifiedFixture, type: "phone"} },
+  { id: "1", name: "bar", type: "desktop", clientRecord: {id: "cli1", serverLastModified: lastModifiedFixture, type: "desktop"} },
+  { id: "2", name: "baz", type: "phone", clientRecord: {id: "cli2", serverLastModified: lastModifiedFixture, type: "phone"} },
+  { id: "3", name: "no client record device", type: "phone" },
 ];
 
 add_task(async function bookmark() {
@@ -204,7 +205,6 @@ add_task(async function sendToDevice_syncNotReady_other_states() {
     await promiseSyncReady();
     const sandbox = sinon.sandbox.create();
     sandbox.stub(gSync, "syncReady").get(() => false);
-    sandbox.stub(Weave.Service.clientsEngine, "isFirstSync").get(() => true);
     sandbox.stub(UIState, "get").returns({ status: UIState.STATUS_NOT_VERIFIED });
     sandbox.stub(gSync, "isSendableURI").returns(true);
 
@@ -235,14 +235,14 @@ add_task(async function sendToDevice_syncNotReady_other_states() {
         attrs: {
           label: "Account Not Verified",
         },
-        disabled: true
+        disabled: true,
       },
       null,
       {
         attrs: {
           label: "Verify Your Account...",
         },
-      }
+      },
     ];
     checkSendToDeviceItems(expectedItems);
 
@@ -261,15 +261,15 @@ add_task(async function sendToDevice_syncNotReady_configured() {
     await promiseSyncReady();
     const sandbox = sinon.sandbox.create();
     const syncReady = sandbox.stub(gSync, "syncReady").get(() => false);
-    const lastSync = sandbox.stub(Weave.Service.clientsEngine, "isFirstSync").get(() => true);
+    const hasSyncedThisSession = sandbox.stub(Weave.Service.clientsEngine, "hasSyncedThisSession").get(() => false);
     sandbox.stub(UIState, "get").returns({ status: UIState.STATUS_SIGNED_IN });
     sandbox.stub(gSync, "isSendableURI").returns(true);
 
     sandbox.stub(Weave.Service, "sync").callsFake(() => {
       syncReady.get(() => true);
-      lastSync.get(() => Date.now());
-      sandbox.stub(gSync, "remoteClients").get(() => mockRemoteClients);
-      sandbox.stub(Weave.Service.clientsEngine, "getClientType").callsFake(id => mockRemoteClients.find(c => c.id == id).type);
+      hasSyncedThisSession.get(() => true);
+      sandbox.stub(gSync, "sendTabTargets").get(() => mockTargets);
+      sandbox.stub(Weave.Service.clientsEngine, "getClientType").callsFake(id => mockTargets.find(c => c.clientRecord && c.clientRecord.id == id).clientRecord.type);
     });
 
     let onShowingSubview = BrowserPageActions.sendToDevice.onShowingSubview;
@@ -314,22 +314,25 @@ add_task(async function sendToDevice_syncNotReady_configured() {
             disabled: true,
           },
         ];
-        for (let client of mockRemoteClients) {
+        for (let target of mockTargets) {
+          const attrs = {
+            clientId: target.id,
+            label: target.name,
+            clientType: target.type,
+          };
+          if (target.clientRecord && target.clientRecord.serverLastModified) {
+            attrs.tooltiptext = gSync.formatLastSyncDate(new Date(target.clientRecord.serverLastModified * 1000));
+          }
           expectedItems.push({
-            attrs: {
-              clientId: client.id,
-              label: client.name,
-              clientType: client.type,
-              tooltiptext: gSync.formatLastSyncDate(new Date(lastModifiedFixture * 1000))
-            },
+            attrs,
           });
         }
         expectedItems.push(
           null,
           {
             attrs: {
-              label: "Send to All Devices"
-            }
+              label: "Send to All Devices",
+            },
           }
         );
         checkSendToDeviceItems(expectedItems);
@@ -373,19 +376,19 @@ add_task(async function sendToDevice_notSignedIn() {
         attrs: {
           label: "Not Connected to Sync",
         },
-        disabled: true
+        disabled: true,
       },
       null,
       {
         attrs: {
-          label: "Sign in to Sync..."
+          label: "Sign in to Sync...",
         },
       },
       {
         attrs: {
-          label: "Learn About Sending Tabs..."
+          label: "Learn About Sending Tabs...",
         },
-      }
+      },
     ];
     checkSendToDeviceItems(expectedItems);
 
@@ -402,11 +405,11 @@ add_task(async function sendToDevice_noDevices() {
     await promiseSyncReady();
     const sandbox = sinon.sandbox.create();
     sandbox.stub(gSync, "syncReady").get(() => true);
-    sandbox.stub(Weave.Service.clientsEngine, "isFirstSync").get(() => false);
+    sandbox.stub(Weave.Service.clientsEngine, "hasSyncedThisSession").get(() => true);
+    sandbox.stub(Weave.Service.clientsEngine, "fxaDevices").get(() => []);
     sandbox.stub(UIState, "get").returns({ status: UIState.STATUS_SIGNED_IN });
     sandbox.stub(gSync, "isSendableURI").returns(true);
-    sandbox.stub(gSync, "remoteClients").get(() => []);
-    sandbox.stub(Weave.Service.clientsEngine, "getClientType").callsFake(id => mockRemoteClients.find(c => c.id == id).type);
+    sandbox.stub(Weave.Service.clientsEngine, "getClientType").callsFake(id => mockTargets.find(c => c.clientRecord && c.clientRecord.id == id).clientRecord.type);
 
     let cleanUp = () => {
       sandbox.restore();
@@ -435,19 +438,19 @@ add_task(async function sendToDevice_noDevices() {
         attrs: {
           label: "No Devices Connected",
         },
-        disabled: true
+        disabled: true,
       },
       null,
       {
         attrs: {
-          label: "Connect Another Device..."
-        }
+          label: "Connect Another Device...",
+        },
       },
       {
         attrs: {
-          label: "Learn About Sending Tabs..."
-        }
-      }
+          label: "Learn About Sending Tabs...",
+        },
+      },
     ];
     checkSendToDeviceItems(expectedItems);
 
@@ -468,11 +471,11 @@ add_task(async function sendToDevice_devices() {
     await promiseSyncReady();
     const sandbox = sinon.sandbox.create();
     sandbox.stub(gSync, "syncReady").get(() => true);
-    sandbox.stub(Weave.Service.clientsEngine, "isFirstSync").get(() => false);
+    sandbox.stub(Weave.Service.clientsEngine, "hasSyncedThisSession").get(() => true);
     sandbox.stub(UIState, "get").returns({ status: UIState.STATUS_SIGNED_IN });
     sandbox.stub(gSync, "isSendableURI").returns(true);
-    sandbox.stub(gSync, "remoteClients").get(() => mockRemoteClients);
-    sandbox.stub(Weave.Service.clientsEngine, "getClientType").callsFake(id => mockRemoteClients.find(c => c.id == id).type);
+    sandbox.stub(gSync, "sendTabTargets").get(() => mockTargets);
+    sandbox.stub(Weave.Service.clientsEngine, "getClientType").callsFake(id => mockTargets.find(c => c.clientRecord && c.clientRecord.id == id).clientRecord.type);
 
     let cleanUp = () => {
       sandbox.restore();
@@ -499,12 +502,12 @@ add_task(async function sendToDevice_devices() {
         disabled: true,
       },
     ];
-    for (let client of mockRemoteClients) {
+    for (let target of mockTargets) {
       expectedItems.push({
         attrs: {
-          clientId: client.id,
-          label: client.name,
-          clientType: client.type,
+          clientId: target.id,
+          label: target.name,
+          clientType: target.type,
         },
       });
     }
@@ -512,8 +515,8 @@ add_task(async function sendToDevice_devices() {
       null,
       {
         attrs: {
-          label: "Send to All Devices"
-        }
+          label: "Send to All Devices",
+        },
       }
     );
     checkSendToDeviceItems(expectedItems);
@@ -527,17 +530,75 @@ add_task(async function sendToDevice_devices() {
   });
 });
 
+add_task(async function sendToDevice_title() {
+  // Open two tabs that are sendable.
+  await BrowserTestUtils.withNewTab("http://example.com/a", async otherBrowser => {
+    await BrowserTestUtils.withNewTab("http://example.com/b", async () => {
+      await promiseSyncReady();
+      const sandbox = sinon.sandbox.create();
+      sandbox.stub(gSync, "syncReady").get(() => true);
+      sandbox.stub(Weave.Service.clientsEngine, "hasSyncedThisSession").get(() => true);
+      sandbox.stub(UIState, "get").returns({ status: UIState.STATUS_SIGNED_IN });
+      sandbox.stub(gSync, "isSendableURI").returns(true);
+      sandbox.stub(gSync, "sendTabTargets").get(() => []);
+      sandbox.stub(Weave.Service.clientsEngine, "getClientType").callsFake(id => mockTargets.find(c => c.clientRecord && c.clientRecord.id == id).clientRecord.type);
+
+      let cleanUp = () => {
+        sandbox.restore();
+      };
+      registerCleanupFunction(cleanUp);
+
+      // Open the panel.  Only one tab is selected, so the action's title should
+      // be "Send Tab to Device".
+      await promisePageActionPanelOpen();
+      let sendToDeviceButton =
+        document.getElementById("pageAction-panel-sendToDevice");
+      Assert.ok(!sendToDeviceButton.disabled);
+
+      Assert.equal(sendToDeviceButton.label, "Send Tab to Device");
+      Assert.equal(PageActions.actionForID("sendToDevice").getTitle(window),
+                   "Send Tab to Device");
+
+      // Hide the panel.
+      let hiddenPromise = promisePageActionPanelHidden();
+      BrowserPageActions.panelNode.hidePopup();
+      await hiddenPromise;
+
+      // Add the other tab to the selection.
+      gBrowser.addToMultiSelectedTabs(gBrowser.getTabForBrowser(otherBrowser),
+                                      false);
+
+      // Open the panel again.  Now the action's title should be "Send 2 Tabs to
+      // Device".
+      await promisePageActionPanelOpen();
+      Assert.ok(!sendToDeviceButton.disabled);
+      Assert.equal(sendToDeviceButton.label, "Send 2 Tabs to Device");
+      Assert.equal(PageActions.actionForID("sendToDevice").getTitle(window),
+                   "Send 2 Tabs to Device");
+
+      // Hide the panel.
+      hiddenPromise = promisePageActionPanelHidden();
+      BrowserPageActions.panelNode.hidePopup();
+      await hiddenPromise;
+
+      cleanUp();
+
+      await UIState.reset();
+    });
+  });
+});
+
 add_task(async function sendToDevice_inUrlbar() {
   // Open a tab that's sendable.
   await BrowserTestUtils.withNewTab("http://example.com/", async () => {
     await promiseSyncReady();
     const sandbox = sinon.sandbox.create();
     sandbox.stub(gSync, "syncReady").get(() => true);
-    sandbox.stub(Weave.Service.clientsEngine, "isFirstSync").get(() => false);
+    sandbox.stub(Weave.Service.clientsEngine, "hasSyncedThisSession").get(() => true);
     sandbox.stub(UIState, "get").returns({ status: UIState.STATUS_SIGNED_IN });
     sandbox.stub(gSync, "isSendableURI").returns(true);
-    sandbox.stub(gSync, "remoteClients").get(() => mockRemoteClients);
-    sandbox.stub(Weave.Service.clientsEngine, "getClientType").callsFake(id => mockRemoteClients.find(c => c.id == id).type);
+    sandbox.stub(gSync, "sendTabTargets").get(() => mockTargets);
+    sandbox.stub(Weave.Service.clientsEngine, "getClientType").callsFake(id => mockTargets.find(c => c.clientRecord && c.clientRecord.id == id).clientRecord.type);
 
     let cleanUp = () => {
       sandbox.restore();
@@ -570,12 +631,12 @@ add_task(async function sendToDevice_inUrlbar() {
         disabled: true,
       },
     ];
-    for (let client of mockRemoteClients) {
+    for (let target of mockTargets) {
       expectedItems.push({
         attrs: {
-          clientId: client.id,
-          label: client.name,
-          clientType: client.type,
+          clientId: target.id,
+          label: target.name,
+          clientType: target.type,
         },
       });
     }
@@ -583,8 +644,8 @@ add_task(async function sendToDevice_inUrlbar() {
       null,
       {
         attrs: {
-          label: "Send to All Devices"
-        }
+          label: "Send to All Devices",
+        },
       }
     );
     checkSendToDeviceItems(expectedItems, true);
@@ -598,8 +659,7 @@ add_task(async function sendToDevice_inUrlbar() {
     Assert.notEqual(deviceMenuItem, null);
 
     // For good measure, wait until it's visible.
-    let dwu = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                    .getInterface(Ci.nsIDOMWindowUtils);
+    let dwu = window.windowUtils;
     await BrowserTestUtils.waitForCondition(() => {
       let bounds = dwu.getBoundsWithoutFlushing(deviceMenuItem);
       return bounds.height > 0 && bounds.width > 0;
@@ -756,10 +816,10 @@ function checkSendToDeviceItems(expectedItems, forUrlbar = false) {
     BrowserPageActions._panelViewNodeIDForActionID("sendToDevice", forUrlbar) +
     "-body";
   let body = document.getElementById(bodyID);
-  Assert.equal(body.childNodes.length, expectedItems.length);
+  Assert.equal(body.children.length, expectedItems.length);
   for (let i = 0; i < expectedItems.length; i++) {
     let expected = expectedItems[i];
-    let actual = body.childNodes[i];
+    let actual = body.children[i];
     if (!expected) {
       Assert.equal(actual.localName, "toolbarseparator");
       continue;
@@ -793,7 +853,7 @@ function checkSendToDeviceItems(expectedItems, forUrlbar = false) {
 
 function collectContextMenuItems() {
   let contextMenu = document.getElementById("pageActionContextMenu");
-  return Array.filter(contextMenu.childNodes, node => {
+  return Array.filter(contextMenu.children, node => {
     return window.getComputedStyle(node).visibility == "visible";
   });
 }

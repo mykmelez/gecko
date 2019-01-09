@@ -8,14 +8,13 @@
 #define nsBox_h___
 
 #include "mozilla/Attributes.h"
+#include "mozilla/StaticPtr.h"
 #include "nsIFrame.h"
 
 class nsITheme;
 
 class nsBox : public nsIFrame {
-
-public:
-
+ public:
   friend class nsIFrame;
 
   static void Shutdown();
@@ -26,11 +25,13 @@ public:
   virtual nscoord GetXULFlex() override;
   virtual nscoord GetXULBoxAscent(nsBoxLayoutState& aBoxLayoutState) override;
 
-  virtual nsSize GetXULMinSizeForScrollArea(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULMinSizeForScrollArea(
+      nsBoxLayoutState& aBoxLayoutState) override;
 
   virtual bool IsXULCollapsed() override;
 
-  virtual void SetXULBounds(nsBoxLayoutState& aBoxLayoutState, const nsRect& aRect,
+  virtual void SetXULBounds(nsBoxLayoutState& aBoxLayoutState,
+                            const nsRect& aRect,
                             bool aRemoveOverflowAreas = false) override;
 
   virtual nsresult GetXULBorder(nsMargin& aBorderAndPadding) override;
@@ -46,8 +47,9 @@ public:
   virtual ~nsBox();
 
   /**
-   * Returns true if this box clips its children, e.g., if this box is an scrollbox.
-  */
+   * Returns true if this box clips its children, e.g., if this box is an
+   * scrollbox.
+   */
   virtual bool DoesClipChildren();
   virtual bool ComputesOwnOverflowArea() = 0;
 
@@ -64,29 +66,26 @@ public:
   static void AddMargin(nsIFrame* aChild, nsSize& aSize);
   static void AddMargin(nsSize& aSize, const nsMargin& aMargin);
 
-  static nsSize BoundsCheckMinMax(const nsSize& aMinSize, const nsSize& aMaxSize);
-  static nsSize BoundsCheck(const nsSize& aMinSize, const nsSize& aPrefSize, const nsSize& aMaxSize);
-  static nscoord BoundsCheck(nscoord aMinSize, nscoord aPrefSize, nscoord aMaxSize);
+  static nsSize BoundsCheckMinMax(const nsSize& aMinSize,
+                                  const nsSize& aMaxSize);
+  static nsSize BoundsCheck(const nsSize& aMinSize, const nsSize& aPrefSize,
+                            const nsSize& aMaxSize);
+  static nscoord BoundsCheck(nscoord aMinSize, nscoord aPrefSize,
+                             nscoord aMaxSize);
 
   static nsIFrame* GetChildXULBox(const nsIFrame* aFrame);
   static nsIFrame* GetNextXULBox(const nsIFrame* aFrame);
   static nsIFrame* GetParentXULBox(const nsIFrame* aFrame);
 
-protected:
-
+ protected:
   nsresult BeginXULLayout(nsBoxLayoutState& aState);
   NS_IMETHOD DoXULLayout(nsBoxLayoutState& aBoxLayoutState);
   nsresult EndXULLayout(nsBoxLayoutState& aState);
 
   static bool gGotTheme;
-  static nsITheme* gTheme;
+  static mozilla::StaticRefPtr<nsITheme> gTheme;
 
-  enum eMouseThrough {
-    unset,
-    never,
-    always
-  };
+  enum eMouseThrough { unset, never, always };
 };
 
 #endif
-

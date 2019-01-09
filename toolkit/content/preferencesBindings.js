@@ -198,13 +198,6 @@ const Preferences = window.Preferences = (function() {
       this.userChangedValue(event.target);
     },
 
-    onSelect(event) {
-      // This "select" event handler tracks changes made to colorpicker
-      // preferences by the user in this window.
-      if (event.target.localName == "colorpicker")
-        this.userChangedValue(event.target);
-    },
-
     onChange(event) {
       // This "change" event handler tracks changes made to preferences by
       // the user in this window.
@@ -258,7 +251,6 @@ const Preferences = window.Preferences = (function() {
         case "command": return this.onCommand(event);
         case "dialogaccept": return this.onDialogAccept(event);
         case "input": return this.onInput(event);
-        case "select": return this.onSelect(event);
         case "unload": return this.onUnload(event);
         default: return undefined;
       }
@@ -365,8 +357,8 @@ const Preferences = window.Preferences = (function() {
           // it has to be set if the value is true and removed if the value
           // is false in order to be interpreted correctly by the element.
           if (value) {
-            // In theory we can set it to anything; however xbl implementations
-            // of `checkbox` and `listitem` only work with "true".
+            // In theory we can set it to anything; however xbl implementation
+            // of `checkbox` only works with "true".
             element.setAttribute(attribute, "true");
           } else {
             element.removeAttribute(attribute);
@@ -375,11 +367,8 @@ const Preferences = window.Preferences = (function() {
           element.setAttribute(attribute, value);
         }
       }
-      if (aElement.localName == "checkbox" ||
-          aElement.localName == "listitem")
+      if (aElement.localName == "checkbox")
         setValue(aElement, "checked", val);
-      else if (aElement.localName == "colorpicker")
-        setValue(aElement, "color", val);
       else if (aElement.localName == "textbox") {
         // XXXmano Bug 303998: Avoid a caret placement issue if either the
         // preference observer or its setter calls updateElements as a result
@@ -418,11 +407,8 @@ const Preferences = window.Preferences = (function() {
         return element.getAttribute(attribute);
       }
       let value;
-      if (aElement.localName == "checkbox" ||
-          aElement.localName == "listitem")
+      if (aElement.localName == "checkbox")
         value = getValue(aElement, "checked");
-      else if (aElement.localName == "colorpicker")
-        value = getValue(aElement, "color");
       else
         value = getValue(aElement, "value");
 
@@ -438,11 +424,9 @@ const Preferences = window.Preferences = (function() {
     isElementEditable(aElement) {
       switch (aElement.localName) {
       case "checkbox":
-      case "colorpicker":
+      case "input":
       case "radiogroup":
       case "textbox":
-      case "listitem":
-      case "listbox":
       case "menulist":
         return true;
       }

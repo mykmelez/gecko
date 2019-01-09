@@ -10,7 +10,7 @@ const nodeFilterConstants = require("devtools/shared/dom-node-filter-constants")
 const SHEET_TYPE = {
   "agent": "AGENT_SHEET",
   "user": "USER_SHEET",
-  "author": "AUTHOR_SHEET"
+  "author": "AUTHOR_SHEET",
 };
 
 // eslint-disable-next-line no-unused-vars
@@ -26,9 +26,10 @@ exports.setIgnoreLayoutChanges = (...args) =>
  */
 const utilsCache = new WeakMap();
 function utilsFor(win) {
+  // XXXbz Given that we now have a direct getter for the DOMWindowUtils, is
+  // this weakmap cache path any faster than just calling the getter?
   if (!utilsCache.has(win)) {
-    utilsCache.set(win, win.QueryInterface(Ci.nsIInterfaceRequestor)
-                           .getInterface(Ci.nsIDOMWindowUtils));
+    utilsCache.set(win, win.windowUtils);
   }
   return utilsCache.get(win);
 }
@@ -40,9 +41,7 @@ function utilsFor(win) {
  * @return {DOMWindow}
  */
 function getTopWindow(win) {
-  const docShell = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                    .getInterface(Ci.nsIWebNavigation)
-                    .QueryInterface(Ci.nsIDocShell);
+  const docShell = win.docShell;
 
   if (!docShell.isMozBrowser) {
     return win.top;
@@ -101,9 +100,7 @@ function getParentWindow(win) {
     return null;
   }
 
-  const docShell = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                 .getInterface(Ci.nsIWebNavigation)
-                 .QueryInterface(Ci.nsIDocShell);
+  const docShell = win.docShell;
 
   if (!docShell.isMozBrowser) {
     return win.parent;
@@ -196,25 +193,27 @@ exports.getFrameOffsets = getFrameOffsets;
  * @param {String} region
  *        The box model region to return: "content", "padding", "border" or
  *        "margin".
+ * @param {Object} [options.ignoreZoom=false]
+ *        Ignore zoom used in the context of e.g. canvas.
  * @return {Array}
  *        An array of objects that have the same structure as quads returned by
  *        getBoxQuads. An empty array if the node has no quads or is invalid.
  */
-function getAdjustedQuads(boundaryWindow, node, region) {
+function getAdjustedQuads(boundaryWindow, node, region, {ignoreZoom} = {}) {
   if (!node || !node.getBoxQuads) {
     return [];
   }
 
   const quads = node.getBoxQuads({
     box: region,
-    relativeTo: boundaryWindow.document
+    relativeTo: boundaryWindow.document,
   });
 
   if (!quads.length) {
     return [];
   }
 
-  const scale = getCurrentZoom(node);
+  const scale = ignoreZoom ? 1 : getCurrentZoom(node);
   const { scrollX, scrollY } = boundaryWindow;
 
   const xOffset = scrollX * scale;
@@ -228,25 +227,25 @@ function getAdjustedQuads(boundaryWindow, node, region) {
         w: quad.p1.w * scale,
         x: quad.p1.x * scale + xOffset,
         y: quad.p1.y * scale + yOffset,
-        z: quad.p1.z * scale
+        z: quad.p1.z * scale,
       },
       p2: {
         w: quad.p2.w * scale,
         x: quad.p2.x * scale + xOffset,
         y: quad.p2.y * scale + yOffset,
-        z: quad.p2.z * scale
+        z: quad.p2.z * scale,
       },
       p3: {
         w: quad.p3.w * scale,
         x: quad.p3.x * scale + xOffset,
         y: quad.p3.y * scale + yOffset,
-        z: quad.p3.z * scale
+        z: quad.p3.z * scale,
       },
       p4: {
         w: quad.p4.w * scale,
         x: quad.p4.x * scale + xOffset,
         y: quad.p4.y * scale + yOffset,
-        z: quad.p4.z * scale
+        z: quad.p4.z * scale,
       },
       bounds: {
         bottom: bounds.bottom * scale + yOffset,
@@ -256,8 +255,8 @@ function getAdjustedQuads(boundaryWindow, node, region) {
         top: bounds.top * scale + yOffset,
         width: bounds.width * scale,
         x: bounds.x * scale + xOffset,
-        y: bounds.y * scale + yOffset
-      }
+        y: bounds.y * scale + yOffset,
+      },
     });
   }
 
@@ -295,7 +294,7 @@ function getRect(boundaryWindow, node, contentWindow) {
     top: clientRect.top + contentWindow.pageYOffset,
     left: clientRect.left + contentWindow.pageXOffset,
     width: clientRect.width,
-    height: clientRect.height
+    height: clientRect.height,
   };
 
   // We iterate through all the parent windows.
@@ -381,7 +380,7 @@ function getNodeBounds(boundaryWindow, node) {
     bottom: yOffset + height,
     left: xOffset,
     width,
-    height
+    height,
   };
 }
 exports.getNodeBounds = getNodeBounds;
@@ -557,11 +556,6 @@ function isXBLAnonymous(node) {
     return false;
   }
 
-  // Shadow nodes also show up in getAnonymousNodes, so return false.
-  if (parent.openOrClosedShadowRoot && parent.openOrClosedShadowRoot.contains(node)) {
-    return false;
-  }
-
   const anonNodes = [...node.ownerDocument.getAnonymousNodes(parent) || []];
   return anonNodes.indexOf(node) > -1;
 }
@@ -587,9 +581,103 @@ function isShadowAnonymous(node) {
 exports.isShadowAnonymous = isShadowAnonymous;
 
 /**
+ * Determine whether a node is a template element.
+ *
+ * @param {DOMNode} node
+ * @return {Boolean}
+ */
+function isTemplateElement(node) {
+  return node.ownerGlobal && node instanceof node.ownerGlobal.HTMLTemplateElement;
+}
+exports.isTemplateElement = isTemplateElement;
+
+/**
+ * Determine whether a node is a shadow root.
+ *
+ * @param {DOMNode} node
+ * @return {Boolean}
+ */
+function isShadowRoot(node) {
+  const isFragment = node.nodeType === Node.DOCUMENT_FRAGMENT_NODE;
+  return isFragment && !!node.host;
+}
+exports.isShadowRoot = isShadowRoot;
+
+/*
+ * Gets the shadow root mode (open or closed).
+ *
+ * @param {DOMNode} node
+ * @return {String|null}
+ */
+function getShadowRootMode(node) {
+  return isShadowRoot(node) ? node.mode : null;
+}
+exports.getShadowRootMode = getShadowRootMode;
+
+/**
+ * Determine whether a node is a shadow host, ie. an element that has a shadowRoot
+ * attached to itself.
+ *
+ * @param {DOMNode} node
+ * @return {Boolean}
+ */
+function isShadowHost(node) {
+  const shadowRoot = node.openOrClosedShadowRoot;
+  return shadowRoot && shadowRoot.nodeType === Node.DOCUMENT_FRAGMENT_NODE;
+}
+exports.isShadowHost = isShadowHost;
+
+/**
+ * Determine whether a node is a child of a shadow host. Even if the element has been
+ * assigned to a slot in the attached shadow DOM, the parent node for this element is
+ * still considered to be the "host" element, and we need to walk them differently.
+ *
+ * @param {DOMNode} node
+ * @return {Boolean}
+ */
+function isDirectShadowHostChild(node) {
+  // Pseudo elements and native anonymous elements are always part of the anonymous tree.
+  if (
+    isBeforePseudoElement(node) ||
+    isAfterPseudoElement(node) ||
+    isNativeAnonymous(node)) {
+    return false;
+  }
+
+  const parentNode = node.parentNode;
+  return parentNode && !!parentNode.openOrClosedShadowRoot;
+}
+exports.isDirectShadowHostChild = isDirectShadowHostChild;
+
+/**
+ * Determine whether a node is a ::before pseudo.
+ *
+ * @param {DOMNode} node
+ * @return {Boolean}
+ */
+function isBeforePseudoElement(node) {
+  return node.nodeName === "_moz_generated_content_before";
+}
+exports.isBeforePseudoElement = isBeforePseudoElement;
+
+/**
+ * Determine whether a node is a ::after pseudo.
+ *
+ * @param {DOMNode} node
+ * @return {Boolean}
+ */
+function isAfterPseudoElement(node) {
+  return node.nodeName === "_moz_generated_content_after";
+}
+exports.isAfterPseudoElement = isAfterPseudoElement;
+
+/**
  * Get the current zoom factor applied to the container window of a given node.
  * Container windows are used as a weakmap key to store the corresponding
  * nsIDOMWindowUtils instance to avoid querying it every time.
+ *
+ * XXXbz Given that we now have a direct getter for the DOMWindowUtils, is
+ * this weakmap cache path any faster than just calling the getter?
  *
  * @param {DOMNode|DOMWindow}
  *        The node for which the zoom factor should be calculated, or its
@@ -736,3 +824,85 @@ function removeSheet(window, url, type = "agent") {
   }
 }
 exports.removeSheet = removeSheet;
+
+/**
+ * Get the untransformed coordinates for a node.
+ *
+ * @param  {DOMNode} node
+ *         The node for which the DOMQuad is to be returned.
+ * @param  {String} region
+ *         The box model region to return: "content", "padding", "border" or
+ *         "margin".
+ * @return {DOMQuad}
+ *         A DOMQuad representation of the node.
+ */
+function getUntransformedQuad(node, region = "border") {
+  // Get the inverse transformation matrix for the node.
+  const matrix = node.getTransformToViewport();
+  const inverse = matrix.inverse();
+  const win = node.ownerGlobal;
+
+  // Get the adjusted quads for the node (including scroll offsets).
+  const quads = getAdjustedQuads(win, node, region, {
+    ignoreZoom: true,
+  });
+
+  // Create DOMPoints from the transformed node position.
+  const p1 = new DOMPoint(quads[0].p1.x, quads[0].p1.y);
+  const p2 = new DOMPoint(quads[0].p2.x, quads[0].p2.y);
+  const p3 = new DOMPoint(quads[0].p3.x, quads[0].p3.y);
+  const p4 = new DOMPoint(quads[0].p4.x, quads[0].p4.y);
+
+  // Apply the inverse transformation matrix to the points to get the
+  // untransformed points.
+  const ip1 = inverse.transformPoint(p1);
+  const ip2 = inverse.transformPoint(p2);
+  const ip3 = inverse.transformPoint(p3);
+  const ip4 = inverse.transformPoint(p4);
+
+  // Save the results in a DOMQuad.
+  const quad = new DOMQuad(
+    { x: ip1.x, y: ip1.y },
+    { x: ip2.x, y: ip2.y },
+    { x: ip3.x, y: ip3.y },
+    { x: ip4.x, y: ip4.y }
+  );
+
+  // Remove the border offsets because we include them when calculating
+  // offsets in the while loop.
+  const style = win.getComputedStyle(node);
+  const leftAdjustment = parseInt(style.borderLeftWidth, 10) || 0;
+  const topAdjustment = parseInt(style.borderTopWidth, 10) || 0;
+
+  quad.p1.x -= leftAdjustment;
+  quad.p2.x -= leftAdjustment;
+  quad.p3.x -= leftAdjustment;
+  quad.p4.x -= leftAdjustment;
+  quad.p1.y -= topAdjustment;
+  quad.p2.y -= topAdjustment;
+  quad.p3.y -= topAdjustment;
+  quad.p4.y -= topAdjustment;
+
+  // Calculate offsets.
+  while (node) {
+    const nodeStyle = win.getComputedStyle(node);
+    const borderLeftWidth = parseInt(nodeStyle.borderLeftWidth, 10) || 0;
+    const borderTopWidth = parseInt(nodeStyle.borderTopWidth, 10) || 0;
+    const leftOffset = node.offsetLeft - node.scrollLeft + borderLeftWidth;
+    const topOffset = node.offsetTop - node.scrollTop + borderTopWidth;
+
+    quad.p1.x += leftOffset;
+    quad.p2.x += leftOffset;
+    quad.p3.x += leftOffset;
+    quad.p4.x += leftOffset;
+    quad.p1.y += topOffset;
+    quad.p2.y += topOffset;
+    quad.p3.y += topOffset;
+    quad.p4.y += topOffset;
+
+    node = node.offsetParent;
+  }
+
+  return quad;
+}
+exports.getUntransformedQuad = getUntransformedQuad;

@@ -10,39 +10,31 @@
 #include "nsIWebBrowserFind.h"
 
 #include "nsCOMPtr.h"
-#include "nsWeakReference.h"
+#include "nsIWeakReferenceUtils.h"
 
 #include "nsIFind.h"
 
 #include "nsString.h"
 
-#define NS_WEB_BROWSER_FIND_CONTRACTID "@mozilla.org/embedcomp/find;1"
-
-#define NS_WEB_BROWSER_FIND_CID \
-  {0x57cf9383, 0x3405, 0x11d5, {0xbe, 0x5b, 0xaa, 0x20, 0xfa, 0x2c, 0xf3, 0x7c}}
-
 class nsIDOMWindow;
-
 class nsIDocShell;
-class nsIDocument;
 class nsRange;
 
 namespace mozilla {
 namespace dom {
+class Document;
 class Element;
 class Selection;
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla
 
 //*****************************************************************************
 // class nsWebBrowserFind
 //*****************************************************************************
 
-class nsWebBrowserFind
-  : public nsIWebBrowserFind
-  , public nsIWebBrowserFindInFrames
-{
-public:
+class nsWebBrowserFind : public nsIWebBrowserFind,
+                         public nsIWebBrowserFindInFrames {
+ public:
   nsWebBrowserFind();
 
   // nsISupports
@@ -54,7 +46,7 @@ public:
   // nsIWebBrowserFindInFrames
   NS_DECL_NSIWEBBROWSERFINDINFRAMES
 
-protected:
+ protected:
   virtual ~nsWebBrowserFind();
 
   bool CanFindNext() { return mSearchString.Length() != 0; }
@@ -65,25 +57,24 @@ protected:
   nsresult OnStartSearchFrame(nsPIDOMWindowOuter* aWindow);
   nsresult OnEndSearchFrame(nsPIDOMWindowOuter* aWindow);
 
-  already_AddRefed<mozilla::dom::Selection>
-    GetFrameSelection(nsPIDOMWindowOuter* aWindow);
+  already_AddRefed<mozilla::dom::Selection> GetFrameSelection(
+      nsPIDOMWindowOuter* aWindow);
   nsresult ClearFrameSelection(nsPIDOMWindowOuter* aWindow);
 
   nsresult OnFind(nsPIDOMWindowOuter* aFoundWindow);
 
   void SetSelectionAndScroll(nsPIDOMWindowOuter* aWindow, nsRange* aRange);
 
-  nsresult GetRootNode(nsIDocument* aDomDoc, mozilla::dom::Element** aNode);
-  nsresult GetSearchLimits(nsRange* aRange,
-                           nsRange* aStartPt, nsRange* aEndPt,
-                           nsIDocument* aDoc, mozilla::dom::Selection* aSel,
-                           bool aWrap);
-  nsresult SetRangeAroundDocument(nsRange* aSearchRange,
-                                  nsRange* aStartPoint,
+  nsresult GetRootNode(mozilla::dom::Document* aDomDoc,
+                       mozilla::dom::Element** aNode);
+  nsresult GetSearchLimits(nsRange* aRange, nsRange* aStartPt, nsRange* aEndPt,
+                           mozilla::dom::Document* aDoc,
+                           mozilla::dom::Selection* aSel, bool aWrap);
+  nsresult SetRangeAroundDocument(nsRange* aSearchRange, nsRange* aStartPoint,
                                   nsRange* aEndPoint,
-                                  nsIDocument* aDoc);
+                                  mozilla::dom::Document* aDoc);
 
-protected:
+ protected:
   nsString mSearchString;
 
   bool mFindBackwards;

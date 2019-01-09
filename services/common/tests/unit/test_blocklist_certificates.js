@@ -51,7 +51,7 @@ add_task(async function test_something() {
   server.registerPathHandler(recordsPath, handleResponse);
 
   // Test an empty db populates
-  await OneCRLBlocklistClient.maybeSync(2000, Date.now());
+  await OneCRLBlocklistClient.maybeSync(2000);
 
   // Open the collection, verify it's been populated:
   const list = await OneCRLBlocklistClient.get();
@@ -63,9 +63,7 @@ add_task(async function test_something() {
   Services.prefs.clearUserPref("services.settings.server");
   Services.prefs.setIntPref("services.blocklist.onecrl.checked", 0);
   // Use any last_modified older than highest shipped in JSON dump.
-  await OneCRLBlocklistClient.maybeSync(123456, Date.now());
-  // Last check value was updated.
-  Assert.notEqual(0, Services.prefs.getIntPref("services.blocklist.onecrl.checked"));
+  await OneCRLBlocklistClient.maybeSync(123456);
 
   // Restore server pref.
   Services.prefs.setCharPref("services.settings.server", dummyServerURL);
@@ -78,7 +76,7 @@ add_task(async function test_something() {
   // single record
   await collection.db.saveLastModified(1000);
 
-  await OneCRLBlocklistClient.maybeSync(2000, Date.now());
+  await OneCRLBlocklistClient.maybeSync(2000);
 
   // Open the collection, verify it's been updated:
   // Our test data now has two records; both should be in the local collection
@@ -86,7 +84,7 @@ add_task(async function test_something() {
   Assert.equal(before.length, 1);
 
   // Test the db is updated when we call again with a later lastModified value
-  await OneCRLBlocklistClient.maybeSync(4000, Date.now());
+  await OneCRLBlocklistClient.maybeSync(4000);
 
   // Open the collection, verify it's been updated:
   // Our test data now has two records; both should be in the local collection
@@ -97,23 +95,16 @@ add_task(async function test_something() {
   // should be attempted.
   // Clear the kinto base pref so any connections will cause a test failure
   Services.prefs.clearUserPref("services.settings.server");
-  await OneCRLBlocklistClient.maybeSync(4000, Date.now());
+  await OneCRLBlocklistClient.maybeSync(4000);
 
   // Try again with a lastModified value at some point in the past
-  await OneCRLBlocklistClient.maybeSync(3000, Date.now());
-
-  // Check the OneCRL check time pref is modified, even if the collection
-  // hasn't changed
-  Services.prefs.setIntPref("services.blocklist.onecrl.checked", 0);
-  await OneCRLBlocklistClient.maybeSync(3000, Date.now());
-  let newValue = Services.prefs.getIntPref("services.blocklist.onecrl.checked");
-  Assert.notEqual(newValue, 0);
+  await OneCRLBlocklistClient.maybeSync(3000);
 
   // Check that a sync completes even when there's bad data in the
   // collection. This will throw on fail, so just calling maybeSync is an
   // acceptible test.
   Services.prefs.setCharPref("services.settings.server", dummyServerURL);
-  await OneCRLBlocklistClient.maybeSync(5000, Date.now());
+  await OneCRLBlocklistClient.maybeSync(5000);
 });
 
 function run_test() {
@@ -141,29 +132,29 @@ function getSampleResponse(req, port) {
         "Access-Control-Allow-Methods: GET,HEAD,OPTIONS,POST,DELETE,OPTIONS",
         "Access-Control-Allow-Origin: *",
         "Content-Type: application/json; charset=UTF-8",
-        "Server: waitress"
+        "Server: waitress",
       ],
       "status": {status: 200, statusText: "OK"},
-      "responseBody": "null"
+      "responseBody": "null",
     },
     "GET:/v1/?": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
-        "Server: waitress"
+        "Server: waitress",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({
         "settings": {
-          "batch_max_requests": 25
+          "batch_max_requests": 25,
         },
         "url": `http://localhost:${port}/v1/`,
         "documentation": "https://kinto.readthedocs.org/",
         "version": "1.5.1",
         "commit": "cbc6f58",
-        "hello": "kinto"
-      })
+        "hello": "kinto",
+      }),
     },
     "GET:/v1/buckets/blocklists/collections/certificates/records?_sort=-last_modified": {
       "sampleHeaders": [
@@ -171,74 +162,74 @@ function getSampleResponse(req, port) {
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"1000\""
+        "Etag: \"1000\"",
       ],
       "status": {status: 200, statusText: "OK"},
-      "responseBody": JSON.stringify({"data": [{}]})
+      "responseBody": JSON.stringify({"data": [{}]}),
     },
-    "GET:/v1/buckets/blocklists/collections/certificates/records?_sort=-last_modified&_since=1000": {
+    "GET:/v1/buckets/blocklists/collections/certificates/records?_expected=2000&_sort=-last_modified&_since=1000": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"3000\""
+        "Etag: \"3000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
         "issuerName": "MEQxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwx0aGF3dGUsIEluYy4xHjAcBgNVBAMTFXRoYXd0ZSBFViBTU0wgQ0EgLSBHMw==",
         "serialNumber": "CrTHPEE6AZSfI3jysin2bA==",
         "id": "78cf8900-fdea-4ce5-f8fb-b78710617718",
-        "last_modified": 3000
-      }]})
+        "last_modified": 3000,
+      }]}),
     },
-    "GET:/v1/buckets/blocklists/collections/certificates/records?_sort=-last_modified&_since=3000": {
+    "GET:/v1/buckets/blocklists/collections/certificates/records?_expected=4000&_sort=-last_modified&_since=3000": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"4000\""
+        "Etag: \"4000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
         "issuerName": "MFkxCzAJBgNVBAYTAk5MMR4wHAYDVQQKExVTdGFhdCBkZXIgTmVkZXJsYW5kZW4xKjAoBgNVBAMTIVN0YWF0IGRlciBOZWRlcmxhbmRlbiBPdmVyaGVpZCBDQQ",
         "serialNumber": "ATFpsA==",
         "id": "dabafde9-df4a-ddba-2548-748da04cc02c",
-        "last_modified": 4000
+        "last_modified": 4000,
       }, {
         "subject": "MCIxIDAeBgNVBAMMF0Fub3RoZXIgVGVzdCBFbmQtZW50aXR5",
         "pubKeyHash": "VCIlmPM9NkgFQtrs4Oa5TeFcDu6MWRTKSNdePEhOgD8=",
         "id": "dabafde9-df4a-ddba-2548-748da04cc02d",
-        "last_modified": 4000
-      }]})
+        "last_modified": 4000,
+      }]}),
     },
-    "GET:/v1/buckets/blocklists/collections/certificates/records?_sort=-last_modified&_since=4000": {
+    "GET:/v1/buckets/blocklists/collections/certificates/records?_expected=5000&_sort=-last_modified&_since=4000": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"5000\""
+        "Etag: \"5000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
         "issuerName": "not a base64 encoded issuer",
         "serialNumber": "not a base64 encoded serial",
         "id": "dabafde9-df4a-ddba-2548-748da04cc02e",
-        "last_modified": 5000
+        "last_modified": 5000,
       }, {
         "subject": "not a base64 encoded subject",
         "pubKeyHash": "not a base64 encoded pubKeyHash",
         "id": "dabafde9-df4a-ddba-2548-748da04cc02f",
-        "last_modified": 5000
+        "last_modified": 5000,
       }, {
         "subject": "MCIxIDAeBgNVBAMMF0Fub3RoZXIgVGVzdCBFbmQtZW50aXR5",
         "pubKeyHash": "VCIlmPM9NkgFQtrs4Oa5TeFcDu6MWRTKSNdePEhOgD8=",
         "id": "dabafde9-df4a-ddba-2548-748da04cc02g",
-        "last_modified": 5000
-      }]})
-    }
+        "last_modified": 5000,
+      }]}),
+    },
   };
   return responses[`${req.method}:${req.path}?${req.queryString}`] ||
          responses[req.method];

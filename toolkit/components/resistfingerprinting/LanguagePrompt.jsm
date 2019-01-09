@@ -7,7 +7,6 @@
 var EXPORTED_SYMBOLS = ["LanguagePrompt"];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 const kPrefResistFingerprinting = "privacy.resistFingerprinting";
 const kPrefSpoofEnglish = "privacy.spoof_english";
@@ -65,7 +64,7 @@ class _LanguagePrompt {
   }
 
   _shouldPromptForLanguagePref() {
-    return (Services.locale.getAppLocaleAsLangTag().substr(0, 2) !== "en")
+    return (Services.locale.appLocaleAsLangTag.substr(0, 2) !== "en")
       && (Services.prefs.getIntPref(kPrefSpoofEnglish) === 0);
   }
 

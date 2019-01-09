@@ -13,8 +13,16 @@ const {LongStringActor} = require("devtools/server/actors/string");
 const InspectorUtils = require("InspectorUtils");
 
 loader.lazyRequireGetter(this, "getFrameElement", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "isAfterPseudoElement", "devtools/shared/layout/utils", true);
 loader.lazyRequireGetter(this, "isAnonymous", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "isBeforePseudoElement", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "isDirectShadowHostChild", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "isNativeAnonymous", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "isShadowHost", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "isShadowRoot", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "isTemplateElement", "devtools/shared/layout/utils", true);
 loader.lazyRequireGetter(this, "loadSheet", "devtools/shared/layout/utils", true);
+
 loader.lazyRequireGetter(this, "throttle", "devtools/shared/throttle", true);
 
 loader.lazyRequireGetter(this, "allAnonymousContentTreeWalkerFilter", "devtools/server/actors/inspector/utils", true);
@@ -22,17 +30,21 @@ loader.lazyRequireGetter(this, "isNodeDead", "devtools/server/actors/inspector/u
 loader.lazyRequireGetter(this, "nodeDocument", "devtools/server/actors/inspector/utils", true);
 loader.lazyRequireGetter(this, "standardTreeWalkerFilter", "devtools/server/actors/inspector/utils", true);
 
+loader.lazyRequireGetter(this, "CustomElementWatcher", "devtools/server/actors/inspector/custom-element-watcher", true);
 loader.lazyRequireGetter(this, "DocumentWalker", "devtools/server/actors/inspector/document-walker", true);
 loader.lazyRequireGetter(this, "SKIP_TO_SIBLING", "devtools/server/actors/inspector/document-walker", true);
 loader.lazyRequireGetter(this, "NodeActor", "devtools/server/actors/inspector/node", true);
 loader.lazyRequireGetter(this, "NodeListActor", "devtools/server/actors/inspector/node", true);
 loader.lazyRequireGetter(this, "LayoutActor", "devtools/server/actors/layout", true);
+loader.lazyRequireGetter(this, "findFlexOrGridParentContainerForNode", "devtools/server/actors/layout", true);
 loader.lazyRequireGetter(this, "getLayoutChangesObserver", "devtools/server/actors/reflow", true);
 loader.lazyRequireGetter(this, "releaseLayoutChangesObserver", "devtools/server/actors/reflow", true);
 loader.lazyRequireGetter(this, "WalkerSearch", "devtools/server/actors/utils/walker-search", true);
 
 loader.lazyServiceGetter(this, "eventListenerService",
   "@mozilla.org/eventlistenerservice;1", "nsIEventListenerService");
+
+loader.lazyRequireGetter(this, "ChromeUtils");
 
 // Minimum delay between two "new-mutations" events.
 const MUTATIONS_THROTTLING_DELAY = 100;
@@ -75,7 +87,7 @@ const PSEUDO_SELECTORS = [
   [":enabled", 0],
   [":disabled", 0],
   [":checked", 1],
-  ["::selection", 0]
+  ["::selection", 0],
 ];
 
 const HELPER_SHEET = "data:text/css;charset=utf-8," + encodeURIComponent(`
@@ -110,8 +122,13 @@ exports.setValueSummaryLength = function(val) {
 var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
   /**
    * Create the WalkerActor
-   * @param DebuggerServerConnection conn
-   *    The server connection.
+   * @param {DebuggerServerConnection} conn
+   *        The server connection.
+   * @param {TargetActor} targetActor
+   *        The top-level Actor for this tab.
+   * @param {Object} options
+   *        - {Boolean} showAllAnonymousContent: Show all native anonymous content
+   *        - {Boolean} showUserAgentShadowRoots: Show shadow roots for user-agent widgets
    */
   initialize: function(conn, targetActor, options) {
     protocol.Actor.prototype.initialize.call(this, conn);
@@ -121,7 +138,10 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     this._refMap = new Map();
     this._pendingMutations = [];
     this._activePseudoClassLocks = new Set();
+    this.customElementWatcher = new CustomElementWatcher(targetActor.chromeEventHandler);
+
     this.showAllAnonymousContent = options.showAllAnonymousContent;
+    this.showUserAgentShadowRoots = options.showUserAgentShadowRoots;
 
     this.walkerSearch = new WalkerSearch(this);
 
@@ -137,13 +157,24 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
     this.onMutations = this.onMutations.bind(this);
     this.onSlotchange = this.onSlotchange.bind(this);
+    this.onShadowrootattached = this.onShadowrootattached.bind(this);
     this.onFrameLoad = this.onFrameLoad.bind(this);
     this.onFrameUnload = this.onFrameUnload.bind(this);
+    this.onCustomElementDefined = this.onCustomElementDefined.bind(this);
     this._throttledEmitNewMutations = throttle(this._emitNewMutations.bind(this),
       MUTATIONS_THROTTLING_DELAY);
 
     targetActor.on("will-navigate", this.onFrameUnload);
     targetActor.on("window-ready", this.onFrameLoad);
+
+    this.customElementWatcher.on("element-defined", this.onCustomElementDefined);
+
+    // Keep a reference to the chromeEventHandler for the current targetActor, to make
+    // sure we will be able to remove the listener during the WalkerActor destroy().
+    this.chromeEventHandler = targetActor.chromeEventHandler;
+    // shadowrootattached is a chrome-only event.
+    this.chromeEventHandler.addEventListener("shadowrootattached",
+      this.onShadowrootattached);
 
     // Ensure that the root document node actor is ready and
     // managed.
@@ -165,9 +196,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
    *    enumerator of nsIEventListenerChange
    */
   _onEventListenerChange: function(changesEnum) {
-    const changes = changesEnum.enumerate();
-    while (changes.hasMoreElements()) {
-      const current = changes.getNext().QueryInterface(Ci.nsIEventListenerChange);
+    for (const current of changesEnum.enumerate(Ci.nsIEventListenerChange)) {
       const target = current.target;
 
       if (this._refMap.has(target)) {
@@ -175,7 +204,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
         const mutation = {
           type: "events",
           target: actor.actorID,
-          hasEventListeners: actor._hasEventListeners
+          hasEventListeners: actor._hasEventListeners,
         };
         this.queueMutation(mutation);
       }
@@ -187,7 +216,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     return {
       actor: this.actorID,
       root: this.rootNode.form(),
-      traits: {}
+      traits: {},
     };
   },
 
@@ -233,9 +262,16 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
       this.targetActor.off("will-navigate", this.onFrameUnload);
       this.targetActor.off("window-ready", this.onFrameLoad);
+      this.customElementWatcher.off("element-defined", this.onCustomElementDefined);
+
+      this.chromeEventHandler.removeEventListener("shadowrootattached",
+        this.onShadowrootattached);
 
       this.onFrameLoad = null;
       this.onFrameUnload = null;
+
+      this.customElementWatcher.destroy();
+      this.customElementWatcher = null;
 
       this.walkerSearch.destroy();
 
@@ -251,6 +287,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
       this.layoutActor = null;
       this.targetActor = null;
+      this.chromeEventHandler = null;
 
       this.emit("destroyed");
     } catch (e) {
@@ -266,6 +303,9 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
           this._activePseudoClassLocks.has(actor)) {
         this.clearPseudoClassLocks(actor);
       }
+
+      this.customElementWatcher.unmanageNode(actor);
+
       this._refMap.delete(actor.rawNode);
     }
     protocol.Actor.prototype.unmanage.call(this, actor);
@@ -307,12 +347,26 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       actor.watchDocument(node, this.onMutations);
     }
 
-    if (actor.isShadowRoot) {
+    if (isShadowRoot(actor.rawNode)) {
       actor.watchDocument(node.ownerDocument, this.onMutations);
       actor.watchSlotchange(this.onSlotchange);
     }
 
+    this.customElementWatcher.manageNode(actor);
+
     return actor;
+  },
+
+  /**
+   * When a custom element is defined, send a customElementDefined mutation for all the
+   * NodeActors using this tag name.
+   */
+  onCustomElementDefined: function({name, actors}) {
+    actors.forEach(actor => this.queueMutation({
+      target: actor.actorID,
+      type: "customElementDefined",
+      customElementLocation: actor.getCustomElementLocation(),
+    }));
   },
 
   _onReflows: function(reflows) {
@@ -359,7 +413,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     const { nodes, newParents } = this.attachElements([node]);
     return {
       node: nodes[0],
-      newParents: newParents
+      newParents: newParents,
     };
   },
 
@@ -392,7 +446,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
     return {
       nodes: nodeActors,
-      newParents: [...newParents]
+      newParents: [...newParents],
     };
   },
 
@@ -423,11 +477,20 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
   },
 
   parentNode: function(node) {
+    const parent = this.rawParentNode(node);
+    if (parent) {
+      return this._ref(parent);
+    }
+
+    return null;
+  },
+
+  rawParentNode: function(node) {
     let parent;
     try {
       // If the node is the child of a shadow host, we can not use an anonymous walker to
       // get the shadow host parent.
-      const walker = node.isDirectShadowHostChild
+      const walker = isDirectShadowHostChild(node.rawNode)
         ? this.getNonAnonymousWalker(node.rawNode)
         : this.getDocumentWalker(node.rawNode);
       parent = walker.parentNode();
@@ -439,11 +502,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       parent = walker.parentNode();
     }
 
-    if (parent) {
-      return this._ref(parent);
-    }
-
-    return null;
+    return parent;
   },
 
   /**
@@ -452,28 +511,53 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
    *
    * @param NodeActor node
    */
-  inlineTextChild: function(node) {
+  inlineTextChild: function({ rawNode }) {
     // Quick checks to prevent creating a new walker if possible.
-    if (node.isBeforePseudoElement ||
-        node.isAfterPseudoElement ||
-        node.rawNode.nodeType != Node.ELEMENT_NODE ||
-        node.rawNode.children.length > 0) {
+    if (isBeforePseudoElement(rawNode) ||
+        isAfterPseudoElement(rawNode) ||
+        isShadowHost(rawNode) ||
+        rawNode.nodeType != Node.ELEMENT_NODE ||
+        rawNode.children.length > 0) {
       return undefined;
     }
 
-    const walker = node.isDirectShadowHostChild ? this.getNonAnonymousWalker(node.rawNode)
-                                              : this.getDocumentWalker(node.rawNode);
+    let walker;
+    try {
+      // By default always try to use an anonymous walker. Even for DirectShadowHostChild,
+      // children should be available through an anonymous walker (unless the child is not
+      // slotted, see catch block).
+      walker = this.getDocumentWalker(rawNode);
+    } catch (e) {
+      // Using an anonymous walker might throw, for instance on unslotted shadow host
+      // children.
+      walker = this.getNonAnonymousWalker(rawNode);
+    }
+
     const firstChild = walker.firstChild();
 
     // Bail out if:
     // - more than one child
     // - unique child is not a text node
     // - unique child is a text node, but is too long to be inlined
+    // - we are a slot -> these are always represented on their own lines with
+    //                    a link to the original node.
+    // - we are a flex item -> these are always shown on their own lines so they can be
+    //                         selected by the flexbox inspector.
+    const isAssignedSlot =
+      !!firstChild &&
+      rawNode.nodeName === "SLOT" &&
+      isDirectShadowHostChild(firstChild);
+
+    const isFlexItem =
+      !!firstChild &&
+      findFlexOrGridParentContainerForNode(firstChild, "flex", this);
+
     if (!firstChild ||
         walker.nextSibling() ||
         firstChild.nodeType !== Node.TEXT_NODE ||
-        firstChild.nodeValue.length > gValueSummaryLength
-        ) {
+        firstChild.nodeValue.length > gValueSummaryLength ||
+        isAssignedSlot ||
+        isFlexItem) {
       return undefined;
     }
 
@@ -553,19 +637,32 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     if (!node) {
       return newParents;
     }
-    const walker = this.getDocumentWalker(node.rawNode);
-    let cur;
-    while ((cur = walker.parentNode())) {
-      const parent = this.getNode(cur);
-      if (!parent) {
-        // This parent didn't exist, so hasn't been seen by the client yet.
-        newParents.add(this._ref(cur));
-      } else {
+    let parent = this.rawParentNode(node);
+    while (parent) {
+      let parentActor = this.getNode(parent);
+      if (parentActor) {
         // This parent did exist, so the client knows about it.
         return newParents;
       }
+      // This parent didn't exist, so hasn't been seen by the client yet.
+      parentActor = this._ref(parent);
+      newParents.add(parentActor);
+      parent = this.rawParentNode(parentActor);
     }
     return newParents;
+  },
+
+  /**
+   * Return the number of children under the provided NodeActor.
+   *
+   * @param NodeActor node
+   *    See JSDoc for children()
+   * @param object options
+   *    See JSDoc for children()
+   * @return Number the number of children
+   */
+  countChildren: function(node, options = {}) {
+    return this._getChildren(node, options).nodes.length;
   },
 
   /**
@@ -590,9 +687,34 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
    * @returns an object with three items:
    *    hasFirst: true if the first child of the node is included in the list.
    *    hasLast: true if the last child of the node is included in the list.
-   *    nodes: Child nodes returned by the request.
+   *    nodes: Array of NodeActor representing the nodes returned by the request.
    */
   children: function(node, options = {}) {
+    const { hasFirst, hasLast, nodes } = this._getChildren(node, options);
+    return {
+      hasFirst,
+      hasLast,
+      nodes: nodes.map(n => this._ref(n)),
+    };
+  },
+
+  /**
+   * Return chidlren of the given node. Contrary to children children(), this method only
+   * returns DOMNodes. Therefore it will not create NodeActor wrappers and will not
+   * update the refMap for the discovered nodes either. This makes this method safe to
+   * call when you are not sure if the discovered nodes will be communicated to the
+   * client.
+   *
+   * @param NodeActor node
+   *    See JSDoc for children()
+   * @param object options
+   *    See JSDoc for children()
+   * @return  an object with three items:
+   *    hasFirst: true if the first child of the node is included in the list.
+   *    hasLast: true if the last child of the node is included in the list.
+   *    nodes: Array of DOMNodes.
+   */
+  _getChildren: function(node, options = {}) {
     if (isNodeDead(node)) {
       return { hasFirst: true, hasLast: true, nodes: [] };
     }
@@ -605,31 +727,38 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       maxNodes = Number.MAX_VALUE;
     }
 
-    const {
-      isDirectShadowHostChild,
-      isShadowHost,
-      isShadowRoot,
-      isTemplateElement,
-    } = node;
+    const directShadowHostChild = isDirectShadowHostChild(node.rawNode);
+    const shadowHost = isShadowHost(node.rawNode);
+    const shadowRoot = isShadowRoot(node.rawNode);
 
-    if (isTemplateElement) {
+    // UA Widgets are internal Firefox widgets such as videocontrols implemented
+    // using shadow DOM. By default, their shadow root should be hidden for web
+    // developers.
+    const isUAWidget = shadowHost && node.rawNode.openOrClosedShadowRoot.isUAWidget();
+    const hideShadowRoot = isUAWidget && !this.showUserAgentShadowRoots;
+    const showNativeAnonymousChildren = isUAWidget && this.showUserAgentShadowRoots;
+
+    const templateElement = isTemplateElement(node.rawNode);
+    if (templateElement) {
       // <template> tags should have a single child pointing to the element's template
       // content.
       const documentFragment = node.rawNode.content;
-      const nodes = [this._ref(documentFragment)];
+      const nodes = [documentFragment];
       return { hasFirst: true, hasLast: true, nodes };
     }
 
     // Detect special case of unslotted shadow host children that cannot rely on a
     // regular anonymous walker.
     let isUnslottedHostChild = false;
-    if (isDirectShadowHostChild) {
+    if (directShadowHostChild) {
       try {
         this.getDocumentWalker(node.rawNode, options.whatToShow, SKIP_TO_SIBLING);
       } catch (e) {
         isUnslottedHostChild = true;
       }
     }
+
+    const useNonAnonymousWalker = shadowRoot || shadowHost || isUnslottedHostChild;
 
     // We're going to create a few document walkers with the same filter,
     // make it easier.
@@ -640,7 +769,6 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       // in case this one is incompatible with the walker's filter function.
       const skipTo = SKIP_TO_SIBLING;
 
-      const useNonAnonymousWalker = isShadowRoot || isShadowHost || isUnslottedHostChild;
       if (useNonAnonymousWalker) {
         // Do not use an anonymous walker for :
         // - shadow roots: if the host element has an ::after pseudo element, a walker on
@@ -662,7 +790,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     const firstChild = getFilteredWalker(rawNode).firstChild();
     const lastChild = getFilteredWalker(rawNode).lastChild();
 
-    if (!firstChild && !isShadowHost) {
+    if (!firstChild && !shadowHost) {
       // No children, we're done.
       return { hasFirst: true, hasLast: true, nodes: [] };
     }
@@ -676,6 +804,16 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       } else if (options.start) {
         start = options.start.rawNode;
       } else {
+        start = firstChild;
+      }
+
+      // If we are using a non anonymous walker, we cannot start on:
+      // - a shadow root
+      // - a native anonymous node
+      if (
+        useNonAnonymousWalker &&
+        (isShadowRoot(start) || isNativeAnonymous(start))
+      ) {
         start = firstChild;
       }
 
@@ -708,37 +846,56 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     if (nodes.length > 0) {
       // Compare first/last with expected nodes before modifying the nodes array in case
       // this is a shadow host.
-      hasFirst = nodes[0].rawNode == firstChild;
-      hasLast = nodes[nodes.length - 1].rawNode == lastChild;
+      hasFirst = nodes[0] == firstChild;
+      hasLast = nodes[nodes.length - 1] == lastChild;
     } else {
       // If nodes is still an empty array, we are on a host element with a shadow root but
       // no direct children.
       hasFirst = hasLast = true;
     }
 
-    if (isShadowHost) {
+    if (shadowHost) {
       // Use anonymous walkers to fetch ::before / ::after pseudo elements
       const firstChildWalker = this.getDocumentWalker(node.rawNode);
       const first = firstChildWalker.firstChild();
-      const hasBefore = first && this._ref(first).isBeforePseudoElement;
+      const hasBefore = first && first.nodeName === "_moz_generated_content_before";
 
       const lastChildWalker = this.getDocumentWalker(node.rawNode);
       const last = lastChildWalker.lastChild();
-      const hasAfter = last && this._ref(last).isAfterPseudoElement;
+      const hasAfter = last && last.nodeName === "_moz_generated_content_after";
 
       nodes = [
         // #shadow-root
-        this._ref(node.rawNode.openOrClosedShadowRoot),
+        ...(hideShadowRoot ? [] : [node.rawNode.openOrClosedShadowRoot]),
         // ::before
-        ...(hasBefore ? [this._ref(first)] : []),
+        ...(hasBefore ? [first] : []),
         // shadow host direct children
         ...nodes,
+        // native anonymous content for UA widgets
+        ...(showNativeAnonymousChildren ?
+          this.getNativeAnonymousChildren(node.rawNode) : []),
         // ::after
-        ...(hasAfter ? [this._ref(last)] : []),
+        ...(hasAfter ? [last] : []),
       ];
     }
 
     return { hasFirst, hasLast, nodes };
+  },
+
+  getNativeAnonymousChildren: function(rawNode) {
+    // Get an anonymous walker and start on the first child.
+    const walker = this.getDocumentWalker(rawNode);
+    let node = walker.firstChild();
+
+    const nodes = [];
+    while (node) {
+      // We only want native anonymous content here.
+      if (isNativeAnonymous(node)) {
+        nodes.push(node);
+      }
+      node = walker.nextSibling();
+    }
+    return nodes;
   },
 
   /**
@@ -791,7 +948,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       if (!walker.isSkippedNode(node)) {
         // The walker can be on a node that would be filtered out if it didn't find any
         // other node to fallback to.
-        ret.push(this._ref(node));
+        ret.push(node);
       }
       node = walker.nextSibling();
     } while (node && --count);
@@ -810,7 +967,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       if (!walker.isSkippedNode(node)) {
         // The walker can be on a node that would be filtered out if it didn't find any
         // other node to fallback to.
-        ret.push(this._ref(node));
+        ret.push(node);
       }
       node = walker.previousSibling();
     } while (node && --count);
@@ -902,7 +1059,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
     return {
       list: nodeList,
-      metadata: []
+      metadata: [],
     };
   },
 
@@ -920,7 +1077,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     const sugs = {
       classes: new Map(),
       tags: new Map(),
-      ids: new Map()
+      ids: new Map(),
     };
     let result = [];
     let nodes = null;
@@ -992,7 +1149,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
             ...this.getSuggestionsForQuery(null, completing, "class")
                    .suggestions,
             ...this.getSuggestionsForQuery(null, completing, "id")
-                   .suggestions
+                   .suggestions,
           ];
         }
 
@@ -1055,7 +1212,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
     return {
       query: query,
-      suggestions: result
+      suggestions: result,
     };
   },
 
@@ -1064,7 +1221,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
    *
    * @param NodeActor node
    * @param string pseudo
-   *    A pseudoclass: ':hover', ':active', ':focus'
+   *    A pseudoclass: ':hover', ':active', ':focus', ':focus-within'
    * @param options
    *    Options object:
    *    `parents`: True if the pseudo-class should be added
@@ -1108,7 +1265,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     this.queueMutation({
       target: node.actorID,
       type: "pseudoClassLock",
-      pseudoClassLocks: node.writePseudoClassLocks()
+      pseudoClassLocks: node.writePseudoClassLocks(),
     });
   },
 
@@ -1144,7 +1301,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
    *
    * @param NodeActor node
    * @param string pseudo
-   *    A pseudoclass: ':hover', ':active', ':focus'
+   *    A pseudoclass: ':hover', ':active', ':focus', ':focus-within'
    * @param options
    *    Options object:
    *    `parents`: True if the pseudo-class should be removed
@@ -1306,7 +1463,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       for (const key in attributeModifications) {
         finalAttributeModifications.push({
           attributeName: key,
-          newValue: attributeModifications[key]
+          newValue: attributeModifications[key],
         });
       }
       node.modifyAttributes(finalAttributeModifications);
@@ -1718,7 +1875,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       type: "inlineTextChild",
       target: parentActor.actorID,
       inlineTextChild:
-        inlineTextChild ? inlineTextChild.form() : undefined
+        inlineTextChild ? inlineTextChild.form() : undefined,
     });
   },
 
@@ -1731,14 +1888,35 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
     this.queueMutation({
       type: "slotchange",
-      target: targetActor.actorID
+      target: targetActor.actorID,
     });
+  },
+
+  onShadowrootattached: function(event) {
+    const actor = this.getNode(event.target);
+    if (!actor) {
+      return;
+    }
+
+    const mutation = {
+      type: "shadowRootAttached",
+      target: actor.actorID,
+    };
+    this.queueMutation(mutation);
   },
 
   onFrameLoad: function({ window, isTopLevel }) {
     const { readyState } = window.document;
     if (readyState != "interactive" && readyState != "complete") {
-      window.addEventListener("DOMContentLoaded",
+      // The document is not loaded, so we want to register to fire again when the
+      // DOM has been loaded. To do this, we need to know if this is a XUL document.
+      // We listen for "DOMContentLoaded" on HTML documents, but XUL documents don't
+      // fire this event, so we fallback to the "load" event for XUL. Unfortunately,
+      // since the document isn't loaded yet, we can't check its namespace declaration
+      // to determine if it is XUL. Instead, we use ChromeUtils to see if the document
+      // object class is XULDocument.
+      const isXULDocument = (ChromeUtils.getClassName(window.document) == "XULDocument");
+      window.addEventListener(isXULDocument ? "load" : "DOMContentLoaded",
         this.onFrameLoad.bind(this, { window, isTopLevel }),
         { once: true });
       return;
@@ -1756,7 +1934,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       this.rootNode = this.document();
       this.queueMutation({
         type: "newRoot",
-        target: this.rootNode.form()
+        target: this.rootNode.form(),
       });
       return;
     }
@@ -1776,7 +1954,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       type: "childList",
       target: frameActor.actorID,
       added: [],
-      removed: []
+      removed: [],
     });
   },
 
@@ -1811,7 +1989,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       this.queueMutation({
         target: this.rootNode.actorID,
         type: "unretained",
-        nodes: releasedOrphans
+        nodes: releasedOrphans,
       });
     }
 
@@ -1828,7 +2006,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
     this.queueMutation({
       type: "documentUnload",
-      target: documentActor.actorID
+      target: documentActor.actorID,
     });
 
     const walker = this.getDocumentWalker(doc);
@@ -1840,7 +2018,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
         type: "childList",
         target: this.getNode(parentNode).actorID,
         added: [],
-        removed: []
+        removed: [],
       });
     }
 

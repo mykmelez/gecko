@@ -56,6 +56,15 @@ permissions-capabilities-block =
 permissions-capabilities-prompt =
     .label = Always Ask
 
+permissions-capabilities-listitem-allow =
+    .value = Allow
+permissions-capabilities-listitem-block =
+    .value = Block
+permissions-capabilities-listitem-allow-first-party =
+    .value = Allow first party only
+permissions-capabilities-listitem-allow-session =
+    .value = Allow for Session
+
 ## Invalid Hostname Dialog
 
 permissions-invalid-uri-title = Invalid Hostname Entered
@@ -63,10 +72,10 @@ permissions-invalid-uri-label = Please enter a valid hostname
 
 ## Exceptions - Tracking Protection
 
-permissions-exceptions-tracking-protection-window =
-    .title = Exceptions - Tracking Protection
+permissions-exceptions-content-blocking-window =
+    .title = Exceptions - Content Blocking
     .style = { permissions-window.style }
-permissions-exceptions-tracking-protection-desc = You have disabled Tracking Protection on these websites.
+permissions-exceptions-content-blocking-desc = You have disabled content blocking on these websites.
 
 ## Exceptions - Cookies
 
@@ -98,10 +107,10 @@ permissions-exceptions-addons-desc = You can specify which websites are allowed 
 
 ## Exceptions - Autoplay Media
 
-permissions-exceptions-autoplay-media-window =
-    .title = Allowed Websites - Autoplay
+permissions-exceptions-autoplay-media-window2 =
+    .title = Exceptions - Autoplay
     .style = { permissions-window.style }
-permissions-exceptions-autoplay-media-desc = You can specify which websites are allowed to automatically play media elements. Type the exact address of the site you want to allow and then click Allow.
+permissions-exceptions-autoplay-media-desc2 = You can specify which websites are always or never allowed to autoplay media with sound. Type the address of the site you want to manage and then click Block or Allow.
 
 ## Site Permissions - Notifications
 

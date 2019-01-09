@@ -7,6 +7,7 @@
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/DOMTypes.h"
 #include "mozilla/dom/TabGroup.h"
+#include "mozilla/PerformanceUtils.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
 #include "nsIDocShell.h"
@@ -14,17 +15,16 @@
 #if defined(XP_WIN)
 #include <processthreadsapi.h>  // for GetCurrentProcessId()
 #else
-#include <unistd.h> // for getpid()
-#endif // defined(XP_WIN)
+#include <unistd.h>  // for getpid()
+#endif               // defined(XP_WIN)
 
 namespace mozilla {
 namespace dom {
 
 AutoTArray<RefPtr<DocGroup>, 2>* DocGroup::sPendingDocGroups = nullptr;
 
-/* static */ nsresult
-DocGroup::GetKey(nsIPrincipal* aPrincipal, nsACString& aKey)
-{
+/* static */ nsresult DocGroup::GetKey(nsIPrincipal* aPrincipal,
+                                       nsACString& aKey) {
   // Use GetBaseDomain() to handle things like file URIs, IP address URIs,
   // etc. correctly.
   nsresult rv = aPrincipal->GetBaseDomain(aKey);
@@ -40,37 +40,34 @@ DocGroup::GetKey(nsIPrincipal* aPrincipal, nsACString& aKey)
   return rv;
 }
 
-void
-DocGroup::RemoveDocument(nsIDocument* aDocument)
-{
+void DocGroup::RemoveDocument(Document* aDocument) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mDocuments.Contains(aDocument));
   mDocuments.RemoveElement(aDocument);
 }
 
 DocGroup::DocGroup(TabGroup* aTabGroup, const nsACString& aKey)
-  : mKey(aKey), mTabGroup(aTabGroup)
-{
-  // This method does not add itself to mTabGroup->mDocGroups as the caller does it for us.
+    : mKey(aKey), mTabGroup(aTabGroup) {
+  // This method does not add itself to mTabGroup->mDocGroups as the caller does
+  // it for us.
   if (mozilla::StaticPrefs::dom_performance_enable_scheduler_timing()) {
-    mPerformanceCounter = new mozilla::PerformanceCounter(NS_LITERAL_CSTRING("DocGroup:") + aKey);
+    mPerformanceCounter =
+        new mozilla::PerformanceCounter(NS_LITERAL_CSTRING("DocGroup:") + aKey);
   }
 }
 
-DocGroup::~DocGroup()
-{
+DocGroup::~DocGroup() {
   MOZ_ASSERT(mDocuments.IsEmpty());
   if (!NS_IsMainThread()) {
     nsIEventTarget* target = EventTargetFor(TaskCategory::Other);
-    NS_ProxyRelease("DocGroup::mReactionsStack", target, mReactionsStack.forget());
+    NS_ProxyRelease("DocGroup::mReactionsStack", target,
+                    mReactionsStack.forget());
   }
 
   mTabGroup->mDocGroups.RemoveEntry(mKey);
 }
 
-PerformanceInfo
-DocGroup::ReportPerformanceInfo()
-{
+RefPtr<PerformanceInfoPromise> DocGroup::ReportPerformanceInfo() {
   AssertIsOnMainThread();
   MOZ_ASSERT(mPerformanceCounter);
 #if defined(XP_WIN)
@@ -78,38 +75,47 @@ DocGroup::ReportPerformanceInfo()
 #else
   uint32_t pid = getpid();
 #endif
-  uint64_t wid = 0;
-  uint64_t pwid = 0;
+  uint64_t windowID = 0;
   uint16_t count = 0;
   uint64_t duration = 0;
-  nsCString host = NS_LITERAL_CSTRING("None");
+  bool isTopLevel = false;
+  nsCString host;
+  nsCOMPtr<nsPIDOMWindowOuter> top;
+  RefPtr<AbstractThread> mainThread;
 
+  // iterating on documents until we find the top window
   for (const auto& document : *this) {
-    // grabbing the host name of the first document
-    nsCOMPtr<nsIDocument> doc = do_QueryInterface(document);
+    nsCOMPtr<Document> doc = document;
     MOZ_ASSERT(doc);
     nsCOMPtr<nsIURI> docURI = doc->GetDocumentURI();
     if (!docURI) {
       continue;
     }
     docURI->GetHost(host);
-    wid = doc->OuterWindowID();
-
-    // getting the top window id - if not possible
-    // pwid gets the same value than wid
-    pwid = wid;
-    nsPIDOMWindowInner* win = doc->GetInnerWindow();
-    if (win) {
-      nsPIDOMWindowOuter* outer = win->GetOuterWindow();
-      if (outer) {
-        nsCOMPtr<nsPIDOMWindowOuter> top = outer->GetTop();
-        if (top) {
-          pwid = top->WindowID();
-        }
-      }
+    // If the host is empty, using the url
+    if (host.IsEmpty()) {
+      host = docURI->GetSpecOrDefault();
     }
+    // looking for the top level document URI
+    nsPIDOMWindowOuter* win = doc->GetWindow();
+    if (!win) {
+      continue;
+    }
+    nsPIDOMWindowOuter* outer = win->GetOuterWindow();
+    if (!outer) {
+      continue;
+    }
+    top = outer->GetTop();
+    if (!top) {
+      continue;
+    }
+    windowID = top->WindowID();
+    isTopLevel = outer->IsTopLevelWindow();
+    mainThread = AbstractMainThreadFor(TaskCategory::Performance);
+    break;
   }
 
+  MOZ_ASSERT(!host.IsEmpty());
   duration = mPerformanceCounter->GetExecutionDuration();
   FallibleTArray<CategoryDispatch> items;
 
@@ -120,47 +126,59 @@ DocGroup::ReportPerformanceInfo()
     CategoryDispatch item = CategoryDispatch(index, count);
     if (!items.AppendElement(item, fallible)) {
       NS_ERROR("Could not complete the operation");
-      return PerformanceInfo(host, pid, wid, pwid, duration, false, items);
+      break;
     }
   }
 
-  // setting back all counters to zero
-  mPerformanceCounter->ResetPerformanceCounters();
-  return PerformanceInfo(host, pid, wid, pwid, duration, false, items);
+  if (!isTopLevel) {
+    return PerformanceInfoPromise::CreateAndResolve(
+        PerformanceInfo(host, pid, windowID, duration,
+                        mPerformanceCounter->GetID(), false, isTopLevel,
+                        PerformanceMemoryInfo(),  // Empty memory info
+                        items),
+        __func__);
+  }
+
+  MOZ_ASSERT(mainThread);
+  RefPtr<DocGroup> self = this;
+
+  return CollectMemoryInfo(top, mainThread)
+      ->Then(mainThread, __func__,
+             [self, host, pid, windowID, duration, isTopLevel,
+              items](const PerformanceMemoryInfo& aMemoryInfo) {
+               PerformanceInfo info =
+                   PerformanceInfo(host, pid, windowID, duration,
+                                   self->mPerformanceCounter->GetID(), false,
+                                   isTopLevel, aMemoryInfo, items);
+
+               return PerformanceInfoPromise::CreateAndResolve(std::move(info),
+                                                               __func__);
+             },
+             [self](const nsresult rv) {
+               return PerformanceInfoPromise::CreateAndReject(rv, __func__);
+             });
 }
 
-nsresult
-DocGroup::Dispatch(TaskCategory aCategory,
-                   already_AddRefed<nsIRunnable>&& aRunnable)
-{
+nsresult DocGroup::Dispatch(TaskCategory aCategory,
+                            already_AddRefed<nsIRunnable>&& aRunnable) {
   if (mPerformanceCounter) {
     mPerformanceCounter->IncrementDispatchCounter(DispatchCategory(aCategory));
   }
   return mTabGroup->DispatchWithDocGroup(aCategory, std::move(aRunnable), this);
 }
 
-nsISerialEventTarget*
-DocGroup::EventTargetFor(TaskCategory aCategory) const
-{
+nsISerialEventTarget* DocGroup::EventTargetFor(TaskCategory aCategory) const {
   return mTabGroup->EventTargetFor(aCategory);
 }
 
-AbstractThread*
-DocGroup::AbstractMainThreadFor(TaskCategory aCategory)
-{
+AbstractThread* DocGroup::AbstractMainThreadFor(TaskCategory aCategory) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   return mTabGroup->AbstractMainThreadFor(aCategory);
 }
 
-bool*
-DocGroup::GetValidAccessPtr()
-{
-  return mTabGroup->GetValidAccessPtr();
-}
+bool* DocGroup::GetValidAccessPtr() { return mTabGroup->GetValidAccessPtr(); }
 
-void
-DocGroup::SignalSlotChange(HTMLSlotElement& aSlot)
-{
+void DocGroup::SignalSlotChange(HTMLSlotElement& aSlot) {
   MOZ_ASSERT(!mSignalSlotList.Contains(&aSlot));
   mSignalSlotList.AppendElement(&aSlot);
 
@@ -173,9 +191,7 @@ DocGroup::SignalSlotChange(HTMLSlotElement& aSlot)
   sPendingDocGroups->AppendElement(this);
 }
 
-void
-DocGroup::MoveSignalSlotListTo(nsTArray<RefPtr<HTMLSlotElement>>& aDest)
-{
+void DocGroup::MoveSignalSlotListTo(nsTArray<RefPtr<HTMLSlotElement>>& aDest) {
   aDest.SetCapacity(aDest.Length() + mSignalSlotList.Length());
   for (RefPtr<HTMLSlotElement>& slot : mSignalSlotList) {
     slot->RemovedFromSignalSlotList();
@@ -184,10 +200,8 @@ DocGroup::MoveSignalSlotListTo(nsTArray<RefPtr<HTMLSlotElement>>& aDest)
   mSignalSlotList.Clear();
 }
 
-bool
-DocGroup::IsActive() const
-{
-  for (nsIDocument* doc : mDocuments) {
+bool DocGroup::IsActive() const {
+  for (Document* doc : mDocuments) {
     if (doc->IsCurrentActiveDocument()) {
       return true;
     }
@@ -196,5 +210,5 @@ DocGroup::IsActive() const
   return false;
 }
 
-}
-}
+}  // namespace dom
+}  // namespace mozilla

@@ -4,7 +4,6 @@
 
 "use strict";
 
-const { Ci } = require("chrome");
 const Services = require("Services");
 const KeyShortcuts = require("devtools/client/shared/key-shortcuts");
 
@@ -24,11 +23,9 @@ const L10N = new LocalizationHelper("devtools/client/locales/toolbox.properties"
  */
 exports.register = function(window) {
   const shortcuts = new KeyShortcuts({
-    window
+    window,
   });
-  const docShell = window.QueryInterface(Ci.nsIInterfaceRequestor)
-    .getInterface(Ci.nsIWebNavigation)
-    .QueryInterface(Ci.nsIDocShell);
+  const docShell = window.docShell;
   const contViewer = docShell.contentViewer;
   let zoomValue = parseFloat(Services.prefs.getCharPref(ZOOM_PREF));
   const zoomIn = function(event) {

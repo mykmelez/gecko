@@ -12,18 +12,16 @@
 
 @namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
 
+%include ../../shared/global.inc.css
+
 /* ::::: XBL bindings ::::: */
 
 menulist > menupopup {
   -moz-binding: url("chrome://global/content/bindings/popup.xml#popup-scrollbars");
 }
 
-progressmeter[mode="undetermined"] {
-  -moz-binding: url("chrome://global/content/bindings/progressmeter.xml#progressmeter-undetermined");
-}
-
 @media (-moz-menubar-drag) {
-  toolbar[type="menubar"]:not([autohide="true"]) {
+  toolbar[type="menubar"] {
     -moz-binding: url("chrome://global/content/bindings/toolbar.xml#toolbar-drag");
   }
 }
@@ -50,14 +48,6 @@ wizard {
   background-color: -moz-Dialog;
   color: -moz-DialogText;
   font: message-box;
-}
-
-/* deprecated */
-window.dialog {
-  padding-top: 8px;
-  padding-bottom: 10px;
-  padding-inline-start: 8px;
-  padding-inline-end: 10px;
 }
 
 /* ::::: alert icons :::::*/
@@ -112,13 +102,32 @@ sidebarheader > label {
   padding-inline-start: 4px;
 }
 
-.toolbar-focustarget {
-  -moz-user-focus: ignore !important;
-}
-
 toolbar[mode="text"] .toolbarbutton-text {
   padding: 0 !important;
   margin: 3px 5px !important;
+}
+
+/* ::::: print preview ::::: */
+
+.print-preview-navigate-button {
+  min-width: 1.9em;
+}
+
+.print-preview-navigate-button > .toolbarbutton-icon {
+  display: none;
+}
+
+#print-preview-portrait-button {
+  list-style-image: url("moz-icon://stock/gtk-orientation-portrait?size=button");
+}
+
+#print-preview-landscape-button {
+  list-style-image: url("moz-icon://stock/gtk-orientation-landscape?size=button");
+}
+
+#print-preview-pageNumber {
+  /* 3 chars + 4px padding left + 2px padding right + 2*6px border */
+  width: calc(18px + 3ch);
 }
 
 /* ::::: miscellaneous formatting ::::: */
@@ -242,7 +251,7 @@ label[disabled="true"] {
   outline: 1px dotted;
 }
 
-notification > button {
+notification > hbox > button {
   margin-top: 0;
   margin-bottom: 0;
 }
@@ -253,26 +262,3 @@ popupnotificationcontent {
 
 %include ../../shared/notification-popup.inc.css
 
-/* :::::: autoscroll popup ::::: */
-
-.autoscroller {
-  border: none;
-  padding: 0;
-  background-image: url("chrome://global/skin/icons/autoscroll.svg");
-  background-size: contain;
-  background-color: transparent;
-  background-repeat: no-repeat;
-  -moz-appearance: none;
-}
-
-.autoscroller[scrolldir="NS"] {
-  background-image: url("chrome://global/skin/icons/autoscroll-vertical.svg");
-}
-
-.autoscroller[scrolldir="EW"] {
-  background-image: url("chrome://global/skin/icons/autoscroll-horizontal.svg");
-}
-
-/* :::::: Close button icons ::::: */
-
-%include ../../shared/close-icon.inc.css

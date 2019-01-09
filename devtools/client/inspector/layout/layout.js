@@ -6,6 +6,8 @@
 
 const { createFactory, createElement } = require("devtools/client/shared/vendor/react");
 const { Provider } = require("devtools/client/shared/vendor/react-redux");
+const FlexboxInspector = require("devtools/client/inspector/flexbox/flexbox");
+const GridInspector = require("devtools/client/inspector/grids/grid-inspector");
 
 const LayoutApp = createFactory(require("./components/LayoutApp"));
 
@@ -13,8 +15,7 @@ const { LocalizationHelper } = require("devtools/shared/l10n");
 const INSPECTOR_L10N =
   new LocalizationHelper("devtools/client/locales/inspector.properties");
 
-loader.lazyRequireGetter(this, "FlexboxInspector", "devtools/client/inspector/flexbox/flexbox");
-loader.lazyRequireGetter(this, "GridInspector", "devtools/client/inspector/grids/grid-inspector");
+loader.lazyRequireGetter(this, "SwatchColorPickerTooltip", "devtools/client/shared/widgets/tooltip/SwatchColorPickerTooltip");
 
 class LayoutView {
   constructor(inspector, window) {
@@ -31,8 +32,8 @@ class LayoutView {
     }
 
     const {
-      setSelectedNode,
       onShowBoxModelHighlighterForNode,
+      setSelectedNode,
     } = this.inspector.getCommonComponentProps();
 
     const {
@@ -42,15 +43,14 @@ class LayoutView {
       onToggleGeometryEditor,
     } = this.inspector.getPanel("boxmodel").getComponentProps();
 
-    this.flexboxInspector = new FlexboxInspector(this.inspector,
-      this.inspector.panelWin);
+    this.flexboxInspector = new FlexboxInspector(this.inspector, this.inspector.panelWin);
     const {
+      onSetFlexboxOverlayColor,
       onToggleFlexboxHighlighter,
     } = this.flexboxInspector.getComponentProps();
 
     this.gridInspector = new GridInspector(this.inspector, this.inspector.panelWin);
     const {
-      getSwatchColorPickerTooltip,
       onSetGridOverlayColor,
       onShowGridOutlineHighlight,
       onToggleGridHighlighter,
@@ -60,14 +60,9 @@ class LayoutView {
     } = this.gridInspector.getComponentProps();
 
     const layoutApp = LayoutApp({
-      getSwatchColorPickerTooltip,
-      setSelectedNode,
-      /**
-       * Shows the box model properties under the box model if true, otherwise, hidden by
-       * default.
-       */
-      showBoxModelProperties: true,
+      getSwatchColorPickerTooltip: () => this.swatchColorPickerTooltip,
       onHideBoxModelHighlighter,
+      onSetFlexboxOverlayColor,
       onSetGridOverlayColor,
       onShowBoxModelEditor,
       onShowBoxModelHighlighter,
@@ -79,6 +74,12 @@ class LayoutView {
       onToggleShowGridAreas,
       onToggleShowGridLineNumbers,
       onToggleShowInfiniteLines,
+      setSelectedNode,
+      /**
+       * Shows the box model properties under the box model if true, otherwise, hidden by
+       * default.
+       */
+      showBoxModelProperties: true,
     });
 
     const provider = createElement(Provider, {
@@ -96,12 +97,29 @@ class LayoutView {
    * Destruction function called when the inspector is destroyed. Cleans up references.
    */
   destroy() {
+    if (this._swatchColorPickerTooltip) {
+      this._swatchColorPickerTooltip.destroy();
+      this._swatchColorPickerTooltip = null;
+    }
+
     this.flexboxInspector.destroy();
     this.gridInspector.destroy();
 
     this.document = null;
     this.inspector = null;
     this.store = null;
+  }
+
+  get swatchColorPickerTooltip() {
+    if (!this._swatchColorPickerTooltip) {
+      this._swatchColorPickerTooltip = new SwatchColorPickerTooltip(
+        this.inspector.toolbox.doc,
+        this.inspector,
+        { supportsCssColor4ColorFunction: () => false }
+      );
+    }
+
+    return this._swatchColorPickerTooltip;
   }
 }
 

@@ -16,7 +16,7 @@ const { Ci } = require("chrome");
 const Services = require("Services");
 const {
   BrowsingContextTargetActor,
-  browsingContextTargetPrototype
+  browsingContextTargetPrototype,
 } = require("devtools/server/actors/targets/browsing-context");
 
 const { extend } = require("devtools/shared/extend");
@@ -54,11 +54,10 @@ const chromeWindowTargetPrototype = extend({}, browsingContextTargetPrototype);
 chromeWindowTargetPrototype.initialize = function(connection, window) {
   BrowsingContextTargetActor.prototype.initialize.call(this, connection);
 
-  const docShell = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                       .getInterface(Ci.nsIDocShell);
+  const docShell = window.docShell;
   Object.defineProperty(this, "docShell", {
     value: docShell,
-    configurable: true
+    configurable: true,
   });
 };
 

@@ -7,7 +7,6 @@
 var EXPORTED_SYMBOLS = ["GeckoViewTrackingProtection"];
 
 ChromeUtils.import("resource://gre/modules/GeckoViewModule.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 class GeckoViewTrackingProtection extends GeckoViewModule {
   onEnable() {
@@ -40,7 +39,7 @@ class GeckoViewTrackingProtection extends GeckoViewModule {
     let message = {
       type: "GeckoView:TrackingProtectionBlocked",
       src: uri,
-      matchedList: classChannel.matchedList
+      matchedList: classChannel.matchedList,
     };
 
     this.eventDispatcher.sendRequest(message);

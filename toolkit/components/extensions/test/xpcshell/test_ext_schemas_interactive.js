@@ -2,8 +2,6 @@
 
 const {ExtensionManager} = ChromeUtils.import("resource://gre/modules/ExtensionChild.jsm", {});
 
-Cu.importGlobalProperties(["Blob", "URL"]);
-
 let experimentAPIs = {
   userinputtest: {
     schema: "schema.json",
@@ -82,8 +80,7 @@ function setHandlingUserInput(extension) {
     }
   }
   notEqual(bgwin, null, "Found background window for the test extension");
-  let winutils = bgwin.QueryInterface(Ci.nsIInterfaceRequestor)
-                      .getInterface(Ci.nsIDOMWindowUtils);
+  let winutils = bgwin.windowUtils;
   return winutils.setHandlingUserInput(true);
 }
 

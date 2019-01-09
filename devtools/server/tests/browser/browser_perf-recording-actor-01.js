@@ -8,16 +8,9 @@
 
 "use strict";
 
-const { PerformanceFront } = require("devtools/shared/fronts/performance");
-
 add_task(async function() {
-  await addTab(MAIN_DOMAIN + "doc_perf.html");
-
-  initDebuggerServer();
-  const client = new DebuggerClient(DebuggerServer.connectPipe());
-  const form = await connectDebuggerClient(client);
-  const front = PerformanceFront(client, form);
-  await front.connect();
+  const target = await addTabTarget(MAIN_DOMAIN + "doc_perf.html");
+  const front = await target.getFront("performance");
 
   const rec = await front.startRecording(
     { withMarkers: true, withTicks: true, withMemory: true });
@@ -70,8 +63,7 @@ add_task(async function() {
   checkSystemInfo(importedModel, "Host");
   checkSystemInfo(importedModel, "Client");
 
-  await front.destroy();
-  await client.close();
+  await target.destroy();
   gBrowser.removeCurrentTab();
 });
 

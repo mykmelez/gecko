@@ -3,8 +3,6 @@
 ChromeUtils.import("resource://gre/modules/ExtensionCommon.jsm");
 const {ExtensionAPI} = ExtensionCommon;
 
-Cu.importGlobalProperties(["Blob", "URL"]);
-
 AddonTestUtils.init(this);
 AddonTestUtils.overrideCertDB();
 
@@ -40,9 +38,8 @@ add_task(async function() {
     },
   };
 
-  const catMan = Cc["@mozilla.org/categorymanager;1"].getService(Ci.nsICategoryManager);
-  catMan.addCategoryEntry("webextension-modules", "test-privileged",
-                          `data:,${JSON.stringify(modules)}`, false, false);
+  Services.catMan.addCategoryEntry("webextension-modules", "test-privileged",
+                                   `data:,${JSON.stringify(modules)}`, false, false);
 
   AddonTestUtils.createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "42");
   await AddonTestUtils.promiseStartupManager();
@@ -75,5 +72,5 @@ add_task(async function() {
   equal(result, true, "Privileged namespace should be accessible to a webextension signed with Mozilla Extensions");
 
   await AddonTestUtils.promiseShutdownManager();
-  catMan.deleteCategoryEntry("webextension-modules", "test-privileged", false);
+  Services.catMan.deleteCategoryEntry("webextension-modules", "test-privileged", false);
 });

@@ -18,11 +18,15 @@ var gTabsPanel = {
     hiddenTabsView: "allTabsMenu-hiddenTabsView",
   },
   _initialized: false,
+  _initializedElements: false,
 
   initElements() {
+    if (this._initializedElements) return;
+
     for (let [name, id] of Object.entries(this.kElements)) {
       this[name] = document.getElementById(id);
     }
+    this._initializedElements = true;
   },
 
   init() {
@@ -30,55 +34,32 @@ var gTabsPanel = {
 
     this.initElements();
 
-    let hiddenTabsMenuButton = this.allTabsView.querySelector(".hidden-tabs-button");
-    let hiddenTabsSeparator = this.allTabsView.querySelector(".hidden-tabs-separator");
     this.hiddenAudioTabsPopup = new TabsPanel({
       view: this.allTabsView,
-      insertBefore: hiddenTabsSeparator,
+      insertBefore: document.getElementById("allTabsMenu-tabsSeparator"),
       filterFn: (tab) => tab.hidden && tab.soundPlaying,
     });
     this.allTabsPanel = new TabsPanel({
       view: this.allTabsView,
       containerNode: this.allTabsViewTabs,
       filterFn: (tab) => !tab.pinned && !tab.hidden,
-      onPopulate() {
-        // Set the visible tab status.
-        let tabContainer = gBrowser.tabContainer;
-        // We don't want menu item decoration unless there is overflow.
-        if (tabContainer.getAttribute("overflow") != "true") {
-          return;
-        }
-
-        let windowUtils = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                                .getInterface(Ci.nsIDOMWindowUtils);
-        let arrowScrollboxRect = windowUtils.getBoundsWithoutFlushing(tabContainer.arrowScrollbox);
-        for (let row of this.rows) {
-          let curTabRect = windowUtils.getBoundsWithoutFlushing(row.tab);
-          if (curTabRect.left >= arrowScrollboxRect.left &&
-              curTabRect.right <= arrowScrollboxRect.right) {
-            row.setAttribute("tabIsVisible", "true");
-          } else {
-            row.removeAttribute("tabIsVisible");
-          }
-        }
-      },
     });
 
-    let containerTabsButton = this.allTabsView.querySelector(".container-tabs-button");
-    let containerTabsSeparator = this.allTabsView.querySelector(".container-tabs-separator");
     this.allTabsView.addEventListener("ViewShowing", (e) => {
       PanelUI._ensureShortcutsShown(this.allTabsView);
-      e.target.querySelector(".undo-close-tab").disabled =
+      document.getElementById("allTabsMenu-undoCloseTab").disabled =
           SessionStore.getClosedTabCount(window) == 0;
 
       let containersEnabled = Services.prefs.getBoolPref("privacy.userContext.enabled")
                                 && !PrivateBrowsingUtils.isWindowPrivate(window);
-      containerTabsButton.hidden = !containersEnabled;
-      containerTabsSeparator.hidden = !containersEnabled;
+      document.getElementById("allTabsMenu-containerTabsButton")
+        .hidden = !containersEnabled;
 
       let hasHiddenTabs = gBrowser.visibleTabs.length < gBrowser.tabs.length;
-      hiddenTabsMenuButton.hidden = !hasHiddenTabs;
-      hiddenTabsSeparator.hidden = !hasHiddenTabs;
+      document.getElementById("allTabsMenu-hiddenTabsButton")
+        .hidden = !hasHiddenTabs;
+      document.getElementById("allTabsMenu-hiddenTabsSeparator")
+        .hidden = !hasHiddenTabs;
     });
 
     this.allTabsView.addEventListener("ViewShown", (e) => {
@@ -92,7 +73,7 @@ var gTabsPanel = {
       let frag = document.createDocumentFragment();
 
       ContextualIdentityService.getPublicIdentities().forEach(identity => {
-        let menuitem = document.createElement("toolbarbutton");
+        let menuitem = document.createXULElement("toolbarbutton");
         menuitem.setAttribute("class", "subviewbutton subviewbutton-iconic");
         menuitem.setAttribute("label", ContextualIdentityService.getUserContextLabel(identity.userContextId));
         // The styles depend on this.
@@ -124,9 +105,16 @@ var gTabsPanel = {
     this._initialized = true;
   },
 
+  get canOpen() {
+    this.initElements();
+    return isElementVisible(this.allTabsButton);
+  },
+
   showAllTabsPanel() {
     this.init();
-    PanelUI.showSubView(this.kElements.allTabsView, this.allTabsButton);
+    if (this.canOpen) {
+      PanelUI.showSubView(this.kElements.allTabsView, this.allTabsButton);
+    }
   },
 
   hideAllTabsPanel() {
@@ -136,9 +124,17 @@ var gTabsPanel = {
 
   showHiddenTabsPanel() {
     this.init();
+    if (!this.canOpen) {
+      return;
+    }
     this.allTabsView.addEventListener("ViewShown", (e) => {
       PanelUI.showSubView(this.kElements.hiddenTabsView, this.hiddenTabsButton);
     }, {once: true});
     this.showAllTabsPanel();
+  },
+
+  searchTabs() {
+    focusAndSelectUrlBar();
+    gURLBar.typeRestrictToken(UrlbarTokenizer.RESTRICT.OPENPAGE);
   },
 };

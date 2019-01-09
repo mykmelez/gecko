@@ -7,27 +7,30 @@
 #ifndef mozilla_dom_SVGTests_h
 #define mozilla_dom_SVGTests_h
 
-#include "nsStringFwd.h"
-#include "SVGStringList.h"
 #include "nsCOMPtr.h"
+#include "nsStringFwd.h"
+#include "mozilla/SVGStringList.h"
 
 class nsAttrValue;
 class nsAtom;
 class nsStaticAtom;
-class nsSVGElement;
 
 namespace mozilla {
 class DOMSVGStringList;
 
-#define MOZILLA_DOMSVGTESTS_IID \
-   { 0x92370da8, 0xda28, 0x4895, \
-     {0x9b, 0x1b, 0xe0, 0x06, 0x0d, 0xb7, 0x3f, 0xc3 } }
+#define MOZILLA_DOMSVGTESTS_IID                      \
+  {                                                  \
+    0x92370da8, 0xda28, 0x4895, {                    \
+      0x9b, 0x1b, 0xe0, 0x06, 0x0d, 0xb7, 0x3f, 0xc3 \
+    }                                                \
+  }
 
 namespace dom {
 
-class SVGTests : public nsISupports
-{
-public:
+class SVGElement;
+
+class SVGTests : public nsISupports {
+ public:
   NS_DECLARE_STATIC_IID_ACCESSOR(MOZILLA_DOMSVGTESTS_IID)
 
   SVGTests();
@@ -50,10 +53,10 @@ public:
   int32_t GetBestLanguagePreferenceRank(const nsAString& aAcceptLangs) const;
 
   /**
-   * Special value to pass to PassesConditionalProcessingTests to ignore systemLanguage
-   * attributes
+   * Special value to pass to PassesConditionalProcessingTests to ignore
+   * systemLanguage attributes
    */
-  static const nsString * const kIgnoreSystemLanguage;
+  static const nsString* const kIgnoreSystemLanguage;
 
   /**
    * Check whether the conditional processing attributes requiredFeatures,
@@ -67,7 +70,7 @@ public:
    *   check if the caller is giving that special treatment.
    */
   bool PassesConditionalProcessingTests(
-         const nsString *aAcceptLangs = nullptr) const;
+      const nsString* aAcceptLangs = nullptr) const;
 
   /**
    * Returns true if the attribute is one of the conditional processing
@@ -75,18 +78,17 @@ public:
    */
   bool IsConditionalProcessingAttribute(const nsAtom* aAttribute) const;
 
-  bool ParseConditionalProcessingAttribute(
-         nsAtom* aAttribute,
-         const nsAString& aValue,
-         nsAttrValue& aResult);
+  bool ParseConditionalProcessingAttribute(nsAtom* aAttribute,
+                                           const nsAString& aValue,
+                                           nsAttrValue& aResult);
 
   /**
    * Unsets a conditional processing attribute.
    */
   void UnsetAttr(const nsAtom* aAttribute);
 
-  nsAtom* GetAttrName(uint8_t aAttrEnum) const;
-  void GetAttrValue(uint8_t aAttrEnum, nsAttrValue &aValue) const;
+  nsStaticAtom* GetAttrName(uint8_t aAttrEnum) const;
+  void GetAttrValue(uint8_t aAttrEnum, nsAttrValue& aValue) const;
 
   void MaybeInvalidate();
 
@@ -94,27 +96,26 @@ public:
   already_AddRefed<DOMSVGStringList> RequiredFeatures();
   already_AddRefed<DOMSVGStringList> RequiredExtensions();
   already_AddRefed<DOMSVGStringList> SystemLanguage();
-  bool HasExtension(const nsAString& aExtension);
+  bool HasExtension(const nsAString& aExtension) const;
 
-  virtual nsSVGElement* AsSVGElement() = 0;
+  virtual SVGElement* AsSVGElement() = 0;
 
-  const nsSVGElement* AsSVGElement() const
-  {
+  const SVGElement* AsSVGElement() const {
     return const_cast<SVGTests*>(this)->AsSVGElement();
   }
 
-protected:
+ protected:
   virtual ~SVGTests() {}
 
-private:
+ private:
   enum { FEATURES, EXTENSIONS, LANGUAGE };
   SVGStringList mStringListAttributes[3];
-  static nsStaticAtom** sStringListNames[3];
+  static nsStaticAtom* const sStringListNames[3];
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(SVGTests, MOZILLA_DOMSVGTESTS_IID)
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla
 
-#endif // mozilla_dom_SVGTests_h
+#endif  // mozilla_dom_SVGTests_h

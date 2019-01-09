@@ -9,9 +9,9 @@
 namespace mozilla {
 namespace dom {
 
-WebAuthnTransactionChild::WebAuthnTransactionChild(WebAuthnManagerBase* aManager)
-  : mManager(aManager)
-{
+WebAuthnTransactionChild::WebAuthnTransactionChild(
+    WebAuthnManagerBase* aManager)
+    : mManager(aManager) {
   MOZ_ASSERT(aManager);
 
   // Retain a reference so the task object isn't deleted without IPDL's
@@ -20,45 +20,53 @@ WebAuthnTransactionChild::WebAuthnTransactionChild(WebAuthnManagerBase* aManager
   NS_ADDREF_THIS();
 }
 
-mozilla::ipc::IPCResult
-WebAuthnTransactionChild::RecvConfirmRegister(const uint64_t& aTransactionId,
-                                              const WebAuthnMakeCredentialResult& aResult)
-{
+mozilla::ipc::IPCResult WebAuthnTransactionChild::RecvConfirmRegister(
+    const uint64_t& aTransactionId,
+    const WebAuthnMakeCredentialResult& aResult) {
   if (NS_WARN_IF(!mManager)) {
     return IPC_FAIL_NO_REASON(this);
   }
 
-  mManager->FinishMakeCredential(aTransactionId, aResult);
+  // We don't own the reference to mManager. We need to prevent its refcount
+  // going to 0 while we call anything that can reach the call to
+  // StopListeningForVisibilityEvents in WebAuthnManager::ClearTransaction
+  // (often via WebAuthnManager::RejectTransaction).
+  RefPtr<WebAuthnManagerBase> kungFuDeathGrip(mManager);
+  kungFuDeathGrip->FinishMakeCredential(aTransactionId, aResult);
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult
-WebAuthnTransactionChild::RecvConfirmSign(const uint64_t& aTransactionId,
-                                          const WebAuthnGetAssertionResult& aResult)
-{
+mozilla::ipc::IPCResult WebAuthnTransactionChild::RecvConfirmSign(
+    const uint64_t& aTransactionId, const WebAuthnGetAssertionResult& aResult) {
   if (NS_WARN_IF(!mManager)) {
     return IPC_FAIL_NO_REASON(this);
   }
 
-  mManager->FinishGetAssertion(aTransactionId, aResult);
+  // We don't own the reference to mManager. We need to prevent its refcount
+  // going to 0 while we call anything that can reach the call to
+  // StopListeningForVisibilityEvents in WebAuthnManager::ClearTransaction
+  // (often via WebAuthnManager::RejectTransaction).
+  RefPtr<WebAuthnManagerBase> kungFuDeathGrip(mManager);
+  kungFuDeathGrip->FinishGetAssertion(aTransactionId, aResult);
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult
-WebAuthnTransactionChild::RecvAbort(const uint64_t& aTransactionId,
-                                    const nsresult& aError)
-{
+mozilla::ipc::IPCResult WebAuthnTransactionChild::RecvAbort(
+    const uint64_t& aTransactionId, const nsresult& aError) {
   if (NS_WARN_IF(!mManager)) {
     return IPC_FAIL_NO_REASON(this);
   }
 
-  mManager->RequestAborted(aTransactionId, aError);
+  // We don't own the reference to mManager. We need to prevent its refcount
+  // going to 0 while we call anything that can reach the call to
+  // StopListeningForVisibilityEvents in WebAuthnManager::ClearTransaction
+  // (often via WebAuthnManager::RejectTransaction).
+  RefPtr<WebAuthnManagerBase> kungFuDeathGrip(mManager);
+  kungFuDeathGrip->RequestAborted(aTransactionId, aError);
   return IPC_OK();
 }
 
-void
-WebAuthnTransactionChild::ActorDestroy(ActorDestroyReason why)
-{
+void WebAuthnTransactionChild::ActorDestroy(ActorDestroyReason why) {
   // Called by either a __delete__ message from the parent, or when the
   // channel disconnects. Clear out the child actor reference to be sure.
   if (mManager) {
@@ -67,9 +75,7 @@ WebAuthnTransactionChild::ActorDestroy(ActorDestroyReason why)
   }
 }
 
-void
-WebAuthnTransactionChild::Disconnect()
-{
+void WebAuthnTransactionChild::Disconnect() {
   mManager = nullptr;
 
   // The WebAuthnManager released us, but we're going to be held alive by the
@@ -79,5 +85,5 @@ WebAuthnTransactionChild::Disconnect()
   SendDestroyMe();
 }
 
-}
-}
+}  // namespace dom
+}  // namespace mozilla

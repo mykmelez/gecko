@@ -308,7 +308,8 @@ var gSyncPane = {
     if (state.displayName) {
       fxaLoginStatus.setAttribute("hasName", true);
       displayNameLabel.hidden = false;
-      displayNameLabel.textContent = state.displayName;
+      document.getElementById("fxaDisplayNameHeading").textContent =
+        state.displayName;
     } else {
       fxaLoginStatus.removeAttribute("hasName");
     }
@@ -356,12 +357,11 @@ var gSyncPane = {
   // Replace the current tab with the specified URL.
   replaceTabWithUrl(url) {
     // Get the <browser> element hosting us.
-    let browser = window.QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIWebNavigation)
-      .QueryInterface(Ci.nsIDocShell)
-      .chromeEventHandler;
+    let browser = window.docShell.chromeEventHandler;
     // And tell it to load our URL.
-    browser.loadURI(url);
+    browser.loadURI(url, {
+      triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal({}),
+    });
   },
 
   async signIn() {

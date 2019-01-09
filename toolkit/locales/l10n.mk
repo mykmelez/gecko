@@ -168,8 +168,8 @@ $(NULL)
 # Dealing with app sub dirs: If DIST_SUBDIRS is defined it contains a
 # listing of app sub-dirs we should include in langpack xpis. If not,
 # check DIST_SUBDIR, and if that isn't present, just package the default
-# chrome directory.
-PKG_ZIP_DIRS = chrome $(or $(DIST_SUBDIRS),$(DIST_SUBDIR))
+# chrome directory and top-level localization for Fluent.
+PKG_ZIP_DIRS = chrome localization $(or $(DIST_SUBDIRS),$(DIST_SUBDIR))
 
 # Clone a l10n repository, either via hg or git
 # Make this a variable as it's embedded in a sh conditional
@@ -183,14 +183,22 @@ L10N_CO = $(error You need to use either hg or git)
 endif
 endif
 
-
 merge-%: IS_LANGUAGE_REPACK=1
 merge-%: AB_CD=$*
 merge-%:
 # For nightly builds, we automatically check out missing localizations
-# from l10n-central.
+# from l10n-central.  We never automatically check out in automation:
+# automation builds check out revisions that have been signed-off by
+# l10n drivers prior to use.
+ifdef MOZ_AUTOMATION
+	if  ! test -d $(L10NBASEDIR)/$(AB_CD) ; then \
+		echo 'Error: Automation requires l10n repositories to be checked out: $(L10NBASEDIR)/$(AB_CD)' ; \
+		exit 1 ; \
+	fi
+endif
 ifdef NIGHTLY_BUILD
-	@if  ! test -d $(L10NBASEDIR)/$(AB_CD) ; then \
+	if  ! test -d $(L10NBASEDIR)/$(AB_CD) ; then \
+		echo 'Checking out $(L10NBASEDIR)/$(AB_CD)' ; \
 		$(NSINSTALL) -D $(L10NBASEDIR) ; \
 		$(L10N_CO) ; \
 	fi

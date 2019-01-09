@@ -278,15 +278,15 @@ pub fn is_u16x8_bidi(s: u16x8) -> bool {
     // Quick refutation failed. Let's do the full check.
 
     (in_range16x8!(s, 0x0590, 0x0900)
-        | in_range16x8!(s, 0xFB50, 0xFE00)
-        | in_range16x8!(s, 0xFE70, 0xFF00)
+        | in_range16x8!(s, 0xFB1D, 0xFE00)
+        | in_range16x8!(s, 0xFE70, 0xFEFF)
         | in_range16x8!(s, 0xD802, 0xD804)
         | in_range16x8!(s, 0xD83A, 0xD83C)
         | s.eq(u16x8::splat(0x200F))
         | s.eq(u16x8::splat(0x202B))
         | s.eq(u16x8::splat(0x202E))
         | s.eq(u16x8::splat(0x2067)))
-        .any()
+    .any()
 }
 
 #[inline(always)]
@@ -360,7 +360,7 @@ mod tests {
         let ptr = vec.as_mut_ptr();
         unsafe {
             store8_unaligned(ptr, first);
-            store8_unaligned(ptr.offset(8), second);
+            store8_unaligned(ptr.add(8), second);
         }
         assert_eq!(&vec[..], &basic_latin[..]);
     }
@@ -376,7 +376,7 @@ mod tests {
             0x75, 0x76,
         ];
         let first = unsafe { load8_unaligned(basic_latin.as_ptr()) };
-        let second = unsafe { load8_unaligned(basic_latin.as_ptr().offset(8)) };
+        let second = unsafe { load8_unaligned(basic_latin.as_ptr().add(8)) };
         let mut vec = Vec::with_capacity(16);
         vec.resize(16, 0u8);
         let ptr = vec.as_mut_ptr();
@@ -394,7 +394,7 @@ mod tests {
             0x75, 0x76,
         ];
         let first = unsafe { load8_unaligned(input.as_ptr()) };
-        let second = unsafe { load8_unaligned(input.as_ptr().offset(8)) };
+        let second = unsafe { load8_unaligned(input.as_ptr().add(8)) };
         assert!(!simd_is_basic_latin(first | second));
     }
 
@@ -405,7 +405,7 @@ mod tests {
             0x75, 0x76,
         ];
         let first = unsafe { load8_unaligned(input.as_ptr()) };
-        let second = unsafe { load8_unaligned(input.as_ptr().offset(8)) };
+        let second = unsafe { load8_unaligned(input.as_ptr().add(8)) };
         assert!(!simd_is_basic_latin(first | second));
     }
 
@@ -416,7 +416,7 @@ mod tests {
             0x75, 0x76,
         ];
         let first = unsafe { load8_unaligned(input.as_ptr()) };
-        let second = unsafe { load8_unaligned(input.as_ptr().offset(8)) };
+        let second = unsafe { load8_unaligned(input.as_ptr().add(8)) };
         assert!(!simd_is_basic_latin(first | second));
     }
 

@@ -88,23 +88,14 @@ const GeckoViewTelemetryController = {
   retrieveSnapshots(aClear, aCallback) {
     debug `retrieveSnapshots`;
 
-    // Selecting the opt-in dataset will ensure that we retrieve opt-in probes
-    // (iff canRecordPreRelease == true) and opt-out probes
-    // (iff canRecordRelease == true) if they are being recorded.
-    const dataset = Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN;
-
-    const rawHistograms = Services.telemetry.snapshotHistograms(dataset,
-                                                                /* subsession */ false,
-                                                                /* clear */ false);
-    const rawKeyedHistograms =
-      Services.telemetry.snapshotKeyedHistograms(dataset, /* subsession */ false,
-                                                 /* clear */ false);
-    const scalars = Services.telemetry.snapshotScalars(dataset, /* clear */ false);
-    const keyedScalars = Services.telemetry.snapshotKeyedScalars(dataset, /* clear */ false);
+    const histograms = Services.telemetry.getSnapshotForHistograms("main", /* clear */ false);
+    const keyedHistograms = Services.telemetry.getSnapshotForKeyedHistograms("main", /* clear */ false);
+    const scalars = Services.telemetry.getSnapshotForScalars("main", /* clear */ false);
+    const keyedScalars = Services.telemetry.getSnapshotForKeyedScalars("main", /* clear */ false);
 
     const snapshots = {
-      histograms: TelemetryUtils.packHistograms(rawHistograms),
-      keyedHistograms: TelemetryUtils.packKeyedHistograms(rawKeyedHistograms),
+      histograms,
+      keyedHistograms,
       scalars,
       keyedScalars,
     };
@@ -115,10 +106,20 @@ const GeckoViewTelemetryController = {
       return;
     }
 
+    let processSnapshots = {};
+    for (let [name, snapshot] of Object.entries(snapshots)) {
+      for (let [processName, processSnapshot] of Object.entries(snapshot)) {
+        if (!(processName in processSnapshots)) {
+          processSnapshots[processName] = {};
+        }
+        processSnapshots[processName][name] = processSnapshot;
+      }
+    }
+
     if (aClear) {
       Services.telemetry.clearProbes();
     }
 
-    aCallback.onSuccess(snapshots);
+    aCallback.onSuccess(processSnapshots);
   },
 };

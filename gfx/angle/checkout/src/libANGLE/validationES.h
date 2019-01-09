@@ -9,8 +9,10 @@
 #ifndef LIBANGLE_VALIDATION_ES_H_
 #define LIBANGLE_VALIDATION_ES_H_
 
+#include "common/PackedEnums.h"
 #include "common/mathutil.h"
-#include "libANGLE/PackedGLEnums.h"
+#include "libANGLE/Context.h"
+#include "libANGLE/Framebuffer.h"
 
 #include <GLES2/gl2.h>
 #include <GLES3/gl3.h>
@@ -72,7 +74,7 @@ bool ValidImageDataSize(Context *context,
                         const void *pixels,
                         GLsizei imageSize);
 
-bool ValidQueryType(const Context *context, GLenum queryType);
+bool ValidQueryType(const Context *context, QueryType queryType);
 
 bool ValidateWebGLVertexAttribPointer(Context *context,
                                       GLenum type,
@@ -165,23 +167,20 @@ bool ValidateReadnPixelsRobustANGLE(Context *context,
 bool ValidateGenQueriesEXT(gl::Context *context, GLsizei n, GLuint *ids);
 bool ValidateDeleteQueriesEXT(gl::Context *context, GLsizei n, const GLuint *ids);
 bool ValidateIsQueryEXT(gl::Context *context, GLuint id);
-bool ValidateBeginQueryBase(Context *context, GLenum target, GLuint id);
-bool ValidateBeginQueryEXT(Context *context, GLenum target, GLuint id);
-bool ValidateEndQueryBase(Context *context, GLenum target);
-bool ValidateEndQueryEXT(Context *context, GLenum target);
-bool ValidateQueryCounterEXT(Context *context, GLuint id, GLenum target);
-bool ValidateGetQueryivBase(Context *context, GLenum target, GLenum pname, GLsizei *numParams);
-bool ValidateGetQueryivEXT(Context *context, GLenum target, GLenum pname, GLint *params);
+bool ValidateBeginQueryBase(Context *context, QueryType target, GLuint id);
+bool ValidateBeginQueryEXT(Context *context, QueryType target, GLuint id);
+bool ValidateEndQueryBase(Context *context, QueryType target);
+bool ValidateEndQueryEXT(Context *context, QueryType target);
+bool ValidateQueryCounterEXT(Context *context, GLuint id, QueryType target);
+bool ValidateGetQueryivBase(Context *context, QueryType target, GLenum pname, GLsizei *numParams);
+bool ValidateGetQueryivEXT(Context *context, QueryType target, GLenum pname, GLint *params);
 bool ValidateGetQueryivRobustANGLE(Context *context,
-                                   GLenum target,
+                                   QueryType target,
                                    GLenum pname,
                                    GLsizei bufSize,
                                    GLsizei *length,
                                    GLint *params);
-bool ValidateGetQueryObjectValueBase(Context *context,
-                                     GLenum target,
-                                     GLenum pname,
-                                     GLsizei *numParams);
+bool ValidateGetQueryObjectValueBase(Context *context, GLuint id, GLenum pname, GLsizei *numParams);
 bool ValidateGetQueryObjectivEXT(Context *context, GLuint id, GLenum pname, GLint *params);
 bool ValidateGetQueryObjectivRobustANGLE(Context *context,
                                          GLuint id,
@@ -273,39 +272,39 @@ bool ValidateCopyTexImageParametersBase(Context *context,
                                         GLint border,
                                         Format *textureFormatOut);
 
-bool ValidateDrawBase(Context *context, GLenum mode, GLsizei count);
+bool ValidateDrawBase(Context *context, PrimitiveMode mode, GLsizei count);
 bool ValidateDrawArraysCommon(Context *context,
-                              GLenum mode,
+                              PrimitiveMode mode,
                               GLint first,
                               GLsizei count,
                               GLsizei primcount);
 bool ValidateDrawArraysInstancedBase(Context *context,
-                                     GLenum mode,
+                                     PrimitiveMode mode,
                                      GLint first,
                                      GLsizei count,
                                      GLsizei primcount);
 bool ValidateDrawArraysInstancedANGLE(Context *context,
-                                      GLenum mode,
+                                      PrimitiveMode mode,
                                       GLint first,
                                       GLsizei count,
                                       GLsizei primcount);
 
-bool ValidateDrawElementsBase(Context *context, GLenum type);
+bool ValidateDrawElementsBase(Context *context, PrimitiveMode mode, GLenum type);
 bool ValidateDrawElementsCommon(Context *context,
-                                GLenum mode,
+                                PrimitiveMode mode,
                                 GLsizei count,
                                 GLenum type,
                                 const void *indices,
                                 GLsizei primcount);
 
 bool ValidateDrawElementsInstancedCommon(Context *context,
-                                         GLenum mode,
+                                         PrimitiveMode mode,
                                          GLsizei count,
                                          GLenum type,
                                          const void *indices,
                                          GLsizei primcount);
 bool ValidateDrawElementsInstancedANGLE(Context *context,
-                                        GLenum mode,
+                                        PrimitiveMode mode,
                                         GLsizei count,
                                         GLenum type,
                                         const void *indices,
@@ -628,7 +627,7 @@ bool ValidateGetActiveUniformBlockivRobustANGLE(Context *context,
                                                 GLsizei *length,
                                                 GLint *params);
 
-bool ValidateGetInternalFormativRobustANGLE(Context *context,
+bool ValidateGetInternalformativRobustANGLE(Context *context,
                                             GLenum target,
                                             GLenum internalformat,
                                             GLenum pname,
@@ -676,10 +675,21 @@ bool ValidateGetInternalFormativBase(Context *context,
                                      GLsizei bufSize,
                                      GLsizei *numParams);
 
-bool ValidateFramebufferComplete(Context *context, Framebuffer *framebuffer, bool isFramebufferOp);
 bool ValidateFramebufferNotMultisampled(Context *context, Framebuffer *framebuffer);
 
 bool ValidateMultitextureUnit(Context *context, GLenum texture);
+
+bool ValidateTransformFeedbackPrimitiveMode(const Context *context,
+                                            PrimitiveMode transformFeedbackPrimitiveMode,
+                                            PrimitiveMode renderPrimitiveMode);
+
+// Common validation for 2D and 3D variants of TexStorage*Multisample.
+bool ValidateTexStorageMultisample(Context *context,
+                                   TextureType target,
+                                   GLsizei samples,
+                                   GLint internalFormat,
+                                   GLsizei width,
+                                   GLsizei height);
 
 // Utility macro for handling implementation methods inside Validation.
 #define ANGLE_HANDLE_VALIDATION_ERR(X) \
@@ -687,6 +697,27 @@ bool ValidateMultitextureUnit(Context *context, GLenum texture);
     return false;
 #define ANGLE_VALIDATION_TRY(EXPR) ANGLE_TRY_TEMPLATE(EXPR, ANGLE_HANDLE_VALIDATION_ERR);
 
+// We should check with Khronos if returning INVALID_FRAMEBUFFER_OPERATION is OK when querying
+// implementation format info for incomplete framebuffers. It seems like these queries are
+// incongruent with the other errors.
+// Inlined for speed.
+template <typename ErrorStream = InvalidFramebufferOperation>
+ANGLE_INLINE bool ValidateFramebufferComplete(Context *context, Framebuffer *framebuffer)
+{
+    if (!framebuffer->isComplete(context))
+    {
+        context->handleError(ErrorStream());
+        return false;
+    }
+
+    return true;
+}
+
+struct ErrorAndMessage
+{
+    GLenum errorType;
+    const char *message;
+};
 }  // namespace gl
 
 #endif  // LIBANGLE_VALIDATION_ES_H_

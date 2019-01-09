@@ -20,10 +20,7 @@ const isDebugBuild = Cc["@mozilla.org/xpcom/debug;1"]
                        .getService(Ci.nsIDebug2).isDebugBuild;
 
 // The test EV roots are only enabled in debug builds as a security measure.
-//
-// Bug 1008316: B2G doesn't have EV enabled, so EV is not expected even in debug
-// builds.
-const gEVExpected = isDebugBuild && !("@mozilla.org/b2g-process-global;1" in Cc);
+const gEVExpected = isDebugBuild;
 
 const SSS_STATE_FILE_NAME = "SiteSecurityServiceState.txt";
 const PRELOAD_STATE_FILE_NAME = "SecurityPreloadState.txt";
@@ -452,7 +449,7 @@ function add_connection_test(aHost, aExpectedResult,
       this.outputStream = this.transport.openOutputStream(0, 0, 0)
                             .QueryInterface(Ci.nsIAsyncOutputStream);
       return this.defer.promise;
-    }
+    },
   };
 
   /* Returns a promise to connect to host that resolves to the result of that
@@ -496,7 +493,7 @@ function _getBinaryUtil(binaryUtilName) {
     utilBin.append("bin");
     utilBin.append(binaryUtilName + mozinfo.bin_suffix);
   }
-  // But maybe we're on Android or B2G, where binaries are in /data/local/xpcb.
+  // But maybe we're on Android, where binaries are in /data/local/xpcb.
   if (!utilBin.exists()) {
     utilBin.initWithPath("/data/local/xpcb/");
     utilBin.append(binaryUtilName);
@@ -683,7 +680,7 @@ function startOCSPResponder(serverPort, identity, nssDBLocation,
                      "Should have 0 remaining expected response types");
       }
       httpServer.stop(callback);
-    }
+    },
   };
 }
 
@@ -696,12 +693,12 @@ function stopOCSPResponder(responder) {
 }
 
 
-// A prototype for a fake, error-free sslstatus
-var FakeSSLStatus = function(certificate) {
+// A prototype for a fake, error-free secInfo
+var FakeTransportSecurityInfo = function(certificate) {
   this.serverCert = certificate;
 };
 
-FakeSSLStatus.prototype = {
+FakeTransportSecurityInfo.prototype = {
   serverCert: null,
   cipherName: null,
   keyLength: 2048,
@@ -712,7 +709,7 @@ FakeSSLStatus.prototype = {
   getInterface(aIID) {
     return this.QueryInterface(aIID);
   },
-  QueryInterface: ChromeUtils.generateQI(["nsISSLStatus"]),
+  QueryInterface: ChromeUtils.generateQI(["nsITransportSecurityInfo"]),
 };
 
 // Utility functions for adding tests relating to certificate error overrides
@@ -720,16 +717,14 @@ FakeSSLStatus.prototype = {
 // Helper function for add_cert_override_test. Probably doesn't need to be
 // called directly.
 function add_cert_override(aHost, aExpectedBits, aSecurityInfo) {
-  let sslstatus = aSecurityInfo.QueryInterface(Ci.nsISSLStatusProvider)
-                               .SSLStatus;
   let bits =
-    (sslstatus.isUntrusted ? Ci.nsICertOverrideService.ERROR_UNTRUSTED : 0) |
-    (sslstatus.isDomainMismatch ? Ci.nsICertOverrideService.ERROR_MISMATCH : 0) |
-    (sslstatus.isNotValidAtThisTime ? Ci.nsICertOverrideService.ERROR_TIME : 0);
+    (aSecurityInfo.isUntrusted ? Ci.nsICertOverrideService.ERROR_UNTRUSTED : 0) |
+    (aSecurityInfo.isDomainMismatch ? Ci.nsICertOverrideService.ERROR_MISMATCH : 0) |
+    (aSecurityInfo.isNotValidAtThisTime ? Ci.nsICertOverrideService.ERROR_TIME : 0);
 
   Assert.equal(bits, aExpectedBits,
                "Actual and expected override bits should match");
-  let cert = sslstatus.serverCert;
+  let cert = aSecurityInfo.serverCert;
   let certOverrideService = Cc["@mozilla.org/security/certoverride;1"]
                               .getService(Ci.nsICertOverrideService);
   certOverrideService.rememberValidityOverride(aHost, 8443, cert, aExpectedBits,
@@ -741,18 +736,16 @@ function add_cert_override(aHost, aExpectedBits, aSecurityInfo) {
 // with the expected errors and that adding an override results in a subsequent
 // connection succeeding.
 function add_cert_override_test(aHost, aExpectedBits, aExpectedError,
-                                aExpectedSSLStatus = undefined) {
+                                aExpectedSecInfo = undefined) {
   add_connection_test(aHost, aExpectedError, null,
                       add_cert_override.bind(this, aHost, aExpectedBits));
   add_connection_test(aHost, PRErrorCodeSuccess, null, aSecurityInfo => {
     Assert.ok(aSecurityInfo.securityState &
               Ci.nsIWebProgressListener.STATE_CERT_USER_OVERRIDDEN,
               "Cert override flag should be set on the security state");
-    if (aExpectedSSLStatus) {
-      let sslstatus = aSecurityInfo.QueryInterface(Ci.nsISSLStatusProvider)
-                                  .SSLStatus;
-      if (aExpectedSSLStatus.failedCertChain) {
-        ok(aExpectedSSLStatus.failedCertChain.equals(sslstatus.failedCertChain));
+    if (aExpectedSecInfo) {
+      if (aExpectedSecInfo.failedCertChain) {
+        ok(aExpectedSecInfo.failedCertChain.equals(aSecurityInfo.failedCertChain));
       }
     }
   });
@@ -760,19 +753,17 @@ function add_cert_override_test(aHost, aExpectedBits, aExpectedError,
 
 // Helper function for add_prevented_cert_override_test. This is much like
 // add_cert_override except it may not be the case that the connection has an
-// SSLStatus set on it. In this case, the error was not overridable anyway, so
+// SecInfo set on it. In this case, the error was not overridable anyway, so
 // we consider it a success.
 function attempt_adding_cert_override(aHost, aExpectedBits, aSecurityInfo) {
-  let sslstatus = aSecurityInfo.QueryInterface(Ci.nsISSLStatusProvider)
-                               .SSLStatus;
-  if (sslstatus) {
+  if (aSecurityInfo.serverCert) {
     let bits =
-      (sslstatus.isUntrusted ? Ci.nsICertOverrideService.ERROR_UNTRUSTED : 0) |
-      (sslstatus.isDomainMismatch ? Ci.nsICertOverrideService.ERROR_MISMATCH : 0) |
-      (sslstatus.isNotValidAtThisTime ? Ci.nsICertOverrideService.ERROR_TIME : 0);
+      (aSecurityInfo.isUntrusted ? Ci.nsICertOverrideService.ERROR_UNTRUSTED : 0) |
+      (aSecurityInfo.isDomainMismatch ? Ci.nsICertOverrideService.ERROR_MISMATCH : 0) |
+      (aSecurityInfo.isNotValidAtThisTime ? Ci.nsICertOverrideService.ERROR_TIME : 0);
     Assert.equal(bits, aExpectedBits,
                  "Actual and expected override bits should match");
-    let cert = sslstatus.serverCert;
+    let cert = aSecurityInfo.serverCert;
     let certOverrideService = Cc["@mozilla.org/security/certoverride;1"]
                                 .getService(Ci.nsICertOverrideService);
     certOverrideService.rememberValidityOverride(aHost, 8443, cert, aExpectedBits,

@@ -80,7 +80,7 @@ add_task(async function test_something() {
                       Services.io.newURI("https://five.example.com"), 0));
 
   // Test an empty db populates
-  await PinningPreloadClient.maybeSync(2000, Date.now());
+  await PinningPreloadClient.maybeSync(2000);
 
   // Open the collection, verify it's been populated:
   // Our test data has a single record; it should be in the local collection
@@ -92,7 +92,7 @@ add_task(async function test_something() {
                      Services.io.newURI("https://one.example.com"), 0));
 
   // Test the db is updated when we call again with a later lastModified value
-  await PinningPreloadClient.maybeSync(4000, Date.now());
+  await PinningPreloadClient.maybeSync(4000);
 
   // Open the collection, verify it's been updated:
   // Our data now has four new records; all should be in the local collection
@@ -114,17 +114,10 @@ add_task(async function test_something() {
   // should be attempted.
   // Clear the kinto base pref so any connections will cause a test failure
   Services.prefs.clearUserPref("services.settings.server");
-  await PinningPreloadClient.maybeSync(4000, Date.now());
+  await PinningPreloadClient.maybeSync(4000);
 
   // Try again with a lastModified value at some point in the past
-  await PinningPreloadClient.maybeSync(3000, Date.now());
-
-  // Check the pinning check time pref is modified, even if the collection
-  // hasn't changed
-  Services.prefs.setIntPref("services.blocklist.onecrl.checked", 0);
-  await PinningPreloadClient.maybeSync(3000, Date.now());
-  let newValue = Services.prefs.getIntPref("services.blocklist.pinning.checked");
-  Assert.notEqual(newValue, 0);
+  await PinningPreloadClient.maybeSync(3000);
 
   // Check that the HSTS preload added to the collection works...
   ok(sss.isSecureURI(sss.HEADER_HSTS,
@@ -139,7 +132,7 @@ add_task(async function test_something() {
   // acceptible test (the data below with last_modified of 300 is nonsense).
   Services.prefs.setCharPref("services.settings.server",
                              `http://localhost:${server.identity.primaryPort}/v1`);
-  await PinningPreloadClient.maybeSync(5000, Date.now());
+  await PinningPreloadClient.maybeSync(5000);
 
   // The STS entry for five.example.com now has includeSubdomains set;
   // ensure that the new includeSubdomains value is honored.
@@ -173,37 +166,37 @@ function getSampleResponse(req, port) {
         "Access-Control-Allow-Methods: GET,HEAD,OPTIONS,POST,DELETE,OPTIONS",
         "Access-Control-Allow-Origin: *",
         "Content-Type: application/json; charset=UTF-8",
-        "Server: waitress"
+        "Server: waitress",
       ],
       "status": {status: 200, statusText: "OK"},
-      "responseBody": "null"
+      "responseBody": "null",
     },
     "GET:/v1/?": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
-        "Server: waitress"
+        "Server: waitress",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({
         "settings": {
-          "batch_max_requests": 25
+          "batch_max_requests": 25,
         },
         "url": `http://localhost:${port}/v1/`,
         "documentation": "https://kinto.readthedocs.org/",
         "version": "1.5.1",
         "commit": "cbc6f58",
-        "hello": "kinto"
-      })
+        "hello": "kinto",
+      }),
     },
-    "GET:/v1/buckets/pinning/collections/pins/records?_sort=-last_modified": {
+    "GET:/v1/buckets/pinning/collections/pins/records?_expected=2000&_sort=-last_modified": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"3000\""
+        "Etag: \"3000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
@@ -215,16 +208,16 @@ function getSampleResponse(req, port) {
                   "M8HztCzM3elUxkcjR2S5P4hhyBNf6lHkmjAHKhpGPWE="],
         "versions": [Services.appinfo.version],
         "id": "78cf8900-fdea-4ce5-f8fb-b78710617718",
-        "last_modified": 3000
-      }]})
+        "last_modified": 3000,
+      }]}),
     },
-    "GET:/v1/buckets/pinning/collections/pins/records?_sort=-last_modified&_since=3000": {
+    "GET:/v1/buckets/pinning/collections/pins/records?_expected=4000&_sort=-last_modified&_since=3000": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"4000\""
+        "Etag: \"4000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
@@ -236,7 +229,7 @@ function getSampleResponse(req, port) {
                   "M8HztCzM3elUxkcjR2S5P4hhyBNf6lHkmjAHKhpGPWE="],
         "versions": [Services.appinfo.version],
         "id": "dabafde9-df4a-ddba-2548-748da04cc02c",
-        "last_modified": 4000
+        "last_modified": 4000,
       }, {
         "pinType": "KeyPin",
         "hostName": "three.example.com",
@@ -246,7 +239,7 @@ function getSampleResponse(req, port) {
                   "M8HztCzM3elUxkcjR2S5P4hhyBNf6lHkmjAHKhpGPWE="],
         "versions": [Services.appinfo.version, "some other version that won't match"],
         "id": "dabafde9-df4a-ddba-2548-748da04cc02d",
-        "last_modified": 4000
+        "last_modified": 4000,
       }, {
         "pinType": "KeyPin",
         "hostName": "four.example.com",
@@ -256,7 +249,7 @@ function getSampleResponse(req, port) {
                   "M8HztCzM3elUxkcjR2S5P4hhyBNf6lHkmjAHKhpGPWE="],
         "versions": ["some version that won't match"],
         "id": "dabafde9-df4a-ddba-2548-748da04cc02e",
-        "last_modified": 4000
+        "last_modified": 4000,
       }, {
         "pinType": "STSPin",
         "hostName": "five.example.com",
@@ -264,23 +257,23 @@ function getSampleResponse(req, port) {
         "expires": new Date().getTime() + 1000000,
         "versions": [Services.appinfo.version, "some version that won't match"],
         "id": "dabafde9-df4a-ddba-2548-748da04cc032",
-        "last_modified": 4000
-      }]})
+        "last_modified": 4000,
+      }]}),
     },
-    "GET:/v1/buckets/pinning/collections/pins/records?_sort=-last_modified&_since=4000": {
+    "GET:/v1/buckets/pinning/collections/pins/records?_expected=5000&_sort=-last_modified&_since=4000": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"5000\""
+        "Etag: \"5000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
         "irrelevant": "this entry looks nothing whatsoever like a pin preload",
         "pinType": "KeyPin",
         "id": "dabafde9-df4a-ddba-2548-748da04cc02f",
-        "last_modified": 5000
+        "last_modified": 5000,
       }, {
         "irrelevant": "this entry has data of the wrong type",
         "pinType": "KeyPin",
@@ -289,7 +282,7 @@ function getSampleResponse(req, port) {
         "expires": "more nonsense",
         "pins": [1, 2, 3, 4],
         "id": "dabafde9-df4a-ddba-2548-748da04cc030",
-        "last_modified": 5000
+        "last_modified": 5000,
       }, {
         "irrelevant": "this entry is missing the actual pins",
         "pinType": "KeyPin",
@@ -298,7 +291,7 @@ function getSampleResponse(req, port) {
         "expires": new Date().getTime() + 1000000,
         "versions": [Services.appinfo.version],
         "id": "dabafde9-df4a-ddba-2548-748da04cc031",
-        "last_modified": 5000
+        "last_modified": 5000,
       }, {
         "pinType": "STSPin",
         "hostName": "five.example.com",
@@ -306,9 +299,9 @@ function getSampleResponse(req, port) {
         "expires": new Date().getTime() + 1000000,
         "versions": [Services.appinfo.version, "some version that won't match"],
         "id": "dabafde9-df4a-ddba-2548-748da04cc032",
-        "last_modified": 5000
-      }]})
-    }
+        "last_modified": 5000,
+      }]}),
+    },
   };
   return responses[`${req.method}:${req.path}?${req.queryString}`] ||
          responses[req.method];

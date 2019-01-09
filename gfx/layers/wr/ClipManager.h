@@ -30,11 +30,11 @@ class StackingContextHelper;
 class WebRenderLayerManager;
 
 /**
- * This class manages creating and assigning scroll layers and clips in WebRender
- * based on the gecko display list. It has a few public functions that are
- * intended to be invoked while traversing the Gecko display list, and it uses
- * the ASR and clip information from the display list to create the necessary
- * clip state in WebRender.
+ * This class manages creating and assigning scroll layers and clips in
+ * WebRender based on the gecko display list. It has a few public functions that
+ * are intended to be invoked while traversing the Gecko display list, and it
+ * uses the ASR and clip information from the display list to create the
+ * necessary clip state in WebRender.
  *
  * The structure of the clip state in WebRender ends up quite similar to how
  * it is in Gecko. For each ASR in Gecko, we create a scroll layer (i.e. a
@@ -49,9 +49,8 @@ class WebRenderLayerManager;
  * similar to that in Gecko, where the clips from container display items get
  * applied to the contained display items.
  */
-class ClipManager
-{
-public:
+class ClipManager {
+ public:
   ClipManager();
 
   void BeginBuild(WebRenderLayerManager* aManager,
@@ -66,21 +65,21 @@ public:
   ~ClipManager();
 
   void PushOverrideForASR(const ActiveScrolledRoot* aASR,
-                          const Maybe<wr::WrClipId>& aClipId);
+                          const wr::WrClipId& aClipId);
   void PopOverrideForASR(const ActiveScrolledRoot* aASR);
 
-private:
+ private:
   Maybe<wr::WrClipId> ClipIdAfterOverride(const Maybe<wr::WrClipId>& aClipId);
 
-  Maybe<wr::WrClipId>
-  DefineScrollLayers(const ActiveScrolledRoot* aASR,
-                     nsDisplayItem* aItem,
-                     const StackingContextHelper& aSc);
+  Maybe<wr::WrClipId> GetScrollLayer(const ActiveScrolledRoot* aASR);
 
-  Maybe<wr::WrClipChainId>
-  DefineClipChain(const DisplayItemClipChain* aChain,
-                  int32_t aAppUnitsPerDevPixel,
-                  const StackingContextHelper& aSc);
+  Maybe<wr::WrClipId> DefineScrollLayers(const ActiveScrolledRoot* aASR,
+                                         nsDisplayItem* aItem,
+                                         const StackingContextHelper& aSc);
+
+  Maybe<wr::WrClipChainId> DefineClipChain(const DisplayItemClipChain* aChain,
+                                           int32_t aAppUnitsPerDevPixel,
+                                           const StackingContextHelper& aSc);
 
   WebRenderLayerManager* MOZ_NON_OWNING_REF mManager;
   wr::DisplayListBuilder* mBuilder;
@@ -95,8 +94,10 @@ private:
   // cache on mCacheStack. This ensures we continue caching stuff within a given
   // reference frame, but disallow caching stuff across reference frames. In
   // general we need to do this anytime PushOverrideForASR is called, as that is
-  // called for the same set of conditions for which we cannot deduplicate clips.
-  typedef std::unordered_map<const DisplayItemClipChain*, wr::WrClipId> ClipIdMap;
+  // called for the same set of conditions for which we cannot deduplicate
+  // clips.
+  typedef std::unordered_map<const DisplayItemClipChain*, wr::WrClipId>
+      ClipIdMap;
   std::stack<ClipIdMap> mCacheStack;
 
   // A map that holds the cache overrides created by (a) "out of band" clips,
@@ -115,18 +116,17 @@ private:
   // ClipManager to do the necessary lookup. Note that there theoretically might
   // be multiple different "Y" clips (in case of nested cache overrides), which
   // is why we need a stack.
-  std::unordered_map<wr::WrClipId,
-                     std::stack<Maybe<wr::WrClipId>>,
-                     wr::WrClipId::HashFn> mASROverride;
+  std::unordered_map<wr::WrClipId, std::stack<wr::WrClipId>> mASROverride;
 
   // This holds some clip state for a single nsDisplayItem
   struct ItemClips {
     ItemClips(const ActiveScrolledRoot* aASR,
-              const DisplayItemClipChain* aChain);
+              const DisplayItemClipChain* aChain, bool aSeparateLeaf);
 
     // These are the "inputs" - they come from the nsDisplayItem
     const ActiveScrolledRoot* mASR;
     const DisplayItemClipChain* mChain;
+    bool mSeparateLeaf;
 
     // These are the "outputs" - they are pushed to WR as needed
     Maybe<wr::WrClipId> mScrollId;
@@ -135,7 +135,7 @@ private:
     // State tracking
     bool mApplied;
 
-    void Apply(wr::DisplayListBuilder* aBuilder);
+    void Apply(wr::DisplayListBuilder* aBuilder, int32_t aAppUnitsPerDevPixel);
     void Unapply(wr::DisplayListBuilder* aBuilder);
     bool HasSameInputs(const ItemClips& aOther);
     void CopyOutputsFrom(const ItemClips& aOther);
@@ -149,7 +149,7 @@ private:
   std::stack<ItemClips> mItemClipStack;
 };
 
-} // namespace layers
-} // namespace mozilla
+}  // namespace layers
+}  // namespace mozilla
 
 #endif

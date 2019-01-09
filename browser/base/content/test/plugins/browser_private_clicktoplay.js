@@ -26,7 +26,8 @@ let createPrivateWindow = async function createPrivateWindow(url) {
   gPrivateBrowser = gPrivateWindow.getBrowser().selectedBrowser;
 
   BrowserTestUtils.loadURI(gPrivateBrowser, url);
-  await BrowserTestUtils.browserLoaded(gPrivateBrowser);
+  await BrowserTestUtils.browserLoaded(gPrivateBrowser, false, url);
+  info("loaded " + url);
 };
 
 add_task(async function test() {
@@ -67,11 +68,16 @@ add_task(async function test1b() {
   popupNotification.reshow();
 
   await promiseShown;
-  is(gPrivateWindow.PopupNotifications.panel.firstChild.checkbox.hidden, true, "'Remember' checkbox should be hidden in private windows");
+  is(gPrivateWindow.PopupNotifications.panel.firstElementChild.checkbox.hidden, true, "'Remember' checkbox should be hidden in private windows");
 
+  let promises = [
+    BrowserTestUtils.browserLoaded(gTestBrowser, false, gHttpTestRoot + "plugin_test.html"),
+    BrowserTestUtils.waitForEvent(window, "activate"),
+  ];
   gPrivateWindow.close();
   BrowserTestUtils.loadURI(gTestBrowser, gHttpTestRoot + "plugin_test.html");
-  await BrowserTestUtils.browserLoaded(gTestBrowser);
+  await Promise.all(promises);
+  await SimpleTest.promiseFocus(window);
 });
 
 add_task(async function test2a() {
@@ -91,7 +97,7 @@ add_task(async function test2a() {
   popupNotification.reshow();
   await promiseShown;
 
-  PopupNotifications.panel.firstChild.button.click();
+  PopupNotifications.panel.firstElementChild.button.click();
 
   await ContentTask.spawn(gTestBrowser, null, async function() {
     let plugin = content.document.getElementById("test");
@@ -120,16 +126,21 @@ add_task(async function test2c() {
                                                    "Shown");
   popupNotification.reshow();
   await promiseShown;
-  is(gPrivateWindow.PopupNotifications.panel.firstChild.secondaryButton.hidden, true,
+  is(gPrivateWindow.PopupNotifications.panel.firstElementChild.secondaryButton.hidden, true,
      "Test 2c, Activated plugin in a private window should not have visible 'Block' button.");
-  is(gPrivateWindow.PopupNotifications.panel.firstChild.checkbox.hidden, true,
+  is(gPrivateWindow.PopupNotifications.panel.firstElementChild.checkbox.hidden, true,
      "Test 2c, Activated plugin in a private window should not have visible 'Remember' checkbox.");
 
   clearAllPluginPermissions();
-  gPrivateWindow.close();
 
+  let promises = [
+    BrowserTestUtils.browserLoaded(gTestBrowser, false, gHttpTestRoot + "plugin_test.html"),
+    BrowserTestUtils.waitForEvent(window, "activate"),
+  ];
+  gPrivateWindow.close();
   BrowserTestUtils.loadURI(gTestBrowser, gHttpTestRoot + "plugin_test.html");
-  await BrowserTestUtils.browserLoaded(gTestBrowser);
+  await Promise.all(promises);
+  await SimpleTest.promiseFocus(window);
 });
 
 add_task(async function test3a() {
@@ -148,7 +159,7 @@ add_task(async function test3a() {
                                                    "Shown");
   popupNotification.reshow();
   await promiseShown;
-  PopupNotifications.panel.firstChild.button.click();
+  PopupNotifications.panel.firstElementChild.button.click();
 
   await ContentTask.spawn(gTestBrowser, null, async function() {
     let plugin = content.document.getElementById("test");
@@ -171,9 +182,9 @@ add_task(async function test3c() {
                                                    "Shown");
   popupNotification.reshow();
   await promiseShown;
-  is(gPrivateWindow.PopupNotifications.panel.firstChild.secondaryButton.hidden, true,
+  is(gPrivateWindow.PopupNotifications.panel.firstElementChild.secondaryButton.hidden, true,
      "Test 2c, Activated plugin in a private window should not have visible 'Block' button.");
-  is(gPrivateWindow.PopupNotifications.panel.firstChild.checkbox.hidden, true,
+  is(gPrivateWindow.PopupNotifications.panel.firstElementChild.checkbox.hidden, true,
      "Test 2c, Activated plugin in a private window should not have visible 'Remember' checkbox.");
 
   BrowserTestUtils.loadURI(gPrivateBrowser, gHttpTestRoot + "plugin_two_types.html");
@@ -189,13 +200,12 @@ add_task(async function test3d() {
                                                    "Shown");
   popupNotification.reshow();
   await promiseShown;
-  let doc = gPrivateWindow.document;
-  for (let item of gPrivateWindow.PopupNotifications.panel.firstChild.childNodes) {
-    let allowalways = doc.getAnonymousElementByAttribute(item, "anonid", "allowalways");
+  for (let item of gPrivateWindow.PopupNotifications.panel.firstElementChild.children) {
+    let allowalways = item.openOrClosedShadowRoot.getElementById("allowalways");
     ok(allowalways, "Test 3d, should have list item for allow always");
-    let allownow = doc.getAnonymousElementByAttribute(item, "anonid", "allownow");
+    let allownow = item.openOrClosedShadowRoot.getElementById("allownow");
     ok(allownow, "Test 3d, should have list item for allow now");
-    let block = doc.getAnonymousElementByAttribute(item, "anonid", "block");
+    let block = item.openOrClosedShadowRoot.getElementById("block");
     ok(block, "Test 3d, should have list item for block");
 
     if (item.action.pluginName === "Test") {

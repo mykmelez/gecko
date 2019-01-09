@@ -1,25 +1,25 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Specified color values.
 
+use super::AllowQuirks;
+#[cfg(feature = "gecko")]
+use crate::gecko_bindings::structs::nscolor;
+use crate::parser::{Parse, ParserContext};
+#[cfg(feature = "gecko")]
+use crate::properties::longhands::system_colors::SystemColor;
+use crate::values::computed::{Color as ComputedColor, Context, ToComputedValue};
+use crate::values::generics::color::Color as GenericColor;
+use crate::values::specified::calc::CalcNode;
 use cssparser::{AngleOrNumber, Color as CSSParserColor, Parser, Token, RGBA};
 use cssparser::{BasicParseErrorKind, NumberOrPercentage, ParseErrorKind};
-#[cfg(feature = "gecko")]
-use gecko_bindings::structs::nscolor;
 use itoa;
-use parser::{Parse, ParserContext};
-#[cfg(feature = "gecko")]
-use properties::longhands::system_colors::SystemColor;
 use std::fmt::{self, Write};
 use std::io::Write as IoWrite;
 use style_traits::{CssType, CssWriter, KeywordsCollectFn, ParseError, StyleParseErrorKind};
 use style_traits::{SpecifiedValueInfo, ToCss, ValueParseErrorKind};
-use super::AllowQuirks;
-use values::computed::{Color as ComputedColor, Context, ToComputedValue};
-use values::generics::color::Color as GenericColor;
-use values::specified::calc::CalcNode;
 
 /// Specified color value
 #[derive(Clone, Debug, MallocSizeOf, PartialEq)]
@@ -73,7 +73,7 @@ impl<'a, 'b: 'a, 'i: 'a> ::cssparser::ColorComponentParser<'i> for ColorComponen
         &self,
         input: &mut Parser<'i, 't>,
     ) -> Result<AngleOrNumber, ParseError<'i>> {
-        use values::specified::Angle;
+        use crate::values::specified::Angle;
 
         let location = input.current_source_location();
         let token = input.next()?.clone();
@@ -89,23 +89,23 @@ impl<'a, 'b: 'a, 'i: 'a> ::cssparser::ColorComponentParser<'i> for ColorComponen
                 };
 
                 Ok(AngleOrNumber::Angle { degrees })
-            }
+            },
             Token::Number { value, .. } => Ok(AngleOrNumber::Number { value }),
             Token::Function(ref name) if name.eq_ignore_ascii_case("calc") => {
                 input.parse_nested_block(|i| CalcNode::parse_angle_or_number(self.0, i))
-            }
+            },
             t => return Err(location.new_unexpected_token_error(t)),
         }
     }
 
     fn parse_percentage<'t>(&self, input: &mut Parser<'i, 't>) -> Result<f32, ParseError<'i>> {
-        use values::specified::Percentage;
+        use crate::values::specified::Percentage;
 
         Ok(Percentage::parse(self.0, input)?.get())
     }
 
     fn parse_number<'t>(&self, input: &mut Parser<'i, 't>) -> Result<f32, ParseError<'i>> {
-        use values::specified::Number;
+        use crate::values::specified::Number;
 
         Ok(Number::parse(self.0, input)?.get())
     }
@@ -120,10 +120,10 @@ impl<'a, 'b: 'a, 'i: 'a> ::cssparser::ColorComponentParser<'i> for ColorComponen
             Token::Number { value, .. } => Ok(NumberOrPercentage::Number { value }),
             Token::Percentage { unit_value, .. } => {
                 Ok(NumberOrPercentage::Percentage { unit_value })
-            }
+            },
             Token::Function(ref name) if name.eq_ignore_ascii_case("calc") => {
                 input.parse_nested_block(|i| CalcNode::parse_number_or_percentage(self.0, i))
-            }
+            },
             t => return Err(location.new_unexpected_token_error(t)),
         }
     }
@@ -169,10 +169,10 @@ impl Parse for Color {
                         Err(e.location.new_custom_error(StyleParseErrorKind::ValueError(
                             ValueParseErrorKind::InvalidColor(t),
                         )))
-                    }
+                    },
                     _ => Err(e),
                 }
-            }
+            },
         }
     }
 }
@@ -276,10 +276,10 @@ impl Color {
                 }
                 return parse_hash_color(ident.as_bytes())
                     .map_err(|()| location.new_custom_error(StyleParseErrorKind::UnspecifiedError));
-            }
+            },
             ref t => {
                 return Err(location.new_unexpected_token_error(t.clone()));
-            }
+            },
         };
         if value < 0 {
             return Err(location.new_custom_error(StyleParseErrorKind::UnspecifiedError));
@@ -317,19 +317,19 @@ impl Color {
             .map_err(|()| location.new_custom_error(StyleParseErrorKind::UnspecifiedError))
     }
 
-    /// Returns false if the color is completely transparent, and
-    /// true otherwise.
-    pub fn is_non_transparent(&self) -> bool {
+    /// Returns true if the color is completely transparent, and false
+    /// otherwise.
+    pub fn is_transparent(&self) -> bool {
         match *self {
-            Color::Numeric { ref parsed, .. } => parsed.alpha != 0,
-            _ => true,
+            Color::Numeric { ref parsed, .. } => parsed.alpha == 0,
+            _ => false,
         }
     }
 }
 
 #[cfg(feature = "gecko")]
 fn convert_nscolor_to_computedcolor(color: nscolor) -> ComputedColor {
-    use gecko::values::convert_nscolor_to_rgba;
+    use crate::gecko::values::convert_nscolor_to_rgba;
     ComputedColor::rgba(convert_nscolor_to_rgba(color))
 }
 
@@ -359,11 +359,11 @@ impl Color {
                         Keyword::MozVisitedhyperlinktext => pres_context.mVisitedLinkColor,
                     })
                 })
-            }
+            },
             #[cfg(feature = "gecko")]
             Color::InheritFromBodyQuirk => {
                 _context.map(|context| ComputedColor::rgba(context.device().body_text_color()))
-            }
+            },
         }
     }
 }

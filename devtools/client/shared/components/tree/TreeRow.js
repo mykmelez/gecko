@@ -49,8 +49,9 @@ define(function(require, exports, module) {
         id: PropTypes.string.isRequired,
         provider: PropTypes.object.isRequired,
         onClick: PropTypes.func.isRequired,
+        onContextMenu: PropTypes.func,
         onMouseOver: PropTypes.func,
-        onMouseOut: PropTypes.func
+        onMouseOut: PropTypes.func,
       };
     }
 
@@ -120,14 +121,16 @@ define(function(require, exports, module) {
     render() {
       const member = this.props.member;
       const decorator = this.props.decorator;
+
       const props = {
         id: this.props.id,
         role: "treeitem",
         "aria-level": member.level,
         "aria-selected": !!member.selected,
         onClick: this.props.onClick,
+        onContextMenu: this.props.onContextMenu,
         onMouseOver: this.props.onMouseOver,
-        onMouseOut: this.props.onMouseOut
+        onMouseOut: this.props.onMouseOut,
       };
 
       // Compute class name list for the <tr> element.
@@ -178,7 +181,7 @@ define(function(require, exports, module) {
         const cellProps = Object.assign({}, this.props, {
           key: col.id,
           id: col.id,
-          value: this.props.provider.getValue(member.object, col.id)
+          value: this.props.provider.getValue(member.object, col.id),
         });
 
         if (decorator && decorator.renderCell) {

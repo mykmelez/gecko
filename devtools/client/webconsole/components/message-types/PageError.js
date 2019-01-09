@@ -18,6 +18,7 @@ PageError.propTypes = {
   open: PropTypes.bool,
   timestampsVisible: PropTypes.bool.isRequired,
   serviceContainer: PropTypes.object,
+  maybeScrollToBottom: PropTypes.func,
 };
 
 PageError.defaultProps = {
@@ -32,9 +33,12 @@ function PageError(props) {
     repeat,
     serviceContainer,
     timestampsVisible,
+    isPaused,
+    maybeScrollToBottom,
   } = props;
   const {
     id: messageId,
+    executionPoint,
     indent,
     source,
     type,
@@ -57,6 +61,8 @@ function PageError(props) {
   return Message({
     dispatch,
     messageId,
+    executionPoint,
+    isPaused,
     open,
     collapsible: Array.isArray(stacktrace),
     source,
@@ -73,6 +79,7 @@ function PageError(props) {
     timeStamp,
     notes,
     timestampsVisible,
+    maybeScrollToBottom,
   });
 }
 

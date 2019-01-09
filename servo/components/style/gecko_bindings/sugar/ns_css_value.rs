@@ -1,20 +1,19 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Little helpers for `nsCSSValue`.
 
-use gecko_bindings::bindings;
-use gecko_bindings::structs;
-use gecko_bindings::structs::{nsCSSUnit, nsCSSValue};
-use gecko_bindings::structs::{nsCSSValueList, nsCSSValue_Array};
-use gecko_string_cache::Atom;
+use crate::gecko_bindings::bindings;
+use crate::gecko_bindings::structs;
+use crate::gecko_bindings::structs::{nsCSSUnit, nsCSSValue};
+use crate::gecko_bindings::structs::{nsCSSValueList, nsCSSValue_Array};
+use crate::gecko_string_cache::Atom;
+use crate::values::computed::{Angle, Length, LengthPercentage, Percentage};
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::{Index, IndexMut};
 use std::slice;
-use values::computed::{Angle, Length, LengthOrPercentage, Percentage};
-use values::specified::url::SpecifiedUrl;
 
 impl nsCSSValue {
     /// Create a CSSValue with null unit, useful to be used as a return value.
@@ -61,20 +60,23 @@ impl nsCSSValue {
     pub unsafe fn array_unchecked(&self) -> &nsCSSValue_Array {
         debug_assert!(
             nsCSSUnit::eCSSUnit_Array as u32 <= self.mUnit as u32 &&
-                self.mUnit as u32 <= nsCSSUnit::eCSSUnit_Calc_Divided as u32
+                self.mUnit as u32 <= nsCSSUnit::eCSSUnit_Calc_Plus as u32
         );
         let array = *self.mValue.mArray.as_ref();
         debug_assert!(!array.is_null());
         &*array
     }
 
-    /// Sets LengthOrPercentage value to this nsCSSValue.
-    pub unsafe fn set_lop(&mut self, lop: LengthOrPercentage) {
-        match lop {
-            LengthOrPercentage::Length(px) => self.set_px(px.px()),
-            LengthOrPercentage::Percentage(pc) => self.set_percentage(pc.0),
-            LengthOrPercentage::Calc(calc) => bindings::Gecko_CSSValue_SetCalc(self, calc.into()),
+    /// Sets LengthPercentage value to this nsCSSValue.
+    pub unsafe fn set_length_percentage(&mut self, lp: LengthPercentage) {
+        if lp.was_calc {
+            return bindings::Gecko_CSSValue_SetCalc(self, lp.into());
         }
+        debug_assert!(lp.percentage.is_none() || lp.unclamped_length() == Length::zero());
+        if let Some(p) = lp.percentage {
+            return self.set_percentage(p.0);
+        }
+        self.set_px(lp.unclamped_length().px());
     }
 
     /// Sets a px value to this nsCSSValue.
@@ -87,18 +89,16 @@ impl nsCSSValue {
         bindings::Gecko_CSSValue_SetPercentage(self, unit_value)
     }
 
-    /// Returns LengthOrPercentage value.
-    pub unsafe fn get_lop(&self) -> LengthOrPercentage {
+    /// Returns LengthPercentage value.
+    pub unsafe fn get_length_percentage(&self) -> LengthPercentage {
         match self.mUnit {
             nsCSSUnit::eCSSUnit_Pixel => {
-                LengthOrPercentage::Length(Length::new(bindings::Gecko_CSSValue_GetNumber(self)))
+                LengthPercentage::new(Length::new(bindings::Gecko_CSSValue_GetNumber(self)), None)
             },
-            nsCSSUnit::eCSSUnit_Percent => LengthOrPercentage::Percentage(Percentage(
+            nsCSSUnit::eCSSUnit_Percent => LengthPercentage::new_percent(Percentage(
                 bindings::Gecko_CSSValue_GetPercentage(self),
             )),
-            nsCSSUnit::eCSSUnit_Calc => {
-                LengthOrPercentage::Calc(bindings::Gecko_CSSValue_GetCalc(self).into())
-            },
+            nsCSSUnit::eCSSUnit_Calc => bindings::Gecko_CSSValue_GetCalc(self).into(),
             _ => panic!("Unexpected unit"),
         }
     }
@@ -167,31 +167,6 @@ impl nsCSSValue {
         unsafe { bindings::Gecko_CSSValue_SetAtomIdent(self, s.into_addrefed()) }
     }
 
-    /// Set to a font format.
-    pub fn set_font_format(&mut self, s: &str) {
-        self.set_string_internal(s, nsCSSUnit::eCSSUnit_Font_Format);
-    }
-
-    /// Set to a local font value.
-    pub fn set_local_font(&mut self, s: &Atom) {
-        self.set_string_from_atom_internal(s, nsCSSUnit::eCSSUnit_Local_Font);
-    }
-
-    /// Set to a font stretch.
-    pub fn set_font_stretch(&mut self, s: f32) {
-        unsafe { bindings::Gecko_CSSValue_SetFontStretch(self, s) }
-    }
-
-    /// Set to a font style
-    pub fn set_font_style(&mut self, s: f32) {
-        unsafe { bindings::Gecko_CSSValue_SetFontSlantStyle(self, s) }
-    }
-
-    /// Set to a font weight
-    pub fn set_font_weight(&mut self, w: f32) {
-        unsafe { bindings::Gecko_CSSValue_SetFontWeight(self, w) }
-    }
-
     fn set_int_internal(&mut self, value: i32, unit: nsCSSUnit) {
         unsafe { bindings::Gecko_CSSValue_SetInt(self, value, unit) }
     }
@@ -211,11 +186,6 @@ impl nsCSSValue {
         unsafe { bindings::Gecko_CSSValue_SetFloat(self, number, nsCSSUnit::eCSSUnit_Number) }
     }
 
-    /// Set to a url value
-    pub fn set_url(&mut self, url: &SpecifiedUrl) {
-        unsafe { bindings::Gecko_CSSValue_SetURL(self, url.url_value.get()) }
-    }
-
     /// Set to an array of given length
     pub fn set_array(&mut self, len: i32) -> &mut nsCSSValue_Array {
         unsafe { bindings::Gecko_CSSValue_SetArray(self, len) }
@@ -229,19 +199,19 @@ impl nsCSSValue {
 
     /// Returns an `Angle` value from this `nsCSSValue`.
     ///
-    /// Panics if the unit is not `eCSSUnit_Degree` `eCSSUnit_Grad`, `eCSSUnit_Turn`
-    /// or `eCSSUnit_Radian`.
+    /// Panics if the unit is not `eCSSUnit_Degree`.
+    #[inline]
     pub fn get_angle(&self) -> Angle {
-        Angle::from_gecko_values(self.float_unchecked(), self.mUnit)
+        debug_assert_eq!(self.mUnit, nsCSSUnit::eCSSUnit_Degree);
+        Angle::from_degrees(self.float_unchecked())
     }
 
     /// Sets Angle value to this nsCSSValue.
     pub fn set_angle(&mut self, angle: Angle) {
         debug_assert_eq!(self.mUnit, nsCSSUnit::eCSSUnit_Null);
-        let (value, unit) = angle.to_gecko_values();
-        self.mUnit = unit;
+        self.mUnit = nsCSSUnit::eCSSUnit_Degree;
         unsafe {
-            *self.mValue.mFloat.as_mut() = value;
+            *self.mValue.mFloat.as_mut() = angle.degrees();
         }
     }
 
@@ -265,9 +235,13 @@ impl nsCSSValue {
         }
         debug_assert_eq!(self.mUnit, nsCSSUnit::eCSSUnit_List);
         let list: &mut structs::nsCSSValueList = &mut unsafe {
-            self.mValue.mList.as_ref() // &*nsCSSValueList_heap
-                .as_mut().expect("List pointer should be non-null")
-        }._base;
+            self.mValue
+                .mList
+                .as_ref() // &*nsCSSValueList_heap
+                .as_mut()
+                .expect("List pointer should be non-null")
+        }
+        ._base;
         for (item, new_value) in list.into_iter().zip(values) {
             *item = new_value;
         }
@@ -286,9 +260,13 @@ impl nsCSSValue {
         }
         debug_assert_eq!(self.mUnit, nsCSSUnit::eCSSUnit_PairList);
         let mut item_ptr = &mut unsafe {
-            self.mValue.mPairList.as_ref() // &*nsCSSValuePairList_heap
-                .as_mut().expect("List pointer should be non-null")
-        }._base as *mut structs::nsCSSValuePairList;
+            self.mValue
+                .mPairList
+                .as_ref() // &*nsCSSValuePairList_heap
+                .as_mut()
+                .expect("List pointer should be non-null")
+        }
+        ._base as *mut structs::nsCSSValuePairList;
         while let Some(item) = unsafe { item_ptr.as_mut() } {
             let value = values.next().expect("Values shouldn't have been exhausted");
             item.mXValue = value.0;

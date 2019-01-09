@@ -21,47 +21,42 @@ namespace dom {
 class Promise;
 class ThreadSafeWorkerRef;
 
-template <class Derived> class FetchBody;
+template <class Derived>
+class FetchBody;
 
 // FetchBody is not thread-safe but we need to move it around threads.  In order
 // to keep it alive all the time, we use a ThreadSafeWorkerRef, if created on
 // workers.
 template <class Derived>
-class FetchBodyConsumer final : public nsIObserver
-                              , public nsSupportsWeakReference
-                              , public AbortFollower
-{
-public:
+class FetchBodyConsumer final : public nsIObserver,
+                                public nsSupportsWeakReference,
+                                public AbortFollower {
+ public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIOBSERVER
 
-  static already_AddRefed<Promise>
-  Create(nsIGlobalObject* aGlobal,
-         nsIEventTarget* aMainThreadEventTarget,
-         FetchBody<Derived>* aBody,
-         AbortSignal* aSignal,
-         FetchConsumeType aType,
-         ErrorResult& aRv);
+  static already_AddRefed<Promise> Create(
+      nsIGlobalObject* aGlobal, nsIEventTarget* aMainThreadEventTarget,
+      FetchBody<Derived>* aBody, nsIInputStream* aBodyStream,
+      AbortSignalImpl* aSignalImpl, FetchConsumeType aType, ErrorResult& aRv);
 
-  void
-  ReleaseObject();
+  void ReleaseObject();
 
-  void
-  BeginConsumeBodyMainThread(ThreadSafeWorkerRef* aWorkerRef);
+  void BeginConsumeBodyMainThread(ThreadSafeWorkerRef* aWorkerRef);
 
-  void
-  ContinueConsumeBody(nsresult aStatus, uint32_t aLength, uint8_t* aResult,
-                      bool aShuttingDown = false);
+  void OnBlobResult(Blob* aBlob, ThreadSafeWorkerRef* aWorkerRef = nullptr);
 
-  void
-  ContinueConsumeBlobBody(BlobImpl* aBlobImpl, bool aShuttingDown = false);
+  void ContinueConsumeBody(nsresult aStatus, uint32_t aLength, uint8_t* aResult,
+                           bool aShuttingDown = false);
 
-  void
-  ShutDownMainThreadConsuming();
+  void ContinueConsumeBlobBody(BlobImpl* aBlobImpl, bool aShuttingDown = false);
 
-  void
-  NullifyConsumeBodyPump()
-  {
+  void DispatchContinueConsumeBlobBody(BlobImpl* aBlobImpl,
+                                       ThreadSafeWorkerRef* aWorkerRef);
+
+  void ShutDownMainThreadConsuming();
+
+  void NullifyConsumeBodyPump() {
     mShuttingDown = true;
     mConsumeBodyPump = nullptr;
   }
@@ -69,18 +64,17 @@ public:
   // AbortFollower
   void Abort() override;
 
-private:
+ private:
   FetchBodyConsumer(nsIEventTarget* aMainThreadEventTarget,
-                    nsIGlobalObject* aGlobalObject,
-                    FetchBody<Derived>* aBody,
-                    nsIInputStream* aBodyStream,
-                    Promise* aPromise,
+                    nsIGlobalObject* aGlobalObject, FetchBody<Derived>* aBody,
+                    nsIInputStream* aBodyStream, Promise* aPromise,
                     FetchConsumeType aType);
 
   ~FetchBodyConsumer();
 
-  void
-  AssertIsOnTargetThread() const;
+  nsresult GetBodyLocalFile(nsIFile** aFile) const;
+
+  void AssertIsOnTargetThread() const;
 
   nsCOMPtr<nsIThread> mTargetThread;
   nsCOMPtr<nsIEventTarget> mMainThreadEventTarget;
@@ -95,6 +89,9 @@ private:
 
   MutableBlobStorage::MutableBlobStorageType mBlobStorageType;
   nsCString mBodyMimeType;
+
+  nsCString mBodyBlobURISpec;
+  nsString mBodyLocalPath;
 
   nsCOMPtr<nsIGlobalObject> mGlobal;
 
@@ -112,7 +109,7 @@ private:
   bool mShuttingDown;
 };
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla
 
-#endif // mozilla_dom_FetchConsumer_h
+#endif  // mozilla_dom_FetchConsumer_h

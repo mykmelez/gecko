@@ -18,45 +18,42 @@ namespace mozilla {
 
 namespace dom {
 class Blob;
-} // namespace dom
+}  // namespace dom
 
 class AllocationHandle;
 class MediaEngineSource;
 
-enum {
-  kVideoTrack = 1,
-  kAudioTrack = 2,
-  kTrackCount
+enum MediaSinkEnum {
+  Speaker,
+  Other,
 };
 
-class MediaEngine : public DeviceChangeCallback
-{
-public:
+enum { kVideoTrack = 1, kAudioTrack = 2, kTrackCount };
+
+class MediaEngine : public DeviceChangeCallback {
+ public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaEngine)
   NS_DECL_OWNINGTHREAD
 
-  void AssertIsOnOwningThread() const
-  {
-    NS_ASSERT_OWNINGTHREAD(MediaEngine);
-  }
+  void AssertIsOnOwningThread() const { NS_ASSERT_OWNINGTHREAD(MediaEngine); }
 
   /**
    * Populate an array of sources of the requested type in the nsTArray.
    * Also include devices that are currently unavailable.
    */
-  virtual void EnumerateDevices(uint64_t aWindowId,
-                                dom::MediaSourceEnum,
-                                nsTArray<RefPtr<MediaEngineSource>>*) = 0;
+  virtual void EnumerateDevices(uint64_t aWindowId, dom::MediaSourceEnum,
+                                MediaSinkEnum,
+                                nsTArray<RefPtr<MediaDevice>>*) = 0;
 
   virtual void ReleaseResourcesForWindow(uint64_t aWindowId) = 0;
   virtual void Shutdown() = 0;
 
   virtual void SetFakeDeviceChangeEvents() {}
 
-protected:
+ protected:
   virtual ~MediaEngine() {}
 };
 
-} // namespace mozilla
+}  // namespace mozilla
 
 #endif /* MEDIAENGINE_H_ */

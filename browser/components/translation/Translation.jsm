@@ -29,7 +29,7 @@ var Translation = {
   _defaultTargetLanguage: "",
   get defaultTargetLanguage() {
     if (!this._defaultTargetLanguage) {
-      this._defaultTargetLanguage = Services.locale.getAppLocaleAsLangTag()
+      this._defaultTargetLanguage = Services.locale.appLocaleAsLangTag
                                       .split("-")[0];
     }
     return this._defaultTargetLanguage;
@@ -75,23 +75,23 @@ var Translation = {
   openProviderAttribution() {
     let attribution = this.supportedEngines[this.translationEngine];
     ChromeUtils.import("resource:///modules/BrowserWindowTracker.jsm");
-    BrowserWindowTracker.getTopWindow().openUILinkIn(attribution, "tab");
+    BrowserWindowTracker.getTopWindow().openWebLinkIn(attribution, "tab");
   },
 
   /**
    * The list of translation engines and their attributions.
    */
   supportedEngines: {
-    "bing": "http://aka.ms/MicrosoftTranslatorAttribution",
-    "yandex": "http://translate.yandex.com/"
+    "Google": "",
+    "Bing": "http://aka.ms/MicrosoftTranslatorAttribution",
+    "Yandex": "http://translate.yandex.com/",
   },
 
   /**
-   * Fallback engine (currently Bing Translator) if the preferences seem
-   * confusing.
+   * Fallback engine (currently Google) if the preferences seem confusing.
    */
   get defaultEngine() {
-    return this.supportedEngines.keys[0];
+    return Object.keys(this.supportedEngines)[0];
   },
 
   /**
@@ -228,7 +228,8 @@ TranslationUI.prototype = {
   showTranslationInfoBar() {
     let notificationBox = this.notificationBox;
     let notif = notificationBox.appendNotification("", "translation", null,
-                                                   notificationBox.PRIORITY_INFO_HIGH);
+      notificationBox.PRIORITY_INFO_HIGH, null, null,
+      "translation-notification");
     notif.init(this);
     return notif;
   },
@@ -281,7 +282,7 @@ TranslationUI.prototype = {
   infobarClosed() {
     if (this.state == Translation.STATE_OFFER)
       TranslationTelemetry.recordDeniedTranslationOffer();
-  }
+  },
 };
 
 /**

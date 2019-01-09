@@ -10,6 +10,7 @@ FORCE_STATIC_LIB = True
 
 UNIFIED_SOURCES += [
     'DllBlocklistWin.cpp',
+    'ErrorHandler.cpp',
     'LauncherProcessWin.cpp',
     'LaunchUnelevated.cpp',
 ]
@@ -25,3 +26,6 @@ TEST_DIRS += [
 ]
 
 DisableStlWrapping()
+
+if CONFIG['CC_TYPE'] == 'clang-cl':
+    AllowCompilerWarnings()  # workaround for bug 1090497

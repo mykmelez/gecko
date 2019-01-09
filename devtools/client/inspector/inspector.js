@@ -23,7 +23,6 @@ const Promise = require("Promise");
 
 loader.lazyRequireGetter(this, "initCssProperties", "devtools/shared/fronts/css-properties", true);
 loader.lazyRequireGetter(this, "HTMLBreadcrumbs", "devtools/client/inspector/breadcrumbs", true);
-loader.lazyRequireGetter(this, "ThreePaneOnboardingTooltip", "devtools/client/inspector/shared/three-pane-onboarding-tooltip");
 loader.lazyRequireGetter(this, "KeyShortcuts", "devtools/client/shared/key-shortcuts");
 loader.lazyRequireGetter(this, "InspectorSearch", "devtools/client/inspector/inspector-search", true);
 loader.lazyRequireGetter(this, "ToolSidebar", "devtools/client/inspector/toolsidebar", true);
@@ -33,9 +32,9 @@ loader.lazyRequireGetter(this, "nodeConstants", "devtools/shared/dom-node-consta
 loader.lazyRequireGetter(this, "Menu", "devtools/client/framework/menu");
 loader.lazyRequireGetter(this, "MenuItem", "devtools/client/framework/menu-item");
 loader.lazyRequireGetter(this, "ExtensionSidebar", "devtools/client/inspector/extensions/extension-sidebar");
-loader.lazyRequireGetter(this, "CommandUtils", "devtools/client/shared/developer-toolbar", true);
 loader.lazyRequireGetter(this, "clipboardHelper", "devtools/shared/platform/clipboard");
 loader.lazyRequireGetter(this, "openContentLink", "devtools/client/shared/link", true);
+loader.lazyRequireGetter(this, "saveScreenshot", "devtools/shared/screenshot/save");
 
 loader.lazyImporter(this, "DeferredTask", "resource://gre/modules/DeferredTask.jsm");
 
@@ -60,12 +59,11 @@ const PORTRAIT_MODE_WIDTH_THRESHOLD = 700;
 // mode.
 const SIDE_PORTAIT_MODE_WIDTH_THRESHOLD = 1000;
 
-const THREE_PANE_FIRST_RUN_PREF = "devtools.inspector.three-pane-first-run";
-const SHOW_THREE_PANE_ONBOARDING_PREF = "devtools.inspector.show-three-pane-tooltip";
 const THREE_PANE_ENABLED_PREF = "devtools.inspector.three-pane-enabled";
 const THREE_PANE_ENABLED_SCALAR = "devtools.inspector.three_pane_enabled";
-
+const THREE_PANE_CHROME_ENABLED_PREF = "devtools.inspector.chrome.three-pane-enabled";
 const TELEMETRY_EYEDROPPER_OPENED = "devtools.toolbar.eyedropper.opened";
+const TRACK_CHANGES_PREF = "devtools.inspector.changes.enabled";
 
 /**
  * Represents an open instance of the Inspector for a tab.
@@ -112,8 +110,9 @@ function Inspector(toolbox) {
   this.panelWin = window;
   this.panelWin.inspector = this;
   this.telemetry = toolbox.telemetry;
-
   this.store = Store();
+
+  this._markupBox = this.panelDoc.getElementById("markup-box");
 
   // Map [panel id => panel instance]
   // Stores all the instances of sidebar panels like rule view, computed view, ...
@@ -126,10 +125,6 @@ function Inspector(toolbox) {
   // telemetry counts in the Grid Inspector are not double counted on reload.
   this.previousURL = this.target.url;
 
-  this.is3PaneModeEnabled = Services.prefs.getBoolPref(THREE_PANE_ENABLED_PREF);
-  this.is3PaneModeFirstRun = Services.prefs.getBoolPref(THREE_PANE_FIRST_RUN_PREF);
-  this.show3PaneTooltip = Services.prefs.getBoolPref(SHOW_THREE_PANE_ONBOARDING_PREF);
-
   this.nodeMenuTriggerInfo = null;
 
   this._clearSearchResultsLabel = this._clearSearchResultsLabel.bind(this);
@@ -138,7 +133,6 @@ function Inspector(toolbox) {
   this._onContextMenu = this._onContextMenu.bind(this);
   this._onMarkupFrameLoad = this._onMarkupFrameLoad.bind(this);
   this._updateSearchResultsLabel = this._updateSearchResultsLabel.bind(this);
-  this._updateDebuggerPausedWarning = this._updateDebuggerPausedWarning.bind(this);
 
   this.onDetached = this.onDetached.bind(this);
   this.onHostChanged = this.onHostChanged.bind(this);
@@ -165,16 +159,14 @@ Inspector.prototype = {
     // Localize all the nodes containing a data-localization attribute.
     localizeMarkup(this.panelDoc);
 
-    this._cssProperties = await initCssProperties(this.toolbox);
-    await this.target.makeRemote();
-    await this._getPageStyle();
+    await Promise.all([
+      this._getCssProperties(),
+      this._getPageStyle(),
+      this._getDefaultSelection(),
+      this._getAccessibilityFront(),
+    ]);
 
-    // This may throw if the document is still loading and we are
-    // refering to a dead about:blank document
-    const defaultSelection = await this._getDefaultNodeForSelection()
-      .catch(this._handleRejectionIfNotDestroyed);
-
-    return this._deferredOpen(defaultSelection);
+    return this._deferredOpen();
   },
 
   get toolbox() {
@@ -205,14 +197,36 @@ Inspector.prototype = {
     return this._highlighters;
   },
 
-  // Added in 53.
-  get canGetCssPath() {
-    return this._target.client.traits.getCssPath;
+  get isHighlighterReady() {
+    return !!this._highlighters;
   },
 
-  // Added in 56.
-  get canGetXPath() {
-    return this._target.client.traits.getXPath;
+  get is3PaneModeEnabled() {
+    if (this.target.chrome) {
+      if (!this._is3PaneModeChromeEnabled) {
+        this._is3PaneModeChromeEnabled = Services.prefs.getBoolPref(
+          THREE_PANE_CHROME_ENABLED_PREF);
+      }
+
+      return this._is3PaneModeChromeEnabled;
+    }
+
+    if (!this._is3PaneModeEnabled) {
+      this._is3PaneModeEnabled = Services.prefs.getBoolPref(THREE_PANE_ENABLED_PREF);
+    }
+
+    return this._is3PaneModeEnabled;
+  },
+
+  set is3PaneModeEnabled(value) {
+    if (this.target.chrome) {
+      this._is3PaneModeChromeEnabled = value;
+      Services.prefs.setBoolPref(THREE_PANE_CHROME_ENABLED_PREF,
+        this._is3PaneModeChromeEnabled);
+    } else {
+      this._is3PaneModeEnabled = value;
+      Services.prefs.setBoolPref(THREE_PANE_ENABLED_PREF, this._is3PaneModeEnabled);
+    }
   },
 
   get notificationBox() {
@@ -231,6 +245,21 @@ Inspector.prototype = {
     return this._search;
   },
 
+  get cssProperties() {
+    return this._cssProperties.cssProperties;
+  },
+
+  /**
+   * Check if the changes panel is enabled and supported by the server.
+   */
+  _supportsChangesPanel() {
+    // The changes actor was introduced in Fx65, we are checking this for backward
+    // compatibility when connecting to an older server. Can be removed once Fx65 hit the
+    // release channel.
+    return this._target.hasActor("changes") &&
+      Services.prefs.getBoolPref(TRACK_CHANGES_PREF);
+  },
+
   /**
    * Handle promise rejections for various asynchronous actions, and only log errors if
    * the inspector panel still exists.
@@ -243,36 +272,25 @@ Inspector.prototype = {
     }
   },
 
-  _deferredOpen: async function(defaultSelection) {
-    this.breadcrumbs = new HTMLBreadcrumbs(this);
-
-    this.walker.on("new-root", this.onNewRoot);
-    this.toolbox.on("host-changed", this.onHostChanged);
-    this.selection.on("new-node-front", this.onNewSelection);
-    this.selection.on("detached-front", this.onDetached);
-
-    if (this.target.isLocalTab) {
-      this.target.on("thread-paused", this._updateDebuggerPausedWarning);
-      this.target.on("thread-resumed", this._updateDebuggerPausedWarning);
-      this.toolbox.on("select", this._updateDebuggerPausedWarning);
-      this._updateDebuggerPausedWarning();
-    }
-
-    // Resets the inspector sidebar widths if this is the first run of the 3 pane mode.
-    if (this.is3PaneModeFirstRun) {
-      Services.prefs.clearUserPref("devtools.toolsidebar-width.inspector");
-      Services.prefs.clearUserPref("devtools.toolsidebar-height.inspector");
-      Services.prefs.clearUserPref("devtools.toolsidebar-width.inspector.splitsidebar");
-      Services.prefs.setBoolPref(THREE_PANE_FIRST_RUN_PREF, false);
-    }
-
+  _deferredOpen: async function() {
     this._initMarkup();
     this.isReady = false;
 
-    this.setupSearchBox();
+    // Set the node front so that the markup and sidebar panels will have the selected
+    // nodeFront ready when they're initialized.
+    if (this._defaultNode) {
+      this.selection.setNodeFront(this._defaultNode, { reason: "inspector-open" });
+    }
 
-    // Setup the splitter before the sidebar is displayed so,
-    // we don't miss any events.
+    if (this._supportsChangesPanel()) {
+      // Get the Changes front, then call a method on it, which will instantiate
+      // the ChangesActor. We want the ChangesActor to be guaranteed available before
+      // the user makes any changes.
+      this.changesFront = await this.toolbox.target.getFront("changes");
+      this.changesFront.start();
+    }
+
+    // Setup the splitter before the sidebar is displayed so, we don't miss any events.
     this.setupSplitter();
 
     // We can display right panel with: tab bar, markup view and breadbrumb. Right after
@@ -280,29 +298,25 @@ Inspector.prototype = {
     // during load of the inspector.
     this.panelDoc.getElementById("inspector-main-content").style.visibility = "visible";
 
+    // Setup the sidebar panels.
     this.setupSidebar();
-    this.setupExtensionSidebars();
 
     await this.once("markuploaded");
     this.isReady = true;
 
-    // All the components are initialized. Let's select a node.
-    if (defaultSelection) {
-      const onAllPanelsUpdated = this.once("inspector-updated");
-      this.selection.setNodeFront(defaultSelection, { reason: "inspector-open" });
-      await onAllPanelsUpdated;
-      await this.markup.expandNode(this.selection.nodeFront);
-    }
-
-    // Setup the toolbar only now because it may depend on the document.
+    // All the components are initialized. Take care of the remaining initialization
+    // and setup.
+    this.breadcrumbs = new HTMLBreadcrumbs(this);
+    this.setupExtensionSidebars();
+    this.setupSearchBox();
     await this.setupToolbar();
 
-    // Show the 3 pane onboarding tooltip only if the inspector is visisble since the
-    // Accessibility panel initializes the Inspector and if it is not the browser toolbox.
-    if (this.show3PaneTooltip && !this.target.chrome &&
-        this.toolbox.currentToolId === "inspector") {
-      this.threePaneTooltip = new ThreePaneOnboardingTooltip(this.toolbox, this.panelDoc);
-    }
+    this.onNewSelection();
+
+    this.walker.on("new-root", this.onNewRoot);
+    this.toolbox.on("host-changed", this.onHostChanged);
+    this.selection.on("new-node-front", this.onNewSelection);
+    this.selection.on("detached-front", this.onDetached);
 
     // Log the 3 pane inspector setting on inspector open. The question we want to answer
     // is:
@@ -318,6 +332,23 @@ Inspector.prototype = {
     this.selection.setNodeFront(null);
     this._destroyMarkup();
     this._pendingSelection = null;
+  },
+
+  _getCssProperties: function() {
+    return initCssProperties(this.toolbox).then(cssProperties => {
+      this._cssProperties = cssProperties;
+    }, this._handleRejectionIfNotDestroyed);
+  },
+
+  _getAccessibilityFront: async function() {
+    this.accessibilityFront = await this.target.getFront("accessibility");
+    return this.accessibilityFront;
+  },
+
+  _getDefaultSelection: function() {
+    // This may throw if the document is still loading and we are
+    // refering to a dead about:blank document
+    return this._getDefaultNodeForSelection().catch(this._handleRejectionIfNotDestroyed);
   },
 
   _getPageStyle: function() {
@@ -444,35 +475,6 @@ Inspector.prototype = {
     this.searchResultsLabel.textContent = str;
   },
 
-  /**
-   * Show a warning notification box when the debugger is paused. We show the warning only
-   * when the inspector is selected.
-   */
-  _updateDebuggerPausedWarning: function() {
-    if (!this.toolbox.threadClient.paused && !this._notificationBox) {
-      return;
-    }
-
-    const notificationBox = this.notificationBox;
-    const notification = this.notificationBox.getNotificationWithValue(
-      "inspector-script-paused");
-
-    if (!notification && this.toolbox.currentToolId == "inspector" &&
-        this.toolbox.threadClient.paused) {
-      const message = INSPECTOR_L10N.getStr("debuggerPausedWarning.message");
-      notificationBox.appendNotification(message,
-        "inspector-script-paused", "", notificationBox.PRIORITY_WARNING_HIGH);
-    }
-
-    if (notification && this.toolbox.currentToolId != "inspector") {
-      notificationBox.removeNotification(notification);
-    }
-
-    if (notification && !this.toolbox.threadClient.paused) {
-      notificationBox.removeNotification(notification);
-    }
-  },
-
   get React() {
     return this._toolbox.React;
   },
@@ -548,7 +550,7 @@ Inspector.prototype = {
       splitterSize: 1,
       endPanelControl: true,
       startPanel: this.InspectorTabPanel({
-        id: "inspector-main-content"
+        id: "inspector-main-content",
       }),
       endPanel: this.InspectorSplitBox({
         initialWidth: splitSidebarWidth,
@@ -557,10 +559,10 @@ Inspector.prototype = {
         splitterSize: this.is3PaneModeEnabled ? 1 : 0,
         endPanelControl: this.is3PaneModeEnabled,
         startPanel: this.InspectorTabPanel({
-          id: "inspector-rules-container"
+          id: "inspector-rules-container",
         }),
         endPanel: this.InspectorTabPanel({
-          id: "inspector-sidebar-container"
+          id: "inspector-sidebar-container",
         }),
         ref: splitbox => {
           this.sidebarSplitBox = splitbox;
@@ -576,30 +578,22 @@ Inspector.prototype = {
     this.panelWin.addEventListener("resize", this.onPanelWindowResize, true);
   },
 
-  /**
-   * Splitter clean up.
-   */
-  teardownSplitter: function() {
-    this.panelWin.removeEventListener("resize", this.onPanelWindowResize, true);
-
-    this.sidebar.off("show", this.onSidebarShown);
-    this.sidebar.off("hide", this.onSidebarHidden);
-    this.sidebar.off("destroy", this.onSidebarHidden);
-  },
-
   _onLazyPanelResize: async function() {
     // We can be called on a closed window because of the deferred task.
     if (window.closed) {
       return;
     }
+
     // Use window.top because promiseDocumentFlushed() in a subframe doesn't
     // work, see https://bugzilla.mozilla.org/show_bug.cgi?id=1441173
     const useLandscapeMode = await window.top.promiseDocumentFlushed(() => {
       return this.useLandscapeMode();
     });
+
     if (window.closed) {
       return;
     }
+
     this.splitBox.setState({ vert: useLandscapeMode });
     this.emit("inspector-resize");
   },
@@ -609,6 +603,10 @@ Inspector.prototype = {
    * to `horizontal` to support portrait view.
    */
   onPanelWindowResize: function() {
+    if (this.toolbox.currentToolId !== "inspector") {
+      return;
+    }
+
     if (!this._lazyResizeHandler) {
       this._lazyResizeHandler = new DeferredTask(this._onLazyPanelResize.bind(this),
                                                  LAZY_RESIZE_INTERVAL_MS, 0);
@@ -673,8 +671,6 @@ Inspector.prototype = {
 
   async onSidebarToggle() {
     this.is3PaneModeEnabled = !this.is3PaneModeEnabled;
-    Services.prefs.setBoolPref(THREE_PANE_ENABLED_PREF, this.is3PaneModeEnabled);
-
     await this.setupToolbar();
     await this.addRuleView({ skipQueue: true });
   },
@@ -764,7 +760,7 @@ Inspector.prototype = {
         INSPECTOR_L10N.getStr("inspector.sidebar.ruleViewTitle"),
         true);
 
-      this.ruleViewSideBar.show("ruleview");
+      this.ruleViewSideBar.show();
     } else {
       // Removes the rule view from the 3 pane mode and adds the rule view to the main
       // inspector sidebar.
@@ -814,16 +810,13 @@ Inspector.prototype = {
     if (this._panels.has(id)) {
       return this._panels.get(id);
     }
+
     let panel;
     switch (id) {
-      case "computedview":
-        const {ComputedViewTool} =
-          this.browserRequire("devtools/client/inspector/computed/computed");
-        panel = new ComputedViewTool(this, this.panelWin);
-        break;
-      case "ruleview":
-        const {RuleViewTool} = require("devtools/client/inspector/rules/rules");
-        panel = new RuleViewTool(this, this.panelWin);
+      case "animationinspector":
+        const AnimationInspector =
+          this.browserRequire("devtools/client/inspector/animation/animation");
+        panel = new AnimationInspector(this, this.panelWin);
         break;
       case "boxmodel":
         // box-model isn't a panel on its own, it used to, now it is being used by
@@ -831,11 +824,44 @@ Inspector.prototype = {
         const BoxModel = require("devtools/client/inspector/boxmodel/box-model");
         panel = new BoxModel(this, this.panelWin);
         break;
+      case "changesview":
+        const ChangesView =
+          this.browserRequire("devtools/client/inspector/changes/ChangesView");
+        panel = new ChangesView(this, this.panelWin);
+        break;
+      case "computedview":
+        const {ComputedViewTool} =
+          this.browserRequire("devtools/client/inspector/computed/computed");
+        panel = new ComputedViewTool(this, this.panelWin);
+        break;
+      case "fontinspector":
+        const FontInspector =
+          this.browserRequire("devtools/client/inspector/fonts/fonts");
+        panel = new FontInspector(this, this.panelWin);
+        break;
+      case "layoutview":
+        const LayoutView =
+          this.browserRequire("devtools/client/inspector/layout/layout");
+        panel = new LayoutView(this, this.panelWin);
+        break;
+      case "newruleview":
+        const RulesView =
+          this.browserRequire("devtools/client/inspector/rules/new-rules");
+        panel = new RulesView(this, this.panelWin);
+        break;
+      case "ruleview":
+        const {RuleViewTool} = require("devtools/client/inspector/rules/rules");
+        panel = new RuleViewTool(this, this.panelWin);
+        break;
       default:
         // This is a custom panel or a non lazy-loaded one.
         return null;
     }
-    this._panels.set(id, panel);
+
+    if (panel) {
+      this._panels.set(id, panel);
+    }
+
     return panel;
   },
 
@@ -851,110 +877,86 @@ Inspector.prototype = {
         collapsePaneTitle: INSPECTOR_L10N.getStr("inspector.hideThreePaneMode"),
         expandPaneTitle: INSPECTOR_L10N.getStr("inspector.showThreePaneMode"),
         onClick: this.onSidebarToggle,
-      }
+      },
     };
 
     this.sidebar = new ToolSidebar(sidebar, this, "inspector", options);
+    this.sidebar.on("select", this.onSidebarSelect);
 
     const ruleSideBar = this.panelDoc.getElementById("inspector-rules-sidebar");
     this.ruleViewSideBar = new ToolSidebar(ruleSideBar, this, "inspector", {
-      hideTabstripe: true
+      hideTabstripe: true,
     });
 
-    this.sidebar.on("select", this.onSidebarSelect);
-
+    // defaultTab may also be an empty string or a tab id that doesn't exist anymore
+    // (e.g. it was a tab registered by an addon that has been uninstalled).
     let defaultTab = Services.prefs.getCharPref("devtools.inspector.activeSidebar");
 
     if (this.is3PaneModeEnabled && defaultTab === "ruleview") {
-      defaultTab = "computedview";
+      defaultTab = "layoutview";
     }
 
     // Append all side panels
 
     await this.addRuleView({ defaultTab });
 
-    // Inject a lazy loaded react tab by exposing a fake React object
-    // with a lazy defined Tab thanks to `panel` being a function
-    const layoutId = "layoutview";
-    const layoutTitle = INSPECTOR_L10N.getStr("inspector.sidebar.layoutViewTitle2");
-    this.sidebar.queueTab(
-      layoutId,
-      layoutTitle,
+    // Inspector sidebar panels in order of appearance.
+    const sidebarPanels = [
       {
-        props: {
-          id: layoutId,
-          title: layoutTitle
-        },
-        panel: () => {
-          if (!this.layoutview) {
-            const LayoutView =
-              this.browserRequire("devtools/client/inspector/layout/layout");
-            this.layoutview = new LayoutView(this, this.panelWin);
-          }
-
-          return this.layoutview.provider;
-        }
+        id: "layoutview",
+        title: INSPECTOR_L10N.getStr("inspector.sidebar.layoutViewTitle2"),
       },
-      defaultTab == layoutId);
+      {
+        id: "computedview",
+        title: INSPECTOR_L10N.getStr("inspector.sidebar.computedViewTitle"),
+      },
+      {
+        id: "animationinspector",
+        title: INSPECTOR_L10N.getStr("inspector.sidebar.animationInspectorTitle"),
+      },
+      {
+        id: "fontinspector",
+        title: INSPECTOR_L10N.getStr("inspector.sidebar.fontInspectorTitle"),
+      },
+    ];
 
-    this.sidebar.queueExistingTab(
-      "computedview",
-      INSPECTOR_L10N.getStr("inspector.sidebar.computedViewTitle"),
-      defaultTab == "computedview");
-
-    const animationTitle =
-      INSPECTOR_L10N.getStr("inspector.sidebar.animationInspectorTitle");
-
-    if (Services.prefs.getBoolPref("devtools.new-animationinspector.enabled")) {
-      const animationId = "newanimationinspector";
-
-      this.sidebar.queueTab(
-        animationId,
-        animationTitle,
-        {
-          props: {
-            id: animationId,
-            title: animationTitle
-          },
-          panel: () => {
-            const AnimationInspector =
-              this.browserRequire("devtools/client/inspector/animation/animation");
-            this.animationinspector = new AnimationInspector(this, this.panelWin);
-            return this.animationinspector.provider;
-          }
-        },
-        defaultTab == animationId);
-    } else {
-      this.sidebar.queueFrameTab(
-        "animationinspector",
-        animationTitle,
-        "chrome://devtools/content/inspector/animation-old/animation-inspector.xhtml",
-        defaultTab == "animationinspector");
+    if (this._supportsChangesPanel()) {
+      // Insert Changes as third tab, right after Computed.
+      // TODO: move this inline to `sidebarPanels` above when addressing Bug 1491887.
+      sidebarPanels.splice(2, 0, {
+        id: "changesview",
+        title: INSPECTOR_L10N.getStr("inspector.sidebar.changesViewTitle"),
+      });
     }
 
-    // Inject a lazy loaded react tab by exposing a fake React object
-    // with a lazy defined Tab thanks to `panel` being a function
-    const fontId = "fontinspector";
-    const fontTitle = INSPECTOR_L10N.getStr("inspector.sidebar.fontInspectorTitle");
-    this.sidebar.queueTab(
-      fontId,
-      fontTitle,
-      {
-        props: {
-          id: fontId,
-          title: fontTitle
-        },
-        panel: () => {
-          if (!this.fontinspector) {
-            const FontInspector =
-              this.browserRequire("devtools/client/inspector/fonts/fonts");
-            this.fontinspector = new FontInspector(this, this.panelWin);
-          }
+    if (Services.prefs.getBoolPref("devtools.inspector.new-rulesview.enabled")) {
+      sidebarPanels.push({
+        id: "newruleview",
+        title: INSPECTOR_L10N.getStr("inspector.sidebar.ruleViewTitle"),
+      });
+    }
 
-          return this.fontinspector.provider;
-        }
-      },
-      defaultTab == fontId);
+    for (const { id, title } of sidebarPanels) {
+      // The Computed panel is not a React-based panel. We pick its element container from
+      // the DOM and wrap it in a React component (InspectorTabPanel) so it behaves like
+      // other panels when using the Inspector's tool sidebar.
+      if (id === "computedview") {
+        this.sidebar.queueExistingTab(id, title, defaultTab === id);
+      } else {
+        // When `panel` is a function, it is called when the tab should render. It is
+        // expected to return a React component to populate the tab's content area.
+        // Calling this method on-demand allows us to lazy-load the requested panel.
+        this.sidebar.queueTab(id, title, {
+          props: {
+            id,
+            title,
+          },
+          panel: () => {
+            return this.getPanel(id).provider;
+          },
+        }, defaultTab === id);
+      }
+    }
 
     this.sidebar.addAllQueuedTabs();
 
@@ -963,7 +965,7 @@ Inspector.prototype = {
     this.sidebar.on("hide", this.onSidebarHidden);
     this.sidebar.on("destroy", this.onSidebarHidden);
 
-    this.sidebar.show(defaultTab);
+    this.sidebar.show();
   },
 
   /**
@@ -1103,6 +1105,8 @@ Inspector.prototype = {
       eyeDropperButton.disabled = true;
       eyeDropperButton.title = INSPECTOR_L10N.getStr("eyedropper.disabled.title");
     }
+
+    this.emit("inspector-toolbar-updated");
   },
 
   teardownToolbar: function() {
@@ -1137,8 +1141,8 @@ Inspector.prototype = {
       this._pendingSelection = null;
       this.selection.setNodeFront(defaultNode, { reason: "navigateaway" });
 
-      this._initMarkup();
       this.once("markuploaded", this.onMarkupLoaded);
+      this._initMarkup();
 
       // Setup the toolbar again, since its content may depend on the current document.
       this.setupToolbar();
@@ -1164,7 +1168,7 @@ Inspector.prototype = {
     if (this._highlighters) {
       await Promise.all([
         this.highlighters.restoreFlexboxState(),
-        this.highlighters.restoreGridState()
+        this.highlighters.restoreGridState(),
       ]);
     }
 
@@ -1205,7 +1209,7 @@ Inspector.prototype = {
 
     this._selectionCssSelector = {
       selector: cssSelector,
-      url: this._target.url
+      url: this._target.url,
     };
   },
 
@@ -1219,6 +1223,18 @@ Inspector.prototype = {
       return this._selectionCssSelector.selector;
     }
     return null;
+  },
+
+  /**
+   * On any new selection made by the user, store the unique css selector
+   * of the selected node so it can be restored after reload of the same page
+   */
+  updateSelectionCssSelector() {
+    if (this.selection.isElementNode()) {
+      this.selection.nodeFront.getUniqueSelector().then(selector => {
+        this.selectionCssSelector = selector;
+      }, this._handleRejectionIfNotDestroyed);
+    }
   },
 
   /**
@@ -1241,11 +1257,30 @@ Inspector.prototype = {
   },
 
   /**
+   * Update the state of the add button in the toolbar depending on the current selection.
+   */
+  updateAddElementButton() {
+    const btn = this.panelDoc.getElementById("inspector-element-add-button");
+    if (this.canAddHTMLChild()) {
+      btn.removeAttribute("disabled");
+    } else {
+      btn.setAttribute("disabled", "true");
+    }
+  },
+
+  /**
    * Handler for the "host-changed" event from the toolbox. Resets the inspector
    * sidebar sizes when the toolbox host type changes.
    */
-  onHostChanged: function() {
-    if (!this.is3PaneModeEnabled) {
+  async onHostChanged() {
+    // Eagerly call our resize handling code to process the fact that we
+    // switched hosts. If we don't do this, we'll wait for resize events + 200ms
+    // to have passed, which causes the old layout to noticeably show up in the
+    // new host, followed by the updated one.
+    await this._onLazyPanelResize();
+    // Note that we may have been destroyed by now, especially in tests, so we
+    // need to check if that's happened before touching anything else.
+    if (!this.target || !this.is3PaneModeEnabled) {
       return;
     }
 
@@ -1260,31 +1295,13 @@ Inspector.prototype = {
       return;
     }
 
-    // Wait for all the known tools to finish updating and then let the
-    // client know.
-    const selection = this.selection.nodeFront;
-
-    // Update the state of the add button in the toolbar depending on the
-    // current selection.
-    const btn = this.panelDoc.querySelector("#inspector-element-add-button");
-    if (this.canAddHTMLChild()) {
-      btn.removeAttribute("disabled");
-    } else {
-      btn.setAttribute("disabled", "true");
-    }
-
-    // On any new selection made by the user, store the unique css selector
-    // of the selected node so it can be restored after reload of the same page
-    if (this.selection.isElementNode()) {
-      selection.getUniqueSelector().then(selector => {
-        this.selectionCssSelector = selector;
-      }, this._handleRejectionIfNotDestroyed);
-    }
+    this.updateAddElementButton();
+    this.updateSelectionCssSelector();
 
     const selfUpdate = this.updating("inspector-panel");
     executeSoon(() => {
       try {
-        selfUpdate(selection);
+        selfUpdate(this.selection.nodeFront);
       } catch (ex) {
         console.error(ex);
       }
@@ -1370,38 +1387,30 @@ Inspector.prototype = {
 
     this.cancelUpdate();
 
+    this.sidebar.destroy();
+
+    this.panelWin.removeEventListener("resize", this.onPanelWindowResize, true);
     this.selection.off("new-node-front", this.onNewSelection);
     this.selection.off("detached-front", this.onDetached);
     this.sidebar.off("select", this.onSidebarSelect);
+    this.sidebar.off("show", this.onSidebarShown);
+    this.sidebar.off("hide", this.onSidebarHidden);
+    this.sidebar.off("destroy", this.onSidebarHidden);
     this.target.off("will-navigate", this._onBeforeNavigate);
-    this.target.off("thread-paused", this._updateDebuggerPausedWarning);
-    this.target.off("thread-resumed", this._updateDebuggerPausedWarning);
-    this._toolbox.off("select", this._updateDebuggerPausedWarning);
 
     for (const [, panel] of this._panels) {
       panel.destroy();
     }
     this._panels.clear();
 
-    if (this.layoutview) {
-      this.layoutview.destroy();
-    }
-
-    if (this.fontinspector) {
-      this.fontinspector.destroy();
-    }
-
-    if (this.animationinspector) {
-      this.animationinspector.destroy();
-    }
-
-    if (this.threePaneTooltip) {
-      this.threePaneTooltip.destroy();
-    }
-
     if (this._highlighters) {
       this._highlighters.destroy();
       this._highlighters = null;
+    }
+
+    if (this._markupFrame) {
+      this._markupFrame.removeEventListener("load", this._onMarkupFrameLoad, true);
+      this._markupFrame.removeEventListener("contextmenu", this._onContextMenu);
     }
 
     if (this._search) {
@@ -1409,25 +1418,25 @@ Inspector.prototype = {
       this._search = null;
     }
 
-    const cssPropertiesDestroyer = this._cssProperties.front.destroy();
     const sidebarDestroyer = this.sidebar.destroy();
     const ruleViewSideBarDestroyer = this.ruleViewSideBar ?
       this.ruleViewSideBar.destroy() : null;
     const markupDestroyer = this._destroyMarkup();
 
-    this.teardownSplitter();
     this.teardownToolbar();
 
     this.breadcrumbs.destroy();
     this.reflowTracker.destroy();
     this.styleChangeTracker.destroy();
 
+    this._is3PaneModeChromeEnabled = null;
+    this._is3PaneModeEnabled = null;
+    this._markupBox = null;
+    this._markupFrame = null;
     this._notificationBox = null;
     this._target = null;
     this._toolbox = null;
     this.breadcrumbs = null;
-    this.is3PaneModeEnabled = null;
-    this.is3PaneModeFirstRun = null;
     this.panelDoc = null;
     this.panelWin.inspector = null;
     this.panelWin = null;
@@ -1437,13 +1446,11 @@ Inspector.prototype = {
     this.sidebar = null;
     this.store = null;
     this.telemetry = null;
-    this.threePaneTooltip = null;
 
     this._panelDestroyer = promise.all([
-      cssPropertiesDestroyer,
       markupDestroyer,
       sidebarDestroyer,
-      ruleViewSideBarDestroyer
+      ruleViewSideBarDestroyer,
     ]);
 
     return this._panelDestroyer;
@@ -1542,7 +1549,7 @@ Inspector.prototype = {
     }));
 
     // Set the pseudo classes
-    for (const name of ["hover", "active", "focus"]) {
+    for (const name of ["hover", "active", "focus", "focus-within"]) {
       const menuitem = new MenuItem({
         id: "node-menu-pseudo-" + name,
         label: name,
@@ -1622,6 +1629,18 @@ Inspector.prototype = {
       click: () => this.showDOMProperties(),
     }));
 
+    if (this.selection.nodeFront.customElementLocation) {
+      menu.append(new MenuItem({
+        type: "separator",
+      }));
+
+      menu.append(new MenuItem({
+        id: "node-menu-jumptodefinition",
+        label: INSPECTOR_L10N.getStr("inspectorCustomElementDefinition.label"),
+        click: () => this.jumpToCustomElementDefinition(),
+      }));
+    }
+
     this.buildA11YMenuItem(menu);
 
     const nodeLinkMenuItems = this._getNodeLinkMenuItems();
@@ -1650,9 +1669,14 @@ Inspector.prototype = {
       id: "node-menu-showaccessibilityproperties",
       label: INSPECTOR_L10N.getStr("inspectorShowAccessibilityProperties.label"),
       click: () => this.showAccessibilityProperties(),
-      disabled: true
+      disabled: true,
     });
-    this._updateA11YMenuItem(showA11YPropsItem);
+    // Only attempt to determine if a11y props menu item needs to be enabled if
+    // AccessibilityFront is enabled.
+    if (this.accessibilityFront.enabled) {
+      this._updateA11YMenuItem(showA11YPropsItem);
+    }
+
     menu.append(showA11YPropsItem);
   },
 
@@ -1702,7 +1726,6 @@ Inspector.prototype = {
       accesskey:
         INSPECTOR_L10N.getStr("inspectorCopyCSSPath.accesskey"),
       disabled: !isSelectionElement,
-      hidden: !this.canGetCssPath,
       click: () => this.copyCssPath(),
     }));
     copySubmenu.append(new MenuItem({
@@ -1711,7 +1734,6 @@ Inspector.prototype = {
       accesskey:
         INSPECTOR_L10N.getStr("inspectorCopyXPath.accesskey"),
       disabled: !isSelectionElement,
-      hidden: !this.canGetXPath,
       click: () => this.copyXPath(),
     }));
     copySubmenu.append(new MenuItem({
@@ -1878,44 +1900,35 @@ Inspector.prototype = {
   },
 
   _initMarkup: function() {
-    const doc = this.panelDoc;
+    if (!this._markupFrame) {
+      this._markupFrame = this.panelDoc.createElement("iframe");
+      this._markupFrame.setAttribute("aria-label",
+        INSPECTOR_L10N.getStr("inspector.panelLabel.markupView"));
+      this._markupFrame.setAttribute("flex", "1");
+      // This is needed to enable tooltips inside the iframe document.
+      this._markupFrame.setAttribute("tooltip", "aHTMLTooltip");
+      this._markupFrame.addEventListener("contextmenu", this._onContextMenu);
 
-    this._markupBox = doc.getElementById("markup-box");
+      this._markupBox.style.visibility = "hidden";
+      this._markupBox.appendChild(this._markupFrame);
 
-    // create tool iframe
-    this._markupFrame = doc.createElement("iframe");
-    this._markupFrame.setAttribute("flex", "1");
-    // This is needed to enable tooltips inside the iframe document.
-    this._markupFrame.setAttribute("tooltip", "aHTMLTooltip");
-    this._markupFrame.addEventListener("contextmenu", this._onContextMenu);
-
-    this._markupBox.style.visibility = "hidden";
-    this._markupBox.appendChild(this._markupFrame);
-
-    this._markupFrame.addEventListener("load", this._onMarkupFrameLoad, true);
-    this._markupFrame.setAttribute("src", "markup/markup.xhtml");
-    this._markupFrame.setAttribute("aria-label",
-      INSPECTOR_L10N.getStr("inspector.panelLabel.markupView"));
+      this._markupFrame.addEventListener("load", this._onMarkupFrameLoad, true);
+      this._markupFrame.setAttribute("src", "markup/markup.xhtml");
+    } else {
+      this._onMarkupFrameLoad();
+    }
   },
 
   _onMarkupFrameLoad: function() {
     this._markupFrame.removeEventListener("load", this._onMarkupFrameLoad, true);
-
     this._markupFrame.contentWindow.focus();
-
-    this.markup = new MarkupView(this, this._markupFrame, this._toolbox.win);
-
     this._markupBox.style.visibility = "visible";
+    this.markup = new MarkupView(this, this._markupFrame, this._toolbox.win);
     this.emit("markuploaded");
   },
 
   _destroyMarkup: function() {
     let destroyPromise;
-
-    if (this._markupFrame) {
-      this._markupFrame.removeEventListener("load", this._onMarkupFrameLoad, true);
-      this._markupFrame.removeEventListener("contextmenu", this._onContextMenu);
-    }
 
     if (this.markup) {
       destroyPromise = this.markup.destroy();
@@ -1924,12 +1937,7 @@ Inspector.prototype = {
       destroyPromise = promise.resolve();
     }
 
-    if (this._markupFrame) {
-      this._markupFrame.remove();
-      this._markupFrame = null;
-    }
-
-    this._markupBox = null;
+    this._markupBox.style.visibility = "hidden";
 
     return destroyPromise;
   },
@@ -1971,7 +1979,7 @@ Inspector.prototype = {
     this.telemetry.scalarSet(TELEMETRY_EYEDROPPER_OPENED, 1);
     this.eyeDropperButton.classList.add("checked");
     this.startEyeDropperListeners();
-    return this.inspector.pickColorFromPage(this.toolbox, {copyOnSelect: true})
+    return this.inspector.pickColorFromPage({copyOnSelect: true})
                          .catch(console.error);
   },
 
@@ -2038,6 +2046,12 @@ Inspector.prototype = {
       jsterm.execute("inspect($0)");
       jsterm.focus();
     });
+  },
+
+  jumpToCustomElementDefinition: function() {
+    const node = this.selection.nodeFront;
+    const { url, line } = node.customElementLocation;
+    this._toolbox.viewSourceInDebugger(url, line, "show_custom_element");
   },
 
   /**
@@ -2257,24 +2271,25 @@ Inspector.prototype = {
   },
 
   /**
-   * Initiate gcli screenshot command on selected node.
+   * Initiate screenshot command on selected node.
    */
   async screenshotNode() {
-    const command = Services.prefs.getBoolPref("devtools.screenshot.clipboard.enabled") ?
-      "screenshot --file --clipboard --selector" :
-      "screenshot --file --selector";
-
     // Bug 1332936 - it's possible to call `screenshotNode` while the BoxModel highlighter
     // is still visible, therefore showing it in the picture.
     // To avoid that, we have to hide it before taking the screenshot. The `hideBoxModel`
     // will do that, calling `hide` for the highlighter only if previously shown.
     await this.highlighter.hideBoxModel();
 
-    // Bug 1180314 -  CssSelector might contain white space so need to make sure it is
-    // passed to screenshot as a single parameter.  More work *might* be needed if
-    // CssSelector could contain escaped single- or double-quotes, backslashes, etc.
-    CommandUtils.executeOnTarget(this._target,
-      `${command} '${this.selectionCssSelector}'`);
+    const clipboardEnabled = Services.prefs
+      .getBoolPref("devtools.screenshot.clipboard.enabled");
+    const args = {
+      file: true,
+      nodeActorID: this.selection.nodeFront.actorID,
+      clipboard: clipboardEnabled,
+    };
+    const screenshotFront = await this.target.getFront("screenshot");
+    const screenshot = await screenshotFront.capture(args);
+    await saveScreenshot(this.panelWin, args, screenshot);
   },
 
   /**
@@ -2453,7 +2468,7 @@ Inspector.prototype = {
    */
   onShowBoxModelHighlighterForNode(nodeFront, options) {
     const toolbox = this.toolbox;
-    toolbox.highlighterUtils.highlightNodeFront(nodeFront, options);
+    toolbox.highlighter.highlight(nodeFront, options);
   },
 
   /**
@@ -2469,7 +2484,7 @@ Inspector.prototype = {
   },
 
   async inspectNodeActor(nodeActor, inspectFromAnnotation) {
-    const nodeFront = await this.walker.getNodeActorFromObjectActor(nodeActor);
+    const nodeFront = await this.walker.gripToNodeFront({ actor: nodeActor });
     if (!nodeFront) {
       console.error("The object cannot be linked to the inspector, the " +
                     "corresponding nodeFront could not be found.");

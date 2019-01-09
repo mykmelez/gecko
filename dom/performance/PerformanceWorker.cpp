@@ -5,27 +5,24 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "PerformanceWorker.h"
-#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/WorkerPrivate.h"
+#include "mozilla/StaticPrefs.h"
 
 namespace mozilla {
 namespace dom {
 
 PerformanceWorker::PerformanceWorker(WorkerPrivate* aWorkerPrivate)
-  : mWorkerPrivate(aWorkerPrivate)
-{
+    : Performance(aWorkerPrivate->UsesSystemPrincipal()),
+      mWorkerPrivate(aWorkerPrivate) {
   mWorkerPrivate->AssertIsOnWorkerThread();
 }
 
-PerformanceWorker::~PerformanceWorker()
-{
+PerformanceWorker::~PerformanceWorker() {
   mWorkerPrivate->AssertIsOnWorkerThread();
 }
 
-void
-PerformanceWorker::InsertUserEntry(PerformanceEntry* aEntry)
-{
-  if (DOMPrefs::PerformanceLoggingEnabled()) {
+void PerformanceWorker::InsertUserEntry(PerformanceEntry* aEntry) {
+  if (StaticPrefs::dom_performance_enable_user_timing_logging()) {
     nsAutoCString uri;
     nsCOMPtr<nsIURI> scriptURI = mWorkerPrivate->GetResolvedScriptURI();
     if (!scriptURI || NS_FAILED(scriptURI->GetHost(uri))) {
@@ -37,23 +34,17 @@ PerformanceWorker::InsertUserEntry(PerformanceEntry* aEntry)
   Performance::InsertUserEntry(aEntry);
 }
 
-TimeStamp
-PerformanceWorker::CreationTimeStamp() const
-{
+TimeStamp PerformanceWorker::CreationTimeStamp() const {
   return mWorkerPrivate->CreationTimeStamp();
 }
 
-DOMHighResTimeStamp
-PerformanceWorker::CreationTime() const
-{
+DOMHighResTimeStamp PerformanceWorker::CreationTime() const {
   return mWorkerPrivate->CreationTime();
 }
 
-uint64_t
-PerformanceWorker::GetRandomTimelineSeed()
-{
+uint64_t PerformanceWorker::GetRandomTimelineSeed() {
   return mWorkerPrivate->GetRandomTimelineSeed();
 }
 
-} // dom namespace
-} // mozilla namespace
+}  // namespace dom
+}  // namespace mozilla

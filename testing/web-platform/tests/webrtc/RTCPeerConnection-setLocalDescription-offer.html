@@ -11,10 +11,9 @@
   // https://w3c.github.io/webrtc-pc/archives/20170605/webrtc.html
 
   // The following helper functions are called from RTCPeerConnection-helper.js:
-  //   generateOffer
+  //   generateDataChannelOffer
   //   assert_session_desc_not_similar
   //   assert_session_desc_similar
-  //   test_state_change_event
 
   /*
     4.3.2.  Interface Definition
@@ -58,9 +57,12 @@
    */
   promise_test(t => {
     const pc = new RTCPeerConnection();
-    test_state_change_event(t, pc, ['have-local-offer']);
+    t.add_cleanup(() => pc.close());
 
-    return pc.createOffer({ offerToReceiveAudio: true })
+    const states = [];
+    pc.addEventListener('signalingstatechange', () => states.push(pc.signalingState));
+
+    return generateAudioReceiveOnlyOffer(pc)
     .then(offer =>
       pc.setLocalDescription(offer)
       .then(() => {
@@ -68,6 +70,8 @@
         assert_session_desc_similar(pc.localDescription, offer);
         assert_session_desc_similar(pc.pendingLocalDescription, offer);
         assert_equals(pc.currentLocalDescription, null);
+
+        assert_array_equals(states, ['have-local-offer']);
       }));
   }, 'setLocalDescription with valid offer should succeed');
 
@@ -79,7 +83,8 @@
    */
   promise_test(t => {
     const pc = new RTCPeerConnection();
-    return pc.createOffer({ offerToReceiveAudio: true })
+    t.add_cleanup(() => pc.close());
+    return generateAudioReceiveOnlyOffer(pc)
     .then(offer =>
       pc.setLocalDescription({ type: 'offer' })
       .then(() => {
@@ -99,9 +104,12 @@
    */
   promise_test(t => {
     const pc = new RTCPeerConnection();
+    t.add_cleanup(() => pc.close());
     const pc2 = new RTCPeerConnection();
 
-    return generateOffer({ pc, data: true })
+    t.add_cleanup(() => pc2.close());
+
+    return generateDataChannelOffer(pc)
     .then(offer =>
       promise_rejects(t, 'InvalidModificationError',
         pc2.setLocalDescription(offer)));
@@ -113,9 +121,10 @@
     // last offer, setLocalDescription would reject when setting
     // with the first offer
     const pc = new RTCPeerConnection();
-    return pc.createOffer({ offerToReceiveAudio: true })
+    t.add_cleanup(() => pc.close());
+    return generateAudioReceiveOnlyOffer(pc)
     .then(offer1 =>
-      pc.createOffer({ offerToReceiveVideo: true })
+      generateVideoReceiveOnlyOffer(pc)
       .then(offer2 => {
         assert_session_desc_not_similar(offer1, offer2);
         return promise_rejects(t, 'InvalidModificationError',
@@ -125,23 +134,26 @@
 
   promise_test(t => {
     const pc = new RTCPeerConnection();
+    t.add_cleanup(() => pc.close());
 
-    // Only one state change event should be fired
-    test_state_change_event(t, pc, ['have-local-offer']);
+    const states = [];
+    pc.addEventListener('signalingstatechange', () => states.push(pc.signalingState));
 
-    return pc.createOffer({ offerToReceiveAudio: true })
+    return generateAudioReceiveOnlyOffer(pc)
     .then(offer1 =>
       pc.setLocalDescription(offer1)
       .then(() =>
-        pc.createOffer({ offerToReceiveVideo: true })
+        generateVideoReceiveOnlyOffer(pc)
         .then(offer2 =>
           pc.setLocalDescription(offer2)
-          .then(offer2 => {
+          .then(() => {
             assert_session_desc_not_similar(offer1, offer2);
             assert_equals(pc.signalingState, 'have-local-offer');
             assert_session_desc_similar(pc.localDescription, offer2);
             assert_session_desc_similar(pc.pendingLocalDescription, offer2);
             assert_equals(pc.currentLocalDescription, null);
+
+            assert_array_equals(states, ['have-local-offer']);
           }))));
   }, 'Creating and setting offer multiple times should succeed');
 

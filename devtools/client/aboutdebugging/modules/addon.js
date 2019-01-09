@@ -4,103 +4,35 @@
 
 "use strict";
 
-loader.lazyImporter(this, "BrowserToolboxProcess",
-  "resource://devtools/client/framework/ToolboxProcess.jsm");
-loader.lazyImporter(this, "AddonManager", "resource://gre/modules/AddonManager.jsm");
 loader.lazyImporter(this, "AddonManagerPrivate", "resource://gre/modules/AddonManager.jsm");
 
-var {TargetFactory} = require("devtools/client/framework/target");
-var {Toolbox} = require("devtools/client/framework/toolbox");
-
-var {gDevTools} = require("devtools/client/framework/devtools");
-
-let browserToolboxProcess = null;
-let remoteAddonToolbox = null;
-function closeToolbox() {
-  if (browserToolboxProcess) {
-    browserToolboxProcess.close();
-  }
-
-  if (remoteAddonToolbox) {
-    remoteAddonToolbox.destroy();
-  }
-}
+const {
+  debugLocalAddon,
+  debugRemoteAddon,
+  getExtensionUuid,
+  openTemporaryExtension,
+  parseFileUri,
+  uninstallAddon,
+} = require("devtools/client/aboutdebugging-new/src/modules/extensions-helper");
 
 /**
- * Start debugging an addon in the current instance of Firefox.
- *
- * @param {String} addonID
- *        String id of the addon to debug.
+ * Most of the implementation for this module has been moved to
+ * devtools/client/aboutdebugging-new/src/modules/extensions-helper.js
+ * The only methods implemented here are the ones used in the old aboutdebugging only.
  */
-exports.debugLocalAddon = async function(addonID) {
-  // Close previous addon debugging toolbox.
-  closeToolbox();
-
-  browserToolboxProcess = BrowserToolboxProcess.init({
-    addonID,
-    onClose: () => {
-      browserToolboxProcess = null;
-    }
-  });
-};
-
-/**
- * Start debugging an addon in a remote instance of Firefox.
- *
- * @param {Object} addonForm
- *        Necessary to create an addon debugging target.
- * @param {DebuggerClient} client
- *        Required for remote debugging.
- */
-exports.debugRemoteAddon = async function(addonForm, client) {
-  // Close previous addon debugging toolbox.
-  closeToolbox();
-
-  const options = {
-    form: addonForm,
-    chrome: true,
-    client,
-    isBrowsingContext: addonForm.isWebExtension
-  };
-
-  const target = await TargetFactory.forRemoteTab(options);
-
-  const hostType = Toolbox.HostType.WINDOW;
-  remoteAddonToolbox = await gDevTools.showToolbox(target, null, hostType);
-  remoteAddonToolbox.once("destroy", () => {
-    remoteAddonToolbox = null;
-  });
-};
-
-exports.uninstallAddon = async function(addonID) {
-  const addon = await AddonManager.getAddonByID(addonID);
-  return addon && addon.uninstall();
-};
 
 exports.isTemporaryID = function(addonID) {
   return AddonManagerPrivate.isTemporaryInstallID(addonID);
 };
 
-exports.isLegacyTemporaryExtension = function(addonForm) {
-  if (!addonForm.type) {
-    // If about:debugging is connected to an older then 59 remote Firefox, and type is
-    // not available on the addon/webextension actors, return false to avoid showing
-    // irrelevant warning messages.
-    return false;
-  }
-  return addonForm.type == "extension" &&
-         addonForm.temporarilyInstalled &&
-         !addonForm.isWebExtension &&
-         !addonForm.isAPIExtension;
-};
+/**
+ * See JSDoc in devtools/client/aboutdebugging-new/src/modules/extensions-helper for all
+ * the methods exposed below.
+ */
 
-exports.parseFileUri = function(url) {
-  // Strip a leading slash from Windows drive letter URIs.
-  // file:///home/foo ~> /home/foo
-  // file:///C:/foo ~> C:/foo
-  const windowsRegex = /^file:\/\/\/([a-zA-Z]:\/.*)/;
-  if (windowsRegex.test(url)) {
-    return windowsRegex.exec(url)[1];
-  }
-  return url.slice("file://".length);
-};
+exports.debugLocalAddon = debugLocalAddon;
+exports.debugRemoteAddon = debugRemoteAddon;
+exports.getExtensionUuid = getExtensionUuid;
+exports.openTemporaryExtension = openTemporaryExtension;
+exports.parseFileUri = parseFileUri;
+exports.uninstallAddon = uninstallAddon;

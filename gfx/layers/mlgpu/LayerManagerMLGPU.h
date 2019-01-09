@@ -27,9 +27,8 @@ class MLGSwapChain;
 class MLGTileBuffer;
 struct LayerProperties;
 
-class LayerManagerMLGPU final : public HostLayerManager
-{
-public:
+class LayerManagerMLGPU final : public HostLayerManager {
+ public:
   explicit LayerManagerMLGPU(widget::CompositorWidget* aWidget);
   ~LayerManagerMLGPU();
 
@@ -37,8 +36,9 @@ public:
   void Destroy() override;
 
   // LayerManager methods
-  bool BeginTransaction() override;
-  void BeginTransactionWithDrawTarget(gfx::DrawTarget* aTarget, const gfx::IntRect& aRect) override;
+  bool BeginTransaction(const nsCString& aURL) override;
+  void BeginTransactionWithDrawTarget(gfx::DrawTarget* aTarget,
+                                      const gfx::IntRect& aRect) override;
   void SetRoot(Layer* aLayer) override;
   already_AddRefed<PaintedLayer> CreatePaintedLayer() override;
   already_AddRefed<ContainerLayer> CreateContainerLayer() override;
@@ -46,7 +46,6 @@ public:
   already_AddRefed<ColorLayer> CreateColorLayer() override;
   already_AddRefed<CanvasLayer> CreateCanvasLayer() override;
   already_AddRefed<RefLayer> CreateRefLayer() override;
-  already_AddRefed<BorderLayer> CreateBorderLayer() override;
 
   bool AreComponentAlphaLayersEnabled() override;
   bool BlendingRequiresIntermediateSurface() override;
@@ -56,13 +55,11 @@ public:
   TextureFactoryIdentifier GetTextureFactoryIdentifier() override;
   LayersBackend GetBackendType() override;
   void AddInvalidRegion(const nsIntRegion& aRegion) override;
-  void EndTransaction(const TimeStamp& aTimeStamp, EndTransactionFlags aFlags) override;
-  void EndTransaction(DrawPaintedLayerCallback aCallback,
-                      void* aCallbackData,
+  void EndTransaction(const TimeStamp& aTimeStamp,
                       EndTransactionFlags aFlags) override;
-  Compositor* GetCompositor() const override {
-    return nullptr;
-  }
+  void EndTransaction(DrawPaintedLayerCallback aCallback, void* aCallbackData,
+                      EndTransactionFlags aFlags) override;
+  Compositor* GetCompositor() const override { return nullptr; }
   bool IsCompositingToScreen() const override;
   TextureSourceProvider* GetTextureSourceProvider() const override;
   void ClearCachedResources(Layer* aSubtree = nullptr) override;
@@ -73,33 +70,23 @@ public:
     AddInvalidRegion(nsIntRegion(mRenderBounds));
   }
 
-  LayerManagerMLGPU* AsLayerManagerMLGPU() override {
-    return this;
-  }
-  const char* Name() const override {
-    return "";
-  }
+  LayerManagerMLGPU* AsLayerManagerMLGPU() override { return this; }
+  const char* Name() const override { return ""; }
 
   // This should only be called while a FrameBuilder is live.
   FrameBuilder* GetCurrentFrame() const {
     MOZ_ASSERT(mCurrentFrame);
     return mCurrentFrame;
   }
-  MLGDevice* GetDevice() {
-    return mDevice;
-  }
+  MLGDevice* GetDevice() { return mDevice; }
 
   TimeStamp GetLastCompositionEndTime() const {
     return mLastCompositionEndTime;
   }
-  const nsIntRegion& GetRegionToClear() const {
-    return mRegionToClear;
-  }
-  uint32_t GetDebugFrameNumber() const {
-    return mDebugFrameNumber;
-  }
+  const nsIntRegion& GetRegionToClear() const { return mRegionToClear; }
+  uint32_t GetDebugFrameNumber() const { return mDebugFrameNumber; }
 
-private:
+ private:
   void Composite();
   void ComputeInvalidRegion();
   void RenderLayers();
@@ -107,7 +94,7 @@ private:
   bool PreRender();
   void PostRender();
 
-private:
+ private:
   RefPtr<MLGDevice> mDevice;
   RefPtr<MLGSwapChain> mSwapChain;
   RefPtr<TextureSourceProviderMLGPU> mTextureSourceProvider;
@@ -123,7 +110,7 @@ private:
   bool mUsingInvalidation;
   nsIntRegion mInvalidRegion;
   Maybe<widget::WidgetRenderingContext> mWidgetContext;
-  
+
   IntSize mWindowSize;
   TimeStamp mCompositionStartTime;
   TimeStamp mLastCompositionEndTime;
@@ -139,7 +126,7 @@ private:
   RefPtr<MLGBuffer> mDiagnosticVertices;
 };
 
-} // namespace layers
-} // namespace mozilla
+}  // namespace layers
+}  // namespace mozilla
 
 #endif

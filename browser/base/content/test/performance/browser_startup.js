@@ -31,18 +31,16 @@ const startupPhases = {
       "MainProcessSingleton.js",
 
       // Bugs to fix: The following components shouldn't be initialized that early.
-      "WebContentConverter.js", // bug 1369443
-      "nsSessionStartup.js", // bug 1369456
       "PushComponents.js", // bug 1369436
     ]),
     modules: new Set([
       "resource://gre/modules/AppConstants.jsm",
+      "resource://gre/modules/ActorManagerParent.jsm",
+      "resource://gre/modules/CustomElementsListener.jsm",
+      "resource://gre/modules/ExtensionUtils.jsm",
       "resource://gre/modules/XPCOMUtils.jsm",
       "resource://gre/modules/Services.jsm",
-
-      // Bugs to fix: Probably loaded too early, needs investigation.
-      "resource://gre/modules/RemotePageManager.jsm", // bug 1369466
-    ])
+    ]),
   }},
 
   // For the following phases of startup we have only a black list for now
@@ -50,7 +48,7 @@ const startupPhases = {
   // We are at this phase after creating the first browser window (ie. after final-ui-startup).
   "before opening first browser window": {blacklist: {
     modules: new Set([
-    ])
+    ]),
   }},
 
   // We reach this phase right after showing the first browser window.
@@ -61,7 +59,6 @@ const startupPhases = {
       "nsSearchService.js",
     ]),
     modules: new Set([
-      "chrome://webcompat-reporter/content/WebCompatReporter.jsm",
       "chrome://webcompat/content/data/ua_overrides.jsm",
       "chrome://webcompat/content/lib/ua_overrider.jsm",
       "resource:///modules/AboutNewTab.jsm",
@@ -76,7 +73,7 @@ const startupPhases = {
     ]),
     services: new Set([
       "@mozilla.org/browser/search-service;1",
-    ])
+    ]),
   }},
 
   // We are at this phase once we are ready to handle user events.
@@ -104,7 +101,7 @@ const startupPhases = {
     services: new Set([
       "@mozilla.org/browser/annotation-service;1",
       "@mozilla.org/browser/nav-bookmarks-service;1",
-    ])
+    ]),
   }},
 
   // Things that are expected to be completely out of the startup path
@@ -117,13 +114,14 @@ const startupPhases = {
     modules: new Set([
       "resource://gre/modules/AsyncPrefs.jsm",
       "resource://gre/modules/LoginManagerContextMenu.jsm",
-      "resource://gre/modules/Task.jsm",
       "resource://pdf.js/PdfStreamConverter.jsm",
     ]),
   }},
 };
 
-if (Services.prefs.getBoolPref("browser.startup.blankWindow")) {
+if (Services.prefs.getBoolPref("browser.startup.blankWindow") &&
+    Services.prefs.getCharPref("lightweightThemes.selectedThemeID") ==
+      "default-theme@mozilla.org") {
   startupPhases["before profile selection"].whitelist.components.add("XULStore.js");
 }
 
@@ -158,7 +156,6 @@ add_task(async function() {
   let startupRecorder = Cc["@mozilla.org/test/startuprecorder;1"].getService().wrappedJSObject;
   await startupRecorder.done;
 
-  let loader = Cc["@mozilla.org/moz/jsloader;1"].getService(Ci.xpcIJSModuleLoader);
   let componentStacks = new Map();
   let data = Cu.cloneInto(startupRecorder.data.code, {});
   // Keep only the file name for components, as the path is an absolute file
@@ -167,14 +164,14 @@ add_task(async function() {
     data[phase].components =
       data[phase].components.map(uri => {
         let fileName = uri.replace(/.*\//, "");
-        componentStacks.set(fileName, loader.getComponentLoadStack(uri));
+        componentStacks.set(fileName, Cu.getComponentLoadStack(uri));
         return fileName;
       }).filter(c => c != "startupRecorder.js");
   }
 
   function printStack(scriptType, name) {
     if (scriptType == "modules")
-      info(loader.getModuleImportStack(name));
+      info(Cu.getModuleImportStack(name));
     else if (scriptType == "components")
       info(componentStacks.get(name));
   }

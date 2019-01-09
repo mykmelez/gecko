@@ -10,7 +10,7 @@
 #include "mozilla/ThrottledEventQueue.h"
 #include "nsComponentManagerUtils.h"
 #include "nsCOMPtr.h"
-#include "nsIThreadPool.h"
+#include "nsThreadPool.h"
 #include "nsThreadUtils.h"
 #include "nsXPCOM.h"
 #include "nsXPCOMCIDInternal.h"
@@ -18,79 +18,72 @@
 
 using namespace mozilla;
 
-TEST(TestEventTargetQI, ThreadPool)
-{
-  nsCOMPtr<nsIThreadPool> thing = do_CreateInstance(NS_THREADPOOL_CONTRACTID);
-  EXPECT_TRUE(thing);
+// Cast the pointer to nsISupports* before doing the QI in order to avoid
+// a static assert intended to prevent trivial QIs.
+template <typename TargetInterface, typename SourcePtr>
+bool TestQITo(SourcePtr& aPtr1) {
+  nsCOMPtr<TargetInterface> aPtr2 =
+      do_QueryInterface(static_cast<nsISupports*>(aPtr1.get()));
+  return (bool)aPtr2;
+}
 
-  nsCOMPtr<nsISerialEventTarget> serial = do_QueryInterface(thing);
-  EXPECT_FALSE(serial);
+TEST(TestEventTargetQI, ThreadPool) {
+  nsCOMPtr<nsIThreadPool> thing = new nsThreadPool();
 
-  nsCOMPtr<nsIEventTarget> target = do_QueryInterface(thing);
-  EXPECT_TRUE(target);
+  EXPECT_FALSE(TestQITo<nsISerialEventTarget>(thing));
+
+  EXPECT_TRUE(TestQITo<nsIEventTarget>(thing));
 
   thing->Shutdown();
 }
 
-TEST(TestEventTargetQI, SharedThreadPool)
-{
-  nsCOMPtr<nsIThreadPool> thing = SharedThreadPool::Get(NS_LITERAL_CSTRING("TestPool"), 1);
+TEST(TestEventTargetQI, SharedThreadPool) {
+  nsCOMPtr<nsIThreadPool> thing =
+      SharedThreadPool::Get(NS_LITERAL_CSTRING("TestPool"), 1);
   EXPECT_TRUE(thing);
 
-  nsCOMPtr<nsISerialEventTarget> serial = do_QueryInterface(thing);
-  EXPECT_FALSE(serial);
+  EXPECT_FALSE(TestQITo<nsISerialEventTarget>(thing));
 
-  nsCOMPtr<nsIEventTarget> target = do_QueryInterface(thing);
-  EXPECT_TRUE(target);
+  EXPECT_TRUE(TestQITo<nsIEventTarget>(thing));
 }
 
-TEST(TestEventTargetQI, Thread)
-{
+TEST(TestEventTargetQI, Thread) {
   nsCOMPtr<nsIThread> thing = do_GetCurrentThread();
   EXPECT_TRUE(thing);
 
-  nsCOMPtr<nsISerialEventTarget> serial = do_QueryInterface(thing);
-  EXPECT_TRUE(serial);
+  EXPECT_TRUE(TestQITo<nsISerialEventTarget>(thing));
 
-  nsCOMPtr<nsIEventTarget> target = do_QueryInterface(thing);
-  EXPECT_TRUE(target);
+  EXPECT_TRUE(TestQITo<nsIEventTarget>(thing));
 }
 
-TEST(TestEventTargetQI, ThrottledEventQueue)
-{
+TEST(TestEventTargetQI, ThrottledEventQueue) {
   nsCOMPtr<nsIThread> thread = do_GetCurrentThread();
   RefPtr<ThrottledEventQueue> thing = ThrottledEventQueue::Create(thread);
   EXPECT_TRUE(thing);
 
-  nsCOMPtr<nsISerialEventTarget> serial = do_QueryInterface(thing);
-  EXPECT_TRUE(serial);
+  EXPECT_TRUE(TestQITo<nsISerialEventTarget>(thing));
 
-  nsCOMPtr<nsIEventTarget> target = do_QueryInterface(thing);
-  EXPECT_TRUE(target);
+  EXPECT_TRUE(TestQITo<nsIEventTarget>(thing));
 }
 
-TEST(TestEventTargetQI, LazyIdleThread)
-{
-  nsCOMPtr<nsIThread> thing = new LazyIdleThread(0, NS_LITERAL_CSTRING("TestThread"));
+TEST(TestEventTargetQI, LazyIdleThread) {
+  nsCOMPtr<nsIThread> thing =
+      new LazyIdleThread(0, NS_LITERAL_CSTRING("TestThread"));
   EXPECT_TRUE(thing);
 
-  nsCOMPtr<nsISerialEventTarget> serial = do_QueryInterface(thing);
-  EXPECT_TRUE(serial);
+  EXPECT_TRUE(TestQITo<nsISerialEventTarget>(thing));
 
-  nsCOMPtr<nsIEventTarget> target = do_QueryInterface(thing);
-  EXPECT_TRUE(target);
+  EXPECT_TRUE(TestQITo<nsIEventTarget>(thing));
 
   thing->Shutdown();
 }
 
-TEST(TestEventTargetQI, SchedulerGroup)
-{
-  nsCOMPtr<nsIEventTarget> thing = SystemGroup::EventTargetFor(TaskCategory::Other);
+TEST(TestEventTargetQI, SchedulerGroup) {
+  nsCOMPtr<nsIEventTarget> thing =
+      SystemGroup::EventTargetFor(TaskCategory::Other);
   EXPECT_TRUE(thing);
 
-  nsCOMPtr<nsISerialEventTarget> serial = do_QueryInterface(thing);
-  EXPECT_TRUE(serial);
+  EXPECT_TRUE(TestQITo<nsISerialEventTarget>(thing));
 
-  nsCOMPtr<nsIEventTarget> target = do_QueryInterface(thing);
-  EXPECT_TRUE(target);
+  EXPECT_TRUE(TestQITo<nsIEventTarget>(thing));
 }

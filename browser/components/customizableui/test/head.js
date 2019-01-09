@@ -23,7 +23,7 @@ var gCUITestUtils = new CustomizableUITestUtils(window);
 Services.prefs.setBoolPref("browser.uiCustomization.skipSourceNodeCheck", true);
 registerCleanupFunction(() => Services.prefs.clearUserPref("browser.uiCustomization.skipSourceNodeCheck"));
 
-var {synthesizeDragStart, synthesizeDrop} = EventUtils;
+var {synthesizeDragStart, synthesizeDrop, synthesizeMouseAtCenter} = EventUtils;
 
 const kNSXUL = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
@@ -47,9 +47,10 @@ function createToolbarWithPlacements(id, placements = []) {
   tb.setAttribute("customizable", "true");
   CustomizableUI.registerArea(id, {
     type: CustomizableUI.TYPE_TOOLBAR,
-    defaultPlacements: placements
+    defaultPlacements: placements,
   });
   gNavToolbox.appendChild(tb);
+  CustomizableUI.registerToolbarNode(tb);
   return tb;
 }
 
@@ -90,6 +91,7 @@ function createOverflowableToolbarWithPlacements(id, placements) {
   tb.setAttribute("overflowbutton", chevron.id);
 
   gNavToolbox.appendChild(tb);
+  CustomizableUI.registerToolbarNode(tb);
   return tb;
 }
 
@@ -178,8 +180,7 @@ function simulateItemDrag(aToDrag, aTarget, aEvent = {}) {
   let ev = aEvent;
   if (ev == "end" || ev == "start") {
     let win = aTarget.ownerGlobal;
-    win.QueryInterface(Ci.nsIInterfaceRequestor);
-    const dwu = win.getInterface(Ci.nsIDOMWindowUtils);
+    const dwu = win.windowUtils;
     let bounds = dwu.getBoundsWithoutFlushing(aTarget);
     if (ev == "end") {
       ev = {clientX: bounds.right - 2, clientY: bounds.bottom - 2};
@@ -190,6 +191,8 @@ function simulateItemDrag(aToDrag, aTarget, aEvent = {}) {
   ev._domDispatchOnly = true;
   synthesizeDrop(aToDrag.parentNode, aTarget, null, null,
                  aToDrag.ownerGlobal, aTarget.ownerGlobal, ev);
+  // Ensure dnd suppression is cleared.
+  synthesizeMouseAtCenter(aTarget, { type: "mouseup" }, aTarget.ownerGlobal);
 }
 
 function endCustomizing(aWindow = window) {
@@ -445,12 +448,12 @@ function promisePopupEvent(aPopup, aEventSuffix) {
 // This is a simpler version of the context menu check that
 // exists in contextmenu_common.js.
 function checkContextMenu(aContextMenu, aExpectedEntries, aWindow = window) {
-  let childNodes = [...aContextMenu.childNodes];
+  let children = [...aContextMenu.children];
   // Ignore hidden nodes:
-  childNodes = childNodes.filter((n) => !n.hidden);
+  children = children.filter((n) => !n.hidden);
 
-  for (let i = 0; i < childNodes.length; i++) {
-    let menuitem = childNodes[i];
+  for (let i = 0; i < children.length; i++) {
+    let menuitem = children[i];
     try {
       if (aExpectedEntries[i][0] == "---") {
         is(menuitem.localName, "menuseparator", "menuseparator expected");
@@ -478,7 +481,7 @@ function waitForOverflowButtonShown(win = window) {
 }
 function waitForElementShown(element) {
   let win = element.ownerGlobal;
-  let dwu = win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+  let dwu = win.windowUtils;
   return BrowserTestUtils.waitForCondition(() => {
     info("Waiting for overflow button to have non-0 size");
     let bounds = dwu.getBoundsWithoutFlushing(element);

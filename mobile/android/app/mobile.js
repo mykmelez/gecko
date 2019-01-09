@@ -49,6 +49,10 @@ pref("toolkit.zoomManager.zoomValues", ".2,.3,.5,.67,.8,.9,1,1.1,1.2,1.33,1.5,1.
 // Mobile will use faster, less durable mode.
 pref("toolkit.storage.synchronous", 0);
 
+// Android needs concurrent access to the same database from multiple processes,
+// thus we can't use exclusive locking on it.
+pref("storage.multiProcessAccess.enabled", true);
+
 pref("browser.viewport.desktopWidth", 980);
 // The default fallback zoom level to render pages at. Set to -1 to fit page; otherwise
 // the value is divided by 1000 and clamped to hard-coded min/max scale values.
@@ -186,6 +190,10 @@ pref("xpinstall.whitelist.add", "https://addons.mozilla.org,https://testpilot.fi
 pref("extensions.langpacks.signatures.required", true);
 pref("xpinstall.signatures.required", true);
 
+// Disable add-ons that are not installed by the user in all scopes by default (See the SCOPE
+// constants in AddonManager.jsm for values to use here, and Bug 1405528 for a rationale).
+pref("extensions.autoDisableScopes", 15);
+
 pref("extensions.enabledScopes", 1);
 pref("extensions.autoupdate.enabled", true);
 pref("extensions.autoupdate.interval", 86400);
@@ -208,6 +216,7 @@ pref("extensions.getAddons.search.browseURL", "https://addons.mozilla.org/%LOCAL
 pref("extensions.getAddons.browseAddons", "https://addons.mozilla.org/%LOCALE%/android/");
 pref("extensions.getAddons.get.url", "https://services.addons.mozilla.org/api/v3/addons/search/?guid=%IDS%&lang=%LOCALE%");
 pref("extensions.getAddons.compatOverides.url", "https://services.addons.mozilla.org/api/v3/addons/compat-override/?guid=%IDS%&lang=%LOCALE%");
+pref("extensions.getAddons.langpacks.url", "https://services.addons.mozilla.org/api/v3/addons/language-tools/?app=android&type=language&appversion=%VERSION%");
 
 /* preference for the locale picker */
 pref("extensions.getLocales.get.url", "");
@@ -222,6 +231,8 @@ pref("extensions.webextOptionalPermissionPrompts", true);
 // Add-on content security policies.
 pref("extensions.webextensions.base-content-security-policy", "script-src 'self' https://* moz-extension: blob: filesystem: 'unsafe-eval' 'unsafe-inline'; object-src 'self' https://* moz-extension: blob: filesystem:;");
 pref("extensions.webextensions.default-content-security-policy", "script-src 'self'; object-src 'self';");
+
+pref("extensions.webextensions.background-delayed-startup", true);
 
 pref("extensions.legacy.enabled", false);
 
@@ -357,7 +368,7 @@ pref("dom.max_script_run_time", 20);
 
 // Absolute path to the devtools unix domain socket file used
 // to communicate with a usb cable via adb forward.
-pref("devtools.debugger.unix-domain-socket", "/data/data/@ANDROID_PACKAGE_NAME@/firefox-debugger-socket");
+pref("devtools.debugger.unix-domain-socket", "@ANDROID_PACKAGE_NAME@/firefox-debugger-socket");
 
 pref("devtools.remote.usb.enabled", false);
 pref("devtools.remote.wifi.enabled", false);
@@ -408,7 +419,7 @@ pref("dom.ipc.plugins.enabled", false);
 
 // product URLs
 // The breakpad report server to link to in about:crashes
-pref("breakpad.reportURL", "https://crash-stats.mozilla.com/report/index/");
+pref("breakpad.reportURL", "https://crash-stats.mozilla.org/report/index/");
 
 pref("app.support.baseURL", "https://support.mozilla.org/1/mobile/%VERSION%/%OS%/%LOCALE%/");
 pref("app.supportURL", "https://support.mozilla.org/1/mobile/%VERSION%/%OS%/%LOCALE%/mobile-help");
@@ -484,7 +495,6 @@ pref("app.update.url.android", "https://aus5.mozilla.org/update/4/%PRODUCT%/%VER
 
 #ifdef MOZ_UPDATER
 /* prefs used specifically for updating the app */
-pref("app.update.enabled", false);
 pref("app.update.channel", "@MOZ_UPDATE_CHANNEL@");
 
 #endif
@@ -534,6 +544,10 @@ pref("layers.low-precision-opacity", "1.0");
 // work harder keep scrolling smooth and memory low.
 pref("layers.max-active", 20);
 
+// On Fennec we need containerful scrolling to support zooming. Bug 1459312
+// tracks zooming with containerless scrolling.
+pref("layout.scroll.root-frame-containers", 1);
+
 pref("notification.feature.enabled", true);
 pref("dom.webnotifications.enabled", true);
 
@@ -567,6 +581,16 @@ pref("media.mediasource.enabled", true);
 
 pref("media.mediadrm-widevinecdm.visible", true);
 
+#ifdef NIGHTLY_BUILD
+// Switch block autoplay logic to v2.
+pref("media.autoplay.enabled.user-gestures-needed", true);
+// Set Fennec to block autoplay by default.
+pref("media.autoplay.default", 1); // 0=Allowed, 1=Blocked
+#else
+pref("media.autoplay.default", 0); // 0=Allowed, 1=Blocked
+pref("media.autoplay.enabled.user-gestures-needed", false);
+#endif
+
 // Enable WebSpeech speech synthesis
 pref("media.webspeech.synth.enabled", true);
 
@@ -596,6 +620,7 @@ pref("browser.firstrun.show.localepicker", false);
 // $ adb shell setprop log.redirect-stdio true
 // $ adb shell start
 pref("browser.dom.window.dump.enabled", true);
+pref("devtools.console.stdout.chrome", true);
 
 // controls if we want camera support
 pref("device.camera.enabled", true);
@@ -681,6 +706,9 @@ pref("layers.enable-tiles", true);
 // Enable the dynamic toolbar
 pref("browser.chrome.dynamictoolbar", true);
 
+// Location Bar AutoComplete.
+pref("browser.urlbar.autocomplete.enabled", true);
+
 // Hide common parts of URLs like "www." or "http://"
 pref("browser.urlbar.trimURLs", true);
 
@@ -761,10 +789,13 @@ pref("media.gmp-provider.enabled", true);
 // The default color scheme in reader mode (light, dark, auto)
 // auto = color automatically adjusts according to ambient light level
 // (auto only works on platforms where the 'devicelight' event is enabled)
-pref("reader.color_scheme", "auto");
+// auto doesn't work: https://bugzilla.mozilla.org/show_bug.cgi?id=1472957
+// pref("reader.color_scheme", "auto");
+pref("reader.color_scheme", "light");
 
 // Color scheme values available in reader mode UI.
-pref("reader.color_scheme.values", "[\"dark\",\"auto\",\"light\"]");
+// pref("reader.color_scheme.values", "[\"dark\",\"auto\",\"light\"]");
+pref("reader.color_scheme.values", "[\"dark\",\"sepia\",\"light\"]");
 
 // Whether to use a vertical or horizontal toolbar.
 pref("reader.toolbar.vertical", false);
@@ -810,7 +841,6 @@ pref("dom.vr.enabled", true);
 pref("browser.tabs.showAudioPlayingIcon", true);
 
 pref("dom.serviceWorkers.enabled", true);
-pref("dom.serviceWorkers.interception.enabled", true);
 
 // Allow service workers to open windows for a longer period after a notification
 // click on mobile.  This is to account for some devices being quite slow.
@@ -857,12 +887,13 @@ pref("media.openUnsupportedTypeWithExternalApp", true);
 
 pref("dom.keyboardevent.dispatch_during_composition", true);
 
-#if CPU_ARCH == aarch64
-pref("javascript.options.native_regexp", false);
-#endif
-
 // Ask for permission when enumerating WebRTC devices.
 pref("media.navigator.permission.device", true);
 
 // Allow system add-on updates
 pref("extensions.systemAddon.update.url", "https://aus5.mozilla.org/update/3/SystemAddons/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
+
+// E10s stuff. We don't support 'file' or 'priveleged' process types.
+pref("browser.tabs.remote.separateFileUriProcess", false);
+pref("browser.tabs.remote.allowLinkedWebInFileUriProcess", true);
+pref("browser.tabs.remote.separatePrivilegedContentProcess", false);

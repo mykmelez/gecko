@@ -16,16 +16,33 @@ function getActorInstance(connID, actorID) {
  * regardless of the object's state.
  */
 add_task(async function() {
-  DebuggerServer.addActors("resource://test/pre_init_global_actors.js");
-  DebuggerServer.addActors("resource://test/pre_init_target_scoped_actors.js");
+  ActorRegistry.registerModule("resource://test/pre_init_global_actors.js", {
+    prefix: "preInitGlobal",
+    constructor: "PreInitGlobalActor",
+    type: { global: true },
+  });
+  ActorRegistry.registerModule("resource://test/pre_init_target_scoped_actors.js", {
+    prefix: "preInitTargetScoped",
+    constructor: "PreInitTargetScopedActor",
+    type: { target: true },
+  });
 
   const client = await startTestDebuggerServer("example tab");
 
-  DebuggerServer.addActors("resource://test/post_init_global_actors.js");
-  DebuggerServer.addActors("resource://test/post_init_target_scoped_actors.js");
+  ActorRegistry.registerModule("resource://test/post_init_global_actors.js", {
+    prefix: "postInitGlobal",
+    constructor: "PostInitGlobalActor",
+    type: { global: true },
+  });
+  ActorRegistry.registerModule("resource://test/post_init_target_scoped_actors.js", {
+    prefix: "postInitTargetScoped",
+    constructor: "PostInitTargetScopedActor",
+    type: { target: true },
+  });
 
-  let actors = await client.listTabs();
-  Assert.equal(actors.tabs.length, 1);
+  let actors = await client.mainRoot.rootForm;
+  const tabs = await client.mainRoot.listTabs();
+  Assert.equal(tabs.length, 1);
 
   let reply = await client.request({
     to: actors.preInitGlobalActor,
@@ -34,7 +51,7 @@ add_task(async function() {
   Assert.equal(reply.message, "pong");
 
   reply = await client.request({
-    to: actors.tabs[0].preInitTargetScopedActor,
+    to: tabs[0].targetForm.preInitTargetScopedActor,
     type: "ping",
   });
   Assert.equal(reply.message, "pong");
@@ -46,7 +63,7 @@ add_task(async function() {
   Assert.equal(reply.message, "pong");
 
   reply = await client.request({
-    to: actors.tabs[0].postInitTargetScopedActor,
+    to: tabs[0].targetForm.postInitTargetScopedActor,
     type: "ping",
   });
   Assert.equal(reply.message, "pong");
@@ -55,7 +72,7 @@ add_task(async function() {
   const connID = Object.keys(DebuggerServer._connections)[0];
   const postInitGlobalActor = getActorInstance(connID, actors.postInitGlobalActor);
   const preInitGlobalActor = getActorInstance(connID, actors.preInitGlobalActor);
-  actors = await client.listTabs();
+  actors = await client.mainRoot.getRoot();
   Assert.equal(postInitGlobalActor,
     getActorInstance(connID, actors.postInitGlobalActor));
   Assert.equal(preInitGlobalActor,

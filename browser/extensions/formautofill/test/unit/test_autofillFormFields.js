@@ -5,8 +5,10 @@
 
 "use strict";
 
-ChromeUtils.import("resource://formautofill/FormAutofillHandler.jsm");
-let {MasterPassword} = ChromeUtils.import("resource://formautofill/MasterPassword.jsm", {});
+add_task(async function setup() {
+  ChromeUtils.import("resource://formautofill/FormAutofillHandler.jsm");
+  ChromeUtils.import("resource://formautofill/OSKeyStore.jsm");
+});
 
 const TESTCASES = [
   {
@@ -246,7 +248,7 @@ const TESTCASES = [
     focusedInputId: "cc-number",
     profileData: {
       "guid": "123",
-      "cc-number": "1234000056780000",
+      "cc-number": "4111111111111111",
       "cc-name": "test name",
       "cc-exp-month": "06",
       "cc-exp-year": "25",
@@ -257,7 +259,7 @@ const TESTCASES = [
       "country": "",
       "email": "",
       "tel": "",
-      "cc-number": "1234000056780000",
+      "cc-number": "4111111111111111",
       "cc-name": "test name",
       "cc-exp-month": "06",
       "cc-exp-year": "25",
@@ -474,7 +476,7 @@ function do_test(testcases, testFn) {
         info("Starting testcase: " + testcase.description);
         let ccNumber = testcase.profileData["cc-number"];
         if (ccNumber) {
-          testcase.profileData["cc-number-encrypted"] = await MasterPassword.encrypt(ccNumber);
+          testcase.profileData["cc-number-encrypted"] = await OSKeyStore.encrypt(ccNumber);
           delete testcase.profileData["cc-number"];
         }
 
@@ -484,18 +486,11 @@ function do_test(testcases, testFn) {
         let formLike = FormLikeFactory.createFromForm(form);
         let handler = new FormAutofillHandler(formLike);
         let promises = [];
-        // Replace the interal decrypt method with MasterPassword API
+        // Replace the internal decrypt method with OSKeyStore API,
+        // but don't pass the reauth parameter to avoid triggering
+        // reauth login dialog in these tests.
         let decryptHelper = async (cipherText, reauth) => {
-          let string;
-          try {
-            string = await MasterPassword.decrypt(cipherText, reauth);
-          } catch (e) {
-            if (e.result != Cr.NS_ERROR_ABORT) {
-              throw e;
-            }
-            info("User canceled master password entry");
-          }
-          return string;
+          return OSKeyStore.decrypt(cipherText, false);
         };
 
         handler.collectFormFields();

@@ -19,11 +19,10 @@ namespace a11y {
 
 /**
  * XULColumAccessible are accessible for list and tree columns elements
- * (xul:treecols and xul:listcols).
+ * (xul:treecols and xul:listheader).
  */
-class XULColumAccessible : public AccessibleWrap
-{
-public:
+class XULColumAccessible : public AccessibleWrap {
+ public:
   XULColumAccessible(nsIContent* aContent, DocAccessible* aDoc);
 
   // Accessible
@@ -33,11 +32,10 @@ public:
 
 /**
  * XULColumnItemAccessible are accessibles for list and tree column elements
- * (xul:listcol and xul:treecol).
+ * (xul:treecol).
  */
-class XULColumnItemAccessible : public LeafAccessible
-{
-public:
+class XULColumnItemAccessible : public LeafAccessible {
+ public:
   XULColumnItemAccessible(nsIContent* aContent, DocAccessible* aDoc);
 
   // Accessible
@@ -56,15 +54,15 @@ public:
  * A class the represents the XUL Listbox widget.
  */
 class XULListboxAccessible : public XULSelectControlAccessible,
-                             public TableAccessible
-{
-public:
+                             public TableAccessible {
+ public:
   XULListboxAccessible(nsIContent* aContent, DocAccessible* aDoc);
 
   // TableAccessible
   virtual uint32_t ColCount() const override;
   virtual uint32_t RowCount() override;
-  virtual Accessible* CellAt(uint32_t aRowIndex, uint32_t aColumnIndex) override;
+  virtual Accessible* CellAt(uint32_t aRowIndex,
+                             uint32_t aColumnIndex) override;
   virtual bool IsColSelected(uint32_t aColIdx) override;
   virtual bool IsRowSelected(uint32_t aRowIdx) override;
   virtual bool IsCellSelected(uint32_t aRowIdx, uint32_t aColIdx) override;
@@ -92,18 +90,17 @@ public:
 
   virtual Accessible* ContainerWidget() const override;
 
-protected:
+ protected:
   virtual ~XULListboxAccessible() {}
 
   bool IsMulticolumn() const { return ColCount() > 1; }
 };
 
 /**
-  * Listitems -- used in listboxes
-  */
-class XULListitemAccessible : public XULMenuitemAccessible
-{
-public:
+ * Listitems -- used in listboxes
+ */
+class XULListitemAccessible : public XULMenuitemAccessible {
+ public:
   enum { eAction_Click = 0 };
 
   NS_INLINE_DECL_REFCOUNTING_INHERITED(XULListitemAccessible,
@@ -123,7 +120,7 @@ public:
   // Widgets
   virtual Accessible* ContainerWidget() const override;
 
-protected:
+ protected:
   virtual ~XULListitemAccessible();
 
   // Accessible
@@ -136,40 +133,11 @@ protected:
    */
   Accessible* GetListAccessible() const;
 
-private:
+ private:
   bool mIsCheckbox;
 };
 
-/**
- * Class represents xul:listcell.
- */
-class XULListCellAccessible : public HyperTextAccessibleWrap,
-                              public TableCellAccessible
-{
-public:
-  XULListCellAccessible(nsIContent* aContent, DocAccessible* aDoc);
-
-  // nsISupports
-  NS_INLINE_DECL_REFCOUNTING_INHERITED(XULListCellAccessible,
-                                       HyperTextAccessibleWrap)
-
-  // Accessible
-  virtual TableCellAccessible* AsTableCell() override { return this; }
-  virtual already_AddRefed<nsIPersistentProperties> NativeAttributes() override;
-  virtual a11y::role NativeRole() const override;
-
-  // TableCellAccessible
-  virtual TableAccessible* Table() const override;
-  virtual uint32_t ColIdx() const override;
-  virtual uint32_t RowIdx() const override;
-  virtual void ColHeaderCells(nsTArray<Accessible*>* aHeaderCells) override;
-  virtual bool Selected() override;
-
-protected:
-  virtual ~XULListCellAccessible() {}
-};
-
-} // namespace a11y
-} // namespace mozilla
+}  // namespace a11y
+}  // namespace mozilla
 
 #endif

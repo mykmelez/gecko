@@ -180,9 +180,7 @@ function testModeCors() {
                },
 
                // nonempty password
-               // XXXbz this passes for now, because we ignore passwords
-               // without usernames in most cases.
-               { pass: 1,
+               { pass: 0,
                  method: "GET",
                  noAllowPreflight: 1,
                  password: "password",
@@ -1723,7 +1721,7 @@ function testReferrer() {
   var dict = {
     'Referer': referrer
   };
-  return fetch(corsServerPath + "headers=" + dict.toSource()).then(function(res) {
+  return fetch(corsServerPath + "headers=" + encodeURIComponent(dict.toSource())).then(function(res) {
     is(res.status, 200, "expected correct referrer header to be sent");
     dump(res.statusText);
   }, function(e) {

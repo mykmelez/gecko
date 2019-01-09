@@ -35,7 +35,7 @@ APP_NAME=''
 HGHOST="hg.mozilla.org"
 STAGEHOST="archive.mozilla.org"
 WGET="wget -nv"
-UNZIP="unzip -q"
+UNTAR="tar -zxf"
 DIFF="$(command -v diff) -u"
 BASEDIR="${HOME}"
 TOOLSDIR="${HOME}/tools"
@@ -80,13 +80,29 @@ REMOTE_SETTINGS_OUTPUT="${DATADIR}/remote-settings.out"
 REMOTE_SETTINGS_DIR="/services/settings/dumps"
 REMOTE_SETTINGS_UPDATED=false
 
+DO_SUFFIX_LIST=false
+GITHUB_SUFFIX_URL="https://raw.githubusercontent.com/publicsuffix/list/master/public_suffix_list.dat"
+GITHUB_SUFFIX_LOCAL="public_suffix_list.dat"
+HG_SUFFIX_LOCAL="effective_tld_names.dat"
+HG_SUFFIX_PATH="/netwerk/dns/${HG_SUFFIX_LOCAL}"
+SUFFIX_LIST_UPDATED=false
+
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-.}"
 # Defaults
 HSTS_DIFF_ARTIFACT="${ARTIFACTS_DIR}/${HSTS_DIFF_ARTIFACT:-"nsSTSPreloadList.diff"}"
 HPKP_DIFF_ARTIFACT="${ARTIFACTS_DIR}/${HPKP_DIFF_ARTIFACT:-"StaticHPKPins.h.diff"}"
 BLOCKLIST_DIFF_ARTIFACT="${ARTIFACTS_DIR}/${BLOCKLIST_DIFF_ARTIFACT:-"blocklist.diff"}"
 REMOTE_SETTINGS_DIFF_ARTIFACT="${ARTIFACTS_DIR}/${REMOTE_SETTINGS_DIFF_ARTIFACT:-"remote-settings.diff"}"
+SUFFIX_LIST_DIFF_ARTIFACT="${ARTIFACTS_DIR}/${SUFFIX_LIST_DIFF_ARTIFACT:-"effective_tld_names.diff"}"
 
+# duplicate the functionality of taskcluster-lib-urls, but in bash..
+if [ "$TASKCLUSTER_ROOT_URL" = "https://taskcluster.net" ]; then
+    queue_base='https://queue.taskcluster.net/v1'
+    index_base='https://index.taskcluster.net/v1'
+else
+    queue_base="$TASKCLUSTER_ROOT_URL/api/queue/v1"
+    index_base="$TASKCLUSTER_ROOT_URL/api/index/v1"
+fi
 
 # Get the current in-tree version for a code branch.
 function get_version {
@@ -139,11 +155,11 @@ function download_shared_artifacts_from_tc {
 
   # Download everything we need to run js with xpcshell
   echo "INFO: Downloading all the necessary pieces from the taskcluster index..."
-  TASKID_URL="https://index.taskcluster.net/v1/task/gecko.v2.${REPODIR}.latest.${PRODUCT}.linux64-opt"
+  TASKID_URL="$index_base/task/gecko.v2.${REPODIR}.latest.${PRODUCT}.linux64-opt"
   if [ "${USE_MC}" == "true" ]; then
-    TASKID_URL="https://index.taskcluster.net/v1/task/gecko.v2.mozilla-central.latest.${PRODUCT}.linux64-opt"
+    TASKID_URL="$index_base/task/gecko.v2.mozilla-central.latest.${PRODUCT}.linux64-opt"
   fi
-  ${WGET} -O ${TASKID_FILE} ${TASKID_URL}
+  ${WGET} -O ${TASKID_FILE} "${TASKID_URL}"
   INDEX_TASK_ID="$($JQ -r '.taskId' ${TASKID_FILE})"
   if [ -z "${INDEX_TASK_ID}" ]; then
     echo "Failed to look up taskId at ${TASKID_URL}"
@@ -153,16 +169,16 @@ function download_shared_artifacts_from_tc {
   fi
 
   TASKSTATUS_FILE="taskstatus.json"
-  STATUS_URL="https://queue.taskcluster.net/v1/task/${INDEX_TASK_ID}/status"
+  STATUS_URL="$queue_base/task/${INDEX_TASK_ID}/status"
   ${WGET} -O "${TASKSTATUS_FILE}" "${STATUS_URL}"
   LAST_RUN_INDEX=$(($(jq '.status.runs | length' ${TASKSTATUS_FILE}) - 1))
   echo "INFO: Examining run number ${LAST_RUN_INDEX}"
 
-  BROWSER_ARCHIVE_URL="https://queue.taskcluster.net/v1/task/${INDEX_TASK_ID}/runs/${LAST_RUN_INDEX}/artifacts/public/build/${BROWSER_ARCHIVE}"
+  BROWSER_ARCHIVE_URL="$queue_base/task/${INDEX_TASK_ID}/runs/${LAST_RUN_INDEX}/artifacts/public/build/${BROWSER_ARCHIVE}"
   echo "INFO: ${WGET} ${BROWSER_ARCHIVE_URL}"
   ${WGET} "${BROWSER_ARCHIVE_URL}"
 
-  TESTS_ARCHIVE_URL="https://queue.taskcluster.net/v1/task/${INDEX_TASK_ID}/runs/${LAST_RUN_INDEX}/artifacts/public/build/${TESTS_ARCHIVE}"
+  TESTS_ARCHIVE_URL="$queue_base/task/${INDEX_TASK_ID}/runs/${LAST_RUN_INDEX}/artifacts/public/build/${TESTS_ARCHIVE}"
   echo "INFO: ${WGET} ${TESTS_ARCHIVE_URL}"
   ${WGET} "${TESTS_ARCHIVE_URL}"
 }
@@ -182,7 +198,7 @@ function unpack_artifacts {
   ${UNPACK_CMD} "${BROWSER_ARCHIVE}"
   mkdir -p tests
   cd tests
-  ${UNZIP} "../${TESTS_ARCHIVE}"
+  ${UNTAR} "../${TESTS_ARCHIVE}"
   cd "${BASEDIR}"
   cp tests/bin/xpcshell "${PRODUCT}"
 }
@@ -273,6 +289,28 @@ function is_valid_xml {
     exit 60
   fi
   ${XMLLINT} --nonet --noout "${xmlfile}"
+}
+
+# Downloads the public suffix list
+function compare_suffix_lists {
+  HG_SUFFIX_URL="${HGREPO}/raw-file/default/${HG_SUFFIX_PATH}"
+  cd "${BASEDIR}"
+
+  echo "INFO: ${WGET} -O ${GITHUB_SUFFIX_LOCAL} ${GITHUB_SUFFIX_URL}"
+  rm -f "${GITHUB_SUFFIX_LOCAL}"
+  ${WGET} -O "${GITHUB_SUFFIX_LOCAL}" "${GITHUB_SUFFIX_URL}"
+
+  echo "INFO: ${WGET} -O ${HG_SUFFIX_LOCAL} ${HG_SUFFIX_URL}"
+  rm -f "${HG_SUFFIX_LOCAL}"
+  ${WGET} -O "${HG_SUFFIX_LOCAL}" "${HG_SUFFIX_URL}"
+
+  echo "INFO: diffing in-tree blocklist against the blocklist from AMO..."
+  ${DIFF} ${GITHUB_SUFFIX_LOCAL} ${HG_SUFFIX_LOCAL} | tee "${SUFFIX_LIST_DIFF_ARTIFACT}"
+  if [ -s "${SUFFIX_LIST_DIFF_ARTIFACT}" ]
+  then
+    return 0
+  fi
+  return 1
 }
 
 # Downloads the current in-tree blocklist file.
@@ -383,6 +421,11 @@ function stage_remote_settings_files {
   cp -a "${REMOTE_SETTINGS_OUTPUT}"/* "${REPODIR}${REMOTE_SETTINGS_DIR}"
 }
 
+function stage_tld_suffix_files {
+  cd "${BASEDIR}"
+  cp -a "${GITHUB_SUFFIX_LOCAL}" "${REPODIR}/${HG_SUFFIX_PATH}"
+}
+
 # Push all pending commits to Phabricator
 function push_repo {
   cd "${REPODIR}"
@@ -430,6 +473,7 @@ while [ $# -gt 0 ]; do
     --hpkp) DO_HPKP=true ;;
     --blocklist) DO_BLOCKLIST=true ;;
     --remote-settings) DO_REMOTE_SETTINGS=true ;;
+    --suffix-list) DO_SUFFIX_LIST=true ;;
     -r) REPODIR="$2"; shift ;;
     --use-mozilla-central) USE_MC=true ;;
     --use-ftp-builds) USE_TC=false ;;
@@ -448,7 +492,7 @@ if [ "${BRANCH}" == "" ]; then
 fi
 
 # Must choose at least one update action.
-if [ "$DO_HSTS" == "false" ] && [ "$DO_HPKP" == "false" ] && [ "$DO_BLOCKLIST" == "false" ] && [ "$DO_REMOTE_SETTINGS" == "false" ]
+if [ "$DO_HSTS" == "false" ] && [ "$DO_HPKP" == "false" ] && [ "$DO_BLOCKLIST" == "false" ] && [ "$DO_REMOTE_SETTINGS" == "false" ] && [ "$DO_SUFFIX_LIST" == "false" ]
 then
   echo "Error: you must specify at least one action from: --hsts, --hpkp, --blocklist, --remote-settings" >&2
   usage
@@ -461,6 +505,7 @@ case "${PRODUCT}" in
     APP_DIR="mail"
     APP_ID="%7B3550f703-e582-4d05-9a08-453d09bdfdc6%7D"
     APP_NAME="Thunderbird"
+    COMMIT_AUTHOR="tbirdbld <tbirdbld@thunderbird.net>"
     ;;
   firefox)
     APP_DIR="browser"
@@ -478,13 +523,18 @@ if [ "${REPODIR}" == "" ]; then
   REPODIR="$(basename "${BRANCH}")"
 fi
 
-if [ "${BRANCH}" == "mozilla-central" ]; then
-  HGREPO="https://${HGHOST}/${BRANCH}"
-elif [[ "${BRANCH}" == mozilla-* ]]; then
-  HGREPO="https://${HGHOST}/releases/${BRANCH}"
-else
-  HGREPO="https://${HGHOST}/projects/${BRANCH}"
-fi
+case "${BRANCH}" in
+  mozilla-central|comm-central )
+    HGREPO="https://${HGHOST}/${BRANCH}"
+    ;;
+  mozilla-*|comm-* )
+    HGREPO="https://${HGHOST}/releases/${BRANCH}"
+    ;;
+  * )
+    HGREPO="https://${HGHOST}/projects/${BRANCH}"
+    ;;
+esac
+
 MCREPO="https://${HGHOST}/mozilla-central"
 
 # Remove once 52esr is off support
@@ -498,15 +548,15 @@ if [ "${USE_MC}" == "true" ]; then
 fi
 
 BROWSER_ARCHIVE="${PRODUCT}-${VERSION}.en-US.${PLATFORM}.${PLATFORM_EXT}"
-TESTS_ARCHIVE="${PRODUCT}-${VERSION}.en-US.${PLATFORM}.common.tests.zip"
+TESTS_ARCHIVE="${PRODUCT}-${VERSION}.en-US.${PLATFORM}.common.tests.tar.gz"
 if [ "${USE_MC}" == "true" ]; then
   BROWSER_ARCHIVE="${PRODUCT}-${MCVERSION}.en-US.${PLATFORM}.${PLATFORM_EXT}"
-  TESTS_ARCHIVE="${PRODUCT}-${MCVERSION}.en-US.${PLATFORM}.common.tests.zip"
+  TESTS_ARCHIVE="${PRODUCT}-${MCVERSION}.en-US.${PLATFORM}.common.tests.tar.gz"
 fi
 # Simple name builds on >=53.0.0
 if [ "${MAJOR_VERSION}" -ge 53 ] ; then
   BROWSER_ARCHIVE="target.${PLATFORM_EXT}"
-  TESTS_ARCHIVE="target.common.tests.zip"
+  TESTS_ARCHIVE="target.common.tests.tar.gz"
 fi
 # End 'remove once 52esr is off support'
 
@@ -545,8 +595,15 @@ if [ "${DO_REMOTE_SETTINGS}" == "true" ]; then
     REMOTE_SETTINGS_UPDATED=true
   fi
 fi
+if [ "${DO_SUFFIX_LIST}" == "true" ]; then
+  if compare_suffix_lists
+  then
+    SUFFIX_LIST_UPDATED=true
+  fi
+fi
 
-if [ "${HSTS_UPDATED}" == "false" ] && [ "${HPKP_UPDATED}" == "false" ] && [ "${BLOCKLIST_UPDATED}" == "false" ] && [ "${REMOTE_SETTINGS_UPDATED}" == "false" ]; then
+
+if [ "${HSTS_UPDATED}" == "false" ] && [ "${HPKP_UPDATED}" == "false" ] && [ "${BLOCKLIST_UPDATED}" == "false" ] && [ "${REMOTE_SETTINGS_UPDATED}" == "false" ] && [ "${SUFFIX_LIST_UPDATED}" == "false" ]; then
   echo "INFO: no updates required. Exiting."
   exit 0
 else
@@ -585,6 +642,13 @@ then
   stage_remote_settings_files
   COMMIT_MESSAGE="${COMMIT_MESSAGE} remote-settings"
 fi
+
+if [ "${SUFFIX_LIST_UPDATED}" == "true" ]
+then
+  stage_tld_suffix_files
+  COMMIT_MESSAGE="${COMMIT_MESSAGE} tld-suffixes"
+fi
+
 
 if [ ${DONTBUILD} == true ]; then
   COMMIT_MESSAGE="${COMMIT_MESSAGE} - (DONTBUILD)"

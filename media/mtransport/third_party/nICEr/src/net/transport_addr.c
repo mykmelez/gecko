@@ -99,12 +99,12 @@ int nr_transport_addr_fmt_ifname_addr_string(const nr_transport_addr *addr, char
     switch(addr->ip_version){
       case NR_IPV4:
         if (!inet_ntop(AF_INET, &addr->u.addr4.sin_addr,buffer,sizeof(buffer))) {
-           strncpy(buffer, "[error]", len);
+           strncpy(buffer, "[error]", sizeof(buffer));
         }
         break;
       case NR_IPV6:
         if (!inet_ntop(AF_INET6, &addr->u.addr6.sin6_addr,buffer,sizeof(buffer))) {
-           strncpy(buffer, "[error]", len);
+           strncpy(buffer, "[error]", sizeof(buffer));
         }
         break;
       default:
@@ -467,7 +467,7 @@ int nr_transport_addr_is_teredo(nr_transport_addr *addr)
       case NR_IPV6:
         {
           UINT4* addrTop = (UINT4*)(addr->u.addr6.sin6_addr.s6_addr);
-          if ((*addrTop & htonl(0xFFFF0000)) == htonl(0x20010000))
+          if ((*addrTop & htonl(0xFFFFFFFF)) == htonl(0x20010000))
             return(1);
         }
         break;

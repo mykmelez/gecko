@@ -10,16 +10,20 @@ const InspectorUtils = require("InspectorUtils");
 const protocol = require("devtools/shared/protocol");
 const { nodeSpec, nodeListSpec } = require("devtools/shared/specs/node");
 
-loader.lazyRequireGetter(this, "colorUtils", "devtools/shared/css/color", true);
-
 loader.lazyRequireGetter(this, "getCssPath", "devtools/shared/inspector/css-logic", true);
 loader.lazyRequireGetter(this, "getXPath", "devtools/shared/inspector/css-logic", true);
 loader.lazyRequireGetter(this, "findCssSelector", "devtools/shared/inspector/css-logic", true);
 
-loader.lazyRequireGetter(this, "isNativeAnonymous", "devtools/shared/layout/utils", true);
-loader.lazyRequireGetter(this, "isXBLAnonymous", "devtools/shared/layout/utils", true);
-loader.lazyRequireGetter(this, "isShadowAnonymous", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "isAfterPseudoElement", "devtools/shared/layout/utils", true);
 loader.lazyRequireGetter(this, "isAnonymous", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "isBeforePseudoElement", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "isDirectShadowHostChild", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "isNativeAnonymous", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "isShadowAnonymous", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "isShadowHost", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "isShadowRoot", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "getShadowRootMode", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "isXBLAnonymous", "devtools/shared/layout/utils", true);
 
 loader.lazyRequireGetter(this, "InspectorActorUtils", "devtools/server/actors/inspector/utils");
 loader.lazyRequireGetter(this, "LongStringActor", "devtools/server/actors/string", true);
@@ -30,7 +34,7 @@ loader.lazyRequireGetter(this, "EventParsers", "devtools/server/actors/inspector
 const SUBGRID_ENABLED =
   Services.prefs.getBoolPref("layout.css.grid-template-subgrid-value.enabled");
 
-const PSEUDO_CLASSES = [":hover", ":active", ":focus"];
+const PSEUDO_CLASSES = [":hover", ":active", ":focus", ":focus-within"];
 const FONT_FAMILY_PREVIEW_TEXT = "The quick brown fox jumps over the lazy dog";
 const FONT_FAMILY_PREVIEW_TEXT_SIZE = 20;
 
@@ -97,9 +101,12 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
 
     const parentNode = this.walker.parentNode(this);
     const inlineTextChild = this.walker.inlineTextChild(this);
+    const shadowRoot = isShadowRoot(this.rawNode);
+    const hostActor = shadowRoot ? this.walker.getNode(this.rawNode.host) : null;
 
     const form = {
       actor: this.actorID,
+      host: hostActor ? hostActor.actorID : undefined,
       baseURI: this.rawNode.baseURI,
       parent: parentNode ? parentNode.actorID : undefined,
       nodeType: this.rawNode.nodeType,
@@ -117,15 +124,17 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       systemId: this.rawNode.systemId,
 
       attrs: this.writeAttrs(),
-      isBeforePseudoElement: this.isBeforePseudoElement,
-      isAfterPseudoElement: this.isAfterPseudoElement,
+      customElementLocation: this.getCustomElementLocation(),
+      isBeforePseudoElement: isBeforePseudoElement(this.rawNode),
+      isAfterPseudoElement: isAfterPseudoElement(this.rawNode),
       isAnonymous: isAnonymous(this.rawNode),
       isNativeAnonymous: isNativeAnonymous(this.rawNode),
       isXBLAnonymous: isXBLAnonymous(this.rawNode),
       isShadowAnonymous: isShadowAnonymous(this.rawNode),
-      isShadowRoot: this.isShadowRoot,
-      isShadowHost: this.isShadowHost,
-      isDirectShadowHostChild: this.isDirectShadowHostChild,
+      isShadowRoot: shadowRoot,
+      shadowRootMode: getShadowRootMode(this.rawNode),
+      isShadowHost: isShadowHost(this.rawNode),
+      isDirectShadowHostChild: isDirectShadowHostChild(this.rawNode),
       pseudoClassLocks: this.writePseudoClassLocks(),
 
       isDisplayed: this.isDisplayed,
@@ -157,7 +166,7 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       characterData: true,
       characterDataOldValue: true,
       childList: true,
-      subtree: true
+      subtree: true,
     });
     this.mutationObserver = observer;
   },
@@ -170,44 +179,12 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
     this.rawNode.addEventListener("slotchange", this.slotchangeListener);
   },
 
-  get isBeforePseudoElement() {
-    return this.rawNode.nodeName === "_moz_generated_content_before";
-  },
-
-  get isAfterPseudoElement() {
-    return this.rawNode.nodeName === "_moz_generated_content_after";
-  },
-
-  get isShadowRoot() {
-    const isFragment = this.rawNode.nodeType === Node.DOCUMENT_FRAGMENT_NODE;
-    return isFragment && !!this.rawNode.host;
-  },
-
-  get isShadowHost() {
-    const shadowRoot = this.rawNode.openOrClosedShadowRoot;
-    return shadowRoot && shadowRoot.nodeType === Node.DOCUMENT_FRAGMENT_NODE;
-  },
-
-  get isDirectShadowHostChild() {
-    // Pseudo elements are always part of the anonymous tree.
-    if (this.isBeforePseudoElement || this.isAfterPseudoElement) {
-      return false;
-    }
-
-    const parentNode = this.rawNode.parentNode;
-    return parentNode && !!parentNode.openOrClosedShadowRoot;
-  },
-
-  get isTemplateElement() {
-    return this.rawNode instanceof this.rawNode.ownerGlobal.HTMLTemplateElement;
-  },
-
   // Estimate the number of children that the walker will return without making
   // a call to children() if possible.
   get numChildren() {
     // For pseudo elements, childNodes.length returns 1, but the walker
     // will return 0.
-    if (this.isBeforePseudoElement || this.isAfterPseudoElement) {
+    if (isBeforePseudoElement(this.rawNode) || isAfterPseudoElement(this.rawNode)) {
       return 0;
     }
 
@@ -225,8 +202,9 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
 
     // Normal counting misses ::before/::after.  Also, some anonymous children
     // may ultimately be skipped, so we have to consult with the walker.
-    if (numChildren === 0 || hasAnonChildren || this.isShadowHost) {
-      numChildren = this.walker.children(this).nodes.length;
+    if (numChildren === 0 || hasAnonChildren || isShadowHost(this.rawNode) ||
+      isShadowAnonymous(this.rawNode)) {
+      numChildren = this.walker.countChildren(this);
     }
 
     return numChildren;
@@ -245,9 +223,7 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
   get displayType() {
     // Consider all non-element nodes as displayed.
     if (InspectorActorUtils.isNodeDead(this) ||
-        this.rawNode.nodeType !== Node.ELEMENT_NODE ||
-        this.isAfterPseudoElement ||
-        this.isBeforePseudoElement) {
+        this.rawNode.nodeType !== Node.ELEMENT_NODE) {
       return null;
     }
 
@@ -370,6 +346,36 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
     });
 
     return listenerArray;
+  },
+
+  /**
+   * Retrieve the script location of the custom element definition for this node, when
+   * relevant. To be linked to a custom element definition
+   */
+  getCustomElementLocation: function() {
+    // Get a reference to the custom element definition function.
+    const name = this.rawNode.localName;
+
+    const customElementsRegistry = this.rawNode.ownerGlobal.customElements;
+    const customElement = customElementsRegistry && customElementsRegistry.get(name);
+    if (!customElement) {
+      return undefined;
+    }
+    // Create debugger object for the customElement function.
+    const global = Cu.getGlobalForObject(customElement);
+    const dbg = this.parent().targetActor.makeDebugger();
+    const globalDO = dbg.addDebuggee(global);
+    const customElementDO = globalDO.makeDebuggeeValue(customElement);
+
+    // Return undefined if we can't find a script for the custom element definition.
+    if (!customElementDO.script) {
+      return undefined;
+    }
+
+    return {
+      url: customElementDO.script.url,
+      line: customElementDO.script.startLine,
+    };
   },
 
   /**
@@ -516,7 +522,7 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       capturing: typeof override.capturing !== "undefined" ?
                  override.capturing : capturing,
       hide: typeof override.hide !== "undefined" ? override.hide : hide,
-      native
+      native,
     };
 
     // Hide the debugger icon for DOM0 and native listeners. DOM0 listeners are
@@ -601,7 +607,7 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
     return InspectorActorUtils.imageToImageData(this.rawNode, maxDim).then(imageData => {
       return {
         data: LongStringActor(this.conn, imageData.data),
-        size: imageData.size
+        size: imageData.size,
       };
     });
   },
@@ -668,7 +674,7 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
     const options = {
       previewText: FONT_FAMILY_PREVIEW_TEXT,
       previewFontSize: FONT_FAMILY_PREVIEW_TEXT_SIZE,
-      fillStyle: fillStyle
+      fillStyle: fillStyle,
     };
     const { dataURL, size } = getFontPreviewData(font, doc, options);
 
@@ -676,27 +682,29 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
   },
 
   /**
-   * Finds the computed background color of the closest parent with
-   * a set background color.
-   * Returns a string with the background color of the form
-   * rgba(r, g, b, a). Defaults to rgba(255, 255, 255, 1) if no
-   * background color is found.
+   * Finds the computed background color of the closest parent with a set background
+   * color.
+   *
+   * @return {String}
+   *         String with the background color of the form rgba(r, g, b, a). Defaults to
+   *         rgba(255, 255, 255, 1) if no background color is found.
    */
   getClosestBackgroundColor: function() {
-    let current = this.rawNode;
-    while (current) {
-      const computedStyle = CssLogic.getComputedStyle(current);
-      const currentStyle = computedStyle.getPropertyValue("background-color");
-      if (colorUtils.isValidCSSColor(currentStyle)) {
-        const currentCssColor = new colorUtils.CssColor(currentStyle);
-        if (!currentCssColor.isTransparent()) {
-          return currentCssColor.rgba;
-        }
-      }
-      current = current.parentNode;
-    }
-    return "rgba(255, 255, 255, 1)";
-  }
+    return InspectorActorUtils.getClosestBackgroundColor(this.rawNode);
+  },
+
+  /**
+   * Returns an object with the width and height of the node's owner window.
+   *
+   * @return {Object}
+   */
+  getOwnerGlobalDimensions: function() {
+    const win = this.rawNode.ownerGlobal;
+    return {
+      innerWidth: win.innerWidth,
+      innerHeight: win.innerHeight,
+    };
+  },
 });
 
 /**
@@ -734,7 +742,7 @@ const NodeListActor = protocol.ActorClassWithSpec(nodeListSpec, {
   form: function() {
     return {
       actor: this.actorID,
-      length: this.nodeList ? this.nodeList.length : 0
+      length: this.nodeList ? this.nodeList.length : 0,
     };
   },
 
@@ -754,7 +762,7 @@ const NodeListActor = protocol.ActorClassWithSpec(nodeListSpec, {
     return this.walker.attachElements(items);
   },
 
-  release: function() {}
+  release: function() {},
 });
 
 exports.NodeActor = NodeActor;

@@ -11,7 +11,6 @@ include protocol PContentBridge;
 include protocol PDocAccessible;
 include protocol PFilePicker;
 include protocol PIndexedDBPermissionRequest;
-include protocol PRenderFrame;
 include protocol PPluginWidget;
 include protocol PRemotePrintJob;
 include protocol PChildToParentStream;
@@ -19,6 +18,7 @@ include protocol PParentToChildStream;
 include protocol PFileDescriptorSet;
 include protocol PIPCBlobInputStream;
 include protocol PPaymentRequest;
+include protocol PWindowGlobal;
 
 include DOMTypes;
 include IPCBlob;
@@ -32,19 +32,20 @@ include "mozilla/GfxMessageUtils.h";
 include "mozilla/layers/LayersMessageUtils.h";
 
 using class IPC::Principal from "mozilla/dom/PermissionMessageUtils.h";
+using moveonly mozilla::gfx::PaintFragment from "mozilla/gfx/CrossProcessPaint.h";
 using mozilla::gfx::Matrix from "mozilla/gfx/Matrix.h";
 using mozilla::gfx::SurfaceFormat from "mozilla/gfx/Types.h";
 using mozilla::LayoutDeviceIntPoint from "Units.h";
 using mozilla::LayoutDevicePoint from "Units.h";
 using mozilla::ScreenIntPoint from "Units.h";
 using ScreenIntSize from "Units.h";
-using struct mozilla::layers::FrameMetrics from "FrameMetrics.h";
-using struct mozilla::layers::ScrollableLayerGuid from "FrameMetrics.h";
-using struct mozilla::layers::ZoomConstraints from "FrameMetrics.h";
+using struct mozilla::layers::ScrollableLayerGuid from "mozilla/layers/ScrollableLayerGuid.h";
+using struct mozilla::layers::ZoomConstraints from "mozilla/layers/ZoomConstraints.h";
 using mozilla::layers::LayersId from "mozilla/layers/LayersTypes.h";
-using mozilla::layers::MaybeZoomConstraints from "FrameMetrics.h";
+using mozilla::layers::LayersObserverEpoch from "mozilla/layers/LayersTypes.h";
+using mozilla::layers::MaybeZoomConstraints from "mozilla/layers/ZoomConstraints.h";
 using mozilla::layers::GeckoContentController::TapType from "mozilla/layers/GeckoContentController.h";
-using FrameMetrics::ViewID from "FrameMetrics.h";
+using ScrollableLayerGuid::ViewID from "mozilla/layers/ScrollableLayerGuid.h";
 using struct mozilla::void_t from "ipc/IPCMessageUtils.h";
 using mozilla::WindowsHandle from "ipc/IPCMessageUtils.h";
 using nscolor from "nsColor.h";
@@ -86,6 +87,7 @@ using class mozilla::NativeEventData from "ipc/nsGUIEventIPC.h";
 using mozilla::FontRange from "ipc/nsGUIEventIPC.h";
 using mozilla::a11y::IAccessibleHolder from "mozilla/a11y/IPCTypes.h";
 using mozilla::OriginAttributes from "mozilla/ipc/BackgroundUtils.h";
+using mozilla::dom::BrowsingContextId from "mozilla/dom/ipc/IdType.h";
 
 namespace mozilla {
 namespace dom {
@@ -116,19 +118,13 @@ nested(upto inside_cpow) sync protocol PBrowser
     manages PDocAccessible;
     manages PFilePicker;
     manages PIndexedDBPermissionRequest;
-    manages PRenderFrame;
     manages PPluginWidget;
     manages PPaymentRequest;
+    manages PWindowGlobal;
 
 both:
     async AsyncMessage(nsString aMessage, CpowEntry[] aCpows,
                        Principal aPrincipal, ClonedMessageData aData);
-
-    /**
-     * Create a layout frame (encapsulating a remote layer tree) for
-     * the page that is currently loaded in the <browser>.
-     */
-    async PRenderFrame();
 
 parent:
     /**
@@ -150,6 +146,12 @@ parent:
     sync PPluginWidget();
 
     async PPaymentRequest();
+
+    /**
+     * Construct a new WindowGlobal actor for a window global in the given
+     * BrowsingContext and with the given principal.
+     */
+    async PWindowGlobal(WindowGlobalInit init);
 
     /**
      * Sends an NS_NATIVE_CHILD_OF_SHAREABLE_WINDOW to be adopted by the
@@ -359,8 +361,6 @@ parent:
     nested(inside_cpow) async SetInputContext(InputContext context,
                                               InputContextAction action);
 
-    sync IsParentWindowMainWidgetVisible() returns (bool visible);
-
     /**
      * Set the native cursor.
      * @param value
@@ -440,7 +440,7 @@ parent:
      *
      * @param opener the PBrowser whose content called window.open.
      */
-    async BrowserFrameOpenWindow(PBrowser opener, PRenderFrame renderFrame,
+    async BrowserFrameOpenWindow(PBrowser opener,
                                  nsString aURL, nsString aName, nsString aFeatures)
         returns (CreatedWindowInfo window);
 
@@ -517,17 +517,12 @@ parent:
                                    uint64_t aObserverId);
     async ClearNativeTouchSequence(uint64_t aObserverId);
 
-    /**
-     * Returns the number of tabs in the window via the out parameter.
-     * If the number of tabs can't be determined, returns 0.
-     *
-     * @param aValue where to store the tab count
-     */
-    sync GetTabCount() returns (uint32_t value);
-
     async AccessKeyNotHandled(WidgetKeyboardEvent event);
 
     async SetHasBeforeUnload(bool aHasBeforeUnload);
+
+    async RegisterProtocolHandler(nsString scheme, nsIURI handlerURI, nsString title,
+                                  nsIURI documentURI);
 
 child:
     async NativeSynthesisResponse(uint64_t aObserverId, nsCString aResponse);
@@ -544,6 +539,11 @@ parent:
     async RemotePaintIsReady();
 
     /**
+     * Child informs the parent that a compositor transaction has ocurred.
+     */
+    async NotifyCompositorTransaction();
+
+    /**
      * Child informs the parent that the content is ready to handle input
      * events. This is sent when the TabChild is created.
      */
@@ -552,7 +552,7 @@ parent:
     /**
      * Child informs the parent that the layer tree is already available.
      */
-    async PaintWhileInterruptingJSNoOp(uint64_t aLayerObserverEpoch);
+    async PaintWhileInterruptingJSNoOp(LayersObserverEpoch aEpoch);
 
     /**
      * Sent by the child to the parent to inform it that an update to the
@@ -568,7 +568,7 @@ parent:
                             OptionalShmem visualData,
                             uint32_t stride, SurfaceFormat format,
                             LayoutDeviceIntRect dragRect,
-                            nsCString principalURISpec);
+                            Principal principal);
 
     // After a compositor reset, it is necessary to reconnect each layers ID to
     // the compositor of the widget that will render those layers. Note that
@@ -583,7 +583,16 @@ parent:
      *
      * @param aFirstPartyURI first party of the tab that is requesting access.
      */
-    async ShowCanvasPermissionPrompt(nsCString aFirstPartyURI);
+    async ShowCanvasPermissionPrompt(nsCString aFirstPartyURI,
+                                     bool aHideDoorHanger);
+
+    sync SetSystemFont(nsCString aFontName);
+    sync GetSystemFont() returns (nsCString retval);
+
+    sync SetPrefersReducedMotionOverrideForTest(bool aValue);
+    sync ResetPrefersReducedMotionOverrideForTest();
+
+    async RootBrowsingContext(BrowsingContextId aId);
 
 child:
     /**
@@ -603,8 +612,7 @@ child:
     async InitRendering(TextureFactoryIdentifier textureFactoryIdentifier,
                         LayersId layersId,
                         CompositorOptions compositorOptions,
-                        bool layersConnected,
-                        nullable PRenderFrame renderFrame);
+                        bool layersConnected);
 
     async LoadURL(nsCString uri, ShowInfo info);
 
@@ -707,7 +715,7 @@ child:
      * don't need support RealDragEvent with input priority.
      */
     async RealDragEvent(WidgetDragEvent aEvent, uint32_t aDragAction,
-                        uint32_t aDropEffect, nsCString aPrincipalURISpec);
+                        uint32_t aDropEffect, Principal aPrincipal);
 
     async PluginEvent(WidgetPluginEvent aEvent);
 
@@ -762,13 +770,16 @@ child:
      * @param aForceRepaint
      *        True if the child should force a paint even if it's already
      *        visible.
-     * @param aLayerObserverEpoch
+     * @param aEpoch
      *        The layer observer epoch for this activation. This message should be
      *        ignored if this epoch has already been observed (via
      *        PaintWhileInterruptingJS).
      */
-    async RenderLayers(bool aEnabled, bool aForceRepaint, uint64_t aLayerObserverEpoch);
+    async RenderLayers(bool aEnabled, bool aForceRepaint, LayersObserverEpoch aEpoch);
 
+    async RequestRootPaint(IntRect aRect, float aScale, nscolor aBackgroundColor) returns (PaintFragment retval);
+    async RequestSubPaint(float aScale, nscolor aBackgroundColor) returns (PaintFragment retval);
+child:
     /**
      * Notify the child that it shouldn't paint the offscreen displayport.
      * This is useful to speed up interactive operations over async
@@ -873,6 +884,11 @@ child:
     async SetWindowName(nsString aName);
 
     /**
+     * Tell the TabChild to allow scripts in the docshell to close the window.
+     */
+    async AllowScriptsToClose();
+
+    /**
      * Tell the TabChild what OriginAttributes it should inherit from. This must
      * be called before the first non-blank document is loaded in the TabChild.
      */
@@ -883,6 +899,19 @@ child:
      * process, so it can be used by PuppetWidget.
      */
     async SetWidgetNativeData(WindowsHandle aHandle);
+
+    /**
+     * Requests the content blocking log, which is sent back in response.
+     */
+    async GetContentBlockingLog() returns(nsString log, bool success);
+
+parent:
+    /** Records a history visit. */
+    async VisitURI(URIParams aURI, OptionalURIParams aLastVisitedURI,
+                   uint32_t aFlags);
+
+    /** Fetches the visited status for an array of URIs (Android-only). */
+    async QueryVisitedState(URIParams[] aURIs);
 
 /*
  * FIXME: write protocol!

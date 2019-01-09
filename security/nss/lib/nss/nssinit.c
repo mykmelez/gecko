@@ -12,7 +12,7 @@
 #include "prprf.h"
 #include "prmem.h"
 #include "cert.h"
-#include "key.h"
+#include "keyhi.h"
 #include "secmod.h"
 #include "secoid.h"
 #include "nss.h"
@@ -54,7 +54,7 @@ nss_mktemp(char *path)
 
 #define NSS_MAX_FLAG_SIZE sizeof("readOnly") + sizeof("noCertDB") +                                  \
                               sizeof("noModDB") + sizeof("forceOpen") + sizeof("passwordRequired") + \
-                              sizeof("optimizeSpace")
+                              sizeof("optimizeSpace") + sizeof("printPolicyFeedback")
 #define NSS_DEFAULT_MOD_NAME "NSS Internal Module"
 
 static char *

@@ -175,9 +175,12 @@ finish: function()
 //
 // Mochitest wrappers - These forward tests to the proper mochitest window.
 //
-ok: function(condition, name, diag)
+ok: function(condition, name)
 {
-  return this._masterWindow.SimpleTest.ok(condition, name, diag);
+  // Forward all arguments to SimpleTest.ok where we will check that ok() was
+  // called with at most 2 arguments.
+  return this._masterWindow.SimpleTest.ok.apply(this._masterWindow.SimpleTest,
+    arguments);
 },
 
 is: function(a, b, name)
@@ -306,10 +309,8 @@ manifestURL: function(overload)
 
 loadContext: function()
 {
-  return SpecialPowers.wrap(window).QueryInterface(SpecialPowers.Ci.nsIInterfaceRequestor)
-                                   .getInterface(SpecialPowers.Ci.nsIWebNavigation)
-                                   .QueryInterface(SpecialPowers.Ci.nsIInterfaceRequestor)
-                                   .getInterface(SpecialPowers.Ci.nsILoadContext);
+  return SpecialPowers.wrap(window).docShell
+                                   .QueryInterface(SpecialPowers.Ci.nsILoadContext);
 },
 
 loadContextInfo: function()

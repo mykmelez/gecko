@@ -19,7 +19,14 @@ from __future__ import absolute_import, print_function, unicode_literals
 import functools
 import json
 import os
+import itertools
+from copy import deepcopy
+from datetime import datetime
+import jsone
 
+from .schema import resolve_keyed_by
+from .taskcluster import get_artifact_prefix
+from .yaml import load_yaml
 
 # constants {{{1
 """Map signing scope aliases to sets of projects.
@@ -46,7 +53,9 @@ SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
     'all-release-branches', set([
         'mozilla-beta',
         'mozilla-release',
+        'mozilla-esr60',
         'comm-beta',
+        'comm-esr60',
     ])
 ]]
 
@@ -74,86 +83,33 @@ DEVEDITION_SIGNING_CERT_SCOPES = {
 BEETMOVER_SCOPE_ALIAS_TO_PROJECT = [[
     'all-nightly-branches', set([
         'mozilla-central',
-        'mozilla-beta',
-        'mozilla-release',
         'comm-central',
     ])
 ], [
     'all-release-branches', set([
         'mozilla-beta',
         'mozilla-release',
+        'mozilla-esr60',
+        'comm-beta',
+        'comm-esr60',
     ])
-]]
-
-"""The set of all beetmover release target tasks.
-
-Used for both `BEETMOVER_SCOPE_ALIAS_TO_TARGET_TASK` and `get_release_build_number`
-"""
-BEETMOVER_CANDIDATES_TARGET_TASKS = set([
-    'promote_fennec',
-    'promote_desktop',
-])
-BEETMOVER_PUSH_TARGET_TASKS = set([
-    'push_fennec',
-    'ship_fennec',
-    'push_desktop',
-    'ship_desktop',
-])
-BEETMOVER_RELEASE_TARGET_TASKS = BEETMOVER_CANDIDATES_TARGET_TASKS | BEETMOVER_PUSH_TARGET_TASKS
-
-"""Map beetmover tasks aliases to sets of target task methods.
-
-This is a list of list-pairs, for ordering.
-"""
-BEETMOVER_SCOPE_ALIAS_TO_TARGET_TASK = [[
-    'all-nightly-tasks', set([
-        'nightly_fennec',
-        'nightly_linux',
-        'nightly_macosx',
-        'nightly_win32',
-        'nightly_win64',
-        'nightly_desktop',
-        'mozilla_beta_tasks',
-        'mozilla_release_tasks',
-    ])
-], [
-    'all-candidates-tasks', BEETMOVER_CANDIDATES_TARGET_TASKS
-], [
-    'all-push-tasks', BEETMOVER_PUSH_TARGET_TASKS
 ]]
 
 """Map the beetmover scope aliases to the actual scopes.
 """
 BEETMOVER_BUCKET_SCOPES = {
-    'all-candidates-tasks': {
-        'all-release-branches': 'beetmover:bucket:release',
-    },
-    'all-push-tasks': {
-        'all-release-branches': 'beetmover:bucket:release',
-    },
-    'all-nightly-tasks': {
-        'all-nightly-branches': 'beetmover:bucket:nightly',
-    },
+    'all-release-branches': 'beetmover:bucket:release',
+    'all-nightly-branches': 'beetmover:bucket:nightly',
     'default': 'beetmover:bucket:dep',
 }
 
 """Map the beetmover tasks aliases to the actual action scopes.
 """
 BEETMOVER_ACTION_SCOPES = {
-    'all-candidates-tasks': 'beetmover:action:push-to-candidates',
-    'all-push-tasks': 'beetmover:action:push-to-releases',
-    'all-nightly-tasks': 'beetmover:action:push-to-nightly',
-    'default': 'beetmover:action:push-to-nightly',
+    'nightly': 'beetmover:action:push-to-nightly',
+    'default': 'beetmover:action:push-to-candidates',
 }
 
-
-"""Map the beetmover tasks aliases to phases.
-"""
-PHASES = {
-    'all-candidates-tasks': 'promote',
-    'all-push-tasks': 'push',
-    'default': None,
-}
 
 """Known balrog actions."""
 BALROG_ACTIONS = ('submit-locale', 'submit-toplevel', 'schedule')
@@ -170,10 +126,16 @@ BALROG_SCOPE_ALIAS_TO_PROJECT = [[
 ], [
     'beta', set([
         'mozilla-beta',
+        'comm-beta',
     ])
 ], [
     'release', set([
         'mozilla-release',
+    ])
+], [
+    'esr60', set([
+        'mozilla-esr60',
+        'comm-esr60',
     ])
 ], [
     'esr', set([
@@ -189,6 +151,7 @@ BALROG_SERVER_SCOPES = {
     'beta': 'balrog:server:beta',
     'release': 'balrog:server:release',
     'esr': 'balrog:server:esr',
+    'esr60': 'balrog:server:esr',
     'default': 'balrog:server:dep',
 }
 
@@ -212,7 +175,7 @@ PUSH_APK_SCOPES = {
     'central': 'googleplay:aurora',
     'beta': 'googleplay:beta',
     'release': 'googleplay:release',
-    'default': 'googleplay:invalid',
+    'default': 'googleplay:dep',
 }
 
 
@@ -283,53 +246,20 @@ def get_scope_from_project(config, alias_to_project_map, alias_to_scope_map):
 
 
 @with_scope_prefix
-def get_scope_from_target_method(config, alias_to_tasks_map, alias_to_scope_map):
+def get_scope_from_release_type(config, release_type_to_scope_map):
     """Determine the restricted scope from `config.params['target_tasks_method']`.
 
     Args:
         config (TransformConfig): The configuration for the kind being transformed.
-        alias_to_tasks_map (list of lists): each list pair contains the
-            alias and the set of target methods that match. This is ordered.
-        alias_to_scope_map (dict): the alias alias to scope
+        release_type_to_scope_map (dict): the maps release types to scopes
 
     Returns:
         string: the scope to use.
     """
-    for alias, tasks in alias_to_tasks_map:
-        if config.params['target_tasks_method'] in tasks and alias in alias_to_scope_map:
-            return alias_to_scope_map[alias]
-    return alias_to_scope_map['default']
-
-
-@with_scope_prefix
-def get_scope_from_target_method_and_project(config, alias_to_tasks_map,
-                                             alias_to_project_map, aliases_to_scope_map):
-    """Determine the restricted scope from both `target_tasks_method` and `project`.
-
-    On certain branches, we'll need differing restricted scopes based on
-    `target_tasks_method`.  However, we can't key solely on that, since that
-    `target_tasks_method` might be run on an unprivileged branch.  This method
-    checks both.
-
-    Args:
-        config (TransformConfig): The configuration for the kind being transformed.
-        alias_to_tasks_map (list of lists): each list pair contains the
-            alias and the set of target methods that match. This is ordered.
-        alias_to_project_map (list of lists): each list pair contains the
-            alias and the set of projects that match.  This is ordered.
-        aliases_to_scope_map (dict of dicts): the task alias to project alias to scope
-
-    Returns:
-        string: the scope to use.
-    """
-    project = config.params['project']
-    target = config.params['target_tasks_method']
-    for alias1, tasks in alias_to_tasks_map:
-        for alias2, projects in alias_to_project_map:
-            if target in tasks and project in projects and \
-                    aliases_to_scope_map.get(alias1, {}).get(alias2):
-                return aliases_to_scope_map[alias1][alias2]
-    return aliases_to_scope_map['default']
+    return release_type_to_scope_map.get(
+        config.params['release_type'],
+        release_type_to_scope_map['default']
+    )
 
 
 def get_phase_from_target_method(config, alias_to_tasks_map, alias_to_phase_map):
@@ -369,22 +299,14 @@ get_devedition_signing_cert_scope = functools.partial(
 )
 
 get_beetmover_bucket_scope = functools.partial(
-    get_scope_from_target_method_and_project,
-    alias_to_tasks_map=BEETMOVER_SCOPE_ALIAS_TO_TARGET_TASK,
+    get_scope_from_project,
     alias_to_project_map=BEETMOVER_SCOPE_ALIAS_TO_PROJECT,
-    aliases_to_scope_map=BEETMOVER_BUCKET_SCOPES,
+    alias_to_scope_map=BEETMOVER_BUCKET_SCOPES,
 )
 
 get_beetmover_action_scope = functools.partial(
-    get_scope_from_target_method,
-    alias_to_tasks_map=BEETMOVER_SCOPE_ALIAS_TO_TARGET_TASK,
-    alias_to_scope_map=BEETMOVER_ACTION_SCOPES,
-)
-
-get_phase = functools.partial(
-    get_phase_from_target_method,
-    alias_to_tasks_map=BEETMOVER_SCOPE_ALIAS_TO_TARGET_TASK,
-    alias_to_phase_map=PHASES,
+    get_scope_from_release_type,
+    release_type_to_scope_map=BEETMOVER_ACTION_SCOPES,
 )
 
 get_balrog_server_scope = functools.partial(
@@ -422,6 +344,7 @@ def get_release_config(config):
                                                  'release-secondary-update-verify-config',
                                                  'release-balrog-submit-toplevel',
                                                  'release-secondary-balrog-submit-toplevel',
+                                                 'release-mark-as-started'
                                                  ):
         partial_updates = json.loads(partial_updates)
         release_config['partial_versions'] = ', '.join([
@@ -442,7 +365,7 @@ def get_release_config(config):
 def get_signing_cert_scope_per_platform(build_platform, is_nightly, config):
     if 'devedition' in build_platform:
         return get_devedition_signing_cert_scope(config)
-    elif is_nightly or build_platform in ('firefox-source', 'fennec-source'):
+    elif is_nightly or build_platform in ('firefox-source', 'fennec-source', 'thunderbird-source'):
         return get_signing_cert_scope(config)
     else:
         return add_scope_prefix(config, 'signing:cert:dep-signing')
@@ -471,3 +394,260 @@ def get_worker_type_for_scope(config, scope):
             ),
         )
     )
+
+
+# generate_beetmover_upstream_artifacts {{{1
+def generate_beetmover_upstream_artifacts(job, platform, locale=None, dependencies=None):
+    """Generate the upstream artifacts for beetmover, using the artifact map.
+
+    Currently only applies to beetmover tasks.
+
+    Args:
+        job (dict): The current job being generated
+        dependencies (list): A list of the job's dependency labels.
+        platform (str): The current build platform
+        locale (str): The current locale being beetmoved.
+
+    Returns:
+        list: A list of dictionaries conforming to the upstream_artifacts spec.
+    """
+    base_artifact_prefix = get_artifact_prefix(job)
+    resolve_keyed_by(job, 'attributes.artifact_map', 'artifact map', platform=platform)
+    map_config = load_yaml(*os.path.split(job['attributes']['artifact_map']))
+    upstream_artifacts = list()
+
+    if not locale:
+        locales = map_config['default_locales']
+    else:
+        locales = [locale]
+
+    if not dependencies:
+        dependencies = job['dependencies'].keys()
+
+    for locale, dep in itertools.product(locales, dependencies):
+        paths = list()
+
+        for filename in map_config['mapping']:
+            if dep not in map_config['mapping'][filename]['from']:
+                continue
+            if locale != 'en-US' and not map_config['mapping'][filename]['all_locales']:
+                continue
+
+            # The next time we look at this file it might be a different locale.
+            file_config = deepcopy(map_config['mapping'][filename])
+            resolve_keyed_by(file_config, "source_path_modifier",
+                             'source path modifier', locale=locale)
+            paths.append(os.path.join(
+                base_artifact_prefix,
+                jsone.render(file_config['source_path_modifier'], {'locale': locale}),
+                filename,
+            ))
+
+        if not paths:
+            continue
+
+        upstream_artifacts.append({
+            "taskId": {
+                "task-reference": "<{}>".format(dep)
+            },
+            "taskType": map_config['tasktype_map'].get(dep),
+            "paths": sorted(paths),
+            "locale": locale,
+        })
+
+    return upstream_artifacts
+
+
+# generate_beetmover_compressed_upstream_artifacts {{{1
+def generate_beetmover_compressed_upstream_artifacts(job, dependencies=None):
+    """Generate compressed file upstream artifacts for beetmover.
+
+    These artifacts will not be beetmoved directly, but will be
+    decompressed from upstream_mapping and the contents beetmoved
+    using the `mapping` entry in the artifact map.
+
+    Currently only applies to beetmover tasks.
+
+    Args:
+        job (dict): The current job being generated
+        dependencies (list): A list of the job's dependency labels.
+
+    Returns:
+        list: A list of dictionaries conforming to the upstream_artifacts spec.
+    """
+    base_artifact_prefix = get_artifact_prefix(job)
+    map_config = load_yaml(*os.path.split(job['attributes']['artifact_map']))
+    upstream_artifacts = list()
+
+    if not dependencies:
+        dependencies = job['dependencies'].keys()
+
+    for dep in dependencies:
+        paths = list()
+
+        for filename in map_config['upstream_mapping']:
+            if dep not in map_config['upstream_mapping'][filename]['from']:
+                continue
+
+            paths.append(os.path.join(
+                base_artifact_prefix,
+                filename,
+            ))
+
+        if not paths:
+            continue
+
+        upstream_artifacts.append({
+            "taskId": {
+                "task-reference": "<{}>".format(dep)
+            },
+            "taskType": map_config['tasktype_map'].get(dep),
+            "paths": sorted(paths),
+            "zipExtract": True,
+        })
+
+    return upstream_artifacts
+
+
+# generate_beetmover_artifact_map {{{1
+def generate_beetmover_artifact_map(config, job, **kwargs):
+    """Generate the beetmover artifact map.
+
+    Currently only applies to beetmover tasks.
+
+    Args:
+        config (): Current taskgraph configuration.
+        job (dict): The current job being generated
+    Common kwargs:
+        platform (str): The current build platform
+        locale (str): The current locale being beetmoved.
+
+    Returns:
+        list: A list of dictionaries containing source->destination
+            maps for beetmover.
+    """
+    platform = kwargs.get('platform', '')
+    resolve_keyed_by(job, 'attributes.artifact_map', 'artifact map', platform=platform)
+    map_config = load_yaml(*os.path.split(job['attributes']['artifact_map']))
+    base_artifact_prefix = map_config.get('base_artifact_prefix', get_artifact_prefix(job))
+
+    artifacts = list()
+
+    dependencies = job['dependencies'].keys()
+
+    if kwargs.get('locale'):
+        locales = [kwargs['locale']]
+    else:
+        locales = map_config['default_locales']
+
+    resolve_keyed_by(map_config, 's3_bucket_paths', 's3_bucket_paths', platform=platform)
+
+    for locale, dep in itertools.product(locales, dependencies):
+        paths = dict()
+        for filename in map_config['mapping']:
+            # Relevancy checks
+            if dep not in map_config['mapping'][filename]['from']:
+                # We don't get this file from this dependency.
+                continue
+            if locale != 'en-US' and not map_config['mapping'][filename]['all_locales']:
+                # This locale either doesn't produce or shouldn't upload this file.
+                continue
+
+            # Filling in destinations
+
+            # deepcopy because the next time we look at this file the locale will differ.
+            file_config = deepcopy(map_config['mapping'][filename])
+
+            for field in [
+                'destinations',
+                'locale_prefix',
+                'source_path_modifier',
+                'update_balrog_manifest',
+                'pretty_name',
+                'checksums_path'
+            ]:
+                resolve_keyed_by(file_config, field, field, locale=locale, platform=platform)
+
+            # This format string should ideally be in the configuration file,
+            # but this would mean keeping variable names in sync between code + config.
+            destinations = [
+                "{s3_bucket_path}/{dest_path}/{locale_prefix}{filename}".format(
+                    s3_bucket_path=bucket_path,
+                    dest_path=dest_path,
+                    locale_prefix=file_config['locale_prefix'],
+                    filename=file_config.get('pretty_name', filename),
+                )
+                for dest_path, bucket_path
+                in itertools.product(file_config['destinations'], map_config['s3_bucket_paths'])
+            ]
+            # Creating map entries
+
+            # Key must be artifact path, to avoid trampling duplicates, such
+            # as public/build/target.apk and public/build/en-US/target.apk
+            key = os.path.join(
+                base_artifact_prefix,
+                file_config['source_path_modifier'],
+                filename,
+            )
+
+            paths[key] = {
+                'destinations': destinations,
+            }
+            if file_config.get('checksums_path'):
+                paths[key]['checksums_path'] = file_config['checksums_path']
+
+            # Optional flags.
+            if file_config.get('update_balrog_manifest'):
+                paths[key]['update_balrog_manifest'] = True
+                if file_config.get('balrog_format'):
+                    paths[key]['balrog_format'] = file_config['balrog_format']
+
+        if not paths:
+            # No files for this dependency/locale combination.
+            continue
+
+        # Render all variables for the artifact map
+
+        platforms = deepcopy(map_config['platform_names'])
+        if platform:
+            for key in platforms.keys():
+                resolve_keyed_by(platforms, key, key, platform=platform)
+
+        upload_date = datetime.fromtimestamp(config.params['build_date'])
+
+        kwargs.update({
+            'locale': locale,
+            'version': config.params['app_version'],
+            'branch': config.params['project'],
+            'build_number': config.params['build_number'],
+            'filename_platform': platforms['filename_platform'],
+            'path_platform': platforms['path_platform'],
+            'year': upload_date.year,
+            'month': upload_date.strftime("%m"),  # zero-pad the month
+            'upload_date': upload_date.strftime("%Y-%m-%d-%H-%M-%S")
+        })
+        paths = jsone.render(paths, kwargs)
+        artifacts.append({
+            'taskId': {'task-reference': "<{}>".format(dep)},
+            'locale': locale,
+            'paths': paths,
+        })
+
+    return artifacts
+
+
+# should_use_artifact_map {{{
+def should_use_artifact_map(platform, project):
+    """Return True if this task uses the beetmover artifact map.
+
+    This function exists solely for the beetmover artifact map
+    migration.
+    """
+    platforms = ['android', 'fennec']
+    # FIXME: once we're ready to switch fully to declarative artifacts on other
+    # branches, we can expand this
+    projects = ['mozilla-central']
+
+    if any([pl in platform for pl in platforms]) and any([pj in project for pj in projects]):
+        return True
+    return False

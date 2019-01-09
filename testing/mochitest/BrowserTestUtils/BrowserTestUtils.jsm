@@ -25,6 +25,9 @@ ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://testing-common/TestUtils.jsm");
 ChromeUtils.import("resource://testing-common/ContentTask.jsm");
 
+ChromeUtils.defineModuleGetter(this, "BrowserWindowTracker",
+  "resource:///modules/BrowserWindowTracker.jsm");
+
 Services
   .mm
   .loadFrameScript(
@@ -52,7 +55,7 @@ NewProcessSelector.prototype = {
 
   provideProcess() {
     return Ci.nsIContentProcessProvider.NEW_PROCESS;
-  }
+  },
 };
 
 let registrar = Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
@@ -100,7 +103,7 @@ var BrowserTestUtils = {
     if (typeof(options) == "string") {
       options = {
         gBrowser: Services.wm.getMostRecentWindow("navigator:browser").gBrowser,
-        url: options
+        url: options,
       };
     }
     let tab = await BrowserTestUtils.openNewForegroundTab(options);
@@ -176,7 +179,7 @@ var BrowserTestUtils = {
 
     let { opening: opening,
           waitForLoad: aWaitForLoad,
-          waitForStateStop: aWaitForStateStop
+          waitForStateStop: aWaitForStateStop,
     } = options;
 
     let promises, tab;
@@ -186,6 +189,7 @@ var BrowserTestUtils = {
       // If DEFAULT_PROCESSSELECTOR_CID is null, we're in non-e10s mode and we
       // should skip this.
       if (options.forceNewProcess && DEFAULT_PROCESSSELECTOR_CID) {
+        Services.ppmm.releaseCachedProcesses();
         registrar.registerFactory(OUR_PROCESSSELECTOR_CID, "",
                                   PROCESSSELECTOR_CONTRACTID, null);
       }
@@ -196,9 +200,9 @@ var BrowserTestUtils = {
             opening();
             tab = tabbrowser.selectedTab;
           } else {
-            tabbrowser.selectedTab = tab = tabbrowser.addTab(opening);
+            tabbrowser.selectedTab = tab = BrowserTestUtils.addTab(tabbrowser, opening);
           }
-        })
+        }),
       ];
 
       if (aWaitForLoad) {
@@ -574,28 +578,29 @@ var BrowserTestUtils = {
           Services.ww.unregisterNotification(observe);
         }
 
+        // Add these event listeners now since they may fire before the
+        // DOMContentLoaded event down below.
+        let promises = [
+          this.waitForEvent(win, "focus", true),
+          this.waitForEvent(win, "activate"),
+        ];
+
         if (url) {
           await this.waitForEvent(win, "DOMContentLoaded");
 
-          if (win.document.documentURI != "chrome://browser/content/browser.xul") {
+          if (win.document.documentURI != AppConstants.BROWSER_CHROME_URL) {
             return;
           }
         }
 
-        let promises = [
-          TestUtils.topicObserved("browser-delayed-startup-finished",
-                                  subject => subject == win),
-        ];
+        promises.push(TestUtils.topicObserved("browser-delayed-startup-finished",
+                                              subject => subject == win));
 
         if (url) {
           let browser = win.gBrowser.selectedBrowser;
 
-          // Retrieve the given browser's current process type.
-          let process =
-              browser.isRemoteBrowser ? Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT
-              : Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
           if (win.gMultiProcessBrowser &&
-              !E10SUtils.canLoadURIInProcess(url, process)) {
+              !E10SUtils.canLoadURIInRemoteType(url, browser.remoteType)) {
             await this.waitForEvent(browser, "XULFrameLoaderCreated");
           }
 
@@ -629,21 +634,19 @@ var BrowserTestUtils = {
    */
   async loadURI(browser, uri) {
     // Load the new URI.
-    browser.loadURI(uri);
+    browser.loadURI(uri, {
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+    });
 
     // Nothing to do in non-e10s mode.
     if (!browser.ownerGlobal.gMultiProcessBrowser) {
       return;
     }
 
-    // Retrieve the given browser's current process type.
-    let process = browser.isRemoteBrowser ? Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT
-                                          : Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
-
     // If the new URI can't load in the browser's current process then we
     // should wait for the new frameLoader to be created. This will happen
     // asynchronously when the browser's remoteness changes.
-    if (!E10SUtils.canLoadURIInProcess(uri, process)) {
+    if (!E10SUtils.canLoadURIInRemoteType(uri, browser.remoteType)) {
       await this.waitForEvent(browser, "XULFrameLoaderCreated");
     }
   },
@@ -700,73 +703,42 @@ var BrowserTestUtils = {
   },
 
   /**
-   * @param {Object} options
-   *        {
-   *          private: A boolean indicating if the window should be
-   *                   private
-   *          remote:  A boolean indicating if the window should run
-   *                   remote browser tabs or not. If omitted, the window
-   *                   will choose the profile default state.
-   *          width: Desired width of window
-   *          height: Desired height of window
-   *        }
+   * Open a new browser window from an existing one.
+   * This relies on OpenBrowserWindow in browser.js, and waits for the window
+   * to be completely loaded before resolving.
+   *
+   * @param {Object}
+   *        Options to pass to OpenBrowserWindow. Additionally, supports:
+   *        - waitForTabURL
+   *          Forces the initial browserLoaded check to wait for the tab to
+   *          load the given URL (instead of about:blank)
+   *
    * @return {Promise}
    *         Resolves with the new window once it is loaded.
    */
   async openNewBrowserWindow(options = {}) {
-    let argString = Cc["@mozilla.org/supports-string;1"].
-                    createInstance(Ci.nsISupportsString);
-    argString.data = "";
-    let features = "chrome,dialog=no,all";
-    let opener = null;
-
-    if (options.opener) {
-      opener = options.opener;
+    let currentWin = BrowserWindowTracker.getTopWindow({private: false});
+    if (!currentWin) {
+      throw new Error("Can't open a new browser window from this helper if no non-private window is open.");
     }
+    let win = currentWin.OpenBrowserWindow(options);
 
-    if (options.private) {
-      features += ",private";
-    }
-
-    if (options.width) {
-      features += ",width=" + options.width;
-    }
-    if (options.height) {
-      features += ",height=" + options.height;
-    }
-
-    if (options.left) {
-      features += ",left=" + options.left;
-    }
-
-    if (options.top) {
-      features += ",top=" + options.top;
-    }
-
-    if (options.hasOwnProperty("remote")) {
-      let remoteState = options.remote ? "remote" : "non-remote";
-      features += `,${remoteState}`;
-    }
-
-    if (options.url) {
-      argString.data = options.url;
-    }
-
-    let win = Services.ww.openWindow(
-      opener, Services.prefs.getCharPref("browser.chromeURL"), "_blank",
-      features, argString);
+    let promises = [this.waitForEvent(win, "focus", true), this.waitForEvent(win, "activate")];
 
     // Wait for browser-delayed-startup-finished notification, it indicates
     // that the window has loaded completely and is ready to be used for
     // testing.
-    let startupPromise =
+    promises.push(
       TestUtils.topicObserved("browser-delayed-startup-finished",
-                              subject => subject == win).then(() => win);
+                              subject => subject == win).then(() => win)
+    );
 
-    let loadPromise = this.firstBrowserLoaded(win);
 
-    await startupPromise;
-    await loadPromise;
+    promises.push(this.firstBrowserLoaded(win, !options.waitForTabURL, browser => {
+      return !options.waitForTabURL || options.waitForTabURL == browser.currentURI.spec;
+    }));
+
+    await Promise.all(promises);
 
     return win;
   },
@@ -1054,7 +1026,7 @@ var BrowserTestUtils = {
     /* eslint-enable no-eval */
 
     let frameScriptSource =
-        `data:,(${frameScript.toString()})(${id}, "${eventName}", ${useCapture}, "${checkFnSource}", ${wantsUntrusted})`;
+        `data:,(${frameScript.toString()})(${id}, "${eventName}", ${uneval(useCapture)}, "${checkFnSource}", ${wantsUntrusted})`;
 
     let mm = Services.mm;
 
@@ -1178,6 +1150,63 @@ var BrowserTestUtils = {
       }
 
       mm.sendAsyncMessage("Test:SynthesizeMouse",
+                          {target, targetFn, x: offsetX, y: offsetY, event},
+                          {object: cpowObject});
+    });
+  },
+
+  /**
+   *  Versions of EventUtils.jsm synthesizeTouch functions that synthesize a
+   *  touch event in a child process and return promises that resolve when the
+   *  event has fired and completed. Instead of a window, a browser is required
+   *  to be passed to this function.
+   *
+   * @param target
+   *        One of the following:
+   *        - a selector string that identifies the element to target. The syntax is as
+   *          for querySelector.
+   *        - An array of selector strings. Each selector after the first
+   *          selects for an element in the iframe specified by the previous
+   *          selector.
+   *        - a CPOW element (for easier test-conversion).
+   *        - a function to be run in the content process that returns the element to
+   *        target
+   *        - null, in which case the offset is from the content document's edge.
+   * @param {integer} offsetX
+   *        x offset from target's left bounding edge
+   * @param {integer} offsetY
+   *        y offset from target's top bounding edge
+   * @param {Object} event object
+   *        Additional arguments, similar to the EventUtils.jsm version
+   * @param {Browser} browser
+   *        Browser element, must not be null
+   *
+   * @returns {Promise}
+   * @resolves True if the touch event was cancelled.
+   */
+  synthesizeTouch(target, offsetX, offsetY, event, browser) {
+    return new Promise((resolve, reject) => {
+      let mm = browser.messageManager;
+      mm.addMessageListener("Test:SynthesizeTouchDone", function touchMsg(message) {
+        mm.removeMessageListener("Test:SynthesizeTouchDone", touchMsg);
+        if (message.data.hasOwnProperty("defaultPrevented")) {
+          resolve(message.data.defaultPrevented);
+        } else {
+          reject(new Error(message.data.error));
+        }
+      });
+
+      let cpowObject = null;
+      let targetFn = null;
+      if (typeof target == "function") {
+        targetFn = target.toString();
+        target = null;
+      } else if (typeof target != "string" && !Array.isArray(target)) {
+        cpowObject = target;
+        target = null;
+      }
+
+      mm.sendAsyncMessage("Test:SynthesizeTouch",
                           {target, targetFn, x: offsetX, y: offsetY, event},
                           {object: cpowObject});
     });
@@ -1475,7 +1504,7 @@ var BrowserTestUtils = {
 
       mm.sendAsyncMessage("Test:SendChar", {
         char,
-        seq
+        seq,
       });
     });
   },
@@ -1612,19 +1641,17 @@ var BrowserTestUtils = {
    *        Resolves to the <xul:notification> that is being shown.
    */
   waitForGlobalNotificationBar(win, notificationValue) {
-    let notificationBox =
-      win.document.getElementById("high-priority-global-notificationbox");
-    return this.waitForNotificationInNotificationBox(notificationBox,
-                                                     notificationValue);
+    return this.waitForNotificationInNotificationBox(
+                       win.gHighPriorityNotificationBox, notificationValue);
   },
 
   waitForNotificationInNotificationBox(notificationBox, notificationValue) {
     return new Promise((resolve) => {
       let check = (event) => {
-        return event.target.value == notificationValue;
+        return event.target.getAttribute("value") == notificationValue;
       };
 
-      BrowserTestUtils.waitForEvent(notificationBox, "AlertActive",
+      BrowserTestUtils.waitForEvent(notificationBox.stack, "AlertActive",
                                     false, check).then((event) => {
         // The originalTarget of the AlertActive on a notificationbox
         // will be the notification itself.
@@ -1785,6 +1812,9 @@ var BrowserTestUtils = {
     if (!params.triggeringPrincipal) {
       params.triggeringPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
     }
+    if (!params.allowInheritPrincipal) {
+      params.allowInheritPrincipal = true;
+    }
     if (beforeLoadFunc) {
       let window = tabbrowser.ownerGlobal;
       window.addEventListener("TabOpen", function(e) {
@@ -1792,5 +1822,5 @@ var BrowserTestUtils = {
       }, {once: true});
     }
     return tabbrowser.addTab(uri, params);
-  }
+  },
 };

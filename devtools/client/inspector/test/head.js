@@ -48,7 +48,7 @@ var navigateTo = async function(inspector, url) {
 
   info("Navigating to: " + url);
   const activeTab = inspector.toolbox.target.activeTab;
-  await activeTab.navigateTo(url);
+  await activeTab.navigateTo({ url });
 
   info("Waiting for markup view to load after navigation.");
   await markuploaded;
@@ -68,7 +68,7 @@ var navigateTo = async function(inspector, url) {
 var startPicker = async function(toolbox, skipFocus) {
   info("Start the element picker");
   toolbox.win.focus();
-  await toolbox.highlighterUtils.startPicker();
+  await toolbox.inspector.nodePicker.start();
   if (!skipFocus) {
     // By default make sure the content window is focused since the picker may not focus
     // the content window by default.
@@ -77,6 +77,54 @@ var startPicker = async function(toolbox, skipFocus) {
     });
   }
 };
+
+/**
+ * Pick an element from the content page using the element picker.
+ *
+ * @param {Inspector} inspector
+ *        Inspector instance
+ * @param {TestActor} testActor
+ *        TestActor instance
+ * @param {String} selector
+ *        CSS selector to identify the click target
+ * @param {Number} x
+ *        X-offset from the top-left corner of the element matching the provided selector
+ * @param {Number} y
+ *        Y-offset from the top-left corner of the element matching the provided selector
+ * @return {Promise} promise that resolves when the selection is updated with the picked
+ *         node.
+ */
+function pickElement(inspector, testActor, selector, x, y) {
+  info("Waiting for element " + selector + " to be picked");
+  // Use an empty options argument in order trigger the default synthesizeMouse behavior
+  // which will trigger mousedown, then mouseup.
+  const onNewNodeFront = inspector.selection.once("new-node-front");
+  testActor.synthesizeMouse({selector, x, y, options: {}});
+  return onNewNodeFront;
+}
+
+/**
+ * Hover an element from the content page using the element picker.
+ *
+ * @param {Inspector} inspector
+ *        Inspector instance
+ * @param {TestActor} testActor
+ *        TestActor instance
+ * @param {String} selector
+ *        CSS selector to identify the hover target
+ * @param {Number} x
+ *        X-offset from the top-left corner of the element matching the provided selector
+ * @param {Number} y
+ *        Y-offset from the top-left corner of the element matching the provided selector
+ * @return {Promise} promise that resolves when the "picker-node-hovered" event is
+ *         emitted.
+ */
+function hoverElement(inspector, testActor, selector, x, y) {
+  info("Waiting for element " + selector + " to be hovered");
+  const onHovered = inspector.inspector.nodePicker.once("picker-node-hovered");
+  testActor.synthesizeMouse({selector, x, y, options: {type: "mousemove"}});
+  return onHovered;
+}
 
 /**
  * Highlight a node and set the inspector's current selection to the node or
@@ -127,7 +175,7 @@ function clearCurrentNodeSelection(inspector) {
  * @param {string} url  The URL to open.
  * @param {String} hostType Optional hostType, as defined in Toolbox.HostType
  * @return A promise that is resolved once the tab and inspector have loaded
- *         with an object: { tab, toolbox, inspector }.
+ *         with an object: { tab, toolbox, inspector }.
  */
 var openInspectorForURL = async function(url, hostType) {
   const tab = await addTab(url);
@@ -135,8 +183,8 @@ var openInspectorForURL = async function(url, hostType) {
   return { tab, inspector, toolbox, testActor };
 };
 
-function getActiveInspector() {
-  const target = TargetFactory.forTab(gBrowser.selectedTab);
+async function getActiveInspector() {
+  const target = await TargetFactory.forTab(gBrowser.selectedTab);
   return gDevTools.getToolbox(target).getPanel("inspector");
 }
 
@@ -155,7 +203,7 @@ var clickOnInspectMenuItem = async function(testActor, selector) {
   await testActor.synthesizeMouse({
     selector: selector,
     center: true,
-    options: {type: "contextmenu", button: 2}
+    options: {type: "contextmenu", button: 2},
   });
 
   await contextOpened;
@@ -186,6 +234,31 @@ var getNodeFrontInFrame = async function(selector, frameSelector,
   const iframe = await getNodeFront(frameSelector, inspector);
   const {nodes} = await inspector.walker.children(iframe);
   return inspector.walker.querySelector(nodes[0], selector);
+};
+
+/**
+ * Get the NodeFront for a node that matches a given css selector inside a shadow root.
+ *
+ * @param {String} selector
+ *        CSS selector of the node inside the shadow root.
+ * @param {String|NodeFront} hostSelector
+ *        Selector or front of the element to which the shadow root is attached.
+ * @param {InspectorPanel} inspector
+ *        The instance of InspectorPanel currently loaded in the toolbox
+ * @return {Promise} Resolves the node front when the inspector is updated with the new
+ *         node.
+ */
+var getNodeFrontInShadowDom = async function(selector, hostSelector, inspector) {
+  const hostFront = await getNodeFront(hostSelector, inspector);
+  const {nodes} = await inspector.walker.children(hostFront);
+
+  // Find the shadow root in the children of the host element.
+  const shadowRoot = nodes.filter(node => node.isShadowRoot)[0];
+  if (!shadowRoot) {
+    throw new Error("Could not find a shadow root under selector: " + hostSelector);
+  }
+
+  return inspector.walker.querySelector(shadowRoot, selector);
 };
 
 var focusSearchBoxUsingShortcut = async function(panelWin, callback) {
@@ -255,7 +328,7 @@ var hoverContainer = async function(selector, inspector) {
   const nodeFront = await getNodeFront(selector, inspector);
   const container = getContainerForNodeFront(nodeFront, inspector);
 
-  const highlit = inspector.toolbox.once("node-highlight");
+  const highlit = inspector.highlighter.once("node-highlight");
   EventUtils.synthesizeMouseAtCenter(container.tagLine, {type: "mousemove"},
     inspector.markup.doc.defaultView);
   return highlit;
@@ -426,7 +499,7 @@ const getHighlighterHelperFor = (type) => async function({inspector, testActor})
         getComputedStyle: async function(options = {}) {
           return inspector.pageStyle.getComputed(
             highlightedNode, options);
-        }
+        },
       };
     },
 
@@ -503,7 +576,7 @@ const getHighlighterHelperFor = (type) => async function({inspector, testActor})
           prevY = y;
           await testActor.synthesizeMouse({
             selector, x, y, options: {type: "mouse" + name}});
-        }
+        },
     }),
 
     reflow: async function() {
@@ -513,7 +586,7 @@ const getHighlighterHelperFor = (type) => async function({inspector, testActor})
     finalize: async function() {
       highlightedNode = null;
       await highlighter.finalize();
-    }
+    },
   };
 };
 
@@ -729,7 +802,7 @@ async function assertTooltipHiddenOnMouseOut(tooltip, target) {
   // The tooltip actually relies on mousemove events to check if it sould be hidden.
   const mouseEvent = new target.ownerDocument.defaultView.MouseEvent("mousemove", {
     bubbles: true,
-    relatedTarget: target
+    relatedTarget: target,
   });
   target.parentNode.dispatchEvent(mouseEvent);
 
@@ -837,4 +910,22 @@ async function expandContainerByClick(inspector, container) {
     inspector.markup.doc.defaultView);
   await onChildren;
   await onUpdated;
+}
+
+/**
+ * Simulate a color change in a given color picker tooltip.
+ *
+ * @param  {Spectrum} colorPicker
+ *         The color picker widget.
+ * @param  {Array} newRgba
+ *         Array of the new rgba values to be set in the color widget.
+ */
+async function simulateColorPickerChange(colorPicker, newRgba) {
+  info("Getting the spectrum colorpicker object");
+  const spectrum = await colorPicker.spectrum;
+  info("Setting the new color");
+  spectrum.rgb = newRgba;
+  info("Applying the change");
+  spectrum.updateUI();
+  spectrum.onChange();
 }

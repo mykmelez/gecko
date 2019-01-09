@@ -38,6 +38,7 @@ XPIDL_SOURCES += [
     'nsIDashboard.idl',
     'nsIDashboardEventNotifier.idl',
     'nsIDeprecationWarner.idl',
+    'nsIDHCPClient.idl',
     'nsIDivertableChannel.idl',
     'nsIDownloader.idl',
     'nsIEncodedChannel.idl',
@@ -52,7 +53,6 @@ XPIDL_SOURCES += [
     'nsIIncrementalStreamLoader.idl',
     'nsIInputStreamChannel.idl',
     'nsIInputStreamPump.idl',
-    'nsIIOActivityData.idl',
     'nsIIOService.idl',
     'nsILoadContextInfo.idl',
     'nsILoadGroup.idl',
@@ -63,12 +63,12 @@ XPIDL_SOURCES += [
     'nsINestedURI.idl',
     'nsINetAddr.idl',
     'nsINetUtil.idl',
+    'nsINetworkConnectivityService.idl',
     'nsINetworkInfoService.idl',
     'nsINetworkInterceptController.idl',
     'nsINetworkLinkService.idl',
     'nsINetworkPredictor.idl',
     'nsINetworkPredictorVerifier.idl',
-    'nsINetworkProperties.idl',
     'nsINullChannel.idl',
     'nsIParentChannel.idl',
     'nsIParentRedirectingChannel.idl',
@@ -97,7 +97,6 @@ XPIDL_SOURCES += [
     'nsISecCheckWrapChannel.idl',
     'nsISecureBrowserUI.idl',
     'nsISecurityEventSink.idl',
-    'nsISecurityInfoProvider.idl',
     'nsISensitiveInfoHiddenURI.idl',
     'nsISerializationHelper.idl',
     'nsIServerSocket.idl',
@@ -124,12 +123,10 @@ XPIDL_SOURCES += [
     'nsIUploadChannel.idl',
     'nsIUploadChannel2.idl',
     'nsIURI.idl',
-    'nsIURIClassifier.idl',
     'nsIURIMutator.idl',
-    'nsIURIWithPrincipal.idl',
+    'nsIURIWithSpecialOrigin.idl',
     'nsIURL.idl',
     'nsIURLParser.idl',
-    'nsPILoadGroupInternal.idl',
     'nsPISocketTransportService.idl',
 ]
 
@@ -174,9 +171,12 @@ EXPORTS.mozilla.net += [
     'DashboardTypes.h',
     'IOActivityMonitor.h',
     'MemoryDownloader.h',
+    'NetworkConnectivityService.h',
     'PartiallySeekableInputStream.h',
     'Predictor.h',
+    'RedirectChannelRegistrar.h',
     'ReferrerPolicy.h',
+    'RequestContextService.h',
     'SimpleChannelParent.h',
     'TCPFastOpen.h',
 ]
@@ -193,6 +193,7 @@ UNIFIED_SOURCES += [
     'LoadContextInfo.cpp',
     'LoadInfo.cpp',
     'MemoryDownloader.cpp',
+    'NetworkConnectivityService.cpp',
     'nsAsyncRedirectVerifyHelper.cpp',
     'nsAsyncStreamCopier.cpp',
     'nsAuthInformationHolder.cpp',
@@ -200,7 +201,6 @@ UNIFIED_SOURCES += [
     'nsBaseChannel.cpp',
     'nsBaseContentStream.cpp',
     'nsBufferedStreams.cpp',
-    'nsChannelClassifier.cpp',
     'nsDirectoryIndexStream.cpp',
     'nsDNSPrefetch.cpp',
     'nsDownloader.cpp',
@@ -301,8 +301,11 @@ LOCAL_INCLUDES += [
     '/dom/base',
     '/netwerk/protocol/http',
     '/netwerk/socket',
-    '/security/pkix/include'
+    '/netwerk/url-classifier',
 ]
 
 if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     CXXFLAGS += ['-Wno-error=shadow']
+
+if CONFIG['CC_TYPE'] == 'clang-cl':
+    AllowCompilerWarnings()  # workaround for bug 1090497

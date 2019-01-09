@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Misc information about a given computed style.
 
@@ -56,13 +56,10 @@ bitflags! {
         /// Whether the child explicitly inherits any reset property.
         const INHERITS_RESET_STYLE = 1 << 8;
 
-        /// A flag to mark a style which is a visited style.
-        const IS_STYLE_IF_VISITED = 1 << 9;
-
         /// Whether the style or any of the ancestors has a multicol style.
         ///
         /// Only used in Servo.
-        const CAN_BE_FRAGMENTED = 1 << 10;
+        const CAN_BE_FRAGMENTED = 1 << 9;
     }
 }
 
@@ -70,7 +67,6 @@ impl ComputedValueFlags {
     /// Flags that are unconditionally propagated to descendants.
     #[inline]
     fn inherited_flags() -> Self {
-        ComputedValueFlags::IS_STYLE_IF_VISITED |
         ComputedValueFlags::IS_RELEVANT_LINK_VISITED |
         ComputedValueFlags::CAN_BE_FRAGMENTED |
         ComputedValueFlags::IS_IN_PSEUDO_ELEMENT_SUBTREE |

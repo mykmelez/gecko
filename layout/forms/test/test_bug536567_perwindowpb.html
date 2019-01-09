@@ -129,11 +129,7 @@ function endTest() {
   SimpleTest.finish();
 }
 
-var mainWindow =
-  window.QueryInterface(Ci.nsIInterfaceRequestor).
-    getInterface(Ci.nsIWebNavigation).QueryInterface(Ci.nsIDocShellTreeItem).
-    rootTreeItem.QueryInterface(Ci.nsIInterfaceRequestor).
-    getInterface(Ci.nsIDOMWindow);
+var mainWindow = window.docShell.rootTreeItem.domWindow;
 var contentPage = "http://mochi.test:8888/chrome/layout/forms/test/bug536567_iframe.html";
 
 function whenDelayedStartupFinished(aWindow, aCallback) {
@@ -150,7 +146,9 @@ function testOnWindow(aIsPrivate, aCallback) {
   whenDelayedStartupFinished(win, function() {
     win.addEventListener("DOMContentLoaded", function onInnerLoad() {
       if (win.content.location.href != contentPage) {
-        win.gBrowser.loadURI(contentPage);
+        win.gBrowser.loadURI(contentPage, {
+          triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal({}),
+        });
         return;
       }
       win.removeEventListener("DOMContentLoaded", onInnerLoad, true);
@@ -159,7 +157,11 @@ function testOnWindow(aIsPrivate, aCallback) {
       win.setTimeout(function() { aCallback(win); }, 0);
     }, true);
     SimpleTest.info("load's window: " + win.location + " vs. " + window.location);
-    win.setTimeout(function() { win.gBrowser.loadURI(contentPage); }, 0);
+    win.setTimeout(function() {
+      win.gBrowser.loadURI(contentPage, {
+        triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal({}),
+      });
+    }, 0);
   });
 }
 

@@ -4,7 +4,6 @@
 "use strict";
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Messaging.jsm");
 ChromeUtils.import("resource://gre/modules/UITelemetry.jsm");
 
@@ -100,7 +99,7 @@ handlers.searchbutton = {
     let browserWin = Services.wm.getMostRecentWindow("navigator:browser");
     // Reset the user search to whatever the new search term was
     browserWin.BrowserApp.loadURI(uri.spec, undefined, { isSearch: true, userRequested: value });
-  }
+  },
 };
 
 handlers.wifi = {
@@ -143,7 +142,7 @@ handlers.wifi = {
     Services.obs.addObserver(this, "network:link-status-changed", true);
 
     EventDispatcher.instance.sendRequest({
-      type: "Wifi:Enable"
+      type: "Wifi:Enable",
     });
   },
 
@@ -169,6 +168,5 @@ handlers.wifi = {
         node.ownerDocument.location.reload(false);
       }, 500);
     }
-  }
+  },
 };
-

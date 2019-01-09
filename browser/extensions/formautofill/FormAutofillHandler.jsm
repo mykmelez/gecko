@@ -6,24 +6,30 @@
  * Defines a handler object to represent forms that autofill can handle.
  */
 
-/* exported FormAutofillHandler */
-
 "use strict";
 
 var EXPORTED_SYMBOLS = ["FormAutofillHandler"];
 
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://formautofill/FormAutofill.jsm");
 
-ChromeUtils.import("resource://formautofill/FormAutofillUtils.jsm");
-
+ChromeUtils.defineModuleGetter(this, "FormAutofillUtils",
+                               "resource://formautofill/FormAutofillUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "FormAutofillHeuristics",
                                "resource://formautofill/FormAutofillHeuristics.jsm");
 ChromeUtils.defineModuleGetter(this, "FormLikeFactory",
                                "resource://gre/modules/FormLikeFactory.jsm");
 
+XPCOMUtils.defineLazyGetter(this, "reauthPasswordPromptMessage", () => {
+  const brandShortName = FormAutofillUtils.brandBundle.GetStringFromName("brandShortName");
+  return FormAutofillUtils.stringBundle.formatStringFromName(
+    `useCreditCardPasswordPrompt.${AppConstants.platform}`, [brandShortName], 1);
+});
+
 this.log = null;
-FormAutofillUtils.defineLazyLogGetter(this, EXPORTED_SYMBOLS[0]);
+FormAutofill.defineLazyLogGetter(this, EXPORTED_SYMBOLS[0]);
 
 const {FIELD_STATES} = FormAutofillUtils;
 
@@ -291,7 +297,7 @@ class FormAutofillSection {
         // Use case for multiple select is not considered here.
         if (!option.selected) {
           option.selected = true;
-          element.dispatchEvent(new element.ownerGlobal.UIEvent("input", {bubbles: true}));
+          element.dispatchEvent(new element.ownerGlobal.Event("input", {bubbles: true}));
           element.dispatchEvent(new element.ownerGlobal.Event("change", {bubbles: true}));
         }
         // Autofill highlight appears regardless if value is changed or not
@@ -552,10 +558,17 @@ class FormAutofillAddressSection extends FormAutofillSection {
   }
 
   isEnabled() {
-    return FormAutofillUtils.isAutofillAddressesEnabled;
+    return FormAutofill.isAutofillAddressesEnabled;
   }
 
   isRecordCreatable(record) {
+    if (record.country && !FormAutofill.supportedCountries.includes(record.country)) {
+      // We don't want to save data in the wrong fields due to not having proper
+      // heuristic regexes in countries we don't yet support.
+      log.warn("isRecordCreatable: Country not supported:", record.country);
+      return false;
+    }
+
     let hasName = 0;
     let length = 0;
     for (let key of Object.keys(record)) {
@@ -770,7 +783,7 @@ class FormAutofillCreditCardSection extends FormAutofillSection {
   }
 
   isEnabled() {
-    return FormAutofillUtils.isAutofillCreditCardsEnabled;
+    return FormAutofill.isAutofillCreditCardsEnabled;
   }
 
   isRecordCreatable(record) {
@@ -861,12 +874,10 @@ class FormAutofillCreditCardSection extends FormAutofillSection {
    * @override
    */
   async prepareFillingProfile(profile) {
-    // When Master Password is enabled by users, the decryption process
-    // should prompt Master Password dialog to get the decrypted credit
-    // card number. Otherwise, the number can be decrypted with the default
-    // password.
+    // Prompt the OS login dialog to get the decrypted credit
+    // card number.
     if (profile["cc-number-encrypted"]) {
-      let decrypted = await this._decrypt(profile["cc-number-encrypted"], true);
+      let decrypted = await this._decrypt(profile["cc-number-encrypted"], reauthPasswordPromptMessage);
 
       if (!decrypted) {
         // Early return if the decrypted is empty or undefined
@@ -894,8 +905,7 @@ class FormAutofillHandler {
     /**
      * A WindowUtils reference of which Window the form belongs
      */
-    this.winUtils = this.form.rootElement.ownerGlobal.QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIDOMWindowUtils);
+    this.winUtils = this.form.rootElement.ownerGlobal.windowUtils;
 
     /**
      * Time in milliseconds since epoch when a user started filling in the form.

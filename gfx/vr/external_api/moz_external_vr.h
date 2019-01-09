@@ -7,6 +7,11 @@
 #ifndef GFX_VR_EXTERNAL_API_H
 #define GFX_VR_EXTERNAL_API_H
 
+#define GFX_VR_EIGHTCC(c1, c2, c3, c4, c5, c6, c7, c8)                  \
+  ((uint64_t)(c1) << 56 | (uint64_t)(c2) << 48 | (uint64_t)(c3) << 40 | \
+   (uint64_t)(c4) << 32 | (uint64_t)(c5) << 24 | (uint64_t)(c6) << 16 | \
+   (uint64_t)(c7) << 8 | (uint64_t)(c8))
+
 #include <stddef.h>
 #include <stdint.h>
 #include <type_traits>
@@ -14,21 +19,22 @@
 #ifdef MOZILLA_INTERNAL_API
 #include "mozilla/TypedEnumBits.h"
 #include "mozilla/gfx/2D.h"
-#endif // MOZILLA_INTERNAL_API
+#endif  // MOZILLA_INTERNAL_API
 
 #if defined(__ANDROID__)
 #include <pthread.h>
-#endif // defined(__ANDROID__)
+#endif  // defined(__ANDROID__)
 
 namespace mozilla {
 #ifdef MOZILLA_INTERNAL_API
 namespace dom {
-  enum class GamepadHand : uint8_t;
-}
-#endif //  MOZILLA_INTERNAL_API
+enum class GamepadHand : uint8_t;
+enum class GamepadCapabilityFlags : uint16_t;
+}  // namespace dom
+#endif  //  MOZILLA_INTERNAL_API
 namespace gfx {
 
-static const int32_t kVRExternalVersion = 0;
+static const int32_t kVRExternalVersion = 5;
 
 // We assign VR presentations to groups with a bitmask.
 // Currently, we will only display either content or chrome.
@@ -44,39 +50,67 @@ static const uint32_t kVRGroupAll = 0xffffffff;
 static const int kVRDisplayNameMaxLen = 256;
 static const int kVRControllerNameMaxLen = 256;
 static const int kVRControllerMaxCount = 16;
-static const int kVRControllerMaxTriggers = 16;
+static const int kVRControllerMaxButtons = 64;
 static const int kVRControllerMaxAxis = 16;
 static const int kVRLayerMaxCount = 8;
+static const int kVRHapticsMaxCount = 32;
 
-struct Point3D_POD
-{
+#if defined(__ANDROID__)
+typedef uint64_t VRLayerTextureHandle;
+#elif defined(XP_MACOSX)
+typedef uint32_t VRLayerTextureHandle;
+#else
+typedef void* VRLayerTextureHandle;
+#endif
+
+struct Point3D_POD {
   float x;
   float y;
   float z;
 };
 
-struct IntSize_POD
-{
+struct IntSize_POD {
   int32_t width;
   int32_t height;
 };
 
-struct FloatSize_POD
-{
+struct FloatSize_POD {
   float width;
   float height;
 };
 
 #ifndef MOZILLA_INTERNAL_API
 
-enum class ControllerHand : uint8_t {
-  _empty,
-  Left,
-  Right,
-  EndGuard_
+enum class ControllerHand : uint8_t { _empty, Left, Right, EndGuard_ };
+
+enum class ControllerCapabilityFlags : uint16_t {
+  Cap_None = 0,
+  /**
+   * Cap_Position is set if the Gamepad is capable of tracking its position.
+   */
+  Cap_Position = 1 << 1,
+  /**
+   * Cap_Orientation is set if the Gamepad is capable of tracking its
+   * orientation.
+   */
+  Cap_Orientation = 1 << 2,
+  /**
+   * Cap_AngularAcceleration is set if the Gamepad is capable of tracking its
+   * angular acceleration.
+   */
+  Cap_AngularAcceleration = 1 << 3,
+  /**
+   * Cap_LinearAcceleration is set if the Gamepad is capable of tracking its
+   * linear acceleration.
+   */
+  Cap_LinearAcceleration = 1 << 4,
+  /**
+   * Cap_All used for validity checking during IPC serialization
+   */
+  Cap_All = (1 << 5) - 1
 };
 
-#endif // ifndef MOZILLA_INTERNAL_API
+#endif  // ifndef MOZILLA_INTERNAL_API
 
 enum class VRDisplayCapabilityFlags : uint16_t {
   Cap_None = 0,
@@ -85,14 +119,15 @@ enum class VRDisplayCapabilityFlags : uint16_t {
    */
   Cap_Position = 1 << 1,
   /**
-    * Cap_Orientation is set if the VRDisplay is capable of tracking its orientation.
-    */
+   * Cap_Orientation is set if the VRDisplay is capable of tracking its
+   * orientation.
+   */
   Cap_Orientation = 1 << 2,
   /**
    * Cap_Present is set if the VRDisplay is capable of presenting content to an
    * HMD or similar device.  Can be used to indicate "magic window" devices that
-   * are capable of 6DoF tracking but for which requestPresent is not meaningful.
-   * If false then calls to requestPresent should always fail, and
+   * are capable of 6DoF tracking but for which requestPresent is not
+   * meaningful. If false then calls to requestPresent should always fail, and
    * getEyeParameters should return null.
    */
   Cap_Present = 1 << 3,
@@ -132,32 +167,33 @@ enum class VRDisplayCapabilityFlags : uint16_t {
 
 #ifdef MOZILLA_INTERNAL_API
 MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(VRDisplayCapabilityFlags)
-#endif // MOZILLA_INTERNAL_API
+#endif  // MOZILLA_INTERNAL_API
 
-struct VRHMDSensorState {
-  int64_t inputFrameID;
-  double timestamp;
-  VRDisplayCapabilityFlags flags;
-
-  // These members will only change with inputFrameID:
+struct VRPose {
   float orientation[4];
   float position[3];
-  float leftViewMatrix[16];
-  float rightViewMatrix[16];
   float angularVelocity[3];
   float angularAcceleration[3];
   float linearVelocity[3];
   float linearAcceleration[3];
+};
+
+struct VRHMDSensorState {
+  uint64_t inputFrameID;
+  double timestamp;
+  VRDisplayCapabilityFlags flags;
+
+  // These members will only change with inputFrameID:
+  VRPose pose;
+  float leftViewMatrix[16];
+  float rightViewMatrix[16];
 
 #ifdef MOZILLA_INTERNAL_API
 
-  void Clear() {
-    memset(this, 0, sizeof(VRHMDSensorState));
-  }
+  void Clear() { memset(this, 0, sizeof(VRHMDSensorState)); }
 
   bool operator==(const VRHMDSensorState& other) const {
-    return inputFrameID == other.inputFrameID &&
-           timestamp == other.timestamp;
+    return inputFrameID == other.inputFrameID && timestamp == other.timestamp;
   }
 
   bool operator!=(const VRHMDSensorState& other) const {
@@ -166,7 +202,7 @@ struct VRHMDSensorState {
 
   void CalcViewMatrices(const gfx::Matrix4x4* aHeadToEyeTransforms);
 
-#endif // MOZILLA_INTERNAL_API
+#endif  // MOZILLA_INTERNAL_API
 };
 
 struct VRFieldOfView {
@@ -179,11 +215,12 @@ struct VRFieldOfView {
 
   VRFieldOfView() = default;
   VRFieldOfView(double up, double right, double down, double left)
-    : upDegrees(up), rightDegrees(right), downDegrees(down), leftDegrees(left)
-  {}
+      : upDegrees(up),
+        rightDegrees(right),
+        downDegrees(down),
+        leftDegrees(left) {}
 
-  void SetFromTanRadians(double up, double right, double down, double left)
-  {
+  void SetFromTanRadians(double up, double right, double down, double left) {
     upDegrees = atan(up) * 180.0 / M_PI;
     rightDegrees = atan(right) * 180.0 / M_PI;
     downDegrees = atan(down) * 180.0 / M_PI;
@@ -191,8 +228,7 @@ struct VRFieldOfView {
   }
 
   bool operator==(const VRFieldOfView& other) const {
-    return other.upDegrees == upDegrees &&
-           other.downDegrees == downDegrees &&
+    return other.upDegrees == upDegrees && other.downDegrees == downDegrees &&
            other.rightDegrees == rightDegrees &&
            other.leftDegrees == leftDegrees;
   }
@@ -202,34 +238,35 @@ struct VRFieldOfView {
   }
 
   bool IsZero() const {
-    return upDegrees == 0.0 ||
-      rightDegrees == 0.0 ||
-      downDegrees == 0.0 ||
-      leftDegrees == 0.0;
+    return upDegrees == 0.0 || rightDegrees == 0.0 || downDegrees == 0.0 ||
+           leftDegrees == 0.0;
   }
 
-  Matrix4x4 ConstructProjectionMatrix(float zNear, float zFar, bool rightHanded) const;
+  Matrix4x4 ConstructProjectionMatrix(float zNear, float zFar,
+                                      bool rightHanded) const;
 
-#endif // MOZILLA_INTERNAL_API
-
+#endif  // MOZILLA_INTERNAL_API
 };
 
-struct VRDisplayState
-{
-  enum Eye {
-    Eye_Left,
-    Eye_Right,
-    NumEyes
-  };
+struct VRDisplayState {
+  enum Eye { Eye_Left, Eye_Right, NumEyes };
 
-#if defined(__ANDROID__)
+  // When true, indicates that the VR service has shut down
   bool shutdown;
-#endif // defined(__ANDROID__)
+  // Minimum number of milliseconds to wait before attempting
+  // to start the VR service again
+  uint32_t mMinRestartInterval;
   char mDisplayName[kVRDisplayNameMaxLen];
+  // eight byte character code identifier
+  // LSB first, so "ABCDEFGH" -> ('H'<<56) + ('G'<<48) + ('F'<<40) +
+  //                             ('E'<<32) + ('D'<<24) + ('C'<<16) +
+  //                             ('B'<<8) + 'A').
+  uint64_t mEightCC;
   VRDisplayCapabilityFlags mCapabilityFlags;
   VRFieldOfView mEyeFOV[VRDisplayState::NumEyes];
   Point3D_POD mEyeTranslation[VRDisplayState::NumEyes];
   IntSize_POD mEyeResolution;
+  bool mSuppressFrames;
   bool mIsConnected;
   bool mIsMounted;
   FloatSize_POD mStageSize;
@@ -238,30 +275,39 @@ struct VRDisplayState
   uint64_t mLastSubmittedFrameId;
   bool mLastSubmittedFrameSuccessful;
   uint32_t mPresentingGeneration;
+  // Telemetry
+  bool mReportsDroppedFrames;
+  uint64_t mDroppedFrameCount;
 };
 
-struct VRControllerState
-{
-  char mControllerName[kVRControllerNameMaxLen];
+struct VRControllerState {
+  char controllerName[kVRControllerNameMaxLen];
 #ifdef MOZILLA_INTERNAL_API
-  dom::GamepadHand mHand;
+  dom::GamepadHand hand;
 #else
-  ControllerHand mHand;
+  ControllerHand hand;
 #endif
-  uint32_t mNumButtons;
-  uint32_t mNumAxes;
-  uint32_t mNumTriggers;
-  uint32_t mNumHaptics;
+  uint32_t numButtons;
+  uint32_t numAxes;
+  uint32_t numHaptics;
   // The current button pressed bit of button mask.
-  uint64_t mButtonPressed;
+  uint64_t buttonPressed;
   // The current button touched bit of button mask.
-  uint64_t mButtonTouched;
-  float mTriggerValue[kVRControllerMaxTriggers];
-  float mAxisValue[kVRControllerMaxAxis];
+  uint64_t buttonTouched;
+  float triggerValue[kVRControllerMaxButtons];
+  float axisValue[kVRControllerMaxAxis];
+
+#ifdef MOZILLA_INTERNAL_API
+  dom::GamepadCapabilityFlags flags;
+#else
+  ControllerCapabilityFlags flags;
+#endif
+  VRPose pose;
+  bool isPositionValid;
+  bool isOrientationValid;
 };
 
-struct VRLayerEyeRect
-{
+struct VRLayerEyeRect {
   float x;
   float y;
   float width;
@@ -277,19 +323,18 @@ enum class VRLayerType : uint16_t {
 enum class VRLayerTextureType : uint16_t {
   LayerTextureType_None = 0,
   LayerTextureType_D3D10SurfaceDescriptor = 1,
-  LayerTextureType_MacIOSurface = 2
+  LayerTextureType_MacIOSurface = 2,
+  LayerTextureType_GeckoSurfaceTexture = 3
 };
 
-struct VRLayer_2D_Content
-{
-  void* mTextureHandle;
+struct VRLayer_2D_Content {
+  VRLayerTextureHandle mTextureHandle;
   VRLayerTextureType mTextureType;
   uint64_t mFrameId;
 };
 
-struct VRLayer_Stereo_Immersive
-{
-  void* mTextureHandle;
+struct VRLayer_Stereo_Immersive {
+  VRLayerTextureHandle mTextureHandle;
   VRLayerTextureType mTextureType;
   uint64_t mFrameId;
   uint64_t mInputFrameId;
@@ -297,8 +342,7 @@ struct VRLayer_Stereo_Immersive
   VRLayerEyeRect mRightEyeRect;
 };
 
-struct VRLayerState
-{
+struct VRLayerState {
   VRLayerType type;
   union {
     VRLayer_2D_Content layer_2d_content;
@@ -306,48 +350,69 @@ struct VRLayerState
   };
 };
 
-struct VRBrowserState
-{
-#if defined(__ANDROID__)
-  bool shutdown;
-#endif // defined(__ANDROID__)
-  VRLayerState layerState[kVRLayerMaxCount];
+struct VRHapticState {
+  // Reference frame for timing.
+  // When 0, this does not represent an active haptic pulse.
+  uint64_t inputFrameID;
+  // Index within VRSystemState.controllerState identifying the controller
+  // to emit the haptic pulse
+  uint32_t controllerIndex;
+  // 0-based index indicating which haptic actuator within the controller
+  uint32_t hapticIndex;
+  // Start time of the haptic feedback pulse, relative to the start of
+  // inputFrameID, in seconds
+  float pulseStart;
+  // Duration of the haptic feedback pulse, in seconds
+  float pulseDuration;
+  // Intensity of the haptic feedback pulse, from 0.0f to 1.0f
+  float pulseIntensity;
 };
 
-struct VRSystemState
-{
-  uint32_t presentingGeneration;
+struct VRBrowserState {
+#if defined(__ANDROID__)
+  bool shutdown;
+#endif  // defined(__ANDROID__)
+  bool presentationActive;
+  bool navigationTransitionActive;
+  VRLayerState layerState[kVRLayerMaxCount];
+  VRHapticState hapticState[kVRHapticsMaxCount];
+};
+
+struct VRSystemState {
   bool enumerationCompleted;
   VRDisplayState displayState;
   VRHMDSensorState sensorState;
   VRControllerState controllerState[kVRControllerMaxCount];
 };
 
-struct VRExternalShmem
-{
+struct VRExternalShmem {
   int32_t version;
   int32_t size;
 #if defined(__ANDROID__)
   pthread_mutex_t systemMutex;
   pthread_mutex_t browserMutex;
+  pthread_cond_t systemCond;
+  pthread_cond_t browserCond;
 #else
   int64_t generationA;
-#endif // defined(__ANDROID__)
+#endif  // defined(__ANDROID__)
   VRSystemState state;
 #if !defined(__ANDROID__)
   int64_t generationB;
   int64_t browserGenerationA;
-#endif // !defined(__ANDROID__)
+#endif  // !defined(__ANDROID__)
   VRBrowserState browserState;
 #if !defined(__ANDROID__)
   int64_t browserGenerationB;
-#endif // !defined(__ANDROID__)
+#endif  // !defined(__ANDROID__)
 };
 
-// As we are memcpy'ing VRExternalShmem and its members around, it must be a POD type
-static_assert(std::is_pod<VRExternalShmem>::value, "VRExternalShmem must be a POD type.");
+// As we are memcpy'ing VRExternalShmem and its members around, it must be a POD
+// type
+static_assert(std::is_pod<VRExternalShmem>::value,
+              "VRExternalShmem must be a POD type.");
 
-} // namespace gfx
-} // namespace mozilla
+}  // namespace gfx
+}  // namespace mozilla
 
 #endif /* GFX_VR_EXTERNAL_API_H */

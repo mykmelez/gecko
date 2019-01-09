@@ -27,7 +27,7 @@ function HistoryRec(collection, id) {
 HistoryRec.prototype = {
   __proto__: CryptoWrapper.prototype,
   _logName: "Sync.Record.History",
-  ttl: HISTORY_TTL
+  ttl: HISTORY_TTL,
 };
 
 Utils.deferGetSet(HistoryRec, "cleartext", ["histUri", "title", "visits"]);
@@ -44,28 +44,6 @@ HistoryEngine.prototype = {
   downloadLimit: MAX_HISTORY_DOWNLOAD,
 
   syncPriority: 7,
-
-  _migratedSyncMetadata: false,
-  async _migrateSyncMetadata() {
-    if (this._migratedSyncMetadata) {
-      return;
-    }
-    // Migrate the history sync ID and last sync time from prefs, to avoid
-    // triggering a full sync on upgrade. This can be removed in bug 1443021.
-    let existingSyncID = await super.getSyncID();
-    if (existingSyncID) {
-      this._log.debug("Migrating existing sync ID ${existingSyncID} from prefs",
-                      { existingSyncID });
-      await PlacesSyncUtils.history.ensureCurrentSyncId(existingSyncID);
-    }
-    let existingLastSync = await super.getLastSync();
-    if (existingLastSync) {
-      this._log.debug("Migrating existing last sync time ${existingLastSync} " +
-                      "from prefs", { existingLastSync });
-      await PlacesSyncUtils.history.setLastSync(existingLastSync);
-    }
-    this._migratedSyncMetadata = true;
-  },
 
   async getSyncID() {
     return PlacesSyncUtils.history.getSyncId();
@@ -103,11 +81,6 @@ HistoryEngine.prototype = {
   async setLastSync(lastSync) {
     await PlacesSyncUtils.history.setLastSync(lastSync);
     await super.setLastSync(lastSync); // Remove in bug 1443021.
-  },
-
-  async _syncStartup() {
-    await this._migrateSyncMetadata();
-    await super._syncStartup();
   },
 
   shouldSyncURL(url) {
@@ -215,8 +188,9 @@ HistoryStore.prototype = {
         toRemove.push(record);
       } else {
         try {
-          if (await this._recordToPlaceInfo(record)) {
-            toAdd.push(record);
+          let pageInfo = await this._recordToPlaceInfo(record);
+          if (pageInfo) {
+            toAdd.push(pageInfo);
           }
         } catch (ex) {
           if (Async.isShutdownException(ex)) {
@@ -330,8 +304,8 @@ HistoryStore.prototype = {
    * Converts a Sync history record to a mozIPlaceInfo.
    *
    * Throws if an invalid record is encountered (invalid URI, etc.),
-   * returns true if the record is to be applied, false otherwise
-   * (no visits to add, etc.),
+   * returns a new PageInfo object if the record is to be applied, null
+   * otherwise (no visits to add, etc.),
    */
   async _recordToPlaceInfo(record) {
     // Sort out invalid URIs and ones Places just simply doesn't want.
@@ -340,7 +314,7 @@ HistoryStore.prototype = {
 
     if (!Utils.checkGUID(record.id)) {
       this._log.warn("Encountered record with invalid GUID: " + record.id);
-      return false;
+      return null;
     }
     record.guid = record.id;
 
@@ -348,7 +322,7 @@ HistoryStore.prototype = {
         !this.engine.shouldSyncURL(record.uri.spec)) {
       this._log.trace("Ignoring record " + record.id + " with URI "
                       + record.uri.spec + ": can't add this URI.");
-      return false;
+      return null;
     }
 
     // We dupe visits by date and type. So an incoming visit that has
@@ -429,10 +403,20 @@ HistoryStore.prototype = {
     if (!record.visits.length) {
       this._log.trace("Ignoring record " + record.id + " with URI "
                       + record.uri.spec + ": no visits to add.");
-      return false;
+      return null;
     }
 
-    return true;
+    // PageInfo is validated using validateItemProperties which does a shallow
+    // copy of the properties. Since record uses getters some of the properties
+    // are not copied over. Thus we create and return a new object.
+    let pageInfo = {
+      title: record.title,
+      url: record.url,
+      guid: record.guid,
+      visits: record.visits,
+    };
+
+    return pageInfo;
   },
 
   async remove(record) {
@@ -471,7 +455,7 @@ HistoryStore.prototype = {
 
   async wipe() {
     return PlacesSyncUtils.history.wipe();
-  }
+  },
 };
 
 function HistoryTracker(name, engine) {
@@ -498,7 +482,7 @@ HistoryTracker.prototype = {
 
   QueryInterface: ChromeUtils.generateQI([
     Ci.nsINavHistoryObserver,
-    Ci.nsISupportsWeakReference
+    Ci.nsISupportsWeakReference,
   ]),
 
   async onDeleteAffectsGUID(uri, guid, reason, source, increment) {
@@ -512,7 +496,7 @@ HistoryTracker.prototype = {
     }
   },
 
-  onDeleteVisits(uri, visitTime, guid, reason) {
+  onDeleteVisits(uri, partialRemoval, guid, reason) {
     this.asyncObserver.enqueueCall(() =>
       this.onDeleteAffectsGUID(uri, guid, reason, "onDeleteVisits", SCORE_INCREMENT_SMALL)
     );

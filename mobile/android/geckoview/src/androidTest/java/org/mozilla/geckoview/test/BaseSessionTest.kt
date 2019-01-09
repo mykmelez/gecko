@@ -28,14 +28,27 @@ open class BaseSessionTest(noErrorCollector: Boolean = false) {
         const val CLICK_TO_RELOAD_HTML_PATH = "/assets/www/clickToReload.html"
         const val CONTENT_CRASH_URL = "about:crashcontent"
         const val DOWNLOAD_HTML_PATH = "/assets/www/download.html"
+        const val FORMS_HTML_PATH = "/assets/www/forms.html"
+        const val FORMS2_HTML_PATH = "/assets/www/forms2.html"
         const val HELLO_HTML_PATH = "/assets/www/hello.html"
         const val HELLO2_HTML_PATH = "/assets/www/hello2.html"
         const val INPUTS_PATH = "/assets/www/inputs.html"
-        const val INVALID_URI = "http://www.test.invalid/"
-        const val NEW_SESSION_HTML_PATH = "/assets/www/newSession.html"
+        const val INVALID_URI = "not a valid uri"
+        const val LINKS_HTML_PATH = "/assets/www/links.html"
+        const val LOREM_IPSUM_HTML_PATH = "/assets/www/loremIpsum.html"
         const val NEW_SESSION_CHILD_HTML_PATH = "/assets/www/newSession_child.html"
+        const val NEW_SESSION_HTML_PATH = "/assets/www/newSession.html"
+        const val POPUP_HTML_PATH = "/assets/www/popup.html"
+        const val SAVE_STATE_PATH = "/assets/www/saveState.html"
         const val TITLE_CHANGE_HTML_PATH = "/assets/www/titleChange.html"
         const val TRACKERS_PATH = "/assets/www/trackers.html"
+        const val VIDEO_OGG_PATH = "/assets/www/ogg.html"
+        const val VIDEO_MP4_PATH = "/assets/www/mp4.html"
+        const val VIDEO_WEBM_PATH = "/assets/www/webm.html"
+        const val VIDEO_BAD_PATH = "/assets/www/badVideoPath.html"
+        const val UNKNOWN_HOST_URI = "http://www.test.invalid/"
+        const val FULLSCREEN_PATH = "/assets/www/fullscreen.html"
+        const val VEIWPORT_PATH = "/assets/www/viewport.html"
     }
 
     @get:Rule val sessionRule = GeckoSessionTestRule()
@@ -64,8 +77,11 @@ open class BaseSessionTest(noErrorCollector: Boolean = false) {
     val GeckoSession.isRemote
         get() = this.settings.getBoolean(GeckoSessionSettings.USE_MULTIPROCESS)
 
+    fun createTestUrl(path: String) =
+            GeckoSessionTestRule.APK_URI_PREFIX + path.removePrefix("/")
+
     fun GeckoSession.loadTestPath(path: String) =
-            this.loadUri(GeckoSessionTestRule.APK_URI_PREFIX + path.removePrefix("/"))
+            this.loadUri(createTestUrl(path))
 
     inline fun GeckoSession.toParcel(lambda: (Parcel) -> Unit) {
         val parcel = Parcel.obtain()
@@ -83,6 +99,7 @@ open class BaseSessionTest(noErrorCollector: Boolean = false) {
             parcel.recycle()
         }
     }
+
 
     fun GeckoSession.open() =
             sessionRule.openSession(this)

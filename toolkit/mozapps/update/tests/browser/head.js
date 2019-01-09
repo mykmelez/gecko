@@ -41,8 +41,10 @@ const gEnv = Cc["@mozilla.org/process/environment;1"].
 const NOTIFICATIONS = [
   "update-available",
   "update-manual",
-  "update-restart"
+  "update-restart",
 ];
+
+let gOriginalUpdateAutoValue = null;
 
 /**
  * Delay for a very short period. Useful for moving the code after this
@@ -91,6 +93,33 @@ function setUpdateTimerPrefs() {
   Services.prefs.setIntPref(PREF_APP_UPDATE_INTERVAL, 43200);
 }
 
+/*
+ * In addition to changing the value of the Auto Update setting, this function
+ * also takes care of cleaning up after itself.
+ */
+async function setAppUpdateAutoEnabledHelper(enabled) {
+  if (gOriginalUpdateAutoValue == null) {
+    gOriginalUpdateAutoValue = await UpdateUtils.getAppUpdateAutoEnabled();
+    registerCleanupFunction(async () => {
+      await UpdateUtils.setAppUpdateAutoEnabled(gOriginalUpdateAutoValue);
+    });
+  }
+  await UpdateUtils.setAppUpdateAutoEnabled(enabled);
+}
+
+add_task(async function setDefaults() {
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      [PREF_APP_UPDATE_LOG, DEBUG_AUS_TEST],
+      // See bug 1505790 - uses a very large value to prevent the sync code
+      // from running since it has nothing to do with these tests.
+      ["services.sync.autoconnectDelay", 600000],
+    ]});
+  // Most tests in this directory expect auto update to be enabled. Those that
+  // don't will explicitly change this.
+  await setAppUpdateAutoEnabledHelper(true);
+});
+
 /**
  * Runs a typical update test. Will set various common prefs for using the
  * updater doorhanger, runs the provided list of steps, and makes sure
@@ -120,10 +149,9 @@ function runUpdateTest(updateParams, checkAttempts, steps) {
     await SpecialPowers.pushPrefEnv({
       set: [
         [PREF_APP_UPDATE_DOWNLOADPROMPTATTEMPTS, 0],
-        [PREF_APP_UPDATE_ENABLED, true],
+        [PREF_APP_UPDATE_DISABLEDFORTESTING, false],
         [PREF_APP_UPDATE_IDLETIME, 0],
         [PREF_APP_UPDATE_URL_MANUAL, URL_MANUAL_UPDATE],
-        [PREF_APP_UPDATE_LOG, DEBUG_AUS_TEST],
       ]});
 
     await setupTestUpdater();
@@ -173,13 +201,12 @@ function runUpdateProcessingTest(updates, steps) {
 
     setUpdateTimerPrefs();
     gEnv.set("MOZ_TEST_SKIP_UPDATE_STAGE", "1");
-    SpecialPowers.pushPrefEnv({
+    await SpecialPowers.pushPrefEnv({
       set: [
         [PREF_APP_UPDATE_DOWNLOADPROMPTATTEMPTS, 0],
-        [PREF_APP_UPDATE_ENABLED, true],
+        [PREF_APP_UPDATE_DISABLEDFORTESTING, false],
         [PREF_APP_UPDATE_IDLETIME, 0],
         [PREF_APP_UPDATE_URL_MANUAL, URL_MANUAL_UPDATE],
-        [PREF_APP_UPDATE_LOG, DEBUG_AUS_TEST],
       ]});
 
     await setupTestUpdater();
@@ -249,19 +276,20 @@ function waitForEvent(topic, status = null) {
         Services.obs.removeObserver(this, topic);
         resolve(innerStatus);
       }
-    }
+    },
   }, topic));
 }
 
 /**
  * Gets the specified button for the notification.
  *
- * @param  window
+ * @param  win
  *         The window to get the notification button for.
  * @param  notificationId
  *         The ID of the notification to get the button for.
  * @param  button
  *         The anonid of the button to get.
+ * @return The button element.
  */
 function getNotificationButton(win, notificationId, button) {
   let notification = win.document.getElementById(`appMenu-${notificationId}-notification`);
@@ -274,13 +302,15 @@ function getNotificationButton(win, notificationId, button) {
  * matches the url parameter provided. If no URL is provided, it will instead
  * ensure that the link matches the default link URL.
  *
+ * @param  win
+ *         The window to get the "What's new" link for.
  * @param  id
  *         The ID of the "What's new" link element.
  * @param  url (optional)
  *         The URL to check against. If none is provided, a default will be used.
  */
-function checkWhatsNewLink(id, url) {
-  let whatsNewLink = document.getElementById(id);
+function checkWhatsNewLink(win, id, url) {
+  let whatsNewLink = win.document.getElementById(id);
   is(whatsNewLink.href,
      url || URL_HTTP_UPDATE_SJS + "?uiURL=DETAILS",
      "What's new link points to the test_details URL");

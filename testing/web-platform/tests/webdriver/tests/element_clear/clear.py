@@ -2,6 +2,8 @@
 
 import pytest
 
+from webdriver import Element
+
 from tests.support.asserts import (
     assert_element_has_focus,
     assert_error,
@@ -44,12 +46,8 @@ def test_null_response_value(session):
     assert value is None
 
 
-def test_closed_context(session, create_window):
-    new_window = create_window()
-    session.window_handle = new_window
-    session.url = inline("<input>")
-    element = session.find.css("input", all=False)
-    session.close()
+def test_no_browsing_context(session, closed_window):
+    element = Element("foo", session)
 
     response = element_clear(session, element)
     assert_error(response, "no such window")
@@ -246,9 +244,7 @@ def test_button(session):
 
 def test_button_with_subtree(session):
     """
-    Whilst an <input> is normally editable, the focusable area
-    where it is placed will default to the <button>.  I.e. if you
-    try to click <input> to focus it, you will hit the <button>.
+    Elements inside button elements are interactable.
     """
     session.url = inline("""
         <button>
@@ -258,7 +254,7 @@ def test_button_with_subtree(session):
     text_field = session.find.css("input", all=False)
 
     response = element_clear(session, text_field)
-    assert_error(response, "element not interactable")
+    assert_success(response)
 
 
 def test_contenteditable(session, add_event_listeners, tracked_events):

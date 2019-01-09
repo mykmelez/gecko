@@ -6,6 +6,8 @@
 
 
 DevToolsModules(
+  'DebugTargetInfo.js',
+  'MeatballMenu.js',
   'ToolboxController.js',
   'ToolboxTab.js',
   'ToolboxTabs.js',

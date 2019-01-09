@@ -4,7 +4,7 @@
 
 extern crate libc;
 
-use core_foundation_sys::runloop::*;
+use core_foundation::runloop::*;
 use platform::iokit::{CFRunLoopEntryObserver, IOHIDDeviceRef, SendableRunLoop};
 use platform::monitor::Monitor;
 use std::os::raw::c_void;
@@ -57,8 +57,7 @@ impl Transaction {
 
                 // Send an error, if the callback wasn't called already.
                 callback.call(Err(::Error::NotAllowed));
-            })
-            .map_err(|_| ::Error::Unknown)?;
+            }).map_err(|_| ::Error::Unknown)?;
 
         // Block until we enter the CFRunLoop.
         let runloop = rx.recv().map_err(|_| ::Error::Unknown)?;

@@ -43,13 +43,11 @@ const PRIVILEGED_REMOTE_TYPE = "privileged";
 const LARGE_ALLOCATION_REMOTE_TYPE = "webLargeAllocation";
 const DEFAULT_REMOTE_TYPE = WEB_REMOTE_TYPE;
 
-const ACTIVITY_STREAM_PAGES = new Set(["home", "newtab", "welcome"]);
-
 function validatedWebRemoteType(aPreferredRemoteType, aTargetUri, aCurrentUri) {
   // If the domain is whitelisted to allow it to use file:// URIs, then we have
   // to run it in a file content process, in case it uses file:// sub-resources.
   const sm = Services.scriptSecurityManager;
-  if (sm.inFileURIWhitelist(aTargetUri)) {
+  if (sm.inFileURIAllowlist(aTargetUri)) {
     return FILE_REMOTE_TYPE;
   }
 
@@ -68,7 +66,9 @@ function validatedWebRemoteType(aPreferredRemoteType, aTargetUri, aCurrentUri) {
     if (aCurrentUri) {
       try {
         // checkSameOriginURI throws when not same origin.
-        sm.checkSameOriginURI(aCurrentUri, aTargetUri, false);
+        // todo: if you intend to update CheckSameOriginURI to log the error to the
+        // console you also need to update the 'aFromPrivateWindow' argument.
+        sm.checkSameOriginURI(aCurrentUri, aTargetUri, false, false);
         return FILE_REMOTE_TYPE;
       } catch (e) {
         return WEB_REMOTE_TYPE;
@@ -90,10 +90,14 @@ var E10SUtils = {
   PRIVILEGED_REMOTE_TYPE,
   LARGE_ALLOCATION_REMOTE_TYPE,
 
-  canLoadURIInProcess(aURL, aProcess) {
-    let remoteType = aProcess == Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT
-                     ? DEFAULT_REMOTE_TYPE : NOT_REMOTE;
-    return remoteType == this.getRemoteTypeForURI(aURL, true, remoteType);
+  canLoadURIInRemoteType(aURL, aRemoteType = DEFAULT_REMOTE_TYPE) {
+    // We need a strict equality here because the value of `NOT_REMOTE` is
+    // `null`, and there is a possibility that `undefined` is passed as the
+    // second argument, which might result a load in the parent process.
+    let preferredRemoteType = aRemoteType === NOT_REMOTE
+      ? NOT_REMOTE
+      : DEFAULT_REMOTE_TYPE;
+    return aRemoteType == this.getRemoteTypeForURI(aURL, true, preferredRemoteType);
   },
 
   getRemoteTypeForURI(aURL, aMultiProcess,
@@ -159,9 +163,8 @@ var E10SUtils = {
 
         let flags = module.getURIFlags(aURI);
         if (flags & Ci.nsIAboutModule.URI_MUST_LOAD_IN_CHILD) {
-          // Load Activity Stream in a separate process.
-          if (useSeparatePrivilegedContentProcess &&
-              ACTIVITY_STREAM_PAGES.has(aURI.filePath)) {
+          if ((flags & Ci.nsIAboutModule.URI_CAN_LOAD_IN_PRIVILEGED_CHILD) &&
+              useSeparatePrivilegedContentProcess) {
             return PRIVILEGED_REMOTE_TYPE;
           }
           return DEFAULT_REMOTE_TYPE;
@@ -193,6 +196,18 @@ var E10SUtils = {
         return WebExtensionPolicy.useRemoteWebExtensions ? EXTENSION_REMOTE_TYPE : NOT_REMOTE;
 
       default:
+        // WebExtensions may set up protocol handlers for protocol names
+        // beginning with ext+.  These may redirect to http(s) pages or to
+        // moz-extension pages.  We can't actually tell here where one of
+        // these pages will end up loading but Talos tests use protocol
+        // handlers that redirect to extension pages that rely on this
+        // behavior so a pageloader frame script is injected correctly.
+        // Protocols that redirect to http(s) will just flip back to a
+        // regular content process after the redirect.
+        if (aURI.scheme.startsWith("ext+")) {
+          return WebExtensionPolicy.useRemoteWebExtensions ? EXTENSION_REMOTE_TYPE : NOT_REMOTE;
+        }
+
         // For any other nested URIs, we use the innerURI to determine the
         // remote type. In theory we should use the innermost URI, but some URIs
         // have fake inner URIs (e.g. about URIs with inner moz-safe-about) and
@@ -261,7 +276,7 @@ var E10SUtils = {
 
   shouldLoadURI(aDocShell, aURI, aReferrer, aHasPostData) {
     // Inner frames should always load in the current process
-    if (aDocShell.QueryInterface(Ci.nsIDocShellTreeItem).sameTypeParent)
+    if (aDocShell.sameTypeParent)
       return true;
 
     // If we are in a Large-Allocation process, and it wouldn't be content visible
@@ -280,7 +295,7 @@ var E10SUtils = {
     let sessionHistory = webNav.sessionHistory;
     let requestedIndex = sessionHistory.legacySHistory.requestedIndex;
     if (requestedIndex >= 0) {
-      if (sessionHistory.legacySHistory.getEntryAtIndex(requestedIndex, false).loadedInThisProcess) {
+      if (sessionHistory.legacySHistory.getEntryAtIndex(requestedIndex).loadedInThisProcess) {
         return true;
       }
 
@@ -309,9 +324,8 @@ var E10SUtils = {
 
   redirectLoad(aDocShell, aURI, aReferrer, aTriggeringPrincipal, aFreshProcess, aFlags) {
     // Retarget the load to the correct process
-    let messageManager = aDocShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                                  .getInterface(Ci.nsIContentFrameMessageManager);
-    let sessionHistory = aDocShell.getInterface(Ci.nsIWebNavigation).sessionHistory;
+    let messageManager = aDocShell.messageManager;
+    let sessionHistory = aDocShell.QueryInterface(Ci.nsIWebNavigation).sessionHistory;
 
     messageManager.sendAsyncMessage("Browser:LoadURI", {
       loadOptions: {
@@ -331,8 +345,7 @@ var E10SUtils = {
   wrapHandlingUserInput(aWindow, aIsHandling, aCallback) {
     var handlingUserInput;
     try {
-      handlingUserInput = aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                                 .getInterface(Ci.nsIDOMWindowUtils)
+      handlingUserInput = aWindow.windowUtils
                                  .setHandlingUserInput(aIsHandling);
       aCallback();
     } finally {

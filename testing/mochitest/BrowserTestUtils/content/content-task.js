@@ -6,7 +6,7 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/Task.jsm", this);
+ChromeUtils.import("resource://testing-common/Task.jsm", this);
 ChromeUtils.import("resource://testing-common/ContentTaskUtils.jsm", this);
 const AssertCls = ChromeUtils.import("resource://testing-common/Assert.jsm", null).Assert;
 
@@ -27,7 +27,7 @@ addMessageListener("content-task:spawn", function(msg) {
       id,
       condition: !err,
       name: err ? err.message : message,
-      stack: getStack(err ? err.stack : stack)
+      stack: getStack(err ? err.stack : stack),
     });
   });
 

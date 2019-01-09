@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/Assertions.h"
+#include "mozilla/Maybe.h"
 
 #include <algorithm>
 #include <errno.h>
@@ -15,19 +16,19 @@
 #include "mozilla/PlatformMutex.h"
 #include "MutexPlatformData_posix.h"
 
-#define REPORT_PTHREADS_ERROR(result, msg)      \
-  {                                             \
-    errno = result;                             \
-    perror(msg);                                \
-    MOZ_CRASH(msg);                             \
+#define REPORT_PTHREADS_ERROR(result, msg) \
+  {                                        \
+    errno = result;                        \
+    perror(msg);                           \
+    MOZ_CRASH(msg);                        \
   }
 
-#define TRY_CALL_PTHREADS(call, msg)            \
-  {                                             \
-    int result = (call);                        \
-    if (result != 0) {                          \
-      REPORT_PTHREADS_ERROR(result, msg);       \
-    }                                           \
+#define TRY_CALL_PTHREADS(call, msg)      \
+  {                                       \
+    int result = (call);                  \
+    if (result != 0) {                    \
+      REPORT_PTHREADS_ERROR(result, msg); \
+    }                                     \
   }
 
 #ifdef XP_DARWIN
@@ -35,11 +36,11 @@
 // CPU count. Read concurrently from multiple threads. Written once during the
 // first mutex initialization; re-initialization is safe hence relaxed ordering
 // is OK.
-static mozilla::Atomic<uint32_t, mozilla::MemoryOrdering::Relaxed> sCPUCount(0);
+static mozilla::Atomic<uint32_t, mozilla::MemoryOrdering::Relaxed,
+                       mozilla::recordreplay::Behavior::DontPreserve>
+    sCPUCount(0);
 
-static void
-EnsureCPUCount()
-{
+static void EnsureCPUCount() {
   if (sCPUCount) {
     return;
   }
@@ -57,14 +58,19 @@ EnsureCPUCount()
 #endif
 }
 
-#endif // XP_DARWIN
+#endif  // XP_DARWIN
 
-mozilla::detail::MutexImpl::MutexImpl()
+mozilla::detail::MutexImpl::MutexImpl(recordreplay::Behavior aRecorded)
 #ifdef XP_DARWIN
-  : averageSpins(0)
+    : averageSpins(0)
 #endif
 {
   pthread_mutexattr_t* attrp = nullptr;
+
+  mozilla::Maybe<mozilla::recordreplay::AutoEnsurePassThroughThreadEvents> pt;
+  if (aRecorded == recordreplay::Behavior::DontPreserve) {
+    pt.emplace();
+  }
 
   // Linux with glibc and FreeBSD support adaptive mutexes that spin
   // for a short number of tries before sleeping.  NSPR's locks did
@@ -84,20 +90,24 @@ mozilla::detail::MutexImpl::MutexImpl()
 #if defined(ATTR_REQUIRED)
   pthread_mutexattr_t attr;
 
-  TRY_CALL_PTHREADS(pthread_mutexattr_init(&attr),
-                    "mozilla::detail::MutexImpl::MutexImpl: pthread_mutexattr_init failed");
+  TRY_CALL_PTHREADS(
+      pthread_mutexattr_init(&attr),
+      "mozilla::detail::MutexImpl::MutexImpl: pthread_mutexattr_init failed");
 
   TRY_CALL_PTHREADS(pthread_mutexattr_settype(&attr, MUTEX_KIND),
-                    "mozilla::detail::MutexImpl::MutexImpl: pthread_mutexattr_settype failed");
+                    "mozilla::detail::MutexImpl::MutexImpl: "
+                    "pthread_mutexattr_settype failed");
   attrp = &attr;
 #endif
 
-  TRY_CALL_PTHREADS(pthread_mutex_init(&platformData()->ptMutex, attrp),
-                    "mozilla::detail::MutexImpl::MutexImpl: pthread_mutex_init failed");
+  TRY_CALL_PTHREADS(
+      pthread_mutex_init(&platformData()->ptMutex, attrp),
+      "mozilla::detail::MutexImpl::MutexImpl: pthread_mutex_init failed");
 
 #if defined(ATTR_REQUIRED)
   TRY_CALL_PTHREADS(pthread_mutexattr_destroy(&attr),
-                    "mozilla::detail::MutexImpl::MutexImpl: pthread_mutexattr_destroy failed");
+                    "mozilla::detail::MutexImpl::MutexImpl: "
+                    "pthread_mutexattr_destroy failed");
 #endif
 
 #ifdef XP_DARWIN
@@ -105,23 +115,20 @@ mozilla::detail::MutexImpl::MutexImpl()
 #endif
 }
 
-mozilla::detail::MutexImpl::~MutexImpl()
-{
-  TRY_CALL_PTHREADS(pthread_mutex_destroy(&platformData()->ptMutex),
-                    "mozilla::detail::MutexImpl::~MutexImpl: pthread_mutex_destroy failed");
+mozilla::detail::MutexImpl::~MutexImpl() {
+  TRY_CALL_PTHREADS(
+      pthread_mutex_destroy(&platformData()->ptMutex),
+      "mozilla::detail::MutexImpl::~MutexImpl: pthread_mutex_destroy failed");
 }
 
-inline void
-mozilla::detail::MutexImpl::mutexLock()
-{
-  TRY_CALL_PTHREADS(pthread_mutex_lock(&platformData()->ptMutex),
-                    "mozilla::detail::MutexImpl::mutexLock: pthread_mutex_lock failed");
+inline void mozilla::detail::MutexImpl::mutexLock() {
+  TRY_CALL_PTHREADS(
+      pthread_mutex_lock(&platformData()->ptMutex),
+      "mozilla::detail::MutexImpl::mutexLock: pthread_mutex_lock failed");
 }
 
 #ifdef XP_DARWIN
-inline bool
-mozilla::detail::MutexImpl::mutexTryLock()
-{
+inline bool mozilla::detail::MutexImpl::mutexTryLock() {
   int result = pthread_mutex_trylock(&platformData()->ptMutex);
   if (result == 0) {
     return true;
@@ -131,14 +138,13 @@ mozilla::detail::MutexImpl::mutexTryLock()
     return false;
   }
 
-  REPORT_PTHREADS_ERROR(result,
-                        "mozilla::detail::MutexImpl::mutexTryLock: pthread_mutex_trylock failed");
+  REPORT_PTHREADS_ERROR(
+      result,
+      "mozilla::detail::MutexImpl::mutexTryLock: pthread_mutex_trylock failed");
 }
 #endif
 
-void
-mozilla::detail::MutexImpl::lock()
-{
+void mozilla::detail::MutexImpl::lock() {
 #ifndef XP_DARWIN
   mutexLock();
 #else
@@ -149,7 +155,7 @@ mozilla::detail::MutexImpl::lock()
   // feature.
 
   MOZ_ASSERT(sCPUCount);
-  if (sCPUCount == 1) {
+  if (sCPUCount == 1 || recordreplay::IsRecordingOrReplaying()) {
     mutexLock();
     return;
   }
@@ -164,7 +170,7 @@ mozilla::detail::MutexImpl::lock()
         mutexLock();
         break;
       }
-      asm("pause"); // Hint to the processor that we're spinning.
+      asm("pause");  // Hint to the processor that we're spinning.
       count++;
     } while (!mutexTryLock());
 
@@ -172,21 +178,19 @@ mozilla::detail::MutexImpl::lock()
     averageSpins += (count - averageSpins) / 8;
     MOZ_ASSERT(averageSpins >= 0 && averageSpins <= SpinLimit);
   }
-#endif // XP_DARWIN
+#endif  // XP_DARWIN
 }
 
-void
-mozilla::detail::MutexImpl::unlock()
-{
-  TRY_CALL_PTHREADS(pthread_mutex_unlock(&platformData()->ptMutex),
-                    "mozilla::detail::MutexImpl::unlock: pthread_mutex_unlock failed");
+void mozilla::detail::MutexImpl::unlock() {
+  TRY_CALL_PTHREADS(
+      pthread_mutex_unlock(&platformData()->ptMutex),
+      "mozilla::detail::MutexImpl::unlock: pthread_mutex_unlock failed");
 }
 
 #undef TRY_CALL_PTHREADS
 
 mozilla::detail::MutexImpl::PlatformData*
-mozilla::detail::MutexImpl::platformData()
-{
+mozilla::detail::MutexImpl::platformData() {
   static_assert(sizeof(platformData_) >= sizeof(PlatformData),
                 "platformData_ is too small");
   return reinterpret_cast<PlatformData*>(platformData_);

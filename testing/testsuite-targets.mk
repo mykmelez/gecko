@@ -112,7 +112,7 @@ ifdef COMPILE_ENVIRONMENT
 stage-all: stage-cppunittests
 endif
 
-TEST_PKGS_ZIP := \
+TEST_PKGS_TARGZ := \
   common \
   cppunittest \
   mochitest \
@@ -121,15 +121,13 @@ TEST_PKGS_ZIP := \
   raptor \
   awsy \
   xpcshell \
-  $(NULL)
-
-TEST_PKGS_TARGZ := \
   web-platform \
+  updater-dep \
   $(NULL)
 
 ifdef LINK_GTEST_DURING_COMPILE
 stage-all: stage-gtest
-TEST_PKGS_ZIP += gtest
+TEST_PKGS_TARGZ += gtest
 endif
 
 PKG_ARG = --$(1) '$(PKG_BASENAME).$(1).tests.$(2)'
@@ -141,7 +139,6 @@ test-packages-manifest:
       --jsshell $(JSSHELL_NAME) \
       --dest-file '$(MOZ_TEST_PACKAGES_FILE)' \
       $(call PKG_ARG,common,zip) \
-      $(foreach pkg,$(TEST_PKGS_ZIP),$(call PKG_ARG,$(pkg),zip)) \
       $(foreach pkg,$(TEST_PKGS_TARGZ),$(call PKG_ARG,$(pkg),tar.gz))
 
 ifdef UPLOAD_PATH
@@ -153,15 +150,17 @@ endif
 package-tests-prepare-dest:
 	$(NSINSTALL) -D $(test_archive_dir)
 
+download-wpt-manifest:
+	$(call py_action,download_wpt_manifest)
+
 define package_archive
-package-tests-$(1): stage-all package-tests-prepare-dest
+package-tests-$(1): stage-all package-tests-prepare-dest download-wpt-manifest
 	$$(call py_action,test_archive, \
 		$(1) \
 		'$$(abspath $$(test_archive_dir))/$$(PKG_BASENAME).$(1).tests.$(2)')
 package-tests: package-tests-$(1)
 endef
 
-$(foreach name,$(TEST_PKGS_ZIP),$(eval $(call package_archive,$(name),zip)))
 $(foreach name,$(TEST_PKGS_TARGZ),$(eval $(call package_archive,$(name),tar.gz)))
 
 ifeq ($(MOZ_BUILD_APP),mobile/android)
@@ -268,6 +267,7 @@ check::
   xpcshell-tests \
   jstestbrowser \
   package-tests \
+  download-wpt-manifest \
   package-tests-prepare-dest \
   package-tests-common \
   make-stage-dir \

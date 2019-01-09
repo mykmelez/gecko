@@ -4,30 +4,24 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/Preferences.jsm");
 ChromeUtils.import("resource:///modules/ShellService.jsm");
 ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
 ChromeUtils.import("resource://gre/modules/Timer.jsm");
-ChromeUtils.import("resource://normandy/lib/Addons.jsm");
 ChromeUtils.import("resource://normandy/lib/LogManager.jsm");
 ChromeUtils.import("resource://normandy/lib/Storage.jsm");
-ChromeUtils.import("resource://normandy/lib/Heartbeat.jsm");
 ChromeUtils.import("resource://normandy/lib/ClientEnvironment.jsm");
 ChromeUtils.import("resource://normandy/lib/PreferenceExperiments.jsm");
 
 ChromeUtils.defineModuleGetter(
   this, "Sampling", "resource://gre/modules/components-utils/Sampling.jsm");
 ChromeUtils.defineModuleGetter(this, "UpdateUtils", "resource://gre/modules/UpdateUtils.jsm");
-ChromeUtils.defineModuleGetter(
-  this, "AddonStudies", "resource://normandy/lib/AddonStudies.jsm");
 
 const {generateUUID} = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
 
 var EXPORTED_SYMBOLS = ["NormandyDriver"];
 
-const log = LogManager.getLogger("normandy-driver");
 const actionLog = LogManager.getLogger("normandy-driver.actions");
 
 var NormandyDriver = function(sandboxManager) {
@@ -41,7 +35,7 @@ var NormandyDriver = function(sandboxManager) {
 
     get locale() {
       if (Services.locale.getAppLocaleAsLangTag) {
-        return Services.locale.getAppLocaleAsLangTag();
+        return Services.locale.getAppLocaleAsLangTag;
       }
 
       return Cc["@mozilla.org/chrome/chrome-registry;1"]
@@ -59,23 +53,6 @@ var NormandyDriver = function(sandboxManager) {
         throw new Error(`Invalid log level "${level}"`);
       }
       actionLog[level](message);
-    },
-
-    showHeartbeat(options) {
-      log.info(`Showing heartbeat prompt "${options.message}"`);
-      const aWindow = Services.wm.getMostRecentWindow("navigator:browser");
-
-      if (!aWindow) {
-        return sandbox.Promise.reject(new sandbox.Error("No window to show heartbeat in"));
-      }
-
-      const internalOptions = Object.assign({}, options, {testing: this.testing});
-      const heartbeat = new Heartbeat(aWindow, sandboxManager, internalOptions);
-      return sandbox.Promise.resolve(heartbeat.eventEmitter.createSandboxedEmitter());
-    },
-
-    saveHeartbeatFlow() {
-      // no-op required by spec
     },
 
     client() {
@@ -158,12 +135,6 @@ var NormandyDriver = function(sandboxManager) {
       sandboxManager.removeHold(`setTimeout-${token}`);
     },
 
-    addons: {
-      get: sandboxManager.wrapAsync(Addons.get.bind(Addons), {cloneInto: true}),
-      install: sandboxManager.wrapAsync(Addons.install.bind(Addons)),
-      uninstall: sandboxManager.wrapAsync(Addons.uninstall.bind(Addons)),
-    },
-
     // Sampling
     ratioSample: sandboxManager.wrapAsync(Sampling.ratioSample),
 
@@ -186,18 +157,6 @@ var NormandyDriver = function(sandboxManager) {
         {cloneInto: true}
       ),
       has: sandboxManager.wrapAsync(PreferenceExperiments.has.bind(PreferenceExperiments)),
-    },
-
-    // Study storage API
-    studies: {
-      start: sandboxManager.wrapAsync(
-        AddonStudies.start.bind(AddonStudies),
-        {cloneArguments: true, cloneInto: true}
-      ),
-      stop: sandboxManager.wrapAsync(AddonStudies.stop.bind(AddonStudies)),
-      get: sandboxManager.wrapAsync(AddonStudies.get.bind(AddonStudies), {cloneInto: true}),
-      getAll: sandboxManager.wrapAsync(AddonStudies.getAll.bind(AddonStudies), {cloneInto: true}),
-      has: sandboxManager.wrapAsync(AddonStudies.has.bind(AddonStudies)),
     },
 
     // Preference read-only API

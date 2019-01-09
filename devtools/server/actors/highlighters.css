@@ -35,7 +35,10 @@
   --highlighter-bubble-arrow-size: 8px;
   --highlighter-font-family: message-box;
   --highlighter-font-size: 11px;
+  --highlighter-infobar-color: hsl(210, 30%, 85%);
   --highlighter-marker-color: #000;
+
+  --grey-40: #b1b1b3;
 }
 
 /**
@@ -210,7 +213,7 @@
 }
 
 :-moz-native-anonymous [class$=infobar-dimensions] {
-  color: hsl(210, 30%, 85%);
+  color: var(--highlighter-infobar-color);
   border-inline-start: 1px solid #5a6169;
   margin-inline-start: 6px;
   padding-inline-start: 6px;
@@ -243,7 +246,7 @@
 }
 
 :-moz-native-anonymous .css-grid-line-infobar-names:not(:empty) {
-  color: hsl(210, 30%, 85%);
+  color: var(--highlighter-infobar-color);
   border-inline-start: 1px solid #5a6169;
   margin-inline-start: 6px;
   padding-inline-start: 6px;
@@ -641,7 +644,88 @@
 
 /* Accessible highlighter */
 
+:-moz-native-anonymous .accessible-infobar {
+  min-width: unset;
+}
+
+:-moz-native-anonymous .accessible-infobar-text {
+  display: grid;
+  grid-template-areas:
+    "role name"
+    "audit audit";
+  grid-template-columns: min-content 1fr;
+}
+
+:-moz-native-anonymous .accessible-infobar-role {
+  grid-area: role;
+  color: #9CDCFE;
+}
+
+:-moz-native-anonymous .accessible-infobar-name {
+  grid-area: name;
+}
+
+:-moz-native-anonymous .accessible-infobar-audit {
+  grid-area: audit;
+  padding-top: 5px;
+  padding-bottom: 2px;
+}
+
 :-moz-native-anonymous .accessible-bounds {
   opacity: 0.6;
   fill: #6a5acd;
+}
+
+:-moz-native-anonymous .accessible-infobar-name,
+:-moz-native-anonymous .accessible-infobar-audit {
+  color: var(--highlighter-infobar-color);
+}
+
+:-moz-native-anonymous .accessible-infobar-audit .accessible-contrast-ratio:not(:empty):before {
+  content: "";
+  height: 8px;
+  width: 8px;
+  display: inline-flex;
+  background-color: var(--accessibility-highlighter-contrast-ratio-color);
+  box-shadow: 0 0 0 1px var(--grey-40), 4px 3px var(--accessibility-highlighter-contrast-ratio-bg), 4px 3px 0 1px var(--grey-40);
+  margin-inline-start: 3px;
+  margin-inline-end: 9px;
+}
+
+:-moz-native-anonymous .accessible-infobar-audit .accessible-contrast-ratio:not(:empty):after {
+  margin-inline-start: 2px;
+}
+
+:-moz-native-anonymous .accessible-infobar-audit .accessible-contrast-ratio:not(:empty).AA:after,
+:-moz-native-anonymous .accessible-infobar-audit .accessible-contrast-ratio:not(:empty).AAA:after {
+  color: #90E274;
+}
+
+:-moz-native-anonymous .accessible-infobar-audit .accessible-contrast-ratio:not(:empty).fail:after {
+  color: #E57180;
+  content: "⚠️";
+}
+
+:-moz-native-anonymous .accessible-infobar-audit .accessible-contrast-ratio:not(:empty).AA:after {
+  content: "AA\2713";
+}
+
+:-moz-native-anonymous .accessible-infobar-audit .accessible-contrast-ratio:not(:empty).AAA:after {
+  content: "AAA\2713";
+}
+
+:-moz-native-anonymous .accessible-infobar-audit .accessible-contrast-ratio-label,
+:-moz-native-anonymous .accessible-infobar-audit .accessible-contrast-ratio-separator:before {
+  margin-inline-end: 3px;
+}
+
+:-moz-native-anonymous .accessible-infobar-audit .accessible-contrast-ratio-separator:before {
+  content: "-";
+  margin-inline-start: 3px;
+}
+
+:-moz-native-anonymous .accessible-infobar-name:not(:empty) {
+  border-inline-start: 1px solid #5a6169;
+  margin-inline-start: 6px;
+  padding-inline-start: 6px;
 }

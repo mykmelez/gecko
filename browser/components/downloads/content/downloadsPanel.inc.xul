@@ -2,6 +2,8 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
+#include downloadsStrings.inc.xul
+
 <commandset>
   <command id="downloadsCmd_doDefault"
            oncommand="goDoCommand('downloadsCmd_doDefault')"/>
@@ -103,6 +105,7 @@
     <panelview id="downloadsPanel-mainView">
       <vbox class="panel-view-body-unscrollable">
         <richlistbox id="downloadsListBox"
+                     style="width: &downloads.width;"
                      context="downloadsContextMenu"
                      onmouseover="DownloadsView.onDownloadMouseOver(event);"
                      onmouseout="DownloadsView.onDownloadMouseOut(event);"
@@ -122,20 +125,18 @@
                 onclick="DownloadsSummary.onClick(event);">
             <image class="downloadTypeIcon" />
             <vbox pack="center"
-                  class="downloadContainer"
-                  style="width: &downloadDetails.width;">
-              <description id="downloadsSummaryDescription"
-                           style="min-width: &downloadsSummary.minWidth2;"/>
-              <progressmeter id="downloadsSummaryProgress"
+                  flex="1"
+                  class="downloadContainer">
+              <description id="downloadsSummaryDescription"/>
+              <html:progress id="downloadsSummaryProgress"
                              class="downloadProgress"
-                             min="0"
-                             max="100"
-                             mode="normal" />
+                             max="100"/>
               <description id="downloadsSummaryDetails"
                            crop="end"/>
             </vbox>
           </hbox>
-          <hbox id="downloadsFooterButtons">
+          <hbox id="downloadsFooterButtons"
+                class="panel-footer">
             <button id="downloadsHistory"
                     class="downloadsPanelFooterButton"
                     label="&downloadsHistory.label;"
@@ -158,7 +159,7 @@
         <description id="downloadsPanel-blockedSubview-details2"/>
       </vbox>
       <hbox id="downloadsPanel-blockedSubview-buttons"
-            class="downloadsPanelFooter"
+            class="panel-footer downloadsPanelFooter"
             align="stretch">
         <button id="downloadsPanel-blockedSubview-openButton"
                 class="downloadsPanelFooterButton"

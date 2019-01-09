@@ -9,9 +9,10 @@ include LayersSurfaces;
 include "mozilla/dom/MediaIPCUtils.h";
 using VideoInfo from "MediaInfo.h";
 using struct mozilla::layers::TextureFactoryIdentifier from "mozilla/layers/CompositorTypes.h";
+using mozilla::CreateDecoderParams::Option from "PlatformDecoderModule.h";
+using mozilla::CreateDecoderParams::OptionSet from "PlatformDecoderModule.h";
 
 namespace mozilla {
-namespace dom {
 
 sync protocol PVideoDecoderManager
 {
@@ -23,7 +24,7 @@ parent:
   // more sync IPC call.
   // Considering that this information is only used for telemetry usage in bug 1393392 and should be removed once
   // we have collected enough data, we add these two return values here for convenience.
-  sync PVideoDecoder(VideoInfo info, float framerate, TextureFactoryIdentifier identifier)
+  sync PVideoDecoder(VideoInfo info, float framerate, OptionSet options, TextureFactoryIdentifier identifier)
          returns (bool success,
                   nsCString aBlacklistedD3D11Driver,
                   nsCString aBlacklistedD3D9Driver,
@@ -34,5 +35,4 @@ parent:
   async DeallocateSurfaceDescriptorGPUVideo(SurfaceDescriptorGPUVideo sd);
 };
 
-} // namespace dom
 } // namespace mozilla

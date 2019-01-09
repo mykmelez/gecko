@@ -5,7 +5,7 @@
 "use strict";
 
 const kXULWidgetId = "a-test-button"; // we'll create a button with this ID.
-const kAPIWidgetId = "feed-button";
+const kAPIWidgetId = "save-page-button";
 const kPanel = CustomizableUI.AREA_FIXED_OVERFLOW_PANEL;
 const kToolbar = CustomizableUI.AREA_NAVBAR;
 const kVisiblePalette = "customization-palette";
@@ -19,8 +19,7 @@ async function ensureVisible(node) {
   if (isInPalette) {
     node.scrollIntoView();
   }
-  window.QueryInterface(Ci.nsIInterfaceRequestor);
-  let dwu = window.getInterface(Ci.nsIDOMWindowUtils);
+  let dwu = window.windowUtils;
   await BrowserTestUtils.waitForCondition(() => {
     let nodeBounds = dwu.getBoundsWithoutFlushing(node);
     if (isInPalette) {
@@ -36,8 +35,8 @@ async function ensureVisible(node) {
 var move = {
   "drag": async function(id, target) {
     let targetNode = document.getElementById(target);
-    if (targetNode.customizationTarget) {
-      targetNode = targetNode.customizationTarget;
+    if (CustomizableUI.getCustomizationTarget(targetNode)) {
+      targetNode = CustomizableUI.getCustomizationTarget(targetNode);
     }
     let nodeToMove = document.getElementById(id);
     await ensureVisible(nodeToMove);
@@ -46,8 +45,8 @@ var move = {
   },
   "dragToItem": async function(id, target) {
     let targetNode = document.getElementById(target);
-    if (targetNode.customizationTarget) {
-      targetNode = targetNode.customizationTarget;
+    if (CustomizableUI.getCustomizationTarget(targetNode)) {
+      targetNode = CustomizableUI.getCustomizationTarget(targetNode);
     }
     let items = targetNode.querySelectorAll("toolbarpaletteitem");
     if (target == kPanel) {
@@ -64,22 +63,26 @@ var move = {
       return CustomizableUI.removeWidgetFromArea(id);
     }
     return CustomizableUI.addWidgetToArea(id, target, null);
-  }
+  },
 };
 
 function isLast(containerId, defaultPlacements, id) {
   assertAreaPlacements(containerId, defaultPlacements.concat([id]));
-  is(document.getElementById(containerId).customizationTarget.lastChild.firstChild.id, id,
+  let thisTarget =
+    CustomizableUI.getCustomizationTarget(document.getElementById(containerId));
+  is(thisTarget.lastElementChild.firstElementChild.id, id,
      "Widget " + id + " should be in " + containerId + " in customizing window.");
-  is(otherWin.document.getElementById(containerId).customizationTarget.lastChild.id, id,
+  let otherTarget =
+    CustomizableUI.getCustomizationTarget(otherWin.document.getElementById(containerId));
+  is(otherTarget.lastElementChild.id, id,
      "Widget " + id + " should be in " + containerId + " in other window.");
 }
 
 function getLastVisibleNodeInToolbar(containerId, win = window) {
-  let container = win.document.getElementById(containerId).customizationTarget;
-  let rv = container.lastChild;
-  while (rv && (rv.getAttribute("hidden") == "true" || (rv.firstChild && rv.firstChild.getAttribute("hidden") == "true"))) {
-    rv = rv.previousSibling;
+  let container = CustomizableUI.getCustomizationTarget(win.document.getElementById(containerId));
+  let rv = container.lastElementChild;
+  while (rv && (rv.getAttribute("hidden") == "true" || (rv.firstElementChild && rv.firstElementChild.getAttribute("hidden") == "true"))) {
+    rv = rv.previousElementSibling;
   }
   return rv;
 }
@@ -99,7 +102,7 @@ function isLastVisibleInToolbar(containerId, defaultPlacements, id) {
   } else {
     assertAreaPlacements(containerId, newPlacements);
   }
-  is(getLastVisibleNodeInToolbar(containerId).firstChild.id, id,
+  is(getLastVisibleNodeInToolbar(containerId).firstElementChild.id, id,
      "Widget " + id + " should be in " + containerId + " in customizing window.");
   is(getLastVisibleNodeInToolbar(containerId, otherWin).id, id,
      "Widget " + id + " should be in " + containerId + " in other window.");
@@ -107,9 +110,13 @@ function isLastVisibleInToolbar(containerId, defaultPlacements, id) {
 
 function isFirst(containerId, defaultPlacements, id) {
   assertAreaPlacements(containerId, [id].concat(defaultPlacements));
-  is(document.getElementById(containerId).customizationTarget.firstChild.firstChild.id, id,
+  let thisTarget =
+    CustomizableUI.getCustomizationTarget(document.getElementById(containerId));
+  is(thisTarget.firstElementChild.firstElementChild.id, id,
      "Widget " + id + " should be in " + containerId + " in customizing window.");
-  is(otherWin.document.getElementById(containerId).customizationTarget.firstChild.id, id,
+  let otherTarget =
+    CustomizableUI.getCustomizationTarget(otherWin.document.getElementById(containerId));
+  is(otherTarget.firstElementChild.id, id,
      "Widget " + id + " should be in " + containerId + " in other window.");
 }
 
@@ -144,7 +151,7 @@ async function checkPanel(id, method) {
     position = -2;
   }
   assertAreaPlacements(kPanel, newPlacements);
-  is(children[children.length + position].firstChild.id, id,
+  is(children[children.length + position].firstElementChild.id, id,
      "Widget " + id + " should be in " + kPanel + " in customizing window.");
   is(otherChildren[otherChildren.length + position].id, id,
      "Widget " + id + " should be in " + kPanel + " in other window.");
@@ -162,7 +169,7 @@ async function checkPalette(id, method) {
   if (method == "drag") {
     expectedChild = expectedChild.previousElementSibling;
   }
-  is(expectedChild.firstChild.id, id, "Widget " + id + " was moved using " + method + " and should now be wrapped in palette in customizing window.");
+  is(expectedChild.firstElementChild.id, id, "Widget " + id + " was moved using " + method + " and should now be wrapped in palette in customizing window.");
   if (id == kXULWidgetId) {
     ok(otherWin.gNavToolbox.palette.querySelector("#" + id), "Widget " + id + " should be in invisible palette in other window.");
   }

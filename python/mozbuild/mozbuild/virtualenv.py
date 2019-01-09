@@ -254,6 +254,18 @@ class VirtualenvManager(object):
             search path. e.g. "objdir:build" will add $topobjdir/build to the
             search path.
 
+        windows -- This denotes that the action should only be taken when run
+            on Windows.
+
+        !windows -- This denotes that the action should only be taken when run
+            on non-Windows systems.
+
+        python3 -- This denotes that the action should only be taken when run
+            on Python 3.
+
+        python2 -- This denotes that the action should only be taken when run
+            on python 2.
+
         Note that the Python interpreter running this function should be the
         one from the virtualenv. If it is the system Python or if the
         environment is not configured properly, packages could be installed
@@ -322,6 +334,20 @@ class VirtualenvManager(object):
                         'because optional. (%s)' % ':'.join(package),
                         file=self.log_handle)
                     return False
+
+            if package[0] in ('windows', '!windows'):
+                for_win = not package[0].startswith('!')
+                is_win = sys.platform == 'win32'
+                if is_win == for_win:
+                    handle_package(package[1:])
+                return True
+
+            if package[0] in ('python2', 'python3'):
+                for_python3 = package[0].endswith('3')
+                is_python3 = sys.version_info[0] > 2
+                if is_python3 == for_python3:
+                    handle_package(package[1:])
+                return True
 
             if package[0] == 'objdir':
                 assert len(package) == 2
@@ -550,14 +576,14 @@ class VirtualenvManager(object):
         pip = os.path.join(self.bin_path, 'pip')
         subprocess.check_call([pip] + args, stderr=subprocess.STDOUT, cwd=self.topsrcdir)
 
-    def activate_pipenv(self, pipfile=None, args=None, populate=False):
+    def activate_pipenv(self, pipfile=None, populate=False, python=None):
         """Activate a virtual environment managed by pipenv
 
         If ``pipfile`` is not ``None`` then the Pipfile located at the path
         provided will be used to create the virtual environment. If
         ``populate`` is ``True`` then the virtual environment will be
-        populated from the manifest file. The optional ``args`` list will be
-        passed to the pipenv commands.
+        populated from the manifest file. The optional ``python`` argument
+        indicates the version of Python for pipenv to use.
         """
         pipenv = os.path.join(self.bin_path, 'pipenv')
         env = os.environ.copy()
@@ -566,22 +592,39 @@ class VirtualenvManager(object):
             b'WORKON_HOME': str(os.path.normpath(os.path.join(self.topobjdir, '_virtualenvs'))),
         })
 
-        args = args or []
+        if python is not None:
+            env[b'PIPENV_DEFAULT_PYTHON_VERSION'] = str(python)
+            env[b'PIPENV_PYTHON'] = str(python)
+
+        def ensure_venv():
+            """Create virtual environment if needed and return path"""
+            venv = get_venv()
+            if venv is not None:
+                return venv
+            if python is not None:
+                subprocess.check_call(
+                    [pipenv, '--python', python],
+                    stderr=subprocess.STDOUT,
+                    env=env)
+            return get_venv()
+
+        def get_venv():
+            """Return path to virtual environment or None"""
+            try:
+                return subprocess.check_output(
+                    [pipenv, '--venv'],
+                    stderr=subprocess.STDOUT,
+                    env=env).rstrip()
+            except subprocess.CalledProcessError:
+                # virtual environment does not exist
+                return None
 
         if pipfile is not None:
             # Install from Pipfile
             env[b'PIPENV_PIPFILE'] = str(pipfile)
-            args.append('install')
+            subprocess.check_call([pipenv, 'install'], stderr=subprocess.STDOUT, env=env)
 
-        subprocess.check_call(
-            [pipenv] + args,
-            stderr=subprocess.STDOUT,
-            env=env)
-
-        self.virtualenv_root = subprocess.check_output(
-            [pipenv, '--venv'],
-            stderr=subprocess.STDOUT,
-            env=env).rstrip()
+        self.virtualenv_root = ensure_venv()
 
         if populate:
             # Populate from the manifest

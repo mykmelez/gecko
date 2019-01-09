@@ -7,6 +7,8 @@
 
 ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "UpdateUtils",
+                               "resource://gre/modules/UpdateUtils.jsm");
 
 const PREF_APP_UPDATE_AUTO                       = "app.update.auto";
 const PREF_APP_UPDATE_BACKGROUNDERRORS           = "app.update.backgroundErrors";
@@ -15,9 +17,8 @@ const PREF_APP_UPDATE_CANCELATIONS               = "app.update.cancelations";
 const PREF_APP_UPDATE_CHANNEL                    = "app.update.channel";
 const PREF_APP_UPDATE_DOORHANGER                 = "app.update.doorhanger";
 const PREF_APP_UPDATE_DOWNLOADPROMPTATTEMPTS     = "app.update.download.attempts";
-const PREF_APP_UPDATE_DOWNLOADPROMPTMAXATTEMPTS  = "app.update.download.maxAttempts";
-const PREF_APP_UPDATE_DOWNLOADBACKGROUNDINTERVAL = "app.update.download.backgroundInterval";
-const PREF_APP_UPDATE_ENABLED                    = "app.update.enabled";
+const PREF_APP_UPDATE_DOWNLOADPROMPT_MAXATTEMPTS = "app.update.download.maxAttempts";
+const PREF_APP_UPDATE_DISABLEDFORTESTING         = "app.update.disabledForTesting";
 const PREF_APP_UPDATE_IDLETIME                   = "app.update.idletime";
 const PREF_APP_UPDATE_LOG                        = "app.update.log";
 const PREF_APP_UPDATE_NOTIFIEDUNSUPPORTED        = "app.update.notifiedUnsupported";
@@ -34,13 +35,17 @@ const PREF_APP_UPDATE_URL_MANUAL                 = "app.update.url.manual";
 const PREFBRANCH_APP_PARTNER         = "app.partner.";
 const PREF_DISTRIBUTION_ID           = "distribution.id";
 const PREF_DISTRIBUTION_VERSION      = "distribution.version";
+const PREF_DISABLE_SECURITY          = "security.turn_off_all_security_so_that_viruses_can_take_over_this_computer";
+
+const CONFIG_APP_UPDATE_AUTO         = "app.update.auto";
 
 const NS_APP_PROFILE_DIR_STARTUP   = "ProfDS";
 const NS_APP_USER_PROFILE_50_DIR   = "ProfD";
-const NS_GRE_DIR                   = "GreD";
 const NS_GRE_BIN_DIR               = "GreBinD";
+const NS_GRE_DIR                   = "GreD";
 const NS_XPCOM_CURRENT_PROCESS_DIR = "XCurProcD";
 const XRE_EXECUTABLE_FILE          = "XREExeF";
+const XRE_OLD_UPDATE_ROOT_DIR      = "OldUpdRootD";
 const XRE_UPDATE_ROOT_DIR          = "UpdRootD";
 
 const DIR_PATCH        = "0";
@@ -51,11 +56,13 @@ const DIR_UPDATED      = IS_MACOSX ? "Updated.app" : "updated";
 const FILE_ACTIVE_UPDATE_XML         = "active-update.xml";
 const FILE_APPLICATION_INI           = "application.ini";
 const FILE_BACKUP_UPDATE_LOG         = "backup-update.log";
+const FILE_BT_RESULT                 = "update.bt";
 const FILE_LAST_UPDATE_LOG           = "last-update.log";
 const FILE_UPDATE_SETTINGS_INI       = "update-settings.ini";
 const FILE_UPDATE_SETTINGS_INI_BAK   = "update-settings.ini.bak";
 const FILE_UPDATER_INI               = "updater.ini";
 const FILE_UPDATES_XML               = "updates.xml";
+const FILE_UPDATE_CONFIG             = "update-config.json";
 const FILE_UPDATE_LOG                = "update.log";
 const FILE_UPDATE_MAR                = "update.mar";
 const FILE_UPDATE_STATUS             = "update.status";
@@ -146,7 +153,7 @@ const observer = {
       }
     }
   },
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver]),
 };
 
 /**
@@ -227,6 +234,40 @@ function writeVersionFile(aVersion) {
   let file = getUpdatesPatchDir();
   file.append(FILE_UPDATE_VERSION);
   writeFile(file, aVersion + "\n");
+}
+
+/**
+ * Synchronously writes the value of the app.update.auto setting to the update
+ * configuration file on Windows or to a user preference on other platforms.
+ * When the value passed to this function is null or undefined it will remove
+ * the configuration file on Windows or the user preference on other platforms.
+ *
+ * @param  aEnabled
+ *         Possible values are true, false, null, and undefined. When true or
+ *         false this value will be written for app.update.auto in the update
+ *         configuration file on Windows or to the user preference on other
+ *         platforms. When null or undefined the update configuration file will
+ *         be removed on Windows or the user preference will be removed on other
+ *         platforms.
+ */
+function setAppUpdateAutoSync(aEnabled) {
+  if (IS_WIN) {
+    let file = getUpdateConfigFile();
+    if (aEnabled === undefined || aEnabled === null) {
+      if (file.exists()) {
+        file.remove(false);
+      }
+    } else {
+      writeFile(file, "{\"" + CONFIG_APP_UPDATE_AUTO + "\":" +
+                      aEnabled.toString() + "}");
+    }
+  } else if (aEnabled === undefined || aEnabled === null) {
+    if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_AUTO)) {
+      Services.prefs.clearUserPref(PREF_APP_UPDATE_AUTO);
+    }
+  } else {
+    Services.prefs.setBoolPref(PREF_APP_UPDATE_AUTO, aEnabled);
+  }
 }
 
 /**
@@ -317,6 +358,19 @@ function readStatusState() {
  */
 function readStatusFailedCode() {
   return readStatusFile().split(": ")[1];
+}
+
+/**
+ * Returns whether or not applying the current update resulted in an error
+ * verifying binary transparency information.
+ *
+ * @return true if there was an error result and false otherwise
+ */
+function updateHasBinaryTransparencyErrorResult() {
+  let file = getUpdatesPatchDir();
+  file.append(FILE_BT_RESULT);
+
+  return file.exists();
 }
 
 /**
@@ -578,6 +632,15 @@ function getGREDir() {
  */
 function getGREBinDir() {
   return Services.dirsvc.get(NS_GRE_BIN_DIR, Ci.nsIFile);
+}
+
+/**
+ * Returns the file containing update configuration
+ */
+function getUpdateConfigFile() {
+  let configFile = getUpdatesRootDir();
+  configFile.append(FILE_UPDATE_CONFIG);
+  return configFile;
 }
 
 /**

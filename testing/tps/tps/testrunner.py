@@ -56,8 +56,11 @@ class TPSTestRunner(object):
     }
 
     default_preferences = {
-        'app.update.enabled': False,
+        'app.update.checkInstallTime': False,
+        'app.update.disabledForTesting': True,
+        'security.turn_off_all_security_so_that_viruses_can_take_over_this_computer': True,
         'browser.dom.window.dump.enabled': True,
+        'devtools.console.stdout.chrome': True,
         'browser.sessionstore.resume_from_crash': False,
         'browser.shell.checkDefaultBrowser': False,
         'browser.tabs.warnOnClose': False,
@@ -73,6 +76,7 @@ class TPSTestRunner(object):
         'extensions.update.notifyUser': False,
         'services.sync.firstSync': 'notReady',
         'services.sync.lastversion': '1.0',
+        'services.sync.autoconnectDelay': 60 * 60 * 10,
         'toolkit.startup.max_resumed_crashes': -1,
         # hrm - not sure what the release/beta channels will do?
         'xpinstall.signatures.required': False,
@@ -234,7 +238,7 @@ class TPSTestRunner(object):
 
             # create the profile if necessary
             if not profilename in profiles:
-                profiles[profilename] = Profile(preferences = self.preferences,
+                profiles[profilename] = Profile(preferences = self.preferences.copy(),
                                                 addons = self.extensions)
 
             # create the test phase
@@ -261,6 +265,7 @@ class TPSTestRunner(object):
                 break;
 
         for profilename in profiles:
+            print "### Cleanup Profile ", profilename
             cleanup_phase = TPSTestPhase(
                 'cleanup-' + profilename,
                 profiles[profilename], testname,
@@ -435,7 +440,13 @@ class TPSTestRunner(object):
             jsondata = f.read()
             f.close()
             testfiles = json.loads(jsondata)
-            testlist = testfiles['tests']
+            testlist = []
+            for (filename, meta) in testfiles['tests'].items():
+                skip_reason = meta.get("disabled")
+                if skip_reason:
+                    print 'Skipping test %s - %s' % (filename, skip_reason)
+                else:
+                    testlist.append(filename)
         except ValueError:
             testlist = [os.path.basename(self.testfile)]
         testdir = os.path.dirname(self.testfile)

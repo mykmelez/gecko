@@ -3,10 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-:root {
-  --eyedropper-image: url(images/command-eyedropper.svg);
-}
-
 * {
   box-sizing: border-box;
 }
@@ -19,6 +15,7 @@ window {
 /* The main Inspector panel container. */
 .inspector-responsive-container {
   height: 100vh;
+  overflow: hidden;
 }
 
 /* The main panel layout. This area consists of a toolbar, markup view
@@ -110,7 +107,7 @@ window {
 }
 
 #inspector-eyedropper-toggle::before {
-  background-image: var(--eyedropper-image);
+  background-image: url(images/command-eyedropper.svg);
 }
 
 #inspector-breadcrumbs-toolbar {
@@ -159,7 +156,6 @@ window {
 #inspector-breadcrumbs .breadcrumbs-widget-item {
   white-space: nowrap;
   flex-shrink: 0;
-  font: message-box;
 }
 
 #inspector-rules-container,

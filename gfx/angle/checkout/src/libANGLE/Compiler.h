@@ -11,8 +11,8 @@
 #define LIBANGLE_COMPILER_H_
 
 #include "GLSLANG/ShaderLang.h"
+#include "common/PackedEnums.h"
 #include "libANGLE/Error.h"
-#include "libANGLE/PackedGLEnums_autogen.h"
 #include "libANGLE/RefCountObject.h"
 
 namespace rx
@@ -41,12 +41,9 @@ class Compiler final : public RefCountObjectNoID
     ShShaderOutput mOutputType;
     ShBuiltInResources mResources;
 
-    ShHandle mFragmentCompiler;
-    ShHandle mVertexCompiler;
-    ShHandle mComputeCompiler;
-    ShHandle mGeometryCompiler;
+    ShaderMap<ShHandle> mShaderCompilers;
 };
 
 }  // namespace gl
 
-#endif // LIBANGLE_COMPILER_H_
+#endif  // LIBANGLE_COMPILER_H_

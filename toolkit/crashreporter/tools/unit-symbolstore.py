@@ -301,6 +301,7 @@ if target_platform() == 'WINNT':
                     "FILE 0 %s" % sourcefile,
                     "PUBLIC xyz 123"
                     ])
+            mock_Popen.return_value.wait.return_value = 0
             mock_communicate = mock_Popen.return_value.communicate
             mock_communicate.side_effect = [("abcd1234", ""),
                                             ("http://example.com/repo", ""),
@@ -441,6 +442,7 @@ class TestFileMapping(HelperMixin, unittest.TestCase):
                 ]
             )
         mock_Popen.return_value.stdout = mk_output(dumped_files)
+        mock_Popen.return_value.wait.return_value = 0
 
         d = symbolstore.Dumper('dump_syms', self.symboldir,
                                file_mapping=file_mapping)
@@ -477,12 +479,7 @@ class TestFunctional(HelperMixin, unittest.TestCase):
                                               'dist', 'host', 'bin',
                                               'dump_syms.exe')
             else:
-                self.dump_syms = os.path.join(self.topsrcdir,
-                                              'toolkit',
-                                              'crashreporter',
-                                              'tools',
-                                              'win32',
-                                              'dump_syms_vc{_MSC_VER}.exe'.format(**buildconfig.substs))
+                self.skip_test = True
             self.target_bin = os.path.join(buildconfig.topobjdir,
                                            'dist', 'bin',
                                            'firefox.exe')
@@ -491,7 +488,7 @@ class TestFunctional(HelperMixin, unittest.TestCase):
                                           'dist', 'host', 'bin',
                                           'dump_syms')
             self.target_bin = os.path.join(buildconfig.topobjdir,
-                                           'dist', 'bin', 'firefox')
+                                           'dist', 'bin', 'firefox-bin')
 
 
     def tearDown(self):

@@ -11,10 +11,11 @@ import subprocess
 import glob
 
 from mozboot.base import BaseBootstrapper
-from mozboot.linux_common import StyloInstall
+from mozboot.linux_common import NodeInstall, StyloInstall, ClangStaticAnalysisInstall
 
 
-class ArchlinuxBootstrapper(StyloInstall, BaseBootstrapper):
+class ArchlinuxBootstrapper(NodeInstall, StyloInstall,
+                            ClangStaticAnalysisInstall, BaseBootstrapper):
     '''Archlinux experimental bootstrapper.'''
 
     SYSTEM_PACKAGES = [
@@ -43,6 +44,7 @@ class ArchlinuxBootstrapper(StyloInstall, BaseBootstrapper):
         'libxt',
         'mime-types',
         'mozilla-common',
+        'nasm',
         'nss',
         'sqlite',
         'startup-notification',

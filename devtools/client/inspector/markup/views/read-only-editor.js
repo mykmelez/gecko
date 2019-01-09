@@ -21,7 +21,7 @@ function ReadOnlyEditor(container, node) {
     this.elt.classList.add("comment", "doctype");
     this.tag.textContent = node.doctypeString;
   } else if (node.isShadowRoot) {
-    this.tag.textContent = "#shadow-root";
+    this.tag.textContent = `#shadow-root (${node.shadowRootMode})`;
   } else {
     this.tag.textContent = node.nodeName;
   }
@@ -58,7 +58,7 @@ ReadOnlyEditor.prototype = {
    */
   getInfoAtNode: function() {
     return null;
-  }
+  },
 };
 
 module.exports = ReadOnlyEditor;

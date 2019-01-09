@@ -29,16 +29,15 @@ add_task(async function() {
     let frame = content.document.getElementById("frame");
     let doc = frame.contentDocument;
     let plugin = doc.getElementById("test");
-    let overlay = doc.getAnonymousElementByAttribute(plugin, "anonid", "main");
+    let overlay = plugin.openOrClosedShadowRoot.getElementById("main");
     Assert.ok(plugin && overlay.classList.contains("visible"),
       "Test 1, Plugin overlay should exist, not be hidden");
 
-    let closeIcon = doc.getAnonymousElementByAttribute(plugin, "anonid", "closeIcon");
+    let closeIcon = plugin.openOrClosedShadowRoot.getElementById("closeIcon");
     let bounds = closeIcon.getBoundingClientRect();
     let left = (bounds.left + bounds.right) / 2;
     let top = (bounds.top + bounds.bottom) / 2;
-    let utils = doc.defaultView.QueryInterface(Ci.nsIInterfaceRequestor)
-                       .getInterface(Ci.nsIDOMWindowUtils);
+    let utils = doc.defaultView.windowUtils;
     utils.sendMouseEvent("mousedown", left, top, 0, 1, 0, false, 0, 0);
     utils.sendMouseEvent("mouseup", left, top, 0, 1, 0, false, 0, 0);
     Assert.ok(!overlay.classList.contains("visible"),

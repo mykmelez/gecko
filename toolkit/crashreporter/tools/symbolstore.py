@@ -459,20 +459,14 @@ class Dumper:
         self.generated_files = generated_files or {}
         self.s3_bucket = s3_bucket
         self.file_mapping = file_mapping or {}
-        # Add a static mapping for Rust sources.
-        target_os = buildconfig.substs['OS_ARCH']
-        rust_srcdir = None
-        if target_os == 'WINNT':
-            rust_srcdir = 'C:/projects/rust/'
-        elif target_os == 'Darwin':
-            rust_srcdir = '/Users/travis/build/rust-lang/rust/'
-        elif target_os == 'Linux':
-            rust_srcdir = '/checkout/'
-        if rust_srcdir is not None:
-            self.srcdirs.append(rust_srcdir)
-            Dumper.srcdirRepoInfo[rust_srcdir] = GitRepoInfo(rust_srcdir,
-                                                             buildconfig.substs['RUSTC_COMMIT'],
-                                                             'https://github.com/rust-lang/rust/')
+        # Add a static mapping for Rust sources. Since Rust 1.30 official Rust builds map
+        # source paths to start with "/rust/<sha>/".
+        rust_sha = buildconfig.substs['RUSTC_COMMIT']
+        rust_srcdir = '/rustc/' + rust_sha
+        self.srcdirs.append(rust_srcdir)
+        Dumper.srcdirRepoInfo[rust_srcdir] = GitRepoInfo(rust_srcdir,
+                                                         rust_sha,
+                                                         'https://github.com/rust-lang/rust/')
 
     # subclasses override this
     def ShouldProcess(self, file):
@@ -598,7 +592,10 @@ class Dumper:
                         # pass through all other lines unchanged
                         f.write(line)
                 f.close()
-                proc.wait()
+                retcode = proc.wait()
+                if retcode != 0:
+                    raise RuntimeError(
+                        "dump_syms failed with error code %d" % retcode)
                 # we output relative paths so callers can get a list of what
                 # was generated
                 print(rel_path)
@@ -762,9 +759,13 @@ class Dumper_Linux(Dumper):
         # We want to strip out the debug info, and add a
         # .gnu_debuglink section to the object, so the debugger can
         # actually load our debug info later.
+        # In some odd cases, the object might already have an irrelevant
+        # .gnu_debuglink section, and objcopy doesn't want to add one in
+        # such cases, so we make it remove it any existing one first.
         file_dbg = file + ".dbg"
         if subprocess.call([self.objcopy, '--only-keep-debug', file, file_dbg]) == 0 and \
-           subprocess.call([self.objcopy, '--add-gnu-debuglink=%s' % file_dbg, file]) == 0:
+           subprocess.call([self.objcopy, '--remove-section', '.gnu_debuglink',
+                            '--add-gnu-debuglink=%s' % file_dbg, file]) == 0:
             rel_path = os.path.join(debug_file,
                                     guid,
                                     debug_file + ".dbg")

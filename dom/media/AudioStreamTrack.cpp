@@ -7,20 +7,10 @@
 
 #include "nsContentUtils.h"
 
-#include "mozilla/dom/AudioStreamTrackBinding.h"
-
 namespace mozilla {
 namespace dom {
 
-JSObject*
-AudioStreamTrack::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
-{
-  return AudioStreamTrack_Binding::Wrap(aCx, this, aGivenProto);
-}
-
-void
-AudioStreamTrack::GetLabel(nsAString& aLabel, CallerType aCallerType)
-{
+void AudioStreamTrack::GetLabel(nsAString& aLabel, CallerType aCallerType) {
   if (nsContentUtils::ResistFingerprinting(aCallerType)) {
     aLabel.AssignLiteral("Internal Microphone");
     return;
@@ -28,5 +18,5 @@ AudioStreamTrack::GetLabel(nsAString& aLabel, CallerType aCallerType)
   MediaStreamTrack::GetLabel(aLabel, aCallerType);
 }
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla

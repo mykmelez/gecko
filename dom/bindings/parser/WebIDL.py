@@ -248,8 +248,14 @@ class IDLScope(IDLObject):
         return self.QName()
 
     def QName(self):
-        if self._name:
-            return self._name.QName() + "::"
+        # It's possible for us to be called before __init__ has been called, for
+        # the IDLObjectWithScope case.  In that case, self._name won't be set yet.
+        if hasattr(self, "_name"):
+            name = self._name
+        else:
+            name = None
+        if name:
+            return name.QName() + "::"
         return "::"
 
     def ensureUnique(self, identifier, object):
@@ -326,6 +332,13 @@ class IDLScope(IDLObject):
         assert isinstance(identifier, IDLIdentifier)
         assert identifier.scope == self
         return self._lookupIdentifier(identifier)
+
+    def addIfaceGlobalNames(self, interfaceName, globalNames):
+        """Record the global names (from |globalNames|) that can be used in
+        [Exposed] to expose things in a global named |interfaceName|"""
+        self.globalNames.update(globalNames)
+        for name in globalNames:
+            self.globalNameMapping[name].add(interfaceName)
 
 
 class IDLIdentifier(IDLObject):
@@ -504,8 +517,10 @@ class IDLExposureMixins():
         return 'Window' in self.exposureSet
 
     def isExposedOnMainThread(self):
-        return (self.isExposedInWindow() or
-                self.isExposedInSystemGlobals())
+        return self.isExposedInWindow()
+
+    def isExposedOffMainThread(self):
+        return len(self.exposureSet - {'Window', 'FakeTestPrimaryGlobal'}) > 0
 
     def isExposedInAnyWorker(self):
         return len(self.getWorkerExposureSet()) > 0
@@ -515,9 +530,6 @@ class IDLExposureMixins():
 
     def isExposedInAnyWorklet(self):
         return len(self.getWorkletExposureSet()) > 0
-
-    def isExposedInSystemGlobals(self):
-        return 'BackstagePass' in self.exposureSet
 
     def isExposedInSomeButNotAllWorkers(self):
         """
@@ -595,6 +607,34 @@ class IDLExternalInterface(IDLObjectWithIdentifier, IDLExposureMixins):
 
     def _getDependentObjects(self):
         return set()
+
+
+class IDLPartialDictionary(IDLObject):
+    def __init__(self, location, name, members, nonPartialDictionary):
+        assert isinstance(name, IDLUnresolvedIdentifier)
+
+        IDLObject.__init__(self, location)
+        self.identifier = name
+        self.members = members
+        self._nonPartialDictionary = nonPartialDictionary
+        self._finished = False
+        nonPartialDictionary.addPartialDictionary(self)
+
+    def addExtendedAttributes(self, attrs):
+        pass
+
+    def finish(self, scope):
+        if self._finished:
+            return
+        self._finished = True
+
+        # Need to make sure our non-partial dictionary gets
+        # finished so it can report cases when we only have partial
+        # dictionaries.
+        self._nonPartialDictionary.finish(scope)
+
+    def validate(self):
+        pass
 
 
 class IDLPartialInterfaceOrNamespace(IDLObject):
@@ -1045,6 +1085,12 @@ class IDLInterfaceOrNamespace(IDLObjectWithScope, IDLExposureMixins):
                  (member.getExtendedAttribute("StoreInSlot") or
                   member.getExtendedAttribute("Cached"))) or
                 member.isMaplikeOrSetlike()):
+                if self.isJSImplemented() and not member.isMaplikeOrSetlike():
+                    raise WebIDLError("Interface %s is JS-implemented and we "
+                                      "don't support [Cached] or [StoreInSlot] "
+                                      "on JS-implemented interfaces" %
+                                      self.identifier.name,
+                                      [self.location, member.location])
                 if member.slotIndices is None:
                     member.slotIndices = dict()
                 member.slotIndices[self.identifier.name] = self.totalMembersInSlots
@@ -1317,10 +1363,9 @@ class IDLInterfaceOrNamespace(IDLObjectWithScope, IDLExposureMixins):
                     checkDuplicateNames(member, bindingAlias, "BindingAlias")
 
 
-        if (self.getExtendedAttribute("Pref") and
-            self._exposureGlobalNames != set([self.parentScope.primaryGlobalName])):
-            raise WebIDLError("[Pref] used on an interface that is not %s-only" %
-                              self.parentScope.primaryGlobalName,
+        if self.getExtendedAttribute("Pref") and self.isExposedOffMainThread():
+            raise WebIDLError("[Pref] used on an interface that is not "
+                              "main-thread-only",
                               [self.location])
 
         # Conditional exposure makes no sense for interfaces with no
@@ -1704,9 +1749,8 @@ class IDLInterface(IDLInterfaceOrNamespace):
                     self.globalNames = attr.args()
                 else:
                     self.globalNames = [self.identifier.name]
-                self.parentScope.globalNames.update(self.globalNames)
-                for globalName in self.globalNames:
-                    self.parentScope.globalNameMapping[globalName].add(self.identifier.name)
+                self.parentScope.addIfaceGlobalNames(self.identifier.name,
+                                                     self.globalNames)
                 self._isOnGlobalProtoChain = True
             elif identifier == "PrimaryGlobal":
                 if not attr.noArguments():
@@ -1719,8 +1763,8 @@ class IDLInterface(IDLInterfaceOrNamespace):
                          self.parentScope.primaryGlobalAttr.location])
                 self.parentScope.primaryGlobalAttr = attr
                 self.parentScope.primaryGlobalName = self.identifier.name
-                self.parentScope.globalNames.add(self.identifier.name)
-                self.parentScope.globalNameMapping[self.identifier.name].add(self.identifier.name)
+                self.parentScope.addIfaceGlobalNames(self.identifier.name,
+                                                     [self.identifier.name])
                 self._isOnGlobalProtoChain = True
             elif identifier == "SecureContext":
                 if not attr.noArguments():
@@ -1803,7 +1847,7 @@ class IDLNamespace(IDLInterfaceOrNamespace):
                 if not attr.noArguments():
                     raise WebIDLError("[%s] must not have arguments" % identifier,
                                       [attr.location])
-            elif identifier == "Pref":
+            elif identifier == "Pref" or identifier == "Func":
                 # Known extended attributes that take a string value
                 if not attr.hasValue():
                     raise WebIDLError("[%s] must have a value" % identifier,
@@ -1826,6 +1870,7 @@ class IDLDictionary(IDLObjectWithScope):
         self.parent = parent
         self._finished = False
         self.members = list(members)
+        self._partialDictionaries = []
 
         IDLObjectWithScope.__init__(self, location, parentScope, name)
 
@@ -1861,6 +1906,11 @@ class IDLDictionary(IDLObjectWithScope):
             # Make sure the parent resolves all its members before we start
             # looking at them.
             self.parent.finish(scope)
+
+        # Now go ahead and merge in our partial dictionaries.
+        for partial in self._partialDictionaries:
+            partial.finish(scope)
+            self.members.extend(partial.members)
 
         for member in self.members:
             member.resolve(self)
@@ -1966,6 +2016,9 @@ class IDLDictionary(IDLObjectWithScope):
             deps.add(self.parent)
         return deps
 
+    def addPartialDictionary(self, partial):
+        assert self.identifier.name == partial.identifier.name
+        self._partialDictionaries.append(partial)
 
 class IDLEnum(IDLObjectWithIdentifier):
     def __init__(self, location, parentScope, name, values):
@@ -2832,7 +2885,12 @@ class IDLWrapperType(IDLType):
         elif self.isEnum():
             return True
         elif self.isDictionary():
-            return all(m.type.isJSONType() for m in self.inner.members)
+            dictionary = self.inner
+            while dictionary:
+                if not all(m.type.isJSONType() for m in dictionary.members):
+                    return False
+                dictionary = dictionary.parent
+            return True
         else:
             raise WebIDLError("IDLWrapperType wraps type %s that we don't know if "
                               "is serializable" % type(self.inner), [self.location])
@@ -3561,10 +3619,9 @@ class IDLInterfaceMember(IDLObjectWithIdentifier, IDLExposureMixins):
         IDLExposureMixins.finish(self, scope)
 
     def validate(self):
-        if (self.getExtendedAttribute("Pref") and
-            self.exposureSet != set([self._globalScope.primaryGlobalName])):
+        if self.getExtendedAttribute("Pref") and self.isExposedOffMainThread():
             raise WebIDLError("[Pref] used on an interface member that is not "
-                              "%s-only" % self._globalScope.primaryGlobalName,
+                              "main-thread-only",
                               [self.location])
 
         if self.isAttr() or self.isMethod():
@@ -4515,8 +4572,9 @@ class IDLArgument(IDLObjectWithIdentifier):
 
         if ((self.type.isDictionary() or
              self.type.isUnion() and self.type.unroll().hasDictionaryType()) and
-            self.optional and not self.defaultValue and not self.variadic):
-            # Default optional non-variadic dictionaries to null,
+            self.optional and not self.defaultValue and not self.variadic and
+            not self.dictionaryMember):
+            # Default optional non-variadic dictionary arguments to null,
             # for simplicity, so the codegen doesn't have to special-case this.
             self.defaultValue = IDLNullValue(self.location)
         elif self.type.isAny():
@@ -5080,6 +5138,10 @@ class IDLMethod(IDLInterfaceMember, IDLScope):
             if not attr.noArguments():
                 raise WebIDLError("[%s] must take no arguments" % identifier,
                                   [attr.location])
+            if identifier == "CrossOriginCallable" and self.isStatic():
+                raise WebIDLError("[CrossOriginCallable] is only allowed on non-static "
+                                  "attributes"
+                                  [attr.location, self.location])
         elif identifier == "Pure":
             if not attr.noArguments():
                 raise WebIDLError("[Pure] must take no arguments",
@@ -5509,9 +5571,10 @@ class Parser(Tokenizer):
     def handleNonPartialObject(self, location, identifier, constructor,
                                constructorArgs, nonPartialArgs):
         """
-        This handles non-partial objects (interfaces and namespaces) by
-        checking for an existing partial object, and promoting it to
-        non-partial as needed.  The return value is the non-partial object.
+        This handles non-partial objects (interfaces, namespaces and
+        dictionaries) by checking for an existing partial object, and promoting
+        it to non-partial as needed.  The return value is the non-partial
+        object.
 
         constructorArgs are all the args for the constructor except the last
         one: isKnownNonPartial.
@@ -5601,6 +5664,7 @@ class Parser(Tokenizer):
         """
             PartialDefinition : PartialInterface
                               | PartialNamespace
+                              | PartialDictionary
         """
         p[0] = p[1]
 
@@ -5608,17 +5672,17 @@ class Parser(Tokenizer):
                             nonPartialConstructorArgs,
                             partialConstructorArgs):
         """
-        This handles partial objects (interfaces and namespaces) by checking for
-        an existing non-partial object, and adding ourselves to it as needed.
-        The return value is our partial object.  For now we just use
-        IDLPartialInterfaceOrNamespace for partial objects.
+        This handles partial objects (interfaces, namespaces and dictionaries)
+        by checking for an existing non-partial object, and adding ourselves to
+        it as needed.  The return value is our partial object.  We use
+        IDLPartialInterfaceOrNamespace for partial interfaces or namespaces,
+        and IDLPartialDictionary for partial dictionaries.
 
         nonPartialConstructorArgs are all the args for the non-partial
         constructor except the last two: members and isKnownNonPartial.
 
-        partialConstructorArgs are the arguments for the
-        IDLPartialInterfaceOrNamespace constructor, except the last one (the
-        non-partial object).
+        partialConstructorArgs are the arguments for the partial object
+        constructor, except the last one (the non-partial object).
         """
         # The name of the class starts with "IDL", so strip that off.
         # Also, starts with a capital letter after that, so nix that
@@ -5643,9 +5707,19 @@ class Parser(Tokenizer):
             nonPartialObject = nonPartialConstructor(
                 # No members, False for isKnownNonPartial
                 *(nonPartialConstructorArgs + [[], False]))
-        partialInterface = IDLPartialInterfaceOrNamespace(
-            *(partialConstructorArgs + [nonPartialObject]))
-        return partialInterface
+
+        partialObject = None
+        if isinstance(nonPartialObject, IDLDictionary):
+            partialObject = IDLPartialDictionary(
+                *(partialConstructorArgs + [nonPartialObject]))
+        elif isinstance(nonPartialObject, (IDLInterface, IDLNamespace)):
+            partialObject = IDLPartialInterfaceOrNamespace(
+                *(partialConstructorArgs + [nonPartialObject]))
+        else:
+            raise WebIDLError("Unknown partial object type %s" %
+                    type(partialObject))
+
+        return partialObject
 
     def p_PartialInterface(self, p):
         """
@@ -5670,6 +5744,19 @@ class Parser(Tokenizer):
 
         p[0] = self.handlePartialObject(
             location, identifier, IDLNamespace,
+            [location, self.globalScope(), identifier],
+            [location, identifier, members])
+
+    def p_PartialDictionary(self, p):
+        """
+            PartialDictionary : DICTIONARY IDENTIFIER LBRACE DictionaryMembers RBRACE SEMICOLON
+        """
+        location = self.getLocation(p, 1)
+        identifier = IDLUnresolvedIdentifier(self.getLocation(p, 2), p[2])
+        members = p[4]
+
+        p[0] = self.handlePartialObject(
+            location, identifier, IDLDictionary,
             [location, self.globalScope(), identifier],
             [location, identifier, members])
 
@@ -6884,16 +6971,13 @@ class Parser(Tokenizer):
             logger.reportGrammarErrors()
 
         self._globalScope = IDLScope(BuiltinLocation("<Global Scope>"), None, None)
+
         # To make our test harness work, pretend like we have a primary global already.
         # Note that we _don't_ set _globalScope.primaryGlobalAttr,
         # so we'll still be able to detect multiple PrimaryGlobal extended attributes.
         self._globalScope.primaryGlobalName = "FakeTestPrimaryGlobal"
-        self._globalScope.globalNames.add("FakeTestPrimaryGlobal")
-        self._globalScope.globalNameMapping["FakeTestPrimaryGlobal"].add("FakeTestPrimaryGlobal")
-        # And we add the special-cased "System" global name, which
-        # doesn't have any corresponding interfaces.
-        self._globalScope.globalNames.add("System")
-        self._globalScope.globalNameMapping["System"].add("BackstagePass")
+        self._globalScope.addIfaceGlobalNames("FakeTestPrimaryGlobal", ["FakeTestPrimaryGlobal"])
+
         self._installBuiltins(self._globalScope)
         self._productions = []
 

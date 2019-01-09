@@ -4,7 +4,7 @@
 "use strict";
 
 const { console, ConsoleAPI } = require("resource://gre/modules/Console.jsm");
-const { ConsoleAPIListener } = require("devtools/server/actors/webconsole/listeners");
+const { ConsoleAPIListener } = require("devtools/server/actors/webconsole/listeners/console-api");
 
 var seenMessages = 0;
 var seenTypes = 0;
@@ -25,7 +25,7 @@ var callback = {
       seenTypes |= 4;
     }
     seenMessages++;
-  }
+  },
 };
 
 let policy;
@@ -54,8 +54,7 @@ function createFakeAddonWindow({addonId} = {}) {
   const principal = Services.scriptSecurityManager
         .createCodebasePrincipal(baseURI, {});
   const chromeWebNav = Services.appShell.createWindowlessBrowser(true);
-  const docShell = chromeWebNav.QueryInterface(Ci.nsIInterfaceRequestor)
-                             .getInterface(Ci.nsIDocShell);
+  const { docShell } = chromeWebNav;
   docShell.createAboutBlankContentViewer(principal);
   const addonWindow = docShell.contentViewer.DOMDocument.defaultView;
 
@@ -70,7 +69,7 @@ function run_test() {
   // console1 Test Console.jsm messages tagged by the Addon SDK
   // are still filtered correctly.
   const console1 = new ConsoleAPI({
-    consoleID: "addon/foo"
+    consoleID: "addon/foo",
   });
 
   // console2 - WebExtension page's console messages tagged

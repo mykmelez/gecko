@@ -6,7 +6,6 @@
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 /** This little class ensures that redirects maintain an https:// origin */
 function RedirectHttpsOnly() {}
@@ -23,7 +22,7 @@ RedirectHttpsOnly.prototype = {
   getInterface(iid) {
     return this.QueryInterface(iid);
   },
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIChannelEventSink])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIChannelEventSink]),
 };
 
 /** This class loads a resource into a single string. ResourceLoader.load() is
@@ -42,7 +41,7 @@ ResourceLoader.load = function(uri, doc) {
       uri,
       loadingNode: doc,
       securityFlags: Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
-      contentPolicyType: Ci.nsIContentPolicy.TYPE_INTERNAL_SCRIPT
+      contentPolicyType: Ci.nsIContentPolicy.TYPE_INTERNAL_SCRIPT,
     });
 
     ioChannel.loadGroup = doc.documentLoadGroup.QueryInterface(Ci.nsILoadGroup);
@@ -77,7 +76,7 @@ ResourceLoader.prototype = {
   getInterface(iid) {
     return this.QueryInterface(iid);
   },
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIStreamListener])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIStreamListener]),
 };
 
 /**
@@ -97,7 +96,7 @@ function createLocationFromURI(uri) {
     origin: uri.prePath,
     toString() {
       return uri.spec;
-    }
+    },
   };
 }
 
@@ -201,8 +200,8 @@ IdpSandbox.prototype = {
       wantGlobalProperties: [
         "indexedDB", "XMLHttpRequest", "TextEncoder", "TextDecoder",
         "URL", "URLSearchParams", "atob", "btoa", "Blob", "crypto",
-        "rtcIdentityProvider", "fetch"
-      ]
+        "rtcIdentityProvider", "fetch",
+      ],
     });
     let registrar = this.sandbox.rtcIdentityProvider;
     if (!Cu.isXrayWrapper(registrar)) {
@@ -235,8 +234,7 @@ IdpSandbox.prototype = {
   // can't rethrow anything else because that could leak information about the
   // internal workings of the IdP across origins.
   _logError(e) {
-    let winID = this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-        .getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
+    let winID = this.window.windowUtils.currentInnerWindowID;
     let scriptError = Cc["@mozilla.org/scripterror;1"]
         .createInstance(Ci.nsIScriptError);
     scriptError.initWithWindowID(e.message, e.fileName, null,
@@ -256,7 +254,7 @@ IdpSandbox.prototype = {
 
   toString() {
     return this.source.spec;
-  }
+  },
 };
 
 var EXPORTED_SYMBOLS = ["IdpSandbox"];

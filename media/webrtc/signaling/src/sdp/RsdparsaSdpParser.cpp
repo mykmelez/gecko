@@ -15,33 +15,23 @@
 #include "signaling/src/sdp/RsdparsaSdpInc.h"
 #include "signaling/src/sdp/RsdparsaSdpGlue.h"
 
-namespace mozilla
-{
+namespace mozilla {
 
-UniquePtr<Sdp>
-RsdparsaSdpParser::Parse(const std::string &sdpText)
-{
+UniquePtr<Sdp> RsdparsaSdpParser::Parse(const std::string& sdpText) {
   ClearParseErrors();
-  const char* rawString = sdpText.c_str();
   RustSdpSession* result;
   RustSdpError* err;
-  nsresult rv = parse_sdp(rawString, sdpText.length() + 1, false,
-                          &result, &err);
+  StringView sdpTextView{sdpText.c_str(), sdpText.length()};
+  nsresult rv = parse_sdp(sdpTextView, false, &result, &err);
   if (rv != NS_OK) {
-    // TODO: err should eventually never be null if rv != NS_OK
-    // see Bug 1433529
-    if (err != nullptr) {
-      size_t line = sdp_get_error_line_num(err);
-      std::string errMsg = convertStringView(sdp_get_error_message(err));
-      sdp_free_error(err);
-      AddParseError(line, errMsg);
-    } else {
-      AddParseError(0, "Unhandled Rsdparsa parsing error");
-    }
+    size_t line = sdp_get_error_line_num(err);
+    std::string errMsg = convertStringView(sdp_get_error_message(err));
+    sdp_free_error(err);
+    AddParseError(line, errMsg);
     return nullptr;
   }
 
-  if(err) {
+  if (err) {
     size_t line = sdp_get_error_line_num(err);
     std::string warningMsg = convertStringView(sdp_get_error_message(err));
     sdp_free_error(err);
@@ -52,11 +42,11 @@ RsdparsaSdpParser::Parse(const std::string &sdpText)
   uniqueResult.reset(result);
   RustSdpOrigin rustOrigin = sdp_get_origin(uniqueResult.get());
   sdp::AddrType addrType = convertAddressType(rustOrigin.addr.addrType);
-  SdpOrigin origin(convertStringView(rustOrigin.username),
-                   rustOrigin.sessionId, rustOrigin.sessionVersion,
-                   addrType, std::string(rustOrigin.addr.unicastAddr));
+  SdpOrigin origin(convertStringView(rustOrigin.username), rustOrigin.sessionId,
+                   rustOrigin.sessionVersion, addrType,
+                   std::string(rustOrigin.addr.unicastAddr));
 
-    return MakeUnique<RsdparsaSdp>(std::move(uniqueResult), origin);
+  return MakeUnique<RsdparsaSdp>(std::move(uniqueResult), origin);
 }
 
-} // namespace mozilla
+}  // namespace mozilla

@@ -13,33 +13,20 @@
 #include "nsString.h"
 #include "nsSystemInfo.h"
 
-// This gives us compiler intrinsics for the x86 PAUSE instruction
-#if defined(_MSC_VER)
-#include <intrin.h>
-#pragma intrinsic(_mm_pause)
-#define CPU_PAUSE() _mm_pause()
-#elif defined(__GNUC__) || defined(__clang__)
-#define CPU_PAUSE() __builtin_ia32_pause()
-#endif
-
 namespace mozilla {
 namespace mscom {
 
 static const TimeDuration kMaxSpinTime = TimeDuration::FromMilliseconds(30);
 bool SpinEvent::sIsMulticore = false;
 
-/* static */ bool
-SpinEvent::InitStatics()
-{
+/* static */ bool SpinEvent::InitStatics() {
   SYSTEM_INFO sysInfo;
   ::GetSystemInfo(&sysInfo);
   sIsMulticore = sysInfo.dwNumberOfProcessors > 1;
   return true;
 }
 
-SpinEvent::SpinEvent()
-  : mDone(false)
-{
+SpinEvent::SpinEvent() : mDone(false) {
   static const bool gotStatics = InitStatics();
   MOZ_ASSERT(gotStatics);
 
@@ -47,9 +34,7 @@ SpinEvent::SpinEvent()
   MOZ_ASSERT(mDoneEvent);
 }
 
-bool
-SpinEvent::Wait(HANDLE aTargetThread)
-{
+bool SpinEvent::Wait(HANDLE aTargetThread) {
   MOZ_ASSERT(aTargetThread);
   if (!aTargetThread) {
     return false;
@@ -68,10 +53,7 @@ SpinEvent::Wait(HANDLE aTargetThread)
       if (elapsed >= kMaxSpinTime) {
         break;
       }
-      // The PAUSE instruction is a hint to the CPU that we're doing a spin
-      // loop. It is a no-op on older processors that don't support it, so
-      // it is safe to use here without any CPUID checks.
-      CPU_PAUSE();
+      YieldProcessor();
     }
     if (mDone) {
       return true;
@@ -85,12 +67,10 @@ SpinEvent::Wait(HANDLE aTargetThread)
   return waitResult == WAIT_OBJECT_0;
 }
 
-void
-SpinEvent::Signal()
-{
+void SpinEvent::Signal() {
   ::SetEvent(mDoneEvent);
   mDone = true;
 }
 
-} // namespace mscom
-} // namespace mozilla
+}  // namespace mscom
+}  // namespace mozilla

@@ -1,41 +1,40 @@
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.default = getMatches;
-
-var _buildQuery = require("./build-query");
-
-var _buildQuery2 = _interopRequireDefault(_buildQuery);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-function getMatches(query, text, modifiers) {
+
+import assert from "../../utils/assert";
+import buildQuery from "../../utils/build-query";
+
+export default function getMatches(
+  query: string,
+  text: string,
+  modifiers: SearchModifiers
+): number {
   if (!query || !text || !modifiers) {
     return [];
   }
-
-  const regexQuery = (0, _buildQuery2.default)(query, modifiers, {
+  const regexQuery = buildQuery(query, modifiers, {
     isGlobal: true
   });
   const matchedLocations = [];
   const lines = text.split("\n");
-
   for (let i = 0; i < lines.length; i++) {
     let singleMatch;
     const line = lines[i];
-
     while ((singleMatch = regexQuery.exec(line)) !== null) {
-      matchedLocations.push({
-        line: i,
-        ch: singleMatch.index
-      });
+      matchedLocations.push({ line: i, ch: singleMatch.index });
+
+      // When the match is an empty string the regexQuery.lastIndex will not
+      // change resulting in an infinite loop so we need to check for this and
+      // increment it manually in that case.  See issue #7023
+      if (singleMatch[0] === "") {
+        assert(
+          !regexQuery.unicode,
+          "lastIndex++ can cause issues in unicode mode"
+        );
+        regexQuery.lastIndex++;
+      }
     }
   }
-
   return matchedLocations;
 }

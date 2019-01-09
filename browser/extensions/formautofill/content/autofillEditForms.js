@@ -19,21 +19,59 @@ class EditAutofillForm {
   loadRecord(record = {}) {
     for (let field of this._elements.form.elements) {
       let value = record[field.id];
-      field.value = typeof(value) == "undefined" ? "" : value;
+      value = typeof(value) == "undefined" ? "" : value;
+
+      if (record.guid) {
+        field.value = value;
+      } else if (field.localName == "select") {
+        this.setDefaultSelectedOptionByValue(field, value);
+      } else {
+        // Use .defaultValue instead of .value to avoid setting the `dirty` flag
+        // which triggers form validation UI.
+        field.defaultValue = value;
+      }
+    }
+    if (!record.guid) {
+      // Reset the dirty value flag and validity state.
+      this._elements.form.reset();
+    } else {
+      for (let field of this._elements.form.elements) {
+        this.updatePopulatedState(field);
+        this.updateCustomValidity(field);
+      }
+    }
+  }
+
+  setDefaultSelectedOptionByValue(select, value) {
+    for (let option of select.options) {
+      option.defaultSelected = option.value == value;
     }
   }
 
   /**
-   * Get inputs from the form.
+   * Get a record from the form suitable for a save/update in storage.
    * @returns {object}
    */
   buildFormObject() {
+    let initialObject = {};
+    if (this.hasMailingAddressFields) {
+      // Start with an empty string for each mailing-address field so that any
+      // fields hidden for the current country are blanked in the return value.
+      initialObject = {
+        "street-address": "",
+        "address-level3": "",
+        "address-level2": "",
+        "address-level1": "",
+        "postal-code": "",
+      };
+    }
+
     return Array.from(this._elements.form.elements).reduce((obj, input) => {
-      if (input.value && !input.disabled) {
+      if (!input.disabled) {
         obj[input.id] = input.value;
       }
       return obj;
-    }, {});
+    }, initialObject);
   }
 
   /**
@@ -43,15 +81,24 @@ class EditAutofillForm {
    */
   handleEvent(event) {
     switch (event.type) {
-      case "input": {
-        this.handleInput(event);
-        break;
-      }
       case "change": {
         this.handleChange(event);
         break;
       }
+      case "input": {
+        this.handleInput(event);
+        break;
+      }
     }
+  }
+
+  /**
+   * Handle change events
+   *
+   * @param  {DOMEvent} event
+   */
+  handleChange(event) {
+    this.updatePopulatedState(event.target);
   }
 
   /**
@@ -68,8 +115,25 @@ class EditAutofillForm {
     this._elements.form.addEventListener("input", this);
   }
 
-  // An interface to be inherited.
-  handleChange(event) {}
+  /**
+   * Set the field-populated attribute if the field has a value.
+   *
+   * @param {DOMElement} field The field that will be checked for a value.
+   */
+  updatePopulatedState(field) {
+    let span = field.parentNode.querySelector(".label-text");
+    if (!span) {
+      return;
+    }
+    span.toggleAttribute("field-populated", !!field.value.trim());
+  }
+
+  /**
+   * Run custom validity routines specific to the field and type of form.
+   *
+   * @param {DOMElement} field The field that will be validated.
+   */
+  updateCustomValidity(field) {}
 }
 
 class EditAddress extends EditAutofillForm {
@@ -79,16 +143,22 @@ class EditAddress extends EditAutofillForm {
    * @param {object} config
    * @param {string[]} config.DEFAULT_REGION
    * @param {function} config.getFormFormat Function to return form layout info for a given country.
-   * @param {string[]} config.supportedCountries
+   * @param {function} config.findAddressSelectOption Finds the matching select option for a given
+                                                      select element, address, and fieldName.
+   * @param {string[]} config.countries
+   * @param {boolean} [config.noValidate=undefined] Whether to validate the form
    */
   constructor(elements, record, config) {
     super(elements);
 
     Object.assign(this, config);
+    let {form} = this._elements;
     Object.assign(this._elements, {
-      addressLevel1Label: this._elements.form.querySelector("#address-level1-container > span"),
-      postalCodeLabel: this._elements.form.querySelector("#postal-code-container > span"),
-      country: this._elements.form.querySelector("#country"),
+      addressLevel3Label: form.querySelector("#address-level3-container > .label-text"),
+      addressLevel2Label: form.querySelector("#address-level2-container > .label-text"),
+      addressLevel1Label: form.querySelector("#address-level1-container > .label-text"),
+      postalCodeLabel: form.querySelector("#postal-code-container > .label-text"),
+      country: form.querySelector("#country"),
     });
 
     this.populateCountries();
@@ -97,20 +167,70 @@ class EditAddress extends EditAutofillForm {
     this.loadRecord(record);
     this.attachEventListeners();
 
-    if (config.novalidate) {
-      this.form.setAttribute("novalidate", "true");
-    }
+    form.noValidate = !!config.noValidate;
   }
 
   loadRecord(record) {
     this._record = record;
     if (!record) {
       record = {
-        country: this.supportedCountries.find(supported => supported == this.DEFAULT_REGION),
+        country: this.DEFAULT_REGION,
       };
     }
+
+    let {addressLevel1Options} = this.getFormFormat(record.country);
+    this.populateAddressLevel1(addressLevel1Options, record.country);
+
     super.loadRecord(record);
+    this.loadAddressLevel1(record["address-level1"], record.country);
     this.formatForm(record.country);
+  }
+
+  get hasMailingAddressFields() {
+    let {addressFields} = this._elements.form.dataset;
+    return !addressFields || addressFields.trim().split(/\s+/).includes("mailing-address");
+  }
+
+  /**
+   * `mailing-address` is a special attribute token to indicate mailing fields + country.
+   *
+   * @param {object[]} mailingFieldsOrder - `fieldsOrder` from `getFormFormat`
+   * @param {string} addressFields - white-space-separated string of requested address fields to show
+   * @returns {object[]} in the same structure as `mailingFieldsOrder` but including non-mail fields
+   */
+  static computeVisibleFields(mailingFieldsOrder, addressFields) {
+    if (addressFields) {
+      let requestedFieldClasses = addressFields.trim().split(/\s+/);
+      let fieldClasses = [];
+      if (requestedFieldClasses.includes("mailing-address")) {
+        fieldClasses = fieldClasses.concat(mailingFieldsOrder);
+        // `country` isn't part of the `mailingFieldsOrder` so add it when filling a mailing-address
+        requestedFieldClasses.splice(requestedFieldClasses.indexOf("mailing-address"), 1,
+                                     "country");
+      }
+
+      for (let fieldClassName of requestedFieldClasses) {
+        fieldClasses.push({
+          fieldId: fieldClassName,
+          newLine: fieldClassName == "name",
+        });
+      }
+      return fieldClasses;
+    }
+
+    // This is the default which is shown in the management interface and includes all fields.
+    return mailingFieldsOrder.concat([
+      {
+        fieldId: "country",
+      },
+      {
+        fieldId: "tel",
+      },
+      {
+        fieldId: "email",
+        newLine: true,
+      },
+    ]);
   }
 
   /**
@@ -119,29 +239,72 @@ class EditAddress extends EditAutofillForm {
    * @param  {string} country
    */
   formatForm(country) {
-    const {addressLevel1Label, postalCodeLabel, fieldsOrder, postalCodePattern} =
-      this.getFormFormat(country);
+    const {
+      addressLevel3Label,
+      addressLevel2Label,
+      addressLevel1Label,
+      addressLevel1Options,
+      postalCodeLabel,
+      fieldsOrder: mailingFieldsOrder,
+      postalCodePattern,
+      countryRequiredFields,
+    } = this.getFormFormat(country);
+    this._elements.addressLevel3Label.dataset.localization = addressLevel3Label;
+    this._elements.addressLevel2Label.dataset.localization = addressLevel2Label;
     this._elements.addressLevel1Label.dataset.localization = addressLevel1Label;
     this._elements.postalCodeLabel.dataset.localization = postalCodeLabel;
-    this.arrangeFields(fieldsOrder);
+    let addressFields = this._elements.form.dataset.addressFields;
+    let extraRequiredFields = this._elements.form.dataset.extraRequiredFields;
+    let fieldClasses = EditAddress.computeVisibleFields(mailingFieldsOrder, addressFields);
+    let requiredFields = new Set(countryRequiredFields);
+    if (extraRequiredFields) {
+      for (let extraRequiredField of extraRequiredFields.trim().split(/\s+/)) {
+        requiredFields.add(extraRequiredField);
+      }
+    }
+    this.arrangeFields(fieldClasses, requiredFields);
     this.updatePostalCodeValidation(postalCodePattern);
+    this.populateAddressLevel1(addressLevel1Options, country);
   }
 
-  arrangeFields(fieldsOrder) {
+  /**
+   * Update address field visibility and order based on libaddressinput data.
+   *
+   * @param {object[]} fieldsOrder array of objects with `fieldId` and optional `newLine` properties
+   * @param {Set} requiredFields Set of `fieldId` strings that mark which fields are required
+   */
+  arrangeFields(fieldsOrder, requiredFields) {
+    /**
+     * @see FormAutofillStorage.VALID_ADDRESS_FIELDS
+     */
     let fields = [
+      // `name` is a wrapper for the 3 name fields.
       "name",
       "organization",
       "street-address",
+      "address-level3",
       "address-level2",
       "address-level1",
       "postal-code",
+      "country",
+      "tel",
+      "email",
     ];
     let inputs = [];
     for (let i = 0; i < fieldsOrder.length; i++) {
       let {fieldId, newLine} = fieldsOrder[i];
-      let container = document.getElementById(`${fieldId}-container`);
+
+      let container = this._elements.form.querySelector(`#${fieldId}-container`);
       let containerInputs = [...container.querySelectorAll("input, textarea, select")];
-      containerInputs.forEach(function(input) { input.disabled = false; });
+      containerInputs.forEach(function(input) {
+        input.disabled = false;
+        // libaddressinput doesn't list 'country' or 'name' as required.
+        // The additional-name field should never get marked as required.
+        input.required = (fieldId == "country" ||
+                          fieldId == "name" ||
+                          requiredFields.has(fieldId)) &&
+                         input.id != "additional-name";
+      });
       inputs.push(...containerInputs);
       container.style.display = "flex";
       container.style.order = i;
@@ -155,7 +318,7 @@ class EditAddress extends EditAutofillForm {
     }
     // Hide the remaining fields
     for (let field of fields) {
-      let container = document.getElementById(`${field}-container`);
+      let container = this._elements.form.querySelector(`#${field}-container`);
       container.style.display = "none";
       for (let input of [...container.querySelectorAll("input, textarea, select")]) {
         input.disabled = true;
@@ -164,7 +327,7 @@ class EditAddress extends EditAutofillForm {
   }
 
   updatePostalCodeValidation(postalCodePattern) {
-    let postalCodeInput = document.getElementById("postal-code");
+    let postalCodeInput = this._elements.form.querySelector("#postal-code");
     if (postalCodePattern && postalCodeInput.style.display != "none") {
       postalCodeInput.setAttribute("pattern", postalCodePattern);
     } else {
@@ -172,23 +335,107 @@ class EditAddress extends EditAutofillForm {
     }
   }
 
+  /**
+   * Set the address-level1 value on the form field (input or select, whichever is present).
+   *
+   * @param {string} addressLevel1Value Value of the address-level1 from the autofill record
+   * @param {string} country The corresponding country
+   */
+  loadAddressLevel1(addressLevel1Value, country) {
+    let field = this._elements.form.querySelector("#address-level1");
+
+    if (field.localName == "input") {
+      field.value = addressLevel1Value || "";
+      return;
+    }
+
+    let matchedSelectOption = this.findAddressSelectOption(field, {
+      country,
+      "address-level1": addressLevel1Value,
+    }, "address-level1");
+    if (matchedSelectOption && !matchedSelectOption.selected) {
+      field.value = matchedSelectOption.value;
+      field.dispatchEvent(new Event("input", {bubbles: true}));
+      field.dispatchEvent(new Event("change", {bubbles: true}));
+    } else if (addressLevel1Value) {
+      // If the option wasn't found, insert an option at the beginning of
+      // the select that matches the stored value.
+      field.insertBefore(new Option(addressLevel1Value, addressLevel1Value, true, true), field.firstChild);
+    }
+  }
+
+  /**
+   * Replace the text input for address-level1 with a select dropdown if
+   * a fixed set of names exists. Otherwise show a text input.
+   *
+   * @param {Map?} options Map of options with regionCode -> name mappings
+   * @param {string} country The corresponding country
+   */
+  populateAddressLevel1(options, country) {
+    let field = this._elements.form.querySelector("#address-level1");
+
+    if (field.dataset.country == country) {
+      return;
+    }
+
+    if (!options) {
+      if (field.localName == "input") {
+        return;
+      }
+
+      let input = document.createElement("input");
+      input.setAttribute("type", "text");
+      input.id = "address-level1";
+      input.required = field.required;
+      input.disabled = field.disabled;
+      input.tabIndex = field.tabIndex;
+      field.replaceWith(input);
+      return;
+    }
+
+    if (field.localName == "input") {
+      let select = document.createElement("select");
+      select.id = "address-level1";
+      select.required = field.required;
+      select.disabled = field.disabled;
+      select.tabIndex = field.tabIndex;
+      field.replaceWith(select);
+      field = select;
+    }
+
+    field.textContent = "";
+    field.dataset.country = country;
+    let fragment = document.createDocumentFragment();
+    fragment.appendChild(new Option(undefined, undefined, true, true));
+    for (let [regionCode, regionName] of options) {
+      let option = new Option(regionName, regionCode);
+      fragment.appendChild(option);
+    }
+    field.appendChild(fragment);
+  }
+
   populateCountries() {
     let fragment = document.createDocumentFragment();
-    for (let country of this.supportedCountries) {
+    // Sort countries by their visible names.
+    let countries = [...this.countries.entries()].sort((e1, e2) => e1[1].localeCompare(e2[1]));
+    for (let country of countries) {
       let option = new Option();
-      option.value = country;
-      option.dataset.localizationRegion = country.toLowerCase();
+      option.value = country[0];
+      option.dataset.localizationRegion = country[0].toLowerCase();
       fragment.appendChild(option);
     }
     this._elements.country.appendChild(fragment);
   }
 
   handleChange(event) {
-    this.formatForm(event.target.value);
+    if (event.target == this._elements.country) {
+      this.formatForm(event.target.value);
+    }
+    super.handleChange(event);
   }
 
   attachEventListeners() {
-    this._elements.country.addEventListener("change", this);
+    this._elements.form.addEventListener("change", this);
     super.attachEventListeners();
   }
 }
@@ -200,6 +447,7 @@ class EditCreditCard extends EditAutofillForm {
    * @param {object} addresses in an object with guid keys for the billing address picker.
    * @param {object} config
    * @param {function} config.isCCNumber Function to determine if a string is a valid CC number.
+   * @param {function} config.getSupportedNetworks Function to get the list of card networks
    */
   constructor(elements, record, addresses, config) {
     super(elements);
@@ -208,24 +456,53 @@ class EditCreditCard extends EditAutofillForm {
     Object.assign(this, config);
     Object.assign(this._elements, {
       ccNumber: this._elements.form.querySelector("#cc-number"),
+      invalidCardNumberStringElement: this._elements.form.querySelector("#invalidCardNumberString"),
+      month: this._elements.form.querySelector("#cc-exp-month"),
       year: this._elements.form.querySelector("#cc-exp-year"),
+      ccType: this._elements.form.querySelector("#cc-type"),
       billingAddress: this._elements.form.querySelector("#billingAddressGUID"),
       billingAddressRow: this._elements.form.querySelector(".billingAddressRow"),
     });
 
-    this.loadRecord(record, addresses);
     this.attachEventListeners();
+    this.loadRecord(record, addresses);
   }
 
   loadRecord(record, addresses, preserveFieldValues) {
     // _record must be updated before generateYears and generateBillingAddressOptions are called.
     this._record = record;
     this._addresses = addresses;
-    this.generateBillingAddressOptions();
+    this.generateBillingAddressOptions(preserveFieldValues);
     if (!preserveFieldValues) {
+      // Re-populating the networks will reset the selected option.
+      this.populateNetworks();
+      // Re-generating the months will reset the selected option.
+      this.generateMonths();
       // Re-generating the years will reset the selected option.
       this.generateYears();
       super.loadRecord(record);
+    }
+  }
+
+  generateMonths() {
+    const count = 12;
+
+    // Clear the list
+    this._elements.month.textContent = "";
+
+    // Empty month option
+    this._elements.month.appendChild(new Option());
+
+    // Populate month list. Format: "month number - month name"
+    let dateFormat = new Intl.DateTimeFormat(navigator.language, {month: "long"}).format;
+    for (let i = 0; i < count; i++) {
+      let monthNumber = (i + 1).toString();
+      let monthName = dateFormat(new Date(1970, i));
+      let option = new Option();
+      option.value = monthNumber;
+      // XXX: Bug 1446164 - Localize this string.
+      option.textContent = `${monthNumber.padStart(2, "0")} - ${monthName}`;
+      this._elements.month.appendChild(option);
     }
   }
 
@@ -236,6 +513,9 @@ class EditCreditCard extends EditAutofillForm {
 
     // Clear the list
     this._elements.year.textContent = "";
+
+    // Provide an empty year option
+    this._elements.year.appendChild(new Option());
 
     if (ccExpYear && ccExpYear < currentYear) {
       this._elements.year.appendChild(new Option(ccExpYear));
@@ -252,8 +532,30 @@ class EditCreditCard extends EditAutofillForm {
     }
   }
 
-  generateBillingAddressOptions() {
-    let billingAddressGUID = this._record && this._record.billingAddressGUID;
+  populateNetworks() {
+    // Clear the list
+    this._elements.ccType.textContent = "";
+    let frag = document.createDocumentFragment();
+    // include an empty first option
+    frag.appendChild(new Option("", ""));
+
+    let supportedNetworks = this.getSupportedNetworks();
+    for (let id of supportedNetworks) {
+      let option = new Option();
+      option.value = id;
+      option.dataset.localization = "cardNetwork." + id;
+      frag.appendChild(option);
+    }
+    this._elements.ccType.appendChild(frag);
+  }
+
+  generateBillingAddressOptions(preserveFieldValues) {
+    let billingAddressGUID;
+    if (preserveFieldValues && this._elements.billingAddress.value) {
+      billingAddressGUID = this._elements.billingAddress.value;
+    } else if (this._record) {
+      billingAddressGUID = this._record.billingAddressGUID;
+    }
 
     this._elements.billingAddress.textContent = "";
 
@@ -271,23 +573,8 @@ class EditCreditCard extends EditAutofillForm {
   }
 
   attachEventListeners() {
-    this._elements.ccNumber.addEventListener("change", this);
+    this._elements.form.addEventListener("change", this);
     super.attachEventListeners();
-  }
-
-  handleChange(event) {
-    super.handleChange(event);
-
-    if (event.target != this._elements.ccNumber) {
-      return;
-    }
-
-    let ccNumberField = this._elements.ccNumber;
-
-    // Mark the cc-number field as invalid if the number is empty or invalid.
-    if (!this.isCCNumber(ccNumberField.value)) {
-      ccNumberField.setCustomValidity(true);
-    }
   }
 
   handleInput(event) {
@@ -297,5 +584,16 @@ class EditCreditCard extends EditAutofillForm {
       this._elements.ccNumber.setCustomValidity("");
     }
     super.handleInput(event);
+  }
+
+  updateCustomValidity(field) {
+    super.updateCustomValidity(field);
+
+    // Mark the cc-number field as invalid if the number is empty or invalid.
+    if (field == this._elements.ccNumber &&
+        !this.isCCNumber(field.value)) {
+      let invalidCardNumberString = this._elements.invalidCardNumberStringElement.textContent;
+      field.setCustomValidity(invalidCardNumberString || " ");
+    }
   }
 }

@@ -7,8 +7,16 @@ from __future__ import absolute_import, print_function, unicode_literals
 import argparse
 import logging
 import os
+import shutil
+import subprocess
+import zipfile
+import json
+
+from zipfile import ZipFile
 
 import mozpack.path as mozpath
+
+from mozfile import TemporaryDirectory
 
 from mozbuild.base import (
     MachCommandBase,
@@ -42,9 +50,13 @@ def REMOVED(cls):
 @CommandProvider
 class MachCommands(MachCommandBase):
     def _root_url(self, artifactdir=None, objdir=None):
+        """Generate a publicly-accessible URL for the tasks's artifacts, or an objdir path"""
         if 'TASK_ID' in os.environ and 'RUN_ID' in os.environ:
-            return 'https://queue.taskcluster.net/v1/task/{}/runs/{}/artifacts/{}'.format(
-                os.environ['TASK_ID'], os.environ['RUN_ID'], artifactdir)
+            import taskcluster_urls
+            from taskgraph.util.taskcluster import get_root_url
+            return taskcluster_urls.api(
+                get_root_url(), 'queue', 'v1', 'task/{}/runs/{}/artifacts/{}'.format(
+                    os.environ['TASK_ID'], os.environ['RUN_ID'], artifactdir))
         else:
             return os.path.join(self.topobjdir, objdir)
 
@@ -60,7 +72,7 @@ class MachCommands(MachCommandBase):
     @CommandArgument('args', nargs=argparse.REMAINDER)
     def android_assemble_app(self, args):
         ret = self.gradle(self.substs['GRADLE_ANDROID_APP_TASKS'] +
-                          ['-x', 'lint', '--continue'] + args, verbose=True)
+                          ['-x', 'lint'] + args, verbose=True)
 
         return ret
 
@@ -105,13 +117,34 @@ class MachCommands(MachCommandBase):
 
         return ret
 
+    @SubCommand('android', 'api-lint',
+                """Runs apilint against GeckoView.""")
+    @CommandArgument('args', nargs=argparse.REMAINDER)
+    def android_api_lint(self, args):
+        ret = self.gradle(self.substs['GRADLE_ANDROID_API_LINT_TASKS'] + args, verbose=True)
+        folder = self.substs['GRADLE_ANDROID_GECKOVIEW_APILINT_FOLDER']
+
+        with open(os.path.join(
+                self.topobjdir,
+                '{}/apilint-result.json'.format(folder))) as f:
+            result = json.load(f)
+
+            print('SUITE-START | android-api-lint')
+            for r in result['compat_failures'] + result['failures']:
+                print ('TEST-UNEXPECTED-FAIL | {} | {}'.format(r['detail'], r['msg']))
+            for r in result['api_changes']:
+                print ('TEST-UNEXPECTED-FAIL | {} | Unexpected api change'.format(r))
+            print('SUITE-END | android-api-lint')
+
+        return ret
+
     @SubCommand('android', 'test',
                 """Run Android local unit tests.
                 See https://developer.mozilla.org/en-US/docs/Mozilla/Android-specific_test_suites#android-test""")  # NOQA: E501
     @CommandArgument('args', nargs=argparse.REMAINDER)
     def android_test(self, args):
         ret = self.gradle(self.substs['GRADLE_ANDROID_TEST_TASKS'] +
-                          ["--continue"] + args, verbose=True)
+                          args, verbose=True)
 
         ret |= self._parse_android_test_results('public/app/unittest',
                                                 'gradle/build/mobile/android/app',
@@ -200,13 +233,46 @@ class MachCommands(MachCommandBase):
 
         return ret
 
+    @SubCommand('android', 'test-ccov',
+                """Run Android local unit tests in order to get a code coverage report.
+        See https://firefox-source-docs.mozilla.org/mobile/android/fennec/testcoverage.html""")  # NOQA: E501
+    @CommandArgument('args', nargs=argparse.REMAINDER)
+    def android_test_ccov(self, args):
+        enable_ccov = '-Penable_code_coverage'
+
+        # Don't care if the tests are failing, we only want the coverage information.
+        self.android_test([enable_ccov])
+
+        self.gradle(self.substs['GRADLE_ANDROID_TEST_CCOV_REPORT_TASKS'] +
+                    [enable_ccov] + args, verbose=True)
+        self._process_jacoco_reports()
+        return 0
+
+    def _process_jacoco_reports(self):
+        def run_grcov(grcov_path, input_path):
+            args = [grcov_path, input_path, '-t', 'lcov']
+            return subprocess.check_output(args)
+
+        with TemporaryDirectory() as xml_dir:
+            grcov = os.path.join(os.environ['MOZ_FETCHES_DIR'], 'grcov')
+
+            report_xml_template = self.topobjdir + '/gradle/build/mobile/android/%s/reports/jacoco/jacocoTestReport/jacocoTestReport.xml'  # NOQA: E501
+            shutil.copy(report_xml_template % 'app', os.path.join(xml_dir, 'app.xml'))
+            shutil.copy(report_xml_template % 'geckoview', os.path.join(xml_dir, 'geckoview.xml'))
+
+            # Parse output files with grcov.
+            grcov_output = run_grcov(grcov, xml_dir)
+            grcov_zip_path = os.path.join(self.topobjdir, 'code-coverage-grcov.zip')
+            with zipfile.ZipFile(grcov_zip_path, 'w', zipfile.ZIP_DEFLATED) as z:
+                z.writestr('grcov_lcov_output.info', grcov_output)
+
     @SubCommand('android', 'lint',
                 """Run Android lint.
                 See https://developer.mozilla.org/en-US/docs/Mozilla/Android-specific_test_suites#android-lint""")  # NOQA: E501
     @CommandArgument('args', nargs=argparse.REMAINDER)
     def android_lint(self, args):
         ret = self.gradle(self.substs['GRADLE_ANDROID_LINT_TASKS'] +
-                          ["--continue"] + args, verbose=True)
+                          args, verbose=True)
 
         # Android Lint produces both HTML and XML reports.  Visit the
         # XML report(s) to report errors and link to the HTML
@@ -254,7 +320,7 @@ class MachCommands(MachCommandBase):
     @CommandArgument('args', nargs=argparse.REMAINDER)
     def android_checkstyle(self, args):
         ret = self.gradle(self.substs['GRADLE_ANDROID_CHECKSTYLE_TASKS'] +
-                          ["--continue"] + args, verbose=True)
+                          args, verbose=True)
 
         # Checkstyle produces both HTML and XML reports.  Visit the
         # XML report(s) to report errors and link to the HTML
@@ -310,7 +376,7 @@ class MachCommands(MachCommandBase):
     @CommandArgument('args', nargs=argparse.REMAINDER)
     def android_findbugs(self, dryrun=False, args=[]):
         ret = self.gradle(self.substs['GRADLE_ANDROID_FINDBUGS_TASKS'] +
-                          ["--continue"] + args, verbose=True)
+                          args, verbose=True)
 
         # Findbug produces both HTML and XML reports.  Visit the
         # XML report(s) to report errors and link to the HTML
@@ -375,16 +441,56 @@ class MachCommands(MachCommandBase):
 
         return 0
 
+    @SubCommand('android', 'archive-coverage-artifacts',
+                """Archive compiled classfiles to be used later in generating code
+        coverage reports. See https://firefox-source-docs.mozilla.org/mobile/android/fennec/testcoverage.html""")  # NOQA: E501
+    @CommandArgument('args', nargs=argparse.REMAINDER)
+    def android_archive_classfiles(self, args):
+        self.gradle(self.substs['GRADLE_ANDROID_ARCHIVE_COVERAGE_ARTIFACTS_TASKS'] +
+                    args, verbose=True)
+
+        return 0
+
     @SubCommand('android', 'archive-geckoview',
                 """Create GeckoView archives.
         See http://firefox-source-docs.mozilla.org/build/buildsystem/toolchains.html#firefox-for-android-with-gradle""")  # NOQA: E501
     @CommandArgument('args', nargs=argparse.REMAINDER)
     def android_archive_geckoview(self, args):
         ret = self.gradle(
-            self.substs['GRADLE_ANDROID_ARCHIVE_GECKOVIEW_TASKS'] + ["--continue"] + args,
+            self.substs['GRADLE_ANDROID_ARCHIVE_GECKOVIEW_TASKS'] + args,
             verbose=True)
 
-        return ret
+        if ret != 0:
+            return ret
+
+        # The zip archive is passed along in CI to ship geckoview onto a maven repo
+        _craft_maven_zip_archive(self.topobjdir)
+
+        return 0
+
+    @SubCommand('android', 'build-geckoview_example',
+                """Build geckoview_example """)
+    @CommandArgument('args', nargs=argparse.REMAINDER)
+    def android_build_geckoview_example(self, args):
+        self.gradle(self.substs['GRADLE_ANDROID_BUILD_GECKOVIEW_EXAMPLE_TASKS'] + args,
+                    verbose=True)
+
+        print('Execute `mach android install-geckoview_example` '
+              'to push the geckoview_example and test APKs to a device.')
+
+        return 0
+
+    @SubCommand('android', 'install-geckoview_example',
+                """Install geckoview_example """)
+    @CommandArgument('args', nargs=argparse.REMAINDER)
+    def android_install_geckoview_example(self, args):
+        self.gradle(self.substs['GRADLE_ANDROID_INSTALL_GECKOVIEW_EXAMPLE_TASKS'] + args,
+                    verbose=True)
+
+        print('Execute `mach android build-geckoview_example` '
+              'to just build the geckoview_example and test APKs.')
+
+        return 0
 
     @SubCommand('android', 'geckoview-docs',
                 """Create GeckoView javadoc and optionally upload to Github""")
@@ -399,17 +505,13 @@ class MachCommands(MachCommandBase):
     @CommandArgument('--upload-message', metavar='MSG',
                      default='GeckoView docs upload',
                      help='Use the specified message for commits.')
-    @CommandArgument('--variant', default='debug',
-                     help='Gradle variant used to generate javadoc.')
     def android_geckoview_docs(self, archive, upload, upload_branch,
-                               upload_message, variant):
+                               upload_message):
 
-        def capitalize(s):
-            # Can't use str.capitalize because it lower cases trailing letters.
-            return (s[0].upper() + s[1:]) if s else ''
+        tasks = (self.substs['GRADLE_ANDROID_GECKOVIEW_DOCS_ARCHIVE_TASKS'] if archive or upload
+                 else self.substs['GRADLE_ANDROID_GECKOVIEW_DOCS_TASKS'])
 
-        task = 'geckoview:javadoc' + ('Jar' if archive or upload else '') + capitalize(variant)
-        ret = self.gradle([task], verbose=True)
+        ret = self.gradle(tasks, verbose=True)
         if ret or not upload:
             return ret
 
@@ -515,8 +617,11 @@ class MachCommands(MachCommandBase):
         # https://discuss.gradle.org/t/unmappable-character-for-encoding-ascii-when-building-a-utf-8-project/10692/11  # NOQA: E501
         # and especially https://stackoverflow.com/a/21755671.
 
+        if self.substs.get('MOZ_AUTOMATION'):
+            gradle_flags += ['--console=plain']
+
         return self.run_process(
-            [self.substs['GRADLE']] + gradle_flags + ['--console=plain'] + args,
+            [self.substs['GRADLE']] + gradle_flags + args,
             append_env={
                 'GRADLE_OPTS': '-Dfile.encoding=utf-8',
                 'JAVA_HOME': java_home,
@@ -530,6 +635,26 @@ class MachCommands(MachCommandBase):
              conditions=[REMOVED])
     def gradle_install(self):
         pass
+
+
+def _get_maven_archive_abs_and_relative_paths(maven_folder):
+    for subdir, _, files in os.walk(maven_folder):
+        for file in files:
+            full_path = os.path.join(subdir, file)
+            relative_path = os.path.relpath(full_path, maven_folder)
+
+            # maven-metadata is intended to be generated on the real maven server
+            if 'maven-metadata.xml' not in relative_path:
+                yield full_path, relative_path
+
+
+def _craft_maven_zip_archive(topobjdir):
+    geckoview_folder = os.path.join(topobjdir, 'gradle/build/mobile/android/geckoview')
+    maven_folder = os.path.join(geckoview_folder, 'maven')
+
+    with ZipFile(os.path.join(geckoview_folder, 'target.maven.zip'), 'w') as target_zip:
+        for abs, rel in _get_maven_archive_abs_and_relative_paths(maven_folder):
+            target_zip.write(abs, arcname=rel)
 
 
 @CommandProvider
@@ -611,47 +736,4 @@ class AndroidEmulatorCommands(MachCommandBase):
             else:
                 self.log(logging.WARN, "emulator", {},
                          "Unable to retrieve Android emulator return code.")
-        return 0
-
-
-@CommandProvider
-class AutophoneCommands(MachCommandBase):
-    """
-       Run autophone, https://wiki.mozilla.org/Auto-tools/Projects/Autophone.
-
-       If necessary, autophone is cloned from github, installed, and configured.
-    """
-    @Command('autophone', category='devenv',
-             conditions=[],
-             description='Run autophone.')
-    @CommandArgument('--clean', action='store_true',
-                     help='Delete an existing autophone installation.')
-    @CommandArgument('--verbose', action='store_true',
-                     help='Log informative status messages.')
-    def autophone(self, clean=False, verbose=False):
-        import platform
-        from mozrunner.devices.autophone import AutophoneRunner
-
-        if platform.system() == "Windows":
-            # Autophone is normally run on Linux or OSX.
-            self.log(logging.ERROR, "autophone", {},
-                     "This mach command is not supported on Windows!")
-            return -1
-
-        runner = AutophoneRunner(self, verbose)
-        runner.load_config()
-        if clean:
-            runner.reset_to_clean()
-            return 0
-        if not runner.setup_directory():
-            return 1
-        if not runner.install_requirements():
-            runner.save_config()
-            return 2
-        if not runner.configure():
-            runner.save_config()
-            return 3
-        runner.save_config()
-        runner.launch_autophone()
-        runner.command_prompts()
         return 0

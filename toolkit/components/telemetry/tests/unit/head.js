@@ -141,7 +141,7 @@ function decodeRequestPayload(request) {
         for (let offset = 0; offset < result.length; offset += chunkSize) {
           this.buffer += String.fromCharCode.apply(String, result.slice(offset, offset + chunkSize));
         }
-      }
+      },
     };
 
     let scs = Cc["@mozilla.org/streamConverters;1"]
@@ -164,6 +164,9 @@ function decodeRequestPayload(request) {
     let bytes = NetUtil.readInputStream(s, s.available());
     payload = JSON.parse((new TextDecoder()).decode(bytes));
   }
+
+  // Check for canary value
+  Assert.notEqual(TelemetryUtils.knownClientID, payload.clientId, "Known clientId should never appear in a ping on the server");
 
   return payload;
 }
@@ -286,6 +289,11 @@ function fakeGzipCompressStringForNextPing(length) {
   };
 }
 
+function fakePrioEncode() {
+  const m = ChromeUtils.import("resource://gre/modules/TelemetrySession.jsm", {});
+  m.Policy.prioEncode = (batchID, prioParams) => prioParams;
+}
+
 // Return a date that is |offset| ms in the future from |date|.
 function futureDate(date, offset) {
   return new Date(date.getTime() + offset);
@@ -336,10 +344,6 @@ function setEmptyPrefWatchlist() {
   });
 }
 
-function histogramValueCount(histogramSnapshot) {
-  return histogramSnapshot.counts.reduce((a, b) => a + b);
-}
-
 if (runningInParent) {
   // Set logging preferences for all the tests.
   Services.prefs.setCharPref("toolkit.telemetry.log.level", "Trace");
@@ -358,6 +362,9 @@ if (runningInParent) {
   Services.prefs.setBoolPref(TelemetryUtils.Preferences.FirstShutdownPingEnabled, false);
   // Turn off Health Ping submission.
   Services.prefs.setBoolPref(TelemetryUtils.Preferences.HealthPingEnabled, false);
+
+  // Speed up child process accumulations
+  Services.prefs.setIntPref(TelemetryUtils.Preferences.IPCBatchTimeout, 10);
 
   // Ensure we're not in a GeckoView-like environment by default
   Services.prefs.setBoolPref("toolkit.telemetry.isGeckoViewMode", false);

@@ -45,13 +45,17 @@ async function fetchAllRecordIds() {
   return recordIds;
 }
 
-async function cleanup(engine, server) {
+async function cleanupEngine(engine) {
+  await engine._tracker.stop();
   await engine._store.wipe();
   await engine.resetClient();
   Svc.Prefs.resetBranch("");
   Service.recordManager.clearCache();
+}
+
+async function cleanup(engine, server) {
   await promiseStopServer(server);
-  await engine._tracker.stop();
+  await cleanupEngine(engine);
 }
 
 add_task(async function setup() {
@@ -453,12 +457,12 @@ async function test_restoreOrImport(engine, { replace }) {
     let expectedFX = {
       id: bookmarkRecordIds.get("http://getfirefox.com/"),
       bmkUri: "http://getfirefox.com/",
-      title: "Get Firefox!"
+      title: "Get Firefox!",
     };
     let expectedTB = {
       id: bookmarkRecordIds.get("http://getthunderbird.com/"),
       bmkUri: "http://getthunderbird.com/",
-      title: "Get Thunderbird!"
+      title: "Get Thunderbird!",
     };
 
     let expectedBookmarks;
@@ -525,7 +529,7 @@ add_task(async function test_mismatched_types() {
     "parentName": "Bookmarks Toolbar",
     "title": "Innerst i Sneglehode",
     "description": null,
-    "parentid": "toolbar"
+    "parentid": "toolbar",
   };
   oldRecord.cleartext = oldRecord;
 
@@ -541,7 +545,7 @@ add_task(async function test_mismatched_types() {
       ["HCRq40Rnxhrd", "YeyWCV1RVsYw", "GCceVZMhvMbP", "sYi2hevdArlF",
        "vjbZlPlSyGY8", "UtjUhVyrpeG6", "rVq8WMG2wfZI", "Lx0tcy43ZKhZ",
        "oT74WwV8_j4P", "IztsItWVSo3-"],
-    "parentid": "toolbar"
+    "parentid": "toolbar",
   };
   newRecord.cleartext = newRecord;
 
@@ -563,21 +567,13 @@ add_task(async function test_mismatched_types() {
     _("Old ID: " + oldID);
     let oldInfo = await PlacesUtils.bookmarks.fetch(oldR.id);
     Assert.equal(oldInfo.type, PlacesUtils.bookmarks.TYPE_FOLDER);
-    Assert.ok(!PlacesUtils.annotations
-                          .itemHasAnnotation(oldID, PlacesUtils.LMANNO_FEEDURI));
 
     await store.applyIncoming(newR);
-    let newID = await PlacesUtils.promiseItemId(newR.id);
-    _("New ID: " + newID);
-
-    _("Applied new. It's a livemark.");
-    let newInfo = await PlacesUtils.bookmarks.fetch(newR.id);
-    Assert.equal(newInfo.type, PlacesUtils.bookmarks.TYPE_FOLDER);
-    Assert.ok(PlacesUtils.annotations
-                         .itemHasAnnotation(newID, PlacesUtils.LMANNO_FEEDURI));
-
+    await Assert.rejects(PlacesUtils.promiseItemId(newR.id),
+      /no item found for the given GUID/, "Should not apply Livemark");
   } finally {
     await cleanup(engine, server);
+    await engine.finalize();
   }
 });
 
@@ -642,12 +638,12 @@ add_task(async function test_bookmark_guidMap_fail() {
 
   deepEqual(ping.engines.find(e => e.name == "bookmarks").failureReason, {
     name: "unexpectederror",
-    error: "Nooo"
+    error: "Nooo",
   });
 
   PlacesUtils.promiseBookmarksTree = pbt;
-  await PlacesSyncUtils.bookmarks.reset();
-  await promiseStopServer(server);
+  await cleanup(engine, server);
+  await engine.finalize();
 });
 
 add_task(async function test_bookmark_tag_but_no_uri() {
@@ -688,12 +684,15 @@ add_task(async function test_bookmark_tag_but_no_uri() {
     description: "",
     tags:        ["foo"],
     title:       "Taggy tag",
-    type:        "folder"
+    type:        "folder",
   });
 
   await store.create(record);
   record.tags = ["bar"];
   await store.update(record);
+
+  await cleanupEngine(engine);
+  await engine.finalize();
 });
 
 add_bookmark_test(async function test_misreconciled_root(engine) {
@@ -948,6 +947,7 @@ add_task(async function test_buffer_hasDupe() {
     await sync_engine_and_validate_telem(engine, false);
   } finally {
     await cleanup(engine, server);
+    await engine.finalize();
   }
 });
 
@@ -1005,6 +1005,7 @@ add_task(async function test_sync_imap_URLs() {
       "Local bookmark B with IMAP URL should exist remotely");
   } finally {
     await cleanup(engine, server);
+    await engine.finalize();
   }
 });
 
@@ -1055,7 +1056,7 @@ add_task(async function test_resume_buffer() {
       type: "folder",
       parentid: "places",
       title: "Bookmarks Toolbar",
-      children
+      children,
     }), timestamp + 10 * children.length);
 
     // Replace applyIncomingBatch with a custom one that calls the original,
@@ -1066,7 +1067,7 @@ add_task(async function test_resume_buffer() {
         // Hacky way to make reading from the batchChunkSize'th record throw.
         delete records[batchChunkSize];
         Object.defineProperty(records, batchChunkSize, {
-          get() { throw new Error("D:"); }
+          get() { throw new Error("D:"); },
         });
       }
       return origApplyIncomingBatch.call(this, records);
@@ -1099,87 +1100,8 @@ add_task(async function test_resume_buffer() {
 
   } finally {
     await cleanup(engine, server);
+    await engine.finalize();
   }
-});
-
-add_task(async function test_legacy_migrate_sync_metadata() {
-  let legacyEngine = new BookmarksEngine(Service);
-  await legacyEngine.initialize();
-  await legacyEngine.resetClient();
-
-  let syncID = Utils.makeGUID();
-  let lastSync = Date.now() / 1000;
-
-  Svc.Prefs.set(`${legacyEngine.name}.syncID`, syncID);
-  Svc.Prefs.set(`${legacyEngine.name}.lastSync`, lastSync.toString());
-
-  strictEqual(await legacyEngine.getSyncID(), "",
-    "Legacy engine should start with empty sync ID");
-  strictEqual(await legacyEngine.getLastSync(), 0,
-    "Legacy engine should start with empty last sync");
-
-  info("Migrate Sync metadata prefs");
-  await legacyEngine._migrateSyncMetadata();
-
-  equal(await legacyEngine.getSyncID(), syncID,
-    "Initializing legacy engine should migrate sync ID");
-  equal(await legacyEngine.getLastSync(), lastSync,
-    "Initializing legacy engine should migrate last sync time");
-
-  let newSyncID = Utils.makeGUID();
-  await legacyEngine.ensureCurrentSyncID(newSyncID);
-
-  equal(await legacyEngine.getSyncID(), newSyncID,
-    "Changing legacy engine sync ID should update Places");
-  strictEqual(await legacyEngine.getLastSync(), 0,
-    "Changing legacy engine sync ID should clear last sync in Places");
-
-  equal(Svc.Prefs.get(`${legacyEngine.name}.syncID`), newSyncID,
-    "Changing legacy engine sync ID should update prefs");
-  strictEqual(Svc.Prefs.get(`${legacyEngine.name}.lastSync`), "0",
-    "Changing legacy engine sync ID should clear last sync pref");
-
-  await legacyEngine.wipeClient();
-});
-
-add_task(async function test_buffered_migate_sync_metadata() {
-  let bufferedEngine = new BufferedBookmarksEngine(Service);
-  await bufferedEngine.initialize();
-  await bufferedEngine.resetClient();
-
-  let syncID = Utils.makeGUID();
-  let lastSync = Date.now() / 1000;
-
-  Svc.Prefs.set(`${bufferedEngine.name}.syncID`, syncID);
-  Svc.Prefs.set(`${bufferedEngine.name}.lastSync`, lastSync.toString());
-
-  strictEqual(await bufferedEngine.getSyncID(), "",
-    "Buffered engine should start with empty sync ID");
-  strictEqual(await bufferedEngine.getLastSync(), 0,
-    "Buffered engine should start with empty last sync");
-
-  info("Migrate Sync metadata prefs");
-  await bufferedEngine._migrateSyncMetadata({
-    migrateLastSync: false,
-  });
-
-  equal(await bufferedEngine.getSyncID(), syncID,
-    "Initializing buffered engine should migrate sync ID");
-  strictEqual(await bufferedEngine.getLastSync(), 0,
-    "Initializing buffered engine should not migrate last sync time");
-
-  let newSyncID = Utils.makeGUID();
-  await bufferedEngine.ensureCurrentSyncID(newSyncID);
-
-  equal(await bufferedEngine.getSyncID(), newSyncID,
-    "Changing buffered engine sync ID should update Places");
-
-  equal(Svc.Prefs.get(`${bufferedEngine.name}.syncID`), newSyncID,
-    "Changing buffered engine sync ID should update prefs");
-  strictEqual(Svc.Prefs.get(`${bufferedEngine.name}.lastSync`), "0",
-    "Changing buffered engine sync ID should clear last sync pref");
-
-  await bufferedEngine.wipeClient();
 });
 
 // The buffered engine stores the sync ID and last sync time in three places:
@@ -1280,5 +1202,137 @@ add_task(async function test_mirror_syncID() {
   strictEqual(await buf.getCollectionHighWaterMark(), 0,
     "Should reset high water mark on sync ID change in Places");
 
-  await bufferedEngine.wipeClient();
+  await cleanupEngine(bufferedEngine);
+  await bufferedEngine.finalize();
+});
+
+add_bookmark_test(async function test_livemarks(engine) {
+  _("Ensure we replace new and existing livemarks with tombstones");
+
+  let server = await serverForFoo(engine);
+  await SyncTestingInfrastructure(server);
+
+  let collection = server.user("foo").collection("bookmarks");
+  let now = Date.now();
+
+  try {
+    _("Insert existing livemark");
+    let modifiedForA = now - 5 * 60 * 1000;
+    await PlacesUtils.bookmarks.insert({
+      guid: "livemarkAAAA",
+      type: PlacesUtils.bookmarks.TYPE_FOLDER,
+      parentGuid: PlacesUtils.bookmarks.menuGuid,
+      title: "A",
+      lastModified: new Date(modifiedForA),
+      dateAdded: new Date(modifiedForA),
+      source: PlacesUtils.bookmarks.SOURCE_SYNC,
+    });
+    collection.insert("menu", encryptPayload({
+      id: "menu",
+      type: "folder",
+      parentName: "",
+      title: "menu",
+      children: ["livemarkAAAA"],
+      parentid: "places",
+    }), modifiedForA / 1000);
+    collection.insert("livemarkAAAA", encryptPayload({
+      id: "livemarkAAAA",
+      type: "livemark",
+      feedUri: "http://example.com/a",
+      parentName: "menu",
+      title: "A",
+      parentid: "menu",
+    }), modifiedForA / 1000);
+
+    _("Insert remotely updated livemark");
+    await PlacesUtils.bookmarks.insert({
+      guid: "livemarkBBBB",
+      type: PlacesUtils.bookmarks.TYPE_FOLDER,
+      parentGuid: PlacesUtils.bookmarks.toolbarGuid,
+      title: "B",
+      lastModified: new Date(now),
+      dateAdded: new Date(now),
+    });
+    collection.insert("toolbar", encryptPayload({
+      id: "toolbar",
+      type: "folder",
+      parentName: "",
+      title: "toolbar",
+      children: ["livemarkBBBB"],
+      parentid: "places",
+    }), now / 1000);
+    collection.insert("livemarkBBBB", encryptPayload({
+      id: "livemarkBBBB",
+      type: "livemark",
+      feedUri: "http://example.com/b",
+      parentName: "toolbar",
+      title: "B",
+      parentid: "toolbar",
+    }), now / 1000);
+
+    _("Insert new remote livemark");
+    collection.insert("unfiled", encryptPayload({
+      id: "unfiled",
+      type: "folder",
+      parentName: "",
+      title: "unfiled",
+      children: ["livemarkCCCC"],
+      parentid: "places",
+    }), now / 1000);
+    collection.insert("livemarkCCCC", encryptPayload({
+      id: "livemarkCCCC",
+      type: "livemark",
+      feedUri: "http://example.com/c",
+      parentName: "unfiled",
+      title: "C",
+      parentid: "unfiled",
+    }), now / 1000);
+
+    _("Bump last sync time to ignore A");
+    await engine.setLastSync(now / 1000 - 60);
+
+    _("Sync");
+    await sync_engine_and_validate_telem(engine, false);
+
+    deepEqual(collection.keys().sort(), ["livemarkAAAA", "livemarkBBBB",
+      "livemarkCCCC", "menu", "mobile", "toolbar", "unfiled"],
+      "Should store original livemark A and tombstones for B and C on server");
+
+    let payloads = collection.payloads();
+
+    deepEqual(payloads.find(payload => payload.id == "menu").children,
+      ["livemarkAAAA"], "Should keep A in menu");
+    ok(!payloads.find(payload => payload.id == "livemarkAAAA").deleted,
+      "Should not upload tombstone for A");
+
+    deepEqual(payloads.find(payload => payload.id == "toolbar").children,
+      [], "Should remove B from toolbar");
+    ok(payloads.find(payload => payload.id == "livemarkBBBB").deleted,
+      "Should upload tombstone for B");
+
+    deepEqual(payloads.find(payload => payload.id == "unfiled").children,
+      [], "Should remove C from unfiled");
+    ok(payloads.find(payload => payload.id == "livemarkCCCC").deleted,
+      "Should replace C with tombstone");
+
+    await assertBookmarksTreeMatches("", [{
+      guid: PlacesUtils.bookmarks.menuGuid,
+      index: 0,
+      children: [{
+        guid: "livemarkAAAA",
+        index: 0,
+      }],
+    }, {
+      guid: PlacesUtils.bookmarks.toolbarGuid,
+      index: 1,
+    }, {
+      guid: PlacesUtils.bookmarks.unfiledGuid,
+      index: 3,
+    }, {
+      guid: PlacesUtils.bookmarks.mobileGuid,
+      index: 4,
+    }], "Should keep A and remove B locally");
+  } finally {
+    await cleanup(engine, server);
+  }
 });

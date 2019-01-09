@@ -23,17 +23,15 @@ const rootDir = helpers.rootDir;
 // When updating EXTRA_SCRIPTS or MAPPINGS, be sure to also update the
 // 'support-files' config in `tools/lint/eslint.yml`.
 
-// These are scripts not included in global-scripts.inc, but which are loaded
-// via overlays.
+// These are scripts not loaded from browser.xul or global-scripts.inc
+// but via other includes.
 const EXTRA_SCRIPTS = [
   "browser/base/content/nsContextMenu.js",
-  "toolkit/content/contentAreaUtils.js",
-  "toolkit/content/customElements.js",
   "browser/components/places/content/editBookmark.js",
   "browser/components/downloads/content/downloads.js",
   "browser/components/downloads/content/indicator.js",
-  // Via editMenuCommands.inc.xul
-  "toolkit/content/editMenuOverlay.js"
+  "toolkit/content/customElements.js",
+  "toolkit/content/editMenuOverlay.js",
 ];
 
 const extraDefinitions = [
@@ -42,32 +40,23 @@ const extraDefinitions = [
   // single) variable.
   {name: "XPCOMUtils", writable: false},
   {name: "Task", writable: false},
-  {name: "PlacesUtils", writable: false},
-  {name: "PlacesUIUtils", writable: false},
-  {name: "PlacesTransactions", writable: false},
-  {name: "PlacesTreeView", writable: false},
-  {name: "PlacesInsertionPoint", writable: false},
-  {name: "PlacesController", writable: false},
-  {name: "PlacesControllerDragHelper", writable: false}
 ];
 
 // Some files in global-scripts.inc need mapping to specific locations.
 const MAPPINGS = {
   "printUtils.js": "toolkit/components/printing/content/printUtils.js",
-  "browserPlacesViews.js":
-    "browser/components/places/content/browserPlacesViews.js",
   "panelUI.js": "browser/components/customizableui/content/panelUI.js",
   "viewSourceUtils.js":
-    "toolkit/components/viewsource/content/viewSourceUtils.js"
+    "toolkit/components/viewsource/content/viewSourceUtils.js",
 };
 
 const globalScriptsRegExp =
-  /<script type=\"application\/javascript\" src=\"(.*)\"\/>|^\s*"(.*?\.js)",$/;
+  /^\s*Services.scriptloader.loadSubScript\(\"(.*?)\", this\);$/;
 
-function getGlobalScriptsIncludes() {
+function getGlobalScriptIncludes(scriptPath) {
   let fileData;
   try {
-    fileData = fs.readFileSync(helpers.globalScriptsPath, {encoding: "utf8"});
+    fileData = fs.readFileSync(scriptPath, {encoding: "utf8"});
   } catch (ex) {
     // The file isn't present, so this isn't an m-c repository.
     return null;
@@ -80,7 +69,8 @@ function getGlobalScriptsIncludes() {
   for (let line of fileData) {
     let match = line.match(globalScriptsRegExp);
     if (match) {
-      let sourceFile = (match[1] || match[2])
+      let sourceFile = match[1]
+                .replace("chrome://browser/content/search/", "browser/components/search/content/")
                 .replace("chrome://browser/content/", "browser/base/content/")
                 .replace("chrome://global/content/", "toolkit/content/");
 
@@ -97,9 +87,17 @@ function getGlobalScriptsIncludes() {
   return result;
 }
 
+function getGlobalScripts() {
+  let results = [];
+  for (let scriptPath of helpers.globalScriptPaths) {
+    results = results.concat(getGlobalScriptIncludes(scriptPath));
+  }
+  return results;
+}
+
 function getScriptGlobals() {
   let fileGlobals = [];
-  let scripts = getGlobalScriptsIncludes();
+  let scripts = getGlobalScripts();
   if (!scripts) {
     return [];
   }
@@ -130,7 +128,7 @@ function mapGlobals(fileGlobals) {
 function getMozillaCentralItems() {
   return {
     globals: mapGlobals(getScriptGlobals()),
-    browserjsScripts: getGlobalScriptsIncludes().concat(EXTRA_SCRIPTS)
+    browserjsScripts: getGlobalScripts().concat(EXTRA_SCRIPTS),
   };
 }
 

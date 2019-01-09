@@ -111,9 +111,9 @@ function grabHistogramsFromContent(use_counter_middlefix, page_before = null) {
   let gather = () => {
     let snapshots;
     if (Services.appinfo.browserTabsRemoteAutostart) {
-      snapshots = telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN, false).content;
+      snapshots = telemetry.getSnapshotForHistograms("main", false).content;
     } else {
-      snapshots = telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN, false).parent;
+      snapshots = telemetry.getSnapshotForHistograms("main", false).parent;
     }
     let checkGet = (probe) => {
       return snapshots[probe] ? snapshots[probe].sum : 0;
@@ -143,7 +143,7 @@ var check_use_counter_iframe = async function(file, use_counter_middlefix, check
        histogram_docs_before, histogram_toplevel_docs_before] =
       await grabHistogramsFromContent(use_counter_middlefix);
 
-  gBrowser.selectedBrowser.loadURI(gHttpTestRoot + "file_use_counter_outer.html");
+  BrowserTestUtils.loadURI(gBrowser.selectedBrowser, gHttpTestRoot + "file_use_counter_outer.html");
   await waitForPageLoad(gBrowser.selectedBrowser);
 
   // Inject our desired file into the iframe of the newly-loaded page.
@@ -151,7 +151,7 @@ var check_use_counter_iframe = async function(file, use_counter_middlefix, check
     ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
     let deferred = PromiseUtils.defer();
 
-    let wu = content.window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+    let wu = content.window.windowUtils;
 
     let iframe = content.document.getElementById('content');
     iframe.src = opts.file;
@@ -170,7 +170,7 @@ var check_use_counter_iframe = async function(file, use_counter_middlefix, check
 
     return deferred.promise;
   });
-  
+
   // Tear down the page.
   gBrowser.removeTab(newTab);
 
@@ -207,7 +207,7 @@ var check_use_counter_img = async function(file, use_counter_middlefix) {
        histogram_docs_before, histogram_toplevel_docs_before] =
       await grabHistogramsFromContent(use_counter_middlefix);
 
-  gBrowser.selectedBrowser.loadURI(gHttpTestRoot + "file_use_counter_outer.html");
+  BrowserTestUtils.loadURI(gBrowser.selectedBrowser, gHttpTestRoot + "file_use_counter_outer.html");
   await waitForPageLoad(gBrowser.selectedBrowser);
 
   // Inject our desired file into the img of the newly-loaded page.
@@ -223,7 +223,7 @@ var check_use_counter_img = async function(file, use_counter_middlefix) {
       // Flush for the image.  It matters what order we do these in, so that
       // the image can propagate its use counters to the document prior to the
       // document reporting its use counters.
-      let wu = content.window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+      let wu = content.window.windowUtils;
       wu.forceUseCounterFlush(img);
 
       // Flush for the main window.
@@ -235,7 +235,7 @@ var check_use_counter_img = async function(file, use_counter_middlefix) {
 
     return deferred.promise;
   });
-  
+
   // Tear down the page.
   gBrowser.removeTab(newTab);
 
@@ -273,14 +273,14 @@ var check_use_counter_direct = async function(file, use_counter_middlefix, xfail
        histogram_docs_before, histogram_toplevel_docs_before] =
       await grabHistogramsFromContent(use_counter_middlefix);
 
-  gBrowser.selectedBrowser.loadURI(gHttpTestRoot + file);
+  BrowserTestUtils.loadURI(gBrowser.selectedBrowser, gHttpTestRoot + file);
   await ContentTask.spawn(gBrowser.selectedBrowser, null, async function() {
     ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
     await new Promise(resolve => {
       let listener = () => {
         removeEventListener("load", listener, true);
 
-        let wu = content.window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+        let wu = content.window.windowUtils;
         wu.forceUseCounterFlush(content.document);
 
         setTimeout(resolve, 0);
@@ -288,7 +288,7 @@ var check_use_counter_direct = async function(file, use_counter_middlefix, xfail
       addEventListener("load", listener, true);
     });
   });
-  
+
   // Tear down the page.
   gBrowser.removeTab(newTab);
 

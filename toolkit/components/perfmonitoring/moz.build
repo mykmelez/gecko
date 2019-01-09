@@ -27,10 +27,13 @@ UNIFIED_SOURCES += [
 ]
 
 UNIFIED_SOURCES += [
+    'PerformanceMetricsCollector.cpp',
     'PerformanceUtils.cpp'
 ]
 
 EXPORTS.mozilla += [
+    'PerformanceMetricsCollector.h',
+    'PerformanceTypes.h',
     'PerformanceUtils.h'
 ]
 
@@ -40,6 +43,7 @@ EXPORTS += [
 
 LOCAL_INCLUDES += [
     '/dom/base',
+    '/dom/media',
 ]
 
 FINAL_LIBRARY = 'xul'

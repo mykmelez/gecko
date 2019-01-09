@@ -11,12 +11,18 @@
 const TEST_URI = "data:text/html;charset=utf-8,Test document.body autocompletion";
 
 add_task(async function() {
-  const { jsterm } = await openNewTabAndConsole(TEST_URI);
+  // Run test with legacy JsTerm
+  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
+  await performTests();
+  // And then run it with the CodeMirror-powered one.
+  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
+  await performTests();
+});
 
-  const {
-    autocompletePopup: popup,
-    completeNode,
-  } = jsterm;
+async function performTests() {
+  const { jsterm, ui } = await openNewTabAndConsole(TEST_URI);
+
+  const { autocompletePopup: popup } = jsterm;
 
   ok(!popup.isOpen, "popup is not open");
   const onPopupOpen = popup.once("popup-opened");
@@ -27,12 +33,12 @@ add_task(async function() {
   await onPopupOpen;
 
   ok(popup.isOpen, "popup is open");
-  is(popup.itemCount, jsterm._autocompleteCache.length, "popup.itemCount is correct");
-  ok(jsterm._autocompleteCache.includes("addEventListener"),
-        "addEventListener is in the list of suggestions");
-  ok(jsterm._autocompleteCache.includes("bgColor"),
-    "bgColor is in the list of suggestions");
-  ok(jsterm._autocompleteCache.includes("ATTRIBUTE_NODE"),
+  const cacheMatches = ui.consoleOutput.getStore().getState().autocomplete.cache.matches;
+  is(popup.itemCount, cacheMatches.length, "popup.itemCount is correct");
+  ok(cacheMatches.includes("addEventListener"),
+    "addEventListener is in the list of suggestions");
+  ok(cacheMatches.includes("bgColor"), "bgColor is in the list of suggestions");
+  ok(cacheMatches.includes("ATTRIBUTE_NODE"),
     "ATTRIBUTE_NODE is in the list of suggestions");
 
   const onPopupClose = popup.once("popup-closed");
@@ -53,5 +59,5 @@ add_task(async function() {
   // > document.bo        <-- input
   // > -----------dy      <-- autocomplete
   const spaces = " ".repeat(inputStr.length + 1);
-  is(completeNode.value, spaces + "dy", "autocomplete shows document.body");
-});
+  checkJsTermCompletionValue(jsterm, spaces + "dy", "autocomplete shows document.body");
+}

@@ -436,6 +436,7 @@ const {
 
 const dispatcher = new WorkerDispatcher();
 
+const setAssetRootURL = dispatcher.task("setAssetRootURL");
 const getOriginalURLs = dispatcher.task("getOriginalURLs");
 const getOriginalRanges = dispatcher.task("getOriginalRanges");
 const getGeneratedRanges = dispatcher.task("getGeneratedRanges", {
@@ -448,11 +449,13 @@ const getAllGeneratedLocations = dispatcher.task("getAllGeneratedLocations", {
   queue: true
 });
 const getOriginalLocation = dispatcher.task("getOriginalLocation");
+const getFileGeneratedRange = dispatcher.task("getFileGeneratedRange");
 const getLocationScopes = dispatcher.task("getLocationScopes");
 const getOriginalSourceText = dispatcher.task("getOriginalSourceText");
 const applySourceMap = dispatcher.task("applySourceMap");
 const clearSourceMaps = dispatcher.task("clearSourceMaps");
 const hasMappedSource = dispatcher.task("hasMappedSource");
+const getOriginalStackFrames = dispatcher.task("getOriginalStackFrames");
 
 module.exports = {
   originalToGeneratedId,
@@ -466,11 +469,16 @@ module.exports = {
   getGeneratedLocation,
   getAllGeneratedLocations,
   getOriginalLocation,
+  getFileGeneratedRange,
   getLocationScopes,
   getOriginalSourceText,
   applySourceMap,
   clearSourceMaps,
-  startSourceMapWorker: dispatcher.start.bind(dispatcher),
+  getOriginalStackFrames,
+  startSourceMapWorker(url, assetRoot) {
+    dispatcher.start(url);
+    setAssetRootURL(assetRoot);
+  },
   stopSourceMapWorker: dispatcher.stop.bind(dispatcher)
 };
 
@@ -546,7 +554,8 @@ const contentMap = {
   vue: "text/vue",
   coffee: "text/coffeescript",
   elm: "text/elm",
-  cljs: "text/x-clojure"
+  cljc: "text/x-clojure",
+  cljs: "text/x-clojurescript"
 };
 
 /**
@@ -591,6 +600,12 @@ function networkRequest(url, opts) {
     cache: opts.loadFromCache ? "default" : "no-cache"
   }).then(res => {
     if (res.status >= 200 && res.status < 300) {
+      if (res.headers.get("Content-Type") === "application/wasm") {
+        return res.arrayBuffer().then(buffer => ({
+          content: buffer,
+          isDwarf: true
+        }));
+      }
       return res.text().then(text => ({ content: text }));
     }
     return Promise.reject(`request failed with status ${res.status}`);
@@ -614,8 +629,8 @@ function WorkerDispatcher() {
    * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 WorkerDispatcher.prototype = {
-  start(url) {
-    this.worker = new Worker(url);
+  start(url, win = window) {
+    this.worker = new win.Worker(url);
     this.worker.onerror = () => {
       console.error(`Error in worker ${url}`);
     };
@@ -687,6 +702,10 @@ WorkerDispatcher.prototype = {
     };
 
     return (...args) => push(args);
+  },
+
+  invoke(method, ...args) {
+    return this.task(method)(...args);
   }
 };
 

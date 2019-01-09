@@ -24,14 +24,14 @@ XCODE_LEGACY = ('https://developer.apple.com/downloads/download.action?path=Deve
                 'xcode_3.2.6_and_ios_sdk_4.3__final/xcode_3.2.6_and_ios_sdk_4.3.dmg')
 
 MACPORTS_URL = {
-    '13': 'https://distfiles.macports.org/MacPorts/MacPorts-2.4.2-10.13-HighSierra.pkg',
-    '12': 'https://distfiles.macports.org/MacPorts/MacPorts-2.4.2-10.12-Sierra.pkg',
-    '11': 'https://distfiles.macports.org/MacPorts/MacPorts-2.4.2-10.11-ElCapitan.pkg',
-    '10': 'https://distfiles.macports.org/MacPorts/MacPorts-2.4.2-10.10-Yosemite.pkg',
-    '9': 'https://distfiles.macports.org/MacPorts/MacPorts-2.4.2-10.9-Mavericks.pkg',
-    '8': 'https://distfiles.macports.org/MacPorts/MacPorts-2.4.2-10.8-MountainLion.pkg',
-    '7': 'https://distfiles.macports.org/MacPorts/MacPorts-2.4.2-10.7-Lion.pkg',
-    '6': 'https://distfiles.macports.org/MacPorts/MacPorts-2.4.2-10.6-SnowLeopard.pkg', }
+    '13': 'https://distfiles.macports.org/MacPorts/MacPorts-2.5.3-10.13-HighSierra.pkg',
+    '12': 'https://distfiles.macports.org/MacPorts/MacPorts-2.5.3-10.12-Sierra.pkg',
+    '11': 'https://distfiles.macports.org/MacPorts/MacPorts-2.5.3-10.11-ElCapitan.pkg',
+    '10': 'https://distfiles.macports.org/MacPorts/MacPorts-2.5.3-10.10-Yosemite.pkg',
+    '9': 'https://distfiles.macports.org/MacPorts/MacPorts-2.5.3-10.9-Mavericks.pkg',
+    '8': 'https://distfiles.macports.org/MacPorts/MacPorts-2.5.3-10.8-MountainLion.pkg',
+    '7': 'https://distfiles.macports.org/MacPorts/MacPorts-2.5.3-10.7-Lion.pkg',
+    '6': 'https://distfiles.macports.org/MacPorts/MacPorts-2.5.3-10.6-SnowLeopard.pkg', }
 
 RE_CLANG_VERSION = re.compile('Apple (?:clang|LLVM) version (\d+\.\d+)')
 
@@ -257,8 +257,8 @@ class OSXBootstrapper(BaseBootstrapper):
             if b'license' in e.output:
                 xcodebuild = self.which('xcodebuild')
                 try:
-                    subprocess.check_call([xcodebuild, '-license'],
-                                          stderr=subprocess.STDOUT)
+                    self.check_output([xcodebuild, '-license'],
+                                      stderr=subprocess.STDOUT)
                 except subprocess.CalledProcessError as e:
                     if b'requires admin privileges' in e.output:
                         self.run_as_root([xcodebuild, '-license'])
@@ -348,6 +348,7 @@ class OSXBootstrapper(BaseBootstrapper):
     def ensure_homebrew_browser_packages(self, artifact_mode=False):
         # TODO: Figure out what not to install for artifact mode
         packages = [
+            'nasm',
             'yasm',
         ]
         self._ensure_homebrew_packages(packages)
@@ -409,14 +410,24 @@ class OSXBootstrapper(BaseBootstrapper):
         ]
 
         self._ensure_macports_packages(packages)
-        self.run_as_root([self.port, 'select', '--set', 'python', 'python27'])
+
+        pythons = set(self.check_output([self.port, 'select', '--list', 'python']).split('\n'))
+        active = ''
+        for python in pythons:
+            if 'active' in python:
+                active = python
+        if 'python27' not in active:
+            self.run_as_root([self.port, 'select', '--set', 'python', 'python27'])
+        else:
+            print('The right python version is already active.')
 
     def ensure_macports_browser_packages(self, artifact_mode=False):
         # TODO: Figure out what not to install for artifact mode
         packages = [
+            'nasm',
             'yasm',
-            'llvm-4.0',
-            'clang-4.0',
+            'llvm-7.0',
+            'clang-7.0',
         ]
 
         self._ensure_macports_packages(packages)
@@ -502,9 +513,18 @@ class OSXBootstrapper(BaseBootstrapper):
 
         return active_name.lower()
 
+    def ensure_clang_static_analysis_package(self, checkout_root):
+        self.install_toolchain_static_analysis(checkout_root)
+
     def ensure_stylo_packages(self, state_dir, checkout_root):
-        # We installed these via homebrew earlier.
-        pass
+        from mozboot import stylo
+        # We installed clang via homebrew earlier.
+        self.install_toolchain_artifact(state_dir, checkout_root, stylo.MACOS_CBINDGEN)
+
+    def ensure_node_packages(self, state_dir, checkout_root):
+        # XXX from necessary?
+        from mozboot import node
+        self.install_toolchain_artifact(state_dir, checkout_root, node.OSX)
 
     def install_homebrew(self):
         print(PACKAGE_MANAGER_INSTALL % ('Homebrew', 'Homebrew', 'Homebrew', 'brew'))

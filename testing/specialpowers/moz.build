@@ -7,7 +7,6 @@
 XPI_NAME = 'specialpowers'
 
 USE_EXTENSION_MANIFEST = True
-NO_JS_MANIFEST = True
 
 FINAL_TARGET_FILES += [
     'api.js',
@@ -23,6 +22,7 @@ FINAL_TARGET_FILES.content += [
     'content/MozillaLogger.js',
     'content/specialpowers.js',
     'content/specialpowersAPI.js',
+    'content/specialpowersFrameScript.js',
     'content/SpecialPowersObserver.jsm',
     'content/SpecialPowersObserverAPI.js',
 ]

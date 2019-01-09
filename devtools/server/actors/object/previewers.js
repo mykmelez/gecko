@@ -83,7 +83,7 @@ const previewers = {
       if (script) {
         grip.location = {
           url: script.url,
-          line: script.startLine
+          line: script.startLine,
         };
       }
     }
@@ -129,19 +129,26 @@ const previewers = {
     const items = grip.preview.items = [];
 
     for (let i = 0; i < length; ++i) {
-      // Array Xrays filter out various possibly-unsafe properties (like
-      // functions, and claim that the value is undefined instead. This
-      // is generally the right thing for privileged code accessing untrusted
-      // objects, but quite confusing for Object previews. So we manually
-      // override this protection by waiving Xrays on the array, and re-applying
-      // Xrays on any indexed value props that we pull off of it.
-      const desc = Object.getOwnPropertyDescriptor(Cu.waiveXrays(raw), i);
-      if (desc && !desc.get && !desc.set) {
-        let value = Cu.unwaiveXrays(desc.value);
-        value = ObjectUtils.makeDebuggeeValueIfNeeded(obj, value);
-        items.push(hooks.createValueGrip(value));
+      if (raw) {
+        // Array Xrays filter out various possibly-unsafe properties (like
+        // functions, and claim that the value is undefined instead. This
+        // is generally the right thing for privileged code accessing untrusted
+        // objects, but quite confusing for Object previews. So we manually
+        // override this protection by waiving Xrays on the array, and re-applying
+        // Xrays on any indexed value props that we pull off of it.
+        const desc = Object.getOwnPropertyDescriptor(Cu.waiveXrays(raw), i);
+        if (desc && !desc.get && !desc.set) {
+          let value = Cu.unwaiveXrays(desc.value);
+          value = ObjectUtils.makeDebuggeeValueIfNeeded(obj, value);
+          items.push(hooks.createValueGrip(value));
+        } else {
+          items.push(null);
+        }
       } else {
-        items.push(null);
+        // When recording/replaying we don't have a raw object, but also don't
+        // need to deal with Xrays into the debuggee compartment.
+        const value = DevToolsUtils.getProperty(obj, i);
+        items.push(hooks.createValueGrip(value));
       }
 
       if (items.length == OBJECT_PREVIEW_MAX_ITEMS) {
@@ -184,7 +191,7 @@ const previewers = {
 
     grip.preview = {
       kind: "ArrayLike",
-      length: enumEntries.size
+      length: enumEntries.size,
     };
 
     // Avoid recursive object grips.
@@ -234,7 +241,7 @@ const previewers = {
 
     grip.preview = {
       kind: "MapLike",
-      size: enumEntries.size
+      size: enumEntries.size,
     };
 
     if (objectActor.hooks.getGripDepth() > 1) {
@@ -291,7 +298,7 @@ const previewers = {
     grip.preview = {
       kind: "Object",
       ownProperties: Object.create(null),
-      ownPropertiesLength: 2 * hasTargetAndHandler
+      ownPropertiesLength: 2 * hasTargetAndHandler,
     };
 
     if (hooks.getGripDepth() > 1) {
@@ -414,7 +421,7 @@ function GenericObject(objectActor, grip, rawObj, specialStringBehavior = false)
     }
 
     preview.ownSymbols.push(Object.assign({
-      descriptor
+      descriptor,
     }, hooks.createValueGrip(symbol)));
 
     if (++i == OBJECT_PREVIEW_MAX_ITEMS) {
@@ -448,15 +455,20 @@ previewers.Object = [
     }
 
     const raw = obj.unsafeDereference();
-    const global = Cu.getGlobalForObject(DebuggerServer);
-    const classProto = global[obj.class].prototype;
-    // The Xray machinery for TypedArrays denies indexed access on the grounds
-    // that it's slow, and advises callers to do a structured clone instead.
-    const safeView = Cu.cloneInto(classProto.subarray.call(raw, 0,
-      OBJECT_PREVIEW_MAX_ITEMS), global);
-    const items = grip.preview.items = [];
-    for (let i = 0; i < safeView.length; i++) {
-      items.push(safeView[i]);
+
+    // The raw object will be null/unavailable when interacting with a
+    // replaying execution.
+    if (raw) {
+      const global = Cu.getGlobalForObject(DebuggerServer);
+      const classProto = global[obj.class].prototype;
+      // The Xray machinery for TypedArrays denies indexed access on the grounds
+      // that it's slow, and advises callers to do a structured clone instead.
+      const safeView = Cu.cloneInto(classProto.subarray.call(raw, 0,
+        OBJECT_PREVIEW_MAX_ITEMS), global);
+      const items = grip.preview.items = [];
+      for (let i = 0; i < safeView.length; i++) {
+        items.push(safeView[i]);
+      }
     }
 
     return true;

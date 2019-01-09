@@ -11,7 +11,9 @@
 #include "CSFLog.h"
 #include "MediaEngineTabVideoSource.h"
 #include "MediaEngineRemoteVideoSource.h"
+#include "MediaEngineWebRTCAudio.h"
 #include "MediaTrackConstraints.h"
+#include "mozilla/dom/MediaDeviceInfo.h"
 #include "mozilla/Logging.h"
 #include "nsIComponentRegistrar.h"
 #include "nsIPrefService.h"
@@ -25,137 +27,32 @@ static mozilla::LazyLogModule sGetUserMediaLog("GetUserMedia");
 
 namespace mozilla {
 
-// statics from AudioInputCubeb
-nsTArray<int>* AudioInputCubeb::mDeviceIndexes;
-int AudioInputCubeb::mDefaultDevice = -1;
-nsTArray<nsCString>* AudioInputCubeb::mDeviceNames;
-cubeb_device_collection AudioInputCubeb::mDevices = { nullptr, 0 };
-bool AudioInputCubeb::mAnyInUse = false;
-StaticMutex AudioInputCubeb::sMutex;
-uint32_t AudioInputCubeb::sUserChannelCount = 0;
-
-// AudioDeviceID is an annoying opaque value that's really a string
-// pointer, and is freed when the cubeb_device_collection is destroyed
-
-void AudioInputCubeb::UpdateDeviceList()
-{
-  // We keep all the device names, but wipe the mappings and rebuild them.
-  // Do this first so that if cubeb has failed we've unmapped our devices
-  // before we early return. Otherwise we'd keep the old list.
-  for (auto& device_index : (*mDeviceIndexes)) {
-    device_index = -1; // unmapped
-  }
-
-  cubeb* cubebContext = CubebUtils::GetCubebContext();
-  if (!cubebContext) {
-    return;
-  }
-
-  cubeb_device_collection devices = { nullptr, 0 };
-
-  if (CUBEB_OK != cubeb_enumerate_devices(cubebContext,
-                                          CUBEB_DEVICE_TYPE_INPUT,
-                                          &devices)) {
-    return;
-  }
-
-  // Calculate translation from existing mDevices to new devices. Note we
-  // never end up with less devices than before, since people have
-  // stashed indexes.
-  // For some reason the "fake" device for automation is marked as DISABLED,
-  // so white-list it.
-  mDefaultDevice = -1;
-  for (uint32_t i = 0; i < devices.count; i++) {
-    LOG(("Cubeb device %u: type 0x%x, state 0x%x, name %s, id %p",
-         i, devices.device[i].type, devices.device[i].state,
-         devices.device[i].friendly_name, devices.device[i].device_id));
-    if (devices.device[i].type == CUBEB_DEVICE_TYPE_INPUT && // paranoia
-        devices.device[i].state == CUBEB_DEVICE_STATE_ENABLED )
-    {
-      auto j = mDeviceNames->IndexOf(devices.device[i].device_id);
-      if (j != nsTArray<nsCString>::NoIndex) {
-        // match! update the mapping
-        (*mDeviceIndexes)[j] = i;
-      } else {
-        // new device, add to the array
-        mDeviceIndexes->AppendElement(i);
-        mDeviceNames->AppendElement(devices.device[i].device_id);
-        j = mDeviceIndexes->Length()-1;
-      }
-      if (devices.device[i].preferred & CUBEB_DEVICE_PREF_VOICE) {
-        // There can be only one... we hope
-        NS_ASSERTION(mDefaultDevice == -1, "multiple default cubeb input devices!");
-        mDefaultDevice = j;
-      }
-    }
-  }
-  LOG(("Cubeb default input device %d", mDefaultDevice));
-  StaticMutexAutoLock lock(sMutex);
-  // swap state
-  cubeb_device_collection_destroy(cubebContext, &mDevices);
-  mDevices = devices;
-}
-
-MediaEngineWebRTC::MediaEngineWebRTC(MediaEnginePrefs &aPrefs)
-  : mMutex("MediaEngineWebRTC::mMutex"),
-    mAudioInput(nullptr),
-    mFullDuplex(aPrefs.mFullDuplex),
-    mDelayAgnostic(aPrefs.mDelayAgnostic),
-    mExtendedFilter(aPrefs.mExtendedFilter),
-    mHasTabVideoSource(false)
-{
+MediaEngineWebRTC::MediaEngineWebRTC(MediaEnginePrefs& aPrefs)
+    : mMutex("mozilla::MediaEngineWebRTC"),
+      mDelayAgnostic(aPrefs.mDelayAgnostic),
+      mExtendedFilter(aPrefs.mExtendedFilter),
+      mHasTabVideoSource(false) {
   nsCOMPtr<nsIComponentRegistrar> compMgr;
   NS_GetComponentRegistrar(getter_AddRefs(compMgr));
   if (compMgr) {
-    compMgr->IsContractIDRegistered(NS_TABSOURCESERVICE_CONTRACTID, &mHasTabVideoSource);
+    compMgr->IsContractIDRegistered(NS_TABSOURCESERVICE_CONTRACTID,
+                                    &mHasTabVideoSource);
   }
 
-  camera::GetChildAndCall(
-    &camera::CamerasChild::AddDeviceChangeCallback,
-    this);
+  camera::GetChildAndCall(&camera::CamerasChild::AddDeviceChangeCallback, this);
 }
 
-void
-MediaEngineWebRTC::SetFakeDeviceChangeEvents()
-{
-  camera::GetChildAndCall(
-    &camera::CamerasChild::SetFakeDeviceChangeEvents);
+void MediaEngineWebRTC::SetFakeDeviceChangeEvents() {
+  camera::GetChildAndCall(&camera::CamerasChild::SetFakeDeviceChangeEvents);
 }
 
-void
-MediaEngineWebRTC::EnumerateVideoDevices(uint64_t aWindowId,
-                                         dom::MediaSourceEnum aMediaSource,
-                                         nsTArray<RefPtr<MediaEngineSource> >* aSources)
-{
+void MediaEngineWebRTC::EnumerateVideoDevices(
+    uint64_t aWindowId, camera::CaptureEngine aCapEngine,
+    nsTArray<RefPtr<MediaDevice>>* aDevices) {
   mMutex.AssertCurrentThreadOwns();
-
-  mozilla::camera::CaptureEngine capEngine = mozilla::camera::InvalidEngine;
-
-  bool scaryKind = false; // flag sources with cross-origin exploit potential
-
-  switch (aMediaSource) {
-    case dom::MediaSourceEnum::Window:
-      capEngine = mozilla::camera::WinEngine;
-      break;
-    case dom::MediaSourceEnum::Application:
-      capEngine = mozilla::camera::AppEngine;
-      break;
-    case dom::MediaSourceEnum::Screen:
-      capEngine = mozilla::camera::ScreenEngine;
-      scaryKind = true;
-      break;
-    case dom::MediaSourceEnum::Browser:
-      capEngine = mozilla::camera::BrowserEngine;
-      scaryKind = true;
-      break;
-    case dom::MediaSourceEnum::Camera:
-      capEngine = mozilla::camera::CameraEngine;
-      break;
-    default:
-      MOZ_CRASH("No valid video engine");
-      break;
-  }
-
+  // flag sources with cross-origin exploit potential
+  bool scaryKind = (aCapEngine == camera::ScreenEngine ||
+                    aCapEngine == camera::BrowserEngine);
   /*
    * We still enumerate every time, in case a new device was plugged in since
    * the last call. TODO: Verify that WebRTC actually does deal with hotplugging
@@ -166,8 +63,7 @@ MediaEngineWebRTC::EnumerateVideoDevices(uint64_t aWindowId,
    */
   int num;
   num = mozilla::camera::GetChildAndCall(
-    &mozilla::camera::CamerasChild::NumberOfCaptureDevices,
-    capEngine);
+      &mozilla::camera::CamerasChild::NumberOfCaptureDevices, aCapEngine);
 
   for (int i = 0; i < num; i++) {
     char deviceName[MediaEngineSource::kMaxDeviceNameLength];
@@ -179,15 +75,12 @@ MediaEngineWebRTC::EnumerateVideoDevices(uint64_t aWindowId,
     uniqueId[0] = '\0';
     int error;
 
-    error =  mozilla::camera::GetChildAndCall(
-      &mozilla::camera::CamerasChild::GetCaptureDevice,
-      capEngine,
-      i, deviceName,
-      sizeof(deviceName), uniqueId,
-      sizeof(uniqueId),
-      &scarySource);
+    error = mozilla::camera::GetChildAndCall(
+        &mozilla::camera::CamerasChild::GetCaptureDevice, aCapEngine, i,
+        deviceName, sizeof(deviceName), uniqueId, sizeof(uniqueId),
+        &scarySource);
     if (error) {
-      LOG(("camera:GetCaptureDevice: Failed %d", error ));
+      LOG(("camera:GetCaptureDevice: Failed %d", error));
       continue;
     }
 #ifdef DEBUG
@@ -195,147 +88,177 @@ MediaEngineWebRTC::EnumerateVideoDevices(uint64_t aWindowId,
 
     webrtc::CaptureCapability cap;
     int numCaps = mozilla::camera::GetChildAndCall(
-      &mozilla::camera::CamerasChild::NumberOfCapabilities,
-      capEngine,
-      uniqueId);
+        &mozilla::camera::CamerasChild::NumberOfCapabilities, aCapEngine,
+        uniqueId);
     LOG(("Number of Capabilities %d", numCaps));
     for (int j = 0; j < numCaps; j++) {
       if (mozilla::camera::GetChildAndCall(
-            &mozilla::camera::CamerasChild::GetCaptureCapability,
-            capEngine,
-            uniqueId,
-            j, cap) != 0) {
-       break;
+              &mozilla::camera::CamerasChild::GetCaptureCapability, aCapEngine,
+              uniqueId, j, cap) != 0) {
+        break;
       }
       LOG(("type=%d width=%d height=%d maxFPS=%d",
-           cap.rawType, cap.width, cap.height, cap.maxFPS ));
+           static_cast<int>(cap.videoType), cap.width, cap.height, cap.maxFPS));
     }
 #endif
 
     if (uniqueId[0] == '\0') {
       // In case a device doesn't set uniqueId!
       strncpy(uniqueId, deviceName, sizeof(uniqueId));
-      uniqueId[sizeof(uniqueId)-1] = '\0'; // strncpy isn't safe
+      uniqueId[sizeof(uniqueId) - 1] = '\0';  // strncpy isn't safe
     }
 
     NS_ConvertUTF8toUTF16 uuid(uniqueId);
     RefPtr<MediaEngineSource> vSource;
 
     nsRefPtrHashtable<nsStringHashKey, MediaEngineSource>*
-      devicesForThisWindow = mVideoSources.LookupOrAdd(aWindowId);
+        devicesForThisWindow = mVideoSources.LookupOrAdd(aWindowId);
 
     if (devicesForThisWindow->Get(uuid, getter_AddRefs(vSource)) &&
         vSource->RequiresSharing()) {
       // We've already seen this shared device, just refresh and append.
       static_cast<MediaEngineRemoteVideoSource*>(vSource.get())->Refresh(i);
-      aSources->AppendElement(vSource.get());
     } else {
-      vSource = new MediaEngineRemoteVideoSource(i, capEngine, aMediaSource,
+      vSource = new MediaEngineRemoteVideoSource(i, aCapEngine,
                                                  scaryKind || scarySource);
       devicesForThisWindow->Put(uuid, vSource);
-      aSources->AppendElement(vSource);
     }
+    aDevices->AppendElement(MakeRefPtr<MediaDevice>(
+        vSource, vSource->GetName(), NS_ConvertUTF8toUTF16(vSource->GetUUID()),
+        NS_LITERAL_STRING("")));
   }
 
-  if (mHasTabVideoSource || dom::MediaSourceEnum::Browser == aMediaSource) {
-    aSources->AppendElement(new MediaEngineTabVideoSource());
+  if (mHasTabVideoSource || aCapEngine == camera::BrowserEngine) {
+    RefPtr<MediaEngineSource> tabVideoSource = new MediaEngineTabVideoSource();
+    aDevices->AppendElement(MakeRefPtr<MediaDevice>(
+        tabVideoSource, tabVideoSource->GetName(),
+        NS_ConvertUTF8toUTF16(tabVideoSource->GetUUID()),
+        NS_LITERAL_STRING("")));
   }
 }
 
-void
-MediaEngineWebRTC::EnumerateMicrophoneDevices(uint64_t aWindowId,
-                                              nsTArray<RefPtr<MediaEngineSource> >* aSources)
-{
+void MediaEngineWebRTC::EnumerateMicrophoneDevices(
+    uint64_t aWindowId, nsTArray<RefPtr<MediaDevice>>* aDevices) {
   mMutex.AssertCurrentThreadOwns();
 
-  if (!mAudioInput) {
-    if (!SupportsDuplex()) {
-      return;
-    }
-    mAudioInput = new mozilla::AudioInputCubeb();
-  }
+  mEnumerator = CubebDeviceEnumerator::GetInstance();
 
-  int nDevices = 0;
-  mAudioInput->GetNumOfRecordingDevices(nDevices);
-  int i;
-#if defined(MOZ_WIDGET_ANDROID)
-  i = 0; // Bug 1037025 - let the OS handle defaulting for now on android/b2g
-#else
-  // -1 is "default communications device" depending on OS in webrtc.org code
-  i = -1;
+  nsTArray<RefPtr<AudioDeviceInfo>> devices;
+  mEnumerator->EnumerateAudioInputDevices(devices);
+
+  DebugOnly<bool> foundPreferredDevice = false;
+
+  for (uint32_t i = 0; i < devices.Length(); i++) {
+#ifndef ANDROID
+    MOZ_ASSERT(devices[i]->DeviceID());
 #endif
-  for (; i < nDevices; i++) {
-    // We use constants here because GetRecordingDeviceName takes char[128].
-    char deviceName[128];
-    char uniqueId[128];
-    // paranoia; jingle doesn't bother with this
-    deviceName[0] = '\0';
-    uniqueId[0] = '\0';
+    LOG(("Cubeb device %u: type 0x%x, state 0x%x, name %s, id %p", i,
+         devices[i]->Type(), devices[i]->State(),
+         NS_ConvertUTF16toUTF8(devices[i]->Name()).get(),
+         devices[i]->DeviceID()));
 
-    int error = mAudioInput->GetRecordingDeviceName(i, deviceName, uniqueId);
-    if (error) {
-      LOG((" AudioInput::GetRecordingDeviceName: Failed %d", error));
-      continue;
-    }
-
-    if (uniqueId[0] == '\0') {
-      // Mac and Linux don't set uniqueId!
-      strcpy(uniqueId, deviceName); // safe given assert and initialization/error-check
-    }
-
-
-    RefPtr<MediaEngineSource> aSource;
-    NS_ConvertUTF8toUTF16 uuid(uniqueId);
-
-    nsRefPtrHashtable<nsStringHashKey, MediaEngineSource>*
-      devicesForThisWindow = mAudioSources.LookupOrAdd(aWindowId);
-
-    if (devicesForThisWindow->Get(uuid, getter_AddRefs(aSource)) &&
-        aSource->RequiresSharing()) {
-      // We've already seen this device, just append.
-      aSources->AppendElement(aSource.get());
-    } else {
-      aSource = new MediaEngineWebRTCMicrophoneSource(
-          new mozilla::AudioInputCubeb(i),
-          i, deviceName, uniqueId,
+    if (devices[i]->State() == CUBEB_DEVICE_STATE_ENABLED) {
+      MOZ_ASSERT(devices[i]->Type() == CUBEB_DEVICE_TYPE_INPUT);
+      RefPtr<MediaEngineSource> source = new MediaEngineWebRTCMicrophoneSource(
+          devices[i], devices[i]->Name(),
+          // Lie and provide the name as UUID
+          NS_ConvertUTF16toUTF8(devices[i]->Name()), devices[i]->MaxChannels(),
           mDelayAgnostic, mExtendedFilter);
-      devicesForThisWindow->Put(uuid, aSource);
-      aSources->AppendElement(aSource);
+      RefPtr<MediaDevice> device = MakeRefPtr<MediaDevice>(
+          source, source->GetName(), NS_ConvertUTF8toUTF16(source->GetUUID()),
+          NS_LITERAL_STRING(""));
+      if (devices[i]->Preferred()) {
+#ifdef DEBUG
+        if (!foundPreferredDevice) {
+          foundPreferredDevice = true;
+        } else {
+          MOZ_ASSERT(!foundPreferredDevice,
+                     "Found more than one preferred audio input device"
+                     "while enumerating");
+        }
+#endif
+        aDevices->InsertElementAt(0, device);
+      } else {
+        aDevices->AppendElement(device);
+      }
     }
   }
 }
 
-void
-MediaEngineWebRTC::EnumerateDevices(uint64_t aWindowId,
-                                    dom::MediaSourceEnum aMediaSource,
-                                    nsTArray<RefPtr<MediaEngineSource> >* aSources)
-{
-  // We spawn threads to handle gUM runnables, so we must protect the member vars
+void MediaEngineWebRTC::EnumerateSpeakerDevices(
+    uint64_t aWindowId, nsTArray<RefPtr<MediaDevice>>* aDevices) {
+  if (!mEnumerator) {
+    mEnumerator = CubebDeviceEnumerator::GetInstance();
+  }
+  nsTArray<RefPtr<AudioDeviceInfo>> devices;
+  mEnumerator->EnumerateAudioOutputDevices(devices);
+
+  for (auto& device : devices) {
+    if (device->State() == CUBEB_DEVICE_STATE_ENABLED) {
+      MOZ_ASSERT(device->Type() == CUBEB_DEVICE_TYPE_OUTPUT);
+      nsString uuid(device->Name());
+      // If, for example, input and output are in the same device, uuid
+      // would be the same for both which ends up to create the same
+      // deviceIDs (in JS).
+      uuid.Append(NS_LITERAL_STRING("_Speaker"));
+      aDevices->AppendElement(MakeRefPtr<MediaDevice>(device, uuid));
+    }
+  }
+}
+
+void MediaEngineWebRTC::EnumerateDevices(
+    uint64_t aWindowId, dom::MediaSourceEnum aMediaSource,
+    MediaSinkEnum aMediaSink, nsTArray<RefPtr<MediaDevice>>* aDevices) {
+  MOZ_ASSERT(aMediaSource != dom::MediaSourceEnum::Other ||
+             aMediaSink != MediaSinkEnum::Other);
   MutexAutoLock lock(mMutex);
   if (MediaEngineSource::IsVideo(aMediaSource)) {
-    EnumerateVideoDevices(aWindowId, aMediaSource, aSources);
+    switch (aMediaSource) {
+      case dom::MediaSourceEnum::Window:
+        // Since the mediaSource constraint is deprecated, treat the Window
+        // value as a request for getDisplayMedia-equivalent sharing: Combine
+        // window and fullscreen into a single list of choices. The other values
+        // are still useful for testing.
+        EnumerateVideoDevices(aWindowId, camera::WinEngine, aDevices);
+        EnumerateVideoDevices(aWindowId, camera::ScreenEngine, aDevices);
+        break;
+      case dom::MediaSourceEnum::Application:
+        EnumerateVideoDevices(aWindowId, camera::AppEngine, aDevices);
+        break;
+      case dom::MediaSourceEnum::Screen:
+        EnumerateVideoDevices(aWindowId, camera::ScreenEngine, aDevices);
+        break;
+      case dom::MediaSourceEnum::Browser:
+        EnumerateVideoDevices(aWindowId, camera::BrowserEngine, aDevices);
+        break;
+      case dom::MediaSourceEnum::Camera:
+        EnumerateVideoDevices(aWindowId, camera::CameraEngine, aDevices);
+        break;
+      default:
+        MOZ_CRASH("No valid video source");
+        break;
+    }
   } else if (aMediaSource == dom::MediaSourceEnum::AudioCapture) {
     RefPtr<MediaEngineWebRTCAudioCaptureSource> audioCaptureSource =
-      new MediaEngineWebRTCAudioCaptureSource(nullptr);
-    aSources->AppendElement(audioCaptureSource);
-  } else {
+        new MediaEngineWebRTCAudioCaptureSource(nullptr);
+    aDevices->AppendElement(MakeRefPtr<MediaDevice>(
+        audioCaptureSource, audioCaptureSource->GetName(),
+        NS_ConvertUTF8toUTF16(audioCaptureSource->GetUUID()),
+        NS_LITERAL_STRING("")));
+  } else if (aMediaSource == dom::MediaSourceEnum::Microphone) {
     MOZ_ASSERT(aMediaSource == dom::MediaSourceEnum::Microphone);
-    EnumerateMicrophoneDevices(aWindowId, aSources);
+    EnumerateMicrophoneDevices(aWindowId, aDevices);
+  }
+
+  if (aMediaSink == MediaSinkEnum::Speaker) {
+    EnumerateSpeakerDevices(aWindowId, aDevices);
   }
 }
 
-bool
-MediaEngineWebRTC::SupportsDuplex()
-{
-  return mFullDuplex;
-}
-
-void
-MediaEngineWebRTC::ReleaseResourcesForWindow(uint64_t aWindowId)
-{
+void MediaEngineWebRTC::ReleaseResourcesForWindow(uint64_t aWindowId) {
   {
     nsRefPtrHashtable<nsStringHashKey, MediaEngineSource>*
-      audioDevicesForThisWindow = mAudioSources.Get(aWindowId);
+        audioDevicesForThisWindow = mAudioSources.Get(aWindowId);
 
     if (audioDevicesForThisWindow) {
       for (auto iter = audioDevicesForThisWindow->Iter(); !iter.Done();
@@ -350,7 +273,7 @@ MediaEngineWebRTC::ReleaseResourcesForWindow(uint64_t aWindowId)
 
   {
     nsRefPtrHashtable<nsStringHashKey, MediaEngineSource>*
-      videoDevicesForThisWindow = mVideoSources.Get(aWindowId);
+        videoDevicesForThisWindow = mVideoSources.Get(aWindowId);
     if (videoDevicesForThisWindow) {
       for (auto iter = videoDevicesForThisWindow->Iter(); !iter.Done();
            iter.Next()) {
@@ -364,9 +287,8 @@ MediaEngineWebRTC::ReleaseResourcesForWindow(uint64_t aWindowId)
 }
 
 namespace {
-template<typename T>
-void ShutdownSources(T& aHashTable)
-{
+template <typename T>
+void ShutdownSources(T& aHashTable) {
   for (auto iter = aHashTable.Iter(); !iter.Done(); iter.Next()) {
     for (auto iterInner = iter.UserData()->Iter(); !iterInner.Done();
          iterInner.Next()) {
@@ -375,17 +297,15 @@ void ShutdownSources(T& aHashTable)
     }
   }
 }
-}
+}  // namespace
 
-void
-MediaEngineWebRTC::Shutdown()
-{
+void MediaEngineWebRTC::Shutdown() {
   // This is likely paranoia
   MutexAutoLock lock(mMutex);
 
   if (camera::GetCamerasChildIfExists()) {
-    camera::GetChildAndCall(
-      &camera::CamerasChild::RemoveDeviceChangeCallback, this);
+    camera::GetChildAndCall(&camera::CamerasChild::RemoveDeviceChangeCallback,
+                            this);
   }
 
   LOG(("%s", __FUNCTION__));
@@ -394,8 +314,9 @@ MediaEngineWebRTC::Shutdown()
   ShutdownSources(mVideoSources);
   ShutdownSources(mAudioSources);
 
+  mEnumerator = nullptr;
+
   mozilla::camera::Shutdown();
-  AudioInputCubeb::CleanupGlobalData();
 }
 
-}
+}  // namespace mozilla

@@ -52,8 +52,6 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-
 ChromeUtils.defineModuleGetter(this, "Services", "resource://gre/modules/Services.jsm");
 ChromeUtils.defineModuleGetter(this, "CleanupManager", "resource://normandy/lib/CleanupManager.jsm");
 ChromeUtils.defineModuleGetter(this, "JSONFile", "resource://gre/modules/JSONFile.jsm");
@@ -92,14 +90,14 @@ const PreferenceBranchType = {
 /**
  * Asynchronously load the JSON file that stores experiment status in the profile.
  */
-let storePromise;
+let gStorePromise;
 function ensureStorage() {
-  if (storePromise === undefined) {
+  if (gStorePromise === undefined) {
     const path = OS.Path.join(OS.Constants.Path.profileDir, EXPERIMENT_FILE);
     const storage = new JSONFile({path});
-    storePromise = storage.load().then(() => storage);
+    gStorePromise = storage.load().then(() => storage);
   }
-  return storePromise;
+  return gStorePromise;
 }
 
 const log = LogManager.getLogger("preference-experiments");
@@ -206,32 +204,44 @@ var PreferenceExperiments = {
   },
 
   /**
-   * Save in-progress preference experiments in a sub-branch of the shield
-   * prefs. On startup, we read these to set the experimental values.
+   * Save in-progress, default-branch preference experiments in a sub-branch of
+   * the normandy preferences. On startup, we read these to set the
+   * experimental values.
+   *
+   * This is needed because the default branch does not persist between Firefox
+   * restarts. To compensate for that, Normandy sets the default branch to the
+   * experiment values again every startup. The values to set the preferences
+   * to are stored in user-branch preferences because preferences have minimal
+   * impact on the performance of startup.
    */
   async saveStartupPrefs() {
     const prefBranch = Services.prefs.getBranch(STARTUP_EXPERIMENT_PREFS_BRANCH);
-    prefBranch.deleteBranch("");
+    for (const pref of prefBranch.getChildList("")) {
+      prefBranch.clearUserPref(pref);
+    }
 
-    for (const experiment of await this.getAllActive()) {
-      const name = experiment.preferenceName;
-      const value = experiment.preferenceValue;
-
-      switch (typeof value) {
+    // Filter out non-default-branch experiments (user-branch), because they
+    // don't need to be set on the default branch during early startup. Doing so
+    // would make the user branch and the default branch the same, which would
+    // cause the user branch to not be saved, and the user branch preference
+    // would be erased.
+    const defaultBranchExperiments = (await this.getAllActive()).filter(exp => exp.preferenceBranchType === "default");
+    for (const {preferenceName, preferenceValue} of defaultBranchExperiments) {
+      switch (typeof preferenceValue) {
         case "string":
-          prefBranch.setCharPref(name, value);
+          prefBranch.setCharPref(preferenceName, preferenceValue);
           break;
 
         case "number":
-          prefBranch.setIntPref(name, value);
+          prefBranch.setIntPref(preferenceName, preferenceValue);
           break;
 
         case "boolean":
-          prefBranch.setBoolPref(name, value);
+          prefBranch.setBoolPref(preferenceName, preferenceValue);
           break;
 
         default:
-          throw new Error(`Invalid preference type ${typeof value}`);
+          throw new Error(`Invalid preference type ${typeof preferenceValue}`);
       }
     }
   },
@@ -240,23 +250,30 @@ var PreferenceExperiments = {
    * Test wrapper that temporarily replaces the stored experiment data with fake
    * data for testing.
    */
-  withMockExperiments(testFunction) {
-    return async function inner(...args) {
-      const oldPromise = storePromise;
-      const mockExperiments = {};
-      storePromise = Promise.resolve({
-        data: mockExperiments,
-        saveSoon() { },
-      });
-      const oldObservers = experimentObservers;
-      experimentObservers = new Map();
-      try {
-        await testFunction(...args, mockExperiments);
-      } finally {
-        storePromise = oldPromise;
-        PreferenceExperiments.stopAllObservers();
-        experimentObservers = oldObservers;
-      }
+  withMockExperiments(mockExperiments = []) {
+    return function wrapper(testFunction) {
+      return async function wrappedTestFunction(...args) {
+        const data = {};
+
+        for (const exp of mockExperiments) {
+          data[exp.name] = exp;
+        }
+
+        const oldPromise = gStorePromise;
+        gStorePromise = Promise.resolve({
+          data,
+          saveSoon() { },
+        });
+        const oldObservers = experimentObservers;
+        experimentObservers = new Map();
+        try {
+          await testFunction(...args, mockExperiments);
+        } finally {
+          gStorePromise = oldPromise;
+          PreferenceExperiments.stopAllObservers();
+          experimentObservers = oldObservers;
+        }
+      };
     };
   },
 
@@ -463,7 +480,7 @@ var PreferenceExperiments = {
    * @param {Object} options
    * @param {boolean} [options.resetValue = true]
    *   If true, reset the preference to its original value prior to
-   *   the experiment. Optional, defauls to true.
+   *   the experiment. Optional, defaults to true.
    * @param {String} [options.reason = "unknown"]
    *   Reason that the experiment is ending. Optional, defaults to
    *   "unknown".
@@ -505,12 +522,12 @@ var PreferenceExperiments = {
         // Remove the "user set" value (which Shield set), but leave the default intact.
         preferences.clearUserPref(preferenceName);
       } else {
-        // Remove both the user and default branch preference. This
-        // is ok because we only do this when studies expire, not
-        // when users actively leave a study by changing the
-        // preference, so there should not be a user branch value at
-        // this point.
-        Services.prefs.getDefaultBranch("").deleteBranch(preferenceName);
+        log.warn(
+          `Can't revert pref for experiment ${experimentName} because it had no default value. `
+          + `Preference will be reset at the next restart.`
+        );
+        // It would seem that Services.prefs.deleteBranch() could be used for
+        // this, but in Normandy's case it does not work. See bug 1502410.
       }
     }
 

@@ -50,33 +50,35 @@ var test_helper = async function(payload) {
   authenticator.allowConnection = () => {
     return DebuggerServer.AuthenticationResult.ALLOW;
   };
+  const socketOptions = {
+    authenticator,
+    portOrPath: -1,
+  };
 
-  const listener = DebuggerServer.createListener();
-  listener.portOrPath = -1;
-  listener.authenticator = authenticator;
+  const listener = new SocketListener(DebuggerServer, socketOptions);
   listener.open();
 
   const transport = await DebuggerClient.socketConnect({
     host: "127.0.0.1",
-    port: listener.port
+    port: listener.port,
   });
-  const closedDeferred = defer();
-  transport.hooks = {
-    onPacket: function(packet) {
-      this.onPacket = function() {
-        do_throw(new Error("This connection should be dropped."));
-        transport.close();
-      };
+  return new Promise((resolve) => {
+    transport.hooks = {
+      onPacket: function(packet) {
+        this.onPacket = function() {
+          do_throw(new Error("This connection should be dropped."));
+          transport.close();
+        };
 
-      // Inject the payload directly into the stream.
-      transport._outgoing.push(new RawPacket(transport, payload));
-      transport._flushOutgoing();
-    },
-    onClosed: function(status) {
-      Assert.ok(true);
-      closedDeferred.resolve();
-    },
-  };
-  transport.ready();
-  return closedDeferred.promise;
+        // Inject the payload directly into the stream.
+        transport._outgoing.push(new RawPacket(transport, payload));
+        transport._flushOutgoing();
+      },
+      onClosed: function(status) {
+        Assert.ok(true);
+        resolve();
+      },
+    };
+    transport.ready();
+  });
 };

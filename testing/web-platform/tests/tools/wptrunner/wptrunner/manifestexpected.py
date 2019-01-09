@@ -61,9 +61,38 @@ def prefs(node):
 
     try:
         node_prefs = node.get("prefs")
-        rv = dict(value(item) for item in node_prefs)
+        if type(node_prefs) in (str, unicode):
+            rv = dict(value(node_prefs))
+        else:
+            rv = dict(value(item) for item in node_prefs)
     except KeyError:
         rv = {}
+    return rv
+
+
+def set_prop(name, node):
+    try:
+        node_items = node.get(name)
+        if isinstance(node_items, (str, unicode)):
+            rv = {node_items}
+        else:
+            rv = set(node_items)
+    except KeyError:
+        rv = set()
+    return rv
+
+
+def leak_threshold(node):
+    rv = {}
+    try:
+        node_items = node.get("leak-threshold")
+        if isinstance(node_items, (str, unicode)):
+            node_items = [node_items]
+        for item in node_items:
+            process, value = item.rsplit(":", 1)
+            rv[process.strip()] = int(value.strip())
+    except KeyError:
+        pass
     return rv
 
 
@@ -137,6 +166,22 @@ class ExpectedManifest(ManifestItem):
     def prefs(self):
         return prefs(self)
 
+    @property
+    def lsan_allowed(self):
+        return set_prop("lsan-allowed", self)
+
+    @property
+    def leak_allowed(self):
+        return set_prop("leak-allowed", self)
+
+    @property
+    def leak_threshold(self):
+        return leak_threshold(self)
+
+    @property
+    def lsan_max_stack_depth(self):
+        return int_prop("lsan-max-stack-depth", self)
+
 
 class DirectoryManifest(ManifestItem):
     @property
@@ -167,6 +212,21 @@ class DirectoryManifest(ManifestItem):
     def prefs(self):
         return prefs(self)
 
+    @property
+    def lsan_allowed(self):
+        return set_prop("lsan-allowed", self)
+
+    @property
+    def leak_allowed(self):
+        return set_prop("leak-allowed", self)
+
+    @property
+    def leak_threshold(self):
+        return leak_threshold(self)
+
+    @property
+    def lsan_max_stack_depth(self):
+        return int_prop("lsan-max-stack-depth", self)
 
 class TestNode(ManifestItem):
     def __init__(self, name):
@@ -224,6 +284,22 @@ class TestNode(ManifestItem):
     def prefs(self):
         return prefs(self)
 
+    @property
+    def lsan_allowed(self):
+        return set_prop("lsan-allowed", self)
+
+    @property
+    def leak_allowed(self):
+        return set_prop("leak-allowed", self)
+
+    @property
+    def leak_threshold(self):
+        return leak_threshold(self)
+
+    @property
+    def lsan_max_stack_depth(self):
+        return int_prop("lsan-max-stack-depth", self)
+
     def append(self, node):
         """Add a subtest to the current test
 
@@ -274,6 +350,7 @@ def get_manifest(metadata_root, test_path, url_base, run_info):
                                   url_base=url_base)
     except IOError:
         return None
+
 
 def get_dir_manifest(path, run_info):
     """Get the ExpectedManifest for a particular test path, or None if there is no

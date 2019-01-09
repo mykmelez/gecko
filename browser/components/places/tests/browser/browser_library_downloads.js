@@ -14,16 +14,16 @@ add_task(async function test() {
   // Add visits.
   await PlacesTestUtils.addVisits([{
     uri: "http://mozilla.org",
-    transition: PlacesUtils.history.TRANSITION_TYPED
+    transition: PlacesUtils.history.TRANSITION_TYPED,
   }, {
     uri: "http://google.com",
-    transition: PlacesUtils.history.TRANSITION_DOWNLOAD
+    transition: PlacesUtils.history.TRANSITION_DOWNLOAD,
   }, {
     uri: "http://en.wikipedia.org",
-    transition: PlacesUtils.history.TRANSITION_TYPED
+    transition: PlacesUtils.history.TRANSITION_TYPED,
   }, {
     uri: "http://ubuntu.org",
-    transition: PlacesUtils.history.TRANSITION_DOWNLOAD
+    transition: PlacesUtils.history.TRANSITION_DOWNLOAD,
   }]);
 
   let library = await promiseLibrary("Downloads");
@@ -41,10 +41,10 @@ add_task(async function test() {
   let testURIs = ["http://ubuntu.org/", "http://google.com/"];
 
   await BrowserTestUtils.waitForCondition(() =>
-    library.ContentArea.currentView.associatedElement.children.length == testURIs.length);
+    library.ContentArea.currentView.associatedElement.itemChildren.length == testURIs.length);
 
   for (let element of library.ContentArea.currentView
-                                          .associatedElement.children) {
+                                          .associatedElement.itemChildren) {
     Assert.equal(element._shell.download.source.url, testURIs.shift(),
       "URI matches");
   }

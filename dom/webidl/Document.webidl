@@ -12,6 +12,7 @@
  * https://w3c.github.io/page-visibility/#extensions-to-the-document-interface
  * https://drafts.csswg.org/cssom/#extensions-to-the-document-interface
  * https://drafts.csswg.org/cssom-view/#extensions-to-the-document-interface
+ * https://wicg.github.io/feature-policy/#policy
  */
 
 interface WindowProxy;
@@ -63,22 +64,25 @@ interface Document : Node {
   [Pure]
   Element? getElementById(DOMString elementId);
 
-  [CEReactions, NewObject, Throws]
+  // These DOM methods cannot be accessed by UA Widget scripts
+  // because the DOM element reflectors will be in the content scope,
+  // instead of the desired UA Widget scope.
+  [CEReactions, NewObject, Throws, Func="IsNotUAWidget"]
   Element createElement(DOMString localName, optional (ElementCreationOptions or DOMString) options);
-  [CEReactions, NewObject, Throws]
+  [CEReactions, NewObject, Throws, Func="IsNotUAWidget"]
   Element createElementNS(DOMString? namespace, DOMString qualifiedName, optional (ElementCreationOptions or DOMString) options);
   [NewObject]
   DocumentFragment createDocumentFragment();
-  [NewObject]
+  [NewObject, Func="IsNotUAWidget"]
   Text createTextNode(DOMString data);
-  [NewObject]
+  [NewObject, Func="IsNotUAWidget"]
   Comment createComment(DOMString data);
   [NewObject, Throws]
   ProcessingInstruction createProcessingInstruction(DOMString target, DOMString data);
 
-  [CEReactions, Throws]
+  [CEReactions, Throws, Func="IsNotUAWidget"]
   Node importNode(Node node, optional boolean deep = false);
-  [CEReactions, Throws]
+  [CEReactions, Throws, Func="IsNotUAWidget"]
   Node adoptNode(Node node);
 
   [NewObject, Throws, NeedsCallerType]
@@ -174,7 +178,9 @@ partial interface Document {
    * True if this document is synthetic : stand alone image, video, audio file,
    * etc.
    */
-  [Func="IsChromeOrXBL"] readonly attribute boolean mozSyntheticDocument;
+  [Func="IsChromeOrXBLOrUAWidget"] readonly attribute boolean mozSyntheticDocument;
+  [Throws, Func="IsChromeOrXBL"]
+  BoxObject? getBoxObjectFor(Element? element);
   /**
    * Returns the script element whose script is currently being processed.
    *
@@ -255,24 +261,24 @@ partial interface Document {
 partial interface Document {
   // Note: Per spec the 'S' in these two is lowercase, but the "Moz"
   // versions have it uppercase.
-  [LenientSetter, Unscopable, Func="nsDocument::IsUnprefixedFullscreenEnabled"]
+  [LenientSetter, Unscopable, Func="Document::IsUnprefixedFullscreenEnabled"]
   readonly attribute boolean fullscreen;
   [BinaryName="fullscreen"]
   readonly attribute boolean mozFullScreen;
-  [LenientSetter, Func="nsDocument::IsUnprefixedFullscreenEnabled", NeedsCallerType]
+  [LenientSetter, Func="Document::IsUnprefixedFullscreenEnabled", NeedsCallerType]
   readonly attribute boolean fullscreenEnabled;
   [BinaryName="fullscreenEnabled", NeedsCallerType]
   readonly attribute boolean mozFullScreenEnabled;
 
-  [Func="nsDocument::IsUnprefixedFullscreenEnabled"]
-  void exitFullscreen();
-  [BinaryName="exitFullscreen"]
-  void mozCancelFullScreen();
+  [Throws, Func="Document::IsUnprefixedFullscreenEnabled"]
+  Promise<void> exitFullscreen();
+  [Throws, BinaryName="exitFullscreen"]
+  Promise<void> mozCancelFullScreen();
 
   // Events handlers
-  [Func="nsDocument::IsUnprefixedFullscreenEnabled"]
+  [Func="Document::IsUnprefixedFullscreenEnabled"]
   attribute EventHandler onfullscreenchange;
-  [Func="nsDocument::IsUnprefixedFullscreenEnabled"]
+  [Func="Document::IsUnprefixedFullscreenEnabled"]
   attribute EventHandler onfullscreenerror;
 };
 
@@ -323,9 +329,9 @@ partial interface Document {
 
 // https://drafts.csswg.org/web-animations/#extensions-to-the-document-interface
 partial interface Document {
-  [Func="nsDocument::IsWebAnimationsEnabled"]
+  [Func="Document::AreWebAnimationsTimelinesEnabled"]
   readonly attribute DocumentTimeline timeline;
-  [Func="nsDocument::IsWebAnimationsEnabled"]
+  [Func="Document::IsWebAnimationsGetAnimationsEnabled"]
   sequence<Animation> getAnimations();
 };
 
@@ -348,6 +354,9 @@ partial interface Document {
   Element? getBindingParent(Node node);
   [Throws, Func="IsChromeOrXBL", NeedsSubjectPrincipal]
   void loadBindingDocument(DOMString documentURL);
+  // Creates a new XUL element regardless of the document's default type.
+  [CEReactions, NewObject, Throws, Func="IsChromeOrXBL"]
+  Element createXULElement(DOMString localName, optional (ElementCreationOptions or DOMString) options);
 
   // Touch bits
   // XXXbz I can't find the sane spec for this stuff, so just cribbing
@@ -368,7 +377,7 @@ partial interface Document {
                     optional float force = 0);
   // XXXbz a hack to get around the fact that we don't support variadics as
   // distinguishing arguments yet.  Once this hack is removed. we can also
-  // remove the corresponding overload on nsIDocument, since Touch... and
+  // remove the corresponding overload on Document, since Touch... and
   // sequence<Touch> look the same in the C++.
   [NewObject, Func="nsGenericHTMLElement::TouchEventsEnabled"]
   TouchList createTouchList(Touch touch, Touch... touches);
@@ -382,13 +391,6 @@ partial interface Document {
 
   [ChromeOnly]
   attribute boolean styleSheetChangeEventsEnabled;
-
-  [ChromeOnly, Throws]
-  void obsoleteSheet(URI sheetURI);
-  [ChromeOnly, Throws]
-  void obsoleteSheet(DOMString sheetURI);
-
-  [ChromeOnly] readonly attribute nsIDocShell? docShell;
 
   [ChromeOnly] readonly attribute DOMString contentLanguage;
 
@@ -408,6 +410,26 @@ partial interface Document {
   // "document_idle" webextension script injection point.
   [ChromeOnly, Throws]
   readonly attribute Promise<Document> documentReadyForIdle;
+
+  // Lazily created command dispatcher, returns null if the document is not
+  // chrome privileged.
+  [ChromeOnly]
+  readonly attribute XULCommandDispatcher? commandDispatcher;
+
+  [ChromeOnly]
+  attribute Node? popupNode;
+
+  /**
+   * These attributes correspond to rangeParent and rangeOffset. They will help
+   * you find where in the DOM the popup is happening. Can be accessed only
+   * during a popup event. Accessing any other time will be an error.
+   */
+  [Throws, ChromeOnly]
+  readonly attribute Node? popupRangeParent;
+  [Throws, ChromeOnly]
+  readonly attribute long  popupRangeOffset;
+  [ChromeOnly]
+  attribute Node? tooltipNode;
 };
 
 dictionary BlockParsingOptions {
@@ -462,6 +484,14 @@ partial interface Document {
   Selection? getSelection();
 };
 
+// https://github.com/whatwg/html/issues/3338
+partial interface Document {
+  [Pref="dom.storage_access.enabled", Throws]
+  Promise<boolean> hasStorageAccess();
+  [Pref="dom.storage_access.enabled", Throws]
+  Promise<void> requestStorageAccess();
+};
+
 // Extension to give chrome JS the ability to determine whether
 // the user has interacted with the document or not.
 partial interface Document {
@@ -475,6 +505,14 @@ partial interface Document {
   void notifyUserGestureActivation();
 };
 
+// Extension to give chrome JS the ability to set an event handler which is
+// called with certain events that happened while events were suppressed in the
+// document or one of its subdocuments.
+partial interface Document {
+  [ChromeOnly]
+  void setSuppressedEventListener(EventListener? aListener);
+};
+
 // Extension to give chrome and XBL JS the ability to determine whether
 // the document is sandboxed without permission to run scripts
 // and whether inline scripts are blocked by the document's CSP.
@@ -486,8 +524,6 @@ partial interface Document {
 // For more information on Flash classification, see
 // toolkit/components/url-classifier/flash-block-lists.rst
 enum FlashClassification {
-  "unclassified",   // Denotes a classification that has not yet been computed.
-                    // Allows for lazy classification.
   "unknown",        // Site is not on the whitelist or blacklist
   "allowed",        // Site is on the Flash whitelist
   "denied"          // Site is on the Flash blacklist
@@ -495,6 +531,10 @@ enum FlashClassification {
 partial interface Document {
   [ChromeOnly]
   readonly attribute FlashClassification documentFlashClassification;
+};
+
+partial interface Document {
+  [Func="Document::DocumentSupportsL10n"] readonly attribute DocumentL10n? l10n;
 };
 
 Document implements XPathEvaluator;
@@ -506,3 +546,9 @@ Document implements OnErrorEventHandlerForNodes;
 Document implements GeometryUtils;
 Document implements FontFaceSource;
 Document implements DocumentOrShadowRoot;
+
+// https://wicg.github.io/feature-policy/#policy
+partial interface Document {
+    [SameObject, Pref="dom.security.featurePolicy.webidl.enabled"]
+    readonly attribute Policy policy;
+};

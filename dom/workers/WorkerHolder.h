@@ -25,16 +25,13 @@ class WorkerPrivate;
  * +=============+=============+=================+==========+
  * |   Closing   |     yes     |       no        |    no    |
  * +-------------+-------------+-----------------+----------+
- * | Terminating |     yes     |       yes       |   yes    |
- * +-------------+-------------+-----------------+----------+
  * |  Canceling  |     yes     |       yes       |   yes    |
  * +-------------+-------------+-----------------+----------+
  * |   Killing   |     yes     |       yes       |   yes    |
  * +-------------+-------------+-----------------+----------+
  */
 
-enum WorkerStatus
-{
+enum WorkerStatus {
   // Not yet scheduled.
   Pending = 0,
 
@@ -47,11 +44,6 @@ enum WorkerStatus
   // to be notified because the behavior of APIs/Components should not change
   // during this status yet.
   Closing,
-
-  // Outer script called terminate() on the worker or the worker object was
-  // garbage collected in its outer script. Setting this status causes the
-  // worker to abort immediately and clear its queue of events.
-  Terminating,
 
   // Either the user navigated away from the owning page or the owning page fell
   // out of bfcache. Setting this status causes the worker to abort immediately.
@@ -66,9 +58,8 @@ enum WorkerStatus
   Dead
 };
 
-class WorkerHolder
-{
-public:
+class WorkerHolder {
+ public:
   enum Behavior {
     AllowIdleShutdownStart,
     PreventIdleShutdownStart,
@@ -85,18 +76,14 @@ public:
 
   Behavior GetBehavior() const;
 
-  const char*
-  Name() const
-  {
-    return mName;
-  }
+  const char* Name() const { return mName; }
 
-protected:
+ protected:
   void ReleaseWorkerInternal();
 
   WorkerPrivate* MOZ_NON_OWNING_REF mWorkerPrivate;
 
-private:
+ private:
   void AssertIsOwningThread() const;
 
   const Behavior mBehavior;
@@ -106,7 +93,7 @@ private:
   const char* mName;
 };
 
-} // dom namespace
-} // mozilla namespace
+}  // namespace dom
+}  // namespace mozilla
 
 #endif /* mozilla_dom_workers_WorkerHolder_h */

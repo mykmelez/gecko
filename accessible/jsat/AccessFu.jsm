@@ -17,15 +17,24 @@ if (Utils.MozBuildApp === "mobile/android") {
 
 const GECKOVIEW_MESSAGE = {
   ACTIVATE: "GeckoView:AccessibilityActivate",
-  VIEW_FOCUSED: "GeckoView:AccessibilityViewFocused",
-  LONG_PRESS: "GeckoView:AccessibilityLongPress",
   BY_GRANULARITY: "GeckoView:AccessibilityByGranularity",
+  CLIPBOARD: "GeckoView:AccessibilityClipboard",
+  CURSOR_TO_FOCUSED: "GeckoView:AccessibilityCursorToFocused",
+  EXPLORE_BY_TOUCH: "GeckoView:AccessibilityExploreByTouch",
+  LONG_PRESS: "GeckoView:AccessibilityLongPress",
   NEXT: "GeckoView:AccessibilityNext",
   PREVIOUS: "GeckoView:AccessibilityPrevious",
   SCROLL_BACKWARD: "GeckoView:AccessibilityScrollBackward",
   SCROLL_FORWARD: "GeckoView:AccessibilityScrollForward",
-  EXPLORE_BY_TOUCH: "GeckoView:AccessibilityExploreByTouch"
+  SET_SELECTION: "GeckoView:AccessibilitySetSelection",
+  VIEW_FOCUSED: "GeckoView:AccessibilityViewFocused",
 };
+
+const ACCESSFU_MESSAGE = {
+  DOSCROLL: "AccessFu:DoScroll",
+};
+
+const FRAME_SCRIPT = "chrome://global/content/accessibility/content-script.js";
 
 var AccessFu = {
   /**
@@ -47,24 +56,13 @@ var AccessFu = {
     this._enabled = true;
 
     ChromeUtils.import("resource://gre/modules/accessibility/Utils.jsm");
-    ChromeUtils.import("resource://gre/modules/accessibility/Presentation.jsm");
-
-    // Check for output notification
-    this._notifyOutputPref =
-      new PrefCache("accessibility.accessfu.notify_output");
 
     Services.obs.addObserver(this, "remote-browser-shown");
     Services.obs.addObserver(this, "inprocess-browser-shown");
     Services.ww.registerNotification(this);
 
-    let windows = Services.wm.getEnumerator(null);
-    while (windows.hasMoreElements()) {
-      this._attachWindow(windows.getNext());
-    }
-
-    if (this.readyCallback) {
-      this.readyCallback();
-      delete this.readyCallback;
+    for (let win of Services.wm.getEnumerator(null)) {
+      this._attachWindow(win);
     }
 
     Logger.info("AccessFu:Enabled");
@@ -84,12 +82,9 @@ var AccessFu = {
     Services.obs.removeObserver(this, "inprocess-browser-shown");
     Services.ww.unregisterNotification(this);
 
-    let windows = Services.wm.getEnumerator(null);
-    while (windows.hasMoreElements()) {
-      this._detachWindow(windows.getNext());
+    for (let win of Services.wm.getEnumerator(null)) {
+      this._detachWindow(win);
     }
-
-    delete this._notifyOutputPref;
 
     if (this.doneCallback) {
       this.doneCallback();
@@ -105,17 +100,7 @@ var AccessFu = {
     });
 
     switch (aMessage.name) {
-      case "AccessFu:Ready":
-        let mm = Utils.getMessageManager(aMessage.target);
-        if (this._enabled) {
-          mm.sendAsyncMessage("AccessFu:Start",
-                              {method: "start", buildApp: Utils.MozBuildApp});
-        }
-        break;
-      case "AccessFu:Present":
-        this._output(aMessage.json, aMessage.target);
-        break;
-      case "AccessFu:DoScroll":
+      case ACCESSFU_MESSAGE.DOSCROLL:
         this.Input.doScroll(aMessage.json, aMessage.target);
         break;
     }
@@ -128,13 +113,13 @@ var AccessFu = {
       return;
     }
 
-    for (let mm of Utils.getAllMessageManagers(win)) {
-      this._addMessageListeners(mm);
-      this._loadFrameScript(mm);
+    // Set up frame script
+    let mm = win.messageManager;
+    for (let messageName of Object.values(ACCESSFU_MESSAGE)) {
+      mm.addMessageListener(messageName, this);
     }
+    mm.loadFrameScript(FRAME_SCRIPT, true);
 
-    win.addEventListener("TabOpen", this);
-    win.addEventListener("TabClose", this);
     win.addEventListener("TabSelect", this);
     if (win.WindowEventDispatcher) {
       // desktop mochitests don't have this.
@@ -144,83 +129,19 @@ var AccessFu = {
   },
 
   _detachWindow: function _detachWindow(win) {
-    for (let mm of Utils.getAllMessageManagers(win)) {
-      mm.sendAsyncMessage("AccessFu:Stop");
-      this._removeMessageListeners(mm);
+    let mm = win.messageManager;
+    mm.broadcastAsyncMessage("AccessFu:Stop");
+    mm.removeDelayedFrameScript(FRAME_SCRIPT);
+    for (let messageName of Object.values(ACCESSFU_MESSAGE)) {
+      mm.removeMessageListener(messageName, this);
     }
 
-    win.removeEventListener("TabOpen", this);
-    win.removeEventListener("TabClose", this);
     win.removeEventListener("TabSelect", this);
     if (win.WindowEventDispatcher) {
       // desktop mochitests don't have this.
       win.WindowEventDispatcher.unregisterListener(this,
         Object.values(GECKOVIEW_MESSAGE));
     }
-  },
-
-  _output: function _output(aPresentationData, aBrowser) {
-    if (!aPresentationData) {
-      // Either no android events to send or a string used for testing only.
-      return;
-    }
-
-    if (!Utils.isAliveAndVisible(Utils.AccService.getAccessibleFor(aBrowser))) {
-      return;
-    }
-
-    let win = aBrowser.ownerGlobal;
-
-    for (let evt of aPresentationData) {
-      if (typeof evt == "string") {
-        continue;
-      }
-
-      if (win.WindowEventDispatcher) {
-        // desktop mochitests don't have this.
-        win.WindowEventDispatcher.sendRequest({
-          ...evt,
-          type: "GeckoView:AccessibilityEvent"
-        });
-      }
-    }
-
-    if (this._notifyOutputPref.value) {
-      Services.obs.notifyObservers(null, "accessibility-output",
-                                   JSON.stringify(aPresentationData));
-    }
-  },
-
-  _loadFrameScript: function _loadFrameScript(aMessageManager) {
-    if (!this._processedMessageManagers.includes(aMessageManager)) {
-      aMessageManager.loadFrameScript(
-        "chrome://global/content/accessibility/content-script.js", true);
-      this._processedMessageManagers.push(aMessageManager);
-    } else if (this._enabled) {
-      // If the content-script is already loaded and AccessFu is enabled,
-      // send an AccessFu:Start message.
-      aMessageManager.sendAsyncMessage("AccessFu:Start",
-        {method: "start", buildApp: Utils.MozBuildApp});
-    }
-  },
-
-  _addMessageListeners: function _addMessageListeners(aMessageManager) {
-    aMessageManager.addMessageListener("AccessFu:Present", this);
-    aMessageManager.addMessageListener("AccessFu:Ready", this);
-    aMessageManager.addMessageListener("AccessFu:DoScroll", this);
-  },
-
-  _removeMessageListeners: function _removeMessageListeners(aMessageManager) {
-    aMessageManager.removeMessageListener("AccessFu:Present", this);
-    aMessageManager.removeMessageListener("AccessFu:Ready", this);
-    aMessageManager.removeMessageListener("AccessFu:DoScroll", this);
-  },
-
-  _handleMessageManager: function _handleMessageManager(aMessageManager) {
-    if (this._enabled) {
-      this._addMessageListeners(aMessageManager);
-    }
-    this._loadFrameScript(aMessageManager);
   },
 
   onEvent(event, data, callback) {
@@ -255,11 +176,8 @@ var AccessFu = {
       case GECKOVIEW_MESSAGE.SCROLL_BACKWARD:
         this.Input.androidScroll("backward");
         break;
-      case GECKOVIEW_MESSAGE.VIEW_FOCUSED:
-        this._focused = data.gainFocus;
-        if (this._focused) {
-          this.autoMove({ forcePresent: true, noOpIfOnScreen: true });
-        }
+      case GECKOVIEW_MESSAGE.CURSOR_TO_FOCUSED:
+        this.autoMove({ moveToFocused: true });
         break;
       case GECKOVIEW_MESSAGE.BY_GRANULARITY:
         this.Input.moveByGranularity(data);
@@ -267,24 +185,22 @@ var AccessFu = {
       case GECKOVIEW_MESSAGE.EXPLORE_BY_TOUCH:
         this.Input.moveToPoint("Simple", ...data.coordinates);
         break;
+      case GECKOVIEW_MESSAGE.SET_SELECTION:
+        this.Input.setSelection(data);
+        break;
+      case GECKOVIEW_MESSAGE.CLIPBOARD:
+        this.Input.clipboard(data);
+        break;
     }
   },
 
   observe: function observe(aSubject, aTopic, aData) {
     switch (aTopic) {
-      case "remote-browser-shown":
-      case "inprocess-browser-shown":
-      {
-        // Ignore notifications that aren't from a Browser
-        let frameLoader = aSubject;
-        if (!frameLoader.ownerIsMozBrowserFrame) {
-          return;
-        }
-        this._handleMessageManager(frameLoader.messageManager);
-        break;
-      }
       case "domwindowopened": {
-        this._attachWindow(aSubject.QueryInterface(Ci.nsIDOMWindow));
+        let win = aSubject.QueryInterface(Ci.nsIDOMWindow);
+        win.addEventListener("load", () => {
+          this._attachWindow(win);
+        }, { once: true });
         break;
       }
     }
@@ -292,22 +208,6 @@ var AccessFu = {
 
   _handleEvent: function _handleEvent(aEvent) {
     switch (aEvent.type) {
-      case "TabOpen":
-      {
-        let mm = Utils.getMessageManager(aEvent.target);
-        this._handleMessageManager(mm);
-        break;
-      }
-      case "TabClose":
-      {
-        let mm = Utils.getMessageManager(aEvent.target);
-        let mmIndex = this._processedMessageManagers.indexOf(mm);
-        if (mmIndex > -1) {
-          this._removeMessageListeners(mm);
-          this._processedMessageManagers.splice(mmIndex, 1);
-        }
-        break;
-      }
       case "TabSelect":
       {
         if (this._focused) {
@@ -328,12 +228,8 @@ var AccessFu = {
   },
 
   autoMove: function autoMove(aOptions) {
-    let mm = Utils.getMessageManager();
+    const mm = Utils.getMessageManager();
     mm.sendAsyncMessage("AccessFu:AutoMove", aOptions);
-  },
-
-  announce: function announce(aAnnouncement) {
-    this._output(Presentation.announce(aAnnouncement), Utils.getCurrentBrowser());
   },
 
   // So we don't enable/disable twice
@@ -341,10 +237,6 @@ var AccessFu = {
 
   // Layerview is focused
   _focused: false,
-
-  // Keep track of message managers tha already have a 'content-script.js'
-  // injected.
-  _processedMessageManagers: [],
 
   /**
    * Adjusts the given bounds that are defined in device display pixels
@@ -361,18 +253,18 @@ var AccessFu = {
       bounds = bounds.scale(1 / devicePixelRatio, 1 / devicePixelRatio);
       bounds = bounds.translate(-mozInnerScreenX, -mozInnerScreenY);
       return bounds.expandToIntegers();
-    }
+    },
 };
 
 var Input = {
   moveToPoint: function moveToPoint(aRule, aX, aY) {
-    let mm = Utils.getMessageManager();
+    const mm = Utils.getMessageManager();
     mm.sendAsyncMessage("AccessFu:MoveToPoint",
       {rule: aRule, x: aX, y: aY, origin: "top"});
   },
 
   moveCursor: function moveCursor(aAction, aRule, aInputType, aAdjustRange) {
-    let mm = Utils.getMessageManager();
+    const mm = Utils.getMessageManager();
     mm.sendAsyncMessage("AccessFu:MoveCursor",
                         { action: aAction, rule: aRule,
                           origin: "top", inputType: aInputType,
@@ -380,46 +272,40 @@ var Input = {
   },
 
   androidScroll: function androidScroll(aDirection) {
-    let mm = Utils.getMessageManager();
+    const mm = Utils.getMessageManager();
     mm.sendAsyncMessage("AccessFu:AndroidScroll",
                         { direction: aDirection, origin: "top" });
   },
 
   moveByGranularity: function moveByGranularity(aDetails) {
-    let mm = Utils.getMessageManager();
+    const mm = Utils.getMessageManager();
     mm.sendAsyncMessage("AccessFu:MoveByGranularity", aDetails);
   },
 
-  activateCurrent: function activateCurrent(aData, aActivateIfKey = false) {
-    let mm = Utils.getMessageManager();
-    let offset = 0;
-
-    mm.sendAsyncMessage("AccessFu:Activate",
-                        {offset, activateIfKey: aActivateIfKey});
+  setSelection: function setSelection(aDetails) {
+    const mm = Utils.getMessageManager();
+    mm.sendAsyncMessage("AccessFu:SetSelection", aDetails);
   },
 
-  // XXX: This is here for backwards compatability with screen reader simulator
-  // it should be removed when the extension is updated on amo.
-  scroll: function scroll(aPage, aHorizontal) {
-    this.sendScrollMessage(aPage, aHorizontal);
+  clipboard: function clipboard(aDetails) {
+    const mm = Utils.getMessageManager();
+    mm.sendAsyncMessage("AccessFu:Clipboard", aDetails);
   },
 
-  sendScrollMessage: function sendScrollMessage(aPage, aHorizontal) {
+  activateCurrent: function activateCurrent(aData) {
     let mm = Utils.getMessageManager();
-    mm.sendAsyncMessage("AccessFu:Scroll",
-      {page: aPage, horizontal: aHorizontal, origin: "top"});
+    mm.sendAsyncMessage("AccessFu:Activate", { offset: 0 });
   },
 
   doScroll: function doScroll(aDetails, aBrowser) {
     let horizontal = aDetails.horizontal;
     let page = aDetails.page;
     let win = aBrowser.ownerGlobal;
-    let winUtils = win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(
-      Ci.nsIDOMWindowUtils);
+    let winUtils = win.windowUtils;
     let p = AccessFu.screenToClientBounds(aDetails.bounds, win).center();
     winUtils.sendWheelEvent(p.x, p.y,
       horizontal ? page : 0, horizontal ? 0 : page, 0,
       win.WheelEvent.DOM_DELTA_PAGE, 0, 0, 0, 0);
-  }
+  },
 };
 AccessFu.Input = Input;

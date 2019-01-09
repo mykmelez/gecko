@@ -36,8 +36,8 @@ namespace mozilla {
 namespace image {
 class Image;
 class ProgressTracker;
-} // namespace image
-} // namespace mozilla
+}  // namespace image
+}  // namespace mozilla
 
 struct NewPartResult;
 
@@ -45,14 +45,13 @@ class imgRequest final : public nsIStreamListener,
                          public nsIThreadRetargetableStreamListener,
                          public nsIChannelEventSink,
                          public nsIInterfaceRequestor,
-                         public nsIAsyncVerifyRedirectCallback
-{
+                         public nsIAsyncVerifyRedirectCallback {
   typedef mozilla::image::Image Image;
   typedef mozilla::image::ImageCacheKey ImageCacheKey;
   typedef mozilla::image::ProgressTracker ProgressTracker;
   typedef mozilla::net::ReferrerPolicy ReferrerPolicy;
 
-public:
+ public:
   imgRequest(imgLoader* aLoader, const ImageCacheKey& aCacheKey);
 
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -63,16 +62,12 @@ public:
   NS_DECL_NSIINTERFACEREQUESTOR
   NS_DECL_NSIASYNCVERIFYREDIRECTCALLBACK
 
-  MOZ_MUST_USE nsresult Init(nsIURI* aURI,
-                             nsIURI* aFinalURI,
-                             bool aHadInsecureRedirect,
-                             nsIRequest* aRequest,
-                             nsIChannel* aChannel,
-                             imgCacheEntry* aCacheEntry,
+  MOZ_MUST_USE nsresult Init(nsIURI* aURI, nsIURI* aFinalURI,
+                             bool aHadInsecureRedirect, nsIRequest* aRequest,
+                             nsIChannel* aChannel, imgCacheEntry* aCacheEntry,
                              nsISupports* aCX,
                              nsIPrincipal* aTriggeringPrincipal,
-                             int32_t aCORSMode,
-                             ReferrerPolicy aReferrerPolicy);
+                             int32_t aCORSMode, ReferrerPolicy aReferrerPolicy);
 
   void ClearLoader();
 
@@ -95,9 +90,7 @@ public:
   // Request that we start decoding the image as soon as data becomes available.
   void StartDecoding();
 
-  inline uint64_t InnerWindowID() const {
-    return mInnerWindowId;
-  }
+  inline uint64_t InnerWindowID() const { return mInnerWindowId; }
 
   // Set the cache validation information (expiry time, whether we must
   // validate, etc) on the cache entry based on the request information.
@@ -125,8 +118,7 @@ public:
 
   // The principal for the document that loaded this image. Used when trying to
   // validate a CORS image load.
-  already_AddRefed<nsIPrincipal> GetTriggeringPrincipal() const
-  {
+  already_AddRefed<nsIPrincipal> GetTriggeringPrincipal() const {
     nsCOMPtr<nsIPrincipal> principal = mTriggeringPrincipal;
     return principal.forget();
   }
@@ -157,9 +149,6 @@ public:
 
   nsresult GetImageErrorCode(void);
 
-  /// Returns true if we've received any data.
-  bool HasTransferredData() const;
-
   /// Returns a non-owning pointer to this imgRequest's MIME type.
   const char* GetMimeType() const { return mContentType.get(); }
 
@@ -177,8 +166,6 @@ public:
   nsIRequest* GetRequest() const { return mRequest; }
 
   nsITimedChannel* GetTimedChannel() const { return mTimedChannel; }
-
-  nsresult GetSecurityInfo(nsISupports** aSecurityInfoOut);
 
   imgCacheValidator* GetValidator() const { return mValidator; }
   void SetValidator(imgCacheValidator* aValidator) { mValidator = aValidator; }
@@ -210,7 +197,7 @@ public:
 
   bool HasConsumers() const;
 
-private:
+ private:
   friend class FinishPreparingForNewPartRunnable;
 
   virtual ~imgRequest();
@@ -238,12 +225,12 @@ private:
   nsCOMPtr<nsIURI> mFinalURI;
   // The principal which triggered the load of this image. Generally either
   // the principal of the document the image is being loaded into, or of the
-  // stylesheet which specified the image to load. Used when validating for CORS.
+  // stylesheet which specified the image to load. Used when validating for
+  // CORS.
   nsCOMPtr<nsIPrincipal> mTriggeringPrincipal;
   // The principal of this image.
   nsCOMPtr<nsIPrincipal> mPrincipal;
   nsCOMPtr<nsIProperties> mProperties;
-  nsCOMPtr<nsISupports> mSecurityInfo;
   nsCOMPtr<nsIChannel> mChannel;
   nsCOMPtr<nsIInterfaceRequestor> mPrevChannelSink;
   nsCOMPtr<nsIApplicationCache> mApplicationCache;
@@ -291,11 +278,10 @@ private:
   RefPtr<ProgressTracker> mProgressTracker;
   RefPtr<Image> mImage;
   bool mIsMultiPartChannel : 1;
-  bool mGotData : 1;
   bool mIsInCache : 1;
   bool mDecodeRequested : 1;
   bool mNewPartPending : 1;
   bool mHadInsecureRedirect : 1;
 };
 
-#endif // mozilla_image_imgRequest_h
+#endif  // mozilla_image_imgRequest_h

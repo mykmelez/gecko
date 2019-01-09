@@ -7,7 +7,7 @@
 #ifndef mozilla_ServoComputedData_h
 #define mozilla_ServoComputedData_h
 
-#include "mozilla/ServoTypes.h"
+class nsWindowSizes;
 
 /*
  * ServoComputedData and its related types.
@@ -18,6 +18,13 @@
 #undef STYLE_STRUCT
 
 namespace mozilla {
+
+template <typename T>
+struct ServoRawOffsetArc {
+  // This is a pointer to a T that lives inside a servo_arc::Arc<T>, and
+  // which already has had its reference count incremented.
+  T* mPtr;
+};
 
 struct ServoWritingMode {
   uint8_t mBits;
@@ -34,10 +41,9 @@ struct ServoRuleNode {
 class ComputedStyle;
 
 struct ServoVisitedStyle {
-  // This is actually a strong reference
-  // but ServoComputedData's destructor is
-  // managed by the Rust code so we just use a
-  // regular pointer
+  // This is actually a strong reference but ServoComputedData's
+  // destructor is managed by the Rust code so we just use a regular
+  // pointer
   ComputedStyle* mPtr;
 };
 
@@ -49,15 +55,15 @@ struct ServoComputedValueFlags {
 #include "nsStyleStructList.h"
 #undef STYLE_STRUCT
 
-} // namespace mozilla
+}  // namespace mozilla
 
 class ServoComputedData;
 
-struct ServoComputedDataForgotten
-{
+struct ServoComputedDataForgotten {
   // Make sure you manually mem::forget the backing ServoComputedData
   // after calling this
-  explicit ServoComputedDataForgotten(const ServoComputedData* aValue) : mPtr(aValue) {}
+  explicit ServoComputedDataForgotten(const ServoComputedData* aValue)
+      : mPtr(aValue) {}
   const ServoComputedData* mPtr;
 };
 
@@ -66,11 +72,10 @@ struct ServoComputedDataForgotten
  * so we define this type on the C++ side and use the bindgenned version
  * on the Rust side.
  */
-class ServoComputedData
-{
+class ServoComputedData {
   friend class mozilla::ComputedStyle;
 
-public:
+ public:
   // Constructs via memcpy.  Will not move out of aValue.
   explicit ServoComputedData(const ServoComputedDataForgotten aValue);
 
@@ -82,7 +87,7 @@ public:
 
   void AddSizeOfExcludingThis(nsWindowSizes& aSizes) const;
 
-private:
+ private:
   mozilla::ServoCustomPropertiesMap custom_properties;
   mozilla::ServoWritingMode writing_mode;
   mozilla::ServoComputedValueFlags flags;
@@ -108,4 +113,4 @@ private:
   ServoComputedData(const ServoComputedData&&) = delete;
 };
 
-#endif // mozilla_ServoComputedData_h
+#endif  // mozilla_ServoComputedData_h

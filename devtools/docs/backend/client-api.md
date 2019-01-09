@@ -21,9 +21,6 @@ function start() {
   // Start the client.
   client = new DebuggerClient(transport);
 
-  // Attach listeners for client events.
-  client.addListener("tabNavigated", onTab);
-  client.addListener("newScript", onScript);
   client.connect((type, traits) => {
     // Now the client is conected to the server.
     debugTab();
@@ -52,10 +49,6 @@ async function startClient() {
   // Start the client.
   client = new DebuggerClient(transport);
 
-  // Attach listeners for client events.
-  client.addListener("tabNavigated", onTab);
-  client.addListener("newScript", onScript);
-
   client.connect((type, traits) => {
     // Now the client is conected to the server.
     debugTab();
@@ -80,17 +73,16 @@ Attaching to a browser tab requires enumerating the available tabs and attaching
 ```javascript
 function attachToTab() {
   // Get the list of tabs to find the one to attach to.
-  client.listTabs().then((response) => {
+  client.mainRoot.listTabs().then(tabs => {
     // Find the active tab.
-    let tab = response.tabs[response.selected];
+    let targetFront = tabs.find(tab => tab.selected);
 
     // Attach to the tab.
-    client.attachTab(tab.actor).then(([response, tabClient]) => {
-      if (!tabClient) {
-        return;
-      }
+    targetFront.attach().then(() => {
+      // Now the targetFront is ready and can be used.
 
-      // Now the tabClient is ready and can be used.
+      // Attach listeners for client events.
+      targetFront.addListener("tabNavigated", onTab);
     });
   });
 }
@@ -103,15 +95,13 @@ The debugger client will send event notifications for a number of events the app
 When the user navigates away from a page, a `tabNavigated` event will be fired. The proper way to handle this event is to detach from the previous thread and tab and attach to the new ones:
 
 ```javascript
-function onTab() {
+async function onTab() {
   // Detach from the previous thread.
-  client.activeThread.detach(() => {
-    // Detach from the previous tab.
-    client.activeTab.detach(() => {
-      // Start debugging the new tab.
-      start();
-    });
-  });
+  await client.activeThread.detach();
+  // Detach from the previous tab.
+  await targetFront.activeTab.detach();
+  // Start debugging the new tab.
+  start();
 }
 ```
 
@@ -121,7 +111,7 @@ Once the application is attached to a tab, it can attach to its thread in order 
 
 ```javascript
 // Assuming the application is already attached to the tab, and response is the first
-// argument of the attachTab callback.
+// argument of the attachTarget callback.
 
 client.attachThread(response.threadActor).then(function([response, threadClient]) {
   if (!threadClient) {
@@ -173,9 +163,6 @@ function startDebugger() {
 
   // Start the client.
   client = new DebuggerClient(transport);
-  // Attach listeners for client events.
-  client.addListener("tabNavigated", onTab);
-  client.addListener("newScript", fooListener);
   client.connect((type, traits) => {
     // Now the client is conected to the server.
     debugTab();
@@ -191,22 +178,13 @@ function shutdownDebugger() {
  */
 function debugTab() {
   // Get the list of tabs to find the one to attach to.
-  client.listTabs().then(response => {
+  client.mainRoot.listTabs().then(tabs => {
     // Find the active tab.
-    let tab = response.tabs[response.selected];
+    let targetFront = tabs.find(tab => tab.selected);
     // Attach to the tab.
-    client.attachTab(tab.actor).then(([response, tabClient]) => {
-      if (!tabClient) {
-        return;
-      }
-
+    targetFront.attach().then(() => {
       // Attach to the thread (context).
-      client.attachThread(response.threadActor, (response, thread) => {
-        if (!thread) {
-          return;
-        }
-
-        threadClient = thread;
+      targetFront.attachThread().then(([response, threadClient]) => {
         // Attach listeners for thread events.
         threadClient.addListener("paused", onPause);
         threadClient.addListener("resumed", fooListener);

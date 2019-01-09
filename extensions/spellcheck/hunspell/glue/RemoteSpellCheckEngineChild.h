@@ -13,24 +13,19 @@ class mozSpellChecker;
 
 namespace mozilla {
 
-class RemoteSpellcheckEngineChild : public mozilla::PRemoteSpellcheckEngineChild
-{
-public:
+class RemoteSpellcheckEngineChild
+    : public mozilla::PRemoteSpellcheckEngineChild {
+ public:
   explicit RemoteSpellcheckEngineChild(mozSpellChecker *aOwner);
   virtual ~RemoteSpellcheckEngineChild();
 
-  virtual mozilla::ipc::IPCResult RecvNotifyOfCurrentDictionary(
-                                    const nsString& aDictionary,
-                                    const intptr_t& aPromiseId) override;
-
   RefPtr<GenericPromise> SetCurrentDictionaryFromList(
-                           const nsTArray<nsString>& aList);
+      const nsTArray<nsString> &aList);
 
-private:
+ private:
   mozSpellChecker *mOwner;
-  nsTArray<UniquePtr<MozPromiseHolder<GenericPromise>>> mResponsePromises;
 };
 
-} //namespace mozilla
+}  // namespace mozilla
 
-#endif // RemoteSpellcheckEngineChild_h_
+#endif  // RemoteSpellcheckEngineChild_h_

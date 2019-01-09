@@ -1,6 +1,6 @@
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", this);
 
 
 /**
@@ -98,8 +98,7 @@ function setTestPluginEnabledState(newEnabledState, pluginName) {
 }
 
 function disable_non_test_mouse(disable) {
-  let utils = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                    .getInterface(Ci.nsIDOMWindowUtils);
+  let utils = window.windowUtils;
   utils.disableNonTestMouseEvents(disable);
 }
 
@@ -143,14 +142,7 @@ class DateTimeTestHelper {
   async openPicker(pageUrl) {
     this.tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, pageUrl);
     await BrowserTestUtils.synthesizeMouseAtCenter("input", {}, gBrowser.selectedBrowser);
-    // If dateTimePopupFrame doesn't exist yet, wait for the binding to be
-    // attached.
-    // FIXME: This has a race condition and we may miss the following events.
-    //        (bug 1423498)
-    if (!this.panel.dateTimePopupFrame) {
-      await BrowserTestUtils.waitForEvent(this.panel, "DateTimePickerBindingReady");
-    }
-    this.frame = this.panel.dateTimePopupFrame;
+    this.frame = this.panel.querySelector("#dateTimePopupFrame");
     await this.waitForPickerReady();
   }
 
@@ -208,7 +200,6 @@ class DateTimeTestHelper {
         this.panel.addEventListener("popuphidden", resolve, {once: true});
       });
       this.panel.hidePopup();
-      this.panel.closePicker();
       await pickerClosePromise;
     }
     BrowserTestUtils.removeTab(this.tab);
@@ -236,4 +227,73 @@ function once(target, name) {
     }, {once: true});
   });
   return p;
+}
+
+// Runs a content script that creates an autoplay video.
+//  browser: the browser to run the script in.
+//  args: test case definition, required members {
+//    mode: String, "autoplay attribute" or "call play".
+//  }
+function loadAutoplayVideo(browser, args) {
+  return ContentTask.spawn(browser, args, async (args) => {
+    info("- create a new autoplay video -");
+    let video = content.document.createElement("video");
+    video.id = "v1";
+    video.didPlayPromise = new Promise((resolve, reject) => {
+      video.addEventListener("playing", (e) => {
+        video.didPlay = true;
+        resolve();
+      }, {once: true});
+      video.addEventListener("blocked", (e) => {
+        video.didPlay = false;
+        resolve();
+      }, {once: true});
+    });
+    if (args.mode == "autoplay attribute") {
+      info("autoplay attribute set to true");
+      video.autoplay = true;
+    } else if (args.mode == "call play") {
+      info("will call play() when reached loadedmetadata");
+      video.addEventListener("loadedmetadata", (e) => {
+        video.play().then(
+          () => {
+            info("video play() resolved");
+          },
+          () => {
+            info("video play() rejected");
+          });
+      }, {once: true});
+    } else {
+      ok(false, "Invalid 'mode' arg");
+    }
+    video.src = "gizmo.mp4";
+    content.document.body.appendChild(video);
+  });
+}
+
+// Runs a content script that checks whether the video created by
+// loadAutoplayVideo() started playing.
+// Parameters:
+//  browser: the browser to run the script in.
+//  args: test case definition, required members {
+//    name: String, description of test.
+//    mode: String, "autoplay attribute" or "call play".
+//    shouldPlay: boolean, whether video should play.
+//  }
+function checkVideoDidPlay(browser, args) {
+  return ContentTask.spawn(browser, args, async (args) => {
+    let video = content.document.getElementById("v1");
+    await video.didPlayPromise;
+    is(video.didPlay, args.shouldPlay,
+      args.name + " should " + (!args.shouldPlay ? "not " : "") + "be able to autoplay");
+    video.src = "";
+    content.document.body.remove(video);
+  });
+}
+
+// The JS content loaded by frame script can be used across different content
+// tasks.
+function loadFrameScript(browser, fn) {
+  const mm = browser.messageManager;
+  mm.loadFrameScript("data:,(" + fn.toString() + ")();", false);
 }

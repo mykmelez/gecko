@@ -2,43 +2,45 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 """
-Transform the beetmover task into an actual task description.
+Transform the per-locale balrog task into an actual task description.
 """
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+from taskgraph.loader.single_dep import schema
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.schema import validate_schema, Schema
+from taskgraph.util.schema import (
+    optionally_keyed_by, resolve_keyed_by,
+)
 from taskgraph.util.scriptworker import (
     get_balrog_server_scope, get_worker_type_for_scope
 )
+from taskgraph.util.treeherder import replace_group
 from taskgraph.transforms.task import task_description_schema
-from voluptuous import Any, Required, Optional
+from voluptuous import Optional
 
 
 # Voluptuous uses marker objects as dictionary *keys*, but they are not
 # comparable, so we cast all of the keys back to regular strings
 task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
 
-transforms = TransformSequence()
-
-# shortcut for a string where task references are allowed
-taskref_or_string = Any(
-    basestring,
-    {Required('task-reference'): basestring})
-
-balrog_description_schema = Schema({
-    # the dependent task (object) for this balrog job, used to inform balrogworker.
-    Required('dependent-task'): object,
-
+balrog_description_schema = schema.extend({
     # unique label to describe this balrog task, defaults to balrog-{dep.label}
     Optional('label'): basestring,
+
+
+    Optional(
+        'update-no-wnp',
+        description="Whether the parallel `-No-WNP` blob should be updated as well.",
+    ): optionally_keyed_by('release-type', bool),
 
     # treeherder is allowed here to override any defaults we use for beetmover.  See
     # taskcluster/taskgraph/transforms/task.py for the schema details, and the
     # below transforms for defaults of various values.
     Optional('treeherder'): task_description_schema['treeherder'],
+
+    Optional('attributes'): task_description_schema['attributes'],
 
     # Shipping product / phase
     Optional('shipping-product'): task_description_schema['shipping-product'],
@@ -46,21 +48,33 @@ balrog_description_schema = Schema({
 })
 
 
+transforms = TransformSequence()
+transforms.add_validate(balrog_description_schema)
+
+
 @transforms.add
-def validate(config, jobs):
+def handle_keyed_by(config, jobs):
+    """Resolve fields that can be keyed by platform, etc."""
+    fields = [
+        "update-no-wnp",
+    ]
     for job in jobs:
         label = job.get('dependent-task', object).__dict__.get('label', '?no-label?')
-        validate_schema(
-            balrog_description_schema, job,
-            "In balrog ({!r} kind) task for {!r}:".format(config.kind, label))
-
+        for field in fields:
+            resolve_keyed_by(
+                item=job, field=field, item_name=label,
+                **{
+                    'project': config.params['project'],
+                    'release-type': config.params['release_type'],
+                }
+            )
         yield job
 
 
 @transforms.add
 def make_task_description(config, jobs):
     for job in jobs:
-        dep_job = job['dependent-task']
+        dep_job = job['primary-dependency']
 
         treeherder = job.get('treeherder', {})
         treeherder.setdefault('symbol', 'c-Up(N)')
@@ -68,15 +82,18 @@ def make_task_description(config, jobs):
             'treeherder', {}).get('machine', {}).get('platform', '')
         treeherder.setdefault('platform',
                               "{}/opt".format(dep_th_platform))
-        treeherder.setdefault('tier', 1)
+        treeherder.setdefault(
+            'tier',
+            dep_job.task.get('extra', {}).get('treeherder', {}).get('tier', 1)
+        )
         treeherder.setdefault('kind', 'build')
 
         attributes = copy_attributes_from_dependent_job(dep_job)
 
-        treeherder_job_symbol = dep_job.attributes.get('locale', 'N')
+        treeherder_job_symbol = dep_job.task['extra']['treeherder']['symbol']
+        treeherder['symbol'] = replace_group(treeherder_job_symbol, 'c-Up')
 
         if dep_job.attributes.get('locale'):
-            treeherder['symbol'] = 'c-Up({})'.format(treeherder_job_symbol)
             attributes['locale'] = dep_job.attributes.get('locale')
 
         label = job['label']
@@ -108,6 +125,7 @@ def make_task_description(config, jobs):
                 'implementation': 'balrog',
                 'upstream-artifacts': upstream_artifacts,
                 'balrog-action': 'submit-locale',
+                'suffixes': ['', '-No-WNP'] if job.get('update-no-wnp') else [''],
             },
             'dependencies': {'beetmover': dep_job.label},
             'attributes': attributes,

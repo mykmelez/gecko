@@ -215,7 +215,7 @@ function snippetToURL(snippet, bodyAttrs = {}) {
   let attrs = Object.assign({}, { id: "body" }, bodyAttrs);
   let attrsString = Object.entries(attrs).map(
     ([attr, value]) => `${attr}=${JSON.stringify(value)}`).join(" ");
-  let encodedDoc = btoa(
+  let encodedDoc = encodeURIComponent(
     `<html>
       <head>
         <meta charset="utf-8"/>
@@ -224,7 +224,7 @@ function snippetToURL(snippet, bodyAttrs = {}) {
       <body ${attrsString}>${snippet}</body>
     </html>`);
 
-  return `data:text/html;charset=utf-8;base64,${encodedDoc}`;
+  return `data:text/html;charset=utf-8,${encodedDoc}`;
 }
 
 /**
@@ -246,11 +246,8 @@ function addAccessibleTask(doc, task) {
     }
 
     registerCleanupFunction(() => {
-      let observers = Services.obs.enumerateObservers("accessible-event");
-      while (observers.hasMoreElements()) {
-        Services.obs.removeObserver(
-          observers.getNext().QueryInterface(Ci.nsIObserver),
-          "accessible-event");
+      for (let observer of Services.obs.enumerateObservers("accessible-event")) {
+        Services.obs.removeObserver(observer, "accessible-event");
       }
     });
 

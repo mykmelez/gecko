@@ -34,6 +34,8 @@ loader.lazyRequireGetter(this, "openContentLink", "devtools/client/shared/link",
  *        - {Function} openSidebar (optional) function that will open the object
  *            inspector sidebar
  *        - {String} rootActorId (optional) actor id for the root object being clicked on
+ *        - {Object} executionPoint (optional) when replaying, the execution point where
+ *            this message was logged
  */
 function createContextMenu(hud, parentNode, {
   actor,
@@ -43,6 +45,8 @@ function createContextMenu(hud, parentNode, {
   serviceContainer,
   openSidebar,
   rootActorId,
+  executionPoint,
+  toolbox,
 }) {
   const win = parentNode.ownerDocument.defaultView;
   const selection = win.getSelection();
@@ -50,7 +54,7 @@ function createContextMenu(hud, parentNode, {
   const { source, request } = message || {};
 
   const menu = new Menu({
-    id: "webconsole-menu"
+    id: "webconsole-menu",
   });
 
   // Copy URL for a network request.
@@ -74,7 +78,7 @@ function createContextMenu(hud, parentNode, {
       label: l10n.getStr("webconsole.menu.openInNetworkPanel.label"),
       accesskey: l10n.getStr("webconsole.menu.openInNetworkPanel.accesskey"),
       visible: source === MESSAGE_SOURCE.NETWORK,
-      click: () => serviceContainer.openNetworkPanel(message.messageId)
+      click: () => serviceContainer.openNetworkPanel(message.messageId),
     }));
   }
 
@@ -174,6 +178,19 @@ function createContextMenu(hud, parentNode, {
       accesskey: l10n.getStr("webconsole.menu.openInSidebar.accesskey"),
       disabled: !rootActorId,
       click: () => openSidebar(message.messageId),
+    }));
+  }
+
+  // Add time warp option if available.
+  if (executionPoint) {
+    menu.append(new MenuItem({
+      id: "console-menu-time-warp",
+      label: l10n.getStr("webconsole.menu.timeWarp.label"),
+      disabled: false,
+      click: () => {
+        const threadClient = toolbox.threadClient;
+        threadClient.timeWarp(executionPoint);
+      },
     }));
   }
 

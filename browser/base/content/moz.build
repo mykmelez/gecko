@@ -37,6 +37,9 @@ with Files("test/forms/**"):
 with Files("test/historySwipeAnimation/**"):
     BUG_COMPONENT = ("Core", "Widget: Cocoa")
 
+with Files("test/keyboard/**"):
+    BUG_COMPONENT = ("Firefox", "Keyboard Navigation")
+
 with Files("test/pageinfo/**"):
     BUG_COMPONENT = ("Firefox", "Page Info Window")
 
@@ -120,9 +123,6 @@ with Files("browser-compacttheme.js"):
     BUG_COMPONENT = ("Firefox", "Themes")
 
 with Files("browser-customization.js"):
-    BUG_COMPONENT = ("Firefox", "Toolbars and Customization")
-
-with Files("browser-feeds.js"):
     BUG_COMPONENT = ("Firefox", "Toolbars and Customization")
 
 with Files("browser-fullZoom.js"):

@@ -11,87 +11,27 @@
 namespace mozilla {
 namespace dom {
 
-// Time between sampling timeout execution time.
-const uint32_t kTelemetryPeriodMS = 1000;
-
-/* static */ TimeoutBudgetManager&
-TimeoutBudgetManager::Get()
-{
+/* static */ TimeoutBudgetManager& TimeoutBudgetManager::Get() {
   static TimeoutBudgetManager gTimeoutBudgetManager;
   return gTimeoutBudgetManager;
 }
 
-void
-TimeoutBudgetManager::StartRecording(const TimeStamp& aNow)
-{
+void TimeoutBudgetManager::StartRecording(const TimeStamp& aNow) {
   mStart = aNow;
 }
 
-void
-TimeoutBudgetManager::StopRecording()
-{
-  mStart = TimeStamp();
-}
+void TimeoutBudgetManager::StopRecording() { mStart = TimeStamp(); }
 
-TimeDuration
-TimeoutBudgetManager::RecordExecution(const TimeStamp& aNow,
-                                      const Timeout* aTimeout,
-                                      bool aIsBackground)
-{
+TimeDuration TimeoutBudgetManager::RecordExecution(const TimeStamp& aNow,
+                                                   const Timeout* aTimeout) {
   if (!mStart) {
     // If we've started a sync operation mStart might be null, in
     // which case we should not record this piece of execution.
     return TimeDuration();
   }
 
-  TimeDuration duration = aNow - mStart;
-
-  if (aIsBackground) {
-    if (aTimeout->mIsTracking) {
-      mTelemetryData.mBackgroundTracking += duration;
-    } else {
-      mTelemetryData.mBackgroundNonTracking += duration;
-    }
-  } else {
-    if (aTimeout->mIsTracking) {
-      mTelemetryData.mForegroundTracking += duration;
-    } else {
-      mTelemetryData.mForegroundNonTracking += duration;
-    }
-  }
-
-  return duration;
+  return aNow - mStart;
 }
 
-void
-TimeoutBudgetManager::Accumulate(Telemetry::HistogramID aId,
-                                 const TimeDuration& aSample)
-{
-  uint32_t sample = std::round(aSample.ToMilliseconds());
-  if (sample) {
-    Telemetry::Accumulate(aId, sample);
-  }
-}
-
-void
-TimeoutBudgetManager::MaybeCollectTelemetry(const TimeStamp& aNow)
-{
-  if ((aNow - mLastCollection).ToMilliseconds() < kTelemetryPeriodMS) {
-    return;
-  }
-
-  Accumulate(Telemetry::TIMEOUT_EXECUTION_FG_TRACKING_MS,
-             mTelemetryData.mForegroundTracking);
-  Accumulate(Telemetry::TIMEOUT_EXECUTION_FG_MS,
-             mTelemetryData.mForegroundNonTracking);
-  Accumulate(Telemetry::TIMEOUT_EXECUTION_BG_TRACKING_MS,
-             mTelemetryData.mBackgroundTracking);
-  Accumulate(Telemetry::TIMEOUT_EXECUTION_BG_MS,
-             mTelemetryData.mBackgroundNonTracking);
-
-  mTelemetryData = TelemetryData();
-  mLastCollection = aNow;
-}
-
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla

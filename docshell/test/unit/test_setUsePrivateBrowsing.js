@@ -6,10 +6,9 @@ ChromeUtils.import("resource://gre/modules/Services.jsm");
 add_task(async function() {
   let webNav = Services.appShell.createWindowlessBrowser(false);
 
-  let loadContext = webNav.QueryInterface(Ci.nsIInterfaceRequestor)
-                          .getInterface(Ci.nsILoadContext);
+  let docShell = webNav.docShell;
 
-  let docShell = webNav.getInterface(Ci.nsIDocShell);
+  let loadContext = docShell.QueryInterface(Ci.nsILoadContext);
 
   equal(loadContext.usePrivateBrowsing, false, "Should start out in non-private mode");
 
@@ -35,7 +34,8 @@ add_task(async function() {
   equal(loadContext.usePrivateBrowsing, false,
         "Should be able to change origin attributes prior to a document load");
 
-  webNav.loadURI("data:text/html,", webNav.LOAD_FLAGS_NONE, null, null, null);
+  let systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
+  webNav.loadURI("data:text/html,", webNav.LOAD_FLAGS_NONE, null, null, null, systemPrincipal);
 
   // Return to the event loop so the load can begin.
   await new Promise(executeSoon);

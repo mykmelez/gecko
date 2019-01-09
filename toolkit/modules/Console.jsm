@@ -22,11 +22,8 @@
 
 var EXPORTED_SYMBOLS = [ "console", "ConsoleAPI" ];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-
 ChromeUtils.defineModuleGetter(this, "Services",
                                "resource://gre/modules/Services.jsm");
-Cu.importGlobalProperties(["Element"]);
 
 var gTimerRegistry = new Map();
 
@@ -343,7 +340,7 @@ function parseStack(aStack) {
     trace.push({
       filename: posn.split(":")[0],
       lineNumber: posn.split(":")[1],
-      functionName: line.substring(0, at)
+      functionName: line.substring(0, at),
     });
   });
   return trace;
@@ -700,8 +697,8 @@ ConsoleAPI.prototype = {
     Services.obs.notifyObservers({
       wrappedJSObject: {
         action: "profile",
-        arguments: [ profileName ]
-      }
+        arguments: [ profileName ],
+      },
     }, "console-api-profiler");
     dumpMessage(this, "profile", `'${profileName}'`);
   },
@@ -713,8 +710,8 @@ ConsoleAPI.prototype = {
     Services.obs.notifyObservers({
       wrappedJSObject: {
         action: "profileEnd",
-        arguments: [ profileName ]
-      }
+        arguments: [ profileName ],
+      },
     }, "console-api-profiler");
     dumpMessage(this, "profileEnd", `'${profileName}'`);
   },

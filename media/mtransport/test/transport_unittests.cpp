@@ -10,15 +10,15 @@
 #include <string>
 #include <map>
 #include <algorithm>
+#include <functional>
 
 #include "mozilla/UniquePtr.h"
 
 #include "sigslot.h"
 
 #include "logging.h"
-#include "nspr.h"
-#include "nss.h"
 #include "ssl.h"
+#include "sslexp.h"
 #include "sslproto.h"
 
 #include "nsThreadUtils.h"
@@ -26,7 +26,7 @@
 
 #include "mediapacket.h"
 #include "dtlsidentity.h"
-#include "nricectxhandler.h"
+#include "nricectx.h"
 #include "nricemediastream.h"
 #include "transportflow.h"
 #include "transportlayer.h"
@@ -44,33 +44,38 @@
 using namespace mozilla;
 MOZ_MTLOG_MODULE("mtransport")
 
-
 const uint8_t kTlsChangeCipherSpecType = 0x14;
-const uint8_t kTlsHandshakeType =        0x16;
+const uint8_t kTlsHandshakeType = 0x16;
 
 const uint8_t kTlsHandshakeCertificate = 0x0b;
 const uint8_t kTlsHandshakeServerKeyExchange = 0x0c;
 
 const uint8_t kTlsFakeChangeCipherSpec[] = {
-  kTlsChangeCipherSpecType,  // Type
-  0xfe, 0xff, // Version
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, // Fictitious sequence #
-  0x00, 0x01, // Length
-  0x01 // Value
+    kTlsChangeCipherSpecType,  // Type
+    0xfe,
+    0xff,  // Version
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x10,  // Fictitious sequence #
+    0x00,
+    0x01,  // Length
+    0x01   // Value
 };
 
 // Layer class which can't be initialized.
 class TransportLayerDummy : public TransportLayer {
  public:
-  TransportLayerDummy(bool allow_init, bool *destroyed)
-      : allow_init_(allow_init),
-        destroyed_(destroyed) {
+  TransportLayerDummy(bool allow_init, bool* destroyed)
+      : allow_init_(allow_init), destroyed_(destroyed) {
     *destroyed_ = false;
   }
 
-  virtual ~TransportLayerDummy() {
-    *destroyed_ = true;
-  }
+  virtual ~TransportLayerDummy() { *destroyed_ = true; }
 
   nsresult InitInternal() override {
     return allow_init_ ? NS_OK : NS_ERROR_FAILURE;
@@ -85,22 +90,22 @@ class TransportLayerDummy : public TransportLayer {
 
  private:
   bool allow_init_;
-  bool *destroyed_;
+  bool* destroyed_;
 };
 
 class Inspector {
  public:
   virtual ~Inspector() {}
 
-  virtual void Inspect(TransportLayer* layer,
-                       const unsigned char *data, size_t len) = 0;
+  virtual void Inspect(TransportLayer* layer, const unsigned char* data,
+                       size_t len) = 0;
 };
 
 // Class to simulate various kinds of network lossage
 class TransportLayerLossy : public TransportLayer {
  public:
   TransportLayerLossy() : loss_mask_(0), packet_(0), inspector_(nullptr) {}
-  ~TransportLayerLossy () {}
+  ~TransportLayerLossy() {}
 
   TransportResult SendPacket(MediaPacket& packet) override {
     MOZ_MTLOG(ML_NOTICE, LAYER_INFO << "SendPacket(" << packet.len() << ")");
@@ -119,19 +124,15 @@ class TransportLayerLossy : public TransportLayer {
     return downward_->SendPacket(packet);
   }
 
-  void SetLoss(uint32_t packet) {
-    loss_mask_ |= (1 << (packet & 32));
-  }
+  void SetLoss(uint32_t packet) { loss_mask_ |= (1 << (packet & 32)); }
 
   void SetInspector(UniquePtr<Inspector> inspector) {
     inspector_ = std::move(inspector);
   }
 
-  void StateChange(TransportLayer *layer, State state) {
-    TL_SET_STATE(state);
-  }
+  void StateChange(TransportLayer* layer, State state) { TL_SET_STATE(state); }
 
-  void PacketReceived(TransportLayer *layer, MediaPacket& packet) {
+  void PacketReceived(TransportLayer* layer, MediaPacket& packet) {
     SignalPacketReceived(this, packet);
   }
 
@@ -139,12 +140,10 @@ class TransportLayerLossy : public TransportLayer {
 
  protected:
   void WasInserted() override {
-    downward_->SignalPacketReceived.
-        connect(this,
-                &TransportLayerLossy::PacketReceived);
-    downward_->SignalStateChange.
-        connect(this,
-                &TransportLayerLossy::StateChange);
+    downward_->SignalPacketReceived.connect(
+        this, &TransportLayerLossy::PacketReceived);
+    downward_->SignalStateChange.connect(this,
+                                         &TransportLayerLossy::StateChange);
 
     TL_SET_STATE(downward_->state());
   }
@@ -156,16 +155,15 @@ class TransportLayerLossy : public TransportLayer {
 };
 
 // Process DTLS Records
-#define CHECK_LENGTH(expected) \
-  do { \
-    EXPECT_GE(remaining(), expected); \
+#define CHECK_LENGTH(expected)                \
+  do {                                        \
+    EXPECT_GE(remaining(), expected);         \
     if (remaining() < expected) return false; \
-  } while(0)
+  } while (0)
 
 class TlsParser {
  public:
-  TlsParser(const unsigned char *data, size_t len)
-      : buffer_(), offset_(0) {
+  TlsParser(const unsigned char* data, size_t len) : buffer_(), offset_(0) {
     buffer_.Copy(data, len);
   }
 
@@ -179,17 +177,15 @@ class TlsParser {
   }
 
   // Read an integral type of specified width.
-  bool Read(uint32_t *val, size_t len) {
-    if (len > sizeof(uint32_t))
-      return false;
+  bool Read(uint32_t* val, size_t len) {
+    if (len > sizeof(uint32_t)) return false;
 
     *val = 0;
 
-    for (size_t i=0; i<len; ++i) {
+    for (size_t i = 0; i < len; ++i) {
       unsigned char tmp;
 
-      if (!Read(&tmp))
-        return false;
+      if (!Read(&tmp)) return false;
 
       (*val) = ((*val) << 8) + tmp;
     }
@@ -212,7 +208,7 @@ class TlsParser {
 
  private:
   size_t remaining() const { return buffer_.len() - offset_; }
-  const uint8_t *ptr() const { return buffer_.data() + offset_; }
+  const uint8_t* ptr() const { return buffer_.data() + offset_; }
   void consume(size_t len) { offset_ += len; }
 
   MediaPacket buffer_;
@@ -221,20 +217,19 @@ class TlsParser {
 
 class DtlsRecordParser {
  public:
-  DtlsRecordParser(const unsigned char *data, size_t len)
+  DtlsRecordParser(const unsigned char* data, size_t len)
       : buffer_(), offset_(0) {
     buffer_.Copy(data, len);
   }
 
   bool NextRecord(uint8_t* ct, nsAutoPtr<MediaPacket>* buffer) {
-    if (!remaining())
-      return false;
+    if (!remaining()) return false;
 
     CHECK_LENGTH(13U);
-    const uint8_t *ctp = reinterpret_cast<const uint8_t *>(ptr());
-    consume(11); // ct + version + length
+    const uint8_t* ctp = reinterpret_cast<const uint8_t*>(ptr());
+    consume(11);  // ct + version + length
 
-    const uint16_t *tmp = reinterpret_cast<const uint16_t*>(ptr());
+    const uint16_t* tmp = reinterpret_cast<const uint16_t*>(ptr());
     size_t length = ntohs(*tmp);
     consume(2);
 
@@ -251,33 +246,30 @@ class DtlsRecordParser {
 
  private:
   size_t remaining() const { return buffer_.len() - offset_; }
-  const uint8_t *ptr() const { return buffer_.data() + offset_; }
+  const uint8_t* ptr() const { return buffer_.data() + offset_; }
   void consume(size_t len) { offset_ += len; }
 
   MediaPacket buffer_;
   size_t offset_;
 };
 
-
 // Inspector that parses out DTLS records and passes
 // them on.
 class DtlsRecordInspector : public Inspector {
  public:
-  virtual void Inspect(TransportLayer* layer,
-                       const unsigned char *data, size_t len) {
+  virtual void Inspect(TransportLayer* layer, const unsigned char* data,
+                       size_t len) {
     DtlsRecordParser parser(data, len);
 
     uint8_t ct;
     nsAutoPtr<MediaPacket> buf;
-    while(parser.NextRecord(&ct, &buf)) {
+    while (parser.NextRecord(&ct, &buf)) {
       OnRecord(layer, ct, buf->data(), buf->len());
     }
   }
 
-  virtual void OnRecord(TransportLayer* layer,
-                        uint8_t content_type,
-                        const unsigned char *record,
-                        size_t len) = 0;
+  virtual void OnRecord(TransportLayer* layer, uint8_t content_type,
+                        const unsigned char* record, size_t len) = 0;
 };
 
 // Inspector that injects arbitrary packets based on
@@ -285,15 +277,13 @@ class DtlsRecordInspector : public Inspector {
 class DtlsInspectorInjector : public DtlsRecordInspector {
  public:
   DtlsInspectorInjector(uint8_t packet_type, uint8_t handshake_type,
-                        const unsigned char *data, size_t len) :
-      packet_type_(packet_type),
-      handshake_type_(handshake_type) {
+                        const unsigned char* data, size_t len)
+      : packet_type_(packet_type), handshake_type_(handshake_type) {
     packet_.Copy(data, len);
   }
 
-  virtual void OnRecord(TransportLayer* layer,
-                        uint8_t content_type,
-                        const unsigned char *data, size_t len) {
+  virtual void OnRecord(TransportLayer* layer, uint8_t content_type,
+                        const unsigned char* data, size_t len) {
     // Only inject once.
     if (!packet_.data()) {
       return;
@@ -330,12 +320,10 @@ class DtlsInspectorInjector : public DtlsRecordInspector {
 class DtlsInspectorRecordHandshakeMessage : public DtlsRecordInspector {
  public:
   explicit DtlsInspectorRecordHandshakeMessage(uint8_t handshake_type)
-      : handshake_type_(handshake_type),
-        buffer_() {}
+      : handshake_type_(handshake_type), buffer_() {}
 
-  virtual void OnRecord(TransportLayer* layer,
-                        uint8_t content_type,
-                        const unsigned char *data, size_t len) {
+  virtual void OnRecord(TransportLayer* layer, uint8_t content_type,
+                        const unsigned char* data, size_t len) {
     // Only do this once.
     if (buffer_.len()) {
       return;
@@ -435,47 +423,46 @@ class TlsServerKeyExchangeECDHE {
 namespace {
 class TransportTestPeer : public sigslot::has_slots<> {
  public:
-  TransportTestPeer(nsCOMPtr<nsIEventTarget> target, std::string name, MtransportTestUtils* utils)
-      : name_(name), offerer_(name == "P1"), target_(target),
-        received_packets_(0),received_bytes_(0),flow_(new TransportFlow(name)),
+  TransportTestPeer(nsCOMPtr<nsIEventTarget> target, std::string name,
+                    MtransportTestUtils* utils)
+      : name_(name),
+        offerer_(name == "P1"),
+        target_(target),
+        received_packets_(0),
+        received_bytes_(0),
+        flow_(new TransportFlow(name)),
         loopback_(new TransportLayerLoopback()),
         logging_(new TransportLayerLogging()),
         lossy_(new TransportLayerLossy()),
         dtls_(new TransportLayerDtls()),
         identity_(DtlsIdentity::Generate()),
-        ice_ctx_(NrIceCtxHandler::Create(name)),
-        streams_(), candidates_(),
+        ice_ctx_(NrIceCtx::Create(name)),
+        streams_(),
         peer_(nullptr),
         gathering_complete_(false),
         enabled_cipersuites_(),
         disabled_cipersuites_(),
-        reuse_dhe_key_(false),
         test_utils_(utils) {
     std::vector<NrIceStunServer> stun_servers;
     UniquePtr<NrIceStunServer> server(NrIceStunServer::Create(
-        std::string((char *)"stun.services.mozilla.com"), 3478));
+        std::string((char*)"stun.services.mozilla.com"), 3478));
     stun_servers.push_back(*server);
-    EXPECT_TRUE(NS_SUCCEEDED(ice_ctx_->ctx()->SetStunServers(stun_servers)));
+    EXPECT_TRUE(NS_SUCCEEDED(ice_ctx_->SetStunServers(stun_servers)));
 
     dtls_->SetIdentity(identity_);
-    dtls_->SetRole(offerer_ ?
-                   TransportLayerDtls::SERVER :
-                   TransportLayerDtls::CLIENT);
+    dtls_->SetRole(offerer_ ? TransportLayerDtls::SERVER
+                            : TransportLayerDtls::CLIENT);
 
-    nsresult res = identity_->ComputeFingerprint("sha-1",
-                                             fingerprint_,
-                                             sizeof(fingerprint_),
-                                             &fingerprint_len_);
+    nsresult res = identity_->ComputeFingerprint(
+        "sha-1", fingerprint_, sizeof(fingerprint_), &fingerprint_len_);
     EXPECT_TRUE(NS_SUCCEEDED(res));
     EXPECT_EQ(20u, fingerprint_len_);
   }
 
   ~TransportTestPeer() {
     test_utils_->sts_target()->Dispatch(
-      WrapRunnable(this, &TransportTestPeer::DestroyFlow),
-      NS_DISPATCH_SYNC);
+        WrapRunnable(this, &TransportTestPeer::DestroyFlow), NS_DISPATCH_SYNC);
   }
-
 
   void DestroyFlow() {
     disconnect_all();
@@ -483,6 +470,7 @@ class TransportTestPeer : public sigslot::has_slots<> {
       loopback_->Disconnect();
       flow_ = nullptr;
     }
+    ice_ctx_->Destroy();
     ice_ctx_ = nullptr;
     streams_.clear();
   }
@@ -490,7 +478,7 @@ class TransportTestPeer : public sigslot::has_slots<> {
   void DisconnectDestroyFlow() {
     loopback_->Disconnect();
     disconnect_all();  // Disconnect from the signals;
-     flow_ = nullptr;
+    flow_ = nullptr;
   }
 
   void SetDtlsAllowAll() {
@@ -500,7 +488,7 @@ class TransportTestPeer : public sigslot::has_slots<> {
 
   void SetAlpn(std::string str, bool withDefault, std::string extra = "") {
     std::set<std::string> alpn;
-    alpn.insert(str); // the one we want to select
+    alpn.insert(str);  // the one we want to select
     if (!extra.empty()) {
       alpn.insert(extra);
     }
@@ -508,26 +496,19 @@ class TransportTestPeer : public sigslot::has_slots<> {
     ASSERT_EQ(NS_OK, res);
   }
 
-  const std::string& GetAlpn() const {
-    return dtls_->GetNegotiatedAlpn();
-  }
+  const std::string& GetAlpn() const { return dtls_->GetNegotiatedAlpn(); }
 
-  void SetDtlsPeer(TransportTestPeer *peer, int digests, unsigned int damage) {
+  void SetDtlsPeer(TransportTestPeer* peer, int digests, unsigned int damage) {
     unsigned int mask = 1;
 
-    for (int i=0; i<digests; i++) {
+    for (int i = 0; i < digests; i++) {
       unsigned char fingerprint_to_set[TransportLayerDtls::kMaxDigestLength];
 
-      memcpy(fingerprint_to_set,
-             peer->fingerprint_,
-             peer->fingerprint_len_);
-      if (damage & mask)
-        fingerprint_to_set[0]++;
+      memcpy(fingerprint_to_set, peer->fingerprint_, peer->fingerprint_len_);
+      if (damage & mask) fingerprint_to_set[0]++;
 
-      nsresult res = dtls_->SetVerificationDigest(
-          "sha-1",
-          fingerprint_to_set,
-          peer->fingerprint_len_);
+      nsresult res = dtls_->SetVerificationDigest("sha-1", fingerprint_to_set,
+                                                  peer->fingerprint_len_);
 
       ASSERT_TRUE(NS_SUCCEEDED(res));
 
@@ -536,19 +517,16 @@ class TransportTestPeer : public sigslot::has_slots<> {
   }
 
   void SetupSrtp() {
-    // this mimics the setup we do elsewhere
-    std::vector<uint16_t> srtp_ciphers;
-    srtp_ciphers.push_back(SRTP_AES128_CM_HMAC_SHA1_80);
-    srtp_ciphers.push_back(SRTP_AES128_CM_HMAC_SHA1_32);
-
+    std::vector<uint16_t> srtp_ciphers =
+        TransportLayerDtls::GetDefaultSrtpCiphers();
     SetSrtpCiphers(srtp_ciphers);
- }
+  }
 
   void SetSrtpCiphers(std::vector<uint16_t>& srtp_ciphers) {
     ASSERT_TRUE(NS_SUCCEEDED(dtls_->SetSrtpCiphers(srtp_ciphers)));
   }
 
-  void ConnectSocket_s(TransportTestPeer *peer) {
+  void ConnectSocket_s(TransportTestPeer* peer) {
     nsresult res;
     res = loopback_->Init();
     ASSERT_EQ((nsresult)NS_OK, res);
@@ -570,19 +548,13 @@ class TransportTestPeer : public sigslot::has_slots<> {
     if (dtls_->state() != TransportLayer::TS_ERROR) {
       // Don't execute these blocks if DTLS didn't initialize.
       TweakCiphers(dtls_->internal_fd());
-      if (reuse_dhe_key_) {
-        // TransportLayerDtls automatically sets this pref to false
-        // so set it back for test.
-        // This is pretty gross. Dig directly into the NSS FD. The problem
-        // is that we are testing a feature which TransaportLayerDtls doesn't
-        // expose.
-        SECStatus rv = SSL_OptionSet(dtls_->internal_fd(),
-                                     SSL_REUSE_SERVER_ECDHE_KEY, PR_TRUE);
-        ASSERT_EQ(SECSuccess, rv);
+      if (post_setup_) {
+        post_setup_(dtls_->internal_fd());
       }
     }
 
-    dtls_->SignalPacketReceived.connect(this, &TransportTestPeer::PacketReceived);
+    dtls_->SignalPacketReceived.connect(this,
+                                        &TransportTestPeer::PacketReceived);
   }
 
   void TweakCiphers(PRFileDesc* fd) {
@@ -594,10 +566,9 @@ class TransportTestPeer : public sigslot::has_slots<> {
     }
   }
 
-  void ConnectSocket(TransportTestPeer *peer) {
+  void ConnectSocket(TransportTestPeer* peer) {
     RUN_ON_THREAD(test_utils_->sts_target(),
-                  WrapRunnable(this, & TransportTestPeer::ConnectSocket_s,
-                               peer),
+                  WrapRunnable(this, &TransportTestPeer::ConnectSocket_s, peer),
                   NS_DISPATCH_SYNC);
   }
 
@@ -616,66 +587,59 @@ class TransportTestPeer : public sigslot::has_slots<> {
     nsresult res;
 
     // Attach our slots
-    ice_ctx_->ctx()->SignalGatheringStateChange.
-        connect(this, &TransportTestPeer::GatheringStateChange);
+    ice_ctx_->SignalGatheringStateChange.connect(
+        this, &TransportTestPeer::GatheringStateChange);
 
     char name[100];
     snprintf(name, sizeof(name), "%s:stream%d", name_.c_str(),
              (int)streams_.size());
 
     // Create the media stream
-    RefPtr<NrIceMediaStream> stream =
-        ice_ctx_->CreateStream(static_cast<char *>(name), 1);
+    RefPtr<NrIceMediaStream> stream = ice_ctx_->CreateStream(name, name, 1);
 
     ASSERT_TRUE(stream != nullptr);
-    ice_ctx_->ctx()->SetStream(streams_.size(), stream);
+    stream->SetIceCredentials("ufrag", "pass");
     streams_.push_back(stream);
 
     // Listen for candidates
-    stream->SignalCandidate.
-        connect(this, &TransportTestPeer::GotCandidate);
+    stream->SignalCandidate.connect(this, &TransportTestPeer::GotCandidate);
 
     // Create the transport layer
     ice_ = new TransportLayerIce();
     ice_->SetParameters(stream, 1);
 
     test_utils_->sts_target()->Dispatch(
-      WrapRunnableRet(&res, this, &TransportTestPeer::InitIce_s),
-      NS_DISPATCH_SYNC);
+        WrapRunnableRet(&res, this, &TransportTestPeer::InitIce_s),
+        NS_DISPATCH_SYNC);
 
     ASSERT_EQ((nsresult)NS_OK, res);
 
     // Listen for media events
-    dtls_->SignalPacketReceived.connect(this, &TransportTestPeer::PacketReceived);
+    dtls_->SignalPacketReceived.connect(this,
+                                        &TransportTestPeer::PacketReceived);
     dtls_->SignalStateChange.connect(this, &TransportTestPeer::StateChanged);
 
     // Start gathering
     test_utils_->sts_target()->Dispatch(
-        WrapRunnableRet(&res,
-                        ice_ctx_->ctx(),
-                        &NrIceCtx::StartGathering,
-                        false,
+        WrapRunnableRet(&res, ice_ctx_, &NrIceCtx::StartGathering, false,
                         false),
         NS_DISPATCH_SYNC);
     ASSERT_TRUE(NS_SUCCEEDED(res));
   }
 
-  void ConnectIce(TransportTestPeer *peer) {
+  void ConnectIce(TransportTestPeer* peer) {
     peer_ = peer;
 
     // If gathering is already complete, push the candidates over
-    if (gathering_complete_)
-      GatheringComplete();
+    if (gathering_complete_) GatheringComplete();
   }
 
   // New candidate
-  void GotCandidate(NrIceMediaStream *stream, const std::string &candidate) {
+  void GotCandidate(NrIceMediaStream* stream, const std::string& candidate) {
     std::cerr << "Got candidate " << candidate << std::endl;
-    candidates_[stream->name()].push_back(candidate);
   }
 
-  void GatheringStateChange(NrIceCtx* ctx,
-                            NrIceCtx::GatheringState state) {
+  void GatheringStateChange(NrIceCtx* ctx, NrIceCtx::GatheringState state) {
     (void)ctx;
     if (state == NrIceCtx::ICE_CTX_GATHER_COMPLETE) {
       GatheringComplete();
@@ -695,25 +659,26 @@ class TransportTestPeer : public sigslot::has_slots<> {
 
     // First send attributes
     test_utils_->sts_target()->Dispatch(
-      WrapRunnableRet(&res, peer_->ice_ctx_->ctx(),
-                      &NrIceCtx::ParseGlobalAttributes,
-                      ice_ctx_->ctx()->GetGlobalAttributes()),
-      NS_DISPATCH_SYNC);
+        WrapRunnableRet(&res, peer_->ice_ctx_, &NrIceCtx::ParseGlobalAttributes,
+                        ice_ctx_->GetGlobalAttributes()),
+        NS_DISPATCH_SYNC);
     ASSERT_TRUE(NS_SUCCEEDED(res));
 
-    for (size_t i=0; i<streams_.size(); ++i) {
+    for (size_t i = 0; i < streams_.size(); ++i) {
       test_utils_->sts_target()->Dispatch(
-        WrapRunnableRet(&res, peer_->streams_[i], &NrIceMediaStream::ParseAttributes,
-                        candidates_[streams_[i]->name()]), NS_DISPATCH_SYNC);
+          WrapRunnableRet(&res, peer_->streams_[i],
+                          &NrIceMediaStream::ConnectToPeer, "ufrag", "pass",
+                          streams_[i]->GetAttributes()),
+          NS_DISPATCH_SYNC);
 
       ASSERT_TRUE(NS_SUCCEEDED(res));
     }
 
     // Start checks on the other peer.
     test_utils_->sts_target()->Dispatch(
-      WrapRunnableRet(&res, peer_->ice_ctx_->ctx(), &NrIceCtx::StartChecks,
-                      offerer_),
-      NS_DISPATCH_SYNC);
+        WrapRunnableRet(&res, peer_->ice_ctx_, &NrIceCtx::StartChecks,
+                        offerer_),
+        NS_DISPATCH_SYNC);
     ASSERT_TRUE(NS_SUCCEEDED(res));
   }
 
@@ -728,17 +693,14 @@ class TransportTestPeer : public sigslot::has_slots<> {
     TransportResult ret;
 
     test_utils_->sts_target()->Dispatch(
-      WrapRunnableNMRet(&ret,
-                        &TransportTestPeer::SendPacketWrapper,
-                        dtls_,
-                        &packet),
-      NS_DISPATCH_SYNC);
+        WrapRunnableNMRet(&ret, &TransportTestPeer::SendPacketWrapper, dtls_,
+                          &packet),
+        NS_DISPATCH_SYNC);
 
     return ret;
   }
 
-
-  void StateChanged(TransportLayer *layer, TransportLayer::State state) {
+  void StateChanged(TransportLayer* layer, TransportLayer::State state) {
     if (state == TransportLayer::TS_OPEN) {
       std::cerr << "Now connected" << std::endl;
     }
@@ -750,13 +712,9 @@ class TransportTestPeer : public sigslot::has_slots<> {
     received_bytes_ += packet.len();
   }
 
-  void SetLoss(uint32_t loss) {
-    lossy_->SetLoss(loss);
-  }
+  void SetLoss(uint32_t loss) { lossy_->SetLoss(loss); }
 
-  void SetCombinePackets(bool combine) {
-    loopback_->CombinePackets(combine);
-  }
+  void SetCombinePackets(bool combine) { loopback_->CombinePackets(combine); }
 
   void SetInspector(UniquePtr<Inspector> inspector) {
     lossy_->SetInspector(std::move(inspector));
@@ -774,8 +732,8 @@ class TransportTestPeer : public sigslot::has_slots<> {
     enabled_cipersuites_ = enableThese;
   }
 
-  void SetReuseECDHEKey() {
-    reuse_dhe_key_ = true;
+  void SetPostSetup(const std::function<void(PRFileDesc*)>& setup) {
+    post_setup_ = std::move(setup);
   }
 
   TransportLayer::State state() {
@@ -787,13 +745,9 @@ class TransportTestPeer : public sigslot::has_slots<> {
     return tstate;
   }
 
-  bool connected() {
-    return state() == TransportLayer::TS_OPEN;
-  }
+  bool connected() { return state() == TransportLayer::TS_OPEN; }
 
-  bool failed() {
-    return state() == TransportLayer::TS_ERROR;
-  }
+  bool failed() { return state() == TransportLayer::TS_ERROR; }
 
   size_t receivedPackets() { return received_packets_; }
 
@@ -802,12 +756,13 @@ class TransportTestPeer : public sigslot::has_slots<> {
   uint16_t cipherSuite() const {
     nsresult rv;
     uint16_t cipher;
-    RUN_ON_THREAD(test_utils_->sts_target(),
-                  WrapRunnableRet(&rv, dtls_, &TransportLayerDtls::GetCipherSuite,
-                                  &cipher));
+    RUN_ON_THREAD(
+        test_utils_->sts_target(),
+        WrapRunnableRet(&rv, dtls_, &TransportLayerDtls::GetCipherSuite,
+                        &cipher));
 
     if (NS_FAILED(rv)) {
-      return TLS_NULL_WITH_NULL_NULL; // i.e., not good
+      return TLS_NULL_WITH_NULL_NULL;  // i.e., not good
     }
     return cipher;
   }
@@ -816,10 +771,10 @@ class TransportTestPeer : public sigslot::has_slots<> {
     nsresult rv;
     uint16_t cipher;
     RUN_ON_THREAD(test_utils_->sts_target(),
-                  WrapRunnableRet(&rv, dtls_, &TransportLayerDtls::GetSrtpCipher,
-                                  &cipher));
+                  WrapRunnableRet(&rv, dtls_,
+                                  &TransportLayerDtls::GetSrtpCipher, &cipher));
     if (NS_FAILED(rv)) {
-      return 0; // the SRTP equivalent of TLS_NULL_WITH_NULL_NULL
+      return 0;  // the SRTP equivalent of TLS_NULL_WITH_NULL_NULL
     }
     return cipher;
   }
@@ -830,26 +785,24 @@ class TransportTestPeer : public sigslot::has_slots<> {
   nsCOMPtr<nsIEventTarget> target_;
   size_t received_packets_;
   size_t received_bytes_;
-    RefPtr<TransportFlow> flow_;
-  TransportLayerLoopback *loopback_;
-  TransportLayerLogging *logging_;
-  TransportLayerLossy *lossy_;
-  TransportLayerDtls *dtls_;
-  TransportLayerIce *ice_;
+  RefPtr<TransportFlow> flow_;
+  TransportLayerLoopback* loopback_;
+  TransportLayerLogging* logging_;
+  TransportLayerLossy* lossy_;
+  TransportLayerDtls* dtls_;
+  TransportLayerIce* ice_;
   RefPtr<DtlsIdentity> identity_;
-  RefPtr<NrIceCtxHandler> ice_ctx_;
+  RefPtr<NrIceCtx> ice_ctx_;
   std::vector<RefPtr<NrIceMediaStream> > streams_;
-  std::map<std::string, std::vector<std::string> > candidates_;
-  TransportTestPeer *peer_;
+  TransportTestPeer* peer_;
   bool gathering_complete_;
   unsigned char fingerprint_[TransportLayerDtls::kMaxDigestLength];
   size_t fingerprint_len_;
   std::vector<uint16_t> enabled_cipersuites_;
   std::vector<uint16_t> disabled_cipersuites_;
-  bool reuse_dhe_key_;
   MtransportTestUtils* test_utils_;
+  std::function<void(PRFileDesc* fd)> post_setup_ = nullptr;
 };
-
 
 class TransportTest : public MtransportTest {
  public:
@@ -960,7 +913,7 @@ class TransportTest : public MtransportTest {
   void TransferTest(size_t count, size_t bytes = 1024) {
     unsigned char buf[bytes];
 
-    for (size_t i= 0; i<count; ++i) {
+    for (size_t i = 0; i < count; ++i) {
       memset(buf, count & 0xff, sizeof(buf));
       MediaPacket packet;
       packet.Copy(buf, sizeof(buf));
@@ -968,7 +921,8 @@ class TransportTest : public MtransportTest {
       ASSERT_TRUE(rv > 0);
     }
 
-    std::cerr << "Received == " << p2_->receivedPackets() << " packets" << std::endl;
+    std::cerr << "Received == " << p2_->receivedPackets() << " packets"
+              << std::endl;
     ASSERT_TRUE_WAIT(count == p2_->receivedPackets(), 10000);
     ASSERT_TRUE((count * sizeof(buf)) == p2_->receivedBytes());
   }
@@ -976,19 +930,18 @@ class TransportTest : public MtransportTest {
  protected:
   void ConnectSocketInternal() {
     test_utils_->sts_target()->Dispatch(
-      WrapRunnable(p1_, &TransportTestPeer::ConnectSocket, p2_),
-      NS_DISPATCH_SYNC);
+        WrapRunnable(p1_, &TransportTestPeer::ConnectSocket, p2_),
+        NS_DISPATCH_SYNC);
     test_utils_->sts_target()->Dispatch(
-      WrapRunnable(p2_, &TransportTestPeer::ConnectSocket, p1_),
-      NS_DISPATCH_SYNC);
+        WrapRunnable(p2_, &TransportTestPeer::ConnectSocket, p1_),
+        NS_DISPATCH_SYNC);
   }
 
-  PRFileDesc *fds_[2];
-  TransportTestPeer *p1_;
-  TransportTestPeer *p2_;
+  PRFileDesc* fds_[2];
+  TransportTestPeer* p1_;
+  TransportTestPeer* p2_;
   nsCOMPtr<nsIEventTarget> target_;
 };
-
 
 TEST_F(TransportTest, TestNoDtlsVerificationSettings) {
   ConnectSocketExpectFail();
@@ -1024,10 +977,9 @@ TEST_F(TransportTest, TestConnectSrtp) {
 
   ASSERT_EQ(TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, p1_->cipherSuite());
 
-  // SRTP is on
-  ASSERT_EQ(SRTP_AES128_CM_HMAC_SHA1_80, p1_->srtpCipher());
+  // SRTP is on with default value
+  ASSERT_EQ(kDtlsSrtpAeadAes128Gcm, p1_->srtpCipher());
 }
-
 
 TEST_F(TransportTest, TestConnectDestroyFlowsMainThread) {
   SetDtlsPeer();
@@ -1077,8 +1029,7 @@ TEST_F(TransportTest, TestConnectClientNoAlpn) {
   // The server doesn't see the extension, so negotiates without it.
   // But then the server is forced to close when it discovers that ALPN wasn't
   // negotiated; the client sees a close.
-  ConnectSocketExpectState(TransportLayer::TS_ERROR,
-                           TransportLayer::TS_CLOSED);
+  ConnectSocketExpectState(TransportLayer::TS_ERROR, TransportLayer::TS_CLOSED);
 }
 
 TEST_F(TransportTest, TestConnectServerNoAlpn) {
@@ -1086,8 +1037,7 @@ TEST_F(TransportTest, TestConnectServerNoAlpn) {
   SetAlpn("", "client-nodefault", false);
   // The client aborts; the server doesn't realize this is a problem and just
   // sees the close.
-  ConnectSocketExpectState(TransportLayer::TS_CLOSED,
-                           TransportLayer::TS_ERROR);
+  ConnectSocketExpectState(TransportLayer::TS_CLOSED, TransportLayer::TS_ERROR);
 }
 
 TEST_F(TransportTest, TestConnectNoDigest) {
@@ -1129,19 +1079,16 @@ TEST_F(TransportTest, TestConnectTwoDigestsBothBad) {
 TEST_F(TransportTest, TestConnectInjectCCS) {
   SetDtlsPeer();
   p2_->SetInspector(MakeUnique<DtlsInspectorInjector>(
-      kTlsHandshakeType,
-      kTlsHandshakeCertificate,
-      kTlsFakeChangeCipherSpec,
+      kTlsHandshakeType, kTlsHandshakeCertificate, kTlsFakeChangeCipherSpec,
       sizeof(kTlsFakeChangeCipherSpec)));
 
   ConnectSocket();
 }
 
-
 TEST_F(TransportTest, TestConnectVerifyNewECDHE) {
   SetDtlsPeer();
-  DtlsInspectorRecordHandshakeMessage *i1 = new
-    DtlsInspectorRecordHandshakeMessage(kTlsHandshakeServerKeyExchange);
+  DtlsInspectorRecordHandshakeMessage* i1 =
+      new DtlsInspectorRecordHandshakeMessage(kTlsHandshakeServerKeyExchange);
   p1_->SetInspector(i1);
   ConnectSocket();
   TlsServerKeyExchangeECDHE dhe1;
@@ -1149,8 +1096,8 @@ TEST_F(TransportTest, TestConnectVerifyNewECDHE) {
 
   Reset();
   SetDtlsPeer();
-  DtlsInspectorRecordHandshakeMessage *i2 = new
-    DtlsInspectorRecordHandshakeMessage(kTlsHandshakeServerKeyExchange);
+  DtlsInspectorRecordHandshakeMessage* i2 =
+      new DtlsInspectorRecordHandshakeMessage(kTlsHandshakeServerKeyExchange);
   p1_->SetInspector(i2);
   ConnectSocket();
   TlsServerKeyExchangeECDHE dhe2;
@@ -1163,22 +1110,32 @@ TEST_F(TransportTest, TestConnectVerifyNewECDHE) {
 }
 
 TEST_F(TransportTest, TestConnectVerifyReusedECDHE) {
+  auto set_reuse_ecdhe_key = [](PRFileDesc* fd) {
+    // TransportLayerDtls automatically sets this pref to false
+    // so set it back for test.
+    // This is pretty gross. Dig directly into the NSS FD. The problem
+    // is that we are testing a feature which TransaportLayerDtls doesn't
+    // expose.
+    SECStatus rv = SSL_OptionSet(fd, SSL_REUSE_SERVER_ECDHE_KEY, PR_TRUE);
+    ASSERT_EQ(SECSuccess, rv);
+  };
+
   SetDtlsPeer();
-  DtlsInspectorRecordHandshakeMessage *i1 = new
-    DtlsInspectorRecordHandshakeMessage(kTlsHandshakeServerKeyExchange);
+  DtlsInspectorRecordHandshakeMessage* i1 =
+      new DtlsInspectorRecordHandshakeMessage(kTlsHandshakeServerKeyExchange);
   p1_->SetInspector(i1);
-  p1_->SetReuseECDHEKey();
+  p1_->SetPostSetup(set_reuse_ecdhe_key);
   ConnectSocket();
   TlsServerKeyExchangeECDHE dhe1;
   ASSERT_TRUE(dhe1.Parse(i1->buffer().data(), i1->buffer().len()));
 
   Reset();
   SetDtlsPeer();
-  DtlsInspectorRecordHandshakeMessage *i2 = new
-    DtlsInspectorRecordHandshakeMessage(kTlsHandshakeServerKeyExchange);
+  DtlsInspectorRecordHandshakeMessage* i2 =
+      new DtlsInspectorRecordHandshakeMessage(kTlsHandshakeServerKeyExchange);
 
   p1_->SetInspector(i2);
-  p1_->SetReuseECDHEKey();
+  p1_->SetPostSetup(set_reuse_ecdhe_key);
 
   ConnectSocket();
   TlsServerKeyExchangeECDHE dhe2;
@@ -1263,9 +1220,9 @@ TEST_F(TransportTest, TestTransferIceCombinedPackets) {
 static void ConfigureOneCipher(TransportTestPeer* peer, uint16_t suite) {
   std::vector<uint16_t> justOne;
   justOne.push_back(suite);
-  std::vector<uint16_t> everythingElse(SSL_GetImplementedCiphers(),
-                                       SSL_GetImplementedCiphers()
-                                       + SSL_GetNumImplementedCiphers());
+  std::vector<uint16_t> everythingElse(
+      SSL_GetImplementedCiphers(),
+      SSL_GetImplementedCiphers() + SSL_GetNumImplementedCiphers());
   std::remove(everythingElse.begin(), everythingElse.end(), suite);
   peer->SetCipherSuiteChanges(justOne, everythingElse);
 }
@@ -1293,17 +1250,140 @@ TEST_F(TransportTest, TestCipherMandatoryOnlyCbc) {
 
 TEST_F(TransportTest, TestSrtpMismatch) {
   std::vector<uint16_t> setA;
-  setA.push_back(SRTP_AES128_CM_HMAC_SHA1_80);
+  setA.push_back(kDtlsSrtpAes128CmHmacSha1_80);
   std::vector<uint16_t> setB;
-  setB.push_back(SRTP_AES128_CM_HMAC_SHA1_32);
+  setB.push_back(kDtlsSrtpAes128CmHmacSha1_32);
 
   p1_->SetSrtpCiphers(setA);
   p2_->SetSrtpCiphers(setB);
   SetDtlsPeer();
-  ConnectSocket();
+  ConnectSocketExpectFail();
 
   ASSERT_EQ(0, p1_->srtpCipher());
   ASSERT_EQ(0, p2_->srtpCipher());
+}
+
+static SECStatus NoopXtnHandler(PRFileDesc* fd, SSLHandshakeType message,
+                                const uint8_t* data, unsigned int len,
+                                SSLAlertDescription* alert, void* arg) {
+  return SECSuccess;
+}
+
+static PRBool WriteFixedXtn(PRFileDesc* fd, SSLHandshakeType message,
+                            uint8_t* data, unsigned int* len,
+                            unsigned int max_len, void* arg) {
+  // When we enable TLS 1.3, change ssl_hs_server_hello here to
+  // ssl_hs_encrypted_extensions.  At the same time, add a test that writes to
+  // ssl_hs_server_hello, which should fail.
+  if (message != ssl_hs_client_hello && message != ssl_hs_server_hello) {
+    return false;
+  }
+
+  auto v = reinterpret_cast<std::vector<uint8_t>*>(arg);
+  memcpy(data, &((*v)[0]), v->size());
+  *len = v->size();
+  return true;
+}
+
+// Note that |value| needs to be readable after this function returns.
+static void InstallBadSrtpExtensionWriter(TransportTestPeer* peer,
+                                          std::vector<uint8_t>* value) {
+  peer->SetPostSetup([value](PRFileDesc* fd) {
+    // Override the handler that is installed by the DTLS setup.
+    SECStatus rv = SSL_InstallExtensionHooks(
+        fd, ssl_use_srtp_xtn, WriteFixedXtn, value, NoopXtnHandler, nullptr);
+    ASSERT_EQ(SECSuccess, rv);
+  });
+}
+
+TEST_F(TransportTest, TestSrtpErrorServerSendsTwoSrtpCiphers) {
+  // Server (p1_) sends an extension with two values, and empty MKI.
+  std::vector<uint8_t> xtn = {0x04, 0x00, 0x01, 0x00, 0x02, 0x00};
+  InstallBadSrtpExtensionWriter(p1_, &xtn);
+  SetupSrtp();
+  SetDtlsPeer();
+  ConnectSocketExpectFail();
+}
+
+TEST_F(TransportTest, TestSrtpErrorServerSendsTwoMki) {
+  // Server (p1_) sends an MKI.
+  std::vector<uint8_t> xtn = {0x02, 0x00, 0x01, 0x01, 0x00};
+  InstallBadSrtpExtensionWriter(p1_, &xtn);
+  SetupSrtp();
+  SetDtlsPeer();
+  ConnectSocketExpectFail();
+}
+
+TEST_F(TransportTest, TestSrtpErrorServerSendsUnknownValue) {
+  std::vector<uint8_t> xtn = {0x02, 0x9a, 0xf1, 0x00};
+  InstallBadSrtpExtensionWriter(p1_, &xtn);
+  SetupSrtp();
+  SetDtlsPeer();
+  ConnectSocketExpectFail();
+}
+
+TEST_F(TransportTest, TestSrtpErrorServerSendsOverflow) {
+  std::vector<uint8_t> xtn = {0x32, 0x00, 0x01, 0x00};
+  InstallBadSrtpExtensionWriter(p1_, &xtn);
+  SetupSrtp();
+  SetDtlsPeer();
+  ConnectSocketExpectFail();
+}
+
+TEST_F(TransportTest, TestSrtpErrorServerSendsUnevenList) {
+  std::vector<uint8_t> xtn = {0x01, 0x00, 0x00};
+  InstallBadSrtpExtensionWriter(p1_, &xtn);
+  SetupSrtp();
+  SetDtlsPeer();
+  ConnectSocketExpectFail();
+}
+
+TEST_F(TransportTest, TestSrtpErrorClientSendsUnevenList) {
+  std::vector<uint8_t> xtn = {0x01, 0x00, 0x00};
+  InstallBadSrtpExtensionWriter(p2_, &xtn);
+  SetupSrtp();
+  SetDtlsPeer();
+  ConnectSocketExpectFail();
+}
+
+TEST_F(TransportTest, OnlyServerSendsSrtpXtn) {
+  p1_->SetupSrtp();
+  SetDtlsPeer();
+  ConnectSocketExpectState(TransportLayer::TS_ERROR, TransportLayer::TS_CLOSED);
+}
+
+TEST_F(TransportTest, OnlyClientSendsSrtpXtn) {
+  p2_->SetupSrtp();
+  SetDtlsPeer();
+  // This means that the server won't semd the extension as well.  The server
+  // (p1) thinks that everything is OK.  The client (p2) notices the problem
+  // after connecting and aborts.
+  ConnectSocketExpectState(TransportLayer::TS_CLOSED, TransportLayer::TS_ERROR);
+}
+
+class TransportSrtpParameterTest
+    : public TransportTest,
+      public ::testing::WithParamInterface<uint16_t> {};
+
+INSTANTIATE_TEST_CASE_P(
+    SrtpParamInit, TransportSrtpParameterTest,
+    ::testing::ValuesIn(TransportLayerDtls::GetDefaultSrtpCiphers()));
+
+TEST_P(TransportSrtpParameterTest, TestSrtpCiphersMismatchCombinations) {
+  uint16_t cipher = GetParam();
+  std::cerr << "Checking cipher: " << cipher << std::endl;
+
+  p1_->SetupSrtp();
+
+  std::vector<uint16_t> setB;
+  setB.push_back(cipher);
+
+  p2_->SetSrtpCiphers(setB);
+  SetDtlsPeer();
+  ConnectSocket();
+
+  ASSERT_EQ(cipher, p1_->srtpCipher());
+  ASSERT_EQ(cipher, p2_->srtpCipher());
 }
 
 // NSS doesn't support DHE suites on the server end.

@@ -12,9 +12,7 @@ ChromeUtils.defineModuleGetter(this, "JSONFile", "resource://gre/modules/JSONFil
 var EXPORTED_SYMBOLS = ["pushBroadcastService"];
 
 // We are supposed to ignore any updates with this version.
-// FIXME: what is the actual "dummy" version?
-// See bug 1467550.
-const DUMMY_VERSION_STRING = "dummy";
+const DUMMY_VERSION_STRING = "____NOP____";
 
 XPCOMUtils.defineLazyGetter(this, "console", () => {
   let {ConsoleAPI} = ChromeUtils.import("resource://gre/modules/Console.jsm", {});
@@ -114,12 +112,27 @@ var BroadcastService = class {
     if (typeof version !== "string") {
       throw new TypeError("version should be a string");
     }
+    if (!version) {
+      throw new TypeError("version should not be an empty string");
+    }
+
     const isNew = !this.jsonFile.data.listeners.hasOwnProperty(broadcastId);
+    const oldVersion = !isNew && this.jsonFile.data.listeners[broadcastId].version;
+    if (!isNew && oldVersion != version) {
+      console.warn("Versions differ while adding listener for", broadcastId,
+                   ". Got", version, "but JSON file says", oldVersion, ".");
+    }
 
     // Update listeners before telling the pushService to subscribe,
     // in case it would disregard the update in the small window
     // between getting listeners and setting state to RUNNING.
-    this.jsonFile.data.listeners[broadcastId] = {version, sourceInfo};
+    //
+    // Keep the old version (if we have it) because Megaphone is
+    // really the source of truth for the current version of this
+    // broadcaster, and the old version is whatever we've either
+    // gotten from Megaphone or what we've told to Megaphone and
+    // haven't been corrected.
+    this.jsonFile.data.listeners[broadcastId] = {version: oldVersion || version, sourceInfo};
     this.jsonFile.saveSoon();
 
     if (isNew) {

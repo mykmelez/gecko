@@ -10,12 +10,12 @@
 author: Jordan Lund
 """
 
+import json
 import os
 import re
 import sys
 import copy
 import shutil
-import tempfile
 import glob
 import imp
 
@@ -40,7 +40,7 @@ from mozharness.mozilla.testing.codecoverage import (
 from mozharness.mozilla.testing.testbase import TestingMixin, testing_config_options
 
 SUITE_CATEGORIES = ['gtest', 'cppunittest', 'jittest', 'mochitest', 'reftest', 'xpcshell',
-                    'mozbase', 'mozmill']
+                    'mozmill']
 SUITE_DEFAULT_E10S = ['mochitest', 'reftest']
 SUITE_NO_E10S = ['xpcshell']
 
@@ -96,14 +96,6 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
             "help": "Specify which jit-test suite to run. "
                     "Suites are defined in the config file\n."
                     "Examples: 'jittest'"}
-         ],
-        [['--mozbase-suite', ], {
-            "action": "extend",
-            "dest": "specified_mozbase_suites",
-            "type": "string",
-            "help": "Specify which mozbase suite to run. "
-                    "Suites are defined in the config file\n."
-                    "Examples: 'mozbase'"}
          ],
         [['--mozmill-suite', ], {
             "action": "extend",
@@ -171,8 +163,15 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
         [["--gpu-required"], {
             "action": "store_true",
             "dest": "gpu_required",
-            "default": "False",
+            "default": False,
             "help": "Run additional verification on modified tests using gpu instances."}
+         ],
+        [["--setpref"], {
+            "action": "append",
+            "metavar": "PREF=VALUE",
+            "dest": "extra_prefs",
+            "default": [],
+            "help": "Defines an extra user preference."}
          ],
     ] + copy.deepcopy(testing_config_options) + \
         copy.deepcopy(code_coverage_config_options)
@@ -218,7 +217,6 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
             ('specified_cppunittest_suites', 'cppunit'),
             ('specified_gtest_suites', 'gtest'),
             ('specified_jittest_suites', 'jittest'),
-            ('specified_mozbase_suites', 'mozbase'),
             ('specified_mozmill_suites', 'mozmill'),
         )
         for s, prefix in suites:
@@ -275,7 +273,6 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
                                                    'blobber_upload_dir')
         dirs['abs_jittest_dir'] = os.path.join(dirs['abs_test_install_dir'],
                                                "jit-test", "jit-test")
-        dirs['abs_mozbase_dir'] = os.path.join(dirs['abs_test_install_dir'], "mozbase")
         dirs['abs_mozmill_dir'] = os.path.join(dirs['abs_test_install_dir'], "mozmill")
 
         if os.path.isabs(c['virtualenv_path']):
@@ -362,6 +359,21 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
         self.symbols_url = symbols_url
         return self.symbols_url
 
+    def _get_mozharness_test_paths(self, suite_category, suite):
+        test_paths = json.loads(os.environ.get('MOZHARNESS_TEST_PATHS', '""'))
+
+        if not test_paths or suite not in test_paths:
+            return None
+
+        suite_test_paths = test_paths[suite]
+
+        if suite_category == 'reftest':
+            dirs = self.query_abs_dirs()
+            suite_test_paths = [os.path.join(dirs['abs_reftest_dir'], 'tests', p)
+                                for p in suite_test_paths]
+
+        return suite_test_paths
+
     def _query_abs_base_cmd(self, suite_category, suite):
         if self.binary_path:
             c = self.config
@@ -402,8 +414,9 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
 
             # Ignore chunking if we have user specified test paths
             if not (self.verify_enabled or self.per_test_coverage):
-                if os.environ.get('MOZHARNESS_TEST_PATHS'):
-                    base_cmd.extend(os.environ['MOZHARNESS_TEST_PATHS'].split(':'))
+                test_paths = self._get_mozharness_test_paths(suite_category, suite)
+                if test_paths:
+                    base_cmd.extend(test_paths)
                 elif c.get('total_chunks') and c.get('this_chunk'):
                     base_cmd.extend(['--total-chunks', c['total_chunks'],
                                      '--this-chunk', c['this_chunk']])
@@ -417,6 +430,9 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
 
             if c['headless']:
                 base_cmd.append('--headless')
+
+            if c['extra_prefs']:
+                base_cmd.extend(['--setpref={}'.format(p) for p in c['extra_prefs']])
 
             # set pluginsPath
             abs_res_plugins_dir = os.path.join(abs_res_dir, 'plugins')
@@ -504,7 +520,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
     def structured_output(self, suite_category, flavor=None):
         unstructured_flavors = self.config.get('unstructured_flavors')
         if not unstructured_flavors:
-            return False
+            return True
         if suite_category not in unstructured_flavors:
             return True
         if not unstructured_flavors.get(suite_category) or \
@@ -554,7 +570,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
     def download_and_extract(self):
         """
         download and extract test zip / download installer
-        optimizes which subfolders to extract from tests zip
+        optimizes which subfolders to extract from tests archive
         """
         c = self.config
 
@@ -796,7 +812,9 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
                 }
                 if isinstance(suites[suite], dict):
                     options_list = suites[suite].get('options', [])
-                    if self.verify_enabled or self.per_test_coverage:
+                    if (self.verify_enabled or self.per_test_coverage or
+                        self._get_mozharness_test_paths(suite_category, suite)):
+                        # Ignore tests list in modes where we are running specific tests.
                         tests_list = []
                     else:
                         tests_list = suites[suite].get('tests', [])
@@ -889,27 +907,18 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
                     final_cmd = copy.copy(cmd)
                     final_cmd.extend(per_test_args)
 
+                    final_env = copy.copy(env)
+
                     if self.per_test_coverage:
-                        gcov_dir, jsvm_dir = self.set_coverage_env(env)
-                        # Per-test reset/dump is only supported for xpcshell and
-                        # Linux for the time being.
-                        if not is_baseline_test and suite == 'xpcshell' and self._is_linux():
-                            env['GCOV_RESULTS_DIR'] = tempfile.mkdtemp()
+                        self.set_coverage_env(final_env)
 
                     return_code = self.run_command(final_cmd, cwd=dirs['abs_work_dir'],
                                                    output_timeout=cmd_timeout,
                                                    output_parser=parser,
-                                                   env=env)
+                                                   env=final_env)
 
                     if self.per_test_coverage:
-                        self.add_per_test_coverage_report(
-                            env['GCOV_RESULTS_DIR'] if 'GCOV_RESULTS_DIR' in env else gcov_dir,
-                            jsvm_dir,
-                            suite,
-                            per_test_args[-1]
-                        )
-                        if 'GCOV_RESULTS_DIR' in env:
-                            shutil.rmtree(gcov_dir)
+                        self.add_per_test_coverage_report(final_env, suite, per_test_args[-1])
 
                     # mochitest, reftest, and xpcshell suites do not return
                     # appropriate return codes. Therefore, we must parse the output

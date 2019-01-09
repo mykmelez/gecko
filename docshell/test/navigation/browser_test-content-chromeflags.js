@@ -13,21 +13,19 @@ add_task(async function() {
     SpecialPowers.pushPrefEnv({
       "set": [
         ["browser.link.open_newwindow", 2],
-      ]
+      ],
     }, resolve);
   });
 
   await BrowserTestUtils.withNewTab({
     gBrowser,
-    url: TEST_PAGE
+    url: TEST_PAGE,
   }, async function(browser) {
     let openedPromise = BrowserTestUtils.waitForNewWindow();
     BrowserTestUtils.synthesizeMouse("a", 0, 0, {}, browser);
     let win = await openedPromise;
 
-    let chromeFlags = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIWebNavigation)
-                         .QueryInterface(Ci.nsIDocShellTreeItem)
+    let chromeFlags = win.docShell
                          .treeOwner
                          .QueryInterface(Ci.nsIInterfaceRequestor)
                          .getInterface(Ci.nsIXULWindow)

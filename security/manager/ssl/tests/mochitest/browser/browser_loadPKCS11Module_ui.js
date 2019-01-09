@@ -58,7 +58,7 @@ const gMockPKCS11ModuleDB = {
     throw new Error("not expecting get isFIPSEnabled() to be called");
   },
 
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIPKCS11ModuleDB])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIPKCS11ModuleDB]),
 };
 
 const gMockPromptService = {
@@ -75,7 +75,7 @@ const gMockPromptService = {
                  "alert: Actual and expected text should match");
   },
 
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIPromptService])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIPromptService]),
 };
 
 var gMockPKCS11CID =
@@ -197,7 +197,13 @@ add_task(async function testAddModuleFailure() {
   gMockPromptService.expectedText = "Unable to add module";
   gMockPromptService.expectedWindow = win;
 
+  // The exception we throw in addModule is first reported as an uncaught
+  // exception by XPConnect before an exception is propagated to the actual
+  // caller.
+  expectUncaughtException(true);
+
   testAddModuleHelper(win, true);
+  expectUncaughtException(false);
   // If adding a module fails, the dialog will not close. As such, we have to
   // close the window ourselves.
   await BrowserTestUtils.closeWindow(win);

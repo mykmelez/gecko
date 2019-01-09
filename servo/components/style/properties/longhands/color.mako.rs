@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 <%namespace name="helpers" file="/helpers.mako.rs" />
 
@@ -15,7 +15,7 @@ ${helpers.predefined_type(
     animation_value_type="AnimatedRGBA",
     flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
     ignored_when_colors_disabled="True",
-    spec="https://drafts.csswg.org/css-color/#color"
+    spec="https://drafts.csswg.org/css-color/#color",
 )}
 
 // FIXME(#15973): Add servo support for system colors
@@ -63,11 +63,11 @@ pub mod system_colors {
                           IMESelectedConvertedTextBackground IMESelectedConvertedTextForeground
                           IMESelectedConvertedTextUnderline SpellCheckerUnderline""".split()
     %>
-    use gecko_bindings::bindings::Gecko_GetLookAndFeelSystemColor;
-    use gecko_bindings::structs::root::mozilla::LookAndFeel_ColorID;
+    use crate::gecko_bindings::bindings::Gecko_GetLookAndFeelSystemColor;
+    use crate::gecko_bindings::structs::root::mozilla::LookAndFeel_ColorID;
     use std::fmt::{self, Write};
     use style_traits::{CssWriter, ToCss};
-    use values::computed::{Context, ToComputedValue};
+    use crate::values::computed::{Context, ToComputedValue};
 
     pub type SystemColor = LookAndFeel_ColorID;
 
@@ -96,8 +96,10 @@ pub mod system_colors {
         #[inline]
         fn to_computed_value(&self, cx: &Context) -> Self::ComputedValue {
             unsafe {
-                Gecko_GetLookAndFeelSystemColor(*self as i32,
-                                                cx.device().pres_context())
+                Gecko_GetLookAndFeelSystemColor(
+                    *self as i32,
+                    cx.device().pres_context(),
+                )
             }
         }
 

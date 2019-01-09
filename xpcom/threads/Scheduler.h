@@ -14,6 +14,7 @@
 #include "mozilla/UniquePtr.h"
 #include "nsTArray.h"
 #include "nsILabelableRunnable.h"
+#include "nsPrintfCString.h"
 
 // Windows silliness. winbase.h defines an empty no-argument Yield macro.
 #undef Yield
@@ -53,16 +54,15 @@ class SynchronizedEventQueue;
 // "dom.ipc.scheduler.chaoticScheduling": When this pref is set, we make an
 // effort to switch between threads even when it is not necessary to do
 // this. This is useful for debugging.
-class Scheduler
-{
-public:
+class Scheduler {
+ public:
   static already_AddRefed<nsThread> Init(nsIIdlePeriod* aIdlePeriod);
   static void Start();
   static void Shutdown();
 
   // Scheduler prefs need to be handled differently because the scheduler needs
   // to start up in the content process before the normal preferences service.
-  static nsCString GetPrefs();
+  static nsPrintfCString GetPrefs();
   static void SetPrefs(const char* aPrefs);
 
   static bool IsSchedulerEnabled();
@@ -75,12 +75,12 @@ public:
   static bool UnlabeledEventRunning();
   static bool AnyEventRunning();
 
-  static void BlockThreadedExecution(nsIBlockThreadedExecutionCallback* aCallback);
+  static void BlockThreadedExecution(
+      nsIBlockThreadedExecutionCallback* aCallback);
   static void UnblockThreadedExecution();
 
-  class MOZ_RAII EventLoopActivation
-  {
-  public:
+  class MOZ_RAII EventLoopActivation {
+   public:
     using EventGroups = nsILabelableRunnable::SchedulerGroupSet;
     EventLoopActivation();
     ~EventLoopActivation();
@@ -95,7 +95,7 @@ public:
     bool IsLabeled() { return mIsLabeled; }
     EventGroups& EventGroupsAffected() { return mEventGroups; }
 
-  private:
+   private:
     EventLoopActivation* mPrev;
     bool mProcessingEvent;
     bool mIsLabeled;
@@ -105,11 +105,11 @@ public:
     static MOZ_THREAD_LOCAL(EventLoopActivation*) sTopActivation;
   };
 
-private:
+ private:
   friend class SchedulerImpl;
   static UniquePtr<SchedulerImpl> sScheduler;
 };
 
-} // namespace mozilla
+}  // namespace mozilla
 
-#endif // mozilla_Scheduler_h
+#endif  // mozilla_Scheduler_h

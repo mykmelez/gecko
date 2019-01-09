@@ -1,31 +1,21 @@
 /* vim: set ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+/* global getPropertyValue */
 
 "use strict";
 
 // Test that keyword values for font properties don't show up in the font editor,
 // but their computed style values show up instead.
 
-const TEST_URI = URL_ROOT + "browser_fontinspector.html";
+const TEST_URI = URL_ROOT + "doc_browser_fontinspector.html";
 
 add_task(async function() {
-  await pushPref("devtools.inspector.fonteditor.enabled", true);
   const { inspector, view } = await openFontInspectorForURL(TEST_URI);
   const viewDoc = view.document;
 
   await testKeywordValues(inspector, viewDoc);
 });
-
-function getPropertyValue(viewDoc, name) {
-  const selector = `#font-editor .font-value-slider[name=${name}]`;
-  return {
-    value: viewDoc.querySelector(selector).value,
-    // Ensure unit dropdown exists before querying its value
-    unit: viewDoc.querySelector(selector + ` ~ .font-unit-select`) &&
-          viewDoc.querySelector(selector + ` ~ .font-unit-select`).value
-  };
-}
 
 async function testKeywordValues(inspector, viewDoc) {
   await selectNode(".bold-text", inspector);

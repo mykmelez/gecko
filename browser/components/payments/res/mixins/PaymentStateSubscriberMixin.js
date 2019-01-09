@@ -13,15 +13,20 @@ import PaymentsStore from "../PaymentsStore.js";
  */
 export let requestStore = new PaymentsStore({
   changesPrevented: false,
-  completionState: "initial",
   orderDetailsShowing: false,
   "basic-card-page": {
     guid: null,
     // preserveFieldValues: true,
+    selectedStateKey: "selectedPaymentCard",
   },
-  "address-page": {
+  "shipping-address-page": {
     guid: null,
-    title: "",
+  },
+  "payer-address-page": {
+    guid: null,
+  },
+  "billing-address-page": {
+    guid: null,
   },
   "payment-summary": {
   },
@@ -32,6 +37,7 @@ export let requestStore = new PaymentsStore({
     // error: "",
   },
   request: {
+    completeStatus: "",
     tabId: null,
     topLevelPrincipal: {URI: {displayHost: null}},
     requestId: null,
@@ -40,6 +46,9 @@ export let requestStore = new PaymentsStore({
       id: null,
       totalItem: {label: null, amount: {currency: null, value: 0}},
       displayItems: [],
+      payerErrors: {},
+      paymentMethodErrors: null,
+      shippingAddressErrors: {},
       shippingOptions: [],
       modifiers: null,
       error: "",

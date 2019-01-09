@@ -56,7 +56,7 @@
       gBrowser = document.getElementById(browserId);
       gFindBar.browser = gBrowser;
       let promise = BrowserTestUtils.browserLoaded(gBrowser);
-      gBrowser.loadURI('data:text/html,<h2>Text mozilla</h2><input id="inp" type="text" />');
+      BrowserTestUtils.loadURI(gBrowser, 'data:text/html,<h2>Text mozilla</h2><input id="inp" type="text" />');
       await promise;
       await onDocumentLoaded();
     }
@@ -140,7 +140,7 @@
       // For posterity, test iframes too.
 
       promise = BrowserTestUtils.browserLoaded(gBrowser);
-      gBrowser.loadURI('data:text/html,<h2>Text mozilla</h2><iframe id="leframe" ' +
+      BrowserTestUtils.loadURI(gBrowser, 'data:text/html,<h2>Text mozilla</h2><iframe id="leframe" ' +
         'src="data:text/html,Text mozilla"></iframe>');
       await promise;
 
@@ -163,10 +163,7 @@
         // Check the iframe too:
         let frame = content.document.getElementById("leframe");
         // Hoops! Get the docShell first, then the selection.
-        selection = getSelection(frame.contentWindow
-          .QueryInterface(Ci.nsIInterfaceRequestor)
-          .getInterface(Ci.nsIWebNavigation)
-          .QueryInterface(Ci.nsIDocShell));
+        selection = getSelection(frame.contentWindow.docShell);
         Assert.equal(selection.rangeCount, 1,
           "Correctly added a match to the selection type");
         Assert.equal(selection.getRangeAt(0).toString().toLowerCase(),
@@ -192,10 +189,7 @@
         // Check the iframe too:
         let frame = content.document.getElementById("leframe");
         // Hoops! Get the docShell first, then the selection.
-        selection = getSelection(frame.contentWindow
-          .QueryInterface(Ci.nsIInterfaceRequestor)
-          .getInterface(Ci.nsIWebNavigation)
-          .QueryInterface(Ci.nsIDocShell));
+        selection = getSelection(frame.contentWindow.docShell);
         Assert.equal(selection.rangeCount, 0, "Correctly removed the range");
 
         content.document.documentElement.focus();

@@ -15,6 +15,7 @@ from textwrap import dedent
 
 from taskgraph.util.schema import Schema
 from voluptuous import Required, Optional, Any
+from voluptuous.validators import Match
 
 from taskgraph.transforms.job import run_job_using
 from taskgraph.transforms.job.common import (
@@ -44,10 +45,16 @@ mozharness_run_schema = Schema({
     Required('config'): [basestring],
 
     # any additional actions to pass to the mozharness command
-    Optional('actions'): [basestring],
+    Optional('actions'): [Match(
+        '^[a-z0-9-]+$',
+        "actions must be `-` seperated alphanumeric strings"
+    )],
 
     # any additional options (without leading --) to be passed to mozharness
-    Optional('options'): [basestring],
+    Optional('options'): [Match(
+        '^[a-z0-9-]+(=[^ ]+)?$',
+        "options must be `-` seperated alphanumeric strings (with optional argument)"
+    )],
 
     # --custom-build-variant-cfg value
     Optional('custom-build-variant-cfg'): basestring,
@@ -140,8 +147,12 @@ def mozharness_on_docker_worker_setup(config, job, taskdesc):
     # android-build).
     taskdesc['worker'].setdefault('docker-image', {'in-tree': 'debian7-amd64-build'})
 
+    taskdesc['worker'].setdefault('artifacts', []).append({
+        'name': 'public/logs',
+        'path': '{workdir}/logs/'.format(**run),
+        'type': 'directory'
+    })
     worker['taskcluster-proxy'] = run.get('taskcluster-proxy')
-
     docker_worker_add_artifacts(config, job, taskdesc)
     docker_worker_add_workspace_cache(config, job, taskdesc,
                                       extra=run.get('extra-workspace-cache-key'))
@@ -149,6 +160,7 @@ def mozharness_on_docker_worker_setup(config, job, taskdesc):
 
     env = worker.setdefault('env', {})
     env.update({
+        'GECKO_PATH': '{workdir}/workspace/build/src'.format(**run),
         'MOZHARNESS_CONFIG': ' '.join(run['config']),
         'MOZHARNESS_SCRIPT': run['script'],
         'MH_BRANCH': config.params['project'],
@@ -181,6 +193,9 @@ def mozharness_on_docker_worker_setup(config, job, taskdesc):
     if config.params.is_try():
         env['TRY_COMMIT_MSG'] = config.params['message']
 
+    if run['comm-checkout']:
+        env['MOZ_SOURCE_CHANGESET'] = env['COMM_HEAD_REV']
+
     # if we're not keeping artifacts, set some env variables to empty values
     # that will cause the build process to skip copying the results to the
     # artifacts directory.  This will have no effect for operations that are
@@ -204,8 +219,7 @@ def mozharness_on_docker_worker_setup(config, job, taskdesc):
 
     command = [
         '{workdir}/bin/run-task'.format(**run),
-        '--vcs-checkout', '{workdir}/workspace/build/src'.format(**run),
-        '--tools-checkout', '{workdir}/workspace/build/tools'.format(**run),
+        '--gecko-checkout', env['GECKO_PATH'],
     ]
     if run['comm-checkout']:
         command.append('--comm-checkout={workdir}/workspace/build/src/comm'.format(**run))
@@ -242,7 +256,13 @@ def mozharness_on_generic_worker(config, job, taskdesc):
 
     worker = taskdesc['worker']
 
-    generic_worker_add_artifacts(config, job, taskdesc)
+    taskdesc['worker'].setdefault('artifacts', []).append({
+        'name': 'public/logs',
+        'path': 'logs',
+        'type': 'directory'
+    })
+    if not worker.get('skip-artifacts', False):
+        generic_worker_add_artifacts(config, job, taskdesc)
     support_vcs_checkout(config, job, taskdesc)
 
     env = worker['env']
@@ -266,6 +286,9 @@ def mozharness_on_generic_worker(config, job, taskdesc):
     if config.params.is_try():
         env['TRY_COMMIT_MSG'] = config.params['message'] or 'no commit message'
 
+    if run['comm-checkout']:
+        env['MOZ_SOURCE_CHANGESET'] = env['COMM_HEAD_REV']
+
     if not job['attributes']['build_platform'].startswith('win'):
         raise Exception(
             "Task generation for mozharness build jobs currently only supported on Windows"
@@ -285,11 +308,9 @@ def mozharness_on_generic_worker(config, job, taskdesc):
         mh_command.append('--branch ' + config.params['project'])
     mh_command.append(r'--work-dir %cd:Z:=z:%\build')
     for action in run.get('actions', []):
-        assert ' ' not in action
         mh_command.append('--' + action)
 
     for option in run.get('options', []):
-        assert ' ' not in option
         mh_command.append('--' + option)
     if run.get('custom-build-variant-cfg'):
         mh_command.append('--custom-build-variant')
@@ -310,6 +331,16 @@ def mozharness_on_generic_worker(config, job, taskdesc):
                 head_rev=env['COMM_HEAD_REV'],
                 path=r'.\build\src\comm'))
 
+    fetch_commands = []
+    if 'MOZ_FETCHES' in env:
+        # When Bug 1436037 is fixed, run-task can be used for this task,
+        # and this call can go away
+        fetch_commands.append(' '.join([
+            r'c:\mozilla-build\python3\python3.exe',
+            r'build\src\taskcluster\scripts\misc\fetch-content',
+            'task-artifacts',
+        ]))
+
     worker['command'] = []
     if taskdesc.get('needs-sccache'):
         worker['command'].extend([
@@ -327,6 +358,7 @@ def mozharness_on_generic_worker(config, job, taskdesc):
         ])
 
     worker['command'].extend(hg_commands)
+    worker['command'].extend(fetch_commands)
     worker['command'].extend([
         ' '.join(mh_command)
     ])

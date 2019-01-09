@@ -39,7 +39,6 @@ const WRAP_TEXT = "devtools.scratchpad.wrapText";
 const SHOW_TRAILING_SPACE = "devtools.scratchpad.showTrailingSpace";
 const EDITOR_FONT_SIZE = "devtools.scratchpad.editorFontSize";
 const ENABLE_AUTOCOMPLETION = "devtools.scratchpad.enableAutocompletion";
-const TAB_SIZE = "devtools.editor.tabsize";
 const FALLBACK_CHARSET_LIST = "intl.fallbackCharsetList.ISO-8859-1";
 
 const VARIABLES_VIEW_URL = "chrome://devtools/content/shared/widgets/VariablesView.xul";
@@ -49,11 +48,7 @@ const {require, loader} = ChromeUtils.import("resource://devtools/shared/Loader.
 const Editor = require("devtools/client/sourceeditor/editor");
 const TargetFactory = require("devtools/client/framework/target").TargetFactory;
 const EventEmitter = require("devtools/shared/event-emitter");
-const {DevToolsWorker} = require("devtools/shared/worker/worker");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
-const flags = require("devtools/shared/flags");
-const promise = require("promise");
-const defer = require("devtools/shared/defer");
 const Services = require("Services");
 const {gDevTools} = require("devtools/client/framework/devtools");
 const { extend } = require("devtools/shared/extend");
@@ -205,9 +200,6 @@ var Scratchpad = {
       "sp-cmd-display": () => {
         Scratchpad.display();
       },
-      "sp-cmd-pprint": () => {
-        Scratchpad.prettyPrint();
-      },
       "sp-cmd-contentContext": () => {
         Scratchpad.setContentContext();
       },
@@ -332,14 +324,6 @@ var Scratchpad = {
   },
 
   /**
-   * Retrieve the xul:notificationbox DOM element. It notifies the user when
-   * the current code execution context is SCRATCHPAD_CONTEXT_BROWSER.
-   */
-  get notificationBox() {
-    return document.getElementById("scratchpad-notificationbox");
-  },
-
-  /**
    * Hide the menu bar.
    */
   hideMenu: function SP_hideMenu() {
@@ -409,7 +393,7 @@ var Scratchpad = {
       filename: this.filename,
       text: this.getText(),
       executionContext: this.executionContext,
-      saved: !this.dirty
+      saved: !this.dirty,
     };
   },
 
@@ -479,12 +463,12 @@ var Scratchpad = {
    * Evaluate a string in the currently desired context, that is either the
    * chrome window or the tab content window object.
    *
-   * @param string aString
+   * @param string string
    *        The script you want to evaluate.
    * @return Promise
    *         The promise for the script evaluation result.
    */
-  evaluate: function SP_evaluate(aString) {
+  async evaluate(string) {
     let connection;
     if (this.target) {
       connection = ScratchpadTarget.consoleFor(this.target);
@@ -495,24 +479,18 @@ var Scratchpad = {
     }
 
     const evalOptions = { url: this.uniqueName };
+    const { debuggerClient, webConsoleClient } = await connection;
+    this.debuggerClient = debuggerClient;
+    this.webConsoleClient = webConsoleClient;
+    const response = await webConsoleClient.evaluateJSAsync(string, null, evalOptions);
 
-    return connection.then(({ debuggerClient, webConsoleClient }) => {
-      const deferred = defer();
-
-      webConsoleClient.evaluateJSAsync(aString, aResponse => {
-        this.debuggerClient = debuggerClient;
-        this.webConsoleClient = webConsoleClient;
-        if (aResponse.error) {
-          deferred.reject(aResponse);
-        } else if (aResponse.exception !== null) {
-          deferred.resolve([aString, aResponse]);
-        } else {
-          deferred.resolve([aString, undefined, aResponse.result]);
-        }
-      }, evalOptions);
-
-      return deferred.promise;
-    });
+    if (response.error) {
+      throw new Error(response.error);
+    } else if (response.exception !== null) {
+      return [string, response];
+    } else {
+      return [string, undefined, response.result];
+    }
   },
 
   /**
@@ -522,7 +500,7 @@ var Scratchpad = {
    * @return Promise
    *         The promise for the script evaluation result.
    */
-  execute: function SP_execute() {
+  execute() {
     WebConsoleUtils.usageCount++;
     const selection = this.editor.getSelection() || this.getText();
     return this.evaluate(selection);
@@ -535,22 +513,14 @@ var Scratchpad = {
    * @return Promise
    *         The promise for the script evaluation result.
    */
-  run: function SP_run() {
-    const deferred = defer();
-    const reject = aReason => deferred.reject(aReason);
-
-    this.execute().then(([aString, aError, aResult]) => {
-      const resolve = () => deferred.resolve([aString, aError, aResult]);
-
-      if (aError) {
-        this.writeAsErrorComment(aError).then(resolve, reject);
-      } else {
-        this.editor.dropSelection();
-        resolve();
-      }
-    }, reject);
-
-    return deferred.promise;
+  async run() {
+    const [string, error, result] = await this.execute();
+    if (error) {
+      await this.writeAsErrorComment(error);
+    } else {
+      this.editor.dropSelection();
+    }
+    return [string, error, result];
   },
 
   /**
@@ -560,22 +530,15 @@ var Scratchpad = {
    * @return Promise
    *         The promise for the script evaluation result.
    */
-  inspect: function SP_inspect() {
-    const deferred = defer();
-    const reject = aReason => deferred.reject(aReason);
-
-    this.execute().then(([aString, aError, aResult]) => {
-      const resolve = () => deferred.resolve([aString, aError, aResult]);
-
-      if (aError) {
-        this.writeAsErrorComment(aError).then(resolve, reject);
-      } else {
-        this.editor.dropSelection();
-        this.sidebar.open(aString, aResult).then(resolve, reject);
-      }
-    }, reject);
-
-    return deferred.promise;
+  async inspect() {
+    const [string, error, result] = await this.execute();
+    if (error) {
+      await this.writeAsErrorComment(error);
+    } else {
+      this.editor.dropSelection();
+      await this.sidebar.open(string, result);
+    }
+    return [string, error, result];
   },
 
   /**
@@ -586,22 +549,19 @@ var Scratchpad = {
    * @return Promise
    *         The promise for the script evaluation result.
    */
-  reloadAndRun: function SP_reloadAndRun() {
-    const deferred = defer();
-
+  async reloadAndRun() {
     if (this.executionContext !== SCRATCHPAD_CONTEXT_CONTENT) {
       console.error(this.strings
                     .GetStringFromName("scratchpadContext.invalid"));
       return;
     }
 
-    const target = TargetFactory.forTab(this.gBrowser.selectedTab);
-    target.once("navigate", () => {
-      this.run().then(results => deferred.resolve(results));
-    });
-    target.makeRemote().then(() => target.activeTab.reload());
-
-    return deferred.promise;
+    const target = await TargetFactory.forTab(this.gBrowser.selectedTab);
+    await target.attach();
+    const onNavigate = target.once("navigate");
+    target.activeTab.reload();
+    await onNavigate;
+    await this.run();
   },
 
   /**
@@ -613,71 +573,24 @@ var Scratchpad = {
    * @return Promise
    *         The promise for the script evaluation result.
    */
-  display: function SP_display() {
-    const deferred = defer();
-    const reject = aReason => deferred.reject(aReason);
-
-    this.execute().then(([aString, aError, aResult]) => {
-      const resolve = () => deferred.resolve([aString, aError, aResult]);
-
-      if (aError) {
-        this.writeAsErrorComment(aError).then(resolve, reject);
-      } else if (VariablesView.isPrimitive({ value: aResult })) {
-        this._writePrimitiveAsComment(aResult).then(resolve, reject);
-      } else {
-        const objectClient = new ObjectClient(this.debuggerClient, aResult);
-        objectClient.getDisplayString(aResponse => {
-          if (aResponse.error) {
-            reportError("display", aResponse);
-            reject(aResponse);
-          } else {
-            this.writeAsComment(aResponse.displayString);
-            resolve();
-          }
-        });
-      }
-    }, reject);
-
-    return deferred.promise;
-  },
-
-  _prettyPrintWorker: null,
-
-  /**
-   * Get or create the worker that handles pretty printing.
-   */
-  get prettyPrintWorker() {
-    if (!this._prettyPrintWorker) {
-      this._prettyPrintWorker = new DevToolsWorker(
-        "resource://devtools/server/actors/pretty-print-worker.js",
-        { name: "pretty-print",
-          verbose: flags.wantLogging }
-      );
+  async display() {
+    const [string, error, result] = await this.execute();
+    if (error) {
+      await this.writeAsErrorComment(error);
+      return [string, error, result];
+    } else if (VariablesView.isPrimitive({ value: result })) {
+      await this._writePrimitiveAsComment(result);
+      return [string, error, result];
     }
-    return this._prettyPrintWorker;
-  },
-
-  /**
-   * Pretty print the source text inside the scratchpad.
-   *
-   * @return Promise
-   *         A promise resolved with the pretty printed code, or rejected with
-   *         an error.
-   */
-  prettyPrint: function SP_prettyPrint() {
-    const uglyText = this.getText();
-    const tabsize = Services.prefs.getIntPref(TAB_SIZE);
-
-    return this.prettyPrintWorker.performTask("pretty-print", {
-      url: "(scratchpad)",
-      indent: tabsize,
-      source: uglyText
-    }).then(data => {
-      this.editor.setText(data.code);
-    }).catch(error => {
-      this.writeAsErrorComment({ exception: error });
-      throw error;
-    });
+    const objectClient = new ObjectClient(this.debuggerClient, result);
+    const response = await objectClient.getDisplayString();
+    if (response.error) {
+      reportError("display", response);
+      throw new Error(response.error);
+    } else {
+      this.writeAsComment(response.displayString);
+      return [string, error, result];
+    }
   },
 
   /**
@@ -802,17 +715,17 @@ var Scratchpad = {
    *
    * @returns Promise [text, error, result]
    */
-  evalTopLevelFunction: function SP_evalTopLevelFunction() {
+  evalTopLevelFunction() {
     const text = this.getText();
     const ast = this._parseText(text);
     if (!ast) {
-      return promise.resolve([text, undefined, undefined]);
+      return Promise.resolve([text, undefined, undefined]);
     }
 
     const cursorPos = this.editor.getCursor();
     const funcStatement = this._findTopLevelFunction(ast, cursorPos);
     if (!funcStatement) {
-      return promise.resolve([text, undefined, undefined]);
+      return Promise.resolve([text, undefined, undefined]);
     }
 
     let functionText = this._getFunctionText(funcStatement, text);
@@ -829,11 +742,11 @@ var Scratchpad = {
     // CodeMirror's are 0-based.
     const from = {
       line: funcStatement.loc.start.line - 1,
-      ch: funcStatement.loc.start.column
+      ch: funcStatement.loc.start.column,
     };
     const to = {
       line: funcStatement.loc.end.line - 1,
-      ch: funcStatement.loc.end.column
+      ch: funcStatement.loc.end.column,
     };
 
     const marker = this.editor.markText(from, to, "eval-text");
@@ -847,102 +760,93 @@ var Scratchpad = {
    * to be printed directly (number, string) as well as grips to values
    * (null, undefined, longString).
    *
-   * @param any aValue
+   * @param any value
    *        The value to print.
    * @return Promise
    *         The promise that resolves after the value has been printed.
    */
-  _writePrimitiveAsComment: function SP__writePrimitiveAsComment(aValue) {
-    const deferred = defer();
-
-    if (aValue.type == "longString") {
+  async _writePrimitiveAsComment(value) {
+    if (value.type == "longString") {
       const client = this.webConsoleClient;
-      client.longString(aValue).substring(0, aValue.length, aResponse => {
-        if (aResponse.error) {
-          reportError("display", aResponse);
-          deferred.reject(aResponse);
-        } else {
-          deferred.resolve(aResponse.substring);
-        }
-      });
+      const response = await client.longString(value).substring(0, value.length);
+      if (response.error) {
+        reportError("display", response);
+        throw new Error(response.error);
+      } else {
+        this.writeAsComment(response.substring);
+      }
     } else {
-      deferred.resolve(aValue.type || aValue);
+      this.writeAsComment(value.type || value);
     }
-
-    return deferred.promise.then(aComment => {
-      this.writeAsComment(aComment);
-    });
   },
 
   /**
    * Write out a value at the next line from the current insertion point.
    * The comment block will always be preceded by a newline character.
-   * @param object aValue
+   * @param object value
    *        The Object to write out as a string
    */
-  writeAsComment: function SP_writeAsComment(aValue) {
-    const value = "\n/*\n" + aValue + "\n*/";
+  writeAsComment(value) {
+    const comment = "\n/*\n" + value + "\n*/";
 
     if (this.editor.somethingSelected()) {
       const from = this.editor.getCursor("end");
-      this.editor.replaceSelection(this.editor.getSelection() + value);
-      const to = this.editor.getPosition(this.editor.getOffset(from) + value.length);
+      this.editor.replaceSelection(this.editor.getSelection() + comment);
+      const to = this.editor.getPosition(this.editor.getOffset(from) + comment.length);
       this.editor.setSelection(from, to);
       return;
     }
 
     const text = this.editor.getText();
-    this.editor.setText(text + value);
+    this.editor.setText(text + comment);
 
-    const [ from, to ] = this.editor.getPosition(text.length, (text + value).length);
+    const [ from, to ] = this.editor.getPosition(text.length, (text + comment).length);
     this.editor.setSelection(from, to);
   },
 
   /**
    * Write out an error at the current insertion point as a block comment
-   * @param object aValue
+   * @param object error
    *        The error object to write out the message and stack trace. It must
    *        contain an |exception| property with the actual error thrown, but it
    *        will often be the entire response of an evaluateJS request.
    * @return Promise
    *         The promise that indicates when writing the comment completes.
    */
-  writeAsErrorComment: function SP_writeAsErrorComment(aError) {
-    const deferred = defer();
-
-    if (VariablesView.isPrimitive({ value: aError.exception })) {
-      const error = aError.exception;
-      const type = error.type;
-      if (type == "undefined" ||
-          type == "null" ||
-          type == "Infinity" ||
-          type == "-Infinity" ||
-          type == "NaN" ||
-          type == "-0") {
-        deferred.resolve(type);
-      } else if (type == "longString") {
-        deferred.resolve(error.initial + "\u2026");
+  writeAsErrorComment(error) {
+    return new Promise(async (resolve, reject) => {
+      const exception = error.exception;
+      if (VariablesView.isPrimitive({ value: exception })) {
+        const type = exception.type;
+        if (type == "undefined" ||
+            type == "null" ||
+            type == "Infinity" ||
+            type == "-Infinity" ||
+            type == "NaN" ||
+            type == "-0") {
+          resolve(type);
+        } else if (type == "longString") {
+          resolve(exception.initial + "\u2026");
+        } else {
+          resolve(exception);
+        }
+      } else if ("preview" in exception) {
+        const stack = this._constructErrorStack(exception.preview);
+        if (typeof error.exceptionMessage == "string") {
+          resolve(error.exceptionMessage + stack);
+        } else {
+          resolve(stack);
+        }
       } else {
-        deferred.resolve(error);
-      }
-    } else if ("preview" in aError.exception) {
-      const error = aError.exception;
-      const stack = this._constructErrorStack(error.preview);
-      if (typeof aError.exceptionMessage == "string") {
-        deferred.resolve(aError.exceptionMessage + stack);
-      } else {
-        deferred.resolve(stack);
-      }
-    } else {
-      // If there is no preview information, we need to ask the server for more.
-      const objectClient = new ObjectClient(this.debuggerClient, aError.exception);
-      objectClient.getPrototypeAndProperties(aResponse => {
-        if (aResponse.error) {
-          deferred.reject(aResponse);
+        // If there is no preview information, we need to ask the server for more.
+        const objectClient = new ObjectClient(this.debuggerClient, exception);
+        const response = await objectClient.getPrototypeAndProperties();
+        if (response.error) {
+          reject(response);
           return;
         }
 
-        const { ownProperties, safeGetterValues } = aResponse;
+        const {ownProperties, safeGetterValues} = response;
         const error = Object.create(null);
 
         // Combine all the property descriptor/getter values into one object.
@@ -957,24 +861,21 @@ var Scratchpad = {
         const stack = this._constructErrorStack(error);
 
         if (typeof error.message == "string") {
-          deferred.resolve(error.message + stack);
+          resolve(error.message + stack);
         } else {
-          objectClient.getDisplayString(aResponse => {
-            if (aResponse.error) {
-              deferred.reject(aResponse);
-            } else if (typeof aResponse.displayString == "string") {
-              deferred.resolve(aResponse.displayString + stack);
-            } else {
-              deferred.resolve(stack);
-            }
-          });
+          const response = await objectClient.getDisplayString();
+          if (response.error) {
+            reject(response);
+          } else if (typeof response.displayString == "string") {
+            resolve(response.displayString + stack);
+          } else {
+            resolve(stack);
+          }
         }
-      });
-    }
-
-    return deferred.promise.then(aMessage => {
-      console.error(aMessage);
-      this.writeAsComment("Exception: " + aMessage);
+      }
+    }).then((message) => {
+      console.error(message);
+      this.writeAsComment("Exception: " + message);
     });
   },
 
@@ -1023,21 +924,20 @@ var Scratchpad = {
   /**
    * Export the textbox content to a file.
    *
-   * @param nsIFile aFile
+   * @param nsIFile file
    *        The file where you want to save the textbox content.
-   * @param boolean aNoConfirmation
+   * @param boolean noConfirmation
    *        If the file already exists, ask for confirmation?
-   * @param boolean aSilentError
+   * @param boolean silentError
    *        True if you do not want to display an error when file save fails,
    *        false otherwise.
-   * @param function aCallback
+   * @param function callback
    *        Optional function you want to call when file save completes. It will
    *        get the following arguments:
    *        1) the nsresult status code for the export operation.
    */
-  exportToFile: function SP_exportToFile(aFile, aNoConfirmation, aSilentError,
-                                         aCallback) {
-    if (!aNoConfirmation && aFile.exists() &&
+  async exportToFile(file, noConfirmation, silentError, callback) {
+    if (!noConfirmation && file.exists() &&
         !window.confirm(this.strings
                         .GetStringFromName("export.fileOverwriteConfirmation"))) {
       return;
@@ -1045,19 +945,19 @@ var Scratchpad = {
 
     const encoder = new TextEncoder();
     const buffer = encoder.encode(this.getText());
-    const writePromise = OS.File.writeAtomic(aFile.path, buffer, {tmpPath: aFile.path + ".tmp"});
-    writePromise.then(value => {
-      if (aCallback) {
-        aCallback.call(this, Cr.NS_OK);
+    try {
+      await OS.File.writeAtomic(file.path, buffer, {tmpPath: file.path + ".tmp"});
+      if (callback) {
+        callback.call(this, Cr.NS_OK);
       }
-    }, reason => {
-      if (!aSilentError) {
+    } catch (error) {
+      if (!silentError) {
         window.alert(this.strings.GetStringFromName("saveFile.failed"));
       }
-      if (aCallback) {
-        aCallback.call(this, Cr.NS_ERROR_UNEXPECTED);
+      if (callback) {
+        callback.call(this, Cr.NS_ERROR_UNEXPECTED);
       }
-    });
+    }
   },
 
   /**
@@ -1118,63 +1018,69 @@ var Scratchpad = {
    *        get the following arguments:
    *        1) the nsresult status code for the import operation.
    *        2) the data that was read from the file, if any.
+   * @return Promise resolved with array of callback args
    */
   importFromFile: function SP_importFromFile(aFile, aSilentError, aCallback) {
-    // Prevent file type detection.
-    const channel = NetUtil.newChannel({
-      uri: NetUtil.newURI(aFile),
-      loadingNode: window.document,
-      securityFlags: Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS,
-      contentPolicyType: Ci.nsIContentPolicy.TYPE_OTHER});
-    channel.contentType = "application/javascript";
+    return new Promise(resolve => {
+      // Prevent file type detection.
+      const channel = NetUtil.newChannel({
+        uri: NetUtil.newURI(aFile),
+        loadingNode: window.document,
+        securityFlags: Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS,
+        contentPolicyType: Ci.nsIContentPolicy.TYPE_OTHER,
+      });
+      channel.contentType = "application/javascript";
 
-    this.notificationBox.removeAllNotifications(false);
+      this.notificationBox.removeAllNotifications(false);
 
-    NetUtil.asyncFetch(channel, (aInputStream, aStatus) => {
-      let content = null;
+      NetUtil.asyncFetch(channel, (aInputStream, aStatus) => {
+        let content = null;
 
-      if (Components.isSuccessCode(aStatus)) {
-        const charsets = this._getApplicableCharsets();
-        content = NetUtil.readInputStreamToString(aInputStream,
-                                                  aInputStream.available());
-        content = this._getUnicodeContent(content, charsets);
-        if (!content) {
-          const message = this.strings.formatStringFromName(
-            "importFromFile.convert.failed",
-            [ charsets.join(", ") ],
-            1);
-          this.notificationBox.appendNotification(
-            message,
-            "file-import-convert-failed",
-            null,
-            this.notificationBox.PRIORITY_CRITICAL_MEDIUM,
-            null);
-          if (aCallback) {
-            aCallback.call(this, aStatus, content);
+        if (Components.isSuccessCode(aStatus)) {
+          const charsets = this._getApplicableCharsets();
+          content = NetUtil.readInputStreamToString(aInputStream,
+            aInputStream.available());
+          content = this._getUnicodeContent(content, charsets);
+          if (!content) {
+            const message = this.strings.formatStringFromName(
+              "importFromFile.convert.failed",
+              [charsets.join(", ")],
+              1);
+            this.notificationBox.appendNotification(
+              message,
+              "file-import-convert-failed",
+              null,
+              this.notificationBox.PRIORITY_CRITICAL_MEDIUM,
+              null);
+            if (aCallback) {
+              aCallback.call(this, aStatus, content);
+            }
+            resolve([aStatus, content]);
+            return;
           }
-          return;
-        }
-        // Check to see if the first line is a mode-line comment.
-        const line = content.split("\n")[0];
-        const modeline = this._scanModeLine(line);
-        const chrome = Services.prefs.getBoolPref(DEVTOOLS_CHROME_ENABLED);
+          // Check to see if the first line is a mode-line comment.
+          const line = content.split("\n")[0];
+          const modeline = this._scanModeLine(line);
+          const chrome = Services.prefs.getBoolPref(DEVTOOLS_CHROME_ENABLED);
 
-        if (chrome && modeline["-sp-context"] === "browser") {
-          this.setBrowserContext();
-        }
+          if (chrome && modeline["-sp-context"] === "browser") {
+            this.setBrowserContext();
+          }
 
-        this.editor.setText(content);
-        this.editor.clearHistory();
-        this.dirty = false;
-        document.getElementById("sp-cmd-revert").setAttribute("disabled", true);
-      } else if (!aSilentError) {
-        window.alert(this.strings.GetStringFromName("openFile.failed"));
-      }
-      this.setFilename(aFile.path);
-      this.setRecentFile(aFile);
-      if (aCallback) {
-        aCallback.call(this, aStatus, content);
-      }
+          this.editor.setText(content);
+          this.editor.clearHistory();
+          this.dirty = false;
+          document.getElementById("sp-cmd-revert").setAttribute("disabled", true);
+        } else if (!aSilentError) {
+          window.alert(this.strings.GetStringFromName("openFile.failed"));
+        }
+        this.setFilename(aFile.path);
+        this.setRecentFile(aFile);
+        if (aCallback) {
+          aCallback.call(this, aStatus, content);
+        }
+        resolve([aStatus, content]);
+      });
     });
   },
 
@@ -1326,7 +1232,7 @@ var Scratchpad = {
 
       // Print out menuitems with the most recent file first.
       for (let i = filePaths.length - 1; i >= 0; --i) {
-        const menuitem = document.createElement("menuitem");
+        const menuitem = document.createXULElement("menuitem");
         menuitem.setAttribute("type", "radio");
         menuitem.setAttribute("label", filePaths[i]);
 
@@ -1339,8 +1245,8 @@ var Scratchpad = {
         recentFilesPopup.appendChild(menuitem);
       }
 
-      recentFilesPopup.appendChild(document.createElement("menuseparator"));
-      const clearItems = document.createElement("menuitem");
+      recentFilesPopup.appendChild(document.createXULElement("menuseparator"));
+      const clearItems = document.createXULElement("menuitem");
       clearItems.setAttribute("id", "sp-menu-clear_recent");
       clearItems.setAttribute("label",
                               this.strings
@@ -1404,56 +1310,64 @@ var Scratchpad = {
    *
    * @param function aCallback
    *        Optional function you want to call when file is saved
+   * @return Promise
    */
   saveFile: function SP_saveFile(aCallback) {
     if (!this.filename) {
       return this.saveFileAs(aCallback);
     }
 
-    const file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
-    file.initWithPath(this.filename);
+    return new Promise(resolve => {
+      const file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+      file.initWithPath(this.filename);
 
-    this.exportToFile(file, true, false, aStatus => {
-      if (Components.isSuccessCode(aStatus)) {
-        this.dirty = false;
-        document.getElementById("sp-cmd-revert").setAttribute("disabled", true);
-        this.setRecentFile(file);
-      }
-      if (aCallback) {
-        aCallback(aStatus);
-      }
+      this.exportToFile(file, true, false, aStatus => {
+        if (Components.isSuccessCode(aStatus)) {
+          this.dirty = false;
+          document.getElementById("sp-cmd-revert").setAttribute("disabled", true);
+          this.setRecentFile(file);
+        }
+        if (aCallback) {
+          aCallback(aStatus);
+        }
+        resolve(aStatus);
+      });
     });
   },
 
   /**
    * Save the textbox content to a new file.
    *
-   * @param function aCallback
+   * @param function callback
    *        Optional function you want to call when file is saved
+   * @return Promise
    */
-  saveFileAs: function SP_saveFileAs(aCallback) {
-    const fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
-    const fpCallback = aResult => {
-      if (aResult != Ci.nsIFilePicker.returnCancel) {
-        this.setFilename(fp.file.path);
-        this.exportToFile(fp.file, true, false, aStatus => {
-          if (Components.isSuccessCode(aStatus)) {
-            this.dirty = false;
-            this.setRecentFile(fp.file);
-          }
-          if (aCallback) {
-            aCallback(aStatus);
-          }
-        });
-      }
-    };
+  saveFileAs(callback) {
+    return new Promise(resolve => {
+      const fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
+      const fpCallback = result => {
+        if (result != Ci.nsIFilePicker.returnCancel) {
+          this.setFilename(fp.file.path);
+          this.exportToFile(fp.file, true, false, status => {
+            if (Components.isSuccessCode(status)) {
+              this.dirty = false;
+              this.setRecentFile(fp.file);
+            }
+            if (callback) {
+              callback(status);
+            }
+            resolve(status);
+          });
+        }
+      };
 
-    fp.init(window, this.strings.GetStringFromName("saveFileAs"),
-            Ci.nsIFilePicker.modeSave);
-    fp.defaultString = "scratchpad.js";
-    fp.appendFilter("JavaScript Files", "*.js; *.jsm; *.json");
-    fp.appendFilter("All Files", "*.*");
-    fp.open(fpCallback);
+      fp.init(window, this.strings.GetStringFromName("saveFileAs"),
+        Ci.nsIFilePicker.modeSave);
+      fp.defaultString = "scratchpad.js";
+      fp.appendFilter("JavaScript Files", "*.js; *.jsm; *.json");
+      fp.appendFilter("All Files", "*.*");
+      fp.open(fpCallback);
+    });
   },
 
   /**
@@ -1529,8 +1443,8 @@ var Scratchpad = {
   /**
    * Open the Web Console.
    */
-  openWebConsole: function SP_openWebConsole() {
-    const target = TargetFactory.forTab(this.gBrowser.selectedTab);
+  openWebConsole: async function SP_openWebConsole() {
+    const target = await TargetFactory.forTab(this.gBrowser.selectedTab);
     gDevTools.showToolbox(target, "webconsole");
     this.browserWindow.focus();
   },
@@ -1583,8 +1497,7 @@ var Scratchpad = {
    *         the inner window ID
    */
   getInnerWindowId: function SP_getInnerWindowId(aWindow) {
-    return aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-           .getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
+    return aWindow.windowUtils.currentInnerWindowID;
   },
 
   updateStatusBar: function SP_updateStatusBar(aEventType) {
@@ -1604,6 +1517,10 @@ var Scratchpad = {
     if (aEvent.target != document) {
       return;
     }
+
+    this.notificationBox = new window.MozElements.NotificationBox(element => {
+      document.getElementById("scratchpad-container").prepend(element);
+    });
 
     const chrome = Services.prefs.getBoolPref(DEVTOOLS_CHROME_ENABLED);
     if (chrome) {
@@ -1665,7 +1582,7 @@ var Scratchpad = {
       const okstring = this.strings.GetStringFromName("selfxss.okstring");
       const msg = this.strings.formatStringFromName("selfxss.msg", [okstring], 1);
       this._onPaste = WebConsoleUtils.pasteHandlerGen(this.editor.container.contentDocument.body,
-                                                      document.querySelector("#scratchpad-notificationbox"),
+                                                      this.notificationBox,
                                                       msg, okstring);
       editorElement.addEventListener("paste", this._onPaste, true);
       editorElement.addEventListener("drop", this._onPaste);
@@ -1764,11 +1681,6 @@ var Scratchpad = {
     if (this._sidebar) {
       this._sidebar.destroy();
       this._sidebar = null;
-    }
-
-    if (this._prettyPrintWorker) {
-      this._prettyPrintWorker.destroy();
-      this._prettyPrintWorker = null;
     }
 
     scratchpadTargets = null;
@@ -2031,62 +1943,55 @@ ScratchpadTab.prototype = {
   /**
    * Initialize a debugger client and connect it to the debugger server.
    *
-   * @param object aSubject
+   * @param object subject
    *        The tab or window to obtain the connection for.
    * @return Promise
    *         The promise for the result of connecting to this tab or window.
    */
-  connect: function ST_connect(aSubject) {
+  connect(subject) {
     if (this._connector) {
       return this._connector;
     }
 
-    const deferred = defer();
-    this._connector = deferred.promise;
-
-    const connectTimer = setTimeout(() => {
-      deferred.reject({
-        error: "timeout",
-        message: Scratchpad.strings.GetStringFromName("connectionTimeout"),
-      });
-    }, REMOTE_TIMEOUT);
-
-    deferred.promise.then(() => clearTimeout(connectTimer));
-
-    this._attach(aSubject).then(aTarget => {
-      const consoleActor = aTarget.form.consoleActor;
-      const client = aTarget.client;
-      client.attachConsole(consoleActor, [])
-        .then(([aResponse, aWebConsoleClient]) => {
-          deferred.resolve({
-            webConsoleClient: aWebConsoleClient,
-            debuggerClient: client
-          });
-        }, error => {
-          reportError("attachConsole", error);
-          deferred.reject(error);
+    this._connector = new Promise(async (resolve, reject) => {
+      const connectTimer = setTimeout(() => {
+        reject({
+          error: "timeout",
+          message: Scratchpad.strings.GetStringFromName("connectionTimeout"),
         });
+      }, REMOTE_TIMEOUT);
+      try {
+        const target = await this._attach(subject);
+        clearTimeout(connectTimer);
+        resolve({
+          webConsoleClient: target.activeConsole,
+          debuggerClient: target.client,
+        });
+      } catch (error) {
+        reportError("attachConsole", error);
+        reject(error);
+      }
     });
 
-    return deferred.promise;
+    return this._connector;
   },
 
   /**
    * Attach to this tab.
    *
-   * @param object aSubject
+   * @param object subject
    *        The tab or window to obtain the connection for.
    * @return Promise
-   *         The promise for the TabTarget for this tab.
+   *         The promise for the Target for this tab.
    */
-  _attach: function ST__attach(aSubject) {
-    const target = TargetFactory.forTab(this._tab);
+  async _attach(subject) {
+    const target = await TargetFactory.forTab(this._tab);
     target.once("close", () => {
       if (scratchpadTargets) {
-        scratchpadTargets.delete(aSubject);
+        scratchpadTargets.delete(subject);
       }
     });
-    return target.makeRemote().then(() => target);
+    return target.attach().then(() => target);
   },
 };
 
@@ -2105,18 +2010,20 @@ ScratchpadWindow.prototype = extend(ScratchpadTab.prototype, {
    * @return Promise
    *         The promise for the target for this window.
    */
-  _attach: function SW__attach() {
+  async _attach() {
     DebuggerServer.init();
     DebuggerServer.registerAllActors();
     DebuggerServer.allowChromeProcess = true;
 
     const client = new DebuggerClient(DebuggerServer.connectPipe());
-    return client.connect()
-      .then(() => client.getProcess())
-      .then(aResponse => {
-        return { form: aResponse.form, client: client };
-      });
-  }
+    await client.connect();
+    const front = await client.mainRoot.getMainProcess();
+    const target = await TargetFactory.forRemoteTab({
+      activeTab: front,
+      client,
+    });
+    return target;
+  },
 });
 
 function ScratchpadTarget(aTarget) {
@@ -2126,12 +2033,10 @@ function ScratchpadTarget(aTarget) {
 ScratchpadTarget.consoleFor = ScratchpadTab.consoleFor;
 
 ScratchpadTarget.prototype = extend(ScratchpadTab.prototype, {
-  _attach: function ST__attach() {
-    if (this._target.isRemote) {
-      return promise.resolve(this._target);
-    }
-    return this._target.makeRemote().then(() => this._target);
-  }
+  _attach() {
+    // We return a promise here to match the typing of ScratchpadWindow._attach.
+    return Promise.resolve(this._target);
+  },
 });
 
 /**
@@ -2169,57 +2074,55 @@ ScratchpadSidebar.prototype = {
    * Open the sidebar, if not open already, and populate it with the properties
    * of the given object.
    *
-   * @param string aString
+   * @param string string
    *        The string that was evaluated.
-   * @param object aObject
+   * @param object obj
    *        The object to inspect, which is the aEvalString evaluation result.
    * @return Promise
    *         A promise that will resolve once the sidebar is open.
    */
-  open: function SS_open(aEvalString, aObject) {
+  open(string, obj) {
     this.show();
 
-    const deferred = defer();
+    return new Promise(resolve => {
+      const onTabReady = () => {
+        if (this.variablesView) {
+          this.variablesView.controller.releaseActors();
+        } else {
+          const window = this._sidebar.getWindowForTab("variablesview");
+          const container = window.document.querySelector("#variables");
 
-    const onTabReady = () => {
-      if (this.variablesView) {
-        this.variablesView.controller.releaseActors();
+          this.variablesView = new VariablesView(container, {
+            searchEnabled: true,
+            searchPlaceholder: this._scratchpad.strings
+              .GetStringFromName("propertiesFilterPlaceholder"),
+          });
+
+          VariablesViewController.attach(this.variablesView, {
+            getEnvironmentClient: grip => {
+              return new EnvironmentClient(this._scratchpad.debuggerClient, grip);
+            },
+            getObjectClient: grip => {
+              return new ObjectClient(this._scratchpad.debuggerClient, grip);
+            },
+            getLongStringClient: actor => {
+              return this._scratchpad.webConsoleClient.longString(actor);
+            },
+            releaseActor: actor => {
+              this._scratchpad.debuggerClient.release(actor);
+            },
+          });
+        }
+        this._update(obj).then(resolve);
+      };
+
+      if (this._sidebar.getCurrentTabID() == "variablesview") {
+        onTabReady();
       } else {
-        const window = this._sidebar.getWindowForTab("variablesview");
-        const container = window.document.querySelector("#variables");
-
-        this.variablesView = new VariablesView(container, {
-          searchEnabled: true,
-          searchPlaceholder: this._scratchpad.strings
-                             .GetStringFromName("propertiesFilterPlaceholder")
-        });
-
-        VariablesViewController.attach(this.variablesView, {
-          getEnvironmentClient: aGrip => {
-            return new EnvironmentClient(this._scratchpad.debuggerClient, aGrip);
-          },
-          getObjectClient: aGrip => {
-            return new ObjectClient(this._scratchpad.debuggerClient, aGrip);
-          },
-          getLongStringClient: aActor => {
-            return this._scratchpad.webConsoleClient.longString(aActor);
-          },
-          releaseActor: aActor => {
-            this._scratchpad.debuggerClient.release(aActor);
-          }
-        });
+        this._sidebar.once("variablesview-ready", onTabReady);
+        this._sidebar.addTab("variablesview", VARIABLES_VIEW_URL, {selected: true});
       }
-      this._update(aObject).then(() => deferred.resolve());
-    };
-
-    if (this._sidebar.getCurrentTabID() == "variablesview") {
-      onTabReady();
-    } else {
-      this._sidebar.once("variablesview-ready", onTabReady);
-      this._sidebar.addTab("variablesview", VARIABLES_VIEW_URL, {selected: true});
-    }
-
-    return deferred.promise;
+    });
   },
 
   /**
@@ -2277,7 +2180,7 @@ ScratchpadSidebar.prototype = {
     view.onlyEnumVisible = onlyEnumVisible;
     view.empty();
     return view.controller.setSingleVariable(options).expanded;
-  }
+  },
 };
 
 /**
@@ -2329,7 +2232,7 @@ var PreferenceObserver = {
 
     this.branch.removeObserver("", this);
     this.branch = null;
-  }
+  },
 };
 
 /**

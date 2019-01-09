@@ -10,9 +10,13 @@
 
 use lmdb;
 
+<<<<<<< HEAD
 use std::marker::{
     PhantomData,
 };
+=======
+use std::marker::PhantomData;
+>>>>>>> central
 
 use lmdb::{
     Cursor,
@@ -24,6 +28,7 @@ use lmdb::{
     Transaction,
 };
 
+<<<<<<< HEAD
 use lmdb::{
     WriteFlags,
 };
@@ -42,11 +47,23 @@ fn read_transform<'x>(val: Result<&'x [u8], lmdb::Error>) -> Result<Option<Value
     match val {
         Ok(bytes) => Value::from_tagged_slice(bytes).map(Some)
                                                     .map_err(StoreError::DataError),
+=======
+use lmdb::WriteFlags;
+
+use error::StoreError;
+
+use value::Value;
+
+fn read_transform<'x>(val: Result<&'x [u8], lmdb::Error>) -> Result<Option<Value<'x>>, StoreError> {
+    match val {
+        Ok(bytes) => Value::from_tagged_slice(bytes).map(Some).map_err(StoreError::DataError),
+>>>>>>> central
         Err(lmdb::Error::NotFound) => Ok(None),
         Err(e) => Err(StoreError::LmdbError(e)),
     }
 }
 
+<<<<<<< HEAD
 pub struct Writer<'env, K> where K: AsRef<[u8]> {
     tx: RwTransaction<'env>,
     db: Database,
@@ -56,6 +73,21 @@ pub struct Writer<'env, K> where K: AsRef<[u8]> {
 pub struct Reader<'env, K> where K: AsRef<[u8]> {
     tx: RoTransaction<'env>,
     db: Database,
+=======
+pub struct Writer<'env, K>
+where
+    K: AsRef<[u8]>,
+{
+    tx: RwTransaction<'env>,
+    phantom: PhantomData<K>,
+}
+
+pub struct Reader<'env, K>
+where
+    K: AsRef<[u8]>,
+{
+    tx: RoTransaction<'env>,
+>>>>>>> central
     phantom: PhantomData<K>,
 }
 
@@ -64,13 +96,30 @@ pub struct Iter<'env> {
     cursor: RoCursor<'env>,
 }
 
+<<<<<<< HEAD
 impl<'env, K> Writer<'env, K> where K: AsRef<[u8]> {
     pub fn get<'s>(&'s self, k: K) -> Result<Option<Value<'s>>, StoreError> {
         let bytes = self.tx.get(self.db, &k.as_ref());
+=======
+impl<'env, K> Writer<'env, K>
+where
+    K: AsRef<[u8]>,
+{
+    pub(crate) fn new(txn: RwTransaction) -> Writer<K> {
+        Writer {
+            tx: txn,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn get<'s>(&'s self, store: &'s Store, k: K) -> Result<Option<Value<'s>>, StoreError> {
+        let bytes = self.tx.get(store.db, &k.as_ref());
+>>>>>>> central
         read_transform(bytes)
     }
 
     // TODO: flags
+<<<<<<< HEAD
     pub fn put<'s>(&'s mut self, k: K, v: &Value) -> Result<(), StoreError> {
         // TODO: don't allocate twice.
         let bytes = v.to_bytes()?;
@@ -86,6 +135,19 @@ impl<'env, K> Writer<'env, K> where K: AsRef<[u8]> {
     }
 
     pub fn delete_value<'s>(&'s mut self, _k: K, _v: &Value) -> Result<(), StoreError> {
+=======
+    pub fn put<'s>(&'s mut self, store: &'s Store, k: K, v: &Value) -> Result<(), StoreError> {
+        // TODO: don't allocate twice.
+        let bytes = v.to_bytes()?;
+        self.tx.put(store.db, &k.as_ref(), &bytes, WriteFlags::empty()).map_err(StoreError::LmdbError)
+    }
+
+    pub fn delete<'s>(&'s mut self, store: &'s Store, k: K) -> Result<(), StoreError> {
+        self.tx.del(store.db, &k.as_ref(), None).map_err(StoreError::LmdbError)
+    }
+
+    pub fn delete_value<'s>(&'s mut self, _store: &'s Store, _k: K, _v: &Value) -> Result<(), StoreError> {
+>>>>>>> central
         // Even better would be to make this a method only on a dupsort store —
         // it would need a little bit of reorganizing of types and traits,
         // but when I see "If the database does not support sorted duplicate
@@ -103,9 +165,25 @@ impl<'env, K> Writer<'env, K> where K: AsRef<[u8]> {
     }
 }
 
+<<<<<<< HEAD
 impl<'env, K> Reader<'env, K> where K: AsRef<[u8]> {
     pub fn get<'s>(&'s self, k: K) -> Result<Option<Value<'s>>, StoreError> {
         let bytes = self.tx.get(self.db, &k.as_ref());
+=======
+impl<'env, K> Reader<'env, K>
+where
+    K: AsRef<[u8]>,
+{
+    pub(crate) fn new(txn: RoTransaction) -> Reader<K> {
+        Reader {
+            tx: txn,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn get<'s>(&'s self, store: &'s Store, k: K) -> Result<Option<Value<'s>>, StoreError> {
+        let bytes = self.tx.get(store.db, &k.as_ref());
+>>>>>>> central
         read_transform(bytes)
     }
 
@@ -113,8 +191,13 @@ impl<'env, K> Reader<'env, K> where K: AsRef<[u8]> {
         self.tx.abort();
     }
 
+<<<<<<< HEAD
     pub fn iter_start<'s>(&'s self) -> Result<Iter<'s>, StoreError> {
         let mut cursor = self.tx.open_ro_cursor(self.db).map_err(StoreError::LmdbError)?;
+=======
+    pub fn iter_start<'s>(&'s self, store: &'s Store) -> Result<Iter<'s>, StoreError> {
+        let mut cursor = self.tx.open_ro_cursor(store.db).map_err(StoreError::LmdbError)?;
+>>>>>>> central
 
         // We call Cursor.iter() instead of Cursor.iter_start() because
         // the latter panics at "called `Result::unwrap()` on an `Err` value:
@@ -127,6 +210,7 @@ impl<'env, K> Reader<'env, K> where K: AsRef<[u8]> {
         let iter = cursor.iter();
 
         Ok(Iter {
+<<<<<<< HEAD
             iter: iter,
             cursor: cursor,
         })
@@ -138,6 +222,19 @@ impl<'env, K> Reader<'env, K> where K: AsRef<[u8]> {
         Ok(Iter {
             iter: iter,
             cursor: cursor,
+=======
+            iter,
+            cursor,
+        })
+    }
+
+    pub fn iter_from<'s>(&'s self, store: &'s Store, k: K) -> Result<Iter<'s>, StoreError> {
+        let mut cursor = self.tx.open_ro_cursor(store.db).map_err(StoreError::LmdbError)?;
+        let iter = cursor.iter_from(k);
+        Ok(Iter {
+            iter,
+            cursor,
+>>>>>>> central
         })
     }
 }
@@ -153,6 +250,7 @@ impl<'env> Iterator for Iter<'env> {
     }
 }
 
+<<<<<<< HEAD
 /// Wrapper around an `lmdb::Database`.
 pub struct Store<K> where K: AsRef<[u8]> {
     db: Database,
@@ -191,4 +289,19 @@ impl<K> Store<K> where K: AsRef<[u8]> {
         let bytes = tx.get(self.db, &k.as_ref());
         read_transform(bytes)
     }
+=======
+/// Wrapper around an `lmdb::Database`.  At this time, the underlying LMDB
+/// handle (within lmdb-rs::Database) is a C integer, so Copy is automatic.
+#[derive(Copy, Clone)]
+pub struct Store {
+    db: Database,
+}
+
+impl Store {
+    pub fn new(db: Database) -> Store {
+        Store {
+            db,
+        }
+    }
+>>>>>>> central
 }

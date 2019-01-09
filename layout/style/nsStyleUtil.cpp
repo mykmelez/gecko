@@ -29,16 +29,14 @@ using namespace mozilla;
 
 // Compare two language strings
 bool nsStyleUtil::DashMatchCompare(const nsAString& aAttributeValue,
-                                     const nsAString& aSelectorValue,
-                                     const nsStringComparator& aComparator)
-{
+                                   const nsAString& aSelectorValue,
+                                   const nsStringComparator& aComparator) {
   bool result;
   uint32_t selectorLen = aSelectorValue.Length();
   uint32_t attributeLen = aAttributeValue.Length();
   if (selectorLen > attributeLen) {
     result = false;
-  }
-  else {
+  } else {
     nsAString::const_iterator iter;
     if (selectorLen != attributeLen &&
         *aAttributeValue.BeginReading(iter).advance(selectorLen) !=
@@ -47,48 +45,42 @@ bool nsStyleUtil::DashMatchCompare(const nsAString& aAttributeValue,
       // the aSelectorValue's text (unless the aSelectorValue and the
       // aAttributeValue have the same text)
       result = false;
-    }
-    else {
+    } else {
       result = StringBeginsWith(aAttributeValue, aSelectorValue, aComparator);
     }
   }
   return result;
 }
 
-bool
-nsStyleUtil::ValueIncludes(const nsAString& aValueList,
-                           const nsAString& aValue,
-                           const nsStringComparator& aComparator)
-{
+bool nsStyleUtil::ValueIncludes(const nsAString& aValueList,
+                                const nsAString& aValue,
+                                const nsStringComparator& aComparator) {
   const char16_t *p = aValueList.BeginReading(),
-              *p_end = aValueList.EndReading();
+                 *p_end = aValueList.EndReading();
 
   while (p < p_end) {
     // skip leading space
-    while (p != p_end && nsContentUtils::IsHTMLWhitespace(*p))
-      ++p;
+    while (p != p_end && nsContentUtils::IsHTMLWhitespace(*p)) ++p;
 
-    const char16_t *val_start = p;
+    const char16_t* val_start = p;
 
     // look for space or end
-    while (p != p_end && !nsContentUtils::IsHTMLWhitespace(*p))
-      ++p;
+    while (p != p_end && !nsContentUtils::IsHTMLWhitespace(*p)) ++p;
 
-    const char16_t *val_end = p;
+    const char16_t* val_end = p;
 
     if (val_start < val_end &&
         aValue.Equals(Substring(val_start, val_end), aComparator))
       return true;
 
-    ++p; // we know the next character is not whitespace
+    ++p;  // we know the next character is not whitespace
   }
   return false;
 }
 
 void nsStyleUtil::AppendEscapedCSSString(const nsAString& aString,
                                          nsAString& aReturn,
-                                         char16_t quoteChar)
-{
+                                         char16_t quoteChar) {
   MOZ_ASSERT(quoteChar == '\'' || quoteChar == '"',
              "CSS strings must be quoted with ' or \"");
 
@@ -115,9 +107,8 @@ void nsStyleUtil::AppendEscapedCSSString(const nsAString& aString,
   aReturn.Append(quoteChar);
 }
 
-/* static */ void
-nsStyleUtil::AppendEscapedCSSIdent(const nsAString& aIdent, nsAString& aReturn)
-{
+/* static */ void nsStyleUtil::AppendEscapedCSSIdent(const nsAString& aIdent,
+                                                     nsAString& aReturn) {
   // The relevant parts of the CSS grammar are:
   //   ident    ([-]?{nmstart}|[-][-]){nmchar}*
   //   nmstart  [_a-z]|{nonascii}|{escape}
@@ -133,8 +124,7 @@ nsStyleUtil::AppendEscapedCSSIdent(const nsAString& aIdent, nsAString& aReturn)
   const char16_t* in = aIdent.BeginReading();
   const char16_t* const end = aIdent.EndReading();
 
-  if (in == end)
-    return;
+  if (in == end) return;
 
   // A leading dash does not need to be escaped as long as it is not the
   // *only* character in the identifier.
@@ -167,11 +157,8 @@ nsStyleUtil::AppendEscapedCSSIdent(const nsAString& aIdent, nsAString& aReturn)
     } else {
       // Escape ASCII non-identifier printables as a backslash plus
       // the character.
-      if (ch < 0x7F &&
-          ch != '_' && ch != '-' &&
-          (ch < '0' || '9' < ch) &&
-          (ch < 'A' || 'Z' < ch) &&
-          (ch < 'a' || 'z' < ch)) {
+      if (ch < 0x7F && ch != '_' && ch != '-' && (ch < '0' || '9' < ch) &&
+          (ch < 'A' || 'Z' < ch) && (ch < 'a' || 'z' < ch)) {
         aReturn.Append(char16_t('\\'));
       }
       aReturn.Append(ch);
@@ -179,91 +166,14 @@ nsStyleUtil::AppendEscapedCSSIdent(const nsAString& aIdent, nsAString& aReturn)
   }
 }
 
-// unquoted family names must be a sequence of idents
-// so escape any parts that require escaping
-static void
-AppendUnquotedFamilyName(const nsAString& aFamilyName, nsAString& aResult)
-{
-  const char16_t *p, *p_end;
-  aFamilyName.BeginReading(p);
-  aFamilyName.EndReading(p_end);
-
-   bool moreThanOne = false;
-   while (p < p_end) {
-     const char16_t* identStart = p;
-     while (++p != p_end && *p != ' ')
-       /* nothing */ ;
-
-     nsDependentSubstring ident(identStart, p);
-     if (!ident.IsEmpty()) {
-       if (moreThanOne) {
-         aResult.Append(' ');
-       }
-       nsStyleUtil::AppendEscapedCSSIdent(ident, aResult);
-       moreThanOne = true;
-     }
-
-     ++p;
-  }
-}
-
-/* static */ void
-nsStyleUtil::AppendEscapedCSSFontFamilyList(
-  const nsTArray<mozilla::FontFamilyName>& aNames,
-  nsAString& aResult)
-{
-  size_t i, len = aNames.Length();
-  for (i = 0; i < len; i++) {
-    if (i != 0) {
-      aResult.AppendLiteral(", ");
-    }
-    const FontFamilyName& name = aNames[i];
-    switch (name.mType) {
-      case eFamily_named:
-        AppendUnquotedFamilyName(name.mName, aResult);
-        break;
-      case eFamily_named_quoted:
-        AppendEscapedCSSString(name.mName, aResult);
-        break;
-      default:
-        name.AppendToString(aResult);
-    }
-  }
-}
-
-/* static */ void
-nsStyleUtil::AppendEscapedCSSFontFamilyList(
-  const mozilla::FontFamilyList& aFamilyList,
-  nsAString& aResult)
-{
-  if (aFamilyList.IsEmpty()) {
-    FontFamilyType defaultGeneric = aFamilyList.GetDefaultFontType();
-    // If the font list is empty, then serialize the default generic.
-    // See also: gfxFontGroup::BuildFontList()
-    if (defaultGeneric != eFamily_none) {
-      FontFamilyName(defaultGeneric).AppendToString(aResult);
-    } else {
-      MOZ_ASSERT_UNREACHABLE("No fonts to serialize");
-    }
-    return;
-  }
-
-  AppendEscapedCSSFontFamilyList(aFamilyList.GetFontlist().get(), aResult);
-}
-
-
-/* static */ void
-nsStyleUtil::AppendBitmaskCSSValue(const nsCSSKTableEntry aTable[],
-                                   int32_t aMaskedValue,
-                                   int32_t aFirstMask,
-                                   int32_t aLastMask,
-                                   nsAString& aResult)
-{
+/* static */ void nsStyleUtil::AppendBitmaskCSSValue(
+    const nsCSSKTableEntry aTable[], int32_t aMaskedValue, int32_t aFirstMask,
+    int32_t aLastMask, nsAString& aResult) {
   for (int32_t mask = aFirstMask; mask <= aLastMask; mask <<= 1) {
     if (mask & aMaskedValue) {
       AppendASCIItoUTF16(nsCSSProps::ValueToKeyword(mask, aTable), aResult);
       aMaskedValue &= ~mask;
-      if (aMaskedValue) { // more left
+      if (aMaskedValue) {  // more left
         aResult.Append(char16_t(' '));
       }
     }
@@ -271,9 +181,8 @@ nsStyleUtil::AppendBitmaskCSSValue(const nsCSSKTableEntry aTable[],
   MOZ_ASSERT(aMaskedValue == 0, "unexpected bit remaining in bitfield");
 }
 
-/* static */ void
-nsStyleUtil::AppendAngleValue(const nsStyleCoord& aAngle, nsAString& aResult)
-{
+/* static */ void nsStyleUtil::AppendAngleValue(const nsStyleCoord& aAngle,
+                                                nsAString& aResult) {
   MOZ_ASSERT(aAngle.IsAngleValue(), "Should have angle value");
 
   // Append number.
@@ -281,21 +190,19 @@ nsStyleUtil::AppendAngleValue(const nsStyleCoord& aAngle, nsAString& aResult)
 
   // Append unit.
   switch (aAngle.GetUnit()) {
-    case eStyleUnit_Degree: aResult.AppendLiteral("deg");  break;
-    case eStyleUnit_Grad:   aResult.AppendLiteral("grad"); break;
-    case eStyleUnit_Radian: aResult.AppendLiteral("rad");  break;
-    case eStyleUnit_Turn:   aResult.AppendLiteral("turn"); break;
-    default: MOZ_ASSERT_UNREACHABLE("unrecognized angle unit");
+    case eStyleUnit_Degree:
+      aResult.AppendLiteral("deg");
+      break;
+    default:
+      MOZ_ASSERT_UNREACHABLE("unrecognized angle unit");
   }
 }
 
-/* static */ void
-nsStyleUtil::AppendPaintOrderValue(uint8_t aValue,
-                                   nsAString& aResult)
-{
-  static_assert
-    (NS_STYLE_PAINT_ORDER_BITWIDTH * NS_STYLE_PAINT_ORDER_LAST_VALUE <= 8,
-     "SVGStyleStruct::mPaintOrder and local variables not big enough");
+/* static */ void nsStyleUtil::AppendPaintOrderValue(uint8_t aValue,
+                                                     nsAString& aResult) {
+  static_assert(
+      NS_STYLE_PAINT_ORDER_BITWIDTH * NS_STYLE_PAINT_ORDER_LAST_VALUE <= 8,
+      "SVGStyleStruct::mPaintOrder and local variables not big enough");
 
   if (aValue == NS_STYLE_PAINT_ORDER_NORMAL) {
     aResult.AppendLiteral("normal");
@@ -312,13 +219,12 @@ nsStyleUtil::AppendPaintOrderValue(uint8_t aValue,
   const uint8_t MASK = (1 << NS_STYLE_PAINT_ORDER_BITWIDTH) - 1;
 
   uint32_t lastPositionToSerialize = 0;
-  for (uint32_t position = NS_STYLE_PAINT_ORDER_LAST_VALUE - 1;
-       position > 0;
+  for (uint32_t position = NS_STYLE_PAINT_ORDER_LAST_VALUE - 1; position > 0;
        position--) {
     uint8_t component =
-      (aValue >> (position * NS_STYLE_PAINT_ORDER_BITWIDTH)) & MASK;
+        (aValue >> (position * NS_STYLE_PAINT_ORDER_BITWIDTH)) & MASK;
     uint8_t earlierComponent =
-      (aValue >> ((position - 1) * NS_STYLE_PAINT_ORDER_BITWIDTH)) & MASK;
+        (aValue >> ((position - 1) * NS_STYLE_PAINT_ORDER_BITWIDTH)) & MASK;
     if (component < earlierComponent) {
       lastPositionToSerialize = position - 1;
       break;
@@ -350,331 +256,7 @@ nsStyleUtil::AppendPaintOrderValue(uint8_t aValue,
   }
 }
 
-/* static */ void
-nsStyleUtil::AppendFontTagAsString(uint32_t aTag, nsAString& aResult)
-{
-  // A font tag (for feature/variation settings) is a 4-char code interpreted
-  // as a bigendian 32-bit value and stored/processed as a uint32_t.
-  // To serialize it, we put the four bytes (which are all guaranteed to be
-  // printable ASCII values) into a string, starting from the high byte of the
-  // value, then append that to the result with CSS escaping and quotes.
-  nsAutoString tagStr;
-  for (int shiftAmount = 24; shiftAmount >= 0; shiftAmount -= 8) {
-    char c = (aTag >> shiftAmount) & 0xff;
-    MOZ_ASSERT(isascii(c) && isprint(c),
-               "parser should have restricted tag to printable ASCII chars");
-    tagStr.Append(c);
-  }
-  AppendEscapedCSSString(tagStr, aResult);
-}
-
-/* static */ void
-nsStyleUtil::AppendFontFeatureSettings(const nsTArray<gfxFontFeature>& aFeatures,
-                                       nsAString& aResult)
-{
-  for (uint32_t i = 0, numFeat = aFeatures.Length(); i < numFeat; i++) {
-    const gfxFontFeature& feat = aFeatures[i];
-
-    if (i != 0) {
-      aResult.AppendLiteral(", ");
-    }
-
-    AppendFontTagAsString(feat.mTag, aResult);
-
-    // omit value if it's 1, implied by default
-    if (feat.mValue != 1) {
-      aResult.Append(' ');
-      aResult.AppendInt(feat.mValue);
-    }
-  }
-}
-
-/* static */ void
-nsStyleUtil::AppendFontFeatureSettings(const nsCSSValue& aSrc,
-                                       nsAString& aResult)
-{
-  nsCSSUnit unit = aSrc.GetUnit();
-
-  if (unit == eCSSUnit_Normal) {
-    aResult.AppendLiteral("normal");
-    return;
-  }
-
-  MOZ_ASSERT(unit == eCSSUnit_PairList || unit == eCSSUnit_PairListDep,
-             "improper value unit for font-feature-settings:");
-
-  nsTArray<gfxFontFeature> featureSettings;
-  nsLayoutUtils::ComputeFontFeatures(aSrc.GetPairListValue(), featureSettings);
-  AppendFontFeatureSettings(featureSettings, aResult);
-}
-
-/* static */ void
-nsStyleUtil::AppendFontVariationSettings(const nsTArray<gfxFontVariation>& aVariations,
-                                         nsAString& aResult)
-{
-  for (uint32_t i = 0, numVars = aVariations.Length(); i < numVars; i++) {
-    const gfxFontVariation& var = aVariations[i];
-
-    if (i != 0) {
-      aResult.AppendLiteral(", ");
-    }
-
-    // output tag
-    AppendFontTagAsString(var.mTag, aResult);
-
-    // output value
-    aResult.Append(' ');
-    aResult.AppendFloat(var.mValue);
-  }
-}
-
-/* static */ void
-nsStyleUtil::AppendFontVariationSettings(const nsCSSValue& aSrc,
-                                         nsAString& aResult)
-{
-  nsCSSUnit unit = aSrc.GetUnit();
-
-  if (unit == eCSSUnit_Normal) {
-    aResult.AppendLiteral("normal");
-    return;
-  }
-
-  MOZ_ASSERT(unit == eCSSUnit_PairList || unit == eCSSUnit_PairListDep,
-             "improper value unit for font-variation-settings:");
-
-  nsTArray<gfxFontVariation> variationSettings;
-  nsLayoutUtils::ComputeFontVariations(aSrc.GetPairListValue(),
-                                       variationSettings);
-  AppendFontVariationSettings(variationSettings, aResult);
-}
-
-/* static */ void
-nsStyleUtil::GetFunctionalAlternatesName(int32_t aFeature,
-                                         nsAString& aFeatureName)
-{
-  aFeatureName.Truncate();
-  nsCSSKeyword key =
-    nsCSSProps::ValueToKeywordEnum(aFeature,
-                           nsCSSProps::kFontVariantAlternatesFuncsKTable);
-
-  NS_ASSERTION(key != eCSSKeyword_UNKNOWN, "bad alternate feature type");
-  AppendUTF8toUTF16(nsCSSKeywords::GetStringValue(key), aFeatureName);
-}
-
-/* static */ void
-nsStyleUtil::SerializeFunctionalAlternates(
-    const nsTArray<gfxAlternateValue>& aAlternates,
-    nsAString& aResult)
-{
-  nsAutoString funcName, funcParams;
-  uint32_t numValues = aAlternates.Length();
-
-  uint32_t feature = 0;
-  for (uint32_t i = 0; i < numValues; i++) {
-    const gfxAlternateValue& v = aAlternates.ElementAt(i);
-    if (feature != v.alternate) {
-      feature = v.alternate;
-      if (!funcName.IsEmpty() && !funcParams.IsEmpty()) {
-        if (!aResult.IsEmpty()) {
-          aResult.Append(char16_t(' '));
-        }
-
-        // append the previous functional value
-        aResult.Append(funcName);
-        aResult.Append(char16_t('('));
-        aResult.Append(funcParams);
-        aResult.Append(char16_t(')'));
-      }
-
-      // function name
-      GetFunctionalAlternatesName(v.alternate, funcName);
-      NS_ASSERTION(!funcName.IsEmpty(), "unknown property value name");
-
-      // function params
-      funcParams.Truncate();
-      AppendEscapedCSSIdent(v.value, funcParams);
-    } else {
-      if (!funcParams.IsEmpty()) {
-        funcParams.AppendLiteral(", ");
-      }
-      AppendEscapedCSSIdent(v.value, funcParams);
-    }
-  }
-
-    // append the previous functional value
-  if (!funcName.IsEmpty() && !funcParams.IsEmpty()) {
-    if (!aResult.IsEmpty()) {
-      aResult.Append(char16_t(' '));
-    }
-
-    aResult.Append(funcName);
-    aResult.Append(char16_t('('));
-    aResult.Append(funcParams);
-    aResult.Append(char16_t(')'));
-  }
-}
-
-/* static */ void
-nsStyleUtil::ComputeFunctionalAlternates(const nsCSSValueList* aList,
-                                  nsTArray<gfxAlternateValue>& aAlternateValues)
-{
-  gfxAlternateValue v;
-
-  aAlternateValues.Clear();
-  for (const nsCSSValueList* curr = aList; curr != nullptr; curr = curr->mNext) {
-    // list contains function units
-    if (curr->mValue.GetUnit() != eCSSUnit_Function) {
-      continue;
-    }
-
-    // element 0 is the propval in ident form
-    const nsCSSValue::Array *func = curr->mValue.GetArrayValue();
-
-    // lookup propval
-    nsCSSKeyword key = func->Item(0).GetKeywordValue();
-    NS_ASSERTION(key != eCSSKeyword_UNKNOWN, "unknown alternate property value");
-
-    int32_t alternate;
-    if (!nsCSSProps::FindKeyword(key,
-                                 nsCSSProps::kFontVariantAlternatesFuncsKTable,
-                                 alternate)) {
-      MOZ_ASSERT_UNREACHABLE("keyword not a font-variant-alternates value");
-      continue;
-    }
-    v.alternate = alternate;
-
-    // other elements are the idents associated with the propval
-    // append one alternate value for each one
-    uint32_t numElems = func->Count();
-    for (uint32_t i = 1; i < numElems; i++) {
-      const nsCSSValue& value = func->Item(i);
-      NS_ASSERTION(value.GetUnit() == eCSSUnit_Ident,
-                   "weird unit found in variant alternate");
-      if (value.GetUnit() != eCSSUnit_Ident) {
-        continue;
-      }
-      value.GetStringValue(v.value);
-      aAlternateValues.AppendElement(v);
-    }
-  }
-}
-
-static void
-AppendSerializedUnicodePoint(uint32_t aCode, nsACString& aBuf)
-{
-  aBuf.Append(nsPrintfCString("%0X", aCode));
-}
-
-// A unicode-range: descriptor is represented as an array of integers,
-// to be interpreted as a sequence of pairs: min max min max ...
-// It is in source order.  (Possibly it should be sorted and overlaps
-// consolidated, but right now we don't do that.)
-/* static */ void
-nsStyleUtil::AppendUnicodeRange(const nsCSSValue& aValue, nsAString& aResult)
-{
-  MOZ_ASSERT(aValue.GetUnit() == eCSSUnit_Null ||
-             aValue.GetUnit() == eCSSUnit_Array,
-             "improper value unit for unicode-range:");
-
-  aResult.Truncate();
-  if (aValue.GetUnit() != eCSSUnit_Array)
-    return;
-
-  nsCSSValue::Array const & sources = *aValue.GetArrayValue();
-  nsAutoCString buf;
-
-  MOZ_ASSERT(sources.Count() % 2 == 0,
-             "odd number of entries in a unicode-range: array");
-
-  for (uint32_t i = 0; i < sources.Count(); i += 2) {
-    uint32_t min = sources[i].GetIntValue();
-    uint32_t max = sources[i+1].GetIntValue();
-
-    // We don't try to replicate the U+XX?? notation.
-    buf.AppendLiteral("U+");
-    AppendSerializedUnicodePoint(min, buf);
-
-    if (min != max) {
-      buf.Append('-');
-      AppendSerializedUnicodePoint(max, buf);
-    }
-    buf.AppendLiteral(", ");
-  }
-  buf.Truncate(buf.Length() - 2); // remove the last comma-space
-  CopyASCIItoUTF16(buf, aResult);
-}
-
-/* static */ void
-nsStyleUtil::AppendStepsTimingFunction(nsTimingFunction::Type aType,
-                                       uint32_t aSteps,
-                                       nsAString& aResult)
-{
-  MOZ_ASSERT(aType == nsTimingFunction::Type::StepStart ||
-             aType == nsTimingFunction::Type::StepEnd);
-
-  aResult.AppendLiteral("steps(");
-  aResult.AppendInt(aSteps);
-  if (aType == nsTimingFunction::Type::StepStart) {
-    aResult.AppendLiteral(", start)");
-  } else {
-    aResult.AppendLiteral(")");
-  }
-}
-
-/* static */ void
-nsStyleUtil::AppendFramesTimingFunction(uint32_t aFrames,
-                                        nsAString& aResult)
-{
-  aResult.AppendLiteral("frames(");
-  aResult.AppendInt(aFrames);
-  aResult.AppendLiteral(")");
-}
-
-/* static */ void
-nsStyleUtil::AppendCubicBezierTimingFunction(float aX1, float aY1,
-                                             float aX2, float aY2,
-                                             nsAString& aResult)
-{
-  // set the value from the cubic-bezier control points
-  // (We could try to regenerate the keywords if we want.)
-  aResult.AppendLiteral("cubic-bezier(");
-  aResult.AppendFloat(aX1);
-  aResult.AppendLiteral(", ");
-  aResult.AppendFloat(aY1);
-  aResult.AppendLiteral(", ");
-  aResult.AppendFloat(aX2);
-  aResult.AppendLiteral(", ");
-  aResult.AppendFloat(aY2);
-  aResult.Append(')');
-}
-
-/* static */ void
-nsStyleUtil::AppendCubicBezierKeywordTimingFunction(
-    nsTimingFunction::Type aType,
-    nsAString& aResult)
-{
-  switch (aType) {
-    case nsTimingFunction::Type::Ease:
-    case nsTimingFunction::Type::Linear:
-    case nsTimingFunction::Type::EaseIn:
-    case nsTimingFunction::Type::EaseOut:
-    case nsTimingFunction::Type::EaseInOut: {
-      nsCSSKeyword keyword = nsCSSProps::ValueToKeywordEnum(
-          static_cast<int32_t>(aType),
-          nsCSSProps::kTransitionTimingFunctionKTable);
-      AppendASCIItoUTF16(nsCSSKeywords::GetStringValue(keyword),
-                         aResult);
-      break;
-    }
-    default:
-      MOZ_ASSERT_UNREACHABLE("unexpected aType");
-      break;
-  }
-}
-
-/* static */ float
-nsStyleUtil::ColorComponentToFloat(uint8_t aAlpha)
-{
+/* static */ float nsStyleUtil::ColorComponentToFloat(uint8_t aAlpha) {
   // Alpha values are expressed as decimals, so we should convert
   // back, using as few decimal places as possible for
   // round-tripping.
@@ -687,10 +269,8 @@ nsStyleUtil::ColorComponentToFloat(uint8_t aAlpha)
   return rounded;
 }
 
-/* static */ bool
-nsStyleUtil::IsSignificantChild(nsIContent* aChild,
-                                bool aWhitespaceIsSignificant)
-{
+/* static */ bool nsStyleUtil::IsSignificantChild(
+    nsIContent* aChild, bool aWhitespaceIsSignificant) {
   bool isText = aChild->IsText();
 
   if (!isText && !aChild->IsComment() && !aChild->IsProcessingInstruction()) {
@@ -698,14 +278,11 @@ nsStyleUtil::IsSignificantChild(nsIContent* aChild,
   }
 
   return isText && aChild->TextLength() != 0 &&
-         (aWhitespaceIsSignificant ||
-          !aChild->TextIsOnlyWhitespace());
+         (aWhitespaceIsSignificant || !aChild->TextIsOnlyWhitespace());
 }
 
-/* static */ bool
-nsStyleUtil::ThreadSafeIsSignificantChild(const nsIContent* aChild,
-                                          bool aWhitespaceIsSignificant)
-{
+/* static */ bool nsStyleUtil::ThreadSafeIsSignificantChild(
+    const nsIContent* aChild, bool aWhitespaceIsSignificant) {
   bool isText = aChild->IsText();
 
   if (!isText && !aChild->IsComment() && !aChild->IsProcessingInstruction()) {
@@ -720,9 +297,8 @@ nsStyleUtil::ThreadSafeIsSignificantChild(const nsIContent* aChild,
 // For a replaced element whose concrete object size is no larger than the
 // element's content-box, this method checks whether the given
 // "object-position" coordinate might cause overflow in its dimension.
-static bool
-ObjectPositionCoordMightCauseOverflow(const Position::Coord& aCoord)
-{
+static bool ObjectPositionCoordMightCauseOverflow(
+    const Position::Coord& aCoord) {
   // Any nonzero length in "object-position" can push us to overflow
   // (particularly if our concrete object size is exactly the same size as the
   // replaced element's content-box).
@@ -740,10 +316,8 @@ ObjectPositionCoordMightCauseOverflow(const Position::Coord& aCoord)
   return false;
 }
 
-
-/* static */ bool
-nsStyleUtil::ObjectPropsMightCauseOverflow(const nsStylePosition* aStylePos)
-{
+/* static */ bool nsStyleUtil::ObjectPropsMightCauseOverflow(
+    const nsStylePosition* aStylePos) {
   auto objectFit = aStylePos->mObjectFit;
 
   // "object-fit: cover" & "object-fit: none" can give us a render rect that's
@@ -752,8 +326,8 @@ nsStyleUtil::ObjectPropsMightCauseOverflow(const nsStylePosition* aStylePos)
       objectFit == NS_STYLE_OBJECT_FIT_NONE) {
     return true;
   }
-  // (All other object-fit values produce a concrete object size that's no larger
-  // than the constraint region.)
+  // (All other object-fit values produce a concrete object size that's no
+  // larger than the constraint region.)
 
   // Check each of our "object-position" coords to see if it could cause
   // overflow in its dimension:
@@ -766,25 +340,16 @@ nsStyleUtil::ObjectPropsMightCauseOverflow(const nsStylePosition* aStylePos)
   return false;
 }
 
-
-/* static */ bool
-nsStyleUtil::CSPAllowsInlineStyle(Element* aElement,
-                                  nsIPrincipal* aPrincipal,
-                                  nsIPrincipal* aTriggeringPrincipal,
-                                  nsIURI* aSourceURI,
-                                  uint32_t aLineNumber,
-                                  const nsAString& aStyleText,
-                                  nsresult* aRv)
-{
+/* static */ bool nsStyleUtil::CSPAllowsInlineStyle(
+    Element* aElement, nsIPrincipal* aPrincipal,
+    nsIPrincipal* aTriggeringPrincipal, nsIURI* aSourceURI,
+    uint32_t aLineNumber, uint32_t aColumnNumber, const nsAString& aStyleText,
+    nsresult* aRv) {
   nsresult rv;
 
   if (aRv) {
     *aRv = NS_OK;
   }
-
-  MOZ_ASSERT(!aElement || aElement->NodeInfo()->NameAtom() == nsGkAtoms::style,
-      "aElement passed to CSPAllowsInlineStyle "
-      "for an element that is not <style>");
 
   nsIPrincipal* principal = aPrincipal;
   if (aTriggeringPrincipal &&
@@ -796,8 +361,7 @@ nsStyleUtil::CSPAllowsInlineStyle(Element* aElement,
   rv = principal->GetCsp(getter_AddRefs(csp));
 
   if (NS_FAILED(rv)) {
-    if (aRv)
-      *aRv = rv;
+    if (aRv) *aRv = rv;
     return false;
   }
 
@@ -808,29 +372,23 @@ nsStyleUtil::CSPAllowsInlineStyle(Element* aElement,
 
   // query the nonce
   nsAutoString nonce;
-  if (aElement) {
+  if (aElement && aElement->NodeInfo()->NameAtom() == nsGkAtoms::style) {
     aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::nonce, nonce);
   }
 
-  nsCOMPtr<nsISupportsString> styleText(do_CreateInstance(NS_SUPPORTS_STRING_CONTRACTID));
-  if (styleText) {
-    styleText->SetData(aStyleText);
-  }
-
   bool allowInlineStyle = true;
-  rv = csp->GetAllowsInline(nsIContentPolicy::TYPE_STYLESHEET,
-                            nonce,
-                            false, // aParserCreated only applies to scripts
-                            styleText, aLineNumber,
+  rv = csp->GetAllowsInline(nsIContentPolicy::TYPE_STYLESHEET, nonce,
+                            false,  // aParserCreated only applies to scripts
+                            aElement, nullptr,  // nsICSPEventListener
+                            aStyleText, aLineNumber, aColumnNumber,
                             &allowInlineStyle);
   NS_ENSURE_SUCCESS(rv, false);
 
   return allowInlineStyle;
 }
 
-void
-nsStyleUtil::AppendFontSlantStyle(const FontSlantStyle& aStyle, nsAString& aOut)
-{
+void nsStyleUtil::AppendFontSlantStyle(const FontSlantStyle& aStyle,
+                                       nsAString& aOut) {
   if (aStyle.IsNormal()) {
     aOut.AppendLiteral("normal");
   } else if (aStyle.IsItalic()) {

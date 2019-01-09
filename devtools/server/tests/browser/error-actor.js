@@ -21,15 +21,10 @@ ErrorActor.prototype = {
 
   onError: function() {
     throw new Error("error");
-  }
+  },
 };
 
 ErrorActor.prototype.requestTypes = {
-  "error": ErrorActor.prototype.onError
+  "error": ErrorActor.prototype.onError,
 };
-
-DebuggerServer.removeGlobalActor("errorActor");
-DebuggerServer.addGlobalActor({
-  constructorName: "ErrorActor",
-  constructorFun: ErrorActor,
-}, "errorActor");
+exports.ErrorActor = ErrorActor;

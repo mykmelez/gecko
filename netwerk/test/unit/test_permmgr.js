@@ -30,6 +30,7 @@ var results = [
 ];
 
 function run_test() {
+  Services.prefs.setCharPref("permissions.manager.defaultsUrl", "");
   var pm = Cc["@mozilla.org/permissionmanager;1"]
              .getService(Ci.nsIPermissionManager);
 
@@ -61,13 +62,7 @@ function run_test() {
   }
 
   // test the enumerator ...
-  var j = 0;
-  var perms = new Array();
-  var enumerator = pm.enumerator;
-  while (enumerator.hasMoreElements()) {
-    perms[j] = enumerator.getNext().QueryInterface(Ci.nsIPermission);
-    ++j;
-  }
+  var perms = Array.from(pm.enumerator);
   Assert.equal(perms.length, hosts.length);
 
   // ... remove all the hosts ...
@@ -108,9 +103,9 @@ function run_test() {
 
   uri = ioService.newURI("https://www.example.com");
   pm.add(uri, "offline-app", pm.ALLOW_ACTION);
-  principal = secMan.createCodebasePrincipalFromOrigin("https://www.example.com");
+  let principal = secMan.createCodebasePrincipalFromOrigin("https://www.example.com");
   // Remove existing entry.
-  perm = pm.getPermissionObject(principal, "offline-app", true);
+  let perm = pm.getPermissionObject(principal, "offline-app", true);
   pm.removePermission(perm);
   // Try to remove already deleted entry.
   perm = pm.getPermissionObject(principal, "offline-app", true);

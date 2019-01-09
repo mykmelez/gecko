@@ -16,11 +16,6 @@ config = {
     "log_name": "raptor",
     "installer_path": "installer.exe",
     "virtualenv_path": VENV_PATH,
-    "find_links": [
-        "http://pypi.pvt.build.mozilla.org/pub",
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
-    "pip_index": False,
     "title": os.uname()[1].lower().split('.')[0],
     "default_actions": [
         "clobber",
@@ -38,7 +33,6 @@ config = {
     "postflight_run_cmd_suites": [
         SCREEN_RESOLUTION_CHECK,
     ],
-    "download_minidump_stackwalk": True,
     "minidump_stackwalk_path": "macosx64-minidump_stackwalk",
     "minidump_tooltool_manifest_path": "config/tooltool-manifests/macosx64/releng.manifest",
     "tooltool_cache": "/builds/tooltool_cache",

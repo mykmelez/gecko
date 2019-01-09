@@ -11,14 +11,12 @@ chrome/toolkit/skin/classic/global/checkbox.css
 chrome/toolkit/skin/classic/global/dialog.css
 chrome/toolkit/skin/classic/global/dropmarker.css
 chrome/toolkit/skin/classic/global/global.css
-chrome/toolkit/skin/classic/global/groupbox.css
 chrome/toolkit/skin/classic/global/listbox.css
 chrome/toolkit/skin/classic/global/menu.css
 chrome/toolkit/skin/classic/global/menulist.css
 chrome/toolkit/skin/classic/global/numberbox.css
 chrome/toolkit/skin/classic/global/popup.css
 chrome/toolkit/skin/classic/global/preferences.css
-chrome/toolkit/skin/classic/global/progressmeter.css
 chrome/toolkit/skin/classic/global/radio.css
 chrome/toolkit/skin/classic/global/richlistbox.css
 chrome/toolkit/skin/classic/global/scrollbars.css
@@ -28,6 +26,7 @@ chrome/toolkit/skin/classic/global/tabbox.css
 chrome/toolkit/skin/classic/global/textbox.css
 chrome/toolkit/skin/classic/global/toolbar.css
 chrome/toolkit/skin/classic/global/toolbarbutton.css
+chrome/toolkit/skin/classic/global/tooltip.css
 chrome/toolkit/skin/classic/global/tree.css
 chrome/toolkit/skin/classic/global/wizard.css
 modules/commonjs/sdk/ui/button/view/events.js

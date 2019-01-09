@@ -7,6 +7,7 @@ package org.mozilla.gecko;
 
 import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.GeckoProfileDirectories.NoMozillaDirectoryException;
+import org.mozilla.gecko.GeckoScreenOrientation.ScreenOrientation;
 import org.mozilla.gecko.annotation.RobocopTarget;
 import org.mozilla.gecko.annotation.WrapForJNI;
 import org.mozilla.gecko.health.HealthRecorder;
@@ -36,11 +37,11 @@ import org.mozilla.gecko.util.FileUtils;
 import org.mozilla.gecko.util.GeckoBundle;
 import org.mozilla.gecko.util.HardwareUtils;
 import org.mozilla.gecko.util.PrefUtils;
+import org.mozilla.gecko.util.StrictModeContext;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.util.ViewUtil;
 import org.mozilla.gecko.widget.ActionModePresenter;
 import org.mozilla.gecko.widget.AnchoredPopup;
-import org.mozilla.geckoview.GeckoRuntime;
 import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.GeckoView;
@@ -54,6 +55,7 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.res.Configuration;
 import android.graphics.BitmapFactory;
@@ -90,6 +92,7 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.mozilla.mozstumbler.service.mainthread.SafeReceiver;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -106,12 +109,14 @@ import static org.mozilla.gecko.Tabs.INTENT_EXTRA_TAB_ID;
 import static org.mozilla.gecko.Tabs.INVALID_TAB_ID;
 import static org.mozilla.gecko.mma.MmaDelegate.DOWNLOAD_MEDIA_SAVED_IMAGE;
 import static org.mozilla.gecko.mma.MmaDelegate.READER_AVAILABLE;
+import static org.mozilla.gecko.util.JavaUtil.getBundleSizeInBytes;
 
 public abstract class GeckoApp extends GeckoActivity
                                implements AnchoredPopup.OnVisibilityChangeListener,
                                           BundleEventListener,
                                           GeckoMenu.Callback,
                                           GeckoMenu.MenuPresenter,
+                                          GeckoScreenOrientation.OrientationChangeListener,
                                           GeckoSession.ContentDelegate,
                                           ScreenOrientationDelegate,
                                           Tabs.OnTabsChangedListener,
@@ -146,12 +151,17 @@ public abstract class GeckoApp extends GeckoActivity
 
      * Originally, this was only used for the telemetry core ping logic. To avoid
      * having to write custom migration logic, we just keep the original pref key.
-     * Be aware of {@link org.mozilla.gecko.fxa.EnvironmentUtils.GECKO_PREFS_IS_FIRST_RUN}.
+     * Be aware of {@link org.mozilla.gecko.fxa.EnvironmentUtils#GECKO_PREFS_IS_FIRST_RUN}.
      */
     public static final String PREFS_IS_FIRST_RUN = "telemetry-isFirstRun";
 
     public static final String SAVED_STATE_IN_BACKGROUND   = "inBackground";
     public static final String SAVED_STATE_PRIVATE_SESSION = "privateSession";
+    /**
+     * Speculative value for the maximum size the Activity Bundle can have in the hope to avoid
+     * TransactionTooLarge exceptions.
+     */
+    protected static final int MAX_BUNDLE_SIZE_BYTES = 300_000;
 
     // Delay before running one-time "cleanup" tasks that may be needed
     // after a version upgrade.
@@ -173,6 +183,8 @@ public abstract class GeckoApp extends GeckoActivity
 
     /** Tells if we're aborting app launch, e.g. if this is an unsupported device configuration. */
     protected boolean mIsAbortingAppLaunch;
+
+    protected boolean mDumpProfileOnShutdown;
 
     private PromptService mPromptService;
     protected TextSelection mTextSelection;
@@ -282,6 +294,15 @@ public abstract class GeckoApp extends GeckoActivity
 
         @Override
         public void onClosedTabsRead(final JSONArray closedTabData) throws JSONException {
+            // All tabs opened in the current session (including those that will be restored through
+            // the session store) will be numbered with a tab ID ≥ 0.
+            // To avoid duplicate IDs with closed tabs read from the previous session, we therefore
+            // renumber the latter with IDs in the negative range.
+            int closedTabId = Tabs.INVALID_TAB_ID;
+            for (int i = 0; i < closedTabData.length(); i++) {
+                final JSONObject closedTab = closedTabData.getJSONObject(i);
+                closedTab.put("tabId", --closedTabId);
+            }
             windowObject.put("closedTabs", closedTabData);
         }
 
@@ -314,8 +335,8 @@ public abstract class GeckoApp extends GeckoActivity
 
     protected boolean mInitialized;
     protected boolean mWindowFocusInitialized;
-    private Telemetry.Timer mJavaUiStartupTimer;
-    private Telemetry.Timer mGeckoReadyStartupTimer;
+    private TelemetryUtils.Timer mJavaUiStartupTimer;
+    private TelemetryUtils.Timer mGeckoReadyStartupTimer;
 
     private String mPrivateBrowsingSession;
     private boolean mPrivateBrowsingSessionOutdated;
@@ -629,6 +650,11 @@ public abstract class GeckoApp extends GeckoActivity
                 } catch (final InterruptedException e) { }
             }
             outState.putString(SAVED_STATE_PRIVATE_SESSION, mPrivateBrowsingSession);
+
+            // Make sure we are not bloating the Bundle which can result in TransactionTooLargeException
+            if (getBundleSizeInBytes(outState) > MAX_BUNDLE_SIZE_BYTES) {
+                outState.remove(SAVED_STATE_PRIVATE_SESSION);
+            }
         }
 
         outState.putBoolean(SAVED_STATE_IN_BACKGROUND, isApplicationInBackground());
@@ -893,9 +919,9 @@ public abstract class GeckoApp extends GeckoActivity
     }
 
     @Override
-    public void onContextMenu(final GeckoSession session, final int screenX,
-                              final int screenY, final String uri,
-                              int elementType, final String elementSrc) {
+    public void onContextMenu(final GeckoSession session,
+                              final int screenX, final int screenY,
+                              final GeckoSession.ContentDelegate.ContextElement element) {
     }
 
     @Override
@@ -906,6 +932,10 @@ public abstract class GeckoApp extends GeckoActivity
     @Override
     public void onCrash(final GeckoSession session) {
         // Won't happen, as we don't use e10s in Fennec
+    }
+
+    @Override
+    public void onFirstComposite(final GeckoSession session) {
     }
 
     protected void setFullScreen(final boolean fullscreen) {
@@ -919,8 +949,9 @@ public abstract class GeckoApp extends GeckoActivity
 
     /**
      * Check and start the Java profiler if MOZ_PROFILER_STARTUP env var is specified.
+     * Also check whether we want to dump the captured profile on shutdown.
      **/
-    protected static void earlyStartJavaSampler(SafeIntent intent) {
+    protected void handleGeckoProfilerOptions(SafeIntent intent) {
         String env = intent.getStringExtra("env0");
         for (int i = 1; env != null; i++) {
             if (env.startsWith("MOZ_PROFILER_STARTUP=")) {
@@ -928,7 +959,10 @@ public abstract class GeckoApp extends GeckoActivity
                     GeckoJavaSampler.start(10, 1000);
                     Log.d(LOGTAG, "Profiling Java on startup");
                 }
-                break;
+            } else if (env.startsWith("MOZ_PROFILER_SHUTDOWN=")) {
+                if (!env.endsWith("=")) {
+                    mDumpProfileOnShutdown = true;
+                }
             }
             env = intent.getStringExtra("env" + i);
         }
@@ -968,12 +1002,12 @@ public abstract class GeckoApp extends GeckoActivity
         }
 
         // The clock starts...now. Better hurry!
-        mJavaUiStartupTimer = new Telemetry.UptimeTimer("FENNEC_STARTUP_TIME_JAVAUI");
-        mGeckoReadyStartupTimer = new Telemetry.UptimeTimer("FENNEC_STARTUP_TIME_GECKOREADY");
+        mJavaUiStartupTimer = new TelemetryUtils.UptimeTimer("FENNEC_STARTUP_TIME_JAVAUI");
+        mGeckoReadyStartupTimer = new TelemetryUtils.UptimeTimer("FENNEC_STARTUP_TIME_GECKOREADY");
 
         final SafeIntent intent = new SafeIntent(getIntent());
 
-        earlyStartJavaSampler(intent);
+        handleGeckoProfilerOptions(intent);
 
         // Workaround for <http://code.google.com/p/android/issues/detail?id=20915>.
         try {
@@ -981,13 +1015,14 @@ public abstract class GeckoApp extends GeckoActivity
         } catch (ClassNotFoundException e) { }
 
         GeckoAppShell.setScreenOrientationDelegate(this);
+        GeckoScreenOrientation.getInstance().addListener(this);
 
         // Tell Stumbler to register a local broadcast listener to listen for preference intents.
         // We do this via intents since we can't easily access Stumbler directly,
         // as it might be compiled outside of Fennec.
-        getApplicationContext().sendBroadcast(
-                new Intent(INTENT_REGISTER_STUMBLER_LISTENER)
-        );
+        final Intent stumblerIntent = new Intent(getApplicationContext(), SafeReceiver.class);
+        stumblerIntent.setAction(INTENT_REGISTER_STUMBLER_LISTENER);
+        getApplicationContext().sendBroadcast(stumblerIntent);
 
         // Did the OS locale change while we were backgrounded? If so,
         // we need to die so that Gecko will re-init add-ons that touch
@@ -1063,8 +1098,6 @@ public abstract class GeckoApp extends GeckoActivity
         }
 
         super.onCreate(savedInstanceState);
-
-        GeckoScreenOrientation.getInstance().update(getResources().getConfiguration().orientation);
 
         setContentView(getLayout());
 
@@ -1148,7 +1181,7 @@ public abstract class GeckoApp extends GeckoActivity
                         // history). This JSON data is then sent to Gecko so session
                         // history can be restored for each tab.
                         restoreMessage = restoreSessionTabs(isExternalURL, false);
-                    } catch (SessionRestoreException e) {
+                    } catch (SessionRestoreException | OutOfMemoryError e) {
                         // If mShouldRestore was set to false in restoreSessionTabs(), this means
                         // either that we intentionally skipped all tabs read from the session file,
                         // or else that the file was syntactically valid, but didn't contain any
@@ -1161,13 +1194,13 @@ public abstract class GeckoApp extends GeckoActivity
                             // Since we will also hit this situation regularly during first run though,
                             // we'll only report it in telemetry if we failed to restore despite the
                             // file existing, which means it's very probably damaged.
-                            if (getProfile().sessionFileExists()) {
+                            if (getProfile().sessionFileExists() && !(e instanceof OutOfMemoryError)) {
                                 Telemetry.addToHistogram("FENNEC_SESSIONSTORE_DAMAGED_SESSION_FILE", 1);
                             }
                             try {
                                 restoreMessage = restoreSessionTabs(isExternalURL, true);
                                 Telemetry.addToHistogram("FENNEC_SESSIONSTORE_RESTORING_FROM_BACKUP", 1);
-                            } catch (SessionRestoreException ex) {
+                            } catch (SessionRestoreException | OutOfMemoryError ex) {
                                 if (!mShouldRestore) {
                                     // Restoring only "failed" because the backup copy was deliberately empty, too.
                                     Telemetry.addToHistogram("FENNEC_SESSIONSTORE_RESTORING_FROM_BACKUP", 1);
@@ -1177,7 +1210,8 @@ public abstract class GeckoApp extends GeckoActivity
                                     mShouldRestore = false;
 
                                     if (!getSharedPreferencesForProfile().
-                                            getBoolean(PREFS_IS_FIRST_RUN, true)) {
+                                            getBoolean(PREFS_IS_FIRST_RUN, true) &&
+                                            !(ex instanceof OutOfMemoryError)) {
                                         // Except when starting with a fresh profile, we should normally
                                         // always have a session file available, even if it might only
                                         // contain an empty window.
@@ -1197,10 +1231,9 @@ public abstract class GeckoApp extends GeckoActivity
                 // If we are doing a restore, send the parsed session data to Gecko.
                 if (!mIsRestoringActivity) {
                     getAppEventDispatcher().dispatch("Session:Restore", restoreMessage);
+                    // Make sure sessionstore.old is either updated or deleted as necessary.
+                    getProfile().updateSessionFile(mShouldRestore);
                 }
-
-                // Make sure sessionstore.old is either updated or deleted as necessary.
-                getProfile().updateSessionFile(mShouldRestore);
             }
         });
 
@@ -1929,11 +1962,6 @@ public abstract class GeckoApp extends GeckoActivity
 
         GeckoAppShell.setScreenOrientationDelegate(this);
 
-        int newOrientation = getResources().getConfiguration().orientation;
-        if (GeckoScreenOrientation.getInstance().update(newOrientation)) {
-            refreshChrome();
-        }
-
         // We use two times: a pseudo-unique wall-clock time to identify the
         // current session across power cycles, and the elapsed realtime to
         // track the duration of the session.
@@ -2036,6 +2064,7 @@ public abstract class GeckoApp extends GeckoActivity
         super.onPause();
     }
 
+    @SuppressWarnings("try")
     @Override
     public void onRestart() {
         if (mIsAbortingAppLaunch) {
@@ -2044,13 +2073,10 @@ public abstract class GeckoApp extends GeckoActivity
         }
 
         // Faster on main thread with an async apply().
-        final StrictMode.ThreadPolicy savedPolicy = StrictMode.allowThreadDiskReads();
-        try {
+        try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
             SharedPreferences.Editor editor = GeckoApp.this.getSharedPreferences().edit();
             editor.putBoolean(GeckoApp.PREFS_WAS_STOPPED, false);
             editor.apply();
-        } finally {
-            StrictMode.setThreadPolicy(savedPolicy);
         }
 
         super.onRestart();
@@ -2133,6 +2159,8 @@ public abstract class GeckoApp extends GeckoActivity
         Tabs.unregisterOnTabsChangedListener(this);
         Tabs.getInstance().detachFromContext();
 
+        GeckoScreenOrientation.getInstance().removeListener(this);
+
         if (mShutdownOnDestroy) {
             GeckoApplication.shutdown(!mRestartOnShutdown ? null : new Intent(
                     Intent.ACTION_MAIN, /* uri */ null, getApplicationContext(), getClass()));
@@ -2177,14 +2205,6 @@ public abstract class GeckoApp extends GeckoActivity
             onLocaleChanged(Locales.getLanguageTag(changed));
         }
 
-        // onConfigurationChanged is not called for 180 degree orientation changes,
-        // we will miss such rotations and the screen orientation will not be
-        // updated.
-        if (GeckoScreenOrientation.getInstance().update(newConfig.orientation)) {
-            if (mFormAssistPopup != null)
-                mFormAssistPopup.hide();
-            refreshChrome();
-        }
         super.onConfigurationChanged(newConfig);
     }
 
@@ -2250,8 +2270,9 @@ public abstract class GeckoApp extends GeckoActivity
                 // the res/fonts directory: we no longer need to copy our
                 // bundled fonts out of the APK in order to use them.
                 // See https://bugzilla.mozilla.org/show_bug.cgi?id=878674.
-                File dir = new File("res/fonts");
-                if (dir.exists() && dir.isDirectory()) {
+                final File dataDir = new File(context.getApplicationInfo().dataDir);
+                final File dir = new File(dataDir, "res/fonts");
+                if (dir.exists() && dir.isDirectory() && dir.listFiles() != null) {
                     for (File file : dir.listFiles()) {
                         if (file.isFile() && file.getName().endsWith(".ttf")) {
                             file.delete();
@@ -2521,5 +2542,13 @@ public abstract class GeckoApp extends GeckoActivity
         }
         setRequestedOrientation(requestedActivityInfoOrientation);
         return true;
+    }
+
+    @Override
+    public void onScreenOrientationChanged(ScreenOrientation newOrientation) {
+        if (mFormAssistPopup != null) {
+            mFormAssistPopup.hide();
+        }
+        refreshChrome();
     }
 }

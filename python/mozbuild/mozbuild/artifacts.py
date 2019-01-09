@@ -144,7 +144,8 @@ class ArtifactJob(object):
 
     # We can tell our input is a test archive by this suffix, which happens to
     # be the same across platforms.
-    _test_archive_suffixes = ('.common.tests.zip', '.common.tests.tar.gz')
+    _test_zip_archive_suffix = '.common.tests.zip'
+    _test_tar_archive_suffix = '.common.tests.tar.gz'
 
     def __init__(self, package_re, tests_re, log=None,
                  download_symbols=False,
@@ -190,8 +191,10 @@ class ArtifactJob(object):
                              'found none!'.format(re=self._tests_re))
 
     def process_artifact(self, filename, processed_filename):
-        if filename.endswith(ArtifactJob._test_archive_suffixes) and self._tests_re:
-            return self.process_tests_artifact(filename, processed_filename)
+        if filename.endswith(ArtifactJob._test_zip_archive_suffix) and self._tests_re:
+            return self.process_tests_zip_artifact(filename, processed_filename)
+        if filename.endswith(ArtifactJob._test_tar_archive_suffix) and self._tests_re:
+            return self.process_tests_tar_artifact(filename, processed_filename)
         if self._symbols_archive_suffix and filename.endswith(self._symbols_archive_suffix):
             return self.process_symbols_archive(filename, processed_filename)
         if self._host_bins_re:
@@ -206,7 +209,7 @@ class ArtifactJob(object):
     def process_package_artifact(self, filename, processed_filename):
         raise NotImplementedError("Subclasses must specialize process_package_artifact!")
 
-    def process_tests_artifact(self, filename, processed_filename):
+    def process_tests_zip_artifact(self, filename, processed_filename):
         from mozbuild.action.test_archive import OBJDIR_TEST_FILES
         added_entry = False
 
@@ -236,6 +239,43 @@ class ArtifactJob(object):
                         destpath = mozpath.join('..', files_entry['base'], leaf_filename)
                         mode = entry['external_attr'] >> 16
                         writer.add(destpath.encode('utf-8'), reader[filename], mode=mode)
+
+        if not added_entry:
+            raise ValueError('Archive format changed! No pattern from "{patterns}"'
+                             'matched an archive path.'.format(
+                                 patterns=LinuxArtifactJob.test_artifact_patterns))
+
+    def process_tests_tar_artifact(self, filename, processed_filename):
+        from mozbuild.action.test_archive import OBJDIR_TEST_FILES
+        added_entry = False
+
+        with JarWriter(file=processed_filename, optimize=False, compress_level=5) as writer:
+            with tarfile.open(filename) as reader:
+                for filename, entry in TarFinder(filename, reader):
+                    for pattern, (src_prefix, dest_prefix) in self.test_artifact_patterns:
+                        if not mozpath.match(filename, pattern):
+                            continue
+
+                        destpath = mozpath.relpath(filename, src_prefix)
+                        destpath = mozpath.join(dest_prefix, destpath)
+                        self.log(logging.INFO, 'artifact',
+                                 {'destpath': destpath},
+                                 'Adding {destpath} to processed archive')
+                        mode = entry.mode
+                        writer.add(destpath.encode('utf-8'), entry.open(), mode=mode)
+                        added_entry = True
+                        break
+                    for files_entry in OBJDIR_TEST_FILES.values():
+                        origin_pattern = files_entry['pattern']
+                        leaf_filename = filename
+                        if 'dest' in files_entry:
+                            dest = files_entry['dest']
+                            origin_pattern = mozpath.join(dest, origin_pattern)
+                            leaf_filename = filename[len(dest) + 1:]
+                        if mozpath.match(filename, origin_pattern):
+                            destpath = mozpath.join('..', files_entry['base'], leaf_filename)
+                            mode = entry.mode
+                            writer.add(destpath.encode('utf-8'), entry.open(), mode=mode)
 
         if not added_entry:
             raise ValueError('Archive format changed! No pattern from "{patterns}"'
@@ -503,6 +543,14 @@ JOB_DETAILS = {
                                                   r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
     'android-x86-opt': (AndroidArtifactJob, (r'public/build/target\.apk',
                                              r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
+    'android-x86_64-opt': (AndroidArtifactJob, (r'public/build/target\.apk',
+                                                r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
+    'android-x86_64-debug': (AndroidArtifactJob, (r'public/build/target\.apk',
+                                                  r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
+    'android-aarch64-opt': (AndroidArtifactJob, (r'public/build/target\.apk',
+                                                 r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
+    'android-aarch64-debug': (AndroidArtifactJob, (r'public/build/target\.apk',
+                                                   r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
     'linux-opt': (LinuxArtifactJob, (r'public/build/target\.tar\.bz2',
                                      r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
     'linux-debug': (LinuxArtifactJob, (r'public/build/target\.tar\.bz2',
@@ -946,8 +994,12 @@ class Artifacts(object):
             target_suffix = '-opt'
 
         if self._substs.get('MOZ_BUILD_APP', '') == 'mobile/android':
+            if self._substs['ANDROID_CPU_ARCH'] == 'x86_64':
+                return 'android-x86_64' + target_suffix
             if self._substs['ANDROID_CPU_ARCH'] == 'x86':
-                return 'android-x86-opt'
+                return 'android-x86' + target_suffix
+            if self._substs['ANDROID_CPU_ARCH'] == 'arm64-v8a':
+                return 'android-aarch64' + target_suffix
             return 'android-api-16' + target_suffix
 
         target_64bit = False
@@ -1205,18 +1257,34 @@ class Artifacts(object):
         return self._install_from_hg_pushheads(hg_pushheads, distdir)
 
     def install_from_revset(self, revset, distdir):
-        if self._hg:
-            revision = subprocess.check_output([self._hg, 'log', '--template', '{node}\n',
-                                                '-r', revset], cwd=self._topsrcdir).strip()
-            if len(revision.split('\n')) != 1:
-                raise ValueError('hg revision specification must resolve to exactly one commit')
-        else:
-            revision = subprocess.check_output([self._git, 'rev-parse', revset], cwd=self._topsrcdir).strip()
-            revision = subprocess.check_output([self._git, 'cinnabar', 'git2hg', revision], cwd=self._topsrcdir).strip()
-            if len(revision.split('\n')) != 1:
-                raise ValueError('hg revision specification must resolve to exactly one commit')
-            if revision == "0" * 40:
-                raise ValueError('git revision specification must resolve to a commit known to hg')
+        revision = None
+        try:
+            if self._hg:
+                revision = subprocess.check_output([self._hg, 'log', '--template', '{node}\n',
+                                                  '-r', revset], cwd=self._topsrcdir).strip()
+            elif self._git:
+                revset = subprocess.check_output([
+                    self._git, 'rev-parse', '%s^{commit}' % revset],
+                    stderr=open(os.devnull, 'w'), cwd=self._topsrcdir).strip()
+            else:
+                # Fallback to the exception handling case from both hg and git
+                raise subprocess.CalledProcessError()
+        except subprocess.CalledProcessError:
+            # If the mercurial of git commands above failed, it means the given
+            # revset is not known locally to the VCS. But if the revset looks
+            # like a complete sha1, assume it is a mercurial sha1 that hasn't
+            # been pulled, and use that.
+            if re.match(r'^[A-Fa-f0-9]{40}$', revset):
+                revision = revset
+
+        if revision is None and self._git:
+            revision = subprocess.check_output(
+                [self._git, 'cinnabar', 'git2hg', revset], cwd=self._topsrcdir).strip()
+
+        if revision == "0" * 40 or revision is None:
+            raise ValueError('revision specification must resolve to a commit known to hg')
+        if len(revision.split('\n')) != 1:
+            raise ValueError('revision specification must resolve to exactly one commit')
 
         self.log(logging.INFO, 'artifact',
                  {'revset': revset,

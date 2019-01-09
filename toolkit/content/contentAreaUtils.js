@@ -19,17 +19,11 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 });
 
 var ContentAreaUtils = {
-
-  // this is for backwards compatibility.
-  get ioService() {
-    return Services.io;
-  },
-
   get stringBundle() {
     delete this.stringBundle;
     return this.stringBundle =
       Services.strings.createBundle("chrome://global/locale/contentAreaCommands.properties");
-  }
+  },
 };
 
 function urlSecurityCheck(aURL, aPrincipal, aFlags) {
@@ -62,14 +56,15 @@ function forbidCPOW(arg, func, argname) {
 // - A linked document using Alt-click Save Link As...
 //
 function saveURL(aURL, aFileName, aFilePickerTitleKey, aShouldBypassCache,
-                 aSkipPrompt, aReferrer, aSourceDocument, aIsContentWindowPrivate) {
+                 aSkipPrompt, aReferrer, aSourceDocument,
+                 aIsContentWindowPrivate, aPrincipal) {
   forbidCPOW(aURL, "saveURL", "aURL");
   forbidCPOW(aReferrer, "saveURL", "aReferrer");
   // Allow aSourceDocument to be a CPOW.
 
   internalSave(aURL, null, aFileName, null, null, aShouldBypassCache,
                aFilePickerTitleKey, null, aReferrer, aSourceDocument,
-               aSkipPrompt, null, aIsContentWindowPrivate);
+               aSkipPrompt, null, aIsContentWindowPrivate, aPrincipal);
 }
 
 // Just like saveURL, but will get some info off the image before
@@ -99,7 +94,7 @@ const nsISupportsCString = Ci.nsISupportsCString;
  * @param aReferrer (nsIURI, optional)
  *        The referrer URI object (not a URL string) to use, or null
  *        if no referrer should be sent.
- * @param aDoc (nsIDocument, deprecated, optional)
+ * @param aDoc (Document, deprecated, optional)
  *        The content document that the save is being initiated from. If this
  *        is omitted, then aIsContentWindowPrivate must be provided.
  * @param aContentType (string, optional)
@@ -112,7 +107,7 @@ const nsISupportsCString = Ci.nsISupportsCString;
  */
 function saveImageURL(aURL, aFileName, aFilePickerTitleKey, aShouldBypassCache,
                       aSkipPrompt, aReferrer, aDoc, aContentType, aContentDisp,
-                      aIsContentWindowPrivate) {
+                      aIsContentWindowPrivate, aPrincipal) {
   forbidCPOW(aURL, "saveImageURL", "aURL");
   forbidCPOW(aReferrer, "saveImageURL", "aReferrer");
 
@@ -156,7 +151,7 @@ function saveImageURL(aURL, aFileName, aFilePickerTitleKey, aShouldBypassCache,
 
   internalSave(aURL, null, aFileName, aContentDisp, aContentType,
                aShouldBypassCache, aFilePickerTitleKey, null, aReferrer,
-               null, aSkipPrompt, null, aIsContentWindowPrivate);
+               aDoc, aSkipPrompt, null, aIsContentWindowPrivate, aPrincipal);
 }
 
 // This is like saveDocument, but takes any browser/frame-like element
@@ -167,6 +162,25 @@ function saveBrowser(aBrowser, aSkipPrompt, aOuterWindowID = 0) {
     throw "Must have a browser when calling saveBrowser";
   }
   let persistable = aBrowser.frameLoader;
+  // Because of how pdf.js deals with principals, saving the document the "normal"
+  // way won't work. Work around this by saving the pdf's URL directly:
+  if (aBrowser.contentPrincipal.URI &&
+      aBrowser.contentPrincipal.URI.spec == "resource://pdf.js/web/viewer.html" &&
+      aBrowser.currentURI.schemeIs("file")) {
+    let correctPrincipal = Services.scriptSecurityManager.createCodebasePrincipal(
+        aBrowser.currentURI, aBrowser.contentPrincipal.originAttributes);
+    internalSave(aBrowser.currentURI.spec,
+                 null /* no document */, null /* automatically determine filename */,
+                 null /* no content disposition */,
+                 "application/pdf", false /* don't bypass cache */,
+                 null /* no alternative title */, null /* no auto-chosen file info */,
+                 null /* null referrer will be OK for file: */,
+                 null /* no document */, aSkipPrompt /* caller decides about prompting */,
+                 null /* no cache key because the one for the document will be for pdfjs */,
+                 PrivateBrowsingUtils.isWindowPrivate(aBrowser.ownerGlobal),
+                 correctPrincipal);
+    return;
+  }
   let stack = Components.stack.caller;
   persistable.startPersistence(aOuterWindowID, {
     onDocumentReady(document) {
@@ -175,7 +189,7 @@ function saveBrowser(aBrowser, aSkipPrompt, aOuterWindowID = 0) {
     onError(status) {
       throw new Components.Exception("saveBrowser failed asynchronously in startPersistence",
                                      status, stack);
-    }
+    },
   });
 }
 
@@ -198,26 +212,23 @@ function saveDocument(aDocument, aSkipPrompt) {
     contentDisposition = aDocument.contentDisposition;
     cacheKey = aDocument.cacheKey;
   } else if (aDocument.nodeType == 9 /* DOCUMENT_NODE */) {
-    // Otherwise it's an actual nsDocument (and possibly a CPOW).
+    // Otherwise it's an actual document (and possibly a CPOW).
     // We want to use cached data because the document is currently visible.
-    let ifreq =
-      aDocument.defaultView
-               .QueryInterface(Ci.nsIInterfaceRequestor);
+    let win = aDocument.defaultView;
 
     try {
-      contentDisposition =
-        ifreq.getInterface(Ci.nsIDOMWindowUtils)
-             .getDocumentMetadata("content-disposition");
+      contentDisposition = win.windowUtils
+                              .getDocumentMetadata("content-disposition");
     } catch (ex) {
       // Failure to get a content-disposition is ok
     }
 
     try {
       let shEntry =
-        ifreq.getInterface(Ci.nsIWebNavigation)
-             .QueryInterface(Ci.nsIWebPageDescriptor)
-             .currentDescriptor
-             .QueryInterface(Ci.nsISHEntry);
+        win.docShell
+           .QueryInterface(Ci.nsIWebPageDescriptor)
+           .currentDescriptor
+           .QueryInterface(Ci.nsISHEntry);
 
       cacheKey = shEntry.cacheKey;
     } catch (ex) {
@@ -262,7 +273,7 @@ DownloadListener.prototype = {
     }
 
     throw Cr.NS_ERROR_NO_INTERFACE;
-  }
+  },
 };
 
 const kSaveAsType_Complete = 0; // Save document with attached objects.
@@ -331,11 +342,15 @@ XPCOMUtils.defineConstant(this, "kSaveAsType_Text", kSaveAsType_Text);
  *        This parameter is provided when the aInitiatingDocument is not a
  *        real document object. Stores whether aInitiatingDocument.defaultView
  *        was private or not.
+ * @param aPrincipal [optional]
+ *        This parameter is provided when neither aDocument nor
+ *        aInitiatingDocument is provided. Used to determine what level of
+ *        privilege to load the URI with.
  */
 function internalSave(aURL, aDocument, aDefaultFileName, aContentDisposition,
                       aContentType, aShouldBypassCache, aFilePickerTitleKey,
                       aChosenData, aReferrer, aInitiatingDocument, aSkipPrompt,
-                      aCacheKey, aIsContentWindowPrivate) {
+                      aCacheKey, aIsContentWindowPrivate, aPrincipal) {
   forbidCPOW(aURL, "internalSave", "aURL");
   forbidCPOW(aReferrer, "internalSave", "aReferrer");
   forbidCPOW(aCacheKey, "internalSave", "aCacheKey");
@@ -374,7 +389,7 @@ function internalSave(aURL, aDocument, aDefaultFileName, aContentDisposition,
       contentType: aContentType,
       saveMode,
       saveAsType: kSaveAsType_Complete,
-      file
+      file,
     };
 
     // Find a URI to use for determining last-downloaded-to directory
@@ -411,8 +426,17 @@ function internalSave(aURL, aDocument, aDefaultFileName, aContentDisposition,
         : aInitiatingDocument.isPrivate;
     }
 
+    // We have to cover the cases here where we were either passed an explicit
+    // principal, or a 'real' document (with a nodePrincipal property), or an
+    // nsIWebBrowserPersistDocument which has a principal property.
+    let sourcePrincipal =
+      aPrincipal ||
+      (aDocument && (aDocument.nodePrincipal || aDocument.principal)) ||
+      (aInitiatingDocument && aInitiatingDocument.nodePrincipal);
+
     var persistArgs = {
       sourceURI,
+      sourcePrincipal,
       sourceReferrer: aReferrer,
       sourceDocument: useSaveDocument ? aDocument : null,
       targetContentType: (saveAsType == kSaveAsType_Text) ? "text/plain" : null,
@@ -463,8 +487,7 @@ function internalPersist(persistArgs) {
 
   // Calculate persist flags.
   const nsIWBP = Ci.nsIWebBrowserPersist;
-  const flags = nsIWBP.PERSIST_FLAGS_REPLACE_EXISTING_FILES |
-                nsIWBP.PERSIST_FLAGS_FORCE_ALLOW_COOKIES;
+  const flags = nsIWBP.PERSIST_FLAGS_REPLACE_EXISTING_FILES;
   if (persistArgs.bypassCache)
     persist.persistFlags = flags | nsIWBP.PERSIST_FLAGS_BYPASS_CACHE;
   else
@@ -511,6 +534,7 @@ function internalPersist(persistArgs) {
                          persistArgs.targetContentType, encodingFlags, kWrapColumn);
   } else {
     persist.savePrivacyAwareURI(persistArgs.sourceURI,
+                                persistArgs.sourcePrincipal,
                                 persistArgs.sourceCacheKey,
                                 persistArgs.sourceReferrer,
                                 Ci.nsIHttpChannel.REFERRER_POLICY_UNSET,
@@ -750,8 +774,7 @@ function DownloadURL(aURL, aFileName, aInitiatingDocument) {
   // For private browsing, try to get document out of the most recent browser
   // window, or provide our own if there's no browser window.
   let isPrivate = aInitiatingDocument.defaultView
-                                     .QueryInterface(Ci.nsIInterfaceRequestor)
-                                     .getInterface(Ci.nsIWebNavigation)
+                                     .docShell
                                      .QueryInterface(Ci.nsILoadContext)
                                      .usePrivateBrowsing;
 
@@ -760,7 +783,7 @@ function DownloadURL(aURL, aFileName, aInitiatingDocument) {
 
   let filepickerParams = {
     fileInfo,
-    saveMode: SAVEMODE_FILEONLY
+    saveMode: SAVEMODE_FILEONLY,
   };
 
   (async function() {
@@ -771,7 +794,7 @@ function DownloadURL(aURL, aFileName, aInitiatingDocument) {
     let file = filepickerParams.file;
     let download = await Downloads.createDownload({
       source: { url: aURL, isPrivate },
-      target: { path: file.path, partFilePath: file.path + ".part" }
+      target: { path: file.path, partFilePath: file.path + ".part" },
     });
     download.tryToKeepPartialData = true;
 
@@ -838,11 +861,8 @@ function appendFiltersForContentType(aFilePicker, aContentType, aFileExtension, 
     var mimeInfo = getMIMEInfoForType(aContentType, aFileExtension);
     if (mimeInfo) {
 
-      var extEnumerator = mimeInfo.getFileExtensions();
-
       var extString = "";
-      while (extEnumerator.hasMore()) {
-        var extension = extEnumerator.getNext();
+      for (var extension of mimeInfo.getFileExtensions()) {
         if (extString)
           extString += "; "; // If adding more than one extension,
                                 // separate by semi-colon
@@ -880,8 +900,7 @@ function getPostData(aDocument) {
     // returns a session history entry.
     let sessionHistoryEntry =
         aDocument.defaultView
-                 .QueryInterface(Ci.nsIInterfaceRequestor)
-                 .getInterface(Ci.nsIWebNavigation)
+                 .docShell
                  .QueryInterface(Ci.nsIWebPageDescriptor)
                  .currentDescriptor
                  .QueryInterface(Ci.nsISHEntry);
@@ -1162,7 +1181,7 @@ function openURL(aURL) {
     var recentWindow = Services.wm.getMostRecentWindow("navigator:browser");
     if (recentWindow) {
       recentWindow.openWebLinkIn(uri.spec, "tab", {
-        triggeringPrincipal: recentWindow.document.contentPrincipal
+        triggeringPrincipal: recentWindow.document.contentPrincipal,
       });
       return;
     }
@@ -1196,12 +1215,12 @@ function openURL(aURL) {
         if (iid.equals(Ci.nsILoadGroup))
           return loadgroup;
         throw Cr.NS_ERROR_NO_INTERFACE;
-      }
+      },
     };
 
     var channel = NetUtil.newChannel({
       uri,
-      loadUsingSystemPrincipal: true
+      loadUsingSystemPrincipal: true,
     });
 
     if (channel) {

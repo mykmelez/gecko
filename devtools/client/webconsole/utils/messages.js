@@ -189,6 +189,7 @@ function transformConsoleAPICallPacket(packet) {
     userProvidedStyles: message.styles,
     prefix: message.prefix,
     private: message.private,
+    executionPoint: message.executionPoint,
   });
 }
 
@@ -196,7 +197,7 @@ function transformNavigationMessagePacket(packet) {
   const { message } = packet;
   return new ConsoleMessage({
     source: MESSAGE_SOURCE.CONSOLE_API,
-    type: MESSAGE_TYPE.LOG,
+    type: MESSAGE_TYPE.NAVIGATION_MARKER,
     level: MESSAGE_LEVEL.LOG,
     messageText: l10n.getFormatStr("webconsole.navigated", [message.url]),
     timeStamp: message.timeStamp,
@@ -232,7 +233,7 @@ function transformPageErrorPacket(packet) {
   const frame = pageError.sourceName ? {
     source: pageError.sourceName,
     line: pageError.lineNumber,
-    column: pageError.columnNumber
+    column: pageError.columnNumber,
   } : null;
 
   const matchesCSS = /^(?:CSS|Layout)\b/.test(pageError.category);
@@ -249,6 +250,7 @@ function transformPageErrorPacket(packet) {
     timeStamp: pageError.timeStamp,
     notes: pageError.notes,
     private: pageError.private,
+    executionPoint: pageError.executionPoint,
   });
 }
 
@@ -268,6 +270,7 @@ function transformNetworkEventPacket(packet) {
     updates: networkEvent.updates,
     cause: networkEvent.cause,
     private: networkEvent.private,
+    securityState: networkEvent.securityState,
   });
 }
 
@@ -352,7 +355,7 @@ function convertCachedPacket(packet) {
   } else if (packet._type === "LogMessage") {
     convertPacket = {
       ...packet,
-      type: "logMessage"
+      type: "logMessage",
     };
   } else {
     throw new Error("Unexpected packet type: " + packet._type);
@@ -400,7 +403,7 @@ function getLevelFromType(type) {
 function isGroupType(type) {
   return [
     MESSAGE_TYPE.START_GROUP,
-    MESSAGE_TYPE.START_GROUP_COLLAPSED
+    MESSAGE_TYPE.START_GROUP_COLLAPSED,
   ].includes(type);
 }
 

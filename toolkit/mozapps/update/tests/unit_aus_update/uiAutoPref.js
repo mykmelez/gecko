@@ -7,16 +7,16 @@ const WindowWatcher = {
     check_showUpdateAvailable();
   },
 
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIWindowWatcher])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIWindowWatcher]),
 };
 
 const WindowMediator = {
   getMostRecentWindow(aWindowType) {
     executeSoon(check_status);
-    return { getInterface: ChromeUtils.generateQI([Ci.nsIDOMWindow]) };
+    return null;
   },
 
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIWindowMediator])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIWindowMediator]),
 };
 
 function run_test() {
@@ -24,10 +24,9 @@ function run_test() {
   // Calling do_get_profile prevents an error from being logged
   do_get_profile();
 
-  debugDump("testing that an update download doesn't start when the " +
-            PREF_APP_UPDATE_AUTO + " preference is false");
+  debugDump("testing that an update download doesn't start when the \"update " +
+            "auto\" value is false");
 
-  Services.prefs.setBoolPref(PREF_APP_UPDATE_AUTO, false);
   Services.prefs.setBoolPref(PREF_APP_UPDATE_SILENT, false);
 
   start_httpserver();

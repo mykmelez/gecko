@@ -3,9 +3,22 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* import-globals-from ../../../../toolkit/components/places/PlacesUtils.jsm */
-
-ChromeUtils.import("resource://gre/modules/TelemetryStopwatch.jsm");
+/* Shared Places Import - change other consumers if you change this: */
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  LightweightThemeChild: "resource:///actors/LightweightThemeChild.jsm",
+  PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
+  PlacesUIUtils: "resource:///modules/PlacesUIUtils.jsm",
+  PlacesTransactions: "resource://gre/modules/PlacesTransactions.jsm",
+  PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
+});
+XPCOMUtils.defineLazyScriptGetter(this, "PlacesTreeView",
+                                  "chrome://browser/content/places/treeView.js");
+XPCOMUtils.defineLazyScriptGetter(this, ["PlacesInsertionPoint", "PlacesController",
+                                         "PlacesControllerDragHelper"],
+                                  "chrome://browser/content/places/controller.js");
+/* End Shared Places Import */
 
 var gHistoryTree;
 var gSearchBox;
@@ -17,6 +30,17 @@ function HistorySidebarInit() {
   if (uidensity) {
     document.documentElement.setAttribute("uidensity", uidensity);
   }
+
+  /* Listen for sidebar theme changes */
+  let themeListener = new LightweightThemeChild({
+    content: window,
+    chromeOuterWindowID: window.top.windowUtils.outerWindowID,
+    docShell: window.docShell,
+  });
+
+  window.addEventListener("unload", () => {
+    themeListener.cleanup();
+  });
 
   gHistoryTree = document.getElementById("historyTree");
   gSearchBox = document.getElementById("search-box");
@@ -86,7 +110,7 @@ function searchHistory(aInput) {
   options.includeHidden = !!aInput;
 
   if (gHistoryGrouping == "lastvisited")
-    this.TelemetryStopwatch.start("HISTORY_LASTVISITED_TREE_QUERY_TIME_MS");
+    TelemetryStopwatch.start("HISTORY_LASTVISITED_TREE_QUERY_TIME_MS");
 
   // call load() on the tree manually
   // instead of setting the place attribute in historySidebar.xul
@@ -94,7 +118,7 @@ function searchHistory(aInput) {
   gHistoryTree.load(query, options);
 
   if (gHistoryGrouping == "lastvisited")
-    this.TelemetryStopwatch.finish("HISTORY_LASTVISITED_TREE_QUERY_TIME_MS");
+    TelemetryStopwatch.finish("HISTORY_LASTVISITED_TREE_QUERY_TIME_MS");
 }
 
 window.addEventListener("SidebarFocused",

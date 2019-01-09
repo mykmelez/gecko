@@ -5,16 +5,19 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 with Files("**"):
-    BUG_COMPONENT = ("Core", "DOM")
+    BUG_COMPONENT = ("Core", "DOM: Web Storage")
 
 EXPORTS.mozilla.dom += [
     'LocalStorage.h',
     'LocalStorageManager.h',
+    'PartitionedLocalStorage.h',
     'SessionStorageManager.h',
     'Storage.h',
     'StorageActivityService.h',
+    'StorageDBUpdater.h',
     'StorageIPC.h',
     'StorageNotifierService.h',
+    'StorageObserver.h',
     'StorageUtils.h',
 ]
 
@@ -22,6 +25,7 @@ UNIFIED_SOURCES += [
     'LocalStorage.cpp',
     'LocalStorageCache.cpp',
     'LocalStorageManager.cpp',
+    'PartitionedLocalStorage.cpp',
     'SessionStorage.cpp',
     'SessionStorageCache.cpp',
     'SessionStorageManager.cpp',
@@ -36,6 +40,7 @@ UNIFIED_SOURCES += [
 ]
 
 IPDL_SOURCES += [
+    'PBackgroundLocalStorageCache.ipdl',
     'PBackgroundStorage.ipdl',
 ]
 
@@ -48,3 +53,6 @@ LOCAL_INCLUDES += [
 
 if CONFIG['ENABLE_TESTS']:
     DEFINES['DOM_STORAGE_TESTS'] = True
+
+if CONFIG['CC_TYPE'] == 'clang-cl':
+    AllowCompilerWarnings()  # workaround for bug 1090497

@@ -18,23 +18,24 @@ EXTRA_JS_MODULES += [
     'ExtensionParent.jsm',
     'ExtensionPermissions.jsm',
     'ExtensionPreferencesManager.jsm',
+    'ExtensionProcessScript.jsm',
     'ExtensionSettingsStore.jsm',
     'ExtensionStorage.jsm',
     'ExtensionStorageIDB.jsm',
     'ExtensionStorageSync.jsm',
+    'ExtensionTelemetry.jsm',
     'ExtensionUtils.jsm',
     'FindContent.jsm',
-    'LegacyExtensionsUtils.jsm',
     'MessageChannel.jsm',
     'MessageManagerProxy.jsm',
     'NativeManifests.jsm',
     'NativeMessaging.jsm',
+    'PerformanceCounters.jsm',
     'ProxyScriptContext.jsm',
     'Schemas.jsm',
 ]
 
 EXTRA_COMPONENTS += [
-    'extension-process-script.js',
     'extensions-toolkit.manifest',
 ]
 
@@ -59,6 +60,7 @@ EXPORTS.mozilla = [
 ]
 
 EXPORTS.mozilla.extensions = [
+    'DocumentObserver.h',
     'MatchGlob.h',
     'MatchPattern.h',
     'WebExtensionContentScript.h',

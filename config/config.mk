@@ -103,31 +103,15 @@ endif
 # The VERSION_NUMBER is suffixed onto the end of the DLLs we ship.
 VERSION_NUMBER		= 50
 
-ifeq ($(HOST_OS_ARCH),WINNT)
-  ifeq ($(MOZILLA_DIR),$(topsrcdir))
-    win_srcdir := $(subst $(topsrcdir),$(WIN_TOP_SRC),$(srcdir))
-  else
-    # This means we're in comm-central's topsrcdir, so we need to adjust
-    # WIN_TOP_SRC (which points to mozilla's topsrcdir) for the substitution
-    # to win_srcdir.
-		cc_WIN_TOP_SRC := $(WIN_TOP_SRC:%/mozilla=%)
-    win_srcdir := $(subst $(topsrcdir),$(cc_WIN_TOP_SRC),$(srcdir))
-  endif
-  BUILD_TOOLS = $(WIN_TOP_SRC)/build/unix
-else
-  win_srcdir := $(srcdir)
-  BUILD_TOOLS = $(MOZILLA_DIR)/build/unix
-endif
-
 CONFIG_TOOLS	= $(MOZ_BUILD_ROOT)/config
 AUTOCONF_TOOLS	= $(MOZILLA_DIR)/build/autoconf
 
 ifdef _MSC_VER
 # clang-cl is smart enough to generate dependencies directly.
-ifndef CLANG_CL
+ifeq (,$(CLANG_CL)$(MOZ_USING_SCCACHE))
 CC_WRAPPER ?= $(call py_action,cl)
 CXX_WRAPPER ?= $(call py_action,cl)
-endif # CLANG_CL
+endif # CLANG_CL/MOZ_USING_SCCACHE
 endif # _MSC_VER
 
 CC := $(CC_WRAPPER) $(CC)
@@ -157,7 +141,7 @@ endif
 # Enable profile-based feedback
 ifneq (1,$(NO_PROFILE_GUIDED_OPTIMIZE))
 ifdef MOZ_PROFILE_GENERATE
-PGO_CFLAGS += $(if $(filter $(notdir $<),$(notdir $(NO_PROFILE_GUIDED_OPTIMIZE))),,$(PROFILE_GEN_CFLAGS))
+PGO_CFLAGS += $(if $(filter $(notdir $<),$(notdir $(NO_PROFILE_GUIDED_OPTIMIZE))),,$(PROFILE_GEN_CFLAGS) $(COMPUTED_PROFILE_GEN_DYN_CFLAGS))
 PGO_LDFLAGS += $(PROFILE_GEN_LDFLAGS)
 ifeq (WINNT,$(OS_ARCH))
 AR_FLAGS += -LTCG
@@ -199,12 +183,17 @@ INCLUDES = \
 
 include $(MOZILLA_DIR)/config/static-checking-config.mk
 
-LDFLAGS		= $(COMPUTED_LDFLAGS) $(PGO_LDFLAGS) $(MK_LDFLAGS)
+ifdef MOZ_PROFILE_GENERATE
+MOZ_LTO_CFLAGS :=
+MOZ_LTO_LDFLAGS :=
+endif
 
-COMPILE_CFLAGS	= $(COMPUTED_CFLAGS) $(PGO_CFLAGS) $(_DEPEND_CFLAGS) $(MK_COMPILE_DEFINES)
-COMPILE_CXXFLAGS = $(COMPUTED_CXXFLAGS) $(PGO_CFLAGS) $(_DEPEND_CFLAGS) $(MK_COMPILE_DEFINES)
-COMPILE_CMFLAGS = $(OS_COMPILE_CMFLAGS) $(MOZBUILD_CMFLAGS)
-COMPILE_CMMFLAGS = $(OS_COMPILE_CMMFLAGS) $(MOZBUILD_CMMFLAGS)
+LDFLAGS		= $(MOZ_LTO_LDFLAGS) $(COMPUTED_LDFLAGS) $(PGO_LDFLAGS) $(MK_LDFLAGS)
+
+COMPILE_CFLAGS	= $(MOZ_LTO_CFLAGS) $(COMPUTED_CFLAGS) $(PGO_CFLAGS) $(_DEPEND_CFLAGS) $(MK_COMPILE_DEFINES)
+COMPILE_CXXFLAGS = $(MOZ_LTO_CFLAGS) $(COMPUTED_CXXFLAGS) $(PGO_CFLAGS) $(_DEPEND_CFLAGS) $(MK_COMPILE_DEFINES)
+COMPILE_CMFLAGS = $(MOZ_LTO_CFLAGS) $(OS_COMPILE_CMFLAGS) $(MOZBUILD_CMFLAGS)
+COMPILE_CMMFLAGS = $(MOZ_LTO_CFLAGS) $(OS_COMPILE_CMMFLAGS) $(MOZBUILD_CMMFLAGS)
 ASFLAGS = $(COMPUTED_ASFLAGS)
 SFLAGS = $(COMPUTED_SFLAGS)
 
@@ -212,6 +201,33 @@ HOST_CFLAGS = $(COMPUTED_HOST_CFLAGS) $(_DEPEND_CFLAGS)
 HOST_CXXFLAGS = $(COMPUTED_HOST_CXXFLAGS) $(_DEPEND_CFLAGS)
 HOST_C_LDFLAGS = $(COMPUTED_HOST_C_LDFLAGS)
 HOST_CXX_LDFLAGS = $(COMPUTED_HOST_CXX_LDFLAGS)
+# Win32 Cross-builds on win64 need to override LIB when invoking the linker,
+# which we do for rust through cargo-linker.bat, so we abuse it here.
+# Ideally, we'd empty LIB and pass -LIBPATH options to the linker somehow but
+# we don't have this in place for rust, so...
+ifdef WIN64_CARGO_LINKER
+HOST_LINKER = $(topobjdir)/build/win64/cargo-linker.bat
+endif
+
+ifdef MOZ_LTO
+ifeq (Darwin,$(OS_TARGET))
+# When linking on macOS, debug info is not linked along with the final binary,
+# and the dwarf data stays in object files until they are "linked" with the
+# dsymutil tool.
+# With LTO, object files are temporary, and are not kept around, which
+# means there's no object file for dsymutil to do its job. Consequently,
+# there is no debug info for LTOed compilation units.
+# The macOS linker has however an option to explicitly keep those object
+# files, which dsymutil will then find.
+# The catch is that the linker uses sequential numbers for those object
+# files, and doesn't avoid conflicts from multiple linkers running at
+# the same time. So in directories with multiple binaries, object files
+# from the first linked binaries would be overwritten by those of the
+# last linked binary. So we use a subdirectory containing the name of the
+# linked binary.
+LDFLAGS += -Wl,-object_path_lto,$(@F).lto.o/
+endif
+endif
 
 # We only add color flags if neither the flag to disable color
 # (e.g. "-fno-color-diagnostics" nor a flag to control color
@@ -350,10 +366,6 @@ include $(MOZILLA_DIR)/config/AB_rCD.mk
 # Many locales directories want this definition.
 ACDEFINES += -DAB_CD=$(AB_CD)
 
-ifndef L10NBASEDIR
-  L10NBASEDIR = $(error L10NBASEDIR not defined by configure)
-endif
-
 EXPAND_LOCALE_SRCDIR = $(if $(filter en-US,$(AB_CD)),$(LOCALE_TOPDIR)/$(1)/en-US,$(or $(realpath $(L10NBASEDIR)),$(abspath $(L10NBASEDIR)))/$(AB_CD)/$(subst /locales,,$(1)))
 
 ifdef relativesrcdir
@@ -405,31 +417,20 @@ ifneq (WINNT,$(OS_ARCH))
 RUN_TEST_PROGRAM = $(DIST)/bin/run-mozilla.sh
 endif # ! WINNT
 
-#
-# Java macros
-#
-
-# Make sure any compiled classes work with at least JVM 1.4
-JAVAC_FLAGS += -source 1.4
-
-ifdef MOZ_DEBUG
-JAVAC_FLAGS += -g
-endif
-
 # autoconf.mk sets OBJ_SUFFIX to an error to avoid use before including
 # this file
 OBJ_SUFFIX := $(_OBJ_SUFFIX)
 
 OBJS_VAR_SUFFIX := OBJS
 
-# PGO builds with GCC build objects with instrumentation in a first pass,
-# then objects optimized, without instrumentation, in a second pass. If
-# we overwrite the objects from the first pass with those from the second,
-# we end up not getting instrumentation data for better optimization on
-# incremental builds. As a consequence, we use a different object suffix
-# for the first pass.
+# PGO builds with GCC and clang-cl build objects with instrumentation in
+# a first pass, then objects optimized, without instrumentation, in a
+# second pass. If we overwrite the objects from the first pass with
+# those from the second, we end up not getting instrumentation data for
+# better optimization on incremental builds. As a consequence, we use a
+# different object suffix for the first pass.
 ifdef MOZ_PROFILE_GENERATE
-ifdef GNU_CC
+ifneq (,$(GNU_CC)$(CLANG_CL))
 OBJS_VAR_SUFFIX := PGO_OBJS
 ifndef NO_PROFILE_GUIDED_OPTIMIZE
 OBJ_SUFFIX := i_o

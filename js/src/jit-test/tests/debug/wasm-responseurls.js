@@ -1,9 +1,8 @@
-// |jit-test| test-also-no-wasm-baseline
+// |jit-test| test-also-no-wasm-baseline; skip-if: !wasmDebuggingIsSupported()
 // Tests that wasm module can accept URL and sourceMapURL from response
 // when instantiateStreaming is used.
 
-if (!wasmDebuggingIsSupported())
-  quit();
+ignoreUnhandledRejections();
 
 try {
     WebAssembly.compileStreaming();

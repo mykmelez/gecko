@@ -10,10 +10,8 @@
 #include "nsCOMPtr.h"
 #include "nsExpirationTracker.h"
 #include "nsISHistory.h"
-#include "nsISHistoryInternal.h"
-#include "nsISimpleEnumerator.h"
-#include "nsIWebNavigation.h"
 #include "nsSHEntryShared.h"
+#include "nsSimpleEnumerator.h"
 #include "nsTObserverArray.h"
 #include "nsWeakReference.h"
 
@@ -22,48 +20,38 @@
 
 class nsIDocShell;
 class nsDocShell;
-class nsSHEnumerator;
 class nsSHistoryObserver;
 class nsISHEntry;
-class nsISHTransaction;
 
 class nsSHistory final : public mozilla::LinkedListElement<nsSHistory>,
                          public nsISHistory,
-                         public nsISHistoryInternal,
-                         public nsIWebNavigation,
-                         public nsSupportsWeakReference
-{
-public:
-
+                         public nsSupportsWeakReference {
+ public:
   // The timer based history tracker is used to evict bfcache on expiration.
-  class HistoryTracker final : public nsExpirationTracker<nsSHEntryShared, 3>
-  {
-  public:
-    explicit HistoryTracker(nsSHistory* aSHistory,
-                            uint32_t aTimeout,
+  class HistoryTracker final : public nsExpirationTracker<nsSHEntryShared, 3> {
+   public:
+    explicit HistoryTracker(nsSHistory* aSHistory, uint32_t aTimeout,
                             nsIEventTarget* aEventTarget)
-      : nsExpirationTracker(1000 * aTimeout / 2, "HistoryTracker", aEventTarget)
-    {
+        : nsExpirationTracker(1000 * aTimeout / 2, "HistoryTracker",
+                              aEventTarget) {
       MOZ_ASSERT(aSHistory);
       mSHistory = aSHistory;
     }
 
-  protected:
-    virtual void NotifyExpired(nsSHEntryShared* aObj) override
-    {
+   protected:
+    virtual void NotifyExpired(nsSHEntryShared* aObj) override {
       RemoveObject(aObj);
       mSHistory->EvictExpiredContentViewerForEntry(aObj);
     }
 
-  private:
+   private:
     // HistoryTracker is owned by nsSHistory; it always outlives HistoryTracker
     // so it's safe to use raw pointer here.
     nsSHistory* mSHistory;
   };
 
   // Structure used in SetChildHistoryEntry
-  struct SwapEntriesData
-  {
+  struct SwapEntriesData {
     nsDocShell* ignoreShell;     // constant; the shell to ignore
     nsISHEntry* destTreeRoot;    // constant; the root of the dest tree
     nsISHEntry* destTreeParent;  // constant; the node under destTreeRoot
@@ -73,8 +61,9 @@ public:
   nsSHistory();
   NS_DECL_ISUPPORTS
   NS_DECL_NSISHISTORY
-  NS_DECL_NSISHISTORYINTERNAL
-  NS_DECL_NSIWEBNAVIGATION
+
+  nsresult Reload(uint32_t aReloadFlags);
+  nsresult GetCurrentURI(nsIURI** aResultURI);
 
   // One time initialization method called upon docshell module construction
   static nsresult Startup();
@@ -94,10 +83,9 @@ public:
   // aEntry is the child history entry, aShell is its corresponding docshell,
   // aChildIndex is the child's index in its parent entry, and aData is
   // the opaque pointer passed to WalkHistoryEntries.
-  typedef nsresult(*WalkHistoryEntriesFunc)(nsISHEntry* aEntry,
-                                            nsDocShell* aShell,
-                                            int32_t aChildIndex,
-                                            void* aData);
+  typedef nsresult (*WalkHistoryEntriesFunc)(nsISHEntry* aEntry,
+                                             nsDocShell* aShell,
+                                             int32_t aChildIndex, void* aData);
 
   // Clone a session history tree for subframe navigation.
   // The tree rooted at |aSrcEntry| will be cloned into |aDestEntry|, except
@@ -107,17 +95,13 @@ public:
   // have that pointer updated to point to the cloned history entry.
   // If aCloneChildren is true then the children of the entry with id
   // |aCloneID| will be cloned into |aReplaceEntry|.
-  static nsresult CloneAndReplace(nsISHEntry* aSrcEntry,
-                                  nsDocShell* aSrcShell,
-                                  uint32_t aCloneID,
-                                  nsISHEntry* aReplaceEntry,
-                                  bool aCloneChildren,
-                                  nsISHEntry** aDestEntry);
+  static nsresult CloneAndReplace(nsISHEntry* aSrcEntry, nsDocShell* aSrcShell,
+                                  uint32_t aCloneID, nsISHEntry* aReplaceEntry,
+                                  bool aCloneChildren, nsISHEntry** aDestEntry);
 
   // Child-walking callback for CloneAndReplace
   static nsresult CloneAndReplaceChild(nsISHEntry* aEntry, nsDocShell* aShell,
                                        int32_t aChildIndex, void* aData);
-
 
   // Child-walking callback for SetHistoryEntry
   static nsresult SetChildHistoryEntry(nsISHEntry* aEntry, nsDocShell* aShell,
@@ -131,12 +115,17 @@ public:
                                      WalkHistoryEntriesFunc aCallback,
                                      void* aData);
 
-private:
+ private:
   virtual ~nsSHistory();
-  friend class nsSHEnumerator;
   friend class nsSHistoryObserver;
 
-  nsresult GetTransactionAtIndex(int32_t aIndex, nsISHTransaction** aResult);
+  // The size of the window of SHEntries which can have alive viewers in the
+  // bfcache around the currently active SHEntry.
+  //
+  // We try to keep viewers for SHEntries between index - VIEWER_WINDOW and
+  // index + VIEWER_WINDOW alive.
+  static const int32_t VIEWER_WINDOW = 3;
+
   nsresult LoadDifferingEntries(nsISHEntry* aPrevEntry, nsISHEntry* aNextEntry,
                                 nsIDocShell* aRootDocShell, long aLoadType,
                                 bool& aDifferenceFound);
@@ -149,16 +138,15 @@ private:
   nsresult PrintHistory();
 #endif
 
-  // Find the transaction for a given bfcache entry. It only looks up between
-  // the range where alive viewers may exist (i.e nsISHistory::VIEWER_WINDOW).
-  nsresult FindTransactionForBFCache(nsIBFCacheEntry* aEntry,
-                                     nsISHTransaction** aResult,
-                                     int32_t* aResultIndex);
+  // Find the history entry for a given bfcache entry. It only looks up between
+  // the range where alive viewers may exist (i.e nsSHistory::VIEWER_WINDOW).
+  nsresult FindEntryForBFCache(nsIBFCacheEntry* aBFEntry, nsISHEntry** aResult,
+                               int32_t* aResultIndex);
 
   // Evict content viewers in this window which don't lie in the "safe" range
   // around aIndex.
   void EvictOutOfRangeWindowContentViewers(int32_t aIndex);
-  void EvictContentViewerForTransaction(nsISHTransaction* aTrans);
+  void EvictContentViewerForEntry(nsISHEntry* aEntry);
   static void GloballyEvictContentViewers();
   static void GloballyEvictAllContentViewers();
 
@@ -169,7 +157,7 @@ private:
   nsresult LoadNextPossibleEntry(int32_t aNewIndex, long aLoadType,
                                  uint32_t aHistCmd);
 
-  // aIndex is the index of the transaction which may be removed.
+  // aIndex is the index of the entry which may be removed.
   // If aKeepNext is true, aIndex is compared to aIndex + 1,
   // otherwise comparison is done to aIndex - 1.
   bool RemoveDuplicate(int32_t aIndex, bool aKeepNext);
@@ -177,10 +165,15 @@ private:
   // Track all bfcache entries and evict on expiration.
   mozilla::UniquePtr<HistoryTracker> mHistoryTracker;
 
-  nsCOMPtr<nsISHTransaction> mListRoot;
-  int32_t mIndex;
-  int32_t mLength;
-  int32_t mRequestedIndex;
+  nsTArray<nsCOMPtr<nsISHEntry>> mEntries;  // entries are never null
+  int32_t mIndex;                           // -1 means "no index"
+  int32_t mRequestedIndex;                  // -1 means "no requested index"
+
+  void WindowIndices(int32_t aIndex, int32_t* aOutStartIndex,
+                     int32_t* aOutEndIndex);
+
+  // Length of mEntries.
+  int32_t Length() { return int32_t(mEntries.Length()); }
 
   // Session History listeners
   nsAutoTObserverArray<nsWeakPtr, 2> mListeners;
@@ -192,26 +185,7 @@ private:
   static int32_t sHistoryMaxTotalViewers;
 };
 
-class nsSHEnumerator : public nsISimpleEnumerator
-{
-public:
-  NS_DECL_ISUPPORTS
-  NS_DECL_NSISIMPLEENUMERATOR
-
-  explicit nsSHEnumerator(nsSHistory* aHistory);
-
-protected:
-  friend class nsSHistory;
-  virtual ~nsSHEnumerator();
-
-private:
-  int32_t mIndex;
-  nsSHistory* mSHistory;
-};
-
-inline nsISupports*
-ToSupports(nsSHistory* aObj)
-{
+inline nsISupports* ToSupports(nsSHistory* aObj) {
   return static_cast<nsISHistory*>(aObj);
 }
 

@@ -14,9 +14,7 @@
 
 namespace mozilla {
 
-void
-GetErrorName(nsresult rv, nsACString& name)
-{
+void GetErrorName(nsresult rv, nsACString& name) {
   if (const char* errorName = GetErrorNameInternal(rv)) {
     name.AssignASCII(errorName);
     return;
@@ -30,24 +28,26 @@ GetErrorName(nsresult rv, nsACString& name)
   // codes.)
   MOZ_ASSERT(isSecurityError);
 
-  name.AssignASCII(NS_SUCCEEDED(rv) ? "NS_ERROR_GENERATE_SUCCESS("
-                                    : "NS_ERROR_GENERATE_FAILURE(");
+  if (NS_SUCCEEDED(rv)) {
+    name.AssignLiteral("NS_ERROR_GENERATE_SUCCESS(");
+  } else {
+    name.AssignLiteral("NS_ERROR_GENERATE_FAILURE(");
+  }
 
   if (isSecurityError) {
-    name.AppendASCII("NS_ERROR_MODULE_SECURITY");
+    name.AppendLiteral("NS_ERROR_MODULE_SECURITY");
   } else {
     // This should never happen given the assertion above, so we don't bother
     // trying to print a symbolic name for the module here.
     name.AppendInt(NS_ERROR_GET_MODULE(rv));
   }
 
-  name.AppendASCII(", ");
+  name.AppendLiteral(", ");
 
-  const char * nsprName = nullptr;
+  const char* nsprName = nullptr;
   if (isSecurityError) {
     // Invert the logic from NSSErrorsService::GetXPCOMFromNSSError
-    PRErrorCode nsprCode
-      = -1 * static_cast<PRErrorCode>(NS_ERROR_GET_CODE(rv));
+    PRErrorCode nsprCode = -1 * static_cast<PRErrorCode>(NS_ERROR_GET_CODE(rv));
     nsprName = PR_ErrorToName(nsprCode);
 
     // All NSPR error codes defined by NSPR or NSS should have a name mapping.
@@ -60,19 +60,16 @@ GetErrorName(nsresult rv, nsACString& name)
     name.AppendInt(NS_ERROR_GET_CODE(rv));
   }
 
-  name.AppendASCII(")");
+  name.AppendLiteral(")");
 }
 
-} // namespace mozilla
+}  // namespace mozilla
 
 extern "C" {
 
 // This is an extern "C" binding for the GetErrorName method which is used by
 // the nsresult rust bindings in xpcom/rust/nserror.
-void
-Gecko_GetErrorName(nsresult aRv, nsACString& aName)
-{
+void Gecko_GetErrorName(nsresult aRv, nsACString& aName) {
   mozilla::GetErrorName(aRv, aName);
 }
-
 }

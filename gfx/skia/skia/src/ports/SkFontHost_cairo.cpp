@@ -106,10 +106,10 @@ public:
 protected:
     virtual unsigned generateGlyphCount() override;
     virtual uint16_t generateCharToGlyph(SkUnichar uniChar) override;
-    virtual void generateAdvance(SkGlyph* glyph) override;
+    virtual bool generateAdvance(SkGlyph* glyph) override;
     virtual void generateMetrics(SkGlyph* glyph) override;
     virtual void generateImage(const SkGlyph& glyph) override;
-    virtual void generatePath(const SkGlyphID glyphID, SkPath* path) override;
+    virtual bool generatePath(SkGlyphID glyphID, SkPath* path) override;
     virtual void generateFontMetrics(SkPaint::FontMetrics* metrics) override;
     virtual SkUnichar generateGlyphToChar(uint16_t glyph) override;
 
@@ -171,23 +171,6 @@ static bool isAxisAligned(const SkScalerContextRec& rec) {
 
 class SkCairoFTTypeface : public SkTypeface {
 public:
-    static SkTypeface* CreateTypeface(cairo_font_face_t* fontFace, FT_Face face,
-                                      FcPattern* pattern = nullptr) {
-        SkASSERT(fontFace != nullptr);
-        SkASSERT(cairo_font_face_get_type(fontFace) == CAIRO_FONT_TYPE_FT);
-        SkASSERT(face != nullptr);
-
-        SkFontStyle style(face->style_flags & FT_STYLE_FLAG_BOLD ?
-                              SkFontStyle::kBold_Weight : SkFontStyle::kNormal_Weight,
-                          SkFontStyle::kNormal_Width,
-                          face->style_flags & FT_STYLE_FLAG_ITALIC ?
-                              SkFontStyle::kItalic_Slant : SkFontStyle::kUpright_Slant);
-
-        bool isFixedWidth = face->face_flags & FT_FACE_FLAG_FIXED_WIDTH;
-
-        return new SkCairoFTTypeface(style, isFixedWidth, fontFace, pattern);
-    }
-
     virtual SkStreamAsset* onOpenStream(int*) const override { return nullptr; }
 
     virtual std::unique_ptr<SkAdvancedTypefaceMetrics> onGetAdvancedMetrics() const override
@@ -271,11 +254,8 @@ public:
         return 0;
     }
 
-private:
-
-    SkCairoFTTypeface(const SkFontStyle& style, bool isFixedWidth,
-                      cairo_font_face_t* fontFace, FcPattern* pattern)
-        : SkTypeface(style, isFixedWidth)
+    SkCairoFTTypeface(cairo_font_face_t* fontFace, FcPattern* pattern)
+        : SkTypeface(SkFontStyle::Normal())
         , fFontFace(fontFace)
         , fPattern(pattern)
     {
@@ -288,6 +268,7 @@ private:
 #endif
     }
 
+private:
     ~SkCairoFTTypeface()
     {
         cairo_font_face_set_user_data(fFontFace, &kSkTypefaceKey, nullptr, nullptr);
@@ -307,16 +288,14 @@ SkTypeface* SkCreateTypefaceFromCairoFTFontWithFontconfig(cairo_scaled_font_t* s
 {
     cairo_font_face_t* fontFace = cairo_scaled_font_get_font_face(scaledFont);
     SkASSERT(cairo_font_face_status(fontFace) == CAIRO_STATUS_SUCCESS);
+    SkASSERT(cairo_font_face_get_type(fontFace) == CAIRO_FONT_TYPE_FT);
 
     SkTypeface* typeface = reinterpret_cast<SkTypeface*>(cairo_font_face_get_user_data(fontFace, &kSkTypefaceKey));
     if (typeface) {
         typeface->ref();
     } else {
-        CairoLockedFTFace faceLock(scaledFont);
-        if (FT_Face face = faceLock.getFace()) {
-            typeface = SkCairoFTTypeface::CreateTypeface(fontFace, face, pattern);
-            SkTypefaceCache::Add(typeface);
-        }
+        typeface = new SkCairoFTTypeface(fontFace, pattern);
+        SkTypefaceCache::Add(typeface);
     }
 
     return typeface;
@@ -601,9 +580,10 @@ uint16_t SkScalerContext_CairoFT::generateCharToGlyph(SkUnichar uniChar)
     return SkToU16(FT_Get_Char_Index(faceLock.getFace(), uniChar));
 }
 
-void SkScalerContext_CairoFT::generateAdvance(SkGlyph* glyph)
+bool SkScalerContext_CairoFT::generateAdvance(SkGlyph* glyph)
 {
     generateMetrics(glyph);
+    return !glyph->isEmpty();
 }
 
 void SkScalerContext_CairoFT::prepareGlyph(FT_GlyphSlot glyph)
@@ -636,6 +616,8 @@ void SkScalerContext_CairoFT::fixVerticalLayoutBearing(FT_GlyphSlot glyph)
 void SkScalerContext_CairoFT::generateMetrics(SkGlyph* glyph)
 {
     SkASSERT(fScaledFont != nullptr);
+
+    glyph->fMaskFormat = fRec.fMaskFormat;
 
     glyph->zeroMetrics();
 
@@ -779,7 +761,7 @@ void SkScalerContext_CairoFT::generateImage(const SkGlyph& glyph)
     }
 }
 
-void SkScalerContext_CairoFT::generatePath(const SkGlyphID glyphID, SkPath* path)
+bool SkScalerContext_CairoFT::generatePath(SkGlyphID glyphID, SkPath* path)
 {
     SkASSERT(fScaledFont != nullptr);
     CairoLockedFTFace faceLock(fScaledFont);
@@ -795,12 +777,12 @@ void SkScalerContext_CairoFT::generatePath(const SkGlyphID glyphID, SkPath* path
 
     if (err != 0) {
         path->reset();
-        return;
+        return false;
     }
 
     prepareGlyph(face->glyph);
 
-    generateGlyphPath(face, path);
+    return generateGlyphPath(face, path);
 }
 
 void SkScalerContext_CairoFT::generateFontMetrics(SkPaint::FontMetrics* metrics)

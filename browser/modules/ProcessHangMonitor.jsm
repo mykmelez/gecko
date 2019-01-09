@@ -305,7 +305,7 @@ var ProcessHangMonitor = {
       }
     }
 
-    for (let [pausedReport, ] of this._pausedReports) {
+    for (let [pausedReport ] of this._pausedReports) {
       if (maybeStopHang(pausedReport)) {
         this.removePausedReport(pausedReport);
       }
@@ -321,7 +321,7 @@ var ProcessHangMonitor = {
 
     this._activeReports = new Set();
 
-    for (let [pausedReport, ] of this._pausedReports) {
+    for (let [pausedReport ] of this._pausedReports) {
       this.stopHang(pausedReport);
       this.removePausedReport(pausedReport);
     }
@@ -345,7 +345,7 @@ var ProcessHangMonitor = {
    */
   findPausedReport(browser) {
     let frameLoader = browser.frameLoader;
-    for (let [report, ] of this._pausedReports) {
+    for (let [report ] of this._pausedReports) {
       if (report.isReportForBrowser(frameLoader)) {
         return report;
       }
@@ -391,9 +391,7 @@ var ProcessHangMonitor = {
       return;
     }
 
-    while (e.hasMoreElements()) {
-      let win = e.getNext();
-
+    for (let win of e) {
       this.updateWindow(win);
 
       // Only listen for these events if there are active hang reports.
@@ -422,8 +420,8 @@ var ProcessHangMonitor = {
    * Show the notification for a hang.
    */
   showNotification(win, report) {
-    let nb = win.document.getElementById("high-priority-global-notificationbox");
-    let notification = nb.getNotificationWithValue("process-hang");
+    let notification =
+        win.gHighPriorityNotificationBox.getNotificationWithValue("process-hang");
     if (notification) {
       return;
     }
@@ -435,14 +433,14 @@ var ProcessHangMonitor = {
         accessKey: bundle.getString("processHang.button_stop.accessKey"),
         callback() {
           ProcessHangMonitor.stopIt(win);
-        }
+        },
       },
       {
         label: bundle.getString("processHang.button_wait.label"),
         accessKey: bundle.getString("processHang.button_wait.accessKey"),
         callback() {
           ProcessHangMonitor.waitLonger(win);
-        }
+        },
       }];
 
     let message = bundle.getString("processHang.label");
@@ -460,7 +458,7 @@ var ProcessHangMonitor = {
       let linkText = bundle.getString("processHang.add-on.learn-more.text");
       let linkURL = "https://support.mozilla.org/kb/warning-unresponsive-script#w_other-causes";
 
-      let link = doc.createElement("label");
+      let link = doc.createXULElement("label");
       link.setAttribute("class", "text-link");
       link.setAttribute("role", "link");
       link.setAttribute("onclick", `openTrustedLinkIn(${JSON.stringify(linkURL)}, "tab")`);
@@ -475,7 +473,7 @@ var ProcessHangMonitor = {
         accessKey: bundle.getString("processHang.button_stop_sandbox.accessKey"),
         callback() {
           ProcessHangMonitor.stopGlobal(win);
-        }
+        },
       });
     }
 
@@ -485,23 +483,23 @@ var ProcessHangMonitor = {
         accessKey: bundle.getString("processHang.button_debug.accessKey"),
         callback() {
           ProcessHangMonitor.debugScript(win);
-        }
+        },
       });
     }
 
-    nb.appendNotification(message, "process-hang",
-                          "chrome://browser/content/aboutRobots-icon.png",
-                          nb.PRIORITY_WARNING_HIGH, buttons);
+    win.gHighPriorityNotificationBox.appendNotification(message, "process-hang",
+      "chrome://browser/content/aboutRobots-icon.png",
+      win.gHighPriorityNotificationBox.PRIORITY_WARNING_HIGH, buttons);
   },
 
   /**
    * Ensure that no hang notifications are visible in |win|.
    */
   hideNotification(win) {
-    let nb = win.document.getElementById("high-priority-global-notificationbox");
-    let notification = nb.getNotificationWithValue("process-hang");
+    let notification =
+        win.gHighPriorityNotificationBox.getNotificationWithValue("process-hang");
     if (notification) {
-      nb.removeNotification(notification);
+      win.gHighPriorityNotificationBox.removeNotification(notification);
     }
   },
 

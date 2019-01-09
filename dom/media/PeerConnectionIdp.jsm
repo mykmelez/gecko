@@ -5,8 +5,6 @@
 
 var EXPORTED_SYMBOLS = ["PeerConnectionIdp"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "IdpSandbox",
   "resource://gre/modules/media/IdpSandbox.jsm");
 
@@ -279,8 +277,8 @@ PeerConnectionIdp.prototype = {
     let content = {
       fingerprint: [{
         algorithm,
-        digest
-      }]
+        digest,
+      }],
     };
 
     this._resetAssertion();
@@ -342,6 +340,5 @@ PeerConnectionIdp.prototype = {
           throw new this._win.DOMException("IdP timed out", "IdpError");
         });
     return this._win.Promise.race([ timeout, p ]);
-  }
+  },
 };
-

@@ -10,11 +10,14 @@ DIRS += [
     'sources-tree',
 ]
 
-DevToolsModules(
+DebuggerModules(
     'assert.js',
     'ast.js',
+    'asyncStoreHelper.js',
     'bootstrap.js',
+    'build-query.js',
     'clipboard.js',
+    'connect.js',
     'dbg.js',
     'defer.js',
     'DevToolsUtils.js',
@@ -26,6 +29,7 @@ DevToolsModules(
     'location.js',
     'log.js',
     'makeRecord.js',
+    'memoize.js',
     'path.js',
     'prefs.js',
     'preview.js',
@@ -37,10 +41,13 @@ DevToolsModules(
     'source.js',
     'tabs.js',
     'task.js',
+    'telemetry.js',
     'text.js',
     'timings.js',
     'ui.js',
+    'url.js',
     'utils.js',
     'wasm.js',
     'worker.js',
+    'workers.js',
 )

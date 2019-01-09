@@ -30,9 +30,7 @@ const uint32_t kDefaultSet = 0;
 const uint32_t kPrivateSet = 1;
 const uint32_t kSessionSet = 2;
 
-inline uint32_t
-GetDataSetIndex(bool aPrivate, bool aSessionOnly)
-{
+inline uint32_t GetDataSetIndex(bool aPrivate, bool aSessionOnly) {
   if (aPrivate) {
     return kPrivateSet;
   }
@@ -44,13 +42,11 @@ GetDataSetIndex(bool aPrivate, bool aSessionOnly)
   return kDefaultSet;
 }
 
-inline uint32_t
-GetDataSetIndex(const LocalStorage* aStorage)
-{
+inline uint32_t GetDataSetIndex(const LocalStorage* aStorage) {
   return GetDataSetIndex(aStorage->IsPrivate(), aStorage->IsSessionOnly());
 }
 
-} // namespace
+}  // namespace
 
 // LocalStorageCacheBridge
 
@@ -59,8 +55,7 @@ NS_IMPL_ADDREF(LocalStorageCacheBridge)
 // Since there is no consumer of return value of Release, we can turn this
 // method to void to make implementation of asynchronous
 // LocalStorageCache::Release much simpler.
-NS_IMETHODIMP_(void) LocalStorageCacheBridge::Release(void)
-{
+NS_IMETHODIMP_(void) LocalStorageCacheBridge::Release(void) {
   MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");
   nsrefcnt count = --mRefCnt;
   NS_LOG_RELEASE(this, count, "LocalStorageCacheBridge");
@@ -75,20 +70,24 @@ NS_IMETHODIMP_(void) LocalStorageCacheBridge::Release(void)
 // LocalStorageCache
 
 LocalStorageCache::LocalStorageCache(const nsACString* aOriginNoSuffix)
-  : mOriginNoSuffix(*aOriginNoSuffix)
-  , mMonitor("LocalStorageCache")
-  , mLoaded(false)
-  , mLoadResult(NS_OK)
-  , mInitialized(false)
-  , mPersistent(false)
-  , mSessionOnlyDataSetActive(false)
-  , mPreloadTelemetryRecorded(false)
-{
+    : mActor(nullptr),
+      mOriginNoSuffix(*aOriginNoSuffix),
+      mMonitor("LocalStorageCache"),
+      mLoaded(false),
+      mLoadResult(NS_OK),
+      mInitialized(false),
+      mPersistent(false),
+      mSessionOnlyDataSetActive(false),
+      mPreloadTelemetryRecorded(false) {
   MOZ_COUNT_CTOR(LocalStorageCache);
 }
 
-LocalStorageCache::~LocalStorageCache()
-{
+LocalStorageCache::~LocalStorageCache() {
+  if (mActor) {
+    mActor->SendDeleteMeInternal();
+    MOZ_ASSERT(!mActor, "SendDeleteMeInternal should have cleared!");
+  }
+
   if (mManager) {
     mManager->DropCache(this);
   }
@@ -96,9 +95,16 @@ LocalStorageCache::~LocalStorageCache()
   MOZ_COUNT_DTOR(LocalStorageCache);
 }
 
+void LocalStorageCache::SetActor(LocalStorageCacheChild* aActor) {
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aActor);
+  MOZ_ASSERT(!mActor);
+
+  mActor = aActor;
+}
+
 NS_IMETHODIMP_(void)
-LocalStorageCache::Release(void)
-{
+LocalStorageCache::Release(void) {
   // We must actually release on the main thread since the cache removes it
   // self from the manager's hash table.  And we don't want to lock access to
   // that hash table.
@@ -108,9 +114,9 @@ LocalStorageCache::Release(void)
   }
 
   RefPtr<nsRunnableMethod<LocalStorageCacheBridge, void, false>> event =
-    NewNonOwningRunnableMethod("dom::LocalStorageCacheBridge::Release",
-                               static_cast<LocalStorageCacheBridge*>(this),
-                               &LocalStorageCacheBridge::Release);
+      NewNonOwningRunnableMethod("dom::LocalStorageCacheBridge::Release",
+                                 static_cast<LocalStorageCacheBridge*>(this),
+                                 &LocalStorageCacheBridge::Release);
 
   nsresult rv = NS_DispatchToMainThread(event);
   if (NS_FAILED(rv)) {
@@ -119,12 +125,9 @@ LocalStorageCache::Release(void)
   }
 }
 
-void
-LocalStorageCache::Init(LocalStorageManager* aManager,
-                   bool aPersistent,
-                   nsIPrincipal* aPrincipal,
-                   const nsACString& aQuotaOriginScope)
-{
+void LocalStorageCache::Init(LocalStorageManager* aManager, bool aPersistent,
+                             nsIPrincipal* aPrincipal,
+                             const nsACString& aQuotaOriginScope) {
   if (mInitialized) {
     return;
   }
@@ -146,29 +149,40 @@ LocalStorageCache::Init(LocalStorageManager* aManager,
   // Check the quota string has (or has not) the identical origin suffix as
   // this storage cache is bound to.
   MOZ_ASSERT(StringBeginsWith(mQuotaOriginScope, mOriginSuffix));
-  MOZ_ASSERT(mOriginSuffix.IsEmpty() != StringBeginsWith(mQuotaOriginScope,
-                                                         NS_LITERAL_CSTRING("^")));
+  MOZ_ASSERT(mOriginSuffix.IsEmpty() !=
+             StringBeginsWith(mQuotaOriginScope, NS_LITERAL_CSTRING("^")));
 
   mUsage = aManager->GetOriginUsage(mQuotaOriginScope);
 }
 
-inline bool
-LocalStorageCache::Persist(const LocalStorage* aStorage) const
-{
-  return mPersistent &&
-         !aStorage->IsSessionOnly() &&
-         !aStorage->IsPrivate();
+void LocalStorageCache::NotifyObservers(const LocalStorage* aStorage,
+                                        const nsString& aKey,
+                                        const nsString& aOldValue,
+                                        const nsString& aNewValue) {
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(aStorage);
+
+  if (!mActor) {
+    return;
+  }
+
+  // We want to send a message to the parent in order to broadcast the
+  // StorageEvent correctly to any child process.
+
+  Unused << mActor->SendNotify(aStorage->DocumentURI(), aKey, aOldValue,
+                               aNewValue);
 }
 
-const nsCString
-LocalStorageCache::Origin() const
-{
+inline bool LocalStorageCache::Persist(const LocalStorage* aStorage) const {
+  return mPersistent && !aStorage->IsSessionOnly() && !aStorage->IsPrivate();
+}
+
+const nsCString LocalStorageCache::Origin() const {
   return LocalStorageManager::CreateOrigin(mOriginSuffix, mOriginNoSuffix);
 }
 
-LocalStorageCache::Data&
-LocalStorageCache::DataSet(const LocalStorage* aStorage)
-{
+LocalStorageCache::Data& LocalStorageCache::DataSet(
+    const LocalStorage* aStorage) {
   uint32_t index = GetDataSetIndex(aStorage);
 
   if (index == kSessionSet && !mSessionOnlyDataSetActive) {
@@ -194,30 +208,20 @@ LocalStorageCache::DataSet(const LocalStorage* aStorage)
   return mData[index];
 }
 
-bool
-LocalStorageCache::ProcessUsageDelta(const LocalStorage* aStorage,
-                                     int64_t aDelta,
-                                     const MutationSource aSource)
-{
+bool LocalStorageCache::ProcessUsageDelta(const LocalStorage* aStorage,
+                                          int64_t aDelta,
+                                          const MutationSource aSource) {
   return ProcessUsageDelta(GetDataSetIndex(aStorage), aDelta, aSource);
 }
 
-bool
-LocalStorageCache::ProcessUsageDelta(uint32_t aGetDataSetIndex,
-                                     const int64_t aDelta,
-                                     const MutationSource aSource)
-{
-  // Check if we are in a low disk space situation
-  if (aSource == ContentMutation &&
-      aDelta > 0 && mManager && mManager->IsLowDiskSpace()) {
-    return false;
-  }
-
+bool LocalStorageCache::ProcessUsageDelta(uint32_t aGetDataSetIndex,
+                                          const int64_t aDelta,
+                                          const MutationSource aSource) {
   // Check limit per this origin
   Data& data = mData[aGetDataSetIndex];
   uint64_t newOriginUsage = data.mOriginQuotaUsage + aDelta;
-  if (aSource == ContentMutation &&
-      aDelta > 0 && newOriginUsage > LocalStorageManager::GetQuota()) {
+  if (aSource == ContentMutation && aDelta > 0 &&
+      newOriginUsage > LocalStorageManager::GetQuota()) {
     return false;
   }
 
@@ -232,9 +236,7 @@ LocalStorageCache::ProcessUsageDelta(uint32_t aGetDataSetIndex,
   return true;
 }
 
-void
-LocalStorageCache::Preload()
-{
+void LocalStorageCache::Preload() {
   if (mLoaded || !mPersistent) {
     return;
   }
@@ -249,9 +251,7 @@ LocalStorageCache::Preload()
   storageChild->AsyncPreload(this);
 }
 
-void
-LocalStorageCache::WaitForPreload(Telemetry::HistogramID aTelemetryID)
-{
+void LocalStorageCache::WaitForPreload(Telemetry::HistogramID aTelemetryID) {
   if (!mPersistent) {
     return;
   }
@@ -262,8 +262,7 @@ LocalStorageCache::WaitForPreload(Telemetry::HistogramID aTelemetryID)
   if (!mPreloadTelemetryRecorded) {
     mPreloadTelemetryRecorded = true;
     Telemetry::Accumulate(
-      Telemetry::LOCALDOMSTORAGE_PRELOAD_PENDING_ON_FIRST_ACCESS,
-      !loaded);
+        Telemetry::LOCALDOMSTORAGE_PRELOAD_PENDING_ON_FIRST_ACCESS, !loaded);
   }
 
   if (loaded) {
@@ -285,9 +284,8 @@ LocalStorageCache::WaitForPreload(Telemetry::HistogramID aTelemetryID)
   StorageDBChild::Get()->SyncPreload(this);
 }
 
-nsresult
-LocalStorageCache::GetLength(const LocalStorage* aStorage, uint32_t* aRetval)
-{
+nsresult LocalStorageCache::GetLength(const LocalStorage* aStorage,
+                                      uint32_t* aRetval) {
   if (Persist(aStorage)) {
     WaitForPreload(Telemetry::LOCALDOMSTORAGE_GETLENGTH_BLOCKING_MS);
     if (NS_FAILED(mLoadResult)) {
@@ -299,10 +297,8 @@ LocalStorageCache::GetLength(const LocalStorage* aStorage, uint32_t* aRetval)
   return NS_OK;
 }
 
-nsresult
-LocalStorageCache::GetKey(const LocalStorage* aStorage, uint32_t aIndex,
-                           nsAString& aRetval)
-{
+nsresult LocalStorageCache::GetKey(const LocalStorage* aStorage,
+                                   uint32_t aIndex, nsAString& aRetval) {
   // XXX: This does a linear search for the key at index, which would
   // suck if there's a large numer of indexes. Do we care? If so,
   // maybe we need to have a lazily populated key array here or
@@ -326,10 +322,8 @@ LocalStorageCache::GetKey(const LocalStorage* aStorage, uint32_t aIndex,
   return NS_OK;
 }
 
-void
-LocalStorageCache::GetKeys(const LocalStorage* aStorage,
-                           nsTArray<nsString>& aKeys)
-{
+void LocalStorageCache::GetKeys(const LocalStorage* aStorage,
+                                nsTArray<nsString>& aKeys) {
   if (Persist(aStorage)) {
     WaitForPreload(Telemetry::LOCALDOMSTORAGE_GETALLKEYS_BLOCKING_MS);
   }
@@ -343,10 +337,8 @@ LocalStorageCache::GetKeys(const LocalStorage* aStorage,
   }
 }
 
-nsresult
-LocalStorageCache::GetItem(const LocalStorage* aStorage, const nsAString& aKey,
-                           nsAString& aRetval)
-{
+nsresult LocalStorageCache::GetItem(const LocalStorage* aStorage,
+                                    const nsAString& aKey, nsAString& aRetval) {
   if (Persist(aStorage)) {
     WaitForPreload(Telemetry::LOCALDOMSTORAGE_GETVALUE_BLOCKING_MS);
     if (NS_FAILED(mLoadResult)) {
@@ -365,11 +357,10 @@ LocalStorageCache::GetItem(const LocalStorage* aStorage, const nsAString& aKey,
   return NS_OK;
 }
 
-nsresult
-LocalStorageCache::SetItem(const LocalStorage* aStorage, const nsAString& aKey,
-                           const nsString& aValue, nsString& aOld,
-                           const MutationSource aSource)
-{
+nsresult LocalStorageCache::SetItem(const LocalStorage* aStorage,
+                                    const nsAString& aKey,
+                                    const nsString& aValue, nsString& aOld,
+                                    const MutationSource aSource) {
   // Size of the cache that will change after this action.
   int64_t delta = 0;
 
@@ -392,7 +383,7 @@ LocalStorageCache::SetItem(const LocalStorage* aStorage, const nsAString& aKey,
            static_cast<int64_t>(aOld.Length());
 
   if (!ProcessUsageDelta(aStorage, delta, aSource)) {
-    return NS_ERROR_DOM_QUOTA_REACHED;
+    return NS_ERROR_DOM_QUOTA_EXCEEDED_ERR;
   }
 
   if (aValue == aOld && DOMStringIsNull(aValue) == DOMStringIsNull(aOld)) {
@@ -401,11 +392,20 @@ LocalStorageCache::SetItem(const LocalStorage* aStorage, const nsAString& aKey,
 
   data.mKeys.Put(aKey, aValue);
 
-  if (aSource == ContentMutation && Persist(aStorage)) {
+  if (aSource != ContentMutation) {
+    return NS_OK;
+  }
+
+#if !defined(MOZ_WIDGET_ANDROID)
+  NotifyObservers(aStorage, nsString(aKey), aOld, aValue);
+#endif
+
+  if (Persist(aStorage)) {
     StorageDBChild* storageChild = StorageDBChild::Get();
     if (!storageChild) {
-      NS_ERROR("Writing to localStorage after the database has been shut down"
-               ", data lose!");
+      NS_ERROR(
+          "Writing to localStorage after the database has been shut down"
+          ", data lose!");
       return NS_ERROR_NOT_INITIALIZED;
     }
 
@@ -419,11 +419,9 @@ LocalStorageCache::SetItem(const LocalStorage* aStorage, const nsAString& aKey,
   return NS_OK;
 }
 
-nsresult
-LocalStorageCache::RemoveItem(const LocalStorage* aStorage,
-                              const nsAString& aKey,
-                              nsString& aOld, const MutationSource aSource)
-{
+nsresult LocalStorageCache::RemoveItem(const LocalStorage* aStorage,
+                                       const nsAString& aKey, nsString& aOld,
+                                       const MutationSource aSource) {
   if (Persist(aStorage)) {
     WaitForPreload(Telemetry::LOCALDOMSTORAGE_REMOVEKEY_BLOCKING_MS);
     if (NS_FAILED(mLoadResult)) {
@@ -443,11 +441,20 @@ LocalStorageCache::RemoveItem(const LocalStorage* aStorage,
   Unused << ProcessUsageDelta(aStorage, delta, aSource);
   data.mKeys.Remove(aKey);
 
-  if (aSource == ContentMutation && Persist(aStorage)) {
+  if (aSource != ContentMutation) {
+    return NS_OK;
+  }
+
+#if !defined(MOZ_WIDGET_ANDROID)
+  NotifyObservers(aStorage, nsString(aKey), aOld, VoidString());
+#endif
+
+  if (Persist(aStorage)) {
     StorageDBChild* storageChild = StorageDBChild::Get();
     if (!storageChild) {
-      NS_ERROR("Writing to localStorage after the database has been shut down"
-               ", data lose!");
+      NS_ERROR(
+          "Writing to localStorage after the database has been shut down"
+          ", data lose!");
       return NS_ERROR_NOT_INITIALIZED;
     }
 
@@ -457,10 +464,8 @@ LocalStorageCache::RemoveItem(const LocalStorage* aStorage,
   return NS_OK;
 }
 
-nsresult
-LocalStorageCache::Clear(const LocalStorage* aStorage,
-                         const MutationSource aSource)
-{
+nsresult LocalStorageCache::Clear(const LocalStorage* aStorage,
+                                  const MutationSource aSource) {
   bool refresh = false;
   if (Persist(aStorage)) {
     // We need to preload all data (know the size) before we can proceeed
@@ -485,11 +490,22 @@ LocalStorageCache::Clear(const LocalStorage* aStorage,
     data.mKeys.Clear();
   }
 
-  if (aSource == ContentMutation && Persist(aStorage) && (refresh || hadData)) {
+  if (aSource != ContentMutation) {
+    return hadData ? NS_OK : NS_SUCCESS_DOM_NO_OPERATION;
+  }
+
+#if !defined(MOZ_WIDGET_ANDROID)
+  if (hadData) {
+    NotifyObservers(aStorage, VoidString(), VoidString(), VoidString());
+  }
+#endif
+
+  if (Persist(aStorage) && (refresh || hadData)) {
     StorageDBChild* storageChild = StorageDBChild::Get();
     if (!storageChild) {
-      NS_ERROR("Writing to localStorage after the database has been shut down"
-               ", data lose!");
+      NS_ERROR(
+          "Writing to localStorage after the database has been shut down"
+          ", data lose!");
       return NS_ERROR_NOT_INITIALIZED;
     }
 
@@ -499,15 +515,12 @@ LocalStorageCache::Clear(const LocalStorage* aStorage,
   return hadData ? NS_OK : NS_SUCCESS_DOM_NO_OPERATION;
 }
 
-int64_t
-LocalStorageCache::GetOriginQuotaUsage(const LocalStorage* aStorage) const
-{
+int64_t LocalStorageCache::GetOriginQuotaUsage(
+    const LocalStorage* aStorage) const {
   return mData[GetDataSetIndex(aStorage)].mOriginQuotaUsage;
 }
 
-void
-LocalStorageCache::UnloadItems(uint32_t aUnloadFlags)
-{
+void LocalStorageCache::UnloadItems(uint32_t aUnloadFlags) {
   if (aUnloadFlags & kUnloadDefault) {
     // Must wait for preload to pass correct usage to ProcessUsageDelta
     // XXX this is not technically needed right now since there is just
@@ -536,7 +549,7 @@ LocalStorageCache::UnloadItems(uint32_t aUnloadFlags)
     WaitForPreload(Telemetry::LOCALDOMSTORAGE_UNLOAD_BLOCKING_MS);
 
     mData[kDefaultSet].mKeys.Clear();
-    mLoaded = false; // This is only used in testing code
+    mLoaded = false;  // This is only used in testing code
     Preload();
   }
 #endif
@@ -544,17 +557,14 @@ LocalStorageCache::UnloadItems(uint32_t aUnloadFlags)
 
 // LocalStorageCacheBridge
 
-uint32_t
-LocalStorageCache::LoadedCount()
-{
+uint32_t LocalStorageCache::LoadedCount() {
   MonitorAutoLock monitor(mMonitor);
   Data& data = mData[kDefaultSet];
   return data.mKeys.Count();
 }
 
-bool
-LocalStorageCache::LoadItem(const nsAString& aKey, const nsString& aValue)
-{
+bool LocalStorageCache::LoadItem(const nsAString& aKey,
+                                 const nsString& aValue) {
   MonitorAutoLock monitor(mMonitor);
   if (mLoaded) {
     return false;
@@ -562,7 +572,7 @@ LocalStorageCache::LoadItem(const nsAString& aKey, const nsString& aValue)
 
   Data& data = mData[kDefaultSet];
   if (data.mKeys.Get(aKey, nullptr)) {
-    return true; // don't stop, just don't override
+    return true;  // don't stop, just don't override
   }
 
   data.mKeys.Put(aKey, aValue);
@@ -570,18 +580,14 @@ LocalStorageCache::LoadItem(const nsAString& aKey, const nsString& aValue)
   return true;
 }
 
-void
-LocalStorageCache::LoadDone(nsresult aRv)
-{
+void LocalStorageCache::LoadDone(nsresult aRv) {
   MonitorAutoLock monitor(mMonitor);
   mLoadResult = aRv;
   mLoaded = true;
   monitor.Notify();
 }
 
-void
-LocalStorageCache::LoadWait()
-{
+void LocalStorageCache::LoadWait() {
   MonitorAutoLock monitor(mMonitor);
   while (!mLoaded) {
     monitor.Wait();
@@ -591,40 +597,36 @@ LocalStorageCache::LoadWait()
 // StorageUsage
 
 StorageUsage::StorageUsage(const nsACString& aOriginScope)
-  : mOriginScope(aOriginScope)
-{
+    : mOriginScope(aOriginScope) {
   mUsage[kDefaultSet] = mUsage[kPrivateSet] = mUsage[kSessionSet] = 0LL;
 }
 
 namespace {
 
-class LoadUsageRunnable : public Runnable
-{
-public:
+class LoadUsageRunnable : public Runnable {
+ public:
   LoadUsageRunnable(int64_t* aUsage, const int64_t aDelta)
-    : Runnable("dom::LoadUsageRunnable")
-    , mTarget(aUsage)
-    , mDelta(aDelta)
-  {}
+      : Runnable("dom::LoadUsageRunnable"), mTarget(aUsage), mDelta(aDelta) {}
 
-private:
+ private:
   int64_t* mTarget;
   int64_t mDelta;
 
-  NS_IMETHOD Run() override { *mTarget = mDelta; return NS_OK; }
+  NS_IMETHOD Run() override {
+    *mTarget = mDelta;
+    return NS_OK;
+  }
 };
 
-} // namespace
+}  // namespace
 
-void
-StorageUsage::LoadUsage(const int64_t aUsage)
-{
+void StorageUsage::LoadUsage(const int64_t aUsage) {
   // Using kDefaultSet index since it is the index for the persitent data
   // stored in the database we have just loaded usage for.
   if (!NS_IsMainThread()) {
     // In single process scenario we get this call from the DB thread
     RefPtr<LoadUsageRunnable> r =
-      new LoadUsageRunnable(mUsage + kDefaultSet, aUsage);
+        new LoadUsageRunnable(mUsage + kDefaultSet, aUsage);
     NS_DispatchToMainThread(r);
   } else {
     // On a child process we get this on the main thread already
@@ -632,15 +634,14 @@ StorageUsage::LoadUsage(const int64_t aUsage)
   }
 }
 
-bool
-StorageUsage::CheckAndSetETLD1UsageDelta(uint32_t aDataSetIndex,
-  const int64_t aDelta, const LocalStorageCache::MutationSource aSource)
-{
+bool StorageUsage::CheckAndSetETLD1UsageDelta(
+    uint32_t aDataSetIndex, const int64_t aDelta,
+    const LocalStorageCache::MutationSource aSource) {
   MOZ_ASSERT(NS_IsMainThread());
 
   int64_t newUsage = mUsage[aDataSetIndex] + aDelta;
-  if (aSource == LocalStorageCache::ContentMutation &&
-      aDelta > 0 && newUsage > LocalStorageManager::GetQuota()) {
+  if (aSource == LocalStorageCache::ContentMutation && aDelta > 0 &&
+      newUsage > LocalStorageManager::GetQuota()) {
     return false;
   }
 
@@ -648,5 +649,5 @@ StorageUsage::CheckAndSetETLD1UsageDelta(uint32_t aDataSetIndex,
   return true;
 }
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla

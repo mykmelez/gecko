@@ -49,48 +49,20 @@ fn calculate_length(width: GLsizei, height: GLsizei, format: GLenum, pixel_type:
         ffi::BGRA => 4,
 
         ffi::ALPHA => 1,
+        ffi::R16 => 1,
         ffi::LUMINANCE => 1,
         ffi::DEPTH_COMPONENT => 1,
         _ => panic!("unsupported format for read_pixels: {:?}", format),
     };
     let depth = match pixel_type {
         ffi::UNSIGNED_BYTE => 1,
-        ffi::FLOAT=> 4,
+        ffi::UNSIGNED_SHORT => 2,
+        ffi::SHORT => 2,
+        ffi::FLOAT => 4,
         _ => panic!("unsupported pixel_type for read_pixels: {:?}", pixel_type),
     };
 
     return (width * height * colors * depth) as usize;
-}
-
-// https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
-fn get_uniform_iv_vector_length(uniform_type: &GLuint) -> usize {
-    match *uniform_type {
-        ffi::BOOL |
-        ffi::INT |
-        ffi::SAMPLER_2D |
-        ffi::SAMPLER_CUBE => 1,
-        ffi::INT_VEC2 |
-        ffi::BOOL_VEC2 => 2,
-        ffi::INT_VEC3 |
-        ffi::BOOL_VEC3 => 3,
-        ffi::INT_VEC4 |
-        ffi::BOOL_VEC4 => 4,
-        _ => panic!("Invalid location argument"),
-    }
-}
-
-// https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
-fn get_uniform_fv_vector_length(uniform_type: &GLuint) -> usize {
-    match *uniform_type {
-        ffi::FLOAT => 1,
-        ffi::FLOAT_VEC2 => 2,
-        ffi::FLOAT_VEC3 => 3,
-        ffi::FLOAT_VEC4 |
-        ffi::FLOAT_MAT2 => 4,
-        ffi::FLOAT_MAT3 => 9,
-        ffi::FLOAT_MAT4 => 16,
-        _ => panic!("Invalid location argument"),
-    }
 }
 
 pub struct DebugMessage {
@@ -185,8 +157,8 @@ declare_gl_apis! {
     fn active_texture(&self, texture: GLenum);
     fn attach_shader(&self, program: GLuint, shader: GLuint);
     fn bind_attrib_location(&self, program: GLuint, index: GLuint, name: &str);
-    fn get_uniform_iv(&self, program: GLuint, location: GLint) -> Vec<GLint>;
-    fn get_uniform_fv(&self, program: GLuint, location: GLint) -> Vec<GLfloat>;
+    unsafe fn get_uniform_iv(&self, program: GLuint, location: GLint, result: &mut [GLint]);
+    unsafe fn get_uniform_fv(&self, program: GLuint, location: GLint, result: &mut [GLfloat]);
     fn get_uniform_block_index(&self, program: GLuint, name: &str) -> GLuint;
     fn get_uniform_indices(&self,  program: GLuint, names: &[&str]) -> Vec<GLuint>;
     fn bind_buffer_base(&self, target: GLenum, index: GLuint, buffer: GLuint);
@@ -311,12 +283,52 @@ declare_gl_apis! {
                             format: GLenum,
                             ty: GLenum,
                             offset: usize);
+    fn tex_storage_2d(&self,
+                      target: GLenum,
+                      levels: GLint,
+                      internal_format: GLenum,
+                      width: GLsizei,
+                      height: GLsizei);
+    fn tex_storage_3d(&self,
+                      target: GLenum,
+                      levels: GLint,
+                      internal_format: GLenum,
+                      width: GLsizei,
+                      height: GLsizei,
+                      depth: GLsizei);
     fn get_tex_image_into_buffer(&self,
                                 target: GLenum,
                                 level: GLint,
                                 format: GLenum,
                                 ty: GLenum,
                                 output: &mut [u8]);
+    unsafe fn copy_image_sub_data(&self,
+                                  src_name: GLuint,
+                                  src_target: GLenum,
+                                  src_level: GLint,
+                                  src_x: GLint,
+                                  src_y: GLint,
+                                  src_z: GLint,
+                                  dst_name: GLuint,
+                                  dst_target: GLenum,
+                                  dst_level: GLint,
+                                  dst_x: GLint,
+                                  dst_y: GLint,
+                                  dst_z: GLint,
+                                  src_width: GLsizei,
+                                  src_height: GLsizei,
+                                  src_depth: GLsizei);
+
+    fn invalidate_framebuffer(&self,
+                              target: GLenum,
+                              attachments: &[GLenum]);
+    fn invalidate_sub_framebuffer(&self,
+                                  target: GLenum,
+                                  attachments: &[GLenum],
+                                  xoffset: GLint,
+                                  yoffset: GLint,
+                                  width: GLsizei,
+                                  height: GLsizei);
 
     unsafe fn get_integer_v(&self, name: GLenum, result: &mut [GLint]);
     unsafe fn get_integer_64v(&self, name: GLenum, result: &mut [GLint64]);

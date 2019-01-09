@@ -4,7 +4,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
 // Windows Timer Primer
 //
 // A good article:  http://www.ddj.com/windows/184416651
@@ -38,14 +37,15 @@
 
 #include "base/time.h"
 
+#ifndef __MINGW32__
 #pragma comment(lib, "winmm.lib")
+#endif
 #include <windows.h>
 #include <mmsystem.h>
 
 #include "base/basictypes.h"
 #include "base/lock.h"
 #include "base/logging.h"
-#include "base/singleton.h"
 #include "mozilla/Casting.h"
 
 using base::Time;
@@ -66,7 +66,7 @@ int64_t FileTimeToMicroseconds(const FILETIME& ft) {
 
 void MicrosecondsToFileTime(int64_t us, FILETIME* ft) {
   DCHECK(us >= 0) << "Time is less than 0, negative values are not "
-      "representable in FILETIME";
+                     "representable in FILETIME";
 
   // Multiply by 10 to convert milliseconds to 100-nanoseconds. BitwiseCast will
   // handle alignment problems. This only works on little-endian machines.
@@ -103,8 +103,7 @@ const int64_t Time::kTimeTToMicrosecondsOffset = GG_INT64_C(11644473600000000);
 
 // static
 Time Time::Now() {
-  if (initial_time == 0)
-    InitializeClock();
+  if (initial_time == 0) InitializeClock();
 
   // We implement time using the high-resolution timers so that we can get
   // timeouts which are smaller than 10-15ms.  If we just used
@@ -116,7 +115,7 @@ Time Time::Now() {
   //
   // To avoid any drift, we periodically resync the counters to the system
   // clock.
-  while(true) {
+  while (true) {
     TimeTicks ticks = TimeTicks::Now();
 
     // Calculate the time elapsed since we started our timer
@@ -137,17 +136,6 @@ Time Time::NowFromSystemTime() {
   // Force resync.
   InitializeClock();
   return Time(initial_time);
-}
-
-// static
-Time Time::FromFileTime(FILETIME ft) {
-  return Time(FileTimeToMicroseconds(ft));
-}
-
-FILETIME Time::ToFileTime() const {
-  FILETIME utc_ft;
-  MicrosecondsToFileTime(us_, &utc_ft);
-  return utc_ft;
 }
 
 // static
@@ -217,10 +205,7 @@ namespace {
 // We define a wrapper to adapt between the __stdcall and __cdecl call of the
 // mock function, and to avoid a static constructor.  Assigning an import to a
 // function pointer directly would require setup code to fetch from the IAT.
-DWORD timeGetTimeWrapper() {
-  return timeGetTime();
-}
-
+DWORD timeGetTimeWrapper() { return timeGetTime(); }
 
 DWORD (*tick_function)(void) = &timeGetTimeWrapper;
 
@@ -231,10 +216,7 @@ DWORD (*tick_function)(void) = &timeGetTimeWrapper;
 // 49 days.
 class NowSingleton {
  public:
-  NowSingleton()
-    : rollover_(TimeDelta::FromMilliseconds(0)),
-      last_seen_(0) {
-  }
+  NowSingleton() : rollover_(TimeDelta::FromMilliseconds(0)), last_seen_(0) {}
 
   TimeDelta Now() {
     AutoLock locked(lock_);
@@ -242,13 +224,19 @@ class NowSingleton {
     // we keep our last_seen_ stay correctly in sync.
     DWORD now = tick_function();
     if (now < last_seen_)
-      rollover_ += TimeDelta::FromMilliseconds(GG_LONGLONG(0x100000000));  // ~49.7 days.
+      rollover_ +=
+          TimeDelta::FromMilliseconds(GG_LONGLONG(0x100000000));  // ~49.7 days.
     last_seen_ = now;
     return TimeDelta::FromMilliseconds(now) + rollover_;
   }
 
+  static NowSingleton& instance() {
+    static NowSingleton now;
+    return now;
+  }
+
  private:
-  Lock lock_;  // To protected last_seen_ and rollover_.
+  Lock lock_;           // To protected last_seen_ and rollover_.
   TimeDelta rollover_;  // Accumulation of time lost due to rollover.
   DWORD last_seen_;  // The last timeGetTime value we saw, to detect rollover.
 
@@ -258,14 +246,6 @@ class NowSingleton {
 }  // namespace
 
 // static
-TimeTicks::TickFunctionType TimeTicks::SetMockTickFunction(
-    TickFunctionType ticker) {
-  TickFunctionType old = tick_function;
-  tick_function = ticker;
-  return old;
-}
-
-// static
 TimeTicks TimeTicks::Now() {
-  return TimeTicks() + Singleton<NowSingleton>::get()->Now();
+  return TimeTicks() + NowSingleton::instance().Now();
 }

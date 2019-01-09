@@ -70,7 +70,7 @@ MockFxaStorageManager.prototype = {
   deleteAccountData() {
     this.accountData = null;
     return Promise.resolve();
-  }
+  },
 };
 
 /**
@@ -132,8 +132,8 @@ var makeIdentityConfig = function(overrides) {
         key: "key",
         hashed_fxa_uid: "f".repeat(32), // used during telemetry validation
         // uid will be set to the username.
-      }
-    }
+      },
+    },
   };
 
   // Now handle any specified overrides.
@@ -186,7 +186,7 @@ var configureFxAccountIdentity = function(authService,
     __proto__: FxAccountsClient.prototype,
     accountStatus() {
       return Promise.resolve(true);
-    }
+    },
   };
   let mockFxAClient = new MockFxAccountsClient();
   fxa.internal._fxAccountsClient = mockFxAClient;
@@ -275,17 +275,20 @@ function encryptPayload(cleartext) {
 var sumHistogram = function(name, options = {}) {
   let histogram = options.key ? Services.telemetry.getKeyedHistogramById(name) :
                   Services.telemetry.getHistogramById(name);
-  let snapshot = histogram.snapshot(options.key);
+  let snapshot = histogram.snapshot();
   let sum = -Infinity;
   if (snapshot) {
-    sum = snapshot.sum;
+    if (options.key && snapshot[options.key]) {
+      sum = snapshot[options.key].sum;
+    } else {
+      sum = snapshot.sum;
+    }
   }
   histogram.clear();
   return sum;
 };
 
 var getLoginTelemetryScalar = function() {
-  let dataset = Services.telemetry.DATASET_RELEASE_CHANNEL_OPTOUT;
-  let snapshot = Services.telemetry.snapshotKeyedScalars(dataset, true);
+  let snapshot = Services.telemetry.getSnapshotForKeyedScalars("main", true);
   return snapshot.parent ? snapshot.parent["services.sync.sync_login_state_transitions"] : {};
 };

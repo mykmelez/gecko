@@ -15,6 +15,9 @@ distinct components that we test:
   - and the **harness** that backs the Marionette, or `Mn` job on
     try, tests is verified using separate mock-styled unit tests.
 
+All these tests can be run by using [mach].
+
+[mach]: https://developer.mozilla.org/en-US/docs/Mozilla/Developer_guide/mach
 
 xpcshell unit tests
 -------------------
@@ -37,7 +40,7 @@ These unit tests run as part of the `X` jobs on Treeherder.
 Marionette functional tests
 ---------------------------
 
-We also have a set of functional tests that make use of the Marionette
+We also have a set of [functional tests] that make use of the Marionette
 Python client.  These start a Firefox process and tests the Marionette
 protocol input and output, and will appear as `Mn` on Treeherder.
 The following command will run all tests locally:
@@ -48,9 +51,9 @@ But you can also run individual tests:
 
 	% ./mach marionette test testing/marionette/harness/marionette_harness/tests/unit/test_navigation.py
 
-In case you want to run the tests with another Firefox binary:
+In case you want to run the tests with another binary like [Firefox Nightly]:
 
-	% ./mach marionette test --binary /path/to/firefox TEST
+	% ./mach marionette test --binary /path/to/nightly/firefox TEST
 
 When working on Marionette it is often useful to surface the stdout
 from Gecko, which can be achived using the `--gecko-log` option.
@@ -65,21 +68,24 @@ and a helpful tip is to suppress the window can be to use Firefox’
 
     % ./mach marionette test -z TEST
 
-`-z` is an alias for `--headless` and equivalent to setting the
-`MOZ_HEADLESS` output variable.  In addition to `MOZ_HEADLESS` there
-is also `MOZ_HEADLESS_WIDTH` and `MOZ_HEADLESS_HEIGHT` for controlling
-the dimensions of the no-op virtual display.  This is similar to
-using xvfb(1) which you may know from the X windowing system, but
-has the additional benefit of also working on macOS and Windows.
+`-z` is an alias for the `--headless` flag and equivalent to setting
+the `MOZ_HEADLESS` output variable.  In addition to `MOZ_HEADLESS`
+there is also `MOZ_HEADLESS_WIDTH` and `MOZ_HEADLESS_HEIGHT` for
+controlling the dimensions of the no-op virtual display.  This is
+similar to using Xvfb(1) which you may know from the X windowing system,
+but has the additional benefit of also working on macOS and Windows.
+
+[functional tests]: PythonTests.html
+[Firefox Nightly]: https://nightly.mozilla.org/
 
 
 ### Android
 
 Prerequisites:
 
-*   You have [built Fennec](https://developer.mozilla.org/en-US/docs/Mozilla/Developer_guide/Build_Instructions/Simple_Firefox_for_Android_build) with 
+*   You have [built Fennec](https://developer.mozilla.org/en-US/docs/Mozilla/Developer_guide/Build_Instructions/Simple_Firefox_for_Android_build) with
     `ac_add_options --enable-marionette` in your mozconfig.
-*   You can run an Android [emulator](https://wiki.mozilla.org/Mobile/Fennec/Android/Testing#Running_tests_on_the_Android_emulator), 
+*   You can run an Android [emulator](https://wiki.mozilla.org/Mobile/Fennec/Android/Testing#Running_tests_on_the_Android_emulator),
     which means you have the AVD you need.
 
 When running tests on Fennec, you can have Marionette runner take care of
@@ -96,9 +102,9 @@ for additional options.
 Alternately, you can start an emulator yourself and have the Marionette runner
 start Fennec for you:
 
-    % ./mach marionette test --emulator --app='fennec' --address=localhost:2828 --disable-e10s
+    % ./mach marionette test --emulator --app='fennec' --address=127.0.0.1:2828 --disable-e10s
 
-To connect to an already-running Fennec in an already running emulator or on a device, you will need to enable Marionette manually by setting the browser preference 
+To connect to an already-running Fennec in an already running emulator or on a device, you will need to enable Marionette manually by setting the browser preference
 `marionette.enabled` set to true in the Fennec profile.
 
 Make sure port 2828 is forwarded:
@@ -107,14 +113,14 @@ Make sure port 2828 is forwarded:
 
 If Fennec is already started:
 
-    % ./mach marionette test --app='fennec' --address=localhost:2828 --disable-e10s
+    % ./mach marionette test --app='fennec' --address=127.0.0.1:2828 --disable-e10s
 
 If Fennec is not already started on the emulator/device, add the `--emulator`
 option. Marionette Test Runner will take care of forwarding the port and
 starting Fennec with the correct prefs. (You may need to run
 `adb forward --remove-all` to allow the runner to start.)
 
-    % ./mach marionette test --emulator --app='fennec' --address=localhost:2828 --disable-e10s
+    % ./mach marionette test --emulator --app='fennec' --address=127.0.0.1:2828 --disable-e10s
     --startup-timeout=300
 
 If you need to troubleshoot the Marionette connection, the most basic check is
@@ -122,7 +128,7 @@ to start Fennec, make sure the `marionette.enabled` browser preference is
 true and port 2828 is forwarded, then see if you get any response from
 Marionette when you connect manually:
 
-    % telnet localhost:2828
+    % telnet 127.0.0.1:2828
 
 You should see output like `{"applicationType":"gecko","marionetteProtocol":3}`
 
@@ -186,7 +192,7 @@ possibly to run the Marionette tests _without_ a local build and
 with a downloaded test archive from <Taskcluster.html>.
 
 If you want to run tests from a downloaded test archive, you will
-need to download the `target.common.tests.zip` artifact attached to
+need to download the `target.common.tests.tar.gz` artifact attached to
 Treeherder [build jobs] `B` for your system.  Extract the archive
 and set up the Python Marionette client and harness by executing
 the following command in a virtual environment:

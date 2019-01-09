@@ -18,7 +18,12 @@ macro_rules! define_matrix {
         $(#[$attr])*
         pub struct $name<T, $($phantom),+> {
             $(pub $field: T,)+
-            _unit: PhantomData<($($phantom),+)>
+
+            // Keep this (secretly) public for the few cases where we would like to
+            // create static constants which currently can't be initialized with a
+            // function.
+            #[doc(hidden)]
+            pub _unit: PhantomData<($($phantom),+)>
         }
 
         impl<T: Clone, $($phantom),+> Clone for $name<T, $($phantom),+> {
@@ -59,23 +64,45 @@ macro_rules! define_matrix {
             }
         }
 
-        impl<T, $($phantom),+> ::std::cmp::Eq for $name<T, $($phantom),+>
-            where T: ::std::cmp::Eq {}
+        impl<T, $($phantom),+> ::core::cmp::Eq for $name<T, $($phantom),+>
+            where T: ::core::cmp::Eq {}
 
-        impl<T, $($phantom),+> ::std::cmp::PartialEq for $name<T, $($phantom),+>
-            where T: ::std::cmp::PartialEq
+        impl<T, $($phantom),+> ::core::cmp::PartialEq for $name<T, $($phantom),+>
+            where T: ::core::cmp::PartialEq
         {
             fn eq(&self, other: &Self) -> bool {
                 true $(&& self.$field == other.$field)+
             }
         }
 
-        impl<T, $($phantom),+> ::std::hash::Hash for $name<T, $($phantom),+>
-            where T: ::std::hash::Hash
+        impl<T, $($phantom),+> ::core::hash::Hash for $name<T, $($phantom),+>
+            where T: ::core::hash::Hash
         {
-            fn hash<H: ::std::hash::Hasher>(&self, h: &mut H) {
+            fn hash<H: ::core::hash::Hasher>(&self, h: &mut H) {
                 $(self.$field.hash(h);)+
             }
         }
     )
+}
+
+macro_rules! mint_vec {
+    ($name:ident [ $($field:ident),* ] = $std_name:ident) => {
+        #[cfg(feature = "mint")]
+        impl<T, U> From<mint::$std_name<T>> for $name<T, U> {
+            fn from(v: mint::$std_name<T>) -> Self {
+                $name {
+                    $( $field: v.$field, )*
+                    _unit: PhantomData,
+                }
+            }
+        }
+        #[cfg(feature = "mint")]
+        impl<T, U> Into<mint::$std_name<T>> for $name<T, U> {
+            fn into(self) -> mint::$std_name<T> {
+                mint::$std_name {
+                    $( $field: self.$field, )*
+                }
+            }
+        }
+    }
 }

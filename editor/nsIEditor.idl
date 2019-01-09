@@ -57,7 +57,7 @@ interface nsIEditor  : nsISupports
                                 in AString sourceAttrValue,
                                 in boolean aSuppressTransaction);
   void removeAttributeOrEquivalent(in Element element,
-                                   in DOMString sourceAttrName,
+                                   in AString sourceAttrName,
                                    in boolean aSuppressTransaction);
 
   /** edit flags for this editor.  May be set at any time. */
@@ -216,16 +216,23 @@ interface nsIEditor  : nsISupports
     */
   void endTransaction();
 
-  boolean shouldTxnSetSelection();
-
-  /** Set the flag that prevents insertElementTxn from changing the selection
-    * @param   should  Set false to suppress changing the selection;
-    *                  i.e., before using InsertElement() to insert
-    *                  under <head> element
-    * WARNING: You must be very careful to reset back to PR_TRUE after
-    *          setting PR_FALSE, else selection/caret is trashed
-    *          for further editing.
-    */
+  /**
+   * While setting the flag with this method to false, CreateElementTransaction,
+   * DeleteRangeTransaction, DeleteTextTransaction, InsertNodeTransaction,
+   * InsertTextTransaction and SplitNodeTransaction won't change Selection
+   * after modifying the DOM tree.
+   * Note that calling this with false does not guarantee that Selection won't
+   * be changed because other transaction may ignore this flag, editor itself
+   * may change selection, and current selection may become invalid after
+   * changing the DOM tree, etc.
+   * After calling this method with true, the caller should guarantee that
+   * Selection should be positioned where user expects.
+   *
+   * @param should    false if you don't want above transactions to modify
+   *                  Selection automatically after modifying the DOM tree.
+   *                  Note that calling this with false does not guarantee
+   *                  that Selection is never changed.
+   */
   void setShouldTxnSetSelection(in boolean should);
 
   /* ------------ Inline Spell Checking methods -------------- */
@@ -463,20 +470,6 @@ interface nsIEditor  : nsISupports
 
   /** Remove a DocumentStateListener to the editors list of doc state listeners. */
   void removeDocumentStateListener(in nsIDocumentStateListener listener);
-
-
-  /* ------------ Debug methods -------------- */
-
-  /**
-   * And a debug method -- show us what the tree looks like right now
-   */
-  void dumpContentTree();
-
-  /** Dumps a text representation of the content tree to standard out */
-  void debugDumpContent() ;
-
-  /* Run unit tests. Noop in optimized builds */
-  void debugUnitTests(out long outNumTests, out long  outNumTestsFailed);
 
   /**
    * forceCompositionEnd() force the composition end

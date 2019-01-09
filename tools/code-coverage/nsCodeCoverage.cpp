@@ -13,38 +13,35 @@ using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::ipc;
 
-NS_IMPL_ISUPPORTS(nsCodeCoverage,
-                  nsICodeCoverage)
+NS_IMPL_ISUPPORTS(nsCodeCoverage, nsICodeCoverage)
 
-nsCodeCoverage::nsCodeCoverage()
-{
-}
+nsCodeCoverage::nsCodeCoverage() {}
 
-nsCodeCoverage::~nsCodeCoverage()
-{
-}
+nsCodeCoverage::~nsCodeCoverage() {}
 
-enum RequestType { Dump, Reset };
+enum RequestType { Flush };
 
 class ProcessCount final {
   NS_INLINE_DECL_REFCOUNTING(ProcessCount);
 
-public:
+ public:
   explicit ProcessCount(uint32_t c) : mCount(c) {}
   operator uint32_t() const { return mCount; }
-  ProcessCount& operator--() { mCount--; return *this; }
+  ProcessCount& operator--() {
+    mCount--;
+    return *this;
+  }
 
-private:
+ private:
   ~ProcessCount() {}
   uint32_t mCount;
 };
 
-nsresult Request(JSContext* cx, Promise** aPromise, RequestType requestType)
-{
+nsresult Request(JSContext* cx, Promise** aPromise, RequestType requestType) {
   MOZ_ASSERT(XRE_IsParentProcess());
   MOZ_ASSERT(NS_IsMainThread());
 
-  nsIGlobalObject* global = xpc::NativeGlobal(JS::CurrentGlobalOrNull(cx));
+  nsIGlobalObject* global = xpc::CurrentNativeGlobal(cx);
   if (NS_WARN_IF(!global)) {
     return NS_ERROR_FAILURE;
   }
@@ -61,10 +58,8 @@ nsresult Request(JSContext* cx, Promise** aPromise, RequestType requestType)
     ++processCount;
   }
 
-  if (requestType == RequestType::Dump) {
-    CodeCoverageHandler::DumpCounters();
-  } else if (requestType == RequestType::Reset) {
-    CodeCoverageHandler::ResetCounters();
+  if (requestType == RequestType::Flush) {
+    CodeCoverageHandler::FlushCounters();
   }
 
   if (processCount == 0) {
@@ -78,15 +73,13 @@ nsresult Request(JSContext* cx, Promise** aPromise, RequestType requestType)
       }
     };
 
-    auto reject = [promise](ResponseRejectReason aReason) {
+    auto reject = [promise](ResponseRejectReason&& aReason) {
       promise->MaybeReject(NS_ERROR_FAILURE);
     };
 
     for (auto* cp : ContentParent::AllProcesses(ContentParent::eLive)) {
-      if (requestType == RequestType::Dump) {
-        cp->SendDumpCodeCoverageCounters(resolve, reject);
-      } else if (requestType == RequestType::Reset) {
-        cp->SendResetCodeCoverageCounters(resolve, reject);
+      if (requestType == RequestType::Flush) {
+        cp->SendFlushCodeCoverageCounters(resolve, reject);
       }
     }
   }
@@ -95,12 +88,6 @@ nsresult Request(JSContext* cx, Promise** aPromise, RequestType requestType)
   return NS_OK;
 }
 
-NS_IMETHODIMP nsCodeCoverage::DumpCounters(JSContext *cx, Promise** aPromise)
-{
-  return Request(cx, aPromise, RequestType::Dump);
-}
-
-NS_IMETHODIMP nsCodeCoverage::ResetCounters(JSContext *cx, Promise** aPromise)
-{
-  return Request(cx, aPromise, RequestType::Reset);
+NS_IMETHODIMP nsCodeCoverage::FlushCounters(JSContext* cx, Promise** aPromise) {
+  return Request(cx, aPromise, RequestType::Flush);
 }

@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+import json
 import pipes
 import re
 
@@ -56,16 +57,95 @@ class TestResult:
 
     """Classified result from a test run."""
 
-    def __init__(self, test, result, results):
+    def __init__(self, test, result, results, wpt_results=None):
         self.test = test
         self.result = result
         self.results = results
+        self.wpt_results = wpt_results  # Only used for wpt tests.
+
+    @classmethod
+    def from_wpt_output(cls, output):
+        """Parse the output from a web-platform test that uses testharness.js.
+        (The output is written to stdout in js/src/tests/testharnessreport.js.)
+        """
+        from wptrunner.executors.base import testharness_result_converter
+
+        rc = output.rc
+        stdout = output.out.split("\n")
+        if rc != 0:
+            if rc == 3:
+                harness_status = "ERROR"
+                harness_message = "Exit code reported exception"
+            else:
+                harness_status = "CRASH"
+                harness_message = "Exit code reported crash"
+            tests = []
+        else:
+            for (idx, line) in enumerate(stdout):
+                if line.startswith("WPT OUTPUT: "):
+                    msg = line[len("WPT OUTPUT: "):]
+                    data = [output.test.wpt.url] + json.loads(msg)
+                    harness_status_obj, tests = testharness_result_converter(output.test.wpt, data)
+                    harness_status = harness_status_obj.status
+                    harness_message = "Reported by harness: %s" % (harness_status_obj.message,)
+                    del stdout[idx]
+                    break
+            else:
+                harness_status = "ERROR"
+                harness_message = "No harness output found"
+                tests = []
+        stdout.append("Harness status: %s (%s)" % (harness_status, harness_message))
+
+        result = cls.PASS
+        results = []
+        subtests = []
+        expected_harness_status = output.test.wpt.expected()
+        if harness_status != expected_harness_status:
+            if harness_status == "CRASH":
+                result = cls.CRASH
+            else:
+                result = cls.FAIL
+        else:
+            for test in tests:
+                test_output = "Subtest \"%s\": " % (test.name,)
+                expected = output.test.wpt.expected(test.name)
+                if test.status == expected:
+                    test_result = (cls.PASS, "")
+                    test_output += "as expected: %s" % (test.status,)
+                else:
+                    test_result = (cls.FAIL, test.message)
+                    result = cls.FAIL
+                    test_output += "expected %s, found %s" % (expected, test.status)
+                    if test.message:
+                        test_output += " (with message: \"%s\")" % (test.message,)
+                subtests.append({
+                    "test": output.test.wpt.id,
+                    "subtest": test.name,
+                    "status": test.status,
+                    "expected": expected,
+                })
+                results.append(test_result)
+                stdout.append(test_output)
+
+        output.out = "\n".join(stdout) + "\n"
+
+        wpt_results = {
+            "name": output.test.wpt.id,
+            "status": harness_status,
+            "expected": expected_harness_status,
+            "subtests": subtests,
+        }
+
+        return cls(output.test, result, results, wpt_results)
 
     @classmethod
     def from_output(cls, output):
         test = output.test
         result = None          # str:      overall result, see class-level variables
         results = []           # (str,str) list: subtest results (pass/fail, message)
+
+        if test.wpt:
+            return cls.from_wpt_output(output)
 
         out, err, rc = output.out, output.err, output.rc
 
@@ -125,6 +205,15 @@ class ResultsSink:
             self.slog = TestLogger(testsuite)
             self.slog.suite_start()
 
+        self.wptreport = None
+        if self.options.wptreport:
+            try:
+                from .wptreport import WptreportHandler
+                self.wptreport = WptreportHandler(self.options.wptreport)
+                self.wptreport.suite_start()
+            except ImportError:
+                pass
+
         self.groups = {}
         self.output_dict = {}
         self.counts = {'PASS': 0, 'FAIL': 0, 'TIMEOUT': 0, 'SKIP': 0}
@@ -156,6 +245,10 @@ class ResultsSink:
             self.n += 1
         else:
             result = TestResult.from_output(output)
+
+            if self.wptreport is not None and result.wpt_results:
+                self.wptreport.test(result.wpt_results, output.dt)
+
             tup = (result.result, result.test.expect, result.test.random)
             dev_label = self.LABELS[tup][1]
 
@@ -242,6 +335,9 @@ class ResultsSink:
             self.slog.suite_end()
         else:
             self.list(completed)
+
+        if self.wptreport is not None:
+            self.wptreport.suite_end()
 
     # Conceptually, this maps (test result x test expection) to text labels.
     #      key   is (result, expect, random)

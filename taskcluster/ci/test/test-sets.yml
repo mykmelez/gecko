@@ -38,8 +38,6 @@ common-tests:
     - reftest
     - reftest-no-accel
     - telemetry-tests-client
-    - test-coverage
-    - test-coverage-wpt
     - test-verify
     - test-verify-gpu
     - test-verify-wpt
@@ -68,31 +66,101 @@ talos:
     - talos-g4
     - talos-g5
     - talos-other
+    - talos-sessionrestore-many-windows
     - talos-svgr
     - talos-tp5o
     - talos-perf-reftest
     - talos-perf-reftest-singletons
-    - talos-tp6
     - talos-tp6-stylo-threads
     - talos-tps
-    - talos-speedometer
-    - talos-motionmark
-    - talos-h1
-    - talos-h2
+    # - talos-h1 Bug 1487031 - Disabled for not finding actionable regressions
+    # - talos-h2 Bug 1487031 - Disabled for not finding actionable regressions
 
-raptor:
-    - raptor-firefox-tp6
-    - raptor-firefox-speedometer
-    - raptor-firefox-stylebench
-    - raptor-firefox-motionmark-htmlsuite
-    - raptor-firefox-motionmark-animometer
-    - raptor-chrome-tp6
-    - raptor-chrome-speedometer
-    - raptor-chrome-stylebench
+talos-ux:
+    - talos-g4
+
+raptor-firefox:
+    - raptor-tp6-1-firefox
+    - raptor-tp6-2-firefox
+    - raptor-tp6-3-firefox
+    - raptor-tp6-4-firefox
+    - raptor-tp6-5-firefox
+    - raptor-tp6-6-firefox
+    - raptor-tp6-7-firefox
+    - raptor-tp6-8-firefox
+    - raptor-speedometer-firefox
+    - raptor-stylebench-firefox
+    - raptor-motionmark-htmlsuite-firefox
+    - raptor-motionmark-animometer-firefox
+    - raptor-webaudio-firefox
+    - raptor-sunspider-firefox
+    - raptor-wasm-godot-firefox
+
+raptor-profiling:
+    - raptor-tp6-1-firefox-profiling
+    - raptor-tp6-2-firefox-profiling
+    - raptor-tp6-3-firefox-profiling
+    - raptor-tp6-4-firefox-profiling
+    - raptor-tp6-5-firefox-profiling
+    - raptor-tp6-6-firefox-profiling
+    - raptor-speedometer-firefox-profiling
+    - raptor-stylebench-firefox-profiling
+    - raptor-motionmark-htmlsuite-firefox-profiling
+    - raptor-motionmark-animometer-firefox-profiling
+    - raptor-webaudio-firefox-profiling
+    - raptor-sunspider-firefox-profiling
+    - raptor-wasm-godot-firefox-profiling
+
+raptor-chrome:
+    - raptor-tp6-1-chrome
+    - raptor-tp6-2-chrome
+    - raptor-tp6-3-chrome
+    - raptor-tp6-4-chrome
+    - raptor-tp6-5-chrome
+    - raptor-tp6-6-chrome
+    - raptor-tp6-7-chrome
+    - raptor-tp6-8-chrome
+    - raptor-speedometer-chrome
+    - raptor-stylebench-chrome
+    - raptor-motionmark-htmlsuite-chrome
+    - raptor-motionmark-animometer-chrome
+    - raptor-webaudio-chrome
+    - raptor-sunspider-chrome
+    - raptor-wasm-godot-chrome
+
+# Fetch tasks are only supported on Linux for now,
+# so these need to be separate sets.
+raptor-fetch-firefox:
+    - raptor-unity-webgl-firefox
+    - raptor-wasm-misc-firefox
+    - raptor-wasm-misc-baseline-firefox
+    - raptor-wasm-misc-ion-firefox
+    - raptor-wasm-godot-baseline-firefox
+    - raptor-wasm-godot-ion-firefox
+    - raptor-assorted-dom-firefox
+
+raptor-fetch-profiling:
+    - raptor-unity-webgl-firefox-profiling
+    - raptor-wasm-misc-firefox-profiling
+    - raptor-wasm-misc-baseline-firefox-profiling
+    - raptor-wasm-misc-ion-firefox-profiling
+    - raptor-wasm-godot-baseline-firefox-profiling
+    - raptor-wasm-godot-ion-firefox-profiling
+    - raptor-assorted-dom-firefox-profiling
+
+raptor-fetch-geckoview:
+    - raptor-unity-webgl-geckoview
+
+raptor-fetch-chrome:
+    - raptor-unity-webgl-chrome
+    - raptor-wasm-misc-chrome
+    - raptor-assorted-dom-chrome
 
 awsy:
     - awsy
     - awsy-base
+    - awsy-dmd
+    - awsy-base-dmd
 
 awsy-stylo-sequential:
     - awsy-stylo-sequential
@@ -111,27 +179,9 @@ linux-qr-tests:
     - mochitest-gpu
     - mochitest-media
     - mochitest-webgl1-core
+    - mochitest-webgl1-ext
     - reftest
     - xpcshell
-
-linux-talos-profiling:
-    - talos-bcv-profiling
-    - talos-chrome-profiling
-    - talos-damp-profiling
-    - talos-dromaeojs-profiling
-    - talos-g1-profiling
-    - talos-g3-profiling
-    - talos-g4-profiling
-    - talos-g5-profiling
-    - talos-other-profiling
-    - talos-perf-reftest-profiling
-    - talos-perf-reftest-singletons-profiling
-    - talos-speedometer-profiling
-    - talos-motionmark-profiling
-    - talos-svgr-profiling
-    - talos-tp5o-profiling
-    - talos-tp6-profiling
-    # - talos-tps-profiling # Bug 1453007 - times out
 
 linux-talos-flex:
     - talos-flex
@@ -142,13 +192,15 @@ windows-qr-tests:
     - mochitest-gpu
     - mochitest-media
     - mochitest-webgl1-core
+    - mochitest-webgl1-ext
+    - mochitest-webgl2-core
+    - mochitest-webgl2-ext
     - reftest
+    - web-platform-tests-reftests
 
-jsdcov-code-coverage-tests:
-    - mochitest
-    - mochitest-browser-chrome
-    - mochitest-devtools-chrome
-    - xpcshell
+ccov-code-coverage-tests:
+    - test-coverage
+    - test-coverage-wpt
 
 windows-reftest-gpu:
     - reftest-gpu
@@ -177,13 +229,9 @@ windows-tests:
     - mochitest-webgl2-ext
     - reftest
     - reftest-no-accel
-    - test-coverage
-    - test-coverage-wpt
     - test-verify
     - test-verify-gpu
     - test-verify-wpt
-    - web-platform-tests
-    - web-platform-tests-reftests
     - xpcshell
 
 windows-talos:
@@ -195,35 +243,17 @@ windows-talos:
     - talos-g4
     - talos-g5
     - talos-other
+    - talos-sessionrestore-many-windows
     - talos-perf-reftest
     - talos-perf-reftest-singletons
     - talos-svgr
     - talos-tp5o
     - talos-xperf
-    - talos-speedometer
-    - talos-tp6
     - talos-tps
-    - talos-motionmark
-    - talos-h1
+    # - talos-h1 Bug 1487031 - Disabled for not finding actionable regressions
 
-windows-talos-profiling:
-    - talos-bcv-profiling
-    - talos-chrome-profiling
-    - talos-damp-profiling
-    - talos-dromaeojs-profiling
-    - talos-g1-profiling
-    - talos-g3-profiling
-    - talos-g4-profiling
-    - talos-g5-profiling
-    - talos-motionmark-profiling
-    - talos-other-profiling
-    - talos-perf-reftest-profiling
-    - talos-perf-reftest-singletons-profiling
-    - talos-speedometer-profiling
-    - talos-svgr-profiling
-    - talos-tp5o-profiling
-    - talos-tp6-profiling
-    - talos-tps-profiling
+marionette-gpu-tests:
+    - marionette-gpu
 
 macosx64-tests:
     - cppunit
@@ -253,6 +283,7 @@ macosx64-tests:
     - test-verify-wpt
     - web-platform-tests
     - web-platform-tests-reftests
+    - web-platform-tests-wdspec
     - xpcshell
 
 macosx64-talos:
@@ -264,35 +295,14 @@ macosx64-talos:
     - talos-g4
     - talos-g5
     - talos-other
+    - talos-sessionrestore-many-windows
     - talos-svgr
     - talos-tp5o
     - talos-perf-reftest
     - talos-perf-reftest-singletons
-    - talos-tp6
     - talos-tp6-stylo-threads
     # - talos-tps # Bug 1453007 times out
-    - talos-speedometer
-    - talos-motionmark
     # - talos-h1 # too long to unpack profile- Bug 1442893
-
-macosx64-talos-profiling:
-    - talos-bcv-profiling
-    - talos-chrome-profiling
-    - talos-damp-profiling
-    - talos-dromaeojs-profiling
-    - talos-g1-profiling
-    - talos-g3-profiling
-    - talos-g4-profiling
-    - talos-g5-profiling
-    - talos-other-profiling
-    - talos-perf-reftest-profiling
-    - talos-perf-reftest-singletons-profiling
-    - talos-speedometer-profiling
-    - talos-motionmark-profiling
-    - talos-svgr-profiling
-    - talos-tp5o-profiling
-    - talos-tp6-profiling
-    # - talos-tps-profiling # Bug 1453007 times out
 
 macosx64-qr-tests:
     - crashtest
@@ -356,27 +366,25 @@ android-opt-tests:
     # Robocop tests often fail on Debug builds
     - robocop
 
-android-gradle-tests:
-    # geckoview_example is only built in gradle builds
-    - geckoview
-
-android-x86-tests:
-    - mochitest-chrome
-    - xpcshell
-    - geckoview
-
 android-x86-kvm-tests:
     - crashtest
     - geckoview-junit
     - jsreftest
-    - mochitest
+    # - mochitest
     # - mochitest-chrome
     - mochitest-clipboard
     - mochitest-gpu
-    - mochitest-media
+    # - mochitest-media
     # - mochitest-webgl1-core
-    - reftest
-    - test-verify
+    # - reftest
+    # - test-verify
+    - web-platform-tests
+    - web-platform-tests-reftests
+    # - web-platform-tests-wdspec
+
+android-ccov-tests:
+    - geckoview-junit
+    - robocop
 
 devtools-tests:
     - mochitest-devtools-chrome
@@ -385,6 +393,7 @@ mochitest-headless:
     - mochitest-plain-headless
 
 android-hw-arm7-opt-unittests:
+    - jittest
     - mochitest-media
 
 android-hw-arm7-debug-unittests:
@@ -392,3 +401,22 @@ android-hw-arm7-debug-unittests:
 
 android-hw-aarch64-opt-unittests:
     - jittest
+
+# Coming soonish!
+android-hw-arm7-raptor:
+    - raptor-speedometer-geckoview
+
+android-hw-aarch64-raptor:
+    - raptor-speedometer-geckoview
+
+android-hw-arm7-raptor-power:
+    - raptor-speedometer-geckoview-power
+
+android-hw-aarch64-raptor-power:
+    - raptor-speedometer-geckoview-power
+
+android-hw-arm7-raptor-nightly:
+    - raptor-speedometer-fennec
+
+android-hw-aarch64-raptor-nightly:
+    - raptor-speedometer-fennec

@@ -2,7 +2,6 @@ ChromeUtils.import("resource://gre/modules/Preferences.jsm", this);
 ChromeUtils.import("resource://testing-common/AddonTestUtils.jsm", this);
 ChromeUtils.import("resource://testing-common/TestUtils.jsm", this);
 ChromeUtils.import("resource://normandy-content/AboutPages.jsm", this);
-ChromeUtils.import("resource://normandy/lib/Addons.jsm", this);
 ChromeUtils.import("resource://normandy/lib/SandboxManager.jsm", this);
 ChromeUtils.import("resource://normandy/lib/NormandyDriver.jsm", this);
 ChromeUtils.import("resource://normandy/lib/NormandyApi.jsm", this);
@@ -71,21 +70,30 @@ this.withWebExtension = function(manifestOverrides = {}) {
   };
 };
 
-this.withInstalledWebExtension = function(manifestOverrides = {}) {
+this.withCorruptedWebExtension = function() {
+  // This should be an invalid manifest version, so that installing this add-on fails.
+  return this.withWebExtension({ manifest_version: -1 });
+};
+
+this.withInstalledWebExtension = function(manifestOverrides = {}, expectUninstall = false) {
   return function wrapper(testFunction) {
     return decorate(
       withWebExtension(manifestOverrides),
       async function wrappedTestFunction(...args) {
         const [id, file] = args[args.length - 1];
         const startupPromise = AddonTestUtils.promiseWebExtensionStartup(id);
-        const url = Services.io.newFileURI(file).spec;
-        await Addons.install(url);
+        const addonInstall = await AddonManager.getInstallForFile(file, "application/x-xpinstall");
+        await addonInstall.install();
         await startupPromise;
+
         try {
           await testFunction(...args);
         } finally {
-          if (await Addons.get(id)) {
-            await Addons.uninstall(id);
+          const addonToUninstall = await AddonManager.getAddonByID(id);
+          if (addonToUninstall) {
+            await addonToUninstall.uninstall();
+          } else {
+            ok(expectUninstall, "Add-on should not be unexpectedly uninstalled during test");
           }
         }
       }
@@ -231,7 +239,7 @@ this.withPrefEnv = function(inPrefs) {
 
 /**
  * Combine a list of functions right to left. The rightmost function is passed
- * to the preceeding function as the argument; the result of this is passed to
+ * to the preceding function as the argument; the result of this is passed to
  * the next function until all are exhausted. For example, this:
  *
  * decorate(func1, func2, func3);
@@ -243,10 +251,12 @@ this.withPrefEnv = function(inPrefs) {
 this.decorate = function(...args) {
   const funcs = Array.from(args);
   let decorated = funcs.pop();
+  const origName = decorated.name;
   funcs.reverse();
   for (const func of funcs) {
     decorated = func(decorated);
   }
+  Object.defineProperty(decorated, "name", {value: origName});
   return decorated;
 };
 
@@ -272,10 +282,10 @@ this.decorate_task = function(...args) {
   return add_task(decorate(...args));
 };
 
-let _studyFactoryId = 0;
-this.studyFactory = function(attrs) {
+let _addonStudyFactoryId = 0;
+this.addonStudyFactory = function(attrs) {
   return Object.assign({
-    recipeId: _studyFactoryId++,
+    recipeId: _addonStudyFactoryId++,
     name: "Test study",
     description: "fake",
     active: true,
@@ -283,6 +293,22 @@ this.studyFactory = function(attrs) {
     addonUrl: "http://test/addon.xpi",
     addonVersion: "1.0.0",
     studyStartDate: new Date(),
+  }, attrs);
+};
+
+let _preferenceStudyFactoryId = 0;
+this.preferenceStudyFactory = function(attrs) {
+  return Object.assign({
+    name: `Test study ${_preferenceStudyFactoryId++}`,
+    branch: "control",
+    expired: false,
+    lastSeen: new Date().toJSON(),
+    preferenceName: "test.study",
+    preferenceValue: false,
+    preferenceType: "boolean",
+    previousPreferenceValue: undefined,
+    preferenceBranchType: "default",
+    experimentType: "exp",
   }, attrs);
 };
 
@@ -354,3 +380,23 @@ this.withSendEventStub = function(testFunction) {
     }
   };
 };
+
+let _recipeId = 1;
+this.recipeFactory = function(overrides = {}) {
+  return Object.assign({
+    id: _recipeId++,
+    arguments: overrides.arguments || {},
+  }, overrides);
+};
+
+function mockLogger() {
+  const logStub = sinon.stub();
+  logStub.fatal = sinon.stub();
+  logStub.error = sinon.stub();
+  logStub.warn = sinon.stub();
+  logStub.info = sinon.stub();
+  logStub.config = sinon.stub();
+  logStub.debug = sinon.stub();
+  logStub.trace = sinon.stub();
+  return logStub;
+}

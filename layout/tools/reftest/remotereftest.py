@@ -13,7 +13,7 @@ import traceback
 import urllib2
 from contextlib import closing
 
-from mozdevice import ADBAndroid
+from mozdevice import ADBDevice, ADBTimeoutError
 import mozinfo
 from automation import Automation
 from remoteautomation import RemoteAutomation, fennecLogcatFilters
@@ -149,11 +149,10 @@ class RemoteReftest(RefTest):
         if options.log_tbpl_level == 'debug' or options.log_mach_level == 'debug':
             verbose = True
             print "set verbose!"
-        self.device = ADBAndroid(adb=options.adb_path or 'adb',
-                                 device=options.deviceSerial,
-                                 test_root=options.remoteTestRoot,
-                                 verbose=verbose)
-
+        self.device = ADBDevice(adb=options.adb_path or 'adb',
+                                device=options.deviceSerial,
+                                test_root=options.remoteTestRoot,
+                                verbose=verbose)
         if options.remoteTestRoot is None:
             options.remoteTestRoot = posixpath.join(self.device.test_root, "reftest")
         options.remoteProfile = posixpath.join(options.remoteTestRoot, "profile")
@@ -177,9 +176,12 @@ class RemoteReftest(RefTest):
         # RemoteAutomation.py's 'messageLogger' is also used by mochitest. Mimic a mochitest
         # MessageLogger object to re-use this code path.
         self.outputHandler.write = self.outputHandler.__call__
-        self.automation = RemoteAutomation(self.device, options.app, self.remoteProfile,
-                                           options.remoteLogFile, processArgs=None)
-        self.automation._processArgs['messageLogger'] = self.outputHandler
+        args = {'messageLogger': self.outputHandler}
+        self.automation = RemoteAutomation(self.device,
+                                           appName=options.app,
+                                           remoteProfile=self.remoteProfile,
+                                           remoteLog=options.remoteLogFile,
+                                           processArgs=args)
 
         self.environment = self.automation.environment
         if self.automation.IS_DEBUG_BUILD:
@@ -322,23 +324,14 @@ class RemoteReftest(RefTest):
 
         return profile
 
-    def copyExtraFilesToProfile(self, options, profile):
-        profileDir = profile.profile
-        RefTest.copyExtraFilesToProfile(self, options, profile)
-        if len(os.listdir(profileDir)) > 0:
-            try:
-                self.device.push(profileDir, options.remoteProfile)
-                self.device.chmod(options.remoteProfile, recursive=True, root=True)
-            except Exception:
-                print "Automation Error: Failed to copy extra files to device"
-                raise
-
     def printDeviceInfo(self, printLogcat=False):
         try:
             if printLogcat:
                 logcat = self.device.get_logcat(filter_out_regexps=fennecLogcatFilters)
                 for l in logcat:
-                    print "%s\n" % l.decode('utf-8', 'replace')
+                    ul = l.decode('utf-8', errors='replace')
+                    sl = ul.encode('iso8859-1', errors='replace')
+                    print "%s\n" % sl
             print "Device info:"
             devinfo = self.device.get_info()
             for category in devinfo:
@@ -349,6 +342,8 @@ class RemoteReftest(RefTest):
                 else:
                     print "  %s: %s" % (category, devinfo[category])
             print "Test root: %s" % self.device.test_root
+        except ADBTimeoutError:
+            raise
         except Exception as e:
             print "WARNING: Error getting device information: %s" % str(e)
 
@@ -385,7 +380,8 @@ class RemoteReftest(RefTest):
                                                            xrePath=options.xrePath,
                                                            debuggerInfo=debuggerInfo,
                                                            symbolsPath=symbolsPath,
-                                                           timeout=timeout)
+                                                           timeout=timeout,
+                                                           e10s=options.e10s)
 
         self.cleanup(profile.profile)
         return status

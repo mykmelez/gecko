@@ -7,6 +7,11 @@ flake8:
         - build/
         - config/
         - configure.py
+        - gfx/gl/
+        - gfx/layers/
+        - intl/
+        - ipc/pull-chromium.py
+        - ipc/ipdl/
         - js/
         - memory/
         - mobile/
@@ -17,12 +22,17 @@ flake8:
         - python/mozboot
         - python/mozbuild/mozpack/path.py
         - python/mozlint
+        - python/mozrelease
         - python/mozterm
         - python/mozversioncontrol
+        - python/safety
         - security/
         - security/manager
         - taskcluster
+        - testing/awsy
         - testing/firefox-ui
+        - testing/geckodriver
+        - testing/gtest
         - testing/mach_commands.py
         - testing/marionette/client
         - testing/marionette/harness
@@ -31,11 +41,11 @@ flake8:
         - testing/mozbase
         - testing/mozharness/configs
         - testing/mozharness/mozfile
-        - testing/mozharness/mozharness/mozilla/l10n/locales.py
-        - testing/mozharness/mozharness/mozilla/mar.py
-        - testing/mozharness/mozharness/mozilla/testing/
+        - testing/mozharness/mozharness
+        - testing/mozharness/mozharness/mozilla/tooltool.py
         - testing/mozharness/mozinfo
         - testing/mozharness/scripts
+        - testing/mozharness/test
         - testing/raptor
         - testing/remotecppunittests.py
         - testing/runcppunittests.py

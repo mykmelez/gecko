@@ -18,6 +18,7 @@ import tempfile
 import time
 import requests
 import sh
+from distutils.util import strtobool
 
 import redo
 from scriptworker.utils import retry_async
@@ -34,20 +35,33 @@ log = logging.getLogger(__name__)
 ddstats = ThreadStats(namespace='releng.releases.partials')
 
 
-ALLOWED_URL_PREFIXES = [
+ROOT_URL = os.environ['TASKCLUSTER_ROOT_URL']
+QUEUE_PREFIX = ("https://queue.taskcluster.net/"
+                if ROOT_URL == 'https://taskcluster.net'
+                else ROOT_URL + '/api/queue/')
+ALLOWED_URL_PREFIXES = (
     "http://download.cdn.mozilla.net/pub/mozilla.org/firefox/nightly/",
     "http://download.cdn.mozilla.net/pub/firefox/nightly/",
     "https://mozilla-nightly-updates.s3.amazonaws.com",
-    "https://queue.taskcluster.net/",
     "http://ftp.mozilla.org/",
     "http://download.mozilla.org/",
     "https://archive.mozilla.org/",
     "http://archive.mozilla.org/",
-    "https://queue.taskcluster.net/v1/task/",
-]
+    QUEUE_PREFIX,
+)
+STAGING_URL_PREFIXES = (
+    "http://ftp.stage.mozaws.net/",
+    "https://ftp.stage.mozaws.net/",
+)
 
 DEFAULT_FILENAME_TEMPLATE = "{appName}-{branch}-{version}-{platform}-" \
                             "{locale}-{from_buildid}-{to_buildid}.partial.mar"
+
+BCJ_OPTIONS = {
+    'x86': ['--x86'],
+    'x86_64': ['--x86'],
+    'aarch64': [],
+}
 
 
 def write_dogrc(api_key):
@@ -132,10 +146,6 @@ async def download(url, dest, mode=None):  # noqa: E999
                         log_interval = chunk_size * 1024
 
             log.debug('Downloaded %s bytes', bytes_downloaded)
-            if 'content-length' in resp.headers:
-                log.debug('Content-Length: %s bytes', resp.headers['content-length'])
-                if bytes_downloaded != int(resp.headers['content-length']):
-                    raise IOError('Unexpected number of bytes downloaded')
             if mode:
                 log.debug("chmod %o %s", mode, dest)
                 os.chmod(dest, mode)
@@ -229,7 +239,7 @@ def get_hash(path, hash_type="sha512"):
 
 class WorkEnv(object):
 
-    def __init__(self, mar=None, mbsdiff=None):
+    def __init__(self, allowed_url_prefixes, mar=None, mbsdiff=None, arch=None):
         self.workdir = tempfile.mkdtemp()
         self.paths = {
             'unwrap_full_update.pl': os.path.join(self.workdir, 'unwrap_full_update.pl'),
@@ -244,10 +254,12 @@ class WorkEnv(object):
             'mbsdiff': 'https://ftp.mozilla.org/pub/mozilla.org/firefox/nightly/'
             'latest-mozilla-central/mar-tools/linux64/mbsdiff'
         }
+        self.allowed_url_prefixes = allowed_url_prefixes
         if mar:
             self.urls['mar'] = mar
         if mbsdiff:
             self.urls['mbsdiff'] = mbsdiff
+        self.arch = arch
 
     async def setup(self, mar=None, mbsdiff=None):
         for filename, url in self.urls.items():
@@ -272,20 +284,22 @@ class WorkEnv(object):
         my_env['LC_ALL'] = 'C'
         my_env['MAR'] = self.paths['mar']
         my_env['MBSDIFF'] = self.paths['mbsdiff']
+        if self.arch:
+            my_env['BCJ_OPTIONS'] = ' '.join(BCJ_OPTIONS[self.arch])
         return my_env
 
 
-def verify_allowed_url(mar):
-    if not any(mar.startswith(prefix) for prefix in ALLOWED_URL_PREFIXES):
+def verify_allowed_url(mar, allowed_url_prefixes):
+    if not any(mar.startswith(prefix) for prefix in allowed_url_prefixes):
         raise ValueError("{mar} is not in allowed URL prefixes: {p}".format(
-            mar=mar, p=ALLOWED_URL_PREFIXES
+            mar=mar, p=allowed_url_prefixes
         ))
 
 
 async def manage_partial(partial_def, work_env, filename_template, artifacts_dir, signing_certs):
     """Manage the creation of partial mars based on payload."""
     for mar in (partial_def["from_mar"], partial_def["to_mar"]):
-        verify_allowed_url(mar)
+        verify_allowed_url(mar, work_env.allowed_url_prefixes)
 
     complete_mars = {}
     use_old_format = False
@@ -319,12 +333,6 @@ async def manage_partial(partial_def, work_env, filename_template, artifacts_dir
                 use_old_format = True
                 log.info("Forcing BZ2 compression for %s", f)
 
-        log.info("AV-scanning %s ...", unpack_dir)
-        metric_tags = [
-            "platform:{}".format(partial_def['platform']),
-        ]
-        with ddstats.timer('mar.clamscan.time', tags=metric_tags):
-            await run_command("clamscan -r {}".format(unpack_dir), label='clamscan')
         log.info("Done.")
 
     to_path = os.path.join(work_env.workdir, "to")
@@ -407,12 +415,18 @@ async def manage_partial(partial_def, work_env, filename_template, artifacts_dir
 async def async_main(args, signing_certs):
     tasks = []
 
+    allowed_url_prefixes = list(ALLOWED_URL_PREFIXES)
+    if args.allow_staging_prefixes:
+        allowed_url_prefixes += STAGING_URL_PREFIXES
+
     task = json.load(args.task_definition)
     # TODO: verify task["extra"]["funsize"]["partials"] with jsonschema
     for definition in task["extra"]["funsize"]["partials"]:
         workenv = WorkEnv(
+            allowed_url_prefixes=allowed_url_prefixes,
             mar=definition.get('mar_binary'),
-            mbsdiff=definition.get('mbsdiff_binary')
+            mbsdiff=definition.get('mbsdiff_binary'),
+            arch=args.arch,
         )
         await workenv.setup()
         tasks.append(asyncio.ensure_future(retry_async(
@@ -442,13 +456,19 @@ def main():
     parser.add_argument("--sha384-signing-cert", required=True)
     parser.add_argument("--task-definition", required=True,
                         type=argparse.FileType('r'))
+    parser.add_argument("--allow-staging-prefixes",
+                        action="store_true",
+                        default=strtobool(
+                            os.environ.get('FUNSIZE_ALLOW_STAGING_PREFIXES', "false")),
+                        help="Allow files from staging buckets.")
     parser.add_argument("--filename-template",
                         default=DEFAULT_FILENAME_TEMPLATE)
-    parser.add_argument("--no-freshclam", action="store_true", default=False,
-                        help="Do not refresh ClamAV DB")
     parser.add_argument("-q", "--quiet", dest="log_level",
                         action="store_const", const=logging.WARNING,
                         default=logging.DEBUG)
+    parser.add_argument('--arch', type=str, required=True,
+                        choices=BCJ_OPTIONS.keys(),
+                        help='The archtecture you are building.')
     args = parser.parse_args()
 
     logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s")
@@ -479,17 +499,6 @@ def main():
         write_dogrc(dd_api_key)
     else:
         log.info("No metric collection")
-
-    if args.no_freshclam:
-        log.info("Skipping freshclam")
-    else:
-        log.info("Refreshing clamav db...")
-        try:
-            redo.retry(lambda: sh.freshclam("--stdout", "--verbose",
-                                            _timeout=300, _err_to_out=True))
-            log.info("Done.")
-        except sh.ErrorReturnCode:
-            log.warning("Freshclam failed, skipping DB update")
 
     loop = asyncio.get_event_loop()
     manifest = loop.run_until_complete(async_main(args, signing_certs))

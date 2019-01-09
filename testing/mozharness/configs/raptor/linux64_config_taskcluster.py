@@ -17,11 +17,6 @@ config = {
     "log_name": "raptor",
     "installer_path": INSTALLER_PATH,
     "virtualenv_path": VENV_PATH,
-    "find_links": [
-        "http://pypi.pvt.build.mozilla.org/pub",
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
-    "pip_index": False,
     "exes": exes,
     "title": os.uname()[1].lower().split('.')[0],
     "default_actions": [
@@ -32,7 +27,6 @@ config = {
         "install",
         "run-tests",
     ],
-    "download_minidump_stackwalk": True,
     "minidump_stackwalk_path": MINIDUMP_STACKWALK_PATH,
     "minidump_tooltool_manifest_path": TOOLTOOL_MANIFEST_PATH,
     "tooltool_cache": "/builds/worker/tooltool-cache",

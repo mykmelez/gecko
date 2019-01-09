@@ -65,10 +65,12 @@ RemoteWebNavigation.prototype = {
   gotoIndex(aIndex) {
     this._sendMessage("WebNavigation:GotoIndex", {index: aIndex});
   },
-  loadURI(aURI, aLoadFlags, aReferrer, aPostData, aHeaders) {
+  loadURI(aURI, aLoadFlags, aReferrer, aPostData, aHeaders,
+          aTriggeringPrincipal) {
     this.loadURIWithOptions(aURI, aLoadFlags, aReferrer,
                             Ci.nsIHttpChannel.REFERRER_POLICY_UNSET,
-                            aPostData, aHeaders, null);
+                            aPostData, aHeaders, null,
+                            aTriggeringPrincipal);
   },
   loadURIWithOptions(aURI, aLoadFlags, aReferrer, aReferrerPolicy,
                      aPostData, aHeaders, aBaseURI, aTriggeringPrincipal) {
@@ -80,12 +82,13 @@ RemoteWebNavigation.prototype = {
       try {
         let uri = makeURI(aURI);
         let principal = aTriggeringPrincipal;
-        // We usually have a aTriggeringPrincipal assigned, but in case we don't
-        // have one, create it with OA inferred from the current context.
-        if (!principal) {
+        // We usually have a aTriggeringPrincipal assigned, but in case we
+        // don't have one or if it's a SystemPrincipal, let's create it with OA
+        // inferred from the current context.
+        if (!principal || principal.isSystemPrincipal) {
           let attrs = {
             userContextId: this._browser.getAttribute("usercontextid") || 0,
-            privateBrowsingId: PrivateBrowsingUtils.isBrowserPrivate(this._browser) ? 1 : 0
+            privateBrowsingId: PrivateBrowsingUtils.isBrowserPrivate(this._browser) ? 1 : 0,
           };
           principal = Services.scriptSecurityManager.createCodebasePrincipal(uri, attrs);
         }
@@ -95,6 +98,7 @@ RemoteWebNavigation.prototype = {
         // reason (such as failing to parse the URI), just ignore it.
       }
     }
+
     this._sendMessage("WebNavigation:LoadURI", {
       uri: aURI,
       flags: aLoadFlags,
@@ -103,9 +107,8 @@ RemoteWebNavigation.prototype = {
       postData: aPostData ? Utils.serializeInputStream(aPostData) : null,
       headers: aHeaders ? Utils.serializeInputStream(aHeaders) : null,
       baseURI: aBaseURI ? aBaseURI.spec : null,
-      triggeringPrincipal: aTriggeringPrincipal
-                           ? Utils.serializePrincipal(aTriggeringPrincipal)
-                           : null,
+      triggeringPrincipal: Utils.serializePrincipal(
+          aTriggeringPrincipal || Services.scriptSecurityManager.createNullPrincipal({})),
       requestTime: Services.telemetry.msSystemNow(),
     });
   },
@@ -134,7 +137,9 @@ RemoteWebNavigation.prototype = {
     return this._currentURI;
   },
   set currentURI(aURI) {
-    this.loadURI(aURI.spec, null, null, null);
+    // Bug 1498600 verify usages of systemPrincipal here
+    let systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
+    this.loadURI(aURI.spec, null, null, null, systemPrincipal);
   },
 
   referringURI: null,

@@ -780,7 +780,7 @@ static BROTLI_BOOL CloseFiles(Context* context, BROTLI_BOOL success) {
   return is_ok;
 }
 
-static const size_t kFileBufferSize = 1 << 16;
+static const size_t kFileBufferSize = 1 << 19;
 
 static void InitializeBuffers(Context* context) {
   context->available_in = 0;
@@ -943,10 +943,9 @@ static BROTLI_BOOL CompressFiles(Context* context) {
       uint32_t lgwin = DEFAULT_LGWIN;
       /* Use file size to limit lgwin. */
       if (context->input_file_length >= 0) {
-        int32_t size = 1 << BROTLI_MIN_WINDOW_BITS;
         lgwin = BROTLI_MIN_WINDOW_BITS;
-        while (size < context->input_file_length) {
-          size <<= 1;
+        while (BROTLI_MAX_BACKWARD_LIMIT(lgwin) <
+               (uint64_t)context->input_file_length) {
           lgwin++;
           if (lgwin == BROTLI_MAX_WINDOW_BITS) break;
         }

@@ -9,67 +9,57 @@
 
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/dom/MessageManagerGlobal.h"
-#include "mozilla/dom/ResolveSystemBinding.h"
 #include "nsContentUtils.h"
+#include "xpcpublic.h"
 
 namespace mozilla {
 namespace dom {
+
+template <typename>
+struct Nullable;
+class WindowProxyHolder;
+
+#define NS_CONTENTFRAMEMESSAGEMANAGER_IID            \
+  {                                                  \
+    0x97e192a6, 0xab7a, 0x4c8f, {                    \
+      0xb7, 0xdd, 0xf7, 0xec, 0x36, 0x38, 0x71, 0xb5 \
+    }                                                \
+  }
 
 /**
  * Base class for implementing the WebIDL ContentFrameMessageManager class.
  */
 class ContentFrameMessageManager : public DOMEventTargetHelper,
-                                   public MessageManagerGlobal
-{
-public:
+                                   public MessageManagerGlobal {
+ public:
   using DOMEventTargetHelper::AddRef;
   using DOMEventTargetHelper::Release;
 
-  bool DoResolve(JSContext* aCx, JS::Handle<JSObject*> aObj,
-                 JS::Handle<jsid> aId,
-                 JS::MutableHandle<JS::PropertyDescriptor> aDesc)
-  {
-    bool found;
-    if (!SystemGlobalResolve(aCx, aObj, aId, &found)) {
-      return false;
-    }
-    if (found) {
-      FillPropertyDescriptor(aDesc, aObj, JS::UndefinedValue(), false);
-    }
-    return true;
-  }
-  static bool MayResolve(jsid aId)
-  {
-    return MayResolveAsSystemBindingName(aId);
-  }
-  void GetOwnPropertyNames(JSContext* aCx, JS::AutoIdVector& aNames,
-                           bool aEnumerableOnly, mozilla::ErrorResult& aRv)
-  {
-    JS::Rooted<JSObject*> thisObj(aCx, GetWrapper());
-    GetSystemBindingNames(aCx, thisObj, aNames, aEnumerableOnly, aRv);
-  }
+  NS_DECLARE_STATIC_IID_ACCESSOR(NS_CONTENTFRAMEMESSAGEMANAGER_IID)
 
-  virtual already_AddRefed<nsPIDOMWindowOuter> GetContent(ErrorResult& aError) = 0;
+  virtual Nullable<WindowProxyHolder> GetContent(ErrorResult& aError) = 0;
   virtual already_AddRefed<nsIDocShell> GetDocShell(ErrorResult& aError) = 0;
   virtual already_AddRefed<nsIEventTarget> GetTabEventTarget() = 0;
+  virtual uint64_t ChromeOuterWindowID() = 0;
 
-  nsFrameMessageManager* GetMessageManager()
-  {
-    return mMessageManager;
-  }
-  void DisconnectMessageManager()
-  {
+  nsFrameMessageManager* GetMessageManager() { return mMessageManager; }
+  void DisconnectMessageManager() {
     mMessageManager->Disconnect();
     mMessageManager = nullptr;
   }
 
-protected:
+  JSObject* GetOrCreateWrapper();
+
+ protected:
   explicit ContentFrameMessageManager(nsFrameMessageManager* aMessageManager)
-    : MessageManagerGlobal(aMessageManager)
-  {}
+      : DOMEventTargetHelper(xpc::NativeGlobal(xpc::PrivilegedJunkScope())),
+        MessageManagerGlobal(aMessageManager) {}
 };
 
-} // namespace dom
-} // namespace mozilla
+NS_DEFINE_STATIC_IID_ACCESSOR(ContentFrameMessageManager,
+                              NS_CONTENTFRAMEMESSAGEMANAGER_IID)
 
-#endif // mozilla_dom_ContentFrameMessageManager_h
+}  // namespace dom
+}  // namespace mozilla
+
+#endif  // mozilla_dom_ContentFrameMessageManager_h

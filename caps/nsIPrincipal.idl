@@ -69,7 +69,7 @@ interface nsIPrincipal : nsISerializable
     /**
      * Returns a hash value for the principal.
      */
-    [noscript] readonly attribute unsigned long hashValue;
+    [notxpcom, nostdcall] readonly attribute unsigned long hashValue;
 
     /**
      * The codebase URI to which this principal pertains.  This is
@@ -246,6 +246,20 @@ interface nsIPrincipal : nsISerializable
     readonly attribute AUTF8String originSuffix;
 
     /**
+     * A canonical representation of the site-origin for this principal.
+     * This string has the same format as |origin| (see above). Two principals
+     * with differing |siteOrigin| values will never compare equal, even when
+     * considering domain mutations.
+     *
+     * For most principals, |siteOrigin| matches |origin| precisely. Only
+     * principals which allow mutating |domain|, such as ContentPrincipal,
+     * override the default implementation in BasePrincipal.
+     *
+     * TODO(nika): Use this in DocGroup.
+     */
+    readonly attribute ACString siteOrigin;
+
+    /**
      * The base domain of the codebase URI to which this principal pertains
      * (generally the document URI), handling null principals and
      * non-hierarchical schemes correctly.
@@ -317,9 +331,24 @@ interface nsIPrincipal : nsISerializable
     [infallible] readonly attribute boolean isExpandedPrincipal;
 
     /**
-     * Returns true iff this is the system principal.
+     * Returns true iff this is the system principal.  C++ callers should use
+     * IsSystemPrincipal() instead of this scriptable accessor.
      */
-    [infallible] readonly attribute boolean isSystemPrincipal;
+    readonly attribute boolean isSystemPrincipal;
+
+    /**
+     * Faster and nicer version callable from C++.  Callers must include
+     * BasePrincipal.h, where it's implemented.
+     */
+    %{C++
+      inline bool IsSystemPrincipal() const;
+    %}
+
+    /**
+     * Returns true iff the principal is either an addon principal or
+     * an expanded principal, which contains at least one addon principal.
+     */
+    [infallible] readonly attribute boolean isAddonOrExpandedAddonPrincipal;
 };
 
 /**
@@ -342,11 +371,11 @@ interface nsIExpandedPrincipal : nsISupports
    * When an expanded principal is used as a triggering principal for a
    * request that inherits a security context, one of its constitutent
    * principals is inherited rather than the expanded principal itself. The
-   * last principal in the whitelist is the default principal to inherit.
+   * last principal in the allowlist is the default principal to inherit.
    *
    * Note: this list is not reference counted, it is shared, so
    * should not be changed and should only be used ephemerally.
    */
   [noscript, notxpcom, nostdcall]
-  PrincipalArray WhiteList();
+  PrincipalArray AllowList();
 };

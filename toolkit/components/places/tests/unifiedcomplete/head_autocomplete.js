@@ -4,6 +4,7 @@
 
 const FRECENCY_DEFAULT = 10000;
 
+ChromeUtils.import("resource://gre/modules/ObjectUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://testing-common/httpd.js");
 
@@ -25,16 +26,20 @@ ChromeUtils.import("resource://testing-common/httpd.js");
 
 // Put any other stuff relative to this test folder below.
 
+XPCOMUtils.defineLazyModuleGetters(this, {
+  UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
+  UrlbarProviderOpenTabs: "resource:///modules/UrlbarProviderOpenTabs.jsm",
+  UrlbarTokenizer: "resource:///modules/UrlbarTokenizer.jsm",
+});
+
 const TITLE_SEARCH_ENGINE_SEPARATOR = " \u00B7\u2013\u00B7 ";
 
 async function cleanup() {
-  Services.prefs.clearUserPref("browser.urlbar.autocomplete.enabled");
   Services.prefs.clearUserPref("browser.urlbar.autoFill");
   Services.prefs.clearUserPref("browser.urlbar.autoFill.searchEngines");
   let suggestPrefs = [
     "history",
     "bookmark",
-    "history.onlyTyped",
     "openpage",
     "searches",
   ];
@@ -57,7 +62,7 @@ AutoCompleteInput.prototype = {
   popup: {
     selectedIndex: -1,
     invalidate() {},
-    QueryInterface: ChromeUtils.generateQI([Ci.nsIAutoCompletePopup])
+    QueryInterface: ChromeUtils.generateQI([Ci.nsIAutoCompletePopup]),
   },
   popupOpen: false,
 
@@ -100,7 +105,7 @@ AutoCompleteInput.prototype = {
   onTextEntered: () => false,
   onTextReverted: () => false,
 
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIAutoCompleteInput])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIAutoCompleteInput]),
 };
 
 /**
@@ -109,7 +114,8 @@ AutoCompleteInput.prototype = {
  *
  * @param {Object} match The expected match for the result, in the following form:
  * {
- *   uri: {nsIURI} The expected uri.
+ *   uri: {String|nsIURI} The expected uri. Note: nsIURI should be considered
+ *        deprecated.
  *   title: {String} The title of the entry.
  *   tags: {String} The tags for the entry.
  *   style: {Array} The style of the entry.
@@ -120,6 +126,9 @@ AutoCompleteInput.prototype = {
  */
 async function _check_autocomplete_matches(match, result) {
   let { uri, tags, style } = match;
+  if (uri instanceof Ci.nsIURI) {
+    uri = uri.spec;
+  }
   let title = match.comment || match.title;
 
   if (tags)
@@ -130,18 +139,29 @@ async function _check_autocomplete_matches(match, result) {
     style = ["favicon"];
 
   let actual = { value: result.value, comment: result.comment };
-  let expected = { value: match.value || uri.spec, comment: title };
+  let expected = { value: match.value || uri, comment: title };
   info(`Checking match: ` +
        `actual=${JSON.stringify(actual)} ... ` +
        `expected=${JSON.stringify(expected)}`);
-  if (actual.value != expected.value || actual.comment != expected.comment) {
+
+  let actualAction = PlacesUtils.parseActionUrl(actual.value);
+  let expectedAction = PlacesUtils.parseActionUrl(expected.value);
+  if (actualAction && expectedAction) {
+    if (!ObjectUtils.deepEqual(actualAction, expectedAction)) {
+      return false;
+    }
+  } else if (actual.value != expected.value) {
+    return false;
+  }
+
+  if (actual.comment != expected.comment) {
     return false;
   }
 
   let actualStyle = result.style.split(/\s+/).sort();
   if (style)
     Assert.equal(actualStyle.toString(), style.toString(), "Match should have expected style");
-  if (uri && uri.spec.startsWith("moz-action:")) {
+  if (uri && uri.startsWith("moz-action:")) {
     Assert.ok(actualStyle.includes("action"), "moz-action results should always have 'action' in their style");
   }
 
@@ -290,42 +310,35 @@ async function check_autocomplete(test) {
 }
 
 var addBookmark = async function(aBookmarkObj) {
-  Assert.ok(!!aBookmarkObj.uri, "Bookmark object contains an uri");
-  let parentId = aBookmarkObj.parentId ? aBookmarkObj.parentId
-                                       : PlacesUtils.unfiledBookmarksFolderId;
-
-  let bm = await PlacesUtils.bookmarks.insert({
-    parentGuid: (await PlacesUtils.promiseItemGuid(parentId)),
+  await PlacesUtils.bookmarks.insert({
+    parentGuid: PlacesUtils.bookmarks.unfiledGuid,
     title: aBookmarkObj.title || "A bookmark",
-    url: aBookmarkObj.uri
+    url: aBookmarkObj.uri,
   });
-  await PlacesUtils.promiseItemId(bm.guid);
 
   if (aBookmarkObj.keyword) {
     await PlacesUtils.keywords.insert({ keyword: aBookmarkObj.keyword,
-                                        url: aBookmarkObj.uri.spec,
-                                        postData: aBookmarkObj.postData
+                                        url: aBookmarkObj.uri instanceof Ci.nsIURI ? aBookmarkObj.uri.spec : aBookmarkObj.uri,
+                                        postData: aBookmarkObj.postData,
                                       });
   }
 
   if (aBookmarkObj.tags) {
-    PlacesUtils.tagging.tagURI(aBookmarkObj.uri, aBookmarkObj.tags);
+    let uri = aBookmarkObj.uri instanceof Ci.nsIURI ?
+      aBookmarkObj.uri : Services.io.newURI(aBookmarkObj.uri);
+    PlacesUtils.tagging.tagURI(uri, aBookmarkObj.tags);
   }
 };
 
 function addOpenPages(aUri, aCount = 1, aUserContextId = 0) {
-  let ac = Cc["@mozilla.org/autocomplete/search;1?name=unifiedcomplete"]
-             .getService(Ci.mozIPlacesAutoComplete);
   for (let i = 0; i < aCount; i++) {
-    ac.registerOpenPage(aUri, aUserContextId);
+    UrlbarProviderOpenTabs.registerOpenTab(aUri.spec, aUserContextId);
   }
 }
 
 function removeOpenPages(aUri, aCount = 1, aUserContextId = 0) {
-  let ac = Cc["@mozilla.org/autocomplete/search;1?name=unifiedcomplete"]
-             .getService(Ci.mozIPlacesAutoComplete);
   for (let i = 0; i < aCount; i++) {
-    ac.unregisterOpenPage(aUri, aUserContextId);
+    UrlbarProviderOpenTabs.unregisterOpenTab(aUri.spec, aUserContextId);
   }
 }
 
@@ -363,25 +376,25 @@ function makeActionURI(action, params) {
 // Creates a full "match" entry for a search result, suitable for passing as
 // an entry to check_autocomplete.
 function makeSearchMatch(input, extra = {}) {
-  // Note that counter-intuitively, the order the object properties are defined
-  // in the object passed to makeActionURI is important for check_autocomplete
-  // to match them :(
   let params = {
     engineName: extra.engineName || "MozSearch",
     input,
     searchQuery: "searchQuery" in extra ? extra.searchQuery : input,
   };
-  if ("alias" in extra) {
-    // May be undefined, which is expected, but in that case make sure it's not
-    // included in the params of the moz-action URL.
-    params.alias = extra.alias;
-  }
   let style = [ "action", "searchengine" ];
   if ("style" in extra && Array.isArray(extra.style)) {
     style.push(...extra.style);
   }
   if (extra.heuristic) {
     style.push("heuristic");
+  }
+  if ("alias" in extra) {
+    params.alias = extra.alias;
+    style.push("alias");
+  }
+  if ("searchSuggestion" in extra) {
+    params.searchSuggestion = extra.searchSuggestion;
+    style.push("suggestion");
   }
   return {
     uri: makeActionURI("searchengine", params),
@@ -463,8 +476,35 @@ function addTestEngine(basename, httpServer = undefined) {
     }, "browser-search-engine-modified");
 
     info("Adding engine from URL: " + dataUrl + basename);
-    Services.search.addEngine(dataUrl + basename, null, null, false);
+    Services.search.addEngine(dataUrl + basename, null, false);
   });
+}
+
+/**
+ * Sets up a search engine that provides some suggestions by appending strings
+ * onto the search query.
+ *
+ * @param   {function} suggestionsFn
+ *          A function that returns an array of suggestion strings given a
+ *          search string.  If not given, a default function is used.
+ * @returns {nsISearchEngine} The new engine.
+ */
+async function addTestSuggestionsEngine(suggestionsFn = null) {
+  // This port number should match the number in engine-suggestions.xml.
+  let server = makeTestServer(9000);
+  server.registerPathHandler("/suggest", (req, resp) => {
+    // URL query params are x-www-form-urlencoded, which converts spaces into
+    // plus signs, so un-convert any plus signs back to spaces.
+    let searchStr = decodeURIComponent(req.queryString.replace(/\+/g, " "));
+    let suggestions =
+      suggestionsFn ? suggestionsFn(searchStr) :
+      [searchStr].concat(["foo", "bar"].map(s => searchStr + " " + s));
+    let data = [searchStr, suggestions];
+    resp.setHeader("Content-Type", "application/json", false);
+    resp.write(JSON.stringify(data));
+  });
+  let engine = await addTestEngine("engine-suggestions.xml", server);
+  return engine;
 }
 
 // Ensure we have a default search engine and the keyword.enabled preference
@@ -491,7 +531,7 @@ add_task(async function ensure_search_engine() {
   Services.search.addEngineWithDetails("MozSearch", "", "", "", "GET",
                                        "http://s.example.com/search");
   let engine = Services.search.getEngineByName("MozSearch");
-  Services.search.currentEngine = engine;
+  Services.search.defaultEngine = engine;
 });
 
 /**
@@ -513,7 +553,7 @@ function addAdaptiveFeedback(aUrl, aSearch) {
     popupOpen: true,
     selectedIndex: 0,
     getValueAt: () => aUrl,
-    searchString: aSearch
+    searchString: aSearch,
   };
   Services.obs.notifyObservers(thing, "autocomplete-will-enter-text");
   return promise;

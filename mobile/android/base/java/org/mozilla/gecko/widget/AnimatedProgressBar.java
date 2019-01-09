@@ -27,7 +27,7 @@ import android.view.animation.LinearInterpolator;
 import org.mozilla.gecko.DynamicToolbar;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.drawable.ShiftDrawable;
-import org.mozilla.gecko.gfx.DynamicToolbarAnimator;
+import org.mozilla.geckoview.DynamicToolbarAnimator;
 import org.mozilla.gecko.widget.themed.ThemedProgressBar;
 
 /**
@@ -318,7 +318,7 @@ public class AnimatedProgressBar extends ThemedProgressBar {
                                    int duration,
                                    @InterpolatorRes int itplId) {
         if (isWrap) {
-            final Interpolator interpolator = (itplId > 0)
+            final Interpolator interpolator = (itplId != 0)
                     ? AnimationUtils.loadInterpolator(getContext(), itplId)
                     : null;
             return new ShiftDrawable(original, duration, interpolator);

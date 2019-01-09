@@ -23,10 +23,6 @@
   fill: currentColor;
 }
 
-.menulist-icon {
-  margin: 0 !important;
-}
-
 /**** expanders ****/
 
 .expander-up,
@@ -43,10 +39,6 @@
   -moz-appearance: -moz-mac-disclosure-button-closed;
 }
 
-#editBookmarkPanelContent {
-  min-width: 23em;
-}
-
 #editBMPanel_folderTree {
   margin: 6px 4px 0 4px;
 }
@@ -60,20 +52,27 @@
   visibility: collapse;
 }
 
+#editBMPanel_tagsSelector > richlistitem > image {
+  -moz-appearance: checkbox;
+  -moz-box-align: center;
+  margin: 0px 2px;
+  min-width: 13px;
+  min-height: 13px;
+}
 
 /* ----- BOOKMARK PANEL DROPDOWN MENU ITEMS ----- */
 
-#editBMPanel_folderMenuList[selectedIndex="0"],
+#editBMPanel_folderMenuList[selectedGuid="toolbar_____"],
 #editBMPanel_toolbarFolderItem {
   list-style-image: url("chrome://browser/skin/places/bookmarksToolbar.svg") !important;
 }
 
-#editBMPanel_folderMenuList[selectedIndex="1"],
+#editBMPanel_folderMenuList[selectedGuid="menu________"],
 #editBMPanel_bmRootItem {
   list-style-image: url("chrome://browser/skin/places/bookmarksMenu.svg") !important;
 }
 
-#editBMPanel_folderMenuList[selectedIndex="2"],
+#editBMPanel_folderMenuList[selectedGuid="unfiled_____"],
 #editBMPanel_unfiledRootItem {
   list-style-image: url("chrome://browser/skin/places/unfiledBookmarks.svg") !important;
 }

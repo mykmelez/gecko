@@ -4,7 +4,10 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import attr
 
+
+@attr.s
 class Task(object):
     """
     Representation of a task in a TaskGraph.  Each Task has, at creation:
@@ -24,33 +27,21 @@ class Task(object):
     This class is just a convenience wrapper for the data type and managing
     display, comparison, serialization, etc. It has no functionality of its own.
     """
-    def __init__(self, kind, label, attributes, task,
-                 optimization=None, dependencies=None):
-        self.kind = kind
-        self.label = label
-        self.attributes = attributes
-        self.task = task
 
-        self.task_id = None
+    kind = attr.ib()
+    label = attr.ib()
+    attributes = attr.ib()
+    task = attr.ib()
+    task_id = attr.ib(default=None, init=False)
+    optimization = attr.ib(default=None)
+    dependencies = attr.ib(factory=dict)
+    release_artifacts = attr.ib(
+        converter=attr.converters.optional(frozenset),
+        default=None,
+    )
 
-        self.attributes['kind'] = kind
-
-        self.optimization = optimization
-        self.dependencies = dependencies or {}
-
-    def __eq__(self, other):
-        return self.kind == other.kind and \
-            self.label == other.label and \
-            self.attributes == other.attributes and \
-            self.task == other.task and \
-            self.task_id == other.task_id and \
-            self.optimization == other.optimization and \
-            self.dependencies == other.dependencies
-
-    def __repr__(self):
-        return ('Task({kind!r}, {label!r}, {attributes!r}, {task!r}, '
-                'optimization={optimization!r}, '
-                'dependencies={dependencies!r})'.format(**self.__dict__))
+    def __attrs_post_init__(self):
+        self.attributes['kind'] = self.kind
 
     def to_json(self):
         rv = {
@@ -63,6 +54,8 @@ class Task(object):
         }
         if self.task_id:
             rv['task_id'] = self.task_id
+        if self.release_artifacts:
+            rv['release_artifacts'] = sorted(self.release_artifacts)
         return rv
 
     @classmethod
@@ -78,7 +71,9 @@ class Task(object):
             attributes=task_dict['attributes'],
             task=task_dict['task'],
             optimization=task_dict['optimization'],
-            dependencies=task_dict.get('dependencies'))
+            dependencies=task_dict.get('dependencies'),
+            release_artifacts=task_dict.get('release-artifacts'),
+        )
         if 'task_id' in task_dict:
             rv.task_id = task_dict['task_id']
         return rv

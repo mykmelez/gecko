@@ -50,7 +50,7 @@ class BaseNavigationTestCase(WindowManagerMixin, MarionetteTestCase):
         self.test_page_remote = self.marionette.absolute_url("test.html")
         self.test_page_slow_resource = self.marionette.absolute_url("slow_resource.html")
 
-        if self.marionette.session_capabilities["platformName"] == "darwin":
+        if self.marionette.session_capabilities["platformName"] == "mac":
             self.mod_key = Keys.META
         else:
             self.mod_key = Keys.CONTROL
@@ -289,12 +289,10 @@ class TestNavigate(BaseNavigationTestCase):
 
         self.marionette.navigate("about:blank")
 
-    @skip("Bug 1332064 - NoSuchElementException: Unable to locate element: :focus")
     @run_if_manage_instance("Only runnable if Marionette manages the instance")
     @skip_if_mobile("Bug 1322993 - Missing temporary folder")
     def test_focus_after_navigation(self):
-        self.marionette.quit()
-        self.marionette.start_session()
+        self.marionette.restart()
 
         self.marionette.navigate(inline("<input autofocus>"))
         focus_el = self.marionette.find_element(By.CSS_SELECTOR, ":focus")

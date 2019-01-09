@@ -7,7 +7,7 @@
 #ifndef mozilla_Observer_h
 #define mozilla_Observer_h
 
-#include "nsTArray.h"
+#include "nsTObserverArray.h"
 
 namespace mozilla {
 
@@ -19,10 +19,9 @@ namespace mozilla {
  *
  * @see ObserverList.
  */
-template<class T>
-class Observer
-{
-public:
+template <class T>
+class Observer {
+ public:
   virtual ~Observer() {}
   virtual void Notify(const T& aParam) = 0;
 };
@@ -35,10 +34,9 @@ public:
  *
  * @see Observer.
  */
-template<class T>
-class ObserverList
-{
-public:
+template <class T>
+class ObserverList {
+ public:
   /**
    * Note: When calling AddObserver, it's up to the caller to make sure the
    * object isn't going to be release as long as RemoveObserver hasn't been
@@ -46,58 +44,35 @@ public:
    *
    * @see RemoveObserver()
    */
-  void AddObserver(Observer<T>* aObserver)
-  {
-    mObservers.AppendElement(aObserver);
+  void AddObserver(Observer<T>* aObserver) {
+    mObservers.AppendElementUnlessExists(aObserver);
   }
 
   /**
    * Remove the observer from the observer list.
    * @return Whether the observer has been found in the list.
    */
-  bool RemoveObserver(Observer<T>* aObserver)
-  {
-    if (mObservers.RemoveElement(aObserver)) {
-      if (!mBroadcastCopy.IsEmpty()) {
-        // Annoyingly, someone could RemoveObserver() an item on the list
-        // while we're in a Broadcast()'s Notify() call.
-        auto i = mBroadcastCopy.IndexOf(aObserver);
-        MOZ_ASSERT(i != mBroadcastCopy.NoIndex);
-        mBroadcastCopy[i] = nullptr;
-      }
-      return true;
-    }
-    return false;
+  bool RemoveObserver(Observer<T>* aObserver) {
+    return mObservers.RemoveElement(aObserver);
   }
 
-  uint32_t Length()
-  {
-    return mObservers.Length();
-  }
+  uint32_t Length() { return mObservers.Length(); }
 
   /**
    * Call Notify() on each item in the list.
-   * Handles the case of Notify() calling RemoveObserver()
    */
-  void Broadcast(const T& aParam)
-  {
-    MOZ_ASSERT(mBroadcastCopy.IsEmpty());
-    mBroadcastCopy = mObservers;
-    uint32_t size = mBroadcastCopy.Length();
-    for (uint32_t i = 0; i < size; ++i) {
-      // nulled if Removed during Broadcast
-      if (mBroadcastCopy[i]) {
-        mBroadcastCopy[i]->Notify(aParam);
-      }
+  void Broadcast(const T& aParam) {
+    typename nsTObserverArray<Observer<T>*>::ForwardIterator iter(mObservers);
+    while (iter.HasMore()) {
+      Observer<T>* obs = iter.GetNext();
+      obs->Notify(aParam);
     }
-    mBroadcastCopy.Clear();
   }
 
-protected:
-  nsTArray<Observer<T>*> mObservers;
-  nsTArray<Observer<T>*> mBroadcastCopy;
+ protected:
+  nsTObserverArray<Observer<T>*> mObservers;
 };
 
-} // namespace mozilla
+}  // namespace mozilla
 
-#endif // mozilla_Observer_h
+#endif  // mozilla_Observer_h

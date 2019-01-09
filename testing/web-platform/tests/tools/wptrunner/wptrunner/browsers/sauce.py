@@ -95,7 +95,7 @@ def check_args(**kwargs):
     require_arg(kwargs, "sauce_key")
 
 
-def browser_kwargs(test_type, run_info_data, **kwargs):
+def browser_kwargs(test_type, run_info_data, config, **kwargs):
     sauce_config = get_sauce_config(**kwargs)
 
     return {"sauce_config": sauce_config}
@@ -133,6 +133,8 @@ class SauceConnect():
         self.sauce_key = kwargs["sauce_key"]
         self.sauce_tunnel_id = kwargs["sauce_tunnel_id"]
         self.sauce_connect_binary = kwargs.get("sauce_connect_binary")
+        self.sauce_connect_args = kwargs.get("sauce_connect_args")
+        self.sauce_init_timeout = kwargs.get("sauce_init_timeout")
         self.sc_process = None
         self.temp_dir = None
         self.env_config = None
@@ -170,14 +172,11 @@ class SauceConnect():
             "--readyfile=./sauce_is_ready",
             "--tunnel-domains",
             ",".join(self.env_config.domains_set)
-        ])
-
-        # Timeout config vars
-        max_wait = 30
+        ] + self.sauce_connect_args)
 
         tot_wait = 0
         while not os.path.exists('./sauce_is_ready') and self.sc_process.poll() is None:
-            if tot_wait >= max_wait:
+            if tot_wait >= self.sauce_init_timeout:
                 self.quit()
 
                 raise SauceException("Sauce Connect Proxy was not ready after %d seconds" % tot_wait)
@@ -233,7 +232,7 @@ class SauceBrowser(Browser):
         Browser.__init__(self, logger)
         self.sauce_config = sauce_config
 
-    def start(self):
+    def start(self, **kwargs):
         pass
 
     def stop(self, force=False):

@@ -266,7 +266,7 @@ const downloadQuery = query => {
   // const endedBefore = normalizeDownloadTime(query.endedBefore, true);
   // const endedAfter = normalizeDownloadTime(query.endedAfter, false);
 
-  const totalBytesGreater = query.totalBytesGreater || 0;
+  const totalBytesGreater = query.totalBytesGreater;
   const totalBytesLess = query.totalBytesLess != null ? query.totalBytesLess : Number.MAX_VALUE;
 
   // Handle options for which we can have a regular expression and/or
@@ -469,7 +469,7 @@ this.downloads = class extends ExtensionAPI {
             if (!filename) {
               let uri = Services.io.newURI(options.url);
               if (uri instanceof Ci.nsIURL) {
-                filename = DownloadPaths.sanitize(uri.fileName);
+                filename = DownloadPaths.sanitize(Services.textToSubURI.unEscapeURIForUI("UTF-8", uri.fileName));
               }
             }
 
@@ -511,7 +511,7 @@ this.downloads = class extends ExtensionAPI {
               }
             }
 
-            if (!saveAs) {
+            if (!saveAs || AppConstants.platform === "android") {
               return target;
             }
 
@@ -708,9 +708,7 @@ this.downloads = class extends ExtensionAPI {
 
             return new Promise((resolve, reject) => {
               let chromeWebNav = Services.appShell.createWindowlessBrowser(true);
-              chromeWebNav
-                .QueryInterface(Ci.nsIInterfaceRequestor)
-                .getInterface(Ci.nsIDocShell)
+              chromeWebNav.docShell
                 .createAboutBlankContentViewer(Services.scriptSecurityManager.getSystemPrincipal());
 
               let img = chromeWebNav.document.createElement("img");

@@ -9,6 +9,9 @@
 
 #include "mozilla/dom/FontFaceBinding.h"
 #include "mozilla/FontPropertyTypes.h"
+#include "mozilla/Maybe.h"
+#include "mozilla/Pair.h"
+#include "mozilla/ServoStyleConsts.h"
 #include "gfxUserFontSet.h"
 #include "nsAutoPtr.h"
 #include "nsCSSPropertyID.h"
@@ -28,66 +31,68 @@ struct FontFaceDescriptors;
 class FontFaceSet;
 class Promise;
 class StringOrArrayBufferOrArrayBufferView;
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla
 
 namespace mozilla {
 namespace dom {
 
-class FontFace final : public nsISupports,
-                       public nsWrapperCache
-{
+class FontFace final : public nsISupports, public nsWrapperCache {
   friend class mozilla::PostTraversalTask;
   friend class mozilla::dom::FontFaceBufferSource;
   friend class Entry;
 
-public:
+ public:
   class Entry final : public gfxUserFontEntry {
     friend class FontFace;
 
-  public:
+   public:
     Entry(gfxUserFontSet* aFontSet,
-          const nsTArray<gfxFontFaceSrc>& aFontFaceSrcList,
-          WeightRange aWeight,
-          StretchRange aStretch,
-          SlantStyleRange aStyle,
+          const nsTArray<gfxFontFaceSrc>& aFontFaceSrcList, WeightRange aWeight,
+          StretchRange aStretch, SlantStyleRange aStyle,
           const nsTArray<gfxFontFeature>& aFeatureSettings,
           const nsTArray<gfxFontVariation>& aVariationSettings,
-          uint32_t aLanguageOverride,
-          gfxCharacterMap* aUnicodeRanges,
-          uint8_t aFontDisplay,
-          RangeFlags aRangeFlags)
-      : gfxUserFontEntry(aFontSet, aFontFaceSrcList, aWeight, aStretch,
-                         aStyle, aFeatureSettings, aVariationSettings,
-                         aLanguageOverride,
-                         aUnicodeRanges, aFontDisplay,
-                         aRangeFlags) {}
+          uint32_t aLanguageOverride, gfxCharacterMap* aUnicodeRanges,
+          StyleFontDisplay aFontDisplay, RangeFlags aRangeFlags)
+        : gfxUserFontEntry(aFontSet, aFontFaceSrcList, aWeight, aStretch,
+                           aStyle, aFeatureSettings, aVariationSettings,
+                           aLanguageOverride, aUnicodeRanges, aFontDisplay,
+                           aRangeFlags) {}
 
     virtual void SetLoadState(UserFontLoadState aLoadState) override;
     virtual void GetUserFontSets(nsTArray<gfxUserFontSet*>& aResult) override;
-    const AutoTArray<FontFace*,1>& GetFontFaces() { return mFontFaces; }
+    const AutoTArray<FontFace*, 1>& GetFontFaces() { return mFontFaces; }
 
-  protected:
+   protected:
     // The FontFace objects that use this user font entry.  We need to store
     // an array of these, not just a single pointer, since the user font
     // cache can return the same entry for different FontFaces that have
     // the same descriptor values and come from the same origin.
-    AutoTArray<FontFace*,1> mFontFaces;
+    AutoTArray<FontFace*, 1> mFontFaces;
   };
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(FontFace)
 
   nsISupports* GetParentObject() const { return mParent; }
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aGivenProto) override;
 
-  static already_AddRefed<FontFace>
-  CreateForRule(nsISupports* aGlobal, FontFaceSet* aFontFaceSet,
-                RawServoFontFaceRule* aRule);
+  static already_AddRefed<FontFace> CreateForRule(nsISupports* aGlobal,
+                                                  FontFaceSet* aFontFaceSet,
+                                                  RawServoFontFaceRule* aRule);
 
   RawServoFontFaceRule* GetRule() { return mRule; }
 
-  void GetDesc(nsCSSFontDesc aDescID, nsCSSValue& aResult) const;
+  bool HasLocalSrc() const;
+  Maybe<StyleComputedFontWeightRange> GetFontWeight() const;
+  Maybe<StyleComputedFontStretchRange> GetFontStretch() const;
+  Maybe<StyleComputedFontStyleDescriptor> GetFontStyle() const;
+  Maybe<StyleFontDisplay> GetFontDisplay() const;
+  void GetFontFeatureSettings(nsTArray<gfxFontFeature>&) const;
+  void GetFontVariationSettings(nsTArray<gfxFontVariation>&) const;
+  void GetSources(nsTArray<StyleFontFaceSourceListComponent>&) const;
+  Maybe<StyleFontLanguageOverride> GetFontLanguageOverride() const;
 
   gfxUserFontEntry* CreateUserFontEntry();
   gfxUserFontEntry* GetUserFontEntry() const { return mUserFontEntry; }
@@ -106,9 +111,9 @@ public:
   /**
    * Gets the family name of the FontFace as a raw string (such as 'Times', as
    * opposed to GetFamily, which returns a CSS-escaped string, such as
-   * '"Times"').  Returns whether a valid family name was available.
+   * '"Times"').  Returns null if a valid family name was not available.
    */
-  bool GetFamilyName(nsString& aResult);
+  nsAtom* GetFamilyName() const;
 
   /**
    * Returns whether this object is CSS-connected, i.e. reflecting an
@@ -145,12 +150,10 @@ public:
   gfxCharacterMap* GetUnicodeRangeAsCharacterMap();
 
   // Web IDL
-  static already_AddRefed<FontFace>
-  Constructor(const GlobalObject& aGlobal,
-              const nsAString& aFamily,
-              const mozilla::dom::StringOrArrayBufferOrArrayBufferView& aSource,
-              const mozilla::dom::FontFaceDescriptors& aDescriptors,
-              ErrorResult& aRV);
+  static already_AddRefed<FontFace> Constructor(
+      const GlobalObject& aGlobal, const nsAString& aFamily,
+      const mozilla::dom::StringOrArrayBufferOrArrayBufferView& aSource,
+      const mozilla::dom::FontFaceDescriptors& aDescriptors, ErrorResult& aRV);
 
   void GetFamily(nsString& aResult);
   void SetFamily(const nsAString& aValue, mozilla::ErrorResult& aRv);
@@ -175,7 +178,7 @@ public:
   mozilla::dom::Promise* Load(mozilla::ErrorResult& aRv);
   mozilla::dom::Promise* GetLoaded(mozilla::ErrorResult& aRv);
 
-private:
+ private:
   FontFace(nsISupports* aParent, FontFaceSet* aFontFaceSet);
   ~FontFace();
 
@@ -186,8 +189,7 @@ private:
 
   // Helper function for the descriptor setter methods.
   // Returns whether it successfully sets the descriptor.
-  bool SetDescriptor(nsCSSFontDesc aFontDesc,
-                     const nsAString& aValue,
+  bool SetDescriptor(nsCSSFontDesc aFontDesc, const nsAString& aValue,
                      mozilla::ErrorResult& aRv);
 
   /**
@@ -206,8 +208,9 @@ private:
 
   already_AddRefed<URLExtraData> GetURLExtraData() const;
 
-  RawServoFontFaceRule* GetData() const
-    { return HasRule() ? mRule : mDescriptors; }
+  RawServoFontFaceRule* GetData() const {
+    return HasRule() ? mRule : mDescriptors;
+  }
 
   /**
    * Returns and takes ownership of the buffer storing the font data.
@@ -292,7 +295,7 @@ private:
   bool mInFontFaceSet;
 };
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla
 
-#endif // !defined(mozilla_dom_FontFace_h)
+#endif  // !defined(mozilla_dom_FontFace_h)

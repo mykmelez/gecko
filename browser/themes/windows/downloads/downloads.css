@@ -10,8 +10,7 @@
   outline-offset: -5px;
 }
 
-@notKeyfocus@ #downloadsSummary:-moz-focusring,
-@notKeyfocus@ .downloadsPanelFooterButton:-moz-focusring {
+@notKeyfocus@ #downloadsSummary:-moz-focusring {
   outline: none;
 }
 
@@ -37,14 +36,13 @@
   }
 
   /* Use unified color for the progressbar on default theme */
-  .downloadProgress > .progress-bar {
+  .downloadProgress::-moz-progress-bar {
     background-color: #3c9af8;
   }
 
-  .downloadProgress[paused="true"] > .progress-bar {
+  .downloadProgress[paused]::-moz-progress-bar {
     background-color: #a6a6a6;
   }
-
 }
 
 /*** Highlighted list items ***/

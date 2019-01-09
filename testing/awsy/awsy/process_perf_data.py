@@ -12,25 +12,38 @@ import parse_about_memory
 
 # A description of each checkpoint and the root path to it.
 CHECKPOINTS = [
-    { 'name': "Fresh start", 'path': "memory-report-Start-0.json.gz" },
-    { 'name': "Fresh start [+30s]", 'path': "memory-report-StartSettled-0.json.gz" },
-    { 'name': "After tabs open", 'path': "memory-report-TabsOpen-4.json.gz" },
-    { 'name': "After tabs open [+30s]", 'path': "memory-report-TabsOpenSettled-4.json.gz" },
-    { 'name': "After tabs open [+30s, forced GC]", 'path': "memory-report-TabsOpenForceGC-4.json.gz" },
-    { 'name': "Tabs closed extra processes", 'path': "memory-report-TabsClosedExtraProcesses-4.json.gz" },
-    { 'name': "Tabs closed", 'path': "memory-report-TabsClosed-4.json.gz" },
-    { 'name': "Tabs closed [+30s]", 'path': "memory-report-TabsClosedSettled-4.json.gz" },
-    { 'name': "Tabs closed [+30s, forced GC]", 'path': "memory-report-TabsClosedForceGC-4.json.gz" }
+    {'name': "Fresh start", 'path': "memory-report-Start-0.json.gz"},
+    {'name': "Fresh start [+30s]", 'path': "memory-report-StartSettled-0.json.gz"},
+    {'name': "After tabs open", 'path': "memory-report-TabsOpen-4.json.gz"},
+    {'name': "After tabs open [+30s]", 'path': "memory-report-TabsOpenSettled-4.json.gz"},
+    {'name': "After tabs open [+30s, forced GC]",
+        'path': "memory-report-TabsOpenForceGC-4.json.gz"},
+    {'name': "Tabs closed extra processes",
+     'path': "memory-report-TabsClosedExtraProcesses-4.json.gz"},
+    {'name': "Tabs closed", 'path': "memory-report-TabsClosed-4.json.gz"},
+    {'name': "Tabs closed [+30s]", 'path': "memory-report-TabsClosedSettled-4.json.gz"},
+    {'name': "Tabs closed [+30s, forced GC]",
+     'path': "memory-report-TabsClosedForceGC-4.json.gz"}
 ]
 
 # A description of each perfherder suite and the path to its values.
 PERF_SUITES = [
-    { 'name': "Resident Memory", 'node': "resident" },
-    { 'name': "Explicit Memory", 'node': "explicit/" },
-    { 'name': "Heap Unclassified", 'node': "explicit/heap-unclassified" },
-    { 'name': "JS", 'node': "js-main-runtime/" },
-    { 'name': "Images", 'node': "explicit/images/" }
+    {'name': "Resident Memory", 'node': "resident"},
+    {'name': "Explicit Memory", 'node': "explicit/"},
+    {'name': "Heap Unclassified", 'node': "explicit/heap-unclassified"},
+    {'name': "JS", 'node': "js-main-runtime/"},
+    {'name': "Images", 'node': "explicit/images/"}
 ]
+
+
+def median(values):
+    sorted_ = sorted(values)
+    med = int(len(sorted_) / 2)
+
+    if len(sorted_) % 2:
+        return sorted_[med]
+    return (sorted_[med - 1] + sorted_[med]) / 2
+
 
 def update_checkpoint_paths(checkpoint_files, checkpoints):
     """
@@ -39,23 +52,24 @@ def update_checkpoint_paths(checkpoint_files, checkpoints):
     :param checkpoints: The checkpoints to update the path of.
     """
     target_path = [['Start-', 0],
-                      ['StartSettled-', 0],
-                      ['TabsOpen-', -1],
-                      ['TabsOpenSettled-', -1],
-                      ['TabsOpenForceGC-', -1],
-                      ['TabsClosedExtraProcesses-', -1],
-                      ['TabsClosed-', -1],
-                      ['TabsClosedSettled-', -1],
-                      ['TabsClosedForceGC-', -1]]
+                   ['StartSettled-', 0],
+                   ['TabsOpen-', -1],
+                   ['TabsOpenSettled-', -1],
+                   ['TabsOpenForceGC-', -1],
+                   ['TabsClosedExtraProcesses-', -1],
+                   ['TabsClosed-', -1],
+                   ['TabsClosedSettled-', -1],
+                   ['TabsClosedForceGC-', -1]]
     for i in range(len(target_path)):
         (name, idx) = target_path[i]
         paths = sorted([x for x in checkpoint_files if name in x])
         if paths:
-            indices = [i for i,x in enumerate(checkpoints) if name in x['path']]
+            indices = [i for i, x in enumerate(checkpoints) if name in x['path']]
             if indices:
                 checkpoints[indices[0]]['path'] = paths[idx]
             else:
                 print "found files but couldn't find %s" % name
+
 
 def create_suite(name, node, data_path, checkpoints=CHECKPOINTS):
     """
@@ -74,10 +88,20 @@ def create_suite(name, node, data_path, checkpoints=CHECKPOINTS):
         'lowerIsBetter': True,
         'units': 'bytes'
     }
+
+    extra_opts = []
+    # The stylo attributes override each other.
     if 'STYLO_FORCE_ENABLED' in os.environ and os.environ['STYLO_FORCE_ENABLED']:
-        suite['extraOptions'] = ["stylo"]
+        extra_opts = ["stylo"]
     if 'STYLO_THREADS' in os.environ and os.environ['STYLO_THREADS'] == '1':
-        suite['extraOptions'] = ["stylo-sequential"]
+        extra_opts = ["stylo-sequential"]
+
+    if 'DMD' in os.environ and os.environ['DMD']:
+        extra_opts.append("dmd")
+
+    if extra_opts:
+        suite['extraOptions'] = extra_opts
+
     update_checkpoint_paths(glob.glob(os.path.join(data_path, "memory-report*")), checkpoints)
 
     total = 0
@@ -85,15 +109,15 @@ def create_suite(name, node, data_path, checkpoints=CHECKPOINTS):
         memory_report_path = os.path.join(data_path, checkpoint['path'])
 
         name_filter = checkpoint.get('name_filter', None)
-        count = checkpoint.get('count', 0)
+        if checkpoint.get('median'):
+            process = median
+        else:
+            process = sum
 
         if node != "resident":
             totals = parse_about_memory.calculate_memory_report_values(
                                             memory_report_path, node, name_filter)
-            if count:
-                value = sum(totals.values()[:count])
-            else:
-                value = sum(totals.values())
+            value = process(totals.values())
         else:
             # For "resident" we really want RSS of the chrome ("Main") process
             # and USS of the child processes. We'll still call it resident
@@ -104,7 +128,7 @@ def create_suite(name, node, data_path, checkpoints=CHECKPOINTS):
             totals_uss = parse_about_memory.calculate_memory_report_values(
                                             memory_report_path, 'resident-unique')
             value = totals_rss.values()[0] + \
-                    sum([v for k, v in totals_uss.iteritems() if not 'Main' in k])
+                sum([v for k, v in totals_uss.iteritems() if 'Main' not in k])
 
         subtest = {
             'name': checkpoint['name'],
@@ -112,7 +136,7 @@ def create_suite(name, node, data_path, checkpoints=CHECKPOINTS):
             'lowerIsBetter': True,
             'units': 'bytes'
         }
-        suite['subtests'].append(subtest);
+        suite['subtests'].append(subtest)
         total += math.log(subtest['value'])
 
     # Add the geometric mean. For more details on the calculation see:
@@ -131,12 +155,13 @@ def create_perf_data(data_path, perf_suites=PERF_SUITES, checkpoints=CHECKPOINTS
         return {}
 
     perf_blob = {
-        'framework': { 'name': 'awsy' },
+        'framework': {'name': 'awsy'},
         'suites': []
     }
 
     for suite in perf_suites:
-        perf_blob['suites'].append(create_suite(suite['name'], suite['node'], data_path, checkpoints))
+        perf_blob['suites'].append(create_suite(
+            suite['name'], suite['node'], data_path, checkpoints))
 
     return perf_blob
 

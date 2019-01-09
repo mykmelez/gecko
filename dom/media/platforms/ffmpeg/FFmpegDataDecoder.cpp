@@ -4,7 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
 #include <string.h>
 #ifdef __GNUC__
 #include <unistd.h>
@@ -22,21 +21,19 @@ StaticMutex FFmpegDataDecoder<LIBAV_VER>::sMonitor;
 FFmpegDataDecoder<LIBAV_VER>::FFmpegDataDecoder(FFmpegLibWrapper* aLib,
                                                 TaskQueue* aTaskQueue,
                                                 AVCodecID aCodecID)
-  : mLib(aLib)
-  , mCodecContext(nullptr)
-  , mCodecParser(nullptr)
-  , mFrame(NULL)
-  , mExtraData(nullptr)
-  , mCodecID(aCodecID)
-  , mTaskQueue(aTaskQueue)
-  , mLastInputDts(media::TimeUnit::FromMicroseconds(INT64_MIN))
-{
+    : mLib(aLib),
+      mCodecContext(nullptr),
+      mCodecParser(nullptr),
+      mFrame(NULL),
+      mExtraData(nullptr),
+      mCodecID(aCodecID),
+      mTaskQueue(aTaskQueue),
+      mLastInputDts(media::TimeUnit::FromMicroseconds(INT64_MIN)) {
   MOZ_ASSERT(aLib);
   MOZ_COUNT_CTOR(FFmpegDataDecoder);
 }
 
-FFmpegDataDecoder<LIBAV_VER>::~FFmpegDataDecoder()
-{
+FFmpegDataDecoder<LIBAV_VER>::~FFmpegDataDecoder() {
   MOZ_COUNT_DTOR(FFmpegDataDecoder);
   if (mCodecParser) {
     mLib->av_parser_close(mCodecParser);
@@ -44,9 +41,7 @@ FFmpegDataDecoder<LIBAV_VER>::~FFmpegDataDecoder()
   }
 }
 
-MediaResult
-FFmpegDataDecoder<LIBAV_VER>::InitDecoder()
-{
+MediaResult FFmpegDataDecoder<LIBAV_VER>::InitDecoder() {
   FFMPEG_LOG("Initialising FFmpeg decoder.");
 
   AVCodec* codec = FindAVCodec(mLib, mCodecID);
@@ -77,12 +72,20 @@ FFmpegDataDecoder<LIBAV_VER>::InitDecoder()
     mCodecContext->extradata_size = mExtraData->Length();
     // FFmpeg may use SIMD instructions to access the data which reads the
     // data in 32 bytes block. Must ensure we have enough data to read.
+    uint32_t padding_size =
 #if LIBAVCODEC_VERSION_MAJOR >= 58
-    mExtraData->AppendElements(AV_INPUT_BUFFER_PADDING_SIZE);
+        AV_INPUT_BUFFER_PADDING_SIZE;
 #else
-    mExtraData->AppendElements(FF_INPUT_BUFFER_PADDING_SIZE);
+        FF_INPUT_BUFFER_PADDING_SIZE;
 #endif
-    mCodecContext->extradata = mExtraData->Elements();
+    mCodecContext->extradata = static_cast<uint8_t*>(
+        mLib->av_malloc(mExtraData->Length() + padding_size));
+    if (!mCodecContext->extradata) {
+      return MediaResult(NS_ERROR_OUT_OF_MEMORY,
+                         RESULT_DETAIL("Couldn't init ffmpeg extradata"));
+    }
+    memcpy(mCodecContext->extradata, mExtraData->Elements(),
+           mExtraData->Length());
   } else {
     mCodecContext->extradata_size = 0;
   }
@@ -104,9 +107,7 @@ FFmpegDataDecoder<LIBAV_VER>::InitDecoder()
   return NS_OK;
 }
 
-RefPtr<ShutdownPromise>
-FFmpegDataDecoder<LIBAV_VER>::Shutdown()
-{
+RefPtr<ShutdownPromise> FFmpegDataDecoder<LIBAV_VER>::Shutdown() {
   if (mTaskQueue) {
     RefPtr<FFmpegDataDecoder<LIBAV_VER>> self = this;
     return InvokeAsync(mTaskQueue, __func__, [self]() {
@@ -118,16 +119,14 @@ FFmpegDataDecoder<LIBAV_VER>::Shutdown()
   return ShutdownPromise::CreateAndResolve(true, __func__);
 }
 
-RefPtr<MediaDataDecoder::DecodePromise>
-FFmpegDataDecoder<LIBAV_VER>::Decode(MediaRawData* aSample)
-{
+RefPtr<MediaDataDecoder::DecodePromise> FFmpegDataDecoder<LIBAV_VER>::Decode(
+    MediaRawData* aSample) {
   return InvokeAsync<MediaRawData*>(mTaskQueue, this, __func__,
                                     &FFmpegDataDecoder::ProcessDecode, aSample);
 }
 
 RefPtr<MediaDataDecoder::DecodePromise>
-FFmpegDataDecoder<LIBAV_VER>::ProcessDecode(MediaRawData* aSample)
-{
+FFmpegDataDecoder<LIBAV_VER>::ProcessDecode(MediaRawData* aSample) {
   bool gotFrame = false;
   DecodedData results;
   MediaResult rv = DoDecode(aSample, &gotFrame, results);
@@ -137,30 +136,29 @@ FFmpegDataDecoder<LIBAV_VER>::ProcessDecode(MediaRawData* aSample)
   return DecodePromise::CreateAndResolve(std::move(results), __func__);
 }
 
-MediaResult
-FFmpegDataDecoder<LIBAV_VER>::DoDecode(MediaRawData* aSample, bool* aGotFrame,
-                                       MediaDataDecoder::DecodedData& aResults)
-{
+MediaResult FFmpegDataDecoder<LIBAV_VER>::DoDecode(
+    MediaRawData* aSample, bool* aGotFrame,
+    MediaDataDecoder::DecodedData& aResults) {
   uint8_t* inputData = const_cast<uint8_t*>(aSample->Data());
   size_t inputSize = aSample->Size();
 
   mLastInputDts = aSample->mTimecode;
 
-  if (mCodecParser) {
+  if (inputData && mCodecParser) {  // inputData is null when draining.
     if (aGotFrame) {
       *aGotFrame = false;
     }
-    do {
+    while (inputSize) {
       uint8_t* data = inputData;
       int size = inputSize;
       int len = mLib->av_parser_parse2(
-        mCodecParser, mCodecContext, &data, &size, inputData, inputSize,
-        aSample->mTime.ToMicroseconds(), aSample->mTimecode.ToMicroseconds(),
-        aSample->mOffset);
+          mCodecParser, mCodecContext, &data, &size, inputData, inputSize,
+          aSample->mTime.ToMicroseconds(), aSample->mTimecode.ToMicroseconds(),
+          aSample->mOffset);
       if (size_t(len) > inputSize) {
         return NS_ERROR_DOM_MEDIA_DECODE_ERR;
       }
-      if (size || !inputSize) {
+      if (size) {
         bool gotFrame = false;
         MediaResult rv = DoDecode(aSample, data, size, &gotFrame, aResults);
         if (NS_FAILED(rv)) {
@@ -172,42 +170,38 @@ FFmpegDataDecoder<LIBAV_VER>::DoDecode(MediaRawData* aSample, bool* aGotFrame,
       }
       inputData += len;
       inputSize -= len;
-    } while (inputSize > 0);
+    }
     return NS_OK;
   }
   return DoDecode(aSample, inputData, inputSize, aGotFrame, aResults);
 }
 
-RefPtr<MediaDataDecoder::FlushPromise>
-FFmpegDataDecoder<LIBAV_VER>::Flush()
-{
+RefPtr<MediaDataDecoder::FlushPromise> FFmpegDataDecoder<LIBAV_VER>::Flush() {
   return InvokeAsync(mTaskQueue, this, __func__,
                      &FFmpegDataDecoder<LIBAV_VER>::ProcessFlush);
 }
 
-RefPtr<MediaDataDecoder::DecodePromise>
-FFmpegDataDecoder<LIBAV_VER>::Drain()
-{
+RefPtr<MediaDataDecoder::DecodePromise> FFmpegDataDecoder<LIBAV_VER>::Drain() {
   return InvokeAsync(mTaskQueue, this, __func__,
                      &FFmpegDataDecoder<LIBAV_VER>::ProcessDrain);
 }
 
 RefPtr<MediaDataDecoder::DecodePromise>
-FFmpegDataDecoder<LIBAV_VER>::ProcessDrain()
-{
+FFmpegDataDecoder<LIBAV_VER>::ProcessDrain() {
   RefPtr<MediaRawData> empty(new MediaRawData());
   empty->mTimecode = mLastInputDts;
   bool gotFrame = false;
   DecodedData results;
-  while (NS_SUCCEEDED(DoDecode(empty, &gotFrame, results)) &&
-         gotFrame) {
+  // When draining the FFmpeg decoder will return either a single frame at a
+  // time until gotFrame is set to false; or return a block of frames with
+  // NS_ERROR_DOM_MEDIA_END_OF_STREAM
+  while (NS_SUCCEEDED(DoDecode(empty, &gotFrame, results)) && gotFrame) {
   }
   return DecodePromise::CreateAndResolve(std::move(results), __func__);
 }
 
 RefPtr<MediaDataDecoder::FlushPromise>
-FFmpegDataDecoder<LIBAV_VER>::ProcessFlush()
-{
+FFmpegDataDecoder<LIBAV_VER>::ProcessFlush() {
   MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
   if (mCodecContext) {
     mLib->avcodec_flush_buffers(mCodecContext);
@@ -219,12 +213,13 @@ FFmpegDataDecoder<LIBAV_VER>::ProcessFlush()
   return FlushPromise::CreateAndResolve(true, __func__);
 }
 
-void
-FFmpegDataDecoder<LIBAV_VER>::ProcessShutdown()
-{
+void FFmpegDataDecoder<LIBAV_VER>::ProcessShutdown() {
   StaticMutexAutoLock mon(sMonitor);
 
   if (mCodecContext) {
+    if (mCodecContext->extradata) {
+      mLib->av_freep(&mCodecContext->extradata);
+    }
     mLib->avcodec_close(mCodecContext);
     mLib->av_freep(&mCodecContext);
 #if LIBAVCODEC_VERSION_MAJOR >= 55
@@ -237,9 +232,7 @@ FFmpegDataDecoder<LIBAV_VER>::ProcessShutdown()
   }
 }
 
-AVFrame*
-FFmpegDataDecoder<LIBAV_VER>::PrepareFrame()
-{
+AVFrame* FFmpegDataDecoder<LIBAV_VER>::PrepareFrame() {
   MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
 #if LIBAVCODEC_VERSION_MAJOR >= 55
   if (mFrame) {
@@ -260,11 +253,9 @@ FFmpegDataDecoder<LIBAV_VER>::PrepareFrame()
   return mFrame;
 }
 
-/* static */ AVCodec*
-FFmpegDataDecoder<LIBAV_VER>::FindAVCodec(FFmpegLibWrapper* aLib,
-                                          AVCodecID aCodec)
-{
+/* static */ AVCodec* FFmpegDataDecoder<LIBAV_VER>::FindAVCodec(
+    FFmpegLibWrapper* aLib, AVCodecID aCodec) {
   return aLib->avcodec_find_decoder(aCodec);
 }
 
-} // namespace mozilla
+}  // namespace mozilla

@@ -10,6 +10,7 @@ DIRS += [
 DevToolsModules(
     'App.js',
     'CollapseButton.js',
+    'ConfirmDialog.js',
     'ConsoleOutput.js',
     'ConsoleTable.js',
     'FilterBar.js',
@@ -22,5 +23,7 @@ DevToolsModules(
     'MessageIcon.js',
     'MessageIndent.js',
     'MessageRepeat.js',
+    'ReverseSearchInput.css',
+    'ReverseSearchInput.js',
     'SideBar.js'
 )

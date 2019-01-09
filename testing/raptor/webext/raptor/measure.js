@@ -7,19 +7,41 @@ var perfData = window.performance;
 var gRetryCounter = 0;
 
 // measure hero element; must exist inside test page;
+// supported on: Firefox, Chromium, Geckoview
 // default only; this is set via control server settings json
 var getHero = false;
 var heroesToCapture = [];
 
-// measure firefox time-to-first-non-blank-paint
+// measure time-to-first-non-blank-paint
+// supported on: Firefox, Geckoview
 // note: this browser pref must be enabled:
 // dom.performance.time_to_non_blank_paint.enabled = True
 // default only; this is set via control server settings json
 var getFNBPaint = false;
 
-// measure google's first-contentful-paint
+// measure domContentFlushed
+// supported on: Firefox, Geckoview
+// note: this browser pref must be enabled:
+// dom.performance.time_to_dom_content_flushed.enabled = True
+// default only; this is set via control server settings json
+var getDCF = false;
+
+// measure TTFI
+// supported on: Firefox, Geckoview
+// note: this browser pref must be enabled:
+// dom.performance.time_to_first_interactive.enabled = True
+// default only; this is set via control server settings json
+var getTTFI = false;
+
+// measure first-contentful-paint
+// supported on: Chromium
 // default only; this is set via control server settings json
 var getFCP = false;
+
+// measure loadtime
+// supported on: Firefox, Chromium, Geckoview
+// default only; this is set via control server settings json
+var getLoadTime = false;
 
 // performance.timing measurement used as 'starttime'
 var startMeasure = "fetchStart";
@@ -57,11 +79,19 @@ function setup(settings) {
     }
   }
 
+  if (settings.measure.dcf !== undefined) {
+    getDCF = settings.measure.dcf;
+    if (getDCF) {
+      console.log("will be measuring dcf");
+      measureDCF();
+    }
+  }
+
   if (settings.measure.fcp !== undefined) {
     getFCP = settings.measure.fcp;
     if (getFCP) {
       console.log("will be measuring first-contentful-paint");
-      measureFirstContentfulPaint();
+      measureFCP();
     }
   }
 
@@ -71,6 +101,22 @@ function setup(settings) {
       heroesToCapture = settings.measure.hero;
       console.log("hero elements to measure: " + heroesToCapture);
       measureHero();
+    }
+  }
+
+  if (settings.measure.ttfi !== undefined) {
+    getTTFI = settings.measure.ttfi;
+    if (getTTFI) {
+      console.log("will be measuring ttfi");
+      measureTTFI();
+    }
+  }
+
+  if (settings.measure.loadtime !== undefined) {
+    getLoadTime = settings.measure.loadtime;
+    if (getLoadTime) {
+      console.log("will be measuring loadtime");
+      measureLoadTime();
     }
   }
 }
@@ -88,13 +134,13 @@ function measureHero() {
         // mark the time now as when hero element received
         perfData.mark(heroFound);
         console.log("found hero:" + heroFound);
+        var resultType = "hero:" + heroFound;
         // calculcate result: performance.timing.fetchStart - time when we got hero element
         perfData.measure(name = resultType,
                          startMark = startMeasure,
                          endMark = heroFound);
         var perfResult = perfData.getEntriesByName(resultType);
-        var _result = perfResult[0].duration;
-        var resultType = "hero:" + heroFound;
+        var _result = Math.round(perfResult[0].duration);
         sendResult(resultType, _result);
         perfData.clearMarks();
         perfData.clearMeasures();
@@ -142,16 +188,71 @@ function measureFNBPaint() {
   }
 }
 
-function measureFirstContentfulPaint() {
+function measureDCF() {
+  var x = window.performance.timing.timeToDOMContentFlushed;
+
+  if (typeof(x) == "undefined") {
+    console.log("ERROR: domContentFlushed is undefined; ensure the pref is enabled");
+    return;
+  }
+  if (x > 0) {
+    console.log("got domContentFlushed: " + x);
+    gRetryCounter = 0;
+    var startTime = perfData.timing.fetchStart;
+    sendResult("dcf", x - startTime);
+  } else {
+    gRetryCounter += 1;
+    if (gRetryCounter <= 10) {
+      console.log("\dcf is not yet available (0), retry number " + gRetryCounter + "...\n");
+      window.setTimeout(measureDCF, 100);
+    } else {
+      console.log("\nunable to get a value for dcf after " + gRetryCounter + " retries\n");
+    }
+  }
+}
+
+function measureTTFI() {
+  var x = window.performance.timing.timeToFirstInteractive;
+
+  if (typeof(x) == "undefined") {
+    console.log("ERROR: timeToFirstInteractive is undefined; ensure the pref is enabled");
+    return;
+  }
+  if (x > 0) {
+    console.log("got timeToFirstInteractive: " + x);
+    gRetryCounter = 0;
+    var startTime = perfData.timing.fetchStart;
+    sendResult("ttfi", x - startTime);
+  } else {
+    gRetryCounter += 1;
+    // NOTE: currently the gecko implementation doesn't look at network
+    // requests, so this is closer to TimeToFirstInteractive than
+    // TimeToInteractive.  Also, we use FNBP instead of FCP as the start
+    // point.  TTFI/TTI requires running at least 5 seconds past last
+    // "busy" point, give 25 seconds here (overall the harness times out at
+    // 30 seconds).  Some pages will never get 5 seconds without a busy
+    // period!
+    if (gRetryCounter <= 25 * (1000 / 200)) {
+      console.log("TTFI is not yet available (0), retry number " + gRetryCounter + "...\n");
+      window.setTimeout(measureTTFI, 200);
+    } else {
+      // unable to get a value for TTFI - negative value will be filtered out later
+      console.log("TTFI was not available for this pageload");
+      sendResult("ttfi", -1);
+    }
+  }
+}
+
+function measureFCP() {
   // see https://developer.mozilla.org/en-US/docs/Web/API/PerformancePaintTiming
   var resultType = "fcp";
   var result = 0;
 
-  let performanceEntries = perfData.getEntriesByType("paint");
+  let perfEntries = perfData.getEntriesByType("paint");
 
-  if (performanceEntries.length >= 2) {
-    if (performanceEntries[1].startTime != undefined)
-      result = performanceEntries[1].startTime;
+  if (perfEntries.length >= 2) {
+    if (perfEntries[1].name == "first-contentful-paint" && perfEntries[1].startTime != undefined)
+      result = perfEntries[1].startTime;
   }
 
   if (result > 0) {
@@ -163,9 +264,32 @@ function measureFirstContentfulPaint() {
     gRetryCounter += 1;
     if (gRetryCounter <= 10) {
       console.log("\ntime to first-contentful-paint is not yet available (0), retry number " + gRetryCounter + "...\n");
-      window.setTimeout(measureFirstContentfulPaint, 100);
+      window.setTimeout(measureFCP, 100);
     } else {
       console.log("\nunable to get a value for time-to-fcp after " + gRetryCounter + " retries\n");
+    }
+  }
+}
+
+function measureLoadTime() {
+  var x = window.performance.timing.loadEventStart;
+
+  if (typeof(x) == "undefined") {
+    console.log("ERROR: loadEventStart is undefined");
+    return;
+  }
+  if (x > 0) {
+    console.log("got loadEventStart: " + x);
+    gRetryCounter = 0;
+    var startTime = perfData.timing.fetchStart;
+    sendResult("loadtime", x - startTime);
+  } else {
+    gRetryCounter += 1;
+    if (gRetryCounter <= 40 * (1000 / 200)) {
+      console.log("\loadEventStart is not yet available (0), retry number " + gRetryCounter + "...\n");
+      window.setTimeout(measureLoadTime, 100);
+    } else {
+      console.log("\nunable to get a value for loadEventStart after " + gRetryCounter + " retries\n");
     }
   }
 }
@@ -174,7 +298,9 @@ function sendResult(_type, _value) {
   // send result back to background runner script
   console.log("sending result back to runner: " + _type + " " + _value);
   chrome.runtime.sendMessage({"type": _type, "value": _value}, function(response) {
-    console.log(response.text);
+    if (response !== undefined) {
+      console.log(response.text);
+    }
   });
 }
 

@@ -7,6 +7,9 @@
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
+ChromeUtils.defineModuleGetter(this, "AppConstants",
+  "resource://gre/modules/AppConstants.jsm");
+
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 const FRAME_SCRIPT_URL = "chrome://gfxsanity/content/gfxFrameScript.js";
 
@@ -26,6 +29,8 @@ const VERSION_PREF = "sanity-test.version";
 const ADVANCED_LAYERS_PREF = "sanity-test.advanced-layers";
 const DISABLE_VIDEO_PREF = "media.hardware-video-decoding.failed";
 const RUNNING_PREF = "sanity-test.running";
+const PERF_ADJUSTMENT_PREF = "performance.adjust_to_machine";
+const LOWEND_DEVICE_PREF = "performance.low_end_machine";
 const TIMEOUT_SEC = 20;
 
 const AL_ENABLED_PREF = "layers.mlgpu.enabled";
@@ -44,14 +49,6 @@ const REASON_FIREFOX_CHANGED = 1;
 const REASON_DEVICE_CHANGED = 2;
 const REASON_DRIVER_CHANGED = 3;
 const REASON_AL_CONFIG_CHANGED = 4;
-
-// GRAPHICS_SANITY_TEST_OS_SNAPSHOT histogram enumeration values
-const SNAPSHOT_VIDEO_OK = 0;
-const SNAPSHOT_VIDEO_FAIL = 1;
-const SNAPSHOT_ERROR = 2;
-const SNAPSHOT_TIMEOUT = 3;
-const SNAPSHOT_LAYERS_OK = 4;
-const SNAPSHOT_LAYERS_FAIL = 5;
 
 function testPixel(ctx, x, y, r, g, b, a, fuzz) {
   var data = ctx.getImageData(x, y, 1, 1);
@@ -80,12 +77,20 @@ function reportTestReason(val) {
   histogram.add(val);
 }
 
-function annotateCrashReport(value) {
+function annotateCrashReport() {
   try {
-    // "1" if we're annotating the crash report, "" to remove the annotation.
     var crashReporter = Cc["@mozilla.org/toolkit/crash-reporter;1"].
                           getService(Ci.nsICrashReporter);
-    crashReporter.annotateCrashReport("GraphicsSanityTest", value ? "1" : "");
+    crashReporter.annotateCrashReport("GraphicsSanityTest", "1");
+  } catch (e) {
+  }
+}
+
+function removeCrashReportAnnotation(value) {
+  try {
+    var crashReporter = Cc["@mozilla.org/toolkit/crash-reporter;1"].
+                          getService(Ci.nsICrashReporter);
+    crashReporter.removeCrashReportAnnotation("GraphicsSanityTest");
   } catch (e) {
   }
 }
@@ -142,7 +147,11 @@ function testCompositor(test, win, ctx) {
     // a device reset so the screen redraws.
     if (Services.prefs.getBoolPref(AL_ENABLED_PREF, false)) {
       Services.prefs.setBoolPref(AL_TEST_FAILED_PREF, true);
-      test.utils.triggerDeviceReset();
+      // Do not need to reset device when WebRender is used.
+      // When WebRender is used, advanced layers are not used.
+      if (test.utils.layerManagerType != "WebRender") {
+        test.utils.triggerDeviceReset();
+      }
     }
     reportResult(TEST_FAILED_RENDER);
     testPassed = false;
@@ -176,8 +185,7 @@ var listener = {
   scheduleTest(win) {
     this.win = win;
     this.win.onload = this.onWindowLoaded.bind(this);
-    this.utils = this.win.QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIDOMWindowUtils);
+    this.utils = this.win.windowUtils;
     setTimeout(TIMEOUT_SEC * 1000, () => {
       if (this.win) {
         reportResult(TEST_TIMEOUT);
@@ -208,7 +216,7 @@ var listener = {
   },
 
   onWindowLoaded() {
-    let browser = this.win.document.createElementNS(XUL_NS, "browser");
+    let browser = this.win.document.createXULElement("browser");
     browser.setAttribute("type", "content");
     browser.setAttribute("disableglobalhistory", "true");
 
@@ -251,8 +259,8 @@ var listener = {
 
     // Remove the annotation after we've cleaned everything up, to catch any
     // incidental crashes from having performed the sanity test.
-    annotateCrashReport(false);
-  }
+    removeCrashReportAnnotation();
+  },
 };
 
 function SanityTest() {}
@@ -329,6 +337,24 @@ SanityTest.prototype = {
     return true;
   },
 
+  _updateLowEndState() {
+    // If we want to adjust performance based on the machine characteristics...
+    if (Services.prefs.getBoolPref(PERF_ADJUSTMENT_PREF, AppConstants.EARLY_BETA_OR_EARLIER)) {
+      // ... treat any machines with 1-2 cores and a clock speed under 1.8GHz
+      // as "low-end". This will trigger use of a lower frame-rate to help free
+      // the CPU for other work by reducing the amount of painting/compositing
+      // we do.
+      // The cut-off here is based on a combination of telemetry info, running
+      // performance tests on the 2018 reference hardware, and gut instinct.
+      // Ideally, we should replace it with one that's entirely powered by
+      // data correlations from telemetry - see bug 1475242 for more.
+      let isLowEnd = Services.sysinfo.get("cpucores") <= 2 && Services.sysinfo.get("cpuspeed") < 1800;
+      Services.prefs.setBoolPref(LOWEND_DEVICE_PREF, isLowEnd);
+    } else {
+      Services.prefs.clearUserPref(LOWEND_DEVICE_PREF);
+    }
+  },
+
   observe(subject, topic, data) {
     if (topic != "profile-after-change") return;
 
@@ -339,13 +365,15 @@ SanityTest.prototype = {
 
     if (!this.shouldRunTest()) return;
 
-    annotateCrashReport(true);
+    annotateCrashReport();
+
+    this._updateLowEndState();
 
     // Open a tiny window to render our test page, and notify us when it's loaded
     var sanityTest = Services.ww.openWindow(null,
         "chrome://gfxsanity/content/sanityparent.html",
         "Test Page",
-        "width=" + PAGE_WIDTH + ",height=" + PAGE_HEIGHT + ",chrome,titlebar=0,scrollbars=0",
+        "width=" + PAGE_WIDTH + ",height=" + PAGE_HEIGHT + ",chrome,titlebar=0,scrollbars=0,popup=1",
         null);
 
     // There's no clean way to have an invisible window and ensure it's always painted.

@@ -16,8 +16,8 @@ from automation import Automation
 from remoteautomation import RemoteAutomation, fennecLogcatFilters
 from runtests import MochitestDesktop, MessageLogger
 from mochitest_options import MochitestArgumentParser
-
-from mozdevice import ADBAndroid
+from mozdevice import ADBDevice, ADBTimeoutError
+from mozscreenshot import dump_screen, dump_device_screen
 import mozinfo
 
 SCRIPT_DIR = os.path.abspath(os.path.realpath(os.path.dirname(__file__)))
@@ -40,10 +40,10 @@ class MochiRemote(MochitestDesktop):
         self.chromePushed = False
         self.mozLogName = "moz.log"
 
-        self.device = ADBAndroid(adb=options.adbPath or 'adb',
-                                 device=options.deviceSerial,
-                                 test_root=options.remoteTestRoot,
-                                 verbose=verbose)
+        self.device = ADBDevice(adb=options.adbPath or 'adb',
+                                device=options.deviceSerial,
+                                test_root=options.remoteTestRoot,
+                                verbose=verbose)
 
         if options.remoteTestRoot is None:
             options.remoteTestRoot = self.device.test_root
@@ -102,6 +102,8 @@ class MochiRemote(MochitestDesktop):
             "Android sdk version '%s'; will use this to filter manifests" %
             str(self.device.version))
         mozinfo.info['android_version'] = str(self.device.version)
+        mozinfo.info['isFennec'] = not ('geckoview' in options.app)
+        mozinfo.info['is_emulator'] = self.device._device_serial.startswith('emulator-')
 
     def cleanup(self, options, final=False):
         if final:
@@ -115,6 +117,17 @@ class MochiRemote(MochitestDesktop):
         self.device.rm(self.remoteCache, force=True, recursive=True)
         MochitestDesktop.cleanup(self, options, final)
         self.localProfile = None
+
+    def dumpScreen(self, utilityPath):
+        if self.haveDumpedScreen:
+            self.log.info(
+                "Not taking screenshot here: see the one that was previously logged")
+            return
+        self.haveDumpedScreen = True
+        if self.device._device_serial.startswith('emulator-'):
+            dump_screen(utilityPath, self.log)
+        else:
+            dump_device_screen(self.device, self.log)
 
     def findPath(self, paths, filename=None):
         for path in paths:
@@ -203,12 +216,10 @@ class MochiRemote(MochitestDesktop):
     def startServers(self, options, debuggerInfo):
         """ Create the servers on the host and start them up """
         restoreRemotePaths = self.switchToLocalPaths(options)
-        # ignoreSSLTunnelExts is a workaround for bug 1109310
         MochitestDesktop.startServers(
             self,
             options,
-            debuggerInfo,
-            ignoreSSLTunnelExts=True)
+            debuggerInfo)
         restoreRemotePaths()
 
     def buildProfile(self, options):
@@ -272,7 +283,9 @@ class MochiRemote(MochitestDesktop):
                 logcat = self.device.get_logcat(
                     filter_out_regexps=fennecLogcatFilters)
                 for l in logcat:
-                    self.log.info(l.decode('utf-8', 'replace'))
+                    ul = l.decode('utf-8', errors='replace')
+                    sl = ul.encode('iso8859-1', errors='replace')
+                    self.log.info(sl)
             self.log.info("Device info:")
             devinfo = self.device.get_info()
             for category in devinfo:
@@ -283,6 +296,8 @@ class MochiRemote(MochitestDesktop):
                 else:
                     self.log.info("  %s: %s" % (category, devinfo[category]))
             self.log.info("Test root: %s" % self.device.test_root)
+        except ADBTimeoutError:
+            raise
         except Exception as e:
             self.log.warning("Error getting device information: %s" % str(e))
 
@@ -305,6 +320,11 @@ class MochiRemote(MochitestDesktop):
             self.mozLogName)
         if options.dmd:
             browserEnv['DMD'] = '1'
+        # Contents of remoteMozLog will be pulled from device and copied to the
+        # host MOZ_UPLOAD_DIR, to be made available as test artifacts. Make
+        # MOZ_UPLOAD_DIR available to the browser environment so that tests
+        # can use it as though they were running on the host.
+        browserEnv["MOZ_UPLOAD_DIR"] = self.remoteMozLog
         return browserEnv
 
     def runApp(self, *args, **kwargs):
@@ -344,21 +364,26 @@ def run_test_harness(parser, options):
         mochitest.printDeviceInfo()
 
     try:
+        device_exception = False
         if options.verify:
             retVal = mochitest.verifyTests(options)
         else:
             retVal = mochitest.runTests(options)
-    except Exception:
+    except Exception as e:
         mochitest.log.error("Automation Error: Exception caught while running tests")
         traceback.print_exc()
-        try:
-            mochitest.cleanup(options)
-        except Exception:
-            # device error cleaning up... oh well!
-            traceback.print_exc()
+        if isinstance(e, ADBTimeoutError):
+            mochitest.log.info("Device disconnected. Will not run mochitest.cleanup().")
+            device_exception = True
+        else:
+            try:
+                mochitest.cleanup(options)
+            except Exception:
+                # device error cleaning up... oh well!
+                traceback.print_exc()
         retVal = 1
 
-    if options.log_mach is None and not options.verify:
+    if not device_exception and options.log_mach is None and not options.verify:
         mochitest.printDeviceInfo(printLogcat=True)
 
     mochitest.message_logger.finish()

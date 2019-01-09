@@ -1,37 +1,21 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Code for invalidations due to state or attribute changes.
 
-use {Atom, LocalName, Namespace};
-use context::QuirksMode;
-use element_state::{DocumentState, ElementState};
+use crate::context::QuirksMode;
+use crate::element_state::{DocumentState, ElementState};
+use crate::selector_map::{MaybeCaseInsensitiveHashMap, SelectorMap, SelectorMapEntry};
+use crate::selector_parser::SelectorImpl;
+use crate::{Atom, LocalName, Namespace};
 use fallible::FallibleVec;
 use hashglobe::FailedAllocationError;
-use selector_map::{MaybeCaseInsensitiveHashMap, SelectorMap, SelectorMapEntry};
-#[cfg(feature = "gecko")]
-use selector_parser::Direction;
-use selector_parser::SelectorImpl;
 use selectors::attr::NamespaceConstraint;
 use selectors::parser::{Combinator, Component};
 use selectors::parser::{Selector, SelectorIter, Visit};
 use selectors::visitor::SelectorVisitor;
 use smallvec::SmallVec;
-
-#[cfg(feature = "gecko")]
-/// Gets the element state relevant to the given `:dir` pseudo-class selector.
-pub fn dir_selector_to_state(dir: &Direction) -> ElementState {
-    match *dir {
-        Direction::Ltr => ElementState::IN_LTR_STATE,
-        Direction::Rtl => ElementState::IN_RTL_STATE,
-        Direction::Other(_) => {
-            // :dir(something-random) is a valid selector, but shouldn't
-            // match anything.
-            ElementState::empty()
-        },
-    }
-}
 
 /// Mapping between (partial) CompoundSelectors (and the combinator to their
 /// right) and the states and attributes they depend on.
@@ -54,8 +38,10 @@ pub fn dir_selector_to_state(dir: &Direction) -> ElementState {
 #[derive(Clone, Debug, MallocSizeOf)]
 pub struct Dependency {
     /// The dependency selector.
-    #[cfg_attr(feature = "gecko",
-               ignore_malloc_size_of = "CssRules have primary refs, we measure there")]
+    #[cfg_attr(
+        feature = "gecko",
+        ignore_malloc_size_of = "CssRules have primary refs, we measure there"
+    )]
     #[cfg_attr(feature = "servo", ignore_malloc_size_of = "Arc")]
     pub selector: Selector<SelectorImpl>,
 
@@ -143,8 +129,10 @@ impl SelectorMapEntry for StateDependency {
 pub struct DocumentStateDependency {
     /// The selector that is affected. We don't need to track an offset, since
     /// when it changes it changes for the whole document anyway.
-    #[cfg_attr(feature = "gecko",
-               ignore_malloc_size_of = "CssRules have primary refs, we measure there")]
+    #[cfg_attr(
+        feature = "gecko",
+        ignore_malloc_size_of = "CssRules have primary refs, we measure there"
+    )]
     #[cfg_attr(feature = "servo", ignore_malloc_size_of = "Arc")]
     pub selector: Selector<SelectorImpl>,
     /// The state this dependency is affected by.
@@ -201,7 +189,8 @@ impl InvalidationMap {
 
     /// Returns the number of dependencies stored in the invalidation map.
     pub fn len(&self) -> usize {
-        self.state_affecting_selectors.len() + self.document_state_selectors.len() +
+        self.state_affecting_selectors.len() +
+            self.document_state_selectors.len() +
             self.other_attribute_affecting_selectors.len() +
             self.id_to_selector
                 .iter()
@@ -369,7 +358,7 @@ impl<'a> SelectorVisitor for CompoundSelectorDependencyCollector<'a> {
 
     fn visit_simple_selector(&mut self, s: &Component<SelectorImpl>) -> bool {
         #[cfg(feature = "gecko")]
-        use selector_parser::NonTSPseudoClass;
+        use crate::selector_parser::NonTSPseudoClass;
 
         match *s {
             Component::ID(ref id) => {
@@ -382,7 +371,7 @@ impl<'a> SelectorVisitor for CompoundSelectorDependencyCollector<'a> {
                 self.other_attributes |= pc.is_attr_based();
                 self.state |= match *pc {
                     #[cfg(feature = "gecko")]
-                    NonTSPseudoClass::Dir(ref dir) => dir_selector_to_state(dir),
+                    NonTSPseudoClass::Dir(ref dir) => dir.element_state(),
                     _ => pc.state_flag(),
                 };
                 *self.document_state |= pc.document_state_flag();

@@ -31,16 +31,17 @@ function urlChecker(url) {
 }
 
 async function runTests(browser, accDoc) {
-  let onLoadEvents = waitForEvents([
-    [EVENT_REORDER, getAccessible(browser)],
-    [EVENT_DOCUMENT_LOAD_COMPLETE, "body2"],
-    [EVENT_STATE_CHANGE, busyChecker(false)]
-  ], [ // unexpected
-    [EVENT_DOCUMENT_LOAD_COMPLETE, inIframeChecker("iframe1")],
-    [EVENT_STATE_CHANGE, inIframeChecker("iframe1")]
-  ]);
+  let onLoadEvents = waitForEvents({
+    expected: [
+      [EVENT_REORDER, getAccessible(browser)],
+      [EVENT_DOCUMENT_LOAD_COMPLETE, "body2"],
+      [EVENT_STATE_CHANGE, busyChecker(false)]],
+    unexpected: [
+      [EVENT_DOCUMENT_LOAD_COMPLETE, inIframeChecker("iframe1")],
+      [EVENT_STATE_CHANGE, inIframeChecker("iframe1")]]
+  });
 
-  browser.loadURI(`data:text/html;charset=utf-8,
+  BrowserTestUtils.loadURI(browser, `data:text/html;charset=utf-8,
     <html><body id="body2">
       <iframe id="iframe1" src="http://example.com"></iframe>
     </body></html>`);
@@ -53,7 +54,7 @@ async function runTests(browser, accDoc) {
       [EVENT_REORDER, getAccessible(browser)]
   ]);
 
-  browser.loadURI("about:about");
+  BrowserTestUtils.loadURI(browser, "about:about");
 
   await onLoadEvents;
 
@@ -73,7 +74,7 @@ async function runTests(browser, accDoc) {
     [EVENT_REORDER, getAccessible(browser)]
   ]);
 
-  browser.loadURI("about:mozilla");
+  BrowserTestUtils.loadURI(browser, "about:mozilla");
 
   await onLoadEvents;
 
@@ -93,7 +94,7 @@ async function runTests(browser, accDoc) {
     [EVENT_REORDER, getAccessible(browser)]
   ]);
 
-  browser.loadURI("http://www.wronguri.wronguri/");
+  BrowserTestUtils.loadURI(browser, "http://www.wronguri.wronguri/");
 
   await onLoadEvents;
 
@@ -103,7 +104,7 @@ async function runTests(browser, accDoc) {
     [EVENT_REORDER, getAccessible(browser)]
   ]);
 
-  browser.loadURI("https://nocert.example.com:443/");
+  BrowserTestUtils.loadURI(browser, "https://nocert.example.com:443/");
 
   await onLoadEvents;
 }

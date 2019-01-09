@@ -98,6 +98,10 @@ browser.getTabBrowser = function(window) {
   // Firefox
   } else if ("gBrowser" in window) {
     return window.gBrowser;
+
+  // Thunderbird
+  } else if (window.document.getElementById("tabmail")) {
+    return window.document.getElementById("tabmail");
   }
 
   return null;
@@ -141,11 +145,11 @@ browser.Context = class {
     // being the currently selected tab.
     this.tab = null;
 
-    // Commands which trigger a page load can cause the frame script to be
-    // reloaded. To not loose the currently active command, or any other
-    // already pushed following command, store them as long as they haven't
-    // been fully processed. The commands get flushed after a new browser
-    // has been registered.
+    // Commands which trigger a navigation can cause the frame script to be
+    // moved to a different process. To not loose the currently active
+    // command, or any other already pushed following command, store them as
+    // long as they haven't been fully processed. The commands get flushed
+    // after a new browser has been registered.
     this.pendingCommands = [];
     this._needsFlushPendingCommands = false;
 
@@ -255,7 +259,6 @@ browser.Context = class {
       y: this.window.screenY,
       width: this.window.outerWidth,
       height: this.window.outerHeight,
-      state: WindowState.from(this.window.windowState),
     };
   }
 
@@ -271,9 +274,10 @@ browser.Context = class {
 
     // The modal is a direct sibling of the browser element.
     // See tabbrowser.xml's getTabModalPromptBox.
-    let modals = br.parentNode.getElementsByTagNameNS(
+    let modalElements = br.parentNode.getElementsByTagNameNS(
         XUL_NS, "tabmodalprompt");
-    return modals[0].ui;
+
+    return br.tabModalPromptBox.prompts.get(modalElements[0]).ui;
   }
 
   /**
@@ -430,7 +434,9 @@ browser.Context = class {
   }
 
   /**
-   * Flushes any queued pending commands after a reload of the frame script.
+   * Flush any queued pending commands.
+   *
+   * Needs to be run after a process change for the frame script.
    */
   flushPendingCommands() {
     if (!this._needsFlushPendingCommands) {
@@ -438,7 +444,6 @@ browser.Context = class {
     }
 
     this.pendingCommands.forEach(cb => cb());
-    this.pendingCommands = [];
     this._needsFlushPendingCommands = false;
   }
 
@@ -447,10 +452,10 @@ browser.Context = class {
     * or executes them as needed.
     *
     * No commands interacting with content are safe to process until
-    * the new listener script is loaded and registers itself.
+    * the new listener script is loaded and registered itself.
     * This occurs when a command whose effect is asynchronous (such
-    * as goBack) results in a reload of the frame script and new commands
-    * are subsequently posted to the server.
+    * as goBack) results in process change of the frame script and new
+    * commands are subsequently posted to the server.
     */
   executeWhenReady(cb) {
     if (this._needsFlushPendingCommands) {

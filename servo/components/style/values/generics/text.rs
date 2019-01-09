@@ -1,19 +1,20 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Generic types for text properties.
 
+use crate::parser::ParserContext;
+use crate::values::animated::{Animate, Procedure, ToAnimatedZero};
+use crate::values::distance::{ComputeSquaredDistance, SquaredDistance};
 use app_units::Au;
 use cssparser::Parser;
-use parser::ParserContext;
 use style_traits::ParseError;
-use values::animated::{Animate, Procedure, ToAnimatedZero};
-use values::distance::{ComputeSquaredDistance, SquaredDistance};
 
 /// A generic value for the `initial-letter` property.
-#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo,
-         ToComputedValue, ToCss)]
+#[derive(
+    Clone, Copy, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToComputedValue, ToCss,
+)]
 pub enum InitialLetter<Number, Integer> {
     /// `normal`
     Normal,
@@ -30,8 +31,9 @@ impl<N, I> InitialLetter<N, I> {
 }
 
 /// A generic spacing value for the `letter-spacing` and `word-spacing` properties.
-#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo,
-         ToComputedValue, ToCss)]
+#[derive(
+    Clone, Copy, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToComputedValue, ToCss,
+)]
 pub enum Spacing<Value> {
     /// `normal`
     Normal,
@@ -101,10 +103,7 @@ where
     }
 }
 
-impl<V> ToAnimatedZero for Spacing<V>
-where
-    V: From<Au>,
-{
+impl<V> ToAnimatedZero for Spacing<V> {
     #[inline]
     fn to_animated_zero(&self) -> Result<Self, ()> {
         Err(())
@@ -112,9 +111,19 @@ where
 }
 
 /// A generic value for the `line-height` property.
-#[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug, MallocSizeOf,
-         PartialEq, SpecifiedValueInfo, ToAnimatedValue, ToCss)]
-pub enum LineHeight<Number, LengthOrPercentage> {
+#[derive(
+    Animate,
+    Clone,
+    ComputeSquaredDistance,
+    Copy,
+    Debug,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToAnimatedValue,
+    ToCss,
+)]
+pub enum LineHeight<Number, LengthPercentage> {
     /// `normal`
     Normal,
     /// `-moz-block-height`
@@ -123,7 +132,7 @@ pub enum LineHeight<Number, LengthOrPercentage> {
     /// `<number>`
     Number(Number),
     /// `<length-or-percentage>`
-    Length(LengthOrPercentage),
+    Length(LengthPercentage),
 }
 
 impl<N, L> ToAnimatedZero for LineHeight<N, L> {
@@ -142,9 +151,20 @@ impl<N, L> LineHeight<N, L> {
 }
 
 /// A generic value for the `-moz-tab-size` property.
-#[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug, MallocSizeOf,
-         PartialEq, SpecifiedValueInfo, ToAnimatedValue, ToAnimatedZero,
-         ToComputedValue, ToCss)]
+#[derive(
+    Animate,
+    Clone,
+    ComputeSquaredDistance,
+    Copy,
+    Debug,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToAnimatedValue,
+    ToAnimatedZero,
+    ToComputedValue,
+    ToCss,
+)]
 pub enum MozTabSize<Number, Length> {
     /// A number.
     Number(Number),

@@ -12,29 +12,24 @@
 
 namespace mozilla {
 
-void
-StyleSheet::SetURIs(nsIURI* aSheetURI,
-                    nsIURI* aOriginalSheetURI,
-                    nsIURI* aBaseURI)
-{
+void StyleSheet::SetURIs(nsIURI* aSheetURI, nsIURI* aOriginalSheetURI,
+                         nsIURI* aBaseURI) {
   MOZ_ASSERT(aSheetURI && aBaseURI, "null ptr");
-  StyleSheetInfo& info = Inner();
-  MOZ_ASSERT(!HasRules() && !info.mComplete,
+  MOZ_ASSERT(!HasRules() && !IsComplete(),
              "Can't call SetURIs on sheets that are complete or have rules");
+  StyleSheetInfo& info = Inner();
   info.mSheetURI = aSheetURI;
   info.mOriginalSheetURI = aOriginalSheetURI;
   info.mBaseURI = aBaseURI;
 }
 
-dom::ParentObject
-StyleSheet::GetParentObject() const
-{
+dom::ParentObject StyleSheet::GetParentObject() const {
   if (mOwningNode) {
     return dom::ParentObject(mOwningNode);
   }
   return dom::ParentObject(mParent);
 }
 
-}
+}  // namespace mozilla
 
-#endif // mozilla_StyleSheetInlines_h
+#endif  // mozilla_StyleSheetInlines_h

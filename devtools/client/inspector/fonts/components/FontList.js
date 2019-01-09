@@ -4,11 +4,18 @@
 
 "use strict";
 
-const { createFactory, PureComponent } = require("devtools/client/shared/vendor/react");
+const {
+  createElement,
+  createFactory,
+  createRef,
+  Fragment,
+  PureComponent,
+} = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
 const Font = createFactory(require("./Font"));
+const FontPreviewInput = createFactory(require("./FontPreviewInput"));
 
 const Types = require("../types");
 
@@ -17,31 +24,56 @@ class FontList extends PureComponent {
     return {
       fontOptions: PropTypes.shape(Types.fontOptions).isRequired,
       fonts: PropTypes.arrayOf(PropTypes.shape(Types.font)).isRequired,
-      onPreviewFonts: PropTypes.func.isRequired,
+      onPreviewTextChange: PropTypes.func.isRequired,
       onToggleFontHighlight: PropTypes.func.isRequired,
     };
+  }
+
+  constructor(props) {
+    super(props);
+
+    this.onPreviewClick = this.onPreviewClick.bind(this);
+    this.previewInputRef = createRef();
+  }
+
+  /**
+   * Handler for clicks on the font preview image.
+   * Requests the FontPreviewInput component, if one exists, to focus its input field.
+   */
+  onPreviewClick() {
+    this.previewInputRef.current && this.previewInputRef.current.focus();
   }
 
   render() {
     const {
       fonts,
       fontOptions,
-      onPreviewFonts,
-      onToggleFontHighlight
+      onPreviewTextChange,
+      onToggleFontHighlight,
     } = this.props;
 
-    return dom.ul(
+    const { previewText } = fontOptions;
+    const { onPreviewClick } = this;
+
+    const list = dom.ul(
       {
-        className: "fonts-list"
+        className: "fonts-list",
       },
       fonts.map((font, i) => Font({
         key: i,
         font,
-        fontOptions,
-        onPreviewFonts,
+        onPreviewClick,
         onToggleFontHighlight,
       }))
     );
+
+    const previewInput = FontPreviewInput({
+      ref: this.previewInputRef,
+      onPreviewTextChange,
+      previewText,
+    });
+
+    return createElement(Fragment, null, previewInput, list);
   }
 }
 

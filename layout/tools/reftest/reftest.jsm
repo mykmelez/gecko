@@ -12,10 +12,11 @@ var EXPORTED_SYMBOLS = [
 ];
 
 Cu.import("resource://gre/modules/FileUtils.jsm");
-Cu.import("chrome://reftest/content/globals.jsm", this);
-Cu.import("chrome://reftest/content/httpd.jsm", this);
-Cu.import("chrome://reftest/content/manifest.jsm", this);
-Cu.import("chrome://reftest/content/StructuredLog.jsm", this);
+Cu.import("resource://reftest/globals.jsm", this);
+Cu.import("resource://reftest/httpd.jsm", this);
+Cu.import("resource://reftest/manifest.jsm", this);
+Cu.import("resource://reftest/StructuredLog.jsm", this);
+Cu.import("resource://reftest/PerTestCoverageUtils.jsm", this);
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/NetUtil.jsm");
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
@@ -177,7 +178,6 @@ function OnRefTestLoad(win)
       g.browser.setAttribute("mozbrowser", "");
     } else {
       g.browser = g.containingWindow.document.createElementNS(XUL_NS, "xul:browser");
-      g.browser.setAttribute("class", "lightweight");
     }
     g.browser.setAttribute("id", "browser");
     g.browser.setAttribute("type", "content");
@@ -279,7 +279,7 @@ function InitAndStartRefTests()
     }
 #endif
 
-    g.windowUtils = g.containingWindow.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+    g.windowUtils = g.containingWindow.windowUtils;
     if (!g.windowUtils || !g.windowUtils.compareCanvases)
         throw "nsIDOMWindowUtils inteface missing";
 
@@ -305,6 +305,10 @@ function InitAndStartRefTests()
 
     // Focus the content browser.
     if (g.focusFilterMode != FOCUS_FILTER_NON_NEEDS_FOCUS_TESTS) {
+        var fm = Cc["@mozilla.org/focus-manager;1"].getService(Ci.nsIFocusManager);
+        if (fm.activeWindow != g.containingWindow) {
+            Focus();
+        }
         g.browser.addEventListener("focus", ReadTests, true);
         g.browser.focus();
     } else {
@@ -359,6 +363,8 @@ function ReadTests() {
 
         if ((testList && manifests) || !(testList || manifests)) {
             logger.error("Exactly one of reftest.manifests or reftest.tests must be specified.");
+            logger.debug("reftest.manifests is: " + manifests);
+            logger.error("reftest.tests is: " + testList);
             DoneTests();
         }
 
@@ -508,11 +514,17 @@ function StartTests()
         }
 
         g.totalTests = g.urls.length;
-        if (!g.totalTests && !g.verify)
+        if (!g.totalTests && !g.verify && !g.repeat)
             throw "No tests to run";
 
         g.uriCanvases = {};
-        StartCurrentTest();
+
+        PerTestCoverageUtils.beforeTest()
+        .then(StartCurrentTest)
+        .catch(e => {
+            logger.error("EXCEPTION: " + e);
+            DoneTests();
+        });
     } catch (ex) {
         //g.browser.loadURI('data:text/plain,' + ex);
         ++g.testResults.Exception;
@@ -626,7 +638,7 @@ function StartCurrentTest()
     } else if (g.urls.length == 0 && g.repeat > 0) {
         // Repeat
         g.repeat--;
-        StartTests();
+        ReadTests();
     } else {
         if (g.urls[0].chaosMode) {
             g.windowUtils.enterChaosMode();
@@ -752,28 +764,32 @@ function StartCurrentURI(aURLTargetType)
 
 function DoneTests()
 {
-    if (g.manageSuite) {
-        g.suiteStarted = false
-        logger.suiteEnd({'results': g.testResults});
-    } else {
-        logger._logData('results', {results: g.testResults});
-    }
-    logger.info("Slowest test took " + g.slowestTestTime + "ms (" + g.slowestTestURL + ")");
-    logger.info("Total canvas count = " + g.recycledCanvases.length);
-    if (g.failedUseWidgetLayers) {
-        LogWidgetLayersFailure();
-    }
+    PerTestCoverageUtils.afterTest()
+    .catch(e => logger.error("EXCEPTION: " + e))
+    .then(() => {
+        if (g.manageSuite) {
+            g.suiteStarted = false
+            logger.suiteEnd({'results': g.testResults});
+        } else {
+            logger._logData('results', {results: g.testResults});
+        }
+        logger.info("Slowest test took " + g.slowestTestTime + "ms (" + g.slowestTestURL + ")");
+        logger.info("Total canvas count = " + g.recycledCanvases.length);
+        if (g.failedUseWidgetLayers) {
+            LogWidgetLayersFailure();
+        }
 
-    function onStopped() {
-        let appStartup = Cc["@mozilla.org/toolkit/app-startup;1"].getService(Ci.nsIAppStartup);
-        appStartup.quit(Ci.nsIAppStartup.eForceQuit);
-    }
-    if (g.server) {
-        g.server.stop(onStopped);
-    }
-    else {
-        onStopped();
-    }
+        function onStopped() {
+            let appStartup = Cc["@mozilla.org/toolkit/app-startup;1"].getService(Ci.nsIAppStartup);
+            appStartup.quit(Ci.nsIAppStartup.eForceQuit);
+        }
+        if (g.server) {
+            g.server.stop(onStopped);
+        }
+        else {
+            onStopped();
+        }
+    });
 }
 
 function UpdateCanvasCache(url, canvas)
@@ -923,6 +939,12 @@ function RecordResult(testRunTime, errorMsg, typeSpecificResults)
     };
     // for EXPECTED_FUZZY we need special handling because we can have
     // Pass, UnexpectedPass, or UnexpectedFail
+
+    if ((g.currentURLTargetType == URL_TARGET_TYPE_TEST && g.urls[0].wrCapture.test) ||
+        (g.currentURLTargetType == URL_TARGET_TYPE_REFERENCE && g.urls[0].wrCapture.ref)) {
+      logger.info("Running webrender capture");
+      g.windowUtils.wrCapture();
+    }
 
     var output;
     var extra;
@@ -1444,7 +1466,7 @@ function RegisterMessageListenersAndLoadContentScript()
         function (m) { RecvExpectProcessCrash(); }
     );
 
-    g.browserMessageManager.loadFrameScript("chrome://reftest/content/reftest-content.js", true, true);
+    g.browserMessageManager.loadFrameScript("resource://reftest/reftest-content.js", true, true);
 }
 
 function RecvAssertionCount(count)

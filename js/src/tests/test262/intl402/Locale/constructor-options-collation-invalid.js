@@ -19,9 +19,10 @@ features: [Intl.Locale]
 
 /*
  alphanum = (ALPHA / DIGIT)     ; letters and numbers
- collation = [(3*8alphanum) *("-" (3*8alphanum))]
+ collation = (3*8alphanum) *("-" (3*8alphanum))
 */
 const invalidCollationOptions = [
+  "",
   "a",
   "ab",
   "abcdefghi",
@@ -30,7 +31,7 @@ const invalidCollationOptions = [
 for (const invalidCollationOption of invalidCollationOptions) {
   assert.throws(RangeError, function() {
     new Intl.Locale("en", {collation: invalidCollationOption});
-  }, `${invalidCollationOption} is an invalid collation option value`);
+  }, '`new Intl.Locale("en", {collation: invalidCollationOption})` throws RangeError');
 }
 
 reportCompare(0, 0);

@@ -1,23 +1,24 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! https://html.spec.whatwg.org/multipage/#source-size-list
 
+#[cfg(feature = "gecko")]
+use crate::gecko_bindings::sugar::ownership::{HasBoxFFI, HasFFI, HasSimpleFFI};
+use crate::media_queries::{Device, MediaCondition};
+use crate::parser::{Parse, ParserContext};
+use crate::values::computed::{self, ToComputedValue};
+use crate::values::specified::{Length, NoCalcLength, ViewportPercentageLength};
 use app_units::Au;
 use cssparser::{Delimiter, Parser, Token};
-#[cfg(feature = "gecko")]
-use gecko_bindings::sugar::ownership::{HasBoxFFI, HasFFI, HasSimpleFFI};
-use media_queries::{Device, MediaCondition};
-use parser::{Parse, ParserContext};
 use selectors::context::QuirksMode;
 use style_traits::ParseError;
-use values::computed::{self, ToComputedValue};
-use values::specified::{Length, NoCalcLength, ViewportPercentageLength};
 
 /// A value for a `<source-size>`:
 ///
 /// https://html.spec.whatwg.org/multipage/#source-size
+#[derive(Debug)]
 pub struct SourceSize {
     condition: MediaCondition,
     value: Length,
@@ -38,6 +39,7 @@ impl Parse for SourceSize {
 /// A value for a `<source-size-list>`:
 ///
 /// https://html.spec.whatwg.org/multipage/#source-size-list
+#[derive(Debug)]
 pub struct SourceSizeList {
     source_sizes: Vec<SourceSize>,
     value: Option<Length>,
@@ -52,9 +54,15 @@ impl SourceSizeList {
         }
     }
 
+    /// Set content of `value`, which can be used as fall-back during evaluate.
+    pub fn set_fallback_value(&mut self, width: Option<Length>) {
+        self.value = width;
+    }
+
     /// Evaluate this <source-size-list> to get the final viewport length.
     pub fn evaluate(&self, device: &Device, quirks_mode: QuirksMode) -> Au {
-        let matching_source_size = self.source_sizes
+        let matching_source_size = self
+            .source_sizes
             .iter()
             .find(|source_size| source_size.condition.matches(device, quirks_mode));
 
@@ -65,10 +73,12 @@ impl SourceSizeList {
                     Some(ref v) => v.to_computed_value(context),
                     None => Length::NoCalc(NoCalcLength::ViewportPercentage(
                         ViewportPercentageLength::Vw(100.),
-                    )).to_computed_value(context),
+                    ))
+                    .to_computed_value(context),
                 },
             }
-        }).into()
+        })
+        .into()
     }
 }
 
@@ -108,7 +118,7 @@ impl SourceSizeList {
                     return Self {
                         source_sizes,
                         value: Some(value),
-                    }
+                    };
                 },
                 Ok(SourceSizeOrLength::SourceSize(source_size)) => {
                     source_sizes.push(source_size);
@@ -132,7 +142,7 @@ impl SourceSizeList {
 
 #[cfg(feature = "gecko")]
 unsafe impl HasFFI for SourceSizeList {
-    type FFIType = ::gecko_bindings::structs::RawServoSourceSizeList;
+    type FFIType = crate::gecko_bindings::structs::RawServoSourceSizeList;
 }
 #[cfg(feature = "gecko")]
 unsafe impl HasSimpleFFI for SourceSizeList {}

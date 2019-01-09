@@ -10,12 +10,7 @@
 #include "nsIAudioChannelAgent.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsCOMPtr.h"
-#include "nsWeakPtr.h"
-
-#define NS_AUDIOCHANNELAGENT_CONTRACTID "@mozilla.org/audiochannelagent;1"
-// f27688e2-3dd7-11e2-904e-10bf48d64bd4
-#define NS_AUDIOCHANNELAGENT_CID {0xf27688e2, 0x3dd7, 0x11e2, \
-      {0x90, 0x4e, 0x10, 0xbf, 0x48, 0xd6, 0x4b, 0xd4}}
+#include "nsIWeakReferenceUtils.h"
 
 class nsPIDOMWindowInner;
 class nsPIDOMWindowOuter;
@@ -26,9 +21,8 @@ namespace dom {
 class AudioPlaybackConfig;
 
 /* Header file */
-class AudioChannelAgent : public nsIAudioChannelAgent
-{
-public:
+class AudioChannelAgent : public nsIAudioChannelAgent {
+ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_NSIAUDIOCHANNELAGENT
 
@@ -40,10 +34,7 @@ public:
   void WindowSuspendChanged(nsSuspendedTypes aSuspend);
   void WindowAudioCaptureChanged(uint64_t aInnerWindowID, bool aCapture);
 
-  nsPIDOMWindowOuter* Window() const
-  {
-    return mWindow;
-  }
+  nsPIDOMWindowOuter* Window() const { return mWindow; }
 
   uint64_t WindowID() const;
   uint64_t InnerWindowID() const;
@@ -51,7 +42,7 @@ public:
   bool IsPlayingStarted() const;
   bool ShouldBlockMedia() const;
 
-private:
+ private:
   virtual ~AudioChannelAgent();
 
   AudioPlaybackConfig GetMediaConfig();
@@ -78,8 +69,7 @@ private:
   bool mIsRegToService;
 };
 
-} // namespace dom
-} // namespace mozilla
-
+}  // namespace dom
+}  // namespace mozilla
 
 #endif

@@ -8,6 +8,7 @@
 #include "nsIContentPolicy.idl"
 
 interface nsIChannel;
+interface nsICSPEventListener;
 interface nsINode;
 interface nsIPrincipal;
 interface nsIRedirectHistoryEntry;
@@ -34,7 +35,8 @@ class ServiceWorkerDescriptor;
 [ref] native nsIRedirectHistoryEntryArray(const nsTArray<nsCOMPtr<nsIRedirectHistoryEntry>>);
 native OriginAttributes(mozilla::OriginAttributes);
 [ref] native const_OriginAttributesRef(const mozilla::OriginAttributes);
-[ref] native StringArrayRef(const nsTArray<nsCString>);
+[ref] native CStringArrayRef(const nsTArray<nsCString>);
+[ref] native StringArrayRef(const nsTArray<nsString>);
 [ref] native Uint64ArrayRef(const nsTArray<uint64_t>);
 [ref] native PrincipalArrayRef(const nsTArray<nsCOMPtr<nsIPrincipal>>);
 [ref] native const_ClientInfoRef(const mozilla::dom::ClientInfo);
@@ -501,6 +503,12 @@ interface nsILoadInfo : nsISupports
    */
   readonly attribute nsContentPolicyType externalContentPolicyType;
 
+  /**
+   * CSP uses this parameter to send or not CSP violation events.
+   * Default value: true.
+   */
+  [infallible] attribute boolean sendCSPViolationEvents;
+
 %{ C++
   inline nsContentPolicyType GetExternalContentPolicyType()
   {
@@ -754,7 +762,7 @@ interface nsILoadInfo : nsISupports
    * The ancestorPrincipals[0] entry for an image loaded in an iframe will be the
    * principal of the iframe element's owner document.
    *
-   * See nsIDocument::AncestorPrincipals for more information.
+   * See Document::AncestorPrincipals for more information.
    *
    * Please note that this array has the same lifetime as the
    * loadInfo object - use with caution!
@@ -783,7 +791,7 @@ interface nsILoadInfo : nsISupports
    * Only call this function when using the SEC_REQUIRE_CORS_DATA_INHERITS mode.
    */
   [noscript, notxpcom, nostdcall]
-  void setCorsPreflightInfo(in StringArrayRef unsafeHeaders,
+  void setCorsPreflightInfo(in CStringArrayRef unsafeHeaders,
                             in boolean forcePreflight);
 
   /**
@@ -792,7 +800,7 @@ interface nsILoadInfo : nsISupports
    * loadInfo object - use with caution!
    */
   [noscript, notxpcom, nostdcall, binaryname(CorsUnsafeHeaders)]
-  StringArrayRef corsUnsafeHeaders();
+  CStringArrayRef corsUnsafeHeaders();
 
   /**
    * Returns value set through setCorsPreflightInfo.
@@ -874,7 +882,20 @@ interface nsILoadInfo : nsISupports
    * GetChannelResultPrincipal() to ensure that the same null principal object
    * is returned every time.
    */
-  [noscript] readonly attribute nsIPrincipal sandboxedLoadingPrincipal;
+  [notxpcom, nostdcall] readonly attribute nsIPrincipal sandboxedLoadingPrincipal;
+
+  /**
+   * Return the top-level principal, which is the principal of the top-level
+   * window.
+   */
+  [notxpcom, nostdcall] readonly attribute nsIPrincipal topLevelPrincipal;
+
+  /**
+   * Return the top-level storage area principal, which is the principal of
+   * the top-level window if it's not a 3rd party context, non tracking
+   * resource.
+   */
+  [notxpcom, nostdcall] readonly attribute nsIPrincipal topLevelStorageAreaPrincipal;
 
   /**
    * Note which client (i.e. global) initiated this network request.  All
@@ -1019,4 +1040,29 @@ interface nsILoadInfo : nsISupports
    */
   [noscript, nostdcall, notxpcom]
   void SynthesizeServiceWorkerTainting(in LoadTainting aTainting);
+
+  /**
+    * The top-level document has been user-interacted.
+    */
+  [infallible] attribute boolean documentHasUserInteracted;
+
+  /**
+    * This attribute represents whether the document to which this
+    * load belongs had finished loading when the load was initiated.
+    */
+  [infallible] attribute boolean documentHasLoaded;
+
+  /**
+    * The object in charged to receive CSP violation events. It can be null.
+    * This attribute will be merged into the CSP object eventually.
+    * See bug 1500908.
+    */
+  attribute nsICSPEventListener cspEventListener;
+
+  /**
+   * This attribute will be true if this is a load triggered by
+   * https://html.spec.whatwg.org/multipage/iframe-embed-object.html#process-the-iframe-attributes
+   * or https://html.spec.whatwg.org/multipage/obsolete.html#process-the-frame-attributes
+   */
+  [infallible] readonly attribute boolean isFromProcessingFrameAttributes;
 };

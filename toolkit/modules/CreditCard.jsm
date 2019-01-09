@@ -6,18 +6,38 @@
 
 var EXPORTED_SYMBOLS = ["CreditCard"];
 
-ChromeUtils.defineModuleGetter(this, "MasterPassword",
-                               "resource://formautofill/MasterPassword.jsm");
+// The list of known and supported credit card network ids ("types")
+// This list mirrors the networks from dom/payments/BasicCardPayment.cpp
+// and is defined by https://www.w3.org/Payments/card-network-ids
+const SUPPORTED_NETWORKS = Object.freeze([
+  "amex",
+  "cartebancaire",
+  "diners",
+  "discover",
+  "jcb",
+  "mastercard",
+  "mir",
+  "unionpay",
+  "visa",
+]);
 
 class CreditCard {
   /**
-   * @param {string} name
+   * A CreditCard object represents a credit card, with
+   * number, name, expiration, network, and CCV.
+   * The number is the only required information when creating
+   * an object, all other members are optional. The number
+   * is validated during construction and will throw if invalid.
+   *
+   * @param {string} name, optional
    * @param {string} number
-   * @param {string} expirationString
-   * @param {string|number} expirationMonth
-   * @param {string|number} expirationYear
-   * @param {string|number} ccv
-   * @param {string} encryptedNumber
+   * @param {string} expirationString, optional
+   * @param {string|number} expirationMonth, optional
+   * @param {string|number} expirationYear, optional
+   * @param {string} network, optional
+   * @param {string|number} ccv, optional
+   * @param {string} encryptedNumber, optional
+   * @throws if number is an invalid credit card number
    */
   constructor({
     name,
@@ -25,21 +45,23 @@ class CreditCard {
     expirationString,
     expirationMonth,
     expirationYear,
+    network,
     ccv,
-    encryptedNumber
+    encryptedNumber,
   }) {
     this._name = name;
     this._unmodifiedNumber = number;
     this._encryptedNumber = encryptedNumber;
     this._ccv = ccv;
     this.number = number;
-    // Only prefer the string version if missing one or both parsed formats.
-    if (expirationString && (!expirationMonth || !expirationYear)) {
-      this.expirationString = expirationString;
-    } else {
-      this.expirationMonth = expirationMonth;
-      this.expirationYear = expirationYear;
-    }
+    let { month, year } = CreditCard.normalizeExpiration({
+      expirationString,
+      expirationMonth,
+      expirationYear,
+    });
+    this._expirationMonth = month;
+    this._expirationYear = year;
+    this.network = network;
   }
 
   set name(value) {
@@ -51,7 +73,7 @@ class CreditCard {
       this._expirationMonth = undefined;
       return;
     }
-    this._expirationMonth = this._normalizeExpirationMonth(value);
+    this._expirationMonth = CreditCard.normalizeExpirationMonth(value);
   }
 
   get expirationMonth() {
@@ -63,7 +85,7 @@ class CreditCard {
       this._expirationYear = undefined;
       return;
     }
-    this._expirationYear = this._normalizeExpirationYear(value);
+    this._expirationYear = CreditCard.normalizeExpirationYear(value);
   }
 
   get expirationYear() {
@@ -71,7 +93,7 @@ class CreditCard {
   }
 
   set expirationString(value) {
-    let {month, year} = this._parseExpirationString(value);
+    let {month, year} = CreditCard.parseExpirationString(value);
     this.expirationMonth = month;
     this.expirationYear = year;
   }
@@ -84,20 +106,45 @@ class CreditCard {
     return this._number;
   }
 
+  /**
+   * Sets the number member of a CreditCard object. If the number
+   * is not valid according to the Luhn algorithm then the member
+   * will get set to the empty string before throwing an exception.
+   *
+   * @param {string} value
+   * @throws if the value is an invalid credit card number
+   */
   set number(value) {
     if (value) {
       let normalizedNumber = value.replace(/[-\s]/g, "");
       // Based on the information on wiki[1], the shortest valid length should be
-      // 9 digits (Canadian SIN).
-      // [1] https://en.wikipedia.org/wiki/Social_Insurance_Number
-      normalizedNumber = normalizedNumber.match(/^\d{9,}$/) ?
-        normalizedNumber : null;
+      // 12 digits (Maestro).
+      // [1] https://en.wikipedia.org/wiki/Payment_card_number
+      normalizedNumber = normalizedNumber.match(/^\d{12,}$/) ?
+        normalizedNumber : "";
       this._number = normalizedNumber;
+    } else {
+      this._number = "";
     }
+
+    if (value && !this.isValidNumber()) {
+      this._number = "";
+      throw new Error("Invalid credit card number");
+    }
+  }
+
+  get network() {
+    return this._network;
+  }
+
+  set network(value) {
+    this._network = value || undefined;
   }
 
   // Implements the Luhn checksum algorithm as described at
   // http://wikipedia.org/wiki/Luhn_algorithm
+  // Number digit lengths vary with network, but should fall within 12-19 range. [2]
+  // More details at https://en.wikipedia.org/wiki/Payment_card_number
   isValidNumber() {
     if (!this._number) {
       return false;
@@ -107,7 +154,7 @@ class CreditCard {
     let number = this._number.replace(/[\-\s]/g, "");
 
     let len = number.length;
-    if (len != 9 && len != 15 && len != 16) {
+    if (len < 12 || len > 19) {
       return false;
     }
 
@@ -154,54 +201,30 @@ class CreditCard {
   }
 
   get maskedNumber() {
-    if (!this.isValidNumber()) {
-      throw new Error("Invalid credit card number");
-    }
-    return "*".repeat(4) + " " + this._number.substr(-4);
+    return CreditCard.getMaskedNumber(this._number);
   }
 
   get longMaskedNumber() {
-    if (!this.isValidNumber()) {
-      throw new Error("Invalid credit card number");
-    }
-    return "*".repeat(this.number.length - 4) + this.number.substr(-4);
+    return CreditCard.getLongMaskedNumber(this._number);
   }
 
   /**
    * Get credit card display label. It should display masked numbers and the
-   * cardholder's name, separated by a comma. If `showNumbers` is set to
-   * true, decrypted credit card numbers are shown instead.
+   * cardholder's name, separated by a comma.
    */
-  async getLabel({showNumbers} = {}) {
+  static getLabel({number, name}) {
     let parts = [];
-    let label;
 
-    if (showNumbers) {
-      if (this._encryptedNumber) {
-        label = await MasterPassword.decrypt(this._encryptedNumber);
-      } else {
-        label = this._number;
-      }
+    if (number) {
+      parts.push(CreditCard.getMaskedNumber(number));
     }
-    if (this._unmodifiedNumber && !label) {
-      if (this.isValidNumber()) {
-        label = this.maskedNumber;
-      } else {
-        let maskedNumber = CreditCard.formatMaskedNumber(this._unmodifiedNumber);
-        label = `${maskedNumber.affix} ${maskedNumber.label}`;
-      }
-    }
-
-    if (label) {
-      parts.push(label);
-    }
-    if (this._name) {
-      parts.push(this._name);
+    if (name) {
+      parts.push(name);
     }
     return parts.join(", ");
   }
 
-  _normalizeExpirationMonth(month) {
+  static normalizeExpirationMonth(month) {
     month = parseInt(month, 10);
     if (isNaN(month) || month < 1 || month > 12) {
       return undefined;
@@ -209,7 +232,7 @@ class CreditCard {
     return month;
   }
 
-  _normalizeExpirationYear(year) {
+  static normalizeExpirationYear(year) {
     year = parseInt(year, 10);
     if (isNaN(year) || year < 0) {
       return undefined;
@@ -220,7 +243,7 @@ class CreditCard {
     return year;
   }
 
-  _parseExpirationString(expirationString) {
+  static parseExpirationString(expirationString) {
     let rules = [
       {
         regex: "(\\d{4})[-/](\\d{1,2})",
@@ -271,6 +294,18 @@ class CreditCard {
     return {month: undefined, year: undefined};
   }
 
+  static normalizeExpiration({expirationString, expirationMonth, expirationYear}) {
+    // Only prefer the string version if missing one or both parsed formats.
+    let parsedExpiration = {};
+    if (expirationString && (!expirationMonth || !expirationYear)) {
+      parsedExpiration = CreditCard.parseExpirationString(expirationString);
+    }
+    return {
+      month: CreditCard.normalizeExpirationMonth(parsedExpiration.month || expirationMonth),
+      year: CreditCard.normalizeExpirationYear(parsedExpiration.year || expirationYear),
+    };
+  }
+
   static formatMaskedNumber(maskedNumber) {
     return {
       affix: "****",
@@ -279,17 +314,29 @@ class CreditCard {
   }
 
   static getMaskedNumber(number) {
-    let creditCard = new CreditCard({number});
-    return creditCard.maskedNumber;
+    return "*".repeat(4) + " " + number.substr(-4);
   }
 
   static getLongMaskedNumber(number) {
-    let creditCard = new CreditCard({number});
-    return creditCard.longMaskedNumber;
+    return "*".repeat(number.length - 4) + number.substr(-4);
   }
 
+  /*
+   * Validates the number according to the Luhn algorithm. This
+   * method does not throw an exception if the number is invalid.
+   */
   static isValidNumber(number) {
-    let creditCard = new CreditCard({number});
-    return creditCard.isValidNumber();
+    try {
+      new CreditCard({number});
+    } catch (ex) {
+      return false;
+    }
+    return true;
+  }
+
+  static isValidNetwork(network) {
+    return SUPPORTED_NETWORKS.includes(network);
   }
 }
+CreditCard.SUPPORTED_NETWORKS = SUPPORTED_NETWORKS;
+

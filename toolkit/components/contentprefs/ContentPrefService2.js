@@ -38,7 +38,7 @@ cache.set = function CPS_cache_set(group, name, val) {
   let groupCount = this._groups.size;
   if (groupCount >= CACHE_MAX_GROUP_ENTRIES) {
     // Clean half of the entries
-    for (let [group, name, ] of this) {
+    for (let [group, name ] of this) {
       this.remove(group, name);
       groupCount--;
       if (groupCount < CACHE_MAX_GROUP_ENTRIES / 2)
@@ -61,6 +61,42 @@ function executeStatementsInTransaction(conn, stmts) {
   });
 }
 
+function HostnameGrouper_group(aURI) {
+  var group;
+
+  try {
+    // Accessing the host property of the URI will throw an exception
+    // if the URI is of a type that doesn't have a host property.
+    // Otherwise, we manually throw an exception if the host is empty,
+    // since the effect is the same (we can't derive a group from it).
+
+    group = aURI.host;
+    if (!group)
+      throw new Error("can't derive group from host; no host in URI");
+  } catch (ex) {
+    // If we don't have a host, then use the entire URI (minus the query,
+    // reference, and hash, if possible) as the group.  This means that URIs
+    // like about:mozilla and about:blank will be considered separate groups,
+    // but at least they'll be grouped somehow.
+
+    // This also means that each individual file: URL will be considered
+    // its own group.  This seems suboptimal, but so does treating the entire
+    // file: URL space as a single group (especially if folks start setting
+    // group-specific capabilities prefs).
+
+    // XXX Is there something better we can do here?
+
+    try {
+      var url = aURI.QueryInterface(Ci.nsIURL);
+      group = aURI.prePath + url.filePath;
+    } catch (ex) {
+      group = aURI.spec;
+    }
+  }
+
+  return group;
+}
+
 ContentPrefService2.prototype = {
   // XPCOM Plumbing
 
@@ -78,7 +114,6 @@ ContentPrefService2.prototype = {
     // refer to us and don't remove themselves from those observer pools.
     delete this._observers;
     delete this._genericObservers;
-    delete this.__grouper;
   },
 
 
@@ -159,7 +194,7 @@ ContentPrefService2.prototype = {
       },
       onError: nsresult => {
         cbHandleError(callback, nsresult);
-      }
+      },
     });
   },
 
@@ -216,7 +251,7 @@ ContentPrefService2.prototype = {
       },
       onError: nsresult => {
         cbHandleError(callback, nsresult);
-      }
+      },
     });
   },
 
@@ -394,7 +429,7 @@ ContentPrefService2.prototype = {
       },
       onError: nsresult => {
         cbHandleError(callback, nsresult);
-      }
+      },
     });
   },
 
@@ -460,7 +495,7 @@ ContentPrefService2.prototype = {
         if (ok) {
           this._cache.set(group, name, undefined);
           if (isPrivate) {
-            for (let [sgroup, ] of
+            for (let [sgroup ] of
                    this._pbStore.match(group, name, includeSubdomains)) {
               prefs.set(sgroup, name, undefined);
               this._pbStore.remove(sgroup, name);
@@ -476,7 +511,7 @@ ContentPrefService2.prototype = {
       },
       onError: nsresult => {
         cbHandleError(callback, nsresult);
-      }
+      },
     });
   },
 
@@ -493,7 +528,7 @@ ContentPrefService2.prototype = {
         DELETE FROM groups WHERE id NOT IN (
           SELECT DISTINCT groupID FROM prefs WHERE groupID NOTNULL
         )
-      `)
+      `),
     ];
   },
 
@@ -571,7 +606,7 @@ ContentPrefService2.prototype = {
       },
       onDone: (reason, ok) => {
         if (ok && isPrivate) {
-          for (let [sgroup, sname, ] of this._pbStore) {
+          for (let [sgroup, sname ] of this._pbStore) {
             if (!group ||
                 (!includeSubdomains && group == sgroup) ||
                 (includeSubdomains && sgroup && this._pbStore.groupsMatchIncludingSubdomains(group, sgroup))) {
@@ -582,14 +617,14 @@ ContentPrefService2.prototype = {
         }
         cbHandleCompletion(callback, reason);
         if (ok) {
-          for (let [sgroup, sname, ] of prefs) {
+          for (let [sgroup, sname ] of prefs) {
             this._notifyPrefRemoved(sgroup, sname, isPrivate);
           }
         }
       },
       onError: nsresult => {
         cbHandleError(callback, nsresult);
-      }
+      },
     });
   },
 
@@ -639,7 +674,7 @@ ContentPrefService2.prototype = {
         // This nukes all the groups in _pbStore since we don't have their timestamp
         // information.
         if (ok && isPrivate) {
-          for (let [sgroup, sname, ] of this._pbStore) {
+          for (let [sgroup, sname ] of this._pbStore) {
             if (sgroup) {
               prefs.set(sgroup, sname, undefined);
             }
@@ -648,14 +683,14 @@ ContentPrefService2.prototype = {
         }
         cbHandleCompletion(callback, reason);
         if (ok) {
-          for (let [sgroup, sname, ] of prefs) {
+          for (let [sgroup, sname ] of prefs) {
             this._notifyPrefRemoved(sgroup, sname, isPrivate);
           }
         }
       },
       onError: nsresult => {
         cbHandleError(callback, nsresult);
-      }
+      },
     });
   },
 
@@ -673,7 +708,7 @@ ContentPrefService2.prototype = {
 
     // Invalidate the cached values so consumers accessing the cache between now
     // and when the operation finishes don't get old data.
-    for (let [group, sname, ] of this._cache) {
+    for (let [group, sname ] of this._cache) {
       if (sname == name)
         this._cache.remove(group, name);
     }
@@ -728,7 +763,7 @@ ContentPrefService2.prototype = {
       },
       onDone: (reason, ok) => {
         if (ok && isPrivate) {
-          for (let [sgroup, sname, ] of this._pbStore) {
+          for (let [sgroup, sname ] of this._pbStore) {
             if (sname === name) {
               prefs.set(sgroup, name, undefined);
               this._pbStore.remove(sgroup, name);
@@ -744,7 +779,7 @@ ContentPrefService2.prototype = {
       },
       onError: nsresult => {
         cbHandleError(callback, nsresult);
-      }
+      },
     });
   },
 
@@ -818,14 +853,6 @@ ContentPrefService2.prototype = {
     }
   },
 
-  __grouper: null,
-  get _grouper() {
-    if (!this.__grouper)
-      this.__grouper = Cc["@mozilla.org/content-pref/hostname-grouper;1"].
-                       getService(Ci.nsIContentURIGrouper);
-    return this.__grouper;
-  },
-
   /**
    * Parses the domain (the "group", to use the database's term) from the given
    * string.
@@ -843,7 +870,7 @@ ContentPrefService2.prototype = {
     } catch (err) {
       return groupStr;
     }
-    return this._grouper.group(groupURI);
+    return HostnameGrouper_group(groupURI);
   },
 
   _schedule: function CPS2__schedule(fn) {
@@ -994,22 +1021,22 @@ ContentPrefService2.prototype = {
                    groupID      INTEGER REFERENCES groups(id), \
                    settingID    INTEGER NOT NULL REFERENCES settings(id), \
                    value        BLOB, \
-                   timestamp    INTEGER NOT NULL DEFAULT 0" // Storage in seconds, API in ms. 0 for migrated values.
+                   timestamp    INTEGER NOT NULL DEFAULT 0", // Storage in seconds, API in ms. 0 for migrated values.
     },
     indices: {
       groups_idx: {
         table: "groups",
-        columns: ["name"]
+        columns: ["name"],
       },
       settings_idx: {
         table: "settings",
-        columns: ["name"]
+        columns: ["name"],
       },
       prefs_idx: {
         table: "prefs",
-        columns: ["timestamp", "groupID", "settingID"]
-      }
-    }
+        columns: ["timestamp", "groupID", "settingID"],
+      },
+    },
   },
 
   _debugLog: false,
@@ -1214,55 +1241,7 @@ function invalidArg(msg) {
   return Components.Exception(msg, Cr.NS_ERROR_INVALID_ARG);
 }
 
-
-function HostnameGrouper() {}
-
-HostnameGrouper.prototype = {
-  // XPCOM Plumbing
-
-  classID:          Components.ID("{8df290ae-dcaa-4c11-98a5-2429a4dc97bb}"),
-  QueryInterface:   ChromeUtils.generateQI([Ci.nsIContentURIGrouper]),
-
-  // nsIContentURIGrouper
-
-  group: function HostnameGrouper_group(aURI) {
-    var group;
-
-    try {
-      // Accessing the host property of the URI will throw an exception
-      // if the URI is of a type that doesn't have a host property.
-      // Otherwise, we manually throw an exception if the host is empty,
-      // since the effect is the same (we can't derive a group from it).
-
-      group = aURI.host;
-      if (!group)
-        throw new Error("can't derive group from host; no host in URI");
-    } catch (ex) {
-      // If we don't have a host, then use the entire URI (minus the query,
-      // reference, and hash, if possible) as the group.  This means that URIs
-      // like about:mozilla and about:blank will be considered separate groups,
-      // but at least they'll be grouped somehow.
-
-      // This also means that each individual file: URL will be considered
-      // its own group.  This seems suboptimal, but so does treating the entire
-      // file: URL space as a single group (especially if folks start setting
-      // group-specific capabilities prefs).
-
-      // XXX Is there something better we can do here?
-
-      try {
-        var url = aURI.QueryInterface(Ci.nsIURL);
-        group = aURI.prePath + url.filePath;
-      } catch (ex) {
-        group = aURI.spec;
-      }
-    }
-
-    return group;
-  }
-};
-
 // XPCOM Plumbing
 
-var components = [ContentPrefService2, HostnameGrouper];
+var components = [ContentPrefService2];
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory(components);

@@ -17,24 +17,24 @@ namespace mozilla {
 
 namespace wr {
 
-class RenderDXGITextureHostOGL final : public RenderTextureHostOGL
-{
-public:
+class RenderDXGITextureHostOGL final : public RenderTextureHostOGL {
+ public:
   explicit RenderDXGITextureHostOGL(WindowsHandle aHandle,
                                     gfx::SurfaceFormat aFormat,
                                     gfx::IntSize aSize);
 
-  wr::WrExternalImage Lock(uint8_t aChannelIndex, gl::GLContext* aGL) override;
+  wr::WrExternalImage Lock(uint8_t aChannelIndex, gl::GLContext* aGL,
+                           wr::ImageRendering aRendering) override;
   void Unlock() override;
   void ClearCachedResources() override;
 
   virtual gfx::IntSize GetSize(uint8_t aChannelIndex) const;
   virtual GLuint GetGLHandle(uint8_t aChannelIndex) const;
 
-private:
+ private:
   virtual ~RenderDXGITextureHostOGL();
 
-  bool EnsureLockable();
+  bool EnsureLockable(wr::ImageRendering aRendering);
 
   void DeleteTextureHandle();
 
@@ -57,24 +57,24 @@ private:
   bool mLocked;
 };
 
-class RenderDXGIYCbCrTextureHostOGL final : public RenderTextureHostOGL
-{
-public:
+class RenderDXGIYCbCrTextureHostOGL final : public RenderTextureHostOGL {
+ public:
   explicit RenderDXGIYCbCrTextureHostOGL(WindowsHandle (&aHandles)[3],
                                          gfx::IntSize aSize,
                                          gfx::IntSize aSizeCbCr);
 
-  wr::WrExternalImage Lock(uint8_t aChannelIndex, gl::GLContext* aGL) override;
+  wr::WrExternalImage Lock(uint8_t aChannelIndex, gl::GLContext* aGL,
+                           wr::ImageRendering aRendering) override;
   virtual void Unlock() override;
   void ClearCachedResources() override;
 
   virtual gfx::IntSize GetSize(uint8_t aChannelIndex) const;
   virtual GLuint GetGLHandle(uint8_t aChannelIndex) const;
 
-private:
+ private:
   virtual ~RenderDXGIYCbCrTextureHostOGL();
 
-  bool EnsureLockable();
+  bool EnsureLockable(wr::ImageRendering aRendering);
 
   void DeleteTextureHandle();
 
@@ -96,7 +96,7 @@ private:
   bool mLocked;
 };
 
-} // namespace wr
-} // namespace mozilla
+}  // namespace wr
+}  // namespace mozilla
 
-#endif // MOZILLA_GFX_RENDERD3D11TEXTUREHOSTOGL_H
+#endif  // MOZILLA_GFX_RENDERD3D11TEXTUREHOSTOGL_H

@@ -17,9 +17,8 @@ namespace gfx {
 class NativeFontResourceFontconfig;
 class UnscaledFontFontconfig;
 
-class ScaledFontFontconfig : public ScaledFontBase
-{
-public:
+class ScaledFontFontconfig : public ScaledFontBase {
+ public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(ScaledFontFontconfig, override)
   ScaledFontFontconfig(cairo_scaled_font_t* aScaledFont, FcPattern* aPattern,
                        const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize);
@@ -28,35 +27,37 @@ public:
   FontType GetType() const override { return FontType::FONTCONFIG; }
 
 #ifdef USE_SKIA
-  SkTypeface* GetSkTypeface() override;
+  SkTypeface* CreateSkTypeface() override;
 #endif
 
   bool CanSerialize() override { return true; }
 
   bool GetFontInstanceData(FontInstanceDataOutput aCb, void* aBaton) override;
 
-  bool GetWRFontInstanceOptions(Maybe<wr::FontInstanceOptions>* aOutOptions,
-                                Maybe<wr::FontInstancePlatformOptions>* aOutPlatformOptions,
-                                std::vector<FontVariation>* aOutVariations) override;
+  bool GetWRFontInstanceOptions(
+      Maybe<wr::FontInstanceOptions>* aOutOptions,
+      Maybe<wr::FontInstancePlatformOptions>* aOutPlatformOptions,
+      std::vector<FontVariation>* aOutVariations) override;
 
   bool HasVariationSettings() override;
 
-private:
+ private:
   friend class NativeFontResourceFontconfig;
   friend class UnscaledFontFontconfig;
 
-  struct InstanceData
-  {
+  struct InstanceData {
     enum {
-      ANTIALIAS       = 1 << 0,
-      AUTOHINT        = 1 << 1,
+      ANTIALIAS = 1 << 0,
+      AUTOHINT = 1 << 1,
       EMBEDDED_BITMAP = 1 << 2,
-      EMBOLDEN        = 1 << 3,
+      EMBOLDEN = 1 << 3,
       VERTICAL_LAYOUT = 1 << 4,
-      HINT_METRICS    = 1 << 5
+      HINT_METRICS = 1 << 5
     };
 
     InstanceData(cairo_scaled_font_t* aScaledFont, FcPattern* aPattern);
+    InstanceData(const wr::FontInstanceOptions* aOptions,
+                 const wr::FontInstancePlatformOptions* aPlatformOptions);
 
     void SetupPattern(FcPattern* aPattern) const;
     void SetupFontOptions(cairo_font_options_t* aFontOptions) const;
@@ -67,18 +68,10 @@ private:
     uint8_t mLcdFilter;
   };
 
-  static already_AddRefed<ScaledFont>
-    CreateFromInstanceData(const InstanceData& aInstanceData,
-                           UnscaledFontFontconfig* aUnscaledFont,
-                           Float aSize,
-                           const FontVariation* aVariations,
-                           uint32_t aNumVariations,
-                           NativeFontResourceFontconfig* aNativeFontResource = nullptr);
-
   FcPattern* mPattern;
 };
 
-}
-}
+}  // namespace gfx
+}  // namespace mozilla
 
 #endif /* MOZILLA_GFX_SCALEDFONTFONTCONFIG_H_ */

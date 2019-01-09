@@ -1,26 +1,26 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! A data structure to efficiently index structs containing selectors by local
 //! name, ids and hash.
 
-use {Atom, LocalName, Namespace, WeakAtom};
-use applicable_declarations::ApplicableDeclarationList;
-use context::QuirksMode;
-use dom::TElement;
+use crate::applicable_declarations::ApplicableDeclarationList;
+use crate::context::QuirksMode;
+use crate::dom::TElement;
+use crate::hash::map as hash_map;
+use crate::hash::{HashMap, HashSet};
+use crate::rule_tree::{CascadeLevel, ShadowCascadeOrder};
+use crate::selector_parser::SelectorImpl;
+use crate::stylist::Rule;
+use crate::{Atom, LocalName, Namespace, WeakAtom};
 use fallible::FallibleVec;
-use hash::{HashMap, HashSet};
-use hash::map as hash_map;
 use hashglobe::FailedAllocationError;
 use precomputed_hash::PrecomputedHash;
-use rule_tree::{CascadeLevel, ShadowCascadeOrder};
-use selector_parser::SelectorImpl;
 use selectors::matching::{matches_selector, ElementSelectorFlags, MatchingContext};
 use selectors::parser::{Combinator, Component, SelectorIter};
 use smallvec::SmallVec;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
-use stylist::Rule;
 
 /// A hasher implementation that doesn't hash anything, because it expects its
 /// input to be a suitable u32 hash.
@@ -96,6 +96,8 @@ pub trait SelectorMapEntry: Sized + Clone {
 /// TODO: Tune the initial capacity of the HashMap
 #[derive(Debug, MallocSizeOf)]
 pub struct SelectorMap<T: 'static> {
+    /// Rules that have `:root` selectors.
+    pub root: SmallVec<[T; 1]>,
     /// A hash from an ID to rules which contain that ID selector.
     pub id_hash: MaybeCaseInsensitiveHashMap<Atom, SmallVec<[T; 1]>>,
     /// A hash from a class name to rules which contain that class selector.
@@ -104,7 +106,7 @@ pub struct SelectorMap<T: 'static> {
     pub local_name_hash: PrecomputedHashMap<LocalName, SmallVec<[T; 1]>>,
     /// A hash from namespace to rules which contain that namespace selector.
     pub namespace_hash: PrecomputedHashMap<Namespace, SmallVec<[T; 1]>>,
-    /// Rules that don't have ID, class, or element selectors.
+    /// All other rules.
     pub other: SmallVec<[T; 1]>,
     /// The number of entries in this map.
     pub count: usize,
@@ -124,6 +126,7 @@ impl<T: 'static> SelectorMap<T> {
     /// Trivially constructs an empty `SelectorMap`.
     pub fn new() -> Self {
         SelectorMap {
+            root: SmallVec::new(),
             id_hash: MaybeCaseInsensitiveHashMap::new(),
             class_hash: MaybeCaseInsensitiveHashMap::new(),
             local_name_hash: HashMap::default(),
@@ -135,6 +138,7 @@ impl<T: 'static> SelectorMap<T> {
 
     /// Clears the hashmap retaining storage.
     pub fn clear(&mut self) {
+        self.root.clear();
         self.id_hash.clear();
         self.class_hash.clear();
         self.local_name_hash.clear();
@@ -181,6 +185,19 @@ impl SelectorMap<Rule> {
         // At the end, we're going to sort the rules that we added, so remember
         // where we began.
         let init_len = matching_rules_list.len();
+
+        if rule_hash_target.is_root() {
+            SelectorMap::get_matching_rules(
+                element,
+                &self.root,
+                matching_rules_list,
+                context,
+                flags_setter,
+                cascade_level,
+                shadow_cascade_order,
+            );
+        }
+
         if let Some(id) = rule_hash_target.id() {
             if let Some(rules) = self.id_hash.get(id, quirks_mode) {
                 SelectorMap::get_matching_rules(
@@ -270,7 +287,9 @@ impl SelectorMap<Rule> {
                 context,
                 flags_setter,
             ) {
-                matching_rules.push(rule.to_applicable_declaration_block(cascade_level, shadow_cascade_order));
+                matching_rules.push(
+                    rule.to_applicable_declaration_block(cascade_level, shadow_cascade_order),
+                );
             }
         }
     }
@@ -287,10 +306,13 @@ impl<T: SelectorMapEntry> SelectorMap<T> {
         self.count += 1;
 
         let vector = match find_bucket(entry.selector()) {
-            Bucket::ID(id) => self.id_hash
+            Bucket::Root => &mut self.root,
+            Bucket::ID(id) => self
+                .id_hash
                 .try_entry(id.clone(), quirks_mode)?
                 .or_insert_with(SmallVec::new),
-            Bucket::Class(class) => self.class_hash
+            Bucket::Class(class) => self
+                .class_hash
                 .try_entry(class.clone(), quirks_mode)?
                 .or_insert_with(SmallVec::new),
             Bucket::LocalName { name, lower_name } => {
@@ -315,7 +337,8 @@ impl<T: SelectorMapEntry> SelectorMap<T> {
                     .try_entry(name.clone())?
                     .or_insert_with(SmallVec::new)
             },
-            Bucket::Namespace(url) => self.namespace_hash
+            Bucket::Namespace(url) => self
+                .namespace_hash
                 .try_entry(url.clone())?
                 .or_insert_with(SmallVec::new),
             Bucket::Universal => &mut self.other,
@@ -340,6 +363,14 @@ impl<T: SelectorMapEntry> SelectorMap<T> {
         E: TElement,
         F: FnMut(&'a T) -> bool,
     {
+        if element.is_root() {
+            for entry in self.root.iter() {
+                if !f(&entry) {
+                    return false;
+                }
+            }
+        }
+
         if let Some(id) = element.id() {
             if let Some(v) = self.id_hash.get(id, quirks_mode) {
                 for entry in v.iter() {
@@ -444,6 +475,7 @@ impl<T: SelectorMapEntry> SelectorMap<T> {
 }
 
 enum Bucket<'a> {
+    Root,
     ID(&'a Atom),
     Class(&'a Atom),
     LocalName {
@@ -456,14 +488,16 @@ enum Bucket<'a> {
 
 fn specific_bucket_for<'a>(component: &'a Component<SelectorImpl>) -> Bucket<'a> {
     match *component {
+        Component::Root => Bucket::Root,
         Component::ID(ref id) => Bucket::ID(id),
         Component::Class(ref class) => Bucket::Class(class),
         Component::LocalName(ref selector) => Bucket::LocalName {
             name: &selector.name,
             lower_name: &selector.lower_name,
         },
-        Component::Namespace(_, ref url) |
-        Component::DefaultNamespace(ref url) => Bucket::Namespace(url),
+        Component::Namespace(_, ref url) | Component::DefaultNamespace(ref url) => {
+            Bucket::Namespace(url)
+        },
         // ::slotted(..) isn't a normal pseudo-element, so we can insert it on
         // the rule hash normally without much problem. For example, in a
         // selector like:
@@ -498,14 +532,19 @@ fn find_bucket<'a>(mut iter: SelectorIter<'a, SelectorImpl>) -> Bucket<'a> {
         // We basically want to find the most specific bucket,
         // where:
         //
-        //   id > class > local name > namespace > universal.
+        //   root > id > class > local name > namespace > universal.
         //
         for ss in &mut iter {
             let new_bucket = specific_bucket_for(ss);
             match new_bucket {
-                Bucket::ID(..) => return new_bucket,
-                Bucket::Class(..) => {
+                Bucket::Root => return new_bucket,
+                Bucket::ID(..) => {
                     current_bucket = new_bucket;
+                },
+                Bucket::Class(..) => {
+                    if !matches!(current_bucket, Bucket::ID(..)) {
+                        current_bucket = new_bucket;
+                    }
                 },
                 Bucket::LocalName { .. } => {
                     if matches!(current_bucket, Bucket::Universal | Bucket::Namespace(..)) {
@@ -516,7 +555,7 @@ fn find_bucket<'a>(mut iter: SelectorIter<'a, SelectorImpl>) -> Bucket<'a> {
                     if matches!(current_bucket, Bucket::Universal) {
                         current_bucket = new_bucket;
                     }
-                }
+                },
                 Bucket::Universal => {},
             }
         }

@@ -6,7 +6,7 @@
 
 #include "Flex.h"
 
-#include "FlexLine.h"
+#include "FlexLineValues.h"
 #include "mozilla/dom/FlexBinding.h"
 #include "nsFlexContainerFrame.h"
 
@@ -21,39 +21,43 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Flex)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-Flex::Flex(Element* aParent,
-           nsFlexContainerFrame* aFrame)
-  : mParent(aParent)
-{
+Flex::Flex(Element* aParent, nsFlexContainerFrame* aFrame) : mParent(aParent) {
   MOZ_ASSERT(aFrame,
-    "Should never be instantiated with a null nsFlexContainerFrame");
+             "Should never be instantiated with a null nsFlexContainerFrame");
 
   // Eagerly create property values from aFrame, because we're not
   // going to keep it around.
   const ComputedFlexContainerInfo* containerInfo =
-    aFrame->GetFlexContainerInfo();
+      aFrame->GetFlexContainerInfo();
   MOZ_ASSERT(containerInfo, "Should only be passed a frame with info.");
 
   mLines.SetLength(containerInfo->mLines.Length());
   uint32_t index = 0;
   for (auto&& l : containerInfo->mLines) {
-    FlexLine* line = new FlexLine(this, &l);
+    FlexLineValues* line = new FlexLineValues(this, &l);
     mLines.ElementAt(index) = line;
     index++;
   }
+
+  mMainAxisDirection = containerInfo->mMainAxisDirection;
+  mCrossAxisDirection = containerInfo->mCrossAxisDirection;
 }
 
-JSObject*
-Flex::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
-{
+JSObject* Flex::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
   return Flex_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-void
-Flex::GetLines(nsTArray<RefPtr<FlexLine>>& aResult)
-{
+void Flex::GetLines(nsTArray<RefPtr<FlexLineValues>>& aResult) {
   aResult.AppendElements(mLines);
 }
 
-} // namespace dom
-} // namespace mozilla
+FlexPhysicalDirection Flex::MainAxisDirection() const {
+  return mMainAxisDirection;
+}
+
+FlexPhysicalDirection Flex::CrossAxisDirection() const {
+  return mCrossAxisDirection;
+}
+
+}  // namespace dom
+}  // namespace mozilla

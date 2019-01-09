@@ -1,20 +1,21 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Generic types for CSS values related to borders.
 
+use crate::values::generics::rect::Rect;
+use crate::values::generics::size::Size;
 use std::fmt::{self, Write};
 use style_traits::{CssWriter, ToCss};
-use values::generics::rect::Rect;
-use values::generics::size::Size;
 
 /// A generic value for a single side of a `border-image-width` property.
-#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo,
-         ToComputedValue, ToCss)]
-pub enum BorderImageSideWidth<LengthOrPercentage, Number> {
+#[derive(
+    Clone, Copy, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToComputedValue, ToCss,
+)]
+pub enum BorderImageSideWidth<LengthPercentage, Number> {
     /// `<length-or-percentage>`
-    Length(LengthOrPercentage),
+    Length(LengthPercentage),
     /// `<number>`
     Number(Number),
     /// `auto`
@@ -22,8 +23,9 @@ pub enum BorderImageSideWidth<LengthOrPercentage, Number> {
 }
 
 /// A generic value for the `border-image-slice` property.
-#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo,
-         ToComputedValue, ToCss)]
+#[derive(
+    Clone, Copy, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToComputedValue, ToCss,
+)]
 pub struct BorderImageSlice<NumberOrPercentage> {
     /// The offsets.
     #[css(field_bound)]
@@ -34,8 +36,20 @@ pub struct BorderImageSlice<NumberOrPercentage> {
 }
 
 /// A generic value for the `border-*-radius` longhand properties.
-#[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug, MallocSizeOf,
-         PartialEq, SpecifiedValueInfo, ToComputedValue, ToCss)]
+#[derive(
+    Animate,
+    Clone,
+    ComputeSquaredDistance,
+    Copy,
+    Debug,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToAnimatedValue,
+    ToAnimatedZero,
+    ToComputedValue,
+    ToCss,
+)]
 pub struct BorderCornerRadius<L>(#[css(field_bound)] pub Size<L>);
 
 impl<L> BorderCornerRadius<L> {
@@ -46,9 +60,20 @@ impl<L> BorderCornerRadius<L> {
 }
 
 /// A generic value for the `border-spacing` property.
-#[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug, MallocSizeOf,
-         PartialEq, SpecifiedValueInfo, ToAnimatedValue, ToAnimatedZero,
-         ToComputedValue, ToCss)]
+#[derive(
+    Animate,
+    Clone,
+    ComputeSquaredDistance,
+    Copy,
+    Debug,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToAnimatedValue,
+    ToAnimatedZero,
+    ToComputedValue,
+    ToCss,
+)]
 pub struct BorderSpacing<L>(#[css(field_bound)] pub Size<L>);
 
 impl<L> BorderSpacing<L> {
@@ -61,30 +86,27 @@ impl<L> BorderSpacing<L> {
 /// A generic value for `border-radius`, `outline-radius` and `inset()`.
 ///
 /// <https://drafts.csswg.org/css-backgrounds-3/#border-radius>
-#[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug, MallocSizeOf,
-         PartialEq, SpecifiedValueInfo, ToComputedValue)]
-pub struct BorderRadius<LengthOrPercentage> {
+#[derive(
+    Animate,
+    Clone,
+    ComputeSquaredDistance,
+    Copy,
+    Debug,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToAnimatedValue,
+    ToComputedValue,
+)]
+pub struct BorderRadius<LengthPercentage> {
     /// The top left radius.
-    pub top_left: BorderCornerRadius<LengthOrPercentage>,
+    pub top_left: BorderCornerRadius<LengthPercentage>,
     /// The top right radius.
-    pub top_right: BorderCornerRadius<LengthOrPercentage>,
+    pub top_right: BorderCornerRadius<LengthPercentage>,
     /// The bottom right radius.
-    pub bottom_right: BorderCornerRadius<LengthOrPercentage>,
+    pub bottom_right: BorderCornerRadius<LengthPercentage>,
     /// The bottom left radius.
-    pub bottom_left: BorderCornerRadius<LengthOrPercentage>,
-}
-
-impl<N> From<N> for BorderImageSlice<N>
-where
-    N: Clone,
-{
-    #[inline]
-    fn from(value: N) -> Self {
-        Self {
-            offsets: Rect::all(value),
-            fill: false,
-        }
-    }
+    pub bottom_left: BorderCornerRadius<LengthPercentage>,
 }
 
 impl<L> BorderRadius<L> {
@@ -120,7 +142,9 @@ where
         W: Write,
     {
         widths.to_css(dest)?;
-        if widths.0 != heights.0 || widths.1 != heights.1 || widths.2 != heights.2 ||
+        if widths.0 != heights.0 ||
+            widths.1 != heights.1 ||
+            widths.2 != heights.2 ||
             widths.3 != heights.3
         {
             dest.write_str(" / ")?;

@@ -1,26 +1,27 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Specified types for CSS values related to effects.
 
-use cssparser::{self, BasicParseErrorKind, Parser, Token};
-use parser::{Parse, ParserContext};
-use style_traits::{ParseError, StyleParseErrorKind, ValueParseErrorKind};
-#[cfg(not(feature = "gecko"))]
-use values::Impossible;
-use values::computed::{Context, NonNegativeNumber as ComputedNonNegativeNumber, ToComputedValue};
-use values::computed::effects::BoxShadow as ComputedBoxShadow;
-use values::computed::effects::SimpleShadow as ComputedSimpleShadow;
-use values::generics::NonNegative;
-use values::generics::effects::BoxShadow as GenericBoxShadow;
-use values::generics::effects::Filter as GenericFilter;
-use values::generics::effects::SimpleShadow as GenericSimpleShadow;
-use values::specified::{Angle, NumberOrPercentage};
-use values::specified::color::Color;
-use values::specified::length::{Length, NonNegativeLength};
+use crate::parser::{Parse, ParserContext};
+use crate::values::computed::effects::BoxShadow as ComputedBoxShadow;
+use crate::values::computed::effects::SimpleShadow as ComputedSimpleShadow;
+use crate::values::computed::NonNegativeNumber as ComputedNonNegativeNumber;
+use crate::values::computed::{Context, ToComputedValue};
+use crate::values::generics::effects::BoxShadow as GenericBoxShadow;
+use crate::values::generics::effects::Filter as GenericFilter;
+use crate::values::generics::effects::SimpleShadow as GenericSimpleShadow;
+use crate::values::generics::NonNegative;
+use crate::values::specified::color::Color;
+use crate::values::specified::length::{Length, NonNegativeLength};
 #[cfg(feature = "gecko")]
-use values::specified::url::SpecifiedUrl;
+use crate::values::specified::url::SpecifiedUrl;
+use crate::values::specified::{Angle, NumberOrPercentage};
+#[cfg(not(feature = "gecko"))]
+use crate::values::Impossible;
+use cssparser::{self, BasicParseErrorKind, Parser, Token};
+use style_traits::{ParseError, StyleParseErrorKind, ValueParseErrorKind};
 
 /// A specified value for a single shadow of the `box-shadow` property.
 pub type BoxShadow =
@@ -77,7 +78,7 @@ impl ToComputedValue for Factor {
 
     #[inline]
     fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
-        use values::computed::NumberOrPercentage;
+        use crate::values::computed::NumberOrPercentage;
         match self.0.to_computed_value(context) {
             NumberOrPercentage::Number(n) => n.into(),
             NumberOrPercentage::Percentage(p) => p.0.into(),
@@ -118,9 +119,9 @@ impl Parse for BoxShadow {
                 let value = input.try::<_, _, ParseError>(|i| {
                     let horizontal = Length::parse(context, i)?;
                     let vertical = Length::parse(context, i)?;
-                    let (blur, spread) = match i.try::<_, _, ParseError>(|i| {
-                        Length::parse_non_negative(context, i)
-                    }) {
+                    let (blur, spread) = match i
+                        .try::<_, _, ParseError>(|i| Length::parse_non_negative(context, i))
+                    {
                         Ok(blur) => {
                             let spread = i.try(|i| Length::parse(context, i)).ok();
                             (Some(blur.into()), spread)
@@ -143,7 +144,8 @@ impl Parse for BoxShadow {
             break;
         }
 
-        let lengths = lengths.ok_or(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))?;
+        let lengths =
+            lengths.ok_or(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))?;
         Ok(BoxShadow {
             base: SimpleShadow {
                 color: color,
@@ -164,7 +166,8 @@ impl ToComputedValue for BoxShadow {
     fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
         ComputedBoxShadow {
             base: self.base.to_computed_value(context),
-            spread: self.spread
+            spread: self
+                .spread
                 .as_ref()
                 .unwrap_or(&Length::zero())
                 .to_computed_value(context),
@@ -271,13 +274,15 @@ impl ToComputedValue for SimpleShadow {
     #[inline]
     fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
         ComputedSimpleShadow {
-            color: self.color
+            color: self
+                .color
                 .as_ref()
                 .unwrap_or(&Color::currentcolor())
                 .to_computed_value(context),
             horizontal: self.horizontal.to_computed_value(context),
             vertical: self.vertical.to_computed_value(context),
-            blur: self.blur
+            blur: self
+                .blur
                 .as_ref()
                 .unwrap_or(&NonNegativeLength::zero())
                 .to_computed_value(context),

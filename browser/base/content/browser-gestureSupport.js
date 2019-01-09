@@ -726,9 +726,7 @@ var gHistorySwipeAnimation = {
    * Adds the boxes that contain the arrows used during the swipe animation.
    */
   _addBoxes: function HSA__addBoxes() {
-    let browserStack =
-      document.getAnonymousElementByAttribute(gBrowser.getNotificationBox(),
-                                              "class", "browserStack");
+    let browserStack = gBrowser.getPanel().querySelector(".browserStack");
     this._container = this._createElement("historySwipeAnimationContainer",
                                           "stack");
     browserStack.appendChild(this._container);
@@ -767,8 +765,7 @@ var gHistorySwipeAnimation = {
    * @return the newly created element.
    */
   _createElement: function HSA__createElement(aID, aTagName) {
-    let XULNS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-    let element = document.createElementNS(XULNS, aTagName);
+    let element = document.createXULElement(aTagName);
     element.id = aID;
     return element;
   },

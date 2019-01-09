@@ -10,13 +10,8 @@
 var gClient;
 var gRegistryFront;
 var gActorFront;
-var gOldPref;
-
-const { ActorRegistryFront } = require("devtools/shared/fronts/actor-registry");
 
 function run_test() {
-  gOldPref = Services.prefs.getBoolPref("devtools.debugger.forbid-certified-apps");
-  Services.prefs.setBoolPref("devtools.debugger.forbid-certified-apps", false);
   initTestDebuggerServer();
   DebuggerServer.registerAllActors();
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
@@ -24,18 +19,16 @@ function run_test() {
   do_test_pending();
 }
 
-function getRegistry() {
-  gClient.listTabs().then((response) => {
-    gRegistryFront = ActorRegistryFront(gClient, response);
-    registerNewActor();
-  });
+async function getRegistry() {
+  gRegistryFront = await gClient.mainRoot.getFront("actorRegistry");
+  registerNewActor();
 }
 
 function registerNewActor() {
   const options = {
     prefix: "helloActor",
     constructor: "HelloActor",
-    type: { global: true }
+    type: { global: true },
   };
 
   gRegistryFront
@@ -49,11 +42,11 @@ function registerNewActor() {
 }
 
 function talkToNewActor() {
-  gClient.listTabs().then(({ helloActor }) => {
+  gClient.mainRoot.getRoot().then(({ helloActor }) => {
     Assert.ok(!!helloActor);
     gClient.request({
       to: helloActor,
-      type: "hello"
+      type: "hello",
     }, response => {
       Assert.ok(!response.error);
       unregisterNewActor();
@@ -72,10 +65,9 @@ function unregisterNewActor() {
 }
 
 function testActorIsUnregistered() {
-  gClient.listTabs().then(({ helloActor }) => {
+  gClient.mainRoot.rootForm.then(({ helloActor }) => {
     Assert.ok(!helloActor);
 
-    Services.prefs.setBoolPref("devtools.debugger.forbid-certified-apps", gOldPref);
     finishClient(gClient);
   });
 }

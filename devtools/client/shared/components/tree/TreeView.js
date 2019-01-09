@@ -24,7 +24,7 @@ define(function(require, exports, module) {
     "ArrowLeft",
     "ArrowRight",
     "End",
-    "Home"
+    "Home",
   ];
 
   const defaultProps = {
@@ -34,7 +34,7 @@ define(function(require, exports, module) {
     expandedNodes: new Set(),
     selected: null,
     expandableStrings: true,
-    columns: []
+    columns: [],
   };
 
   /**
@@ -125,58 +125,13 @@ define(function(require, exports, module) {
         columns: PropTypes.arrayOf(PropTypes.shape({
           id: PropTypes.string.isRequired,
           title: PropTypes.string,
-          width: PropTypes.string
-        }))
+          width: PropTypes.string,
+        })),
       };
     }
 
     static get defaultProps() {
       return defaultProps;
-    }
-
-    constructor(props) {
-      super(props);
-
-      this.state = {
-        expandedNodes: props.expandedNodes,
-        columns: ensureDefaultColumn(props.columns),
-        selected: props.selected,
-        lastSelectedIndex: 0
-      };
-
-      this.toggle = this.toggle.bind(this);
-      this.isExpanded = this.isExpanded.bind(this);
-      this.onKeyDown = this.onKeyDown.bind(this);
-      this.onClickRow = this.onClickRow.bind(this);
-      this.getSelectedRow = this.getSelectedRow.bind(this);
-      this.selectRow = this.selectRow.bind(this);
-      this.isSelected = this.isSelected.bind(this);
-      this.onFilter = this.onFilter.bind(this);
-      this.onSort = this.onSort.bind(this);
-      this.getMembers = this.getMembers.bind(this);
-      this.renderRows = this.renderRows.bind(this);
-    }
-
-    componentWillReceiveProps(nextProps) {
-      const { expandedNodes, selected } = nextProps;
-      const state = {
-        expandedNodes,
-        lastSelectedIndex: this.getSelectedRowIndex()
-      };
-
-      if (selected) {
-        state.selected = selected;
-      }
-
-      this.setState(Object.assign({}, this.state, state));
-    }
-
-    componentDidUpdate() {
-      const selected = this.getSelectedRow();
-      if (!selected && this.rows.length > 0) {
-        this.selectRow(this.rows[
-          Math.min(this.state.lastSelectedIndex, this.rows.length - 1)]);
-      }
     }
 
     static subPath(path, subKey) {
@@ -199,7 +154,7 @@ define(function(require, exports, module) {
       const queue = [{
         object: rootObj,
         level: 1,
-        path: ""
+        path: "",
       }];
       while (queue.length) {
         const {object, level, path} = queue.shift();
@@ -218,12 +173,57 @@ define(function(require, exports, module) {
             queue.push({
               object: object[key],
               level: level + 1,
-              path: nodePath
+              path: nodePath,
             });
           }
         }
       }
       return expandedNodes;
+    }
+
+    constructor(props) {
+      super(props);
+
+      this.state = {
+        expandedNodes: props.expandedNodes,
+        columns: ensureDefaultColumn(props.columns),
+        selected: props.selected,
+        lastSelectedIndex: 0,
+      };
+
+      this.toggle = this.toggle.bind(this);
+      this.isExpanded = this.isExpanded.bind(this);
+      this.onKeyDown = this.onKeyDown.bind(this);
+      this.onClickRow = this.onClickRow.bind(this);
+      this.getSelectedRow = this.getSelectedRow.bind(this);
+      this.selectRow = this.selectRow.bind(this);
+      this.isSelected = this.isSelected.bind(this);
+      this.onFilter = this.onFilter.bind(this);
+      this.onSort = this.onSort.bind(this);
+      this.getMembers = this.getMembers.bind(this);
+      this.renderRows = this.renderRows.bind(this);
+    }
+
+    componentWillReceiveProps(nextProps) {
+      const { expandedNodes, selected } = nextProps;
+      const state = {
+        expandedNodes,
+        lastSelectedIndex: this.getSelectedRowIndex(),
+      };
+
+      if (selected) {
+        state.selected = selected;
+      }
+
+      this.setState(Object.assign({}, this.state, state));
+    }
+
+    componentDidUpdate() {
+      const selected = this.getSelectedRow();
+      if (!selected && this.rows.length > 0) {
+        this.selectRow(this.rows[
+          Math.min(this.state.lastSelectedIndex, this.rows.length - 1)]);
+      }
     }
 
     // Node expand/collapse
@@ -238,7 +238,7 @@ define(function(require, exports, module) {
 
       // Compute new state and update the tree.
       this.setState(Object.assign({}, this.state, {
-        expandedNodes: nodes
+        expandedNodes: nodes,
       }));
     }
 
@@ -297,7 +297,7 @@ define(function(require, exports, module) {
             // the table head. So we want to force the tree to scroll to the very top.
             this.selectRow(firstRow, {
               block: "end",
-              inline: "nearest"
+              inline: "nearest",
             });
           }
           break;
@@ -357,7 +357,7 @@ define(function(require, exports, module) {
       }
 
       this.setState(Object.assign({}, this.state, {
-        selected: row.id
+        selected: row.id,
       }));
 
       row.scrollIntoView(scrollOptions);
@@ -447,7 +447,7 @@ define(function(require, exports, module) {
           // True if the node is hidden (used for filtering)
           hidden: !this.onFilter(child),
           // True if the node is selected with keyboard
-          selected: this.isSelected(nodePath)
+          selected: this.isSelected(nodePath),
         };
       });
     }
@@ -480,7 +480,7 @@ define(function(require, exports, module) {
           columns: this.state.columns,
           id: member.path,
           ref: row => row && this.rows.push(row),
-          onClick: this.onClickRow.bind(this, member.path)
+          onClick: this.onClickRow.bind(this, member.path),
         });
 
         // Render single row.
@@ -529,7 +529,7 @@ define(function(require, exports, module) {
       }
 
       const props = Object.assign({}, this.props, {
-        columns: this.state.columns
+        columns: this.state.columns,
       });
 
       return (
@@ -548,7 +548,7 @@ define(function(require, exports, module) {
           TreeHeader(props),
           dom.tbody({
             role: "presentation",
-            tabIndex: -1
+            tabIndex: -1,
           }, rows)
         )
       );

@@ -16,7 +16,7 @@ add_task(async function enableDialogs() {
   let dialogShown = false;
   function onDialogShown(node) {
     dialogShown = true;
-    let dismissButton = node.ui.button0;
+    let dismissButton = node.querySelector(".tabmodalprompt-button0");
     dismissButton.click();
   }
   let obsName = "tabmodal-dialog-loaded";
@@ -41,8 +41,7 @@ async function openPage(enableDialogs) {
       ChromeUtils.import("resource://gre/modules/Services.jsm");
       Services.obs.addObserver(doc => {
         if (content && doc == content.document) {
-          content.QueryInterface(Ci.nsIInterfaceRequestor).
-            getInterface(Ci.nsIDOMWindowUtils)[name]();
+          content.windowUtils[name]();
         }
       }, "document-element-inserted");
     });

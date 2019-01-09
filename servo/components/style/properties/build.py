@@ -1,6 +1,6 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import json
 import os.path
@@ -49,7 +49,8 @@ STYLE_STRUCT_LIST = [
 
 
 def main():
-    usage = "Usage: %s [ servo | gecko ] [ style-crate | geckolib <template> | html ]" % sys.argv[0]
+    usage = ("Usage: %s [ servo | gecko ] [ style-crate | geckolib <template> | html ]" %
+             sys.argv[0])
     if len(sys.argv) < 3:
         abort(usage)
     product = sys.argv[1]
@@ -122,7 +123,7 @@ def render(filename, **context):
         # Uncomment to debug generated Python code:
         # write("/tmp", "mako_%s.py" % os.path.basename(filename), template.code)
         return template.render(**context).encode("utf8")
-    except:
+    except Exception:
         # Uncomment to see a traceback in generated Python code:
         # raise
         abort(exceptions.text_error_template().render().encode("utf8"))

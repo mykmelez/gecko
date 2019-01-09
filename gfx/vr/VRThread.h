@@ -4,53 +4,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
- #ifndef GFX_VR_THREAD_H
- #define GFX_VR_THREAD_H
+#ifndef GFX_VR_THREAD_H
+#define GFX_VR_THREAD_H
 
 #include "ThreadSafeRefcountingWithMainThreadDestruction.h"
-#include "base/thread.h"                // for Thread
+#include "base/thread.h"  // for Thread
 
 namespace mozilla {
 namespace gfx {
 
-class VRListenerThreadHolder final
-{
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING_WITH_MAIN_THREAD_DESTRUCTION(VRListenerThreadHolder)
-
-public:
-  VRListenerThreadHolder();
-
-  base::Thread* GetThread() const {
-    return mThread;
-  }
-
-  static VRListenerThreadHolder* GetSingleton();
-
-  static bool IsActive() {
-    return GetSingleton() && Loop();
-  }
-
-  static void Start();
-  static void Shutdown();
-  static MessageLoop* Loop();
-  static bool IsInVRListenerThread();
-
-private:
-  ~VRListenerThreadHolder();
-
-  base::Thread* const mThread;
-
-  static base::Thread* CreateThread();
-  static void DestroyThread(base::Thread* aThread);
-};
-
-base::Thread* VRListenerThread();
-
-class VRThread final
-{
+class VRThread final {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(VRThread)
 
-public:
+ public:
   explicit VRThread(const nsCString& aName);
 
   void Start();
@@ -63,10 +29,10 @@ public:
   const nsCOMPtr<nsIThread> GetThread() const;
   bool IsActive();
 
-protected:
+ protected:
   ~VRThread();
 
-private:
+ private:
   nsCOMPtr<nsIThread> mThread;
   TimeStamp mLastActiveTime;
   nsCString mName;
@@ -74,7 +40,7 @@ private:
   Atomic<bool> mStarted;
 };
 
-} // namespace gfx
-} // namespace mozilla
+}  // namespace gfx
+}  // namespace mozilla
 
-#endif // GFX_VR_THREAD_H
+#endif  // GFX_VR_THREAD_H

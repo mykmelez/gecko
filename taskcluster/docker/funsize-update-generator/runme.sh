@@ -9,8 +9,14 @@ test "$SHA384_SIGNING_CERT"
 ARTIFACTS_DIR="/home/worker/artifacts"
 mkdir -p "$ARTIFACTS_DIR"
 
-curl --location --retry 10 --retry-delay 10 -o /home/worker/task.json \
-    "https://queue.taskcluster.net/v1/task/$TASK_ID"
+# duplicate the functionality of taskcluster-lib-urls, but in bash..
+if [ "$TASKCLUSTER_ROOT_URL" = "https://taskcluster.net" ]; then
+    queue_base='https://queue.taskcluster.net/v1'
+else
+    queue_base="$TASKCLUSTER_ROOT_URL/api/queue/v1"
+fi
+
+curl --location --retry 10 --retry-delay 10 -o /home/worker/task.json "$queue_base/task/$TASK_ID"
 
 # auth:aws-s3:read-write:tc-gp-private-1d-us-east-1/releng/mbsdiff-cache/
 # -> bucket of tc-gp-private-1d-us-east-1, path of releng/mbsdiff-cache/
@@ -27,7 +33,8 @@ then
   test "${AWS_BUCKET_NAME}"
 
   set +x  # Don't echo these.
-  secret_url="taskcluster/auth/v1/aws/s3/read-write/${AWS_BUCKET_NAME}/${S3_PATH}"
+  # Until bug 1460015 is finished, use baseUrl-style proxy URLs
+  secret_url="${TASKCLUSTER_PROXY_URL}/auth/v1/aws/s3/read-write/${AWS_BUCKET_NAME}/${S3_PATH}"
   AUTH=$(curl "${secret_url}")
   AWS_ACCESS_KEY_ID=$(echo "${AUTH}" | jq -r '.credentials.accessKeyId')
   AWS_SECRET_ACCESS_KEY=$(echo "${AUTH}" | jq -r '.credentials.secretAccessKey')
@@ -43,8 +50,8 @@ then
   fi
   set -x
 else
-  # enable locale cache
-  export MBSDIFF_HOOK="/home/worker/bin/mbsdiff_hook.sh -c /tmp/fs-cache"
+  # disable caching
+  export MBSDIFF_HOOK=
 fi
 
 if [ ! -z "$FILENAME_TEMPLATE" ]; then
@@ -53,7 +60,7 @@ fi
 
 # EXTRA_PARAMS is optional
 # shellcheck disable=SC2086
-/home/worker/bin/funsize.py \
+pipenv run /home/worker/bin/funsize.py \
     --artifacts-dir "$ARTIFACTS_DIR" \
     --task-definition /home/worker/task.json \
     --sha1-signing-cert "/home/worker/keys/${SHA1_SIGNING_CERT}.pubkey" \

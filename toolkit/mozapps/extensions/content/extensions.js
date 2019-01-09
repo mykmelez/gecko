@@ -11,9 +11,7 @@
 ChromeUtils.import("resource://gre/modules/DeferredTask.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/DownloadUtils.jsm");
 ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 ChromeUtils.import("resource://gre/modules/addons/AddonRepository.jsm");
 ChromeUtils.import("resource://gre/modules/addons/AddonSettings.jsm");
 
@@ -103,7 +101,7 @@ function promiseEvent(event, target, capture = false) {
 
 var gPendingInitializations = 1;
 Object.defineProperty(this, "gIsInitializing", {
-  get: () => gPendingInitializations > 0
+  get: () => gPendingInitializations > 0,
 });
 
 function initialize(event) {
@@ -127,14 +125,6 @@ function initialize(event) {
     gViewController.doCommand(event.target.id);
   });
 
-  let detailScreenshot = document.getElementById("detail-screenshot");
-  detailScreenshot.addEventListener("load", function(event) {
-    this.removeAttribute("loading");
-  });
-  detailScreenshot.addEventListener("error", function(event) {
-    this.setAttribute("loading", "error");
-  });
-
   let addonPage = document.getElementById("addons-page");
   addonPage.addEventListener("dragenter", function(event) {
     gDragDrop.onDragOver(event);
@@ -151,6 +141,20 @@ function initialize(event) {
   if (!isDiscoverEnabled()) {
     gViewDefault = "addons://list/extension";
   }
+
+  let helpButton = document.getElementById("helpButton");
+  let helpUrl = Services.urlFormatter.formatURLPref("app.support.baseURL") + "addons-help";
+  helpButton.setAttribute("href", helpUrl);
+
+  document.getElementById("preferencesButton")
+    .addEventListener("click", () => {
+      let mainWindow = getMainWindow();
+      if ("switchToTabHavingURI" in mainWindow) {
+        mainWindow.switchToTabHavingURI("about:preferences", true, {
+          triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+        });
+      }
+    });
 
   gViewController.initialize();
   gCategories.initialize();
@@ -274,22 +278,27 @@ function isDiscoverEnabled() {
   return true;
 }
 
+function setSearchLabel(type) {
+  let searchLabel = document.getElementById("search-label");
+  if (type == "extension" || type == "theme") {
+    searchLabel
+      .textContent = gStrings.ext.GetStringFromName(`searchLabel.${type}`);
+    searchLabel.hidden = false;
+  } else {
+    searchLabel.textContent = "";
+    searchLabel.hidden = true;
+  }
+}
+
 /**
  * Obtain the main DOMWindow for the current context.
  */
 function getMainWindow() {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIWebNavigation)
-               .QueryInterface(Ci.nsIDocShellTreeItem)
-               .rootTreeItem
-               .QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIDOMWindow);
+  return window.docShell.rootTreeItem.domWindow;
 }
 
 function getBrowserElement() {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIDocShell)
-               .chromeEventHandler;
+  return window.docShell.chromeEventHandler;
 }
 
 /**
@@ -298,20 +307,20 @@ function getBrowserElement() {
  */
 var HTML5History = {
   get index() {
-    return window.QueryInterface(Ci.nsIInterfaceRequestor)
-                 .getInterface(Ci.nsIWebNavigation)
+    return window.docShell
+                 .QueryInterface(Ci.nsIWebNavigation)
                  .sessionHistory.index;
   },
 
   get canGoBack() {
-    return window.QueryInterface(Ci.nsIInterfaceRequestor)
-                 .getInterface(Ci.nsIWebNavigation)
+    return window.docShell
+                 .QueryInterface(Ci.nsIWebNavigation)
                  .canGoBack;
   },
 
   get canGoForward() {
-    return window.QueryInterface(Ci.nsIInterfaceRequestor)
-                 .getInterface(Ci.nsIWebNavigation)
+    return window.docShell
+                 .QueryInterface(Ci.nsIWebNavigation)
                  .canGoForward;
   },
 
@@ -347,7 +356,7 @@ var HTML5History = {
     window.history.back();
     gViewController.updateCommand("cmd_back");
     gViewController.updateCommand("cmd_forward");
-  }
+  },
 };
 
 /**
@@ -409,13 +418,13 @@ var FakeHistory = {
     gViewController.updateState(this.states[this.pos]);
     gViewController.updateCommand("cmd_back");
     gViewController.updateCommand("cmd_forward");
-  }
+  },
 };
 
 // If the window has a session history then use the HTML5 History wrapper
 // otherwise use our fake history implementation
-if (window.QueryInterface(Ci.nsIInterfaceRequestor)
-          .getInterface(Ci.nsIWebNavigation)
+if (window.docShell
+          .QueryInterface(Ci.nsIWebNavigation)
           .sessionHistory) {
   var gHistory = HTML5History;
 } else {
@@ -617,7 +626,7 @@ var gEventManager = {
 
   onUpdateModeChanged() {
     this.refreshAutoUpdateDefault();
-  }
+  },
 };
 
 function attachUpdateHandler(install) {
@@ -649,6 +658,9 @@ function attachUpdateHandler(install) {
             type: "update",
             addon: info.addon,
             icon: info.addon.icon,
+            // Reference to the related AddonInstall object (used in AMTelemetry to
+            // link the recorded event to the other events from the same install flow).
+            install,
             permissions: difference,
             resolve,
             reject,
@@ -756,7 +768,7 @@ var gViewController = {
 
     var state = {
       view: aViewId,
-      previousView: this.currentViewId
+      previousView: this.currentViewId,
     };
     if (!isRefresh) {
       gHistory.pushState(state);
@@ -773,7 +785,7 @@ var gViewController = {
 
     var state = {
       view: aViewId,
-      previousView: null
+      previousView: null,
     };
     gHistory.replaceState(state);
     this.loadViewInternal(aViewId, null, state);
@@ -782,7 +794,7 @@ var gViewController = {
   loadInitialView(aViewId) {
     var state = {
       view: aViewId,
-      previousView: null
+      previousView: null,
     };
     gHistory.replaceState(state);
 
@@ -840,6 +852,16 @@ var gViewController = {
     this.currentViewObj.node.setAttribute("loading", "true");
     this.currentViewObj.node.focus();
 
+    let headingName = document.getElementById("heading-name");
+    try {
+      headingName.textContent = gStrings.ext.GetStringFromName(`listHeading.${view.param}`);
+      setSearchLabel(view.param);
+    } catch (e) {
+      // In tests we sometimes render this view with a type we don't support, that's fine.
+      headingName.textContent = "";
+    }
+
+
     if (aViewId == aPreviousView)
       this.currentViewObj.refresh(view.param, ++this.currentViewRequest, aState);
     else
@@ -872,7 +894,7 @@ var gViewController = {
       },
       doCommand() {
         gHistory.back();
-      }
+      },
     },
 
     cmd_forward: {
@@ -881,14 +903,14 @@ var gViewController = {
       },
       doCommand() {
         gHistory.forward();
-      }
+      },
     },
 
     cmd_focusSearch: {
       isEnabled: () => true,
       doCommand() {
         gHeader.focusSearchBox();
-      }
+      },
     },
 
     cmd_enableCheckCompatibility: {
@@ -897,7 +919,7 @@ var gViewController = {
       },
       doCommand() {
         AddonManager.checkCompatibility = true;
-      }
+      },
     },
 
     cmd_enableUpdateSecurity: {
@@ -906,7 +928,7 @@ var gViewController = {
       },
       doCommand() {
         AddonManager.checkUpdateSecurity = true;
-      }
+      },
     },
 
     cmd_toggleAutoUpdateDefault: {
@@ -925,7 +947,7 @@ var gViewController = {
           // Toggle the auto pref to false, but don't touch the enabled check.
           AddonManager.autoUpdateDefault = false;
         }
-      }
+      },
     },
 
     cmd_resetAddonAutoUpdate: {
@@ -938,7 +960,7 @@ var gViewController = {
           if ("applyBackgroundUpdates" in addon)
             addon.applyBackgroundUpdates = AddonManager.AUTOUPDATE_DEFAULT;
         }
-      }
+      },
     },
 
     cmd_goToDiscoverPane: {
@@ -947,7 +969,7 @@ var gViewController = {
       },
       doCommand() {
         gViewController.loadView("addons://discover/");
-      }
+      },
     },
 
     cmd_goToRecentUpdates: {
@@ -956,7 +978,7 @@ var gViewController = {
       },
       doCommand() {
         gViewController.loadView("addons://updates/recent");
-      }
+      },
     },
 
     cmd_goToAvailableUpdates: {
@@ -965,7 +987,7 @@ var gViewController = {
       },
       doCommand() {
         gViewController.loadView("addons://updates/available");
-      }
+      },
     },
 
     cmd_showItemDetails: {
@@ -976,7 +998,7 @@ var gViewController = {
         gViewController.loadView("addons://detail/" +
                                  encodeURIComponent(aAddon.id) +
                                  (aScrollToPreferences ? "/preferences" : ""));
-      }
+      },
     },
 
     cmd_findAllUpdates: {
@@ -1036,7 +1058,7 @@ var gViewController = {
             pendingChecks--;
             numUpdated++;
             updateStatus();
-          }
+          },
         };
 
         var updateCheckListener = {
@@ -1060,7 +1082,7 @@ var gViewController = {
           onUpdateFinished(aAddon, aError) {
             gEventManager.delegateAddonEvent("onUpdateFinished",
                                              [aAddon, aError]);
-          }
+          },
         };
 
         let aAddonList = await AddonManager.getAddonsByTypes(null);
@@ -1074,7 +1096,7 @@ var gViewController = {
 
         if (pendingChecks == 0)
           updateStatus();
-      }
+      },
     },
 
     cmd_findItemUpdates: {
@@ -1095,11 +1117,11 @@ var gViewController = {
           onNoUpdateAvailable(aAddon) {
             gEventManager.delegateAddonEvent("onNoUpdateAvailable",
                                              [aAddon]);
-          }
+          },
         };
         gEventManager.delegateAddonEvent("onCheckingUpdate", [aAddon]);
         aAddon.findUpdates(listener, AddonManager.UPDATE_WHEN_USER_REQUESTED);
-      }
+      },
     },
 
     cmd_showItemPreferences: {
@@ -1118,7 +1140,7 @@ var gViewController = {
         } else if (aAddon.optionsType == AddonManager.OPTIONS_TYPE_TAB) {
           openOptionsInTab(aAddon.optionsURL);
         }
-      }
+      },
     },
 
     cmd_enableItem: {
@@ -1141,7 +1163,10 @@ var gViewController = {
                   addon: aAddon,
                   icon: aAddon.iconURL,
                   permissions: perms,
-                  resolve() { aAddon.enable(); },
+                  resolve() {
+                    aAddon.markAsSeen();
+                    aAddon.enable();
+                  },
                   reject() {},
                 },
               },
@@ -1156,7 +1181,7 @@ var gViewController = {
         if (!aAddon)
           return "";
         return gStrings.ext.GetStringFromName("enableAddonTooltip");
-      }
+      },
     },
 
     cmd_disableItem: {
@@ -1174,7 +1199,7 @@ var gViewController = {
         if (!aAddon)
           return "";
         return gStrings.ext.GetStringFromName("disableAddonTooltip");
-      }
+      },
     },
 
     cmd_installItem: {
@@ -1192,7 +1217,7 @@ var gViewController = {
           gViewController.popState(doInstall);
         else
           doInstall();
-      }
+      },
     },
 
     cmd_uninstallItem: {
@@ -1201,21 +1226,21 @@ var gViewController = {
           return false;
         return hasPermission(aAddon, "uninstall");
       },
-      doCommand(aAddon) {
-        if (gViewController.currentViewObj != gDetailView) {
-          aAddon.uninstall();
-          return;
+      async doCommand(aAddon) {
+        // Make sure we're on the list view, which supports undo.
+        if (gViewController.currentViewObj != gListView) {
+          await new Promise(resolve => {
+            document.addEventListener("ViewChanged", resolve, {once: true});
+            gViewController.loadView(`addons://list/${aAddon.type}`);
+          });
         }
-
-        gViewController.popState(function() {
-          gViewController.currentViewObj.getListItemForID(aAddon.id).uninstall();
-        });
+        gViewController.currentViewObj.getListItemForID(aAddon.id).uninstall();
       },
       getTooltip(aAddon) {
         if (!aAddon)
           return "";
         return gStrings.ext.GetStringFromName("uninstallAddonTooltip");
-      }
+      },
     },
 
     cmd_cancelUninstallItem: {
@@ -1226,7 +1251,7 @@ var gViewController = {
       },
       doCommand(aAddon) {
         aAddon.cancelUninstall();
-      }
+      },
     },
 
     cmd_installFromFile: {
@@ -1250,15 +1275,18 @@ var gViewController = {
           if (result != nsIFilePicker.returnOK)
             return;
 
+          let installTelemetryInfo = {
+            source: "about:addons",
+            method: "install-from-file",
+          };
+
           let browser = getBrowserElement();
-          let files = fp.files;
-          while (files.hasMoreElements()) {
-            let file = files.getNext();
-            let install = await AddonManager.getInstallForFile(file);
+          for (let file of fp.files) {
+            let install = await AddonManager.getInstallForFile(file, null, installTelemetryInfo);
             AddonManager.installAddonFromAOM(browser, document.documentURIObject, install);
           }
         });
-      }
+      },
     },
 
     cmd_debugAddons: {
@@ -1285,7 +1313,7 @@ var gViewController = {
         if (isPending(aAddon, "uninstall")) {
           aAddon.cancelUninstall();
         }
-      }
+      },
     },
 
     cmd_contribute: {
@@ -1296,7 +1324,7 @@ var gViewController = {
       },
       doCommand(aAddon) {
         openURL(aAddon.contributionURL);
-      }
+      },
     },
 
     cmd_askToActivateItem: {
@@ -1309,7 +1337,7 @@ var gViewController = {
       },
       doCommand(aAddon) {
         aAddon.userDisabled = AddonManager.STATE_ASK_TO_ACTIVATE;
-      }
+      },
     },
 
     cmd_alwaysActivateItem: {
@@ -1322,7 +1350,7 @@ var gViewController = {
       },
       doCommand(aAddon) {
         aAddon.userDisabled = false;
-      }
+      },
     },
 
     cmd_neverActivateItem: {
@@ -1335,7 +1363,7 @@ var gViewController = {
       },
       doCommand(aAddon) {
         aAddon.userDisabled = true;
-      }
+      },
     },
 
     cmd_showUnsignedExtensions: {
@@ -1403,7 +1431,7 @@ var gViewController = {
     cmd.doCommand(aAddon);
   },
 
-  onEvent() {}
+  onEvent() {},
 };
 
 function hasInlineOptions(aAddon) {
@@ -1457,9 +1485,9 @@ function shouldShowVersionNumber(aAddon) {
 }
 
 function createItem(aObj, aIsInstall) {
-  let item = document.createElement("richlistitem");
+  let item = document.createXULElement("richlistitem");
 
-  item.setAttribute("class", "addon addon-view");
+  item.setAttribute("class", "addon addon-view card");
   item.setAttribute("name", aObj.name);
   item.setAttribute("type", aObj.type);
 
@@ -1540,6 +1568,15 @@ function sortElements(aElements, aSortBy, aAscending) {
     return (UISTATE_ORDER.indexOf(a) - UISTATE_ORDER.indexOf(b));
   }
 
+  // Prioritize themes that have screenshots.
+  function hasPreview(aHasStr, bHasStr) {
+    let aHas = aHasStr == "true";
+    let bHas = bHasStr == "true";
+    if (aHas == bHas)
+      return 0;
+    return aHas ? -1 : 1;
+  }
+
   function getValue(aObj, aKey) {
     if (!aObj)
       return null;
@@ -1586,6 +1623,8 @@ function sortElements(aElements, aSortBy, aAscending) {
       aSortFuncs[i] = dateCompare;
     else if (NUMERIC_FIELDS.includes(sortBy))
       aSortFuncs[i] = numberCompare;
+    else if (sortBy == "hasPreview")
+      aSortFuncs[i] = hasPreview;
   }
 
 
@@ -1607,8 +1646,9 @@ function sortElements(aElements, aSortBy, aAscending) {
       if (aValue != bValue) {
         var result = aSortFuncs[i](aValue, bValue);
 
-        if (result != 0)
+        if (result != 0) {
           return result;
+        }
       }
     }
 
@@ -1623,8 +1663,8 @@ function sortList(aList, aSortBy, aAscending) {
   var elements = Array.slice(aList.childNodes, 0);
   sortElements(elements, [aSortBy], aAscending);
 
-  while (aList.listChild)
-    aList.removeChild(aList.lastChild);
+  while (aList.lastChild)
+    aList.lastChild.remove();
 
   for (let element of elements)
     aList.appendChild(element);
@@ -1715,7 +1755,7 @@ var gCategories = {
     if (document.getElementById("category-" + aId))
       return;
 
-    var category = document.createElement("richlistitem");
+    var category = document.createXULElement("richlistitem");
     category.setAttribute("id", "category-" + aId);
     category.setAttribute("value", aView);
     category.setAttribute("class", "category");
@@ -1725,7 +1765,7 @@ var gCategories = {
     category.setAttribute("hidden", aStartHidden);
 
     var node;
-    for (node of this.node.children) {
+    for (node of this.node.itemChildren) {
       var nodePriority = parseInt(node.getAttribute("priority"));
       // If the new type's priority is higher than this one then this is the
       // insertion point
@@ -1808,7 +1848,7 @@ var gCategories = {
               Services.prefs.setBoolPref(prefName, false);
               gEventManager.unregisterInstallListener(this);
             }
-          }
+          },
         });
 
         notifyInitialized();
@@ -1887,7 +1927,10 @@ var gHeader = {
 
       let browser = getBrowserElement();
       let chromewin = browser.ownerGlobal;
-      chromewin.openLinkIn(url, "tab", {fromChrome: true});
+      chromewin.openLinkIn(url, "tab", {
+        fromChrome: true,
+        triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal({}),
+      });
     });
   },
 
@@ -1902,16 +1945,13 @@ var gHeader = {
   },
 
   get shouldShowNavButtons() {
-    var docshellItem = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                             .getInterface(Ci.nsIWebNavigation)
-                             .QueryInterface(Ci.nsIDocShellTreeItem);
+    var docshellItem = window.docShell;
 
     // If there is no outer frame then make the buttons visible
     if (docshellItem.rootTreeItem == docshellItem)
       return true;
 
-    var outerWin = docshellItem.rootTreeItem.QueryInterface(Ci.nsIInterfaceRequestor)
-                                            .getInterface(Ci.nsIDOMWindow);
+    var outerWin = docshellItem.rootTreeItem.domWindow;
     var outerDoc = outerWin.document;
     var node = outerDoc.getElementById("back-button");
     // If the outer frame has no back-button then make the buttons visible
@@ -1989,7 +2029,8 @@ var gDiscoverView = {
       this._browser.addProgressListener(this);
 
       if (this.loaded)
-        this._loadURL(this.homepageURL.spec, false, notifyInitialized);
+        this._loadURL(this.homepageURL.spec, false, notifyInitialized,
+                      Services.scriptSecurityManager.getSystemPrincipal());
       else
         notifyInitialized();
     };
@@ -2000,7 +2041,7 @@ var gDiscoverView = {
     }
 
     gPendingInitializations++;
-    let aAddons = await AddonManager.getAllAddons();
+    let aAddons = await AddonManager.getAddonsByTypes(["extension", "theme"]);
     var list = {};
     for (let addon of aAddons) {
       var prefName = PREF_GETADDONS_CACHE_ID_ENABLED.replace("%ID%",
@@ -2015,7 +2056,7 @@ var gDiscoverView = {
         type: addon.type,
         userDisabled: addon.userDisabled,
         isCompatible: addon.isCompatible,
-        isBlocklisted: addon.blocklistState == Ci.nsIBlocklistService.STATE_BLOCKED
+        isBlocklisted: addon.blocklistState == Ci.nsIBlocklistService.STATE_BLOCKED,
       };
     }
 
@@ -2058,7 +2099,8 @@ var gDiscoverView = {
     }
 
     this._loadURL(this.homepageURL.spec, aIsRefresh,
-                  gViewController.notifyViewChanged.bind(gViewController));
+                  gViewController.notifyViewChanged.bind(gViewController),
+                  Services.scriptSecurityManager.getSystemPrincipal());
   },
 
   canRefresh() {
@@ -2078,8 +2120,8 @@ var gDiscoverView = {
     this.node.selectedPanel = this._error;
   },
 
-  _loadURL(aURL, aKeepHistory, aCallback) {
-    if (this._browser.currentURI.spec == aURL) {
+  _loadURL(aURL, aKeepHistory, aCallback, aPrincipal) {
+    if (this._browser.currentURI && this._browser.currentURI.spec == aURL) {
       if (aCallback)
         aCallback();
       return;
@@ -2092,7 +2134,10 @@ var gDiscoverView = {
     if (!aKeepHistory)
       flags |= Ci.nsIWebNavigation.LOAD_FLAGS_REPLACE_HISTORY;
 
-    this._browser.loadURI(aURL, { flags });
+    this._browser.loadURI(aURL, {
+      flags,
+      triggeringPrincipal: aPrincipal || Services.scriptSecurityManager.createNullPrincipal({}),
+    });
   },
 
   onLocationChange(aWebProgress, aRequest, aLocation, aFlags) {
@@ -2108,7 +2153,7 @@ var gDiscoverView = {
 
       var state = {
         view: "addons://discover/",
-        url: aLocation.spec
+        url: aLocation.spec,
       };
 
       var replaceHistory = Ci.nsIWebNavigation.LOAD_FLAGS_REPLACE_HISTORY << 16;
@@ -2199,7 +2244,7 @@ var gDiscoverView = {
 
   getSelectedAddon() {
     return null;
-  }
+  },
 };
 
 
@@ -2297,7 +2342,7 @@ var gLegacyView = {
       listitem = listitem.nextSibling;
     }
     return null;
-  }
+  },
 };
 
 var gListView = {
@@ -2345,13 +2390,6 @@ var gListView = {
     } else {
       document.getElementById("plugindeprecation-notice").hidden = true;
     }
-
-    if (Preferences.get("extensions.getAddons.themes.browseURL", "")) {
-      document.getElementById("getthemes-learnmore-link")
-        .setAttribute("href", Services.urlFormatter.formatURLPref("extensions.getAddons.themes.browseURL"));
-    } else {
-      document.getElementById("getthemes-container").hidden = true;
-    }
   },
 
   show(aType, aRequest) {
@@ -2398,9 +2436,16 @@ var gListView = {
 
       this.showEmptyNotice(elements.length == 0);
       if (elements.length > 0) {
-        sortElements(elements, ["uiState", "name"], true);
-        for (let element of elements)
+        let sortBy;
+        if (aType == "theme") {
+          sortBy = ["uiState", "hasPreview", "name"];
+        } else {
+          sortBy = ["uiState", "name"];
+        }
+        sortElements(elements, sortBy, true);
+        for (let element of elements) {
           this._listBox.appendChild(element);
+        }
       }
 
       this.filterDisabledUnsigned(showOnlyDisabledUnsigned);
@@ -2537,7 +2582,7 @@ var gListView = {
       listitem = listitem.nextSibling;
     }
     return null;
-  }
+  },
 };
 
 
@@ -2566,6 +2611,16 @@ var gDetailView = {
   },
 
   _updateView(aAddon, aIsRemote, aScrollToPreferences) {
+    setSearchLabel(aAddon.type);
+
+    // Set the preview image for themes, if available.
+    if (aAddon.type == "theme") {
+      let previewURL = aAddon.screenshots && aAddon.screenshots[0] && aAddon.screenshots[0].url;
+      if (previewURL) {
+        this.node.querySelector(".card-heading-image").src = previewURL;
+      }
+    }
+
     AddonManager.addManagerListener(this);
     this.clearLoading();
 
@@ -2588,7 +2643,7 @@ var gDetailView = {
     gCategories.select(category);
 
     document.getElementById("detail-name").textContent = aAddon.name;
-    var icon = AddonManager.getPreferredIconURL(aAddon, 64, window);
+    var icon = AddonManager.getPreferredIconURL(aAddon, 32, window);
     document.getElementById("detail-icon").src = icon ? icon : "";
     document.getElementById("detail-creator").setCreator(aAddon.creator, aAddon.homepageURL);
 
@@ -2598,24 +2653,6 @@ var gDetailView = {
       version.value = aAddon.version;
     } else {
       version.hidden = true;
-    }
-
-    var screenshotbox = document.getElementById("detail-screenshot-box");
-    var screenshot = document.getElementById("detail-screenshot");
-    if (aAddon.screenshots && aAddon.screenshots.length > 0) {
-      if (aAddon.screenshots[0].thumbnailURL) {
-        screenshot.src = aAddon.screenshots[0].thumbnailURL;
-        screenshot.width = aAddon.screenshots[0].thumbnailWidth;
-        screenshot.height = aAddon.screenshots[0].thumbnailHeight;
-      } else {
-        screenshot.src = aAddon.screenshots[0].url;
-        screenshot.width = aAddon.screenshots[0].width;
-        screenshot.height = aAddon.screenshots[0].height;
-      }
-      screenshot.setAttribute("loading", "true");
-      screenshotbox.hidden = false;
-    } else {
-      screenshotbox.hidden = true;
     }
 
     var desc = document.getElementById("detail-desc");
@@ -3030,10 +3067,10 @@ var gDetailView = {
       stack.remove();
     }
 
-    stack = document.createElement("stack");
+    stack = document.createXULElement("stack");
     stack.setAttribute("id", containerId);
 
-    let browser = document.createElement("browser");
+    let browser = document.createXULElement("browser");
     browser.setAttribute("type", "content");
     browser.setAttribute("disableglobalhistory", "true");
     browser.setAttribute("id", "addon-options");
@@ -3055,10 +3092,9 @@ var gDetailView = {
       let policy = ExtensionParent.WebExtensionPolicy.getByID(this._addon.id);
       browser.sameProcessAsFrameLoader = policy.extension.groupFrameLoader;
     }
-    let remote = !E10SUtils.canLoadURIInProcess(optionsURL, Services.appinfo.PROCESS_TYPE_DEFAULT);
 
     let readyPromise;
-    if (remote) {
+    if (E10SUtils.canLoadURIInRemoteType(optionsURL, E10SUtils.EXTENSION_REMOTE_TYPE)) {
       browser.setAttribute("remote", "true");
       browser.setAttribute("remoteType", E10SUtils.EXTENSION_REMOTE_TYPE);
       readyPromise = promiseEvent("XULFrameLoaderCreated", browser);
@@ -3106,8 +3142,8 @@ var gDetailView = {
       }
 
       mm.loadFrameScript("chrome://extensions/content/ext-browser-content.js",
-                         false);
-      mm.loadFrameScript("chrome://browser/content/content.js", false);
+                         false, true);
+      mm.loadFrameScript("chrome://browser/content/content.js", false, true);
       mm.addMessageListener("Extension:BrowserContentLoaded", messageListener);
       mm.addMessageListener("Extension:BrowserResized", messageListener);
 
@@ -3122,7 +3158,9 @@ var gDetailView = {
 
       mm.sendAsyncMessage("Extension:InitBrowser", browserOptions);
 
-      browser.loadURI(optionsURL);
+      browser.loadURI(optionsURL, {
+        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+      });
     });
   },
 
@@ -3189,7 +3227,7 @@ var gDetailView = {
   onInstallCancelled(aInstall) {
     if (aInstall.addon.id == this._addon.id)
       gViewController.popState();
-  }
+  },
 };
 
 
@@ -3406,7 +3444,7 @@ var gUpdatesView = {
   onPropertyChanged(aAddon, aProperties) {
     if (aProperties.includes("applyBackgroundUpdates"))
       this.updateAvailableCount();
-  }
+  },
 };
 
 var gDragDrop = {
@@ -3444,11 +3482,15 @@ var gDragDrop = {
       }
 
       if (url) {
-        let install = await AddonManager.getInstallForURL(url, "application/x-xpinstall");
+        let install = await AddonManager.getInstallForURL(url, "application/x-xpinstall",
+                                                          null, null, null, null, null, {
+                                                            source: "about:addons",
+                                                            method: "drag-and-drop",
+                                                          });
         AddonManager.installAddonFromAOM(browser, document.documentURIObject, install);
       }
     }
-  }
+  },
 };
 
 // Stub tabbrowser implementation for use by the tab-modal alert code
@@ -3456,14 +3498,14 @@ var gDragDrop = {
 // (See Bug 1385548 for rationale).
 var gBrowser = {
   getTabModalPromptBox(browser) {
-    const parentWindow = document.docShell.chromeEventHandler.ownerGlobal;
+    const parentWindow = window.docShell.chromeEventHandler.ownerGlobal;
 
     if (parentWindow.gBrowser) {
       return parentWindow.gBrowser.getTabModalPromptBox(browser);
     }
 
     return null;
-  }
+  },
 };
 
 // Force the options_ui remote browser to recompute window.mozInnerScreenX and

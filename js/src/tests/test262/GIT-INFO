@@ -1,5 +1,7 @@
-commit a8f7012587250b32ffb43a3cbd8da8a9f9d1565e
-Author: Rick Waldron <waldron.rick@gmail.com>
-Date:   Tue May 22 15:47:50 2018 -0400
+commit 8e3c6d048449a2e47c7748eafa350f49c0b8b7bc
+Author: Leo Balter <leonardo.balter@gmail.com>
+Date:   Mon Dec 10 10:59:09 2018 -0500
 
-    Array.prototype.flatten => Array.prototype.flat (#1569)
+    Merge pull request #1987 from test262-automation/v8-test262-automation-export-07b313100e
+    
+    Import test changes from V8

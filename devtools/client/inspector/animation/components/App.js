@@ -94,6 +94,7 @@ class App extends Component {
             rewindAnimationsCurrentTime,
             setAnimationsPlaybackRate,
             setAnimationsPlayState,
+            timeScale,
           }
         ),
         SplitBox({
@@ -135,12 +136,12 @@ class App extends Component {
             }
           ),
           vert: false,
-        })
+        }),
       ]
       :
       NoAnimationPanel(
         {
-          toggleElementPicker
+          toggleElementPicker,
         }
       )
     );

@@ -153,14 +153,6 @@ prefBranch.addObserver("", observer.onPrefChange);
 observer.onPrefChange(); // read initial values
 
 
-function messageManagerFromWindow(win) {
-  return win.QueryInterface(Ci.nsIInterfaceRequestor)
-            .getInterface(Ci.nsIWebNavigation)
-            .QueryInterface(Ci.nsIDocShell)
-            .QueryInterface(Ci.nsIInterfaceRequestor)
-            .getInterface(Ci.nsIContentFrameMessageManager);
-}
-
 // This object maps to the "child" process (even in the single-process case).
 var LoginManagerContent = {
   __formFillService: null, // FormFillController, for username autocompleting
@@ -303,7 +295,7 @@ var LoginManagerContent = {
     }
     let actionOrigin = LoginUtils._getActionOrigin(form);
 
-    let messageManager = messageManagerFromWindow(win);
+    let messageManager = win.docShell.messageManager;
 
     // XXX Weak??
     let requestData = { form };
@@ -325,7 +317,7 @@ var LoginManagerContent = {
     let formOrigin = LoginUtils._getPasswordOrigin(doc.documentURI);
     let actionOrigin = LoginUtils._getActionOrigin(form);
 
-    let messageManager = messageManagerFromWindow(win);
+    let messageManager = win.docShell.messageManager;
 
     let previousResult = aPreviousResult ?
                            { searchString: aPreviousResult.searchString,
@@ -362,9 +354,7 @@ var LoginManagerContent = {
     }
 
     try {
-      let webProgress = window.QueryInterface(Ci.nsIInterfaceRequestor).
-                        getInterface(Ci.nsIWebNavigation).
-                        QueryInterface(Ci.nsIDocShell).
+      let webProgress = window.docShell.
                         QueryInterface(Ci.nsIInterfaceRequestor).
                         getInterface(Ci.nsIWebProgress);
       webProgress.addProgressListener(observer,
@@ -446,14 +436,8 @@ var LoginManagerContent = {
   _fetchLoginsFromParentAndFillForm(form, window) {
     this._detectInsecureFormLikes(window);
 
-    const isPrivateWindow = PrivateBrowsingUtils.isContentWindowPrivate(window);
-
-    let messageManager = messageManagerFromWindow(window);
-    messageManager.sendAsyncMessage("LoginStats:LoginEncountered",
-                                    {
-                                      isPrivateWindow,
-                                      isPwmgrEnabled: gEnabled,
-                                    });
+    let messageManager = window.docShell.messageManager;
+    messageManager.sendAsyncMessage("LoginStats:LoginEncountered");
 
     if (!gEnabled) {
       return;
@@ -511,7 +495,7 @@ var LoginManagerContent = {
                         frame => hasInsecureLoginForms(frame));
     };
 
-    let messageManager = messageManagerFromWindow(topWindow);
+    let messageManager = topWindow.docShell.messageManager;
     messageManager.sendAsyncMessage("RemoteLogins:insecureLoginFormPresent", {
       hasInsecureLoginForms: hasInsecureLoginForms(topWindow),
     });
@@ -710,7 +694,7 @@ var LoginManagerContent = {
 
       pwFields[pwFields.length] = {
                                     index: i,
-                                    element
+                                    element,
                                   };
     }
 
@@ -949,7 +933,7 @@ var LoginManagerContent = {
     }
 
     let formSubmitURL = LoginUtils._getActionOrigin(form);
-    let messageManager = messageManagerFromWindow(win);
+    let messageManager = win.docShell.messageManager;
 
     let recipes = LoginRecipesContent.getRecipes(hostname, win);
 
@@ -986,16 +970,20 @@ var LoginManagerContent = {
                               value: oldPasswordField.value } :
                             null;
 
-    // Make sure to pass the opener's top in case it was in a frame.
-    let openerTopWindow = win.opener ? win.opener.top : null;
+    // Make sure to pass the opener's top ID in case it was in a frame.
+    let openerTopWindowID = null;
+    if (win.opener) {
+      openerTopWindowID = win.opener.top.windowUtils.outerWindowID;
+    }
 
     messageManager.sendAsyncMessage("RemoteLogins:onFormSubmit",
                                     { hostname,
                                       formSubmitURL,
                                       usernameField: mockUsername,
                                       newPasswordField: mockPassword,
-                                      oldPasswordField: mockOldPassword },
-                                    { openerTopWindow });
+                                      oldPasswordField: mockOldPassword,
+                                      openerTopWindowID,
+                                    });
   },
 
   /**
@@ -1267,7 +1255,7 @@ var LoginManagerContent = {
       autofillResult = AUTOFILL_RESULT.FILLED;
 
       let win = doc.defaultView;
-      let messageManager = messageManagerFromWindow(win);
+      let messageManager = win.docShell.messageManager;
       messageManager.sendAsyncMessage("LoginStats:LoginFillSuccessful");
     } finally {
       if (autofillResult == -1) {
@@ -1346,6 +1334,33 @@ var LoginManagerContent = {
   },
 
   /**
+   * Returns the username and password fields found in the form by input
+   * element into form.
+   *
+   * @param {HTMLInputElement} aField
+   *                           A form field into form.
+   * @return {Array} [usernameField, newPasswordField, oldPasswordField]
+   *
+   * More detail of these values is same as _getFormFields.
+   */
+  getUserNameAndPasswordFields(aField) {
+    // If the element is not a proper form field, return null.
+    if (ChromeUtils.getClassName(aField) !== "HTMLInputElement" ||
+        (aField.type != "password" && !LoginHelper.isUsernameFieldType(aField)) ||
+        aField.nodePrincipal.isNullPrincipal ||
+        !aField.ownerDocument) {
+      return [null, null, null];
+    }
+    let form = LoginFormFactory.createFromField(aField);
+
+    let doc = aField.ownerDocument;
+    let formOrigin = LoginUtils._getPasswordOrigin(doc.documentURI);
+    let recipes = LoginRecipesContent.getRecipes(formOrigin, doc.defaultView);
+
+    return this._getFormFields(form, false, recipes);
+  },
+
+  /**
    * Verify if a field is a valid login form field and
    * returns some information about it's FormLike.
    *
@@ -1360,17 +1375,13 @@ var LoginManagerContent = {
     // If the element is not a proper form field, return null.
     if (ChromeUtils.getClassName(aField) !== "HTMLInputElement" ||
         (aField.type != "password" && !LoginHelper.isUsernameFieldType(aField)) ||
+        aField.nodePrincipal.isNullPrincipal ||
         !aField.ownerDocument) {
       return null;
     }
-    let form = LoginFormFactory.createFromField(aField);
-
-    let doc = aField.ownerDocument;
-    let formOrigin = LoginUtils._getPasswordOrigin(doc.documentURI);
-    let recipes = LoginRecipesContent.getRecipes(formOrigin, doc.defaultView);
 
     let [usernameField, newPasswordField] =
-          this._getFormFields(form, false, recipes);
+          this.getUserNameAndPasswordFields(aField);
 
     // If we are not verifying a password field, we want
     // to use aField as the username field.
@@ -1586,7 +1597,7 @@ UserAutoCompleteResult.prototype = {
         Services.logins.removeLogin(removedLogin);
       }
     }
-  }
+  },
 };
 
 /**

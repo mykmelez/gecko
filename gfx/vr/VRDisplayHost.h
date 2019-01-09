@@ -31,7 +31,7 @@ class VRThread;
 class VRLayerParent;
 
 class VRDisplayHost {
-public:
+ public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(VRDisplayHost)
 
   const VRDisplayInfo& GetDisplayInfo() const { return mDisplayInfo; }
@@ -42,12 +42,16 @@ public:
   virtual void ZeroSensor() = 0;
   virtual void StartPresentation() = 0;
   virtual void StopPresentation() = 0;
+  virtual void StartVRNavigation();
+  virtual void StopVRNavigation(const TimeDuration& aTimeout);
   void NotifyVSync();
+  virtual void Run1msTasks(double aDeltaTime);
+  virtual void Run10msTasks();
+  virtual void Run100msTasks();
 
   void StartFrame();
   void SubmitFrame(VRLayerParent* aLayer,
-                   const layers::SurfaceDescriptor& aTexture,
-                   uint64_t aFrameId,
+                   const layers::SurfaceDescriptor& aTexture, uint64_t aFrameId,
                    const gfx::Rect& aLeftEyeRect,
                    const gfx::Rect& aRightEyeRect);
 
@@ -56,11 +60,12 @@ public:
   bool GetIsConnected();
 
   class AutoRestoreRenderState {
-  public:
+   public:
     explicit AutoRestoreRenderState(VRDisplayHost* aDisplay);
     ~AutoRestoreRenderState();
     bool IsSuccess();
-  private:
+
+   private:
     RefPtr<VRDisplayHost> mDisplay;
 #if defined(XP_WIN)
     RefPtr<ID3DDeviceContextState> mPrevDeviceContextState;
@@ -68,7 +73,7 @@ public:
     bool mSuccess;
   };
 
-protected:
+ protected:
   explicit VRDisplayHost(VRDeviceType aType);
   virtual ~VRDisplayHost();
 
@@ -76,32 +81,36 @@ protected:
   // the next frame is ready to start and the resources in aTexture can
   // safely be released.
   virtual bool SubmitFrame(const layers::SurfaceDescriptor& aTexture,
-                           uint64_t aFrameId,
-                           const gfx::Rect& aLeftEyeRect,
+                           uint64_t aFrameId, const gfx::Rect& aLeftEyeRect,
                            const gfx::Rect& aRightEyeRect) = 0;
 
   VRDisplayInfo mDisplayInfo;
 
-  nsTArray<VRLayerParent *> mLayers;
+  nsTArray<VRLayerParent*> mLayers;
   // Weak reference to mLayers entries are cleared in
   // VRLayerParent destructor
 
-protected:
-  virtual VRHMDSensorState GetSensorState() = 0;
+ protected:
+  virtual VRHMDSensorState& GetSensorState() = 0;
 
   RefPtr<VRThread> mSubmitThread;
-private:
+
+ private:
   void SubmitFrameInternal(const layers::SurfaceDescriptor& aTexture,
-                           uint64_t aFrameId,
-                           const gfx::Rect& aLeftEyeRect,
+                           uint64_t aFrameId, const gfx::Rect& aLeftEyeRect,
                            const gfx::Rect& aRightEyeRect);
+  void CheckWatchDog();
 
   VRDisplayInfo mLastUpdateDisplayInfo;
-  TimeStamp mLastFrameStart;
   bool mFrameStarted;
+#if defined(MOZ_WIDGET_ANDROID)
+ protected:
+  uint64_t mLastSubmittedFrameId;
+  uint64_t mLastStartedFrame;
+#endif  // defined(MOZ_WIDGET_ANDROID)
 
 #if defined(XP_WIN)
-protected:
+ protected:
   bool CreateD3DObjects();
   RefPtr<ID3D11Device1> mDevice;
   RefPtr<ID3D11DeviceContext1> mContext;
@@ -109,13 +118,13 @@ protected:
   ID3D11DeviceContext1* GetD3DDeviceContext();
   ID3DDeviceContextState* GetD3DDeviceContextState();
 
-private:
+ private:
   RefPtr<ID3DDeviceContextState> mDeviceContextState;
 #endif
 };
 
 class VRControllerHost {
-public:
+ public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(VRControllerHost)
 
   const VRControllerInfo& GetControllerInfo() const;
@@ -129,7 +138,7 @@ public:
   void SetVibrateIndex(uint64_t aIndex);
   uint64_t GetVibrateIndex();
 
-protected:
+ protected:
   explicit VRControllerHost(VRDeviceType aType, dom::GamepadHand aHand,
                             uint32_t aDisplayID);
   virtual ~VRControllerHost();
@@ -139,7 +148,7 @@ protected:
   dom::GamepadPoseState mPose;
 };
 
-} // namespace gfx
-} // namespace mozilla
+}  // namespace gfx
+}  // namespace mozilla
 
 #endif /* GFX_VR_DISPLAY_HOST_H */

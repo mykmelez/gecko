@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! This module contains shared types and messages for use by devtools/script.
 //! The traits are here instead of in script so that the devtools crate can be
@@ -8,27 +8,35 @@
 
 #![crate_name = "style_traits"]
 #![crate_type = "rlib"]
-
 #![deny(unsafe_code, missing_docs)]
 
 extern crate app_units;
-#[macro_use] extern crate bitflags;
-#[macro_use] extern crate cssparser;
+#[macro_use]
+extern crate bitflags;
+#[macro_use]
+extern crate cssparser;
 extern crate euclid;
 extern crate malloc_size_of;
-#[macro_use] extern crate malloc_size_of_derive;
+#[macro_use]
+extern crate malloc_size_of_derive;
 extern crate selectors;
-#[cfg(feature = "servo")] #[macro_use] extern crate serde;
-#[cfg(feature = "servo")] extern crate webrender_api;
+#[cfg(feature = "servo")]
+#[macro_use]
+extern crate serde;
 extern crate servo_arc;
-#[cfg(feature = "servo")] extern crate servo_atoms;
-#[cfg(feature = "servo")] extern crate servo_url;
-
-#[cfg(feature = "servo")] pub use webrender_api::DevicePixel;
+#[cfg(feature = "servo")]
+extern crate servo_atoms;
+#[cfg(feature = "servo")]
+extern crate servo_url;
+#[cfg(feature = "servo")]
+extern crate webrender_api;
+#[cfg(feature = "servo")]
+pub use webrender_api::DevicePixel;
 
 use cssparser::{CowRcStr, Token};
 use selectors::parser::SelectorParseErrorKind;
-#[cfg(feature = "servo")] use servo_atoms::Atom;
+#[cfg(feature = "servo")]
+use servo_atoms::Atom;
 
 /// One hardware pixel.
 ///
@@ -80,8 +88,10 @@ pub mod values;
 #[macro_use]
 pub mod viewport;
 
-pub use specified_value_info::{CssType, KeywordsCollectFn, SpecifiedValueInfo};
-pub use values::{Comma, CommaWithSpace, CssWriter, OneOrMoreSeparated, Separator, Space, ToCss};
+pub use crate::specified_value_info::{CssType, KeywordsCollectFn, SpecifiedValueInfo};
+pub use crate::values::{
+    Comma, CommaWithSpace, CssWriter, OneOrMoreSeparated, Separator, Space, ToCss,
+};
 
 /// The error type for all CSS parsing routines.
 pub type ParseError<'i> = cssparser::ParseError<'i, StyleParseErrorKind<'i>>;
@@ -183,16 +193,14 @@ impl<'i> StyleParseErrorKind<'i> {
     {
         let name = name.into();
         let variant = match value_error.kind {
-            cssparser::ParseErrorKind::Custom(StyleParseErrorKind::ValueError(e)) => {
-                match e {
-                    ValueParseErrorKind::InvalidColor(token) => {
-                        StyleParseErrorKind::InvalidColor(name, token)
-                    }
-                    ValueParseErrorKind::InvalidFilter(token) => {
-                        StyleParseErrorKind::InvalidFilter(name, token)
-                    }
-                }
-            }
+            cssparser::ParseErrorKind::Custom(StyleParseErrorKind::ValueError(e)) => match e {
+                ValueParseErrorKind::InvalidColor(token) => {
+                    StyleParseErrorKind::InvalidColor(name, token)
+                },
+                ValueParseErrorKind::InvalidFilter(token) => {
+                    StyleParseErrorKind::InvalidFilter(name, token)
+                },
+            },
             _ => StyleParseErrorKind::OtherInvalidValue(name),
         };
         cssparser::ParseError {
@@ -236,5 +244,9 @@ impl ParsingMode {
 /// Speculatively execute paint code in the worklet thread pool.
 pub trait SpeculativePainter: Send + Sync {
     /// <https://drafts.css-houdini.org/css-paint-api/#draw-a-paint-image>
-    fn speculatively_draw_a_paint_image(&self, properties: Vec<(Atom, String)>, arguments: Vec<String>);
+    fn speculatively_draw_a_paint_image(
+        &self,
+        properties: Vec<(Atom, String)>,
+        arguments: Vec<String>,
+    );
 }

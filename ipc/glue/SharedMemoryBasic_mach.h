@@ -12,6 +12,7 @@
 
 #include "SharedMemory.h"
 #include <mach/port.h>
+#include "chrome/common/mach_ipc_mac.h"
 
 #ifdef FUZZING
 #include "SharedMemoryFuzzer.h"
@@ -28,19 +29,40 @@ class ReceivePort;
 namespace mozilla {
 namespace ipc {
 
-class SharedMemoryBasic final : public SharedMemoryCommon<mach_port_t>
-{
-public:
-  static void SetupMachMemory(pid_t pid,
-                              ReceivePort* listen_port,
+enum {
+  kGetPortsMsg = 1,
+  kSharePortsMsg,
+  kWaitForTexturesMsg,
+  kUpdateTextureLocksMsg,
+  kReturnIdMsg,
+  kReturnWaitForTexturesMsg,
+  kReturnPortsMsg,
+  kShutdownMsg,
+  kCleanupMsg,
+};
+
+struct MemoryPorts {
+  MachPortSender* mSender;
+  ReceivePort* mReceiver;
+
+  MemoryPorts() = default;
+  MemoryPorts(MachPortSender* sender, ReceivePort* receiver)
+      : mSender(sender), mReceiver(receiver) {}
+};
+
+class SharedMemoryBasic final : public SharedMemoryCommon<mach_port_t> {
+ public:
+  static void SetupMachMemory(pid_t pid, ReceivePort* listen_port,
                               MachPortSender* listen_port_ack,
                               MachPortSender* send_port,
-                              ReceivePort* send_port_ack,
-                              bool pidIsParent);
+                              ReceivePort* send_port_ack, bool pidIsParent);
 
   static void CleanupForPid(pid_t pid);
 
   static void Shutdown();
+
+  static bool SendMachMessage(pid_t pid, MachSendMessage& message,
+                              MachReceiveMessage* response);
 
   SharedMemoryBasic();
 
@@ -52,8 +74,7 @@ public:
 
   virtual void CloseHandle() override;
 
-  virtual void* memory() const override
-  {
+  virtual void* memory() const override {
 #ifdef FUZZING
     return SharedMemoryFuzzer::MutateSharedMemory(mMemory, mAllocSize);
 #else
@@ -61,34 +82,27 @@ public:
 #endif
   }
 
-  virtual SharedMemoryType Type() const override
-  {
-    return TYPE_BASIC;
-  }
+  virtual SharedMemoryType Type() const override { return TYPE_BASIC; }
 
-  static Handle NULLHandle()
-  {
-    return Handle();
-  }
+  static Handle NULLHandle() { return Handle(); }
 
-
-  virtual bool IsHandleValid(const Handle &aHandle) const override;
+  virtual bool IsHandleValid(const Handle& aHandle) const override;
 
   virtual bool ShareToProcess(base::ProcessId aProcessId,
                               Handle* aNewHandle) override;
 
-private:
+ private:
   ~SharedMemoryBasic();
 
   void Unmap();
   mach_port_t mPort;
   // Pointer to mapped region, null if unmapped.
-  void *mMemory;
+  void* mMemory;
   // Access rights to map an existing region with.
   OpenRights mOpenRights;
 };
 
-} // namespace ipc
-} // namespace mozilla
+}  // namespace ipc
+}  // namespace mozilla
 
-#endif // ifndef mozilla_ipc_SharedMemoryBasic_mach_h
+#endif  // ifndef mozilla_ipc_SharedMemoryBasic_mach_h

@@ -91,7 +91,7 @@ var ControlSet = {
     let [controlElem, messageElem] = controlObj.render();
     this.controlSection.appendChild(controlElem);
     this.messageSection.appendChild(messageElem);
-  }
+  },
 };
 
 function Control() {
@@ -144,7 +144,7 @@ Control.prototype = {
 
   onClick(event) {
     return true;
-  }
+  },
 };
 
 function SavePage() {
@@ -336,7 +336,7 @@ var AboutWebRTC = {
 
     heading.appendChild(renderElement("button", getString("stats_clear"), {
       className: "no-print",
-      onclick: this._onClearStats
+      onclick: this._onClearStats,
     }));
     connections.appendChild(heading);
 
@@ -361,7 +361,7 @@ var AboutWebRTC = {
     heading.appendChild(renderElement("h3", getString("log_heading")));
     heading.appendChild(renderElement("button", getString("log_clear"), {
       className: "no-print",
-      onclick: this._onClearLog
+      onclick: this._onClearLog,
     }));
     content.appendChild(heading);
 
@@ -371,7 +371,7 @@ var AboutWebRTC = {
 
     let div = new FoldableSection(content, {
       showMsg: getString("log_show_msg"),
-      hideMsg: getString("log_hide_msg")
+      hideMsg: getString("log_hide_msg"),
     }).render();
 
     for (let line of this._log) {
@@ -380,7 +380,7 @@ var AboutWebRTC = {
 
     content.appendChild(div);
     return content;
-  }
+  },
 };
 
 function PeerConnection(report) {
@@ -417,11 +417,11 @@ PeerConnection.prototype = {
 
     info.appendChild(
         renderElement("span", `${getString("peer_connection_id_label")}: `), {
-          className: "info-label"
+          className: "info-label",
         });
 
     info.appendChild(renderElement("span", this._report.pcid, {
-      className: "info-body"
+      className: "info-body",
     }));
 
     return info;
@@ -431,9 +431,9 @@ PeerConnection.prototype = {
     return {
       id: report.pcid.match(/id=(\S+)/)[1],
       url: report.pcid.match(/url=([^)]+)/)[1],
-      closed: report.closed
+      closed: report.closed,
     };
-  }
+  },
 };
 
 function renderElement(elemName, elemText, options = {}) {
@@ -470,7 +470,7 @@ SDPStats.prototype = {
     div.appendChild(renderElement("pre", this._report.remoteSdp));
 
     return div;
-  }
+  },
 };
 
 function RTPStats(report) {
@@ -515,19 +515,6 @@ RTPStats.prototype = {
     }
 
     this._stats = rtpStats;
-  },
-
-  renderAvStats(stats) {
-    let statsString = "";
-
-    if (stats.mozAvSyncDelay) {
-      statsString += `${getString("av_sync_label")}: ${stats.mozAvSyncDelay} ms `;
-    }
-    if (stats.mozJitterBufferDelay) {
-      statsString += `${getString("jitter_buffer_delay_label")}: ${stats.mozJitterBufferDelay} ms`;
-    }
-
-    return renderElement("p", statsString);
   },
 
   renderCoderStats(stats) {
@@ -593,10 +580,6 @@ RTPStats.prototype = {
     let div = document.createElement("div");
     div.appendChild(renderElement("h5", stats.id));
 
-    if (stats.MozAvSyncDelay || stats.mozJitterBufferDelay) {
-      div.appendChild(this.renderAvStats(stats));
-    }
-
     div.appendChild(this.renderCoderStats(stats));
     div.appendChild(this.renderTransportStats(stats, getString("typeLocal")));
 
@@ -649,7 +632,7 @@ ICEStats.prototype = {
     }
     caption.appendChild(
         renderElement("span", getString("trickle_highlight_color_name2"), {
-          className: "trickled"
+          className: "trickled",
         }));
     // only append span if non-whitespace chars present
     if (/\S/.test(end)) {
@@ -668,14 +651,14 @@ ICEStats.prototype = {
       stat.nominated,
       stat.selected,
       stat.bytesSent,
-      stat.bytesReceived
+      stat.bytesReceived,
     ].map(entry => Object.is(entry, undefined) ? "" : entry));
 
     let statsTable = new SimpleTable(
       ["local_candidate", "remote_candidate",
        "ice_component_id", "ice_state",
        "priority", "nominated", "selected",
-       "ice_pair_bytes_sent", "ice_pair_bytes_received"
+       "ice_pair_bytes_sent", "ice_pair_bytes_received",
       ].map(columnName => getString(columnName)),
       tbody, caption).render();
 
@@ -733,7 +716,7 @@ ICEStats.prototype = {
 
     let div = new FoldableSection(section, {
       showMsg: getString("raw_cand_show_msg"),
-      hideMsg: getString("raw_cand_hide_msg")
+      hideMsg: getString("raw_cand_hide_msg"),
     }).render();
 
     div.appendChild(this.renderRawICECandidates());
@@ -759,7 +742,7 @@ ICEStats.prototype = {
       let rawRemote = rawRemotes[i];
       row = {
         local: rawLocal || "",
-        remote: rawRemote || ""
+        remote: rawRemote || "",
       };
       rows.push(row);
     }
@@ -771,7 +754,7 @@ ICEStats.prototype = {
 
     info.appendChild(
         renderElement("span", `${getString(labelName)}: `, {
-          className: "info-label"
+          className: "info-label",
         }));
     info.appendChild(
         renderElement("span", value, {className: "info-body"}));
@@ -811,7 +794,7 @@ ICEStats.prototype = {
           nominated: pair.nominated,
           selected: pair.selected,
           bytesSent: pair.bytesSent,
-          bytesReceived: pair.bytesReceived
+          bytesReceived: pair.bytesReceived,
         };
         matched[local.id] = true;
         if (isTrickled(local.id)) {
@@ -850,18 +833,18 @@ ICEStats.prototype = {
     var type = c.candidateType;
 
     if (c.type == "local-candidate" && c.candidateType == "relayed") {
-      type = `${c.candidateType}-${c.mozLocalTransport}`;
+      type = `${c.candidateType}-${c.relayProtocol}`;
     }
 
-    return `${c.ipAddress}:${c.portNumber}/${c.transport}(${type})`;
-  }
+    return `${c.address}:${c.port}/${c.transport}(${type})`;
+  },
 };
 
 function FoldableSection(parentElement, options = {}) {
   this._foldableElement = document.createElement("div");
   if (parentElement) {
     let sectionCtrl = renderElement("div", null, {
-      className: "section-ctrl no-print"
+      className: "section-ctrl no-print",
     });
     let foldEffect = new FoldEffect(this._foldableElement, options);
     sectionCtrl.appendChild(foldEffect.render());
@@ -872,7 +855,7 @@ function FoldableSection(parentElement, options = {}) {
 FoldableSection.prototype = {
   render() {
     return this._foldableElement;
-  }
+  },
 };
 
 function SimpleTable(heading, data, caption) {
@@ -909,7 +892,7 @@ SimpleTable.prototype = {
     }
 
     return table;
-  }
+  },
 };
 
 function FoldEffect(targetElem, options = {}) {
@@ -954,7 +937,7 @@ FoldEffect.prototype = {
     this._target.classList.add("fold-closed");
     this._trigger.setAttribute("title", this._showHint);
     this._trigger.textContent = this._showMsg;
-  }
+  },
 };
 
 FoldEffect._sections = [];

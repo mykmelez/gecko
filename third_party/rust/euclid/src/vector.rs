@@ -10,6 +10,8 @@
 use super::UnknownUnit;
 use approxeq::ApproxEq;
 use length::Length;
+#[cfg(feature = "mint")]
+use mint;
 use point::{TypedPoint2D, TypedPoint3D, point2, point3};
 use size::{TypedSize2D, size2};
 use scale::TypedScale;
@@ -17,9 +19,9 @@ use trig::Trig;
 use Angle;
 use num::*;
 use num_traits::{Float, NumCast, Signed};
-use std::fmt;
-use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
-use std::marker::PhantomData;
+use core::fmt;
+use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use core::marker::PhantomData;
 
 define_matrix! {
     /// A 2d Vector tagged with a unit.
@@ -28,6 +30,7 @@ define_matrix! {
         pub y: T,
     }
 }
+mint_vec!(TypedVector2D[x, y] = Vector2);
 
 /// Default 2d vector type with no unit.
 ///
@@ -65,8 +68,8 @@ impl<T, U> TypedVector2D<T, U> {
     #[inline]
     pub fn new(x: T, y: T) -> Self {
         TypedVector2D {
-            x: x,
-            y: y,
+            x,
+            y,
             _unit: PhantomData,
         }
     }
@@ -169,6 +172,21 @@ where
         self / self.length()
     }
 
+    /// Return the normalized vector even if the length is larger than the max value of Float.
+    #[inline]
+    pub fn robust_normalize(self) -> Self
+    where
+        T: Float,
+    {
+        let length = self.length();
+        if length.is_infinite() {
+            let scaled = self / T::max_value();
+            scaled / scaled.length()
+        } else {
+            self / length
+        }
+    }
+
     #[inline]
     pub fn square_length(&self) -> T {
         self.x * self.x + self.y * self.y
@@ -243,6 +261,11 @@ impl<T: Float, U> TypedVector2D<T, U> {
     #[inline]
     pub fn max(self, other: Self) -> Self {
         vec2(self.x.max(other.x), self.y.max(other.y))
+    }
+
+    #[inline]
+    pub fn clamp(&self, start: Self, end: Self) -> Self {
+        self.max(start).min(end)
     }
 }
 
@@ -335,7 +358,17 @@ impl<T: NumCast + Copy, U> TypedVector2D<T, U> {
     /// as one would expect from a simple cast, but this behavior does not always make sense
     /// geometrically. Consider using `round()`, `ceil()` or `floor()` before casting.
     #[inline]
-    pub fn cast<NewT: NumCast + Copy>(&self) -> Option<TypedVector2D<NewT, U>> {
+    pub fn cast<NewT: NumCast + Copy>(&self) -> TypedVector2D<NewT, U> {
+        self.try_cast().unwrap()
+    }
+
+    /// Fallible cast from one numeric representation to another, preserving the units.
+    ///
+    /// When casting from floating vector to integer coordinates, the decimals are truncated
+    /// as one would expect from a simple cast, but this behavior does not always make sense
+    /// geometrically. Consider using `round()`, `ceil()` or `floor()` before casting.
+    #[inline]
+    pub fn try_cast<NewT: NumCast + Copy>(&self) -> Option<TypedVector2D<NewT, U>> {
         match (NumCast::from(self.x), NumCast::from(self.y)) {
             (Some(x), Some(y)) => Some(TypedVector2D::new(x, y)),
             _ => None,
@@ -347,13 +380,13 @@ impl<T: NumCast + Copy, U> TypedVector2D<T, U> {
     /// Cast into an `f32` vector.
     #[inline]
     pub fn to_f32(&self) -> TypedVector2D<f32, U> {
-        self.cast().unwrap()
+        self.cast()
     }
 
     /// Cast into an `f64` vector.
     #[inline]
     pub fn to_f64(&self) -> TypedVector2D<f64, U> {
-        self.cast().unwrap()
+        self.cast()
     }
 
     /// Cast into an `usize` vector, truncating decimals if any.
@@ -363,7 +396,7 @@ impl<T: NumCast + Copy, U> TypedVector2D<T, U> {
     /// the desired conversion behavior.
     #[inline]
     pub fn to_usize(&self) -> TypedVector2D<usize, U> {
-        self.cast().unwrap()
+        self.cast()
     }
 
     /// Cast into an `u32` vector, truncating decimals if any.
@@ -373,7 +406,7 @@ impl<T: NumCast + Copy, U> TypedVector2D<T, U> {
     /// the desired conversion behavior.
     #[inline]
     pub fn to_u32(&self) -> TypedVector2D<u32, U> {
-        self.cast().unwrap()
+        self.cast()
     }
 
     /// Cast into an i32 vector, truncating decimals if any.
@@ -383,7 +416,7 @@ impl<T: NumCast + Copy, U> TypedVector2D<T, U> {
     /// the desired conversion behavior.
     #[inline]
     pub fn to_i32(&self) -> TypedVector2D<i32, U> {
-        self.cast().unwrap()
+        self.cast()
     }
 
     /// Cast into an i64 vector, truncating decimals if any.
@@ -393,7 +426,7 @@ impl<T: NumCast + Copy, U> TypedVector2D<T, U> {
     /// the desired conversion behavior.
     #[inline]
     pub fn to_i64(&self) -> TypedVector2D<i64, U> {
-        self.cast().unwrap()
+        self.cast()
     }
 }
 
@@ -443,6 +476,7 @@ define_matrix! {
         pub z: T,
     }
 }
+mint_vec!(TypedVector3D[x, y, z] = Vector3);
 
 /// Default 3d vector type with no unit.
 ///
@@ -479,9 +513,9 @@ impl<T, U> TypedVector3D<T, U> {
     #[inline]
     pub fn new(x: T, y: T, z: T) -> Self {
         TypedVector3D {
-            x: x,
-            y: y,
-            z: z,
+            x,
+            y,
+            z,
             _unit: PhantomData,
         }
     }
@@ -586,6 +620,21 @@ impl<T: Mul<T, Output = T> + Add<T, Output = T> + Sub<T, Output = T> + Copy, U>
         T: Float,
     {
         self / self.length()
+    }
+
+    /// Return the normalized vector even if the length is larger than the max value of Float.
+    #[inline]
+    pub fn robust_normalize(self) -> Self
+    where
+        T: Float,
+    {
+        let length = self.length();
+        if length.is_infinite() {
+            let scaled = self / T::max_value();
+            scaled / scaled.length()
+        } else {
+            self / length
+        }
     }
 
     #[inline]
@@ -702,6 +751,11 @@ impl<T: Float, U> TypedVector3D<T, U> {
             self.z.max(other.z),
         )
     }
+
+    #[inline]
+    pub fn clamp(&self, start: Self, end: Self) -> Self {
+        self.max(start).min(end)
+    }
 }
 
 impl<T: Copy + Mul<T, Output = T>, U1, U2> Mul<TypedScale<T, U1, U2>> for TypedVector3D<T, U1> {
@@ -760,7 +814,17 @@ impl<T: NumCast + Copy, U> TypedVector3D<T, U> {
     /// as one would expect from a simple cast, but this behavior does not always make sense
     /// geometrically. Consider using `round()`, `ceil()` or `floor()` before casting.
     #[inline]
-    pub fn cast<NewT: NumCast + Copy>(&self) -> Option<TypedVector3D<NewT, U>> {
+    pub fn cast<NewT: NumCast + Copy>(&self) -> TypedVector3D<NewT, U> {
+        self.try_cast().unwrap()
+    }
+
+    /// Fallible cast from one numeric representation to another, preserving the units.
+    ///
+    /// When casting from floating vector to integer coordinates, the decimals are truncated
+    /// as one would expect from a simple cast, but this behavior does not always make sense
+    /// geometrically. Consider using `round()`, `ceil()` or `floor()` before casting.
+    #[inline]
+    pub fn try_cast<NewT: NumCast + Copy>(&self) -> Option<TypedVector3D<NewT, U>> {
         match (
             NumCast::from(self.x),
             NumCast::from(self.y),
@@ -776,13 +840,13 @@ impl<T: NumCast + Copy, U> TypedVector3D<T, U> {
     /// Cast into an `f32` vector.
     #[inline]
     pub fn to_f32(&self) -> TypedVector3D<f32, U> {
-        self.cast().unwrap()
+        self.cast()
     }
 
     /// Cast into an `f64` vector.
     #[inline]
     pub fn to_f64(&self) -> TypedVector3D<f64, U> {
-        self.cast().unwrap()
+        self.cast()
     }
 
     /// Cast into an `usize` vector, truncating decimals if any.
@@ -792,7 +856,7 @@ impl<T: NumCast + Copy, U> TypedVector3D<T, U> {
     /// the desired conversion behavior.
     #[inline]
     pub fn to_usize(&self) -> TypedVector3D<usize, U> {
-        self.cast().unwrap()
+        self.cast()
     }
 
     /// Cast into an `u32` vector, truncating decimals if any.
@@ -802,7 +866,7 @@ impl<T: NumCast + Copy, U> TypedVector3D<T, U> {
     /// the desired conversion behavior.
     #[inline]
     pub fn to_u32(&self) -> TypedVector3D<u32, U> {
-        self.cast().unwrap()
+        self.cast()
     }
 
     /// Cast into an `i32` vector, truncating decimals if any.
@@ -812,7 +876,7 @@ impl<T: NumCast + Copy, U> TypedVector3D<T, U> {
     /// the desired conversion behavior.
     #[inline]
     pub fn to_i32(&self) -> TypedVector3D<i32, U> {
-        self.cast().unwrap()
+        self.cast()
     }
 
     /// Cast into an `i64` vector, truncating decimals if any.
@@ -822,7 +886,7 @@ impl<T: NumCast + Copy, U> TypedVector3D<T, U> {
     /// the desired conversion behavior.
     #[inline]
     pub fn to_i64(&self) -> TypedVector3D<i64, U> {
-        self.cast().unwrap()
+        self.cast()
     }
 }
 
@@ -1130,6 +1194,8 @@ pub fn bvec3(x: bool, y: bool, z: bool) -> BoolVector3D {
 #[cfg(test)]
 mod vector2d {
     use super::{Vector2D, vec2};
+    #[cfg(feature = "mint")]
+    use mint;
     type Vec2 = Vector2D<f32>;
 
     #[test]
@@ -1164,6 +1230,10 @@ mod vector2d {
         assert!(p0.normalize().x.is_nan() && p0.normalize().y.is_nan());
         assert_eq!(p1.normalize(), vec2(1.0, 0.0));
         assert_eq!(p2.normalize(), vec2(0.6, -0.8));
+
+        let p3: Vec2 = vec2(::std::f32::MAX, ::std::f32::MAX);
+        assert_ne!(p3.normalize(), vec2(1.0 / 2.0f32.sqrt(), 1.0 / 2.0f32.sqrt()));
+        assert_eq!(p3.robust_normalize(), vec2(1.0 / 2.0f32.sqrt(), 1.0 / 2.0f32.sqrt()));
     }
 
     #[test]
@@ -1185,10 +1255,9 @@ mod vector2d {
 
         assert_eq!(result, vec2(2.0, 3.0));
     }
-
     #[test]
     pub fn test_angle_from_x_axis() {
-        use std::f32::consts::FRAC_PI_2;
+        use core::f32::consts::FRAC_PI_2;
         use approxeq::ApproxEq;
 
         let right: Vec2 = vec2(10.0, 0.0);
@@ -1198,6 +1267,16 @@ mod vector2d {
         assert!(right.angle_from_x_axis().get().approx_eq(&0.0));
         assert!(down.angle_from_x_axis().get().approx_eq(&FRAC_PI_2));
         assert!(up.angle_from_x_axis().get().approx_eq(&-FRAC_PI_2));
+    }
+
+    #[cfg(feature = "mint")]
+    #[test]
+    pub fn test_mint() {
+        let v1 = Vec2::new(1.0, 3.0);
+        let vm: mint::Vector2<_> = v1.into();
+        let v2 = Vec2::from(vm);
+
+        assert_eq!(v1, v2);
     }
 }
 
@@ -1249,6 +1328,8 @@ mod typedvector2d {
 
 #[cfg(test)]
 mod vector3d {
+    #[cfg(feature = "mint")]
+    use mint;
     use super::{TypedVector3D, Vector3D, vec2, vec3};
     use scale::TypedScale;
 
@@ -1279,6 +1360,10 @@ mod vector3d {
         );
         assert_eq!(p1.normalize(), vec3(0.0, -1.0, 0.0));
         assert_eq!(p2.normalize(), vec3(1.0 / 3.0, 2.0 / 3.0, -2.0 / 3.0));
+
+        let p3: Vec3 = vec3(::std::f32::MAX, ::std::f32::MAX, 0.0);
+        assert_ne!(p3.normalize(), vec3(1.0 / 2.0f32.sqrt(), 1.0 / 2.0f32.sqrt(), 0.0));
+        assert_eq!(p3.robust_normalize(), vec3(1.0 / 2.0f32.sqrt(), 1.0 / 2.0f32.sqrt(), 0.0));
     }
 
     #[test]
@@ -1302,6 +1387,17 @@ mod vector3d {
     }
 
     #[test]
+    pub fn test_clamp() {
+        let p1: Vec3 = vec3(1.0, -1.0, 5.0);
+        let p2: Vec3 = vec3(2.0, 5.0, 10.0);
+        let p3: Vec3 = vec3(-1.0, 2.0, 20.0);
+
+        let result = p3.clamp(p1, p2);
+
+        assert_eq!(result, vec3(1.0, 2.0, 10.0));
+    }
+
+    #[test]
     pub fn test_scalar_mul() {
         enum Mm {}
         enum Cm {}
@@ -1321,8 +1417,19 @@ mod vector3d {
         assert_eq!(p.xz(), vec2(1, 3));
         assert_eq!(p.yz(), vec2(2, 3));
     }
+
+    #[cfg(feature = "mint")]
+    #[test]
+    pub fn test_mint() {
+        let v1 = Vec3::new(1.0, 3.0, 5.0);
+        let vm: mint::Vector3<_> = v1.into();
+        let v2 = Vec3::from(vm);
+
+        assert_eq!(v1, v2);
+    }
 }
 
+#[cfg(test)]
 mod bool_vector {
     use super::*;
     type Vec2 = Vector2D<f32>;

@@ -23,7 +23,7 @@ const MovementGranularity = {
   CHARACTER: 1,
   WORD: 2,
   LINE: 4,
-  PARAGRAPH: 8
+  PARAGRAPH: 8,
 };
 
 var AccessFuTest = {
@@ -45,7 +45,7 @@ var AccessFuTest = {
           return;
         }
         aListenerFunc.apply(listener);
-      }
+      },
     };
     Services.console.registerListener(listener);
     return listener;
@@ -105,7 +105,7 @@ var AccessFuTest = {
 
   finish: function AccessFuTest_finish() {
     // Disable the console service logging.
-    Logger.test = false;
+    Logger.useConsoleService = false;
     Logger.logLevel = Logger.INFO;
     // Finish through idle callback to let AccessFu._disable complete.
     SimpleTest.executeSoon(function() {
@@ -116,13 +116,15 @@ var AccessFuTest = {
   },
 
   nextTest: function AccessFuTest_nextTest() {
-    var result = gIterator.next();
-    if (result.done) {
-      this.finish();
-      return;
-    }
-    var testFunc = result.value;
-    testFunc();
+    SimpleTest.executeSoon(() => {
+      var result = gIterator.next();
+      if (result.done) {
+        this.finish();
+        return;
+      }
+      var testFunc = result.value;
+      testFunc();
+    });
   },
 
   runTests: function AccessFuTest_runTests(aAdditionalPrefs) {
@@ -139,14 +141,11 @@ var AccessFuTest = {
       }
     })();
 
+    Logger.useConsoleService = true;
+    Logger.logLevel = Logger.DEBUG;
+
     // Start AccessFu and put it in stand-by.
     ChromeUtils.import("resource://gre/modules/accessibility/AccessFu.jsm");
-
-    AccessFu.readyCallback = function readyCallback() {
-      // Enable logging to the console service.
-      Logger.test = true;
-      Logger.logLevel = Logger.DEBUG;
-    };
 
     var prefs = [["accessibility.accessfu.notify_output", 1]];
     prefs.push.apply(prefs, aAdditionalPrefs);
@@ -161,7 +160,7 @@ var AccessFuTest = {
         AccessFuTest.finish();
       }
     });
-  }
+  },
 };
 
 class AccessFuContentTestRunner {
@@ -216,6 +215,10 @@ class AccessFuContentTestRunner {
 
   async setupMessageManager(aMessageManager) {
     function contentScript() {
+      ChromeUtils.import("resource://gre/modules/accessibility/Utils.jsm");
+      Logger.logLevel = "DEBUG";
+      Utils.inTest = true;
+
       addMessageListener("AccessFuTest:Focus", aMessage => {
         var elem = content.document.querySelector(aMessage.data.selector);
         if (elem) {
@@ -231,22 +234,11 @@ class AccessFuContentTestRunner {
     aMessageManager.loadFrameScript(
       "data:,(" + contentScript.toString() + ")();", false);
 
-    let readyPromise = new Promise(resolve =>
-      aMessageManager.addMessageListener("AccessFu:Ready", resolve));
-
     aMessageManager.loadFrameScript(
       "chrome://global/content/accessibility/content-script.js", false);
 
-    await readyPromise;
-
     let startedPromise = new Promise(resolve =>
       aMessageManager.addMessageListener("AccessFu:ContentStarted", resolve));
-
-    aMessageManager.sendAsyncMessage("AccessFu:Start",
-      { buildApp: "browser",
-        androidSdkVersion: Utils.AndroidSdkVersion,
-        logLevel: "DEBUG",
-        inTest: true });
 
     await startedPromise;
 
@@ -283,8 +275,8 @@ class AccessFuContentTestRunner {
         data: {
           inputType: "gesture",
           origin: "top",
-          ...aArgs
-        }
+          ...aArgs,
+        },
       });
     }, ...aExpectedEvents);
   }
@@ -321,8 +313,8 @@ class AccessFuContentTestRunner {
       this.sendMessage({
         name: "AccessFu:ClearCursor",
         data: {
-          origin: "top"
-        }
+          origin: "top",
+        },
       });
     });
   }
@@ -332,8 +324,8 @@ class AccessFuContentTestRunner {
       this.sendMessage({
         name: "AccessFuTest:Focus",
         data: {
-          selector: aSelector
-        }
+          selector: aSelector,
+        },
       });
     }, ...aExpectedEvents);
   }
@@ -350,8 +342,8 @@ class AccessFuContentTestRunner {
         name: "AccessFu:Activate",
         data: {
           origin: "top",
-          offset: aOffset
-        }
+          offset: aOffset,
+        },
       });
     }, ...aExpectedEvents);
   }
@@ -368,17 +360,24 @@ class AccessFuContentTestRunner {
       `Got ${JSON.stringify(aEvent.text)}, expected ${JSON.stringify(aExpected)}.`);
   }
 
+  eventInfoMatches(aEvent, aExpected) {
+    for (let key in aExpected) {
+      is(aEvent[key], aExpected[key], `Event info matches for ${key}. ` +
+         `Got ${aEvent[key]}, expected ${aExpected[key]}.`);
+    }
+  }
+
   androidScrollForward() {
     this.sendMessage({
       name: "AccessFu:AndroidScroll",
-      data: { origin: "top", direction: "forward" }
+      data: { origin: "top", direction: "forward" },
     });
   }
 
   androidScrollBackward() {
     this.sendMessage({
       name: "AccessFu:AndroidScroll",
-      data: { origin: "top", direction: "backward" }
+      data: { origin: "top", direction: "backward" },
     });
   }
 
@@ -388,8 +387,8 @@ class AccessFuContentTestRunner {
         name: "AccessFu:MoveByGranularity",
         data: {
           direction: aDirection,
-          granularity: aGranularity
-        }
+          granularity: aGranularity,
+        },
       });
     }, ...aExpectedEvents);
   }

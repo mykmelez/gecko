@@ -34,7 +34,10 @@ def populate_repack_manifests_url(config, tasks):
 
         for property in ("limit-locales", ):
             property = "extra.{}".format(property)
-            resolve_keyed_by(task, property, property, **config.params)
+            resolve_keyed_by(
+                task, property, property,
+                **{'release-level': config.params.release_level()}
+            )
 
         if task['worker']['env']['REPACK_MANIFESTS_URL'].startswith('git@'):
             task.setdefault('scopes', []).append(
@@ -73,7 +76,7 @@ def add_command_arguments(config, tasks):
                 task['run']['options'].append('limit-locale={}'.format(locale))
         if 'partner' in config.kind and config.params['release_partners']:
             for partner in config.params['release_partners']:
-                task['run']['options'].append('p={}'.format(partner))
+                task['run']['options'].append('partner={}'.format(partner))
 
         # The upstream taskIds are stored a special environment variable, because we want to use
         # task-reference's to resolve dependencies, but the string handling of MOZHARNESS_OPTIONS

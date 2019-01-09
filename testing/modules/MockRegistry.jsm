@@ -4,7 +4,6 @@
 var EXPORTED_SYMBOLS = ["MockRegistry"];
 
 ChromeUtils.import("resource://testing-common/MockRegistrar.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 class MockRegistry {
   constructor() {
@@ -77,7 +76,7 @@ class MockRegistry {
           throw new Error("invalid registry path");
         }
         return this.values.get(name);
-      }
+      },
     };
 
     this.cid = MockRegistrar.register("@mozilla.org/windows-registry-key;1", MockWindowsRegKey);
@@ -110,4 +109,3 @@ class MockRegistry {
     }
   }
 }
-

@@ -1,58 +1,81 @@
-"use strict";
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.getScope = getScope;
+// @flow
+import { objectInspector } from "devtools-reps";
+import { getBindingVariables } from "./getVariables";
+import { getFramePopVariables, getThisVariable } from "./utils";
+import { simplifyDisplayName } from "../../pause/frames";
 
-var _devtoolsReps = require("devtools/client/shared/components/reps/reps.js");
+import type { Frame, Why, Scope } from "../../../types";
 
-var _getVariables = require("./getVariables");
+import type { NamedValue } from "./types";
 
-var _utils = require("./utils");
+export type RenderableScope = {
+  type: $ElementType<Scope, "type">,
+  actor: $ElementType<Scope, "actor">,
+  bindings: $ElementType<Scope, "bindings">,
+  parent: ?RenderableScope,
+  object?: ?Object,
+  function?: ?{
+    displayName: string
+  },
+  block?: ?{
+    displayName: string
+  }
+};
 
-var _frames = require("../../pause/frames/index");
+const {
+  utils: {
+    node: { NODE_TYPES }
+  }
+} = objectInspector;
 
-function _objectSpread(target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i] != null ? arguments[i] : {}; var ownKeys = Object.keys(source); if (typeof Object.getOwnPropertySymbols === 'function') { ownKeys = ownKeys.concat(Object.getOwnPropertySymbols(source).filter(function (sym) { return Object.getOwnPropertyDescriptor(source, sym).enumerable; })); } ownKeys.forEach(function (key) { _defineProperty(target, key, source[key]); }); } return target; }
-
-function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
-
-function getScopeTitle(type, scope) {
+function getScopeTitle(type, scope: RenderableScope) {
   if (type === "block" && scope.block && scope.block.displayName) {
     return scope.block.displayName;
   }
 
   if (type === "function" && scope.function) {
-    return scope.function.displayName ? (0, _frames.simplifyDisplayName)(scope.function.displayName) : L10N.getStr("anonymous");
+    return scope.function.displayName
+      ? simplifyDisplayName(scope.function.displayName)
+      : L10N.getStr("anonymousFunction");
   }
-
   return L10N.getStr("scopes.block");
 }
 
-function getScope(scope, selectedFrame, frameScopes, why, scopeIndex) {
-  const {
-    type,
-    actor
-  } = scope;
-  const isLocalScope = scope.actor === frameScopes.actor;
-  const key = `${actor}-${scopeIndex}`;
+export function getScope(
+  scope: RenderableScope,
+  selectedFrame: Frame,
+  frameScopes: RenderableScope,
+  why: Why,
+  scopeIndex: number
+): ?NamedValue {
+  const { type, actor } = scope;
 
+  const isLocalScope = scope.actor === frameScopes.actor;
+
+  const key = `${actor}-${scopeIndex}`;
   if (type === "function" || type === "block") {
     const bindings = scope.bindings;
-    let vars = (0, _getVariables.getBindingVariables)(bindings, key); // show exception, return, and this variables in innermost scope
 
+    let vars = getBindingVariables(bindings, key);
+
+    // show exception, return, and this variables in innermost scope
     if (isLocalScope) {
-      vars = vars.concat((0, _utils.getFramePopVariables)(why, key));
+      vars = vars.concat(getFramePopVariables(why, key));
+
       let thisDesc_ = selectedFrame.this;
 
-      if ("this" in bindings) {
+      if (bindings && "this" in bindings) {
         // The presence of "this" means we're rendering a "this" binding
         // generated from mapScopes and this can override the binding
         // provided by the current frame.
         thisDesc_ = bindings.this ? bindings.this.value : null;
       }
 
-      const this_ = (0, _utils.getThisVariable)(thisDesc_, key);
+      const this_ = getThisVariable(thisDesc_, key);
 
       if (this_) {
         vars.push(this_);
@@ -60,31 +83,26 @@ function getScope(scope, selectedFrame, frameScopes, why, scopeIndex) {
     }
 
     if (vars && vars.length) {
-      const title = getScopeTitle(type, scope);
+      const title = getScopeTitle(type, scope) || "";
       vars.sort((a, b) => a.name.localeCompare(b.name));
       return {
         name: title,
         path: key,
         contents: vars,
-        type: _devtoolsReps.ObjectInspectorUtils.node.NODE_TYPES.BLOCK
+        type: NODE_TYPES.BLOCK
       };
     }
   } else if (type === "object" && scope.object) {
-    let value = scope.object; // If this is the global window scope, mark it as such so that it will
+    let value = scope.object;
+    // If this is the global window scope, mark it as such so that it will
     // preview Window: Global instead of Window: Window
-
     if (value.class === "Window") {
-      value = _objectSpread({}, scope.object, {
-        displayClass: "Global"
-      });
+      value = { ...scope.object, displayClass: "Global" };
     }
-
     return {
       name: scope.object.class,
       path: key,
-      contents: {
-        value
-      }
+      contents: { value }
     };
   }
 

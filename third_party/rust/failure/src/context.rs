@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 use core::fmt::{self, Display, Debug};
+=======
+use core::fmt::{self, Debug, Display};
+>>>>>>> central
 
 use Fail;
 
@@ -26,6 +30,19 @@ without_std! {
             &self.context
         }
 
+<<<<<<< HEAD
+=======
+        /// Maps `Context<D>` to `Context<T>` by applying a function to the contained context.
+        pub fn map<F, T>(self, op: F) -> Context<T>
+            where F: FnOnce(D) -> T,
+                  T: Display + Send + Sync + 'static
+        {
+            Context {
+                context: op(self.context),
+            }
+        }
+
+>>>>>>> central
         pub(crate) fn with_err<E: Fail>(context: D, _: E) -> Context<D> {
             Context { context }
         }
@@ -44,6 +61,15 @@ without_std! {
             write!(f, "{}", self.context)
         }
     }
+<<<<<<< HEAD
+=======
+
+    #[test]
+    fn test_map() {
+        let ctx = Context::new("a string").map(|s| format!("{} with some more stuff", s));
+        assert_eq!(ctx.context, String::from("a string with some more stuff"));
+    }
+>>>>>>> central
 }
 
 with_std! {
@@ -74,6 +100,20 @@ with_std! {
             &self.context
         }
 
+<<<<<<< HEAD
+=======
+        /// Maps `Context<D>` to `Context<T>` by applying a function to the contained context.
+        pub fn map<F, T>(self, op: F) -> Context<T>
+            where F: FnOnce(D) -> T,
+                  T: Display + Send + Sync + 'static
+        {
+            Context {
+                context: op(self.context),
+                failure: self.failure,
+            }
+        }
+
+>>>>>>> central
         pub(crate) fn with_err<E: Into<Error>>(context: D, error: E) -> Context<D> {
             let failure = Either::That(error.into());
             Context { context, failure }
@@ -82,7 +122,11 @@ with_std! {
 
     impl<D: Display + Send + Sync + 'static> Fail for Context<D> {
         fn cause(&self) -> Option<&Fail> {
+<<<<<<< HEAD
             self.failure.cause()
+=======
+            self.failure.as_cause()
+>>>>>>> central
         }
 
         fn backtrace(&self) -> Option<&Backtrace> {
@@ -115,10 +159,17 @@ with_std! {
             }
         }
 
+<<<<<<< HEAD
         fn cause(&self) -> Option<&Fail> {
             match *self {
                 Either::This(_)         => None,
                 Either::That(ref error) => Some(error.cause())
+=======
+        fn as_cause(&self) -> Option<&Fail> {
+            match *self {
+                Either::This(_)         => None,
+                Either::That(ref error) => Some(error.as_fail())
+>>>>>>> central
             }
         }
     }
@@ -131,10 +182,24 @@ with_std! {
             }
         }
     }
+<<<<<<< HEAD
 }
 
 impl<D> From<D> for Context<D> where
     D: Display + Send + Sync + 'static
+=======
+
+    #[test]
+    fn test_map() {
+        let ctx = Context::new("a string").map(|s| format!("{} with some more stuff", s));
+        assert_eq!(ctx.context, String::from("a string with some more stuff"));
+    }
+}
+
+impl<D> From<D> for Context<D>
+where
+    D: Display + Send + Sync + 'static,
+>>>>>>> central
 {
     fn from(display: D) -> Context<D> {
         Context::new(display)

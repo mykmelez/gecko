@@ -1,5 +1,4 @@
 /* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ft= javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,15 +7,16 @@
 
 const {Ci, Cu} = require("chrome");
 
-// Note that this is only used in WebConsoleCommands, see $0 and pprint().
+// Note that this is only used in WebConsoleCommands, see $0, screenshot and pprint().
 if (!isWorker) {
   loader.lazyImporter(this, "VariablesView", "resource://devtools/client/shared/widgets/VariablesView.jsm");
+  loader.lazyRequireGetter(this, "captureScreenshot", "devtools/shared/screenshot/capture", true);
 }
 
 const CONSOLE_WORKER_IDS = exports.CONSOLE_WORKER_IDS = [
   "SharedWorker",
   "ServiceWorker",
-  "Worker"
+  "Worker",
 ];
 
 var WebConsoleUtils = {
@@ -84,8 +84,7 @@ var WebConsoleUtils = {
    *         Inner ID for the given window.
    */
   getInnerWindowId: function(window) {
-    return window.QueryInterface(Ci.nsIInterfaceRequestor)
-             .getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
+    return window.windowUtils.currentInnerWindowID;
   },
 
   /**
@@ -351,7 +350,7 @@ WebConsoleCommands._registerOriginal("$$", function(owner, selector) {
 WebConsoleCommands._registerOriginal("$_", {
   get: function(owner) {
     return owner.consoleActor.getLastConsoleInputEvaluation();
-  }
+  },
 });
 
 /**
@@ -390,7 +389,7 @@ WebConsoleCommands._registerOriginal("$x", function(owner, xPath, context) {
 WebConsoleCommands._registerOriginal("$0", {
   get: function(owner) {
     return owner.makeDebuggeeValue(owner.selectedNode);
-  }
+  },
 });
 
 /**
@@ -477,7 +476,7 @@ WebConsoleCommands._registerOriginal("cd", function(owner, window) {
   if (!(window instanceof Ci.nsIDOMWindow)) {
     owner.helperResult = {
       type: "error",
-      message: "cdFunctionInvalidArgument"
+      message: "cdFunctionInvalidArgument",
     };
     return;
   }
@@ -593,6 +592,29 @@ WebConsoleCommands._registerOriginal("copy", function(owner, value) {
 });
 
 /**
+ * Take a screenshot of a page.
+ *
+ * @param object args
+ *               The arguments to be passed to the screenshot
+ * @return void
+ */
+WebConsoleCommands._registerOriginal("screenshot", function(owner, args = {}) {
+  owner.helperResult = (async () => {
+    // creates data for saving the screenshot
+    // help is handled on the client side
+    const value = await captureScreenshot(args, owner.window.document);
+    return {
+      type: "screenshotOutput",
+      value,
+      // pass args through to the client, so that the client can take care of copying
+      // and saving the screenshot data on the client machine instead of on the
+      // remote machine
+      args,
+    };
+  })();
+});
+
+/**
  * (Internal only) Add the bindings to |owner.sandbox|.
  * This is intended to be used by the WebConsole actor only.
   *
@@ -614,7 +636,7 @@ function addWebConsoleCommands(owner) {
         // We force the enumerability and the configurability (so the
         // WebConsoleActor can reconfigure the property).
         enumerable: true,
-        configurable: true
+        configurable: true,
       });
 
       if (typeof command.get === "function") {

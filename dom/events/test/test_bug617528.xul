@@ -17,6 +17,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=617528
   </body>
 
   <script type="application/javascript"><![CDATA[
+    ChromeUtils.import("resource://testing-common/BrowserTestUtils.jsm");
     var _window;
     var browser;
 
@@ -39,7 +40,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=617528
     </div>\
   </body>\
 </html>';
-      browser.loadURI(uri);
+      BrowserTestUtils.loadURI(browser, uri);
     }
 
     function onPageShow() {
@@ -73,8 +74,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=617528
       var left = rect.left + rect.width / 2;
       var top = rect.top + rect.height / 2;
 
-      var wu = win.QueryInterface(Ci.nsIInterfaceRequestor)
-        .getInterface(Ci.nsIDOMWindowUtils);
+      var wu = win.windowUtils;
 
       browser.addEventListener("contextmenu", onContextMenu1, false);
       wu.sendMouseEvent("contextmenu", left, top, 2, 1, 0);

@@ -18,10 +18,12 @@ callback LifecycleAttributeChangedCallback = void(DOMString attrName,
                                                   DOMString? oldValue,
                                                   DOMString? newValue,
                                                   DOMString? namespaceURI);
+callback LifecycleGetCustomInterfaceCallback = object?(any iid);
 
 dictionary LifecycleCallbacks {
   LifecycleConnectedCallback connectedCallback;
   LifecycleDisconnectedCallback disconnectedCallback;
   LifecycleAdoptedCallback adoptedCallback;
   LifecycleAttributeChangedCallback attributeChangedCallback;
+  [ChromeOnly] LifecycleGetCustomInterfaceCallback getCustomInterfaceCallback;
 };

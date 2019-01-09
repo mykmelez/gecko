@@ -36,22 +36,22 @@ class TestMarionette(MarionetteTestCase):
 
     def test_disable_enable_new_connections(self):
         # Do not re-create socket if it already exists
-        self.marionette._send_message("acceptConnections", {"value": True})
+        self.marionette._send_message("Marionette:AcceptConnections", {"value": True})
 
         try:
             # Disabling new connections does not affect existing ones...
-            self.marionette._send_message("acceptConnections", {"value": False})
+            self.marionette._send_message("Marionette:AcceptConnections", {"value": False})
             self.assertEqual(1, self.marionette.execute_script("return 1"))
 
             # but only new connection attempts
             marionette = Marionette(host=self.marionette.host, port=self.marionette.port)
             self.assertRaises(socket.timeout, marionette.raise_for_port, timeout=1.0)
 
-            self.marionette._send_message("acceptConnections", {"value": True})
+            self.marionette._send_message("Marionette:AcceptConnections", {"value": True})
             marionette.raise_for_port(timeout=10.0)
 
         finally:
-            self.marionette._send_message("acceptConnections", {"value": True})
+            self.marionette._send_message("Marionette:AcceptConnections", {"value": True})
 
     def test_client_socket_uses_expected_socket_timeout(self):
         current_socket_timeout = self.marionette.socket_timeout
@@ -61,6 +61,18 @@ class TestMarionette(MarionetteTestCase):
         self.assertEqual(current_socket_timeout,
                          self.marionette.client._sock.gettimeout())
 
+    @skip_if_mobile("No application update service available on Android")
+    def test_application_update_disabled(self):
+        # Updates of the application should always be disabled by default
+        with self.marionette.using_context("chrome"):
+            update_allowed = self.marionette.execute_script("""
+              let aus = Cc['@mozilla.org/updates/update-service;1']
+                        .getService(Ci.nsIApplicationUpdateService);
+              return aus.canCheckForUpdates;
+            """)
+
+        self.assertFalse(update_allowed)
+
 
 class TestContext(MarionetteTestCase):
 
@@ -69,10 +81,10 @@ class TestContext(MarionetteTestCase):
         self.marionette.set_context(self.marionette.CONTEXT_CONTENT)
 
     def get_context(self):
-        return self.marionette._send_message("getContext", key="value")
+        return self.marionette._send_message("Marionette:GetContext", key="value")
 
     def set_context(self, value):
-        return self.marionette._send_message("setContext", {"value": value})
+        return self.marionette._send_message("Marionette:SetContext", {"value": value})
 
     def test_set_context(self):
         self.assertEqual(self.set_context("content"), {"value": None})

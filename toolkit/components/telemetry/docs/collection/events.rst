@@ -19,7 +19,7 @@ For events recorded into Firefox Telemetry we also provide an API that opaquely 
 Serialization format
 ====================
 
-Events are submitted as an array, e.g.:
+Events are submitted in an :doc:`../data/event-ping` as an array, e.g.:
 
 .. code-block:: js
 
@@ -53,17 +53,26 @@ Where the individual fields are:
 Limits
 ------
 
-Each ``String`` marked as an identifier is restricted to the following regex pattern: ``^[:alpha:][:alnum:_.]*[:alnum:]$``.
+Each ``String`` marked as an identifier (the event ``name``, ``category``, ``method``,
+``object``, and the keys of ``extra``) is restricted to be composed of alphanumeric ASCII
+characters ([a-zA-Z0-9]) plus infix underscores ('_' characters that aren't the first or last).
+``category`` is also permitted infix periods ('.' characters, so long as they aren't the
+first or last character).
 
-For the Firefox Telemetry implementation, several fields are subject to limits:
+For the Firefox Telemetry implementation, several fields are subject to length limits:
 
 - ``category``: Max. byte length is ``30``.
 - ``method``: Max. byte length is ``20``.
 - ``object``: Max. byte length is ``20``.
 - ``value``: Max. byte length is ``80``.
 - ``extra``: Max. number of keys is ``10``.
+
   - Each extra key name: Max. string length is ``15``.
   - Each extra value: Max. byte length is ``80``.
+
+Only ``value`` and the values of ``extra`` will be truncated if over the specified length.
+Any other ``String`` going over its limit will be reported as an error and the operation
+aborted.
 
 The YAML definition file
 ========================
@@ -95,7 +104,7 @@ The probes in the definition file are represented in a fixed-depth, three-level 
         loadtime: How long it took to load this completion entry.
     # ...
 
-Category and probe names are subject to the limits and regex patterns :ref:`specified above <eventlimits>`.
+Category and event names are subject to the limits :ref:`specified above <eventlimits>`.
 
 The following event properties are valid:
 
@@ -124,6 +133,10 @@ The following event properties are valid:
   - ``fennec``
   - ``geckoview``
   - ``all`` (record on all products)
+
+.. note::
+
+  Combinations of ``category``, ``method``, and ``object`` defined in the file must be unique.
 
 The API
 =======
@@ -213,7 +226,7 @@ For events recorded from add-ons, registration happens at runtime. Any new event
 The registered categories will automatically be enabled for recording.
 If a dynamic event uses the same category as a static event, the category will also be enabled upon registration.
 
-After registration, the events can be recorded through the ``recordEvent()`` function. They will be submitted in the main pings payload under ``processes.dynamic.events``.
+After registration, the events can be recorded through the ``recordEvent()`` function. They will be submitted in event pings like static events are, under the ``dynamic`` process.
 
 New events registered here are subject to the same limitations as the ones registered through ``Events.yaml``, although the naming was in parts updated to recent policy changes.
 

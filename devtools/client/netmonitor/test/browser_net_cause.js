@@ -17,35 +17,35 @@ const EXPECTED_REQUESTS = [
     causeType: "document",
     causeUri: null,
     // The document load has internal privileged JS code on the stack
-    stack: true
+    stack: true,
   },
   {
     method: "GET",
     url: EXAMPLE_URL + "stylesheet_request",
     causeType: "stylesheet",
     causeUri: CAUSE_URL,
-    stack: false
+    stack: false,
   },
   {
     method: "GET",
     url: EXAMPLE_URL + "img_request",
     causeType: "img",
     causeUri: CAUSE_URL,
-    stack: false
+    stack: false,
   },
   {
     method: "GET",
     url: EXAMPLE_URL + "xhr_request",
     causeType: "xhr",
     causeUri: CAUSE_URL,
-    stack: [{ fn: "performXhrRequest", file: CAUSE_FILE_NAME, line: 24 }]
+    stack: [{ fn: "performXhrRequestCallback", file: CAUSE_FILE_NAME, line: 26 }],
   },
   {
     method: "GET",
     url: EXAMPLE_URL + "fetch_request",
     causeType: "fetch",
     causeUri: CAUSE_URL,
-    stack: [{ fn: "performFetchRequest", file: CAUSE_FILE_NAME, line: 28 }]
+    stack: [{ fn: "performFetchRequest", file: CAUSE_FILE_NAME, line: 31 }],
   },
   {
     method: "GET",
@@ -53,9 +53,10 @@ const EXPECTED_REQUESTS = [
     causeType: "fetch",
     causeUri: CAUSE_URL,
     stack: [
-      { fn: "performPromiseFetchRequest", file: CAUSE_FILE_NAME, line: 40 },
-      { fn: null, file: CAUSE_FILE_NAME, line: 39, asyncCause: "promise callback" },
-    ]
+      { fn: "performPromiseFetchRequestCallback", file: CAUSE_FILE_NAME, line: 37 },
+      { fn: "performPromiseFetchRequest", file: CAUSE_FILE_NAME, line: 36,
+        asyncCause: "promise callback" },
+    ],
   },
   {
     method: "GET",
@@ -63,17 +64,17 @@ const EXPECTED_REQUESTS = [
     causeType: "fetch",
     causeUri: CAUSE_URL,
     stack: [
-      { fn: "performTimeoutFetchRequest", file: CAUSE_FILE_NAME, line: 42 },
-      { fn: "performPromiseFetchRequest", file: CAUSE_FILE_NAME, line: 41,
+      { fn: "performTimeoutFetchRequestCallback2", file: CAUSE_FILE_NAME, line: 44 },
+      { fn: "performTimeoutFetchRequestCallback1", file: CAUSE_FILE_NAME, line: 43,
         asyncCause: "setTimeout handler" },
-    ]
+    ],
   },
   {
     method: "POST",
     url: EXAMPLE_URL + "beacon_request",
     causeType: "beacon",
     causeUri: CAUSE_URL,
-    stack: [{ fn: "performBeaconRequest", file: CAUSE_FILE_NAME, line: 32 }]
+    stack: [{ fn: "performBeaconRequest", file: CAUSE_FILE_NAME, line: 50 }],
   },
 ];
 
@@ -99,7 +100,7 @@ add_task(async function() {
   store.dispatch(Actions.batchEnable(false));
 
   const wait = waitForNetworkEvents(monitor, EXPECTED_REQUESTS.length);
-  tab.linkedBrowser.loadURI(CAUSE_URL);
+  BrowserTestUtils.loadURI(tab.linkedBrowser, CAUSE_URL);
   await wait;
 
   const requests = getSortedRequests(store.getState());
@@ -109,7 +110,7 @@ add_task(async function() {
   is(store.getState().requests.requests.size, EXPECTED_REQUESTS.length,
     "All the page events should be recorded.");
 
-  EXPECTED_REQUESTS.forEach(async (spec, i) => {
+  EXPECTED_REQUESTS.forEach((spec, i) => {
     const { method, url, causeType, causeUri, stack } = spec;
 
     const requestItem = getSortedRequests(store.getState()).get(i);
@@ -124,8 +125,6 @@ add_task(async function() {
 
     const stacktrace = requestItem.stacktrace;
     const stackLen = stacktrace ? stacktrace.length : 0;
-
-    await waitUntil(() => !!requestItem.stacktrace);
 
     if (stack) {
       ok(stacktrace, `Request #${i} has a stacktrace`);

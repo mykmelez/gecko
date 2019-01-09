@@ -43,7 +43,7 @@ const PREFERENCE_NAME = "test-pref";
 function add_cookie(aDomain) {
   check_cookie_exists(aDomain, false);
   Services.cookies.add(aDomain, COOKIE_PATH, COOKIE_NAME, "", false, false, false,
-                       COOKIE_EXPIRY, {});
+                       COOKIE_EXPIRY, {}, Ci.nsICookie2.SAMESITE_UNSET);
   check_cookie_exists(aDomain, true);
 }
 
@@ -56,12 +56,7 @@ function add_cookie(aDomain) {
  *        True if the cookie should exist, false otherwise.
  */
 function check_cookie_exists(aDomain, aExists) {
-  let cookie = {
-    host: aDomain,
-    name: COOKIE_NAME,
-    path: COOKIE_PATH
-  };
-  Assert.equal(aExists, Services.cookies.cookieExists(cookie));
+  Assert.equal(aExists, Services.cookies.cookieExists(aDomain, COOKIE_PATH, COOKIE_NAME, {}));
 }
 
 /**
@@ -159,7 +154,7 @@ function add_preference(aURI) {
     let cp = Cc["@mozilla.org/content-pref/service;1"].
                getService(Ci.nsIContentPrefService2);
     cp.set(aURI.spec, PREFERENCE_NAME, "foo", null, {
-      handleCompletion: () => resolve()
+      handleCompletion: () => resolve(),
     });
   });
 }
@@ -177,7 +172,7 @@ function preference_exists(aURI) {
     let exists = false;
     cp.getByDomainAndName(aURI.spec, PREFERENCE_NAME, null, {
       handleResult: () => exists = true,
-      handleCompletion: () => resolve(exists)
+      handleCompletion: () => resolve(exists),
     });
   });
 }
@@ -313,34 +308,13 @@ async function test_permission_manager_not_cleared_with_uri_contains_domain() {
   check_permission_exists(TEST_URI, false);
 }
 
-function waitForPurgeNotification() {
-  return new Promise(resolve => {
-
-    let observer = {
-      observe(aSubject, aTopic, aData) {
-        Services.obs.removeObserver(observer, "browser:purge-domain-data");
-        // test_storage_cleared needs this extra executeSoon because
-        // the DOMStorage clean-up is also listening to this same observer
-        // which is run synchronously.
-        Services.tm.dispatchToMainThread(function() {
-          resolve();
-        });
-      }
-    };
-    Services.obs.addObserver(observer, "browser:purge-domain-data");
-
-  });
-}
-
 // Content Preferences
 async function test_content_preferences_cleared_with_direct_match() {
   const TEST_URI = Services.io.newURI("http://mozilla.org");
   Assert.equal(false, await preference_exists(TEST_URI));
   await add_preference(TEST_URI);
   Assert.ok(await preference_exists(TEST_URI));
-  let promisePurgeNotification = waitForPurgeNotification();
   await ForgetAboutSite.removeDataFromDomain("mozilla.org");
-  await promisePurgeNotification;
   Assert.equal(false, await preference_exists(TEST_URI));
 }
 
@@ -349,9 +323,7 @@ async function test_content_preferences_cleared_with_subdomain() {
   Assert.equal(false, await preference_exists(TEST_URI));
   await add_preference(TEST_URI);
   Assert.ok(await preference_exists(TEST_URI));
-  let promisePurgeNotification = waitForPurgeNotification();
   await ForgetAboutSite.removeDataFromDomain("mozilla.org");
-  await promisePurgeNotification;
   Assert.equal(false, await preference_exists(TEST_URI));
 }
 
@@ -360,15 +332,11 @@ async function test_content_preferences_not_cleared_with_uri_contains_domain() {
   Assert.equal(false, await preference_exists(TEST_URI));
   await add_preference(TEST_URI);
   Assert.ok(await preference_exists(TEST_URI));
-  let promisePurgeNotification = waitForPurgeNotification();
   await ForgetAboutSite.removeDataFromDomain("mozilla.org");
-  await promisePurgeNotification;
   Assert.ok(await preference_exists(TEST_URI));
 
   // Reset state
-  promisePurgeNotification = waitForPurgeNotification();
   await ForgetAboutSite.removeDataFromDomain("ilovemozilla.org");
-  await promisePurgeNotification;
   Assert.equal(false, await preference_exists(TEST_URI));
 }
 
@@ -418,7 +386,7 @@ async function test_push_cleared() {
             }));
           },
         });
-      }
+      },
     });
 
     const TEST_URL = "https://www.mozilla.org/scope/";
@@ -433,9 +401,7 @@ async function test_push_cleared() {
     });
     Assert.ok(await push_registration_exists(TEST_URL, ps));
 
-    let promisePurgeNotification = waitForPurgeNotification();
     await ForgetAboutSite.removeDataFromDomain("mozilla.org");
-    await promisePurgeNotification;
 
     Assert.equal(false, await push_registration_exists(TEST_URL, ps));
   } finally {
@@ -459,7 +425,7 @@ async function test_cache_cleared() {
       // Shutdown the download manager.
       Services.obs.notifyObservers(null, "quit-application");
       do_test_finished();
-    }
+    },
   };
   Services.obs.addObserver(observer, "cacheservice:empty-cache");
   await ForgetAboutSite.removeDataFromDomain("mozilla.org");
@@ -487,9 +453,7 @@ async function test_storage_cleared() {
     Assert.equal(storage.getItem("test"), "value" + i);
   }
 
-  let promisePurgeNotification = waitForPurgeNotification();
   await ForgetAboutSite.removeDataFromDomain("mozilla.org");
-  await promisePurgeNotification;
 
   Assert.equal(s[0].getItem("test"), null);
   Assert.equal(s[0].length, 0);

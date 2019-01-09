@@ -26,13 +26,13 @@ const TEST_URI = "data:application/xhtml+xml;charset=utf-8," + encodeURI(XHTML);
 // suggestions is an array of suggestions that should be shown in the popup.
 const TEST_DATA = [{
   key: "c",
-  suggestions: ["circle", "clipPath"]
+  suggestions: ["circle", "clipPath"],
 }, {
   key: "VK_BACK_SPACE",
-  suggestions: []
+  suggestions: [],
 }, {
   key: "s",
-  suggestions: ["svg"]
+  suggestions: ["svg"],
 }];
 
 add_task(async function() {
@@ -51,7 +51,7 @@ add_task(async function() {
 
     info("Waiting for search query to complete and getting the suggestions");
     await inspector.searchSuggestions._lastQuery;
-    const actualSuggestions = popup.getItems().reverse();
+    const actualSuggestions = popup.getItems();
 
     is(popup.isOpen ? actualSuggestions.length : 0, suggestions.length,
        "There are expected number of suggestions.");

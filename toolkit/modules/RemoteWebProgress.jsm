@@ -5,15 +5,13 @@
 
 var EXPORTED_SYMBOLS = ["RemoteWebProgressManager"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-function RemoteWebProgressRequest(spec, originalSpec, matchedList, requestCPOW) {
+function RemoteWebProgressRequest(spec, originalSpec, matchedList) {
   this.wrappedJSObject = this;
 
   this._uri = Services.io.newURI(spec);
   this._originalURI = Services.io.newURI(originalSpec);
-  this._requestCPOW = requestCPOW;
   this._matchedList = matchedList;
 }
 
@@ -22,7 +20,7 @@ RemoteWebProgressRequest.prototype = {
 
   get URI() { return this._uri; },
   get originalURI() { return this._originalURI; },
-  get matchedList() { return this._matchedList; }
+  get matchedList() { return this._matchedList; },
 };
 
 function RemoteWebProgress(aManager, aIsTopLevel) {
@@ -31,7 +29,6 @@ function RemoteWebProgress(aManager, aIsTopLevel) {
   this._manager = aManager;
 
   this._isLoadingDocument = false;
-  this._DOMWindow = null;
   this._DOMWindowID = 0;
   this._isTopLevel = aIsTopLevel;
   this._loadType = 0;
@@ -51,7 +48,9 @@ RemoteWebProgress.prototype = {
   NOTIFY_ALL:            0x000001ff,
 
   get isLoadingDocument() { return this._isLoadingDocument; },
-  get DOMWindow() { return this._DOMWindow; },
+  get DOMWindow() {
+    throw Cr.NS_ERROR_NOT_AVAILABLE;
+  },
   get DOMWindowID() { return this._DOMWindowID; },
   get isTopLevel() { return this._isTopLevel; },
   get loadType() { return this._loadType; },
@@ -62,7 +61,7 @@ RemoteWebProgress.prototype = {
 
   removeProgressListener(aListener) {
     this._manager.removeProgressListener(aListener);
-  }
+  },
 };
 
 function RemoteWebProgressManager(aBrowser) {
@@ -93,6 +92,16 @@ RemoteWebProgressManager.prototype = {
     this._messageManager.addMessageListener("Content:LoadURIResult", this);
   },
 
+  swapListeners(aOtherRemoteWebProgressManager) {
+    let temp = aOtherRemoteWebProgressManager.progressListeners;
+    aOtherRemoteWebProgressManager._progressListeners = this._progressListeners;
+    this._progressListeners = temp;
+  },
+
+  get progressListeners() {
+    return this._progressListeners;
+  },
+
   get topLevelWebProgress() {
     return this._topLevelWebProgress;
   },
@@ -101,7 +110,7 @@ RemoteWebProgressManager.prototype = {
     let listener = aListener.QueryInterface(Ci.nsIWebProgressListener);
     this._progressListeners.push({
       listener,
-      mask: aNotifyMask || Ci.nsIWebProgress.NOTIFY_ALL
+      mask: aNotifyMask || Ci.nsIWebProgress.NOTIFY_ALL,
     });
   },
 
@@ -110,14 +119,14 @@ RemoteWebProgressManager.prototype = {
       this._progressListeners.filter(l => l.listener != aListener);
   },
 
-  _fixSSLStatusAndState(aStatus, aState) {
+  _fixSecInfoAndState(aSecInfo, aState) {
     let deserialized = null;
-    if (aStatus) {
+    if (aSecInfo) {
       let helper = Cc["@mozilla.org/network/serialization-helper;1"]
                     .getService(Ci.nsISerializationHelper);
 
-      deserialized = helper.deserializeObject(aStatus);
-      deserialized.QueryInterface(Ci.nsISSLStatus);
+      deserialized = helper.deserializeObject(aSecInfo);
+      deserialized.QueryInterface(Ci.nsITransportSecurityInfo);
     }
 
     return [deserialized, aState];
@@ -151,7 +160,6 @@ RemoteWebProgressManager.prototype = {
 
   receiveMessage(aMessage) {
     let json = aMessage.json;
-    let objects = aMessage.objects;
     // This message is a custom one we send as a result of a loadURI call.
     // It shouldn't go through the same processing as all the forwarded
     // webprogresslistener messages.
@@ -171,10 +179,8 @@ RemoteWebProgressManager.prototype = {
 
       // Update the actual WebProgress fields.
       webProgress._isLoadingDocument = json.webProgress.isLoadingDocument;
-      webProgress._DOMWindow = objects.DOMWindow;
       webProgress._DOMWindowID = json.webProgress.DOMWindowID;
       webProgress._loadType = json.webProgress.loadType;
-      webProgress._webProgressCPOW = objects.webProgress;
     }
 
     // The WebProgressRequest object however is always dynamic.
@@ -182,13 +188,10 @@ RemoteWebProgressManager.prototype = {
     if (json.requestURI) {
       request = new RemoteWebProgressRequest(json.requestURI,
                                              json.originalRequestURI,
-                                             json.matchedList,
-                                             objects.request);
+                                             json.matchedList);
     }
 
     if (isTopLevel) {
-      this._browser._contentWindow = objects.contentWindow;
-      this._browser._contentDocument = objects.contentDocument;
       // Setting a content-type back to `null` is quite nonsensical for the
       // frontend, especially since we're not expecting it.
       if (json.documentContentType !== null) {
@@ -241,14 +244,14 @@ RemoteWebProgressManager.prototype = {
       break;
 
     case "Content:SecurityChange":
-      let [status, state] = this._fixSSLStatusAndState(json.status, json.state);
+      let [secInfo, state] = this._fixSecInfoAndState(json.secInfo, json.state);
 
       if (isTopLevel) {
         // Invoking this getter triggers the generation of the underlying object,
         // which we need to access with ._securityUI, because .securityUI returns
         // a wrapper that makes _update inaccessible.
         void this._browser.securityUI;
-        this._browser._securityUI._update(status, state);
+        this._browser._securityUI._update(secInfo, state);
       }
 
       this._callProgressListeners(

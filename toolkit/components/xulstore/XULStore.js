@@ -9,7 +9,6 @@ const debugMode = false;
 // 30 seconds normally, or 3 seconds for testing
 const WRITE_DELAY_MS = (debugMode ? 3 : 30) * 1000;
 
-const XULSTORE_CONTRACTID = "@mozilla.org/xul/xulstore;1";
 const XULSTORE_CID = Components.ID("{6f46b6f4-c8b1-4bd4-a4fa-9ebbed0753ea}");
 const STOREDB_FILENAME = "xulstore.json";
 
@@ -26,10 +25,6 @@ function XULStore() {
 
 XULStore.prototype = {
   classID: XULSTORE_CID,
-  classInfo: XPCOMUtils.generateCI({classID: XULSTORE_CID,
-                                    contractID: XULSTORE_CONTRACTID,
-                                    classDescription: "XULStore",
-                                    interfaces: [Ci.nsIXULStore]}),
   QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver, Ci.nsIXULStore,
                                           Ci.nsISupportsWeakReference]),
   _xpcom_factory: XPCOMUtils.generateSingletonFactory(XULStore),
@@ -80,11 +75,34 @@ XULStore.prototype = {
   log(message) {
     if (!debugMode)
       return;
-    dump("XULStore: " + message + "\n");
-    Services.console.logStringMessage("XULStore: " + message);
+    console.log("XULStore: " + message);
   },
 
   /* ---------- interface implementation ---------- */
+
+  persist(node, attr) {
+    if (!node.id) {
+      throw new Error("Node without ID passed into persist()");
+    }
+
+    const uri = node.ownerDocument.documentURI;
+    const value = node.getAttribute(attr);
+
+    if (node.localName == "window") {
+      this.log("Persisting attributes to windows is handled by nsXULWindow.");
+      return;
+    }
+
+    // See Bug 1476680 - we could drop the `hasValue` check so that
+    // any time there's an empty attribute it gets removed from the
+    // store. Since this is copying behavior from document.persist,
+    // callers would need to be updated with that change.
+    if (!value && this.hasValue(uri, node.id, attr)) {
+      this.removeValue(uri, node.id, attr);
+    } else {
+      this.setValue(uri, node.id, attr, value);
+    }
+  },
 
   setValue(docURI, id, attr, value) {
     this.log("Saving " + attr + "=" + value + " for id=" + id + ", doc=" + docURI);
@@ -153,7 +171,7 @@ XULStore.prototype = {
   getAttributeEnumerator(docURI, id) {
     this.log("Getting attribute enumerator for id=" + id + ", doc=" + docURI);
     return new nsStringEnumerator(XULStoreStore.getAttributeIterator(docURI, id));
-  }
+  },
 };
 
 // TODO: free the iterPtr when the enumerator is destroyed.
@@ -163,6 +181,10 @@ function nsStringEnumerator(iterPtr) {
 
 nsStringEnumerator.prototype = {
   QueryInterface: ChromeUtils.generateQI([Ci.nsIStringEnumerator]),
+  _nextIndex: 0,
+  [Symbol.iterator]() {
+    return this._items.values();
+  },
   hasMore() {
     return XULStoreStore.iterHasMore(this._iterPtr);
   },

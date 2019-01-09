@@ -26,24 +26,21 @@ async function test_opensearch(shouldWork) {
   let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, rootDir + "opensearch.html");
   let searchPopup = document.getElementById("PopupSearchAutoComplete");
   let promiseSearchPopupShown = BrowserTestUtils.waitForEvent(searchPopup, "popupshown");
-  let searchBarButton = document.getAnonymousElementByAttribute(searchBar,
-                                                                "anonid",
-                                                                "searchbar-search-button");
+  let searchBarButton = searchBar.querySelector(".searchbar-search-button");
+
   searchBarButton.click();
   await promiseSearchPopupShown;
   let oneOffsContainer = document.getAnonymousElementByAttribute(searchPopup,
                                                                  "anonid",
                                                                  "search-one-off-buttons");
-  let engineListElement = document.getAnonymousElementByAttribute(oneOffsContainer,
-                                                                  "anonid",
-                                                                  "add-engines");
+  let engineListElement = oneOffsContainer.querySelector(".search-add-engines");
   if (shouldWork) {
-    ok(engineListElement.firstChild,
+    ok(engineListElement.firstElementChild,
        "There should be search engines available to add");
     ok(searchBar.getAttribute("addengines"),
        "Search bar should have addengines attribute");
   } else {
-    is(engineListElement.firstChild, null,
+    is(engineListElement.firstElementChild, null,
        "There should be no search engines available to add");
     ok(!searchBar.getAttribute("addengines"),
        "Search bar should not have addengines attribute");
@@ -54,7 +51,7 @@ async function test_opensearch(shouldWork) {
 add_task(async function test_install_and_set_default() {
   // Make sure we are starting in an expected state to avoid false positive
   // test results.
-  isnot(Services.search.currentEngine.name, "MozSearch",
+  isnot(Services.search.defaultEngine.name, "MozSearch",
         "Default search engine should not be MozSearch when test starts");
   is(Services.search.getEngineByName("Foo"), null,
      "Engine \"Foo\" should not be present when test starts");
@@ -65,28 +62,28 @@ add_task(async function test_install_and_set_default() {
         "Add": [
           {
             "Name": "MozSearch",
-            "URLTemplate": "http://example.com/?q={searchTerms}"
-          }
+            "URLTemplate": "http://example.com/?q={searchTerms}",
+          },
         ],
-        "Default": "MozSearch"
-      }
-    }
+        "Default": "MozSearch",
+      },
+    },
   });
 
   // If this passes, it means that the new search engine was properly installed
   // *and* was properly set as the default.
-  is(Services.search.currentEngine.name, "MozSearch",
+  is(Services.search.defaultEngine.name, "MozSearch",
      "Specified search engine should be the default");
 
   // Clean up
-  Services.search.removeEngine(Services.search.currentEngine);
+  Services.search.removeEngine(Services.search.defaultEngine);
   EnterprisePolicyTesting.resetRunOnceState();
 });
 
 // Same as the last test, but with "PreventInstalls" set to true to make sure
 // it does not prevent search engines from being installed properly
 add_task(async function test_install_and_set_default_prevent_installs() {
-  isnot(Services.search.currentEngine.name, "MozSearch",
+  isnot(Services.search.defaultEngine.name, "MozSearch",
         "Default search engine should not be MozSearch when test starts");
   is(Services.search.getEngineByName("Foo"), null,
      "Engine \"Foo\" should not be present when test starts");
@@ -97,20 +94,20 @@ add_task(async function test_install_and_set_default_prevent_installs() {
         "Add": [
           {
             "Name": "MozSearch",
-            "URLTemplate": "http://example.com/?q={searchTerms}"
-          }
+            "URLTemplate": "http://example.com/?q={searchTerms}",
+          },
         ],
         "Default": "MozSearch",
-        "PreventInstalls": true
-      }
-    }
+        "PreventInstalls": true,
+      },
+    },
   });
 
-  is(Services.search.currentEngine.name, "MozSearch",
+  is(Services.search.defaultEngine.name, "MozSearch",
      "Specified search engine should be the default");
 
   // Clean up
-  Services.search.removeEngine(Services.search.currentEngine);
+  Services.search.removeEngine(Services.search.defaultEngine);
   EnterprisePolicyTesting.resetRunOnceState();
 });
 
@@ -118,7 +115,7 @@ add_task(async function test_opensearch_works() {
   // Clear out policies so we can test with no policies applied
   await setupPolicyEngineWithJson({
     "policies": {
-    }
+    },
   });
   // Ensure that opensearch works before we make sure that it can be properly
   // disabled
@@ -129,9 +126,9 @@ add_task(async function setup_prevent_installs() {
   await setupPolicyEngineWithJson({
     "policies": {
       "SearchEngines": {
-        "PreventInstalls": true
-      }
-    }
+        "PreventInstalls": true,
+      },
+    },
   });
 });
 
@@ -162,6 +159,10 @@ add_task(async function test_opensearch_disabled() {
 });
 
 add_task(async function test_AddSearchProvider() {
+  if (!Services.prefs.getBoolPref("dom.sidebar.enabled", false)) {
+    return;
+  }
+
   // Mock the modal error dialog
   let mockPrompter = {
     promptCount: 0,
@@ -194,6 +195,8 @@ add_task(async function test_AddSearchProvider() {
 });
 
 add_task(async function test_install_and_remove() {
+  let iconURL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
   is(Services.search.getEngineByName("Foo"), null,
      "Engine \"Foo\" should not be present when test starts");
 
@@ -203,23 +206,29 @@ add_task(async function test_install_and_remove() {
         "Add": [
           {
             "Name": "Foo",
-            "URLTemplate": "http://example.com/?q={searchTerms}"
-          }
-        ]
-      }
-    }
+            "URLTemplate": "http://example.com/?q={searchTerms}",
+            "IconURL": iconURL,
+          },
+        ],
+      },
+    },
   });
 
   // If this passes, it means that the new search engine was properly installed
-  isnot(Services.search.getEngineByName("Foo"), null,
+
+  let engine = Services.search.getEngineByName("Foo");
+  isnot(engine, null,
      "Specified search engine should be installed");
+
+  is(engine.wrappedJSObject.iconURI.spec, iconURL,
+     "Icon should be present");
 
   await setupPolicyEngineWithJson({
   "policies": {
       "SearchEngines": {
-        "Remove": ["Foo"]
-      }
-    }
+        "Remove": ["Foo"],
+      },
+    },
   });
 
   // If this passes, it means that the specified engine was properly removed

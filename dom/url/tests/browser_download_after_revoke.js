@@ -20,8 +20,7 @@ function test () {
 	  finish();
         }
 
-        var domwindow = aXULWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                                  .getInterface(Ci.nsIDOMWindow);
+        var domwindow = aXULWindow.docShell.domWindow;
         domwindow.addEventListener("load", downloadOnLoad, true);
       },
       onCloseWindow: function(aXULWindow) {},
@@ -47,5 +46,5 @@ function test () {
   BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(onLoad);
 
   info("Loading download page...");
-  gBrowser.loadURI("http://example.com/browser/dom/url/tests/empty.html");
+  BrowserTestUtils.loadURI(gBrowser, "http://example.com/browser/dom/url/tests/empty.html");
 }

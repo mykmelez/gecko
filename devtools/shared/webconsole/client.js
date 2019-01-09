@@ -25,6 +25,15 @@ function WebConsoleClient(debuggerClient, response) {
   this._client = debuggerClient;
   this._longStrings = {};
   this.traits = response.traits || {};
+
+  /**
+   * Tells if the window.console object of the remote web page is the native
+   * object or not.
+   * @private
+   * @type boolean
+   */
+  this.hasNativeConsoleAPI = response.nativeConsoleAPI;
+
   this.events = [];
   this._networkRequests = new Map();
 
@@ -110,7 +119,9 @@ WebConsoleClient.prototype = {
         updates: [],
         private: actor.private,
         fromCache: actor.fromCache,
-        fromServiceWorker: actor.fromServiceWorker
+        fromServiceWorker: actor.fromServiceWorker,
+        isThirdPartyTrackingResource: actor.isThirdPartyTrackingResource,
+        referrerPolicy: actor.referrerPolicy,
       };
       this._networkRequests.set(actor.actor, networkInfo);
 
@@ -165,7 +176,7 @@ WebConsoleClient.prototype = {
         networkInfo.totalTime = packet.totalTime;
         break;
       case "securityInfo":
-        networkInfo.securityInfo = packet.state;
+        networkInfo.securityState = packet.state;
         break;
       case "responseCache":
         networkInfo.response.responseCache = packet.responseCache;
@@ -174,7 +185,7 @@ WebConsoleClient.prototype = {
 
     this.emit("networkEventUpdate", {
       packet: packet,
-      networkInfo
+      networkInfo,
     });
   },
 
@@ -303,11 +314,6 @@ WebConsoleClient.prototype = {
    * See evaluateJS for parameter and response information.
    */
   evaluateJSAsync: function(string, onResponse, options = {}) {
-    // Pre-37 servers don't support async evaluation.
-    if (!this.traits.evaluateJSAsync) {
-      return this.evaluateJS(string, onResponse, options);
-    }
-
     const packet = {
       to: this._actor,
       type: "evaluateJSAsync",
@@ -317,6 +323,7 @@ WebConsoleClient.prototype = {
       url: options.url,
       selectedNodeActor: options.selectedNodeActor,
       selectedObjectActor: options.selectedObjectActor,
+      mapped: options.mapped,
     };
 
     return new Promise((resolve, reject) => {
@@ -367,26 +374,37 @@ WebConsoleClient.prototype = {
   /**
    * Autocomplete a JavaScript expression.
    *
-   * @param string string
+   * @param {String} string
    *        The code you want to autocomplete.
-   * @param number cursor
+   * @param {Number} cursor
    *        Cursor location inside the string. Index starts from 0.
-   * @param function onResponse
-   *        The function invoked when the response is received.
-   * @param string frameActor
+   * @param {String} frameActor
    *        The id of the frame actor that made the call.
+   * @param {String} selectedNodeActor: Actor id of the selected node in the inspector.
+   * @param {Array} authorizedEvaluations
+   *        Array of the properties access which can be executed by the engine.
+   *        Example: [["x", "myGetter"], ["x", "myGetter", "y", "anotherGetter"]] to
+   *        retrieve properties of `x.myGetter.` and `x.myGetter.y.anotherGetter`.
    * @return request
    *         Request object that implements both Promise and EventEmitter interfaces
    */
-  autocomplete: function(string, cursor, onResponse, frameActor) {
+  autocomplete: function(
+    string,
+    cursor,
+    frameActor,
+    selectedNodeActor,
+    authorizedEvaluations
+  ) {
     const packet = {
       to: this._actor,
       type: "autocomplete",
       text: string,
-      cursor: cursor,
-      frameActor: frameActor,
+      cursor,
+      frameActor,
+      selectedNodeActor,
+      authorizedEvaluations,
     };
-    return this._client.request(packet, onResponse);
+    return this._client.request(packet);
   },
 
   /**
@@ -635,7 +653,7 @@ WebConsoleClient.prototype = {
     const packet = {
       to: this._actor,
       type: "sendHTTPRequest",
-      request: data
+      request: data,
     };
     return this._client.request(packet, onResponse);
   },
@@ -763,5 +781,5 @@ WebConsoleClient.prototype = {
         resolve(initial + response.substring);
       });
     });
-  }
+  },
 };

@@ -4,7 +4,6 @@ ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://testing-common/httpd.js");
 const { FileUtils } = ChromeUtils.import("resource://gre/modules/FileUtils.jsm", {});
-const { OS } = ChromeUtils.import("resource://gre/modules/osfile.jsm", {});
 
 const { RemoteSettings } = ChromeUtils.import("resource://services-settings/remote-settings.js", {});
 const BlocklistClients = ChromeUtils.import("resource://services-common/blocklist-clients.js", {});
@@ -18,12 +17,6 @@ const IS_ANDROID = AppConstants.platform == "android";
 let gBlocklistClients;
 let server;
 
-async function readJSON(filepath) {
-  const binaryData = await OS.File.read(filepath);
-  const textData = (new TextDecoder()).decode(binaryData);
-  return Promise.resolve(JSON.parse(textData));
-}
-
 async function clear_state() {
   for (let {client} of gBlocklistClients) {
     // Remove last server times.
@@ -32,11 +25,6 @@ async function clear_state() {
     // Clear local DB.
     const collection = await client.openCollection();
     await collection.clear();
-
-    // Remove JSON dumps folders in profile dir.
-    const dumpFile = OS.Path.join(OS.Constants.Path.profileDir, client.filename);
-    const folder = OS.Path.dirname(dumpFile);
-    await OS.File.removeDir(folder, { ignoreAbsent: true });
   }
 }
 
@@ -114,7 +102,7 @@ add_task(async function test_initial_dump_is_loaded_as_synced_when_collection_is
     }
 
     // Test an empty db populates, but don't reach server (specified timestamp <= dump).
-    await client.maybeSync(1, Date.now());
+    await client.maybeSync(1);
 
     // Verify the loaded data has status to synced:
     const collection = await client.openCollection();
@@ -146,96 +134,30 @@ add_task(async function test_initial_dump_is_loaded_when_using_get_on_empty_coll
 });
 add_task(clear_state);
 
-add_task(async function test_list_is_written_to_file_in_profile() {
-  for (let {client, testData} of gBlocklistClients) {
-    const filePath = OS.Path.join(OS.Constants.Path.profileDir, client.filename);
-    const profFile = new FileUtils.File(filePath);
-    strictEqual(profFile.exists(), false);
-
-    await client.maybeSync(2000, Date.now(), {loadDump: false});
-
-    strictEqual(profFile.exists(), true);
-    const content = await readJSON(profFile.path);
-    equal(content.data[0].blockID, testData[testData.length - 1]);
-  }
-});
-add_task(clear_state);
-
-add_task(async function test_current_server_time_is_saved_in_pref() {
-  for (let {client} of gBlocklistClients) {
-    // The lastCheckTimePref was customized:
-    ok(/services\.blocklist\.(\w+)\.checked/.test(client.lastCheckTimePref), client.lastCheckTimePref);
-
-    const serverTime = Date.now();
-    await client.maybeSync(2000, serverTime);
-    const after = Services.prefs.getIntPref(client.lastCheckTimePref);
-    equal(after, Math.round(serverTime / 1000));
-  }
-});
-add_task(clear_state);
-
-add_task(async function test_update_json_file_when_addons_has_changes() {
-  for (let {client, testData} of gBlocklistClients) {
-    await client.maybeSync(2000, Date.now() - 1000, {loadDump: false});
-    const filePath = OS.Path.join(OS.Constants.Path.profileDir, client.filename);
-    const profFile = new FileUtils.File(filePath);
-    const fileLastModified = profFile.lastModifiedTime = profFile.lastModifiedTime - 1000;
-    const serverTime = Date.now();
-
-    await client.maybeSync(3001, serverTime);
-
-    // File was updated.
-    notEqual(fileLastModified, profFile.lastModifiedTime);
-    const content = await readJSON(profFile.path);
-    deepEqual(content.data.map((r) => r.blockID), testData);
-    // Server time was updated.
-    const after = Services.prefs.getIntPref(client.lastCheckTimePref);
-    equal(after, Math.round(serverTime / 1000));
-  }
-});
-add_task(clear_state);
-
-add_task(async function test_sends_reload_message_when_blocklist_has_changes() {
-  for (let {client} of gBlocklistClients) {
-    let received = await new Promise((resolve, reject) => {
-      Services.ppmm.addMessageListener("Blocklist:reload-from-disk", {
-        receiveMessage(aMsg) { resolve(aMsg); }
-      });
-
-      client.maybeSync(2000, Date.now() - 1000, {loadDump: false});
-    });
-
-    equal(received.data.filename, client.filename);
-  }
-});
-add_task(clear_state);
-
 add_task(async function test_sync_event_data_is_filtered_for_target() {
   // Here we will synchronize 4 times, the first two to initialize the local DB and
   // the last two about event filtered data.
-  const timestamp1 = 2000;
-  const timestamp2 = 3000;
-  const timestamp3 = 4000;
-  const timestamp4 = 5000;
-  // Fake a date value obtained from server (used to store a pref, useless here).
-  const fakeServerTime = Date.now();
+  const timestamp1 = 3000;
+  const timestamp2 = 3001;
+  const timestamp3 = 4001;
+  const timestamp4 = 5001;
 
   for (let {client} of gBlocklistClients) {
     // Initialize the collection with some data (local is empty, thus no ?_since)
-    await client.maybeSync(timestamp1, fakeServerTime - 30, {loadDump: false});
+    await client.maybeSync(timestamp1, {loadDump: false});
     // This will pick the data with ?_since=3000.
-    await client.maybeSync(timestamp2 + 1, fakeServerTime - 20);
+    await client.maybeSync(timestamp2);
 
     // In ?_since=4000 entries, no target matches. The sync event is not called.
     let called = false;
     client.on("sync", e => called = true);
-    await client.maybeSync(timestamp3 + 1, fakeServerTime - 10);
+    await client.maybeSync(timestamp3);
     equal(called, false, `shouldn't have sync event for ${client.collectionName}`);
 
     // In ?_since=5000 entries, only one entry matches.
     let syncEventData;
     client.on("sync", e => syncEventData = e.data);
-    await client.maybeSync(timestamp4 + 1, fakeServerTime);
+    await client.maybeSync(timestamp4);
     const { current, created, updated, deleted } = syncEventData;
     equal(created.length + updated.length + deleted.length, 1, `event filtered data for ${client.collectionName}`);
 
@@ -253,21 +175,21 @@ add_task(async function test_entries_are_filtered_when_jexl_filter_expression_is
       willMatch: true,
     }, {
       willMatch: true,
-      filter_expression: null
+      filter_expression: null,
     }, {
       willMatch: true,
-      filter_expression: "1 == 1"
+      filter_expression: "1 == 1",
     }, {
       willMatch: false,
-      filter_expression: "1 == 2"
+      filter_expression: "1 == 2",
     }, {
       willMatch: true,
       filter_expression: "1 == 1",
       versionRange: [{
         targetApplication: [{
-          guid: "some-guid"
+          guid: "some-guid",
         }],
-      }]
+      }],
     }, {
       willMatch: false,  // jexl prevails over versionRange.
       filter_expression: "1 == 2",
@@ -277,8 +199,8 @@ add_task(async function test_entries_are_filtered_when_jexl_filter_expression_is
           minVersion: "0",
           maxVersion: "*",
         }],
-      }]
-    }
+      }],
+    },
   ];
   for (let {client} of gBlocklistClients) {
     const collection = await client.openCollection();
@@ -299,7 +221,7 @@ add_task(async function test_inspect_with_blocklist_clients() {
     serverTimestamp,
     localTimestamp,
     lastCheck,
-    collections
+    collections,
   } = await RemoteSettings.inspect();
 
   equal(serverTimestamp, '"3000"');
@@ -314,8 +236,8 @@ add_task(async function test_inspect_with_blocklist_clients() {
   };
   equal(collections.length, 3);
   deepEqual(collections[0], { ...defaults, collection: "gfx", serverTimestamp: 3000 });
-  deepEqual(collections[1], { ...defaults, collection: "addons", serverTimestamp: 2900 });
-  deepEqual(collections[2], { ...defaults, collection: "plugins", serverTimestamp: 2800 });
+  deepEqual(collections[1], { ...defaults, collection: "addons", serverTimestamp: 3000 });
+  deepEqual(collections[2], { ...defaults, collection: "plugins", serverTimestamp: 3000 });
 
   // Now synchronize, and check that values were updated.
   Services.prefs.setBoolPref("services.settings.load_dump", false);
@@ -333,6 +255,22 @@ add_task(async function test_inspect_with_blocklist_clients() {
 });
 add_task(clear_state);
 
+add_task(async function test_bucketname_changes_when_bucket_pref_changes() {
+  for (const { client } of gBlocklistClients) {
+    equal(client.bucketName, "blocklists");
+  }
+  equal(BlocklistClients.PinningBlocklistClient.bucketName, "pinning");
+
+  Services.prefs.setCharPref("services.blocklist.bucket", "blocklists-preview");
+  Services.prefs.setCharPref("services.blocklist.pinning.bucket", "pinning-preview");
+
+  for (const { client } of gBlocklistClients) {
+    equal(client.bucketName, "blocklists-preview", client.identifier);
+  }
+  equal(BlocklistClients.PinningBlocklistClient.bucketName, "pinning-preview");
+});
+add_task(clear_state);
+
 
 // get a response for a given request from sample data
 function getSampleResponse(req, port) {
@@ -343,29 +281,29 @@ function getSampleResponse(req, port) {
         "Access-Control-Allow-Methods: GET,HEAD,OPTIONS,POST,DELETE,OPTIONS",
         "Access-Control-Allow-Origin: *",
         "Content-Type: application/json; charset=UTF-8",
-        "Server: waitress"
+        "Server: waitress",
       ],
       "status": {status: 200, statusText: "OK"},
-      "responseBody": "null"
+      "responseBody": "null",
     },
     "GET:/v1/": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
-        "Server: waitress"
+        "Server: waitress",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({
         "settings": {
-          "batch_max_requests": 25
+          "batch_max_requests": 25,
         },
         "url": `http://localhost:${port}/v1/`,
         "documentation": "https://kinto.readthedocs.org/",
         "version": "1.5.1",
         "commit": "cbc6f58",
-        "hello": "kinto"
-      })
+        "hello": "kinto",
+      }),
     },
     "GET:/v1/buckets/monitor/collections/changes/records": {
       "sampleHeaders": [
@@ -374,7 +312,7 @@ function getSampleResponse(req, port) {
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
         `Date: ${new Date().toUTCString()}`,
-        "Etag: \"3000\""
+        "Etag: \"3000\"",
       ],
       "status": { status: 200, statusText: "OK" },
       "responseBody": JSON.stringify({
@@ -382,37 +320,37 @@ function getSampleResponse(req, port) {
           "id": "4676f0c7-9757-4796-a0e8-b40a5a37a9c9",
           "bucket": "blocklists",
           "collection": "gfx",
-          "last_modified": 3000
+          "last_modified": 3000,  // will become ?_expected=3000
         }, {
           "id": "36b2ebab-d691-4796-b36b-f7a06df38b26",
           "bucket": "blocklists",
           "collection": "addons",
-          "last_modified": 2900
+          "last_modified": 3000,  // will become ?_expected=3000
         }, {
           "id": "42aea14b-4b35-4308-94d9-8562412a2fef",
           "bucket": "blocklists",
           "collection": "plugins",
-          "last_modified": 2800
+          "last_modified": 3000,  // will become ?_expected=3000
         }, {
           "id": "50f4ef31-7788-4be8-b073-114440be4d8d",
           "bucket": "main",
           "collection": "passwords",
-          "last_modified": 2700
+          "last_modified": 2900,
         }, {
           "id": "d2f08123-b815-4bbf-a0b7-a948a65ecafa",
           "bucket": "pinning-preview",
           "collection": "pins",
-          "last_modified": 2600
-        }]
-      })
+          "last_modified": 2800,
+        }],
+      }),
     },
-    "GET:/v1/buckets/blocklists/collections/addons/records?_sort=-last_modified": {
+    "GET:/v1/buckets/blocklists/collections/addons/records?_expected=3000&_sort=-last_modified": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"3000\""
+        "Etag: \"3000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
@@ -423,19 +361,19 @@ function getSampleResponse(req, port) {
           "targetApplication": [],
           "maxVersion": "*",
           "minVersion": "0",
-          "severity": "1"
+          "severity": "1",
         }],
         "guid": "ScorpionSaver@jetpack",
-        "id": "9d500963-d80e-3a91-6e74-66f3811b99cc"
-      }]})
+        "id": "9d500963-d80e-3a91-6e74-66f3811b99cc",
+      }]}),
     },
-    "GET:/v1/buckets/blocklists/collections/plugins/records?_sort=-last_modified": {
+    "GET:/v1/buckets/blocklists/collections/plugins/records?_expected=3000&_sort=-last_modified": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"3000\""
+        "Etag: \"3000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
@@ -443,16 +381,16 @@ function getSampleResponse(req, port) {
         "blockID": "p28",
         "id": "7b1e0b3c-e390-a817-11b6-a6887f65f56e",
         "last_modified": 3000,
-        "versionRange": []
-      }]})
+        "versionRange": [],
+      }]}),
     },
-    "GET:/v1/buckets/blocklists/collections/gfx/records?_sort=-last_modified": {
+    "GET:/v1/buckets/blocklists/collections/gfx/records?_expected=3000&_sort=-last_modified": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"3000\""
+        "Etag: \"3000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
@@ -465,16 +403,16 @@ function getSampleResponse(req, port) {
         "featureStatus": "BLOCKED_DRIVER_VERSION",
         "last_modified": 3000,
         "os": "WINNT 6.1",
-        "id": "3f947f16-37c2-4e96-d356-78b26363729b"
-      }]})
+        "id": "3f947f16-37c2-4e96-d356-78b26363729b",
+      }]}),
     },
-    "GET:/v1/buckets/blocklists/collections/addons/records?_sort=-last_modified&_since=3000": {
+    "GET:/v1/buckets/blocklists/collections/addons/records?_expected=3001&_sort=-last_modified&_since=3000": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"4000\""
+        "Etag: \"4000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
@@ -485,10 +423,10 @@ function getSampleResponse(req, port) {
           "targetApplication": [],
           "maxVersion": "*",
           "minVersion": "0",
-          "severity": "3"
+          "severity": "3",
         }],
         "guid": "{c96d1ae6-c4cf-4984-b110-f5f561b33b5a}",
-        "id": "9ccfac91-e463-c30c-f0bd-14143794a8dd"
+        "id": "9ccfac91-e463-c30c-f0bd-14143794a8dd",
       }, {
         "prefs": ["browser.startup.homepage"],
         "blockID": "i720",
@@ -497,19 +435,19 @@ function getSampleResponse(req, port) {
           "targetApplication": [],
           "maxVersion": "*",
           "minVersion": "0",
-          "severity": "1"
+          "severity": "1",
         }],
         "guid": "FXqG@xeeR.net",
-        "id": "cf9b3129-a97e-dbd7-9525-a8575ac03c25"
-      }]})
+        "id": "cf9b3129-a97e-dbd7-9525-a8575ac03c25",
+      }]}),
     },
-    "GET:/v1/buckets/blocklists/collections/plugins/records?_sort=-last_modified&_since=3000": {
+    "GET:/v1/buckets/blocklists/collections/plugins/records?_expected=3001&_sort=-last_modified&_since=3000": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"4000\""
+        "Etag: \"4000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
@@ -522,10 +460,10 @@ function getSampleResponse(req, port) {
           "minVersion": "11.2.202.509",
           "maxVersion": "*",
           "severity": "0",
-          "vulnerabilityStatus": "1"
+          "vulnerabilityStatus": "1",
         }],
         "os": "Linux",
-        "id": "aabad965-e556-ffe7-4191-074f5dee3df3"
+        "id": "aabad965-e556-ffe7-4191-074f5dee3df3",
       }, {
         "matchFilename": "npViewpoint.dll",
         "blockID": "p32",
@@ -534,18 +472,18 @@ function getSampleResponse(req, port) {
         "versionRange": [{
           "targetApplication": [{
             "minVersion": "3.0",
-            "maxVersion": "*"
-          }]
-        }]
-      }]})
+            "maxVersion": "*",
+          }],
+        }],
+      }]}),
     },
-    "GET:/v1/buckets/blocklists/collections/gfx/records?_sort=-last_modified&_since=3000": {
+    "GET:/v1/buckets/blocklists/collections/gfx/records?_expected=3001&_sort=-last_modified&_since=3000": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"4000\""
+        "Etag: \"4000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
@@ -556,7 +494,7 @@ function getSampleResponse(req, port) {
         "id": "c96bca82-e6bd-044d-14c4-9c1d67e9283a",
         "last_modified": 4000,
         "os": "Darwin 10",
-        "featureStatus": "BLOCKED_DEVICE"
+        "featureStatus": "BLOCKED_DEVICE",
       }, {
         "vendor": "0x10de",
         "blockID": "g200",
@@ -565,35 +503,35 @@ function getSampleResponse(req, port) {
         "id": "c3a15ba9-e0e2-421f-e399-c995e5b8d14e",
         "last_modified": 3500,
         "os": "Darwin 11",
-        "featureStatus": "BLOCKED_DEVICE"
-      }]})
+        "featureStatus": "BLOCKED_DEVICE",
+      }]}),
     },
-    "GET:/v1/buckets/blocklists/collections/addons/records?_sort=-last_modified&_since=4000": {
+    "GET:/v1/buckets/blocklists/collections/addons/records?_expected=4001&_sort=-last_modified&_since=4000": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"5000\""
+        "Etag: \"5000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
         "last_modified": 4001,
         "versionRange": [{
           "targetApplication": [{
-            "guid": "some-guid"
+            "guid": "some-guid",
           }],
         }],
-        "id": "8f03b264-57b7-4263-9b15-ad91b033a034"
-      }]})
+        "id": "8f03b264-57b7-4263-9b15-ad91b033a034",
+      }]}),
     },
-    "GET:/v1/buckets/blocklists/collections/plugins/records?_sort=-last_modified&_since=4000": {
+    "GET:/v1/buckets/blocklists/collections/plugins/records?_expected=4001&_sort=-last_modified&_since=4000": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"5000\""
+        "Etag: \"5000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
@@ -602,19 +540,19 @@ function getSampleResponse(req, port) {
           "targetApplication": [{
             "guid": "xpcshell@tests.mozilla.org",
             "minVersion": "0",
-            "maxVersion": "57.*"
-          }]
+            "maxVersion": "57.*",
+          }],
         }],
-        "id": "cd3ea0b2-1ba8-4fb6-b242-976a87626116"
-      }]})
+        "id": "cd3ea0b2-1ba8-4fb6-b242-976a87626116",
+      }]}),
     },
-    "GET:/v1/buckets/blocklists/collections/gfx/records?_sort=-last_modified&_since=4000": {
+    "GET:/v1/buckets/blocklists/collections/gfx/records?_expected=4001&_sort=-last_modified&_since=4000": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"5000\""
+        "Etag: \"5000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
@@ -622,31 +560,31 @@ function getSampleResponse(req, port) {
         "versionRange": [{
           "targetApplication": [{
             "guid": "xpcshell@tests.mozilla.org",
-            "maxVersion": "20"
+            "maxVersion": "20",
           }],
         }],
-        "id": "86771771-e803-4006-95e9-c9275d58b3d1"
-      }]})
+        "id": "86771771-e803-4006-95e9-c9275d58b3d1",
+      }]}),
     },
-    "GET:/v1/buckets/blocklists/collections/addons/records?_sort=-last_modified&_since=5000": {
+    "GET:/v1/buckets/blocklists/collections/addons/records?_expected=5001&_sort=-last_modified&_since=5000": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"6000\""
+        "Etag: \"6000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
         // delete an entry with non matching target (see above)
         "last_modified": 5001,
         "deleted": true,
-        "id": "8f03b264-57b7-4263-9b15-ad91b033a034"
+        "id": "8f03b264-57b7-4263-9b15-ad91b033a034",
       }, {
         // delete entry with matching target (see above)
         "last_modified": 5002,
         "deleted": true,
-        "id": "9ccfac91-e463-c30c-f0bd-14143794a8dd"
+        "id": "9ccfac91-e463-c30c-f0bd-14143794a8dd",
       }, {
         // create an extra non matching
         "last_modified": 5003,
@@ -655,18 +593,18 @@ function getSampleResponse(req, port) {
           "targetApplication": [{
             "guid": "xpcshell@tests.mozilla.org",
             "minVersion": "0",
-            "maxVersion": "57.*"
-          }]
+            "maxVersion": "57.*",
+          }],
         }],
-      }]})
+      }]}),
     },
-    "GET:/v1/buckets/blocklists/collections/plugins/records?_sort=-last_modified&_since=5000": {
+    "GET:/v1/buckets/blocklists/collections/plugins/records?_expected=5001&_sort=-last_modified&_since=5000": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"6000\""
+        "Etag: \"6000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
@@ -676,10 +614,10 @@ function getSampleResponse(req, port) {
           "targetApplication": [{
             "guid": "xpcshell@tests.mozilla.org",
             "minVersion": "0",
-            "maxVersion": "57.*"
-          }]
+            "maxVersion": "57.*",
+          }],
         }],
-        "id": "cd3ea0b2-1ba8-4fb6-b242-976a87626116"
+        "id": "cd3ea0b2-1ba8-4fb6-b242-976a87626116",
       }, {
         // entry with matching target (see above)
         "newAttribute": 42,
@@ -691,18 +629,18 @@ function getSampleResponse(req, port) {
           "targetApplication": [{
             "guid": "xpcshell@tests.mozilla.org",
             "minVersion": "3.0",
-            "maxVersion": "*"
-          }]
-        }]
-      }]})
+            "maxVersion": "*",
+          }],
+        }],
+      }]}),
     },
-    "GET:/v1/buckets/blocklists/collections/gfx/records?_sort=-last_modified&_since=5000": {
+    "GET:/v1/buckets/blocklists/collections/gfx/records?_expected=5001&_sort=-last_modified&_since=5000": {
       "sampleHeaders": [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
         "Content-Type: application/json; charset=UTF-8",
         "Server: waitress",
-        "Etag: \"6000\""
+        "Etag: \"6000\"",
       ],
       "status": {status: 200, statusText: "OK"},
       "responseBody": JSON.stringify({"data": [{
@@ -710,21 +648,21 @@ function getSampleResponse(req, port) {
           "targetApplication": [{
             "guid": "xpcshell@tests.mozilla.org",
             "minVersion": "0",
-            "maxVersion": "*"
-          }]
+            "maxVersion": "*",
+          }],
         }],
-        "id": "43031a81-5f36-4eef-9b35-52f0bbeba363"
+        "id": "43031a81-5f36-4eef-9b35-52f0bbeba363",
       }, {
         "versionRange": [{
           "targetApplication": [{
             "guid": "xpcshell@tests.mozilla.org",
             "minVersion": "0",
-            "maxVersion": "3"
-          }]
+            "maxVersion": "3",
+          }],
         }],
-        "id": "75a06bd3-f906-427d-a448-02092ee589fc"
-      }]})
-    }
+        "id": "75a06bd3-f906-427d-a448-02092ee589fc",
+      }]}),
+    },
   };
   return responses[`${req.method}:${req.path}?${req.queryString}`] ||
          responses[`${req.method}:${req.path}`] ||

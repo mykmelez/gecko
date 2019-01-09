@@ -25,14 +25,14 @@ const DEVTOOLS_THEME_PREF = "devtools.theme";
  */
 
 async function openToolboxForTab(tab) {
-  const target = gDevTools.getTargetForTab(tab);
+  const target = await gDevTools.getTargetForTab(tab);
   const toolbox = await gDevTools.showToolbox(target, "testBlankPanel");
   info("Developer toolbox opened");
   return {toolbox, target};
 }
 
 async function closeToolboxForTab(tab) {
-  const target = gDevTools.getTargetForTab(tab);
+  const target = await gDevTools.getTargetForTab(tab);
   await gDevTools.closeToolbox(target);
   await target.destroy();
   info("Developer toolbox closed");
@@ -243,7 +243,8 @@ add_task(async function test_devtools_page_panels_create() {
   }
 
   const longPrefix = (new Array(80)).fill("x").join("");
-  const EXTENSION_ID = `${longPrefix}@create-devtools-panel.test`;
+  // Extension ID includes "inspector" to verify Bug 1474379 doesn't regress.
+  const EXTENSION_ID = `${longPrefix}-inspector@create-devtools-panel.test`;
 
   let extension = ExtensionTestUtils.loadExtension({
     useAddonManager: "temporary",

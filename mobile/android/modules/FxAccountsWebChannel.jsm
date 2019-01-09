@@ -188,7 +188,7 @@ this.FxAccountsWebChannel.prototype = {
           let response = {
             command: command,
             messageId: message.messageId,
-            data: data
+            data: data,
           };
           log.d("Sending response to command: " + command);
           this._channel.send(response, sendingContext);
@@ -196,9 +196,9 @@ this.FxAccountsWebChannel.prototype = {
 
         switch (command) {
           case COMMAND_LOADED:
-            let mm = sendingContext.browser.docShell
-              .QueryInterface(Ci.nsIInterfaceRequestor)
-              .getInterface(Ci.nsIContentFrameMessageManager);
+            // Note: we want the child side of the message manager here, not the
+            // parent, so get it from the docshell, not the browser.
+            let mm = sendingContext.browser.docShell.messageManager;
             mm.sendAsyncMessage(COMMAND_LOADED);
             break;
 
@@ -223,7 +223,7 @@ this.FxAccountsWebChannel.prototype = {
                         // We have an account, so this opens Sync native preferences.
                         Accounts.launchSetup();
                       },
-                    }
+                    },
                   });
                   respond({ok: false});
                 }
@@ -371,7 +371,7 @@ this.FxAccountsWebChannel.prototype = {
     this._channel.listen(listener);
 
     log.d("FxAccountsWebChannel registered: " + this._webChannelId + " with origin " + this._webChannelOrigin.prePath);
-  }
+  },
 };
 
 var singleton;

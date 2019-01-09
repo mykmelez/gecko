@@ -26,13 +26,13 @@
           mountAndInitializeComponent,
           selectors,
           getState,
-          recordingPreferencesCalls
+          recordingPreferencesCalls,
         } = createPerfComponent();
 
         await mountAndInitializeComponent();
 
-        is(selectors.getInterval(getState()), 1,
-          "The interval starts out as 1");
+        is(selectors.getInterval(getState()), 1000,
+          "The interval starts out as 1000");
         is(recordingPreferencesCalls.length, 0,
           "No calls have been made");
 

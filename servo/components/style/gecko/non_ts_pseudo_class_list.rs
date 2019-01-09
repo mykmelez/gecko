@@ -1,32 +1,22 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /*
  * This file contains a helper macro includes all supported non-tree-structural
  * pseudo-classes.
  *
-
  * FIXME: Find a way to autogenerate this file.
  *
  * Expected usage is as follows:
  * ```
  * macro_rules! pseudo_class_macro{
- *     (bare: [$(($css:expr, $name:ident, $gecko_type:tt, $state:tt, $flags:tt),)*],
- *      string: [$(($s_css:expr, $s_name:ident, $s_gecko_type:tt, $s_state:tt, $s_flags:tt),)*]) => {
- *      keyword: [$(($k_css:expr, $k_name:ident, $k_gecko_type:tt, $k_state:tt, $k_flags:tt),)*]) => {
+ *     ([$(($css:expr, $name:ident, $gecko_type:tt, $state:tt, $flags:tt),)*]) => {
  *         // do stuff
  *     }
  * }
  * apply_non_ts_list!(pseudo_class_macro)
  * ```
- *
- * The `string` and `keyword` variables will be applied to pseudoclasses that are of the form of
- * functions with string or keyword arguments.
- *
- * Pending pseudo-classes:
- *
- *  :scope -> <style scoped>, pending discussion.
  *
  * $gecko_type can be either "_" or an ident in Gecko's CSSPseudoClassType.
  * $state can be either "_" or an expression of type ElementState.  If present,
@@ -39,7 +29,7 @@
 macro_rules! apply_non_ts_list {
     ($apply_macro:ident) => {
         $apply_macro! {
-            bare: [
+            [
                 ("-moz-table-border-nonzero", MozTableBorderNonzero, mozTableBorderNonzero, _, PSEUDO_CLASS_ENABLED_IN_UA_SHEETS),
                 ("-moz-browser-frame", MozBrowserFrame, mozBrowserFrame, _, PSEUDO_CLASS_ENABLED_IN_UA_SHEETS_AND_CHROME),
                 ("link", Link, link, IN_UNVISITED_STATE, _),
@@ -47,7 +37,7 @@ macro_rules! apply_non_ts_list {
                 ("visited", Visited, visited, IN_VISITED_STATE, _),
                 ("active", Active, active, IN_ACTIVE_STATE, _),
                 ("checked", Checked, checked, IN_CHECKED_STATE, _),
-                ("defined", Defined, defined, IN_DEFINED_STATE, PSEUDO_CLASS_ENABLED_IN_UA_SHEETS_AND_CHROME),
+                ("defined", Defined, defined, IN_DEFINED_STATE, _),
                 ("disabled", Disabled, disabled, IN_DISABLED_STATE, _),
                 ("enabled", Enabled, enabled, IN_ENABLED_STATE, _),
                 ("focus", Focus, focus, IN_FOCUS_STATE, _),
@@ -111,9 +101,6 @@ macro_rules! apply_non_ts_list {
                 ("-moz-lwtheme-brighttext", MozLWThemeBrightText, mozLWThemeBrightText, _, _),
                 ("-moz-lwtheme-darktext", MozLWThemeDarkText, mozLWThemeDarkText, _, _),
                 ("-moz-window-inactive", MozWindowInactive, mozWindowInactive, _, _),
-            ],
-            string: [
-                ("lang", Lang, lang, _, _),
             ]
         }
     }

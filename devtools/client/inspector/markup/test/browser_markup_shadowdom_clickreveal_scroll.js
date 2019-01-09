@@ -32,8 +32,6 @@ const TEST_URL = `data:text/html;charset=utf-8,
   </script>`;
 
 add_task(async function() {
-  await enableWebComponents();
-
   const {inspector} = await openInspectorForURL(TEST_URL);
   const {markup} = inspector;
 
@@ -64,6 +62,7 @@ add_task(async function() {
   // the scroll was performed.
   await waitUntil(() => isScrolledOut(slottedElement));
   is(isScrolledOut(slottedElement), true, "slotted element is scrolled out");
+  await waitUntil(() => !isScrolledOut(realElement));
   is(isScrolledOut(realElement), false, "real element is not scrolled out");
 
   info("Scroll back to see the slotted element");
@@ -75,6 +74,7 @@ add_task(async function() {
   await clickOnRevealLink(inspector, slottedContainer);
   await waitUntil(() => isScrolledOut(slottedElement));
   is(isScrolledOut(slottedElement), true, "slotted element is scrolled out");
+  await waitUntil(() => !isScrolledOut(realElement));
   is(isScrolledOut(realElement), false, "real element is not scrolled out");
 });
 

@@ -5,15 +5,9 @@
 ChromeUtils.import("resource://services-common/utils.js"); /* global: CommonUtils */
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/TelemetryStopwatch.jsm");
 
 XPCOMUtils.defineLazyGetter(window, "gChromeWin", () =>
-  window.QueryInterface(Ci.nsIInterfaceRequestor)
-    .getInterface(Ci.nsIWebNavigation)
-    .QueryInterface(Ci.nsIDocShellTreeItem)
-    .rootTreeItem
-    .QueryInterface(Ci.nsIInterfaceRequestor)
-    .getInterface(Ci.nsIDOMWindow)
+  window.docShell.rootTreeItem.domWindow
     .QueryInterface(Ci.nsIDOMChromeWindow));
 
 ChromeUtils.defineModuleGetter(this, "EventDispatcher",
@@ -346,7 +340,7 @@ var Logins = {
       message: password,
       buttons: [
         gStringBundle.GetStringFromName("loginsDialog.copy"),
-        gStringBundle.GetStringFromName("loginsDialog.cancel") ]
+        gStringBundle.GetStringFromName("loginsDialog.cancel") ],
       }).show((data) => {
         switch (data.button) {
           case 0:
@@ -372,7 +366,7 @@ var Logins = {
       { label: gStringBundle.GetStringFromName("loginsMenu.copyPassword") },
       { label: gStringBundle.GetStringFromName("loginsMenu.copyUsername") },
       { label: gStringBundle.GetStringFromName("loginsMenu.editLogin") },
-      { label: gStringBundle.GetStringFromName("loginsMenu.delete") }
+      { label: gStringBundle.GetStringFromName("loginsMenu.delete") },
     ];
 
     prompt.setSingleChoiceItems(menuItems);
@@ -399,7 +393,7 @@ var Logins = {
             message: gStringBundle.GetStringFromName("loginsDialog.confirmDelete"),
             buttons: [
               gStringBundle.GetStringFromName("loginsDialog.confirm"),
-              gStringBundle.GetStringFromName("loginsDialog.cancel") ]
+              gStringBundle.GetStringFromName("loginsDialog.cancel") ],
           });
           confirmPrompt.show((data) => {
             switch (data.button) {
@@ -420,7 +414,7 @@ var Logins = {
     EventDispatcher.instance.sendRequestForResult({
       type: "Favicon:Request",
       url: aHostname,
-      skipNetwork: true
+      skipNetwork: true,
     }).then(function(faviconUrl) {
       aImg.style.backgroundImage = "url('" + faviconUrl + "')";
       aImg.style.visibility = "visible";
@@ -515,7 +509,7 @@ var Logins = {
     });
 
     this._loadList(logins);
-  }
+  },
 };
 
 window.addEventListener("load", Logins.init.bind(Logins));

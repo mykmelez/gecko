@@ -12,12 +12,6 @@ findbar {
   transition-timing-function: ease-in-out, ease-in-out, linear;
 }
 
-findbar:-moz-lwtheme {
-  background-color: var(--toolbar-bgcolor);
-  background-image: none;
-  color: var(--toolbar-color, -moz-DialogText);
-}
-
 findbar[hidden] {
   /* Override display:none to make the transition work. */
   display: -moz-box;
@@ -167,6 +161,12 @@ findbar[noanim] {
   color: GrayText;
   margin: 0 !important;
   margin-inline-start: 12px !important;
+}
+
+.findbar-find-status:-moz-lwtheme,
+.found-matches:-moz-lwtheme {
+  color: inherit;
+  opacity: .6;
 }
 
 .find-status-icon[status="pending"] {

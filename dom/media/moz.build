@@ -41,6 +41,7 @@ DIRS += [
     'gmp-plugin-openh264',
     'imagecapture',
     'ipc',
+    'mediacapabilities',
     'mediasink',
     'mediasource',
     'mp3',
@@ -80,6 +81,7 @@ if CONFIG['MOZ_WEBRTC']:
 
 XPIDL_SOURCES += [
     'nsIAudioDeviceInfo.idl',
+    'nsIAutoplay.idl',
     'nsIDOMNavigatorUserMedia.idl',
     'nsIMediaManager.idl',
 ]
@@ -95,6 +97,7 @@ EXPORTS += [
     'AudioCompactor.h',
     'AudioConfig.h',
     'AudioConverter.h',
+    'AudioDeviceInfo.h',
     'AudioMixer.h',
     'AudioPacketizer.h',
     'AudioSampleFormat.h',
@@ -104,6 +107,7 @@ EXPORTS += [
     'BackgroundVideoDecodingPermissionObserver.h',
     'Benchmark.h',
     'BitReader.h',
+    'BitWriter.h',
     'BufferMediaResource.h',
     'BufferReader.h',
     'ByteWriter.h',
@@ -113,8 +117,8 @@ EXPORTS += [
     'DOMMediaStream.h',
     'FileBlockCache.h',
     'FrameStatistics.h',
+    'ImageToI420.h',
     'Intervals.h',
-    'Latency.h',
     'MediaCache.h',
     'MediaContainerType.h',
     'MediaData.h',
@@ -223,6 +227,7 @@ UNIFIED_SOURCES += [
     'BaseMediaResource.cpp',
     'Benchmark.cpp',
     'BitReader.cpp',
+    'BitWriter.cpp',
     'CanvasCaptureMediaStream.cpp',
     'ChannelMediaDecoder.cpp',
     'ChannelMediaResource.cpp',
@@ -232,7 +237,7 @@ UNIFIED_SOURCES += [
     'FileMediaResource.cpp',
     'GetUserMediaRequest.cpp',
     'GraphDriver.cpp',
-    'Latency.cpp',
+    'ImageToI420.cpp',
     'MediaCache.cpp',
     'MediaContainerType.cpp',
     'MediaData.cpp',
@@ -319,6 +324,7 @@ LOCAL_INCLUDES += [
     '/dom/base',
     '/layout/generic',
     '/layout/xul',
+    '/media/libyuv/libyuv/include',
     '/netwerk/base',
 ]
 
@@ -326,6 +332,7 @@ if CONFIG['MOZ_WEBRTC']:
     LOCAL_INCLUDES += [
         '/media/webrtc/signaling/src/common',
         '/media/webrtc/trunk',
+        '/media/webrtc/trunk/webrtc',
     ]
 
 DEFINES['MOZILLA_INTERNAL_API'] = True

@@ -1,7 +1,11 @@
 # Deriving `Fail`
 
 Though you can implement `Fail` yourself, we also provide a derive macro to
+<<<<<<< HEAD
 generate the impl for you. To get access to this macro, you must tag the extenr
+=======
+generate the impl for you. To get access to this macro, you must tag the extern
+>>>>>>> central
 crate declaration with `#[macro_use]`, as in:
 
 ```rust
@@ -148,7 +152,11 @@ Backtrace type.
 In contrast to `backtrace`, the cause cannot be determined by type name alone
 because it could be any type which implements `Fail`. For this reason, if your
 error has an underlying cause field, you need to annotate that field with
+<<<<<<< HEAD
 the `#[cause]` attribute.
+=======
+the `#[fail(cause)]` attribute.
+>>>>>>> central
 
 This can be used in fields of enums as well as structs.
 
@@ -162,7 +170,11 @@ use std::io;
 #[derive(Fail, Debug)]
 #[fail(display = "An error occurred.")]
 struct MyError {
+<<<<<<< HEAD
     #[cause] io_error: io::Error,
+=======
+    #[fail(cause)] io_error: io::Error,
+>>>>>>> central
 }
 
 /// MyEnumError::cause will return a reference only if it is Variant2,
@@ -172,6 +184,10 @@ enum MyEnumError {
     #[fail(display = "An error occurred.")]
     Variant1,
     #[fail(display = "A different error occurred.")]
+<<<<<<< HEAD
     Variant2(#[cause] io::Error),
+=======
+    Variant2(#[fail(cause)] io::Error),
+>>>>>>> central
 }
 ```

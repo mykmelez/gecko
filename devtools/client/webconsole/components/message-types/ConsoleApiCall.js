@@ -24,6 +24,7 @@ ConsoleApiCall.propTypes = {
   open: PropTypes.bool,
   serviceContainer: PropTypes.object.isRequired,
   timestampsVisible: PropTypes.bool.isRequired,
+  maybeScrollToBottom: PropTypes.func,
 };
 
 ConsoleApiCall.defaultProps = {
@@ -39,9 +40,13 @@ function ConsoleApiCall(props) {
     serviceContainer,
     timestampsVisible,
     repeat,
+    pausedExecutionPoint,
+    isPaused,
+    maybeScrollToBottom,
   } = props;
   const {
     id: messageId,
+    executionPoint,
     indent,
     source,
     type,
@@ -63,10 +68,18 @@ function ConsoleApiCall(props) {
     userProvidedStyles,
     serviceContainer,
     type,
+    maybeScrollToBottom,
   };
 
   if (type === "trace") {
-    messageBody = dom.span({className: "cm-variable"}, "console.trace()");
+    const traceParametersBody = Array.isArray(parameters) && parameters.length > 0
+      ? [" "].concat(formatReps(messageBodyConfig))
+      : [];
+
+    messageBody = [
+      dom.span({className: "cm-variable"}, "console.trace()"),
+      ...traceParametersBody,
+    ];
   } else if (type === "assert") {
     const reps = formatReps(messageBodyConfig);
     messageBody = dom.span({ className: "cm-variable" }, "Assertion failed: ", reps);
@@ -77,7 +90,7 @@ function ConsoleApiCall(props) {
     messageBody = formatReps(messageBodyConfig);
     if (prefix) {
       messageBody.unshift(dom.span({
-        className: "console-message-prefix"
+        className: "console-message-prefix",
       }, `${prefix}: `));
     }
   } else {
@@ -106,6 +119,9 @@ function ConsoleApiCall(props) {
 
   return Message({
     messageId,
+    executionPoint,
+    pausedExecutionPoint,
+    isPaused,
     open,
     collapsible,
     collapseTitle,
@@ -124,6 +140,7 @@ function ConsoleApiCall(props) {
     timeStamp,
     timestampsVisible,
     parameters,
+    maybeScrollToBottom,
   });
 }
 
@@ -137,6 +154,7 @@ function formatReps(options = {}) {
     serviceContainer,
     userProvidedStyles,
     type,
+    maybeScrollToBottom,
   } = options;
 
   return (
@@ -153,6 +171,7 @@ function formatReps(options = {}) {
         loadedObjectProperties,
         loadedObjectEntries,
         type,
+        maybeScrollToBottom,
       }))
       // Interleave spaces.
       .reduce((arr, v, i) => {

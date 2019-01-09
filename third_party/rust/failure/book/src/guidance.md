@@ -7,6 +7,7 @@ some patterns and how users might use them.
 
 In brief, these are the patterns documented here:
 
+<<<<<<< HEAD
 - **[Strings as errors](./error-msg.html):** Using strings as your error
   type. Good for prototyping.
 - **[A Custom Fail type](./custom-fail.html):** Defining a custom type to be
@@ -16,6 +17,17 @@ In brief, these are the patterns documented here:
   together multiple failures of different types. Good for applications and
   APIs that know the error won't be inspected much more.
 - **[An Error and ErrorKind pair](./error-errorkind.html):** Using both a
+=======
+- **[Strings as errors](./error-msg.md):** Using strings as your error
+  type. Good for prototyping.
+- **[A Custom Fail type](./custom-fail.md):** Defining a custom type to be
+  your error type. Good for APIs where you control all or more of the
+  possible failures.
+- **[Using the Error type](./use-error.md):** Using the Error type to pull
+  together multiple failures of different types. Good for applications and
+  APIs that know the error won't be inspected much more.
+- **[An Error and ErrorKind pair](./error-errorkind.md):** Using both a
+>>>>>>> central
   custom error type and an ErrorKind enum to create a very robust error
   type. Good for public APIs in large crates.
 

@@ -193,9 +193,9 @@ FastListWidget.prototype = {
     }
 
     // Ensure the element is visible but not scrolled horizontally.
-    const boxObject = this._list.boxObject;
-    boxObject.ensureElementIsVisible(element);
-    boxObject.scrollBy(-this._list.clientWidth, 0);
+    const scrollbox = this._list;
+    scrollbox.ensureElementIsVisible(element);
+    scrollbox.scrollBy(-this._list.clientWidth, 0);
   },
 
   /**
@@ -244,5 +244,5 @@ FastListWidget.prototype = {
   _orderedMenuElementsArray: null,
   _itemsByElement: null,
   _emptyTextNode: null,
-  _emptyTextValue: ""
+  _emptyTextValue: "",
 };

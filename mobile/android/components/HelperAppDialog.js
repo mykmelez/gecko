@@ -26,7 +26,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   RuntimePermissions: "resource://gre/modules/RuntimePermissions.jsm",
   Services: "resource://gre/modules/Services.jsm",
   Snackbars: "resource://gre/modules/Snackbars.jsm",
-  Task: "resource://gre/modules/Task.jsm",
 });
 
 // -----------------------------------------------------------------------
@@ -72,7 +71,7 @@ HelperAppLauncherDialog.prototype = {
     if (!alreadyResolved) {
       let innerURI = NetUtil.newChannel({
         uri: url,
-        loadUsingSystemPrincipal: true
+        loadUsingSystemPrincipal: true,
       }).URI;
 
       if (!url.equals(innerURI)) {
@@ -125,7 +124,7 @@ HelperAppLauncherDialog.prototype = {
       OMA_DOWNLOAD_DESCRIPTOR_MIME_TYPE,
       OMA_DRM_MESSAGE_MIME,
       OMA_DRM_CONTENT_MIME,
-      OMA_DRM_RIGHTS_MIME
+      OMA_DRM_RIGHTS_MIME,
     ].includes(mimeType);
   },
 
@@ -136,16 +135,16 @@ HelperAppLauncherDialog.prototype = {
     }
 
     if (this._shouldForwardToAndroidDownloadManager(aLauncher)) {
-      Task.spawn(function* () {
+      (async () => {
         try {
-          let hasPermission = yield RuntimePermissions.waitForPermissions(RuntimePermissions.WRITE_EXTERNAL_STORAGE);
+          let hasPermission = await RuntimePermissions.waitForPermissions(RuntimePermissions.WRITE_EXTERNAL_STORAGE);
           if (hasPermission) {
             this._downloadWithAndroidDownloadManager(aLauncher);
           }
         } finally {
           aLauncher.cancel(Cr.NS_BINDING_ABORTED);
         }
-      }.bind(this)).catch(Cu.reportError);
+      })().catch(Cu.reportError);
       return;
     }
 
@@ -167,7 +166,7 @@ HelperAppLauncherDialog.prototype = {
           aLauncher.MIMEInfo.preferredAction = Ci.nsIMIMEInfo.saveToDisk;
           aLauncher.saveToDisk(null, false);
           return true;
-        }
+        },
       });
     }
 
@@ -217,10 +216,10 @@ HelperAppLauncherDialog.prototype = {
       title: bundle.GetStringFromName("helperapps.pick"),
       buttons: [
         newButtonOrder ? alwaysUse : justOnce,
-        newButtonOrder ? justOnce : alwaysUse
+        newButtonOrder ? justOnce : alwaysUse,
       ],
       // Tapping an app twice should choose "Just once".
-      doubleTapButton: newButtonOrder ? 1 : 0
+      doubleTapButton: newButtonOrder ? 1 : 0,
     }, (data) => {
       if (data.button < 0) {
         aLauncher.cancel(Cr.NS_BINDING_ABORTED);
@@ -264,7 +263,7 @@ HelperAppLauncherDialog.prototype = {
       "type": "Download:AndroidDownloadManager",
       "uri": aLauncher.source.spec,
       "mimeType": mimeType,
-      "filename": aLauncher.suggestedFileName
+      "filename": aLauncher.suggestedFileName,
     });
   },
 
@@ -305,15 +304,15 @@ HelperAppLauncherDialog.prototype = {
 
   promptForSaveToFileAsync: function(aLauncher, aContext, aDefaultFile,
                                       aSuggestedFileExt, aForcePrompt) {
-    Task.spawn(function* () {
+    (async () => {
       let file = null;
       try {
-        let hasPermission = yield RuntimePermissions.waitForPermissions(RuntimePermissions.WRITE_EXTERNAL_STORAGE);
+        let hasPermission = await RuntimePermissions.waitForPermissions(RuntimePermissions.WRITE_EXTERNAL_STORAGE);
         if (hasPermission) {
           // If we do have the STORAGE permission then pick the public downloads directory as destination
           // for this file. Without the permission saveDestinationAvailable(null) will be called which
           // will effectively cancel the download.
-          let preferredDir = yield Downloads.getPreferredDownloadsDirectory();
+          let preferredDir = await Downloads.getPreferredDownloadsDirectory();
           file = this.validateLeafName(new FileUtils.File(preferredDir),
                                        aDefaultFile, aSuggestedFileExt);
         }
@@ -321,7 +320,7 @@ HelperAppLauncherDialog.prototype = {
         // The file argument will be null in case any exception occurred.
         aLauncher.saveDestinationAvailable(file);
       }
-    }.bind(this)).catch(Cu.reportError);
+    })().catch(Cu.reportError);
   },
 
   validateLeafName: function hald_validateLeafName(aLocalFile, aLeafName, aFileExt) {

@@ -46,7 +46,6 @@ config = {
         "cppunittest": "runcppunittests.py",
         "gtest": "rungtests.py",
         "jittest": "jit_test.py",
-        "mozbase": "test.py",
         "mozmill": "runtestlist.py",
     },
     "minimum_tests_zip_dirs": [
@@ -102,14 +101,6 @@ config = {
             ],
             "run_filename": "runtests.py",
             "testsdir": "mochitest"
-        },
-        "mozbase": {
-            "options": [
-                "-b",
-                "%(binary_path)s"
-            ],
-            "run_filename": "test.py",
-            "testsdir": "mozbase"
         },
         "mozmill": {
             "options": [
@@ -245,9 +236,6 @@ config = {
         "jittest2": ["--total-chunks=2", "--this-chunk=2"],
         "jittest-chunked": [],
     },
-    "all_mozbase_suites": {
-        "mozbase": []
-    },
     "run_cmd_checks_enabled": True,
     "preflight_run_cmd_suites": [
         # NOTE 'enabled' is only here while we have unconsolidated configs
@@ -278,14 +266,12 @@ config = {
                              "mozmill": [],
                              "cppunittest": [],
                              "jittest": [],
-                             "mozbase": [],
                              },
-    "download_minidump_stackwalk": True,
     "minidump_stackwalk_path": MINIDUMP_STACKWALK_PATH,
     "minidump_tooltool_manifest_path": TOOLTOOL_MANIFEST_PATH,
     "tooltool_cache": "/builds/worker/tooltool-cache",
     "download_nodejs": True,
     "nodejs_path": NODEJS_PATH,
     "nodejs_tooltool_manifest_path": NODEJS_TOOLTOOL_MANIFEST_PATH,
-    "log_format": "%(levelname)8s - %(message)s",
+    # "log_format": "%(levelname)8s - %(message)s",
 }

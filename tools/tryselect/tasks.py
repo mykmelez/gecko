@@ -4,12 +4,19 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import glob
+import hashlib
+import json
 import os
+import re
+import shutil
 import sys
+from collections import defaultdict
 
 from mozboot.util import get_state_dir
 from mozbuild.base import MozbuildObject
 from mozpack.files import FileFinder
+from moztest.resolve import TestResolver, get_suite_definition
 
 import taskgraph
 from taskgraph.generator import TaskGraphGenerator
@@ -17,6 +24,7 @@ from taskgraph.parameters import (
     ParameterMismatch,
     load_parameters_file,
 )
+from taskgraph.taskgraph import TaskGraph
 
 here = os.path.abspath(os.path.dirname(__file__))
 build = MozbuildObject.from_environment(cwd=here)
@@ -49,21 +57,32 @@ def invalidate(cache, root):
 def generate_tasks(params, full, root):
     params = params or "project=mozilla-central"
 
-    cache_dir = os.path.join(get_state_dir()[0], 'cache', 'taskgraph')
-    attr = 'full_task_set' if full else 'target_task_set'
+    # Try to delete the old taskgraph cache directory.
+    old_cache_dir = os.path.join(get_state_dir()[0], 'cache', 'taskgraph')
+    if os.path.isdir(old_cache_dir):
+        shutil.rmtree(old_cache_dir)
+
+    root_hash = hashlib.sha256(os.path.abspath(root)).hexdigest()
+    cache_dir = os.path.join(get_state_dir()[0], 'cache', root_hash, 'taskgraph')
+
+    # Cleanup old cache files
+    for path in glob.glob(os.path.join(cache_dir, '*_set')):
+        os.remove(path)
+
+    attr = 'full_task_graph' if full else 'target_task_graph'
     cache = os.path.join(cache_dir, attr)
 
     invalidate(cache, root)
     if os.path.isfile(cache):
         with open(cache, 'r') as fh:
-            return fh.read().splitlines()
+            return TaskGraph.from_json(json.load(fh))[1]
 
     if not os.path.isdir(cache_dir):
         os.makedirs(cache_dir)
 
     print("Task configuration changed, generating {}".format(attr.replace('_', ' ')))
     try:
-        params = load_parameters_file(params, strict=False)
+        params = load_parameters_file(params, strict=False, overrides={'try_mode': 'try_select'})
         params.check()
     except ParameterMismatch as e:
         print(PARAMETER_MISMATCH.format(e.args[0]))
@@ -75,10 +94,45 @@ def generate_tasks(params, full, root):
 
     root = os.path.join(root, 'taskcluster', 'ci')
     tg = getattr(TaskGraphGenerator(root_dir=root, parameters=params), attr)
-    labels = [label for label in tg.graph.visit_postorder()]
 
     os.chdir(cwd)
 
     with open(cache, 'w') as fh:
-        fh.write('\n'.join(labels))
-    return labels
+        json.dump(tg.to_json(), fh)
+    return tg
+
+
+def filter_tasks_by_paths(tasks, paths):
+    resolver = TestResolver.from_environment(cwd=here)
+    run_suites, run_tests = resolver.resolve_metadata(paths)
+    flavors = set([(t['flavor'], t.get('subsuite')) for t in run_tests])
+
+    task_regexes = set()
+    for flavor, subsuite in flavors:
+        suite = get_suite_definition(flavor, subsuite, strict=True)
+        if 'task_regex' not in suite:
+            print("warning: no tasks could be resolved from flavor '{}'{}".format(
+                    flavor, " and subsuite '{}'".format(subsuite) if subsuite else ""))
+            continue
+
+        task_regexes.update(suite['task_regex'])
+
+    def match_task(task):
+        return any(re.search(pattern, task) for pattern in task_regexes)
+
+    return filter(match_task, tasks)
+
+
+def resolve_tests_by_suite(paths):
+    resolver = TestResolver.from_environment(cwd=here)
+    _, run_tests = resolver.resolve_metadata(paths)
+
+    suite_to_tests = defaultdict(list)
+    for test in run_tests:
+        key = test['flavor']
+        subsuite = test.get('subsuite')
+        if subsuite:
+            key += '-' + subsuite
+        suite_to_tests[key].append(test['srcdir_relpath'])
+
+    return suite_to_tests

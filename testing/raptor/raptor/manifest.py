@@ -18,8 +18,7 @@ LOG = get_proxy_logger(component="raptor-manifest")
 required_settings = ['apps', 'type', 'page_cycles', 'test_url', 'measure',
                      'unit', 'lower_is_better', 'alert_threshold']
 
-playback_settings = ['playback_binary_manifest', 'playback_binary_zip_mac',
-                     'playback_pageset_manifest', 'playback_pageset_zip_mac',
+playback_settings = ['playback_binary_manifest', 'playback_pageset_manifest',
                      'playback_recordings', 'python3_win_manifest']
 
 
@@ -63,26 +62,34 @@ def validate_test_ini(test_details):
     return valid_settings
 
 
-def write_test_settings_json(test_details, oskey):
+def write_test_settings_json(args, test_details, oskey):
     # write test settings json file with test details that the control
     # server will provide for the web ext
     test_url = transform_platform(test_details['test_url'], oskey)
+
     test_settings = {
         "raptor-options": {
             "type": test_details['type'],
             "test_url": test_url,
-            "page_cycles": int(test_details['page_cycles'])
+            "page_cycles": int(test_details['page_cycles']),
+            "host": args.host,
         }
     }
 
     if test_details['type'] == "pageload":
         test_settings['raptor-options']['measure'] = {}
+        if "dcf" in test_details['measure']:
+            test_settings['raptor-options']['measure']['dcf'] = True
         if "fnbpaint" in test_details['measure']:
             test_settings['raptor-options']['measure']['fnbpaint'] = True
         if "fcp" in test_details['measure']:
             test_settings['raptor-options']['measure']['fcp'] = True
         if "hero" in test_details['measure']:
             test_settings['raptor-options']['measure']['hero'] = test_details['hero'].split()
+        if "ttfi" in test_details['measure']:
+            test_settings['raptor-options']['measure']['ttfi'] = True
+        if "loadtime" in test_details['measure']:
+            test_settings['raptor-options']['measure']['loadtime'] = True
     if test_details.get("page_timeout", None) is not None:
         test_settings['raptor-options']['page_timeout'] = int(test_details['page_timeout'])
     test_settings['raptor-options']['unit'] = test_details.get("unit", "ms")
@@ -90,8 +97,38 @@ def write_test_settings_json(test_details, oskey):
         test_settings['raptor-options']['lower_is_better'] = False
     else:
         test_settings['raptor-options']['lower_is_better'] = True
+
+    # support optional subtest unit/lower_is_better fields, default to main test values if not set
+    val = test_details.get('subtest_unit', test_settings['raptor-options']['unit'])
+    test_settings['raptor-options']['subtest_unit'] = val
+    val = test_details.get('subtest_lower_is_better',
+                           test_settings['raptor-options']['lower_is_better'])
+    if val == "false":
+        test_settings['raptor-options']['subtest_lower_is_better'] = False
+    else:
+        test_settings['raptor-options']['subtest_lower_is_better'] = True
+
     if test_details.get("alert_threshold", None) is not None:
         test_settings['raptor-options']['alert_threshold'] = float(test_details['alert_threshold'])
+
+    if test_details.get("screen_capture", None) is not None:
+        test_settings['raptor-options']['screen_capture'] = test_details.get("screen_capture")
+
+    # if gecko profiling is enabled, write profiling settings for webext
+    if test_details.get("gecko_profile", False):
+        test_settings['raptor-options']['gecko_profile'] = True
+        # when profiling, if webRender is enabled we need to set that, so
+        # the runner can add the web render threads to gecko profiling
+        test_settings['raptor-options']['gecko_profile_interval'] = \
+            float(test_details.get("gecko_profile_interval", 0))
+        test_settings['raptor-options']['gecko_profile_entries'] = \
+            float(test_details.get("gecko_profile_entries", 0))
+        if str(os.getenv('MOZ_WEBRENDER')) == '1':
+            test_settings['raptor-options']['webrender_enabled'] = True
+
+    if test_details.get("newtab_per_cycle", None) is not None:
+        test_settings['raptor-options']['newtab_per_cycle'] = \
+            bool(test_details['newtab_per_cycle'])
 
     settings_file = os.path.join(tests_dir, test_details['name'] + '.json')
     try:
@@ -145,11 +182,37 @@ def get_raptor_test_list(args, oskey):
                 # subtest comes from matching test ini file name, so add it
                 tests_to_run.append(next_test)
 
+    # go through each test and set the page-cycles and page-timeout, and some config flags
+    # the page-cycles value in the INI can be overriden when debug-mode enabled, when
+    # gecko-profiling enabled, or when --page-cycles cmd line arg was used (that overrides all)
+    for next_test in tests_to_run:
+        LOG.info("configuring settings for test %s" % next_test['name'])
+        max_page_cycles = next_test['page_cycles']
+        if args.gecko_profile is True:
+            next_test['gecko_profile'] = True
+            LOG.info("gecko-profiling enabled")
+            max_page_cycles = 3
+        if args.debug_mode is True:
+            next_test['debug_mode'] = True
+            LOG.info("debug-mode enabled")
+            max_page_cycles = 2
+        if args.page_cycles is not None:
+            next_test['page_cycles'] = args.page_cycles
+            LOG.info("set page-cycles to %d as specified on cmd line" % args.page_cycles)
+        else:
+            if int(next_test['page_cycles']) > max_page_cycles:
+                next_test['page_cycles'] = max_page_cycles
+                LOG.info("page-cycles set to %d" % next_test['page_cycles'])
+        # if --page-timeout was provided on the command line, use that instead of INI
+        if args.page_timeout is not None:
+            LOG.info("setting page-timeout to %d as specified on cmd line" % args.page_timeout)
+            next_test['page_timeout'] = args.page_timeout
+
     # write out .json test setting files for the control server to read and send to web ext
     if len(tests_to_run) != 0:
         for test in tests_to_run:
             if validate_test_ini(test):
-                write_test_settings_json(test, oskey)
+                write_test_settings_json(args, test, oskey)
             else:
                 # test doesn't have valid settings, remove it from available list
                 LOG.info("test %s is not valid due to missing settings" % test['name'])

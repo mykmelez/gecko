@@ -1,7 +1,8 @@
 #include "mozilla/Types.h"
 #include "mozilla/Assertions.h"
 
-#define STUB(symbol) MOZ_EXPORT void symbol (void) { MOZ_CRASH(); }
+#define STUB(symbol) \
+  MOZ_EXPORT void symbol(void) { MOZ_CRASH(); }
 
 #ifdef COMMON_SYMBOLS
 STUB(gdk_atom_intern)
@@ -25,6 +26,7 @@ STUB(gdk_display_sync)
 STUB(gdk_display_warp_pointer)
 STUB(gdk_drag_context_get_actions)
 STUB(gdk_drag_context_get_dest_window)
+STUB(gdk_drag_context_get_source_window)
 STUB(gdk_drag_context_list_targets)
 STUB(gdk_drag_status)
 STUB(gdk_error_trap_pop)
@@ -54,6 +56,7 @@ STUB(gdk_pointer_grab)
 STUB(gdk_pointer_ungrab)
 STUB(gdk_property_change)
 STUB(gdk_property_get)
+STUB(gdk_property_delete)
 STUB(gdk_screen_get_default)
 STUB(gdk_screen_get_display)
 STUB(gdk_screen_get_font_options)
@@ -413,6 +416,7 @@ STUB(gtk_table_get_type)
 STUB(gtk_table_new)
 STUB(gtk_target_list_add)
 STUB(gtk_target_list_add_image_targets)
+STUB(gtk_target_list_add_text_targets)
 STUB(gtk_target_list_new)
 STUB(gtk_target_list_unref)
 STUB(gtk_targets_include_image)
@@ -493,6 +497,7 @@ STUB(gtk_widget_unrealize)
 STUB(gtk_window_deiconify)
 STUB(gtk_window_fullscreen)
 STUB(gtk_window_get_group)
+STUB(gtk_window_get_modal)
 STUB(gtk_window_get_transient_for)
 STUB(gtk_window_get_type)
 STUB(gtk_window_get_type_hint)
@@ -524,6 +529,8 @@ STUB(gtk_window_unmaximize)
 #endif
 
 #ifdef GTK3_SYMBOLS
+STUB(gtk_css_provider_load_from_data)
+STUB(gtk_css_provider_new)
 STUB(gdk_device_get_source)
 STUB(gdk_device_manager_get_client_pointer)
 STUB(gdk_disable_multidevice)
@@ -567,6 +574,7 @@ STUB(gtk_render_slider)
 STUB(gtk_scale_new)
 STUB(gtk_scrollbar_new)
 STUB(gtk_style_context_add_class)
+STUB(gtk_style_context_add_provider)
 STUB(gtk_style_context_add_region)
 STUB(gtk_style_context_get)
 STUB(gtk_style_context_get_background_color)
@@ -593,6 +601,7 @@ STUB(gtk_style_context_set_path)
 STUB(gtk_style_context_set_parent)
 STUB(gtk_style_context_set_state)
 STUB(gtk_style_properties_lookup_property)
+STUB(gtk_style_provider_get_type)
 STUB(gtk_tree_view_column_get_button)
 STUB(gtk_widget_get_preferred_size)
 STUB(gtk_widget_get_preferred_width)
@@ -648,10 +657,5 @@ STUB(gtk_object_get_type)
 // So we define our own stub that always indicates XShm not being present.
 // mozgtk loads before libXext/libcairo and so this stub will take priority.
 // Our tree usage goes through xcb and remains unaffected by this.
-MOZ_EXPORT Bool
-XShmQueryExtension(Display* aDisplay)
-{
-  return False;
-}
+MOZ_EXPORT Bool XShmQueryExtension(Display* aDisplay) { return False; }
 #endif
-

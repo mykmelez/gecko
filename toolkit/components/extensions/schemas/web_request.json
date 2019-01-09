@@ -52,18 +52,21 @@
           "csp_report",
           "imageset",
           "web_manifest",
+          "speculative",
           "other"
         ]
       },
       {
         "id": "OnBeforeRequestOptions",
         "type": "string",
-        "enum": ["blocking", "requestBody"]
+        "enum": ["blocking", "requestBody"],
+        "postprocess": "webRequestBlockingPermissionRequired"
       },
       {
         "id": "OnBeforeSendHeadersOptions",
         "type": "string",
-        "enum": ["requestHeaders", "blocking"]
+        "enum": ["requestHeaders", "blocking"],
+        "postprocess": "webRequestBlockingPermissionRequired"
       },
       {
         "id": "OnSendHeadersOptions",
@@ -73,12 +76,14 @@
       {
         "id": "OnHeadersReceivedOptions",
         "type": "string",
-        "enum": ["blocking", "responseHeaders"]
+        "enum": ["blocking", "responseHeaders"],
+        "postprocess": "webRequestBlockingPermissionRequired"
       },
       {
         "id": "OnAuthRequiredOptions",
         "type": "string",
-        "enum": ["responseHeaders", "blocking", "asyncBlocking"]
+        "enum": ["responseHeaders", "blocking", "asyncBlocking"],
+        "postprocess": "webRequestBlockingPermissionRequired"
       },
       {
         "id": "OnResponseStartedOptions",
@@ -189,10 +194,10 @@
           },
           "validity": {
             "type": "object",
-            "description": "Contains start and end dates in GMT.",
+            "description": "Contains start and end timestamps.",
             "properties": {
-              "startGMT": { "type": "string" },
-              "endGMT": { "type": "string" }
+              "start": { "type": "integer" },
+              "end": { "type": "integer" }
             }
           },
           "fingerprint": {
@@ -213,9 +218,6 @@
             "properties": {
               "sha256": { "type": "string" }
             }
-          },
-          "keyUsages": {
-            "type": "string"
           },
           "rawDER": {
             "optional": true,
@@ -270,6 +272,16 @@
           "cipherSuite": {
             "type": "string",
             "description": "The cipher suite used in this request if state is \"secure\".",
+            "optional": true
+          },
+          "keaGroupName": {
+            "type": "string",
+            "description": "The key exchange algorithm used in this request if state is \"secure\".",
+            "optional": true
+          },
+          "signatureSchemeName": {
+            "type": "string",
+            "description": "The signature scheme used in this request if state is \"secure\".",
             "optional": true
           },
           "certificates": {

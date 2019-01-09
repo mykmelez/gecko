@@ -6,11 +6,11 @@
 
 ChromeUtils.defineModuleGetter(this, "CreditCard",
                                "resource://gre/modules/CreditCard.jsm");
+ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
+                               "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 (function() {
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 let satchelFormListener = {
   QueryInterface: ChromeUtils.generateQI([
@@ -80,6 +80,12 @@ let satchelFormListener = {
 
         // Only use inputs that hold text values (not including type="password")
         if (!input.mozIsTextField(true)) {
+          continue;
+        }
+
+        // Don't save fields that were previously type=password such as on sites
+        // that allow the user to toggle password visibility.
+        if (input.hasBeenTypePassword) {
           continue;
         }
 

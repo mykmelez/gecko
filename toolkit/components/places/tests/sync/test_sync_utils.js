@@ -3,29 +3,10 @@ ChromeUtils.import("resource://gre/modules/PlacesSyncUtils.jsm");
 ChromeUtils.import("resource://testing-common/httpd.js");
 ChromeUtils.defineModuleGetter(this, "Preferences",
                                "resource://gre/modules/Preferences.jsm");
-Cu.importGlobalProperties(["URLSearchParams"]);
 
 const SYNC_PARENT_ANNO = "sync/parent";
 
 var makeGuid = PlacesUtils.history.makeGuid;
-
-function makeLivemarkServer() {
-  let server = new HttpServer();
-  server.registerPrefixHandler("/feed/", do_get_file("./livemark.xml"));
-  server.start(-1);
-  return {
-    server,
-    get site() {
-      let { identity } = server;
-      let host = identity.primaryHost.includes(":") ?
-        `[${identity.primaryHost}]` : identity.primaryHost;
-      return `${identity.primaryScheme}://${host}:${identity.primaryPort}`;
-    },
-    stopServer() {
-      return new Promise(resolve => server.stop(resolve));
-    },
-  };
-}
 
 function shuffle(array) {
   let results = [];
@@ -37,9 +18,11 @@ function shuffle(array) {
   return results;
 }
 
-function assertTagForURLs(tag, urls, message) {
-  let taggedURLs = PlacesUtils.tagging.getURIsForTag(tag).map(uri => uri.spec);
-  deepEqual(taggedURLs.sort(compareAscending), urls.sort(compareAscending), message);
+async function assertTagForURLs(tag, urls, message) {
+  let taggedURLs = new Set();
+  await PlacesUtils.bookmarks.fetch({tags: [tag]}, b => taggedURLs.add(b.url.href));
+  deepEqual(Array.from(taggedURLs).sort(compareAscending),
+            urls.sort(compareAscending), message);
 }
 
 function assertURLHasTags(url, tags, message) {
@@ -581,7 +564,7 @@ add_task(async function test_update_tags() {
     deepEqual(updatedItem.tags, ["foo", "baz"], "Should return updated tags");
     assertURLHasTags("https://mozilla.org", ["baz", "foo"],
       "Should update tags for URL");
-    assertTagForURLs("bar", [], "Should remove existing tag");
+    await assertTagForURLs("bar", [], "Should remove existing tag");
   }
 
   info("Tags with whitespace");
@@ -645,7 +628,7 @@ add_task(async function test_pullChanges_tags() {
 
   let tagBm = await PlacesUtils.bookmarks.fetch({
     parentGuid: PlacesUtils.bookmarks.tagsGuid,
-    index: 0
+    index: 0,
   });
   let tagFolderGuid = tagBm.guid;
   let tagFolderId = await PlacesUtils.promiseItemId(tagFolderGuid);
@@ -666,7 +649,7 @@ add_task(async function test_pullChanges_tags() {
     deepEqual(Object.keys(changes).sort(),
       [firstItem.recordId, secondItem.recordId, taggedItem.recordId].sort(),
       "Should include tagged bookmarks after changing case");
-    assertTagForURLs("TaGgY", ["https://example.org/", "https://mozilla.org/"],
+    await assertTagForURLs("TaGgY", ["https://example.org/", "https://mozilla.org/"],
       "Should add tag for new URL");
     await setChangesSynced(changes);
   }
@@ -679,7 +662,7 @@ add_task(async function test_pullChanges_tags() {
   info("Rename tag folder using Bookmarks.setItemTitle");
   {
     PlacesUtils.bookmarks.setItemTitle(tagFolderId, "sneaky");
-    deepEqual(PlacesUtils.tagging.allTags, ["sneaky"],
+    deepEqual((await PlacesUtils.bookmarks.fetchTags()).map(t => t.name), ["sneaky"],
       "Tagging service should update cache with new title");
     let changes = await PlacesSyncUtils.bookmarks.pullChanges();
     deepEqual(Object.keys(changes).sort(),
@@ -694,7 +677,7 @@ add_task(async function test_pullChanges_tags() {
       guid: tagFolderGuid,
       title: "tricky",
     });
-    deepEqual(PlacesUtils.tagging.allTags, ["tricky"],
+    deepEqual((await PlacesUtils.bookmarks.fetchTags()).map(t => t.name), ["tricky"],
       "Tagging service should update cache after updating tag folder");
     let changes = await PlacesSyncUtils.bookmarks.pullChanges();
     deepEqual(Object.keys(changes).sort(),
@@ -707,7 +690,7 @@ add_task(async function test_pullChanges_tags() {
   {
     let bm = await PlacesUtils.bookmarks.fetch({
       parentGuid: tagFolderGuid,
-      index: 0
+      index: 0,
     });
     bm.url = "https://bugzilla.org/";
     await PlacesUtils.bookmarks.update(bm);
@@ -715,17 +698,17 @@ add_task(async function test_pullChanges_tags() {
     deepEqual(Object.keys(changes).sort(),
       [firstItem.recordId, secondItem.recordId, untaggedItem.recordId].sort(),
       "Should include tagged bookmarks after changing tag entry URI");
-    assertTagForURLs("tricky", ["https://bugzilla.org/", "https://mozilla.org/"],
+    await assertTagForURLs("tricky", ["https://bugzilla.org/", "https://mozilla.org/"],
       "Should remove tag entry for old URI");
     await setChangesSynced(changes);
 
-    bm.url = "https://example.com/";
+    bm.url = "https://example.org/";
     await PlacesUtils.bookmarks.update(bm);
     changes = await PlacesSyncUtils.bookmarks.pullChanges();
     deepEqual(Object.keys(changes).sort(),
-      [untaggedItem.recordId].sort(),
+      [firstItem.recordId, secondItem.recordId, untaggedItem.recordId].sort(),
       "Should include tagged bookmarks after changing tag entry URL");
-    assertTagForURLs("tricky", ["https://example.com/", "https://mozilla.org/"],
+    await assertTagForURLs("tricky", ["https://example.org/", "https://mozilla.org/"],
       "Should remove tag entry for old URL");
     await setChangesSynced(changes);
   }
@@ -1050,246 +1033,6 @@ add_task(async function test_insert() {
   await PlacesSyncUtils.bookmarks.reset();
 });
 
-add_task(async function test_insert_livemark() {
-  let { site, stopServer } = makeLivemarkServer();
-
-  try {
-    info("Insert livemark with feed URL");
-    {
-      let livemark = await PlacesSyncUtils.bookmarks.insert({
-        kind: "livemark",
-        recordId: makeGuid(),
-        feed: site + "/feed/1",
-        parentRecordId: "menu",
-      });
-      let bmk = await PlacesUtils.bookmarks.fetch({
-        guid: await PlacesSyncUtils.bookmarks.recordIdToGuid(livemark.recordId),
-      });
-      equal(bmk.type, PlacesUtils.bookmarks.TYPE_FOLDER,
-        "Livemarks should be stored as folders");
-    }
-
-    let livemarkRecordId;
-    info("Insert livemark with site and feed URLs");
-    {
-      let livemark = await PlacesSyncUtils.bookmarks.insert({
-        kind: "livemark",
-        recordId: makeGuid(),
-        site,
-        feed: site + "/feed/1",
-        parentRecordId: "menu",
-      });
-      livemarkRecordId = livemark.recordId;
-    }
-
-    info("Try inserting livemark into livemark");
-    {
-      let livemark = await PlacesSyncUtils.bookmarks.insert({
-        kind: "livemark",
-        recordId: makeGuid(),
-        site,
-        feed: site + "/feed/1",
-        parentRecordId: livemarkRecordId,
-      });
-      ok(!livemark, "Should not insert livemark as child of livemark");
-    }
-  } finally {
-    await stopServer();
-  }
-
-  await PlacesUtils.bookmarks.eraseEverything();
-  await PlacesSyncUtils.bookmarks.reset();
-});
-
-add_task(async function test_update_livemark() {
-  let { site, stopServer } = makeLivemarkServer();
-  let feedURI = uri(site + "/feed/1");
-
-  try {
-    // We shouldn't reinsert the livemark if the URLs are the same.
-    info("Update livemark with same URLs");
-    {
-      let livemark = await PlacesUtils.livemarks.addLivemark({
-        parentGuid: PlacesUtils.bookmarks.menuGuid,
-        feedURI,
-        siteURI: uri(site),
-        index: PlacesUtils.bookmarks.DEFAULT_INDEX,
-      });
-
-      await PlacesSyncUtils.bookmarks.update({
-        recordId: livemark.guid,
-        feed: feedURI,
-      });
-      // `nsLivemarkService` returns references to `Livemark` instances, so we
-      // can compare them with `==` to make sure they haven't been replaced.
-      equal(await PlacesUtils.livemarks.getLivemark({
-        guid: livemark.guid,
-      }), livemark, "Livemark with same feed URL should not be replaced");
-
-      await PlacesSyncUtils.bookmarks.update({
-        recordId: livemark.guid,
-        site,
-      });
-      equal(await PlacesUtils.livemarks.getLivemark({
-        guid: livemark.guid,
-      }), livemark, "Livemark with same site URL should not be replaced");
-
-      await PlacesSyncUtils.bookmarks.update({
-        recordId: livemark.guid,
-        feed: feedURI,
-        site,
-      });
-      equal(await PlacesUtils.livemarks.getLivemark({
-        guid: livemark.guid,
-      }), livemark, "Livemark with same feed and site URLs should not be replaced");
-    }
-
-    info("Change livemark feed URL");
-    {
-      let livemark = await PlacesUtils.livemarks.addLivemark({
-        parentGuid: PlacesUtils.bookmarks.menuGuid,
-        feedURI,
-        index: PlacesUtils.bookmarks.DEFAULT_INDEX,
-      });
-
-      // Since we're reinserting, we need to pass all properties required
-      // for a new livemark. `update` won't merge the old and new ones.
-      await Assert.rejects(PlacesSyncUtils.bookmarks.update({
-        recordId: livemark.guid,
-        feed: site + "/feed/2",
-      }), /reinsert: Invalid value for property 'feed'/,
-          "Reinserting livemark with changed feed URL requires full record");
-
-      let newLivemark = await PlacesSyncUtils.bookmarks.update({
-        kind: "livemark",
-        parentRecordId: "menu",
-        recordId: livemark.guid,
-        feed: site + "/feed/2",
-      });
-      equal(newLivemark.recordId, livemark.guid,
-        "IDs should match for reinserted livemark with changed feed URL");
-      equal(newLivemark.feed.href, site + "/feed/2",
-        "Reinserted livemark should have changed feed URI");
-    }
-
-    info("Add livemark site URL");
-    {
-      let livemark = await PlacesUtils.livemarks.addLivemark({
-        parentGuid: PlacesUtils.bookmarks.menuGuid,
-        feedURI,
-      });
-      ok(livemark.feedURI.equals(feedURI), "Livemark feed URI should match");
-      ok(!livemark.siteURI, "Livemark should not have site URI");
-
-      await Assert.rejects(PlacesSyncUtils.bookmarks.update({
-        recordId: livemark.guid,
-        site,
-      }), /reinsert: Invalid value for property 'site'/,
-          "Reinserting livemark with new site URL requires full record");
-
-      let newLivemark = await PlacesSyncUtils.bookmarks.update({
-        kind: "livemark",
-        parentRecordId: "menu",
-        recordId: livemark.guid,
-        feed: feedURI,
-        site,
-      });
-      notEqual(newLivemark, livemark,
-        "Livemark with new site URL should replace old livemark");
-      equal(newLivemark.recordId, livemark.guid,
-        "IDs should match for reinserted livemark with new site URL");
-      equal(newLivemark.site.href, site + "/",
-        "Reinserted livemark should have new site URI");
-      equal(newLivemark.feed.href, feedURI.spec,
-        "Reinserted livemark with new site URL should have same feed URI");
-    }
-
-    info("Remove livemark site URL");
-    {
-      let livemark = await PlacesUtils.livemarks.addLivemark({
-        parentGuid: PlacesUtils.bookmarks.menuGuid,
-        feedURI,
-        siteURI: uri(site),
-        index: PlacesUtils.bookmarks.DEFAULT_INDEX,
-      });
-
-      await Assert.rejects(PlacesSyncUtils.bookmarks.update({
-        recordId: livemark.guid,
-        site: null,
-      }), /reinsert: Invalid value for property 'site'/,
-          "Reinserting livemark witout site URL requires full record");
-
-      let newLivemark = await PlacesSyncUtils.bookmarks.update({
-        kind: "livemark",
-        parentRecordId: "menu",
-        recordId: livemark.guid,
-        feed: feedURI,
-        site: null,
-      });
-      notEqual(newLivemark, livemark,
-        "Livemark without site URL should replace old livemark");
-      equal(newLivemark.recordId, livemark.guid,
-        "IDs should match for reinserted livemark without site URL");
-      ok(!newLivemark.site, "Reinserted livemark should not have site URI");
-    }
-
-    info("Change livemark site URL");
-    {
-      let livemark = await PlacesUtils.livemarks.addLivemark({
-        parentGuid: PlacesUtils.bookmarks.menuGuid,
-        feedURI,
-        siteURI: uri(site),
-        index: PlacesUtils.bookmarks.DEFAULT_INDEX,
-      });
-
-      await Assert.rejects(PlacesSyncUtils.bookmarks.update({
-        recordId: livemark.guid,
-        site: site + "/new",
-      }), /reinsert: Invalid value for property 'site'/,
-          "Reinserting livemark with changed site URL requires full record");
-
-      let newLivemark = await PlacesSyncUtils.bookmarks.update({
-        kind: "livemark",
-        parentRecordId: "menu",
-        recordId: livemark.guid,
-        feed: feedURI,
-        site: site + "/new",
-      });
-      notEqual(newLivemark, livemark,
-        "Livemark with changed site URL should replace old livemark");
-      equal(newLivemark.recordId, livemark.guid,
-        "IDs should match for reinserted livemark with changed site URL");
-      equal(newLivemark.site.href, site + "/new",
-        "Reinserted livemark should have changed site URI");
-    }
-
-    // Livemarks are stored as folders, but have different kinds. We should
-    // remove the folder and insert a livemark with the same GUID instead of
-    // trying to update the folder in-place.
-    info("Replace folder with livemark");
-    {
-      let folder = await PlacesUtils.bookmarks.insert({
-        type: PlacesUtils.bookmarks.TYPE_FOLDER,
-        parentGuid: PlacesUtils.bookmarks.menuGuid,
-        title: "Plain folder",
-      });
-      let livemark = await PlacesSyncUtils.bookmarks.update({
-        kind: "livemark",
-        parentRecordId: "menu",
-        recordId: folder.guid,
-        feed: feedURI,
-      });
-      equal(livemark.guid, folder.recordId,
-        "Livemark should have same GUID as replaced folder");
-    }
-  } finally {
-    await stopServer();
-  }
-
-  await PlacesUtils.bookmarks.eraseEverything();
-  await PlacesSyncUtils.bookmarks.reset();
-});
-
 add_task(async function test_insert_tags() {
   await Promise.all([{
     kind: "bookmark",
@@ -1313,13 +1056,13 @@ add_task(async function test_insert_tags() {
     title: "bar",
   }].map(info => PlacesSyncUtils.bookmarks.insert(info)));
 
-  assertTagForURLs("foo", ["https://example.com/", "https://example.org/"],
+  await assertTagForURLs("foo", ["https://example.com/", "https://example.org/"],
     "2 URLs with new tag");
-  assertTagForURLs("bar", ["https://example.com/"], "1 URL with existing tag");
-  assertTagForURLs("baz", ["https://example.org/",
+  await assertTagForURLs("bar", ["https://example.com/"], "1 URL with existing tag");
+  await assertTagForURLs("baz", ["https://example.org/",
     "place:queryType=1&sort=12&maxResults=10"],
     "Should support tagging URLs and tag queries");
-  assertTagForURLs("qux", ["place:queryType=1&sort=12&maxResults=10"],
+  await assertTagForURLs("qux", ["place:queryType=1&sort=12&maxResults=10"],
     "Should support tagging tag queries");
 
   await PlacesUtils.bookmarks.eraseEverything();
@@ -1353,12 +1096,12 @@ add_task(async function test_insert_tags_whitespace() {
   assertURLHasTags("https://example.net/", ["taggy"],
     "Should ignore dupes when setting tags");
 
-  assertTagForURLs("taggy", ["https://example.net/", "https://example.org/"],
+  await assertTagForURLs("taggy", ["https://example.net/", "https://example.org/"],
     "Should exclude falsy tags");
 
   PlacesUtils.tagging.untagURI(uri("https://example.org"), ["untrimmed", "taggy"]);
   PlacesUtils.tagging.untagURI(uri("https://example.net"), ["taggy"]);
-  deepEqual(PlacesUtils.tagging.allTags, [], "Should clean up all tags");
+  deepEqual((await PlacesUtils.bookmarks.fetchTags()).map(t => t.name), [], "Should clean up all tags");
 
   await PlacesUtils.bookmarks.eraseEverything();
   await PlacesSyncUtils.bookmarks.reset();
@@ -1423,7 +1166,7 @@ add_task(async function test_insert_tag_query() {
     ok(!params.has("type"), "Should not preserve query type");
     ok(!params.has("folder"), "Should not preserve folder");
     equal(params.get("tag"), "nonexisting", "Should add tag");
-    deepEqual(PlacesUtils.tagging.allTags, ["taggy"],
+    deepEqual((await PlacesUtils.bookmarks.fetchTags()).map(t => t.name), ["taggy"],
               "The nonexisting tag should not be added");
   }
 
@@ -1443,7 +1186,7 @@ add_task(async function test_insert_tag_query() {
     ok(!params.has("folder"), "Should not preserve folder");
     equal(params.get("maxResults"), "15", "Should preserve additional params");
     equal(params.get("tag"), "taggy", "Should add tag");
-    deepEqual(PlacesUtils.tagging.allTags, ["taggy"],
+    deepEqual((await PlacesUtils.bookmarks.fetchTags()).map(t => t.name), ["taggy"],
               "Should not duplicate existing tags");
   }
 
@@ -1451,7 +1194,7 @@ add_task(async function test_insert_tag_query() {
 
   info("Removing the tag should clean up the tag folder");
   PlacesUtils.tagging.untagURI(uri("https://mozilla.org"), null);
-  deepEqual(PlacesUtils.tagging.allTags, [],
+  deepEqual((await PlacesUtils.bookmarks.fetchTags()).map(t => t.name), [],
     "Should remove tag folder once last item is untagged");
 
   await PlacesUtils.bookmarks.eraseEverything();
@@ -1656,7 +1399,7 @@ add_task(async function test_unsynced_orphans() {
     await PlacesUtils.bookmarks.update({
       guid: unknownGuid,
       parentGuid: PlacesUtils.bookmarks.toolbarGuid,
-      index: PlacesUtils.bookmarks.DEFAULT_INDEX
+      index: PlacesUtils.bookmarks.DEFAULT_INDEX,
     });
     let orphanGuids = await PlacesSyncUtils.bookmarks.fetchGuidsWithAnno(
       SYNC_PARENT_ANNO, nonexistentRecordId);
@@ -1710,14 +1453,6 @@ add_task(async function test_fetch() {
     url: "place:tag=taggy",
     folder: "taggy",
     title: "Tagged stuff",
-  });
-  let smartBmk = await PlacesSyncUtils.bookmarks.insert({
-    kind: "query",
-    recordId: makeGuid(),
-    parentRecordId: "toolbar",
-    url: "place:folder=TOOLBAR",
-    query: "BookmarksToolbar",
-    title: "Bookmarks toolbar query",
   });
 
   info("Fetch empty folder");
@@ -1774,43 +1509,6 @@ add_task(async function test_fetch() {
       "Should include query-specific properties");
     equal(item.url.href, `place:tag=taggy`, "Should not rewrite outgoing tag queries");
     equal(item.folder, "taggy", "Should return tag name for tag queries");
-  }
-
-  info("Fetch smart bookmark");
-  {
-    let item = await PlacesSyncUtils.bookmarks.fetch(smartBmk.recordId);
-    deepEqual(Object.keys(item).sort(), ["recordId", "kind", "parentRecordId",
-      "url", "title", "query", "parentTitle", "dateAdded"].sort(),
-      "Should include smart bookmark-specific properties");
-    equal(item.query, "BookmarksToolbar", "Should return query name for smart bookmarks");
-  }
-
-  await PlacesUtils.bookmarks.eraseEverything();
-  await PlacesSyncUtils.bookmarks.reset();
-});
-
-add_task(async function test_fetch_livemark() {
-  let { site, stopServer } = makeLivemarkServer();
-
-  try {
-    info("Create livemark");
-    let livemark = await PlacesUtils.livemarks.addLivemark({
-      parentGuid: PlacesUtils.bookmarks.menuGuid,
-      feedURI: uri(site + "/feed/1"),
-      siteURI: uri(site),
-      index: PlacesUtils.bookmarks.DEFAULT_INDEX,
-    });
-
-    info("Fetch livemark");
-    let item = await PlacesSyncUtils.bookmarks.fetch(livemark.guid);
-    deepEqual(Object.keys(item).sort(), ["recordId", "kind", "parentRecordId",
-      "feed", "site", "parentTitle", "title", "dateAdded"].sort(),
-      "Should include livemark-specific properties");
-    equal(item.feed.href, site + "/feed/1", "Should return feed URL");
-    equal(item.site.href, site + "/", "Should return site URL");
-    strictEqual(item.title, "", "Should include livemark title even if empty");
-  } finally {
-    await stopServer();
   }
 
   await PlacesUtils.bookmarks.eraseEverything();
@@ -2159,6 +1857,7 @@ add_task(async function test_pushChanges() {
   }
 
   info("Pull changes");
+  let totalSyncChanges = PlacesUtils.bookmarks.totalSyncChanges;
   let changes = await PlacesSyncUtils.bookmarks.pullChanges();
   {
     let actualChanges = Object.entries(changes).map(([recordId, change]) => ({
@@ -2202,6 +1901,7 @@ add_task(async function test_pushChanges() {
   }
 
   await PlacesSyncUtils.bookmarks.pushChanges(changes);
+  equal(PlacesUtils.bookmarks.totalSyncChanges, totalSyncChanges + 4);
 
   {
     let fields = await PlacesTestUtils.fetchBookmarkSyncFields(
@@ -2263,6 +1963,7 @@ add_task(async function test_changes_between_pull_and_push() {
   });
 
   info("Pull changes");
+  let totalSyncChanges = PlacesUtils.bookmarks.totalSyncChanges;
   let changes = await PlacesSyncUtils.bookmarks.pullChanges();
   Assert.equal(changes[guids.bmk].counter, 1);
   Assert.equal(changes[guids.bmk].tombstone, false);
@@ -2272,6 +1973,7 @@ add_task(async function test_changes_between_pull_and_push() {
 
   info("Push changes");
   await PlacesSyncUtils.bookmarks.pushChanges(changes);
+  equal(PlacesUtils.bookmarks.totalSyncChanges, totalSyncChanges + 2);
 
   // we should have a tombstone.
   let ts = await PlacesTestUtils.fetchSyncTombstones();
@@ -2323,26 +2025,6 @@ add_task(async function test_touch() {
     await setChangesSynced(changes);
   }
 
-  // Livemarks are stored as folders, but their kinds are different, so we
-  // should still bump their change counters.
-  let { site, stopServer } = makeLivemarkServer();
-  try {
-    let livemark = await PlacesSyncUtils.bookmarks.insert({
-      kind: "livemark",
-      recordId: makeGuid(),
-      feed: site + "/feed/1",
-      parentRecordId: "unfiled",
-    });
-
-    let changes = await PlacesSyncUtils.bookmarks.touch(livemark.recordId);
-    deepEqual(Object.keys(changes).sort(), [livemark.recordId, "unfiled"].sort(),
-      "Should return change records for revived livemark and parent");
-    equal(changes[livemark.recordId].counter, 1,
-      "Change counter for revived livemark should be 1");
-  } finally {
-    await stopServer();
-  }
-
   await PlacesUtils.bookmarks.eraseEverything();
   await PlacesSyncUtils.bookmarks.reset();
 });
@@ -2366,7 +2048,7 @@ add_task(async function test_separator() {
   let separator = await PlacesSyncUtils.bookmarks.insert({
     kind: "separator",
     parentRecordId: "menu",
-    recordId: separatorRecordId
+    recordId: separatorRecordId,
   });
   await PlacesSyncUtils.bookmarks.insert({
     kind: "bookmark",
@@ -2383,7 +2065,7 @@ add_task(async function test_separator() {
   await PlacesUtils.bookmarks.update({
     guid: child2Guid,
     parentGuid,
-    index: 2
+    index: 2,
   });
   let changes = await PlacesSyncUtils.bookmarks.pullChanges();
   deepEqual(Object.keys(changes).sort(),
@@ -2395,7 +2077,7 @@ add_task(async function test_separator() {
   await PlacesUtils.bookmarks.update({
     guid: separatorGuid,
     parentGuid,
-    index: 0
+    index: 0,
   });
 
   changes = await PlacesSyncUtils.bookmarks.pullChanges();

@@ -1,5 +1,10 @@
 extern crate failure;
+<<<<<<< HEAD
 #[macro_use] extern crate failure_derive;
+=======
+#[macro_use]
+extern crate failure_derive;
+>>>>>>> central
 
 #[derive(Fail, Debug)]
 #[fail(display = "An error has occurred.")]
@@ -36,9 +41,13 @@ fn tuple_struct() {
 #[derive(Fail, Debug)]
 enum EnumError {
     #[fail(display = "Error code: {}", code)]
+<<<<<<< HEAD
     StructVariant {
         code: i32,
     },
+=======
+    StructVariant { code: i32 },
+>>>>>>> central
     #[fail(display = "Error: {}", _0)]
     TupleVariant(&'static str),
     #[fail(display = "An error has occurred.")]

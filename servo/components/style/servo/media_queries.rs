@@ -1,24 +1,24 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Servo's media-query device and expression representation.
 
+use crate::custom_properties::CssEnvironment;
+use crate::media_queries::media_feature::{AllowsRanges, ParsingRequirements};
+use crate::media_queries::media_feature::{Evaluator, MediaFeatureDescription};
+use crate::media_queries::media_feature_expression::RangeOrOperator;
+use crate::media_queries::MediaType;
+use crate::properties::ComputedValues;
+use crate::values::computed::font::FontSize;
+use crate::values::computed::CSSPixelLength;
+use crate::values::KeyframesName;
 use app_units::Au;
-use context::QuirksMode;
-use cssparser::{Parser, RGBA};
+use cssparser::RGBA;
 use euclid::{Size2D, TypedScale, TypedSize2D};
-use media_queries::MediaType;
-use parser::ParserContext;
-use properties::ComputedValues;
-use selectors::parser::SelectorParseErrorKind;
-use std::fmt::{self, Write};
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
-use style_traits::{CSSPixel, CssWriter, DevicePixel, ParseError, ToCss};
 use style_traits::viewport::ViewportConstraints;
-use values::{specified, KeyframesName};
-use values::computed::{self, ToComputedValue};
-use values::computed::font::FontSize;
+use style_traits::{CSSPixel, DevicePixel};
 
 /// A device is a structure that represents the current media a given document
 /// is displayed in.
@@ -50,6 +50,9 @@ pub struct Device {
     /// Whether any styles computed in the document relied on the viewport size.
     #[ignore_malloc_size_of = "Pure stack type"]
     used_viewport_units: AtomicBool,
+    /// The CssEnvironment object responsible of getting CSS environment
+    /// variables.
+    environment: CssEnvironment,
 }
 
 impl Device {
@@ -67,7 +70,14 @@ impl Device {
             root_font_size: AtomicIsize::new(FontSize::medium().size().0 as isize),
             used_root_font_size: AtomicBool::new(false),
             used_viewport_units: AtomicBool::new(false),
+            environment: CssEnvironment,
         }
+    }
+
+    /// Get the relevant environment to resolve `env()` functions.
+    #[inline]
+    pub fn environment(&self) -> &CssEnvironment {
+        &self.environment
     }
 
     /// Return the default computed values for this device.
@@ -155,125 +165,47 @@ impl Device {
     }
 }
 
-/// A expression kind servo understands and parses.
-///
-/// Only `pub` for unit testing, please don't use it directly!
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
-pub enum ExpressionKind {
-    /// <http://dev.w3.org/csswg/mediaqueries-3/#width>
-    Width(Range<specified::Length>),
+/// https://drafts.csswg.org/mediaqueries-4/#width
+fn eval_width(
+    device: &Device,
+    value: Option<CSSPixelLength>,
+    range_or_operator: Option<RangeOrOperator>,
+) -> bool {
+    RangeOrOperator::evaluate(
+        range_or_operator,
+        value.map(Au::from),
+        device.au_viewport_size().width,
+    )
 }
 
-/// A single expression a per:
-///
-/// <http://dev.w3.org/csswg/mediaqueries-3/#media1>
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
-pub struct MediaFeatureExpression(pub ExpressionKind);
-
-impl MediaFeatureExpression {
-    /// The kind of expression we're, just for unit testing.
-    ///
-    /// Eventually this will become servo-only.
-    pub fn kind_for_testing(&self) -> &ExpressionKind {
-        &self.0
-    }
-
-    /// Parse a media expression of the form:
-    ///
-    /// ```
-    /// media-feature: media-value
-    /// ```
-    ///
-    /// Only supports width ranges for now.
-    pub fn parse<'i, 't>(
-        context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self, ParseError<'i>> {
-        input.expect_parenthesis_block()?;
-        input.parse_nested_block(|input| {
-            Self::parse_in_parenthesis_block(context, input)
-        })
-    }
-
-    /// Parse a media range expression where we've already consumed the
-    /// parenthesis.
-    pub fn parse_in_parenthesis_block<'i, 't>(
-        context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self, ParseError<'i>> {
-        let name = input.expect_ident_cloned()?;
-        input.expect_colon()?;
-        // TODO: Handle other media features
-        Ok(MediaFeatureExpression(match_ignore_ascii_case! { &name,
-            "min-width" => {
-                ExpressionKind::Width(Range::Min(specified::Length::parse_non_negative(context, input)?))
-            },
-            "max-width" => {
-                ExpressionKind::Width(Range::Max(specified::Length::parse_non_negative(context, input)?))
-            },
-            "width" => {
-                ExpressionKind::Width(Range::Eq(specified::Length::parse_non_negative(context, input)?))
-            },
-            _ => return Err(input.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(name.clone())))
-        }))
-    }
-
-    /// Evaluate this expression and return whether it matches the current
-    /// device.
-    pub fn matches(&self, device: &Device, quirks_mode: QuirksMode) -> bool {
-        let viewport_size = device.au_viewport_size();
-        let value = viewport_size.width;
-        match self.0 {
-            ExpressionKind::Width(ref range) => {
-                match range.to_computed_range(device, quirks_mode) {
-                    Range::Min(ref width) => value >= *width,
-                    Range::Max(ref width) => value <= *width,
-                    Range::Eq(ref width) => value == *width,
-                }
-            },
-        }
-    }
+#[derive(Clone, Copy, Debug, FromPrimitive, Parse, ToCss)]
+#[repr(u8)]
+enum Scan {
+    Progressive,
+    Interlace,
 }
 
-impl ToCss for MediaFeatureExpression {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: Write,
-    {
-        let (s, l) = match self.0 {
-            ExpressionKind::Width(Range::Min(ref l)) => ("(min-width: ", l),
-            ExpressionKind::Width(Range::Max(ref l)) => ("(max-width: ", l),
-            ExpressionKind::Width(Range::Eq(ref l)) => ("(width: ", l),
-        };
-        dest.write_str(s)?;
-        l.to_css(dest)?;
-        dest.write_char(')')
-    }
+/// https://drafts.csswg.org/mediaqueries-4/#scan
+fn eval_scan(_: &Device, _: Option<Scan>) -> bool {
+    // Since we doesn't support the 'tv' media type, the 'scan' feature never
+    // matches.
+    false
 }
 
-/// An enumeration that represents a ranged value.
-///
-/// Only public for testing, implementation details of `MediaFeatureExpression`
-/// may change for Stylo.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
-pub enum Range<T> {
-    /// At least the inner value.
-    Min(T),
-    /// At most the inner value.
-    Max(T),
-    /// Exactly the inner value.
-    Eq(T),
-}
-
-impl Range<specified::Length> {
-    fn to_computed_range(&self, device: &Device, quirks_mode: QuirksMode) -> Range<Au> {
-        computed::Context::for_media_query_evaluation(device, quirks_mode, |context| match *self {
-            Range::Min(ref width) => Range::Min(Au::from(width.to_computed_value(&context))),
-            Range::Max(ref width) => Range::Max(Au::from(width.to_computed_value(&context))),
-            Range::Eq(ref width) => Range::Eq(Au::from(width.to_computed_value(&context))),
-        })
-    }
+lazy_static! {
+    /// A list with all the media features that Servo supports.
+    pub static ref MEDIA_FEATURES: [MediaFeatureDescription; 2] = [
+        feature!(
+            atom!("width"),
+            AllowsRanges::Yes,
+            Evaluator::Length(eval_width),
+            ParsingRequirements::empty(),
+        ),
+        feature!(
+            atom!("scan"),
+            AllowsRanges::No,
+            keyword_evaluator!(eval_scan, Scan),
+            ParsingRequirements::empty(),
+        ),
+    ];
 }

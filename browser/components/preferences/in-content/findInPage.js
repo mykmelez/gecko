@@ -185,9 +185,7 @@ var gSearchResultsPane = {
    */
   getFindSelection(win) {
     // Yuck. See bug 138068.
-    let docShell = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                      .getInterface(Ci.nsIWebNavigation)
-                      .QueryInterface(Ci.nsIDocShell);
+    let docShell = win.docShell;
 
     let controller = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
                               .getInterface(Ci.nsISelectionDisplay)
@@ -312,7 +310,7 @@ var gSearchResultsPane = {
       gotoPref("paneGeneral");
 
       // Hide some special second level headers in normal view
-      for (let element of document.querySelectorAll("caption.search-header")) {
+      for (let element of document.querySelectorAll(".search-header")) {
         element.hidden = true;
       }
     }
@@ -520,8 +518,8 @@ var gSearchResultsPane = {
     if (anchorNode.tooltipNode) {
       return;
     }
-    let searchTooltip = anchorNode.ownerDocument.createElement("span");
-    let searchTooltipText = anchorNode.ownerDocument.createElement("span");
+    let searchTooltip = anchorNode.ownerDocument.createXULElement("span");
+    let searchTooltipText = anchorNode.ownerDocument.createXULElement("span");
     searchTooltip.className = "search-tooltip";
     searchTooltipText.textContent = query;
     searchTooltip.appendChild(searchTooltipText);
@@ -549,7 +547,9 @@ var gSearchResultsPane = {
   removeAllSearchTooltips() {
     for (let anchorNode of this.listSearchTooltips) {
       anchorNode.parentElement.classList.remove("search-tooltip-parent");
-      anchorNode.tooltipNode.remove();
+      if (anchorNode.tooltipNode) {
+        anchorNode.tooltipNode.remove();
+      }
       anchorNode.tooltipNode = null;
     }
     this.listSearchTooltips.clear();
@@ -563,5 +563,5 @@ var gSearchResultsPane = {
       node.removeAttribute("indicator");
     }
     this.listSearchMenuitemIndicators.clear();
-  }
+  },
 };

@@ -1,21 +1,28 @@
+/* -*- js-indent-level: 2; indent-tabs-mode: nil -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
+const Services = require("Services");
 const { createElement, createFactory } = require("devtools/client/shared/vendor/react");
 const ReactDOM = require("devtools/client/shared/vendor/react-dom");
 const { Provider } = require("devtools/client/shared/vendor/react-redux");
 
 const actions = require("devtools/client/webconsole/actions/index");
+const { createEditContextMenu } = require("devtools/client/framework/toolbox-context-menu");
 const { createContextMenu } = require("devtools/client/webconsole/utils/context-menu");
 const { configureStore } = require("devtools/client/webconsole/store");
+
 const { isPacketPrivate } = require("devtools/client/webconsole/utils/messages");
 const { getAllMessagesById, getMessage } = require("devtools/client/webconsole/selectors/messages");
 const Telemetry = require("devtools/client/shared/telemetry");
 
 const EventEmitter = require("devtools/shared/event-emitter");
 const App = createFactory(require("devtools/client/webconsole/components/App"));
+const ObjectClient = require("devtools/shared/client/object-client");
+const LongStringClient = require("devtools/shared/client/long-string-client");
+loader.lazyRequireGetter(this, "Constants", "devtools/client/webconsole/constants");
 
 let store = null;
 
@@ -36,8 +43,6 @@ function WebConsoleOutputWrapper(parentNode, hud, toolbox, owner, document) {
   this.throttledDispatchPromise = null;
 
   this.telemetry = new Telemetry();
-
-  store = configureStore(this.hud);
 }
 
 WebConsoleOutputWrapper.prototype = {
@@ -46,42 +51,8 @@ WebConsoleOutputWrapper.prototype = {
       const attachRefToHud = (id, node) => {
         this.hud[id] = node;
       };
-      // Focus the input line whenever the output area is clicked.
-      this.parentNode.addEventListener("click", (event) => {
-        // Do not focus on middle/right-click or 2+ clicks.
-        if (event.detail !== 1 || event.button !== 0) {
-          return;
-        }
-
-        // Do not focus if a link was clicked
-        const target = event.originalTarget || event.target;
-        if (target.closest("a")) {
-          return;
-        }
-
-        // Do not focus if an input field was clicked
-        if (target.closest("input")) {
-          return;
-        }
-
-        // Do not focus if something other than the output region was clicked
-        // (including e.g. the clear messages button in toolbar)
-        if (!target.closest(".webconsole-output-wrapper")) {
-          return;
-        }
-
-        // Do not focus if something is selected
-        const selection = this.document.defaultView.getSelection();
-        if (selection && !selection.isCollapsed) {
-          return;
-        }
-
-        if (this.hud && this.hud.jsterm) {
-          this.hud.jsterm.focus();
-        }
-      });
-
       const { hud } = this;
+      const debuggerClient = this.owner.target.client;
 
       const serviceContainer = {
         attachRefToHud,
@@ -96,6 +67,13 @@ WebConsoleOutputWrapper.prototype = {
         openLink: (url, e) => {
           hud.owner.openLink(url, e);
         },
+        canRewind: () => {
+          if (!(hud.owner && hud.owner.target && hud.owner.target.activeTab)) {
+            return false;
+          }
+
+          return hud.owner.target.activeTab.traits.canRewind;
+        },
         createElement: nodename => {
           return this.document.createElement(nodename);
         },
@@ -109,7 +87,82 @@ WebConsoleOutputWrapper.prototype = {
           if (hud && hud.owner && hud.owner.viewSource) {
             hud.owner.viewSource(frame.url, frame.line);
           }
-        }
+        },
+        recordTelemetryEvent: (eventName, extra = {}) => {
+          this.telemetry.recordEvent(eventName, "webconsole", null, {
+            ...extra,
+            "session_id": this.toolbox && this.toolbox.sessionId || -1,
+          });
+        },
+        createObjectClient: (object) => {
+          return new ObjectClient(debuggerClient, object);
+        },
+
+        createLongStringClient: (object) => {
+          return new LongStringClient(debuggerClient, object);
+        },
+
+        releaseActor: (actor) => {
+          if (!actor) {
+            return null;
+          }
+
+          return debuggerClient.release(actor);
+        },
+
+        getWebConsoleClient: () => {
+          return hud.webConsoleClient;
+        },
+
+        /**
+         * Retrieve the FrameActor ID given a frame depth, or the selected one if no
+         * frame depth given.
+         *
+         * @param {Number} frame: optional frame depth.
+         * @return {String|null}: The FrameActor ID for the given frame depth (or the
+         *                        selected frame if it exists).
+         */
+        getFrameActor: (frame = null) => {
+          const state = this.owner.getDebuggerFrames();
+          if (!state) {
+            return null;
+          }
+
+          const grip = Number.isInteger(frame)
+            ? state.frames[frame]
+            : state.frames[state.selected];
+          return grip ? grip.actor : null;
+        },
+
+        inputHasSelection: () => {
+          const {editor, inputNode} = hud.jsterm || {};
+          return editor
+            ? !!editor.getSelection()
+            : (inputNode && inputNode.selectionStart !== inputNode.selectionEnd);
+        },
+
+        getInputValue: () => {
+          return hud.jsterm && hud.jsterm.getInputValue();
+        },
+
+        getInputCursor: () => {
+          return hud.jsterm && hud.jsterm.getSelectionStart();
+        },
+
+        getSelectedNodeActor: () => {
+          const inspectorSelection = this.owner.getInspectorSelection();
+          if (inspectorSelection && inspectorSelection.nodeFront) {
+            return inspectorSelection.nodeFront.actorID;
+          }
+          return null;
+        },
+
+        getJsTermTooltipAnchor: () => {
+          if (jstermCodeMirror) {
+            return hud.jsterm.node.querySelector(".CodeMirror-cursor");
+          }
+          return hud.jsterm.completeNode;
+        },
       };
 
       // Set `openContextMenu` this way so, `serviceContainer` variable
@@ -140,8 +193,11 @@ WebConsoleOutputWrapper.prototype = {
 
         const sidebarTogglePref = store.getState().prefs.sidebarToggle;
         const openSidebar = sidebarTogglePref ? (messageId) => {
-          store.dispatch(actions.showObjectInSidebar(rootActorId, messageId));
+          store.dispatch(actions.showMessageObjectInSidebar(rootActorId, messageId));
         } : null;
+
+        const messageData = getMessage(store.getState(), message.messageId);
+        const executionPoint = messageData && messageData.executionPoint;
 
         const menu = createContextMenu(this.hud, this.parentNode, {
           actor,
@@ -150,7 +206,9 @@ WebConsoleOutputWrapper.prototype = {
           message,
           serviceContainer,
           openSidebar,
-          rootActorId
+          rootActorId,
+          executionPoint,
+          toolbox: this.toolbox,
         });
 
         // Emit the "menu-open" event for testing.
@@ -160,11 +218,25 @@ WebConsoleOutputWrapper.prototype = {
         return menu;
       };
 
+      serviceContainer.openEditContextMenu = (e) => {
+        const { screenX, screenY } = e;
+        const menu = createEditContextMenu(window, "webconsole-menu");
+        // Emit the "menu-open" event for testing.
+        menu.once("open", () => this.emit("menu-open"));
+        menu.popup(screenX, screenY, { doc: this.owner.chromeWindow.document });
+
+        return menu;
+      };
+
       if (this.toolbox) {
+        this.toolbox.threadClient.addListener("paused", this.dispatchPaused.bind(this));
+        this.toolbox.threadClient.addListener(
+          "progress", this.dispatchProgress.bind(this));
+
         Object.assign(serviceContainer, {
           onViewSourceInDebugger: frame => {
             this.toolbox.viewSourceInDebugger(frame.url, frame.line).then(() => {
-              this.telemetry.recordEvent("devtools.main", "jump_to_source", "webconsole",
+              this.telemetry.recordEvent("jump_to_source", "webconsole",
                                          null, { "session_id": this.toolbox.sessionId }
               );
               this.hud.emit("source-in-debugger-opened");
@@ -174,7 +246,7 @@ WebConsoleOutputWrapper.prototype = {
             frame.url,
             frame.line
           ).then(() => {
-            this.telemetry.recordEvent("devtools.main", "jump_to_source", "webconsole",
+            this.telemetry.recordEvent("jump_to_source", "webconsole",
                                        null, { "session_id": this.toolbox.sessionId }
             );
           }),
@@ -182,7 +254,7 @@ WebConsoleOutputWrapper.prototype = {
             frame.url,
             frame.line
           ).then(() => {
-            this.telemetry.recordEvent("devtools.main", "jump_to_source", "webconsole",
+            this.telemetry.recordEvent("jump_to_source", "webconsole",
                                        null, { "session_id": this.toolbox.sessionId }
             );
           }),
@@ -192,22 +264,26 @@ WebConsoleOutputWrapper.prototype = {
             });
           },
           sourceMapService: this.toolbox ? this.toolbox.sourceMapURLService : null,
-          highlightDomElement: (grip, options = {}) => {
-            return this.toolbox.highlighterUtils
-              ? this.toolbox.highlighterUtils.highlightDomValueGrip(grip, options)
-              : null;
+          highlightDomElement: async (grip, options = {}) => {
+            await this.toolbox.initInspector();
+            if (!this.toolbox.highlighter) {
+              return null;
+            }
+            const nodeFront = await this.toolbox.walker.gripToNodeFront(grip);
+            return this.toolbox.highlighter.highlight(nodeFront, options);
           },
           unHighlightDomElement: (forceHide = false) => {
-            return this.toolbox.highlighterUtils
-              ? this.toolbox.highlighterUtils.unhighlight(forceHide)
+            return this.toolbox.highlighter
+              ? this.toolbox.highlighter.unhighlight(forceHide)
               : null;
           },
           openNodeInInspector: async (grip) => {
-            const onSelectInspector = this.toolbox.selectTool("inspector");
-            const onGripNodeToFront = this.toolbox.highlighterUtils.gripToNodeFront(grip);
+            await this.toolbox.initInspector();
+            const onSelectInspector = this.toolbox.selectTool("inspector", "inspect_dom");
+            const onGripNodeToFront = this.toolbox.walker.gripToNodeFront(grip);
             const [
               front,
-              inspector
+              inspector,
             ] = await Promise.all([onGripNodeToFront, onSelectInspector]);
 
             const onInspectorUpdated = inspector.once("inspector-updated");
@@ -215,9 +291,27 @@ WebConsoleOutputWrapper.prototype = {
               .setNodeFront(front, { reason: "console" });
 
             return Promise.all([onNodeFrontSet, onInspectorUpdated]);
-          }
+          },
+          jumpToExecutionPoint: executionPoint =>
+            this.toolbox.threadClient.timeWarp(executionPoint),
+
+          onMessageHover: (type, messageId) => {
+            const message = getMessage(store.getState(), messageId);
+            this.hud.emit("message-hover", type, message);
+          },
         });
       }
+
+      store = configureStore(this.hud, {
+        // We may not have access to the toolbox (e.g. in the browser console).
+        sessionId: this.toolbox && this.toolbox.sessionId || -1,
+        telemetry: this.telemetry,
+        services: serviceContainer,
+      });
+
+      const {prefs} = store.getState();
+      const jstermCodeMirror = prefs.jstermCodeMirror
+        && !Services.appinfo.accessibilityEnabled;
 
       const app = App({
         attachRefToHud,
@@ -225,12 +319,17 @@ WebConsoleOutputWrapper.prototype = {
         hud,
         onFirstMeaningfulPaint: resolve,
         closeSplitConsole: this.closeSplitConsole.bind(this),
-        jstermCodeMirror: store.getState().prefs.jstermCodeMirror,
+        jstermCodeMirror,
       });
 
       // Render the root Application component.
-      const provider = createElement(Provider, { store }, app);
-      this.body = ReactDOM.render(provider, this.parentNode);
+      if (this.parentNode) {
+        const provider = createElement(Provider, { store }, app);
+        this.body = ReactDOM.render(provider, this.parentNode);
+      } else {
+        // If there's no parentNode, we are in a test. So we can resolve immediately.
+        resolve();
+      }
     });
   },
 
@@ -261,12 +360,12 @@ WebConsoleOutputWrapper.prototype = {
       promise = Promise.resolve();
     }
 
-    this.batchedMessagesAdd(packet);
+    this.batchedMessageAdd(packet);
     return promise;
   },
 
   dispatchMessagesAdd: function(messages) {
-    store.dispatch(actions.messagesAdd(messages));
+    this.batchedMessagesAdd(messages);
   },
 
   dispatchMessagesClear: function() {
@@ -277,6 +376,7 @@ WebConsoleOutputWrapper.prototype = {
     this.queuedMessageUpdates = [];
     this.queuedRequestUpdates = [];
     store.dispatch(actions.messagesClear());
+    this.hud.emit("messages-cleared");
   },
 
   dispatchPrivateMessagesClear: function() {
@@ -326,6 +426,18 @@ WebConsoleOutputWrapper.prototype = {
     store.dispatch(actions.timestampsToggle(enabled));
   },
 
+  dispatchPaused: function(_, packet) {
+    if (packet.executionPoint) {
+      store.dispatch(actions.setPauseExecutionPoint(packet.executionPoint));
+    }
+  },
+
+  dispatchProgress: function(_, packet) {
+    const {executionPoint, recording} = packet;
+    const point = recording ? null : executionPoint;
+    store.dispatch(actions.setPauseExecutionPoint(point));
+  },
+
   dispatchMessageUpdate: function(message, res) {
     // network-message-updated will emit when all the update message arrives.
     // Since we can't ensure the order of the network update, we check
@@ -363,6 +475,26 @@ WebConsoleOutputWrapper.prototype = {
       this.toolbox && this.toolbox.currentToolId !== "webconsole"));
   },
 
+  dispatchTabWillNavigate: function(packet) {
+    const { ui } = store.getState();
+
+    // For the browser console, we receive tab navigation
+    // when the original top level window we attached to is closed,
+    // but we don't want to reset console history and just switch to
+    // the next available window.
+    if (ui.persistLogs || this.hud.isBrowserConsole) {
+      // Add a _type to hit convertCachedPacket.
+      packet._type = true;
+      this.dispatchMessageAdd(packet);
+    } else {
+      this.hud.webConsoleClient.clearNetworkRequests();
+      this.dispatchMessagesClear();
+      store.dispatch({
+        type: Constants.WILL_NAVIGATE,
+      });
+    }
+  },
+
   batchedMessageUpdates: function(info) {
     this.queuedMessageUpdates.push(info);
     this.setTimeoutIfNeeded();
@@ -373,8 +505,13 @@ WebConsoleOutputWrapper.prototype = {
     this.setTimeoutIfNeeded();
   },
 
-  batchedMessagesAdd: function(message) {
+  batchedMessageAdd: function(message) {
     this.queuedMessageAdds.push(message);
+    this.setTimeoutIfNeeded();
+  },
+
+  batchedMessagesAdd: function(messages) {
+    this.queuedMessageAdds = this.queuedMessageAdds.concat(messages);
     this.setTimeoutIfNeeded();
   },
 
@@ -401,11 +538,23 @@ WebConsoleOutputWrapper.prototype = {
       setTimeout(() => {
         this.throttledDispatchPromise = null;
 
+        if (!store) {
+          // The store is not initialized yet, we can call setTimeoutIfNeeded so the
+          // messages will be handled in the next timeout when the store is ready.
+          this.setTimeoutIfNeeded();
+          return;
+        }
+
         store.dispatch(actions.messagesAdd(this.queuedMessageAdds));
 
         const length = this.queuedMessageAdds.length;
-        this.telemetry.addEventProperty(
-          "devtools.main", "enter", "webconsole", null, "message_count", length);
+
+        // This telemetry event is only useful when we have a toolbox so only
+        // send it when we have one.
+        if (this.toolbox) {
+          this.telemetry.addEventProperty(
+            this.toolbox, "enter", "webconsole", null, "message_count", length);
+        }
 
         this.queuedMessageAdds = [];
 
@@ -441,10 +590,14 @@ WebConsoleOutputWrapper.prototype = {
     return store;
   },
 
+  subscribeToStore: function(callback) {
+    store.subscribe(() => callback(store.getState()));
+  },
+
   // Called by pushing close button.
   closeSplitConsole() {
     this.toolbox.closeSplitConsole();
-  }
+  },
 };
 
 // Exports from this module

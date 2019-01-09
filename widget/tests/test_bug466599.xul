@@ -24,9 +24,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=466599
   /** Test for Bug 466599 **/
 
 function getLoadContext() {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIWebNavigation)
-               .QueryInterface(Ci.nsILoadContext);
+  return window.docShell.QueryInterface(Ci.nsILoadContext);
 }
 
 function copyToClipboard(txt)
@@ -68,12 +66,11 @@ function readFromClipboard()
   trans.addDataFlavor('text/html');
   clip.getData(trans,clipid.kGlobalClipboard);
   var str = new Object();
-  var strLength = new Object();
-  trans.getTransferData("text/html",str,strLength);
+  trans.getTransferData("text/html",str);
   if (str)
     str = str.value.QueryInterface(Ci.nsISupportsString);
   if (str)
-    pastetext = str.data.substring(0,strLength.value / 2);
+    pastetext = str.data;
   return pastetext;
 }
 

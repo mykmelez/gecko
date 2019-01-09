@@ -6,8 +6,6 @@
 
 "use strict";
 
-const { getRootBindingParent } = require("devtools/shared/layout/utils");
-const { getTabPrefs } = require("devtools/shared/indentation");
 const InspectorUtils = require("InspectorUtils");
 
 const MAX_DATA_URL_LENGTH = 40;
@@ -49,8 +47,11 @@ const MAX_DATA_URL_LENGTH = 40;
 const Services = require("Services");
 
 loader.lazyImporter(this, "findCssSelector", "resource://gre/modules/css-selector.js");
+loader.lazyImporter(this, "getCssPath", "resource://gre/modules/css-selector.js");
+loader.lazyImporter(this, "getXPath", "resource://gre/modules/css-selector.js");
+loader.lazyRequireGetter(this, "getCSSLexer", "devtools/shared/css/lexer", true);
+loader.lazyRequireGetter(this, "getTabPrefs", "devtools/shared/indentation", true);
 
-const CSSLexer = require("devtools/shared/css/lexer");
 const {LocalizationHelper} = require("devtools/shared/l10n");
 const styleInspectorL10N =
   new LocalizationHelper("devtools/shared/locales/styleinspector.properties");
@@ -79,6 +80,26 @@ exports.STATUS = {
   PARENT_MATCH: 1,
   UNMATCHED: 0,
   UNKNOWN: -1,
+};
+
+/**
+ * Mapping of CSSRule type value to CSSRule type name.
+ * @see https://developer.mozilla.org/en-US/docs/Web/API/CSSRule
+ */
+exports.CSSRuleTypeName = {
+  1: "", // Regular CSS style rule has no name
+  3: "@import",
+  4: "@media",
+  5: "@font-face",
+  6: "@page",
+  7: "@keyframes",
+  8: "@keyframe",
+  10: "@namespace",
+  11: "@counter-style",
+  12: "@supports",
+  13: "@document",
+  14: "@font-feature-values",
+  15: "@viewport",
 };
 
 /**
@@ -189,7 +210,7 @@ function prettifyCSS(text, ruleCount) {
   // minified file.
   let indent = "";
   let indentLevel = 0;
-  const tokens = CSSLexer.getCSSLexer(text);
+  const tokens = getCSSLexer(text);
   let result = "";
   let pushbackToken = undefined;
 
@@ -230,6 +251,10 @@ function prettifyCSS(text, ruleCount) {
   // True if the token just before the terminating token was
   // whitespace.
   let lastWasWS;
+  // True if the current token is inside a CSS selector.
+  let isInSelector = true;
+  // True if the current token is inside an at-rule definition.
+  let isInAtRuleDefinition = false;
 
   // A helper function that reads tokens until there is a reason to
   // insert a newline.  This updates the state variables as needed.
@@ -251,12 +276,22 @@ function prettifyCSS(text, ruleCount) {
         break;
       }
 
+      if (token.tokenType === "at") {
+        isInAtRuleDefinition = true;
+      }
+
       // A "}" symbol must be inserted later, to deal with indentation
       // and newline.
       if (token.tokenType === "symbol" && token.text === "}") {
+        isInSelector = true;
         isCloseBrace = true;
         break;
       } else if (token.tokenType === "symbol" && token.text === "{") {
+        if (isInAtRuleDefinition) {
+          isInAtRuleDefinition = false;
+        } else {
+          isInSelector = false;
+        }
         break;
       }
 
@@ -270,6 +305,11 @@ function prettifyCSS(text, ruleCount) {
       endIndex = token.endOffset;
 
       if (token.tokenType === "symbol" && token.text === ";") {
+        break;
+      }
+
+      if (token.tokenType === "symbol" && token.text === "," &&
+          isInSelector && !isInAtRuleDefinition) {
         break;
       }
 
@@ -374,49 +414,6 @@ exports.findCssSelector = findCssSelector;
  * match the element uniquely. It does however, represent the full path from the root
  * node to the element.
  */
-function getCssPath(ele) {
-  ele = getRootBindingParent(ele);
-  const document = ele.ownerDocument;
-  if (!document || !document.contains(ele)) {
-    // getCssPath received element not inside document.
-    return "";
-  }
-
-  const getElementSelector = element => {
-    if (!element.localName) {
-      return "";
-    }
-
-    let label = element.nodeName == element.nodeName.toUpperCase()
-                ? element.localName.toLowerCase()
-                : element.localName;
-
-    if (element.id) {
-      label += "#" + element.id;
-    }
-
-    if (element.classList) {
-      for (const cl of element.classList) {
-        label += "." + cl;
-      }
-    }
-
-    return label;
-  };
-
-  const paths = [];
-
-  while (ele) {
-    if (!ele || ele.nodeType !== Node.ELEMENT_NODE) {
-      break;
-    }
-
-    paths.splice(0, 0, getElementSelector(ele));
-    ele = ele.parentNode;
-  }
-
-  return paths.length ? paths.join(" ") : "";
-}
 exports.getCssPath = getCssPath;
 
 /**
@@ -424,60 +421,6 @@ exports.getCssPath = getCssPath;
  * @param {DomNode} ele
  * @returns a string that can be used as an XPath to find the element uniquely.
  */
-function getXPath(ele) {
-  ele = getRootBindingParent(ele);
-  const document = ele.ownerDocument;
-  if (!document || !document.contains(ele)) {
-    // getXPath received element not inside document.
-    return "";
-  }
-
-  // Create a short XPath for elements with IDs.
-  if (ele.id) {
-    return `//*[@id="${ele.id}"]`;
-  }
-
-  // Otherwise walk the DOM up and create a part for each ancestor.
-  const parts = [];
-
-  // Use nodeName (instead of localName) so namespace prefix is included (if any).
-  while (ele && ele.nodeType === Node.ELEMENT_NODE) {
-    let nbOfPreviousSiblings = 0;
-    let hasNextSiblings = false;
-
-    // Count how many previous same-name siblings the element has.
-    let sibling = ele.previousSibling;
-    while (sibling) {
-      // Ignore document type declaration.
-      if (sibling.nodeType !== Node.DOCUMENT_TYPE_NODE &&
-          sibling.nodeName == ele.nodeName) {
-        nbOfPreviousSiblings++;
-      }
-
-      sibling = sibling.previousSibling;
-    }
-
-    // Check if the element has at least 1 next same-name sibling.
-    sibling = ele.nextSibling;
-    while (sibling) {
-      if (sibling.nodeName == ele.nodeName) {
-        hasNextSiblings = true;
-        break;
-      }
-      sibling = sibling.nextSibling;
-    }
-
-    const prefix = ele.prefix ? ele.prefix + ":" : "";
-    const nth = nbOfPreviousSiblings || hasNextSiblings
-                ? `[${nbOfPreviousSiblings + 1}]` : "";
-
-    parts.push(prefix + ele.localName + nth);
-
-    ele = ele.parentNode;
-  }
-
-  return parts.length ? "/" + parts.reverse().join("/") : "";
-}
 exports.getXPath = getXPath;
 
 /**
@@ -502,7 +445,7 @@ function getBindingElementAndPseudo(node) {
   }
   return {
     bindingElement: bindingElement,
-    pseudo: pseudo
+    pseudo: pseudo,
   };
 }
 exports.getBindingElementAndPseudo = getBindingElementAndPseudo;
@@ -514,6 +457,7 @@ exports.getBindingElementAndPseudo = getBindingElementAndPseudo;
  */
 function getCSSStyleRules(node) {
   const { bindingElement, pseudo } = getBindingElementAndPseudo(node);
-  return InspectorUtils.getCSSStyleRules(bindingElement, pseudo);
+  const rules = InspectorUtils.getCSSStyleRules(bindingElement, pseudo);
+  return rules;
 }
 exports.getCSSStyleRules = getCSSStyleRules;

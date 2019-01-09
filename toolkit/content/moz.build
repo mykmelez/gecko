@@ -29,6 +29,8 @@ if CONFIG['MOZ_BUILD_APP'] == 'mobile/android':
 
 JAR_MANIFESTS += ['jar.mn']
 
+SPHINX_TREES['toolkit_widgets'] = 'widgets/docs'
+
 DEFINES['TOPOBJDIR'] = TOPOBJDIR
 
 with Files('**'):
@@ -122,7 +124,7 @@ with Files('tests/chrome/*331215*'):
     BUG_COMPONENT = ('Toolkit', 'Find Toolbar')
 
 with Files('tests/chrome/*360220*'):
-    BUG_COMPONENT = ('Firefox', 'RSS Discovery and Preview')
+    BUG_COMPONENT = ('Core', 'XUL')
 
 with Files('tests/chrome/*360437*'):
     BUG_COMPONENT = ('Toolkit', 'Find Toolbar')
@@ -166,9 +168,6 @@ with Files('tests/mochitest/*autocomplete*'):
 
 with Files('tests/mochitest/*mousecapture*'):
     BUG_COMPONENT = ('Core', 'Event Handling')
-
-with Files('tests/reftests/*progress*'):
-    BUG_COMPONENT = ('Toolkit', 'XUL Widgets')
 
 with Files('tests/reftests/*multiline*'):
     BUG_COMPONENT = ('Core', 'XBL')
@@ -264,9 +263,6 @@ with Files('plugins*'):
 
 with Files('resetProfile*'):
     BUG_COMPONENT = ('Firefox', 'Migration')
-
-with Files('textbox*'):
-    BUG_COMPONENT = ('Toolkit', 'XUL Widgets')
 
 with Files('timepicker*'):
     BUG_COMPONENT = ('Toolkit', 'XUL Widgets')

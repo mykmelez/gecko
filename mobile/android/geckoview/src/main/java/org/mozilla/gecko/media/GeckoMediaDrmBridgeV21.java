@@ -19,7 +19,9 @@ import java.util.UUID;
 import java.util.ArrayDeque;
 
 import android.annotation.SuppressLint;
+import android.annotation.TargetApi;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.media.DeniedByServerException;
@@ -33,6 +35,7 @@ import android.util.Log;
 import org.mozilla.gecko.util.StringUtils;
 import org.mozilla.gecko.util.ProxySelector;
 
+@TargetApi(Build.VERSION_CODES.JELLY_BEAN_MR2)
 public class GeckoMediaDrmBridgeV21 implements GeckoMediaDrm {
     protected final String LOGTAG;
     private static final String INVALID_SESSION_ID = "Invalid";
@@ -301,6 +304,17 @@ public class GeckoMediaDrmBridgeV21 implements GeckoMediaDrm {
         return mCrypto;
     }
 
+    @SuppressLint("WrongConstant")
+    @Override
+    public void setServerCertificate(final byte[] cert) {
+        if (DEBUG) Log.d(LOGTAG, "setServerCertificate()");
+        if (mDrm == null) {
+            throw new IllegalStateException("MediaDrm instance doesn't exist !!");
+        }
+        mDrm.setPropertyByteArray("serviceCertificate", cert);
+        return;
+    }
+
     protected void HandleKeyStatusChangeByDummyKey(String sessionId)
     {
         SessionKeyInfo[] keyInfos = new SessionKeyInfo[1];
@@ -473,9 +487,11 @@ public class GeckoMediaDrmBridgeV21 implements GeckoMediaDrm {
 
         @Override
         protected Void doInBackground(Void... params) {
+            HttpURLConnection urlConnection = null;
+            BufferedReader in = null;
             try {
                 URI finalURI = new URI(mURL + "&signedRequest=" + URLEncoder.encode(new String(mDrmRequest), "UTF-8"));
-                HttpURLConnection urlConnection = (HttpURLConnection) ProxySelector.openConnectionWithProxy(finalURI);
+                urlConnection = (HttpURLConnection) ProxySelector.openConnectionWithProxy(finalURI);
                 urlConnection.setRequestMethod("POST");
                 if (DEBUG) Log.d(LOGTAG, "Provisioning, posting url =" + finalURI.toString());
 
@@ -489,8 +505,7 @@ public class GeckoMediaDrmBridgeV21 implements GeckoMediaDrm {
 
                 int responseCode = urlConnection.getResponseCode();
                 if (responseCode == HttpURLConnection.HTTP_OK) {
-                    BufferedReader in =
-                      new BufferedReader(new InputStreamReader(urlConnection.getInputStream(), StringUtils.UTF_8));
+                    in = new BufferedReader(new InputStreamReader(urlConnection.getInputStream(), StringUtils.UTF_8));
                     String inputLine;
                     StringBuffer response = new StringBuffer();
 
@@ -508,6 +523,17 @@ public class GeckoMediaDrmBridgeV21 implements GeckoMediaDrm {
                 Log.e(LOGTAG, "Got exception during posting provisioning request ...", e);
             } catch (URISyntaxException e) {
                 Log.e(LOGTAG, "Got exception during creating uri ...", e);
+            } finally {
+                if (urlConnection != null) {
+                    urlConnection.disconnect();
+                }
+                try {
+                    if (in != null) {
+                        in.close();
+                    }
+                } catch (IOException e) {
+                    Log.e(LOGTAG, "Exception during closing in ...", e);
+                }
             }
             return null;
         }
@@ -590,7 +616,7 @@ public class GeckoMediaDrmBridgeV21 implements GeckoMediaDrm {
         }
         try {
             mProvisioningPromiseId = promiseId;
-            MediaDrm.ProvisionRequest request = mDrm.getProvisionRequest();
+            @SuppressLint("NewApi") MediaDrm.ProvisionRequest request = mDrm.getProvisionRequest();
             PostRequestTask postTask =
                 new PostRequestTask(promiseId, request.getDefaultUrl(), request.getData());
             postTask.execute();

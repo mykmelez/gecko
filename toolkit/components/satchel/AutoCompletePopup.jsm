@@ -6,7 +6,6 @@
 
 var EXPORTED_SYMBOLS = ["AutoCompletePopup"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 // AutoCompleteResultView is an abstraction around a list of results
@@ -29,6 +28,10 @@ var AutoCompleteResultView = {
   },
 
   getValueAt(index) {
+    return this.results[index].value;
+  },
+
+  getFinalCompleteValueAt(index) {
     return this.results[index].value;
   },
 
@@ -128,8 +131,12 @@ this.AutoCompletePopup = {
       }
 
       case "popuphidden": {
+        let selectedIndex = this.openedPopup.selectedIndex;
+        let selectedRowStyle = selectedIndex != -1 ?
+          AutoCompleteResultView.getStyleAt(selectedIndex) : "";
+        this.sendMessageToBrowser("FormAutoComplete:PopupClosed",
+                                  { selectedRowStyle });
         AutoCompleteResultView.clearResults();
-        this.sendMessageToBrowser("FormAutoComplete:PopupClosed");
         // adjustHeight clears the height from the popup so that
         // we don't have a big shrink effect if we closed with a
         // large list, and then open on a small one.

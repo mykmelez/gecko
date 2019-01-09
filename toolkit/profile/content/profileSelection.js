@@ -31,10 +31,7 @@ function startup() {
 
     var profilesElement = document.getElementById("profiles");
 
-    var profileList = gProfileService.profiles;
-    while (profileList.hasMoreElements()) {
-      var profile = profileList.getNext().QueryInterface(I.nsIToolkitProfile);
-
+    for (let profile of gProfileService.profiles.entries(I.nsIToolkitProfile)) {
       var listitem = profilesElement.appendItem(profile.name, "");
 
       var tooltiptext =
@@ -101,6 +98,8 @@ function acceptDialog() {
   updateStartupPrefs();
 
   gDialogParams.SetInt(0, 1);
+  /* Bug 257777 */
+  gDialogParams.SetInt(1, document.getElementById("offlineState").checked ? 1 : 0);
 
   gDialogParams.SetString(0, selectedProfile.profile.name);
 
@@ -116,9 +115,6 @@ function exitDialog() {
 function updateStartupPrefs() {
   var autoSelectLastProfile = document.getElementById("autoSelectLastProfile");
   gProfileService.startWithLastProfile = autoSelectLastProfile.checked;
-
-  /* Bug 257777 */
-  gProfileService.startOffline = document.getElementById("offlineState").checked;
 }
 
 // handle key event on listboxes
@@ -137,7 +133,7 @@ function onProfilesKey(aEvent) {
 }
 
 function onProfilesDblClick(aEvent) {
-  if (aEvent.target.localName == "listitem")
+  if (aEvent.target.closest("richlistitem"))
     document.documentElement.acceptDialog();
 }
 
@@ -197,7 +193,7 @@ function RenameProfile() {
       return false;
     }
 
-    selectedItem.label = newName;
+    selectedItem.firstChild.setAttribute("value", newName);
     var tiptext = gProfileManagerBundle.
                   getFormattedString("profileTooltip",
                                      [newName, selectedProfile.rootDir.path]);

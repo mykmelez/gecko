@@ -19,21 +19,6 @@ impl GlesFns
             ffi_gl_: ffi_gl_,
         }) as Rc<Gl>
     }
-
-    fn get_active_uniform_type(&self, program: GLuint) -> GLuint {
-        let mut size: GLint = 0;
-        let mut uniform_type: GLuint = 0;
-        unsafe {
-            self.ffi_gl_.GetActiveUniform(program,
-                                          0 as GLuint,
-                                          0 as GLsizei,
-                                          ptr::null_mut(),
-                                          &mut size,
-                                          &mut uniform_type,
-                                          ptr::null_mut());
-        }
-        uniform_type
-    }
 }
 
 impl Gl for GlesFns {
@@ -333,25 +318,15 @@ impl Gl for GlesFns {
     }
 
     // https://www.khronos.org/registry/OpenGL-Refpages/es2.0/xhtml/glGetUniform.xml
-    fn get_uniform_iv(&self, program: GLuint, location: GLint) -> Vec<GLint> {
-        let uniform_type = self.get_active_uniform_type(program);
-        let len = get_uniform_iv_vector_length(&uniform_type);
-        let mut result: [GLint; 4] = [0; 4];
-        unsafe {
-            self.ffi_gl_.GetUniformiv(program, location, result.as_mut_ptr());
-        }
-        Vec::from(&result[0..len])
+    unsafe fn get_uniform_iv(&self, program: GLuint, location: GLint, result: &mut [GLint]) {
+        assert!(!result.is_empty());
+        self.ffi_gl_.GetUniformiv(program, location, result.as_mut_ptr());
     }
 
     // https://www.khronos.org/registry/OpenGL-Refpages/es2.0/xhtml/glGetUniform.xml
-    fn get_uniform_fv(&self, program: GLuint, location: GLint) -> Vec<GLfloat> {
-        let uniform_type = self.get_active_uniform_type(program);
-        let len = get_uniform_fv_vector_length(&uniform_type);
-        let mut result: [GLfloat; 16] = [0.0; 16];
-        unsafe {
-            self.ffi_gl_.GetUniformfv(program, location, result.as_mut_ptr());
-        }
-        Vec::from(&result[0..len])
+    unsafe fn get_uniform_fv(&self, program: GLuint, location: GLint, result: &mut [GLfloat]) {
+        assert!(!result.is_empty());
+        self.ffi_gl_.GetUniformfv(program, location, result.as_mut_ptr());
     }
 
     fn get_uniform_block_index(&self, program: GLuint, name: &str) -> GLuint {
@@ -664,6 +639,38 @@ impl Gl for GlesFns {
         }
     }
 
+    fn tex_storage_2d(&self,
+                      target: GLenum,
+                      levels: GLint,
+                      internal_format: GLenum,
+                      width: GLsizei,
+                      height: GLsizei) {
+        unsafe {
+            self.ffi_gl_.TexStorage2D(target,
+                                      levels,
+                                      internal_format,
+                                      width,
+                                      height);
+        }
+    }
+
+    fn tex_storage_3d(&self,
+                      target: GLenum,
+                      levels: GLint,
+                      internal_format: GLenum,
+                      width: GLsizei,
+                      height: GLsizei,
+                      depth: GLsizei) {
+        unsafe {
+            self.ffi_gl_.TexStorage3D(target,
+                                      levels,
+                                      internal_format,
+                                      width,
+                                      height,
+                                      depth);
+        }
+    }
+
     #[allow(unused_variables)]
     fn get_tex_image_into_buffer(&self,
                                  target: GLenum,
@@ -672,6 +679,73 @@ impl Gl for GlesFns {
                                  ty: GLenum,
                                  output: &mut [u8]) {
         panic!("not supported");
+    }
+
+    unsafe fn copy_image_sub_data(&self,
+                                  src_name: GLuint,
+                                  src_target: GLenum,
+                                  src_level: GLint,
+                                  src_x: GLint,
+                                  src_y: GLint,
+                                  src_z: GLint,
+                                  dst_name: GLuint,
+                                  dst_target: GLenum,
+                                  dst_level: GLint,
+                                  dst_x: GLint,
+                                  dst_y: GLint,
+                                  dst_z: GLint,
+                                  src_width: GLsizei,
+                                  src_height: GLsizei,
+                                  src_depth: GLsizei) {
+        self.ffi_gl_.CopyImageSubDataEXT(
+            src_name,
+            src_target,
+            src_level,
+            src_x,
+            src_y,
+            src_z,
+            dst_name,
+            dst_target,
+            dst_level,
+            dst_x,
+            dst_y,
+            dst_z,
+            src_width,
+            src_height,
+            src_depth,
+        );
+    }
+
+    fn invalidate_framebuffer(&self,
+                              target: GLenum,
+                              attachments: &[GLenum]) {
+        unsafe {
+            self.ffi_gl_.InvalidateFramebuffer(
+                target,
+                attachments.len() as GLsizei,
+                attachments.as_ptr(),
+            );
+        }
+    }
+
+    fn invalidate_sub_framebuffer(&self,
+                                  target: GLenum,
+                                  attachments: &[GLenum],
+                                  xoffset: GLint,
+                                  yoffset: GLint,
+                                  width: GLsizei,
+                                  height: GLsizei) {
+        unsafe {
+            self.ffi_gl_.InvalidateSubFramebuffer(
+                target,
+                attachments.len() as GLsizei,
+                attachments.as_ptr(),
+                xoffset,
+                yoffset,
+                width,
+                height,
+            );
+        }
     }
 
     #[inline]
@@ -1477,14 +1551,30 @@ impl Gl for GlesFns {
                                    shader_type: GLuint,
                                    precision_type: GLuint)
                                    -> (GLint, GLint, GLint) {
-        let mut range = [0 as GLint, 0];
-        let mut precision = 0 as GLint;
+        let (mut range, mut precision) = match precision_type {
+            // These values are for a 32-bit twos-complement integer format.
+            ffi::LOW_INT |
+            ffi::MEDIUM_INT |
+            ffi::HIGH_INT => ([31, 30], 0),
+
+            // These values are for an IEEE single-precision floating-point format.
+            ffi::LOW_FLOAT |
+            ffi::MEDIUM_FLOAT |
+            ffi::HIGH_FLOAT => ([127, 127], 23),
+
+            _ => unreachable!("invalid precision"),
+        };
+        // This function is sometimes defined even though it's really just
+        // a stub, so we need to set range and precision as if it weren't
+        // defined before calling it. Suppress any error that might occur.
         unsafe {
             self.ffi_gl_.GetShaderPrecisionFormat(shader_type,
                                                   precision_type,
                                                   range.as_mut_ptr(),
                                                   &mut precision);
+            let _ = self.ffi_gl_.GetError();
         }
+
         (range[0], range[1], precision)
     }
 

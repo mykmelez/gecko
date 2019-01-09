@@ -22,7 +22,7 @@
 
 var EXPORTED_SYMBOLS = [
   "ClientEngine",
-  "ClientsRec"
+  "ClientsRec",
 ];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -50,6 +50,10 @@ const STALE_CLIENT_REMOTE_AGE = 604800; // 7 days
 // TTL of the message sent to another device when sending a tab
 const NOTIFY_TAB_SENT_TTL_SECS = 1 * 3600; // 1 hour
 
+// This is to avoid multiple sequential syncs ending up calling
+// this expensive endpoint multiple times in a row.
+const TIME_BETWEEN_FXA_DEVICES_FETCH_MS = 10 * 1000;
+
 // Reasons behind sending collection_changed push notifications.
 const COLLECTION_MODIFIED_REASON_SENDTAB = "sendtab";
 const COLLECTION_MODIFIED_REASON_FIRSTSYNC = "firstsync";
@@ -71,7 +75,7 @@ function ClientsRec(collection, id) {
 ClientsRec.prototype = {
   __proto__: CryptoWrapper.prototype,
   _logName: "Sync.Record.Clients",
-  ttl: CLIENTS_TTL
+  ttl: CLIENTS_TTL,
 };
 
 Utils.deferGetSet(ClientsRec,
@@ -128,6 +132,10 @@ ClientEngine.prototype = {
   },
   set lastRecordUpload(value) {
     Svc.Prefs.set(this.name + ".lastRecordUpload", Math.floor(value));
+  },
+
+  get fxaDevices() {
+    return this._fxaDevices;
   },
 
   get remoteClients() {
@@ -327,7 +335,8 @@ ClientEngine.prototype = {
 
   async updateKnownStaleClients() {
     this._log.debug("Updating the known stale clients");
-    await this._refreshKnownStaleClients();
+    // _fetchFxADevices side effect updates this._knownStaleFxADeviceIds.
+    await this._fetchFxADevices();
     let localFxADeviceId = await fxAccounts.getDeviceId();
     // Process newer records first, so that if we hit a record with a device ID
     // we've seen before, we can mark it stale immediately.
@@ -353,22 +362,30 @@ ClientEngine.prototype = {
     }
   },
 
-  // We assume that clients not present in the FxA Device Manager list have been
-  // disconnected and so are stale
-  async _refreshKnownStaleClients() {
+  async _fetchFxADevices() {
+    const now = new Date().getTime();
+    if ((this._lastFxADevicesFetch || 0) + TIME_BETWEEN_FXA_DEVICES_FETCH_MS >= now) {
+      return;
+    }
+    const remoteClients = Object.values(this.remoteClients);
+    try {
+      this._fxaDevices = await this.fxAccounts.getDeviceList();
+      for (const device of this._fxaDevices) {
+        device.clientRecord = remoteClients.find(c => c.fxaDeviceId == device.id);
+      }
+    } catch (e) {
+      this._log.error("Could not retrieve the FxA device list", e);
+      this._fxaDevices = [];
+    }
+    this._lastFxADevicesFetch = now;
+
+    // We assume that clients not present in the FxA Device Manager list have been
+    // disconnected and so are stale
     this._log.debug("Refreshing the known stale clients list");
     let localClients = Object.values(this._store._remoteClients)
                              .filter(client => client.fxaDeviceId) // iOS client records don't have fxaDeviceId
                              .map(client => client.fxaDeviceId);
-    let fxaClients;
-    try {
-      let deviceList = await this.fxAccounts.getDeviceList();
-      fxaClients = deviceList.map(device => device.id);
-    } catch (ex) {
-      this._log.error("Could not retrieve the FxA device list", ex);
-      this._knownStaleFxADeviceIds = [];
-      return;
-    }
+    const fxaClients = this._fxaDevices.map(device => device.id);
     this._knownStaleFxADeviceIds = Utils.arraySub(localClients, fxaClients);
   },
 
@@ -386,11 +403,8 @@ ClientEngine.prototype = {
     this._incomingClients = {};
     try {
       await SyncEngine.prototype._processIncoming.call(this);
-      // Refresh the known stale clients list at startup and when we receive
-      // "device connected/disconnected" push notifications.
-      if (!this._knownStaleFxADeviceIds) {
-        await this._refreshKnownStaleClients();
-      }
+      // Update FxA Device list.
+      await this._fetchFxADevices();
       // Since clients are synced unconditionally, any records in the local store
       // that don't exist on the server must be for disconnected clients. Remove
       // them, so that we don't upload records with commands for clients that will
@@ -542,8 +556,8 @@ ClientEngine.prototype = {
       command: "sync:collection_changed",
       data: {
         collections: ["clients"],
-        reason
-      }
+        reason,
+      },
     };
     let excludedIds = null;
     if (!ids) {
@@ -640,8 +654,9 @@ ClientEngine.prototype = {
     this._log.debug("Handling HMAC mismatch for " + item.id);
 
     let base = await SyncEngine.prototype.handleHMACMismatch.call(this, item, mayRetry);
-    if (base != SyncEngine.kRecoveryStrategy.error)
+    if (base != SyncEngine.kRecoveryStrategy.error) {
       return base;
+    }
 
     // It's a bad client record. Save it to be deleted at the end of the sync.
     this._log.debug("Bad client record detected. Scheduling for deletion.");
@@ -925,7 +940,7 @@ ClientEngine.prototype = {
     uris.forEach(uri => {
       uri.sender = {
         id: uri.clientId,
-        name: this.getClientName(uri.clientId)
+        name: this.getClientName(uri.clientId),
       };
     });
     Svc.Obs.notify("weave:engine:clients:display-uris", uris);
@@ -1054,8 +1069,9 @@ ClientStore.prototype = {
   async getAllIDs() {
     let ids = {};
     ids[this.engine.localID] = true;
-    for (let id in this._remoteClients)
+    for (let id in this._remoteClients) {
       ids[id] = true;
+    }
     return ids;
   },
 
@@ -1073,19 +1089,23 @@ ClientsTracker.prototype = {
   _enabled: false,
 
   onStart() {
+    Svc.Obs.add("fxaccounts:new_device_id", this.asyncObserver);
     Svc.Prefs.observe("client.name", this.asyncObserver);
   },
   onStop() {
     Svc.Prefs.ignore("client.name", this.asyncObserver);
+    Svc.Obs.remove("fxaccounts:new_device_id", this.asyncObserver);
   },
 
   async observe(subject, topic, data) {
     switch (topic) {
       case "nsPref:changed":
         this._log.debug("client.name preference changed");
+        // Fallthrough intended.
+      case "fxaccounts:new_device_id":
         await this.addChangedID(this.engine.localID);
-        this.score += SCORE_INCREMENT_XLARGE;
+        this.score += SINGLE_USER_THRESHOLD + 1; // ALWAYS SYNC NOW.
         break;
     }
-  }
+  },
 };

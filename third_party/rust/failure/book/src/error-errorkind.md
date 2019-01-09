@@ -79,9 +79,16 @@ impl From<Context<MyErrorKind>> for MyError {
 ```
 
 With this code set up, you can use the context method from failure to apply
+<<<<<<< HEAD
 your ErrorKind to errors in underlying libraries:
 
 ```rust
+=======
+your ErrorKind to `Result`s in underlying libraries:
+
+```rust
+use failure::ResultExt;
+>>>>>>> central
 perform_some_io().context(ErrorKind::NetworkFailure)?;
 ```
 

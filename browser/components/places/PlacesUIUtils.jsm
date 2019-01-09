@@ -163,9 +163,9 @@ let InternalFaviconLoader = {
     });
   },
 
-  loadFavicon(browser, principal, uri, expiration, iconURI) {
+  loadFavicon(browser, principal, pageURI, uri, expiration, iconURI) {
     this.ensureInitialized();
-    let win = browser.ownerGlobal;
+    let {ownerGlobal: win, innerWindowID} = browser;
     if (!gFaviconLoadDataMap.has(win)) {
       gFaviconLoadDataMap.set(win, []);
       let unloadHandler = event => {
@@ -179,8 +179,6 @@ let InternalFaviconLoader = {
       win.addEventListener("unload", unloadHandler, true);
     }
 
-    let {innerWindowID, currentURI} = browser;
-
     // First we do the actual setAndFetch call:
     let loadType = PrivateBrowsingUtils.isWindowPrivate(win)
       ? PlacesUtils.favicons.FAVICON_LOAD_PRIVATE
@@ -193,8 +191,8 @@ let InternalFaviconLoader = {
                                                          expiration, principal);
     }
 
-    let request = PlacesUtils.favicons.setAndFetchFaviconForPage(currentURI, uri, false,
-                                                                 loadType, callback, principal);
+    let request = PlacesUtils.favicons.setAndFetchFaviconForPage(
+      pageURI, uri, false, loadType, callback, principal);
 
     // Now register the result so we can cancel it if/when necessary.
     if (!request) {
@@ -313,15 +311,16 @@ var PlacesUIUtils = {
    * set and fetch a favicon. Can only be used from the parent process.
    * @param browser    {Browser}   The XUL browser element for which we're fetching a favicon.
    * @param principal  {Principal} The loading principal to use for the fetch.
+   * @pram pageURI     {URI}       The page URI associated to this favicon load.
    * @param uri        {URI}       The URI to fetch.
    * @param expiration {Number}    An optional expiration time.
    * @param iconURI    {URI}       An optional data: URI holding the icon's data.
    */
-  loadFavicon(browser, principal, uri, expiration = 0, iconURI = null) {
+  loadFavicon(browser, principal, pageURI, uri, expiration = 0, iconURI = null) {
     if (gInContentProcess) {
       throw new Error("Can't track loads from within the child process!");
     }
-    InternalFaviconLoader.loadFavicon(browser, principal, uri, expiration, iconURI);
+    InternalFaviconLoader.loadFavicon(browser, principal, pageURI, uri, expiration, iconURI);
   },
 
   /**
@@ -460,6 +459,32 @@ var PlacesUIUtils = {
   },
 
   /**
+   * Sets the character-set for a page. The character set will not be saved
+   * if the window is determined to be a private browsing window.
+   *
+   * @param {string|URL|nsIURI} url The URL of the page to set the charset on.
+   * @param {String} charset character-set value.
+   * @param {window} window The window that the charset is being set from.
+   * @return {Promise}
+   */
+  async setCharsetForPage(url, charset, window) {
+    if (PrivateBrowsingUtils.isWindowPrivate(window)) {
+      return;
+    }
+
+    // UTF-8 is the default. If we are passed the value then set it to null,
+    // to ensure any charset is removed from the database.
+    if (charset.toLowerCase() == "utf-8") {
+      charset = null;
+    }
+
+    await PlacesUtils.history.update({
+      url,
+      annotations: new Map([[PlacesUtils.CHARSET_ANNO, charset]]),
+    });
+  },
+
+  /**
    * Allows opening of javascript/data URI only if the given node is
    * bookmarked (see bug 224521).
    * @param aURINode
@@ -493,11 +518,9 @@ var PlacesUIUtils = {
    *
    * @param aNode
    *        a node, except the root node of a query.
-   * @param aView
-   *        The view originating the request.
    * @return true if the aNode represents a removable entry, false otherwise.
    */
-  canUserRemove(aNode, aView) {
+  canUserRemove(aNode) {
     let parentNode = aNode.parent;
     if (!parentNode) {
       // canUserRemove doesn't accept root nodes.
@@ -519,21 +542,13 @@ var PlacesUIUtils = {
       }
     }
 
-    // If it's not a bookmark, we can remove it unless it's a child of a
-    // livemark.
-    if (aNode.itemId == -1) {
-      // Rather than executing a db query, checking the existence of the feedURI
-      // annotation, detect livemark children by the fact that they are the only
-      // direct non-bookmark children of bookmark folders.
-      return !PlacesUtils.nodeIsFolder(parentNode);
+    // If it's not a bookmark, or it's child of a query, we can remove it.
+    if (aNode.itemId == -1 || PlacesUtils.nodeIsQuery(parentNode)) {
+      return true;
     }
 
-    // Generally it's always possible to remove children of a query.
-    if (PlacesUtils.nodeIsQuery(parentNode))
-      return true;
-
     // Otherwise it has to be a child of an editable folder.
-    return !this.isFolderReadOnly(parentNode, aView);
+    return !this.isFolderReadOnly(parentNode);
   },
 
   /**
@@ -551,25 +566,15 @@ var PlacesUIUtils = {
    *
    * @param placesNode
    *        any folder result node.
-   * @param view
-   *        The view originating the request.
    * @throws if placesNode is not a folder result node or views is invalid.
-   * @note livemark "folders" are considered read-only (but see bug 1072833).
    * @return true if placesNode is a read-only folder, false otherwise.
    */
-  isFolderReadOnly(placesNode, view) {
+  isFolderReadOnly(placesNode) {
     if (typeof placesNode != "object" || !PlacesUtils.nodeIsFolder(placesNode)) {
       throw new Error("invalid value for placesNode");
     }
-    if (!view || typeof view != "object") {
-      throw new Error("invalid value for aView");
-    }
-    let itemId = PlacesUtils.getConcreteItemId(placesNode);
-    if (itemId == PlacesUtils.placesRootId ||
-        view.controller.hasCachedLivemarkInfo(placesNode))
-      return true;
 
-    return false;
+    return PlacesUtils.getConcreteItemId(placesNode) == PlacesUtils.placesRootId;
   },
 
   /** aItemsToOpen needs to be an array of objects of the form:
@@ -605,7 +610,7 @@ var PlacesUIUtils = {
                   createInstance(Ci.nsIMutableArray);
       args.appendElement(uriList);
       browserWindow = Services.ww.openWindow(aWindow,
-                                             "chrome://browser/content/browser.xul",
+                                             AppConstants.BROWSER_CHROME_URL,
                                              null, "chrome,dialog=no,all", args);
       return;
     }
@@ -621,45 +626,36 @@ var PlacesUIUtils = {
     });
   },
 
-  openLiveMarkNodesInTabs:
-  function PUIU_openLiveMarkNodesInTabs(aNode, aEvent, aView) {
-    let window = aView.ownerWindow;
-
-    PlacesUtils.livemarks.getLivemark({id: aNode.itemId})
-      .then(aLivemark => {
-        let urlsToOpen = [];
-
-        let nodes = aLivemark.getNodesForContainer(aNode);
-        for (let node of nodes) {
-          urlsToOpen.push({uri: node.uri, isBookmark: false});
-        }
-
-        if (OpenInTabsUtils.confirmOpenInTabs(urlsToOpen.length, window)) {
-          this._openTabset(urlsToOpen, aEvent, window);
-        }
-      }, Cu.reportError);
-  },
-
-  openContainerNodeInTabs:
-  function PUIU_openContainerInTabs(aNode, aEvent, aView) {
-    let window = aView.ownerWindow;
-
-    let urlsToOpen = PlacesUtils.getURLsForContainerNode(aNode);
-    if (OpenInTabsUtils.confirmOpenInTabs(urlsToOpen.length, window)) {
-      this._openTabset(urlsToOpen, aEvent, window);
-    }
-  },
-
-  openURINodesInTabs: function PUIU_openURINodesInTabs(aNodes, aEvent, aView) {
-    let window = aView.ownerWindow;
-
+  /**
+   * Loads a selected node's or nodes' URLs in tabs,
+   * warning the user when lots of URLs are being opened
+   *
+   * @param {object|array} nodeOrNodes
+   *          Contains the node or nodes that we're opening in tabs
+   * @param {event} event
+   *          The DOM mouse/key event with modifier keys set that track the
+   *          user's preferred destination window or tab.
+   * @param {object} view
+   *          The current view that contains the node or nodes selected for
+   *          opening
+   */
+  openMultipleLinksInTabs(nodeOrNodes, event, view) {
+    let window = view.ownerWindow;
     let urlsToOpen = [];
-    for (var i = 0; i < aNodes.length; i++) {
-      // Skip over separators and folders.
-      if (PlacesUtils.nodeIsURI(aNodes[i]))
-        urlsToOpen.push({uri: aNodes[i].uri, isBookmark: PlacesUtils.nodeIsBookmark(aNodes[i])});
+
+    if (PlacesUtils.nodeIsContainer(nodeOrNodes)) {
+      urlsToOpen = PlacesUtils.getURLsForContainerNode(nodeOrNodes);
+    } else {
+      for (var i = 0; i < nodeOrNodes.length; i++) {
+        // Skip over separators and folders.
+        if (PlacesUtils.nodeIsURI(nodeOrNodes[i])) {
+          urlsToOpen.push({uri: nodeOrNodes[i].uri, isBookmark: PlacesUtils.nodeIsBookmark(nodeOrNodes[i])});
+        }
+      }
     }
-    this._openTabset(urlsToOpen, aEvent, window);
+    if (OpenInTabsUtils.confirmOpenInTabs(urlsToOpen.length, window)) {
+      this._openTabset(urlsToOpen, event, window);
+    }
   },
 
   /**
@@ -683,16 +679,12 @@ var PlacesUIUtils = {
       if (where == "current" && !aNode.uri.startsWith("javascript:")) {
         where = "tab";
       }
-      if (where == "tab" && browserWindow.isTabEmpty(browserWindow.gBrowser.selectedTab)) {
+      if (where == "tab" && browserWindow.gBrowser.selectedTab.isEmpty) {
         where = "current";
       }
     }
 
     this._openNodeIn(aNode, where, window);
-    let view = this.getViewForNode(aEvent.target);
-    if (view && view.controller.hasCachedLivemarkInfo(aNode.parent)) {
-      Services.telemetry.scalarAdd("browser.feeds.livebookmark_item_opened", 1);
-    }
   },
 
   /**
@@ -716,9 +708,11 @@ var PlacesUIUtils = {
           this.markPageAsTyped(aNode.uri);
       }
 
+      const isJavaScriptURL = aNode.uri.startsWith("javascript:");
       aWindow.openTrustedLinkIn(aNode.uri, aWhere, {
-        allowPopups: aNode.uri.startsWith("javascript:"),
+        allowPopups: isJavaScriptURL,
         inBackground: this.loadBookmarksInBackground,
+        allowInheritPrincipal: isJavaScriptURL && aWhere == "current",
         private: aPrivate,
       });
     }
@@ -816,7 +810,7 @@ var PlacesUIUtils = {
     let parent = {
       itemId: await PlacesUtils.promiseItemId(aFetchInfo.parentGuid),
       bookmarkGuid: aFetchInfo.parentGuid,
-      type: Ci.nsINavHistoryResultNode.RESULT_TYPE_FOLDER
+      type: Ci.nsINavHistoryResultNode.RESULT_TYPE_FOLDER,
     };
 
     return Object.freeze({
@@ -844,7 +838,7 @@ var PlacesUIUtils = {
 
       get parent() {
         return parent;
-      }
+      },
     });
   },
 
@@ -972,7 +966,7 @@ var PlacesUIUtils = {
     } else if (!mouseInGutter && openInTabs &&
                event.originalTarget.localName == "treechildren") {
       tbo.view.selection.select(cell.row);
-      this.openContainerNodeInTabs(tree.selectedNode, event, tree);
+      this.openMultipleLinksInTabs(tree.selectedNode, event, tree);
     } else if (!mouseInGutter && !isContainer &&
                event.originalTarget.localName == "treechildren") {
       // Clear all other selection since we're loading a link now. We must
@@ -1063,7 +1057,7 @@ XPCOMUtils.defineLazyPreferenceGetter(PlacesUIUtils, "openInTabClosesMenu",
  */
 function canMoveUnwrappedNode(unwrappedNode) {
   if ((unwrappedNode.concreteGuid && PlacesUtils.isRootItem(unwrappedNode.concreteGuid)) ||
-      unwrappedNode.id <= 0 || PlacesUtils.isRootItem(unwrappedNode.id)) {
+      (unwrappedNode.guid && PlacesUtils.isRootItem(unwrappedNode.guid))) {
     return false;
   }
 

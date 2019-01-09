@@ -56,7 +56,7 @@ EventTooltip.prototype = {
       readOnly: true,
       styleActiveLine: true,
       extraKeys: {},
-      theme: "mozilla markup-view"
+      theme: "mozilla markup-view",
     };
 
     const doc = this._tooltip.doc;
@@ -120,7 +120,7 @@ EventTooltip.prototype = {
           this._subscriptions.push({
             url: location.url,
             line: location.line,
-            callback
+            callback,
           });
         }
       }
@@ -130,10 +130,8 @@ EventTooltip.prototype = {
       header.appendChild(filename);
 
       if (!listener.hide.debugger) {
-        const debuggerIcon = doc.createElementNS(XHTML_NS, "img");
+        const debuggerIcon = doc.createElementNS(XHTML_NS, "div");
         debuggerIcon.className = "event-tooltip-debugger-icon";
-        debuggerIcon.setAttribute("src",
-          "chrome://devtools/skin/images/jump-definition.svg");
         const openInDebugger = L10N.getStr("eventsTooltip.openInDebugger");
         debuggerIcon.setAttribute("title", openInDebugger);
         header.appendChild(debuggerIcon);
@@ -197,7 +195,9 @@ EventTooltip.prototype = {
       this._addContentListeners(header);
     }
 
-    this._tooltip.setContent(this.container, {width: CONTAINER_WIDTH});
+    this._tooltip.panel.innerHTML = "";
+    this._tooltip.panel.appendChild(this.container);
+    this._tooltip.setContentSize({ width: CONTAINER_WIDTH, height: Infinity });
     this._tooltip.on("hidden", this.destroy);
   },
 
@@ -329,7 +329,7 @@ EventTooltip.prototype = {
     }
 
     this._eventListenerInfos = this._toolbox = this._tooltip = null;
-  }
+  },
 };
 
 module.exports.setEventTooltip = setEventTooltip;

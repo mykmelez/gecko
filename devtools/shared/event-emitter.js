@@ -65,7 +65,7 @@ class EventEmitter {
       return;
     }
 
-    if (length === 3) {
+    if (length >= 3) {
       // Trying to remove from the `target` the `listener` specified for the
       // event's `type` given.
       const listenersForType = events.get(type);
@@ -98,9 +98,17 @@ class EventEmitter {
         events.delete(type);
       }
     } else if (length === 1) {
-      // With only the `target` given, we're removing all the isteners from the object.
+      // With only the `target` given, we're removing all the listeners from the object.
       events.clear();
     }
+  }
+
+  static clearEvents(target) {
+    const events = target[eventListeners];
+    if (!events) {
+      return;
+    }
+    events.clear();
   }
 
   /**
@@ -159,14 +167,14 @@ class EventEmitter {
       // in emit.
       const listenersForType = new Set(target[eventListeners].get(type));
 
+      const events = target[eventListeners];
+      const listeners = events.get(type);
+
       for (const listener of listenersForType) {
         // If the object was destroyed during event emission, stop emitting.
         if (!(eventListeners in target)) {
           break;
         }
-
-        const events = target[eventListeners];
-        const listeners = events.get(type);
 
         // If listeners were removed during emission, make sure the
         // event handler we're going to fire wasn't removed.
@@ -247,6 +255,10 @@ class EventEmitter {
     EventEmitter.off(this, ...args);
   }
 
+  clearEvents() {
+    EventEmitter.clearEvents(this);
+  }
+
   once(...args) {
     return EventEmitter.once(this, ...args);
   }
@@ -270,7 +282,7 @@ if (!isWorker) {
   Services.prefs.addObserver("devtools.dump.emit", {
     observe: () => {
       loggingEnabled = Services.prefs.getBoolPref("devtools.dump.emit");
-    }
+    },
   });
 }
 

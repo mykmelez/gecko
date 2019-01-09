@@ -1,12 +1,10 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifndef nsIAppStartupNotifier_h___
 #define nsIAppStartupNotifier_h___
-
-#include "nsIObserver.h"
 
 /*
  Some components need to be run at the startup of mozilla or embedding - to
@@ -42,11 +40,8 @@
  and release them.
 */
 
-#define NS_APPSTARTUPNOTIFIER_CONTRACTID "@mozilla.org/embedcomp/appstartup-notifier;1"
-
 #define APPSTARTUP_CATEGORY "app-startup"
-#define APPSTARTUP_TOPIC    "app-startup"
-
+#define APPSTARTUP_TOPIC "app-startup"
 
 /*
  Please note that there's not a new interface in this file.

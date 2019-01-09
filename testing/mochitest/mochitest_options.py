@@ -53,7 +53,7 @@ ALL_FLAVORS = {
     'browser-chrome': {
         'suite': 'browser',
         'aliases': ('browser', 'browser-chrome', 'mochitest-browser-chrome', 'bc'),
-        'enabled_apps': ('firefox',),
+        'enabled_apps': ('firefox', 'thunderbird'),
         'extra_args': {
             'flavor': 'browser',
         }
@@ -370,13 +370,6 @@ class MochitestArguments(ArgumentContainer):
           "default": False,
           "help": "Delay execution between tests.",
           }],
-        [["--metro-immersive"],
-         {"action": "store_true",
-          "dest": "immersiveMode",
-          "default": False,
-          "help": "Launches tests in an immersive browser.",
-          "suppress": True,
-          }],
         [["--httpd-path"],
          {"dest": "httpdPath",
           "default": None,
@@ -511,6 +504,11 @@ class MochitestArguments(ArgumentContainer):
          {"dest": "debuggerArgs",
           "default": None,
           "help": "Arguments to pass to the debugger.",
+          }],
+        [["--save-recordings"],
+         {"dest": "recordingPath",
+          "default": None,
+          "help": "Directory to save Web Replay recordings in.",
           }],
         [["--valgrind"],
          {"default": None,
@@ -753,7 +751,7 @@ class MochitestArguments(ArgumentContainer):
                     options.testingModulesDir = p
                     break
 
-        # Paths to specialpowers and mochijar from the tests zip.
+        # Paths to specialpowers and mochijar from the tests archive.
         options.stagedAddons = [
             os.path.join(here, 'extensions', 'specialpowers'),
             os.path.join(here, 'mochijar'),
@@ -788,15 +786,6 @@ class MochitestArguments(ArgumentContainer):
                 '/')
             if options.testingModulesDir[-1] != '/':
                 options.testingModulesDir += '/'
-
-        if options.immersiveMode:
-            if not mozinfo.isWin:
-                parser.error("immersive is only supported on Windows 8 and up.")
-            options.immersiveHelperPath = os.path.join(
-                options.utilityPath, "metrotestharness.exe")
-            if not os.path.exists(options.immersiveHelperPath):
-                parser.error("%s not found, cannot launch immersive tests." %
-                             options.immersiveHelperPath)
 
         if options.runUntilFailure:
             if not options.repeat:
@@ -837,6 +826,7 @@ class MochitestArguments(ArgumentContainer):
             "tab": options.defaultLeakThreshold,
             # GMP rarely gets a log, but when it does, it leaks a little.
             "geckomediaplugin": 20000,
+            "rdd": 400,
         }
 
         # See the dependencies of bug 1401764.
@@ -898,6 +888,18 @@ class AndroidArguments(ArgumentContainer):
           "help": "remote directory to use as test root \
                    (eg. /mnt/sdcard/tests or /data/local/tests)",
           "suppress": True,
+          }],
+        [["--enable-coverage"],
+         {"action": "store_true",
+          "default": False,
+          "help": "Enable collecting code coverage information when running"
+                  "robocop tests.",
+          }],
+        [["--coverage-output-dir"],
+         {"action": "store",
+          "default": None,
+          "help": "When using --enable-java-coverage, save the code coverage report"
+                  "files to this directory.",
           }],
     ]
 
@@ -965,10 +967,20 @@ class AndroidArguments(ArgumentContainer):
                     options.robocopApk)
             options.robocopApk = os.path.abspath(options.robocopApk)
 
-        # Disable e10s by default on Android because we don't run Android
-        # e10s jobs anywhere yet.
-        options.e10s = False
-        mozinfo.update({'e10s': options.e10s})
+        if options.coverage_output_dir and not options.enable_coverage:
+            parser.error("--coverage-output-dir must be used with --enable-coverage")
+        if options.enable_coverage:
+            if not options.autorun:
+                parser.error(
+                    "--enable-coverage cannot be used with --no-autorun")
+            if not options.coverage_output_dir:
+                parser.error(
+                    "--coverage-output-dir must be specified when using --enable-coverage")
+            parent_dir = os.path.dirname(options.coverage_output_dir)
+            if not os.path.isdir(options.coverage_output_dir):
+                parser.error(
+                    "The directory for the coverage output does not exist: %s" %
+                    parent_dir)
 
         # allow us to keep original application around for cleanup while
         # running robocop via 'am'

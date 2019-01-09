@@ -11,12 +11,9 @@ DIRS += [
     'utils',
 ]
 
-DevToolsModules(
+DebuggerModules(
     'ast.js',
-    'breakpoints.js',
-    'coverage.js',
     'debuggee.js',
-    'event-listeners.js',
     'expressions.js',
     'file-search.js',
     'index.js',
@@ -24,8 +21,8 @@ DevToolsModules(
     'preview.js',
     'project-text-search.js',
     'quick-open.js',
-    'replay.js',
     'source-tree.js',
+    'tabs.js',
     'toolbox.js',
     'ui.js',
 )

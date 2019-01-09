@@ -1,0 +1,5 @@
+commit 6e82c7c389888603f0de84ffe5c60f43f11ee844
+Author: Yoshito Umaoka <yoshito_umaoka@us.ibm.com>
+Date:   Wed Nov 7 19:23:35 2018 -0500
+
+    ICU-20260 Fix CR/LF issue

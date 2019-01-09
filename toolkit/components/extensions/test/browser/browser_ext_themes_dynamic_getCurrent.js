@@ -19,58 +19,68 @@ add_task(async function test_get_current() {
 
       const theme1 = {
         "images": {
-          "headerURL": "image1.png",
+          "theme_frame": "image1.png",
         },
         "colors": {
-          "accentcolor": ACCENT_COLOR_1,
-          "textcolor": TEXT_COLOR_1,
+          "frame": ACCENT_COLOR_1,
+          "tab_background_text": TEXT_COLOR_1,
         },
       };
 
       const theme2 = {
         "images": {
-          "headerURL": "image2.png",
+          "theme_frame": "image2.png",
         },
         "colors": {
-          "accentcolor": ACCENT_COLOR_2,
-          "textcolor": TEXT_COLOR_2,
+          "frame": ACCENT_COLOR_2,
+          "tab_background_text": TEXT_COLOR_2,
         },
       };
 
-      function promiseWindowChanged(winId) {
-        return new Promise(resolve => {
+      function ensureWindowFocused(winId) {
+        browser.test.log("Waiting for focused window to be " + winId);
+        return new Promise(async (resolve) => {
           let listener = windowId => {
             if (windowId === winId) {
               browser.windows.onFocusChanged.removeListener(listener);
               resolve();
             }
           };
+          // We first add a listener and then check whether the window is
+          // focused using .get(), because the .get() Promise resolving
+          // could race with the listener running, in which case we'd
+          // never be notified.
           browser.windows.onFocusChanged.addListener(listener);
+          let {focused} = await browser.windows.get(winId);
+          if (focused) {
+            browser.windows.onFocusChanged.removeListener(listener);
+            resolve();
+          }
         });
       }
 
       function testTheme1(returnedTheme) {
         browser.test.assertTrue(
-          returnedTheme.images.headerURL.includes("image1.png"),
-          "Theme 1 header URL should be applied");
+          returnedTheme.images.theme_frame.includes("image1.png"),
+          "Theme 1 theme_frame image should be applied");
         browser.test.assertEq(
-          ACCENT_COLOR_1, returnedTheme.colors.accentcolor,
-          "Theme 1 accent color should be applied");
+          ACCENT_COLOR_1, returnedTheme.colors.frame,
+          "Theme 1 frame color should be applied");
         browser.test.assertEq(
-          TEXT_COLOR_1, returnedTheme.colors.textcolor,
-          "Theme 1 text color should be applied");
+          TEXT_COLOR_1, returnedTheme.colors.tab_background_text,
+          "Theme 1 tab_background_text color should be applied");
       }
 
       function testTheme2(returnedTheme) {
         browser.test.assertTrue(
-          returnedTheme.images.headerURL.includes("image2.png"),
-          "Theme 2 header URL should be applied");
+          returnedTheme.images.theme_frame.includes("image2.png"),
+          "Theme 2 theme_frame image should be applied");
         browser.test.assertEq(
-          ACCENT_COLOR_2, returnedTheme.colors.accentcolor,
-          "Theme 2 accent color should be applied");
+          ACCENT_COLOR_2, returnedTheme.colors.frame,
+          "Theme 2 frame color should be applied");
         browser.test.assertEq(
-          TEXT_COLOR_2, returnedTheme.colors.textcolor,
-          "Theme 2 text color should be applied");
+          TEXT_COLOR_2, returnedTheme.colors.tab_background_text,
+          "Theme 2 tab_background_text color should be applied");
       }
 
       function testEmptyTheme(returnedTheme) {
@@ -89,13 +99,14 @@ add_task(async function test_get_current() {
 
       browser.test.log("Testing getCurrent() with after theme.update(windowId)");
       const secondWin = await browser.windows.create();
+      await ensureWindowFocused(secondWin.id);
       await browser.theme.update(secondWin.id, theme2);
       testTheme2(await browser.theme.getCurrent());
       testTheme1(await browser.theme.getCurrent(firstWin.id));
       testTheme2(await browser.theme.getCurrent(secondWin.id));
 
       browser.test.log("Testing getCurrent() after window focus change");
-      let focusChanged = promiseWindowChanged(firstWin.id);
+      let focusChanged = ensureWindowFocused(firstWin.id);
       await browser.windows.update(firstWin.id, {focused: true});
       await focusChanged;
       testTheme1(await browser.theme.getCurrent());
@@ -103,7 +114,7 @@ add_task(async function test_get_current() {
       testTheme2(await browser.theme.getCurrent(secondWin.id));
 
       browser.test.log("Testing getCurrent() after another window focus change");
-      focusChanged = promiseWindowChanged(secondWin.id);
+      focusChanged = ensureWindowFocused(secondWin.id);
       await browser.windows.update(secondWin.id, {focused: true});
       await focusChanged;
       testTheme2(await browser.theme.getCurrent());
@@ -117,7 +128,7 @@ add_task(async function test_get_current() {
       testTheme2(await browser.theme.getCurrent(secondWin.id));
 
       browser.test.log("Testing getCurrent() after reset and window focus change");
-      focusChanged = promiseWindowChanged(firstWin.id);
+      focusChanged = ensureWindowFocused(firstWin.id);
       await browser.windows.update(firstWin.id, {focused: true});
       await focusChanged;
       testEmptyTheme(await browser.theme.getCurrent());

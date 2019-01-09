@@ -5,9 +5,7 @@
 "use strict";
 
 var gDialog;
-var gBundleBrand;
-var gPKIBundle;
-var gSSLStatus;
+var gSecInfo;
 var gCert;
 var gChecking;
 var gBroken;
@@ -20,13 +18,10 @@ ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 function initExceptionDialog() {
   gNeedReset = false;
   gDialog = document.documentElement;
-  gBundleBrand = document.getElementById("brand_bundle");
-  gPKIBundle = document.getElementById("pippki_bundle");
   gSecHistogram = Services.telemetry.getHistogramById("SECURITY_UI");
   gNsISecTel = Ci.nsISecurityUITelemetry;
-
-  var brandName = gBundleBrand.getString("brandShortName");
-  setText("warningText", gPKIBundle.getFormattedString("addExceptionBrandedWarning2", [brandName]));
+  let warningText = document.getElementById("warningText");
+  document.l10n.setAttributes(warningText, "add-exception-branded-warning");
   gDialog.getButton("extra1").disabled = true;
 
   var args = window.arguments;
@@ -36,9 +31,9 @@ function initExceptionDialog() {
       document.getElementById("locationTextBox").value = args[0].location;
       document.getElementById("checkCertButton").disabled = false;
 
-      if (args[0].sslStatus) {
-        gSSLStatus = args[0].sslStatus;
-        gCert = gSSLStatus.serverCert;
+      if (args[0].securityInfo) {
+        gSecInfo = args[0].securityInfo;
+        gCert = gSecInfo.serverCert;
         gBroken = true;
         updateCertStatus();
       } else if (args[0].prefetchCert) {
@@ -64,7 +59,7 @@ function initExceptionDialog() {
 
 /**
  * Helper function for checkCert. Set as the onerror/onload callbacks for an
- * XMLHttpRequest. Sets gSSLStatus, gCert, gBroken, and gChecking according to
+ * XMLHttpRequest. Sets gSecInfo, gCert, gBroken, and gChecking according to
  * the load information from the request. Probably should not be used directly.
  *
  * @param {XMLHttpRequest} req
@@ -74,10 +69,9 @@ function initExceptionDialog() {
  */
 function grabCert(req, evt) {
   if (req.channel && req.channel.securityInfo) {
-    gSSLStatus = req.channel.securityInfo
-                    .QueryInterface(Ci.nsISSLStatusProvider).SSLStatus;
-    gCert = gSSLStatus ? gSSLStatus.QueryInterface(Ci.nsISSLStatus).serverCert
-                       : null;
+    gSecInfo = req.channel.securityInfo
+                  .QueryInterface(Ci.nsITransportSecurityInfo);
+    gCert = gSecInfo ? gSecInfo.serverCert : null;
   }
   gBroken = evt.type == "error";
   gChecking = false;
@@ -90,7 +84,7 @@ function grabCert(req, evt) {
  */
 function checkCert() {
   gCert = null;
-  gSSLStatus = null;
+  gSecInfo = null;
   gChecking = true;
   gBroken = false;
   updateCertStatus();
@@ -159,7 +153,8 @@ function resetDialog() {
  */
 function handleTextChange() {
   var checkCertButton = document.getElementById("checkCertButton");
-  checkCertButton.disabled = !(document.getElementById("locationTextBox").value);
+  checkCertButton.disabled =
+                    !(document.getElementById("locationTextBox").value);
   if (gNeedReset) {
     gNeedReset = false;
     resetDialog();
@@ -175,20 +170,20 @@ function updateCertStatus() {
   let bucketId = gNsISecTel.WARNING_BAD_CERT_TOP_ADD_EXCEPTION_BASE;
   if (gCert) {
     if (gBroken) {
-      var mms = "addExceptionDomainMismatchShort";
-      var mml = "addExceptionDomainMismatchLong2";
-      var exs = "addExceptionExpiredShort";
-      var exl = "addExceptionExpiredLong2";
-      var uts = "addExceptionUnverifiedOrBadSignatureShort";
-      var utl = "addExceptionUnverifiedOrBadSignatureLong2";
+      var mms = "add-exception-domain-mismatch-short";
+      var mml = "add-exception-domain-mismatch-long";
+      var exs = "add-exception-expired-short";
+      var exl = "add-exception-expired-long";
+      var uts = "add-exception-unverified-or-bad-signature-short";
+      var utl = "add-exception-unverified-or-bad-signature-long";
       var use1 = false;
-      if (gSSLStatus.isDomainMismatch) {
+      if (gSecInfo.isDomainMismatch) {
         bucketId += gNsISecTel.WARNING_BAD_CERT_TOP_ADD_EXCEPTION_FLAG_DOMAIN;
         use1 = true;
         shortDesc = mms;
         longDesc  = mml;
       }
-      if (gSSLStatus.isNotValidAtThisTime) {
+      if (gSecInfo.isNotValidAtThisTime) {
         bucketId += gNsISecTel.WARNING_BAD_CERT_TOP_ADD_EXCEPTION_FLAG_TIME;
         if (!use1) {
           use1 = true;
@@ -200,8 +195,9 @@ function updateCertStatus() {
           longDesc2  = exl;
         }
       }
-      if (gSSLStatus.isUntrusted) {
-        bucketId += gNsISecTel.WARNING_BAD_CERT_TOP_ADD_EXCEPTION_FLAG_UNTRUSTED;
+      if (gSecInfo.isUntrusted) {
+        bucketId +=
+          gNsISecTel.WARNING_BAD_CERT_TOP_ADD_EXCEPTION_FLAG_UNTRUSTED;
         if (!use1) {
           use1 = true;
           shortDesc = uts;
@@ -229,10 +225,11 @@ function updateCertStatus() {
       pe.disabled = inPrivateBrowsing;
       pe.checked = !inPrivateBrowsing;
 
-      setText("headerDescription", gPKIBundle.getString("addExceptionInvalidHeader"));
+      let headerDescription = document.getElementById("headerDescription");
+      document.l10n.setAttributes(headerDescription, "add-exception-invalid-header");
     } else {
-      shortDesc = "addExceptionValidShort";
-      longDesc  = "addExceptionValidLong";
+      shortDesc = "add-exception-valid-short";
+      longDesc  = "add-exception-valid-long";
       gDialog.getButton("extra1").disabled = true;
       document.getElementById("permanent").disabled = true;
     }
@@ -244,8 +241,8 @@ function updateCertStatus() {
     // Notify observers about the availability of the certificate
     Services.obs.notifyObservers(null, "cert-exception-ui-ready");
   } else if (gChecking) {
-    shortDesc = "addExceptionCheckingShort";
-    longDesc  = "addExceptionCheckingLong2";
+    shortDesc = "add-exception-checking-short";
+    longDesc  = "add-exception-checking-long";
     // We're checking the certificate, so we disable the Get Certificate
     // button to make sure that the user can't interrupt the process and
     // trigger another certificate fetch.
@@ -254,26 +251,31 @@ function updateCertStatus() {
     gDialog.getButton("extra1").disabled = true;
     document.getElementById("permanent").disabled = true;
   } else {
-    shortDesc = "addExceptionNoCertShort";
-    longDesc  = "addExceptionNoCertLong2";
+    shortDesc = "add-exception-no-cert-short";
+    longDesc  = "add-exception-no-cert-long";
     // We're done checking the certificate, so allow the user to check it again.
     document.getElementById("checkCertButton").disabled = false;
     document.getElementById("viewCertButton").disabled = true;
     gDialog.getButton("extra1").disabled = true;
     document.getElementById("permanent").disabled = true;
   }
-
-  setText("statusDescription", gPKIBundle.getString(shortDesc));
-  setText("statusLongDescription", gPKIBundle.getString(longDesc));
+  let statusDescription = document.getElementById("statusDescription");
+  let statusLongDescription = document.getElementById("statusLongDescription");
+  document.l10n.setAttributes(statusDescription, shortDesc);
+  document.l10n.setAttributes(statusLongDescription, longDesc);
 
   if (use2) {
-    setText("status2Description", gPKIBundle.getString(shortDesc2));
-    setText("status2LongDescription", gPKIBundle.getString(longDesc2));
+    let status2Description = document.getElementById("status2Description");
+    let status2LongDescription = document.getElementById("status2LongDescription");
+    document.l10n.setAttributes(status2Description, shortDesc2);
+    document.l10n.setAttributes(status2LongDescription, longDesc2);
   }
 
   if (use3) {
-    setText("status3Description", gPKIBundle.getString(shortDesc3));
-    setText("status3LongDescription", gPKIBundle.getString(longDesc3));
+    let status3Description = document.getElementById("status3Description");
+    let status3LongDescription = document.getElementById("status3LongDescription");
+    document.l10n.setAttributes(status3Description, shortDesc3);
+    document.l10n.setAttributes(status3LongDescription, longDesc3);
   }
 
   window.sizeToContent();
@@ -294,29 +296,34 @@ function viewCertButtonClick() {
  * Handle user request to add an exception for the specified cert
  */
 function addException() {
-  if (!gCert || !gSSLStatus) {
+  if (!gCert || !gSecInfo) {
     return;
   }
 
   var overrideService = Cc["@mozilla.org/security/certoverride;1"]
                           .getService(Ci.nsICertOverrideService);
   var flags = 0;
-  let confirmBucketId = gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_BASE;
-  if (gSSLStatus.isUntrusted) {
+  let confirmBucketId =
+        gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_BASE;
+  if (gSecInfo.isUntrusted) {
     flags |= overrideService.ERROR_UNTRUSTED;
-    confirmBucketId += gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_FLAG_UNTRUSTED;
+    confirmBucketId +=
+        gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_FLAG_UNTRUSTED;
   }
-  if (gSSLStatus.isDomainMismatch) {
+  if (gSecInfo.isDomainMismatch) {
     flags |= overrideService.ERROR_MISMATCH;
-    confirmBucketId += gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_FLAG_DOMAIN;
+    confirmBucketId +=
+           gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_FLAG_DOMAIN;
   }
-  if (gSSLStatus.isNotValidAtThisTime) {
+  if (gSecInfo.isNotValidAtThisTime) {
     flags |= overrideService.ERROR_TIME;
-    confirmBucketId += gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_FLAG_TIME;
+    confirmBucketId +=
+           gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_FLAG_TIME;
   }
 
   var permanentCheckbox = document.getElementById("permanent");
-  var shouldStorePermanently = permanentCheckbox.checked && !inPrivateBrowsingMode();
+  var shouldStorePermanently = permanentCheckbox.checked &&
+                               !inPrivateBrowsingMode();
   if (!permanentCheckbox.checked) {
     gSecHistogram.add(gNsISecTel.WARNING_BAD_CERT_TOP_DONT_REMEMBER_EXCEPTION);
   }

@@ -7,7 +7,6 @@ const { combineReducers } = require("devtools/client/shared/vendor/redux");
 const { recordingState: {
   NOT_YET_KNOWN,
 }} = require("devtools/client/performance-new/utils");
-
 /**
  * The current state of the recording.
  * @param state - A recordingState key.
@@ -55,10 +54,10 @@ function isSupportedPlatform(state = null, action) {
 // is opened. These should be persisted between sessions. See Bug 1453014.
 
 /**
- * The setting for the recording interval.
+ * The setting for the recording interval. Defaults to 1ms.
  * @param {number} state
  */
-function interval(state = 1, action) {
+function interval(state = 1000, action) {
   switch (action.type) {
     case "CHANGE_INTERVAL":
       return action.interval;
@@ -129,10 +128,9 @@ function initializedValues(state = null, action) {
   switch (action.type) {
     case "INITIALIZE_STORE":
       return {
-        toolbox: action.toolbox,
         perfFront: action.perfFront,
         receiveProfile: action.receiveProfile,
-        setRecordingPreferences: action.setRecordingPreferences
+        setRecordingPreferences: action.setRecordingPreferences,
       };
     default:
       return state;

@@ -1,6 +1,7 @@
 from __future__ import absolute_import, unicode_literals
 
 import os
+import sys
 import threading
 import time
 
@@ -9,6 +10,16 @@ import pytest
 
 from mozprofile import BaseProfile
 from mozrunner.errors import RunnerNotStartedError
+
+# need this so raptor imports work both from /raptor and via mach
+here = os.path.abspath(os.path.dirname(__file__))
+if os.environ.get('SCRIPTSPATH', None) is not None:
+    # in production it is env SCRIPTS_PATH
+    mozharness_dir = os.environ['SCRIPTSPATH']
+else:
+    # locally it's in source tree
+    mozharness_dir = os.path.join(here, '../../mozharness')
+sys.path.insert(0, mozharness_dir)
 
 from raptor.raptor import Raptor
 
@@ -22,15 +33,21 @@ def test_create_profile(options, app, get_prefs):
     if app != 'firefox':
         return
 
-    # This pref is set in mozprofile
-    firefox_pref = 'user_pref("app.update.enabled", false);'
+    # These prefs are set in mozprofile
+    firefox_prefs = [
+        'user_pref("app.update.checkInstallTime", false);',
+        'user_pref("app.update.disabledForTesting", true);',
+        'user_pref("'
+        'security.turn_off_all_security_so_that_viruses_can_take_over_this_computer", true);'
+    ]
     # This pref is set in raptor
     raptor_pref = 'user_pref("security.enable_java", false);'
 
     prefs_file = os.path.join(raptor.profile.profile, 'user.js')
     with open(prefs_file, 'r') as fh:
         prefs = fh.read()
-        assert firefox_pref in prefs
+        for firefox_pref in firefox_prefs:
+            assert firefox_pref in prefs
         assert raptor_pref in prefs
 
 

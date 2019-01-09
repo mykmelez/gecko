@@ -8,38 +8,29 @@
 
 "use strict";
 
-const { PerformanceFront } = require("devtools/shared/fronts/performance");
 const { pmmIsProfilerActive, pmmLoadFrameScripts } = require("devtools/client/performance/test/helpers/profiler-mm-utils");
 
 add_task(async function() {
-  await addTab(MAIN_DOMAIN + "doc_perf.html");
-  initDebuggerServer();
-  const client = new DebuggerClient(DebuggerServer.connectPipe());
-  const form = await connectDebuggerClient(client);
-  const firstFront = PerformanceFront(client, form);
-  await firstFront.connect();
+  const target1 = await addTabTarget(MAIN_DOMAIN + "doc_perf.html");
+  const firstFront = await target1.getFront("performance");
 
   pmmLoadFrameScripts(gBrowser);
 
   await firstFront.startRecording();
 
-  await addTab(MAIN_DOMAIN + "doc_perf.html");
-  const client2 = new DebuggerClient(DebuggerServer.connectPipe());
-  const form2 = await connectDebuggerClient(client2);
-  const secondFront = PerformanceFront(client2, form2);
+  const target2 = await addTabTarget(MAIN_DOMAIN + "doc_perf.html");
+  const secondFront = await target2.getFront("performance");
   await secondFront.connect();
   pmmLoadFrameScripts(gBrowser);
 
   await secondFront.startRecording();
 
   // Manually teardown the tabs so we can check profiler status
-  await secondFront.destroy();
-  await client2.close();
+  await target2.destroy();
   ok((await pmmIsProfilerActive()),
     "The built-in profiler module should still be active.");
 
-  await firstFront.destroy();
-  await client.close();
+  await target1.destroy();
   ok(!(await pmmIsProfilerActive()),
     "The built-in profiler module should no longer be active.");
 

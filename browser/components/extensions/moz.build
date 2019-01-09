@@ -17,7 +17,6 @@ EXTRA_JS_MODULES += [
     'ExtensionControlledPopup.jsm',
     'ExtensionPopups.jsm',
     'ParseBreakpadSymbols-worker.js',
-    'ParseCppFiltSymbols-worker.js',
     'ParseNMSymbols-worker.js',
     'ParseSymbols.jsm',
 ]
@@ -25,6 +24,7 @@ EXTRA_JS_MODULES += [
 DIRS += ['schemas']
 
 BROWSER_CHROME_MANIFESTS += [
+    'test/browser/browser-private.ini',
     'test/browser/browser-remote.ini',
     'test/browser/browser.ini',
 ]

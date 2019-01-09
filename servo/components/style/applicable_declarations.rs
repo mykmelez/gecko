@@ -1,13 +1,13 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Applicable declarations management.
 
-use properties::PropertyDeclarationBlock;
-use rule_tree::{CascadeLevel, ShadowCascadeOrder, StyleSource};
+use crate::properties::PropertyDeclarationBlock;
+use crate::rule_tree::{CascadeLevel, ShadowCascadeOrder, StyleSource};
+use crate::shared_lock::Locked;
 use servo_arc::Arc;
-use shared_lock::Locked;
 use smallvec::SmallVec;
 use std::fmt::{self, Debug};
 
@@ -38,7 +38,8 @@ const SOURCE_ORDER_MASK: u32 = SOURCE_ORDER_MAX << SOURCE_ORDER_SHIFT;
 const SHADOW_CASCADE_ORDER_SHIFT: usize = SOURCE_ORDER_BITS;
 const SHADOW_CASCADE_ORDER_BITS: usize = 4;
 const SHADOW_CASCADE_ORDER_MAX: u8 = (1 << SHADOW_CASCADE_ORDER_BITS) - 1;
-const SHADOW_CASCADE_ORDER_MASK: u32 = (SHADOW_CASCADE_ORDER_MAX as u32) << SHADOW_CASCADE_ORDER_SHIFT;
+const SHADOW_CASCADE_ORDER_MASK: u32 =
+    (SHADOW_CASCADE_ORDER_MAX as u32) << SHADOW_CASCADE_ORDER_SHIFT;
 
 const CASCADE_LEVEL_SHIFT: usize = SOURCE_ORDER_BITS + SHADOW_CASCADE_ORDER_BITS;
 const CASCADE_LEVEL_BITS: usize = 4;
@@ -61,7 +62,8 @@ impl ApplicableDeclarationBits {
             "Gotta find more bits!"
         );
         let mut bits = ::std::cmp::min(source_order, SOURCE_ORDER_MAX);
-        bits |= ((shadow_cascade_order & SHADOW_CASCADE_ORDER_MAX) as u32) << SHADOW_CASCADE_ORDER_SHIFT;
+        bits |= ((shadow_cascade_order & SHADOW_CASCADE_ORDER_MAX) as u32) <<
+            SHADOW_CASCADE_ORDER_SHIFT;
         bits |= (cascade_level as u8 as u32) << CASCADE_LEVEL_SHIFT;
         ApplicableDeclarationBits(bits)
     }

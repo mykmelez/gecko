@@ -34,6 +34,12 @@
 #include "JSONFormatter.h"
 #include "StringOperations.h"
 
+#if CLANG_VERSION_MAJOR < 8
+// Starting with Clang 8.0 some basic functions have been renamed
+#define getBeginLoc getLocStart
+#define getEndLoc getLocEnd
+#endif
+
 using namespace clang;
 
 const std::string GENERATED("__GENERATED__" PATHSEP_STRING);
@@ -96,6 +102,7 @@ struct FileInfo {
       // We use the escape character to indicate the objdir nature.
       // Note that output also has the `/' already placed
       Interesting = true;
+      Generated = true;
       Realname.replace(0, Objdir.length(), GENERATED);
       return;
     }
@@ -105,6 +112,7 @@ struct FileInfo {
     // Srcdir or anything outside Srcdir.
     Interesting = (Rname.length() > Srcdir.length()) &&
                   (Rname.compare(0, Srcdir.length(), Srcdir) == 0);
+    Generated = false;
     if (Interesting) {
       // Remove the trailing `/' as well.
       Realname.erase(0, Srcdir.length() + 1);
@@ -113,6 +121,7 @@ struct FileInfo {
   std::string Realname;
   std::vector<std::string> Output;
   bool Interesting;
+  bool Generated;
 };
 
 class IndexConsumer;
@@ -128,13 +137,8 @@ public:
 
   virtual void MacroExpands(const Token &Tok, const MacroDefinition &Md,
                             SourceRange Range, const MacroArgs *Ma) override;
-#if CLANG_VERSION_MAJOR >= 5
   virtual void MacroUndefined(const Token &Tok, const MacroDefinition &Md,
                               const MacroDirective *Undef) override;
-#else
-  virtual void MacroUndefined(const Token &Tok,
-                              const MacroDefinition &Md) override;
-#endif
   virtual void Defined(const Token &Tok, const MacroDefinition &Md,
                        SourceRange Range) override;
   virtual void Ifdef(SourceLocation Loc, const Token &Tok,
@@ -158,8 +162,9 @@ private:
   // Tracks the set of declarations that the current expression/statement is
   // nested inside of.
   struct AutoSetContext {
-    AutoSetContext(IndexConsumer *Self, NamedDecl *Context)
+    AutoSetContext(IndexConsumer *Self, NamedDecl *Context, bool VisitImplicit = false)
         : Self(Self), Prev(Self->CurDeclContext), Decl(Context) {
+      this->VisitImplicit = VisitImplicit || (Prev ? Prev->VisitImplicit : false);
       Self->CurDeclContext = this;
     }
 
@@ -168,6 +173,7 @@ private:
     IndexConsumer *Self;
     AutoSetContext *Prev;
     NamedDecl *Decl;
+    bool VisitImplicit;
   };
   AutoSetContext *CurDeclContext;
 
@@ -271,18 +277,8 @@ private:
           std::string Backing;
           llvm::raw_string_ostream Stream(Backing);
           const TemplateArgumentList &TemplateArgs = Spec->getTemplateArgs();
-#if CLANG_VERSION_MAJOR > 5
           printTemplateArgumentList(
               Stream, TemplateArgs.asArray(), PrintingPolicy(CI.getLangOpts()));
-#elif CLANG_VERSION_MAJOR > 3 ||                                                 \
-    (CLANG_VERSION_MAJOR == 3 && CLANG_VERSION_MINOR >= 9)
-          TemplateSpecializationType::PrintTemplateArgumentList(
-              Stream, TemplateArgs.asArray(), PrintingPolicy(CI.getLangOpts()));
-#else
-          TemplateSpecializationType::PrintTemplateArgumentList(
-              stream, templateArgs.data(), templateArgs.size(),
-              PrintingPolicy(CI.getLangOpts()));
-#endif
           Result += Stream.str();
         }
       } else if (const auto *Nd = dyn_cast<NamespaceDecl>(DC)) {
@@ -327,6 +323,14 @@ private:
     std::string Filename = F->Realname;
     if (Filename.length() == 0 && Backup.length() != 0) {
       return Backup;
+    }
+    if (F->Generated) {
+      // Since generated files may be different on different platforms,
+      // we need to include a platform-specific thing in the hash. Otherwise
+      // we can end up with hash collisions where different symbols from
+      // different platforms map to the same thing.
+      char* Platform = getenv("MOZSEARCH_PLATFORM");
+      Filename = std::string(Platform ? Platform : "") + std::string("@") + Filename;
     }
     return hash(Filename + std::string("@") + locationToString(Loc));
   }
@@ -385,7 +389,7 @@ private:
     } else if (const FieldDecl *D2 = dyn_cast<FieldDecl>(Decl)) {
       const RecordDecl *Record = D2->getParent();
       return std::string("F_<") + getMangledName(Ctx, Record) + ">_" +
-             toString(D2->getFieldIndex());
+             D2->getNameAsString();
     } else if (const EnumConstantDecl *D2 = dyn_cast<EnumConstantDecl>(Decl)) {
       const DeclContext *DC = Decl->getDeclContext();
       if (const NamedDecl *Named = dyn_cast<NamedDecl>(DC)) {
@@ -466,7 +470,8 @@ public:
       AutoLockFile Lock(Filename);
 
       if (!Lock.success()) {
-        continue;
+        fprintf(stderr, "Unable to lock file %s\n", Filename.c_str());
+        exit(1);
       }
 
       std::vector<std::string> Lines;
@@ -476,7 +481,7 @@ public:
       // there. This ensures that header files that are included multiple times
       // in different ways are analyzed completely.
       char Buffer[65536];
-      FILE *Fp = Lock.openFile("r");
+      FILE *Fp = Lock.openFile("rb");
       if (!Fp) {
         fprintf(stderr, "Unable to open input file %s\n", Filename.c_str());
         exit(1);
@@ -496,7 +501,7 @@ public:
 
       // Overwrite the output file with the merged data. Since we have the lock,
       // this will happen atomically.
-      Fp = Lock.openFile("w");
+      Fp = Lock.openFile("wb");
       if (!Fp) {
         fprintf(stderr, "Unable to open output file %s\n", Filename.c_str());
         exit(1);
@@ -571,7 +576,7 @@ public:
     return Super::TraverseCXXMethodDecl(D);
   }
   bool TraverseCXXConstructorDecl(CXXConstructorDecl *D) {
-    AutoSetContext Asc(this, D);
+    AutoSetContext Asc(this, D, /*VisitImplicit=*/true);
     const FunctionDecl *Def;
     // See TraverseFunctionDecl.
     if (TemplateStack && D->isDefined(Def) && Def && D != Def) {
@@ -796,6 +801,10 @@ public:
     return false;
   }
 
+  bool shouldVisitImplicitCode() const {
+    return CurDeclContext && CurDeclContext->VisitImplicit;
+  }
+
   bool TraverseClassTemplateDecl(ClassTemplateDecl *D) {
     AutoTemplateContext Atc(this);
     Super::TraverseClassTemplateDecl(D);
@@ -988,7 +997,7 @@ public:
   SourceRange getFunctionPeekRange(FunctionDecl* D) {
     // We always start at the start of the function decl, which may include the
     // return type on a separate line.
-    SourceLocation Start = D->getLocStart();
+    SourceLocation Start = D->getBeginLoc();
 
     // By default, we end at the line containing the function's name.
     SourceLocation End = D->getLocation();
@@ -1003,7 +1012,7 @@ public:
       // the parameters in that case.
       if (ParamLoc.first == FuncLoc.first) {
         // Assume parameters are in order, so we always take the last one.
-        End = Param->getLocEnd();
+        End = Param->getEndLoc();
       }
     }
 
@@ -1011,7 +1020,7 @@ public:
   }
 
   SourceRange getTagPeekRange(TagDecl* D) {
-    SourceLocation Start = D->getLocStart();
+    SourceLocation Start = D->getBeginLoc();
 
     // By default, we end at the line containing the name.
     SourceLocation End = D->getLocation();
@@ -1021,13 +1030,13 @@ public:
     if (CXXRecordDecl* D2 = dyn_cast<CXXRecordDecl>(D)) {
       // But if there are parameters, we want to include those as well.
       for (CXXBaseSpecifier& Base : D2->bases()) {
-        std::pair<FileID, unsigned> Loc = SM.getDecomposedLoc(Base.getLocEnd());
+        std::pair<FileID, unsigned> Loc = SM.getDecomposedLoc(Base.getEndLoc());
 
         // It's possible there are macros involved or something. We don't include
         // the parameters in that case.
         if (Loc.first == FuncLoc.first) {
           // Assume parameters are in order, so we always take the last one.
-          End = Base.getLocEnd();
+          End = Base.getEndLoc();
         }
       }
     }
@@ -1110,7 +1119,7 @@ public:
     int Flags = 0;
     const char *Kind = "def";
     const char *PrettyKind = "?";
-    SourceRange PeekRange(D->getLocStart(), D->getLocEnd());
+    SourceRange PeekRange(D->getBeginLoc(), D->getEndLoc());
     if (FunctionDecl *D2 = dyn_cast<FunctionDecl>(D)) {
       if (D2->isTemplateInstantiation()) {
         D = D2->getTemplateInstantiationPattern();
@@ -1168,7 +1177,7 @@ public:
     // class name.
     if (isa<CXXDestructorDecl>(D)) {
       const char *P = SM.getCharacterData(Loc);
-      assert(*p == '~');
+      assert(*P == '~');
       P++;
 
       unsigned Skipped = 1;
@@ -1189,7 +1198,7 @@ public:
   }
 
   bool VisitCXXConstructExpr(CXXConstructExpr *E) {
-    SourceLocation Loc = E->getLocStart();
+    SourceLocation Loc = E->getBeginLoc();
     normalizeLocation(&Loc);
     if (!isInterestingLocation(Loc)) {
       return true;
@@ -1467,14 +1476,9 @@ void PreprocessorHook::MacroExpands(const Token &Tok, const MacroDefinition &Md,
   Indexer->macroUsed(Tok, Md.getMacroInfo());
 }
 
-#if CLANG_VERSION_MAJOR >= 5
 void PreprocessorHook::MacroUndefined(const Token &Tok,
                                       const MacroDefinition &Md,
                                       const MacroDirective *Undef)
-#else
-void PreprocessorHook::MacroUndefined(const Token &Tok,
-                                      const MacroDefinition &Md)
-#endif
 {
   Indexer->macroUsed(Tok, Md.getMacroInfo());
 }

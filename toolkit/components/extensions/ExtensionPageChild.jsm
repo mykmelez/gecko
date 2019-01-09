@@ -15,19 +15,15 @@ var EXPORTED_SYMBOLS = ["ExtensionPageChild"];
  */
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "ExtensionChildDevToolsUtils",
                                "resource://gre/modules/ExtensionChildDevToolsUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "ExtensionProcessScript",
+                               "resource://gre/modules/ExtensionProcessScript.jsm");
 ChromeUtils.defineModuleGetter(this, "Schemas",
                                "resource://gre/modules/Schemas.jsm");
 ChromeUtils.defineModuleGetter(this, "WebNavigationFrames",
                                "resource://gre/modules/WebNavigationFrames.jsm");
-
-XPCOMUtils.defineLazyGetter(
-  this, "processScript",
-  () => Cc["@mozilla.org/webextensions/extension-process-script;1"]
-          .getService().wrappedJSObject);
 
 const CATEGORY_EXTENSION_SCRIPTS_ADDON = "webextension-scripts-addon";
 const CATEGORY_EXTENSION_SCRIPTS_DEVTOOLS = "webextension-scripts-devtools";
@@ -90,7 +86,7 @@ const initializeBackgroundPage = (context) => {
 };
 
 function getFrameData(global) {
-  return processScript.getFrameData(global, true);
+  return ExtensionProcessScript.getFrameData(global, true);
 }
 
 var apiManager = new class extends SchemaAPIManager {
@@ -103,7 +99,7 @@ var apiManager = new class extends SchemaAPIManager {
     if (!this.initialized) {
       this.initialized = true;
       this.initGlobal();
-      for (let [/* name */, value] of XPCOMUtils.enumerateCategoryEntries(CATEGORY_EXTENSION_SCRIPTS_ADDON)) {
+      for (let {value} of Services.catMan.enumerateCategory(CATEGORY_EXTENSION_SCRIPTS_ADDON)) {
         this.loadScript(value);
       }
     }
@@ -120,7 +116,7 @@ var devtoolsAPIManager = new class extends SchemaAPIManager {
     if (!this.initialized) {
       this.initialized = true;
       this.initGlobal();
-      for (let [/* name */, value] of XPCOMUtils.enumerateCategoryEntries(CATEGORY_EXTENSION_SCRIPTS_DEVTOOLS)) {
+      for (let {value} of Services.catMan.enumerateCategory(CATEGORY_EXTENSION_SCRIPTS_DEVTOOLS)) {
         this.loadScript(value);
       }
     }
@@ -399,9 +395,7 @@ ExtensionPageChild = {
       throw new Error("An extension context was already initialized for this frame");
     }
 
-    let mm = contentWindow.document.docShell
-                          .QueryInterface(Ci.nsIInterfaceRequestor)
-                          .getInterface(Ci.nsIContentFrameMessageManager);
+    let mm = contentWindow.docShell.messageManager;
 
     let {viewType, tabId, devtoolsToolboxInfo} = getFrameData(mm) || {};
 

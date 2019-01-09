@@ -1,27 +1,21 @@
-"use strict";
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.getNextStep = getNextStep;
+// @flow
 
-var _types = require("@babel/types/index");
+import * as t from "@babel/types";
+import type { SimplePath } from "./utils/simple-path";
+import type { SourceLocation, SourceId } from "../../types";
+import type { AstPosition } from "./types";
+import { getClosestPath } from "./utils/closest";
+import { isAwaitExpression, isYieldExpression } from "./utils/helpers";
 
-var t = _interopRequireWildcard(_types);
-
-var _closest = require("./utils/closest");
-
-var _helpers = require("./utils/helpers");
-
-function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) { var desc = Object.defineProperty && Object.getOwnPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : {}; if (desc.get || desc.set) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } } newObj.default = obj; return newObj; } }
-
-function _objectSpread(target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i] != null ? arguments[i] : {}; var ownKeys = Object.keys(source); if (typeof Object.getOwnPropertySymbols === 'function') { ownKeys = ownKeys.concat(Object.getOwnPropertySymbols(source).filter(function (sym) { return Object.getOwnPropertyDescriptor(source, sym).enumerable; })); } ownKeys.forEach(function (key) { _defineProperty(target, key, source[key]); }); } return target; }
-
-function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
-
-function getNextStep(sourceId, pausedPosition) {
+export function getNextStep(
+  sourceId: SourceId,
+  pausedPosition: AstPosition
+): ?SourceLocation {
   const currentExpression = getSteppableExpression(sourceId, pausedPosition);
-
   if (!currentExpression) {
     return null;
   }
@@ -31,33 +25,44 @@ function getNextStep(sourceId, pausedPosition) {
   });
 
   if (!currentStatement) {
-    throw new Error("Assertion failure - this should always find at least Program");
+    throw new Error(
+      "Assertion failure - this should always find at least Program"
+    );
   }
 
   return _getNextStep(currentStatement, sourceId, pausedPosition);
 }
 
-function getSteppableExpression(sourceId, pausedPosition) {
-  const closestPath = (0, _closest.getClosestPath)(sourceId, pausedPosition);
+function getSteppableExpression(
+  sourceId: SourceId,
+  pausedPosition: AstPosition
+) {
+  const closestPath = getClosestPath(sourceId, pausedPosition);
 
   if (!closestPath) {
     return null;
   }
 
-  if ((0, _helpers.isAwaitExpression)(closestPath) || (0, _helpers.isYieldExpression)(closestPath)) {
+  if (isAwaitExpression(closestPath) || isYieldExpression(closestPath)) {
     return closestPath;
   }
 
-  return closestPath.find(p => t.isAwaitExpression(p.node) || t.isYieldExpression(p.node));
+  return closestPath.find(
+    p => t.isAwaitExpression(p.node) || t.isYieldExpression(p.node)
+  );
 }
 
-function _getNextStep(statement, sourceId, position) {
+function _getNextStep(
+  statement: SimplePath,
+  sourceId: string,
+  position: AstPosition
+): ?SourceLocation {
   const nextStatement = statement.getSibling(1);
-
   if (nextStatement) {
-    return _objectSpread({}, nextStatement.node.loc.start, {
+    return {
+      ...nextStatement.node.loc.start,
       sourceId: sourceId
-    });
+    };
   }
 
   return null;

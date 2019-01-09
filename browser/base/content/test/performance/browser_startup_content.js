@@ -20,70 +20,65 @@ const kDumpAllStacks = false;
 const whitelist = {
   components: new Set([
     "ContentProcessSingleton.js",
-    "EnterprisePoliciesContent.js", // bug 1470324
-    "extension-process-script.js",
   ]),
   modules: new Set([
-    // From the test harness
     "chrome://mochikit/content/ShutdownLeaksCollector.jsm",
-    "resource://specialpowers/MockColorPicker.jsm",
-    "resource://specialpowers/MockFilePicker.jsm",
-    "resource://specialpowers/MockPermissionPrompt.jsm",
+    "resource://specialpowers/specialpowers.js",
+    "resource://specialpowers/specialpowersAPI.js",
 
     // General utilities
     "resource://gre/modules/AppConstants.jsm",
     "resource://gre/modules/AsyncShutdown.jsm",
     "resource://gre/modules/DeferredTask.jsm",
-    "resource://gre/modules/FileUtils.jsm",
-    "resource://gre/modules/NetUtil.jsm",
     "resource://gre/modules/PromiseUtils.jsm",
     "resource://gre/modules/Services.jsm", // bug 1464542
     "resource://gre/modules/Timer.jsm",
     "resource://gre/modules/XPCOMUtils.jsm",
 
     // Logging related
-    "resource://gre/modules/Console.jsm", // bug 1470333
     "resource://gre/modules/Log.jsm",
 
     // Session store
-    "resource:///modules/sessionstore/ContentRestore.jsm",
+    "resource:///modules/sessionstore/ContentSessionStore.jsm",
     "resource://gre/modules/sessionstore/SessionHistory.jsm",
 
     // Forms and passwords
+    "resource://formautofill/FormAutofill.jsm",
     "resource://formautofill/FormAutofillContent.jsm",
-    "resource://formautofill/FormAutofillUtils.jsm",
 
     // Browser front-end
-    "resource:///modules/ContentLinkHandler.jsm",
+    "resource:///actors/AboutReaderChild.jsm",
+    "resource:///actors/BrowserTabChild.jsm",
     "resource:///modules/ContentMetaHandler.jsm",
-    "resource:///modules/PageStyleHandler.jsm",
-    "resource://gre/modules/BrowserUtils.jsm",
+    "resource:///actors/LinkHandlerChild.jsm",
+    "resource:///actors/PageStyleChild.jsm",
+    "resource:///actors/SearchTelemetryChild.jsm",
+    "resource://gre/modules/ActorChild.jsm",
+    "resource://gre/modules/ActorManagerChild.jsm",
     "resource://gre/modules/E10SUtils.jsm",
-    "resource://gre/modules/PrivateBrowsingUtils.jsm",
-    "resource://gre/modules/ReaderMode.jsm",
-    "resource://gre/modules/RemotePageManager.jsm",
-
-    // Pocket
-    "chrome://pocket/content/AboutPocket.jsm",
+    "resource://gre/modules/Readerable.jsm",
+    "resource://gre/modules/WebProgressChild.jsm",
 
     // Telemetry
     "resource://gre/modules/TelemetryController.jsm", // bug 1470339
-    "resource://gre/modules/TelemetrySession.jsm", // bug 1470339
     "resource://gre/modules/TelemetryUtils.jsm", // bug 1470339
 
-    // PDF.js
-    "resource://pdf.js/PdfJsRegistration.jsm",
-    "resource://pdf.js/PdfjsContentUtils.jsm",
-
     // Extensions
+    "resource://gre/modules/ExtensionProcessScript.jsm",
     "resource://gre/modules/ExtensionUtils.jsm",
     "resource://gre/modules/MessageChannel.jsm",
+  ]),
+};
 
-    // Service workers
-    "resource://gre/modules/ServiceWorkerCleanUp.jsm",
-
-    // Shield
-    "resource://normandy-content/AboutPages.jsm",
+// Items on this list are allowed to be loaded but not
+// required, as opposed to items in the main whitelist,
+// which are all required.
+const intermittently_loaded_whitelist = {
+  components: new Set([
+    "nsAsyncShutdown.js",
+  ]),
+  modules: new Set([
+    "resource://gre/modules/sessionstore/Utils.jsm",
   ]),
 };
 
@@ -92,7 +87,7 @@ const blacklist = {
     "@mozilla.org/base/telemetry-startup;1",
     "@mozilla.org/embedcomp/default-tooltiptextprovider;1",
     "@mozilla.org/push/Service;1",
-  ])
+  ]),
 };
 
 add_task(async function() {
@@ -111,17 +106,16 @@ add_task(async function() {
     Cm.QueryInterface(Ci.nsIServiceManager);
     ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
     let collectStacks = AppConstants.NIGHTLY_BUILD || AppConstants.DEBUG;
-    let loader = Cc["@mozilla.org/moz/jsloader;1"].getService(Ci.xpcIJSModuleLoader);
     let components = {};
-    for (let component of loader.loadedComponents()) {
+    for (let component of Cu.loadedComponents) {
       /* Keep only the file name for components, as the path is an absolute file
          URL rather than a resource:// URL like for modules. */
       components[component.replace(/.*\//, "")] =
-        collectStacks ? loader.getComponentLoadStack(component) : "";
+        collectStacks ? Cu.getComponentLoadStack(component) : "";
     }
     let modules = {};
-    for (let module of loader.loadedModules()) {
-      modules[module] = collectStacks ? loader.getModuleImportStack(module) : "";
+    for (let module of Cu.loadedModules) {
+      modules[module] = collectStacks ? Cu.getModuleImportStack(module) : "";
     }
     let services = {};
     for (let contractID of Object.keys(Cc)) {
@@ -143,6 +137,10 @@ add_task(async function() {
         return true;
       whitelist[scriptType].delete(c);
       return false;
+    });
+
+    loadedList[scriptType] = loadedList[scriptType].filter(c => {
+      return !intermittently_loaded_whitelist[scriptType].has(c);
     });
 
     is(loadedList[scriptType].length, 0,

@@ -14,10 +14,8 @@
 namespace mozilla {
 namespace dom {
 
-void
-TextDecoder::Init(const nsAString& aLabel, const bool aFatal,
-                  ErrorResult& aRv)
-{
+void TextDecoder::Init(const nsAString& aLabel,
+                       const TextDecoderOptions& aOptions, ErrorResult& aRv) {
   // Let encoding be the result of getting an encoding from label.
   // If encoding is failure or replacement, throw a RangeError
   // (https://encoding.spec.whatwg.org/#dom-textdecoder).
@@ -28,29 +26,26 @@ TextDecoder::Init(const nsAString& aLabel, const bool aFatal,
     aRv.ThrowRangeError<MSG_ENCODING_NOT_SUPPORTED>(label);
     return;
   }
-  InitWithEncoding(WrapNotNull(encoding), aFatal);
+  InitWithEncoding(WrapNotNull(encoding), aOptions);
 }
 
-void
-TextDecoder::InitWithEncoding(NotNull<const Encoding*> aEncoding,
-                              const bool aFatal)
-{
+void TextDecoder::InitWithEncoding(NotNull<const Encoding*> aEncoding,
+                                   const TextDecoderOptions& aOptions) {
   aEncoding->Name(mEncoding);
-  // If the constructor is called with an options argument,
-  // and the fatal property of the dictionary is set,
-  // set the internal fatal flag of the decoder object.
-  mFatal = aFatal;
+  // Store the flags passed via our options dictionary.
+  mFatal = aOptions.mFatal;
+  mIgnoreBOM = aOptions.mIgnoreBOM;
 
   // Create a decoder object for mEncoding.
-  mDecoder = aEncoding->NewDecoderWithBOMRemoval();
+  if (mIgnoreBOM) {
+    mDecoder = aEncoding->NewDecoderWithoutBOMHandling();
+  } else {
+    mDecoder = aEncoding->NewDecoderWithBOMRemoval();
+  }
 }
 
-void
-TextDecoder::Decode(Span<const uint8_t> aInput,
-                    const bool aStream,
-                    nsAString& aOutDecodedString,
-                    ErrorResult& aRv)
-{
+void TextDecoder::Decode(Span<const uint8_t> aInput, const bool aStream,
+                         nsAString& aOutDecodedString, ErrorResult& aRv) {
   aOutDecodedString.Truncate();
 
   CheckedInt<size_t> needed = mDecoder->MaxUTF16BufferLength(aInput.Length());
@@ -71,14 +66,14 @@ TextDecoder::Decode(Span<const uint8_t> aInput,
   bool hadErrors;
   if (mFatal) {
     Tie(result, read, written) = mDecoder->DecodeToUTF16WithoutReplacement(
-      aInput, aOutDecodedString, !aStream);
+        aInput, aOutDecodedString, !aStream);
     if (result != kInputEmpty) {
       aRv.ThrowTypeError<MSG_DOM_DECODING_FAILED>();
       return;
     }
   } else {
     Tie(result, read, written, hadErrors) =
-      mDecoder->DecodeToUTF16(aInput, aOutDecodedString, !aStream);
+        mDecoder->DecodeToUTF16(aInput, aOutDecodedString, !aStream);
   }
   MOZ_ASSERT(result == kInputEmpty);
   MOZ_ASSERT(read == aInput.Length());
@@ -97,12 +92,9 @@ TextDecoder::Decode(Span<const uint8_t> aInput,
   }
 }
 
-void
-TextDecoder::Decode(const Optional<ArrayBufferViewOrArrayBuffer>& aBuffer,
-                    const TextDecodeOptions& aOptions,
-                    nsAString& aOutDecodedString,
-                    ErrorResult& aRv)
-{
+void TextDecoder::Decode(const Optional<ArrayBufferViewOrArrayBuffer>& aBuffer,
+                         const TextDecodeOptions& aOptions,
+                         nsAString& aOutDecodedString, ErrorResult& aRv) {
   if (!aBuffer.WasPassed()) {
     Decode(nullptr, aOptions.mStream, aOutDecodedString, aRv);
     return;
@@ -123,12 +115,10 @@ TextDecoder::Decode(const Optional<ArrayBufferViewOrArrayBuffer>& aBuffer,
   Decode(MakeSpan(data, length), aOptions.mStream, aOutDecodedString, aRv);
 }
 
-void
-TextDecoder::GetEncoding(nsAString& aEncoding)
-{
+void TextDecoder::GetEncoding(nsAString& aEncoding) {
   CopyASCIItoUTF16(mEncoding, aEncoding);
   nsContentUtils::ASCIIToLower(aEncoding);
 }
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla

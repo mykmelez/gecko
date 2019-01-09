@@ -3,7 +3,7 @@
 
 "use strict";
 
-var {RetVal, Actor, ActorClassWithSpec, Front, FrontClassWithSpec,
+var {RetVal, Actor, ActorClassWithSpec, FrontClassWithSpec,
      generateActorSpec} = require("devtools/shared/protocol");
 var Services = require("Services");
 
@@ -12,9 +12,9 @@ const lazySpec = generateActorSpec({
 
   methods: {
     hello: {
-      response: { str: RetVal("string") }
-    }
-  }
+      response: { str: RetVal("string") },
+    },
+  },
 });
 
 exports.LazyActor = ActorClassWithSpec(lazySpec, {
@@ -26,17 +26,18 @@ exports.LazyActor = ActorClassWithSpec(lazySpec, {
 
   hello: function(str) {
     return "world";
-  }
+  },
 });
 
 Services.obs.notifyObservers(null, "actor", "loaded");
 
-exports.LazyFront = FrontClassWithSpec(lazySpec, {
-  initialize: function(client, form) {
-    Front.prototype.initialize.call(this, client);
+class LazyFront extends FrontClassWithSpec(lazySpec) {
+  constructor(client, form) {
+    super(client, form);
     this.actorID = form.lazyActor;
 
     client.addActorPool(this);
     this.manage(this);
   }
-});
+}
+exports.LazyFront = LazyFront;

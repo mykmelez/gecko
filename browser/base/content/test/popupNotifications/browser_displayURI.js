@@ -107,4 +107,3 @@ add_task(async function test_displayURI_camera_blob() {
     content.location.href = url;
   }, {skipOnExtension: true});
 });
-

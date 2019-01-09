@@ -113,9 +113,6 @@ exports.HighlighterActor = protocol.ActorClassWithSpec(highlighterSpec, {
   form: function() {
     return {
       actor: this.actorID,
-      traits: {
-        autoHideOnDestroy: true
-      }
     };
   },
 
@@ -161,6 +158,7 @@ exports.HighlighterActor = protocol.ActorClassWithSpec(highlighterSpec, {
     protocol.Actor.prototype.destroy.call(this);
 
     this.hideBoxModel();
+    this.cancelPick();
     this._destroyHighlighter();
     this._targetActor.off("navigate", this._onNavigate);
 
@@ -383,6 +381,33 @@ exports.HighlighterActor = protocol.ActorClassWithSpec(highlighterSpec, {
     return this._walker.attachElement(node);
   },
 
+  _onSuppressedEvent(event) {
+    if (event.type == "mousemove") {
+      this._onHovered(event);
+    } else if (event.type == "mouseup") {
+      // Suppressed mousedown/mouseup events will be sent to us before they have
+      // been converted into click events. Just treat any mouseup as a click.
+      this._onPick(event);
+    }
+  },
+
+  /**
+   * When the debugger pauses execution in a page, events will not be delivered
+   * to any handlers added to elements on that page. This method uses the
+   * document's setSuppressedEventListener interface to bypass this restriction:
+   * events will be delivered to the callback at times when they would
+   * otherwise be suppressed. The set of events delivered this way is currently
+   * limited to mouse events.
+   *
+   * @param callback The function to call with suppressed events, or null.
+   */
+  _setSuppressedEventListener(callback) {
+    const document = this._targetActor.window.document;
+
+    // Pass the callback to setSuppressedEventListener as an EventListener.
+    document.setSuppressedEventListener(callback ? { handleEvent: callback } : null);
+  },
+
   _startPickerListeners: function() {
     const target = this._highlighterEnv.pageListenerTarget;
     target.addEventListener("mousemove", this._onHovered, true);
@@ -392,6 +417,8 @@ exports.HighlighterActor = protocol.ActorClassWithSpec(highlighterSpec, {
     target.addEventListener("dblclick", this._preventContentEvent, true);
     target.addEventListener("keydown", this._onKey, true);
     target.addEventListener("keyup", this._preventContentEvent, true);
+
+    this._setSuppressedEventListener(this._onSuppressedEvent.bind(this));
   },
 
   _stopPickerListeners: function() {
@@ -408,6 +435,8 @@ exports.HighlighterActor = protocol.ActorClassWithSpec(highlighterSpec, {
     target.removeEventListener("dblclick", this._preventContentEvent, true);
     target.removeEventListener("keydown", this._onKey, true);
     target.removeEventListener("keyup", this._preventContentEvent, true);
+
+    this._setSuppressedEventListener(null);
   },
 
   _highlighterReady: function() {
@@ -425,7 +454,7 @@ exports.HighlighterActor = protocol.ActorClassWithSpec(highlighterSpec, {
       this._isPicking = false;
       this._hoveredNode = null;
     }
-  }
+  },
 });
 
 /**
@@ -498,11 +527,13 @@ exports.CustomHighlighterActor = protocol.ActorClassWithSpec(customHighlighterSp
    * (FF41+)
    */
   show: function(node, options) {
-    if (!node || !this._highlighter) {
-      return false;
+    if (!this._highlighter) {
+      return null;
     }
 
-    return this._highlighter.show(node.rawNode, options);
+    const rawNode = node && node.rawNode;
+
+    return this._highlighter.show(rawNode, options);
   },
 
   /**
@@ -538,7 +569,7 @@ exports.CustomHighlighterActor = protocol.ActorClassWithSpec(customHighlighterSp
       this._highlighterEnv.destroy();
       this._highlighterEnv = null;
     }
-  }
+  },
 });
 
 /**
@@ -551,8 +582,7 @@ exports.CustomHighlighterActor = protocol.ActorClassWithSpec(customHighlighterSp
  * most frequent way of using it, since highlighters are usually initialized by
  * the HighlighterActor or CustomHighlighterActor, which have a targetActor
  * reference). It can also be initialized just with a window object (which is
- * useful for when a highlighter is used outside of the debugger server context,
- * for instance from a gcli command).
+ * useful for when a highlighter is used outside of the debugger server context.
  */
 function HighlighterEnvironment() {
   this.relayTargetActorWindowReady = this.relayTargetActorWindowReady.bind(this);
@@ -581,7 +611,7 @@ HighlighterEnvironment.prototype = {
     this.listener = {
       QueryInterface: ChromeUtils.generateQI([
         Ci.nsIWebProgressListener,
-        Ci.nsISupportsWeakReference
+        Ci.nsISupportsWeakReference,
       ]),
 
       onStateChange: function(progress, request, flag) {
@@ -599,16 +629,16 @@ HighlighterEnvironment.prototype = {
           // in this window.
           self.emit("will-navigate", {
             window: win,
-            isTopLevel: true
+            isTopLevel: true,
           });
         }
         if (isWindow && isStop) {
           self.emit("navigate", {
             window: win,
-            isTopLevel: true
+            isTopLevel: true,
           });
         }
-      }
+      },
     };
 
     this.webProgress.addProgressListener(this.listener,
@@ -640,9 +670,7 @@ HighlighterEnvironment.prototype = {
 
   get docShell() {
     return this.window &&
-           this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-                      .getInterface(Ci.nsIWebNavigation)
-                      .QueryInterface(Ci.nsIDocShell);
+           this.window.docShell;
   },
 
   get webProgress() {
@@ -701,7 +729,7 @@ HighlighterEnvironment.prototype = {
 
     this._targetActor = null;
     this._win = null;
-  }
+  },
 };
 
 register("BoxModelHighlighter", "box-model");

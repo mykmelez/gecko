@@ -33,6 +33,7 @@
 #include "mozilla/BackgroundHangMonitor.h"
 #include "GeckoProfiler.h"
 #include "ScreenHelperCocoa.h"
+#include "mozilla/Hal.h"
 #include "mozilla/widget/ScreenManager.h"
 #include "HeadlessScreenHelper.h"
 #include "pratom.h"
@@ -44,6 +45,7 @@
 #include "nsIDOMWakeLockListener.h"
 #include "nsIPowerManagerService.h"
 
+using namespace mozilla;
 using namespace mozilla::widget;
 
 #define WAKE_LOCK_LOG(...) MOZ_LOG(gMacWakeLockLog, mozilla::LogLevel::Debug, (__VA_ARGS__))
@@ -237,6 +239,8 @@ nsAppShell::~nsAppShell()
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
+  hal::Shutdown();
+
   if (mCFRunLoop) {
     if (mCFRunLoopSource) {
       ::CFRunLoopRemoveSource(mCFRunLoop, mCFRunLoopSource,
@@ -311,29 +315,31 @@ nsAppShell::Init()
   mAutoreleasePools = ::CFArrayCreateMutable(nullptr, 0, nullptr);
   NS_ENSURE_STATE(mAutoreleasePools);
 
-  // Get the path of the nib file, which lives in the GRE location
-  nsCOMPtr<nsIFile> nibFile;
-  nsresult rv = NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(nibFile));
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (XRE_GetProcessType() != GeckoProcessType_RDD) {
+    // Get the path of the nib file, which lives in the GRE location
+    nsCOMPtr<nsIFile> nibFile;
+    nsresult rv = NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(nibFile));
+    NS_ENSURE_SUCCESS(rv, rv);
 
-  nibFile->AppendNative(NS_LITERAL_CSTRING("res"));
-  nibFile->AppendNative(NS_LITERAL_CSTRING("MainMenu.nib"));
+    nibFile->AppendNative(NS_LITERAL_CSTRING("res"));
+    nibFile->AppendNative(NS_LITERAL_CSTRING("MainMenu.nib"));
 
-  nsAutoCString nibPath;
-  rv = nibFile->GetNativePath(nibPath);
-  NS_ENSURE_SUCCESS(rv, rv);
+    nsAutoCString nibPath;
+    rv = nibFile->GetNativePath(nibPath);
+    NS_ENSURE_SUCCESS(rv, rv);
 
-  // This call initializes NSApplication unless:
-  // 1) we're using xre -- NSApp's already been initialized by
-  //    MacApplicationDelegate.mm's EnsureUseCocoaDockAPI().
-  // 2) an embedding app that uses NSApplicationMain() is running -- NSApp's
-  //    already been initialized and its main run loop is already running.
-  [NSBundle loadNibFile:
-                     [NSString stringWithUTF8String:(const char*)nibPath.get()]
-      externalNameTable:
-           [NSDictionary dictionaryWithObject:[GeckoNSApplication sharedApplication]
-                                       forKey:@"NSOwner"]
-               withZone:NSDefaultMallocZone()];
+    // This call initializes NSApplication unless:
+    // 1) we're using xre -- NSApp's already been initialized by
+    //    MacApplicationDelegate.mm's EnsureUseCocoaDockAPI().
+    // 2) an embedding app that uses NSApplicationMain() is running -- NSApp's
+    //    already been initialized and its main run loop is already running.
+    [NSBundle loadNibFile:
+                       [NSString stringWithUTF8String:(const char*)nibPath.get()]
+        externalNameTable:
+             [NSDictionary dictionaryWithObject:[GeckoNSApplication sharedApplication]
+                                         forKey:@"NSOwner"]
+                 withZone:NSDefaultMallocZone()];
+  }
 
   mDelegate = [[AppShellDelegate alloc] initWithAppShell:this];
   NS_ENSURE_STATE(mDelegate);
@@ -356,6 +362,8 @@ nsAppShell::Init()
 
   ::CFRunLoopAddSource(mCFRunLoop, mCFRunLoopSource, kCFRunLoopCommonModes);
 
+  hal::Init();
+
   if (XRE_IsParentProcess()) {
     ScreenManager& screenManager = ScreenManager::GetSingleton();
 
@@ -366,7 +374,7 @@ nsAppShell::Init()
     }
   }
 
-  rv = nsBaseAppShell::Init();
+  nsresult rv = nsBaseAppShell::Init();
 
   if (!gAppShellMethodsSwizzled) {
     // We should only replace the original terminate: method if we're not

@@ -1,19 +1,19 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Common handling for the specified value CSS url() values.
 
+use crate::parser::{Parse, ParserContext};
 use cssparser::Parser;
-use parser::{Parse, ParserContext};
 use servo_url::ServoUrl;
 use std::fmt::{self, Write};
 // Note: We use std::sync::Arc rather than servo_arc::Arc here because the
 // nonzero optimization is important in keeping the size of SpecifiedUrl below
 // the threshold.
+use crate::values::computed::{Context, ToComputedValue};
 use std::sync::Arc;
 use style_traits::{CssWriter, ParseError, ToCss};
-use values::computed::{Context, ToComputedValue};
 
 /// A CSS url() value for servo.
 ///
@@ -23,6 +23,9 @@ use values::computed::{Context, ToComputedValue};
 ///
 /// However, this approach is still not necessarily optimal: See
 /// <https://bugzilla.mozilla.org/show_bug.cgi?id=1347435#c6>
+///
+/// TODO(emilio): This should be shrunk by making CssUrl a wrapper type of an
+/// arc, and keep the serialization in that Arc. See gecko/url.rs for example.
 #[derive(Clone, Debug, Deserialize, MallocSizeOf, Serialize, SpecifiedValueInfo)]
 pub struct CssUrl {
     /// The original URI. This might be optional since we may insert computed
@@ -97,6 +100,18 @@ impl CssUrl {
             original: Some(Arc::new(url.into())),
             resolved: ServoUrl::parse(url).ok(),
         }
+    }
+
+    /// Parses a URL request and records that the corresponding request needs to
+    /// be CORS-enabled.
+    ///
+    /// This is only for shape images and masks in Gecko, thus unimplemented for
+    /// now so somebody notices when trying to do so.
+    pub fn parse_with_cors_anonymous<'i, 't>(
+        _context: &ParserContext,
+        _input: &mut Parser<'i, 't>,
+    ) -> Result<Self, ParseError<'i>> {
+        unimplemented!("Need to record somewhere that the request needs to be CORS-enabled")
     }
 }
 

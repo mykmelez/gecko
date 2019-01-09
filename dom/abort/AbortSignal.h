@@ -8,73 +8,77 @@
 #define mozilla_dom_AbortSignal_h
 
 #include "mozilla/DOMEventTargetHelper.h"
+#include "nsTObserverArray.h"
 
 namespace mozilla {
 namespace dom {
 
-class AbortController;
 class AbortSignal;
+class AbortSignalImpl;
 
-// This class must be implemented by objects who want to follow a AbortSignal.
-class AbortFollower
-{
-public:
+// This class must be implemented by objects who want to follow a
+// AbortSignalImpl.
+class AbortFollower {
+ public:
   virtual void Abort() = 0;
 
-  void
-  Follow(AbortSignal* aSignal);
+  void Follow(AbortSignalImpl* aSignal);
 
-  void
-  Unfollow();
+  void Unfollow();
 
-  bool
-  IsFollowing() const;
+  bool IsFollowing() const;
 
-protected:
+ protected:
   virtual ~AbortFollower();
 
-  RefPtr<AbortSignal> mFollowingSignal;
+  // Subclasses of AbortFollower must Traverse this member and call
+  // Unfollow() when Unlinking.
+  RefPtr<AbortSignalImpl> mFollowingSignal;
 };
 
-class AbortSignal final : public DOMEventTargetHelper
-                        , public AbortFollower
-{
-public:
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(AbortSignal, DOMEventTargetHelper)
+// Any subclass of this class must Traverse mFollowingSignal and call
+// Unfollow() when Unlinking.
+class AbortSignalImpl : public AbortFollower, public nsISupports {
+ public:
+  explicit AbortSignalImpl(bool aAborted);
 
-  AbortSignal(AbortController* aController, bool aAborted);
-  explicit AbortSignal(bool aAborted);
+  bool Aborted() const;
 
-  JSObject*
-  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  void Abort() override;
 
-  bool
-  Aborted() const;
+  void AddFollower(AbortFollower* aFollower);
 
-  void
-  Abort() override;
+  void RemoveFollower(AbortFollower* aFollower);
 
-  IMPL_EVENT_HANDLER(abort);
+ protected:
+  virtual ~AbortSignalImpl() = default;
 
-  void
-  AddFollower(AbortFollower* aFollower);
-
-  void
-  RemoveFollower(AbortFollower* aFollower);
-
-private:
-  ~AbortSignal() = default;
-
-  RefPtr<AbortController> mController;
-
+ private:
   // Raw pointers. AbortFollower unregisters itself in the DTOR.
-  nsTArray<AbortFollower*> mFollowers;
+  nsTObserverArray<AbortFollower*> mFollowers;
 
   bool mAborted;
 };
 
-} // dom namespace
-} // mozilla namespace
+class AbortSignal final : public DOMEventTargetHelper, public AbortSignalImpl {
+ public:
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(AbortSignal, DOMEventTargetHelper)
 
-#endif // mozilla_dom_AbortSignal_h
+  AbortSignal(nsIGlobalObject* aGlobalObject, bool aAborted);
+
+  JSObject* WrapObject(JSContext* aCx,
+                       JS::Handle<JSObject*> aGivenProto) override;
+
+  IMPL_EVENT_HANDLER(abort);
+
+  void Abort() override;
+
+ private:
+  ~AbortSignal() = default;
+};
+
+}  // namespace dom
+}  // namespace mozilla
+
+#endif  // mozilla_dom_AbortSignal_h

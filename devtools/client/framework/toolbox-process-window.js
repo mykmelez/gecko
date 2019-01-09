@@ -7,6 +7,7 @@
 "use strict";
 
 var { loader, require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+
 // Require this module to setup core modules
 loader.require("devtools/client/framework/devtools-browser");
 
@@ -16,6 +17,9 @@ var { Toolbox } = require("devtools/client/framework/toolbox");
 var Services = require("Services");
 var { DebuggerClient } = require("devtools/shared/client/debugger-client");
 var { PrefsHelper } = require("devtools/client/shared/prefs");
+const KeyShortcuts = require("devtools/client/shared/key-shortcuts");
+const { LocalizationHelper } = require("devtools/shared/l10n");
+const L10N = new LocalizationHelper("devtools/client/locales/toolbox.properties");
 
 // Timeout to wait before we assume that a connect() timed out without an error.
 // In milliseconds. (With the Debugger pane open, this has been reported to last
@@ -30,19 +34,23 @@ var Prefs = new PrefsHelper("devtools.debugger", {
   chromeDebuggingWebSocket: ["Bool", "chrome-debugging-websocket"],
 });
 
-var gToolbox, gClient;
+var gToolbox, gClient, gShortcuts;
 
 function appendStatusMessage(msg) {
   const statusMessage = document.getElementById("status-message");
-  statusMessage.value += msg + "\n";
+  statusMessage.textContent += msg + "\n";
   if (msg.stack) {
-    statusMessage.value += msg.stack + "\n";
+    statusMessage.textContent += msg.stack + "\n";
   }
 }
 
 function toggleStatusMessage(visible = true) {
   const statusMessageContainer = document.getElementById("status-message-container");
-  statusMessageContainer.hidden = !visible;
+  if (visible) {
+    statusMessageContainer.removeAttribute("hidden");
+  } else {
+    statusMessageContainer.setAttribute("hidden", "true");
+  }
 }
 
 function revealStatusMessage() {
@@ -62,7 +70,7 @@ var connect = async function() {
 
   // A port needs to be passed in from the environment, for instance:
   //    MOZ_BROWSER_TOOLBOX_PORT=6080 ./mach run -chrome \
-  //      chrome://devtools/content/framework/toolbox-process-window.xul
+  //      chrome://devtools/content/framework/toolbox-process-window.html
   if (!port) {
     throw new Error("Must pass a port in an env variable with MOZ_BROWSER_TOOLBOX_PORT");
   }
@@ -81,13 +89,11 @@ var connect = async function() {
 
   appendStatusMessage("Get root form for toolbox");
   if (addonID) {
-    const { addons } = await gClient.listAddons();
-    const addonTargetActor = addons.filter(addon => addon.id === addonID).pop();
-    const isBrowsingContext = addonTargetActor.isWebExtension;
-    await openToolbox({form: addonTargetActor, chrome: true, isBrowsingContext});
+    const addonTargetFront = await gClient.mainRoot.getAddon({ id: addonID });
+    await openToolbox({activeTab: addonTargetFront, chrome: true});
   } else {
-    const response = await gClient.getProcess();
-    await openToolbox({form: response.form, chrome: true});
+    const front = await gClient.mainRoot.getMainProcess();
+    await openToolbox({activeTab: front, chrome: true});
   }
 };
 
@@ -97,21 +103,25 @@ function setPrefDefaults() {
   Services.prefs.setBoolPref("devtools.performance.ui.show-platform-data", true);
   Services.prefs.setBoolPref("devtools.inspector.showAllAnonymousContent", true);
   Services.prefs.setBoolPref("browser.dom.window.dump.enabled", true);
+  Services.prefs.setBoolPref("devtools.console.stdout.chrome", true);
   Services.prefs.setBoolPref("devtools.command-button-noautohide.enabled", true);
   // Bug 1225160 - Using source maps with browser debugging can lead to a crash
   Services.prefs.setBoolPref("devtools.debugger.source-maps-enabled", false);
-  Services.prefs.setBoolPref("devtools.debugger.new-debugger-frontend", true);
   Services.prefs.setBoolPref("devtools.preference.new-panel-enabled", false);
   Services.prefs.setBoolPref("layout.css.emulate-moz-box-with-flex", false);
 
-  Services.prefs.setBoolPref("devtools.accessibility.enabled", true);
   Services.prefs.setBoolPref("devtools.performance.enabled", false);
 }
 
 window.addEventListener("load", async function() {
-  const cmdClose = document.getElementById("toolbox-cmd-close");
-  cmdClose.addEventListener("command", onCloseCommand);
+  gShortcuts = new KeyShortcuts({window});
+  gShortcuts.on("CmdOrCtrl+W", onCloseCommand);
+
+  const statusMessageContainer = document.getElementById("status-message-title");
+  statusMessageContainer.textContent = L10N.getStr("browserToolbox.statusMessage");
+
   setPrefDefaults();
+
   // Reveal status message if connecting is slow or if an error occurs.
   const delayedStatusReveal = setTimeout(revealStatusMessage, STATUS_REVEAL_TIME);
   try {
@@ -130,15 +140,16 @@ function onCloseCommand(event) {
   window.close();
 }
 
-async function openToolbox({ form, chrome, isBrowsingContext }) {
-  let options = {
-    form: form,
+async function openToolbox({ activeTab, chrome }) {
+  const targetOptions = {
+    activeTab,
     client: gClient,
-    chrome: chrome,
-    isBrowsingContext: isBrowsingContext
+    chrome,
   };
-  appendStatusMessage(`Create toolbox target: ${JSON.stringify(arguments, null, 2)}`);
-  const target = await TargetFactory.forRemoteTab(options);
+
+  const form = activeTab.targetForm;
+  appendStatusMessage(`Create toolbox target: ${JSON.stringify({form, chrome}, null, 2)}`);
+  const target = await TargetFactory.forRemoteTab(targetOptions);
   const frame = document.getElementById("toolbox-iframe");
 
   // Remember the last panel that was used inside of this profile.
@@ -148,13 +159,13 @@ async function openToolbox({ form, chrome, isBrowsingContext }) {
       Services.prefs.getCharPref("devtools.toolbox.selectedTool",
                                   "jsdebugger"));
 
-  options = { customIframe: frame };
+  const toolboxOptions = { customIframe: frame };
   appendStatusMessage(`Show toolbox with ${selectedTool} selected`);
   const toolbox = await gDevTools.showToolbox(
     target,
     selectedTool,
     Toolbox.HostType.CUSTOM,
-    options
+    toolboxOptions
   );
   onNewToolbox(toolbox);
 }
@@ -223,8 +234,6 @@ function updateBadgeText(paused) {
 function onUnload() {
   window.removeEventListener("unload", onUnload);
   window.removeEventListener("message", onMessage);
-  const cmdClose = document.getElementById("toolbox-cmd-close");
-  cmdClose.removeEventListener("command", onCloseCommand);
   gToolbox.destroy();
 }
 

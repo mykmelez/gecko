@@ -14,6 +14,7 @@
 #include "mozilla/layers/CompositableClient.h"  // for CompositableClient
 #include "mozilla/layers/LayersMessages.h"      // for TileDescriptor
 #include "mozilla/layers/TiledContentClient.h"  // for ClientTiledPaintedLayer
+#include "mozilla/UniquePtr.h"                  // for UniquePtr
 #include "TiledLayerBuffer.h"                   // for TiledLayerBuffer
 
 namespace mozilla {
@@ -22,11 +23,11 @@ namespace layers {
 class ClientLayerManager;
 
 class ClientMultiTiledLayerBuffer
-  : public TiledLayerBuffer<ClientMultiTiledLayerBuffer, TileClient>
-  , public ClientTiledLayerBuffer
-{
+    : public TiledLayerBuffer<ClientMultiTiledLayerBuffer, TileClient>,
+      public ClientTiledLayerBuffer {
   friend class TiledLayerBuffer<ClientMultiTiledLayerBuffer, TileClient>;
-public:
+
+ public:
   ClientMultiTiledLayerBuffer(ClientTiledPaintedLayer& aPaintedLayer,
                               CompositableClient& aCompositableClient,
                               ClientLayerManager* aManager,
@@ -53,7 +54,7 @@ public:
                          BasicTiledLayerPaintData* aPaintData,
                          LayerManager::DrawPaintedLayerCallback aCallback,
                          void* aCallbackData) override;
-  
+
   void ResetPaintedAndValidState() override {
     mValidRegion.SetEmpty();
     mTiles.mSize.width = 0;
@@ -61,7 +62,6 @@ public:
     DiscardBuffers();
     mRetainedTiles.Clear();
   }
-
 
   const nsIntRegion& GetValidRegion() override {
     return TiledLayerBuffer::GetValidRegion();
@@ -71,9 +71,7 @@ public:
     return TiledLayerBuffer::IsLowPrecision();
   }
 
-  void Dump(std::stringstream& aStream,
-            const char* aPrefix,
-            bool aDumpHtml,
+  void Dump(std::stringstream& aStream, const char* aPrefix, bool aDumpHtml,
             TextureDumpMode aCompress) override {
     TiledLayerBuffer::Dump(aStream, aPrefix, aDumpHtml, aCompress);
   }
@@ -95,20 +93,17 @@ public:
     mResolution = aResolution;
   }
 
-protected:
-  bool ValidateTile(TileClient& aTile,
-                    const nsIntPoint& aTileRect,
-                    nsIntRegion& aDirtyRegion,
-                    TilePaintFlags aFlags);
+ protected:
+  bool ValidateTile(TileClient& aTile, const nsIntPoint& aTileRect,
+                    nsIntRegion& aDirtyRegion, TilePaintFlags aFlags);
 
   void Update(const nsIntRegion& aNewValidRegion,
-              const nsIntRegion& aPaintRegion,
-              const nsIntRegion& aDirtyRegion,
+              const nsIntRegion& aPaintRegion, const nsIntRegion& aDirtyRegion,
               TilePaintFlags aFlags);
 
   TileClient GetPlaceholderTile() const { return TileClient(); }
 
-private:
+ private:
   RefPtr<ClientLayerManager> mManager;
   LayerManager::DrawPaintedLayerCallback mCallback;
   void* mCallbackData;
@@ -117,12 +112,12 @@ private:
   // completed then this is identical to mValidRegion.
   nsIntRegion mNewValidRegion;
 
-  SharedFrameMetricsHelper*  mSharedFrameMetricsHelper;
+  SharedFrameMetricsHelper* mSharedFrameMetricsHelper;
 
   // Parameters that are collected during Update for a paint before they
   // are either executed or replayed on the paint thread.
-  std::vector<gfx::Tile> mPaintTiles;
-  std::vector<RefPtr<CapturedTiledPaintState>> mPaintStates;
+  AutoTArray<gfx::Tile, 4> mPaintTiles;
+  AutoTArray<UniquePtr<PaintTask>, 4> mPaintTasks;
 
   /**
    * While we're adding tiles, this is used to keep track of the position of
@@ -156,28 +151,30 @@ private:
                                       nsIntRegion& aRegionToPaint,
                                       BasicTiledLayerPaintData* aPaintData,
                                       bool aIsRepeated);
+
+  void MaybeSyncTextures(const nsIntRegion& aPaintRegion,
+                         const TilesPlacement& aNewTiles,
+                         const gfx::IntSize& aScaledTileSize);
 };
 
 /**
  * An implementation of TiledContentClient that supports
  * multiple tiles and a low precision buffer.
  */
-class MultiTiledContentClient : public TiledContentClient
-{
-public:
+class MultiTiledContentClient : public TiledContentClient {
+ public:
   MultiTiledContentClient(ClientTiledPaintedLayer& aPaintedLayer,
                           ClientLayerManager* aManager);
 
-protected:
-  ~MultiTiledContentClient()
-  {
+ protected:
+  ~MultiTiledContentClient() {
     MOZ_COUNT_DTOR(MultiTiledContentClient);
 
-      mTiledBuffer.DiscardBuffers();
-      mLowPrecisionTiledBuffer.DiscardBuffers();
+    mTiledBuffer.DiscardBuffers();
+    mLowPrecisionTiledBuffer.DiscardBuffers();
   }
 
-public:
+ public:
   void ClearCachedResources() override;
   void UpdatedBuffer(TiledBufferType aType) override;
 
@@ -189,14 +186,14 @@ public:
     return nullptr;
   }
 
-private:
+ private:
   SharedFrameMetricsHelper mSharedFrameMetricsHelper;
   ClientMultiTiledLayerBuffer mTiledBuffer;
   ClientMultiTiledLayerBuffer mLowPrecisionTiledBuffer;
   bool mHasLowPrecision;
 };
 
-} // namespace layers
-} // namespace mozilla
+}  // namespace layers
+}  // namespace mozilla
 
-#endif // MOZILLA_GFX_MULTITILEDCONTENTCLIENT_H
+#endif  // MOZILLA_GFX_MULTITILEDCONTENTCLIENT_H

@@ -1,71 +1,96 @@
-"use strict";
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.onConnect = onConnect;
+// @flow
 
-var _firefox = require("./firefox");
+import * as firefox from "./firefox";
+import * as chrome from "./chrome";
 
-var firefox = _interopRequireWildcard(_firefox);
+import { prefs, asyncStore } from "../utils/prefs";
+import { setupHelper } from "../utils/dbg";
 
-var _prefs = require("../utils/prefs");
+import {
+  bootstrapApp,
+  bootstrapStore,
+  bootstrapWorkers
+} from "../utils/bootstrap";
+import { initialBreakpointsState } from "../reducers/breakpoints";
 
-var _dbg = require("../utils/dbg");
-
-var _bootstrap = require("../utils/bootstrap");
-
-function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) { var desc = Object.defineProperty && Object.getOwnPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : {}; if (desc.get || desc.set) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } } newObj.default = obj; return newObj; } }
-
-function _objectSpread(target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i] != null ? arguments[i] : {}; var ownKeys = Object.keys(source); if (typeof Object.getOwnPropertySymbols === 'function') { ownKeys = ownKeys.concat(Object.getOwnPropertySymbols(source).filter(function (sym) { return Object.getOwnPropertyDescriptor(source, sym).enumerable; })); } ownKeys.forEach(function (key) { _defineProperty(target, key, source[key]); }); } return target; }
-
-function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
-
-function loadFromPrefs(actions) {
-  const {
-    pauseOnExceptions,
-    pauseOnCaughtExceptions
-  } = _prefs.prefs;
-
+function loadFromPrefs(actions: Object) {
+  const { pauseOnExceptions, pauseOnCaughtExceptions } = prefs;
   if (pauseOnExceptions || pauseOnCaughtExceptions) {
-    return actions.pauseOnExceptions(pauseOnExceptions, pauseOnCaughtExceptions);
+    return actions.pauseOnExceptions(
+      pauseOnExceptions,
+      pauseOnCaughtExceptions
+    );
   }
 }
 
-async function onConnect(connection, {
-  services,
-  toolboxActions
-}) {
+function syncXHRBreakpoints() {
+  asyncStore.xhrBreakpoints.then(bps => {
+    bps.forEach(({ path, method, disabled }) => {
+      if (!disabled) {
+        firefox.clientCommands.setXHRBreakpoint(path, method);
+      }
+    });
+  });
+}
+
+async function loadInitialState() {
+  const pendingBreakpoints = await asyncStore.pendingBreakpoints;
+  const tabs = await asyncStore.tabs;
+  const xhrBreakpoints = await asyncStore.xhrBreakpoints;
+
+  const breakpoints = initialBreakpointsState(xhrBreakpoints);
+
+  return { pendingBreakpoints, tabs, breakpoints };
+}
+
+function getClient(connection: any) {
+  const {
+    tab: { clientType }
+  } = connection;
+  return clientType == "firefox" ? firefox : chrome;
+}
+
+export async function onConnect(
+  connection: Object,
+  { services, toolboxActions }: Object
+) {
   // NOTE: the landing page does not connect to a JS process
   if (!connection) {
     return;
   }
 
-  const commands = firefox.clientCommands;
-  const {
-    store,
-    actions,
-    selectors
-  } = (0, _bootstrap.bootstrapStore)(commands, {
-    services,
-    toolboxActions
-  });
-  const workers = (0, _bootstrap.bootstrapWorkers)();
-  await firefox.onConnect(connection, actions);
+  const client = getClient(connection);
+  const commands = client.clientCommands;
+
+  const initialState = await loadInitialState();
+
+  const { store, actions, selectors } = bootstrapStore(
+    commands,
+    {
+      services,
+      toolboxActions
+    },
+    initialState
+  );
+
+  const workers = bootstrapWorkers();
+  await client.onConnect(connection, actions);
+
   await loadFromPrefs(actions);
-  (0, _dbg.setupHelper)({
+  syncXHRBreakpoints();
+  setupHelper({
     store,
     actions,
     selectors,
-    workers: _objectSpread({}, workers, services),
+    workers: { ...workers, ...services },
     connection,
-    client: firefox.clientCommands
+    client: client.clientCommands
   });
-  (0, _bootstrap.bootstrapApp)(store);
-  return {
-    store,
-    actions,
-    selectors,
-    client: commands
-  };
+
+  bootstrapApp(store);
+  return { store, actions, selectors, client: commands };
 }

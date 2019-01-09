@@ -4,21 +4,19 @@
 
 "use strict";
 
-const PREVIEW_MAX_DIM_PREF = "devtools.inspector.imagePreviewTooltipSize";
-
 const promise = require("promise");
 const Services = require("Services");
-const nodeConstants = require("devtools/shared/dom-node-constants");
-const clipboardHelper = require("devtools/shared/platform/clipboard");
-const {setImageTooltip, setBrokenImageTooltip} =
-      require("devtools/client/shared/widgets/tooltip/ImageTooltipHelper");
 const MarkupContainer = require("devtools/client/inspector/markup/views/markup-container");
 const ElementEditor = require("devtools/client/inspector/markup/views/element-editor");
+const {ELEMENT_NODE} = require("devtools/shared/dom-node-constants");
 const {extend} = require("devtools/shared/extend");
 
-// Lazy load this module as _buildEventTooltipContent is only called on click
-loader.lazyRequireGetter(this, "setEventTooltip",
-  "devtools/client/shared/widgets/tooltip/EventTooltipHelper", true);
+loader.lazyRequireGetter(this, "setEventTooltip", "devtools/client/shared/widgets/tooltip/EventTooltipHelper", true);
+loader.lazyRequireGetter(this, "setImageTooltip", "devtools/client/shared/widgets/tooltip/ImageTooltipHelper", true);
+loader.lazyRequireGetter(this, "setBrokenImageTooltip", "devtools/client/shared/widgets/tooltip/ImageTooltipHelper", true);
+loader.lazyRequireGetter(this, "clipboardHelper", "devtools/shared/platform/clipboard");
+
+const PREVIEW_MAX_DIM_PREF = "devtools.inspector.imagePreviewTooltipSize";
 
 /**
  * An implementation of MarkupContainer for Elements that can contain
@@ -34,12 +32,7 @@ function MarkupElementContainer(markupView, node) {
   MarkupContainer.prototype.initialize.call(this, markupView, node,
     "elementcontainer");
 
-  this.onGridHighlighterChange = this.onGridHighlighterChange.bind(this);
-
-  this.markup.highlighters.on("grid-highlighter-hidden", this.onGridHighlighterChange);
-  this.markup.highlighters.on("grid-highlighter-shown", this.onGridHighlighterChange);
-
-  if (node.nodeType === nodeConstants.ELEMENT_NODE) {
+  if (node.nodeType === ELEMENT_NODE) {
     this.editor = new ElementEditor(this, node);
   } else {
     throw new Error("Invalid node for MarkupElementContainer");
@@ -49,13 +42,6 @@ function MarkupElementContainer(markupView, node) {
 }
 
 MarkupElementContainer.prototype = extend(MarkupContainer.prototype, {
-  destroy: function() {
-    this.markup.highlighters.off("grid-highlighter-hidden", this.onGridHighlighterChange);
-    this.markup.highlighters.off("grid-highlighter-shown", this.onGridHighlighterChange);
-
-    MarkupContainer.prototype.destroy.call(this);
-  },
-
   onContainerClick: function(event) {
     if (!event.target.hasAttribute("data-event")) {
       return;
@@ -64,19 +50,8 @@ MarkupElementContainer.prototype = extend(MarkupContainer.prototype, {
     this._buildEventTooltipContent(event.target);
   },
 
-  /**
-   * Handler for "grid-highlighter-hidden" and "grid-highlighter-shown" event emitted from
-   * the HighlightersOverlay. Toggles the active state of the display badge if it matches
-   * the highlighted grid node.
-   */
-  onGridHighlighterChange: function() {
-    this.editor.displayBadge.classList.toggle("active",
-      this.markup.highlighters.gridHighlighterShown === this.node);
-  },
-
   async _buildEventTooltipContent(target) {
     const tooltip = this.markup.eventDetailsTooltip;
-
     await tooltip.hide();
 
     const listenerInfo = await this.node.getEventListenerInfo();
@@ -89,7 +64,20 @@ MarkupElementContainer.prototype = extend(MarkupContainer.prototype, {
     tooltip.once("hidden", () => {
       // Enable the image preview tooltip after closing the event details
       this.markup._enableImagePreviewTooltip();
+
+      // Allow clicks on the event badge to display the event popup again
+      // (but allow the currently queued click event to run first).
+      this.markup.win.setTimeout(() => {
+        if (this.editor._eventBadge) {
+          this.editor._eventBadge.style.pointerEvents = "auto";
+        }
+      }, 0);
     });
+
+    // Prevent clicks on the event badge to display the event popup again.
+    if (this.editor._eventBadge) {
+      this.editor._eventBadge.style.pointerEvents = "none";
+    }
     tooltip.show(target);
   },
 
@@ -161,7 +149,7 @@ MarkupElementContainer.prototype = extend(MarkupContainer.prototype, {
       const options = {
         naturalWidth: size.naturalWidth,
         naturalHeight: size.naturalHeight,
-        maxDim: Services.prefs.getIntPref(PREVIEW_MAX_DIM_PREF)
+        maxDim: Services.prefs.getIntPref(PREVIEW_MAX_DIM_PREF),
       };
 
       setImageTooltip(tooltip, this.markup.doc, data, options);
@@ -220,7 +208,7 @@ MarkupElementContainer.prototype = extend(MarkupContainer.prototype, {
     }, () => {
       undoMods.apply();
     });
-  }
+  },
 });
 
 module.exports = MarkupElementContainer;

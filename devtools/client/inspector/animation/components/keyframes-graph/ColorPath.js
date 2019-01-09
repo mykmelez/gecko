@@ -33,7 +33,7 @@ class ColorPath extends ComputedStylePath {
   }
 
   propToState({ keyframes }) {
-    const maxObject = { distance: 0 };
+    const maxObject = { distance: -Number.MAX_VALUE };
 
     for (let i = 0; i < keyframes.length - 1; i++) {
       const value1 = getRGBA(keyframes[i].value);
@@ -85,7 +85,7 @@ class ColorPath extends ComputedStylePath {
 
       const g = dom.g(
         {
-          className: "hint"
+          className: "hint",
         },
         dom.title({}, startKeyframe.easing),
         dom.rect(

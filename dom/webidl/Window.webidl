@@ -15,29 +15,29 @@
  * http://dvcs.w3.org/hg/speech-api/raw-file/tip/speechapi.html
  * https://w3c.github.io/webappsec-secure-contexts/#monkey-patching-global-object
  * https://w3c.github.io/requestidlecallback/
- * https://webaudio.github.io/web-audio-api/#widl-Window-audioWorklet
  * https://drafts.css-houdini.org/css-paint-api-1/#dom-window-paintworklet
+ * https://wicg.github.io/visual-viewport/#the-visualviewport-interface
  */
 
-interface ApplicationCache;
-interface IID;
 interface nsIBrowserDOMWindow;
 interface XULControllers;
+interface nsIDOMWindowUtils;
+
+typedef OfflineResourceList ApplicationCache;
 
 // http://www.whatwg.org/specs/web-apps/current-work/
 [PrimaryGlobal, LegacyUnenumerableNamedProperties, NeedResolve]
 /*sealed*/ interface Window : EventTarget {
   // the current browsing context
   [Unforgeable, Constant, StoreInSlot,
-   CrossOriginReadable] readonly attribute Window window;
+   CrossOriginReadable] readonly attribute WindowProxy window;
   [Replaceable, Constant, StoreInSlot,
-   CrossOriginReadable] readonly attribute Window self;
+   CrossOriginReadable] readonly attribute WindowProxy self;
   [Unforgeable, StoreInSlot, Pure] readonly attribute Document? document;
   [Throws] attribute DOMString name;
-  [PutForwards=href, Unforgeable, BinaryName="getLocation",
-   CrossOriginReadable, CrossOriginWritable] readonly attribute Location location;
+  [PutForwards=href, Unforgeable, CrossOriginReadable,
+   CrossOriginWritable] readonly attribute Location location;
   [Throws] readonly attribute History history;
-  [Func="CustomElementRegistry::IsCustomElementEnabled"]
   readonly attribute CustomElementRegistry customElements;
   [Replaceable, Throws] readonly attribute BarProp locationbar;
   [Replaceable, Throws] readonly attribute BarProp menubar;
@@ -46,11 +46,12 @@ interface XULControllers;
   [Replaceable, Throws] readonly attribute BarProp statusbar;
   [Replaceable, Throws] readonly attribute BarProp toolbar;
   [Throws] attribute DOMString status;
-  [Throws, CrossOriginCallable] void close();
+  [Throws, CrossOriginCallable, NeedsCallerType] void close();
   [Throws, CrossOriginReadable] readonly attribute boolean closed;
   [Throws] void stop();
   [Throws, CrossOriginCallable] void focus();
   [Throws, CrossOriginCallable] void blur();
+  [Replaceable, Pref="dom.window.event.enabled"] readonly attribute any event;
 
   // other browsing contexts
   [Replaceable, Throws, CrossOriginReadable] readonly attribute WindowProxy frames;
@@ -82,6 +83,8 @@ interface XULControllers;
 
   [Throws, CrossOriginCallable, NeedsSubjectPrincipal]
   void postMessage(any message, DOMString targetOrigin, optional sequence<object> transfer = []);
+  [Throws, CrossOriginCallable, NeedsSubjectPrincipal]
+  void postMessage(any message, optional WindowPostMessageOptions options);
 
   // also has obsolete members
 };
@@ -185,6 +188,10 @@ partial interface Window {
   [Replaceable, Throws] readonly attribute double scrollY;
   [Replaceable, Throws] readonly attribute double pageYOffset;
 
+  // Aliases for screenX / screenY.
+  [Replaceable, Throws, NeedsCallerType] readonly attribute double screenLeft;
+  [Replaceable, Throws, NeedsCallerType] readonly attribute double screenTop;
+
   // client
   // These are writable because we allow chrome to write them.  And they need
   // to use 'any' as the type, because non-chrome writing them needs to act
@@ -253,6 +260,8 @@ partial interface Window {
 
   [ChromeOnly, Throws] readonly attribute Element? realFrameElement;
 
+  [ChromeOnly] readonly attribute nsIDocShell? docShell;
+
   [Throws, NeedsCallerType]
   readonly attribute float mozInnerScreenX;
   [Throws, NeedsCallerType]
@@ -268,10 +277,6 @@ partial interface Window {
   [Replaceable, Throws] readonly attribute long   scrollMaxY;
 
   [Throws] attribute boolean fullScreen;
-
-  [Throws, ChromeOnly] void back();
-  [Throws, ChromeOnly] void forward();
-  [Throws, ChromeOnly, NeedsSubjectPrincipal] void home();
 
   // XXX Should this be in nsIDOMChromeWindow?
   void                      updateCommands(DOMString action,
@@ -334,7 +339,7 @@ partial interface Window {
    NonEnumerable, Replaceable, Throws, NeedsCallerType]
   readonly attribute object? content;
 
-  [Throws, ChromeOnly] any getInterface(IID iid);
+  [Throws, ChromeOnly] any getInterface(any iid);
 
   /**
    * Same as nsIDOMWindow.windowRoot, useful for event listener targeting.
@@ -356,6 +361,15 @@ partial interface Window {
    */
   [Replaceable]
   readonly attribute InstallTriggerImpl? InstallTrigger;
+
+  /**
+   * Get the nsIDOMWindowUtils for this window.
+   */
+  [Constant, Throws, ChromeOnly]
+  readonly attribute nsIDOMWindowUtils windowUtils;
+
+  [ChromeOnly]
+  readonly attribute boolean hasOpenerForInitialContentBrowser;
 };
 
 Window implements TouchEventHandlers;
@@ -374,7 +388,7 @@ partial interface Window {
 #ifdef HAVE_SIDEBAR
 // Mozilla extension
 partial interface Window {
-  [Replaceable, Throws, UseCounter]
+  [Replaceable, Throws, UseCounter, Pref="dom.sidebar.enabled"]
   readonly attribute (External or WindowProxy) sidebar;
 };
 #endif
@@ -509,12 +523,6 @@ partial interface Window {
   attribute EventHandler onvrdisplaypresentchange;
 };
 
-// https://webaudio.github.io/web-audio-api/#widl-Window-audioWorklet
-partial interface Window {
-  [Pref="dom.audioWorklet.enabled", Throws]
-  readonly attribute Worklet audioWorklet;
-};
-
 // https://drafts.css-houdini.org/css-paint-api-1/#dom-window-paintworklet
 partial interface Window {
     [Pref="dom.paintWorklet.enabled", Throws]
@@ -553,13 +561,25 @@ partial interface Window {
    *
    * Example: ["en-US", "de", "pl", "sr-Cyrl", "zh-Hans-HK"]
    */
-  [Func="IsChromeOrXBL"]
+  [Func="IsChromeOrXBLOrUAWidget"]
   sequence<DOMString> getRegionalPrefsLocales();
 
   /**
    * Getter funcion for IntlUtils, which provides helper functions for
    * localization.
    */
-  [Throws, Func="IsChromeOrXBL"]
+  [Throws, Func="IsChromeOrXBLOrUAWidget"]
   readonly attribute IntlUtils intlUtils;
+};
+
+Window implements WebGPUProvider;
+
+partial interface Window {
+  [SameObject, Pref="dom.visualviewport.enabled", Replaceable]
+  readonly attribute VisualViewport visualViewport;
+
+};
+
+dictionary WindowPostMessageOptions : PostMessageOptions {
+  USVString targetOrigin = "/";
 };

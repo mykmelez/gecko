@@ -9,62 +9,23 @@
 using namespace mozilla;
 using namespace mozilla::a11y;
 
-void
-a11y::PlatformInit()
-{
-}
+void a11y::PlatformInit() {}
 
-void
-a11y::PlatformShutdown()
-{
-}
+void a11y::PlatformShutdown() {}
 
-void
-a11y::ProxyCreated(ProxyAccessible*, uint32_t)
-{
-}
+void a11y::ProxyCreated(ProxyAccessible*, uint32_t) {}
 
-void
-a11y::ProxyDestroyed(ProxyAccessible*)
-{
-}
+void a11y::ProxyDestroyed(ProxyAccessible*) {}
 
-void
-a11y::ProxyEvent(ProxyAccessible*, uint32_t)
-{
-}
+void a11y::ProxyEvent(ProxyAccessible*, uint32_t) {}
 
-void
-a11y::ProxyStateChangeEvent(ProxyAccessible*, uint64_t, bool)
-{
-}
+void a11y::ProxyStateChangeEvent(ProxyAccessible*, uint64_t, bool) {}
 
-void
-a11y::ProxyCaretMoveEvent(ProxyAccessible* aTarget, int32_t aOffset)
-{
-}
+void a11y::ProxyCaretMoveEvent(ProxyAccessible* aTarget, int32_t aOffset) {}
 
-void
-a11y::ProxyTextChangeEvent(ProxyAccessible*, const nsString&, int32_t, uint32_t,
-                     bool, bool)
-{
-}
+void a11y::ProxyTextChangeEvent(ProxyAccessible*, const nsString&, int32_t,
+                                uint32_t, bool, bool) {}
 
-void
-a11y::ProxyShowHideEvent(ProxyAccessible*, ProxyAccessible*, bool, bool)
-{
-}
+void a11y::ProxyShowHideEvent(ProxyAccessible*, ProxyAccessible*, bool, bool) {}
 
-void
-a11y::ProxySelectionEvent(ProxyAccessible*, ProxyAccessible*, uint32_t)
-{
-}
-
-#if defined(ANDROID)
-void
-a11y::ProxyVirtualCursorChangeEvent(ProxyAccessible*, ProxyAccessible*,
-                                    int32_t, int32_t, ProxyAccessible*,
-                                    int32_t, int32_t, uint16_t, bool)
-{
-}
-#endif
+void a11y::ProxySelectionEvent(ProxyAccessible*, ProxyAccessible*, uint32_t) {}

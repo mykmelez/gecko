@@ -51,7 +51,7 @@ add_task(async function() {
   await waitNetwork;
 
   EventUtils.synthesizeMouseAtCenter(
-    document.querySelector(".devtools-filterinput"), {}, window);
+    document.querySelector(".devtools-filterinput"), {}, document.defaultView);
   // Empty Mouse click should keep autocomplete hidden
   ok(!document.querySelector(".devtools-autocomplete-popup"),
     "Autocomplete Popup still hidden");
@@ -112,7 +112,7 @@ add_task(async function() {
   testAutocompleteContents([
     "mime-type:text/css",
     "mime-type:text/html",
-    "mime-type:text/plain"
+    "mime-type:text/plain",
   ], document);
 
   // The negative filter flags

@@ -21,15 +21,18 @@
       window.onload = function() {
         SimpleTest.waitForExplicitFinish();
 
-        const {Devices} = ChromeUtils.import("resource://devtools/shared/apps/Devices.jsm", {});
+        const { adbAddon, ADB_ADDON_STATES } = require("devtools/shared/adb/adb-addon");
+        function isAdbAddonInstalled() {
+          return adbAddon.status === ADB_ADDON_STATES.INSTALLED;
+        }
 
         function uninstallADBFromUI(doc) {
           return new Promise((resolve, reject) => {
-            Devices.on("addon-status-updated", function onUpdate() {
+            adbAddon.on("update", function onUpdate() {
               nextTick().then(() => {
                 const li = doc.querySelector('[status="uninstalled"][addon="adb"]');
                 if (li) {
-                  Devices.off("addon-status-updated", onUpdate);
+                  adbAddon.off("update", onUpdate);
                   resolve();
                 } else {
                   reject("Can't find item");
@@ -42,20 +45,28 @@
         }
 
         (async function() {
-          ok(!Devices.helperAddonInstalled, "Helper not installed");
+          ok(!isAdbAddonInstalled(), "ADB extension not installed");
 
           const win = await openWebIDE(true);
 
-          ok(Devices.helperAddonInstalled, "Helper has been auto-installed");
+          // ADB is installed asynchronously after starting WebIDE.
+          while (!isAdbAddonInstalled()) {
+            await adbAddon.once("update");
+          }
+
+          ok(isAdbAddonInstalled(), "ADB extension has been auto-installed");
 
           await nextTick();
 
+          const addonDoc = getAddonsDocument(win);
           const w = addonDoc.querySelector(".warning");
           let display = addonDoc.defaultView.getComputedStyle(w).display;
           is(display, "none", "Warning about missing ADB hidden");
 
           await uninstallADBFromUI(addonDoc, "adb");
 
+          const docRuntime = getRuntimeDocument(win);
+          const panelNode = docRuntime.querySelector("#runtime-panel");
           items = panelNode.querySelectorAll(".runtime-panel-item-usb");
           is(items.length, 0, "No usb runtime listed");
 

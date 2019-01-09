@@ -3,7 +3,11 @@
 
 "use strict";
 
-const remoteClientsFixture = [ { id: 1, name: "Foo"}, { id: 2, name: "Bar"} ];
+const fxaDevices = [
+  {id: 1, name: "Foo", availableCommands: {"https://identity.mozilla.com/cmd/open-uri": "baz"}},
+  {id: 2, name: "Bar", clientRecord: "bar"}, // Legacy send tab target (no availableCommands).
+  {id: 3, name: "Homer"}, // Incompatible target.
+];
 
 add_task(async function setup() {
   await promiseSyncReady();
@@ -14,26 +18,50 @@ add_task(async function setup() {
 });
 
 add_task(async function test_page_contextmenu() {
-  const sandbox = setupSendTabMocks({ syncReady: true, clientsSynced: true, remoteClients: remoteClientsFixture,
-                                      state: UIState.STATUS_SIGNED_IN, isSendableURI: true });
+  const sandbox = setupSendTabMocks({fxaDevices});
 
   await openContentContextMenu("#moztext", "context-sendpagetodevice");
   is(document.getElementById("context-sendpagetodevice").hidden, false, "Send tab to device is shown");
   is(document.getElementById("context-sendpagetodevice").disabled, false, "Send tab to device is enabled");
   checkPopup([
-    { label: "Foo" },
     { label: "Bar" },
+    { label: "Foo" },
     "----",
-    { label: "Send to All Devices" }
+    { label: "Send to All Devices" },
   ]);
   await hideContentContextMenu();
 
   sandbox.restore();
 });
 
+add_task(async function test_link_contextmenu() {
+  const sandbox = setupSendTabMocks({fxaDevices});
+  let expectation = sandbox.mock(gSync)
+                           .expects("sendTabToDevice")
+                           .once()
+                           .withExactArgs("https://www.example.org/", [fxaDevices[1]], "Click on me!!");
+
+  // Add a link to the page
+  await ContentTask.spawn(gBrowser.selectedBrowser, null, () => {
+    let a = content.document.createElement("a");
+    a.href = "https://www.example.org";
+    a.id = "testingLink";
+    a.textContent = "Click on me!!";
+    content.document.body.appendChild(a);
+  });
+
+  await openContentContextMenu("#testingLink", "context-sendlinktodevice", "context-sendlinktodevice-popup");
+  is(document.getElementById("context-sendlinktodevice").hidden, false, "Send link to device is shown");
+  is(document.getElementById("context-sendlinktodevice").disabled, false, "Send link to device is enabled");
+  document.getElementById("context-sendlinktodevice-popup").querySelector("menuitem").click();
+  await hideContentContextMenu();
+
+  expectation.verify();
+  sandbox.restore();
+});
+
 add_task(async function test_page_contextmenu_no_remote_clients() {
-  const sandbox = setupSendTabMocks({ syncReady: true, clientsSynced: true, remoteClients: [],
-                                      state: UIState.STATUS_SIGNED_IN, isSendableURI: true });
+  const sandbox = setupSendTabMocks({fxaDevices: []});
 
   await openContentContextMenu("#moztext", "context-sendpagetodevice");
   is(document.getElementById("context-sendpagetodevice").hidden, false, "Send tab to device is shown");
@@ -42,7 +70,7 @@ add_task(async function test_page_contextmenu_no_remote_clients() {
     { label: "No Devices Connected", disabled: true },
     "----",
     { label: "Connect Another Device..." },
-    { label: "Learn About Sending Tabs..." }
+    { label: "Learn About Sending Tabs..." },
   ]);
   await hideContentContextMenu();
 
@@ -50,14 +78,13 @@ add_task(async function test_page_contextmenu_no_remote_clients() {
 });
 
 add_task(async function test_page_contextmenu_one_remote_client() {
-  const sandbox = setupSendTabMocks({ syncReady: true, clientsSynced: true, remoteClients: [{ id: 1, name: "Foo"}],
-                                      state: UIState.STATUS_SIGNED_IN, isSendableURI: true });
+  const sandbox = setupSendTabMocks({fxaDevices: [{id: 1, name: "Foo", availableCommands: {"https://identity.mozilla.com/cmd/open-uri": "baz"}}]});
 
   await openContentContextMenu("#moztext", "context-sendpagetodevice");
   is(document.getElementById("context-sendpagetodevice").hidden, false, "Send tab to device is shown");
   is(document.getElementById("context-sendpagetodevice").disabled, false, "Send tab to device is enabled");
   checkPopup([
-    { label: "Foo" }
+    { label: "Foo" },
   ]);
   await hideContentContextMenu();
 
@@ -65,8 +92,7 @@ add_task(async function test_page_contextmenu_one_remote_client() {
 });
 
 add_task(async function test_page_contextmenu_not_sendable() {
-  const sandbox = setupSendTabMocks({ syncReady: true, clientsSynced: true, remoteClients: remoteClientsFixture,
-                                      state: UIState.STATUS_SIGNED_IN, isSendableURI: false });
+  const sandbox = setupSendTabMocks({fxaDevices, isSendableURI: false});
 
   await openContentContextMenu("#moztext");
   is(document.getElementById("context-sendpagetodevice").hidden, false, "Send tab to device is shown");
@@ -78,8 +104,7 @@ add_task(async function test_page_contextmenu_not_sendable() {
 });
 
 add_task(async function test_page_contextmenu_not_synced_yet() {
-  const sandbox = setupSendTabMocks({ syncReady: true, clientsSynced: false, remoteClients: [],
-                                      state: UIState.STATUS_SIGNED_IN, isSendableURI: true });
+  const sandbox = setupSendTabMocks({fxaDevices: null});
 
   await openContentContextMenu("#moztext");
   is(document.getElementById("context-sendpagetodevice").hidden, false, "Send tab to device is shown");
@@ -91,8 +116,7 @@ add_task(async function test_page_contextmenu_not_synced_yet() {
 });
 
 add_task(async function test_page_contextmenu_sync_not_ready_configured() {
-  const sandbox = setupSendTabMocks({ syncReady: false, clientsSynced: false, remoteClients: null,
-                                      state: UIState.STATUS_SIGNED_IN, isSendableURI: true });
+  const sandbox = setupSendTabMocks({syncReady: false});
 
   await openContentContextMenu("#moztext");
   is(document.getElementById("context-sendpagetodevice").hidden, false, "Send tab to device is shown");
@@ -104,8 +128,7 @@ add_task(async function test_page_contextmenu_sync_not_ready_configured() {
 });
 
 add_task(async function test_page_contextmenu_sync_not_ready_other_state() {
-  const sandbox = setupSendTabMocks({ syncReady: false, clientsSynced: false, remoteClients: null,
-                                      state: UIState.STATUS_NOT_VERIFIED, isSendableURI: true });
+  const sandbox = setupSendTabMocks({syncReady: false, state: UIState.STATUS_NOT_VERIFIED});
 
   await openContentContextMenu("#moztext", "context-sendpagetodevice");
   is(document.getElementById("context-sendpagetodevice").hidden, false, "Send tab to device is shown");
@@ -113,7 +136,7 @@ add_task(async function test_page_contextmenu_sync_not_ready_other_state() {
   checkPopup([
     { label: "Account Not Verified", disabled: true },
     "----",
-    { label: "Verify Your Account..." }
+    { label: "Verify Your Account..." },
   ]);
   await hideContentContextMenu();
 
@@ -121,8 +144,7 @@ add_task(async function test_page_contextmenu_sync_not_ready_other_state() {
 });
 
 add_task(async function test_page_contextmenu_unconfigured() {
-  const sandbox = setupSendTabMocks({ syncReady: true, clientsSynced: true, remoteClients: null,
-                                      state: UIState.STATUS_NOT_CONFIGURED, isSendableURI: true });
+  const sandbox = setupSendTabMocks({state: UIState.STATUS_NOT_CONFIGURED});
 
   await openContentContextMenu("#moztext", "context-sendpagetodevice");
   is(document.getElementById("context-sendpagetodevice").hidden, false, "Send tab to device is shown");
@@ -131,7 +153,7 @@ add_task(async function test_page_contextmenu_unconfigured() {
     { label: "Not Connected to Sync", disabled: true },
     "----",
     { label: "Sign in to Sync..." },
-    { label: "Learn About Sending Tabs..." }
+    { label: "Learn About Sending Tabs..." },
   ]);
 
   await hideContentContextMenu();
@@ -140,8 +162,7 @@ add_task(async function test_page_contextmenu_unconfigured() {
 });
 
 add_task(async function test_page_contextmenu_not_verified() {
-  const sandbox = setupSendTabMocks({ syncReady: true, clientsSynced: true, remoteClients: null,
-                                      state: UIState.STATUS_NOT_VERIFIED, isSendableURI: true });
+  const sandbox = setupSendTabMocks({state: UIState.STATUS_NOT_VERIFIED});
 
   await openContentContextMenu("#moztext", "context-sendpagetodevice");
   is(document.getElementById("context-sendpagetodevice").hidden, false, "Send tab to device is shown");
@@ -149,7 +170,7 @@ add_task(async function test_page_contextmenu_not_verified() {
   checkPopup([
     { label: "Account Not Verified", disabled: true },
     "----",
-    { label: "Verify Your Account..." }
+    { label: "Verify Your Account..." },
   ]);
 
   await hideContentContextMenu();
@@ -158,9 +179,7 @@ add_task(async function test_page_contextmenu_not_verified() {
 });
 
 add_task(async function test_page_contextmenu_login_failed() {
-  const syncReady = sinon.stub(gSync, "syncReady").get(() => true);
-  const getState = sinon.stub(UIState, "get").returns({ status: UIState.STATUS_LOGIN_FAILED });
-  const isSendableURI = sinon.stub(gSync, "isSendableURI").returns(true);
+  const sandbox = setupSendTabMocks({state: UIState.STATUS_LOGIN_FAILED});
 
   await openContentContextMenu("#moztext", "context-sendpagetodevice");
   is(document.getElementById("context-sendpagetodevice").hidden, false, "Send tab to device is shown");
@@ -168,14 +187,12 @@ add_task(async function test_page_contextmenu_login_failed() {
   checkPopup([
     { label: "Account Not Verified", disabled: true },
     "----",
-    { label: "Verify Your Account..." }
+    { label: "Verify Your Account..." },
   ]);
 
   await hideContentContextMenu();
 
-  syncReady.restore();
-  getState.restore();
-  isSendableURI.restore();
+  sandbox.restore();
 });
 
 add_task(async function test_page_contextmenu_fxa_disabled() {
@@ -229,7 +246,7 @@ async function openContentContextMenu(selector, openSubmenuId = null) {
       type: "contextmenu",
       button: 2,
       shiftkey: false,
-      centered: true
+      centered: true,
     },
     gBrowser.selectedBrowser);
   await awaitPopupShown;

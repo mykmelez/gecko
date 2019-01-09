@@ -8,6 +8,7 @@ ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   WindowsGPOParser: "resource:///modules/policies/WindowsGPOParser.jsm",
+  macOSPoliciesParser: "resource:///modules/policies/macOSPoliciesParser.jsm",
   Policies: "resource:///modules/policies/Policies.jsm",
   JsonSchemaValidator: "resource://gre/modules/components-utils/JsonSchemaValidator.jsm",
 });
@@ -43,22 +44,6 @@ XPCOMUtils.defineLazyGetter(this, "log", () => {
   });
 });
 
-// ==== Start XPCOM Boilerplate ==== \\
-
-// Factory object
-const EnterprisePoliciesFactory = {
-  _instance: null,
-  createInstance: function BGSF_createInstance(outer, iid) {
-    if (outer != null)
-      throw Cr.NS_ERROR_NO_AGGREGATION;
-    return this._instance == null ?
-      this._instance = new EnterprisePoliciesManager() : this._instance;
-  }
-};
-
-// ==== End XPCOM Boilerplate ==== //
-
-// Constructor
 function EnterprisePoliciesManager() {
   Services.obs.addObserver(this, "profile-after-change", true);
   Services.obs.addObserver(this, "final-ui-startup", true);
@@ -67,14 +52,11 @@ function EnterprisePoliciesManager() {
 }
 
 EnterprisePoliciesManager.prototype = {
-  // for XPCOM
-  classID:          Components.ID("{ea4e1414-779b-458b-9d1f-d18e8efbc145}"),
+  classID:        Components.ID("{ea4e1414-779b-458b-9d1f-d18e8efbc145}"),
   QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver,
                                           Ci.nsISupportsWeakReference,
                                           Ci.nsIEnterprisePolicies]),
-
-  // redefine the default factory for XPCOMUtils
-  _xpcom_factory: EnterprisePoliciesFactory,
+  _xpcom_factory: XPCOMUtils.generateSingletonFactory(EnterprisePoliciesManager),
 
   _initialize() {
     let provider = this._chooseProvider();
@@ -95,16 +77,19 @@ EnterprisePoliciesManager.prototype = {
   },
 
   _chooseProvider() {
+    let provider = null;
     if (AppConstants.platform == "win") {
-      let gpoProvider = new GPOPoliciesProvider();
-      if (gpoProvider.hasPolicies) {
-        return gpoProvider;
-      }
+      provider = new WindowsGPOPoliciesProvider();
+    } else if (AppConstants.platform == "macosx") {
+      provider = new macOSPoliciesProvider();
+    }
+    if (provider && provider.hasPolicies) {
+      return provider;
     }
 
-    let jsonProvider = new JSONPoliciesProvider();
-    if (jsonProvider.hasPolicies) {
-      return jsonProvider;
+    provider = new JSONPoliciesProvider();
+    if (provider.hasPolicies) {
+      return provider;
     }
 
     return null;
@@ -152,7 +137,7 @@ EnterprisePoliciesManager.prototype = {
   },
 
   _callbacks: {
-    // The earlist that a policy callback can run. This will
+    // The earliest that a policy callback can run. This will
     // happen right after the Policy Engine itself has started,
     // and before the Add-ons Manager has started.
     onBeforeAddons: [],
@@ -195,16 +180,16 @@ EnterprisePoliciesManager.prototype = {
 
     DisallowedFeatures = {};
 
+    Services.ppmm.sharedData.delete("EnterprisePolicies:Status");
+    Services.ppmm.sharedData.delete("EnterprisePolicies:DisallowedFeatures");
+
     this._status = Ci.nsIEnterprisePolicies.UNINITIALIZED;
     for (let timing of Object.keys(this._callbacks)) {
       this._callbacks[timing] = [];
     }
-    delete Services.ppmm.initialProcessData.policies;
-    Services.ppmm.broadcastAsyncMessage("EnterprisePolicies:Restart", null);
 
     let { PromiseUtils } = ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm",
                                               {});
-
     // Simulate the startup process. This step-by-step is a bit ugly but it
     // tries to emulate the same behavior as of a normal startup.
 
@@ -259,21 +244,13 @@ EnterprisePoliciesManager.prototype = {
   },
 
   disallowFeature(feature, neededOnContentProcess = false) {
-    DisallowedFeatures[feature] = true;
+    DisallowedFeatures[feature] = neededOnContentProcess;
 
     // NOTE: For optimization purposes, only features marked as needed
     // on content process will be passed onto the child processes.
     if (neededOnContentProcess) {
-      Services.ppmm.initialProcessData.policies
-                                      .disallowedFeatures.push(feature);
-
-      if (Services.ppmm.childCount > 1) {
-        // If there has been a content process already initialized, let's
-        // broadcast the newly disallowed feature.
-        Services.ppmm.broadcastAsyncMessage(
-          "EnterprisePolicies:DisallowFeature", {feature}
-        );
-      }
+      Services.ppmm.sharedData.set("EnterprisePolicies:DisallowedFeatures",
+        new Set(Object.keys(DisallowedFeatures).filter(key => DisallowedFeatures[key])));
     }
   },
 
@@ -286,10 +263,7 @@ EnterprisePoliciesManager.prototype = {
   set status(val) {
     this._status = val;
     if (val != Ci.nsIEnterprisePolicies.INACTIVE) {
-      Services.ppmm.initialProcessData.policies = {
-        status: val,
-        disallowedFeatures: [],
-      };
+      Services.ppmm.sharedData.set("EnterprisePolicies:Status", val);
     }
     return val;
   },
@@ -409,6 +383,11 @@ class JSONPoliciesProvider {
       let data = Cu.readUTF8File(this._getConfigurationFile());
       if (data) {
         this._policies = JSON.parse(data).policies;
+
+        if (!this._policies) {
+          log.error("Policies file doesn't contain a 'policies' object");
+          this._failed = true;
+        }
       }
     } catch (ex) {
       if (ex instanceof Components.Exception &&
@@ -425,7 +404,7 @@ class JSONPoliciesProvider {
   }
 }
 
-class GPOPoliciesProvider {
+class WindowsGPOPoliciesProvider {
   constructor() {
     this._policies = null;
 
@@ -433,7 +412,9 @@ class GPOPoliciesProvider {
 
     // Machine policies override user policies, so we read
     // user policies first and then replace them if necessary.
+    log.debug("root = HKEY_CURRENT_USER");
     this._readData(wrk, wrk.ROOT_KEY_CURRENT_USER);
+    log.debug("root = HKEY_LOCAL_MACHINE");
     this._readData(wrk, wrk.ROOT_KEY_LOCAL_MACHINE);
   }
 
@@ -452,10 +433,33 @@ class GPOPoliciesProvider {
   _readData(wrk, root) {
     wrk.open(root, "SOFTWARE\\Policies", wrk.ACCESS_READ);
     if (wrk.hasChild("Mozilla\\Firefox")) {
-      let isMachineRoot = (root == wrk.ROOT_KEY_LOCAL_MACHINE);
-      this._policies = WindowsGPOParser.readPolicies(wrk, this._policies, isMachineRoot);
+      this._policies = WindowsGPOParser.readPolicies(wrk, this._policies);
     }
     wrk.close();
+  }
+}
+
+class macOSPoliciesProvider {
+  constructor() {
+    this._policies = null;
+    let prefReader = Cc["@mozilla.org/mac-preferences-reader;1"]
+                       .createInstance(Ci.nsIMacPreferencesReader);
+    if (!prefReader.policiesEnabled()) {
+      return;
+    }
+    this._policies = macOSPoliciesParser.readPolicies(prefReader);
+  }
+
+  get hasPolicies() {
+    return this._policies !== null;
+  }
+
+  get policies() {
+    return this._policies;
+  }
+
+  get failed() {
+    return this._failed;
   }
 }
 

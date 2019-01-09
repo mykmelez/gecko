@@ -10,15 +10,11 @@ const Services = require("Services");
 const {DevToolsShim} = require("chrome://devtools-startup/content/DevToolsShim.jsm");
 
 loader.lazyRequireGetter(this, "TargetFactory", "devtools/client/framework/target", true);
-loader.lazyRequireGetter(this, "TabTarget", "devtools/client/framework/target", true);
 loader.lazyRequireGetter(this, "ToolboxHostManager", "devtools/client/framework/toolbox-host-manager", true);
 loader.lazyRequireGetter(this, "HUDService", "devtools/client/webconsole/hudservice", true);
 loader.lazyRequireGetter(this, "Telemetry", "devtools/client/shared/telemetry");
 loader.lazyImporter(this, "ScratchpadManager", "resource://devtools/client/scratchpad/scratchpad-manager.jsm");
 loader.lazyImporter(this, "BrowserToolboxProcess", "resource://devtools/client/framework/ToolboxProcess.jsm");
-
-loader.lazyRequireGetter(this, "WebExtensionInspectedWindowFront",
-      "devtools/shared/fronts/addon/webextension-inspected-window", true);
 
 const {defaultTools: DefaultTools, defaultThemes: DefaultThemes} =
   require("devtools/client/definitions");
@@ -42,7 +38,7 @@ function DevTools() {
 
   EventEmitter.decorate(this);
   this._telemetry = new Telemetry();
-  this._telemetry.setEventRecordingEnabled("devtools.main", true);
+  this._telemetry.setEventRecordingEnabled(true);
 
   // Listen for changes to the theme pref.
   this._onThemeChanged = this._onThemeChanged.bind(this);
@@ -447,19 +443,22 @@ DevTools.prototype = {
    * @param {Number} startTime
    *        Optional, indicates the time at which the user event related to this toolbox
    *        opening started. This is a `Cu.now()` timing.
+   * @param {string} reason
+   *        Reason the tool was opened
    *
    * @return {Toolbox} toolbox
    *        The toolbox that was opened
    */
-  async showToolbox(target, toolId, hostType, hostOptions, startTime) {
+  async showToolbox(target, toolId, hostType, hostOptions, startTime, reason = "toolbox_show") {
     let toolbox = this._toolboxes.get(target);
+
     if (toolbox) {
       if (hostType != null && toolbox.hostType != hostType) {
         await toolbox.switchHost(hostType);
       }
 
       if (toolId != null && toolbox.currentToolId != toolId) {
-        await toolbox.selectTool(toolId, "toolbox_show");
+        await toolbox.selectTool(toolId, reason);
       }
 
       toolbox.raise();
@@ -477,14 +476,16 @@ DevTools.prototype = {
       this._creatingToolboxes.delete(target);
 
       if (startTime) {
-        this.logToolboxOpenTime(toolbox.currentToolId, startTime);
+        this.logToolboxOpenTime(toolbox, startTime);
       }
       this._firstShowToolbox = false;
     }
 
+    // We send the "enter" width here to ensure it is always sent *after*
+    // the "open" event.
     const width = Math.ceil(toolbox.win.outerWidth / 50) * 50;
-    this._telemetry.addEventProperty(
-      "devtools.main", "open", "tools", null, "width", width);
+    const panelName = this.makeToolIdHumanReadable(toolId || toolbox.defaultToolId);
+    this._telemetry.addEventProperty(toolbox, "enter", panelName, null, "width", width);
 
     return toolbox;
   },
@@ -496,22 +497,25 @@ DevTools.prototype = {
    * subsequent toolbox opening, which should all be faster.
    * These two probes are indexed by Tool ID.
    *
-   * @param {String} toolId
-   *        The id of the opened tool.
+   * @param {String} toolbox
+   *        Toolbox instance.
    * @param {Number} startTime
    *        Indicates the time at which the user event related to the toolbox
    *        opening started. This is a `Cu.now()` timing.
    */
-  logToolboxOpenTime(toolId, startTime) {
+  logToolboxOpenTime(toolbox, startTime) {
+    const toolId = toolbox.currentToolId || toolbox.defaultToolId;
     const delay = Cu.now() - startTime;
+    const panelName = this.makeToolIdHumanReadable(toolId);
 
     const telemetryKey = this._firstShowToolbox ?
       "DEVTOOLS_COLD_TOOLBOX_OPEN_DELAY_MS" : "DEVTOOLS_WARM_TOOLBOX_OPEN_DELAY_MS";
     this._telemetry.getKeyedHistogramById(telemetryKey).add(toolId, delay);
 
+    const browserWin = toolbox.win.top;
     this._telemetry.addEventProperty(
-      "devtools.main", "open", "tools", null, "first_panel",
-      this.makeToolIdHumanReadable(toolId));
+      browserWin, "open", "tools", null, "first_panel", panelName
+    );
   },
 
   makeToolIdHumanReadable(toolId) {
@@ -597,7 +601,7 @@ DevTools.prototype = {
    * @param  {XULTab} tab
    *         The tab to use in creating a new target.
    *
-   * @return {TabTarget} A target object
+   * @return {Target} A target object
    */
   getTargetForTab: function(tab) {
     return TargetFactory.forTab(tab);
@@ -607,11 +611,11 @@ DevTools.prototype = {
    * Compatibility layer for web-extensions. Used by DevToolsShim for
    * browser/components/extensions/ext-devtools.js
    *
-   * web-extensions need to use dedicated instances of TabTarget and cannot reuse the
+   * web-extensions need to use dedicated instances of Target and cannot reuse the
    * cached instances managed by DevTools target factory.
    */
   createTargetForTab: function(tab) {
-    return new TabTarget(tab);
+    return TargetFactory.createTargetForTab(tab);
   },
 
   /**
@@ -619,7 +623,7 @@ DevTools.prototype = {
    * browser/components/extensions/ext-devtools-inspectedWindow.js
    */
   createWebExtensionInspectedWindowFront: function(tabTarget) {
-    return new WebExtensionInspectedWindowFront(tabTarget.client, tabTarget.form);
+    return tabTarget.getFront("webExtensionInspectedWindow");
   },
 
   /**
@@ -650,8 +654,15 @@ DevTools.prototype = {
       nodeFront = await walker.querySelector(nodeFront, selector);
       if (nodeSelectors.length > 0) {
         const { nodes } = await walker.children(nodeFront);
-        // This is the NodeFront for the document node inside the iframe
-        nodeFront = nodes[0];
+        // If there are remaining selectors to process, they will target a document or a
+        // document-fragment under the current node. Whether the element is a frame or
+        // a web component, it can only contain one document/document-fragment, so just
+        // select the first one available.
+        nodeFront = nodes.find(node => {
+          const { nodeType } = node;
+          return nodeType === Node.DOCUMENT_FRAGMENT_NODE ||
+                 nodeType === Node.DOCUMENT_NODE;
+        });
       }
       return querySelectors(nodeFront);
     }
@@ -676,9 +687,10 @@ DevTools.prototype = {
    *         markup view.
    */
   async inspectNode(tab, nodeSelectors, startTime) {
-    const target = TargetFactory.forTab(tab);
+    const target = await TargetFactory.forTab(tab);
 
-    const toolbox = await gDevTools.showToolbox(target, "inspector", null, null, startTime);
+    const toolbox = await gDevTools.showToolbox(target, "inspector", null, null,
+                                                startTime, "inspect_dom");
     const inspector = toolbox.getCurrentPanel();
 
     // If the toolbox has been switched into a nested frame, we should first remove
@@ -715,7 +727,7 @@ DevTools.prototype = {
    *         selected in the accessibility inspector.
    */
   async inspectA11Y(tab, nodeSelectors, startTime) {
-    const target = TargetFactory.forTab(tab);
+    const target = await TargetFactory.forTab(tab);
 
     const toolbox = await gDevTools.showToolbox(
       target, "accessibility", null, null, startTime);
@@ -743,7 +755,7 @@ DevTools.prototype = {
       }
     }
 
-    for (const [key, ] of this.getToolDefinitionMap()) {
+    for (const [key ] of this.getToolDefinitionMap()) {
       this.unregisterTool(key, true);
     }
 

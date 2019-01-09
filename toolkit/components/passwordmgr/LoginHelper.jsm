@@ -40,13 +40,19 @@ var LoginHelper = {
       return this.debug ? "debug" : "warn";
     };
 
-    // Create a new instance of the ConsoleAPI so we can control the maxLogLevel with a pref.
-    let ConsoleAPI = ChromeUtils.import("resource://gre/modules/Console.jsm", {}).ConsoleAPI;
-    let consoleOptions = {
-      maxLogLevel: getMaxLogLevel(),
-      prefix: aLogPrefix,
-    };
-    let logger = new ConsoleAPI(consoleOptions);
+    let logger;
+    function getConsole() {
+      if (!logger) {
+        // Create a new instance of the ConsoleAPI so we can control the maxLogLevel with a pref.
+        let ConsoleAPI = ChromeUtils.import("resource://gre/modules/Console.jsm", {}).ConsoleAPI;
+        let consoleOptions = {
+          maxLogLevel: getMaxLogLevel(),
+          prefix: aLogPrefix,
+        };
+        logger = new ConsoleAPI(consoleOptions);
+      }
+      return logger;
+    }
 
     // Watch for pref changes and update this.debug and the maxLogLevel for created loggers
     Services.prefs.addObserver("signon.", () => {
@@ -54,10 +60,31 @@ var LoginHelper = {
       this.formlessCaptureEnabled = Services.prefs.getBoolPref("signon.formlessCapture.enabled");
       this.schemeUpgrades = Services.prefs.getBoolPref("signon.schemeUpgrades");
       this.insecureAutofill = Services.prefs.getBoolPref("signon.autofillForms.http");
-      logger.maxLogLevel = getMaxLogLevel();
+      if (logger) {
+        logger.maxLogLevel = getMaxLogLevel();
+      }
     });
 
-    return logger;
+    return {
+      log: (...args) => {
+        if (this.debug) {
+          getConsole().log(...args);
+        }
+      },
+      error: (...args) => {
+        getConsole().error(...args);
+      },
+      debug: (...args) => {
+        if (this.debug) {
+          getConsole().debug(...args);
+        }
+      },
+      warn: (...args) => {
+        if (this.debug) {
+          getConsole().warn(...args);
+        }
+      },
+    };
   },
 
   /**
@@ -309,9 +336,7 @@ var LoginHelper = {
         }
       }
 
-      let propEnum = aNewLoginData.enumerator;
-      while (propEnum.hasMoreElements()) {
-        let prop = propEnum.getNext().QueryInterface(Ci.nsIProperty);
+      for (let prop of aNewLoginData.enumerator) {
         switch (prop.name) {
           // nsILoginInfo
           case "hostname":
@@ -714,33 +739,6 @@ var LoginHelper = {
     return logins.map(this.vanillaObjectToLogin);
   },
 
-  removeLegacySignonFiles() {
-    const {Constants, Path, File} = ChromeUtils.import("resource://gre/modules/osfile.jsm").OS;
-
-    const profileDir = Constants.Path.profileDir;
-    const defaultSignonFilePrefs = new Map([
-      ["signon.SignonFileName", "signons.txt"],
-      ["signon.SignonFileName2", "signons2.txt"],
-      ["signon.SignonFileName3", "signons3.txt"]
-    ]);
-    const toDeletes = new Set();
-
-    for (let [pref, val] of defaultSignonFilePrefs.entries()) {
-      toDeletes.add(Path.join(profileDir, val));
-
-      try {
-        let signonFile = Services.prefs.getCharPref(pref);
-
-        toDeletes.add(Path.join(profileDir, signonFile));
-        Services.prefs.clearUserPref(pref);
-      } catch (e) {}
-    }
-
-    for (let file of toDeletes) {
-      File.remove(file);
-    }
-  },
-
   /**
    * Returns true if the user has a master password set and false otherwise.
    */
@@ -769,7 +767,7 @@ var LoginHelper = {
       dataObject.data = data;
     }
     Services.obs.notifyObservers(dataObject, "passwordmgr-storage-changed", changeType);
-  }
+  },
 };
 
 XPCOMUtils.defineLazyPreferenceGetter(LoginHelper, "showInsecureFieldWarning",

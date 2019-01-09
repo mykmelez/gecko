@@ -18,6 +18,9 @@ var start = null;
 var divCount = 1000;
 var maxIterations = 600;
 
+// ensure contentful paint occurs
+document.body.innerHTML = "DisplayList inactive mutate";
+
 for (var i = 0; i < divCount; i++) {
   var div = document.createElement("div");
   div.id = i;
@@ -52,5 +55,5 @@ addEventListener("load", function() {
 });
 
 </script>
-<script type="text/javascript" src="chrome://talos-powers-content/content/TalosContentProfiler.js"></script>
+<script type="text/javascript" src="resource://talos-powers/TalosContentProfiler.js"></script>
 </html>

@@ -12,7 +12,6 @@ const {
 
 loader.lazyRequireGetter(this, "EditingSession", "devtools/client/inspector/boxmodel/utils/editing-session");
 loader.lazyRequireGetter(this, "InplaceEditor", "devtools/client/shared/inplace-editor", true);
-loader.lazyRequireGetter(this, "getCssProperties", "devtools/shared/fronts/css-properties", true);
 
 const NUMERIC = /^-?[\d\.]+$/;
 
@@ -146,7 +145,7 @@ BoxModel.prototype = {
 
       const styleEntries = await this.inspector.pageStyle.getApplied(node, {
         // We don't need styles applied to pseudo elements of the current node.
-        skipPseudo: true
+        skipPseudo: true,
       });
       this.elementRules = styleEntries.map(e => e.rule);
 
@@ -182,7 +181,12 @@ BoxModel.prototype = {
       this._updateReasons = [];
 
       return null;
-    }).bind(this))().catch(console.error);
+    }).bind(this))().catch(error => {
+      // If we failed because we were being destroyed while waiting for a request, ignore.
+      if (this.document) {
+        console.error(error);
+      }
+    });
 
     this._lastRequest = lastRequest;
   },
@@ -195,8 +199,7 @@ BoxModel.prototype = {
       return;
     }
 
-    const toolbox = this.inspector.toolbox;
-    toolbox.highlighterUtils.unhighlight();
+    this.inspector.highlighter.unhighlight();
   },
 
   /**
@@ -204,12 +207,12 @@ BoxModel.prototype = {
    * geometry editor enabled state.
    */
   onHideGeometryEditor() {
-    const { markup, selection, toolbox } = this.inspector;
+    const { markup, selection, inspector } = this.inspector;
 
     this.highlighters.hideGeometryEditor();
     this.store.dispatch(updateGeometryEditorEnabled(false));
 
-    toolbox.off("picker-started", this.onHideGeometryEditor);
+    inspector.nodePicker.off("picker-started", this.onHideGeometryEditor);
     selection.off("new-node-front", this.onHideGeometryEditor);
     markup.off("leave", this.onMarkupViewLeave);
     markup.off("node-hover", this.onMarkupViewNodeHover);
@@ -280,7 +283,7 @@ BoxModel.prototype = {
       initial: initialValue,
       contentType: InplaceEditor.CONTENT_TYPES.CSS_VALUE,
       property: {
-        name: property
+        name: property,
       },
       start: self => {
         self.elt.parentNode.classList.add("boxmodel-editing");
@@ -291,7 +294,7 @@ BoxModel.prototype = {
         }
 
         const properties = [
-          { name: property, value: value }
+          { name: property, value: value },
         ];
 
         if (property.substring(0, 7) == "border-") {
@@ -319,7 +322,7 @@ BoxModel.prototype = {
 
         this.updateBoxModel("editable-value-change");
       },
-      cssProperties: getCssProperties(this.inspector.toolbox)
+      cssProperties: this.inspector.cssProperties,
     }, event);
   },
 
@@ -334,10 +337,8 @@ BoxModel.prototype = {
       return;
     }
 
-    const toolbox = this.inspector.toolbox;
     const nodeFront = this.inspector.selection.nodeFront;
-
-    toolbox.highlighterUtils.highlightNodeFront(nodeFront, options);
+    this.inspector.highlighter.highlight(nodeFront, options);
   },
 
   /**
@@ -364,7 +365,7 @@ BoxModel.prototype = {
    * toggle button is clicked.
    */
   onToggleGeometryEditor() {
-    const { markup, selection, toolbox } = this.inspector;
+    const { markup, selection, inspector } = this.inspector;
     const nodeFront = this.inspector.selection.nodeFront;
     const state = this.store.getState();
     const enabled = !state.boxModel.geometryEditorEnabled;
@@ -374,13 +375,13 @@ BoxModel.prototype = {
 
     if (enabled) {
       // Hide completely the geometry editor if the picker is clicked or a new node front
-      toolbox.on("picker-started", this.onHideGeometryEditor);
+      inspector.nodePicker.on("picker-started", this.onHideGeometryEditor);
       selection.on("new-node-front", this.onHideGeometryEditor);
       // Temporary hide the geometry editor
       markup.on("leave", this.onMarkupViewLeave);
       markup.on("node-hover", this.onMarkupViewNodeHover);
     } else {
-      toolbox.off("picker-started", this.onHideGeometryEditor);
+      inspector.nodePicker.off("picker-started", this.onHideGeometryEditor);
       selection.off("new-node-front", this.onHideGeometryEditor);
       markup.off("leave", this.onMarkupViewLeave);
       markup.off("node-hover", this.onMarkupViewNodeHover);

@@ -6,7 +6,9 @@
 
 #include "WorkletGlobalScope.h"
 #include "mozilla/dom/WorkletGlobalScopeBinding.h"
+#include "mozilla/dom/WorkletImpl.h"
 #include "mozilla/dom/Console.h"
+#include "mozilla/StaticPrefs.h"
 
 namespace mozilla {
 namespace dom {
@@ -34,28 +36,24 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(WorkletGlobalScope)
   NS_INTERFACE_MAP_ENTRY(WorkletGlobalScope)
 NS_INTERFACE_MAP_END
 
-WorkletGlobalScope::WorkletGlobalScope() = default;
+WorkletGlobalScope::WorkletGlobalScope()
+    : mCreationTimeStamp(TimeStamp::Now()) {}
 
-JSObject*
-WorkletGlobalScope::WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aGivenProto)
-{
+WorkletGlobalScope::~WorkletGlobalScope() = default;
+
+JSObject* WorkletGlobalScope::WrapObject(JSContext* aCx,
+                                         JS::Handle<JSObject*> aGivenProto) {
   MOZ_CRASH("We should never get here!");
   return nullptr;
 }
 
-already_AddRefed<Console>
-WorkletGlobalScope::GetConsole(JSContext* aCx, ErrorResult& aRv)
-{
-  RefPtr<WorkletThread> thread = WorkletThread::Get();
-  MOZ_ASSERT(thread);
-
+already_AddRefed<Console> WorkletGlobalScope::GetConsole(JSContext* aCx,
+                                                         ErrorResult& aRv) {
   if (!mConsole) {
-    mConsole =
-      Console::CreateForWorklet(aCx,
-                                thread->GetWorkletLoadInfo().OuterWindowID(),
-                                thread->GetWorkletLoadInfo().InnerWindowID(),
-                                aRv);
+    MOZ_ASSERT(Impl());
+    const WorkletLoadInfo& loadInfo = Impl()->LoadInfo();
+    mConsole = Console::CreateForWorklet(aCx, this, loadInfo.OuterWindowID(),
+                                         loadInfo.InnerWindowID(), aRv);
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
@@ -65,15 +63,10 @@ WorkletGlobalScope::GetConsole(JSContext* aCx, ErrorResult& aRv)
   return console.forget();
 }
 
-void
-WorkletGlobalScope::Dump(const Optional<nsAString>& aString) const
-{
+void WorkletGlobalScope::Dump(const Optional<nsAString>& aString) const {
   WorkletThread::AssertIsOnWorkletThread();
 
-  WorkletThread* workletThread = WorkletThread::Get();
-  MOZ_ASSERT(workletThread);
-
-  if (!workletThread->GetWorkletLoadInfo().DumpEnabled()) {
+  if (!StaticPrefs::browser_dom_window_dump_enabled()) {
     return;
   }
 
@@ -91,5 +84,5 @@ WorkletGlobalScope::Dump(const Optional<nsAString>& aString) const
   fflush(stdout);
 }
 
-} // dom namespace
-} // mozilla namespace
+}  // namespace dom
+}  // namespace mozilla

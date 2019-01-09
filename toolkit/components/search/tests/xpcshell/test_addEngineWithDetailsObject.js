@@ -12,6 +12,9 @@ const kAlias = "alias_foo";
 const kSearchTerm = "foo";
 const kExtensionID = "test@example.com";
 const URLTYPE_SUGGEST_JSON = "application/x-suggestions+json";
+const kSearchEnginePOSTID = "addEngineWithDetails_post_test_engine";
+const kSearchEnginePOSTURL = "http://example.com/";
+const kSearchEnginePOSTData = "search={searchTerms}&extra=more";
 
 add_task(async function test_addEngineWithDetails() {
   Assert.ok(!Services.search.isInitialized);
@@ -40,14 +43,34 @@ add_task(async function test_addEngineWithDetails() {
 
   // Set the engine as default; this should set a loadPath verification hash,
   // which should ensure we don't show the search reset prompt.
-  Services.search.currentEngine = engine;
+  Services.search.defaultEngine = engine;
 
   let expectedURL = kSearchEngineURL.replace("{searchTerms}", kSearchTerm);
   let submission =
-    Services.search.currentEngine.getSubmission(kSearchTerm, null, "searchbar");
+    Services.search.defaultEngine.getSubmission(kSearchTerm, null, "searchbar");
   Assert.equal(submission.uri.spec, expectedURL);
   let expectedSuggestURL = kSearchSuggestURL.replace("{searchTerms}", kSearchTerm);
   let submissionSuggest =
-    Services.search.currentEngine.getSubmission(kSearchTerm, URLTYPE_SUGGEST_JSON);
+    Services.search.defaultEngine.getSubmission(kSearchTerm, URLTYPE_SUGGEST_JSON);
   Assert.equal(submissionSuggest.uri.spec, expectedSuggestURL);
+});
+
+add_task(async function test_addEngineWithDetailsPOST() {
+  Assert.ok(Services.search.isInitialized);
+
+  Services.search.addEngineWithDetails(kSearchEnginePOSTID, {
+    template: kSearchEnginePOSTURL,
+    method: "POST",
+    postData: kSearchEnginePOSTData,
+  });
+
+  let engine = Services.search.getEngineByName(kSearchEnginePOSTID);
+
+  let expectedPOSTData = kSearchEnginePOSTData.replace("{searchTerms}", kSearchTerm);
+  let submission = engine.getSubmission(kSearchTerm, null, "searchbar");
+  Assert.equal(submission.uri.spec, kSearchEnginePOSTURL);
+  let sis = Cc["@mozilla.org/scriptableinputstream;1"].createInstance(Ci.nsIScriptableInputStream);
+  sis.init(submission.postData);
+  let data = sis.read(submission.postData.available());
+  Assert.equal(data, expectedPOSTData);
 });

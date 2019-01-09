@@ -11,16 +11,16 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/BackgroundHangMonitor.h"
 #include "mozilla/ClearOnShutdown.h"
-#include "mozilla/DebugOnly.h"
 #include "mozilla/mscom/SpinEvent.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/SystemGroup.h"
-#include "private/prpriv.h" // For PR_GetThreadID
-#include <winternl.h> // For NTSTATUS and NTAPI
+#include "mozilla/Unused.h"
+#include "private/prpriv.h"  // For PR_GetThreadID
+#include <winternl.h>        // For NTSTATUS and NTAPI
 
 namespace {
 
-typedef NTSTATUS (NTAPI* NtTestAlertPtr)(VOID);
+typedef NTSTATUS(NTAPI* NtTestAlertPtr)(VOID);
 
 /**
  * SyncRunnable implements different code paths depending on whether or not
@@ -29,21 +29,18 @@ typedef NTSTATUS (NTAPI* NtTestAlertPtr)(VOID);
  * our runnable. Since spinning is pointless in the uniprocessor case, we block
  * on an event that is set by the main thread once it has finished the runnable.
  */
-class SyncRunnable : public mozilla::Runnable
-{
-public:
+class SyncRunnable : public mozilla::Runnable {
+ public:
   explicit SyncRunnable(already_AddRefed<nsIRunnable> aRunnable)
-    : mozilla::Runnable("MainThreadInvoker")
-    , mRunnable(aRunnable)
-  {
+      : mozilla::Runnable("MainThreadInvoker"), mRunnable(aRunnable) {
     static const bool gotStatics = InitStatics();
     MOZ_ASSERT(gotStatics);
+    Unused << gotStatics;
   }
 
   ~SyncRunnable() = default;
 
-  NS_IMETHOD Run() override
-  {
+  NS_IMETHOD Run() override {
     if (mHasRun) {
       // The APC already ran, so we have nothing to do.
       return NS_OK;
@@ -56,8 +53,7 @@ public:
   }
 
   // This is called by MainThreadInvoker::MainThreadAPC.
-  void APCRun()
-  {
+  void APCRun() {
     mHasRun = true;
 
     TimeStamp runStart(TimeStamp::Now());
@@ -69,46 +65,38 @@ public:
     mEvent.Signal();
   }
 
-  bool WaitUntilComplete()
-  {
+  bool WaitUntilComplete() {
     return mEvent.Wait(mozilla::mscom::MainThreadInvoker::GetTargetThread());
   }
 
-  const mozilla::TimeDuration& GetDuration() const
-  {
-    return mDuration;
-  }
+  const mozilla::TimeDuration& GetDuration() const { return mDuration; }
 
-private:
-  bool                      mHasRun = false;
-  nsCOMPtr<nsIRunnable>     mRunnable;
+ private:
+  bool mHasRun = false;
+  nsCOMPtr<nsIRunnable> mRunnable;
   mozilla::mscom::SpinEvent mEvent;
-  mozilla::TimeDuration     mDuration;
+  mozilla::TimeDuration mDuration;
 
   static NtTestAlertPtr sNtTestAlert;
 
-  static bool InitStatics()
-  {
+  static bool InitStatics() {
     sNtTestAlert = reinterpret_cast<NtTestAlertPtr>(
-      ::GetProcAddress(::GetModuleHandleW(L"ntdll.dll"), "NtTestAlert"));
+        ::GetProcAddress(::GetModuleHandleW(L"ntdll.dll"), "NtTestAlert"));
     MOZ_ASSERT(sNtTestAlert);
     return sNtTestAlert;
   }
-
 };
 
 NtTestAlertPtr SyncRunnable::sNtTestAlert = nullptr;
 
-} // anonymous namespace
+}  // anonymous namespace
 
 namespace mozilla {
 namespace mscom {
 
 HANDLE MainThreadInvoker::sMainThread = nullptr;
 
-/* static */ bool
-MainThreadInvoker::InitStatics()
-{
+/* static */ bool MainThreadInvoker::InitStatics() {
   nsCOMPtr<nsIThread> mainThread;
   nsresult rv = ::NS_GetMainThread(getter_AddRefs(mainThread));
   if (NS_FAILED(rv)) {
@@ -127,15 +115,13 @@ MainThreadInvoker::InitStatics()
   return !!sMainThread;
 }
 
-MainThreadInvoker::MainThreadInvoker()
-{
+MainThreadInvoker::MainThreadInvoker() {
   static const bool gotStatics = InitStatics();
   MOZ_ASSERT(gotStatics);
+  Unused << gotStatics;
 }
 
-bool
-MainThreadInvoker::Invoke(already_AddRefed<nsIRunnable>&& aRunnable)
-{
+bool MainThreadInvoker::Invoke(already_AddRefed<nsIRunnable>&& aRunnable) {
   nsCOMPtr<nsIRunnable> runnable(std::move(aRunnable));
   if (!runnable) {
     return false;
@@ -167,8 +153,8 @@ MainThreadInvoker::Invoke(already_AddRefed<nsIRunnable>&& aRunnable)
 
   // 2. Post a Gecko runnable (which always runs). If the APC hasn't run, the
   // Gecko runnable runs it. Otherwise, it does nothing.
-  if (NS_FAILED(SystemGroup::Dispatch(
-                  TaskCategory::Other, do_AddRef(syncRunnable)))) {
+  if (NS_FAILED(SystemGroup::Dispatch(TaskCategory::Other,
+                                      do_AddRef(syncRunnable)))) {
     return false;
   }
 
@@ -177,9 +163,7 @@ MainThreadInvoker::Invoke(already_AddRefed<nsIRunnable>&& aRunnable)
   return result;
 }
 
-/* static */ VOID CALLBACK
-MainThreadInvoker::MainThreadAPC(ULONG_PTR aParam)
-{
+/* static */ VOID CALLBACK MainThreadInvoker::MainThreadAPC(ULONG_PTR aParam) {
   AUTO_PROFILER_THREAD_WAKE;
   mozilla::BackgroundHangMonitor().NotifyActivity();
   MOZ_ASSERT(NS_IsMainThread());
@@ -188,5 +172,5 @@ MainThreadInvoker::MainThreadAPC(ULONG_PTR aParam)
   NS_RELEASE(runnable);
 }
 
-} // namespace mscom
-} // namespace mozilla
+}  // namespace mscom
+}  // namespace mozilla

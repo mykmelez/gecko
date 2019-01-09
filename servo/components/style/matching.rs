@@ -1,25 +1,25 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! High-level interface to CSS selector matching.
 
 #![allow(unsafe_code)]
 #![deny(missing_docs)]
 
-use context::{ElementCascadeInputs, QuirksMode, SelectorFlagsMap};
-use context::{SharedStyleContext, StyleContext};
-use data::ElementData;
-use dom::TElement;
-use invalidation::element::restyle_hints::RestyleHint;
-use properties::ComputedValues;
-use properties::longhands::display::computed_value::T as Display;
-use rule_tree::{CascadeLevel, StrongRuleNode};
-use selector_parser::{PseudoElement, RestyleDamage};
+use crate::context::{ElementCascadeInputs, QuirksMode, SelectorFlagsMap};
+use crate::context::{SharedStyleContext, StyleContext};
+use crate::data::ElementData;
+use crate::dom::TElement;
+use crate::invalidation::element::restyle_hints::RestyleHint;
+use crate::properties::longhands::display::computed_value::T as Display;
+use crate::properties::ComputedValues;
+use crate::rule_tree::{CascadeLevel, StrongRuleNode};
+use crate::selector_parser::{PseudoElement, RestyleDamage};
+use crate::style_resolver::ResolvedElementStyles;
+use crate::traversal_flags::TraversalFlags;
 use selectors::matching::ElementSelectorFlags;
 use servo_arc::{Arc, ArcBorrow};
-use style_resolver::ResolvedElementStyles;
-use traversal_flags::TraversalFlags;
 
 /// Represents the result of comparing an element's old and new style.
 #[derive(Debug)]
@@ -93,8 +93,8 @@ trait PrivateMatchMethods: TElement {
         cascade_visited: CascadeVisitedMode,
         cascade_inputs: &mut ElementCascadeInputs,
     ) -> bool {
-        use properties::PropertyDeclarationBlock;
-        use shared_lock::Locked;
+        use crate::properties::PropertyDeclarationBlock;
+        use crate::shared_lock::Locked;
 
         debug_assert!(
             replacements.intersects(RestyleHint::replacements()) &&
@@ -195,9 +195,9 @@ trait PrivateMatchMethods: TElement {
         context: &mut StyleContext<Self>,
         primary_style: &Arc<ComputedValues>,
     ) -> Option<Arc<ComputedValues>> {
-        use context::CascadeInputs;
-        use style_resolver::{PseudoElementResolution, StyleResolverForElement};
-        use stylist::RuleInclusion;
+        use crate::context::CascadeInputs;
+        use crate::style_resolver::{PseudoElementResolution, StyleResolverForElement};
+        use crate::stylist::RuleInclusion;
 
         let rule_node = primary_style.rules();
         let without_transition_rules = context
@@ -224,7 +224,8 @@ trait PrivateMatchMethods: TElement {
             context,
             RuleInclusion::All,
             PseudoElementResolution::IfApplicable,
-        ).cascade_style_and_visited_with_default_parents(inputs);
+        )
+        .cascade_style_and_visited_with_default_parents(inputs);
 
         Some(style.0)
     }
@@ -233,18 +234,23 @@ trait PrivateMatchMethods: TElement {
     fn needs_animations_update(
         &self,
         context: &mut StyleContext<Self>,
-        old_values: Option<&ComputedValues>,
-        new_values: &ComputedValues,
+        old_style: Option<&ComputedValues>,
+        new_style: &ComputedValues,
     ) -> bool {
-        let new_box_style = new_values.get_box();
-        let has_new_animation_style = new_box_style.specifies_animations();
+        let new_box_style = new_style.get_box();
+        let new_style_specifies_animations = new_box_style.specifies_animations();
 
-        let old = match old_values {
+        let old_style = match old_style {
             Some(old) => old,
-            None => return has_new_animation_style,
+            None => return new_style_specifies_animations,
         };
 
-        let old_box_style = old.get_box();
+        let has_animations = self.has_css_animations();
+        if !new_style_specifies_animations && !has_animations {
+            return false;
+        }
+
+        let old_box_style = old_style.get_box();
 
         let keyframes_could_have_changed = context
             .shared
@@ -258,7 +264,7 @@ trait PrivateMatchMethods: TElement {
         //
         // TODO: We should check which @keyframes were added/changed/deleted and
         // update only animations corresponding to those @keyframes.
-        if keyframes_could_have_changed && (has_new_animation_style || self.has_css_animations()) {
+        if keyframes_could_have_changed {
             return true;
         }
 
@@ -272,19 +278,27 @@ trait PrivateMatchMethods: TElement {
 
         // If we were display: none, we may need to trigger animations.
         if old_display == Display::None && new_display != Display::None {
-            return has_new_animation_style;
+            return new_style_specifies_animations;
         }
 
         // If we are becoming display: none, we may need to stop animations.
         if old_display != Display::None && new_display == Display::None {
-            return self.has_css_animations();
+            return has_animations;
+        }
+
+        // We might need to update animations if writing-mode or direction
+        // changed, and any of the animations contained logical properties.
+        //
+        // We may want to be more granular, but it's probably not worth it.
+        if new_style.writing_mode != old_style.writing_mode {
+            return has_animations;
         }
 
         false
     }
 
-    /// Create a SequentialTask for resolving descendants in a SMIL display property
-    /// animation if the display property changed from none.
+    /// Create a SequentialTask for resolving descendants in a SMIL display
+    /// property animation if the display property changed from none.
     #[cfg(feature = "gecko")]
     fn handle_display_change_for_smil_if_needed(
         &self,
@@ -293,7 +307,7 @@ trait PrivateMatchMethods: TElement {
         new_values: &ComputedValues,
         restyle_hints: RestyleHint,
     ) {
-        use context::PostAnimationTasks;
+        use crate::context::PostAnimationTasks;
 
         if !restyle_hints.intersects(RestyleHint::RESTYLE_SMIL) {
             return;
@@ -323,7 +337,7 @@ trait PrivateMatchMethods: TElement {
         restyle_hint: RestyleHint,
         important_rules_changed: bool,
     ) {
-        use context::UpdateAnimationsTasks;
+        use crate::context::UpdateAnimationsTasks;
 
         if context.shared.traversal_flags.for_animation_only() {
             self.handle_display_change_for_smil_if_needed(
@@ -343,10 +357,9 @@ trait PrivateMatchMethods: TElement {
             tasks.insert(UpdateAnimationsTasks::CSS_ANIMATIONS);
         }
 
-        let before_change_style = if self.might_need_transitions_update(
-            old_values.as_ref().map(|s| &**s),
-            new_values,
-        ) {
+        let before_change_style = if self
+            .might_need_transitions_update(old_values.as_ref().map(|s| &**s), new_values)
+        {
             let after_change_style = if self.has_css_transitions() {
                 self.after_change_style(context, new_values)
             } else {
@@ -406,8 +419,8 @@ trait PrivateMatchMethods: TElement {
         _restyle_hint: RestyleHint,
         _important_rules_changed: bool,
     ) {
-        use animation;
-        use dom::TNode;
+        use crate::animation;
+        use crate::dom::TNode;
 
         let mut possibly_expired_animations = vec![];
         let shared_context = context.shared;
@@ -523,7 +536,7 @@ trait PrivateMatchMethods: TElement {
         // seems not common enough to care about.
         #[cfg(feature = "gecko")]
         {
-            use values::specified::align::AlignFlags;
+            use crate::values::specified::align::AlignFlags;
 
             let old_justify_items = old_values.get_position().clone_justify_items();
             let new_justify_items = new_values.get_position().clone_justify_items();
@@ -568,11 +581,11 @@ trait PrivateMatchMethods: TElement {
         &self,
         context: &SharedStyleContext,
         style: &mut Arc<ComputedValues>,
-        possibly_expired_animations: &mut Vec<::animation::PropertyAnimation>,
-        font_metrics: &::font_metrics::FontMetricsProvider,
+        possibly_expired_animations: &mut Vec<crate::animation::PropertyAnimation>,
+        font_metrics: &crate::font_metrics::FontMetricsProvider,
     ) {
-        use animation::{self, Animation};
-        use dom::TNode;
+        use crate::animation::{self, Animation, AnimationUpdate};
+        use crate::dom::TNode;
 
         // Finish any expired transitions.
         let this_opaque = self.as_node().opaque();
@@ -589,30 +602,27 @@ trait PrivateMatchMethods: TElement {
         }
 
         let mut all_running_animations = context.running_animations.write();
-        for running_animation in all_running_animations.get_mut(&this_opaque).unwrap() {
-            // This shouldn't happen frequently, but under some circumstances
-            // mainly huge load or debug builds, the constellation might be
-            // delayed in sending the `TickAllAnimations` message to layout.
-            //
-            // Thus, we can't assume all the animations have been already
-            // updated by layout, because other restyle due to script might be
-            // triggered by layout before the animation tick.
-            //
-            // See #12171 and the associated PR for an example where this
-            // happened while debugging other release panic.
-            if running_animation.is_expired() {
+        for mut running_animation in all_running_animations.get_mut(&this_opaque).unwrap() {
+            if let Animation::Transition(_, _, ref frame) = *running_animation {
+                possibly_expired_animations.push(frame.property_animation.clone());
                 continue;
             }
 
-            animation::update_style_for_animation::<Self>(
+            let update = animation::update_style_for_animation::<Self>(
                 context,
-                running_animation,
+                &mut running_animation,
                 style,
                 font_metrics,
             );
 
-            if let Animation::Transition(_, _, ref frame, _) = *running_animation {
-                possibly_expired_animations.push(frame.property_animation.clone())
+            match *running_animation {
+                Animation::Transition(..) => unreachable!(),
+                Animation::Keyframes(_, _, _, ref mut state) => match update {
+                    AnimationUpdate::Regular => {},
+                    AnimationUpdate::AnimationCanceled => {
+                        state.expired = true;
+                    },
+                },
             }
         }
     }

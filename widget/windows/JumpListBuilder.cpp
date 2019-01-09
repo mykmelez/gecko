@@ -20,22 +20,26 @@
 #include "nsThreadUtils.h"
 #include "mozilla/LazyIdleThread.h"
 #include "nsIObserverService.h"
+#include "mozilla/ScopeExit.h"
 #include "mozilla/Unused.h"
+#include "mozilla/dom/Promise.h"
+#include "mozilla/mscom/COMApartmentRegion.h"
+#include "mozilla/mscom/EnsureMTA.h"
 
+#include <shellapi.h>
 #include "WinUtils.h"
 
-// The amount of time, in milliseconds, that our IO thread will stay alive after the last event it processes.
+using mozilla::dom::Promise;
+
+// The amount of time, in milliseconds, that our IO thread will stay alive after
+// the last event it processes.
 #define DEFAULT_THREAD_TIMEOUT_MS 30000
 
 namespace mozilla {
 namespace widget {
 
-static NS_DEFINE_CID(kJumpListItemCID,     NS_WIN_JUMPLISTITEM_CID);
-static NS_DEFINE_CID(kJumpListLinkCID,     NS_WIN_JUMPLISTLINK_CID);
-static NS_DEFINE_CID(kJumpListShortcutCID, NS_WIN_JUMPLISTSHORTCUT_CID);
-
 // defined in WinTaskbar.cpp
-extern const wchar_t *gMozillaJumpListIDGeneric;
+extern const wchar_t* gMozillaJumpListIDGeneric;
 
 Atomic<bool> JumpListBuilder::sBuildingList(false);
 const char kPrefTaskbarEnabled[] = "browser.taskbar.lists.enabled";
@@ -44,24 +48,17 @@ NS_IMPL_ISUPPORTS(JumpListBuilder, nsIJumpListBuilder, nsIObserver)
 #define TOPIC_PROFILE_BEFORE_CHANGE "profile-before-change"
 #define TOPIC_CLEAR_PRIVATE_DATA "clear-private-data"
 
-
 namespace detail {
 
-class DoneCommitListBuildCallback final : public nsIRunnable
-{
+class DoneCommitListBuildCallback final : public nsIRunnable {
   NS_DECL_THREADSAFE_ISUPPORTS
 
-public:
+ public:
   DoneCommitListBuildCallback(nsIJumpListCommittedCallback* aCallback,
                               JumpListBuilder* aBuilder)
-    : mCallback(aCallback)
-    , mBuilder(aBuilder)
-    , mResult(false)
-  {
-  }
+      : mCallback(aCallback), mBuilder(aBuilder), mResult(false) {}
 
-  NS_IMETHOD Run() override
-  {
+  NS_IMETHOD Run() override {
     MOZ_ASSERT(NS_IsMainThread());
     if (mCallback) {
       Unused << mCallback->Done(mResult);
@@ -71,21 +68,16 @@ public:
     return NS_OK;
   }
 
-  void SetResult(bool aResult)
-  {
-    mResult = aResult;
-  }
+  void SetResult(bool aResult) { mResult = aResult; }
 
-private:
-  ~DoneCommitListBuildCallback()
-  {
+ private:
+  ~DoneCommitListBuildCallback() {
     // Destructor does not always call on the main thread.
     MOZ_ASSERT(!mCallback);
     MOZ_ASSERT(!mBuilder);
   }
 
-  void Destroy()
-  {
+  void Destroy() {
     MOZ_ASSERT(NS_IsMainThread());
     mCallback = nullptr;
     mBuilder = nullptr;
@@ -99,18 +91,32 @@ private:
 
 NS_IMPL_ISUPPORTS(DoneCommitListBuildCallback, nsIRunnable);
 
-} // namespace detail
+}  // namespace detail
 
+JumpListBuilder::JumpListBuilder()
+    : mMaxItems(0), mHasCommit(false), mMonitor("JumpListBuilderMonitor") {
+  MOZ_ASSERT(NS_IsMainThread());
 
-JumpListBuilder::JumpListBuilder() :
-  mMaxItems(0),
-  mHasCommit(false),
-  mMonitor("JumpListBuilderMonitor")
-{
-  ::CoInitialize(nullptr);
+  // Instantiate mJumpListMgr in the multithreaded apartment so that proxied
+  // calls on that object do not need to interact with the main thread's message
+  // pump.
+  mscom::EnsureMTA([this]() {
+    RefPtr<ICustomDestinationList> jumpListMgr;
+    HRESULT hr = ::CoCreateInstance(
+        CLSID_DestinationList, nullptr, CLSCTX_INPROC_SERVER,
+        IID_ICustomDestinationList, getter_AddRefs(jumpListMgr));
+    if (FAILED(hr)) {
+      return;
+    }
 
-  CoCreateInstance(CLSID_DestinationList, nullptr, CLSCTX_INPROC_SERVER,
-                   IID_ICustomDestinationList, getter_AddRefs(mJumpListMgr));
+    // Since we are accessing mJumpListMgr across different threads
+    // (ie, different apartments), mJumpListMgr must be an agile reference.
+    mJumpListMgr = jumpListMgr;
+  });
+
+  if (!mJumpListMgr) {
+    return;
+  }
 
   // Make a lazy thread for any IO
   mIOThread = new LazyIdleThread(DEFAULT_THREAD_TIMEOUT_MS,
@@ -119,43 +125,35 @@ JumpListBuilder::JumpListBuilder() :
   Preferences::AddStrongObserver(this, kPrefTaskbarEnabled);
 
   nsCOMPtr<nsIObserverService> observerService =
-    do_GetService("@mozilla.org/observer-service;1");
+      do_GetService("@mozilla.org/observer-service;1");
   if (observerService) {
     observerService->AddObserver(this, TOPIC_PROFILE_BEFORE_CHANGE, false);
     observerService->AddObserver(this, TOPIC_CLEAR_PRIVATE_DATA, false);
   }
 }
 
-JumpListBuilder::~JumpListBuilder()
-{
+JumpListBuilder::~JumpListBuilder() {
   Preferences::RemoveObserver(this, kPrefTaskbarEnabled);
-  mJumpListMgr = nullptr;
-  ::CoUninitialize();
 }
 
-NS_IMETHODIMP JumpListBuilder::GetAvailable(int16_t *aAvailable)
-{
+NS_IMETHODIMP JumpListBuilder::GetAvailable(int16_t* aAvailable) {
   *aAvailable = false;
 
   ReentrantMonitorAutoEnter lock(mMonitor);
-  if (mJumpListMgr)
-    *aAvailable = true;
+  if (mJumpListMgr) *aAvailable = true;
 
   return NS_OK;
 }
 
-NS_IMETHODIMP JumpListBuilder::GetIsListCommitted(bool *aCommit)
-{
+NS_IMETHODIMP JumpListBuilder::GetIsListCommitted(bool* aCommit) {
   *aCommit = mHasCommit;
 
   return NS_OK;
 }
 
-NS_IMETHODIMP JumpListBuilder::GetMaxListItems(int16_t *aMaxItems)
-{
+NS_IMETHODIMP JumpListBuilder::GetMaxListItems(int16_t* aMaxItems) {
   ReentrantMonitorAutoEnter lock(mMonitor);
-  if (!mJumpListMgr)
-    return NS_ERROR_NOT_AVAILABLE;
+  if (!mJumpListMgr) return NS_ERROR_NOT_AVAILABLE;
 
   *aMaxItems = 0;
 
@@ -164,116 +162,114 @@ NS_IMETHODIMP JumpListBuilder::GetMaxListItems(int16_t *aMaxItems)
     return NS_OK;
   }
 
-  IObjectArray *objArray;
-  if (SUCCEEDED(mJumpListMgr->BeginList(&mMaxItems, IID_PPV_ARGS(&objArray)))) {
+  RefPtr<ICustomDestinationList> jumpListMgr = mJumpListMgr;
+  if (!jumpListMgr) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  IObjectArray* objArray;
+  if (SUCCEEDED(jumpListMgr->BeginList(&mMaxItems, IID_PPV_ARGS(&objArray)))) {
     *aMaxItems = mMaxItems;
 
-    if (objArray)
-      objArray->Release();
+    if (objArray) objArray->Release();
 
-    mJumpListMgr->AbortList();
+    jumpListMgr->AbortList();
   }
 
   return NS_OK;
 }
 
-NS_IMETHODIMP JumpListBuilder::InitListBuild(nsIMutableArray *removedItems, bool *_retval)
-{
-  NS_ENSURE_ARG_POINTER(removedItems);
+NS_IMETHODIMP JumpListBuilder::InitListBuild(JSContext* aCx,
+                                             Promise** aPromise) {
+  ReentrantMonitorAutoEnter lock(mMonitor);
+  if (!mJumpListMgr) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
 
-  *_retval = false;
+  nsIGlobalObject* globalObject = xpc::CurrentNativeGlobal(aCx);
+  if (NS_WARN_IF(!globalObject)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  ErrorResult result;
+  RefPtr<Promise> promise = Promise::Create(globalObject, result);
+  if (NS_WARN_IF(result.Failed())) {
+    return result.StealNSResult();
+  }
+
+  nsCOMPtr<nsIRunnable> runnable =
+      NewRunnableMethod<StoreCopyPassByRRef<RefPtr<Promise>>>(
+          "InitListBuild", this, &JumpListBuilder::DoInitListBuild, promise);
+  nsresult rv = mIOThread->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  promise.forget(aPromise);
+  return NS_OK;
+}
+
+void JumpListBuilder::DoInitListBuild(RefPtr<Promise>&& aPromise) {
+  // Since we're invoking COM interfaces to talk to the shell on a background
+  // thread, we need to be running inside a multithreaded apartment.
+  mscom::MTARegion mta;
+  MOZ_ASSERT(mta.IsValid());
 
   ReentrantMonitorAutoEnter lock(mMonitor);
-  if (!mJumpListMgr)
-    return NS_ERROR_NOT_AVAILABLE;
+  MOZ_ASSERT(mJumpListMgr);
 
-  if(sBuildingList)
+  if (sBuildingList) {
     AbortListBuild();
+  }
 
-  IObjectArray *objArray;
+  HRESULT hr = E_UNEXPECTED;
+  auto errorHandler = MakeScopeExit([&aPromise, &hr]() {
+    if (SUCCEEDED(hr)) {
+      return;
+    }
+
+    NS_DispatchToMainThread(NS_NewRunnableFunction(
+        "InitListBuildReject", [promise = std::move(aPromise)]() {
+          promise->MaybeReject(NS_ERROR_FAILURE);
+        }));
+  });
+
+  RefPtr<ICustomDestinationList> jumpListMgr = mJumpListMgr;
+  if (!jumpListMgr) {
+    return;
+  }
+
+  nsTArray<nsString> urisToRemove;
+  RefPtr<IObjectArray> objArray;
+  hr = jumpListMgr->BeginList(
+      &mMaxItems,
+      IID_PPV_ARGS(static_cast<IObjectArray**>(getter_AddRefs(objArray))));
+  if (FAILED(hr)) {
+    return;
+  }
 
   // The returned objArray of removed items are for manually removed items.
   // This does not return items which are removed because they were previously
   // part of the jump list but are no longer part of the jump list.
-  if (SUCCEEDED(mJumpListMgr->BeginList(&mMaxItems, IID_PPV_ARGS(&objArray)))) {
-    if (objArray) {
-      TransferIObjectArrayToIMutableArray(objArray, removedItems);
-      objArray->Release();
-    }
+  sBuildingList = true;
+  RemoveIconCacheAndGetJumplistShortcutURIs(objArray, urisToRemove);
 
-    RemoveIconCacheForItems(removedItems);
-
-    sBuildingList = true;
-    *_retval = true;
-    return NS_OK;
-  }
-
-  return NS_OK;
-}
-
-// Ensures that we don't have old ICO files that aren't in our jump lists
-// anymore left over in the cache.
-nsresult JumpListBuilder::RemoveIconCacheForItems(nsIMutableArray *items)
-{
-  NS_ENSURE_ARG_POINTER(items);
-
-  nsresult rv;
-  uint32_t length;
-  items->GetLength(&length);
-  for (uint32_t i = 0; i < length; ++i) {
-
-    //Obtain an IJumpListItem and get the type
-    nsCOMPtr<nsIJumpListItem> item = do_QueryElementAt(items, i);
-    if (!item) {
-      continue;
-    }
-    int16_t type;
-    if (NS_FAILED(item->GetType(&type))) {
-      continue;
-    }
-
-    // If the item is a shortcut, remove its associated icon if any
-    if (type == nsIJumpListItem::JUMPLIST_ITEM_SHORTCUT) {
-      nsCOMPtr<nsIJumpListShortcut> shortcut = do_QueryInterface(item);
-      if (shortcut) {
-        nsCOMPtr<nsIURI> uri;
-        rv = shortcut->GetFaviconPageUri(getter_AddRefs(uri));
-        if (NS_SUCCEEDED(rv) && uri) {
-
-          // The local file path is stored inside the nsIURI
-          // Get the nsIURI spec which stores the local path for the icon to remove
-          nsAutoCString spec;
-          nsresult rv = uri->GetSpec(spec);
-          NS_ENSURE_SUCCESS(rv, rv);
-
-          nsCOMPtr<nsIRunnable> event
-            = new mozilla::widget::AsyncDeleteIconFromDisk(NS_ConvertUTF8toUTF16(spec));
-          mIOThread->Dispatch(event, NS_DISPATCH_NORMAL);
-
-          // The shortcut was generated from an IShellLinkW so IShellLinkW can
-          // only tell us what the original icon is and not the URI.
-          // So this field was used only temporarily as the actual icon file
-          // path.  It should be cleared.
-          shortcut->SetFaviconPageUri(nullptr);
-        }
-      }
-    }
-
-  } // end for
-
-  return NS_OK;
+  NS_DispatchToMainThread(NS_NewRunnableFunction(
+      "InitListBuildResolve", [urisToRemove = std::move(urisToRemove),
+                               promise = std::move(aPromise)]() {
+        promise->MaybeResolve(urisToRemove);
+      }));
 }
 
 // Ensures that we have no old ICO files left in the jump list cache
-nsresult JumpListBuilder::RemoveIconCacheForAllItems()
-{
+nsresult JumpListBuilder::RemoveIconCacheForAllItems() {
   // Construct the path of our jump list cache
   nsCOMPtr<nsIFile> jumpListCacheDir;
-  nsresult rv = NS_GetSpecialDirectory("ProfLDS",
-                                       getter_AddRefs(jumpListCacheDir));
+  nsresult rv =
+      NS_GetSpecialDirectory("ProfLDS", getter_AddRefs(jumpListCacheDir));
   NS_ENSURE_SUCCESS(rv, rv);
-  rv = jumpListCacheDir->AppendNative(nsDependentCString(
-                         mozilla::widget::FaviconHelper::kJumpListCacheDir));
+  rv = jumpListCacheDir->AppendNative(
+      nsDependentCString(mozilla::widget::FaviconHelper::kJumpListCacheDir));
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIDirectoryEnumerator> entries;
@@ -287,36 +283,38 @@ nsresult JumpListBuilder::RemoveIconCacheForAllItems()
       break;
 
     nsAutoString path;
-    if (NS_FAILED(currFile->GetPath(path)))
-      continue;
+    if (NS_FAILED(currFile->GetPath(path))) continue;
 
     if (StringTail(path, 4).LowerCaseEqualsASCII(".ico")) {
       // Check if the cached ICO file exists
       bool exists;
-      if (NS_FAILED(currFile->Exists(&exists)) || !exists)
-        continue;
+      if (NS_FAILED(currFile->Exists(&exists)) || !exists) continue;
 
       // We found an ICO file that exists, so we should remove it
       currFile->Remove(false);
     }
-  } while(true);
+  } while (true);
 
   return NS_OK;
 }
 
-NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray *items, const nsAString &catName, bool *_retval)
-{
+NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray* items,
+                                              const nsAString& catName,
+                                              bool* _retval) {
   nsresult rv;
 
   *_retval = false;
 
   ReentrantMonitorAutoEnter lock(mMonitor);
-  if (!mJumpListMgr)
-    return NS_ERROR_NOT_AVAILABLE;
+  if (!mJumpListMgr) return NS_ERROR_NOT_AVAILABLE;
 
-  switch(aCatType) {
-    case nsIJumpListBuilder::JUMPLIST_CATEGORY_TASKS:
-    {
+  RefPtr<ICustomDestinationList> jumpListMgr = mJumpListMgr;
+  if (!jumpListMgr) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  switch (aCatType) {
+    case nsIJumpListBuilder::JUMPLIST_CATEGORY_TASKS: {
       NS_ENSURE_ARG_POINTER(items);
 
       HRESULT hr;
@@ -324,301 +322,306 @@ NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray *items,
       hr = CoCreateInstance(CLSID_EnumerableObjectCollection, nullptr,
                             CLSCTX_INPROC_SERVER, IID_IObjectCollection,
                             getter_AddRefs(collection));
-      if (FAILED(hr))
-        return NS_ERROR_UNEXPECTED;
+      if (FAILED(hr)) return NS_ERROR_UNEXPECTED;
 
       // Build the list
       uint32_t length;
       items->GetLength(&length);
       for (uint32_t i = 0; i < length; ++i) {
         nsCOMPtr<nsIJumpListItem> item = do_QueryElementAt(items, i);
-        if (!item)
-          continue;
+        if (!item) continue;
         // Check for separators
         if (IsSeparator(item)) {
           RefPtr<IShellLinkW> link;
           rv = JumpListSeparator::GetSeparator(link);
-          if (NS_FAILED(rv))
-            return rv;
+          if (NS_FAILED(rv)) return rv;
           collection->AddObject(link);
           continue;
         }
         // These should all be ShellLinks
         RefPtr<IShellLinkW> link;
         rv = JumpListShortcut::GetShellLink(item, link, mIOThread);
-        if (NS_FAILED(rv))
-          return rv;
+        if (NS_FAILED(rv)) return rv;
         collection->AddObject(link);
       }
 
       // We need IObjectArray to submit
       RefPtr<IObjectArray> pArray;
       hr = collection->QueryInterface(IID_IObjectArray, getter_AddRefs(pArray));
-      if (FAILED(hr))
-        return NS_ERROR_UNEXPECTED;
+      if (FAILED(hr)) return NS_ERROR_UNEXPECTED;
 
       // Add the tasks
-      hr = mJumpListMgr->AddUserTasks(pArray);
-      if (SUCCEEDED(hr))
+      hr = jumpListMgr->AddUserTasks(pArray);
+      if (SUCCEEDED(hr)) *_retval = true;
+      return NS_OK;
+    } break;
+    case nsIJumpListBuilder::JUMPLIST_CATEGORY_RECENT: {
+      if (SUCCEEDED(jumpListMgr->AppendKnownCategory(KDC_RECENT)))
         *_retval = true;
       return NS_OK;
-    }
-    break;
-    case nsIJumpListBuilder::JUMPLIST_CATEGORY_RECENT:
-    {
-      if (SUCCEEDED(mJumpListMgr->AppendKnownCategory(KDC_RECENT)))
+    } break;
+    case nsIJumpListBuilder::JUMPLIST_CATEGORY_FREQUENT: {
+      if (SUCCEEDED(jumpListMgr->AppendKnownCategory(KDC_FREQUENT)))
         *_retval = true;
       return NS_OK;
-    }
-    break;
-    case nsIJumpListBuilder::JUMPLIST_CATEGORY_FREQUENT:
-    {
-      if (SUCCEEDED(mJumpListMgr->AppendKnownCategory(KDC_FREQUENT)))
-        *_retval = true;
-      return NS_OK;
-    }
-    break;
-    case nsIJumpListBuilder::JUMPLIST_CATEGORY_CUSTOMLIST:
-    {
+    } break;
+    case nsIJumpListBuilder::JUMPLIST_CATEGORY_CUSTOMLIST: {
       NS_ENSURE_ARG_POINTER(items);
 
-      if (catName.IsEmpty())
-        return NS_ERROR_INVALID_ARG;
+      if (catName.IsEmpty()) return NS_ERROR_INVALID_ARG;
 
       HRESULT hr;
       RefPtr<IObjectCollection> collection;
       hr = CoCreateInstance(CLSID_EnumerableObjectCollection, nullptr,
                             CLSCTX_INPROC_SERVER, IID_IObjectCollection,
                             getter_AddRefs(collection));
-      if (FAILED(hr))
-        return NS_ERROR_UNEXPECTED;
+      if (FAILED(hr)) return NS_ERROR_UNEXPECTED;
 
       uint32_t length;
       items->GetLength(&length);
       for (uint32_t i = 0; i < length; ++i) {
         nsCOMPtr<nsIJumpListItem> item = do_QueryElementAt(items, i);
-        if (!item)
-          continue;
+        if (!item) continue;
         int16_t type;
-        if (NS_FAILED(item->GetType(&type)))
-          continue;
-        switch(type) {
-          case nsIJumpListItem::JUMPLIST_ITEM_SEPARATOR:
-          {
+        if (NS_FAILED(item->GetType(&type))) continue;
+        switch (type) {
+          case nsIJumpListItem::JUMPLIST_ITEM_SEPARATOR: {
             RefPtr<IShellLinkW> shellItem;
             rv = JumpListSeparator::GetSeparator(shellItem);
-            if (NS_FAILED(rv))
-              return rv;
+            if (NS_FAILED(rv)) return rv;
             collection->AddObject(shellItem);
-          }
-          break;
-          case nsIJumpListItem::JUMPLIST_ITEM_LINK:
-          {
+          } break;
+          case nsIJumpListItem::JUMPLIST_ITEM_LINK: {
             RefPtr<IShellItem2> shellItem;
             rv = JumpListLink::GetShellItem(item, shellItem);
-            if (NS_FAILED(rv))
-              return rv;
+            if (NS_FAILED(rv)) return rv;
             collection->AddObject(shellItem);
-          }
-          break;
-          case nsIJumpListItem::JUMPLIST_ITEM_SHORTCUT:
-          {
+          } break;
+          case nsIJumpListItem::JUMPLIST_ITEM_SHORTCUT: {
             RefPtr<IShellLinkW> shellItem;
             rv = JumpListShortcut::GetShellLink(item, shellItem, mIOThread);
-            if (NS_FAILED(rv))
-              return rv;
+            if (NS_FAILED(rv)) return rv;
             collection->AddObject(shellItem);
-          }
-          break;
+          } break;
         }
       }
 
       // We need IObjectArray to submit
       RefPtr<IObjectArray> pArray;
       hr = collection->QueryInterface(IID_IObjectArray, (LPVOID*)&pArray);
-      if (FAILED(hr))
-        return NS_ERROR_UNEXPECTED;
+      if (FAILED(hr)) return NS_ERROR_UNEXPECTED;
 
       // Add the tasks
-      hr = mJumpListMgr->AppendCategory(reinterpret_cast<const wchar_t*>(catName.BeginReading()), pArray);
-      if (SUCCEEDED(hr))
-        *_retval = true;
+      hr = jumpListMgr->AppendCategory(
+          reinterpret_cast<const wchar_t*>(catName.BeginReading()), pArray);
+      if (SUCCEEDED(hr)) *_retval = true;
 
       // Get rid of the old icons
       nsCOMPtr<nsIRunnable> event =
-        new mozilla::widget::AsyncDeleteAllFaviconsFromDisk(true);
+          new mozilla::widget::AsyncDeleteAllFaviconsFromDisk(true);
       mIOThread->Dispatch(event, NS_DISPATCH_NORMAL);
 
       return NS_OK;
-    }
-    break;
+    } break;
   }
   return NS_OK;
 }
 
-NS_IMETHODIMP JumpListBuilder::AbortListBuild()
-{
+NS_IMETHODIMP JumpListBuilder::AbortListBuild() {
   ReentrantMonitorAutoEnter lock(mMonitor);
-  if (!mJumpListMgr)
-    return NS_ERROR_NOT_AVAILABLE;
+  if (!mJumpListMgr) return NS_ERROR_NOT_AVAILABLE;
 
-  mJumpListMgr->AbortList();
+  RefPtr<ICustomDestinationList> jumpListMgr = mJumpListMgr;
+  if (!jumpListMgr) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  jumpListMgr->AbortList();
   sBuildingList = false;
 
   return NS_OK;
 }
 
-NS_IMETHODIMP JumpListBuilder::CommitListBuild(nsIJumpListCommittedCallback* aCallback)
-{
+NS_IMETHODIMP JumpListBuilder::CommitListBuild(
+    nsIJumpListCommittedCallback* aCallback) {
   ReentrantMonitorAutoEnter lock(mMonitor);
-  if (!mJumpListMgr)
-    return NS_ERROR_NOT_AVAILABLE;
+  if (!mJumpListMgr) return NS_ERROR_NOT_AVAILABLE;
 
   // Also holds a strong reference to this to prevent use-after-free.
   RefPtr<detail::DoneCommitListBuildCallback> callback =
-    new detail::DoneCommitListBuildCallback(aCallback, this);
+      new detail::DoneCommitListBuildCallback(aCallback, this);
 
   // The builder has a strong reference in the callback already, so we do not
   // need to do it for this runnable again.
   RefPtr<nsIRunnable> event =
-    NewNonOwningRunnableMethod<RefPtr<detail::DoneCommitListBuildCallback>>
-      ("JumpListBuilder::DoCommitListBuild", this,
-       &JumpListBuilder::DoCommitListBuild, std::move(callback));
+      NewNonOwningRunnableMethod<RefPtr<detail::DoneCommitListBuildCallback>>(
+          "JumpListBuilder::DoCommitListBuild", this,
+          &JumpListBuilder::DoCommitListBuild, std::move(callback));
   Unused << mIOThread->Dispatch(event, NS_DISPATCH_NORMAL);
 
   return NS_OK;
 }
 
-void JumpListBuilder::DoCommitListBuild(RefPtr<detail::DoneCommitListBuildCallback> aCallback)
-{
+void JumpListBuilder::DoCommitListBuild(
+    RefPtr<detail::DoneCommitListBuildCallback> aCallback) {
+  // Since we're invoking COM interfaces to talk to the shell on a background
+  // thread, we need to be running inside a multithreaded apartment.
+  mscom::MTARegion mta;
+  MOZ_ASSERT(mta.IsValid());
+
   ReentrantMonitorAutoEnter lock(mMonitor);
   MOZ_ASSERT(mJumpListMgr);
   MOZ_ASSERT(aCallback);
 
-  HRESULT hr = mJumpListMgr->CommitList();
+  HRESULT hr = E_UNEXPECTED;
+  auto onExit = MakeScopeExit([&hr, &aCallback]() {
+    // XXX We might want some specific error data here.
+    aCallback->SetResult(SUCCEEDED(hr));
+    Unused << NS_DispatchToMainThread(aCallback);
+  });
+
+  RefPtr<ICustomDestinationList> jumpListMgr = mJumpListMgr;
+  if (!jumpListMgr) {
+    return;
+  }
+
+  hr = jumpListMgr->CommitList();
   sBuildingList = false;
 
   if (SUCCEEDED(hr)) {
     mHasCommit = true;
   }
-
-  // XXX We might want some specific error data here.
-  aCallback->SetResult(SUCCEEDED(hr));
-  Unused << NS_DispatchToMainThread(aCallback);
 }
 
-NS_IMETHODIMP JumpListBuilder::DeleteActiveList(bool *_retval)
-{
+NS_IMETHODIMP JumpListBuilder::DeleteActiveList(bool* _retval) {
   *_retval = false;
 
   ReentrantMonitorAutoEnter lock(mMonitor);
-  if (!mJumpListMgr)
-    return NS_ERROR_NOT_AVAILABLE;
+  if (!mJumpListMgr) return NS_ERROR_NOT_AVAILABLE;
 
-  if(sBuildingList)
+  if (sBuildingList) {
     AbortListBuild();
+  }
 
   nsAutoString uid;
-  if (!WinTaskbar::GetAppUserModelID(uid))
-    return NS_OK;
+  if (!WinTaskbar::GetAppUserModelID(uid)) return NS_OK;
 
-  if (SUCCEEDED(mJumpListMgr->DeleteList(uid.get())))
+  RefPtr<ICustomDestinationList> jumpListMgr = mJumpListMgr;
+  if (!jumpListMgr) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  if (SUCCEEDED(jumpListMgr->DeleteList(uid.get()))) {
     *_retval = true;
+  }
 
   return NS_OK;
 }
 
 /* internal */
 
-bool JumpListBuilder::IsSeparator(nsCOMPtr<nsIJumpListItem>& item)
-{
+bool JumpListBuilder::IsSeparator(nsCOMPtr<nsIJumpListItem>& item) {
   int16_t type;
   item->GetType(&type);
-  if (NS_FAILED(item->GetType(&type)))
-    return false;
+  if (NS_FAILED(item->GetType(&type))) return false;
 
-  if (type == nsIJumpListItem::JUMPLIST_ITEM_SEPARATOR)
-    return true;
+  if (type == nsIJumpListItem::JUMPLIST_ITEM_SEPARATOR) return true;
   return false;
 }
 
-// TransferIObjectArrayToIMutableArray - used in converting removed items
-// to our objects.
-nsresult JumpListBuilder::TransferIObjectArrayToIMutableArray(IObjectArray *objArray, nsIMutableArray *removedItems)
-{
-  NS_ENSURE_ARG_POINTER(objArray);
-  NS_ENSURE_ARG_POINTER(removedItems);
+// RemoveIconCacheAndGetJumplistShortcutURIs - does multiple things to
+// avoid unnecessary extra XPCOM incantations. For each object in the input
+// array,  if it's an IShellLinkW, this deletes the cached icon and adds the
+// url param to a list of URLs to be removed from the places database.
+void JumpListBuilder::RemoveIconCacheAndGetJumplistShortcutURIs(
+    IObjectArray* aObjArray, nsTArray<nsString>& aURISpecs) {
+  MOZ_ASSERT(!NS_IsMainThread());
 
-  nsresult rv;
+  // Early return here just in case some versions of Windows don't populate this
+  if (!aObjArray) {
+    return;
+  }
 
   uint32_t count = 0;
-  objArray->GetCount(&count);
-
-  nsCOMPtr<nsIJumpListItem> item;
+  aObjArray->GetCount(&count);
 
   for (uint32_t idx = 0; idx < count; idx++) {
-    IShellLinkW * pLink = nullptr;
-    IShellItem * pItem = nullptr;
+    RefPtr<IShellLinkW> pLink;
 
-    if (SUCCEEDED(objArray->GetAt(idx, IID_IShellLinkW, (LPVOID*)&pLink))) {
-      nsCOMPtr<nsIJumpListShortcut> shortcut =
-        do_CreateInstance(kJumpListShortcutCID, &rv);
-      if (NS_FAILED(rv))
-        return NS_ERROR_UNEXPECTED;
-      rv = JumpListShortcut::GetJumpListShortcut(pLink, shortcut);
-      item = do_QueryInterface(shortcut);
-    }
-    else if (SUCCEEDED(objArray->GetAt(idx, IID_IShellItem, (LPVOID*)&pItem))) {
-      nsCOMPtr<nsIJumpListLink> link =
-        do_CreateInstance(kJumpListLinkCID, &rv);
-      if (NS_FAILED(rv))
-        return NS_ERROR_UNEXPECTED;
-      rv = JumpListLink::GetJumpListLink(pItem, link);
-      item = do_QueryInterface(link);
+    if (FAILED(aObjArray->GetAt(idx, IID_IShellLinkW,
+                                static_cast<void**>(getter_AddRefs(pLink))))) {
+      continue;
     }
 
-    if (pLink)
-      pLink->Release();
-    if (pItem)
-      pItem->Release();
+    wchar_t buf[MAX_PATH];
+    HRESULT hres = pLink->GetArguments(buf, MAX_PATH);
+    if (SUCCEEDED(hres)) {
+      LPWSTR* arglist;
+      int32_t numArgs;
 
-    if (NS_SUCCEEDED(rv)) {
-      removedItems->AppendElement(item);
+      arglist = ::CommandLineToArgvW(buf, &numArgs);
+      if (arglist && numArgs > 0) {
+        nsString spec(arglist[0]);
+        aURISpecs.AppendElement(std::move(spec));
+        ::LocalFree(arglist);
+      }
+    }
+
+    int iconIdx = 0;
+    hres = pLink->GetIconLocation(buf, MAX_PATH, &iconIdx);
+    if (SUCCEEDED(hres)) {
+      nsDependentString spec(buf);
+      DeleteIconFromDisk(spec);
     }
   }
-  return NS_OK;
+}
+
+void JumpListBuilder::DeleteIconFromDisk(const nsAString& aPath) {
+  MOZ_ASSERT(!NS_IsMainThread());
+
+  // Check that we aren't deleting some arbitrary file that is not an icon
+  if (StringTail(aPath, 4).LowerCaseEqualsASCII(".ico")) {
+    // Construct the parent path of the passed in path
+    nsCOMPtr<nsIFile> icoFile;
+    nsresult rv = NS_NewLocalFile(aPath, true, getter_AddRefs(icoFile));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return;
+    }
+
+    icoFile->Remove(false);
+  }
 }
 
 NS_IMETHODIMP JumpListBuilder::Observe(nsISupports* aSubject,
                                        const char* aTopic,
-                                       const char16_t* aData)
-{
+                                       const char16_t* aData) {
   NS_ENSURE_ARG_POINTER(aTopic);
   if (strcmp(aTopic, TOPIC_PROFILE_BEFORE_CHANGE) == 0) {
     nsCOMPtr<nsIObserverService> observerService =
-      do_GetService("@mozilla.org/observer-service;1");
+        do_GetService("@mozilla.org/observer-service;1");
     if (observerService) {
       observerService->RemoveObserver(this, TOPIC_PROFILE_BEFORE_CHANGE);
     }
     mIOThread->Shutdown();
+    // Clear out mJumpListMgr, as MSCOM services won't be available soon.
+    ReentrantMonitorAutoEnter lock(mMonitor);
+    mJumpListMgr = nullptr;
   } else if (strcmp(aTopic, "nsPref:changed") == 0 &&
              nsDependentString(aData).EqualsASCII(kPrefTaskbarEnabled)) {
     bool enabled = Preferences::GetBool(kPrefTaskbarEnabled, true);
     if (!enabled) {
-
       nsCOMPtr<nsIRunnable> event =
-        new mozilla::widget::AsyncDeleteAllFaviconsFromDisk();
+          new mozilla::widget::AsyncDeleteAllFaviconsFromDisk();
       mIOThread->Dispatch(event, NS_DISPATCH_NORMAL);
     }
   } else if (strcmp(aTopic, TOPIC_CLEAR_PRIVATE_DATA) == 0) {
     // Delete JumpListCache icons from Disk, if any.
     nsCOMPtr<nsIRunnable> event =
-      new mozilla::widget::AsyncDeleteAllFaviconsFromDisk(false);
+        new mozilla::widget::AsyncDeleteAllFaviconsFromDisk(false);
     mIOThread->Dispatch(event, NS_DISPATCH_NORMAL);
   }
   return NS_OK;
 }
 
-} // namespace widget
-} // namespace mozilla
-
+}  // namespace widget
+}  // namespace mozilla

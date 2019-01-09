@@ -6,6 +6,7 @@
 
 #include "mozilla/dom/ChildSHistory.h"
 #include "mozilla/dom/ChildSHistoryBinding.h"
+#include "mozilla/dom/ContentFrameMessageManager.h"
 #include "nsIMessageManager.h"
 #include "nsComponentManagerUtils.h"
 #include "nsSHistory.h"
@@ -17,41 +18,26 @@ namespace mozilla {
 namespace dom {
 
 ChildSHistory::ChildSHistory(nsDocShell* aDocShell)
-  : mDocShell(aDocShell)
-  , mHistory(new nsSHistory())
-{
+    : mDocShell(aDocShell), mHistory(new nsSHistory()) {
+  MOZ_ASSERT(mDocShell);
   mHistory->SetRootDocShell(mDocShell);
 }
 
-ChildSHistory::~ChildSHistory()
-{
-}
+ChildSHistory::~ChildSHistory() {}
 
-int32_t
-ChildSHistory::Count()
-{
-  int32_t count;
-  mHistory->GetCount(&count);
-  return count;
-}
+int32_t ChildSHistory::Count() { return mHistory->GetCount(); }
 
-int32_t
-ChildSHistory::Index()
-{
+int32_t ChildSHistory::Index() {
   int32_t index;
   mHistory->GetIndex(&index);
   return index;
 }
 
-void
-ChildSHistory::Reload(uint32_t aReloadFlags, ErrorResult& aRv)
-{
+void ChildSHistory::Reload(uint32_t aReloadFlags, ErrorResult& aRv) {
   aRv = mHistory->Reload(aReloadFlags);
 }
 
-bool
-ChildSHistory::CanGo(int32_t aOffset)
-{
+bool ChildSHistory::CanGo(int32_t aOffset) {
   CheckedInt<int32_t> index = Index();
   index += aOffset;
   if (!index.isValid()) {
@@ -60,12 +46,7 @@ ChildSHistory::CanGo(int32_t aOffset)
   return index.value() < Count() && index.value() >= 0;
 }
 
-void
-ChildSHistory::Go(int32_t aOffset, ErrorResult& aRv)
-{
-  // XXX(nika): Should we turn Go(-1) and Go(1) to call GoForward and GoBack?
-  // They technically fire different change events but I couldn't find anyone
-  // who cares, so I'm inclined not to.
+void ChildSHistory::Go(int32_t aOffset, ErrorResult& aRv) {
   CheckedInt<int32_t> index = Index();
   index += aOffset;
   if (!index.isValid()) {
@@ -75,33 +56,13 @@ ChildSHistory::Go(int32_t aOffset, ErrorResult& aRv)
   aRv = mHistory->GotoIndex(index.value());
 }
 
-void
-ChildSHistory::EvictLocalContentViewers()
-{
+void ChildSHistory::EvictLocalContentViewers() {
   mHistory->EvictAllContentViewers();
 }
 
-nsISHistory*
-ChildSHistory::LegacySHistory()
-{
-  return mHistory;
-}
+nsISHistory* ChildSHistory::LegacySHistory() { return mHistory; }
 
-nsISHistoryInternal*
-ChildSHistory::LegacySHistoryInternal()
-{
-  return mHistory;
-}
-
-nsIWebNavigation*
-ChildSHistory::LegacySHistoryWebNav()
-{
-  return mHistory;
-}
-
-ParentSHistory*
-ChildSHistory::GetParentIfSameProcess()
-{
+ParentSHistory* ChildSHistory::GetParentIfSameProcess() {
   if (XRE_IsContentProcess()) {
     return nullptr;
   }
@@ -117,25 +78,23 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(ChildSHistory)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(ChildSHistory)
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(ChildSHistory,
-                                      mDocShell,
-                                      mHistory)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(ChildSHistory, mDocShell, mHistory)
 
-JSObject*
-ChildSHistory::WrapObject(JSContext* cx, JS::Handle<JSObject*> aGivenProto)
-{
+JSObject* ChildSHistory::WrapObject(JSContext* cx,
+                                    JS::Handle<JSObject*> aGivenProto) {
   return ChildSHistory_Binding::Wrap(cx, this, aGivenProto);
 }
 
-nsISupports*
-ChildSHistory::GetParentObject() const
-{
-  // We want to get the TabChildGlobal, which is the
-  // nsIContentFrameMessageManager on mDocShell.
-  nsCOMPtr<nsIContentFrameMessageManager> mm =
-    do_GetInterface(static_cast<nsIDocShell*>(mDocShell));
-  return mm;
+nsISupports* ChildSHistory::GetParentObject() const {
+  // We want to get the TabChildMessageManager, which is the
+  // messageManager on mDocShell.
+  RefPtr<ContentFrameMessageManager> mm;
+  if (mDocShell) {
+    mm = mDocShell->GetMessageManager();
+  }
+  // else we must be unlinked... can that happen here?
+  return ToSupports(mm);
 }
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla

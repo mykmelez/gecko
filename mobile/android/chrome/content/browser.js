@@ -7,6 +7,7 @@
 ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 ChromeUtils.import("resource://gre/modules/DelayedInit.jsm");
+ChromeUtils.import("resource://gre/modules/L10nRegistry.jsm");
 ChromeUtils.import("resource://gre/modules/Messaging.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -38,7 +39,6 @@ ChromeUtils.defineModuleGetter(this, "Downloads",
 ChromeUtils.defineModuleGetter(this, "UserAgentOverrides",
                                "resource://gre/modules/UserAgentOverrides.jsm");
 
-ChromeUtils.defineModuleGetter(this, "Task", "resource://gre/modules/Task.jsm");
 ChromeUtils.defineModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
 
 ChromeUtils.defineModuleGetter(this, "SafeBrowsing",
@@ -104,13 +104,16 @@ ChromeUtils.defineModuleGetter(this, "RuntimePermissions", "resource://gre/modul
 
 ChromeUtils.defineModuleGetter(this, "WebsiteMetadata", "resource://gre/modules/WebsiteMetadata.jsm");
 
-ChromeUtils.defineModuleGetter(this, "TelemetryStopwatch", "resource://gre/modules/TelemetryStopwatch.jsm");
-
 XPCOMUtils.defineLazyServiceGetter(this, "FontEnumerator",
   "@mozilla.org/gfx/fontenumerator;1",
   "nsIFontEnumerator");
 
 ChromeUtils.defineModuleGetter(this, "Utils", "resource://gre/modules/sessionstore/Utils.jsm");
+
+ChromeUtils.defineModuleGetter(this, "FormLikeFactory",
+                               "resource://gre/modules/FormLikeFactory.jsm");
+ChromeUtils.defineModuleGetter(this, "GeckoViewAutoFill",
+                               "resource://gre/modules/GeckoViewAutoFill.jsm");
 
 var GlobalEventDispatcher = EventDispatcher.instance;
 var WindowEventDispatcher = EventDispatcher.for(window);
@@ -123,10 +126,6 @@ var lazilyLoadedBrowserScripts = [
   ["RemoteDebugger", "chrome://browser/content/RemoteDebugger.js"],
   ["gViewSourceUtils", "chrome://global/content/viewSourceUtils.js"],
 ];
-if (!AppConstants.RELEASE_OR_BETA) {
-  lazilyLoadedBrowserScripts.push(
-    ["WebcompatReporter", "chrome://browser/content/WebcompatReporter.js"]);
-}
 
 lazilyLoadedBrowserScripts.forEach(function (aScript) {
   let [name, script] = aScript;
@@ -349,7 +348,7 @@ var BrowserApp = {
   deck: null,
 
   startup: function startup() {
-    window.QueryInterface(Ci.nsIDOMChromeWindow).browserDOMWindow = new nsBrowserAccess();
+    window.browserDOMWindow = new nsBrowserAccess();
     Services.obs.notifyObservers(this.browser, "BrowserChrome:Ready");
 
     this.deck = document.getElementById("browsers");
@@ -389,6 +388,11 @@ var BrowserApp = {
       "Telemetry:CustomTabsPing",
     ]);
 
+    // Initialize the default l10n resource sources for L10nRegistry.
+    let locales = Services.locale.packagedLocales;
+    const greSource = new FileSource("toolkit", locales, "resource://gre/localization/{locale}/");
+    L10nRegistry.registerSource(greSource);
+
     // Provide compatibility for add-ons like QuitNow that send "Browser:Quit"
     // as an observer notification.
     Services.obs.addObserver((subject, topic, data) =>
@@ -407,15 +411,8 @@ var BrowserApp = {
     });
 
     window.addEventListener("fullscreenchange", (e) => {
-      // This event gets fired on the document and its entire ancestor chain
-      // of documents. When enabling fullscreen, it is fired on the top-level
-      // document first and goes down; when disabling the order is reversed
-      // (per spec). This means the last event on enabling will be for the innermost
-      // document, which will have fullscreenElement set correctly.
-      let doc = e.target;
       WindowEventDispatcher.sendRequest({
-        type: doc.fullscreenElement ? "DOMFullScreen:Start" : "DOMFullScreen:Stop",
-        rootElement: doc.fullscreenElement == doc.documentElement
+        type: document.fullscreenElement ? "DOMFullScreen:Start" : "DOMFullScreen:Stop"
       });
 
       if (this.fullscreenTransitionTab) {
@@ -472,12 +469,6 @@ var BrowserApp = {
         SharedPreferences.forApp().setBoolPref("android.not_a_preference.healthreport.uploadEnabled", isHealthReportEnabled);
     }
 
-    let sysInfo = Cc["@mozilla.org/system-info;1"].getService(Ci.nsIPropertyBag2);
-    if (sysInfo.get("version") < 16) {
-      let defaults = Services.prefs.getDefaultBranch(null);
-      defaults.setBoolPref("media.autoplay.enabled", false);
-    }
-
     InitLater(() => {
       // The order that context menu items are added is important
       // Make sure the "Open in App" context menu item appears at the bottom of the list
@@ -488,7 +479,7 @@ var BrowserApp = {
     if (AppConstants.ACCESSIBILITY) {
       InitLater(() => GlobalEventDispatcher.dispatch("GeckoView:AccessibilityReady"));
       GlobalEventDispatcher.registerListener((aEvent, aData, aCallback) => {
-        if (aData.enabled) {
+        if (aData.touchEnabled) {
           AccessFu.enable();
         } else {
           AccessFu.disable();
@@ -497,20 +488,20 @@ var BrowserApp = {
     }
 
     InitLater(() => {
-      Task.spawn(function* () {
-        let downloadsDir = yield Downloads.getPreferredDownloadsDirectory();
+      (async () => {
+        let downloadsDir = await Downloads.getPreferredDownloadsDirectory();
         let logsDir = OS.Path.join(downloadsDir, "memory-reports");
-        yield OS.File.removeDir(logsDir);
-      });
+        await OS.File.removeDir(logsDir);
+      })();
     });
 
     // Don't delay loading content.js because when we restore reader mode tabs,
     // we require the reader mode scripts in content.js right away.
     let mm = window.getGroupMessageManager("browsers");
-    mm.loadFrameScript("chrome://browser/content/content.js", true);
+    mm.loadFrameScript("chrome://browser/content/content.js", true, true);
 
     // Listen to manifest messages
-    mm.loadFrameScript("chrome://global/content/manifestMessages.js", true);
+    mm.loadFrameScript("chrome://global/content/manifestMessages.js", true, true);
 
     // We can't delay registering WebChannel listeners: if the first page is
     // about:accounts, which can happen when starting the Firefox Account flow
@@ -537,10 +528,6 @@ var BrowserApp = {
 
       // AsyncPrefs is needed for reader mode.
       InitLater(() => AsyncPrefs.init());
-
-      if (!AppConstants.RELEASE_OR_BETA) {
-        InitLater(() => WebcompatReporter.init());
-      }
 
       // Collect telemetry data.
       // We do this at startup because we want to move away from "gather-telemetry" (bug 1127907)
@@ -662,6 +649,7 @@ var BrowserApp = {
         UITelemetry.addEvent("action.1", "contextmenu", null, "web_copy_link");
 
         let url = NativeWindow.contextmenus._getLinkURL(aTarget);
+        url = NativeWindow.contextmenus._stripViewSource(url);
         NativeWindow.contextmenus._copyStringToDefaultClipboard(url);
       });
 
@@ -690,9 +678,11 @@ var BrowserApp = {
       order: NativeWindow.contextmenus.DEFAULT_HTML5_ORDER - 1, // Show above HTML5 menu items
       selector: NativeWindow.contextmenus._disableRestricted("SHARE", NativeWindow.contextmenus.linkShareableContext),
       showAsActions: function(aElement) {
+        let uri = NativeWindow.contextmenus._getLinkURL(aElement);
+        uri = NativeWindow.contextmenus._stripViewSource(uri);
         return {
           title: aElement.textContent.trim() || aElement.title.trim(),
-          uri: NativeWindow.contextmenus._getLinkURL(aElement),
+          uri,
         };
       },
       icon: "drawable://ic_menu_share",
@@ -851,7 +841,7 @@ var BrowserApp = {
     NativeWindow.contextmenus.add(stringGetter("contextmenu.viewImage"),
       NativeWindow.contextmenus.imageLocationCopyableContext,
       function(aTarget) {
-        let url = aTarget.src;
+        let url = aTarget.currentSrc || aTarget.src;
         ContentAreaUtils.urlSecurityCheck(url, aTarget.ownerDocument.nodePrincipal,
                                           Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
 
@@ -865,7 +855,8 @@ var BrowserApp = {
       function(aTarget) {
         UITelemetry.addEvent("action.1", "contextmenu", null, "web_copy_image");
 
-        let url = aTarget.src;
+        let url = aTarget.currentSrc || aTarget.src;
+        url = NativeWindow.contextmenus._stripViewSource(url);
         NativeWindow.contextmenus._copyStringToDefaultClipboard(url);
       });
 
@@ -874,7 +865,8 @@ var BrowserApp = {
       selector: NativeWindow.contextmenus._disableRestricted("SHARE", NativeWindow.contextmenus.imageShareableContext),
       order: NativeWindow.contextmenus.DEFAULT_HTML5_ORDER - 1, // Show above HTML5 menu items
       showAsActions: function(aTarget) {
-        let src = aTarget.src;
+        let src = aTarget.currentSrc || aTarget.src;
+        src = NativeWindow.contextmenus._stripViewSource(src);
         return {
           title: src,
           uri: src,
@@ -915,7 +907,7 @@ var BrowserApp = {
       function(aTarget) {
         UITelemetry.addEvent("action.1", "contextmenu", null, "web_background_image");
 
-        let src = aTarget.src;
+        let src = aTarget.currentSrc || aTarget.src;
         GlobalEventDispatcher.sendRequest({
           type: "Image:SetAs",
           url: src
@@ -1087,7 +1079,7 @@ var BrowserApp = {
   },
 
   contentDocumentChanged: function() {
-    window.top.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils).isFirstPaint = true;
+    window.top.windowUtils.isFirstPaint = true;
     Services.androidBridge.contentDocumentChanged(window);
   },
 
@@ -1187,6 +1179,8 @@ var BrowserApp = {
       if ("userRequested" in aParams) tab.userRequested = aParams.userRequested;
       tab.isSearch = ("isSearch" in aParams) ? aParams.isSearch : false;
     }
+    // Don't fall back to System here Bug 1474619
+    let triggeringPrincipal = "triggeringPrincipal" in aParams ? aParams.triggeringPrincipal : Services.scriptSecurityManager.getSystemPrincipal();
 
     try {
       aBrowser.loadURI(aURI, {
@@ -1194,6 +1188,7 @@ var BrowserApp = {
         referrerURI,
         charset,
         postData,
+        triggeringPrincipal,
       });
     } catch(e) {
       if (tab) {
@@ -1510,29 +1505,29 @@ var BrowserApp = {
         return;
       }
 
-      Task.spawn(function* () {
+      (async () => {
         let fileName = ContentAreaUtils.getDefaultFileName(aBrowser.contentTitle, aBrowser.currentURI, null, null);
         fileName = fileName.trim() + ".pdf";
 
-        let downloadsDir = yield Downloads.getPreferredDownloadsDirectory();
+        let downloadsDir = await Downloads.getPreferredDownloadsDirectory();
         let file = OS.Path.join(downloadsDir, fileName);
 
         // Force this to have a unique name.
-        let openedFile = yield OS.File.openUnique(file, { humanReadable: true });
+        let openedFile = await OS.File.openUnique(file, { humanReadable: true });
         file = openedFile.path;
-        yield openedFile.file.close();
+        await openedFile.file.close();
 
-        let download = yield Downloads.createDownload({
+        let download = await Downloads.createDownload({
           source: aBrowser.contentWindow,
           target: file,
           saver: "pdf",
           startTime: Date.now(),
         });
 
-        let list = yield Downloads.getList(download.source.isPrivate ? Downloads.PRIVATE : Downloads.PUBLIC)
-        yield list.add(download);
-        yield download.start();
-      });
+        let list = await Downloads.getList(download.source.isPrivate ? Downloads.PRIVATE : Downloads.PUBLIC);
+        await list.add(download);
+        await download.start();
+      })();
     });
   },
 
@@ -1577,6 +1572,13 @@ var BrowserApp = {
         case "cookies_sessions":
           promises.push(Sanitizer.clearItem("cookies"));
           promises.push(Sanitizer.clearItem("sessions"));
+          break;
+        case "downloadFiles":
+          // If the user is quiting the app and the downloads are to be sanitized
+          // means he chose to "Clear private data -> Downloads" upon exit so
+          // all downloads will be purged, irrespective of their current state (in progress/error/completed)
+          let clearUnfinishedDownloads = aShutdown === true;
+          promises.push(Sanitizer.clearItem(key, undefined, clearUnfinishedDownloads));
           break;
         case "openTabs":
           if (aShutdown === true) {
@@ -1656,8 +1658,7 @@ var BrowserApp = {
       return;
     }
 
-    let dwu = aBrowser.contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                                    .getInterface(Ci.nsIDOMWindowUtils);
+    let dwu = aBrowser.contentWindow.windowUtils;
     if (!dwu) {
       return;
     }
@@ -1698,7 +1699,7 @@ var BrowserApp = {
   },
 
   getUALocalePref: function () {
-    return Services.locale.getRequestedLocale() || undefined;
+    return Services.locale.requestedLocale || undefined;
   },
 
   getOSLocalePref: function () {
@@ -1775,9 +1776,9 @@ var BrowserApp = {
 
       case "Locale:Changed": {
         if (data) {
-          Services.locale.setRequestedLocales([data.languageTag]);
+          Services.locale.requestedLocales = [data.languageTag];
         } else {
-          Services.locale.setRequestedLocales([]);
+          Services.locale.requestedLocales = [];
         }
 
         console.log("Gecko display locale: " + this.getUALocalePref());
@@ -1840,7 +1841,8 @@ var BrowserApp = {
 
       case "Session:Navigate": {
         let index = data.index;
-        let webNav = BrowserApp.selectedTab.window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIWebNavigation);
+        let webNav = BrowserApp.selectedTab.window.docShell
+                               .QueryInterface(Ci.nsIWebNavigation);
         let historySize = webNav.sessionHistory.count;
 
         if (index < 0) {
@@ -2223,7 +2225,8 @@ var BrowserApp = {
   // optionally selecting selIndex (if fromIndex <= selIndex <= toIndex)
   getHistory: function(data) {
     let action = data.action;
-    let webNav = BrowserApp.getTabForId(data.tabId).window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIWebNavigation);
+    let webNav = BrowserApp.getTabForId(data.tabId).window.docShell
+                           .QueryInterface(Ci.nsIWebNavigation);
     let historyIndex = webNav.sessionHistory.index;
     let historySize = webNav.sessionHistory.count;
     let canGoBack = webNav.canGoBack;
@@ -2266,7 +2269,7 @@ var BrowserApp = {
     let browser = this.selectedBrowser;
     let hist = browser.sessionHistory.legacySHistory;
     for (let i = toIndex; i >= fromIndex; i--) {
-      let entry = hist.getEntryAtIndex(i, false);
+      let entry = hist.getEntryAtIndex(i);
       let item = {
         title: entry.title || entry.URI.displaySpec,
         url: entry.URI.displaySpec,
@@ -2332,8 +2335,8 @@ var NativeWindow = {
 
   menu: {
     _callbacks: [],
-    _menuId: 1,
-    toolsMenuID: -1,
+    // This value must be kept in sync with GECKO_TOOLS_MENU_UUID in AddonUICache.java.
+    toolsMenuID: "{115b9308-2023-44f1-a4e9-3e2197669f07}",
     add: function() {
       let options;
       if (arguments.length == 1) {
@@ -2349,25 +2352,24 @@ var NativeWindow = {
       }
 
       options.type = "Menu:Add";
-      options.id = this._menuId;
+      options.uuid = uuidgen.generateUUID().toString();
 
       GlobalEventDispatcher.sendRequest(options);
-      this._callbacks[this._menuId] = options.callback;
-      this._menuId++;
-      return this._menuId - 1;
+      this._callbacks[options.uuid] = options.callback;
+      return options.uuid;
     },
 
-    remove: function(aId) {
-      GlobalEventDispatcher.sendRequest({ type: "Menu:Remove", id: aId });
+    remove: function(aUuid) {
+      GlobalEventDispatcher.sendRequest({ type: "Menu:Remove", uuid: aUuid });
     },
 
-    update: function(aId, aOptions) {
+    update: function(aUuid, aOptions) {
       if (!aOptions)
         return;
 
       GlobalEventDispatcher.sendRequest({
         type: "Menu:Update",
-        id: aId,
+        uuid: aUuid,
         options: aOptions
       });
     }
@@ -2894,6 +2896,9 @@ var NativeWindow = {
         return;
       }
 
+      // Find the HTMLMediaElement host if the element is inside video controls UA Widget.
+      this._target = this._findMediaElementHostFromControls(this._target);
+
       // Try to build a list of contextmenu items. If successful, actually show the
       // native context menu by passing the list to Java.
       this._buildMenu(event.clientX, event.clientY);
@@ -2955,6 +2960,27 @@ var NativeWindow = {
           this.menus[context] = [];
         }
         this.menus[context] = this.menus[context].concat(items);
+    },
+
+    _findMediaElementHostFromControls(element) {
+      if (!(element instanceof HTMLMediaElement)) {
+        let n = element;
+        while (n) {
+          if (n instanceof ShadowRoot) {
+            if (n.host instanceof HTMLMediaElement) {
+              // Node is a UA Widget Shadow Root with HTMLMediaElement as host
+              return n.host;
+            }
+            // Node is a normal Shadow Root, give up
+            return element;
+          }
+          // Set the node to its parentNode and continue the loop.
+          n = n.parentNode;
+        }
+      }
+      // Return the element given that the loop ends without finding anything,
+      // or because the element is already an HTMLMediaElement.
+      return element;
     },
 
     /* Does the basic work of building a context menu to show. Will combine HTML and Native
@@ -3211,6 +3237,11 @@ var NativeWindow = {
     _stripScheme: function(aString) {
       let index = aString.indexOf(":");
       return aString.slice(index + 1);
+    },
+
+    _stripViewSource: function(aString) {
+      // If we're in a view source tab, remove the view-source: prefix
+      return aString.replace(/^view-source:/, "");
     }
   }
 };
@@ -3749,6 +3780,7 @@ Tab.prototype = {
 
     this.browser.addEventListener("DOMContentLoaded", this, true);
     this.browser.addEventListener("DOMFormHasPassword", this, true);
+    this.browser.addEventListener("DOMInputPasswordAdded", this, true);
     this.browser.addEventListener("DOMLinkAdded", this, true);
     this.browser.addEventListener("DOMLinkChanged", this, true);
     this.browser.addEventListener("DOMMetaAdded", this);
@@ -3757,10 +3789,14 @@ Tab.prototype = {
     this.browser.addEventListener("DOMAudioPlaybackStopped", this, true);
     this.browser.addEventListener("DOMWindowClose", this, true);
     this.browser.addEventListener("DOMWillOpenModalDialog", this, true);
+    this.browser.addEventListener("pagehide", this, true);
     this.browser.addEventListener("pageshow", this, true);
     this.browser.addEventListener("MozApplicationManifest", this, true);
     this.browser.addEventListener("TabPreZombify", this, true);
     this.browser.addEventListener("DOMWindowFocus", this, true);
+    this.browser.addEventListener("focusin", this, true);
+    this.browser.addEventListener("focusout", this, true);
+    this.browser.addEventListener("TabSelect", this, true);
 
     // Note that the XBL binding is untrusted
     this.browser.addEventListener("VideoBindingAttached", this, true, true);
@@ -3770,13 +3806,18 @@ Tab.prototype = {
     Services.obs.addObserver(this, "before-first-paint");
     Services.obs.addObserver(this, "media-playback");
 
+    XPCOMUtils.defineLazyGetter(this, "_autoFill", () =>
+        new GeckoViewAutoFill(WindowEventDispatcher));
+
     // Always initialise new tabs with basic session store data to avoid
     // problems with functions that always expect it to be present
+    let triggeringPrincipal_base64 = aParams.triggeringPrincipal ?
+      Utils.serializePrincipal(aParams.triggeringPrincipal) : Utils.SERIALIZED_SYSTEMPRINCIPAL;
     this.browser.__SS_data = {
       entries: [{
         url: uri,
         title: truncate(title, MAX_TITLE_LENGTH),
-        triggeringPrincipal_base64: Utils.SERIALIZED_SYSTEMPRINCIPAL
+        triggeringPrincipal_base64,
       }],
       index: 1,
       desktopMode: this.desktopMode,
@@ -3798,6 +3839,10 @@ Tab.prototype = {
       this.browser.setAttribute("pending", "true");
     } else {
       let flags = "flags" in aParams ? aParams.flags : Ci.nsIWebNavigation.LOAD_FLAGS_NONE;
+      if (aParams.disallowInheritPrincipal) {
+        flags |= Ci.nsIWebNavigation.LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL;
+      }
+
       let postData = ("postData" in aParams && aParams.postData) ? aParams.postData.value : null;
       let referrerURI = "referrerURI" in aParams ? aParams.referrerURI : null;
       let charset = "charset" in aParams ? aParams.charset : null;
@@ -3812,6 +3857,7 @@ Tab.prototype = {
           referrerURI,
           charset,
           postData,
+          triggeringPrincipal: aParams.triggeringPrincipal,
         });
       } catch(e) {
         let message = {
@@ -3830,7 +3876,7 @@ Tab.prototype = {
   reloadWithMode: function (aDesktopMode) {
     // notify desktopmode for PIDOMWindow
     let win = this.browser.contentWindow;
-    let dwi = win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+    let dwi = win.windowUtils;
     dwi.setDesktopModeViewport(aDesktopMode);
 
     // Set desktop mode for tab and send change to Java
@@ -3859,7 +3905,7 @@ Tab.prototype = {
       url = this.originalURI.spec;
     }
 
-    this.browser.docShell.loadURI(url, flags, null, null, null);
+    this.browser.docShell.loadURI(url, flags, null, null, null, this.browser.contentPrincipal);
   },
 
   destroy: function() {
@@ -3873,6 +3919,7 @@ Tab.prototype = {
 
     this.browser.removeEventListener("DOMContentLoaded", this, true);
     this.browser.removeEventListener("DOMFormHasPassword", this, true);
+    this.browser.removeEventListener("DOMInputPasswordAdded", this, true);
     this.browser.removeEventListener("DOMLinkAdded", this, true);
     this.browser.removeEventListener("DOMLinkChanged", this, true);
     this.browser.removeEventListener("DOMMetaAdded", this);
@@ -3881,10 +3928,14 @@ Tab.prototype = {
     this.browser.removeEventListener("DOMAudioPlaybackStopped", this, true);
     this.browser.removeEventListener("DOMWindowClose", this, true);
     this.browser.removeEventListener("DOMWillOpenModalDialog", this, true);
+    this.browser.removeEventListener("pagehide", this, true);
     this.browser.removeEventListener("pageshow", this, true);
     this.browser.removeEventListener("MozApplicationManifest", this, true);
     this.browser.removeEventListener("TabPreZombify", this, true);
     this.browser.removeEventListener("DOMWindowFocus", this, true);
+    this.browser.removeEventListener("focusin", this, true);
+    this.browser.removeEventListener("focusout", this, true);
+    this.browser.removeEventListener("TabSelect", this, true);
 
     this.browser.removeEventListener("VideoBindingAttached", this, true, true);
     this.browser.removeEventListener("VideoBindingCast", this, true, true);
@@ -4184,9 +4235,9 @@ Tab.prototype = {
           if (errorExtra == "fileAccessDenied") {
             // Check if we already have the permissions, then - if we do not have them, show the prompt and reload the page.
             // If we already have them, it means access to file was denied.
-            RuntimePermissions.checkPermission(RuntimePermissions.WRITE_EXTERNAL_STORAGE).then((permissionAlreadyGranted) => {
+            RuntimePermissions.checkPermissions(RuntimePermissions.READ_EXTERNAL_STORAGE).then((permissionAlreadyGranted) => {
               if (!permissionAlreadyGranted) {
-                RuntimePermissions.waitForPermissions(RuntimePermissions.WRITE_EXTERNAL_STORAGE).then((permissionGranted) => {
+                RuntimePermissions.waitForPermissions(RuntimePermissions.READ_EXTERNAL_STORAGE).then((permissionGranted) => {
                   if (permissionGranted) {
                     this.browser.reload();
                   }
@@ -4245,6 +4296,17 @@ Tab.prototype = {
             type: "Doorhanger:Logins",
             data: selectObj
           });
+        }
+
+        this._autoFill.addElement(
+            FormLikeFactory.createFromForm(aEvent.composedTarget));
+        break;
+      }
+
+      case "DOMInputPasswordAdded": {
+        const input = aEvent.composedTarget;
+        if (!input.form) {
+          this._autoFill.addElement(FormLikeFactory.createFromField(input));
         }
         break;
       }
@@ -4402,7 +4464,42 @@ Tab.prototype = {
         break;
       }
 
+      case "focusin": {
+        if (BrowserApp.selectedTab === this &&
+            aEvent.composedTarget instanceof HTMLInputElement) {
+          this._autoFill.onFocus(aEvent.composedTarget);
+        }
+        break;
+      }
+
+      case "focusout": {
+        if (BrowserApp.selectedTab === this &&
+            aEvent.composedTarget instanceof HTMLInputElement) {
+          this._autoFill.onFocus(null);
+        }
+        break;
+      }
+
+      case "TabSelect": {
+        this._autoFill.clearElements();
+        this._autoFill.scanDocument(this.browser.contentDocument);
+        break;
+      }
+
+      case "pagehide": {
+        if (BrowserApp.selectedTab === this &&
+            aEvent.target === this.browser.contentDocument) {
+          this._autoFill.clearElements();
+        }
+        break;
+      }
+
       case "pageshow": {
+        if (BrowserApp.selectedTab === this &&
+            aEvent.target === this.browser.contentDocument && aEvent.persisted) {
+          this._autoFill.scanDocument(aEvent.target);
+        }
+
         // The rest of this only handles pageshow for the top-level document.
         if (aEvent.originalTarget.defaultView != this.browser.contentWindow)
           return;
@@ -4496,7 +4593,7 @@ Tab.prototype = {
 
   onLocationChange: function(aWebProgress, aRequest, aLocationURI, aFlags) {
     let contentWin = aWebProgress.DOMWindow;
-    let webNav = contentWin.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIWebNavigation);
+    let webNav = contentWin.docShell.QueryInterface(Ci.nsIWebNavigation);
 
     // Browser webapps may load content inside iframes that can not reach across the app/frame boundary
     // i.e. even though the page is loaded in an iframe window.top != webapp
@@ -4660,16 +4757,6 @@ Tab.prototype = {
     Services.obs.notifyObservers(this.browser, "Content:HistoryChange");
   },
 
-  OnHistoryGoBack: function(backURI) {
-    Services.obs.notifyObservers(this.browser, "Content:HistoryChange");
-    return true;
-  },
-
-  OnHistoryGoForward: function(forwardURI) {
-    Services.obs.notifyObservers(this.browser, "Content:HistoryChange");
-    return true;
-  },
-
   OnHistoryReload: function(reloadURI, reloadFlags) {
     Services.obs.notifyObservers(this.browser, "Content:HistoryChange");
     return true;
@@ -4677,24 +4764,14 @@ Tab.prototype = {
 
   OnHistoryGotoIndex: function(index, gotoURI) {
     Services.obs.notifyObservers(this.browser, "Content:HistoryChange");
-    return true;
   },
 
   OnHistoryPurge: function(numEntries) {
     Services.obs.notifyObservers(this.browser, "Content:HistoryChange");
-    return true;
   },
 
   OnHistoryReplaceEntry: function(index) {
     Services.obs.notifyObservers(this.browser, "Content:HistoryChange");
-  },
-
-  OnLengthChanged: function(aCount) {
-    // Ignore, the method is implemented so that XPConnect doesn't throw!
-  },
-
-  OnIndexChanged: function(aIndex) {
-    // Ignore, the method is implemented so that XPConnect doesn't throw!
   },
 
   UpdateMediaPlaybackRelatedObserver: function(active) {
@@ -4787,7 +4864,7 @@ Tab.prototype = {
       case "audioFocusChanged":
       case "mediaControl":
         let win = this.browser.contentWindow;
-        let utils = win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+        let utils = win.windowUtils;
         let suspendTypes = Ci.nsISuspendedTypes;
         switch (aData) {
           case "lostAudioFocus":
@@ -4838,7 +4915,6 @@ var BrowserEventHandler = {
 
     BrowserApp.deck.addEventListener("DOMUpdateBlockedPopups", PopupBlockerObserver.onUpdateBlockedPopups);
     BrowserApp.deck.addEventListener("MozMouseHittest", this, true);
-    BrowserApp.deck.addEventListener("OpenMediaWithExternalApp", this, true);
 
     // ReaderViews support backPress listeners.
     WindowEventDispatcher.registerListener((event, data, callback) => {
@@ -4856,16 +4932,6 @@ var BrowserEventHandler = {
       case 'MozMouseHittest':
         this._handleRetargetedTouchStart(aEvent);
         break;
-      case 'OpenMediaWithExternalApp': {
-        let mediaSrc = aEvent.target.currentSrc || aEvent.target.src;
-        let uuid = uuidgen.generateUUID().toString();
-        GlobalEventDispatcher.sendRequest({
-          type: "Video:Play",
-          uri: mediaSrc,
-          uuid: uuid
-        });
-        break;
-      }
     }
   },
 
@@ -5007,7 +5073,14 @@ var ErrorPageEventHandler = {
             // Allow users to override and continue through to the site,
             let webNav = BrowserApp.selectedBrowser.docShell.QueryInterface(Ci.nsIWebNavigation);
             let location = BrowserApp.selectedBrowser.contentWindow.location;
-            webNav.loadURI(location, Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_CLASSIFIER, null, null, null);
+            let attrs = {};
+            let isPrivate = PrivateBrowsingUtils.isBrowserPrivate(BrowserApp.selectedBrowser);
+            if (isPrivate) {
+              attrs["privateBrowsingId"] = 1;
+            }
+
+            let triggeringPrincipal = nullServices.scriptSecurityManager.createNullPrincipal(attrs);
+            webNav.loadURI(location, Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_CLASSIFIER, null, null, triggeringPrincipal);
 
             // ....but add a notify bar as a reminder, so that they don't lose
             // track after, e.g., tab switching.
@@ -5147,9 +5220,24 @@ var XPInstallObserver = {
             break;
           }
         }
+        this._monitorReportSiteIssueEnabledPref();
         break;
       }
     }
+  },
+
+  _monitorReportSiteIssueEnabledPref: function() {
+    const PREF = "extensions.webcompat-reporter.enabled";
+    const ID = "webcompat-reporter@mozilla.org";
+    Services.prefs.addObserver(PREF, async () => {
+      let addon = await AddonManager.getAddonByID(ID);
+      let enabled = Services.prefs.getBoolPref(PREF, false);
+      if (enabled && !addon.isActive) {
+        await addon.enable({allowSystemAddons: true});
+      } else if (!enabled && addon.isActive) {
+        await addon.disable({allowSystemAddons: true});
+      }
+    });
   },
 
   _notifyUnsignedAddonsDisabled: function() {
@@ -5579,18 +5667,18 @@ var IdentityHandler = {
   // Loaded active tracking content. Yellow triangle icon is shown.
   TRACKING_MODE_CONTENT_LOADED: "tracking_content_loaded",
 
-  // Cache the most recent SSLStatus and Location seen in getIdentityStrings
-  _lastStatus : null,
+  // Cache the most recent TransportSecurityInfo and Location seen in
+  // getIdentityStrings
+  _lastSecInfo : null,
   _lastLocation : null,
 
   /**
-   * Helper to parse out the important parts of _lastStatus (of the SSL cert in
+   * Helper to parse out the important parts of _lastSecInfo (of the SSL cert in
    * particular) for use in constructing identity UI strings
   */
   getIdentityData : function() {
     let result = {};
-    let status = this._lastStatus.QueryInterface(Ci.nsISSLStatus);
-    let cert = status.serverCert;
+    let cert = this._lastSecInfo.serverCert;
 
     // Human readable name of Subject
     result.subjectOrg = cert.organization;
@@ -5694,9 +5782,7 @@ var IdentityHandler = {
    * (if available). Return the data needed to update the UI.
    */
   checkIdentity: function checkIdentity(aState, aBrowser) {
-    this._lastStatus = aBrowser.securityUI
-                               .QueryInterface(Ci.nsISSLStatusProvider)
-                               .SSLStatus;
+    this._lastSecInfo = aBrowser.securityUI.secInfo;
 
     // Don't pass in the actual location object, since it can cause us to
     // hold on to the window object too long.  Just pass in the fields we
@@ -5981,7 +6067,7 @@ var SearchEngines = {
   },
 
   addOpenSearchEngine: function addOpenSearchEngine(engine) {
-    Services.search.addEngine(engine.url, Ci.nsISearchEngine.DATA_XML, engine.iconURL, false, {
+    Services.search.addEngine(engine.url, engine.iconURL, false, {
       onSuccess: function() {
         // Display a toast confirming addition of new search engine.
         Snackbars.show(Strings.browser.formatStringFromName("alertSearchEngineAddedToast", [engine.title], 1), Snackbars.LENGTH_LONG);
@@ -6550,26 +6636,29 @@ var Distribution = {
   // aFile is an nsIFile
   // aCallback takes the parsed JSON object as a parameter
   readJSON: function dc_readJSON(aFile, aCallback) {
-    Task.spawn(function*() {
-      let bytes = yield OS.File.read(aFile.path);
-      let raw = new TextDecoder().decode(bytes) || "";
+    (async () => {
+      try {
+        let bytes = await OS.File.read(aFile.path);
+        let raw = new TextDecoder().decode(bytes) || "";
+      } catch (e) {
+        if (!(e instanceof OS.File.Error && reason.becauseNoSuchFile)) {
+          Cu.reportError("Distribution: Could not read from " + aFile.leafName + " file");
+        }
+        return;
+      }
 
       try {
         aCallback(JSON.parse(raw));
       } catch (e) {
         Cu.reportError("Distribution: Could not parse JSON: " + e);
       }
-    }).catch(function onError(reason) {
-      if (!(reason instanceof OS.File.Error && reason.becauseNoSuchFile)) {
-        Cu.reportError("Distribution: Could not read from " + aFile.leafName + " file");
-      }
-    });
+    })();
   },
 
   // Track pending installs so we can avoid showing notifications for them.
   pendingAddonInstalls: new Set(),
 
-  installDistroAddons: Task.async(function* () {
+  async installDistroAddons() {
     const PREF_ADDONS_INSTALLED = "distribution.addonsInstalled";
     try {
       let installed = Services.prefs.getBoolPref(PREF_ADDONS_INSTALLED);
@@ -6584,7 +6673,7 @@ var Distribution = {
     try {
       distroPath = FileUtils.getDir("XREAppDist", ["extensions"]).path;
 
-      let info = yield OS.File.stat(distroPath);
+      let info = await OS.File.stat(distroPath);
       if (!info.isDir) {
         return;
       }
@@ -6594,14 +6683,15 @@ var Distribution = {
 
     let it = new OS.File.DirectoryIterator(distroPath);
     try {
-      yield it.forEach(entry => {
+      await it.forEach(entry => {
         // Only support extensions that are zipped in .xpi files.
         if (entry.isDir || !entry.name.endsWith(".xpi")) {
           dump("Ignoring distribution add-on that isn't an XPI: " + entry.path);
           return;
         }
 
-        AddonManager.getInstallForFile(new FileUtils.File(entry.path)).then(install => {
+        AddonManager.getInstallForFile(new FileUtils.File(entry.path), null,
+                                       {source: "distribution"}).then(install => {
           let id = entry.name.substring(0, entry.name.length - 4);
           if (install.addon.id !== id) {
             Cu.reportError("File entry " + entry.path + " contains an add-on with an incorrect ID");
@@ -6616,7 +6706,7 @@ var Distribution = {
     } finally {
       it.close();
     }
-  })
+  },
 };
 
 var Tabs = {

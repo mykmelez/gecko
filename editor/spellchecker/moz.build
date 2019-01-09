@@ -8,14 +8,9 @@ MOCHITEST_MANIFESTS += ['tests/mochitest.ini']
 
 XPIDL_SOURCES += [
     'nsIInlineSpellChecker.idl',
-    'nsITextServicesFilter.idl',
 ]
 
 XPIDL_MODULE = 'txtsvc'
-
-EXPORTS += [
-    'nsISpellChecker.h',
-]
 
 EXPORTS.mozilla += [
     'EditorSpellCheck.h',

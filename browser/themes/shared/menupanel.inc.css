@@ -33,6 +33,10 @@
   list-style-image: url(chrome://browser/skin/search-glass.svg);
 }
 
+#appMenu-taskmanager-button {
+  list-style-image: url(chrome://global/skin/icons/performance.svg);
+}
+
 #appMenu-help-button {
   list-style-image: url(chrome://global/skin/icons/help.svg);
 }
@@ -67,6 +71,10 @@
 
 #appMenu-fullscreen-button[checked] {
   list-style-image: url(chrome://browser/skin/fullscreen-exit.svg);
+}
+
+#appMenu-library-pocket-button {
+  list-style-image: url("chrome://browser/skin/pocket.svg");
 }
 
 #appMenu-library-history-button {

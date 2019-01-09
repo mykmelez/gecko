@@ -1,44 +1,54 @@
-"use strict";
-
-var _prettyFast = require("pretty-fast/index");
-
-var _prettyFast2 = _interopRequireDefault(_prettyFast);
-
-var _devtoolsUtils = require("devtools/client/debugger/new/dist/vendors").vendored["devtools-utils"];
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-const {
-  workerHandler
-} = _devtoolsUtils.workerUtils;
 
-function prettyPrint({
-  url,
-  indent,
-  sourceText
-}) {
-  const prettified = (0, _prettyFast2.default)(sourceText, {
+// @flow
+
+import prettyFast from "pretty-fast";
+
+import { workerUtils } from "devtools-utils";
+const { workerHandler } = workerUtils;
+
+type Mappings = {
+  _array: Mapping[]
+};
+
+type Mapping = {
+  originalLine: number,
+  originalColumn: number,
+  source?: string,
+  generatedLine?: number,
+  generatedColumn?: number,
+  name?: string
+};
+
+type InvertedMapping = {
+  generated: Object,
+  source?: any,
+  original?: any,
+  name?: string
+};
+
+function prettyPrint({ url, indent, sourceText }) {
+  const prettified = prettyFast(sourceText, {
     url: url,
     indent: " ".repeat(indent)
   });
+
   return {
     code: prettified.code,
     mappings: invertMappings(prettified.map._mappings)
   };
 }
 
-function invertMappings(mappings) {
-  return mappings._array.map(m => {
-    const mapping = {
+function invertMappings(mappings: Mappings) {
+  return mappings._array.map((m: Mapping) => {
+    const mapping: InvertedMapping = {
       generated: {
         line: m.originalLine,
         column: m.originalColumn
       }
     };
-
     if (m.source) {
       mapping.source = m.source;
       mapping.original = {
@@ -47,11 +57,8 @@ function invertMappings(mappings) {
       };
       mapping.name = m.name;
     }
-
     return mapping;
   });
 }
 
-self.onmessage = workerHandler({
-  prettyPrint
-});
+self.onmessage = workerHandler({ prettyPrint });

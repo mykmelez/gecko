@@ -10,7 +10,7 @@
  * @note It is implicitly tested that restoring the last window works when
  * non-browser windows are around. The "Run Tests" window as well as the main
  * browser window (wherein the test code gets executed) won't be considered
- * browser windows. To achiveve this said main browser window has it's windowtype
+ * browser windows. To achiveve this said main browser window has its windowtype
  * attribute modified so that it's not considered a browser window any longer.
  * This is crucial, because otherwise there would be two browser windows around,
  * said main test window and the one opened by the tests, and hence the new
@@ -59,9 +59,8 @@ const IS_MAC = navigator.platform.match(/Mac/);
  */
 function getBrowserWindowsCount() {
   let open = 0;
-  let e = Services.wm.getEnumerator("navigator:browser");
-  while (e.hasMoreElements()) {
-    if (!e.getNext().closed)
+  for (let win of Services.wm.getEnumerator("navigator:browser")) {
+    if (!win.closed)
       ++open;
   }
 
@@ -117,7 +116,7 @@ let setupTest = async function(options, testFunction) {
   // Observe these, and also use to count the number of hits
   let observing = {
     "browser-lastwindow-close-requested": 0,
-    "browser-lastwindow-close-granted": 0
+    "browser-lastwindow-close-granted": 0,
   };
 
   /**
@@ -163,7 +162,7 @@ let setupTest = async function(options, testFunction) {
  *        The browser window to load the tabs in
  */
 function injectTestTabs(win) {
-  let promises = TEST_URLS.map(url => win.gBrowser.addTab(url))
+  let promises = TEST_URLS.map(url => BrowserTestUtils.addTab(win.gBrowser, url))
                           .map(tab => BrowserTestUtils.browserLoaded(tab.linkedBrowser));
   return Promise.all(promises);
 }
@@ -284,60 +283,6 @@ add_task(async function test_open_close_private_browsing() {
 });
 
 /**
- * Open some popup windows to check those aren't restored, but the browser
- * window is.
- *
- * @note: Non-Mac only
- *
- * Should do the following:
- *  1. Open a new browser window
- *  2. Add some tabs
- *  3. Open some popups
- *  4. Add another tab to one popup (so that it gets stored) and close it again
- *  5. Close the browser window
- *  6. Open another browser window
- *  7. Make sure that the tabs of the closed browser window, but not the popup,
- *     are restored
- */
-add_task(async function test_open_close_window_and_popup() {
-  if (IS_MAC) {
-    return;
-  }
-
-  await setupTest({}, async function(newWin, obs) {
-    let popupPromise = BrowserTestUtils.waitForNewWindow();
-    openDialog(location, "popup", POPUP_FEATURES, TEST_URLS[0]);
-    let popup = await popupPromise;
-
-    let popup2Promise = BrowserTestUtils.waitForNewWindow();
-    openDialog(location, "popup2", POPUP_FEATURES, TEST_URLS[1]);
-    let popup2 = await popup2Promise;
-
-    popup2.gBrowser.addTab(TEST_URLS[0]);
-
-    let closed = await closeWindowForRestoration(newWin);
-    ok(closed, "Should be able to close the window");
-
-    await BrowserTestUtils.closeWindow(popup2);
-
-    newWin = await promiseNewWindowLoaded();
-
-    is(newWin.gBrowser.browsers.length, TEST_URLS.length + 2,
-       "Restored window and associated tabs in session");
-
-    await BrowserTestUtils.closeWindow(popup);
-    await BrowserTestUtils.closeWindow(newWin);
-
-    // We closed one window with closeWindowForRestoration, and it should
-    // have been successful.
-    is(obs["browser-lastwindow-close-requested"], 1,
-       "Got expected browser-lastwindow-close-requested notifications");
-    is(obs["browser-lastwindow-close-granted"], 1,
-       "Got expected browser-lastwindow-close-granted notifications");
-  });
-});
-
-/**
  * Open some popup window to check it isn't restored. Instead nothing at all
  * should be restored
  *
@@ -378,7 +323,7 @@ add_task(async function test_open_close_only_popup() {
     openDialog(location, "popup", POPUP_FEATURES, TEST_URLS[1]);
     popup = await popupPromise;
 
-    popup.gBrowser.addTab(TEST_URLS[0]);
+    BrowserTestUtils.addTab(popup.gBrowser, TEST_URLS[0]);
     is(popup.gBrowser.browsers.length, 2,
        "Did not restore to the popup window (2)");
 

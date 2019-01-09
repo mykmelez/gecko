@@ -29,8 +29,7 @@ impl Utf16Decoder {
     }
 
     pub fn additional_from_state(&self) -> usize {
-        1
-            + if self.lead_byte.is_some() { 1 } else { 0 }
+        1 + if self.lead_byte.is_some() { 1 } else { 0 }
             + if self.lead_surrogate == 0 { 0 } else { 2 }
     }
 
@@ -120,9 +119,9 @@ impl Utf16Decoder {
                 Some(lead) => {
                     self.lead_byte = None;
                     let code_unit = if self.be {
-                        (lead as u16) << 8 | b as u16
+                        u16::from(lead) << 8 | u16::from(b)
                     } else {
-                        (b as u16) << 8 | (lead as u16)
+                        u16::from(b) << 8 | u16::from(lead)
                     };
                     let high_bits = code_unit & 0xFC00u16;
                     if high_bits == 0xD800u16 {
@@ -399,6 +398,60 @@ mod tests {
             assert_eq!(written, 1);
             assert!(had_errors);
             assert_eq!(output[0], 0xFFFD);
+        }
+    }
+
+    #[test]
+    fn test_utf_16le_decode_near_end() {
+        let mut output = [0u8; 4];
+        let mut decoder = UTF_16LE.new_decoder();
+        {
+            let (result, read, written, had_errors) =
+                decoder.decode_to_utf8(&[0x03], &mut output[..], false);
+            assert_eq!(result, CoderResult::InputEmpty);
+            assert_eq!(read, 1);
+            assert_eq!(written, 0);
+            assert!(!had_errors);
+            assert_eq!(output[0], 0x0);
+        }
+        {
+            let (result, read, written, had_errors) =
+                decoder.decode_to_utf8(&[0x26, 0x03, 0x26], &mut output[..], false);
+            assert_eq!(result, CoderResult::OutputFull);
+            assert_eq!(read, 1);
+            assert_eq!(written, 3);
+            assert!(!had_errors);
+            assert_eq!(output[0], 0xE2);
+            assert_eq!(output[1], 0x98);
+            assert_eq!(output[2], 0x83);
+            assert_eq!(output[3], 0x00);
+        }
+    }
+
+    #[test]
+    fn test_utf_16be_decode_near_end() {
+        let mut output = [0u8; 4];
+        let mut decoder = UTF_16BE.new_decoder();
+        {
+            let (result, read, written, had_errors) =
+                decoder.decode_to_utf8(&[0x26], &mut output[..], false);
+            assert_eq!(result, CoderResult::InputEmpty);
+            assert_eq!(read, 1);
+            assert_eq!(written, 0);
+            assert!(!had_errors);
+            assert_eq!(output[0], 0x0);
+        }
+        {
+            let (result, read, written, had_errors) =
+                decoder.decode_to_utf8(&[0x03, 0x26, 0x03], &mut output[..], false);
+            assert_eq!(result, CoderResult::OutputFull);
+            assert_eq!(read, 1);
+            assert_eq!(written, 3);
+            assert!(!had_errors);
+            assert_eq!(output[0], 0xE2);
+            assert_eq!(output[1], 0x98);
+            assert_eq!(output[2], 0x83);
+            assert_eq!(output[3], 0x00);
         }
     }
 }

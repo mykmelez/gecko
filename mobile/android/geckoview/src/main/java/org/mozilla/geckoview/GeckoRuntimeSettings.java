@@ -8,20 +8,31 @@ package org.mozilla.geckoview;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.util.Collections;
+import java.util.Map;
 
+import android.app.Service;
+import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.Parcel;
 import android.os.Parcelable;
+import android.support.annotation.AnyThread;
 import android.support.annotation.IntDef;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.v4.util.ArrayMap;
 
+import org.mozilla.gecko.EventDispatcher;
+import org.mozilla.gecko.util.GeckoBundle;
 import org.mozilla.geckoview.GeckoSession.TrackingProtectionDelegate;
 
+@AnyThread
 public final class GeckoRuntimeSettings implements Parcelable {
+
     /**
      * Settings builder used to construct the settings object.
      */
+    @AnyThread
     public static final class Builder {
         private final GeckoRuntimeSettings mSettings;
 
@@ -114,35 +125,7 @@ public final class GeckoRuntimeSettings implements Parcelable {
          * @return This Builder instance.
          */
         public @NonNull Builder webFontsEnabled(final boolean flag) {
-            mSettings.mWebFonts.set(flag);
-            return this;
-        }
-
-        /**
-         * Set whether crash reporting for native code should be enabled. This will cause
-         * a SIGSEGV handler to be installed, and any crash encountered there will be
-         * reported to Mozilla.
-         *
-         * @param enabled A flag determining whether native crash reporting should be enabled.
-         *                Defaults to false.
-         * @return This Builder.
-         */
-        public @NonNull Builder nativeCrashReportingEnabled(final boolean enabled) {
-            mSettings.mNativeCrashReporting = enabled;
-            return this;
-        }
-
-        /**
-         * Set whether crash reporting for Java code should be enabled. This will cause
-         * a default unhandled exception handler to be installed, and any exceptions encountered
-         * will automatically reported to Mozilla.
-         *
-         * @param enabled A flag determining whether Java crash reporting should be enabled.
-         *                Defaults to false.
-         * @return This Builder.
-         */
-        public @NonNull Builder javaCrashReportingEnabled(final boolean enabled) {
-            mSettings.mJavaCrashReporting = enabled;
+            mSettings.mWebFonts.set(flag ? 1 : 0);
             return this;
         }
 
@@ -156,6 +139,20 @@ public final class GeckoRuntimeSettings implements Parcelable {
          */
         public @NonNull Builder pauseForDebugger(boolean enabled) {
             mSettings.mDebugPause = enabled;
+            return this;
+        }
+        /**
+         * Set whether the to report the full bit depth of the device.
+         *
+         * By default, 24 bits are reported for high memory devices and 16 bits
+         * for low memory devices. If set to true, the device's maximum bit depth is
+         * reported. On most modern devices this will be 32 bit screen depth.
+         *
+         * @param enable A flag determining whether maximum screen depth should be used.
+         * @return This Builder.
+         */
+        public @NonNull Builder useMaxScreenDepth(boolean enable) {
+            mSettings.mUseMaxScreenDepth = enable;
             return this;
         }
 
@@ -176,27 +173,10 @@ public final class GeckoRuntimeSettings implements Parcelable {
          *
          * @param lifetime The enforced cookie lifetime.
          *                 Use one of the {@link #COOKIE_LIFETIME_NORMAL COOKIE_LIFETIME_*} flags.
-         *                 Use {@link #cookieLifetimeDays} to set expiration
-         *                 days for {@link #COOKIE_LIFETIME_DAYS}.
          * @return The Builder instance.
          */
         public @NonNull Builder cookieLifetime(@CookieLifetime int lifetime) {
             mSettings.mCookieLifetime.set(lifetime);
-            return this;
-        }
-
-        /**
-         * Set the expiration days for {@link #COOKIE_LIFETIME_DAYS}.
-         *
-         * @param days Limit lifetime to N days. Only enforced for {@link #COOKIE_LIFETIME_DAYS}.
-         * @return The Builder instance.
-         */
-        public @NonNull Builder cookieLifetimeDays(int days) {
-            if (mSettings.mCookieLifetime.get() != COOKIE_LIFETIME_DAYS) {
-                throw new IllegalStateException(
-                    "Setting expiration days for incompatible cookie lifetime");
-            }
-            mSettings.mCookieLifetimeDays.set(days);
             return this;
         }
 
@@ -229,6 +209,121 @@ public final class GeckoRuntimeSettings implements Parcelable {
             mSettings.mConsoleOutput.set(enabled);
             return this;
         }
+
+        /**
+         * Set the display density override.
+         *
+         * @param density The display density value to use for overriding the system default.
+         * @return The builder instance.
+         */
+        public @NonNull Builder displayDensityOverride(float density) {
+            mSettings.mDisplayDensityOverride = density;
+            return this;
+        }
+
+        /** Set whether or not known malware sites should be blocked.
+         *
+         * Note: For each blocked site, {@link GeckoSession.NavigationDelegate#onLoadError}
+         * with error category {@link WebRequestError#ERROR_CATEGORY_SAFEBROWSING}
+         * is called.
+         *
+         * @param enabled A flag determining whether or not to block malware
+         *                sites.
+         * @return The builder instance.
+         */
+        public @NonNull Builder blockMalware(boolean enabled) {
+            mSettings.mSafebrowsingMalware.set(enabled);
+            return this;
+        }
+
+        /**
+         * Set whether or not known phishing sites should be blocked.
+         *
+         * Note: For each blocked site, {@link GeckoSession.NavigationDelegate#onLoadError}
+         * with error category {@link WebRequestError#ERROR_CATEGORY_SAFEBROWSING}
+         * is called.
+         *
+         * @param enabled A flag determining whether or not to block phishing
+         *                sites.
+         * @return The builder instance.
+         */
+        public @NonNull Builder blockPhishing(boolean enabled) {
+            mSettings.mSafebrowsingPhishing.set(enabled);
+            return this;
+        }
+
+        /**
+         * Set the display DPI override.
+         *
+         * @param dpi The display DPI value to use for overriding the system default.
+         * @return The builder instance.
+         */
+        public @NonNull Builder displayDpiOverride(int dpi) {
+            mSettings.mDisplayDpiOverride = dpi;
+            return this;
+        }
+
+        /**
+         * Set the screen size override.
+         *
+         * @param width The screen width value to use for overriding the system default.
+         * @param height The screen height value to use for overriding the system default.
+         * @return The builder instance.
+         */
+        public @NonNull Builder screenSizeOverride(int width, int height) {
+            mSettings.mScreenWidthOverride = width;
+            mSettings.mScreenHeightOverride = height;
+            return this;
+        }
+
+        /**
+         * When set, the specified {@link android.app.Service} will be started by
+         * an {@link android.content.Intent} with action {@link GeckoRuntime#ACTION_CRASHED} when
+         * a crash is encountered. Crash details can be found in the Intent extras, such as
+         * {@link GeckoRuntime#EXTRA_MINIDUMP_PATH}.
+         * <br><br>
+         * The crash handler Service must be declared to run in a different process from
+         * the {@link GeckoRuntime}. Additionally, the handler will be run as a foreground service,
+         * so the normal rules about activating a foreground service apply.
+         * <br><br>
+         * In practice, you have one of three
+         * options once the crash handler is started:
+         * <ul>
+         * <li>Call {@link android.app.Service#startForeground(int, android.app.Notification)}. You can then
+         * take as much time as necessary to report the crash.</li>
+         * <li>Start an activity. Unless you also call {@link android.app.Service#startForeground(int, android.app.Notification)}
+         * this should be in a different process from the crash handler, since Android will
+         * kill the crash handler process as part of the background execution limitations.</li>
+         * <li>Schedule work via {@link android.app.job.JobScheduler}. This will allow you to
+         * do substantial work in the background without execution limits.</li>
+         * </ul><br>
+         * You can use {@link CrashReporter} to send the report to Mozilla, which provides Mozilla
+         * with data needed to fix the crash. Be aware that the minidump may contain
+         * personally identifiable information (PII). Consult Mozilla's
+         * <a href="https://www.mozilla.org/en-US/privacy/">privacy policy</a> for information
+         * on how this data will be handled.
+         *
+         * @param handler The class for the crash handler Service.
+         * @return This builder instance.
+         *
+         * @see <a href="https://developer.android.com/about/versions/oreo/background">Android Background Execution Limits</a>
+         * @see GeckoRuntime#ACTION_CRASHED
+         */
+        public @NonNull Builder crashHandler(final Class<? extends Service> handler) {
+            mSettings.mCrashHandler = handler;
+            return this;
+        }
+
+        /**
+         * Set the locale.
+         *
+         * @param requestedLocales List of locale codes in Gecko format ("en" or "en-US").
+         * @return The builder instance.
+         */
+        public @NonNull Builder locales(String[] requestedLocales) {
+            mSettings.mRequestedLocales = requestedLocales;
+            return this;
+        }
     }
 
     /* package */ GeckoRuntime runtime;
@@ -254,16 +349,34 @@ public final class GeckoRuntimeSettings implements Parcelable {
         public void set(T newValue) {
             mValue = newValue;
             mIsSet = true;
-            flush();
+
+            // There is a flush() in GeckoRuntimeSettings, so be explicit.
+            this.flush();
         }
 
         public T get() {
             return mValue;
         }
 
-        public void flush() {
-            if (GeckoRuntimeSettings.this.runtime != null) {
-                GeckoRuntimeSettings.this.runtime.setPref(name, mValue, mIsSet);
+        private void flush() {
+            final GeckoRuntime runtime = GeckoRuntimeSettings.this.runtime;
+            if (runtime != null) {
+                final GeckoBundle prefs = new GeckoBundle(1);
+                intoBundle(prefs);
+                runtime.setDefaultPrefs(prefs);
+            }
+        }
+
+        public void intoBundle(final GeckoBundle bundle) {
+            final T value = mIsSet ? mValue : defaultValue;
+            if (value instanceof String) {
+                bundle.putString(name, (String)value);
+            } else if (value instanceof Integer) {
+                bundle.putInt(name, (Integer)value);
+            } else if (value instanceof Boolean) {
+                bundle.putBoolean(name, (Boolean)value);
+            } else {
+                throw new UnsupportedOperationException("Unhandled pref type for " + name);
             }
         }
     }
@@ -272,27 +385,39 @@ public final class GeckoRuntimeSettings implements Parcelable {
         "javascript.enabled", true);
     /* package */ Pref<Boolean> mRemoteDebugging = new Pref<Boolean>(
         "devtools.debugger.remote-enabled", false);
-    /* package */ Pref<Boolean> mWebFonts = new Pref<Boolean>(
-        "browser.display.use_document_fonts", true);
+    /* package */ Pref<Integer> mWebFonts = new Pref<Integer>(
+        "browser.display.use_document_fonts", 1);
     /* package */ Pref<Integer> mCookieBehavior = new Pref<Integer>(
         "network.cookie.cookieBehavior", COOKIE_ACCEPT_ALL);
     /* package */ Pref<Integer> mCookieLifetime = new Pref<Integer>(
         "network.cookie.lifetimePolicy", COOKIE_LIFETIME_NORMAL);
-    /* package */ Pref<Integer> mCookieLifetimeDays = new Pref<Integer>(
-        "network.cookie.lifetime.days", 90);
     /* package */ Pref<String> mTrackingProtection = new Pref<String>(
         "urlclassifier.trackingTable",
-        TrackingProtection.buildPrefValue(TrackingProtectionDelegate.CATEGORY_ALL));
+        TrackingProtection.buildPrefValue(
+            TrackingProtectionDelegate.CATEGORY_TEST |
+            TrackingProtectionDelegate.CATEGORY_ANALYTIC |
+            TrackingProtectionDelegate.CATEGORY_SOCIAL |
+            TrackingProtectionDelegate.CATEGORY_AD));
     /* package */ Pref<Boolean> mConsoleOutput = new Pref<Boolean>(
         "geckoview.console.enabled", false);
+    /* package */ Pref<Boolean> mSafebrowsingMalware = new Pref<Boolean>(
+        "browser.safebrowsing.malware.enabled", true);
+    /* package */ Pref<Boolean> mSafebrowsingPhishing = new Pref<Boolean>(
+        "browser.safebrowsing.phishing.enabled", true);
 
-    /* package */ boolean mNativeCrashReporting;
-    /* package */ boolean mJavaCrashReporting;
     /* package */ boolean mDebugPause;
+    /* package */ boolean mUseMaxScreenDepth;
+    /* package */ float mDisplayDensityOverride = -1.0f;
+    /* package */ int mDisplayDpiOverride;
+    /* package */ int mScreenWidthOverride;
+    /* package */ int mScreenHeightOverride;
+    /* package */ Class<? extends Service> mCrashHandler;
+    /* package */ String[] mRequestedLocales;
 
     private final Pref<?>[] mPrefs = new Pref<?>[] {
-        mCookieBehavior, mCookieLifetime, mCookieLifetimeDays, mConsoleOutput,
-        mJavaScript, mRemoteDebugging, mTrackingProtection, mWebFonts
+        mCookieBehavior, mCookieLifetime, mConsoleOutput,
+        mJavaScript, mRemoteDebugging, mSafebrowsingMalware,
+        mSafebrowsingPhishing, mTrackingProtection, mWebFonts,
     };
 
     /* package */ GeckoRuntimeSettings() {
@@ -324,15 +449,42 @@ public final class GeckoRuntimeSettings implements Parcelable {
             uncheckedPref.set(settings.mPrefs[i].get());
         }
 
-        mNativeCrashReporting = settings.mNativeCrashReporting;
-        mJavaCrashReporting = settings.mJavaCrashReporting;
         mDebugPause = settings.mDebugPause;
+        mUseMaxScreenDepth = settings.mUseMaxScreenDepth;
+        mDisplayDensityOverride = settings.mDisplayDensityOverride;
+        mDisplayDpiOverride = settings.mDisplayDpiOverride;
+        mScreenWidthOverride = settings.mScreenWidthOverride;
+        mScreenHeightOverride = settings.mScreenHeightOverride;
+        mCrashHandler = settings.mCrashHandler;
+        mRequestedLocales = settings.mRequestedLocales;
+    }
+
+    /* package */ Map<String, Object> getPrefsMap() {
+        final ArrayMap<String, Object> prefs = new ArrayMap<>(mPrefs.length);
+        for (final Pref<?> pref : mPrefs) {
+            prefs.put(pref.name, pref.get());
+        }
+
+        return Collections.unmodifiableMap(prefs);
     }
 
     /* package */ void flush() {
-        for (final Pref<?> pref: mPrefs) {
-            pref.flush();
+        flushLocales();
+
+        // Prefs are flushed individually when they are set, and
+        // initial values are handled by GeckoRuntime itself.
+        // We may have user prefs due to previous versions of
+        // this class operating differently, though, so we'll
+        // send a message to clear any user prefs that may have
+        // been set on the prefs we manage.
+        final String[] names = new String[mPrefs.length];
+        for (int i = 0; i < mPrefs.length; i++) {
+            names[i] = mPrefs[i].name;
         }
+
+        final GeckoBundle data = new GeckoBundle(1);
+        data.putStringArray("names", names);
+        EventDispatcher.getInstance().dispatch("GeckoView:ResetUserPrefs", data);
     }
 
     /**
@@ -349,7 +501,7 @@ public final class GeckoRuntimeSettings implements Parcelable {
      *
      * @return The Gecko process arguments.
      */
-    public String[] getArguments() {
+    public @NonNull String[] getArguments() {
         return mArgs;
     }
 
@@ -358,7 +510,7 @@ public final class GeckoRuntimeSettings implements Parcelable {
      *
      * @return The Gecko intent extras.
      */
-    public Bundle getExtras() {
+    public @NonNull Bundle getExtras() {
         return mExtras;
     }
 
@@ -408,7 +560,7 @@ public final class GeckoRuntimeSettings implements Parcelable {
      * @return Whether web fonts support is enabled.
      */
     public boolean getWebFontsEnabled() {
-        return mWebFonts.get();
+        return mWebFonts.get() != 0 ? true : false;
     }
 
     /**
@@ -418,26 +570,8 @@ public final class GeckoRuntimeSettings implements Parcelable {
      * @return This GeckoRuntimeSettings instance.
      */
     public @NonNull GeckoRuntimeSettings setWebFontsEnabled(final boolean flag) {
-        mWebFonts.set(flag);
+        mWebFonts.set(flag ? 1 : 0);
         return this;
-    }
-
-    /**
-     * Get whether native crash reporting is enabled or not.
-     *
-     * @return True if native crash reporting is enabled.
-     */
-    public boolean getNativeCrashReportingEnabled() {
-        return mNativeCrashReporting;
-    }
-
-    /**
-     * Get whether Java crash reporting is enabled or not.
-     *
-     * @return True if Java crash reporting is enabled.
-     */
-    public boolean getJavaCrashReportingEnabled() {
-        return mJavaCrashReporting;
     }
 
     /**
@@ -447,11 +581,89 @@ public final class GeckoRuntimeSettings implements Parcelable {
      */
     public boolean getPauseForDebuggerEnabled() { return mDebugPause; }
 
+    /**
+     * Gets whether the compositor should use the maximum screen depth when rendering.
+     *
+     * @return True if the maximum screen depth should be used.
+     */
+    public boolean getUseMaxScreenDepth() { return mUseMaxScreenDepth; }
+
+    /**
+     * Gets the display density override value.
+     *
+     * @return Returns a positive number. Will return null if not set.
+     */
+    public @Nullable Float getDisplayDensityOverride() {
+        if (mDisplayDensityOverride > 0.0f) {
+            return mDisplayDensityOverride;
+        }
+        return null;
+    }
+
+    /**
+     * Gets the display DPI override value.
+     *
+     * @return Returns a positive number. Will return null if not set.
+     */
+    public @Nullable Integer getDisplayDpiOverride() {
+        if (mDisplayDpiOverride > 0) {
+            return mDisplayDpiOverride;
+        }
+        return null;
+    }
+
+    public @Nullable Class<? extends Service> getCrashHandler() {
+        return mCrashHandler;
+    }
+
+    /**
+     * Gets the screen size  override value.
+     *
+     * @return Returns a Rect containing the dimensions to use for the window size.
+     * Will return null if not set.
+     */
+    public @Nullable Rect getScreenSizeOverride() {
+        if ((mScreenWidthOverride > 0) && (mScreenHeightOverride > 0)) {
+            return new Rect(0, 0, mScreenWidthOverride, mScreenHeightOverride);
+        }
+        return null;
+    }
+
+    /**
+     * Gets the list of requested locales.
+     *
+     * @return A list of locale codes in Gecko format ("en" or "en-US").
+     */
+    public @Nullable String[] getLocales() {
+        return mRequestedLocales;
+    }
+
+    /**
+     * Set the locale.
+     *
+     * @param requestedLocales An ordered list of locales in Gecko format ("en-US").
+     */
+    public void setLocales(@Nullable String[] requestedLocales) {
+        mRequestedLocales = requestedLocales;
+        flushLocales();
+    }
+
+    private void flushLocales() {
+        if (mRequestedLocales == null) {
+            return;
+        }
+        final GeckoBundle data = new GeckoBundle(1);
+        data.putStringArray("requestedLocales", mRequestedLocales);
+        EventDispatcher.getInstance().dispatch("GeckoView:SetLocale", data);
+    }
+
     // Sync values with nsICookieService.idl.
     @Retention(RetentionPolicy.SOURCE)
     @IntDef({ COOKIE_ACCEPT_ALL, COOKIE_ACCEPT_FIRST_PARTY,
-              COOKIE_ACCEPT_NONE, COOKIE_ACCEPT_VISITED })
-    public @interface CookieBehavior {}
+              COOKIE_ACCEPT_NONE, COOKIE_ACCEPT_VISITED,
+              COOKIE_ACCEPT_NON_TRACKERS })
+    /* package */ @interface CookieBehavior {}
+
     /**
      * Accept first-party and third-party cookies and site data.
      */
@@ -470,6 +682,12 @@ public final class GeckoRuntimeSettings implements Parcelable {
      * sites previously visited in a first-party context.
      */
     public static final int COOKIE_ACCEPT_VISITED = 3;
+    /**
+     * Accept only first-party and non-tracking third-party cookies and site data
+     * to block cookies which are not associated with the domain of the visited
+     * site set by known trackers.
+     */
+    public static final int COOKIE_ACCEPT_NON_TRACKERS = 4;
 
     /**
      * Get the assigned cookie storage behavior.
@@ -497,7 +715,8 @@ public final class GeckoRuntimeSettings implements Parcelable {
     @Retention(RetentionPolicy.SOURCE)
     @IntDef({ COOKIE_LIFETIME_NORMAL, COOKIE_LIFETIME_RUNTIME,
               COOKIE_LIFETIME_DAYS })
-    public @interface CookieLifetime {}
+    /* package */ @interface CookieLifetime {}
+
     /**
      * Accept default cookie lifetime.
      */
@@ -522,43 +741,15 @@ public final class GeckoRuntimeSettings implements Parcelable {
     }
 
     /**
-     * Get the enforced lifetime expiration days.
-     *
-     * Note: This is only enforced for {@link #COOKIE_LIFETIME_DAYS}.
-     *
-     * @return The enforced expiration days.
-     */
-    public int getCookieLifetimeDays() {
-        return mCookieLifetimeDays.get();
-    }
-
-    /**
      * Set the cookie lifetime.
      *
      * @param lifetime The enforced cookie lifetime.
      *                 Use one of the {@link #COOKIE_LIFETIME_NORMAL COOKIE_LIFETIME_*} flags.
-     *                 Use {@link #setCookieLifetimeDays} to set expiration
-     *                 days for {@link #COOKIE_LIFETIME_DAYS}.
      * @return This GeckoRuntimeSettings instance.
      */
     public @NonNull GeckoRuntimeSettings setCookieLifetime(
             @CookieLifetime int lifetime) {
         mCookieLifetime.set(lifetime);
-        return this;
-    }
-
-    /**
-     * Set the expiration days for {@link #COOKIE_LIFETIME_DAYS}.
-     *
-     * @param days Limit lifetime to N days. Only enforced for {@link #COOKIE_LIFETIME_DAYS}.
-     * @return This GeckoRuntimeSettings instance.
-     */
-    public @NonNull GeckoRuntimeSettings setCookieLifetimeDays(int days) {
-        if (mCookieLifetime.get() != COOKIE_LIFETIME_DAYS) {
-            throw new IllegalStateException(
-                "Setting expiration days for incompatible cookie lifetime");
-        }
-        mCookieLifetimeDays.set(days);
         return this;
     }
 
@@ -606,10 +797,58 @@ public final class GeckoRuntimeSettings implements Parcelable {
     /**
      * Get whether or not web console messages are sent to logcat.
      *
-     * @return This GeckoRuntimeSettings instance.
+     * @return True if console output is enabled.
      */
     public boolean getConsoleOutputEnabled() {
         return mConsoleOutput.get();
+    }
+
+    /**
+     * Set whether or not known malware sites should be blocked.
+     *
+     * Note: For each blocked site, {@link GeckoSession.NavigationDelegate#onLoadError}
+     * with error category {@link WebRequestError#ERROR_CATEGORY_SAFEBROWSING}
+     * is called.
+     *
+     * @param enabled A flag determining whether or not to block malware sites.
+     * @return The GeckoRuntimeSettings instance.
+     */
+    public @NonNull GeckoRuntimeSettings setBlockMalware(boolean enabled) {
+        mSafebrowsingMalware.set(enabled);
+        return this;
+    }
+
+    /**
+     * Get whether or not known malware sites are blocked.
+     *
+     * @return True if malware site blocking is enabled.
+     */
+    public boolean getBlockMalware() {
+        return mSafebrowsingMalware.get();
+    }
+
+    /**
+     * Set whether or not known phishing sites should be blocked.
+     *
+     * Note: For each blocked site, {@link GeckoSession.NavigationDelegate#onLoadError}
+     * with error category {@link WebRequestError#ERROR_CATEGORY_SAFEBROWSING}
+     * is called.
+     *
+     * @param enabled A flag determining whether or not to block phishing sites.
+     * @return The GeckoRuntimeSettings instance.
+     */
+    public @NonNull GeckoRuntimeSettings setBlockPhishing(boolean enabled) {
+        mSafebrowsingPhishing.set(enabled);
+        return this;
+    }
+
+    /**
+     * Get whether or not known phishing sites are blocked.
+     *
+     * @return True if phishing site blocking is enabled.
+     */
+    public boolean getBlockPhishing() {
+        return mSafebrowsingPhishing.get();
     }
 
     @Override // Parcelable
@@ -627,13 +866,18 @@ public final class GeckoRuntimeSettings implements Parcelable {
             out.writeValue(pref.get());
         }
 
-        ParcelableUtils.writeBoolean(out, mNativeCrashReporting);
-        ParcelableUtils.writeBoolean(out, mJavaCrashReporting);
         ParcelableUtils.writeBoolean(out, mDebugPause);
+        ParcelableUtils.writeBoolean(out, mUseMaxScreenDepth);
+        out.writeFloat(mDisplayDensityOverride);
+        out.writeInt(mDisplayDpiOverride);
+        out.writeInt(mScreenWidthOverride);
+        out.writeInt(mScreenHeightOverride);
+        out.writeString(mCrashHandler != null ? mCrashHandler.getName() : null);
+        out.writeStringArray(mRequestedLocales);
     }
 
     // AIDL code may call readFromParcel even though it's not part of Parcelable.
-    public void readFromParcel(final Parcel source) {
+    public void readFromParcel(final @NonNull Parcel source) {
         mUseContentProcess = ParcelableUtils.readBoolean(source);
         mArgs = source.createStringArray();
         mExtras.readFromParcel(source);
@@ -645,9 +889,26 @@ public final class GeckoRuntimeSettings implements Parcelable {
             uncheckedPref.set(source.readValue(getClass().getClassLoader()));
         }
 
-        mNativeCrashReporting = ParcelableUtils.readBoolean(source);
-        mJavaCrashReporting = ParcelableUtils.readBoolean(source);
         mDebugPause = ParcelableUtils.readBoolean(source);
+        mUseMaxScreenDepth = ParcelableUtils.readBoolean(source);
+        mDisplayDensityOverride = source.readFloat();
+        mDisplayDpiOverride = source.readInt();
+        mScreenWidthOverride = source.readInt();
+        mScreenHeightOverride = source.readInt();
+
+        final String crashHandlerName = source.readString();
+        if (crashHandlerName != null) {
+            try {
+                @SuppressWarnings("unchecked")
+                final Class<? extends Service> handler =
+                        (Class<? extends Service>) Class.forName(crashHandlerName);
+
+                mCrashHandler = handler;
+            } catch (ClassNotFoundException e) {
+            }
+        }
+
+        mRequestedLocales = source.createStringArray();
     }
 
     public static final Parcelable.Creator<GeckoRuntimeSettings> CREATOR

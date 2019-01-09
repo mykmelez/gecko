@@ -11,14 +11,14 @@
  */
 
 const { RootActor } = require("devtools/server/actors/root");
-const { DebuggerServer } = require("devtools/server/main");
+const { ActorRegistry } = require("devtools/server/actors/utils/actor-registry");
 const { BrowserTabList, BrowserAddonList, sendShutdownEvent } =
   require("devtools/server/actors/webbrowser");
 
 /**
  * Construct a root actor appropriate for use in a server running in a
  * browser on Android. The returned root actor:
- * - respects the factories registered with DebuggerServer.addGlobalActor,
+ * - respects the factories registered with ActorRegistry.addGlobalActor,
  * - uses a MobileTabList to supply tab actors,
  * - sends all navigator:browser window documents a Debugger:Shutdown event
  *   when it exits.
@@ -26,15 +26,15 @@ const { BrowserTabList, BrowserAddonList, sendShutdownEvent } =
  * * @param aConnection DebuggerServerConnection
  *        The conection to the client.
  */
-function createRootActor(aConnection) {
+exports.createRootActor = function createRootActor(aConnection) {
   let parameters = {
     tabList: new MobileTabList(aConnection),
     addonList: new BrowserAddonList(aConnection),
-    globalActorFactories: DebuggerServer.globalActorFactories,
-    onShutdown: sendShutdownEvent
+    globalActorFactories: ActorRegistry.globalActorFactories,
+    onShutdown: sendShutdownEvent,
   };
   return new RootActor(aConnection, parameters);
-}
+};
 
 /**
  * A live list of BrowserTabActors representing the current browser tabs,
@@ -66,12 +66,4 @@ MobileTabList.prototype._getSelectedBrowser = function(aWindow) {
 
 MobileTabList.prototype._getChildren = function(aWindow) {
   return aWindow.BrowserApp.tabs.map(tab => tab.browser);
-};
-
-exports.register = function(handle) {
-  handle.setRootActor(createRootActor);
-};
-
-exports.unregister = function(handle) {
-  handle.setRootActor(null);
 };

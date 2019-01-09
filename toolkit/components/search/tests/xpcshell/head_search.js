@@ -25,8 +25,7 @@ const CACHE_FILENAME = "search.json.mozlz4";
 
 // nsSearchService.js uses Services.appinfo.name to build a salt for a hash.
 // eslint-disable-next-line mozilla/use-services
-var XULRuntime = Components.classesByID["{95d89e3e-a169-41a3-8e56-719978e15b12}"]
-                           .getService(Ci.nsIXULRuntime);
+var XULRuntime = Cc["@mozilla.org/xre/runtime;1"].getService(Ci.nsIXULRuntime);
 
 var isChild = XULRuntime.processType == XULRuntime.PROCESS_TYPE_CONTENT;
 
@@ -96,22 +95,12 @@ function installAddonEngine(name = "engine-addon") {
     },
 
     getFiles(prop) {
-      let result = [];
-
-      switch (prop) {
-      case XRE_EXTENSIONS_DIR_LIST:
-        result.push(addonDir);
-        break;
-      default:
-        throw Cr.NS_ERROR_FAILURE;
+      if (prop == XRE_EXTENSIONS_DIR_LIST) {
+        return [addonDir].values();
       }
 
-      return {
-        QueryInterface: ChromeUtils.generateQI([Ci.nsISimpleEnumerator]),
-        hasMoreElements: () => result.length > 0,
-        getNext: () => result.shift()
-      };
-    }
+      throw Cr.NS_ERROR_FAILURE;
+    },
   });
 }
 
@@ -143,7 +132,7 @@ function installDistributionEngine() {
       if (aProp == XRE_APP_DISTRIBUTION_DIR)
         return distDir.clone();
       return null;
-    }
+    },
   });
 }
 
@@ -238,13 +227,13 @@ function getDefaultEngineName(isUS) {
   // The list of visibleDefaultEngines needs to match or the cache will be ignored.
   let chan = NetUtil.newChannel({
     uri: "resource://search-plugins/list.json",
-    loadUsingSystemPrincipal: true
+    loadUsingSystemPrincipal: true,
   });
   let searchSettings = parseJsonFromStream(chan.open2());
   let defaultEngineName = searchSettings.default.searchDefault;
 
   if (isUS === undefined)
-    isUS = Services.locale.getRequestedLocale() == "en-US" && isUSTimezone();
+    isUS = Services.locale.requestedLocale == "en-US" && isUSTimezone();
 
   if (isUS && ("US" in searchSettings &&
                "searchDefault" in searchSettings.US)) {
@@ -257,13 +246,13 @@ function getDefaultEngineList(isUS) {
   // The list of visibleDefaultEngines needs to match or the cache will be ignored.
   let chan = NetUtil.newChannel({
     uri: "resource://search-plugins/list.json",
-    loadUsingSystemPrincipal: true
+    loadUsingSystemPrincipal: true,
   });
   let json = parseJsonFromStream(chan.open2());
   let visibleDefaultEngines = json.default.visibleDefaultEngines;
 
   if (isUS === undefined)
-    isUS = Services.locale.getRequestedLocale() == "en-US" && isUSTimezone();
+    isUS = Services.locale.requestedLocale == "en-US" && isUSTimezone();
 
   if (isUS) {
     let searchSettings = json.locales["en-US"];
@@ -415,8 +404,7 @@ var addTestEngines = async function(aItems) {
       }, "browser-search-engine-modified");
 
       if (item.xmlFileName) {
-        Services.search.addEngine(gDataUrl + item.xmlFileName,
-                                  null, null, false);
+        Services.search.addEngine(gDataUrl + item.xmlFileName, null, false);
       } else {
         Services.search.addEngineWithDetails(item.name, ...item.details);
       }
@@ -433,33 +421,6 @@ function installTestEngine() {
   useHttpServer();
   return addTestEngines([
     { name: kTestEngineName, xmlFileName: "engine.xml" },
-  ]);
-}
-
-/**
- * Set a localized preference on the default branch
- * @param aPrefName
- *        The name of the pref to set.
- */
-function setLocalizedDefaultPref(aPrefName, aValue) {
-  let value = "data:text/plain," + BROWSER_SEARCH_PREF + aPrefName + "=" + aValue;
-  Services.prefs.getDefaultBranch(BROWSER_SEARCH_PREF)
-          .setCharPref(aPrefName, value);
-}
-
-/**
- * Installs two test engines, sets them as default for US vs. general.
- */
-function setUpGeoDefaults() {
-  const kSecondTestEngineName = "A second test engine";
-
-  setLocalizedDefaultPref("defaultenginename", "Test search engine");
-  setLocalizedDefaultPref("defaultenginename.US", "A second test engine");
-
-  useHttpServer();
-  return addTestEngines([
-    { name: kTestEngineName, xmlFileName: "engine.xml" },
-    { name: kSecondTestEngineName, xmlFileName: "engine2.xml" },
   ]);
 }
 
@@ -521,10 +482,9 @@ const TELEMETRY_RESULT_ENUM = {
 function checkCountryResultTelemetry(aExpectedValue) {
   let histogram = Services.telemetry.getHistogramById("SEARCH_SERVICE_COUNTRY_FETCH_RESULT");
   let snapshot = histogram.snapshot();
-  // The probe is declared with 8 values, but we get 9 back from .counts
-  let expectedCounts = [0, 0, 0, 0, 0, 0, 0, 0, 0];
   if (aExpectedValue != null) {
-    expectedCounts[aExpectedValue] = 1;
+    equal(snapshot.values[aExpectedValue], 1);
+  } else {
+    deepEqual(snapshot.values, {});
   }
-  deepEqual(snapshot.counts, expectedCounts);
 }

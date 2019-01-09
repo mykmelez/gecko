@@ -10,9 +10,10 @@ const promise = require("promise");
 const CssLogic = require("devtools/shared/inspector/css-logic");
 const {ELEMENT_STYLE} = require("devtools/shared/specs/styles");
 const TextProperty = require("devtools/client/inspector/rules/models/text-property");
-const {promiseWarn} = require("devtools/client/inspector/shared/utils");
-const {parseNamedDeclarations} = require("devtools/shared/css/parsing-utils");
 const Services = require("Services");
+
+loader.lazyRequireGetter(this, "promiseWarn", "devtools/client/inspector/shared/utils", true);
+loader.lazyRequireGetter(this, "parseNamedDeclarations", "devtools/shared/css/parsing-utils", true);
 
 const STYLE_INSPECTOR_PROPERTIES = "devtools/shared/locales/styleinspector.properties";
 const {LocalizationHelper} = require("devtools/shared/l10n");
@@ -189,7 +190,7 @@ Rule.prototype = {
         disabledProps.push({
           name: prop.name,
           value: prop.value,
-          priority: prop.priority
+          priority: prop.priority,
         });
         continue;
       }
@@ -230,7 +231,7 @@ Rule.prototype = {
           cssProp = {
             name: textProp.name,
             value: "",
-            priority: ""
+            priority: "",
           };
         }
 
@@ -330,17 +331,18 @@ Rule.prototype = {
    *        The property's value (not including priority).
    * @param {String} priority
    *        The property's priority (either "important" or an empty string).
+   * @return {Promise}
    */
   setPropertyValue: function(property, value, priority) {
     if (value === property.value && priority === property.priority) {
-      return;
+      return Promise.resolve();
     }
 
     property.value = value;
     property.priority = priority;
 
     const index = this.textProps.indexOf(property);
-    this.applyProperties((modifications) => {
+    return this.applyProperties((modifications) => {
       modifications.setProperty(index, property.name, value, priority);
     });
   },
@@ -355,12 +357,13 @@ Rule.prototype = {
    *        The value to be used for the preview
    * @param {String} priority
    *        The property's priority (either "important" or an empty string).
+   **@return {Promise}
    */
   previewPropertyValue: function(property, value, priority) {
     const modifications = this.domRule.startModifyingProperties(this.cssProperties);
     modifications.setProperty(this.textProps.indexOf(property),
                               property.name, value, priority);
-    modifications.apply().then(() => {
+    return modifications.apply().then(() => {
       // Ensure dispatching a ruleview-changed event
       // also for previews
       this.elementStyle._changed();
@@ -661,7 +664,7 @@ Rule.prototype = {
       }
     }
     return false;
-  }
+  },
 };
 
 module.exports = Rule;

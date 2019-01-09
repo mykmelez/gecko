@@ -1,7 +1,9 @@
 add_task(async function testPartialPatchApplyFailureWithCompleteValidationFailure() {
   // because of the way we're simulating failure, we have to just pretend we've already
   // retried.
-  SpecialPowers.pushPrefEnv({set: [[PREF_APP_UPDATE_DOWNLOADPROMPTMAXATTEMPTS, 0]]});
+  SpecialPowers.pushPrefEnv({set: [
+    [PREF_APP_UPDATE_DOWNLOADPROMPT_MAXATTEMPTS, 0],
+  ]});
 
   let patchProps = {type: "partial",
                     state: STATE_PENDING};
@@ -20,14 +22,14 @@ add_task(async function testPartialPatchApplyFailureWithCompleteValidationFailur
       notificationId: "update-manual",
       button: "button",
       beforeClick() {
-        checkWhatsNewLink("update-manual-whats-new");
+        checkWhatsNewLink(window, "update-manual-whats-new");
       },
       async cleanup() {
         await BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
         is(gBrowser.selectedBrowser.currentURI.spec,
            URL_MANUAL_UPDATE, "Landed on manual update page.");
         gBrowser.removeTab(gBrowser.selectedTab);
-      }
+      },
     },
   ]);
 });

@@ -29,19 +29,18 @@ class FontSlantStyle;
 namespace dom {
 class Element;
 }
-}
+}  // namespace mozilla
 
 // Style utility functions
 class nsStyleUtil {
-public:
+ public:
+  static bool DashMatchCompare(const nsAString& aAttributeValue,
+                               const nsAString& aSelectorValue,
+                               const nsStringComparator& aComparator);
 
- static bool DashMatchCompare(const nsAString& aAttributeValue,
-                                const nsAString& aSelectorValue,
-                                const nsStringComparator& aComparator);
-
- static bool ValueIncludes(const nsAString& aValueList,
-                           const nsAString& aValue,
-                           const nsStringComparator& aComparator);
+  static bool ValueIncludes(const nsAString& aValueList,
+                            const nsAString& aValue,
+                            const nsStringComparator& aComparator);
 
   // Append a quoted (with 'quoteChar') and escaped version of aString
   // to aResult.  'quoteChar' must be ' or ".
@@ -56,89 +55,28 @@ public:
   static void AppendEscapedCSSIdent(const nsAString& aIdent,
                                     nsAString& aResult);
 
-  static void
-  AppendEscapedCSSFontFamilyList(const mozilla::FontFamilyList& aFamilyList,
-                                 nsAString& aResult);
-  static void
-  AppendEscapedCSSFontFamilyList(mozilla::SharedFontList* aFontlist,
-                                 nsAString& aResult)
-  {
-    AppendEscapedCSSFontFamilyList(aFontlist->mNames, aResult);
-  }
+  static void AppendFontSlantStyle(const mozilla::FontSlantStyle&,
+                                   nsAString& aResult);
 
-  static void
-  AppendFontSlantStyle(const mozilla::FontSlantStyle&, nsAString& aResult);
-
-private:
-  static void
-  AppendEscapedCSSFontFamilyList(const nsTArray<mozilla::FontFamilyName>& aNames,
-                                 nsAString& aResult);
-
-public:
+ public:
   // Append a bitmask-valued property's value(s) (space-separated) to aResult.
   static void AppendBitmaskCSSValue(const nsCSSKTableEntry aTable[],
-                                    int32_t aMaskedValue,
-                                    int32_t aFirstMask,
-                                    int32_t aLastMask,
-                                    nsAString& aResult);
+                                    int32_t aMaskedValue, int32_t aFirstMask,
+                                    int32_t aLastMask, nsAString& aResult);
 
   static void AppendAngleValue(const nsStyleCoord& aValue, nsAString& aResult);
 
   static void AppendPaintOrderValue(uint8_t aValue, nsAString& aResult);
 
-  static void AppendFontTagAsString(uint32_t aTag, nsAString& aResult);
-
-  static void AppendFontFeatureSettings(const nsTArray<gfxFontFeature>& aFeatures,
-                                        nsAString& aResult);
-
-  static void AppendFontFeatureSettings(const nsCSSValue& src,
-                                        nsAString& aResult);
-
-  static void AppendFontVariationSettings(const nsTArray<gfxFontVariation>& aVariations,
-                                          nsAString& aResult);
-
-  static void AppendFontVariationSettings(const nsCSSValue& src,
-                                          nsAString& aResult);
-
-  static void AppendUnicodeRange(const nsCSSValue& aValue, nsAString& aResult);
-
-  static void AppendCSSNumber(float aNumber, nsAString& aResult)
-  {
+  static void AppendCSSNumber(float aNumber, nsAString& aResult) {
     aResult.AppendFloat(aNumber);
   }
-
-  static void AppendStepsTimingFunction(nsTimingFunction::Type aType,
-                                        uint32_t aSteps,
-                                        nsAString& aResult);
-  static void AppendFramesTimingFunction(uint32_t aFrames,
-                                         nsAString& aResult);
-  static void AppendCubicBezierTimingFunction(float aX1, float aY1,
-                                              float aX2, float aY2,
-                                              nsAString& aResult);
-  static void AppendCubicBezierKeywordTimingFunction(
-      nsTimingFunction::Type aType,
-      nsAString& aResult);
-
-  // convert bitmask value to keyword name for a functional alternate
-  static void GetFunctionalAlternatesName(int32_t aFeature,
-                                          nsAString& aFeatureName);
-
-  // Append functional font-variant-alternates values to string
-  static void
-  SerializeFunctionalAlternates(const nsTArray<gfxAlternateValue>& aAlternates,
-                                nsAString& aResult);
-
-  // List of functional font-variant-alternates values to feature/value pairs
-  static void
-  ComputeFunctionalAlternates(const nsCSSValueList* aList,
-                              nsTArray<gfxAlternateValue>& aAlternateValues);
 
   /*
    * Convert an author-provided floating point number to an integer (0
    * ... 255) appropriate for use in the alpha component of a color.
    */
-  static uint8_t FloatToColorComponent(float aAlpha)
-  {
+  static uint8_t FloatToColorComponent(float aAlpha) {
     NS_ASSERTION(0.0 <= aAlpha && aAlpha <= 1.0, "out of range");
     return NSToIntRound(aAlpha * 255);
   }
@@ -202,6 +140,9 @@ public:
    *  @param aLineNumber
    *      Line number of inline style element in the containing document (for
    *      reporting violations)
+   *  @param aColumnNumber
+   *      Column number of inline style element in the containing document (for
+   *      reporting violations)
    *  @param aStyleText
    *      Contents of the inline style element (for reporting violations)
    *  @param aRv
@@ -212,35 +153,30 @@ public:
   static bool CSPAllowsInlineStyle(mozilla::dom::Element* aContent,
                                    nsIPrincipal* aPrincipal,
                                    nsIPrincipal* aTriggeringPrincipal,
-                                   nsIURI* aSourceURI,
-                                   uint32_t aLineNumber,
-                                   const nsAString& aStyleText,
-                                   nsresult* aRv);
+                                   nsIURI* aSourceURI, uint32_t aLineNumber,
+                                   uint32_t aColumnNumber,
+                                   const nsAString& aStyleText, nsresult* aRv);
 
-  template<size_t N>
+  template <size_t N>
   static bool MatchesLanguagePrefix(const char16_t* aLang, size_t aLen,
-                                    const char16_t (&aPrefix)[N])
-  {
+                                    const char16_t (&aPrefix)[N]) {
     return !NS_strncmp(aLang, aPrefix, N - 1) &&
            (aLen == N - 1 || aLang[N - 1] == '-');
   }
 
-  template<size_t N>
+  template <size_t N>
   static bool MatchesLanguagePrefix(const nsAtom* aLang,
-                                    const char16_t (&aPrefix)[N])
-  {
+                                    const char16_t (&aPrefix)[N]) {
     MOZ_ASSERT(aLang);
-    return MatchesLanguagePrefix(aLang->GetUTF16String(),
-                                 aLang->GetLength(), aPrefix);
+    return MatchesLanguagePrefix(aLang->GetUTF16String(), aLang->GetLength(),
+                                 aPrefix);
   }
 
-  template<size_t N>
+  template <size_t N>
   static bool MatchesLanguagePrefix(const nsAString& aLang,
-                                    const char16_t (&aPrefix)[N])
-  {
+                                    const char16_t (&aPrefix)[N]) {
     return MatchesLanguagePrefix(aLang.Data(), aLang.Length(), aPrefix);
   }
 };
-
 
 #endif /* nsStyleUtil_h___ */

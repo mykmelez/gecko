@@ -17,12 +17,6 @@ const kEntities = {
   "geolocation": "geolocation",
 };
 
-// For these types, prompt for permission if action is unknown.
-const PROMPT_FOR_UNKNOWN = [
-  "desktop-notification",
-  "geolocation",
-];
-
 function ContentPermissionPrompt() {}
 
 ContentPermissionPrompt.prototype = {
@@ -30,7 +24,7 @@ ContentPermissionPrompt.prototype = {
 
   QueryInterface: ChromeUtils.generateQI([Ci.nsIContentPermissionPrompt]),
 
-  handleExistingPermission: function handleExistingPermission(request, type, denyUnknown, callback) {
+  handleExistingPermission: function handleExistingPermission(request, type, isApp, callback) {
     let result = Services.perms.testExactPermissionFromPrincipal(request.principal, type);
     if (result == Ci.nsIPermissionManager.ALLOW_ACTION) {
       callback(/* allow */ true);
@@ -42,7 +36,7 @@ ContentPermissionPrompt.prototype = {
       return true;
     }
 
-    if (denyUnknown && result == Ci.nsIPermissionManager.UNKNOWN_ACTION) {
+    if (isApp && result == Ci.nsIPermissionManager.UNKNOWN_ACTION) {
       callback(/* allow */ false);
       return true;
     }
@@ -51,12 +45,7 @@ ContentPermissionPrompt.prototype = {
   },
 
   getChromeWindow: function getChromeWindow(aWindow) {
-     let chromeWin = aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                            .getInterface(Ci.nsIWebNavigation)
-                            .QueryInterface(Ci.nsIDocShellTreeItem)
-                            .rootTreeItem
-                            .QueryInterface(Ci.nsIInterfaceRequestor)
-                            .getInterface(Ci.nsIDOMWindow)
+     let chromeWin = aWindow.docShell.rootTreeItem.domWindow
                             .QueryInterface(Ci.nsIDOMChromeWindow);
      return chromeWin;
   },
@@ -97,10 +86,7 @@ ContentPermissionPrompt.prototype = {
     };
 
     // Returns true if the request was handled
-    let access = (perm.access && perm.access !== "unused") ?
-                 (perm.type + "-" + perm.access) : perm.type;
-    if (this.handleExistingPermission(request, access,
-          /* denyUnknown */ isApp || !PROMPT_FOR_UNKNOWN.includes(perm.type), callback)) {
+    if (this.handleExistingPermission(request, perm.type, isApp, callback)) {
        return;
     }
 
@@ -112,25 +98,25 @@ ContentPermissionPrompt.prototype = {
       callback: function(aChecked) {
         // If the user checked "Don't ask again" or this is a desktopNotification, make a permanent exception
         if (aChecked || entityName == "desktopNotification2")
-          Services.perms.addFromPrincipal(request.principal, access, Ci.nsIPermissionManager.DENY_ACTION);
+          Services.perms.addFromPrincipal(request.principal, perm.type, Ci.nsIPermissionManager.DENY_ACTION);
 
         callback(/* allow */ false);
-      }
+      },
     },
     {
       label: browserBundle.GetStringFromName(entityName + ".allow"),
       callback: function(aChecked) {
         // If the user checked "Don't ask again" or this is a desktopNotification, make a permanent exception
         if (aChecked || entityName == "desktopNotification2") {
-          Services.perms.addFromPrincipal(request.principal, access, Ci.nsIPermissionManager.ALLOW_ACTION);
+          Services.perms.addFromPrincipal(request.principal, perm.type, Ci.nsIPermissionManager.ALLOW_ACTION);
         } else if (isApp) {
           // Otherwise allow the permission for the current session if the request comes from an app
-          Services.perms.addFromPrincipal(request.principal, access, Ci.nsIPermissionManager.ALLOW_ACTION, Ci.nsIPermissionManager.EXPIRE_SESSION);
+          Services.perms.addFromPrincipal(request.principal, perm.type, Ci.nsIPermissionManager.ALLOW_ACTION, Ci.nsIPermissionManager.EXPIRE_SESSION);
         }
 
         callback(/* allow */ true);
       },
-      positive: true
+      positive: true,
     }];
 
     let chromeWin = this.getChromeForRequest(request);
@@ -143,8 +129,8 @@ ContentPermissionPrompt.prototype = {
       options = {
         link: {
           label: browserBundle.GetStringFromName("doorhanger.learnMore"),
-          url: "https://www.mozilla.org/firefox/push/"
-        }
+          url: "https://www.mozilla.org/firefox/push/",
+        },
       };
     } else {
       options = { checkbox: browserBundle.GetStringFromName(entityName + ".dontAskAgain") };
@@ -157,7 +143,7 @@ ContentPermissionPrompt.prototype = {
     DoorHanger.show(request.window || request.element.ownerGlobal,
                     message, entityName + request.principal.URI.host,
                     buttons, options, entityName.toUpperCase());
-  }
+  },
 };
 
 

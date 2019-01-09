@@ -37,8 +37,8 @@ add_task(async function() {
         type: "plain",
         fullMimeType: "text/plain; charset=utf-8",
         size: L10N.getFormatStrWithNumbers("networkMenu.sizeB", 0),
-        time: true
-      }
+        time: true,
+      },
     },
     {
       // request #1
@@ -51,8 +51,8 @@ add_task(async function() {
         type: "plain",
         fullMimeType: "text/plain; charset=utf-8",
         size: L10N.getFormatStrWithNumbers("networkMenu.sizeB", 22),
-        time: true
-      }
+        time: true,
+      },
     },
     {
       // request #2
@@ -65,8 +65,8 @@ add_task(async function() {
         type: "plain",
         fullMimeType: "text/plain; charset=utf-8",
         size: L10N.getFormatStrWithNumbers("networkMenu.sizeB", 22),
-        time: true
-      }
+        time: true,
+      },
     },
     {
       // request #3
@@ -79,8 +79,8 @@ add_task(async function() {
         type: "plain",
         fullMimeType: "text/plain; charset=utf-8",
         size: L10N.getFormatStrWithNumbers("networkMenu.sizeB", 22),
-        time: true
-      }
+        time: true,
+      },
     },
     {
       // request #4
@@ -93,9 +93,9 @@ add_task(async function() {
         type: "plain",
         fullMimeType: "text/plain; charset=utf-8",
         size: L10N.getFormatStrWithNumbers("networkMenu.sizeB", 22),
-        time: true
-      }
-    }
+        time: true,
+      },
+    },
   ];
 
   // Execute requests.
@@ -176,16 +176,18 @@ add_task(async function() {
     const summaryValues = panel.querySelectorAll(".tabpanel-summary-value.textbox-input");
     const { method, correctUri, details: { status, statusText } } = data;
     const statusCode = panel.querySelector(".status-code");
+    const statusTextInput = panel.querySelector(".status-text");
     EventUtils.sendMouseEvent({ type: "mouseover" }, statusCode);
     await waitUntil(() => statusCode.title);
 
-    is(summaryValues[0].value, correctUri,
+    is(summaryValues[0].textContent, correctUri,
       "The url summary value is incorrect.");
-    is(summaryValues[1].value, method, "The method summary value is incorrect.");
+    is(summaryValues[1].textContent, method, "The method summary value is incorrect.");
     is(statusCode.dataset.code, status,
       "The status summary code is incorrect.");
     is(statusCode.getAttribute("title"), status + " " + statusText,
       "The status summary value is incorrect.");
+    is(statusTextInput.value, statusText, "The status text value is incorrect.");
   }
 
   /**

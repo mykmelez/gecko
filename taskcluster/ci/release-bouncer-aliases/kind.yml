@@ -15,25 +15,17 @@ kind-dependencies:
 job-defaults:
    description: Update bouncer aliases job
    worker-type:
-      by-project:
-         mozilla-beta: scriptworker-prov-v1/bouncer-v1
-         mozilla-release: scriptworker-prov-v1/bouncer-v1
-         mozilla-esr60: scriptworker-prov-v1/bouncer-v1
-         default: scriptworker-prov-v1/bouncer-dev
+      by-release-level:
+         production: scriptworker-prov-v1/bouncer-v1
+         staging: scriptworker-prov-v1/bouncer-dev
    worker:
       implementation: bouncer-aliases
    scopes:
-      by-project:
-         mozilla-beta:
+      by-release-level:
+         production:
             - project:releng:bouncer:action:aliases
             - project:releng:bouncer:server:production
-         mozilla-release:
-            - project:releng:bouncer:action:aliases
-            - project:releng:bouncer:server:production
-         mozilla-esr60:
-            - project:releng:bouncer:action:aliases
-            - project:releng:bouncer:server:production
-         default:
+         staging:
             - project:releng:bouncer:action:aliases
             - project:releng:bouncer:server:staging
    run-on-projects: []
@@ -49,6 +41,7 @@ jobs:
          firefox-devedition-latest-ssl: installer-ssl
          firefox-devedition-latest: installer
          firefox-devedition-stub: stub-installer
+         firefox-devedition-msi-latest-ssl: msi
       shipping-product: devedition
       treeherder:
          platform: devedition-release/opt
@@ -76,21 +69,23 @@ jobs:
                firefox-beta-latest-ssl: installer-ssl
                firefox-beta-latest: installer
                firefox-beta-stub: stub-installer
+               firefox-beta-msi-latest-ssl: msi
             mozilla-release:
                firefox-latest-ssl: installer-ssl
                firefox-latest: installer
                firefox-stub: stub-installer
+               firefox-msi-latest-ssl: msi
             mozilla-esr60:
-               # convert to firefox-esr-latest when ESR52 stops
-               firefox-esr-next-latest-ssl: installer-ssl
-               firefox-esr-next-latest: installer
+               firefox-esr-latest-ssl: installer-ssl
+               firefox-esr-latest: installer
+               firefox-esr-msi-latest-ssl: msi
             birch:
                firefox-latest-ssl: installer-ssl
                firefox-latest: installer
                firefox-stub: stub-installer
             jamun:
-               firefox-esr-next-latest-ssl: installer-ssl
-               firefox-esr-next-latest: installer
+               firefox-esr-latest-ssl: installer-ssl
+               firefox-esr-latest: installer
             maple:
                firefox-beta-latest-ssl: installer-ssl
                firefox-beta-latest: installer

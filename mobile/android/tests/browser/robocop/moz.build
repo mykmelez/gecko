@@ -15,7 +15,6 @@ for var in ('MOZ_ANDROID_MIN_SDK_VERSION',
 
 TEST_HARNESS_FILES.testing.mochitest += [
     'robocop.ini',
-    'robocop_autophone2.ini',
 ]
 TEST_HARNESS_FILES.testing.mochitest.tests.robocop += [
     '*.html',
@@ -26,6 +25,8 @@ TEST_HARNESS_FILES.testing.mochitest.tests.robocop += [
     '*.swf',
     '*.webm',
     '*.xml',
+    '/mobile/android/tests/browser/chrome/head.js',
+    'browser_theme_image_file.xpi',
     'reader_mode_pages/**', # The ** preserves directory structure.
     'robocop*.js',
     'test*.js',

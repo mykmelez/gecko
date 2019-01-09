@@ -3298,17 +3298,19 @@ public abstract class TreeBuilder<T> implements TokenHandler,
                     }
             }
         }
-        String charset = null;
         if (start != -1) {
             if (end == -1) {
+              if (charsetState == CHARSET_UNQUOTED) {
                 end = buffer.length;
+              } else {
+                return null;
+              }
             }
-            charset = Portability.newStringFromBuffer(buffer, start, end
-                    - start
+            return Portability.newStringFromBuffer(buffer, start, end - start
                 // CPPONLY: , tb, false
             );
         }
-        return charset;
+        return null;
     }
 
     private void checkMetaCharset(HtmlAttributes attributes)
@@ -3357,6 +3359,7 @@ public abstract class TreeBuilder<T> implements TokenHandler,
                     }
                 }
                 eltPos = currentPtr;
+                int origPos = currentPtr;
                 for (;;) {
                     if (eltPos == 0) {
                         assert fragment: "We can get this close to the root of the stack in foreign content only in the fragment case.";
@@ -3364,7 +3367,7 @@ public abstract class TreeBuilder<T> implements TokenHandler,
                     }
                     if (stack[eltPos].name == name) {
                         while (currentPtr >= eltPos) {
-                            pop();
+                          popForeign(origPos);
                         }
                         break endtagloop;
                     }
@@ -4786,7 +4789,7 @@ public abstract class TreeBuilder<T> implements TokenHandler,
                 assert node == listOfActiveFormattingElements[nodeListPos];
                 assert node == stack[nodePos];
                 T clone = createElement("http://www.w3.org/1999/xhtml",
-                        node.name, node.attributes.cloneAttributes(null), commonAncestor.node
+                        node.name, node.attributes.cloneAttributes(), commonAncestor.node
                         // CPPONLY: , htmlCreator(node.getHtmlCreator())
                         );
                 StackNode<T> newNode = createStackNode(node.getFlags(), node.ns,
@@ -4818,7 +4821,7 @@ public abstract class TreeBuilder<T> implements TokenHandler,
             }
             T clone = createElement("http://www.w3.org/1999/xhtml",
                     formattingElt.name,
-                    formattingElt.attributes.cloneAttributes(null), furthestBlock.node
+                    formattingElt.attributes.cloneAttributes(), furthestBlock.node
                     // CPPONLY: , htmlCreator(formattingElt.getHtmlCreator())
                     );
             StackNode<T> formattingClone = createStackNode(
@@ -5005,12 +5008,12 @@ public abstract class TreeBuilder<T> implements TokenHandler,
             T clone;
             if (currentNode.isFosterParenting()) {
                 clone = createAndInsertFosterParentedElement("http://www.w3.org/1999/xhtml", entry.name,
-                        entry.attributes.cloneAttributes(null)
+                        entry.attributes.cloneAttributes()
                         // CPPONLY: , htmlCreator(entry.getHtmlCreator())
                         );
             } else {
                 clone = createElement("http://www.w3.org/1999/xhtml", entry.name,
-                        entry.attributes.cloneAttributes(null), currentNode.node
+                        entry.attributes.cloneAttributes(), currentNode.node
                         // CPPONLY: , htmlCreator(entry.getHtmlCreator())
                         );
                 appendElement(clone, currentNode.node);
@@ -5223,6 +5226,17 @@ public abstract class TreeBuilder<T> implements TokenHandler,
         node.release(this);
     }
 
+    private void popForeign(int origPos) throws SAXException {
+      StackNode<T> node = stack[currentPtr];
+      if (origPos != currentPtr) {
+        markMalformedIfScript(node.node);
+      }
+      assert debugOnlyClearLastStackSlot();
+      currentPtr--;
+      elementPopped(node.ns, node.popName, node.node);
+      node.release(this);
+    }
+
     private void silentPop() throws SAXException {
         StackNode<T> node = stack[currentPtr];
         assert debugOnlyClearLastStackSlot();
@@ -5424,7 +5438,7 @@ public abstract class TreeBuilder<T> implements TokenHandler,
         checkAttributes(attributes, "http://www.w3.org/1999/xhtml");
         // ]NOCPP]
         // This method can't be called for custom elements
-        HtmlAttributes clone = attributes.cloneAttributes(null);
+        HtmlAttributes clone = attributes.cloneAttributes();
         // Attributes must not be read after calling createElement, because
         // createElement may delete attributes in C++.
         T elt;
@@ -6130,7 +6144,7 @@ public abstract class TreeBuilder<T> implements TokenHandler,
                 StackNode<T> newNode = new StackNode<T>(-1);
                 newNode.setValues(node.getFlags(), node.ns,
                         node.name, node.node, node.popName,
-                        node.attributes.cloneAttributes(null)
+                        node.attributes.cloneAttributes()
                         // CPPONLY: , node.getHtmlCreator()
                         // [NOCPP[
                         , node.getLocator()
@@ -6217,7 +6231,7 @@ public abstract class TreeBuilder<T> implements TokenHandler,
     }
 
     @SuppressWarnings("unchecked") public void loadState(
-            TreeBuilderState<T> snapshot, Interner interner)
+            TreeBuilderState<T> snapshot)
             throws SAXException {
         // CPPONLY: mCurrentHtmlScriptIsAsyncOrDefer = false;
         StackNode<T>[] stackCopy = snapshot.getStack();
@@ -6254,9 +6268,9 @@ public abstract class TreeBuilder<T> implements TokenHandler,
             StackNode<T> node = listCopy[i];
             if (node != null) {
                 StackNode<T> newNode = createStackNode(node.getFlags(), node.ns,
-                        Portability.newLocalFromLocal(node.name, interner), node.node,
-                        Portability.newLocalFromLocal(node.popName, interner),
-                        node.attributes.cloneAttributes(null)
+                        node.name, node.node,
+                        node.popName,
+                        node.attributes.cloneAttributes()
                         // CPPONLY: , node.getHtmlCreator()
                         // [NOCPP[
                         , node.getLocator()
@@ -6272,8 +6286,8 @@ public abstract class TreeBuilder<T> implements TokenHandler,
             int listIndex = findInArray(node, listCopy);
             if (listIndex == -1) {
                 StackNode<T> newNode = createStackNode(node.getFlags(), node.ns,
-                        Portability.newLocalFromLocal(node.name, interner), node.node,
-                        Portability.newLocalFromLocal(node.popName, interner),
+                        node.name, node.node,
+                        node.popName,
                         null
                         // CPPONLY: , node.getHtmlCreator()
                         // [NOCPP[

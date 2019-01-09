@@ -12,8 +12,6 @@ const {LongStringActor} = require("devtools/server/actors/string");
 const {fetch} = require("devtools/shared/DevToolsUtils");
 const {mediaRuleSpec, styleSheetSpec,
        styleSheetsSpec} = require("devtools/shared/specs/stylesheets");
-const {
-  addPseudoClassLock, removePseudoClassLock } = require("devtools/server/actors/highlighters/utils/markup");
 const InspectorUtils = require("InspectorUtils");
 
 loader.lazyRequireGetter(this, "CssLogic", "devtools/shared/inspector/css-logic");
@@ -114,7 +112,7 @@ var MediaRuleActor = protocol.ActorClassWithSpec(mediaRuleSpec, {
       matches: this.matches,
       line: this.line,
       column: this.column,
-      parentStyleSheet: this.parentActor.actorID
+      parentStyleSheet: this.parentActor.actorID,
     };
 
     return form;
@@ -122,7 +120,7 @@ var MediaRuleActor = protocol.ActorClassWithSpec(mediaRuleSpec, {
 
   _matchesChange: function() {
     this.emit("matches-change", this.matches);
-  }
+  },
 });
 
 function getSheetText(sheet, consoleActor) {
@@ -141,44 +139,6 @@ function getSheetText(sheet, consoleActor) {
 }
 
 exports.getSheetText = getSheetText;
-
-/**
- * Try to fetch the stylesheet text from the network monitor.  If it was enabled during
- * the load, it should have a copy of the text saved.
- *
- * @param string href
- *        The URL of the sheet to fetch.
- */
-function fetchStylesheetFromNetworkMonitor(href, consoleActor) {
-  if (!consoleActor) {
-    return null;
-  }
-  const request = consoleActor.getNetworkEventActorForURL(href);
-  if (!request) {
-    return null;
-  }
-  const content = request._response.content;
-  if (request._discardResponseBody || request._truncated || !content) {
-    return null;
-  }
-
-  if (content.text.type != "longString") {
-    // For short strings, the text is available directly.
-    return {
-      content: content.text,
-      contentType: content.mimeType,
-    };
-  }
-  // For long strings, look up the actor that holds the full text.
-  const longStringActor = consoleActor.conn._getOrCreateActor(content.text.actor);
-  if (!longStringActor) {
-    return null;
-  }
-  return {
-    content: longStringActor.str,
-    contentType: content.mimeType,
-  };
-}
 
 /**
  * Get the charset of the stylesheet.
@@ -215,15 +175,18 @@ function getCSSCharset(sheet) {
 async function fetchStylesheet(sheet, consoleActor) {
   const href = sheet.href;
 
-  let result = fetchStylesheetFromNetworkMonitor(href, consoleActor);
-  if (result) {
-    return result;
+  let result;
+  if (consoleActor) {
+    result = await consoleActor.getRequestContentForURL(href);
+    if (result) {
+      return result;
+    }
   }
 
   const options = {
     loadFromCache: true,
     policy: Ci.nsIContentPolicy.TYPE_INTERNAL_STYLESHEET,
-    charset: getCSSCharset(sheet)
+    charset: getCSSCharset(sheet),
   };
 
   // Bug 1282660 - We use the system principal to load the default internal
@@ -321,8 +284,9 @@ var StyleSheetActor = protocol.ActorClassWithSpec(styleSheetSpec, {
    */
   get styleSheetIndex() {
     if (this._styleSheetIndex == -1) {
-      for (let i = 0; i < this.document.styleSheets.length; i++) {
-        if (this.document.styleSheets[i] == this.rawSheet) {
+      const styleSheets = InspectorUtils.getAllStyleSheets(this.document, true);
+      for (let i = 0; i < styleSheets.length; i++) {
+        if (styleSheets[i] == this.rawSheet) {
           this._styleSheetIndex = i;
           break;
         }
@@ -614,7 +578,7 @@ var StyleSheetActor = protocol.ActorClassWithSpec(styleSheetSpec, {
     this._transitionTimeout = null;
     removePseudoClassLock(this.document.documentElement, TRANSITION_PSEUDO_CLASS);
     this.emit("style-applied", kind, this);
-  }
+  },
 });
 
 exports.StyleSheetActor = StyleSheetActor;
@@ -679,8 +643,8 @@ var StyleSheetsActor = protocol.ActorClassWithSpec(styleSheetsSpec, {
     this.parentActor.off("stylesheet-added", this._onNewStyleSheetActor);
     this.parentActor.off("window-ready", this._onWindowReady);
 
-    this.parentActor.chromeEventHandler.removeEventListener("StyleSheetAdded",
-                                                            this._onSheetAdded, true);
+    this.parentActor.chromeEventHandler
+      .removeEventListener("StyleSheetApplicableStateChanged", this._onSheetAdded, true);
 
     protocol.Actor.prototype.destroy.call(this);
   },
@@ -776,8 +740,8 @@ var StyleSheetsActor = protocol.ActorClassWithSpec(styleSheetsSpec, {
 
       const isChrome =
         Services.scriptSecurityManager.isSystemPrincipal(doc.nodePrincipal);
-      const styleSheets =
-        isChrome ? InspectorUtils.getAllStyleSheets(doc) : doc.styleSheets;
+      const documentOnly = !isChrome;
+      const styleSheets = InspectorUtils.getAllStyleSheets(doc, documentOnly);
       let actors = [];
       for (let i = 0; i < styleSheets.length; i++) {
         const sheet = styleSheets[i];
@@ -885,7 +849,7 @@ var StyleSheetsActor = protocol.ActorClassWithSpec(styleSheetsSpec, {
 
     const actor = this.parentActor.createStyleSheetActor(style.sheet);
     return actor;
-  }
+  },
 });
 
 exports.StyleSheetsActor = StyleSheetsActor;

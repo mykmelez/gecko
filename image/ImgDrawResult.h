@@ -6,7 +6,7 @@
 #ifndef mozilla_image_ImgDrawResult_h
 #define mozilla_image_ImgDrawResult_h
 
-#include <cstdint> // for uint8_t
+#include <cstdint>  // for uint8_t
 #include "mozilla/Attributes.h"
 #include "mozilla/Likely.h"
 
@@ -22,6 +22,12 @@ namespace image {
  *
  * SUCCESS: We successfully drew a completely decoded frame of the requested
  * size. Drawing again with FLAG_SYNC_DECODE would not change the result.
+ *
+ * SUCCESS_NOT_COMPLETE: The image was drawn successfully and completely, but
+ * it hasn't notified about the sync-decode yet. This can only happen when
+ * layout pokes at the internal image state beforehand via
+ * nsStyleImage::StartDecoding. This should probably go away eventually,
+ * somehow, see bug 1471583.
  *
  * INCOMPLETE: We successfully drew a frame that was partially decoded. (Note
  * that successfully drawing a partially decoded frame may not actually draw any
@@ -45,41 +51,53 @@ namespace image {
  * permanent condition.
  *
  * BAD_ARGS: We failed to draw because bad arguments were passed to draw().
+ *
+ * NOT_SUPPORTED: The requested operation is not supported, but the image is
+ *                otherwise valid.
  */
-enum class MOZ_MUST_USE_TYPE ImgDrawResult : uint8_t
-{
+enum class MOZ_MUST_USE_TYPE ImgDrawResult : uint8_t {
   SUCCESS,
+  SUCCESS_NOT_COMPLETE,
   INCOMPLETE,
   WRONG_SIZE,
   NOT_READY,
   TEMPORARY_ERROR,
   BAD_IMAGE,
-  BAD_ARGS
+  BAD_ARGS,
+  NOT_SUPPORTED
 };
 
 /**
  * You can combine ImgDrawResults with &. By analogy to bitwise-&, the result is
- * ImgDrawResult::SUCCESS only if both operands are ImgDrawResult::SUCCESS. Otherwise,
- * a failing ImgDrawResult is returned; we favor the left operand's failure when
- * deciding which failure to return, with the exception that we always prefer
- * any other kind of failure over ImgDrawResult::BAD_IMAGE, since other failures
- * are recoverable and we want to know if any recoverable failures occurred.
+ * ImgDrawResult::SUCCESS only if both operands are ImgDrawResult::SUCCESS.
+ * Otherwise, a failing ImgDrawResult is returned; we favor the left operand's
+ * failure when deciding which failure to return, with the exception that we
+ * always prefer any other kind of failure over ImgDrawResult::BAD_IMAGE, since
+ * other failures are recoverable and we want to know if any recoverable
+ * failures occurred.
  */
-inline ImgDrawResult
-operator&(const ImgDrawResult aLeft, const ImgDrawResult aRight)
-{
+inline ImgDrawResult operator&(const ImgDrawResult aLeft,
+                               const ImgDrawResult aRight) {
   if (MOZ_LIKELY(aLeft == ImgDrawResult::SUCCESS)) {
     return aRight;
   }
-  if (aLeft == ImgDrawResult::BAD_IMAGE && aRight != ImgDrawResult::SUCCESS) {
+
+  if (aLeft == ImgDrawResult::NOT_SUPPORTED ||
+      aRight == ImgDrawResult::NOT_SUPPORTED) {
+    return ImgDrawResult::NOT_SUPPORTED;
+  }
+
+  if ((aLeft == ImgDrawResult::BAD_IMAGE ||
+       aLeft == ImgDrawResult::SUCCESS_NOT_COMPLETE) &&
+      aRight != ImgDrawResult::SUCCESS &&
+      aRight != ImgDrawResult::SUCCESS_NOT_COMPLETE) {
     return aRight;
   }
   return aLeft;
 }
 
-inline ImgDrawResult&
-operator&=(ImgDrawResult& aLeft, const ImgDrawResult aRight)
-{
+inline ImgDrawResult& operator&=(ImgDrawResult& aLeft,
+                                 const ImgDrawResult aRight) {
   aLeft = aLeft & aRight;
   return aLeft;
 }
@@ -92,15 +110,14 @@ operator&=(ImgDrawResult& aLeft, const ImgDrawResult aRight)
  */
 struct imgDrawingParams {
   explicit imgDrawingParams(uint32_t aImageFlags = 0)
-    : imageFlags(aImageFlags), result(ImgDrawResult::SUCCESS)
-  {}
+      : imageFlags(aImageFlags), result(ImgDrawResult::SUCCESS) {}
 
-  const uint32_t imageFlags; // imgIContainer::FLAG_* image flags to pass to
-                             // image lib draw calls.
-  ImgDrawResult result;         // To return results from image lib painting.
+  const uint32_t imageFlags;  // imgIContainer::FLAG_* image flags to pass to
+                              // image lib draw calls.
+  ImgDrawResult result;       // To return results from image lib painting.
 };
 
-} // namespace image
-} // namespace mozilla
+}  // namespace image
+}  // namespace mozilla
 
-#endif // mozilla_image_ImgDrawResult_h
+#endif  // mozilla_image_ImgDrawResult_h

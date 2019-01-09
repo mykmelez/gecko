@@ -1,10 +1,10 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Helper types for the `@viewport` rule.
 
-use {CSSPixel, CssWriter, ParseError, PinchZoomFactor, ToCss};
+use crate::{CSSPixel, CssWriter, ParseError, PinchZoomFactor, ToCss};
 use cssparser::Parser;
 use euclid::TypedSize2D;
 use std::fmt::{self, Write};
@@ -43,7 +43,7 @@ pub struct ViewportConstraints {
     /// <https://drafts.csswg.org/css-device-adapt/#user-zoom-desc>
     pub user_zoom: UserZoom,
     /// <https://drafts.csswg.org/css-device-adapt/#orientation-desc>
-    pub orientation: Orientation
+    pub orientation: Orientation,
 }
 
 impl ToCss for ViewportConstraints {
@@ -93,7 +93,8 @@ pub enum Zoom {
 
 impl ToCss for Zoom {
     fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-        where W: fmt::Write,
+    where
+        W: fmt::Write,
     {
         match *self {
             Zoom::Number(number) => number.to_css(dest),
@@ -101,7 +102,7 @@ impl ToCss for Zoom {
             Zoom::Percentage(percentage) => {
                 (percentage * 100.).to_css(dest)?;
                 dest.write_char('%')
-            }
+            },
         }
     }
 }
@@ -111,9 +112,9 @@ impl Zoom {
     ///
     /// <https://drafts.csswg.org/css-device-adapt/#descdef-viewport-zoom>
     pub fn parse<'i, 't>(input: &mut Parser<'i, 't>) -> Result<Zoom, ParseError<'i>> {
-        use ParsingMode;
+        use crate::values::specified::AllowedNumericType::NonNegative;
+        use crate::ParsingMode;
         use cssparser::Token;
-        use values::specified::AllowedNumericType::NonNegative;
 
         let location = input.current_source_location();
         match *input.next()? {
@@ -121,16 +122,16 @@ impl Zoom {
             // argument, and pass ParsingMode owned by the ParserContext to
             // is_ok() instead of using ParsingMode::DEFAULT directly.
             // In order to do so, we might want to move these stuff into style::stylesheets::viewport_rule.
-            Token::Percentage { unit_value, .. } if NonNegative.is_ok(ParsingMode::DEFAULT, unit_value) => {
+            Token::Percentage { unit_value, .. }
+                if NonNegative.is_ok(ParsingMode::DEFAULT, unit_value) =>
+            {
                 Ok(Zoom::Percentage(unit_value))
-            }
+            },
             Token::Number { value, .. } if NonNegative.is_ok(ParsingMode::DEFAULT, value) => {
                 Ok(Zoom::Number(value))
-            }
-            Token::Ident(ref value) if value.eq_ignore_ascii_case("auto") => {
-                Ok(Zoom::Auto)
-            }
-            ref t => Err(location.new_unexpected_token_error(t.clone()))
+            },
+            Token::Ident(ref value) if value.eq_ignore_ascii_case("auto") => Ok(Zoom::Auto),
+            ref t => Err(location.new_unexpected_token_error(t.clone())),
         }
     }
 
@@ -141,7 +142,7 @@ impl Zoom {
         match *self {
             Zoom::Number(number) => Some(number as f32),
             Zoom::Percentage(percentage) => Some(percentage as f32),
-            Zoom::Auto => None
+            Zoom::Auto => None,
         }
     }
 }

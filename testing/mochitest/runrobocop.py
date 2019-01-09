@@ -17,12 +17,13 @@ sys.path.insert(
 
 from automation import Automation
 from remoteautomation import RemoteAutomation, fennecLogcatFilters
-from runtests import KeyValueParseError, MochitestDesktop, MessageLogger, parseKeyValue
+from runtests import KeyValueParseError, MochitestDesktop, MessageLogger
 from mochitest_options import MochitestArgumentParser
 
 from manifestparser import TestManifest
 from manifestparser.filters import chunk_by_slice
-from mozdevice import ADBAndroid
+from mozdevice import ADBDevice, ADBTimeoutError
+from mozprofile.cli import parse_key_value, parse_preferences
 import mozfile
 import mozinfo
 
@@ -47,10 +48,10 @@ class RobocopTestRunner(MochitestDesktop):
         verbose = False
         if options.log_tbpl_level == 'debug' or options.log_mach_level == 'debug':
             verbose = True
-        self.device = ADBAndroid(adb=options.adbPath or 'adb',
-                                 device=options.deviceSerial,
-                                 test_root=options.remoteTestRoot,
-                                 verbose=verbose)
+        self.device = ADBDevice(adb=options.adbPath or 'adb',
+                                device=options.deviceSerial,
+                                test_root=options.remoteTestRoot,
+                                verbose=verbose)
 
         # Check that Firefox is installed
         expected = options.app.split('/')[-1]
@@ -63,6 +64,7 @@ class RobocopTestRunner(MochitestDesktop):
         self.remoteProfile = posixpath.join(options.remoteTestRoot, "profile")
         self.remoteProfileCopy = posixpath.join(options.remoteTestRoot, "profile-copy")
 
+        self.remoteModulesDir = posixpath.join(options.remoteTestRoot, "modules/")
         self.remoteConfigFile = posixpath.join(options.remoteTestRoot, "robotium.config")
         self.remoteLogFile = posixpath.join(options.remoteTestRoot, "logs", "robocop.log")
 
@@ -121,11 +123,9 @@ class RobocopTestRunner(MochitestDesktop):
             self.printDeviceInfo()
         self.setupLocalPaths()
         self.buildProfile()
-        # ignoreSSLTunnelExts is a workaround for bug 1109310
         self.startServers(
             self.options,
-            debuggerInfo=None,
-            ignoreSSLTunnelExts=True)
+            debuggerInfo=None)
         self.log.debug("Servers started")
 
     def cleanup(self):
@@ -241,7 +241,22 @@ class RobocopTestRunner(MochitestDesktop):
             'mochikit@mozilla.org',
         ])
 
+        self.extraPrefs = parse_preferences(self.options.extraPrefs)
+        if self.options.testingModulesDir:
+            try:
+                self.device.push(self.options.testingModulesDir, self.remoteModulesDir)
+                self.device.chmod(self.remoteModulesDir, recursive=True, root=True)
+            except Exception:
+                self.log.error(
+                    "Automation Error: Unable to copy test modules to device.")
+                raise
+            savedTestingModulesDir = self.options.testingModulesDir
+            self.options.testingModulesDir = self.remoteModulesDir
+        else:
+            savedTestingModulesDir = None
         manifest = MochitestDesktop.buildProfile(self, self.options)
+        if savedTestingModulesDir:
+            self.options.testingModulesDir = savedTestingModulesDir
         self.localProfile = self.options.profilePath
         self.log.debug("Profile created at %s" % self.localProfile)
         # some files are not needed for robocop; save time by not pushing
@@ -341,6 +356,8 @@ class RobocopTestRunner(MochitestDesktop):
                 else:
                     self.log.info("  %s: %s" % (category, devinfo[category]))
             self.log.info("Test root: %s" % self.device.test_root)
+        except ADBTimeoutError:
+            raise
         except Exception as e:
             self.log.warning("Error getting device information: %s" % str(e))
 
@@ -396,7 +413,7 @@ class RobocopTestRunner(MochitestDesktop):
         try:
             browserEnv.update(
                 dict(
-                    parseKeyValue(
+                    parse_key_value(
                         self.options.environment,
                         context='--setenv')))
         except KeyValueParseError as e:
@@ -416,17 +433,34 @@ class RobocopTestRunner(MochitestDesktop):
         self.setupRemoteProfile()
         self.options.app = "am"
         timeout = None
+
+        testName = test['name'].split('/')[-1].split('.java')[0]
+        if self.options.enable_coverage:
+            remoteCoverageFile = posixpath.join(self.options.remoteTestRoot,
+                                                'robocop-coverage-%s.ec' % testName)
+            coverageFile = os.path.join(self.options.coverage_output_dir,
+                                        'robocop-coverage-%s.ec' % testName)
         if self.options.autorun:
             # This launches a test (using "am instrument") and instructs
             # Fennec to /quit/ the browser (using Robocop:Quit) and to
             # /finish/ all opened activities.
             browserArgs = [
                 "instrument",
+            ]
+
+            if self.options.enable_coverage:
+                browserArgs += [
+                    "-e", "coverage", "true",
+                    "-e", "coverageFile", remoteCoverageFile,
+                ]
+
+            browserArgs += [
                 "-e", "quit_and_finish", "1",
                 "-e", "deviceroot", self.device.test_root,
                 "-e", "class",
-                "org.mozilla.gecko.tests.%s" % test['name'].split('/')[-1].split('.java')[0],
-                "org.mozilla.roboexample.test/org.mozilla.gecko.FennecInstrumentationTestRunner"]
+                "org.mozilla.gecko.tests.%s" % testName,
+                "org.mozilla.roboexample.test/org.mozilla.gecko.FennecInstrumentationTestRunner",
+            ]
         else:
             # This does not launch a test at all. It launches an activity
             # that starts Fennec and then waits indefinitely, since cat
@@ -463,6 +497,14 @@ class RobocopTestRunner(MochitestDesktop):
                 # terse.
                 if self.options.log_mach is None:
                     self.printDeviceInfo(printLogcat=True)
+            if self.options.enable_coverage:
+                if self.device.is_file(remoteCoverageFile):
+                    self.device.pull(remoteCoverageFile, coverageFile)
+                    self.device.rm(remoteCoverageFile)
+                else:
+                    self.log.warning("Code coverage output not found on remote device: %s" %
+                                     remoteCoverageFile)
+
         except Exception:
             self.log.error(
                 "Automation Error: Exception caught while running tests")

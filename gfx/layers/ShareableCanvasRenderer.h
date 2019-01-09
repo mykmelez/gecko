@@ -14,18 +14,22 @@
 namespace mozilla {
 namespace gl {
 class SurfaceFactory;
-} // namespace gl
+}  // namespace gl
+
+namespace gfx {
+class DrawTarget;
+}  // namespace gfx
 
 namespace layers {
 
-class ShareableCanvasRenderer : public CopyableCanvasRenderer
-{
+class ShareableCanvasRenderer : public CopyableCanvasRenderer {
   typedef CanvasClient::CanvasClientType CanvasClientType;
-public:
+
+ public:
   ShareableCanvasRenderer();
   virtual ~ShareableCanvasRenderer();
 
-public:
+ public:
   void Initialize(const CanvasInitializeData& aData) override;
 
   virtual CompositableForwarder* GetForwarder() = 0;
@@ -41,7 +45,7 @@ public:
 
   CanvasClient* GetCanvasClient() { return mCanvasClient; }
 
-protected:
+ protected:
   bool UpdateTarget(gfx::DrawTarget* aDestTarget);
 
   CanvasClientType GetCanvasClientType();
@@ -56,7 +60,7 @@ protected:
   friend class CanvasClientSharedSurface;
 };
 
-} // namespace layers
-} // namespace mozilla
+}  // namespace layers
+}  // namespace mozilla
 
 #endif

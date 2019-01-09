@@ -5,13 +5,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/MessageSender.h"
+#include "mozilla/dom/MessageBroadcaster.h"
 
 namespace mozilla {
 namespace dom {
 
-void
-MessageSender::InitWithCallback(ipc::MessageManagerCallback* aCallback)
-{
+void MessageSender::InitWithCallback(ipc::MessageManagerCallback* aCallback) {
   if (mCallback) {
     // Initialization should only happen once.
     return;
@@ -25,9 +24,10 @@ MessageSender::InitWithCallback(ipc::MessageManagerCallback* aCallback)
   }
 
   for (uint32_t i = 0; i < mPendingScripts.Length(); ++i) {
-    LoadScript(mPendingScripts[i], false, mPendingScriptsGlobalStates[i], IgnoreErrors());
+    LoadScript(mPendingScripts[i], false, mPendingScriptsGlobalStates[i],
+               IgnoreErrors());
   }
 }
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla

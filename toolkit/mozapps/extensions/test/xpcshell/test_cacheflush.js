@@ -11,9 +11,11 @@ var CacheFlushObserver = {
   observe(aSubject, aTopic, aData) {
     if (aTopic != "flush-cache-entry")
       return;
-    // Ignore flushes triggered by the fake cert DB
-    if (aData == "cert-override")
+
+    // Ignore flushes from the fake cert DB or extension-process-script
+    if (aData == "cert-override" || aSubject == null)
       return;
+
 
     if (!gExpectedFile) {
       return;
@@ -21,19 +23,8 @@ var CacheFlushObserver = {
     ok(aSubject instanceof Ci.nsIFile);
     equal(aSubject.path, gExpectedFile.path);
     gCacheFlushCount++;
-  }
-};
-
-const ADDONS = [
-  {
-    id: "addon2@tests.mozilla.org",
-    version: "2.0",
-
-    name: "Cache Flush Test",
   },
-];
-
-const XPIS = ADDONS.map(addon => createTempXPIFile(addon));
+};
 
 add_task(async function setup() {
   Services.obs.addObserver(CacheFlushObserver, "flush-cache-entry");
@@ -44,7 +35,15 @@ add_task(async function setup() {
 
 // Tests that the cache is flushed when installing a restartless add-on
 add_task(async function test_flush_restartless_install() {
-  let install = await AddonManager.getInstallForFile(XPIS[0]);
+  let xpi = await createTempWebExtensionFile({
+    manifest: {
+      name: "Cache Flush Test",
+      version: "2.0",
+      applications: {gecko: {id: "addon2@tests.mozilla.org"}},
+    },
+  });
+
+  let install = await AddonManager.getInstallForFile(xpi);
 
   await new Promise(resolve => {
     install.addListener({
@@ -62,7 +61,7 @@ add_task(async function test_flush_restartless_install() {
         gCacheFlushCount = 0;
 
         resolve();
-      }
+      },
     });
 
     install.install();

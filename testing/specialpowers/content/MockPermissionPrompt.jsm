@@ -8,9 +8,7 @@ const Cm = Components.manager;
 
 const CONTRACT_ID = "@mozilla.org/content-permission/prompt;1";
 
-ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 var registrar = Cm.QueryInterface(Ci.nsIComponentRegistrar);
 var oldClassID, oldFactory;
@@ -24,7 +22,7 @@ var newFactory = {
   lockFactory(aLock) {
     throw Cr.NS_ERROR_NOT_IMPLEMENTED;
   },
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIFactory])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIFactory]),
 };
 
 var MockPermissionPrompt = {
@@ -78,5 +76,5 @@ MockPermissionPromptInstance.prototype = {
     }
 
     request.allow();
-  }
+  },
 };

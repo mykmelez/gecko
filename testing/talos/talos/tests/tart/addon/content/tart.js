@@ -51,7 +51,7 @@ Tart.prototype = {
 
     cleanup(handler, win) {
       win.gBrowser.tabContainer.removeEventListener("transitionend", handler);
-    }
+    },
   },
 
   customizeEnterDetector: {
@@ -65,7 +65,7 @@ Tart.prototype = {
 
     cleanup(handler, win) {
       win.gNavToolbox.removeEventListener("customizationready", handler);
-    }
+    },
   },
 
   makeNewTabURLChangePromise(url) {
@@ -104,7 +104,7 @@ Tart.prototype = {
     cleanup(handler, win) {
       win.gNavToolbox.removeEventListener("customization-transitionend", handler);
       win.gNavToolbox.removeEventListener("customizationready", handler);
-    }
+    },
   },
 
   customizeExitDetector: {
@@ -118,7 +118,7 @@ Tart.prototype = {
 
     cleanup(handler, win) {
       win.gNavToolbox.removeEventListener("aftercustomization", handler);
-    }
+    },
   },
 
   clickNewTab() {
@@ -161,7 +161,7 @@ Tart.prototype = {
 
   addSomeChromeUriTab() {
     this._endDetection = this.tabDetector;
-    this._win.gBrowser.selectedTab = this._win.gBrowser.addTab("chrome://tart/content/blank.icon.html");
+    this._win.gBrowser.selectedTab = this._win.gBrowser.addTrustedTab("chrome://tart/content/blank.icon.html");
   },
 
   triggerCustomizeEnter() {
@@ -215,9 +215,7 @@ Tart.prototype = {
       }
       startRecordTimestamp = window.performance.now();
       if (self.USE_RECORDING_API) {
-        return window.QueryInterface(Ci.nsIInterfaceRequestor)
-                     .getInterface(Ci.nsIDOMWindowUtils)
-                     .startFrameTimeRecording();
+        return window.windowUtils.startFrameTimeRecording();
       }
 
       _recording = [];
@@ -250,8 +248,7 @@ Tart.prototype = {
       }
       if (self.USE_RECORDING_API) {
         var paints = {};
-        return window.QueryInterface(Ci.nsIInterfaceRequestor)
-                     .getInterface(Ci.nsIDOMWindowUtils)
+        return window.windowUtils
                      .stopFrameTimeRecording(recordingHandle, paints);
 
       }
@@ -396,27 +393,13 @@ Tart.prototype = {
   },
 
   _reportAllResults() {
-    var testNames = [];
-    var testResults = [];
-
     var out = "";
     for (var i in this._results) {
       res = this._results[i];
       var disp = [].concat(res.value).map(function(a) { return (isNaN(a) ? -1 : a.toFixed(1)); }).join(" ");
       out += res.name + ": " + disp + "\n";
-
-      if (!Array.isArray(res.value)) { // Waw intervals array is not reported to talos
-        testNames.push(res.name);
-        testResults.push(res.value);
-      }
     }
     this._log("\n" + out);
-
-    if (content && content.tpRecordTime) {
-      content.tpRecordTime(testResults.join(","), 0, testNames.join(","));
-    } else {
-      // alert(out);
-    }
   },
 
   _onTestComplete: null,
@@ -511,7 +494,7 @@ Tart.prototype = {
         function() { animate(0, closeCurrentTab, next); },
 
         function() { animate(rest, addTab, next, true, "simple-open-DPI1", tabRefDuration); },
-        function() { animate(rest, closeCurrentTab, next, true, "simple-close-DPI1", tabRefDuration); }
+        function() { animate(rest, closeCurrentTab, next, true, "simple-close-DPI1", tabRefDuration); },
       ],
 
       iconDpi1: [
@@ -523,7 +506,7 @@ Tart.prototype = {
         function() { animate(0, closeCurrentTab, next); },
 
         function() { animate(rest, addTab, next, true, "icon-open-DPI1", tabRefDuration); },
-        function() { animate(rest, closeCurrentTab, next, true, "icon-close-DPI1", tabRefDuration); }
+        function() { animate(rest, closeCurrentTab, next, true, "icon-close-DPI1", tabRefDuration); },
       ],
 
       iconDpi2: [
@@ -535,7 +518,7 @@ Tart.prototype = {
         function() { animate(0, closeCurrentTab, next); },
 
         function() { animate(rest, addTab, next, true, "icon-open-DPI2", tabRefDuration); },
-        function() { animate(rest, closeCurrentTab, next, true, "icon-close-DPI2", tabRefDuration); }
+        function() { animate(rest, closeCurrentTab, next, true, "icon-close-DPI2", tabRefDuration); },
       ],
 
       newtabNoPreload: [
@@ -545,7 +528,7 @@ Tart.prototype = {
           self.makeNewTabURLChangePromise("about:newtab").then(next);
         },
         function() { animate(rest, addTab, next, true, "newtab-open-preload-no", tabRefDuration); },
-        function() { animate(0, closeCurrentTab, next); }
+        function() { animate(0, closeCurrentTab, next); },
       ],
 
       newtabYesPreload: [
@@ -558,7 +541,7 @@ Tart.prototype = {
         function() { animate(0, closeCurrentTab, next); },
 
         function() { animate(1000, addTab, next, true, "newtab-open-preload-yes", tabRefDuration); },
-        function() { animate(0, closeCurrentTab, next); }
+        function() { animate(0, closeCurrentTab, next); },
       ],
 
       simple3open3closeDpiCurrent: [
@@ -568,7 +551,7 @@ Tart.prototype = {
 
         function() { animate(rest, closeCurrentTab, next, true, "simple3-3-close-DPIcurrent", tabRefDuration); },
         function() { animate(rest, closeCurrentTab, next, true, "simple3-2-close-DPIcurrent", tabRefDuration); },
-        function() { animate(rest, closeCurrentTab, next, true, "simple3-1-close-DPIcurrent", tabRefDuration); }
+        function() { animate(rest, closeCurrentTab, next, true, "simple3-1-close-DPIcurrent", tabRefDuration); },
       ],
 
       multi: [
@@ -655,8 +638,8 @@ Tart.prototype = {
         function() { animate(rest, customizeEnterCss, next, true, "3-customize-enter-css", custRefDuration); },
         function() { animate(0, customizeExit, next); },
 
-        function() { animate(0, closeCurrentTab, next); }
-      ]
+        function() { animate(0, closeCurrentTab, next); },
+      ],
     };
 
     // Construct the sequence array: config.repeat times config.subtests,
@@ -687,5 +670,5 @@ Tart.prototype = {
     Profiler.mark("TART - start", true);
 
     return this._startTest();
-  }
+  },
 };

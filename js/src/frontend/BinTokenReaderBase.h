@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sts=4 et sw=4 tw=99:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: set ts=8 sts=2 et sw=2 tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,6 +8,7 @@
 #define frontend_BinTokenReaderBase_h
 
 #include "frontend/BinToken.h"
+#include "frontend/ErrorReporter.h"
 #include "frontend/TokenStream.h"
 
 #include "js/Result.h"
@@ -19,153 +20,164 @@ namespace frontend {
 // A constant used by tokenizers to represent a null float.
 extern const uint64_t NULL_FLOAT_REPRESENTATION;
 
-class MOZ_STACK_CLASS BinTokenReaderBase
-{
-  public:
-    template<typename T> using ErrorResult = mozilla::GenericErrorResult<T>;
+class MOZ_STACK_CLASS BinTokenReaderBase {
+ public:
+  template <typename T>
+  using ErrorResult = mozilla::GenericErrorResult<T>;
 
-    // The information needed to skip a subtree.
-    class SkippableSubTree {
-      public:
-        SkippableSubTree(const uint8_t* start, const size_t length)
-          : start_(start)
-          , length_(length)
-        { }
+  // The information needed to skip a subtree.
+  class SkippableSubTree {
+   public:
+    SkippableSubTree(const size_t startOffset, const size_t length)
+        : startOffset_(startOffset), length_(length) {}
 
-        // The position in the source buffer at which the subtree starts.
-        //
-        // `SkippableSubTree` does *not* attempt to keep anything alive.
-        const uint8_t* start() const {
-            return start_;
-        }
+    // The position in the source buffer at which the subtree starts.
+    //
+    // `SkippableSubTree` does *not* attempt to keep anything alive.
+    size_t startOffset() const { return startOffset_; }
 
-        // The length of the subtree.
-        size_t length() const {
-            return length_;
-        }
-      private:
-        const uint8_t* start_;
-        const size_t length_;
-    };
+    // The length of the subtree.
+    size_t length() const { return length_; }
 
-    /**
-     * Return the position of the latest token.
-     */
-    TokenPos pos();
-    TokenPos pos(size_t startOffset);
-    size_t offset() const;
+   private:
+    const size_t startOffset_;
+    const size_t length_;
+  };
 
-     /**
-      * Poison this tokenizer.
-      */
-    void poison();
+  /**
+   * Return the position of the latest token.
+   */
+  TokenPos pos();
+  TokenPos pos(size_t startOffset);
+  size_t offset() const;
 
-    /**
-     * Raise an error.
-     *
-     * Once `raiseError` has been called, the tokenizer is poisoned.
-     */
-    MOZ_MUST_USE ErrorResult<JS::Error&> raiseError(const char* description);
-    MOZ_MUST_USE ErrorResult<JS::Error&> raiseOOM();
-    MOZ_MUST_USE ErrorResult<JS::Error&> raiseInvalidNumberOfFields(
-        const BinKind kind, const uint32_t expected, const uint32_t got);
-    MOZ_MUST_USE ErrorResult<JS::Error&> raiseInvalidField(const char* kind,
-        const BinField field);
+  // Set the tokenizer's cursor in the file. Use with caution.
+  void seek(size_t offset);
 
-  protected:
-    BinTokenReaderBase(JSContext* cx, const uint8_t* start, const size_t length)
-        : cx_(cx)
-        , poisoned_(false)
-        , start_(start)
-        , current_(start)
-        , stop_(start + length)
-        , latestKnownGoodPos_(0)
-    { }
+  /**
+   * Poison this tokenizer.
+   */
+  void poison();
 
-    /**
-     * Read a single byte.
-     */
-    MOZ_MUST_USE JS::Result<uint8_t> readByte();
+  /**
+   * Raise an error.
+   *
+   * Once `raiseError` has been called, the tokenizer is poisoned.
+   */
+  MOZ_MUST_USE ErrorResult<JS::Error&> raiseError(const char* description);
+  MOZ_MUST_USE ErrorResult<JS::Error&> raiseOOM();
+  MOZ_MUST_USE ErrorResult<JS::Error&> raiseInvalidNumberOfFields(
+      const BinKind kind, const uint32_t expected, const uint32_t got);
+  MOZ_MUST_USE ErrorResult<JS::Error&> raiseInvalidField(const char* kind,
+                                                         const BinField field);
 
-    /**
-     * Read several bytes.
-     *
-     * If there is not enough data, or if the tokenizer has previously been
-     * poisoned, return an error.
-     */
-    MOZ_MUST_USE JS::Result<Ok> readBuf(uint8_t* bytes, uint32_t len);
+ protected:
+  BinTokenReaderBase(JSContext* cx, ErrorReporter* er, const uint8_t* start,
+                     const size_t length)
+      : cx_(cx),
+        errorReporter_(er),
+        poisoned_(false),
+        start_(start),
+        current_(start),
+        stop_(start + length),
+        latestKnownGoodPos_(0) {
+    MOZ_ASSERT(errorReporter_);
+  }
 
-    /**
-     * Read a sequence of chars, ensuring that they match an expected
-     * sequence of chars.
-     *
-     * @param value The sequence of chars to expect, NUL-terminated.
-     */
-     template <size_t N>
-     MOZ_MUST_USE JS::Result<Ok> readConst(const char (&value)[N])
-     {
-        updateLatestKnownGood();
-        if (!matchConst(value, false))
-            return raiseError("Could not find expected literal");
-        return Ok();
-     }
+  /**
+   * Read a single byte.
+   */
+  MOZ_MUST_USE JS::Result<uint8_t> readByte();
 
-     /**
-     * Read a sequence of chars, consuming the bytes only if they match an expected
-     * sequence of chars.
-     *
-     * @param value The sequence of chars to expect, NUL-terminated.
-     * @param expectNul If true, expect NUL in the stream, otherwise don't.
-     * @return true if `value` represents the next few chars in the
-     * internal buffer, false otherwise. If `true`, the chars are consumed,
-     * otherwise there is no side-effect.
-     */
-    template <size_t N>
-    MOZ_MUST_USE bool matchConst(const char (&value)[N], bool expectNul) {
-        MOZ_ASSERT(N > 0);
-        MOZ_ASSERT(value[N - 1] == 0);
-        MOZ_ASSERT(!cx_->isExceptionPending());
+  /**
+   * Read several bytes.
+   *
+   * If there is not enough data, or if the tokenizer has previously been
+   * poisoned, return an error.
+   */
+  MOZ_MUST_USE JS::Result<Ok> readBuf(uint8_t* bytes, uint32_t len);
 
-        if (current_ + N - 1 > stop_)
-            return false;
+  /**
+   * Read a sequence of chars, ensuring that they match an expected
+   * sequence of chars.
+   *
+   * @param value The sequence of chars to expect, NUL-terminated.
+   */
+  template <size_t N>
+  MOZ_MUST_USE JS::Result<Ok> readConst(const char (&value)[N]) {
+    updateLatestKnownGood();
+    if (!matchConst(value, false)) {
+      return raiseError("Could not find expected literal");
+    }
+    return Ok();
+  }
 
-        // Perform lookup, without side-effects.
-        if (!std::equal(current_, current_ + N + (expectNul ? 0 : -1)/*implicit NUL*/, value))
-            return false;
+  /**
+   * Read a sequence of chars, consuming the bytes only if they match an
+   * expected sequence of chars.
+   *
+   * @param value The sequence of chars to expect, NUL-terminated.
+   * @param expectNul If true, expect NUL in the stream, otherwise don't.
+   * @return true if `value` represents the next few chars in the
+   * internal buffer, false otherwise. If `true`, the chars are consumed,
+   * otherwise there is no side-effect.
+   */
+  template <size_t N>
+  MOZ_MUST_USE bool matchConst(const char (&value)[N], bool expectNul) {
+    MOZ_ASSERT(N > 0);
+    MOZ_ASSERT(value[N - 1] == 0);
+    MOZ_ASSERT(!hasRaisedError());
 
-        // Looks like we have a match. Now perform side-effects
-        current_ += N + (expectNul ? 0 : -1);
-        updateLatestKnownGood();
-        return true;
+    if (current_ + N - 1 > stop_) {
+      return false;
     }
 
-    void updateLatestKnownGood();
+#ifndef FUZZING
+    // Perform lookup, without side-effects.
+    if (!std::equal(current_,
+                    current_ + N + (expectNul ? 0 : -1) /*implicit NUL*/,
+                    value)) {
+      return false;
+    }
+#endif
 
-    JSContext* cx_;
+    // Looks like we have a match. Now perform side-effects
+    current_ += N + (expectNul ? 0 : -1);
+    updateLatestKnownGood();
+    return true;
+  }
 
-    // `true` if we have encountered an error. Errors are non recoverable.
-    // Attempting to read from a poisoned tokenizer will cause assertion errors.
-    bool poisoned_;
+  void updateLatestKnownGood();
 
-    // The first byte of the buffer. Not owned.
-    const uint8_t* start_;
+  bool hasRaisedError() const;
 
-    // The current position.
-    const uint8_t* current_;
+  JSContext* cx_;
 
-    // The last+1 byte of the buffer.
-    const uint8_t* stop_;
+  ErrorReporter* errorReporter_;
 
-    // Latest known good position. Used for error reporting.
-    size_t latestKnownGoodPos_;
+  // `true` if we have encountered an error. Errors are non recoverable.
+  // Attempting to read from a poisoned tokenizer will cause assertion errors.
+  bool poisoned_;
 
-  private:
-    BinTokenReaderBase(const BinTokenReaderBase&) = delete;
-    BinTokenReaderBase(BinTokenReaderBase&&) = delete;
-    BinTokenReaderBase& operator=(BinTokenReaderBase&) = delete;
+  // The first byte of the buffer. Not owned.
+  const uint8_t* start_;
+
+  // The current position.
+  const uint8_t* current_;
+
+  // The last+1 byte of the buffer.
+  const uint8_t* stop_;
+
+  // Latest known good position. Used for error reporting.
+  size_t latestKnownGoodPos_;
+
+ private:
+  BinTokenReaderBase(const BinTokenReaderBase&) = delete;
+  BinTokenReaderBase(BinTokenReaderBase&&) = delete;
+  BinTokenReaderBase& operator=(BinTokenReaderBase&) = delete;
 };
 
-} // namespace frontend
-} // namespace js
+}  // namespace frontend
+}  // namespace js
 
-#endif // frontend_BinTokenReaderBase_h
+#endif  // frontend_BinTokenReaderBase_h

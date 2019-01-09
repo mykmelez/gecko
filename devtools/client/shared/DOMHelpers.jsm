@@ -143,9 +143,7 @@ DOMHelpers.prototype = {
    */
   onceDOMReady: function Helpers_onLocationChange(callback, targetURL) {
     const window = this.window;
-    const docShell = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIWebNavigation)
-                         .QueryInterface(Ci.nsIDocShell);
+    const docShell = window.docShell;
     const onReady = function(event) {
       if (event.target == window.document) {
         docShell.chromeEventHandler.removeEventListener("DOMContentLoaded", onReady);
@@ -162,5 +160,5 @@ DOMHelpers.prototype = {
     } else {
       docShell.chromeEventHandler.addEventListener("DOMContentLoaded", onReady);
     }
-  }
+  },
 };

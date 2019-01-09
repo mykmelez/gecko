@@ -17,9 +17,13 @@ class GeckoViewContent extends GeckoViewModule {
   onInit() {
     this.registerListener([
         "GeckoViewContent:ExitFullScreen",
+        "GeckoView:ClearMatches",
+        "GeckoView:DisplayMatches",
+        "GeckoView:FindInPage",
         "GeckoView:RestoreState",
         "GeckoView:SaveState",
         "GeckoView:SetActive",
+        "GeckoView:SetFocused",
         "GeckoView:ZoomToInput",
     ]);
 
@@ -58,17 +62,39 @@ class GeckoViewContent extends GeckoViewModule {
       case "GeckoViewContent:ExitFullScreen":
         this.messageManager.sendAsyncMessage("GeckoView:DOMFullscreenExited");
         break;
+      case "GeckoView:ClearMatches": {
+        this._clearMatches();
+        break;
+      }
+      case "GeckoView:DisplayMatches": {
+        this._displayMatches(aData);
+        break;
+      }
+      case "GeckoView:FindInPage": {
+        this._findInPage(aData, aCallback);
+        break;
+      }
       case "GeckoView:ZoomToInput":
         this.messageManager.sendAsyncMessage(aEvent);
         break;
       case "GeckoView:SetActive":
         if (aData.active) {
-          this.browser.setAttribute("primary", "true");
-          this.browser.focus();
           this.browser.docShellIsActive = true;
         } else {
-          this.browser.removeAttribute("primary");
           this.browser.docShellIsActive = false;
+        }
+        var msgData = {
+          active: aData.active,
+          suspendMedia: this.settings.suspendMediaWhenInactive,
+        };
+        this.messageManager.sendAsyncMessage("GeckoView:SetActive", msgData);
+        break;
+      case "GeckoView:SetFocused":
+        if (aData.focused) {
+          this.browser.focus();
+          this.browser.setAttribute("primary", "true");
+        } else {
+          this.browser.removeAttribute("primary");
           this.browser.blur();
         }
         break;
@@ -110,13 +136,11 @@ class GeckoViewContent extends GeckoViewModule {
 
     switch (aMsg.name) {
       case "GeckoView:DOMFullscreenExit":
-        this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-                   .getInterface(Ci.nsIDOMWindowUtils)
+        this.window.windowUtils
                    .remoteFrameFullscreenReverted();
         break;
       case "GeckoView:DOMFullscreenRequest":
-        this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-                   .getInterface(Ci.nsIDOMWindowUtils)
+        this.window.windowUtils
                    .remoteFrameFullscreenChanged(aMsg.target);
         break;
       case "GeckoView:SaveStateFinish":
@@ -124,7 +148,13 @@ class GeckoViewContent extends GeckoViewModule {
           warn `Failed to save state due to missing callback`;
           return;
         }
-        this._saveStateCallbacks.get(aMsg.data.id).onSuccess(aMsg.data.state);
+
+        const callback = this._saveStateCallbacks.get(aMsg.data.id);
+        if (aMsg.data.error) {
+          callback.onError(aMsg.data.error);
+        } else {
+          callback.onSuccess(aMsg.data.state);
+        }
         this._saveStateCallbacks.delete(aMsg.data.id);
         break;
     }
@@ -142,10 +172,173 @@ class GeckoViewContent extends GeckoViewModule {
         }
 
         this.eventDispatcher.sendRequest({
-          type: "GeckoView:ContentCrash"
+          type: "GeckoView:ContentCrash",
         });
       }
       break;
     }
+  }
+
+  _findInPage(aData, aCallback) {
+    debug `findInPage: data=${aData} callback=${aCallback && "non-null"}`;
+
+    let finder;
+    try {
+      finder = this.browser.finder;
+    } catch (e) {
+      if (aCallback) {
+        aCallback.onError(`No finder: ${e}`);
+      }
+      return;
+    }
+
+    if (this._finderListener) {
+      finder.removeResultListener(this._finderListener);
+    }
+
+    this._finderListener = {
+      response: {
+        found: false,
+        wrapped: false,
+        current: 0,
+        total: -1,
+        searchString: aData.searchString || finder.searchString,
+        linkURL: null,
+        clientRect: null,
+        flags: {
+          backwards: !!aData.backwards,
+          linksOnly: !!aData.linksOnly,
+          matchCase: !!aData.matchCase,
+          wholeWord: !!aData.wholeWord,
+        },
+      },
+
+      onFindResult(aOptions) {
+        if (!aCallback || aOptions.searchString !== aData.searchString) {
+          // Result from a previous search.
+          return;
+        }
+
+        Object.assign(this.response, {
+          found: aOptions.result !== Ci.nsITypeAheadFind.FIND_NOTFOUND,
+          wrapped: aOptions.result !== Ci.nsITypeAheadFind.FIND_FOUND,
+          linkURL: aOptions.linkURL,
+          clientRect: aOptions.rect && {
+            left: aOptions.rect.left,
+            top: aOptions.rect.top,
+            right: aOptions.rect.right,
+            bottom: aOptions.rect.bottom,
+          },
+          flags: {
+            backwards: aOptions.findBackwards,
+            linksOnly: aOptions.linksOnly,
+            matchCase: this.response.flags.matchCase,
+            wholeWord: this.response.flags.wholeWord,
+          },
+        });
+
+        if (!this.response.found) {
+          this.response.current = 0;
+          this.response.total = 0;
+        }
+
+        // Only send response if we have a count.
+        if (!this.response.found || this.response.current !== 0) {
+          debug `onFindResult: ${this.response}`;
+          aCallback.onSuccess(this.response);
+          aCallback = undefined;
+        }
+      },
+
+      onMatchesCountResult(aResult) {
+        if (!aCallback || finder.searchString !== aData.searchString) {
+          // Result from a previous search.
+          return;
+        }
+
+        Object.assign(this.response, {
+          current: aResult.current,
+          total: aResult.total,
+        });
+
+        // Only send response if we have a result. `found` and `wrapped` are
+        // both false only when we haven't received a result yet.
+        if (this.response.found || this.response.wrapped) {
+          debug `onMatchesCountResult: ${this.response}`;
+          aCallback.onSuccess(this.response);
+          aCallback = undefined;
+        }
+      },
+
+      onCurrentSelection() {
+      },
+
+      onHighlightFinished() {
+      },
+    };
+
+    finder.caseSensitive = !!aData.matchCase;
+    finder.entireWord = !!aData.wholeWord;
+    finder.addResultListener(this._finderListener);
+
+    const drawOutline = this._matchDisplayOptions &&
+                        !!this._matchDisplayOptions.drawOutline;
+
+    if (!aData.searchString || aData.searchString === finder.searchString) {
+      // Search again.
+      aData.searchString = finder.searchString;
+      finder.findAgain(!!aData.backwards,
+                       !!aData.linksOnly,
+                       drawOutline);
+    } else {
+      finder.fastFind(aData.searchString,
+                      !!aData.linksOnly,
+                      drawOutline);
+    }
+  }
+
+  _clearMatches() {
+    debug `clearMatches`;
+
+    let finder;
+    try {
+      finder = this.browser.finder;
+    } catch (e) {
+      return;
+    }
+
+    finder.removeSelection();
+    finder.highlight(false);
+
+    if (this._finderListener) {
+      finder.removeResultListener(this._finderListener);
+      this._finderListener = null;
+    }
+  }
+
+  _displayMatches(aData) {
+    debug `displayMatches: data=${aData}`;
+
+    let finder;
+    try {
+      finder = this.browser.finder;
+    } catch (e) {
+      return;
+    }
+
+    this._matchDisplayOptions = aData;
+    finder.onModalHighlightChange(!!aData.dimPage);
+    finder.onHighlightAllChange(!!aData.highlightAll);
+
+    if (!aData.highlightAll && !aData.dimPage) {
+      finder.highlight(false);
+      return;
+    }
+
+    if (!this._finderListener || !finder.searchString) {
+      return;
+    }
+    const linksOnly = this._finderListener.response.linksOnly;
+    finder.highlight(true, finder.searchString, linksOnly, !!aData.drawOutline);
   }
 }

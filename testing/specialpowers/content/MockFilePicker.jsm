@@ -8,9 +8,9 @@ const Cm = Components.manager;
 
 const CONTRACT_ID = "@mozilla.org/filepicker;1";
 
-ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "FileUtils",
+                               "resource://gre/modules/FileUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 // Allow stuff from this scope to be accessed from non-privileged scopes. This
 // would crash if used outside of automation.
@@ -29,7 +29,7 @@ var newFactory = function(window) {
     lockFactory(aLock) {
       throw Cr.NS_ERROR_NOT_IMPLEMENTED;
     },
-    QueryInterface: ChromeUtils.generateQI([Ci.nsIFactory])
+    QueryInterface: ChromeUtils.generateQI([Ci.nsIFactory]),
   };
 };
 
@@ -151,7 +151,7 @@ var MockFilePicker = {
       return this.returnData[0].nsIFile;
     }
     return null;
-  }
+  },
 };
 
 function MockFilePickerInstance(window) {
@@ -210,43 +210,22 @@ MockFilePickerInstance.prototype = {
 
     return null;
   },
-  get files() {
-    return {
-      index: 0,
-      QueryInterface: ChromeUtils.generateQI([Ci.nsISimpleEnumerator]),
-      hasMoreElements() {
-        return this.index < MockFilePicker.returnData.length;
-      },
-      getNext() {
-        if (!MockFilePicker.returnData[this.index].nsIFile) {
-          return null;
-        }
-        return MockFilePicker.returnData[this.index++].nsIFile;
+  * getFiles(asDOM) {
+    for (let d of MockFilePicker.returnData) {
+      if (asDOM) {
+        yield d.domFile || d.domDirectory;
+      } else if (d.nsIFile) {
+        yield d.nsIFile;
+      } else {
+        throw Components.Exception("", Cr.NS_ERROR_FAILURE);
       }
-    };
+    }
+  },
+  get files() {
+    return this.getFiles(false);
   },
   get domFileOrDirectoryEnumerator() {
-    this.parent.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIDOMWindowUtils);
-    return {
-      index: 0,
-      QueryInterface: ChromeUtils.generateQI([Ci.nsISimpleEnumerator]),
-      hasMoreElements() {
-        return this.index < MockFilePicker.returnData.length;
-      },
-      getNext() {
-        // window.File does not implement nsIFile
-        if (MockFilePicker.returnData[this.index].domFile) {
-          return MockFilePicker.returnData[this.index++].domFile;
-        }
-
-        if (MockFilePicker.returnData[this.index].domDirectory) {
-          return MockFilePicker.returnData[this.index++].domDirectory;
-        }
-
-        return null;
-      }
-    };
+    return this.getFiles(true);
   },
   open(aFilePickerShownCallback) {
     MockFilePicker.showing = true;
@@ -301,5 +280,5 @@ MockFilePickerInstance.prototype = {
         }
       });
     });
-  }
+  },
 };

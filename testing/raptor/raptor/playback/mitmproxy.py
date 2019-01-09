@@ -58,36 +58,45 @@ except Exception:
     DEFAULT_CERT_PATH = os.path.join(os.getenv('HOMEDRIVE'), os.getenv('HOMEPATH'),
                                      '.mitmproxy', 'mitmproxy-ca-cert.cer')
 
-MITMPROXY_SETTINGS = '''// Start with a comment
-// Load up mitmproxy cert
-var certdb = Cc["@mozilla.org/security/x509certdb;1"].getService(Ci.nsIX509CertDB);
-var certdb2 = certdb;
+# On Windows, deal with mozilla-build having forward slashes in $HOME:
+if os.name == 'nt' and '/' in DEFAULT_CERT_PATH:
+    DEFAULT_CERT_PATH = DEFAULT_CERT_PATH.replace('/', '\\')
 
-try {
-certdb2 = Cc["@mozilla.org/security/x509certdb;1"].getService(Ci.nsIX509CertDB2);
-} catch (e) {}
+# to install mitmproxy certificate into Firefox and turn on/off proxy
+POLICIES_CONTENT_ON = '''{
+  "policies": {
+    "Certificates": {
+      "Install": ["%(cert)s"]
+    },
+    "Proxy": {
+      "Mode": "manual",
+      "HTTPProxy": "%(host)s:8080",
+      "SSLProxy": "%(host)s:8080",
+      "Passthrough": "localhost, 127.0.0.1, %(host)s",
+      "Locked": true
+    }
+  }
+}'''
 
-cert = "%(cert)s";
-certdb2.addCertFromBase64(cert, "C,C,C", "");
-
-// Use mitmdump as the proxy
-// Manual proxy configuration
-pref("network.proxy.type", 1);
-pref("network.proxy.http", "127.0.0.1");
-pref("network.proxy.http_port", 8080);
-pref("network.proxy.ssl", "127.0.0.1");
-pref("network.proxy.ssl_port", 8080);
-'''
+POLICIES_CONTENT_OFF = '''{
+  "policies": {
+    "Proxy": {
+      "Mode": "none",
+      "Locked": false
+    }
+  }
+}'''
 
 
 class Mitmproxy(Playback, Python3Virtualenv, TestingMixin, MercurialScript):
 
-    def __init__(self, config):
+    def __init__(self, config, android_device=None):
         self.config = config
         self.mitmproxy_proc = None
         self.mitmdump_path = None
         self.recordings = config.get('playback_recordings', None)
         self.browser_path = config.get('binary', None)
+        self.android_device = android_device
 
         # raptor_dir is where we will download all mitmproxy required files
         # when running locally it comes from obj_path via mozharness/mach
@@ -149,7 +158,7 @@ class Mitmproxy(Playback, Python3Virtualenv, TestingMixin, MercurialScript):
             transformed_manifest = transform_platform(_manifest, self.config['platform'])
             self._tooltool_fetch(transformed_manifest)
 
-        # we use one pageset for all platforms (pageset was recorded on win10)
+        # we use one pageset for all platforms
         LOG.info("downloading mitmproxy pageset")
         _manifest = os.path.join(here, self.config['playback_pageset_manifest'])
         transformed_manifest = transform_platform(_manifest, self.config['platform'])
@@ -190,15 +199,19 @@ class Mitmproxy(Playback, Python3Virtualenv, TestingMixin, MercurialScript):
         self.mitmdump_path = os.path.join(self.py3_path_to_executables(), 'mitmdump')
 
     def setup(self):
-        # install the generated CA certificate into Firefox
-        # mitmproxy cert setup needs path to mozharness install; mozharness has set this
-        # value in the SCRIPTSPATH env var for us in mozharness/mozilla/testing/talos.py
-        scripts_path = os.environ.get('SCRIPTSPATH')
-        LOG.info('scripts_path: %s' % str(scripts_path))
-        self.install_mitmproxy_cert(self.mitmproxy_proc,
-                                    self.browser_path,
-                                    str(scripts_path))
-        return
+        # for firefox we need to install the generated mitmproxy CA cert
+        # for google chromium this is not necessary as chromium will be
+        # started with --ignore-certificate-errors cmd line arg
+        if self.config['app'] == "firefox":
+            # install the generated CA certificate into Firefox desktop
+            self.install_mitmproxy_cert_desktop(self.mitmproxy_proc,
+                                                self.browser_path)
+        elif self.config['app'] == "geckoview":
+            # install the generated CA certificate into android geckoview
+            self.install_mitmproxy_cert_android(self.mitmproxy_proc,
+                                                self.browser_path)
+        else:
+            return
 
     def start(self):
         # if on windows, the mitmdump_path was already set when creating py3 env
@@ -214,64 +227,142 @@ class Mitmproxy(Playback, Python3Virtualenv, TestingMixin, MercurialScript):
 
     def stop(self):
         self.stop_mitmproxy_playback()
+        self.turn_off_browser_proxy()
         return
 
-    def configure_mitmproxy(self,
-                            fx_install_dir,
-                            scripts_path,
-                            certificate_path=DEFAULT_CERT_PATH):
-        # scripts_path is path to mozharness on test machine; needed so can import
-        if scripts_path is not False:
-            sys.path.insert(1, scripts_path)
-            sys.path.insert(1, os.path.join(scripts_path, 'mozharness'))
-        from mozharness.mozilla.firefox.autoconfig import write_autoconfig_files
-        certificate = self._read_certificate(certificate_path)
-        write_autoconfig_files(fx_install_dir=fx_install_dir,
-                               cfg_contents=MITMPROXY_SETTINGS % {
-                                  'cert': certificate})
+    def install_mitmproxy_cert_desktop(self, mitmproxy_proc, browser_path):
+        """Install the CA certificate generated by mitmproxy, into Firefox
+        1. Create a dir called 'distribution' in the same directory as the Firefox executable
+        2. Create the policies.json file inside that folder; which points to the certificate
+           location, and turns on the the browser proxy settings
+        """
+        LOG.info("Installing mitmproxy CA certficate into Firefox")
 
-    def _read_certificate(self, certificate_path):
-        ''' Return the certificate's hash from the certificate file.'''
-        # NOTE: mitmproxy's certificates do not exist until one of its binaries
-        #       has been executed once on the host
-        with open(certificate_path, 'r') as fd:
-            contents = fd.read()
-        return ''.join(contents.splitlines()[1:-1])
+        # browser_path is the exe, we want the folder
+        self.policies_dir = os.path.dirname(browser_path)
+        # on macosx we need to remove the last folders 'MacOS'
+        # and the policies json needs to go in ../Content/Resources/
+        if 'mac' in self.config['platform']:
+            self.policies_dir = os.path.join(self.policies_dir[:-6], "Resources")
+        # for all platforms the policies json goes in a 'distribution' dir
+        self.policies_dir = os.path.join(self.policies_dir, "distribution")
 
-    def is_mitmproxy_cert_installed(self, browser_install):
+        self.cert_path = DEFAULT_CERT_PATH
+        # for windows only
+        if mozinfo.os == 'win':
+            self.cert_path = self.cert_path.replace('\\', '\\\\')
+
+        if not os.path.exists(self.policies_dir):
+            LOG.info("creating folder: %s" % self.policies_dir)
+            os.makedirs(self.policies_dir)
+        else:
+            LOG.info("folder already exists: %s" % self.policies_dir)
+
+        self.write_policies_json(self.policies_dir,
+                                 policies_content=POLICIES_CONTENT_ON %
+                                 {'cert': self.cert_path,
+                                  'host': self.config['host']})
+
+        # cannot continue if failed to add CA cert to Firefox, need to check
+        if not self.is_mitmproxy_cert_installed_desktop():
+            LOG.error('Aborting: failed to install mitmproxy CA cert into Firefox desktop')
+            self.stop_mitmproxy_playback()
+            sys.exit()
+
+    def install_mitmproxy_cert_android(self, mitmproxy_proc, browser_path):
+        """Install the CA certificate generated by mitmproxy, into geckoview android
+        1. Get the `certutil` tool.
+        2. Create an NSS certificate database in the geckoview browser profile dir.
+           `certutil -N -d sql:<path to profile> --empty-password`
+        3. Import the mitmproxy certificate into the database.
+           `certutil -A -d sql:<path to profile> -n "some nickname" -t TC,, -a -i <path to CA.pem>`
+        """
+        # get the certutil tool
+        if self.config.get("obj_path", None) is not None:
+            # when running locally, it is found in the Firefox desktop build (..obj../dist/bin)
+            self.certutil = os.path.join(self.config['obj_path'], 'dist', 'bin')
+        else:
+            # in production it is already downloaded on the host automation machines via hostutils
+            # self.certutil = TODO
+            LOG.info("TODO: where is the path in production to certutil/hostutils?")
+
+        bin_suffix = mozinfo.info.get('bin_suffix', '')
+        self.certutil = os.path.join(self.certutil, "certutil" + bin_suffix)
+
+        if os.path.isfile(self.certutil):
+            LOG.info("certutil is found at: %s" % self.certutil)
+        else:
+            LOG.critical("unable to find certutil at %s" % self.certutil)
+
+        # DEFAULT_CERT_PATH has local path and name of mitmproxy cert i.e.
+        # /home/cltbld/.mitmproxy/mitmproxy-ca-cert.cer
+        self.local_cert_path = DEFAULT_CERT_PATH
+
+        # create cert db
+        param1 = "sql:%s/" % self.config['local_profile_dir']
+        command = [self.certutil, '-N', '-d', param1, '--empty-password']
+
+        LOG.info("creating nss cert database using command: %s" % ' '.join(command))
+        cmd_proc = subprocess.Popen(command, env=os.environ.copy())
+        time.sleep(3)
+        cmd_terminated = cmd_proc.poll()
+        if cmd_terminated is None:  # None value indicates process hasn't terminated
+            LOG.critical("nss cert db creation command failed to complete")
+
+        # import mitmproxy cert into the db
+        command = [self.certutil, '-A', '-d', param1, '-n',
+                   'mitmproxy-cert', '-t', 'TC,,', '-a', '-i', self.local_cert_path]
+
+        LOG.info("importing mitmproxy cert into db using command: %s" % ' '.join(command))
+        cmd_proc = subprocess.Popen(command, env=os.environ.copy())
+        time.sleep(3)
+        cmd_terminated = cmd_proc.poll()
+        if cmd_terminated is None:  # None value indicates process hasn't terminated
+            LOG.critical("command to import mitmproxy cert into cert db failed to complete")
+
+        # cannot continue if failed to add CA cert to Firefox, need to check
+        # if not self.is_mitmproxy_cert_installed_android():
+        #    LOG.error('Aborting: failed to install mitmproxy CA cert into Firefox')
+        #    self.stop_mitmproxy_playback()
+        #    sys.exit()
+
+    def write_policies_json(self, location, policies_content):
+        policies_file = os.path.join(location, "policies.json")
+        LOG.info("writing: %s" % policies_file)
+
+        with open(policies_file, 'w') as fd:
+            fd.write(policies_content)
+
+    def read_policies_json(self, location):
+        policies_file = os.path.join(location, "policies.json")
+        LOG.info("reading: %s" % policies_file)
+
+        with open(policies_file, 'r') as fd:
+            return fd.read()
+
+    def is_mitmproxy_cert_installed_desktop(self):
         """Verify mitmxproy CA cert was added to Firefox"""
-        from mozharness.mozilla.firefox.autoconfig import read_autoconfig_file
         try:
             # read autoconfig file, confirm mitmproxy cert is in there
-            certificate = self._read_certificate(DEFAULT_CERT_PATH)
-            contents = read_autoconfig_file(browser_install)
-            if (MITMPROXY_SETTINGS % {'cert': certificate}) in contents:
+            contents = self.read_policies_json(self.policies_dir)
+            LOG.info("Firefox policies file contents:")
+            LOG.info(contents)
+            if (POLICIES_CONTENT_ON % {
+                    'cert': self.cert_path,
+                    'host': self.config['host']}) in contents:
                 LOG.info("Verified mitmproxy CA certificate is installed in Firefox")
             else:
-                LOG.info("Firefox autoconfig file contents:")
-                LOG.info(contents)
+
                 return False
-        except Exception:
-            LOG.info("Failed to read Firefox autoconfig file, when verifying CA cert install")
+        except Exception as e:
+            LOG.info("failed to read Firefox policies file, exeption: %s" % e)
             return False
         return True
 
-    def install_mitmproxy_cert(self, mitmproxy_proc, browser_path, scripts_path):
-        """Install the CA certificate generated by mitmproxy, into Firefox"""
-        LOG.info("Installing mitmxproxy CA certficate into Firefox")
-        # browser_path is exe, we want install dir
-        browser_install = os.path.dirname(browser_path)
-        # on macosx we need to remove the last folders 'Content/MacOS'
-        if mozinfo.os == 'mac':
-            browser_install = browser_install[:-14]
-
-        LOG.info('Calling configure_mitmproxy with browser folder: %s' % browser_install)
-        self.configure_mitmproxy(browser_install, scripts_path)
-        # cannot continue if failed to add CA cert to Firefox, need to check
-        if not self.is_mitmproxy_cert_installed(browser_install):
-            LOG.error('Aborting: failed to install mitmproxy CA cert into Firefox')
-            self.stop_mitmproxy_playback(mitmproxy_proc)
-            sys.exit()
+    def is_mitmproxy_cert_installed_android(self):
+        """Verify mitmxproy CA cert was added to Firefox"""
+        LOG.info("* TODO: verify cert is installed on android")
+        return False
 
     def start_mitmproxy_playback(self,
                                  mitmdump_path,
@@ -342,3 +433,14 @@ class Mitmproxy(Playback, Python3Virtualenv, TestingMixin, MercurialScript):
             LOG.info(str(status))
         else:
             LOG.info("Successfully killed the mitmproxy playback process")
+
+    def turn_off_browser_proxy(self):
+        """Turn off the browser proxy that was used for mitmproxy playback"""
+        # in firefox we need to change the autoconfig files to revert
+        # the proxy; for google chromium the proxy was setup on the cmd line
+        # so nothing is required here
+        if self.config['app'] == "firefox":
+            LOG.info("Turning off the browser proxy")
+
+            self.write_policies_json(self.policies_dir,
+                                     policies_content=POLICIES_CONTENT_OFF)

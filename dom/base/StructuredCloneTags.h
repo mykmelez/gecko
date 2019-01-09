@@ -70,10 +70,12 @@ enum StructuredCloneTags {
   // Adding to the end of the list would make removing of other tags harder in
   // future.
 
-  SCTAG_DOM_MAX
+  SCTAG_DOM_MAX,
+
+  SCTAG_DOM_STRUCTURED_CLONE_TESTER
 };
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla
 
-#endif // StructuredCloneTags_h__
+#endif  // StructuredCloneTags_h__

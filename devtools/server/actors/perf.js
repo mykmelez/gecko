@@ -25,7 +25,7 @@ exports.PerfActor = ActorClassWithSpec(perfSpec, {
     // Only setup the observers on a supported platform.
     if (IS_SUPPORTED_PLATFORM) {
       this._observer = {
-        observe: this._observe.bind(this)
+        observe: this._observe.bind(this),
       };
       Services.obs.addObserver(this._observer, "profiler-started");
       Services.obs.addObserver(this._observer, "profiler-stopped");
@@ -54,10 +54,13 @@ exports.PerfActor = ActorClassWithSpec(perfSpec, {
     // to be tweaked or made configurable as needed.
     const settings = {
       entries: options.entries || 1000000,
+      // Window length should be Infinite if nothing's been passed.
+      // options.duration is supported for `perfActorVersion > 0`.
+      duration: options.duration || 0,
       interval: options.interval || 1,
       features: options.features ||
         ["js", "stackwalk", "responsiveness", "threads", "leaf"],
-      threads: options.threads || ["GeckoMain", "Compositor"]
+      threads: options.threads || ["GeckoMain", "Compositor"],
     };
 
     try {
@@ -68,7 +71,8 @@ exports.PerfActor = ActorClassWithSpec(perfSpec, {
         settings.features,
         settings.features.length,
         settings.threads,
-        settings.threads.length
+        settings.threads.length,
+        settings.duration
       );
     } catch (e) {
       // In case any errors get triggered, bailout with a false.
@@ -85,10 +89,20 @@ exports.PerfActor = ActorClassWithSpec(perfSpec, {
     Services.profiler.StopProfiler();
   },
 
+  async getSymbolTable(debugPath, breakpadId) {
+    const [addr, index, buffer] =
+      await Services.profiler.getSymbolTable(debugPath, breakpadId);
+    // The protocol does not support the transfer of typed arrays, so we convert
+    // these typed arrays to plain JS arrays of numbers now.
+    // Our return value type is declared as "array:array:number".
+    return [Array.from(addr), Array.from(index), Array.from(buffer)];
+  },
+
   async getProfileAndStopProfiler() {
     if (!IS_SUPPORTED_PLATFORM) {
       return null;
     }
+
     let profile;
     try {
       // Attempt to pull out the data.
@@ -143,11 +157,11 @@ exports.PerfActor = ActorClassWithSpec(perfSpec, {
         break;
       case "profiler-started":
         const param = subject.QueryInterface(Ci.nsIProfilerStartParams);
-        this.emit(topic, param.entries, param.interval, param.features);
+        this.emit(topic, param.entries, param.interval, param.features, param.duration);
         break;
       case "profiler-stopped":
         this.emit(topic);
         break;
     }
-  }
+  },
 });

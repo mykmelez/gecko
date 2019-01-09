@@ -17,9 +17,7 @@ const PLUGIN_SMALL_PAGE = gTestRoot + "plugin_small.html";
  */
 function convertPropertyBag(aBag) {
   let result = {};
-  let enumerator = aBag.enumerator;
-  while (enumerator.hasMoreElements()) {
-    let { name, value } = enumerator.getNext().QueryInterface(Ci.nsIProperty);
+  for (let { name, value } of aBag.enumerator) {
     if (value instanceof Ci.nsIPropertyBag) {
       value = convertPropertyBag(value);
     }
@@ -75,7 +73,7 @@ add_task(async function() {
     // Simulate clicking the "Allow Always" button.
     let notification = PopupNotifications.getNotification("click-to-play-plugins", browser);
     await promiseForNotificationShown(notification, browser);
-    PopupNotifications.panel.firstChild.button.click();
+    PopupNotifications.panel.firstElementChild.button.click();
 
     // Prepare a crash report topic observer that only returns when
     // the crash report has been successfully sent.
@@ -98,10 +96,8 @@ add_task(async function() {
       } catch (e) {
       }
 
-      let doc = plugin.ownerDocument;
-
-      let getUI = (anonid) => {
-        return doc.getAnonymousElementByAttribute(plugin, "anonid", anonid);
+      let getUI = (id) => {
+        return plugin.openOrClosedShadowRoot.getElementById(id);
       };
 
       // Now wait until the plugin crash report UI shows itself, which is
@@ -140,7 +136,7 @@ add_task(async function() {
       100, 200);
     });
 
-    let [subject, ] = await crashReportPromise;
+    let [subject ] = await crashReportPromise;
 
     ok(subject instanceof Ci.nsIPropertyBag,
        "The crash report subject should be an nsIPropertyBag.");
@@ -212,7 +208,7 @@ add_task(async function() {
     let submitButton = buttons[1];
     submitButton.click();
 
-    let [subject, ] = await crashReportPromise;
+    let [subject ] = await crashReportPromise;
 
     ok(subject instanceof Ci.nsIPropertyBag,
        "The crash report subject should be an nsIPropertyBag.");

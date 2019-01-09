@@ -4,9 +4,10 @@
 
 var EXPORTED_SYMBOLS = ["LightweightThemeConsumer"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+
+const DEFAULT_THEME_ID = "default-theme@mozilla.org";
+const ICONS = Services.prefs.getStringPref("extensions.webextensions.themes.icons.buttons", "").split(",");
 
 const toolkitVariableMap = [
   ["--lwt-accent-color", {
@@ -18,7 +19,7 @@ const toolkitVariableMap = [
       // Remove the alpha channel
       const {r, g, b} = rgbaChannels;
       return `rgb(${r}, ${g}, ${b})`;
-    }
+    },
   }],
   ["--lwt-text-color", {
     lwtProperty: "textcolor",
@@ -30,10 +31,10 @@ const toolkitVariableMap = [
       const {r, g, b} = rgbaChannels;
       element.setAttribute("lwthemetextcolor", _isTextColorDark(r, g, b) ? "dark" : "bright");
       return `rgba(${r}, ${g}, ${b})`;
-    }
+    },
   }],
   ["--arrowpanel-background", {
-    lwtProperty: "popup"
+    lwtProperty: "popup",
   }],
   ["--arrowpanel-color", {
     lwtProperty: "popup_text",
@@ -59,13 +60,13 @@ const toolkitVariableMap = [
 
       element.style.setProperty(disabledColorVariable, `rgba(${r}, ${g}, ${b}, 0.5)`);
       return `rgba(${r}, ${g}, ${b}, ${a})`;
-    }
+    },
   }],
   ["--arrowpanel-border-color", {
-    lwtProperty: "popup_border"
+    lwtProperty: "popup_border",
   }],
   ["--lwt-toolbar-field-background-color", {
-    lwtProperty: "toolbar_field"
+    lwtProperty: "toolbar_field",
   }],
   ["--lwt-toolbar-field-color", {
     lwtProperty: "toolbar_field_text",
@@ -81,38 +82,41 @@ const toolkitVariableMap = [
         element.setAttribute("lwt-toolbar-field-brighttext", "true");
       }
       return `rgba(${r}, ${g}, ${b}, ${a})`;
-    }
+    },
   }],
   ["--lwt-toolbar-field-border-color", {
-    lwtProperty: "toolbar_field_border"
+    lwtProperty: "toolbar_field_border",
   }],
   ["--lwt-toolbar-field-focus", {
-    lwtProperty: "toolbar_field_focus"
+    lwtProperty: "toolbar_field_focus",
   }],
   ["--lwt-toolbar-field-focus-color", {
-    lwtProperty: "toolbar_field_text_focus"
+    lwtProperty: "toolbar_field_text_focus",
   }],
   ["--toolbar-field-focus-border-color", {
-    lwtProperty: "toolbar_field_border_focus"
+    lwtProperty: "toolbar_field_border_focus",
   }],
 ];
 
 // Get the theme variables from the app resource directory.
 // This allows per-app variables.
-ChromeUtils.import("resource:///modules/ThemeVariableMap.jsm");
-
+ChromeUtils.defineModuleGetter(this, "ThemeContentPropertyList",
+  "resource:///modules/ThemeVariableMap.jsm");
+ChromeUtils.defineModuleGetter(this, "ThemeVariableMap",
+  "resource:///modules/ThemeVariableMap.jsm");
 ChromeUtils.defineModuleGetter(this, "LightweightThemeImageOptimizer",
   "resource://gre/modules/addons/LightweightThemeImageOptimizer.jsm");
 
 function LightweightThemeConsumer(aDocument) {
   this._doc = aDocument;
   this._win = aDocument.defaultView;
+  this._winId = this._win.windowUtils.outerWindowID;
 
   Services.obs.addObserver(this, "lightweight-theme-styling-update");
 
   var temp = {};
   ChromeUtils.import("resource://gre/modules/LightweightThemeManager.jsm", temp);
-  this._update(temp.LightweightThemeManager.currentThemeForDisplay);
+  this._update(temp.LightweightThemeManager.currentThemeWithPersistedData);
 
   this._win.addEventListener("resolutionchange", this);
   this._win.addEventListener("unload", this, { once: true });
@@ -131,16 +135,16 @@ LightweightThemeConsumer.prototype = {
     if (aTopic != "lightweight-theme-styling-update")
       return;
 
-    const { outerWindowID } = this._win
-      .QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIDOMWindowUtils);
+    let parsedData = JSON.parse(aData);
+    if (!parsedData) {
+      parsedData = { theme: null, experiment: null };
+    }
 
-    const parsedData = JSON.parse(aData);
-    if (parsedData && parsedData.window && parsedData.window !== outerWindowID) {
+    if (parsedData.window && parsedData.window !== this._winId) {
       return;
     }
 
-    this._update(parsedData);
+    this._update(parsedData.theme, parsedData.experiment);
   },
 
   handleEvent(aEvent) {
@@ -152,46 +156,49 @@ LightweightThemeConsumer.prototype = {
         break;
       case "unload":
         Services.obs.removeObserver(this, "lightweight-theme-styling-update");
+        Services.ppmm.sharedData.delete(`theme/${this._winId}`);
         this._win.removeEventListener("resolutionchange", this);
         this._win = this._doc = null;
         break;
     }
   },
 
-  _update(aData) {
-    if (!aData) {
-      aData = { headerURL: "", footerURL: "", textcolor: "", accentcolor: "" };
-      this._lastData = aData;
-    } else {
-      this._lastData = aData;
-      aData = LightweightThemeImageOptimizer.optimize(aData, this._win.screen);
+  _update(theme, experiment) {
+    this._lastData = theme;
+    if (theme) {
+      theme = LightweightThemeImageOptimizer.optimize(theme, this._win.screen);
+    }
+
+    let active = this._active = theme && theme.id !== DEFAULT_THEME_ID;
+
+    if (!theme) {
+      theme = {};
     }
 
     let root = this._doc.documentElement;
 
-    if (aData.headerURL) {
+    if (active && theme.headerURL) {
       root.setAttribute("lwtheme-image", "true");
     } else {
       root.removeAttribute("lwtheme-image");
     }
 
-    let active = aData.accentcolor || aData.headerURL;
-    this._active = active;
-
-    if (aData.icons) {
-      let activeIcons = active ? Object.keys(aData.icons).join(" ") : "";
+    if (active && theme.icons) {
+      let activeIcons = Object.keys(theme.icons).join(" ");
       root.setAttribute("lwthemeicons", activeIcons);
-      for (let [name, value] of Object.entries(aData.icons)) {
-        _setImage(root, active, name, value);
-      }
     } else {
       root.removeAttribute("lwthemeicons");
     }
 
-    _setImage(root, active, "--lwt-header-image", aData.headerURL);
-    _setImage(root, active, "--lwt-footer-image", aData.footerURL);
-    _setImage(root, active, "--lwt-additional-images", aData.additionalBackgrounds);
-    _setProperties(root, active, aData);
+    for (let icon of ICONS) {
+      let value = theme.icons ? theme.icons[`--${icon}-icon`] : null;
+      _setImage(root, active, `--${icon}-icon`, value);
+    }
+
+    this._setExperiment(active, experiment, theme.experimental);
+    _setImage(root, active, "--lwt-header-image", theme.headerURL);
+    _setImage(root, active, "--lwt-additional-images", theme.additionalBackgrounds);
+    _setProperties(root, active, theme);
 
     if (active) {
       root.setAttribute("lwtheme", "true");
@@ -200,12 +207,79 @@ LightweightThemeConsumer.prototype = {
       root.removeAttribute("lwthemetextcolor");
     }
 
-    if (active && aData.footerURL)
-      root.setAttribute("lwthemefooter", "true");
-    else
-      root.removeAttribute("lwthemefooter");
-  }
+    let contentThemeData = _getContentProperties(this._doc, active, theme);
+    Services.ppmm.sharedData.set(`theme/${this._winId}`, contentThemeData);
+  },
+
+  _setExperiment(active, experiment, properties) {
+    const root = this._doc.documentElement;
+    if (this._lastExperimentData) {
+      const { stylesheet, usedVariables } = this._lastExperimentData;
+      if (stylesheet) {
+        stylesheet.remove();
+      }
+      if (usedVariables) {
+        for (const [variable] of usedVariables) {
+          _setProperty(root, false, variable);
+        }
+      }
+    }
+
+    this._lastExperimentData = {};
+
+    if (!active || !experiment) {
+      return;
+    }
+
+    let usedVariables = [];
+    if (properties.colors) {
+      for (const property in properties.colors) {
+        const cssVariable = experiment.colors[property];
+        const value = _sanitizeCSSColor(root.ownerDocument, properties.colors[property]);
+        usedVariables.push([cssVariable, value]);
+      }
+    }
+
+    if (properties.images) {
+      for (const property in properties.images) {
+        const cssVariable = experiment.images[property];
+        usedVariables.push([cssVariable, `url(${properties.images[property]})`]);
+      }
+    }
+    if (properties.properties) {
+      for (const property in properties.properties) {
+        const cssVariable = experiment.properties[property];
+        usedVariables.push([cssVariable, properties.properties[property]]);
+      }
+    }
+    for (const [variable, value] of usedVariables) {
+      _setProperty(root, true, variable, value);
+    }
+    this._lastExperimentData.usedVariables = usedVariables;
+
+    if (experiment.stylesheet) {
+      /* Stylesheet URLs are validated using WebExtension schemas */
+      let stylesheetAttr = `href="${experiment.stylesheet}" type="text/css"`;
+      let stylesheet = this._doc.createProcessingInstruction("xml-stylesheet",
+        stylesheetAttr);
+      this._doc.insertBefore(stylesheet, root);
+      this._lastExperimentData.stylesheet = stylesheet;
+    }
+  },
 };
+
+function _getContentProperties(doc, active, data) {
+  if (!active) {
+    return {};
+  }
+  let properties = {};
+  for (let property in data) {
+    if (ThemeContentPropertyList.includes(property)) {
+      properties[property] = _parseRGBA(_sanitizeCSSColor(doc, data[property]));
+    }
+  }
+  return properties;
+}
 
 function _setImage(aRoot, aActive, aVariableName, aURLs) {
   if (aURLs && !Array.isArray(aURLs)) {
@@ -223,17 +297,18 @@ function _setProperty(elem, active, variableName, value) {
 }
 
 function _setProperties(root, active, themeData) {
+  let properties = [];
+
   for (let map of [toolkitVariableMap, ThemeVariableMap]) {
     for (let [cssVarName, definition] of map) {
       const {
         lwtProperty,
         optionalElementID,
         processColor,
-        isColor = true
+        isColor = true,
       } = definition;
       let elem = optionalElementID ? root.ownerDocument.getElementById(optionalElementID)
                                    : root;
-
       let val = themeData[lwtProperty];
       if (isColor) {
         val = _sanitizeCSSColor(root.ownerDocument, val);
@@ -241,8 +316,13 @@ function _setProperties(root, active, themeData) {
           val = processColor(_parseRGBA(val), elem);
         }
       }
-      _setProperty(elem, active, cssVarName, val);
+      properties.push([elem, cssVarName, val]);
     }
+  }
+
+  // Set all the properties together, since _sanitizeCSSColor flushes.
+  for (const [elem, cssVarName, val] of properties) {
+    _setProperty(elem, active, cssVarName, val);
   }
 }
 
@@ -253,12 +333,22 @@ function _sanitizeCSSColor(doc, cssColor) {
   const HTML_NS = "http://www.w3.org/1999/xhtml";
   // style.color normalizes color values and makes invalid ones black, so a
   // simple round trip gets us a sanitized color value.
+  // Use !important so that the theme's stylesheets cannot override us.
   let div = doc.createElementNS(HTML_NS, "div");
-  div.style.color = "black";
+  div.style.setProperty("color", "black", "important");
+  div.style.setProperty("display", "none", "important");
   let span = doc.createElementNS(HTML_NS, "span");
-  span.style.color = cssColor;
+  span.style.setProperty("color", cssColor, "important");
+
+  // CSS variables are not allowed and should compute to black.
+  if (span.style.color.includes("var(")) {
+    span.style.color = "";
+  }
+
   div.appendChild(span);
+  doc.documentElement.appendChild(div);
   cssColor = doc.defaultView.getComputedStyle(span).color;
+  div.remove();
   return cssColor;
 }
 

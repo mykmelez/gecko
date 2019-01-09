@@ -9,8 +9,7 @@ function addWindowListener(aURL, aCallback) {
     onOpenWindow(aXULWindow) {
       info("window opened, waiting for focus");
       Services.wm.removeListener(this);
-      var domwindow = aXULWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                                .getInterface(Ci.nsIDOMWindow);
+      var domwindow = aXULWindow.docShell.domWindow;
       waitForFocus(function() {
         is(domwindow.document.location.href, aURL, "should have seen the right window open");
         aCallback(domwindow);
@@ -32,5 +31,5 @@ function test() {
      win.close();
      finish();
   });
-  gBrowser.loadURI(kTestURI);
+  BrowserTestUtils.loadURI(gBrowser, kTestURI);
 }

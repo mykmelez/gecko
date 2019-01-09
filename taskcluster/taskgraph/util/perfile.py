@@ -4,21 +4,26 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import itertools
+import json
 import logging
 import math
 
 from mozbuild.util import memoize
 from mozpack.path import match as mozpackmatch
-from mozversioncontrol import get_repository_object, InvalidRepoPath
-from subprocess import CalledProcessError
 from taskgraph import files_changed
+import taskgraph
 from .. import GECKO
 
 logger = logging.getLogger(__name__)
 
 
 @memoize
-def perfile_number_of_chunks(try_task_config, head_repository, head_rev, type):
+def perfile_number_of_chunks(is_try, try_task_config, head_repository, head_rev, type):
+    if taskgraph.fast and not is_try:
+        # When iterating on taskgraph changes, the exact number of chunks that
+        # test-verify runs usually isn't important, so skip it when going fast.
+        return 3
     tests_per_chunk = 10.0
     if type.startswith('test-coverage'):
         tests_per_chunk = 30.0
@@ -44,23 +49,17 @@ def perfile_number_of_chunks(try_task_config, head_repository, head_rev, type):
         return 1
 
     changed_files = set()
-    specified_files = []
     if try_task_config:
-        specified_files = try_task_config.split(":")
+        suite_to_paths = json.loads(try_task_config)
+        specified_files = itertools.chain.from_iterable(suite_to_paths.values())
+        changed_files.update(specified_files)
 
-    try:
-        vcs = get_repository_object(GECKO)
-        changed_files.update(vcs.get_outgoing_files('AM'))
-    except InvalidRepoPath:
-        vcs = None
-    except CalledProcessError:
-        return 0
-
-    if not changed_files:
+    if is_try:
+        changed_files.update(files_changed.get_locally_changed_files(GECKO))
+    else:
         changed_files.update(files_changed.get_changed_files(head_repository,
                                                              head_rev))
 
-    changed_files.update(specified_files)
     test_count = 0
     for pattern in file_patterns:
         for path in changed_files:

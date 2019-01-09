@@ -6,7 +6,6 @@
 
 var EXPORTED_SYMBOLS = ["FormData"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "CreditCard",
   "resource://gre/modules/CreditCard.jsm");
 
@@ -42,7 +41,7 @@ function getDocumentURI(doc) {
 // https://dxr.mozilla.org/mozilla-central/search?q=kInputTypeTable&redirect=false
 const IGNORE_PROPERTIES = [
   ["type", new Set(["password", "hidden", "button", "image", "submit", "reset"])],
-  ["autocomplete", new Set(["off"])]
+  ["autocomplete", new Set(["off"])],
 ];
 function shouldIgnoreNode(node) {
   for (let i = 0; i < IGNORE_PROPERTIES.length; ++i) {
@@ -69,7 +68,7 @@ var FormData = Object.freeze({
 
   restoreTree(root, data) {
     FormDataInternal.restoreTree(root, data);
-  }
+  },
 });
 
 /**
@@ -78,7 +77,7 @@ var FormData = Object.freeze({
 var FormDataInternal = {
   namespaceURIs: {
     "xhtml": "http://www.w3.org/1999/xhtml",
-    "xul": "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+    "xul": "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul",
   },
 
   /**
@@ -133,7 +132,7 @@ var FormDataInternal = {
    * @return object
    *         Form data encoded in an object.
    */
-  collect({document: doc}) {
+  collect(doc) {
     let formNodes = doc.evaluate(
       this.restorableFormNodesXPath,
       doc,
@@ -162,9 +161,9 @@ var FormDataInternal = {
         continue;
       }
 
-      // We do not want to collect credit card numbers.
+      // We do not want to collect credit card numbers or past/current password fields.
       if (ChromeUtils.getClassName(node) === "HTMLInputElement") {
-        if (CreditCard.isValidNumber(node.value)) {
+        if (CreditCard.isValidNumber(node.value) || node.hasBeenTypePassword) {
           continue;
         }
       }
@@ -386,9 +385,11 @@ var FormDataInternal = {
    * @param node (DOMNode)
    */
   fireInputEvent(node) {
-    let doc = node.ownerDocument;
-    let event = doc.createEvent("UIEvents");
-    event.initUIEvent("input", true, true, doc.defaultView, 0);
+    // "inputType" value hasn't been decided for session restor:
+    // https://github.com/w3c/input-events/issues/30#issuecomment-438693664
+    let event = node.isInputEventTarget ?
+      new node.ownerGlobal.InputEvent("input", {bubbles: true, inputType: ""}) :
+      new node.ownerGlobal.Event("input", {bubbles: true});
     node.dispatchEvent(event);
   },
 
@@ -431,5 +432,5 @@ var FormDataInternal = {
         this.restoreTree(frames[index], data.children[index]);
       }
     }
-  }
+  },
 };

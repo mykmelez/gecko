@@ -29,7 +29,6 @@ VARIANTS = [
     'stylo-sequential',
     'qr',
     'ccov',
-    'jsdcov',
 ]
 
 
@@ -52,7 +51,14 @@ mozharness_test_run_schema = Schema({
 
 def test_packages_url(taskdesc):
     """Account for different platforms that name their test packages differently"""
-    return get_artifact_url('<build>', get_artifact_path(taskdesc, 'target.test_packages.json'))
+    artifact_url = get_artifact_url('<build>', get_artifact_path(taskdesc,
+                                    'target.test_packages.json'))
+    # for android nightly we need to add 'en-US' to the artifact url
+    test = taskdesc['run']['test']
+    if get_variant(test['test-platform']) == "nightly" and 'android' in test['test-platform']:
+        head, tail = os.path.split(artifact_url)
+        artifact_url = os.path.join(head, 'en-US', tail)
+    return artifact_url
 
 
 @run_job_using('docker-engine', 'mozharness-test', schema=mozharness_test_run_schema)
@@ -70,10 +76,12 @@ def mozharness_test_on_docker(config, job, taskdesc):
     worker['loopback-audio'] = test['loopback-audio']
     worker['max-run-time'] = test['max-run-time']
     worker['retry-exit-status'] = test['retry-exit-status']
+    if 'android-em-7.0-x86' in test['test-platform']:
+        worker['privileged'] = True
 
     artifacts = [
         # (artifact name prefix, in-image path)
-        ("public/logs/", "{workdir}/workspace/build/upload/logs/".format(**run)),
+        ("public/logs/", "{workdir}/workspace/logs/".format(**run)),
         ("public/test", "{workdir}/artifacts/".format(**run)),
         ("public/test_info/", "{workdir}/workspace/build/blobber_upload_dir/".format(**run)),
     ]
@@ -95,7 +103,8 @@ def mozharness_test_on_docker(config, job, taskdesc):
         'mount-point': "{workdir}/workspace".format(**run),
     }]
 
-    env = worker['env'] = {
+    env = worker.setdefault('env', {})
+    env.update({
         'MOZHARNESS_CONFIG': ' '.join(mozharness['config']),
         'MOZHARNESS_SCRIPT': mozharness['script'],
         'MOZILLA_BUILD_URL': {'task-reference': installer_url},
@@ -103,7 +112,8 @@ def mozharness_test_on_docker(config, job, taskdesc):
         'NEED_WINDOW_MANAGER': 'true',
         'ENABLE_E10S': str(bool(test.get('e10s'))).lower(),
         'MOZ_AUTOMATION': '1',
-    }
+        'WORKING_DIR': '/builds/worker',
+    })
 
     if mozharness.get('mochitest-flavor'):
         env['MOCHITEST_FLAVOR'] = mozharness['mochitest-flavor']
@@ -137,7 +147,7 @@ def mozharness_test_on_docker(config, job, taskdesc):
     # If we have a source checkout, run mozharness from it instead of
     # downloading a zip file with the same content.
     if test['checkout']:
-        command.extend(['--vcs-checkout', '{workdir}/checkouts/gecko'.format(**run)])
+        command.extend(['--gecko-checkout', '{workdir}/checkouts/gecko'.format(**run)])
         env['MOZHARNESS_PATH'] = '{workdir}/checkouts/gecko/testing/mozharness'.format(**run)
     else:
         env['MOZHARNESS_URL'] = {'task-reference': mozharness_url}
@@ -181,7 +191,8 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
 
     is_macosx = worker['os'] == 'macosx'
     is_windows = worker['os'] == 'windows'
-    assert is_macosx or is_windows
+    is_linux = worker['os'] == 'linux'
+    assert is_macosx or is_windows or is_linux
 
     artifacts = [
         {
@@ -203,9 +214,26 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
     installer_url = get_artifact_url(upstream_task, mozharness['build-artifact-name'])
 
     taskdesc['scopes'].extend(
-        ['generic-worker:os-group:{}'.format(group) for group in test['os-groups']])
+        ['generic-worker:os-group:{}/{}'.format(
+            job['worker-type'],
+            group
+        ) for group in test['os-groups']])
 
     worker['os-groups'] = test['os-groups']
+
+    # run-as-administrator is a feature for workers with UAC enabled and as such should not be
+    # included in tasks on workers that have UAC disabled. Currently UAC is only enabled on
+    # gecko Windows 10 workers, however this may be subject to change. Worker type
+    # environment definitions can be found in https://github.com/mozilla-releng/OpenCloudConfig
+    # See https://docs.microsoft.com/en-us/windows/desktop/secauthz/user-account-control
+    # for more information about UAC.
+    if test.get('run-as-administrator', False):
+        if job['worker-type'].startswith('aws-provisioner-v1/gecko-t-win10-64'):
+            taskdesc['scopes'].extend(
+                ['generic-worker:run-as-administrator:{}'.format(job['worker-type'])])
+            worker['run-as-administrator'] = True
+        else:
+            raise Exception('run-as-administrator not supported on {}'.format(job['worker-type']))
 
     if test['reboot']:
         raise Exception('reboot: {} not supported on generic-worker'.format(test['reboot']))
@@ -227,7 +255,6 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
             'MOZ_HIDE_RESULTS_TABLE': '1',
             'MOZ_NODE_PATH': '/usr/local/bin/node',
             'MOZ_NO_REMOTE': '1',
-            'NO_EM_RESTART': '1',
             'NO_FAIL_ON_TEST_ERRORS': '1',
             'PATH': '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
             'SHELL': '/bin/bash',
@@ -236,17 +263,18 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
             'XPC_SERVICE_NAME': '0',
         })
 
-    if is_macosx:
-        mh_command = [
-            'python2.7',
-            '-u',
-            'mozharness/scripts/' + mozharness['script']
-        ]
-    elif is_windows:
+    if is_windows:
         mh_command = [
             'c:\\mozilla-build\\python\\python.exe',
             '-u',
             'mozharness\\scripts\\' + normpath(mozharness['script'])
+        ]
+    else:
+        # is_linux or is_macosx
+        mh_command = [
+            'python2.7',
+            '-u',
+            'mozharness/scripts/' + mozharness['script']
         ]
 
     for mh_config in mozharness['config']:
@@ -310,7 +338,7 @@ def mozharness_test_on_native_engine(config, job, taskdesc):
     test = taskdesc['run']['test']
     mozharness = test['mozharness']
     worker = taskdesc['worker']
-    is_talos = test['suite'] == 'talos'
+    is_talos = test['suite'] == 'talos' or test['suite'] == 'raptor'
     is_macosx = worker['os'] == 'macosx'
 
     installer_url = get_artifact_url('<build>', mozharness['build-artifact-name'])
@@ -323,7 +351,7 @@ def mozharness_test_on_native_engine(config, job, taskdesc):
         'type': 'directory',
     } for (prefix, path) in [
         # (artifact name prefix, in-image path relative to homedir)
-        ("public/logs/", "workspace/build/upload/logs/"),
+        ("public/logs/", "workspace/build/logs/"),
         ("public/test", "artifacts/"),
         ("public/test_info/", "workspace/build/blobber_upload_dir/"),
     ]]
@@ -334,7 +362,8 @@ def mozharness_test_on_native_engine(config, job, taskdesc):
     if test['max-run-time']:
         worker['max-run-time'] = test['max-run-time']
 
-    worker['env'] = env = {
+    env = worker.setdefault('env', {})
+    env.update({
         'GECKO_HEAD_REPOSITORY': config.params['head_repository'],
         'GECKO_HEAD_REV': config.params['head_rev'],
         'MOZHARNESS_CONFIG': ' '.join(mozharness['config']),
@@ -342,13 +371,12 @@ def mozharness_test_on_native_engine(config, job, taskdesc):
         'MOZHARNESS_URL': {'task-reference': mozharness_url},
         'MOZILLA_BUILD_URL': {'task-reference': installer_url},
         "MOZ_NO_REMOTE": '1',
-        "NO_EM_RESTART": '1',
         "XPCOM_DEBUG_BREAK": 'warn',
         "NO_FAIL_ON_TEST_ERRORS": '1',
         "MOZ_HIDE_RESULTS_TABLE": '1',
         "MOZ_NODE_PATH": "/usr/local/bin/node",
         'MOZ_AUTOMATION': '1',
-    }
+    })
     # talos tests don't need Xvfb
     if is_talos:
         env['NEED_XVFB'] = 'false'
@@ -390,7 +418,7 @@ def mozharness_test_on_script_engine_autophone(config, job, taskdesc):
     test = taskdesc['run']['test']
     mozharness = test['mozharness']
     worker = taskdesc['worker']
-    is_talos = test['suite'] == 'talos'
+    is_talos = test['suite'] == 'talos' or test['suite'] == 'raptor'
     if worker['os'] != 'linux':
         raise Exception('os: {} not supported on script-engine-autophone'.format(worker['os']))
 
@@ -401,7 +429,7 @@ def mozharness_test_on_script_engine_autophone(config, job, taskdesc):
     artifacts = [
         # (artifact name prefix, in-image path)
         ("public/test/", "/builds/worker/artifacts"),
-        ("public/logs/", "/builds/worker/workspace/build/upload/logs"),
+        ("public/logs/", "/builds/worker/workspace/build/logs"),
         ("public/test_info/", "/builds/worker/workspace/build/blobber_upload_dir"),
     ]
 
@@ -422,16 +450,21 @@ def mozharness_test_on_script_engine_autophone(config, job, taskdesc):
         'MOZHARNESS_URL': {'task-reference': mozharness_url},
         'MOZILLA_BUILD_URL': {'task-reference': installer_url},
         "MOZ_NO_REMOTE": '1',
-        "NO_EM_RESTART": '1',
         "XPCOM_DEBUG_BREAK": 'warn',
         "NO_FAIL_ON_TEST_ERRORS": '1',
         "MOZ_HIDE_RESULTS_TABLE": '1',
         "MOZ_NODE_PATH": "/usr/local/bin/node",
         'MOZ_AUTOMATION': '1',
+        'WORKING_DIR': '/builds/worker',
         'WORKSPACE': '/builds/worker/workspace',
         'TASKCLUSTER_WORKER_TYPE': job['worker-type'],
-
     }
+
+    # for fetch tasks on mobile
+    if 'env' in job['worker'] and 'MOZ_FETCHES' in job['worker']['env']:
+        env['MOZ_FETCHES'] = job['worker']['env']['MOZ_FETCHES']
+        env['MOZ_FETCHES_DIR'] = job['worker']['env']['MOZ_FETCHES_DIR']
+
     # talos tests don't need Xvfb
     if is_talos:
         env['NEED_XVFB'] = 'false'

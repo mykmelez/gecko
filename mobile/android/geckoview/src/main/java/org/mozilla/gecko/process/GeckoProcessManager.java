@@ -6,6 +6,7 @@ package org.mozilla.gecko.process;
 
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoThread;
+import org.mozilla.gecko.IGeckoEditableChild;
 import org.mozilla.gecko.IGeckoEditableParent;
 import org.mozilla.gecko.annotation.WrapForJNI;
 import org.mozilla.gecko.util.ThreadUtils;
@@ -23,8 +24,6 @@ import android.os.SystemClock;
 import android.support.v4.util.SimpleArrayMap;
 import android.util.Log;
 
-import java.io.IOException;
-
 public final class GeckoProcessManager extends IProcessManager.Stub {
     private static final String LOGTAG = "GeckoProcessManager";
     private static final GeckoProcessManager INSTANCE = new GeckoProcessManager();
@@ -33,13 +32,24 @@ public final class GeckoProcessManager extends IProcessManager.Stub {
         return INSTANCE;
     }
 
-    @WrapForJNI(stubName = "GetEditableParent")
-    private static native IGeckoEditableParent nativeGetEditableParent(long contentId,
-                                                                       long tabId);
+    @WrapForJNI(calledFrom = "gecko")
+    private static void setEditableChildParent(final IGeckoEditableChild child,
+                                               final IGeckoEditableParent parent) {
+        try {
+            child.transferParent(parent);
+        } catch (final RemoteException e) {
+            Log.e(LOGTAG, "Cannot set parent", e);
+        }
+    }
+
+    @WrapForJNI(stubName = "GetEditableParent", dispatchTo = "gecko")
+    private static native void nativeGetEditableParent(IGeckoEditableChild child,
+                                                       long contentId, long tabId);
 
     @Override // IProcessManager
-    public IGeckoEditableParent getEditableParent(final long contentId, final long tabId) {
-        return nativeGetEditableParent(contentId, tabId);
+    public void getEditableParent(final IGeckoEditableChild child,
+                                  final long contentId, final long tabId) {
+        nativeGetEditableParent(child, contentId, tabId);
     }
 
     private static final class ChildConnection implements ServiceConnection,
@@ -84,15 +94,25 @@ public final class GeckoProcessManager extends IProcessManager.Stub {
             }
 
             Log.e(LOGTAG, "Cannot connect to process " + mType);
-            context.unbindService(this);
+            unbind();
             return null;
         }
 
         public synchronized void unbind() {
-            final Context context = GeckoAppShell.getApplicationContext();
-            context.unbindService(this);
-
+            // This could end up using IPC, so do it before we unbind.
             final int pid = getPid();
+
+            if (mChild != null) {
+                final Context context = GeckoAppShell.getApplicationContext();
+                try {
+                    context.unbindService(this);
+                } catch (IllegalArgumentException e) {
+                    mChild = null;
+                    mPid = 0;
+                    return;
+                }
+            }
+
             if (pid != 0) {
                 Process.killProcess(pid);
                 waitForChildLocked();
@@ -140,7 +160,11 @@ public final class GeckoProcessManager extends IProcessManager.Stub {
             if (mChild != null) {
                 mChild = null;
                 mPid = 0;
-                GeckoAppShell.getApplicationContext().unbindService(this);
+
+                try {
+                    GeckoAppShell.getApplicationContext().unbindService(this);
+                } catch (IllegalArgumentException e) {
+                }
             }
         }
     }
@@ -173,24 +197,28 @@ public final class GeckoProcessManager extends IProcessManager.Stub {
 
     public void crashChild() {
         try {
-            mConnections.get("tab").bind().crash();
+            IChildProcess childProcess = mConnections.get("tab").bind();
+            if (childProcess != null) {
+                childProcess.crash();
+            }
         } catch (RemoteException e) {
         }
     }
 
     @WrapForJNI
     private static int start(final String type, final String[] args,
-                             final int prefsFd, final int ipcFd,
+                             final int prefsFd, final int prefMapFd,
+                             final int ipcFd,
                              final int crashFd, final int crashAnnotationFd) {
-        return INSTANCE.start(type, args, prefsFd, ipcFd, crashFd, crashAnnotationFd, /* retry */ false);
+        return INSTANCE.start(type, args, prefsFd, prefMapFd, ipcFd, crashFd, crashAnnotationFd, /* retry */ false);
     }
 
     private int filterFlagsForChild(int flags) {
-        return flags & (GeckoThread.FLAG_ENABLE_JAVA_CRASHREPORTER |
-                GeckoThread.FLAG_ENABLE_NATIVE_CRASHREPORTER);
+        return flags & GeckoThread.FLAG_ENABLE_NATIVE_CRASHREPORTER;
     }
 
-    private int start(final String type, final String[] args, final int prefsFd,
+    private int start(final String type, final String[] args,
+                      final int prefsFd, final int prefMapFd,
                       final int ipcFd, final int crashFd,
                       final int crashAnnotationFd, final boolean retry) {
         final ChildConnection connection = getConnection(type);
@@ -200,27 +228,39 @@ public final class GeckoProcessManager extends IProcessManager.Stub {
         }
 
         final Bundle extras = GeckoThread.getActiveExtras();
-        final ParcelFileDescriptor prefsPfd;
-        final ParcelFileDescriptor ipcPfd;
-        final ParcelFileDescriptor crashPfd;
-        final ParcelFileDescriptor crashAnnotationPfd;
-        try {
-            prefsPfd = ParcelFileDescriptor.fromFd(prefsFd);
-            ipcPfd = ParcelFileDescriptor.fromFd(ipcFd);
-            crashPfd = (crashFd >= 0) ? ParcelFileDescriptor.fromFd(crashFd) : null;
-            crashAnnotationPfd = (crashAnnotationFd >= 0) ? ParcelFileDescriptor.fromFd(crashAnnotationFd) : null;
-        } catch (final IOException e) {
-            Log.e(LOGTAG, "Cannot create fd for " + type, e);
-            return 0;
-        }
+        final ParcelFileDescriptor prefsPfd =
+                (prefsFd >= 0) ? ParcelFileDescriptor.adoptFd(prefsFd) : null;
+        final ParcelFileDescriptor prefMapPfd =
+                (prefMapFd >= 0) ? ParcelFileDescriptor.adoptFd(prefMapFd) : null;
+        final ParcelFileDescriptor ipcPfd = ParcelFileDescriptor.adoptFd(ipcFd);
+        final ParcelFileDescriptor crashPfd =
+                (crashFd >= 0) ? ParcelFileDescriptor.adoptFd(crashFd) : null;
+        final ParcelFileDescriptor crashAnnotationPfd =
+                (crashAnnotationFd >= 0) ? ParcelFileDescriptor.adoptFd(crashAnnotationFd) : null;
 
         final int flags = filterFlagsForChild(GeckoThread.getActiveFlags());
 
         boolean started = false;
+        final String crashHandler = GeckoAppShell.getCrashHandlerService() != null ?
+                GeckoAppShell.getCrashHandlerService().getName() : null;
         try {
-            started = child.start(this, args, extras, flags, prefsPfd, ipcPfd, crashPfd,
-                                  crashAnnotationPfd);
+            started = child.start(this, args, extras, flags, crashHandler,
+                    prefsPfd, prefMapPfd, ipcPfd, crashPfd, crashAnnotationPfd);
         } catch (final RemoteException e) {
+        }
+
+        if (crashAnnotationPfd != null) {
+            crashAnnotationPfd.detachFd();
+        }
+        if (crashPfd != null) {
+            crashPfd.detachFd();
+        }
+        ipcPfd.detachFd();
+        if (prefMapPfd != null) {
+            prefMapPfd.detachFd();
+        }
+        if (prefsPfd != null) {
+            prefsPfd.detachFd();
         }
 
         if (!started) {
@@ -230,18 +270,7 @@ public final class GeckoProcessManager extends IProcessManager.Stub {
             }
             Log.w(LOGTAG, "Attempting to kill running child " + type);
             connection.unbind();
-            return start(type, args, prefsFd, ipcFd, crashFd, crashAnnotationFd, /* retry */ true);
-        }
-
-        try {
-            if (crashAnnotationPfd != null) {
-                crashAnnotationPfd.close();
-            }
-            if (crashPfd != null) {
-                crashPfd.close();
-            }
-            ipcPfd.close();
-        } catch (final IOException e) {
+            return start(type, args, prefsFd, prefMapFd, ipcFd, crashFd, crashAnnotationFd, /* retry */ true);
         }
 
         return connection.getPid();

@@ -9,14 +9,21 @@ var EXPORTED_SYMBOLS = ["ClientID"];
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/Log.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 const LOGGER_NAME = "Toolkit.Telemetry";
 const LOGGER_PREFIX = "ClientID::";
+// Must match ID in TelemetryUtils
+const CANARY_CLIENT_ID = "c0ffeec0-ffee-c0ff-eec0-ffeec0ffeec0";
 
 ChromeUtils.defineModuleGetter(this, "CommonUtils",
                                "resource://services-common/utils.js");
 ChromeUtils.defineModuleGetter(this, "OS",
                                "resource://gre/modules/osfile.jsm");
+
+XPCOMUtils.defineLazyGetter(this, "CryptoHash", () => {
+  return Components.Constructor("@mozilla.org/security/hash;1", "nsICryptoHash", "initWithString");
+});
 
 XPCOMUtils.defineLazyGetter(this, "gDatareportingPath", () => {
   return OS.Path.join(OS.Constants.Path.profileDir, "datareporting");
@@ -56,7 +63,19 @@ var ClientID = Object.freeze({
     return ClientIDImpl.getClientID();
   },
 
-/**
+  /**
+   * This returns true if the client ID prior to the last client ID reset was a canary client ID.
+   * Android only. Always returns null on Desktop.
+   */
+  wasCanaryClientID() {
+    if (AppConstants.platform == "android") {
+      return ClientIDImpl.wasCanaryClientID();
+    }
+
+    return null;
+  },
+
+  /**
    * Get the client id synchronously without hitting the disk.
    * This returns:
    *  - the current on-disk client id if it was already loaded
@@ -65,6 +84,35 @@ var ClientID = Object.freeze({
    */
   getCachedClientID() {
     return ClientIDImpl.getCachedClientID();
+  },
+
+  async getClientIdHash() {
+    return ClientIDImpl.getClientIdHash();
+  },
+
+  /**
+   * Set a specific client id asynchronously, writing it to disk
+   * and updating the cached version.
+   *
+   * Should only ever be used when a known client ID value should be set.
+   * Use `resetClientID` to generate a new random one if required.
+   *
+   * @return {Promise<string>} The stable client ID.
+   */
+  setClientID(id) {
+    return ClientIDImpl.setClientID(id);
+  },
+
+  /**
+   * Reset the client id asynchronously, writing it to disk
+   * and updating the cached version.
+   *
+   * Should only be used if a reset is explicitely requested by the user.
+   *
+   * @return {Promise<string>} A new stable client ID.
+   */
+  resetClientID() {
+    return ClientIDImpl.resetClientID();
   },
 
   /**
@@ -78,9 +126,12 @@ var ClientID = Object.freeze({
 
 var ClientIDImpl = {
   _clientID: null,
+  _clientIDHash: null,
   _loadClientIdTask: null,
   _saveClientIdTask: null,
+  _removeClientIdTask: null,
   _logger: null,
+  _wasCanary: null,
 
   _loadClientID() {
     if (this._loadClientIdTask) {
@@ -98,9 +149,15 @@ var ClientIDImpl = {
    * If no Client ID is found, we generate a new one.
    */
   async _doLoadClientID() {
+    // If there's a removal in progress, let's wait for it
+    await this._removeClientIdTask;
+
     // Try to load the client id from the DRS state file.
     try {
       let state = await CommonUtils.readJSON(gStateFilePath);
+      if (AppConstants.platform == "android" && state && "wasCanary" in state) {
+        this._wasCanary = state.wasCanary;
+      }
       if (state && this.updateClientID(state.clientID)) {
         return this._clientID;
       }
@@ -128,6 +185,10 @@ var ClientIDImpl = {
    */
   async _saveClientID() {
     let obj = { clientID: this._clientID };
+    // We detected a canary client ID when resetting, storing this as a flag
+    if (AppConstants.platform == "android" && this._wasCanary) {
+      obj.wasCanary = true;
+    }
     await OS.File.makeDir(gDatareportingPath);
     await CommonUtils.writeJSON(obj, gStateFilePath);
     this._saveClientIdTask = null;
@@ -145,6 +206,14 @@ var ClientIDImpl = {
     }
 
     return Promise.resolve(this._clientID);
+  },
+
+  /**
+   * This returns true if the client ID prior to the last client ID reset was a canary client ID.
+   * Android only. Always returns null on Desktop.
+   */
+  wasCanaryClientID() {
+    return this._wasCanary;
   },
 
   /**
@@ -183,6 +252,16 @@ var ClientIDImpl = {
     return id;
   },
 
+  async getClientIdHash() {
+    if (!this._clientIDHash) {
+      let byteArr = new TextEncoder().encode(await this.getClientID());
+      let hash = new CryptoHash("sha256");
+      hash.update(byteArr, byteArr.length);
+      this._clientIDHash = CommonUtils.bytesAsHex(hash.finish(false));
+    }
+    return this._clientIDHash;
+  },
+
   /*
    * Resets the provider. This is for testing only.
    */
@@ -190,6 +269,49 @@ var ClientIDImpl = {
     await this._loadClientIdTask;
     await this._saveClientIdTask;
     this._clientID = null;
+    this._clientIDHash = null;
+  },
+
+  async setClientID(id) {
+    if (!this.updateClientID(id)) {
+      throw ("Invalid client ID: " + id);
+    }
+
+    this._saveClientIdTask = this._saveClientID();
+    await this._saveClientIdTask;
+    return this._clientID;
+  },
+
+  async _doRemoveClientID() {
+    // Reset stored id.
+    this._clientID = null;
+    this._clientIDHash = null;
+
+    // Clear the client id from the preference cache.
+    Services.prefs.clearUserPref(PREF_CACHED_CLIENTID);
+
+    // Remove the client id from disk
+    await OS.File.remove(gStateFilePath, {ignoreAbsent: true});
+  },
+
+  async resetClientID() {
+    let oldClientId = this._clientID;
+
+    // Wait for the removal.
+    // Asynchronous calls to getClientID will also be blocked on this.
+    this._removeClientIdTask = this._doRemoveClientID();
+    let clear = () => this._removeClientIdTask = null;
+    this._removeClientIdTask.then(clear, clear);
+
+    await this._removeClientIdTask;
+
+    // On Android we detect resets after a canary client ID.
+    if (AppConstants.platform == "android" ) {
+      this._wasCanary = oldClientId == CANARY_CLIENT_ID;
+    }
+
+    // Generate a new id.
+    return this.getClientID();
   },
 
   /**
@@ -207,6 +329,7 @@ var ClientIDImpl = {
     }
 
     this._clientID = id;
+    this._clientIDHash = null;
     Services.prefs.setStringPref(PREF_CACHED_CLIENTID, this._clientID);
     return true;
   },

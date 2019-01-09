@@ -12,11 +12,11 @@ function debug(aStr) {
 }
 
 var EXPORTED_SYMBOLS = [
-  "DateTimePickerParent"
+  "DateTimePickerParent",
 ];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.defineModuleGetter(this, "DateTimePickerPanel", "resource://gre/modules/DateTimePickerPanel.jsm");
 
 /*
  * DateTimePickerParent receives message from content side (input box) and
@@ -31,7 +31,7 @@ var DateTimePickerParent = {
   MESSAGES: [
     "FormDateTime:OpenPicker",
     "FormDateTime:ClosePicker",
-    "FormDateTime:UpdatePicker"
+    "FormDateTime:UpdatePicker",
   ],
 
   init() {
@@ -106,7 +106,7 @@ var DateTimePickerParent = {
   },
 
   // Get picker from browser and show it anchored to the input box.
-  async showPicker(aBrowser, aData) {
+  showPicker(aBrowser, aData) {
     let rect = aData.rect;
     let type = aData.type;
     let detail = aData.detail;
@@ -130,22 +130,11 @@ var DateTimePickerParent = {
     }
 
     this.weakBrowser = Cu.getWeakReference(aBrowser);
-    this.picker = aBrowser.dateTimePicker;
-    if (!this.picker) {
+    if (!aBrowser.dateTimePicker) {
       debug("aBrowser.dateTimePicker not found, exiting now.");
       return;
     }
-    // The datetimepopup binding is only attached when it is needed.
-    // Check if openPicker method is present to determine if binding has
-    // been attached. If not, attach the binding first before calling it.
-    if (!this.picker.openPicker) {
-      let bindingPromise = new Promise(resolve => {
-        this.picker.addEventListener("DateTimePickerBindingReady",
-                                     resolve, {once: true});
-      });
-      this.picker.setAttribute("active", true);
-      await bindingPromise;
-    }
+    this.picker = new DateTimePickerPanel(aBrowser.dateTimePicker);
     // The arrow panel needs an anchor to work. The popupAnchor (this._anchor)
     // is a transparent div that the arrow can point to.
     this.picker.openPicker(type, this._anchor, detail);
@@ -166,8 +155,8 @@ var DateTimePickerParent = {
     if (!this.picker) {
       return;
     }
-    this.picker.addEventListener("popuphidden", this);
-    this.picker.addEventListener("DateTimePickerValueChanged", this);
+    this.picker.element.addEventListener("popuphidden", this);
+    this.picker.element.addEventListener("DateTimePickerValueChanged", this);
   },
 
   // Stop listening to picker's event.
@@ -175,7 +164,7 @@ var DateTimePickerParent = {
     if (!this.picker) {
       return;
     }
-    this.picker.removeEventListener("popuphidden", this);
-    this.picker.removeEventListener("DateTimePickerValueChanged", this);
+    this.picker.element.removeEventListener("popuphidden", this);
+    this.picker.element.removeEventListener("DateTimePickerValueChanged", this);
   },
 };

@@ -13,6 +13,10 @@ RUN mkdir /builds && \
 # Declare default working folder
 WORKDIR /builds/worker
 
+VOLUME /builds/worker/checkouts
+VOLUME /builds/worker/workspace
+VOLUME /builds/worker/tooltool-cache
+
 # Set variable normally configured at login, by the shells parent process, these
 # are taken from GNU su manual
 ENV HOME=/builds/worker \
@@ -45,8 +49,9 @@ RUN apt-get update && \
 COPY setup_packages.sh /usr/local/sbin/
 COPY cloud-mirror-workaround.sh /usr/local/sbin/
 
+# %ARG TASKCLUSTER_ROOT_URL
 # %ARG DOCKER_IMAGE_PACKAGES
-RUN /usr/local/sbin/setup_packages.sh $DOCKER_IMAGE_PACKAGES && \
+RUN /usr/local/sbin/setup_packages.sh $TASKCLUSTER_ROOT_URL $DOCKER_IMAGE_PACKAGES && \
     echo 'dir::bin::methods::https "/usr/local/sbin/cloud-mirror-workaround.sh";' > /etc/apt/apt.conf.d/99cloud-mirror-workaround && \
     apt-get update && \
     apt-get install \

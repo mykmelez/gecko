@@ -19,17 +19,23 @@ Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/devtools/client/shared/test/shared-head.js",
   this);
 
+// Import helpers for the new debugger
+/* import-globals-from ../../../debugger/new/test/mochitest/helpers/context.js */
+Services.scriptloader.loadSubScript(
+  "chrome://mochitests/content/browser/devtools/client/debugger/new/test/mochitest/helpers/context.js",
+  this);
+
 var {HUDService} = require("devtools/client/webconsole/hudservice");
 var WCUL10n = require("devtools/client/webconsole/webconsole-l10n");
 const DOCS_GA_PARAMS = `?${new URLSearchParams({
   "utm_source": "mozilla",
   "utm_medium": "firefox-console-errors",
-  "utm_campaign": "default"
+  "utm_campaign": "default",
 })}`;
 const STATUS_CODES_GA_PARAMS = `?${new URLSearchParams({
   "utm_source": "mozilla",
   "utm_medium": "devtools-webconsole",
-  "utm_campaign": "default"
+  "utm_campaign": "default",
 })}`;
 
 const wcActions = require("devtools/client/webconsole/actions/index");
@@ -66,7 +72,6 @@ registerCleanupFunction(async function() {
 async function openNewTabAndConsole(url, clearJstermHistory = true) {
   const toolbox = await openNewTabAndToolbox(url, "webconsole");
   const hud = toolbox.getCurrentPanel().hud;
-  hud.jsterm._lazyVariablesView = false;
 
   if (clearJstermHistory) {
     // Clearing history that might have been set in previous tests.
@@ -104,8 +109,10 @@ function logAllStoreChanges(hud) {
  *        - messages: Array[Object]. An array of messages to match.
             Current supported options:
  *            - text: Partial text match in .message-body
+ *        - selector: {String} a selector that should match the message node. Defaults to
+ *                             ".message".
  */
-function waitForMessages({ hud, messages }) {
+function waitForMessages({ hud, messages, selector = ".message" }) {
   return new Promise(resolve => {
     const matchedMessages = [];
     hud.ui.on("new-messages",
@@ -116,8 +123,13 @@ function waitForMessages({ hud, messages }) {
           }
 
           for (const newMessage of newMessages) {
-            const messageBody = newMessage.node.querySelector(".message-body");
-            if (messageBody.textContent.includes(message.text)) {
+            const messageBody =
+              newMessage.node.querySelector(`.message-body`);
+            if (
+              messageBody &&
+              newMessage.node.matches(selector) &&
+              messageBody.textContent.includes(message.text)
+            ) {
               matchedMessages.push(newMessage);
               message.matched = true;
               const messagesLeft = messages.length - matchedMessages.length;
@@ -169,10 +181,30 @@ function waitForRepeatedMessage(hud, text, repeat) {
  *
  * @param {Object} hud : the webconsole
  * @param {String} text : text included in .message-body
+ * @param {String} selector : A selector that should match the message node.
  */
-async function waitForMessage(hud, text) {
-  const messages = await waitForMessages({hud, messages: [{text}]});
+async function waitForMessage(hud, text, selector) {
+  const messages = await waitForMessages({
+    hud,
+    messages: [{text}],
+    selector,
+  });
   return messages[0];
+}
+
+/**
+ * Execute an input expression and wait for a message with the expected text (and an
+ * optional selector) to be displayed in the output.
+ *
+ * @param {Object} hud : The webconsole.
+ * @param {String} input : The input expression to execute.
+ * @param {String} matchingText : A string that should match the message body content.
+ * @param {String} selector : A selector that should match the message node.
+ */
+function executeAndWaitForMessage(hud, input, matchingText, selector = ".message") {
+  const onMessage = waitForMessage(hud, matchingText, selector);
+  hud.jsterm.execute(input);
+  return onMessage;
 }
 
 /**
@@ -332,7 +364,7 @@ async function checkClickOnNode(hud, toolbox, frameLinkNode) {
 
   const dbg = toolbox.getPanel("jsdebugger");
   is(
-    dbg._selectors.getSelectedSource(dbg._getState()).get("url"),
+    dbg._selectors.getSelectedSource(dbg._getState()).url,
     url,
     "expected source url"
   );
@@ -347,48 +379,173 @@ function hasFocus(node) {
 }
 
 /**
- * Set the value of the JsTerm and its caret position, and fire a completion request.
+ * Set the value of the JsTerm and its caret position, and wait for the autocompletion
+ * to be updated.
  *
  * @param {JsTerm} jsterm
  * @param {String} value : The value to set the jsterm to.
- * @param {Integer} caretIndexOffset : A number that will be added to value.length
- *                  when setting the caret. A negative number will place the caret
- *                  in (end - offset) position. Default to 0 (caret set at the end)
- * @param {Integer} completionType : One of the following jsterm property
- *                   - COMPLETE_FORWARD
- *                   - COMPLETE_BACKWARD
- *                   - COMPLETE_HINT_ONLY
- *                   - COMPLETE_PAGEUP
- *                   - COMPLETE_PAGEDOWN
- *                  Will default to COMPLETE_HINT_ONLY.
+ * @param {Integer} caretPosition : The index where to place the cursor. A negative
+ *                  number will place the caret at (value.length - offset) position.
+ *                  Default to value.length (caret set at the end).
  * @returns {Promise} resolves when the jsterm is completed.
  */
-function jstermSetValueAndComplete(jsterm, value, caretIndexOffset = 0, completionType) {
-  const {inputNode} = jsterm;
-  inputNode.value = value;
-  const index = value.length + caretIndexOffset;
-  inputNode.setSelectionRange(index, index);
+async function setInputValueForAutocompletion(
+  jsterm,
+  value,
+  caretPosition = value.length,
+) {
+  jsterm.setInputValue("");
+  jsterm.focus();
 
-  return jstermComplete(jsterm, completionType);
+  const updated = jsterm.once("autocomplete-updated");
+  EventUtils.sendString(value);
+  await updated;
+
+  if (caretPosition < 0) {
+    caretPosition = value.length + caretPosition;
+  }
+
+  if (Number.isInteger(caretPosition)) {
+    if (jsterm.inputNode) {
+      const {inputNode} = jsterm;
+      inputNode.value = value;
+      inputNode.setSelectionRange(caretPosition, caretPosition);
+    }
+
+    if (jsterm.editor) {
+      jsterm.editor.setCursor(jsterm.editor.getPosition(caretPosition));
+    }
+  }
 }
 
 /**
- * Fires a completion request on the jsterm with the specified completionType
+ * Set the value of the JsTerm and wait for the confirm dialog to be displayed.
+ *
+ * @param {Toolbox} toolbox
+ * @param {JsTerm} jsterm
+ * @param {String} value : The value to set the jsterm to.
+ *                  Default to value.length (caret set at the end).
+ * @returns {Promise<HTMLElement>} resolves with dialog element when it is opened.
+ */
+async function setInputValueForGetterConfirmDialog(toolbox, jsterm, value) {
+  await setInputValueForAutocompletion(jsterm, value);
+  await waitFor(() => isConfirmDialogOpened(toolbox));
+  ok(true, "The confirm dialog is displayed");
+  return getConfirmDialog(toolbox);
+}
+
+/**
+ * Checks if the jsterm has the expected completion value.
  *
  * @param {JsTerm} jsterm
- * @param {Integer} completionType : One of the following jsterm property
- *                   - COMPLETE_FORWARD
- *                   - COMPLETE_BACKWARD
- *                   - COMPLETE_HINT_ONLY
- *                   - COMPLETE_PAGEUP
- *                   - COMPLETE_PAGEDOWN
- *                  Will default to COMPLETE_HINT_ONLY.
- * @returns {Promise} resolves when the jsterm is completed.
+ * @param {String} expectedValue
+ * @param {String} assertionInfo: Description of the assertion passed to `is`.
  */
-function jstermComplete(jsterm, completionType = jsterm.COMPLETE_HINT_ONLY) {
-  const updated = jsterm.once("autocomplete-updated");
-  jsterm.complete(completionType);
-  return updated;
+function checkJsTermCompletionValue(jsterm, expectedValue, assertionInfo) {
+  const completionValue = getJsTermCompletionValue(jsterm);
+  if (completionValue === null) {
+    ok(false, "Couldn't retrieve the completion value");
+  }
+
+  info(`Expects "${expectedValue}", is "${completionValue}"`);
+
+  if (jsterm.completeNode) {
+    is(completionValue, expectedValue, assertionInfo);
+  } else {
+    // CodeMirror jsterm doesn't need to add prefix-spaces.
+    is(completionValue, expectedValue.trim(), assertionInfo);
+  }
+}
+
+/**
+ * Checks if the cursor on jsterm is at the expected position.
+ *
+ * @param {JsTerm} jsterm
+ * @param {Integer} expectedCursorIndex
+ * @param {String} assertionInfo: Description of the assertion passed to `is`.
+ */
+function checkJsTermCursor(jsterm, expectedCursorIndex, assertionInfo) {
+  if (jsterm.inputNode) {
+    const {selectionStart, selectionEnd} = jsterm.inputNode;
+    is(selectionStart, expectedCursorIndex, assertionInfo);
+    ok(selectionStart === selectionEnd);
+  } else {
+    is(jsterm.editor.getCursor().ch, expectedCursorIndex, assertionInfo);
+  }
+}
+
+/**
+ * Checks the jsterm value and the cursor position given an expected string containing
+ * a "|" to indicate the expected cursor position.
+ *
+ * @param {JsTerm} jsterm
+ * @param {String} expectedStringWithCursor:
+ *                  String with a "|" to indicate the expected cursor position.
+ *                  For example, this is how you assert an empty value with the focus "|",
+ *                  and this indicates the value should be "test" and the cursor at the
+ *                  end of the input: "test|".
+ * @param {String} assertionInfo: Description of the assertion passed to `is`.
+ */
+function checkJsTermValueAndCursor(jsterm, expectedStringWithCursor, assertionInfo) {
+  info(`Checking jsterm state: \n${expectedStringWithCursor}`);
+  if (!expectedStringWithCursor.includes("|")) {
+    ok(false,
+      `expectedStringWithCursor must contain a "|" char to indicate cursor position`);
+  }
+
+  const inputValue = expectedStringWithCursor.replace("|", "");
+  is(jsterm.getInputValue(), inputValue, "jsterm has expected value");
+  if (jsterm.inputNode) {
+    is(jsterm.inputNode.selectionStart, jsterm.inputNode.selectionEnd);
+    is(jsterm.inputNode.selectionStart, expectedStringWithCursor.indexOf("|"),
+      assertionInfo);
+  } else {
+    const lines = expectedStringWithCursor.split("\n");
+    const lineWithCursor = lines.findIndex(line => line.includes("|"));
+    const {ch, line} = jsterm.editor.getCursor();
+    is(line, lineWithCursor, assertionInfo + " - correct line");
+    is(ch, lines[lineWithCursor].indexOf("|"), assertionInfo + " - correct ch");
+  }
+}
+
+/**
+ * Returns the jsterm completion value, whether there's CodeMirror enabled or not.
+ *
+ * @param {JsTerm} jsterm
+ * @returns {String}
+ */
+function getJsTermCompletionValue(jsterm) {
+  if (jsterm.completeNode) {
+    return jsterm.completeNode.value;
+  }
+
+  if (jsterm.editor) {
+    return jsterm.editor.getAutoCompletionText();
+  }
+
+  return null;
+}
+
+/**
+ * Returns a boolean indicating if the jsterm is focused, whether there's CodeMirror
+ * enabled or not.
+ *
+ * @param {JsTerm} jsterm
+ * @returns {Boolean}
+ */
+function isJstermFocused(jsterm) {
+  const document = jsterm.outputNode.ownerDocument;
+  const documentIsFocused = document.hasFocus();
+
+  if (jsterm.inputNode) {
+    return document.activeElement == jsterm.inputNode && documentIsFocused;
+  }
+
+  if (jsterm.editor) {
+    return documentIsFocused && jsterm.editor.hasFocus();
+  }
+
+  return false;
 }
 
 /**
@@ -410,7 +567,7 @@ async function openDebugger(options = {}) {
     options.tab = gBrowser.selectedTab;
   }
 
-  const target = TargetFactory.forTab(options.tab);
+  const target = await TargetFactory.forTab(options.tab);
   let toolbox = gDevTools.getToolbox(target);
   const dbgPanelAlreadyOpen = toolbox && toolbox.getPanel("jsdebugger");
   if (dbgPanelAlreadyOpen) {
@@ -419,7 +576,7 @@ async function openDebugger(options = {}) {
     return {
       target,
       toolbox,
-      panel: toolbox.getCurrentPanel()
+      panel: toolbox.getCurrentPanel(),
     };
   }
 
@@ -427,9 +584,17 @@ async function openDebugger(options = {}) {
   const panel = toolbox.getCurrentPanel();
 
   // Do not clear VariableView lazily so it doesn't disturb test ending.
-  panel._view.Variables.lazyEmpty = false;
+  if (panel._view) {
+    panel._view.Variables.lazyEmpty = false;
+  }
 
-  await panel.panelWin.DebuggerController.waitForSourcesLoaded();
+  // Old debugger
+  if (panel.panelWin && panel.panelWin.DebuggerController) {
+    await panel.panelWin.DebuggerController.waitForSourcesLoaded();
+  } else {
+    // New debugger
+    await toolbox.threadClient.getSources();
+  }
   return {target, toolbox, panel};
 }
 
@@ -438,7 +603,7 @@ async function openInspector(options = {}) {
     options.tab = gBrowser.selectedTab;
   }
 
-  const target = TargetFactory.forTab(options.tab);
+  const target = await TargetFactory.forTab(options.tab);
   const toolbox = await gDevTools.showToolbox(target, "inspector");
 
   return toolbox.getCurrentPanel();
@@ -454,7 +619,7 @@ async function openInspector(options = {}) {
  *         A promise that is resolved with the console hud once the web console is open.
  */
 async function openConsole(tab) {
-  const target = TargetFactory.forTab(tab || gBrowser.selectedTab);
+  const target = await TargetFactory.forTab(tab || gBrowser.selectedTab);
   const toolbox = await gDevTools.showToolbox(target, "webconsole");
   return toolbox.getCurrentPanel().hud;
 }
@@ -469,7 +634,7 @@ async function openConsole(tab) {
  *         A promise that is resolved once the web console is closed.
  */
 async function closeConsole(tab = gBrowser.selectedTab) {
-  const target = TargetFactory.forTab(tab);
+  const target = await TargetFactory.forTab(tab);
   const toolbox = gDevTools.getToolbox(target);
   if (toolbox) {
     await toolbox.destroy();
@@ -754,3 +919,212 @@ async function resetFilters(hud) {
   const store = hud.ui.consoleOutput.getStore();
   store.dispatch(wcActions.filtersClear());
 }
+
+/**
+ * Open the reverse search input by simulating the appropriate keyboard shortcut.
+ *
+ * @param {Object} hud
+ * @returns {DOMNode} The reverse search dom node.
+ */
+async function openReverseSearch(hud) {
+  info("Open the reverse search UI with a keyboard shortcut");
+  const onReverseSearchUiOpen = waitFor(() => getReverseSearchElement(hud));
+  const isMacOS = AppConstants.platform === "macosx";
+  if (isMacOS) {
+    EventUtils.synthesizeKey("r", {ctrlKey: true});
+  } else {
+    EventUtils.synthesizeKey("VK_F9");
+  }
+
+  const element = await onReverseSearchUiOpen;
+  return element;
+}
+
+function getReverseSearchElement(hud) {
+  const {outputNode} = hud.ui;
+  return outputNode.querySelector(".reverse-search");
+}
+
+function getReverseSearchInfoElement(hud) {
+  const reverseSearchElement = getReverseSearchElement(hud);
+  if (!reverseSearchElement) {
+    return null;
+  }
+
+  return reverseSearchElement.querySelector(".reverse-search-info");
+}
+
+/**
+ * Returns a boolean indicating if the reverse search input is focused.
+ *
+ * @param {JsTerm} jsterm
+ * @returns {Boolean}
+ */
+function isReverseSearchInputFocused(hud) {
+  const {outputNode} = hud.ui;
+  const document = outputNode.ownerDocument;
+  const documentIsFocused = document.hasFocus();
+  const reverseSearchInput = outputNode.querySelector(".reverse-search-input");
+
+  return document.activeElement == reverseSearchInput && documentIsFocused;
+}
+
+/**
+ * Selects a node in the inspector.
+ *
+ * @param {Object} toolbox
+ * @param {Object} testActor: A test actor registered on the target. Needed to click on
+ *                            the content element.
+ * @param {String} selector: The selector for the node we want to select.
+ */
+async function selectNodeWithPicker(toolbox, testActor, selector) {
+  const inspector = toolbox.getPanel("inspector");
+  const inspectorFront = inspector.inspector;
+
+  const onPickerStarted = inspectorFront.nodePicker.once("picker-started");
+  inspectorFront.nodePicker.start();
+  await onPickerStarted;
+
+  info(`Picker mode started, now clicking on "${selector}" to select that node`);
+  const onPickerStopped = inspectorFront.nodePicker.once("picker-stopped");
+  const onInspectorUpdated = inspector.once("inspector-updated");
+
+  testActor.synthesizeMouse({
+    selector,
+    center: true,
+    options: {},
+  });
+
+  await onPickerStopped;
+  await onInspectorUpdated;
+}
+
+/**
+ * Clicks on the arrow of a single object inspector node if it exists.
+ *
+ * @param {HTMLElement} node: Object inspector node (.tree-node)
+ */
+function expandObjectInspectorNode(node) {
+  const arrow = getObjectInspectorNodeArrow(node);
+  if (!arrow) {
+    ok(false, "Node can't be expanded");
+    return;
+  }
+  arrow.click();
+}
+
+/**
+ * Retrieve the arrow of a single object inspector node.
+ *
+ * @param {HTMLElement} node: Object inspector node (.tree-node)
+ * @return {HTMLElement|null} the arrow element
+ */
+function getObjectInspectorNodeArrow(node) {
+  return node.querySelector(".arrow");
+}
+
+/**
+ * Check if a single object inspector node is expandable.
+ *
+ * @param {HTMLElement} node: Object inspector node (.tree-node)
+ * @return {Boolean} true if the node can be expanded
+ */
+function isObjectInspectorNodeExpandable(node) {
+  return !!getObjectInspectorNodeArrow(node);
+}
+
+/**
+ * Retrieve the nodes for a given object inspector element.
+ *
+ * @param {HTMLElement} oi: Object inspector element
+ * @return {NodeList} the object inspector nodes
+ */
+function getObjectInspectorNodes(oi) {
+  return oi.querySelectorAll(".tree-node");
+}
+
+/**
+ * Retrieve the "children" nodes for a given object inspector node.
+ *
+ * @param {HTMLElement} node: Object inspector node (.tree-node)
+ * @return {Array<HTMLElement>} the direct children (i.e. the ones that are one level
+ *                              deeper than the passed node)
+ */
+function getObjectInspectorChildrenNodes(node) {
+  const getLevel = n => parseInt(n.getAttribute("aria-level"), 10);
+  const level = getLevel(node);
+  const childLevel = level + 1;
+  const children = [];
+
+  let currentNode = node;
+  while (currentNode.nextSibling && getLevel(currentNode.nextSibling) === childLevel) {
+    currentNode = currentNode.nextSibling;
+    children.push(currentNode);
+  }
+
+  return children;
+}
+
+/**
+ * Retrieve the invoke getter button for a given object inspector node.
+ *
+ * @param {HTMLElement} node: Object inspector node (.tree-node)
+ * @return {HTMLElement|null} the invoke button element
+ */
+function getObjectInspectorInvokeGetterButton(node) {
+  return node.querySelector(".invoke-getter");
+}
+
+/**
+ * Retrieve the first node that match the passed node label, for a given object inspector
+ * element.
+ *
+ * @param {HTMLElement} oi: Object inspector element
+ * @param {String} nodeLabel: label of the searched node
+ * @return {HTMLElement|null} the Object inspector node with the matching label
+ */
+function findObjectInspectorNode(oi, nodeLabel) {
+  return [...oi.querySelectorAll(".tree-node")].find(node => {
+    const label = node.querySelector(".object-label");
+    if (!label) {
+      return false;
+    }
+    return label.textContent === nodeLabel;
+  });
+}
+
+/**
+ * Return an array of the label of the autocomplete popup items.
+ *
+ * @param {AutocompletPopup} popup
+ * @returns {Array<String>}
+ */
+function getAutocompletePopupLabels(popup) {
+  return popup.getItems().map(item => item.label);
+}
+
+/**
+ * Return the "Confirm Dialog" element.
+ *
+ * @param toolbox
+ * @returns {HTMLElement|null}
+ */
+function getConfirmDialog(toolbox) {
+  const {doc} = toolbox;
+  return doc.querySelector(".invoke-confirm");
+}
+
+/**
+ * Returns true if the Confirm Dialog is opened.
+ * @param toolbox
+ * @returns {Boolean}
+ */
+function isConfirmDialogOpened(toolbox) {
+  const tooltip = getConfirmDialog(toolbox);
+  if (!tooltip) {
+    return false;
+  }
+
+  return tooltip.classList.contains("tooltip-visible");
+}
+

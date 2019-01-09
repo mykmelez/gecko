@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Value information for devtools.
 
@@ -110,7 +110,7 @@ macro_rules! impl_generic_specified_value_info {
                 $param::collect_completion_keywords(f);
             }
         }
-    }
+    };
 }
 impl_generic_specified_value_info!(Option<T>);
 impl_generic_specified_value_info!(Vec<T>);

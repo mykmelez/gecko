@@ -1,26 +1,25 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Per-node data used in style calculation.
 
-use context::{SharedStyleContext, StackLimitChecker};
-use dom::TElement;
-use invalidation::element::invalidator::InvalidationResult;
-use invalidation::element::restyle_hints::RestyleHint;
+use crate::context::{SharedStyleContext, StackLimitChecker};
+use crate::dom::TElement;
+use crate::invalidation::element::invalidator::InvalidationResult;
+use crate::invalidation::element::restyle_hints::RestyleHint;
+use crate::properties::ComputedValues;
+use crate::rule_tree::StrongRuleNode;
+use crate::selector_parser::{PseudoElement, RestyleDamage, EAGER_PSEUDO_COUNT};
+use crate::shared_lock::StylesheetGuards;
+use crate::style_resolver::{PrimaryStyle, ResolvedElementStyles, ResolvedStyle};
 #[cfg(feature = "gecko")]
 use malloc_size_of::MallocSizeOfOps;
-use properties::ComputedValues;
-use rule_tree::StrongRuleNode;
-use selector_parser::{PseudoElement, RestyleDamage, EAGER_PSEUDO_COUNT};
 use selectors::NthIndexCache;
 use servo_arc::Arc;
-use shared_lock::StylesheetGuards;
-use smallvec::SmallVec;
 use std::fmt;
 use std::mem;
 use std::ops::{Deref, DerefMut};
-use style_resolver::{PrimaryStyle, ResolvedElementStyles, ResolvedStyle};
 
 bitflags! {
     /// Various flags stored on ElementData.
@@ -256,8 +255,8 @@ impl ElementData {
             return InvalidationResult::empty();
         }
 
-        use invalidation::element::invalidator::TreeStyleInvalidator;
-        use invalidation::element::state_and_attributes::StateAndAttrInvalidationProcessor;
+        use crate::invalidation::element::invalidator::TreeStyleInvalidator;
+        use crate::invalidation::element::state_and_attributes::StateAndAttrInvalidationProcessor;
 
         debug!(
             "invalidate_style_if_needed: {:?}, flags: {:?}, has_snapshot: {}, \
@@ -273,20 +272,8 @@ impl ElementData {
             return InvalidationResult::empty();
         }
 
-        let mut non_document_styles = SmallVec::<[_; 3]>::new();
-        let matches_doc_author_rules =
-            element.each_applicable_non_document_style_rule_data(|data, quirks_mode, host| {
-                non_document_styles.push((data, quirks_mode, host.map(|h| h.opaque())))
-            });
-
-        let mut processor = StateAndAttrInvalidationProcessor::new(
-            shared_context,
-            &non_document_styles,
-            matches_doc_author_rules,
-            element,
-            self,
-            nth_index_cache,
-        );
+        let mut processor =
+            StateAndAttrInvalidationProcessor::new(shared_context, element, self, nth_index_cache);
 
         let invalidator = TreeStyleInvalidator::new(element, stack_limit_checker, &mut processor);
 
@@ -314,7 +301,8 @@ impl ElementData {
 
     /// Returns this element's primary style as a resolved style to use for sharing.
     pub fn share_primary_style(&self) -> PrimaryStyle {
-        let reused_via_rule_node = self.flags
+        let reused_via_rule_node = self
+            .flags
             .contains(ElementDataFlags::PRIMARY_STYLE_REUSED_VIA_RULE_NODE);
 
         PrimaryStyle {
@@ -399,7 +387,8 @@ impl ElementData {
         guards: &StylesheetGuards,
     ) -> bool {
         debug_assert!(self.has_styles());
-        let (important_rules, _custom) = self.styles
+        let (important_rules, _custom) = self
+            .styles
             .primary()
             .rules()
             .get_properties_overriding_animations(&guards);

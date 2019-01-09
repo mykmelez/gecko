@@ -113,10 +113,8 @@ locales = [
 [build]
 exclude-multi-locale = [
     "ach",
-    "en-CA",
     "ia",
     "km",
-    "lij",
     "ltg",
     "meh",
     "mix",
@@ -156,8 +154,16 @@ exclude-multi-locale = [
     l10n = "{l}dom/chrome/dom/dom.properties"
 
 [[paths]]
+    reference = "toolkit/locales/en-US/toolkit/about/*Plugins.ftl"
+    l10n = "{l}toolkit/toolkit/about/*Plugins.ftl"
+
+[[paths]]
     reference = "dom/locales/en-US/chrome/plugins.properties"
     l10n = "{l}dom/chrome/plugins.properties"
+
+[[paths]]
+    reference = "toolkit/locales/en-US/toolkit/about/*About.ftl"
+    l10n = "{l}toolkit/toolkit/about/*About.ftl"
 
 [[paths]]
     reference = "toolkit/locales/en-US/chrome/global/aboutAbout.dtd"
@@ -204,6 +210,14 @@ exclude-multi-locale = [
     l10n = "{l}toolkit/chrome/global/aboutSupport.properties"
 
 [[paths]]
+    reference = "toolkit/locales/en-US/toolkit/about/*Support.ftl"
+    l10n = "{l}toolkit/toolkit/about/*Support.ftl"
+
+[[paths]]
+    reference = "toolkit/locales/en-US/crashreporter/*.ftl"
+    l10n = "{l}toolkit/crashreporter/*.ftl"
+
+[[paths]]
     reference = "toolkit/locales/en-US/crashreporter/crashes.dtd"
     l10n = "{l}toolkit/crashreporter/crashes.dtd"
 
@@ -243,8 +257,6 @@ exclude-multi-locale = [
 [[filters]]
     path = "{l}mobile/chrome/region.properties"
     key = [
-        "re:^browser\\.search\\.order\\.[1-9]$",
-        "re:^browser\\.search\\.[a-zA-Z]+\\.US",
         "re:^browser\\.contentHandlers\\.types\\.[0-5]\\..*$",
         "re:^gecko\\.handlerService\\.schemes\\..+$",
         "re:^gecko\\.handlerService\\.defaultHandlersVersion$",

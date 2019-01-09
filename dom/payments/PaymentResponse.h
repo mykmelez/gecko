@@ -7,9 +7,9 @@
 #ifndef mozilla_dom_PaymentResponse_h
 #define mozilla_dom_PaymentResponse_h
 
-#include "mozilla/dom/PaymentResponseBinding.h" // PaymentComplete
+#include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/dom/PaymentResponseBinding.h"  // PaymentComplete
 #include "nsPIDOMWindow.h"
-#include "nsWrapperCache.h"
 #include "nsITimer.h"
 
 namespace mozilla {
@@ -19,30 +19,87 @@ class PaymentAddress;
 class PaymentRequest;
 class Promise;
 
-class PaymentResponse final : public nsITimerCallback,
-                              public nsWrapperCache
-{
-public:
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(PaymentResponse)
+class GeneralData final {
+ public:
+  GeneralData() = default;
+  ~GeneralData() = default;
+  nsString data;
+};
+
+class BasicCardData final {
+ public:
+  struct Address {
+    nsString country;
+    nsTArray<nsString> addressLine;
+    nsString region;
+    nsString regionCode;
+    nsString city;
+    nsString dependentLocality;
+    nsString postalCode;
+    nsString sortingCode;
+    nsString organization;
+    nsString recipient;
+    nsString phone;
+  };
+  BasicCardData() = default;
+  ~BasicCardData() = default;
+
+  nsString cardholderName;
+  nsString cardNumber;
+  nsString expiryMonth;
+  nsString expiryYear;
+  nsString cardSecurityCode;
+  Address billingAddress;
+};
+
+class ResponseData final {
+ public:
+  enum Type { Unknown = 0, GeneralResponse = 1, BasicCardResponse };
+  ResponseData() : mType(ResponseData::Unknown) {}
+  explicit ResponseData(const GeneralData& aGeneralData)
+      : mType(GeneralResponse), mGeneralData(aGeneralData) {}
+  explicit ResponseData(const BasicCardData& aBasicCardData)
+      : mType(BasicCardResponse), mBasicCardData(aBasicCardData) {}
+  ResponseData& operator=(const GeneralData& aGeneralData) {
+    mType = GeneralResponse;
+    mGeneralData = aGeneralData;
+    mBasicCardData = BasicCardData();
+    return *this;
+  }
+  ResponseData& operator=(const BasicCardData& aBasicCardData) {
+    mType = BasicCardResponse;
+    mGeneralData = GeneralData();
+    mBasicCardData = aBasicCardData;
+    return *this;
+  }
+  ~ResponseData() = default;
+
+  const Type& type() const { return mType; }
+  const GeneralData& generalData() const { return mGeneralData; }
+  const BasicCardData& basicCardData() const { return mBasicCardData; }
+
+ private:
+  Type mType;
+  GeneralData mGeneralData;
+  BasicCardData mBasicCardData;
+};
+
+class PaymentResponse final : public DOMEventTargetHelper,
+                              public nsITimerCallback {
+ public:
+  NS_DECL_ISUPPORTS_INHERITED
+
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(PaymentResponse,
+                                                         DOMEventTargetHelper)
 
   NS_IMETHOD Notify(nsITimer* aTimer) override;
 
-  PaymentResponse(nsPIDOMWindowInner* aWindow,
-                  PaymentRequest* aRequest,
-                  const nsAString& aRequestId,
-                  const nsAString& aMethodName,
+  PaymentResponse(nsPIDOMWindowInner* aWindow, PaymentRequest* aRequest,
+                  const nsAString& aRequestId, const nsAString& aMethodName,
                   const nsAString& aShippingOption,
-                  RefPtr<PaymentAddress> aShippingAddress,
-                  const nsAString& aDetails,
-                  const nsAString& aPayerName,
-                  const nsAString& aPayerEmail,
-                  const nsAString& aPayerPhone);
-
-  nsPIDOMWindowInner* GetParentObject() const
-  {
-    return mOwner;
-  }
+                  PaymentAddress* aShippingAddress,
+                  const ResponseData& aDetails, const nsAString& aPayerName,
+                  const nsAString& aPayerEmail, const nsAString& aPayerPhone);
 
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override;
@@ -69,16 +126,41 @@ public:
 
   void RespondComplete();
 
-protected:
+  IMPL_EVENT_HANDLER(payerdetailchange);
+
+  nsresult UpdatePayerDetail(const nsAString& aPayerName,
+                             const nsAString& aPayerEmail,
+                             const nsAString& aPayerPhone);
+
+  already_AddRefed<Promise> Retry(JSContext* aCx,
+                                  const PaymentValidationErrors& errorField,
+                                  ErrorResult& aRv);
+
+  void RespondRetry(const nsAString& aMethodName,
+                    const nsAString& aShippingOption,
+                    PaymentAddress* aShippingAddress,
+                    const ResponseData& aDetails, const nsAString& aPayerName,
+                    const nsAString& aPayerEmail, const nsAString& aPayerPhone);
+  void RejectRetry(nsresult aRejectReason);
+
+ protected:
   ~PaymentResponse();
 
-private:
-  nsCOMPtr<nsPIDOMWindowInner> mOwner;
+  nsresult ValidatePaymentValidationErrors(
+      const PaymentValidationErrors& aErrors);
+
+  nsresult ConvertPaymentMethodErrors(JSContext* aCx,
+                                      const PaymentValidationErrors& aErrors,
+                                      nsAString& aErrorMsg) const;
+
+  nsresult DispatchUpdateEvent(const nsAString& aType);
+
+ private:
   bool mCompleteCalled;
   PaymentRequest* mRequest;
   nsString mRequestId;
   nsString mMethodName;
-  nsString mDetails;
+  ResponseData mDetails;
   nsString mShippingOption;
   nsString mPayerName;
   nsString mPayerEmail;
@@ -89,9 +171,11 @@ private:
   // Timer for timing out if the page doesn't call
   // complete()
   nsCOMPtr<nsITimer> mTimer;
+  // Promise for "PaymentResponse::Retry"
+  RefPtr<Promise> mRetryPromise;
 };
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla
 
-#endif // mozilla_dom_PaymentResponse_h
+#endif  // mozilla_dom_PaymentResponse_h

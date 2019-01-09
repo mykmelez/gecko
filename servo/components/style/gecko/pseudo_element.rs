@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Gecko's definition of a pseudo-element.
 //!
@@ -8,14 +8,16 @@
 //! `pseudo_element_definition.mako.rs`. If you touch that file, you probably
 //! need to update the checked-in files for Servo.
 
+use crate::gecko_bindings::structs::{self, CSSPseudoElementType};
+use crate::properties::longhands::display::computed_value::T as Display;
+use crate::properties::{ComputedValues, PropertyFlags};
+use crate::selector_parser::{NonTSPseudoClass, PseudoElementCascadeType, SelectorImpl};
+use crate::str::{starts_with_ignore_ascii_case, string_as_ascii_lowercase};
+use crate::string_cache::Atom;
+use crate::values::serialize_atom_identifier;
 use cssparser::ToCss;
-use gecko_bindings::structs::{self, CSSPseudoElementType};
-use properties::{CascadeFlags, ComputedValues, PropertyFlags};
-use properties::longhands::display::computed_value::T as Display;
-use selector_parser::{NonTSPseudoClass, PseudoElementCascadeType, SelectorImpl};
 use std::fmt;
-use string_cache::Atom;
-use values::serialize_atom_identifier;
+use thin_slice::ThinBoxedSlice;
 
 include!(concat!(
     env!("OUT_DIR"),
@@ -24,6 +26,16 @@ include!(concat!(
 
 impl ::selectors::parser::PseudoElement for PseudoElement {
     type Impl = SelectorImpl;
+
+    // ::slotted() should support all tree-abiding pseudo-elements, see
+    // https://drafts.csswg.org/css-scoping/#slotted-pseudo
+    // https://drafts.csswg.org/css-pseudo-4/#treelike
+    fn valid_after_slotted(&self) -> bool {
+        matches!(
+            *self,
+            PseudoElement::Before | PseudoElement::After | PseudoElement::Placeholder
+        )
+    }
 
     fn supports_pseudo_class(&self, pseudo_class: &NonTSPseudoClass) -> bool {
         if !self.supports_user_action_state() {
@@ -53,15 +65,6 @@ impl PseudoElement {
         }
 
         PseudoElementCascadeType::Lazy
-    }
-
-    /// The CascadeFlags needed to cascade this pseudo-element.
-    ///
-    /// This is only needed to support the broken INHERIT_ALL pseudo mode for
-    /// Servo.
-    #[inline]
-    pub fn cascade_flags(&self) -> CascadeFlags {
-        CascadeFlags::empty()
     }
 
     /// Whether the pseudo-element should inherit from the default computed
@@ -161,15 +164,6 @@ impl PseudoElement {
     #[inline]
     pub fn is_precomputed(&self) -> bool {
         self.is_anon_box() && !self.is_tree_pseudo_element()
-    }
-
-    /// Covert non-canonical pseudo-element to canonical one, and keep a
-    /// canonical one as it is.
-    pub fn canonical(&self) -> PseudoElement {
-        match *self {
-            PseudoElement::MozPlaceholder => PseudoElement::Placeholder,
-            _ => self.clone(),
-        }
     }
 
     /// Property flag that properties must have to apply to this pseudo-element.

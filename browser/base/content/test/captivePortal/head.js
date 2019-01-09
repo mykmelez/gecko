@@ -20,22 +20,13 @@ async function setupPrefsAndRecentWindowBehavior() {
   // We need to test behavior when a portal is detected when there is no browser
   // window, but we can't close the default window opened by the test harness.
   // Instead, we deactivate CaptivePortalWatcher in the default window and
-  // exclude it from BrowserWindowTracker.getTopWindow in an attempt to
-  // mask its presence.
+  // exclude it using an attribute to mask its presence.
   window.CaptivePortalWatcher.uninit();
-  let getTopWindowCopy = BrowserWindowTracker.getTopWindow;
-  let defaultWindow = window;
-  BrowserWindowTracker.getTopWindow = () => {
-    let win = getTopWindowCopy();
-    if (win == defaultWindow) {
-      return null;
-    }
-    return win;
-  };
+  window.document.documentElement.setAttribute("ignorecaptiveportal", "true");
 
   registerCleanupFunction(function cleanUp() {
-    BrowserWindowTracker.getTopWindow = getTopWindowCopy;
     window.CaptivePortalWatcher.init();
+    window.document.documentElement.removeAttribute("ignorecaptiveportal");
   });
 }
 
@@ -69,7 +60,9 @@ async function focusWindowAndWaitForPortalUI(aLongRecheck, win) {
   if (!win) {
     win = await BrowserTestUtils.openNewBrowserWindow();
   }
-  await SimpleTest.promiseFocus(win);
+  let windowActivePromise = waitForBrowserWindowActive(win);
+  win.focus();
+  await windowActivePromise;
 
   // After a new window is opened, CaptivePortalWatcher asks for a recheck, and
   // waits for it to complete. We need to manually tell it a recheck completed.
@@ -105,9 +98,8 @@ function ensurePortalTab(win) {
 }
 
 function ensurePortalNotification(win) {
-  let notificationBox =
-    win.document.getElementById("high-priority-global-notificationbox");
-  let notification = notificationBox.getNotificationWithValue(PORTAL_NOTIFICATION_VALUE);
+  let notification = win.gHighPriorityNotificationBox.getNotificationWithValue(
+                                                  PORTAL_NOTIFICATION_VALUE);
   isnot(notification, null,
     "There should be a captive portal notification in the window.");
   return notification;
@@ -129,34 +121,42 @@ function ensureNoPortalTab(win) {
 }
 
 function ensureNoPortalNotification(win) {
-  let notificationBox =
-    win.document.getElementById("high-priority-global-notificationbox");
-  is(notificationBox.getNotificationWithValue(PORTAL_NOTIFICATION_VALUE), null,
+  is(win.gHighPriorityNotificationBox
+    .getNotificationWithValue(PORTAL_NOTIFICATION_VALUE), null,
     "There should be no captive portal notification in the window.");
 }
 
 /**
  * Some tests open a new window and close it later. When the window is closed,
- * the original window opened by mochitest gains focus, generating a
- * xul-window-visible notification. If the next test also opens a new window
- * before this notification has a chance to fire, CaptivePortalWatcher picks
+ * the original window opened by mochitest gains focus, generating an
+ * activate event. If the next test also opens a new window
+ * before this event has a chance to fire, CaptivePortalWatcher picks
  * up the first one instead of the one from the new window. To avoid this
- * unfortunate intermittent timing issue, we wait for the notification from
+ * unfortunate intermittent timing issue, we wait for the event from
  * the original window every time we close a window that we opened.
  */
-function waitForXulWindowVisible() {
+function waitForBrowserWindowActive(win) {
   return new Promise(resolve => {
-    Services.obs.addObserver(function observe() {
-      Services.obs.removeObserver(observe, "xul-window-visible");
+    if (Services.focus.activeWindow == win) {
       resolve();
-    }, "xul-window-visible");
+    } else {
+      win.addEventListener("activate", () => {
+        resolve();
+      }, { once: true });
+    }
   });
 }
 
-async function closeWindowAndWaitForXulWindowVisible(win) {
-  let p = waitForXulWindowVisible();
+async function closeWindowAndWaitForWindowActivate(win) {
+  let activationPromises = [];
+  for (let w of BrowserWindowTracker.orderedWindows) {
+    if (w != win &&
+        !win.document.documentElement.getAttribute("ignorecaptiveportal")) {
+      activationPromises.push(waitForBrowserWindowActive(win));
+    }
+  }
   await BrowserTestUtils.closeWindow(win);
-  await p;
+  await Promise.race(activationPromises);
 }
 
 /**
@@ -166,6 +166,6 @@ async function closeWindowAndWaitForXulWindowVisible(win) {
  */
 async function openWindowAndWaitForFocus() {
   let win = await BrowserTestUtils.openNewBrowserWindow();
-  await SimpleTest.promiseFocus(win);
+  await waitForBrowserWindowActive(win);
   return win;
 }

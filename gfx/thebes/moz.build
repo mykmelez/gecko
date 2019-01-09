@@ -53,7 +53,6 @@ EXPORTS += [
     'gfxTypes.h',
     'gfxUserFontSet.h',
     'gfxUtils.h',
-    'RoundedRect.h',
     'SoftwareVsyncSource.h',
     'VsyncSource.h',
 ]
@@ -233,13 +232,6 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     SOURCES += [
         'DeviceManagerDx.cpp',
     ]
-    if CONFIG['MOZ_ENABLE_SKIA_PDF']:
-        EXPORTS.mozilla.gfx += [
-            'PrintTargetEMF.h',
-        ]
-        UNIFIED_SOURCES += [
-            'PrintTargetEMF.cpp',
-        ]
 
 if CONFIG['MOZ_ENABLE_SKIA_PDF']:
     EXPORTS.mozilla.gfx += [
@@ -289,3 +281,6 @@ DEFINES['GRAPHITE2_STATIC'] = True
 if CONFIG['CC_TYPE'] == 'clang':
     # Suppress warnings from Skia header files.
     SOURCES['gfxPlatform.cpp'].flags += ['-Wno-implicit-fallthrough']
+
+if CONFIG['CC_TYPE'] == 'clang-cl':
+    AllowCompilerWarnings()  # workaround for bug 1090497

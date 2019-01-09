@@ -9,10 +9,10 @@ add_task(async function() {
 
   await BrowserTestUtils.withNewTab({ gBrowser, url: "about:home" }, async function(browser) {
     // Add a test engine that provides suggestions and switch to it.
-    let currEngine = Services.search.currentEngine;
+    let currEngine = Services.search.defaultEngine;
     let engine = await promiseNewEngine("searchSuggestionEngine.xml");
     let p = promiseContentSearchChange(browser, engine.name);
-    Services.search.currentEngine = engine;
+    Services.search.defaultEngine = engine;
     await p;
 
     await ContentTask.spawn(browser, null, async function() {
@@ -58,35 +58,25 @@ add_task(async function() {
       composition: {
         string: "x",
         clauses: [
-          { length: 1, attr: Ci.nsITextInputProcessor.ATTR_RAW_CLAUSE }
-        ]
+          { length: 1, attr: Ci.nsITextInputProcessor.ATTR_RAW_CLAUSE },
+        ],
       },
-      caret: { start: 1, length: 0 }
+      caret: { start: 1, length: 0 },
     }, browser);
 
     info("Waiting for search suggestion table unhidden");
     await mutationPromise;
 
     // Click the second suggestion.
-    let expectedURL = Services.search.currentEngine
+    let expectedURL = Services.search.defaultEngine
       .getSubmission("xbar", null, "homepage").uri.spec;
     let loadPromise = waitForDocLoadAndStopIt(expectedURL);
     await BrowserTestUtils.synthesizeMouseAtCenter("#TEMPID", {
-      button: 0
+      button: 0,
     }, browser);
     await loadPromise;
 
-    await ContentTask.spawn(browser, null, async function() {
-      let input = content.document.querySelector(["#searchText", "#newtab-search-text"]);
-      ok(input.value == "x", "Input value did not change");
-
-      let row = content.document.getElementById("TEMPID");
-      if (row) {
-        row.removeAttribute("id");
-      }
-    });
-
-    Services.search.currentEngine = currEngine;
+    Services.search.defaultEngine = currEngine;
     try {
       Services.search.removeEngine(engine);
     } catch (ex) { }

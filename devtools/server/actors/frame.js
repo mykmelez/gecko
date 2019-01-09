@@ -50,7 +50,14 @@ const FrameActor = ActorClassWithSpec(frameSpec, {
   },
 
   getEnvironment: function() {
-    if (!this.frame.environment) {
+    try {
+      if (!this.frame.environment) {
+        return {};
+      }
+    } catch (e) {
+      // |this.frame| might not be live. FIXME Bug 1477030 we shouldn't be
+      // using frames we derived from a point where we are not currently
+      // paused at.
       return {};
     }
 
@@ -94,7 +101,7 @@ const FrameActor = ActorClassWithSpec(frameSpec, {
       form.where = {
         source: generatedLocation.generatedSourceActor.form(),
         line: generatedLocation.generatedLine,
-        column: generatedLocation.generatedColumn
+        column: generatedLocation.generatedColumn,
       };
     }
 
@@ -112,7 +119,7 @@ const FrameActor = ActorClassWithSpec(frameSpec, {
 
     return this.frame.arguments.map(arg => createValueGrip(arg,
       this.threadActor._pausePool, this.threadActor.objectGrip));
-  }
+  },
 });
 
 exports.FrameActor = FrameActor;

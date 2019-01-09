@@ -1,22 +1,23 @@
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.default = createSimplePath;
-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-function createSimplePath(ancestors) {
+
+// @flow
+
+import type { Node, TraversalAncestors } from "@babel/types";
+export type { Node, TraversalAncestors };
+
+export default function createSimplePath(ancestors: TraversalAncestors) {
   if (ancestors.length === 0) {
     return null;
-  } // Slice the array because babel-types traverse may continue mutating
+  }
+
+  // Slice the array because babel-types traverse may continue mutating
   // the ancestors array in later traversal logic.
-
-
   return new SimplePath(ancestors.slice());
 }
+
+export type { SimplePath };
 
 /**
  * Mimics @babel/traverse's NodePath API in a simpler fashion that isn't as
@@ -24,7 +25,16 @@ function createSimplePath(ancestors) {
  * AST structures.
  */
 class SimplePath {
-  constructor(ancestors, index = ancestors.length - 1) {
+  _index: number;
+  _ancestors: TraversalAncestors;
+  _ancestor: $ElementType<TraversalAncestors, number>;
+
+  _parentPath: SimplePath | null | void;
+
+  constructor(
+    ancestors: TraversalAncestors,
+    index: number = ancestors.length - 1
+  ) {
     if (index < 0 || index >= ancestors.length) {
       console.error(ancestors);
       throw new Error("Created invalid path");
@@ -35,32 +45,26 @@ class SimplePath {
     this._index = index;
   }
 
-  get parentPath() {
+  get parentPath(): SimplePath | null {
     let path = this._parentPath;
-
     if (path === undefined) {
       if (this._index === 0) {
         path = null;
       } else {
         path = new SimplePath(this._ancestors, this._index - 1);
       }
-
       this._parentPath = path;
     }
 
     return path;
   }
 
-  get parent() {
+  get parent(): Node {
     return this._ancestor.node;
   }
 
-  get node() {
-    const {
-      node,
-      key,
-      index
-    } = this._ancestor;
+  get node(): Node {
+    const { node, key, index } = this._ancestor;
 
     if (typeof index === "number") {
       return node[key][index];
@@ -69,17 +73,19 @@ class SimplePath {
     return node[key];
   }
 
-  set node(replacement) {
+  get key(): string {
+    return this._ancestor.key;
+  }
+
+  set node(replacement: Node): void {
     if (this.type !== "Identifier") {
-      throw new Error("Replacing anything other than leaf nodes is undefined behavior " + "in t.traverse()");
+      throw new Error(
+        "Replacing anything other than leaf nodes is undefined behavior " +
+          "in t.traverse()"
+      );
     }
 
-    const {
-      node,
-      key,
-      index
-    } = this._ancestor;
-
+    const { node, key, index } = this._ancestor;
     if (typeof index === "number") {
       node[key][index] = replacement;
     } else {
@@ -87,18 +93,16 @@ class SimplePath {
     }
   }
 
-  get type() {
+  get type(): string {
     return this.node.type;
   }
 
-  get inList() {
+  get inList(): boolean {
     return typeof this._ancestor.index === "number";
   }
 
-  get containerIndex() {
-    const {
-      index
-    } = this._ancestor;
+  get containerIndex(): number {
+    const { index } = this._ancestor;
 
     if (typeof index !== "number") {
       throw new Error("Cannot get index of non-array node");
@@ -107,25 +111,24 @@ class SimplePath {
     return index;
   }
 
-  get depth() {
+  get depth(): number {
     return this._index;
   }
 
-  replace(node) {
+  replace(node: Node) {
     this.node = node;
   }
 
-  find(predicate) {
+  find(predicate: SimplePath => boolean): SimplePath | null {
     for (let path = this; path; path = path.parentPath) {
       if (predicate(path)) {
         return path;
       }
     }
-
     return null;
   }
 
-  findParent(predicate) {
+  findParent(predicate: SimplePath => boolean): SimplePath | null {
     if (!this.parentPath) {
       throw new Error("Cannot use findParent on root path");
     }
@@ -133,29 +136,22 @@ class SimplePath {
     return this.parentPath.find(predicate);
   }
 
-  getSibling(offset) {
-    const {
-      node,
-      key,
-      index
-    } = this._ancestor;
+  getSibling(offset: number): ?SimplePath {
+    const { node, key, index } = this._ancestor;
 
     if (typeof index !== "number") {
       throw new Error("Non-array nodes do not have siblings");
     }
 
     const container = node[key];
-    const siblingIndex = index + offset;
 
+    const siblingIndex = index + offset;
     if (siblingIndex < 0 || siblingIndex >= container.length) {
       return null;
     }
 
-    return new SimplePath(this._ancestors.slice(0, -1).concat([{
-      node,
-      key,
-      index: siblingIndex
-    }]));
+    return new SimplePath(
+      this._ancestors.slice(0, -1).concat([{ node, key, index: siblingIndex }])
+    );
   }
-
 }

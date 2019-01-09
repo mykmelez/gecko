@@ -5,7 +5,6 @@
 var EXPORTED_SYMBOLS = ["CommonDialog"];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "EnableDelayHelper",
                                "resource://gre/modules/SharedPromptUtils.jsm");
 
@@ -139,6 +138,7 @@ CommonDialog.prototype = {
         if (label) {
             // Only show the checkbox if label has a value.
             this.ui.checkboxContainer.hidden = false;
+            this.ui.checkboxContainer.clientTop; // style flush to assure binding is attached
             this.setLabelForNode(this.ui.checkbox, label);
             this.ui.checkbox.checked = this.args.checked;
         }
@@ -162,6 +162,11 @@ CommonDialog.prototype = {
         else
             button.setAttribute("default", "true");
 
+        // For tab prompts, we will need to ensure its content bindings are attached.
+        if (!xulDialog) {
+            this.ui.prompt.ensureXBLBindingAttached();
+        }
+
         // Set default focus / selection.
         this.setDefaultFocus(true);
 
@@ -169,7 +174,7 @@ CommonDialog.prototype = {
             this.delayHelper = new EnableDelayHelper({
                 disableDialog: () => this.setButtonsEnabledState(false),
                 enableDialog: () => this.setButtonsEnabledState(true),
-                focusTarget: this.ui.focusTarget
+                focusTarget: this.ui.focusTarget,
             });
         }
 
@@ -184,10 +189,13 @@ CommonDialog.prototype = {
             Cu.reportError("Couldn't play common dialog event sound: " + e);
         }
 
-        let topic = "common-dialog-loaded";
-        if (!xulDialog)
-            topic = "tabmodal-dialog-loaded";
-        Services.obs.notifyObservers(this.ui.prompt, topic);
+        if (xulDialog) {
+            // ui.prompt is the window object of the dialog.
+            Services.obs.notifyObservers(this.ui.prompt, "common-dialog-loaded");
+        } else {
+            // ui.promptContainer is the <tabmodalprompt> element.
+            Services.obs.notifyObservers(this.ui.promptContainer, "tabmodal-dialog-loaded");
+        }
     },
 
     setLabelForNode(aNode, aLabel) {

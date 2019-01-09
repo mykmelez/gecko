@@ -17,7 +17,7 @@ const IO_SERVICE_CONTRACTID = "@mozilla.org/network/io-service;1"
 const BLANK_URL_FOR_CLEARING = "data:text/html;charset=UTF-8,%3C%21%2D%2DCLEAR%2D%2D%3E";
 
 Cu.import("resource://gre/modules/Timer.jsm");
-Cu.import("chrome://reftest/content/AsyncSpellCheckTestHelper.jsm");
+Cu.import("resource://reftest/AsyncSpellCheckTestHelper.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
 var gBrowserIsRemote;
@@ -65,8 +65,7 @@ function webNavigation() {
 }
 
 function windowUtilsForWindow(w) {
-    return w.QueryInterface(Ci.nsIInterfaceRequestor)
-            .getInterface(Ci.nsIDOMWindowUtils);
+    return w.windowUtils;
 }
 
 function windowUtils() {
@@ -266,8 +265,7 @@ function printToPdf(callback) {
         ps.endPageRange = +range[1] || 1;
     }
 
-    let webBrowserPrint = content.QueryInterface(Ci.nsIInterfaceRequestor)
-                                 .getInterface(Ci.nsIWebBrowserPrint);
+    let webBrowserPrint = content.getInterface(Ci.nsIWebBrowserPrint);
     webBrowserPrint.print(ps, {
         onStateChange: function(webProgress, request, stateFlags, status) {
             if (stateFlags & Ci.nsIWebProgressListener.STATE_STOP &&
@@ -294,8 +292,8 @@ function setupViewport(contentRootElement) {
     var sw = attrOrDefault(contentRootElement, "reftest-scrollport-w", 0);
     var sh = attrOrDefault(contentRootElement, "reftest-scrollport-h", 0);
     if (sw !== 0 || sh !== 0) {
-        LogInfo("Setting scrollport to <w=" + sw + ", h=" + sh + ">");
-        windowUtils().setScrollPositionClampingScrollPortSize(sw, sh);
+        LogInfo("Setting viewport to <w=" + sw + ", h=" + sh + ">");
+        windowUtils().setVisualViewportSize(sw, sh);
     }
 
     // XXX support resolution when needed
@@ -497,8 +495,7 @@ function FlushRendering(aFlushMode) {
     var anyPendingPaintsGeneratedInDescendants = false;
 
     function flushWindow(win) {
-        var utils = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                    .getInterface(Ci.nsIDOMWindowUtils);
+        var utils = win.windowUtils;
         var afterPaintWasPending = utils.isMozAfterPaintPending;
 
         var root = win.document.documentElement;
@@ -696,9 +693,7 @@ function WaitForTestEnd(contentRootElement, inPrintMode, spellCheckedElements) {
             };
             os.addObserver(flushWaiter, "apz-repaints-flushed");
 
-            var willSnapshot = (gCurrentTestType != TYPE_SCRIPT) &&
-                               (gCurrentTestType != TYPE_LOAD) &&
-                               (gCurrentTestType != TYPE_PRINT);
+            var willSnapshot = IsSnapshottableTestType();
             var noFlush =
                 !(contentRootElement &&
                   contentRootElement.classList.contains("reftest-no-flush"));
@@ -757,6 +752,17 @@ function WaitForTestEnd(contentRootElement, inPrintMode, spellCheckedElements) {
               }
               CheckLayerAssertions(contentRootElement);
             }
+
+            if (!IsSnapshottableTestType()) {
+              // If we're not snapshotting the test, at least do a sync round-trip
+              // to the compositor to ensure that all the rendering messages
+              // related to this test get processed. Otherwise problems triggered
+              // by this test may only manifest as failures in a later test.
+              LogInfo("MakeProgress: Doing sync flush to compositor");
+              gFailureReason = "timed out while waiting for sync compositor flush"
+              windowUtils().syncFlushCompositor();
+            }
+
             LogInfo("MakeProgress: Completed");
             state = STATE_COMPLETED;
             gFailureReason = "timed out while taking snapshot (bug in harness?)";
@@ -1075,7 +1081,8 @@ function DoAssertionCheck()
 function LoadURI(uri)
 {
     var flags = webNavigation().LOAD_FLAGS_NONE;
-    webNavigation().loadURI(uri, flags, null, null, null);
+    var systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
+    webNavigation().loadURI(uri, flags, null, null, null, systemPrincipal);
 }
 
 function LogWarning(str)
@@ -1096,14 +1103,19 @@ function LogInfo(str)
     }
 }
 
+function IsSnapshottableTestType()
+{
+    // Script, load-only, and PDF-print tests do not need any snapshotting.
+    return !(gCurrentTestType == TYPE_SCRIPT ||
+             gCurrentTestType == TYPE_LOAD ||
+             gCurrentTestType == TYPE_PRINT);
+}
+
 const SYNC_DEFAULT = 0x0;
 const SYNC_ALLOW_DISABLE = 0x1;
 function SynchronizeForSnapshot(flags)
 {
-    if (gCurrentTestType == TYPE_SCRIPT ||
-        gCurrentTestType == TYPE_LOAD ||
-        gCurrentTestType == TYPE_PRINT) {
-        // Script, load-only, and PDF-print tests do not need any snapshotting.
+    if (!IsSnapshottableTestType()) {
         return;
     }
 

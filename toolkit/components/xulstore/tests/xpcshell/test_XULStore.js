@@ -4,6 +4,7 @@
 
 "use strict";
 
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
 var XULStore = null;
@@ -25,30 +26,11 @@ function checkValueExists(uri, id, attr, exists) {
 }
 
 function getIDs(uri) {
-  let it = XULStore.getIDsEnumerator(uri);
-  let result = [];
-
-  while (it.hasMore()) {
-    let value = it.getNext();
-    result.push(value);
-  }
-
-  result.sort();
-  return result;
+  return Array.from(XULStore.getIDsEnumerator(uri)).sort();
 }
 
 function getAttributes(uri, id) {
-  let it = XULStore.getAttributeEnumerator(uri, id);
-
-  let result = [];
-
-  while (it.hasMore()) {
-    let value = it.getNext();
-    result.push(value);
-  }
-
-  result.sort();
-  return result;
+  return Array.from(XULStore.getAttributeEnumerator(uri, id)).sort();
 }
 
 function checkArrays(a, b) {
@@ -59,7 +41,7 @@ function checkArrays(a, b) {
 
 add_task(async function setup() {
   // Set a value that a future test depends on manually
-  XULStore = Cc["@mozilla.org/xul/xulstore;1"].getService(Ci.nsIXULStore);
+  XULStore = Services.xulStore;
   XULStore.setValue(browserURI, "main-window", "width", "994");
 });
 

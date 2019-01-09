@@ -8,37 +8,12 @@
 
 #include "libANGLE/angletypes.h"
 #include "libANGLE/Program.h"
-#include "libANGLE/VertexAttribute.h"
 #include "libANGLE/State.h"
 #include "libANGLE/VertexArray.h"
+#include "libANGLE/VertexAttribute.h"
 
 namespace gl
 {
-
-PrimitiveType GetPrimitiveType(GLenum drawMode)
-{
-    switch (drawMode)
-    {
-        case GL_POINTS:
-            return PRIMITIVE_POINTS;
-        case GL_LINES:
-            return PRIMITIVE_LINES;
-        case GL_LINE_STRIP:
-            return PRIMITIVE_LINE_STRIP;
-        case GL_LINE_LOOP:
-            return PRIMITIVE_LINE_LOOP;
-        case GL_TRIANGLES:
-            return PRIMITIVE_TRIANGLES;
-        case GL_TRIANGLE_STRIP:
-            return PRIMITIVE_TRIANGLE_STRIP;
-        case GL_TRIANGLE_FAN:
-            return PRIMITIVE_TRIANGLE_FAN;
-        default:
-            UNREACHABLE();
-            return PRIMITIVE_TYPE_MAX;
-    }
-}
-
 RasterizerState::RasterizerState()
 {
     memset(this, 0, sizeof(RasterizerState));
@@ -190,6 +165,22 @@ static void MinMax(int a, int b, int *minimum, int *maximum)
     }
 }
 
+Rectangle Rectangle::removeReversal() const
+{
+    Rectangle unreversed = *this;
+    if (isReversedX())
+    {
+        unreversed.x     = unreversed.x + unreversed.width;
+        unreversed.width = -unreversed.width;
+    }
+    if (isReversedY())
+    {
+        unreversed.y      = unreversed.y + unreversed.height;
+        unreversed.height = -unreversed.height;
+    }
+    return unreversed;
+}
+
 bool ClipRectangle(const Rectangle &source, const Rectangle &clip, Rectangle *intersection)
 {
     int minSourceX, maxSourceX, minSourceY, maxSourceY;
@@ -200,36 +191,25 @@ bool ClipRectangle(const Rectangle &source, const Rectangle &clip, Rectangle *in
     MinMax(clip.x, clip.x + clip.width, &minClipX, &maxClipX);
     MinMax(clip.y, clip.y + clip.height, &minClipY, &maxClipY);
 
-    if (minSourceX >= maxClipX || maxSourceX <= minClipX || minSourceY >= maxClipY || maxSourceY <= minClipY)
+    if (minSourceX >= maxClipX || maxSourceX <= minClipX || minSourceY >= maxClipY ||
+        maxSourceY <= minClipY)
     {
-        if (intersection)
-        {
-            intersection->x = minSourceX;
-            intersection->y = maxSourceY;
-            intersection->width = maxSourceX - minSourceX;
-            intersection->height = maxSourceY - minSourceY;
-        }
-
         return false;
     }
-    else
+    if (intersection)
     {
-        if (intersection)
-        {
-            intersection->x = std::max(minSourceX, minClipX);
-            intersection->y = std::max(minSourceY, minClipY);
-            intersection->width  = std::min(maxSourceX, maxClipX) - std::max(minSourceX, minClipX);
-            intersection->height = std::min(maxSourceY, maxClipY) - std::max(minSourceY, minClipY);
-        }
-
-        return true;
+        intersection->x      = std::max(minSourceX, minClipX);
+        intersection->y      = std::max(minSourceY, minClipY);
+        intersection->width  = std::min(maxSourceX, maxClipX) - std::max(minSourceX, minClipX);
+        intersection->height = std::min(maxSourceY, maxClipY) - std::max(minSourceY, minClipY);
     }
+    return true;
 }
 
 bool Box::operator==(const Box &other) const
 {
-    return (x == other.x && y == other.y && z == other.z &&
-            width == other.width && height == other.height && depth == other.depth);
+    return (x == other.x && y == other.y && z == other.z && width == other.width &&
+            height == other.height && depth == other.depth);
 }
 
 bool Box::operator!=(const Box &other) const

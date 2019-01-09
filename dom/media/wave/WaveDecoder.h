@@ -6,18 +6,23 @@
 #if !defined(WaveDecoder_h_)
 #define WaveDecoder_h_
 
+#include "mozilla/UniquePtr.h"
+#include "nsTArray.h"
+
 namespace mozilla {
 
 class MediaContainerType;
+class TrackInfo;
 
-class WaveDecoder
-{
-public:
+class WaveDecoder {
+ public:
   // Returns true if the Wave backend is pref'ed on, and we're running on a
   // platform that is likely to have decoders for the format.
   static bool IsSupportedType(const MediaContainerType& aContainerType);
+  static nsTArray<UniquePtr<TrackInfo>> GetTracksInfo(
+      const MediaContainerType& aType);
 };
 
-} // namespace mozilla
+}  // namespace mozilla
 
 #endif

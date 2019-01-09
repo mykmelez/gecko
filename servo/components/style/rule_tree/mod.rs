@@ -1,26 +1,26 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #![allow(unsafe_code)]
 
 //! The rule tree.
 
-use applicable_declarations::ApplicableDeclarationList;
+use crate::applicable_declarations::ApplicableDeclarationList;
 #[cfg(feature = "gecko")]
-use gecko::selector_parser::PseudoElement;
+use crate::gecko::selector_parser::PseudoElement;
+use crate::properties::{Importance, LonghandIdSet, PropertyDeclarationBlock};
+use crate::shared_lock::{Locked, SharedRwLockReadGuard, StylesheetGuards};
+use crate::stylesheets::StyleRule;
+use crate::thread_state;
 #[cfg(feature = "gecko")]
 use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
-use properties::{Importance, LonghandIdSet, PropertyDeclarationBlock};
-use servo_arc::{Arc, ArcBorrow, ArcUnion, ArcUnionBorrow, NonZeroPtrMut};
-use shared_lock::{Locked, SharedRwLockReadGuard, StylesheetGuards};
+use servo_arc::{Arc, ArcBorrow, ArcUnion, ArcUnionBorrow};
 use smallvec::SmallVec;
 use std::io::{self, Write};
 use std::mem;
 use std::ptr;
 use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
-use stylesheets::StyleRule;
-use thread_state;
 
 /// The rule tree, the structure servo uses to preserve the results of selector
 /// matching.
@@ -453,6 +453,7 @@ impl RuleTree {
                         StyleSource::from_declarations(pdb.clone_arc()),
                         level,
                     );
+                    *important_rules_changed = true;
                 }
             } else {
                 if pdb.read_with(level.guard(guards)).any_normal() {
@@ -488,7 +489,8 @@ impl RuleTree {
             return path.clone();
         }
 
-        let iter = path.self_and_ancestors()
+        let iter = path
+            .self_and_ancestors()
             .take_while(|node| node.cascade_level() >= CascadeLevel::SMILOverride);
         let mut last = path;
         let mut children = SmallVec::<[_; 10]>::new();
@@ -525,7 +527,8 @@ impl RuleTree {
             path,
             guards,
             &mut dummy,
-        ).expect("Should return a valid rule node")
+        )
+        .expect("Should return a valid rule node")
     }
 }
 
@@ -729,9 +732,9 @@ unsafe impl Send for RuleTree {}
 #[cfg(feature = "gecko")]
 #[cfg(debug_assertions)]
 mod gecko_leak_checking {
+    use super::RuleNode;
     use std::mem::size_of;
     use std::os::raw::{c_char, c_void};
-    use super::RuleNode;
 
     extern "C" {
         pub fn NS_LogCtor(aPtr: *const c_void, aTypeName: *const c_char, aSize: u32);
@@ -937,18 +940,19 @@ impl MallocSizeOf for RuleNode {
     }
 }
 
-// FIXME: use std::ptr::NonNull when Firefox requires Rust 1.25+
-
 #[derive(Clone)]
 struct WeakRuleNode {
-    p: NonZeroPtrMut<RuleNode>,
+    p: ptr::NonNull<RuleNode>,
 }
 
 /// A strong reference to a rule node.
 #[derive(Debug, Eq, Hash, PartialEq)]
 pub struct StrongRuleNode {
-    p: NonZeroPtrMut<RuleNode>,
+    p: ptr::NonNull<RuleNode>,
 }
+
+unsafe impl Send for StrongRuleNode {}
+unsafe impl Sync for StrongRuleNode {}
 
 #[cfg(feature = "servo")]
 malloc_size_of_is_0!(StrongRuleNode);
@@ -967,7 +971,7 @@ impl StrongRuleNode {
 
     fn from_ptr(ptr: *mut RuleNode) -> Self {
         StrongRuleNode {
-            p: NonZeroPtrMut::new(ptr),
+            p: ptr::NonNull::new(ptr).expect("Pointer must not be null"),
         }
     }
 
@@ -1051,7 +1055,7 @@ impl StrongRuleNode {
 
     /// Raw pointer to the RuleNode
     pub fn ptr(&self) -> *mut RuleNode {
-        self.p.ptr()
+        self.p.as_ptr()
     }
 
     fn get(&self) -> &RuleNode {
@@ -1146,13 +1150,13 @@ impl StrongRuleNode {
 
     unsafe fn assert_free_list_has_no_duplicates_or_null(&self) {
         assert!(cfg!(debug_assertions), "This is an expensive check!");
-        use hash::FnvHashSet;
+        use crate::hash::FxHashSet;
 
         let me = &*self.ptr();
         assert!(me.is_root());
 
         let mut current = self.ptr();
-        let mut seen = FnvHashSet::default();
+        let mut seen = FxHashSet::default();
         while current != FREE_LIST_SENTINEL {
             let next = (*current).next_free.load(Ordering::Relaxed);
             assert!(!next.is_null());
@@ -1199,9 +1203,6 @@ impl StrongRuleNode {
         }
     }
 
-    /// Implementation of `nsRuleNode::HasAuthorSpecifiedRules` for Servo rule
-    /// nodes.
-    ///
     /// Returns true if any properties specified by `rule_type_mask` was set by
     /// an author rule.
     #[cfg(feature = "gecko")]
@@ -1214,15 +1215,15 @@ impl StrongRuleNode {
         author_colors_allowed: bool,
     ) -> bool
     where
-        E: ::dom::TElement,
+        E: crate::dom::TElement,
     {
-        use gecko_bindings::structs::NS_AUTHOR_SPECIFIED_BACKGROUND;
-        use gecko_bindings::structs::NS_AUTHOR_SPECIFIED_BORDER;
-        use gecko_bindings::structs::NS_AUTHOR_SPECIFIED_PADDING;
-        use properties::{CSSWideKeyword, LonghandId, LonghandIdSet};
-        use properties::{PropertyDeclaration, PropertyDeclarationId};
+        use crate::gecko_bindings::structs::NS_AUTHOR_SPECIFIED_BACKGROUND;
+        use crate::gecko_bindings::structs::NS_AUTHOR_SPECIFIED_BORDER;
+        use crate::gecko_bindings::structs::NS_AUTHOR_SPECIFIED_PADDING;
+        use crate::properties::{CSSWideKeyword, LonghandId, LonghandIdSet};
+        use crate::properties::{PropertyDeclaration, PropertyDeclarationId};
+        use crate::values::specified::Color;
         use std::borrow::Cow;
-        use values::specified::Color;
 
         // Reset properties:
         const BACKGROUND_PROPS: &'static [LonghandId] =
@@ -1289,24 +1290,12 @@ impl StrongRuleNode {
             }
         }
 
-        // If author colors are not allowed, only claim to have author-specified
-        // rules if we're looking at a non-color property or if we're looking at
-        // the background color and it's set to transparent.
-        const IGNORED_WHEN_COLORS_DISABLED: &'static [LonghandId] = &[
-            LonghandId::BackgroundImage,
-            LonghandId::BorderTopColor,
-            LonghandId::BorderRightColor,
-            LonghandId::BorderBottomColor,
-            LonghandId::BorderLeftColor,
-            LonghandId::BorderInlineStartColor,
-            LonghandId::BorderInlineEndColor,
-            LonghandId::BorderBlockStartColor,
-            LonghandId::BorderBlockEndColor,
-        ];
-
+        // If author colors are not allowed, don't look at those properties
+        // (except for background-color which is special and we handle below).
         if !author_colors_allowed {
-            for id in IGNORED_WHEN_COLORS_DISABLED {
-                properties.remove(*id);
+            properties.remove_all(LonghandIdSet::ignored_when_colors_disabled());
+            if rule_type_mask & NS_AUTHOR_SPECIFIED_BACKGROUND != 0 {
+                properties.insert(LonghandId::BackgroundColor);
             }
         }
 
@@ -1442,7 +1431,7 @@ impl StrongRuleNode {
         &self,
         guards: &StylesheetGuards,
     ) -> (LonghandIdSet, bool) {
-        use properties::PropertyDeclarationId;
+        use crate::properties::PropertyDeclarationId;
 
         // We want to iterate over cascade levels that override the animations
         // level, i.e.  !important levels and the transitions level.
@@ -1452,7 +1441,8 @@ impl StrongRuleNode {
         // transitions and animations are present for a given element and
         // property, transitions are suppressed so that they don't actually
         // override animations.
-        let iter = self.self_and_ancestors()
+        let iter = self
+            .self_and_ancestors()
             .skip_while(|node| node.cascade_level() == CascadeLevel::Transitions)
             .take_while(|node| node.cascade_level() > CascadeLevel::Animations);
         let mut result = (LonghandIdSet::new(), false);
@@ -1666,12 +1656,12 @@ impl WeakRuleNode {
 
     fn from_ptr(ptr: *mut RuleNode) -> Self {
         WeakRuleNode {
-            p: NonZeroPtrMut::new(ptr),
+            p: ptr::NonNull::new(ptr).expect("Pointer must not be null"),
         }
     }
 
     fn ptr(&self) -> *mut RuleNode {
-        self.p.ptr()
+        self.p.as_ptr()
     }
 }
 

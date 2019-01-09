@@ -15,8 +15,8 @@ ChromeUtils.import("resource://testing-common/TelemetryArchiveTesting.jsm", this
 add_task(async function testUpdatePingReady() {
   SpecialPowers.pushPrefEnv({set: [
     [PREF_APP_UPDATE_STAGING_ENABLED, false],
-    [PREF_APP_UPDATE_AUTO, false]
   ]});
+  await UpdateUtils.setAppUpdateAutoEnabled(false);
 
   let updateParams = "promptWaitTime=0";
 
@@ -29,15 +29,15 @@ add_task(async function testUpdatePingReady() {
       notificationId: "update-available",
       button: "button",
       beforeClick() {
-        checkWhatsNewLink("update-available-whats-new");
-      }
+        checkWhatsNewLink(window, "update-available-whats-new");
+      },
     },
     {
       notificationId: "update-restart",
       button: "secondarybutton",
       cleanup() {
         AppMenuNotifications.removeNotification(/.*/);
-      }
+      },
     },
   ]);
 
@@ -49,7 +49,7 @@ add_task(async function testUpdatePingReady() {
     // The test data is defined in ../data/sharedUpdateXML.js
     updatePing = await archiveChecker.promiseFindPing("update", [
         [["payload", "reason"], "ready"],
-        [["payload", "targetBuildId"], "20080811053724"]
+        [["payload", "targetBuildId"], "20080811053724"],
       ]);
     return !!updatePing;
   }, "Make sure the ping is generated before trying to validate it.", 500, 100);

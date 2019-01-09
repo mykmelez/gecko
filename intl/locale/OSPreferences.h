@@ -7,6 +7,7 @@
 #define mozilla_intl_IntlOSPreferences_h__
 
 #include "mozilla/StaticPtr.h"
+#include "nsDataHashtable.h"
 #include "nsString.h"
 #include "nsTArray.h"
 #include "unicode/uloc.h"
@@ -40,10 +41,8 @@ namespace intl {
  * notify apps about changes, new OS-level settings may not be reflected
  * in the app until it is relaunched.
  */
-class OSPreferences: public mozIOSPreferences
-{
-
-public:
+class OSPreferences : public mozIOSPreferences {
+ public:
   NS_DECL_ISUPPORTS
   NS_DECL_MOZIOSPREFERENCES
 
@@ -75,59 +74,9 @@ public:
    * Return an addRef'd pointer to the singleton instance. This is used by the
    * XPCOM constructor that exists to support usage from JS.
    */
-  static already_AddRefed<OSPreferences> GetInstanceAddRefed()
-  {
+  static already_AddRefed<OSPreferences> GetInstanceAddRefed() {
     return RefPtr<OSPreferences>(GetInstance()).forget();
   }
-
-
-  /**
-   * Returns a list of locales used by the host environment for UI
-   * localization.
-   *
-   * The result is a sorted list and we expect that the OS attempts to
-   * use the top locale from the list for which it has data.
-   *
-   * Each element of the list is a valid locale ID that can be passed to ICU
-   * and ECMA402 Intl APIs,
-   * At the same time each element is a valid BCP47 language tag that can be
-   * used for language negotiation.
-   *
-   * Example: ["en-US", "de", "pl", "sr-Cyrl", "zh-Hans-HK"]
-   *
-   * The return bool value indicates whether the function successfully
-   * resolved at least one locale.
-   *
-   * Usage:
-   *   nsTArray<nsCString> systemLocales;
-   *   OSPreferences::GetInstance()->GetSystemLocales(systemLocales);
-   *
-   * (See mozIOSPreferences.idl for a JS-callable version of this.)
-   */
-  bool GetSystemLocales(nsTArray<nsCString>& aRetVal);
-
-  /**
-   * Returns a list of locales used by host environment for regional
-   * preferences internationalization.
-   *
-   * The result is a sorted list and we expect that the OS attempts to
-   * use the top locale from the list for which it has data.
-   *
-   * Each element of the list is a valid locale ID that can be passed to ICU
-   * and ECMA402 Intl APIs,
-   *
-   * Example: ["en-US", "de", "pl", "sr-Cyrl", "zh-Hans-HK"]
-   *
-   * The return bool value indicates whether the function successfully
-   * resolved at least one locale.
-   *
-   * Usage:
-   *   nsTArray<nsCString> systemLocales;
-   *   OSPreferences::GetInstance()->GetRegionalPrefsLocales(regionalPrefsLocales);
-   *
-   * (See mozIOSPreferences.idl for a JS-callable version of this.)
-   */
-  bool GetRegionalPrefsLocales(nsTArray<nsCString>& aRetVal);
 
   static bool GetDateTimeConnectorPattern(const nsACString& aLocale,
                                           nsAString& aRetVal);
@@ -145,11 +94,14 @@ public:
    */
   void Refresh();
 
-protected:
+ protected:
   nsTArray<nsCString> mSystemLocales;
   nsTArray<nsCString> mRegionalPrefsLocales;
 
-private:
+  const size_t kMaxCachedPatterns = 15;
+  nsDataHashtable<nsCStringHashKey, nsString> mPatternCache;
+
+ private:
   virtual ~OSPreferences();
 
   static StaticRefPtr<OSPreferences> sInstance;
@@ -171,8 +123,7 @@ private:
                                    nsAString& aRetVal);
 
   bool GetPatternForSkeleton(const nsAString& aSkeleton,
-                             const nsACString& aLocale,
-                             nsAString& aRetVal);
+                             const nsACString& aLocale, nsAString& aRetVal);
 
   /**
    * This is a host environment specific method that will be implemented
@@ -202,11 +153,10 @@ private:
    */
   bool ReadDateTimePattern(DateTimeFormatStyle aDateFormatStyle,
                            DateTimeFormatStyle aTimeFormatStyle,
-                           const nsACString& aLocale,
-                           nsAString& aRetVal);
+                           const nsACString& aLocale, nsAString& aRetVal);
 };
 
-} // intl
-} // namespace mozilla
+}  // namespace intl
+}  // namespace mozilla
 
 #endif /* mozilla_intl_IntlOSPreferences_h__ */

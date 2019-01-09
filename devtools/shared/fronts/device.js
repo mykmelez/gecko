@@ -5,17 +5,16 @@
 
 const {Cu} = require("chrome");
 const {deviceSpec} = require("devtools/shared/specs/device");
-const protocol = require("devtools/shared/protocol");
+const { FrontClassWithSpec, registerFront } = require("devtools/shared/protocol");
 const defer = require("devtools/shared/defer");
 
-const DeviceFront = protocol.FrontClassWithSpec(deviceSpec, {
-  initialize: function(client, form) {
-    protocol.Front.prototype.initialize.call(this, client);
-    this.actorID = form.deviceActor;
+class DeviceFront extends FrontClassWithSpec(deviceSpec) {
+  constructor(client, form) {
+    super(client, { actor: form.deviceActor });
     this.manage(this);
-  },
+  }
 
-  screenshotToBlob: function() {
+  screenshotToBlob() {
     return this.screenshotToDataURL().then(longstr => {
       return longstr.string().then(dataURL => {
         const deferred = defer();
@@ -33,32 +32,8 @@ const DeviceFront = protocol.FrontClassWithSpec(deviceSpec, {
         return deferred.promise;
       });
     });
-  },
-});
-
-const _knownDeviceFronts = new WeakMap();
-
-/**
- * Retrieve the device front already created for the provided client, if available.
- */
-exports.getKnownDeviceFront = function(client) {
-  return _knownDeviceFronts.get(client);
-};
-
-/**
- * Only one DeviceFront is created for a given client, afterwards the instance is cached
- * and returned immediately.
- */
-exports.getDeviceFront = function(client, form) {
-  if (!form.deviceActor) {
-    return null;
   }
+}
 
-  if (_knownDeviceFronts.has(client)) {
-    return _knownDeviceFronts.get(client);
-  }
-
-  const front = new DeviceFront(client, form);
-  _knownDeviceFronts.set(client, front);
-  return front;
-};
+exports.DeviceFront = DeviceFront;
+registerFront(DeviceFront);

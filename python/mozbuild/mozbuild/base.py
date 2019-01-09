@@ -11,7 +11,11 @@ import multiprocessing
 import os
 import subprocess
 import sys
-import which
+try:
+    from shutil import which
+except ImportError:
+    # shutil.which is not available in Python 2.7
+    import which
 
 from mach.mixin.process import ProcessExecutionMixin
 from mozversioncontrol import (
@@ -28,7 +32,10 @@ from .mozconfig import (
     MozconfigLoader,
 )
 from .pythonutil import find_python3_executable
-from .util import memoized_property
+from .util import (
+    memoize,
+    memoized_property,
+)
 from .virtualenv import VirtualenvManager
 
 
@@ -207,6 +214,16 @@ class MozbuildObject(ProcessExecutionMixin):
 
         return self._virtualenv_manager
 
+    @staticmethod
+    @memoize
+    def get_mozconfig(topsrcdir, path, env_mozconfig):
+        # env_mozconfig is only useful for unittests, which change the value of
+        # the environment variable, which has an impact on autodetection (when
+        # path is MozconfigLoader.AUTODETECT), and memoization wouldn't account
+        # for it without the explicit (unused) argument.
+        loader = MozconfigLoader(topsrcdir)
+        return loader.read_mozconfig(path=path)
+
     @property
     def mozconfig(self):
         """Returns information about the current mozconfig file.
@@ -214,8 +231,8 @@ class MozbuildObject(ProcessExecutionMixin):
         This a dict as returned by MozconfigLoader.read_mozconfig()
         """
         if not isinstance(self._mozconfig, dict):
-            loader = MozconfigLoader(self.topsrcdir)
-            self._mozconfig = loader.read_mozconfig(path=self._mozconfig)
+            self._mozconfig = self.get_mozconfig(
+                self.topsrcdir, self._mozconfig, os.environ.get('MOZCONFIG'))
 
         return self._mozconfig
 
@@ -312,6 +329,13 @@ class MozbuildObject(ProcessExecutionMixin):
             pass
 
         return get_repository_object(self.topsrcdir)
+
+    def reload_config_environment(self):
+        '''Force config.status to be re-read and return the new value
+        of ``self.config_environment``.
+        '''
+        self._config_environment = None
+        return self.config_environment
 
     def mozbuild_reader(self, config_mode='build', vcs_revision=None,
                         vcs_check_clean=True):
@@ -757,11 +781,11 @@ class MozbuildObject(ProcessExecutionMixin):
                 self.virtualenv_manager.install_pip_package(path, vendored=True)
         return pipenv
 
-    def activate_pipenv(self, pipfile=None, args=None, populate=False):
+    def activate_pipenv(self, pipfile=None, populate=False, python=None):
         if pipfile is not None and not os.path.exists(pipfile):
             raise Exception('Pipfile not found: %s.' % pipfile)
         self.ensure_pipenv()
-        self.virtualenv_manager.activate_pipenv(pipfile, args, populate)
+        self.virtualenv_manager.activate_pipenv(pipfile, populate, python)
 
 
 class MachCommandBase(MozbuildObject):
@@ -875,11 +899,23 @@ class MachCommandConditions(object):
         return False
 
     @staticmethod
+    def is_thunderbird(cls):
+        """Must have a Thunderbird build."""
+        if hasattr(cls, 'substs'):
+            return cls.substs.get('MOZ_BUILD_APP') == 'comm/mail'
+        return False
+
+    @staticmethod
     def is_android(cls):
         """Must have an Android build."""
         if hasattr(cls, 'substs'):
             return cls.substs.get('MOZ_WIDGET_TOOLKIT') == 'android'
         return False
+
+    @staticmethod
+    def is_firefox_or_android(cls):
+        """Must have a Firefox or Android build."""
+        return MachCommandConditions.is_firefox(cls) or MachCommandConditions.is_android(cls)
 
     @staticmethod
     def is_hg(cls):

@@ -23,14 +23,13 @@
 var { Ci, Cu, Cr, Cc } = require("chrome");
 var Services = require("Services");
 const ChromeUtils = require("ChromeUtils");
-var {
-  ActorPool, createExtraActors, appendExtraActors
-} = require("devtools/server/actors/common");
-var { DebuggerServer } = require("devtools/server/main");
+var { ActorRegistry } = require("devtools/server/actors/utils/actor-registry");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 var { assert } = DevToolsUtils;
 var { TabSources } = require("devtools/server/actors/utils/TabSources");
 var makeDebugger = require("devtools/server/actors/utils/make-debugger");
+const Debugger = require("Debugger");
+const ReplayDebugger = require("devtools/server/actors/replay/debugger");
 const InspectorUtils = require("InspectorUtils");
 
 const EXTENSION_CONTENT_JSM = "resource://gre/modules/ExtensionContent.jsm";
@@ -39,7 +38,8 @@ const { LocalizationHelper } = require("devtools/shared/l10n");
 const STRINGS_URI = "devtools/shared/locales/browsing-context.properties";
 const L10N = new LocalizationHelper(STRINGS_URI);
 
-const { ActorClassWithSpec, Actor } = require("devtools/shared/protocol");
+const { ActorClassWithSpec, Actor, Pool } = require("devtools/shared/protocol");
+const { LazyPool, createExtraActors } = require("devtools/shared/protocol/lazy-pool");
 const { browsingContextTargetSpec } = require("devtools/shared/specs/targets/browsing-context");
 
 loader.lazyRequireGetter(this, "ThreadActor", "devtools/server/actors/thread", true);
@@ -51,9 +51,7 @@ loader.lazyRequireGetter(this, "StyleSheetActor", "devtools/server/actors/styles
 loader.lazyRequireGetter(this, "getSheetText", "devtools/server/actors/stylesheets", true);
 
 function getWindowID(window) {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIDOMWindowUtils)
-               .currentInnerWindowID;
+  return window.windowUtils.currentInnerWindowID;
 }
 
 function getDocShellChromeEventHandler(docShell) {
@@ -62,8 +60,7 @@ function getDocShellChromeEventHandler(docShell) {
     try {
       // Toplevel xul window's docshell doesn't have chromeEventHandler
       // attribute. The chrome event handler is just the global window object.
-      handler = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                        .getInterface(Ci.nsIDOMWindow);
+      handler = docShell.domWindow;
     } catch (e) {
       // ignore
     }
@@ -78,8 +75,7 @@ function getChildDocShells(parentDocShell) {
   );
 
   const docShells = [];
-  while (docShellsEnum.hasMoreElements()) {
-    const docShell = docShellsEnum.getNext();
+  for (const docShell of docShellsEnum) {
     docShell.QueryInterface(Ci.nsIInterfaceRequestor)
             .getInterface(Ci.nsIWebProgress);
     docShells.push(docShell);
@@ -94,8 +90,7 @@ exports.getChildDocShells = getChildDocShells;
  */
 
 function getInnerId(window) {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
+  return window.windowUtils.currentInnerWindowID;
 }
 
 const browsingContextTargetPrototype = {
@@ -108,7 +103,7 @@ const browsingContextTargetPrototype = {
    * is a `docShell`.
    *
    * The main goal of this class is to expose the target-scoped actors being registered
-   * via `DebuggerServer.registerModule` and manage their lifetimes. In addition, this
+   * via `ActorRegistry.registerModule` and manage their lifetimes. In addition, this
    * class also tracks the lifetime of the targeted browsing context.
    *
    * ### Main requests:
@@ -233,23 +228,28 @@ const browsingContextTargetPrototype = {
       findDebuggees: () => {
         return this.windows.concat(this.webextensionsContentScriptGlobals);
       },
-      shouldAddNewGlobalAsDebuggee: this._shouldAddNewGlobalAsDebuggee
+      shouldAddNewGlobalAsDebuggee: this._shouldAddNewGlobalAsDebuggee,
     });
 
     // Flag eventually overloaded by sub classes in order to watch new docshells
     // Used by the ParentProcessTargetActor to list all frames in the Browser Toolbox
     this.listenForNewDocShells = false;
 
+    let canRewind = false;
+    if (Debugger.recordReplayProcessKind() == "Middleman") {
+      const replayDebugger = new ReplayDebugger();
+      canRewind = replayDebugger.canRewind();
+    }
+
     this.traits = {
       reconfigure: true,
       // Supports frame listing via `listFrames` request and `frameUpdate` events
       // as well as frame switching via `switchToFrame` request
       frames: true,
-      // Do not require to send reconfigure request to reset the document state
-      // to what it was before using the actor
-      noTabReconfigureOnClose: true,
       // Supports the logInPage request.
       logInPage: true,
+      // Supports requests related to rewinding.
+      canRewind,
     };
 
     this._workerTargetActorList = null;
@@ -290,7 +290,6 @@ const browsingContextTargetPrototype = {
   },
 
   _targetScopedActorPool: null,
-  _contextPool: null,
 
   /**
    * A constant prefix that will be used to form the actor ID by the server.
@@ -309,10 +308,10 @@ const browsingContextTargetPrototype = {
    */
   get messageManager() {
     try {
-      return this.docShell
-        .QueryInterface(Ci.nsIInterfaceRequestor)
-        .getInterface(Ci.nsIContentFrameMessageManager);
+      return this.docShell.messageManager;
     } catch (e) {
+      // In some cases we can't get a docshell.  We just have no message manager
+      // then,
       return null;
     }
   },
@@ -337,20 +336,12 @@ const browsingContextTargetPrototype = {
    * Getter for the browsing context's current DOM window.
    */
   get window() {
-    // On xpcshell, there is no document
-    if (this.docShell) {
-      return this.docShell
-        .QueryInterface(Ci.nsIInterfaceRequestor)
-        .getInterface(Ci.nsIDOMWindow);
-    }
-    return null;
+    return this.docShell.domWindow;
   },
 
   get outerWindowID() {
     if (this.window) {
-      return this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-                        .getInterface(Ci.nsIDOMWindowUtils)
-                        .outerWindowID;
+      return this.window.windowUtils.outerWindowID;
     }
     return null;
   },
@@ -360,11 +351,10 @@ const browsingContextTargetPrototype = {
    * browsing context's current DOM window.
    */
   get webextensionsContentScriptGlobals() {
-    // Ignore xpcshell runtime which spawns target actors without a window
-    // and only retrieve the content scripts globals if the ExtensionContent JSM module
+    // Only retrieve the content scripts globals if the ExtensionContent JSM module
     // has been already loaded (which is true if the WebExtensions internals have already
     // been loaded in the same content process).
-    if (this.window && Cu.isModuleLoaded(EXTENSION_CONTENT_JSM)) {
+    if (Cu.isModuleLoaded(EXTENSION_CONTENT_JSM)) {
       return ExtensionContent.getContentScriptGlobals(this.window);
     }
 
@@ -377,8 +367,7 @@ const browsingContextTargetPrototype = {
    */
   get windows() {
     return this.docShells.map(docShell => {
-      return docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                     .getInterface(Ci.nsIDOMWindow);
+      return docShell.domWindow;
     });
   },
 
@@ -394,9 +383,7 @@ const browsingContextTargetPrototype = {
       return this.docShell;
     }
 
-    return this._originalWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                               .getInterface(Ci.nsIWebNavigation)
-                               .QueryInterface(Ci.nsIDocShell);
+    return this._originalWindow.docShell;
   },
 
   /**
@@ -423,9 +410,7 @@ const browsingContextTargetPrototype = {
    * Getter for the nsIWebNavigation for the target.
    */
   get webNavigation() {
-    return this.docShell
-      .QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIWebNavigation);
+    return this.docShell.QueryInterface(Ci.nsIWebNavigation);
   },
 
   /**
@@ -468,13 +453,17 @@ const browsingContextTargetPrototype = {
                "Actor should have an actorID.");
 
     const response = {
-      actor: this.actorID
+      actor: this.actorID,
+      traits: {
+        // FF64+ exposes a new trait to help identify BrowsingContextActor's inherited
+        // actorss from the client side.
+        isBrowsingContext: true,
+      },
     };
 
-    // We may try to access window while the document is closing, then
-    // accessing window throws. Also on xpcshell we are using this actor even if
-    // there is no valid document.
-    if (this.docShell && !this.docShell.isBeingDestroyed()) {
+    // We may try to access window while the document is closing, then accessing window
+    // throws.
+    if (!this.docShell.isBeingDestroyed()) {
       response.title = this.title;
       response.url = this.url;
       response.outerWindowID = this.outerWindowID;
@@ -483,16 +472,18 @@ const browsingContextTargetPrototype = {
     // Always use the same ActorPool, so existing actor instances
     // (created in createExtraActors) are not lost.
     if (!this._targetScopedActorPool) {
-      this._targetScopedActorPool = new ActorPool(this.conn);
-      this.conn.addActorPool(this._targetScopedActorPool);
+      this._targetScopedActorPool = new LazyPool(this.conn);
     }
 
     // Walk over target-scoped actor factories and make sure they are all
     // instantiated and added into the ActorPool.
-    this._createExtraActors(DebuggerServer.targetScopedActorFactories,
-      this._targetScopedActorPool);
+    const actors = createExtraActors(
+      ActorRegistry.targetScopedActorFactories,
+      this._targetScopedActorPool,
+      this
+    );
 
-    this._appendExtraActors(response);
+    Object.assign(response, actors);
     return response;
   },
 
@@ -500,8 +491,8 @@ const browsingContextTargetPrototype = {
    * Called when the actor is removed from the connection.
    */
   destroy() {
-    Actor.prototype.destroy.call(this);
     this.exit();
+    Actor.prototype.destroy.call(this);
   },
 
   /**
@@ -523,7 +514,7 @@ const browsingContextTargetPrototype = {
 
     Object.defineProperty(this, "docShell", {
       value: null,
-      configurable: true
+      configurable: true,
     });
 
     this._extraActors = null;
@@ -566,10 +557,6 @@ const browsingContextTargetPrototype = {
     return false;
   },
 
-  /* Support for DebuggerServer.addTargetScopedActor. */
-  _createExtraActors: createExtraActors,
-  _appendExtraActors: appendExtraActors,
-
   /**
    * Does the actual work of attaching to a browsing context.
    */
@@ -579,19 +566,16 @@ const browsingContextTargetPrototype = {
     }
 
     // Create a pool for context-lifetime actors.
-    this._pushContext();
+    this._createThreadActor();
 
-    // on xpcshell, there is no document
-    if (this.window) {
-      this._progressListener = new DebuggerProgressListener(this);
+    this._progressListener = new DebuggerProgressListener(this);
 
-      // Save references to the original document we attached to
-      this._originalWindow = this.window;
+    // Save references to the original document we attached to
+    this._originalWindow = this.window;
 
-      // Ensure replying to attach() request first
-      // before notifying about new docshells.
-      DevToolsUtils.executeSoon(() => this._watchDocshells());
-    }
+    // Ensure replying to attach() request first
+    // before notifying about new docshells.
+    DevToolsUtils.executeSoon(() => this._watchDocshells());
 
     this._attached = true;
   },
@@ -651,25 +635,27 @@ const browsingContextTargetPrototype = {
     if (this._workerTargetActorList === null) {
       this._workerTargetActorList = new WorkerTargetActorList(this.conn, {
         type: Ci.nsIWorkerDebugger.TYPE_DEDICATED,
-        window: this.window
+        window: this.window,
       });
     }
 
     return this._workerTargetActorList.getList().then((actors) => {
-      const pool = new ActorPool(this.conn);
+      const pool = new Pool(this.conn);
       for (const actor of actors) {
-        pool.addActor(actor);
+        pool.manage(actor);
       }
 
-      this.conn.removeActorPool(this._workerTargetActorPool);
-      this._workerTargetActorPool = pool;
-      this.conn.addActorPool(this._workerTargetActorPool);
+      // Do not destroy the pool before transfering ownership to the newly created
+      // pool, so that we do not accidently destroy actors that are still in use.
+      if (this._workerTargetActorPool) {
+        this._workerTargetActorPool.destroy();
+      }
 
+      this._workerTargetActorPool = pool;
       this._workerTargetActorList.onListChanged = this._onWorkerTargetActorListChanged;
 
       return {
-        "from": this.actorID,
-        "workers": actors.map((actor) => actor.form())
+        workers: actors,
       };
     });
   },
@@ -686,7 +672,7 @@ const browsingContextTargetPrototype = {
 
   _onWorkerTargetActorListChanged() {
     this._workerTargetActorList.onListChanged = null;
-    this.conn.sendActorEvent(this.actorID, "workerListChanged");
+    this.emit("workerListChanged");
   },
 
   observe(subject, topic, data) {
@@ -783,9 +769,7 @@ const browsingContextTargetPrototype = {
     const webProgress = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
                               .getInterface(Ci.nsIWebProgress);
     const window = webProgress.DOMWindow;
-    const id = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                   .getInterface(Ci.nsIDOMWindowUtils)
-                   .outerWindowID;
+    const id = window.windowUtils.outerWindowID;
     let parentID = undefined;
     // Ignore the parent of the original document on non-e10s firefox,
     // as we get the xul window as parent and don't care about it.
@@ -793,10 +777,7 @@ const browsingContextTargetPrototype = {
     // current window in order to deal with front end. e.g. toolbox will be fall
     // into infinite loop due to recursive search with by using parent id.
     if (window.parent && window.parent != window && window != this._originalWindow) {
-      parentID = window.parent
-                       .QueryInterface(Ci.nsIInterfaceRequestor)
-                       .getInterface(Ci.nsIDOMWindowUtils)
-                       .outerWindowID;
+      parentID = window.parent.windowUtils.outerWindowID;
     }
 
     return {
@@ -820,10 +801,8 @@ const browsingContextTargetPrototype = {
       return;
     }
 
-    this.conn.send({
-      from: this.actorID,
-      type: "frameUpdate",
-      frames: windows
+    this.emit("frameUpdate", {
+      frames: windows,
     });
   },
 
@@ -833,51 +812,35 @@ const browsingContextTargetPrototype = {
 
   _notifyDocShellDestroy(webProgress) {
     webProgress = webProgress.QueryInterface(Ci.nsIWebProgress);
-    const id = webProgress.DOMWindow
-                        .QueryInterface(Ci.nsIInterfaceRequestor)
-                        .getInterface(Ci.nsIDOMWindowUtils)
-                        .outerWindowID;
-    this.conn.send({
-      from: this.actorID,
-      type: "frameUpdate",
+    const id = webProgress.DOMWindow.windowUtils.outerWindowID;
+    this.emit("frameUpdate", {
       frames: [{
         id,
-        destroy: true
-      }]
+        destroy: true,
+      }],
     });
   },
 
   _notifyDocShellDestroyAll() {
-    this.conn.send({
-      from: this.actorID,
-      type: "frameUpdate",
-      destroyAll: true
+    this.emit("frameUpdate", {
+      destroyAll: true,
     });
   },
 
   /**
-   * Creates a thread actor and a pool for context-lifetime actors. It then sets
-   * up the content window for debugging.
+   * Creates and manages the thread actor as part of the Browsing Context Target pool.
+   * This sets up the content window for being debugged
    */
-  _pushContext() {
-    assert(!this._contextPool, "Can't push multiple contexts");
-
-    this._contextPool = new ActorPool(this.conn);
-    this.conn.addActorPool(this._contextPool);
-
+  _createThreadActor() {
     this.threadActor = new ThreadActor(this, this.window);
-    this._contextPool.addActor(this.threadActor);
+    this.manage(this.threadActor);
   },
 
   /**
-   * Exits the current thread actor and removes the context-lifetime actor pool.
+   * Exits the current thread actor and removes it from the Browsing Context Target pool.
    * The content window is no longer being debugged after this call.
    */
-  _popContext() {
-    assert(!!this._contextPool, "No context to pop.");
-
-    this.conn.removeActorPool(this._contextPool);
-    this._contextPool = null;
+  _destroyThreadActor() {
     this.threadActor.exit();
     this.threadActor = null;
     this._sources = null;
@@ -911,12 +874,12 @@ const browsingContextTargetPrototype = {
       Services.obs.removeObserver(this, "webnavigation-destroy");
     }
 
-    this._popContext();
+    this._destroyThreadActor();
 
     // Shut down actors that belong to this target's pool.
     this._styleSheetActors.clear();
     if (this._targetScopedActorPool) {
-      this.conn.removeActorPool(this._targetScopedActorPool);
+      this._targetScopedActorPool.destroy();
       this._targetScopedActorPool = null;
     }
 
@@ -927,14 +890,13 @@ const browsingContextTargetPrototype = {
     }
 
     if (this._workerTargetActorPool !== null) {
-      this.conn.removeActorPool(this._workerTargetActorPool);
+      this._workerTargetActorPool.destroy();
       this._workerTargetActorPool = null;
     }
 
     this._attached = false;
 
-    this.conn.send({ from: this.actorID,
-                     type: "tabDetached" });
+    this.emit("tabDetached");
 
     return true;
   },
@@ -1003,7 +965,7 @@ const browsingContextTargetPrototype = {
     // subsequent navigation event packet.
     Services.tm.dispatchToMainThread(DevToolsUtils.makeInfallible(() => {
       this.window.location = request.url;
-    }, "BrowsingContextTargetActor.prototype.navigateTo's delayed body"));
+    }, "BrowsingContextTargetActor.prototype.navigateTo's delayed body:" + request.url));
     return {};
   },
 
@@ -1079,6 +1041,10 @@ const browsingContextTargetPrototype = {
         options.cacheDisabled !== this._getCacheDisabled()) {
       this._setCacheDisabled(options.cacheDisabled);
     }
+    if (typeof options.paintFlashing !== "undefined" &&
+        options.PaintFlashing !== this._getPaintFlashing()) {
+      this._setPaintFlashingEnabled(options.paintFlashing);
+    }
     if ((typeof options.serviceWorkersTestingEnabled !== "undefined") &&
         (options.serviceWorkersTestingEnabled !==
          this._getServiceWorkersTestingEnabled())) {
@@ -1105,6 +1071,7 @@ const browsingContextTargetPrototype = {
     this._restoreJavascript();
     this._setCacheDisabled(false);
     this._setServiceWorkersTestingEnabled(false);
+    this._setPaintFlashingEnabled(false);
   },
 
   /**
@@ -1155,9 +1122,16 @@ const browsingContextTargetPrototype = {
    * Disable or enable the service workers testing features.
    */
   _setServiceWorkersTestingEnabled(enabled) {
-    const windowUtils = this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-                                 .getInterface(Ci.nsIDOMWindowUtils);
+    const windowUtils = this.window.windowUtils;
     windowUtils.serviceWorkersTestingEnabled = enabled;
+  },
+
+  /**
+   * Disable or enable the paint flashing on the target.
+   */
+  _setPaintFlashingEnabled(enabled) {
+    const windowUtils = this.window.windowUtils;
+    windowUtils.paintFlashing = enabled;
   },
 
   /**
@@ -1175,6 +1149,18 @@ const browsingContextTargetPrototype = {
   },
 
   /**
+   * Return paint flashing status.
+   */
+  _getPaintFlashing() {
+    if (!this.docShell) {
+      // The browsing context is already closed.
+      return null;
+    }
+
+    return this.window.windowUtils.paintFlashing;
+  },
+
+  /**
    * Return service workers testing allowed status.
    */
   _getServiceWorkersTestingEnabled() {
@@ -1183,8 +1169,7 @@ const browsingContextTargetPrototype = {
       return null;
     }
 
-    const windowUtils = this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-                                 .getInterface(Ci.nsIDOMWindowUtils);
+    const windowUtils = this.window.windowUtils;
     return windowUtils.serviceWorkersTestingEnabled;
   },
 
@@ -1196,10 +1181,15 @@ const browsingContextTargetPrototype = {
       // The browsing context is already closed.
       return;
     }
-    const windowUtils = this.window
-                          .QueryInterface(Ci.nsIInterfaceRequestor)
-                          .getInterface(Ci.nsIDOMWindowUtils);
-    windowUtils.suppressEventHandling(true);
+    const windowUtils = this.window.windowUtils;
+
+    // Events are not suppressed when running in the middleman, as we are in a
+    // different process from the debuggee and may want to process events in
+    // the middleman for e.g. the overlay drawn when rewinding.
+    if (Debugger.recordReplayProcessKind() != "Middleman") {
+      windowUtils.suppressEventHandling(true);
+    }
+
     windowUtils.suspendTimeouts();
   },
 
@@ -1211,11 +1201,11 @@ const browsingContextTargetPrototype = {
       // The browsing context is already closed.
       return;
     }
-    const windowUtils = this.window
-                          .QueryInterface(Ci.nsIInterfaceRequestor)
-                          .getInterface(Ci.nsIDOMWindowUtils);
+    const windowUtils = this.window.windowUtils;
     windowUtils.resumeTimeouts();
-    windowUtils.suppressEventHandling(false);
+    if (Debugger.recordReplayProcessKind() != "Middleman") {
+      windowUtils.suppressEventHandling(false);
+    }
   },
 
   _changeTopLevelDocument(window) {
@@ -1245,22 +1235,18 @@ const browsingContextTargetPrototype = {
   },
 
   _setWindow(window) {
-    const docShell = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIWebNavigation)
-                         .QueryInterface(Ci.nsIDocShell);
+    const docShell = window.docShell;
     // Here is the very important call where we switch the currently targeted
     // browsing context (it will indirectly update this.window and many other
     // attributes defined from docShell).
     Object.defineProperty(this, "docShell", {
       value: docShell,
       enumerable: true,
-      configurable: true
+      configurable: true,
     });
     this.emit("changed-toplevel-document");
-    this.conn.send({
-      from: this.actorID,
-      type: "frameUpdate",
-      selected: this.outerWindowID
+    this.emit("frameUpdate", {
+      selected: this.outerWindowID,
     });
   },
 
@@ -1281,14 +1267,14 @@ const browsingContextTargetPrototype = {
     this.emit("window-ready", {
       window: window,
       isTopLevel: isTopLevel,
-      id: getWindowID(window)
+      id: getWindowID(window),
     });
 
     // TODO bug 997119: move that code to ThreadActor by listening to
     // window-ready
     const threadActor = this.threadActor;
     if (isTopLevel && threadActor.state != "detached") {
-      this.sources.reset({ sourceMaps: true });
+      this.sources.reset();
       threadActor.clearDebuggees();
       threadActor.dbg.enabled = true;
       threadActor.maybePauseOnExceptions();
@@ -1309,7 +1295,7 @@ const browsingContextTargetPrototype = {
       window: window,
       isTopLevel: window == this.window,
       id: id || getWindowID(window),
-      isFrozen: isFrozen
+      isFrozen: isFrozen,
     });
   },
 
@@ -1345,7 +1331,7 @@ const browsingContextTargetPrototype = {
       window: window,
       isTopLevel: isTopLevel,
       newURI: newURI,
-      request: request
+      request: request,
     });
 
     // We don't do anything for inner frames here.
@@ -1365,13 +1351,11 @@ const browsingContextTargetPrototype = {
     }
     threadActor.disableAllBreakpoints();
 
-    this.conn.send({
-      from: this.actorID,
-      type: "tabNavigated",
+    this.emit("tabNavigated", {
       url: newURI,
       nativeConsoleAPI: true,
       state: "start",
-      isFrameSwitching: isFrameSwitching
+      isFrameSwitching: isFrameSwitching,
     });
 
     if (reset) {
@@ -1392,7 +1376,7 @@ const browsingContextTargetPrototype = {
     // after the load event, it's document ready-state is 'complete'.
     this.emit("navigate", {
       window: window,
-      isTopLevel: isTopLevel
+      isTopLevel: isTopLevel,
     });
 
     // We don't do anything for inner frames here.
@@ -1407,14 +1391,12 @@ const browsingContextTargetPrototype = {
       threadActor.dbg.enabled = true;
     }
 
-    this.conn.send({
-      from: this.actorID,
-      type: "tabNavigated",
+    this.emit("tabNavigated", {
       url: this.url,
       title: this.title,
       nativeConsoleAPI: this.hasNativeConsoleAPI(this.window),
       state: "stop",
-      isFrameSwitching: isFrameSwitching
+      isFrameSwitching: isFrameSwitching,
     });
   },
 
@@ -1451,13 +1433,14 @@ const browsingContextTargetPrototype = {
    *
    */
   createStyleSheetActor(styleSheet) {
+    assert(!this.exited, "Target must not be exited to create a sheet actor.");
     if (this._styleSheetActors.has(styleSheet)) {
       return this._styleSheetActors.get(styleSheet);
     }
     const actor = new StyleSheetActor(styleSheet, this);
     this._styleSheetActors.set(styleSheet, actor);
 
-    this._targetScopedActorPool.addActor(actor);
+    this._targetScopedActorPool.manage(actor);
     this.emit("stylesheet-added", actor);
 
     return actor;
@@ -1519,8 +1502,7 @@ DebuggerProgressListener.prototype = {
     // Add the docshell to the watched set. We're actually adding the window,
     // because docShell objects are not wrappercached and would be rejected
     // by the WeakSet.
-    const docShellWindow = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                                 .getInterface(Ci.nsIDOMWindow);
+    const docShellWindow = docShell.domWindow;
     this._watchedDocShells.add(docShellWindow);
 
     const webProgress = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -1542,8 +1524,7 @@ DebuggerProgressListener.prototype = {
   },
 
   unwatch(docShell) {
-    const docShellWindow = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                                 .getInterface(Ci.nsIDOMWindow);
+    const docShellWindow = docShell.domWindow;
     if (!this._watchedDocShells.has(docShellWindow)) {
       return;
     }
@@ -1570,8 +1551,7 @@ DebuggerProgressListener.prototype = {
 
   _getWindowsInDocShell(docShell) {
     return getChildDocShells(docShell).map(d => {
-      return d.QueryInterface(Ci.nsIInterfaceRequestor)
-              .getInterface(Ci.nsIDOMWindow);
+      return d.domWindow;
     });
   },
 
@@ -1650,6 +1630,10 @@ DebuggerProgressListener.prototype = {
     if (!this._targetActor.attached) {
       return;
     }
+    progress.QueryInterface(Ci.nsIDocShell);
+    if (progress.isBeingDestroyed()) {
+      return;
+    }
 
     const isStart = flag & Ci.nsIWebProgressListener.STATE_START;
     const isStop = flag & Ci.nsIWebProgressListener.STATE_STOP;
@@ -1659,7 +1643,6 @@ DebuggerProgressListener.prototype = {
     // Catch any iframe location change
     if (isDocument && isStop) {
       // Watch document stop to ensure having the new iframe url.
-      progress.QueryInterface(Ci.nsIDocShell);
       this._targetActor._notifyDocShellsUpdate([progress]);
     }
 
@@ -1697,5 +1680,5 @@ DebuggerProgressListener.prototype = {
         this._targetActor._navigate(window);
       }
     }
-  }, "DebuggerProgressListener.prototype.onStateChange")
+  }, "DebuggerProgressListener.prototype.onStateChange"),
 };

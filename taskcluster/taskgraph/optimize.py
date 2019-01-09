@@ -77,7 +77,6 @@ def _make_default_strategies():
         'skip-unless-changed': SkipUnlessChanged(),
         'skip-unless-schedules': SkipUnlessSchedules(),
         'skip-unless-schedules-or-seta': Either(SkipUnlessSchedules(), SETA()),
-        'only-if-dependencies-run': OnlyIfDependenciesRun(),
     }
 
 
@@ -282,18 +281,6 @@ class Either(OptimizationStrategy):
             lambda sub, arg: sub.should_replace_task(task, params, arg))
 
 
-class OnlyIfDependenciesRun(OptimizationStrategy):
-    """Run this taks only if its dependencies run."""
-
-    # This takes advantage of the behavior of the second phase of optimization:
-    # a task can only be replaced if it has no un-optimized dependencies. So if
-    # should_replace_task is called, then a task has no un-optimized
-    # dependencies and can be removed (indicated by returning True)
-
-    def should_replace_task(self, task, params, arg):
-        return True
-
-
 class IndexSearch(OptimizationStrategy):
 
     # A task with no dependencies remaining after optimization will be replaced
@@ -388,7 +375,8 @@ class TestVerify(OptimizationStrategy):
         # and we wouldn't optimize it. Otherwise, it will return 'True, None'
         env = params.get('try_task_config', {}) or {}
         env = env.get('templates', {}).get('env', {})
-        if perfile_number_of_chunks(env.get('MOZHARNESS_TEST_PATHS', ''),
+        if perfile_number_of_chunks(params.is_try(),
+                                    env.get('MOZHARNESS_TEST_PATHS', ''),
                                     params.get('head_repository', ''),
                                     params.get('head_rev', ''),
                                     task):

@@ -7,18 +7,20 @@ const chrome_base = "chrome://mochitests/content/browser/browser/base/content/te
 Services.scriptloader.loadSubScript(chrome_base + "head.js", this);
 /* import-globals-from ../general/head.js */
 
-const remoteClientsFixture = [ { id: 1, name: "Foo"}, { id: 2, name: "Bar"} ];
+const fxaDevices = [
+  {id: 1, name: "Foo", availableCommands: {"https://identity.mozilla.com/cmd/open-uri": "baz"}},
+  {id: 2, name: "Bar", clientRecord: "bar"}, // Legacy send tab target (no availableCommands).
+  {id: 3, name: "Homer"}, // Incompatible target.
+];
 
 let [testTab] = gBrowser.visibleTabs;
 
-function updateTabContextMenu(tab) {
+function updateTabContextMenu(tab = gBrowser.selectedTab) {
   let menu = document.getElementById("tabContextMenu");
-  if (!tab)
-    tab = gBrowser.selectedTab;
   var evt = new Event("");
   tab.dispatchEvent(evt);
   menu.openPopup(tab, "end_after", 0, 0, true, false, evt);
-  is(TabContextMenu.contextTab, tab, "TabContextMenu context is the expected tab");
+  is(window.TabContextMenu.contextTab, tab, "TabContextMenu context is the expected tab");
   menu.hidePopup();
 }
 
@@ -26,26 +28,35 @@ add_task(async function setup() {
   await promiseSyncReady();
   // gSync.init() is called in a requestIdleCallback. Force its initialization.
   gSync.init();
-  is(gBrowser.visibleTabs.length, 1, "there is one visible tab");
+  sinon.stub(Weave.Service.clientsEngine, "getClientType").returns("desktop");
+  await BrowserTestUtils.openNewForegroundTab(gBrowser, "about:mozilla");
+  registerCleanupFunction(() => {
+    gBrowser.removeCurrentTab();
+  });
+  is(gBrowser.visibleTabs.length, 2, "there are two visible tabs");
 });
 
-// We are not testing the devices popup contents, since it is already tested by
-// browser_contextmenu_sendpage.js and the code to populate it is the same.
-
 add_task(async function test_tab_contextmenu() {
-  const sandbox = setupSendTabMocks({ syncReady: true, clientsSynced: true, remoteClients: remoteClientsFixture,
-                                      state: UIState.STATUS_SIGNED_IN, isSendableURI: true });
+  const sandbox = setupSendTabMocks({fxaDevices});
+  let expectation = sandbox.mock(gSync)
+                           .expects("sendTabToDevice")
+                           .once()
+                           .withExactArgs("about:mozilla", [fxaDevices[1]], "The Book of Mozilla, 11:14");
 
   updateTabContextMenu(testTab);
+  await openTabContextMenu("context_sendTabToDevice");
   is(document.getElementById("context_sendTabToDevice").hidden, false, "Send tab to device is shown");
   is(document.getElementById("context_sendTabToDevice").disabled, false, "Send tab to device is enabled");
 
+  document.getElementById("context_sendTabToDevicePopupMenu").querySelector("menuitem").click();
+
+  await hideTabContextMenu();
+  expectation.verify();
   sandbox.restore();
 });
 
 add_task(async function test_tab_contextmenu_unconfigured() {
-  const sandbox = setupSendTabMocks({ syncReady: true, clientsSynced: true, remoteClients: remoteClientsFixture,
-                                      state: UIState.STATUS_NOT_CONFIGURED, isSendableURI: true });
+  const sandbox = setupSendTabMocks({state: UIState.STATUS_NOT_CONFIGURED});
 
   updateTabContextMenu(testTab);
   is(document.getElementById("context_sendTabToDevice").hidden, false, "Send tab to device is shown");
@@ -55,8 +66,7 @@ add_task(async function test_tab_contextmenu_unconfigured() {
 });
 
 add_task(async function test_tab_contextmenu_not_sendable() {
-  const sandbox = setupSendTabMocks({ syncReady: true, clientsSynced: true, remoteClients: [{ id: 1, name: "Foo"}],
-                                      state: UIState.STATUS_SIGNED_IN, isSendableURI: false });
+  const sandbox = setupSendTabMocks({fxaDevices, isSendableURI: false});
 
   updateTabContextMenu(testTab);
   is(document.getElementById("context_sendTabToDevice").hidden, false, "Send tab to device is shown");
@@ -66,8 +76,7 @@ add_task(async function test_tab_contextmenu_not_sendable() {
 });
 
 add_task(async function test_tab_contextmenu_not_synced_yet() {
-  const sandbox = setupSendTabMocks({ syncReady: true, clientsSynced: false, remoteClients: [],
-                                      state: UIState.STATUS_SIGNED_IN, isSendableURI: true });
+  const sandbox = setupSendTabMocks({fxaDevices: null});
 
   updateTabContextMenu(testTab);
   is(document.getElementById("context_sendTabToDevice").hidden, false, "Send tab to device is shown");
@@ -77,8 +86,7 @@ add_task(async function test_tab_contextmenu_not_synced_yet() {
 });
 
 add_task(async function test_tab_contextmenu_sync_not_ready_configured() {
-  const sandbox = setupSendTabMocks({ syncReady: false, clientsSynced: false, remoteClients: null,
-                                      state: UIState.STATUS_SIGNED_IN, isSendableURI: true });
+  const sandbox = setupSendTabMocks({syncReady: false});
 
   updateTabContextMenu(testTab);
   is(document.getElementById("context_sendTabToDevice").hidden, false, "Send tab to device is shown");
@@ -88,8 +96,7 @@ add_task(async function test_tab_contextmenu_sync_not_ready_configured() {
 });
 
 add_task(async function test_tab_contextmenu_sync_not_ready_other_state() {
-  const sandbox = setupSendTabMocks({ syncReady: false, clientsSynced: false, remoteClients: null,
-                                      state: UIState.STATUS_NOT_VERIFIED, isSendableURI: true });
+  const sandbox = setupSendTabMocks({syncReady: false, state: UIState.STATUS_NOT_VERIFIED});
 
   updateTabContextMenu(testTab);
   is(document.getElementById("context_sendTabToDevice").hidden, false, "Send tab to device is shown");
@@ -105,8 +112,34 @@ add_task(async function test_tab_contextmenu_fxa_disabled() {
 
   updateTabContextMenu(testTab);
   is(document.getElementById("context_sendTabToDevice").hidden, true, "Send tab to device is hidden");
-  is(document.getElementById("context_sendTabToDevice_separator").hidden, true, "Separator is also hidden");
 
   getter.restore();
   [...document.querySelectorAll(".sync-ui-item")].forEach(e => e.hidden = false);
 });
+
+add_task(async function teardown() {
+  Weave.Service.clientsEngine.getClientType.restore();
+});
+
+async function openTabContextMenu(openSubmenuId = null) {
+  const contextMenu = document.getElementById("tabContextMenu");
+  is(contextMenu.state, "closed", "checking if popup is closed");
+
+  const awaitPopupShown = BrowserTestUtils.waitForEvent(contextMenu, "popupshown");
+  EventUtils.synthesizeMouseAtCenter(gBrowser.selectedTab, {type: "contextmenu", button: 2});
+  await awaitPopupShown;
+
+  if (openSubmenuId) {
+    const menuPopup = document.getElementById(openSubmenuId).menupopup;
+    const menuPopupPromise = BrowserTestUtils.waitForEvent(menuPopup, "popupshown");
+    menuPopup.openPopup();
+    await menuPopupPromise;
+  }
+}
+
+async function hideTabContextMenu() {
+  const contextMenu = document.getElementById("tabContextMenu");
+  const awaitPopupHidden = BrowserTestUtils.waitForEvent(contextMenu, "popuphidden");
+  contextMenu.hidePopup();
+  await awaitPopupHidden;
+}

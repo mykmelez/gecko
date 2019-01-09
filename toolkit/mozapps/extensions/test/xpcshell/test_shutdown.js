@@ -10,9 +10,12 @@ const IGNORE = ["getPreferredIconURL", "escapeAddonURI",
                 "addAddonListener", "removeAddonListener",
                 "addInstallListener", "removeInstallListener",
                 "addManagerListener", "removeManagerListener",
+                "addExternalExtensionLoader",
                 "shutdown", "init",
                 "stateToString", "errorToString", "getUpgradeListener",
-                "addUpgradeListener", "removeUpgradeListener"];
+                "addUpgradeListener", "removeUpgradeListener",
+                "getInstallSourceFromHost", "getInstallSourceFromPrincipal",
+               ];
 
 const IGNORE_PRIVATE = ["AddonAuthor", "AddonCompatibilityOverride",
                         "AddonScreenshot", "AddonType", "startup", "shutdown",

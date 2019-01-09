@@ -9,36 +9,43 @@
 
 #include "mozilla/NotNull.h"
 
-class nsIDocument;
-
 namespace mozilla {
 namespace dom {
 
 class HTMLMediaElement;
 class AudioContext;
+class Document;
 
 /**
  * AutoplayPolicy is used to manage autoplay logic for all kinds of media,
  * including MediaElement, Web Audio and Web Speech.
  *
- * Autoplay could be disable by turn off the pref "media.autoplay.enabled".
- * Once user disable autoplay, media could only be played if one of following
- * conditions is true.
+ * Autoplay could be disable by setting the pref "media.autoplay.default"
+ * to anything but nsIAutoplay::Allowed. Once user disables autoplay, media
+ * could only be played if one of following conditions is true.
  * 1) Owner document is activated by user gestures
  *    We restrict user gestures to "mouse click", "keyboard press" and "touch".
  * 2) Muted media content or video without audio content.
  * 3) Document's origin has the "autoplay-media" permission.
  */
-class AutoplayPolicy
-{
-public:
-  static bool IsMediaElementAllowedToPlay(NotNull<HTMLMediaElement*> aElement);
-  static bool IsAudioContextAllowedToPlay(NotNull<AudioContext*> aContext);
-private:
-  static bool IsDocumentAllowedToPlay(nsIDocument* aDoc);
+class AutoplayPolicy {
+ public:
+  // Returns whether a given media element is allowed to play.
+  static bool IsAllowedToPlay(const HTMLMediaElement& aElement);
+
+  // Returns whether a given AudioContext is allowed to play.
+  static bool IsAllowedToPlay(const AudioContext& aContext);
+
+  // Returns true if a given media element would be allowed to play
+  // if block autoplay was enabled. If this returns false, it means we would
+  // either block or ask for permission.
+  // Note: this is for telemetry purposes, and doesn't check the prefs
+  // which enable/disable block autoplay. Do not use for blocking logic!
+  static bool WouldBeAllowedToPlayIfAutoplayDisabled(
+      const HTMLMediaElement& aElement);
 };
 
-} // namespace dom
-} // namespace mozilla
+}  // namespace dom
+}  // namespace mozilla
 
 #endif

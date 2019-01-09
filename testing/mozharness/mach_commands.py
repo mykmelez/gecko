@@ -117,11 +117,6 @@ class MozharnessRunner(MozbuildObject):
                 "config": desktop_unittest_config + [
                     "--jittest-suite", "jittest"]
             },
-            "mozbase": {
-                "script": "desktop_unittest.py",
-                "config": desktop_unittest_config + [
-                    "--mozbase-suite", "mozbase"]
-            },
             "marionette": {
                 "script": "marionette.py",
                 "config": ["--config-file", self.config_path("marionette",
@@ -188,7 +183,7 @@ class MozharnessRunner(MozbuildObject):
 class MozharnessCommands(MachCommandBase):
     @Command('mozharness', category='testing',
              description='Run tests using mozharness.',
-             conditions=[conditions.is_firefox],
+             conditions=[conditions.is_firefox_or_android],
              parser=get_parser)
     def mozharness(self, **kwargs):
         runner = self._spawn(MozharnessRunner)

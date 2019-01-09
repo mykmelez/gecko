@@ -58,14 +58,11 @@ ContentObserver.prototype = {
   _onInnerWindowDestroyed: function(subject, topic, data) {
     const id = subject.QueryInterface(Ci.nsISupportsPRUint64).data;
     EventEmitter.emit(this, "global-destroyed", id);
-  }
+  },
 };
 
 // Utility functions.
 
 ContentObserver.GetInnerWindowID = function(window) {
-  return window
-    .QueryInterface(Ci.nsIInterfaceRequestor)
-    .getInterface(Ci.nsIDOMWindowUtils)
-    .currentInnerWindowID;
+  return window.windowUtils.currentInnerWindowID;
 };
