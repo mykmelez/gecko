@@ -645,7 +645,7 @@ pref("media.cubeb.sandbox", false);
 #endif
 
 #ifdef MOZ_AV1
-#if defined(XP_WIN)
+#if defined(XP_WIN) && !defined(_ARM64_)
 pref("media.av1.enabled", true);
 #else
 pref("media.av1.enabled", false);
@@ -957,7 +957,8 @@ pref("gfx.webrender.debug.show-overdraw", false);
 pref("gfx.webrender.debug.slow-frame-indicator", false);
 pref("gfx.webrender.dl.dump-parent", false);
 pref("gfx.webrender.dl.dump-content", false);
-pref("gfx.webrender.picture-caching", false);
+
+pref("gfx.webrender.picture-caching", true);
 
 #ifdef EARLY_BETA_OR_EARLIER
 pref("performance.adjust_to_machine", true);
@@ -1079,6 +1080,8 @@ pref("toolkit.scrollbox.scrollIncrement", 20);
 pref("toolkit.scrollbox.verticalScrollDistance", 3);
 pref("toolkit.scrollbox.horizontalScrollDistance", 5);
 pref("toolkit.scrollbox.clickToScroll.scrollDelay", 150);
+
+pref("toolkit.tabbox.switchByScrolling", false);
 
 // Telemetry settings.
 // Server to submit telemetry pings to.
@@ -1738,9 +1741,6 @@ pref("network.http.request.max-start-delay", 10);
 
 // If a connection is reset, we will retry it max-attempts times.
 pref("network.http.request.max-attempts", 10);
-
-// Headers
-pref("network.http.accept.default", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8");
 
 // Prefs allowing granular control of referers
 // 0=don't send any, 1=send only on clicks, 2=send on image requests as well

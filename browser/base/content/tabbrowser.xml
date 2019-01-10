@@ -34,7 +34,7 @@
         // - for vertical orientation
         // - corresponding to an overflow event that we ignored
         let tabs = document.getBindingParent(this);
-        if (event.originalTarget != this._scrollbox ||
+        if (event.originalTarget != this.scrollbox ||
             event.detail == 0 ||
             !tabs.hasAttribute("overflow")) {
           return;
@@ -56,7 +56,7 @@
         // Ignore overflow events:
         // - from nested scrollable elements
         // - for vertical orientation
-        if (event.originalTarget != this._scrollbox ||
+        if (event.originalTarget != this.scrollbox ||
             event.detail == 0) {
           return;
         }
@@ -634,7 +634,7 @@
           let leftMovingTabScreenX = movingTabs[0].boxObject.screenX;
           let translateX = screenX - draggedTab._dragData.screenX;
           if (!pinned) {
-            translateX += this.arrowScrollbox._scrollbox.scrollLeft - draggedTab._dragData.scrollX;
+            translateX += this.arrowScrollbox.scrollbox.scrollLeft - draggedTab._dragData.scrollX;
           }
           let leftBound = leftTab.boxObject.screenX - leftMovingTabScreenX;
           let rightBound = (rightTab.boxObject.screenX + rightTab.boxObject.width) -
@@ -1555,7 +1555,7 @@
         tab._dragData = {
           offsetX: event.screenX - window.screenX - tabOffsetX,
           offsetY: event.screenY - window.screenY,
-          scrollX: this.arrowScrollbox._scrollbox.scrollLeft,
+          scrollX: this.arrowScrollbox.scrollbox.scrollLeft,
           screenX: event.screenX,
           movingTabs: (tab.multiselected ? gBrowser.selectedTabs : [tab])
                       .filter(t => t.pinned == tab.pinned),
@@ -2363,7 +2363,9 @@
 
         if (this.selected) {
           this.style.MozUserFocus = "ignore";
-        } else if (this.mOverCloseButton || this._overPlayingIcon) {
+        } else if (event.originalTarget.classList.contains("tab-close-button") ||
+                   event.originalTarget.classList.contains("tab-icon-sound") ||
+                   event.originalTarget.classList.contains("tab-icon-overlay")) {
             // Prevent tabbox.xml from selecting the tab.
             event.stopPropagation();
         }
@@ -2418,8 +2420,9 @@
         }
 
         if (gBrowser.multiSelectedTabsCount > 0 &&
-          !this.mOverCloseButton &&
-          !this._overPlayingIcon) {
+            !event.originalTarget.classList.contains("tab-close-button") &&
+            !event.originalTarget.classList.contains("tab-icon-sound") &&
+            !event.originalTarget.classList.contains("tab-icon-overlay")) {
           // Tabs were previously multi-selected and user clicks on a tab
           // without holding Ctrl/Cmd Key
 
@@ -2430,7 +2433,10 @@
           gBrowser.clearMultiSelectedTabs(updatePositionalAttr);
         }
 
-        if (this._overPlayingIcon) {
+        if (event.originalTarget.classList.contains("tab-icon-sound") ||
+            (event.originalTarget.classList.contains("tab-icon-overlay") &&
+             (event.originalTarget.hasAttribute("soundplaying") ||
+              event.originalTarget.hasAttribute("muted")))) {
           if (this.multiselected) {
             gBrowser.toggleMuteAudioOnMultiSelectedTabs(this);
           } else {
@@ -2464,7 +2470,8 @@
         if (tabContainer._closeTabByDblclick &&
             this._selectedOnFirstMouseDown &&
             this.selected &&
-            !this._overPlayingIcon) {
+            !(event.originalTarget.classList.contains("tab-icon-sound") ||
+              event.originalTarget.classList.contains("tab-icon-overlay"))) {
           gBrowser.removeTab(this, {
             animate: true,
             byMouse: event.mozInputSource == MouseEvent.MOZ_SOURCE_MOUSE,

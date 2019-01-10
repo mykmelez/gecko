@@ -58,9 +58,6 @@
 
 .popup-notification-button {
   flex: 1;
-  margin: 0;
-  min-width: 0;
-  min-height: 41px;
 }
 
 .popup-notification-primary-button:not([alone]) {
@@ -69,10 +66,6 @@
 
 .popup-notification-secondary-button[hidden="true"] ~ .popup-notification-primary-button {
   flex: 1;
-}
-
-.popup-notification-button > .button-box {
-  padding: 0;
 }
 
 .popup-notification-dropmarker {

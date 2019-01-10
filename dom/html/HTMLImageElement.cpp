@@ -500,8 +500,9 @@ nsresult HTMLImageElement::BindToTree(Document* aDocument, nsIContent* aParent,
   }
 
   if (HaveSrcsetOrInPicture()) {
-    if (aDocument && !mInDocResponsiveContent) {
-      aDocument->AddResponsiveContent(this);
+    Document* doc = GetComposedDoc();
+    if (doc && !mInDocResponsiveContent) {
+      doc->AddResponsiveContent(this);
       mInDocResponsiveContent = true;
     }
 
@@ -524,11 +525,6 @@ nsresult HTMLImageElement::BindToTree(Document* aDocument, nsIContent* aParent,
     // Mark channel as urgent-start before load image if the image load is
     // initaiated by a user interaction.
     mUseUrgentStartForChannel = EventStateManager::IsHandlingUserInput();
-
-    // FIXME: Bug 660963 it would be nice if we could just have
-    // ClearBrokenState update our state and do it fast...
-    ClearBrokenState();
-    RemoveStatesSilently(NS_EVENT_STATE_BROKEN);
 
     // We still act synchronously for the non-responsive case (Bug
     // 1076583), but still need to delay if it is unsafe to run

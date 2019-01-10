@@ -1108,6 +1108,26 @@
     "n_buckets": 50,
     "description": "Total JavaScript compartments used for web pages"
   },
+  "MEMORY_JS_REALMS_SYSTEM": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["memshrink-telemetry-alerts@mozilla.com", "jdemooij@mozilla.com"],
+    "bug_numbers": [1518077],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 1000,
+    "n_buckets": 50,
+    "description": "Total JavaScript realms used for add-ons and internals."
+  },
+  "MEMORY_JS_REALMS_USER": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["memshrink-telemetry-alerts@mozilla.com", "jdemooij@mozilla.com"],
+    "bug_numbers": [1518077],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 1000,
+    "n_buckets": 50,
+    "description": "Total JavaScript realms used for web pages."
+  },
   "MEMORY_JS_GC_HEAP": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["memshrink-telemetry-alerts@mozilla.com"],
@@ -14440,6 +14460,21 @@
     "n_buckets": 10,
     "bug_numbers": [1490074],
     "description": "How long the AudioContext would become audible since it was created, time unit is seconds.",
+    "releaseChannelCollection": "opt-out"
+  },
+  "WEB_AUDIO_AUTOPLAY": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": [
+      "alwu@mozilla.com",
+      "cpearce@mozilla.com",
+      "padenot@mozilla.com",
+      "ktomlinson@mozilla.com"
+    ],
+    "expires_in_version": "70",
+    "kind": "categorical",
+    "labels": ["NeverBlocked", "AllowedAfterBlocked", "NeverAllowed"],
+    "bug_numbers": [1512277],
+    "description": "The number of times an AudioContext is allowed to start after being blocked, or the number of AudioContexts attempting to start which were never blocked or never allowed.",
     "releaseChannelCollection": "opt-out"
   },
   "QM_REPOSITORIES_INITIALIZATION_TIME": {
