@@ -1120,7 +1120,7 @@ VARCACHE_PREF(
 )
 #undef PREF_VALUE
 
-#if defined(XP_WIN)
+#if defined(XP_WIN) && !defined(_ARM64_)
 # define PREF_VALUE true
 #else
 # define PREF_VALUE false
@@ -1441,7 +1441,7 @@ VARCACHE_PREF(
 )
 
 // AV1
-#if defined(XP_WIN)
+#if defined(XP_WIN) && !defined(_ARM64_)
 # define PREF_VALUE true
 #else
 # define PREF_VALUE false
@@ -1781,6 +1781,20 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "privacy.trackingprotection.annotate_channels",
    privacy_trackingprotection_annotate_channels,
+  bool, true
+)
+
+// Block 3rd party fingerprinting resources.
+VARCACHE_PREF(
+  "privacy.trackingprotection.fingerprinting.enabled",
+   privacy_trackingprotection_fingerprinting_enabled,
+  bool, true
+)
+
+// Block 3rd party cryptomining resources.
+VARCACHE_PREF(
+  "privacy.trackingprotection.cryptomining.enabled",
+   privacy_trackingprotection_cryptomining_enabled,
   bool, true
 )
 

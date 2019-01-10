@@ -3891,14 +3891,10 @@ void nsWindow::AddWindowOverlayWebRenderCommands(
     wr::IpcResourceUpdateQueue& aResources) {
   if (mWindowButtonsRect) {
     wr::LayoutRect rect = wr::ToLayoutRect(*mWindowButtonsRect);
-    nsTArray<wr::ComplexClipRegion> roundedClip;
-    roundedClip.AppendElement(wr::ToComplexClipRegion(
+    auto complexRegion = wr::ToComplexClipRegion(
         RoundedRect(IntRectToRect(mWindowButtonsRect->ToUnknownRect()),
-                    RectCornerRadii(0, 0, 3, 3))));
-    wr::WrClipId clipId = aBuilder.DefineClip(Nothing(), rect, &roundedClip);
-    aBuilder.PushClip(clipId);
-    aBuilder.PushClearRect(rect);
-    aBuilder.PopClip();
+                    RectCornerRadii(0, 0, 3, 3)));
+    aBuilder.PushClearRectWithComplexRegion(rect, complexRegion);
   }
 }
 
@@ -6504,19 +6500,22 @@ void nsWindow::OnWindowPosChanging(LPWINDOWPOS& info) {
     nsCOMPtr<nsIScreenManager> screenmgr =
         do_GetService(sScreenManagerContractID);
     if (screenmgr) {
+      LayoutDeviceIntRect bounds(info->x, info->y, info->cx, info->cy);
+      DesktopIntRect deskBounds =
+          RoundedToInt(bounds / GetDesktopToDeviceScale());
       nsCOMPtr<nsIScreen> screen;
-      screenmgr->ScreenForRect(info->x, info->y, info->cx, info->cy,
+      screenmgr->ScreenForRect(deskBounds.X(), deskBounds.Y(),
+                               deskBounds.Width(), deskBounds.Height(),
                                getter_AddRefs(screen));
 
       if (screen) {
         int32_t x, y, width, height;
-        screen->GetRectDisplayPix(&x, &y, &width, &height);
-        double scale = GetDesktopToDeviceScale().scale;
+        screen->GetRect(&x, &y, &width, &height);
 
-        info->x = NSToIntRound(x * scale);
-        info->y = NSToIntRound(y * scale);
-        info->cx = NSToIntRound(width * scale);
-        info->cy = NSToIntRound(height * scale);
+        info->x = x;
+        info->y = y;
+        info->cx = width;
+        info->cy = height;
       }
     }
   }

@@ -141,7 +141,8 @@ const MozElementMixin = Base => class MozElement extends Base {
             `;
         }, "")}
       ]>` : ""}
-      <box xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
+      <box xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+           xmlns:html="http://www.w3.org/1999/xhtml">
         ${str}
       </box>
     `, "application/xml");
@@ -288,6 +289,10 @@ MozXULElement.implementCustomInterface(MozElements.BaseControl,
 window.MozElementMixin = MozElementMixin;
 window.MozXULElement = MozXULElement;
 window.MozElements = MozElements;
+
+customElements.setElementCreationCallback("browser", () => {
+  Services.scriptloader.loadSubScript("chrome://global/content/elements/browser-custom-element.js", window);
+});
 
 // For now, don't load any elements in the extension dummy document.
 // We will want to load <browser> when that's migrated (bug 1441935).

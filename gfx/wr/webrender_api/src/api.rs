@@ -984,6 +984,8 @@ bitflags! {
         const GPU_CACHE_DBG         = 1 << 12;
         const SLOW_FRAME_INDICATOR  = 1 << 13;
         const TEXTURE_CACHE_DBG_CLEAR_EVICTED = 1 << 14;
+        /// Show picture caching debug overlay
+        const PICTURE_CACHING_DBG   = 1 << 15;
     }
 }
 
@@ -1281,6 +1283,7 @@ impl ZoomFactor {
     }
 }
 
+#[repr(C)]
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, Eq, Hash)]
 pub struct PropertyBindingId {
     namespace: IdNamespace,
@@ -1298,6 +1301,7 @@ impl PropertyBindingId {
 
 /// A unique key that is used for connecting animated property
 /// values to bindings in the display list.
+#[repr(C)]
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PropertyBindingKey<T> {
     pub id: PropertyBindingId,
@@ -1326,6 +1330,7 @@ impl<T> PropertyBindingKey<T> {
 /// Note that Binding has also a non-animated value, the value is
 /// used for the case where the animation is still in-delay phase
 /// (i.e. the animation doesn't produce any animation values).
+#[repr(C)]
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub enum PropertyBinding<T> {
     Value(T),

@@ -42,11 +42,15 @@ DeviceInfoIos::DeviceInfoIos() {
   this->Init();
 }
 
-DeviceInfoIos::~DeviceInfoIos() {}
+DeviceInfoIos::~DeviceInfoIos() {
+  [_captureInfo registerOwner:nil];
+}
 
 int32_t DeviceInfoIos::Init() {
-  // Fill in all device capabilities.
+  _captureInfo = [[DeviceInfoIosObjC alloc] init];
+  [_captureInfo registerOwner:this];
 
+  // Fill in all device capabilities.
   int deviceCount = [DeviceInfoIosObjC captureDeviceCount];
 
   for (int i = 0; i < deviceCount; i++) {

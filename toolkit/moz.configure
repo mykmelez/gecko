@@ -25,9 +25,9 @@ imply_option('--enable-profiling', jprof)
 @depends(target)
 def gecko_profiler(target):
     if target.os == 'Android':
-        return target.cpu in ('aarch64', 'arm', 'x86')
+        return target.cpu in ('aarch64', 'arm', 'x86', 'x86_64')
     elif target.kernel == 'Linux':
-        return target.cpu in ('x86', 'x86_64', 'mips64', 'arm')
+        return target.cpu in ('aarch64', 'arm', 'x86', 'x86_64', 'mips64')
     return target.os in ('OSX', 'WINNT')
 
 @depends(gecko_profiler)
@@ -1293,6 +1293,7 @@ set_config('MOZ_LAYOUT_DEBUGGER', depends_if('--enable-layout-debugger')(lambda 
 with only_when(compile_environment):
     fxc = check_prog('FXC', ('fxc.exe', 'fxc2.exe'), when=depends(target)
                      (lambda t: t.kernel == 'WINNT'))
+    add_old_configure_assignment('FXC', fxc)
     wine = check_prog('WINE', ['wine'], when=depends(target, host)
                       (lambda t, h: t.kernel == 'WINNT' and h.kernel == 'Linux'))
 
