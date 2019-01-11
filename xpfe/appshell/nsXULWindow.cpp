@@ -50,6 +50,7 @@
 #include "nsGlobalWindow.h"
 #include "XULDocument.h"
 #include "nsXULTooltipListener.h"
+#include "XULStore.h"
 
 #include "prenv.h"
 #include "mozilla/AutoRestore.h"
@@ -1595,15 +1596,8 @@ nsresult nsXULWindow::GetPersistentValue(const nsAtom* aAttr,
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ConvertUTF8toUTF16 uri(utf8uri);
 
-  if (!mLocalStore) {
-    mLocalStore = do_GetService("@mozilla.org/xul/xulstore;1");
-    if (NS_WARN_IF(!mLocalStore)) {
-      return NS_ERROR_NOT_INITIALIZED;
-    }
-  }
-
-  rv = mLocalStore->GetValue(uri, windowElementId, nsDependentAtomString(aAttr),
-                             aValue);
+  nsDependentAtomString attrString(aAttr);
+  rv = xulstore_get_value_ns(&uri, &windowElementId, &attrString, &aValue);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -1653,15 +1647,9 @@ nsresult nsXULWindow::SetPersistentValue(const nsAtom* aAttr,
                       maybeConvertedValue);
   }
 
-  if (!mLocalStore) {
-    mLocalStore = do_GetService("@mozilla.org/xul/xulstore;1");
-    if (NS_WARN_IF(!mLocalStore)) {
-      return NS_ERROR_NOT_INITIALIZED;
-    }
-  }
-
-  return mLocalStore->SetValue(
-      uri, windowElementId, nsDependentAtomString(aAttr), maybeConvertedValue);
+  nsDependentAtomString attrString(aAttr);
+  return xulstore_set_value_ns(&uri, &windowElementId, &attrString,
+                               &maybeConvertedValue);
 }
 
 NS_IMETHODIMP nsXULWindow::SavePersistentAttributes() {

@@ -5,8 +5,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "XULPersist.h"
-
-#include "nsIXULStore.h"
+#include "XULStore.h"
 
 namespace mozilla {
 namespace dom {
@@ -80,13 +79,6 @@ void XULPersist::Persist(Element* aElement, int32_t aNameSpaceID,
     return;
   }
 
-  if (!mLocalStore) {
-    mLocalStore = do_GetService("@mozilla.org/xul/xulstore;1");
-    if (NS_WARN_IF(!mLocalStore)) {
-      return;
-    }
-  }
-
   nsAutoString id;
 
   aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::id, id);
@@ -102,14 +94,10 @@ void XULPersist::Persist(Element* aElement, int32_t aNameSpaceID,
   }
   NS_ConvertUTF8toUTF16 uri(utf8uri);
 
-  bool hasAttr;
-  rv = mLocalStore->HasValue(uri, id, attrstr, &hasAttr);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return;
-  }
+  bool hasAttr = xulstore_has_value_ns(&uri, &id, &attrstr);
 
   if (hasAttr && valuestr.IsEmpty()) {
-    mLocalStore->RemoveValue(uri, id, attrstr);
+    Unused << xulstore_remove_value_ns(&uri, &id, &attrstr);
     return;
   }
 
@@ -121,7 +109,7 @@ void XULPersist::Persist(Element* aElement, int32_t aNameSpaceID,
     }
   }
 
-  mLocalStore->SetValue(uri, id, attrstr, valuestr);
+  Unused << xulstore_set_value_ns(&uri, &id, &attrstr, &valuestr);
 }
 
 nsresult XULPersist::ApplyPersistentAttributes() {
@@ -135,13 +123,6 @@ nsresult XULPersist::ApplyPersistentAttributes() {
 
   // Add all of the 'persisted' attributes into the content
   // model.
-  if (!mLocalStore) {
-    mLocalStore = do_GetService("@mozilla.org/xul/xulstore;1");
-    if (NS_WARN_IF(!mLocalStore)) {
-      return NS_ERROR_NOT_INITIALIZED;
-    }
-  }
-
   ApplyPersistentAttributesInternal();
 
   return NS_OK;
@@ -158,21 +139,11 @@ nsresult XULPersist::ApplyPersistentAttributesInternal() {
   NS_ConvertUTF8toUTF16 uri(utf8uri);
 
   // Get a list of element IDs for which persisted values are available
-  nsCOMPtr<nsIStringEnumerator> ids;
-  rv = mLocalStore->GetIDsEnumerator(uri, getter_AddRefs(ids));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
+  void* ids = xulstore_get_ids_iterator_ns(&uri);
 
-  while (1) {
-    bool hasmore = false;
-    ids->HasMore(&hasmore);
-    if (!hasmore) {
-      break;
-    }
-
+  while (xulstore_iter_has_more(ids)) {
     nsAutoString id;
-    ids->GetNext(id);
+    Unused << xulstore_iter_get_next_ns(ids, &id);
 
     // We want to hold strong refs to the elements while applying
     // persistent attributes, just in case.
@@ -191,6 +162,7 @@ nsresult XULPersist::ApplyPersistentAttributesInternal() {
       return rv;
     }
   }
+  xulstore_iter_drop(ids);
 
   return NS_OK;
 }
@@ -205,24 +177,14 @@ nsresult XULPersist::ApplyPersistentAttributesToElements(
   NS_ConvertUTF8toUTF16 uri(utf8uri);
 
   // Get a list of attributes for which persisted values are available
-  nsCOMPtr<nsIStringEnumerator> attrs;
-  rv = mLocalStore->GetAttributeEnumerator(uri, aID, getter_AddRefs(attrs));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
+  void* attrs = xulstore_get_attribute_iterator_ns(&uri, &aID);
 
-  while (1) {
-    bool hasmore = PR_FALSE;
-    attrs->HasMore(&hasmore);
-    if (!hasmore) {
-      break;
-    }
-
+  while (xulstore_iter_has_more(attrs)) {
     nsAutoString attrstr;
-    attrs->GetNext(attrstr);
+    Unused << xulstore_iter_get_next_ns(attrs, &attrstr);
 
     nsAutoString value;
-    rv = mLocalStore->GetValue(uri, aID, attrstr, value);
+    rv = xulstore_get_value_ns(&uri, &aID, &attrstr, &value);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -251,6 +213,7 @@ nsresult XULPersist::ApplyPersistentAttributesToElements(
       Unused << element->SetAttr(kNameSpaceID_None, attr, value, true);
     }
   }
+  xulstore_iter_drop(attrs);
 
   return NS_OK;
 }

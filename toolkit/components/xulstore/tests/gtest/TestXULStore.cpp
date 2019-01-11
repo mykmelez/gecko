@@ -2,18 +2,7 @@
 #include "gtest/gtest.h"
 #include "nsCOMPtr.h"
 #include "nsString.h"
-
-extern "C" {
-  nsresult xulstore_set_value_ns(nsAString* doc, nsAString* id, nsAString* attr, nsAString* value);
-  bool xulstore_has_value_ns(nsAString* doc, nsAString* id, nsAString* attr);
-  nsresult xulstore_get_value_ns(const nsAString* doc, const nsAString* id, const nsAString* attr, nsAString* value);
-  nsresult xulstore_remove_value_ns(const nsAString* doc, const nsAString* id, const nsAString* attr);
-  void *xulstore_get_ids_iterator_ns(const nsAString* doc);
-  void *xulstore_get_attribute_iterator_ns(const nsAString* doc, const nsAString* id);
-  bool xulstore_iter_has_more(void *);
-  nsresult xulstore_iter_get_next_ns(void *, nsAString* value);
-  void xulstore_iter_drop(void *);
-}
+#include "XULStore.h"
 
 TEST(XULStore, SetGetValue) {
   nsAutoString doc(NS_LITERAL_STRING("SetGetValue"));

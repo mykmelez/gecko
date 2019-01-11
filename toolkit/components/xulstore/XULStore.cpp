@@ -2,9 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-extern "C" {
-	void xulstore_function_marked_used();
-}
+// Local Includes
+#include "XULStore.h"
 
 // Use a XULStore function to prevent the linker from stripping functions
 // that are only called via js-ctypes.
@@ -20,5 +19,5 @@ extern "C" {
 // TODO: figure out a better way to tell the linker these functions are used.
 //
 void __attribute__((__used__)) mark_xulstore_function_used() {
-	xulstore_function_marked_used();
+  xulstore_function_marked_used();
 }
