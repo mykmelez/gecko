@@ -389,10 +389,7 @@ impl EnumerateTask {
     }
 }
 
-type KeyValuePair = (
-    Result<String, KeyValueError>,
-    Result<OwnedValue, KeyValueError>,
-);
+type KeyValuePair = Result<(String, OwnedValue), KeyValueError>;
 
 impl Task for EnumerateTask {
     fn run(&self) {
@@ -426,28 +423,33 @@ impl Task for EnumerateTask {
                     // For forward compatibility, we don't fail here if we can't convert
                     // a key to UTF-8.  Instead, we store the Err in the collection
                     // and fail lazily in KeyValueEnumerator.get_next().
-                    .map(|(key, val)| (str::from_utf8(&key), val))
-                    .take_while(|(key, _val)| {
-                        if to_key.is_empty() {
-                            true
-                        } else {
-                            match *key {
-                                Ok(key) => key < to_key,
-                                Err(_err) => true,
+                    .map(|result| match result {
+                        Ok((key, val)) => Ok((str::from_utf8(&key), val)),
+                        Err(err) => Err(err) })
+                    // Stop iterating once we reach the to_key, if any.
+                    .take_while(|result| match result {
+                        Ok((key, _val)) => {
+                            if to_key.is_empty() {
+                                true
+                            } else {
+                                match *key {
+                                    Ok(key) => key < to_key,
+                                    Err(_err) => true,
+                                }
                             }
-                        }
+                        },
+                        Err(_) => true,
                     })
-                    .map(|(key, val)| {
-                        (
-                            match key {
-                                Ok(key) => Ok(key.to_owned()),
-                                Err(err) => Err(err.into()),
-                            },
-                            match val {
-                                Ok(val) => value_to_owned(val),
-                                Err(err) => Err(KeyValueError::StoreError(err)),
-                            },
-                        )
+                    // Convert the key, value pair to owned.
+                    .map(|result| match result {
+                        Ok((key, val)) => {
+                            match (key, value_to_owned(val)) {
+                                (Ok(key), Ok(val)) => Ok((key.to_owned(), val)),
+                                (Err(err), _) => Err(err.into()),
+                                (_, Err(err)) => Err(err),
+                            }
+                        },
+                        Err(err) => Err(KeyValueError::StoreError(err)),
                     })
                     .collect();
 

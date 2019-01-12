@@ -275,19 +275,13 @@ impl KeyValueDatabase {
 #[refcnt = "atomic"]
 pub struct InitKeyValueEnumerator {
     iter: AtomicRefCell<
-        IntoIter<(
-            Result<String, KeyValueError>,
-            Result<OwnedValue, KeyValueError>,
-        )>,
+        IntoIter<Result<(String, OwnedValue), KeyValueError>>,
     >,
 }
 
 impl KeyValueEnumerator {
     fn new(
-        pairs: Vec<(
-            Result<String, KeyValueError>,
-            Result<OwnedValue, KeyValueError>,
-        )>,
+        pairs: Vec<Result<(String, OwnedValue), KeyValueError>>,
     ) -> RefPtr<KeyValueEnumerator> {
         KeyValueEnumerator::allocate(InitKeyValueEnumerator {
             iter: AtomicRefCell::new(pairs.into_iter()),
@@ -304,13 +298,13 @@ impl KeyValueEnumerator {
 
     fn get_next(&self) -> Result<RefPtr<nsIKeyValuePair>, KeyValueError> {
         let mut iter = self.iter.borrow_mut();
-        let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
+        let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))??;
 
         // We fail on retrieval of the key/value pair if the key isn't valid
         // UTF-*, if the value is unexpected, or if we encountered a store error
         // while retrieving the pair.
         Ok(RefPtr::new(
-            KeyValuePair::new(key?, value?).coerce::<nsIKeyValuePair>(),
+            KeyValuePair::new(key, value).coerce::<nsIKeyValuePair>(),
         ))
     }
 }
