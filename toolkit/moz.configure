@@ -1093,7 +1093,8 @@ def check_for_midl(target, compile_environment):
         return True
 
 
-midl = check_prog('MIDL', midl_names, when=check_for_midl, allow_missing=True)
+midl = check_prog('MIDL', midl_names, when=check_for_midl, allow_missing=True,
+                  paths=sdk_bin_path)
 
 
 @depends(c_compiler, target, vc_compiler_path,
@@ -1130,9 +1131,17 @@ set_config('MIDL_FLAGS', midl_flags)
 # Accessibility
 # ==============================================================
 
-option('--disable-accessibility', help='Disable accessibility support')
+@depends(target)
+def a11y_default(target):
+    # Accessibility doesn't work on aarch64-windows yet.
+    if target.kernel == 'WINNT' and target.cpu == 'aarch64':
+        return False
+    return True
 
-@depends('--disable-accessibility', check_for_midl, midl, c_compiler)
+option('--enable-accessibility',
+       default=a11y_default, help='{Enable|Disable} accessibility support')
+
+@depends('--enable-accessibility', check_for_midl, midl, c_compiler)
 def accessibility(value, check_for_midl, midl, c_compiler):
     enabled = bool(value)
 
@@ -1292,8 +1301,8 @@ set_config('MOZ_LAYOUT_DEBUGGER', depends_if('--enable-layout-debugger')(lambda 
 
 with only_when(compile_environment):
     fxc = check_prog('FXC', ('fxc.exe', 'fxc2.exe'), when=depends(target)
-                     (lambda t: t.kernel == 'WINNT'))
-    add_old_configure_assignment('FXC', fxc)
+                     (lambda t: t.kernel == 'WINNT'),
+                     paths=sdk_bin_path)
     wine = check_prog('WINE', ['wine'], when=depends(target, host)
                       (lambda t, h: t.kernel == 'WINNT' and h.kernel == 'Linux'))
 
@@ -1371,7 +1380,6 @@ with only_when(compile_environment):
 
     set_config('VPX_USE_YASM', in_tree_vpx.use_yasm)
     set_config('VPX_ASFLAGS', vpx_as_flags)
-    add_old_configure_assignment('VPX_ASFLAGS', vpx_as_flags)
 
 
 # JPEG
@@ -1476,12 +1484,111 @@ with only_when(compile_environment):
     set_config('LIBJPEG_TURBO_ASFLAGS', in_tree_jpeg.flags)
 
 
-@depends(yasm_version, in_tree_vpx.need_yasm, in_tree_jpeg.use_yasm)
+# Libav-fft Support
+# ==============================================================
+with only_when(compile_environment):
+    @depends(target)
+    def libav_fft(target):
+        flags = None
+        if target.kernel == 'WINNT' and target.cpu == 'x86':
+            flags = ['-DPIC', '-DWIN32']
+        elif target.cpu == 'x86_64':
+            if target.kernel == 'Darwin':
+                flags = ['-D__x86_64__', '-DPIC', '-DMACHO']
+            elif target.kernel == 'WINNT':
+                flags = ['-D__x86_64__', '-DPIC', '-DWIN64', '-DMSVC']
+            else:
+                flags = ['-D__x86_64__', '-DPIC', '-DELF']
+        if flags:
+            if target.kernel == 'Linux' and target.os == 'GNU':
+                need_yasm = Version('1.0.1')
+            else:
+                need_yasm = Version('1.1')
+            return namespace(flags=flags, need_yasm=need_yasm)
+
+
+    set_config('MOZ_LIBAV_FFT', depends(when=libav_fft)(lambda: True))
+    set_define('MOZ_LIBAV_FFT', depends(when=libav_fft)(lambda: True))
+    set_config('LIBAV_FFT_ASFLAGS', libav_fft.flags)
+
+
+# FFmpeg's ffvpx configuration
+# ==============================================================
+with only_when(compile_environment):
+    @depends_if(yasm_version)
+    def yasm_has_avx2(yasm_version):
+        return yasm_version >= '1.2'
+
+
+    set_config('YASM_HAS_AVX2', yasm_has_avx2)
+
+
+    @depends(yasm_has_avx2, libav_fft, vpx_as_flags, target)
+    def ffvpx(yasm_has_avx2, libav_fft, vpx_as_flags, target):
+        enable = flac_only = use_yasm = False
+        flags = []
+        if target.cpu in ('x86', 'x86_64'):
+            enable = True
+            if libav_fft and libav_fft.flags:
+                use_yasm = True
+                flags.extend(libav_fft.flags)
+                if target.kernel == 'WINNT':
+                    if target.cpu == 'x86':
+                        # 32-bit windows need to prefix symbols with an underscore.
+                        flags.extend(('-DPREFIX', '-Pconfig_win32.asm'))
+                    else:
+                        flags.append('-Pconfig_win64.asm')
+                elif target.kernel == 'Darwin':
+                    # 32/64-bit macosx assemblers need to prefix symbols with an
+                    # underscore.
+                    flags.extend(('-DPREFIX', '-Pconfig_darwin64.asm'))
+                else:
+                    # Default to unix.
+                    flags.append('-Pconfig_unix64.asm')
+            else:
+                flac_only = True
+        elif target.cpu in ('arm', 'aarch64') and \
+                target.kernel not in ('WINNT', 'Darwin'):
+            enable = flac_only = True
+            flags.extend(vpx_as_flags)
+
+        if use_yasm:
+            # default disabled components
+            flags.append('-Pdefaults_disabled.asm')
+            if not yasm_has_avx2:
+                flags.extend((
+                    '-DHAVE_AVX2=0',
+                    '-DHAVE_AVX2_INTERNAL=0',
+                    '-DHAVE_AVX2_EXTERNAL=0',
+                ))
+
+        return namespace(
+            enable=enable,
+            use_yasm=use_yasm,
+            flac_only=flac_only,
+            flags=flags,
+        )
+
+
+    set_config('MOZ_FFVPX', True, when=ffvpx.enable)
+    set_define('MOZ_FFVPX', True, when=ffvpx.enable)
+    set_config('MOZ_FFVPX_FLACONLY', True, when=ffvpx.flac_only)
+    set_define('MOZ_FFVPX_FLACONLY', True, when=ffvpx.flac_only)
+    set_config('FFVPX_ASFLAGS', ffvpx.flags)
+    set_config('FFVPX_USE_YASM', True, when=ffvpx.use_yasm)
+
+
+@depends(yasm_version, in_tree_vpx.need_yasm, in_tree_jpeg.use_yasm,
+         libav_fft.need_yasm, ffvpx.use_yasm)
 @imports(_from='__builtin__', _import='sorted')
-def valid_yasm_version(yasm_version, for_vpx, for_jpeg):
+def valid_yasm_version(yasm_version, for_vpx, for_jpeg, for_libav,
+                       for_ffvpx=False):
+    # Note: the default for for_ffvpx above only matters for unit tests.
     requires = {
         'vpx': for_vpx,
         'jpeg': for_jpeg,
+        'libav': for_libav,
+        'ffvpx': for_ffvpx,
     }
     requires = {k: v for (k, v) in requires.items() if v}
     if requires and not yasm_version:
@@ -1500,3 +1607,44 @@ def valid_yasm_version(yasm_version, for_vpx, for_jpeg):
         if yasm_version < version:
             die('Yasm version %s or greater is required to build with %s.'
                 % (version, what))
+
+
+# ANGLE OpenGL->D3D translator for WebGL
+# ==============================================================
+
+with only_when(compile_environment & target_is_windows):
+    def d3d_compiler_dll_result(value):
+        if not value.path:
+            return 'provided by the OS'
+        return value.path
+
+    @depends(target, valid_windows_sdk_dir, fxc)
+    @checking('for D3D compiler DLL', d3d_compiler_dll_result)
+    @imports('os.path')
+    def d3d_compiler_dll(target, windows_sdk_dir, fxc):
+        suffix = {
+            'x86_64': 'x64',
+        }.get(target.cpu, target.cpu)
+
+        name = 'd3dcompiler_47.dll'
+
+        if target.cpu == 'aarch64':
+            # AArch64 Windows comes with d3dcompiler_47.dll installed
+            return namespace(name=name, path=None)
+
+        if windows_sdk_dir:
+            path = os.path.join(windows_sdk_dir.path, 'Redist', 'D3D', suffix, name)
+            error_extra = 'in Windows SDK at {}'.format(windows_sdk_dir.path)
+        else:
+            path = os.path.join(os.path.dirname(fxc), name)
+            error_extra = 'alongside FXC at {}'.format(fxc)
+
+        if os.path.exists(path):
+            return namespace(name=name, path=path)
+        die('Could not find {} {}'.format(name, error_extra))
+
+
+    set_config('MOZ_ANGLE_RENDERER', True)
+    set_config('MOZ_D3DCOMPILER_VISTA_DLL', d3d_compiler_dll.name,
+               when=d3d_compiler_dll.path)
+    set_config('MOZ_D3DCOMPILER_VISTA_DLL_PATH', d3d_compiler_dll.path)

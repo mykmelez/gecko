@@ -2288,97 +2288,71 @@ nsDocumentViewer::RequestWindowClose(bool* aCanClose) {
 }
 
 UniquePtr<ServoStyleSet> nsDocumentViewer::CreateStyleSet(Document* aDocument) {
-  // Make sure this does the same thing as PresShell::AddSheet wrt ordering.
-
-  // this should eventually get expanded to allow for creating
-  // different sets for different media
-
-  UniquePtr<ServoStyleSet> styleSet = MakeUnique<ServoStyleSet>();
+  // Make sure this does the same thing as PresShell::Add{User,Agent}Sheet wrt
+  // ordering.
 
   // The document will fill in the document sheets when we create the presshell
   auto cache = nsLayoutStylesheetCache::Singleton();
+  nsStyleSheetService* sheetService = nsStyleSheetService::GetInstance();
 
-  // Handle the user sheets.
-  StyleSheet* sheet = nullptr;
-  if (nsContentUtils::IsInChromeDocshell(aDocument)) {
-    sheet = cache->UserChromeSheet();
-  } else {
-    sheet = cache->UserContentSheet();
+  auto styleSet = MakeUnique<ServoStyleSet>();
+
+  // User sheets
+
+  for (StyleSheet* sheet : *sheetService->UserStyleSheets()) {
+    styleSet->AppendStyleSheet(SheetType::User, sheet);
   }
+
+  StyleSheet* sheet = nsContentUtils::IsInChromeDocshell(aDocument)
+                          ? cache->GetUserChromeSheet()
+                          : cache->GetUserContentSheet();
 
   if (sheet) {
     styleSet->AppendStyleSheet(SheetType::User, sheet);
   }
 
-  // Append chrome sheets (scrollbars + forms).
-  sheet = cache->ScrollbarsSheet();
-  if (sheet) {
-    styleSet->PrependStyleSheet(SheetType::Agent, sheet);
+  // Agent sheets
+
+  styleSet->AppendStyleSheet(SheetType::Agent, cache->UASheet());
+
+  if (MOZ_LIKELY(mDocument->NodeInfoManager()->MathMLEnabled())) {
+    styleSet->AppendStyleSheet(SheetType::Agent, cache->MathMLSheet());
   }
 
-  sheet = cache->FormsSheet();
-  if (sheet) {
-    styleSet->PrependStyleSheet(SheetType::Agent, sheet);
+  if (MOZ_LIKELY(mDocument->NodeInfoManager()->SVGEnabled())) {
+    styleSet->AppendStyleSheet(SheetType::Agent, cache->SVGSheet());
   }
 
-  if (aDocument->LoadsFullXULStyleSheetUpFront()) {
-    sheet = cache->XULSheet();
-    if (sheet) {
-      styleSet->PrependStyleSheet(SheetType::Agent, sheet);
-    }
-  }
-
-  sheet = cache->MinimalXULSheet();
-  if (sheet) {
-    // Load the minimal XUL rules for scrollbars and a few other XUL things
-    // that non-XUL (typically HTML) documents commonly use.
-    styleSet->PrependStyleSheet(SheetType::Agent, sheet);
-  }
-
-  sheet = cache->CounterStylesSheet();
-  if (sheet) {
-    styleSet->PrependStyleSheet(SheetType::Agent, sheet);
-  }
-
-  if (nsLayoutUtils::ShouldUseNoScriptSheet(aDocument)) {
-    sheet = cache->NoScriptSheet();
-    if (sheet) {
-      styleSet->PrependStyleSheet(SheetType::Agent, sheet);
-    }
-  }
-
-  if (nsLayoutUtils::ShouldUseNoFramesSheet(aDocument)) {
-    sheet = cache->NoFramesSheet();
-    if (sheet) {
-      styleSet->PrependStyleSheet(SheetType::Agent, sheet);
-    }
-  }
+  styleSet->AppendStyleSheet(SheetType::Agent, cache->HTMLSheet());
 
   // We don't add quirk.css here; nsPresContext::CompatibilityModeChanged will
   // append it if needed.
 
-  sheet = cache->HTMLSheet();
-  if (sheet) {
-    styleSet->PrependStyleSheet(SheetType::Agent, sheet);
+  if (nsLayoutUtils::ShouldUseNoFramesSheet(aDocument)) {
+    styleSet->AppendStyleSheet(SheetType::Agent, cache->NoFramesSheet());
   }
 
-  if (MOZ_LIKELY(mDocument->NodeInfoManager()->SVGEnabled())) {
-    styleSet->PrependStyleSheet(SheetType::Agent, cache->SVGSheet());
+  if (nsLayoutUtils::ShouldUseNoScriptSheet(aDocument)) {
+    styleSet->AppendStyleSheet(SheetType::Agent, cache->NoScriptSheet());
   }
 
-  if (MOZ_LIKELY(mDocument->NodeInfoManager()->MathMLEnabled())) {
-    styleSet->PrependStyleSheet(SheetType::Agent, cache->MathMLSheet());
+  styleSet->AppendStyleSheet(SheetType::Agent, cache->CounterStylesSheet());
+
+  // Load the minimal XUL rules for scrollbars and a few other XUL things
+  // that non-XUL (typically HTML) documents commonly use.
+  styleSet->AppendStyleSheet(SheetType::Agent, cache->MinimalXULSheet());
+
+  // Only load the full XUL sheet if we'll need it.
+  if (aDocument->LoadsFullXULStyleSheetUpFront()) {
+    styleSet->AppendStyleSheet(SheetType::Agent, cache->XULSheet());
   }
 
-  styleSet->PrependStyleSheet(SheetType::Agent, cache->UASheet());
+  // Append chrome sheets (scrollbars + forms).
+  styleSet->AppendStyleSheet(SheetType::Agent, cache->FormsSheet());
+  styleSet->AppendStyleSheet(SheetType::Agent, cache->ScrollbarsSheet());
 
-  if (nsStyleSheetService* sheetService = nsStyleSheetService::GetInstance()) {
-    for (StyleSheet* sheet : *sheetService->AgentStyleSheets()) {
-      styleSet->AppendStyleSheet(SheetType::Agent, sheet);
-    }
-    for (StyleSheet* sheet : Reversed(*sheetService->UserStyleSheets())) {
-      styleSet->PrependStyleSheet(SheetType::User, sheet);
-    }
+  for (StyleSheet* sheet : *sheetService->AgentStyleSheets()) {
+    styleSet->AppendStyleSheet(SheetType::Agent, sheet);
   }
 
   return styleSet;

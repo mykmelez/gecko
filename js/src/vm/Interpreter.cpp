@@ -1099,50 +1099,37 @@ static void SettleOnTryNote(JSContext* cx, const JSTryNote* tn,
   regs.sp = regs.spForStackDepth(tn->stackDepth);
 }
 
-class InterpreterFrameStackDepthOp {
+class InterpreterTryNoteFilter {
   const InterpreterRegs& regs_;
 
  public:
-  explicit InterpreterFrameStackDepthOp(const InterpreterRegs& regs)
+  explicit InterpreterTryNoteFilter(const InterpreterRegs& regs)
       : regs_(regs) {}
-  uint32_t operator()() { return regs_.stackDepth(); }
+  bool operator()(const JSTryNote* note) {
+    return note->stackDepth <= regs_.stackDepth();
+  }
 };
 
 class TryNoteIterInterpreter
-    : public TryNoteIter<InterpreterFrameStackDepthOp> {
+    : public TryNoteIter<InterpreterTryNoteFilter> {
  public:
   TryNoteIterInterpreter(JSContext* cx, const InterpreterRegs& regs)
       : TryNoteIter(cx, regs.fp()->script(), regs.pc,
-                    InterpreterFrameStackDepthOp(regs)) {}
+                    InterpreterTryNoteFilter(regs)) {}
 };
 
 static void UnwindIteratorsForUncatchableException(
     JSContext* cx, const InterpreterRegs& regs) {
   // c.f. the regular (catchable) TryNoteIterInterpreter loop in
   // ProcessTryNotes.
-  bool inForOfIterClose = false;
   for (TryNoteIterInterpreter tni(cx, regs); !tni.done(); ++tni) {
     const JSTryNote* tn = *tni;
     switch (tn->kind) {
       case JSTRY_FOR_IN: {
-        // See corresponding comment in ProcessTryNotes.
-        if (inForOfIterClose) {
-          break;
-        }
-
         Value* sp = regs.spForStackDepth(tn->stackDepth);
         UnwindIteratorForUncatchableException(&sp[-1].toObject());
         break;
       }
-
-      case JSTRY_FOR_OF_ITERCLOSE:
-        inForOfIterClose = true;
-        break;
-
-      case JSTRY_FOR_OF:
-        inForOfIterClose = false;
-        break;
-
       default:
         break;
     }
@@ -1159,7 +1146,6 @@ enum HandleErrorContinuation {
 static HandleErrorContinuation ProcessTryNotes(JSContext* cx,
                                                EnvironmentIter& ei,
                                                InterpreterRegs& regs) {
-  bool inForOfIterClose = false;
   for (TryNoteIterInterpreter tni(cx, regs); !tni.done(); ++tni) {
     const JSTryNote* tn = *tni;
 
@@ -1170,50 +1156,14 @@ static HandleErrorContinuation ProcessTryNotes(JSContext* cx,
           break;
         }
 
-        // If IteratorClose due to abnormal completion threw inside a
-        // for-of loop, it is not catchable by try statements inside of
-        // the for-of loop.
-        //
-        // This is handled by this weirdness in the exception handler
-        // instead of in bytecode because it is hard to do so in bytecode:
-        //
-        //   1. IteratorClose emitted due to abnormal completion (break,
-        //   throw, return) are emitted inline, at the source location of
-        //   the break, throw, or return statement. For example:
-        //
-        //     for (x of iter) {
-        //       try { return; } catch (e) { }
-        //     }
-        //
-        //   From the try-note nesting's perspective, the IteratorClose
-        //   resulting from |return| is covered by the inner try, when it
-        //   should not be.
-        //
-        //   2. Try-catch notes cannot be disjoint. That is, we can't have
-        //   multiple notes with disjoint pc ranges jumping to the same
-        //   catch block.
-        if (inForOfIterClose) {
-          break;
-        }
         SettleOnTryNote(cx, tn, ei, regs);
         return CatchContinuation;
 
       case JSTRY_FINALLY:
-        // See note above.
-        if (inForOfIterClose) {
-          break;
-        }
         SettleOnTryNote(cx, tn, ei, regs);
         return FinallyContinuation;
 
       case JSTRY_FOR_IN: {
-        // Don't let (extra) values pushed on the stack while closing a
-        // for-of iterator confuse us into thinking we still have to close
-        // an inner for-in iterator.
-        if (inForOfIterClose) {
-          break;
-        }
-
         /* This is similar to JSOP_ENDITER in the interpreter loop. */
         DebugOnly<jsbytecode*> pc =
             regs.fp()->script()->offsetToPC(tn->start + tn->length);
@@ -1225,11 +1175,6 @@ static HandleErrorContinuation ProcessTryNotes(JSContext* cx,
       }
 
       case JSTRY_DESTRUCTURING: {
-        // See note above.
-        if (inForOfIterClose) {
-          break;
-        }
-
         // Whether the destructuring iterator is done is at the top of the
         // stack. The iterator object is second from the top.
         MOZ_ASSERT(tn->stackDepth > 1);
@@ -1246,17 +1191,11 @@ static HandleErrorContinuation ProcessTryNotes(JSContext* cx,
         break;
       }
 
-      case JSTRY_FOR_OF_ITERCLOSE:
-        inForOfIterClose = true;
-        break;
-
       case JSTRY_FOR_OF:
-        inForOfIterClose = false;
-        break;
-
       case JSTRY_LOOP:
         break;
 
+      // JSTRY_FOR_OF_ITERCLOSE is handled internally by the try note iterator.
       default:
         MOZ_CRASH("Invalid try note");
     }
@@ -2406,7 +2345,10 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
     }
     END_CASE(JSOP_BINDNAME)
 
-    CASE(JSOP_BINDVAR) { PUSH_OBJECT(REGS.fp()->varObj()); }
+    CASE(JSOP_BINDVAR) {
+      JSObject* varObj = BindVarOperation(cx, REGS.fp()->environmentChain());
+      PUSH_OBJECT(*varObj);
+    }
     END_CASE(JSOP_BINDVAR)
 
     CASE(JSOP_BITOR) {
@@ -3615,17 +3557,8 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
     END_CASE(JSOP_SETLOCAL)
 
     CASE(JSOP_DEFVAR) {
-      /* ES5 10.5 step 8 (with subsequent errata). */
-      unsigned attrs = JSPROP_ENUMERATE;
-      if (!REGS.fp()->isEvalFrame()) {
-        attrs |= JSPROP_PERMANENT;
-      }
-
-      /* Step 8b. */
-      ReservedRooted<JSObject*> obj(&rootObject0, &REGS.fp()->varObj());
-      ReservedRooted<PropertyName*> name(&rootName0, script->getName(REGS.pc));
-
-      if (!DefVarOperation(cx, obj, name, attrs)) {
+      HandleObject env = REGS.fp()->environmentChain();
+      if (!DefVarOperation(cx, env, script, REGS.pc)) {
         goto error;
       }
     }
@@ -3633,16 +3566,8 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
 
     CASE(JSOP_DEFCONST)
     CASE(JSOP_DEFLET) {
-      LexicalEnvironmentObject* lexicalEnv;
-      JSObject* varObj;
-      if (script->hasNonSyntacticScope()) {
-        lexicalEnv = &REGS.fp()->extensibleLexicalEnvironment();
-        varObj = &REGS.fp()->varObj();
-      } else {
-        lexicalEnv = &cx->global()->lexicalEnvironment();
-        varObj = cx->global();
-      }
-      if (!DefLexicalOperation(cx, lexicalEnv, varObj, script, REGS.pc)) {
+      HandleObject env = REGS.fp()->environmentChain();
+      if (!DefLexicalOperation(cx, env, script, REGS.pc)) {
         goto error;
       }
     }
@@ -4581,6 +4506,97 @@ JSObject* js::LambdaArrow(JSContext* cx, HandleFunction fun,
 
   MOZ_ASSERT(fun->global() == clone->global());
   return clone;
+}
+
+JSObject* js::BindVarOperation(JSContext* cx, JSObject* envChain) {
+  // Note: BindVarOperation has an unused cx argument because the JIT callVM
+  // machinery requires this.
+  return &GetVariablesObject(envChain);
+}
+
+bool js::DefVarOperation(JSContext* cx, HandleObject envChain,
+                         HandleScript script, jsbytecode* pc) {
+  MOZ_ASSERT(JSOp(*pc) == JSOP_DEFVAR);
+
+  RootedObject varobj(cx, &GetVariablesObject(envChain));
+  MOZ_ASSERT(varobj->isQualifiedVarObj());
+
+  RootedPropertyName name(cx, script->getName(pc));
+
+  unsigned attrs = JSPROP_ENUMERATE;
+  if (!script->isForEval()) {
+    attrs |= JSPROP_PERMANENT;
+  }
+
+#ifdef DEBUG
+  // Per spec, it is an error to redeclare a lexical binding. This should
+  // have already been checked.
+  if (JS_HasExtensibleLexicalEnvironment(varobj)) {
+    Rooted<LexicalEnvironmentObject*> lexicalEnv(cx);
+    lexicalEnv = &JS_ExtensibleLexicalEnvironment(varobj)
+                      ->as<LexicalEnvironmentObject>();
+    MOZ_ASSERT(CheckVarNameConflict(cx, lexicalEnv, name));
+  }
+#endif
+
+  Rooted<PropertyResult> prop(cx);
+  RootedObject obj2(cx);
+  if (!LookupProperty(cx, varobj, name, &obj2, &prop)) {
+    return false;
+  }
+
+  /* Steps 8c, 8d. */
+  if (!prop || (obj2 != varobj && varobj->is<GlobalObject>())) {
+    if (!DefineDataProperty(cx, varobj, name, UndefinedHandleValue, attrs)) {
+      return false;
+    }
+  }
+
+  if (varobj->is<GlobalObject>()) {
+    if (!varobj->as<GlobalObject>().realm()->addToVarNames(cx, name)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool js::DefLexicalOperation(JSContext* cx, HandleObject envChain,
+                             HandleScript script, jsbytecode* pc) {
+  MOZ_ASSERT(*pc == JSOP_DEFLET || *pc == JSOP_DEFCONST);
+
+  unsigned attrs = JSPROP_ENUMERATE | JSPROP_PERMANENT;
+  if (*pc == JSOP_DEFCONST) {
+    attrs |= JSPROP_READONLY;
+  }
+
+  Rooted<LexicalEnvironmentObject*> lexicalEnv(cx);
+  if (script->hasNonSyntacticScope()) {
+    lexicalEnv = &NearestEnclosingExtensibleLexicalEnvironment(envChain);
+  } else {
+    lexicalEnv = &cx->global()->lexicalEnvironment();
+  }
+
+#ifdef DEBUG
+  RootedObject varObj(cx);
+  if (script->hasNonSyntacticScope()) {
+    varObj = &GetVariablesObject(envChain);
+  } else {
+    varObj = cx->global();
+  }
+
+  MOZ_ASSERT_IF(!script->hasNonSyntacticScope(),
+                lexicalEnv == &cx->global()->lexicalEnvironment() &&
+                    varObj == cx->global());
+
+  // Redeclaration checks should have already been done.
+  RootedPropertyName name(cx, script->getName(pc));
+  MOZ_ASSERT(CheckLexicalNameConflict(cx, lexicalEnv, varObj, name));
+#endif
+
+  RootedId id(cx, NameToId(script->getName(pc)));
+  RootedValue uninitialized(cx, MagicValue(JS_UNINITIALIZED_LEXICAL));
+  return NativeDefineDataProperty(cx, lexicalEnv, id, uninitialized, attrs);
 }
 
 bool js::DefFunOperation(JSContext* cx, HandleScript script,

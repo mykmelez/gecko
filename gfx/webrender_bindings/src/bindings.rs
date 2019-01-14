@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::ops::Range;
-use std::os::raw::{c_void, c_char, c_float};
+use std::os::raw::{c_void, c_char};
 #[cfg(target_os = "android")]
 use std::os::raw::{c_int};
 use gleam::gl;
@@ -140,6 +140,15 @@ impl WrSpaceAndClip {
     }
 }
 
+#[inline]
+fn clip_chain_id_to_webrender(id: u64, pipeline_id: WrPipelineId) -> ClipId {
+    if id == ROOT_CLIP_CHAIN {
+        ClipId::root(pipeline_id)
+    } else {
+        ClipId::ClipChain(ClipChainId(id, pipeline_id))
+    }
+}
+
 #[repr(C)]
 pub struct WrSpaceAndClipChain {
     space: WrSpatialId,
@@ -151,15 +160,27 @@ impl WrSpaceAndClipChain {
         //Warning: special case here to support dummy clip chain
         SpaceAndClipInfo {
             spatial_id: self.space.to_webrender(pipeline_id),
-            clip_id: if self.clip_chain == ROOT_CLIP_CHAIN {
-                ClipId::root(pipeline_id)
-            } else {
-                ClipId::ClipChain(ClipChainId(self.clip_chain, pipeline_id))
-            },
+            clip_id: clip_chain_id_to_webrender(self.clip_chain, pipeline_id),
         }
     }
 }
 
+#[repr(C)]
+pub enum WrStackingContextClip {
+    None,
+    ClipId(WrClipId),
+    ClipChain(u64),
+}
+
+impl WrStackingContextClip {
+    fn to_webrender(&self, pipeline_id: WrPipelineId) -> Option<ClipId> {
+        match *self {
+            WrStackingContextClip::None => None,
+            WrStackingContextClip::ClipChain(id) => Some(clip_chain_id_to_webrender(id, pipeline_id)),
+            WrStackingContextClip::ClipId(id) => Some(id.to_webrender(pipeline_id)),
+        }
+    }
+}
 
 fn make_slice<'a, T>(ptr: *const T, len: usize) -> &'a [T] {
     if ptr.is_null() {
@@ -475,34 +496,6 @@ pub enum WrAnimationType {
 pub struct WrAnimationProperty {
     effect_type: WrAnimationType,
     id: u64,
-}
-
-#[repr(u32)]
-#[derive(Copy, Clone)]
-pub enum WrFilterOpType {
-  Blur = 0,
-  Brightness = 1,
-  Contrast = 2,
-  Grayscale = 3,
-  HueRotate = 4,
-  Invert = 5,
-  Opacity = 6,
-  Saturate = 7,
-  Sepia = 8,
-  DropShadow = 9,
-  ColorMatrix = 10,
-  SrgbToLinear = 11,
-  LinearToSrgb = 12,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct WrFilterOp {
-    filter_type: WrFilterOpType,
-    argument: c_float, // holds radius for DropShadow; value for other filters
-    offset: LayoutVector2D, // only used for DropShadow
-    color: ColorF, // only used for DropShadow
-    matrix: [f32;20], // only used in ColorMatrix
 }
 
 /// cbindgen:derive-eq=false
@@ -1902,45 +1895,28 @@ pub extern "C" fn wr_dp_clear_save(state: &mut WrState) {
 }
 
 #[no_mangle]
-pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
-                                              mut bounds: LayoutRect,
-                                              spatial_id: WrSpatialId,
-                                              clip_node_id: *const WrClipId,
-                                              animation: *const WrAnimationProperty,
-                                              opacity: *const f32,
-                                              transform: *const LayoutTransform,
-                                              transform_style: TransformStyle,
-                                              perspective: *const LayoutTransform,
-                                              mix_blend_mode: MixBlendMode,
-                                              filters: *const WrFilterOp,
-                                              filter_count: usize,
-                                              is_backface_visible: bool,
-                                              glyph_raster_space: RasterSpace,
-                                              ) -> WrSpatialId {
+pub extern "C" fn wr_dp_push_stacking_context(
+    state: &mut WrState,
+    mut bounds: LayoutRect,
+    spatial_id: WrSpatialId,
+    clip: &WrStackingContextClip,
+    animation: *const WrAnimationProperty,
+    opacity: *const f32,
+    transform: *const LayoutTransform,
+    transform_style: TransformStyle,
+    perspective: *const LayoutTransform,
+    mix_blend_mode: MixBlendMode,
+    filters: *const FilterOp,
+    filter_count: usize,
+    is_backface_visible: bool,
+    glyph_raster_space: RasterSpace,
+) -> WrSpatialId {
     debug_assert!(unsafe { !is_in_render_thread() });
 
     let c_filters = make_slice(filters, filter_count);
     let mut filters : Vec<FilterOp> = c_filters.iter().map(|c_filter| {
-        match c_filter.filter_type {
-            WrFilterOpType::Blur => FilterOp::Blur(c_filter.argument),
-            WrFilterOpType::Brightness => FilterOp::Brightness(c_filter.argument),
-            WrFilterOpType::Contrast => FilterOp::Contrast(c_filter.argument),
-            WrFilterOpType::Grayscale => FilterOp::Grayscale(c_filter.argument),
-            WrFilterOpType::HueRotate => FilterOp::HueRotate(c_filter.argument),
-            WrFilterOpType::Invert => FilterOp::Invert(c_filter.argument),
-            WrFilterOpType::Opacity => FilterOp::Opacity(PropertyBinding::Value(c_filter.argument), c_filter.argument),
-            WrFilterOpType::Saturate => FilterOp::Saturate(c_filter.argument),
-            WrFilterOpType::Sepia => FilterOp::Sepia(c_filter.argument),
-            WrFilterOpType::DropShadow => FilterOp::DropShadow(c_filter.offset,
-                                                               c_filter.argument,
-                                                               c_filter.color),
-            WrFilterOpType::ColorMatrix => FilterOp::ColorMatrix(c_filter.matrix),
-            WrFilterOpType::SrgbToLinear => FilterOp::SrgbToLinear,
-            WrFilterOpType::LinearToSrgb => FilterOp::LinearToSrgb,
-        }
+                                                           *c_filter
     }).collect();
-
-    let clip_node_id_ref = unsafe { clip_node_id.as_ref() };
 
     let transform_ref = unsafe { transform.as_ref() };
     let mut transform_binding = match transform_ref {
@@ -1986,7 +1962,7 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
     };
 
     let mut wr_spatial_id = spatial_id.to_webrender(state.pipeline_id);
-    let wr_clip_id = clip_node_id_ref.map(|id| id.to_webrender(state.pipeline_id));
+    let wr_clip_id = clip.to_webrender(state.pipeline_id);
 
     let is_reference_frame = transform_binding.is_some() || perspective.is_some();
     // Note: 0 has special meaning in WR land, standing for ROOT_REFERENCE_FRAME.

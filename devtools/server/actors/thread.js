@@ -1825,9 +1825,13 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     const { generatedSourceActor } = this.sources.getFrameLocation(youngestFrame);
     const url = generatedSourceActor ? generatedSourceActor.url : null;
 
-    // We ignore sources without a url because we do not
-    // want to pause at console evaluations or watch expressions.
-    if (!url || this.skipBreakpoints || this.sources.isBlackBoxed(url)) {
+    // Don't pause on exceptions thrown while inside an evaluation being done on
+    // behalf of the client.
+    if (this.insideClientEvaluation) {
+      return undefined;
+    }
+
+    if (this.skipBreakpoints || this.sources.isBlackBoxed(url)) {
       return undefined;
     }
 
@@ -1939,7 +1943,11 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       sourceActor = this.sources.createSourceActor(source);
     }
 
-    const bpActors = [...this.breakpointActorMap.findActors()];
+    const bpActors = [...this.breakpointActorMap.findActors()]
+    .filter((actor) => {
+      const bpSource = actor.generatedLocation.generatedSourceActor;
+      return bpSource.source ? bpSource.source === source : bpSource.url === source.url;
+    });
 
     // Bug 1225160: If addSource is called in response to a new script
     // notification, and this notification was triggered by loading a JSM from

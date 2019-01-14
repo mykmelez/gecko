@@ -737,9 +737,10 @@ SYNC_ENUMS(GMPLUGIN, GMPlugin)
 SYNC_ENUMS(GPU, GPU)
 SYNC_ENUMS(VR, VR)
 SYNC_ENUMS(RDD, RDD)
+SYNC_ENUMS(SOCKET, Socket)
 
 // .. and ensure that that is all of them:
-static_assert(GeckoProcessType_RDD + 1 == GeckoProcessType_End,
+static_assert(GeckoProcessType_Socket + 1 == GeckoProcessType_End,
               "Did not find the final GeckoProcessType");
 
 NS_IMETHODIMP
@@ -2657,7 +2658,8 @@ static bool RemoveComponentRegistries(nsIFile* aProfileDir,
 
   file->SetNativeLeafName(NS_LITERAL_CSTRING("startupCache"));
   nsresult rv = file->Remove(true);
-  return NS_SUCCEEDED(rv) || rv == NS_ERROR_FILE_TARGET_DOES_NOT_EXIST;
+  return NS_SUCCEEDED(rv) || rv == NS_ERROR_FILE_TARGET_DOES_NOT_EXIST ||
+         rv == NS_ERROR_FILE_NOT_FOUND;
 }
 
 // To support application initiated restart via nsIAppStartup.quit, we
@@ -4927,31 +4929,16 @@ GeckoProcessType XRE_GetProcessType() {
   return mozilla::startup::sChildProcessType;
 }
 
-bool XRE_IsGPUProcess() { return XRE_GetProcessType() == GeckoProcessType_GPU; }
-
-bool XRE_IsRDDProcess() { return XRE_GetProcessType() == GeckoProcessType_RDD; }
-
-bool XRE_IsVRProcess() { return XRE_GetProcessType() == GeckoProcessType_VR; }
-
-/**
- * Returns true in the e10s parent process and in the main process when e10s
- * is disabled.
- */
-bool XRE_IsParentProcess() {
-  return XRE_GetProcessType() == GeckoProcessType_Default;
-}
-
 bool XRE_IsE10sParentProcess() {
   return XRE_IsParentProcess() && BrowserTabsRemoteAutostart();
 }
 
-bool XRE_IsContentProcess() {
-  return XRE_GetProcessType() == GeckoProcessType_Content;
-}
-
-bool XRE_IsPluginProcess() {
-  return XRE_GetProcessType() == GeckoProcessType_Plugin;
-}
+#define GECKO_PROCESS_TYPE(enum_name, string_name, xre_name)     \
+  bool XRE_Is##xre_name##Process() {                             \
+    return XRE_GetProcessType() == GeckoProcessType_##enum_name; \
+  }
+#include "mozilla/GeckoProcessTypes.h"
+#undef GECKO_PROCESS_TYPE
 
 bool XRE_UseNativeEventProcessing() {
 #ifdef XP_MACOSX

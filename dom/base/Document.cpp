@@ -75,6 +75,7 @@
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/ServiceWorkerContainer.h"
 #include "mozilla/dom/ScriptLoader.h"
+#include "mozilla/dom/ShadowIncludingTreeIterator.h"
 #include "mozilla/dom/StyleSheetList.h"
 #include "mozilla/dom/SVGUseElement.h"
 #include "nsGenericHTMLElement.h"
@@ -1646,10 +1647,6 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_BEGIN(Document)
   return Element::CanSkipThis(tmp);
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
 
-static const char* kNSURIs[] = {"([none])", "(xmlns)", "(xml)", "(xhtml)",
-                                "(XLink)",  "(XSLT)",  "(XBL)", "(MathML)",
-                                "(RDF)",    "(XUL)"};
-
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(Document)
   if (MOZ_UNLIKELY(cb.WantDebugInfo())) {
     char name[512];
@@ -1662,6 +1659,9 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(Document)
     uint32_t nsid = tmp->GetDefaultNamespaceID();
     nsAutoCString uri;
     if (tmp->mDocumentURI) uri = tmp->mDocumentURI->GetSpecOrDefault();
+    static const char* kNSURIs[] = {"([none])", "(xmlns)", "(xml)", "(xhtml)",
+                                    "(XLink)",  "(XSLT)",  "(XBL)", "(MathML)",
+                                    "(RDF)",    "(XUL)"};
     if (nsid < ArrayLength(kNSURIs)) {
       SprintfLiteral(name, "Document %s %s %s", loadedAsData.get(),
                      kNSURIs[nsid], uri.get());
@@ -3548,21 +3548,21 @@ void Document::TryChannelCharset(nsIChannel* aChannel, int32_t& aCharsetSource,
   }
 }
 
-static inline void AssertNoStaleServoDataIn(const nsINode& aSubtreeRoot) {
+static inline void AssertNoStaleServoDataIn(nsINode& aSubtreeRoot) {
 #ifdef DEBUG
-  for (const nsINode* node = &aSubtreeRoot; node;
-       node = node->GetNextNode(&aSubtreeRoot)) {
+  for (nsINode* node : ShadowIncludingTreeIterator(aSubtreeRoot)) {
     const Element* element = Element::FromNode(node);
     if (!element) {
       continue;
     }
     MOZ_ASSERT(!element->HasServoData());
-    if (auto* shadow = element->GetShadowRoot()) {
-      AssertNoStaleServoDataIn(*shadow);
-    }
     if (nsXBLBinding* binding = element->GetXBLBinding()) {
       if (nsXBLBinding* bindingWithContent = binding->GetBindingWithContent()) {
         nsIContent* content = bindingWithContent->GetAnonymousContent();
+        // Need to do this instead of just AssertNoStaleServoDataIn(*content),
+        // because the parent of the children of the <content> element isn't the
+        // <content> element, but the bound element, and that confuses
+        // GetNextNode a lot.
         MOZ_ASSERT(!content->AsElement()->HasServoData());
         for (nsINode* child = content->GetFirstChild(); child;
              child = child->GetNextSibling()) {
@@ -3582,7 +3582,7 @@ already_AddRefed<nsIPresShell> Document::CreateShell(
   NS_ENSURE_FALSE(GetBFCacheEntry(), nullptr);
 
   FillStyleSet(aStyleSet.get());
-  AssertNoStaleServoDataIn(static_cast<nsINode&>(*this));
+  AssertNoStaleServoDataIn(*this);
 
   RefPtr<PresShell> shell = new PresShell;
   // Note: we don't hold a ref to the shell (it holds a ref to us)
@@ -3705,7 +3705,7 @@ void Document::DeleteShell() {
   mStyleSetFilled = false;
 
   ClearStaleServoData();
-  AssertNoStaleServoDataIn(static_cast<nsINode&>(*this));
+  AssertNoStaleServoDataIn(*this);
 }
 
 void Document::SetBFCacheEntry(nsIBFCacheEntry* aEntry) {
@@ -11690,6 +11690,16 @@ void Document::MaybeNotifyAutoplayBlocked() {
       topLevelDoc, NS_LITERAL_STRING("GloballyAutoplayBlocked"),
       CanBubble::eYes, ChromeOnlyDispatch::eYes);
   asyncDispatcher->PostDOMEvent();
+}
+
+void Document::ClearUserGestureActivation() {
+  Document* doc = this;
+  while (doc) {
+    MOZ_LOG(gUserInteractionPRLog, LogLevel::Debug,
+          ("Reset user activation flag for document %p.", this));
+    doc->mUserGestureActivated = false;
+    doc = doc->GetSameTypeParentDocument();
+  }
 }
 
 void Document::SetDocTreeHadAudibleMedia() {

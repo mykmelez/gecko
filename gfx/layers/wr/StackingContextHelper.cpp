@@ -24,14 +24,14 @@ StackingContextHelper::StackingContextHelper()
 StackingContextHelper::StackingContextHelper(
     const StackingContextHelper& aParentSC, const ActiveScrolledRoot* aAsr,
     nsIFrame* aContainerFrame, nsDisplayItem* aContainerItem,
-    wr::DisplayListBuilder& aBuilder, const nsTArray<wr::WrFilterOp>& aFilters,
+    wr::DisplayListBuilder& aBuilder, const nsTArray<wr::FilterOp>& aFilters,
     const LayoutDeviceRect& aBounds, const gfx::Matrix4x4* aBoundTransform,
     const wr::WrAnimationProperty* aAnimation, const float* aOpacityPtr,
     const gfx::Matrix4x4* aTransformPtr, const gfx::Matrix4x4* aPerspectivePtr,
     const gfx::CompositionOp& aMixBlendMode, bool aBackfaceVisible,
     bool aIsPreserve3D,
     const Maybe<nsDisplayTransform*>& aDeferredTransformItem,
-    const wr::WrClipId* aClipNodeId, bool aAnimated)
+    const wr::WrStackingContextClip& aClip, bool aAnimated)
     : mBuilder(&aBuilder),
       mScale(1.0f, 1.0f),
       mDeferredTransformItem(aDeferredTransformItem),
@@ -68,8 +68,7 @@ StackingContextHelper::StackingContextHelper(
           : wr::RasterSpace::Screen();
 
   mReferenceFrameId = mBuilder->PushStackingContext(
-      wr::ToLayoutRect(aBounds), aClipNodeId, aAnimation, aOpacityPtr,
-      aTransformPtr,
+      wr::ToLayoutRect(aBounds), aClip, aAnimation, aOpacityPtr, aTransformPtr,
       aIsPreserve3D ? wr::TransformStyle::Preserve3D : wr::TransformStyle::Flat,
       aPerspectivePtr, wr::ToMixBlendMode(aMixBlendMode), aFilters,
       aBackfaceVisible, rasterSpace);

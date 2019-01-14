@@ -14,7 +14,7 @@ use api::{BuiltDisplayListIter, SpecificDisplayItem};
 use api::{DevicePixelScale, DeviceIntPoint, DeviceIntRect, DeviceIntSize};
 use api::{DocumentId, DocumentLayer, ExternalScrollId, FrameMsg, HitTestFlags, HitTestResult};
 use api::{IdNamespace, LayoutPoint, PipelineId, RenderNotifier, SceneMsg, ScrollClamping};
-use api::{MemoryReport, VoidPtrToSizeFn};
+use api::{MemoryReport};
 use api::{ScrollLocation, ScrollNodeState, TransactionMsg, ResourceUpdate, BlobImageKey};
 use api::{NotificationRequest, Checkpoint};
 use api::channel::{MsgReceiver, MsgSender, Payload};
@@ -30,6 +30,7 @@ use frame_builder::{FrameBuilder, FrameBuilderConfig};
 use gpu_cache::GpuCache;
 use hit_test::{HitTest, HitTester};
 use internal_types::{DebugOutput, FastHashMap, FastHashSet, RenderedDocument, ResultMsg};
+use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
 use picture::RetainedTiles;
 use prim_store::{PrimitiveDataStore, PrimitiveScratchBuffer, PrimitiveInstance};
 use prim_store::{PrimitiveInstanceKind, PrimTemplateCommonData};
@@ -88,7 +89,7 @@ impl DocumentView {
     }
 }
 
-#[derive(Copy, Clone, Hash, PartialEq, PartialOrd, Debug, Eq, Ord)]
+#[derive(Copy, Clone, Hash, MallocSizeOf, PartialEq, PartialOrd, Debug, Eq, Ord)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct FrameId(usize);
@@ -142,18 +143,21 @@ impl ::std::ops::Sub<usize> for FrameId {
 /// decisions. As such, we use the `FrameId` for equality and comparison, since
 /// we should never have two `FrameStamps` with the same id but different
 /// timestamps.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, MallocSizeOf)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct FrameStamp {
     id: FrameId,
     time: SystemTime,
+    document_id: DocumentId,
 }
 
 impl Eq for FrameStamp {}
 
 impl PartialEq for FrameStamp {
     fn eq(&self, other: &Self) -> bool {
+        // We should not be checking equality unless the documents are the same
+        debug_assert!(self.document_id == other.document_id);
         self.id == other.id
     }
 }
@@ -175,11 +179,24 @@ impl FrameStamp {
         self.time
     }
 
+    /// Gets the DocumentId in this stamp.
+    pub fn document_id(&self) -> DocumentId {
+        self.document_id
+    }
+
+    pub fn is_valid(&self) -> bool {
+        // If any fields are their default values, the whole struct should equal INVALID
+        debug_assert!((self.time != UNIX_EPOCH && self.id != FrameId(0) && self.document_id != DocumentId::INVALID) ||
+                      *self == Self::INVALID);
+        self.document_id != DocumentId::INVALID
+    }
+
     /// Returns a FrameStamp corresponding to the first frame.
-    pub fn first() -> Self {
+    pub fn first(document_id: DocumentId) -> Self {
         FrameStamp {
             id: FrameId::first(),
             time: SystemTime::now(),
+            document_id: document_id,
         }
     }
 
@@ -193,32 +210,35 @@ impl FrameStamp {
     pub const INVALID: FrameStamp = FrameStamp {
         id: FrameId(0),
         time: UNIX_EPOCH,
+        document_id: DocumentId::INVALID,
     };
 }
 
-// A collection of resources that are shared by clips, primitives
-// between display lists.
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Default)]
-pub struct FrameResources {
-    /// The store of currently active / available clip nodes. This is kept
-    /// in sync with the clip interner in the scene builder for each document.
-    pub clip_data_store: ClipDataStore,
+macro_rules! declare_frame_resources {
+    ( $( { $x: ident, $y: ty, $datastore_ident: ident, $datastore_type: ty } )+ ) => {
+        /// A collection of resources that are shared by clips, primitives
+        /// between display lists.
+        #[cfg_attr(feature = "capture", derive(Serialize))]
+        #[cfg_attr(feature = "replay", derive(Deserialize))]
+        #[derive(Default)]
+        pub struct FrameResources {
+            $(
+                pub $datastore_ident: $datastore_type,
+            )+
+        }
 
-    /// Currently active / available primitives. Kept in sync with the
-    /// primitive interner in the scene builder, per document.
-    pub prim_data_store: PrimitiveDataStore,
-    pub image_data_store: ImageDataStore,
-    pub image_border_data_store: ImageBorderDataStore,
-    pub line_decoration_data_store: LineDecorationDataStore,
-    pub linear_grad_data_store: LinearGradientDataStore,
-    pub normal_border_data_store: NormalBorderDataStore,
-    pub picture_data_store: PictureDataStore,
-    pub radial_grad_data_store: RadialGradientDataStore,
-    pub text_run_data_store: TextRunDataStore,
-    pub yuv_image_data_store: YuvImageDataStore,
+        impl FrameResources {
+            /// Reports CPU heap usage.
+            fn report_memory(&self, ops: &mut MallocSizeOfOps, r: &mut MemoryReport) {
+                $(
+                    r.interning.$datastore_ident += self.$datastore_ident.size_of(ops);
+                )+
+            }
+        }
+    }
 }
+
+enumerate_interners!(declare_frame_resources);
 
 impl FrameResources {
     pub fn as_common_data(
@@ -268,15 +288,6 @@ impl FrameResources {
                 &prim_data.common
             }
         }
-    }
-
-    /// Reports CPU heap usage.
-    fn report_memory(&self, op: VoidPtrToSizeFn, r: &mut MemoryReport) {
-        r.data_stores += self.clip_data_store.malloc_size_of(op);
-        r.data_stores += self.prim_data_store.malloc_size_of(op);
-        r.data_stores += self.linear_grad_data_store.malloc_size_of(op);
-        r.data_stores += self.radial_grad_data_store.malloc_size_of(op);
-        r.data_stores += self.text_run_data_store.malloc_size_of(op);
     }
 }
 
@@ -332,6 +343,7 @@ struct Document {
 
 impl Document {
     pub fn new(
+        id: DocumentId,
         window_size: DeviceIntSize,
         layer: DocumentLayer,
         default_device_pixel_ratio: f32,
@@ -349,7 +361,7 @@ impl Document {
                 device_pixel_ratio: default_device_pixel_ratio,
             },
             clip_scroll_tree: ClipScrollTree::new(),
-            stamp: FrameStamp::first(),
+            stamp: FrameStamp::first(id),
             frame_builder: None,
             output_pipelines: FastHashSet::default(),
             hit_tester: None,
@@ -661,7 +673,7 @@ pub struct RenderBackend {
     notifier: Box<RenderNotifier>,
     recorder: Option<Box<ApiRecordingReceiver>>,
     sampler: Option<Box<AsyncPropertySampler + Send>>,
-    size_of_op: Option<VoidPtrToSizeFn>,
+    size_of_ops: Option<MallocSizeOfOps>,
     debug_flags: DebugFlags,
     namespace_alloc_by_client: bool,
 }
@@ -680,7 +692,7 @@ impl RenderBackend {
         frame_config: FrameBuilderConfig,
         recorder: Option<Box<ApiRecordingReceiver>>,
         sampler: Option<Box<AsyncPropertySampler + Send>>,
-        size_of_op: Option<VoidPtrToSizeFn>,
+        size_of_ops: Option<MallocSizeOfOps>,
         debug_flags: DebugFlags,
         namespace_alloc_by_client: bool,
     ) -> RenderBackend {
@@ -700,7 +712,7 @@ impl RenderBackend {
             notifier,
             recorder,
             sampler,
-            size_of_op,
+            size_of_ops,
             debug_flags,
             namespace_alloc_by_client,
         }
@@ -982,6 +994,7 @@ impl RenderBackend {
             }
             ApiMsg::AddDocument(document_id, initial_size, layer) => {
                 let document = Document::new(
+                    document_id,
                     initial_size,
                     layer,
                     self.default_device_pixel_ratio,
@@ -1517,6 +1530,8 @@ impl RenderBackend {
 
     #[cfg(feature = "debugger")]
     fn get_clip_scroll_tree_for_debugger(&self) -> String {
+        use print_tree::PrintableTree;
+
         let mut debug_root = debug_server::ClipScrollTreeList::new();
 
         for (_, doc) in &self.documents {
@@ -1531,18 +1546,18 @@ impl RenderBackend {
         serde_json::to_string(&debug_root).unwrap()
     }
 
-    fn report_memory(&self, tx: MsgSender<MemoryReport>) {
+    fn report_memory(&mut self, tx: MsgSender<MemoryReport>) {
         let mut report = MemoryReport::default();
-        let op = self.size_of_op.unwrap();
-        report.gpu_cache_metadata = self.gpu_cache.malloc_size_of(op);
+        let ops = self.size_of_ops.as_mut().unwrap();
+        let op = ops.size_of_op;
+        report.gpu_cache_metadata = self.gpu_cache.size_of(ops);
         for (_id, doc) in &self.documents {
             if let Some(ref fb) = doc.frame_builder {
-                report.clip_stores += fb.clip_store.malloc_size_of(op);
+                report.clip_stores += fb.clip_store.size_of(ops);
             }
-            report.hit_testers +=
-                doc.hit_tester.as_ref().map_or(0, |ht| ht.malloc_size_of(op));
+            report.hit_testers += doc.hit_tester.size_of(ops);
 
-            doc.resources.report_memory(op, &mut report)
+            doc.resources.report_memory(ops, &mut report)
         }
 
         report += self.resource_cache.report_memory(op);
@@ -1647,6 +1662,8 @@ impl RenderBackend {
                 // which may capture necessary details for some cases.
                 let file_name = format!("frame-{}-{}", (id.0).0, id.1);
                 config.serialize(&rendered_document.frame, file_name);
+                let file_name = format!("clip-scroll-{}-{}", (id.0).0, id.1);
+                config.serialize_tree(&doc.clip_scroll_tree, file_name);
             }
 
             let frame_resources_name = format!("frame-resources-{}-{}", (id.0).0, id.1);
@@ -1747,7 +1764,7 @@ impl RenderBackend {
                 removed_pipelines: Vec::new(),
                 view: view.clone(),
                 clip_scroll_tree: ClipScrollTree::new(),
-                stamp: FrameStamp::first(),
+                stamp: FrameStamp::first(id),
                 frame_builder: Some(FrameBuilder::empty()),
                 output_pipelines: FastHashSet::default(),
                 dynamic_properties: SceneProperties::new(),

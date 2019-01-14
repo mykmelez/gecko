@@ -1616,19 +1616,6 @@ pub unsafe extern "C" fn Servo_StyleSet_MediumFeaturesChanged(
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_StyleSet_PrependStyleSheet(
-    raw_data: RawServoStyleSetBorrowed,
-    sheet: *const DomStyleSheet,
-) {
-    let global_style_data = &*GLOBAL_STYLE_DATA;
-    let mut data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
-    let data = &mut *data;
-    let guard = global_style_data.shared_lock.read();
-    let sheet = unsafe { GeckoStyleSheet::new(sheet) };
-    data.stylist.prepend_stylesheet(sheet, &guard);
-}
-
-#[no_mangle]
 pub extern "C" fn Servo_StyleSet_InsertStyleSheetBefore(
     raw_data: RawServoStyleSetBorrowed,
     sheet: *const DomStyleSheet,
@@ -5792,8 +5779,8 @@ pub extern "C" fn Servo_GetCustomPropertyNameAt(
         None => return false,
     };
 
-    let property_name = match custom_properties.get_key_at(index) {
-        Some(n) => n,
+    let property_name = match custom_properties.get_index(index as usize) {
+        Some((key, _value)) => key,
         None => return false,
     };
 
