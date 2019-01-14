@@ -498,7 +498,7 @@ nsresult nsHttpHandler::Init() {
   }
 
   // Generating the spoofed User Agent for fingerprinting resistance.
-  rv = nsRFPService::GetSpoofedUserAgent(mSpoofedUserAgent);
+  rv = nsRFPService::GetSpoofedUserAgent(mSpoofedUserAgent, true);
   if (NS_FAILED(rv)) {
     // Empty mSpoofedUserAgent to make sure the unsuccessful spoofed UA string
     // will not be used anywhere.
@@ -1116,6 +1116,10 @@ void nsHttpHandler::PrefsChanged(const char *pref) {
   int32_t val;
 
   LOG(("nsHttpHandler::PrefsChanged [pref=%s]\n", pref));
+
+  if (pref) {
+    gIOService->NotifySocketProcessPrefsChanged(pref);
+  }
 
 #define PREF_CHANGED(p) ((pref == nullptr) || !PL_strcmp(pref, p))
 #define MULTI_PREF_CHANGED(p) \

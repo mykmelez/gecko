@@ -579,6 +579,7 @@ void WebRenderDebugPrefChangeCallback(const char* aPrefName, void*) {
   GFX_WEBRENDER_DEBUG(".gpu-cache", 1 << 12)
   GFX_WEBRENDER_DEBUG(".slow-frame-indicator", 1 << 13)
   GFX_WEBRENDER_DEBUG(".texture-cache.clear-evicted", 1 << 14)
+  GFX_WEBRENDER_DEBUG(".texture-cache.disable-shrink", 1 << 16)
 #undef GFX_WEBRENDER_DEBUG
 
   gfx::gfxVars::SetWebRenderDebugFlags(flags);
@@ -679,6 +680,17 @@ static void FinishAsyncMemoryReport() {
   }
 }
 
+// clang-format off
+// (For some reason, clang-format gets the second macro right, but totally mangles the first).
+#define REPORT_INTERNER(id)                      \
+  helper.Report(aReport.interning.id##_interner, \
+                "interning/" #id "/interners");
+// clang-format on
+
+#define REPORT_DATA_STORE(id)                      \
+  helper.Report(aReport.interning.id##_data_store, \
+                "interning/" #id "/data-stores");
+
 NS_IMPL_ISUPPORTS(WebRenderMemoryReporter, nsIMemoryReporter)
 
 NS_IMETHODIMP
@@ -697,7 +709,6 @@ WebRenderMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
   manager->SendReportMemory(
       [=](wr::MemoryReport aReport) {
         // CPU Memory.
-        helper.Report(aReport.primitive_stores, "primitive-stores");
         helper.Report(aReport.clip_stores, "clip-stores");
         helper.Report(aReport.gpu_cache_metadata, "gpu-cache/metadata");
         helper.Report(aReport.gpu_cache_cpu_mirror, "gpu-cache/cpu-mirror");
@@ -708,8 +719,9 @@ WebRenderMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
         helper.Report(aReport.rasterized_blobs,
                       "resource-cache/rasterized-blobs");
         helper.Report(aReport.shader_cache, "shader-cache");
-        helper.Report(aReport.data_stores, "interning/data-stores");
-        helper.Report(aReport.interners, "interning/interners");
+
+        WEBRENDER_FOR_EACH_INTERNER(REPORT_INTERNER);
+        WEBRENDER_FOR_EACH_INTERNER(REPORT_DATA_STORE);
 
         // GPU Memory.
         helper.ReportTexture(aReport.gpu_cache_textures, "gpu-cache");
@@ -727,6 +739,9 @@ WebRenderMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
 
   return NS_OK;
 }
+
+#undef REPORT_INTERNER
+#undef REPORT_DATA_STORE
 
 static const char* const WR_ROLLOUT_PREF = "gfx.webrender.all.qualified";
 static const char* const WR_ROLLOUT_PREF_DEFAULT =
@@ -928,15 +943,6 @@ void gfxPlatform::Init() {
   if (gfxConfig::IsEnabled(Feature::GPU_PROCESS)) {
     GPUProcessManager* gpu = GPUProcessManager::Get();
     gpu->LaunchGPUProcess();
-  }
-
-  if (XRE_IsParentProcess() &&
-      BrowserTabsRemoteAutostart() &&  // only do rdd process if e10s on
-      Preferences::GetBool("media.rdd-process.enabled", false)) {
-    RDDProcessManager* rdd = RDDProcessManager::Get();
-    if (rdd) {
-      rdd->LaunchRDDProcess();
-    }
   }
 
   gLastUsedFrameRate = ForceSoftwareVsync() ? GetSoftwareVsyncRate() : -1;

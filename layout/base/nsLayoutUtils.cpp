@@ -1490,11 +1490,11 @@ bool nsLayoutUtils::IsAncestorFrameCrossDoc(const nsIFrame* aAncestorFrame,
 }
 
 // static
-bool nsLayoutUtils::IsProperAncestorFrame(nsIFrame* aAncestorFrame,
-                                          nsIFrame* aFrame,
-                                          nsIFrame* aCommonAncestor) {
+bool nsLayoutUtils::IsProperAncestorFrame(const nsIFrame* aAncestorFrame,
+                                          const nsIFrame* aFrame,
+                                          const nsIFrame* aCommonAncestor) {
   if (aFrame == aAncestorFrame) return false;
-  for (nsIFrame* f = aFrame; f != aCommonAncestor; f = f->GetParent()) {
+  for (const nsIFrame* f = aFrame; f != aCommonAncestor; f = f->GetParent()) {
     if (f == aAncestorFrame) return true;
   }
   return aCommonAncestor == aAncestorFrame;
@@ -8707,6 +8707,15 @@ static void MaybeReflowForInflationScreenSizeChange(
     metrics.SetScrollOffset(scrollPosition);
     metrics.SetBaseScrollOffset(apzScrollPosition);
 
+    if (aIsRootContent) {
+      if (const Maybe<nsPoint>& visualOffset =
+              presShell->GetPendingVisualViewportOffset()) {
+        metrics.SetVisualViewportOffset(CSSPoint::FromAppUnits(*visualOffset));
+        metrics.SetVisualScrollUpdateType(FrameMetrics::eMainThread);
+        presShell->SetPendingVisualViewportOffset(Nothing());
+      }
+    }
+
     CSSRect viewport = metrics.GetLayoutViewport();
     viewport.MoveTo(scrollPosition);
     metrics.SetLayoutViewport(viewport);
@@ -9014,6 +9023,11 @@ static void MaybeReflowForInflationScreenSizeChange(
     bool isRootContent = presContext->IsRootContentDocument();
 
     nsRect viewport(aBuilder->ToReferenceFrame(frame), frame->GetSize());
+    if (isRootContent && rootScrollFrame) {
+      nsIScrollableFrame* scrollableFrame =
+          rootScrollFrame->GetScrollTargetFrame();
+      viewport.SizeTo(scrollableFrame->GetScrollPortRect().Size());
+    }
     return Some(nsLayoutUtils::ComputeScrollMetadata(
         frame, rootScrollFrame, content, aBuilder->FindReferenceFrameFor(frame),
         aLayerManager, ScrollableLayerGuid::NULL_SCROLL_ID, viewport, Nothing(),

@@ -5403,27 +5403,37 @@ void CodeGenerator::visitCheckOverRecursed(LCheckOverRecursed* lir) {
   masm.bind(ool->rejoin());
 }
 
-typedef bool (*DefVarFn)(JSContext*, HandlePropertyName, unsigned,
-                         HandleObject);
-static const VMFunction DefVarInfo = FunctionInfo<DefVarFn>(DefVar, "DefVar");
+typedef bool (*DefVarFn)(JSContext*, HandleObject, HandleScript, jsbytecode*);
+static const VMFunction DefVarInfo =
+    FunctionInfo<DefVarFn>(DefVarOperation, "DefVarOperation");
 
 void CodeGenerator::visitDefVar(LDefVar* lir) {
   Register envChain = ToRegister(lir->environmentChain());
 
+  JSScript* script = current->mir()->info().script();
+  jsbytecode* pc = lir->mir()->resumePoint()->pc();
+
+  pushArg(ImmPtr(pc));                    // jsbytecode*
+  pushArg(ImmGCPtr(script));              // JSScript*
   pushArg(envChain);                      // JSObject*
-  pushArg(Imm32(lir->mir()->attrs()));    // unsigned
-  pushArg(ImmGCPtr(lir->mir()->name()));  // PropertyName*
 
   callVM(DefVarInfo, lir);
 }
 
-typedef bool (*DefLexicalFn)(JSContext*, HandlePropertyName, unsigned);
+typedef bool (*DefLexicalFn)(JSContext*, HandleObject, HandleScript,
+                             jsbytecode*);
 static const VMFunction DefLexicalInfo =
-    FunctionInfo<DefLexicalFn>(DefGlobalLexical, "DefGlobalLexical");
+    FunctionInfo<DefLexicalFn>(DefLexicalOperation, "DefLexicalOperation");
 
 void CodeGenerator::visitDefLexical(LDefLexical* lir) {
-  pushArg(Imm32(lir->mir()->attrs()));    // unsigned
-  pushArg(ImmGCPtr(lir->mir()->name()));  // PropertyName*
+  Register envChain = ToRegister(lir->environmentChain());
+
+  JSScript* script = current->mir()->info().script();
+  jsbytecode* pc = lir->mir()->resumePoint()->pc();
+
+  pushArg(ImmPtr(pc));        // jsbytecode*
+  pushArg(ImmGCPtr(script));  // JSScript*
+  pushArg(envChain);          // JSObject*
 
   callVM(DefLexicalInfo, lir);
 }
@@ -10682,9 +10692,9 @@ void CodeGenerator::visitOutOfLineUnboxFloatingPoint(
   masm.jump(ool->rejoin());
 }
 
-typedef JSObject* (*BindVarFn)(JSContext*, HandleObject);
+typedef JSObject* (*BindVarFn)(JSContext*, JSObject*);
 static const VMFunction BindVarInfo =
-    FunctionInfo<BindVarFn>(jit::BindVar, "BindVar");
+    FunctionInfo<BindVarFn>(BindVarOperation, "BindVarOperation");
 
 void CodeGenerator::visitCallBindVar(LCallBindVar* lir) {
   pushArg(ToRegister(lir->environmentChain()));
@@ -12678,27 +12688,19 @@ void CodeGenerator::visitHasClass(LHasClass* ins) {
 
 void CodeGenerator::visitGuardToClass(LGuardToClass* ins) {
   Register lhs = ToRegister(ins->lhs());
-  Register output = ToRegister(ins->output());
   Register temp = ToRegister(ins->temp());
+
+  // branchTestObjClass may zero the object register on speculative paths
+  // (we should have a defineReuseInput allocation in this case).
+  Register spectreRegToZero = lhs;
 
   Label notEqual;
 
   masm.branchTestObjClass(Assembler::NotEqual, lhs, ins->mir()->getClass(),
-                          temp, output, &notEqual);
-  masm.mov(lhs, output);
+                          temp, spectreRegToZero, &notEqual);
 
-  if (ins->mir()->type() == MIRType::Object) {
-    // Can't return null-return here, so bail
-    bailoutFrom(&notEqual, ins->snapshot());
-  } else {
-    Label done;
-    masm.jump(&done);
-
-    masm.bind(&notEqual);
-    masm.mov(ImmPtr(0), output);
-
-    masm.bind(&done);
-  }
+  // Can't return null-return here, so bail.
+  bailoutFrom(&notEqual, ins->snapshot());
 }
 
 typedef JSString* (*ObjectClassToStringFn)(JSContext*, HandleObject);

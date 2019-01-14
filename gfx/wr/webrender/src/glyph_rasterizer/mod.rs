@@ -28,7 +28,7 @@ pub use self::pathfinder::{ThreadSafePathfinderFontContext, NativeFontHandleWrap
 #[cfg(not(feature = "pathfinder"))]
 mod no_pathfinder;
 
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct FontTransform {
@@ -164,7 +164,7 @@ impl<'a> From<&'a LayoutToWorldTransform> for FontTransform {
 // Ensure glyph sizes are reasonably limited to avoid that scenario.
 pub const FONT_SIZE_LIMIT: f64 = 512.0;
 
-#[derive(Clone, Hash, PartialEq, Eq, Debug, Ord, PartialOrd)]
+#[derive(Clone, Hash, PartialEq, Eq, Debug, Ord, PartialOrd, MallocSizeOf)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct FontInstance {
@@ -731,7 +731,7 @@ mod test_glyph_rasterizer {
         let workers = Arc::new(worker.unwrap());
         let mut glyph_rasterizer = GlyphRasterizer::new(workers).unwrap();
         let mut glyph_cache = GlyphCache::new();
-        let mut gpu_cache = GpuCache::new();
+        let mut gpu_cache = GpuCache::new_for_testing();
         let mut texture_cache = TextureCache::new_for_testing(2048, 1024);
         let mut render_task_cache = RenderTaskCache::new();
         let mut render_task_tree = RenderTaskTree::new(FrameId::INVALID);

@@ -29,6 +29,9 @@ const {
 } = ChromeUtils.import("chrome://marionette/content/cert.js", {});
 ChromeUtils.import("chrome://marionette/content/cookie.js");
 const {
+  WebElementEventTarget,
+} = ChromeUtils.import("chrome://marionette/content/dom.js", {});
+const {
   ChromeWebElement,
   element,
   WebElement,
@@ -3042,10 +3045,15 @@ GeckoDriver.prototype.minimizeWindow = async function() {
       await exitFullscreen(win);
     }
 
+    let cb;
+    let observer = new WebElementEventTarget(this.curBrowser.messageManager);
     await new TimedPromise(resolve => {
-      win.addEventListener("visibilitychange", resolve, {once: true});
+      cb = new DebounceCallback(resolve);
+      observer.addEventListener("visibilitychange", cb);
       win.minimize();
     }, {throws: null});
+    observer.removeEventListener("visibilitychange", cb);
+
     await new IdlePromise(win);
   }
 
@@ -3498,13 +3506,13 @@ GeckoDriver.prototype.setupReftest = async function(cmd) {
   }
 
   this._reftest = new reftest.Runner(this);
-  await this._reftest.setup(urlCount, screenshot);
+  this._reftest.setup(urlCount, screenshot);
 };
 
 
 /** Run a reftest. */
 GeckoDriver.prototype.runReftest = async function(cmd) {
-  let {test, references, expected, timeout} = cmd.parameters;
+  let {test, references, expected, timeout, width, height} = cmd.parameters;
 
   if (!this._reftest) {
     throw new UnsupportedOperationError(
@@ -3516,7 +3524,7 @@ GeckoDriver.prototype.runReftest = async function(cmd) {
   assert.array(references);
 
   return {value: await this._reftest.run(
-      test, references, expected, timeout)};
+      test, references, expected, timeout, width, height)};
 };
 
 /**

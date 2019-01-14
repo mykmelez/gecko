@@ -1544,7 +1544,7 @@ pref("browser.contentblocking.reportBreakage.url", "https://tracking-protection-
 
 pref("browser.contentblocking.introCount", 0);
 
-pref("privacy.trackingprotection.introURL", "https://www.mozilla.org/%LOCALE%/firefox/%VERSION%/tracking-protection/start/");
+pref("privacy.trackingprotection.introURL", "https://www.mozilla.org/%LOCALE%/firefox/%VERSION%/content-blocking/start/");
 
 // Workaround for Google Recaptcha
 pref("urlclassifier.trackingAnnotationSkipURLs", "google.com/recaptcha/,*.google.com/recaptcha/");
@@ -1756,11 +1756,12 @@ pref("app.shield.optoutstudies.enabled", false);
 #endif
 
 // Multi-lingual preferences
-pref("intl.multilingual.enabled", false);
-// AMO only serves language packs for release and beta versions.
 #ifdef RELEASE_OR_BETA
+pref("intl.multilingual.enabled", true);
 pref("intl.multilingual.downloadEnabled", true);
 #else
+pref("intl.multilingual.enabled", false);
+// AMO only serves language packs for release and beta versions.
 pref("intl.multilingual.downloadEnabled", false);
 #endif
 

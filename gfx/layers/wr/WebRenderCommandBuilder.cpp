@@ -1081,14 +1081,14 @@ static bool IsItemProbablyActive(nsDisplayItem* aItem,
       Matrix t2d;
       bool is2D = t.Is2D(&t2d);
       GP("active: %d\n", transformItem->MayBeAnimated(aDisplayListBuilder));
-      return transformItem->MayBeAnimated(aDisplayListBuilder) || !is2D ||
-             HasActiveChildren(*transformItem->GetChildren(),
-                               aDisplayListBuilder);
+      return transformItem->MayBeAnimated(aDisplayListBuilder, false) ||
+             !is2D || HasActiveChildren(*transformItem->GetChildren(),
+                                        aDisplayListBuilder);
     }
     case DisplayItemType::TYPE_OPACITY: {
       nsDisplayOpacity* opacityItem = static_cast<nsDisplayOpacity*>(aItem);
       bool active = opacityItem->NeedsActiveLayer(aDisplayListBuilder,
-                                                  opacityItem->Frame());
+                                                  opacityItem->Frame(), false);
       GP("active: %d\n", active);
       return active || HasActiveChildren(*opacityItem->GetChildren(),
                                          aDisplayListBuilder);
@@ -1432,7 +1432,7 @@ void WebRenderCommandBuilder::BuildWebRenderCommands(
     wr::DisplayListBuilder& aBuilder,
     wr::IpcResourceUpdateQueue& aResourceUpdates, nsDisplayList* aDisplayList,
     nsDisplayListBuilder* aDisplayListBuilder, WebRenderScrollData& aScrollData,
-    wr::LayoutSize& aContentSize, const nsTArray<wr::WrFilterOp>& aFilters) {
+    wr::LayoutSize& aContentSize, const nsTArray<wr::FilterOp>& aFilters) {
   StackingContextHelper sc;
   aScrollData = WebRenderScrollData(mManager);
   MOZ_ASSERT(mLayerScrollData.empty());

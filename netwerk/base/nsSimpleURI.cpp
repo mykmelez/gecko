@@ -523,8 +523,11 @@ bool nsSimpleURI::EqualsInternal(nsSimpleURI *otherUri,
 
 NS_IMETHODIMP
 nsSimpleURI::SchemeIs(const char *i_Scheme, bool *o_Equals) {
-  NS_ENSURE_ARG_POINTER(o_Equals);
-  if (!i_Scheme) return NS_ERROR_NULL_POINTER;
+  MOZ_ASSERT(o_Equals, "null pointer");
+  if (!i_Scheme) {
+    *o_Equals = false;
+    return NS_OK;
+  }
 
   const char *this_scheme = mScheme.get();
 

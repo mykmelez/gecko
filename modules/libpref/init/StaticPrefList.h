@@ -883,6 +883,25 @@ VARCACHE_PREF(
   bool, true
 )
 
+// Pref to control enabling scroll anchoring.
+#ifdef NIGHTLY_BUILD
+#define PREF_VALUE true
+#else
+#define PREF_VALUE false
+#endif
+VARCACHE_PREF(
+  "layout.css.scroll-anchoring.enabled",
+   layout_css_scroll_anchoring_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
+
+VARCACHE_PREF(
+  "layout.css.scroll-anchoring.highlight",
+   layout_css_scroll_anchoring_highlight,
+  bool, false
+)
+
 //---------------------------------------------------------------------------
 // JavaScript prefs
 //---------------------------------------------------------------------------
@@ -1785,18 +1804,30 @@ VARCACHE_PREF(
 )
 
 // Block 3rd party fingerprinting resources.
+#ifdef NIGHTLY_BUILD
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   "privacy.trackingprotection.fingerprinting.enabled",
    privacy_trackingprotection_fingerprinting_enabled,
-  bool, true
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 // Block 3rd party cryptomining resources.
+#ifdef NIGHTLY_BUILD
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   "privacy.trackingprotection.cryptomining.enabled",
    privacy_trackingprotection_cryptomining_enabled,
-  bool, true
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 // Lower the priority of network loads for resources on the tracking protection
 // list.  Note that this requires the

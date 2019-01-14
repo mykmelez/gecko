@@ -141,7 +141,8 @@ void LIRGenerator::visitDefVar(MDefVar* ins) {
 }
 
 void LIRGenerator::visitDefLexical(MDefLexical* ins) {
-  LDefLexical* lir = new (alloc()) LDefLexical();
+  LDefLexical* lir =
+      new (alloc()) LDefLexical(useRegisterAtStart(ins->environmentChain()));
   add(lir, ins);
   assignSafepoint(lir, ins);
 }
@@ -4206,12 +4207,11 @@ void LIRGenerator::visitHasClass(MHasClass* ins) {
 
 void LIRGenerator::visitGuardToClass(MGuardToClass* ins) {
   MOZ_ASSERT(ins->object()->type() == MIRType::Object);
-  MOZ_ASSERT(ins->type() == MIRType::ObjectOrNull ||
-             ins->type() == MIRType::Object);
+  MOZ_ASSERT(ins->type() == MIRType::Object);
   LGuardToClass* lir =
-      new (alloc()) LGuardToClass(useRegister(ins->object()), temp());
+      new (alloc()) LGuardToClass(useRegisterAtStart(ins->object()), temp());
   assignSnapshot(lir, Bailout_TypeBarrierO);
-  define(lir, ins);
+  defineReuseInput(lir, ins, 0);
 }
 
 void LIRGenerator::visitObjectClassToString(MObjectClassToString* ins) {

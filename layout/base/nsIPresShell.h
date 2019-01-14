@@ -454,6 +454,9 @@ class nsIPresShell : public nsStubDocumentObserver {
    */
   virtual nsCanvasFrame* GetCanvasFrame() const = 0;
 
+  virtual void PostDirtyScrollAnchorContainer(nsIScrollableFrame* aFrame) = 0;
+  virtual void FlushDirtyScrollAnchorContainers() = 0;
+
   /**
    * Tell the pres shell that a frame needs to be marked dirty and needs
    * Reflow.  It's OK if this is an ancestor of the frame needing reflow as
@@ -1647,12 +1650,29 @@ class nsIPresShell : public nsStubDocumentObserver {
     return mVisualViewportSize;
   }
 
-  void SetVisualViewportOffset(const nsPoint& aScrollOffset,
+  /**
+   * The return value indicates whether the offset actually changed.
+   */
+  bool SetVisualViewportOffset(const nsPoint& aScrollOffset,
                                const nsPoint& aPrevLayoutScrollPos);
 
   nsPoint GetVisualViewportOffset() const { return mVisualViewportOffset; }
 
   nsPoint GetVisualViewportOffsetRelativeToLayoutViewport() const;
+
+  // Ask APZ in the next transaction to scroll to the given visual viewport 
+  // offset (relative to the document).
+  // Use this sparingly, as it will clobber JS-driven scrolling that happens
+  // in the same frame. This is mostly intended to be used in special
+  // situations like "first paint" or session restore.
+  // Please request APZ review if adding a new call site.
+  void SetPendingVisualViewportOffset(
+      const mozilla::Maybe<nsPoint>& aPendingVisualViewportOffset) {
+    mPendingVisualViewportOffset = aPendingVisualViewportOffset;
+  }
+  const mozilla::Maybe<nsPoint>& GetPendingVisualViewportOffset() const {
+    return mPendingVisualViewportOffset;
+  }
 
   nsPoint GetLayoutViewportOffset() const;
 
@@ -1734,6 +1754,11 @@ class nsIPresShell : public nsStubDocumentObserver {
   nsSize mVisualViewportSize;
 
   nsPoint mVisualViewportOffset;
+
+  // A pending visual viewport offset that we will ask APZ to scroll to
+  // during the next transaction. Cleared when we send the transaction.
+  // Only applicable to the RCD pres shell.
+  mozilla::Maybe<nsPoint> mPendingVisualViewportOffset;
 
   // A list of stack weak frames. This is a pointer to the last item in the
   // list.
