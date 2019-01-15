@@ -3,7 +3,7 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XULStore.jsm");
+ChromeUtils.import("resource://gre/modules/XULStoreStore.jsm");
 
 function run_test() {
   do_get_profile();

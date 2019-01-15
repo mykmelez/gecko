@@ -14,7 +14,7 @@ const STOREDB_FILENAME = "xulstore.json";
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/XULStore.jsm");
+ChromeUtils.import("resource://gre/modules/XULStoreStore.jsm");
 
 ChromeUtils.defineModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
 

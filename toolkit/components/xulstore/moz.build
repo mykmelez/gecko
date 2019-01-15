@@ -22,7 +22,8 @@ EXTRA_COMPONENTS += [
 ]
 
 EXTRA_JS_MODULES += [
-	'XULStore.jsm',
+    'XULStore.jsm',
+    'XULStoreStore.jsm',
 ]
 
 TEST_DIRS += [
