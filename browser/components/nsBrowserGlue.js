@@ -721,7 +721,7 @@ BrowserGlue.prototype = {
         this._openPreferences("privacy-permissions", { origin: "notifOpenSettings" });
         break;
       case "final-ui-startup":
-        this._beforeUIStartup();
+        await this._beforeUIStartup();
         break;
       case "browser-delayed-startup-finished":
         this._onFirstWindowLoaded(subject);
@@ -803,7 +803,7 @@ BrowserGlue.prototype = {
         } else if (data == "force-ui-migration") {
           this._migrateUI();
         } else if (data == "force-distribution-customization") {
-          this._distributionCustomizer.applyCustomizations();
+          await this._distributionCustomizer.applyCustomizations();
           // To apply distribution bookmarks use "places-init-complete".
         } else if (data == "force-places-init") {
           this._initPlaces(false);
@@ -1004,7 +1004,7 @@ BrowserGlue.prototype = {
 
   // runs on startup, before the first command line handler is invoked
   // (i.e. before the first window is opened)
-  _beforeUIStartup: function BG__beforeUIStartup() {
+  _beforeUIStartup: async function BG__beforeUIStartup() {
     SessionStartup.init();
 
     if (Services.prefs.prefHasUserValue(PREF_PDFJS_ENABLED_CACHE_STATE)) {
@@ -1022,7 +1022,7 @@ BrowserGlue.prototype = {
     }
 
     // apply distribution customizations
-    this._distributionCustomizer.applyCustomizations();
+    await this._distributionCustomizer.applyCustomizations();
 
     // handle any UI migration
     this._migrateUI();
