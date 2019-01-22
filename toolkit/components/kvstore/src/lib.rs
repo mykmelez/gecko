@@ -15,7 +15,6 @@ extern crate nsstring;
 extern crate ordered_float;
 extern crate rkv;
 extern crate storage_variant;
-extern crate threadbound;
 #[macro_use]
 extern crate xpcom;
 
@@ -37,13 +36,12 @@ use std::{
     vec::IntoIter,
 };
 use task::{DeleteTask, EnumerateTask, GetOrCreateTask, GetTask, HasTask, PutTask};
-use threadbound::ThreadBound;
 use xpcom::{
     interfaces::{
         nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback, nsIKeyValuePair,
         nsIKeyValueVariantCallback, nsIKeyValueVoidCallback, nsISupports, nsIThread, nsIVariant,
     },
-    nsIID, RefPtr,
+    nsIID, RefPtr, ThreadBoundRefPtr,
 };
 
 #[no_mangle]
@@ -94,13 +92,13 @@ pub unsafe extern "C" fn nsKeyValueServiceConstructor(
 #[xpimplements(nsIKeyValueService)]
 #[refcnt = "atomic"]
 pub struct InitKeyValueService {
-    thread: ThreadBound<RefPtr<nsIThread>>,
+    thread: ThreadBoundRefPtr<nsIThread>,
 }
 
 impl KeyValueService {
     fn new(thread: RefPtr<nsIThread>) -> RefPtr<KeyValueService> {
         KeyValueService::allocate(InitKeyValueService {
-            thread: ThreadBound::new(thread),
+            thread: ThreadBoundRefPtr::new(thread),
         })
     }
 
@@ -122,12 +120,12 @@ impl KeyValueService {
 
         let task = Box::new(GetOrCreateTask::new(
             RefPtr::new(callback),
-            thread.clone(),
+            RefPtr::new(thread),
             nsCString::from(path),
             nsCString::from(name),
         ));
 
-        TaskRunnable::new("KVService::GetOrCreate", task)?.dispatch(thread.clone())
+        TaskRunnable::new("KVService::GetOrCreate", task)?.dispatch(RefPtr::new(thread))
     }
 }
 
@@ -137,14 +135,14 @@ impl KeyValueService {
 pub struct InitKeyValueDatabase {
     rkv: Arc<RwLock<Rkv>>,
     store: Store,
-    thread: ThreadBound<RefPtr<nsIThread>>,
+    thread: ThreadBoundRefPtr<nsIThread>,
 }
 
 impl KeyValueDatabase {
     fn new(
         rkv: Arc<RwLock<Rkv>>,
         store: Store,
-        thread: ThreadBound<RefPtr<nsIThread>>,
+        thread: ThreadBoundRefPtr<nsIThread>,
     ) -> RefPtr<KeyValueDatabase> {
         KeyValueDatabase::allocate(InitKeyValueDatabase { rkv, store, thread })
     }
@@ -178,7 +176,7 @@ impl KeyValueDatabase {
 
         let thread = self.thread.get_ref().ok_or(NS_ERROR_FAILURE)?;
 
-        TaskRunnable::new("KVDatabase::Put", task)?.dispatch(thread.clone())
+        TaskRunnable::new("KVDatabase::Put", task)?.dispatch(RefPtr::new(thread))
     }
 
     xpcom_method!(
@@ -205,7 +203,7 @@ impl KeyValueDatabase {
 
         let thread = self.thread.get_ref().ok_or(NS_ERROR_FAILURE)?;
 
-        TaskRunnable::new("KVDatabase::Get", task)?.dispatch(thread.clone())
+        TaskRunnable::new("KVDatabase::Get", task)?.dispatch(RefPtr::new(thread))
     }
 
     xpcom_method!(
@@ -222,7 +220,7 @@ impl KeyValueDatabase {
 
         let thread = self.thread.get_ref().ok_or(NS_ERROR_FAILURE)?;
 
-        TaskRunnable::new("KVDatabase::Has", task)?.dispatch(thread.clone())
+        TaskRunnable::new("KVDatabase::Has", task)?.dispatch(RefPtr::new(thread))
     }
 
     xpcom_method!(
@@ -239,7 +237,7 @@ impl KeyValueDatabase {
 
         let thread = self.thread.get_ref().ok_or(NS_ERROR_FAILURE)?;
 
-        TaskRunnable::new("KVDatabase::Delete", task)?.dispatch(thread.clone())
+        TaskRunnable::new("KVDatabase::Delete", task)?.dispatch(RefPtr::new(thread))
     }
 
     xpcom_method!(
@@ -266,7 +264,7 @@ impl KeyValueDatabase {
 
         let thread = self.thread.get_ref().ok_or(NS_ERROR_FAILURE)?;
 
-        TaskRunnable::new("KVDatabase::Enumerate", task)?.dispatch(thread.clone())
+        TaskRunnable::new("KVDatabase::Enumerate", task)?.dispatch(RefPtr::new(thread))
     }
 }
 
