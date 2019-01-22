@@ -106,15 +106,16 @@ class KeyValueDatabase {
  * And then iterate pairs via its hasMoreElements() and getNext() methods:
  *
  * ```
- *     while (await enumerator.hasMoreElements()) {
- *       const { key, value } = await enumerator.getNext();
+ *     while (enumerator.hasMoreElements()) {
+ *       const { key, value } = enumerator.getNext();
+ *       …
  *     }
  * ```
  *
- * Or with a `for await...of` statement:
+ * Or with a `for...of` statement:
  *
  * ```
- *     for await (const { key, value } of enumerator) {
+ *     for (const { key, value } of enumerator) {
  *         …
  *     }
  * ```
