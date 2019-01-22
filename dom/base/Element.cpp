@@ -81,12 +81,12 @@
 #include "nsCSSPseudoElements.h"
 #include "nsWindowSizes.h"
 #ifdef MOZ_XUL
-#include "nsXULElement.h"
+#  include "nsXULElement.h"
 #endif /* MOZ_XUL */
 #include "SVGElement.h"
 #include "nsFrameSelection.h"
 #ifdef DEBUG
-#include "nsRange.h"
+#  include "nsRange.h"
 #endif
 
 #include "nsBindingManager.h"
@@ -179,9 +179,9 @@ namespace dom {
 // thread pointer that comes with the non-threadsafe refcount on
 // nsIContent.
 #ifdef MOZ_THREAD_SAFETY_OWNERSHIP_CHECKS_SUPPORTED
-#define EXTRA_DOM_NODE_BYTES 8
+#  define EXTRA_DOM_NODE_BYTES 8
 #else
-#define EXTRA_DOM_NODE_BYTES 0
+#  define EXTRA_DOM_NODE_BYTES 0
 #endif
 
 #define ASSERT_NODE_SIZE(type, opt_size_64, opt_size_32)              \
@@ -282,41 +282,20 @@ void Element::UpdateState(bool aNotify) {
 }  // namespace mozilla
 
 void nsIContent::UpdateEditableState(bool aNotify) {
-  // Guaranteed to be non-element content
-  NS_ASSERTION(!IsElement(), "What happened here?");
   nsIContent* parent = GetParent();
 
-  // Skip over unknown native anonymous content to avoid setting a flag we
-  // can't clear later
-  bool isUnknownNativeAnon = false;
-  if (IsInNativeAnonymousSubtree()) {
-    isUnknownNativeAnon = true;
-    nsCOMPtr<nsIContent> root = this;
-    while (root && !root->IsRootOfNativeAnonymousSubtree()) {
-      root = root->GetParent();
-    }
-    // root should always be true here, but isn't -- bug 999416
-    if (root) {
-      nsIFrame* rootFrame = root->GetPrimaryFrame();
-      if (rootFrame) {
-        nsContainerFrame* parentFrame = rootFrame->GetParent();
-        nsITextControlFrame* textCtrl = do_QueryFrame(parentFrame);
-        isUnknownNativeAnon = !textCtrl;
-      }
-    }
-  }
-
+  // Don't implicitly set the flag on the root of a native anonymous subtree.
+  // This needs to be set explicitly, see for example
+  // nsTextControlFrame::CreateRootNode().
   SetEditableFlag(parent && parent->HasFlag(NODE_IS_EDITABLE) &&
-                  !isUnknownNativeAnon);
+                  !IsRootOfNativeAnonymousSubtree());
 }
 
 namespace mozilla {
 namespace dom {
 
 void Element::UpdateEditableState(bool aNotify) {
-  nsIContent* parent = GetParent();
-
-  SetEditableFlag(parent && parent->HasFlag(NODE_IS_EDITABLE));
+  nsIContent::UpdateEditableState(aNotify);
   if (aNotify) {
     UpdateState(aNotify);
   } else {

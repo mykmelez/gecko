@@ -760,6 +760,8 @@ sitedata-delete-on-close =
     .label = Delete cookies and site data when { -brand-short-name } is closed
     .accesskey = c
 
+sitedata-delete-on-close-private-browsing = In permanent private browsing mode, cookies and site data will always be cleared when { -brand-short-name } is closed.
+
 sitedata-allow-cookies-option =
     .label = Accept cookies and site data
     .accesskey = A
@@ -949,11 +951,6 @@ addon-recommendations-link = Learn more
 # This message is displayed above disabled data sharing options in developer builds
 # or builds with no Telemetry support available.
 collection-health-report-disabled = Data reporting is disabled for this build configuration
-
-collection-browser-errors =
-    .label = Allow { -brand-short-name } to send browser error reports (including error messages) to { -vendor-short-name }
-    .accesskey = b
-collection-browser-errors-link = Learn more
 
 collection-backlogged-crash-reports =
     .label = Allow { -brand-short-name } to send backlogged crash reports on your behalf

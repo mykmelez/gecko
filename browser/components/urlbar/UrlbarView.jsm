@@ -8,7 +8,12 @@ var EXPORTED_SYMBOLS = ["UrlbarView"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
+  Services: "resource://gre/modules/Services.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
+});
+
+XPCOMUtils.defineLazyGetter(this, "bundle", function() {
+  return Services.strings.createBundle("chrome://global/locale/autocomplete.properties");
 });
 
 /**
@@ -29,7 +34,7 @@ class UrlbarView {
     this._mainContainer = this.panel.querySelector(".urlbarView-body-inner");
     this._rows = this.panel.querySelector(".urlbarView-results");
 
-    this._rows.addEventListener("click", this);
+    this._rows.addEventListener("mouseup", this);
 
     // For the horizontal fade-out effect, set the overflow attribute on result
     // rows when they overflow.
@@ -52,6 +57,19 @@ class UrlbarView {
    */
   get isOpen() {
     return this.panel.state == "open" || this.panel.state == "showing";
+  }
+
+  /**
+   * @returns {UrlbarMatch}
+   *   The currently selected result.
+   */
+  get selectedResult() {
+    if (!this.isOpen) {
+      return null;
+    }
+
+    let resultIndex = this._selected.getAttribute("resultIndex");
+    return this._queryContext.results[resultIndex];
   }
 
   /**
@@ -117,7 +135,48 @@ class UrlbarView {
     for (let resultIndex in queryContext.results) {
       this._addRow(resultIndex);
     }
+
+    if (queryContext.preselected) {
+      this._selected = this._rows.firstElementChild;
+      this._selected.toggleAttribute("selected", true);
+    }
+
     this._openPanel();
+  }
+
+  /**
+   * Handles removing a result from the view when it is removed from the query,
+   * and attempts to select the new result on the same row.
+   *
+   * This assumes that the result rows are in index order.
+   *
+   * @param {number} index The index of the result that has been removed.
+   */
+  onQueryResultRemoved(index) {
+    // Change the index for any rows above the removed index.
+    for (let i = index + 1; i < this._rows.children.length; i++) {
+      let child = this._rows.children[i];
+      child.setAttribute("resultIndex", child.getAttribute("resultIndex") - 1);
+    }
+
+    let rowToRemove = this._rows.children[index];
+    rowToRemove.remove();
+
+    if (rowToRemove != this._selected) {
+      return;
+    }
+
+    // Select the row at the same index, if possible.
+    let newSelectionIndex = index;
+    if (index >= this._queryContext.results.length) {
+      newSelectionIndex = this._queryContext.results.length - 1;
+    }
+    if (newSelectionIndex >= 0) {
+      this._selected = this._rows.children[newSelectionIndex];
+      this._selected.setAttribute("selected", true);
+    }
+
+    this.input.setValueFromResult(this._queryContext.results[newSelectionIndex]);
   }
 
   // Private methods below.
@@ -144,9 +203,6 @@ class UrlbarView {
     this.oneOffSearchButtons;
 
     this.panel.openPopup(this.input.textbox.closest("toolbar"), "after_end", 0, -1);
-
-    this._selected = this._rows.firstElementChild;
-    this._selected.toggleAttribute("selected", true);
   }
 
   _alignPanel() {
@@ -214,28 +270,51 @@ class UrlbarView {
 
     let favicon = this._createElement("img");
     favicon.className = "urlbarView-favicon";
-    favicon.src = result.payload.icon || "chrome://mozapps/skin/places/defaultFavicon.svg";
+    if (result.type == UrlbarUtils.MATCH_TYPE.SEARCH ||
+        result.type == UrlbarUtils.MATCH_TYPE.KEYWORD) {
+      favicon.src = "chrome://browser/skin/search-glass.svg";
+    } else {
+      favicon.src = result.payload.icon || "chrome://mozapps/skin/places/defaultFavicon.svg";
+    }
     content.appendChild(favicon);
 
     let title = this._createElement("span");
     title.className = "urlbarView-title";
     this._addTextContentWithHighlights(
-      title,
-      ...(result.title ?
-          [result.title, result.titleHighlights] :
-          [result.payload.url || "", result.payloadHighlights.url || []])
-    );
+      title, result.title, result.titleHighlights);
     content.appendChild(title);
+
+    if (result.payload.tags && result.payload.tags.length > 0) {
+      const tagsContainer = this._createElement("div");
+      tagsContainer.className = "urlbarView-tags";
+      tagsContainer.append(...result.payload.tags.map((tag, i) => {
+        const element = this._createElement("span");
+        element.className = "urlbarView-tag";
+        this._addTextContentWithHighlights(
+          element, tag, result.payloadHighlights.tags[i]);
+        return element;
+      }));
+      content.appendChild(tagsContainer);
+    }
 
     let secondary = this._createElement("span");
     secondary.className = "urlbarView-secondary";
-    if (result.type == UrlbarUtils.MATCH_TYPE.TAB_SWITCH) {
-      secondary.classList.add("urlbarView-action");
-      this._addTextContentWithHighlights(secondary, "Switch to Tab", []);
-    } else {
-      secondary.classList.add("urlbarView-url");
-      this._addTextContentWithHighlights(secondary, result.payload.url || "",
-                                         result.payloadHighlights.url || []);
+    switch (result.type) {
+      case UrlbarUtils.MATCH_TYPE.TAB_SWITCH:
+        secondary.classList.add("urlbarView-action");
+        secondary.textContent = bundle.GetStringFromName("switchToTab2");
+        break;
+      case UrlbarUtils.MATCH_TYPE.SEARCH:
+        secondary.classList.add("urlbarView-action");
+        secondary.textContent =
+          bundle.formatStringFromName("searchWithEngine",
+                                      [result.payload.engine], 1);
+        break;
+      default:
+        secondary.classList.add("urlbarView-url");
+        this._addTextContentWithHighlights(secondary, result.payload.url || "",
+                                           result.payloadHighlights.url || []);
+        break;
     }
     content.appendChild(secondary);
 
@@ -293,7 +372,12 @@ class UrlbarView {
     }
   }
 
-  _on_click(event) {
+  _on_mouseup(event) {
+    if (event.button == 2) {
+      // Ignore right clicks.
+      return;
+    }
+
     let row = event.target;
     while (!row.classList.contains("urlbarView-row")) {
       row = row.parentNode;
@@ -303,7 +387,6 @@ class UrlbarView {
     if (result) {
       this.input.pickResult(event, result);
     }
-    this.close();
   }
 
   _on_overflow(event) {

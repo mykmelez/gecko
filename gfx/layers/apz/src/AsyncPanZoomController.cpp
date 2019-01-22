@@ -86,25 +86,25 @@
 #include "WheelScrollAnimation.h"
 #include "KeyboardScrollAnimation.h"
 #if defined(MOZ_WIDGET_ANDROID)
-#include "AndroidAPZ.h"
-#include "mozilla/layers/AndroidDynamicToolbarAnimator.h"
+#  include "AndroidAPZ.h"
+#  include "mozilla/layers/AndroidDynamicToolbarAnimator.h"
 #endif  // defined(MOZ_WIDGET_ANDROID)
 
 #define ENABLE_APZC_LOGGING 0
 // #define ENABLE_APZC_LOGGING 1
 
 #if ENABLE_APZC_LOGGING
-#define APZC_LOG(...) printf_stderr("APZC: " __VA_ARGS__)
-#define APZC_LOG_FM(fm, prefix, ...)                  \
-  {                                                   \
-    std::stringstream ss;                             \
-    ss << nsPrintfCString(prefix, __VA_ARGS__).get(); \
-    AppendToString(ss, fm, ":", "", true);            \
-    APZC_LOG("%s\n", ss.str().c_str());               \
-  }
+#  define APZC_LOG(...) printf_stderr("APZC: " __VA_ARGS__)
+#  define APZC_LOG_FM(fm, prefix, ...)                  \
+    {                                                   \
+      std::stringstream ss;                             \
+      ss << nsPrintfCString(prefix, __VA_ARGS__).get(); \
+      AppendToString(ss, fm, ":", "", true);            \
+      APZC_LOG("%s\n", ss.str().c_str());               \
+    }
 #else
-#define APZC_LOG(...)
-#define APZC_LOG_FM(fm, prefix, ...)
+#  define APZC_LOG(...)
+#  define APZC_LOG_FM(fm, prefix, ...)
 #endif
 
 namespace mozilla {
@@ -4262,8 +4262,7 @@ void AsyncPanZoomController::NotifyLayersUpdated(
       (aLayerMetrics.GetScrollGeneration() != Metrics().GetScrollGeneration());
 
   if (scrollOffsetUpdated && userScrolled &&
-      aLayerMetrics.GetScrollUpdateType() ==
-          FrameMetrics::ScrollOffsetUpdateType::eRestore) {
+      aLayerMetrics.GetScrollUpdateType() == FrameMetrics::eRestore) {
     APZC_LOG(
         "%p dropping scroll update of type eRestore because of user scroll\n",
         this);
@@ -4273,6 +4272,23 @@ void AsyncPanZoomController::NotifyLayersUpdated(
   bool smoothScrollRequested =
       aLayerMetrics.GetDoSmoothScroll() &&
       (aLayerMetrics.GetScrollGeneration() != Metrics().GetScrollGeneration());
+
+  // The main thread may also ask us to scroll the visual viewport to a
+  // particular location. This is different from a layout viewport offset update
+  // in that the layout viewport offset is limited to the layout scroll range
+  // (this will be enforced by the main thread once bug 1516056 is fixed),
+  // while the visual viewport offset is not.
+  // The update type indicates the priority; an eMainThread layout update (or
+  // a smooth scroll request which is similar) takes precedence over an eRestore
+  // visual update, but we allow the possibility for the main thread to ask us
+  // to scroll both the layout and visual viewports to distinct (but compatible)
+  // locations (via e.g. both updates being eRestore).
+  bool visualScrollOffsetUpdated =
+      aLayerMetrics.GetVisualScrollUpdateType() != FrameMetrics::eNone;
+  if (aLayerMetrics.GetScrollUpdateType() == FrameMetrics::eMainThread ||
+      smoothScrollRequested) {
+    visualScrollOffsetUpdated = false;
+  }
 
   // TODO if we're in a drag and scrollOffsetUpdated is set then we want to
   // ignore it
@@ -4500,18 +4516,7 @@ void AsyncPanZoomController::NotifyLayersUpdated(
     SmoothScrollTo(Metrics().GetSmoothScrollOffset());
   }
 
-  // If the main thread asked us to scroll the visual viewport to a particular
-  // location, do so. This is different from a layout viewport offset update
-  // in that the layout viewport offset is limited to the layout scroll range
-  // (this will be enforced by the main thread once bug 1516056 is fixed),
-  // while the visual viewport offset is not. The main thread can also ask
-  // us to scroll both the layout and visual viewports to distinct (but
-  // compatible) locations.
-  FrameMetrics::ScrollOffsetUpdateType visualUpdateType =
-      aLayerMetrics.GetVisualScrollUpdateType();
-  MOZ_ASSERT(visualUpdateType == FrameMetrics::eNone ||
-             visualUpdateType == FrameMetrics::eMainThread);
-  if (visualUpdateType == FrameMetrics::eMainThread) {
+  if (visualScrollOffsetUpdated) {
     Metrics().ClampAndSetScrollOffset(aLayerMetrics.GetVisualViewportOffset());
 
     // The rest of this branch largely follows the code in the

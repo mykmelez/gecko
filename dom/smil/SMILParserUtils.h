@@ -11,13 +11,13 @@
 #include "nsStringFwd.h"
 
 class nsISMILAttr;
-class SMILKeySpline;
-class nsSMILTimeValue;
 class nsSMILValue;
-class nsSMILRepeatCount;
-class nsSMILTimeValueSpecParams;
 
 namespace mozilla {
+class SMILKeySpline;
+class SMILRepeatCount;
+class SMILTimeValue;
+class SMILTimeValueSpecParams;
 namespace dom {
 class SVGAnimationElement;
 }  // namespace dom
@@ -57,10 +57,10 @@ class SMILParserUtils {
                                  GenericValueParser& aParser);
 
   static bool ParseRepeatCount(const nsAString& aSpec,
-                               nsSMILRepeatCount& aResult);
+                               SMILRepeatCount& aResult);
 
   static bool ParseTimeValueSpecParams(const nsAString& aSpec,
-                                       nsSMILTimeValueSpecParams& aResult);
+                                       SMILTimeValueSpecParams& aResult);
 
   /*
    * Parses a clock value as defined in the SMIL Animation specification.
@@ -71,7 +71,7 @@ class SMILParserUtils {
    * @param aResult  The parsed result. [OUT]
    * @return true if parsing succeeded, otherwise false.
    */
-  static bool ParseClockValue(const nsAString& aSpec, nsSMILTimeValue* aResult);
+  static bool ParseClockValue(const nsAString& aSpec, SMILTimeValue* aResult);
 
   /*
    * This method checks whether the given string looks like a negative number.

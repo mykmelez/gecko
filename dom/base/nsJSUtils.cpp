@@ -343,9 +343,9 @@ nsresult nsJSUtils::ExecutionContext::DecodeBinAST(
 
   MOZ_ASSERT(aBuf);
   MOZ_ASSERT(mRetValue.isUndefined());
-#ifdef DEBUG
+#  ifdef DEBUG
   mWantsReturnValue = !aCompileOptions.noScriptRval;
-#endif
+#  endif
 
   mScript.set(JS::DecodeBinAST(mCx, aCompileOptions, aBuf, aLength));
 
@@ -374,6 +374,10 @@ JSScript* nsJSUtils::ExecutionContext::GetScript() {
   mScriptUsed = true;
 #endif
 
+  return MaybeGetScript();
+}
+
+JSScript* nsJSUtils::ExecutionContext::MaybeGetScript() {
   return mScript;
 }
 

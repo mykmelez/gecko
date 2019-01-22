@@ -21,7 +21,6 @@
 namespace js {
 namespace jit {
 
-class StackValue;
 class ICEntry;
 class ICStub;
 class ControlFlowGraph;
@@ -46,8 +45,6 @@ class PCMappingSlotInfo {
   static inline bool ValidSlotLocation(SlotLocation loc) {
     return (loc == SlotInR0) || (loc == SlotInR1) || (loc == SlotIgnore);
   }
-
-  static SlotLocation ToSlotLocation(const StackValue* stackVal);
 
   inline static PCMappingSlotInfo MakeSlotInfo() {
     return PCMappingSlotInfo(0);
@@ -246,10 +243,10 @@ struct BaselineScript final {
 
   // The offsets and event used for Tracelogger toggling.
 #ifdef JS_TRACE_LOGGING
-#ifdef DEBUG
+#  ifdef DEBUG
   bool traceLoggerScriptsEnabled_ = false;
   bool traceLoggerEngineEnabled_ = false;
-#endif
+#  endif
   TraceLoggerEvent traceLoggerScriptEvent_ = {};
 #endif
 

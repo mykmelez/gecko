@@ -60,13 +60,13 @@
 #include "mozilla/dom/XULMenuElementBinding.h"
 #include "mozilla/dom/XULPopupElementBinding.h"
 #include "mozilla/dom/XULTextElementBinding.h"
+#include "mozilla/dom/XULTreeElementBinding.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/WebIDLGlobalNameHash.h"
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/WorkerScope.h"
 #include "mozilla/dom/XrayExpandoClass.h"
 #include "mozilla/dom/WindowProxyHolder.h"
-#include "mozilla/dom/XULScrollElementBinding.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "ipc/ErrorIPCUtils.h"
 #include "mozilla/UseCounter.h"
@@ -1608,8 +1608,8 @@ static void DEBUG_CheckXBLLookup(JSContext* cx, JS::PropertyDescriptor* desc) {
   }
 }
 #else
-#define DEBUG_CheckXBLLookup(a, b) \
-  {}
+#  define DEBUG_CheckXBLLookup(a, b) \
+    {}
 #endif
 
 /* static */ bool XrayResolveOwnProperty(
@@ -2903,7 +2903,7 @@ struct CrossOriginThisPolicy : public MaybeGlobalThisPolicy {
   // We want the ExtractThisObject of MaybeGlobalThisPolicy.
 
   static MOZ_ALWAYS_INLINE JSObject* MaybeUnwrapThisObject(JSObject* aObj) {
-    if (xpc::WrapperFactory::IsXrayWrapper(aObj)) {
+    if (xpc::WrapperFactory::IsCrossOriginWrapper(aObj)) {
       return js::UncheckedUnwrap(aObj);
     }
 
@@ -3618,8 +3618,8 @@ bool HTMLConstructor(JSContext* aCx, unsigned aArgc, JS::Value* aVp,
     } else if (definition->mLocalName == nsGkAtoms::menu ||
                definition->mLocalName == nsGkAtoms::menulist) {
       cb = XULMenuElement_Binding::GetConstructorObject;
-    } else if (definition->mLocalName == nsGkAtoms::scrollbox) {
-      cb = XULScrollElement_Binding::GetConstructorObject;
+    } else if (definition->mLocalName == nsGkAtoms::tree) {
+      cb = XULTreeElement_Binding::GetConstructorObject;
     } else {
       cb = XULElement_Binding::GetConstructorObject;
     }

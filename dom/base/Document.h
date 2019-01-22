@@ -43,6 +43,7 @@
 #include "mozilla/net/ReferrerPolicy.h"  // for member
 #include "mozilla/UseCounter.h"
 #include "mozilla/WeakPtr.h"
+#include "mozilla/StaticPresData.h"
 #include "Units.h"
 #include "nsContentListDeclarations.h"
 #include "nsExpirationTracker.h"
@@ -63,11 +64,11 @@
 
 // windows.h #defines CreateEvent
 #ifdef CreateEvent
-#undef CreateEvent
+#  undef CreateEvent
 #endif
 
 #ifdef MOZILLA_INTERNAL_API
-#include "mozilla/dom/DocumentBinding.h"
+#  include "mozilla/dom/DocumentBinding.h"
 #else
 namespace mozilla {
 namespace dom {
@@ -123,6 +124,7 @@ class nsDOMCaretPosition;
 class nsViewportInfo;
 class nsIGlobalObject;
 class nsIXULWindow;
+struct nsFont;
 
 namespace mozilla {
 class AbstractThread;
@@ -136,6 +138,7 @@ class FullscreenRequest;
 class PendingAnimationTracker;
 class ServoStyleSet;
 class SMILAnimationController;
+enum class StyleCursorKind : uint8_t;
 template <typename>
 class OwningNonNull;
 struct URLExtraData;
@@ -445,7 +448,8 @@ class Document : public nsINode,
   Document& operator=(const Document&) = delete;
 
  public:
-  typedef mozilla::dom::ExternalResourceMap::ExternalResourceLoad ExternalResourceLoad;
+  typedef mozilla::dom::ExternalResourceMap::ExternalResourceLoad
+      ExternalResourceLoad;
   typedef net::ReferrerPolicy ReferrerPolicyEnum;
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_IDOCUMENT_IID)
@@ -672,8 +676,9 @@ class Document : public nsINode,
   /**
    * Return the referrer policy of the document. Return "default" if there's no
    * valid meta referrer tag found in the document.
+   * Referrer policy should be inherited from parent if the iframe is srcdoc
    */
-  ReferrerPolicyEnum GetReferrerPolicy() const { return mReferrerPolicy; }
+  ReferrerPolicyEnum GetReferrerPolicy() const;
 
   /**
    * GetReferrerPolicy() for Document.webidl.
@@ -751,6 +756,22 @@ class Document : public nsINode,
   nsIURI* GetFallbackBaseURI() const {
     if (mIsSrcdocDocument && mParentDocument) {
       return mParentDocument->GetDocBaseURI();
+    }
+    return mDocumentURI;
+  }
+
+  /**
+   * Return the referrer from document URI as defined in the Referrer Policy
+   * specification.
+   * https://w3c.github.io/webappsec-referrer-policy/#determine-requests-referrer
+   * While document is an iframe srcdoc document, let document be document’s
+   * browsing context’s browsing context container’s node document.
+   * Then referrer should be document's URL
+   */
+
+  nsIURI* GetDocumentURIAsReferrer() const {
+    if (mIsSrcdocDocument && mParentDocument) {
+      return mParentDocument->GetDocumentURIAsReferrer();
     }
     return mDocumentURI;
   }
@@ -1019,7 +1040,7 @@ class Document : public nsINode,
    * Set the tracking content blocked flag for this document.
    */
   void SetHasTrackingContentBlocked(bool aHasTrackingContentBlocked,
-                                    const nsAString& aOriginBlocked) {
+                                    const nsACString& aOriginBlocked) {
     RecordContentBlockingLog(
         aOriginBlocked, nsIWebProgressListener::STATE_BLOCKED_TRACKING_CONTENT,
         aHasTrackingContentBlocked);
@@ -1029,7 +1050,7 @@ class Document : public nsINode,
    * Set the all cookies blocked flag for this document.
    */
   void SetHasAllCookiesBlocked(bool aHasAllCookiesBlocked,
-                               const nsAString& aOriginBlocked) {
+                               const nsACString& aOriginBlocked) {
     RecordContentBlockingLog(aOriginBlocked,
                              nsIWebProgressListener::STATE_COOKIES_BLOCKED_ALL,
                              aHasAllCookiesBlocked);
@@ -1039,7 +1060,7 @@ class Document : public nsINode,
    * Set the tracking cookies blocked flag for this document.
    */
   void SetHasTrackingCookiesBlocked(bool aHasTrackingCookiesBlocked,
-                                    const nsAString& aOriginBlocked) {
+                                    const nsACString& aOriginBlocked) {
     RecordContentBlockingLog(
         aOriginBlocked, nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER,
         aHasTrackingCookiesBlocked);
@@ -1049,7 +1070,7 @@ class Document : public nsINode,
    * Set the third-party cookies blocked flag for this document.
    */
   void SetHasForeignCookiesBlocked(bool aHasForeignCookiesBlocked,
-                                   const nsAString& aOriginBlocked) {
+                                   const nsACString& aOriginBlocked) {
     RecordContentBlockingLog(
         aOriginBlocked, nsIWebProgressListener::STATE_COOKIES_BLOCKED_FOREIGN,
         aHasForeignCookiesBlocked);
@@ -1059,7 +1080,7 @@ class Document : public nsINode,
    * Set the cookies blocked by site permission flag for this document.
    */
   void SetHasCookiesBlockedByPermission(bool aHasCookiesBlockedByPermission,
-                                        const nsAString& aOriginBlocked) {
+                                        const nsACString& aOriginBlocked) {
     RecordContentBlockingLog(
         aOriginBlocked,
         nsIWebProgressListener::STATE_COOKIES_BLOCKED_BY_PERMISSION,
@@ -1070,7 +1091,7 @@ class Document : public nsINode,
    * Set the cookies loaded flag for this document.
    */
   void SetHasCookiesLoaded(bool aHasCookiesLoaded,
-                           const nsAString& aOriginLoaded) {
+                           const nsACString& aOriginLoaded) {
     RecordContentBlockingLog(aOriginLoaded,
                              nsIWebProgressListener::STATE_COOKIES_LOADED,
                              aHasCookiesLoaded);
@@ -1096,7 +1117,7 @@ class Document : public nsINode,
    * Set the tracking content loaded flag for this document.
    */
   void SetHasTrackingContentLoaded(bool aHasTrackingContentLoaded,
-                                   const nsAString& aOriginBlocked) {
+                                   const nsACString& aOriginBlocked) {
     RecordContentBlockingLog(
         aOriginBlocked, nsIWebProgressListener::STATE_LOADED_TRACKING_CONTENT,
         aHasTrackingContentLoaded);
@@ -1262,6 +1283,8 @@ class Document : public nsINode,
    */
   void UpdateViewportOverflowType(nscoord aScrolledWidth,
                                   nscoord aScrollportWidth);
+
+  void UpdateForScrollAnchorAdjustment(nscoord aLength);
 
   /**
    * True iff this doc will ignore manual character encoding overrides.
@@ -1820,8 +1843,8 @@ class Document : public nsINode,
    */
   static bool HandlePendingFullscreenRequests(Document* aDocument);
 
-  void RequestPointerLock(Element* aElement, mozilla::dom::CallerType);
-  bool SetPointerLock(Element* aElement, int aCursorStyle);
+  void RequestPointerLock(Element* aElement, CallerType);
+  bool SetPointerLock(Element* aElement, StyleCursorKind);
 
   static void UnlockPointer(Document* aDoc = nullptr);
 
@@ -3096,7 +3119,9 @@ class Document : public nsINode,
 
 #ifdef MOZILLA_INTERNAL_API
   bool Hidden() const { return mVisibilityState != VisibilityState::Visible; }
-  mozilla::dom::VisibilityState VisibilityState() const { return mVisibilityState; }
+  mozilla::dom::VisibilityState VisibilityState() const {
+    return mVisibilityState;
+  }
 #endif
   void GetSelectedStyleSheetSet(nsAString& aSheetSet);
   void SetSelectedStyleSheetSet(const nsAString& aSheetSet);
@@ -3287,6 +3312,10 @@ class Document : public nsINode,
   bool UserHasInteracted() { return mUserHasInteracted; }
   void ResetUserInteractionTimer();
 
+  // This method would return current autoplay policy, it would be "allowed"
+  // , "allowed-muted" or "disallowed".
+  mozilla::dom::DocumentAutoplayPolicy AutoplayPolicy() const;
+
   // This should be called when this document receives events which are likely
   // to be user interaction with the document, rather than the byproduct of
   // interaction with the browser (i.e. a keypress to scroll the view port,
@@ -3301,6 +3330,8 @@ class Document : public nsINode,
   // Return true if NotifyUserGestureActivation() has been called on any
   // document in the document tree.
   bool HasBeenUserGestureActivated();
+
+  BrowsingContext* GetBrowsingContext() const;
 
   // This document is a WebExtension page, it might be a background page, a
   // popup, a visible tab, a visible iframe ...e.t.c.
@@ -3429,7 +3460,39 @@ class Document : public nsINode,
  public:
   bool IsThirdPartyForFlashClassifier();
 
-  bool IsScopedStyleEnabled();
+ private:
+  void DoCacheAllKnownLangPrefs();
+  void RecomputeLanguageFromCharset();
+
+ public:
+  void ResetLangPrefs() {
+    mLangGroupFontPrefs.Reset();
+    mFontGroupCacheDirty = true;
+  }
+
+  already_AddRefed<nsAtom> GetContentLanguageAsAtomForStyle() const;
+  already_AddRefed<nsAtom> GetLanguageForStyle() const;
+
+  /**
+   * Fetch the user's font preferences for the given aLanguage's
+   * language group.
+   */
+  const LangGroupFontPrefs* GetFontPrefsForLang(
+      nsAtom* aLanguage, bool* aNeedsToCache = nullptr) const;
+
+  void ForceCacheLang(nsAtom* aLanguage) {
+    if (!mLanguagesUsed.EnsureInserted(aLanguage)) {
+      return;
+    }
+    GetFontPrefsForLang(aLanguage);
+  }
+
+  void CacheAllKnownLangPrefs() {
+    if (!mFontGroupCacheDirty) {
+      return;
+    }
+    DoCacheAllKnownLangPrefs();
+  }
 
   nsINode* GetServoRestyleRoot() const { return mServoRestyleRoot; }
 
@@ -3581,7 +3644,7 @@ class Document : public nsINode,
                                        bool aUpdateCSSLoader);
 
  private:
-  void RecordContentBlockingLog(const nsAString& aOrigin, uint32_t aType,
+  void RecordContentBlockingLog(const nsACString& aOrigin, uint32_t aType,
                                 bool aBlocked) {
     mContentBlockingLog.RecordLog(aOrigin, aType, aBlocked);
   }
@@ -3775,6 +3838,8 @@ class Document : public nsINode,
 
   // True if BIDI is enabled.
   bool mBidiEnabled : 1;
+  // True if mLangGroupFontPrefs is not initialized or dirty in some other way.
+  bool mFontGroupCacheDirty : 1;
   // True if a MathML element has ever been owned by this document.
   bool mMathMLEnabled : 1;
 
@@ -4221,13 +4286,6 @@ class Document : public nsINode,
   // timer is scheduled.
   bool mHasUserInteractionTimerScheduled;
 
-  // Whether the user has interacted with the document via a restricted
-  // set of gestures which are likely to be interaction with the document,
-  // and not events that are fired as a byproduct of the user interacting
-  // with the browser (events for like scrolling the page, keyboard short
-  // cuts, etc).
-  bool mUserGestureActivated;
-
   mozilla::TimeStamp mPageUnloadingEventTimeStamp;
 
   RefPtr<mozilla::dom::DocGroup> mDocGroup;
@@ -4313,6 +4371,9 @@ class Document : public nsINode,
   nsWeakPtr mAutoFocusElement;
 
   nsCString mScrollToRef;
+
+  nscoord mScrollAnchorAdjustmentLength;
+  int32_t mScrollAnchorAdjustmentCount;
 
   // Weak reference to the scope object (aka the script global object)
   // that, unlike mScriptGlobalObject, is never unset once set. This
@@ -4407,6 +4468,18 @@ class Document : public nsINode,
   // attributes in Servo mode. This list contains all elements which need lazy
   // resolution.
   nsTHashtable<nsPtrHashKey<SVGElement>> mLazySVGPresElements;
+
+  // Most documents will only use one (or very few) language groups. Rather
+  // than have the overhead of a hash lookup, we simply look along what will
+  // typically be a very short (usually of length 1) linked list. There are 31
+  // language groups, so in the worst case scenario we'll need to traverse 31
+  // link items.
+  LangGroupFontPrefs mLangGroupFontPrefs;
+
+  nsTHashtable<nsRefPtrHashKey<nsAtom>> mLanguagesUsed;
+
+  // TODO(emilio): Is this hot enough to warrant to be cached?
+  RefPtr<nsAtom> mLanguageFromCharset;
 
   // Restyle root for servo's style system.
   //

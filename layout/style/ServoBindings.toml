@@ -389,6 +389,7 @@ cbindgen-types = [
     { gecko = "StyleComputedFontStyleDescriptor", servo = "font_face::ComputedFontStyleDescriptor" },
     { gecko = "StyleComputedFontWeightRange", servo = "font_face::ComputedFontWeightRange" },
     { gecko = "StyleComputedTimingFunction", servo = "values::computed::easing::TimingFunction" },
+    { gecko = "StyleCursorKind", servo = "values::computed::ui::CursorKind" },
     { gecko = "StyleDisplay", servo = "values::specified::Display" },
     { gecko = "StyleDisplayMode", servo = "gecko::media_features::DisplayMode" },
     { gecko = "StyleExtremumLength", servo = "values::computed::length::ExtremumLength" },
@@ -412,6 +413,7 @@ cbindgen-types = [
     { gecko = "StyleTextAlign", servo = "values::computed::TextAlign" },
     { gecko = "StyleOverflow", servo = "values::computed::Overflow" },
     { gecko = "StyleOverflowAnchor", servo = "values::computed::OverflowAnchor" },
+    { gecko = "StyleLengthPercentage", servo = "values::computed::LengthPercentage" },
 ]
 
 mapped-generic-types = [

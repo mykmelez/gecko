@@ -10,9 +10,14 @@ const {actionTypes: at} = ChromeUtils.import("resource://activity-stream/common/
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
 
+XPCOMUtils.defineLazyModuleGetters(this, {
+  PreferenceExperiments: "resource://normandy/lib/PreferenceExperiments.jsm",
+});
+
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
 const PREFERENCES_LOADED_EVENT = "home-pane-loaded";
+const DISCOVERY_STREAM_CONFIG_PREF_NAME = "browser.newtabpage.activity-stream.discoverystream.config";
 
 // These "section" objects are formatted in a way to be similar to the ones from
 // SectionsManager to construct the preferences view.
@@ -66,6 +71,9 @@ const CUSTOM_CSS = `
   margin-top: 0;
   margin-bottom: 0;
 }
+#discoveryContentsGroup .contentDiscoveryButton {
+  margin-inline-start: 0;
+}
 `;
 
 this.AboutPreferences = class AboutPreferences {
@@ -97,7 +105,7 @@ this.AboutPreferences = class AboutPreferences {
 
   async observe(window) {
     this.renderPreferences(window, await this.strings, [...PREFS_BEFORE_SECTIONS,
-      ...this.store.getState().Sections, ...PREFS_AFTER_SECTIONS]);
+      ...this.store.getState().Sections, ...PREFS_AFTER_SECTIONS], this.store.getState().DiscoveryStream.config.enabled);
   }
 
   /**
@@ -125,7 +133,7 @@ this.AboutPreferences = class AboutPreferences {
    * Render preferences to an about:preferences content window with the provided
    * strings and preferences structure.
    */
-  renderPreferences({document, Preferences, gHomePane}, strings, prefStructure) {
+  renderPreferences({document, Preferences, gHomePane}, strings, prefStructure, discoveryStreamEnabled) {
     // Helper to create a new element and append it
     const createAppend = (tag, parent) => parent.appendChild(
       document.createXULElement(tag));
@@ -256,6 +264,40 @@ this.AboutPreferences = class AboutPreferences {
         linkPref(subcheck, nested.name, "bool");
       });
     });
+
+    if (discoveryStreamEnabled) {
+      // If Discovery Stream is enabled hide Home Content options
+      contentsGroup.style.visibility = "hidden";
+
+      const discoveryGroup = homeGroup.insertAdjacentElement("afterend", homeGroup.cloneNode());
+      discoveryGroup.id = "discoveryContentsGroup";
+      discoveryGroup.setAttribute("data-subcategory", "discovery");
+      createAppend("label", discoveryGroup)
+        .appendChild(document.createElementNS(HTML_NS, "h2"))
+        .textContent = formatString("prefs_content_discovery_header");
+      createAppend("description", discoveryGroup)
+        .textContent = formatString("prefs_content_discovery_description");
+
+      const contentDiscoveryButton = document.createElementNS(HTML_NS, "button");
+      contentDiscoveryButton.classList.add("contentDiscoveryButton");
+      contentDiscoveryButton.textContent = formatString("prefs_content_discovery_button");
+      createAppend("hbox", discoveryGroup)
+        .appendChild(contentDiscoveryButton)
+        .addEventListener("click", async () => {
+          const activeExperiments = await PreferenceExperiments.getAllActive();
+          const experiment = activeExperiments.find(exp => exp.preferenceName === DISCOVERY_STREAM_CONFIG_PREF_NAME);
+          // Unconditionally update the UI for a fast user response and in
+          // order to help with testing
+          discoveryGroup.style.display = "none";
+          contentsGroup.style.visibility = "visible";
+          if (experiment) {
+            await PreferenceExperiments.stop(experiment.name, {
+              resetValue: true,
+              reason: "individual-opt-out",
+            });
+          }
+        }, {once: true});
+    }
 
     // Update the visibility of the Restore Defaults btn based on checked prefs
     gHomePane.toggleRestoreDefaultsBtn();

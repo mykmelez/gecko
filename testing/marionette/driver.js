@@ -90,6 +90,10 @@ const SUPPORTED_STRATEGIES = new Set([
   element.Strategy.AnonAttribute,
 ]);
 
+// Timeout used to abort fullscreen, maximize, and minimize
+// commands if no window manager is present.
+const TIMEOUT_NO_WINDOW_MANAGER = 5000;
+
 const globalMessageManager = Services.mm;
 
 /**
@@ -1455,27 +1459,14 @@ GeckoDriver.prototype.setWindowRect = async function(cmd) {
       break;
   }
 
-  if (height != null && width != null) {
+  if (width != null && height != null) {
     assert.positiveInteger(height);
     assert.positiveInteger(width);
 
-    let debounce = new DebounceCallback(() => {
-      win.dispatchEvent(new win.CustomEvent("resizeEnd"));
-    });
-
-    await new TimedPromise(async resolve => {
-      if (win.outerWidth == width && win.outerHeight == height) {
-        resolve();
-        return;
-      }
-
-      win.addEventListener("resize", debounce);
-      win.addEventListener("resizeEnd", resolve, {once: true});
+    if (win.outerWidth != width || win.outerHeight != height) {
       win.resizeTo(width, height);
       await new IdlePromise(win);
-    }, {timeout: 5000});
-
-    win.removeEventListener("resize", debounce);
+    }
   }
 
   if (x != null && y != null) {
@@ -3047,13 +3038,13 @@ GeckoDriver.prototype.minimizeWindow = async function() {
 
     let cb;
     let observer = new WebElementEventTarget(this.curBrowser.messageManager);
+    // Use a timed promise to abort if no window manager is present
     await new TimedPromise(resolve => {
       cb = new DebounceCallback(resolve);
       observer.addEventListener("visibilitychange", cb);
       win.minimize();
-    }, {throws: null});
+    }, {throws: null, timeout: TIMEOUT_NO_WINDOW_MANAGER});
     observer.removeEventListener("visibilitychange", cb);
-
     await new IdlePromise(win);
   }
 
@@ -3095,11 +3086,12 @@ GeckoDriver.prototype.maximizeWindow = async function() {
 
   if (WindowState.from(win.windowState) != WindowState.Maximized) {
     let cb;
+    // Use a timed promise to abort if no window manager is present
     await new TimedPromise(resolve => {
       cb = new DebounceCallback(resolve);
       win.addEventListener("sizemodechange", cb);
       win.maximize();
-    }, {throws: null});
+    }, {throws: null, timeout: TIMEOUT_NO_WINDOW_MANAGER});
     win.removeEventListener("sizemodechange", cb);
     await new IdlePromise(win);
   }
@@ -3136,11 +3128,12 @@ GeckoDriver.prototype.fullscreenWindow = async function() {
 
   if (WindowState.from(win.windowState) != WindowState.Fullscreen) {
     let cb;
+    // Use a timed promise to abort if no window manager is present
     await new TimedPromise(resolve => {
       cb = new DebounceCallback(resolve);
       win.addEventListener("sizemodechange", cb);
       win.fullScreen = true;
-    }, {throws: null});
+    }, {throws: null, timeout: TIMEOUT_NO_WINDOW_MANAGER});
     win.removeEventListener("sizemodechange", cb);
   }
   await new IdlePromise(win);
@@ -3637,21 +3630,23 @@ function getOuterWindowId(win) {
 
 async function exitFullscreen(window) {
   let cb;
+  // Use a timed promise to abort if no window manager is present
   await new TimedPromise(resolve => {
     cb = new DebounceCallback(resolve);
     window.addEventListener("sizemodechange", cb);
     window.fullScreen = false;
-  });
+  }, {throws: null, timeout: TIMEOUT_NO_WINDOW_MANAGER});
   window.removeEventListener("sizemodechange", cb);
 }
 
-function restoreWindow(window) {
+async function restoreWindow(window) {
   window.restore();
-  return new PollPromise((resolve, reject) => {
+  // Use a poll promise to abort if no window manager is present
+  await new PollPromise((resolve, reject) => {
     if (WindowState.from(window.windowState) != WindowState.Minimized) {
       resolve();
     } else {
       reject();
     }
-  }, {timeout: 2000});
+  }, {timeout: TIMEOUT_NO_WINDOW_MANAGER});
 }

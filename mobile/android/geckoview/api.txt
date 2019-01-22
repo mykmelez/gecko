@@ -621,6 +621,7 @@ package org.mozilla.geckoview {
   public static interface GeckoSession.TrackingProtectionDelegate {
     method @android.support.annotation.UiThread public void onTrackerBlocked(@android.support.annotation.NonNull org.mozilla.geckoview.GeckoSession, @android.support.annotation.Nullable java.lang.String, int);
     field public static final int CATEGORY_AD = 1;
+    field public static final int CATEGORY_AD_EXT = 64;
     field public static final int CATEGORY_ALL = 31;
     field public static final int CATEGORY_ANALYTIC = 2;
     field public static final int CATEGORY_CONTENT = 8;
@@ -705,9 +706,9 @@ package org.mozilla.geckoview {
     method @android.support.annotation.AnyThread @android.support.annotation.NonNull public org.mozilla.gecko.EventDispatcher getEventDispatcher();
     method @android.support.annotation.NonNull public org.mozilla.geckoview.PanZoomController getPanZoomController();
     method @android.support.annotation.AnyThread @android.support.annotation.Nullable public org.mozilla.geckoview.GeckoSession getSession();
-    method @android.support.annotation.Nullable public org.mozilla.geckoview.GeckoSession releaseSession();
-    method public void setSession(@android.support.annotation.NonNull org.mozilla.geckoview.GeckoSession);
-    method public void setSession(@android.support.annotation.NonNull org.mozilla.geckoview.GeckoSession, @android.support.annotation.Nullable org.mozilla.geckoview.GeckoRuntime);
+    method @android.support.annotation.UiThread @android.support.annotation.Nullable public org.mozilla.geckoview.GeckoSession releaseSession();
+    method @android.support.annotation.UiThread public void setSession(@android.support.annotation.NonNull org.mozilla.geckoview.GeckoSession);
+    method @android.support.annotation.UiThread public void setSession(@android.support.annotation.NonNull org.mozilla.geckoview.GeckoSession, @android.support.annotation.Nullable org.mozilla.geckoview.GeckoRuntime);
     method public boolean shouldPinOnScreen();
     field protected final org.mozilla.geckoview.GeckoView.Display mDisplay;
     field protected org.mozilla.geckoview.GeckoRuntime mRuntime;

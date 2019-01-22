@@ -18,9 +18,9 @@
 
 // For _exit().
 #ifdef XP_WIN
-#include <process.h>
+#  include <process.h>
 #else
-#include <unistd.h>
+#  include <unistd.h>
 #endif
 
 namespace mozilla {
@@ -152,32 +152,34 @@ already_AddRefed<WakeLock> PowerManagerService::NewWakeLockOnBehalfOfProcess(
 
 NS_DEFINE_NAMED_CID(NS_POWERMANAGERSERVICE_CID);
 
-NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsIPowerManagerService,
-                                         mozilla::dom::power::PowerManagerService::GetInstance)
+NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(
+    nsIPowerManagerService,
+    mozilla::dom::power::PowerManagerService::GetInstance)
 
 static const mozilla::Module::CIDEntry kPowerManagerCIDs[] = {
     // clang-format off
-  { &kNS_POWERMANAGERSERVICE_CID, false, nullptr, nsIPowerManagerServiceConstructor, mozilla::Module::ALLOW_IN_GPU_PROCESS },
+  { &kNS_POWERMANAGERSERVICE_CID, false, nullptr, nsIPowerManagerServiceConstructor, mozilla::Module::ALLOW_IN_GPU_AND_SOCKET_PROCESS },
   { nullptr }
     // clang-format on
 };
 
 static const mozilla::Module::ContractIDEntry kPowerManagerContracts[] = {
     // clang-format off
-  { POWERMANAGERSERVICE_CONTRACTID, &kNS_POWERMANAGERSERVICE_CID, mozilla::Module::ALLOW_IN_GPU_PROCESS },
+  { POWERMANAGERSERVICE_CONTRACTID, &kNS_POWERMANAGERSERVICE_CID, mozilla::Module::ALLOW_IN_GPU_AND_SOCKET_PROCESS },
   { nullptr }
     // clang-format on
 };
 
 // We mark the power module as being available in the GPU process because the
 // appshell depends on the power manager service.
-static const mozilla::Module kPowerManagerModule = {mozilla::Module::kVersion,
-                                                    kPowerManagerCIDs,
-                                                    kPowerManagerContracts,
-                                                    nullptr,
-                                                    nullptr,
-                                                    nullptr,
-                                                    nullptr,
-                                                    mozilla::Module::ALLOW_IN_GPU_PROCESS};
+static const mozilla::Module kPowerManagerModule = {
+    mozilla::Module::kVersion,
+    kPowerManagerCIDs,
+    kPowerManagerContracts,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    mozilla::Module::ALLOW_IN_GPU_AND_SOCKET_PROCESS};
 
 NSMODULE_DEFN(nsPowerManagerModule) = &kPowerManagerModule;

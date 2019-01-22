@@ -4,15 +4,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifdef MOZ_MEMORY
-#define MOZ_MEMORY_IMPL
-#include "mozmemory_wrap.h"
-#define MALLOC_FUNCS MALLOC_FUNCS_MALLOC
+#  define MOZ_MEMORY_IMPL
+#  include "mozmemory_wrap.h"
+#  define MALLOC_FUNCS MALLOC_FUNCS_MALLOC
 // See mozmemory_wrap.h for more details. This file is part of libmozglue, so
 // it needs to use _impl suffixes.
-#define MALLOC_DECL(name, return_type, ...) \
-  MOZ_MEMORY_API return_type name##_impl(__VA_ARGS__);
-#include "malloc_decls.h"
-#include "mozilla/mozalloc.h"
+#  define MALLOC_DECL(name, return_type, ...) \
+    MOZ_MEMORY_API return_type name##_impl(__VA_ARGS__);
+#  include "malloc_decls.h"
+#  include "mozilla/mozalloc.h"
 #endif
 
 #include <windows.h>
@@ -34,6 +34,7 @@
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/StackWalk_windows.h"
+#include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Vector.h"
 #include "mozilla/WindowsVersion.h"
@@ -47,7 +48,7 @@ using namespace mozilla;
 using CrashReporter::Annotation;
 using CrashReporter::AnnotationToString;
 
-static SRWLOCK gDllServicesLock = SRWLOCK_INIT;
+static glue::Win32SRWLock gDllServicesLock;
 static glue::detail::DllServicesBase* gDllServices;
 
 #define DLL_BLOCKLIST_ENTRY(name, ...) {name, __VA_ARGS__},
@@ -436,8 +437,8 @@ const char* DllBlocklist_TestBlocklistIntegrity() {
 }
 
 #else  // ENABLE_TESTS
-#define CallDllLoadHook(...)
-#define CallCreateThreadHook(...)
+#  define CallDllLoadHook(...)
+#  define CallCreateThreadHook(...)
 #endif  // ENABLE_TESTS
 
 static NTSTATUS NTAPI patched_LdrLoadDll(PWCHAR filePath, PULONG flags,
@@ -652,25 +653,35 @@ continue_loading:
   // holds the RtlLookupFunctionEntry lock.
   AutoSuppressStackWalking suppress;
 #endif
+
   NTSTATUS ret;
   HANDLE myHandle;
-  ret = stub_LdrLoadDll(filePath, flags, moduleFileName, &myHandle);
-  if (handle) {
-    *handle = myHandle;
-  }
 
-  if (IsUntrustedDllsHandlerEnabled() && NT_SUCCESS(ret)) {
-    // Win32 HMODULEs use the bottom two bits as flags. Ensure those bits are
-    // cleared so we're left with the base address value.
-    glue::UntrustedDllsHandler::OnAfterModuleLoad(
-        (uintptr_t)myHandle & ~(uintptr_t)3, moduleFileName);
-    glue::AutoSharedLock lock(gDllServicesLock);
-    if (gDllServices) {
-      Vector<glue::ModuleLoadEvent, 0, InfallibleAllocPolicy> events;
-      if (glue::UntrustedDllsHandler::TakePendingEvents(events)) {
-        gDllServices->NotifyUntrustedModuleLoads(events);
+  if (IsUntrustedDllsHandlerEnabled()) {
+    TimeStamp loadStart = TimeStamp::Now();
+    ret = stub_LdrLoadDll(filePath, flags, moduleFileName, &myHandle);
+    TimeStamp loadEnd = TimeStamp::Now();
+
+    if (NT_SUCCESS(ret)) {
+      double loadDurationMS = (loadEnd - loadStart).ToMilliseconds();
+      // Win32 HMODULEs use the bottom two bits as flags. Ensure those bits are
+      // cleared so we're left with the base address value.
+      glue::UntrustedDllsHandler::OnAfterModuleLoad(
+          (uintptr_t)myHandle & ~(uintptr_t)3, moduleFileName, loadDurationMS);
+      glue::AutoSharedLock lock(gDllServicesLock);
+      if (gDllServices) {
+        Vector<glue::ModuleLoadEvent, 0, InfallibleAllocPolicy> events;
+        if (glue::UntrustedDllsHandler::TakePendingEvents(events)) {
+          gDllServices->NotifyUntrustedModuleLoads(events);
+        }
       }
     }
+  } else {
+    ret = stub_LdrLoadDll(filePath, flags, moduleFileName, &myHandle);
+  }
+
+  if (handle) {
+    *handle = myHandle;
   }
 
   CallDllLoadHook(NT_SUCCESS(ret), ret, handle ? *handle : 0, moduleFileName);

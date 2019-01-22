@@ -20,7 +20,7 @@
 
 // scoped_ptr.h uses FF
 #ifdef FF
-#undef FF
+#  undef FF
 #endif
 #include "webrtc/voice_engine/voice_engine_defines.h"
 #include "webrtc/modules/audio_processing/include/audio_processing.h"
@@ -520,6 +520,9 @@ void MediaEngineWebRTCMicrophoneSource::SetTrack(
   aStream->AddAudioTrack(aTrackID, aStream->GraphRate(), segment,
                          SourceMediaStream::ADDTRACK_QUEUED);
 
+  mInputProcessing = new AudioInputProcessing(mDeviceMaxChannelCount, mStream,
+                                              mTrackID, mPrincipal);
+
   LOG("Stream %p registered for microphone capture", aStream.get());
 }
 
@@ -566,9 +569,6 @@ nsresult MediaEngineWebRTCMicrophoneSource::Start(
     return NS_ERROR_FAILURE;
   }
 
-  mInputProcessing = new AudioInputProcessing(mDeviceMaxChannelCount, mStream,
-                                              mTrackID, mPrincipal);
-
   RefPtr<MediaEngineWebRTCMicrophoneSource> that = this;
   NS_DispatchToMainThread(media::NewRunnableFrom(
       [that, deviceID, stream = mStream, track = mTrackID]() {
@@ -605,20 +605,19 @@ nsresult MediaEngineWebRTCMicrophoneSource::Stop(
   }
 
   RefPtr<MediaEngineWebRTCMicrophoneSource> that = this;
-  NS_DispatchToMainThread(
-      media::NewRunnableFrom([that, stream = mStream]() {
-        if (stream->IsDestroyed()) {
-          return NS_OK;
-        }
+  NS_DispatchToMainThread(media::NewRunnableFrom([that, stream = mStream]() {
+    if (stream->IsDestroyed()) {
+      return NS_OK;
+    }
 
-        stream->GraphImpl()->AppendMessage(MakeUnique<StartStopMessage>(
-            that->mInputProcessing, StartStopMessage::Stop));
-        CubebUtils::AudioDeviceID deviceID = that->mDeviceInfo->DeviceID();
-        Maybe<CubebUtils::AudioDeviceID> id = Some(deviceID);
-        stream->CloseAudioInput(id, that->mInputProcessing);
+    stream->GraphImpl()->AppendMessage(MakeUnique<StartStopMessage>(
+        that->mInputProcessing, StartStopMessage::Stop));
+    CubebUtils::AudioDeviceID deviceID = that->mDeviceInfo->DeviceID();
+    Maybe<CubebUtils::AudioDeviceID> id = Some(deviceID);
+    stream->CloseAudioInput(id, that->mInputProcessing);
 
-        return NS_OK;
-      }));
+    return NS_OK;
+  }));
 
   MOZ_ASSERT(mState == kStarted, "Should be started when stopping");
   mState = kStopped;
@@ -776,7 +775,14 @@ void AudioInputProcessing::UpdateAPMExtraOptions(bool aExtendedFilter,
   mAudioProcessing->SetExtraOptions(config);
 }
 
-void AudioInputProcessing::Start() { mEnabled = true; }
+void AudioInputProcessing::Start() {
+  mEnabled = true;
+  mLiveFramesAppended = false;
+  mLiveSilenceAppended = false;
+#ifdef DEBUG
+  mLastCallbackAppendTime = 0;
+#endif
+}
 
 void AudioInputProcessing::Stop() { mEnabled = false; }
 

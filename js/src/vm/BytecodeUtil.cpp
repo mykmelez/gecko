@@ -1468,10 +1468,10 @@ static unsigned Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
       break;
     }
 
-#ifdef ENABLE_BIGINT
+#  ifdef ENABLE_BIGINT
     case JOF_BIGINT:
       // Fallthrough.
-#endif
+#  endif
     case JOF_DOUBLE: {
       RootedValue v(cx, script->getConst(GET_UINT32_INDEX(pc)));
       UniqueChars bytes = ToDisassemblySource(cx, v);
@@ -2182,6 +2182,9 @@ UniqueChars ExpressionDecompiler::getOutput() {
 static bool DecompileAtPCForStackDump(
     JSContext* cx, HandleScript script,
     const OffsetAndDefIndex& offsetAndDefIndex, Sprinter* sp) {
+  // The expression decompiler asserts the script is in the current realm.
+  AutoRealm ar(cx, script);
+
   LifoAllocScope allocScope(&cx->tempLifoAlloc());
   BytecodeParser parser(cx, allocScope.alloc(), script);
   parser.setStackDump();

@@ -567,6 +567,8 @@ class LexicalEnvironmentObject : public EnvironmentObject {
     return enclosingEnvironment().as<GlobalObject>();
   }
 
+  void setWindowProxyThisValue(JSObject* obj);
+
   // Global and non-syntactic lexical scopes are extensible. All other
   // lexical scopes are not.
   bool isExtensible() const;
@@ -1146,8 +1148,6 @@ extern bool CreateObjectsForEnvironmentChain(JSContext* cx,
                                              MutableHandleObject envObj);
 
 ModuleObject* GetModuleObjectForScript(JSScript* script);
-
-Value FindScriptOrModulePrivateForScript(JSScript* script);
 
 ModuleEnvironmentObject* GetModuleEnvironmentForScript(JSScript* script);
 

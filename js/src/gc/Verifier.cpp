@@ -9,10 +9,11 @@
 #include "mozilla/Sprintf.h"
 
 #ifdef MOZ_VALGRIND
-#include <valgrind/memcheck.h>
+#  include <valgrind/memcheck.h>
 #endif
 
 #include "gc/GCInternals.h"
+#include "gc/GCLock.h"
 #include "gc/PublicIterators.h"
 #include "gc/WeakMap.h"
 #include "gc/Zone.h"
@@ -526,9 +527,9 @@ HeapCheckTracerBase::HeapCheckTracerBase(JSRuntime* rt,
       rt(rt),
       oom(false),
       parentIndex(-1) {
-#ifdef DEBUG
+#  ifdef DEBUG
   setCheckEdges(false);
-#endif
+#  endif
 }
 
 void HeapCheckTracerBase::onChild(const JS::GCCellPtr& thing) {
@@ -702,7 +703,7 @@ void CheckGrayMarkingTracer::checkCell(Cell* cell) {
     fprintf(stderr, "\n");
     dumpCellPath();
 
-#ifdef DEBUG
+#  ifdef DEBUG
     if (parent->is<JSObject>()) {
       fprintf(stderr, "\nSource: ");
       DumpObject(parent->as<JSObject>(), stderr);
@@ -711,7 +712,7 @@ void CheckGrayMarkingTracer::checkCell(Cell* cell) {
       fprintf(stderr, "\nTarget: ");
       DumpObject(cell->as<JSObject>(), stderr);
     }
-#endif
+#  endif
   }
 }
 

@@ -18,7 +18,7 @@ using namespace mozilla::dom;
 NS_IMPL_ISUPPORTS(URLClassifierParent, nsIURIClassifierCallback)
 
 mozilla::ipc::IPCResult URLClassifierParent::StartClassify(
-    nsIPrincipal* aPrincipal, bool aUseTrackingProtection, bool* aSuccess) {
+    nsIPrincipal* aPrincipal, bool* aSuccess) {
   *aSuccess = false;
   nsresult rv = NS_OK;
   // Note that in safe mode, the URL classifier service isn't available, so we
@@ -26,8 +26,7 @@ mozilla::ipc::IPCResult URLClassifierParent::StartClassify(
   nsCOMPtr<nsIURIClassifier> uriClassifier =
       do_GetService(NS_URICLASSIFIERSERVICE_CONTRACTID, &rv);
   if (NS_SUCCEEDED(rv)) {
-    rv = uriClassifier->Classify(aPrincipal, nullptr, aUseTrackingProtection,
-                                 this, aSuccess);
+    rv = uriClassifier->Classify(aPrincipal, nullptr, this, aSuccess);
   }
   if (NS_FAILED(rv) || !*aSuccess) {
     // We treat the case where we fail to classify and the case where the
@@ -161,18 +160,20 @@ mozilla::ipc::IPCResult URLClassifierLocalParent::StartClassify(
 NS_IMETHODIMP
 URLClassifierLocalParent::OnClassifyComplete(
     const nsTArray<RefPtr<nsIUrlClassifierFeatureResult>>& aResults) {
-  nsTArray<URLClassifierLocalResult> ipcResults;
-  for (nsIUrlClassifierFeatureResult* result : aResults) {
-    URLClassifierLocalResult* ipcResult = ipcResults.AppendElement();
+  if (mIPCOpen) {
+    nsTArray<URLClassifierLocalResult> ipcResults;
+    for (nsIUrlClassifierFeatureResult* result : aResults) {
+      URLClassifierLocalResult* ipcResult = ipcResults.AppendElement();
 
-    net::UrlClassifierFeatureResult* r =
-        static_cast<net::UrlClassifierFeatureResult*>(result);
+      net::UrlClassifierFeatureResult* r =
+          static_cast<net::UrlClassifierFeatureResult*>(result);
 
-    ipcResult->uri() = r->URI();
-    r->Feature()->GetName(ipcResult->featureName());
-    ipcResult->matchingList() = r->List();
+      ipcResult->uri() = r->URI();
+      r->Feature()->GetName(ipcResult->featureName());
+      ipcResult->matchingList() = r->List();
+    }
+
+    Unused << Send__delete__(this, ipcResults);
   }
-
-  Unused << Send__delete__(this, ipcResults);
   return NS_OK;
 }

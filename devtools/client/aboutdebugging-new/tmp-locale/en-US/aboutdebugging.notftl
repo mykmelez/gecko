@@ -5,9 +5,16 @@
 ### These strings are used inside the about:debugging panel which is available
 ### by setting the preference `devtools.aboutdebugging.new-enabled` to true.
 
+# Display name of the runtime "This Firefox". Reused as the sidebar name for This Firefox
+# (about-debugging-sidebar-this-firefox.name). Not displayed elsewhere in the application
+# at the moment.
+# This should the same string as the part outside of the parentheses in toolbox.properties
+# toolbox.debugTargetInfo.runtimeLabel.thisFirefox. See 1520525.
+about-debugging-this-firefox-runtime-name = This Firefox
+
 # Sidebar heading for selecting the currently running instance of Firefox
 about-debugging-sidebar-this-firefox =
-  .name = This Firefox
+  .name = { about-debugging-this-firefox-runtime-name }
 
 # Sidebar heading for connecting to some remote source
 about-debugging-sidebar-connect =
@@ -48,7 +55,6 @@ about-debugging-sidebar-runtime-item-name =
 # locations).
 about-debugging-sidebar-runtime-item-name-no-device =
   .title = { $displayName }
-
 
 # Temporary text displayed in a sidebar button to refresh USB devices. Temporary
 # UI, do not localize.
@@ -150,6 +156,9 @@ about-debugging-tmp-extension-remove-button = Remove
 # Note: this message is only displayed in Windows and Linux platforms.
 about-debugging-tmp-extension-install-message = Select manifest.json file or .xpi/.zip archive
 
+# This string is displayed as a message about the add-on having a temporaryID.
+about-debugging-tmp-extension-temporary-id = This WebExtension has a temporary ID. <a>Learn more</a>
+
 # Text of a link displayed for extensions in "runtime" pages.
 # Clicking on the link should open the manifest file in a new tab.
 about-debugging-extension-manifest-link = Manifest URL
@@ -248,14 +257,15 @@ about-debugging-connection-prompt-disable-button = Disable connection prompt
 
 # Page title of connect / runtime page
 # Part of "about-debugging-page-title" string defined below
-about-debugging-page-title-selected-page = 
-  { $selectedPage -> 
+about-debugging-page-title-selected-page =
+  { $selectedPage ->
      [connect] Connect
      *[runtime] Runtime
   }
 
 # Page title with the runtime displayed in the tab
-about-debugging-page-title-with-runtime = { -application-title } - { about-debugging-page-title-selected-page } / { $selectedRuntime }
+# { $selectedRuntimeId } is the id of the current runtime, such as "this-firefox", "localhost:6080", ...
+about-debugging-page-title-with-runtime = { -application-title } - { about-debugging-page-title-selected-page } / { $selectedRuntimeId }
 
 # Page title without the runtime displayed in the tab
 about-debugging-page-title = { -application-title } - { about-debugging-page-title-selected-page }

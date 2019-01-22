@@ -92,7 +92,7 @@ let ACTORS = {
     child: {
       module: "resource:///actors/ContentSearchChild.jsm",
       group: "browsers",
-      matches: ["about:home", "about:newtab", "about:welcome",
+      matches: ["about:home", "about:newtab", "about:welcome", "about:privatebrowsing",
                 "chrome://mochitests/content/*"],
       events: {
         "ContentSearchClient": {capture: true, wantUntrusted: true},
@@ -321,7 +321,10 @@ let ACTORS = {
                                    browserWindowFeatures, null);
 
   // Hide the titlebar if the actual browser window will draw in it.
-  if (Services.prefs.getBoolPref("browser.tabs.drawInTitlebar")) {
+  let hiddenTitlebar =
+    Services.prefs.getBoolPref("browser.tabs.drawInTitlebar",
+      win.matchMedia("(-moz-gtk-csd-hide-titlebar-by-default)").matches);
+  if (hiddenTitlebar) {
     win.windowUtils.setChromeMargin(0, 2, 2, 2);
   }
 
@@ -384,7 +387,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   Blocklist: "resource://gre/modules/Blocklist.jsm",
   BookmarkHTMLUtils: "resource://gre/modules/BookmarkHTMLUtils.jsm",
   BookmarkJSONUtils: "resource://gre/modules/BookmarkJSONUtils.jsm",
-  BrowserErrorReporter: "resource:///modules/BrowserErrorReporter.jsm",
   BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.jsm",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
   ContentClick: "resource:///modules/ContentClick.jsm",
@@ -656,16 +658,6 @@ BrowserGlue.prototype = {
       value: new PingCentre({ topic: MAIN_TOPIC_ID }),
     });
     return this.pingCentre;
-  },
-
-  /**
-   * Lazily initialize BrowserErrorReporter
-   */
-  get browserErrorReporter() {
-    Object.defineProperty(this, "browserErrorReporter", {
-      value: new BrowserErrorReporter(),
-    });
-    return this.browserErrorReporter;
   },
 
   _sendMainPingCentrePing() {
@@ -1015,6 +1007,14 @@ BrowserGlue.prototype = {
       PdfJs.earlyInit();
     }
 
+    // Initialize the default l10n resource sources for L10nRegistry.
+    let locales = Services.locale.packagedLocales;
+    const greSource = new FileSource("toolkit", locales, "resource://gre/localization/{locale}/");
+    L10nRegistry.registerSource(greSource);
+
+    const appSource = new FileSource("app", locales, "resource://app/localization/{locale}/");
+    L10nRegistry.registerSource(appSource);
+
     // check if we're in safe mode
     if (Services.appinfo.inSafeMode) {
       Services.ww.openWindow(null, "chrome://browser/content/safeMode.xul",
@@ -1080,14 +1080,6 @@ BrowserGlue.prototype = {
     });
 
     Normandy.init();
-
-    // Initialize the default l10n resource sources for L10nRegistry.
-    let locales = Services.locale.packagedLocales;
-    const greSource = new FileSource("toolkit", locales, "resource://gre/localization/{locale}/");
-    L10nRegistry.registerSource(greSource);
-
-    const appSource = new FileSource("app", locales, "resource://app/localization/{locale}/");
-    L10nRegistry.registerSource(appSource);
 
     SaveToPocket.init();
     Services.obs.notifyObservers(null, "browser-ui-startup-complete");
@@ -1455,12 +1447,6 @@ BrowserGlue.prototype = {
     AutoCompletePopup.uninit();
     DateTimePickerParent.uninit();
 
-    // Browser errors are only collected on Nightly, but telemetry for
-    // them is collected on all channels.
-    if (AppConstants.MOZ_DATA_REPORTING) {
-      this.browserErrorReporter.uninit();
-    }
-
     Normandy.uninit();
   },
 
@@ -1502,12 +1488,6 @@ BrowserGlue.prototype = {
       return;
     }
     this._windowsWereRestored = true;
-
-    // Browser errors are only collected on Nightly, but telemetry for
-    // them is collected on all channels.
-    if (AppConstants.MOZ_DATA_REPORTING) {
-      this.browserErrorReporter.init();
-    }
 
     BrowserUsageTelemetry.init();
     SearchTelemetry.init();
@@ -1631,12 +1611,6 @@ BrowserGlue.prototype = {
       });
     }
 
-    if (AppConstants.MOZ_DEV_EDITION) {
-      Services.tm.idleDispatchToMainThread(() => {
-        this._createExtraDefaultProfile();
-      });
-    }
-
     Services.tm.idleDispatchToMainThread(() => {
       this._checkForDefaultBrowser();
     });
@@ -1715,40 +1689,6 @@ BrowserGlue.prototype = {
     Services.tm.idleDispatchToMainThread(() => {
       RemoteSettings.init();
     });
-  },
-
-  _createExtraDefaultProfile() {
-    if (!AppConstants.MOZ_DEV_EDITION) {
-      return;
-    }
-    // If Developer Edition is the only installed Firefox version and no other
-    // profiles are present, create a second one for use by other versions.
-    // This helps Firefox versions earlier than 35 avoid accidentally using the
-    // unsuitable Developer Edition profile.
-    let profileService = Cc["@mozilla.org/toolkit/profile-service;1"]
-                         .getService(Ci.nsIToolkitProfileService);
-    let profileCount = profileService.profileCount;
-    if (profileCount == 1 && profileService.selectedProfile.name != "default") {
-      let newProfile;
-      try {
-        newProfile = profileService.createProfile(null, "default");
-        profileService.defaultProfile = newProfile;
-        profileService.flush();
-      } catch (e) {
-        Cu.reportError("Could not create profile 'default': " + e);
-      }
-      if (newProfile) {
-        // We don't want a default profile with Developer Edition settings, an
-        // empty profile directory will do. The profile service of the other
-        // Firefox will populate it with its own stuff.
-        let newProfilePath = newProfile.rootDir.path;
-        OS.File.removeDir(newProfilePath).then(() => {
-          return OS.File.makeDir(newProfilePath);
-        }).catch(e => {
-          Cu.reportError("Could not empty profile 'default': " + e);
-        });
-      }
-    }
   },
 
   _onQuitRequest: function BG__onQuitRequest(aCancelQuit, aQuitType) {
@@ -2255,7 +2195,7 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 77;
+    const UI_VERSION = 78;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     let currentUIVersion;
@@ -2594,10 +2534,6 @@ BrowserGlue.prototype = {
       }
     }
 
-    if (currentUIVersion < 74) {
-      Services.prefs.clearUserPref("browser.search.region");
-    }
-
     if (currentUIVersion < 75) {
       // Ensure we try to migrate any live bookmarks the user might have, trying up to
       // 5 times. We set this early, and here, to avoid running the migration on
@@ -2622,6 +2558,10 @@ BrowserGlue.prototype = {
       for (let toolbarId of toolbars) {
         xulStore.removeValue(BROWSER_DOCURL, toolbarId, "currentset");
       }
+    }
+
+    if (currentUIVersion < 78) {
+      Services.prefs.clearUserPref("browser.search.region");
     }
 
     // Update the migration version.

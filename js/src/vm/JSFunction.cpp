@@ -1851,7 +1851,8 @@ static bool CreateDynamicFunction(JSContext* cx, const CallArgs& args,
       .setFileAndLine(filename, 1)
       .setNoScriptRval(false)
       .setIntroductionInfo(introducerFilename, introductionType, lineno,
-                           maybeScript, pcOffset);
+                           maybeScript, pcOffset)
+      .setScriptOrModule(maybeScript);
 
   StringBuffer sb(cx);
 
@@ -1999,6 +2000,7 @@ static bool CreateDynamicFunction(JSContext* cx, const CallArgs& args,
     return false;
   }
 
+  JSProtoKey protoKey = JSProto_Null;
   if (isAsync) {
     if (isGenerator) {
       if (!CompileStandaloneAsyncGenerator(cx, &fun, options, srcBuf,
@@ -2022,12 +2024,13 @@ static bool CreateDynamicFunction(JSContext* cx, const CallArgs& args,
                                      parameterListEnd)) {
         return false;
       }
+      protoKey = JSProto_Function;
     }
   }
 
   // Steps 6, 29.
   RootedObject proto(cx);
-  if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+  if (!GetPrototypeFromBuiltinConstructor(cx, args, protoKey, &proto)) {
     return false;
   }
 

@@ -56,6 +56,11 @@ const INITIAL_STATE = {
     feeds: {
       // "https://foo.com/feed1": {lastUpdated: 123, data: []}
     },
+    spocs: {
+      spocs_endpoint: "",
+      lastUpdated: null,
+      data: {}, // {spocs: []}
+    },
   },
   Search: {
     // Pretend the search box is focused after handing off to AwesomeBar.
@@ -455,6 +460,28 @@ function DiscoveryStream(prevState = INITIAL_STATE.DiscoveryStream, action) {
       return {...prevState, lastUpdated: action.data.lastUpdated || null, layout: action.data.layout || []};
     case at.DISCOVERY_STREAM_LAYOUT_RESET:
       return {...prevState, lastUpdated: INITIAL_STATE.DiscoveryStream.lastUpdated, layout: INITIAL_STATE.DiscoveryStream.layout};
+    case at.DISCOVERY_STREAM_FEEDS_UPDATE:
+      return {...prevState, feeds: action.data || prevState.feeds};
+    case at.DISCOVERY_STREAM_SPOCS_ENDPOINT:
+      return {
+        ...prevState,
+        spocs: {
+          ...INITIAL_STATE.DiscoveryStream.spocs,
+          spocs_endpoint: action.data || INITIAL_STATE.DiscoveryStream.spocs.spocs_endpoint,
+        },
+      };
+    case at.DISCOVERY_STREAM_SPOCS_UPDATE:
+      if (action.data) {
+        return {
+          ...prevState,
+          spocs: {
+            ...prevState.spocs,
+            lastUpdated: action.data.lastUpdated,
+            data: action.data.spocs,
+          },
+        };
+      }
+      return prevState;
     default:
       return prevState;
   }
@@ -464,10 +491,8 @@ function Search(prevState = INITIAL_STATE.Search, action) {
   switch (action.type) {
     case at.HIDE_SEARCH:
       return Object.assign({...prevState, hide: true});
-    case at.FOCUS_SEARCH:
-      return Object.assign({...prevState, focus: true});
     case at.SHOW_SEARCH:
-      return Object.assign({...prevState, hide: false, focus: false});
+      return Object.assign({...prevState, hide: false});
     default:
       return prevState;
   }

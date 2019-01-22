@@ -619,7 +619,7 @@ class JSTerm extends Component {
       "lines": str.split(/\n/).length,
     });
 
-    return this.webConsoleClient.evaluateJSAsync(str, null, {
+    return this.webConsoleClient.evaluateJSAsync(str, {
       frameActor: this.props.serviceContainer.getFrameActor(options.frame),
       ...options,
     });
@@ -636,8 +636,7 @@ class JSTerm extends Component {
    *         received.
    */
   copyObject(evalString, evalOptions) {
-    return this.webConsoleClient.evaluateJSAsync(`copy(${evalString})`,
-      null, evalOptions);
+    return this.webConsoleClient.evaluateJSAsync(`copy(${evalString})`, evalOptions);
   }
 
   /**
@@ -732,6 +731,14 @@ class JSTerm extends Component {
     }
 
     return this.inputNode ? this.inputNode.selectionStart : null;
+  }
+
+  getSelectedText() {
+    if (this.inputNode) {
+      return this.inputNode.value.substring(
+        this.inputNode.selectionStart, this.inputNode.selectionEnd);
+    }
+    return this.editor.getSelection();
   }
 
   /**

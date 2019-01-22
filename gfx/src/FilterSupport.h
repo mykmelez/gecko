@@ -18,6 +18,16 @@
 
 namespace mozilla {
 namespace gfx {
+class FilterPrimitiveDescription;
+}  // namespace gfx
+}  // namespace mozilla
+
+DECLARE_USE_COPY_CONSTRUCTORS(mozilla::gfx::FilterPrimitiveDescription)
+
+extern const float gsRGBToLinearRGBMap[256];
+
+namespace mozilla {
+namespace gfx {
 
 // Morphology Operators
 const unsigned short SVG_OPERATOR_UNKNOWN = 0;
@@ -461,10 +471,10 @@ class FilterPrimitiveDescription final {
 
  private:
   PrimitiveAttributes mAttributes;
-  nsTArray<int32_t> mInputPrimitives;
+  AutoTArray<int32_t, 2> mInputPrimitives;
   IntRect mFilterPrimitiveSubregion;
   IntRect mFilterSpaceBounds;
-  nsTArray<ColorSpace> mInputColorSpaces;
+  AutoTArray<ColorSpace, 2> mInputColorSpaces;
   ColorSpace mOutputColorSpace;
   bool mIsTainted;
 };

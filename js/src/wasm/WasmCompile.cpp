@@ -68,7 +68,7 @@ uint32_t wasm::ObservedCPUFeatures() {
 #elif defined(JS_CODEGEN_NONE)
   return 0;
 #else
-#error "unknown architecture"
+#  error "unknown architecture"
 #endif
 }
 
@@ -259,8 +259,10 @@ static const double arm64IonBytecodesPerMs = 750;  // Estimate
 static const double x64DesktopTierCutoff = x64IonBytecodesPerMs * tierCutoffMs;
 static const double x86DesktopTierCutoff = x86IonBytecodesPerMs * tierCutoffMs;
 static const double x86MobileTierCutoff = x86DesktopTierCutoff / 2;  // Guess
-static const double arm32MobileTierCutoff = arm32IonBytecodesPerMs * tierCutoffMs;
-static const double arm64MobileTierCutoff = arm64IonBytecodesPerMs * tierCutoffMs;
+static const double arm32MobileTierCutoff =
+    arm32IonBytecodesPerMs * tierCutoffMs;
+static const double arm64MobileTierCutoff =
+    arm64IonBytecodesPerMs * tierCutoffMs;
 
 static double CodesizeCutoff(SystemClass cls) {
   switch (cls) {
@@ -413,7 +415,6 @@ void CompilerEnvironment::computeParameters(Decoder& d,
                    gcFeatureOptIn == HasGcTypes::True;
   bool argBaselineEnabled = args_->baselineEnabled || gcEnabled;
   bool argIonEnabled = args_->ionEnabled && !gcEnabled;
-  bool argTestTiering = args_->testTiering && !gcEnabled;
   bool argDebugEnabled = args_->debugEnabled;
 
   uint32_t codeSectionSize = 0;
@@ -424,11 +425,9 @@ void CompilerEnvironment::computeParameters(Decoder& d,
   }
 
   // Attempt to default to ion if baseline is disabled.
-  bool baselineEnabled =
-      BaselineCanCompile() && (argBaselineEnabled || argTestTiering);
+  bool baselineEnabled = BaselineCanCompile() && argBaselineEnabled;
   bool debugEnabled = BaselineCanCompile() && argDebugEnabled;
-  bool ionEnabled =
-      IonCanCompile() && (argIonEnabled || !baselineEnabled || argTestTiering);
+  bool ionEnabled = IonCanCompile() && (argIonEnabled || !baselineEnabled);
 #ifdef ENABLE_WASM_CRANELIFT
   bool forceCranelift = args_->forceCranelift;
 #endif
@@ -437,7 +436,7 @@ void CompilerEnvironment::computeParameters(Decoder& d,
   MOZ_RELEASE_ASSERT(baselineEnabled || ionEnabled);
 
   if (baselineEnabled && ionEnabled && !debugEnabled && CanUseExtraThreads() &&
-      (TieringBeneficial(codeSectionSize) || argTestTiering)) {
+      (TieringBeneficial(codeSectionSize) || args_->testTiering)) {
     mode_ = CompileMode::Tier1;
     tier_ = Tier::Baseline;
   } else {

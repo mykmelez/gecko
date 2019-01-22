@@ -4,12 +4,13 @@
 
 use api::{
     ColorF, ColorU,ExtendMode, GradientStop, LayoutPoint, LayoutSize,
-    LayoutPrimitiveInfo, LayoutRect, PremultipliedColorF
+    LayoutPrimitiveInfo, PremultipliedColorF
 };
 use display_list_flattener::{AsInstanceKind, IsVisible};
 use frame_builder::FrameBuildingState;
 use gpu_cache::{GpuCacheHandle, GpuDataRequest};
-use intern::{DataStore, Handle, Internable, InternDebug, Interner, UpdateList};
+use intern::{Internable, InternDebug};
+use intern_types;
 use prim_store::{BrushSegment, GradientTileRange};
 use prim_store::{PrimitiveInstanceKind, PrimitiveOpacity, PrimitiveSceneData};
 use prim_store::{PrimKeyCommonData, PrimTemplateCommonData, PrimitiveStore};
@@ -55,14 +56,12 @@ impl LinearGradientKey {
     pub fn new(
         is_backface_visible: bool,
         prim_size: LayoutSize,
-        prim_relative_clip_rect: LayoutRect,
         linear_grad: LinearGradient,
     ) -> Self {
         LinearGradientKey {
             common: PrimKeyCommonData {
                 is_backface_visible,
                 prim_size: prim_size.into(),
-                prim_relative_clip_rect: prim_relative_clip_rect.into(),
             },
             extend_mode: linear_grad.extend_mode,
             start_point: linear_grad.start_point,
@@ -227,15 +226,7 @@ impl LinearGradientTemplate {
     }
 }
 
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Clone, Copy, Debug, Hash, Eq, MallocSizeOf, PartialEq)]
-pub struct LinearGradientDataMarker;
-
-pub type LinearGradientDataStore = DataStore<LinearGradientKey, LinearGradientTemplate, LinearGradientDataMarker>;
-pub type LinearGradientDataHandle = Handle<LinearGradientDataMarker>;
-pub type LinearGradientDataUpdateList = UpdateList<LinearGradientKey>;
-pub type LinearGradientDataInterner = Interner<LinearGradientKey, PrimitiveSceneData, LinearGradientDataMarker>;
+pub type LinearGradientDataHandle = intern_types::linear_grad::Handle;
 
 pub struct LinearGradient {
     pub extend_mode: ExtendMode,
@@ -249,7 +240,7 @@ pub struct LinearGradient {
 }
 
 impl Internable for LinearGradient {
-    type Marker = LinearGradientDataMarker;
+    type Marker = intern_types::linear_grad::Marker;
     type Source = LinearGradientKey;
     type StoreData = LinearGradientTemplate;
     type InternData = PrimitiveSceneData;
@@ -258,12 +249,10 @@ impl Internable for LinearGradient {
     fn build_key(
         self,
         info: &LayoutPrimitiveInfo,
-        prim_relative_clip_rect: LayoutRect
     ) -> LinearGradientKey {
         LinearGradientKey::new(
             info.is_backface_visible,
             info.rect.size,
-            prim_relative_clip_rect,
             self
         )
     }
@@ -316,14 +305,12 @@ impl RadialGradientKey {
     pub fn new(
         is_backface_visible: bool,
         prim_size: LayoutSize,
-        prim_relative_clip_rect: LayoutRect,
         radial_grad: RadialGradient,
     ) -> Self {
         RadialGradientKey {
             common: PrimKeyCommonData {
                 is_backface_visible,
                 prim_size: prim_size.into(),
-                prim_relative_clip_rect: prim_relative_clip_rect.into(),
             },
             extend_mode: radial_grad.extend_mode,
             center: radial_grad.center,
@@ -458,15 +445,7 @@ impl RadialGradientTemplate {
     }
 }
 
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Clone, Copy, Debug, Hash, Eq, MallocSizeOf, PartialEq)]
-pub struct RadialGradientDataMarker;
-
-pub type RadialGradientDataStore = DataStore<RadialGradientKey, RadialGradientTemplate, RadialGradientDataMarker>;
-pub type RadialGradientDataHandle = Handle<RadialGradientDataMarker>;
-pub type RadialGradientDataUpdateList = UpdateList<RadialGradientKey>;
-pub type RadialGradientDataInterner = Interner<RadialGradientKey, PrimitiveSceneData, RadialGradientDataMarker>;
+pub type RadialGradientDataHandle = intern_types::radial_grad::Handle;
 
 pub struct RadialGradient {
     pub extend_mode: ExtendMode,
@@ -479,7 +458,7 @@ pub struct RadialGradient {
 }
 
 impl Internable for RadialGradient {
-    type Marker = RadialGradientDataMarker;
+    type Marker = intern_types::radial_grad::Marker;
     type Source = RadialGradientKey;
     type StoreData = RadialGradientTemplate;
     type InternData = PrimitiveSceneData;
@@ -488,12 +467,10 @@ impl Internable for RadialGradient {
     fn build_key(
         self,
         info: &LayoutPrimitiveInfo,
-        prim_relative_clip_rect: LayoutRect,
     ) -> RadialGradientKey {
         RadialGradientKey::new(
             info.is_backface_visible,
             info.rect.size,
-            prim_relative_clip_rect,
             self,
         )
     }
@@ -726,10 +703,10 @@ fn test_struct_sizes() {
     // (b) You made a structure larger. This is not necessarily a problem, but should only
     //     be done with care, and after checking if talos performance regresses badly.
     assert_eq!(mem::size_of::<LinearGradient>(), 72, "LinearGradient size changed");
-    assert_eq!(mem::size_of::<LinearGradientTemplate>(), 128, "LinearGradientTemplate size changed");
-    assert_eq!(mem::size_of::<LinearGradientKey>(), 96, "LinearGradientKey size changed");
+    assert_eq!(mem::size_of::<LinearGradientTemplate>(), 112, "LinearGradientTemplate size changed");
+    assert_eq!(mem::size_of::<LinearGradientKey>(), 80, "LinearGradientKey size changed");
 
     assert_eq!(mem::size_of::<RadialGradient>(), 72, "RadialGradient size changed");
-    assert_eq!(mem::size_of::<RadialGradientTemplate>(), 136, "RadialGradientTemplate size changed");
-    assert_eq!(mem::size_of::<RadialGradientKey>(), 104, "RadialGradientKey size changed");
+    assert_eq!(mem::size_of::<RadialGradientTemplate>(), 120, "RadialGradientTemplate size changed");
+    assert_eq!(mem::size_of::<RadialGradientKey>(), 88, "RadialGradientKey size changed");
 }

@@ -64,11 +64,11 @@
 #include "TrackingDummyChannel.h"
 
 #ifdef MOZ_TASK_TRACER
-#include "GeckoTaskTracer.h"
+#  include "GeckoTaskTracer.h"
 #endif
 
 #ifdef MOZ_GECKO_PROFILER
-#include "ProfilerMarkerPayload.h"
+#  include "ProfilerMarkerPayload.h"
 #endif
 
 #include <functional>
@@ -880,7 +880,11 @@ void HttpChannelChild::OnTransportAndData(const nsresult& channelStatus,
 
 bool HttpChannelChild::NeedToReportBytesRead() {
   if (mCacheNeedToReportBytesReadInitialized) {
-    return mNeedToReportBytesRead;
+    // No need to send SendRecvBytes when diversion starts since the parent
+    // process will suspend for diversion triggered in during OnStrartRequest at
+    // child side, which is earlier. Parent will take over the flow control
+    // after the diverting starts. Sending |SendBytesRead| is redundant.
+    return mNeedToReportBytesRead && !mDivertingToParent;
   }
 
   // Might notify parent for partial cache, and the IPC message is ignored by
@@ -1026,6 +1030,10 @@ void HttpChannelChild::OnStopRequest(
   LOG(("HttpChannelChild::OnStopRequest [this=%p status=%" PRIx32 "]\n", this,
        static_cast<uint32_t>(channelStatus)));
   MOZ_ASSERT(NS_IsMainThread());
+
+  if (mOnStopRequestCalled && !mIPCOpen) {
+    return;
+  }
 
   if (mDivertingToParent) {
     MOZ_RELEASE_ASSERT(
@@ -1183,29 +1191,32 @@ void HttpChannelChild::DoOnStopRequest(nsIRequest* aRequest,
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!mIsPending);
 
-  // NB: We use aChannelStatus here instead of mStatus because if there was an
-  // nsCORSListenerProxy on this request, it will override the tracking
-  // protection's return value.
-  if (aChannelStatus == NS_ERROR_TRACKING_URI ||
-      aChannelStatus == NS_ERROR_MALWARE_URI ||
-      aChannelStatus == NS_ERROR_UNWANTED_URI ||
-      aChannelStatus == NS_ERROR_BLOCKED_URI ||
-      aChannelStatus == NS_ERROR_HARMFUL_URI ||
-      aChannelStatus == NS_ERROR_PHISHING_URI) {
-    nsCString list, provider, fullhash;
+  auto checkForBlockedContent = [&]() {
+    // NB: We use aChannelStatus here instead of mStatus because if there was an
+    // nsCORSListenerProxy on this request, it will override the tracking
+    // protection's return value.
+    if (aChannelStatus == NS_ERROR_TRACKING_URI ||
+        aChannelStatus == NS_ERROR_MALWARE_URI ||
+        aChannelStatus == NS_ERROR_UNWANTED_URI ||
+        aChannelStatus == NS_ERROR_BLOCKED_URI ||
+        aChannelStatus == NS_ERROR_HARMFUL_URI ||
+        aChannelStatus == NS_ERROR_PHISHING_URI) {
+      nsCString list, provider, fullhash;
 
-    nsresult rv = GetMatchedList(list);
-    NS_ENSURE_SUCCESS_VOID(rv);
+      nsresult rv = GetMatchedList(list);
+      NS_ENSURE_SUCCESS_VOID(rv);
 
-    rv = GetMatchedProvider(provider);
-    NS_ENSURE_SUCCESS_VOID(rv);
+      rv = GetMatchedProvider(provider);
+      NS_ENSURE_SUCCESS_VOID(rv);
 
-    rv = GetMatchedFullHash(fullhash);
-    NS_ENSURE_SUCCESS_VOID(rv);
+      rv = GetMatchedFullHash(fullhash);
+      NS_ENSURE_SUCCESS_VOID(rv);
 
-    UrlClassifierCommon::SetBlockedContent(this, aChannelStatus, list, provider,
-                                           fullhash);
-  }
+      UrlClassifierCommon::SetBlockedContent(this, aChannelStatus, list,
+                                             provider, fullhash);
+    }
+  };
+  checkForBlockedContent();
 
   MOZ_ASSERT(!mOnStopRequestCalled, "We should not call OnStopRequest twice");
 
@@ -2347,9 +2358,17 @@ HttpChannelChild::Resume() {
       SendResume();
     }
     if (mCallOnResume) {
-      rv = AsyncCall(mCallOnResume);
-      NS_ENSURE_SUCCESS(rv, rv);
-      mCallOnResume = nullptr;
+      nsCOMPtr<nsIEventTarget> neckoTarget = GetNeckoTarget();
+      MOZ_ASSERT(neckoTarget);
+
+      RefPtr<HttpChannelChild> self = this;
+      std::function<nsresult(HttpChannelChild*)> callOnResume = nullptr;
+      std::swap(callOnResume, mCallOnResume);
+      rv = neckoTarget->Dispatch(
+          NS_NewRunnableFunction(
+              "net::HttpChannelChild::mCallOnResume",
+              [callOnResume, self{std::move(self)}]() { callOnResume(self); }),
+          NS_DISPATCH_NORMAL);
     }
   }
   if (mSynthesizedResponsePump) {
@@ -3772,6 +3791,15 @@ void HttpChannelChild::ActorDestroy(ActorDestroyReason aWhy) {
   // and BackgroundChild might have pending IPC messages.
   // Clean up BackgroundChild at this time to prevent memleak.
   if (aWhy != Deletion) {
+    // The actor tree might get destroyed before we get the OnStopRequest.
+    // So if we didn't get it, we send it here in order to prevent any leaks.
+    // Ocasionally we will get the OnStopRequest message after this, in which
+    // case we just ignore it as we've already cleared the listener.
+    if (!mOnStopRequestCalled) {
+      DoPreOnStopRequest(NS_ERROR_ABORT);
+      DoOnStopRequest(this, NS_ERROR_ABORT, mListenerContext);
+    }
+
     CleanupBackgroundChannel();
   }
 }
@@ -3813,7 +3841,7 @@ HttpChannelChild::LogMimeTypeMismatch(const nsACString& aMessageName,
 
   nsAutoString url(aURL);
   nsAutoString contentType(aContentType);
-  const char16_t* params[] = { url.get(), contentType.get() };
+  const char16_t* params[] = {url.get(), contentType.get()};
   nsContentUtils::ReportToConsole(
       aWarning ? nsIScriptError::warningFlag : nsIScriptError::errorFlag,
       NS_LITERAL_CSTRING("MIMEMISMATCH"), doc,

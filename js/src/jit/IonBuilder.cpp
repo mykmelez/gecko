@@ -719,6 +719,8 @@ AbortReasonOr<Ok> IonBuilder::analyzeNewLoopTypes(
         case JSOP_DIV:
         case JSOP_MOD:
         case JSOP_NEG:
+        case JSOP_INC:
+        case JSOP_DEC:
           type = inspector->expectedResultType(last);
           break;
         default:
@@ -1910,6 +1912,10 @@ AbortReasonOr<Ok> IonBuilder::inspectOpcode(JSOp op) {
 
     case JSOP_NEG:
       return jsop_neg();
+
+    case JSOP_INC:
+    case JSOP_DEC:
+      return jsop_inc_or_dec(op);
 
     case JSOP_TOSTRING:
       return jsop_tostring();
@@ -3654,6 +3660,14 @@ AbortReasonOr<Ok> IonBuilder::arithTryBinaryStub(bool* emitted, JSOp op,
       MOZ_ASSERT_IF(op != JSOP_MUL, !left);
       stub = MUnaryCache::New(alloc(), right);
       break;
+    case JSOP_INC:
+      MOZ_ASSERT(op == JSOP_ADD && right->toConstant()->toInt32() == 1);
+      stub = MUnaryCache::New(alloc(), left);
+      break;
+    case JSOP_DEC:
+      MOZ_ASSERT(op == JSOP_SUB && right->toConstant()->toInt32() == 1);
+      stub = MUnaryCache::New(alloc(), left);
+      break;
     case JSOP_ADD:
     case JSOP_SUB:
     case JSOP_MUL:
@@ -3788,6 +3802,27 @@ AbortReasonOr<Ok> IonBuilder::jsop_neg() {
   MDefinition* right = current->pop();
 
   return jsop_binary_arith(JSOP_MUL, negator, right);
+}
+
+AbortReasonOr<Ok> IonBuilder::jsop_inc_or_dec(JSOp op) {
+  // As above, pass constant without slot traffic.
+  MConstant* one = MConstant::New(alloc(), Int32Value(1));
+  current->add(one);
+
+  MDefinition* value = current->pop();
+
+  switch (op) {
+    case JSOP_INC:
+      op = JSOP_ADD;
+      break;
+    case JSOP_DEC:
+      op = JSOP_SUB;
+      break;
+    default:
+      MOZ_CRASH("jsop_inc_or_dec with bad op");
+  }
+
+  return jsop_binary_arith(op, value, one);
 }
 
 AbortReasonOr<Ok> IonBuilder::jsop_tostring() {
@@ -4795,6 +4830,10 @@ AbortReasonOr<Ok> IonBuilder::inlineCalls(CallInfo& callInfo,
     }
     inlineInfo.popCallStack(inlineBlock);
     inlineInfo.setFun(funcDef);
+
+    if (callInfo.constructing() && callInfo.getNewTarget() == callInfo.fun()) {
+      inlineInfo.setNewTarget(funcDef);
+    }
 
     if (maybeCache) {
       // Assign the 'this' value a TypeSet specialized to the groups that
@@ -12848,8 +12887,8 @@ AbortReasonOr<Ok> IonBuilder::jsop_functionthis() {
   MOZ_ASSERT(info().funMaybeLazy());
   MOZ_ASSERT(!info().funMaybeLazy()->isArrow());
 
-  if (script()->strict() || info().funMaybeLazy()->isSelfHostedBuiltin()) {
-    // No need to wrap primitive |this| in strict mode or self-hosted code.
+  if (script()->strict()) {
+    // No need to wrap primitive |this| in strict mode.
     current->pushSlot(info().thisSlot());
     return Ok();
   }
@@ -13636,12 +13675,12 @@ AbortReasonOr<Ok> IonBuilder::jsop_importmeta() {
 }
 
 AbortReasonOr<Ok> IonBuilder::jsop_dynamic_import() {
-  Value referencingPrivate = FindScriptOrModulePrivateForScript(script());
-  MConstant* ref = constant(referencingPrivate);
+  JSObject* referencingScriptSource = script()->sourceObject();
 
   MDefinition* specifier = current->pop();
 
-  MDynamicImport* ins = MDynamicImport::New(alloc(), ref, specifier);
+  MDynamicImport* ins =
+      MDynamicImport::New(alloc(), referencingScriptSource, specifier);
   current->add(ins);
   current->push(ins);
   return resumeAfter(ins);

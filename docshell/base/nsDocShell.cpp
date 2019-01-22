@@ -9,10 +9,10 @@
 #include <algorithm>
 
 #ifdef XP_WIN
-#include <process.h>
-#define getpid _getpid
+#  include <process.h>
+#  define getpid _getpid
 #else
-#include <unistd.h>  // for getpid()
+#  include <unistd.h>  // for getpid()
 #endif
 
 #include "mozilla/ArrayUtils.h"
@@ -209,17 +209,17 @@
 #include "timeline/JavascriptTimelineMarker.h"
 
 #ifdef MOZ_PLACES
-#include "nsIFaviconService.h"
-#include "mozIPlacesPendingOperation.h"
+#  include "nsIFaviconService.h"
+#  include "mozIPlacesPendingOperation.h"
 #endif
 
 #if NS_PRINT_PREVIEW
-#include "nsIDocumentViewerPrint.h"
-#include "nsIWebBrowserPrint.h"
+#  include "nsIDocumentViewerPrint.h"
+#  include "nsIWebBrowserPrint.h"
 #endif
 
 #ifdef MOZ_TOOLKIT_SEARCH
-#include "nsIBrowserSearchService.h"
+#  include "nsIBrowserSearchService.h"
 #endif
 
 using namespace mozilla;
@@ -1047,8 +1047,6 @@ nsDOMNavigationTiming* nsDocShell::GetNavigationTiming() const {
   }
 
   // Not strictly equal, special case if both are file: uris
-  bool originIsFile = false;
-  bool targetIsFile = false;
   nsCOMPtr<nsIURI> originURI;
   nsCOMPtr<nsIURI> targetURI;
   nsCOMPtr<nsIURI> innerOriginURI;
@@ -1064,10 +1062,8 @@ nsDOMNavigationTiming* nsDocShell::GetNavigationTiming() const {
     innerTargetURI = NS_GetInnermostURI(targetURI);
   }
 
-  return innerOriginURI && innerTargetURI &&
-         NS_SUCCEEDED(innerOriginURI->SchemeIs("file", &originIsFile)) &&
-         NS_SUCCEEDED(innerTargetURI->SchemeIs("file", &targetIsFile)) &&
-         originIsFile && targetIsFile;
+  return innerOriginURI && innerTargetURI && SchemeIsFile(innerOriginURI) &&
+         SchemeIsFile(innerTargetURI);
 }
 
 nsPresContext* nsDocShell::GetEldestPresContext() {
@@ -1232,11 +1228,8 @@ nsDocShell::GatherCharsetMenuTelemetry() {
 
   Telemetry::ScalarSet(Telemetry::ScalarID::ENCODING_OVERRIDE_USED, true);
 
-  bool isFileURL = false;
   nsIURI* url = doc->GetOriginalURI();
-  if (url) {
-    url->SchemeIs("file", &isFileURL);
-  }
+  bool isFileURL = url && SchemeIsFile(url);
 
   int32_t charsetSource = doc->GetDocumentCharacterSetSource();
   switch (charsetSource) {
@@ -3281,14 +3274,7 @@ nsDocShell::AddChild(nsIDocShellTreeItem* aChild) {
     return NS_OK;
   }
 
-  bool isWyciwyg = false;
-
-  if (mCurrentURI) {
-    // Check if the url is wyciwyg
-    mCurrentURI->SchemeIs("wyciwyg", &isWyciwyg);
-  }
-
-  if (!isWyciwyg) {
+  if (!(mCurrentURI && SchemeIsWYCIWYG(mCurrentURI))) {
     // If this docshell is loaded from a wyciwyg: URI, don't
     // advertise our charset since it does not in any way reflect
     // the actual source charset, which is what we're trying to
@@ -3667,7 +3653,8 @@ nsDocShell::GetContentBlockingLog(Promise** aPromise) {
   if (NS_WARN_IF(rv.Failed())) {
     return rv.StealNSResult();
   }
-  promise->MaybeResolve(doc->GetContentBlockingLog()->Stringify());
+  promise->MaybeResolve(
+      NS_ConvertUTF8toUTF16(doc->GetContentBlockingLog()->Stringify()));
   promise.forget(aPromise);
   return NS_OK;
 }
@@ -4345,9 +4332,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
     if (aURI) {
       // displaying "file://" is aesthetically unpleasing and could even be
       // confusing to the user
-      bool isFileURI = false;
-      rv = aURI->SchemeIs("file", &isFileURI);
-      if (NS_SUCCEEDED(rv) && isFileURI) {
+      if (SchemeIsFile(aURI)) {
         aURI->GetPathQueryRef(spec);
       } else {
         aURI->GetSpec(spec);
@@ -4382,13 +4367,10 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
   // Display the error as a page or an alert prompt
   NS_ENSURE_FALSE(messageStr.IsEmpty(), NS_ERROR_FAILURE);
 
-  if (NS_ERROR_NET_INTERRUPT == aError || NS_ERROR_NET_RESET == aError) {
-    bool isSecureURI = false;
-    rv = aURI->SchemeIs("https", &isSecureURI);
-    if (NS_SUCCEEDED(rv) && isSecureURI) {
-      // Maybe TLS intolerant. Treat this as an SSL error.
-      error = "nssFailure2";
-    }
+  if ((NS_ERROR_NET_INTERRUPT == aError || NS_ERROR_NET_RESET == aError) &&
+      SchemeIsHTTPS(aURI)) {
+    // Maybe TLS intolerant. Treat this as an SSL error.
+    error = "nssFailure2";
   }
 
   if (UseErrorPages()) {
@@ -5524,10 +5506,9 @@ nsDocShell::GetAllowMixedContentAndConnectionData(
 
     // For things with system principal (e.g. scratchpad) there is no uri
     // aRootHasSecureConnection should be false.
-    nsCOMPtr<nsIURI> rootUri;
-    if (nsContentUtils::IsSystemPrincipal(rootPrincipal) ||
-        NS_FAILED(rootPrincipal->GetURI(getter_AddRefs(rootUri))) || !rootUri ||
-        NS_FAILED(rootUri->SchemeIs("https", aRootHasSecureConnection))) {
+    nsCOMPtr<nsIURI> rootUri = rootPrincipal->GetURI();
+    if (nsContentUtils::IsSystemPrincipal(rootPrincipal) || !rootUri ||
+        !SchemeIsHTTPS(rootUri)) {
       *aRootHasSecureConnection = false;
     }
 
@@ -6283,13 +6264,9 @@ nsresult nsDocShell::Embed(nsIContentViewer* aContentViewer,
       (mLoadType & LOAD_CMD_HISTORY || mLoadType == LOAD_RELOAD_NORMAL ||
        mLoadType == LOAD_RELOAD_CHARSET_CHANGE ||
        mLoadType == LOAD_RELOAD_CHARSET_CHANGE_BYPASS_CACHE ||
-       mLoadType == LOAD_RELOAD_CHARSET_CHANGE_BYPASS_PROXY_AND_CACHE)) {
-    bool isWyciwyg = false;
-    // Check if the url is wyciwyg
-    rv = mCurrentURI->SchemeIs("wyciwyg", &isWyciwyg);
-    if (isWyciwyg && NS_SUCCEEDED(rv)) {
-      SetBaseUrlForWyciwyg(aContentViewer);
-    }
+       mLoadType == LOAD_RELOAD_CHARSET_CHANGE_BYPASS_PROXY_AND_CACHE) &&
+      SchemeIsWYCIWYG(mCurrentURI)) {
+    SetBaseUrlForWyciwyg(aContentViewer);
   }
   // XXX What if SetupNewViewer fails?
   if (mLSHE) {
@@ -6567,6 +6544,13 @@ nsDocShell::OnStatusChange(nsIWebProgress* aWebProgress, nsIRequest* aRequest,
 NS_IMETHODIMP
 nsDocShell::OnSecurityChange(nsIWebProgress* aWebProgress, nsIRequest* aRequest,
                              uint32_t aState) {
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::OnContentBlockingEvent(nsIWebProgress* aWebProgress,
+                                   nsIRequest* aRequest, uint32_t aEvent) {
   MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
@@ -7549,14 +7533,12 @@ nsresult nsDocShell::RestoreFromHistory() {
 
   nsCOMPtr<nsIContentViewer> oldCv(mContentViewer);
   nsCOMPtr<nsIContentViewer> newCv(viewer);
-  int32_t minFontSize = 0;
   float textZoom = 1.0f;
   float pageZoom = 1.0f;
   float overrideDPPX = 0.0f;
 
   bool styleDisabled = false;
   if (oldCv && newCv) {
-    oldCv->GetMinFontSize(&minFontSize);
     oldCv->GetTextZoom(&textZoom);
     oldCv->GetFullZoom(&pageZoom);
     oldCv->GetOverrideDPPX(&overrideDPPX);
@@ -7787,7 +7769,6 @@ nsresult nsDocShell::RestoreFromHistory() {
   }
 
   if (oldCv && newCv) {
-    newCv->SetMinFontSize(minFontSize);
     newCv->SetTextZoom(textZoom);
     newCv->SetFullZoom(pageZoom);
     newCv->SetOverrideDPPX(overrideDPPX);
@@ -8286,7 +8267,6 @@ nsresult nsDocShell::SetupNewViewer(nsIContentViewer* aNewViewer) {
   const Encoding* forceCharset = nullptr;
   const Encoding* hintCharset = nullptr;
   int32_t hintCharsetSource;
-  int32_t minFontSize;
   float textZoom;
   float pageZoom;
   float overrideDPPX;
@@ -8322,8 +8302,6 @@ nsresult nsDocShell::SetupNewViewer(nsIContentViewer* aNewViewer) {
         forceCharset = oldCv->GetForceCharset();
         hintCharset = oldCv->GetHintCharset();
         NS_ENSURE_SUCCESS(oldCv->GetHintCharacterSetSource(&hintCharsetSource),
-                          NS_ERROR_FAILURE);
-        NS_ENSURE_SUCCESS(oldCv->GetMinFontSize(&minFontSize),
                           NS_ERROR_FAILURE);
         NS_ENSURE_SUCCESS(oldCv->GetTextZoom(&textZoom), NS_ERROR_FAILURE);
         NS_ENSURE_SUCCESS(oldCv->GetFullZoom(&pageZoom), NS_ERROR_FAILURE);
@@ -8390,7 +8368,6 @@ nsresult nsDocShell::SetupNewViewer(nsIContentViewer* aNewViewer) {
     newCv->SetHintCharset(hintCharset);
     NS_ENSURE_SUCCESS(newCv->SetHintCharacterSetSource(hintCharsetSource),
                       NS_ERROR_FAILURE);
-    NS_ENSURE_SUCCESS(newCv->SetMinFontSize(minFontSize), NS_ERROR_FAILURE);
     NS_ENSURE_SUCCESS(newCv->SetTextZoom(textZoom), NS_ERROR_FAILURE);
     NS_ENSURE_SUCCESS(newCv->SetFullZoom(pageZoom), NS_ERROR_FAILURE);
     NS_ENSURE_SUCCESS(newCv->SetOverrideDPPX(overrideDPPX), NS_ERROR_FAILURE);
@@ -8599,18 +8576,12 @@ nsresult nsDocShell::InternalLoad(nsDocShellLoadState* aLoadState,
 
   // wyciwyg urls can only be loaded through history. Any normal load of
   // wyciwyg through docshell is  illegal. Disallow such loads.
-  if (aLoadState->LoadType() & LOAD_CMD_NORMAL) {
-    bool isWyciwyg = false;
-    rv = aLoadState->URI()->SchemeIs("wyciwyg", &isWyciwyg);
-    if ((isWyciwyg && NS_SUCCEEDED(rv)) || NS_FAILED(rv)) {
-      return NS_ERROR_FAILURE;
-    }
+  if ((aLoadState->LoadType() & LOAD_CMD_NORMAL) &&
+      SchemeIsWYCIWYG(aLoadState->URI())) {
+    return NS_ERROR_FAILURE;
   }
 
-  bool isJavaScript = false;
-  if (NS_FAILED(aLoadState->URI()->SchemeIs("javascript", &isJavaScript))) {
-    isJavaScript = false;
-  }
+  bool isJavaScript = SchemeIsJavascript(aLoadState->URI());
 
   bool isTargetTopLevelDocShell = false;
   nsCOMPtr<nsIDocShell> targetDocShell;
@@ -9031,9 +9002,7 @@ nsresult nsDocShell::InternalLoad(nsDocShellLoadState* aLoadState,
   if (aLoadState->LoadType() == LOAD_NORMAL_EXTERNAL) {
     loadFromExternal = true;
     // Disallow external chrome: loads targetted at content windows
-    bool isChrome = false;
-    if (NS_SUCCEEDED(aLoadState->URI()->SchemeIs("chrome", &isChrome)) &&
-        isChrome) {
+    if (SchemeIsChrome(aLoadState->URI())) {
       NS_WARNING("blocked external chrome: url -- use '--chrome' option");
       return NS_ERROR_FAILURE;
     }
@@ -9619,17 +9588,15 @@ static bool IsConsideredSameOriginForUIR(nsIPrincipal* aTriggeringPrincipal,
     return false;
   }
 
-  nsCOMPtr<nsIURI> resultURI;
-  nsresult rv = aResultPrincipal->GetURI(getter_AddRefs(resultURI));
-  NS_ENSURE_SUCCESS(rv, false);
+  nsCOMPtr<nsIURI> resultURI = aResultPrincipal->GetURI();
 
-  nsAutoCString resultScheme;
-  rv = resultURI->GetScheme(resultScheme);
-  NS_ENSURE_SUCCESS(rv, false);
-  if (!resultScheme.EqualsLiteral("http")) {
+  // We know this is a codebase principal, and codebase principals require valid
+  // URIs, so we shouldn't need to check non-null here.
+  if (!SchemeIsHTTP(resultURI)) {
     return false;
   }
 
+  nsresult rv;
   nsAutoCString tmpResultSpec;
   rv = resultURI->GetSpec(tmpResultSpec);
   NS_ENSURE_SUCCESS(rv, false);
@@ -9709,9 +9676,7 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
     while (nestedURI) {
       // view-source should always be an nsINestedURI, loop and check the
       // scheme on this and all inner URIs that are also nested URIs.
-      bool isViewSource = false;
-      rv = tempURI->SchemeIs("view-source", &isViewSource);
-      if (NS_FAILED(rv) || isViewSource) {
+      if (SchemeIsViewSource(tempURI)) {
         return NS_ERROR_UNKNOWN_PROTOCOL;
       }
       nestedURI->GetInnerURI(getter_AddRefs(tempURI));
@@ -9804,10 +9769,8 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
         true,  // aInheritForAboutBlank
         isSrcdoc);
 
-    bool isData;
-    bool isURIUniqueOrigin =
-        nsIOService::IsDataURIUniqueOpaqueOrigin() &&
-        NS_SUCCEEDED(aLoadState->URI()->SchemeIs("data", &isData)) && isData;
+    bool isURIUniqueOrigin = nsIOService::IsDataURIUniqueOpaqueOrigin() &&
+                             SchemeIsData(aLoadState->URI());
     inheritPrincipal = inheritAttrs && !isURIUniqueOrigin;
   }
 
@@ -9919,28 +9882,20 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
         MOZ_ASSERT(NS_SUCCEEDED(rv));
       }
     }
+  } else if (SchemeIsViewSource(aLoadState->URI())) {
+    nsViewSourceHandler* vsh = nsViewSourceHandler::GetInstance();
+    NS_ENSURE_TRUE(vsh, NS_ERROR_FAILURE);
+
+    rv = vsh->NewSrcdocChannel(aLoadState->URI(), baseURI, aSrcdoc, loadInfo,
+                               getter_AddRefs(channel));
   } else {
-    nsAutoCString scheme;
-    rv = aLoadState->URI()->GetScheme(scheme);
+    rv = NS_NewInputStreamChannelInternal(
+        getter_AddRefs(channel), aLoadState->URI(), aSrcdoc,
+        NS_LITERAL_CSTRING("text/html"), loadInfo, true);
     NS_ENSURE_SUCCESS(rv, rv);
-    bool isViewSource;
-    aLoadState->URI()->SchemeIs("view-source", &isViewSource);
-
-    if (isViewSource) {
-      nsViewSourceHandler* vsh = nsViewSourceHandler::GetInstance();
-      NS_ENSURE_TRUE(vsh, NS_ERROR_FAILURE);
-
-      rv = vsh->NewSrcdocChannel(aLoadState->URI(), baseURI, aSrcdoc, loadInfo,
-                                 getter_AddRefs(channel));
-    } else {
-      rv = NS_NewInputStreamChannelInternal(
-          getter_AddRefs(channel), aLoadState->URI(), aSrcdoc,
-          NS_LITERAL_CSTRING("text/html"), loadInfo, true);
-      NS_ENSURE_SUCCESS(rv, rv);
-      nsCOMPtr<nsIInputStreamChannel> isc = do_QueryInterface(channel);
-      MOZ_ASSERT(isc);
-      isc->SetBaseURI(baseURI);
-    }
+    nsCOMPtr<nsIInputStreamChannel> isc = do_QueryInterface(channel);
+    MOZ_ASSERT(isc);
+    isc->SetBaseURI(baseURI);
   }
 
   // Navigational requests that are same origin need to be upgraded in case
@@ -10426,7 +10381,7 @@ nsresult nsDocShell::DoChannelLoad(nsIChannel* aChannel,
   // We're about to load a new page and it may take time before necko
   // gives back any data, so main thread might have a chance to process a
   // collector slice
-  nsJSContext::MaybeRunNextCollectorSlice(this, JS::gcreason::DOCSHELL);
+  nsJSContext::MaybeRunNextCollectorSlice(this, JS::GCReason::DOCSHELL);
 
   // Success.  Keep the initial ClientSource if it exists.
   cleanupInitialClient.release();
@@ -11483,9 +11438,8 @@ nsresult nsDocShell::LoadHistoryEntry(nsISHEntry* aEntry, uint32_t aLoadType) {
   // die while we're loading it.  So hold a strong ref to aEntry here, just
   // in case.
   nsCOMPtr<nsISHEntry> kungFuDeathGrip(aEntry);
-  bool isJS;
-  nsresult rv = uri->SchemeIs("javascript", &isJS);
-  if (NS_FAILED(rv) || isJS) {
+  nsresult rv;
+  if (SchemeIsJavascript(uri)) {
     // We're loading a URL that will execute script from inside asyncOpen.
     // Replace the current document with about:blank now to prevent
     // anything from the current document from leaking into any JavaScript

@@ -357,7 +357,7 @@ class MOZ_STACK_CLASS TryNoteIter {
         } while (!(pcInRange() && tn_->kind == JSTRY_FOR_OF));
 
         // Advance to trynote following the enclosing for-of.
-        ++tn_;
+        continue;
       }
 
       /*
@@ -415,7 +415,6 @@ class MOZ_STACK_CLASS TryNoteIter {
     uint32_t start = tn_->start;
     uint32_t length = tn_->length;
     return offset - start < length;
-
   }
   bool done() const { return tn_ == tnEnd_; }
   const JSTryNote* operator*() const { return tn_; }

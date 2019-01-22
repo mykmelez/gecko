@@ -393,13 +393,12 @@ nsDocLoader::OnStartRequest(nsIRequest* request, nsISupports* aCtxt) {
   //
   if (mIsLoadingDocument) {
     if (loadFlags & nsIChannel::LOAD_DOCUMENT_URI) {
-      //
-      // Make sure that the document channel is null at this point...
-      // (unless its been redirected)
-      //
-      NS_ASSERTION(
-          (loadFlags & nsIChannel::LOAD_REPLACE) || !(mDocumentRequest.get()),
-          "Overwriting an existing document channel!");
+      // If we have a document request channel, and this is not a redirect, we
+      // must abort it and replace it with the new one.
+      if (!(loadFlags & nsIChannel::LOAD_REPLACE) && mDocumentRequest) {
+        mDocumentRequest->Cancel(NS_ERROR_ABORT);
+        mDocumentRequest = nullptr;
+      }
 
       // This request is associated with the entire document...
       mDocumentRequest = request;
@@ -1413,6 +1412,26 @@ NS_IMETHODIMP nsDocLoader::OnSecurityChange(nsISupports* aContext,
   return NS_OK;
 }
 
+NS_IMETHODIMP nsDocLoader::OnContentBlockingEvent(nsISupports* aContext,
+                                                  uint32_t aEvent) {
+  //
+  // Fire progress notifications out to any registered nsIWebProgressListeners.
+  //
+
+  nsCOMPtr<nsIRequest> request = do_QueryInterface(aContext);
+  nsIWebProgress* webProgress = static_cast<nsIWebProgress*>(this);
+
+  NOTIFY_LISTENERS(
+      nsIWebProgress::NOTIFY_CONTENT_BLOCKING,
+      listener->OnContentBlockingEvent(webProgress, request, aEvent););
+
+  // Pass the notification up to the parent...
+  if (mParent) {
+    mParent->OnContentBlockingEvent(aContext, aEvent);
+  }
+  return NS_OK;
+}
+
 /*
  * Implementation of nsISupportsPriority methods...
  *
@@ -1470,7 +1489,7 @@ void nsDocLoader::DumpChannelInfo()
   for(i=0; i<count; i++) {
     info = (nsChannelInfo *)mChannelInfoList.ElementAt(i);
 
-#if defined(DEBUG)
+#  if defined(DEBUG)
     nsAutoCString buffer;
     nsresult rv = NS_OK;
     if (info->mURI) {
@@ -1480,7 +1499,7 @@ void nsDocLoader::DumpChannelInfo()
     printf("  [%d] current=%d  max=%d [%s]\n", i,
            info->mCurrentProgress,
            info->mMaxProgress, buffer.get());
-#endif /* DEBUG */
+#  endif /* DEBUG */
 
     current += info->mCurrentProgress;
     if (max >= 0) {
@@ -1494,4 +1513,4 @@ void nsDocLoader::DumpChannelInfo()
 
   printf("\nCurrent=%d   Total=%d\n====\n", current, max);
 }
-#endif /* 0 */
+#endif   /* 0 */

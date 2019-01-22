@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{
-    AuHelpers, LayoutPrimitiveInfo, LayoutRect, LayoutSideOffsets,
+    AuHelpers, LayoutPrimitiveInfo, LayoutSideOffsets,
     LayoutSideOffsetsAu, LayoutSize, NormalBorder, PremultipliedColorF,
     Shadow
 };
@@ -13,6 +13,7 @@ use display_list_flattener::{AsInstanceKind, CreateShadow, IsVisible};
 use frame_builder::{FrameBuildingState};
 use gpu_cache::GpuDataRequest;
 use intern;
+use intern_types;
 use prim_store::{
     BorderSegmentInfo, BrushSegment, NinePatchDescriptor, PrimKey,
     PrimKeyCommonData, PrimTemplate, PrimTemplateCommonData,
@@ -35,13 +36,11 @@ pub type NormalBorderKey = PrimKey<NormalBorderPrim>;
 impl NormalBorderKey {
     pub fn new(
         info: &LayoutPrimitiveInfo,
-        prim_relative_clip_rect: LayoutRect,
         normal_border: NormalBorderPrim,
     ) -> Self {
         NormalBorderKey {
             common: PrimKeyCommonData::with_info(
                 info,
-                prim_relative_clip_rect,
             ),
             kind: normal_border,
         }
@@ -160,18 +159,10 @@ impl From<NormalBorderKey> for NormalBorderTemplate {
     }
 }
 
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Clone, Copy, Debug, Hash, Eq, MallocSizeOf, PartialEq)]
-pub struct NormalBorderDataMarker;
-
-pub type NormalBorderDataStore = intern::DataStore<NormalBorderKey, NormalBorderTemplate, NormalBorderDataMarker>;
-pub type NormalBorderDataHandle = intern::Handle<NormalBorderDataMarker>;
-pub type NormalBorderDataUpdateList = intern::UpdateList<NormalBorderKey>;
-pub type NormalBorderDataInterner = intern::Interner<NormalBorderKey, PrimitiveSceneData, NormalBorderDataMarker>;
+pub use intern_types::normal_border::Handle as NormalBorderDataHandle;
 
 impl intern::Internable for NormalBorderPrim {
-    type Marker = NormalBorderDataMarker;
+    type Marker = intern_types::normal_border::Marker;
     type Source = NormalBorderKey;
     type StoreData = NormalBorderTemplate;
     type InternData = PrimitiveSceneData;
@@ -180,11 +171,9 @@ impl intern::Internable for NormalBorderPrim {
     fn build_key(
         self,
         info: &LayoutPrimitiveInfo,
-        prim_relative_clip_rect: LayoutRect,
     ) -> NormalBorderKey {
         NormalBorderKey::new(
             info,
-            prim_relative_clip_rect,
             self,
         )
     }
@@ -222,13 +211,11 @@ pub type ImageBorderKey = PrimKey<ImageBorder>;
 impl ImageBorderKey {
     pub fn new(
         info: &LayoutPrimitiveInfo,
-        prim_relative_clip_rect: LayoutRect,
         image_border: ImageBorder,
     ) -> Self {
         ImageBorderKey {
             common: PrimKeyCommonData::with_info(
                 info,
-                prim_relative_clip_rect,
             ),
             kind: image_border,
         }
@@ -341,18 +328,10 @@ impl From<ImageBorderKey> for ImageBorderTemplate {
     }
 }
 
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Clone, Copy, Debug, Hash, Eq, MallocSizeOf, PartialEq)]
-pub struct ImageBorderDataMarker;
-
-pub type ImageBorderDataStore = intern::DataStore<ImageBorderKey, ImageBorderTemplate, ImageBorderDataMarker>;
-pub type ImageBorderDataHandle = intern::Handle<ImageBorderDataMarker>;
-pub type ImageBorderDataUpdateList = intern::UpdateList<ImageBorderKey>;
-pub type ImageBorderDataInterner = intern::Interner<ImageBorderKey, PrimitiveSceneData, ImageBorderDataMarker>;
+pub use intern_types::image_border::Handle as ImageBorderDataHandle;
 
 impl intern::Internable for ImageBorder {
-    type Marker = ImageBorderDataMarker;
+    type Marker = intern_types::image_border::Marker;
     type Source = ImageBorderKey;
     type StoreData = ImageBorderTemplate;
     type InternData = PrimitiveSceneData;
@@ -361,11 +340,9 @@ impl intern::Internable for ImageBorder {
     fn build_key(
         self,
         info: &LayoutPrimitiveInfo,
-        prim_relative_clip_rect: LayoutRect,
     ) -> ImageBorderKey {
         ImageBorderKey::new(
             info,
-            prim_relative_clip_rect,
             self,
         )
     }
@@ -388,9 +365,9 @@ fn test_struct_sizes() {
     // (b) You made a structure larger. This is not necessarily a problem, but should only
     //     be done with care, and after checking if talos performance regresses badly.
     assert_eq!(mem::size_of::<NormalBorderPrim>(), 84, "NormalBorderPrim size changed");
-    assert_eq!(mem::size_of::<NormalBorderTemplate>(), 224, "NormalBorderTemplate size changed");
-    assert_eq!(mem::size_of::<NormalBorderKey>(), 112, "NormalBorderKey size changed");
+    assert_eq!(mem::size_of::<NormalBorderTemplate>(), 208, "NormalBorderTemplate size changed");
+    assert_eq!(mem::size_of::<NormalBorderKey>(), 96, "NormalBorderKey size changed");
     assert_eq!(mem::size_of::<ImageBorder>(), 92, "ImageBorder size changed");
-    assert_eq!(mem::size_of::<ImageBorderTemplate>(), 88, "ImageBorderTemplate size changed");
-    assert_eq!(mem::size_of::<ImageBorderKey>(), 120, "ImageBorderKey size changed");
+    assert_eq!(mem::size_of::<ImageBorderTemplate>(), 72, "ImageBorderTemplate size changed");
+    assert_eq!(mem::size_of::<ImageBorderKey>(), 104, "ImageBorderKey size changed");
 }

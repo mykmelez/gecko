@@ -13,7 +13,7 @@ AC_CANONICAL_SYSTEM
 
 dnl ========================================================
 dnl =
-dnl = Don't change the following two lines.  Doing so breaks:
+dnl = Don't change the following lines. Doing so breaks:
 dnl =
 dnl = CFLAGS="-foo" ./configure
 dnl =
@@ -367,6 +367,7 @@ dnl ========================================================
 CFLAGS="$CFLAGS $MOZ_HARDENING_CFLAGS"
 CPPFLAGS="$CPPFLAGS $MOZ_HARDENING_CFLAGS"
 CXXFLAGS="$CXXFLAGS $MOZ_HARDENING_CFLAGS"
+LDFLAGS="$LDFLAGS $MOZ_HARDENING_LDFLAGS"
 
 dnl ========================================================
 dnl GNU specific defaults
@@ -658,11 +659,19 @@ case "$target" in
         MOZ_OPTIMIZE_FLAGS="-Oz"
         # Disable the outliner, which causes performance regressions, and is
         # enabled on some platforms at -Oz.
-        DISABLE_OUTLINER="-mno-outline"
-        _SAVE_CFLAGS=$CFLAGS
-        CFLAGS="$CFLAGS $DISABLE_OUTLINER"
-        AC_TRY_COMPILE(,,[MOZ_OPTIMIZE_FLAGS="$MOZ_OPTIMIZE_FLAGS $DISABLE_OUTLINER"])
-        CFLAGS="$_SAVE_CFLAGS"
+        if test -z "$MOZ_LTO"; then
+            DISABLE_OUTLINER="-mno-outline"
+            _SAVE_CFLAGS=$CFLAGS
+            CFLAGS="$CFLAGS $DISABLE_OUTLINER"
+            AC_TRY_COMPILE(,,[MOZ_OPTIMIZE_FLAGS="$MOZ_OPTIMIZE_FLAGS $DISABLE_OUTLINER"])
+            CFLAGS="$_SAVE_CFLAGS"
+        else
+            DISABLE_OUTLINER="-Wl,-plugin-opt=-enable-machine-outliner=never"
+            _SAVE_LDFLAGS=$LDFLAGS
+            LDFLAGS="$LDFLAGS $MOZ_LTO_LDFLAGS $DISABLE_OUTLINER"
+            AC_TRY_LINK(,,[MOZ_OPTIMIZE_LDFLAGS="$MOZ_OPTIMIZE_LDFLAGS $DISABLE_OUTLINER"])
+            LDFLAGS="$_SAVE_LDFLAGS"
+        fi
     fi
     ;;
 
@@ -773,6 +782,9 @@ case "$target" in
         if test -z "$MOZ_ASAN"; then
             CFLAGS="$CFLAGS -Gw"
             CXXFLAGS="$CXXFLAGS -Gw"
+        else
+            # String tail merging doesn't play nice with ASan's ODR checker.
+            LDFLAGS="$LDFLAGS -opt:nolldtailmerge"
         fi
         # khuey says we can safely ignore MSVC warning C4251
         # MSVC warning C4244 (implicit type conversion may lose data) warns
@@ -2784,9 +2796,6 @@ else
 fi # MOZ_MEMORY
 AC_SUBST(MOZ_GLUE_IN_PROGRAM)
 
-AC_SUBST_LIST(MOZ_GLUE_WRAP_LDFLAGS)
-export MOZ_GLUE_WRAP_LDFLAGS
-
 dnl ========================================================
 dnl = Enable using the clang plugin to build
 dnl ========================================================
@@ -3667,94 +3676,5 @@ HAVE_SYS_MOUNT_H
 AC_DEFINE(NO_NSPR_10_SUPPORT)
 
 MOZ_CREATE_CONFIG_STATUS()
-
-unset MAKEFILES
-unset CONFIG_FILES
-
-if test "$COMPILE_ENVIRONMENT" -a "$MOZ_WIDGET_TOOLKIT"; then
-
-
-dnl ========================================================
-dnl = Setup a nice relatively clean build environment for
-dnl = sub-configures.
-dnl ========================================================
-CC="$_SUBDIR_CC"
-CXX="$_SUBDIR_CXX"
-CFLAGS="$_SUBDIR_CFLAGS"
-CPPFLAGS="$_SUBDIR_CPPFLAGS"
-CXXFLAGS="$_SUBDIR_CXXFLAGS"
-LDFLAGS="$_SUBDIR_LDFLAGS"
-HOST_CC="$_SUBDIR_HOST_CC"
-HOST_CFLAGS="$_SUBDIR_HOST_CFLAGS"
-HOST_CXXFLAGS="$_SUBDIR_HOST_CXXFLAGS"
-HOST_LDFLAGS="$_SUBDIR_HOST_LDFLAGS"
-
-# Run the SpiderMonkey 'configure' script.
-dist=$MOZ_BUILD_ROOT/dist
-ac_configure_args="$_SUBDIR_CONFIG_ARGS"
-
-# --with-system-nspr will have been converted into the relevant $NSPR_CFLAGS
-# and $NSPR_LIBS.
-ac_configure_args="`echo $ac_configure_args | sed -e 's/--with-system-nspr[[^[:space:]]]* *//'`"
-
-if test "$_INTL_API" = no; then
-    ac_configure_args="$ac_configure_args --without-intl-api"
-fi
-
-if test -n "$NSPR_CFLAGS" -o -n "$NSPR_LIBS"; then
-    ac_configure_args="$ac_configure_args --with-nspr-cflags='$NSPR_CFLAGS'"
-    ac_configure_args="$ac_configure_args --with-nspr-libs='$NSPR_LIBS'"
-fi
-ac_configure_args="$ac_configure_args --prefix=$dist"
-if test -n "$ZLIB_IN_MOZGLUE"; then
-   MOZ_ZLIB_LIBS=
-fi
-export MOZ_SYSTEM_ZLIB
-export MOZ_ZLIB_CFLAGS
-export MOZ_ZLIB_LIBS
-export MOZ_APP_NAME
-export MOZ_APP_REMOTINGNAME
-export MOZ_DEV_EDITION
-export RUSTC
-export CARGO
-export MOZILLA_CENTRAL_PATH=$_topsrcdir
-export STLPORT_CPPFLAGS
-export STLPORT_LIBS
-unset MOZ_BUILD_APP
-export DIST
-export MOZ_LINKER
-export ZLIB_IN_MOZGLUE
-export RANLIB
-export AR
-export CPP
-export CC
-export CXX
-export CPPFLAGS
-export CFLAGS
-export CXXFLAGS
-export LDFLAGS
-export HOST_CC
-export HOST_CXX
-export HOST_CFLAGS
-export HOST_CPPFLAGS
-export HOST_CXXFLAGS
-export HOST_LDFLAGS
-
-if ! test -e js; then
-    mkdir js
-fi
-
-ac_configure_args="$ac_configure_args JS_STANDALONE="
-AC_OUTPUT_SUBDIRS(js/src,$cache_file)
-ac_configure_args="$_SUBDIR_CONFIG_ARGS"
-
-fi # COMPILE_ENVIRONMENT
-
-dnl we need to run config.status after js/src subconfigure because we're
-dnl traversing its moz.build and we need its config.status for that.
-dnl However, writing our own config.status needs to happen before
-dnl subconfigures because the setup surrounding subconfigures alters
-dnl many AC_SUBSTed variables.
-MOZ_RUN_ALL_SUBCONFIGURES()
 
 rm -fr confdefs* $ac_clean_files

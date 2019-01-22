@@ -10,11 +10,11 @@
 #define nsContentUtils_h___
 
 #if defined(XP_WIN)
-#include <float.h>
+#  include <float.h>
 #endif
 
 #if defined(SOLARIS)
-#include <ieeefp.h>
+#  include <ieeefp.h>
 #endif
 
 #include "js/TypeDecls.h"
@@ -50,7 +50,7 @@
 
 #if defined(XP_WIN)
 // Undefine LoadImage to prevent naming conflict with Windows.
-#undef LoadImage
+#  undef LoadImage
 #endif
 
 class imgICache;
@@ -1214,7 +1214,7 @@ class nsContentUtils {
   /**
    * Returns true if aDocument is a chrome document
    */
-  static bool IsChromeDoc(Document* aDocument);
+  static bool IsChromeDoc(const Document* aDocument);
 
   /**
    * Returns true if aDocument is in a docshell whose parent is the same type
@@ -3304,6 +3304,14 @@ class nsContentUtils {
   static bool StringifyJSON(JSContext* aCx, JS::MutableHandle<JS::Value> vp,
                             nsAString& aOutStr);
 
+  /**
+   * Returns true if the top level ancestor content document of aDocument hasn't
+   * yet had the first contentful paint and there is a high priority event
+   * pending in the main thread.
+   */
+  static bool HighPriorityEventPendingForTopLevelDocumentBeforeContentfulPaint(
+      Document* aDocument);
+
  private:
   static bool InitializeEventTable();
 
@@ -3436,7 +3444,6 @@ class nsContentUtils {
   static bool sIsFrameTimingPrefEnabled;
   static bool sIsFormAutofillAutocompleteEnabled;
   static bool sIsUAWidgetEnabled;
-  static bool sIsCustomElementsEnabled;
   static bool sSendPerformanceTimingNotifications;
   static bool sUseActivityCursor;
   static bool sAnimationsAPICoreEnabled;

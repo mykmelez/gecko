@@ -8,6 +8,20 @@ const { createEnum } = require("devtools/client/shared/enum");
 
 createEnum([
 
+  // Disables all the pseudo class checkboxes because the current selection is not an
+  // element node.
+  "DISABLE_ALL_PSEUDO_CLASSES",
+
+  // Sets the entire pseudo class state with the new list of applied pseudo-class
+  // locks.
+  "SET_PSEUDO_CLASSES",
+
+  // Toggles on or off the given pseudo class value for the current selected element.
+  "TOGGLE_PSEUDO_CLASS",
+
+  // Updates the highlighted selector.
+  "UPDATE_HIGHLIGHTED_SELECTOR",
+
   // Updates the rules state with the new list of CSS rules for the selected element.
   "UPDATE_RULES",
 

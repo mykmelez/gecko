@@ -237,12 +237,12 @@
 #include "mozilla/Encoding.h"
 #include "nsXULElement.h"
 #include "mozilla/RecordReplay.h"
-
+#include "nsThreadManager.h"
 #include "nsIBidiKeyboard.h"
 
 #if defined(XP_WIN)
 // Undefine LoadImage to prevent naming conflict with Windows.
-#undef LoadImage
+#  undef LoadImage
 #endif
 
 extern "C" int MOZ_XMLTranslateEntity(const char* ptr, const char* end,
@@ -3844,11 +3844,8 @@ void nsContentUtils::LogMessageToConsole(const char* aMsg) {
   sConsoleService->LogStringMessage(NS_ConvertUTF8toUTF16(aMsg).get());
 }
 
-bool nsContentUtils::IsChromeDoc(Document* aDocument) {
-  if (!aDocument) {
-    return false;
-  }
-  return aDocument->NodePrincipal() == sSystemPrincipal;
+bool nsContentUtils::IsChromeDoc(const Document* aDocument) {
+  return aDocument && aDocument->NodePrincipal() == sSystemPrincipal;
 }
 
 bool nsContentUtils::IsChildOfSameType(Document* aDoc) {
@@ -10436,6 +10433,20 @@ static bool JSONCreator(const char16_t* aBuf, uint32_t aLen, void* aData) {
                  false);
   aOutStr = serializedValue;
   return true;
+}
+
+/* static */
+bool nsContentUtils::HighPriorityEventPendingForTopLevelDocumentBeforeContentfulPaint(
+    Document* aDocument) {
+  if (!aDocument) {
+    return false;
+  }
+
+  Document* topLevel = aDocument->GetTopLevelContentDocument();
+  return topLevel && topLevel->GetShell() &&
+         topLevel->GetShell()->GetPresContext() &&
+         !topLevel->GetShell()->GetPresContext()->HadContentfulPaint() &&
+         nsThreadManager::MainThreadHasPendingHighPriorityEvents();
 }
 
 /* static */ bool nsContentUtils::IsURIInPrefList(nsIURI* aURI,

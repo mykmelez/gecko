@@ -24,6 +24,8 @@
                   "*://*.imgur.com/*",
                   "*://*.instagram.com/*",
                   "*://*.microsoft.com/*",
+                  "*://*.paypal.com/*",
+                  "*://*.pinterest.com/*",
                   "*://*.reddit.com/*",
                   "*://*.twitter.com/*",
                   "*://*.vice.com/*",

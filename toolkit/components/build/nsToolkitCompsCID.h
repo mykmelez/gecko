@@ -65,14 +65,15 @@
 #define NS_APPSTARTUP_CONTRACTID "@mozilla.org/toolkit/app-startup;1"
 
 #if defined(MOZ_UPDATER) && !defined(MOZ_WIDGET_ANDROID)
-#define NS_UPDATEPROCESSOR_CONTRACTID "@mozilla.org/updates/update-processor;1"
+#  define NS_UPDATEPROCESSOR_CONTRACTID \
+    "@mozilla.org/updates/update-processor;1"
 #endif
 
 #define NS_ADDONCONTENTPOLICY_CONTRACTID "@mozilla.org/addons/content-policy;1"
 
 #if defined(ENABLE_TESTS)
-#define NS_TELEMETRYGECKOVIEWTESTING_CONTRACTID \
-  "@mozilla.org/telemetry/geckoview-testing;1"
+#  define NS_TELEMETRYGECKOVIEWTESTING_CONTRACTID \
+    "@mozilla.org/telemetry/geckoview-testing;1"
 #endif
 
 #define NS_KEY_VALUE_SERVICE_CONTRACTID "@mozilla.org/key-value-service;1"
@@ -233,12 +234,12 @@
   }
 
 #if defined(MOZ_UPDATER) && !defined(MOZ_WIDGET_ANDROID)
-#define NS_UPDATEPROCESSOR_CID                       \
-  {                                                  \
-    0xf3dcf644, 0x79e8, 0x4f59, {                    \
-      0xa1, 0xbb, 0x87, 0x84, 0x54, 0x48, 0x8e, 0xf9 \
-    }                                                \
-  }
+#  define NS_UPDATEPROCESSOR_CID                       \
+    {                                                  \
+      0xf3dcf644, 0x79e8, 0x4f59, {                    \
+        0xa1, 0xbb, 0x87, 0x84, 0x54, 0x48, 0x8e, 0xf9 \
+      }                                                \
+    }
 #endif
 
 #define NS_APPLICATION_REPUTATION_SERVICE_CONTRACTID \
@@ -279,8 +280,11 @@
   "@mozilla.org/addons/policy-service;1"
 
 #if defined(ENABLE_TESTS)
-#define NS_TELEMETRYGECKOVIEWTESTING_CID \
-  {0xaaa3f7f2, 0x8ef0, 0x41ec, {0x8d, 0x3, 0xae, 0xd6, 0x67, 0xcf, 0x7f, 0xa2}};
+#  define NS_TELEMETRYGECKOVIEWTESTING_CID \
+    {0xaaa3f7f2,                           \
+     0x8ef0,                               \
+     0x41ec,                               \
+     {0x8d, 0x3, 0xae, 0xd6, 0x67, 0xcf, 0x7f, 0xa2}};
 #endif
 
 // 6cc1a0a8-af97-4d41-9b4a-58dcec46ebce

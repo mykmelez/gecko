@@ -44,7 +44,7 @@
 #include "nsXBLSerialize.h"
 
 #ifdef MOZ_XUL
-#include "nsXULPrototypeCache.h"
+#  include "nsXULPrototypeCache.h"
 #endif
 #include "nsIDOMEventListener.h"
 #include "mozilla/Attributes.h"
@@ -152,8 +152,8 @@ class nsXBLStreamListener final : public nsIStreamListener,
   AutoTArray<nsXBLBindingRequest*, 8> mBindingRequests;
 
   nsWeakPtr mBoundDocument;
-  nsCOMPtr<nsIXMLContentSink> mSink;       // Only set until OnStartRequest
-  nsCOMPtr<Document> mBindingDocument;     // Only set until OnStartRequest
+  nsCOMPtr<nsIXMLContentSink> mSink;    // Only set until OnStartRequest
+  nsCOMPtr<Document> mBindingDocument;  // Only set until OnStartRequest
 };
 
 /* Implementation file */

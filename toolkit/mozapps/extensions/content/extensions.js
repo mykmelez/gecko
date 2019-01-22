@@ -20,14 +20,12 @@ ChromeUtils.defineModuleGetter(this, "Extension",
                                "resource://gre/modules/Extension.jsm");
 ChromeUtils.defineModuleGetter(this, "ExtensionParent",
                                "resource://gre/modules/ExtensionParent.jsm");
-ChromeUtils.defineModuleGetter(this, "Preferences",
-                               "resource://gre/modules/Preferences.jsm");
-
-
 ChromeUtils.defineModuleGetter(this, "PluralForm",
                                "resource://gre/modules/PluralForm.jsm");
 ChromeUtils.defineModuleGetter(this, "Preferences",
                                "resource://gre/modules/Preferences.jsm");
+ChromeUtils.defineModuleGetter(this, "ClientID",
+                               "resource://gre/modules/ClientID.jsm");
 
 XPCOMUtils.defineLazyPreferenceGetter(this, "WEBEXT_PERMISSION_PROMPTS",
                                       "extensions.webextPermissionPrompts", false);
@@ -280,9 +278,14 @@ function isDiscoverEnabled() {
 
 function setSearchLabel(type) {
   let searchLabel = document.getElementById("search-label");
-  if (type == "extension" || type == "theme") {
+  let keyMap = {
+    extension: "extension",
+    shortcuts: "extension",
+    theme: "theme",
+  };
+  if (type in keyMap) {
     searchLabel
-      .textContent = gStrings.ext.GetStringFromName(`searchLabel.${type}`);
+      .textContent = gStrings.ext.GetStringFromName(`searchLabel.${keyMap[type]}`);
     searchLabel.hidden = false;
   } else {
     searchLabel.textContent = "";
@@ -692,6 +695,7 @@ var gViewController = {
     this.viewObjects.legacy = gLegacyView;
     this.viewObjects.detail = gDetailView;
     this.viewObjects.updates = gUpdatesView;
+    this.viewObjects.shortcuts = gShortcutsView;
 
     for (let type in this.viewObjects) {
       let view = this.viewObjects[type];
@@ -1383,6 +1387,15 @@ var gViewController = {
         gViewController.loadView("addons://list/extension");
       },
     },
+
+    cmd_showShortcuts: {
+      isEnabled() {
+        return true;
+      },
+      doCommand() {
+        gViewController.loadView("addons://shortcuts/shortcuts");
+      },
+    },
   },
 
   supportsCommand(aCommand) {
@@ -1995,11 +2008,28 @@ var gDiscoverView = {
   _loadListeners: [],
   hideHeader: true,
 
+  get clientIdDiscoveryEnabled() {
+    // These prefs match Discovery.jsm for enabling clientId cookies.
+    return Services.prefs.getBoolPref("datareporting.healthreport.uploadEnabled", false) &&
+           Services.prefs.getBoolPref("browser.discovery.enabled", false);
+  },
+
+  async getClientHeader() {
+    if (!this.clientIdDiscoveryEnabled) {
+      return undefined;
+    }
+    let clientId = await ClientID.getClientIdHash();
+
+    let stream = Cc["@mozilla.org/io/string-input-stream;1"].createInstance(Ci.nsISupportsCString);
+    stream.data = `Moz-Client-Id: ${clientId}\r\n`;
+    return stream;
+  },
+
   async initialize() {
     this.enabled = isDiscoverEnabled();
     if (!this.enabled) {
       gCategories.get("addons://discover/").hidden = true;
-      return;
+      return null;
     }
 
     this.node = document.getElementById("discover-view");
@@ -2017,7 +2047,7 @@ var gDiscoverView = {
     url = url.replace("%COMPATIBILITY_MODE%", compatMode);
     url = Services.urlFormatter.formatURL(url);
 
-    let setURL = (aURL) => {
+    let setURL = async (aURL) => {
       try {
         this.homepageURL = Services.io.newURI(aURL);
       } catch (e) {
@@ -2028,16 +2058,17 @@ var gDiscoverView = {
 
       this._browser.addProgressListener(this);
 
-      if (this.loaded)
+      if (this.loaded) {
         this._loadURL(this.homepageURL.spec, false, notifyInitialized,
-                      Services.scriptSecurityManager.getSystemPrincipal());
-      else
+                      Services.scriptSecurityManager.getSystemPrincipal(),
+                      await this.getClientHeader());
+      } else {
         notifyInitialized();
+      }
     };
 
     if (!Services.prefs.getBoolPref(PREF_GETADDONS_CACHE_ENABLED)) {
-      setURL(url);
-      return;
+      return setURL(url);
     }
 
     gPendingInitializations++;
@@ -2060,7 +2091,7 @@ var gDiscoverView = {
       };
     }
 
-    setURL(url + "#" + JSON.stringify(list));
+    return setURL(url + "#" + JSON.stringify(list));
   },
 
   destroy() {
@@ -2071,7 +2102,7 @@ var gDiscoverView = {
     }
   },
 
-  show(aParam, aRequest, aState, aIsRefresh) {
+  async show(aParam, aRequest, aState, aIsRefresh) {
     gViewController.updateCommands();
 
     // If we're being told to load a specific URL then just do that
@@ -2100,7 +2131,8 @@ var gDiscoverView = {
 
     this._loadURL(this.homepageURL.spec, aIsRefresh,
                   gViewController.notifyViewChanged.bind(gViewController),
-                  Services.scriptSecurityManager.getSystemPrincipal());
+                  Services.scriptSecurityManager.getSystemPrincipal(),
+                  await this.getClientHeader());
   },
 
   canRefresh() {
@@ -2120,7 +2152,7 @@ var gDiscoverView = {
     this.node.selectedPanel = this._error;
   },
 
-  _loadURL(aURL, aKeepHistory, aCallback, aPrincipal) {
+  _loadURL(aURL, aKeepHistory, aCallback, aPrincipal, headers) {
     if (this._browser.currentURI && this._browser.currentURI.spec == aURL) {
       if (aCallback)
         aCallback();
@@ -2137,6 +2169,7 @@ var gDiscoverView = {
     this._browser.loadURI(aURL, {
       flags,
       triggeringPrincipal: aPrincipal || Services.scriptSecurityManager.createNullPrincipal({}),
+      headers,
     });
   },
 
@@ -2191,6 +2224,8 @@ var gDiscoverView = {
     // the error page
     aRequest.cancel(Cr.NS_BINDING_ABORTED);
   },
+
+  onContentBlockingEvent(aWebProgress, aRequest, aEvent) {},
 
   onStateChange(aWebProgress, aRequest, aStateFlags, aStatus) {
     let transferStart = Ci.nsIWebProgressListener.STATE_IS_DOCUMENT |
@@ -2448,6 +2483,9 @@ var gListView = {
         }
       }
 
+      // Only show the manage shortcuts button for extensions.
+      document.getElementById("manage-shortcuts").hidden = this._type != "extension";
+
       this.filterDisabledUnsigned(showOnlyDisabledUnsigned);
       let legacyNotice = document.getElementById("legacy-extensions-notice");
       if (showLegacyInfo) {
@@ -2474,6 +2512,7 @@ var gListView = {
   hide() {
     gEventManager.unregisterInstallListener(this);
     doPendingUninstalls(this._listBox);
+    document.getElementById("manage-shortcuts").hidden = true;
   },
 
   filterDisabledUnsigned(aFilter = true) {
@@ -2594,6 +2633,7 @@ var gDetailView = {
 
   initialize() {
     this.node = document.getElementById("detail-view");
+    this.headingImage = this.node.querySelector(".card-heading-image");
 
     this._autoUpdate = document.getElementById("detail-autoUpdate");
 
@@ -2614,10 +2654,11 @@ var gDetailView = {
     setSearchLabel(aAddon.type);
 
     // Set the preview image for themes, if available.
+    this.headingImage.src = "";
     if (aAddon.type == "theme") {
       let previewURL = aAddon.screenshots && aAddon.screenshots[0] && aAddon.screenshots[0].url;
       if (previewURL) {
-        this.node.querySelector(".card-heading-image").src = previewURL;
+        this.headingImage.src = previewURL;
       }
     }
 
@@ -3468,6 +3509,39 @@ var gUpdatesView = {
   onPropertyChanged(aAddon, aProperties) {
     if (aProperties.includes("applyBackgroundUpdates"))
       this.updateAvailableCount();
+  },
+};
+
+var gShortcutsView = {
+  node: null,
+  loaded: null,
+
+  initialize() {
+    this.node = document.getElementById("shortcuts-view");
+    this.node.loadURI("chrome://mozapps/content/extensions/shortcuts.html", {
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+    });
+    // Store a Promise for when the contentWindow will exist.
+    this.loaded = new Promise(resolve => this.node.addEventListener("load", resolve, {once: true}));
+  },
+
+  async show() {
+    // Ensure the Extensions category is selected in case of refresh/restart.
+    gCategories.select("addons://list/extension");
+
+    await this.loaded;
+    await this.node.contentWindow.render();
+    gViewController.notifyViewChanged();
+  },
+
+  refresh() {
+    return this.show();
+  },
+
+  hide() {},
+
+  getSelectedAddon() {
+    return null;
   },
 };
 

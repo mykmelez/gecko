@@ -132,7 +132,7 @@
 #include "mozilla/dom/InspectorFontFace.h"
 
 #ifdef MOZ_XUL
-#include "nsXULPopupManager.h"
+#  include "nsXULPopupManager.h"
 #endif
 
 #include "GeckoProfiler.h"
@@ -143,10 +143,10 @@
 
 // Make sure getpid() works.
 #ifdef XP_WIN
-#include <process.h>
-#define getpid _getpid
+#  include <process.h>
+#  define getpid _getpid
 #else
-#include <unistd.h>
+#  include <unistd.h>
 #endif
 
 using namespace mozilla;
@@ -2945,7 +2945,7 @@ StyleClear nsLayoutUtils::CombineBreakType(StyleClear aOrigBreakType,
 }
 
 #ifdef MOZ_DUMP_PAINTING
-#include <stdio.h>
+#  include <stdio.h>
 
 static bool gDumpEventList = false;
 
@@ -3457,6 +3457,9 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
                 PaintFrameFlags::PAINT_TO_WINDOW)) {
     builder.SetPaintingToWindow(true);
   }
+  if (aFlags & PaintFrameFlags::PAINT_FOR_WEBRENDER) {
+    builder.SetPaintingForWebRender(true);
+  }
   if (aFlags & PaintFrameFlags::PAINT_IGNORE_SUPPRESSION) {
     builder.IgnorePaintSuppression();
   }
@@ -3546,7 +3549,7 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
 
   {
     AUTO_PROFILER_LABEL("nsLayoutUtils::PaintFrame:BuildDisplayList", GRAPHICS);
-    AUTO_PROFILER_TRACING("Paint", "DisplayList");
+    AUTO_PROFILER_TRACING("Paint", "DisplayList", GRAPHICS);
 
     PaintTelemetry::AutoRecord record(PaintTelemetry::Metric::DisplayList);
     TimeStamp dlStart = TimeStamp::Now();
@@ -3899,7 +3902,7 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
   builder.Check();
 
   {
-    AUTO_PROFILER_TRACING("Paint", "DisplayListResources");
+    AUTO_PROFILER_TRACING("Paint", "DisplayListResources", GRAPHICS);
 
     // Flush the list so we don't trigger the IsEmpty-on-destruction assertion
     if (!useRetainedBuilder) {
@@ -6361,8 +6364,6 @@ static SnappedImageDrawingParameters ComputeSnappedImageDrawingParameters(
   // Snap even if we have a scale in the context. But don't snap if
   // we have something that's not translation+scale, or if the scale flips in
   // the X or Y direction, because snapped image drawing can't handle that yet.
-  // Any changes to this algorithm will need to be reflected in
-  // ComputeImageContainerDrawingParameters.
   if (!currentMatrix.HasNonAxisAlignedTransform() && currentMatrix._11 > 0.0 &&
       currentMatrix._22 > 0.0 && aCtx->UserToDevicePixelSnapped(fill, true) &&
       aCtx->UserToDevicePixelSnapped(dest, true)) {
@@ -6752,46 +6753,17 @@ static ImgDrawResult DrawImageInternal(
     }
   }
 
-  // Attempt to snap pixels, the same as ComputeSnappedImageDrawingParameters.
-  // Any changes to the algorithm here will need to be reflected there.
-  bool snapped = false;
-  gfxSize gfxLayerSize;
-  const gfx::Matrix& itm = aSc.GetInheritedTransform();
-  if (!itm.HasNonAxisAlignedTransform() && itm._11 > 0.0 && itm._22 > 0.0) {
-    gfxRect rect(gfxPoint(aDestRect.X(), aDestRect.Y()),
-                 gfxSize(aDestRect.Width(), aDestRect.Height()));
+  // Compute our size in layer pixels. We may need to revisit this for Android
+  // because mobile websites are rarely displayed at a 1:1
+  // LayoutPixel:ScreenPixel ratio and the snapping here may be insufficient.
+  const LayerIntSize layerSize =
+      RoundedToInt(LayerSize(aDestRect.Width() * scaleFactors.width,
+                             aDestRect.Height() * scaleFactors.height));
 
-    gfxPoint p1 = ThebesPoint(itm.TransformPoint(ToPoint(rect.TopLeft())));
-    gfxPoint p2 = ThebesPoint(itm.TransformPoint(ToPoint(rect.TopRight())));
-    gfxPoint p3 = ThebesPoint(itm.TransformPoint(ToPoint(rect.BottomRight())));
-
-    if (p2 == gfxPoint(p1.x, p3.y) || p2 == gfxPoint(p3.x, p1.y)) {
-      p1.Round();
-      p3.Round();
-
-      rect.MoveTo(gfxPoint(std::min(p1.x, p3.x), std::min(p1.y, p3.y)));
-      rect.SizeTo(gfxSize(std::max(p1.x, p3.x) - rect.X(),
-                          std::max(p1.y, p3.y) - rect.Y()));
-
-      // An empty size is unacceptable so we ensure our suggested size is at
-      // least 1 pixel wide/tall.
-      gfxLayerSize =
-          gfxSize(std::max(rect.Width(), 1.0), std::max(rect.Height(), 1.0));
-      snapped = true;
-    }
-  }
-
-  if (!snapped) {
-    // Compute our size in layer pixels.
-    const LayerIntSize layerSize =
-        RoundedToInt(LayerSize(aDestRect.Width() * scaleFactors.width,
-                               aDestRect.Height() * scaleFactors.height));
-
-    // An empty size is unacceptable so we ensure our suggested size is at least
-    // 1 pixel wide/tall.
-    gfxLayerSize =
-        gfxSize(std::max(layerSize.width, 1), std::max(layerSize.height, 1));
-  }
+  // An empty size is unacceptable so we ensure our suggested size is at least
+  // 1 pixel wide/tall.
+  gfxSize gfxLayerSize =
+      gfxSize(std::max(layerSize.width, 1), std::max(layerSize.height, 1));
 
   return aImage->OptimalImageSizeForDest(
       gfxLayerSize, imgIContainer::FRAME_CURRENT, samplingFilter, aFlags);
@@ -8708,11 +8680,20 @@ static void MaybeReflowForInflationScreenSizeChange(
     metrics.SetBaseScrollOffset(apzScrollPosition);
 
     if (aIsRootContent) {
-      if (const Maybe<nsPoint>& visualOffset =
-              presShell->GetPendingVisualViewportOffset()) {
-        metrics.SetVisualViewportOffset(CSSPoint::FromAppUnits(*visualOffset));
-        metrics.SetVisualScrollUpdateType(FrameMetrics::eMainThread);
-        presShell->SetPendingVisualViewportOffset(Nothing());
+      if (aLayerManager->GetIsFirstPaint() &&
+          presShell->IsVisualViewportOffsetSet()) {
+        // Restore the visual viewport offset to the copy stored on the
+        // main thread.
+        presShell->SetPendingVisualScrollUpdate(
+            presShell->GetVisualViewportOffset(), FrameMetrics::eRestore);
+      }
+
+      if (const Maybe<nsIPresShell::VisualScrollUpdate>& visualUpdate =
+              presShell->GetPendingVisualScrollUpdate()) {
+        metrics.SetVisualViewportOffset(
+            CSSPoint::FromAppUnits(visualUpdate->mVisualScrollOffset));
+        metrics.SetVisualScrollUpdateType(visualUpdate->mUpdateType);
+        presShell->ClearPendingVisualScrollUpdate();
       }
     }
 

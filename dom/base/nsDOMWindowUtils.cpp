@@ -64,8 +64,8 @@
 #include <algorithm>
 
 #if defined(MOZ_X11) && defined(MOZ_WIDGET_GTK)
-#include <gdk/gdk.h>
-#include <gdk/gdkx.h>
+#  include <gdk/gdk.h>
+#  include <gdk/gdkx.h>
 #endif
 
 #include "Layers.h"
@@ -117,7 +117,7 @@
 #include "mozilla/layers/WebRenderLayerManager.h"
 
 #ifdef XP_WIN
-#undef GetClassName
+#  undef GetClassName
 #endif
 
 using namespace mozilla;
@@ -1037,7 +1037,7 @@ NS_IMETHODIMP
 nsDOMWindowUtils::GarbageCollect(nsICycleCollectorListener* aListener) {
   AUTO_PROFILER_LABEL("nsDOMWindowUtils::GarbageCollect", GCCC);
 
-  nsJSContext::GarbageCollectNow(JS::gcreason::DOM_UTILS);
+  nsJSContext::GarbageCollectNow(JS::GCReason::DOM_UTILS);
   nsJSContext::CycleCollectNow(aListener);
 
   return NS_OK;
@@ -1051,7 +1051,7 @@ nsDOMWindowUtils::CycleCollect(nsICycleCollectorListener* aListener) {
 
 NS_IMETHODIMP
 nsDOMWindowUtils::RunNextCollectorTimer() {
-  nsJSContext::RunNextCollectorTimer(JS::gcreason::DOM_WINDOW_UTILS);
+  nsJSContext::RunNextCollectorTimer(JS::GCReason::DOM_WINDOW_UTILS);
 
   return NS_OK;
 }
@@ -1406,8 +1406,12 @@ nsDOMWindowUtils::ScrollToVisual(float aOffsetX, float aOffsetY) {
   // This should only be called on the root content document.
   NS_ENSURE_TRUE(presContext->IsRootContentDocument(), NS_ERROR_INVALID_ARG);
 
-  presContext->PresShell()->SetPendingVisualViewportOffset(
-      Some(CSSPoint::ToAppUnits(CSSPoint(aOffsetX, aOffsetY))));
+  // Use |eRestore| as the priority for now, as it's the conservative choice.
+  // If a JS call site needs higher priority, we can expose the update type
+  // as a parameter.
+  presContext->PresShell()->SetPendingVisualScrollUpdate(
+      CSSPoint::ToAppUnits(CSSPoint(aOffsetX, aOffsetY)),
+      FrameMetrics::eRestore);
 
   return NS_OK;
 }
@@ -3018,7 +3022,7 @@ static void PrepareForFullscreenChange(nsIPresShell* aPresShell,
 
 NS_IMETHODIMP
 nsDOMWindowUtils::HandleFullscreenRequests(bool* aRetVal) {
-  PROFILER_ADD_MARKER("Enter fullscreen");
+  PROFILER_ADD_MARKER("Enter fullscreen", DOM);
   nsCOMPtr<Document> doc = GetDocument();
   NS_ENSURE_STATE(doc);
 
@@ -3039,7 +3043,7 @@ nsDOMWindowUtils::HandleFullscreenRequests(bool* aRetVal) {
 }
 
 nsresult nsDOMWindowUtils::ExitFullscreen() {
-  PROFILER_ADD_MARKER("Exit fullscreen");
+  PROFILER_ADD_MARKER("Exit fullscreen", DOM);
   nsCOMPtr<Document> doc = GetDocument();
   NS_ENSURE_STATE(doc);
 

@@ -1,0 +1,63 @@
+// Type sizes
+$header-font-size: 17;
+$header-line-height: 24;
+$excerpt-font-size: 13;
+$excerpt-line-height: 20;
+
+.ds-card {
+  border: 5px solid transparent;
+
+  &:hover {
+    border: 5px solid $grey-30;
+    box-shadow: 0 1px 4px $grey-30;
+    border-radius: 4px;
+  }
+
+  .img-wrapper {
+    width: 100%;
+    border: 0.5px solid $black-10;
+    border-radius: 4px;
+  }
+
+  .img {
+    height: 0;
+    padding-top: 50%; // 2:1 aspect ratio
+    background-repeat: no-repeat;
+    background-size: cover;
+  }
+
+  .meta {
+    padding: 16px;
+
+    .title {
+      // show only 2 lines of copy
+      @include limit-visibile-lines(2, $header-line-height, $header-font-size);
+    }
+
+    .excerpt {
+      // show only 4 lines of copy
+      @include limit-visibile-lines(4, $excerpt-line-height, $excerpt-font-size);
+    }
+  }
+
+  header {
+    line-height: $header-line-height * 1px;
+    font-size: $header-font-size * 1px;
+    color: $grey-90;
+
+    &:hover {
+      color: $blue-60;
+    }
+
+    &:active {
+      color: $blue-70;
+    }
+  }
+
+  p {
+    font-size: $excerpt-font-size * 1px;
+    line-height: $excerpt-line-height * 1px;
+    color: $grey-50;
+    margin: 8px 0;
+  }
+}

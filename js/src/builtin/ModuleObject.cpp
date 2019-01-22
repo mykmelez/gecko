@@ -381,7 +381,8 @@ bool IndirectBindingMap::lookup(jsid name, ModuleEnvironmentObject** envOut,
   }
 
   SetProxyReservedSlot(object, ExportsSlot, ObjectValue(*exports));
-  SetProxyReservedSlot(object, BindingsSlot, PrivateValue(rootedBindings.release()));
+  SetProxyReservedSlot(object, BindingsSlot,
+                       PrivateValue(rootedBindings.release()));
 
   return &object->as<ModuleNamespaceObject>();
 }
@@ -1678,8 +1679,15 @@ JSObject* js::CallModuleResolveHook(JSContext* cx,
 }
 
 JSObject* js::StartDynamicModuleImport(JSContext* cx,
-                                       HandleValue referencingPrivate,
+                                       HandleObject referencingScriptSource,
                                        HandleValue specifierArg) {
+  RootedValue referencingPrivate(cx);
+  if (referencingScriptSource) {
+    ScriptSourceObject* sso =
+        &UncheckedUnwrap(referencingScriptSource)->as<ScriptSourceObject>();
+    referencingPrivate = sso->canonicalPrivate();
+  }
+
   RootedObject promiseConstructor(cx, JS::GetPromiseConstructor(cx));
   if (!promiseConstructor) {
     return nullptr;

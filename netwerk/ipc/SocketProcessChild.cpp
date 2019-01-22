@@ -18,7 +18,7 @@
 #include "SocketProcessBridgeParent.h"
 
 #ifdef MOZ_GECKO_PROFILER
-#include "ChildProfilerController.h"
+#  include "ChildProfilerController.h"
 #endif
 
 namespace mozilla {
@@ -67,6 +67,10 @@ bool SocketProcessChild::Init(base::ProcessId aParentPid,
 
   // Init crash reporter support.
   CrashReporterClient::InitSingleton(this);
+
+  if (NS_FAILED(NS_InitMinimalXPCOM())) {
+    return false;
+  }
 
   SetThisProcessName("Socket Process");
   return true;
@@ -148,6 +152,13 @@ mozilla::ipc::IPCResult SocketProcessChild::RecvInitProfiler(
   mProfilerController =
       mozilla::ChildProfilerController::Create(std::move(aEndpoint));
 #endif
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult SocketProcessChild::RecvSocketProcessTelemetryPing() {
+  const uint32_t kExpectedUintValue = 42;
+  Telemetry::ScalarSet(Telemetry::ScalarID::TELEMETRY_TEST_SOCKET_ONLY_UINT,
+                       kExpectedUintValue);
   return IPC_OK();
 }
 

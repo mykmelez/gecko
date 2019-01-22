@@ -133,6 +133,10 @@ class RemoteVideoDecoder : public RemoteDataDecoder {
     JavaCallbacksSupport::Init();
 
     mJavaCallbacks = CodecProxy::NativeCallbacks::New();
+    if (!mJavaCallbacks) {
+      return InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR,
+                                          __func__);
+    }
     JavaCallbacksSupport::AttachNative(
         mJavaCallbacks, mozilla::MakeUnique<CallbacksSupport>(this));
 
@@ -325,6 +329,10 @@ class RemoteAudioDecoder : public RemoteDataDecoder {
     JavaCallbacksSupport::Init();
 
     mJavaCallbacks = CodecProxy::NativeCallbacks::New();
+    if (!mJavaCallbacks) {
+      return InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR,
+                                          __func__);
+    }
     JavaCallbacksSupport::AttachNative(
         mJavaCallbacks, mozilla::MakeUnique<CallbacksSupport>(this));
 
@@ -421,7 +429,7 @@ class RemoteAudioDecoder : public RemoteDataDecoder {
 #ifdef MOZ_SAMPLE_TYPE_S16
       const int32_t numSamples = size / 2;
 #else
-#error We only support 16-bit integer PCM
+#  error We only support 16-bit integer PCM
 #endif
 
       const int32_t numFrames = numSamples / mOutputChannels;

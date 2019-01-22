@@ -22,7 +22,7 @@
 #include "vm/ArgumentsObject.h"
 #include "vm/ArrayObject.h"
 #ifdef ENABLE_BIGINT
-#include "vm/BigIntType.h"
+#  include "vm/BigIntType.h"
 #endif
 #include "vm/Debugger.h"
 #include "vm/EnvironmentObject.h"
@@ -95,20 +95,20 @@ using mozilla::PodCopy;
 //                       '---------'   '----------'         '-----------------'                 //
 //                            |                                                                 //
 //                            |                                                                 //
-//                        .--------.                                                            //
-//      o---------------->|traverse| .                                                          //
-//     /_\                '--------'   ' .                                                      //
-//      |                     .     .      ' .                                                  //
-//      |                     .       .        ' .                                              //
-//      |                     .         .          ' .                                          //
-//      |             .-----------.    .-----------.   ' .     .--------------------.           //
-//      |             |markAndScan|    |markAndPush|       ' - |markAndTraceChildren|---->      //
-//      |             '-----------'    '-----------'           '--------------------'           //
-//      |                   |                  \                                                //
-//      |                   |                   \                                               //
-//      |       .----------------------.     .----------------.                                 //
-//      |       |T::eagerlyMarkChildren|     |pushMarkStackTop|<===Oo                           //
-//      |       '----------------------'     '----------------'    ||                           //
+//                     .-----------.                                                            //
+//      o------------->|traverse(T)| .                                                          //
+//     /_\             '-----------'   ' .                                                      //
+//      |                   .       .      ' .                                                  //
+//      |                   .         .        ' .                                              //
+//      |                   .           .          ' .                                          //
+//      |          .--------------.  .--------------.  ' .     .-----------------------.        //
+//      |          |markAndScan(T)|  |markAndPush(T)|      ' - |markAndTraceChildren(T)|        //
+//      |          '--------------'  '--------------'          '-----------------------'        //
+//      |                   |                  \                               |                //
+//      |                   |                   \                              |                //
+//      |       .----------------------.     .----------------.         .------------------.    //
+//      |       |eagerlyMarkChildren(T)|     |pushMarkStackTop|<===Oo   |T::traceChildren()|--> //
+//      |       '----------------------'     '----------------'    ||   '------------------'    //
 //      |                  |                         ||            ||                           //
 //      |                  |                         ||            ||                           //
 //      |                  |                         ||            ||                           //
@@ -677,6 +677,10 @@ void GCMarker::markImplicitEdges(T* thing) {
   markImplicitEdgesHelper<typename ImplicitEdgeHolderType<T*>::Type>(thing);
 }
 
+template void GCMarker::markImplicitEdges(JSObject*);
+template void GCMarker::markImplicitEdges(JSScript*);
+template void GCMarker::markImplicitEdges(LazyScript*);
+
 }  // namespace js
 
 template <typename T>
@@ -843,7 +847,6 @@ void GCMarker::traverse(JSString* thing) {
 template <>
 void GCMarker::traverse(LazyScript* thing) {
   markAndScan(thing);
-  markImplicitEdges(thing);
 }
 template <>
 void GCMarker::traverse(Shape* thing) {
@@ -866,7 +869,6 @@ void js::GCMarker::markAndPush(T* thing) {
     return;
   }
   pushTaggedPtr(thing);
-  markImplicitEdges(thing);
 }
 namespace js {
 template <>
@@ -971,7 +973,7 @@ static bool TraceKindParticipatesInCC(JS::TraceKind kind) {
   return DispatchTraceKindTyped(ParticipatesInCCFunctor(), kind);
 }
 
-#endif // DEBUG
+#endif  // DEBUG
 
 template <typename T>
 bool js::GCMarker::mark(T* thing) {
@@ -1027,6 +1029,10 @@ void LazyScript::traceChildren(JSTracer* trc) {
   for (auto i : IntegerRange(numInnerFunctions())) {
     TraceEdge(trc, &innerFunctions[i], "lazyScriptInnerFunction");
   }
+
+  if (trc->isMarkingTracer()) {
+    GCMarker::fromTracer(trc)->markImplicitEdges(this);
+  }
 }
 inline void js::GCMarker::eagerlyMarkChildren(LazyScript* thing) {
   if (thing->script_) {
@@ -1061,6 +1067,8 @@ inline void js::GCMarker::eagerlyMarkChildren(LazyScript* thing) {
   for (auto i : IntegerRange(thing->numInnerFunctions())) {
     traverseEdge(thing, static_cast<JSObject*>(innerFunctions[i]));
   }
+
+  markImplicitEdges(thing);
 }
 
 void Shape::traceChildren(JSTracer* trc) {
@@ -1094,7 +1102,7 @@ inline void js::GCMarker::eagerlyMarkChildren(Shape* shape) {
 
     traverseEdge(shape, shape->propidRef().get());
 
-    // When triggered between slices on belhalf of a barrier, these
+    // When triggered between slices on behalf of a barrier, these
     // objects may reside in the nursery, so require an extra check.
     // FIXME: Bug 1157967 - remove the isTenured checks.
     if (shape->hasGetterObject() && shape->getterObject()->isTenured()) {

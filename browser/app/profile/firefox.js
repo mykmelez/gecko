@@ -459,9 +459,9 @@ pref("browser.tabs.loadBookmarksInBackground", false);
 pref("browser.tabs.loadBookmarksInTabs", false);
 pref("browser.tabs.tabClipWidth", 140);
 pref("browser.tabs.tabMinWidth", 76);
-#ifdef UNIX_BUT_NOT_MAC
-pref("browser.tabs.drawInTitlebar", false);
-#else
+// Initial titlebar state is managed by -moz-gtk-csd-hide-titlebar-by-default
+// on Linux.
+#ifndef UNIX_BUT_NOT_MAC
 pref("browser.tabs.drawInTitlebar", true);
 #endif
 
@@ -973,6 +973,9 @@ pref("security.certerrors.recordEventTelemetry", true);
 // Whether to start the private browsing mode at application startup
 pref("browser.privatebrowsing.autostart", false);
 
+// Whether to show the new private browsing UI with in-content search box.
+pref("browser.privatebrowsing.searchUI", true);
+
 // Whether the bookmark panel should be shown when bookmarking a page.
 pref("browser.bookmarks.editDialog.showForNewBookmarks", true);
 
@@ -1174,6 +1177,18 @@ pref("services.sync.prefs.sync.browser.ctrlTab.recentlyUsedOrder", true);
 pref("services.sync.prefs.sync.browser.download.useDownloadDir", true);
 pref("services.sync.prefs.sync.browser.formfill.enable", true);
 pref("services.sync.prefs.sync.browser.link.open_newwindow", true);
+pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.showSearch", true);
+pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.feeds.topsites", true);
+pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.topSitesRows", true);
+pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.feeds.snippets", true);
+pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.feeds.section.topstories", true);
+pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.section.topstories.rows", true);
+pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.feeds.section.highlights", true);
+pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.section.highlights.includeVisited", true);
+pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.section.highlights.includeBookmarks", true);
+pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.section.highlights.includeDownloads", true);
+pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.section.highlights.includePocket", true);
+pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.section.highlights.rows", true);
 pref("services.sync.prefs.sync.browser.newtabpage.enabled", true);
 pref("services.sync.prefs.sync.browser.newtabpage.pinned", true);
 pref("services.sync.prefs.sync.browser.offline-apps.notify", true);
@@ -1283,14 +1298,14 @@ pref("browser.newtabpage.activity-stream.improvesearch.topSiteSearchShortcuts", 
 
 // ASRouter provider configuration
 pref("browser.newtabpage.activity-stream.asrouter.providers.cfr", "{\"id\":\"cfr\",\"enabled\":true,\"type\":\"local\",\"localProvider\":\"CFRMessageProvider\",\"frequency\":{\"custom\":[{\"period\":\"daily\",\"cap\":1}]}}");
-
-#ifdef EARLY_BETA_OR_EARLIER
 pref("browser.newtabpage.activity-stream.asrouter.providers.snippets", "{\"id\":\"snippets\",\"enabled\":true,\"type\":\"remote\",\"url\":\"https://snippets.cdn.mozilla.net/%STARTPAGE_VERSION%/%NAME%/%VERSION%/%APPBUILDID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/\",\"updateCycleInMs\":14400000}");
+
+// The pref controls if search hand-off is enabled for Activity Stream.
+#ifdef NIGHTLY_BUILD
+pref("browser.newtabpage.activity-stream.improvesearch.handoffToAwesomebar", true);
 #else
-pref("browser.newtabpage.activity-stream.asrouter.providers.snippets", "{\"id\":\"snippets\",\"enabled\":false,\"type\":\"remote\",\"url\":\"https://snippets.cdn.mozilla.net/%STARTPAGE_VERSION%/%NAME%/%VERSION%/%APPBUILDID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/\",\"updateCycleInMs\":14400000}");
+pref("browser.newtabpage.activity-stream.improvesearch.handoffToAwesomebar", false);
 #endif
-
-
 
 // Enable the DOM fullscreen API.
 pref("full-screen-api.enabled", true);
@@ -1723,19 +1738,6 @@ pref("extensions.screenshots.disabled", false);
 // disable uploading to the server.
 pref("extensions.screenshots.upload-disabled", false);
 
-// Preferences for BrowserErrorReporter.jsm
-// Only collect errors on Nightly, and specifically not local builds
-#if defined(NIGHTLY_BUILD) && MOZ_UPDATE_CHANNEL != default
-pref("browser.chrome.errorReporter.enabled", true);
-#else
-pref("browser.chrome.errorReporter.enabled", false);
-#endif
-pref("browser.chrome.errorReporter.sampleRate", "0.001");
-pref("browser.chrome.errorReporter.publicKey", "c709cb7a2c0b4f0882fcc84a5af161ec");
-pref("browser.chrome.errorReporter.projectId", "339");
-pref("browser.chrome.errorReporter.submitUrl", "https://sentry.prod.mozaws.net/api/339/store/");
-pref("browser.chrome.errorReporter.logLevel", "Error");
-
 // URL for Learn More link for browser error logging in preferences
 pref("browser.chrome.errorReporter.infoURL",
      "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/nightly-error-collection");
@@ -1801,3 +1803,8 @@ pref("browser.engagement.recent_visited_origins.expiry", 86400); // 24 * 60 * 60
 #ifdef NIGHTLY_BUILD
 pref("browser.aboutConfig.showWarning", true);
 #endif
+
+#if defined(XP_WIN) && defined(MOZ_LAUNCHER_PROCESS)
+// Launcher process is disabled by default, will be selectively enabled via SHIELD
+pref("browser.launcherProcess.enabled", false);
+#endif // defined(XP_WIN) && defined(MOZ_LAUNCHER_PROCESS)

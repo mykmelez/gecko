@@ -25,11 +25,18 @@ const declaration = exports.declaration = {
   // An unique CSS declaration id.
   id: PropTypes.string,
 
+  // Whether or not the declaration is valid. (Does it make sense for this value
+  // to be assigned to this property name?)
+  isDeclarationValid: PropTypes.bool,
+
   // Whether or not the declaration is enabled.
   isEnabled: PropTypes.bool,
 
   // Whether or not the declaration's property name is known.
   isKnownProperty: PropTypes.bool,
+
+  // Whether or not the property name is valid.
+  isNameValid: PropTypes.bool,
 
   // Whether or not the the declaration is overridden.
   isOverridden: PropTypes.bool,
@@ -45,9 +52,48 @@ const declaration = exports.declaration = {
 };
 
 /**
+ * The pseudo classes redux structure.
+ */
+exports.pseudoClasses = {
+  // An object containing the :active pseudo class toggle state.
+  ":active": PropTypes.shape({
+    // Whether or not the :active pseudo class is checked.
+    isChecked: PropTypes.bool,
+    // Whether or not the :active pseudo class is disabled.
+    isDisabled: PropTypes.bool,
+  }),
+
+  // An object containing the :focus pseudo class toggle state.
+  ":focus": PropTypes.shape({
+    // Whether or not the :focus pseudo class is checked
+    isChecked: PropTypes.bool,
+    // Whether or not the :focus pseudo class is disabled.
+    isDisabled: PropTypes.bool,
+  }),
+
+  // An object containing the :focus-within pseudo class toggle state.
+  ":focus-within": PropTypes.shape({
+    // Whether or not the :focus-within pseudo class is checked
+    isChecked: PropTypes.bool,
+    // Whether or not the :focus-within pseudo class is disabled.
+    isDisabled: PropTypes.bool,
+  }),
+
+  // An object containing the :hover pseudo class toggle state.
+  ":hover": PropTypes.shape({
+    // Whether or not the :hover pseudo class is checked.
+    isChecked: PropTypes.bool,
+    // Whether or not the :hover pseudo class is disabled.
+    isDisabled: PropTypes.bool,
+  }),
+};
+
+/**
  * A CSS selector.
  */
 const selector = exports.selector = {
+  // Function that returns a Promise containing an unique CSS selector.
+  getUniqueSelector: PropTypes.func,
   // Array of the selectors that match the selected element.
   matchedSelectors: PropTypes.arrayOf(PropTypes.string),
   // The CSS rule's selector text content.
@@ -102,6 +148,9 @@ exports.rule = {
     // The keyframes rule name.
     keyframesName: PropTypes.string,
   }),
+
+  // The pseudo-element keyword used in the rule.
+  pseudoElement: PropTypes.string,
 
   // An object containing information about the CSS rule's selector.
   selector: PropTypes.shape(selector),
