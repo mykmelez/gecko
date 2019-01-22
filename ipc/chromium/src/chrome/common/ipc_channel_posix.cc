@@ -10,7 +10,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #if defined(OS_MACOSX)
-#include <sched.h>
+#  include <sched.h>
 #endif
 #include <stddef.h>
 #include <unistd.h>
@@ -36,7 +36,7 @@
 #include "mozilla/UniquePtr.h"
 
 #ifdef FUZZING
-#include "mozilla/ipc/Faulty.h"
+#  include "mozilla/ipc/Faulty.h"
 #endif
 
 // Use OS specific iovec array limit where it's possible.
@@ -49,7 +49,7 @@ static const size_t kMaxIOVecSize = 16;
 #endif
 
 #ifdef MOZ_TASK_TRACER
-#include "GeckoTaskTracerImpl.h"
+#  include "GeckoTaskTracerImpl.h"
 using namespace mozilla::tasktracer;
 #endif
 
@@ -150,9 +150,7 @@ class PipeMap {
   }
 
  private:
-  explicit PipeMap(mozilla::StaticMutex& aMutex)
-    : lock_(aMutex)
-  {}
+  explicit PipeMap(mozilla::StaticMutex& aMutex) : lock_(aMutex) {}
   ~PipeMap() = default;
 
   mozilla::StaticMutex& lock_;

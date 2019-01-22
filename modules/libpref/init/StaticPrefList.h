@@ -419,6 +419,12 @@ VARCACHE_PREF(
    dom_script_loader_binast_encoding_enabled,
   RelaxedAtomicBool, false
 )
+
+VARCACHE_PREF(
+  "dom.script_loader.binast_encoding.domain.restrict",
+   dom_script_loader_binast_encoding_domain_restrict,
+  bool, true
+)
 #endif
 
 // IMPORTANT: Keep this in condition in sync with all.js. The value
@@ -555,7 +561,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "html5.flushtimer.initialdelay",
    html5_flushtimer_initialdelay,
-  RelaxedAtomicInt32, 120
+  RelaxedAtomicInt32, 16
 )
 
 // Time in milliseconds between the time a network buffer is seen and the timer
@@ -563,7 +569,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "html5.flushtimer.subsequentdelay",
    html5_flushtimer_subsequentdelay,
-  RelaxedAtomicInt32, 120
+  RelaxedAtomicInt32, 16
 )
 
 //---------------------------------------------------------------------------
@@ -841,13 +847,6 @@ VARCACHE_PREF(
   bool, false
 )
 
-// Is overflow: -moz-scrollbars-* value enabled?
-VARCACHE_PREF(
-  "layout.css.overflow.moz-scrollbars.enabled",
-   layout_css_overflow_moz_scrollbars_enabled,
-  bool, false
-)
-
 // Does arbitrary ::-webkit-* pseudo-element parsed?
 VARCACHE_PREF(
   "layout.css.unknown-webkit-pseudo-element",
@@ -884,7 +883,7 @@ VARCACHE_PREF(
 )
 
 // Pref to control enabling scroll anchoring.
-#ifdef NIGHTLY_BUILD
+#ifndef ANDROID
 #define PREF_VALUE true
 #else
 #define PREF_VALUE false
@@ -1140,6 +1139,8 @@ VARCACHE_PREF(
 #undef PREF_VALUE
 
 #if defined(XP_WIN) && !defined(_ARM64_)
+# define PREF_VALUE true
+#elif defined(XP_MACOSX)
 # define PREF_VALUE true
 #else
 # define PREF_VALUE false
@@ -1462,6 +1463,8 @@ VARCACHE_PREF(
 // AV1
 #if defined(XP_WIN) && !defined(_ARM64_)
 # define PREF_VALUE true
+#elif defined(XP_MACOSX)
+# define PREF_VALUE true
 #else
 # define PREF_VALUE false
 #endif
@@ -1596,6 +1599,18 @@ VARCACHE_PREF(
   "media.test.video-suspend",
    MediaTestVideoSuspend,
   RelaxedAtomicBool, false
+)
+
+VARCACHE_PREF(
+  "media.autoplay.allow-muted",
+   MediaAutoplayAllowMuted,
+  RelaxedAtomicBool, true
+)
+
+VARCACHE_PREF(
+  "media.autoplay.blackList-override-default",
+   MediaAutoplayBlackListOverrideDefault,
+  RelaxedAtomicBool, true
 )
 
 //---------------------------------------------------------------------------

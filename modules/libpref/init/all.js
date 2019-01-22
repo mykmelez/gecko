@@ -264,6 +264,7 @@ pref("dom.script_loader.bytecode_cache.strategy", 0);
 
 #ifdef JS_BUILD_BINAST
 pref("dom.script_loader.binast_encoding.enabled", false);
+pref("dom.script_loader.binast_encoding.domain.restrict.list", "*.facebook.com,static.xx.fbcdn.net");
 #endif
 
 // Whether window.event is enabled
@@ -619,6 +620,11 @@ pref("media.allowed-to-play.enabled", true);
 pref("media.allowed-to-play.enabled", false);
 #endif
 
+// This pref is used to enable/disable the `document.autoplayPolicy` API which
+// returns a enum string which presents current autoplay policy and can change
+// overtime based on user session activity.
+pref("dom.media.autoplay.autoplay-policy-api", false);
+
 // The default number of decoded video frames that are enqueued in
 // MediaDecoderReader's mVideoQueue.
 pref("media.video-queue.default-size", 10);
@@ -646,6 +652,8 @@ pref("media.cubeb.sandbox", false);
 
 #ifdef MOZ_AV1
 #if defined(XP_WIN) && !defined(_ARM64_)
+pref("media.av1.enabled", true);
+#elif defined(XP_MACOSX)
 pref("media.av1.enabled", true);
 #else
 pref("media.av1.enabled", false);
@@ -956,9 +964,11 @@ pref("gfx.webrender.debug.new-frame-indicator", false);
 pref("gfx.webrender.debug.new-scene-indicator", false);
 pref("gfx.webrender.debug.show-overdraw", false);
 pref("gfx.webrender.debug.slow-frame-indicator", false);
+pref("gfx.webrender.debug.picture-caching", false);
+pref("gfx.webrender.debug.primitives", false);
 pref("gfx.webrender.dl.dump-parent", false);
 pref("gfx.webrender.dl.dump-content", false);
-pref("gfx.webrender.picture-caching", false);
+pref("gfx.webrender.picture-caching", true);
 
 #ifdef EARLY_BETA_OR_EARLIER
 pref("performance.adjust_to_machine", true);
@@ -1900,11 +1910,10 @@ pref("network.http.rcwn.max_wait_before_racing_ms", 500);
 // all available active connections.
 pref("network.http.focused_window_transaction_ratio", "0.9");
 
-// XXX Disable for intranet downloading issue.
 // This is the size of the flow control window (KB) (i.e., the amount of data
 // that the parent can send to the child before getting an ack). 0 for disable
 // the flow control.
-pref("network.http.send_window_size", 0);
+pref("network.http.send_window_size", 1024);
 
 // Whether or not we give more priority to active tab.
 // Note that this requires restart for changes to take effect.
@@ -3333,7 +3342,7 @@ pref("dom.ipc.plugins.asyncdrawing.enabled", true);
 pref("dom.ipc.plugins.forcedirect.enabled", true);
 
 // Enable multi by default.
-#if defined(NIGHTLY_BUILD) && !defined(MOZ_ASAN)
+#if !defined(MOZ_ASAN)
 pref("dom.ipc.processCount", 8);
 #else
 pref("dom.ipc.processCount", 4);
@@ -3753,7 +3762,11 @@ pref("font.name-list.cursive.zh-CN", "KaiTi, KaiTi_GB2312");
 // Per Taiwanese users' demand. They don't want to use TC fonts for
 // rendering Latin letters. (bug 88579)
 pref("font.name-list.serif.zh-TW", "Times New Roman, PMingLiu, MingLiU, MingLiU-ExtB");
+#ifdef EARLY_BETA_OR_EARLIER
 pref("font.name-list.sans-serif.zh-TW", "Arial, Microsoft JhengHei, PMingLiU, MingLiU, MingLiU-ExtB");
+#else
+pref("font.name-list.sans-serif.zh-TW", "Arial, PMingLiU, MingLiU, MingLiU-ExtB, Microsoft JhengHei");
+#endif
 pref("font.name-list.monospace.zh-TW", "MingLiU, MingLiU-ExtB");
 pref("font.name-list.cursive.zh-TW", "DFKai-SB");
 
@@ -5117,11 +5130,7 @@ pref("extensions.webextensions.userScripts.enabled", false);
 pref("extensions.webextensions.background-delayed-startup", false);
 
 // Whether or not the installed extensions should be migrated to the storage.local IndexedDB backend.
-#ifdef NIGHTLY_BUILD
 pref("extensions.webextensions.ExtensionStorageIDB.enabled", true);
-#else
-pref("extensions.webextensions.ExtensionStorageIDB.enabled", false);
-#endif
 
 // if enabled, store execution times for API calls
 pref("extensions.webextensions.enablePerformanceCounters", true);
@@ -5334,7 +5343,11 @@ pref("dom.vr.autoactivate.enabled", false);
 // The threshold value of trigger inputs for VR controllers
 pref("dom.vr.controller_trigger_threshold", "0.1");
 // Enable external XR API integrations
+#if defined(XP_WIN) && defined(NIGHTLY_BUILD)
+pref("dom.vr.external.enabled", true);
+#else
 pref("dom.vr.external.enabled", false);
+#endif
 // Minimum number of milliseconds the browser will wait before attempting
 // to re-start the VR service after an enumeration returned no devices.
 pref("dom.vr.external.notdetected.timeout", 60000);
@@ -5423,8 +5436,8 @@ pref("dom.vr.poseprediction.enabled", true);
 // tests or in a headless kiosk system.
 pref("dom.vr.require-gesture", true);
 // Enable a separate process for VR module.
-#if defined(XP_WIN)
-pref("dom.vr.process.enabled", false);
+#if defined(XP_WIN) && defined(NIGHTLY_BUILD)
+pref("dom.vr.process.enabled", true);
 #endif
 // Puppet device, used for simulating VR hardware within tests and dev tools
 pref("dom.vr.puppet.enabled", false);
@@ -5554,8 +5567,13 @@ pref("urlclassifier.trackingAnnotationWhitelistTable", "test-trackwhite-simple,m
 pref("urlclassifier.trackingTable", "test-track-simple,base-track-digest256");
 pref("urlclassifier.trackingWhitelistTable", "test-trackwhite-simple,mozstd-trackwhite-digest256");
 
+pref("urlclassifier.features.fingerprinting.blacklistTables", "");
+pref("urlclassifier.features.fingerprinting.whitelistTables", "");
+pref("urlclassifier.features.cryptomining.blacklistTables", "");
+pref("urlclassifier.features.cryptomining.whitelistTables", "");
+
 // These tables will never trigger a gethash call.
-pref("urlclassifier.disallow_completions", "test-malware-simple,test-harmful-simple,test-phish-simple,test-unwanted-simple,test-track-simple,test-trackwhite-simple,test-block-simple,goog-downloadwhite-digest256,base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,except-flashinfobar-digest256,goog-passwordwhite-proto,ads-track-digest256,social-track-digest256,analytics-track-digest256");
+pref("urlclassifier.disallow_completions", "test-malware-simple,test-harmful-simple,test-phish-simple,test-unwanted-simple,test-track-simple,test-trackwhite-simple,test-block-simple,goog-downloadwhite-digest256,base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,goog-passwordwhite-proto,ads-track-digest256,social-track-digest256,analytics-track-digest256,base-fingerprinting-track-digest256,content-fingerprinting-track-digest256,base-cryptomining-track-digest256,content-cryptomining-track-digest256,fanboy-annoyance-digest256,fanboy-social-digest256,easylist-digest256,easyprivacy-digest256,adguard-digest256");
 
 // Number of random entries to send with a gethash request
 pref("urlclassifier.gethashnoise", 4);
@@ -5624,7 +5642,7 @@ pref("browser.safebrowsing.reportPhishURL", "https://%LOCALE%.phish-report.mozil
 
 // Mozilla Safe Browsing provider (for tracking protection and plugin blocking)
 pref("browser.safebrowsing.provider.mozilla.pver", "2.2");
-pref("browser.safebrowsing.provider.mozilla.lists", "base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,except-flashinfobar-digest256,ads-track-digest256,social-track-digest256,analytics-track-digest256");
+pref("browser.safebrowsing.provider.mozilla.lists", "base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,ads-track-digest256,social-track-digest256,analytics-track-digest256,base-fingerprinting-track-digest256,content-fingerprinting-track-digest256,base-cryptomining-track-digest256,content-cryptomining-track-digest256,fanboy-annoyance-digest256,fanboy-social-digest256,easylist-digest256,easyprivacy-digest256,adguard-digest256");
 pref("browser.safebrowsing.provider.mozilla.updateURL", "https://shavar.services.mozilla.com/downloads?client=SAFEBROWSING_ID&appver=%MAJOR_VERSION%&pver=2.2");
 pref("browser.safebrowsing.provider.mozilla.gethashURL", "https://shavar.services.mozilla.com/gethash?client=SAFEBROWSING_ID&appver=%MAJOR_VERSION%&pver=2.2");
 // Set to a date in the past to force immediate download in new profiles.
@@ -5645,7 +5663,6 @@ pref("urlclassifier.flashTable", "block-flash-digest256");
 pref("urlclassifier.flashExceptTable", "except-flash-digest256");
 pref("urlclassifier.flashSubDocTable", "block-flashsubdoc-digest256");
 pref("urlclassifier.flashSubDocExceptTable", "except-flashsubdoc-digest256");
-pref("urlclassifier.flashInfobarTable", "except-flashinfobar-digest256");
 
 // Turn off Spatial navigation by default.
 pref("snav.enabled", false);

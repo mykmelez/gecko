@@ -28,6 +28,9 @@ const SHOW_PSEUDO_ELEMENTS_PREF = "devtools.inspector.show_pseudo_elements";
 class RulesApp extends PureComponent {
   static get propTypes() {
     return {
+      onToggleDeclaration: PropTypes.func.isRequired,
+      onTogglePseudoClass: PropTypes.func.isRequired,
+      onToggleSelectorHighlighter: PropTypes.func.isRequired,
       rules: PropTypes.arrayOf(PropTypes.shape(Types.rule)).isRequired,
     };
   }
@@ -49,7 +52,11 @@ class RulesApp extends PureComponent {
         );
       }
 
-      output.push(Rule({ rule }));
+      output.push(Rule({
+        onToggleDeclaration: this.props.onToggleDeclaration,
+        onToggleSelectorHighlighter: this.props.onToggleSelectorHighlighter,
+        rule,
+      }));
     }
 
     return output;
@@ -74,6 +81,8 @@ class RulesApp extends PureComponent {
         {
           component: Rules,
           componentProps: {
+            onToggleDeclaration: this.props.onToggleDeclaration,
+            onToggleSelectorHighlighter: this.props.onToggleSelectorHighlighter,
             rules: rules.filter(r => r.keyframesRule.id === lastKeyframes),
           },
           header: rule.keyframesRule.keyframesName,
@@ -92,7 +101,11 @@ class RulesApp extends PureComponent {
       return null;
     }
 
-    return Rules({ rules });
+    return Rules({
+      onToggleDeclaration: this.props.onToggleDeclaration,
+      onToggleSelectorHighlighter: this.props.onToggleSelectorHighlighter,
+      rules,
+    });
   }
 
   renderPseudoElementRules(rules) {
@@ -103,7 +116,11 @@ class RulesApp extends PureComponent {
     const items = [
       {
         component: Rules,
-        componentProps: { rules },
+        componentProps: {
+          onToggleDeclaration: this.props.onToggleDeclaration,
+          onToggleSelectorHighlighter: this.props.onToggleSelectorHighlighter,
+          rules,
+        },
         header: getStr("rule.pseudoElement"),
         opened: Services.prefs.getBoolPref(SHOW_PSEUDO_ELEMENTS_PREF),
         onToggled: () => {
@@ -144,7 +161,9 @@ class RulesApp extends PureComponent {
           id: "sidebar-panel-ruleview",
           className: "theme-sidebar inspector-tabpanel",
         },
-        Toolbar({}),
+        Toolbar({
+          onTogglePseudoClass: this.props.onTogglePseudoClass,
+        }),
         dom.div(
           {
             id: "ruleview-container",

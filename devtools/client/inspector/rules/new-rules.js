@@ -8,8 +8,17 @@ const Services = require("Services");
 const ElementStyle = require("devtools/client/inspector/rules/models/element-style");
 const { createFactory, createElement } = require("devtools/client/shared/vendor/react");
 const { Provider } = require("devtools/client/shared/vendor/react-redux");
+const EventEmitter = require("devtools/shared/event-emitter");
 
-const { updateRules } = require("./actions/rules");
+const {
+  disableAllPseudoClasses,
+  setPseudoClassLocks,
+  togglePseudoClass,
+} = require("./actions/pseudo-classes");
+const {
+  updateHighlightedSelector,
+  updateRules,
+} = require("./actions/rules");
 
 const RulesApp = createFactory(require("./components/RulesApp"));
 
@@ -27,17 +36,24 @@ class RulesView {
     this.pageStyle = inspector.pageStyle;
     this.selection = inspector.selection;
     this.store = inspector.store;
+    this.telemetry = inspector.telemetry;
     this.toolbox = inspector.toolbox;
 
     this.showUserAgentStyles = Services.prefs.getBoolPref(PREF_UA_STYLES);
 
     this.onSelection = this.onSelection.bind(this);
+    this.onToggleDeclaration = this.onToggleDeclaration.bind(this);
+    this.onTogglePseudoClass = this.onTogglePseudoClass.bind(this);
+    this.onToggleSelectorHighlighter = this.onToggleSelectorHighlighter.bind(this);
+    this.updateRules = this.updateRules.bind(this);
 
     this.inspector.sidebar.on("select", this.onSelection);
     this.selection.on("detached-front", this.onSelection);
     this.selection.on("new-node-front", this.onSelection);
 
     this.init();
+
+    EventEmitter.decorate(this);
   }
 
   init() {
@@ -45,7 +61,11 @@ class RulesView {
       return;
     }
 
-    const rulesApp = RulesApp({});
+    const rulesApp = RulesApp({
+      onToggleDeclaration: this.onToggleDeclaration,
+      onTogglePseudoClass: this.onTogglePseudoClass,
+      onToggleSelectorHighlighter: this.onToggleSelectorHighlighter,
+    });
 
     const provider = createElement(Provider, {
       id: "ruleview",
@@ -63,6 +83,11 @@ class RulesView {
     this.selection.off("detached-front", this.onSelection);
     this.selection.off("new-node-front", this.onSelection);
 
+    if (this._selectHighlighter) {
+      this._selectorHighlighter.finalize();
+      this._selectorHighlighter = null;
+    }
+
     if (this.elementStyle) {
       this.elementStyle.destroy();
     }
@@ -76,6 +101,7 @@ class RulesView {
     this.selection = null;
     this.showUserAgentStyles = null;
     this.store = null;
+    this.telemetry = null;
     this.toolbox = null;
   }
 
@@ -94,6 +120,41 @@ class RulesView {
     }
 
     return this._dummyElement;
+  }
+
+  /**
+   * Get the highlighters overlay from the Inspector.
+   *
+   * @return {HighlighterOverlay}.
+   */
+  get highlighters() {
+    return this.inspector.highlighters;
+  }
+
+  /**
+   * Get an instance of SelectorHighlighter (used to highlight nodes that match
+   * selectors in the rule-view).
+   *
+   * @return {Promise} resolves to the instance of the highlighter.
+   */
+  async getSelectorHighlighter() {
+    if (!this.inspector) {
+      return null;
+    }
+
+    if (this._selectorHighlighter) {
+      return this._selectorHighlighter;
+    }
+
+    try {
+      const front = this.inspector.inspector;
+      this._selectorHighlighter = await front.getHighlighterByType("SelectorHighlighter");
+      return this._selectorHighlighter;
+    } catch (e) {
+      // The SelectorHighlighter type could not be created in the
+      // current target. It could be an older server, or a XUL page.
+      return null;
+    }
   }
 
   /**
@@ -125,6 +186,72 @@ class RulesView {
   }
 
   /**
+   * Handler for toggling the enabled property for a given CSS declaration.
+   *
+   * @param  {String} ruleId
+   *         The Rule id of the given CSS declaration.
+   * @param  {String} declarationId
+   *         The TextProperty id for the CSS declaration.
+   */
+  onToggleDeclaration(ruleId, declarationId) {
+    this.elementStyle.toggleDeclaration(ruleId, declarationId);
+    this.telemetry.recordEvent("edit_rule", "ruleview", null, {
+      "session_id": this.toolbox.sessionId,
+    });
+  }
+
+  /**
+   * Handler for toggling a pseudo class in the pseudo class panel. Toggles on and off
+   * a given pseudo class value.
+   *
+   * @param  {String} value
+   *         The pseudo class to toggle on or off.
+   */
+  onTogglePseudoClass(value) {
+    this.store.dispatch(togglePseudoClass(value));
+    this.inspector.togglePseudoClass(value);
+  }
+
+  /**
+   * Handler for toggling the selector highlighter for the given selector.
+   * Highlight/unhighlight all the nodes that match a given set of selectors inside the
+   * document of the current selected node. Only one selector can be highlighted at a
+   * time, so calling the method a second time with a different selector will first
+   * unhighlight the previously highlighted nodes. Calling the method a second time with
+   * the same select will unhighlight the highlighted nodes.
+   *
+   * @param  {String} selector
+   *         The selector used to find nodes in the page.
+   */
+  async onToggleSelectorHighlighter(selector) {
+    const highlighter = await this.getSelectorHighlighter();
+    if (!highlighter) {
+      return;
+    }
+
+    await highlighter.hide();
+
+    if (selector !== this.highlighters.selectorHighlighterShown) {
+      this.store.dispatch(updateHighlightedSelector(selector));
+
+      await highlighter.show(this.selection.nodeFront, {
+        hideInfoBar: true,
+        hideGuides: true,
+        selector,
+      });
+
+      this.highlighters.selectorHighlighterShown = selector;
+      // This event is emitted for testing purposes.
+      this.emit("ruleview-selectorhighlighter-toggled", true);
+    } else {
+      this.highlighters.selectorHighlighterShown = null;
+      this.store.dispatch(updateHighlightedSelector(""));
+      // This event is emitted for testing purposes.
+      this.emit("ruleview-selectorhighlighter-toggled", false);
+    }
+  }
+
+  /**
    * Updates the rules view by dispatching the new rules data of the newly selected
    * element. This is called when the rules view becomes visible or upon new node
    * selection.
@@ -134,14 +261,25 @@ class RulesView {
    */
   async update(element) {
     if (!element) {
+      this.store.dispatch(disableAllPseudoClasses());
       this.store.dispatch(updateRules([]));
       return;
     }
 
     this.elementStyle = new ElementStyle(element, this, {}, this.pageStyle,
       this.showUserAgentStyles);
+    this.elementStyle.onChanged = this.updateRules;
     await this.elementStyle.populate();
 
+    this.store.dispatch(setPseudoClassLocks(this.elementStyle.element.pseudoClassLocks));
+    this.updateRules();
+  }
+
+  /**
+   * Updates the rules view by dispatching the current rules state. This is called from
+   * the update() function, and from the ElementStyle's onChange() handler.
+   */
+  updateRules() {
     this.store.dispatch(updateRules(this.elementStyle.rules));
   }
 }

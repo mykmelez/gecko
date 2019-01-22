@@ -1095,6 +1095,18 @@ void nsIFrame::MarkNeedsDisplayItemRebuild() {
       }
     }
 
+    const nsStyleDisplay* oldDisp = aOldComputedStyle->PeekStyleDisplay();
+    if (oldDisp &&
+        (oldDisp->mOverflowAnchor != StyleDisplay()->mOverflowAnchor)) {
+      if (ScrollAnchorContainer* container =
+              ScrollAnchorContainer::FindFor(this)) {
+        container->InvalidateAnchor();
+      }
+      if (nsIScrollableFrame* scrollableFrame = do_QueryFrame(this)) {
+        scrollableFrame->GetAnchor()->InvalidateAnchor();
+      }
+    }
+
     if (mInScrollAnchorChain) {
       const nsStylePosition* oldPosition =
           aOldComputedStyle->PeekStylePosition();
@@ -1109,7 +1121,6 @@ void nsIFrame::MarkNeedsDisplayItemRebuild() {
         needAnchorSuppression = true;
       }
 
-      const nsStyleDisplay* oldDisp = aOldComputedStyle->PeekStyleDisplay();
       if (oldDisp && (oldDisp->mPosition != StyleDisplay()->mPosition ||
                       oldDisp->TransformChanged(*StyleDisplay()))) {
         needAnchorSuppression = true;
@@ -2534,6 +2545,13 @@ static bool FrameParticipatesIn3DContext(nsIFrame* aAncestor,
 static bool ItemParticipatesIn3DContext(nsIFrame* aAncestor,
                                         nsDisplayItem* aItem) {
   auto type = aItem->GetType();
+
+  if (type == DisplayItemType::TYPE_WRAP_LIST &&
+      aItem->GetChildren()->Count() == 1) {
+    // If the wraplist has only one child item, use the type of that item.
+    type = aItem->GetChildren()->GetBottom()->GetType();
+  }
+
   if (type != DisplayItemType::TYPE_TRANSFORM &&
       type != DisplayItemType::TYPE_PERSPECTIVE) {
     return false;
@@ -2557,7 +2575,6 @@ static void WrapSeparatorTransform(nsDisplayListBuilder* aBuilder,
   nsDisplayTransform* item = MakeDisplayItem<nsDisplayTransform>(
       aBuilder, aFrame, aNonParticipants, aBuilder->GetVisibleRect(),
       Matrix4x4(), aIndex);
-  item->SetNoExtendContext();
 
   if (*aSeparator == nullptr) {
     *aSeparator = item;
@@ -5043,17 +5060,17 @@ void nsIFrame::AssociateImage(const nsStyleImage& aImage,
 
 nsresult nsFrame::GetCursor(const nsPoint& aPoint, nsIFrame::Cursor& aCursor) {
   FillCursorInformationFromStyle(StyleUI(), aCursor);
-  if (NS_STYLE_CURSOR_AUTO == aCursor.mCursor) {
+  if (StyleCursorKind::Auto == aCursor.mCursor) {
     // If this is editable, I-beam cursor is better for most elements.
     aCursor.mCursor = (mContent && mContent->IsEditable())
-                          ? NS_STYLE_CURSOR_TEXT
-                          : NS_STYLE_CURSOR_DEFAULT;
+                          ? StyleCursorKind::Text
+                          : StyleCursorKind::Default;
   }
-  if (NS_STYLE_CURSOR_TEXT == aCursor.mCursor &&
+  if (StyleCursorKind::Text == aCursor.mCursor &&
       GetWritingMode().IsVertical()) {
     // Per CSS UI spec, UA may treat value 'text' as
     // 'vertical-text' for vertical text.
-    aCursor.mCursor = NS_STYLE_CURSOR_VERTICAL_TEXT;
+    aCursor.mCursor = StyleCursorKind::VerticalText;
   }
 
   return NS_OK;
@@ -10952,7 +10969,7 @@ void nsFrame::VerifyDirtyBitSet(const nsFrameList& aFrameList) {
 }
 
 // Start Display Reflow
-#ifdef DEBUG
+#  ifdef DEBUG
 
 DR_cookie::DR_cookie(nsPresContext* aPresContext, nsIFrame* aFrame,
                      const ReflowInput& aReflowInput, ReflowOutput& aMetrics,
@@ -11450,12 +11467,12 @@ void DR_State::InitFrameTypeTable() {
   AddFrameTypeInfo(LayoutFrameType::TextInput, "textCtl", "textInput");
   AddFrameTypeInfo(LayoutFrameType::Text, "text", "text");
   AddFrameTypeInfo(LayoutFrameType::Viewport, "VP", "viewport");
-#ifdef MOZ_XUL
+#    ifdef MOZ_XUL
   AddFrameTypeInfo(LayoutFrameType::XULLabel, "XULLabel", "XULLabel");
   AddFrameTypeInfo(LayoutFrameType::Box, "Box", "Box");
   AddFrameTypeInfo(LayoutFrameType::Slider, "Slider", "Slider");
   AddFrameTypeInfo(LayoutFrameType::PopupSet, "PopupSet", "PopupSet");
-#endif
+#    endif
   AddFrameTypeInfo(LayoutFrameType::None, "unknown", "unknown");
 }
 
@@ -12023,7 +12040,7 @@ void DR_cookie::Change() const {
   DR_state->DeleteTreeNode(*treeNode);
 }
 
-#endif
+#  endif
 // End Display Reflow
 
 #endif

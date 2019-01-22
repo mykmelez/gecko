@@ -1,0 +1,117 @@
+// Type sizes
+$item-font-size: 13;
+$item-line-height: 20;
+
+.ds-list-title {
+  color: $grey-90;
+
+  // reset these, which come from the browser's <hr> implementation
+  margin-block-start: 0;
+  margin-block-end: 0;
+
+  // Since we don't have a border, we use padding instead of margin in order to
+  // defeat margin collapsing.
+  padding: 8px 0;
+
+  line-height: 24px;
+  font-size: 17px;
+}
+
+.ds-list-border {
+  border: 1px solid $grey-40-36;
+
+  // Instead of using margin, we need to use these to override stuff that comes
+  // by default from <hr>.
+  margin-block-start: 8px;
+  margin-block-end: 8px;
+}
+
+.ds-list {
+  display: grid;
+  grid-row-gap: 24px;
+  grid-column-gap: 24px;
+
+  // reset some stuff from <ul>.  Should maybe be hoisted when we have better
+  // regression detection?
+  padding-inline-start: 0;
+
+  // "2/3 width layout"
+  .ds-column-5 &,
+  .ds-column-6 &,
+  .ds-column-7 &,
+  .ds-column-8 & {
+    grid-template-columns: repeat(2, 1fr);
+    grid-row-gap: 24px;
+  }
+
+  // "Full width layout"
+  .ds-column-9 &,
+  .ds-column-10 &,
+  .ds-column-11 &,
+  .ds-column-12 & {
+    grid-template-columns: repeat(3, 1fr);
+    grid-row-gap: 18px;
+  }
+
+}
+
+// XXX this is gross, and attaches the bottom-border to the item above.
+// Ideally, we'd attach the top-border to the item that needs it.
+// Unfortunately the border needs to go _above_ the row gap as currently
+// set up, which means that some refactoring will be required to do this.
+.ds-list-item:nth-child(-n+3) { // all but the last three items
+  border-bottom: 2px solid $grey-40-36;
+  margin-bottom: -2px;  // cancel out the 2 pixels we used for the border
+
+  padding-bottom: 2px;
+}
+
+.ds-list-item {
+  // XXX see if we really want absolute units, maybe hoist somewhere central?
+  line-height: $item-line-height * 1px;
+  font-size: $item-font-size * 1px;
+
+  // reset some stuff from <li>.  Should maybe be hoisted when we have better
+  // regression detection?
+  display: block;
+  text-align: start;
+
+  .ds-list-item-link {
+    mix-blend-mode: normal;
+
+    padding-bottom: 16px;
+
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .ds-list-item-info {
+    @include limit-visibile-lines(1, $item-line-height, $item-font-size);
+
+    color: $grey-50;
+
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ds-list-item-title {
+    @include limit-visibile-lines(2, $item-line-height, $item-font-size);
+
+    margin-bottom: 8px;
+  }
+
+  .ds-list-item-text {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .ds-list-image {
+    width: 72px;
+    height: 72px;
+    object-fit: cover;
+
+    border: 0.5px solid $black-12;
+    box-sizing: border-box;
+    border-radius: 4px;
+  }
+}

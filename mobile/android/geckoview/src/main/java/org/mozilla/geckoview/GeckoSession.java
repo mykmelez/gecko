@@ -107,7 +107,7 @@ public class GeckoSession implements Parcelable {
     private boolean mShouldPinOnScreen;
 
     // All fields are accessed on UI thread only.
-    private PanZoomController mNPZC;
+    private PanZoomController mPanZoomController = new PanZoomController(this);
     private OverscrollEdgeEffect mOverscroll;
     private DynamicToolbarAnimator mToolbar;
     private CompositorController mController;
@@ -3658,13 +3658,7 @@ public class GeckoSession implements Parcelable {
     public @NonNull PanZoomController getPanZoomController() {
         ThreadUtils.assertOnUiThread();
 
-        if (mNPZC == null) {
-            mNPZC = new PanZoomController(this);
-            if (mAttachedCompositor) {
-                mCompositor.attachNPZC(mNPZC);
-            }
-        }
-        return mNPZC;
+        return mPanZoomController;
     }
 
     /**
@@ -3822,7 +3816,7 @@ public class GeckoSession implements Parcelable {
         @IntDef(flag = true,
                 value = { CATEGORY_NONE, CATEGORY_AD, CATEGORY_ANALYTIC,
                           CATEGORY_SOCIAL, CATEGORY_CONTENT, CATEGORY_ALL,
-                          CATEGORY_TEST })
+                          CATEGORY_TEST, CATEGORY_AD_EXT })
         /* package */ @interface Category {}
 
         static final int CATEGORY_NONE = 0;
@@ -3850,6 +3844,10 @@ public class GeckoSession implements Parcelable {
          * Block all known trackers.
          */
         static final int CATEGORY_ALL = (1 << 5) - 1;
+        /**
+         * Experimental: Block advertisements.
+         */
+        static final int CATEGORY_AD_EXT = 1 << 6;
 
         /**
          * A tracking element has been blocked from loading.
@@ -4340,10 +4338,7 @@ public class GeckoSession implements Parcelable {
         }
 
         mAttachedCompositor = true;
-
-        if (mNPZC != null) {
-            mCompositor.attachNPZC(mNPZC);
-        }
+        mCompositor.attachNPZC(mPanZoomController);
 
         if (mSurface != null) {
             // If we have a valid surface, create the compositor now that we're attached.

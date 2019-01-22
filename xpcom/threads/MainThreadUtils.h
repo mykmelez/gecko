@@ -35,11 +35,11 @@ bool NS_IsMainThread();
 
 namespace mozilla {
 
-#ifdef DEBUG
+#  ifdef DEBUG
 void AssertIsOnMainThread();
-#else
+#  else
 inline void AssertIsOnMainThread() {}
-#endif
+#  endif
 
 }  // namespace mozilla
 

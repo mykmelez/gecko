@@ -252,9 +252,6 @@ set_config('RUST_TARGET_ENV_NAME', rust_target_env_name)
 # This is used for putting source info into symbol files.
 set_config('RUSTC_COMMIT', depends(rustc_info)(lambda i: i.commit))
 
-# Until we remove all the other Rust checks in old-configure.
-add_old_configure_assignment('RUSTC', rustc)
-
 # Rustdoc is required by Rust tests below.
 js_option(env='RUSTDOC', nargs=1, help='Path to the rustdoc program')
 
@@ -312,3 +309,19 @@ def win64_cargo_linker_config(linker, env):
 
 
 set_config('WIN64_CARGO_LINKER_CONFIG', win64_cargo_linker_config)
+
+
+@depends(target, c_compiler, rustc)
+@imports('os')
+def rustc_natvis_ldflags(target, compiler_info, rustc):
+    if target.kernel == 'WINNT' and compiler_info.type in ('msvc', 'clang-cl'):
+        sysroot = check_cmd_output(rustc, '--print', 'sysroot').strip()
+        etc = os.path.join(sysroot, 'lib/rustlib/etc')
+        ldflags = []
+        for f in os.listdir(etc):
+            if f.endswith('.natvis'):
+                ldflags.append('-NATVIS:' + normsep(os.path.join(etc, f)))
+        return ldflags
+
+
+set_config('RUSTC_NATVIS_LDFLAGS', rustc_natvis_ldflags)

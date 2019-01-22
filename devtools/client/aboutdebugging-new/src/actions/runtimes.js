@@ -11,8 +11,8 @@ const {
   getCurrentRuntime,
   findRuntimeById,
 } = require("../modules/runtimes-state-helper");
-const { isSupportedDebugTarget } = require("../modules/debug-target-support");
 
+const { l10n } = require("../modules/l10n");
 const { createClientForRuntime } = require("../modules/runtime-client-factory");
 
 const { remoteClientManager } =
@@ -22,7 +22,6 @@ const {
   CONNECT_RUNTIME_FAILURE,
   CONNECT_RUNTIME_START,
   CONNECT_RUNTIME_SUCCESS,
-  DEBUG_TARGETS,
   DISCONNECT_RUNTIME_FAILURE,
   DISCONNECT_RUNTIME_START,
   DISCONNECT_RUNTIME_SUCCESS,
@@ -30,6 +29,7 @@ const {
   REMOTE_RUNTIMES_UPDATED,
   RUNTIME_PREFERENCE,
   RUNTIMES,
+  THIS_FIREFOX_RUNTIME_CREATED,
   UNWATCH_RUNTIME_FAILURE,
   UNWATCH_RUNTIME_START,
   UNWATCH_RUNTIME_SUCCESS,
@@ -116,6 +116,18 @@ function connectRuntime(id) {
   };
 }
 
+function createThisFirefoxRuntime() {
+  return (dispatch, getState) => {
+    const thisFirefoxRuntime = {
+      id: RUNTIMES.THIS_FIREFOX,
+      isUnknown: false,
+      name: l10n.getString("about-debugging-this-firefox-runtime-name"),
+      type: RUNTIMES.THIS_FIREFOX,
+    };
+    dispatch({ type: THIS_FIREFOX_RUNTIME_CREATED, runtime: thisFirefoxRuntime });
+  };
+}
+
 function disconnectRuntime(id) {
   return async (dispatch, getState) => {
     dispatch({ type: DISCONNECT_RUNTIME_START });
@@ -196,17 +208,9 @@ function watchRuntime(id) {
       const runtime = findRuntimeById(id, getState().runtimes);
       await dispatch({ type: WATCH_RUNTIME_SUCCESS, runtime });
 
-      if (isSupportedDebugTarget(runtime.type, DEBUG_TARGETS.EXTENSION)) {
-        dispatch(Actions.requestExtensions());
-      }
-
-      if (isSupportedDebugTarget(runtime.type, DEBUG_TARGETS.TAB)) {
-        dispatch(Actions.requestTabs());
-      }
-
-      if (isSupportedDebugTarget(runtime.type, DEBUG_TARGETS.WORKER)) {
-        dispatch(Actions.requestWorkers());
-      }
+      dispatch(Actions.requestExtensions());
+      dispatch(Actions.requestTabs());
+      dispatch(Actions.requestWorkers());
     } catch (e) {
       dispatch({ type: WATCH_RUNTIME_FAILURE, error: e });
     }
@@ -358,6 +362,7 @@ function removeRuntimeListeners() {
 
 module.exports = {
   connectRuntime,
+  createThisFirefoxRuntime,
   disconnectRuntime,
   removeRuntimeListeners,
   unwatchRuntime,

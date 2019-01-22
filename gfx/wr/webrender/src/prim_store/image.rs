@@ -11,7 +11,8 @@ use api::ImageKey as ApiImageKey;
 use display_list_flattener::{AsInstanceKind, CreateShadow, IsVisible};
 use frame_builder::FrameBuildingState;
 use gpu_cache::{GpuCacheHandle, GpuDataRequest};
-use intern::{DataStore, Handle, Internable, Interner, InternDebug, UpdateList};
+use intern::{Internable, InternDebug};
+use intern_types;
 use prim_store::{
     EdgeAaSegmentMask, OpacityBindingIndex, PrimitiveInstanceKind,
     PrimitiveOpacity, PrimitiveSceneData, PrimKey, PrimKeyCommonData,
@@ -84,7 +85,6 @@ impl ImageKey {
     pub fn new(
         is_backface_visible: bool,
         prim_size: LayoutSize,
-        prim_relative_clip_rect: LayoutRect,
         image: Image,
     ) -> Self {
 
@@ -92,7 +92,6 @@ impl ImageKey {
             common: PrimKeyCommonData {
                 is_backface_visible,
                 prim_size: prim_size.into(),
-                prim_relative_clip_rect: prim_relative_clip_rect.into(),
             },
             kind: image,
         }
@@ -335,18 +334,10 @@ impl From<ImageKey> for ImageTemplate {
     }
 }
 
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Clone, Copy, Debug, Hash, Eq, MallocSizeOf, PartialEq)]
-pub struct ImageDataMarker;
-
-pub type ImageDataStore = DataStore<ImageKey, ImageTemplate, ImageDataMarker>;
-pub type ImageDataHandle = Handle<ImageDataMarker>;
-pub type ImageDataUpdateList = UpdateList<ImageKey>;
-pub type ImageDataInterner = Interner<ImageKey, PrimitiveSceneData, ImageDataMarker>;
+pub use intern_types::image::Handle as ImageDataHandle;
 
 impl Internable for Image {
-    type Marker = ImageDataMarker;
+    type Marker = intern_types::image::Marker;
     type Source = ImageKey;
     type StoreData = ImageTemplate;
     type InternData = PrimitiveSceneData;
@@ -355,12 +346,10 @@ impl Internable for Image {
     fn build_key(
         self,
         info: &LayoutPrimitiveInfo,
-        prim_relative_clip_rect: LayoutRect,
     ) -> ImageKey {
         ImageKey::new(
             info.is_backface_visible,
             info.rect.size,
-            prim_relative_clip_rect,
             self
         )
     }
@@ -405,7 +394,6 @@ impl YuvImageKey {
     pub fn new(
         is_backface_visible: bool,
         prim_size: LayoutSize,
-        prim_relative_clip_rect: LayoutRect,
         yuv_image: YuvImage,
     ) -> Self {
 
@@ -413,7 +401,6 @@ impl YuvImageKey {
             common: PrimKeyCommonData {
                 is_backface_visible,
                 prim_size: prim_size.into(),
-                prim_relative_clip_rect: prim_relative_clip_rect.into(),
             },
             kind: yuv_image,
         }
@@ -513,18 +500,10 @@ impl From<YuvImageKey> for YuvImageTemplate {
     }
 }
 
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Clone, Copy, Debug, Hash, Eq, MallocSizeOf, PartialEq)]
-pub struct YuvImageDataMarker;
-
-pub type YuvImageDataStore = DataStore<YuvImageKey, YuvImageTemplate, YuvImageDataMarker>;
-pub type YuvImageDataHandle = Handle<YuvImageDataMarker>;
-pub type YuvImageDataUpdateList = UpdateList<YuvImageKey>;
-pub type YuvImageDataInterner = Interner<YuvImageKey, PrimitiveSceneData, YuvImageDataMarker>;
+pub use intern_types::yuv_image::Handle as YuvImageDataHandle;
 
 impl Internable for YuvImage {
-    type Marker = YuvImageDataMarker;
+    type Marker = intern_types::yuv_image::Marker;
     type Source = YuvImageKey;
     type StoreData = YuvImageTemplate;
     type InternData = PrimitiveSceneData;
@@ -533,12 +512,10 @@ impl Internable for YuvImage {
     fn build_key(
         self,
         info: &LayoutPrimitiveInfo,
-        prim_relative_clip_rect: LayoutRect,
     ) -> YuvImageKey {
         YuvImageKey::new(
             info.is_backface_visible,
             info.rect.size,
-            prim_relative_clip_rect,
             self
         )
     }
@@ -561,9 +538,9 @@ fn test_struct_sizes() {
     // (b) You made a structure larger. This is not necessarily a problem, but should only
     //     be done with care, and after checking if talos performance regresses badly.
     assert_eq!(mem::size_of::<Image>(), 56, "Image size changed");
-    assert_eq!(mem::size_of::<ImageTemplate>(), 124, "ImageTemplate size changed");
-    assert_eq!(mem::size_of::<ImageKey>(), 84, "ImageKey size changed");
+    assert_eq!(mem::size_of::<ImageTemplate>(), 108, "ImageTemplate size changed");
+    assert_eq!(mem::size_of::<ImageKey>(), 68, "ImageKey size changed");
     assert_eq!(mem::size_of::<YuvImage>(), 36, "YuvImage size changed");
-    assert_eq!(mem::size_of::<YuvImageTemplate>(), 72, "YuvImageTemplate size changed");
-    assert_eq!(mem::size_of::<YuvImageKey>(), 64, "YuvImageKey size changed");
+    assert_eq!(mem::size_of::<YuvImageTemplate>(), 56, "YuvImageTemplate size changed");
+    assert_eq!(mem::size_of::<YuvImageKey>(), 48, "YuvImageKey size changed");
 }

@@ -43,29 +43,29 @@
 #include <gtk/gtkx.h>
 
 #ifdef MOZ_WAYLAND
-#include <gdk/gdkwayland.h>
+#  include <gdk/gdkwayland.h>
 #endif /* MOZ_WAYLAND */
 
 #ifdef MOZ_X11
-#include <gdk/gdkx.h>
-#include <X11/Xatom.h>
-#include <X11/extensions/XShm.h>
-#include <X11/extensions/shape.h>
-#include <gdk/gdkkeysyms-compat.h>
+#  include <gdk/gdkx.h>
+#  include <X11/Xatom.h>
+#  include <X11/extensions/XShm.h>
+#  include <X11/extensions/shape.h>
+#  include <gdk/gdkkeysyms-compat.h>
 #endif /* MOZ_X11 */
 
 #include <gdk/gdkkeysyms.h>
 
 #if defined(MOZ_WAYLAND)
-#include <gdk/gdkwayland.h>
-#include "nsView.h"
+#  include <gdk/gdkwayland.h>
+#  include "nsView.h"
 #endif
 
 #include "nsGkAtoms.h"
 
 #ifdef MOZ_ENABLE_STARTUP_NOTIFICATION
-#define SN_API_NOT_YET_FROZEN
-#include <startup-notification-1.0/libsn/sn.h>
+#  define SN_API_NOT_YET_FROZEN
+#  include <startup-notification-1.0/libsn/sn.h>
 #endif
 
 #include "mozilla/Assertions.h"
@@ -84,9 +84,9 @@
 #include "gfx2DGlue.h"
 
 #ifdef ACCESSIBILITY
-#include "mozilla/a11y/Accessible.h"
-#include "mozilla/a11y/Platform.h"
-#include "nsAccessibilityService.h"
+#  include "mozilla/a11y/Accessible.h"
+#  include "mozilla/a11y/Platform.h"
+#  include "nsAccessibilityService.h"
 
 using namespace mozilla;
 using namespace mozilla::widget;
@@ -119,15 +119,15 @@ using namespace mozilla::widget;
 #include "mozilla/layers/CompositorThread.h"
 
 #ifdef MOZ_X11
-#include "GLContextGLX.h"  // for GLContextGLX::FindVisual()
-#include "GtkCompositorWidget.h"
-#include "gfxXlibSurface.h"
-#include "WindowSurfaceX11Image.h"
-#include "WindowSurfaceX11SHM.h"
-#include "WindowSurfaceXRender.h"
+#  include "GLContextGLX.h"  // for GLContextGLX::FindVisual()
+#  include "GtkCompositorWidget.h"
+#  include "gfxXlibSurface.h"
+#  include "WindowSurfaceX11Image.h"
+#  include "WindowSurfaceX11SHM.h"
+#  include "WindowSurfaceXRender.h"
 #endif  // MOZ_X11
 #ifdef MOZ_WAYLAND
-#include "nsIClipboard.h"
+#  include "nsIClipboard.h"
 #endif
 
 #include "nsShmImage.h"
@@ -1769,15 +1769,15 @@ bool nsWindow::HasPendingInputEvent() {
 }
 
 #if 0
-#ifdef DEBUG
+#  ifdef DEBUG
 // Paint flashing code (disabled for cairo - see below)
 
-#define CAPS_LOCK_IS_ON \
-  (KeymapWrapper::AreModifiersCurrentlyActive(KeymapWrapper::CAPS_LOCK))
+#    define CAPS_LOCK_IS_ON \
+      (KeymapWrapper::AreModifiersCurrentlyActive(KeymapWrapper::CAPS_LOCK))
 
-#define WANT_PAINT_FLASHING (debug_WantPaintFlashing() && CAPS_LOCK_IS_ON)
+#    define WANT_PAINT_FLASHING (debug_WantPaintFlashing() && CAPS_LOCK_IS_ON)
 
-#ifdef MOZ_X11
+#    ifdef MOZ_X11
 static void
 gdk_window_flash(GdkWindow *    aGdkWindow,
                  unsigned int   aTimes,
@@ -1832,12 +1832,12 @@ gdk_window_flash(GdkWindow *    aGdkWindow,
 
   gdk_region_offset(aRegion, -x, -y);
 }
-#endif  /* MOZ_X11 */
-#endif  // DEBUG
+#    endif /* MOZ_X11 */
+#  endif   // DEBUG
 #endif
 
 #ifdef cairo_copy_clip_rectangle_list
-#error "Looks like we're including Mozilla's cairo instead of system cairo"
+#  error "Looks like we're including Mozilla's cairo instead of system cairo"
 #endif
 static bool ExtractExposeRegion(LayoutDeviceIntRegion &aRegion, cairo_t *cr) {
   cairo_rectangle_list_t *rects = cairo_copy_clip_rectangle_list(cr);
@@ -2008,16 +2008,16 @@ gboolean nsWindow::OnExposeEvent(cairo_t *cr) {
   }
   MOZ_ASSERT(ctx);  // checked both dt and destDT valid draw target above
 
-#if 0
+#  if 0
     // NOTE: Paint flashing region would be wrong for cairo, since
     // cairo inflates the update region, etc.  So don't paint flash
     // for cairo.
-#ifdef DEBUG
+#    ifdef DEBUG
     // XXX aEvent->region may refer to a newly-invalid area.  FIXME
     if (0 && WANT_PAINT_FLASHING && gtk_widget_get_window(aEvent))
         gdk_window_flash(mGdkWindow, 1, 100, aEvent->region);
-#endif
-#endif
+#    endif
+#  endif
 
 #endif  // MOZ_X11
 
@@ -2310,6 +2310,31 @@ static LayoutDeviceIntPoint GetRefPoint(nsWindow *aWindow, Event *aEvent) {
 }
 
 void nsWindow::OnMotionNotifyEvent(GdkEventMotion *aEvent) {
+  if (mWindowShouldStartDragging) {
+    mWindowShouldStartDragging = false;
+    // find the top-level window
+    GdkWindow *gdk_window = gdk_window_get_toplevel(mGdkWindow);
+    MOZ_ASSERT(gdk_window, "gdk_window_get_toplevel should not return null");
+
+    bool canDrag = true;
+    if (mIsX11Display) {
+      // Workaround for https://bugzilla.gnome.org/show_bug.cgi?id=789054
+      // To avoid crashes disable double-click on WM without _NET_WM_MOVERESIZE.
+      // See _should_perform_ewmh_drag() at gdkwindow-x11.c
+      GdkScreen *screen = gdk_window_get_screen(gdk_window);
+      GdkAtom atom = gdk_atom_intern("_NET_WM_MOVERESIZE", FALSE);
+      if (!gdk_x11_screen_supports_net_wm_hint(screen, atom)) {
+        canDrag = false;
+      }
+    }
+
+    if (canDrag) {
+      gdk_window_begin_move_drag(gdk_window, 1, aEvent->x_root, aEvent->y_root,
+                                 aEvent->time);
+      return;
+    }
+  }
+
   // see if we can compress this event
   // XXXldb Why skip every other motion event when we have multiple,
   // but not more than that?
@@ -2538,7 +2563,13 @@ void nsWindow::OnButtonPressEvent(GdkEventButton *aEvent) {
   InitButtonEvent(event, aEvent);
   event.pressure = mLastMotionPressure;
 
-  DispatchInputEvent(&event);
+  nsEventStatus eventStatus = DispatchInputEvent(&event);
+
+  if (mDraggableRegion.Contains(aEvent->x, aEvent->y) &&
+      domButton == WidgetMouseEvent::eLeftButton &&
+      eventStatus != nsEventStatus_eConsumeNoDefault) {
+    mWindowShouldStartDragging = true;
+  }
 
   // right menu click on linux should also pop up a context menu
   if (!nsBaseWidget::ShowContextMenuAfterMouseUp()) {
@@ -2548,6 +2579,10 @@ void nsWindow::OnButtonPressEvent(GdkEventButton *aEvent) {
 
 void nsWindow::OnButtonReleaseEvent(GdkEventButton *aEvent) {
   LOG(("Button %u release on %p\n", aEvent->button, (void *)this));
+
+  if (mWindowShouldStartDragging) {
+    mWindowShouldStartDragging = false;
+  }
 
   uint16_t domButton;
   switch (aEvent->button) {
@@ -3174,14 +3209,6 @@ nsresult nsWindow::Create(nsIWidget *aParent, nsNativeWidget aNativeParent,
   bool needsAlphaVisual =
       (mWindowType == eWindowType_popup && aInitData->mSupportTranslucency);
 
-  // Some Gtk+ themes use non-rectangular toplevel windows. To fully support
-  // such themes we need to make toplevel window transparent with ARGB visual.
-  // It may cause performanance issue so make it configurable
-  // and enable it by default for selected window managers.
-  if (mWindowType == eWindowType_toplevel) {
-    needsAlphaVisual = TopLevelWindowUseARGBVisual();
-  }
-
   if (aParent) {
     parentnsWindow = static_cast<nsWindow *>(aParent);
     parentGdkWindow = parentnsWindow->mGdkWindow;
@@ -3228,8 +3255,6 @@ nsresult nsWindow::Create(nsIWidget *aParent, nsNativeWidget aNativeParent,
       }
       mShell = gtk_window_new(type);
 
-      bool isSetVisual = false;
-#ifdef MOZ_X11
       // Ensure gfxPlatform is initialized, since that is what initializes
       // gfxVars, used below.
       Unused << gfxPlatform::GetPlatform();
@@ -3240,6 +3265,18 @@ nsresult nsWindow::Create(nsIWidget *aParent, nsNativeWidget aNativeParent,
       bool shouldAccelerate = ComputeShouldAccelerate();
       MOZ_ASSERT(shouldAccelerate | !useWebRender);
 
+      // Some Gtk+ themes use non-rectangular toplevel windows. To fully support
+      // such themes we need to make toplevel window transparent with ARGB
+      // visual. It may cause performanance issue so make it configurable and
+      // enable it by default for selected window managers. Also disable it for
+      // X11 SW rendering (Bug 1516224) by default.
+      if (mWindowType == eWindowType_toplevel &&
+          (shouldAccelerate || !mIsX11Display ||
+           Preferences::HasUserValue("mozilla.widget.use-argb-visuals"))) {
+        needsAlphaVisual = TopLevelWindowUseARGBVisual();
+      }
+
+      bool isSetVisual = false;
       // If using WebRender on X11, we need to select a visual with a depth
       // buffer, as well as an alpha channel if transparency is requested. This
       // must be done before the widget is realized.
@@ -3263,7 +3300,6 @@ nsresult nsWindow::Create(nsIWidget *aParent, nsNativeWidget aNativeParent,
           NS_WARNING("We're missing X11 Visual!");
         }
       }
-#endif  // MOZ_X11
 
       if (!isSetVisual && needsAlphaVisual) {
         GdkScreen *screen = gtk_widget_get_screen(mShell);
@@ -3647,11 +3683,11 @@ nsresult nsWindow::Create(nsIWidget *aParent, nsNativeWidget aNativeParent,
       SetCompositorHint(GTK_WIDGET_COMPOSIDED_ENABLED);
     }
   }
-#ifdef MOZ_WAYLAND
+#  ifdef MOZ_WAYLAND
   else if (!mIsX11Display) {
     mSurfaceProvider.Initialize(this);
   }
-#endif
+#  endif
 #endif
   return NS_OK;
 }
@@ -5224,7 +5260,7 @@ static gboolean key_press_event_cb(GtkWidget *widget, GdkEventKey *event) {
   // We use the event time of the last one.
   // Note: GDK calls XkbSetDetectableAutorepeat so that KeyRelease events
   // are generated only when the key is physically released.
-#define NS_GDKEVENT_MATCH_MASK 0x1FFF /* GDK_SHIFT_MASK .. GDK_BUTTON5_MASK */
+#  define NS_GDKEVENT_MATCH_MASK 0x1FFF  // GDK_SHIFT_MASK .. GDK_BUTTON5_MASK
   GdkDisplay *gdkDisplay = gtk_widget_get_display(widget);
   if (GDK_IS_X11_DISPLAY(gdkDisplay)) {
     Display *dpy = GDK_DISPLAY_XDISPLAY(gdkDisplay);
@@ -5780,26 +5816,6 @@ bool nsWindow::GetDragInfo(WidgetMouseEvent *aMouseEvent, GdkWindow **aWindow,
   return true;
 }
 
-nsresult nsWindow::BeginMoveDrag(WidgetMouseEvent *aEvent) {
-  MOZ_ASSERT(aEvent, "must have event");
-  MOZ_ASSERT(aEvent->mClass == eMouseEventClass,
-             "event must have correct struct type");
-
-  GdkWindow *gdk_window;
-  gint button, screenX, screenY;
-  if (!GetDragInfo(aEvent, &gdk_window, &button, &screenX, &screenY)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  // tell the window manager to start the move
-  screenX = DevicePixelsToGdkCoordRoundDown(screenX);
-  screenY = DevicePixelsToGdkCoordRoundDown(screenY);
-  gdk_window_begin_move_drag(gdk_window, button, screenX, screenY,
-                             aEvent->mTime);
-
-  return NS_OK;
-}
-
 nsresult nsWindow::BeginResizeDrag(WidgetGUIEvent *aEvent, int32_t aHorizontal,
                                    int32_t aVertical) {
   NS_ENSURE_ARG_POINTER(aEvent);
@@ -6345,6 +6361,25 @@ nsWindow::CSDSupportLevel nsWindow::GetSystemCSDSupportLevel() {
   return sCSDSupportLevel;
 }
 
+bool nsWindow::HideTitlebarByDefault() {
+  static int hideTitlebar = -1;
+  if (hideTitlebar != -1) {
+    return hideTitlebar;
+  }
+
+  const char *currentDesktop = getenv("XDG_CURRENT_DESKTOP");
+  hideTitlebar =
+      (currentDesktop && GetSystemCSDSupportLevel() != CSD_SUPPORT_NONE);
+
+  if (hideTitlebar) {
+    hideTitlebar =
+        (strstr(currentDesktop, "GNOME-Flashback:GNOME") != nullptr ||
+         strstr(currentDesktop, "GNOME") != nullptr);
+  }
+
+  return hideTitlebar;
+}
+
 bool nsWindow::TopLevelWindowUseARGBVisual() {
   static int useARGBVisual = -1;
   if (useARGBVisual != -1) {
@@ -6419,7 +6454,7 @@ bool nsWindow::WaylandSurfaceNeedsClear() {
  * for further details.
  */
 
-#define PROGRESS_HINT "_NET_WM_XAPP_PROGRESS"
+#  define PROGRESS_HINT "_NET_WM_XAPP_PROGRESS"
 
 static void set_window_hint_cardinal(Window xid, const gchar *atom_name,
                                      gulong cardinal) {

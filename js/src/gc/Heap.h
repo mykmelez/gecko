@@ -166,8 +166,9 @@ class FreeSpan {
       return nullptr;  // The span is empty.
     }
     checkSpan(arena);
-    DebugOnlyPoison(reinterpret_cast<void*>(thing), JS_ALLOCATED_TENURED_PATTERN,
-                    thingSize, MemCheckKind::MakeUndefined);
+    DebugOnlyPoison(reinterpret_cast<void*>(thing),
+                    JS_ALLOCATED_TENURED_PATTERN, thingSize,
+                    MemCheckKind::MakeUndefined);
     return reinterpret_cast<TenuredCell*>(thing);
   }
 
@@ -237,7 +238,7 @@ class Arena {
    */
   static const size_t DELAYED_MARKING_FLAG_BITS = 3;
   static const size_t DELAYED_MARKING_ARENA_BITS =
-    JS_BITS_PER_WORD - 8 - DELAYED_MARKING_FLAG_BITS;
+      JS_BITS_PER_WORD - 8 - DELAYED_MARKING_FLAG_BITS;
   size_t onDelayedMarkingList_ : 1;
   size_t hasDelayedBlackMarking_ : 1;
   size_t hasDelayedGrayMarking_ : 1;
@@ -841,12 +842,12 @@ static_assert(
  * Tracks the used sizes for owned heap data and automatically maintains the
  * memory usage relationship between GCRuntime and Zones.
  */
-class HeapUsage {
+class HeapSize {
   /*
    * A heap usage that contains our parent's heap usage, or null if this is
    * the top-level usage container.
    */
-  HeapUsage* const parent_;
+  HeapSize* const parent_;
 
   /*
    * The approximate number of bytes in use on the GC heap, to the nearest
@@ -860,7 +861,7 @@ class HeapUsage {
       gcBytes_;
 
  public:
-  explicit HeapUsage(HeapUsage* parent) : parent_(parent), gcBytes_(0) {}
+  explicit HeapSize(HeapSize* parent) : parent_(parent), gcBytes_(0) {}
 
   size_t gcBytes() const { return gcBytes_; }
 
@@ -879,7 +880,7 @@ class HeapUsage {
   }
 
   /* Pair to adoptArenas. Adopts the attendant usage statistics. */
-  void adopt(HeapUsage& other) {
+  void adopt(HeapSize& other) {
     gcBytes_ += other.gcBytes_;
     other.gcBytes_ = 0;
   }

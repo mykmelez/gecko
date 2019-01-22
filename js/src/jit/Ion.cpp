@@ -36,7 +36,6 @@
 #include "jit/LICM.h"
 #include "jit/Linker.h"
 #include "jit/LIR.h"
-#include "jit/LoopUnroller.h"
 #include "jit/Lowering.h"
 #include "jit/PerfSpewer.h"
 #include "jit/RangeAnalysis.h"
@@ -67,7 +66,7 @@
 #include "vm/Stack-inl.h"
 
 #if defined(ANDROID)
-#include <sys/system_properties.h>
+#  include <sys/system_properties.h>
 #endif
 
 using namespace js;
@@ -1470,17 +1469,6 @@ bool OptimizeMIR(MIRGenerator* mir) {
       if (mir->shouldCancel("Truncate Doubles")) {
         return false;
       }
-    }
-
-    if (mir->optimizationInfo().loopUnrollingEnabled()) {
-      AutoTraceLog log(logger, TraceLogger_LoopUnrolling);
-
-      if (!UnrollLoops(graph, r.loopIterationBounds)) {
-        return false;
-      }
-
-      gs.spewPass("Unroll Loops");
-      AssertExtendedGraphCoherency(graph);
     }
   }
 
@@ -3094,9 +3082,9 @@ AutoFlushICache::AutoFlushICache(const char* nonce, bool inhibit)
     defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
     : start_(0),
       stop_(0),
-#ifdef JS_JITSPEW
+#  ifdef JS_JITSPEW
       name_(nonce),
-#endif
+#  endif
       inhibit_(inhibit)
 #endif
 {

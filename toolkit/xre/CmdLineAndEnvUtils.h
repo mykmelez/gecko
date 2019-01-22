@@ -10,20 +10,20 @@
 // NB: This code may be used outside of xul and thus must not depend on XPCOM
 
 #if defined(MOZILLA_INTERNAL_API)
-#include "prenv.h"
-#include "prprf.h"
-#include <string.h>
+#  include "prenv.h"
+#  include "prprf.h"
+#  include <string.h>
 #elif defined(XP_WIN)
-#include <stdlib.h>
+#  include <stdlib.h>
 #endif
 
 #if defined(XP_WIN)
-#include "mozilla/Move.h"
-#include "mozilla/UniquePtr.h"
-#include "mozilla/Vector.h"
+#  include "mozilla/Move.h"
+#  include "mozilla/UniquePtr.h"
+#  include "mozilla/Vector.h"
 
-#include <wchar.h>
-#include <windows.h>
+#  include <wchar.h>
+#  include <windows.h>
 #endif  // defined(XP_WIN)
 
 #include "mozilla/MemoryChecking.h"
@@ -31,6 +31,11 @@
 
 #include <ctype.h>
 #include <stdint.h>
+
+#ifndef NS_NO_XPCOM
+#  include "nsIFile.h"
+#  include "mozilla/AlreadyAddRefed.h"
+#endif
 
 // Undo X11/X.h's definition of None
 #undef None
@@ -123,7 +128,8 @@ MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(CheckArgFlag)
  */
 template <typename CharT>
 inline ArgResult CheckArg(int& aArgc, CharT** aArgv, const CharT* aArg,
-                          const CharT** aParam, CheckArgFlag aFlags) {
+                          const CharT** aParam = nullptr,
+                          CheckArgFlag aFlags = CheckArgFlag::RemoveArg) {
   MOZ_ASSERT(aArgv && aArg);
 
   CharT** curarg = aArgv + 1;  // skip argv[0]
@@ -353,11 +359,7 @@ inline UniquePtr<wchar_t[]> MakeCommandLine(int argc, wchar_t** argv,
   return s;
 }
 
-inline bool SetArgv0ToFullBinaryPath(wchar_t* aArgv[]) {
-  if (!aArgv) {
-    return false;
-  }
-
+inline UniquePtr<wchar_t[]> GetFullBinaryPath() {
   DWORD bufLen = MAX_PATH;
   mozilla::UniquePtr<wchar_t[]> buf;
   DWORD retLen;
@@ -366,7 +368,7 @@ inline bool SetArgv0ToFullBinaryPath(wchar_t* aArgv[]) {
     buf = mozilla::MakeUnique<wchar_t[]>(bufLen);
     retLen = ::GetModuleFileNameW(nullptr, buf.get(), bufLen);
     if (!retLen) {
-      return false;
+      return nullptr;
     }
 
     if (retLen == bufLen && ::GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
@@ -382,8 +384,21 @@ inline bool SetArgv0ToFullBinaryPath(wchar_t* aArgv[]) {
 
   // Since we're likely to have a bunch of unused space in buf, let's reallocate
   // a string to the actual size of the file name.
-  auto newArgv_0 = mozilla::MakeUnique<wchar_t[]>(retLen);
-  if (wcscpy_s(newArgv_0.get(), retLen, buf.get())) {
+  auto result = mozilla::MakeUnique<wchar_t[]>(retLen);
+  if (wcscpy_s(result.get(), retLen, buf.get())) {
+    return nullptr;
+  }
+
+  return result;
+}
+
+inline bool SetArgv0ToFullBinaryPath(wchar_t* aArgv[]) {
+  if (!aArgv) {
+    return false;
+  }
+
+  UniquePtr<wchar_t[]> newArgv_0(GetFullBinaryPath());
+  if (!newArgv_0) {
     return false;
   }
 
@@ -411,7 +426,7 @@ MOZ_NEVER_INLINE inline void SaveToEnv(const char* aEnvString) {
   // copy)
   _putenv(aEnvString);
 #else
-#error "Not implemented for this configuration"
+#  error "Not implemented for this configuration"
 #endif
 }
 
@@ -424,9 +439,13 @@ inline bool EnvHasValue(const char* aVarName) {
   const char* val = getenv(aVarName);
   return val && *val;
 #else
-#error "Not implemented for this configuration"
+#  error "Not implemented for this configuration"
 #endif
 }
+
+#ifndef NS_NO_XPCOM
+already_AddRefed<nsIFile> GetFileFromEnv(const char* name);
+#endif
 
 }  // namespace mozilla
 

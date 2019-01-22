@@ -558,11 +558,10 @@ class ContentParent final : public PContentParent,
 
   // PURLClassifierParent.
   virtual PURLClassifierParent* AllocPURLClassifierParent(
-      const Principal& aPrincipal, const bool& aUseTrackingProtection,
-      bool* aSuccess) override;
+      const Principal& aPrincipal, bool* aSuccess) override;
   virtual mozilla::ipc::IPCResult RecvPURLClassifierConstructor(
       PURLClassifierParent* aActor, const Principal& aPrincipal,
-      const bool& aUseTrackingProtection, bool* aSuccess) override;
+      bool* aSuccess) override;
 
   // PURLClassifierLocalParent.
   virtual PURLClassifierLocalParent* AllocPURLClassifierLocalParent(
@@ -645,6 +644,9 @@ class ContentParent final : public PContentParent,
   virtual mozilla::ipc::IPCResult RecvWindowPostMessage(
       const BrowsingContextId& aContextId, const ClonedMessageData& aMessage,
       const PostMessageData& aData) override;
+
+  virtual mozilla::ipc::IPCResult RecvSetUserGestureActivation(
+      const BrowsingContextId& aContextId, const bool& aNewValue) override;
 
  protected:
   void OnChannelConnected(int32_t pid) override;

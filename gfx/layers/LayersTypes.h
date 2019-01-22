@@ -13,7 +13,7 @@
 #include "mozilla/DefineEnum.h"  // for MOZ_DEFINE_ENUM
 #include "mozilla/gfx/Point.h"   // for IntPoint
 #include "mozilla/Maybe.h"
-#include "mozilla/TimeStamp.h"   // for TimeStamp
+#include "mozilla/TimeStamp.h"  // for TimeStamp
 #include "mozilla/TypedEnumBits.h"
 #include "nsRegion.h"
 #include "nsStyleConsts.h"
@@ -22,7 +22,7 @@
 #include "mozilla/Logging.h"  // for PR_LOG
 
 #ifndef MOZ_LAYERS_HAVE_LOG
-#define MOZ_LAYERS_HAVE_LOG
+#  define MOZ_LAYERS_HAVE_LOG
 #endif
 #define MOZ_LAYERS_LOG(_args) \
   MOZ_LOG(LayerManager::GetLog(), LogLevel::Debug, _args)
@@ -420,7 +420,7 @@ MOZ_DEFINE_ENUM_CLASS_WITH_BASE(CompositionPayloadType, uint8_t, (
 // clang-format on
 
 struct CompositionPayload {
-  bool operator ==(const CompositionPayload& aOther) const {
+  bool operator==(const CompositionPayload& aOther) const {
     return mType == aOther.mType && mTimeStamp == aOther.mTimeStamp;
   }
   /* The type of payload that is in this composition */

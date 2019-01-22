@@ -235,7 +235,6 @@
 @RESPATH@/components/nsUpdateTimerManager.js
 @RESPATH@/components/utils.manifest
 @RESPATH@/components/simpleServices.js
-@RESPATH@/components/pluginGlue.manifest
 @RESPATH@/components/ProcessSingleton.manifest
 @RESPATH@/components/MainProcessSingleton.js
 @RESPATH@/components/ContentProcessSingleton.js
@@ -500,7 +499,7 @@
 @RESPATH@/res/svg.css
 
 ; [Layout Debugger]
-#ifdef MOZ_DEBUG
+#ifdef MOZ_LAYOUT_DEBUGGER
 @RESPATH@/chrome/layoutdebug@JAREXT@
 @RESPATH@/chrome/layoutdebug.manifest
 #endif

@@ -36,7 +36,7 @@
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #ifdef ENABLE_BIGINT
-#include "vm/BigIntType.h"
+#  include "vm/BigIntType.h"
 #endif
 #include "vm/BytecodeUtil.h"
 #include "vm/Debugger.h"
@@ -51,7 +51,6 @@
 #include "vm/Opcodes.h"
 #include "vm/Scope.h"
 #include "vm/Shape.h"
-#include "vm/Stopwatch.h"
 #include "vm/StringType.h"
 #include "vm/TraceLogging.h"
 
@@ -120,11 +119,13 @@ bool js::GetFunctionThis(JSContext* cx, AbstractFramePtr frame,
   MOZ_ASSERT(frame.isFunctionFrame());
   MOZ_ASSERT(!frame.callee()->isArrow());
 
-  if (frame.thisArgument().isObject() || frame.callee()->strict() ||
-      frame.callee()->isSelfHostedBuiltin()) {
+  if (frame.thisArgument().isObject() || frame.callee()->strict()) {
     res.set(frame.thisArgument());
     return true;
   }
+
+  MOZ_ASSERT(!frame.callee()->isSelfHostedBuiltin(),
+             "Self-hosted builtins must be strict");
 
   RootedValue thisv(cx, frame.thisArgument());
 
@@ -377,7 +378,7 @@ InterpreterFrame* RunState::pushInterpreterFrame(JSContext* cx) {
 // stack frames and stack overflow issues, see bug 1167883. Turn off PGO to
 // avoid this.
 #ifdef _MSC_VER
-#pragma optimize("g", off)
+#  pragma optimize("g", off)
 #endif
 bool js::RunScript(JSContext* cx, RunState& state) {
   if (!CheckRecursionLimit(cx)) {
@@ -397,10 +398,6 @@ bool js::RunScript(JSContext* cx, RunState& state) {
   if (!Debugger::checkNoExecute(cx, state.script())) {
     return false;
   }
-
-#if defined(MOZ_HAVE_RDTSC)
-  js::AutoStopwatch stopwatch(cx);
-#endif  // defined(MOZ_HAVE_RDTSC)
 
   GeckoProfilerEntryMarker marker(cx, state.script());
 
@@ -424,7 +421,7 @@ bool js::RunScript(JSContext* cx, RunState& state) {
   return Interpret(cx, state);
 }
 #ifdef _MSC_VER
-#pragma optimize("", on)
+#  pragma optimize("", on)
 #endif
 
 STATIC_PRECONDITION_ASSUME(ubound(args.argv_) >= argc)
@@ -1110,8 +1107,7 @@ class InterpreterTryNoteFilter {
   }
 };
 
-class TryNoteIterInterpreter
-    : public TryNoteIter<InterpreterTryNoteFilter> {
+class TryNoteIterInterpreter : public TryNoteIter<InterpreterTryNoteFilter> {
  public:
   TryNoteIterInterpreter(JSContext* cx, const InterpreterRegs& regs)
       : TryNoteIter(cx, regs.fp()->script(), regs.pc,
@@ -1680,38 +1676,38 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
 #if (defined(__GNUC__) || (__IBMC__ >= 700 && defined __IBM_COMPUTED_GOTO) || \
      __SUNPRO_C >= 0x570)
 // Non-standard but faster indirect-goto-based dispatch.
-#define INTERPRETER_LOOP()
-#define CASE(OP) label_##OP:
-#define DEFAULT() \
+#  define INTERPRETER_LOOP()
+#  define CASE(OP) label_##OP:
+#  define DEFAULT() \
   label_default:
-#define DISPATCH_TO(OP) goto* addresses[(OP)]
+#  define DISPATCH_TO(OP) goto* addresses[(OP)]
 
-#define LABEL(X) (&&label_##X)
+#  define LABEL(X) (&&label_##X)
 
   // Use addresses instead of offsets to optimize for runtime speed over
   // load-time relocation overhead.
   static const void* const addresses[EnableInterruptsPseudoOpcode + 1] = {
-#define OPCODE_LABEL(op, ...) LABEL(op),
+#  define OPCODE_LABEL(op, ...) LABEL(op),
       FOR_EACH_OPCODE(OPCODE_LABEL)
-#undef OPCODE_LABEL
-#define TRAILING_LABEL(v)                                                    \
-  ((v) == EnableInterruptsPseudoOpcode ? LABEL(EnableInterruptsPseudoOpcode) \
-                                       : LABEL(default)),
+#  undef OPCODE_LABEL
+#  define TRAILING_LABEL(v)                                                    \
+    ((v) == EnableInterruptsPseudoOpcode ? LABEL(EnableInterruptsPseudoOpcode) \
+                                         : LABEL(default)),
           FOR_EACH_TRAILING_UNUSED_OPCODE(TRAILING_LABEL)
-#undef TRAILING_LABEL
+#  undef TRAILING_LABEL
   };
 #else
 // Portable switch-based dispatch.
-#define INTERPRETER_LOOP() \
-  the_switch:              \
-  switch (switchOp)
-#define CASE(OP) case OP:
-#define DEFAULT() default:
-#define DISPATCH_TO(OP) \
-  JS_BEGIN_MACRO        \
-    switchOp = (OP);    \
-    goto the_switch;    \
-  JS_END_MACRO
+#  define INTERPRETER_LOOP() \
+  the_switch:                \
+    switch (switchOp)
+#  define CASE(OP) case OP:
+#  define DEFAULT() default:
+#  define DISPATCH_TO(OP) \
+    JS_BEGIN_MACRO        \
+      switchOp = (OP);    \
+      goto the_switch;    \
+    JS_END_MACRO
 
   // This variable is effectively a parameter to the_switch.
   jsbytecode switchOp;
@@ -4263,14 +4259,14 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
     END_CASE(JSOP_IMPORTMETA)
 
     CASE(JSOP_DYNAMIC_IMPORT) {
-      ReservedRooted<Value> referencingPrivate(&rootValue0);
-      referencingPrivate = FindScriptOrModulePrivateForScript(script);
+      ReservedRooted<JSObject*> referencingScriptSource(&rootObject0);
+      referencingScriptSource = script->sourceObject();
 
       ReservedRooted<Value> specifier(&rootValue1);
       POP_COPY_TO(specifier);
 
       JSObject* promise =
-          StartDynamicModuleImport(cx, referencingPrivate, specifier);
+          StartDynamicModuleImport(cx, referencingScriptSource, specifier);
       if (!promise) goto error;
 
       PUSH_OBJECT(*promise);
@@ -4343,6 +4339,24 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
 
     CASE(JSOP_IS_CONSTRUCTING) { PUSH_MAGIC(JS_IS_CONSTRUCTING); }
     END_CASE(JSOP_IS_CONSTRUCTING)
+
+    CASE(JSOP_INC) {
+      ReservedRooted<Value> val(&rootValue0, REGS.sp[-1]);
+      MutableHandleValue res = REGS.stackHandleAt(-1);
+      if (!IncOperation(cx, &val, res)) {
+        goto error;
+      }
+    }
+    END_CASE(JSOP_INC)
+
+    CASE(JSOP_DEC) {
+      ReservedRooted<Value> val(&rootValue0, REGS.sp[-1]);
+      MutableHandleValue res = REGS.stackHandleAt(-1);
+      if (!DecOperation(cx, &val, res)) {
+        goto error;
+      }
+    }
+    END_CASE(JSOP_DEC)
 
 #ifdef ENABLE_BIGINT
     CASE(JSOP_BIGINT) {
@@ -4626,8 +4640,8 @@ bool js::DefFunOperation(JSContext* cx, HandleScript script,
    * ECMA requires functions defined when entering Eval code to be
    * impermanent.
    */
-  unsigned attrs = script->isActiveEval() ? JSPROP_ENUMERATE
-                                          : JSPROP_ENUMERATE | JSPROP_PERMANENT;
+  unsigned attrs = script->isForEval() ? JSPROP_ENUMERATE
+                                       : JSPROP_ENUMERATE | JSPROP_PERMANENT;
 
   /* Steps 5d, 5f. */
   if (!prop || pobj != parent) {
@@ -5162,9 +5176,7 @@ JSObject* js::NewObjectOperation(JSContext* cx, HandleScript script,
   }
 
   if (newKind == SingletonObject) {
-    if (!JSObject::setSingleton(cx, obj)) {
-      return nullptr;
-    }
+    MOZ_ASSERT(obj->isSingleton());
   } else {
     obj->setGroup(group);
 

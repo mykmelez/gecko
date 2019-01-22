@@ -32,7 +32,7 @@
 #include <algorithm>
 
 #ifdef XP_WIN
-#include "winuser.h"
+#  include "winuser.h"
 #endif
 
 #include "gfxContext.h"
@@ -90,10 +90,10 @@
 #include "nsRegion.h"
 #include "nsAutoLayoutPhase.h"
 #ifdef MOZ_GECKO_PROFILER
-#include "AutoProfilerStyleMarker.h"
+#  include "AutoProfilerStyleMarker.h"
 #endif
 #ifdef MOZ_REFLOW_PERF
-#include "nsFontMetrics.h"
+#  include "nsFontMetrics.h"
 #endif
 #include "OverflowChangedTracker.h"
 #include "PositionedEventTargeting.h"
@@ -124,28 +124,26 @@
 #include "nsIScrollableFrame.h"
 #include "nsITimer.h"
 #ifdef ACCESSIBILITY
-#include "nsAccessibilityService.h"
-#include "mozilla/a11y/DocAccessible.h"
-#ifdef DEBUG
-#include "mozilla/a11y/Logging.h"
-#endif
+#  include "nsAccessibilityService.h"
+#  include "mozilla/a11y/DocAccessible.h"
+#  ifdef DEBUG
+#    include "mozilla/a11y/Logging.h"
+#  endif
 #endif
 
 // For style data reconstruction
 #include "nsStyleChangeList.h"
 #include "nsCSSFrameConstructor.h"
 #ifdef MOZ_XUL
-#include "nsMenuFrame.h"
-#include "nsTreeBodyFrame.h"
-#include "nsIBoxObject.h"
-#include "nsITreeBoxObject.h"
-#include "nsMenuPopupFrame.h"
-#include "nsTreeColumns.h"
-#include "nsIDOMXULMultSelectCntrlEl.h"
-#include "nsIDOMXULSelectCntrlItemEl.h"
-#include "nsIDOMXULMenuListElement.h"
-#include "nsXULElement.h"
-#include "mozilla/dom/BoxObject.h"
+#  include "nsMenuFrame.h"
+#  include "nsTreeBodyFrame.h"
+#  include "XULTreeElement.h"
+#  include "nsMenuPopupFrame.h"
+#  include "nsTreeColumns.h"
+#  include "nsIDOMXULMultSelectCntrlEl.h"
+#  include "nsIDOMXULSelectCntrlItemEl.h"
+#  include "nsIDOMXULMenuListElement.h"
+#  include "nsXULElement.h"
 #endif  // MOZ_XUL
 
 #include "mozilla/layers/CompositorBridgeChild.h"
@@ -192,7 +190,7 @@
 #include "VisualViewport.h"
 
 #ifdef MOZ_TASK_TRACER
-#include "GeckoTaskTracer.h"
+#  include "GeckoTaskTracer.h"
 using namespace mozilla::tasktracer;
 #endif
 
@@ -268,7 +266,7 @@ static const VerifyReflowFlags gFlags[] = {
     // clang-format on
 };
 
-#define NUM_VERIFY_REFLOW_FLAGS (sizeof(gFlags) / sizeof(gFlags[0]))
+#  define NUM_VERIFY_REFLOW_FLAGS (sizeof(gFlags) / sizeof(gFlags[0]))
 
 static void ShowVerifyReflowFlags() {
   printf("Here are the available GECKO_VERIFY_REFLOW_FLAGS:\n");
@@ -431,20 +429,21 @@ struct nsCallbackEventRequest {
 // bfcache, but font pref changes don't care about that, and maybe / probably
 // shouldn't.
 #ifdef DEBUG
-#define ASSERT_REFLOW_SCHEDULED_STATE()                                       \
-  {                                                                           \
-    if (ObservingLayoutFlushes()) {                                           \
-      MOZ_ASSERT(                                                             \
-          mDocument->GetBFCacheEntry() ||                                     \
-              mPresContext->RefreshDriver()->IsLayoutFlushObserver(this),     \
-          "Unexpected state");                                                \
-    } else {                                                                  \
-      MOZ_ASSERT(!mPresContext->RefreshDriver()->IsLayoutFlushObserver(this), \
-                 "Unexpected state");                                         \
-    }                                                                         \
-  }
+#  define ASSERT_REFLOW_SCHEDULED_STATE()                                   \
+    {                                                                       \
+      if (ObservingLayoutFlushes()) {                                       \
+        MOZ_ASSERT(                                                         \
+            mDocument->GetBFCacheEntry() ||                                 \
+                mPresContext->RefreshDriver()->IsLayoutFlushObserver(this), \
+            "Unexpected state");                                            \
+      } else {                                                              \
+        MOZ_ASSERT(                                                         \
+            !mPresContext->RefreshDriver()->IsLayoutFlushObserver(this),    \
+            "Unexpected state");                                            \
+      }                                                                     \
+    }
 #else
-#define ASSERT_REFLOW_SCHEDULED_STATE() /* nothing */
+#  define ASSERT_REFLOW_SCHEDULED_STATE() /* nothing */
 #endif
 
 class nsAutoCauseReflowNotifier {
@@ -1203,10 +1202,10 @@ void PresShell::Destroy() {
 
 #ifdef ACCESSIBILITY
   if (mDocAccessible) {
-#ifdef DEBUG
+#  ifdef DEBUG
     if (a11y::logging::IsEnabled(a11y::logging::eDocDestroy))
       a11y::logging::DocDestroy("presshell destroyed", mDocument);
-#endif
+#  endif
 
     mDocAccessible->Shutdown();
     mDocAccessible = nullptr;
@@ -1313,7 +1312,8 @@ void PresShell::Destroy() {
   }
 
   mFramesToDirty.Clear();
-  mDirtyScrollAnchorContainers.Clear();
+  mPendingScrollAnchorSelection.Clear();
+  mPendingScrollAnchorAdjustment.Clear();
 
   if (mViewManager) {
     // Clear the view manager's weak pointer back to |this| in case it
@@ -2153,7 +2153,8 @@ void PresShell::NotifyDestroyingFrame(nsIFrame* aFrame) {
 
     nsIScrollableFrame* scrollableFrame = do_QueryFrame(aFrame);
     if (scrollableFrame) {
-      mDirtyScrollAnchorContainers.RemoveEntry(scrollableFrame);
+      mPendingScrollAnchorSelection.RemoveEntry(scrollableFrame);
+      mPendingScrollAnchorAdjustment.RemoveEntry(scrollableFrame);
     }
   }
 }
@@ -2576,17 +2577,32 @@ void PresShell::VerifyHasDirtyRootAncestor(nsIFrame* aFrame) {
 }
 #endif
 
-void PresShell::PostDirtyScrollAnchorContainer(nsIScrollableFrame* aFrame) {
-  mDirtyScrollAnchorContainers.PutEntry(aFrame);
+void PresShell::PostPendingScrollAnchorSelection(
+    mozilla::layout::ScrollAnchorContainer* aContainer) {
+  mPendingScrollAnchorSelection.PutEntry(aContainer->ScrollableFrame());
 }
 
-void PresShell::FlushDirtyScrollAnchorContainers() {
-  for (auto iter = mDirtyScrollAnchorContainers.Iter(); !iter.Done();
+void PresShell::FlushPendingScrollAnchorSelections() {
+  for (auto iter = mPendingScrollAnchorSelection.Iter(); !iter.Done();
        iter.Next()) {
     nsIScrollableFrame* scroll = iter.Get()->GetKey();
     scroll->GetAnchor()->SelectAnchor();
   }
-  mDirtyScrollAnchorContainers.Clear();
+  mPendingScrollAnchorSelection.Clear();
+}
+
+void PresShell::PostPendingScrollAnchorAdjustment(
+    ScrollAnchorContainer* aContainer) {
+  mPendingScrollAnchorAdjustment.PutEntry(aContainer->ScrollableFrame());
+}
+
+void PresShell::FlushPendingScrollAnchorAdjustments() {
+  for (auto iter = mPendingScrollAnchorAdjustment.Iter(); !iter.Done();
+       iter.Next()) {
+    nsIScrollableFrame* scroll = iter.Get()->GetKey();
+    scroll->GetAnchor()->ApplyAdjustments();
+  }
+  mPendingScrollAnchorAdjustment.Clear();
 }
 
 void PresShell::FrameNeedsReflow(nsIFrame* aFrame,
@@ -3689,7 +3705,7 @@ void PresShell::ScheduleViewManagerFlush(PaintType aType) {
 }
 
 void nsIPresShell::DispatchSynthMouseMove(WidgetGUIEvent* aEvent) {
-  AUTO_PROFILER_TRACING_DOCSHELL("Paint", "DispatchSynthMouseMove",
+  AUTO_PROFILER_TRACING_DOCSHELL("Paint", "DispatchSynthMouseMove", GRAPHICS,
                                  mPresContext->GetDocShell());
   nsEventStatus status = nsEventStatus_eIgnore;
   nsView* targetView = nsView::GetViewFor(aEvent->mWidget);
@@ -4028,12 +4044,12 @@ void PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush) {
 #endif
 
 #ifdef ACCESSIBILITY
-#ifdef DEBUG
+#  ifdef DEBUG
   if (nsAccessibilityService* accService = GetAccService()) {
     NS_ASSERTION(!accService->IsProcessingRefreshDriverNotification(),
                  "Flush during accessible tree update!");
   }
-#endif
+#  endif
 #endif
 
   NS_ASSERTION(flushType >= FlushType::Frames, "Why did we get called?");
@@ -4176,13 +4192,17 @@ void PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush) {
       didLayoutFlush = true;
       mFrameConstructor->RecalcQuotesAndCounters();
       viewManager->FlushDelayedResize(true);
-      if (ProcessReflowCommands(flushType < FlushType::Layout) &&
-          mContentToScrollTo) {
-        // We didn't get interrupted.  Go ahead and scroll to our content
-        DoScrollContentIntoView();
+      if (ProcessReflowCommands(flushType < FlushType::Layout)) {
+        // We didn't get interrupted. Go ahead and perform scroll anchor
+        // adjustments and scroll content into view
+        FlushPendingScrollAnchorAdjustments();
+
         if (mContentToScrollTo) {
-          mContentToScrollTo->DeleteProperty(nsGkAtoms::scrolling);
-          mContentToScrollTo = nullptr;
+          DoScrollContentIntoView();
+          if (mContentToScrollTo) {
+            mContentToScrollTo->DeleteProperty(nsGkAtoms::scrolling);
+            mContentToScrollTo = nullptr;
+          }
         }
       }
     }
@@ -4644,7 +4664,7 @@ nsRect PresShell::ClipListToRange(nsDisplayListBuilder* aBuilder,
 }
 
 #ifdef DEBUG
-#include <stdio.h>
+#  include <stdio.h>
 
 static bool gDumpRangePaintList = false;
 #endif
@@ -6049,6 +6069,9 @@ void PresShell::Paint(nsView* aViewToPaint, const nsRegion& aDirtyRegion,
   if (mNextPaintCompressed) {
     flags |= PaintFrameFlags::PAINT_COMPRESSED;
     mNextPaintCompressed = false;
+  }
+  if (layerManager->GetBackendType() == layers::LayersBackend::LAYERS_WR) {
+    flags |= PaintFrameFlags::PAINT_FOR_WEBRENDER;
   }
 
   if (frame) {
@@ -8007,41 +8030,35 @@ void PresShell::GetCurrentItemAndPositionForElement(
     int32_t currentIndex;
     multiSelect->GetCurrentIndex(&currentIndex);
     if (currentIndex >= 0) {
-      RefPtr<nsXULElement> xulElement = nsXULElement::FromNode(focusedContent);
-      if (xulElement) {
-        nsCOMPtr<nsIBoxObject> box = xulElement->GetBoxObject(IgnoreErrors());
-        nsCOMPtr<nsITreeBoxObject> treeBox(do_QueryInterface(box));
-        // Tree view special case (tree items have no frames)
-        // Get the focused row and add its coordinates, which are already in
-        // pixels
-        // XXX Boris, should we create a new interface so that this doesn't
-        // need to know about trees? Something like nsINodelessChildCreator
-        // which could provide the current focus coordinates?
-        if (treeBox) {
-          treeBox->EnsureRowIsVisible(currentIndex);
-          int32_t firstVisibleRow, rowHeight;
-          treeBox->GetFirstVisibleRow(&firstVisibleRow);
-          treeBox->GetRowHeight(&rowHeight);
+      RefPtr<XULTreeElement> tree = XULTreeElement::FromNode(focusedContent);
+      // Tree view special case (tree items have no frames)
+      // Get the focused row and add its coordinates, which are already in
+      // pixels
+      // XXX Boris, should we create a new interface so that this doesn't
+      // need to know about trees? Something like nsINodelessChildCreator
+      // which could provide the current focus coordinates?
+      if (tree) {
+        tree->EnsureRowIsVisible(currentIndex);
+        int32_t firstVisibleRow = tree->GetFirstVisibleRow();
+        int32_t rowHeight = tree->RowHeight();
 
-          extraTreeY += nsPresContext::CSSPixelsToAppUnits(
-              (currentIndex - firstVisibleRow + 1) * rowHeight);
-          istree = true;
+        extraTreeY += nsPresContext::CSSPixelsToAppUnits(
+            (currentIndex - firstVisibleRow + 1) * rowHeight);
+        istree = true;
 
-          RefPtr<nsTreeColumns> cols;
-          treeBox->GetColumns(getter_AddRefs(cols));
-          if (cols) {
-            nsTreeColumn* col = cols->GetFirstColumn();
-            if (col) {
-              RefPtr<Element> colElement = col->Element();
-              nsIFrame* frame = colElement->GetPrimaryFrame();
-              if (frame) {
-                extraTreeY += frame->GetSize().height;
-              }
+        RefPtr<nsTreeColumns> cols = tree->GetColumns();
+        if (cols) {
+          nsTreeColumn* col = cols->GetFirstColumn();
+          if (col) {
+            RefPtr<Element> colElement = col->Element();
+            nsIFrame* frame = colElement->GetPrimaryFrame();
+            if (frame) {
+              extraTreeY += frame->GetSize().height;
             }
           }
-        } else {
-          multiSelect->GetCurrentItem(getter_AddRefs(item));
         }
+      } else {
+        multiSelect->GetCurrentItem(getter_AddRefs(item));
       }
     }
   } else {
@@ -8500,13 +8517,13 @@ bool PresShell::DoReflow(nsIFrame* target, bool aInterruptible,
 
 #ifdef MOZ_GECKO_PROFILER
   DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);
-  AutoProfilerTracing tracingLayoutFlush("Paint", "Reflow",
-                                         std::move(mReflowCause), docShellId,
-                                         docShellHistoryId);
+  AutoProfilerTracing tracingLayoutFlush(
+      "Paint", "Reflow", js::ProfilingStackFrame::Category::LAYOUT,
+      std::move(mReflowCause), docShellId, docShellHistoryId);
   mReflowCause = nullptr;
 #endif
 
-  FlushDirtyScrollAnchorContainers();
+  FlushPendingScrollAnchorSelections();
 
   if (mReflowContinueTimer) {
     mReflowContinueTimer->Cancel();
@@ -8629,7 +8646,7 @@ bool PresShell::DoReflow(nsIFrame* target, bool aInterruptible,
   target->DidReflow(mPresContext, nullptr);
   if (target->IsInScrollAnchorChain()) {
     ScrollAnchorContainer* container = ScrollAnchorContainer::FindFor(target);
-    container->ApplyAdjustments();
+    PostPendingScrollAnchorAdjustment(container);
   }
   if (isRoot && size.BSize(wm) == NS_UNCONSTRAINEDSIZE) {
     mPresContext->SetVisibleArea(boundsRelativeToTarget);
@@ -9276,14 +9293,14 @@ static void CopySheetsIntoClone(ServoStyleSet* aSet, ServoStyleSet* aClone) {
   }
 
   // The document expects to insert document stylesheets itself
-#if 0
+#  if 0
   n = aSet->SheetCount(SheetType::Doc);
   for (i = 0; i < n; i++) {
     StyleSheet* ss = aSet->StyleSheetAt(SheetType::Doc, i);
     if (ss)
       aClone->AddDocStyleSheet(ss, mDocument);
   }
-#endif
+#  endif
 
   n = aSet->SheetCount(SheetType::User);
   for (i = 0; i < n; i++) {
@@ -9382,12 +9399,12 @@ bool PresShell::VerifyIncrementalReflow() {
   bool ok = CompareTrees(mPresContext, root1, cx, root2);
   if (!ok && (VERIFY_REFLOW_NOISY & gVerifyReflowFlags)) {
     printf("Verify reflow failed, primary tree:\n");
-    root1->List(stdout, 0);
+    root1->List(stdout);
     printf("Verification tree:\n");
-    root2->List(stdout, 0);
+    root2->List(stdout);
   }
 
-#if 0
+#  if 0
   // Sample code for dumping page to png
   // XXX Needs to be made more flexible
   if (!ok) {
@@ -9404,7 +9421,7 @@ bool PresShell::VerifyIncrementalReflow() {
     gfxUtils::WriteAsPNG(sh, strb);
     ++num;
   }
-#endif
+#  endif
 
   sh->EndObservingDocument();
   sh->Destroy();
@@ -9568,7 +9585,8 @@ void ReflowCounter::DisplayHTMLTotals(uint32_t aTotal, const char* aTitle) {
 //-- ReflowCountMgr
 //------------------------------------------------------------------
 
-#define KEY_BUF_SIZE_FOR_PTR 24  // adequate char[] buffer to sprintf a pointer
+#  define KEY_BUF_SIZE_FOR_PTR \
+    24  // adequate char[] buffer to sprintf a pointer
 
 ReflowCountMgr::ReflowCountMgr() : mCounts(10), mIndiFrameCounts(10) {
   mCycledOnce = false;
@@ -9779,9 +9797,9 @@ void ReflowCountMgr::DoGrandHTMLTotals() {
 
 //------------------------------------
 void ReflowCountMgr::DisplayTotals(const char* aStr) {
-#ifdef DEBUG_rods
+#  ifdef DEBUG_rods
   printf("%s\n", aStr ? aStr : "No name");
-#endif
+#  endif
   if (mDumpFrameCounts) {
     DoGrandTotals();
   }
@@ -9791,7 +9809,7 @@ void ReflowCountMgr::DisplayTotals(const char* aStr) {
 }
 //------------------------------------
 void ReflowCountMgr::DisplayHTMLTotals(const char* aStr) {
-#ifdef WIN32x  // XXX NOT XP!
+#  ifdef WIN32x  // XXX NOT XP!
   char name[1024];
 
   char* sptr = strrchr(aStr, '/');
@@ -9818,7 +9836,7 @@ void ReflowCountMgr::DisplayHTMLTotals(const char* aStr) {
     fclose(mFD);
     mFD = nullptr;
   }
-#endif  // not XP!
+#  endif  // not XP!
 }
 
 //------------------------------------------------------------------
@@ -10042,7 +10060,8 @@ void PresShell::AddSizeOfIncludingThis(nsWindowSizes& aSizes) const {
   aSizes.mLayoutPresShellSize +=
       mApproximatelyVisibleFrames.ShallowSizeOfExcludingThis(mallocSizeOf) +
       mFramesToDirty.ShallowSizeOfExcludingThis(mallocSizeOf) +
-      mDirtyScrollAnchorContainers.ShallowSizeOfExcludingThis(mallocSizeOf);
+      mPendingScrollAnchorSelection.ShallowSizeOfExcludingThis(mallocSizeOf) +
+      mPendingScrollAnchorAdjustment.ShallowSizeOfExcludingThis(mallocSizeOf);
 
   StyleSet()->AddSizeOfIncludingThis(aSizes);
 
@@ -10102,9 +10121,9 @@ void nsIPresShell::SetVisualViewportSize(nscoord aWidth, nscoord aHeight) {
 bool nsIPresShell::SetVisualViewportOffset(
     const nsPoint& aScrollOffset, const nsPoint& aPrevLayoutScrollPos) {
   bool didChange = false;
-  if (mVisualViewportOffset != aScrollOffset) {
-    nsPoint prevOffset = mVisualViewportOffset;
-    mVisualViewportOffset = aScrollOffset;
+  if (GetVisualViewportOffset() != aScrollOffset) {
+    nsPoint prevOffset = GetVisualViewportOffset();
+    mVisualViewportOffset = Some(aScrollOffset);
     didChange = true;
 
     if (auto* window = nsGlobalWindowInner::Cast(mDocument->GetInnerWindow())) {

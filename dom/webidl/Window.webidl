@@ -455,17 +455,6 @@ partial interface Window {
   ChromeMessageBroadcaster getGroupMessageManager(DOMString aGroup);
 
   /**
-   * On some operating systems, we must allow the window manager to
-   * handle window dragging. This function tells the window manager to
-   * start dragging the window. This function will fail unless called
-   * while the left mouse button is held down, callers must check this.
-   *
-   * Throws NS_ERROR_NOT_IMPLEMENTED if the OS doesn't support this.
-   */
-  [Throws, Func="nsGlobalWindowInner::IsPrivilegedChromeWindow"]
-  void beginWindowMove(Event mouseDownEvent);
-
-  /**
    * Calls the given function as soon as a style or layout flush for the
    * top-level document is not necessary, and returns a Promise which
    * resolves to the callback's return value after it executes.
@@ -488,6 +477,21 @@ partial interface Window {
    * be fired first (and in the order that they were queued) and then the
    * Promise resolution handlers will all be invoked later on during the
    * next microtask checkpoint.
+   *
+   * Using window.top.promiseDocumentFlushed in combination with a callback
+   * that is querying items in a window that might be swapped out via
+   * nsFrameLoader::SwapWithOtherLoader is highly discouraged. For example:
+   *
+   *   let result = await window.top.promiseDocumentFlushed(() => {
+   *     return window.document.body.getBoundingClientRect();
+   *   });
+   *
+   *   If "window" might get swapped out via nsFrameLoader::SwapWithOtherLoader
+   *   at any time, then the callback might get called when the new host window
+   *   will still incur layout flushes, since it's only the original host window
+   *   that's being monitored via window.top.promiseDocumentFlushed.
+   *
+   *   See bug 1519407 for further details.
    *
    * promiseDocumentFlushed does not support re-entrancy - so calling it from
    * within a promiseDocumentFlushed callback will result in the inner call

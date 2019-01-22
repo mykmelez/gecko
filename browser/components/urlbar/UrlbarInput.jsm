@@ -9,6 +9,7 @@ var EXPORTED_SYMBOLS = ["UrlbarInput"];
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
+  AppConstants: "resource://gre/modules/AppConstants.jsm",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
   QueryContext: "resource:///modules/UrlbarUtils.jsm",
   Services: "resource://gre/modules/Services.jsm",
@@ -56,6 +57,7 @@ class UrlbarInput {
     this.userInitiatedFocus = false;
     this.isPrivate = PrivateBrowsingUtils.isWindowPrivate(this.window);
     this._untrimmedValue = "";
+    this._suppressStartQuery = false;
 
     // Forward textbox methods and properties.
     const METHODS = ["addEventListener", "removeEventListener",
@@ -110,6 +112,7 @@ class UrlbarInput {
     this.view.panel.addEventListener("popuphidden", this);
 
     this.inputField.controllers.insertControllerAt(0, new CopyCutController(this));
+    this._initPasteAndGo();
   }
 
   /**
@@ -214,6 +217,16 @@ class UrlbarInput {
     //   return;
     // }
 
+    // Use the selected result if we have one; this should always be the case
+    // when the view is open.
+    let result = this.view.selectedResult;
+    if (result) {
+      this.pickResult(event, result);
+      return;
+    }
+
+    // Use the current value if we don't have a UrlbarMatch e.g. because the
+    // view is closed.
     let url = this.value;
     if (!url) {
       return;
@@ -268,6 +281,8 @@ class UrlbarInput {
   pickResult(event, result) {
     this.setValueFromResult(result);
 
+    this.view.close();
+
     // TODO: Work out how we get the user selection behavior, probably via passing
     // it in, since we don't have the old autocomplete controller to work with.
     // BrowserUsageTelemetry.recordUrlbarSelectedResultMethod(
@@ -279,8 +294,15 @@ class UrlbarInput {
       allowInheritPrincipal: false,
     };
 
+    let url = result.payload.url;
+
     switch (result.type) {
       case UrlbarUtils.MATCH_TYPE.TAB_SWITCH: {
+        if (this._overrideDefaultAction(event)) {
+          where = "current";
+          break;
+        }
+
         this.handleRevert();
         let prevTab = this.window.gBrowser.selectedTab;
         let loadOpts = {
@@ -292,17 +314,19 @@ class UrlbarInput {
           this.window.gBrowser.removeTab(prevTab);
         }
         return;
-
-        // TODO: How to handle meta chars?
-        // Once we get here, we got a TAB_SWITCH match but the user
-        // bypassed it by pressing shift/meta/ctrl. Those modifiers
-        // might otherwise affect where we open - we always want to
-        // open in the current tab.
-        // where = "current";
       }
-      case UrlbarUtils.MATCH_TYPE.SEARCH:
-        // TODO: port _parseAndRecordSearchEngineLoad.
-        return;
+      case UrlbarUtils.MATCH_TYPE.SEARCH: {
+        const actionDetails = {
+          isSuggestion: !!result.payload.suggestion,
+          alias: result.payload.keyword,
+        };
+        const engine = Services.search.getEngineByName(result.payload.engine);
+
+        [url, openParams.postData] = this._getSearchQueryUrl(
+          engine, result.payload.suggestion || result.payload.query);
+        this._recordSearch(engine, event, actionDetails);
+        break;
+      }
       case UrlbarUtils.MATCH_TYPE.OMNIBOX:
         // Give the extension control of handling the command.
         ExtensionSearchHandler.handleInputEntered(result.payload.keyword,
@@ -311,7 +335,7 @@ class UrlbarInput {
         return;
     }
 
-    this._loadURL(result.payload.url, where, openParams);
+    this._loadURL(url, where, openParams);
   }
 
   /**
@@ -320,16 +344,26 @@ class UrlbarInput {
    * @param {UrlbarMatch} result The result that was selected.
    */
   setValueFromResult(result) {
-    // FIXME: This is wrong, not all the matches have a url. For example
-    // extension matches will call into the extension code rather than loading
-    // a url. That means we likely can't use the url as our value.
-    let val = result.payload.url;
-    let uri;
-    try {
-      uri = Services.io.newURI(val);
-    } catch (ex) {}
-    if (uri) {
-      val = this.window.losslessDecodeURI(uri);
+    let val;
+
+    switch (result.type) {
+      case UrlbarUtils.MATCH_TYPE.SEARCH:
+        val = result.payload.suggestion || result.payload.query;
+        break;
+      default: {
+        // FIXME: This is wrong, not all the other matches have a url. For example
+        // extension matches will call into the extension code rather than loading
+        // a url. That means we likely can't use the url as our value.
+        val = result.payload.url;
+        let uri;
+        try {
+          uri = Services.io.newURI(val);
+        } catch (ex) {}
+        if (uri) {
+          val = this.window.losslessDecodeURI(uri);
+        }
+        break;
+      }
     }
     this.value = val;
   }
@@ -337,22 +371,24 @@ class UrlbarInput {
   /**
    * Starts a query based on the user input.
    *
-   * @param {string} [options.searchString]
-   *   The string the user entered in autocomplete.
    * @param {number} [options.lastKey]
    *   The last key the user entered (as a key code).
    */
   startQuery({
-    searchString = "",
     lastKey = null,
   } = {}) {
+    if (this._suppressStartQuery) {
+      return;
+    }
+
     this.controller.startQuery(new QueryContext({
-      searchString,
+      enableAutofill: UrlbarPrefs.get("autoFill"),
+      isPrivate: this.isPrivate,
       lastKey,
       maxResults: UrlbarPrefs.get("maxRichResults"),
-      isPrivate: this.isPrivate,
-      providers: ["UnifiedComplete"],
       muxer: "UnifiedComplete",
+      providers: ["UnifiedComplete"],
+      searchString: this.textValue,
     }));
   }
 
@@ -463,14 +499,6 @@ class UrlbarInput {
       }
     }
 
-    // If the value was filled by a search suggestion, just return it.
-    // FIXME: This is wrong, the new system doesn't return action urls, it
-    // should instead build this based on MATCH_TYPE.
-    let action = this._parseActionUrl(this.value);
-    if (action && action.type == "searchengine") {
-      return selectedVal;
-    }
-
     let uri;
     if (this.getAttribute("pageproxystate") == "valid") {
       uri = this.window.gBrowser.currentURI;
@@ -510,40 +538,60 @@ class UrlbarInput {
     return selectedVal;
   }
 
+  _overrideDefaultAction(event) {
+    return event.shiftKey ||
+           event.altKey ||
+           (AppConstants.platform == "macosx" ?
+              event.metaKey : event.ctrlKey);
+  }
+
   /**
-   * @param {string} url
-   * @returns {object}
-   *   The action object
+   * Get the url to load for the search query and records in telemetry that it
+   * is being loaded.
+   *
+   * @param {nsISearchEngine} engine
+   *   The engine to generate the query for.
+   * @param {string} query
+   *   The query string to search for.
+   * @returns {array}
+   *   Returns an array containing the query url (string) and the
+   *    post data (object).
    */
-  _parseActionUrl(url) {
-    const MOZ_ACTION_REGEX = /^moz-action:([^,]+),(.*)$/;
-    if (!MOZ_ACTION_REGEX.test(url)) {
-      return null;
+  _getSearchQueryUrl(engine, query) {
+    let submission = engine.getSubmission(query, null, "keyword");
+    return [submission.uri.spec, submission.postData];
+  }
+
+  /**
+   * Get the url to load for the search query and records in telemetry that it
+   * is being loaded.
+   *
+   * @param {nsISearchEngine} engine
+   *   The engine to generate the query for.
+   * @param {Event} event
+   *   The event that triggered this query.
+   * @param {object} searchActionDetails
+   *   The details associated with this search query.
+   * @param {boolean} searchActionDetails.isSuggestion
+   *   True if this query was initiated from a suggestion from the search engine.
+   * @param {alias} searchActionDetails.alias
+   *   True if this query was initiated via a search alias.
+   */
+  _recordSearch(engine, event, searchActionDetails = {}) {
+    const isOneOff = this.view.oneOffSearchButtons.maybeRecordTelemetry(event);
+    // Infer the type of the event which triggered the search.
+    let eventType = "unknown";
+    if (event instanceof KeyboardEvent) {
+      eventType = "key";
+    } else if (event instanceof MouseEvent) {
+      eventType = "mouse";
     }
+    // Augment the search action details object.
+    let details = searchActionDetails;
+    details.isOneOff = isOneOff;
+    details.type = eventType;
 
-    // URL is in the format moz-action:ACTION,PARAMS
-    // Where PARAMS is a JSON encoded object.
-    let [, type, params] = url.match(MOZ_ACTION_REGEX);
-
-    let action = {
-      type,
-    };
-
-    action.params = JSON.parse(params);
-    for (let key in action.params) {
-      action.params[key] = decodeURIComponent(action.params[key]);
-    }
-
-    if ("url" in action.params) {
-      try {
-        let uri = Services.io.newURI(action.params.url);
-        action.params.displayUrl = this.window.losslessDecodeURI(uri);
-      } catch (e) {
-        action.params.displayUrl = action.params.url;
-      }
-    }
-
-    return action;
+    this.window.BrowserSearch.recordSearchInTelemetry(engine, "urlbar", details);
   }
 
   /**
@@ -654,6 +702,51 @@ class UrlbarInput {
     return where;
   }
 
+  _initPasteAndGo() {
+    let inputBox = this.document.getAnonymousElementByAttribute(
+                     this.textbox, "anonid", "moz-input-box");
+    // Force the Custom Element to upgrade until Bug 1470242 handles this:
+    this.window.customElements.upgrade(inputBox);
+    let contextMenu = inputBox.menupopup;
+    let insertLocation = contextMenu.firstElementChild;
+    while (insertLocation.nextElementSibling &&
+           insertLocation.getAttribute("cmd") != "cmd_paste") {
+      insertLocation = insertLocation.nextElementSibling;
+    }
+    if (!insertLocation) {
+      return;
+    }
+
+    let pasteAndGo = this.document.createXULElement("menuitem");
+    let label = Services.strings
+                        .createBundle("chrome://browser/locale/browser.properties")
+                        .GetStringFromName("pasteAndGo.label");
+    pasteAndGo.setAttribute("label", label);
+    pasteAndGo.setAttribute("anonid", "paste-and-go");
+    pasteAndGo.addEventListener("command", () => {
+      this._suppressStartQuery = true;
+
+      this.select();
+      this.window.goDoCommand("cmd_paste");
+      this.handleCommand();
+
+      this._suppressStartQuery = false;
+    });
+
+    contextMenu.addEventListener("popupshowing", () => {
+      let controller =
+        this.document.commandDispatcher.getControllerForCommand("cmd_paste");
+      let enabled = controller.isCommandEnabled("cmd_paste");
+      if (enabled) {
+        pasteAndGo.removeAttribute("disabled");
+      } else {
+        pasteAndGo.setAttribute("disabled", "true");
+      }
+    });
+
+    insertLocation.insertAdjacentElement("afterend", pasteAndGo);
+  }
+
   // Event handlers below.
 
   _on_blur(event) {
@@ -690,8 +783,8 @@ class UrlbarInput {
     }
   }
 
-  _on_input(event) {
-    let value = event.target.value;
+  _on_input() {
+    let value = this.textValue;
     this.valueIsTyped = true;
     this._untrimmedValue = value;
     this.window.gBrowser.userTypedValue = value;
@@ -704,7 +797,6 @@ class UrlbarInput {
 
     // XXX Fill in lastKey, and add anything else we need.
     this.startQuery({
-      searchString: value,
       lastKey: null,
     });
   }
