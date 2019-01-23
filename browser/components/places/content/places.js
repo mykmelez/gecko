@@ -734,6 +734,7 @@ var PlacesSearchBox = {
           options.resultType = currentOptions.RESULTS_AS_URI;
           options.queryType = Ci.nsINavHistoryQueryOptions.QUERY_TYPE_HISTORY;
           options.includeHidden = true;
+          await currentView.initPromise;
           currentView.load([query], options);
         } else {
           TelemetryStopwatch.start(HISTORY_LIBRARY_SEARCH_TELEMETRY);
