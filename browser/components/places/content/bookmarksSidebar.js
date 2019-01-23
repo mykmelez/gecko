@@ -48,9 +48,7 @@ async function searchBookmarks(aSearchString) {
     // eslint-disable-next-line no-self-assign
     await tree.setPlace(tree.place);
   } else {
-    await tree.initPromise;
-    tree.applyFilter(aSearchString,
-                     PlacesUtils.bookmarks.userContentRoots);
+    await tree.applyFilter(aSearchString, PlacesUtils.bookmarks.userContentRoots);
   }
 }
 

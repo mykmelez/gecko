@@ -88,30 +88,34 @@
         <parameter name="folderRestrict"/>
         <parameter name="includeHidden"/>
         <body><![CDATA[
-          // preserve grouping
-          var queryNode = PlacesUtils.asQuery(this.result.root);
-          var options = queryNode.queryOptions.clone();
+          return (async () => {
+            await this.initPromise;
 
-          // Make sure we're getting uri results.
-          // We do not yet support searching into grouped queries or into
-          // tag containers, so we must fall to the default case.
-          if (PlacesUtils.nodeIsHistoryContainer(queryNode) ||
-              PlacesUtils.nodeIsTagQuery(queryNode) ||
-              options.resultType == options.RESULTS_AS_TAGS_ROOT ||
-              options.resultType == options.RESULTS_AS_ROOTS_QUERY)
-            options.resultType = options.RESULTS_AS_URI;
+            // preserve grouping
+            var queryNode = PlacesUtils.asQuery(this.result.root);
+            var options = queryNode.queryOptions.clone();
 
-          var query = PlacesUtils.history.getNewQuery();
-          query.searchTerms = filterString;
+            // Make sure we're getting uri results.
+            // We do not yet support searching into grouped queries or into
+            // tag containers, so we must fall to the default case.
+            if (PlacesUtils.nodeIsHistoryContainer(queryNode) ||
+                PlacesUtils.nodeIsTagQuery(queryNode) ||
+                options.resultType == options.RESULTS_AS_TAGS_ROOT ||
+                options.resultType == options.RESULTS_AS_ROOTS_QUERY)
+              options.resultType = options.RESULTS_AS_URI;
 
-          if (folderRestrict) {
-            query.setParents(folderRestrict, folderRestrict.length);
-            options.queryType = options.QUERY_TYPE_BOOKMARKS;
-          }
+            var query = PlacesUtils.history.getNewQuery();
+            query.searchTerms = filterString;
 
-          options.includeHidden = !!includeHidden;
+            if (folderRestrict) {
+              query.setParents(folderRestrict, folderRestrict.length);
+              options.queryType = options.QUERY_TYPE_BOOKMARKS;
+            }
 
-          this.load(query, options);
+            options.includeHidden = !!includeHidden;
+
+            this.load(query, options);
+          })();
         ]]></body>
       </method>
 

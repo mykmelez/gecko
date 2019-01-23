@@ -65,7 +65,7 @@ async function search(aFolderGuid, aSearchStr) {
   // properly.
   let searchBox = doc.getElementById("searchFilter");
   searchBox.value = aSearchStr;
-  gLibrary.PlacesSearchBox.search(searchBox.value);
+  await gLibrary.PlacesSearchBox.search(searchBox.value);
   let query = {};
   PlacesUtils.history.queryStringToQuery(contentTree.result.root.uri, query, {});
   if (aSearchStr) {

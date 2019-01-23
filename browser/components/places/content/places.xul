@@ -74,7 +74,7 @@
 
   <commandset id="organizerCommandSet">
     <command id="OrganizerCommand_find:all"
-             oncommand="PlacesSearchBox.findAll();"/>
+             oncommand="PlacesSearchBox.findAll().catch(Cu.reportError);"/>
     <command id="OrganizerCommand_export"
              oncommand="PlacesOrganizer.exportBookmarks();"/>
     <command id="OrganizerCommand_import"
@@ -340,7 +340,7 @@
                flex="1"
                type="search"
                aria-controls="placeContent"
-               oncommand="PlacesSearchBox.search(this.value);"
+               oncommand="PlacesSearchBox.search(this.value).catch(Cu.reportError);"
                collection="bookmarks">
       </textbox>
       <toolbarbutton id="clearDownloadsButton"
@@ -359,7 +359,7 @@
           class="plain placesTree"
           type="places"
           hidecolumnpicker="true" context="placesContext"
-          onselect="PlacesOrganizer.onPlaceSelected(true);"
+          onselect="PlacesOrganizer.onPlaceSelected(true).catch(Cu.reportError);"
           onclick="PlacesOrganizer.onPlacesListClick(event);"
           onfocus="PlacesOrganizer.updateDetailsPane(event);"
           seltype="single"
