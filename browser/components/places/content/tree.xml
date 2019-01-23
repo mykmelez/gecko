@@ -123,9 +123,7 @@
         <parameter name="query"/>
         <parameter name="options"/>
         <body><![CDATA[
-          if (!this._xulStoreCache) {
-            throw new Error(`XULStore data not cached for ${document.documentURI}`);
-          }
+          console.assert(this._xulStoreCache, `XULStore cached for ${document.documentURI}`);
 
           let result = PlacesUtils.history
                                   .executeQuery(query, options);
