@@ -107,6 +107,7 @@ async function testPlacesPanel(testInfo, preFunc) {
         preFunc();
 
         let tree = sidebar.contentDocument.getElementById(testInfo.treeName);
+        await tree.initPromise;
 
         // Select the inserted places item.
         await testInfo.selectNode(tree);

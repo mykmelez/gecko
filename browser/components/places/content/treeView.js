@@ -31,7 +31,7 @@ function makeNodeDetailsKey(nodeOrDetails) {
   return "";
 }
 
-function PlacesTreeView(aFlatList, aOnOpenFlatContainer, aController) {
+function PlacesTreeView(aFlatList, aOnOpenFlatContainer, aController, xulStoreCache) {
   this._tree = null;
   this._result = null;
   this._selection = null;
@@ -41,6 +41,7 @@ function PlacesTreeView(aFlatList, aOnOpenFlatContainer, aController) {
   this._nodeDetails = new Map();
   this._openContainerCallback = aOnOpenFlatContainer;
   this._controller = aController;
+  this._xulStoreCache = xulStoreCache;
 }
 
 PlacesTreeView.prototype = {
@@ -344,7 +345,7 @@ PlacesTreeView.prototype = {
         let isopen = false;
 
         if (uri) {
-          let val = Services.xulStore.getValue(document.documentURI, uri, "open");
+          let val = this._xulStoreCache.getValue(uri, "open");
           isopen = (val == "true");
         }
 
@@ -1488,9 +1489,9 @@ PlacesTreeView.prototype = {
       let docURI = document.documentURI;
 
       if (node.containerOpen) {
-        Services.xulStore.removeValue(docURI, uri, "open");
+        this._xulStoreCache.removeValue(uri, "open");
       } else {
-        Services.xulStore.setValue(docURI, uri, "open", "true");
+        this._xulStoreCache.setValue(uri, "open", "true");
       }
     }
 

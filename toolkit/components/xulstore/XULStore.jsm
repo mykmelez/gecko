@@ -26,6 +26,9 @@ XPCOMUtils.defineLazyGetter(this, "gDatabasePromise", async function() {
 
 let saveAllowed = true;
 
+const cache = {};
+const cachePromises = {};
+
 const XULStore = {
   /*
    * Internal function for logging debug messages to the Error Console window
@@ -83,18 +86,21 @@ const XULStore = {
     await gDatabase.delete(makeKey(docURI, id, attr));
   },
 
+  // TODO: rename.
   async getIDsEnumerator(docURI) {
     this.log("Getting ID enumerator for doc=" + docURI);
     const gDatabase = await gDatabasePromise;
     const enumerator = await gDatabase.enumerate(docURI.concat("\t"), docURI.concat("\n"));
 
     // IDs are the second of the three tab-delimited fields in the key.
+    // TODO: optimize.
     const ids = Array.from(enumerator).map(({key}) => key.split("\t")[1]);
 
     // Filter the array for uniqueness before returning it.
     return [...new Set(ids)];
   },
 
+  // TODO: rename.
   async getAttributeEnumerator(docURI, id) {
     this.log("Getting attribute enumerator for id=" + id + ", doc=" + docURI);
     const gDatabase = await gDatabasePromise;
@@ -102,6 +108,7 @@ const XULStore = {
     const enumerator = await gDatabase.enumerate(prefix.concat("\t"), prefix.concat("\n"));
 
     // Attributes are the third of the three tab-delimited fields in the key.
+    // TODO: optimize.
     const attrs = Array.from(enumerator).map(({key}) => key.split("\t")[2]);
 
     // Filter the array for uniqueness before returning it.
@@ -131,4 +138,59 @@ const XULStore = {
       await this.setValue(uri, node.id, attr, value);
     }
   },
+
+  // TODO: consider storing caches in a weakmap to reuse them if available
+  // without preventing them from being garbage collected.
+  cache(uri) {
+    return (new XULStoreCache(uri)).load();
+  },
+
+  decache(uri) {
+    delete promises[uri];
+    delete cache[uri];
+  },
 };
+
+class XULStoreCache {
+  constructor(uri) {
+    this.uri = uri;
+    this.cache = {};
+  }
+
+  async load() {
+    // TODO: optimize retrieval of data to cache by directly querying the store
+    // for the relevant key-value pairs.
+    let ids = await XULStore.getIDsEnumerator(this.uri);
+    for (const id of ids) {
+      this.cache[id] = {};
+      let attrs = await XULStore.getAttributeEnumerator(this.uri, id);
+      for (const attr of attrs) {
+        this.cache[id][attr] = await XULStore.getValue(this.uri, id, attr);
+      }
+    }
+    return this;
+  }
+
+  getValue(id, attr) {
+    if (id in this.cache && attr in this.cache[id]) {
+      return this.cache[id][attr];
+    }
+    return "";
+  }
+
+  setValue(id, attr, value) {
+    if (!(id in this.cache)) {
+      this.cache[id] = {};
+    }
+    this.cache[id][attr] = value;
+    XULStore.setValue(this.uri, id, attr, value);
+  }
+
+  removeValue(id, attr) {
+    if (!(id in this.cache) || !(attr in this.cache[id])) {
+      return;
+    }
+    delete this.cache[id][attr];
+    XULStore.removeValue(this.uri, id, attr);
+  }
+}

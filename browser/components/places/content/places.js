@@ -39,8 +39,8 @@ const HISTORY_LIBRARY_SEARCH_TELEMETRY = "PLACES_HISTORY_LIBRARY_SEARCH_TIME_MS"
 var PlacesOrganizer = {
   _places: null,
 
-  _initFolderTree() {
-    this._places.place = `place:type=${Ci.nsINavHistoryQueryOptions.RESULTS_AS_LEFT_PANE_QUERY}&excludeItems=1&expandQueries=0`;
+  _initFolderTree: async function() {
+    await this._places.setPlace(`place:type=${Ci.nsINavHistoryQueryOptions.RESULTS_AS_LEFT_PANE_QUERY}&excludeItems=1&expandQueries=0`);
   },
 
   /**
@@ -130,7 +130,7 @@ var PlacesOrganizer = {
     }
   },
 
-  init: function PO_init() {
+  init: async function PO_init() {
     // Register the downloads view.
     const DOWNLOADS_QUERY = "place:transition=" +
       Ci.nsINavHistoryService.TRANSITION_DOWNLOAD +
@@ -145,7 +145,7 @@ var PlacesOrganizer = {
     ContentArea.init();
 
     this._places = document.getElementById("placesList");
-    this._initFolderTree();
+    await this._initFolderTree();
 
     var leftPaneSelection = "AllBookmarks"; // default to all-bookmarks
     if (window.arguments && window.arguments[0])

@@ -213,9 +213,11 @@ function testSortByDir(aOrganizerWin, aPlaceContentTree, aUnsortFirst) {
 function test() {
   waitForExplicitFinish();
 
-  openLibrary(function(win) {
+  openLibrary(async function(win) {
         let tree = win.document.getElementById("placeContent");
         isnot(tree, null, "sanity check: placeContent tree should exist");
+        await tree.initPromise;
+
         // Run the tests.
         testSortByColAndDir(win, tree, true);
         testSortByColAndDir(win, tree, false);
