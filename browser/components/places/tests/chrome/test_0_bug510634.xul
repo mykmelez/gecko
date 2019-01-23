@@ -70,6 +70,8 @@
           for (let i = 0; i < tree.view.rowCount && !found; i++) {
             rowProperties = tree.view.getCellProperties(i, titleColumn).split(" ");
             found = rowProperties.includes("OrganizerQuery_" + queryName);
+          }
+          ok(found, `OrganizerQuery_${queryName} is set`);
         }
 
         const folderGuids = [
