@@ -26,7 +26,10 @@ add_task(async function test() {
 
   await withSidebarTree("history", async function() {
     info("Set 'by last visited' view");
-    sidebar.contentDocument.getElementById("bylastvisited").doCommand();
+    // Call GroupBy() directly rather than indirectly through
+    // menuItem.doCommand() so we can await its resolution.
+    let menuItem = sidebar.contentDocument.getElementById("bylastvisited");
+    await sidebar.contentWindow.GroupBy(menuItem, "lastvisited");
     let tree = sidebar.contentDocument.getElementById("historyTree");
     await tree.initPromise;
     check_tree_order(tree, pages);

@@ -62,7 +62,8 @@ async function HistorySidebarInit() {
   await searchHistory("");
 }
 
-async function GroupBy(groupingType) {
+async function GroupBy(menuItem, groupingType) {
+  menuItem.parentNode.parentNode.setAttribute('selectedsort', groupingType);
   gHistoryGrouping = groupingType;
   await searchHistory(gSearchBox.value);
 }
