@@ -35,7 +35,7 @@
         windowtype="Places:Organizer"
         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
         xmlns:html="http://www.w3.org/1999/xhtml"
-        onload="PlacesOrganizer.init();"
+        onload="PlacesOrganizer.init().catch(Cu.reportError);"
         onunload="PlacesOrganizer.destroy();"
         width="&places.library.width;" height="&places.library.height;"
         screenX="10" screenY="10"
