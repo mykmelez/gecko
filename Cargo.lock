@@ -1336,7 +1336,6 @@ dependencies = [
  "ordered-float 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "rkv 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "storage_variant 0.1.0",
- "threadbound 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "xpcom 0.1.0",
 ]
 
@@ -3211,6 +3210,7 @@ dependencies = [
  "libc 0.2.43 (registry+https://github.com/rust-lang/crates.io-index)",
  "nserror 0.1.0",
  "nsstring 0.1.0",
+ "threadbound 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "xpcom_macros 0.1.0",
 ]
 

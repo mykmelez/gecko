@@ -15,7 +15,6 @@ nsstring = { path = "../../../xpcom/rust/nsstring" }
 ordered-float = "1"
 rkv = "0.7"
 storage_variant = { path = "../../../storage/variant" }
-threadbound = "0.1"
 xpcom = { path = "../../../xpcom/rust/xpcom" }
 
 # Get rid of failure's dependency on backtrace. Eventually

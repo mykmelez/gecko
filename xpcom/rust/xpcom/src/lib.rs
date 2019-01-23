@@ -14,6 +14,7 @@
 extern crate libc;
 extern crate nsstring;
 extern crate nserror;
+extern crate threadbound;
 
 // re-export the xpcom_macros macro
 #[macro_use]
