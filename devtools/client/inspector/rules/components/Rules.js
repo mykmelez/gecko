@@ -17,6 +17,8 @@ class Rules extends PureComponent {
       onToggleDeclaration: PropTypes.func.isRequired,
       onToggleSelectorHighlighter: PropTypes.func.isRequired,
       rules: PropTypes.arrayOf(PropTypes.shape(Types.rule)).isRequired,
+      showDeclarationNameEditor: PropTypes.func.isRequired,
+      showSelectorEditor: PropTypes.func.isRequired,
     };
   }
 
@@ -25,6 +27,8 @@ class Rules extends PureComponent {
       onToggleDeclaration,
       onToggleSelectorHighlighter,
       rules,
+      showDeclarationNameEditor,
+      showSelectorEditor,
     } = this.props;
 
     return rules.map(rule => {
@@ -33,6 +37,8 @@ class Rules extends PureComponent {
         onToggleDeclaration,
         onToggleSelectorHighlighter,
         rule,
+        showDeclarationNameEditor,
+        showSelectorEditor,
       });
     });
   }

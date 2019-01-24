@@ -190,9 +190,6 @@ XPCOMUtils.defineLazyGetter(this, "gURLBar", () => {
     return element;
   }
 
-  // Disable the legacy XBL binding.
-  element.setAttribute("quantumbar", "true");
-
   // Re-focus the input field if it was focused before switching bindings.
   if (element.hasAttribute("focused")) {
     element.inputField.focus();
@@ -2961,12 +2958,14 @@ var BrowserOnClick = {
             flags |= overrideService.ERROR_TIME;
           }
           let uri = Services.uriFixup.createFixupURI(location, 0);
+          let permanentOverride =
+            Services.prefs.getBoolPref("security.certerrors.permanentOverride");
           cert = securityInfo.serverCert;
           overrideService.rememberValidityOverride(
             uri.asciiHost, uri.port,
             cert,
             flags,
-            true);
+            !permanentOverride);
           browser.reload();
           return;
         }
@@ -4000,7 +3999,6 @@ const BrowserSearch = {
 
     let focusUrlBarIfSearchFieldIsNotActive = function(aSearchBar) {
       if (!aSearchBar || document.activeElement != aSearchBar.textbox.inputField) {
-        focusAndSelectUrlBar(true);
         // Limit the results to search suggestions, like the search bar.
         gURLBar.typeRestrictToken(UrlbarTokenizer.RESTRICT.SEARCH);
       }
@@ -4827,6 +4825,7 @@ var XULBrowserWindow = {
 
       CFRPageActions.updatePageActions(gBrowser.selectedBrowser);
     }
+    Services.obs.notifyObservers(null, "touchbar-location-change", location);
     UpdateBackForwardCommands(gBrowser.webNavigation);
     ReaderParent.updateReaderButton(gBrowser.selectedBrowser);
 
