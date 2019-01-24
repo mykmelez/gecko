@@ -58,10 +58,18 @@ pref("devtools.inspector.fonthighlighter.enabled", true);
 pref("devtools.inspector.changes.enabled", true);
 // Enable the new Rules View
 pref("devtools.inspector.new-rulesview.enabled", false);
+// Hide the 'scrollable' markup-badges for now
+pref("devtools.inspector.scrollable-badges.enabled", false);
 
 // Flexbox preferences
 pref("devtools.inspector.flexboxHighlighter.enabled", true);
 pref("devtools.flexboxinspector.enabled", true);
+
+#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
+pref("devtools.inspector.flexboxHighlighter.combine", true);
+#else
+pref("devtools.inspector.flexboxHighlighter.combine", false);
+#endif
 
 // Grid highlighter preferences
 pref("devtools.gridinspector.gridOutlineMaxColumns", 50);

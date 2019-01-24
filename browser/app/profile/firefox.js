@@ -962,19 +962,23 @@ pref("security.alternate_certificate_error_page", "certerror");
 // Enable the new certificate error pages.
 #ifdef EARLY_BETA_OR_EARLIER
 pref("browser.security.newcerterrorpage.enabled", true);
-pref("browser.security.newcerterrorpage.mitm.enabled", true);
 #else
 pref("browser.security.newcerterrorpage.enabled", false);
-pref("browser.security.newcerterrorpage.mitm.enabled", false);
 #endif
 
+pref("browser.security.newcerterrorpage.mitm.enabled", true);
 pref("security.certerrors.recordEventTelemetry", true);
+pref("security.certerrors.permanentOverride", true);
 
 // Whether to start the private browsing mode at application startup
 pref("browser.privatebrowsing.autostart", false);
 
 // Whether to show the new private browsing UI with in-content search box.
+#ifdef EARLY_BETA_OR_EARLIER
 pref("browser.privatebrowsing.searchUI", true);
+#else
+pref("browser.privatebrowsing.searchUI", false);
+#endif
 
 // Whether the bookmark panel should be shown when bookmarking a page.
 pref("browser.bookmarks.editDialog.showForNewBookmarks", true);
@@ -1473,16 +1477,16 @@ pref("media.gmp-widevinecdm.visible", true);
 pref("media.gmp-widevinecdm.enabled", true);
 #endif
 
-#ifdef NIGHTLY_BUILD
+
 // Switch block autoplay logic to v2, and enable UI.
 pref("media.autoplay.enabled.user-gestures-needed", true);
 // Set Firefox to block autoplay, asking for permission by default.
 pref("media.autoplay.default", 1); // 0=Allowed, 1=Blocked
+
+#ifdef NIGHTLY_BUILD
 // Block WebAudio from playing automatically.
 pref("media.autoplay.block-webaudio", true);
 #else
-pref("media.autoplay.default", 0); // 0=Allowed, 1=Blocked
-pref("media.autoplay.enabled.user-gestures-needed", false);
 pref("media.autoplay.block-webaudio", false);
 #endif
 
