@@ -9,7 +9,9 @@ function openLibrary(callback, aLeftPaneRoot) {
   let library = window.openDialog("chrome://browser/content/places/places.xul",
                                   "", "chrome,toolbar=yes,dialog=no,resizable",
                                   aLeftPaneRoot);
-  waitForFocus(function() {
+  waitForFocus(async () => {
+    await library.PlacesOrganizer._places.initPromise;
+    await library.ContentTree.view.initPromise;
     callback(library);
   }, library);
 
@@ -24,9 +26,11 @@ function openLibrary(callback, aLeftPaneRoot) {
  *        Hierarchy to open and select in the left pane.
  */
 function promiseLibrary(aLeftPaneRoot) {
-  return new Promise(resolve => {
+  return new Promise(async (resolve) => {
     let library = Services.wm.getMostRecentWindow("Places:Organizer");
     if (library && !library.closed) {
+      await library.PlacesOrganizer._places.initPromise;
+      await library.ContentTree.view.initPromise;
       if (aLeftPaneRoot) {
         library.PlacesOrganizer.selectLeftPaneContainerByHierarchy(aLeftPaneRoot);
       }
@@ -343,6 +347,7 @@ var withSidebarTree = async function(type, taskFn) {
   let treeId = type == "bookmarks" ? "bookmarks-view"
                                    : "historyTree";
   let tree = sidebar.contentDocument.getElementById(treeId);
+  await tree.initPromise;
 
   // Need to executeSoon since the tree is initialized on sidebar load.
   info("withSidebarTree: executing the task");

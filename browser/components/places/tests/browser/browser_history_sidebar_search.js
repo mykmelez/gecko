@@ -24,22 +24,30 @@ add_task(async function test() {
   }
   await PlacesTestUtils.addVisits(places);
 
-  await withSidebarTree("history", function() {
+  await withSidebarTree("history", async function() {
     info("Set 'by last visited' view");
-    sidebar.contentDocument.getElementById("bylastvisited").doCommand();
+    // Call GroupBy() directly rather than indirectly through
+    // menuItem.doCommand() so we can await its resolution.
+    let menuItem = sidebar.contentDocument.getElementById("bylastvisited");
+    await sidebar.contentWindow.GroupBy(menuItem, "lastvisited");
     let tree = sidebar.contentDocument.getElementById("historyTree");
+    await tree.initPromise;
     check_tree_order(tree, pages);
 
     // Set a search value.
     let searchBox = sidebar.contentDocument.getElementById("search-box");
     ok(searchBox, "search box is in context");
     searchBox.value = "sidebar.mozilla";
-    searchBox.doCommand();
+    // Call searchHistory() directly rather than indirectly through
+    // searchBox.doCommand() so we can await its resolution.
+    await sidebar.contentWindow.searchHistory(searchBox.value);
     check_tree_order(tree, pages, -FILTERED_COUNT);
 
     info("Reset the search");
     searchBox.value = "";
-    searchBox.doCommand();
+    // Call searchHistory() directly rather than indirectly through
+    // searchBox.doCommand() so we can await its resolution.
+    await sidebar.contentWindow.searchHistory(searchBox.value);
     check_tree_order(tree, pages);
   });
 
