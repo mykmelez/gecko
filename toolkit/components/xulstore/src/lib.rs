@@ -108,7 +108,7 @@ lazy_static! {
         // profiles without restarting.
         //
         // It isn't clear that there's any way to initiate such a profile
-        // change anymore, but in any case the nsIXULStore implementation
+        // change anymore, but in any case the XULStore.jsm implementation
         // ignores writes after receiving a profile-after-change notification,
         // so it isn't necessary to support that here, assuming consumers
         // always access this store via that interface.

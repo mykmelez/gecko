@@ -139,6 +139,14 @@ const XULStore = {
     }
   },
 
+  async removeDocument(docURI) {
+    for (const id of await this.getIDsEnumerator(docURI)) {
+      for (const attr of await this.getAttributeEnumerator(docURI, id)) {
+        await this.removeValue(docURI, id, attr);
+      }
+    }
+  },
+
   // TODO: consider storing caches in a weakmap to reuse them if available
   // without preventing them from being garbage collected.
   cache(uri) {
