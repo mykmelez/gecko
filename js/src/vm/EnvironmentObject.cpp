@@ -12,6 +12,7 @@
 #include "vm/AsyncFunction.h"
 #include "vm/GlobalObject.h"
 #include "vm/Iteration.h"
+#include "vm/JSObject.h"
 #include "vm/ProxyObject.h"
 #include "vm/Realm.h"
 #include "vm/Shape.h"
@@ -3618,6 +3619,8 @@ static bool CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script,
 bool js::CheckGlobalOrEvalDeclarationConflicts(JSContext* cx,
                                                HandleObject envChain,
                                                HandleScript script) {
+  MOZ_ASSERT(script->isGlobalCode() || script->isForEval());
+
   RootedObject varObj(cx, &GetVariablesObject(envChain));
 
   if (script->isForEval()) {

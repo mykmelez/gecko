@@ -12,6 +12,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.jsm",
   ExtensionSearchHandler: "resource://gre/modules/ExtensionSearchHandler.jsm",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
+  ReaderMode: "resource://gre/modules/ReaderMode.jsm",
   Services: "resource://gre/modules/Services.jsm",
   UrlbarController: "resource:///modules/UrlbarController.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
@@ -62,7 +63,7 @@ class UrlbarInput {
     // Forward textbox methods and properties.
     const METHODS = ["addEventListener", "removeEventListener",
       "setAttribute", "hasAttribute", "removeAttribute", "getAttribute",
-      "focus", "blur", "select"];
+      "select"];
     const READ_ONLY_PROPERTIES = ["inputField", "editor"];
     const READ_WRITE_PROPERTIES = ["placeholder", "readOnly",
       "selectionStart", "selectionEnd"];
@@ -137,7 +138,16 @@ class UrlbarInput {
   }
 
   closePopup() {
+    this.controller.cancelQuery();
     this.view.close();
+  }
+
+  focus() {
+    this.inputField.focus();
+  }
+
+  blur() {
+    this.inputField.blur();
   }
 
   /**
@@ -152,7 +162,7 @@ class UrlbarInput {
   makeURIReadable(uri) {
     // Avoid copying 'about:reader?url=', and always provide the original URI:
     // Reader mode ensures we call createExposableURI itself.
-    let readerStrippedURI = this.window.ReaderMode.getOriginalUrlObjectForDisplay(uri.displaySpec);
+    let readerStrippedURI = ReaderMode.getOriginalUrlObjectForDisplay(uri.displaySpec);
     if (readerStrippedURI) {
       return readerStrippedURI;
     }
@@ -481,6 +491,11 @@ class UrlbarInput {
 
   set value(val) {
     this._untrimmedValue = val;
+
+    let originalUrl = ReaderMode.getOriginalUrlObjectForDisplay(val);
+    if (originalUrl) {
+      val = originalUrl.displaySpec;
+    }
 
     val = this.trimValue(val);
 
@@ -856,6 +871,7 @@ class UrlbarInput {
 
   _on_blur(event) {
     this.formatValue();
+    this.closePopup();
   }
 
   _on_focus(event) {

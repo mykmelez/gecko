@@ -456,6 +456,27 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
+// Block multiple external protocol URLs in iframes per single event.
+#ifdef NIGHTLY_BUILD
+#define PREF_VALUE true
+#else
+#define PREF_VALUE false
+#endif
+VARCACHE_PREF(
+  "dom.block_external_protocol_in_iframes",
+   dom_block_external_protocol_in_iframes,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
+
+// Any how many seconds we allow external protocol URLs in iframe when not in
+// single events
+VARCACHE_PREF(
+  "dom.delay.block_external_protocol_in_iframes",
+   dom_delay_block_external_protocol_in_iframes,
+  uint32_t, 10 // in seconds
+)
+
 // Block multiple window.open() per single event.
 VARCACHE_PREF(
   "dom.block_multiple_popups",
