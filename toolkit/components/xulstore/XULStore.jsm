@@ -86,35 +86,6 @@ const XULStore = {
     await gDatabase.delete(makeKey(docURI, id, attr));
   },
 
-  // TODO: rename.
-  async getIDsEnumerator(docURI) {
-    this.log("Getting ID enumerator for doc=" + docURI);
-    const gDatabase = await gDatabasePromise;
-    const enumerator = await gDatabase.enumerate(docURI.concat("\t"), docURI.concat("\n"));
-
-    // IDs are the second of the three tab-delimited fields in the key.
-    // TODO: optimize.
-    const ids = Array.from(enumerator).map(({key}) => key.split("\t")[1]);
-
-    // Filter the array for uniqueness before returning it.
-    return [...new Set(ids)];
-  },
-
-  // TODO: rename.
-  async getAttributeEnumerator(docURI, id) {
-    this.log("Getting attribute enumerator for id=" + id + ", doc=" + docURI);
-    const gDatabase = await gDatabasePromise;
-    const prefix = docURI.concat("\t", id);
-    const enumerator = await gDatabase.enumerate(prefix.concat("\t"), prefix.concat("\n"));
-
-    // Attributes are the third of the three tab-delimited fields in the key.
-    // TODO: optimize.
-    const attrs = Array.from(enumerator).map(({key}) => key.split("\t")[2]);
-
-    // Filter the array for uniqueness before returning it.
-    return [...new Set(attrs)];
-  },
-
   async persist(node, attr) {
     if (!node.id) {
       throw new Error("Node without ID passed into persist()");
@@ -140,43 +111,45 @@ const XULStore = {
   },
 
   async removeDocument(docURI) {
-    for (const id of await this.getIDsEnumerator(docURI)) {
-      for (const attr of await this.getAttributeEnumerator(docURI, id)) {
-        await this.removeValue(docURI, id, attr);
-      }
+    this.log("remove store values for doc=" + docURI);
+
+    if (!this._saveAllowed) {
+      Services.console.logStringMessage("XULStore: Changes after profile-before-change are ignored!");
+      return;
     }
+
+    const gDatabase = await gDatabasePromise;
+    const enumerator = await gDatabase.enumerate(docURI.concat("\t"), docURI.concat("\n"));
+
+    await Promise.all(Array.from(enumerator).map(({key}) => gDatabase.delete(key)));
   },
 
-  // TODO: consider storing caches in a weakmap to reuse them if available
-  // without preventing them from being garbage collected.
-  cache(uri) {
-    return (new XULStoreCache(uri)).load();
+  async cache(docURI) {
+    const gDatabase = await gDatabasePromise;
+    const enumerator = await gDatabase.enumerate(docURI.concat("\t"), docURI.concat("\n"));
+    const cache = {};
+
+    for (const {key, value} of enumerator) {
+      const [uri, id, attr] = key.split("\t");
+        if (!(id in cache)) {
+          cache[id] = {};
+        }
+        cache[id][attr] = value;
+    }
+
+    return new XULStoreCache(docURI, cache);
   },
 
-  decache(uri) {
-    delete promises[uri];
-    delete cache[uri];
+  decache(docURI) {
+    delete promises[docURI];
+    delete cache[docURI];
   },
 };
 
 class XULStoreCache {
-  constructor(uri) {
+  constructor(uri, cache) {
     this.uri = uri;
-    this.cache = {};
-  }
-
-  async load() {
-    // TODO: optimize retrieval of data to cache by directly querying the store
-    // for the relevant key-value pairs.
-    let ids = await XULStore.getIDsEnumerator(this.uri);
-    for (const id of ids) {
-      this.cache[id] = {};
-      let attrs = await XULStore.getAttributeEnumerator(this.uri, id);
-      for (const attr of attrs) {
-        this.cache[id][attr] = await XULStore.getValue(this.uri, id, attr);
-      }
-    }
-    return this;
+    this.cache = cache;
   }
 
   getValue(id, attr) {
@@ -191,7 +164,7 @@ class XULStoreCache {
       this.cache[id] = {};
     }
     this.cache[id][attr] = value;
-    XULStore.setValue(this.uri, id, attr, value);
+    XULStore.setValue(this.uri, id, attr, value).catch(Cu.reportError);
   }
 
   removeValue(id, attr) {
@@ -199,6 +172,6 @@ class XULStoreCache {
       return;
     }
     delete this.cache[id][attr];
-    XULStore.removeValue(this.uri, id, attr);
+    XULStore.removeValue(this.uri, id, attr).catch(Cu.reportError);
   }
 }
