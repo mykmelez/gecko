@@ -22,6 +22,7 @@ RELEASE_PROJECTS = {
     'comm-central',
     'comm-beta',
     'comm-esr60',
+    'oak',
 }
 
 RELEASE_PROMOTION_PROJECTS = {

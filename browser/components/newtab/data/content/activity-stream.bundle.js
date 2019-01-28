@@ -1948,7 +1948,7 @@ module.exports = {"title":"EOYSnippet","description":"Fundraising Snippet","vers
 /* 19 */
 /***/ (function(module) {
 
-module.exports = {"title":"SimpleSnippet","description":"A simple template with an icon, text, and optional button.","version":"1.1.1","type":"object","definitions":{"plainText":{"description":"Plain text (no HTML allowed)","type":"string"},"richText":{"description":"Text with HTML subset allowed: i, b, u, strong, em, br","type":"string"},"link_url":{"description":"Target for links or buttons","type":"string","format":"uri"}},"properties":{"title":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Snippet title displayed before snippet text"}]},"text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"icon":{"type":"string","description":"Snippet icon. 64x64px. SVG or PNG preferred."},"title_icon":{"type":"string","description":"Small icon that shows up before the title / text. 16x16px. SVG or PNG preferred. Grayscale."},"button_action":{"type":"string","description":"The type of action the button should trigger."},"button_url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"A url, button_label links to this"}]},"button_action_args":{"type":"string","description":"Additional parameters for button action, example which specific menu the button should open"},"button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for a button next to main snippet text that links to button_url. Requires button_url."}]},"button_color":{"type":"string","description":"The text color of the button. Valid CSS color."},"button_background_color":{"type":"string","description":"The background color of the button. Valid CSS color."},"block_button_text":{"type":"string","description":"Tooltip text used for dismiss button.","default":"Remove this"},"tall":{"type":"boolean","description":"To be used by fundraising only, increases height to roughly 120px. Defaults to false."},"do_not_autoblock":{"type":"boolean","description":"Used to prevent blocking the snippet after the CTA (link or button) has been clicked"},"links":{"additionalProperties":{"url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"The url where the link points to."}]},"metric":{"type":"string","description":"Custom event name sent with telemetry event."},"args":{"type":"string","description":"Additional parameters for link action, example which specific menu the button should open"}}}},"additionalProperties":false,"required":["text"],"dependencies":{"button_action":["button_label"],"button_url":["button_label"],"button_color":["button_label"],"button_background_color":["button_label"]}};
+module.exports = {"title":"SimpleSnippet","description":"A simple template with an icon, text, and optional button.","version":"1.1.1","type":"object","definitions":{"plainText":{"description":"Plain text (no HTML allowed)","type":"string"},"richText":{"description":"Text with HTML subset allowed: i, b, u, strong, em, br","type":"string"},"link_url":{"description":"Target for links or buttons","type":"string","format":"uri"}},"properties":{"title":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Snippet title displayed before snippet text"}]},"text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"icon":{"type":"string","description":"Snippet icon. 64x64px. SVG or PNG preferred."},"title_icon":{"type":"string","description":"Small icon that shows up before the title / text. 16x16px. SVG or PNG preferred. Grayscale."},"button_action":{"type":"string","description":"The type of action the button should trigger."},"button_url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"A url, button_label links to this"}]},"button_action_args":{"type":"string","description":"Additional parameters for button action, example which specific menu the button should open"},"button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for a button next to main snippet text that links to button_url. Requires button_url."}]},"button_color":{"type":"string","description":"The text color of the button. Valid CSS color."},"button_background_color":{"type":"string","description":"The background color of the button. Valid CSS color."},"block_button_text":{"type":"string","description":"Tooltip text used for dismiss button.","default":"Remove this"},"tall":{"type":"boolean","description":"To be used by fundraising only, increases height to roughly 120px. Defaults to false."},"do_not_autoblock":{"type":"boolean","description":"Used to prevent blocking the snippet after the CTA (link or button) has been clicked"},"links":{"additionalProperties":{"url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"The url where the link points to."}]},"metric":{"type":"string","description":"Custom event name sent with telemetry event."},"args":{"type":"string","description":"Additional parameters for link action, example which specific menu the button should open"}}},"section_title_icon":{"type":"string","description":"Section title icon. 16x16px. SVG or PNG preferred. section_title_text must also be specified to display."},"section_title_text":{"type":"string","description":"Section title text. section_title_icon must also be specified to display."},"section_title_url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"A url, section_title_text links to this"}]}},"additionalProperties":false,"required":["text"],"dependencies":{"button_action":["button_label"],"button_url":["button_label"],"button_color":["button_label"],"button_background_color":["button_label"],"section_title_url":["section_title_text"]}};
 
 /***/ }),
 /* 20 */
@@ -2372,6 +2372,15 @@ class BaseContent extends react__WEBPACK_IMPORTED_MODULE_9___default.a.PureCompo
     this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].UserEvent({ event: "OPEN_NEWTAB_PREFS" }));
   }
 
+  disableDarkTheme() {
+    // Dark themes are not supported in discovery stream view
+    // Add force-light-theme class to body tag to disable dark mode. See Bug 1519764
+    const bodyClassNames = global.document.body.classList;
+    if (!bodyClassNames.contains("force-light-theme")) {
+      bodyClassNames.add("force-light-theme");
+    }
+  }
+
   render() {
     const { props } = this;
     const { App } = props;
@@ -2382,6 +2391,10 @@ class BaseContent extends react__WEBPACK_IMPORTED_MODULE_9___default.a.PureCompo
     const noSectionsEnabled = !prefs["feeds.topsites"] && props.Sections.filter(section => section.enabled).length === 0;
     const isDiscoveryStream = props.DiscoveryStream.config && props.DiscoveryStream.config.enabled;
     const searchHandoffEnabled = prefs["improvesearch.handoffToAwesomebar"];
+
+    if (isDiscoveryStream) {
+      this.disableDarkTheme();
+    }
 
     const outerClassName = ["outer-wrapper", shouldBeFixedToTop && "fixed-to-top", prefs.showSearch && this.state.fixedSearch && !noSectionsEnabled && "fixed-search", prefs.showSearch && noSectionsEnabled && "only-search"].filter(v => v).join(" ");
 
@@ -2411,7 +2424,11 @@ class BaseContent extends react__WEBPACK_IMPORTED_MODULE_9___default.a.PureCompo
               { className: "non-collapsible-section" },
               react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(content_src_components_ManualMigration_ManualMigration__WEBPACK_IMPORTED_MODULE_7__["ManualMigration"], null)
             ),
-            isDiscoveryStream ? react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(content_src_components_DiscoveryStreamBase_DiscoveryStreamBase__WEBPACK_IMPORTED_MODULE_5__["DiscoveryStreamBase"], null) : react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(content_src_components_Sections_Sections__WEBPACK_IMPORTED_MODULE_11__["Sections"], null),
+            isDiscoveryStream ? react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(
+              content_src_components_ErrorBoundary_ErrorBoundary__WEBPACK_IMPORTED_MODULE_6__["ErrorBoundary"],
+              { className: "borderless-error" },
+              react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(content_src_components_DiscoveryStreamBase_DiscoveryStreamBase__WEBPACK_IMPORTED_MODULE_5__["DiscoveryStreamBase"], null)
+            ) : react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(content_src_components_Sections_Sections__WEBPACK_IMPORTED_MODULE_11__["Sections"], null),
             react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(PrefsButton, { onClick: this.openPreferences })
           ),
           react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(content_src_components_ConfirmDialog_ConfirmDialog__WEBPACK_IMPORTED_MODULE_3__["ConfirmDialog"], null)
@@ -6410,7 +6427,7 @@ class _Search extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureComponent
             { className: "fake-textbox" },
             this.props.intl.formatMessage({ id: "search_web_placeholder" })
           ),
-          react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("div", { className: "fake-editable", tabIndex: "-1", "aria-hidden": "true", contentEditable: "", onDrop: this.onSearchHandoffDrop, onPaste: this.onSearchHandoffPaste }),
+          react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("input", { type: "search", className: "fake-editable", tabIndex: "-1", "aria-hidden": "true", onDrop: this.onSearchHandoffDrop, onPaste: this.onSearchHandoffPaste }),
           react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("div", { className: "fake-caret" })
         ),
         react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("input", {
@@ -7052,23 +7069,37 @@ class DSCard_DSCard extends external_React_default.a.PureComponent {
         "div",
         { className: "meta" },
         external_React_default.a.createElement(
-          "header",
-          { className: "title" },
-          this.props.title
+          "div",
+          { className: "info-wrap" },
+          external_React_default.a.createElement(
+            "header",
+            { className: "title" },
+            this.props.title
+          ),
+          this.props.excerpt && external_React_default.a.createElement(
+            "p",
+            { className: "excerpt" },
+            this.props.excerpt
+          )
         ),
         external_React_default.a.createElement(
           "p",
-          { className: "excerpt" },
-          this.props.excerpt
-        ),
-        this.props.context ? external_React_default.a.createElement(
-          "p",
-          { className: "context" },
-          this.props.context
-        ) : external_React_default.a.createElement(
-          "p",
-          { className: "source" },
-          this.props.source
+          null,
+          this.props.context && external_React_default.a.createElement(
+            "span",
+            null,
+            external_React_default.a.createElement(
+              "span",
+              { className: "context" },
+              this.props.context
+            ),
+            external_React_default.a.createElement("br", null)
+          ),
+          external_React_default.a.createElement(
+            "span",
+            { className: "source" },
+            this.props.source
+          )
         )
       )
     );
@@ -7118,7 +7149,7 @@ class CardGrid_CardGrid extends external_React_default.a.PureComponent {
       ),
       external_React_default.a.createElement(
         "div",
-        { className: `ds-card-grid ds-card-grid-${divisibility}` },
+        { className: `ds-card-grid ds-card-grid-${this.props.border} ds-card-grid-${divisibility}` },
         cards
       )
     );
@@ -7132,129 +7163,11 @@ CardGrid_CardGrid.defaultProps = {
 // EXTERNAL MODULE: external "ReactRedux"
 var external_ReactRedux_ = __webpack_require__(24);
 
-// CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/Hero/Hero.jsx
-
-
-
-
-class Hero_Hero extends external_React_default.a.PureComponent {
-  constructor(props) {
-    super(props);
-    this.onLinkClick = this.onLinkClick.bind(this);
-  }
-
-  onLinkClick(event) {
-    if (this.props.dispatch) {
-      this.props.dispatch(Actions["actionCreators"].UserEvent({
-        event: "CLICK",
-        source: this.props.type.toUpperCase(),
-        action_position: 0
-      }));
-
-      this.props.dispatch(Actions["actionCreators"].ImpressionStats({
-        source: this.props.type.toUpperCase(),
-        click: 0,
-        tiles: [{ id: this.heroRec.id, pos: 0 }]
-      }));
-    }
-  }
-
-  render() {
-    const { data } = this.props;
-
-    // Handle a render before feed has been fetched by displaying nothing
-    if (!data || !data.recommendations) {
-      return external_React_default.a.createElement("div", null);
-    }
-
-    let [heroRec, ...otherRecs] = data.recommendations.slice(0, this.props.items);
-    this.heroRec = heroRec;
-    let truncateText = (text, cap) => `${text.substring(0, cap)}${text.length > cap ? `...` : ``}`;
-
-    // Note that `{index + 1}` is necessary below for telemetry since we treat heroRec as index 0.
-    let cards = otherRecs.map((rec, index) => external_React_default.a.createElement(DSCard_DSCard, {
-      key: `dscard-${index}`,
-      image_src: rec.image_src,
-      title: truncateText(rec.title, 44),
-      url: rec.url,
-      id: rec.id,
-      index: index + 1,
-      type: this.props.type,
-      dispatch: this.props.dispatch,
-      context: truncateText(rec.context || "", 22),
-      source: truncateText(`TODO: SOURCE`, 22) }));
-
-    return external_React_default.a.createElement(
-      "div",
-      null,
-      external_React_default.a.createElement(
-        "div",
-        { className: "ds-header" },
-        this.props.title
-      ),
-      external_React_default.a.createElement(
-        "div",
-        { className: `ds-hero ds-hero-${this.props.border}` },
-        external_React_default.a.createElement(
-          "a",
-          { href: heroRec.url, className: "wrapper", onClick: this.onLinkClick },
-          external_React_default.a.createElement(
-            "div",
-            { className: "img-wrapper" },
-            external_React_default.a.createElement("div", { className: "img", style: { backgroundImage: `url(${heroRec.image_src})` } })
-          ),
-          external_React_default.a.createElement(
-            "div",
-            { className: "meta" },
-            external_React_default.a.createElement(
-              "header",
-              null,
-              truncateText(heroRec.title, 28)
-            ),
-            external_React_default.a.createElement(
-              "p",
-              null,
-              truncateText(heroRec.excerpt, 114)
-            ),
-            heroRec.context ? external_React_default.a.createElement(
-              "p",
-              { className: "context" },
-              truncateText(heroRec.context, 22)
-            ) : external_React_default.a.createElement(
-              "p",
-              null,
-              truncateText(`TODO: SOURCE`, 22)
-            )
-          )
-        ),
-        external_React_default.a.createElement(
-          "div",
-          { className: "cards" },
-          cards
-        )
-      )
-    );
-  }
+// CONCATENATED MODULE: ./content-src/lib/truncate-text.js
+function truncateText(text = "", cap) {
+  return text.substring(0, cap).trim() + (text.length > cap ? "…" : "");
 }
-
-Hero_Hero.defaultProps = {
-  data: {},
-  border: `border`,
-  items: 1 // Number of stories to display
-};
-// CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/HorizontalRule/HorizontalRule.jsx
-
-
-class HorizontalRule_HorizontalRule extends external_React_default.a.PureComponent {
-  render() {
-    return external_React_default.a.createElement("hr", { className: "ds-hr" });
-  }
-}
-// EXTERNAL MODULE: ./content-src/components/DiscoveryStreamImpressionStats/ImpressionStats.jsx
-var ImpressionStats = __webpack_require__(29);
-
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/List/List.jsx
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
 
 
@@ -7300,11 +7213,12 @@ class List_ListItem extends external_React_default.a.PureComponent {
           external_React_default.a.createElement(
             "div",
             { className: "ds-list-item-title" },
-            external_React_default.a.createElement(
-              "b",
-              null,
-              this.props.title
-            )
+            this.props.title
+          ),
+          this.props.excerpt && external_React_default.a.createElement(
+            "div",
+            { className: "ds-list-item-excerpt" },
+            truncateText(this.props.excerpt, 90)
           ),
           external_React_default.a.createElement(
             "div",
@@ -7330,9 +7244,18 @@ function _List(props) {
 
   const recs = feed.data.recommendations;
 
-  let recMarkup = recs.slice(0, props.items).map((rec, index) => external_React_default.a.createElement(List_ListItem, _extends({}, rec, { key: `ds-list-item-${index}`, index: index, type: props.type, dispatch: props.dispatch })));
+  let recMarkup = recs.slice(props.recStartingPoint, props.recStartingPoint + props.items).map((rec, index) => external_React_default.a.createElement(List_ListItem, { key: `ds-list-item-${index}`,
+    dispatch: props.dispatch,
+    domain: rec.domain,
+    excerpt: rec.excerpt,
+    id: rec.id,
+    image_src: rec.image_src,
+    index: index,
+    title: rec.title,
+    type: props.type,
+    url: rec.url }));
 
-  const listStyles = ["ds-list", props.hasImages ? "ds-list-images" : "", props.hasNumbers ? "ds-list-numbers" : ""];
+  const listStyles = ["ds-list", props.fullWidth ? "ds-list-full-width" : "", props.hasBorders ? "ds-list-borders" : "", props.hasImages ? "ds-list-images" : "", props.hasNumbers ? "ds-list-numbers" : ""];
   return external_React_default.a.createElement(
     "div",
     null,
@@ -7341,7 +7264,6 @@ function _List(props) {
       { className: "ds-header" },
       props.header.title
     ) : null,
-    external_React_default.a.createElement("hr", { className: "ds-list-border" }),
     external_React_default.a.createElement(
       "ul",
       { className: listStyles.join(" ") },
@@ -7351,12 +7273,145 @@ function _List(props) {
 }
 
 _List.defaultProps = {
+  recStartingPoint: 0, // Index of recommendations to start displaying from
+  fullWidth: false, // Display items taking up the whole column
+  hasBorders: false, // Display lines separating each item
   hasImages: false, // Display images for each item
   hasNumbers: false, // Display numbers for each item
   items: 6 // Number of stories to display.  TODO: get from endpoint
 };
 
 const List = Object(external_ReactRedux_["connect"])(state => ({ DiscoveryStream: state.DiscoveryStream }))(_List);
+// CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/Hero/Hero.jsx
+
+
+
+
+
+
+class Hero_Hero extends external_React_default.a.PureComponent {
+  constructor(props) {
+    super(props);
+    this.onLinkClick = this.onLinkClick.bind(this);
+  }
+
+  onLinkClick(event) {
+    if (this.props.dispatch) {
+      this.props.dispatch(Actions["actionCreators"].UserEvent({
+        event: "CLICK",
+        source: this.props.type.toUpperCase(),
+        action_position: 0
+      }));
+
+      this.props.dispatch(Actions["actionCreators"].ImpressionStats({
+        source: this.props.type.toUpperCase(),
+        click: 0,
+        tiles: [{ id: this.heroRec.id, pos: 0 }]
+      }));
+    }
+  }
+
+  render() {
+    const { data } = this.props;
+
+    // Handle a render before feed has been fetched by displaying nothing
+    if (!data || !data.recommendations) {
+      return external_React_default.a.createElement("div", null);
+    }
+
+    let [heroRec, ...otherRecs] = data.recommendations.slice(0, this.props.items);
+    this.heroRec = heroRec;
+
+    // Note that `{index + 1}` is necessary below for telemetry since we treat heroRec as index 0.
+    let cards = otherRecs.map((rec, index) => external_React_default.a.createElement(DSCard_DSCard, {
+      key: `dscard-${index}`,
+      image_src: rec.image_src,
+      title: truncateText(rec.title, 44),
+      url: rec.url,
+      id: rec.id,
+      index: index + 1,
+      type: this.props.type,
+      dispatch: this.props.dispatch,
+      context: truncateText(rec.context, 22),
+      source: truncateText(rec.domain, 22) }));
+
+    let list = external_React_default.a.createElement(List, {
+      recStartingPoint: 1,
+      feed: this.props.feed,
+      hasImages: true,
+      hasBorders: this.props.border === `border`,
+      items: this.props.items - 1,
+      type: `Hero` });
+
+    return external_React_default.a.createElement(
+      "div",
+      null,
+      external_React_default.a.createElement(
+        "div",
+        { className: "ds-header" },
+        this.props.title
+      ),
+      external_React_default.a.createElement(
+        "div",
+        { className: `ds-hero ds-hero-${this.props.border}` },
+        external_React_default.a.createElement(
+          "a",
+          { href: heroRec.url, className: "wrapper", onClick: this.onLinkClick },
+          external_React_default.a.createElement(
+            "div",
+            { className: "img-wrapper" },
+            external_React_default.a.createElement("div", { className: "img", style: { backgroundImage: `url(${heroRec.image_src})` } })
+          ),
+          external_React_default.a.createElement(
+            "div",
+            { className: "meta" },
+            external_React_default.a.createElement(
+              "header",
+              null,
+              truncateText(heroRec.title, 28)
+            ),
+            external_React_default.a.createElement(
+              "p",
+              null,
+              truncateText(heroRec.excerpt, 114)
+            ),
+            heroRec.context ? external_React_default.a.createElement(
+              "p",
+              { className: "context" },
+              truncateText(heroRec.context, 22)
+            ) : external_React_default.a.createElement(
+              "p",
+              { className: "source" },
+              truncateText(heroRec.domain, 22)
+            )
+          )
+        ),
+        external_React_default.a.createElement(
+          "div",
+          { className: `${this.props.subComponentType}` },
+          this.props.subComponentType === `cards` ? cards : list
+        )
+      )
+    );
+  }
+}
+
+Hero_Hero.defaultProps = {
+  data: {},
+  border: `border`,
+  items: 1 // Number of stories to display
+};
+// CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/HorizontalRule/HorizontalRule.jsx
+
+
+class HorizontalRule_HorizontalRule extends external_React_default.a.PureComponent {
+  render() {
+    return external_React_default.a.createElement("hr", { className: "ds-hr" });
+  }
+}
+// EXTERNAL MODULE: ./content-src/components/DiscoveryStreamImpressionStats/ImpressionStats.jsx
+var ImpressionStats = __webpack_require__(29);
+
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/Navigation/Navigation.jsx
 
 
@@ -7379,13 +7434,23 @@ class Navigation_Navigation extends external_React_default.a.PureComponent {
   render() {
     const { links } = this.props || [];
     const { alignment } = this.props || "centered";
+    const header = this.props.header || {};
     return external_React_default.a.createElement(
-      "span",
+      "div",
       { className: `ds-navigation ds-navigation-${alignment}` },
+      header.title ? external_React_default.a.createElement(
+        "div",
+        { className: "ds-header" },
+        header.title
+      ) : null,
       external_React_default.a.createElement(
-        "ul",
+        "div",
         null,
-        links && links.map(t => external_React_default.a.createElement(Navigation_Topic, { key: t.name, url: t.url, name: t.name }))
+        external_React_default.a.createElement(
+          "ul",
+          null,
+          links && links.map(t => external_React_default.a.createElement(Navigation_Topic, { key: t.name, url: t.url, name: t.name }))
+        )
       )
     );
   }
@@ -7597,7 +7662,7 @@ class TopSites_TopSites extends external_React_default.a.PureComponent {
         external_React_default.a.createElement("span", { className: "icon icon-small-spacer icon-topsites" }),
         external_React_default.a.createElement(
           "span",
-          null,
+          { className: "ds-header-title" },
           header.title
         )
       ) : null,
@@ -7725,7 +7790,7 @@ class DiscoveryStreamBase_DiscoveryStreamBase extends external_React_default.a.P
     });
   }
 
-  renderComponent(component) {
+  renderComponent(component, embedWidth) {
     let rows;
     const { spocs } = this.props.DiscoveryStream;
 
@@ -7745,7 +7810,8 @@ class DiscoveryStreamBase_DiscoveryStreamBase extends external_React_default.a.P
       case "Navigation":
         return external_React_default.a.createElement(Navigation_Navigation, {
           links: component.properties.links,
-          alignment: component.properties.alignment });
+          alignment: component.properties.alignment,
+          header: component.header });
       case "CardGrid":
         rows = this.extractRows(component, MAX_ROWS_CARDGRID);
         return external_React_default.a.createElement(
@@ -7766,6 +7832,8 @@ class DiscoveryStreamBase_DiscoveryStreamBase extends external_React_default.a.P
           ImpressionStats["ImpressionStats"],
           { rows: rows, dispatch: this.props.dispatch, source: component.type },
           external_React_default.a.createElement(Hero_Hero, {
+            subComponentType: embedWidth >= 9 ? `cards` : `list`,
+            feed: component.feed,
             title: component.header && component.header.title,
             data: component.data,
             border: component.properties.border,
@@ -7782,6 +7850,8 @@ class DiscoveryStreamBase_DiscoveryStreamBase extends external_React_default.a.P
           { rows: rows, dispatch: this.props.dispatch, source: component.type },
           external_React_default.a.createElement(List, {
             feed: component.feed,
+            fullWidth: component.properties.full_width,
+            hasBorders: component.properties.border === "border",
             hasImages: component.properties.has_images,
             hasNumbers: component.properties.has_numbers,
             items: component.properties.items,
@@ -7821,7 +7891,7 @@ class DiscoveryStreamBase_DiscoveryStreamBase extends external_React_default.a.P
             return external_React_default.a.createElement(
               "div",
               { key: `component-${componentIndex}` },
-              this.renderComponent(component)
+              this.renderComponent(component, row.width)
             );
           })
         )
@@ -7881,6 +7951,9 @@ const Button = props => {
     props.children
   );
 };
+// CONCATENATED MODULE: ./content-src/asrouter/components/ConditionalWrapper/ConditionalWrapper.jsx
+// lifted from https://gist.github.com/kitze/23d82bb9eb0baabfd03a6a720b1d637f
+const ConditionalWrapper = ({ condition, wrap, children }) => condition ? wrap(children) : children;
 // EXTERNAL MODULE: ./content-src/asrouter/components/RichText/RichText.jsx
 var RichText = __webpack_require__(16);
 
@@ -7966,6 +8039,7 @@ var _extends = Object.assign || function (target) { for (var i = 1; i < argument
 
 
 
+
 const DEFAULT_ICON_PATH = "chrome://branding/content/icon64.png";
 
 class SimpleSnippet_SimpleSnippet extends external_React_default.a.PureComponent {
@@ -8035,35 +8109,95 @@ class SimpleSnippet_SimpleSnippet extends external_React_default.a.PureComponent
       sendClick: props.sendClick });
   }
 
+  wrapSectionHeader(url) {
+    return function (children) {
+      return external_React_default.a.createElement(
+        "a",
+        { href: url },
+        children
+      );
+    };
+  }
+
+  wrapSnippetContent(children) {
+    return external_React_default.a.createElement(
+      "div",
+      { className: "innerContentWrapper" },
+      children
+    );
+  }
+
+  renderSectionHeader() {
+    const { props } = this;
+
+    // an icon and text must be specified to render the section header
+    if (props.content.section_title_icon && props.content.section_title_text) {
+      const sectionTitleIcon = Object(template_utils["safeURI"])(props.content.section_title_icon);
+      const sectionTitleURL = props.content.section_title_url;
+
+      return external_React_default.a.createElement(
+        "div",
+        { className: "section-header" },
+        external_React_default.a.createElement(
+          "h3",
+          { className: "section-title" },
+          external_React_default.a.createElement(
+            ConditionalWrapper,
+            { condition: sectionTitleURL, wrap: this.wrapSectionHeader(sectionTitleURL) },
+            external_React_default.a.createElement("span", { className: "icon icon-small-spacer", style: { backgroundImage: `url("${sectionTitleIcon}")` } }),
+            external_React_default.a.createElement(
+              "span",
+              { className: "section-title-text" },
+              props.content.section_title_text
+            )
+          )
+        )
+      );
+    }
+
+    return null;
+  }
+
   render() {
     const { props } = this;
+    const sectionHeader = this.renderSectionHeader();
     let className = "SimpleSnippet";
+
     if (props.className) {
       className += ` ${props.className}`;
     }
     if (props.content.tall) {
       className += " tall";
     }
+    if (sectionHeader) {
+      className += " has-section-header";
+    }
+
     return external_React_default.a.createElement(
       SnippetBase_SnippetBase,
       _extends({}, props, { className: className, textStyle: this.props.textStyle }),
-      external_React_default.a.createElement("img", { src: Object(template_utils["safeURI"])(props.content.icon) || DEFAULT_ICON_PATH, className: "icon" }),
+      sectionHeader,
       external_React_default.a.createElement(
-        "div",
-        null,
-        this.renderTitle(),
-        " ",
+        ConditionalWrapper,
+        { condition: sectionHeader, wrap: this.wrapSnippetContent },
+        external_React_default.a.createElement("img", { src: Object(template_utils["safeURI"])(props.content.icon) || DEFAULT_ICON_PATH, className: "icon" }),
         external_React_default.a.createElement(
-          "p",
-          { className: "body" },
-          this.renderText()
+          "div",
+          null,
+          this.renderTitle(),
+          " ",
+          external_React_default.a.createElement(
+            "p",
+            { className: "body" },
+            this.renderText()
+          ),
+          this.props.extraContent
         ),
-        this.props.extraContent
-      ),
-      external_React_default.a.createElement(
-        "div",
-        null,
-        this.renderButton()
+        external_React_default.a.createElement(
+          "div",
+          null,
+          this.renderButton()
+        )
       )
     );
   }
