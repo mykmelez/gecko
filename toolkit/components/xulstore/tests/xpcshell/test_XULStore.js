@@ -26,11 +26,11 @@ async function checkValueExists(uri, id, attr, exists) {
 }
 
 async function getIDs(uri) {
-  return Array.from(await XULStore.getIDsEnumerator(uri)).sort();
+  return Array.from(await XULStore.getIDs(uri)).sort();
 }
 
 async function getAttributes(uri, id) {
-  return Array.from(await XULStore.getAttributeEnumerator(uri, id)).sort();
+  return Array.from(await XULStore.getAttributes(uri, id)).sort();
 }
 
 function checkArrays(a, b) {

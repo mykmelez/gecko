@@ -110,6 +110,37 @@ const XULStore = {
     }
   },
 
+  async getIDs(docURI) {
+    this.log("Getting ID enumerator for doc=" + docURI);
+    const gDatabase = await gDatabasePromise;
+    const enumerator = await gDatabase.enumerate(docURI.concat("\t"), docURI.concat("\n"));
+    const ids = new Set();
+
+    for (const {key} of enumerator) {
+      // IDs are the second of the three tab-delimited fields in the key.
+      const id = key.split("\t")[1];
+      ids.add(id);
+    }
+
+    return ids;
+  },
+
+  async getAttributes(docURI, id) {
+    this.log("Getting attribute enumerator for id=" + id + ", doc=" + docURI);
+    const gDatabase = await gDatabasePromise;
+    const prefix = docURI.concat("\t", id);
+    const enumerator = await gDatabase.enumerate(prefix.concat("\t"), prefix.concat("\n"));
+    const attrs = new Set();
+
+    for (const {key} of enumerator) {
+      // Attributes are the third of the three tab-delimited fields in the key.
+      const attr = key.split("\t")[2];
+      attrs.add(attr);
+    }
+
+    return attrs;
+  },
+
   async removeDocument(docURI) {
     this.log("remove store values for doc=" + docURI);
 
