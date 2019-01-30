@@ -151,6 +151,11 @@ void ICEntry::trace(JSTracer* trc) {
   // Add ICEntries and fallback stubs for JOF_IC bytecode ops.
   for (jsbytecode* pc = script->code(); pc < pcEnd; pc = GetNextPc(pc)) {
     JSOp op = JSOp(*pc);
+
+    // Assert the frontend stored the correct IC index in jump target ops.
+    MOZ_ASSERT_IF(BytecodeIsJumpTarget(op),
+                  GET_ICINDEX(pc) == icEntries.length());
+
     if (!BytecodeOpHasIC(op)) {
       continue;
     }
@@ -1479,6 +1484,12 @@ bool ICTypeMonitor_PrimitiveSet::Compiler::generateStubCode(
     masm.branchTestSymbol(Assembler::Equal, R0, &success);
   }
 
+#ifdef ENABLE_BIGINT
+  if (flags_ & TypeToFlag(JSVAL_TYPE_BIGINT)) {
+    masm.branchTestBigInt(Assembler::Equal, R0, &success);
+  }
+#endif
+
   if (flags_ & TypeToFlag(JSVAL_TYPE_OBJECT)) {
     masm.branchTestObject(Assembler::Equal, R0, &success);
   }
@@ -1818,6 +1829,12 @@ bool ICTypeUpdate_PrimitiveSet::Compiler::generateStubCode(
   if (flags_ & TypeToFlag(JSVAL_TYPE_SYMBOL)) {
     masm.branchTestSymbol(Assembler::Equal, R0, &success);
   }
+
+#ifdef ENABLE_BIGINT
+  if (flags_ & TypeToFlag(JSVAL_TYPE_BIGINT)) {
+    masm.branchTestBigInt(Assembler::Equal, R0, &success);
+  }
+#endif
 
   if (flags_ & TypeToFlag(JSVAL_TYPE_OBJECT)) {
     masm.branchTestObject(Assembler::Equal, R0, &success);

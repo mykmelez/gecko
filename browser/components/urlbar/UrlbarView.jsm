@@ -6,7 +6,7 @@
 
 var EXPORTED_SYMBOLS = ["UrlbarView"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
   Services: "resource://gre/modules/Services.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
@@ -35,6 +35,7 @@ class UrlbarView {
     this._rows = this.panel.querySelector(".urlbarView-results");
 
     this._rows.addEventListener("mouseup", this);
+    this._rows.addEventListener("mousedown", this);
 
     // For the horizontal fade-out effect, set the overflow attribute on result
     // rows when they overflow.
@@ -141,6 +142,9 @@ class UrlbarView {
     if (queryContext.preselected) {
       this._selected = this._rows.firstElementChild;
       this._selected.toggleAttribute("selected", true);
+    } else if (queryContext.lastResultCount == 0) {
+      // Clear the selection when we get a new set of results.
+      this._selected = null;
     }
 
     this._openPanel();
@@ -256,9 +260,9 @@ class UrlbarView {
     item.className = "urlbarView-row";
     item.setAttribute("resultIndex", resultIndex);
 
-    if (result.source == UrlbarUtils.MATCH_SOURCE.TABS) {
+    if (result.source == UrlbarUtils.RESULT_SOURCE.TABS) {
       item.setAttribute("type", "tab");
-    } else if (result.source == UrlbarUtils.MATCH_SOURCE.BOOKMARKS) {
+    } else if (result.source == UrlbarUtils.RESULT_SOURCE.BOOKMARKS) {
       item.setAttribute("type", "bookmark");
     }
 
@@ -372,6 +376,25 @@ class UrlbarView {
     } else {
       throw new Error("Unrecognized UrlbarView event: " + event.type);
     }
+  }
+
+  _on_mousedown(event) {
+    if (event.button == 2) {
+      // Ignore right clicks.
+      return;
+    }
+
+    let row = event.target;
+    while (!row.classList.contains("urlbarView-row")) {
+      row = row.parentNode;
+    }
+    let resultIndex = row.getAttribute("resultIndex");
+    if (this._selected) {
+      this._selected.toggleAttribute("selected", false);
+    }
+    this._selected = this._rows.children[resultIndex];
+    this._selected.toggleAttribute("selected", true);
+    this.controller.speculativeConnect(this._queryContext, resultIndex, "mousedown");
   }
 
   _on_mouseup(event) {

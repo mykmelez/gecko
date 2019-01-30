@@ -29,12 +29,8 @@ pref("general.warnOnAboutConfig", true);
 pref("browser.bookmarks.max_backups",       5);
 
 pref("browser.cache.disk.enable",           true);
-// Is this the first-time smartsizing has been introduced?
-pref("browser.cache.disk.smart_size.first_run", true);
 // Does the user want smart-sizing?
 pref("browser.cache.disk.smart_size.enabled", true);
-// Which max value should we use for smart-sizing?
-pref("browser.cache.disk.smart_size.use_old_max", true);
 // Size (in KB) explicitly set by the user. Used when smart_size.enabled == false
 pref("browser.cache.disk.capacity",         256000);
 // When smartsizing is disabled we could potentially fill all disk space by
@@ -909,23 +905,19 @@ pref("gfx.logging.peak-texture-usage.enabled", false);
 
 pref("gfx.ycbcr.accurate-conversion", false);
 
-// On Nightly, we expose two prefs: gfx.webrender.all and gfx.webrender.enabled.
+// We expose two prefs: gfx.webrender.all and gfx.webrender.enabled.
 // The first enables WR+additional features, and the second just enables WR.
 // For developer convenience, building with --enable-webrender=true or just
 // --enable-webrender will set gfx.webrender.enabled to true by default.
-// On non-Nightly, we ignore these prefs.
 //
-// On both Nightly and non-Nightly, we have a pref gfx.webrender.all.qualified
-// which is not exposed via about:config. That pref enables WR but only on
-// qualified hardware. This is the pref we'll eventually flip to deploy WebRender
-// to the target population.
-#ifdef NIGHTLY_BUILD
+// We also have a pref gfx.webrender.all.qualified which is not exposed via
+// about:config. That pref enables WR but only on qualified hardware. This is
+// the pref we'll eventually flip to deploy WebRender to the target population.
 pref("gfx.webrender.all", false);
 #ifdef MOZ_ENABLE_WEBRENDER
 pref("gfx.webrender.enabled", true);
 #else
 pref("gfx.webrender.enabled", false);
-#endif
 #endif
 
 // Also expose a pref to allow users to force-disable WR. This is exposed
@@ -1459,8 +1451,6 @@ pref("dom.event.clipboardevents.enabled",   true);
 pref("dom.event.highrestimestamp.enabled",  true);
 pref("dom.event.coalesce_mouse_move",       true);
 
-pref("dom.ua_widget.enabled", true);
-
 pref("javascript.enabled",                  true);
 pref("javascript.options.strict",           false);
 #ifdef DEBUG
@@ -1606,7 +1596,11 @@ pref("javascript.options.streams", true);
 pref("javascript.options.bigint", false);
 
 // Dynamic module import.
+#ifdef NIGHTLY_BUILD
+pref("javascript.options.dynamicImport", true);
+#else
 pref("javascript.options.dynamicImport", false);
+#endif
 
 // advanced prefs
 pref("advanced.mailftp",                    false);
@@ -5587,9 +5581,7 @@ pref("urlclassifier.update.timeout_ms", 90000);
 // Name of the about: page to display Safe Browsing warnings (bug 399233)
 pref("urlclassifier.alternate_error_page", "blocked");
 
-// Enable phishing & malware protection.
-pref("browser.safebrowsing.phishing.enabled", true);
-pref("browser.safebrowsing.malware.enabled", true);
+// Enable safe-browsing debugging
 pref("browser.safebrowsing.debug", false);
 
 // Allow users to ignore Safe Browsing warnings.
@@ -5652,7 +5644,6 @@ pref("browser.safebrowsing.provider.mozilla.lists.base", "moz-std");
 pref("browser.safebrowsing.provider.mozilla.lists.content", "moz-full");
 
 // The table and global pref for blocking plugin content
-pref("browser.safebrowsing.blockedURIs.enabled", true);
 pref("urlclassifier.blockedTable", "test-block-simple,mozplugin-block-digest256");
 
 // Flash blocking tables

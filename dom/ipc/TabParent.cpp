@@ -102,7 +102,7 @@
 #include "nsString.h"
 #include "IHistory.h"
 #include "mozilla/dom/WindowGlobalParent.h"
-#include "mozilla/dom/ChromeBrowsingContext.h"
+#include "mozilla/dom/CanonicalBrowsingContext.h"
 
 #ifdef XP_WIN
 #  include "mozilla/plugins/PluginWidgetParent.h"
@@ -1631,8 +1631,7 @@ mozilla::ipc::IPCResult TabParent::RecvAsyncMessage(
 }
 
 mozilla::ipc::IPCResult TabParent::RecvSetCursor(
-    const nsCursor& aCursor,
-    const bool& aHasCustomCursor,
+    const nsCursor& aCursor, const bool& aHasCustomCursor,
     const nsCString& aCursorData, const uint32_t& aWidth,
     const uint32_t& aHeight, const uint32_t& aStride,
     const gfx::SurfaceFormat& aFormat, const uint32_t& aHotspotX,
@@ -1652,6 +1651,10 @@ mozilla::ipc::IPCResult TabParent::RecvSetCursor(
 
   nsCOMPtr<imgIContainer> cursorImage;
   if (aHasCustomCursor) {
+    if (aHeight * aStride != aCursorData.Length() ||
+        aStride < aWidth * gfx::BytesPerPixel(aFormat)) {
+      return IPC_FAIL(this, "Invalid custom cursor data");
+    }
     const gfx::IntSize size(aWidth, aHeight);
     RefPtr<gfx::DataSourceSurface> customCursor =
         gfx::CreateDataSourceSurfaceFromData(
@@ -3429,7 +3432,7 @@ mozilla::ipc::IPCResult TabParent::RecvGetSystemFont(nsCString* aFontName) {
 mozilla::ipc::IPCResult TabParent::RecvRootBrowsingContext(
     const BrowsingContextId& aId) {
   MOZ_ASSERT(!mBrowsingContext, "May only set browsing context once!");
-  mBrowsingContext = ChromeBrowsingContext::Get(aId);
+  mBrowsingContext = CanonicalBrowsingContext::Get(aId);
   MOZ_ASSERT(mBrowsingContext, "Invalid ID!");
   return IPC_OK();
 }

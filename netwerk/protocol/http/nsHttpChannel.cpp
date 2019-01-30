@@ -5686,6 +5686,12 @@ nsresult nsHttpChannel::AsyncProcessRedirection(uint32_t redirectType) {
   if (NS_FAILED(mResponseHead->GetHeader(nsHttp::Location, location)))
     return NS_ERROR_FAILURE;
 
+  // If we were told to not follow redirects automatically, then again
+  // carry on as though this were a normal response.
+  if (mLoadInfo && mLoadInfo->GetDontFollowRedirects()) {
+    return NS_ERROR_FAILURE;
+  }
+
   // make sure non-ASCII characters in the location header are escaped.
   nsAutoCString locationBuf;
   if (NS_EscapeURL(location.get(), -1, esc_OnlyNonASCII | esc_Spaces,
@@ -6620,6 +6626,8 @@ nsresult nsHttpChannel::BeginConnectActual() {
   if (mCanceled) {
     return mStatus;
   }
+
+  AUTO_PROFILER_LABEL("nsHttpChannel::BeginConnectActual", NETWORK);
 
   if (mTrackingProtectionCancellationPending) {
     LOG(

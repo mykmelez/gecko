@@ -10,6 +10,7 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/Components.h"
 #include "mozilla/FilePreferences.h"
 #include "mozilla/ChaosMode.h"
 #include "mozilla/CmdLineAndEnvUtils.h"
@@ -150,7 +151,6 @@
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsXULAppAPI.h"
 #include "nsXREDirProvider.h"
-#include "nsToolkitCompsCID.h"
 
 #include "nsINIParser.h"
 #include "mozilla/Omnijar.h"
@@ -1298,7 +1298,7 @@ ScopedXPCOMStartup::~ScopedXPCOMStartup() {
     mozilla::MacAutoreleasePool pool;
 #endif
 
-    nsCOMPtr<nsIAppStartup> appStartup(do_GetService(NS_APPSTARTUP_CONTRACTID));
+    nsCOMPtr<nsIAppStartup> appStartup(components::AppStartup::Service());
     if (appStartup) appStartup->DestroyHiddenWindow();
 
     gDirServiceProvider->DoShutdown();
@@ -1422,7 +1422,7 @@ nsresult ScopedXPCOMStartup::SetWindowCreator(nsINativeAppSupport* native) {
 
   if (cr) cr->CheckForOSAccessibility();
 
-  nsCOMPtr<nsIWindowCreator> creator(do_GetService(NS_APPSTARTUP_CONTRACTID));
+  nsCOMPtr<nsIWindowCreator> creator(components::AppStartup::Service());
   if (!creator) return NS_ERROR_UNEXPECTED;
 
   nsCOMPtr<nsIWindowWatcher> wwatch(
@@ -1998,8 +1998,7 @@ static ReturnAbortOnError ShowProfileManager(
 
       ioParamBlock->SetObjects(dlgArray);
 
-      nsCOMPtr<nsIAppStartup> appStartup(
-          do_GetService(NS_APPSTARTUP_CONTRACTID));
+      nsCOMPtr<nsIAppStartup> appStartup(components::AppStartup::Service());
       NS_ENSURE_TRUE(appStartup, NS_ERROR_FAILURE);
 
       nsCOMPtr<mozIDOMWindowProxy> newWindow;
@@ -3622,12 +3621,15 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
 
     bool disableWayland = true;
 #  if defined(MOZ_WAYLAND)
-    // Make X11 backend the default one.
-    // Enable Wayland backend only when GDK_BACKEND is set and
-    // Gtk+ >= 3.22 where we can expect recent enough
+    // Enable Wayland on Gtk+ >= 3.22 where we can expect recent enough
     // compositor & libwayland interface.
-    disableWayland = (PR_GetEnv("GDK_BACKEND") == nullptr) ||
-                     (gtk_check_version(3, 22, 0) != nullptr);
+    disableWayland = (gtk_check_version(3, 22, 0) != nullptr);
+    if (!disableWayland) {
+      // Make X11 backend the default one unless MOZ_ENABLE_WAYLAND or
+      // GDK_BACKEND are specified.
+      disableWayland = (PR_GetEnv("GDK_BACKEND") == nullptr) &&
+                       (PR_GetEnv("MOZ_ENABLE_WAYLAND") == nullptr);
+    }
 #  endif
     // On Wayland disabled builds read X11 DISPLAY env exclusively
     // and don't care about different displays.
@@ -4217,7 +4219,7 @@ nsresult XREMain::XRE_mainRun() {
 
   nsAppStartupNotifier::NotifyObservers(APPSTARTUP_TOPIC);
 
-  nsCOMPtr<nsIAppStartup> appStartup(do_GetService(NS_APPSTARTUP_CONTRACTID));
+  nsCOMPtr<nsIAppStartup> appStartup(components::AppStartup::Service());
   NS_ENSURE_TRUE(appStartup, NS_ERROR_FAILURE);
 
   mDirProvider.DoStartup();
@@ -4714,7 +4716,7 @@ bool XRE_IsE10sParentProcess() {
 #undef GECKO_PROCESS_TYPE
 
 bool XRE_UseNativeEventProcessing() {
-#ifdef XP_MACOSX
+#if defined(XP_MACOSX) || defined(XP_WIN)
   if (XRE_IsRDDProcess() || XRE_IsSocketProcess()) {
     return false;
   }
@@ -4733,6 +4735,18 @@ bool XRE_UseNativeEventProcessing() {
 
   return true;
 }
+
+#if defined(XP_WIN)
+bool XRE_Win32kCallsAllowed() {
+  switch (XRE_GetProcessType()) {
+    case GeckoProcessType_GMPlugin:
+    case GeckoProcessType_RDD:
+      return false;
+    default:
+      return true;
+  }
+}
+#endif
 
 // If you add anything to this enum, please update about:support to reflect it
 enum {

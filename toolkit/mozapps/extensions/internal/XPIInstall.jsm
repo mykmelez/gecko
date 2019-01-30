@@ -25,9 +25,9 @@ var EXPORTED_SYMBOLS = [
 
 /* globals DownloadAddonInstall, LocalAddonInstall */
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {AddonManager, AddonManagerPrivate} = ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["TextDecoder", "TextEncoder", "fetch"]);
 
@@ -84,7 +84,7 @@ const PREF_XPI_WHITELIST_REQUIRED     = "xpinstall.whitelist.required";
 
 const TOOLKIT_ID                      = "toolkit@mozilla.org";
 
-/* globals BOOTSTRAP_REASONS, KEY_APP_SYSTEM_ADDONS, KEY_APP_SYSTEM_DEFAULTS, PREF_BRANCH_INSTALLED_ADDON, PREF_SYSTEM_ADDON_SET, TEMPORARY_ADDON_SUFFIX, XPI_PERMISSION, XPIStates, iterDirectory */
+/* globals BOOTSTRAP_REASONS, KEY_APP_SYSTEM_ADDONS, KEY_APP_SYSTEM_DEFAULTS, PREF_BRANCH_INSTALLED_ADDON, PREF_SYSTEM_ADDON_SET, TEMPORARY_ADDON_SUFFIX, XPI_PERMISSION, XPIStates, getURIForResourceInFile, iterDirectory */
 const XPI_INTERNAL_SYMBOLS = [
   "BOOTSTRAP_REASONS",
   "KEY_APP_SYSTEM_ADDONS",
@@ -94,6 +94,7 @@ const XPI_INTERNAL_SYMBOLS = [
   "TEMPORARY_ADDON_SUFFIX",
   "XPI_PERMISSION",
   "XPIStates",
+  "getURIForResourceInFile",
   "iterDirectory",
 ];
 
@@ -170,7 +171,7 @@ const MSG_MESSAGE_MANAGER_CACHES_FLUSH = "AddonMessageManagerCachesFlush";
  */
 var gIDTest = /^(\{[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}|[a-z0-9-\._]*\@[a-z0-9-\._]+)$/i;
 
-ChromeUtils.import("resource://gre/modules/Log.jsm");
+const {Log} = ChromeUtils.import("resource://gre/modules/Log.jsm");
 const LOGGER_ID = "addons.xpi";
 
 // Create a new logger for use by all objects in this Addons XPI Provider module
@@ -207,16 +208,6 @@ class Package {
 
   getURI(...path) {
     return Services.io.newURI(path.join("/"), null, this.rootURI);
-  }
-
-  async getManifestFile() {
-    if (await this.hasResource("manifest.json")) {
-      return "manifest.json";
-    }
-    if (await this.hasResource("install.rdf")) {
-      return "install.rdf";
-    }
-    return null;
   }
 
   async readString(...path) {
@@ -434,6 +425,7 @@ async function loadManifestFromWebManifest(aUri, aPackage) {
   addon.dependencies = Object.freeze(Array.from(extension.dependencies));
   addon.startupData = extension.startupData;
   addon.hidden = manifest.hidden;
+  addon.incognito = manifest.incognito;
 
   if (addon.type === "theme" && await aPackage.hasResource("preview.png")) {
     addon.previewImage = "preview.png";
@@ -1527,6 +1519,7 @@ class AddonInstall {
 
         // Update the metadata in the database
         this.addon._sourceBundle = file;
+        this.addon.rootURI = getURIForResourceInFile(file, "").spec;
         this.addon.visible = true;
 
         if (isUpgrade) {
@@ -2344,11 +2337,12 @@ AddonInstallWrapper.prototype = {
  *        An optional platform version to check for updates for
  * @throws if the aListener or aReason arguments are not valid
  */
+var AddonUpdateChecker;
 var UpdateChecker = function(aAddon, aListener, aReason, aAppVersion, aPlatformVersion) {
   if (!aListener || !aReason)
     throw Cr.NS_ERROR_INVALID_ARG;
 
-  ChromeUtils.import("resource://gre/modules/addons/AddonUpdateChecker.jsm");
+  ({AddonUpdateChecker} = ChromeUtils.import("resource://gre/modules/addons/AddonUpdateChecker.jsm"));
 
   this.addon = aAddon;
   aAddon._updateCheck = this;
@@ -3276,6 +3270,7 @@ var XPIInstall = {
 
     // Install the add-on
     addon._sourceBundle = location.installer.installAddon({ id, source: file, action: "copy" });
+    addon.rootURI = XPIInternal.getURIForResourceInFile(addon._sourceBundle, "").spec;
 
     XPIStates.addAddon(addon);
     logger.debug(`Installed distribution add-on ${id}`);
@@ -3649,9 +3644,76 @@ var XPIInstall = {
       flushJarCache(aFile);
     }
     let addon = await loadManifestFromFile(aFile, installLocation);
+    addon.rootURI = getURIForResourceInFile(aFile, "").spec;
 
-    installLocation.installer.installAddon({ id: addon.id, source: aFile });
+    await this._activateAddon(addon, {temporarilyInstalled: true});
 
+    logger.debug(`Install of temporary addon in ${aFile.path} completed.`);
+    return addon.wrapper;
+  },
+
+  /**
+   * Installs an add-on from a built-in location
+   *  (ie a resource: url referencing assets shipped with the application)
+   *
+   * @param  {string} base
+   *         A string containing the base URL.  Must be a resource: URL.
+   * @returns {Promise}
+   *          A Promise that resolves when the addon is installed.
+   */
+  async installBuiltinAddon(base) {
+    let baseURL = Services.io.newURI(base);
+
+    // WebExtensions need to be able to iterate through the contents of
+    // an extension (for localization).  It knows how to do this with
+    // jar: and file: URLs, so translate the provided base URL to
+    // something it can use.
+    if (baseURL.scheme !== "resource") {
+      throw new Error("Built-in addons must use resource: URLS");
+    }
+
+    let root = Services.io.getProtocolHandler("resource")
+                       .QueryInterface(Ci.nsISubstitutingProtocolHandler)
+                       .resolveURI(baseURL);
+    let rootURI = Services.io.newURI(root);
+
+    // Enough of the Package interface to allow loadManifest() to work.
+    let pkg = {
+      rootURI: Services.io.newURI("manifest.json", null, rootURI),
+      filePath: baseURL,
+      file: null,
+      verifySignedState() {
+        return {
+          signedState: AddonManager.SIGNEDSTATE_NOT_REQUIRED,
+          cert: null,
+        };
+      },
+      async hasResource(path) {
+        let response = await fetch(this.rootURI.resolve(path));
+        return response.ok;
+      },
+    };
+
+    let addon = await loadManifest(pkg, XPIInternal.BuiltInLocation);
+    addon.rootURI = root;
+    await this._activateAddon(addon);
+  },
+
+  /**
+   * Activate a newly installed addon.
+   * This function handles all the bookkeeping related to a new addon
+   * and invokes whatever bootstrap methods are necessary.
+   * Note that this function is only used for temporary and built-in
+   * installs, it is very similar to AddonInstall::startInstall().
+   * It would be great to merge this function with that one some day.
+   *
+   * @param {AddonInternal} addon  The addon to activate
+   * @param {object} [extraParams] Any extra parameters to pass to the
+   *                               bootstrap install() method
+   *
+   * @returns {Promise<void>}
+   */
+  async _activateAddon(addon, extraParams = {}) {
     if (addon.appDisabled) {
       let message = `Add-on ${addon.id} is not compatible with application version.`;
 
@@ -3669,46 +3731,34 @@ var XPIInstall = {
 
     let oldAddon = await XPIDatabase.getVisibleAddonForID(addon.id);
 
-    let extraParams = {};
-    extraParams.temporarilyInstalled = true;
-
     let install = () => {
-      addon.state = AddonManager.STATE_INSTALLED;
-      logger.debug(`Install of temporary addon in ${aFile.path} completed.`);
       addon.visible = true;
-      addon.enabled = true;
       addon.active = true;
-      // WebExtension themes are installed as disabled, fix that here.
       addon.userDisabled = false;
 
-      addon = XPIDatabase.addToDatabase(addon, addon._sourceBundle.path);
+      addon = XPIDatabase.addToDatabase(addon, addon._sourceBundle ? addon._sourceBundle.path : null);
 
       XPIStates.addAddon(addon);
-      XPIDatabase.saveChanges();
       XPIStates.save();
     };
 
-    let promise;
+    AddonManagerPrivate.callAddonListeners("onInstalling", addon.wrapper);
+
     if (oldAddon) {
       logger.warn(`Addon with ID ${oldAddon.id} already installed, ` +
                   "older version will be disabled");
 
       addon.installDate = oldAddon.installDate;
 
-      promise = XPIInternal.BootstrapScope.get(oldAddon).update(
+      await XPIInternal.BootstrapScope.get(oldAddon).update(
         addon, true, install);
     } else {
       addon.installDate = Date.now();
 
       install();
       let bootstrap = XPIInternal.BootstrapScope.get(addon);
-      promise = bootstrap.install(undefined, true, {temporarilyInstalled: true});
+      await bootstrap.install(undefined, true, extraParams);
     }
-
-    AddonManagerPrivate.callAddonListeners("onInstalling", addon.wrapper,
-                                           false);
-
-    await promise;
 
     AddonManagerPrivate.callInstallListeners("onExternalInstall",
                                              null, addon.wrapper,
@@ -3719,8 +3769,6 @@ var XPIInstall = {
     // Notify providers that a new theme has been enabled.
     if (addon.type === "theme")
       AddonManagerPrivate.notifyAddonChanged(addon.id, addon.type, false);
-
-    return addon.wrapper;
   },
 
   /**

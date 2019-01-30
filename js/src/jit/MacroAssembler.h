@@ -380,6 +380,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void Push(FloatRegister reg) PER_SHARED_ARCH;
   void PushFlags() DEFINED_ON(x86_shared);
   void Push(jsid id, Register scratchReg);
+  void Push(const Address& addr);
   void Push(TypedOrValueRegister v);
   void Push(const ConstantOrRegister& v);
   void Push(const ValueOperand& val);
@@ -764,6 +765,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
                  const ValueOperand& dest) PER_ARCH;
   void moveValue(const ValueOperand& src, const ValueOperand& dest) PER_ARCH;
   void moveValue(const Value& src, const ValueOperand& dest) PER_ARCH;
+
+  // ===============================================================
+  // Load instructions
+
+  inline void load32SignExtendToPtr(const Address& src, Register dest) PER_ARCH;
 
  public:
   // ===============================================================
@@ -1421,6 +1427,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                Label* label) PER_SHARED_ARCH;
   inline void branchTestSymbol(Condition cond, Register tag,
                                Label* label) PER_SHARED_ARCH;
+#ifdef ENABLE_BIGINT
+  inline void branchTestBigInt(Condition cond, Register tag,
+                               Label* label) PER_SHARED_ARCH;
+#endif
   inline void branchTestNull(Condition cond, Register tag,
                              Label* label) PER_SHARED_ARCH;
   inline void branchTestObject(Condition cond, Register tag,
@@ -1483,6 +1493,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void branchTestSymbol(Condition cond, const ValueOperand& value,
                                Label* label)
       DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
+
+#ifdef ENABLE_BIGINT
+  inline void branchTestBigInt(Condition cond, const BaseIndex& address,
+                               Label* label) PER_SHARED_ARCH;
+  inline void branchTestBigInt(Condition cond, const ValueOperand& value,
+                               Label* label)
+      DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
+#endif
 
   inline void branchTestNull(Condition cond, const Address& address,
                              Label* label) PER_SHARED_ARCH;
@@ -1577,6 +1595,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
   template <typename T>
   inline void branchTestSymbolImpl(Condition cond, const T& t, Label* label)
       DEFINED_ON(arm, arm64, x86_shared);
+#ifdef ENABLE_BIGINT
+  template <typename T>
+  inline void branchTestBigIntImpl(Condition cond, const T& t, Label* label)
+      DEFINED_ON(arm, arm64, x86_shared);
+#endif
   template <typename T>
   inline void branchTestNullImpl(Condition cond, const T& t, Label* label)
       DEFINED_ON(arm, arm64, x86_shared);

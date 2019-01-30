@@ -19,8 +19,9 @@ class nsFrameLoader;
 namespace mozilla {
 namespace dom {
 
-class ChromeBrowsingContext;
+class CanonicalBrowsingContext;
 class WindowGlobalChild;
+class JSWindowActorParent;
 
 /**
  * A handle in the parent process to a specific nsGlobalWindowInner object.
@@ -51,13 +52,21 @@ class WindowGlobalParent final : public nsISupports,
   // |nullptr| if the actor has been torn down, or is not in-process.
   already_AddRefed<WindowGlobalChild> GetChildActor();
 
+  // Get a JS actor object by name.
+  already_AddRefed<JSWindowActorParent> GetActor(const nsAString& aName,
+                                                 ErrorResult& aRv);
+
+  // Get this actor's manager if it is not an in-process actor. Returns
+  // |nullptr| if the actor has been torn down, or is in-process.
+  already_AddRefed<TabParent> GetTabParent();
+
   // The principal of this WindowGlobal. This value will not change over the
   // lifetime of the WindowGlobal object, even to reflect changes in
   // |document.domain|.
   nsIPrincipal* DocumentPrincipal() { return mDocumentPrincipal; }
 
   // The BrowsingContext which this WindowGlobal has been loaded into.
-  ChromeBrowsingContext* BrowsingContext() { return mBrowsingContext; }
+  CanonicalBrowsingContext* BrowsingContext() { return mBrowsingContext; }
 
   // Get the root nsFrameLoader object for the tree of BrowsingContext nodes
   // which this WindowGlobal is a part of. This will be the nsFrameLoader
@@ -90,6 +99,7 @@ class WindowGlobalParent final : public nsISupports,
   // IPC messages
   mozilla::ipc::IPCResult RecvUpdateDocumentURI(nsIURI* aURI) override;
   mozilla::ipc::IPCResult RecvBecomeCurrentWindowGlobal() override;
+  mozilla::ipc::IPCResult RecvDestroy() override;
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
@@ -101,7 +111,8 @@ class WindowGlobalParent final : public nsISupports,
   nsCOMPtr<nsIPrincipal> mDocumentPrincipal;
   nsCOMPtr<nsIURI> mDocumentURI;
   RefPtr<nsFrameLoader> mFrameLoader;
-  RefPtr<ChromeBrowsingContext> mBrowsingContext;
+  RefPtr<CanonicalBrowsingContext> mBrowsingContext;
+  nsRefPtrHashtable<nsStringHashKey, JSWindowActorParent> mWindowActors;
   uint64_t mInnerWindowId;
   uint64_t mOuterWindowId;
   bool mInProcess;

@@ -31,7 +31,7 @@ var Startup = Cc["@mozilla.org/devtools/startup-clh;1"].getService(Ci.nsISupport
   .wrappedJSObject;
 
 const { BrowserLoader } =
-  ChromeUtils.import("resource://devtools/client/shared/browser-loader.js", {});
+  ChromeUtils.import("resource://devtools/client/shared/browser-loader.js");
 
 const {LocalizationHelper} = require("devtools/shared/l10n");
 const L10N = new LocalizationHelper("devtools/client/locales/toolbox.properties");
@@ -62,6 +62,8 @@ loader.lazyRequireGetter(this, "sortPanelDefinitions",
   "devtools/client/framework/toolbox-tabs-order-manager", true);
 loader.lazyRequireGetter(this, "createEditContextMenu",
   "devtools/client/framework/toolbox-context-menu", true);
+loader.lazyRequireGetter(this, "remoteClientManager",
+  "devtools/client/shared/remote-debugging/remote-client-manager.js", true);
 
 loader.lazyGetter(this, "domNodeConstants", () => {
   return require("devtools/shared/dom-node-constants");
@@ -433,6 +435,12 @@ Toolbox.prototype = {
       if (isToolboxURL) {
         // Update the URL so that onceDOMReady watch for the right url.
         this._URL = this.win.location.href;
+
+        // Displays DebugTargetInfo which shows the basic information of debug target,
+        // if `about:devtools-toolbox` URL opens directly.
+        // DebugTargetInfo requires this._deviceDescription to be populated
+        this._showDebugTargetInfo = true;
+        this._deviceDescription = await this._getDeviceDescription();
       }
 
       const domHelper = new DOMHelpers(this.win);
@@ -447,15 +455,6 @@ Toolbox.prototype = {
 
       // Load the toolbox-level actor fronts and utilities now
       await this._target.attach();
-
-      // Displays DebugTargetInfo which shows the basic information of debug target,
-      // if `about:devtools-toolbar` URL opens directly.
-      if (isToolboxURL) {
-        this._showDebugTargetInfo = true;
-        const deviceFront = await this.target.client.mainRoot.getFront("device");
-        // DebugTargetInfo requires the device description to be rendered.
-        this._deviceDescription = await deviceFront.getDescription();
-      }
 
       // Start tracking network activity on toolbox open for targets such as tabs.
       // (Workers and potentially others don't manage the console client in the target.)
@@ -477,10 +476,15 @@ Toolbox.prototype = {
       Services.prefs.addObserver("devtools.serviceWorkers.testing.enabled",
                                  this._applyServiceWorkersTestingSettings);
 
+      // Register listener for handling context menus in standard
+      // input elements: <input> and <textarea>.
+      // There is also support for custom input elements using
+      // .devtools-input class (e.g. CodeMirror instances).
       this.doc.addEventListener("contextmenu", (e) => {
         if (e.originalTarget.closest("input[type=text]") ||
             e.originalTarget.closest("input[type=search]") ||
             e.originalTarget.closest("input:not([type])") ||
+            e.originalTarget.closest(".devtools-input") ||
             e.originalTarget.closest("textarea")) {
           e.stopPropagation();
           e.preventDefault();
@@ -579,6 +583,14 @@ Toolbox.prototype = {
       // passing `e` to console.error, it is not on the stdout, so print it via dump.
       dump(e.stack + "\n");
     });
+  },
+
+  _getDeviceDescription: async function() {
+    const deviceFront = await this.target.client.mainRoot.getFront("device");
+    const description = await deviceFront.getDescription();
+    const remoteId = new this.win.URLSearchParams(this.win.location.href).get("remoteId");
+    const connectionType = remoteClientManager.getConnectionTypeByRemoteId(remoteId);
+    return Object.assign({}, description, { connectionType });
   },
 
   /**

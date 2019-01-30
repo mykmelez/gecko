@@ -501,17 +501,11 @@ VARCACHE_PREF(
 
 // For area and anchor elements with target=_blank and no rel set to
 // opener/noopener, this pref sets noopener by default.
-#ifdef EARLY_BETA_OR_EARLIER
-#define PREF_VALUE true
-#else
-#define PREF_VALUE false
-#endif
 VARCACHE_PREF(
   "dom.targetBlankNoOpener.enabled",
    dom_targetBlankNoOpener_enabled,
-  bool, PREF_VALUE
+  bool, true
 )
-#undef PREF_VALUE
 
 VARCACHE_PREF(
   "dom.disable_open_during_load",
@@ -533,6 +527,16 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "dom.clearSiteData.enabled",
    dom_clearSiteData_enabled,
+  bool, true
+)
+
+//---------------------------------------------------------------------------
+// Extension prefs
+//---------------------------------------------------------------------------
+
+VARCACHE_PREF(
+  "extensions.allowPrivateBrowsingByDefault",
+   extensions_allowPrivateBrowsingByDefault,
   bool, true
 )
 
@@ -915,6 +919,12 @@ VARCACHE_PREF(
 VARCACHE_PREF(
    "layout.dynamic-reflow-roots.enabled",
    layout_dynamic_reflow_roots_enabled,
+  bool, true
+)
+
+VARCACHE_PREF(
+   "layout.lower_priority_refresh_driver_during_load",
+   layout_lower_priority_refresh_driver_during_load,
   bool, true
 )
 
@@ -1817,6 +1827,16 @@ VARCACHE_PREF(
 )
 
 //---------------------------------------------------------------------------
+// ContentSessionStore prefs
+//---------------------------------------------------------------------------
+// Maximum number of bytes of DOMSessionStorage data we collect per origin.
+VARCACHE_PREF(
+  "browser.sessionstore.dom_storage_limit",
+  browser_sessionstore_dom_storage_limit,
+  uint32_t, 2048
+)
+
+//---------------------------------------------------------------------------
 // Preferences prefs
 //---------------------------------------------------------------------------
 
@@ -1935,6 +1955,27 @@ VARCACHE_PREF(
   "browser.safebrowsing.passwords.enabled",
    browser_safebrowsing_passwords_enabled,
   bool, false
+)
+
+// Malware protection
+VARCACHE_PREF(
+  "browser.safebrowsing.malware.enabled",
+   browser_safebrowsing_malware_enabled,
+  bool, true
+)
+
+// Phishing protection
+VARCACHE_PREF(
+  "browser.safebrowsing.phishing.enabled",
+   browser_safebrowsing_phishing_enabled,
+  bool, true
+)
+
+// Blocked plugin content
+VARCACHE_PREF(
+  "browser.safebrowsing.blockedURIs.enabled",
+   browser_safebrowsing_blockedURIs_enabled,
+  bool, true
 )
 
 //---------------------------------------------------------------------------

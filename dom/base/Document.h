@@ -27,7 +27,6 @@
 #include "nsIProgressEventSink.h"
 #include "nsIRadioGroupContainer.h"
 #include "nsIScriptObjectPrincipal.h"
-#include "nsISecurityEventSink.h"
 #include "nsIScriptGlobalObject.h"  // for member (in nsCOMPtr)
 #include "nsIServiceManager.h"
 #include "nsIURI.h"  // for use in inline functions
@@ -408,7 +407,6 @@ class ExternalResourceMap {
     DECL_SHIM(nsILoadContext, NSILOADCONTEXT)
     DECL_SHIM(nsIProgressEventSink, NSIPROGRESSEVENTSINK)
     DECL_SHIM(nsIChannelEventSink, NSICHANNELEVENTSINK)
-    DECL_SHIM(nsISecurityEventSink, NSISECURITYEVENTSINK)
     DECL_SHIM(nsIApplicationCacheContainer, NSIAPPLICATIONCACHECONTAINER)
 #undef DECL_SHIM
   };
@@ -3580,6 +3578,8 @@ class Document : public nsINode,
   void SetDocTreeHadAudibleMedia();
   void SetDocTreeHadPlayRevoked();
 
+  mozilla::dom::XPathEvaluator* XPathEvaluator();
+
  protected:
   void DoUpdateSVGUseElementShadowTrees();
 
@@ -3708,8 +3708,6 @@ class Document : public nsINode,
   void SetContentTypeInternal(const nsACString& aType);
 
   nsCString GetContentTypeInternal() const { return mContentType; }
-
-  mozilla::dom::XPathEvaluator* XPathEvaluator();
 
   // Update our frame request callback scheduling state, if needed.  This will
   // schedule or unschedule them, if necessary, and update

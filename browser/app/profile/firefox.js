@@ -858,8 +858,6 @@ pref("browser.sessionstore.debug", false);
 pref("browser.sessionstore.debug.no_auto_updates", false);
 // Forget closed windows/tabs after two weeks
 pref("browser.sessionstore.cleanup.forget_closed_after", 1209600000);
-// Maximum number of bytes of DOMSessionStorage data we collect per origin.
-pref("browser.sessionstore.dom_storage_limit", 2048);
 // Amount of failed SessionFile writes until we restart the worker.
 pref("browser.sessionstore.max_write_failures", 5);
 
@@ -1043,10 +1041,11 @@ pref("security.sandbox.windows.log.stackTraceDepth", 0);
 // security/sandbox/win/src/sandboxbroker/sandboxBroker.cpp
 pref("security.sandbox.gpu.level", 0);
 
-// Controls whether we disable win32k for the GMP processes.
+// Controls whether we disable win32k for the processes.
 // true means that win32k system calls are not permitted.
-// Note: win32k is currently _not_ disabled due to intermittent test failures,
-// where the GMP process fails very early. See bug 1449348.
+pref("security.sandbox.rdd.win32k-disable", true);
+// Note: win32k is currently _not_ disabled for GMP due to intermittent test
+// failures, where the GMP process fails very early. See bug 1449348.
 pref("security.sandbox.gmp.win32k-disable", false);
 #endif
 
@@ -1623,6 +1622,11 @@ pref("dom.ipc.cpows.forbid-unsafe-from-browser", true);
 // Enable e10s hang monitoring (slow script checking and plugin hang
 // detection).
 pref("dom.ipc.processHangMonitor", true);
+
+#if defined(NIGHTLY_BUILD) && defined(XP_WIN)
+// Allows us to deprioritize the processes of background tabs at an OS level
+pref("dom.ipc.processPriorityManager.enabled", true);
+#endif
 
 #ifdef DEBUG
 // Don't report hangs in DEBUG builds. They're too slow and often a
