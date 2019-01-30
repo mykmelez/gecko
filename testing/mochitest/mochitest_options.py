@@ -383,6 +383,11 @@ class MochitestArguments(ArgumentContainer):
           "dest": "extraPrefs",
           "help": "Defines an extra user preference.",
           }],
+        [["--jsconsole"],
+         {"action": "store_true",
+          "default": False,
+          "help": "Open the Browser Console.",
+          }],
         [["--jsdebugger"],
          {"action": "store_true",
           "default": False,
@@ -704,13 +709,6 @@ class MochitestArguments(ArgumentContainer):
             options.symbolsPath = self.get_full_path(options.symbolsPath, parser.oldcwd)
         elif not options.symbolsPath and build_obj:
             options.symbolsPath = os.path.join(build_obj.distdir, 'crashreporter-symbols')
-
-        if options.jsdebugger:
-            options.extraPrefs += [
-                "devtools.debugger.remote-enabled=true",
-                "devtools.chrome.enabled=true",
-                "devtools.debugger.prompt-connection=false"
-            ]
 
         if options.debugOnFailure and not options.jsdebugger:
             parser.error(

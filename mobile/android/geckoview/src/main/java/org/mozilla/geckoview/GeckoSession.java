@@ -364,6 +364,7 @@ public class GeckoSession implements Parcelable {
                 } else if ("GeckoView:ContextMenu".equals(event)) {
                     final ContentDelegate.ContextElement elem =
                         new ContentDelegate.ContextElement(
+                            message.getString("baseUri"),
                             message.getString("uri"),
                             message.getString("title"),
                             message.getString("alt"),
@@ -2650,7 +2651,12 @@ public class GeckoSession implements Parcelable {
             public static final int TYPE_AUDIO = 3;
 
             /**
-             * The link URI (href) of the element.
+             * The base URI of the element's document.
+             */
+            public final @Nullable String baseUri;
+
+            /**
+             * The absolute link URI (href) of the element.
              */
             public final @Nullable String linkUri;
 
@@ -2677,11 +2683,13 @@ public class GeckoSession implements Parcelable {
             public final @Nullable String srcUri;
 
             protected ContextElement(
+                    final @Nullable String baseUri,
                     final @Nullable String linkUri,
                     final @Nullable String title,
                     final @Nullable String altText,
                     final @NonNull String typeStr,
                     final @Nullable String srcUri) {
+                this.baseUri = baseUri;
                 this.linkUri = linkUri;
                 this.title = title;
                 this.altText = altText;
@@ -3040,8 +3048,8 @@ public class GeckoSession implements Parcelable {
         }
 
         /**
-         * A request to open an URI. This is called before each page load to
-         * allow custom behavior implementation.
+         * A request to open an URI. This is called before each top-level page load to
+         * allow custom behavior.
          * For example, this can be used to override the behavior of
          * TAGET_WINDOW_NEW requests, which defaults to requesting a new
          * GeckoSession via onNewSession.

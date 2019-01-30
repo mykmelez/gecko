@@ -6,7 +6,7 @@
 
 var EXPORTED_SYMBOLS = ["UrlbarInput"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.jsm",
@@ -57,6 +57,7 @@ class UrlbarInput {
     this.valueIsTyped = false;
     this.userInitiatedFocus = false;
     this.isPrivate = PrivateBrowsingUtils.isWindowPrivate(this.window);
+    this.lastQueryContextPromise = Promise.resolve();
     this._untrimmedValue = "";
     this._suppressStartQuery = false;
 
@@ -109,6 +110,7 @@ class UrlbarInput {
     this.inputField.addEventListener("scrollend", this);
     this.inputField.addEventListener("select", this);
     this.inputField.addEventListener("keydown", this);
+    this.inputField.addEventListener("keyup", this);
     this.view.panel.addEventListener("popupshowing", this);
     this.view.panel.addEventListener("popuphidden", this);
 
@@ -299,19 +301,18 @@ class UrlbarInput {
     //   event, this.userSelectionBehavior);
 
     let where = this._whereToOpen(event);
+    let {url, postData} = UrlbarUtils.getUrlFromResult(result);
     let openParams = {
-      postData: null,
+      postData,
       allowInheritPrincipal: false,
     };
 
     // TODO bug 1521702: Call _maybeCanonizeURL for autofilled results with the
     // typed string (not the autofilled one).
 
-    let url = result.payload.url;
-
     switch (result.type) {
       case UrlbarUtils.RESULT_TYPE.TAB_SWITCH: {
-        if (this._overrideDefaultAction(event)) {
+        if (this.hasAttribute("noactions")) {
           where = "current";
           break;
         }
@@ -322,7 +323,7 @@ class UrlbarInput {
           adoptIntoActiveWindow: UrlbarPrefs.get("switchTabs.adoptIntoActiveWindow"),
         };
 
-        if (this.window.switchToTabHavingURI(Services.io.newURI(result.payload.url), false, loadOpts) &&
+        if (this.window.switchToTabHavingURI(Services.io.newURI(url), false, loadOpts) &&
             prevTab.isEmpty) {
           this.window.gBrowser.removeTab(prevTab);
         }
@@ -334,26 +335,26 @@ class UrlbarInput {
         if (url) {
           break;
         }
-
         const actionDetails = {
           isSuggestion: !!result.payload.suggestion,
           alias: result.payload.keyword,
         };
         const engine = Services.search.getEngineByName(result.payload.engine);
-
-        [url, openParams.postData] = this._getSearchQueryUrl(
-          engine, result.payload.suggestion || result.payload.query);
         this._recordSearch(engine, event, actionDetails);
         break;
       }
-      case UrlbarUtils.RESULT_TYPE.OMNIBOX:
+      case UrlbarUtils.RESULT_TYPE.OMNIBOX: {
         // Give the extension control of handling the command.
         ExtensionSearchHandler.handleInputEntered(result.payload.keyword,
                                                   result.payload.content,
                                                   where);
         return;
+      }
     }
 
+    if (!url) {
+      throw new Error(`Invalid url for result ${JSON.stringify(result)}`);
+    }
     this._loadURL(url, where, openParams);
   }
 
@@ -385,6 +386,15 @@ class UrlbarInput {
       }
     }
     this.value = val;
+
+    switch (result.type) {
+      case UrlbarUtils.RESULT_TYPE.TAB_SWITCH:
+        this.setAttribute("actiontype", "switchtab");
+        break;
+      case UrlbarUtils.RESULT_TYPE.OMNIBOX:
+        this.setAttribute("actiontype", "extension");
+        break;
+    }
   }
 
   /**
@@ -409,8 +419,12 @@ class UrlbarInput {
       UrlbarPrefs.get("autoFill") &&
       (!this._lastSearchString ||
        !this._lastSearchString.startsWith(searchString));
+    this._lastSearchString = searchString;
 
-    this.controller.startQuery(new UrlbarQueryContext({
+    // TODO (Bug 1522902): This promise is necessary for tests, because some
+    // tests are not listening for completion when starting a query through
+    // other methods than startQuery (input events for example).
+    this.lastQueryContextPromise = this.controller.startQuery(new UrlbarQueryContext({
       enableAutofill,
       isPrivate: this.isPrivate,
       lastKey,
@@ -419,7 +433,6 @@ class UrlbarInput {
       providers: ["UnifiedComplete"],
       searchString,
     }));
-    this._lastSearchString = searchString;
   }
 
   typeRestrictToken(char) {
@@ -502,6 +515,7 @@ class UrlbarInput {
     this.valueIsTyped = false;
     this.inputField.value = val;
     this.formatValue();
+    this.removeAttribute("actiontype");
 
     // Dispatch ValueChange event for accessibility.
     let event = this.document.createEvent("Events");
@@ -613,28 +627,18 @@ class UrlbarInput {
     return selectedVal;
   }
 
-  _overrideDefaultAction(event) {
-    return event.shiftKey ||
-           event.altKey ||
-           (AppConstants.platform == "macosx" ?
-              event.metaKey : event.ctrlKey);
-  }
-
-  /**
-   * Get the url to load for the search query and records in telemetry that it
-   * is being loaded.
-   *
-   * @param {nsISearchEngine} engine
-   *   The engine to generate the query for.
-   * @param {string} query
-   *   The query string to search for.
-   * @returns {array}
-   *   Returns an array containing the query url (string) and the
-   *    post data (object).
-   */
-  _getSearchQueryUrl(engine, query) {
-    let submission = engine.getSubmission(query, null, "keyword");
-    return [submission.uri.spec, submission.postData];
+  _toggleNoActions(event) {
+    if (event.keyCode == KeyEvent.DOM_VK_SHIFT ||
+        event.keyCode == KeyEvent.DOM_VK_ALT ||
+        event.keyCode == (AppConstants.platform == "macosx" ?
+                            KeyEvent.DOM_VK_META :
+                            KeyEvent.DOM_VK_CONTROL)) {
+      if (event.type == "keydown") {
+        this.setAttribute("noactions", "true");
+      } else {
+        this.removeAttribute("noactions");
+      }
+    }
   }
 
   /**
@@ -737,7 +741,7 @@ class UrlbarInput {
     // this.value = url;
     // browser.userTypedValue = url;
     if (this.window.gInitialPages.includes(url)) {
-      browser.initialPageLoadedFromURLBar = url;
+      browser.initialPageLoadedFromUserAction = url;
     }
     try {
       UrlbarUtils.addToUrlbarHistory(url, this.window);
@@ -915,6 +919,7 @@ class UrlbarInput {
     } else {
       this.removeAttribute("usertyping");
     }
+    this.removeAttribute("actiontype");
 
     // XXX Fill in lastKey, and add anything else we need.
     this.startQuery({
@@ -976,6 +981,11 @@ class UrlbarInput {
 
   _on_keydown(event) {
     this.controller.handleKeyNavigation(event);
+    this._toggleNoActions(event);
+  }
+
+  _on_keyup(event) {
+    this._toggleNoActions(event);
   }
 
   _on_popupshowing() {

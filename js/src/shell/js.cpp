@@ -1067,6 +1067,19 @@ static bool TrackUnhandledRejections(JSContext* cx, JS::HandleObject promise,
     return true;
   }
 
+#if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
+  if (cx->runningOOMTest) {
+    // When OOM happens, we cannot reliably track the set of unhandled
+    // promise rejections. Throw error only when simulated OOM is used
+    // *and* promises are used in the test.
+    JS_ReportErrorASCII(
+        cx,
+        "Can't track unhandled rejections while running simulated OOM "
+        "test. Call ignoreUnhandledRejections before using oomTest etc.");
+    return false;
+  }
+#endif
+
   if (!sc->unhandledRejectedPromises) {
     sc->unhandledRejectedPromises = SetObject::create(cx);
     if (!sc->unhandledRejectedPromises) {
@@ -1093,7 +1106,8 @@ static bool TrackUnhandledRejections(JSContext* cx, JS::HandleObject promise,
                               &deleted)) {
         return false;
       }
-      MOZ_ASSERT(deleted);
+      // We can't MOZ_ASSERT(deleted) here, because it's possible we failed to
+      // add the promise in the first place, due to OOM.
       break;
   }
 
@@ -3762,6 +3776,39 @@ static void SetStandardRealmOptions(JS::RealmOptions& options) {
       .setStreamsEnabled(enableStreams);
 }
 
+static MOZ_MUST_USE bool CheckRealmOptions(JSContext* cx,
+                                           JS::RealmOptions& options,
+                                           JSPrincipals* principals) {
+  JS::RealmCreationOptions& creationOptions = options.creationOptions();
+  if (creationOptions.compartmentSpecifier() !=
+      JS::CompartmentSpecifier::ExistingCompartment) {
+    return true;
+  }
+
+  JS::Compartment* comp = creationOptions.compartment();
+
+  // All realms in a compartment must be either system or non-system.
+  bool isSystem =
+      principals && principals == cx->runtime()->trustedPrincipals();
+  if (isSystem != IsSystemCompartment(comp)) {
+    JS_ReportErrorASCII(cx,
+                        "Cannot create system and non-system realms in the "
+                        "same compartment");
+    return false;
+  }
+
+  // Debugger visibility is per-compartment, not per-realm, so make sure the
+  // requested visibility matches the existing compartment's.
+  if (creationOptions.invisibleToDebugger() != comp->invisibleToDebugger()) {
+    JS_ReportErrorASCII(cx,
+                        "All the realms in a compartment must have "
+                        "the same debugger visibility");
+    return false;
+  }
+
+  return true;
+}
+
 static JSObject* NewSandbox(JSContext* cx, bool lazy) {
   JS::RealmOptions options;
   SetStandardRealmOptions(options);
@@ -3772,8 +3819,13 @@ static JSObject* NewSandbox(JSContext* cx, bool lazy) {
     options.creationOptions().setNewCompartmentAndZone();
   }
 
+  JSPrincipals* principals = nullptr;
+  if (!CheckRealmOptions(cx, options, principals)) {
+    return nullptr;
+  }
+
   RootedObject obj(cx,
-                   JS_NewGlobalObject(cx, &sandbox_class, nullptr,
+                   JS_NewGlobalObject(cx, &sandbox_class, principals,
                                       JS::DontFireOnNewGlobalHook, options));
   if (!obj) {
     return nullptr;
@@ -6260,26 +6312,8 @@ static bool NewGlobal(JSContext* cx, unsigned argc, Value* vp) {
     }
   }
 
-  if (creationOptions.compartmentSpecifier() ==
-      JS::CompartmentSpecifier::ExistingCompartment) {
-    JS::Compartment* comp = creationOptions.compartment();
-    bool isSystem =
-        principals && principals == cx->runtime()->trustedPrincipals();
-    if (isSystem != IsSystemCompartment(comp)) {
-      JS_ReportErrorASCII(cx,
-                          "Cannot create system and non-system realms in the "
-                          "same compartment");
-      return false;
-    }
-
-    // Debugger visibility is per-compartment, not per-realm, so make sure the
-    // requested visibility matches the existing compartment's.
-    if (creationOptions.invisibleToDebugger() != comp->invisibleToDebugger()) {
-      JS_ReportErrorASCII(cx,
-                          "All the realms in a compartment must have "
-                          "the same debugger visibility");
-      return false;
-    }
+  if (!CheckRealmOptions(cx, options, principals)) {
+    return false;
   }
 
   RootedObject global(cx, NewGlobalObject(cx, options, principals));

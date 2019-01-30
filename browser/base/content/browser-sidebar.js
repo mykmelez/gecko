@@ -388,8 +388,14 @@ var SidebarUI = {
    * @param {string}  commandID     ID of the sidebar to use.
    * @param {DOMNode} [triggerNode] Node, usually a button, that triggered the
    *                                showing of the sidebar.
+   * @return {Promise<boolean>}
    */
-  show(commandID, triggerNode) {
+  async show(commandID, triggerNode) {
+    // Extensions without private window access wont be in the
+    // sidebars map.
+    if (!this.sidebars.has(commandID)) {
+      return false;
+    }
     return this._show(commandID).then(() => {
       this._loadSidebarExtension(commandID);
 
@@ -398,6 +404,7 @@ var SidebarUI = {
       }
 
       this._fireFocusedEvent();
+      return true;
     });
   },
 
@@ -407,10 +414,17 @@ var SidebarUI = {
    * when a window opens (not triggered by user interaction).
    *
    * @param {string} commandID ID of the sidebar.
+   * @return {Promise<boolean>}
    */
-  showInitially(commandID) {
+  async showInitially(commandID) {
+    // Extensions without private window access wont be in the
+    // sidebars map.
+    if (!this.sidebars.has(commandID)) {
+      return false;
+    }
     return this._show(commandID).then(() => {
       this._loadSidebarExtension(commandID);
+      return true;
     });
   },
 
@@ -419,6 +433,7 @@ var SidebarUI = {
    * when a window is opened and we don't want to ping telemetry.
    *
    * @param {string} commandID ID of the sidebar.
+   * @return {Promise<void>}
    */
   _show(commandID) {
     return new Promise(resolve => {

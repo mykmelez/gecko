@@ -9,10 +9,10 @@ const debugMode = false;
 
 const EXPORTED_SYMBOLS = ["XULStore"];
 
-ChromeUtils.import("resource://gre/modules/kvstore.jsm");
-ChromeUtils.import("resource://gre/modules/osfile.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {KeyValueService} = ChromeUtils.import("resource://gre/modules/kvstore.jsm");
+const {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 function makeKey(docURI, id, attr) {
   return docURI.concat("\t", id).concat("\t", attr);

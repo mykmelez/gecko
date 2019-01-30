@@ -16,7 +16,6 @@
 #include "nsIProtocolHandler.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsISecureBrowserUI.h"
-#include "nsISecurityEventSink.h"
 #include "nsISupportsPriority.h"
 #include "nsNetUtil.h"
 #include "nsXULAppAPI.h"
@@ -25,6 +24,7 @@
 #include "nsIUrlClassifierFeature.h"
 #include "nsPrintfCString.h"
 
+#include "mozilla/Components.h"
 #include "mozilla/ErrorNames.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Preferences.h"
@@ -370,7 +370,7 @@ nsresult nsChannelClassifier::SendThreatHitReport(nsIChannel* aChannel,
   }
 
   nsCOMPtr<nsIURIClassifier> uriClassifier =
-      do_GetService(NS_URLCLASSIFIERDBSERVICE_CONTRACTID);
+      components::UrlClassifierDB::Service();
   if (!uriClassifier) {
     return NS_ERROR_UNEXPECTED;
   }

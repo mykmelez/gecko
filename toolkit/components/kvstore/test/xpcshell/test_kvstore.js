@@ -3,8 +3,8 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/kvstore.jsm");
-ChromeUtils.import("resource://gre/modules/osfile.jsm");
+const {KeyValueService} = ChromeUtils.import("resource://gre/modules/kvstore.jsm");
+const {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
 function run_test() {
   do_get_profile();

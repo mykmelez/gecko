@@ -991,18 +991,6 @@ nsFrameConstructorState::~nsFrameConstructorState() {
   }
 }
 
-static nsContainerFrame* AdjustAbsoluteContainingBlock(
-    nsContainerFrame* aContainingBlockIn) {
-  if (!aContainingBlockIn) {
-    return nullptr;
-  }
-
-  // Always use the container's first continuation. (Inline frames can have
-  // non-fluid bidi continuations...)
-  return static_cast<nsContainerFrame*>(
-      aContainingBlockIn->FirstContinuation());
-}
-
 void nsFrameConstructorState::PushAbsoluteContainingBlock(
     nsContainerFrame* aNewAbsoluteContainingBlock, nsIFrame* aPositionedFrame,
     nsFrameConstructorSaveState& aSaveState) {
@@ -1019,8 +1007,7 @@ void nsFrameConstructorState::PushAbsoluteContainingBlock(
     mFixedItems = mAbsoluteItems;
   }
 
-  mAbsoluteItems = nsAbsoluteItems(
-      AdjustAbsoluteContainingBlock(aNewAbsoluteContainingBlock));
+  mAbsoluteItems = nsAbsoluteItems(aNewAbsoluteContainingBlock);
 
   /* See if we're wiring the fixed-pos and abs-pos lists together.  This happens
    * iff we're a transformed element.
@@ -5961,7 +5948,10 @@ void nsCSSFrameConstructor::AppendFramesToParent(
 
     nsFrameList columnSpanSiblings = CreateColumnSpanSiblings(
         aState, aParentFrame, aFrameList,
-        aParentFrame->IsAbsPosContainingBlock() ? aParentFrame : nullptr);
+        // Column content should never be a absolute/fixed positioned containing
+        // block. Pass nullptr as aPositionedFrame.
+        nullptr);
+
     FinishBuildingColumns(aState,
                           GetMultiColumnContainingBlockFor(aParentFrame),
                           aParentFrame, columnSpanSiblings);
@@ -6722,7 +6712,7 @@ void nsCSSFrameConstructor::ContentAppended(nsIContent* aFirstNewContent,
 #ifdef DEBUG
   if (gNoisyContentUpdates && IsFramePartOfIBSplit(parentFrame)) {
     printf("nsCSSFrameConstructor::ContentAppended: parentFrame=");
-    nsFrame::ListTag(stdout, parentFrame);
+    parentFrame->ListTag(stdout);
     printf(" is ib-split\n");
   }
 #endif
@@ -7502,6 +7492,12 @@ bool nsCSSFrameConstructor::ContentRemoved(nsIContent* aChild,
   }
 
   if (childFrame) {
+    if (aFlags == REMOVE_FOR_RECONSTRUCTION) {
+      // Before removing the frames associated with the content object,
+      // ask them to save their state onto a temporary state object.
+      CaptureStateForFramesOf(aChild, mTempFrameTreeState);
+    }
+
     InvalidateCanvasIfNeeded(mPresShell, aChild);
 
     // See whether we need to remove more than just childFrame
@@ -7576,11 +7572,11 @@ bool nsCSSFrameConstructor::ContentRemoved(nsIContent* aChild,
       // frame tree when first-letter style is present.
 #ifdef NOISY_FIRST_LETTER
       printf("ContentRemoved: containingBlock=");
-      nsFrame::ListTag(stdout, containingBlock);
+      containingBlock->ListTag(stdout);
       printf(" parentFrame=");
-      nsFrame::ListTag(stdout, parentFrame);
+      parentFrame->ListTag(stdout);
       printf(" childFrame=");
-      nsFrame::ListTag(stdout, childFrame);
+      childFrame->ListTag(stdout);
       printf("\n");
 #endif
 
@@ -7601,9 +7597,9 @@ bool nsCSSFrameConstructor::ContentRemoved(nsIContent* aChild,
 
 #ifdef NOISY_FIRST_LETTER
       printf("  ==> revised parentFrame=");
-      nsFrame::ListTag(stdout, parentFrame);
+      parentFrame->ListTag(stdout);
       printf(" childFrame=");
-      nsFrame::ListTag(stdout, childFrame);
+      childFrame->ListTag(stdout);
       printf("\n");
 #endif
     }
@@ -7611,7 +7607,7 @@ bool nsCSSFrameConstructor::ContentRemoved(nsIContent* aChild,
 #ifdef DEBUG
     if (gReallyNoisyContentUpdates) {
       printf("nsCSSFrameConstructor::ContentRemoved: childFrame=");
-      nsFrame::ListTag(stdout, childFrame);
+      childFrame->ListTag(stdout);
       putchar('\n');
       parentFrame->List(stdout);
     }
@@ -8653,10 +8649,6 @@ void nsCSSFrameConstructor::RecreateFramesForContent(
 
   MOZ_ASSERT(aContent->GetParentNode());
 
-  // Before removing the frames associated with the content object,
-  // ask them to save their state onto a temporary state object.
-  CaptureStateForFramesOf(aContent, mTempFrameTreeState);
-
   // Remove the frames associated with the content object.
   nsIContent* nextSibling = aContent->IsRootOfAnonymousSubtree()
                                 ? nullptr
@@ -8693,7 +8685,6 @@ bool nsCSSFrameConstructor::DestroyFramesFor(Element* aElement) {
                                 ? nullptr
                                 : aElement->GetNextSibling();
 
-  CaptureStateForFramesOf(aElement, mTempFrameTreeState);
   return ContentRemoved(aElement, nextSibling, REMOVE_FOR_RECONSTRUCTION);
 }
 
@@ -10630,7 +10621,11 @@ void nsCSSFrameConstructor::ConstructBlock(
   }
 
   nsFrameList columnSpanSiblings = CreateColumnSpanSiblings(
-      aState, blockFrame, childItems, aPositionedFrameForAbsPosContainer);
+      aState, blockFrame, childItems,
+      // If we're constructing a column container, pass nullptr as
+      // aPositionedFrame to forbid reparenting absolute/fixed positioned frames
+      // to column contents or column-span wrappers.
+      needsColumn ? nullptr : aPositionedFrameForAbsPosContainer);
 
   if (needsColumn) {
     // We're constructing a column container; need to finish building it.
