@@ -6520,43 +6520,11 @@ nsresult PresShell::EventHandler::HandleEvent(nsIFrame* aFrame,
     return NS_OK;
   }
 
-  nsIContent* capturingContent = ((aGUIEvent->mClass == ePointerEventClass ||
-                                   aGUIEvent->mClass == eWheelEventClass ||
-                                   aGUIEvent->HasMouseEventMessage())
-                                      ? nsIPresShell::GetCapturingContent()
-                                      : nullptr);
-
-  RefPtr<Document> retargetEventDoc;
   if (!aDontRetargetEvents) {
-    // key and IME related events should not cross top level window boundary.
-    // Basically, such input events should be fired only on focused widget.
-    // However, some IMEs might need to clean up composition after focused
-    // window is deactivated.  And also some tests on MozMill want to test key
-    // handling on deactivated window because MozMill window can be activated
-    // during tests.  So, there is no merit the events should be redirected to
-    // active window.  So, the events should be handled on the last focused
-    // content in the last focused DOM window in same top level window.
-    // Note, if no DOM window has been focused yet, we can discard the events.
-    if (aGUIEvent->IsTargetedAtFocusedWindow()) {
-      nsCOMPtr<nsPIDOMWindowOuter> window = GetFocusedDOMWindowInOurWindow();
-      // No DOM window in same top level window has not been focused yet,
-      // discard the events.
-      if (!window) {
-        return NS_OK;
-      }
-
-      retargetEventDoc = window->GetExtantDoc();
-      if (!retargetEventDoc) return NS_OK;
-    } else if (capturingContent) {
-      // if the mouse is being captured then retarget the mouse event at the
-      // document that is being captured.
-      retargetEventDoc = capturingContent->GetComposedDoc();
-#ifdef ANDROID
-    } else if ((aGUIEvent->mClass == eTouchEventClass) ||
-               (aGUIEvent->mClass == eMouseEventClass) ||
-               (aGUIEvent->mClass == eWheelEventClass)) {
-      retargetEventDoc = mPresShell->GetPrimaryContentDocument();
-#endif
+    RefPtr<Document> retargetEventDoc;
+    if (!GetRetargetEventDocument(aGUIEvent,
+                                  getter_AddRefs(retargetEventDoc))) {
+      return NS_OK;  // Not need to return error.
     }
 
     if (retargetEventDoc) {
@@ -6611,6 +6579,11 @@ nsresult PresShell::EventHandler::HandleEvent(nsIFrame* aFrame,
   nsIFrame* frame = aFrame;
 
   if (aGUIEvent->IsUsingCoordinates()) {
+    // XXX Retrieving capturing content here.  However, some of the following
+    //     methods allow to run script.  So, isn't it possible the capturing
+    //     content outdated?
+    nsIContent* capturingContent =
+        EventHandler::GetCapturingContentFor(aGUIEvent);
     if (GetDocument()) {
       if (aGUIEvent->mClass == eTouchEventClass) {
         Document::UnlockPointer();
@@ -7153,6 +7126,73 @@ bool PresShell::EventHandler::MaybeHandleEventWithAccessibleCaret(
   // If the event is consumed, cancel APZC panning by setting
   // mMultipleActionsPrevented.
   aGUIEvent->mFlags.mMultipleActionsPrevented = true;
+  return true;
+}
+
+// static
+nsIContent* PresShell::EventHandler::GetCapturingContentFor(
+    WidgetGUIEvent* aGUIEvent) {
+  return (aGUIEvent->mClass == ePointerEventClass ||
+          aGUIEvent->mClass == eWheelEventClass ||
+          aGUIEvent->HasMouseEventMessage())
+             ? nsIPresShell::GetCapturingContent()
+             : nullptr;
+}
+
+bool PresShell::EventHandler::GetRetargetEventDocument(
+    WidgetGUIEvent* aGUIEvent, Document** aRetargetEventDocument) {
+  MOZ_ASSERT(aGUIEvent);
+  MOZ_ASSERT(aRetargetEventDocument);
+
+  *aRetargetEventDocument = nullptr;
+
+  // key and IME related events should not cross top level window boundary.
+  // Basically, such input events should be fired only on focused widget.
+  // However, some IMEs might need to clean up composition after focused
+  // window is deactivated.  And also some tests on MozMill want to test key
+  // handling on deactivated window because MozMill window can be activated
+  // during tests.  So, there is no merit the events should be redirected to
+  // active window.  So, the events should be handled on the last focused
+  // content in the last focused DOM window in same top level window.
+  // Note, if no DOM window has been focused yet, we can discard the events.
+  if (aGUIEvent->IsTargetedAtFocusedWindow()) {
+    nsCOMPtr<nsPIDOMWindowOuter> window = GetFocusedDOMWindowInOurWindow();
+    // No DOM window in same top level window has not been focused yet,
+    // discard the events.
+    if (!window) {
+      return false;
+    }
+
+    RefPtr<Document> retargetEventDoc = window->GetExtantDoc();
+    if (!retargetEventDoc) {
+      return false;
+    }
+    retargetEventDoc.forget(aRetargetEventDocument);
+    return true;
+  }
+
+  nsIContent* capturingContent =
+      EventHandler::GetCapturingContentFor(aGUIEvent);
+  if (capturingContent) {
+    // if the mouse is being captured then retarget the mouse event at the
+    // document that is being captured.
+    RefPtr<Document> retargetEventDoc = capturingContent->GetComposedDoc();
+    retargetEventDoc.forget(aRetargetEventDocument);
+    return true;
+  }
+
+#ifdef ANDROID
+  if (aGUIEvent->mClass == eTouchEventClass ||
+      aGUIEvent->mClass == eMouseEventClass ||
+      aGUIEvent->mClass == eWheelEventClass) {
+    RefPtr<Document> retargetEventDoc = mPresShell->GetPrimaryContentDocument();
+    retargetEventDoc.forget(aRetargetEventDocument);
+    return true;
+  }
+#endif  // #ifdef ANDROID
+
+  // When we don't find another document to handle the event, we need to keep
+  // handling the event by ourselves.
   return true;
 }
 

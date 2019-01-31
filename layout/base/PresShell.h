@@ -574,6 +574,24 @@ class PresShell final : public nsIPresShell,
     static already_AddRefed<nsIURI> GetDocumentURIToCompareWithBlacklist(
         PresShell& aPresShell);
 
+    /**
+     * GetCapturingContentFor() returns capturing content for aGUIEvent.
+     * If aGUIEvent is not related to capturing, this returns nullptr.
+     */
+    static nsIContent* GetCapturingContentFor(WidgetGUIEvent* aGUIEvent);
+
+    /**
+     * GetRetargetEventDocument() returns a document if aGUIEvent should be
+     * handled in another document.
+     *
+     * @param aGUIEvent                 Handling event.
+     * @param aRetargetEventDocument    Document which should handle aGUIEvent.
+     * @return                          true if caller can keep handling
+     *                                  aGUIEvent.
+     */
+    bool GetRetargetEventDocument(WidgetGUIEvent* aGUIEvent,
+                                  Document** aRetargetEventDocument);
+
     MOZ_CAN_RUN_SCRIPT
     nsresult RetargetEventToParent(WidgetGUIEvent* aGUIEvent,
                                    nsEventStatus* aEventStatus);

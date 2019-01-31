@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 { // start private scope for gBrowser
-
 /**
  * A set of known icons to use for internal pages. These are hardcoded so we can
  * start loading them faster than ContentLinkHandler would normally find them.
@@ -2307,6 +2306,7 @@ window._gBrowser = {
     sameProcessAsFrameLoader,
     skipAnimation,
     skipBackgroundNotify,
+    title,
     triggeringPrincipal,
     userContextId,
     recordExecution,
@@ -2430,7 +2430,6 @@ window._gBrowser = {
             ((openerTab &&
               Services.prefs.getBoolPref("browser.tabs.insertRelatedAfterCurrent")) ||
              Services.prefs.getBoolPref("browser.tabs.insertAfterCurrent"))) {
-
           let lastRelatedTab = openerTab && this._lastRelatedTabMap.get(openerTab);
           let previousTab = (lastRelatedTab || openerTab || this.selectedTab);
           if (previousTab.multiselected) {
@@ -2551,6 +2550,13 @@ window._gBrowser = {
                                                       userContextId);
           b.registeredOpenURI = lazyBrowserURI;
         }
+        SessionStore.setTabState(t, {
+          entries: [{
+            url: lazyBrowserURI ? lazyBrowserURI.spec : "about:blank",
+            title,
+            triggeringPrincipal_base64: Utils.serializePrincipal(triggeringPrincipal),
+          }],
+        });
       } else {
         this._insertBrowser(t, true);
       }
@@ -2675,6 +2681,12 @@ window._gBrowser = {
     var shouldPrompt = Services.prefs.getBoolPref(pref);
     if (!shouldPrompt)
       return true;
+
+    const maxTabsUndo = Services.prefs.getIntPref("browser.sessionstore.max_tabs_undo");
+    if (aCloseTabs != this.closingTabsEnum.ALL &&
+        tabsToClose <= maxTabsUndo) {
+      return true;
+    }
 
     var ps = Services.prompt;
 
@@ -3805,12 +3817,15 @@ window._gBrowser = {
     // the same remote type and process as the one we're swapping in.
     // This makes sure we don't get a short-lived process for the new tab.
     let linkedBrowser = aTab.linkedBrowser;
+    let createLazyBrowser = !aTab.linkedPanel;
     let params = {
       eventDetail: { adoptedTab: aTab },
       preferredRemoteType: linkedBrowser.remoteType,
       sameProcessAsFrameLoader: linkedBrowser.frameLoader,
       skipAnimation: true,
       index: aIndex,
+      createLazyBrowser,
+      allowInheritPrincipal: createLazyBrowser,
     };
 
     let numPinned = this._numPinnedTabs;
@@ -3827,10 +3842,12 @@ window._gBrowser = {
 
     aTab.parentNode._finishAnimateTabMove();
 
-    // Stop the about:blank load.
-    newBrowser.stop();
-    // Make sure it has a docshell.
-    newBrowser.docShell;
+    if (!createLazyBrowser) {
+      // Stop the about:blank load.
+      newBrowser.stop();
+      // Make sure it has a docshell.
+      newBrowser.docShell;
+    }
 
     if (!this.swapBrowsersAndCloseOther(newTab, aTab)) {
       // Swapping wasn't permitted. Bail out.
@@ -5002,7 +5019,6 @@ class TabProgressListener {
       }
     } else if (aStateFlags & Ci.nsIWebProgressListener.STATE_STOP &&
                aStateFlags & Ci.nsIWebProgressListener.STATE_IS_NETWORK) {
-
       let modifiedAttrs = [];
       if (this.mTab.hasAttribute("busy")) {
         this.mTab.removeAttribute("busy");
@@ -5242,7 +5258,6 @@ TabProgressListener.prototype.QueryInterface = ChromeUtils.generateQI(
   ["nsIWebProgressListener",
    "nsIWebProgressListener2",
    "nsISupportsWeakReference"]);
-
 } // end private scope for gBrowser
 
 var StatusPanel = {
