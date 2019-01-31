@@ -368,18 +368,6 @@ partial namespace ChromeUtils {
   [Throws]
   Promise<sequence<IOActivityDataDictionary>> requestIOActivity();
 
-  /**
-   * Returns the BrowsingContext referred by the given id.
-   */
-  [ChromeOnly]
-  BrowsingContext? getBrowsingContext(unsigned long long id);
-
-  /**
-   * Returns all the root BrowsingContexts.
-   */
-  [ChromeOnly]
-  sequence<BrowsingContext> getRootBrowsingContexts();
-
   [ChromeOnly, Throws]
   boolean hasReportingHeaderForOrigin(DOMString aOrigin);
 
@@ -395,8 +383,18 @@ partial namespace ChromeUtils {
   [ChromeOnly]
   double lastExternalProtocolIframeAllowed();
 
+  /**
+   * For testing purpose we need to reset this value.
+   */
+  [ChromeOnly]
+  void resetLastExternalProtocolIframeAllowed();
+
   [ChromeOnly, Throws]
   void registerWindowActor(DOMString aName, WindowActorOptions aOptions);
+
+  [ChromeOnly]
+  // aError should a nsresult.
+  boolean isClassifierBlockingErrorCode(unsigned long aError);
 };
 
 /**

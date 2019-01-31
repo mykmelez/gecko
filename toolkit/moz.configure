@@ -425,11 +425,12 @@ imply_option('--enable-fmp4', ffmpeg, '--enable-ffmpeg')
 option('--enable-av1',
         help='Enable libaom for av1 video support')
 
-@depends('--enable-av1', target)
-def av1(value, target):
+@depends('--enable-av1', target, c_compiler)
+def av1(value, target, c_compiler):
     enabled = bool(value)
     if value.origin == 'default':
-        if target.os == 'WINNT' and target.cpu == 'x86':
+        if target.os == 'WINNT' and target.cpu == 'x86' and \
+                c_compiler and c_compiler.type == 'msvc':
             enabled = False
         else:
             enabled = True
@@ -1345,7 +1346,7 @@ with only_when(compile_environment):
            help='Use system libvpx (located with pkgconfig)')
 
     with only_when('--with-system-libvpx'):
-        vpx = pkg_check_modules('MOZ_LIBVPX', 'vpx >= 1.5.0')
+        vpx = pkg_check_modules('MOZ_LIBVPX', 'vpx >= 1.7.0')
 
         check_header('vpx/vpx_decoder.h', flags=vpx.cflags, onerror=lambda: die(
             "Couldn't find vpx/vpx_decoder.h, which is required to build "

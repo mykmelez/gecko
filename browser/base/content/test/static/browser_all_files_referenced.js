@@ -216,7 +216,6 @@ if (!isDevtools) {
                       "extension-storage.js"]) {
     whitelist.add("resource://services-sync/engines/" + module);
   }
-
 }
 
 if (AppConstants.MOZ_CODE_COVERAGE) {
