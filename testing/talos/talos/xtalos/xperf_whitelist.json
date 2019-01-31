@@ -542,12 +542,6 @@
     "minbytes": 6000,
     "maxbytes": 6000
   },
-  "{profile}\\xulstore.json": {
-    "mincount": 0,
-    "maxcount": 0,
-    "minbytes": 0,
-    "maxbytes": 702
-  },
   "{talos}\\talos\\tests\\{tp5n_files}": {
     "mincount": 0,
     "maxcount": 2,

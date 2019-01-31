@@ -9,7 +9,7 @@
  */
 add_task(async function test_default_bookmark_toolbar_visibility() {
   const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
-  ChromeUtils.import("resource://gre/modules/XULStore.jsm");
+  const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
 
   is(await XULStore.getValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed"), "",
      "Check that @collapsed isn't persisted");

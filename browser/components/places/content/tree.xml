@@ -16,7 +16,7 @@
   <binding id="places-tree" extends="chrome://global/content/bindings/tree.xml#tree">
     <implementation>
       <constructor><![CDATA[
-        ChromeUtils.import("resource://gre/modules/XULStore.jsm");
+        const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
         this._initPromise = XULStore.cache(document.documentURI).then(xulStoreCache => {
           this._xulStoreCache = xulStoreCache;
           // Force an initial build.

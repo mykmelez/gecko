@@ -5,7 +5,7 @@
 // Bug 679604 - Test that a XUL persisted category from an older version of
 // Firefox doesn't break the add-ons manager when that category doesn't exist
 
-ChromeUtils.import("resource://gre/modules/XULStore.jsm");
+const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
 
 async function test() {
   waitForExplicitFinish();

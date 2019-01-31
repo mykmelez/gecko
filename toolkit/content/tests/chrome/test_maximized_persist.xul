@@ -138,7 +138,7 @@
     win.close();
 
     // Clean up the XUL store for the given window.
-    ChromeUtils.import("resource://gre/modules/XULStore.jsm");
+    const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
     await XULStore.removeDocument(chrome_url);
 
     SimpleTest.finish();
