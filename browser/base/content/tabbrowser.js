@@ -1617,7 +1617,7 @@ window._gBrowser = {
     }
 
     // Abort if we're not going to change anything
-    let oldRemoteType = aBrowser.getAttribute("remoteType");
+    let oldRemoteType = aBrowser.remoteType;
     if (isRemote == aShouldBeRemote && !newFrameloader &&
         (!isRemote || oldRemoteType == remoteType)) {
       return false;
@@ -1765,7 +1765,7 @@ window._gBrowser = {
     if (!gMultiProcessBrowser)
       return this.updateBrowserRemoteness(aBrowser, false);
 
-    let oldRemoteType = aBrowser.getAttribute("remoteType") || null;
+    let oldRemoteType = aBrowser.remoteType;
 
     aOptions.remoteType =
       E10SUtils.getRemoteTypeForURI(aURL,
@@ -2289,6 +2289,7 @@ window._gBrowser = {
     forceNotRemote,
     fromExternal,
     index,
+    lazyTabTitle,
     name,
     nextTabParentId,
     noInitialLabel,
@@ -2306,7 +2307,6 @@ window._gBrowser = {
     sameProcessAsFrameLoader,
     skipAnimation,
     skipBackgroundNotify,
-    title,
     triggeringPrincipal,
     userContextId,
     recordExecution,
@@ -2553,7 +2553,7 @@ window._gBrowser = {
         SessionStore.setTabState(t, {
           entries: [{
             url: lazyBrowserURI ? lazyBrowserURI.spec : "about:blank",
-            title,
+            title: lazyTabTitle,
             triggeringPrincipal_base64: Utils.serializePrincipal(triggeringPrincipal),
           }],
         });
