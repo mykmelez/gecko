@@ -8,6 +8,7 @@ license = "MPL-2.0"
 itertools = "^0.7.6"
 lazy_static = "1.0"
 lmdb-rkv = "0.9"
+log = "0.4"
 nsstring = { path = "../../../xpcom/rust/nsstring" }
 nserror = { path = "../../../xpcom/rust/nserror" }
 rkv = "0.7.0"

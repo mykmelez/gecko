@@ -94,10 +94,10 @@ void XULPersist::Persist(Element* aElement, int32_t aNameSpaceID,
   }
   NS_ConvertUTF8toUTF16 uri(utf8uri);
 
-  bool hasAttr = xulstore_has_value_ns(&uri, &id, &attrstr);
+  bool hasAttr = xulstore_has_value(&uri, &id, &attrstr);
 
   if (hasAttr && valuestr.IsEmpty()) {
-    Unused << xulstore_remove_value_ns(&uri, &id, &attrstr);
+    Unused << xulstore_remove_value(&uri, &id, &attrstr);
     return;
   }
 
@@ -109,7 +109,7 @@ void XULPersist::Persist(Element* aElement, int32_t aNameSpaceID,
     }
   }
 
-  Unused << xulstore_set_value_ns(&uri, &id, &attrstr, &valuestr);
+  Unused << xulstore_set_value(&uri, &id, &attrstr, &valuestr);
 }
 
 nsresult XULPersist::ApplyPersistentAttributes() {
@@ -139,11 +139,11 @@ nsresult XULPersist::ApplyPersistentAttributesInternal() {
   NS_ConvertUTF8toUTF16 uri(utf8uri);
 
   // Get a list of element IDs for which persisted values are available
-  void* ids = xulstore_get_ids_iterator_ns(&uri);
+  void* ids = xulstore_get_ids_iterator(&uri);
 
   while (xulstore_iter_has_more(ids)) {
     nsAutoString id;
-    Unused << xulstore_iter_get_next_ns(ids, &id);
+    Unused << xulstore_iter_get_next(ids, &id);
 
     // We want to hold strong refs to the elements while applying
     // persistent attributes, just in case.
@@ -177,14 +177,14 @@ nsresult XULPersist::ApplyPersistentAttributesToElements(
   NS_ConvertUTF8toUTF16 uri(utf8uri);
 
   // Get a list of attributes for which persisted values are available
-  void* attrs = xulstore_get_attribute_iterator_ns(&uri, &aID);
+  void* attrs = xulstore_get_attribute_iterator(&uri, &aID);
 
   while (xulstore_iter_has_more(attrs)) {
     nsAutoString attrstr;
-    Unused << xulstore_iter_get_next_ns(attrs, &attrstr);
+    Unused << xulstore_iter_get_next(attrs, &attrstr);
 
     nsAutoString value;
-    rv = xulstore_get_value_ns(&uri, &aID, &attrstr, &value);
+    rv = xulstore_get_value(&uri, &aID, &attrstr, &value);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }

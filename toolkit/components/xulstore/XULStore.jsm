@@ -5,7 +5,7 @@
 "use strict";
 
 // Enables logging.
-const debugMode = false;
+const debugMode = true;
 
 const EXPORTED_SYMBOLS = ["XULStore"];
 

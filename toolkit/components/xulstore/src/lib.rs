@@ -47,6 +47,8 @@ extern crate itertools;
 #[macro_use]
 extern crate lazy_static;
 extern crate lmdb;
+#[macro_use]
+extern crate log;
 extern crate nserror;
 extern crate nsstring;
 extern crate rkv;
@@ -58,10 +60,9 @@ use itertools::Itertools;
 use nserror::{nsresult, NS_OK};
 use nsstring::{nsAString, nsString};
 use rkv::{Rkv, Store, StoreError, Value};
-use std::ffi::{CStr, CString};
+use std::ffi::{CString};
 use std::fs;
 use std::ops::DerefMut;
-use std::os::raw::{c_char};
 use std::path::Path;
 use std::str;
 use xpcom::{interfaces, XpCom};
@@ -101,7 +102,7 @@ lazy_static! {
 
         let xulstore_dir_path = profile_dir_path.join("xulstore");
         fs::create_dir_all(xulstore_dir_path.clone()).expect("dir created");
-        println!("xulstore directory: {:?}", &xulstore_dir_path);
+        info!("directory: {:?}", &xulstore_dir_path);
 
         // NB: this singleton is tied to the profile directory it retrieves
         // during initialization, which can change if the application changes
@@ -152,7 +153,7 @@ fn get_key(doc: &str, id: &str, attr: &str) -> String {
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_set_value_ns(
+pub extern "C" fn xulstore_set_value(
     doc: &nsAString,
     id: &nsAString,
     attr: &nsAString,
@@ -163,6 +164,7 @@ pub extern "C" fn xulstore_set_value_ns(
         &String::from_utf16_lossy(id),
         &String::from_utf16_lossy(attr),
     );
+    info!("set value {} {} {} {}", doc, id, attr, value);
     let store = STORE.clone();
     let mut writer = RKV.write().expect("writer");
 
@@ -178,40 +180,8 @@ pub extern "C" fn xulstore_set_value_ns(
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_set_value_c(
-    doc: *const c_char,
-    id: *const c_char,
-    attr: *const c_char,
-    value: *const c_char,
-) -> nsresult {
-    assert!(!doc.is_null());
-    assert!(!id.is_null());
-    assert!(!attr.is_null());
-    assert!(!value.is_null());
-
-    // TODO: encapsulate key retrieval in a function that converts the strings
-    // from pointers itself.
-    let key = get_key(
-        unsafe { CStr::from_ptr(doc) }.to_str().unwrap(),
-        unsafe { CStr::from_ptr(id) }.to_str().unwrap(),
-        unsafe { CStr::from_ptr(attr) }.to_str().unwrap(),
-    );
-
-    let store = STORE.clone();
-    let mut writer = RKV.write().expect("writer");
-    // TODO: store (and retrieve) values as blobs instead of converting them
-    // to Value::Str (and back).
-    let val = Value::Str(unsafe { CStr::from_ptr(value) }.to_str().unwrap());
-
-    // TODO: handle errors by returning NS_ERROR_FAILURE or another nsresult.
-    writer.put(store, &key, &val).expect("put");
-    writer.commit().expect("commit");
-
-    NS_OK
-}
-
-#[no_mangle]
-pub extern "C" fn xulstore_has_value_ns(doc: &nsAString, id: &nsAString, attr: &nsAString) -> bool {
+pub extern "C" fn xulstore_has_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> bool {
+    info!("has value {} {} {}", doc, id, attr);
     let key = get_key(
         &String::from_utf16_lossy(doc),
         &String::from_utf16_lossy(id),
@@ -230,41 +200,13 @@ pub extern "C" fn xulstore_has_value_ns(doc: &nsAString, id: &nsAString, attr: &
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_has_value_c(
-    doc: *const c_char,
-    id: *const c_char,
-    attr: *const c_char,
-) -> bool {
-    assert!(!doc.is_null());
-    assert!(!id.is_null());
-    assert!(!attr.is_null());
-
-    // TODO: encapsulate key retrieval in a function that converts the strings
-    // from pointers itself.
-    let key = get_key(
-        unsafe { CStr::from_ptr(doc) }.to_str().unwrap(),
-        unsafe { CStr::from_ptr(id) }.to_str().unwrap(),
-        unsafe { CStr::from_ptr(attr) }.to_str().unwrap(),
-    );
-    let store = STORE.clone();
-    let reader = RKV.read().expect("reader");
-    let value = reader.get(store, &key);
-
-    // TODO: distinguish between a value not found and an error retrieving it.
-    match value {
-        Ok(None) => false,
-        Err(_) => false,
-        _ => true,
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn xulstore_get_value_ns(
+pub extern "C" fn xulstore_get_value(
     doc: &nsAString,
     id: &nsAString,
     attr: &nsAString,
     value: *mut nsAString,
 ) -> nsresult {
+    info!("get value {} {} {}", doc, id, attr);
     let key = get_key(
         &String::from_utf16_lossy(doc),
         &String::from_utf16_lossy(id),
@@ -292,50 +234,12 @@ pub extern "C" fn xulstore_get_value_ns(
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_get_value_c(
-    doc: *const c_char,
-    id: *const c_char,
-    attr: *const c_char,
-) -> *const c_char {
-    assert!(!doc.is_null());
-    assert!(!id.is_null());
-    assert!(!attr.is_null());
-
-    // TODO: encapsulate key retrieval in a function that converts the strings
-    // from pointers itself.
-    let key = get_key(
-        unsafe { CStr::from_ptr(doc) }.to_str().unwrap(),
-        unsafe { CStr::from_ptr(id) }.to_str().unwrap(),
-        unsafe { CStr::from_ptr(attr) }.to_str().unwrap(),
-    );
-    let store = STORE.clone();
-    let reader = RKV.read().expect("reader");
-    let retrieved_value = reader.get(store, &key);
-
-    let return_value = match retrieved_value {
-        Ok(Some(Value::Str(value))) => value,
-        // TODO: report error instead of merely swallowing it.
-        Err(_) => "",
-        _ => "",
-    };
-
-    CString::new(return_value).unwrap().into_raw()
-}
-
-#[no_mangle]
-pub extern "C" fn xulstore_drop_value_c(str: *mut c_char) {
-    if str.is_null() {
-        // Implicitly calls drop when the CString goes out of scope.
-        unsafe { CString::from_raw(str) };
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn xulstore_remove_value_ns(
+pub extern "C" fn xulstore_remove_value(
     doc: &nsAString,
     id: &nsAString,
     attr: &nsAString,
 ) -> nsresult {
+    info!("remove value {} {} {}", doc, id, attr);
     let key = get_key(
         &String::from_utf16_lossy(doc),
         &String::from_utf16_lossy(id),
@@ -362,40 +266,8 @@ pub extern "C" fn xulstore_remove_value_ns(
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_remove_value_c(
-    doc: *const c_char,
-    id: *const c_char,
-    attr: *const c_char,
-) -> nsresult {
-    assert!(!doc.is_null());
-    assert!(!id.is_null());
-    assert!(!attr.is_null());
-
-    // TODO: encapsulate key retrieval in a function that converts the strings
-    // from pointers itself.
-    let key = get_key(
-        unsafe { CStr::from_ptr(doc) }.to_str().unwrap(),
-        unsafe { CStr::from_ptr(id) }.to_str().unwrap(),
-        unsafe { CStr::from_ptr(attr) }.to_str().unwrap(),
-    );
-    let store = STORE.clone();
-    let mut writer = RKV.write().expect("writer");
-
-    match writer.delete(store, &key) {
-        // The XULStore API doesn't care if a consumer tries to remove a value
-        // that doesn't actually exist, so we ignore that error.
-        Err(StoreError::LmdbError(lmdb::Error::NotFound)) => Ok(()),
-        Ok(ok) => Ok(ok),
-        Err(err) => Err(err),
-    }.expect("delete");
-
-    writer.commit().expect("commit");
-
-    NS_OK
-}
-
-#[no_mangle]
-pub extern "C" fn xulstore_get_ids_iterator_ns(doc: &nsAString) -> *const StringIterator {
+pub extern "C" fn xulstore_get_ids_iterator(doc: &nsAString) -> *const StringIterator {
+    info!("get IDs iterator {}", doc);
     let doc_url = String::from_utf16_lossy(doc);
     let store = STORE.clone();
     let reader = RKV.read().expect("reader");
@@ -417,64 +289,14 @@ pub extern "C" fn xulstore_get_ids_iterator_ns(doc: &nsAString) -> *const String
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_get_ids_iterator_c<'a>(doc: *const c_char) -> *const StringIterator {
-    assert!(!doc.is_null());
-
-    let doc_url = unsafe { CStr::from_ptr(doc) }.to_str().unwrap();
-    let store = STORE.clone();
-    let reader = RKV.read::<&str>().expect("reader");
-    let iterator = reader.iter_start(store).expect("iter");
-
-    let collection: Vec<String> = iterator
-        .map(|(key, _val)| key)
-        // TODO: avoid assuming we control writes and check the conversion.
-        .map(|key| unsafe { str::from_utf8_unchecked(&key) })
-        .map(|key| key.split('\u{0009}').collect::<Vec<&str>>())
-        .filter(|parts| parts[0] == doc_url)
-        .map(|parts| parts[1].to_owned())
-        // TODO: unique() collects values, and collect() does too,
-        // so do so only once, by collecting the values into a set.
-        .unique()
-        .collect();
-
-    Box::into_raw(Box::new(StringIterator::new(collection)))
-}
-
-#[no_mangle]
-pub extern "C" fn xulstore_get_attribute_iterator_ns<'a>(
+pub extern "C" fn xulstore_get_attribute_iterator<'a>(
     doc: &nsAString,
     id: &nsAString,
 ) -> *const StringIterator {
+    info!("get attribute iterator {} {}", doc, id);
     let doc_url = String::from_utf16_lossy(doc);
     let element_id = String::from_utf16_lossy(id);
     let key_prefix = doc_url.to_owned() + "\u{0009}" + &element_id;
-    let store = STORE.clone();
-    let reader = RKV.read().expect("reader");
-    let iterator = reader.iter_from(store, &key_prefix).expect("iter");
-
-    let collection: Vec<String> = iterator
-        .map(|(key, _val)| key)
-        // TODO: avoid assuming we control writes and check the conversion.
-        .map(|key| unsafe { str::from_utf8_unchecked(&key) })
-        .map(|key| key.split('\u{0009}').collect::<Vec<&str>>())
-        .filter(|parts| parts[0] == doc_url && parts[1] == element_id)
-        .map(|parts| parts[2].to_owned())
-        .collect();
-
-    Box::into_raw(Box::new(StringIterator::new(collection)))
-}
-
-#[no_mangle]
-pub extern "C" fn xulstore_get_attribute_iterator_c<'a>(
-    doc: *const c_char,
-    id: *const c_char,
-) -> *const StringIterator {
-    assert!(!doc.is_null());
-    assert!(!id.is_null());
-
-    let doc_url = unsafe { CStr::from_ptr(doc) }.to_str().unwrap();
-    let element_id = unsafe { CStr::from_ptr(id) }.to_str().unwrap();
-    let key_prefix = doc_url.to_owned() + "\u{0009}" + element_id;
     let store = STORE.clone();
     let reader = RKV.read().expect("reader");
     let iterator = reader.iter_from(store, &key_prefix).expect("iter");
@@ -591,10 +413,12 @@ impl<'a> StringIterator {
     }
 
     pub fn has_more(&self) -> bool {
+        info!("has more");
         self.index < self.values.len()
     }
 
-    pub fn get_next_ns(&mut self, value: *mut nsAString) -> nsresult {
+    pub fn get_next(&mut self, value: *mut nsAString) -> nsresult {
+        info!("get next");
         // TODO: confirm that self.index in range.
         // TODO: consume the value being returned.
         unsafe {
@@ -603,39 +427,28 @@ impl<'a> StringIterator {
         self.index = self.index + 1;
         NS_OK
     }
-
-    pub fn get_next_c(&mut self) -> &String {
-        // TODO: confirm that self.index in range.
-        // TODO: consume the value being returned.
-        let value = &self.values[self.index];
-        self.index = self.index + 1;
-        value
-    }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn xulstore_iter_has_more(iter: *mut StringIterator) -> bool {
+    info!("iter has more");
     assert!(!iter.is_null());
     (&*iter).has_more()
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn xulstore_iter_get_next_ns(
+pub unsafe extern "C" fn xulstore_iter_get_next(
     iter: *mut StringIterator,
     value: *mut nsAString,
 ) -> nsresult {
+    info!("iter get next");
     assert!(!iter.is_null());
-    (&mut *iter).get_next_ns(value)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn xulstore_iter_get_next_c(iter: *mut StringIterator) -> *const c_char {
-    assert!(!iter.is_null());
-    CString::new((&mut *iter).get_next_c().as_str()).unwrap().into_raw()
+    (&mut *iter).get_next(value)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn xulstore_iter_drop(iter: *mut StringIterator) {
+    info!("iter drop");
     if !iter.is_null() {
         drop(Box::from_raw(iter));
     }
