@@ -29,7 +29,7 @@ use moz_task::{create_thread, TaskRunnable};
 use nserror::{nsresult, NS_ERROR_FAILURE, NS_ERROR_NO_AGGREGATION, NS_OK};
 use nsstring::{nsACString, nsCString};
 use owned_value::{owned_to_variant, variant_to_owned, OwnedValue};
-use rkv::{Rkv, Store};
+use rkv::{Rkv, SingleStore};
 use std::{
     ptr,
     sync::{Arc, RwLock},
@@ -134,14 +134,14 @@ impl KeyValueService {
 #[refcnt = "atomic"]
 pub struct InitKeyValueDatabase {
     rkv: Arc<RwLock<Rkv>>,
-    store: Store,
+    store: SingleStore,
     thread: ThreadBoundRefPtr<nsIThread>,
 }
 
 impl KeyValueDatabase {
     fn new(
         rkv: Arc<RwLock<Rkv>>,
-        store: Store,
+        store: SingleStore,
         thread: ThreadBoundRefPtr<nsIThread>,
     ) -> RefPtr<KeyValueDatabase> {
         KeyValueDatabase::allocate(InitKeyValueDatabase { rkv, store, thread })
