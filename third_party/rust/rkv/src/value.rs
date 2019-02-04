@@ -1,4 +1,4 @@
-// Copyright 2018 Mozilla
+// Copyright 2018-2019 Mozilla
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use
 // this file except in compliance with the License. You may obtain a copy of the
@@ -8,19 +8,19 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
-use ordered_float::OrderedFloat;
-
+use arrayref::array_ref;
 use bincode::{
     deserialize,
     serialize,
 };
+use ordered_float::OrderedFloat;
 
 use uuid::{
     Bytes,
     Uuid,
 };
 
-use error::DataError;
+use crate::error::DataError;
 
 /// We define a set of types, associated with simple integers, to annotate values
 /// stored in LMDB. This is to avoid an accidental 'cast' from a value of one type
@@ -158,7 +158,8 @@ impl<'s> Value<'s> {
                 // Processed above to avoid verbose duplication of error transforms.
                 unreachable!()
             },
-        }.map_err(|e| DataError::DecodingError {
+        }
+        .map_err(|e| DataError::DecodingError {
             value_type: t,
             err: e,
         })
@@ -178,7 +179,8 @@ impl<'s> Value<'s> {
                 // Processed above to avoid verbose duplication of error transforms.
                 serialize(&(Type::Uuid.to_tag(), v))
             },
-        }.map_err(DataError::EncodingError)
+        }
+        .map_err(DataError::EncodingError)
     }
 }
 

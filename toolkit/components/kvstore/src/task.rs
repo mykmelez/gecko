@@ -6,11 +6,12 @@ extern crate xpcom;
 
 use crossbeam_utils::atomic::AtomicCell;
 use error::KeyValueError;
+use lmdb::Transaction;
 use moz_task::Task;
 use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE};
 use nsstring::{nsCString, nsString};
 use owned_value::{value_to_owned, OwnedValue};
-use rkv::{Manager, Rkv, Store, StoreError, Value};
+use rkv::{Manager, Rkv, SingleStore, StoreError, StoreOptions, Value};
 use std::{
     path::Path,
     str,
@@ -83,7 +84,7 @@ pub struct GetOrCreateTask {
     thread: AtomicCell<Option<ThreadBoundRefPtr<nsIThread>>>,
     path: nsCString,
     name: nsCString,
-    result: AtomicCell<Option<Result<(Arc<RwLock<Rkv>>, Store), KeyValueError>>>,
+    result: AtomicCell<Option<Result<(Arc<RwLock<Rkv>>, SingleStore), KeyValueError>>>,
 }
 
 impl GetOrCreateTask {
@@ -104,7 +105,7 @@ impl GetOrCreateTask {
 
     fn convert(
         &self,
-        result: (Arc<RwLock<Rkv>>, Store),
+        result: (Arc<RwLock<Rkv>>, SingleStore),
     ) -> Result<RefPtr<KeyValueDatabase>, KeyValueError> {
         let thread = self.thread.swap(None).ok_or(NS_ERROR_FAILURE)?;
         Ok(KeyValueDatabase::new(result.0, result.1, thread))
@@ -116,14 +117,13 @@ impl Task for GetOrCreateTask {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
         self.result.store(Some(
-            || -> Result<(Arc<RwLock<Rkv>>, Store), KeyValueError> {
+            || -> Result<(Arc<RwLock<Rkv>>, SingleStore), KeyValueError> {
                 let mut writer = Manager::singleton().write()?;
                 let rkv = writer.get_or_create(Path::new(str::from_utf8(&self.path)?), Rkv::new)?;
                 let store = if self.name.is_empty() {
-                    rkv.write()?.open_or_create_default()
+                    rkv.write()?.open_single("default", StoreOptions::create())
                 } else {
-                    rkv.write()?
-                        .open_or_create(Some(str::from_utf8(&self.name)?))
+                    rkv.write()?.open_single(str::from_utf8(&self.name)?, StoreOptions::create())
                 }?;
                 Ok((rkv, store))
             }(),
@@ -136,7 +136,7 @@ impl Task for GetOrCreateTask {
 pub struct PutTask {
     callback: AtomicCell<Option<ThreadBoundRefPtr<nsIKeyValueVoidCallback>>>,
     rkv: Arc<RwLock<Rkv>>,
-    store: Store,
+    store: SingleStore,
     key: nsCString,
     value: OwnedValue,
     result: AtomicCell<Option<Result<(), KeyValueError>>>,
@@ -146,7 +146,7 @@ impl PutTask {
     pub fn new(
         callback: RefPtr<nsIKeyValueVoidCallback>,
         rkv: Arc<RwLock<Rkv>>,
-        store: Store,
+        store: SingleStore,
         key: nsCString,
         value: OwnedValue,
     ) -> PutTask {
@@ -177,7 +177,7 @@ impl Task for PutTask {
                 OwnedValue::Str(ref val) => Value::Str(&val),
             };
 
-            writer.put(self.store, key, &value)?;
+            self.store.clone().put(&mut writer, key, &value)?;
             writer.commit()?;
 
             Ok(())
@@ -190,7 +190,7 @@ impl Task for PutTask {
 pub struct GetTask {
     callback: AtomicCell<Option<ThreadBoundRefPtr<nsIKeyValueVariantCallback>>>,
     rkv: Arc<RwLock<Rkv>>,
-    store: Store,
+    store: SingleStore,
     key: nsCString,
     default_value: Option<OwnedValue>,
     result: AtomicCell<Option<Result<Option<OwnedValue>, KeyValueError>>>,
@@ -200,7 +200,7 @@ impl GetTask {
     pub fn new(
         callback: RefPtr<nsIKeyValueVariantCallback>,
         rkv: Arc<RwLock<Rkv>>,
-        store: Store,
+        store: SingleStore,
         key: nsCString,
         default_value: Option<OwnedValue>,
     ) -> GetTask {
@@ -235,7 +235,7 @@ impl Task for GetTask {
                 let key = str::from_utf8(&self.key)?;
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
-                let value = reader.get(self.store, key)?;
+                let value = self.store.get(&reader, key)?;
 
                 // TODO: refactor with value_to_owned in owned_value.rs.
                 Ok(match value {
@@ -258,7 +258,7 @@ impl Task for GetTask {
 pub struct HasTask {
     callback: AtomicCell<Option<ThreadBoundRefPtr<nsIKeyValueVariantCallback>>>,
     rkv: Arc<RwLock<Rkv>>,
-    store: Store,
+    store: SingleStore,
     key: nsCString,
     result: AtomicCell<Option<Result<bool, KeyValueError>>>,
 }
@@ -267,7 +267,7 @@ impl HasTask {
     pub fn new(
         callback: RefPtr<nsIKeyValueVariantCallback>,
         rkv: Arc<RwLock<Rkv>>,
-        store: Store,
+        store: SingleStore,
         key: nsCString,
     ) -> HasTask {
         HasTask {
@@ -292,7 +292,7 @@ impl Task for HasTask {
             let key = str::from_utf8(&self.key)?;
             let env = self.rkv.read()?;
             let reader = env.read()?;
-            let value = reader.get(self.store, key)?;
+            let value = self.store.get(&reader, key)?;
             Ok(value.is_some())
         }()));
     }
@@ -303,7 +303,7 @@ impl Task for HasTask {
 pub struct DeleteTask {
     callback: AtomicCell<Option<ThreadBoundRefPtr<nsIKeyValueVoidCallback>>>,
     rkv: Arc<RwLock<Rkv>>,
-    store: Store,
+    store: SingleStore,
     key: nsCString,
     result: AtomicCell<Option<Result<(), KeyValueError>>>,
 }
@@ -312,7 +312,7 @@ impl DeleteTask {
     pub fn new(
         callback: RefPtr<nsIKeyValueVoidCallback>,
         rkv: Arc<RwLock<Rkv>>,
-        store: Store,
+        store: SingleStore,
         key: nsCString,
     ) -> DeleteTask {
         DeleteTask {
@@ -334,7 +334,7 @@ impl Task for DeleteTask {
             let env = self.rkv.read()?;
             let mut writer = env.write()?;
 
-            match writer.delete(self.store, key) {
+            match self.store.clone().delete(&mut writer, key) {
                 Ok(_) => (),
 
                 // LMDB fails with an error if the key to delete wasn't found,
@@ -357,7 +357,7 @@ impl Task for DeleteTask {
 pub struct EnumerateTask {
     callback: AtomicCell<Option<ThreadBoundRefPtr<nsIKeyValueEnumeratorCallback>>>,
     rkv: Arc<RwLock<Rkv>>,
-    store: Store,
+    store: SingleStore,
     from_key: nsCString,
     to_key: nsCString,
     result: AtomicCell<Option<Result<Vec<KeyValuePair>, KeyValueError>>>,
@@ -367,7 +367,7 @@ impl EnumerateTask {
     pub fn new(
         callback: RefPtr<nsIKeyValueEnumeratorCallback>,
         rkv: Arc<RwLock<Rkv>>,
-        store: Store,
+        store: SingleStore,
         from_key: nsCString,
         to_key: nsCString,
     ) -> EnumerateTask {
@@ -389,10 +389,7 @@ impl EnumerateTask {
     }
 }
 
-type KeyValuePair = (
-    Result<String, KeyValueError>,
-    Result<OwnedValue, KeyValueError>,
-);
+type KeyValuePair = Result<(String, OwnedValue), KeyValueError>;
 
 impl Task for EnumerateTask {
     fn run(&self) {
@@ -406,9 +403,9 @@ impl Task for EnumerateTask {
                 let to_key = str::from_utf8(&self.to_key)?;
 
                 let iterator = if from_key.is_empty() {
-                    reader.iter_start(self.store)?
+                    self.store.iter_start(&reader)?
                 } else {
-                    reader.iter_from(self.store, &from_key)?
+                    self.store.iter_from(&reader, &from_key)?
                 };
 
                 // Ideally, we'd enumerate pairs lazily, as the consumer calls
@@ -426,28 +423,33 @@ impl Task for EnumerateTask {
                     // For forward compatibility, we don't fail here if we can't convert
                     // a key to UTF-8.  Instead, we store the Err in the collection
                     // and fail lazily in KeyValueEnumerator.get_next().
-                    .map(|(key, val)| (str::from_utf8(&key), val))
-                    .take_while(|(key, _val)| {
-                        if to_key.is_empty() {
-                            true
-                        } else {
-                            match *key {
-                                Ok(key) => key < to_key,
-                                Err(_err) => true,
+                    .map(|result| match result {
+                        Ok((key, val)) => Ok((str::from_utf8(&key), val)),
+                        Err(err) => Err(err) })
+                    // Stop iterating once we reach the to_key, if any.
+                    .take_while(|result| match result {
+                        Ok((key, _val)) => {
+                            if to_key.is_empty() {
+                                true
+                            } else {
+                                match *key {
+                                    Ok(key) => key < to_key,
+                                    Err(_err) => true,
+                                }
                             }
-                        }
+                        },
+                        Err(_) => true,
                     })
-                    .map(|(key, val)| {
-                        (
-                            match key {
-                                Ok(key) => Ok(key.to_owned()),
-                                Err(err) => Err(err.into()),
-                            },
-                            match val {
-                                Ok(val) => value_to_owned(val),
-                                Err(err) => Err(KeyValueError::StoreError(err)),
-                            },
-                        )
+                    // Convert the key, value pair to owned.
+                    .map(|result| match result {
+                        Ok((key, val)) => {
+                            match (key, value_to_owned(val)) {
+                                (Ok(key), Ok(val)) => Ok((key.to_owned(), val)),
+                                (Err(err), _) => Err(err.into()),
+                                (_, Err(err)) => Err(err),
+                            }
+                        },
+                        Err(err) => Err(KeyValueError::StoreError(err)),
                     })
                     .collect();
 

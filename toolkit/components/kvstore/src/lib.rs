@@ -29,7 +29,7 @@ use moz_task::{create_thread, TaskRunnable};
 use nserror::{nsresult, NS_ERROR_FAILURE, NS_ERROR_NO_AGGREGATION, NS_OK};
 use nsstring::{nsACString, nsCString};
 use owned_value::{owned_to_variant, variant_to_owned, OwnedValue};
-use rkv::{Rkv, Store};
+use rkv::{Rkv, SingleStore};
 use std::{
     ptr,
     sync::{Arc, RwLock},
@@ -134,14 +134,14 @@ impl KeyValueService {
 #[refcnt = "atomic"]
 pub struct InitKeyValueDatabase {
     rkv: Arc<RwLock<Rkv>>,
-    store: Store,
+    store: SingleStore,
     thread: ThreadBoundRefPtr<nsIThread>,
 }
 
 impl KeyValueDatabase {
     fn new(
         rkv: Arc<RwLock<Rkv>>,
-        store: Store,
+        store: SingleStore,
         thread: ThreadBoundRefPtr<nsIThread>,
     ) -> RefPtr<KeyValueDatabase> {
         KeyValueDatabase::allocate(InitKeyValueDatabase { rkv, store, thread })
@@ -273,19 +273,13 @@ impl KeyValueDatabase {
 #[refcnt = "atomic"]
 pub struct InitKeyValueEnumerator {
     iter: AtomicRefCell<
-        IntoIter<(
-            Result<String, KeyValueError>,
-            Result<OwnedValue, KeyValueError>,
-        )>,
+        IntoIter<Result<(String, OwnedValue), KeyValueError>>,
     >,
 }
 
 impl KeyValueEnumerator {
     fn new(
-        pairs: Vec<(
-            Result<String, KeyValueError>,
-            Result<OwnedValue, KeyValueError>,
-        )>,
+        pairs: Vec<Result<(String, OwnedValue), KeyValueError>>,
     ) -> RefPtr<KeyValueEnumerator> {
         KeyValueEnumerator::allocate(InitKeyValueEnumerator {
             iter: AtomicRefCell::new(pairs.into_iter()),
@@ -302,13 +296,13 @@ impl KeyValueEnumerator {
 
     fn get_next(&self) -> Result<RefPtr<nsIKeyValuePair>, KeyValueError> {
         let mut iter = self.iter.borrow_mut();
-        let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
+        let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))??;
 
         // We fail on retrieval of the key/value pair if the key isn't valid
         // UTF-*, if the value is unexpected, or if we encountered a store error
         // while retrieving the pair.
         Ok(RefPtr::new(
-            KeyValuePair::new(key?, value?).coerce::<nsIKeyValuePair>(),
+            KeyValuePair::new(key, value).coerce::<nsIKeyValuePair>(),
         ))
     }
 }
