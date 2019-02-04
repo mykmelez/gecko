@@ -5,10 +5,16 @@
 "use strict";
 
 const {
+  UPDATE_ADD_RULE_ENABLED,
   UPDATE_RULES,
+  UPDATE_HIGHLIGHTED_SELECTOR,
 } = require("../actions/index");
 
 const INITIAL_RULES = {
+  // The selector of the node that is highlighted by the selector highlighter.
+  highlightedSelector: "",
+  // Whether or not the add new rule button should be enabled.
+  isAddRuleEnabled: false,
   // Array of CSS rules.
   rules: [],
 };
@@ -19,26 +25,33 @@ const INITIAL_RULES = {
  *
  * @param  {TextProperty} declaration
  *         A TextProperty of a rule.
- * @param  {Number} index
- *         The index of the CSS declaration within the declaration block.
+ * @param  {String} ruleId
+ *         The rule id that is associated with the given CSS declaration.
  * @return {Object} containing the properties needed to render a CSS declaration.
  */
-function getDeclarationState(declaration, index) {
+function getDeclarationState(declaration, ruleId) {
   return {
     // Array of the computed properties for a CSS declaration.
     computedProperties: declaration.computedProperties,
     // An unique CSS declaration id.
-    id: `${declaration.name}${declaration.value}${index}`,
+    id: declaration.id,
+    // Whether or not the declaration is valid. (Does it make sense for this value
+    // to be assigned to this property name?)
+    isDeclarationValid: declaration.isValid(),
     // Whether or not the declaration is enabled.
     isEnabled: declaration.enabled,
     // Whether or not the declaration's property name is known.
     isKnownProperty: declaration.isKnownProperty,
+    // Whether or not the property name is valid.
+    isNameValid: declaration.isNameValid(),
     // Whether or not the the declaration is overridden.
     isOverridden: !!declaration.overridden,
     // The declaration's property name.
     name: declaration.name,
     // The declaration's priority (either "important" or an empty string).
     priority: declaration.priority,
+    // The CSS rule id that is associated with this CSS declaration.
+    ruleId,
     // The declaration's property value.
     value: declaration.value,
   };
@@ -54,8 +67,8 @@ function getDeclarationState(declaration, index) {
 function getRuleState(rule) {
   return {
     // Array of CSS declarations.
-    declarations: rule.declarations.map((declaration, i) =>
-      getDeclarationState(declaration, i)),
+    declarations: rule.declarations.map(declaration =>
+      getDeclarationState(declaration, rule.domRule.actorID)),
     // An unique CSS rule id.
     id: rule.domRule.actorID,
     // An object containing information about the CSS rule's inheritance.
@@ -66,6 +79,8 @@ function getRuleState(rule) {
     isUserAgentStyle: rule.isSystem,
     // An object containing information about the CSS keyframes rules.
     keyframesRule: rule.keyframesRule,
+    // The pseudo-element keyword used in the rule.
+    pseudoElement: rule.pseudoElement,
     // An object containing information about the CSS rule's selector.
     selector: rule.selector,
     // An object containing information about the CSS rule's stylesheet source.
@@ -77,9 +92,25 @@ function getRuleState(rule) {
 
 const reducers = {
 
-  [UPDATE_RULES](_, { rules }) {
+  [UPDATE_ADD_RULE_ENABLED](rules, { enabled }) {
     return {
-      rules: rules.map(rule => getRuleState(rule)),
+      ...rules,
+      isAddRuleEnabled: enabled,
+    };
+  },
+
+  [UPDATE_HIGHLIGHTED_SELECTOR](rules, { highlightedSelector }) {
+    return {
+      ...rules,
+      highlightedSelector,
+    };
+  },
+
+  [UPDATE_RULES](rules, { rules: newRules }) {
+    return {
+      highlightedSelector: rules.highlightedSelector,
+      isAddRuleEnabled: rules.isAddRuleEnabled,
+      rules: newRules.map(rule => getRuleState(rule)),
     };
   },
 

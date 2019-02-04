@@ -60,10 +60,10 @@
 #include "nsIBaseWindow.h"
 #include "nsICategoryManager.h"
 #include "nsIContentInlines.h"
-#include "nsIContentIterator.h"
 #include "nsIControllers.h"
 #include "mozilla/dom/Document.h"
 #include "nsIDOMEventListener.h"
+#include "nsIFrameInlines.h"
 #include "nsILinkHandler.h"
 #include "mozilla/dom/NodeInfo.h"
 #include "mozilla/dom/NodeInfoInlines.h"
@@ -111,7 +111,7 @@
 #include "XPathGenerator.h"
 
 #ifdef ACCESSIBILITY
-#include "mozilla/dom/AccessibleNode.h"
+#  include "mozilla/dom/AccessibleNode.h"
 #endif
 
 using namespace mozilla;
@@ -146,10 +146,10 @@ void nsINode::nsSlots::Unlink() {
 nsINode::nsINode(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
     : mNodeInfo(std::move(aNodeInfo)),
       mParent(nullptr)
-#ifndef BOOL_FLAGS_ON_WRAPPER_CACHE
+#  ifndef BOOL_FLAGS_ON_WRAPPER_CACHE
       ,
       mBoolFlags(0)
-#endif
+#  endif
       ,
       mChildCount(0),
       mPreviousOrLastSibling(nullptr),
@@ -2697,6 +2697,29 @@ bool nsINode::HasBoxQuadsSupport(JSContext* aCx, JSObject* /* unused */) {
 }
 
 nsINode* nsINode::GetScopeChainParent() const { return nullptr; }
+
+Element* nsINode::GetParentFlexElement() {
+  if (!IsContent()) {
+    return nullptr;
+  }
+
+  nsIFrame* primaryFrame = AsContent()->GetPrimaryFrame(FlushType::Frames);
+
+  // Walk up the parent chain and pierce through any anonymous boxes
+  // that might be between this frame and a possible flex parent.
+  for (nsIFrame* f = primaryFrame; f; f = f->GetParent()) {
+    if (f != primaryFrame && !f->Style()->IsAnonBox()) {
+      // We hit a non-anonymous ancestor before finding a flex item.
+      // Bail out.
+      break;
+    }
+    if (f->IsFlexItem()) {
+      return f->GetParent()->GetContent()->AsElement();
+    }
+  }
+
+  return nullptr;
+}
 
 void nsINode::AddAnimationObserver(nsIAnimationObserver* aAnimationObserver) {
   AddMutationObserver(aAnimationObserver);

@@ -4,9 +4,9 @@
 
 const XULNS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 ChromeUtils.defineModuleGetter(this, "ActorManagerParent",
                                "resource://gre/modules/ActorManagerParent.jsm");
@@ -92,7 +92,7 @@ let ACTORS = {
     child: {
       module: "resource:///actors/ContentSearchChild.jsm",
       group: "browsers",
-      matches: ["about:home", "about:newtab", "about:welcome",
+      matches: ["about:home", "about:newtab", "about:welcome", "about:privatebrowsing",
                 "chrome://mochitests/content/*"],
       events: {
         "ContentSearchClient": {capture: true, wantUntrusted: true},
@@ -321,7 +321,10 @@ let ACTORS = {
                                    browserWindowFeatures, null);
 
   // Hide the titlebar if the actual browser window will draw in it.
-  if (Services.prefs.getBoolPref("browser.tabs.drawInTitlebar")) {
+  let hiddenTitlebar =
+    Services.prefs.getBoolPref("browser.tabs.drawInTitlebar",
+      win.matchMedia("(-moz-gtk-csd-hide-titlebar-by-default)").matches);
+  if (hiddenTitlebar) {
     win.windowUtils.setChromeMargin(0, 2, 2, 2);
   }
 
@@ -358,7 +361,7 @@ let ACTORS = {
   win.stop();
 
   let { TelemetryTimestamps } =
-    ChromeUtils.import("resource://gre/modules/TelemetryTimestamps.jsm", {});
+    ChromeUtils.import("resource://gre/modules/TelemetryTimestamps.jsm");
   TelemetryTimestamps.add("blankWindowShown");
 })();
 
@@ -384,7 +387,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   Blocklist: "resource://gre/modules/Blocklist.jsm",
   BookmarkHTMLUtils: "resource://gre/modules/BookmarkHTMLUtils.jsm",
   BookmarkJSONUtils: "resource://gre/modules/BookmarkJSONUtils.jsm",
-  BrowserErrorReporter: "resource:///modules/BrowserErrorReporter.jsm",
   BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.jsm",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
   ContentClick: "resource:///modules/ContentClick.jsm",
@@ -593,7 +595,7 @@ function BrowserGlue() {
                                      "nsIIdleService");
 
   XPCOMUtils.defineLazyGetter(this, "_distributionCustomizer", function() {
-                                ChromeUtils.import("resource:///modules/distribution.js");
+                                const {DistributionCustomizer} = ChromeUtils.import("resource:///modules/distribution.js");
                                 return new DistributionCustomizer();
                               });
 
@@ -643,7 +645,7 @@ BrowserGlue.prototype = {
     }
     delay = delay <= MAX_DELAY ? delay : MAX_DELAY;
 
-    ChromeUtils.import("resource://services-sync/main.js");
+    const {Weave} = ChromeUtils.import("resource://services-sync/main.js");
     Weave.Service.scheduler.delayedAutoConnect(delay);
   },
 
@@ -656,16 +658,6 @@ BrowserGlue.prototype = {
       value: new PingCentre({ topic: MAIN_TOPIC_ID }),
     });
     return this.pingCentre;
-  },
-
-  /**
-   * Lazily initialize BrowserErrorReporter
-   */
-  get browserErrorReporter() {
-    Object.defineProperty(this, "browserErrorReporter", {
-      value: new BrowserErrorReporter(),
-    });
-    return this.browserErrorReporter;
   },
 
   _sendMainPingCentrePing() {
@@ -1015,6 +1007,14 @@ BrowserGlue.prototype = {
       PdfJs.earlyInit();
     }
 
+    // Initialize the default l10n resource sources for L10nRegistry.
+    let locales = Services.locale.packagedLocales;
+    const greSource = new FileSource("toolkit", locales, "resource://gre/localization/{locale}/");
+    L10nRegistry.registerSource(greSource);
+
+    const appSource = new FileSource("app", locales, "resource://app/localization/{locale}/");
+    L10nRegistry.registerSource(appSource);
+
     // check if we're in safe mode
     if (Services.appinfo.inSafeMode) {
       Services.ww.openWindow(null, "chrome://browser/content/safeMode.xul",
@@ -1081,14 +1081,6 @@ BrowserGlue.prototype = {
 
     Normandy.init();
 
-    // Initialize the default l10n resource sources for L10nRegistry.
-    let locales = Services.locale.packagedLocales;
-    const greSource = new FileSource("toolkit", locales, "resource://gre/localization/{locale}/");
-    L10nRegistry.registerSource(greSource);
-
-    const appSource = new FileSource("app", locales, "resource://app/localization/{locale}/");
-    L10nRegistry.registerSource(appSource);
-
     SaveToPocket.init();
     Services.obs.notifyObservers(null, "browser-ui-startup-complete");
   },
@@ -1097,7 +1089,6 @@ BrowserGlue.prototype = {
     // check for update if our build is old
     if (AppConstants.MOZ_UPDATER &&
         Services.prefs.getBoolPref("app.update.checkInstallTime")) {
-
       let buildID = Services.appinfo.appBuildID;
       let today = new Date().getTime();
       /* eslint-disable no-multi-spaces */
@@ -1234,7 +1225,7 @@ BrowserGlue.prototype = {
     if (!win)
       return;
 
-    ChromeUtils.import("resource://gre/modules/ResetProfile.jsm");
+    const {ResetProfile} = ChromeUtils.import("resource://gre/modules/ResetProfile.jsm");
     if (!ResetProfile.resetSupported())
       return;
 
@@ -1306,7 +1297,7 @@ BrowserGlue.prototype = {
     let channel = new WebChannel("remote-troubleshooting", "remote-troubleshooting");
     channel.listen((id, data, target) => {
       if (data.command == "request") {
-        let {Troubleshoot} = ChromeUtils.import("resource://gre/modules/Troubleshoot.jsm", {});
+        let {Troubleshoot} = ChromeUtils.import("resource://gre/modules/Troubleshoot.jsm");
         Troubleshoot.snapshot(snapshotData => {
           // for privacy we remove crash IDs and all preferences (but bug 1091944
           // exists to expose prefs once we are confident of privacy implications)
@@ -1377,6 +1368,12 @@ BrowserGlue.prototype = {
     Services.prefs.addObserver("urlclassifier.trackingTable", this._matchCBCategory);
     Services.prefs.addObserver("network.cookie.cookieBehavior", this._matchCBCategory);
     Services.prefs.addObserver(ContentBlockingCategoriesPrefs.PREF_CB_CATEGORY, this._updateCBCategory);
+    Services.prefs.addObserver("media.autoplay.default", this._updateAutoplayPref);
+  },
+
+  _updateAutoplayPref() {
+    let blocked = Services.prefs.getIntPref("media.autoplay.default", 1);
+    Services.telemetry.scalarSet("media.autoplay_default_blocked", blocked);
   },
 
   _matchCBCategory() {
@@ -1455,12 +1452,6 @@ BrowserGlue.prototype = {
     AutoCompletePopup.uninit();
     DateTimePickerParent.uninit();
 
-    // Browser errors are only collected on Nightly, but telemetry for
-    // them is collected on all channels.
-    if (AppConstants.MOZ_DATA_REPORTING) {
-      this.browserErrorReporter.uninit();
-    }
-
     Normandy.uninit();
   },
 
@@ -1496,18 +1487,28 @@ BrowserGlue.prototype = {
     });
   },
 
+  _showNewInstallModal() {
+    // Allow other observers of the same topic to run while we open the dialog.
+    Services.tm.dispatchToMainThread(() => {
+      let win = BrowserWindowTracker.getTopWindow();
+
+      let stack = win.gBrowser.getPanel().querySelector(".browserStack");
+      let mask = win.document.createElementNS(XULNS, "box");
+      mask.setAttribute("id", "content-mask");
+      stack.appendChild(mask);
+
+      Services.ww.openWindow(win, "chrome://browser/content/newInstall.xul",
+                             "_blank", "chrome,modal,resizable=no,centerscreen", null);
+      mask.remove();
+    });
+  },
+
   // All initial windows have opened.
   _onWindowsRestored: function BG__onWindowsRestored() {
     if (this._windowsWereRestored) {
       return;
     }
     this._windowsWereRestored = true;
-
-    // Browser errors are only collected on Nightly, but telemetry for
-    // them is collected on all channels.
-    if (AppConstants.MOZ_DATA_REPORTING) {
-      this.browserErrorReporter.init();
-    }
 
     BrowserUsageTelemetry.init();
     SearchTelemetry.init();
@@ -1556,6 +1557,12 @@ BrowserGlue.prototype = {
 
     this._monitorScreenshotsPref();
     this._monitorWebcompatReporterPref();
+
+    let pService = Cc["@mozilla.org/toolkit/profile-service;1"].
+                  getService(Ci.nsIToolkitProfileService);
+    if (pService.createdAlternateProfile) {
+      this._showNewInstallModal();
+    }
   },
 
   /**
@@ -1591,6 +1598,10 @@ BrowserGlue.prototype = {
         enableCertErrorUITelemetry);
     });
 
+    Services.tm.idleDispatchToMainThread(() => {
+      this._recordContentBlockingTelemetry();
+    });
+
     // Load the Login Manager data from disk off the main thread, some time
     // after startup.  If the data is required before this runs, for example
     // because a restored page contains a password field, it will be loaded on
@@ -1614,7 +1625,7 @@ BrowserGlue.prototype = {
     }
 
     if (AppConstants.ASAN_REPORTER) {
-      ChromeUtils.import("resource:///modules/AsanReporter.jsm");
+      var {AsanReporter} = ChromeUtils.import("resource:///modules/AsanReporter.jsm");
       AsanReporter.init();
     }
 
@@ -1631,18 +1642,12 @@ BrowserGlue.prototype = {
       });
     }
 
-    if (AppConstants.MOZ_DEV_EDITION) {
-      Services.tm.idleDispatchToMainThread(() => {
-        this._createExtraDefaultProfile();
-      });
-    }
-
     Services.tm.idleDispatchToMainThread(() => {
       this._checkForDefaultBrowser();
     });
 
     Services.tm.idleDispatchToMainThread(() => {
-      let {setTimeout} = ChromeUtils.import("resource://gre/modules/Timer.jsm", {});
+      let {setTimeout} = ChromeUtils.import("resource://gre/modules/Timer.jsm");
       setTimeout(function() {
         Services.tm.idleDispatchToMainThread(Services.startup.trackStartupCrashEnd);
       }, STARTUP_CRASHES_END_DELAY_MS);
@@ -1715,40 +1720,6 @@ BrowserGlue.prototype = {
     Services.tm.idleDispatchToMainThread(() => {
       RemoteSettings.init();
     });
-  },
-
-  _createExtraDefaultProfile() {
-    if (!AppConstants.MOZ_DEV_EDITION) {
-      return;
-    }
-    // If Developer Edition is the only installed Firefox version and no other
-    // profiles are present, create a second one for use by other versions.
-    // This helps Firefox versions earlier than 35 avoid accidentally using the
-    // unsuitable Developer Edition profile.
-    let profileService = Cc["@mozilla.org/toolkit/profile-service;1"]
-                         .getService(Ci.nsIToolkitProfileService);
-    let profileCount = profileService.profileCount;
-    if (profileCount == 1 && profileService.selectedProfile.name != "default") {
-      let newProfile;
-      try {
-        newProfile = profileService.createProfile(null, "default");
-        profileService.defaultProfile = newProfile;
-        profileService.flush();
-      } catch (e) {
-        Cu.reportError("Could not create profile 'default': " + e);
-      }
-      if (newProfile) {
-        // We don't want a default profile with Developer Edition settings, an
-        // empty profile directory will do. The profile service of the other
-        // Firefox will populate it with its own stuff.
-        let newProfilePath = newProfile.rootDir.path;
-        OS.File.removeDir(newProfilePath).then(() => {
-          return OS.File.makeDir(newProfilePath);
-        }).catch(e => {
-          Cu.reportError("Could not empty profile 'default': " + e);
-        });
-      }
-    }
   },
 
   _onQuitRequest: function BG__onQuitRequest(aCancelQuit, aQuitType) {
@@ -2094,7 +2065,6 @@ BrowserGlue.prototype = {
           } catch (e) {
             Cu.reportError(e);
           }
-
         } else {
           Cu.reportError(new Error("Unable to find bookmarks.html file."));
         }
@@ -2141,7 +2111,6 @@ BrowserGlue.prototype = {
         }
         this._idleService.addIdleObserver(this, this._bookmarksBackupIdleTime);
       }
-
     })().catch(ex => {
       Cu.reportError(ex);
     }).then(() => {
@@ -2149,10 +2118,6 @@ BrowserGlue.prototype = {
       // we threw halfway through initializing in the Task above.
       this._placesBrowserInitComplete = true;
       Services.obs.notifyObservers(null, "places-browser-init-complete");
-    });
-
-    Services.tm.idleDispatchToMainThread(() => {
-      this._recordContentBlockingTelemetry();
     });
   },
 
@@ -2255,7 +2220,7 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 77;
+    const UI_VERSION = 78;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     let currentUIVersion;
@@ -2594,10 +2559,6 @@ BrowserGlue.prototype = {
       }
     }
 
-    if (currentUIVersion < 74) {
-      Services.prefs.clearUserPref("browser.search.region");
-    }
-
     if (currentUIVersion < 75) {
       // Ensure we try to migrate any live bookmarks the user might have, trying up to
       // 5 times. We set this early, and here, to avoid running the migration on
@@ -2622,6 +2583,10 @@ BrowserGlue.prototype = {
       for (let toolbarId of toolbars) {
         xulStore.removeValue(BROWSER_DOCURL, toolbarId, "currentset");
       }
+    }
+
+    if (currentUIVersion < 78) {
+      Services.prefs.clearUserPref("browser.search.region");
     }
 
     // Update the migration version.
@@ -2743,7 +2708,7 @@ BrowserGlue.prototype = {
     let experiment = null;
     let experimentName = "pref-flip-search-composition-57-release-1413565";
     let {PreferenceExperiments} =
-      ChromeUtils.import("resource://normandy/lib/PreferenceExperiments.jsm", {});
+      ChromeUtils.import("resource://normandy/lib/PreferenceExperiments.jsm");
     try {
       experiment = await PreferenceExperiments.get(experimentName);
     } catch (e) {}
@@ -3224,7 +3189,6 @@ ContentPermissionPrompt.prototype = {
       }
 
       permissionPrompt.prompt();
-
     } catch (ex) {
       Cu.reportError(ex);
       request.cancel();

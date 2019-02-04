@@ -6,6 +6,8 @@
 
 "use strict";
 
+const { generateUUID } = require("devtools/shared/generate-uuid");
+
 loader.lazyRequireGetter(this, "escapeCSSComment", "devtools/shared/css/parsing-utils", true);
 
 /**
@@ -35,6 +37,7 @@ loader.lazyRequireGetter(this, "escapeCSSComment", "devtools/shared/css/parsing-
  */
 function TextProperty(rule, name, value, priority, enabled = true,
                       invisible = false) {
+  this.id = name + "_" + generateUUID().toString();
   this.rule = rule;
   this.name = name;
   this.value = value;
@@ -49,13 +52,16 @@ function TextProperty(rule, name, value, priority, enabled = true,
 
 TextProperty.prototype = {
   get computedProperties() {
-    return this.computed.map(computed => {
-      return {
-        name: computed.name,
-        priority: computed.priority,
-        value: computed.value,
-      };
-    });
+    return this.computed
+      .filter(computed => computed.name !== this.name)
+      .map(computed => {
+        return {
+          isOverridden: computed.overridden,
+          name: computed.name,
+          priority: computed.priority,
+          value: computed.value,
+        };
+      });
   },
 
   /**
@@ -156,15 +162,14 @@ TextProperty.prototype = {
     }
   },
 
-  setName: function(name) {
-    const store = this.rule.elementStyle.store;
-
-    if (name !== this.name) {
+  setName: async function(name) {
+    if (name !== this.name && this.editor) {
+      const store = this.rule.elementStyle.store;
       store.userProperties.setProperty(this.rule.domRule, name,
                                        this.editor.committed.value);
     }
 
-    this.rule.setPropertyName(this, name);
+    await this.rule.setPropertyName(this, name);
     this.updateEditor();
   },
 

@@ -91,7 +91,7 @@ nsXPConnect::~nsXPConnect() {
   // XPConnect, to clean the stuff we forcibly disconnected. The forced
   // shutdown code defaults to leaking in a number of situations, so we can't
   // get by with only the second GC. :-(
-  mRuntime->GarbageCollect(JS::gcreason::XPCONNECT_SHUTDOWN);
+  mRuntime->GarbageCollect(JS::GCReason::XPCONNECT_SHUTDOWN);
 
   mShuttingDown = true;
   XPCWrappedNativeScope::SystemIsBeingShutDown();
@@ -101,7 +101,7 @@ nsXPConnect::~nsXPConnect() {
   // after which point we need to GC to clean everything up. We need to do
   // this before deleting the XPCJSContext, because doing so destroys the
   // maps that our finalize callback depends on.
-  mRuntime->GarbageCollect(JS::gcreason::XPCONNECT_SHUTDOWN);
+  mRuntime->GarbageCollect(JS::GCReason::XPCONNECT_SHUTDOWN);
 
   NS_RELEASE(gSystemPrincipal);
   gScriptSecurityManager = nullptr;
@@ -682,7 +682,8 @@ nsXPConnect::GetWrappedNativeOfJSObject(JSContext* aJSContext,
   MOZ_ASSERT(_retval, "bad param");
 
   RootedObject aJSObj(aJSContext, aJSObjArg);
-  aJSObj = js::CheckedUnwrap(aJSObj, /* stopAtWindowProxy = */ false);
+  aJSObj = js::CheckedUnwrapDynamic(aJSObj, aJSContext,
+                                    /* stopAtWindowProxy = */ false);
   if (!aJSObj || !IS_WN_REFLECTOR(aJSObj)) {
     *_retval = nullptr;
     return NS_ERROR_FAILURE;
@@ -693,10 +694,7 @@ nsXPConnect::GetWrappedNativeOfJSObject(JSContext* aJSContext,
   return NS_OK;
 }
 
-already_AddRefed<nsISupports> xpc::UnwrapReflectorToISupports(
-    JSObject* reflector) {
-  // Unwrap security wrappers, if allowed.
-  reflector = js::CheckedUnwrap(reflector, /* stopAtWindowProxy = */ false);
+static already_AddRefed<nsISupports> ReflectorToISupports(JSObject* reflector) {
   if (!reflector) {
     return nullptr;
   }
@@ -717,6 +715,20 @@ already_AddRefed<nsISupports> xpc::UnwrapReflectorToISupports(
   nsCOMPtr<nsISupports> canonical =
       do_QueryInterface(mozilla::dom::UnwrapDOMObjectToISupports(reflector));
   return canonical.forget();
+}
+
+already_AddRefed<nsISupports> xpc::ReflectorToISupportsStatic(
+    JSObject* reflector) {
+  // Unwrap security wrappers, if allowed.
+  return ReflectorToISupports(js::CheckedUnwrapStatic(reflector));
+}
+
+already_AddRefed<nsISupports> xpc::ReflectorToISupportsDynamic(
+    JSObject* reflector, JSContext* cx) {
+  // Unwrap security wrappers, if allowed.
+  return ReflectorToISupports(
+      js::CheckedUnwrapDynamic(reflector, cx,
+                               /* stopAtWindowProxy = */ false));
 }
 
 NS_IMETHODIMP

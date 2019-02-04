@@ -606,7 +606,7 @@ describe("Reducers", () => {
       assert.propertyVal(state, "version", data.version);
     });
     it("should reset to the initial state on a SNIPPETS_RESET action", () => {
-      const state = Snippets({initalized: true, foo: "bar"}, {type: at.SNIPPETS_RESET});
+      const state = Snippets({initialized: true, foo: "bar"}, {type: at.SNIPPETS_RESET});
       assert.equal(state, INITIAL_STATE.Snippets);
     });
     it("should set the new blocklist on SNIPPET_BLOCKED", () => {
@@ -668,6 +668,28 @@ describe("Reducers", () => {
       const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_CONFIG_CHANGE, data: {enabled: true}});
       assert.deepEqual(state.config, {enabled: true});
     });
+    it("should set spoc_endpoint with DISCOVERY_STREAM_SPOCS_ENDPOINT", () => {
+      const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_SPOCS_ENDPOINT, data: "foo.com"});
+      assert.equal(state.spocs.spocs_endpoint, "foo.com");
+    });
+    it("should set spocs with DISCOVERY_STREAM_SPOCS_UPDATE", () => {
+      const data = {
+        lastUpdated: 123,
+        spocs: [1, 2, 3],
+      };
+      const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_SPOCS_UPDATE, data});
+      assert.deepEqual(state.spocs, {
+        spocs_endpoint: "",
+        data: [1, 2, 3],
+        lastUpdated: 123,
+        loaded: true,
+      });
+    });
+    it("should handle no data from DISCOVERY_STREAM_SPOCS_UPDATE", () => {
+      const data = null;
+      const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_SPOCS_UPDATE, data});
+      assert.deepEqual(state.spocs, INITIAL_STATE.DiscoveryStream.spocs);
+    });
   });
   describe("Search", () => {
     it("should return INITIAL_STATE by default", () => {
@@ -677,13 +699,13 @@ describe("Reducers", () => {
       const nextState = Search(undefined, {type: "HIDE_SEARCH"});
       assert.propertyVal(nextState, "hide", true);
     });
-    it("should set focus to true on FOCUS_SEARCH", () => {
-      const nextState = Search(undefined, {type: "FOCUS_SEARCH"});
-      assert.propertyVal(nextState, "focus", true);
+    it("should set focus to true on FAKE_FOCUS_SEARCH", () => {
+      const nextState = Search(undefined, {type: "FAKE_FOCUS_SEARCH"});
+      assert.propertyVal(nextState, "fakeFocus", true);
     });
     it("should set focus and hide to false on SHOW_SEARCH", () => {
       const nextState = Search(undefined, {type: "SHOW_SEARCH"});
-      assert.propertyVal(nextState, "focus", false);
+      assert.propertyVal(nextState, "fakeFocus", false);
       assert.propertyVal(nextState, "hide", false);
     });
   });

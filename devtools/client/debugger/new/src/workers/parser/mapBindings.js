@@ -4,7 +4,7 @@
 
 // @flow
 
-import { parseConsoleScript } from "./utils/ast";
+import { replaceNode } from "./utils/ast";
 import { isTopLevel } from "./utils/helpers";
 
 import generate from "@babel/generator";
@@ -76,26 +76,11 @@ function globalizeAssignment(node, bindings) {
   );
 }
 
-function replaceNode(ancestors, node) {
-  const parent = ancestors[ancestors.length - 1];
-
-  if (typeof parent.index === "number") {
-    if (Array.isArray(node)) {
-      parent.node[parent.key].splice(parent.index, 1, ...node);
-    } else {
-      parent.node[parent.key][parent.index] = node;
-    }
-  } else {
-    parent.node[parent.key] = node;
-  }
-}
-
 export default function mapExpressionBindings(
   expression: string,
+  ast?: Object,
   bindings: string[] = []
 ): string {
-  const ast = parseConsoleScript(expression);
-
   let isMapped = false;
   let shouldUpdate = true;
 

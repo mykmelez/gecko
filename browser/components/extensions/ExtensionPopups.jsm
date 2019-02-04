@@ -6,7 +6,7 @@
 
 var EXPORTED_SYMBOLS = ["BasePopup", "PanelPopup", "ViewPopup"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "CustomizableUI",
                                "resource:///modules/CustomizableUI.jsm");
@@ -17,9 +17,9 @@ ChromeUtils.defineModuleGetter(this, "ExtensionParent",
 ChromeUtils.defineModuleGetter(this, "setTimeout",
                                "resource://gre/modules/Timer.jsm");
 
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/ExtensionCommon.jsm");
-ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {ExtensionCommon} = ChromeUtils.import("resource://gre/modules/ExtensionCommon.jsm");
+const {ExtensionUtils} = ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
 
 var {
   DefaultWeakMap,
@@ -335,6 +335,9 @@ class BasePopup {
 
   unblockParser() {
     this.browserReady.then(browser => {
+      if (this.destroyed) {
+        return;
+      }
       this.browser.messageManager.sendAsyncMessage("Extension:UnblockParser");
     });
   }
@@ -489,6 +492,9 @@ class ViewPopup extends BasePopup {
    *        should be closed, or `true` otherwise.
    */
   async attach(viewNode) {
+    if (this.destroyed) {
+      return false;
+    }
     this.viewNode.removeEventListener(this.DESTROY_EVENT, this);
     this.panel.removeEventListener("popuppositioned", this, {once: true, capture: true});
 

@@ -271,7 +271,7 @@ class Nursery {
   static const size_t MaxNurseryBufferSize = 1024;
 
   /* Do a minor collection. */
-  void collect(JS::gcreason::Reason reason);
+  void collect(JS::GCReason reason);
 
   /*
    * If the thing at |*ref| in the Nursery has been forwarded, set |*ref| to
@@ -312,8 +312,7 @@ class Nursery {
   }
   size_t sizeOfMallocedBuffers(mozilla::MallocSizeOf mallocSizeOf) const {
     size_t total = 0;
-    for (BufferSet::Range r = mallocedBuffers.all(); !r.empty();
-         r.popFront()) {
+    for (BufferSet::Range r = mallocedBuffers.all(); !r.empty(); r.popFront()) {
       total += mallocSizeOf(r.front());
     }
     total += mallocedBuffers.shallowSizeOfExcludingThis(mallocSizeOf);
@@ -353,16 +352,14 @@ class Nursery {
     return (void*)&currentStringEnd_;
   }
 
-  void requestMinorGC(JS::gcreason::Reason reason) const;
+  void requestMinorGC(JS::GCReason reason) const;
 
   bool minorGCRequested() const {
-    return minorGCTriggerReason_ != JS::gcreason::NO_REASON;
+    return minorGCTriggerReason_ != JS::GCReason::NO_REASON;
   }
-  JS::gcreason::Reason minorGCTriggerReason() const {
-    return minorGCTriggerReason_;
-  }
+  JS::GCReason minorGCTriggerReason() const { return minorGCTriggerReason_; }
   void clearMinorGCRequest() {
-    minorGCTriggerReason_ = JS::gcreason::NO_REASON;
+    minorGCTriggerReason_ = JS::GCReason::NO_REASON;
   }
 
   bool needIdleTimeCollection() const;
@@ -443,7 +440,7 @@ class Nursery {
    * mutable as it is set by the store buffer, which otherwise cannot modify
    * anything in the nursery.
    */
-  mutable JS::gcreason::Reason minorGCTriggerReason_;
+  mutable JS::GCReason minorGCTriggerReason_;
 
   /* Profiling data. */
 
@@ -466,7 +463,7 @@ class Nursery {
   ProfileDurations totalDurations_;
 
   struct {
-    JS::gcreason::Reason reason = JS::gcreason::NO_REASON;
+    JS::GCReason reason = JS::GCReason::NO_REASON;
     size_t nurseryCapacity = 0;
     size_t nurseryLazyCapacity = 0;
     size_t nurseryUsedBytes = 0;
@@ -563,8 +560,7 @@ class Nursery {
   /* Common internal allocator function. */
   void* allocate(size_t size);
 
-  void doCollection(JS::gcreason::Reason reason,
-                    gc::TenureCountCache& tenureCounts);
+  void doCollection(JS::GCReason reason, gc::TenureCountCache& tenureCounts);
 
   /*
    * Move the object at |src| in the Nursery to an already-allocated cell
@@ -601,8 +597,8 @@ class Nursery {
   void sweepMapAndSetObjects();
 
   /* Change the allocable space provided by the nursery. */
-  void maybeResizeNursery(JS::gcreason::Reason reason);
-  void growAllocableSpace();
+  void maybeResizeNursery(JS::GCReason reason);
+  void growAllocableSpace(unsigned newCount);
   void shrinkAllocableSpace(unsigned newCount);
   void minimizeAllocableSpace();
 

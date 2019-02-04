@@ -13,6 +13,9 @@ const { render, unmountComponentAtNode } =
 const Provider =
   createFactory(require("devtools/client/shared/vendor/react-redux").Provider);
 
+const FluentReact = require("devtools/client/shared/vendor/fluent-react");
+const LocalizationProvider = createFactory(FluentReact.LocalizationProvider);
+
 const actions = require("./src/actions/index");
 const { configureStore } = require("./src/create-store");
 const {
@@ -52,19 +55,25 @@ const AboutDebugging = {
     this.store = configureStore();
     this.actions = bindActionCreators(actions, this.store.dispatch);
 
+    const width = this.getRoundedViewportWidth();
+    this.actions.recordTelemetryEvent("open_adbg", { width });
+
     await l10n.init();
+
+    this.actions.createThisFirefoxRuntime();
 
     render(
       Provider(
         {
           store: this.store,
         },
-        Router(
-          {},
-          App(
-            {
-              fluentBundles: l10n.getBundles(),
-            }
+        LocalizationProvider(
+          { messages: l10n.getBundles() },
+          Router(
+            {},
+            App(
+              {}
+            )
           )
         )
       ),
@@ -98,10 +107,11 @@ const AboutDebugging = {
   },
 
   async destroy() {
-    const state = this.store.getState();
-
+    const width = this.getRoundedViewportWidth();
+    this.actions.recordTelemetryEvent("close_adbg", { width });
     l10n.destroy();
 
+    const state = this.store.getState();
     const currentRuntimeId = state.runtimes.selectedRuntimeId;
     if (currentRuntimeId) {
       await this.actions.unwatchRuntime(currentRuntimeId);
@@ -119,6 +129,13 @@ const AboutDebugging = {
 
   get mount() {
     return document.getElementById("mount");
+  },
+
+  /**
+   * Computed viewport width, rounded at 50px. Used for telemetry events.
+   */
+  getRoundedViewportWidth() {
+    return Math.ceil(window.outerWidth / 50) * 50;
   },
 };
 

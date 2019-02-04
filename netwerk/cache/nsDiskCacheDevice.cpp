@@ -13,9 +13,9 @@
 
 // include files for ftruncate (or equivalent)
 #if defined(XP_UNIX)
-#include <unistd.h>
+#  include <unistd.h>
 #elif defined(XP_WIN)
-#include <windows.h>
+#  include <windows.h>
 #else
 // XXX add necessary include file for ftruncate (or equivalent)
 #endif
@@ -938,7 +938,6 @@ nsresult nsDiskCacheDevice::OpenDiskCache() {
 
   // if we don't have a cache directory, create one and open it
   if (!exists) {
-    nsCacheService::MarkStartingFresh();
     rv = mCacheDirectory->Create(nsIFile::DIRECTORY_TYPE, 0777);
     CACHE_LOG_PATH(LogLevel::Info, "\ncreate cache directory: %s\n",
                    mCacheDirectory);

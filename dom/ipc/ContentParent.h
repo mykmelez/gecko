@@ -302,6 +302,9 @@ class ContentParent final : public PContentParent,
       const uint32_t& aPluginId, nsresult* aRv,
       Endpoint<PPluginModuleParent>* aEndpoint) override;
 
+  virtual mozilla::ipc::IPCResult RecvLaunchRDDProcess(
+      nsresult* aRv, Endpoint<PRemoteDecoderManagerChild>* aEndpoint) override;
+
   virtual mozilla::ipc::IPCResult RecvUngrabPointer(
       const uint32_t& aTime) override;
 
@@ -555,11 +558,10 @@ class ContentParent final : public PContentParent,
 
   // PURLClassifierParent.
   virtual PURLClassifierParent* AllocPURLClassifierParent(
-      const Principal& aPrincipal, const bool& aUseTrackingProtection,
-      bool* aSuccess) override;
+      const Principal& aPrincipal, bool* aSuccess) override;
   virtual mozilla::ipc::IPCResult RecvPURLClassifierConstructor(
       PURLClassifierParent* aActor, const Principal& aPrincipal,
-      const bool& aUseTrackingProtection, bool* aSuccess) override;
+      bool* aSuccess) override;
 
   // PURLClassifierLocalParent.
   virtual PURLClassifierLocalParent* AllocPURLClassifierLocalParent(
@@ -642,6 +644,9 @@ class ContentParent final : public PContentParent,
   virtual mozilla::ipc::IPCResult RecvWindowPostMessage(
       const BrowsingContextId& aContextId, const ClonedMessageData& aMessage,
       const PostMessageData& aData) override;
+
+  virtual mozilla::ipc::IPCResult RecvSetUserGestureActivation(
+      const BrowsingContextId& aContextId, const bool& aNewValue) override;
 
  protected:
   void OnChannelConnected(int32_t pid) override;
@@ -1145,6 +1150,10 @@ class ContentParent final : public PContentParent,
 
   virtual mozilla::ipc::IPCResult RecvNotifyPushSubscriptionChangeObservers(
       const nsCString& aScope, const IPC::Principal& aPrincipal) override;
+
+  virtual mozilla::ipc::IPCResult RecvPushError(
+      const nsCString& aScope, const IPC::Principal& aPrincipal,
+      const nsString& aMessage, const uint32_t& aFlags) override;
 
   virtual mozilla::ipc::IPCResult RecvNotifyPushSubscriptionModifiedObservers(
       const nsCString& aScope, const IPC::Principal& aPrincipal) override;

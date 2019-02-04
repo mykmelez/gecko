@@ -2,7 +2,6 @@
    http://creativecommons.org/publicdomain/zero/1.0/
 */
 
-ChromeUtils.import("resource://services-common/utils.js");
 ChromeUtils.import("resource://testing-common/ContentTaskUtils.jsm", this);
 
 const MESSAGE_CHILD_TEST_DONE = "ChildTest:Done";
@@ -45,6 +44,7 @@ add_task(async function test_setup() {
   do_get_profile(true);
   loadAddonManager(APP_ID, APP_NAME, APP_VERSION, PLATFORM_VERSION);
   finishAddonManagerStartup();
+  fakeIntlReady();
   await TelemetryController.testSetup();
   // Make sure we don't generate unexpected pings due to pref changes.
   await setEmptyPrefWatchlist();

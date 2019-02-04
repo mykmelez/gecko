@@ -164,7 +164,8 @@ void LayerManager::PayloadPresented() {
             "Payload Presented, type: %d latency: %dms\n",
             int32_t(payload.mType),
             int32_t((presented - payload.mTimeStamp).ToMilliseconds()));
-        profiler_add_marker(marker.get());
+        profiler_add_marker(marker.get(),
+                            js::ProfilingStackFrame::Category::GRAPHICS);
       }
 #endif
 
@@ -1716,6 +1717,11 @@ void Layer::PrintInfo(std::stringstream& aStream, const char* aPrefix) {
   }
   if (Is3DContextLeaf()) {
     aStream << " [is3DContextLeaf]";
+  }
+  if (Maybe<FrameMetrics::ViewID> viewId = IsAsyncZoomContainer()) {
+    aStream << nsPrintfCString(" [asyncZoomContainer scrollId=%" PRIu64 "]",
+                               *viewId)
+                   .get();
   }
   if (IsScrollbarContainer()) {
     aStream << " [scrollbar]";

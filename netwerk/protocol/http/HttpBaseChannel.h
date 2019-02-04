@@ -219,6 +219,8 @@ class HttpBaseChannel : public nsHashPropertyBag,
   NS_IMETHOD GetResponseStatusText(nsACString &aValue) override;
   NS_IMETHOD GetRequestSucceeded(bool *aValue) override;
   NS_IMETHOD RedirectTo(nsIURI *newURI) override;
+  NS_IMETHOD SwitchProcessTo(mozilla::dom::Promise *aTabParent,
+                             uint64_t aIdentifier) override;
   NS_IMETHOD UpgradeToSecure() override;
   NS_IMETHOD GetRequestContextID(uint64_t *aRCID) override;
   NS_IMETHOD GetTransferSize(uint64_t *aTransferSize) override;
@@ -305,7 +307,7 @@ class HttpBaseChannel : public nsHashPropertyBag,
   NS_IMETHOD SetLastRedirectFlags(uint32_t aValue) override;
   NS_IMETHOD GetNavigationStartTimeStamp(TimeStamp *aTimeStamp) override;
   NS_IMETHOD SetNavigationStartTimeStamp(TimeStamp aTimeStamp) override;
-  NS_IMETHOD CancelForTrackingProtection() override;
+  NS_IMETHOD CancelByChannelClassifier(nsresult aErrorCode) override;
   virtual void SetIPv4Disabled(void) override;
   virtual void SetIPv6Disabled(void) override;
 
@@ -451,6 +453,8 @@ class HttpBaseChannel : public nsHashPropertyBag,
   }
 
  protected:
+  nsresult GetTopWindowURI(nsIURI *aURIBeingLoaded, nsIURI **aTopWindowURI);
+
   // Handle notifying listener, removing from loadgroup if request failed.
   void DoNotifyListener();
   virtual void DoNotifyListenerCleanup() = 0;
@@ -793,7 +797,8 @@ NS_DEFINE_STATIC_IID_ACCESSOR(HttpBaseChannel, HTTP_BASE_CHANNEL_IID)
 template <class T>
 class HttpAsyncAborter {
  public:
-  explicit HttpAsyncAborter(T *derived) : mThis(derived), mCallOnResume(0) {}
+  explicit HttpAsyncAborter(T *derived)
+      : mThis(derived), mCallOnResume(nullptr) {}
 
   // Aborts channel: calls OnStart/Stop with provided status, removes channel
   // from loadGroup.
@@ -813,7 +818,7 @@ class HttpAsyncAborter {
 
  protected:
   // Function to be called at resume time
-  void (T::*mCallOnResume)(void);
+  std::function<nsresult(T *)> mCallOnResume;
 };
 
 template <class T>
@@ -838,7 +843,10 @@ inline void HttpAsyncAborter<T>::HandleAsyncAbort() {
     MOZ_LOG(
         gHttpLog, LogLevel::Debug,
         ("Waiting until resume to do async notification [this=%p]\n", mThis));
-    mCallOnResume = &T::HandleAsyncAbort;
+    mCallOnResume = [](T *self) {
+      self->HandleAsyncAbort();
+      return NS_OK;
+    };
     return;
   }
 

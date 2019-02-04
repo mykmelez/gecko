@@ -196,15 +196,18 @@ fn write_reference_frame(
     properties: &SceneProperties,
     clip_id_mapper: &mut ClipIdMapper,
 ) {
+    // FIXME: This ignores the scrolling_relative_to member in
+    // ReferenceFrameKind::Perspective, but it's a bit annoying to fix since the
+    // frame reader abuses `ExternalScrollId`s.
+
     matrix4d_node(
         parent,
-        "transform",
+        match reference_frame.kind {
+            ReferenceFrameKind::Transform => "transform",
+            ReferenceFrameKind::Perspective { .. } => "perspective",
+        },
         &properties.resolve_layout_transform(&reference_frame.transform)
     );
-
-    if let Some(perspective) = reference_frame.perspective {
-        matrix4d_node(parent, "perspective", &perspective);
-    }
 
     usize_node(parent, "id", clip_id_mapper.add_spatial_id(reference_frame.id));
 }
@@ -269,19 +272,6 @@ fn write_stacking_context(
     yaml_node(parent, "filters", Yaml::Array(filters));
 }
 
-#[cfg(target_os = "windows")]
-fn native_font_handle_to_yaml(
-    _rsrc: &mut ResourceGenerator,
-    handle: &NativeFontHandle,
-    parent: &mut yaml_rust::yaml::Hash,
-    _: &mut Option<PathBuf>,
-) {
-    str_node(parent, "family", &handle.family_name);
-    u32_node(parent, "weight", handle.weight.to_u32());
-    u32_node(parent, "style", handle.style.to_u32());
-    u32_node(parent, "stretch", handle.stretch.to_u32());
-}
-
 #[cfg(target_os = "macos")]
 fn native_font_handle_to_yaml(
     rsrc: &mut ResourceGenerator,
@@ -308,14 +298,17 @@ fn native_font_handle_to_yaml(
     path_node(parent, "font", &path);
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(target_os = "macos"))]
 fn native_font_handle_to_yaml(
     _rsrc: &mut ResourceGenerator,
     handle: &NativeFontHandle,
     parent: &mut yaml_rust::yaml::Hash,
     _: &mut Option<PathBuf>,
 ) {
-    str_node(parent, "font", &handle.pathname);
+    str_node(parent, "font", handle.path.as_os_str().to_str().unwrap());
+    if handle.index != 0 {
+        u32_node(parent, "font-index", handle.index);
+    }
 }
 
 fn radial_gradient_to_yaml(

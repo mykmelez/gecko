@@ -16,11 +16,11 @@
 #include "mozilla/layers/SynchronousTask.h"
 #include "TextDrawTarget.h"
 
+// clang-format off
 #define WRDL_LOG(...)
-
 //#define WRDL_LOG(...) printf_stderr("WRDL(%p): " __VA_ARGS__)
-
 //#define WRDL_LOG(...) if (XRE_IsContentProcess()) printf_stderr("WRDL(%p): " __VA_ARGS__)
+// clang-format on
 
 namespace mozilla {
 namespace wr {
@@ -672,35 +672,24 @@ void DisplayListBuilder::Finalize(wr::LayoutSize& aOutContentSize,
 }
 
 Maybe<wr::WrSpatialId> DisplayListBuilder::PushStackingContext(
-    const wr::LayoutRect& aBounds, const wr::WrClipId* aClipNodeId,
-    const WrAnimationProperty* aAnimation, const float* aOpacity,
-    const gfx::Matrix4x4* aTransform, wr::TransformStyle aTransformStyle,
-    const gfx::Matrix4x4* aPerspective, const wr::MixBlendMode& aMixBlendMode,
-    const nsTArray<wr::WrFilterOp>& aFilters, bool aIsBackfaceVisible,
+    const wr::StackingContextParams& aParams, const wr::LayoutRect& aBounds,
     const wr::RasterSpace& aRasterSpace) {
   MOZ_ASSERT(mClipChainLeaf.isNothing(),
              "Non-empty leaf from clip chain given, but not used with SC!");
 
   wr::LayoutTransform matrix;
-  if (aTransform) {
-    matrix = ToLayoutTransform(*aTransform);
+  const gfx::Matrix4x4* transform = aParams.mTransformPtr;
+  if (transform) {
+    matrix = ToLayoutTransform(*transform);
   }
-  const wr::LayoutTransform* maybeTransform = aTransform ? &matrix : nullptr;
-  wr::LayoutTransform perspective;
-  if (aPerspective) {
-    perspective = ToLayoutTransform(*aPerspective);
-  }
-
-  const wr::LayoutTransform* maybePerspective =
-      aPerspective ? &perspective : nullptr;
+  const wr::LayoutTransform* maybeTransform = transform ? &matrix : nullptr;
   WRDL_LOG("PushStackingContext b=%s t=%s\n", mWrState,
            Stringify(aBounds).c_str(),
-           aTransform ? Stringify(*aTransform).c_str() : "none");
+           transform ? Stringify(*transform).c_str() : "none");
 
   auto spatialId = wr_dp_push_stacking_context(
-      mWrState, aBounds, mCurrentSpaceAndClipChain.space, aClipNodeId,
-      aAnimation, aOpacity, maybeTransform, aTransformStyle, maybePerspective,
-      aMixBlendMode, aFilters.Elements(), aFilters.Length(), aIsBackfaceVisible,
+      mWrState, aBounds, mCurrentSpaceAndClipChain.space, &aParams,
+      maybeTransform, aParams.mFilters.Elements(), aParams.mFilters.Length(),
       aRasterSpace);
 
   return spatialId.id != 0 ? Some(spatialId) : Nothing();
@@ -796,11 +785,14 @@ wr::WrSpaceAndClip DisplayListBuilder::DefineScrollLayer(
     return it->second;
   }
 
-  auto rootSpaceAndClip = wr::RootScrollNode();
   // We haven't defined aViewId before, so let's define it now.
+  wr::WrSpaceAndClip defaultParent = wr::RootScrollNode();
+  // Note: we are currently ignoring the clipId on the stack here
+  defaultParent.space = mCurrentSpaceAndClipChain.space;
+
   auto spaceAndClip = wr_dp_define_scroll_layer(
-      mWrState, aViewId, aParent ? aParent.ptr() : &rootSpaceAndClip,
-      aContentRect, aClipRect);
+      mWrState, aViewId, aParent ? aParent.ptr() : &defaultParent, aContentRect,
+      aClipRect);
 
   WRDL_LOG("DefineScrollLayer id=%" PRIu64 "/%zu p=%s co=%s cl=%s\n", mWrState,
            aViewId, spaceAndClip.space.id,

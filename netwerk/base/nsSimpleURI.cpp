@@ -18,7 +18,6 @@
 #include "nsIObjectOutputStream.h"
 #include "nsEscape.h"
 #include "nsError.h"
-#include "nsIIPCSerializableURI.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "nsIURIMutator.h"
@@ -51,8 +50,7 @@ nsSimpleURI::nsSimpleURI() : mIsRefValid(false), mIsQueryValid(false) {}
 NS_IMPL_ADDREF(nsSimpleURI)
 NS_IMPL_RELEASE(nsSimpleURI)
 NS_INTERFACE_TABLE_HEAD(nsSimpleURI)
-  NS_INTERFACE_TABLE(nsSimpleURI, nsIURI, nsISerializable, nsIClassInfo,
-                     nsIIPCSerializableURI)
+  NS_INTERFACE_TABLE(nsSimpleURI, nsIURI, nsISerializable, nsIClassInfo)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE
   if (aIID.Equals(kThisSimpleURIImplementationCID))
     foundInterface = static_cast<nsIURI *>(this);
@@ -141,9 +139,6 @@ nsSimpleURI::Write(nsIObjectOutputStream *aStream) {
 
   return NS_OK;
 }
-
-////////////////////////////////////////////////////////////////////////////////
-// nsIIPCSerializableURI methods:
 
 void nsSimpleURI::Serialize(URIParams &aParams) {
   SimpleURIParams params;
@@ -523,8 +518,11 @@ bool nsSimpleURI::EqualsInternal(nsSimpleURI *otherUri,
 
 NS_IMETHODIMP
 nsSimpleURI::SchemeIs(const char *i_Scheme, bool *o_Equals) {
-  NS_ENSURE_ARG_POINTER(o_Equals);
-  if (!i_Scheme) return NS_ERROR_NULL_POINTER;
+  MOZ_ASSERT(o_Equals, "null pointer");
+  if (!i_Scheme) {
+    *o_Equals = false;
+    return NS_OK;
+  }
 
   const char *this_scheme = mScheme.get();
 

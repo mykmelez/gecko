@@ -153,6 +153,7 @@ AudioContext::AudioContext(nsPIDOMWindowInner* aWindow, bool aIsOffline,
       mSuspendCalled(false),
       mIsDisconnecting(false),
       mWasAllowedToStart(true),
+      mSuspendedByContent(false),
       mWasEverAllowedToStart(false),
       mWasEverBlockedToStart(false),
       mWouldBeAllowedToStart(true) {
@@ -161,6 +162,14 @@ AudioContext::AudioContext(nsPIDOMWindowInner* aWindow, bool aIsOffline,
   // Note: AudioDestinationNode needs an AudioContext that must already be
   // bound to the window.
   const bool allowedToStart = AutoplayPolicy::IsAllowedToPlay(*this);
+  // If an AudioContext is not allowed to start, we would postpone its state
+  // transition from `suspended` to `running` until sites explicitly call
+  // AudioContext.resume() or AudioScheduledSourceNode.start().
+  if (!allowedToStart) {
+    AUTOPLAY_LOG("AudioContext %p is not allowed to start", this);
+    mSuspendCalled = true;
+    ReportBlocked();
+  }
   mDestination = new AudioDestinationNode(this, aIsOffline, allowedToStart,
                                           aNumberOfChannels, aLength);
 
@@ -169,21 +178,12 @@ AudioContext::AudioContext(nsPIDOMWindowInner* aWindow, bool aIsOffline,
     Mute();
   }
 
-  // If an AudioContext is not allowed to start, we would postpone its state
-  // transition from `suspended` to `running` until sites explicitly call
-  // AudioContext.resume() or AudioScheduledSourceNode.start().
-  if (!allowedToStart) {
-    AUTOPLAY_LOG("AudioContext %p is not allowed to start", this);
-    SuspendInternal(nullptr);
-    ReportBlocked();
-  }
-
   UpdateAutoplayAssumptionStatus();
 
   FFTBlock::MainThreadInit();
 }
 
-void AudioContext::NotifyScheduledSourceNodeStarted() {
+void AudioContext::StartBlockedAudioContextIfAllowed() {
   MOZ_ASSERT(NS_IsMainThread());
   MaybeUpdateAutoplayTelemetry();
   // Only try to start AudioContext when AudioContext was not allowed to start.
@@ -194,7 +194,11 @@ void AudioContext::NotifyScheduledSourceNodeStarted() {
   const bool isAllowedToPlay = AutoplayPolicy::IsAllowedToPlay(*this);
   AUTOPLAY_LOG("Trying to start AudioContext %p, IsAllowedToPlay=%d", this,
                isAllowedToPlay);
-  if (isAllowedToPlay) {
+
+  // Only start the AudioContext if this resume() call was initiated by content,
+  // not if it was a result of the AudioContext starting after having been
+  // blocked because of the auto-play policy.
+  if (isAllowedToPlay && !mSuspendedByContent) {
     ResumeInternal();
   } else {
     ReportBlocked();
@@ -541,7 +545,8 @@ already_AddRefed<Promise> AudioContext::DecodeAudioData(
   jsapi.Init();
   JSContext* cx = jsapi.cx();
 
-  JS::Rooted<JSObject*> obj(cx, js::CheckedUnwrap(aBuffer.Obj()));
+  // CheckedUnwrapStatic is OK, since we know we have an ArrayBuffer.
+  JS::Rooted<JSObject*> obj(cx, js::CheckedUnwrapStatic(aBuffer.Obj()));
   if (!obj) {
     aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return nullptr;
@@ -823,8 +828,8 @@ void AudioContext::OnStateChanged(void* aPromise, AudioContextState aNewState) {
   }
 
 #ifndef WIN32  // Bug 1170547
-#ifndef XP_MACOSX
-#ifdef DEBUG
+#  ifndef XP_MACOSX
+#    ifdef DEBUG
 
   if (!((mAudioContextState == AudioContextState::Suspended &&
          aNewState == AudioContextState::Running) ||
@@ -841,9 +846,9 @@ void AudioContext::OnStateChanged(void* aPromise, AudioContextState aNewState) {
     MOZ_ASSERT(false);
   }
 
-#endif  // DEBUG
-#endif  // XP_MACOSX
-#endif  // WIN32
+#    endif  // DEBUG
+#  endif    // XP_MACOSX
+#endif      // WIN32
 
   if (aPromise) {
     Promise* promise = reinterpret_cast<Promise*>(aPromise);
@@ -903,9 +908,19 @@ already_AddRefed<Promise> AudioContext::Suspend(ErrorResult& aRv) {
     return promise.forget();
   }
 
+  mSuspendedByContent = true;
   mPromiseGripArray.AppendElement(promise);
   SuspendInternal(promise);
   return promise.forget();
+}
+
+void AudioContext::SuspendFromChrome() {
+  // Not support suspend call for these situations.
+  if (mAudioContextState == AudioContextState::Suspended || mIsOffline ||
+      (mAudioContextState == AudioContextState::Closed || mCloseCalled)) {
+    return;
+  }
+  SuspendInternal(nullptr);
 }
 
 void AudioContext::SuspendInternal(void* aPromise) {
@@ -923,6 +938,15 @@ void AudioContext::SuspendInternal(void* aPromise) {
                                       AudioContextOperation::Suspend, aPromise);
 
   mSuspendCalled = true;
+}
+
+void AudioContext::ResumeFromChrome() {
+  // Not support resume call for these situations.
+  if (mAudioContextState == AudioContextState::Running || mIsOffline ||
+      (mAudioContextState == AudioContextState::Closed || mCloseCalled)) {
+    return;
+  }
+  ResumeInternal();
 }
 
 already_AddRefed<Promise> AudioContext::Resume(ErrorResult& aRv) {
@@ -943,6 +967,7 @@ already_AddRefed<Promise> AudioContext::Resume(ErrorResult& aRv) {
     return promise.forget();
   }
 
+  mSuspendedByContent = false;
   mPendingResumePromises.AppendElement(promise);
 
   const bool isAllowedToPlay = AutoplayPolicy::IsAllowedToPlay(*this);
@@ -1018,7 +1043,8 @@ void AudioContext::MaybeUpdateAutoplayTelemetryWhenShutdown() {
 }
 
 void AudioContext::ReportBlocked() {
-  ReportToConsole(nsIScriptError::warningFlag, "BlockAutoplayWebAudioError");
+  ReportToConsole(nsIScriptError::warningFlag,
+                  "BlockAutoplayWebAudioStartError");
   mWasAllowedToStart = false;
 
   if (!StaticPrefs::MediaBlockEventEnabled()) {

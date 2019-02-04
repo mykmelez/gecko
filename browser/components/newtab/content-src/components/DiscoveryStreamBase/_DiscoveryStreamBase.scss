@@ -1,16 +1,33 @@
-.discovery-stream.layout {
+.discovery-stream.ds-layout {
   $columns: 12;
+  --gridColumnGap: 48px;
+  --gridRowGap: 24px;
   display: grid;
   grid-template-columns: repeat($columns, 1fr);
-  grid-column-gap: 10px;
-  grid-row-gap: 10px;
+  grid-column-gap: var(--gridColumnGap);
+  grid-row-gap: var(--gridRowGap);
+  width: 936px;
+  margin: 0 auto;
 
   @while $columns > 0 {
-    .column-#{$columns} {
+    .ds-column-#{$columns} {
       grid-column-start: auto;
       grid-column-end: span $columns;
     }
 
     $columns: $columns - 1;
   }
+
+  .ds-column-grid {
+    display: grid;
+    grid-row-gap: var(--gridRowGap);
+  }
+}
+
+.ds-header {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 24px;
+  color: $grey-90;
+  margin: 16px 0;
 }

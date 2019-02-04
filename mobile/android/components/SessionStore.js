@@ -3,13 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   EventDispatcher: "resource://gre/modules/Messaging.jsm",
-  FormData: "resource://gre/modules/FormData.jsm",
   OS: "resource://gre/modules/osfile.jsm",
   PrivacyFilter: "resource://gre/modules/sessionstore/PrivacyFilter.jsm",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
@@ -19,9 +18,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 });
 
 XPCOMUtils.defineLazyModuleGetter(this, "Log", "resource://gre/modules/AndroidLog.jsm", "AndroidLog");
-
-const ssu = Cc["@mozilla.org/browser/sessionstore/utils;1"]
-              .getService(Ci.nsISessionStoreUtils);
 
 function dump(a) {
   Services.console.logStringMessage(a);
@@ -546,8 +542,8 @@ SessionStore.prototype = {
         }
         break;
       }
-      case "resize":
-      case "scroll": {
+      case "mozvisualresize":
+      case "mozvisualscroll": {
         let browser = aEvent.currentTarget;
         // Duplicated logging check to avoid calling getTabForBrowser on each scroll event.
         if (loggingEnabled) {
@@ -650,8 +646,10 @@ SessionStore.prototype = {
     aBrowser.addEventListener("DOMAutoComplete", this, true);
 
     // Record the current scroll position and zoom level.
-    aBrowser.addEventListener("scroll", this, true);
-    aBrowser.addEventListener("resize", this, true);
+    aBrowser.addEventListener("mozvisualscroll", this,
+                              { capture: true, mozSystemGroup: true });
+    aBrowser.addEventListener("mozvisualresize", this,
+                              { capture: true, mozSystemGroup: true });
 
     log("onTabAdd() ran for tab " + aWindow.BrowserApp.getTabForBrowser(aBrowser).id +
         ", aNoNotification = " + aNoNotification);
@@ -676,8 +674,10 @@ SessionStore.prototype = {
     aBrowser.removeEventListener("AboutReaderContentReady", this, true);
     aBrowser.removeEventListener("input", this, true);
     aBrowser.removeEventListener("DOMAutoComplete", this, true);
-    aBrowser.removeEventListener("scroll", this, true);
-    aBrowser.removeEventListener("resize", this, true);
+    aBrowser.removeEventListener("mozvisualscroll", this,
+                                 { capture: true, mozSystemGroup: true });
+    aBrowser.removeEventListener("mozvisualresize", this,
+                                 { capture: true, mozSystemGroup: true });
 
     if (aBrowser.__SS_historyChange) {
       aWindow.clearTimeout(aBrowser.__SS_historyChange);
@@ -893,7 +893,7 @@ SessionStore.prototype = {
 
     // Store the form data.
     let content = aBrowser.contentWindow;
-    let [formdata] = Utils.mapFrameTree(content, FormData.collect);
+    let [formdata] = Utils.mapFrameTree(content, SessionStoreUtils.collectFormData);
     formdata = PrivacyFilter.filterFormData(formdata || {});
 
     // If we found any form data, main content or frames, let's save it
@@ -932,7 +932,8 @@ SessionStore.prototype = {
 
     // Save the scroll position itself.
     let content = aBrowser.contentWindow;
-    let [scrolldata] = Utils.mapFrameTree(content, ssu.collectScrollPosition.bind(ssu));
+    let [scrolldata] =
+        Utils.mapFrameTree(content, SessionStoreUtils.collectScrollPosition);
     scrolldata = scrolldata || {};
 
     // Save the current document resolution.
@@ -1393,7 +1394,7 @@ SessionStore.prototype = {
         // restore() will return false, and thus abort restoration for the
         // current |frame| and its descendants, if |data.url| is given but
         // doesn't match the loaded document's URL.
-        return FormData.restore(frame, data);
+        return SessionStoreUtils.restoreFormData(frame.document, data);
       });
     }
   },
@@ -1423,7 +1424,7 @@ SessionStore.prototype = {
       log("_restoreScrollPosition()");
       Utils.restoreFrameTreeData(aBrowser.contentWindow, aScrollData, (frame, data) => {
         if (data.scroll) {
-          ssu.restoreScrollPosition(frame, data.scroll);
+          SessionStoreUtils.restoreScrollPosition(frame, data);
         }
       });
     }
@@ -1572,7 +1573,6 @@ SessionStore.prototype = {
   },
 
   _sendClosedTabsToJava(aWindow) {
-
     // If the app is shutting down, we don't need to do anything.
     if (this._loadState <= STATE_QUITTING) {
       return;

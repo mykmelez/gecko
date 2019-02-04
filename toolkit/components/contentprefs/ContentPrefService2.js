@@ -2,10 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/ContentPrefUtils.jsm");
-ChromeUtils.import("resource://gre/modules/ContentPrefStore.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {ContentPref, cbHandleCompletion, cbHandleError, cbHandleResult} = ChromeUtils.import("resource://gre/modules/ContentPrefUtils.jsm");
+const {ContentPrefStore} = ChromeUtils.import("resource://gre/modules/ContentPrefStore.jsm");
 ChromeUtils.defineModuleGetter(this, "OS",
                                "resource://gre/modules/osfile.jsm");
 ChromeUtils.defineModuleGetter(this, "Sqlite",
@@ -1051,7 +1051,7 @@ ContentPrefService2.prototype = {
     let path = OS.Path.join(OS.Constants.Path.profileDir, "content-prefs.sqlite");
     let conn;
     let resetAndRetry = async e => {
-      if (e.status != Cr.NS_ERROR_FILE_CORRUPTED) {
+      if (e.result != Cr.NS_ERROR_FILE_CORRUPTED) {
         throw e;
       }
 

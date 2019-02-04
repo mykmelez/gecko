@@ -16,11 +16,11 @@ const LOCAL_GMP_SOURCES = [{
 
 var EXPORTED_SYMBOLS = [ "ProductAddonChecker" ];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/Log.jsm");
-ChromeUtils.import("resource://gre/modules/CertUtils.jsm");
-ChromeUtils.import("resource://gre/modules/osfile.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Log} = ChromeUtils.import("resource://gre/modules/Log.jsm");
+const {CertUtils} = ChromeUtils.import("resource://gre/modules/CertUtils.jsm");
+const {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["XMLHttpRequest"]);
 
@@ -225,7 +225,6 @@ function parseXML(document) {
  * load the sources from local build configuration.
  */
 function downloadLocalConfig() {
-
   if (!GMPPrefs.getBool(GMPPrefs.KEY_UPDATE_ENABLED, true)) {
     logger.info("Updates are disabled via media.gmp-manager.updateEnabled");
     return Promise.resolve({usedFallback: true, gmpAddons: []});
@@ -233,7 +232,6 @@ function downloadLocalConfig() {
 
   return Promise.all(LOCAL_GMP_SOURCES.map(conf => {
     return downloadJSON(conf.src).then(addons => {
-
       let platforms = addons.vendors[conf.id].platforms;
       let target = Services.appinfo.OS + "_" + UpdateUtils.ABI;
       let details = null;
@@ -265,7 +263,6 @@ function downloadLocalConfig() {
       };
     });
   })).then(addons => {
-
     // Some filters may not match this platform so
     // filter those out
     addons = addons.filter(x => x !== false);

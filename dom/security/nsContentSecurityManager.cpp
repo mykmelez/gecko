@@ -16,7 +16,6 @@
 #include "nsContentUtils.h"
 #include "nsCORSListenerProxy.h"
 #include "nsIStreamListener.h"
-#include "nsCDefaultURIFixup.h"
 #include "nsIURIFixup.h"
 #include "nsIImageLoadingContent.h"
 #include "nsIRedirectHistoryEntry.h"
@@ -25,6 +24,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/nsMixedContentBlocker.h"
 #include "mozilla/dom/TabChild.h"
+#include "mozilla/Components.h"
 #include "mozilla/Logging.h"
 
 NS_IMPL_ISUPPORTS(nsContentSecurityManager, nsIContentSecurityManager,
@@ -380,8 +380,8 @@ static nsresult DoContentSecurityChecks(nsIChannel* aChannel,
     // TYPE_DOCUMENT and TYPE_SUBDOCUMENT loads might potentially
     // be wyciwyg:// channels. Let's fix up the URI so we can
     // perform proper security checks.
-    nsCOMPtr<nsIURIFixup> urifixup(do_GetService(NS_URIFIXUP_CONTRACTID, &rv));
-    if (NS_SUCCEEDED(rv) && urifixup) {
+    nsCOMPtr<nsIURIFixup> urifixup(components::URIFixup::Service());
+    if (urifixup) {
       nsCOMPtr<nsIURI> fixedURI;
       rv = urifixup->CreateExposableURI(uri, getter_AddRefs(fixedURI));
       if (NS_SUCCEEDED(rv)) {
@@ -618,8 +618,22 @@ static void LogPrincipal(nsIPrincipal* aPrincipal,
       return;
     }
     if (aPrincipal->GetIsExpandedPrincipal()) {
+      nsCOMPtr<nsIExpandedPrincipal> expanded(do_QueryInterface(aPrincipal));
+      const nsTArray<nsCOMPtr<nsIPrincipal>>& allowList = expanded->AllowList();
       nsAutoCString origin;
-      aPrincipal->GetOrigin(origin);
+      origin.AssignLiteral("[Expanded Principal [");
+      for (size_t i = 0; i < allowList.Length(); ++i) {
+        if (i != 0) {
+          origin.AppendLiteral(", ");
+        }
+
+        nsAutoCString subOrigin;
+        DebugOnly<nsresult> rv = allowList.ElementAt(i)->GetOrigin(subOrigin);
+        MOZ_ASSERT(NS_SUCCEEDED(rv));
+        origin.Append(subOrigin);
+      }
+      origin.AppendLiteral("]]");
+
       MOZ_LOG(sCSMLog, LogLevel::Debug,
               ("  %s: %s\n", NS_ConvertUTF16toUTF8(aPrincipalName).get(),
                origin.get()));
@@ -908,8 +922,8 @@ nsresult nsContentSecurityManager::CheckChannel(nsIChannel* aChannel) {
     // TYPE_DOCUMENT and TYPE_SUBDOCUMENT loads might potentially
     // be wyciwyg:// channels. Let's fix up the URI so we can
     // perform proper security checks.
-    nsCOMPtr<nsIURIFixup> urifixup(do_GetService(NS_URIFIXUP_CONTRACTID, &rv));
-    if (NS_SUCCEEDED(rv) && urifixup) {
+    nsCOMPtr<nsIURIFixup> urifixup(components::URIFixup::Service());
+    if (urifixup) {
       nsCOMPtr<nsIURI> fixedURI;
       rv = urifixup->CreateExposableURI(uri, getter_AddRefs(fixedURI));
       if (NS_SUCCEEDED(rv)) {

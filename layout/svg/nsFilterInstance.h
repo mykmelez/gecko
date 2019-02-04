@@ -122,11 +122,9 @@ class nsFilterInstance {
    * Try to build WebRender filters for a frame if the filters applied to it are
    * supported.
    */
-  static bool BuildWebRenderFilters(
-      nsIFrame* aFilteredFrame,
-      const mozilla::LayoutDeviceIntRect& aPreFilterBounds,
-      nsTArray<mozilla::wr::WrFilterOp>& aWrFilters,
-      mozilla::LayoutDeviceIntRect& aPostFilterBounds);
+  static bool BuildWebRenderFilters(nsIFrame* aFilteredFrame,
+                                    nsTArray<mozilla::wr::FilterOp>& aWrFilters,
+                                    mozilla::Maybe<nsRect>& aPostFilterClip);
 
  private:
   /**
@@ -242,7 +240,10 @@ class nsFilterInstance {
    * Creates the SourceSurface for the SourceGraphic graph node, paints its
    * contents, and assigns it to mSourceGraphic.mSourceSurface.
    */
-  void BuildSourceImage(DrawTarget* aDest, imgDrawingParams& aImgParams);
+  void BuildSourceImage(DrawTarget* aDest, imgDrawingParams& aImgParams,
+                        mozilla::gfx::FilterNode* aFilter,
+                        mozilla::gfx::FilterNode* aSource,
+                        const mozilla::gfx::Rect& aSourceRect);
 
   /**
    * Build the list of FilterPrimitiveDescriptions that describes the filter's

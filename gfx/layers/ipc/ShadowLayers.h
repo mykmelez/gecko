@@ -256,7 +256,7 @@ class ShadowLayerForwarder final : public LayersIPCActor,
                       const mozilla::TimeStamp& aVsyncTime,
                       const mozilla::TimeStamp& aRefreshStart,
                       const mozilla::TimeStamp& aTransactionStart,
-                      const nsCString& aURL, bool* aSent,
+                      bool aContainsSVG, const nsCString& aURL, bool* aSent,
                       const InfallibleTArray<CompositionPayload>& aPayload =
                           InfallibleTArray<CompositionPayload>());
 
@@ -338,6 +338,7 @@ class ShadowLayerForwarder final : public LayersIPCActor,
    * Flag the next paint as the first for a document.
    */
   void SetIsFirstPaint() { mIsFirstPaint = true; }
+  bool GetIsFirstPaint() const { return mIsFirstPaint; }
 
   /**
    * Set the current focus target to be sent with the next paint.

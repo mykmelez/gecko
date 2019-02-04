@@ -989,9 +989,10 @@ class RunProgram(MachCommandBase):
 
             if debugger:
                 self.debuggerInfo = mozdebug.get_debugger_info(debugger, debugger_args)
-                if not self.debuggerInfo:
-                    print("Could not find a suitable debugger in your PATH.")
-                    return 1
+
+            if not debugger or not self.debuggerInfo:
+                print("Could not find a suitable debugger in your PATH.")
+                return 1
 
             # Parameters come from the CLI. We need to convert them before
             # their use.
@@ -1382,16 +1383,21 @@ class PackageFrontend(MachCommandBase):
 
                 digest = algorithm = None
                 data = {}
-                # The file is GPG-signed, but we don't care about validating
-                # that. Instead of parsing the PGP signature, we just take
-                # the one line we're interested in, which starts with a `{`.
-                for l in cot.content.splitlines():
-                    if l.startswith('{'):
-                        try:
-                            data = json.loads(l)
-                            break
-                        except Exception:
-                            pass
+                # The file is GPG-signed, but we don't care about validating that.
+                # The data looks like:
+                #     -----BEGIN PGP SIGNED MESSAGE-----
+                #     Hash: SHA256
+                #
+                #     {
+                #       ...
+                #     }
+                #     -----BEGIN PGP SIGNATURE-----
+                #     <signature data>
+                #     -----END PGP SIGNATURE-----
+                # The following code extracts the json from there.
+                data = json.loads(
+                    cot.content.partition("-----BEGIN PGP SIGNATURE-----")[0]
+                               .partition("Hash: SHA256")[2])
                 for algorithm, digest in (data.get('artifacts', {})
                                               .get(artifact_name, {}).items()):
                     pass
@@ -1521,7 +1527,7 @@ class PackageFrontend(MachCommandBase):
                     os.unlink(record.filename)
                     if attempt < retry:
                         self.log(logging.INFO, 'artifact', {},
-                                 'Will retry in a moment...')
+                                 'Corrupt download. Will retry in a moment...')
                     continue
 
                 downloaded.append(record)
@@ -1647,7 +1653,7 @@ class StaticAnalysis(MachCommandBase):
     """Utilities for running C++ static analysis checks and format."""
 
     # List of file extension to consider (should start with dot)
-    _format_include_extensions = ('.cpp', '.c', '.cc', '.h')
+    _format_include_extensions = ('.cpp', '.c', '.cc', '.h', '.m', '.mm')
     # File contaning all paths to exclude from formatting
     _format_ignore_file = '.clang-format-ignore'
 
@@ -2333,7 +2339,11 @@ class StaticAnalysis(MachCommandBase):
                           'location')
     @CommandArgument('--path', '-p', nargs='+', default=None,
                      help='Specify the path(s) to reformat')
-    def clang_format(self, show, assume_filename, path, verbose=False):
+    @CommandArgument('--commit', '-c', default=None,
+                     help='Specify a commit to reformat from.'
+                          'For git you can also pass a range of commits (foo..bar)'
+                          'to format all of them at the same time.')
+    def clang_format(self, show, assume_filename, path, commit, verbose=False):
         # Run clang-format or clang-format-diff on the local changes
         # or files/directories
         if path is not None:
@@ -2364,7 +2374,7 @@ class StaticAnalysis(MachCommandBase):
 
         if path is None:
             return self._run_clang_format_diff(self._clang_format_diff,
-                                               self._clang_format_path, show)
+                                               self._clang_format_path, show, commit)
 
         if assume_filename:
             return self._run_clang_format_in_console(self._clang_format_path, path, assume_filename)
@@ -2672,14 +2682,17 @@ class StaticAnalysis(MachCommandBase):
         assert os.path.exists(self._run_clang_tidy_path)
         return 0
 
-    def _get_clang_format_diff_command(self):
+    def _get_clang_format_diff_command(self, commit):
         if self.repository.name == 'hg':
-            args = ["hg", "diff", "-U0", "-r" ".^"]
+            args = ["hg", "diff", "-U0", "-r", commit if commit else ".^"]
             for dot_extension in self._format_include_extensions:
                 args += ['--include', 'glob:**{0}'.format(dot_extension)]
             args += ['--exclude', 'listfile:{0}'.format(self._format_ignore_file)]
         else:
-            args = ["git", "diff", "--no-color", "-U0", "HEAD", "--"]
+            commit_range = "HEAD" # All uncommitted changes.
+            if commit:
+                commit_range = commit if ".." in commit else "{}~..{}".format(commit, commit)
+            args = ["git", "diff", "--no-color", "-U0", commit_range, "--"]
             for dot_extension in self._format_include_extensions:
                 args += ['*{0}'.format(dot_extension)]
             # git-diff doesn't support an 'exclude-from-files' param, but
@@ -2740,12 +2753,12 @@ class StaticAnalysis(MachCommandBase):
         os.chdir(currentWorkingDir)
         return rc
 
-    def _run_clang_format_diff(self, clang_format_diff, clang_format, show):
+    def _run_clang_format_diff(self, clang_format_diff, clang_format, show, commit):
         # Run clang-format on the diff
         # Note that this will potentially miss a lot things
         from subprocess import Popen, PIPE, check_output, CalledProcessError
 
-        diff_process = Popen(self._get_clang_format_diff_command(), stdout=PIPE)
+        diff_process = Popen(self._get_clang_format_diff_command(commit), stdout=PIPE)
         args = [sys.executable, clang_format_diff, "-p1", "-binary=%s" % clang_format]
 
         if not show:
@@ -3053,7 +3066,9 @@ class Repackage(MachCommandBase):
         help='Name of the package being rebuilt')
     @CommandArgument('--sfx-stub', type=str, required=True,
         help='Path to the self-extraction stub.')
-    def repackage_installer(self, tag, setupexe, package, output, package_name, sfx_stub):
+    @CommandArgument('--use-upx', required=False, action='store_true',
+        help='Run UPX on the self-extraction stub.')
+    def repackage_installer(self, tag, setupexe, package, output, package_name, sfx_stub, use_upx):
         from mozbuild.repackaging.installer import repackage_installer
         repackage_installer(
             topsrcdir=self.topsrcdir,
@@ -3063,6 +3078,7 @@ class Repackage(MachCommandBase):
             output=output,
             package_name=package_name,
             sfx_stub=sfx_stub,
+            use_upx=use_upx,
         )
 
     @SubCommand('repackage', 'msi',

@@ -147,7 +147,6 @@ impl Transaction {
     ///
     /// Arguments:
     ///
-    /// * `document_id`: Target Document ID.
     /// * `epoch`: The unique Frame ID, monotonically increasing.
     /// * `background`: The background color of this pipeline.
     /// * `viewport_size`: The size of the viewport for this frame.
@@ -561,7 +560,7 @@ pub struct HitTestResult {
 }
 
 bitflags! {
-    #[derive(Deserialize, Serialize)]
+    #[derive(Deserialize, MallocSizeOf, Serialize)]
     pub struct HitTestFlags: u8 {
         const FIND_ALL = 0b00000001;
         const POINT_RELATIVE_TO_PIPELINE_VIEWPORT = 0b00000010;
@@ -787,12 +786,16 @@ impl Epoch {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, PartialEq, Hash, Ord, PartialOrd, Deserialize, Serialize)]
 pub struct IdNamespace(pub u32);
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, MallocSizeOf, PartialEq, Serialize)]
 pub struct DocumentId(pub IdNamespace, pub u32);
+
+impl DocumentId {
+    pub const INVALID: DocumentId = DocumentId(IdNamespace(0), 0);
+}
 
 /// This type carries no valuable semantics for WR. However, it reflects the fact that
 /// clients (Servo) may generate pipelines by different semi-independent sources.
@@ -803,7 +806,7 @@ pub type PipelineSourceId = u32;
 /// From the point of view of WR, `PipelineId` is completely opaque and generic as long as
 /// it's clonable, serializable, comparable, and hashable.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, MallocSizeOf, PartialEq, Serialize)]
 pub struct PipelineId(pub PipelineSourceId, pub u32);
 
 impl PipelineId {
@@ -812,14 +815,69 @@ impl PipelineId {
     }
 }
 
-/// Collection of heap sizes, in bytes.
+/// Meta-macro to enumerate the various interner identifiers and types.
+///
+/// IMPORTANT: Keep this synchronized with the list in mozilla-central located at
+/// gfx/webrender_bindings/webrender_ffi.h
+///
+/// Note that this could be a lot less verbose if concat_idents! were stable. :-(
+#[macro_export]
+macro_rules! enumerate_interners {
+    ($macro_name: ident) => {
+        $macro_name! {
+            clip,
+            prim,
+            normal_border,
+            image_border,
+            image,
+            yuv_image,
+            line_decoration,
+            linear_grad,
+            radial_grad,
+            picture,
+            text_run,
+        }
+    }
+}
+
+macro_rules! declare_interning_memory_report {
+    ( $( $name: ident, )+ ) => {
+        #[repr(C)]
+        #[derive(AddAssign, Clone, Debug, Default, Deserialize, Serialize)]
+        pub struct InternerSubReport {
+            $(
+                pub $name: usize,
+            )+
+        }
+    }
+}
+
+enumerate_interners!(declare_interning_memory_report);
+
+/// Memory report for interning-related data structures.
+/// cbindgen:derive-eq=false
 #[repr(C)]
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct InterningMemoryReport {
+    pub interners: InternerSubReport,
+    pub data_stores: InternerSubReport,
+}
+
+impl ::std::ops::AddAssign for InterningMemoryReport {
+    fn add_assign(&mut self, other: InterningMemoryReport) {
+        self.interners += other.interners;
+        self.data_stores += other.data_stores;
+    }
+}
+
+/// Collection of heap sizes, in bytes.
+/// cbindgen:derive-eq=false
+#[repr(C)]
+#[derive(AddAssign, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct MemoryReport {
     //
     // CPU Memory.
     //
-    pub primitive_stores: usize,
     pub clip_stores: usize,
     pub gpu_cache_metadata: usize,
     pub gpu_cache_cpu_mirror: usize,
@@ -829,8 +887,7 @@ pub struct MemoryReport {
     pub images: usize,
     pub rasterized_blobs: usize,
     pub shader_cache: usize,
-    pub data_stores: usize,
-    pub interners: usize,
+    pub interning: InterningMemoryReport,
 
     //
     // GPU memory.
@@ -841,29 +898,6 @@ pub struct MemoryReport {
     pub texture_cache_textures: usize,
     pub depth_target_textures: usize,
     pub swap_chain: usize,
-}
-
-impl ::std::ops::AddAssign for MemoryReport {
-    fn add_assign(&mut self, other: MemoryReport) {
-        self.primitive_stores += other.primitive_stores;
-        self.clip_stores += other.clip_stores;
-        self.gpu_cache_metadata += other.gpu_cache_metadata;
-        self.gpu_cache_cpu_mirror += other.gpu_cache_cpu_mirror;
-        self.render_tasks += other.render_tasks;
-        self.hit_testers += other.hit_testers;
-        self.fonts += other.fonts;
-        self.images += other.images;
-        self.rasterized_blobs += other.rasterized_blobs;
-        self.shader_cache += other.shader_cache;
-        self.data_stores += other.data_stores;
-        self.interners += other.interners;
-        self.gpu_cache_textures += other.gpu_cache_textures;
-        self.vertex_data_textures += other.vertex_data_textures;
-        self.render_target_textures += other.render_target_textures;
-        self.texture_cache_textures += other.texture_cache_textures;
-        self.depth_target_textures += other.depth_target_textures;
-        self.swap_chain += other.swap_chain;
-    }
 }
 
 /// A C function that takes a pointer to a heap allocation and returns its size.
@@ -959,7 +993,7 @@ impl RenderApiSender {
 }
 
 bitflags! {
-    #[derive(Default, Deserialize, Serialize)]
+    #[derive(Default, Deserialize, MallocSizeOf, Serialize)]
     pub struct DebugFlags: u32 {
         /// Display the frame profiler on screen.
         const PROFILER_DBG          = 1 << 0;
@@ -986,6 +1020,9 @@ bitflags! {
         const TEXTURE_CACHE_DBG_CLEAR_EVICTED = 1 << 14;
         /// Show picture caching debug overlay
         const PICTURE_CACHING_DBG   = 1 << 15;
+        const TEXTURE_CACHE_DBG_DISABLE_SHRINK = 1 << 16;
+        /// Highlight all primitives with colors based on kind.
+        const PRIMITIVE_DBG = 1 << 17;
     }
 }
 
@@ -1284,7 +1321,7 @@ impl ZoomFactor {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Deserialize, MallocSizeOf, PartialEq, Serialize, Eq, Hash)]
 pub struct PropertyBindingId {
     namespace: IdNamespace,
     uid: u32,

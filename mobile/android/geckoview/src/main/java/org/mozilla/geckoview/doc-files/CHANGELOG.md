@@ -1,10 +1,24 @@
 ---
 layout: geckoview
+title: API Changelog
+description: GeckoView API Changelog.
 ---
 
 <h1> GeckoView API Changelog. </h1>
 
+## v67
+- Added nested `ContentBlocking` runtime settings.
+
+- Added `RuntimeSettings` base class to support nested settings.
+
+- Added `baseUri` to [`ContentDelegate.ContextElement`][65.21] and changed
+  `linkUri` to absolute form.
+
 ## v66
+- Removed redundant field `GeckoSession.ProgressDelegate.SecurityInformation.trackingMode`.
+  Use `GeckoSession.TrackingProtectionDelegate.onTrackerBlocked` for
+  notification of blocked elements during page load.
+
 - Added [`@NonNull`][66.1] or [`@Nullable`][66.2] to all APIs.
 
 [66.1]: https://developer.android.com/reference/android/support/annotation/NonNull
@@ -17,7 +31,11 @@ layout: geckoview
 - Added GeckoRuntimeSetting for enabling desktop viewport. Desktop viewport is
   no longer set by `USER_AGENT_MODE_DESKTOP` and must be set separately.
 
+- Added `@UiThread` to `GeckoSession.releaseSession` and `GeckoSession.setSession`
+
 ## v65
+- Added experimental ad-blocking category to `GeckoSession.TrackingProtectionDelegate`.
+
 - Moved [`CompositorController`][65.1], [`DynamicToolbarAnimator`][65.2],
   [`OverscrollEdgeEffect`][65.3], [`PanZoomController`][65.4] from
   `org.mozilla.gecko.gfx` to [`org.mozilla.geckoview`][65.5]
@@ -105,4 +123,4 @@ layout: geckoview
 [65.24]: ../CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: ../GeckoResult.html
 
-[api-version]: 5957a5943b39ae0e56b7e892bd824a16bb71e811
+[api-version]: 2b12249de4649178832780cb5c0aba13079803c8

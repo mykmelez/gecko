@@ -439,6 +439,8 @@ void gfxWindowsPlatform::InitAcceleration() {
   // CanUseHardwareVideoDecoding depends on DeviceManagerDx state,
   // so update the cached value now.
   UpdateCanUseHardwareVideoDecoding();
+
+  RecordStartupTelemetry();
 }
 
 void gfxWindowsPlatform::InitWebRenderConfig() {
@@ -1017,12 +1019,12 @@ void gfxWindowsPlatform::GetPlatformCMSOutputProfile(void*& mem,
 #ifdef _WIN32
   qcms_data_from_unicode_path(str, &mem, &mem_size);
 
-#ifdef DEBUG_tor
+#  ifdef DEBUG_tor
   if (mem_size > 0)
     fprintf(stderr, "ICM profile read from %s successfully\n",
             NS_ConvertUTF16toUTF8(str).get());
-#endif  // DEBUG_tor
-#endif  // _WIN32
+#  endif  // DEBUG_tor
+#endif    // _WIN32
 }
 
 void gfxWindowsPlatform::GetDLLVersion(char16ptr_t aDLLPath,
@@ -1470,6 +1472,21 @@ void gfxWindowsPlatform::InitializeD3D11Config() {
   }
   Telemetry::Accumulate(Telemetry::GFX_CONTENT_FAILED_TO_ACQUIRE_DEVICE,
                         uint32_t(aDevice));
+}
+
+void gfxWindowsPlatform::RecordStartupTelemetry() {
+  DeviceManagerDx* dx = DeviceManagerDx::Get();
+  nsTArray<DXGI_OUTPUT_DESC1> outputs = dx->EnumerateOutputs();
+
+  uint32_t allSupportedColorSpaces = 0;
+  for (auto& output : outputs) {
+    uint32_t colorSpace = 1 << output.ColorSpace;
+    allSupportedColorSpaces |= colorSpace;
+  }
+
+  Telemetry::ScalarSet(
+      Telemetry::ScalarID::GFX_HDR_WINDOWS_DISPLAY_COLORSPACE_BITFIELD,
+      allSupportedColorSpaces);
 }
 
 // Supports lazy device initialization on Windows, so that WebRender can avoid

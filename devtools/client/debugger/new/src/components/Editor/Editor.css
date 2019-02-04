@@ -9,6 +9,7 @@
   --debug-line-error-border: rgb(255, 0, 0);
   --debug-expression-error-background: rgba(231, 116, 113, 0.3);
   --editor-header-height: 30px;
+  --highlight-line-duration: 1500ms;
 }
 
 .theme-dark .editor-wrapper {
@@ -23,6 +24,10 @@
 
 .editor-wrapper {
   min-width: 0 !important;
+}
+
+.CodeMirror.cm-s-mozilla, .CodeMirror-scroll, .CodeMirror-sizer {
+  overflow-anchor: none;
 }
 
 .theme-dark {
@@ -71,7 +76,7 @@ html[dir="rtl"] .editor-mount {
 }
 
 .theme-dark .cm-s-mozilla .empty-line .CodeMirror-linenumber {
-  color: var(--grey-60);
+  color: var(--grey-50);
 }
 
 :not(.empty-line):not(.new-breakpoint)
@@ -86,6 +91,10 @@ html[dir="rtl"] .editor-mount {
     transparent 1px,
     var(--gutter-hover-background-color) 0
   );
+}
+
+.new-breakpoint .CodeMirror-linenumber {
+  pointer-events: none;
 }
 
 :not(.empty-line):not(.new-breakpoint)
@@ -253,7 +262,7 @@ debug-expression-error {
   display: none;
 }
 .highlight-line .CodeMirror-line {
-  animation: fade-highlight-out 1.5s normal forwards;
+  animation: fade-highlight-out var(--highlight-line-duration) normal forwards;
 }
 
 @keyframes fade-highlight-out {

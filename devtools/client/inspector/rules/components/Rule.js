@@ -10,6 +10,7 @@ const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
 const Declarations = createFactory(require("./Declarations"));
 const Selector = createFactory(require("./Selector"));
+const SelectorHighlighter = createFactory(require("./SelectorHighlighter"));
 const SourceLink = createFactory(require("./SourceLink"));
 
 const Types = require("../types");
@@ -17,28 +18,67 @@ const Types = require("../types");
 class Rule extends PureComponent {
   static get propTypes() {
     return {
+      onToggleDeclaration: PropTypes.func.isRequired,
+      onToggleSelectorHighlighter: PropTypes.func.isRequired,
       rule: PropTypes.shape(Types.rule).isRequired,
+      showDeclarationNameEditor: PropTypes.func.isRequired,
+      showDeclarationValueEditor: PropTypes.func.isRequired,
+      showSelectorEditor: PropTypes.func.isRequired,
     };
   }
 
   render() {
-    const { rule } = this.props;
+    const {
+      onToggleDeclaration,
+      onToggleSelectorHighlighter,
+      rule,
+      showDeclarationNameEditor,
+      showDeclarationValueEditor,
+      showSelectorEditor,
+    } = this.props;
     const {
       declarations,
+      id,
+      isUnmatched,
+      isUserAgentStyle,
       selector,
       sourceLink,
+      type,
     } = rule;
 
     return (
       dom.div(
-        { className: "ruleview-rule devtools-monospace" },
+        {
+          className: "ruleview-rule devtools-monospace" +
+                     (isUnmatched ? " unmatched" : "") +
+                     (isUserAgentStyle ? " uneditable" : ""),
+        },
         SourceLink({ sourceLink }),
         dom.div({ className: "ruleview-code" },
           dom.div({},
-            Selector({ selector }),
+            Selector({
+              id,
+              isUserAgentStyle,
+              selector,
+              showSelectorEditor,
+              type,
+            }),
+            type !== CSSRule.KEYFRAME_RULE ?
+              SelectorHighlighter({
+                onToggleSelectorHighlighter,
+                selector,
+              })
+              :
+              null,
             dom.span({ className: "ruleview-ruleopen" }, " {")
           ),
-          Declarations({ declarations }),
+          Declarations({
+            declarations,
+            isUserAgentStyle,
+            onToggleDeclaration,
+            showDeclarationNameEditor,
+            showDeclarationValueEditor,
+          }),
           dom.div({ className: "ruleview-ruleclose" }, "}")
         )
       )

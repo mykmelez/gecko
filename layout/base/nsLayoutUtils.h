@@ -528,8 +528,9 @@ class nsLayoutUtils {
    * aAncestorFrame. If non-null, this can bound the search and speed up
    * the function
    */
-  static bool IsProperAncestorFrame(nsIFrame* aAncestorFrame, nsIFrame* aFrame,
-                                    nsIFrame* aCommonAncestor = nullptr);
+  static bool IsProperAncestorFrame(const nsIFrame* aAncestorFrame,
+                                    const nsIFrame* aFrame,
+                                    const nsIFrame* aCommonAncestor = nullptr);
 
   /**
    * Like IsProperAncestorFrame, but looks across document boundaries.
@@ -1076,7 +1077,8 @@ class nsLayoutUtils {
     PAINT_TO_WINDOW = 0x40,
     PAINT_EXISTING_TRANSACTION = 0x80,
     PAINT_NO_COMPOSITE = 0x100,
-    PAINT_COMPRESSED = 0x200
+    PAINT_COMPRESSED = 0x200,
+    PAINT_FOR_WEBRENDER = 0x400,
   };
 
   /**

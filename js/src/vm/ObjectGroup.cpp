@@ -19,6 +19,7 @@
 #include "js/CharacterEncoding.h"
 #include "js/UniquePtr.h"
 #include "vm/ArrayObject.h"
+#include "vm/GlobalObject.h"
 #include "vm/JSObject.h"
 #include "vm/RegExpObject.h"
 #include "vm/Shape.h"
@@ -201,10 +202,6 @@ void ObjectGroup::setAddendum(AddendumKind kind, void* addendum,
 /* static */ bool ObjectGroup::useSingletonForAllocationSite(JSScript* script,
                                                              jsbytecode* pc,
                                                              JSProtoKey key) {
-  // The return value of this method can either be tested like a boolean or
-  // passed to a NewObject method.
-  JS_STATIC_ASSERT(GenericObject == 0);
-
   /*
    * Objects created outside loops in global and eval scripts should have
    * singleton types. For now this is only done for plain objects, but not
@@ -212,17 +209,17 @@ void ObjectGroup::setAddendum(AddendumKind kind, void* addendum,
    */
 
   if (script->functionNonDelazifying() && !script->treatAsRunOnce()) {
-    return GenericObject;
+    return false;
   }
 
   if (key != JSProto_Object) {
-    return GenericObject;
+    return false;
   }
 
   // All loops in the script will have a try note indicating their boundary.
 
   if (!script->hasTrynotes()) {
-    return SingletonObject;
+    return true;
   }
 
   uint32_t offset = script->pcToOffset(pc);
@@ -234,38 +231,25 @@ void ObjectGroup::setAddendum(AddendumKind kind, void* addendum,
     }
 
     if (tn.start <= offset && offset < tn.start + tn.length) {
-      return GenericObject;
+      return false;
     }
   }
 
-  return SingletonObject;
-}
-
-/* static */ bool ObjectGroup::useSingletonForAllocationSite(
-    JSScript* script, jsbytecode* pc, const Class* clasp) {
-  return useSingletonForAllocationSite(script, pc,
-                                       JSCLASS_CACHED_PROTO_KEY(clasp));
+  return true;
 }
 
 /////////////////////////////////////////////////////////////////////
 // JSObject
 /////////////////////////////////////////////////////////////////////
 
-bool JSObject::shouldSplicePrototype() {
-  /*
-   * During bootstrapping, if inference is enabled we need to make sure not
-   * to splice a new prototype in for Function.prototype or the global
-   * object if their __proto__ had previously been set to null, as this
-   * will change the prototype for all other objects with the same type.
-   */
-  if (staticPrototype() != nullptr) {
-    return false;
-  }
-  return isSingleton();
+bool GlobalObject::shouldSplicePrototype() {
+  // During bootstrapping, we need to make sure not to splice a new prototype in
+  // for the global object if its __proto__ had previously been set to non-null,
+  // as this will change the prototype for all other objects with the same type.
+  return staticPrototype() == nullptr;
 }
 
 /* static */ bool JSObject::splicePrototype(JSContext* cx, HandleObject obj,
-                                            const Class* clasp,
                                             Handle<TaggedProto> proto) {
   MOZ_ASSERT(cx->compartment() == obj->compartment());
 
@@ -278,6 +262,10 @@ bool JSObject::shouldSplicePrototype() {
 
   // Windows may not appear on prototype chains.
   MOZ_ASSERT_IF(proto.isObject(), !IsWindow(proto.toObject()));
+
+#ifdef DEBUG
+  const Class* oldClass = obj->getClass();
+#endif
 
   if (proto.isObject()) {
     RootedObject protoObj(cx, proto.toObject());
@@ -300,7 +288,8 @@ bool JSObject::shouldSplicePrototype() {
     }
   }
 
-  group->setClasp(clasp);
+  MOZ_ASSERT(group->clasp() == oldClass,
+             "splicing a prototype doesn't change a group's class");
   group->setProto(proto);
   return true;
 }
@@ -726,17 +715,6 @@ inline const Class* GetClassForProtoKey(JSProtoKey key) {
     case JSProto_Array:
       return &ArrayObject::class_;
 
-    case JSProto_Number:
-      return &NumberObject::class_;
-    case JSProto_Boolean:
-      return &BooleanObject::class_;
-    case JSProto_String:
-      return &StringObject::class_;
-    case JSProto_Symbol:
-      return &SymbolObject::class_;
-    case JSProto_RegExp:
-      return &RegExpObject::class_;
-
     case JSProto_Int8Array:
     case JSProto_Uint8Array:
     case JSProto_Int16Array:
@@ -748,16 +726,8 @@ inline const Class* GetClassForProtoKey(JSProtoKey key) {
     case JSProto_Uint8ClampedArray:
       return &TypedArrayObject::classes[key - JSProto_Int8Array];
 
-    case JSProto_ArrayBuffer:
-      return &ArrayBufferObject::class_;
-
-    case JSProto_SharedArrayBuffer:
-      return &SharedArrayBufferObject::class_;
-
-    case JSProto_DataView:
-      return &DataViewObject::class_;
-
     default:
+      // We only expect to see plain objects, arrays, and typed arrays here.
       MOZ_CRASH("Bad proto key");
   }
 }
@@ -1764,15 +1734,13 @@ ObjectGroup* ObjectGroupRealm::getStringSplitStringGroup(JSContext* cx) {
   // The following code is a specialized version of the code
   // for ObjectGroup::allocationSiteGroup().
 
-  const Class* clasp = GetClassForProtoKey(JSProto_Array);
-
   JSObject* proto = GlobalObject::getOrCreateArrayPrototype(cx, cx->global());
   if (!proto) {
     return nullptr;
   }
   Rooted<TaggedProto> tagged(cx, TaggedProto(proto));
 
-  group = makeGroup(cx, cx->realm(), clasp, tagged, /* initialFlags = */ 0);
+  group = makeGroup(cx, cx->realm(), &ArrayObject::class_, tagged);
   if (!group) {
     return nullptr;
   }

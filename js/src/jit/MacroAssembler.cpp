@@ -64,6 +64,11 @@ static void EmitTypeCheck(MacroAssembler& masm, Assembler::Condition cond,
     case JSVAL_TYPE_SYMBOL:
       masm.branchTestSymbol(cond, src, label);
       break;
+#ifdef ENABLE_BIGINT
+    case JSVAL_TYPE_BIGINT:
+      masm.branchTestBigInt(cond, src, label);
+      break;
+#endif
     case JSVAL_TYPE_NULL:
       masm.branchTestNull(cond, src, label);
       break;
@@ -96,10 +101,17 @@ void MacroAssembler::guardTypeSet(const Source& address, const TypeSet* types,
   MOZ_ASSERT(!types->unknown());
 
   Label matched;
-  TypeSet::Type tests[8] = {TypeSet::Int32Type(),    TypeSet::UndefinedType(),
-                            TypeSet::BooleanType(),  TypeSet::StringType(),
-                            TypeSet::SymbolType(),   TypeSet::NullType(),
-                            TypeSet::MagicArgType(), TypeSet::AnyObjectType()};
+  TypeSet::Type tests[] = {TypeSet::Int32Type(),
+                           TypeSet::UndefinedType(),
+                           TypeSet::BooleanType(),
+                           TypeSet::StringType(),
+                           TypeSet::SymbolType(),
+#ifdef ENABLE_BIGINT
+                           TypeSet::BigIntType(),
+#endif
+                           TypeSet::NullType(),
+                           TypeSet::MagicArgType(),
+                           TypeSet::AnyObjectType()};
 
   // The double type also implies Int32.
   // So replace the int32 test with the double one.
@@ -456,8 +468,9 @@ void MacroAssembler::loadFromTypedArray(Scalar::Type arrayType, const T& src,
         }
         bind(&isDouble);
         {
-          convertUInt32ToDouble(temp, ScratchDoubleReg);
-          boxDouble(ScratchDoubleReg, dest, ScratchDoubleReg);
+          ScratchDoubleScope fpscratch(*this);
+          convertUInt32ToDouble(temp, fpscratch);
+          boxDouble(fpscratch, dest, fpscratch);
         }
         bind(&done);
       } else {
@@ -466,17 +479,22 @@ void MacroAssembler::loadFromTypedArray(Scalar::Type arrayType, const T& src,
         tagValue(JSVAL_TYPE_INT32, temp, dest);
       }
       break;
-    case Scalar::Float32:
-      loadFromTypedArray(arrayType, src, AnyRegister(ScratchFloat32Reg),
+    case Scalar::Float32: {
+      ScratchDoubleScope dscratch(*this);
+      FloatRegister fscratch = dscratch.asSingle();
+      loadFromTypedArray(arrayType, src, AnyRegister(fscratch),
                          dest.scratchReg(), nullptr);
-      convertFloat32ToDouble(ScratchFloat32Reg, ScratchDoubleReg);
-      boxDouble(ScratchDoubleReg, dest, ScratchDoubleReg);
+      convertFloat32ToDouble(fscratch, dscratch);
+      boxDouble(dscratch, dest, dscratch);
       break;
-    case Scalar::Float64:
-      loadFromTypedArray(arrayType, src, AnyRegister(ScratchDoubleReg),
+    }
+    case Scalar::Float64: {
+      ScratchDoubleScope fpscratch(*this);
+      loadFromTypedArray(arrayType, src, AnyRegister(fpscratch),
                          dest.scratchReg(), nullptr);
-      boxDouble(ScratchDoubleReg, dest, ScratchDoubleReg);
+      boxDouble(fpscratch, dest, fpscratch);
       break;
+    }
     default:
       MOZ_CRASH("Invalid typed array type");
   }
@@ -655,15 +673,17 @@ void MacroAssembler::storeUnboxedProperty(T address, JSValueType type,
     case JSVAL_TYPE_DOUBLE:
       if (value.constant()) {
         if (value.value().isNumber()) {
-          loadConstantDouble(value.value().toNumber(), ScratchDoubleReg);
-          storeDouble(ScratchDoubleReg, address);
+          ScratchDoubleScope fpscratch(*this);
+          loadConstantDouble(value.value().toNumber(), fpscratch);
+          storeDouble(fpscratch, address);
         } else {
           StoreUnboxedFailure(*this, failure);
         }
       } else if (value.reg().hasTyped()) {
         if (value.reg().type() == MIRType::Int32) {
-          convertInt32ToDouble(value.reg().typedReg().gpr(), ScratchDoubleReg);
-          storeDouble(ScratchDoubleReg, address);
+          ScratchDoubleScope fpscratch(*this);
+          convertInt32ToDouble(value.reg().typedReg().gpr(), fpscratch);
+          storeDouble(fpscratch, address);
         } else if (value.reg().type() == MIRType::Double) {
           storeDouble(value.reg().typedReg().fpu(), address);
         } else {
@@ -673,8 +693,11 @@ void MacroAssembler::storeUnboxedProperty(T address, JSValueType type,
         ValueOperand reg = value.reg().valueReg();
         Label notInt32, end;
         branchTestInt32(Assembler::NotEqual, reg, &notInt32);
-        int32ValueToDouble(reg, ScratchDoubleReg);
-        storeDouble(ScratchDoubleReg, address);
+        {
+          ScratchDoubleScope fpscratch(*this);
+          int32ValueToDouble(reg, fpscratch);
+          storeDouble(fpscratch, address);
+        }
         jump(&end);
         bind(&notInt32);
         if (failure) {
@@ -767,7 +790,7 @@ void MacroAssembler::checkAllocatorState(Label* fail) {
   // Don't execute the inline path if the realm has an object metadata callback,
   // as the metadata to use for the object may vary between executions of the
   // op.
-  if (GetJitContext()->realm->hasAllocationMetadataBuilder()) {
+  if (GetJitContext()->realm()->hasAllocationMetadataBuilder()) {
     jump(fail);
   }
 }
@@ -800,7 +823,7 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
 
   // No explicit check for nursery.isEnabled() is needed, as the comparison
   // with the nursery's end will always fail in such cases.
-  CompileZone* zone = GetJitContext()->realm->zone();
+  CompileZone* zone = GetJitContext()->realm()->zone();
   size_t thingSize = gc::Arena::thingSize(allocKind);
   size_t totalSize = thingSize + nDynamicSlots * sizeof(HeapSlot);
   MOZ_ASSERT(totalSize < INT32_MAX);
@@ -818,7 +841,7 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
 // Inlined version of FreeSpan::allocate. This does not fill in slots_.
 void MacroAssembler::freeListAllocate(Register result, Register temp,
                                       gc::AllocKind allocKind, Label* fail) {
-  CompileZone* zone = GetJitContext()->realm->zone();
+  CompileZone* zone = GetJitContext()->realm()->zone();
   int thingSize = int(gc::Arena::thingSize(allocKind));
 
   Label fallback;
@@ -881,7 +904,7 @@ void MacroAssembler::callMallocStub(size_t nbytes, Register result,
   }
 
   move32(Imm32(nbytes), regNBytes);
-  movePtr(ImmPtr(GetJitContext()->realm->zone()), regZone);
+  movePtr(ImmPtr(GetJitContext()->realm()->zone()), regZone);
   call(GetJitContext()->runtime->jitRuntime()->mallocStub());
   if (regReturn != result) {
     movePtr(regReturn, result);
@@ -991,7 +1014,7 @@ void MacroAssembler::nurseryAllocateString(Register result, Register temp,
   // No explicit check for nursery.isEnabled() is needed, as the comparison
   // with the nursery's end will always fail in such cases.
 
-  CompileZone* zone = GetJitContext()->realm->zone();
+  CompileZone* zone = GetJitContext()->realm()->zone();
   size_t thingSize = gc::Arena::thingSize(allocKind);
   size_t totalSize = js::Nursery::stringHeaderSize() + thingSize;
   MOZ_ASSERT(totalSize < INT32_MAX, "Nursery allocation too large");
@@ -1027,7 +1050,7 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
   subPtr(Imm32(size), result);
 
   if (GetJitContext()->runtime->geckoProfiler().enabled()) {
-    CompileZone* zone = GetJitContext()->realm->zone();
+    CompileZone* zone = GetJitContext()->realm()->zone();
     uint32_t* countAddress = zone->addressOfNurseryAllocCount();
     CheckedInt<int32_t> counterOffset =
         (CheckedInt<uintptr_t>(uintptr_t(countAddress)) -
@@ -1177,7 +1200,8 @@ static void AllocateObjectBufferWithInit(JSContext* cx, TypedArrayObject* obj,
   obj->setFixedSlot(TypedArrayObject::LENGTH_SLOT, Int32Value(count));
 
   size_t nbytes = count * obj->bytesPerElement();
-  MOZ_ASSERT((CheckedUint32(nbytes) + sizeof(Value)).isValid());
+  MOZ_ASSERT((CheckedUint32(nbytes) + sizeof(Value)).isValid(),
+             "JS_ROUNDUP must not overflow");
 
   nbytes = JS_ROUNDUP(nbytes, sizeof(Value));
   void* buf = cx->nursery().allocateZeroedBuffer(obj, nbytes,
@@ -2218,16 +2242,18 @@ void MacroAssembler::convertInt32ValueToDouble(const Address& address,
                                                Register scratch, Label* done) {
   branchTestInt32(Assembler::NotEqual, address, done);
   unboxInt32(address, scratch);
-  convertInt32ToDouble(scratch, ScratchDoubleReg);
-  storeDouble(ScratchDoubleReg, address);
+  ScratchDoubleScope fpscratch(*this);
+  convertInt32ToDouble(scratch, fpscratch);
+  storeDouble(fpscratch, address);
 }
 
 void MacroAssembler::convertInt32ValueToDouble(ValueOperand val) {
   Label done;
   branchTestInt32(Assembler::NotEqual, val, &done);
   unboxInt32(val, val.scratchReg());
-  convertInt32ToDouble(val.scratchReg(), ScratchDoubleReg);
-  boxDouble(ScratchDoubleReg, val, ScratchDoubleReg);
+  ScratchDoubleScope fpscratch(*this);
+  convertInt32ToDouble(val.scratchReg(), fpscratch);
+  boxDouble(fpscratch, val, fpscratch);
   bind(&done);
 }
 
@@ -2265,15 +2291,19 @@ void MacroAssembler::convertValueToFloatingPoint(ValueOperand value,
   int32ValueToFloatingPoint(value, output, outputType);
   jump(&done);
 
+  // On some non-multiAlias platforms, unboxDouble may use the scratch register,
+  // so do not merge code paths here.
   bind(&isDouble);
-  FloatRegister tmp = output.asDouble();
   if (outputType == MIRType::Float32 && hasMultiAlias()) {
-    tmp = ScratchDoubleReg;
-  }
-
-  unboxDouble(value, tmp);
-  if (outputType == MIRType::Float32) {
+    ScratchDoubleScope tmp(*this);
+    unboxDouble(value, tmp);
     convertDoubleToFloat32(tmp, output);
+  } else {
+    FloatRegister tmp = output.asDouble();
+    unboxDouble(value, tmp);
+    if (outputType == MIRType::Float32) {
+      convertDoubleToFloat32(tmp, output);
+    }
   }
 
   bind(&done);
@@ -2389,9 +2419,10 @@ void MacroAssembler::outOfLineTruncateSlow(FloatRegister src, Register dest,
                                            wasm::BytecodeOffset callOffset) {
 #if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) || \
     defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
+  ScratchDoubleScope fpscratch(*this);
   if (widenFloatToDouble) {
-    convertFloat32ToDouble(src, ScratchDoubleReg);
-    src = ScratchDoubleReg;
+    convertFloat32ToDouble(src, fpscratch);
+    src = fpscratch;
   }
 #elif defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
   FloatRegister srcSingle;
@@ -2926,10 +2957,12 @@ void MacroAssembler::Push(TypedOrValueRegister v) {
   } else if (IsFloatingPointType(v.type())) {
     FloatRegister reg = v.typedReg().fpu();
     if (v.type() == MIRType::Float32) {
-      convertFloat32ToDouble(reg, ScratchDoubleReg);
-      reg = ScratchDoubleReg;
+      ScratchDoubleScope fpscratch(*this);
+      convertFloat32ToDouble(reg, fpscratch);
+      Push(fpscratch);
+    } else {
+      Push(reg);
     }
-    Push(reg);
   } else {
     Push(ValueTypeFromMIRType(v.type()), v.typedReg().gpr());
   }
@@ -2941,6 +2974,11 @@ void MacroAssembler::Push(const ConstantOrRegister& v) {
   } else {
     Push(v.reg());
   }
+}
+
+void MacroAssembler::Push(const Address& addr) {
+  push(addr);
+  framePushed_ += sizeof(uintptr_t);
 }
 
 void MacroAssembler::Push(const ValueOperand& val) {
@@ -3038,13 +3076,13 @@ void MacroAssembler::setupABICall() {
 #if defined(JS_CODEGEN_ARM)
   // On ARM, we need to know what ABI we are using, either in the
   // simulator, or based on the configure flags.
-#if defined(JS_SIMULATOR_ARM)
+#  if defined(JS_SIMULATOR_ARM)
   abiArgs_.setUseHardFp(UseHardFpABI());
-#elif defined(JS_CODEGEN_ARM_HARDFP)
+#  elif defined(JS_CODEGEN_ARM_HARDFP)
   abiArgs_.setUseHardFp(true);
-#else
+#  else
   abiArgs_.setUseHardFp(false);
-#endif
+#  endif
 #endif
 
 #if defined(JS_CODEGEN_MIPS32)
@@ -3626,7 +3664,7 @@ void MacroAssembler::emitPreBarrierFastPath(JSRuntime* rt, MIRType type,
 #elif JS_CODEGEN_NONE
   MOZ_CRASH();
 #else
-#error "Unknown architecture"
+#  error "Unknown architecture"
 #endif
 
   // No barrier is needed if the bit is set, |word & mask != 0|.

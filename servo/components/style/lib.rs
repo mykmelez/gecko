@@ -38,6 +38,8 @@ extern crate crossbeam_channel;
 extern crate cssparser;
 #[macro_use]
 extern crate debug_unreachable;
+#[macro_use]
+extern crate derive_more;
 extern crate euclid;
 extern crate fallible;
 extern crate fxhash;
@@ -48,6 +50,7 @@ extern crate hashglobe;
 #[cfg(feature = "servo")]
 #[macro_use]
 extern crate html5ever;
+extern crate indexmap;
 extern crate itertools;
 extern crate itoa;
 #[macro_use]

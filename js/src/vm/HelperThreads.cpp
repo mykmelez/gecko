@@ -14,6 +14,7 @@
 #include "frontend/BytecodeCompilation.h"
 #include "gc/GCInternals.h"
 #include "jit/IonBuilder.h"
+#include "js/ContextOptions.h"  // JS::ContextOptions
 #include "js/SourceText.h"
 #include "js/UniquePtr.h"
 #include "js/Utility.h"
@@ -2261,6 +2262,34 @@ void js::CancelOffThreadCompressions(JSRuntime* runtime) {
   // Clean up finished tasks.
   ClearCompressionTaskList(HelperThreadState().compressionFinishedList(lock),
                            runtime);
+}
+
+void js::AttachFinishedCompressions(JSRuntime* runtime, AutoLockHelperThreadState& lock) {
+  auto& finished = HelperThreadState().compressionFinishedList(lock);
+  for (size_t i = 0; i < finished.length(); i++) {
+    if (finished[i]->runtimeMatches(runtime)) {
+      UniquePtr<SourceCompressionTask> compressionTask(std::move(finished[i]));
+      HelperThreadState().remove(finished, &i);
+      compressionTask->complete();
+    }
+  }
+}
+
+void js::RunPendingSourceCompressions(JSRuntime* runtime) {
+  AutoLockHelperThreadState lock;
+
+  if (!HelperThreadState().threads) {
+    return;
+  }
+
+  HelperThreadState().startHandlingCompressionTasks(lock);
+
+  // Wait for all in-process compression tasks to complete.
+  while (!HelperThreadState().compressionWorklist(lock).empty()) {
+    HelperThreadState().wait(lock, GlobalHelperThreadState::CONSUMER);
+  }
+
+  AttachFinishedCompressions(runtime, lock);
 }
 
 void PromiseHelperTask::executeAndResolveAndDestroy(JSContext* cx) {

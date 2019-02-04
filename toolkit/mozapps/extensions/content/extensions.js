@@ -8,31 +8,34 @@
 /* globals ProcessingInstruction */
 /* exported UPDATES_RELEASENOTES_TRANSFORMFILE, XMLURI_PARSE_ERROR, loadView, gBrowser */
 
-ChromeUtils.import("resource://gre/modules/DeferredTask.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
-ChromeUtils.import("resource://gre/modules/addons/AddonRepository.jsm");
-ChromeUtils.import("resource://gre/modules/addons/AddonSettings.jsm");
+const {DeferredTask} = ChromeUtils.import("resource://gre/modules/DeferredTask.jsm");
+const {AddonManager} = ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
+const {AddonRepository} = ChromeUtils.import("resource://gre/modules/addons/AddonRepository.jsm");
+const {AddonSettings} = ChromeUtils.import("resource://gre/modules/addons/AddonSettings.jsm");
 
 ChromeUtils.defineModuleGetter(this, "E10SUtils", "resource://gre/modules/E10SUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "Extension",
                                "resource://gre/modules/Extension.jsm");
 ChromeUtils.defineModuleGetter(this, "ExtensionParent",
                                "resource://gre/modules/ExtensionParent.jsm");
-ChromeUtils.defineModuleGetter(this, "Preferences",
-                               "resource://gre/modules/Preferences.jsm");
-
-
+ChromeUtils.defineModuleGetter(this, "ExtensionPermissions",
+                               "resource://gre/modules/ExtensionPermissions.jsm");
 ChromeUtils.defineModuleGetter(this, "PluralForm",
                                "resource://gre/modules/PluralForm.jsm");
 ChromeUtils.defineModuleGetter(this, "Preferences",
                                "resource://gre/modules/Preferences.jsm");
+ChromeUtils.defineModuleGetter(this, "ClientID",
+                               "resource://gre/modules/ClientID.jsm");
+ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
+                               "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 XPCOMUtils.defineLazyPreferenceGetter(this, "WEBEXT_PERMISSION_PROMPTS",
                                       "extensions.webextPermissionPrompts", false);
 XPCOMUtils.defineLazyPreferenceGetter(this, "XPINSTALL_ENABLED",
                                       "xpinstall.enabled", true);
+
+XPCOMUtils.defineLazyPreferenceGetter(this, "allowPrivateBrowsingByDefault",
+                                      "extensions.allowPrivateBrowsingByDefault", true);
 
 XPCOMUtils.defineLazyPreferenceGetter(this, "SUPPORT_URL", "app.support.baseURL",
                                       "", null, val => Services.urlFormatter.formatURL(val));
@@ -56,7 +59,7 @@ const XMLURI_PARSE_ERROR = "http://www.mozilla.org/newlayout/xml/parsererror.xml
 var gViewDefault = "addons://discover/";
 
 XPCOMUtils.defineLazyGetter(this, "extensionStylesheets", () => {
-  const {ExtensionParent} = ChromeUtils.import("resource://gre/modules/ExtensionParent.jsm", {});
+  const {ExtensionParent} = ChromeUtils.import("resource://gre/modules/ExtensionParent.jsm");
   return ExtensionParent.extensionStylesheets;
 });
 
@@ -280,9 +283,14 @@ function isDiscoverEnabled() {
 
 function setSearchLabel(type) {
   let searchLabel = document.getElementById("search-label");
-  if (type == "extension" || type == "theme") {
+  let keyMap = {
+    extension: "extension",
+    shortcuts: "extension",
+    theme: "theme",
+  };
+  if (type in keyMap) {
     searchLabel
-      .textContent = gStrings.ext.GetStringFromName(`searchLabel.${type}`);
+      .textContent = gStrings.ext.GetStringFromName(`searchLabel.${keyMap[type]}`);
     searchLabel.hidden = false;
   } else {
     searchLabel.textContent = "";
@@ -484,7 +492,6 @@ var gEventManager = {
 
       // Hide the separator if there are no visible menu items before it
       menuSep.hidden = (countMenuItemsBeforeSep == 0);
-
     });
 
     let addonTooltip = document.getElementById("addonitem-tooltip");
@@ -681,17 +688,20 @@ var gViewController = {
   viewChangeCallback: null,
   initialViewSelected: false,
   lastHistoryIndex: -1,
+  backButton: null,
 
   initialize() {
     this.viewPort = document.getElementById("view-port");
     this.headeredViews = document.getElementById("headered-views");
     this.headeredViewsDeck = document.getElementById("headered-views-content");
+    this.backButton = document.getElementById("go-back");
 
     this.viewObjects.discover = gDiscoverView;
     this.viewObjects.list = gListView;
     this.viewObjects.legacy = gLegacyView;
     this.viewObjects.detail = gDetailView;
     this.viewObjects.updates = gUpdatesView;
+    this.viewObjects.shortcuts = gShortcutsView;
 
     for (let type in this.viewObjects) {
       let view = this.viewObjects[type];
@@ -866,6 +876,8 @@ var gViewController = {
       this.currentViewObj.refresh(view.param, ++this.currentViewRequest, aState);
     else
       this.currentViewObj.show(view.param, ++this.currentViewRequest, aState);
+
+    this.backButton.hidden = this.currentViewObj.isRoot || !gHistory.canGoBack;
   },
 
   // Moves back in the document history and removes the current history entry
@@ -1383,6 +1395,15 @@ var gViewController = {
         gViewController.loadView("addons://list/extension");
       },
     },
+
+    cmd_showShortcuts: {
+      isEnabled() {
+        return true;
+      },
+      doCommand() {
+        gViewController.loadView("addons://shortcuts/shortcuts");
+      },
+    },
   },
 
   supportsCommand(aCommand) {
@@ -1655,7 +1676,6 @@ function sortElements(aElements, aSortBy, aAscending) {
     // If we got here, then all values of a and b
     // must have been equal.
     return 0;
-
   });
 }
 
@@ -1994,12 +2014,31 @@ var gDiscoverView = {
   homepageURL: null,
   _loadListeners: [],
   hideHeader: true,
+  isRoot: true,
+
+  get clientIdDiscoveryEnabled() {
+    // These prefs match Discovery.jsm for enabling clientId cookies.
+    return Services.prefs.getBoolPref("datareporting.healthreport.uploadEnabled", false) &&
+           Services.prefs.getBoolPref("browser.discovery.enabled", false) &&
+           !PrivateBrowsingUtils.isContentWindowPrivate(window);
+  },
+
+  async getClientHeader() {
+    if (!this.clientIdDiscoveryEnabled) {
+      return undefined;
+    }
+    let clientId = await ClientID.getClientIdHash();
+
+    let stream = Cc["@mozilla.org/io/string-input-stream;1"].createInstance(Ci.nsISupportsCString);
+    stream.data = `Moz-Client-Id: ${clientId}\r\n`;
+    return stream;
+  },
 
   async initialize() {
     this.enabled = isDiscoverEnabled();
     if (!this.enabled) {
       gCategories.get("addons://discover/").hidden = true;
-      return;
+      return null;
     }
 
     this.node = document.getElementById("discover-view");
@@ -2017,7 +2056,7 @@ var gDiscoverView = {
     url = url.replace("%COMPATIBILITY_MODE%", compatMode);
     url = Services.urlFormatter.formatURL(url);
 
-    let setURL = (aURL) => {
+    let setURL = async (aURL) => {
       try {
         this.homepageURL = Services.io.newURI(aURL);
       } catch (e) {
@@ -2028,16 +2067,17 @@ var gDiscoverView = {
 
       this._browser.addProgressListener(this);
 
-      if (this.loaded)
+      if (this.loaded) {
         this._loadURL(this.homepageURL.spec, false, notifyInitialized,
-                      Services.scriptSecurityManager.getSystemPrincipal());
-      else
+                      Services.scriptSecurityManager.getSystemPrincipal(),
+                      await this.getClientHeader());
+      } else {
         notifyInitialized();
+      }
     };
 
     if (!Services.prefs.getBoolPref(PREF_GETADDONS_CACHE_ENABLED)) {
-      setURL(url);
-      return;
+      return setURL(url);
     }
 
     gPendingInitializations++;
@@ -2060,7 +2100,7 @@ var gDiscoverView = {
       };
     }
 
-    setURL(url + "#" + JSON.stringify(list));
+    return setURL(url + "#" + JSON.stringify(list));
   },
 
   destroy() {
@@ -2071,7 +2111,7 @@ var gDiscoverView = {
     }
   },
 
-  show(aParam, aRequest, aState, aIsRefresh) {
+  async show(aParam, aRequest, aState, aIsRefresh) {
     gViewController.updateCommands();
 
     // If we're being told to load a specific URL then just do that
@@ -2100,7 +2140,8 @@ var gDiscoverView = {
 
     this._loadURL(this.homepageURL.spec, aIsRefresh,
                   gViewController.notifyViewChanged.bind(gViewController),
-                  Services.scriptSecurityManager.getSystemPrincipal());
+                  Services.scriptSecurityManager.getSystemPrincipal(),
+                  await this.getClientHeader());
   },
 
   canRefresh() {
@@ -2120,7 +2161,7 @@ var gDiscoverView = {
     this.node.selectedPanel = this._error;
   },
 
-  _loadURL(aURL, aKeepHistory, aCallback, aPrincipal) {
+  _loadURL(aURL, aKeepHistory, aCallback, aPrincipal, headers) {
     if (this._browser.currentURI && this._browser.currentURI.spec == aURL) {
       if (aCallback)
         aCallback();
@@ -2137,6 +2178,7 @@ var gDiscoverView = {
     this._browser.loadURI(aURL, {
       flags,
       triggeringPrincipal: aPrincipal || Services.scriptSecurityManager.createNullPrincipal({}),
+      headers,
     });
   },
 
@@ -2191,6 +2233,8 @@ var gDiscoverView = {
     // the error page
     aRequest.cancel(Cr.NS_BINDING_ABORTED);
   },
+
+  onContentBlockingEvent(aWebProgress, aRequest, aEvent) {},
 
   onStateChange(aWebProgress, aRequest, aStateFlags, aStatus) {
     let transferStart = Ci.nsIWebProgressListener.STATE_IS_DOCUMENT |
@@ -2252,6 +2296,7 @@ var gLegacyView = {
   node: null,
   _listBox: null,
   _categoryItem: null,
+  isRoot: true,
 
   initialize() {
     this.node = document.getElementById("legacy-view");
@@ -2350,6 +2395,7 @@ var gListView = {
   _listBox: null,
   _emptyNotice: null,
   _type: null,
+  isRoot: true,
 
   initialize() {
     this.node = document.getElementById("list-view");
@@ -2368,6 +2414,13 @@ var gListView = {
     document.getElementById("legacy-extensions-learnmore-link").addEventListener("click", evt => {
       gViewController.loadView("addons://legacy/");
     });
+
+    try {
+      document.getElementById("private-browsing-learnmore-link")
+              .setAttribute("href", SUPPORT_URL + "extensions-pb");
+    } catch (e) {
+      document.getElementById("private-browsing-notice").hidden = true;
+    }
 
     let findSignedAddonsLink = document.getElementById("find-alternative-addons");
     try {
@@ -2425,6 +2478,9 @@ var gListView = {
           showLegacyInfo = true;
         }
       }
+
+      let privateNotice = document.getElementById("private-browsing-notice");
+      privateNotice.hidden = allowPrivateBrowsingByDefault || aType != "extension";
 
       var elements = [];
 
@@ -2544,6 +2600,10 @@ var gListView = {
     if (aIsInstall && aObj.existingAddon)
       return;
 
+    if (aObj.addon && aObj.addon.hidden) {
+      return;
+    }
+
     let prop = aIsInstall ? "mInstall" : "mAddon";
     for (let item of this._listBox.childNodes) {
       if (item[prop] == aObj)
@@ -2585,20 +2645,52 @@ var gListView = {
   },
 };
 
-
 var gDetailView = {
   node: null,
   _addon: null,
   _loadingTimer: null,
   _autoUpdate: null,
+  isRoot: false,
+  restartingAddon: false,
 
   initialize() {
     this.node = document.getElementById("detail-view");
+    this.headingImage = this.node.querySelector(".card-heading-image");
 
     this._autoUpdate = document.getElementById("detail-autoUpdate");
 
     this._autoUpdate.addEventListener("command", () => {
       this._addon.applyBackgroundUpdates = this._autoUpdate.value;
+    }, true);
+
+    document.getElementById("detail-private-browsing-learnmore-link")
+            .setAttribute("href", SUPPORT_URL + "extensions-pb");
+
+    this._privateBrowsing = document.getElementById("detail-privateBrowsing");
+    this._privateBrowsing.addEventListener("command", async () => {
+      let addon = this._addon;
+      let policy = WebExtensionPolicy.getByID(addon.id);
+      let extension = policy && policy.extension;
+
+      let perms = {permissions: ["internal:privateBrowsingAllowed"], origins: []};
+      if (this._privateBrowsing.value == "1") {
+        await ExtensionPermissions.add(addon.id, perms, extension);
+      } else {
+        await ExtensionPermissions.remove(addon.id, perms, extension);
+      }
+
+      // Reload the extension if it is already enabled.  This ensures any change
+      // on the private browsing permission is properly handled.
+      if (addon.isActive) {
+        try {
+          this.restartingAddon = true;
+          await addon.reload();
+        } finally {
+          this.restartingAddon = false;
+          this.updateState();
+          this._updateView(addon, false);
+        }
+      }
     }, true);
   },
 
@@ -2610,14 +2702,20 @@ var gDetailView = {
     this.onPropertyChanged(["applyBackgroundUpdates"]);
   },
 
-  _updateView(aAddon, aIsRemote, aScrollToPreferences) {
+  async _updateView(aAddon, aIsRemote, aScrollToPreferences) {
+    // Skip updates to avoid flickering while restarting the addon.
+    if (this.restartingAddon) {
+      return;
+    }
+
     setSearchLabel(aAddon.type);
 
     // Set the preview image for themes, if available.
+    this.headingImage.src = "";
     if (aAddon.type == "theme") {
       let previewURL = aAddon.screenshots && aAddon.screenshots[0] && aAddon.screenshots[0].url;
       if (previewURL) {
-        this.node.querySelector(".card-heading-image").src = previewURL;
+        this.headingImage.src = previewURL;
       }
     }
 
@@ -2739,6 +2837,25 @@ var gDetailView = {
       document.getElementById("detail-findUpdates-btn").hidden = false;
     }
 
+    // Only type = "extension" will ever get privateBrowsingAllowed, other types have
+    // no code that would be affected by the setting.  The permission is read directly
+    // from ExtensionPermissions so we can get it whether or not the extension is
+    // currently active.
+    let privateBrowsingRow = document.getElementById("detail-privateBrowsing-row");
+    let privateBrowsingFooterRow = document.getElementById("detail-privateBrowsing-row-footer");
+    if (allowPrivateBrowsingByDefault || aAddon.type != "extension" ||
+        aAddon.incognito == "not_allowed") {
+      this._privateBrowsing.hidden = true;
+      privateBrowsingRow.hidden = true;
+      privateBrowsingFooterRow.hidden = true;
+    } else {
+      let perms = await ExtensionPermissions.get(aAddon.id);
+      this._privateBrowsing.hidden = false;
+      privateBrowsingRow.hidden = false;
+      privateBrowsingFooterRow.hidden = false;
+      this._privateBrowsing.value = perms.permissions.includes("internal:privateBrowsingAllowed") ? "1" : "0";
+    }
+
     document.getElementById("detail-prefs-btn").hidden = !aIsRemote &&
       !gViewController.commands.cmd_showItemPreferences.isEnabled(aAddon);
 
@@ -2817,6 +2934,11 @@ var gDetailView = {
   },
 
   updateState() {
+    // Skip updates to avoid flickering while restarting the addon.
+    if (this.restartingAddon) {
+      return;
+    }
+
     gViewController.updateCommands();
 
     var pending = this._addon.pendingOperations;
@@ -3261,6 +3383,7 @@ var gUpdatesView = {
   _emptyNotice: null,
   _updateSelected: null,
   _categoryItem: null,
+  isRoot: true,
 
   initialize() {
     this.node = document.getElementById("updates-view");
@@ -3468,6 +3591,36 @@ var gUpdatesView = {
   onPropertyChanged(aAddon, aProperties) {
     if (aProperties.includes("applyBackgroundUpdates"))
       this.updateAvailableCount();
+  },
+};
+
+var gShortcutsView = {
+  node: null,
+  loaded: null,
+  isRoot: false,
+
+  initialize() {
+    this.node = document.getElementById("shortcuts-view");
+    this.node.loadURI("chrome://mozapps/content/extensions/shortcuts.html", {
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+    });
+    // Store a Promise for when the contentWindow will exist.
+    this.loaded = new Promise(resolve => this.node.addEventListener("load", resolve, {once: true}));
+  },
+
+  async show() {
+    // Ensure the Extensions category is selected in case of refresh/restart.
+    gCategories.select("addons://list/extension");
+
+    await this.loaded;
+    await this.node.contentWindow.render();
+    gViewController.notifyViewChanged();
+  },
+
+  hide() {},
+
+  getSelectedAddon() {
+    return null;
   },
 };
 

@@ -33,6 +33,7 @@
 #include "mozilla/SnappyUncompressInputStream.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/storage.h"
+#include "mozilla/Telemetry.h"
 #include "mozilla/Unused.h"
 #include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/dom/ContentParent.h"
@@ -57,6 +58,7 @@
 #include "mozilla/dom/quota/Client.h"
 #include "mozilla/dom/quota/FileStreams.h"
 #include "mozilla/dom/quota/OriginScope.h"
+#include "mozilla/dom/quota/QuotaCommon.h"
 #include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/dom/quota/UsageInfo.h"
 #include "mozilla/ipc/BackgroundParent.h"
@@ -115,18 +117,18 @@
 #define DISABLE_ASSERTS_FOR_FUZZING 0
 
 #if DISABLE_ASSERTS_FOR_FUZZING
-#define ASSERT_UNLESS_FUZZING(...) \
-  do {                             \
-  } while (0)
+#  define ASSERT_UNLESS_FUZZING(...) \
+    do {                             \
+    } while (0)
 #else
-#define ASSERT_UNLESS_FUZZING(...) MOZ_ASSERT(false, __VA_ARGS__)
+#  define ASSERT_UNLESS_FUZZING(...) MOZ_ASSERT(false, __VA_ARGS__)
 #endif
 
 #define IDB_DEBUG_LOG(_args) \
   MOZ_LOG(IndexedDatabaseManager::GetLoggingModule(), LogLevel::Debug, _args)
 
 #if defined(MOZ_WIDGET_ANDROID)
-#define IDB_MOBILE
+#  define IDB_MOBILE
 #endif
 
 namespace mozilla {
@@ -260,6 +262,15 @@ const char kPrefFileHandleEnabled[] = "dom.fileHandle.enabled";
 #define PERMISSION_STRING_CHROME_BASE IDB_PREFIX "-chrome-"
 #define PERMISSION_STRING_CHROME_READ_SUFFIX "-read"
 #define PERMISSION_STRING_CHROME_WRITE_SUFFIX "-write"
+
+// The deletion marker file is created before RemoveDatabaseFilesAndDirectory
+// begins deleting a database. It is removed as the last step of deletion. If a
+// deletion marker file is found when initializing the origin, the deletion
+// routine is run again to ensure that the database and all of its related files
+// are removed. The primary goal of this mechanism is to avoid situations where
+// a database has been partially deleted, leading to inconsistent state for the
+// origin.
+#define IDB_DELETION_MARKER_FILE_PREFIX "idb-deleting-"
 
 #ifdef DEBUG
 
@@ -6819,9 +6830,6 @@ class DeleteDatabaseOp::VersionChangeOp final : public DatabaseOperationBase {
 
   void RunOnOwningThread();
 
-  nsresult DeleteFile(nsIFile* aDirectory, const nsAString& aFilename,
-                      QuotaManager* aQuotaManager);
-
   NS_DECL_NSIRUNNABLE
 };
 
@@ -7868,10 +7876,14 @@ class QuotaClient final : public mozilla::dom::quota::Client {
   nsresult GetDirectory(PersistenceType aPersistenceType,
                         const nsACString& aOrigin, nsIFile** aDirectory);
 
+  // The aObsoleteFiles will collect files based on the marker files. For now,
+  // InitOrigin() is the only consumer of this argument because it checks those
+  // unfinished deletion and clean them up after that.
   nsresult GetDatabaseFilenames(
       nsIFile* aDirectory, const AtomicBool& aCanceled, bool aForUpgrade,
       nsTArray<nsString>& aSubdirsToProcess,
-      nsTHashtable<nsStringHashKey>& aDatabaseFilename);
+      nsTHashtable<nsStringHashKey>& aDatabaseFilename,
+      nsTHashtable<nsStringHashKey>* aObsoleteFilenames = nullptr);
 
   nsresult GetUsageForDirectoryInternal(nsIFile* aDirectory,
                                         const AtomicBool& aCanceled,
@@ -8329,6 +8341,17 @@ nsresult DeserializeStructuredCloneFile(FileManager* aFileManager,
 
   RefPtr<FileInfo> fileInfo = aFileManager->GetFileInfo(id);
   MOZ_ASSERT(fileInfo);
+  // XXX In bug 1432133, for some reasons FileInfo object cannot be got. This
+  // is just a short-term fix, and we are working on finding the real cause
+  // in bug 1519859.
+  if (!fileInfo) {
+    IDB_WARNING(
+        "Corrupt structured clone data detected in IndexedDB. Failing the "
+        "database request. Bug 1519859 will address this problem.");
+    Telemetry::ScalarAdd(Telemetry::ScalarID::IDB_FAILURE_FILEINFO_ERROR, 1);
+
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
 
   aFile->mFileInfo.swap(fileInfo);
   aFile->mType = type;
@@ -8553,6 +8576,302 @@ nsresult SerializeStructuredCloneFiles(
       default:
         MOZ_CRASH("Should never get here!");
     }
+  }
+
+  return NS_OK;
+}
+
+// Idempotently delete a file, decreasing the quota usage as appropriate. If the
+// file no longer exists, success is returned, although quota usage can't be
+// decreased. (With the assumption being that the file was already deleted prior
+// to this logic running, and the non-existent file was no longer tracked by
+// quota because it didn't exist at initialization time or a previous deletion
+// call updated the usage.)
+nsresult DeleteFile(nsIFile* aDirectory, const nsAString& aFilename,
+                    QuotaManager* aQuotaManager,
+                    const PersistenceType aPersistenceType,
+                    const nsACString& aGroup, const nsACString& aOrigin) {
+  AssertIsOnIOThread();
+  MOZ_ASSERT(aDirectory);
+  MOZ_ASSERT(!aFilename.IsEmpty());
+
+  nsCOMPtr<nsIFile> file;
+  nsresult rv = aDirectory->Clone(getter_AddRefs(file));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = file->Append(aFilename);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  int64_t fileSize;
+  if (aQuotaManager) {
+    rv = file->GetFileSize(&fileSize);
+    if (rv == NS_ERROR_FILE_NOT_FOUND ||
+        rv == NS_ERROR_FILE_TARGET_DOES_NOT_EXIST) {
+      return NS_OK;
+    }
+
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    MOZ_ASSERT(fileSize >= 0);
+  }
+
+  rv = file->Remove(false);
+  if (rv == NS_ERROR_FILE_NOT_FOUND ||
+      rv == NS_ERROR_FILE_TARGET_DOES_NOT_EXIST) {
+    return NS_OK;
+  }
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (aQuotaManager && fileSize > 0) {
+    aQuotaManager->DecreaseUsageForOrigin(aPersistenceType, aGroup, aOrigin,
+                                          fileSize);
+  }
+
+  return NS_OK;
+}
+
+nsresult DeleteFilesNoQuota(nsIFile* aDirectory, const nsAString& aFilename) {
+  AssertIsOnIOThread();
+  MOZ_ASSERT(aDirectory);
+  MOZ_ASSERT(!aFilename.IsEmpty());
+
+  // The current using function hasn't initialzed the origin, so in here we
+  // don't update the size of origin. Adding this assertion for preventing from
+  // misusing.
+  DebugOnly<QuotaManager*> quotaManager = QuotaManager::Get();
+  MOZ_ASSERT(!quotaManager->IsTemporaryStorageInitialized());
+
+  nsCOMPtr<nsIFile> file;
+  nsresult rv = aDirectory->Clone(getter_AddRefs(file));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = file->Append(aFilename);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = file->Remove(true);
+  if (rv == NS_ERROR_FILE_NOT_FOUND ||
+      rv == NS_ERROR_FILE_TARGET_DOES_NOT_EXIST) {
+    return NS_OK;
+  }
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
+// CreateMarkerFile and RemoveMarkerFile are a pair of functions to indicate
+// whether having removed all the files successfully. The marker file should
+// be checked before executing the next operation or initialization.
+nsresult CreateMarkerFile(nsIFile* aBaseDirectory,
+                          const nsAString& aDatabaseNameBase,
+                          nsIFile** aMarkerFileOut) {
+  AssertIsOnIOThread();
+  MOZ_ASSERT(aBaseDirectory);
+  MOZ_ASSERT(!aDatabaseNameBase.IsEmpty());
+
+  nsCOMPtr<nsIFile> markerFile;
+  nsresult rv = aBaseDirectory->Clone(getter_AddRefs(markerFile));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = markerFile->Append(NS_LITERAL_STRING(IDB_DELETION_MARKER_FILE_PREFIX) +
+                          aDatabaseNameBase);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = markerFile->Create(nsIFile::NORMAL_FILE_TYPE, 0644);
+  if (rv != NS_ERROR_FILE_ALREADY_EXISTS && NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  markerFile.forget(aMarkerFileOut);
+
+  return NS_OK;
+}
+
+nsresult RemoveMarkerFile(nsIFile* aMarkerFile) {
+  AssertIsOnIOThread();
+  MOZ_ASSERT(aMarkerFile);
+
+  DebugOnly<bool> exists;
+  MOZ_ASSERT(NS_SUCCEEDED(aMarkerFile->Exists(&exists)));
+  MOZ_ASSERT(exists);
+
+  nsresult rv = aMarkerFile->Remove(false);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
+// Idempotently delete all the parts of an IndexedDB database including its
+// SQLite database file, its WAL journal, it's shared-memory file, and its
+// Blob/Files sub-directory. A marker file is created prior to performing the
+// deletion so that in the event we crash or fail to successfully delete the
+// database and its files, we will re-attempt the deletion the next time the
+// origin is initialized using this method. Because this means the method may be
+// called on a partially deleted database, this method uses DeleteFile which
+// succeeds when the file we ask it to delete does not actually exist. The
+// marker file is removed once deletion has successfully completed.
+nsresult RemoveDatabaseFilesAndDirectory(nsIFile* aBaseDirectory,
+                                         const nsAString& aFilenameBase,
+                                         QuotaManager* aQuotaManager,
+                                         const PersistenceType aPersistenceType,
+                                         const nsACString& aGroup,
+                                         const nsACString& aOrigin,
+                                         const nsAString& aDatabaseName) {
+  AssertIsOnIOThread();
+  MOZ_ASSERT(aBaseDirectory);
+  MOZ_ASSERT(!aFilenameBase.IsEmpty());
+
+  AUTO_PROFILER_LABEL("RemoveDatabaseFilesAndDirectory", DOM);
+
+  nsCOMPtr<nsIFile> markerFile;
+  nsresult rv = CreateMarkerFile(aBaseDirectory, aFilenameBase,
+                                 getter_AddRefs(markerFile));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  // The database file counts towards quota.
+  nsAutoString filename = aFilenameBase + NS_LITERAL_STRING(".sqlite");
+
+  rv = DeleteFile(aBaseDirectory, filename, aQuotaManager, aPersistenceType,
+                  aGroup, aOrigin);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  // .sqlite-journal files don't count towards quota.
+  const NS_ConvertASCIItoUTF16 journalSuffix(
+      kSQLiteJournalSuffix, LiteralStringLength(kSQLiteJournalSuffix));
+
+  filename = aFilenameBase + journalSuffix;
+
+  rv = DeleteFile(aBaseDirectory, filename, /* doesn't count */ nullptr,
+                  aPersistenceType, aGroup, aOrigin);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  // .sqlite-shm files don't count towards quota.
+  const NS_ConvertASCIItoUTF16 shmSuffix(kSQLiteSHMSuffix,
+                                         LiteralStringLength(kSQLiteSHMSuffix));
+
+  filename = aFilenameBase + shmSuffix;
+
+  rv = DeleteFile(aBaseDirectory, filename, /* doesn't count */ nullptr,
+                  aPersistenceType, aGroup, aOrigin);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  // .sqlite-wal files do count towards quota.
+  const NS_ConvertASCIItoUTF16 walSuffix(kSQLiteWALSuffix,
+                                         LiteralStringLength(kSQLiteWALSuffix));
+
+  filename = aFilenameBase + walSuffix;
+
+  rv = DeleteFile(aBaseDirectory, filename, aQuotaManager, aPersistenceType,
+                  aGroup, aOrigin);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  nsCOMPtr<nsIFile> fmDirectory;
+  rv = aBaseDirectory->Clone(getter_AddRefs(fmDirectory));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  // The files directory counts towards quota.
+  const NS_ConvertASCIItoUTF16 filesSuffix(
+      kFileManagerDirectoryNameSuffix,
+      LiteralStringLength(kFileManagerDirectoryNameSuffix));
+
+  rv = fmDirectory->Append(aFilenameBase + filesSuffix);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  bool exists;
+  rv = fmDirectory->Exists(&exists);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (exists) {
+    bool isDirectory;
+    rv = fmDirectory->IsDirectory(&isDirectory);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    if (NS_WARN_IF(!isDirectory)) {
+      IDB_REPORT_INTERNAL_ERR();
+      return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+    }
+
+    uint64_t usage = 0;
+
+    if (aQuotaManager) {
+      rv = FileManager::GetUsage(fmDirectory, &usage);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+    }
+
+    rv = fmDirectory->Remove(true);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      // We may have deleted some files, check if we can and update quota
+      // information before returning the error.
+      if (aQuotaManager) {
+        uint64_t newUsage;
+        if (NS_SUCCEEDED(FileManager::GetUsage(fmDirectory, &newUsage))) {
+          MOZ_ASSERT(newUsage <= usage);
+          usage = usage - newUsage;
+        }
+      }
+    }
+
+    if (aQuotaManager && usage) {
+      aQuotaManager->DecreaseUsageForOrigin(aPersistenceType, aGroup, aOrigin,
+                                            usage);
+    }
+
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+  }
+
+  IndexedDatabaseManager* mgr = IndexedDatabaseManager::Get();
+  MOZ_ASSERT_IF(aQuotaManager, mgr);
+
+  if (mgr) {
+    mgr->InvalidateFileManager(aPersistenceType, aOrigin, aDatabaseName);
+  }
+
+  rv = RemoveMarkerFile(markerFile);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
   }
 
   return NS_OK;
@@ -12262,12 +12581,7 @@ already_AddRefed<FileInfo> Database::GetBlob(const IPCBlob& aIPCBlob) {
 
   const IPCStream& ipcStream = stream.get_IPCStream();
 
-  if (ipcStream.type() != IPCStream::TInputStreamParamsWithFds) {
-    return nullptr;
-  }
-
-  const InputStreamParams& inputStreamParams =
-      ipcStream.get_InputStreamParamsWithFds().stream();
+  const InputStreamParams& inputStreamParams = ipcStream.stream();
   if (inputStreamParams.type() !=
       InputStreamParams::TIPCBlobInputStreamParams) {
     return nullptr;
@@ -15506,6 +15820,7 @@ nsresult QuotaClient::InitOrigin(PersistenceType aPersistenceType,
   nsresult rv =
       GetDirectory(aPersistenceType, aOrigin, getter_AddRefs(directory));
   if (NS_WARN_IF(NS_FAILED(rv))) {
+    REPORT_TELEMETRY_INIT_ERR(kExternalError, IDB_GetDirectory);
     return rv;
   }
 
@@ -15515,10 +15830,12 @@ nsresult QuotaClient::InitOrigin(PersistenceType aPersistenceType,
 
   AutoTArray<nsString, 20> subdirsToProcess;
   nsTHashtable<nsStringHashKey> databaseFilenames(20);
+  nsTHashtable<nsStringHashKey> obsoleteFilenames;
   rv = GetDatabaseFilenames(directory, aCanceled,
                             /* aForUpgrade */ false, subdirsToProcess,
-                            databaseFilenames);
+                            databaseFilenames, &obsoleteFilenames);
   if (NS_WARN_IF(NS_FAILED(rv))) {
+    REPORT_TELEMETRY_INIT_ERR(kExternalError, IDB_GetDBFilenames);
     return rv;
   }
 
@@ -15532,11 +15849,38 @@ nsresult QuotaClient::InitOrigin(PersistenceType aPersistenceType,
     // The directory must have the correct suffix.
     nsDependentSubstring subdirNameBase;
     if (NS_WARN_IF(!GetBaseFilename(subdirName, filesSuffix, subdirNameBase))) {
-      return NS_ERROR_UNEXPECTED;
+      // If there is an unexpected directory in the idb directory, trying to
+      // delete at first instead of breaking the whole initialization.
+      if (NS_WARN_IF(NS_FAILED(DeleteFilesNoQuota(directory, subdirName)))) {
+        REPORT_TELEMETRY_INIT_ERR(kExternalError, IDB_GetBaseFilename);
+        return NS_ERROR_UNEXPECTED;
+      }
+
+      continue;
+    }
+
+    if (obsoleteFilenames.Contains(subdirNameBase)) {
+      rv = RemoveDatabaseFilesAndDirectory(directory, subdirNameBase, nullptr,
+                                           aPersistenceType, aGroup, aOrigin,
+                                           EmptyString());
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        // If we somehow running into here, it probably means we are in a
+        // serious situation. e.g. Filesystem corruption.
+        // Will handle this in bug 1521541.
+        REPORT_TELEMETRY_INIT_ERR(kExternalError, IDB_RemoveDBFiles);
+        return NS_ERROR_UNEXPECTED;
+      }
+
+      databaseFilenames.RemoveEntry(subdirNameBase);
+      continue;
     }
 
     // The directory base must exist in databaseFilenames.
-    if (NS_WARN_IF(!databaseFilenames.GetEntry(subdirNameBase))) {
+    // If there is an unexpected directory in the idb directory, trying to
+    // delete at first instead of breaking the whole initialization.
+    if (NS_WARN_IF(!databaseFilenames.GetEntry(subdirNameBase)) &&
+        NS_WARN_IF(NS_FAILED(DeleteFilesNoQuota(directory, subdirName)))) {
+      REPORT_TELEMETRY_INIT_ERR(kExternalError, IDB_GetEntry);
       return NS_ERROR_UNEXPECTED;
     }
   }
@@ -15553,22 +15897,26 @@ nsresult QuotaClient::InitOrigin(PersistenceType aPersistenceType,
     nsCOMPtr<nsIFile> fmDirectory;
     rv = directory->Clone(getter_AddRefs(fmDirectory));
     if (NS_WARN_IF(NS_FAILED(rv))) {
+      REPORT_TELEMETRY_INIT_ERR(kExternalError, IDB_Clone);
       return rv;
     }
 
     rv = fmDirectory->Append(databaseFilename + filesSuffix);
     if (NS_WARN_IF(NS_FAILED(rv))) {
+      REPORT_TELEMETRY_INIT_ERR(kExternalError, IDB_Append);
       return rv;
     }
 
     nsCOMPtr<nsIFile> databaseFile;
     rv = directory->Clone(getter_AddRefs(databaseFile));
     if (NS_WARN_IF(NS_FAILED(rv))) {
+      REPORT_TELEMETRY_INIT_ERR(kExternalError, IDB_Clone2);
       return rv;
     }
 
     rv = databaseFile->Append(databaseFilename + sqliteSuffix);
     if (NS_WARN_IF(NS_FAILED(rv))) {
+      REPORT_TELEMETRY_INIT_ERR(kExternalError, IDB_Append2);
       return rv;
     }
 
@@ -15576,11 +15924,13 @@ nsresult QuotaClient::InitOrigin(PersistenceType aPersistenceType,
     if (aUsageInfo) {
       rv = directory->Clone(getter_AddRefs(walFile));
       if (NS_WARN_IF(NS_FAILED(rv))) {
+        REPORT_TELEMETRY_INIT_ERR(kExternalError, IDB_Clone3);
         return rv;
       }
 
       rv = walFile->Append(databaseFilename + walSuffix);
       if (NS_WARN_IF(NS_FAILED(rv))) {
+        REPORT_TELEMETRY_INIT_ERR(kExternalError, IDB_Append3);
         return rv;
       }
     }
@@ -15589,6 +15939,7 @@ nsresult QuotaClient::InitOrigin(PersistenceType aPersistenceType,
                                     aGroup, aOrigin,
                                     TelemetryIdForFile(databaseFile));
     if (NS_WARN_IF(NS_FAILED(rv))) {
+      REPORT_TELEMETRY_INIT_ERR(kInternalError, IDB_InitDirectory);
       return rv;
     }
 
@@ -15596,6 +15947,7 @@ nsresult QuotaClient::InitOrigin(PersistenceType aPersistenceType,
       int64_t fileSize;
       rv = databaseFile->GetFileSize(&fileSize);
       if (NS_WARN_IF(NS_FAILED(rv))) {
+        REPORT_TELEMETRY_INIT_ERR(kExternalError, IDB_GetFileSize);
         return rv;
       }
 
@@ -15609,12 +15961,14 @@ nsresult QuotaClient::InitOrigin(PersistenceType aPersistenceType,
         aUsageInfo->AppendToDatabaseUsage(uint64_t(fileSize));
       } else if (NS_WARN_IF(rv != NS_ERROR_FILE_NOT_FOUND &&
                             rv != NS_ERROR_FILE_TARGET_DOES_NOT_EXIST)) {
+        REPORT_TELEMETRY_INIT_ERR(kExternalError, IDB_GetWalFileSize);
         return rv;
       }
 
       uint64_t usage;
       rv = FileManager::GetUsage(fmDirectory, &usage);
       if (NS_WARN_IF(NS_FAILED(rv))) {
+        REPORT_TELEMETRY_INIT_ERR(kExternalError, IDB_GetUsage);
         return rv;
       }
 
@@ -15820,7 +16174,8 @@ nsresult QuotaClient::GetDirectory(PersistenceType aPersistenceType,
 nsresult QuotaClient::GetDatabaseFilenames(
     nsIFile* aDirectory, const AtomicBool& aCanceled, bool aForUpgrade,
     nsTArray<nsString>& aSubdirsToProcess,
-    nsTHashtable<nsStringHashKey>& aDatabaseFilenames) {
+    nsTHashtable<nsStringHashKey>& aDatabaseFilenames,
+    nsTHashtable<nsStringHashKey>* aObsoleteFilenames) {
   AssertIsOnIOThread();
   MOZ_ASSERT(aDirectory);
 
@@ -15859,10 +16214,24 @@ nsresult QuotaClient::GetDatabaseFilenames(
       continue;
     }
 
-    // Skip Desktop Service Store (.DS_Store) files. These files are only used
-    // on Mac OS X, but the profile can be shared across different operating
-    // systems, so we check it on all platforms.
-    if (leafName.EqualsLiteral(DSSTORE_FILE_NAME)) {
+    if (aObsoleteFilenames &&
+        StringBeginsWith(leafName,
+                         NS_LITERAL_STRING(IDB_DELETION_MARKER_FILE_PREFIX))) {
+      const uint32_t start = 13;
+      MOZ_ASSERT(start == LiteralStringLength(IDB_DELETION_MARKER_FILE_PREFIX));
+      aObsoleteFilenames->PutEntry(Substring(leafName, start));
+      continue;
+    }
+
+    // Skip OS metadata files. These files are only used in different platforms,
+    // but the profile can be shared across different operating systems, so we
+    // check it on all platforms.
+    if (QuotaManager::IsOSMetadata(leafName)) {
+      continue;
+    }
+
+    // Skip files starting with ".".
+    if (QuotaManager::IsDotFile(leafName)) {
       continue;
     }
 
@@ -15936,6 +16305,19 @@ nsresult QuotaClient::GetUsageForDirectoryInternal(nsIFile* aDirectory,
     rv = file->GetLeafName(leafName);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
+    }
+
+    // Ignore the markerfiles. Note: the unremoved files can still be calculated
+    // here as long as its size matches the size recorded in QuotaManager
+    // in-memory objects.
+    if (StringBeginsWith(leafName,
+                         NS_LITERAL_STRING(IDB_DELETION_MARKER_FILE_PREFIX))) {
+      continue;
+    }
+
+    if (QuotaManager::IsOSMetadata(leafName) ||
+        QuotaManager::IsDotFile(leafName)) {
+      continue;
     }
 
     // Journal files and sqlite-shm files don't count towards usage.
@@ -19112,6 +19494,35 @@ nsresult OpenDatabaseOp::DoDatabaseWork() {
   nsAutoString filename;
   GetDatabaseFilename(databaseName, filename);
 
+  nsCOMPtr<nsIFile> markerFile;
+  rv = dbDirectory->Clone(getter_AddRefs(markerFile));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = markerFile->Append(NS_LITERAL_STRING(IDB_DELETION_MARKER_FILE_PREFIX) +
+                          filename);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  markerFile->Exists(&exists);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (exists) {
+    // Delete the database and directroy since they should be deleted in
+    // previous operation.
+    // Note: only update usage to the QuotaManager when mEnforcingQuota == true
+    rv = RemoveDatabaseFilesAndDirectory(
+        dbDirectory, filename, mEnforcingQuota ? quotaManager : nullptr,
+        persistenceType, mGroup, mOrigin, databaseName);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
   nsCOMPtr<nsIFile> dbFile;
   rv = dbDirectory->Clone(getter_AddRefs(dbFile));
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -20596,67 +21007,6 @@ void DeleteDatabaseOp::SendResults() {
   FinishSendResults();
 }
 
-nsresult DeleteDatabaseOp::VersionChangeOp::DeleteFile(
-    nsIFile* aDirectory, const nsAString& aFilename,
-    QuotaManager* aQuotaManager) {
-  AssertIsOnIOThread();
-  MOZ_ASSERT(aDirectory);
-  MOZ_ASSERT(!aFilename.IsEmpty());
-  MOZ_ASSERT_IF(aQuotaManager, mDeleteDatabaseOp->mEnforcingQuota);
-
-  MOZ_ASSERT(mDeleteDatabaseOp->mState == State::DatabaseWorkVersionChange);
-
-  AUTO_PROFILER_LABEL("DeleteDatabaseOp::VersionChangeOp::DeleteFile", DOM);
-
-  nsCOMPtr<nsIFile> file;
-  nsresult rv = aDirectory->Clone(getter_AddRefs(file));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  rv = file->Append(aFilename);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  int64_t fileSize;
-
-  if (aQuotaManager) {
-    rv = file->GetFileSize(&fileSize);
-    if (rv == NS_ERROR_FILE_NOT_FOUND ||
-        rv == NS_ERROR_FILE_TARGET_DOES_NOT_EXIST) {
-      return NS_OK;
-    }
-
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    MOZ_ASSERT(fileSize >= 0);
-  }
-
-  rv = file->Remove(false);
-  if (rv == NS_ERROR_FILE_NOT_FOUND ||
-      rv == NS_ERROR_FILE_TARGET_DOES_NOT_EXIST) {
-    return NS_OK;
-  }
-
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  if (aQuotaManager && fileSize > 0) {
-    const PersistenceType& persistenceType =
-        mDeleteDatabaseOp->mCommonParams.metadata().persistenceType();
-
-    aQuotaManager->DecreaseUsageForOrigin(persistenceType,
-                                          mDeleteDatabaseOp->mGroup,
-                                          mDeleteDatabaseOp->mOrigin, fileSize);
-  }
-
-  return NS_OK;
-}
-
 nsresult DeleteDatabaseOp::VersionChangeOp::RunOnIOThread() {
   AssertIsOnIOThread();
   MOZ_ASSERT(mDeleteDatabaseOp->mState == State::DatabaseWorkVersionChange);
@@ -20684,124 +21034,13 @@ nsresult DeleteDatabaseOp::VersionChangeOp::RunOnIOThread() {
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
-  // The database file counts towards quota.
-  nsAutoString filename =
-      mDeleteDatabaseOp->mDatabaseFilenameBase + NS_LITERAL_STRING(".sqlite");
-
-  nsresult rv = DeleteFile(directory, filename, quotaManager);
+  nsresult rv = RemoveDatabaseFilesAndDirectory(
+      directory, mDeleteDatabaseOp->mDatabaseFilenameBase, quotaManager,
+      persistenceType, mDeleteDatabaseOp->mGroup, mDeleteDatabaseOp->mOrigin,
+      mDeleteDatabaseOp->mCommonParams.metadata().name());
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
-
-  // .sqlite-journal files don't count towards quota.
-  const NS_ConvertASCIItoUTF16 journalSuffix(
-      kSQLiteJournalSuffix, LiteralStringLength(kSQLiteJournalSuffix));
-
-  filename = mDeleteDatabaseOp->mDatabaseFilenameBase + journalSuffix;
-
-  rv = DeleteFile(directory, filename, /* doesn't count */ nullptr);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  // .sqlite-shm files don't count towards quota.
-  const NS_ConvertASCIItoUTF16 shmSuffix(kSQLiteSHMSuffix,
-                                         LiteralStringLength(kSQLiteSHMSuffix));
-
-  filename = mDeleteDatabaseOp->mDatabaseFilenameBase + shmSuffix;
-
-  rv = DeleteFile(directory, filename, /* doesn't count */ nullptr);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  // .sqlite-wal files do count towards quota.
-  const NS_ConvertASCIItoUTF16 walSuffix(kSQLiteWALSuffix,
-                                         LiteralStringLength(kSQLiteWALSuffix));
-
-  filename = mDeleteDatabaseOp->mDatabaseFilenameBase + walSuffix;
-
-  rv = DeleteFile(directory, filename, quotaManager);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  nsCOMPtr<nsIFile> fmDirectory;
-  rv = directory->Clone(getter_AddRefs(fmDirectory));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  // The files directory counts towards quota.
-  const NS_ConvertASCIItoUTF16 filesSuffix(
-      kFileManagerDirectoryNameSuffix,
-      LiteralStringLength(kFileManagerDirectoryNameSuffix));
-
-  rv = fmDirectory->Append(mDeleteDatabaseOp->mDatabaseFilenameBase +
-                           filesSuffix);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  bool exists;
-  rv = fmDirectory->Exists(&exists);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  if (exists) {
-    bool isDirectory;
-    rv = fmDirectory->IsDirectory(&isDirectory);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    if (NS_WARN_IF(!isDirectory)) {
-      IDB_REPORT_INTERNAL_ERR();
-      return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
-    }
-
-    uint64_t usage = 0;
-
-    if (mDeleteDatabaseOp->mEnforcingQuota) {
-      rv = FileManager::GetUsage(fmDirectory, &usage);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
-      }
-    }
-
-    rv = fmDirectory->Remove(true);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      // We may have deleted some files, check if we can and update quota
-      // information before returning the error.
-      if (mDeleteDatabaseOp->mEnforcingQuota) {
-        uint64_t newUsage;
-        if (NS_SUCCEEDED(FileManager::GetUsage(fmDirectory, &newUsage))) {
-          MOZ_ASSERT(newUsage <= usage);
-          usage = usage - newUsage;
-        }
-      }
-    }
-
-    if (mDeleteDatabaseOp->mEnforcingQuota && usage) {
-      quotaManager->DecreaseUsageForOrigin(persistenceType,
-                                           mDeleteDatabaseOp->mGroup,
-                                           mDeleteDatabaseOp->mOrigin, usage);
-    }
-
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-  }
-
-  IndexedDatabaseManager* mgr = IndexedDatabaseManager::Get();
-  MOZ_ASSERT(mgr);
-
-  const nsString& databaseName =
-      mDeleteDatabaseOp->mCommonParams.metadata().name();
-
-  mgr->InvalidateFileManager(persistenceType, mDeleteDatabaseOp->mOrigin,
-                             databaseName);
 
   rv = mOwningEventTarget->Dispatch(this, NS_DISPATCH_NORMAL);
   if (NS_WARN_IF(NS_FAILED(rv))) {

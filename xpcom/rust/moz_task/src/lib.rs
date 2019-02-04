@@ -72,12 +72,12 @@ pub trait Task {
 #[refcnt = "atomic"]
 pub struct InitTaskRunnable {
     name: &'static str,
-    task: Box<dyn Task>,
+    task: Box<dyn Task + Send + Sync>,
     has_run: AtomicBool,
 }
 
 impl TaskRunnable {
-    pub fn new(name: &'static str, task: Box<dyn Task>) -> Result<RefPtr<TaskRunnable>, nsresult> {
+    pub fn new(name: &'static str, task: Box<dyn Task + Send + Sync>) -> Result<RefPtr<TaskRunnable>, nsresult> {
         assert!(is_main_thread());
         Ok(TaskRunnable::allocate(InitTaskRunnable {
             name,

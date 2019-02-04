@@ -23,7 +23,7 @@ use {ImageRendering, LayoutPoint, LayoutPrimitiveInfo, LayoutRect, LayoutSideOff
 use {LayoutTransform, LayoutVector2D, LineDisplayItem, LineOrientation, LineStyle, MixBlendMode};
 use {PipelineId, PropertyBinding, ReferenceFrameDisplayListItem};
 use {PushStackingContextDisplayItem, RadialGradient, RadialGradientDisplayItem};
-use {RectangleDisplayItem, ReferenceFrame, ScrollFrameDisplayItem, ScrollSensitivity};
+use {RectangleDisplayItem, ReferenceFrame, ReferenceFrameKind, ScrollFrameDisplayItem, ScrollSensitivity};
 use {SerializedDisplayItem, Shadow, SpaceAndClipInfo, SpatialId, SpecificDisplayItem};
 use {StackingContext, StickyFrameDisplayItem, StickyOffsetBounds};
 use {TextDisplayItem, TransformStyle, YuvColorSpace, YuvData, YuvImageDisplayItem, ColorDepth};
@@ -1256,8 +1256,8 @@ impl DisplayListBuilder {
         rect: &LayoutRect,
         parent: SpatialId,
         transform_style: TransformStyle,
-        transform: Option<PropertyBinding<LayoutTransform>>,
-        perspective: Option<LayoutTransform>,
+        transform: PropertyBinding<LayoutTransform>,
+        kind: ReferenceFrameKind,
     ) -> SpatialId {
         let id = self.generate_spatial_index();
 
@@ -1265,7 +1265,7 @@ impl DisplayListBuilder {
             reference_frame: ReferenceFrame {
                 transform_style,
                 transform,
-                perspective,
+                kind,
                 id,
             },
         });
@@ -1304,6 +1304,7 @@ impl DisplayListBuilder {
         mix_blend_mode: MixBlendMode,
         filters: &[FilterOp],
         raster_space: RasterSpace,
+        cache_tiles: bool,
     ) {
         let item = SpecificDisplayItem::PushStackingContext(PushStackingContextDisplayItem {
             stacking_context: StackingContext {
@@ -1311,6 +1312,7 @@ impl DisplayListBuilder {
                 mix_blend_mode,
                 clip_id,
                 raster_space,
+                cache_tiles,
             },
         });
 
@@ -1319,6 +1321,34 @@ impl DisplayListBuilder {
             clip_id: ClipId::invalid(),
         });
         self.push_iter(filters);
+    }
+
+    /// Helper for examples/ code.
+    pub fn push_simple_stacking_context(
+        &mut self,
+        layout: &LayoutPrimitiveInfo,
+        spatial_id: SpatialId,
+    ) {
+        self.push_simple_stacking_context_with_filters(layout, spatial_id, &[]);
+    }
+
+    /// Helper for examples/ code.
+    pub fn push_simple_stacking_context_with_filters(
+        &mut self,
+        layout: &LayoutPrimitiveInfo,
+        spatial_id: SpatialId,
+        filters: &[FilterOp],
+    ) {
+        self.push_stacking_context(
+            layout,
+            spatial_id,
+            None,
+            TransformStyle::Flat,
+            MixBlendMode::Normal,
+            filters,
+            RasterSpace::Screen,
+            /* cache_tiles = */ false,
+        );
     }
 
     pub fn pop_stacking_context(&mut self) {

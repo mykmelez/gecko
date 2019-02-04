@@ -7,7 +7,7 @@
 
 var EXPORTED_SYMBOLS = [ "ReaderParent" ];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(this, "PlacesUtils", "resource://gre/modules/PlacesUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "ReaderMode", "resource://gre/modules/ReaderMode.jsm");
@@ -78,6 +78,7 @@ var ReaderParent = {
       key.setAttribute("disabled", false);
 
       browser.setAttribute("aria-reader", "active");
+      Services.obs.notifyObservers(null, "reader-mode-available");
     } else {
       let enterText = gStringBundle.GetStringFromName("readerView.enter");
 
@@ -94,6 +95,7 @@ var ReaderParent = {
 
       if (browser.isArticle) {
         browser.setAttribute("aria-reader", "available");
+        Services.obs.notifyObservers(null, "reader-mode-available");
       } else {
         browser.removeAttribute("aria-reader");
       }

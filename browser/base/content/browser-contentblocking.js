@@ -85,12 +85,20 @@ var TrackingProtection = {
     this.categoryLabel.textContent = label ? gNavigatorBundle.getString(label) : "";
   },
 
+  // FIXME This must change! Fingerprinting and cryptomining must have theirs
+  // own sections. See bug 1522566.
   isBlocking(state) {
-    return (state & Ci.nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT) != 0;
+    return (state & Ci.nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT) != 0 ||
+           (state & Ci.nsIWebProgressListener.STATE_BLOCKED_FINGERPRINTING_CONTENT) != 0 ||
+           (state & Ci.nsIWebProgressListener.STATE_BLOCKED_CRYPTOMINING_CONTENT) != 0;
   },
 
+  // FIXME This must change! Fingerprinting and cryptomining must have theirs
+  // own sections. See bug 1522566.
   isAllowing(state) {
-    return (state & Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT) != 0;
+    return (state & Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT) != 0 ||
+           (state & Ci.nsIWebProgressListener.STATE_LOADED_FINGERPRINTING_CONTENT) != 0 ||
+           (state & Ci.nsIWebProgressListener.STATE_LOADED_CRYPTOMINING_CONTENT) != 0;
   },
 
   isDetected(state) {
@@ -652,16 +660,6 @@ var ContentBlocking = {
         Services.prefs.getBoolPref(this.PREF_ANIMATIONS_ENABLED, false));
     };
 
-    for (let blocker of this.blockers) {
-      if (blocker.init) {
-        blocker.init();
-      }
-    }
-
-    this.updateAnimationsEnabled();
-
-    Services.prefs.addObserver(this.PREF_ANIMATIONS_ENABLED, this.updateAnimationsEnabled);
-
     XPCOMUtils.defineLazyPreferenceGetter(this, "showBlockedLabels",
       this.PREF_SHOW_BLOCKED_LABELS, false, () => {
         for (let blocker of this.blockers) {
@@ -676,6 +674,16 @@ var ContentBlocking = {
     });
     XPCOMUtils.defineLazyPreferenceGetter(this, "reportBreakageEnabled",
       this.PREF_REPORT_BREAKAGE_ENABLED, false);
+
+    for (let blocker of this.blockers) {
+      if (blocker.init) {
+        blocker.init();
+      }
+    }
+
+    this.updateAnimationsEnabled();
+
+    Services.prefs.addObserver(this.PREF_ANIMATIONS_ENABLED, this.updateAnimationsEnabled);
 
     this.appMenuLabel.setAttribute("value", this.strings.appMenuTitle);
     this.appMenuLabel.setAttribute("tooltiptext", this.strings.appMenuTooltip);
@@ -791,7 +799,7 @@ var ContentBlocking = {
     // they see in the report breakage dialog.
     this.reportURI = gBrowser.currentURI;
     let urlWithoutQuery = this.reportURI.asciiSpec.replace("?" + this.reportURI.query, "");
-    this.reportBreakageURL.textContent = urlWithoutQuery;
+    this.reportBreakageURL.value = urlWithoutQuery;
     this.identityPopupMultiView.showSubView("identity-popup-breakageReportView");
   },
 
@@ -812,7 +820,7 @@ var ContentBlocking = {
     Services.telemetry.getHistogramById("TRACKING_PROTECTION_SHIELD").add(value);
   },
 
-  onSecurityChange(state, webProgress, isSimulated) {
+  onContentBlockingEvent(event, webProgress, isSimulated) {
     let baseURI = this._baseURIForChannelClassifier;
 
     // Don't deal with about:, file: etc.
@@ -831,9 +839,9 @@ var ContentBlocking = {
       // reporting it using the "report breakage" dialog. Under normal circumstances this
       // dialog should only be able to open in the currently selected tab and onSecurityChange
       // runs on tab switch, so we can avoid associating the data with the document directly.
-      blocker.activated = blocker.isBlocking(state);
+      blocker.activated = blocker.isBlocking(event);
       blocker.categoryItem.classList.toggle("blocked", blocker.enabled);
-      let detected = blocker.isDetected(state);
+      let detected = blocker.isDetected(event);
       blocker.categoryItem.hidden = !detected;
       anyDetected = anyDetected || detected;
       anyBlocking = anyBlocking || blocker.activated;

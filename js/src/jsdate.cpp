@@ -2923,11 +2923,11 @@ MOZ_ALWAYS_INLINE bool date_toLocaleString_impl(JSContext* cx,
    * with msvc; '%#c' requests that a full year be used in the result string.
    */
   static const char format[] =
-#if defined(_WIN32) && !defined(__MWERKS__)
+#  if defined(_WIN32) && !defined(__MWERKS__)
       "%#c"
-#else
+#  else
       "%c"
-#endif
+#  endif
       ;
 
   Rooted<DateObject*> dateObj(cx, &args.thisv().toObject().as<DateObject>());
@@ -2947,11 +2947,11 @@ MOZ_ALWAYS_INLINE bool date_toLocaleDateString_impl(JSContext* cx,
    * with msvc; '%#x' requests that a full year be used in the result string.
    */
   static const char format[] =
-#if defined(_WIN32) && !defined(__MWERKS__)
+#  if defined(_WIN32) && !defined(__MWERKS__)
       "%#x"
-#else
+#  else
       "%x"
-#endif
+#  endif
       ;
 
   Rooted<DateObject*> dateObj(cx, &args.thisv().toObject().as<DateObject>());
@@ -3136,7 +3136,7 @@ static bool NewDateObject(JSContext* cx, const CallArgs& args, ClippedTime t) {
   MOZ_ASSERT(args.isConstructing());
 
   RootedObject proto(cx);
-  if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+  if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_Date, &proto)) {
     return false;
   }
 

@@ -49,6 +49,7 @@
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/TextUtils.h"
+#include "mozilla/Telemetry.h"
 #include "mozilla/TypeTraits.h"
 #include "mozilla/Unused.h"
 #include "mozStorageCID.h"
@@ -78,11 +79,11 @@
 #define DISABLE_ASSERTS_FOR_FUZZING 0
 
 #if DISABLE_ASSERTS_FOR_FUZZING
-#define ASSERT_UNLESS_FUZZING(...) \
-  do {                             \
-  } while (0)
+#  define ASSERT_UNLESS_FUZZING(...) \
+    do {                             \
+    } while (0)
 #else
-#define ASSERT_UNLESS_FUZZING(...) MOZ_ASSERT(false, __VA_ARGS__)
+#  define ASSERT_UNLESS_FUZZING(...) MOZ_ASSERT(false, __VA_ARGS__)
 #endif
 
 #define UNKNOWN_FILE_WARNING(_leafName)                              \
@@ -1266,8 +1267,12 @@ void AssertNoUnderflow(T aDest, U aArg) {
   MOZ_ASSERT(uint64_t(aDest) >= uint64_t(aArg));
 }
 
-bool IsOSMetadata(const nsAString& aFileName) {
-  return aFileName.EqualsLiteral(DSSTORE_FILE_NAME);
+inline bool IsDotFile(const nsAString& aFileName) {
+  return QuotaManager::IsDotFile(aFileName);
+}
+
+inline bool IsOSMetadata(const nsAString& aFileName) {
+  return QuotaManager::IsOSMetadata(aFileName);
 }
 
 bool IsOriginMetadata(const nsAString& aFileName) {
@@ -1468,6 +1473,15 @@ class MOZ_STACK_CLASS OriginParser final {
     eExpectingPort,
     eExpectingEmptyTokenOrDriveLetterOrPathnameComponent,
     eExpectingEmptyTokenOrPathnameComponent,
+
+    // We transit from eExpectingHost to this state when we encounter a host
+    // beginning with "[" which indicates an IPv6 literal. Because we mangle the
+    // IPv6 ":" delimiter to be a "+", we will receive separate tokens for each
+    // portion of the IPv6 address, including a final token that ends with "]".
+    // (Note that we do not mangle "[" or "]".) Note that the URL spec
+    // explicitly disclaims support for "<zone_id>" and so we don't have to deal
+    // with that.
+    eExpectingIPV6Token,
     eComplete,
     eHandledTrailingSeparator
   };
@@ -1490,6 +1504,9 @@ class MOZ_STACK_CLASS OriginParser final {
   bool mMaybeDriveLetter;
   bool mError;
 
+  // Number of group which a IPv6 address has. Should be less than 9.
+  uint8_t mIPGroup;
+
  public:
   OriginParser(const nsACString& aOrigin,
                const OriginAttributes& aOriginAttributes)
@@ -1503,7 +1520,8 @@ class MOZ_STACK_CLASS OriginParser final {
         mInIsolatedMozBrowser(false),
         mUniversalFileOrigin(false),
         mMaybeDriveLetter(false),
-        mError(false) {}
+        mError(false),
+        mIPGroup(0) {}
 
   static ResultType ParseOrigin(const nsACString& aOrigin, nsCString& aSpec,
                                 OriginAttributes* aAttrs);
@@ -1667,7 +1685,8 @@ int64_t GetLastModifiedTime(nsIFile* aFile, bool aPersistent) {
           return rv;
         }
 
-        if (IsOriginMetadata(leafName) || IsTempMetadata(leafName)) {
+        if (IsOriginMetadata(leafName) || IsTempMetadata(leafName) ||
+            IsDotFile(leafName)) {
           return NS_OK;
         }
 
@@ -2868,6 +2887,19 @@ QuotaManager* QuotaManager::Get() {
 // static
 bool QuotaManager::IsShuttingDown() { return gShutdown; }
 
+// static
+bool QuotaManager::IsOSMetadata(const nsAString& aFileName) {
+  return aFileName.EqualsLiteral(DSSTORE_FILE_NAME) ||
+         aFileName.EqualsLiteral(DESKTOP_FILE_NAME) ||
+         aFileName.LowerCaseEqualsLiteral(DESKTOP_INI_FILE_NAME) ||
+         aFileName.EqualsLiteral(THUMBS_DB_FILE_NAME);
+}
+
+// static
+bool QuotaManager::IsDotFile(const nsAString& aFileName) {
+  return aFileName.First() == char16_t('.');
+}
+
 auto QuotaManager::CreateDirectoryLock(
     const Nullable<PersistenceType>& aPersistenceType, const nsACString& aGroup,
     const OriginScope& aOriginScope, const Nullable<Client::Type>& aClientType,
@@ -3625,18 +3657,24 @@ nsresult QuotaManager::GetDirectoryMetadata2(
 nsresult QuotaManager::GetDirectoryMetadata2WithRestore(
     nsIFile* aDirectory, bool aPersistent, int64_t* aTimestamp,
     bool* aPersisted, nsACString& aSuffix, nsACString& aGroup,
-    nsACString& aOrigin) {
+    nsACString& aOrigin, const bool aTelemetry) {
   nsresult rv = GetDirectoryMetadata2(aDirectory, aTimestamp, aPersisted,
                                       aSuffix, aGroup, aOrigin);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     rv = RestoreDirectoryMetadata2(aDirectory, aPersistent);
     if (NS_WARN_IF(NS_FAILED(rv))) {
+      if (aTelemetry) {
+        REPORT_TELEMETRY_INIT_ERR(kInternalError, Rep_RestoreDirMeta);
+      }
       return rv;
     }
 
     rv = GetDirectoryMetadata2(aDirectory, aTimestamp, aPersisted, aSuffix,
                                aGroup, aOrigin);
     if (NS_WARN_IF(NS_FAILED(rv))) {
+      if (aTelemetry) {
+        REPORT_TELEMETRY_INIT_ERR(kExternalError, Rep_GetDirMeta);
+      }
       return rv;
     }
   }
@@ -3711,20 +3749,29 @@ nsresult QuotaManager::InitializeRepository(PersistenceType aPersistenceType) {
   nsresult rv = NS_NewLocalFile(GetStoragePath(aPersistenceType), false,
                                 getter_AddRefs(directory));
   if (NS_WARN_IF(NS_FAILED(rv))) {
+    REPORT_TELEMETRY_INIT_ERR(kExternalError, Rep_NewLocalFile);
     return rv;
   }
 
   bool created;
   rv = EnsureDirectory(directory, &created);
   if (NS_WARN_IF(NS_FAILED(rv))) {
+    REPORT_TELEMETRY_INIT_ERR(kExternalError, Rep_EnsureDirectory);
     return rv;
   }
 
   nsCOMPtr<nsIDirectoryEnumerator> entries;
   rv = directory->GetDirectoryEntries(getter_AddRefs(entries));
   if (NS_WARN_IF(NS_FAILED(rv))) {
+    REPORT_TELEMETRY_INIT_ERR(kExternalError, Rep_GetDirEntries);
     return rv;
   }
+
+  // A keeper to defer the return only in Nightly, so that the telemetry data
+  // for whole profile can be collected
+#ifdef NIGHTLY_BUILD
+  nsresult statusKeeper = NS_OK;
+#endif
 
   nsCOMPtr<nsIFile> childDirectory;
   while (NS_SUCCEEDED(
@@ -3733,22 +3780,29 @@ nsresult QuotaManager::InitializeRepository(PersistenceType aPersistenceType) {
     bool isDirectory;
     rv = childDirectory->IsDirectory(&isDirectory);
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
+      REPORT_TELEMETRY_INIT_ERR(kExternalError, Rep_IsDirectory);
+      RECORD_IN_NIGHTLY(statusKeeper, rv);
+      CONTINUE_IN_NIGHTLY_RETURN_IN_OTHERS(rv);
     }
 
     if (!isDirectory) {
       nsString leafName;
       rv = childDirectory->GetLeafName(leafName);
       if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
+        REPORT_TELEMETRY_INIT_ERR(kExternalError, Rep_GetLeafName);
+        RECORD_IN_NIGHTLY(statusKeeper, rv);
+        CONTINUE_IN_NIGHTLY_RETURN_IN_OTHERS(rv);
       }
 
-      if (IsOSMetadata(leafName)) {
+      if (IsOSMetadata(leafName) || IsDotFile(leafName)) {
         continue;
       }
 
       UNKNOWN_FILE_WARNING(leafName);
-      return NS_ERROR_UNEXPECTED;
+
+      REPORT_TELEMETRY_INIT_ERR(kInternalError, Rep_UnexpectedFile);
+      RECORD_IN_NIGHTLY(statusKeeper, NS_ERROR_UNEXPECTED);
+      CONTINUE_IN_NIGHTLY_RETURN_IN_OTHERS(NS_ERROR_UNEXPECTED);
     }
 
     int64_t timestamp;
@@ -3758,20 +3812,35 @@ nsresult QuotaManager::InitializeRepository(PersistenceType aPersistenceType) {
     nsCString origin;
     rv = GetDirectoryMetadata2WithRestore(childDirectory,
                                           /* aPersistent */ false, &timestamp,
-                                          &persisted, suffix, group, origin);
+                                          &persisted, suffix, group, origin,
+                                          /* aTelemetry */ true);
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
+      // Error should have reported in GetDirectoryMetadata2WithRestore
+      RECORD_IN_NIGHTLY(statusKeeper, rv);
+      CONTINUE_IN_NIGHTLY_RETURN_IN_OTHERS(rv);
     }
 
     rv = InitializeOrigin(aPersistenceType, group, origin, timestamp, persisted,
                           childDirectory);
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
+      // Error should have reported in InitializeOrigin
+      RECORD_IN_NIGHTLY(statusKeeper, rv);
+      CONTINUE_IN_NIGHTLY_RETURN_IN_OTHERS(rv);
     }
   }
   if (NS_WARN_IF(NS_FAILED(rv))) {
+    REPORT_TELEMETRY_INIT_ERR(kInternalError, Rep_GetNextFile);
+    RECORD_IN_NIGHTLY(statusKeeper, rv);
+#ifndef NIGHTLY_BUILD
     return rv;
+#endif
   }
+
+#ifdef NIGHTLY_BUILD
+  if (NS_FAILED(statusKeeper)) {
+    return statusKeeper;
+  }
+#endif
 
   return NS_OK;
 }
@@ -3794,9 +3863,18 @@ nsresult QuotaManager::InitializeOrigin(PersistenceType aPersistenceType,
     usageInfo = new UsageInfo();
   }
 
+  // A keeper to defer the return only in Nightly, so that the telemetry data
+  // for whole profile can be collected
+#ifdef NIGHTLY_BUILD
+  nsresult statusKeeper = NS_OK;
+#endif
+
   nsCOMPtr<nsIDirectoryEnumerator> entries;
   rv = aDirectory->GetDirectoryEntries(getter_AddRefs(entries));
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    REPORT_TELEMETRY_INIT_ERR(kExternalError, Ori_GetDirEntries);
+    return rv;
+  }
 
   nsCOMPtr<nsIFile> file;
   while (NS_SUCCEEDED((rv = entries->GetNextFile(getter_AddRefs(file)))) &&
@@ -3804,13 +3882,17 @@ nsresult QuotaManager::InitializeOrigin(PersistenceType aPersistenceType,
     bool isDirectory;
     rv = file->IsDirectory(&isDirectory);
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
+      REPORT_TELEMETRY_INIT_ERR(kExternalError, Ori_IsDirectory);
+      RECORD_IN_NIGHTLY(statusKeeper, rv);
+      CONTINUE_IN_NIGHTLY_RETURN_IN_OTHERS(rv);
     }
 
     nsString leafName;
     rv = file->GetLeafName(leafName);
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
+      REPORT_TELEMETRY_INIT_ERR(kExternalError, Ori_GetLeafName);
+      RECORD_IN_NIGHTLY(statusKeeper, rv);
+      CONTINUE_IN_NIGHTLY_RETURN_IN_OTHERS(rv);
     }
 
     if (!isDirectory) {
@@ -3821,28 +3903,55 @@ nsresult QuotaManager::InitializeOrigin(PersistenceType aPersistenceType,
       if (IsTempMetadata(leafName)) {
         rv = file->Remove(/* recursive */ false);
         if (NS_WARN_IF(NS_FAILED(rv))) {
-          return rv;
+          REPORT_TELEMETRY_INIT_ERR(kExternalError, Ori_Remove);
+          RECORD_IN_NIGHTLY(statusKeeper, rv);
+          CONTINUE_IN_NIGHTLY_RETURN_IN_OTHERS(rv);
         }
 
         continue;
       }
 
+      if (IsOSMetadata(leafName) || IsDotFile(leafName)) {
+        continue;
+      }
+
       UNKNOWN_FILE_WARNING(leafName);
-      return NS_ERROR_UNEXPECTED;
+      REPORT_TELEMETRY_INIT_ERR(kInternalError, Ori_UnexpectedFile);
+      RECORD_IN_NIGHTLY(statusKeeper, NS_ERROR_UNEXPECTED);
+      CONTINUE_IN_NIGHTLY_RETURN_IN_OTHERS(NS_ERROR_UNEXPECTED);
     }
 
     Client::Type clientType;
     rv = Client::TypeFromText(leafName, clientType);
     if (NS_FAILED(rv)) {
       UNKNOWN_FILE_WARNING(leafName);
-      return NS_ERROR_UNEXPECTED;
+      REPORT_TELEMETRY_INIT_ERR(kInternalError, Ori_UnexpectedClient);
+      RECORD_IN_NIGHTLY(statusKeeper, NS_ERROR_UNEXPECTED);
+      CONTINUE_IN_NIGHTLY_RETURN_IN_OTHERS(NS_ERROR_UNEXPECTED);
     }
 
     Atomic<bool> dummy(false);
     rv = mClients[clientType]->InitOrigin(aPersistenceType, aGroup, aOrigin,
                                           /* aCanceled */ dummy, usageInfo);
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      // error should have reported in InitOrigin
+      RECORD_IN_NIGHTLY(statusKeeper, rv);
+      CONTINUE_IN_NIGHTLY_RETURN_IN_OTHERS(rv);
+    }
   }
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    REPORT_TELEMETRY_INIT_ERR(kInternalError, Ori_GetNextFile);
+    RECORD_IN_NIGHTLY(statusKeeper, rv);
+#ifndef NIGHTLY_BUILD
+    return rv;
+#endif
+  }
+
+#ifdef NIGHTLY_BUILD
+  if (NS_FAILED(statusKeeper)) {
+    return statusKeeper;
+  }
+#endif
 
   if (trackQuota) {
     InitQuotaForOrigin(aPersistenceType, aGroup, aOrigin,
@@ -5012,20 +5121,32 @@ nsresult QuotaManager::EnsureTemporaryStorageIsInitialized() {
 
   TimeStamp startTime = TimeStamp::Now();
 
+  // A keeper to defer the return only in Nightly, so that the telemetry data
+  // for whole profile can be collected
+  nsresult statusKeeper = NS_OK;
+
   nsresult rv = InitializeRepository(PERSISTENCE_TYPE_DEFAULT);
   if (NS_WARN_IF(NS_FAILED(rv))) {
+    RECORD_IN_NIGHTLY(statusKeeper, rv);
+
+#ifndef NIGHTLY_BUILD
     // We have to cleanup partially initialized quota.
     RemoveQuota();
 
     return rv;
+#endif
   }
 
   rv = InitializeRepository(PERSISTENCE_TYPE_TEMPORARY);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
+  if (NS_WARN_IF(NS_FAILED(rv)) || NS_FAILED(statusKeeper)) {
     // We have to cleanup partially initialized quota.
     RemoveQuota();
 
+#ifdef NIGHTLY_BUILD
+    return NS_FAILED(statusKeeper) ? statusKeeper : rv;
+#else
     return rv;
+#endif
   }
 
   Telemetry::AccumulateTimeDelta(Telemetry::QM_REPOSITORIES_INITIALIZATION_TIME,
@@ -6530,6 +6651,10 @@ nsresult QuotaUsageRequestBase::GetUsageForOrigin(
           continue;
         }
 
+        if (IsOSMetadata(leafName) || IsDotFile(leafName)) {
+          continue;
+        }
+
         UNKNOWN_FILE_WARNING(leafName);
         if (!initialized) {
           return NS_ERROR_UNEXPECTED;
@@ -6657,6 +6782,8 @@ nsresult GetUsageOp::TraverseRepository(QuotaManager* aQuotaManager,
         return rv;
       }
 
+      // Unknown files during getting usages are allowed. Just warn if we find
+      // them.
       if (!IsOSMetadata(leafName)) {
         UNKNOWN_FILE_WARNING(leafName);
       }
@@ -7944,6 +8071,9 @@ auto OriginParser::Parse(nsACString& aSpec, OriginAttributes* aAttrs)
 
   MOZ_ASSERT(mState == eComplete || mState == eHandledTrailingSeparator);
 
+  // For IPv6 URL, it should at least have three groups.
+  MOZ_ASSERT_IF(mIPGroup > 0, mIPGroup >= 3);
+
   if (mAppId == kNoAppId) {
     *aAttrs = mOriginAttributes;
   } else {
@@ -8174,6 +8304,16 @@ void OriginParser::HandleToken(const nsDependentCSubstring& aToken) {
 
       mHost = aToken;
 
+      if (aToken.First() == '[') {
+        MOZ_ASSERT(mIPGroup == 0);
+
+        ++mIPGroup;
+        mState = eExpectingIPV6Token;
+
+        MOZ_ASSERT(mTokenizer.hasMoreTokens());
+        return;
+      }
+
       mState = mTokenizer.hasMoreTokens() ? eExpectingPort : eComplete;
 
       return;
@@ -8261,6 +8401,22 @@ void OriginParser::HandleToken(const nsDependentCSubstring& aToken) {
       }
 
       HandlePathnameComponent(aToken);
+
+      return;
+    }
+
+    case eExpectingIPV6Token: {
+      // A safe check for preventing infinity recursion.
+      if (++mIPGroup > 8) {
+        mError = true;
+        return;
+      }
+
+      mHost.AppendLiteral(":");
+      mHost.Append(aToken);
+      if (!aToken.IsEmpty() && aToken.Last() == ']') {
+        mState = mTokenizer.hasMoreTokens() ? eExpectingPort : eComplete;
+      }
 
       return;
     }

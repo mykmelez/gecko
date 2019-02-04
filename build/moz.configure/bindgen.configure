@@ -4,14 +4,46 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+# cbindgen is needed by the style system build.
+cbindgen = check_prog('CBINDGEN', ['cbindgen'], paths=toolchain_search_path,
+                      when=depends(build_project)
+                      (lambda build_project: build_project != 'js'))
+
+
+@depends_if(cbindgen)
+@checking('cbindgen version')
+@imports(_from='textwrap', _import='dedent')
+def cbindgen_version(cbindgen):
+    cbindgen_min_version = Version('0.6.8')
+
+    # cbindgen x.y.z
+    version = Version(check_cmd_output(cbindgen, '--version').strip().split(" ")[1])
+
+    if version < cbindgen_min_version:
+        die(dedent('''\
+        cbindgen version {} is too old. At least version {} is required.
+
+        Please update using 'cargo install cbindgen --force' or running
+        './mach bootstrap', after removing the existing executable located at
+        {}.
+        '''.format(version, cbindgen_min_version, cbindgen)))
+
+    return version
+
+
+# Bindgen can use rustfmt to format Rust file, but it's not required.
+js_option(env='RUSTFMT', nargs=1, help='Path to the rustfmt program')
+
+rustfmt = check_prog('RUSTFMT', ['rustfmt'], paths=toolchain_search_path,
+                     input='RUSTFMT', allow_missing=True)
+
+
 # We support setting up the appropriate options for bindgen via setting
 # LLVM_CONFIG or by providing explicit configure options.  The Windows
 # installer of LLVM/Clang doesn't provide llvm-config, so we need both
 # methods to support all of our tier-1 platforms.
 @depends(host)
-@imports('which')
 @imports('os')
-@imports('subprocess')
 def llvm_config_paths(host):
     llvm_supported_versions = ['6.0', '5.0', '4.0', '3.9']
     llvm_config_progs = []
@@ -26,9 +58,9 @@ def llvm_config_paths(host):
     # Homebrew on macOS doesn't make clang available on PATH, so we have to
     # look for it in non-standard places.
     if host.kernel == 'Darwin':
-        try:
-            brew = which.which('brew')
-            brew_config = subprocess.check_output([brew, 'config']).strip()
+        brew = find_program('brew')
+        if brew:
+            brew_config = check_cmd_output(brew, 'config').strip()
 
             for line in brew_config.splitlines():
                 if line.startswith('HOMEBREW_PREFIX'):
@@ -37,9 +69,6 @@ def llvm_config_paths(host):
                     path = ['opt', 'llvm', 'bin', 'llvm-config']
                     llvm_config_progs.append(os.path.join(prefix, *path))
                     break
-        except which.WhichError:
-            # Homebrew not installed, which is fine.
-            pass
 
     # Also add in the location to which `mach bootstrap` or
     # `mach artifact toolchain` installs clang.
@@ -291,8 +320,6 @@ def basic_bindgen_cflags(host, target, is_unix, compiler_info, android_cflags):
             'compiler': {
                 'msvc': {
                     'default': [
-                        # For compatibility with MSVC 2015
-                        '-fms-compatibility-version=19',
                         # To enable the builtin __builtin_offsetof so that CRT wouldn't
                         # use reinterpret_cast in offsetof() which is not allowed inside
                         # static_assert().

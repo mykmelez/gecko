@@ -13,12 +13,12 @@
 #include "nsCoreUtils.h"
 
 #if defined(XP_WIN)
-#include "AccessibleWrap.h"
-#include "Compatibility.h"
-#include "mozilla/mscom/PassthruProxy.h"
-#include "mozilla/mscom/Ptr.h"
-#include "nsWinUtils.h"
-#include "RootAccessible.h"
+#  include "AccessibleWrap.h"
+#  include "Compatibility.h"
+#  include "mozilla/mscom/PassthruProxy.h"
+#  include "mozilla/mscom/Ptr.h"
+#  include "nsWinUtils.h"
+#  include "RootAccessible.h"
 #endif
 
 namespace mozilla {
@@ -411,6 +411,8 @@ mozilla::ipc::IPCResult DocAccessibleParent::RecvScrollingEvent(
 #if defined(ANDROID)
   ProxyScrollingEvent(target, aType, aScrollX, aScrollY, aMaxScrollX,
                       aMaxScrollY);
+#else
+  ProxyEvent(target, aType);
 #endif
 
   if (!nsCoreUtils::AccEventObserversExist()) {
@@ -700,9 +702,9 @@ void DocAccessibleParent::SendParentCOMProxy() {
     return;
   }
 
-#if defined(MOZ_CONTENT_SANDBOX)
+#  if defined(MOZ_CONTENT_SANDBOX)
   mParentProxyStream = holder.GetPreservedStream();
-#endif  // defined(MOZ_CONTENT_SANDBOX)
+#  endif  // defined(MOZ_CONTENT_SANDBOX)
 }
 
 void DocAccessibleParent::SetEmulatedWindowHandle(HWND aWindowHandle) {
@@ -714,7 +716,7 @@ void DocAccessibleParent::SetEmulatedWindowHandle(HWND aWindowHandle) {
 
 mozilla::ipc::IPCResult DocAccessibleParent::RecvGetWindowedPluginIAccessible(
     const WindowsHandle& aHwnd, IAccessibleHolder* aPluginCOMProxy) {
-#if defined(MOZ_CONTENT_SANDBOX)
+#  if defined(MOZ_CONTENT_SANDBOX)
   // We don't actually want the accessible object for aHwnd, but rather the
   // one that belongs to its child (see HTMLWin32ObjectAccessible).
   HWND childWnd = ::GetWindow(reinterpret_cast<HWND>(aHwnd), GW_CHILD);
@@ -736,9 +738,9 @@ mozilla::ipc::IPCResult DocAccessibleParent::RecvGetWindowedPluginIAccessible(
   aPluginCOMProxy->Set(IAccessibleHolder::COMPtrType(rawAccPlugin));
 
   return IPC_OK();
-#else
+#  else
   return IPC_FAIL(this, "Message unsupported in this build configuration");
-#endif
+#  endif
 }
 
 mozilla::ipc::IPCResult DocAccessibleParent::RecvFocusEvent(
@@ -777,18 +779,23 @@ mozilla::ipc::IPCResult DocAccessibleParent::RecvBatch(
     const uint64_t& aBatchType, nsTArray<BatchData>&& aData) {
   // Only do something in Android. We can't ifdef the entire protocol out in
   // the ipdl because it doesn't allow preprocessing.
-#if defined(ANDROID)
+#  if defined(ANDROID)
   nsTArray<ProxyAccessible*> proxies(aData.Length());
   for (size_t i = 0; i < aData.Length(); i++) {
     DocAccessibleParent* doc = static_cast<DocAccessibleParent*>(
         aData.ElementAt(i).Document().get_PDocAccessibleParent());
     MOZ_ASSERT(doc);
+
     ProxyAccessible* proxy = doc->GetAccessible(aData.ElementAt(i).ID());
-    MOZ_ASSERT(proxy);
+    if (!proxy) {
+      MOZ_ASSERT_UNREACHABLE("No proxy found!");
+      continue;
+    }
+
     proxies.AppendElement(proxy);
   }
   ProxyBatch(this, aBatchType, proxies, aData);
-#endif  // defined(XP_WIN)
+#  endif  // defined(XP_WIN)
   return IPC_OK();
 }
 #endif  // !defined(XP_WIN)

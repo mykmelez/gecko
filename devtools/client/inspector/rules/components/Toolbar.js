@@ -6,6 +6,8 @@
 
 const { createFactory, PureComponent } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
+const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
+const { connect } = require("devtools/client/shared/vendor/react-redux");
 
 const SearchBox = createFactory(require("./SearchBox"));
 
@@ -20,34 +22,45 @@ const { getStr } = require("../utils/l10n");
 
 class Toolbar extends PureComponent {
   static get propTypes() {
-    return {};
+    return {
+      isAddRuleEnabled: PropTypes.bool.isRequired,
+      isClassPanelExpanded: PropTypes.bool.isRequired,
+      onAddClass: PropTypes.func.isRequired,
+      onAddRule: PropTypes.func.isRequired,
+      onSetClassState: PropTypes.func.isRequired,
+      onToggleClassPanelExpanded: PropTypes.func.isRequired,
+      onTogglePseudoClass: PropTypes.func.isRequired,
+    };
   }
 
   constructor(props) {
     super(props);
 
     this.state = {
-      // Whether or not the class panel is expanded.
-      isClassPanelExpanded: false,
       // Whether or not the pseudo class panel is expanded.
       isPseudoClassPanelExpanded: false,
     };
 
+    this.onAddRuleClick = this.onAddRuleClick.bind(this);
     this.onClassPanelToggle = this.onClassPanelToggle.bind(this);
     this.onPseudoClassPanelToggle = this.onPseudoClassPanelToggle.bind(this);
+  }
+
+  onAddRuleClick(event) {
+    event.stopPropagation();
+    this.props.onAddRule();
   }
 
   onClassPanelToggle(event) {
     event.stopPropagation();
 
+    const isClassPanelExpanded = !this.props.isClassPanelExpanded;
+    this.props.onToggleClassPanelExpanded(isClassPanelExpanded);
     this.setState(prevState => {
-      const isClassPanelExpanded = !prevState.isClassPanelExpanded;
-      const isPseudoClassPanelExpanded = isClassPanelExpanded ?
-        false : prevState.isPseudoClassPanelExpanded;
-
       return {
-        isClassPanelExpanded,
-        isPseudoClassPanelExpanded,
+        isPseudoClassPanelExpanded: isClassPanelExpanded ?
+                                    false :
+                                    prevState.isPseudoClassPanelExpanded,
       };
     });
   }
@@ -55,23 +68,18 @@ class Toolbar extends PureComponent {
   onPseudoClassPanelToggle(event) {
     event.stopPropagation();
 
-    this.setState(prevState => {
-      const isPseudoClassPanelExpanded = !prevState.isPseudoClassPanelExpanded;
-      const isClassPanelExpanded = isPseudoClassPanelExpanded ?
-        false : prevState.isClassPanelExpanded;
+    const isPseudoClassPanelExpanded = !this.state.isPseudoClassPanelExpanded;
 
-      return {
-        isClassPanelExpanded,
-        isPseudoClassPanelExpanded,
-      };
-    });
+    if (isPseudoClassPanelExpanded) {
+      this.props.onToggleClassPanelExpanded(false);
+    }
+
+    this.setState({ isPseudoClassPanelExpanded });
   }
 
   render() {
-    const {
-      isClassPanelExpanded,
-      isPseudoClassPanelExpanded,
-    } = this.state;
+    const { isAddRuleEnabled, isClassPanelExpanded } = this.props;
+    const { isPseudoClassPanelExpanded } = this.state;
 
     return (
       dom.div(
@@ -85,6 +93,8 @@ class Toolbar extends PureComponent {
             dom.button({
               id: "ruleview-add-rule-button",
               className: "devtools-button",
+              disabled: !isAddRuleEnabled,
+              onClick: this.onAddRuleClick,
               title: getStr("rule.addRule.tooltip"),
             }),
             dom.button({
@@ -104,11 +114,16 @@ class Toolbar extends PureComponent {
           )
         ),
         isClassPanelExpanded ?
-          ClassListPanel({})
+          ClassListPanel({
+            onAddClass: this.props.onAddClass,
+            onSetClassState: this.props.onSetClassState,
+          })
           :
           null,
         isPseudoClassPanelExpanded ?
-          PseudoClassPanel({})
+          PseudoClassPanel({
+            onTogglePseudoClass: this.props.onTogglePseudoClass,
+          })
           :
           null
       )
@@ -116,4 +131,11 @@ class Toolbar extends PureComponent {
   }
 }
 
-module.exports = Toolbar;
+const mapStateToProps = state => {
+  return {
+    isAddRuleEnabled: state.rules.isAddRuleEnabled,
+    isClassPanelExpanded: state.classList.isClassPanelExpanded,
+  };
+};
+
+module.exports = connect(mapStateToProps)(Toolbar);

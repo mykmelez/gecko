@@ -20,6 +20,7 @@ exports[`SearchInput renders 1`] = `
       aria-controls="result-list"
       className=""
       onBlur={[Function]}
+      onChange={[Function]}
       onFocus={[Function]}
       onKeyDown={[Function]}
       placeholder="A placeholder"
@@ -58,6 +59,7 @@ exports[`SearchInput shows nav buttons 1`] = `
       aria-controls="result-list"
       className=""
       onBlur={[Function]}
+      onChange={[Function]}
       onFocus={[Function]}
       onKeyDown={[Function]}
       placeholder="A placeholder"
@@ -79,8 +81,8 @@ exports[`SearchInput shows nav buttons 1`] = `
         title="Previous result"
         type="arrow-up"
       >
-        <Svg
-          name="arrow-up"
+        <AccessibleImage
+          className="arrow-up"
         />
       </button>
       <button
@@ -90,8 +92,8 @@ exports[`SearchInput shows nav buttons 1`] = `
         title="Next result"
         type="arrow-down"
       >
-        <Svg
-          name="arrow-down"
+        <AccessibleImage
+          className="arrow-down"
         />
       </button>
     </div>
@@ -122,6 +124,7 @@ exports[`SearchInput shows svg error emoji 1`] = `
       aria-controls="result-list"
       className="empty"
       onBlur={[Function]}
+      onChange={[Function]}
       onFocus={[Function]}
       onKeyDown={[Function]}
       placeholder="A placeholder"
@@ -143,8 +146,8 @@ exports[`SearchInput shows svg error emoji 1`] = `
         title="Previous result"
         type="arrow-up"
       >
-        <Svg
-          name="arrow-up"
+        <AccessibleImage
+          className="arrow-up"
         />
       </button>
       <button
@@ -154,8 +157,8 @@ exports[`SearchInput shows svg error emoji 1`] = `
         title="Next result"
         type="arrow-down"
       >
-        <Svg
-          name="arrow-down"
+        <AccessibleImage
+          className="arrow-down"
         />
       </button>
     </div>
@@ -186,6 +189,7 @@ exports[`SearchInput shows svg magnifying glass 1`] = `
       aria-controls="result-list"
       className=""
       onBlur={[Function]}
+      onChange={[Function]}
       onFocus={[Function]}
       onKeyDown={[Function]}
       placeholder="A placeholder"
@@ -207,8 +211,8 @@ exports[`SearchInput shows svg magnifying glass 1`] = `
         title="Previous result"
         type="arrow-up"
       >
-        <Svg
-          name="arrow-up"
+        <AccessibleImage
+          className="arrow-up"
         />
       </button>
       <button
@@ -218,8 +222,8 @@ exports[`SearchInput shows svg magnifying glass 1`] = `
         title="Next result"
         type="arrow-down"
       >
-        <Svg
-          name="arrow-down"
+        <AccessibleImage
+          className="arrow-down"
         />
       </button>
     </div>

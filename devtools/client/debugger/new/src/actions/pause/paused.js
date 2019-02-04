@@ -4,10 +4,11 @@
 
 // @flow
 import {
-  getHiddenBreakpointLocation,
+  getHiddenBreakpoint,
   isEvaluatingExpression,
   getSelectedFrame,
-  getSources
+  getSources,
+  getLastCommand
 } from "../../selectors";
 
 import { mapFrames } from ".";
@@ -50,7 +51,11 @@ export function paused(pauseInfo: Pause) {
       await dispatch(loadSourceText(source));
 
       if (shouldStep(mappedFrame, getState(), sourceMaps)) {
-        dispatch(command("stepOver"));
+        // When stepping past a location we shouldn't pause at according to the
+        // source map, make sure we continue stepping in the same direction we
+        // were going previously.
+        const rewind = getLastCommand(getState(), thread) == "reverseStepOver";
+        dispatch(command(rewind ? "reverseStepOver" : "stepOver"));
         return;
       }
     }
@@ -64,9 +69,9 @@ export function paused(pauseInfo: Pause) {
       loadedObjects: loadedObjects || []
     });
 
-    const hiddenBreakpointLocation = getHiddenBreakpointLocation(getState());
-    if (hiddenBreakpointLocation) {
-      dispatch(removeBreakpoint(hiddenBreakpointLocation));
+    const hiddenBreakpoint = getHiddenBreakpoint(getState());
+    if (hiddenBreakpoint) {
+      dispatch(removeBreakpoint(hiddenBreakpoint));
     }
 
     await dispatch(mapFrames());

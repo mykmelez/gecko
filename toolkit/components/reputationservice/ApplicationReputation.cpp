@@ -29,6 +29,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/BasePrincipal.h"
+#include "mozilla/Components.h"
 #include "mozilla/ErrorNames.h"
 #include "mozilla/LoadContext.h"
 #include "mozilla/Preferences.h"
@@ -368,7 +369,7 @@ nsresult PendingDBLookup::LookupSpecInternal(const nsACString& aSpec) {
   // blacklisted.
   LOG(("Checking DB service for principal %s [this = %p]", mSpec.get(), this));
   nsCOMPtr<nsIUrlClassifierDBService> dbService =
-      do_GetService(NS_URLCLASSIFIERDBSERVICE_CONTRACTID, &rv);
+      mozilla::components::UrlClassifierDB::Service(&rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsAutoCString tables;
@@ -483,7 +484,8 @@ static const char* const kBinaryFileExtensions[] = {
     ".com",        // Windows executable
     ".command",    // Mac script
     ".cpgz",       // Mac archive
-    ".cpi",        // Control Panel Item. Executable used for adding icons to Control Panel
+    ".cpi",        // Control Panel Item. Executable used for adding icons
+                   // to Control Panel
     //".cpio",
     ".cpl",         // Windows executable
     ".crt",         // Windows signed certificate
@@ -779,16 +781,22 @@ static const char* const kZipFileExtensions[] = {
     ".zipx",  // WinZip
 };
 
+static const char* GetFileExt(const nsACString& aFilename,
+                              const char* const aFileExtensions[],
+                              const size_t aLength) {
+  for (size_t i = 0; i < aLength; ++i) {
+    if (StringEndsWith(aFilename, nsDependentCString(aFileExtensions[i]))) {
+      return aFileExtensions[i];
+    }
+  }
+  return nullptr;
+}
+
 // Returns true if the file extension matches one in the given array.
 static bool IsFileType(const nsACString& aFilename,
                        const char* const aFileExtensions[],
                        const size_t aLength) {
-  for (size_t i = 0; i < aLength; ++i) {
-    if (StringEndsWith(aFilename, nsDependentCString(aFileExtensions[i]))) {
-      return true;
-    }
-  }
-  return false;
+  return GetFileExt(aFilename, aFileExtensions, aLength) != nullptr;
 }
 
 ClientDownloadRequest::DownloadType PendingLookup::GetDownloadType(
@@ -1524,8 +1532,15 @@ nsresult PendingLookup::SendRemoteQueryInternal(Reason& aReason) {
   if (!mRequest.SerializeToString(&serialized)) {
     return NS_ERROR_UNEXPECTED;
   }
-  LOG(("Serialized protocol buffer [this = %p]: (length=%zu) %s", this,
-       serialized.length(), serialized.c_str()));
+
+  if (LOG_ENABLED()) {
+    nsAutoCString serializedStr(serialized.c_str(), serialized.length());
+    serializedStr.ReplaceSubstring(NS_LITERAL_CSTRING("\0"),
+                                   NS_LITERAL_CSTRING("\\0"));
+
+    LOG(("Serialized protocol buffer [this = %p]: (length=%d) %s", this,
+         serializedStr.Length(), serializedStr.get()));
+  }
 
   // Set the input stream to the serialized protocol buffer
   nsCOMPtr<nsIStringInputStream> sstream =
@@ -1726,6 +1741,10 @@ nsresult PendingLookup::OnStopRequestInternal(nsIRequest* aRequest,
   // Clamp responses 0-7, we only know about 0-4 for now.
   Accumulate(mozilla::Telemetry::APPLICATION_REPUTATION_SERVER_VERDICT,
              std::min<uint32_t>(response.verdict(), 7));
+  AccumulateCategoricalKeyed(
+      nsCString(GetFileExt(mFileName, kBinaryFileExtensions,
+                           ArrayLength(kBinaryFileExtensions))),
+      VerdictToLabel(std::min<uint32_t>(response.verdict(), 7)));
   switch (response.verdict()) {
     case safe_browsing::ClientDownloadResponse::DANGEROUS:
       aVerdict = nsIApplicationReputationService::VERDICT_DANGEROUS;

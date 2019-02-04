@@ -57,9 +57,9 @@
 
 #ifdef XP_WIN
 // We need to undef the MS macro for Document::CreateEvent
-#ifdef CreateEvent
-#undef CreateEvent
-#endif
+#  ifdef CreateEvent
+#    undef CreateEvent
+#  endif
 #endif  // XP_WIN
 
 #include "mozilla/dom/Document.h"
@@ -109,17 +109,17 @@
 #ifdef XP_WIN
 // We need to undef the MS macro again in case the windows include file
 // got imported after we included mozilla/dom/Document.h
-#ifdef CreateEvent
-#undef CreateEvent
-#endif
+#  ifdef CreateEvent
+#    undef CreateEvent
+#  endif
 #endif  // XP_WIN
 
 #include "MediaSegment.h"
 
 #ifdef USE_FAKE_PCOBSERVER
-#include "FakePCObserver.h"
+#  include "FakePCObserver.h"
 #else
-#include "mozilla/dom/PeerConnectionObserverBinding.h"
+#  include "mozilla/dom/PeerConnectionObserverBinding.h"
 #endif
 #include "mozilla/dom/PeerConnectionObserverEnumsBinding.h"
 
@@ -133,7 +133,7 @@ typedef PCObserverString ObString;
 
 static const char* pciLogTag = "PeerConnectionImpl";
 #ifdef LOGTAG
-#undef LOGTAG
+#  undef LOGTAG
 #endif
 #define LOGTAG pciLogTag
 
@@ -308,6 +308,7 @@ PeerConnectionImpl::PeerConnectionImpl(const GlobalObject* aGlobal)
       mSTSThread(nullptr),
       mForceIceTcp(false),
       mMedia(nullptr),
+      mTransportHandler(MediaTransportHandler::Create()),
       mUuidGen(MakeUnique<PCUuidGenerator>()),
       mIceRestartCount(0),
       mIceRollbackCount(0),
@@ -327,7 +328,7 @@ PeerConnectionImpl::PeerConnectionImpl(const GlobalObject* aGlobal)
     mWindow = do_QueryInterface(aGlobal->GetAsSupports());
     if (IsPrivateBrowsing(mWindow)) {
       mPrivateWindow = true;
-      MediaTransportHandler::EnterPrivateMode();
+      mTransportHandler->EnterPrivateMode();
     }
     mWindow->AddPeerConnection();
     mActiveOnWindow = true;
@@ -359,7 +360,7 @@ PeerConnectionImpl::~PeerConnectionImpl() {
   }
 
   if (mPrivateWindow) {
-    MediaTransportHandler::ExitPrivateMode();
+    mTransportHandler->ExitPrivateMode();
   }
   if (PeerConnectionCtx::isActive()) {
     PeerConnectionCtx::GetInstance()->mPeerConnections.erase(mHandle);
@@ -458,6 +459,18 @@ nsresult PeerConnectionImpl::Initialize(PeerConnectionObserver& aObserver,
   res = PeerConnectionCtx::InitializeGlobal(mThread, mSTSThread);
   NS_ENSURE_SUCCESS(res, res);
 
+  nsTArray<dom::RTCIceServer> iceServers;
+  if (aConfiguration.mIceServers.WasPassed()) {
+    iceServers = aConfiguration.mIceServers.Value();
+  }
+
+  res = mTransportHandler->Init("PC:" + GetName(), iceServers,
+                                aConfiguration.mIceTransportPolicy);
+  if (NS_FAILED(res)) {
+    CSFLogError(LOGTAG, "%s: Failed to init mtransport", __FUNCTION__);
+    return NS_ERROR_FAILURE;
+  }
+
   mMedia = new PeerConnectionMedia(this);
 
   // Connect ICE slots.
@@ -471,7 +484,7 @@ nsresult PeerConnectionImpl::Initialize(PeerConnectionObserver& aObserver,
   mMedia->SignalCandidate.connect(this, &PeerConnectionImpl::CandidateReady);
 
   // Initialize the media object.
-  res = mMedia->Init(aConfiguration);
+  res = mMedia->Init();
   if (NS_FAILED(res)) {
     CSFLogError(LOGTAG, "%s: Couldn't initialize media object", __FUNCTION__);
     return res;
@@ -843,8 +856,7 @@ PeerConnectionImpl::EnsureDataConnection(uint16_t aLocalPort,
 
   nsCOMPtr<nsIEventTarget> target =
       mWindow ? mWindow->EventTargetFor(TaskCategory::Other) : nullptr;
-  mDataConnection =
-      new DataChannelConnection(this, target, mMedia->mTransportHandler);
+  mDataConnection = new DataChannelConnection(this, target, mTransportHandler);
   if (!mDataConnection->Init(aLocalPort, aNumstreams, aMMSSet,
                              aMaxMessageSize)) {
     CSFLogError(LOGTAG, "%s DataConnection Init Failed", __FUNCTION__);
@@ -2068,20 +2080,17 @@ PeerConnectionImpl::ReplaceTrackNoRenegotiation(TransceiverImpl& aTransceiver,
 
 nsresult PeerConnectionImpl::CalculateFingerprint(
     const std::string& algorithm, std::vector<uint8_t>* fingerprint) const {
-  uint8_t buf[DtlsIdentity::HASH_ALGORITHM_MAX_LENGTH];
-  size_t len = 0;
+  DtlsDigest digest(algorithm);
 
   MOZ_ASSERT(fingerprint);
   const UniqueCERTCertificate& cert = mCertificate->Certificate();
-  nsresult rv = DtlsIdentity::ComputeFingerprint(cert, algorithm, &buf[0],
-                                                 sizeof(buf), &len);
+  nsresult rv = DtlsIdentity::ComputeFingerprint(cert, &digest);
   if (NS_FAILED(rv)) {
     CSFLogError(LOGTAG, "Unable to calculate certificate fingerprint, rv=%u",
                 static_cast<unsigned>(rv));
     return rv;
   }
-  MOZ_ASSERT(len > 0 && len <= DtlsIdentity::HASH_ALGORITHM_MAX_LENGTH);
-  fingerprint->assign(buf, buf + len);
+  *fingerprint = digest.value_;
   return NS_OK;
 }
 
@@ -2474,6 +2483,11 @@ PeerConnectionWrapper::PeerConnectionWrapper(const std::string& handle)
   impl_ = impl;
 }
 
+const RefPtr<MediaTransportHandler> PeerConnectionImpl::GetTransportHandler()
+    const {
+  return mTransportHandler;
+}
+
 const std::string& PeerConnectionImpl::GetHandle() {
   PC_AUTO_ENTER_API_CALL_NO_CHECK();
   return mHandle;
@@ -2728,8 +2742,8 @@ nsresult PeerConnectionImpl::BuildStatsQuery_m(
   }
 
   // We do not use the pcHandle here, since that's risky to expose to content.
-  query->report = new RTCStatsReportInternalConstruct(
-      NS_ConvertASCIItoUTF16(mName.c_str()), query->now);
+  query->report.reset(new RTCStatsReportInternalConstruct(
+      NS_ConvertASCIItoUTF16(mName.c_str()), query->now));
 
   query->iceStartTime = mIceStartTime;
   query->report->mIceRestarts.Construct(mIceRestartCount);
@@ -2868,15 +2882,17 @@ RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::ExecuteStatsQuery_s(
             double bitrateStdDev;
             uint32_t droppedFrames;
             uint32_t framesEncoded;
+            Maybe<uint64_t> qpSum;
             if (mp.Conduit()->GetVideoEncoderStats(
                     &framerateMean, &framerateStdDev, &bitrateMean,
-                    &bitrateStdDev, &droppedFrames, &framesEncoded)) {
+                    &bitrateStdDev, &droppedFrames, &framesEncoded, &qpSum)) {
               s.mFramerateMean.Construct(framerateMean);
               s.mFramerateStdDev.Construct(framerateStdDev);
               s.mBitrateMean.Construct(bitrateMean);
               s.mBitrateStdDev.Construct(bitrateStdDev);
               s.mDroppedFrames.Construct(droppedFrames);
               s.mFramesEncoded.Construct(framesEncoded);
+              qpSum.apply([&s](uint64_t aQp) { s.mQpSum.Construct(aQp); });
             }
           }
           query->report->mOutboundRTPStreamStats.Value().AppendElement(
@@ -2972,7 +2988,25 @@ RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::ExecuteStatsQuery_s(
     }
   }
 
-  return aTransportHandler->GetIceStats(std::move(query));
+  std::string transportId;
+  if (!query->grabAllLevels) {
+    transportId = query->transportId;
+  }
+  auto report = std::move(query->report);
+
+  return aTransportHandler
+      ->GetIceStats(transportId, query->now, std::move(report))
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          [query = std::move(query)](
+              std::unique_ptr<dom::RTCStatsReportInternal>&& aReport) mutable {
+            query->report = std::move(aReport);
+            return RTCStatsQueryPromise::CreateAndResolve(std::move(query),
+                                                          __func__);
+          },
+          [](nsresult aError) {
+            return RTCStatsQueryPromise::CreateAndReject(aError, __func__);
+          });
 }
 
 void PeerConnectionImpl::DeliverStatsReportToPCObserver_m(

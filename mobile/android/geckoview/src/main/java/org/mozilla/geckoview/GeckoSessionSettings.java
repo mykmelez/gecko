@@ -213,7 +213,16 @@ public final class GeckoSessionSettings implements Parcelable {
     public static final int USER_AGENT_MODE_VR = 2;
 
     // This needs to match GeckoViewSettingsChild.js
+    /**
+     * Mobile-friendly pages will be rendered using a viewport based on their &lt;meta&gt; viewport
+     * tag. All other pages will be rendered using a special desktop mode viewport, which has a
+     * width of 980 CSS px.
+     */
     public static final int VIEWPORT_MODE_MOBILE = 0;
+    /**
+     * All pages will be rendered using the special desktop mode viewport, which has a width of
+     * 980 CSS px, regardless of whether the page has a &lt;meta&gt; viewport tag specified or not.
+     */
     public static final int VIEWPORT_MODE_DESKTOP = 1;
 
     public static class Key<T> {
@@ -588,7 +597,7 @@ public final class GeckoSessionSettings implements Parcelable {
     /**
      * Specify the user agent override string.
      * Set value to null to use the user agent specified by USER_AGENT_MODE.
-     * @param value
+     * @param value The string to override the user agent with.
      */
     public void setUserAgentOverride(final @Nullable String value) {
         setString(USER_AGENT_OVERRIDE, value);

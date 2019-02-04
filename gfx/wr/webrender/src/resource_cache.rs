@@ -27,7 +27,7 @@ use glyph_cache::GlyphCacheEntry;
 use glyph_rasterizer::{FontInstance, GlyphFormat, GlyphKey, GlyphRasterizer};
 use gpu_cache::{GpuCache, GpuCacheAddress, GpuCacheHandle};
 use gpu_types::UvRectKind;
-use image::{compute_tile_range, for_each_tile_in_range};
+use image::{compute_tile_size, compute_tile_range, for_each_tile_in_range};
 use internal_types::{FastHashMap, FastHashSet, TextureSource, TextureUpdateList};
 use profiler::{ResourceProfileCounters, TextureCacheProfileCounters};
 use render_backend::{FrameId, FrameStamp};
@@ -1125,7 +1125,7 @@ impl ResourceCache {
                             LayoutIntRect {
                                 origin: point2(tile.x, tile.y) * tile_size as i32,
                                 size: blob_size(compute_tile_size(
-                                    &template.descriptor,
+                                    &template.descriptor.size.into(),
                                     tile_size,
                                     tile,
                                 )),
@@ -1248,7 +1248,7 @@ impl ResourceCache {
                         rect: LayoutIntRect {
                             origin: point2(tile.x, tile.y) * tile_size as i32,
                             size: blob_size(compute_tile_size(
-                                &template.descriptor,
+                                &template.descriptor.size.into(),
                                 tile_size,
                                 tile,
                             )),
@@ -1610,7 +1610,6 @@ impl ResourceCache {
             &mut self.texture_cache,
             render_tasks,
         );
-        self.texture_cache.end_frame(texture_cache_profile);
     }
 
     fn rasterize_missing_blob_images(&mut self) {
@@ -1692,7 +1691,7 @@ impl ResourceCache {
 
                 if let Some(tile) = request.tile {
                     let tile_size = image_template.tiling.unwrap();
-                    let clipped_tile_size = compute_tile_size(&descriptor, tile_size, tile);
+                    let clipped_tile_size = compute_tile_size(&descriptor.size.into(), tile_size, tile);
 
                     // The tiled image could be stored on the CPU as one large image or be
                     // already broken up into tiles. This affects the way we compute the stride
@@ -1767,9 +1766,10 @@ impl ResourceCache {
         }
     }
 
-    pub fn end_frame(&mut self) {
+    pub fn end_frame(&mut self, texture_cache_profile: &mut TextureCacheProfileCounters) {
         debug_assert_eq!(self.state, State::QueryResources);
         self.state = State::Idle;
+        self.texture_cache.end_frame(texture_cache_profile);
     }
 
     pub fn set_debug_flags(&mut self, flags: DebugFlags) {
@@ -1821,6 +1821,13 @@ impl ResourceCache {
     }
 
     /// Reports the CPU heap usage of this ResourceCache.
+    ///
+    /// NB: It would be much better to use the derive(MallocSizeOf) machinery
+    /// here, but the Arcs complicate things. The two ways to handle that would
+    /// be to either (a) Implement MallocSizeOf manually for the things that own
+    /// them and manually avoid double-counting, or (b) Use the "seen this pointer
+    /// yet" machinery from the proper malloc_size_of crate. We can do this if/when
+    /// more accurate memory reporting on these resources becomes a priority.
     pub fn report_memory(&self, op: VoidPtrToSizeFn) -> MemoryReport {
         let mut report = MemoryReport::default();
 
@@ -1893,32 +1900,6 @@ pub fn get_blob_tiling(
     }
 
     tiling
-}
-
-
-// Compute the width and height of a tile depending on its position in the image.
-pub fn compute_tile_size(
-    descriptor: &ImageDescriptor,
-    base_size: TileSize,
-    tile: TileOffset,
-) -> DeviceIntSize {
-    let base_size = base_size as i32;
-    // Most tiles are going to have base_size as width and height,
-    // except for tiles around the edges that are shrunk to fit the mage data
-    // (See decompose_tiled_image in frame.rs).
-    let actual_width = if (tile.x as i32) < descriptor.size.width / base_size {
-        base_size
-    } else {
-        descriptor.size.width % base_size
-    };
-
-    let actual_height = if (tile.y as i32) < descriptor.size.height / base_size {
-        base_size
-    } else {
-        descriptor.size.height % base_size
-    };
-
-    size2(actual_width, actual_height)
 }
 
 #[cfg(any(feature = "capture", feature = "replay"))]

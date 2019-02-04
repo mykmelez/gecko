@@ -1,6 +1,5 @@
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-const {Sanitizer} = ChromeUtils.import("resource:///modules/Sanitizer.jsm", {});
-const {SiteDataTestUtils} = ChromeUtils.import("resource://testing-common/SiteDataTestUtils.jsm", {});
+const {Sanitizer} = ChromeUtils.import("resource:///modules/Sanitizer.jsm");
+const {SiteDataTestUtils} = ChromeUtils.import("resource://testing-common/SiteDataTestUtils.jsm");
 
 function checkDataForAboutURL() {
   return new Promise(resolve => {
@@ -243,6 +242,26 @@ tests.forEach(methods => {
           originAttributes: originAttributes.oa,
           cookiePermission: Ci.nsICookiePermission.ACCESS_SESSION,
           expectedForOrg: true,
+          expectedForCom: false,
+          fullHost: true,
+        });
+    });
+  });
+});
+
+// Session mode, but with unsupported custom permission, data in
+// www.example.com, cookie permission set for www.example.com
+tests.forEach(methods => {
+  attributes.forEach(originAttributes => {
+    add_task(async function deleteStorageOnlyCustomPermission() {
+      info(methods.name + ": All is session only, but with unsupported custom custom permission, data in www.example.com, cookie permission set for www.example.com - OA: " + originAttributes.name);
+      await deleteOnShutdown(
+        { lifetimePolicy: Ci.nsICookieService.ACCEPT_SESSION,
+          createData: methods.createData,
+          checkData: methods.checkData,
+          originAttributes: originAttributes.oa,
+          cookiePermission: 123, // invalid cookie permission
+          expectedForOrg: false,
           expectedForCom: false,
           fullHost: true,
         });

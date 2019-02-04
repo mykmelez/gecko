@@ -4,9 +4,6 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-
 ChromeUtils.defineModuleGetter(this, "ctypes", "resource://gre/modules/ctypes.jsm");
 
 const FLAGS_NOT_SET = 0;
@@ -33,7 +30,6 @@ function OSCrypto() {
                                                   ]);
 
   try {
-
     this._libs.set("crypt32", ctypes.open("Crypt32"));
     this._libs.set("kernel32", ctypes.open("Kernel32"));
 
@@ -167,9 +163,9 @@ OSCrypto.prototype = {
     }
 
     let status = this._functions.get("CryptUnprotectData")(inData.address(), null,
-                                     entropyParam,
-                                     null, null, FLAGS_NOT_SET,
-                                     outData.address());
+                                                           entropyParam,
+                                                           null, null, FLAGS_NOT_SET,
+                                                           outData.address());
     if (status === 0) {
       throw new Error("decryptData failed: " + status);
     }
@@ -184,7 +180,7 @@ OSCrypto.prototype = {
 
     this._functions.get("LocalFree")(outData.pbData);
     return decryptedData;
- },
+  },
 
   /**
    * Encrypt a string using the windows CryptProtectData API.

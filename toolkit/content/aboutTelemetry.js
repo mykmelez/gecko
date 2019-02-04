@@ -4,14 +4,12 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/BrowserUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/TelemetryTimestamps.jsm");
-ChromeUtils.import("resource://gre/modules/TelemetryController.jsm");
-ChromeUtils.import("resource://gre/modules/TelemetryArchive.jsm");
-ChromeUtils.import("resource://gre/modules/TelemetryUtils.jsm");
-ChromeUtils.import("resource://gre/modules/TelemetrySend.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {BrowserUtils} = ChromeUtils.import("resource://gre/modules/BrowserUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {TelemetryTimestamps} = ChromeUtils.import("resource://gre/modules/TelemetryTimestamps.jsm");
+const {TelemetryController} = ChromeUtils.import("resource://gre/modules/TelemetryController.jsm");
+const {TelemetryArchive} = ChromeUtils.import("resource://gre/modules/TelemetryArchive.jsm");
+const {TelemetrySend} = ChromeUtils.import("resource://gre/modules/TelemetrySend.jsm");
 
 ChromeUtils.defineModuleGetter(this, "AppConstants",
                                "resource://gre/modules/AppConstants.jsm");
@@ -181,7 +179,7 @@ var Settings = {
     for (let el of elements) {
       el.addEventListener("click", function() {
         if (AppConstants.platform == "android") {
-          ChromeUtils.import("resource://gre/modules/Messaging.jsm");
+          var {EventDispatcher} = ChromeUtils.import("resource://gre/modules/Messaging.jsm");
           EventDispatcher.instance.sendRequest({
             type: "Settings:Show",
             resource: "preferences_privacy",
@@ -2441,7 +2439,7 @@ var SimpleMeasurements = {
   },
 };
 
-function renderProcessList(ping, selectEl) {
+function renderProcessList(payload, selectEl) {
   removeAllChildNodes(selectEl);
   let option = document.createElement("option");
   option.appendChild(document.createTextNode("parent"));
@@ -2449,13 +2447,13 @@ function renderProcessList(ping, selectEl) {
   option.selected = true;
   selectEl.appendChild(option);
 
-  if (!("processes" in ping.payload)) {
+  if (!("processes" in payload)) {
     selectEl.disabled = true;
     return;
   }
   selectEl.disabled = false;
 
-  for (let process of Object.keys(ping.payload.processes)) {
+  for (let process of Object.keys(payload.processes)) {
     // TODO: parent hgrams are on root payload, not in payload.processes.parent
     // When/If that gets moved, you'll need to remove this
     if (process === "parent") {
@@ -2506,7 +2504,7 @@ function displayPingData(ping, updatePayloadList = false) {
 function displayRichPingData(ping, updatePayloadList) {
   // Update the payload list and process lists
   if (updatePayloadList) {
-    renderProcessList(ping, document.getElementById("processes"));
+    renderProcessList(ping.payload, document.getElementById("processes"));
   }
 
   // Show general data.
@@ -2517,10 +2515,31 @@ function displayRichPingData(ping, updatePayloadList) {
 
   RawPayloadData.render(ping);
 
-  // We only have special rendering code for the payloads from "main" pings.
+  // We have special rendering code for the payloads from "main" and "event" pings.
   // For any other pings we just render the raw JSON payload.
   let isMainPing = (ping.type == "main" || ping.type == "saved-session");
+  let isEventPing = ping.type == "event";
   togglePingSections(isMainPing);
+
+  if (isEventPing) {
+    // Copy the payload, so we don't modify the raw representation
+    let payload = { processes: {} };
+    for (let process of Object.keys(ping.payload.events)) {
+      payload.processes[process] = {
+        events: ping.payload.events[process],
+      };
+    }
+
+    // We transformed the actual payload, let's reload the process list if necessary.
+    if (updatePayloadList) {
+      renderProcessList(payload, document.getElementById("processes"));
+    }
+
+    // Show event data.
+    Events.render(payload);
+    return;
+  }
+
 
   if (!isMainPing) {
     return;
@@ -2556,7 +2575,6 @@ function displayRichPingData(ping, updatePayloadList) {
 
   // Show simple measurements
   SimpleMeasurements.render(payload);
-
 }
 
 window.addEventListener("load", onLoad);

@@ -5,10 +5,38 @@
 "use strict";
 
 const {
+  UPDATE_ADD_RULE_ENABLED,
+  UPDATE_HIGHLIGHTED_SELECTOR,
   UPDATE_RULES,
 } = require("./index");
 
 module.exports = {
+
+  /**
+   * Updates whether or not the add new rule button should be enabled.
+   *
+   * @param  {Boolean} enabled
+   *         Whether or not the add new rule button is enabled.
+   */
+  updateAddRuleEnabled(enabled) {
+    return {
+      type: UPDATE_ADD_RULE_ENABLED,
+      enabled,
+    };
+  },
+
+  /**
+   * Updates the highlighted selector.
+   *
+   * @param  {String} highlightedSelector
+   *         The selector of the element to be highlighted by the selector highlighter.
+   */
+  updateHighlightedSelector(highlightedSelector) {
+    return {
+      type: UPDATE_HIGHLIGHTED_SELECTOR,
+      highlightedSelector,
+    };
+  },
 
   /**
    * Updates the rules state with the new list of CSS rules for the selected element.

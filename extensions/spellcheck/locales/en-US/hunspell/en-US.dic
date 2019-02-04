@@ -1,4 +1,4 @@
-52975
+53000
 0/nm
 0th/pt
 1/n1
@@ -1990,6 +1990,7 @@ CAD/M
 CAI
 CAM
 CAP
+CAPTCHA
 CARE
 CATV
 CB
@@ -15891,8 +15892,10 @@ backslider/M
 backspace/DSMG
 backspin/M
 backsplash/S
+backstab/S
 backstabber/MS
 backstabbing
+backstabby
 backstage/M
 backstair/S
 backstop/SM
@@ -17310,6 +17313,8 @@ bomber/M
 bombproof
 bombshell/SM
 bombsite/S
+bon/S
+bona
 bonanza/MS
 bonbon/MS
 bonce/S
@@ -18503,6 +18508,7 @@ capsulize/DSG
 capt
 captain/SMDG
 captaincy/SM
+captcha
 caption/SMDG
 captious/YP
 captiousness/M
@@ -20151,6 +20157,8 @@ colloquy/M
 collude/DSG
 collusion/M
 collusive
+colocate/DGS
+colocation/S
 cologne/SM
 colon/SM
 colonel/SM
@@ -21238,7 +21246,7 @@ cosmonaut/SM
 cosmopolitan/MS
 cosmopolitanism/M
 cosmos/MS
-cosplay
+cosplay/DGSRZ
 cosponsor/GSMD
 cosset/SGD
 cossetted
@@ -21843,6 +21851,7 @@ cullender/MS
 culminate/XDSGN
 culmination/M
 culotte/SM
+culpa/S
 culpability/M
 culpable/I
 culpably
@@ -22462,6 +22471,7 @@ definer/MS
 definite/IYVP
 definiteness/IM
 definition/AM
+definitional/Y
 definitions
 definitive/Y
 deflate/GNDS
@@ -24302,6 +24312,8 @@ ecru/M
 ecstasy/SM
 ecstatic
 ecstatically
+ectopic
+ectopically
 ecu/S
 ecumenical/Y
 ecumenicism/M
@@ -25713,6 +25725,7 @@ extemporize/GDS
 extend/SZGDRB
 extender/M
 extendible
+extensibility
 extensible
 extension/SM
 extensional
@@ -25740,6 +25753,7 @@ extolled
 extolling
 extort/SGD
 extortion/MRZ
+extortionary
 extortionate/Y
 extortioner/M
 extortionist/MS
@@ -26295,6 +26309,7 @@ fiddler/M
 fiddlesticks
 fiddly/TR
 fidelity/IM
+fides
 fidget/SGMD
 fidgety
 fiduciary/SM
@@ -27222,6 +27237,7 @@ framed/U
 framer/M
 framework/SM
 franc/SM
+franca
 franchise's
 franchise/EDSG
 franchisee/SM
@@ -27971,7 +27987,7 @@ geometry/SM
 geophysical
 geophysicist/SM
 geophysics/M
-geopolitical
+geopolitical/Y
 geopolitics/M
 geostationary
 geosynchronous
@@ -33457,6 +33473,7 @@ lingerie/M
 lingering/Y
 lingo/M
 lingoes
+lingua
 lingual
 linguine/M
 linguini/SM
@@ -34603,6 +34620,7 @@ mazurka/MS
 mañana/M
 mdse
 me/DSH
+mea
 mead/M
 meadow/MS
 meadowlark/MS
@@ -38306,6 +38324,8 @@ oxygenate/DSGN
 oxygenation/M
 oxymora
 oxymoron/M
+oxymoronic
+oxymoronically
 oy
 oyes
 oyez
@@ -39810,6 +39830,7 @@ pivot/MDGS
 pivotal
 pix/M
 pixel/MS
+pixelate/DS
 pixie/MS
 pizazz/M
 pizza/MS
@@ -41935,7 +41956,7 @@ ramify/DSXNG
 ramjet/SM
 rammed
 ramming
-ramp/GMS
+ramp/GMSD
 rampage/DSMG
 rampancy/M
 rampant/Y
@@ -43845,7 +43866,7 @@ scalar/S
 scalawag/MS
 scald/MDSG
 scale's
-scale/CGDS
+scale/CGDSB
 scaleless
 scalene
 scaliness/M
@@ -47064,6 +47085,7 @@ stony/TRP
 stood
 stooge/MS
 stool/SM
+stoolie/SM
 stoop/GSMD
 stop's
 stop/US
@@ -47753,6 +47775,7 @@ supertanker/MS
 superuser/S
 supervene/GDS
 supervention/M
+supervillain/SM
 supervise/XGNDS
 supervised/U
 supervision/M
@@ -51464,6 +51487,7 @@ vivace
 vivacious/PY
 vivaciousness/M
 vivacity/M
+vivant/S
 vivaria
 vivarium/SM
 vivid/RYTP
@@ -52377,6 +52401,7 @@ wishbone/SM
 wisher/M
 wishful/Y
 wishlist's
+wishy-washy
 wisp/MS
 wispy/RT
 wist

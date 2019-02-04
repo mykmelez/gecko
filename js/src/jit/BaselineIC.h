@@ -211,8 +211,8 @@ void FallbackICSpew(JSContext* cx, ICFallbackStub* stub, const char* fmt, ...)
 void TypeFallbackICSpew(JSContext* cx, ICTypeMonitor_Fallback* stub,
                         const char* fmt, ...) MOZ_FORMAT_PRINTF(3, 4);
 #else
-#define FallbackICSpew(...)
-#define TypeFallbackICSpew(...)
+#  define FallbackICSpew(...)
+#  define TypeFallbackICSpew(...)
 #endif
 
 // An entry in the BaselineScript IC descriptor table. There's one ICEntry per
@@ -1694,8 +1694,11 @@ class ICGetElem_Fallback : public ICMonitoredFallbackStub {
   // Compiler for this stub kind.
   class Compiler : public ICStubCompiler {
    protected:
+    CodeOffset bailoutReturnOffset_;
     bool hasReceiver_;
     MOZ_MUST_USE bool generateStubCode(MacroAssembler& masm) override;
+    void postGenerateStubCode(MacroAssembler& masm,
+                              Handle<JitCode*> code) override;
 
     virtual int32_t getKey() const override {
       return static_cast<int32_t>(kind) |
@@ -2607,6 +2610,8 @@ class ICRest_Fallback : public ICFallbackStub {
 // UnaryArith
 //     JSOP_BITNOT
 //     JSOP_NEG
+//     JSOP_INC
+//     JSOP_DEC
 
 class ICUnaryArith_Fallback : public ICFallbackStub {
   friend class ICStubSpace;

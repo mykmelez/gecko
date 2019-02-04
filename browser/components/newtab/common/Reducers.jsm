@@ -3,8 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const {actionTypes: at} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm", {});
-const {Dedupe} = ChromeUtils.import("resource://activity-stream/common/Dedupe.jsm", {});
+const {actionTypes: at} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm");
+const {Dedupe} = ChromeUtils.import("resource://activity-stream/common/Dedupe.jsm");
 
 const TOP_SITES_DEFAULT_ROWS = 1;
 const TOP_SITES_MAX_SITES_PER_ROW = 8;
@@ -56,10 +56,19 @@ const INITIAL_STATE = {
     feeds: {
       // "https://foo.com/feed1": {lastUpdated: 123, data: []}
     },
+    spocs: {
+      spocs_endpoint: "",
+      lastUpdated: null,
+      data: {}, // {spocs: []}
+      loaded: false,
+    },
   },
   Search: {
-    // Pretend the search box is focused after handing off to AwesomeBar.
-    focus: false,
+    // When search hand-off is enabled, we render a big button that is styled to
+    // look like a search textbox. If the button is clicked, we style
+    // the button as if it was a focused search box and show a fake cursor but
+    // really focus the awesomebar without the focus styles ("hidden focus").
+    fakeFocus: false,
     // Hide the search box after handing off to AwesomeBar and user starts typing.
     hide: false,
   },
@@ -455,6 +464,29 @@ function DiscoveryStream(prevState = INITIAL_STATE.DiscoveryStream, action) {
       return {...prevState, lastUpdated: action.data.lastUpdated || null, layout: action.data.layout || []};
     case at.DISCOVERY_STREAM_LAYOUT_RESET:
       return {...prevState, lastUpdated: INITIAL_STATE.DiscoveryStream.lastUpdated, layout: INITIAL_STATE.DiscoveryStream.layout};
+    case at.DISCOVERY_STREAM_FEEDS_UPDATE:
+      return {...prevState, feeds: action.data || prevState.feeds};
+    case at.DISCOVERY_STREAM_SPOCS_ENDPOINT:
+      return {
+        ...prevState,
+        spocs: {
+          ...INITIAL_STATE.DiscoveryStream.spocs,
+          spocs_endpoint: action.data || INITIAL_STATE.DiscoveryStream.spocs.spocs_endpoint,
+        },
+      };
+    case at.DISCOVERY_STREAM_SPOCS_UPDATE:
+      if (action.data) {
+        return {
+          ...prevState,
+          spocs: {
+            ...prevState.spocs,
+            lastUpdated: action.data.lastUpdated,
+            data: action.data.spocs,
+            loaded: true,
+          },
+        };
+      }
+      return prevState;
     default:
       return prevState;
   }
@@ -464,10 +496,10 @@ function Search(prevState = INITIAL_STATE.Search, action) {
   switch (action.type) {
     case at.HIDE_SEARCH:
       return Object.assign({...prevState, hide: true});
-    case at.FOCUS_SEARCH:
-      return Object.assign({...prevState, focus: true});
+    case at.FAKE_FOCUS_SEARCH:
+      return Object.assign({...prevState, fakeFocus: true});
     case at.SHOW_SEARCH:
-      return Object.assign({...prevState, hide: false, focus: false});
+      return Object.assign({...prevState, hide: false, fakeFocus: false});
     default:
       return prevState;
   }

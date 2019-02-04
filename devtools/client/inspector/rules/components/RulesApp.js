@@ -28,7 +28,27 @@ const SHOW_PSEUDO_ELEMENTS_PREF = "devtools.inspector.show_pseudo_elements";
 class RulesApp extends PureComponent {
   static get propTypes() {
     return {
+      onAddClass: PropTypes.func.isRequired,
+      onAddRule: PropTypes.func.isRequired,
+      onSetClassState: PropTypes.func.isRequired,
+      onToggleClassPanelExpanded: PropTypes.func.isRequired,
+      onToggleDeclaration: PropTypes.func.isRequired,
+      onTogglePseudoClass: PropTypes.func.isRequired,
+      onToggleSelectorHighlighter: PropTypes.func.isRequired,
       rules: PropTypes.arrayOf(PropTypes.shape(Types.rule)).isRequired,
+      showDeclarationNameEditor: PropTypes.func.isRequired,
+      showDeclarationValueEditor: PropTypes.func.isRequired,
+      showSelectorEditor: PropTypes.func.isRequired,
+    };
+  }
+
+  getRuleProps() {
+    return {
+      onToggleDeclaration: this.props.onToggleDeclaration,
+      onToggleSelectorHighlighter: this.props.onToggleSelectorHighlighter,
+      showDeclarationNameEditor: this.props.showDeclarationNameEditor,
+      showDeclarationValueEditor: this.props.showDeclarationValueEditor,
+      showSelectorEditor: this.props.showSelectorEditor,
     };
   }
 
@@ -49,7 +69,10 @@ class RulesApp extends PureComponent {
         );
       }
 
-      output.push(Rule({ rule }));
+      output.push(Rule({
+        ...this.getRuleProps(),
+        rule,
+      }));
     }
 
     return output;
@@ -74,6 +97,7 @@ class RulesApp extends PureComponent {
         {
           component: Rules,
           componentProps: {
+            ...this.getRuleProps(),
             rules: rules.filter(r => r.keyframesRule.id === lastKeyframes),
           },
           header: rule.keyframesRule.keyframesName,
@@ -92,7 +116,10 @@ class RulesApp extends PureComponent {
       return null;
     }
 
-    return Rules({ rules });
+    return Rules({
+      ...this.getRuleProps(),
+      rules,
+    });
   }
 
   renderPseudoElementRules(rules) {
@@ -103,7 +130,10 @@ class RulesApp extends PureComponent {
     const items = [
       {
         component: Rules,
-        componentProps: { rules },
+        componentProps: {
+          ...this.getRuleProps(),
+          rules,
+        },
         header: getStr("rule.pseudoElement"),
         opened: Services.prefs.getBoolPref(SHOW_PSEUDO_ELEMENTS_PREF),
         onToggled: () => {
@@ -144,7 +174,13 @@ class RulesApp extends PureComponent {
           id: "sidebar-panel-ruleview",
           className: "theme-sidebar inspector-tabpanel",
         },
-        Toolbar({}),
+        Toolbar({
+          onAddClass: this.props.onAddClass,
+          onAddRule: this.props.onAddRule,
+          onSetClassState: this.props.onSetClassState,
+          onToggleClassPanelExpanded: this.props.onToggleClassPanelExpanded,
+          onTogglePseudoClass: this.props.onTogglePseudoClass,
+        }),
         dom.div(
           {
             id: "ruleview-container",

@@ -9,8 +9,9 @@ import "./ColumnBreakpoints.css";
 
 import { getSelectedSource, visibleColumnBreakpoints } from "../../selectors";
 import { connect } from "../../utils/connect";
-import { makeLocationId } from "../../utils/breakpoint";
-import actions from "../../actions";
+import { makeBreakpointId } from "../../utils/breakpoint";
+import { breakpointItemActions } from "./menus/breakpoints";
+import type { BreakpointItemActions } from "./menus/breakpoints";
 
 import type { Source } from "../../types";
 // eslint-disable-next-line max-len
@@ -21,7 +22,7 @@ class ColumnBreakpoints extends Component {
     editor: Object,
     selectedSource: Source,
     columnBreakpoints: ColumnBreakpointType[],
-    toggleBreakpoint: (number, ?number) => void
+    breakpointActions: BreakpointItemActions
   };
 
   render() {
@@ -29,7 +30,7 @@ class ColumnBreakpoints extends Component {
       editor,
       columnBreakpoints,
       selectedSource,
-      toggleBreakpoint
+      breakpointActions
     } = this.props;
 
     if (!selectedSource || selectedSource.isBlackBoxed) {
@@ -40,11 +41,11 @@ class ColumnBreakpoints extends Component {
     editor.codeMirror.operation(() => {
       breakpoints = columnBreakpoints.map(breakpoint => (
         <ColumnBreakpoint
-          key={makeLocationId(breakpoint.location)}
+          key={makeBreakpointId(breakpoint.location)}
           columnBreakpoint={breakpoint}
           editor={editor}
           source={selectedSource}
-          toggleBreakpoint={toggleBreakpoint}
+          breakpointActions={breakpointActions}
         />
       ));
     });
@@ -59,10 +60,7 @@ const mapStateToProps = state => {
   };
 };
 
-const { toggleBreakpoint } = actions;
-const mapDispatchToProps = { toggleBreakpoint };
-
 export default connect(
   mapStateToProps,
-  mapDispatchToProps
+  dispatch => ({ breakpointActions: breakpointItemActions(dispatch) })
 )(ColumnBreakpoints);

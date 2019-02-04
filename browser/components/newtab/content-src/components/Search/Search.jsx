@@ -12,7 +12,10 @@ export class _Search extends React.PureComponent {
     super(props);
     this.onSearchClick = this.onSearchClick.bind(this);
     this.onSearchHandoffClick = this.onSearchHandoffClick.bind(this);
+    this.onSearchHandoffPaste = this.onSearchHandoffPaste.bind(this);
+    this.onSearchHandoffDrop = this.onSearchHandoffDrop.bind(this);
     this.onInputMount = this.onInputMount.bind(this);
+    this.onSearchHandoffButtonMount = this.onSearchHandoffButtonMount.bind(this);
   }
 
   handleEvent(event) {
@@ -26,20 +29,35 @@ export class _Search extends React.PureComponent {
     window.gContentSearchController.search(event);
   }
 
+  doSearchHandoff(text) {
+    this.props.dispatch(ac.OnlyToMain({type: at.HANDOFF_SEARCH_TO_AWESOMEBAR, data: {text}}));
+    this.props.dispatch({type: at.FAKE_FOCUS_SEARCH});
+    this.props.dispatch(ac.UserEvent({event: "SEARCH_HANDOFF"}));
+    if (text) {
+      this.props.dispatch({type: at.HIDE_SEARCH});
+    }
+  }
+
   onSearchHandoffClick(event) {
     // When search hand-off is enabled, we render a big button that is styled to
-    // look like a search textbox. If the button is clicked with the mouse, we style
+    // look like a search textbox. If the button is clicked, we style
     // the button as if it was a focused search box and show a fake cursor but
-    // really focus the awesomebar without the focus styles.
-    // If the button is clicked from the keyboard, we focus the awesomebar normally.
-    // This is to minimize confusion with users navigating with the keyboard and
-    // users using assistive technologoy.
-    const isKeyboardClick = event.clientX === 0 && event.clientY === 0;
-    const hiddenFocus =  !isKeyboardClick;
-    this.props.dispatch(ac.OnlyToMain({type: at.HANDOFF_SEARCH_TO_AWESOMEBAR, data: {hiddenFocus}}));
-    this.props.dispatch({type: at.FOCUS_SEARCH});
+    // really focus the awesomebar without the focus styles ("hidden focus").
+    event.preventDefault();
+    this.doSearchHandoff();
+  }
 
-    // TODO: Send a telemetry ping. BUG 1514732
+  onSearchHandoffPaste(event) {
+    event.preventDefault();
+    this.doSearchHandoff(event.clipboardData.getData("Text"));
+  }
+
+  onSearchHandoffDrop(event) {
+    event.preventDefault();
+    let text = event.dataTransfer.getData("text");
+    if (text) {
+      this.doSearchHandoff(text);
+    }
   }
 
   componentWillUnmount() {
@@ -74,6 +92,11 @@ export class _Search extends React.PureComponent {
     }
   }
 
+  onSearchHandoffButtonMount(button) {
+    // Keep a reference to the button for use during "paste" event handling.
+    this._searchHandoffButton = button;
+  }
+
   /*
    * Do not change the ID on the input field, as legacy newtab code
    * specifically looks for the id 'newtab-search-text' on input fields
@@ -83,7 +106,7 @@ export class _Search extends React.PureComponent {
     const wrapperClassName = [
       "search-wrapper",
       this.props.hide && "search-hidden",
-      this.props.focus && "search-active",
+      this.props.fakeFocus && "fake-focus",
     ].filter(v => v).join(" ");
 
     return (<div className={wrapperClassName}>
@@ -118,9 +141,12 @@ export class _Search extends React.PureComponent {
         <div className="search-inner-wrapper">
           <button
             className="search-handoff-button"
+            ref={this.onSearchHandoffButtonMount}
             onClick={this.onSearchHandoffClick}
+            tabIndex="-1"
             title={this.props.intl.formatMessage({id: "search_web_placeholder"})}>
             <div className="fake-textbox">{this.props.intl.formatMessage({id: "search_web_placeholder"})}</div>
+            <input type="search" className="fake-editable" tabIndex="-1" aria-hidden="true" onDrop={this.onSearchHandoffDrop} onPaste={this.onSearchHandoffPaste} />
             <div className="fake-caret" />
           </button>
           {/*

@@ -36,9 +36,9 @@
 
 // #define APZCCH_LOGGING 1
 #ifdef APZCCH_LOGGING
-#define APZCCH_LOG(...) printf_stderr("APZCCH: " __VA_ARGS__)
+#  define APZCCH_LOG(...) printf_stderr("APZCCH: " __VA_ARGS__)
 #else
-#define APZCCH_LOG(...)
+#  define APZCCH_LOG(...)
 #endif
 
 namespace mozilla {
@@ -174,9 +174,11 @@ static ScreenMargin ScrollFrame(nsIContent* aContent,
     sf->SetScrollableByAPZ(!aRequest.IsScrollInfoLayer());
     if (sf->IsRootScrollFrameOfDocument()) {
       if (nsCOMPtr<nsIPresShell> shell = GetPresShell(aContent)) {
-        shell->SetVisualViewportOffset(
-            CSSPoint::ToAppUnits(aRequest.GetScrollOffset()),
-            shell->GetLayoutViewportOffset());
+        if (shell->SetVisualViewportOffset(
+                CSSPoint::ToAppUnits(aRequest.GetScrollOffset()),
+                shell->GetLayoutViewportOffset())) {
+          sf->MarkEverScrolled();
+        }
       }
     }
   }
@@ -203,7 +205,8 @@ static ScreenMargin ScrollFrame(nsIContent* aContent,
           aRequest, actualScrollOffset);
     }
   } else if (aRequest.IsRootContent() &&
-             aRequest.GetScrollOffset() != aRequest.GetLayoutViewport().TopLeft()) {
+             aRequest.GetScrollOffset() !=
+                 aRequest.GetLayoutViewport().TopLeft()) {
     // APZ uses the visual viewport's offset to calculate where to place the
     // display port, so the display port is misplaced when a pinch zoom occurs.
     //

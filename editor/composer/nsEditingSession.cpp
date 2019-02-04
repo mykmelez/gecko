@@ -50,6 +50,7 @@
 #include "mozilla/dom/Selection.h"       // for AutoHideSelectionChanges, etc
 #include "nsFrameSelection.h"            // for nsFrameSelection
 #include "nsBaseCommandController.h"     // for nsBaseCommandController
+#include "mozilla/dom/LoadURIOptionsBinding.h"
 
 class nsISupports;
 class nsIURI;
@@ -787,7 +788,20 @@ nsEditingSession::OnStatusChange(nsIWebProgress* aWebProgress,
 ----------------------------------------------------------------------------*/
 NS_IMETHODIMP
 nsEditingSession::OnSecurityChange(nsIWebProgress* aWebProgress,
-                                   nsIRequest* aRequest, uint32_t state) {
+                                   nsIRequest* aRequest, uint32_t aState) {
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
+  return NS_OK;
+}
+
+/*---------------------------------------------------------------------------
+
+  OnContentBlockingEvent
+
+----------------------------------------------------------------------------*/
+NS_IMETHODIMP
+nsEditingSession::OnContentBlockingEvent(nsIWebProgress* aWebProgress,
+                                         nsIRequest* aRequest,
+                                         uint32_t aEvent) {
   MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
@@ -940,8 +954,10 @@ void nsEditingSession::TimerCallback(nsITimer* aTimer, void* aClosure) {
   if (docShell) {
     nsCOMPtr<nsIWebNavigation> webNav(do_QueryInterface(docShell));
     if (webNav) {
-      webNav->LoadURI(NS_LITERAL_STRING("about:blank"), 0, nullptr, nullptr,
-                      nullptr, nsContentUtils::GetSystemPrincipal());
+      LoadURIOptions loadURIOptions;
+      loadURIOptions.mTriggeringPrincipal =
+          nsContentUtils::GetSystemPrincipal();
+      webNav->LoadURI(NS_LITERAL_STRING("about:blank"), loadURIOptions);
     }
   }
 }

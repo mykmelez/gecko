@@ -5,35 +5,25 @@
 use api::{AsyncBlobImageRasterizer, BlobImageRequest, BlobImageParams, BlobImageResult};
 use api::{DocumentId, PipelineId, ApiMsg, FrameMsg, ResourceUpdate, ExternalEvent, Epoch};
 use api::{BuiltDisplayList, ColorF, LayoutSize, NotificationRequest, Checkpoint, IdNamespace};
-use api::{MemoryReport, VoidPtrToSizeFn};
+use api::{MemoryReport};
 use api::channel::MsgSender;
 #[cfg(feature = "capture")]
 use capture::CaptureConfig;
 use frame_builder::{FrameBuilderConfig, FrameBuilder};
-use clip::{ClipDataInterner, ClipDataUpdateList};
 use clip_scroll_tree::ClipScrollTree;
 use display_list_flattener::DisplayListFlattener;
 use intern::{Internable, Interner};
+use intern_types;
 use internal_types::{FastHashMap, FastHashSet};
-use prim_store::{PrimitiveDataInterner, PrimitiveDataUpdateList, PrimitiveKeyKind};
+use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
+use prim_store::{PrimitiveKeyKind};
 use prim_store::PrimitiveStoreStats;
-use prim_store::borders::{
-    ImageBorder, ImageBorderDataInterner, ImageBorderDataUpdateList,
-    NormalBorderPrim, NormalBorderDataInterner, NormalBorderDataUpdateList
-};
-use prim_store::gradient::{
-    LinearGradient, LinearGradientDataInterner, LinearGradientDataUpdateList,
-    RadialGradient, RadialGradientDataInterner, RadialGradientDataUpdateList
-};
-use prim_store::image::{
-    Image, ImageDataInterner, ImageDataUpdateList,
-    YuvImage, YuvImageDataInterner, YuvImageDataUpdateList,
-};
-use prim_store::line_dec::{
-    LineDecoration, LineDecorationDataInterner, LineDecorationDataUpdateList
-};
-use prim_store::picture::{PictureDataInterner, Picture, PictureDataUpdateList};
-use prim_store::text_run::{TextRunDataInterner, TextRun, TextRunDataUpdateList};
+use prim_store::borders::{ImageBorder, NormalBorderPrim};
+use prim_store::gradient::{LinearGradient, RadialGradient};
+use prim_store::image::{Image, YuvImage};
+use prim_store::line_dec::LineDecoration;
+use prim_store::picture::Picture;
+use prim_store::text_run::TextRun;
 use resource_cache::{AsyncBlobImageInfo, FontInstanceMap};
 use render_backend::DocumentView;
 use renderer::{PipelineInfo, SceneBuilderHooks};
@@ -44,20 +34,6 @@ use time::precise_time_ns;
 use util::drain_filter;
 use std::thread;
 use std::time::Duration;
-
-pub struct DocumentResourceUpdates {
-    pub clip_updates: ClipDataUpdateList,
-    pub prim_updates: PrimitiveDataUpdateList,
-    pub image_updates: ImageDataUpdateList,
-    pub image_border_updates: ImageBorderDataUpdateList,
-    pub line_decoration_updates: LineDecorationDataUpdateList,
-    pub linear_grad_updates: LinearGradientDataUpdateList,
-    pub normal_border_updates: NormalBorderDataUpdateList,
-    pub picture_updates: PictureDataUpdateList,
-    pub radial_grad_updates: RadialGradientDataUpdateList,
-    pub text_run_updates: TextRunDataUpdateList,
-    pub yuv_image_updates: YuvImageDataUpdateList,
-}
 
 /// Represents the work associated to a transaction before scene building.
 pub struct Transaction {
@@ -116,7 +92,7 @@ pub struct BuiltTransaction {
     pub frame_ops: Vec<FrameMsg>,
     pub removed_pipelines: Vec<PipelineId>,
     pub notifications: Vec<NotificationRequest>,
-    pub doc_resource_updates: Option<DocumentResourceUpdates>,
+    pub interner_updates: Option<InternerUpdates>,
     pub scene_build_start_time: u64,
     pub scene_build_end_time: u64,
     pub render_frame: bool,
@@ -148,7 +124,7 @@ pub struct LoadScene {
     pub view: DocumentView,
     pub config: FrameBuilderConfig,
     pub build_frame: bool,
-    pub doc_resources: DocumentResources,
+    pub interners: Interners,
 }
 
 pub struct BuiltScene {
@@ -193,54 +169,63 @@ pub enum SceneSwapResult {
     Aborted,
 }
 
-// This struct contains all items that can be shared between
-// display lists. We want to intern and share the same clips,
-// primitives and other things between display lists so that:
-// - GPU cache handles remain valid, reducing GPU cache updates.
-// - Comparison of primitives and pictures between two
-//   display lists is (a) fast (b) done during scene building.
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Default)]
-pub struct DocumentResources {
-    pub clip_interner: ClipDataInterner,
-    pub prim_interner: PrimitiveDataInterner,
-    pub image_interner: ImageDataInterner,
-    pub image_border_interner: ImageBorderDataInterner,
-    pub line_decoration_interner: LineDecorationDataInterner,
-    pub linear_grad_interner: LinearGradientDataInterner,
-    pub normal_border_interner: NormalBorderDataInterner,
-    pub picture_interner: PictureDataInterner,
-    pub radial_grad_interner: RadialGradientDataInterner,
-    pub text_run_interner: TextRunDataInterner,
-    pub yuv_image_interner: YuvImageDataInterner,
-}
+macro_rules! declare_interners {
+    ( $( $name: ident, )+ ) => {
+        /// This struct contains all items that can be shared between
+        /// display lists. We want to intern and share the same clips,
+        /// primitives and other things between display lists so that:
+        /// - GPU cache handles remain valid, reducing GPU cache updates.
+        /// - Comparison of primitives and pictures between two
+        ///   display lists is (a) fast (b) done during scene building.
+        #[cfg_attr(feature = "capture", derive(Serialize))]
+        #[cfg_attr(feature = "replay", derive(Deserialize))]
+        #[derive(Default)]
+        pub struct Interners {
+            $(
+                pub $name: intern_types::$name::Interner,
+            )+
+        }
 
-impl DocumentResources {
-    /// Reports CPU heap memory used by the interners.
-    fn report_memory(
-        &self,
-        op: VoidPtrToSizeFn,
-        eop: VoidPtrToSizeFn,
-        r: &mut MemoryReport,
-    ) {
-        r.interners += self.clip_interner.malloc_size_of(op, eop);
-        r.interners += self.prim_interner.malloc_size_of(op, eop);
-        r.interners += self.linear_grad_interner.malloc_size_of(op, eop);
-        r.interners += self.radial_grad_interner.malloc_size_of(op, eop);
-        r.interners += self.text_run_interner.malloc_size_of(op, eop);
+        pub struct InternerUpdates {
+            $(
+                pub $name: intern_types::$name::UpdateList,
+            )+
+        }
+
+        impl Interners {
+            /// Reports CPU heap memory used by the interners.
+            fn report_memory(
+                &self,
+                ops: &mut MallocSizeOfOps,
+                r: &mut MemoryReport,
+            ) {
+                $(
+                    r.interning.interners.$name += self.$name.size_of(ops);
+                )+
+            }
+
+            fn end_frame_and_get_pending_updates(&mut self) -> InternerUpdates {
+                InternerUpdates {
+                    $(
+                        $name: self.$name.end_frame_and_get_pending_updates(),
+                    )+
+                }
+            }
+        }
     }
 }
 
-// Access to `DocumentResources` interners by `Internable`
+enumerate_interners!(declare_interners);
+
+// Access to `Interners` interners by `Internable`
 pub trait InternerMut<I: Internable>
 {
     fn interner_mut(&mut self) -> &mut Interner<I::Source, I::InternData, I::Marker>;
 }
 
-macro_rules! impl_internet_mut {
+macro_rules! impl_interner_mut {
     ($($ty:ident: $mem:ident,)*) => {
-        $(impl InternerMut<$ty> for DocumentResources {
+        $(impl InternerMut<$ty> for Interners {
             fn interner_mut(&mut self) -> &mut Interner<
                 <$ty as Internable>::Source,
                 <$ty as Internable>::InternData,
@@ -252,17 +237,17 @@ macro_rules! impl_internet_mut {
     }
 }
 
-impl_internet_mut! {
-    Image: image_interner,
-    ImageBorder: image_border_interner,
-    LineDecoration: line_decoration_interner,
-    LinearGradient: linear_grad_interner,
-    NormalBorderPrim: normal_border_interner,
-    Picture: picture_interner,
-    PrimitiveKeyKind: prim_interner,
-    RadialGradient: radial_grad_interner,
-    TextRun: text_run_interner,
-    YuvImage: yuv_image_interner,
+impl_interner_mut! {
+    Image: image,
+    ImageBorder: image_border,
+    LineDecoration: line_decoration,
+    LinearGradient: linear_grad,
+    NormalBorderPrim: normal_border,
+    Picture: picture,
+    PrimitiveKeyKind: prim,
+    RadialGradient: radial_grad,
+    TextRun: text_run,
+    YuvImage: yuv_image,
 }
 
 // A document in the scene builder contains the current scene,
@@ -271,7 +256,7 @@ impl_internet_mut! {
 // display lists.
 struct Document {
     scene: Scene,
-    resources: DocumentResources,
+    interners: Interners,
     prim_store_stats: PrimitiveStoreStats,
 }
 
@@ -279,7 +264,7 @@ impl Document {
     fn new(scene: Scene) -> Self {
         Document {
             scene,
-            resources: DocumentResources::default(),
+            interners: Interners::default(),
             prim_store_stats: PrimitiveStoreStats::empty(),
         }
     }
@@ -293,8 +278,7 @@ pub struct SceneBuilder {
     config: FrameBuilderConfig,
     hooks: Option<Box<SceneBuilderHooks + Send>>,
     simulate_slow_ms: u32,
-    size_of_op: Option<VoidPtrToSizeFn>,
-    enclosing_size_of_op: Option<VoidPtrToSizeFn>,
+    size_of_ops: Option<MallocSizeOfOps>,
 }
 
 impl SceneBuilder {
@@ -302,8 +286,7 @@ impl SceneBuilder {
         config: FrameBuilderConfig,
         api_tx: MsgSender<ApiMsg>,
         hooks: Option<Box<SceneBuilderHooks + Send>>,
-        size_of_op: Option<VoidPtrToSizeFn>,
-        enclosing_size_of_op: Option<VoidPtrToSizeFn>,
+        size_of_ops: Option<MallocSizeOfOps>,
     ) -> (Self, Sender<SceneBuilderRequest>, Receiver<SceneBuilderResult>) {
         let (in_tx, in_rx) = channel();
         let (out_tx, out_rx) = channel();
@@ -315,8 +298,7 @@ impl SceneBuilder {
                 api_tx,
                 config,
                 hooks,
-                size_of_op,
-                enclosing_size_of_op,
+                size_of_ops,
                 simulate_slow_ms: 0,
             },
             in_tx,
@@ -402,8 +384,8 @@ impl SceneBuilder {
     #[cfg(feature = "capture")]
     fn save_scene(&mut self, config: CaptureConfig) {
         for (id, doc) in &self.documents {
-            let doc_resources_name = format!("doc-resources-{}-{}", (id.0).0, id.1);
-            config.serialize(&doc.resources, doc_resources_name);
+            let interners_name = format!("interners-{}-{}", (id.0).0, id.1);
+            config.serialize(&doc.interners, interners_name);
         }
     }
 
@@ -415,7 +397,7 @@ impl SceneBuilder {
             let scene_build_start_time = precise_time_ns();
 
             let mut built_scene = None;
-            let mut doc_resource_updates = None;
+            let mut interner_updates = None;
 
             if item.scene.has_root_pipeline() {
                 let mut clip_scroll_tree = ClipScrollTree::new();
@@ -429,81 +411,12 @@ impl SceneBuilder {
                     &item.output_pipelines,
                     &self.config,
                     &mut new_scene,
-                    &mut item.doc_resources,
+                    &mut item.interners,
                     &PrimitiveStoreStats::empty(),
                 );
 
-                // TODO(djg): Can we do better than this?  Use a #[derive] to
-                // write the code for us, or unify updates into one enum/list?
-                let clip_updates = item
-                    .doc_resources
-                    .clip_interner
-                    .end_frame_and_get_pending_updates();
-
-                let prim_updates = item
-                    .doc_resources
-                    .prim_interner
-                    .end_frame_and_get_pending_updates();
-
-                let image_updates = item
-                    .doc_resources
-                    .image_interner
-                    .end_frame_and_get_pending_updates();
-
-                let image_border_updates = item
-                    .doc_resources
-                    .image_border_interner
-                    .end_frame_and_get_pending_updates();
-
-                let line_decoration_updates = item
-                    .doc_resources
-                    .line_decoration_interner
-                    .end_frame_and_get_pending_updates();
-
-                let linear_grad_updates = item
-                    .doc_resources
-                    .linear_grad_interner
-                    .end_frame_and_get_pending_updates();
-
-                let normal_border_updates = item
-                    .doc_resources
-                    .normal_border_interner
-                    .end_frame_and_get_pending_updates();
-
-                let picture_updates = item
-                    .doc_resources
-                    .picture_interner
-                    .end_frame_and_get_pending_updates();
-
-                let radial_grad_updates = item
-                    .doc_resources
-                    .radial_grad_interner
-                    .end_frame_and_get_pending_updates();
-
-                let text_run_updates = item
-                    .doc_resources
-                    .text_run_interner
-                    .end_frame_and_get_pending_updates();
-
-                let yuv_image_updates = item
-                    .doc_resources
-                    .yuv_image_interner
-                    .end_frame_and_get_pending_updates();
-
-                doc_resource_updates = Some(
-                    DocumentResourceUpdates {
-                        clip_updates,
-                        prim_updates,
-                        image_updates,
-                        image_border_updates,
-                        line_decoration_updates,
-                        linear_grad_updates,
-                        normal_border_updates,
-                        picture_updates,
-                        radial_grad_updates,
-                        text_run_updates,
-                        yuv_image_updates,
-                    }
+                interner_updates = Some(
+                    item.interners.end_frame_and_get_pending_updates()
                 );
 
                 built_scene = Some(BuiltScene {
@@ -517,7 +430,7 @@ impl SceneBuilder {
                 item.document_id,
                 Document {
                     scene: item.scene,
-                    resources: item.doc_resources,
+                    interners: item.interners,
                     prim_store_stats: PrimitiveStoreStats::empty(),
                 },
             );
@@ -535,7 +448,7 @@ impl SceneBuilder {
                 notifications: Vec::new(),
                 scene_build_start_time,
                 scene_build_end_time: precise_time_ns(),
-                doc_resource_updates,
+                interner_updates,
             });
 
             self.forward_built_transaction(txn);
@@ -579,7 +492,7 @@ impl SceneBuilder {
         }
 
         let mut built_scene = None;
-        let mut doc_resource_updates = None;
+        let mut interner_updates = None;
         if scene.has_root_pipeline() {
             if let Some(request) = txn.request_scene_build.take() {
                 let mut clip_scroll_tree = ClipScrollTree::new();
@@ -593,7 +506,7 @@ impl SceneBuilder {
                     &request.output_pipelines,
                     &self.config,
                     &mut new_scene,
-                    &mut doc.resources,
+                    &mut doc.interners,
                     &doc.prim_store_stats,
                 );
 
@@ -601,75 +514,8 @@ impl SceneBuilder {
                 doc.prim_store_stats = frame_builder.prim_store.get_stats();
 
                 // Retrieve the list of updates from the clip interner.
-                let clip_updates = doc
-                    .resources
-                    .clip_interner
-                    .end_frame_and_get_pending_updates();
-
-                let prim_updates = doc
-                    .resources
-                    .prim_interner
-                    .end_frame_and_get_pending_updates();
-
-                let image_updates = doc
-                    .resources
-                    .image_interner
-                    .end_frame_and_get_pending_updates();
-
-                let image_border_updates = doc
-                    .resources
-                    .image_border_interner
-                    .end_frame_and_get_pending_updates();
-
-                let line_decoration_updates = doc
-                    .resources
-                    .line_decoration_interner
-                    .end_frame_and_get_pending_updates();
-
-                let linear_grad_updates = doc
-                    .resources
-                    .linear_grad_interner
-                    .end_frame_and_get_pending_updates();
-
-                let normal_border_updates = doc
-                    .resources
-                    .normal_border_interner
-                    .end_frame_and_get_pending_updates();
-
-                let picture_updates = doc
-                    .resources
-                    .picture_interner
-                    .end_frame_and_get_pending_updates();
-
-                let radial_grad_updates = doc
-                    .resources
-                    .radial_grad_interner
-                    .end_frame_and_get_pending_updates();
-
-                let text_run_updates = doc
-                    .resources
-                    .text_run_interner
-                    .end_frame_and_get_pending_updates();
-
-                let yuv_image_updates = doc
-                    .resources
-                    .yuv_image_interner
-                    .end_frame_and_get_pending_updates();
-
-                doc_resource_updates = Some(
-                    DocumentResourceUpdates {
-                        clip_updates,
-                        prim_updates,
-                        image_updates,
-                        image_border_updates,
-                        line_decoration_updates,
-                        linear_grad_updates,
-                        normal_border_updates,
-                        picture_updates,
-                        radial_grad_updates,
-                        text_run_updates,
-                        yuv_image_updates,
-                    }
+                interner_updates = Some(
+                    doc.interners.end_frame_and_get_pending_updates()
                 );
 
                 built_scene = Some(BuiltScene {
@@ -704,7 +550,7 @@ impl SceneBuilder {
             frame_ops: replace(&mut txn.frame_ops, Vec::new()),
             removed_pipelines: replace(&mut txn.removed_pipelines, Vec::new()),
             notifications: replace(&mut txn.notifications, Vec::new()),
-            doc_resource_updates,
+            interner_updates,
             scene_build_start_time,
             scene_build_end_time: precise_time_ns(),
         })
@@ -763,12 +609,11 @@ impl SceneBuilder {
     }
 
     /// Reports CPU heap memory used by the SceneBuilder.
-    fn report_memory(&self) -> MemoryReport {
-        let op = self.size_of_op.unwrap();
-        let eop = self.enclosing_size_of_op.unwrap();
+    fn report_memory(&mut self) -> MemoryReport {
+        let ops = self.size_of_ops.as_mut().unwrap();
         let mut report = MemoryReport::default();
         for doc in self.documents.values() {
-            doc.resources.report_memory(op, eop, &mut report);
+            doc.interners.report_memory(ops, &mut report);
         }
 
         report

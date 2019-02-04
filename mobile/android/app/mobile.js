@@ -72,7 +72,6 @@ pref("browser.cache.disk.enable", true);
 pref("browser.cache.disk.capacity", 20480); // kilobytes
 pref("browser.cache.disk.max_entry_size", 4096); // kilobytes
 pref("browser.cache.disk.smart_size.enabled", true);
-pref("browser.cache.disk.smart_size.first_run", true);
 
 pref("browser.cache.memory.enable", true);
 pref("browser.cache.memory.capacity", 1024); // kilobytes
@@ -581,15 +580,10 @@ pref("media.mediasource.enabled", true);
 
 pref("media.mediadrm-widevinecdm.visible", true);
 
-#ifdef NIGHTLY_BUILD
 // Switch block autoplay logic to v2.
 pref("media.autoplay.enabled.user-gestures-needed", true);
 // Set Fennec to block autoplay by default.
 pref("media.autoplay.default", 1); // 0=Allowed, 1=Blocked
-#else
-pref("media.autoplay.default", 0); // 0=Allowed, 1=Blocked
-pref("media.autoplay.enabled.user-gestures-needed", false);
-#endif
 
 // Enable WebSpeech speech synthesis
 pref("media.webspeech.synth.enabled", true);

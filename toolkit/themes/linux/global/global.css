@@ -19,7 +19,7 @@
 
 @media (-moz-menubar-drag) {
   toolbar[type="menubar"] {
-    -moz-binding: url("chrome://global/content/bindings/toolbar.xml#toolbar-drag");
+    -moz-window-dragging: drag;
   }
 }
 
@@ -140,19 +140,6 @@ html|*#print-preview-pageNumber {
 
 :root[lwtheme-image]:-moz-lwtheme-brighttext {
   text-shadow: 1px 1px 1.5px black;
-}
-
-.inset {
-  border: 1px solid ThreeDShadow;
-  border-right-color: ThreeDHighlight;
-  border-bottom-color: ThreeDHighlight;
-  margin: 0 5px 5px;
-}
-
-.outset {
-  border: 1px solid ThreeDShadow;
-  border-left-color: ThreeDHighlight;
-  border-top-color: ThreeDHighlight;
 }
 
 separator:not([orient="vertical"]) {

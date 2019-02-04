@@ -10,18 +10,10 @@
 }
 
 .theme-light {
-  --searchbox-background-color: var(--theme-highlight-yellow);
-  --searchbox-border-color: #ffbf00;
-  --searcbox-no-match-background-color: #ffe5e5;
-  --searcbox-no-match-border-color: #e52e2e;
   --separator-border-color: rgba(0,0,0,.1);
 }
 
 .theme-dark {
-  --searchbox-background-color: #4d4222;
-  --searchbox-border-color: #d99f2b;
-  --searcbox-no-match-background-color: #402325;
-  --searcbox-no-match-border-color: #cc3d3d;
   --separator-border-color: rgba(100%,100%,100%,.2);
 }
 
@@ -40,27 +32,6 @@
 
 .devtools-toolbar {
   padding: 0 3px;
-}
-
-.devtools-toolbar checkbox {
-  margin: 0 2px;
-  padding: 0;
-  line-height: -moz-block-height;
-}
-
-.devtools-toolbar checkbox .checkbox-check {
-  margin: 0;
-  padding: 0;
-  vertical-align: bottom;
-}
-
-.devtools-toolbar checkbox .checkbox-label-box {
-  border: none !important; /* overrides .checkbox-label-box from checkbox.css */
-}
-
-.devtools-toolbar checkbox .checkbox-label-box .checkbox-label {
-  margin: 0 6px !important; /* overrides .checkbox-label from checkbox.css */
-  padding: 0;
 }
 
 .devtools-toolbar-bottom {
@@ -181,21 +152,10 @@
 /*
  * Apply the default fill color to toolbar icons
  */
-.devtools-toolbarbutton > image,
-.devtools-button::before,
-.scrollbutton-up > .toolbarbutton-icon,
-.scrollbutton-down > .toolbarbutton-icon,
-#black-boxed-message-button .button-icon,
 #canvas-debugging-empty-notice-button .button-icon,
-#toggle-breakpoints[checked] > image,
 .event-tooltip-debugger-icon {
   -moz-context-properties: fill;
-  fill: var(--theme-toolbar-icon-color);
-}
-
-.hidden-labels-box:not(.visible) > label,
-.hidden-labels-box.visible ~ .hidden-labels-box > label:last-child {
-  display: none;
+  fill: var(--theme-icon-color);
 }
 
 .devtools-invisible-splitter {
@@ -217,7 +177,7 @@ splitter.devtools-horizontal-splitter,
   overflow: hidden;
   padding-inline-start: 2px !important;
   padding-inline-end: 10px !important;
-  fill: var(--theme-toolbar-icon-color);
+  fill: var(--theme-icon-color);
   -moz-context-properties: fill;
 }
 

@@ -36,6 +36,7 @@
 #include "vm/StringType.h"
 #include "wasm/WasmBaselineCompile.h"
 #include "wasm/WasmCompile.h"
+#include "wasm/WasmCraneliftCompile.h"
 #include "wasm/WasmInstance.h"
 #include "wasm/WasmIonCompile.h"
 #include "wasm/WasmModule.h"
@@ -56,6 +57,19 @@ using mozilla::Nothing;
 using mozilla::RangedPtr;
 
 extern mozilla::Atomic<bool> fuzzingSafe;
+
+bool wasm::HasReftypesSupport(JSContext* cx) {
+#ifdef ENABLE_WASM_CRANELIFT
+  if (cx->options().wasmCranelift()) {
+    return false;
+  }
+#endif
+#ifdef ENABLE_WASM_REFTYPES
+  return cx->options().wasmGc() && cx->options().wasmBaseline();
+#else
+  return false;
+#endif
+}
 
 bool wasm::HasCompilerSupport(JSContext* cx) {
 #if !MOZ_LITTLE_ENDIAN || defined(JS_CODEGEN_NONE)
@@ -89,14 +103,22 @@ bool wasm::HasCompilerSupport(JSContext* cx) {
   }
 #endif
 
-  return BaselineCanCompile() || IonCanCompile();
+  return BaselineCanCompile() || IonCanCompile() || CraneliftCanCompile();
+}
+
+bool wasm::HasOptimizedCompilerTier(JSContext* cx) {
+  return (cx->options().wasmIon() && IonCanCompile())
+#ifdef ENABLE_WASM_CRANELIFT
+         || (cx->options().wasmCranelift() && CraneliftCanCompile())
+#endif
+  ;
 }
 
 // Return whether wasm compilation is allowed by prefs.  This check
 // only makes sense if HasCompilerSupport() is true.
 static bool HasAvailableCompilerTier(JSContext* cx) {
   return (cx->options().wasmBaseline() && BaselineCanCompile()) ||
-         (cx->options().wasmIon() && IonCanCompile());
+         HasOptimizedCompilerTier(cx);
 }
 
 bool wasm::HasSupport(JSContext* cx) {
@@ -106,7 +128,6 @@ bool wasm::HasSupport(JSContext* cx) {
 
 bool wasm::HasStreamingSupport(JSContext* cx) {
   // This should match EnsureStreamSupport().
-
   return HasSupport(cx) &&
          cx->runtime()->offThreadPromiseState.ref().initialized() &&
          CanUseExtraThreads() && cx->runtime()->consumeStreamCallback &&
@@ -114,7 +135,7 @@ bool wasm::HasStreamingSupport(JSContext* cx) {
 }
 
 bool wasm::HasCachingSupport(JSContext* cx) {
-  return HasStreamingSupport(cx) && cx->options().wasmIon() && IonCanCompile();
+  return HasStreamingSupport(cx) && HasOptimizedCompilerTier(cx);
 }
 
 static bool ToWebAssemblyValue(JSContext* cx, ValType targetType, HandleValue v,
@@ -396,8 +417,7 @@ bool wasm::Eval(JSContext* cx, Handle<TypedArrayObject*> code,
     return false;
   }
 
-  MutableCompileArgs compileArgs =
-      cx->new_<CompileArgs>(cx, std::move(scriptedCaller));
+  SharedCompileArgs compileArgs = CompileArgs::build(cx, std::move(scriptedCaller));
   if (!compileArgs) {
     return false;
   }
@@ -1019,14 +1039,14 @@ static bool GetBufferSource(JSContext* cx, JSObject* obj, unsigned errorNumber,
   return true;
 }
 
-static MutableCompileArgs InitCompileArgs(JSContext* cx,
-                                          const char* introducer) {
+static SharedCompileArgs InitCompileArgs(JSContext* cx,
+                                         const char* introducer) {
   ScriptedCaller scriptedCaller;
   if (!DescribeScriptedCaller(cx, &scriptedCaller, introducer)) {
     return nullptr;
   }
 
-  return cx->new_<CompileArgs>(cx, std::move(scriptedCaller));
+  return CompileArgs::build(cx, std::move(scriptedCaller));
 }
 
 static bool ReportCompileWarnings(JSContext* cx,
@@ -2047,7 +2067,7 @@ bool WasmTableObject::isNewborn() const {
     tableKind = TableKind::AnyFunction;
 #ifdef ENABLE_WASM_GENERALIZED_TABLES
   } else if (StringEqualsAscii(elementLinearStr, "anyref")) {
-    if (!cx->options().wasmGc()) {
+    if (!HasReftypesSupport(cx)) {
       JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
                                JSMSG_WASM_BAD_ELEMENT);
       return false;
@@ -2459,8 +2479,8 @@ const Class WasmGlobalObject::class_ = {
     globalType = ValType::F32;
   } else if (StringEqualsAscii(typeLinearStr, "f64")) {
     globalType = ValType::F64;
-#ifdef ENABLE_WASM_GC
-  } else if (cx->options().wasmGc() &&
+#ifdef ENABLE_WASM_REFTYPES
+  } else if (HasReftypesSupport(cx) &&
              StringEqualsAscii(typeLinearStr, "anyref")) {
     globalType = ValType::AnyRef;
 #endif
@@ -3325,7 +3345,7 @@ class ResolveResponseClosure : public NativeObject {
   static const unsigned RESERVED_SLOTS = 4;
   static const Class class_;
 
-  static ResolveResponseClosure* create(JSContext* cx, CompileArgs& args,
+  static ResolveResponseClosure* create(JSContext* cx, const CompileArgs& args,
                                         HandleObject promise, bool instantiate,
                                         HandleObject importObj) {
     MOZ_ASSERT_IF(importObj, instantiate);
@@ -3337,7 +3357,7 @@ class ResolveResponseClosure : public NativeObject {
     }
 
     args.AddRef();
-    obj->setReservedSlot(COMPILE_ARGS_SLOT, PrivateValue(&args));
+    obj->setReservedSlot(COMPILE_ARGS_SLOT, PrivateValue((void*)&args));
     obj->setReservedSlot(PROMISE_OBJ_SLOT, ObjectValue(*promise));
     obj->setReservedSlot(INSTANTIATE_SLOT, BooleanValue(instantiate));
     obj->setReservedSlot(IMPORT_OBJ_SLOT, ObjectOrNullValue(importObj));
@@ -3446,7 +3466,7 @@ static bool ResolveResponse(JSContext* cx, CallArgs callArgs,
   const char* introducer = instantiate ? "WebAssembly.instantiateStreaming"
                                        : "WebAssembly.compileStreaming";
 
-  MutableCompileArgs compileArgs = InitCompileArgs(cx, introducer);
+  SharedCompileArgs compileArgs = InitCompileArgs(cx, introducer);
   if (!compileArgs) {
     return false;
   }

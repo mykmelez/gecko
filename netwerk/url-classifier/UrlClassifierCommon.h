@@ -27,11 +27,8 @@ class UrlClassifierCommon final {
 
   static bool AddonMayLoad(nsIChannel* aChannel, nsIURI* aURI);
 
-  static void NotifyTrackingProtectionDisabled(nsIChannel* aChannel);
-
-  // aBlockedReason must be one of the nsIWebProgressListener state.
-  static void NotifyChannelBlocked(nsIChannel* aChannel,
-                                   unsigned aBlockedReason);
+  static void NotifyChannelClassifierProtectionDisabled(
+      nsIChannel* aChannel, uint32_t aAcceptedReason);
 
   static bool ShouldEnableClassifier(
       nsIChannel* aChannel,
@@ -46,6 +43,12 @@ class UrlClassifierCommon final {
   // with the format: http://toplevel.page/?resource=channel.uri.domain
   static nsresult CreatePairwiseWhiteListURI(nsIChannel* aChannel,
                                              nsIURI** aURI);
+
+ private:
+  // aBlockedReason must be one of the nsIWebProgressListener state.
+  static void NotifyChannelBlocked(nsIChannel* aChannel,
+                                   nsIURI* aURIBeingLoaded,
+                                   unsigned aBlockedReason);
 };
 
 }  // namespace net

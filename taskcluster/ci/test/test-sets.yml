@@ -88,6 +88,8 @@ raptor-firefox:
     - raptor-tp6-6-firefox
     - raptor-tp6-7-firefox
     - raptor-tp6-8-firefox
+    - raptor-tp6-9-firefox
+    - raptor-tp6-10-firefox
     - raptor-speedometer-firefox
     - raptor-stylebench-firefox
     - raptor-motionmark-htmlsuite-firefox
@@ -103,6 +105,10 @@ raptor-profiling:
     - raptor-tp6-4-firefox-profiling
     - raptor-tp6-5-firefox-profiling
     - raptor-tp6-6-firefox-profiling
+    - raptor-tp6-7-firefox-profiling
+    - raptor-tp6-8-firefox-profiling
+    - raptor-tp6-9-firefox-profiling
+    - raptor-tp6-10-firefox-profiling
     - raptor-speedometer-firefox-profiling
     - raptor-stylebench-firefox-profiling
     - raptor-motionmark-htmlsuite-firefox-profiling
@@ -120,6 +126,8 @@ raptor-chrome:
     - raptor-tp6-6-chrome
     - raptor-tp6-7-chrome
     - raptor-tp6-8-chrome
+    - raptor-tp6-9-chrome
+    - raptor-tp6-10-chrome
     - raptor-speedometer-chrome
     - raptor-stylebench-chrome
     - raptor-motionmark-htmlsuite-chrome
@@ -196,7 +204,6 @@ windows-qr-tests:
     - mochitest-webgl2-core
     - mochitest-webgl2-ext
     - reftest
-    - web-platform-tests-reftests
 
 ccov-code-coverage-tests:
     - test-coverage
@@ -271,6 +278,7 @@ macosx64-tests:
     - mochitest-chrome
     - mochitest-clipboard
     - mochitest-devtools-chrome
+    - mochitest-devtools-webreplay
     - mochitest-gpu
     - mochitest-media
     - mochitest-webgl1-core
@@ -402,12 +410,13 @@ android-hw-arm7-debug-unittests:
 android-hw-aarch64-opt-unittests:
     - jittest
 
-# Coming soonish!
 android-hw-arm7-raptor:
     - raptor-speedometer-geckoview
+    - raptor-tp6m-1-geckoview
 
 android-hw-aarch64-raptor:
     - raptor-speedometer-geckoview
+    - raptor-tp6m-1-geckoview
 
 android-hw-arm7-raptor-power:
     - raptor-speedometer-geckoview-power

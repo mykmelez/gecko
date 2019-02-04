@@ -16,8 +16,8 @@ var EXPORTED_SYMBOLS = ["ExtensionChild"];
  * Don't put contentscript logic here, use ExtensionContent.jsm instead.
  */
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "finalizationService",
                                    "@mozilla.org/toolkit/finalizationwitness;1",
@@ -37,8 +37,8 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 XPCOMUtils.defineLazyPreferenceGetter(this, "gTimingEnabled",
                                       "extensions.webextensions.enablePerformanceCounters",
                                       false);
-ChromeUtils.import("resource://gre/modules/ExtensionCommon.jsm");
-ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
+const {ExtensionCommon} = ChromeUtils.import("resource://gre/modules/ExtensionCommon.jsm");
+const {ExtensionUtils} = ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
 
 const {
   DefaultMap,
@@ -196,8 +196,8 @@ class Port {
         context: this.context,
         name: "Port.onMessage",
         register: fire => {
-          return this.registerOnMessage(holder => {
-            let msg = holder.deserialize(this.context.cloneScope);
+          return this.registerOnMessage((holder, isLastHandler) => {
+            let msg = holder.deserialize(this.context.cloneScope, !isLastHandler);
             fire.asyncWithoutClone(msg, portObj);
           });
         },
@@ -255,9 +255,9 @@ class Port {
    */
   registerOnMessage(callback) {
     let handler = Object.assign({
-      receiveMessage: ({data}) => {
+      receiveMessage: ({data}, isLastHandler) => {
         if (this.context.active && !this.disconnected) {
-          callback(data);
+          callback(data, isLastHandler);
         }
       },
     }, this.handlerBase);
@@ -434,7 +434,7 @@ class Messenger {
                     filter(sender, recipient));
           },
 
-          receiveMessage: ({target, data: holder, sender, recipient, channelId}) => {
+          receiveMessage: ({target, data: holder, sender, recipient, channelId}, isLastHandler) => {
             if (!this.context.active) {
               return;
             }
@@ -448,7 +448,7 @@ class Messenger {
               };
             });
 
-            let message = holder.deserialize(this.context.cloneScope);
+            let message = holder.deserialize(this.context.cloneScope, !isLastHandler);
             holder = null;
 
             sender = Cu.cloneInto(sender, this.context.cloneScope);

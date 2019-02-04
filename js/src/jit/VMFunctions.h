@@ -210,7 +210,7 @@ struct VMFunction {
   // Whether this function returns anything more than a boolean flag for
   // failures.
   bool returnsData() const {
-    return returnType == Type_Pointer || outParam != Type_Void;
+    return returnType == Type_Object || outParam != Type_Void;
   }
 
   ArgProperties argProperties(uint32_t explicitArg) const {
@@ -921,13 +921,6 @@ bool InvokeFromInterpreterStub(JSContext* cx,
 bool CheckOverRecursed(JSContext* cx);
 bool CheckOverRecursedBaseline(JSContext* cx, BaselineFrame* frame);
 
-JSObject* BindVar(JSContext* cx, HandleObject scopeChain);
-MOZ_MUST_USE bool DefVar(JSContext* cx, HandlePropertyName dn, unsigned attrs,
-                         HandleObject scopeChain);
-MOZ_MUST_USE bool DefLexical(JSContext* cx, HandlePropertyName dn,
-                             unsigned attrs, HandleObject scopeChain);
-MOZ_MUST_USE bool DefGlobalLexical(JSContext* cx, HandlePropertyName dn,
-                                   unsigned attrs);
 MOZ_MUST_USE bool MutatePrototype(JSContext* cx, HandlePlainObject obj,
                                   HandleValue value);
 MOZ_MUST_USE bool InitProp(JSContext* cx, HandleObject obj,
@@ -983,7 +976,6 @@ MOZ_MUST_USE bool InterruptCheck(JSContext* cx);
 void* MallocWrapper(JS::Zone* zone, size_t nbytes);
 JSObject* NewCallObject(JSContext* cx, HandleShape shape,
                         HandleObjectGroup group);
-JSObject* NewSingletonCallObject(JSContext* cx, HandleShape shape);
 JSObject* NewStringObject(JSContext* cx, HandleString str);
 
 bool OperatorIn(JSContext* cx, HandleValue key, HandleObject obj, bool* out);
@@ -1024,8 +1016,7 @@ void FrameIsDebuggeeCheck(BaselineFrame* frame);
 JSObject* CreateGenerator(JSContext* cx, BaselineFrame* frame);
 
 MOZ_MUST_USE bool NormalSuspend(JSContext* cx, HandleObject obj,
-                                BaselineFrame* frame, jsbytecode* pc,
-                                uint32_t stackDepth);
+                                BaselineFrame* frame, jsbytecode* pc);
 MOZ_MUST_USE bool FinalSuspend(JSContext* cx, HandleObject obj, jsbytecode* pc);
 MOZ_MUST_USE bool InterpretResume(JSContext* cx, HandleObject obj,
                                   HandleValue val, HandlePropertyName kind,
@@ -1038,8 +1029,6 @@ MOZ_MUST_USE bool GeneratorThrowOrReturn(JSContext* cx, BaselineFrame* frame,
 
 MOZ_MUST_USE bool GlobalNameConflictsCheckFromIon(JSContext* cx,
                                                   HandleScript script);
-MOZ_MUST_USE bool CheckGlobalOrEvalDeclarationConflicts(JSContext* cx,
-                                                        BaselineFrame* frame);
 MOZ_MUST_USE bool InitFunctionEnvironmentObjects(JSContext* cx,
                                                  BaselineFrame* frame);
 
@@ -1192,6 +1181,8 @@ bool DoConcatStringObject(JSContext* cx, HandleValue lhs, HandleValue rhs,
 // the JS_CANNOT_SKIP_AWAIT magic value to `resolved`.
 MOZ_MUST_USE bool TrySkipAwait(JSContext* cx, HandleValue val,
                                MutableHandleValue resolved);
+
+bool IsPossiblyWrappedTypedArray(JSContext* cx, JSObject* obj, bool* result);
 
 // VMFunctions shared by JITs
 extern const VMFunction SetArrayLengthInfo;

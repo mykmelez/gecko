@@ -420,7 +420,7 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
   };
 
   void SynthesizeGLError(GLenum err) const;
-  void SynthesizeGLError(GLenum err, const char* fmt, ...) const
+  void GenerateError(GLenum err, const char* fmt, ...) const
       MOZ_FORMAT_PRINTF(3, 4);
 
   void ErrorInvalidEnum(const char* fmt = 0, ...) const MOZ_FORMAT_PRINTF(2, 3);
@@ -1047,7 +1047,18 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
   realGLboolean mScissorTestEnabled;
   realGLboolean mDepthTestEnabled = 0;
   realGLboolean mStencilTestEnabled;
+  realGLboolean mBlendEnabled = 0;
   GLenum mGenerateMipmapHint = 0;
+
+  struct ScissorRect final {
+    GLint x;
+    GLint y;
+    GLsizei w;
+    GLsizei h;
+
+    void Apply(gl::GLContext&) const;
+  };
+  ScissorRect mScissorRect = {};
 
   bool ValidateCapabilityEnum(GLenum cap);
   realGLboolean* GetStateTrackingSlot(GLenum cap);
@@ -1701,8 +1712,8 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
 
   bool ValidateArrayBufferView(const dom::ArrayBufferView& view,
                                GLuint elemOffset, GLuint elemCountOverride,
-                               uint8_t** const out_bytes,
-                               size_t* const out_byteLen);
+                               GLenum errorVal, uint8_t** const out_bytes,
+                               size_t* const out_byteLen) const;
 
  protected:
   ////
@@ -1949,13 +1960,17 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
   // --
 
   bool EnsureDefaultFB();
-  bool ValidateAndInitFB(const WebGLFramebuffer* fb);
+  bool ValidateAndInitFB(
+      const WebGLFramebuffer* fb,
+      GLenum incompleteFbError = LOCAL_GL_INVALID_FRAMEBUFFER_OPERATION);
   void DoBindFB(const WebGLFramebuffer* fb,
                 GLenum target = LOCAL_GL_FRAMEBUFFER) const;
 
   bool BindCurFBForDraw();
-  bool BindCurFBForColorRead(const webgl::FormatUsageInfo** out_format,
-                             uint32_t* out_width, uint32_t* out_height);
+  bool BindCurFBForColorRead(
+      const webgl::FormatUsageInfo** out_format, uint32_t* out_width,
+      uint32_t* out_height,
+      GLenum incompleteFbError = LOCAL_GL_INVALID_FRAMEBUFFER_OPERATION);
   void DoColorMask(uint8_t bitmask) const;
   void BlitBackbufferToCurDriverFB() const;
   bool BindDefaultFBForRead();

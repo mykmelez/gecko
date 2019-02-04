@@ -14,13 +14,13 @@
 #if defined(MOZ_FMP4)
 extern mozilla::LogModule* GetDemuxerLog();
 
-#define STRINGIFY(x) #x
-#define TOSTRING(x) STRINGIFY(x)
-#define LOG(name, arg, ...)                          \
-  MOZ_LOG(GetDemuxerLog(), mozilla::LogLevel::Debug, \
-          (TOSTRING(name) "(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
+#  define STRINGIFY(x) #  x
+#  define TOSTRING(x) STRINGIFY(x)
+#  define LOG(name, arg, ...)                          \
+    MOZ_LOG(GetDemuxerLog(), mozilla::LogLevel::Debug, \
+            (TOSTRING(name) "(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
 #else
-#define LOG(...)
+#  define LOG(...)
 #endif
 
 namespace mozilla {
@@ -54,8 +54,8 @@ bool MoofParser::RebuildFragmentedIndex(BoxContext& aContext) {
       mInitRange = MediaByteRange(0, box.Range().mEnd);
       ParseMoov(box);
     } else if (box.IsType("moof")) {
-      Moof moof(box, mTrex, mMvhd, mMdhd, mEdts, mSinf, &mLastDecodeTime,
-                mIsAudio);
+      Moof moof(box, mTrackParseMode, mTrex, mMvhd, mMdhd, mEdts, mSinf,
+                &mLastDecodeTime, mIsAudio);
 
       if (!moof.IsValid() && !box.Next().IsAvailable()) {
         // Moof isn't valid abort search for now.
@@ -84,6 +84,10 @@ bool MoofParser::RebuildFragmentedIndex(BoxContext& aContext) {
     }
     mOffset = box.NextOffset();
   }
+  MOZ_ASSERT(mTrackParseMode.is<ParseAllTracks>() ||
+                 mTrex.mTrackId == mTrackParseMode.as<uint32_t>(),
+             "If not parsing all tracks, mTrex should have the same track id "
+             "as the track being parsed.");
   return foundValidMoof;
 }
 
@@ -227,11 +231,13 @@ void MoofParser::ParseTrak(Box& aBox) {
     if (box.IsType("tkhd")) {
       tkhd = Tkhd(box);
     } else if (box.IsType("mdia")) {
-      if (!mTrex.mTrackId || tkhd.mTrackId == mTrex.mTrackId) {
+      if (mTrackParseMode.is<ParseAllTracks>() ||
+          tkhd.mTrackId == mTrackParseMode.as<uint32_t>()) {
         ParseMdia(box, tkhd);
       }
     } else if (box.IsType("edts") &&
-               (!mTrex.mTrackId || tkhd.mTrackId == mTrex.mTrackId)) {
+               (mTrackParseMode.is<ParseAllTracks>() ||
+                tkhd.mTrackId == mTrackParseMode.as<uint32_t>())) {
       mEdts = Edts(box);
     }
   }
@@ -251,12 +257,9 @@ void MoofParser::ParseMvex(Box& aBox) {
   for (Box box = aBox.FirstChild(); box.IsAvailable(); box = box.Next()) {
     if (box.IsType("trex")) {
       Trex trex = Trex(box);
-      if (!mTrex.mTrackId || trex.mTrackId == mTrex.mTrackId) {
-        auto trackId = mTrex.mTrackId;
+      if (mTrackParseMode.is<ParseAllTracks>() ||
+          trex.mTrackId == mTrackParseMode.as<uint32_t>()) {
         mTrex = trex;
-        // Keep the original trackId, as should it be 0 we want to continue
-        // parsing all tracks.
-        mTrex.mTrackId = trackId;
       }
     }
   }
@@ -299,11 +302,10 @@ void MoofParser::ParseStbl(Box& aBox) {
 }
 
 void MoofParser::ParseStsd(Box& aBox) {
-  if (mTrex.mTrackId == 0) {
-    // If mTrex.mTrackId is 0, then the parser is being used to read multiple
-    // tracks metadata, and it is not a sane operation to try and map multiple
-    // sample description boxes, from different tracks, onto the parser, which
-    // is modeled around storing metadata for a single track.
+  if (mTrackParseMode.is<ParseAllTracks>()) {
+    // It is not a sane operation to try and map sample description boxes from
+    // multiple tracks onto the parser, which is modeled around storing metadata
+    // for a single track.
     return;
   }
   MOZ_ASSERT(
@@ -352,13 +354,19 @@ class CtsComparator {
   }
 };
 
-Moof::Moof(Box& aBox, Trex& aTrex, Mvhd& aMvhd, Mdhd& aMdhd, Edts& aEdts,
-           Sinf& aSinf, uint64_t* aDecodeTime, bool aIsAudio)
+Moof::Moof(Box& aBox, const TrackParseMode& aTrackParseMode, Trex& aTrex,
+           Mvhd& aMvhd, Mdhd& aMdhd, Edts& aEdts, Sinf& aSinf,
+           uint64_t* aDecodeTime, bool aIsAudio)
     : mRange(aBox.Range()), mTfhd(aTrex), mMaxRoundingError(35000) {
+  MOZ_ASSERT(aTrackParseMode.is<ParseAllTracks>() ||
+                 aTrex.mTrackId == aTrackParseMode.as<uint32_t>(),
+             "If not parsing all tracks, aTrex should have the same track id "
+             "as the track being parsed.");
   nsTArray<Box> psshBoxes;
   for (Box box = aBox.FirstChild(); box.IsAvailable(); box = box.Next()) {
     if (box.IsType("traf")) {
-      ParseTraf(box, aTrex, aMvhd, aMdhd, aEdts, aSinf, aDecodeTime, aIsAudio);
+      ParseTraf(box, aTrackParseMode, aTrex, aMvhd, aMdhd, aEdts, aSinf,
+                aDecodeTime, aIsAudio);
     }
     if (box.IsType("pssh")) {
       psshBoxes.AppendElement(box);
@@ -423,7 +431,7 @@ Moof::Moof(Box& aBox, Trex& aTrex, Mvhd& aMvhd, Mdhd& aMdhd, Edts& aEdts,
           ctsOrder[0]->mCompositionRange.start,
           ctsOrder.LastElement()->mCompositionRange.end);
     }
-    ProcessCenc();
+    ProcessCencAuxInfo(aSinf.mDefaultEncryptionType);
   }
 }
 
@@ -492,9 +500,9 @@ bool Moof::GetAuxInfo(AtomType aType,
   return false;
 }
 
-bool Moof::ProcessCenc() {
+bool Moof::ProcessCencAuxInfo(AtomType aScheme) {
   FallibleTArray<MediaByteRange> cencRanges;
-  if (!GetAuxInfo(AtomType("cenc"), &cencRanges) ||
+  if (!GetAuxInfo(aScheme, &cencRanges) ||
       cencRanges.Length() != mIndex.Length()) {
     return false;
   }
@@ -504,16 +512,21 @@ bool Moof::ProcessCenc() {
   return true;
 }
 
-void Moof::ParseTraf(Box& aBox, Trex& aTrex, Mvhd& aMvhd, Mdhd& aMdhd,
-                     Edts& aEdts, Sinf& aSinf, uint64_t* aDecodeTime,
-                     bool aIsAudio) {
+void Moof::ParseTraf(Box& aBox, const TrackParseMode& aTrackParseMode,
+                     Trex& aTrex, Mvhd& aMvhd, Mdhd& aMdhd, Edts& aEdts,
+                     Sinf& aSinf, uint64_t* aDecodeTime, bool aIsAudio) {
   MOZ_ASSERT(aDecodeTime);
+  MOZ_ASSERT(aTrackParseMode.is<ParseAllTracks>() ||
+                 aTrex.mTrackId == aTrackParseMode.as<uint32_t>(),
+             "If not parsing all tracks, aTrex should have the same track id "
+             "as the track being parsed.");
   Tfdt tfdt;
 
   for (Box box = aBox.FirstChild(); box.IsAvailable(); box = box.Next()) {
     if (box.IsType("tfhd")) {
       mTfhd = Tfhd(box, aTrex);
-    } else if (!aTrex.mTrackId || mTfhd.mTrackId == aTrex.mTrackId) {
+    } else if (aTrackParseMode.is<ParseAllTracks>() ||
+               mTfhd.mTrackId == aTrackParseMode.as<uint32_t>()) {
       if (box.IsType("tfdt")) {
         tfdt = Tfdt(box);
       } else if (box.IsType("sgpd")) {
@@ -551,7 +564,8 @@ void Moof::ParseTraf(Box& aBox, Trex& aTrex, Mvhd& aMvhd, Mdhd& aMdhd,
       }
     }
   }
-  if (aTrex.mTrackId && mTfhd.mTrackId != aTrex.mTrackId) {
+  if (aTrackParseMode.is<uint32_t>() &&
+      mTfhd.mTrackId != aTrackParseMode.as<uint32_t>()) {
     return;
   }
   // Now search for TRUN boxes.
@@ -1068,28 +1082,47 @@ Result<Ok, nsresult> CencSampleEncryptionInfoEntry::Init(BoxReader& aReader) {
   // Skip a reserved byte.
   MOZ_TRY(aReader->ReadU8());
 
-  uint8_t possiblePatternInfo;
-  MOZ_TRY_VAR(possiblePatternInfo, aReader->ReadU8());
-  uint8_t flag;
-  MOZ_TRY_VAR(flag, aReader->ReadU8());
+  uint8_t pattern;
+  MOZ_TRY_VAR(pattern, aReader->ReadU8());
+  mCryptByteBlock = pattern >> 4;
+  mSkipByteBlock = pattern & 0x0f;
+
+  uint8_t isEncrypted;
+  MOZ_TRY_VAR(isEncrypted, aReader->ReadU8());
+  mIsEncrypted = isEncrypted != 0;
 
   MOZ_TRY_VAR(mIVSize, aReader->ReadU8());
 
   // Read the key id.
-  uint8_t key;
-  for (uint32_t i = 0; i < kKeyIdSize; ++i) {
-    MOZ_TRY_VAR(key, aReader->ReadU8());
-    mKeyId.AppendElement(key);
+  if (!mKeyId.SetLength(kKeyIdSize, fallible)) {
+    LOG(CencSampleEncryptionInfoEntry, "OOM");
+    return Err(NS_ERROR_FAILURE);
   }
-
-  mIsEncrypted = flag != 0;
+  for (uint32_t i = 0; i < kKeyIdSize; ++i) {
+    MOZ_TRY_VAR(mKeyId.ElementAt(i), aReader->ReadU8());
+  }
 
   if (mIsEncrypted) {
     if (mIVSize != 8 && mIVSize != 16) {
       return Err(NS_ERROR_FAILURE);
     }
   } else if (mIVSize != 0) {
-    return Err(NS_ERROR_FAILURE);
+    // Protected content with 0 sized IV indicates a constant IV is present.
+    // This is used for the cbcs scheme.
+    uint8_t constantIVSize;
+    MOZ_TRY_VAR(constantIVSize, aReader->ReadU8());
+    if (constantIVSize != 8 && constantIVSize != 16) {
+      LOG(CencSampleEncryptionInfoEntry, "Unexpected constantIVSize: %" PRIu8,
+          constantIVSize);
+      return Err(NS_ERROR_FAILURE);
+    }
+    if (!mConsantIV.SetLength(constantIVSize, mozilla::fallible)) {
+      LOG(CencSampleEncryptionInfoEntry, "OOM");
+      return Err(NS_ERROR_FAILURE);
+    }
+    for (uint32_t i = 0; i < constantIVSize; ++i) {
+      MOZ_TRY_VAR(mConsantIV.ElementAt(i), aReader->ReadU8());
+    }
   }
 
   return Ok();

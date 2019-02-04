@@ -16,11 +16,21 @@ class Declarations extends PureComponent {
   static get propTypes() {
     return {
       declarations: PropTypes.arrayOf(PropTypes.shape(Types.declaration)).isRequired,
+      isUserAgentStyle: PropTypes.bool.isRequired,
+      onToggleDeclaration: PropTypes.func.isRequired,
+      showDeclarationNameEditor: PropTypes.func.isRequired,
+      showDeclarationValueEditor: PropTypes.func.isRequired,
     };
   }
 
   render() {
-    const { declarations } = this.props;
+    const {
+      declarations,
+      isUserAgentStyle,
+      onToggleDeclaration,
+      showDeclarationNameEditor,
+      showDeclarationValueEditor,
+    } = this.props;
 
     if (!declarations.length) {
       return null;
@@ -32,6 +42,10 @@ class Declarations extends PureComponent {
           return Declaration({
             key: declaration.id,
             declaration,
+            isUserAgentStyle,
+            onToggleDeclaration,
+            showDeclarationNameEditor,
+            showDeclarationValueEditor,
           });
         })
       )

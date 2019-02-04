@@ -2,67 +2,56 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{LayoutPrimitiveInfo, LayoutRect};
-use api::VoidPtrToSizeFn;
+//! The interning module provides a generic data structure
+//! interning container. It is similar in concept to a
+//! traditional string interning container, but it is
+//! specialized to the WR thread model.
+//!
+//! There is an Interner structure, that lives in the
+//! scene builder thread, and a DataStore structure
+//! that lives in the frame builder thread.
+//!
+//! Hashing, interning and handle creation is done by
+//! the interner structure during scene building.
+//!
+//! Delta changes for the interner are pushed during
+//! a transaction to the frame builder. The frame builder
+//! is then able to access the content of the interned
+//! handles quickly, via array indexing.
+//!
+//! Epoch tracking ensures that the garbage collection
+//! step which the interner uses to remove items is
+//! only invoked on items that the frame builder thread
+//! is no longer referencing.
+//!
+//! Items in the data store are stored in a traditional
+//! free-list structure, for content access and memory
+//! usage efficiency.
+//!
+//! The epoch is incremented each time a scene is
+//! built. The most recently used scene epoch is
+//! stored inside each handle. This is then used for
+//! cache invalidation.
+
+use api::{LayoutPrimitiveInfo};
 use internal_types::FastHashMap;
+use malloc_size_of::MallocSizeOf;
 use profiler::ResourceProfileCounter;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::{mem, ops, u64};
-use std::os::raw::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use util::VecHelper;
 
-/*
-
- The interning module provides a generic data structure
- interning container. It is similar in concept to a
- traditional string interning container, but it is
- specialized to the WR thread model.
-
- There is an Interner structure, that lives in the
- scene builder thread, and a DataStore structure
- that lives in the frame builder thread.
-
- Hashing, interning and handle creation is done by
- the interner structure during scene building.
-
- Delta changes for the interner are pushed during
- a transaction to the frame builder. The frame builder
- is then able to access the content of the interned
- handles quickly, via array indexing.
-
- Epoch tracking ensures that the garbage collection
- step which the interner uses to remove items is
- only invoked on items that the frame builder thread
- is no longer referencing.
-
- Items in the data store are stored in a traditional
- free-list structure, for content access and memory
- usage efficiency.
-
- */
-
-/// The epoch is incremented each time a scene is
-/// built. The most recently used scene epoch is
-/// stored inside each item and handle. This is
-/// then used for cache invalidation (item) and
-/// correctness validation (handle).
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, MallocSizeOf, PartialEq)]
 struct Epoch(u64);
-
-impl Epoch {
-    pub const INVALID: Self = Epoch(u64::MAX);
-}
 
 /// A list of updates to be applied to the data store,
 /// provided by the interning structure.
 pub struct UpdateList<S> {
-    /// The current epoch of the scene builder.
-    epoch: Epoch,
     /// The additions and removals to apply.
     updates: Vec<Update>,
     /// Actual new data to insert.
@@ -76,7 +65,7 @@ lazy_static! {
 /// A globally, unique identifier
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug, Copy, Clone, Eq, Hash, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, Hash, MallocSizeOf, PartialEq)]
 pub struct ItemUid {
     uid: usize,
 }
@@ -90,7 +79,7 @@ impl ItemUid {
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, MallocSizeOf)]
 pub struct Handle<M: Copy> {
     index: u32,
     epoch: Epoch,
@@ -106,26 +95,18 @@ impl <M> Handle<M> where M: Copy {
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
+#[derive(MallocSizeOf)]
 pub enum UpdateKind {
     Insert,
     Remove,
-    UpdateEpoch,
 }
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
+#[derive(MallocSizeOf)]
 pub struct Update {
     index: usize,
     kind: UpdateKind,
-}
-
-/// The data item is stored with an epoch, for validating
-/// correct access patterns.
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-struct Item<T> {
-    epoch: Epoch,
-    data: T,
 }
 
 pub trait InternDebug {
@@ -136,13 +117,18 @@ pub trait InternDebug {
 /// contains a free-list of items for fast access.
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-pub struct DataStore<S, T, M> {
-    items: Vec<Item<T>>,
+#[derive(MallocSizeOf)]
+pub struct DataStore<S, T: MallocSizeOf, M> {
+    items: Vec<Option<T>>,
     _source: PhantomData<S>,
     _marker: PhantomData<M>,
 }
 
-impl<S, T, M> ::std::default::Default for DataStore<S, T, M> where S: Debug, T: From<S>, M: Debug
+impl<S, T, M> ::std::default::Default for DataStore<S, T, M>
+where
+    S: Debug + MallocSizeOf,
+    T: From<S> + MallocSizeOf,
+    M: Debug
 {
     fn default() -> Self {
         DataStore {
@@ -153,7 +139,11 @@ impl<S, T, M> ::std::default::Default for DataStore<S, T, M> where S: Debug, T: 
     }
 }
 
-impl<S, T, M> DataStore<S, T, M> where S: Debug, T: From<S>, M: Debug
+impl<S, T, M> DataStore<S, T, M>
+where
+    S: Debug + MallocSizeOf,
+    T: From<S> + MallocSizeOf,
+    M: Debug
 {
     /// Apply any updates from the scene builder thread to
     /// this data store.
@@ -166,16 +156,11 @@ impl<S, T, M> DataStore<S, T, M> where S: Debug, T: From<S>, M: Debug
         for update in update_list.updates {
             match update.kind {
                 UpdateKind::Insert => {
-                    self.items.entry(update.index).set(Item {
-                        data: T::from(data_iter.next().unwrap()),
-                        epoch: update_list.epoch,
-                    });
+                    self.items.entry(update.index).
+                        set(Some(T::from(data_iter.next().unwrap())));
                 }
                 UpdateKind::Remove => {
-                    self.items[update.index].epoch = Epoch::INVALID;
-                }
-                UpdateKind::UpdateEpoch => {
-                    self.items[update.index].epoch = update_list.epoch;
+                    self.items[update.index] = None;
                 }
             }
         }
@@ -185,22 +170,18 @@ impl<S, T, M> DataStore<S, T, M> where S: Debug, T: From<S>, M: Debug
 
         debug_assert!(data_iter.next().is_none());
     }
-
-    /// Reports CPU heap usage.
-    pub fn malloc_size_of(&self, op: VoidPtrToSizeFn) -> usize {
-        unsafe { op(self.items.as_ptr() as *const c_void) }
-    }
 }
 
 /// Retrieve an item from the store via handle
 impl<S, T, M> ops::Index<Handle<M>> for DataStore<S, T, M>
-where M: Copy
+where
+    S: MallocSizeOf,
+    T: MallocSizeOf,
+    M: Copy
 {
     type Output = T;
     fn index(&self, handle: Handle<M>) -> &T {
-        let item = &self.items[handle.index as usize];
-        assert_eq!(item.epoch, handle.epoch);
-        &item.data
+        self.items[handle.index as usize].as_ref().expect("Bad datastore lookup")
     }
 }
 
@@ -208,12 +189,12 @@ where M: Copy
 /// Retrieve an item from the store via handle
 impl<S, T, M> ops::IndexMut<Handle<M>> for DataStore<S, T, M>
 where
+    S: MallocSizeOf,
+    T: MallocSizeOf,
     M: Copy
 {
     fn index_mut(&mut self, handle: Handle<M>) -> &mut T {
-        let item = &mut self.items[handle.index as usize];
-        assert_eq!(item.epoch, handle.epoch);
-        &mut item.data
+        self.items[handle.index as usize].as_mut().expect("Bad datastore lookup")
     }
 }
 
@@ -224,10 +205,12 @@ where
 /// an update list of additions / removals.
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
+#[derive(MallocSizeOf)]
 pub struct Interner<S, D, M>
 where
-    S: Eq + Hash + Clone + Debug,
-    M: Copy
+    S: Eq + Hash + Clone + Debug + MallocSizeOf,
+    D: MallocSizeOf,
+    M: Copy + MallocSizeOf,
 {
     /// Uniquely map an interning key to a handle
     map: FastHashMap<S, Handle<M>>,
@@ -241,13 +224,14 @@ where
     current_epoch: Epoch,
     /// The information associated with each interned
     /// item that can be accessed by the interner.
-    local_data: Vec<Item<D>>,
+    local_data: Vec<D>,
 }
 
 impl<S, D, M> ::std::default::Default for Interner<S, D, M>
 where
-    S: Eq + Hash + Clone + Debug,
-    M: Copy + Debug
+    S: Eq + Hash + Clone + Debug + MallocSizeOf,
+    D: MallocSizeOf,
+    M: Copy + Debug + MallocSizeOf,
 {
     fn default() -> Self {
         Interner {
@@ -263,8 +247,9 @@ where
 
 impl<S, D, M> Interner<S, D, M>
 where
-    S: Eq + Hash + Clone + Debug + InternDebug,
-    M: Copy + Debug
+    S: Eq + Hash + Clone + Debug + InternDebug + MallocSizeOf,
+    D: MallocSizeOf,
+    M: Copy + Debug + MallocSizeOf
 {
     /// Intern a data structure, and return a handle to
     /// that data. The handle can then be stored in the
@@ -282,17 +267,6 @@ where
         // cloning the (sometimes large) key in the common
         // case, where the data already exists in the interner.
         if let Some(handle) = self.map.get_mut(data) {
-            // Update the epoch in the data store. This
-            // is not strictly needed for correctness, but
-            // is used to ensure items are only accessed
-            // via valid handles.
-            if handle.epoch != self.current_epoch {
-                self.updates.push(Update {
-                    index: handle.index as usize,
-                    kind: UpdateKind::UpdateEpoch,
-                });
-                self.local_data[handle.index as usize].epoch = self.current_epoch;
-            }
             handle.epoch = self.current_epoch;
             return *handle;
         }
@@ -329,10 +303,7 @@ where
 
         // Create the local data for this item that is
         // being interned.
-        self.local_data.entry(index).set(Item {
-            epoch: self.current_epoch,
-            data: f(),
-        });
+        self.local_data.entry(index).set(f());
 
         handle
     }
@@ -374,7 +345,6 @@ where
         let updates = UpdateList {
             updates,
             data,
-            epoch: self.current_epoch,
         };
 
         // Begin the next epoch
@@ -382,30 +352,18 @@ where
 
         updates
     }
-
-    /// Reports CPU heap usage.
-    pub fn malloc_size_of(&self, op: VoidPtrToSizeFn, eop: VoidPtrToSizeFn) -> usize {
-        let mut bytes = 0;
-        unsafe {
-            bytes += op(self.local_data.as_ptr() as *const c_void);
-            bytes += self.map.values().next()
-                .map_or(0, |v| eop(v as *const _ as *const c_void));
-        }
-        bytes
-    }
 }
 
 /// Retrieve the local data for an item from the interner via handle
 impl<S, D, M> ops::Index<Handle<M>> for Interner<S, D, M>
 where
-    S: Eq + Clone + Hash + Debug,
-    M: Copy + Debug
+    S: Eq + Clone + Hash + Debug + MallocSizeOf,
+    D: MallocSizeOf,
+    M: Copy + Debug + MallocSizeOf
 {
     type Output = D;
     fn index(&self, handle: Handle<M>) -> &D {
-        let item = &self.local_data[handle.index as usize];
-        assert_eq!(item.epoch, handle.epoch);
-        &item.data
+        &self.local_data[handle.index as usize]
     }
 }
 
@@ -413,15 +371,14 @@ where
 ///
 /// see DisplayListFlattener::add_interned_primitive<P>
 pub trait Internable {
-    type Marker: Copy + Debug;
-    type Source: Eq + Hash + Clone + Debug;
-    type StoreData: From<Self::Source>;
-    type InternData;
+    type Marker: Copy + Debug + MallocSizeOf;
+    type Source: Eq + Hash + Clone + Debug + MallocSizeOf;
+    type StoreData: From<Self::Source> + MallocSizeOf;
+    type InternData: MallocSizeOf;
 
     /// Build a new key from self with `info`.
     fn build_key(
         self,
         info: &LayoutPrimitiveInfo,
-        prim_relative_clip_rect: LayoutRect,
     ) -> Self::Source;
 }

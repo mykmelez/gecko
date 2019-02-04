@@ -11,14 +11,13 @@ Object {
       "sourceUrl": "http://localhost:8000/examples/a",
     },
   },
-  "condition": null,
   "disabled": false,
   "generatedLocation": Object {
+    "column": undefined,
     "line": 7,
     "sourceId": "a",
     "sourceUrl": "http://localhost:8000/examples/a",
   },
-  "hidden": false,
   "id": "a:5:",
   "loading": false,
   "location": Object {
@@ -26,7 +25,11 @@ Object {
     "sourceId": "a",
     "sourceUrl": "http://localhost:8000/examples/a",
   },
-  "log": false,
+  "options": Object {
+    "condition": null,
+    "hidden": false,
+    "logValue": null,
+  },
   "originalText": "",
   "text": "",
 }
@@ -37,15 +40,35 @@ Array [
   Object {
     "breakpoints": Array [
       Object {
-        "condition": null,
+        "astLocation": Object {
+          "index": 0,
+          "name": undefined,
+          "offset": Object {
+            "line": 2,
+            "sourceId": "a",
+            "sourceUrl": "http://localhost:8000/examples/a",
+          },
+        },
         "disabled": false,
-        "id": "hi",
-        "log": false,
-        "selectedLocation": Object {
+        "generatedLocation": Object {
+          "column": undefined,
           "line": 2,
           "sourceId": "a",
           "sourceUrl": "http://localhost:8000/examples/a",
         },
+        "id": "a:2:",
+        "loading": false,
+        "location": Object {
+          "line": 2,
+          "sourceId": "a",
+          "sourceUrl": "http://localhost:8000/examples/a",
+        },
+        "options": Object {
+          "condition": null,
+          "hidden": false,
+          "logValue": null,
+        },
+        "originalText": "return a",
         "text": "return a",
       },
     ],
@@ -54,6 +77,7 @@ Array [
       "error": undefined,
       "id": "a",
       "isBlackBoxed": false,
+      "isExtension": false,
       "isPrettyPrinted": false,
       "isWasm": false,
       "loadedState": "loaded",
@@ -80,15 +104,14 @@ Object {
       "sourceUrl": "http://localhost:8000/examples/a.js",
     },
   },
-  "condition": null,
   "disabled": false,
   "generatedLocation": Object {
+    "column": undefined,
     "line": 1,
     "sourceId": "a.js",
     "sourceUrl": "http://localhost:8000/examples/a.js",
   },
-  "hidden": false,
-  "id": "hi",
+  "id": "a.js:1:",
   "loading": false,
   "location": Object {
     "column": 0,
@@ -96,7 +119,11 @@ Object {
     "sourceId": "a.js/originalSource-d6d70368d5c252598541e693a7ad6c27",
     "sourceUrl": "http://localhost:8000/examples/a.js:formatted",
   },
-  "log": false,
+  "options": Object {
+    "condition": null,
+    "hidden": false,
+    "logValue": null,
+  },
   "originalText": "function a() {",
   "text": "function a() {",
 }
@@ -107,15 +134,35 @@ Array [
   Object {
     "breakpoints": Array [
       Object {
-        "condition": null,
+        "astLocation": Object {
+          "index": 0,
+          "name": undefined,
+          "offset": Object {
+            "line": 5,
+            "sourceId": "a",
+            "sourceUrl": "http://localhost:8000/examples/a",
+          },
+        },
         "disabled": true,
-        "id": "hi",
-        "log": false,
-        "selectedLocation": Object {
+        "generatedLocation": Object {
+          "column": undefined,
           "line": 5,
           "sourceId": "a",
           "sourceUrl": "http://localhost:8000/examples/a",
         },
+        "id": "a:5:",
+        "loading": false,
+        "location": Object {
+          "line": 5,
+          "sourceId": "a",
+          "sourceUrl": "http://localhost:8000/examples/a",
+        },
+        "options": Object {
+          "condition": null,
+          "hidden": false,
+          "logValue": null,
+        },
+        "originalText": "",
         "text": "",
       },
     ],
@@ -124,6 +171,7 @@ Array [
       "error": undefined,
       "id": "a",
       "isBlackBoxed": false,
+      "isExtension": false,
       "isPrettyPrinted": false,
       "isWasm": false,
       "loadedState": "loaded",

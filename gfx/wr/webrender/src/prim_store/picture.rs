@@ -3,12 +3,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{
-    ColorU, FilterOp, LayoutRect, LayoutSize, LayoutPrimitiveInfo, MixBlendMode,
-    PropertyBinding, PropertyBindingId,
+    ColorU, FilterOp, LayoutSize, LayoutPrimitiveInfo, MixBlendMode,
+    PropertyBinding, PropertyBindingId, LayoutVector2D,
 };
 use app_units::Au;
 use display_list_flattener::{AsInstanceKind, IsVisible};
-use intern::{DataStore, Handle, Internable, Interner, InternDebug, UpdateList};
+use intern::{Internable, InternDebug};
+use intern_types;
 use picture::PictureCompositeMode;
 use prim_store::{
     PrimKey, PrimKeyCommonData, PrimTemplate, PrimTemplateCommonData,
@@ -19,7 +20,7 @@ use prim_store::{
 /// will be composited into its parent.
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug, Clone, PartialEq, Hash, Eq)]
+#[derive(Debug, Clone, MallocSizeOf, PartialEq, Hash, Eq)]
 pub enum PictureCompositeKey {
     // No visual compositing effect
     Identity,
@@ -127,7 +128,7 @@ impl From<Option<PictureCompositeMode>> for PictureCompositeKey {
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, MallocSizeOf, PartialEq, Hash)]
 pub struct Picture {
     pub composite_mode_key: PictureCompositeKey,
 }
@@ -138,7 +139,6 @@ impl PictureKey {
     pub fn new(
         is_backface_visible: bool,
         prim_size: LayoutSize,
-        prim_relative_clip_rect: LayoutRect,
         pic: Picture,
     ) -> Self {
 
@@ -146,7 +146,6 @@ impl PictureKey {
             common: PrimKeyCommonData {
                 is_backface_visible,
                 prim_size: prim_size.into(),
-                prim_relative_clip_rect: prim_relative_clip_rect.into(),
             },
             kind: pic,
         }
@@ -162,6 +161,7 @@ impl AsInstanceKind<PictureDataHandle> for PictureKey {
         &self,
         _: PictureDataHandle,
         _: &mut PrimitiveStore,
+        _reference_frame_relative_offset: LayoutVector2D,
     ) -> PrimitiveInstanceKind {
         // Should never be hit as this method should not be
         // called for pictures.
@@ -171,6 +171,7 @@ impl AsInstanceKind<PictureDataHandle> for PictureKey {
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
+#[derive(MallocSizeOf)]
 pub struct PictureData;
 
 pub type PictureTemplate = PrimTemplate<PictureData>;
@@ -186,18 +187,10 @@ impl From<PictureKey> for PictureTemplate {
     }
 }
 
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
-pub struct PictureDataMarker;
-
-pub type PictureDataStore = DataStore<PictureKey, PictureTemplate, PictureDataMarker>;
-pub type PictureDataHandle = Handle<PictureDataMarker>;
-pub type PictureDataUpdateList = UpdateList<PictureKey>;
-pub type PictureDataInterner = Interner<PictureKey, PrimitiveSceneData, PictureDataMarker>;
+pub use intern_types::picture::Handle as PictureDataHandle;
 
 impl Internable for Picture {
-    type Marker = PictureDataMarker;
+    type Marker = intern_types::picture::Marker;
     type Source = PictureKey;
     type StoreData = PictureTemplate;
     type InternData = PrimitiveSceneData;
@@ -206,12 +199,10 @@ impl Internable for Picture {
     fn build_key(
         self,
         info: &LayoutPrimitiveInfo,
-        prim_relative_clip_rect: LayoutRect,
     ) -> PictureKey {
         PictureKey::new(
             info.is_backface_visible,
             info.rect.size,
-            prim_relative_clip_rect,
             self
         )
     }
@@ -234,6 +225,6 @@ fn test_struct_sizes() {
     // (b) You made a structure larger. This is not necessarily a problem, but should only
     //     be done with care, and after checking if talos performance regresses badly.
     assert_eq!(mem::size_of::<Picture>(), 84, "Picture size changed");
-    assert_eq!(mem::size_of::<PictureTemplate>(), 36, "PictureTemplate size changed");
-    assert_eq!(mem::size_of::<PictureKey>(), 112, "PictureKey size changed");
+    assert_eq!(mem::size_of::<PictureTemplate>(), 20, "PictureTemplate size changed");
+    assert_eq!(mem::size_of::<PictureKey>(), 96, "PictureKey size changed");
 }

@@ -38,14 +38,9 @@ impl Example for App {
         let mut space_and_clip = SpaceAndClipInfo::root_scroll(pipeline_id);
 
         let info = LayoutPrimitiveInfo::new(sub_bounds);
-        sub_builder.push_stacking_context(
+        sub_builder.push_simple_stacking_context(
             &info,
             space_and_clip.spatial_id,
-            None,
-            TransformStyle::Flat,
-            MixBlendMode::Normal,
-            &[],
-            RasterSpace::Screen,
         );
 
         // green rect visible == success
@@ -66,20 +61,15 @@ impl Example for App {
             &sub_bounds,
             space_and_clip.spatial_id,
             TransformStyle::Flat,
-            Some(PropertyBinding::Binding(PropertyBindingKey::new(42), LayoutTransform::identity())),
-            None,
+            PropertyBinding::Binding(PropertyBindingKey::new(42), LayoutTransform::identity()),
+            ReferenceFrameKind::Transform,
         );
 
         // And this is for the root pipeline
         let info = LayoutPrimitiveInfo::new(sub_bounds);
-        builder.push_stacking_context(
+        builder.push_simple_stacking_context(
             &info,
             space_and_clip.spatial_id,
-            None,
-            TransformStyle::Flat,
-            MixBlendMode::Normal,
-            &[],
-            RasterSpace::Screen,
         );
         // red rect under the iframe: if this is visible, things have gone wrong
         builder.push_rect(&info, &space_and_clip, ColorF::new(1.0, 0.0, 0.0, 1.0));

@@ -95,7 +95,7 @@
 #include "mozilla/dom/WorkerRunnable.h"
 
 #if defined(XP_LINUX)
-#include "mozilla/Hal.h"
+#  include "mozilla/Hal.h"
 #endif
 
 #include "mozilla/EMEUtils.h"
@@ -1681,6 +1681,19 @@ nsresult Navigator::GetUserAgent(nsPIDOMWindowInner* aWindow,
       aUserAgent = override;
       return NS_OK;
     }
+  }
+
+  // When the caller is content and 'privacy.resistFingerprinting' is true,
+  // return a spoofed userAgent which reveals the platform but not the
+  // specific OS version, etc.
+  if (!aIsCallerChrome && nsContentUtils::ShouldResistFingerprinting()) {
+    nsAutoCString spoofedUA;
+    nsresult rv = nsRFPService::GetSpoofedUserAgent(spoofedUA, false);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+    CopyASCIItoUTF16(spoofedUA, aUserAgent);
+    return NS_OK;
   }
 
   nsresult rv;

@@ -526,12 +526,14 @@ Inspector.prototype = {
       return true;
     }
 
-    const { clientWidth } = this.panelDoc.getElementById("inspector-splitter-box");
+    const splitterBox = this.panelDoc.getElementById("inspector-splitter-box");
+    const { width } = window.windowUtils.getBoundsWithoutFlushing(splitterBox);
+
     return this.is3PaneModeEnabled &&
            (this.toolbox.hostType == Toolbox.HostType.LEFT ||
             this.toolbox.hostType == Toolbox.HostType.RIGHT) ?
-      clientWidth > SIDE_PORTAIT_MODE_WIDTH_THRESHOLD :
-      clientWidth > PORTRAIT_MODE_WIDTH_THRESHOLD;
+      width > SIDE_PORTAIT_MODE_WIDTH_THRESHOLD :
+      width > PORTRAIT_MODE_WIDTH_THRESHOLD;
   },
 
   /**
@@ -584,17 +586,7 @@ Inspector.prototype = {
       return;
     }
 
-    // Use window.top because promiseDocumentFlushed() in a subframe doesn't
-    // work, see https://bugzilla.mozilla.org/show_bug.cgi?id=1441173
-    const useLandscapeMode = await window.top.promiseDocumentFlushed(() => {
-      return this.useLandscapeMode();
-    });
-
-    if (window.closed) {
-      return;
-    }
-
-    this.splitBox.setState({ vert: useLandscapeMode });
+    this.splitBox.setState({ vert: this.useLandscapeMode() });
     this.emit("inspector-resize");
   },
 
@@ -911,18 +903,18 @@ Inspector.prototype = {
         title: INSPECTOR_L10N.getStr("inspector.sidebar.computedViewTitle"),
       },
       {
-        id: "animationinspector",
-        title: INSPECTOR_L10N.getStr("inspector.sidebar.animationInspectorTitle"),
-      },
-      {
         id: "fontinspector",
         title: INSPECTOR_L10N.getStr("inspector.sidebar.fontInspectorTitle"),
+      },
+      {
+        id: "animationinspector",
+        title: INSPECTOR_L10N.getStr("inspector.sidebar.animationInspectorTitle"),
       },
     ];
 
     if (this._supportsChangesPanel()) {
       // Insert Changes as third tab, right after Computed.
-      // TODO: move this inline to `sidebarPanels` above when addressing Bug 1491887.
+      // TODO: move this inline to `sidebarPanels` above when addressing Bug 1511877.
       sidebarPanels.splice(2, 0, {
         id: "changesview",
         title: INSPECTOR_L10N.getStr("inspector.sidebar.changesViewTitle"),
@@ -1410,7 +1402,8 @@ Inspector.prototype = {
 
     if (this._markupFrame) {
       this._markupFrame.removeEventListener("load", this._onMarkupFrameLoad, true);
-      this._markupFrame.removeEventListener("contextmenu", this._onContextMenu);
+      this._markupFrame.contentWindow.removeEventListener("contextmenu",
+                                                          this._onContextMenu);
     }
 
     if (this._search) {
@@ -1907,7 +1900,6 @@ Inspector.prototype = {
       this._markupFrame.setAttribute("flex", "1");
       // This is needed to enable tooltips inside the iframe document.
       this._markupFrame.setAttribute("tooltip", "aHTMLTooltip");
-      this._markupFrame.addEventListener("contextmenu", this._onContextMenu);
 
       this._markupBox.style.visibility = "hidden";
       this._markupBox.appendChild(this._markupFrame);
@@ -1921,6 +1913,7 @@ Inspector.prototype = {
 
   _onMarkupFrameLoad: function() {
     this._markupFrame.removeEventListener("load", this._onMarkupFrameLoad, true);
+    this._markupFrame.contentWindow.addEventListener("contextmenu", this._onContextMenu);
     this._markupFrame.contentWindow.focus();
     this._markupBox.style.visibility = "visible";
     this.markup = new MarkupView(this, this._markupFrame, this._toolbox.win);

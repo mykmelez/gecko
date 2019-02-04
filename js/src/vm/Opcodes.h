@@ -710,15 +710,8 @@
      */ \
     MACRO(JSOP_TABLESWITCH, 70, "tableswitch", NULL, 16, 1, 0, JOF_TABLESWITCH|JOF_DETECTING) \
     /*
-     * Prologue emitted in scripts expected to run once, which deoptimizes code
-     * if it executes multiple times.
-     *
-     *   Category: Statements
-     *   Type: Function
-     *   Operands:
-     *   Stack: =>
      */ \
-    MACRO(JSOP_RUNONCE, 71, "runonce", NULL, 1, 0, 0, JOF_BYTE) \
+    MACRO(JSOP_UNUSED71, 71, "unused71", NULL, 1, 0, 0, JOF_BYTE) \
     /*
      * Pops the top two values from the stack, then pushes the result of
      * applying the operator to the two values.
@@ -1093,7 +1086,7 @@
      *   Operands: int32_t offset
      *   Stack: =>
      */ \
-    MACRO(JSOP_LABEL, 106, "label", NULL, 5, 0, 0, JOF_JUMP) \
+    MACRO(JSOP_LABEL, 106, "label", NULL, 5, 0, 0, JOF_CODE_OFFSET) \
     /*
      * Pops the top three values on the stack as 'val', 'obj' and 'receiver',
      * and performs 'obj.prop = val', pushing 'val' back onto the stack.
@@ -1126,13 +1119,14 @@
      * Another no-op.
      *
      * This opcode is the target of the backwards jump for some loop.
+     * See JSOP_JUMPTARGET for the icIndex operand.
      *
      *   Category: Statements
      *   Type: Jumps
-     *   Operands:
+     *   Operands: uint32_t icIndex
      *   Stack: =>
      */ \
-    MACRO(JSOP_LOOPHEAD, 109, "loophead", NULL, 1, 0, 0, JOF_BYTE) \
+    MACRO(JSOP_LOOPHEAD, 109, "loophead", NULL, 5, 0, 0, JOF_ICINDEX) \
     /*
      * Looks up name on the environment chain and pushes the environment which
      * contains the name onto the stack. If not found, pushes global lexical
@@ -1487,7 +1481,7 @@
      *   Operands: uint8_t hops, uint24_t slot
      *   Stack: v => v
      */ \
-    MACRO(JSOP_SETALIASEDVAR, 137, "setaliasedvar", NULL, 5, 1, 1, JOF_ENVCOORD|JOF_NAME|JOF_PROPSET|JOF_DETECTING|JOF_IC) \
+    MACRO(JSOP_SETALIASEDVAR, 137, "setaliasedvar", NULL, 5, 1, 1, JOF_ENVCOORD|JOF_NAME|JOF_PROPSET|JOF_DETECTING) \
     /*
      * Checks if the value of the local variable is the
      * JS_UNINITIALIZED_LEXICAL magic, throwing an error if so.
@@ -1527,7 +1521,7 @@
      *   Operands: uint8_t hops, uint24_t slot
      *   Stack: v => v
      */ \
-    MACRO(JSOP_INITALIASEDLEXICAL, 141, "initaliasedlexical", NULL, 5, 1, 1, JOF_ENVCOORD|JOF_NAME|JOF_PROPINIT|JOF_DETECTING|JOF_IC) \
+    MACRO(JSOP_INITALIASEDLEXICAL, 141, "initaliasedlexical", NULL, 5, 1, 1, JOF_ENVCOORD|JOF_NAME|JOF_PROPINIT|JOF_DETECTING) \
     /*
      * Pushes a JS_UNINITIALIZED_LEXICAL value onto the stack, representing an
      * uninitialized lexical binding.
@@ -2445,14 +2439,14 @@
      * loop depth. This value starts at 1 and is just a hint: deeply nested
      * loops all have the same value. The upper bit is set if Ion should be
      * able to OSR at this point, which is true unless there is non-loop state
-     * on the stack.
+     * on the stack. See JSOP_JUMPTARGET for the icIndex argument.
      *
      *   Category: Statements
      *   Type: Jumps
-     *   Operands: uint8_t BITFIELD
+     *   Operands: uint32_t icIndex, uint8_t BITFIELD
      *   Stack: =>
      */ \
-    MACRO(JSOP_LOOPENTRY, 227, "loopentry", NULL, 2, 0, 0, JOF_UINT8|JOF_IC) \
+    MACRO(JSOP_LOOPENTRY, 227, "loopentry", NULL, 6, 0, 0, JOF_LOOPENTRY|JOF_IC) \
     /*
      * Converts the value on the top of the stack to a String.
      *
@@ -2472,15 +2466,14 @@
     MACRO(JSOP_NOP_DESTRUCTURING, 229, "nop-destructuring", NULL, 1, 0, 0, JOF_BYTE) \
     /*
      * This opcode is a no-op and it indicates the location of a jump
-     * instruction target. Some other opcodes act as jump targets, such as
-     * LOOPENTRY, as well as all which are matched by BytecodeIsJumpTarget
-     * function.
+     * instruction target. Some other opcodes act as jump targets as well, see
+     * BytecodeIsJumpTarget. The IC index is used by the Baseline interpreter.
      *
      *   Category: Other
-     *   Operands:
+     *   Operands: uint32_t icIndex
      *   Stack: =>
      */ \
-    MACRO(JSOP_JUMPTARGET, 230, "jumptarget", NULL, 1, 0, 0, JOF_BYTE)\
+    MACRO(JSOP_JUMPTARGET, 230, "jumptarget", NULL, 5, 0, 0, JOF_ICINDEX) \
     /*
      * Like JSOP_CALL, but tells the function that the return value is ignored.
      * stack.
@@ -2512,13 +2505,31 @@
      */ \
     MACRO(JSOP_DYNAMIC_IMPORT, 233, "call-import", NULL, 1, 1, 1, JOF_BYTE) \
     /*
+     * Pops the numeric value 'val' from the stack, then pushes 'val + 1'.
+     *
+     *   Category: Operators
+     *   Type: Arithmetic Operators
+     *   Operands:
+     *   Stack: val => (val + 1)
+     */ \
+    MACRO(JSOP_INC, 234, "inc", NULL, 1, 1, 1, JOF_BYTE|JOF_IC) \
+    /*
+     * Pops the numeric value 'val' from the stack, then pushes 'val - 1'.
+     *
+     *   Category: Operators
+     *   Type: Arithmetic Operators
+     *   Operands:
+     *   Stack: val => (val - 1)
+     */ \
+    MACRO(JSOP_DEC, 235, "dec", NULL, 1, 1, 1, JOF_BYTE|JOF_IC) \
+    /*
      * Pushes a BigInt constant onto the stack.
      *   Category: Literals
      *   Type: Constants
      *   Operands: uint32_t constIndex
      *   Stack: => val
      */ \
-    IF_BIGINT(MACRO(JSOP_BIGINT, 234, "bigint", NULL, 5, 0, 1, JOF_BIGINT),)
+    IF_BIGINT(MACRO(JSOP_BIGINT, 236, "bigint", NULL, 5, 0, 1, JOF_BIGINT),)
 // clang-format on
 
 /*
@@ -2526,9 +2537,7 @@
  * a power of two.  Use this macro to do so.
  */
 #define FOR_EACH_TRAILING_UNUSED_OPCODE(MACRO) \
-  IF_BIGINT(, MACRO(234))                      \
-  MACRO(235)                                   \
-  MACRO(236)                                   \
+  IF_BIGINT(, MACRO(236))                      \
   MACRO(237)                                   \
   MACRO(238)                                   \
   MACRO(239)                                   \

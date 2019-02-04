@@ -16,14 +16,12 @@ import { highlightMatches } from "../utils/project-search";
 import { statusType } from "../reducers/project-text-search";
 import { getRelativePath } from "../utils/sources-tree";
 import {
-  getSources,
   getActiveSearch,
   getTextSearchResults,
   getTextSearchStatus,
   getTextSearchQuery
 } from "../selectors";
 
-import Svg from "./shared/Svg";
 import ManagedTree from "./shared/ManagedTree";
 import SearchInput from "./shared/SearchInput";
 import AccessibleImage from "./shared/AccessibleImage";
@@ -60,7 +58,6 @@ type State = {
 };
 
 type Props = {
-  sources: Object,
   query: string,
   results: List<Result>,
   status: StatusType,
@@ -84,13 +81,18 @@ function sanitizeQuery(query: string): string {
   return query.replace(/\\$/, "");
 }
 
+type FileItem = {
+  setExpanded: (Result, boolean) => mixed,
+  file: Result,
+  expanded: boolean
+};
+type MatchItem = {
+  expanded: null,
+  match: Match
+};
+
 export class ProjectSearch extends Component<Props, State> {
-  focusedItem: ?{
-    setExpanded?: any,
-    file?: any,
-    expanded?: any,
-    match?: Match
-  };
+  focusedItem: ?(FileItem | MatchItem);
   constructor(props: Props) {
     super(props);
     this.state = {
@@ -183,13 +185,16 @@ export class ProjectSearch extends Component<Props, State> {
   };
 
   onEnterPress = () => {
-    if (this.focusedItem && !this.state.inputFocused) {
-      const { setExpanded, file, expanded, match } = this.focusedItem;
-      if (setExpanded) {
-        setExpanded(file, !expanded);
-      } else if (match) {
-        this.selectMatchItem(match);
-      }
+    if (!this.focusedItem || this.state.inputFocused) {
+      return;
+    }
+    if (this.focusedItem.expanded !== null) {
+      // expanded is not null implies this is a `FileItem`
+      const { setExpanded, file, expanded } = this.focusedItem;
+      setExpanded(file, !expanded);
+    } else {
+      const { match } = this.focusedItem;
+      this.selectMatchItem(match);
     }
   };
 
@@ -220,7 +225,7 @@ export class ProjectSearch extends Component<Props, State> {
         className={classnames("file-result", { focused })}
         key={file.sourceId}
       >
-        <Svg name="arrow" className={classnames({ expanded })} />
+        <AccessibleImage className={classnames("arrow", { expanded })} />
         <AccessibleImage className="file" />
         <span className="file-path">{getRelativePath(file.filepath)}</span>
         <span className="matches-summary">{matches}</span>
@@ -230,7 +235,7 @@ export class ProjectSearch extends Component<Props, State> {
 
   renderMatch = (match: Match, focused: boolean) => {
     if (focused) {
-      this.focusedItem = { match };
+      this.focusedItem = { match, expanded: null };
     }
     return (
       <div
@@ -341,7 +346,6 @@ ProjectSearch.contextTypes = {
 };
 
 const mapStateToProps = state => ({
-  sources: getSources(state),
   activeSearch: getActiveSearch(state),
   results: getTextSearchResults(state),
   query: getTextSearchQuery(state),

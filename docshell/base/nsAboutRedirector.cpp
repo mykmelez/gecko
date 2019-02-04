@@ -12,11 +12,11 @@
 #include "nsIProtocolHandler.h"
 
 #if defined(MOZ_WIDGET_ANDROID) && defined(RELEASE_OR_BETA)
-#define ABOUT_CONFIG_BLOCKED_GV
+#  define ABOUT_CONFIG_BLOCKED_GV
 #endif
 
 #ifdef ABOUT_CONFIG_BLOCKED_GV
-#include "mozilla/jni/Utils.h"  // for mozilla::jni::IsFennec()
+#  include "mozilla/jni/Utils.h"  // for mozilla::jni::IsFennec()
 #endif
 
 NS_IMPL_ISUPPORTS(nsAboutRedirector, nsIAboutModule)
@@ -72,7 +72,9 @@ static const RedirEntry kRedirMap[] = {
     {"checkerboard", "chrome://global/content/aboutCheckerboard.xhtml",
      nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
          nsIAboutModule::ALLOW_SCRIPT},
+#if !defined(NIGHTLY_BUILD) || !defined(MOZ_BUILD_APP_IS_BROWSER)
     {"config", "chrome://global/content/config.xul", 0},
+#endif
 #ifdef MOZ_CRASHREPORTER
     {"crashes", "chrome://global/content/crashes.xhtml", 0},
 #endif

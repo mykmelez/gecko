@@ -79,7 +79,7 @@ class WebRenderLayerManager final : public LayerManager {
       EndTransactionFlags aFlags = END_DEFAULT) override;
   void EndTransactionWithoutLayer(
       nsDisplayList* aDisplayList, nsDisplayListBuilder* aDisplayListBuilder,
-      const nsTArray<wr::WrFilterOp>& aFilters = nsTArray<wr::WrFilterOp>(),
+      nsTArray<wr::FilterOp>&& aFilters = nsTArray<wr::FilterOp>(),
       WebRenderBackgroundData* aBackground = nullptr);
   virtual void EndTransaction(
       DrawPaintedLayerCallback aCallback, void* aCallbackData,
@@ -139,6 +139,7 @@ class WebRenderLayerManager final : public LayerManager {
   }
   virtual bool NeedsComposite() const override { return mNeedsComposite; }
   virtual void SetIsFirstPaint() override { mIsFirstPaint = true; }
+  virtual bool GetIsFirstPaint() const override { return mIsFirstPaint; }
   virtual void SetFocusTarget(const FocusTarget& aFocusTarget) override;
 
   virtual already_AddRefed<PersistentBufferProvider>

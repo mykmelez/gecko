@@ -9,7 +9,6 @@
 // This is loaded into chrome windows with the subscript loader. Wrap in
 // a block to prevent accidentally leaking globals onto `window`.
 {
-
 const inheritsMap = {
   ".searchbar-textbox": ["disabled", "disableautocomplete", "searchengine", "src", "newlines"],
   ".searchbar-search-button": ["addengines"],
@@ -27,7 +26,6 @@ function inheritAttribute(parent, child, attr) {
  * Defines the search bar element.
  */
 class MozSearchbar extends MozXULElement {
-
   static get observedAttributes() {
     let unique = new Set();
     for (let i in inheritsMap) {
@@ -121,19 +119,15 @@ class MozSearchbar extends MozXULElement {
 
     (window.delayedStartupPromise || Promise.resolve()).then(() => {
       window.requestIdleCallback(() => {
-        Services.search.init(aStatus => {
+        Services.search.init().then(aStatus => {
           // Bail out if the binding's been destroyed
           if (!this._initialized)
             return;
 
-          if (Components.isSuccessCode(aStatus)) {
-            // Refresh the display (updating icon, etc)
-            this.updateDisplay();
-            BrowserSearch.updateOpenSearchBadge();
-          } else {
-            Cu.reportError("Cannot initialize search service, bailing out: " + aStatus);
-          }
-        });
+          // Refresh the display (updating icon, etc)
+          this.updateDisplay();
+          BrowserSearch.updateOpenSearchBadge();
+        }).catch(status => Cu.reportError("Cannot initialize search service, bailing out: " + status));
       });
     });
 
@@ -304,7 +298,7 @@ class MozSearchbar extends MozXULElement {
 
     if (!selection || (selection.index == -1)) {
       oneOffRecorded = this.textbox.popup.oneOffButtons
-        .maybeRecordTelemetry(aEvent, aWhere, aParams);
+        .maybeRecordTelemetry(aEvent);
       if (!oneOffRecorded) {
         let source = "unknown";
         let type = "unknown";
@@ -325,8 +319,7 @@ class MozSearchbar extends MozXULElement {
         if (!aEngine) {
           aEngine = this.currentEngine;
         }
-        BrowserSearch.recordOneoffSearchInTelemetry(aEngine, source, type,
-          aWhere);
+        BrowserSearch.recordOneoffSearchInTelemetry(aEngine, source, type);
       }
     }
 
@@ -484,10 +477,8 @@ class MozSearchbar extends MozXULElement {
         this.openSuggestionsPanel(true);
       }
     });
-
   }
 }
 
 customElements.define("searchbar", MozSearchbar);
-
 }

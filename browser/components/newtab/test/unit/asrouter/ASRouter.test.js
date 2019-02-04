@@ -130,14 +130,6 @@ describe("ASRouter", () => {
 
       assert.deepEqual(Router.state.messageBlockList, ["foo"]);
     });
-    it("should set state.messageBlockList to the block list in ASRouterPreferences", async () => {
-      setMessageProviderPref([{id: "onboarding", type: "local", exclude: ["RTAMO"]}]);
-      messageBlockList = ["foo"];
-      Router = new _ASRouter();
-      await Router.init(channel, createFakeStorage(), dispatchStub);
-
-      assert.deepEqual(Router.state.messageBlockList, ["foo", "RTAMO"]);
-    });
     it("should set state.messageImpressions to the messageImpressions object in persistent storage", async () => {
       // Note that messageImpressions are only kept if a message exists in router and has a .frequency property,
       // otherwise they will be cleaned up by .cleanupImpressions()
@@ -910,6 +902,27 @@ describe("ASRouter", () => {
 
         assert.calledOnce(MessageLoaderUtils.installAddonFromURL);
         assert.calledWithExactly(MessageLoaderUtils.installAddonFromURL, msg.target.browser, "foo.com");
+      });
+      it("should add/remove observers for `webextension-install-notify`", async () => {
+        sandbox.spy(global.Services.obs, "addObserver");
+        sandbox.spy(global.Services.obs, "removeObserver");
+        sandbox.spy(Router, "blockMessageById");
+
+        sandbox.stub(MessageLoaderUtils, "installAddonFromURL").resolves(null);
+        const msg = fakeExecuteUserAction({type: "INSTALL_ADDON_FROM_URL", data: {url: "foo.com"}});
+
+        await Router.onMessage(msg);
+
+        assert.calledOnce(global.Services.obs.addObserver);
+
+        const [cb] = global.Services.obs.addObserver.firstCall.args;
+
+        cb();
+
+        assert.calledOnce(global.Services.obs.removeObserver);
+        assert.calledOnce(channel.sendAsyncMessage);
+        assert.calledOnce(Router.blockMessageById);
+        assert.calledWithExactly(Router.blockMessageById, "RETURN_TO_AMO_1");
       });
     });
 

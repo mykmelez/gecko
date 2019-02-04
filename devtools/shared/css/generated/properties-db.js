@@ -331,20 +331,6 @@ exports.CSS_PROPERTIES = {
       "visible"
     ]
   },
-  "-moz-binding": {
-    "isInherited": false,
-    "subproperties": [
-      "-moz-binding"
-    ],
-    "supports": [],
-    "values": [
-      "inherit",
-      "initial",
-      "none",
-      "unset",
-      "url"
-    ]
-  },
   "-moz-border-end": {
     "isInherited": false,
     "subproperties": [
@@ -2857,6 +2843,10 @@ exports.CSS_PROPERTIES = {
       "border-inline-end-color",
       "border-inline-end-style",
       "border-inline-end-width",
+      "border-start-start-radius",
+      "border-start-end-radius",
+      "border-end-start-radius",
+      "border-end-end-radius",
       "margin-block-start",
       "margin-block-end",
       "margin-inline-start",
@@ -2917,6 +2907,7 @@ exports.CSS_PROPERTIES = {
       "overflow-clip-box-block",
       "overflow-x",
       "overflow-y",
+      "overflow-anchor",
       "transition-duration",
       "transition-timing-function",
       "transition-property",
@@ -3683,6 +3674,67 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "border-block": {
+    "isInherited": false,
+    "subproperties": [
+      "border-block-start-width",
+      "border-block-end-width",
+      "border-block-start-style",
+      "border-block-end-style",
+      "border-block-start-color",
+      "border-block-end-color"
+    ],
+    "supports": [
+      2
+    ],
+    "values": [
+      "COLOR",
+      "currentColor",
+      "dashed",
+      "dotted",
+      "double",
+      "groove",
+      "hidden",
+      "hsl",
+      "hsla",
+      "inherit",
+      "initial",
+      "inset",
+      "medium",
+      "none",
+      "outset",
+      "rgb",
+      "rgba",
+      "ridge",
+      "solid",
+      "thick",
+      "thin",
+      "transparent",
+      "unset"
+    ]
+  },
+  "border-block-color": {
+    "isInherited": false,
+    "subproperties": [
+      "border-block-start-color",
+      "border-block-end-color"
+    ],
+    "supports": [
+      2
+    ],
+    "values": [
+      "COLOR",
+      "currentColor",
+      "hsl",
+      "hsla",
+      "inherit",
+      "initial",
+      "rgb",
+      "rgba",
+      "transparent",
+      "unset"
+    ]
+  },
   "border-block-end": {
     "isInherited": false,
     "subproperties": [
@@ -3871,6 +3923,45 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "border-block-style": {
+    "isInherited": false,
+    "subproperties": [
+      "border-block-start-style",
+      "border-block-end-style"
+    ],
+    "supports": [],
+    "values": [
+      "dashed",
+      "dotted",
+      "double",
+      "groove",
+      "hidden",
+      "inherit",
+      "initial",
+      "inset",
+      "none",
+      "outset",
+      "ridge",
+      "solid",
+      "unset"
+    ]
+  },
+  "border-block-width": {
+    "isInherited": false,
+    "subproperties": [
+      "border-block-start-width",
+      "border-block-end-width"
+    ],
+    "supports": [],
+    "values": [
+      "inherit",
+      "initial",
+      "medium",
+      "thick",
+      "thin",
+      "unset"
+    ]
+  },
   "border-bottom": {
     "isInherited": false,
     "subproperties": [
@@ -4027,6 +4118,30 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "border-end-end-radius": {
+    "isInherited": false,
+    "subproperties": [
+      "border-end-end-radius"
+    ],
+    "supports": [],
+    "values": [
+      "inherit",
+      "initial",
+      "unset"
+    ]
+  },
+  "border-end-start-radius": {
+    "isInherited": false,
+    "subproperties": [
+      "border-end-start-radius"
+    ],
+    "supports": [],
+    "values": [
+      "inherit",
+      "initial",
+      "unset"
+    ]
+  },
   "border-image": {
     "isInherited": false,
     "subproperties": [
@@ -4150,6 +4265,67 @@ exports.CSS_PROPERTIES = {
       "auto",
       "inherit",
       "initial",
+      "unset"
+    ]
+  },
+  "border-inline": {
+    "isInherited": false,
+    "subproperties": [
+      "border-inline-start-width",
+      "border-inline-end-width",
+      "border-inline-start-style",
+      "border-inline-end-style",
+      "border-inline-start-color",
+      "border-inline-end-color"
+    ],
+    "supports": [
+      2
+    ],
+    "values": [
+      "COLOR",
+      "currentColor",
+      "dashed",
+      "dotted",
+      "double",
+      "groove",
+      "hidden",
+      "hsl",
+      "hsla",
+      "inherit",
+      "initial",
+      "inset",
+      "medium",
+      "none",
+      "outset",
+      "rgb",
+      "rgba",
+      "ridge",
+      "solid",
+      "thick",
+      "thin",
+      "transparent",
+      "unset"
+    ]
+  },
+  "border-inline-color": {
+    "isInherited": false,
+    "subproperties": [
+      "border-inline-start-color",
+      "border-inline-end-color"
+    ],
+    "supports": [
+      2
+    ],
+    "values": [
+      "COLOR",
+      "currentColor",
+      "hsl",
+      "hsla",
+      "inherit",
+      "initial",
+      "rgb",
+      "rgba",
+      "transparent",
       "unset"
     ]
   },
@@ -4330,6 +4506,45 @@ exports.CSS_PROPERTIES = {
     "isInherited": false,
     "subproperties": [
       "border-inline-start-width"
+    ],
+    "supports": [],
+    "values": [
+      "inherit",
+      "initial",
+      "medium",
+      "thick",
+      "thin",
+      "unset"
+    ]
+  },
+  "border-inline-style": {
+    "isInherited": false,
+    "subproperties": [
+      "border-inline-start-style",
+      "border-inline-end-style"
+    ],
+    "supports": [],
+    "values": [
+      "dashed",
+      "dotted",
+      "double",
+      "groove",
+      "hidden",
+      "inherit",
+      "initial",
+      "inset",
+      "none",
+      "outset",
+      "ridge",
+      "solid",
+      "unset"
+    ]
+  },
+  "border-inline-width": {
+    "isInherited": false,
+    "subproperties": [
+      "border-inline-start-width",
+      "border-inline-end-width"
     ],
     "supports": [],
     "values": [
@@ -4548,6 +4763,30 @@ exports.CSS_PROPERTIES = {
     "isInherited": true,
     "subproperties": [
       "border-spacing"
+    ],
+    "supports": [],
+    "values": [
+      "inherit",
+      "initial",
+      "unset"
+    ]
+  },
+  "border-start-end-radius": {
+    "isInherited": false,
+    "subproperties": [
+      "border-start-end-radius"
+    ],
+    "supports": [],
+    "values": [
+      "inherit",
+      "initial",
+      "unset"
+    ]
+  },
+  "border-start-start-radius": {
+    "isInherited": false,
+    "subproperties": [
+      "border-start-start-radius"
     ],
     "supports": [],
     "values": [
@@ -6444,6 +6683,36 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "inset": {
+    "isInherited": false,
+    "subproperties": [
+      "top",
+      "right",
+      "bottom",
+      "left"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "inherit",
+      "initial",
+      "unset"
+    ]
+  },
+  "inset-block": {
+    "isInherited": false,
+    "subproperties": [
+      "inset-block-start",
+      "inset-block-end"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "inherit",
+      "initial",
+      "unset"
+    ]
+  },
   "inset-block-end": {
     "isInherited": false,
     "subproperties": [
@@ -6461,6 +6730,20 @@ exports.CSS_PROPERTIES = {
     "isInherited": false,
     "subproperties": [
       "inset-block-start"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "inherit",
+      "initial",
+      "unset"
+    ]
+  },
+  "inset-inline": {
+    "isInherited": false,
+    "subproperties": [
+      "inset-inline-start",
+      "inset-inline-end"
     ],
     "supports": [],
     "values": [
@@ -6842,6 +7125,20 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "margin-block": {
+    "isInherited": false,
+    "subproperties": [
+      "margin-block-start",
+      "margin-block-end"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "inherit",
+      "initial",
+      "unset"
+    ]
+  },
   "margin-block-end": {
     "isInherited": false,
     "subproperties": [
@@ -6872,6 +7169,20 @@ exports.CSS_PROPERTIES = {
     "isInherited": false,
     "subproperties": [
       "margin-bottom"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "inherit",
+      "initial",
+      "unset"
+    ]
+  },
+  "margin-inline": {
+    "isInherited": false,
+    "subproperties": [
+      "margin-inline-start",
+      "margin-inline-end"
     ],
     "supports": [],
     "values": [
@@ -7643,6 +7954,20 @@ exports.CSS_PROPERTIES = {
       "visible"
     ]
   },
+  "overflow-anchor": {
+    "isInherited": false,
+    "subproperties": [
+      "overflow-anchor"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "inherit",
+      "initial",
+      "none",
+      "unset"
+    ]
+  },
   "overflow-wrap": {
     "isInherited": true,
     "subproperties": [
@@ -7753,6 +8078,19 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "padding-block": {
+    "isInherited": false,
+    "subproperties": [
+      "padding-block-start",
+      "padding-block-end"
+    ],
+    "supports": [],
+    "values": [
+      "inherit",
+      "initial",
+      "unset"
+    ]
+  },
   "padding-block-end": {
     "isInherited": false,
     "subproperties": [
@@ -7781,6 +8119,19 @@ exports.CSS_PROPERTIES = {
     "isInherited": false,
     "subproperties": [
       "padding-bottom"
+    ],
+    "supports": [],
+    "values": [
+      "inherit",
+      "initial",
+      "unset"
+    ]
+  },
+  "padding-inline": {
+    "isInherited": false,
+    "subproperties": [
+      "padding-inline-start",
+      "padding-inline-end"
     ],
     "supports": [],
     "values": [
@@ -9377,6 +9728,10 @@ exports.PREFERENCES = [
     "layout.css.osx-font-smoothing.enabled"
   ],
   [
+    "overflow-anchor",
+    "layout.css.scroll-anchoring.enabled"
+  ],
+  [
     "scrollbar-width",
     "layout.css.scrollbar-width.enabled"
   ],
@@ -9455,6 +9810,10 @@ exports.PREFERENCES = [
   [
     "scroll-snap-destination",
     "layout.css.scroll-snap.enabled"
+  ],
+  [
+    "-moz-binding",
+    "layout.css.moz-binding.content.enabled"
   ],
   [
     "-webkit-text-stroke-width",

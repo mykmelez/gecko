@@ -4,8 +4,6 @@
 
 // Tests AddonRepository.jsm
 
-ChromeUtils.import("resource://gre/modules/addons/AddonRepository.jsm");
-
 var gServer = createHttpServer({hosts: ["example.com"]});
 
 const PREF_GETADDONS_BROWSEADDONS        = "extensions.getAddons.browseAddons";
@@ -133,7 +131,6 @@ function check_results(aActualAddons, aExpectedAddons) {
       do_throw(aActualAddon.id + " - " + aActualAddon.description);
     if (aActualAddon.name != "PASS")
       do_throw(aActualAddon.id + " - invalid add-on name " + aActualAddon.name);
-
   });
 }
 

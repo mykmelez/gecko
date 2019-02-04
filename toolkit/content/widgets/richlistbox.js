@@ -6,9 +6,22 @@
 // This is loaded into chrome windows with the subscript loader. If you need to
 // define globals, wrap in a block to prevent leaking onto `window`.
 
+/**
+ * XUL:richlistbox element.
+ */
 MozElements.RichListBox = class RichListBox extends MozElements.BaseControl {
   constructor() {
     super();
+
+    this.selectedItems = new ChromeNodeList();
+    this._currentIndex = null;
+    this._lastKeyTime = 0;
+    this._incrementalString = "";
+    this._suppressOnSelect = false;
+    this._userSelecting = false;
+    this._selectTimeout = null;
+    this._currentItem = null;
+    this._selectionStart = null;
 
     this.addEventListener("keypress", event => {
       if (event.altKey || event.metaKey) {
@@ -102,7 +115,7 @@ MozElements.RichListBox = class RichListBox extends MozElements.BaseControl {
             this.selectItem(currentItem);
           }
         } else {
-          this.currentItem._fireEvent("DOMMenuItemActive");
+          this._fireEvent(this.currentItem, "DOMMenuItemActive");
         }
       }
       this._lastKeyTime = 0;
@@ -135,17 +148,6 @@ MozElements.RichListBox = class RichListBox extends MozElements.BaseControl {
     }
 
     this.setAttribute("allowevents", "true");
-
-    this.selectedItems = new ChromeNodeList();
-    this._currentIndex = null;
-    this._lastKeyTime = 0;
-    this._incrementalString = "";
-    this._suppressOnSelect = false;
-    this._userSelecting = false;
-    this._selectTimeout = null;
-    this._currentItem = null;
-    this._selectionStart = null;
-
     this._refreshSelection();
   }
 
@@ -218,11 +220,20 @@ MozElements.RichListBox = class RichListBox extends MozElements.BaseControl {
 
     if (this._currentItem) {
       this._currentItem.current = false;
+      if (!val && !this.suppressMenuItemEvent) {
+        // An item is losing focus and there is no new item to focus.
+        // Notify a11y that there is no focused item.
+        this._fireEvent(this._currentItem, "DOMMenuItemInactive");
+      }
     }
     this._currentItem = val;
 
     if (val) {
       val.current = true;
+      if (!this.suppressMenuItemEvent) {
+        // Notify a11y that this item got focus.
+        this._fireEvent(val, "DOMMenuItemActive");
+      }
     }
 
     return val;
@@ -816,6 +827,12 @@ MozElements.RichListBox = class RichListBox extends MozElements.BaseControl {
   ensureSelectedElementIsVisible() {
     return this.ensureElementIsVisible(this.selectedItem);
   }
+
+  _fireEvent(aTarget, aName) {
+    let event = document.createEvent("Events");
+    event.initEvent(aName, true, true);
+    aTarget.dispatchEvent(event);
+  }
 };
 
 MozXULElement.implementCustomInterface(MozElements.RichListBox, [
@@ -824,3 +841,161 @@ MozXULElement.implementCustomInterface(MozElements.RichListBox, [
 ]);
 
 customElements.define("richlistbox", MozElements.RichListBox);
+
+/**
+ * XUL:richlistitem element.
+ */
+MozElements.MozRichlistitem = class MozRichlistitem extends MozElements.BaseText {
+  constructor() {
+    super();
+
+    this.selectedByMouseOver = false;
+
+    /**
+     * If there is no modifier key, we select on mousedown, not
+     * click, so that drags work correctly.
+     */
+    this.addEventListener("mousedown", (event) => {
+      var control = this.control;
+      if (!control || control.disabled)
+        return;
+      if ((!event.ctrlKey || (/Mac/.test(navigator.platform) && event.button == 2)) &&
+        !event.shiftKey && !event.metaKey) {
+        if (!this.selected) {
+          control.selectItem(this);
+        }
+        control.currentItem = this;
+      }
+    });
+
+    /**
+     * On a click (up+down on the same item), deselect everything
+     * except this item.
+     */
+    this.addEventListener("click", (event) => {
+      if (event.button != 0) {
+        return;
+      }
+
+      var control = this.control;
+      if (!control || control.disabled)
+        return;
+      control._userSelecting = true;
+      if (control.selType != "multiple") {
+        control.selectItem(this);
+      } else if (event.ctrlKey || event.metaKey) {
+        control.toggleItemSelection(this);
+        control.currentItem = this;
+      } else if (event.shiftKey) {
+        control.selectItemRange(null, this);
+        control.currentItem = this;
+      } else {
+        /* We want to deselect all the selected items except what was
+          clicked, UNLESS it was a right-click.  We have to do this
+          in click rather than mousedown so that you can drag a
+          selected group of items */
+
+        // use selectItemRange instead of selectItem, because this
+        // doesn't de- and reselect this item if it is selected
+        control.selectItemRange(this, this);
+      }
+      control._userSelecting = false;
+    });
+  }
+
+  /**
+   * nsIDOMXULSelectControlItemElement
+   */
+  get label() {
+    const XULNS =
+      "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+    return Array.map(this.getElementsByTagNameNS(XULNS, "label"),
+        label => label.value)
+      .join(" ");
+  }
+
+  set searchLabel(val) {
+    if (val !== null)
+      this.setAttribute("searchlabel", val);
+    else
+      // fall back to the label property (default value)
+      this.removeAttribute("searchlabel");
+    return val;
+  }
+
+  get searchLabel() {
+    return this.hasAttribute("searchlabel") ?
+      this.getAttribute("searchlabel") : this.label;
+  }
+  /**
+   * nsIDOMXULSelectControlItemElement
+   */
+  set value(val) {
+    this.setAttribute("value", val);
+    return val;
+  }
+
+  get value() {
+    return this.getAttribute("value");
+  }
+
+  /**
+   * nsIDOMXULSelectControlItemElement
+   */
+  set selected(val) {
+    if (val)
+      this.setAttribute("selected", "true");
+    else
+      this.removeAttribute("selected");
+
+    return val;
+  }
+
+  get selected() {
+    return this.getAttribute("selected") == "true";
+  }
+  /**
+   * nsIDOMXULSelectControlItemElement
+   */
+  get control() {
+    var parent = this.parentNode;
+    while (parent) {
+      if (parent.localName == "richlistbox")
+        return parent;
+      parent = parent.parentNode;
+    }
+    return null;
+  }
+
+  set current(val) {
+    if (val)
+      this.setAttribute("current", "true");
+    else
+      this.removeAttribute("current");
+    return val;
+  }
+
+  get current() {
+    return this.getAttribute("current") == "true";
+  }
+  disconnectedCallback() {
+    var control = this.control;
+    if (!control)
+      return;
+    // When we are destructed and we are current or selected, unselect ourselves
+    // so that richlistbox's selection doesn't point to something not in the DOM.
+    // We don't want to reset last-selected, so we set _suppressOnSelect.
+    if (this.selected) {
+      var suppressSelect = control._suppressOnSelect;
+      control._suppressOnSelect = true;
+      control.removeItemFromSelection(this);
+      control._suppressOnSelect = suppressSelect;
+    }
+    if (this.current)
+      control.currentItem = null;
+  }
+};
+
+MozXULElement.implementCustomInterface(
+  MozElements.MozRichlistitem, [Ci.nsIDOMXULSelectControlItemElement]
+);

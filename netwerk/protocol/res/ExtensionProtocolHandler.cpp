@@ -39,12 +39,13 @@
 #include "nsIOutputStream.h"
 #include "nsIStreamConverterService.h"
 #include "nsNetUtil.h"
+#include "nsURLHelper.h"
 #include "prio.h"
 #include "SimpleChannel.h"
 
 #if defined(XP_WIN)
-#include "nsILocalFileWin.h"
-#include "WinUtils.h"
+#  include "nsILocalFileWin.h"
+#  include "WinUtils.h"
 #endif
 
 #define EXTENSION_SCHEME "moz-extension"
@@ -317,10 +318,10 @@ ExtensionProtocolHandler::GetSingleton() {
 ExtensionProtocolHandler::ExtensionProtocolHandler()
     : SubstitutingProtocolHandler(EXTENSION_SCHEME)
 #if !defined(XP_WIN)
-#if defined(XP_MACOSX)
+#  if defined(XP_MACOSX)
       ,
       mAlreadyCheckedDevRepo(false)
-#endif /* XP_MACOSX */
+#  endif /* XP_MACOSX */
       ,
       mAlreadyCheckedAppDir(false)
 #endif /* ! XP_WIN */
@@ -341,20 +342,27 @@ static inline ExtensionPolicyService& EPS() {
 
 nsresult ExtensionProtocolHandler::GetFlagsForURI(nsIURI* aURI,
                                                   uint32_t* aFlags) {
-  // In general a moz-extension URI is only loadable by chrome, but a
-  // whitelisted subset are web-accessible (and cross-origin fetchable). Check
-  // that whitelist.
-  bool loadableByAnyone = false;
+  uint32_t flags =
+      URI_STD | URI_IS_LOCAL_RESOURCE | URI_IS_POTENTIALLY_TRUSTWORTHY;
 
   URLInfo url(aURI);
   if (auto* policy = EPS().GetByURL(url)) {
-    loadableByAnyone = policy->IsPathWebAccessible(url.FilePath());
+    // In general a moz-extension URI is only loadable by chrome, but a
+    // whitelisted subset are web-accessible (and cross-origin fetchable). Check
+    // that whitelist.
+    if (policy->IsPathWebAccessible(url.FilePath())) {
+      flags |= URI_LOADABLE_BY_ANYONE | URI_FETCHABLE_BY_ANYONE;
+    } else {
+      flags |= URI_DANGEROUS_TO_LOAD;
+    }
+
+    // Disallow in private windows if the extension does not have permission.
+    if (!policy->PrivateBrowsingAllowed()) {
+      flags |= URI_DISALLOW_IN_PRIVATE_CONTEXT;
+    }
   }
 
-  *aFlags =
-      URI_STD | URI_IS_LOCAL_RESOURCE | URI_IS_POTENTIALLY_TRUSTWORTHY |
-      (loadableByAnyone ? (URI_LOADABLE_BY_ANYONE | URI_FETCHABLE_BY_ANYONE)
-                        : URI_DANGEROUS_TO_LOAD);
+  *aFlags = flags;
   return NS_OK;
 }
 
@@ -499,15 +507,15 @@ Result<Ok, nsresult> ExtensionProtocolHandler::AllowExternalResource(
     return Ok();
   }
 
-#if defined(XP_MACOSX)
+#  if defined(XP_MACOSX)
   // Additionally, on Mac dev builds, we make sure that the requested
   // resource is within the repo dir. We don't perform this check on Linux
   // because we don't have a reliable path to the repo dir on Linux.
   MOZ_TRY(DevRepoContains(aRequestedFile, aResult));
-#endif /* XP_MACOSX */
+#  endif /* XP_MACOSX */
 
   return Ok();
-#endif /* defined(XP_WIN) */
+#endif   /* defined(XP_WIN) */
 }
 
 #if defined(XP_MACOSX)

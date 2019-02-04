@@ -608,8 +608,7 @@ bool GeneralParser<ParseHandler, Unit>::noteDeclaredName(
 
   switch (kind) {
     case DeclarationKind::Var:
-    case DeclarationKind::BodyLevelFunction:
-    case DeclarationKind::ForOfVar: {
+    case DeclarationKind::BodyLevelFunction: {
       Maybe<DeclarationKind> redeclaredKind;
       uint32_t prevPos;
       if (!pc->tryDeclareVar(name, kind, pos.begin, &redeclaredKind,
@@ -1882,8 +1881,7 @@ bool PerHandlerParser<ParseHandler>::declareFunctionArgumentsObject() {
   // declared 'var arguments', we still need to declare 'arguments' in the
   // function scope.
   DeclaredNamePtr p = varScope.lookupDeclaredName(argumentsName);
-  if (p && (p->value()->kind() == DeclarationKind::Var ||
-            p->value()->kind() == DeclarationKind::ForOfVar)) {
+  if (p && p->value()->kind() == DeclarationKind::Var) {
     if (hasExtraBodyVarScope) {
       tryDeclareArguments = true;
     } else {
@@ -3345,8 +3343,8 @@ bool Parser<SyntaxParseHandler, Unit>::asmJS(ListNodeType list) {
   return false;
 }
 
-template <>
-bool Parser<FullParseHandler, char16_t>::asmJS(ListNodeType list) {
+template <typename Unit>
+bool Parser<FullParseHandler, Unit>::asmJS(ListNodeType list) {
   // Disable syntax parsing in anything nested inside the asm.js module.
   disableSyntaxParser();
 
@@ -3381,14 +3379,6 @@ bool Parser<FullParseHandler, char16_t>::asmJS(ListNodeType list) {
     return false;
   }
 
-  return true;
-}
-
-template <>
-bool Parser<FullParseHandler, Utf8Unit>::asmJS(ListNodeType list) {
-  // Just succeed without setting the asm.js directive flag.  Given Web
-  // Assembly's rapid advance, it's probably not worth the trouble to really
-  // support UTF-8 asm.js.
   return true;
 }
 
@@ -3763,14 +3753,6 @@ GeneralParser<ParseHandler, Unit>::bindingInitializer(
       handler.newAssignment(ParseNodeKind::AssignExpr, lhs, rhs);
   if (!assign) {
     return null();
-  }
-
-  if (foldConstants) {
-    Node node = assign;
-    if (!FoldConstants(context, &node, this)) {
-      return null();
-    }
-    assign = handler.asBinary(node);
   }
 
   return assign;
@@ -4170,11 +4152,6 @@ GeneralParser<ParseHandler, Unit>::declarationPattern(
       *forHeadKind = ParseNodeKind::ForIn;
     } else if (isForOf) {
       *forHeadKind = ParseNodeKind::ForOf;
-
-      // Annex B.3.5 has different early errors for vars in for-of loops.
-      if (declKind == DeclarationKind::Var) {
-        declKind = DeclarationKind::ForOfVar;
-      }
     } else {
       *forHeadKind = ParseNodeKind::ForHead;
     }
@@ -4322,11 +4299,6 @@ GeneralParser<ParseHandler, Unit>::declarationName(DeclarationKind declKind,
         *forHeadKind = ParseNodeKind::ForIn;
       } else if (isForOf) {
         *forHeadKind = ParseNodeKind::ForOf;
-
-        // Annex B.3.5 has different early errors for vars in for-of loops.
-        if (declKind == DeclarationKind::Var) {
-          declKind = DeclarationKind::ForOfVar;
-        }
       } else {
         *forHeadKind = ParseNodeKind::ForHead;
       }
@@ -9030,7 +9002,7 @@ BigIntLiteral* Parser<FullParseHandler, Unit>::newBigInt() {
   const auto& chars = tokenStream.getCharBuffer();
   mozilla::Range<const char16_t> source(chars.begin(), chars.length());
 
-  BigInt* b = js::StringToBigInt(context, source);
+  BigInt* b = js::ParseBigIntLiteral(context, source);
   if (!b) {
     return null();
   }
@@ -9267,9 +9239,6 @@ GeneralParser<ParseHandler, Unit>::arrayInitializer(
                 element, elementPos, &possibleErrorInner, possibleError)) {
           return null();
         }
-        if (foldConstants && !FoldConstants(context, &element, this)) {
-          return null();
-        }
         handler.addArrayElement(literal, element);
       }
 
@@ -9388,7 +9357,8 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::propertyName(
     }
 
     case TokenKind::LeftBracket:
-      propName = computedPropertyName(yieldHandling, maybeDecl, propList);
+      propName = computedPropertyName(yieldHandling, maybeDecl,
+                                      propertyNameContext, propList);
       if (!propName) {
         return null();
       }
@@ -9453,7 +9423,8 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::propertyName(
       if (tt == TokenKind::LeftBracket) {
         tokenStream.consumeKnownToken(TokenKind::LeftBracket);
 
-        return computedPropertyName(yieldHandling, maybeDecl, propList);
+        return computedPropertyName(yieldHandling, maybeDecl,
+                                    propertyNameContext, propList);
       }
 
       // Not an accessor property after all.
@@ -9528,7 +9499,7 @@ template <class ParseHandler, typename Unit>
 typename ParseHandler::UnaryNodeType
 GeneralParser<ParseHandler, Unit>::computedPropertyName(
     YieldHandling yieldHandling, const Maybe<DeclarationKind>& maybeDecl,
-    ListNodeType literal) {
+    PropertyNameContext propertyNameContext, ListNodeType literal) {
   MOZ_ASSERT(anyChars.isCurrentTokenType(TokenKind::LeftBracket));
 
   uint32_t begin = pos().begin;
@@ -9537,7 +9508,8 @@ GeneralParser<ParseHandler, Unit>::computedPropertyName(
     if (*maybeDecl == DeclarationKind::FormalParameter) {
       pc->functionBox()->hasParameterExprs = true;
     }
-  } else {
+  } else if (propertyNameContext ==
+             PropertyNameContext::PropertyNameInLiteral) {
     handler.setListHasNonConstInitializer(literal);
   }
 
@@ -9647,10 +9619,6 @@ GeneralParser<ParseHandler, Unit>::objectLiteral(YieldHandling yieldHandling,
           }
           seenPrototypeMutation = true;
 
-          if (foldConstants && !FoldConstants(context, &propExpr, this)) {
-            return null();
-          }
-
           // This occurs *only* if we observe PropertyType::Normal!
           // Only |__proto__: v| mutates [[Prototype]]. Getters,
           // setters, method/generator definitions, computed
@@ -9660,18 +9628,13 @@ GeneralParser<ParseHandler, Unit>::objectLiteral(YieldHandling yieldHandling,
             return null();
           }
         } else {
-          // Use Node instead of BinaryNodeType to pass it to
-          // FoldConstants.
-          Node propDef = handler.newPropertyDefinition(propName, propExpr);
+          BinaryNodeType propDef =
+              handler.newPropertyDefinition(propName, propExpr);
           if (!propDef) {
             return null();
           }
 
-          if (foldConstants && !FoldConstants(context, &propDef, this)) {
-            return null();
-          }
-
-          handler.addPropertyDefinition(literal, handler.asBinary(propDef));
+          handler.addPropertyDefinition(literal, propDef);
         }
       } else if (propType == PropertyType::Shorthand) {
         /*

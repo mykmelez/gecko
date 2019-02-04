@@ -47,8 +47,8 @@ var navigateTo = async function(inspector, url) {
   const onUpdated = inspector.once("inspector-updated");
 
   info("Navigating to: " + url);
-  const activeTab = inspector.toolbox.target.activeTab;
-  await activeTab.navigateTo({ url });
+  const target = inspector.toolbox.target;
+  await target.navigateTo({ url });
 
   info("Waiting for markup view to load after navigation.");
   await markuploaded;
@@ -865,7 +865,7 @@ async function getDisplayedNodeTextContent(selector, inspector) {
  *        If true, the shapes highlighter is being shown. If false, it is being hidden
  * @param {Options} options
  *        Config option for the shapes highlighter. Contains:
- *        - {Boolean} transformMode: wether to show the highlighter in transforms mode
+ *        - {Boolean} transformMode: whether to show the highlighter in transforms mode
  */
 async function toggleShapesHighlighter(view, selector, property, show, options = {}) {
   info(`Toggle shapes highlighter ${show ? "on" : "off"} for ${property} on ${selector}`);

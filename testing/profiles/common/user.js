@@ -12,6 +12,9 @@ user_pref("browser.newtabpage.activity-stream.feeds.snippets", false);
 user_pref("browser.newtabpage.activity-stream.tippyTop.service.endpoint", "");
 // For Activity Stream firstrun page, use an empty string to avoid fetching.
 user_pref("browser.newtabpage.activity-stream.fxaccounts.endpoint", "");
+// Background thumbnails in particular cause grief, and disabling thumbnails
+// in general can't hurt - we re-enable them when tests need them.
+user_pref("browser.pagethumbnails.capturing_disabled", true);
 // Tell the search service we are running in the US.  This also has the desired
 // side-effect of preventing our geoip lookup.
 user_pref("browser.search.region", "US");
@@ -53,3 +56,4 @@ user_pref("media.autoplay.ask-permission", false);
 user_pref("media.autoplay.block-webaudio", false);
 user_pref("media.allowed-to-play.enabled", true);
 user_pref("toolkit.telemetry.coverage.endpoint.base", "http://localhost");
+user_pref("layout.css.moz-binding.content.enabled", true); // Le sad

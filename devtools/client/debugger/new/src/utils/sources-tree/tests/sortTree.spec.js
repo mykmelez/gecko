@@ -3,6 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
+// @flow
+
 import { createSource } from "../../../reducers/sources";
 
 import {
@@ -17,21 +19,21 @@ describe("sources-tree", () => {
     it("alphabetically sorts children", () => {
       const source1 = createSource({
         url: "http://example.com/source1.js",
-        actor: "actor1"
+        id: "actor1"
       });
       const source2 = createSource({
         url: "http://example.com/foo/b_source2.js",
-        actor: "actor2"
+        id: "actor2"
       });
       const source3 = createSource({
         url: "http://example.com/foo/a_source3.js",
-        actor: "actor3"
+        id: "actor3"
       });
       const _tree = createDirectoryNode("root", "", []);
 
-      addToTree(_tree, source1, "http://example.com/");
-      addToTree(_tree, source2, "http://example.com/");
-      addToTree(_tree, source3, "http://example.com/");
+      addToTree(_tree, source1, "http://example.com/", "");
+      addToTree(_tree, source2, "http://example.com/", "");
+      addToTree(_tree, source3, "http://example.com/", "");
       const tree = sortEntireTree(_tree);
 
       const base = tree.contents[0];
@@ -54,33 +56,33 @@ describe("sources-tree", () => {
       const sources = [
         createSource({
           url: "http://example.com/a.js",
-          actor: "actor1"
+          id: "actor1"
         }),
         createSource({
           url: "http://example.com/b.js/b_source.js",
-          actor: "actor2"
+          id: "actor2"
         }),
         createSource({
           url: "http://example.com/c.js",
-          actor: "actor1"
+          id: "actor3"
         }),
         createSource({
           url: "http://example.com",
-          actor: "actor1"
+          id: "actor4"
         }),
         createSource({
           url: "http://example.com/d/d_source.js",
-          actor: "actor3"
+          id: "actor5"
         }),
         createSource({
           url: "http://example.com/b2",
-          actor: "actor2"
+          id: "actor6"
         })
       ];
 
       const _tree = createDirectoryNode("root", "", []);
       sources.forEach(source =>
-        addToTree(_tree, source, "http://example.com/")
+        addToTree(_tree, source, "http://example.com/", "")
       );
       const tree = sortEntireTree(_tree);
       const domain = tree.contents[0];
@@ -116,21 +118,21 @@ describe("sources-tree", () => {
       const sources = [
         createSource({
           url: "http://example.com/folder/a.js",
-          actor: "actor1"
+          id: "actor1"
         }),
         createSource({
           url: "http://example.com/folder/b/b.js",
-          actor: "actor2"
+          id: "actor2"
         }),
         createSource({
           url: "http://example.com/folder/c/",
-          actor: "actor1"
+          id: "actor3"
         })
       ];
 
       const _tree = createDirectoryNode("root", "", []);
       sources.forEach(source =>
-        addToTree(_tree, source, "http://example.com/")
+        addToTree(_tree, source, "http://example.com/", "")
       );
       const tree = sortEntireTree(_tree);
       const [
@@ -155,15 +157,15 @@ describe("sources-tree", () => {
       const sources = [
         createSource({
           url: "http://api.example.com/a.js",
-          actor: "actor1"
+          id: "actor1"
         }),
         createSource({
           url: "http://example.com/b.js",
-          actor: "actor2"
+          id: "actor2"
         }),
         createSource({
           url: "http://demo.com/c.js",
-          actor: "actor3"
+          id: "actor3"
         })
       ];
 
@@ -172,8 +174,8 @@ describe("sources-tree", () => {
       const _treeA = createDirectoryNode("root", "", []);
       const _treeB = createDirectoryNode("root", "", []);
       sources.forEach(source => {
-        addToTree(_treeA, source, rootA);
-        addToTree(_treeB, source, rootB);
+        addToTree(_treeA, source, rootA, "");
+        addToTree(_treeB, source, rootB, "");
       });
       const treeA = sortEntireTree(_treeA, rootA);
       const treeB = sortEntireTree(_treeB, rootB);

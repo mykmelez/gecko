@@ -127,6 +127,8 @@ struct MOZ_STACK_CLASS BidiParagraphData {
   nsBidiLevel mParaLevel;
   nsIContent* mPrevContent;
   nsIFrame* mPrevFrame;
+  // Cache the block frame which needs bidi resolution.
+  const nsIFrame* mBlock;
 #ifdef DEBUG
   // Only used for NOISY debug output.
   nsBlockFrame* mCurrentBlock;
@@ -138,12 +140,16 @@ struct MOZ_STACK_CLASS BidiParagraphData {
         mRequiresBidi(false),
         mParaLevel(nsBidiPresUtils::BidiLevelFromStyle(aBlockFrame->Style())),
         mPrevContent(nullptr),
-        mPrevFrame(nullptr)
+        mPrevFrame(nullptr),
+        mBlock(aBlockFrame)
 #ifdef DEBUG
         ,
         mCurrentBlock(aBlockFrame)
 #endif
   {
+    MOZ_ASSERT(mBlock->FirstContinuation() == mBlock,
+               "mBlock must be the first continuation!");
+
     if (mParaLevel > 0) {
       mRequiresBidi = true;
     }
@@ -740,17 +746,17 @@ nsresult nsBidiPresUtils::ResolveParagraph(BidiParagraphData* aBpd) {
   nsLineBox* currentLine = nullptr;
 
 #ifdef DEBUG
-#ifdef NOISY_BIDI
+#  ifdef NOISY_BIDI
   printf(
       "Before Resolve(), mCurrentBlock=%p, mBuffer='%s', frameCount=%d, "
       "runCount=%d\n",
       (void*)aBpd->mCurrentBlock, NS_ConvertUTF16toUTF8(aBpd->mBuffer).get(),
       frameCount, runCount);
-#ifdef REALLY_NOISY_BIDI
+#    ifdef REALLY_NOISY_BIDI
   printf(" block frame tree=:\n");
-  aBpd->mCurrentBlock->List(stdout, 0);
-#endif
-#endif
+  aBpd->mCurrentBlock->List(stdout);
+#    endif
+#  endif
 #endif
 
   if (runCount == 1 && frameCount == 1 && aBpd->GetDirection() == NSBIDI_LTR &&
@@ -765,9 +771,9 @@ nsresult nsBidiPresUtils::ResolveParagraph(BidiParagraphData* aBpd) {
       FrameBidiData bidiData = frame->GetBidiData();
       if (!bidiData.embeddingLevel && !bidiData.baseLevel) {
 #ifdef DEBUG
-#ifdef NOISY_BIDI
+#  ifdef NOISY_BIDI
         printf("early return for single direction frame %p\n", (void*)frame);
-#endif
+#  endif
 #endif
         frame->AddStateBits(NS_FRAME_IS_BIDI);
         return NS_OK;
@@ -979,11 +985,11 @@ nsresult nsBidiPresUtils::ResolveParagraph(BidiParagraphData* aBpd) {
   }  // for
 
 #ifdef DEBUG
-#ifdef REALLY_NOISY_BIDI
+#  ifdef REALLY_NOISY_BIDI
   printf("---\nAfter Resolve(), frameTree =:\n");
-  aBpd->mCurrentBlock->List(stdout, 0);
+  aBpd->mCurrentBlock->List(stdout);
   printf("===\n");
-#endif
+#  endif
 #endif
 
   return rv;
@@ -1779,7 +1785,9 @@ void nsBidiPresUtils::RemoveBidiContinuation(BidiParagraphData* aBpd,
       // so they can be reused or deleted by normal reflow code
       frame->SetProperty(nsIFrame::BidiDataProperty(), bidiData);
       frame->AddStateBits(NS_FRAME_IS_BIDI);
-      while (frame) {
+
+      // Go no further than the block which needs resolution.
+      while (frame && aBpd->mBlock != frame->FirstContinuation()) {
         nsIFrame* prev = frame->GetPrevContinuation();
         if (prev) {
           MakeContinuationFluid(prev, frame);

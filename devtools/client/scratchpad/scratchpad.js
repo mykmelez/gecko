@@ -43,7 +43,7 @@ const FALLBACK_CHARSET_LIST = "intl.fallbackCharsetList.ISO-8859-1";
 
 const VARIABLES_VIEW_URL = "chrome://devtools/content/shared/widgets/VariablesView.xul";
 
-const {require, loader} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const {require, loader} = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
 
 const Editor = require("devtools/client/sourceeditor/editor");
 const TargetFactory = require("devtools/client/framework/target").TargetFactory;
@@ -482,7 +482,7 @@ var Scratchpad = {
     const { debuggerClient, webConsoleClient } = await connection;
     this.debuggerClient = debuggerClient;
     this.webConsoleClient = webConsoleClient;
-    const response = await webConsoleClient.evaluateJSAsync(string, null, evalOptions);
+    const response = await webConsoleClient.evaluateJSAsync(string, evalOptions);
 
     if (response.error) {
       throw new Error(response.error);
@@ -559,7 +559,7 @@ var Scratchpad = {
     const target = await TargetFactory.forTab(this.gBrowser.selectedTab);
     await target.attach();
     const onNavigate = target.once("navigate");
-    target.activeTab.reload();
+    target.reload();
     await onNavigate;
     await this.run();
   },

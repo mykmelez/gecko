@@ -31,15 +31,10 @@ typedef Handle<ModuleObject*> HandleModuleObject;
 extern Shape* EnvironmentCoordinateToEnvironmentShape(JSScript* script,
                                                       jsbytecode* pc);
 
-// Return the name being accessed by the given ALIASEDVAR op.
-extern PropertyName* EnvironmentCoordinateName(
-    EnvironmentCoordinateNameCache& cache, JSScript* script, jsbytecode* pc);
-
-// Return the function script accessed by the given ALIASEDVAR op, or nullptr.
-extern JSScript* EnvironmentCoordinateFunctionScript(JSScript* script,
-                                                     jsbytecode* pc);
-
-/*** Environment objects ****************************************************/
+// Return the name being accessed by the given ALIASEDVAR op. This function is
+// relatively slow so it should not be used on hot paths.
+extern PropertyName* EnvironmentCoordinateNameSlow(JSScript* script,
+                                                   jsbytecode* pc);
 
 /*** Environment objects ****************************************************/
 
@@ -264,8 +259,7 @@ class EnvironmentObject : public NativeObject {
   // GlobalObject, or a non-syntactic environment object.
   static const uint32_t ENCLOSING_ENV_SLOT = 0;
 
-  inline void setAliasedBinding(JSContext* cx, uint32_t slot,
-                                PropertyName* name, const Value& v);
+  inline void setAliasedBinding(JSContext* cx, uint32_t slot, const Value& v);
 
   void setEnclosingEnvironment(JSObject* enclosing) {
     setReservedSlot(ENCLOSING_ENV_SLOT, ObjectOrNullValue(enclosing));
@@ -295,7 +289,7 @@ class EnvironmentObject : public NativeObject {
   }
 
   inline void setAliasedBinding(JSContext* cx, EnvironmentCoordinate ec,
-                                PropertyName* name, const Value& v);
+                                const Value& v);
 
   inline void setAliasedBinding(JSContext* cx, const BindingIter& bi,
                                 const Value& v);
@@ -322,17 +316,11 @@ class CallObject : public EnvironmentObject {
   /* These functions are internal and are exposed only for JITs. */
 
   /*
-   * Construct a bare-bones call object given a shape and a non-singleton
-   * group.  The call object must be further initialized to be usable.
+   * Construct a bare-bones call object given a shape and a group.
+   * The call object must be further initialized to be usable.
    */
   static CallObject* create(JSContext* cx, HandleShape shape,
                             HandleObjectGroup group);
-
-  /*
-   * Construct a bare-bones call object given a shape and make it into
-   * a singleton.  The call object must be initialized to be usable.
-   */
-  static CallObject* createSingleton(JSContext* cx, HandleShape shape);
 
   static CallObject* createTemplateObject(JSContext* cx, HandleScript script,
                                           HandleObject enclosing,
@@ -567,6 +555,8 @@ class LexicalEnvironmentObject : public EnvironmentObject {
     return enclosingEnvironment().as<GlobalObject>();
   }
 
+  void setWindowProxyThisValue(JSObject* obj);
+
   // Global and non-syntactic lexical scopes are extensible. All other
   // lexical scopes are not.
   bool isExtensible() const;
@@ -578,6 +568,10 @@ class LexicalEnvironmentObject : public EnvironmentObject {
   // For extensible lexical environments, the 'this' value for its
   // scope. Otherwise asserts.
   Value thisValue() const;
+
+  static constexpr size_t offsetOfThisValueOrScopeSlot() {
+    return getFixedSlotOffset(THIS_VALUE_OR_SCOPE_SLOT);
+  }
 };
 
 class NamedLambdaObject : public LexicalEnvironmentObject {
@@ -1147,8 +1141,6 @@ extern bool CreateObjectsForEnvironmentChain(JSContext* cx,
 
 ModuleObject* GetModuleObjectForScript(JSScript* script);
 
-Value FindScriptOrModulePrivateForScript(JSScript* script);
-
 ModuleEnvironmentObject* GetModuleEnvironmentForScript(JSScript* script);
 
 MOZ_MUST_USE bool GetThisValueForDebuggerMaybeOptimizedOut(
@@ -1172,10 +1164,9 @@ MOZ_MUST_USE bool CheckGlobalDeclarationConflicts(
     JSContext* cx, HandleScript script,
     Handle<LexicalEnvironmentObject*> lexicalEnv, HandleObject varObj);
 
-MOZ_MUST_USE bool CheckEvalDeclarationConflicts(JSContext* cx,
-                                                HandleScript script,
-                                                HandleObject envChain,
-                                                HandleObject varObj);
+MOZ_MUST_USE bool CheckGlobalOrEvalDeclarationConflicts(JSContext* cx,
+                                                        HandleObject envChain,
+                                                        HandleScript script);
 
 MOZ_MUST_USE bool InitFunctionEnvironmentObjects(JSContext* cx,
                                                  AbstractFramePtr frame);

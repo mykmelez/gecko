@@ -8,7 +8,7 @@
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["URL"]);
 
-const LMCBackstagePass = ChromeUtils.import("resource://gre/modules/LoginManagerContent.jsm", {});
+const LMCBackstagePass = ChromeUtils.import("resource://gre/modules/LoginManagerContent.jsm", null);
 const { LoginManagerContent, LoginFormFactory } = LMCBackstagePass;
 const TESTCASES = [
   {
@@ -84,7 +84,7 @@ for (let tc of TESTCASES) {
     add_task(async function() {
       info("Starting testcase: " + testcase.description);
       let document = MockDocument.createTestDocument("http://localhost:8080/test/",
-                                                      testcase.document);
+                                                     testcase.document);
 
       let input = document.querySelector("input");
       MockDocument.mockOwnerDocumentProperty(input, document, "http://localhost:8080/test/");

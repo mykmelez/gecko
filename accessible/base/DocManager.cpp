@@ -17,13 +17,13 @@
 #include "xpcAccessibleDocument.h"
 
 #ifdef A11Y_LOG
-#include "Logging.h"
+#  include "Logging.h"
 #endif
 
+#include "mozilla/Components.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/dom/Event.h"  // for Event
 #include "nsContentUtils.h"
-#include "nsCURILoader.h"
 #include "nsDocShellLoadTypes.h"
 #include "nsIChannel.h"
 #include "nsIInterfaceRequestorUtils.h"
@@ -171,8 +171,7 @@ bool DocManager::IsProcessingRefreshDriverNotification() const {
 // DocManager protected
 
 bool DocManager::Init() {
-  nsCOMPtr<nsIWebProgress> progress =
-      do_GetService(NS_DOCUMENTLOADER_SERVICE_CONTRACTID);
+  nsCOMPtr<nsIWebProgress> progress = components::DocLoader::Service();
 
   if (!progress) return false;
 
@@ -183,8 +182,7 @@ bool DocManager::Init() {
 }
 
 void DocManager::Shutdown() {
-  nsCOMPtr<nsIWebProgress> progress =
-      do_GetService(NS_DOCUMENTLOADER_SERVICE_CONTRACTID);
+  nsCOMPtr<nsIWebProgress> progress = components::DocLoader::Service();
 
   if (progress)
     progress->RemoveProgressListener(
@@ -304,6 +302,13 @@ DocManager::OnStatusChange(nsIWebProgress* aWebProgress, nsIRequest* aRequest,
 NS_IMETHODIMP
 DocManager::OnSecurityChange(nsIWebProgress* aWebProgress, nsIRequest* aRequest,
                              uint32_t aState) {
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+DocManager::OnContentBlockingEvent(nsIWebProgress* aWebProgress,
+                                   nsIRequest* aRequest, uint32_t aEvent) {
   MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }

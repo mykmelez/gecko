@@ -13,31 +13,16 @@ add_task(async function() {
   const UPDATED_EXTENSION_NAME = "Temporary web extension (updated)";
   const EXTENSION_ID = "test-devtools@mozilla.org";
 
-  const manifestBase = {
-    "manifest_version": 2,
-    "name": ORIGINAL_EXTENSION_NAME,
-    "version": "1.0",
-    "applications": {
-      "gecko": {
-        "id": EXTENSION_ID,
-      },
-    },
-  };
-
-  const tempExt = new TemporaryExtension(EXTENSION_ID);
-  tempExt.writeManifest(manifestBase);
-
-  info("Install a temporary extension (original)");
-  await AddonManager.installTemporaryAddon(tempExt.sourceDir);
-
-  info("Wait until a debug target item appears");
-  await waitUntil(() => findDebugTargetByText(ORIGINAL_EXTENSION_NAME, document));
+  const addonFile = await installTemporaryExtensionFromXPI({
+    id: EXTENSION_ID,
+    name: ORIGINAL_EXTENSION_NAME,
+  }, document);
 
   const originalTarget = findDebugTargetByText(ORIGINAL_EXTENSION_NAME, document);
   ok(!!originalTarget, "The temporary extension isinstalled with the expected name");
 
   info("Update the name of the temporary extension in the manifest");
-  tempExt.writeManifest(Object.assign({}, manifestBase, {name: UPDATED_EXTENSION_NAME}));
+  updateTemporaryXPI({ id: EXTENSION_ID, name: UPDATED_EXTENSION_NAME }, addonFile);
 
   info("Click on the reload button for the temporary extension");
   const reloadButton =
@@ -61,9 +46,6 @@ add_task(async function() {
   info("Wait until the debug target with the updated extension name disappears");
   await waitUntil(() => !findDebugTargetByText(UPDATED_EXTENSION_NAME, document));
 
-  info("Remove the temporary web extension");
-  tempExt.remove();
-
   await removeTab(tab);
 });
 
@@ -73,7 +55,7 @@ add_task(async function() {
 
   const { document, tab } = await openAboutDebugging();
 
-  await installRegularAddon("resources/packaged-extension/packaged-extension.xpi");
+  await installRegularExtension("resources/packaged-extension/packaged-extension.xpi");
 
   info("Wait until extension appears in about:debugging");
   await waitUntil(() => findDebugTargetByText(PACKAGED_EXTENSION_NAME, document));
@@ -85,12 +67,6 @@ add_task(async function() {
   const removeButton = target.querySelector(".js-temporary-extension-remove-button");
   ok(!removeButton, "No remove button displayed for a regularly installed extension");
 
-  info("Retrieve the extension instance from the addon manager, and uninstall it");
-  const extension = await AddonManager.getAddonByID(PACKAGED_EXTENSION_ID);
-  extension.uninstall();
-
-  info("Wait until the addon disappears from about:debugging");
-  await waitUntil(() => !findDebugTargetByText(PACKAGED_EXTENSION_NAME, document));
-
+  await removeExtension(PACKAGED_EXTENSION_ID, PACKAGED_EXTENSION_NAME, document);
   await removeTab(tab);
 });

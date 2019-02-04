@@ -452,7 +452,8 @@ function generatedToOriginalId(generatedId, url) {
 }
 
 function isOriginalId(id) {
-  return !!id.match(/\/originalSource/);
+  return (/\/originalSource/.test(id)
+  );
 }
 
 function isGeneratedId(id) {
@@ -1871,6 +1872,7 @@ exports.ArraySet = ArraySet;
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 const {
   getOriginalURLs,
+  hasOriginalURL,
   getOriginalRanges,
   getGeneratedRanges,
   getGeneratedLocation,
@@ -1895,6 +1897,7 @@ const {
 self.onmessage = workerHandler({
   setAssetRootURL,
   getOriginalURLs,
+  hasOriginalURL,
   getOriginalRanges,
   getGeneratedRanges,
   getGeneratedLocation,
@@ -1930,7 +1933,11 @@ const { SourceMapConsumer, SourceMapGenerator } = __webpack_require__(3705);
 
 const { createConsumer } = __webpack_require__(3793);
 const assert = __webpack_require__(3717);
-const { fetchSourceMap } = __webpack_require__(3718);
+const {
+  fetchSourceMap,
+  hasOriginalURL,
+  clearOriginalURLs
+} = __webpack_require__(3718);
 const {
   getSourceMap,
   setSourceMap,
@@ -2239,10 +2246,12 @@ function applySourceMap(generatedId, url, code, mappings) {
 function clearSourceMaps() {
   clearSourceMapsRequests();
   clearWasmXScopes();
+  clearOriginalURLs();
 }
 
 module.exports = {
   getOriginalURLs,
+  hasOriginalURL,
   getOriginalRanges,
   getGeneratedRanges,
   getGeneratedLocation,
@@ -3954,6 +3963,17 @@ const { SourceMapConsumer } = __webpack_require__(3705);
 const { convertToJSON } = __webpack_require__(3785);
 const { createConsumer } = __webpack_require__(3793);
 
+// URLs which have been seen in a completed source map request.
+const originalURLs = new Set();
+
+function clearOriginalURLs() {
+  originalURLs.clear();
+}
+
+function hasOriginalURL(url) {
+  return originalURLs.has(url);
+}
+
 function _resolveSourceMapURL(source) {
   const { url = "", sourceMapURL = "" } = source;
 
@@ -3996,6 +4016,10 @@ async function _resolveAndFetch(generatedSource) {
     }
   }
 
+  if (map && map.sources) {
+    map.sources.forEach(url => originalURLs.add(url));
+  }
+
   return map;
 }
 
@@ -4025,7 +4049,7 @@ function fetchSourceMap(generatedSource) {
   return req;
 }
 
-module.exports = { fetchSourceMap };
+module.exports = { fetchSourceMap, hasOriginalURL, clearOriginalURLs };
 
 /***/ }),
 
@@ -4267,7 +4291,11 @@ function indexLinkingNames(items) {
   let queue = [...items];
   while (queue.length > 0) {
     const item = queue.shift();
-    if ("linkage_name" in item) {
+    if ("uid" in item) {
+      result.set(item.uid, item);
+    } else if ("linkage_name" in item) {
+      // TODO the linkage_name string value is used for compatibility
+      // with old format. Remove in favour of the uid referencing.
       result.set(item.linkage_name, item);
     }
     if ("children" in item) {
@@ -4275,6 +4303,16 @@ function indexLinkingNames(items) {
     }
   }
   return result;
+}
+
+function getIndexedItem(index, key) {
+  if (typeof key === "object" && key != null) {
+    return index.get(key.uid);
+  }
+  if (typeof key === "string") {
+    return index.get(key);
+  }
+  return null;
 }
 
 async function getXScopes(sourceId) {
@@ -4334,7 +4372,7 @@ function filterScopes(items, pc, lastItem, index) {
         break;
       case "inlined_subroutine":
         if (isInRange(item, pc)) {
-          const linkedItem = index.get(item.abstract_origin);
+          const linkedItem = getIndexedItem(index, item.abstract_origin);
           const s = {
             id: item.abstract_origin,
             name: linkedItem ? linkedItem.name : void 0

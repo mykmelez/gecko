@@ -2,7 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
+// @flow
+
 import mapExpressionBindings from "../mapBindings";
+import { parseConsoleScript } from "../utils/ast";
 import cases from "jest-in-case";
 
 const prettier = require("prettier");
@@ -12,12 +15,20 @@ function format(code) {
 }
 
 function excludedTest({ name, expression, bindings = [] }) {
-  const safeExpression = mapExpressionBindings(expression, bindings);
+  const safeExpression = mapExpressionBindings(
+    expression,
+    parseConsoleScript(expression),
+    bindings
+  );
   expect(format(safeExpression)).toEqual(format(expression));
 }
 
 function includedTest({ name, expression, newExpression, bindings }) {
-  const safeExpression = mapExpressionBindings(expression, bindings);
+  const safeExpression = mapExpressionBindings(
+    expression,
+    parseConsoleScript(expression),
+    bindings
+  );
   expect(format(safeExpression)).toEqual(format(newExpression));
 }
 

@@ -5,7 +5,7 @@
 
 "use strict";
 
-const {require, loader} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const {require, loader} = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
 const {DebuggerClient} = require("devtools/shared/client/debugger-client");
 const {DebuggerServer} = require("devtools/server/main");
 const {TargetFactory} = require("devtools/client/framework/target");
@@ -60,10 +60,10 @@ function waitForFramesUpdated(target, matchFn) {
         return;
       }
 
-      target.activeTab.off("frameUpdate", listener);
+      target.off("frameUpdate", listener);
       resolve(data.frames);
     };
-    target.activeTab.on("frameUpdate", listener);
+    target.on("frameUpdate", listener);
   });
 }
 
@@ -98,7 +98,8 @@ async function attachAddon(addonId) {
 
   await client.connect();
 
-  const addonTargetFront = await client.mainRoot.getAddon({ id: addonId });
+  const addonFront = await client.mainRoot.getAddon({ id: addonId });
+  const addonTargetFront = await addonFront.connect();
 
   if (!addonTargetFront) {
     client.close();

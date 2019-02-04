@@ -52,6 +52,7 @@ static UniquePtr<nsString> sUserExtensionsDir;
 #endif
 
 // Cached prefs which are needed off main thread.
+static bool sRddWin32kDisable = false;
 static bool sGmpWin32kDisable = false;
 
 static LazyLogModule sSandboxBrokerLog("SandboxBroker");
@@ -129,6 +130,8 @@ void SandboxBroker::GeckoDependentInitialize() {
   ClearOnShutdown(&sLaunchErrors);
 
   // Cache prefs that are needed off main thread.
+  Preferences::AddBoolVarCache(&sRddWin32kDisable,
+                               "security.sandbox.rdd.win32k-disable");
   Preferences::AddBoolVarCache(&sGmpWin32kDisable,
                                "security.sandbox.gmp.win32k-disable");
 }
@@ -410,13 +413,13 @@ void SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
     }
   }
 
-#if defined(DEBUG)
+#  if defined(DEBUG)
   // This is required for a MOZ_ASSERT check in WindowsMessageLoop.cpp
   // WinEventHook, see bug 1366694 for details.
   DWORD uiExceptions = JOB_OBJECT_UILIMIT_HANDLES;
-#else
+#  else
   DWORD uiExceptions = 0;
-#endif
+#  endif
   sandbox::ResultCode result = SetJobLevel(mPolicy, jobLevel, uiExceptions);
   MOZ_RELEASE_ASSERT(sandbox::SBOX_ALL_OK == result,
                      "Setting job level failed, have you set memory limit when "
@@ -495,6 +498,11 @@ void SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
                        "With these static arguments AddRule should never fail, "
                        "what happened?");
   } else {
+    // Add rule to allow access to user specific fonts.
+    AddCachedDirRule(mPolicy, sandbox::TargetPolicy::FILES_ALLOW_READONLY,
+                     sLocalAppDataDir,
+                     NS_LITERAL_STRING("\\Microsoft\\Windows\\Fonts\\*"));
+
     // Add rule to allow read access to installation directory.
     AddCachedDirRule(mPolicy, sandbox::TargetPolicy::FILES_ALLOW_READONLY,
                      sBinDir, NS_LITERAL_STRING("\\*"));
@@ -511,11 +519,11 @@ void SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
     AddCachedDirRule(mPolicy, sandbox::TargetPolicy::FILES_ALLOW_READONLY,
                      sUserExtensionsDevDir, NS_LITERAL_STRING("\\*"));
 
-#ifdef ENABLE_SYSTEM_EXTENSION_DIRS
+#  ifdef ENABLE_SYSTEM_EXTENSION_DIRS
     // Add rule to allow read access to the per-user extensions directory.
     AddCachedDirRule(mPolicy, sandbox::TargetPolicy::FILES_ALLOW_READONLY,
                      sUserExtensionsDir, NS_LITERAL_STRING("\\*"));
-#endif
+#  endif
   }
 
   // Add the policy for the client side of a pipe. It is just a file
@@ -720,13 +728,21 @@ bool SandboxBroker::SetSecurityLevelForRDDProcess() {
       sandbox::MITIGATION_BOTTOM_UP_ASLR | sandbox::MITIGATION_HEAP_TERMINATE |
       sandbox::MITIGATION_SEHOP | sandbox::MITIGATION_EXTENSION_POINT_DISABLE |
       sandbox::MITIGATION_DEP_NO_ATL_THUNK | sandbox::MITIGATION_DEP |
-      sandbox::MITIGATION_DYNAMIC_CODE_DISABLE |
       sandbox::MITIGATION_IMAGE_LOAD_PREFER_SYS32;
+
+  if (sRddWin32kDisable) {
+    mitigations |= sandbox::MITIGATION_WIN32K_DISABLE;
+    result =
+        mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_WIN32K_LOCKDOWN,
+                         sandbox::TargetPolicy::FAKE_USER_GDI_INIT, nullptr);
+    SANDBOX_ENSURE_SUCCESS(result, "Failed to set FAKE_USER_GDI_INIT policy.");
+  }
 
   result = mPolicy->SetProcessMitigations(mitigations);
   SANDBOX_ENSURE_SUCCESS(result, "Invalid flags for SetProcessMitigations.");
 
   mitigations = sandbox::MITIGATION_STRICT_HANDLE_CHECKS |
+                sandbox::MITIGATION_DYNAMIC_CODE_DISABLE |
                 sandbox::MITIGATION_DLL_SEARCH_ORDER;
 
   result = mPolicy->SetDelayedProcessMitigations(mitigations);
@@ -864,6 +880,8 @@ bool SandboxBroker::SetSecurityLevelForPluginProcess(int32_t aSandboxLevel) {
     // not exist.
     AddCachedDirRule(mPolicy, sandbox::TargetPolicy::FILES_ALLOW_DIR_ANY,
                      sRoamingAppDataDir, NS_LITERAL_STRING("\\Macromedia"));
+    AddCachedDirRule(mPolicy, sandbox::TargetPolicy::FILES_ALLOW_QUERY,
+                     sRoamingAppDataDir, NS_LITERAL_STRING("\\Macromedia\\"));
     AddCachedDirRule(mPolicy, sandbox::TargetPolicy::FILES_ALLOW_DIR_ANY,
                      sRoamingAppDataDir,
                      NS_LITERAL_STRING("\\Macromedia\\Flash Player"));

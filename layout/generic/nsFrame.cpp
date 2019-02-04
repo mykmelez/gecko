@@ -22,6 +22,7 @@
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/PathHelpers.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/StaticPrefs.h"
 
 #include "nsCOMPtr.h"
 #include "nsFlexContainerFrame.h"
@@ -111,6 +112,7 @@
 #include "mozilla/dom/TouchEvent.h"
 #include "mozilla/gfx/Tools.h"
 #include "mozilla/layers/WebRenderUserData.h"
+#include "mozilla/layout/ScrollAnchorContainer.h"
 #include "nsPrintfCString.h"
 #include "ActiveLayerTracker.h"
 
@@ -727,6 +729,11 @@ void nsFrame::DestroyFrom(nsIFrame* aDestructRoot,
     ActiveLayerTracker::TransferActivityToContent(this, mContent);
   }
 
+  ScrollAnchorContainer* anchor = nullptr;
+  if (IsScrollAnchor(&anchor)) {
+    anchor->InvalidateAnchor();
+  }
+
   if (HasCSSAnimations() || HasCSSTransitions() ||
       EffectSet::GetEffectSet(this)) {
     // If no new frame for this element is created by the end of the
@@ -1047,6 +1054,11 @@ void nsIFrame::MarkNeedsDisplayItemRebuild() {
   AddAndRemoveImageAssociations(this, oldLayers, newLayers);
 
   if (aOldComputedStyle) {
+    // Detect style changes that should trigger a scroll anchor adjustment
+    // suppression.
+    // https://drafts.csswg.org/css-scroll-anchoring/#suppression-triggers
+    bool needAnchorSuppression = false;
+
     // If we detect a change on margin, padding or border, we store the old
     // values on the frame itself between now and reflow, so if someone
     // calls GetUsed(Margin|Border|Padding)() before the next reflow, we
@@ -1056,17 +1068,21 @@ void nsIFrame::MarkNeedsDisplayItemRebuild() {
     nsMargin newValue(0, 0, 0, 0);
     const nsStyleMargin* oldMargin = aOldComputedStyle->PeekStyleMargin();
     if (oldMargin && oldMargin->GetMargin(oldValue)) {
-      if ((!StyleMargin()->GetMargin(newValue) || oldValue != newValue) &&
-          !HasProperty(UsedMarginProperty())) {
-        AddProperty(UsedMarginProperty(), new nsMargin(oldValue));
+      if (!StyleMargin()->GetMargin(newValue) || oldValue != newValue) {
+        if (!HasProperty(UsedMarginProperty())) {
+          AddProperty(UsedMarginProperty(), new nsMargin(oldValue));
+        }
+        needAnchorSuppression = true;
       }
     }
 
     const nsStylePadding* oldPadding = aOldComputedStyle->PeekStylePadding();
     if (oldPadding && oldPadding->GetPadding(oldValue)) {
-      if ((!StylePadding()->GetPadding(newValue) || oldValue != newValue) &&
-          !HasProperty(UsedPaddingProperty())) {
-        AddProperty(UsedPaddingProperty(), new nsMargin(oldValue));
+      if (!StylePadding()->GetPadding(newValue) || oldValue != newValue) {
+        if (!HasProperty(UsedPaddingProperty())) {
+          AddProperty(UsedPaddingProperty(), new nsMargin(oldValue));
+        }
+        needAnchorSuppression = true;
       }
     }
 
@@ -1077,6 +1093,42 @@ void nsIFrame::MarkNeedsDisplayItemRebuild() {
       if (oldValue != newValue && !HasProperty(UsedBorderProperty())) {
         AddProperty(UsedBorderProperty(), new nsMargin(oldValue));
       }
+    }
+
+    const nsStyleDisplay* oldDisp = aOldComputedStyle->PeekStyleDisplay();
+    if (oldDisp &&
+        (oldDisp->mOverflowAnchor != StyleDisplay()->mOverflowAnchor)) {
+      if (ScrollAnchorContainer* container =
+              ScrollAnchorContainer::FindFor(this)) {
+        container->InvalidateAnchor();
+      }
+      if (nsIScrollableFrame* scrollableFrame = do_QueryFrame(this)) {
+        scrollableFrame->GetAnchor()->InvalidateAnchor();
+      }
+    }
+
+    if (mInScrollAnchorChain) {
+      const nsStylePosition* oldPosition =
+          aOldComputedStyle->PeekStylePosition();
+      if (oldPosition &&
+          (oldPosition->mOffset != StylePosition()->mOffset ||
+           oldPosition->mWidth != StylePosition()->mWidth ||
+           oldPosition->mMinWidth != StylePosition()->mMinWidth ||
+           oldPosition->mMaxWidth != StylePosition()->mMaxWidth ||
+           oldPosition->mHeight != StylePosition()->mHeight ||
+           oldPosition->mMinHeight != StylePosition()->mMinHeight ||
+           oldPosition->mMaxHeight != StylePosition()->mMaxHeight)) {
+        needAnchorSuppression = true;
+      }
+
+      if (oldDisp && (oldDisp->mPosition != StyleDisplay()->mPosition ||
+                      oldDisp->TransformChanged(*StyleDisplay()))) {
+        needAnchorSuppression = true;
+      }
+    }
+
+    if (mInScrollAnchorChain && needAnchorSuppression) {
+      ScrollAnchorContainer::FindFor(this)->SuppressAdjustments();
     }
   }
 
@@ -2493,6 +2545,13 @@ static bool FrameParticipatesIn3DContext(nsIFrame* aAncestor,
 static bool ItemParticipatesIn3DContext(nsIFrame* aAncestor,
                                         nsDisplayItem* aItem) {
   auto type = aItem->GetType();
+
+  if (type == DisplayItemType::TYPE_WRAP_LIST &&
+      aItem->GetChildren()->Count() == 1) {
+    // If the wraplist has only one child item, use the type of that item.
+    type = aItem->GetChildren()->GetBottom()->GetType();
+  }
+
   if (type != DisplayItemType::TYPE_TRANSFORM &&
       type != DisplayItemType::TYPE_PERSPECTIVE) {
     return false;
@@ -2516,7 +2575,6 @@ static void WrapSeparatorTransform(nsDisplayListBuilder* aBuilder,
   nsDisplayTransform* item = MakeDisplayItem<nsDisplayTransform>(
       aBuilder, aFrame, aNonParticipants, aBuilder->GetVisibleRect(),
       Matrix4x4(), aIndex);
-  item->SetNoExtendContext();
 
   if (*aSeparator == nullptr) {
     *aSeparator = item;
@@ -2885,7 +2943,20 @@ void nsIFrame::BuildDisplayListForStackingContext(
 
   nsDisplayListBuilder::AutoContainerASRTracker contASRTracker(aBuilder);
 
-  DisplayListClipState::AutoSaveRestore clipState(aBuilder);
+  DisplayListClipState::AutoSaveRestore cssClip(aBuilder);
+  {
+    // The clip property clips everything, including filters and what not.
+    if (auto contentClip = GetClipPropClipRect(disp, effects, GetSize())) {
+      nsPoint offset = isTransformed
+                           ? GetOffsetToCrossDoc(
+                                 aBuilder->FindReferenceFrameFor(GetParent()))
+                           : aBuilder->GetCurrentFrameOffsetToReferenceFrame();
+
+      aBuilder->IntersectDirtyRect(*contentClip);
+      aBuilder->IntersectVisibleRect(*contentClip);
+      cssClip.ClipContentDescendants(*contentClip + offset);
+    }
+  }
 
   // If there is a current clip, then depending on the container items we
   // create, different things can happen to it. Some container items simply
@@ -2918,18 +2989,15 @@ void nsIFrame::BuildDisplayListForStackingContext(
     clipCapturedBy = ContainerItemType::eFilter;
   }
 
+  DisplayListClipState::AutoSaveRestore clipState(aBuilder);
   if (clipCapturedBy != ContainerItemType::eNone) {
     clipState.Clear();
-  }
-
-  Maybe<nsRect> clipForMask;
-  if (usingMask) {
-    clipForMask = ComputeClipForMaskItem(aBuilder, this);
   }
 
   mozilla::UniquePtr<HitTestInfo> hitTestInfo;
 
   nsDisplayListCollection set(aBuilder);
+  Maybe<nsRect> clipForMask;
   {
     DisplayListClipState::AutoSaveRestore nestedClipState(aBuilder);
     nsDisplayListBuilder::AutoInTransformSetter inTransformSetter(aBuilder,
@@ -2939,17 +3007,14 @@ void nsIFrame::BuildDisplayListForStackingContext(
 
     CheckForApzAwareEventHandlers(aBuilder, this);
 
-    Maybe<nsRect> contentClip = GetClipPropClipRect(disp, effects, GetSize());
-
     if (usingMask) {
-      contentClip = IntersectMaybeRects(contentClip, clipForMask);
-    }
-
-    if (contentClip) {
-      aBuilder->IntersectDirtyRect(*contentClip);
-      aBuilder->IntersectVisibleRect(*contentClip);
-      nestedClipState.ClipContentDescendants(*contentClip +
-                                             aBuilder->ToReferenceFrame(this));
+      clipForMask = ComputeClipForMaskItem(aBuilder, this);
+      if (clipForMask) {
+        aBuilder->IntersectDirtyRect(*clipForMask);
+        aBuilder->IntersectVisibleRect(*clipForMask);
+        nestedClipState.ClipContentDescendants(
+            *clipForMask + aBuilder->GetCurrentFrameOffsetToReferenceFrame());
+      }
     }
 
     // extend3DContext also guarantees that applyAbsPosClipping and
@@ -3031,53 +3096,17 @@ void nsIFrame::BuildDisplayListForStackingContext(
     set.PositionedDescendants()->AppendToTop(color);
   }
 
-  // Sort PositionedDescendants() in CSS 'z-order' order.  The list is already
-  // in content document order and SortByZOrder is a stable sort which
-  // guarantees that boxes produced by the same element are placed together
-  // in the sort. Consider a position:relative inline element that breaks
-  // across lines and has absolutely positioned children; all the abs-pos
-  // children should be z-ordered after all the boxes for the position:relative
-  // element itself.
-  set.PositionedDescendants()->SortByZOrder();
-
-  nsDisplayList resultList;
-  // Now follow the rules of http://www.w3.org/TR/CSS21/zindex.html
-  // 1,2: backgrounds and borders
-  resultList.AppendToTop(set.BorderBackground());
-  // 3: negative z-index children.
-  for (;;) {
-    nsDisplayItem* item = set.PositionedDescendants()->GetBottom();
-    if (item && item->ZIndex() < 0) {
-      set.PositionedDescendants()->RemoveBottom();
-      resultList.AppendToTop(item);
-      continue;
-    }
-    break;
-  }
-  // 4: block backgrounds
-  resultList.AppendToTop(set.BlockBorderBackgrounds());
-  // 5: floats
-  resultList.AppendToTop(set.Floats());
-  // 7: general content
-  resultList.AppendToTop(set.Content());
-  // 7.5: outlines, in content tree order. We need to sort by content order
-  // because an element with outline that breaks and has children with outline
-  // might have placed child outline items between its own outline items.
-  // The element's outline items need to all come before any child outline
-  // items.
   nsIContent* content = GetContent();
   if (!content) {
     content = PresContext()->Document()->GetRootElement();
   }
-  if (content) {
-    set.Outlines()->SortByContentOrder(content);
-  }
+
+  nsDisplayList resultList;
+  set.SerializeWithCorrectZOrder(&resultList, content);
+
 #ifdef DEBUG
   DisplayDebugBorders(aBuilder, this, set);
 #endif
-  resultList.AppendToTop(set.Outlines());
-  // 8, 9: non-negative z-index children
-  resultList.AppendToTop(set.PositionedDescendants());
 
   // Get the ASR to use for the container items that we create here.
   const ActiveScrolledRoot* containerItemASR = contASRTracker.GetContainerASR();
@@ -3439,8 +3468,7 @@ static bool ShouldSkipFrame(nsDisplayListBuilder* aBuilder,
     return true;
   }
 
-  if ((aBuilder->IsForGenerateGlyphMask() ||
-       aBuilder->IsForPaintingSelectionBG()) &&
+  if (aBuilder->IsForGenerateGlyphMask() &&
       (!aFrame->IsTextFrame() && aFrame->IsLeaf())) {
     return true;
   }
@@ -3476,6 +3504,17 @@ void nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder* aBuilder,
       (child->GetStateBits() & NS_FRAME_SIMPLE_DISPLAYLIST) &&
       // Animations may change the stacking context state.
       !(child->MayHaveTransformAnimation() || child->MayHaveOpacityAnimation());
+
+  if (StaticPrefs::layout_css_scroll_anchoring_highlight()) {
+    if (child->FirstContinuation()->IsScrollAnchor()) {
+      nsRect bounds = child->GetContentRectRelativeToSelf() +
+                      aBuilder->ToReferenceFrame(child);
+      nsDisplaySolidColor* color = MakeDisplayItem<nsDisplaySolidColor>(
+          aBuilder, child, bounds, NS_RGBA(255, 0, 255, 64));
+      color->SetOverrideZIndex(INT32_MAX);
+      aLists.PositionedDescendants()->AppendToTop(color);
+    }
+  }
 
   if (doingShortcut) {
     BuildDisplayListForSimpleChild(aBuilder, child, aLists);
@@ -4984,17 +5023,17 @@ void nsIFrame::AssociateImage(const nsStyleImage& aImage,
 
 nsresult nsFrame::GetCursor(const nsPoint& aPoint, nsIFrame::Cursor& aCursor) {
   FillCursorInformationFromStyle(StyleUI(), aCursor);
-  if (NS_STYLE_CURSOR_AUTO == aCursor.mCursor) {
+  if (StyleCursorKind::Auto == aCursor.mCursor) {
     // If this is editable, I-beam cursor is better for most elements.
     aCursor.mCursor = (mContent && mContent->IsEditable())
-                          ? NS_STYLE_CURSOR_TEXT
-                          : NS_STYLE_CURSOR_DEFAULT;
+                          ? StyleCursorKind::Text
+                          : StyleCursorKind::Default;
   }
-  if (NS_STYLE_CURSOR_TEXT == aCursor.mCursor &&
+  if (StyleCursorKind::Text == aCursor.mCursor &&
       GetWritingMode().IsVertical()) {
     // Per CSS UI spec, UA may treat value 'text' as
     // 'vertical-text' for vertical text.
-    aCursor.mCursor = NS_STYLE_CURSOR_VERTICAL_TEXT;
+    aCursor.mCursor = StyleCursorKind::VerticalText;
   }
 
   return NS_OK;
@@ -7254,21 +7293,21 @@ int32_t nsFrame::ContentIndexInContainer(const nsIFrame* aFrame) {
  */
 void DebugListFrameTree(nsIFrame* aFrame) { ((nsFrame*)aFrame)->List(stderr); }
 
-void nsIFrame::ListTag(nsACString& aTo) const { ListTag(aTo, this); }
-
-/* static */
-void nsIFrame::ListTag(nsACString& aTo, const nsIFrame* aFrame) {
+nsAutoCString nsIFrame::ListTag() const {
   nsAutoString tmp;
-  aFrame->GetFrameName(tmp);
-  aTo += NS_ConvertUTF16toUTF8(tmp).get();
-  aTo += nsPrintfCString("@%p", static_cast<const void*>(aFrame));
+  GetFrameName(tmp);
+
+  nsAutoCString tag;
+  tag += NS_ConvertUTF16toUTF8(tmp);
+  tag += nsPrintfCString("@%p", static_cast<const void*>(this));
+  return tag;
 }
 
 // Debugging
 void nsIFrame::ListGeneric(nsACString& aTo, const char* aPrefix,
                            uint32_t aFlags) const {
   aTo += aPrefix;
-  ListTag(aTo);
+  aTo += ListTag();
   if (HasView()) {
     aTo += nsPrintfCString(" [view=%p]", static_cast<void*>(GetView()));
   }
@@ -9143,6 +9182,28 @@ void nsIFrame::ComputePreserve3DChildrenOverflow(
   }
 }
 
+bool nsIFrame::IsScrollAnchor(ScrollAnchorContainer** aOutContainer) {
+  if (!mInScrollAnchorChain) {
+    return false;
+  }
+
+  ScrollAnchorContainer* container = ScrollAnchorContainer::FindFor(this);
+  if (container->AnchorNode() != this) {
+    return false;
+  }
+
+  if (aOutContainer) {
+    *aOutContainer = container;
+  }
+  return true;
+}
+
+bool nsIFrame::IsInScrollAnchorChain() const { return mInScrollAnchorChain; }
+
+void nsIFrame::SetInScrollAnchorChain(bool aInChain) {
+  mInScrollAnchorChain = aInChain;
+}
+
 uint32_t nsIFrame::GetDepthInFrameTree() const {
   uint32_t result = 0;
   for (nsContainerFrame* ancestor = GetParent(); ancestor;
@@ -9860,7 +9921,7 @@ void nsFrame::BoxReflow(nsBoxLayoutState& aState, nsPresContext* aPresContext,
 #ifdef DEBUG_REFLOW
   nsAdaptorAddIndents();
   printf("Reflowing: ");
-  nsFrame::ListTag(stdout, mFrame);
+  mFrame->ListTag(stdout);
   printf("\n");
   gIndent2++;
 #endif
@@ -10871,7 +10932,7 @@ void nsFrame::VerifyDirtyBitSet(const nsFrameList& aFrameList) {
 }
 
 // Start Display Reflow
-#ifdef DEBUG
+#  ifdef DEBUG
 
 DR_cookie::DR_cookie(nsPresContext* aPresContext, nsIFrame* aFrame,
                      const ReflowInput& aReflowInput, ReflowOutput& aMetrics,
@@ -11369,12 +11430,12 @@ void DR_State::InitFrameTypeTable() {
   AddFrameTypeInfo(LayoutFrameType::TextInput, "textCtl", "textInput");
   AddFrameTypeInfo(LayoutFrameType::Text, "text", "text");
   AddFrameTypeInfo(LayoutFrameType::Viewport, "VP", "viewport");
-#ifdef MOZ_XUL
+#    ifdef MOZ_XUL
   AddFrameTypeInfo(LayoutFrameType::XULLabel, "XULLabel", "XULLabel");
   AddFrameTypeInfo(LayoutFrameType::Box, "Box", "Box");
   AddFrameTypeInfo(LayoutFrameType::Slider, "Slider", "Slider");
   AddFrameTypeInfo(LayoutFrameType::PopupSet, "PopupSet", "PopupSet");
-#endif
+#    endif
   AddFrameTypeInfo(LayoutFrameType::None, "unknown", "unknown");
 }
 
@@ -11942,7 +12003,7 @@ void DR_cookie::Change() const {
   DR_state->DeleteTreeNode(*treeNode);
 }
 
-#endif
+#  endif
 // End Display Reflow
 
 #endif

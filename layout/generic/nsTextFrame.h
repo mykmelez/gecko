@@ -25,7 +25,7 @@
 
 // Undo the windows.h damage
 #if defined(XP_WIN) && defined(DrawText)
-#undef DrawText
+#  undef DrawText
 #endif
 
 class nsTextPaintStyle;
@@ -406,8 +406,6 @@ class nsTextFrame : public nsFrame {
     DrawPathCallbacks* callbacks = nullptr;
     enum {
       PaintText,         // Normal text painting.
-      PaintTextBGColor,  // Only paint background color of the selected text
-                         // range in this state.
       GenerateTextMask   // To generate a mask from a text frame. Should
                          // only paint text itself with opaque color.
                          // Text shadow, text selection color and text
@@ -418,7 +416,6 @@ class nsTextFrame : public nsFrame {
 
     bool IsPaintText() const { return state == PaintText; }
     bool IsGenerateTextMask() const { return state == GenerateTextMask; }
-    bool IsPaintBGColor() const { return state == PaintTextBGColor; }
   };
 
   struct PaintTextSelectionParams : PaintTextParams {

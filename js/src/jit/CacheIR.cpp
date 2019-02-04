@@ -1958,7 +1958,14 @@ bool GetPropIRGenerator::tryAttachPrimitive(ValOperandId valId, HandleId id) {
   } else if (val_.isSymbol()) {
     primitiveType = JSVAL_TYPE_SYMBOL;
     proto = MaybeNativeObject(cx_->global()->maybeGetPrototype(JSProto_Symbol));
-  } else {
+  }
+#ifdef ENABLE_BIGINT
+  else if (val_.isBigInt()) {
+    primitiveType = JSVAL_TYPE_BIGINT;
+    proto = MaybeNativeObject(cx_->global()->maybeGetPrototype(JSProto_BigInt));
+  }
+#endif
+  else {
     MOZ_ASSERT(val_.isNullOrUndefined() || val_.isMagic());
     return false;
   }
@@ -4981,12 +4988,6 @@ bool CallIRGenerator::tryAttachArrayPush() {
 
   RootedArrayObject thisarray(cx_, &thisobj->as<ArrayObject>());
 
-  // And the object group for the array is not collecting preliminary objects.
-  AutoSweepObjectGroup sweep(thisobj->group());
-  if (thisobj->group()->maybePreliminaryObjects(sweep)) {
-    return false;
-  }
-
   // Check for other indexed properties or class hooks.
   if (!CanAttachAddElement(thisarray, /* isInit = */ false)) {
     return false;
@@ -5824,6 +5825,14 @@ bool UnaryArithIRGenerator::tryAttachInt32() {
       writer.int32NegationResult(intId);
       trackAttached("UnaryArith.Int32Neg");
       break;
+    case JSOP_INC:
+      writer.int32IncResult(intId);
+      trackAttached("UnaryArith.Int32Inc");
+      break;
+    case JSOP_DEC:
+      writer.int32DecResult(intId);
+      trackAttached("UnaryArith.Int32Dec");
+      break;
     default:
       MOZ_CRASH("Unexected OP");
   }
@@ -5849,6 +5858,14 @@ bool UnaryArithIRGenerator::tryAttachNumber() {
     case JSOP_NEG:
       writer.doubleNegationResult(valId);
       trackAttached("UnaryArith.DoubleNeg");
+      break;
+    case JSOP_INC:
+      writer.doubleIncResult(valId);
+      trackAttached("UnaryArith.DoubleInc");
+      break;
+    case JSOP_DEC:
+      writer.doubleDecResult(valId);
+      trackAttached("UnaryArith.DoubleDec");
       break;
     default:
       MOZ_CRASH("Unexpected OP");

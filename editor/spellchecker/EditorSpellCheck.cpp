@@ -188,7 +188,8 @@ DictionaryFetcher::Fetch(nsIEditor* aEditor) {
 
   nsCOMPtr<nsIRunnable> runnable =
       new ContentPrefInitializerRunnable(aEditor, this);
-  NS_IdleDispatchToCurrentThread(runnable.forget(), 1000);
+  NS_DispatchToCurrentThreadQueue(runnable.forget(), 1000,
+                                  EventQueuePriority::Idle);
 
   return NS_OK;
 }
@@ -439,6 +440,16 @@ EditorSpellCheck::CheckCurrentWordNoSuggest(const nsAString& aSuggestedWord,
   NS_ENSURE_TRUE(mSpellChecker, NS_ERROR_NOT_INITIALIZED);
 
   return mSpellChecker->CheckWord(aSuggestedWord, aIsMisspelled, nullptr);
+}
+
+RefPtr<CheckWordPromise> EditorSpellCheck::CheckCurrentWordsNoSuggest(
+    const nsTArray<nsString>& aSuggestedWords) {
+  if (NS_WARN_IF(!mSpellChecker)) {
+    return CheckWordPromise::CreateAndReject(NS_ERROR_NOT_INITIALIZED,
+                                             __func__);
+  }
+
+  return mSpellChecker->CheckWords(aSuggestedWords);
 }
 
 NS_IMETHODIMP

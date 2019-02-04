@@ -22,6 +22,7 @@
   skin/classic/browser/addons/addon-install-error.svg          (../shared/addons/addon-install-error.svg)
   skin/classic/browser/addons/addon-install-installed.svg      (../shared/addons/addon-install-installed.svg)
   skin/classic/browser/addons/addon-install-warning.svg        (../shared/addons/addon-install-warning.svg)
+  skin/classic/browser/addons/addon-private-browsing.svg       (../shared/addons/addon-private-browsing.svg)
   skin/classic/browser/controlcenter/3rdpartycookies.svg       (../shared/controlcenter/3rdpartycookies.svg)
   skin/classic/browser/controlcenter/3rdpartycookies-disabled.svg (../shared/controlcenter/3rdpartycookies-disabled.svg)
   skin/classic/browser/controlcenter/conn-not-secure.svg       (../shared/controlcenter/conn-not-secure.svg)
@@ -55,6 +56,8 @@
   skin/classic/browser/identity-icon.svg                       (../shared/identity-block/identity-icon.svg)
   skin/classic/browser/identity-icon-notice.svg                (../shared/identity-block/identity-icon-notice.svg)
   skin/classic/browser/info.svg                                (../shared/info.svg)
+  skin/classic/browser/newInstall.css                          (../shared/newInstall.css)
+  skin/classic/browser/newInstallPage.css                      (../shared/newInstallPage.css)
 
   skin/classic/browser/illustrations/error-session-restore.svg (../shared/illustrations/error-session-restore.svg)
 
@@ -85,6 +88,8 @@
   skin/classic/browser/notification-icons/update.svg                        (../shared/notification-icons/update.svg)
   skin/classic/browser/notification-icons/midi.svg                          (../shared/notification-icons/midi.svg)
   skin/classic/browser/notification-icons/webauthn.svg                      (../shared/notification-icons/webauthn.svg)
+  skin/classic/browser/notification-icons/images.svg                        (../shared/notification-icons/images.svg)
+  skin/classic/browser/notification-icons/images-blocked.svg                (../shared/notification-icons/images-blocked.svg)
 
   skin/classic/browser/tracking-protection.svg                 (../shared/identity-block/tracking-protection.svg)
   skin/classic/browser/tracking-protection-disabled.svg        (../shared/identity-block/tracking-protection-disabled.svg)

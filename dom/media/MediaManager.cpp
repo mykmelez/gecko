@@ -74,23 +74,23 @@
 /* Using WebRTC backend on Desktops (Mac, Windows, Linux), otherwise default */
 #include "MediaEngineDefault.h"
 #if defined(MOZ_WEBRTC)
-#include "MediaEngineWebRTC.h"
-#include "browser_logging/WebRtcLog.h"
-#include "webrtc/modules/audio_processing/include/audio_processing.h"
+#  include "MediaEngineWebRTC.h"
+#  include "browser_logging/WebRtcLog.h"
+#  include "webrtc/modules/audio_processing/include/audio_processing.h"
 #endif
 
 #if defined(XP_WIN)
-#include "mozilla/WindowsVersion.h"
-#include <objbase.h>
-#include <winsock2.h>
-#include <iphlpapi.h>
-#include <tchar.h>
+#  include "mozilla/WindowsVersion.h"
+#  include <objbase.h>
+#  include <winsock2.h>
+#  include <iphlpapi.h>
+#  include <tchar.h>
 #endif
 
 // GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
 // GetTickCount() and conflicts with MediaStream::GetCurrentTime.
 #ifdef GetCurrentTime
-#undef GetCurrentTime
+#  undef GetCurrentTime
 #endif
 
 // XXX Workaround for bug 986974 to maintain the existing broken semantics
@@ -190,7 +190,7 @@ already_AddRefed<nsIAsyncShutdownClient> GetShutdownPhase() {
 namespace mozilla {
 
 #ifdef LOG
-#undef LOG
+#  undef LOG
 #endif
 
 LazyLogModule gMediaManagerLog("MediaManager");
@@ -2192,7 +2192,7 @@ void MediaManager::OnDeviceChange() {
         // On some Windows machine, if we call EnumerateRawDevices immediately
         // after receiving devicechange event, sometimes we would get outdated
         // devices list.
-        PR_Sleep(PR_MillisecondsToInterval(100));
+        PR_Sleep(PR_MillisecondsToInterval(200));
         auto devices = MakeRefPtr<MediaDeviceSetRefCnt>();
         self->EnumerateRawDevices(
                 0, MediaSourceEnum::Camera, MediaSourceEnum::Microphone,
@@ -2423,6 +2423,13 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetUserMedia(
   if (NS_WARN_IF(!doc)) {
     return StreamPromise::CreateAndReject(
         MakeRefPtr<MediaMgrError>(MediaMgrError::Name::SecurityError),
+        __func__);
+  }
+
+  // Disallow access to null principal pages.
+  if (principal->GetIsNullPrincipal()) {
+    return StreamPromise::CreateAndReject(
+        MakeRefPtr<MediaMgrError>(MediaMgrError::Name::NotAllowedError),
         __func__);
   }
 
@@ -4173,54 +4180,54 @@ SourceListener::InitializeAsync() {
                LOG("started all sources");
                aHolder.Resolve(true, __func__);
              })
-      ->Then(GetMainThreadSerialEventTarget(), __func__,
-             [self = RefPtr<SourceListener>(this), this]() {
-               if (mStopped) {
-                 // We were shut down during the async init
-                 return SourceListenerPromise::CreateAndResolve(true, __func__);
-               }
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          [self = RefPtr<SourceListener>(this), this]() {
+            if (mStopped) {
+              // We were shut down during the async init
+              return SourceListenerPromise::CreateAndResolve(true, __func__);
+            }
 
-               for (DeviceState* state :
-                    {mAudioDeviceState.get(), mVideoDeviceState.get()}) {
-                 if (!state) {
-                   continue;
-                 }
-                 MOZ_DIAGNOSTIC_ASSERT(!state->mTrackEnabled);
-                 MOZ_DIAGNOSTIC_ASSERT(!state->mDeviceEnabled);
-                 MOZ_DIAGNOSTIC_ASSERT(!state->mStopped);
+            for (DeviceState* state :
+                 {mAudioDeviceState.get(), mVideoDeviceState.get()}) {
+              if (!state) {
+                continue;
+              }
+              MOZ_DIAGNOSTIC_ASSERT(!state->mTrackEnabled);
+              MOZ_DIAGNOSTIC_ASSERT(!state->mDeviceEnabled);
+              MOZ_DIAGNOSTIC_ASSERT(!state->mStopped);
 
-                 state->mDeviceEnabled = true;
-                 state->mTrackEnabled = true;
-                 state->mTrackEnabledTime = TimeStamp::Now();
+              state->mDeviceEnabled = true;
+              state->mTrackEnabled = true;
+              state->mTrackEnabledTime = TimeStamp::Now();
 
-                 if (state == mVideoDeviceState.get() &&
-                     !mStream->IsDestroyed()) {
-                   mStream->SetPullingEnabled(kVideoTrack, true);
-                 }
-               }
-               return SourceListenerPromise::CreateAndResolve(true, __func__);
-             },
-             [self = RefPtr<SourceListener>(this),
-              this](RefPtr<MediaMgrError>&& aResult) {
-               if (mStopped) {
-                 return SourceListenerPromise::CreateAndReject(
-                     std::move(aResult), __func__);
-               }
+              if (state == mVideoDeviceState.get() && !mStream->IsDestroyed()) {
+                mStream->SetPullingEnabled(kVideoTrack, true);
+              }
+            }
+            return SourceListenerPromise::CreateAndResolve(true, __func__);
+          },
+          [self = RefPtr<SourceListener>(this),
+           this](RefPtr<MediaMgrError>&& aResult) {
+            if (mStopped) {
+              return SourceListenerPromise::CreateAndReject(std::move(aResult),
+                                                            __func__);
+            }
 
-               for (DeviceState* state :
-                    {mAudioDeviceState.get(), mVideoDeviceState.get()}) {
-                 if (!state) {
-                   continue;
-                 }
-                 MOZ_DIAGNOSTIC_ASSERT(!state->mTrackEnabled);
-                 MOZ_DIAGNOSTIC_ASSERT(!state->mDeviceEnabled);
-                 MOZ_DIAGNOSTIC_ASSERT(!state->mStopped);
+            for (DeviceState* state :
+                 {mAudioDeviceState.get(), mVideoDeviceState.get()}) {
+              if (!state) {
+                continue;
+              }
+              MOZ_DIAGNOSTIC_ASSERT(!state->mTrackEnabled);
+              MOZ_DIAGNOSTIC_ASSERT(!state->mDeviceEnabled);
+              MOZ_DIAGNOSTIC_ASSERT(!state->mStopped);
 
-                 state->mStopped = true;
-               }
-               return SourceListenerPromise::CreateAndReject(std::move(aResult),
-                                                             __func__);
-             });
+              state->mStopped = true;
+            }
+            return SourceListenerPromise::CreateAndReject(std::move(aResult),
+                                                          __func__);
+          });
 }
 
 void SourceListener::Stop() {

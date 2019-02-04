@@ -13,7 +13,7 @@ const url = new window.URL(href);
 
 // Only use this method to attach the toolbox if some query parameters are given
 if (url.search.length > 1) {
-  const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+  const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
   const { gDevTools } = require("devtools/client/framework/devtools");
   const { targetFromURL } = require("devtools/client/framework/target-from-url");
   const { Toolbox } = require("devtools/client/framework/toolbox");
@@ -77,7 +77,7 @@ if (url.search.length > 1) {
       target = await targetFromURL(url);
     }
     const options = { customIframe: host };
-    await gDevTools.showToolbox(target, tool, Toolbox.HostType.CUSTOM, options);
+    await gDevTools.showToolbox(target, tool, Toolbox.HostType.PAGE, options);
   })().catch(error => {
     console.error("Exception while loading the toolbox", error);
   });

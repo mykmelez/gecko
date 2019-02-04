@@ -172,7 +172,6 @@ module.exports = {
     "mozilla/import-globals": "error",
     "mozilla/no-compare-against-boolean-literals": "error",
     "mozilla/no-define-cc-etc": "error",
-    "mozilla/no-import-into-var-and-global": "error",
     "mozilla/no-useless-parameters": "error",
     "mozilla/no-useless-removeEventListener": "error",
     "mozilla/reject-importGlobalProperties": ["error", "allownonwebidl"],
@@ -183,6 +182,7 @@ module.exports = {
     "mozilla/use-default-preference-values": "error",
     "mozilla/use-includes-instead-of-indexOf": "error",
     "mozilla/use-ownerGlobal": "error",
+    "mozilla/use-returnValue": "error",
     "mozilla/use-services": "error",
 
     // Always require parenthesis for new calls
@@ -327,6 +327,9 @@ module.exports = {
 
     // Require object-literal shorthand with ES6 method syntax
     "object-shorthand": ["error", "always", { "avoidQuotes": true }],
+
+    // Prohibit blank lines at the beginning and end of blocks.
+    "padded-blocks": ["error", "never"],
 
     // Require double-quotes everywhere, except where quotes are escaped
     // or template literals are used.

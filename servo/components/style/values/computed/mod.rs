@@ -28,7 +28,6 @@ use std::cell::RefCell;
 use std::cmp;
 use std::f32;
 use std::fmt::{self, Write};
-use style_traits::cursor::CursorKind;
 use style_traits::{CssWriter, ToCss};
 
 #[cfg(feature = "gecko")]
@@ -43,7 +42,7 @@ pub use self::border::{BorderImageRepeat, BorderImageSideWidth};
 pub use self::border::{BorderImageSlice, BorderImageWidth};
 pub use self::box_::{AnimationIterationCount, AnimationName, Contain};
 pub use self::box_::{Appearance, BreakBetween, BreakWithin, Clear, Float};
-pub use self::box_::{Display, Overflow, TransitionProperty};
+pub use self::box_::{Display, Overflow, OverflowAnchor, TransitionProperty};
 pub use self::box_::{OverflowClipBox, OverscrollBehavior, Perspective, Resize};
 pub use self::box_::{ScrollSnapType, TouchAction, VerticalAlign, WillChange};
 pub use self::color::{Color, ColorPropertyValue, RGBAColor};
@@ -452,7 +451,6 @@ trivial_to_computed_value!(u8);
 trivial_to_computed_value!(u16);
 trivial_to_computed_value!(u32);
 trivial_to_computed_value!(Atom);
-trivial_to_computed_value!(CursorKind);
 #[cfg(feature = "servo")]
 trivial_to_computed_value!(Prefix);
 trivial_to_computed_value!(String);

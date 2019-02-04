@@ -6,20 +6,20 @@
 
 #include "Link.h"
 
+#include "mozilla/Components.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/Element.h"
 #if defined(MOZ_PLACES)
-#include "mozilla/places/History.h"
+#  include "mozilla/places/History.h"
 #else
-#include "mozilla/IHistory.h"
+#  include "mozilla/IHistory.h"
 #endif
 #include "nsIURL.h"
 #include "nsIURIMutator.h"
 #include "nsISizeOf.h"
 #include "nsIDocShell.h"
 #include "nsIPrefetchService.h"
-#include "nsCPrefetchService.h"
 #include "nsStyleLinkElement.h"
 
 #include "nsEscape.h"
@@ -134,7 +134,7 @@ void Link::TryDNSPrefetchOrPreconnectOrPrefetchOrPreloadOrPrerender() {
       (linkTypes & nsStyleLinkElement::eNEXT) ||
       (linkTypes & nsStyleLinkElement::ePRELOAD)) {
     nsCOMPtr<nsIPrefetchService> prefetchService(
-        do_GetService(NS_PREFETCHSERVICE_CONTRACTID));
+        components::Prefetch::Service());
     if (prefetchService) {
       nsCOMPtr<nsIURI> uri(GetURI());
       if (uri) {
@@ -209,8 +209,7 @@ void Link::UpdatePreload(nsAtom *aName, const nsAttrValue *aValue,
     return;
   }
 
-  nsCOMPtr<nsIPrefetchService> prefetchService(
-      do_GetService(NS_PREFETCHSERVICE_CONTRACTID));
+  nsCOMPtr<nsIPrefetchService> prefetchService(components::Prefetch::Service());
   if (!prefetchService) {
     return;
   }
@@ -310,8 +309,7 @@ void Link::UpdatePreload(nsAtom *aName, const nsAttrValue *aValue,
 }
 
 void Link::CancelPrefetchOrPreload() {
-  nsCOMPtr<nsIPrefetchService> prefetchService(
-      do_GetService(NS_PREFETCHSERVICE_CONTRACTID));
+  nsCOMPtr<nsIPrefetchService> prefetchService(components::Prefetch::Service());
   if (prefetchService) {
     nsCOMPtr<nsIURI> uri(GetURI());
     if (uri) {

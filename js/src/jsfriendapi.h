@@ -26,17 +26,17 @@
 #include "js/Utility.h"
 
 #ifndef JS_STACK_GROWTH_DIRECTION
-#ifdef __hppa
-#define JS_STACK_GROWTH_DIRECTION (1)
-#else
-#define JS_STACK_GROWTH_DIRECTION (-1)
-#endif
+#  ifdef __hppa
+#    define JS_STACK_GROWTH_DIRECTION (1)
+#  else
+#    define JS_STACK_GROWTH_DIRECTION (-1)
+#  endif
 #endif
 
 #if JS_STACK_GROWTH_DIRECTION > 0
-#define JS_CHECK_STACK_SIZE(limit, sp) (MOZ_LIKELY((uintptr_t)(sp) < (limit)))
+#  define JS_CHECK_STACK_SIZE(limit, sp) (MOZ_LIKELY((uintptr_t)(sp) < (limit)))
 #else
-#define JS_CHECK_STACK_SIZE(limit, sp) (MOZ_LIKELY((uintptr_t)(sp) > (limit)))
+#  define JS_CHECK_STACK_SIZE(limit, sp) (MOZ_LIKELY((uintptr_t)(sp) > (limit)))
 #endif
 
 struct JSErrorFormatString;
@@ -170,6 +170,7 @@ enum {
   JS_TELEMETRY_GC_MARK_RATE,
   JS_TELEMETRY_PRIVILEGED_PARSER_COMPILE_LAZY_AFTER_MS,
   JS_TELEMETRY_WEB_PARSER_COMPILE_LAZY_AFTER_MS,
+  JS_TELEMETRY_DEPRECATED_STRING_GENERICS,
   JS_TELEMETRY_END
 };
 
@@ -2625,7 +2626,7 @@ extern JS_FRIEND_API JSObject* GetJSMEnvironmentOfScriptedCaller(JSContext* cx);
 extern JS_FRIEND_API bool IsJSMEnvironment(JSObject* obj);
 
 // Matches the condition in js/src/jit/ProcessExecutableMemory.cpp
-#if defined(XP_WIN) && defined(HAVE_64BIT_BUILD) && defined(_M_X64)
+#if defined(XP_WIN) && defined(HAVE_64BIT_BUILD)
 // Parameters use void* types to avoid #including windows.h. The return value of
 // this function is returned from the exception handler.
 typedef long (*JitExceptionHandler)(void* exceptionRecord,  // PEXECTION_RECORD

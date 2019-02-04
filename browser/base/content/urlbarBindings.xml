@@ -111,7 +111,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         this.clickSelectsAll = this._prefs.getBoolPref("clickSelectsAll");
         this.doubleClickSelectsAll = this._prefs.getBoolPref("doubleClickSelectsAll");
         this.completeDefaultIndex = this._prefs.getBoolPref("autoFill");
-        this.speculativeConnectEnabled = this._prefs.getBoolPref("speculativeConnect.enabled");
         this.urlbarSearchSuggestEnabled = this._prefs.getBoolPref("suggest.searches");
         this.timeout = this._prefs.getIntPref("delay");
         this._mayTrimURLs = this._prefs.getBoolPref("trimURLs");
@@ -379,7 +378,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                 event.ctrlKey &&
                 (event.key === "n" || event.key === "p") &&
                 this.popupOpen)) {
-
             // Not a key that should trigger deferring.
             return false;
           }
@@ -699,8 +697,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             [url, postData] =
               this._parseAndRecordSearchEngineLoad(selectedOneOff.engine,
                                                    this.oneOffSearchQuery,
-                                                   event, where,
-                                                   openUILinkParams);
+                                                   event);
           } else if (action) {
             switch (action.type) {
               case "visiturl":
@@ -776,8 +773,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                   action.params.engineName,
                   action.params.searchSuggestion || action.params.searchQuery,
                   event,
-                  where,
-                  openUILinkParams,
                   actionDetails
                 );
                 break;
@@ -845,7 +840,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           this.value = url;
           browser.userTypedValue = url;
           if (gInitialPages.includes(url)) {
-            browser.initialPageLoadedFromURLBar = url;
+            browser.initialPageLoadedFromUserAction = url;
           }
           try {
             UrlbarUtils.addToUrlbarHistory(url, window);
@@ -853,6 +848,13 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             // Things may go wrong when adding url to session history,
             // but don't let that interfere with the loading of the url.
             Cu.reportError(ex);
+          }
+
+          // Reset DOS mitigations for the basic auth prompt.
+          // TODO: When bug 1498553 is resolved, we should be able to
+          // remove the !triggeringPrincipal condition here.
+          if (!triggeringPrincipal || triggeringPrincipal.isSystemPrincipal) {
+            delete browser.canceledAuthenticationPromptCounter;
           }
 
           let params = {
@@ -904,8 +906,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         <parameter name="engineOrEngineName"/>
         <parameter name="query"/>
         <parameter name="event"/>
-        <parameter name="openUILinkWhere"/>
-        <parameter name="openUILinkParams"/>
         <parameter name="searchActionDetails"/>
         <body><![CDATA[
           let engine =
@@ -913,7 +913,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
               Services.search.getEngineByName(engineOrEngineName) :
               engineOrEngineName;
           let isOneOff = this.popup.oneOffSearchButtons
-              .maybeRecordTelemetry(event, openUILinkWhere, openUILinkParams);
+              .maybeRecordTelemetry(event);
           // Infer the type of the event which triggered the search.
           let eventType = "unknown";
           if (event instanceof KeyboardEvent) {
@@ -1212,9 +1212,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
               case "ctrlCanonizesURLs":
                 this._ctrlCanonizesURLs = this._prefs.getBoolPref(aData);
                 break;
-              case "speculativeConnect.enabled":
-                this.speculativeConnectEnabled = this._prefs.getBoolPref(aData);
-                break;
               case "openintab":
                 this.openInTab = this._prefs.getBoolPref(aData);
                 break;
@@ -1501,7 +1498,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             // the input, since the user is editing.
             if (!this.popup.richlistbox.suppressMenuItemEvent &&
                 this.popup.richlistbox.currentItem) {
-              this.popup.richlistbox.currentItem._fireEvent("DOMMenuItemInactive");
+              this.popup.richlistbox._fireEvent(
+                this.popup.richlistbox.currentItem, "DOMMenuItemInactive");
             }
             // The user is typing, so don't give accessibility focus to the
             // popup, even if an item gets automatically selected.
@@ -1678,8 +1676,14 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           // and fire an input event to do that.  (If we set this.textValue we'd
           // get an input event for free, but it would also set mIgnoreInput,
           // skipping all of the above requirements.)
-          this.focus();
-          this.value = value;
+          focusAndSelectUrlBar();
+
+          // If the value is a restricted token, append a space.
+          if (Object.values(UrlbarTokenizer.RESTRICT).includes(value)) {
+            this.inputField.value = value + " ";
+          } else {
+            this.inputField.value = value;
+          }
 
           // Avoid selecting the text if this method is called twice in a row.
           this.selectionStart = -1;
@@ -1699,24 +1703,13 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         ]]></body>
       </method>
 
-      <method name="typeRestrictToken">
-        <parameter name="char"/>
-        <body><![CDATA[
-          this.inputField.value = char + " ";
-
-          let event = this.document.createEvent("UIEvents");
-          event.initUIEvent("input", true, false, window, 0);
-          this.inputField.dispatchEvent(event);
-        ]]></body>
-      </method>
-
       <method name="removeHiddenFocus">
         <body><![CDATA[
           this.classList.remove("hidden-focus");
         ]]></body>
       </method>
 
-      <method name="hiddenFocus">
+      <method name="setHiddenFocus">
         <body><![CDATA[
           this.classList.add("hidden-focus");
           this.focus();
@@ -2231,7 +2224,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             // but because the popup isn't open yet, accessibility will ignore
             // it. Therefore, fire it again once the popup opens.
             this.addEventListener("popupshown", () => {
-              this.richlistbox.currentItem._fireEvent("DOMMenuItemActive");
+              this.richlistbox._fireEvent(this.richlistbox.currentItem,
+                "DOMMenuItemActive");
             }, {once: true});
           }
 
@@ -2464,19 +2458,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         </body>
       </method>
 
-      <method name="maybeSetupSpeculativeConnect">
-        <parameter name="aUriString"/>
-        <body><![CDATA[
-          try {
-            let uri = makeURI(aUriString);
-            Services.io.speculativeConnect2(uri, gBrowser.contentPrincipal, null);
-          } catch (ex) {
-            // Can't setup speculative connection for this uri string for some
-            // reason, just ignore it.
-          }
-        ]]></body>
-      </method>
-
       <method name="onResultsAdded">
         <body>
           <![CDATA[
@@ -2514,20 +2495,18 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
               // search and we are not in the private context, we can speculatively
               // connect to the intended site as a performance optimization.
               if (!this.input.gotResultForCurrentQuery &&
-                  this.input.speculativeConnectEnabled &&
                   !this.input.inPrivateContext) {
                 let firstStyle = this.input.mController.getStyleAt(0);
                 if (firstStyle.includes("autofill")) {
                   let uri = this.input.mController.getFinalCompleteValueAt(0);
-                  this.maybeSetupSpeculativeConnect(uri);
+                  UrlbarUtils.setupSpeculativeConnection(uri, window);
                 } else if (firstStyle.includes("searchengine") &&
                           this.input.browserSearchSuggestEnabled &&
                           this.input.urlbarSearchSuggestEnabled) {
                   // Preconnect to the current search engine only if the search
                   // suggestions are enabled.
                   let engine = Services.search.defaultEngine;
-                  engine.speculativeConnect({window,
-                                            originAttributes: gBrowser.contentPrincipal.originAttributes});
+                  UrlbarUtils.setupSpeculativeConnection(engine, window);
                 }
               }
 
@@ -2705,7 +2684,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           return;
         }
 
-        if (!this.input.speculativeConnectEnabled) {
+        if (!UrlbarPrefs.get("speculativeConnect.enabled")) {
           return;
         }
 
@@ -2724,29 +2703,21 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           return;
         }
 
-        let url = this.input.controller.getFinalCompleteValueAt(this.selectedIndex);
-
         // Whitelist the cases that we want to speculative connect, and ignore
         // other moz-action uris or fancy protocols.
         // Note that it's likely we've speculatively connected to the first
         // url because it is a heuristic "autofill" result (see bug 1348275).
         // "moz-action:searchengine" is also the same case. (see bug 1355443)
         // So we won't duplicate the effort here.
+        let url = this.input.controller.getFinalCompleteValueAt(this.selectedIndex);
         if (url.startsWith("http") && this.selectedIndex > 0) {
-          this.maybeSetupSpeculativeConnect(url);
+          UrlbarUtils.setupSpeculativeConnection(url, window);
         } else if (url.startsWith("moz-action:remotetab")) {
-          // URL is in the format moz-action:ACTION,PARAMS
-          // Where PARAMS is a JSON encoded object.
-          const MOZ_ACTION_REGEX = /^moz-action:([^,]+),(.*)$/;
-          if (!MOZ_ACTION_REGEX.test(url))
-            return;
-
-          let params = JSON.parse(url.match(MOZ_ACTION_REGEX)[2]);
-          if (params.url) {
-            this.maybeSetupSpeculativeConnect(decodeURIComponent(params.url));
+          let action = PlacesUtils.parseActionUrl(url);
+          if (action && action.params.url) {
+            UrlbarUtils.setupSpeculativeConnection(action.params.url, window);
           }
         }
-
       ]]></handler>
 
     </handlers>

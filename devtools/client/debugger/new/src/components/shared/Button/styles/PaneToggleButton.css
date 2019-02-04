@@ -6,18 +6,15 @@
   transform: translate(0, 0px);
   transition: transform 0.25s ease-in-out;
   padding: 5px;
+  height: inherit;
 }
 
-.toggle-button .togglePanes {
-  vertical-align: -2px;
-}
-
-.toggle-button svg {
+.toggle-button .img {
   fill: var(--theme-comment);
   vertical-align: 0;
 }
 
-:root.theme-dark .toggle-button svg {
+:root.theme-dark .toggle-button .img {
   fill: var(--theme-comment-alt);
 }
 
@@ -30,12 +27,12 @@
   margin-inline-start: 0px;
 }
 
-html:not([dir="rtl"]) .toggle-button.end svg,
-html[dir="rtl"] .toggle-button.start svg {
+html:not([dir="rtl"]) .toggle-button.end .img,
+html[dir="rtl"] .toggle-button.start .img {
   transform: rotate(180deg);
 }
 
-html .toggle-button.end.vertical svg {
+html .toggle-button.end.vertical .img {
   transform: rotate(-90deg);
 }
 

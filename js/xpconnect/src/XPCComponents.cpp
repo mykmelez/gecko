@@ -16,6 +16,7 @@
 #include "nsCycleCollector.h"
 #include "jsfriendapi.h"
 #include "js/CharacterEncoding.h"
+#include "js/ContextOptions.h"
 #include "js/SavedFrameAPI.h"
 #include "js/StructuredClone.h"
 #include "mozilla/Attributes.h"
@@ -31,7 +32,6 @@
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/StructuredCloneTags.h"
 #include "mozilla/dom/WindowBinding.h"
-#include "mozilla/Scheduler.h"
 #include "nsZipArchive.h"
 #include "nsWindowMemoryReporter.h"
 #include "nsICycleCollectorListener.h"
@@ -1529,7 +1529,8 @@ nsXPCComponents_Utils::GetSandboxMetadata(HandleValue sandboxVal, JSContext* cx,
   }
 
   RootedObject sandbox(cx, &sandboxVal.toObject());
-  sandbox = js::CheckedUnwrap(sandbox);
+  // We only care about sandboxes here, so CheckedUnwrapStatic is fine.
+  sandbox = js::CheckedUnwrapStatic(sandbox);
   if (!sandbox || !xpc::IsSandbox(sandbox)) {
     return NS_ERROR_INVALID_ARG;
   }
@@ -1546,7 +1547,8 @@ nsXPCComponents_Utils::SetSandboxMetadata(HandleValue sandboxVal,
   }
 
   RootedObject sandbox(cx, &sandboxVal.toObject());
-  sandbox = js::CheckedUnwrap(sandbox);
+  // We only care about sandboxes here, so CheckedUnwrapStatic is fine.
+  sandbox = js::CheckedUnwrapStatic(sandbox);
   if (!sandbox || !xpc::IsSandbox(sandbox)) {
     return NS_ERROR_INVALID_ARG;
   }
@@ -1597,9 +1599,9 @@ nsXPCComponents_Utils::ImportGlobalProperties(HandleValue aPropertyList,
   js::AssertSameCompartment(cx, global);
   JSAutoRealm ar(cx, global);
 
-  // Don't allow doing this if the global is a Window
+  // Don't allow doing this if the global is a Window.
   nsGlobalWindowInner* win;
-  if (NS_SUCCEEDED(UNWRAP_OBJECT(Window, &global, win))) {
+  if (NS_SUCCEEDED(UNWRAP_NON_WRAPPER_OBJECT(Window, global, win))) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -1637,7 +1639,7 @@ NS_IMETHODIMP
 nsXPCComponents_Utils::ForceGC() {
   JSContext* cx = XPCJSContext::Get()->Context();
   PrepareForFullGC(cx);
-  NonIncrementalGC(cx, GC_NORMAL, gcreason::COMPONENT_UTILS);
+  NonIncrementalGC(cx, GC_NORMAL, GCReason::COMPONENT_UTILS);
   return NS_OK;
 }
 
@@ -1683,7 +1685,7 @@ NS_IMETHODIMP
 nsXPCComponents_Utils::ForceShrinkingGC() {
   JSContext* cx = dom::danger::GetJSContext();
   PrepareForFullGC(cx);
-  NonIncrementalGC(cx, GC_SHRINK, gcreason::COMPONENT_UTILS);
+  NonIncrementalGC(cx, GC_SHRINK, GCReason::COMPONENT_UTILS);
   return NS_OK;
 }
 
@@ -1696,7 +1698,7 @@ class PreciseGCRunnable : public Runnable {
 
   NS_IMETHOD Run() override {
     nsJSContext::GarbageCollectNow(
-        gcreason::COMPONENT_UTILS, nsJSContext::NonIncrementalGC,
+        GCReason::COMPONENT_UTILS, nsJSContext::NonIncrementalGC,
         mShrinking ? nsJSContext::ShrinkingGC : nsJSContext::NonShrinkingGC);
 
     mCallback->Callback();
@@ -1733,6 +1735,24 @@ nsXPCComponents_Utils::UnlinkGhostWindows() {
     }
   }
 
+  return NS_OK;
+#else
+  return NS_ERROR_NOT_IMPLEMENTED;
+#endif
+}
+
+#ifdef NS_FREE_PERMANENT_DATA
+struct IntentionallyLeakedObject {
+  IntentionallyLeakedObject() { MOZ_COUNT_CTOR(IntentionallyLeakedObject); }
+
+  ~IntentionallyLeakedObject() { MOZ_COUNT_DTOR(IntentionallyLeakedObject); }
+};
+#endif
+
+NS_IMETHODIMP
+nsXPCComponents_Utils::IntentionallyLeak() {
+#ifdef NS_FREE_PERMANENT_DATA
+  Unused << new IntentionallyLeakedObject();
   return NS_OK;
 #else
   return NS_ERROR_NOT_IMPLEMENTED;
@@ -1820,7 +1840,10 @@ nsXPCComponents_Utils::IsProxy(HandleValue vobj, JSContext* cx, bool* rval) {
   }
 
   RootedObject obj(cx, &vobj.toObject());
-  obj = js::CheckedUnwrap(obj, /* stopAtWindowProxy = */ false);
+  // We need to do a dynamic unwrap, because we apparently want to treat
+  // "failure to unwrap" differently from "not a proxy" (throw for the former,
+  // return false for the latter).
+  obj = js::CheckedUnwrapDynamic(obj, cx, /* stopAtWindowProxy = */ false);
   NS_ENSURE_TRUE(obj, NS_ERROR_FAILURE);
 
   *rval = js::IsScriptedProxy(obj);
@@ -2299,7 +2322,8 @@ bool xpc::CloneInto(JSContext* aCx, HandleValue aValue, HandleValue aScope,
   }
 
   RootedObject scope(aCx, &aScope.toObject());
-  scope = js::CheckedUnwrap(scope);
+  // The scope could be a Window, so we need to CheckedUnwrapDynamic.
+  scope = js::CheckedUnwrapDynamic(scope, aCx);
   if (!scope) {
     JS_ReportErrorASCII(aCx, "Permission denied to clone object into scope");
     return false;
@@ -2360,7 +2384,9 @@ nsXPCComponents_Utils::GetObjectPrincipal(HandleValue val, JSContext* cx,
     return NS_ERROR_INVALID_ARG;
   }
   RootedObject obj(cx, &val.toObject());
-  obj = js::CheckedUnwrap(obj);
+  // We need to be able to unwrap to WindowProxy or Location here, so
+  // use CheckedUnwrapDynamic.
+  obj = js::CheckedUnwrapDynamic(obj, cx);
   MOZ_ASSERT(obj);
 
   nsCOMPtr<nsIPrincipal> prin = nsContentUtils::ObjectPrincipal(obj);
@@ -2375,7 +2401,9 @@ nsXPCComponents_Utils::GetRealmLocation(HandleValue val, JSContext* cx,
     return NS_ERROR_INVALID_ARG;
   }
   RootedObject obj(cx, &val.toObject());
-  obj = js::CheckedUnwrap(obj);
+  // We need to be able to unwrap to WindowProxy or Location here, so
+  // use CheckedUnwrapDynamic.
+  obj = js::CheckedUnwrapDynamic(obj, cx);
   MOZ_ASSERT(obj);
 
   result = xpc::RealmPrivate::Get(obj)->GetLocation();
@@ -2402,19 +2430,6 @@ NS_IMETHODIMP
 nsXPCComponents_Utils::Now(double* aRetval) {
   TimeStamp start = TimeStamp::ProcessCreation();
   *aRetval = (TimeStamp::Now() - start).ToMilliseconds();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsXPCComponents_Utils::BlockThreadedExecution(
-    nsIBlockThreadedExecutionCallback* aCallback) {
-  Scheduler::BlockThreadedExecution(aCallback);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsXPCComponents_Utils::UnblockThreadedExecution() {
-  Scheduler::UnblockThreadedExecution();
   return NS_OK;
 }
 

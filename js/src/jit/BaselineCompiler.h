@@ -139,6 +139,7 @@ namespace jit {
   _(JSOP_DELNAME)               \
   _(JSOP_GETIMPORT)             \
   _(JSOP_GETINTRINSIC)          \
+  _(JSOP_SETINTRINSIC)          \
   _(JSOP_BINDVAR)               \
   _(JSOP_DEFVAR)                \
   _(JSOP_DEFCONST)              \
@@ -188,7 +189,6 @@ namespace jit {
   _(JSOP_EXCEPTION)             \
   _(JSOP_DEBUGGER)              \
   _(JSOP_ARGUMENTS)             \
-  _(JSOP_RUNONCE)               \
   _(JSOP_REST)                  \
   _(JSOP_TOASYNC)               \
   _(JSOP_TOASYNCGEN)            \
@@ -248,7 +248,9 @@ namespace jit {
   _(JSOP_CLASSCONSTRUCTOR)      \
   _(JSOP_DERIVEDCONSTRUCTOR)    \
   _(JSOP_IMPORTMETA)            \
-  _(JSOP_DYNAMIC_IMPORT)
+  _(JSOP_DYNAMIC_IMPORT)        \
+  _(JSOP_INC)                   \
+  _(JSOP_DEC)
 
 // Base class for BaselineCompiler and BaselineInterpreterGenerator. The Handler
 // template is a class storing fields/methods that are interpreter or compiler
@@ -260,23 +262,29 @@ class BaselineCodeGen {
   Handler handler;
 
   JSContext* cx;
-  JSScript* script;
-  jsbytecode* pc;
   StackMacroAssembler masm;
-  bool ionCompileable_;
 
-  TempAllocator& alloc_;
-  BytecodeAnalysis analysis_;
-  FrameInfo frame;
+  typename Handler::FrameInfoT& frame;
 
-  js::Vector<RetAddrEntry, 16, SystemAllocPolicy> retAddrEntries_;
   js::Vector<CodeOffset> traceLoggerToggleOffsets_;
 
   NonAssertingLabel return_;
   NonAssertingLabel postBarrierSlot_;
 
-  // Index of the current ICEntry in the script's ICScript.
-  uint32_t icEntryIndex_;
+  CodeOffset profilerEnterFrameToggleOffset_;
+  CodeOffset profilerExitFrameToggleOffset_;
+
+  // Early Ion bailouts will enter at this address. This is after frame
+  // construction and before environment chain is initialized.
+  CodeOffset bailoutPrologueOffset_;
+
+  // Baseline Debug OSR during prologue will enter at this address. This is
+  // right after where a debug prologue VM call would have returned.
+  CodeOffset debugOsrPrologueOffset_;
+
+  // Baseline Debug OSR during epilogue will enter at this address. This is
+  // right after where a debug epilogue VM call would have returned.
+  CodeOffset debugOsrEpilogueOffset_;
 
   uint32_t pushedBeforeCall_;
 #ifdef DEBUG
@@ -287,32 +295,54 @@ class BaselineCodeGen {
   bool modifiesArguments_;
 
   template <typename... HandlerArgs>
-  BaselineCodeGen(JSContext* cx, TempAllocator& alloc, JSScript* script,
-                  HandlerArgs&&... args);
-
-  MOZ_MUST_USE bool appendRetAddrEntry(RetAddrEntry::Kind kind,
-                                       uint32_t retOffset) {
-    if (!retAddrEntries_.emplaceBack(script->pcToOffset(pc), kind,
-                                     CodeOffset(retOffset))) {
-      ReportOutOfMemory(cx);
-      return false;
-    }
-    return true;
-  }
-
-  JSFunction* function() const {
-    // Not delazifying here is ok as the function is guaranteed to have
-    // been delazified before compilation started.
-    return script->functionNonDelazifying();
-  }
-
-  ModuleObject* module() const { return script->module(); }
+  explicit BaselineCodeGen(JSContext* cx, HandlerArgs&&... args);
 
   template <typename T>
   void pushArg(const T& t) {
     masm.Push(t);
   }
+
+  // Pushes the current script as argument for a VM function.
+  void pushScriptArg(Register scratch);
+
+  // Pushes the bytecode pc as argument for a VM function.
+  void pushBytecodePCArg();
+
+  // Pushes a name/object/scope associated with the current bytecode op (and
+  // stored in the script) as argument for a VM function.
+  enum class ScriptObjectType { RegExp, Function };
+  void pushScriptObjectArg(ScriptObjectType type);
+  void pushScriptNameArg();
+  void pushScriptScopeArg();
+
+  // Pushes a bytecode operand as argument for a VM function.
+  void pushUint8BytecodeOperandArg();
+  void pushUint16BytecodeOperandArg();
+
+  void loadResumeIndexBytecodeOperand(Register dest);
+
+  // Loads the current JSScript* in dest.
+  void loadScript(Register dest);
+
+  // Subtracts |script->nslots() * sizeof(Value)| from reg.
+  void subtractScriptSlotsSize(Register reg, Register scratch);
+
+  // Jump to the script's resume entry indicated by resumeIndex.
+  void jumpToResumeEntry(Register resumeIndex, Register scratch1,
+                         Register scratch2);
+
+  // Load the global's lexical environment.
+  void loadGlobalLexicalEnvironment(Register dest);
+  void pushGlobalLexicalEnvironmentValue(ValueOperand scratch);
+
+  // Load the |this|-value from the global's lexical environment.
+  void loadGlobalThisValue(ValueOperand dest);
+
   void prepareVMCall();
+
+  void storeFrameSizeAndPushDescriptor(uint32_t frameBaseSize, uint32_t argSize,
+                                       const Address& frameSizeAddr,
+                                       Register scratch1, Register scratch2);
 
   enum CallVMPhase { POST_INITIALIZE, CHECK_OVER_RECURSED };
   bool callVM(const VMFunction& fun, CallVMPhase phase = POST_INITIALIZE);
@@ -321,7 +351,7 @@ class BaselineCodeGen {
     if (!callVM(fun, phase)) {
       return false;
     }
-    retAddrEntries_.back().setKind(RetAddrEntry::Kind::NonOpCallVM);
+    handler.markLastRetAddrEntryKind(RetAddrEntry::Kind::NonOpCallVM);
     return true;
   }
 
@@ -336,23 +366,33 @@ class BaselineCodeGen {
     return emitDebugInstrumentation(ifDebuggee, mozilla::Maybe<F>());
   }
 
+  // ifSet should be a function emitting code for when the script has |flag|
+  // set. ifNotSet emits code for when the flag isn't set.
+  template <typename F1, typename F2>
+  MOZ_MUST_USE bool emitTestScriptFlag(JSScript::ImmutableFlags flag,
+                                       const F1& ifSet, const F2& ifNotSet,
+                                       Register scratch);
+
+  // If |script->hasFlag(flag) == value|, execute the code emitted by |emit|.
+  template <typename F>
+  MOZ_MUST_USE bool emitTestScriptFlag(JSScript::ImmutableFlags flag,
+                                       bool value, const F& emit,
+                                       Register scratch);
+
   MOZ_MUST_USE bool emitCheckThis(ValueOperand val, bool reinit = false);
   void emitLoadReturnValue(ValueOperand val);
 
   MOZ_MUST_USE bool emitNextIC();
   MOZ_MUST_USE bool emitInterruptCheck();
-  MOZ_MUST_USE bool emitWarmUpCounterIncrement(bool allowOsr = true);
+  MOZ_MUST_USE bool emitWarmUpCounterIncrement();
   MOZ_MUST_USE bool emitTraceLoggerResume(Register script,
                                           AllocatableGeneralRegisterSet& regs);
-
-  void storeValue(const StackValue* source, const Address& dest,
-                  const ValueOperand& scratch);
 
 #define EMIT_OP(op) bool emit_##op();
   OPCODE_LIST(EMIT_OP)
 #undef EMIT_OP
 
-  // JSOP_NEG, JSOP_BITNOT
+  // JSOP_NEG, JSOP_BITNOT, JSOP_INC, JSOP_DEC
   MOZ_MUST_USE bool emitUnaryArith();
 
   // JSOP_BITXOR, JSOP_LSH, JSOP_ADD etc.
@@ -372,6 +412,10 @@ class BaselineCodeGen {
   // or branches to the default pc if not int32 or out-of-range.
   void emitGetTableSwitchIndex(ValueOperand val, Register dest);
 
+  // Jumps to the target of a table switch based on |key| and the
+  // firstResumeIndex stored in JSOP_TABLESWITCH.
+  void emitTableSwitchJump(Register key, Register scratch1, Register scratch2);
+
   MOZ_MUST_USE bool emitReturn();
 
   MOZ_MUST_USE bool emitToBoolean();
@@ -389,10 +433,15 @@ class BaselineCodeGen {
   MOZ_MUST_USE bool emitBindName(JSOp op);
   MOZ_MUST_USE bool emitDefLexical(JSOp op);
 
+  // Try to bake in the result of GETGNAME/BINDGNAME instead of using an IC.
+  // Return true if we managed to optimize the op.
+  bool tryOptimizeGetGlobalName();
+  bool tryOptimizeBindGlobalName();
+
   MOZ_MUST_USE bool emitInitPropGetterSetter();
   MOZ_MUST_USE bool emitInitElemGetterSetter();
 
-  MOZ_MUST_USE bool emitFormalArgAccess(uint32_t arg, bool get);
+  MOZ_MUST_USE bool emitFormalArgAccess(JSOp op);
 
   MOZ_MUST_USE bool emitThrowConstAssignment();
   MOZ_MUST_USE bool emitUninitializedLexicalCheck(const ValueOperand& val);
@@ -403,26 +452,109 @@ class BaselineCodeGen {
   Address getEnvironmentCoordinateAddressFromObject(Register objReg,
                                                     Register reg);
   Address getEnvironmentCoordinateAddress(Register reg);
+
+  MOZ_MUST_USE bool emitPrologue();
+  MOZ_MUST_USE bool emitEpilogue();
+  MOZ_MUST_USE bool emitOutOfLinePostBarrierSlot();
+  MOZ_MUST_USE bool emitStackCheck();
+  MOZ_MUST_USE bool emitArgumentTypeChecks();
+  MOZ_MUST_USE bool emitDebugPrologue();
+  MOZ_MUST_USE bool initEnvironmentChain();
+
+  MOZ_MUST_USE bool emitTraceLoggerEnter();
+  MOZ_MUST_USE bool emitTraceLoggerExit();
+
+  void emitIsDebuggeeCheck();
+  void emitInitializeLocals();
+  void emitPreInitEnvironmentChain(Register nonFunctionEnv);
+
+  void emitProfilerEnterFrame();
+  void emitProfilerExitFrame();
 };
+
+using RetAddrEntryVector = js::Vector<RetAddrEntry, 16, SystemAllocPolicy>;
 
 // Interface used by BaselineCodeGen for BaselineCompiler.
 class BaselineCompilerHandler {
+  CompilerFrameInfo frame_;
   TempAllocator& alloc_;
+  BytecodeAnalysis analysis_;
   FixedList<Label> labels_;
+  RetAddrEntryVector retAddrEntries_;
   JSScript* script_;
+  jsbytecode* pc_;
+
+  // Index of the current ICEntry in the script's ICScript.
+  uint32_t icEntryIndex_;
+
   bool compileDebugInstrumentation_;
+  bool ionCompileable_;
 
  public:
-  BaselineCompilerHandler(TempAllocator& alloc, JSScript* script);
+  using FrameInfoT = CompilerFrameInfo;
 
-  MOZ_MUST_USE bool init();
+  BaselineCompilerHandler(JSContext* cx, MacroAssembler& masm,
+                          TempAllocator& alloc, JSScript* script);
 
+  MOZ_MUST_USE bool init(JSContext* cx);
+
+  CompilerFrameInfo& frame() { return frame_; }
+
+  jsbytecode* pc() const { return pc_; }
+  jsbytecode* maybePC() const { return pc_; }
+
+  void moveToNextPC() { pc_ += GetBytecodeLength(pc_); }
   Label* labelOf(jsbytecode* pc) { return &labels_[script_->pcToOffset(pc)]; }
+
+  bool isDefinitelyLastOp() const { return pc_ == script_->lastPC(); }
+
+  JSScript* script() const { return script_; }
+  JSScript* maybeScript() const { return script_; }
+
+  JSFunction* function() const {
+    // Not delazifying here is ok as the function is guaranteed to have
+    // been delazified before compilation started.
+    return script_->functionNonDelazifying();
+  }
+  JSFunction* maybeFunction() const { return function(); }
+
+  ModuleObject* module() const { return script_->module(); }
 
   void setCompileDebugInstrumentation() { compileDebugInstrumentation_ = true; }
   bool compileDebugInstrumentation() const {
     return compileDebugInstrumentation_;
   }
+
+  bool maybeIonCompileable() const { return ionCompileable_; }
+
+  uint32_t icEntryIndex() const { return icEntryIndex_; }
+  void moveToNextICEntry() { icEntryIndex_++; }
+
+  BytecodeAnalysis& analysis() { return analysis_; }
+
+  RetAddrEntryVector& retAddrEntries() { return retAddrEntries_; }
+
+  MOZ_MUST_USE bool appendRetAddrEntry(JSContext* cx, RetAddrEntry::Kind kind,
+                                       uint32_t retOffset) {
+    if (!retAddrEntries_.emplaceBack(script_->pcToOffset(pc_), kind,
+                                     CodeOffset(retOffset))) {
+      ReportOutOfMemory(cx);
+      return false;
+    }
+    return true;
+  }
+  void markLastRetAddrEntryKind(RetAddrEntry::Kind kind) {
+    retAddrEntries_.back().setKind(kind);
+  }
+
+  // If a script has more |nslots| than this, then emit code to do an
+  // early stack check.
+  bool needsEarlyStackCheck() const {
+    static const unsigned EARLY_STACK_CHECK_SLOT_COUNT = 128;
+    return script()->nslots() > EARLY_STACK_CHECK_SLOT_COUNT;
+  }
+
+  JSObject* maybeNoCloneSingletonObject();
 };
 
 using BaselineCompilerCodeGen = BaselineCodeGen<BaselineCompilerHandler>;
@@ -442,29 +574,8 @@ class BaselineCompiler final : private BaselineCompilerCodeGen {
   js::Vector<PCMappingEntry, 16, SystemAllocPolicy> pcMappingEntries_;
 
   CodeOffset profilerPushToggleOffset_;
-  CodeOffset profilerEnterFrameToggleOffset_;
-  CodeOffset profilerExitFrameToggleOffset_;
 
   CodeOffset traceLoggerScriptTextIdOffset_;
-
-  // Early Ion bailouts will enter at this address. This is after frame
-  // construction and before environment chain is initialized.
-  CodeOffset bailoutPrologueOffset_;
-
-  // Baseline Debug OSR during prologue will enter at this address. This is
-  // right after where a debug prologue VM call would have returned.
-  CodeOffset debugOsrPrologueOffset_;
-
-  // Baseline Debug OSR during epilogue will enter at this address. This is
-  // right after where a debug epilogue VM call would have returned.
-  CodeOffset debugOsrEpilogueOffset_;
-
-  // If a script has more |nslots| than this, then emit code to do an
-  // early stack check.
-  static const unsigned EARLY_STACK_CHECK_SLOT_COUNT = 128;
-  bool needsEarlyStackCheck() const {
-    return script->nslots() > EARLY_STACK_CHECK_SLOT_COUNT;
-  }
 
  public:
   BaselineCompiler(JSContext* cx, TempAllocator& alloc, JSScript* script);
@@ -485,51 +596,65 @@ class BaselineCompiler final : private BaselineCompilerCodeGen {
     switch (frame.numUnsyncedSlots()) {
       case 0:
         return PCMappingSlotInfo::MakeSlotInfo();
-      case 1:
-        return PCMappingSlotInfo::MakeSlotInfo(
-            PCMappingSlotInfo::ToSlotLocation(frame.peek(-1)));
+      case 1: {
+        PCMappingSlotInfo::SlotLocation loc = frame.stackValueSlotLocation(-1);
+        return PCMappingSlotInfo::MakeSlotInfo(loc);
+      }
       case 2:
-      default:
-        return PCMappingSlotInfo::MakeSlotInfo(
-            PCMappingSlotInfo::ToSlotLocation(frame.peek(-1)),
-            PCMappingSlotInfo::ToSlotLocation(frame.peek(-2)));
+      default: {
+        PCMappingSlotInfo::SlotLocation loc1 = frame.stackValueSlotLocation(-1);
+        PCMappingSlotInfo::SlotLocation loc2 = frame.stackValueSlotLocation(-2);
+        return PCMappingSlotInfo::MakeSlotInfo(loc1, loc2);
+      }
     }
   }
 
-  BytecodeAnalysis& analysis() { return analysis_; }
-
   MethodStatus emitBody();
 
-  void emitInitializeLocals();
-  MOZ_MUST_USE bool emitPrologue();
-  MOZ_MUST_USE bool emitEpilogue();
-  MOZ_MUST_USE bool emitOutOfLinePostBarrierSlot();
-  MOZ_MUST_USE bool emitStackCheck();
-  MOZ_MUST_USE bool emitArgumentTypeChecks();
-  void emitIsDebuggeeCheck();
-  MOZ_MUST_USE bool emitDebugPrologue();
   MOZ_MUST_USE bool emitDebugTrap();
-  MOZ_MUST_USE bool emitTraceLoggerEnter();
-  MOZ_MUST_USE bool emitTraceLoggerExit();
-
-  void emitProfilerEnterFrame();
-  void emitProfilerExitFrame();
-
-  MOZ_MUST_USE bool initEnvironmentChain();
 
   MOZ_MUST_USE bool addPCMappingEntry(bool addIndexEntry);
 };
 
 // Interface used by BaselineCodeGen for BaselineInterpreterGenerator.
 class BaselineInterpreterHandler {
+  InterpreterFrameInfo frame_;
+
  public:
-  explicit BaselineInterpreterHandler();
+  using FrameInfoT = InterpreterFrameInfo;
+
+  explicit BaselineInterpreterHandler(JSContext* cx, MacroAssembler& masm);
+
+  InterpreterFrameInfo& frame() { return frame_; }
+
+  // Interpreter doesn't know the script and pc statically.
+  jsbytecode* maybePC() const { return nullptr; }
+  bool isDefinitelyLastOp() const { return false; }
+  JSScript* maybeScript() const { return nullptr; }
+  JSFunction* maybeFunction() const { return nullptr; }
+
+  // Interpreter doesn't need to keep track of RetAddrEntries, so these methods
+  // are no-ops.
+  MOZ_MUST_USE bool appendRetAddrEntry(JSContext* cx, RetAddrEntry::Kind kind,
+                                       uint32_t retOffset) {
+    return true;
+  }
+  void markLastRetAddrEntryKind(RetAddrEntry::Kind) {}
+
+  bool maybeIonCompileable() const { return true; }
+
+  // The interpreter always does the early stack check because we don't know the
+  // frame size statically.
+  bool needsEarlyStackCheck() const { return true; }
+
+  JSObject* maybeNoCloneSingletonObject() { return nullptr; }
 };
 
 using BaselineInterpreterCodeGen = BaselineCodeGen<BaselineInterpreterHandler>;
 
 class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
  public:
+  explicit BaselineInterpreterGenerator(JSContext* cx);
 };
 
 extern const VMFunction NewArrayCopyOnWriteInfo;

@@ -77,11 +77,11 @@
 #include "WebGLVertexAttribData.h"
 
 #ifdef MOZ_WIDGET_COCOA
-#include "nsCocoaFeatures.h"
+#  include "nsCocoaFeatures.h"
 #endif
 
 #ifdef XP_WIN
-#include "WGLLibrary.h"
+#  include "WGLLibrary.h"
 #endif
 
 // Generated
@@ -934,7 +934,8 @@ WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight) {
   mViewportHeight = size.height;
   gl->fViewport(mViewportX, mViewportY, mViewportWidth, mViewportHeight);
 
-  gl->fScissor(0, 0, size.width, size.height);
+  mScissorRect = {0, 0, size.width, size.height};
+  mScissorRect.Apply(*gl);
 
   //////
   // Check everything
@@ -1720,8 +1721,9 @@ gfx::IntSize WebGLContext::DrawingBufferSize() {
   return mDefaultFB->mSize;
 }
 
-bool WebGLContext::ValidateAndInitFB(const WebGLFramebuffer* const fb) {
-  if (fb) return fb->ValidateAndInitAttachments();
+bool WebGLContext::ValidateAndInitFB(const WebGLFramebuffer* const fb,
+                                     const GLenum incompleteFbError) {
+  if (fb) return fb->ValidateAndInitAttachments(incompleteFbError);
 
   if (!EnsureDefaultFB()) return false;
 
@@ -1758,11 +1760,11 @@ bool WebGLContext::BindCurFBForDraw() {
 
 bool WebGLContext::BindCurFBForColorRead(
     const webgl::FormatUsageInfo** const out_format, uint32_t* const out_width,
-    uint32_t* const out_height) {
+    uint32_t* const out_height, const GLenum incompleteFbError) {
   const auto& fb = mBoundReadFramebuffer;
 
   if (fb) {
-    if (!ValidateAndInitFB(fb)) return false;
+    if (!ValidateAndInitFB(fb, incompleteFbError)) return false;
     if (!fb->ValidateForColorRead(out_format, out_width, out_height))
       return false;
 
@@ -1873,6 +1875,12 @@ ScopedDrawCallWrapper::~ScopedDrawCallWrapper() {
 
   mWebGL.Invalidate();
   mWebGL.mShouldPresent = true;
+}
+
+// -
+
+void WebGLContext::ScissorRect::Apply(gl::GLContext& gl) const {
+  gl.fScissor(x, y, w, h);
 }
 
 ////////////////////////////////////////
@@ -2197,8 +2205,9 @@ static inline size_t SizeOfViewElem(const dom::ArrayBufferView& view) {
 bool WebGLContext::ValidateArrayBufferView(const dom::ArrayBufferView& view,
                                            GLuint elemOffset,
                                            GLuint elemCountOverride,
+                                           const GLenum errorEnum,
                                            uint8_t** const out_bytes,
-                                           size_t* const out_byteLen) {
+                                           size_t* const out_byteLen) const {
   view.ComputeLengthAndData();
   uint8_t* const bytes = view.DataAllowShared();
   const size_t byteLen = view.LengthAllowShared();
@@ -2207,14 +2216,14 @@ bool WebGLContext::ValidateArrayBufferView(const dom::ArrayBufferView& view,
 
   size_t elemCount = byteLen / elemSize;
   if (elemOffset > elemCount) {
-    ErrorInvalidValue("Invalid offset into ArrayBufferView.");
+    GenerateError(errorEnum, "Invalid offset into ArrayBufferView.");
     return false;
   }
   elemCount -= elemOffset;
 
   if (elemCountOverride) {
     if (elemCountOverride > elemCount) {
-      ErrorInvalidValue("Invalid sub-length for ArrayBufferView.");
+      GenerateError(errorEnum, "Invalid sub-length for ArrayBufferView.");
       return false;
     }
     elemCount = elemCountOverride;

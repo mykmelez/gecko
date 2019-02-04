@@ -7,7 +7,7 @@
 
 const SHARED_STRINGS_URI = "devtools/client/locales/shared.properties";
 
-const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
 const EventEmitter = require("devtools/shared/event-emitter");
 const { LocalizationHelper } = require("devtools/shared/l10n");
 const { ViewHelpers } = require("devtools/client/shared/widgets/view-helpers");
@@ -226,9 +226,8 @@ SideMenuWidget.prototype = {
     }
 
     // Ensure the element is visible but not scrolled horizontally.
-    const scrollbox = this._list;
-    scrollbox.ensureElementIsVisible(aElement);
-    scrollbox.scrollBy(-this._list.clientWidth, 0);
+    aElement.scrollIntoView({ block: "nearest" });
+    this._list.scrollBy(-this._list.clientWidth, 0);
   },
 
   /**
@@ -417,6 +416,10 @@ SideMenuWidget.prototype = {
       node = node.parentNode;
     }
 
+    // Call stopPropagation() and preventDefault() here so that avoid to show default
+    // context menu in about:devtools-toolbox. See Bug 1515265.
+    e.stopPropagation();
+    e.preventDefault();
     this._contextMenu.openPopupAtScreen(e.screenX, e.screenY, true);
   },
 

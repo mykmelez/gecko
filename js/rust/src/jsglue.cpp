@@ -9,7 +9,7 @@
 
 #ifdef JS_DEBUG
 // A hack for MFBT. Guard objects need this to work.
-#define DEBUG 1
+#  define DEBUG 1
 #endif
 
 #include "jsapi.h"
@@ -63,9 +63,6 @@ struct ProxyTraps {
   bool (*construct)(JSContext* cx, JS::HandleObject proxy,
                     const JS::CallArgs& args);
 
-  bool (*getPropertyDescriptor)(JSContext* cx, JS::HandleObject proxy,
-                                JS::HandleId id,
-                                JS::MutableHandle<JS::PropertyDescriptor> desc);
   bool (*hasOwn)(JSContext* cx, JS::HandleObject proxy, JS::HandleId id,
                  bool* bp);
   bool (*getOwnEnumerablePropertyKeys)(JSContext* cx, JS::HandleObject proxy,
@@ -267,14 +264,6 @@ class WrapperProxyHandler : public js::Wrapper {
                ? mTraps.isExtensible(cx, proxy, succeeded)
                : js::Wrapper::isExtensible(cx, proxy, succeeded);
   }
-
-  virtual bool getPropertyDescriptor(
-      JSContext* cx, JS::HandleObject proxy, JS::HandleId id,
-      JS::MutableHandle<JS::PropertyDescriptor> desc) const override {
-    return mTraps.getPropertyDescriptor
-               ? mTraps.getPropertyDescriptor(cx, proxy, id, desc)
-               : js::Wrapper::getPropertyDescriptor(cx, proxy, id, desc);
-  }
 };
 
 class RustJSPrincipal : public JSPrincipals {
@@ -355,12 +344,6 @@ class ForwardingProxyHandler : public js::BaseProxyHandler {
   virtual bool isExtensible(JSContext* cx, JS::HandleObject proxy,
                             bool* succeeded) const override {
     return mTraps.isExtensible(cx, proxy, succeeded);
-  }
-
-  virtual bool getPropertyDescriptor(
-      JSContext* cx, JS::HandleObject proxy, JS::HandleId id,
-      JS::MutableHandle<JS::PropertyDescriptor> desc) const override {
-    return mTraps.getPropertyDescriptor(cx, proxy, id, desc);
   }
 };
 
@@ -581,15 +564,15 @@ bool AppendToAutoObjectVector(JS::AutoObjectVector* v, JSObject* obj) {
 void DeleteAutoObjectVector(JS::AutoObjectVector* v) { delete v; }
 
 #if defined(__linux__)
-#include <malloc.h>
+#  include <malloc.h>
 #elif defined(__APPLE__)
-#include <malloc/malloc.h>
+#  include <malloc/malloc.h>
 #elif defined(__MINGW32__) || defined(__MINGW64__)
 // nothing needed here
 #elif defined(_MSC_VER)
 // nothing needed here
 #else
-#error "unsupported platform"
+#  error "unsupported platform"
 #endif
 
 // SpiderMonkey-in-Rust currently uses system malloc, not jemalloc.
@@ -603,7 +586,7 @@ static size_t MallocSizeOf(const void* aPtr) {
 #elif defined(_MSC_VER)
   return _msize((void*)aPtr);
 #else
-#error "unsupported platform"
+#  error "unsupported platform"
 #endif
 }
 

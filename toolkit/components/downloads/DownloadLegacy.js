@@ -14,7 +14,7 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "Downloads",
                                "resource://gre/modules/Downloads.jsm");
@@ -68,7 +68,6 @@ DownloadLegacyTransfer.prototype = {
 
     if ((aStateFlags & Ci.nsIWebProgressListener.STATE_START) &&
         (aStateFlags & Ci.nsIWebProgressListener.STATE_IS_NETWORK)) {
-
       let blockedByParentalControls = false;
       // If it is a failed download, aRequest.responseStatus doesn't exist.
       // (missing file on the server, network failure to download)
@@ -166,6 +165,8 @@ DownloadLegacyTransfer.prototype = {
   },
 
   onSecurityChange() { },
+
+  onContentBlockingEvent() { },
 
   // nsIWebProgressListener2
   onProgressChange64: function DLT_onProgressChange64(aWebProgress, aRequest,

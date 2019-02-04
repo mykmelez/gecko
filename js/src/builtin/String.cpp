@@ -32,14 +32,14 @@
 #include "jit/InlinableNatives.h"
 #include "js/Conversions.h"
 #if !EXPOSE_INTL_API
-#include "js/LocaleSensitive.h"
+#  include "js/LocaleSensitive.h"
 #endif
 #include "js/PropertySpec.h"
 #include "js/StableStringChars.h"
 #include "js/UniquePtr.h"
 #if ENABLE_INTL_API
-#include "unicode/uchar.h"
-#include "unicode/unorm2.h"
+#  include "unicode/uchar.h"
+#  include "unicode/unorm2.h"
 #endif
 #include "util/StringBuffer.h"
 #include "util/Unicode.h"
@@ -3426,7 +3426,7 @@ bool js::StringConstructor(JSContext* cx, unsigned argc, Value* vp) {
 
   if (args.isConstructing()) {
     RootedObject proto(cx);
-    if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+    if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_String, &proto)) {
       return false;
     }
 

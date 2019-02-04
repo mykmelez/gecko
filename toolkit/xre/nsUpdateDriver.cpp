@@ -31,26 +31,26 @@
 #include "mozilla/Services.h"
 
 #ifdef XP_MACOSX
-#include "nsILocalFileMac.h"
-#include "nsCommandLineServiceMac.h"
-#include "MacLaunchHelper.h"
-#include "updaterfileutils_osx.h"
-#include "mozilla/Monitor.h"
+#  include "nsILocalFileMac.h"
+#  include "nsCommandLineServiceMac.h"
+#  include "MacLaunchHelper.h"
+#  include "updaterfileutils_osx.h"
+#  include "mozilla/Monitor.h"
 #endif
 
 #if defined(XP_WIN)
-#include <direct.h>
-#include <process.h>
-#include <windows.h>
-#include <shlwapi.h>
-#include <strsafe.h>
-#include "commonupdatedir.h"
-#include "nsWindowsHelpers.h"
-#define getcwd(path, size) _getcwd(path, size)
-#define getpid() GetCurrentProcessId()
+#  include <direct.h>
+#  include <process.h>
+#  include <windows.h>
+#  include <shlwapi.h>
+#  include <strsafe.h>
+#  include "commonupdatedir.h"
+#  include "nsWindowsHelpers.h"
+#  define getcwd(path, size) _getcwd(path, size)
+#  define getpid() GetCurrentProcessId()
 #elif defined(XP_UNIX)
-#include <unistd.h>
-#include <sys/wait.h>
+#  include <unistd.h>
+#  include <sys/wait.h>
 #endif
 
 using namespace mozilla;
@@ -59,19 +59,19 @@ static LazyLogModule sUpdateLog("updatedriver");
 #define LOG(args) MOZ_LOG(sUpdateLog, mozilla::LogLevel::Debug, args)
 
 #ifdef XP_WIN
-#define UPDATER_BIN "updater.exe"
-#define MAINTENANCE_SVC_NAME L"MozillaMaintenance"
+#  define UPDATER_BIN "updater.exe"
+#  define MAINTENANCE_SVC_NAME L"MozillaMaintenance"
 #elif XP_MACOSX
-#define UPDATER_BIN "org.mozilla.updater"
+#  define UPDATER_BIN "org.mozilla.updater"
 #else
-#define UPDATER_BIN "updater"
+#  define UPDATER_BIN "updater"
 #endif
 #define UPDATER_INI "updater.ini"
 #ifdef XP_MACOSX
-#define UPDATER_APP "updater.app"
+#  define UPDATER_APP "updater.app"
 #endif
 #if defined(XP_UNIX) && !defined(XP_MACOSX)
-#define UPDATER_PNG "updater.png"
+#  define UPDATER_PNG "updater.png"
 #endif
 
 #ifdef XP_MACOSX
@@ -313,29 +313,29 @@ static bool CopyUpdaterIntoUpdateDir(nsIFile *greDir, nsIFile *appDir,
                                      nsIFile *updateDir,
                                      nsCOMPtr<nsIFile> &updater) {
   // Copy the updater application from the GRE and the updater ini from the app.
-#if defined(XP_MACOSX)
+#  if defined(XP_MACOSX)
   if (!CopyFileIntoUpdateDir(appDir, NS_LITERAL_CSTRING(UPDATER_APP),
                              updateDir))
     return false;
   CopyFileIntoUpdateDir(greDir, NS_LITERAL_CSTRING(UPDATER_INI), updateDir);
-#else
+#  else
   if (!CopyFileIntoUpdateDir(greDir, NS_LITERAL_CSTRING(UPDATER_BIN),
                              updateDir))
     return false;
   CopyFileIntoUpdateDir(appDir, NS_LITERAL_CSTRING(UPDATER_INI), updateDir);
-#endif
-#if defined(XP_UNIX) && !defined(XP_MACOSX) && !defined(ANDROID)
+#  endif
+#  if defined(XP_UNIX) && !defined(XP_MACOSX) && !defined(ANDROID)
   nsCOMPtr<nsIFile> iconDir;
   appDir->Clone(getter_AddRefs(iconDir));
   iconDir->AppendNative(NS_LITERAL_CSTRING("icons"));
   if (!CopyFileIntoUpdateDir(iconDir, NS_LITERAL_CSTRING(UPDATER_PNG),
                              updateDir))
     return false;
-#endif
+#  endif
   // Finally, return the location of the updater binary.
   nsresult rv = updateDir->Clone(getter_AddRefs(updater));
   if (NS_FAILED(rv)) return false;
-#if defined(XP_MACOSX)
+#  if defined(XP_MACOSX)
   rv = updater->AppendNative(NS_LITERAL_CSTRING(UPDATER_APP));
   nsresult tmp = updater->AppendNative(NS_LITERAL_CSTRING("Contents"));
   if (NS_FAILED(tmp)) {
@@ -343,7 +343,7 @@ static bool CopyUpdaterIntoUpdateDir(nsIFile *greDir, nsIFile *appDir,
   }
   tmp = updater->AppendNative(NS_LITERAL_CSTRING("MacOS"));
   if (NS_FAILED(tmp) || NS_FAILED(rv)) return false;
-#endif
+#  endif
   rv = updater->AppendNative(NS_LITERAL_CSTRING(UPDATER_BIN));
   return NS_SUCCEEDED(rv);
 }
@@ -356,9 +356,9 @@ static bool CopyUpdaterIntoUpdateDir(nsIFile *greDir, nsIFile *appDir,
  * @param pathToAppend A new library path to prepend to LD_LIBRARY_PATH
  */
 #if defined(MOZ_VERIFY_MAR_SIGNATURE) && !defined(XP_WIN) && !defined(XP_MACOSX)
-#include "prprf.h"
-#define PATH_SEPARATOR ":"
-#define LD_LIBRARY_PATH_ENVVAR_NAME "LD_LIBRARY_PATH"
+#  include "prprf.h"
+#  define PATH_SEPARATOR ":"
+#  define LD_LIBRARY_PATH_ENVVAR_NAME "LD_LIBRARY_PATH"
 static void AppendToLibPath(const char *pathToAppend) {
   char *pathValue = getenv(LD_LIBRARY_PATH_ENVVAR_NAME);
   if (nullptr == pathValue || '\0' == *pathValue) {
@@ -639,59 +639,59 @@ static void ApplyUpdate(nsIFile *greDir, nsIFile *updateDir, nsIFile *appDir,
   }
   *outpid = fork();
   if (*outpid == -1) {
+    delete[] argv;
     return;
   } else if (*outpid == 0) {
     exit(execv(updaterPath.get(), argv));
   }
+  delete[] argv;
 #elif defined(XP_WIN)
   if (isStaged) {
     // Launch the updater to replace the installation with the staged updated.
     if (!WinLaunchChild(updaterPathW.get(), argc, argv)) {
+      delete[] argv;
       return;
     }
   } else {
     // Launch the updater to either stage or apply an update.
     if (!WinLaunchChild(updaterPathW.get(), argc, argv, nullptr, outpid)) {
+      delete[] argv;
       return;
     }
   }
+  delete[] argv;
 #elif defined(XP_MACOSX)
-UpdateDriverSetupMacCommandLine(argc, argv, restart);
-// We need to detect whether elevation is required for this update. This can
-// occur when an admin user installs the application, but another admin
-// user attempts to update (see bug 394984).
-if (restart && !IsRecursivelyWritable(installDirPath.get())) {
-  if (!LaunchElevatedUpdate(argc, argv, outpid)) {
-    LOG(("Failed to launch elevated update!"));
-    exit(1);
+  UpdateDriverSetupMacCommandLine(argc, argv, restart);
+  // We need to detect whether elevation is required for this update. This can
+  // occur when an admin user installs the application, but another admin
+  // user attempts to update (see bug 394984).
+  if (restart && !IsRecursivelyWritable(installDirPath.get())) {
+    if (!LaunchElevatedUpdate(argc, argv, outpid)) {
+      LOG(("Failed to launch elevated update!"));
+      exit(1);
+    }
+    exit(0);
   }
-  exit(0);
-}
 
-if (isStaged) {
-  // Launch the updater to replace the installation with the staged updated.
-  LaunchChildMac(argc, argv);
-} else {
-  // Launch the updater to either stage or apply an update.
-  LaunchChildMac(argc, argv, outpid);
-}
-if (restart) {
-  exit(0);
-}
+  if (isStaged) {
+    // Launch the updater to replace the installation with the staged updated.
+    LaunchChildMac(argc, argv);
+  } else {
+    // Launch the updater to either stage or apply an update.
+    LaunchChildMac(argc, argv, outpid);
+  }
 #else
-if (isStaged) {
-  // Launch the updater to replace the installation with the staged updated.
-  PR_CreateProcessDetached(updaterPath.get(), argv, nullptr, nullptr);
-} else {
-  // Launch the updater to either stage or apply an update.
-  *outpid = PR_CreateProcess(updaterPath.get(), argv, nullptr, nullptr);
-}
+  if (isStaged) {
+    // Launch the updater to replace the installation with the staged updated.
+    PR_CreateProcessDetached(updaterPath.get(), argv, nullptr, nullptr);
+  } else {
+    // Launch the updater to either stage or apply an update.
+    *outpid = PR_CreateProcess(updaterPath.get(), argv, nullptr, nullptr);
+  }
 #endif
-#if !defined(USE_EXECV)
   if (restart) {
     exit(0);
   }
-#endif
 }
 
 /**
@@ -812,7 +812,7 @@ nsUpdateProcessor::nsUpdateProcessor() : mUpdaterPID(0) {}
 nsUpdateProcessor::~nsUpdateProcessor() {}
 
 NS_IMETHODIMP
-nsUpdateProcessor::ProcessUpdate(nsIUpdate *aUpdate) {
+nsUpdateProcessor::ProcessUpdate() {
   nsresult rv;
 
   nsCOMPtr<nsIProperties> ds =

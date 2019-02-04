@@ -226,9 +226,6 @@ void ServoStyleSet::InvalidateStyleForDocumentStateChanges(
 static const MediaFeatureChangeReason kMediaFeaturesAffectingDefaultStyle =
     // Zoom changes change the meaning of em units.
     MediaFeatureChangeReason::ZoomChange |
-    // Changes the meaning of em units, depending on which one is the actual
-    // min-font-size.
-    MediaFeatureChangeReason::MinFontSizeChange |
     // A resolution change changes the app-units-per-dev-pixels ratio, which
     // some structs (Border, Outline, Column) store for clamping. We should
     // arguably not do that, maybe doing it on layout directly, to try to avoid
@@ -387,10 +384,13 @@ void ServoStyleSet::PreTraverseSync() {
 
   LookAndFeel::NativeInit();
 
-  nsPresContext* presContext = GetPresContext();
-  MOZ_ASSERT(presContext,
-             "For now, we don't call into here without a pres context");
+  mDocument->CacheAllKnownLangPrefs();
+
   if (gfxUserFontSet* userFontSet = mDocument->GetUserFontSet()) {
+    nsPresContext* presContext = GetPresContext();
+    MOZ_ASSERT(presContext,
+               "For now, we don't call into here without a pres context");
+
     // Ensure that the @font-face data is not stale
     uint64_t generation = userFontSet->GetGeneration();
     if (generation != mUserFontSetUpdateGeneration) {
@@ -401,7 +401,6 @@ void ServoStyleSet::PreTraverseSync() {
   }
 
   MOZ_ASSERT(!StylistNeedsUpdate());
-  presContext->CacheAllLangs();
 }
 
 void ServoStyleSet::PreTraverse(ServoTraversalFlags aFlags, Element* aRoot) {
@@ -646,31 +645,6 @@ nsresult ServoStyleSet::AppendStyleSheet(SheetType aType, StyleSheet* aSheet) {
     // Servo will remove aSheet from its original position as part of the call
     // to Servo_StyleSet_AppendStyleSheet.
     Servo_StyleSet_AppendStyleSheet(mRawSet.get(), aSheet);
-    SetStylistStyleSheetsDirty();
-  }
-
-  if (mStyleRuleMap) {
-    mStyleRuleMap->SheetAdded(*aSheet);
-  }
-
-  return NS_OK;
-}
-
-nsresult ServoStyleSet::PrependStyleSheet(SheetType aType, StyleSheet* aSheet) {
-  MOZ_ASSERT(aSheet);
-  MOZ_ASSERT(aSheet->IsApplicable());
-  MOZ_ASSERT(IsCSSSheetType(aType));
-  MOZ_ASSERT(aSheet->RawContents(),
-             "Raw sheet should be in place before insertion.");
-
-  RemoveSheetOfType(aType, aSheet);
-  PrependSheetOfType(aType, aSheet);
-
-  if (mRawSet) {
-    // Maintain a mirrored list of sheets on the servo side.
-    // Servo will remove aSheet from its original position as part of the call
-    // to Servo_StyleSet_PrependStyleSheet.
-    Servo_StyleSet_PrependStyleSheet(mRawSet.get(), aSheet);
     SetStylistStyleSheetsDirty();
   }
 

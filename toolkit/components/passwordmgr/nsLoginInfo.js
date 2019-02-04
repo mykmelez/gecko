@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "LoginHelper",
                                "resource://gre/modules/LoginHelper.jsm");
@@ -28,8 +28,8 @@ nsLoginInfo.prototype = {
   passwordField: null,
 
   init(aHostname, aFormSubmitURL, aHttpRealm,
-                  aUsername, aPassword,
-                  aUsernameField, aPasswordField) {
+       aUsername, aPassword,
+       aUsernameField, aPasswordField) {
     this.hostname      = aHostname;
     this.formSubmitURL = aFormSubmitURL;
     this.httpRealm     = aHttpRealm;
@@ -52,8 +52,9 @@ nsLoginInfo.prototype = {
         this.username != aLogin.username ||
         this.password != aLogin.password ||
         this.usernameField != aLogin.usernameField ||
-        this.passwordField != aLogin.passwordField)
+        this.passwordField != aLogin.passwordField) {
       return false;
+    }
 
     return true;
   },

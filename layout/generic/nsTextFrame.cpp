@@ -77,7 +77,7 @@
 #include <algorithm>
 #include <limits>
 #ifdef ACCESSIBILITY
-#include "nsAccessibilityService.h"
+#  include "nsAccessibilityService.h"
 #endif
 
 #include "nsPrintfCString.h"
@@ -91,15 +91,15 @@
 #include "GeckoProfiler.h"
 
 #ifdef DEBUG
-#undef NOISY_REFLOW
-#undef NOISY_TRIM
+#  undef NOISY_REFLOW
+#  undef NOISY_TRIM
 #else
-#undef NOISY_REFLOW
-#undef NOISY_TRIM
+#  undef NOISY_REFLOW
+#  undef NOISY_TRIM
 #endif
 
 #ifdef DrawText
-#undef DrawText
+#  undef DrawText
 #endif
 
 using namespace mozilla;
@@ -1898,7 +1898,7 @@ bool BuildTextRunsScanner::ContinueTextRunAcrossFrames(nsTextFrame* aFrame1,
     };
 
     const nsIFrame* ancestor =
-      nsLayoutUtils::FindNearestCommonAncestorFrame(aFrame1, aFrame2);
+        nsLayoutUtils::FindNearestCommonAncestorFrame(aFrame1, aFrame2);
     MOZ_ASSERT(ancestor);
 
     // Map inline-end and inline-start to physical sides for checking presence
@@ -4567,9 +4567,9 @@ static void VerifyNotDirty(nsFrameState state) {
   bool isDirty = state & NS_FRAME_IS_DIRTY;
   if (!isZero && isDirty) NS_WARNING("internal offsets may be out-of-sync");
 }
-#define DEBUG_VERIFY_NOT_DIRTY(state) VerifyNotDirty(state)
+#  define DEBUG_VERIFY_NOT_DIRTY(state) VerifyNotDirty(state)
 #else
-#define DEBUG_VERIFY_NOT_DIRTY(state)
+#  define DEBUG_VERIFY_NOT_DIRTY(state)
 #endif
 
 nsIFrame* NS_NewTextFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
@@ -4590,13 +4590,13 @@ nsTextFrame::~nsTextFrame() {}
 nsresult nsTextFrame::GetCursor(const nsPoint& aPoint,
                                 nsIFrame::Cursor& aCursor) {
   FillCursorInformationFromStyle(StyleUI(), aCursor);
-  if (NS_STYLE_CURSOR_AUTO == aCursor.mCursor) {
+  if (StyleCursorKind::Auto == aCursor.mCursor) {
     if (!IsSelectable(nullptr)) {
-      aCursor.mCursor = NS_STYLE_CURSOR_DEFAULT;
+      aCursor.mCursor = StyleCursorKind::Default;
     } else {
       aCursor.mCursor = GetWritingMode().IsVertical()
-                            ? NS_STYLE_CURSOR_VERTICAL_TEXT
-                            : NS_STYLE_CURSOR_TEXT;
+                            ? StyleCursorKind::VerticalText
+                            : StyleCursorKind::Text;
     }
     return NS_OK;
   } else {
@@ -5068,8 +5068,7 @@ void nsDisplayText::RenderToContext(gfxContext* aCtx,
   pixelVisible.Inflate(2);
   pixelVisible.RoundOut();
 
-  bool willClip = !aBuilder->IsForGenerateGlyphMask() &&
-                  !aBuilder->IsForPaintingSelectionBG() && !aIsRecording;
+  bool willClip = !aBuilder->IsForGenerateGlyphMask() && !aIsRecording;
   if (willClip) {
     aCtx->NewPath();
     aCtx->Rectangle(pixelVisible);
@@ -5107,10 +5106,7 @@ void nsDisplayText::RenderToContext(gfxContext* aCtx,
   params.dirtyRect = extraVisible;
 
   if (aBuilder->IsForGenerateGlyphMask()) {
-    MOZ_ASSERT(!aBuilder->IsForPaintingSelectionBG());
     params.state = nsTextFrame::PaintTextParams::GenerateTextMask;
-  } else if (aBuilder->IsForPaintingSelectionBG()) {
-    params.state = nsTextFrame::PaintTextParams::PaintTextBGColor;
   } else {
     params.state = nsTextFrame::PaintTextParams::PaintText;
   }
@@ -5733,11 +5729,12 @@ gfxFloat nsTextFrame::ComputeSelectionUnderlineHeight(
       // computed value from the default font size can be too thick for the
       // current font size.
       nscoord defaultFontSize =
-          aPresContext
-              ->GetDefaultFont(kPresContext_DefaultVariableFont_ID, nullptr)
+          aPresContext->Document()
+              ->GetFontPrefsForLang(nullptr)
+              ->GetDefaultFont(kPresContext_DefaultVariableFont_ID)
               ->size;
       int32_t zoomedFontSize = aPresContext->AppUnitsToDevPixels(
-          nsStyleFont::ZoomText(aPresContext, defaultFontSize));
+          nsStyleFont::ZoomText(*aPresContext->Document(), defaultFontSize));
       gfxFloat fontSize =
           std::min(gfxFloat(zoomedFontSize), aFontMetrics.emHeight);
       fontSize = std::max(fontSize, 1.0);
@@ -6128,6 +6125,10 @@ void nsTextFrame::PaintOneShadow(const PaintShadowParams& aParams,
   if (auto* textDrawer = aParams.context->GetTextDrawer()) {
     wr::Shadow wrShadow;
 
+    // Gecko already inflates the bounding rect of text shadows,
+    // so tell WR not to inflate again.
+    wrShadow.should_inflate = false;
+
     wrShadow.offset = {
         PresContext()->AppUnitsToFloatDevPixels(aShadowDetails->mXOffset),
         PresContext()->AppUnitsToFloatDevPixels(aShadowDetails->mYOffset)};
@@ -6311,10 +6312,6 @@ bool nsTextFrame::PaintTextWithSelectionColors(
       }
       iterator.UpdateWithAdvance(advance);
     }
-  }
-
-  if (aParams.IsPaintBGColor()) {
-    return true;
   }
 
   gfxFloat advance;
@@ -6775,32 +6772,6 @@ void nsTextFrame::PaintShadows(nsCSSShadowArray* aShadow,
   }
 }
 
-static bool ShouldDrawSelection(const nsIFrame* aFrame) {
-  // Normal text-with-selection rendering sequence is:
-  //   * Paint background > Paint text-selection-color > Paint text
-  // When we have an parent frame with background-clip-text style, rendering
-  // sequence changes to:
-  //   * Paint text-selection-color > Paint background > Paint text
-  //
-  // If there is a parent frame has background-clip:text style,
-  // text-selection-color should be drawn with the background of that parent
-  // frame, so we should not draw it again while painting text frames.
-
-  if (!aFrame) {
-    return true;
-  }
-
-  const nsStyleBackground* bg = aFrame->Style()->StyleBackground();
-  const nsStyleImageLayers& layers = bg->mImage;
-  NS_FOR_VISIBLE_IMAGE_LAYERS_BACK_TO_FRONT(i, layers) {
-    if (layers.mLayers[i].mClip == StyleGeometryBox::Text) {
-      return false;
-    }
-  }
-
-  return ShouldDrawSelection(aFrame->GetParent());
-}
-
 void nsTextFrame::PaintText(const PaintTextParams& aParams,
                             const nsCharClipDisplayItem& aItem,
                             float aOpacity /* = 1.0f */) {
@@ -6862,8 +6833,7 @@ void nsTextFrame::PaintText(const PaintTextParams& aParams,
   textPaintStyle.SetResolveColors(!aParams.callbacks);
 
   // Fork off to the (slower) paint-with-selection path if necessary.
-  if (isSelected &&
-      (aParams.IsPaintBGColor() || ShouldDrawSelection(this->GetParent()))) {
+  if (isSelected) {
     MOZ_ASSERT(aOpacity == 1.0f, "We don't support opacity with selections!");
     gfxSkipCharsIterator tmp(provider.GetStart());
     Range contentRange(
@@ -6877,10 +6847,6 @@ void nsTextFrame::PaintText(const PaintTextParams& aParams,
     if (PaintTextWithSelection(params, clipEdges)) {
       return;
     }
-  }
-
-  if (aParams.IsPaintBGColor()) {
-    return;
   }
 
   nscolor foregroundColor = aParams.IsGenerateTextMask()

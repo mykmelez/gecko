@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-var {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+var {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
 var {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
 var {VariablesView} = require("resource://devtools/client/shared/widgets/VariablesView.jsm");
 var Services = require("Services");
@@ -219,6 +219,7 @@ VariablesViewController.prototype = {
     }
     // We started slicing properties, and the slice is now small enough to be displayed
     const deferred = defer();
+    // eslint-disable-next-line mozilla/use-returnValue
     aGrip.propertyIterator.slice(aGrip.start, aGrip.count,
       ({ ownProperties }) => {
         // Add all the variable properties.

@@ -4,8 +4,8 @@
 
 var EXPORTED_SYMBOLS = [ "SitePermissions" ];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 var gStringBundle =
   Services.strings.createBundle("chrome://browser/locale/sitePermissions.properties");
@@ -220,6 +220,7 @@ var SitePermissions = {
   SCOPE_POLICY: "{SitePermissions.SCOPE_POLICY}",
   SCOPE_GLOBAL: "{SitePermissions.SCOPE_GLOBAL}",
 
+  _permissionsArray: null,
   _defaultPrefBranch: Services.prefs.getBranch("permissions.default."),
 
   /**
@@ -250,8 +251,7 @@ var SitePermissions = {
         }
 
         // Hide canvas permission when privacy.resistFingerprinting is false.
-        if ((permission.type == "canvas") &&
-            !Services.prefs.getBoolPref("privacy.resistFingerprinting")) {
+        if ((permission.type == "canvas") && !this.resistFingerprinting) {
           continue;
         }
 
@@ -348,14 +348,33 @@ var SitePermissions = {
    * @return {Array<String>} an array of all permission IDs.
    */
   listPermissions() {
-    let permissions = Object.keys(gPermissionObject);
+    if (this._permissionsArray === null) {
+      let permissions = Object.keys(gPermissionObject);
 
-    // Hide canvas permission when privacy.resistFingerprinting is false.
-    if (!Services.prefs.getBoolPref("privacy.resistFingerprinting")) {
-      permissions = permissions.filter(permission => permission !== "canvas");
+      // Hide canvas permission when privacy.resistFingerprinting is false.
+      if (!this.resistFingerprinting) {
+        permissions = permissions.filter(permission => permission !== "canvas");
+      }
+      this._permissionsArray = permissions;
     }
 
-    return permissions;
+    return this._permissionsArray;
+  },
+
+  /**
+   * Called when the privacy.resistFingerprinting preference changes its value.
+   *
+   * @param {string} data
+   *        The last argument passed to the preference change observer
+   * @param {string} previous
+   *        The previous value of the preference
+   * @param {string} latest
+   *        The latest value of the preference
+   */
+  onResistFingerprintingChanged(data, previous, latest) {
+    // Ensure that listPermissions() will reconstruct its return value the next
+    // time it's called.
+    this._permissionsArray = null;
   },
 
   /**
@@ -474,7 +493,6 @@ var SitePermissions = {
    *        This needs to be provided if the scope is SCOPE_TEMPORARY!
    */
   set(uri, permissionID, state, scope = this.SCOPE_PERSISTENT, browser = null) {
-
     if (scope == this.SCOPE_GLOBAL && state == this.BLOCK) {
       GloballyBlockedPermissions.set(browser, permissionID);
       browser.dispatchEvent(new browser.ownerGlobal.CustomEvent("PermissionStateChange"));
@@ -705,7 +723,8 @@ var gPermissionObject = {
       }
       return SitePermissions.UNKNOWN;
     },
-    labelID: "autoplay-media",
+    labelID: "autoplay-media2",
+    states: [ SitePermissions.ALLOW, SitePermissions.BLOCK ],
   },
 
   "image": {
@@ -809,3 +828,6 @@ if (!Services.prefs.getBoolPref("dom.webmidi.enabled")) {
 
 XPCOMUtils.defineLazyPreferenceGetter(SitePermissions, "temporaryPermissionExpireTime",
                                       "privacy.temporary_permission_expire_time_ms", 3600 * 1000);
+XPCOMUtils.defineLazyPreferenceGetter(SitePermissions, "resistFingerprinting",
+                                      "privacy.resistFingerprinting", false,
+                                      SitePermissions.onResistFingerprintingChanged.bind(SitePermissions));

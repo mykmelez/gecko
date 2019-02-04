@@ -42,7 +42,6 @@ function closeAllNotifications() {
       });
       notification.close();
     }
-
   });
 }
 
@@ -213,7 +212,6 @@ function promiseOpenAndLoadWindow(aOptions, aWaitForDelayedStartup = false) {
         Services.obs.removeObserver(onDS, "browser-delayed-startup-finished");
         resolve(win);
       }, "browser-delayed-startup-finished");
-
     } else {
       win.addEventListener("load", function() {
         resolve(win);
@@ -423,27 +421,12 @@ function is_element_hidden(element, msg) {
   ok(is_hidden(element), msg || "Element should be hidden");
 }
 
-function promisePopupEvent(popup, eventSuffix) {
-  let endState = {shown: "open", hidden: "closed"}[eventSuffix];
-
-  if (popup.state == endState)
-    return Promise.resolve();
-
-  let eventType = "popup" + eventSuffix;
-  return new Promise(resolve => {
-    popup.addEventListener(eventType, function(event) {
-      resolve();
-    }, {once: true});
-
-  });
-}
-
 function promisePopupShown(popup) {
-  return promisePopupEvent(popup, "shown");
+  return BrowserTestUtils.waitForPopupEvent(popup, "shown");
 }
 
 function promisePopupHidden(popup) {
-  return promisePopupEvent(popup, "hidden");
+  return BrowserTestUtils.waitForPopupEvent(popup, "hidden");
 }
 
 function promiseNotificationShown(notification) {

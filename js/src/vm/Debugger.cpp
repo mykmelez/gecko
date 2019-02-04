@@ -640,10 +640,10 @@ Debugger::Debugger(JSContext* cx, NativeObject* dbg)
 #ifdef JS_TRACE_LOGGING
   TraceLoggerThread* logger = TraceLoggerForCurrentThread(cx);
   if (logger) {
-#ifdef NIGHTLY_BUILD
+#  ifdef NIGHTLY_BUILD
     logger->getIterationAndSize(&traceLoggerLastDrainedIteration,
                                 &traceLoggerLastDrainedSize);
-#endif
+#  endif
     logger->getIterationAndSize(&traceLoggerScriptedCallsLastDrainedIteration,
                                 &traceLoggerScriptedCallsLastDrainedSize);
   }
@@ -3767,14 +3767,15 @@ GlobalObject* Debugger::unwrapDebuggeeArgument(JSContext* cx, const Value& v) {
   }
 
   // If we have a cross-compartment wrapper, dereference as far as is secure.
-  obj = CheckedUnwrap(obj);
+  //
+  // Since we're dealing with globals, we may have a WindowProxy here.  So we
+  // have to make sure to do a dynamic unwrap, and we want to unwrap the
+  // WindowProxy too, if we have one.
+  obj = CheckedUnwrapDynamic(obj, cx, /* stopAtWindowProxy = */ false);
   if (!obj) {
     ReportAccessDenied(cx);
     return nullptr;
   }
-
-  // If that produced a WindowProxy, get the Window (global).
-  obj = ToWindowIfWindowProxy(obj);
 
   // If that didn't produce a global object, it's an error.
   if (!obj->is<GlobalObject>()) {
@@ -4213,9 +4214,9 @@ static T* findDebuggerInVector(Debugger* dbg,
 
 // a ReadBarriered version for findDebuggerInVector
 // TODO: Bug 1515934 - findDebuggerInVector<T> triggers read barriers.
-static ReadBarriered<Debugger*>*
-findDebuggerInVector(Debugger* dbg,
-                     Vector<ReadBarriered<Debugger*>, 0, js::SystemAllocPolicy>* vec) {
+static ReadBarriered<Debugger*>* findDebuggerInVector(
+    Debugger* dbg,
+    Vector<ReadBarriered<Debugger*>, 0, js::SystemAllocPolicy>* vec) {
   ReadBarriered<Debugger*>* p;
   for (p = vec->begin(); p != vec->end(); p++) {
     if (p->unbarrieredGet() == dbg) {
@@ -4794,14 +4795,14 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery : public Debugger::QueryBase {
     if (!realms.has(realm)) {
       return;
     }
+    if (!commonFilter(script, nogc)) {
+      return;
+    }
     if (hasLine) {
       if (line < script->lineno() ||
           script->lineno() + GetScriptLineExtent(script) < line) {
         return;
       }
-    }
-    if (!commonFilter(script, nogc)) {
-      return;
     }
 
     if (innermost) {
@@ -8141,10 +8142,7 @@ bool DebuggerFrame::hasAnyLiveHooks() const {
 
 /* static */ NativeObject* DebuggerFrame::initClass(
     JSContext* cx, HandleObject dbgCtor, Handle<GlobalObject*> global) {
-  RootedObject objProto(cx,
-                        GlobalObject::getOrCreateObjectPrototype(cx, global));
-
-  return InitClass(cx, dbgCtor, objProto, &class_, construct, 0, properties_,
+  return InitClass(cx, dbgCtor, nullptr, &class_, construct, 0, properties_,
                    methods_, nullptr, nullptr);
 }
 
@@ -8543,8 +8541,6 @@ static bool EvaluateInEnv(JSContext* cx, Handle<Env*> env,
     if (!script) {
       return false;
     }
-
-    script->setActiveEval();
   } else {
     // Do not consider executeInGlobal{WithBindings} as an eval, but instead
     // as executing a series of statements at the global level. This is to
@@ -9386,7 +9382,8 @@ static DebuggerObject* DebuggerObject_checkThis(JSContext* cx,
 
 #define THIS_DEBUGOBJECT_PROMISE(cx, argc, vp, fnname, args, obj)             \
   THIS_DEBUGOBJECT_REFERENT(cx, argc, vp, fnname, args, obj);                 \
-  obj = CheckedUnwrap(obj);                                                   \
+  /* We only care about promises, so CheckedUnwrapStatic is OK. */            \
+  obj = CheckedUnwrapStatic(obj);                                             \
   if (!obj) {                                                                 \
     ReportAccessDenied(cx);                                                   \
     return false;                                                             \
@@ -9401,7 +9398,8 @@ static DebuggerObject* DebuggerObject_checkThis(JSContext* cx,
 
 #define THIS_DEBUGOBJECT_OWNER_PROMISE(cx, argc, vp, fnname, args, dbg, obj)  \
   THIS_DEBUGOBJECT_OWNER_REFERENT(cx, argc, vp, fnname, args, dbg, obj);      \
-  obj = CheckedUnwrap(obj);                                                   \
+  /* We only care about promises, so CheckedUnwrapStatic is OK. */            \
+  obj = CheckedUnwrapStatic(obj);                                             \
   if (!obj) {                                                                 \
     ReportAccessDenied(cx);                                                   \
     return false;                                                             \
@@ -10578,11 +10576,8 @@ const JSFunctionSpec DebuggerObject::methods_[] = {
 
 /* static */ NativeObject* DebuggerObject::initClass(
     JSContext* cx, Handle<GlobalObject*> global, HandleObject debugCtor) {
-  RootedObject objProto(cx,
-                        GlobalObject::getOrCreateObjectPrototype(cx, global));
-
   RootedNativeObject objectProto(
-      cx, InitClass(cx, debugCtor, objProto, &class_, construct, 0, properties_,
+      cx, InitClass(cx, debugCtor, nullptr, &class_, construct, 0, properties_,
                     methods_, nullptr, nullptr));
 
   if (!objectProto) {
@@ -10658,7 +10653,8 @@ bool DebuggerObject::isPromise() const {
   JSObject* referent = this->referent();
 
   if (IsCrossCompartmentWrapper(referent)) {
-    referent = CheckedUnwrap(referent);
+    /* We only care about promises, so CheckedUnwrapStatic is OK. */
+    referent = CheckedUnwrapStatic(referent);
     if (!referent) {
       return false;
     }
@@ -10832,7 +10828,8 @@ double DebuggerObject::promiseTimeToResolution() const {
                                                  JSErrorReport*& report) {
   JSObject* obj = maybeError;
   if (IsCrossCompartmentWrapper(obj)) {
-    obj = CheckedUnwrap(obj);
+    /* We only care about Error objects, so CheckedUnwrapStatic is OK. */
+    obj = CheckedUnwrapStatic(obj);
   }
 
   if (!obj) {
@@ -11525,7 +11522,8 @@ double DebuggerObject::promiseTimeToResolution() const {
   RootedObject referent(cx, object->referent());
 
   if (IsCrossCompartmentWrapper(referent)) {
-    referent = CheckedUnwrap(referent);
+    /* We only care about promises, so CheckedUnwrapStatic is OK. */
+    referent = CheckedUnwrapStatic(referent);
     if (!referent) {
       ReportAccessDenied(cx);
       return false;
@@ -11876,10 +11874,7 @@ const JSFunctionSpec DebuggerEnvironment::methods_[] = {
 
 /* static */ NativeObject* DebuggerEnvironment::initClass(
     JSContext* cx, HandleObject dbgCtor, Handle<GlobalObject*> global) {
-  RootedObject objProto(cx,
-                        GlobalObject::getOrCreateObjectPrototype(cx, global));
-
-  return InitClass(cx, dbgCtor, objProto, &DebuggerEnvironment::class_,
+  return InitClass(cx, dbgCtor, nullptr, &DebuggerEnvironment::class_,
                    construct, 0, properties_, methods_, nullptr, nullptr);
 }
 
@@ -12227,19 +12222,15 @@ AutoEntryMonitor::~AutoEntryMonitor() { cx_->entryMonitor = savedMonitor_; }
 
 extern JS_PUBLIC_API bool JS_DefineDebuggerObject(JSContext* cx,
                                                   HandleObject obj) {
-  RootedNativeObject objProto(cx), debugCtor(cx), debugProto(cx),
-      frameProto(cx), scriptProto(cx), sourceProto(cx), objectProto(cx),
-      envProto(cx), memoryProto(cx);
+  RootedNativeObject debugCtor(cx), debugProto(cx), frameProto(cx),
+      scriptProto(cx), sourceProto(cx), objectProto(cx), envProto(cx),
+      memoryProto(cx);
   RootedObject debuggeeWouldRunProto(cx);
   RootedValue debuggeeWouldRunCtor(cx);
   Handle<GlobalObject*> global = obj.as<GlobalObject>();
 
-  objProto = GlobalObject::getOrCreateObjectPrototype(cx, global);
-  if (!objProto) {
-    return false;
-  }
   debugProto =
-      InitClass(cx, global, objProto, &Debugger::class_, Debugger::construct, 1,
+      InitClass(cx, global, nullptr, &Debugger::class_, Debugger::construct, 1,
                 Debugger::properties, Debugger::methods, nullptr,
                 Debugger::static_methods, debugCtor.address());
   if (!debugProto) {
@@ -12252,16 +12243,15 @@ extern JS_PUBLIC_API bool JS_DefineDebuggerObject(JSContext* cx,
   }
 
   scriptProto = InitClass(
-      cx, debugCtor, objProto, &DebuggerScript_class, DebuggerScript_construct,
+      cx, debugCtor, nullptr, &DebuggerScript_class, DebuggerScript_construct,
       0, DebuggerScript_properties, DebuggerScript_methods, nullptr, nullptr);
   if (!scriptProto) {
     return false;
   }
 
-  sourceProto =
-      InitClass(cx, debugCtor, sourceProto, &DebuggerSource_class,
-                DebuggerSource_construct, 0, DebuggerSource_properties,
-                DebuggerSource_methods, nullptr, nullptr);
+  sourceProto = InitClass(
+      cx, debugCtor, nullptr, &DebuggerSource_class, DebuggerSource_construct,
+      0, DebuggerSource_properties, DebuggerSource_methods, nullptr, nullptr);
   if (!sourceProto) {
     return false;
   }
@@ -12277,7 +12267,7 @@ extern JS_PUBLIC_API bool JS_DefineDebuggerObject(JSContext* cx,
   }
 
   memoryProto =
-      InitClass(cx, debugCtor, objProto, &DebuggerMemory::class_,
+      InitClass(cx, debugCtor, nullptr, &DebuggerMemory::class_,
                 DebuggerMemory::construct, 0, DebuggerMemory::properties,
                 DebuggerMemory::methods, nullptr, nullptr);
   if (!memoryProto) {
@@ -12313,7 +12303,8 @@ extern JS_PUBLIC_API bool JS_DefineDebuggerObject(JSContext* cx,
 }
 
 JS_PUBLIC_API bool JS::dbg::IsDebugger(JSObject& obj) {
-  JSObject* unwrapped = CheckedUnwrap(&obj);
+  /* We only care about debugger objects, so CheckedUnwrapStatic is OK. */
+  JSObject* unwrapped = CheckedUnwrapStatic(&obj);
   return unwrapped && unwrapped->getClass() == &Debugger::class_ &&
          js::Debugger::fromJSObject(unwrapped) != nullptr;
 }
@@ -12321,7 +12312,8 @@ JS_PUBLIC_API bool JS::dbg::IsDebugger(JSObject& obj) {
 JS_PUBLIC_API bool JS::dbg::GetDebuggeeGlobals(JSContext* cx, JSObject& dbgObj,
                                                AutoObjectVector& vector) {
   MOZ_ASSERT(IsDebugger(dbgObj));
-  js::Debugger* dbg = js::Debugger::fromJSObject(CheckedUnwrap(&dbgObj));
+  /* Since we know we have a debugger object, CheckedUnwrapStatic is fine. */
+  js::Debugger* dbg = js::Debugger::fromJSObject(CheckedUnwrapStatic(&dbgObj));
 
   if (!vector.reserve(vector.length() + dbg->debuggees.count())) {
     JS_ReportOutOfMemory(cx);
@@ -12397,7 +12389,7 @@ namespace dbg {
       // reasons this data is stored and replicated on each slice. Each
       // slice used to have its own GCReason, but now they are all the
       // same.
-      data->reason = gcreason::ExplainReason(slice.reason);
+      data->reason = ExplainGCReason(slice.reason);
       MOZ_ASSERT(data->reason);
     }
 

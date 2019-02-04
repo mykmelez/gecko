@@ -58,10 +58,22 @@ pref("devtools.inspector.fonthighlighter.enabled", true);
 pref("devtools.inspector.changes.enabled", true);
 // Enable the new Rules View
 pref("devtools.inspector.new-rulesview.enabled", false);
+// Enable the 'scrollable' markup-badges in nightly only for now
+#if defined(NIGHTLY_BUILD)
+pref("devtools.inspector.scrollable-badges.enabled", true);
+#else
+pref("devtools.inspector.scrollable-badges.enabled", false);
+#endif
 
 // Flexbox preferences
 pref("devtools.inspector.flexboxHighlighter.enabled", true);
 pref("devtools.flexboxinspector.enabled", true);
+
+#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
+pref("devtools.inspector.flexboxHighlighter.combine", true);
+#else
+pref("devtools.inspector.flexboxHighlighter.combine", false);
+#endif
 
 // Grid highlighter preferences
 pref("devtools.gridinspector.gridOutlineMaxColumns", 50);
@@ -279,6 +291,9 @@ pref("devtools.webconsole.sidebarToggle", false);
 // Enable CodeMirror in the JsTerm
 pref("devtools.webconsole.jsterm.codeMirror", true);
 
+// Enable editor mode in the console.
+pref("devtools.webconsole.input.editor", false);
+
 // Disable the new performance recording panel by default
 pref("devtools.performance.new-panel-enabled", false);
 
@@ -319,6 +334,9 @@ pref("devtools.responsive.reloadConditions.userAgent", false);
 pref("devtools.responsive.reloadNotification.enabled", true);
 // Whether or not touch simulation is enabled.
 pref("devtools.responsive.touchSimulation.enabled", false);
+// Whether or not meta viewport is enabled, if and only if touchSimulation
+// is also enabled.
+pref("devtools.responsive.metaViewport.enabled", false);
 // The user agent of the viewport.
 pref("devtools.responsive.userAgent", "");
 

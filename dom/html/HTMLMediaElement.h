@@ -29,7 +29,7 @@
 
 // X.h on Linux #defines CurrentTime as 0L, so we have to #undef it here.
 #ifdef CurrentTime
-#undef CurrentTime
+#  undef CurrentTime
 #endif
 
 #include "mozilla/dom/HTMLMediaElementBinding.h"
@@ -722,6 +722,11 @@ class HTMLMediaElement : public nsGenericHTMLElement,
     MOZ_ASSERT(NS_IsMainThread());
     aSinkId = mSink.first();
   }
+
+  // This is used to notify MediaElementAudioSourceNode that media element is
+  // allowed to play when media element is used as a source for web audio, so
+  // that we can start AudioContext if it was not allowed to start.
+  RefPtr<GenericNonExclusivePromise> GetAllowedToPlayPromise();
 
  protected:
   virtual ~HTMLMediaElement();
@@ -1657,6 +1662,11 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // True if the autoplay media was blocked because it hadn't loaded metadata
   // yet.
   bool mBlockedAsWithoutMetadata = false;
+
+  // This promise is used to notify MediaElementAudioSourceNode that media
+  // element is allowed to play when MediaElement is used as a source for web
+  // audio.
+  MozPromiseHolder<GenericNonExclusivePromise> mAllowedToPlayPromise;
 
  public:
   // Helper class to measure times for MSE telemetry stats

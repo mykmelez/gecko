@@ -14,7 +14,6 @@ XPIDL_SOURCES += [
     'nsIException.idl',
     'nsIGZFileWriter.idl',
     'nsIInterfaceRequestor.idl',
-    'nsILoadURIDelegate.idl',
     'nsIMemory.idl',
     'nsIMemoryInfoDumper.idl',
     'nsIMemoryReporter.idl',
@@ -45,6 +44,10 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     ]
 
 XPIDL_MODULE = 'xpcom_base'
+
+XPCOM_MANIFESTS += [
+    'components.conf',
+]
 
 EXPORTS += [
     '!ErrorList.h',
@@ -220,6 +223,7 @@ LOCAL_INCLUDES += [
     '../build',
     '/dom/base',
     '/mfbt',
+    '/netwerk/base',
     '/xpcom/ds',
 ]
 

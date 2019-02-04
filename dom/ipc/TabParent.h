@@ -67,7 +67,7 @@ class DataSourceSurface;
 
 namespace dom {
 
-class ChromeBrowsingContext;
+class CanonicalBrowsingContext;
 class ClonedMessageData;
 class nsIContentParent;
 class Element;
@@ -126,7 +126,7 @@ class TabParent final : public PBrowserParent,
 
   nsIXULBrowserWindow* GetXULBrowserWindow();
 
-  ChromeBrowsingContext* GetBrowsingContext() { return mBrowsingContext; }
+  CanonicalBrowsingContext* GetBrowsingContext() { return mBrowsingContext; }
 
   void Destroy();
 
@@ -159,6 +159,10 @@ class TabParent final : public PBrowserParent,
   virtual mozilla::ipc::IPCResult RecvRegisterProtocolHandler(
       const nsString& aScheme, nsIURI* aHandlerURI, const nsString& aTitle,
       nsIURI* aDocURI) override;
+
+  virtual mozilla::ipc::IPCResult RecvOnContentBlockingEvent(
+      const OptionalWebProgressData& aWebProgressData,
+      const RequestData& aRequestData, const uint32_t& aEvent) override;
 
   virtual mozilla::ipc::IPCResult RecvBrowserFrameOpenWindow(
       PBrowserParent* aOpener, const nsString& aURL, const nsString& aName,
@@ -256,13 +260,14 @@ class TabParent final : public PBrowserParent,
       nsTArray<nsCString>&& aDisabledCommands) override;
 
   virtual mozilla::ipc::IPCResult RecvSetCursor(const nsCursor& aValue,
+                                                const bool& aHasCustomCursor,
+                                                const nsCString& aUri,
+                                                const uint32_t& aWidth, const uint32_t& aHeight,
+                                                const uint32_t& aStride,
+                                                const gfx::SurfaceFormat& aFormat,
+                                                const uint32_t& aHotspotX,
+                                                const uint32_t& aHotspotY,
                                                 const bool& aForce) override;
-
-  virtual mozilla::ipc::IPCResult RecvSetCustomCursor(
-      const nsCString& aUri, const uint32_t& aWidth, const uint32_t& aHeight,
-      const uint32_t& aStride, const gfx::SurfaceFormat& aFormat,
-      const uint32_t& aHotspotX, const uint32_t& aHotspotY,
-      const bool& aForce) override;
 
   virtual mozilla::ipc::IPCResult RecvSetStatus(
       const uint32_t& aType, const nsString& aStatus) override;
@@ -672,7 +677,7 @@ class TabParent final : public PBrowserParent,
   RefPtr<nsFrameLoader> mFrameLoader;
 
   // The root browsing context loaded in this TabParent.
-  RefPtr<ChromeBrowsingContext> mBrowsingContext;
+  RefPtr<CanonicalBrowsingContext> mBrowsingContext;
 
   TabId mTabId;
 

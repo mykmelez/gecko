@@ -611,7 +611,6 @@ toolbarbutton[constrain-size="true"][cui-areatype="menu-panel"] > .toolbarbutton
 }
 
 #appMenu-tp-category {
-  color: var(--panel-disabled-color);
   margin-inline-end: 0;
 }
 
@@ -925,7 +924,6 @@ panelview .toolbarbutton-1,
 .subviewbutton[shortcut]::after {
   content: attr(shortcut);
   float: right;
-  color: var(--panel-disabled-color);
 }
 
 .PanelUI-subView .subviewbutton-nav::after {

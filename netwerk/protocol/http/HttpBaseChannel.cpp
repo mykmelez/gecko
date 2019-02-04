@@ -42,8 +42,10 @@
 #include "nsPIDOMWindow.h"
 #include "nsIDocShell.h"
 #include "nsINetworkInterceptController.h"
+#include "mozilla/AntiTrackingCommon.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/PerformanceStorage.h"
+#include "mozilla/net/UrlClassifierFeatureFactory.h"
 #include "mozilla/NullPrincipal.h"
 #include "mozilla/Services.h"
 #include "mozIThirdPartyUtil.h"
@@ -2225,6 +2227,12 @@ HttpBaseChannel::RedirectTo(nsIURI* targetURI) {
 }
 
 NS_IMETHODIMP
+HttpBaseChannel::SwitchProcessTo(mozilla::dom::Promise *aTabParent,
+                                 uint64_t aIdentifier) {
+  return NS_ERROR_NOT_AVAILABLE;
+}
+
+NS_IMETHODIMP
 HttpBaseChannel::UpgradeToSecure() {
   // Upgrades are handled internally between http-on-modify-request and
   // http-on-before-connect, which means upgrades are only possible during
@@ -2320,6 +2328,13 @@ HttpBaseChannel::SetTopWindowURIIfUnknown(nsIURI* aTopWindowURI) {
 
 NS_IMETHODIMP
 HttpBaseChannel::GetTopWindowURI(nsIURI** aTopWindowURI) {
+  nsCOMPtr<nsIURI> uriBeingLoaded =
+      AntiTrackingCommon::MaybeGetDocumentURIBeingLoaded(this);
+  return GetTopWindowURI(uriBeingLoaded, aTopWindowURI);
+}
+
+nsresult HttpBaseChannel::GetTopWindowURI(nsIURI* aURIBeingLoaded,
+                                          nsIURI** aTopWindowURI) {
   nsresult rv = NS_OK;
   nsCOMPtr<mozIThirdPartyUtil> util;
   // Only compute the top window URI once. In e10s, this must be computed in the
@@ -2330,7 +2345,8 @@ HttpBaseChannel::GetTopWindowURI(nsIURI** aTopWindowURI) {
       return NS_ERROR_NOT_AVAILABLE;
     }
     nsCOMPtr<mozIDOMWindowProxy> win;
-    rv = util->GetTopWindowForChannel(this, getter_AddRefs(win));
+    rv = util->GetTopWindowForChannel(this, aURIBeingLoaded,
+                                      getter_AddRefs(win));
     if (NS_SUCCEEDED(rv)) {
       rv = util->GetURIFromWindow(win, getter_AddRefs(mTopWindowURI));
 #if DEBUG
@@ -4527,8 +4543,10 @@ HttpBaseChannel::GetNativeServerTiming(
 }
 
 NS_IMETHODIMP
-HttpBaseChannel::CancelForTrackingProtection() {
-  return Cancel(NS_ERROR_TRACKING_URI);
+HttpBaseChannel::CancelByChannelClassifier(nsresult aErrorCode) {
+  MOZ_ASSERT(
+      UrlClassifierFeatureFactory::IsClassifierBlockingErrorCode(aErrorCode));
+  return Cancel(aErrorCode);
 }
 
 void HttpBaseChannel::SetIPv4Disabled() { mCaps |= NS_HTTP_DISABLE_IPV4; }

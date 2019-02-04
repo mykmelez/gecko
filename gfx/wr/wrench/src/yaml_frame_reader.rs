@@ -1582,6 +1582,7 @@ impl YamlFrameReader {
                 blur_radius,
                 offset,
                 color,
+                should_inflate: true,
             },
         );
     }
@@ -1667,15 +1668,26 @@ impl YamlFrameReader {
             .as_point()
             .unwrap_or(default_transform_origin);
 
+        assert!(
+            yaml["transform"].is_badvalue() ||
+            yaml["perspective"].is_badvalue(),
+            "Should have one of either transform or perspective"
+        );
+
+        let reference_frame_kind = if !yaml["perspective"].is_badvalue() {
+            ReferenceFrameKind::Perspective { scrolling_relative_to: None }
+        } else {
+            ReferenceFrameKind::Transform
+        };
+
         let transform = yaml["transform"]
-            .as_transform(&transform_origin)
-            .map(|transform| transform.into());
+            .as_transform(&transform_origin);
 
         let perspective = match yaml["perspective"].as_f32() {
             Some(value) if value != 0.0 => {
                 Some(make_perspective(perspective_origin, value as f32))
             }
-            Some(_) => None,
+            Some(..) => None,
             _ => yaml["perspective"].as_matrix4d(),
         };
 
@@ -1683,8 +1695,8 @@ impl YamlFrameReader {
             &bounds,
             *self.spatial_id_stack.last().unwrap(),
             transform_style,
-            transform.into(),
-            perspective,
+            transform.or_else(|| perspective).unwrap_or_default().into(),
+            reference_frame_kind,
         );
 
         let numeric_id = yaml["id"].as_i64();
@@ -1745,6 +1757,7 @@ impl YamlFrameReader {
         let raster_space = yaml["raster-space"]
             .as_raster_space()
             .unwrap_or(RasterSpace::Screen);
+        let cache_tiles = yaml["cache"].as_bool().unwrap_or(false);
 
         if is_root {
             if let Some(size) = yaml["scroll-offset"].as_point() {
@@ -1766,6 +1779,7 @@ impl YamlFrameReader {
             mix_blend_mode,
             &filters,
             raster_space,
+            cache_tiles,
         );
 
         if !yaml["items"].is_badvalue() {

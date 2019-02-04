@@ -13,6 +13,8 @@ const { RUNTIME_PREFERENCE } =
 // situations
 const DEFAULT_PREFERENCES = {
   [RUNTIME_PREFERENCE.CONNECTION_PROMPT]: true,
+  [RUNTIME_PREFERENCE.PERMANENT_PRIVATE_BROWSING]: false,
+  [RUNTIME_PREFERENCE.SERVICE_WORKERS_ENABLED]: true,
 };
 
 // Creates a simple mock ClientWrapper.
@@ -27,6 +29,7 @@ function createClientMock() {
     _eventEmitter: eventEmitter,
     _preferences: {},
     contentProcessFronts: [],
+    serviceWorkerRegistrationFronts: [],
     addOneTimeListener: (evt, listener) => {
       eventEmitter.once(evt, listener);
     },
@@ -48,9 +51,10 @@ function createClientMock() {
         eventEmitter.off(evt, listener);
       },
     },
-
     // no-op
     close: () => {},
+    // client is not closed
+    isClosed: () => false,
     // no-op
     connect: () => {},
     // no-op

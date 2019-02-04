@@ -10,10 +10,10 @@
 #include <fstream>
 #include <prinrval.h>
 #ifdef _WINDOWS
-#include <process.h>
-#define getpid _getpid
+#  include <process.h>
+#  define getpid _getpid
 #else
-#include <unistd.h>
+#  include <unistd.h>
 #endif
 #include "base/string_util.h"
 #include "FuzzingMutate.h"
@@ -39,7 +39,7 @@
 
 #ifdef IsLoggingEnabled
 // This is defined in the Windows SDK urlmon.h
-#undef IsLoggingEnabled
+#  undef IsLoggingEnabled
 #endif
 
 namespace mozilla {
@@ -214,17 +214,12 @@ bool Faulty::IsValidProcessType(void) {
   bool isValidProcessType;
   const bool targetChildren = !!PR_GetEnv("FAULTY_CHILDREN");
   const bool targetParent = !!PR_GetEnv("FAULTY_PARENT");
-  unsigned short int currentProcessType = XRE_GetProcessType();
+  const bool isParent = XRE_IsParentProcess();
 
   if (targetChildren && !targetParent) {
     // Fuzz every child process type but not the parent process.
-    isValidProcessType = currentProcessType == GeckoProcessType_Default;
-  } else if (!targetChildren && targetParent &&
-             (currentProcessType == GeckoProcessType_Plugin ||
-              currentProcessType == GeckoProcessType_Content ||
-              currentProcessType == GeckoProcessType_GMPlugin ||
-              currentProcessType == GeckoProcessType_GPU ||
-              currentProcessType == GeckoProcessType_VR)) {
+    isValidProcessType = isParent;
+  } else if (!targetChildren && targetParent && !isParent) {
     // Fuzz inside any of the above child process only.
     isValidProcessType = true;
   } else if (targetChildren && targetParent) {

@@ -18,8 +18,8 @@ _appInfo.updateAppInfo({
   crashReporter: true,
 });
 
-const { require, loader } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
-const { worker } = ChromeUtils.import("resource://devtools/shared/worker/loader.js", {});
+const { require, loader } = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
+const { worker } = ChromeUtils.import("resource://devtools/shared/worker/loader.js");
 const defer = require("devtools/shared/defer");
 const { NetUtil } = require("resource://gre/modules/NetUtil.jsm");
 
@@ -38,7 +38,7 @@ const { DebuggerClient } = require("devtools/shared/client/debugger-client");
 const ObjectClient = require("devtools/shared/client/object-client");
 const {TargetFactory} = require("devtools/client/framework/target");
 
-const { addDebuggerToGlobal } = ChromeUtils.import("resource://gre/modules/jsdebugger.jsm", {});
+const { addDebuggerToGlobal } = ChromeUtils.import("resource://gre/modules/jsdebugger.jsm");
 
 const systemPrincipal = Cc["@mozilla.org/systemprincipal;1"]
                         .createInstance(Ci.nsIPrincipal);
@@ -390,9 +390,6 @@ async function getTestTab(client, title) {
 async function attachTestTab(client, title) {
   const targetFront = await getTestTab(client, title);
   await targetFront.attach();
-  const response = await targetFront.attach();
-  Assert.equal(response.type, "tabAttached");
-  Assert.ok(typeof response.threadActor === "string");
   return targetFront;
 }
 
@@ -804,19 +801,26 @@ function getSourceContent(sourceClient) {
  * @param string url
  * @returns Promise<SourceClient>
  */
-function getSource(threadClient, url) {
-  const deferred = defer();
-  threadClient.getSources((res) => {
-    const source = res.sources.filter(function(s) {
-      return s.url === url;
-    });
-    if (source.length) {
-      deferred.resolve(threadClient.source(source[0]));
-    } else {
-      deferred.reject(new Error("source not found"));
-    }
-  });
-  return deferred.promise;
+async function getSource(threadClient, url) {
+  const {sources} = await threadClient.getSources();
+  const source = sources.find((s) => s.url === url);
+
+  if (source) {
+    return threadClient.source(source);
+  }
+
+  throw new Error("source not found");
+}
+
+async function getSourceById(threadClient, id) {
+  const { sources } = await threadClient.getSources();
+  const form = sources.find(source => source.actor == id);
+  return threadClient.source(form);
+}
+
+async function getSourceFormById(threadClient, id) {
+  const { sources } = await threadClient.getSources();
+  return sources.find(source => source.actor == id);
 }
 
 /**

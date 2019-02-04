@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
 const { ViewHelpers } = require("devtools/client/shared/widgets/view-helpers");
 
 this.EXPORTED_SYMBOLS = ["SimpleListWidget"];
@@ -170,9 +170,8 @@ SimpleListWidget.prototype = {
     }
 
     // Ensure the element is visible but not scrolled horizontally.
-    const scrollbox = this._list;
-    scrollbox.ensureElementIsVisible(aElement);
-    scrollbox.scrollBy(-this._list.clientWidth, 0);
+    aElement.scrollIntoView({ block: "nearest" });
+    this._list.scrollBy(-this._list.clientWidth, 0);
   },
 
   /**

@@ -96,6 +96,12 @@ class nsHtml5TreeOpExecutor final
    */
   bool mAlreadyComplainedAboutCharset;
 
+  /**
+   * Whether this executor has already complained about the tree being too
+   * deep.
+   */
+  bool mAlreadyComplainedAboutDeepTree;
+
  public:
   nsHtml5TreeOpExecutor();
 
@@ -129,6 +135,8 @@ class nsHtml5TreeOpExecutor final
    * Unimplemented. For interface compat only.
    */
   NS_IMETHOD WillResume() override;
+
+  virtual void InitialDocumentTranslationCompleted() override;
 
   /**
    * Sets the parser.
@@ -190,6 +198,8 @@ class nsHtml5TreeOpExecutor final
                                  uint32_t aLineNumber);
 
   void ComplainAboutBogusProtocolCharset(mozilla::dom::Document*);
+
+  void MaybeComplainAboutDeepTree(uint32_t aLineNumber);
 
   bool HasStarted() { return mStarted; }
 

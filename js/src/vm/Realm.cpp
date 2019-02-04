@@ -53,8 +53,7 @@ Realm::Realm(Compartment* comp, const JS::RealmOptions& options)
       global_(nullptr),
       objects_(zone_),
       randomKeyGenerator_(runtime_->forkRandomKeyGenerator()),
-      wasm(runtime_),
-      performanceMonitoring(runtime_) {
+      wasm(runtime_) {
   MOZ_ASSERT_IF(creationOptions_.mergeable(),
                 creationOptions_.invisibleToDebugger());
 
@@ -170,7 +169,7 @@ bool Realm::ensureJitRealmExists(JSContext* cx) {
     return false;
   }
 
-  if (!jitRealm->initialize(cx)) {
+  if (!jitRealm->initialize(cx, zone()->allocNurseryStrings)) {
     return false;
   }
 
@@ -605,7 +604,7 @@ void Realm::checkScriptMapsAfterMovingGC() {
     }
   }
 
-#ifdef MOZ_VTUNE
+#  ifdef MOZ_VTUNE
   if (scriptVTuneIdMap) {
     for (auto r = scriptVTuneIdMap->all(); !r.empty(); r.popFront()) {
       JSScript* script = r.front().key();
@@ -615,7 +614,7 @@ void Realm::checkScriptMapsAfterMovingGC() {
       MOZ_RELEASE_ASSERT(ptr.found() && &*ptr == &r.front());
     }
   }
-#endif  // MOZ_VTUNE
+#  endif  // MOZ_VTUNE
 }
 #endif
 

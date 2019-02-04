@@ -29,7 +29,7 @@ class OOMReporter;
 
 namespace dom {
 
-class BrowsingContext;
+class BrowsingContextGroup;
 class ContentParent;
 template <typename>
 struct Nullable;
@@ -37,14 +37,6 @@ template <typename T>
 class Sequence;
 struct WindowPostMessageOptions;
 class WindowProxyHolder;
-
-// List of top-level or auxiliary BrowsingContexts
-class BrowsingContextGroup : public nsTArray<WeakPtr<BrowsingContext>> {
- public:
-  NS_INLINE_DECL_REFCOUNTING(BrowsingContextGroup)
- private:
-  ~BrowsingContextGroup() {}
-};
 
 // BrowsingContext, in this context, is the cross process replicated
 // environment in which information about documents is stored. In
@@ -74,6 +66,9 @@ class BrowsingContext : public nsWrapperCache,
 
   // Look up a BrowsingContext in the current process by ID.
   static already_AddRefed<BrowsingContext> Get(uint64_t aId);
+  static already_AddRefed<BrowsingContext> Get(GlobalObject&, uint64_t aId) {
+    return Get(aId);
+  }
 
   // Create a brand-new BrowsingContext object.
   static already_AddRefed<BrowsingContext> Create(BrowsingContext* aParent,
@@ -133,12 +128,28 @@ class BrowsingContext : public nsWrapperCache,
 
   void SetOpener(BrowsingContext* aOpener);
 
-  static void GetRootBrowsingContexts(
-      nsTArray<RefPtr<BrowsingContext>>& aBrowsingContexts);
+  BrowsingContextGroup* Group() { return mGroup; }
 
   nsISupports* GetParentObject() const;
   JSObject* WrapObject(JSContext* aCx,
                        JS::Handle<JSObject*> aGivenProto) override;
+
+  // This function would be called when its corresponding document is activated
+  // by user gesture, and we would set the flag in the top level browsing
+  // context.
+  void NotifyUserGestureActivation();
+
+  // This function would be called when we want to reset the user gesture
+  // activation flag of the top level browsing context.
+  void NotifyResetUserGestureActivation();
+
+  // These functions would only be called in the top level browsing context.
+  // They would set/reset the user gesture activation flag.
+  void SetUserGestureActivation();
+  void ResetUserGestureActivation();
+
+  // Return true if it corresponding document is activated by user gesture.
+  bool GetUserGestureActivation();
 
   // Return the window proxy object that corresponds to this browsing context.
   inline JSObject* GetWindowProxy() const { return mWindowProxy; }
@@ -204,13 +215,15 @@ class BrowsingContext : public nsWrapperCache,
   // reach its browsing context anymore.
   void ClearWindowProxy() { mWindowProxy = nullptr; }
 
+  BrowsingContext* TopLevelBrowsingContext();
+
   // Type of BrowsingContent
   const Type mType;
 
   // Unique id identifying BrowsingContext
   const uint64_t mBrowsingContextId;
 
-  RefPtr<BrowsingContextGroup> mBrowsingContextGroup;
+  RefPtr<BrowsingContextGroup> mGroup;
   RefPtr<BrowsingContext> mParent;
   Children mChildren;
   WeakPtr<BrowsingContext> mOpener;
@@ -222,6 +235,10 @@ class BrowsingContext : public nsWrapperCache,
   // objectMoved hook and clear it from its finalize hook.
   JS::Heap<JSObject*> mWindowProxy;
   bool mClosed;
+
+  // This flag is only valid in the top level browsing context, it indicates
+  // whether the corresponding document has been activated by user gesture.
+  bool mIsActivatedByUserGesture;
 };
 
 /**

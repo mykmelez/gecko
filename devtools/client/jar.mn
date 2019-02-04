@@ -109,6 +109,7 @@ devtools.jar:
     skin/images/aboutdebugging-firefox-nightly.svg (themes/images/aboutdebugging-firefox-nightly.svg)
     skin/images/aboutdebugging-firefox-release.svg (themes/images/aboutdebugging-firefox-release.svg)
     skin/images/aboutdebugging-globe-icon.svg (themes/images/aboutdebugging-globe-icon.svg)
+    skin/images/aboutdebugging-usb-icon.svg (themes/images/aboutdebugging-usb-icon.svg)
     skin/images/fox-smiling.svg (themes/images/fox-smiling.svg)
     skin/images/grid.svg (themes/images/grid.svg)
     skin/images/angle-swatch.svg (themes/images/angle-swatch.svg)
@@ -159,6 +160,7 @@ devtools.jar:
     skin/components-h-split-box.css (themes/components-h-split-box.css)
     skin/jit-optimizations.css (themes/jit-optimizations.css)
     skin/images/filter.svg (themes/images/filter.svg)
+    skin/images/filter-small.svg (themes/images/filter-small.svg)
     skin/images/search.svg (themes/images/search.svg)
     skin/images/item-toggle.svg (themes/images/item-toggle.svg)
     skin/images/item-arrow-dark-rtl.svg (themes/images/item-arrow-dark-rtl.svg)
@@ -214,8 +216,7 @@ devtools.jar:
     skin/images/close-3-pane.svg (themes/images/close-3-pane.svg)
     skin/images/open-3-pane.svg (themes/images/open-3-pane.svg)
     skin/images/vview-delete.svg (themes/images/vview-delete.svg)
-    skin/images/vview-edit.png (themes/images/vview-edit.png)
-    skin/images/vview-edit@2x.png (themes/images/vview-edit@2x.png)
+    skin/images/vview-edit.svg (themes/images/vview-edit.svg)
     skin/images/vview-lock.png (themes/images/vview-lock.png)
     skin/images/vview-lock@2x.png (themes/images/vview-lock@2x.png)
     skin/images/sort-ascending-arrow.svg (themes/images/sort-ascending-arrow.svg)
@@ -226,9 +227,7 @@ devtools.jar:
     skin/computed.css (themes/computed.css)
     skin/layout.css (themes/layout.css)
     skin/images/arrow-e.svg (themes/images/arrow-e.svg)
-    skin/images/search-clear-failed.svg (themes/images/search-clear-failed.svg)
-    skin/images/search-clear-light.svg (themes/images/search-clear-light.svg)
-    skin/images/search-clear-dark.svg (themes/images/search-clear-dark.svg)
+    skin/images/search-clear.svg (themes/images/search-clear.svg)
     skin/images/reload.svg (themes/images/reload.svg)
     skin/images/file-type-general.svg (netmonitor/src/assets/icons/file-type-general.svg)
     skin/images/file-type-image.svg (netmonitor/src/assets/icons/file-type-image.svg)
@@ -264,4 +263,3 @@ devtools.jar:
 
     # Application panel
     content/application/index.html (application/index.html)
-

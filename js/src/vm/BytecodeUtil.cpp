@@ -1429,6 +1429,14 @@ static unsigned Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
       break;
     }
 
+    case JOF_CODE_OFFSET: {
+      ptrdiff_t off = GET_CODE_OFFSET(pc);
+      if (!sp->jsprintf(" %u (%+d)", unsigned(loc + int(off)), int(off))) {
+        return 0;
+      }
+      break;
+    }
+
     case JOF_SCOPE: {
       RootedScope scope(cx, script->getScope(GET_UINT32_INDEX(pc)));
       UniqueChars bytes;
@@ -1442,8 +1450,7 @@ static unsigned Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
     }
 
     case JOF_ENVCOORD: {
-      RootedValue v(cx, StringValue(EnvironmentCoordinateName(
-                            cx->caches().envCoordinateNameCache, script, pc)));
+      RootedValue v(cx, StringValue(EnvironmentCoordinateNameSlow(script, pc)));
       UniqueChars bytes = ToDisassemblySource(cx, v);
       if (!bytes) {
         return 0;
@@ -1468,10 +1475,10 @@ static unsigned Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
       break;
     }
 
-#ifdef ENABLE_BIGINT
+#  ifdef ENABLE_BIGINT
     case JOF_BIGINT:
       // Fallthrough.
-#endif
+#  endif
     case JOF_DOUBLE: {
       RootedValue v(cx, script->getConst(GET_UINT32_INDEX(pc)));
       UniqueChars bytes = ToDisassemblySource(cx, v);
@@ -1563,6 +1570,19 @@ static unsigned Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
 
     case JOF_UINT32:
       if (!sp->jsprintf(" %u", GET_UINT32(pc))) {
+        return 0;
+      }
+      break;
+
+    case JOF_ICINDEX:
+      if (!sp->jsprintf(" (ic: %u)", GET_ICINDEX(pc))) {
+        return 0;
+      }
+      break;
+
+    case JOF_LOOPENTRY:
+      if (!sp->jsprintf(" (ic: %u, data: %u,%u)", GET_ICINDEX(pc),
+                        LoopEntryCanIonOsr(pc), LoopEntryDepthHint(pc))) {
         return 0;
       }
       break;
@@ -1770,8 +1790,7 @@ bool ExpressionDecompiler::decompilePC(jsbytecode* pc, uint8_t defIndex) {
       return write(atom);
     }
     case JSOP_GETALIASEDVAR: {
-      JSAtom* atom = EnvironmentCoordinateName(
-          cx->caches().envCoordinateNameCache, script, pc);
+      JSAtom* atom = EnvironmentCoordinateNameSlow(script, pc);
       MOZ_ASSERT(atom);
       return write(atom);
     }
@@ -2182,6 +2201,9 @@ UniqueChars ExpressionDecompiler::getOutput() {
 static bool DecompileAtPCForStackDump(
     JSContext* cx, HandleScript script,
     const OffsetAndDefIndex& offsetAndDefIndex, Sprinter* sp) {
+  // The expression decompiler asserts the script is in the current realm.
+  AutoRealm ar(cx, script);
+
   LifoAllocScope allocScope(&cx->tempLifoAlloc());
   BytecodeParser parser(cx, allocScope.alloc(), script);
   parser.setStackDump();

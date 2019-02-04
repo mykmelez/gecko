@@ -10,7 +10,7 @@
    closeDebugger, checkConsoleAPICalls, checkRawHeaders, runTests, nextTest, Ci, Cc,
    withActiveServiceWorker, Services, consoleAPICall */
 
-const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
 const {DebuggerServer} = require("devtools/server/main");
 const {DebuggerClient} = require("devtools/shared/client/debugger-client");
 const ObjectClient = require("devtools/shared/client/object-client");
@@ -84,7 +84,7 @@ var _attachConsole = async function(
         worker = new Worker(workerName);
         await waitForMessage(worker);
 
-        const { workers } = await target.activeTab.listWorkers();
+        const { workers } = await target.listWorkers();
         const workerTargetFront = workers.filter(w => w.url == workerName)[0];
         if (!workerTargetFront) {
           console.error("listWorkers failed. Unable to find the worker actor\n");

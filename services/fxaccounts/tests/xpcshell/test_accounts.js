@@ -3,16 +3,14 @@
 
 "use strict";
 
-ChromeUtils.import("resource://services-common/utils.js");
-ChromeUtils.import("resource://gre/modules/FxAccounts.jsm");
-ChromeUtils.import("resource://gre/modules/FxAccountsClient.jsm");
-ChromeUtils.import("resource://gre/modules/FxAccountsCommon.js");
-ChromeUtils.import("resource://gre/modules/FxAccountsOAuthGrantClient.jsm");
-ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Log.jsm");
+const {FxAccounts} = ChromeUtils.import("resource://gre/modules/FxAccounts.jsm");
+const {FxAccountsClient} = ChromeUtils.import("resource://gre/modules/FxAccountsClient.jsm");
+const {ASSERTION_LIFETIME, CERT_LIFETIME, ERRNO_INVALID_AUTH_TOKEN, ERRNO_INVALID_FXA_ASSERTION, ERRNO_NETWORK, ERROR_INVALID_FXA_ASSERTION, ERROR_NETWORK, KEY_LIFETIME, ONLOGIN_NOTIFICATION, ONLOGOUT_NOTIFICATION, ONVERIFIED_NOTIFICATION} = ChromeUtils.import("resource://gre/modules/FxAccountsCommon.js");
+const {FxAccountsOAuthGrantClient, FxAccountsOAuthGrantClientError} = ChromeUtils.import("resource://gre/modules/FxAccountsOAuthGrantClient.jsm");
+const {PromiseUtils} = ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
 
 // We grab some additional stuff via backstage passes.
-var {AccountState} = ChromeUtils.import("resource://gre/modules/FxAccounts.jsm", {});
+var {AccountState} = ChromeUtils.import("resource://gre/modules/FxAccounts.jsm", null);
 
 const ONE_HOUR_MS = 1000 * 60 * 60;
 const ONE_DAY_MS = ONE_HOUR_MS * 24;
@@ -1111,7 +1109,6 @@ add_test(function test_getOAuthToken() {
       );
     }
   );
-
 });
 
 add_test(function test_getOAuthTokenScoped() {
@@ -1144,7 +1141,6 @@ add_test(function test_getOAuthTokenScoped() {
       );
     }
   );
-
 });
 
 add_task(async function test_getOAuthTokenCached() {
@@ -1446,13 +1442,13 @@ add_task(async function test_checkVerificationStatusFailed() {
   Assert.equal(user.sessionToken, null);
 });
 
-add_test(function test_deriveKeys() {
+add_task(async function test_deriveKeys() {
   let account = MakeFxAccounts();
   let kBhex = "fd5c747806c07ce0b9d69dcfea144663e630b65ec4963596a22f24910d7dd15d";
   let kB = CommonUtils.hexToBytes(kBhex);
   const uid = "1ad7f502-4cc7-4ec1-a209-071fd2fae348";
 
-  const {kSync, kXCS, kExtSync, kExtKbHash} = account.internal._deriveKeys(uid, kB);
+  const {kSync, kXCS, kExtSync, kExtKbHash} = await account.internal._deriveKeys(uid, kB);
 
   Assert.equal(kSync, "ad501a50561be52b008878b2e0d8a73357778a712255f7722f497b5d4df14b05" +
                       "dc06afb836e1521e882f521eb34691d172337accdbf6e2a5b968b05a7bbb9885");
@@ -1460,7 +1456,6 @@ add_test(function test_deriveKeys() {
   Assert.equal(kExtSync, "f5ccd9cfdefd9b1ac4d02c56964f59239d8dfa1ca326e63696982765c1352cdc" +
                          "5d78a5a9c633a6d25edfea0a6c221a3480332a49fd866f311c2e3508ddd07395");
   Assert.equal(kExtKbHash, "6192f1cc7dce95334455ba135fa1d8fca8f70e8f594ae318528de06f24ed0273");
-  run_next_test();
 });
 
 /*

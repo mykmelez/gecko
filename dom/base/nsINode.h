@@ -30,9 +30,9 @@
 
 // Including 'windows.h' will #define GetClassInfo to something else.
 #ifdef XP_WIN
-#ifdef GetClassInfo
-#undef GetClassInfo
-#endif
+#  ifdef GetClassInfo
+#    undef GetClassInfo
+#  endif
 #endif
 
 class AttrArray;
@@ -466,6 +466,8 @@ class nsINode : public mozilla::dom::EventTarget {
    * global object as the scope chain parent.
    */
   virtual nsINode* GetScopeChainParent() const;
+
+  MOZ_CAN_RUN_SCRIPT mozilla::dom::Element* GetParentFlexElement();
 
   /**
    * Return whether the node is an Element node

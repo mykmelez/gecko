@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{
-    ColorF, ColorU, LayoutPrimitiveInfo, LayoutRect, LayoutSizeAu,
+    ColorF, ColorU, LayoutPrimitiveInfo, LayoutSizeAu, LayoutVector2D,
     LineOrientation, LineStyle, PremultipliedColorF, Shadow,
 };
 use app_units::Au;
@@ -11,13 +11,14 @@ use display_list_flattener::{AsInstanceKind, CreateShadow, IsVisible};
 use frame_builder::{FrameBuildingState};
 use gpu_cache::GpuDataRequest;
 use intern;
+use intern_types;
 use prim_store::{
     PrimKey, PrimKeyCommonData, PrimTemplate, PrimTemplateCommonData,
     PrimitiveSceneData, PrimitiveStore,
 };
 use prim_store::PrimitiveInstanceKind;
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, MallocSizeOf, PartialEq, Eq)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct LineDecorationCacheKey {
@@ -28,7 +29,7 @@ pub struct LineDecorationCacheKey {
 }
 
 /// Identifying key for a line decoration.
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, MallocSizeOf, PartialEq, Eq)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct LineDecoration {
@@ -45,13 +46,11 @@ pub type LineDecorationKey = PrimKey<LineDecoration>;
 impl LineDecorationKey {
     pub fn new(
         info: &LayoutPrimitiveInfo,
-        prim_relative_clip_rect: LayoutRect,
         line_dec: LineDecoration,
     ) -> Self {
         LineDecorationKey {
             common: PrimKeyCommonData::with_info(
                 info,
-                prim_relative_clip_rect,
             ),
             kind: line_dec,
         }
@@ -67,6 +66,7 @@ impl AsInstanceKind<LineDecorationDataHandle> for LineDecorationKey {
         &self,
         data_handle: LineDecorationDataHandle,
         _: &mut PrimitiveStore,
+        _reference_frame_relative_offset: LayoutVector2D,
     ) -> PrimitiveInstanceKind {
         PrimitiveInstanceKind::LineDecoration {
             data_handle,
@@ -77,6 +77,7 @@ impl AsInstanceKind<LineDecorationDataHandle> for LineDecorationKey {
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
+#[derive(MallocSizeOf)]
 pub struct LineDecorationData {
     pub cache_key: Option<LineDecorationCacheKey>,
     pub color: ColorF,
@@ -134,18 +135,10 @@ impl From<LineDecorationKey> for LineDecorationTemplate {
     }
 }
 
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
-pub struct LineDecorationDataMarker;
-
-pub type LineDecorationDataStore = intern::DataStore<LineDecorationKey, LineDecorationTemplate, LineDecorationDataMarker>;
-pub type LineDecorationDataHandle = intern::Handle<LineDecorationDataMarker>;
-pub type LineDecorationDataUpdateList = intern::UpdateList<LineDecorationKey>;
-pub type LineDecorationDataInterner = intern::Interner<LineDecorationKey, PrimitiveSceneData, LineDecorationDataMarker>;
+pub use intern_types::line_decoration::Handle as LineDecorationDataHandle;
 
 impl intern::Internable for LineDecoration {
-    type Marker = LineDecorationDataMarker;
+    type Marker = intern_types::line_decoration::Marker;
     type Source = LineDecorationKey;
     type StoreData = LineDecorationTemplate;
     type InternData = PrimitiveSceneData;
@@ -154,11 +147,9 @@ impl intern::Internable for LineDecoration {
     fn build_key(
         self,
         info: &LayoutPrimitiveInfo,
-        prim_relative_clip_rect: LayoutRect,
     ) -> LineDecorationKey {
         LineDecorationKey::new(
             info,
-            prim_relative_clip_rect,
             self,
         )
     }
@@ -190,6 +181,6 @@ fn test_struct_sizes() {
     // (b) You made a structure larger. This is not necessarily a problem, but should only
     //     be done with care, and after checking if talos performance regresses badly.
     assert_eq!(mem::size_of::<LineDecoration>(), 20, "LineDecoration size changed");
-    assert_eq!(mem::size_of::<LineDecorationTemplate>(), 68, "LineDecorationTemplate size changed");
-    assert_eq!(mem::size_of::<LineDecorationKey>(), 48, "LineDecorationKey size changed");
+    assert_eq!(mem::size_of::<LineDecorationTemplate>(), 52, "LineDecorationTemplate size changed");
+    assert_eq!(mem::size_of::<LineDecorationKey>(), 32, "LineDecorationKey size changed");
 }

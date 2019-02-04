@@ -12,9 +12,8 @@ debug("loaded");
 
 var BrowserElementIsReady;
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/BrowserElementPromptService.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+var {BrowserElementPromptService} = ChromeUtils.import("resource://gre/modules/BrowserElementPromptService.jsm");
 
 var kLongestReturnedString = 128;
 
@@ -1201,14 +1200,6 @@ BrowserElementChild.prototype = {
         securityStateDesc = '???';
       }
 
-      var trackingStateDesc;
-      if (state & Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT) {
-        trackingStateDesc = 'loaded_tracking_content';
-      }
-      else if (state & Ci.nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT) {
-        trackingStateDesc = 'blocked_tracking_content';
-      }
-
       var mixedStateDesc;
       if (state & Ci.nsIWebProgressListener.STATE_BLOCKED_MIXED_ACTIVE_CONTENT) {
         mixedStateDesc = 'blocked_mixed_active_content';
@@ -1219,19 +1210,14 @@ BrowserElementChild.prototype = {
       }
 
       var isEV = !!(state & Ci.nsIWebProgressListener.STATE_IDENTITY_EV_TOPLEVEL);
-      var isTrackingContent = !!(state &
-        (Ci.nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT |
-        Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT));
       var isMixedContent = !!(state &
         (Ci.nsIWebProgressListener.STATE_BLOCKED_MIXED_ACTIVE_CONTENT |
         Ci.nsIWebProgressListener.STATE_LOADED_MIXED_ACTIVE_CONTENT));
 
       sendAsyncMsg('securitychange', {
         state: securityStateDesc,
-        trackingState: trackingStateDesc,
         mixedState: mixedStateDesc,
         extendedValidation: isEV,
-        trackingContent: isTrackingContent,
         mixedContent: isMixedContent,
       });
     },

@@ -4,14 +4,19 @@
 
 "use strict";
 
-var EXPORTED_SYMBOLS = ["QueryContext", "UrlbarController"];
+var EXPORTED_SYMBOLS = [
+  "UrlbarController",
+];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.jsm",
   // BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.jsm",
+  PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
   UrlbarProvidersManager: "resource:///modules/UrlbarProvidersManager.jsm",
+  UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
 });
 
 const TELEMETRY_1ST_RESULT = "PLACES_AUTOCOMPLETE_1ST_RESULT_TIME_MS";
@@ -28,6 +33,7 @@ const TELEMETRY_6_FIRST_RESULTS = "PLACES_AUTOCOMPLETE_6_FIRST_RESULTS_TIME_MS";
  * - onQueryResults(queryContext)
  * - onQueryCancelled(queryContext)
  * - onQueryFinished(queryContext)
+ * - onQueryResultRemoved(index)
  */
 class UrlbarController {
   /**
@@ -80,7 +86,7 @@ class UrlbarController {
   /**
    * Takes a query context and starts the query based on the user input.
    *
-   * @param {QueryContext} queryContext The query details.
+   * @param {UrlbarQueryContext} queryContext The query details.
    */
   async startQuery(queryContext) {
     // Cancel any running query.
@@ -89,52 +95,58 @@ class UrlbarController {
     }
     this._lastQueryContext = queryContext;
 
-    queryContext.autoFill = UrlbarPrefs.get("autoFill");
-
-    queryContext.lastTelemetryResultCount = 0;
+    queryContext.lastResultCount = 0;
     TelemetryStopwatch.start(TELEMETRY_1ST_RESULT, queryContext);
     TelemetryStopwatch.start(TELEMETRY_6_FIRST_RESULTS, queryContext);
 
     this._notify("onQueryStarted", queryContext);
     await this.manager.startQuery(queryContext, this);
     this._notify("onQueryFinished", queryContext);
+    return queryContext;
   }
 
   /**
    * Cancels an in-progress query. Note, queries may continue running if they
    * can't be canceled.
-   *
-   * @param {QueryContext} queryContext The query details.
    */
-  cancelQuery(queryContext) {
-    if (queryContext === this._lastQueryContext) {
-      delete this._lastQueryContext;
+  cancelQuery() {
+    if (!this._lastQueryContext) {
+      return;
     }
 
-    TelemetryStopwatch.cancel(TELEMETRY_1ST_RESULT, queryContext);
-    TelemetryStopwatch.cancel(TELEMETRY_6_FIRST_RESULTS, queryContext);
+    TelemetryStopwatch.cancel(TELEMETRY_1ST_RESULT, this._lastQueryContext);
+    TelemetryStopwatch.cancel(TELEMETRY_6_FIRST_RESULTS, this._lastQueryContext);
 
-    this.manager.cancelQuery(queryContext);
-    this._notify("onQueryCancelled", queryContext);
+    this.manager.cancelQuery(this._lastQueryContext);
+    this._notify("onQueryCancelled", this._lastQueryContext);
+    delete this._lastQueryContext;
   }
 
   /**
    * Receives results from a query.
    *
-   * @param {QueryContext} queryContext The query details.
+   * @param {UrlbarQueryContext} queryContext The query details.
    */
   receiveResults(queryContext) {
-    if (queryContext.lastTelemetryResultCount < 1 &&
-        queryContext.results.length >= 1) {
+    if (queryContext.lastResultCount < 1 && queryContext.results.length >= 1) {
       TelemetryStopwatch.finish(TELEMETRY_1ST_RESULT, queryContext);
     }
-    if (queryContext.lastTelemetryResultCount < 6 &&
-        queryContext.results.length >= 6) {
+    if (queryContext.lastResultCount < 6 && queryContext.results.length >= 6) {
       TelemetryStopwatch.finish(TELEMETRY_6_FIRST_RESULTS, queryContext);
     }
-    queryContext.lastTelemetryResultCount = queryContext.results.length;
+
+    if (queryContext.lastResultCount == 0) {
+      if (queryContext.autofillValue) {
+        this.input.autofill(queryContext.autofillValue);
+      }
+      // The first time we receive results try to connect to the heuristic
+      // result.
+      this.speculativeConnect(queryContext, 0, "resultsadded");
+    }
 
     this._notify("onQueryResults", queryContext);
+    // Update lastResultCount after notifying, so the view can use it.
+    queryContext.lastResultCount = queryContext.results.length;
   }
 
   /**
@@ -175,8 +187,9 @@ class UrlbarController {
    *   The DOM KeyboardEvent.
    */
   handleKeyNavigation(event) {
+    const isMac = AppConstants.platform == "macosx";
     // Handle readline/emacs-style navigation bindings on Mac.
-    if (AppConstants.platform == "macosx" &&
+    if (isMac &&
         this.view.isOpen &&
         event.ctrlKey &&
         (event.key == "n" || event.key == "p")) {
@@ -191,12 +204,11 @@ class UrlbarController {
         event.preventDefault();
         break;
       case KeyEvent.DOM_VK_RETURN:
-        if (AppConstants.platform == "macosx" &&
+        if (isMac &&
             event.metaKey) {
           // Prevent beep on Mac.
           event.preventDefault();
         }
-        // TODO: We may have an autoFill entry, so we should use that instead.
         // TODO: We should have an input bufferrer so that we can use search results
         // if appropriate.
         this.input.handleCommand(event);
@@ -219,7 +231,104 @@ class UrlbarController {
           event.preventDefault();
         }
         break;
+      case KeyEvent.DOM_VK_DELETE:
+        if (isMac && !event.shiftKey) {
+          break;
+        }
+        if (this._handleDeleteEntry()) {
+          event.preventDefault();
+        }
+        break;
+      case KeyEvent.DOM_VK_BACK_SPACE:
+        if (isMac && event.shiftKey &&
+            this._handleDeleteEntry()) {
+          event.preventDefault();
+        }
+        break;
     }
+  }
+
+  /**
+   * Tries to initialize a speculative connection on a result.
+   * Speculative connections are only supported for a subset of all the results.
+   * @param {UrlbarQueryContext} context The queryContext
+   * @param {number} resultIndex index of the result to speculative connect to.
+   * @param {string} reason Reason for the speculative connect request.
+   * @note speculative connect to:
+   *  - Search engine heuristic results
+   *  - autofill results
+   *  - http/https results
+   */
+  speculativeConnect(context, resultIndex, reason) {
+    // Never speculative connect in private contexts.
+    if (!this.input || context.isPrivate || context.results.length == 0) {
+      return;
+    }
+    let result = context.results[resultIndex];
+    let {url} = UrlbarUtils.getUrlFromResult(result);
+    if (!url) {
+      return;
+    }
+
+    switch (reason) {
+      case "resultsadded": {
+        // We should connect to an heuristic result, if it exists.
+        if (resultIndex == 0 && (context.preselected || context.autofillValue)) {
+          if (result.type == UrlbarUtils.RESULT_TYPE.SEARCH) {
+            // Speculative connect only if search suggestions are enabled.
+            if (UrlbarPrefs.get("suggest.searches") &&
+                UrlbarPrefs.get("browser.search.suggest.enabled")) {
+              let engine = Services.search.defaultEngine;
+              UrlbarUtils.setupSpeculativeConnection(engine, this.browserWindow);
+            }
+          } else if (context.autofillValue) {
+            UrlbarUtils.setupSpeculativeConnection(url, this.browserWindow);
+          }
+        }
+        return;
+      }
+      case "mousedown": {
+        // On mousedown, connect only to http/https urls.
+        if (url.startsWith("http")) {
+          UrlbarUtils.setupSpeculativeConnection(url, this.browserWindow);
+        }
+        return;
+      }
+      default: {
+        throw new Error("Invalid speculative connection reason");
+      }
+    }
+  }
+
+  /**
+   * Internal function handling deletion of entries. We only support removing
+   * of history entries - other result sources will be ignored.
+   *
+   * @returns {boolean} Returns true if the deletion was acted upon.
+   */
+  _handleDeleteEntry() {
+    if (!this._lastQueryContext) {
+      Cu.reportError("Cannot delete - the latest query is not present");
+      return false;
+    }
+
+    const selectedResult = this.input.view.selectedResult;
+    if (!selectedResult ||
+        selectedResult.source != UrlbarUtils.RESULT_SOURCE.HISTORY) {
+      return false;
+    }
+
+    let index = this._lastQueryContext.results.indexOf(selectedResult);
+    if (!index) {
+      Cu.reportError("Failed to find the selected result in the results");
+      return false;
+    }
+
+    this._lastQueryContext.results.splice(index, 1);
+    this._notify("onQueryResultRemoved", index);
+
+    PlacesUtils.history.remove(selectedResult.payload.url).catch(Cu.reportError);
+    return true;
   }
 
   /**

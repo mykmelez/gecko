@@ -24,7 +24,7 @@
 #include "nsString.h"
 
 #if defined(XP_WIN) && defined(MOZ_SANDBOX)
-#include "sandboxBroker.h"
+#  include "sandboxBroker.h"
 #endif
 
 namespace mozilla {
@@ -162,12 +162,12 @@ class GeckoChildProcessHost : public ChildProcessHost {
   void InitWindowsGroupID();
   nsString mGroupId;
 
-#ifdef MOZ_SANDBOX
+#  ifdef MOZ_SANDBOX
   SandboxBroker mSandboxBroker;
   std::vector<std::wstring> mAllowedFilesRead;
   bool mEnableSandboxLogging;
   int32_t mSandboxLevel;
-#endif
+#  endif
 #endif  // XP_WIN
 
   ProcessHandle mChildProcessHandle;
@@ -181,13 +181,13 @@ class GeckoChildProcessHost : public ChildProcessHost {
  private:
   DISALLOW_EVIL_CONSTRUCTORS(GeckoChildProcessHost);
 
-  // Does the actual work for AsyncLaunch; run in a thread pool
-  // (or, on Windows, a dedicated thread).
+  // Does the actual work for AsyncLaunch, on the IO thread.
+  // (TODO, bug 1487287: move this to its own thread(s).)
   bool PerformAsyncLaunch(StringVector aExtraOpts);
 
-  // Called on the I/O thread; creates channel, dispatches
-  // PerformAsyncLaunch, and consolidates error handling.
-  void RunPerformAsyncLaunch(StringVector aExtraOpts);
+  // Also called on the I/O thread; creates channel, launches, and
+  // consolidates error handling.
+  bool RunPerformAsyncLaunch(StringVector aExtraOpts);
 
   enum class BinaryPathType { Self, PluginContainer };
 

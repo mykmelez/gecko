@@ -21,12 +21,10 @@ pub struct PremultipliedColorF {
     pub a: f32,
 }
 
+#[allow(missing_docs)]
 impl PremultipliedColorF {
-    ///
     pub const BLACK: Self = PremultipliedColorF { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
-    ///
     pub const TRANSPARENT: Self = PremultipliedColorF { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
-    ///
     pub const WHITE: Self = PremultipliedColorF { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
 
     pub fn to_array(&self) -> [f32; 4] {
@@ -39,7 +37,7 @@ impl PremultipliedColorF {
 /// All components must be between 0.0 and 1.0.
 /// An alpha value of 1.0 is opaque while 0.0 is fully transparent.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, MallocSizeOf, PartialEq, Serialize)]
 pub struct ColorF {
     pub r: f32,
     pub g: f32,
@@ -47,12 +45,10 @@ pub struct ColorF {
     pub a: f32,
 }
 
+#[allow(missing_docs)]
 impl ColorF {
-    ///
     pub const BLACK: Self = ColorF { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
-    ///
     pub const TRANSPARENT: Self = ColorF { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
-    ///
     pub const WHITE: Self = ColorF { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
 
     /// Constructs a new `ColorF` from its components.
@@ -112,7 +108,7 @@ impl Hash for PremultipliedColorF {
 ///
 /// If the alpha value `a` is 255 the color is opaque.
 #[repr(C)]
-#[derive(Clone, Copy, Hash, Eq, Debug, Deserialize, PartialEq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Copy, Hash, Eq, Debug, Deserialize, MallocSizeOf, PartialEq, PartialOrd, Ord, Serialize)]
 pub struct ColorU {
     pub r: u8,
     pub g: u8,

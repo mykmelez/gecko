@@ -13,13 +13,13 @@
 #include <algorithm>
 
 #ifdef DEBUG_brendan
-#define METERING
+#  define METERING
 #endif
 
 #ifdef METERING
-#include <stdio.h>
-#define METER(x) x
-#define MAX_BIG_SEEKS 20
+#  include <stdio.h>
+#  define METER(x) x
+#  define MAX_BIG_SEEKS 20
 
 static struct {
   uint32_t mSeeksWithinBuffer;
@@ -34,7 +34,7 @@ static struct {
   } mBigSeek[MAX_BIG_SEEKS];
 } bufstats;
 #else
-#define METER(x) /* nothing */
+#  define METER(x) /* nothing */
 #endif
 
 using namespace mozilla::ipc;
@@ -590,7 +590,36 @@ nsBufferedInputStream::GetUnbufferedStream(nsISupports** aStream) {
 }
 
 void nsBufferedInputStream::Serialize(InputStreamParams& aParams,
-                                      FileDescriptorArray& aFileDescriptors) {
+                                      FileDescriptorArray& aFileDescriptors,
+                                      bool aDelayedStart,
+                                      mozilla::dom::nsIContentChild* aManager) {
+  SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aManager);
+}
+
+void nsBufferedInputStream::Serialize(InputStreamParams& aParams,
+                                      FileDescriptorArray& aFileDescriptors,
+                                      bool aDelayedStart,
+                                      PBackgroundChild* aManager) {
+  SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aManager);
+}
+
+void nsBufferedInputStream::Serialize(
+    InputStreamParams& aParams, FileDescriptorArray& aFileDescriptors,
+    bool aDelayedStart, mozilla::dom::nsIContentParent* aManager) {
+  SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aManager);
+}
+
+void nsBufferedInputStream::Serialize(InputStreamParams& aParams,
+                                      FileDescriptorArray& aFileDescriptors,
+                                      bool aDelayedStart,
+                                      PBackgroundParent* aManager) {
+  SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aManager);
+}
+
+template <typename M>
+void nsBufferedInputStream::SerializeInternal(
+    InputStreamParams& aParams, FileDescriptorArray& aFileDescriptors,
+    bool aDelayedStart, M* aManager) {
   BufferedInputStreamParams params;
 
   if (mStream) {
@@ -598,8 +627,8 @@ void nsBufferedInputStream::Serialize(InputStreamParams& aParams,
     MOZ_ASSERT(stream);
 
     InputStreamParams wrappedParams;
-    InputStreamHelper::SerializeInputStream(stream, wrappedParams,
-                                            aFileDescriptors);
+    InputStreamHelper::SerializeInputStream(
+        stream, wrappedParams, aFileDescriptors, aDelayedStart, aManager);
 
     params.optionalStream() = wrappedParams;
   } else {
@@ -640,14 +669,6 @@ bool nsBufferedInputStream::Deserialize(
   NS_ENSURE_SUCCESS(rv, false);
 
   return true;
-}
-
-Maybe<uint64_t> nsBufferedInputStream::ExpectedSerializedLength() {
-  nsCOMPtr<nsIIPCSerializableInputStream> stream = do_QueryInterface(mStream);
-  if (stream) {
-    return stream->ExpectedSerializedLength();
-  }
-  return Nothing();
 }
 
 NS_IMETHODIMP

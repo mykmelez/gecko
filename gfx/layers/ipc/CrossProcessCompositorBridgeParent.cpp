@@ -14,7 +14,7 @@
 #include "base/task.h"                // for CancelableTask, etc
 #include "base/thread.h"              // for Thread
 #ifdef XP_WIN
-#include "mozilla/gfx/DeviceManagerDx.h"  // for DeviceManagerDx
+#  include "mozilla/gfx/DeviceManagerDx.h"  // for DeviceManagerDx
 #endif
 #include "mozilla/ipc/Transport.h"           // for Transport
 #include "mozilla/layers/AnimationHelper.h"  // for CompositorAnimationStorage
@@ -380,7 +380,8 @@ void CrossProcessCompositorBridgeParent::ShadowLayersUpdated(
       }
     };
     profiler_add_marker_for_thread(
-        profiler_current_thread_id(), "CONTENT_FULL_PAINT_TIME",
+        profiler_current_thread_id(),
+        js::ProfilingStackFrame::Category::GRAPHICS, "CONTENT_FULL_PAINT_TIME",
         MakeUnique<ContentBuildPayload>(aInfo.transactionStart(), endTime));
   }
 #endif
@@ -389,9 +390,12 @@ void CrossProcessCompositorBridgeParent::ShadowLayersUpdated(
       static_cast<uint32_t>(
           (endTime - aInfo.transactionStart()).ToMilliseconds()));
 
+  RegisterPayload(aLayerTree, aInfo.payload());
+
   aLayerTree->SetPendingTransactionId(
       aInfo.id(), aInfo.vsyncId(), aInfo.vsyncStart(), aInfo.refreshStart(),
-      aInfo.transactionStart(), endTime, aInfo.url(), aInfo.fwdTime());
+      aInfo.transactionStart(), endTime, aInfo.containsSVG(), aInfo.url(),
+      aInfo.fwdTime());
 }
 
 void CrossProcessCompositorBridgeParent::DidCompositeLocked(

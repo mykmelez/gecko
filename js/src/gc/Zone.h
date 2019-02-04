@@ -9,6 +9,7 @@
 
 #include "mozilla/Atomics.h"
 #include "mozilla/HashFunctions.h"
+#include "mozilla/SegmentedVector.h"
 
 #include "gc/FindSCCs.h"
 #include "js/GCHashTable.h"
@@ -186,8 +187,17 @@ class Zone : public JS::shadow::Zone,
 
   void findOutgoingEdges(js::gc::ZoneComponentFinder& finder);
 
-  void discardJitCode(js::FreeOp* fop, bool discardBaselineCode = true,
-                      bool releaseTypes = false);
+  enum ShouldDiscardBaselineCode : bool {
+    KeepBaselineCode = false,
+    DiscardBaselineCode
+  };
+
+  enum ShouldReleaseTypes : bool { KeepTypes = false, ReleaseTypes };
+
+  void discardJitCode(
+      js::FreeOp* fop,
+      ShouldDiscardBaselineCode discardBaselineCode = DiscardBaselineCode,
+      ShouldReleaseTypes releaseTypes = KeepTypes);
 
   void addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                               size_t* typePool, size_t* regexpZone,
@@ -260,6 +270,10 @@ class Zone : public JS::shadow::Zone,
   void setNeedsIncrementalBarrier(bool needs);
   const uint32_t* addressOfNeedsIncrementalBarrier() const {
     return &needsIncrementalBarrier_;
+  }
+
+  static constexpr size_t offsetOfNeedsIncrementalBarrier() {
+    return offsetof(Zone, needsIncrementalBarrier_);
   }
 
   js::jit::JitZone* getJitZone(JSContext* cx) {
@@ -362,7 +376,9 @@ class Zone : public JS::shadow::Zone,
   CompartmentVector& compartments() { return compartments_.ref(); }
 
   // This zone's gray roots.
-  typedef js::Vector<js::gc::Cell*, 0, js::SystemAllocPolicy> GrayRootVector;
+  using GrayRootVector = mozilla::SegmentedVector<js::gc::Cell*,
+                                                  1024 * sizeof(js::gc::Cell*),
+                                                  js::SystemAllocPolicy>;
 
  private:
   js::ZoneOrGCTaskData<GrayRootVector> gcGrayRoots_;
@@ -533,8 +549,8 @@ class Zone : public JS::shadow::Zone,
     return functionToStringCache_.ref();
   }
 
-  // Track heap usage under this Zone.
-  js::gc::HeapUsage usage;
+  // Track heap size under this Zone.
+  js::gc::HeapSize zoneSize;
 
   // Thresholds used to trigger GC.
   js::gc::ZoneHeapThreshold threshold;

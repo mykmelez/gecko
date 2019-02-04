@@ -12,7 +12,7 @@
 #include <algorithm>
 
 #ifdef MOZ_TOOLKIT_SEARCH
-#include "nsIBrowserSearchService.h"
+#  include "nsISearchService.h"
 #endif
 
 #include "nsIURIFixup.h"
@@ -51,8 +51,7 @@ nsDefaultURIFixup::CreateExposableURI(nsIURI* aURI, nsIURI** aReturn) {
   NS_ENSURE_ARG_POINTER(aURI);
   NS_ENSURE_ARG_POINTER(aReturn);
 
-  bool isWyciwyg = false;
-  aURI->SchemeIs("wyciwyg", &isWyciwyg);
+  bool isWyciwyg = net::SchemeIsWYCIWYG(aURI);
 
   nsAutoCString userPass;
   aURI->GetUserPass(userPass);
@@ -442,7 +441,7 @@ nsDefaultURIFixup::KeywordToURI(const nsACString& aKeyword,
 
 #ifdef MOZ_TOOLKIT_SEARCH
   // Try falling back to the search service's default search engine
-  nsCOMPtr<nsIBrowserSearchService> searchSvc =
+  nsCOMPtr<nsISearchService> searchSvc =
       do_GetService("@mozilla.org/browser/search-service;1");
   if (searchSvc) {
     nsCOMPtr<nsISearchEngine> defaultEngine;
@@ -515,9 +514,7 @@ bool nsDefaultURIFixup::MakeAlternateURI(nsCOMPtr<nsIURI>& aURI) {
   }
 
   // Code only works for http. Not for any other protocol including https!
-  bool isHttp = false;
-  aURI->SchemeIs("http", &isHttp);
-  if (!isHttp) {
+  if (!net::SchemeIsHTTP(aURI)) {
     return false;
   }
 

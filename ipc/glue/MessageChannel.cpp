@@ -10,6 +10,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/ipc/ProcessChild.h"
 #include "mozilla/ipc/ProtocolUtils.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Move.h"
@@ -29,7 +30,7 @@
 #include <math.h>
 
 #ifdef MOZ_TASK_TRACER
-#include "GeckoTaskTracer.h"
+#  include "GeckoTaskTracer.h"
 using namespace mozilla::tasktracer;
 #endif
 
@@ -1890,7 +1891,7 @@ void MessageChannel::RunMessage(MessageTask& aTask) {
 
   // Check that we're going to run the first message that's valid to run.
 #if 0
-#ifdef DEBUG
+#  ifdef DEBUG
     nsCOMPtr<nsIEventTarget> messageTarget =
         mListener->GetMessageEventTarget(msg);
 
@@ -1907,7 +1908,7 @@ void MessageChannel::RunMessage(MessageTask& aTask) {
                    aTask.Msg().priority() != task->Msg().priority());
 
     }
-#endif
+#  endif
 #endif
 
   if (!mDeferred.empty()) {
@@ -2328,14 +2329,14 @@ bool MessageChannel::WaitResponse(bool aWaitTimedOut) {
 
 #ifndef OS_WIN
 bool MessageChannel::WaitForSyncNotify(bool /* aHandleWindowsMessages */) {
-#ifdef DEBUG
+#  ifdef DEBUG
   // WARNING: We don't release the lock here. We can't because the link thread
   // could signal at this time and we would miss it. Instead we require
   // ArtificialTimeout() to be extremely simple.
   if (mListener->ArtificialTimeout()) {
     return false;
   }
-#endif
+#  endif
 
   MOZ_RELEASE_ASSERT(!mIsSameThreadChannel,
                      "Wait on same-thread channel will deadlock!");
@@ -2524,7 +2525,16 @@ void MessageChannel::OnChannelErrorFromLink() {
 
   if (ChannelClosing != mChannelState) {
     if (mAbortOnError) {
-      MOZ_CRASH("Aborting on channel error.");
+      // mAbortOnError is set by main actors (e.g., ContentChild) to ensure
+      // that the process terminates even if normal shutdown is prevented.
+      // A MOZ_CRASH() here is not helpful because crash reporting relies
+      // on the parent process which we know is dead or otherwise unusable.
+      //
+      // Additionally, the parent process can (and often is) killed on Android
+      // when apps are backgrounded. We don't need to report a crash for
+      // normal behavior in that case.
+      printf_stderr("Exiting due to channel error.\n");
+      ProcessChild::QuickExit();
     }
     mChannelState = ChannelError;
     mMonitor->Notify();

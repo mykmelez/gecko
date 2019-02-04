@@ -6,10 +6,10 @@
 #include "ipc/IPCMessageUtils.h"
 
 #if defined(XP_UNIX) || defined(XP_BEOS)
-#include <unistd.h>
+#  include <unistd.h>
 #elif defined(XP_WIN)
-#include <windows.h>
-#include "nsILocalFileWin.h"
+#  include <windows.h>
+#  include "nsILocalFileWin.h"
 #else
 // XXX add necessary include file for ftruncate (or equivalent)
 #endif
@@ -536,7 +536,35 @@ nsFileInputStream::Available(uint64_t* aResult) {
 }
 
 void nsFileInputStream::Serialize(InputStreamParams& aParams,
-                                  FileDescriptorArray& aFileDescriptors) {
+                                  FileDescriptorArray& aFileDescriptors,
+                                  bool aDelayedStart,
+                                  mozilla::dom::nsIContentChild* aManager) {
+  SerializeInternal(aParams, aFileDescriptors);
+}
+
+void nsFileInputStream::Serialize(InputStreamParams& aParams,
+                                  FileDescriptorArray& aFileDescriptors,
+                                  bool aDelayedStart,
+                                  PBackgroundChild* aManager) {
+  SerializeInternal(aParams, aFileDescriptors);
+}
+
+void nsFileInputStream::Serialize(InputStreamParams& aParams,
+                                  FileDescriptorArray& aFileDescriptors,
+                                  bool aDelayedStart,
+                                  mozilla::dom::nsIContentParent* aManager) {
+  SerializeInternal(aParams, aFileDescriptors);
+}
+
+void nsFileInputStream::Serialize(InputStreamParams& aParams,
+                                  FileDescriptorArray& aFileDescriptors,
+                                  bool aDelayedStart,
+                                  PBackgroundParent* aManager) {
+  SerializeInternal(aParams, aFileDescriptors);
+}
+
+void nsFileInputStream::SerializeInternal(
+    InputStreamParams& aParams, FileDescriptorArray& aFileDescriptors) {
   FileInputStreamParams params;
 
   if (NS_SUCCEEDED(DoPendingOpen())) {
@@ -624,10 +652,6 @@ bool nsFileInputStream::Deserialize(
   mIOFlags = params.ioFlags();
 
   return true;
-}
-
-Maybe<uint64_t> nsFileInputStream::ExpectedSerializedLength() {
-  return Nothing();
 }
 
 bool nsFileInputStream::IsCloneable() const {

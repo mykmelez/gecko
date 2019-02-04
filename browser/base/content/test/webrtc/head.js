@@ -1,5 +1,5 @@
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource:///modules/SitePermissions.jsm");
+var {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+var {SitePermissions} = ChromeUtils.import("resource:///modules/SitePermissions.jsm");
 
 const PREF_PERMISSION_FAKE = "media.navigator.permission.fake";
 const PREF_AUDIO_LOOPBACK = "media.audio_loopback_dev";
@@ -160,27 +160,13 @@ async function assertWebRTCIndicatorStatus(expected) {
   }
 }
 
-function promisePopupEvent(popup, eventSuffix) {
-  let endState = {shown: "open", hidden: "closed"}[eventSuffix];
-
-  if (popup.state == endState)
-    return Promise.resolve();
-
-  let eventType = "popup" + eventSuffix;
-  return new Promise(resolve => {
-    popup.addEventListener(eventType, function(event) {
-      executeSoon(resolve);
-    }, {once: true});
-
-  });
-}
-
 function promiseNotificationShown(notification) {
   let win = notification.browser.ownerGlobal;
   if (win.PopupNotifications.panel.state == "open") {
     return Promise.resolve();
   }
-  let panelPromise = promisePopupEvent(win.PopupNotifications.panel, "shown");
+  let panelPromise =
+    BrowserTestUtils.waitForPopupEvent(win.PopupNotifications.panel, "shown");
   notification.reshow();
   return panelPromise;
 }
@@ -294,7 +280,6 @@ function promiseMessage(aMessage, aAction) {
 
 function promisePopupNotificationShown(aName, aAction) {
   return new Promise(resolve => {
-
     // In case the global webrtc indicator has stolen focus (bug 1421724)
     window.focus();
 
@@ -308,13 +293,11 @@ function promisePopupNotificationShown(aName, aAction) {
 
     if (aAction)
       aAction();
-
   });
 }
 
 function promisePopupNotification(aName) {
   return new Promise(resolve => {
-
     waitForCondition(() => PopupNotifications.getNotification(aName),
                      () => {
       ok(!!PopupNotifications.getNotification(aName),
@@ -322,20 +305,17 @@ function promisePopupNotification(aName) {
 
       resolve();
     }, "timeout waiting for popup notification " + aName);
-
   });
 }
 
 function promiseNoPopupNotification(aName) {
   return new Promise(resolve => {
-
     waitForCondition(() => !PopupNotifications.getNotification(aName),
                      () => {
       ok(!PopupNotifications.getNotification(aName),
          aName + " notification removed");
       resolve();
     }, "timeout waiting for popup notification " + aName + " to disappear");
-
   });
 }
 

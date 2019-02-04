@@ -6,7 +6,7 @@
 
 var EXPORTED_SYMBOLS = ["MessagePort", "MessageListener"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.defineModuleGetter(this, "AsyncPrefs",
   "resource://gre/modules/AsyncPrefs.jsm");
 ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
@@ -25,7 +25,8 @@ let RPMAccessManager = {
       // "sendAsyncMessage": handled within AboutPrivateBrowsingHandler.jsm
       // "setBoolPref": handled within AsyncPrefs.jsm and uses the pref
       //                ["privacy.trackingprotection.pbmode.enabled"],
-      "getBoolPref": ["privacy.trackingprotection.pbmode.enabled"],
+      "getBoolPref": ["privacy.trackingprotection.pbmode.enabled",
+                      "browser.privatebrowsing.searchUI"],
       "getFormatURLPref": ["privacy.trackingprotection.introURL",
                            "app.support.baseURL"],
       "isWindowPrivate": ["yes"],

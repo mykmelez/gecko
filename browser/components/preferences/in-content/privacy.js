@@ -5,20 +5,16 @@
 /* import-globals-from extensionControlled.js */
 /* import-globals-from preferences.js */
 
-/* FIXME: ESlint globals workaround should be removed once bug 1395426 gets fixed */
-/* globals DownloadUtils, LoadContextInfo */
+var {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/PluralForm.jsm");
-
-ChromeUtils.defineModuleGetter(this, "PluralForm",
-  "resource://gre/modules/PluralForm.jsm");
+ChromeUtils.defineModuleGetter(this, "DownloadUtils",
+  "resource://gre/modules/DownloadUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "LoginHelper",
   "resource://gre/modules/LoginHelper.jsm");
 ChromeUtils.defineModuleGetter(this, "SiteDataManager",
   "resource:///modules/SiteDataManager.jsm");
 
-ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
+var {PrivateBrowsingUtils} = ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 const PREF_UPLOAD_ENABLED = "datareporting.healthreport.uploadEnabled";
 
@@ -130,9 +126,6 @@ if (AppConstants.MOZ_DATA_REPORTING) {
 }
 
 // Data Choices tab
-if (AppConstants.NIGHTLY_BUILD) {
-  Preferences.add({ id: "browser.chrome.errorReporter.enabled", type: "bool" });
-}
 if (AppConstants.MOZ_CRASHREPORTER) {
   Preferences.add({ id: "browser.crashReports.unsubmittedCheck.autoSubmit2", type: "bool" });
 }
@@ -390,25 +383,9 @@ var gPrivacyPane = {
       Services.urlFormatter.formatURLPref("app.support.baseURL") + "push";
     document.getElementById("notificationPermissionsLearnMore").setAttribute("href",
       notificationInfoURL);
-    let drmInfoURL =
-      Services.urlFormatter.formatURLPref("app.support.baseURL") + "drm-content";
-    document.getElementById("playDRMContentLink").setAttribute("href", drmInfoURL);
-    let emeUIEnabled = Services.prefs.getBoolPref("browser.eme.ui.enabled");
-    // Force-disable/hide on WinXP:
-    if (navigator.platform.toLowerCase().startsWith("win")) {
-      emeUIEnabled = emeUIEnabled && parseFloat(Services.sysinfo.get("version")) >= 6;
-    }
-    if (!emeUIEnabled) {
-      // Don't want to rely on .hidden for the toplevel groupbox because
-      // of the pane hiding/showing code potentially interfering:
-      document.getElementById("drmGroup").setAttribute("style", "display: none !important");
-    }
 
     if (AppConstants.MOZ_DATA_REPORTING) {
       this.initDataCollection();
-      if (AppConstants.NIGHTLY_BUILD) {
-        this.initCollectBrowserErrors();
-      }
       if (AppConstants.MOZ_CRASHREPORTER) {
         this.initSubmitCrashes();
       }
@@ -478,9 +455,11 @@ var gPrivacyPane = {
     let contentBlockingUrl = Services.urlFormatter.formatURLPref("app.support.baseURL") + "content-blocking";
     link.setAttribute("href", contentBlockingUrl);
 
+    let contentBlockingTour = Services.urlFormatter.formatURLPref("privacy.trackingprotection.introURL")
+      + `?step=3&newtab=true`;
     let warningLinks = document.getElementsByClassName("content-blocking-warning-learn-how");
     for (let warningLink of warningLinks) {
-      warningLink.setAttribute("href", contentBlockingUrl);
+      warningLink.setAttribute("href", contentBlockingTour);
     }
   },
 
@@ -539,6 +518,7 @@ var gPrivacyPane = {
     let behavior = Preferences.get("network.cookie.cookieBehavior").value;
     let blockCookiesMenu = document.getElementById("blockCookiesMenu");
     let deleteOnCloseCheckbox = document.getElementById("deleteOnClose");
+    let deleteOnCloseNote = document.getElementById("deleteOnCloseNote");
 
     let blockCookies = (behavior != Ci.nsICookieService.BEHAVIOR_ACCEPT);
     let cookieBehaviorLocked = Services.prefs.prefIsLocked("network.cookie.cookieBehavior");
@@ -550,6 +530,7 @@ var gPrivacyPane = {
     let cookieExpirationLocked = Services.prefs.prefIsLocked("network.cookie.lifetimePolicy");
     deleteOnCloseCheckbox.disabled = privateBrowsing || completelyBlockCookies ||
                                      cookieExpirationLocked;
+    deleteOnCloseNote.hidden = !privateBrowsing;
 
     switch (behavior) {
       case Ci.nsICookieService.BEHAVIOR_ACCEPT:
@@ -1483,11 +1464,6 @@ var gPrivacyPane = {
   initDataCollection() {
     this._setupLearnMoreLink("toolkit.datacollection.infoURL",
       "dataCollectionPrivacyNotice");
-  },
-
-  initCollectBrowserErrors() {
-    this._setupLearnMoreLink("browser.chrome.errorReporter.infoURL",
-      "collectBrowserErrorsLearnMore");
   },
 
   initSubmitCrashes() {

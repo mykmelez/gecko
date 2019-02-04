@@ -12,7 +12,6 @@
 #include "jsfriendapi.h"
 #include "js/CharacterEncoding.h"
 #include "xpcprivate.h"
-#include "CPOWTimer.h"
 #include "WrapperFactory.h"
 
 #include "nsIDocShellTreeItem.h"
@@ -148,10 +147,7 @@ const CPOWProxyHandler CPOWProxyHandler::singleton;
   if (!owner->allowMessage(cx)) {                                       \
     return failRetVal;                                                  \
   }                                                                     \
-  {                                                                     \
-    CPOWTimer timer(cx);                                                \
-    return owner->call args;                                            \
-  }
+  { return owner->call args; }
 
 bool CPOWProxyHandler::getOwnPropertyDescriptor(
     JSContext* cx, HandleObject proxy, HandleId id,
@@ -1038,7 +1034,9 @@ bool WrapperOwner::ok(JSContext* cx, const ReturnStatus& status,
 // process from this function.  It's sent with the CPOW to the remote process,
 // where it can be fetched with Components.utils.getCrossProcessWrapperTag.
 static nsCString GetRemoteObjectTag(JS::Handle<JSObject*> obj) {
-  if (nsCOMPtr<nsISupports> supports = xpc::UnwrapReflectorToISupports(obj)) {
+  // OK to use ReflectorToISupportsStatic, because we only care about docshells
+  // and documents here.
+  if (nsCOMPtr<nsISupports> supports = xpc::ReflectorToISupportsStatic(obj)) {
     nsCOMPtr<nsIDocShellTreeItem> treeItem(do_QueryInterface(supports));
     if (treeItem) {
       return NS_LITERAL_CSTRING("ContentDocShellTreeItem");

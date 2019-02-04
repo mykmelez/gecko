@@ -4,10 +4,10 @@
 "use strict";
 var EXPORTED_SYMBOLS = ["FxAccountsConfig"];
 
-ChromeUtils.import("resource://services-common/rest.js");
-ChromeUtils.import("resource://gre/modules/FxAccountsCommon.js");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {RESTRequest} = ChromeUtils.import("resource://services-common/rest.js");
+const {log} = ChromeUtils.import("resource://gre/modules/FxAccountsCommon.js");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "fxAccounts",
                                "resource://gre/modules/FxAccounts.jsm");
@@ -122,7 +122,7 @@ var FxAccountsConfig = {
     }
     let rootURL = Services.urlFormatter.formatURL(pref);
     if (rootURL.endsWith("/")) {
-      rootURL.slice(0, -1);
+      rootURL = rootURL.slice(0, -1);
     }
     return rootURL;
   },

@@ -60,7 +60,7 @@ using namespace mozilla;
 using namespace mozilla::dom;
 
 #if defined(DEBUG_bzbarsky) || defined(DEBUG_caillon)
-#define DEBUG_ComputedDOMStyle
+#  define DEBUG_ComputedDOMStyle
 #endif
 
 /*
@@ -2259,38 +2259,6 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetCaretColor() {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
   SetValueFromComplexColor(val, StyleUI()->mCaretColor);
   return val.forget();
-}
-
-already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetCursor() {
-  RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(true);
-
-  const nsStyleUI* ui = StyleUI();
-
-  for (const nsCursorImage& item : ui->mCursorImages) {
-    RefPtr<nsDOMCSSValueList> itemList = GetROCSSValueList(false);
-
-    RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-    SetValueToURLValue(item.mImage->GetImageValue(), val);
-    itemList->AppendCSSValue(val.forget());
-
-    if (item.mHaveHotspot) {
-      RefPtr<nsROCSSPrimitiveValue> valX = new nsROCSSPrimitiveValue;
-      RefPtr<nsROCSSPrimitiveValue> valY = new nsROCSSPrimitiveValue;
-
-      valX->SetNumber(item.mHotspotX);
-      valY->SetNumber(item.mHotspotY);
-
-      itemList->AppendCSSValue(valX.forget());
-      itemList->AppendCSSValue(valY.forget());
-    }
-    valueList->AppendCSSValue(itemList.forget());
-  }
-
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  val->SetIdent(
-      nsCSSProps::ValueToKeywordEnum(ui->mCursor, nsCSSProps::kCursorKTable));
-  valueList->AppendCSSValue(val.forget());
-  return valueList.forget();
 }
 
 already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetBoxFlex() {

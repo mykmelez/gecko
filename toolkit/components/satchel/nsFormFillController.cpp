@@ -180,8 +180,7 @@ void nsFormFillController::CharacterDataChanged(
 void nsFormFillController::AttributeWillChange(mozilla::dom::Element* aElement,
                                                int32_t aNameSpaceID,
                                                nsAtom* aAttribute,
-                                               int32_t aModType,
-                                               const nsAttrValue* aNewValue) {}
+                                               int32_t aModType) {}
 
 void nsFormFillController::NativeAnonymousChildListChange(nsIContent* aContent,
                                                           bool aIsRemove) {}
@@ -789,7 +788,7 @@ nsFormFillController::HandleEvent(Event* aEvent) {
     case eKeyPress:
       return KeyPress(aEvent);
     case eEditorInput: {
-      nsCOMPtr<nsINode> input = do_QueryInterface(aEvent->GetTarget());
+      nsCOMPtr<nsINode> input = do_QueryInterface(aEvent->GetComposedTarget());
       if (!IsTextControl(input)) {
         return NS_OK;
       }
@@ -927,7 +926,7 @@ void nsFormFillController::MaybeStartControllingInput(
 }
 
 nsresult nsFormFillController::Focus(Event* aEvent) {
-  nsCOMPtr<nsIContent> input = do_QueryInterface(aEvent->GetTarget());
+  nsCOMPtr<nsIContent> input = do_QueryInterface(aEvent->GetComposedTarget());
   MaybeStartControllingInput(HTMLInputElement::FromNodeOrNull(input));
 
   // Bail if we didn't start controlling the input.
@@ -1094,7 +1093,7 @@ nsresult nsFormFillController::MouseDown(Event* aEvent) {
     return NS_ERROR_FAILURE;
   }
 
-  nsCOMPtr<nsINode> targetNode = do_QueryInterface(aEvent->GetTarget());
+  nsCOMPtr<nsINode> targetNode = do_QueryInterface(aEvent->GetComposedTarget());
   if (!HTMLInputElement::FromNodeOrNull(targetNode)) {
     return NS_OK;
   }

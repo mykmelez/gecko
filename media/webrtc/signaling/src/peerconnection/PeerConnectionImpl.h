@@ -25,7 +25,7 @@
 
 // Work around nasty macro in webrtc/voice_engine/voice_engine_defines.h
 #ifdef GetLastError
-#undef GetLastError
+#  undef GetLastError
 #endif
 
 #include "signaling/src/jsep/JsepSession.h"
@@ -86,7 +86,7 @@ typedef NS_ConvertUTF8toUTF16 PCObserverString;
 #if defined(__cplusplus) && __cplusplus >= 201103L
 typedef struct Timecard Timecard;
 #else
-#include "signaling/src/common/time_profiling/timecard.h"
+#  include "signaling/src/common/time_profiling/timecard.h"
 #endif
 
 // To preserve blame, convert nsresult to ErrorResult with wrappers. These
@@ -133,7 +133,7 @@ class RTCStatsQuery {
   RTCStatsQuery(RTCStatsQuery&& aOrig) = default;
   ~RTCStatsQuery();
 
-  nsAutoPtr<mozilla::dom::RTCStatsReportInternal> report;
+  std::unique_ptr<mozilla::dom::RTCStatsReportInternal> report;
   // A timestamp to help with telemetry.
   mozilla::TimeStamp iceStartTime;
 
@@ -203,6 +203,8 @@ class PeerConnectionImpl final
       // PeerConnectionImpl only inherits from mozilla::DataChannelConnection
       // inside libxul.
       override;
+
+  const RefPtr<MediaTransportHandler> GetTransportHandler() const;
 
   // Get the media object
   const RefPtr<PeerConnectionMedia>& media() const {
@@ -631,6 +633,7 @@ class PeerConnectionImpl final
 
   bool mForceIceTcp;
   RefPtr<PeerConnectionMedia> mMedia;
+  RefPtr<MediaTransportHandler> mTransportHandler;
 
   // The JSEP negotiation session.
   mozilla::UniquePtr<PCUuidGenerator> mUuidGen;

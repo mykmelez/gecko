@@ -12,14 +12,14 @@
 #include "mozilla/Unused.h"
 
 #if defined(XP_DARWIN)
-#include <mach/mach.h>
+#  include <mach/mach.h>
 #elif defined(XP_UNIX)
-#include <sys/resource.h>
+#  include <sys/resource.h>
 #endif  // defined(XP_DARWIN) || defined(XP_UNIX) || defined(XP_WIN)
 #include <locale.h>
 #include <string.h>
 #ifdef JS_CAN_CHECK_THREADSAFE_ACCESSES
-#include <sys/mman.h>
+#  include <sys/mman.h>
 #endif
 
 #include "jsfriendapi.h"
@@ -156,14 +156,14 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
       autoWritableJitCodeActive_(false),
       oomCallback(nullptr),
       debuggerMallocSizeOf(ReturnZeroSize),
-      performanceMonitoring_(),
       stackFormat_(parentRuntime ? js::StackFormat::Default
                                  : js::StackFormat::SpiderMonkey),
       wasmInstances(mutexid::WasmRuntimeInstances),
       moduleResolveHook(),
       moduleMetadataHook(),
       moduleDynamicImportHook(),
-      scriptPrivateFinalizeHook() {
+      scriptPrivateAddRefHook(),
+      scriptPrivateReleaseHook() {
   JS_COUNT_CTOR(JSRuntime);
   liveRuntimesCount++;
 
@@ -280,7 +280,7 @@ void JSRuntime::destroyRuntime() {
     profilingScripts = false;
 
     JS::PrepareForFullGC(cx);
-    gc.gc(GC_NORMAL, JS::gcreason::DESTROY_RUNTIME);
+    gc.gc(GC_NORMAL, JS::GCReason::DESTROY_RUNTIME);
   }
 
   AutoNoteSingleThreadedRegion anstr;

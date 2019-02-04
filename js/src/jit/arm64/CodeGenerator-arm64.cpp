@@ -812,6 +812,7 @@ class js::jit::OutOfLineTableSwitch
 void CodeGeneratorARM64::visitOutOfLineTableSwitch(OutOfLineTableSwitch* ool) {
   MTableSwitch* mir = ool->mir();
 
+  AutoForbidPools afp(&masm, (mir->numCases() + 1) * (sizeof(void*) / vixl::kInstructionSize));
   masm.haltingAlign(sizeof(void*));
   masm.bind(ool->jumpLabel());
   masm.addCodeLabel(*ool->jumpLabel());
@@ -948,8 +949,8 @@ void CodeGenerator::visitRound(LRound* lir) {
   const FloatRegister input = ToFloatRegister(lir->input());
   const ARMFPRegister input64(input, 64);
   const FloatRegister temp = ToFloatRegister(lir->temp());
-  const FloatRegister scratch = ScratchDoubleReg;
   const Register output = ToRegister(lir->output());
+  ScratchDoubleScope scratch(masm);
 
   Label negative, done;
 
@@ -1025,8 +1026,8 @@ void CodeGenerator::visitRoundF(LRoundF* lir) {
   const FloatRegister input = ToFloatRegister(lir->input());
   const ARMFPRegister input32(input, 32);
   const FloatRegister temp = ToFloatRegister(lir->temp());
-  const FloatRegister scratch = ScratchFloat32Reg;
   const Register output = ToRegister(lir->output());
+  ScratchFloat32Scope scratch(masm);
 
   Label negative, done;
 
@@ -1056,7 +1057,7 @@ void CodeGenerator::visitRoundF(LRoundF* lir) {
       masm.Fcmp(input32, 0.0f);
       bailoutIf(Assembler::Overflow, lir->snapshot());
 
-      // Move all 64 bits of the input into a scratch register to check for -0.
+      // Move all 32 bits of the input into a scratch register to check for -0.
       vixl::UseScratchRegisterScope temps(&masm.asVIXL());
       const ARMRegister scratchGPR32 = temps.AcquireW();
       masm.Fmov(scratchGPR32, input32);
@@ -1098,9 +1099,83 @@ void CodeGenerator::visitRoundF(LRoundF* lir) {
   masm.bind(&done);
 }
 
-void CodeGenerator::visitTrunc(LTrunc* lir) { MOZ_CRASH("visitTrunc"); }
+void CodeGenerator::visitTrunc(LTrunc* lir) {
+  const FloatRegister input = ToFloatRegister(lir->input());
+  const ARMFPRegister input64(input, 64);
+  const Register output = ToRegister(lir->output());
+  const ARMRegister output32(output, 32);
 
-void CodeGenerator::visitTruncF(LTruncF* lir) { MOZ_CRASH("visitTruncF"); }
+  Label done, zeroCase;
+
+  // Convert scalar to signed 32-bit fixed-point, rounding toward zero.
+  // In the case of overflow, the output is saturated.
+  // In the case of NaN and -0, the output is zero.
+  masm.Fcvtzs(output32, input64);
+
+  // If the output was zero, worry about special cases.
+  masm.branch32(Assembler::Equal, output, Imm32(0), &zeroCase);
+
+  // Bail on overflow cases.
+  bailoutCmp32(Assembler::Equal, output, Imm32(INT_MAX), lir->snapshot());
+  bailoutCmp32(Assembler::Equal, output, Imm32(INT_MIN), lir->snapshot());
+
+  // If the output was non-zero and wasn't saturated, just return it.
+  masm.jump(&done);
+
+  // Handle the case of a zero output:
+  // 1. The input may have been NaN, requiring a bail.
+  // 2. The input may have been in (-1,-0], requiring a bail.
+  {
+    masm.bind(&zeroCase);
+
+    // If input is a negative number that truncated to zero, the real
+    // output should be the non-integer -0.
+    // The use of "lt" instead of "lo" also catches unordered NaN input.
+    masm.Fcmp(input64, 0.0);
+    bailoutIf(vixl::lt, lir->snapshot());
+  }
+
+  masm.bind(&done);
+}
+
+void CodeGenerator::visitTruncF(LTruncF* lir) {
+  const FloatRegister input = ToFloatRegister(lir->input());
+  const ARMFPRegister input32(input, 32);
+  const Register output = ToRegister(lir->output());
+  const ARMRegister output32(output, 32);
+
+  Label done, zeroCase;
+
+  // Convert scalar to signed 32-bit fixed-point, rounding toward zero.
+  // In the case of overflow, the output is saturated.
+  // In the case of NaN and -0, the output is zero.
+  masm.Fcvtzs(output32, input32);
+
+  // If the output was zero, worry about special cases.
+  masm.branch32(Assembler::Equal, output, Imm32(0), &zeroCase);
+
+  // Bail on overflow cases.
+  bailoutCmp32(Assembler::Equal, output, Imm32(INT_MAX), lir->snapshot());
+  bailoutCmp32(Assembler::Equal, output, Imm32(INT_MIN), lir->snapshot());
+
+  // If the output was non-zero and wasn't saturated, just return it.
+  masm.jump(&done);
+
+  // Handle the case of a zero output:
+  // 1. The input may have been NaN, requiring a bail.
+  // 2. The input may have been in (-1,-0], requiring a bail.
+  {
+    masm.bind(&zeroCase);
+
+    // If input is a negative number that truncated to zero, the real
+    // output should be the non-integer -0.
+    // The use of "lt" instead of "lo" also catches unordered NaN input.
+    masm.Fcmp(input32, 0.0f);
+    bailoutIf(vixl::lt, lir->snapshot());
+  }
+
+  masm.bind(&done);
+}
 
 void CodeGenerator::visitClzI(LClzI* lir) {
   ARMRegister input = toWRegister(lir->input());
@@ -1112,11 +1187,6 @@ void CodeGenerator::visitCtzI(LCtzI* lir) {
   Register input = ToRegister(lir->input());
   Register output = ToRegister(lir->output());
   masm.ctz32(input, output, /* knownNotZero = */ false);
-}
-
-void CodeGeneratorARM64::emitRoundDouble(FloatRegister src, Register dest,
-                                         Label* fail) {
-  MOZ_CRASH("CodeGeneratorARM64::emitRoundDouble");
 }
 
 void CodeGenerator::visitTruncateDToInt32(LTruncateDToInt32* ins) {
@@ -1387,7 +1457,7 @@ void CodeGenerator::visitBitAndAndBranch(LBitAndAndBranch* baab) {
   } else {
     masm.Tst(toWRegister(baab->left()), toWRegister(baab->right()));
   }
-  emitBranch(Assembler::NonZero, baab->ifTrue(), baab->ifFalse());
+  emitBranch(baab->cond(), baab->ifTrue(), baab->ifFalse());
 }
 
 void CodeGenerator::visitWasmUint32ToDouble(LWasmUint32ToDouble* lir) {
@@ -1504,7 +1574,52 @@ void CodeGenerator::visitWasmStackArg(LWasmStackArg* ins) {
   MOZ_CRASH("visitWasmStackArg");
 }
 
-void CodeGenerator::visitUDiv(LUDiv* ins) { MOZ_CRASH("visitUDiv"); }
+void CodeGenerator::visitUDiv(LUDiv* ins) {
+  MDiv* mir = ins->mir();
+  Register lhs = ToRegister(ins->lhs());
+  Register rhs = ToRegister(ins->rhs());
+  Register output = ToRegister(ins->output());
+  ARMRegister lhs32 = ARMRegister(lhs, 32);
+  ARMRegister rhs32 = ARMRegister(rhs, 32);
+  ARMRegister output32 = ARMRegister(output, 32);
+
+  // Prevent divide by zero.
+  if (mir->canBeDivideByZero()) {
+    if (mir->isTruncated()) {
+      if (mir->trapOnError()) {
+        Label nonZero;
+        masm.branchTest32(Assembler::NonZero, rhs, rhs, &nonZero);
+        masm.wasmTrap(wasm::Trap::IntegerDivideByZero, mir->bytecodeOffset());
+        masm.bind(&nonZero);
+      } else {
+        // ARM64 UDIV instruction will return 0 when divided by 0.
+        // No need for extra tests.
+      }
+    } else {
+      bailoutTest32(Assembler::Zero, rhs, rhs, ins->snapshot());
+    }
+  }
+
+  // Unsigned division.
+  masm.Udiv(output32, lhs32, rhs32);
+
+  // If the remainder is > 0, bailout since this must be a double.
+  if (!mir->canTruncateRemainder()) {
+    Register remainder = ToRegister(ins->remainder());
+    ARMRegister remainder32 = ARMRegister(remainder, 32);
+
+    // Compute the remainder: remainder = lhs - (output * rhs).
+    masm.Msub(remainder32, output32, rhs32, lhs32);
+
+    bailoutTest32(Assembler::NonZero, remainder, remainder, ins->snapshot());
+  }
+
+  // Unsigned div can return a value that's not a signed int32.
+  // If our users aren't expecting that, bail.
+  if (!mir->isTruncated()) {
+    bailoutTest32(Assembler::Signed, output, output, ins->snapshot());
+  }
+}
 
 void CodeGenerator::visitUMod(LUMod* ins) {
   MMod* mir = ins->mir();

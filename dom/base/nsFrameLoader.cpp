@@ -100,24 +100,24 @@
 #include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/ParentSHistory.h"
 #include "mozilla/dom/ChildSHistory.h"
-#include "mozilla/dom/ChromeBrowsingContext.h"
+#include "mozilla/dom/CanonicalBrowsingContext.h"
 
 #include "mozilla/dom/HTMLBodyElement.h"
 
 #include "mozilla/ContentPrincipal.h"
 
 #ifdef XP_WIN
-#include "mozilla/plugins/PPluginWidgetParent.h"
-#include "../plugins/ipc/PluginWidgetParent.h"
+#  include "mozilla/plugins/PPluginWidgetParent.h"
+#  include "../plugins/ipc/PluginWidgetParent.h"
 #endif
 
 #ifdef MOZ_XUL
-#include "nsXULPopupManager.h"
+#  include "nsXULPopupManager.h"
 #endif
 
 #ifdef NS_PRINTING
-#include "mozilla/embedding/printingui/PrintingParent.h"
-#include "nsIWebBrowserPrint.h"
+#  include "mozilla/embedding/printingui/PrintingParent.h"
+#  include "nsIWebBrowserPrint.h"
 #endif
 
 using namespace mozilla;
@@ -2028,6 +2028,12 @@ nsresult nsFrameLoader::MaybeCreateDocShell() {
     attrs.mAppId = nsIScriptSecurityManager::NO_APP_ID;
     attrs.mInIsolatedMozBrowser = OwnerIsIsolatedMozBrowserFrame();
     mDocShell->SetFrameType(nsIDocShell::FRAME_TYPE_BROWSER);
+  } else {
+    nsCOMPtr<nsIDocShellTreeItem> parentCheck;
+    mDocShell->GetSameTypeParent(getter_AddRefs(parentCheck));
+    if (!!parentCheck) {
+      mDocShell->SetIsFrame();
+    }
   }
 
   // Apply sandbox flags even if our owner is not an iframe, as this copies
@@ -2503,6 +2509,11 @@ bool nsFrameLoader::TryRemoteBrowser() {
   if (!mRemoteBrowser) {
     return false;
   }
+
+  // We no longer need the remoteType attribute on the frame element.
+  // The remoteType can be queried by asking the message manager instead.
+  ownerElement->UnsetAttr(kNameSpaceID_None, nsGkAtoms::RemoteType, false);
+
   // Now that mRemoteBrowser is set, we can initialize the RenderFrame
   mRemoteBrowser->InitRendering();
 

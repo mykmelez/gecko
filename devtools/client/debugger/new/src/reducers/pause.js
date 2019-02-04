@@ -37,8 +37,7 @@ export type Command =
   | "rewind"
   | "reverseStepOver"
   | "reverseStepIn"
-  | "reverseStepOut"
-  | "expression";
+  | "reverseStepOut";
 
 // Pause state associated with an individual thread.
 type ThreadPauseState = {
@@ -69,6 +68,7 @@ type ThreadPauseState = {
   shouldPauseOnExceptions: boolean,
   shouldPauseOnCaughtExceptions: boolean,
   command: Command,
+  lastCommand: Command,
   previousLocation: ?MappedLocation,
   skipPausing: boolean
 };
@@ -105,6 +105,7 @@ const createInitialPauseState = () => ({
   shouldPauseOnCaughtExceptions: prefs.pauseOnCaughtExceptions,
   canRewind: false,
   command: null,
+  lastCommand: null,
   previousLocation: null,
   skipPausing: prefs.skipPausing
 });
@@ -265,6 +266,7 @@ function update(
         return updateThreadState({
           ...resumedPauseState,
           command: action.command,
+          lastCommand: action.command,
           previousLocation: getPauseLocation(threadState(), action)
         });
       }
@@ -351,6 +353,10 @@ export function getPauseReason(state: OuterState): ?Why {
 
 export function getPauseCommand(state: OuterState): Command {
   return getCurrentPauseState(state).command;
+}
+
+export function getLastCommand(state: OuterState, thread: string) {
+  return getThreadPauseState(state.pause, thread).lastCommand;
 }
 
 export function isStepping(state: OuterState) {

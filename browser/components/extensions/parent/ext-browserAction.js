@@ -18,7 +18,7 @@ var {
   ExtensionError,
 } = ExtensionUtils;
 
-ChromeUtils.import("resource://gre/modules/ExtensionParent.jsm");
+var {ExtensionParent} = ChromeUtils.import("resource://gre/modules/ExtensionParent.jsm");
 
 var {
   IconDetails,
@@ -201,7 +201,7 @@ this.browserAction = class extends ExtensionAPI {
             if (this.eventQueue.length) {
               ExtensionTelemetry.browserActionPreloadResult.histogramAdd({
                 category: "popupShown",
-                extension: this.extension,
+                extension,
               });
               this.eventQueue = [];
             }

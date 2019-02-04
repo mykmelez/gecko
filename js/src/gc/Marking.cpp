@@ -22,7 +22,7 @@
 #include "vm/ArgumentsObject.h"
 #include "vm/ArrayObject.h"
 #ifdef ENABLE_BIGINT
-#include "vm/BigIntType.h"
+#  include "vm/BigIntType.h"
 #endif
 #include "vm/Debugger.h"
 #include "vm/EnvironmentObject.h"
@@ -95,20 +95,20 @@ using mozilla::PodCopy;
 //                       '---------'   '----------'         '-----------------'                 //
 //                            |                                                                 //
 //                            |                                                                 //
-//                        .--------.                                                            //
-//      o---------------->|traverse| .                                                          //
-//     /_\                '--------'   ' .                                                      //
-//      |                     .     .      ' .                                                  //
-//      |                     .       .        ' .                                              //
-//      |                     .         .          ' .                                          //
-//      |             .-----------.    .-----------.   ' .     .--------------------.           //
-//      |             |markAndScan|    |markAndPush|       ' - |markAndTraceChildren|---->      //
-//      |             '-----------'    '-----------'           '--------------------'           //
-//      |                   |                  \                                                //
-//      |                   |                   \                                               //
-//      |       .----------------------.     .----------------.                                 //
-//      |       |T::eagerlyMarkChildren|     |pushMarkStackTop|<===Oo                           //
-//      |       '----------------------'     '----------------'    ||                           //
+//                     .-----------.                                                            //
+//      o------------->|traverse(T)| .                                                          //
+//     /_\             '-----------'   ' .                                                      //
+//      |                   .       .      ' .                                                  //
+//      |                   .         .        ' .                                              //
+//      |                   .           .          ' .                                          //
+//      |          .--------------.  .--------------.  ' .     .-----------------------.        //
+//      |          |markAndScan(T)|  |markAndPush(T)|      ' - |markAndTraceChildren(T)|        //
+//      |          '--------------'  '--------------'          '-----------------------'        //
+//      |                   |                  \                               |                //
+//      |                   |                   \                              |                //
+//      |       .----------------------.     .----------------.         .------------------.    //
+//      |       |eagerlyMarkChildren(T)|     |pushMarkStackTop|<===Oo   |T::traceChildren()|--> //
+//      |       '----------------------'     '----------------'    ||   '------------------'    //
 //      |                  |                         ||            ||                           //
 //      |                  |                         ||            ||                           //
 //      |                  |                         ||            ||                           //
@@ -677,6 +677,10 @@ void GCMarker::markImplicitEdges(T* thing) {
   markImplicitEdgesHelper<typename ImplicitEdgeHolderType<T*>::Type>(thing);
 }
 
+template void GCMarker::markImplicitEdges(JSObject*);
+template void GCMarker::markImplicitEdges(JSScript*);
+template void GCMarker::markImplicitEdges(LazyScript*);
+
 }  // namespace js
 
 template <typename T>
@@ -843,7 +847,6 @@ void GCMarker::traverse(JSString* thing) {
 template <>
 void GCMarker::traverse(LazyScript* thing) {
   markAndScan(thing);
-  markImplicitEdges(thing);
 }
 template <>
 void GCMarker::traverse(Shape* thing) {
@@ -866,7 +869,6 @@ void js::GCMarker::markAndPush(T* thing) {
     return;
   }
   pushTaggedPtr(thing);
-  markImplicitEdges(thing);
 }
 namespace js {
 template <>
@@ -971,7 +973,7 @@ static bool TraceKindParticipatesInCC(JS::TraceKind kind) {
   return DispatchTraceKindTyped(ParticipatesInCCFunctor(), kind);
 }
 
-#endif // DEBUG
+#endif  // DEBUG
 
 template <typename T>
 bool js::GCMarker::mark(T* thing) {
@@ -1027,6 +1029,10 @@ void LazyScript::traceChildren(JSTracer* trc) {
   for (auto i : IntegerRange(numInnerFunctions())) {
     TraceEdge(trc, &innerFunctions[i], "lazyScriptInnerFunction");
   }
+
+  if (trc->isMarkingTracer()) {
+    GCMarker::fromTracer(trc)->markImplicitEdges(this);
+  }
 }
 inline void js::GCMarker::eagerlyMarkChildren(LazyScript* thing) {
   if (thing->script_) {
@@ -1061,6 +1067,8 @@ inline void js::GCMarker::eagerlyMarkChildren(LazyScript* thing) {
   for (auto i : IntegerRange(thing->numInnerFunctions())) {
     traverseEdge(thing, static_cast<JSObject*>(innerFunctions[i]));
   }
+
+  markImplicitEdges(thing);
 }
 
 void Shape::traceChildren(JSTracer* trc) {
@@ -1094,7 +1102,7 @@ inline void js::GCMarker::eagerlyMarkChildren(Shape* shape) {
 
     traverseEdge(shape, shape->propidRef().get());
 
-    // When triggered between slices on belhalf of a barrier, these
+    // When triggered between slices on behalf of a barrier, these
     // objects may reside in the nursery, so require an extra check.
     // FIXME: Bug 1157967 - remove the isTenured checks.
     if (shape->hasGetterObject() && shape->getterObject()->isTenured()) {
@@ -1319,95 +1327,95 @@ void Scope::traceChildren(JSTracer* trc) {
   }
 }
 inline void js::GCMarker::eagerlyMarkChildren(Scope* scope) {
-  if (scope->enclosing_) {
-    traverseEdge(scope, scope->enclosing_.get());
-  }
-  if (scope->environmentShape_) {
-    traverseEdge(scope, scope->environmentShape_.get());
-  }
-  TrailingNamesArray* names = nullptr;
-  uint32_t length = 0;
-  switch (scope->kind()) {
-    case ScopeKind::Function: {
-      FunctionScope::Data& data = scope->as<FunctionScope>().data();
-      traverseObjectEdge(scope, data.canonicalFunction);
-      names = &data.trailingNames;
-      length = data.length;
-      break;
+  do {
+    if (scope->environmentShape_) {
+      traverseEdge(scope, scope->environmentShape_.get());
     }
+    TrailingNamesArray* names = nullptr;
+    uint32_t length = 0;
+    switch (scope->kind()) {
+      case ScopeKind::Function: {
+        FunctionScope::Data& data = scope->as<FunctionScope>().data();
+        traverseObjectEdge(scope, data.canonicalFunction);
+        names = &data.trailingNames;
+        length = data.length;
+        break;
+      }
 
-    case ScopeKind::FunctionBodyVar:
-    case ScopeKind::ParameterExpressionVar: {
-      VarScope::Data& data = scope->as<VarScope>().data();
-      names = &data.trailingNames;
-      length = data.length;
-      break;
-    }
+      case ScopeKind::FunctionBodyVar:
+      case ScopeKind::ParameterExpressionVar: {
+        VarScope::Data& data = scope->as<VarScope>().data();
+        names = &data.trailingNames;
+        length = data.length;
+        break;
+      }
 
-    case ScopeKind::Lexical:
-    case ScopeKind::SimpleCatch:
-    case ScopeKind::Catch:
-    case ScopeKind::NamedLambda:
-    case ScopeKind::StrictNamedLambda: {
-      LexicalScope::Data& data = scope->as<LexicalScope>().data();
-      names = &data.trailingNames;
-      length = data.length;
-      break;
-    }
+      case ScopeKind::Lexical:
+      case ScopeKind::SimpleCatch:
+      case ScopeKind::Catch:
+      case ScopeKind::NamedLambda:
+      case ScopeKind::StrictNamedLambda: {
+        LexicalScope::Data& data = scope->as<LexicalScope>().data();
+        names = &data.trailingNames;
+        length = data.length;
+        break;
+      }
 
-    case ScopeKind::Global:
-    case ScopeKind::NonSyntactic: {
-      GlobalScope::Data& data = scope->as<GlobalScope>().data();
-      names = &data.trailingNames;
-      length = data.length;
-      break;
-    }
+      case ScopeKind::Global:
+      case ScopeKind::NonSyntactic: {
+        GlobalScope::Data& data = scope->as<GlobalScope>().data();
+        names = &data.trailingNames;
+        length = data.length;
+        break;
+      }
 
-    case ScopeKind::Eval:
-    case ScopeKind::StrictEval: {
-      EvalScope::Data& data = scope->as<EvalScope>().data();
-      names = &data.trailingNames;
-      length = data.length;
-      break;
-    }
+      case ScopeKind::Eval:
+      case ScopeKind::StrictEval: {
+        EvalScope::Data& data = scope->as<EvalScope>().data();
+        names = &data.trailingNames;
+        length = data.length;
+        break;
+      }
 
-    case ScopeKind::Module: {
-      ModuleScope::Data& data = scope->as<ModuleScope>().data();
-      traverseObjectEdge(scope, data.module);
-      names = &data.trailingNames;
-      length = data.length;
-      break;
-    }
+      case ScopeKind::Module: {
+        ModuleScope::Data& data = scope->as<ModuleScope>().data();
+        traverseObjectEdge(scope, data.module);
+        names = &data.trailingNames;
+        length = data.length;
+        break;
+      }
 
-    case ScopeKind::With:
-      break;
+      case ScopeKind::With:
+        break;
 
-    case ScopeKind::WasmInstance: {
-      WasmInstanceScope::Data& data = scope->as<WasmInstanceScope>().data();
-      traverseObjectEdge(scope, data.instance);
-      names = &data.trailingNames;
-      length = data.length;
-      break;
-    }
+      case ScopeKind::WasmInstance: {
+        WasmInstanceScope::Data& data = scope->as<WasmInstanceScope>().data();
+        traverseObjectEdge(scope, data.instance);
+        names = &data.trailingNames;
+        length = data.length;
+        break;
+      }
 
-    case ScopeKind::WasmFunction: {
-      WasmFunctionScope::Data& data = scope->as<WasmFunctionScope>().data();
-      names = &data.trailingNames;
-      length = data.length;
-      break;
-    }
-  }
-  if (scope->kind_ == ScopeKind::Function) {
-    for (uint32_t i = 0; i < length; i++) {
-      if (JSAtom* name = names->get(i).name()) {
-        traverseStringEdge(scope, name);
+      case ScopeKind::WasmFunction: {
+        WasmFunctionScope::Data& data = scope->as<WasmFunctionScope>().data();
+        names = &data.trailingNames;
+        length = data.length;
+        break;
       }
     }
-  } else {
-    for (uint32_t i = 0; i < length; i++) {
-      traverseStringEdge(scope, names->get(i).name());
+    if (scope->kind_ == ScopeKind::Function) {
+      for (uint32_t i = 0; i < length; i++) {
+        if (JSAtom* name = names->get(i).name()) {
+          traverseStringEdge(scope, name);
+        }
+      }
+    } else {
+      for (uint32_t i = 0; i < length; i++) {
+        traverseStringEdge(scope, names->get(i).name());
+      }
     }
-  }
+    scope = scope->enclosing_;
+  } while (scope && mark(scope));
 }
 
 void js::ObjectGroup::traceChildren(JSTracer* trc) {
@@ -2708,7 +2716,7 @@ void GCMarker::checkZone(void* p) {
 size_t GCMarker::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
   size_t size = stack.sizeOfExcludingThis(mallocSizeOf);
   for (ZonesIter zone(runtime(), WithAtoms); !zone.done(); zone.next()) {
-    size += zone->gcGrayRoots().sizeOfExcludingThis(mallocSizeOf);
+    size += zone->gcGrayRoots().SizeOfExcludingThis(mallocSizeOf);
   }
   return size;
 }
@@ -2767,10 +2775,9 @@ void TenuringTracer::traverse(T* thingp) {
 }  // namespace js
 
 template <typename T>
-void js::gc::StoreBuffer::MonoTypeBuffer<T>::trace(StoreBuffer* owner,
-                                                   TenuringTracer& mover) {
-  mozilla::ReentrancyGuard g(*owner);
-  MOZ_ASSERT(owner->isEnabled());
+void js::gc::StoreBuffer::MonoTypeBuffer<T>::trace(TenuringTracer& mover) {
+  mozilla::ReentrancyGuard g(*owner_);
+  MOZ_ASSERT(owner_->isEnabled());
   if (last_) {
     last_.trace(mover);
   }
@@ -2782,11 +2789,11 @@ void js::gc::StoreBuffer::MonoTypeBuffer<T>::trace(StoreBuffer* owner,
 namespace js {
 namespace gc {
 template void StoreBuffer::MonoTypeBuffer<StoreBuffer::ValueEdge>::trace(
-    StoreBuffer*, TenuringTracer&);
+    TenuringTracer&);
 template void StoreBuffer::MonoTypeBuffer<StoreBuffer::SlotsEdge>::trace(
-    StoreBuffer*, TenuringTracer&);
+    TenuringTracer&);
 template void StoreBuffer::MonoTypeBuffer<StoreBuffer::CellPtrEdge>::trace(
-    StoreBuffer*, TenuringTracer&);
+    TenuringTracer&);
 }  // namespace gc
 }  // namespace js
 
@@ -2866,9 +2873,8 @@ static void TraceBufferedCells(TenuringTracer& mover, Arena* arena,
   }
 }
 
-void js::gc::StoreBuffer::WholeCellBuffer::trace(StoreBuffer* owner,
-                                                 TenuringTracer& mover) {
-  MOZ_ASSERT(owner->isEnabled());
+void js::gc::StoreBuffer::WholeCellBuffer::trace(TenuringTracer& mover) {
+  MOZ_ASSERT(owner_->isEnabled());
 
   for (ArenaCellSet* cells = head_; cells; cells = cells->next) {
     cells->check();

@@ -5,8 +5,8 @@
 
 var EXPORTED_SYMBOLS = ["ClickHandlerChild"];
 
-ChromeUtils.import("resource://gre/modules/ActorChild.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {ActorChild} = ChromeUtils.import("resource://gre/modules/ActorChild.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(this, "BrowserUtils",
                                "resource://gre/modules/BrowserUtils.jsm");
@@ -87,6 +87,16 @@ class ClickHandlerChild extends ActorChild {
       }
       json.originPrincipal = ownerDoc.nodePrincipal;
       json.triggeringPrincipal = ownerDoc.nodePrincipal;
+
+      // If a link element is clicked with middle button, user wants to open
+      // the link somewhere rather than pasting clipboard content.  Therefore,
+      // when it's clicked with middle button, we should prevent multiple
+      // actions here to avoid leaking clipboard content unexpectedly.
+      // Note that whether the link will work actually or not does not matter
+      // because in this case, user does not intent to paste clipboard content.
+      if (event.button === 1) {
+        event.preventMultipleActions();
+      }
 
       this.mm.sendAsyncMessage("Content:Click", json);
       return;

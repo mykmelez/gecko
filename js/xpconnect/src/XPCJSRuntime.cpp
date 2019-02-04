@@ -69,7 +69,7 @@
 #include "nsJSPrincipals.h"
 
 #ifdef XP_WIN
-#include <windows.h>
+#  include <windows.h>
 #endif
 
 using namespace mozilla;
@@ -156,7 +156,8 @@ class AsyncFreeSnowWhite : public Runnable {
 
   nsresult Dispatch() {
     nsCOMPtr<nsIRunnable> self(this);
-    return NS_IdleDispatchToCurrentThread(self.forget(), 500);
+    return NS_DispatchToCurrentThreadQueue(self.forget(), 500,
+                                           EventQueuePriority::Idle);
   }
 
   void Start(bool aContinuation = false, bool aPurge = false) {
@@ -2249,7 +2250,7 @@ class XPCJSRuntimeStats : public JS::RuntimeStats {
       RootedObject global(cx, JS::GetRealmGlobalOrNull(realm));
       if (global) {
         RefPtr<nsGlobalWindowInner> window;
-        if (NS_SUCCEEDED(UNWRAP_OBJECT(Window, global, window))) {
+        if (NS_SUCCEEDED(UNWRAP_NON_WRAPPER_OBJECT(Window, global, window))) {
           // The global is a |window| object.  Use the path prefix that
           // we should have already created for it.
           if (mTopWindowPaths->Get(window->WindowID(), &extras->pathPrefix))
@@ -2277,7 +2278,7 @@ class XPCJSRuntimeStats : public JS::RuntimeStats {
     RootedObject global(cx, JS::GetRealmGlobalOrNull(realm));
     if (global) {
       RefPtr<nsGlobalWindowInner> window;
-      if (NS_SUCCEEDED(UNWRAP_OBJECT(Window, global, window))) {
+      if (NS_SUCCEEDED(UNWRAP_NON_WRAPPER_OBJECT(Window, global, window))) {
         // The global is a |window| object.  Use the path prefix that
         // we should have already created for it.
         if (mWindowPaths->Get(window->WindowID(), &extras->jsPathPrefix)) {
@@ -2740,6 +2741,9 @@ static void AccumulateTelemetryCallback(int id, uint32_t sample,
       break;
     case JS_TELEMETRY_GC_MARK_RATE:
       Telemetry::Accumulate(Telemetry::GC_MARK_RATE, sample);
+      break;
+    case JS_TELEMETRY_DEPRECATED_STRING_GENERICS:
+      Telemetry::Accumulate(Telemetry::JS_DEPRECATED_STRING_GENERICS, sample);
       break;
     default:
       MOZ_ASSERT_UNREACHABLE("Unexpected JS_TELEMETRY id");

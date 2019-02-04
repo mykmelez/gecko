@@ -13,7 +13,12 @@ loader.lazyRequireGetter(this, "ContentProcessTargetFront", "devtools/shared/fro
 
 class RootFront extends FrontClassWithSpec(rootSpec) {
   constructor(client, form) {
-    super(client, { actor: form.from });
+    super(client);
+
+    // Root Front is a special Front. It is the only one to set its actor ID manually
+    // out of the form object returned by RootActor.sayHello which is called when calling
+    // DebuggerClient.connect().
+    this.actorID = form.from;
 
     this.applicationType = form.applicationType;
     this.traits = form.traits;
@@ -82,15 +87,19 @@ class RootFront extends FrontClassWithSpec(rootSpec) {
       other: [],
     };
 
-    registrations.forEach(form => {
+    registrations.forEach(front => {
+      // All the information is simply mirrored from the registration front.
+      // However since registering workers will fetch similar information from the worker
+      // target front and will not have a service worker registration front, consumers
+      // should not read meta data directly on the registration front instance.
       result.service.push({
-        name: form.url,
-        url: form.url,
-        scope: form.scope,
-        fetch: form.fetch,
-        registrationActor: form.actor,
-        active: form.active,
-        lastUpdateTime: form.lastUpdateTime,
+        active: front.active,
+        fetch: front.fetch,
+        lastUpdateTime: front.lastUpdateTime,
+        name: front.url,
+        registrationFront: front,
+        scope: front.scope,
+        url: front.url,
       });
     });
 
@@ -157,12 +166,16 @@ class RootFront extends FrontClassWithSpec(rootSpec) {
     // which is a ParentProcessTargetActor, but not in xpcshell, which uses a
     // ContentProcessTargetActor. So select the right front based on the actor ID.
     if (form.actor.includes("contentProcessTarget")) {
-      front = new ContentProcessTargetFront(this._client, form);
+      front = new ContentProcessTargetFront(this._client);
     } else {
       // ParentProcessTargetActor doesn't have a specific front, instead it uses
       // BrowsingContextTargetFront on the client side.
-      front = new BrowsingContextTargetFront(this._client, form);
+      front = new BrowsingContextTargetFront(this._client);
     }
+    // As these fronts aren't instantiated by protocol.js, we have to set their actor ID
+    // manually like that:
+    front.actorID = form.actor;
+    front.form(form);
     this.manage(front);
 
     return front;

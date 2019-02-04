@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 { // start private scope for gBrowser
-
 /**
  * A set of known icons to use for internal pages. These are hardcoded so we can
  * start loading them faster than ContentLinkHandler would normally find them.
@@ -360,6 +359,10 @@ window._gBrowser = {
 
     this._appendStatusPanel();
 
+    // This is the initial browser, so it's usually active; the default is false
+    // so we have to update it:
+    browser.docShellIsActive = this.shouldActivateDocShell(browser);
+
     // Only necessary because of pageloader talos tests which access this.
     // Bug 1508171 covers removing this.
     this.initialBrowser = browser;
@@ -492,7 +495,7 @@ window._gBrowser = {
   },
 
   set userTypedValue(val) {
-    return this.selectedBrowser.userTypedValue = val;
+    this.selectedBrowser.userTypedValue = val;
   },
 
   get userTypedValue() {
@@ -964,10 +967,13 @@ window._gBrowser = {
 
     let securityUI = newBrowser.securityUI;
     if (securityUI) {
+      this._callProgressListeners(null, "onSecurityChange",
+                                  [webProgress, null, securityUI.state],
+                                  true, false);
       // Include the true final argument to indicate that this event is
       // simulated (instead of being observed by the webProgressListener).
-      this._callProgressListeners(null, "onSecurityChange",
-                                  [webProgress, null, securityUI.state, true],
+      this._callProgressListeners(null, "onContentBlockingEvent",
+                                  [webProgress, null, securityUI.contentBlockingEvent, true],
                                   true, false);
     }
 
@@ -1611,7 +1617,7 @@ window._gBrowser = {
     }
 
     // Abort if we're not going to change anything
-    let oldRemoteType = aBrowser.getAttribute("remoteType");
+    let oldRemoteType = aBrowser.remoteType;
     if (isRemote == aShouldBeRemote && !newFrameloader &&
         (!isRemote || oldRemoteType == remoteType)) {
       return false;
@@ -1714,10 +1720,14 @@ window._gBrowser = {
     let securityUI = aBrowser.securityUI;
     let state = securityUI ? securityUI.state :
       Ci.nsIWebProgressListener.STATE_IS_INSECURE;
+    this._callProgressListeners(aBrowser, "onSecurityChange",
+                                [aBrowser.webProgress, null, state],
+                                true, false);
+    let event = securityUI ? securityUI.contentBlockingEvent : 0;
     // Include the true final argument to indicate that this event is
     // simulated (instead of being observed by the webProgressListener).
-    this._callProgressListeners(aBrowser, "onSecurityChange",
-                                [aBrowser.webProgress, null, state, true],
+    this._callProgressListeners(aBrowser, "onContentBlockingEvent",
+                                [aBrowser.webProgress, null, event, true],
                                 true, false);
 
     if (aShouldBeRemote) {
@@ -1755,7 +1765,7 @@ window._gBrowser = {
     if (!gMultiProcessBrowser)
       return this.updateBrowserRemoteness(aBrowser, false);
 
-    let oldRemoteType = aBrowser.getAttribute("remoteType") || null;
+    let oldRemoteType = aBrowser.remoteType;
 
     aOptions.remoteType =
       E10SUtils.getRemoteTypeForURI(aURL,
@@ -2279,6 +2289,7 @@ window._gBrowser = {
     forceNotRemote,
     fromExternal,
     index,
+    lazyTabTitle,
     name,
     nextTabParentId,
     noInitialLabel,
@@ -2419,7 +2430,6 @@ window._gBrowser = {
             ((openerTab &&
               Services.prefs.getBoolPref("browser.tabs.insertRelatedAfterCurrent")) ||
              Services.prefs.getBoolPref("browser.tabs.insertAfterCurrent"))) {
-
           let lastRelatedTab = openerTab && this._lastRelatedTabMap.get(openerTab);
           let previousTab = (lastRelatedTab || openerTab || this.selectedTab);
           if (previousTab.multiselected) {
@@ -2540,6 +2550,13 @@ window._gBrowser = {
                                                       userContextId);
           b.registeredOpenURI = lazyBrowserURI;
         }
+        SessionStore.setTabState(t, {
+          entries: [{
+            url: lazyBrowserURI ? lazyBrowserURI.spec : "about:blank",
+            title: lazyTabTitle,
+            triggeringPrincipal_base64: Utils.serializePrincipal(triggeringPrincipal),
+          }],
+        });
       } else {
         this._insertBrowser(t, true);
       }
@@ -2664,6 +2681,12 @@ window._gBrowser = {
     var shouldPrompt = Services.prefs.getBoolPref(pref);
     if (!shouldPrompt)
       return true;
+
+    const maxTabsUndo = Services.prefs.getIntPref("browser.sessionstore.max_tabs_undo");
+    if (aCloseTabs != this.closingTabsEnum.ALL &&
+        tabsToClose <= maxTabsUndo) {
+      return true;
+    }
 
     var ps = Services.prompt;
 
@@ -3502,6 +3525,8 @@ window._gBrowser = {
     // Reset temporary permissions on the current tab. This is done here
     // because we only want to reset permissions on user reload.
     SitePermissions.clearTemporaryPermissions(browser);
+    // Also reset DOS mitigations for the basic auth prompt on reload.
+    delete browser.canceledAuthenticationPromptCounter;
     PanelMultiView.hidePopup(gIdentityHandler._identityPopup);
     browser.reload();
   },
@@ -3794,12 +3819,15 @@ window._gBrowser = {
     // the same remote type and process as the one we're swapping in.
     // This makes sure we don't get a short-lived process for the new tab.
     let linkedBrowser = aTab.linkedBrowser;
+    let createLazyBrowser = !aTab.linkedPanel;
     let params = {
       eventDetail: { adoptedTab: aTab },
       preferredRemoteType: linkedBrowser.remoteType,
       sameProcessAsFrameLoader: linkedBrowser.frameLoader,
       skipAnimation: true,
       index: aIndex,
+      createLazyBrowser,
+      allowInheritPrincipal: createLazyBrowser,
     };
 
     let numPinned = this._numPinnedTabs;
@@ -3816,10 +3844,12 @@ window._gBrowser = {
 
     aTab.parentNode._finishAnimateTabMove();
 
-    // Stop the about:blank load.
-    newBrowser.stop();
-    // Make sure it has a docshell.
-    newBrowser.docShell;
+    if (!createLazyBrowser) {
+      // Stop the about:blank load.
+      newBrowser.stop();
+      // Make sure it has a docshell.
+      newBrowser.docShell;
+    }
 
     if (!this.swapBrowsersAndCloseOther(newTab, aTab)) {
       // Swapping wasn't permitted. Bail out.
@@ -4956,7 +4986,7 @@ class TabProgressListener {
         // pointing to their resolved jar: or file: URIs.
         if (!(originalLocation && gInitialPages.includes(originalLocation.spec) &&
             originalLocation != "about:blank" &&
-            this.mBrowser.initialPageLoadedFromURLBar != originalLocation.spec &&
+            this.mBrowser.initialPageLoadedFromUserAction != originalLocation.spec &&
             this.mBrowser.currentURI && this.mBrowser.currentURI.spec == "about:blank")) {
           // Indicating that we started a load will allow the location
           // bar to be cleared when the load finishes.
@@ -4971,7 +5001,7 @@ class TabProgressListener {
           // remoteness or is a new tab/window).
           this.mBrowser.urlbarChangeTracker.startedLoad();
         }
-        delete this.mBrowser.initialPageLoadedFromURLBar;
+        delete this.mBrowser.initialPageLoadedFromUserAction;
         // If the browser is loading it must not be crashed anymore
         this.mTab.removeAttribute("crashed");
       }
@@ -4991,7 +5021,6 @@ class TabProgressListener {
       }
     } else if (aStateFlags & Ci.nsIWebProgressListener.STATE_STOP &&
                aStateFlags & Ci.nsIWebProgressListener.STATE_IS_NETWORK) {
-
       let modifiedAttrs = [];
       if (this.mTab.hasAttribute("busy")) {
         this.mTab.removeAttribute("busy");
@@ -5089,8 +5118,8 @@ class TabProgressListener {
     // and the subframes.
     let topLevel = aWebProgress.isTopLevel;
 
+    let isSameDocument = !!(aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT);
     if (topLevel) {
-      let isSameDocument = !!(aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT);
       let isReload = !!(aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_RELOAD);
       let isErrorPage = !!(aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_ERROR_PAGE);
 
@@ -5185,9 +5214,15 @@ class TabProgressListener {
       }
     }
 
-    if (!this.mBlank) {
+    if (!this.mBlank || this.mBrowser.hasContentOpener) {
       this._callProgressListeners("onLocationChange",
                                   [aWebProgress, aRequest, aLocation, aFlags]);
+      if (topLevel && !isSameDocument) {
+        // Include the true final argument to indicate that this event is
+        // simulated (instead of being observed by the webProgressListener).
+        this._callProgressListeners("onContentBlockingEvent",
+                                    [aWebProgress, null, 0, true]);
+      }
     }
 
     if (topLevel) {
@@ -5211,6 +5246,11 @@ class TabProgressListener {
                                 [aWebProgress, aRequest, aState]);
   }
 
+  onContentBlockingEvent(aWebProgress, aRequest, aEvent) {
+    this._callProgressListeners("onContentBlockingEvent",
+                                [aWebProgress, aRequest, aEvent]);
+  }
+
   onRefreshAttempted(aWebProgress, aURI, aDelay, aSameURI) {
     return this._callProgressListeners("onRefreshAttempted",
                                        [aWebProgress, aURI, aDelay, aSameURI]);
@@ -5220,7 +5260,6 @@ TabProgressListener.prototype.QueryInterface = ChromeUtils.generateQI(
   ["nsIWebProgressListener",
    "nsIWebProgressListener2",
    "nsISupportsWeakReference"]);
-
 } // end private scope for gBrowser
 
 var StatusPanel = {

@@ -307,6 +307,12 @@ bool CallerGetterImpl(JSContext* cx, const CallArgs& args) {
       return true;
     }
 
+    if (JS_IsDeadWrapper(callerObj)) {
+      JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                JSMSG_DEAD_OBJECT);
+      return false;
+    }
+
     JSFunction* callerFun = &callerObj->as<JSFunction>();
     if (IsWrappedAsyncFunction(callerFun)) {
       callerFun = GetUnwrappedAsyncFunction(callerFun);
@@ -335,64 +341,14 @@ static bool CallerGetter(JSContext* cx, unsigned argc, Value* vp) {
 bool CallerSetterImpl(JSContext* cx, const CallArgs& args) {
   MOZ_ASSERT(IsFunction(args.thisv()));
 
-  // Beware!  This function can be invoked on *any* function!  It can't
-  // assume it'll never be invoked on natives, strict mode functions, bound
-  // functions, or anything else that ordinarily has immutable .caller
-  // defined with [[ThrowTypeError]].
-  RootedFunction fun(cx, &args.thisv().toObject().as<JSFunction>());
-  if (!CallerRestrictions(cx, fun)) {
+  // We just have to return |undefined|, but first we call CallerGetterImpl
+  // because we need the same strict-mode and security checks.
+
+  if (!CallerGetterImpl(cx, args)) {
     return false;
   }
 
-  // Return |undefined| unless an error must be thrown.
   args.rval().setUndefined();
-
-  // We can almost just return |undefined| here -- but if the caller function
-  // was strict mode code, we still have to throw a TypeError.  This requires
-  // computing the caller, checking that no security boundaries are crossed,
-  // and throwing a TypeError if the resulting caller is strict.
-
-  NonBuiltinScriptFrameIter iter(cx);
-  if (!AdvanceToActiveCallLinear(cx, iter, fun)) {
-    return true;
-  }
-
-  ++iter;
-  while (!iter.done() && iter.isEvalFrame()) {
-    ++iter;
-  }
-
-  if (iter.done() || !iter.isFunctionFrame()) {
-    return true;
-  }
-
-  RootedObject caller(cx, iter.callee(cx));
-  // |caller| is only used for security access-checking and for its
-  // strictness.  An unwrapped async function has its wrapped async
-  // function's security access and strictness, so don't bother calling
-  // |GetUnwrappedAsyncFunction|.
-  if (!cx->compartment()->wrap(cx, &caller)) {
-    cx->clearPendingException();
-    return true;
-  }
-
-  // If we don't have full access to the caller, or the caller is not strict,
-  // return undefined.  Otherwise throw a TypeError.
-  JSObject* callerObj = CheckedUnwrap(caller);
-  if (!callerObj) {
-    return true;
-  }
-
-  JSFunction* callerFun = &callerObj->as<JSFunction>();
-  MOZ_ASSERT(!callerFun->isBuiltin(),
-             "non-builtin iterator returned a builtin?");
-
-  if (callerFun->strict()) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_CALLER_IS_STRICT);
-    return false;
-  }
-
   return true;
 }
 
@@ -1851,7 +1807,8 @@ static bool CreateDynamicFunction(JSContext* cx, const CallArgs& args,
       .setFileAndLine(filename, 1)
       .setNoScriptRval(false)
       .setIntroductionInfo(introducerFilename, introductionType, lineno,
-                           maybeScript, pcOffset);
+                           maybeScript, pcOffset)
+      .setScriptOrModule(maybeScript);
 
   StringBuffer sb(cx);
 
@@ -1999,6 +1956,7 @@ static bool CreateDynamicFunction(JSContext* cx, const CallArgs& args,
     return false;
   }
 
+  JSProtoKey protoKey = JSProto_Null;
   if (isAsync) {
     if (isGenerator) {
       if (!CompileStandaloneAsyncGenerator(cx, &fun, options, srcBuf,
@@ -2022,12 +1980,13 @@ static bool CreateDynamicFunction(JSContext* cx, const CallArgs& args,
                                      parameterListEnd)) {
         return false;
       }
+      protoKey = JSProto_Function;
     }
   }
 
   // Steps 6, 29.
   RootedObject proto(cx);
-  if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+  if (!GetPrototypeFromBuiltinConstructor(cx, args, protoKey, &proto)) {
     return false;
   }
 
@@ -2328,6 +2287,7 @@ JSFunction* js::CloneFunctionReuseScript(
 JSFunction* js::CloneFunctionAndScript(JSContext* cx, HandleFunction fun,
                                        HandleObject enclosingEnv,
                                        HandleScope newScope,
+                                       Handle<ScriptSourceObject*> sourceObject,
                                        gc::AllocKind allocKind /* = FUNCTION */,
                                        HandleObject proto /* = nullptr */) {
   MOZ_ASSERT(NewFunctionEnvironmentIsWellFormed(cx, enclosingEnv));
@@ -2370,7 +2330,7 @@ JSFunction* js::CloneFunctionAndScript(JSContext* cx, HandleFunction fun,
              "Otherwise we could relazify clone below!");
 
   RootedScript clonedScript(
-      cx, CloneScriptIntoFunction(cx, newScope, clone, script));
+      cx, CloneScriptIntoFunction(cx, newScope, clone, script, sourceObject));
   if (!clonedScript) {
     return nullptr;
   }

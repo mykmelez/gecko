@@ -49,14 +49,14 @@
 
 #include "updatecommon.h"
 #ifdef XP_MACOSX
-#include "updaterfileutils_osx.h"
+#  include "updaterfileutils_osx.h"
 #endif  // XP_MACOSX
 
 #include "mozilla/Compiler.h"
 #include "mozilla/Types.h"
 #include "mozilla/UniquePtr.h"
 #ifdef XP_WIN
-#include "mozilla/WinHeaderOnlyUtils.h"
+#  include "mozilla/WinHeaderOnlyUtils.h"
 #endif  // XP_WIN
 
 // Amount of the progress bar to use in each of the 3 update stages,
@@ -87,52 +87,52 @@ struct UpdateServerThreadArgs {
 #endif
 
 #ifndef _O_BINARY
-#define _O_BINARY 0
+#  define _O_BINARY 0
 #endif
 
 #ifndef NULL
-#define NULL (0)
+#  define NULL (0)
 #endif
 
 #ifndef SSIZE_MAX
-#define SSIZE_MAX LONG_MAX
+#  define SSIZE_MAX LONG_MAX
 #endif
 
 // We want to use execv to invoke the callback executable on platforms where
 // we were launched using execv.  See nsUpdateDriver.cpp.
 #if defined(XP_UNIX) && !defined(XP_MACOSX)
-#define USE_EXECV
+#  define USE_EXECV
 #endif
 
 #if defined(MOZ_VERIFY_MAR_SIGNATURE) && !defined(XP_WIN) && !defined(XP_MACOSX)
-#include "nss.h"
-#include "prerror.h"
+#  include "nss.h"
+#  include "prerror.h"
 #endif
 
 #include "crctable.h"
 
 #ifdef XP_WIN
-#ifdef MOZ_MAINTENANCE_SERVICE
-#include "registrycertificates.h"
-#endif
+#  ifdef MOZ_MAINTENANCE_SERVICE
+#    include "registrycertificates.h"
+#  endif
 BOOL PathAppendSafe(LPWSTR base, LPCWSTR extra);
 BOOL PathGetSiblingFilePath(LPWSTR destinationBuffer, LPCWSTR siblingFilePath,
                             LPCWSTR newFileName);
-#include "updatehelper.h"
+#  include "updatehelper.h"
 
 // Closes the handle if valid and if the updater is elevated returns with the
 // return code specified. This prevents multiple launches of the callback
 // application by preventing the elevated process from launching the callback.
-#define EXIT_WHEN_ELEVATED(path, handle, retCode)             \
-  {                                                           \
-    if (handle != INVALID_HANDLE_VALUE) {                     \
-      CloseHandle(handle);                                    \
-    }                                                         \
-    if (_waccess(path, F_OK) == 0 && NS_tremove(path) != 0) { \
-      ImpersonatedLogFinish();                                \
-      return retCode;                                         \
-    }                                                         \
-  }
+#  define EXIT_WHEN_ELEVATED(path, handle, retCode)             \
+    {                                                           \
+      if (handle != INVALID_HANDLE_VALUE) {                     \
+        CloseHandle(handle);                                    \
+      }                                                         \
+      if (_waccess(path, F_OK) == 0 && NS_tremove(path) != 0) { \
+        ImpersonatedLogFinish();                                \
+        return retCode;                                         \
+      }                                                         \
+    }
 #endif
 
 //-----------------------------------------------------------------------------
@@ -215,7 +215,7 @@ UmaskContext::~UmaskContext() { umask(mPreviousUmask); }
 typedef void (*ThreadFunc)(void *param);
 
 #ifdef XP_WIN
-#include <process.h>
+#  include <process.h>
 
 class Thread {
  public:
@@ -248,7 +248,7 @@ class Thread {
 };
 
 #elif defined(XP_UNIX)
-#include <pthread.h>
+#  include <pthread.h>
 
 class Thread {
  public:
@@ -265,7 +265,7 @@ class Thread {
 };
 
 #else
-#error "Unsupported platform"
+#  error "Unsupported platform"
 #endif
 
 //-----------------------------------------------------------------------------
@@ -286,7 +286,7 @@ static NS_tchar gCallbackRelPath[MAXPATHLEN];
 static NS_tchar gCallbackBackupPath[MAXPATHLEN];
 static NS_tchar gDeleteDirPath[MAXPATHLEN];
 
-#ifdef MOZ_MAINTENANCE_SERVICE
+#  ifdef MOZ_MAINTENANCE_SERVICE
 // Token used to impersonate the original user when running via the
 // maintenance service. If nullptr no impersonation is performed.
 static HANDLE gUserToken;
@@ -306,12 +306,12 @@ static void ImpersonatedLogFinish() {
   }
 }
 
-#endif  // MOZ_MAINTENANCE_SERVICE
-#endif  // XP_WIN
+#  endif  // MOZ_MAINTENANCE_SERVICE
+#endif    // XP_WIN
 
 #if !defined(XP_WIN) || !defined(MOZ_MAINTENANCE_SERVICE)
-#define ImpersonatedLogInit LogInit
-#define ImpersonatedLogFinish LogFinish
+#  define ImpersonatedLogInit LogInit
+#  define ImpersonatedLogFinish LogFinish
 #endif
 
 static const NS_tchar kWhitespace[] = NS_T(" \t");
@@ -360,9 +360,9 @@ static NS_tchar *mstrtok(const NS_tchar *delims, NS_tchar **str) {
 }
 
 #if defined(TEST_UPDATER)
-#define HAS_ENV_CHECK 1
+#  define HAS_ENV_CHECK 1
 #elif defined(MOZ_MAINTENANCE_SERVICE)
-#define HAS_ENV_CHECK 1
+#  define HAS_ENV_CHECK 1
 #endif
 
 #if defined(HAS_ENV_CHECK)
@@ -481,6 +481,14 @@ static NS_tchar *get_valid_path(NS_tchar **line, bool isdir = false) {
   return path;
 }
 
+/*
+ * Gets a quoted path. The return value is malloc'd and it is the responsibility
+ * of the caller to free it.
+ *
+ * @param  path
+ *         The path to quote.
+ * @return On success the quoted path and nullptr otherwise.
+ */
 static NS_tchar *get_quoted_path(const NS_tchar *path) {
   size_t lenQuote = NS_tstrlen(kQuote);
   size_t lenPath = NS_tstrlen(path);
@@ -694,11 +702,11 @@ static int ensure_copy(const NS_tchar *path, const NS_tchar *dest) {
     return READ_ERROR;
   }
 
-#ifdef XP_UNIX
+#  ifdef XP_UNIX
   if (S_ISLNK(ss.st_mode)) {
     return ensure_copy_symlink(path, dest);
   }
-#endif
+#  endif
 
   AutoFile infile(ensure_open(path, NS_T("rb"), ss.st_mode));
   if (!infile) {
@@ -1884,10 +1892,10 @@ void PatchIfFile::Finish(int status) {
 //-----------------------------------------------------------------------------
 
 #ifdef XP_WIN
-#include "nsWindowsRestart.cpp"
-#include "nsWindowsHelpers.h"
-#include "uachelper.h"
-#include "pathhash.h"
+#  include "nsWindowsRestart.cpp"
+#  include "nsWindowsHelpers.h"
+#  include "uachelper.h"
+#  include "pathhash.h"
 
 /**
  * Launch the post update application (helper.exe). It takes in the path of the
@@ -1954,12 +1962,12 @@ bool LaunchWinPostProcess(const WCHAR *installationDir,
     return false;
   }
 
-#if !defined(TEST_UPDATER) && defined(MOZ_MAINTENANCE_SERVICE)
+#  if !defined(TEST_UPDATER) && defined(MOZ_MAINTENANCE_SERVICE)
   if (sUsingService &&
       !DoesBinaryMatchAllowedCertificates(installationDir, exefullpath)) {
     return false;
   }
-#endif
+#  endif
 
   WCHAR dlogFile[MAX_PATH + 1];
   if (!PathGetSiblingFilePath(dlogFile, exefullpath, L"uninstall.update")) {
@@ -2046,19 +2054,19 @@ static void LaunchCallbackApp(const NS_tchar *workingDir, int argc,
     }
   }
 #else
-#warning "Need implementaton of LaunchCallbackApp"
+#  warning "Need implementaton of LaunchCallbackApp"
 #endif
 }
 
 static bool WriteToFile(const NS_tchar *aFilename, const char *aStatus) {
   NS_tchar filename[MAXPATHLEN] = {NS_T('\0')};
 #if defined(XP_WIN)
-#if defined(MOZ_MAINTENANCE_SERVICE)
+#  if defined(MOZ_MAINTENANCE_SERVICE)
   ImpersonationScope impersonated(gUserToken);
   if (gUserToken && !impersonated) {
     return false;
   }
-#endif
+#  endif
 
   // The temp file is not removed on failure since there is client code that
   // will remove it.
@@ -2133,12 +2141,12 @@ static void WriteStatusFile(int status) {
  *         or pending-service.
  */
 static bool IsUpdateStatusPendingService() {
-#if defined(XP_WIN) && defined(MOZ_MAINTENANCE_SERVICE)
+#  if defined(XP_WIN) && defined(MOZ_MAINTENANCE_SERVICE)
   ImpersonationScope impersonated(gUserToken);
   if (gUserToken && !impersonated) {
     return false;
   }
-#endif
+#  endif
 
   NS_tchar filename[MAXPATHLEN];
   NS_tsnprintf(filename, sizeof(filename) / sizeof(filename[0]),
@@ -2170,12 +2178,12 @@ static bool IsUpdateStatusPendingService() {
  * @return true if the information was retrieved and it is succeeded.
  */
 static bool IsUpdateStatusSucceeded(bool &isSucceeded) {
-#if defined(MOZ_MAINTENANCE_SERVICE)
+#  if defined(MOZ_MAINTENANCE_SERVICE)
   ImpersonationScope impersonated(gUserToken);
   if (gUserToken && !impersonated) {
     return false;
   }
-#endif
+#  endif
 
   isSucceeded = false;
   NS_tchar filename[MAXPATHLEN];
@@ -2205,19 +2213,19 @@ static bool IsUpdateStatusSucceeded(bool &isSucceeded) {
 static int CopyInstallDirToDestDir() {
   // These files should not be copied over to the updated app
 #ifdef XP_WIN
-#define SKIPLIST_COUNT 3
+#  define SKIPLIST_COUNT 3
 #elif XP_MACOSX
-#define SKIPLIST_COUNT 0
+#  define SKIPLIST_COUNT 0
 #else
-#define SKIPLIST_COUNT 2
+#  define SKIPLIST_COUNT 2
 #endif
   copy_recursive_skiplist<SKIPLIST_COUNT> skiplist;
 #ifndef XP_MACOSX
   skiplist.append(0, gInstallDirPath, NS_T("updated"));
   skiplist.append(1, gInstallDirPath, NS_T("updates/0"));
-#ifdef XP_WIN
+#  ifdef XP_WIN
   skiplist.append(2, gInstallDirPath, NS_T("updated.update_in_progress.lock"));
-#endif
+#  endif
 #endif
 
   return ensure_copy_recursive(gInstallDirPath, gWorkingDirPath, skiplist);
@@ -2432,11 +2440,11 @@ static void UpdateThreadFunc(void *param) {
         NS_tchar updateSettingsPath[MAX_TEXT_LEN];
         NS_tsnprintf(updateSettingsPath,
                      sizeof(updateSettingsPath) / sizeof(updateSettingsPath[0]),
-#ifdef XP_MACOSX
+#  ifdef XP_MACOSX
                      NS_T("%s/Contents/Resources/update-settings.ini"),
-#else
+#  else
                      NS_T("%s/update-settings.ini"),
-#endif
+#  endif
                      gWorkingDirPath);
         MARChannelStringTable MARStrings;
         if (ReadMARChannelIDs(updateSettingsPath, &MARStrings) != OK) {
@@ -2458,6 +2466,33 @@ static void UpdateThreadFunc(void *param) {
       // the files in dist/bin in the test updater when staging an update since
       // this can cause tests to timeout.
       if (EnvHasValue("MOZ_TEST_SKIP_UPDATE_STAGE")) {
+        rv = OK;
+      } else if (EnvHasValue("MOZ_TEST_SLOW_SKIP_UPDATE_STAGE")) {
+        // The following is to simulate staging so the UI tests have time to
+        // show that the update is being staged.
+        NS_tchar continueFilePath[MAXPATHLEN] = {NS_T('\0')};
+        NS_tsnprintf(continueFilePath,
+                     sizeof(continueFilePath) / sizeof(continueFilePath[0]),
+                     NS_T("%s/continueStaging"), gPatchDirPath);
+        // Use 100 retries for staging requests to lessen the likelihood of
+        // tests intermittently failing on debug builds due to launching the
+        // updater. The total time to wait with the default interval of 100 ms
+        // is approximately 10 seconds. The tests use the same values.
+        const int max_retries = 100;
+        int retries = 1;
+        while (retries++ < max_retries) {
+#  ifdef XP_WIN
+          Sleep(100);
+#  else
+          usleep(100000);
+#  endif
+          // Continue after the continue file exists and it is successfully
+          // removed.
+          if (!NS_taccess(continueFilePath, F_OK) &&
+              !NS_tremove(continueFilePath)) {
+            break;
+          }
+        }
         rv = OK;
       } else {
         rv = CopyInstallDirToDestDir();
@@ -2585,11 +2620,11 @@ int NS_main(int argc, NS_tchar **argv) {
   sUsingService = EnvHasValue("MOZ_USING_SERVICE");
   putenv(const_cast<char *>("MOZ_USING_SERVICE="));
 
-#if XP_WIN
+#  if XP_WIN
   // Null gUserToken is treated as "no impersonation required".
   gUserToken = nullptr;
 
-#ifndef DISABLE_USER_IMPERSONATION
+#    ifndef DISABLE_USER_IMPERSONATION
   if (sUsingService) {
     char *tokenStr = getenv(USER_TOKEN_VAR_NAME);
 
@@ -2617,8 +2652,8 @@ int NS_main(int argc, NS_tchar **argv) {
       // run a new updater.
     }
   }
-#endif  // DISABLE_USER_IMPERSONATION
-#endif
+#    endif  // DISABLE_USER_IMPERSONATION
+#  endif
 #endif
 
   // The callback is the remaining arguments starting at callbackIndex.
@@ -2758,17 +2793,17 @@ int NS_main(int argc, NS_tchar **argv) {
 
   // We never want the service to be used unless we build with
   // the maintenance service.
-#ifdef MOZ_MAINTENANCE_SERVICE
+#  ifdef MOZ_MAINTENANCE_SERVICE
   useService = IsUpdateStatusPendingService();
-#ifdef TEST_UPDATER
+#    ifdef TEST_UPDATER
   noServiceFallback = EnvHasValue("MOZ_NO_SERVICE_FALLBACK");
   putenv(const_cast<char *>("MOZ_NO_SERVICE_FALLBACK="));
   // Our tests run with a different apply directory for each test.
   // We use this registry key on our test slaves to store the
   // allowed name/issuers.
   testOnlyFallbackKeyExists = DoesFallbackKeyExist();
-#endif
-#endif
+#    endif
+#  endif
 
   // Remove everything except close window from the context menu
   {
@@ -2954,12 +2989,12 @@ int NS_main(int argc, NS_tchar **argv) {
     // update.
     if (parent) {
       DWORD waitTime = PARENT_WAIT;
-#ifdef TEST_UPDATER
+#  ifdef TEST_UPDATER
       if (EnvHasValue("MOZ_TEST_SHORTER_WAIT_PID")) {
         // Use a shorter time to wait for the PID to exit for the test.
         waitTime = 100;
       }
-#endif
+#  endif
       DWORD result = WaitForSingleObject(parent, waitTime);
       CloseHandle(parent);
       if (result != WAIT_OBJECT_0) {
@@ -3071,7 +3106,7 @@ int NS_main(int argc, NS_tchar **argv) {
       // A block to contain ImpersonationScope when testing access, removing,
       // and the creating elevated lock file.
       {
-#if defined(XP_WIN) && defined(MOZ_MAINTENANCE_SERVICE)
+#  if defined(XP_WIN) && defined(MOZ_MAINTENANCE_SERVICE)
         ImpersonationScope impersonated(gUserToken);
         if (gUserToken && !impersonated) {
           fprintf(stderr,
@@ -3079,7 +3114,7 @@ int NS_main(int argc, NS_tchar **argv) {
                   "lock file. Exiting\n");
           return 1;
         }
-#endif
+#  endif
 
         if (!_waccess(elevatedLockFilePath, F_OK) &&
             NS_tremove(elevatedLockFilePath) != 0) {
@@ -3136,9 +3171,9 @@ int NS_main(int argc, NS_tchar **argv) {
                             &baseKey) == ERROR_SUCCESS) {
             RegCloseKey(baseKey);
           } else {
-#ifdef TEST_UPDATER
+#  ifdef TEST_UPDATER
             useService = testOnlyFallbackKeyExists;
-#endif
+#  endif
             if (!useService) {
               lastFallbackError = FALLBACKKEY_NOKEY_ERROR;
             }
@@ -3780,6 +3815,7 @@ int add_dir_entries(const NS_tchar *dirpath, ActionList *list) {
         if (rv) {
           LOG(("add_dir_entries Parse error on recurse: " LOG_S ", err: %d",
                quotedpath, rv));
+          free(quotedpath);
           return rv;
         }
         free(quotedpath);
@@ -3865,9 +3901,11 @@ int add_dir_entries(const NS_tchar *dirpath, ActionList *list) {
         if (rv) {
           LOG(("add_dir_entries Parse error on recurse: " LOG_S ", err: %d",
                quotedpath, rv));
+          free(quotedpath);
           closedir(dir);
           return rv;
         }
+        free(quotedpath);
 
         list->Append(action);
       }
@@ -3888,6 +3926,7 @@ int add_dir_entries(const NS_tchar *dirpath, ActionList *list) {
     } else {
       list->Append(action);
     }
+    free(quotedpath);
 
     return rv;
   }
@@ -4008,6 +4047,14 @@ int add_dir_entries(const NS_tchar *dirpath, ActionList *list) {
 }
 #endif
 
+/*
+ * Gets the contents of an update manifest file. The return value is malloc'd
+ * and it is the responsibility of the caller to free it.
+ *
+ * @param  manifest
+ *         The full path to the manifest file.
+ * @return On success the contents of the manifest and nullptr otherwise.
+ */
 static NS_tchar *GetManifestContents(const NS_tchar *manifest) {
   AutoFile mfile(NS_tfopen(manifest, NS_T("rb")));
   if (mfile == nullptr) {
@@ -4042,11 +4089,10 @@ static NS_tchar *GetManifestContents(const NS_tchar *manifest) {
     r -= c;
     rb += c;
   }
-  mbuf[ms.st_size] = '\0';
-  rb = mbuf;
+  *rb = '\0';
 
 #ifndef XP_WIN
-  return rb;
+  return mbuf;
 #else
     NS_tchar *wrb = (NS_tchar *)malloc((ms.st_size + 1) * sizeof(NS_tchar));
     if (!wrb) {
@@ -4054,7 +4100,7 @@ static NS_tchar *GetManifestContents(const NS_tchar *manifest) {
       return nullptr;
     }
 
-    if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, rb, -1, wrb,
+    if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, mbuf, -1, wrb,
                              ms.st_size + 1)) {
       LOG(("GetManifestContents: error converting utf8 to utf16le: %d",
            GetLastError()));
@@ -4077,8 +4123,8 @@ int AddPreCompleteActions(ActionList *list) {
         get_full_path(NS_T("precomplete")));
 #endif
 
-  NS_tchar *rb = GetManifestContents(manifestPath.get());
-  if (rb == nullptr) {
+  NS_tchar *buf = GetManifestContents(manifestPath.get());
+  if (!buf) {
     LOG(
         ("AddPreCompleteActions: error getting contents of precomplete "
          "manifest"));
@@ -4086,6 +4132,7 @@ int AddPreCompleteActions(ActionList *list) {
     // generation scripts enforce the presence of a precomplete manifest.
     return OK;
   }
+  NS_tchar *rb = buf;
 
   int rv;
   NS_tchar *line;
@@ -4098,6 +4145,7 @@ int AddPreCompleteActions(ActionList *list) {
     NS_tchar *token = mstrtok(kWhitespace, &line);
     if (!token) {
       LOG(("AddPreCompleteActions: token not found in manifest"));
+      free(buf);
       return PARSE_ERROR;
     }
 
@@ -4111,21 +4159,26 @@ int AddPreCompleteActions(ActionList *list) {
       action = new RemoveDir();
     } else {
       LOG(("AddPreCompleteActions: unknown token: " LOG_S, token));
+      free(buf);
       return PARSE_ERROR;
     }
 
     if (!action) {
+      free(buf);
       return BAD_ACTION_ERROR;
     }
 
     rv = action->Parse(line);
     if (rv) {
+      delete action;
+      free(buf);
       return rv;
     }
 
     list->Append(action);
   }
 
+  free(buf);
   return OK;
 }
 
@@ -4142,17 +4195,17 @@ int DoUpdate() {
     return rv;
   }
 
-  NS_tchar *rb = GetManifestContents(manifest);
+  NS_tchar *buf = GetManifestContents(manifest);
   NS_tremove(manifest);
-  if (rb == nullptr) {
+  if (!buf) {
     LOG(("DoUpdate: error opening manifest file: " LOG_S, manifest));
     return READ_ERROR;
   }
+  NS_tchar *rb = buf;
 
   ActionList list;
   NS_tchar *line;
   bool isFirstAction = true;
-
   while ((line = mstrtok(kNL, &rb)) != 0) {
     // skip comments
     if (*line == NS_T('#')) {
@@ -4162,6 +4215,7 @@ int DoUpdate() {
     NS_tchar *token = mstrtok(kWhitespace, &line);
     if (!token) {
       LOG(("DoUpdate: token not found in manifest"));
+      free(buf);
       return PARSE_ERROR;
     }
 
@@ -4175,6 +4229,7 @@ int DoUpdate() {
         if (NS_tstrcmp(type, NS_T("complete")) == 0) {
           rv = AddPreCompleteActions(&list);
           if (rv) {
+            free(buf);
             return rv;
           }
         }
@@ -4190,15 +4245,18 @@ int DoUpdate() {
     } else if (NS_tstrcmp(token, NS_T("rmrfdir")) == 0) {  // rmdir recursive
       const NS_tchar *reldirpath = mstrtok(kQuote, &line);
       if (!reldirpath) {
+        free(buf);
         return PARSE_ERROR;
       }
 
       if (reldirpath[NS_tstrlen(reldirpath) - 1] != NS_T('/')) {
+        free(buf);
         return PARSE_ERROR;
       }
 
       rv = add_dir_entries(reldirpath, &list);
       if (rv) {
+        free(buf);
         return rv;
       }
 
@@ -4216,15 +4274,18 @@ int DoUpdate() {
       action = new PatchIfFile();
     } else {
       LOG(("DoUpdate: unknown token: " LOG_S, token));
+      free(buf);
       return PARSE_ERROR;
     }
 
     if (!action) {
+      free(buf);
       return BAD_ACTION_ERROR;
     }
 
     rv = action->Parse(line);
     if (rv) {
+      free(buf);
       return rv;
     }
 
@@ -4233,11 +4294,13 @@ int DoUpdate() {
 
   rv = list.Prepare();
   if (rv) {
+    free(buf);
     return rv;
   }
 
   rv = list.Execute();
 
   list.Finish(rv);
+  free(buf);
   return rv;
 }

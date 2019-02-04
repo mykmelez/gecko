@@ -23,7 +23,7 @@
 #include "nsIWindowProvider.h"
 
 #if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
-#include "nsIFile.h"
+#  include "nsIFile.h"
 #endif
 
 struct ChromePackage;
@@ -133,6 +133,8 @@ class ContentChild final : public PContentChild,
 
   void GetProcessName(nsACString& aName) const;
 
+  void LaunchRDDProcess();
+
 #if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
   void GetProfileDir(nsIFile** aProfileDir) const {
     *aProfileDir = mProfileDir;
@@ -187,9 +189,6 @@ class ContentChild final : public PContentChild,
   virtual mozilla::ipc::IPCResult RecvAudioDefaultDeviceChange() override;
 
   mozilla::ipc::IPCResult RecvReinitRenderingForDeviceReset() override;
-
-  virtual mozilla::ipc::IPCResult RecvInitRemoteDecoder(
-      Endpoint<PRemoteDecoderManagerChild>&& aRemoteManager) override;
 
   virtual mozilla::ipc::IPCResult RecvSetProcessSandbox(
       const MaybeFileDesc& aBroker) override;
@@ -442,6 +441,9 @@ class ContentChild final : public PContentChild,
   virtual mozilla::ipc::IPCResult RecvInitBlobURLs(
       nsTArray<BlobURLRegistrationData>&& aRegistations) override;
 
+  virtual mozilla::ipc::IPCResult RecvInitJSWindowActorInfos(
+      nsTArray<JSWindowActorInfo>&& aInfos) override;
+
   virtual mozilla::ipc::IPCResult RecvLastPrivateDocShellDestroyed() override;
 
   virtual mozilla::ipc::IPCResult RecvNotifyProcessPriorityChanged(
@@ -638,8 +640,7 @@ class ContentChild final : public PContentChild,
 
   // PURLClassifierChild
   virtual PURLClassifierChild* AllocPURLClassifierChild(
-      const Principal& aPrincipal, const bool& aUseTrackingProtection,
-      bool* aSuccess) override;
+      const Principal& aPrincipal, bool* aSuccess) override;
   virtual bool DeallocPURLClassifierChild(PURLClassifierChild* aActor) override;
 
   // PURLClassifierLocalChild
@@ -696,6 +697,12 @@ class ContentChild final : public PContentChild,
 
   mozilla::ipc::IPCResult RecvSaveRecording(
       const FileDescriptor& aFile) override;
+
+  virtual mozilla::ipc::IPCResult RecvCrossProcessRedirect(
+      const uint32_t& aRegistrarId, nsIURI* aURI, const uint32_t& aNewLoadFlags,
+      const OptionalLoadInfoArgs& aLoadInfoForwarder,
+      const uint64_t& aChannelId, nsIURI* aOriginalURI,
+      const uint64_t& aIdentifier) override;
 
 #ifdef NIGHTLY_BUILD
   // Fetch the current number of pending input events.

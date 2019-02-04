@@ -28,6 +28,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/SRILogHelper.h"
+#include "mozilla/net/UrlClassifierFeatureFactory.h"
 #include "nsGkAtoms.h"
 #include "nsNetUtil.h"
 #include "nsGlobalWindowInner.h"
@@ -966,7 +967,8 @@ void ScriptLoader::EnsureModuleHooksInitialized() {
 
   JS::SetModuleResolveHook(rt, HostResolveImportedModule);
   JS::SetModuleMetadataHook(rt, HostPopulateImportMeta);
-  JS::SetScriptPrivateFinalizeHook(rt, HostFinalizeTopLevelScript);
+  JS::SetScriptPrivateReferenceHooks(rt, HostAddRefTopLevelScript,
+                                     HostReleaseTopLevelScript);
 
   Preferences::RegisterCallbackAndCall(DynamicImportPrefChangedCallback,
                                        "javascript.options.dynamicImport",
@@ -1106,21 +1108,22 @@ bool ScriptLoader::InstantiateModuleTree(ModuleLoadRequest* aRequest) {
   return true;
 }
 
-nsresult ScriptLoader::AssociateSourceElementsForModuleTree(
+nsresult ScriptLoader::InitDebuggerDataForModuleTree(
     JSContext* aCx, ModuleLoadRequest* aRequest) {
-  // Preloading can cause JS scripts to be compiled before DOM script element
-  // nodes have been created. This method ensures compiled scripts are
-  // associated with DOM element nodes before execution.
+  // JS scripts can be associated with a DOM element for use by the debugger,
+  // but preloading can cause scripts to be compiled before DOM script element
+  // nodes have been created. This method ensures that this association takes
+  // place before the first time a module script is run.
 
   MOZ_ASSERT(aRequest);
 
   ModuleScript* moduleScript = aRequest->mModuleScript;
-  if (moduleScript->SourceElementAssociated()) {
+  if (moduleScript->DebuggerDataInitialized()) {
     return NS_OK;
   }
 
   for (ModuleLoadRequest* childRequest : aRequest->mImports) {
-    nsresult rv = AssociateSourceElementsForModuleTree(aCx, childRequest);
+    nsresult rv = InitDebuggerDataForModuleTree(aCx, childRequest);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -1131,13 +1134,13 @@ nsresult ScriptLoader::AssociateSourceElementsForModuleTree(
   if (element) {
     nsresult rv = nsJSUtils::InitModuleSourceElement(aCx, module, element);
     NS_ENSURE_SUCCESS(rv, rv);
-    moduleScript->SetSourceElementAssociated();
   }
 
   // The script is now ready to be exposed to the debugger.
   JS::Rooted<JSScript*> script(aCx, JS::GetModuleScript(module));
   JS::ExposeScriptToDebugger(aCx, script);
 
+  moduleScript->SetDebuggerDataInitialized();
   return NS_OK;
 }
 
@@ -1304,7 +1307,7 @@ nsresult ScriptLoader::StartLoad(ScriptLoadRequest* aRequest) {
   if (httpChannel) {
     // HTTP content negotation has little value in this context.
     nsAutoCString acceptTypes("*/*");
-    if (BinASTEncodingEnabled() && aRequest->ShouldAcceptBinASTEncoding()) {
+    if (nsJSUtils::BinASTEncodingEnabled() && aRequest->ShouldAcceptBinASTEncoding()) {
       acceptTypes = APPLICATION_JAVASCRIPT_BINAST ", */*";
     }
     rv = httpChannel->SetRequestHeader(NS_LITERAL_CSTRING("Accept"),
@@ -1429,14 +1432,6 @@ bool ScriptLoader::ProcessScriptElement(nsIScriptElement* aElement) {
   }
 
   NS_ASSERTION(!aElement->IsMalformed(), "Executing malformed script");
-
-  nsAutoCString url;
-  nsCOMPtr<nsIURI> scriptURI = aElement->GetScriptURI();
-  if (scriptURI) {
-    scriptURI->GetAsciiSpec(url);
-  }
-  AUTO_PROFILER_LABEL_DYNAMIC_NSCSTRING("ScriptLoader::ProcessScriptElement",
-                                        JS, url);
 
   nsCOMPtr<nsIContent> scriptContent = do_QueryInterface(aElement);
 
@@ -1801,6 +1796,9 @@ ScriptLoadRequest* ScriptLoader::LookupPreloadRequest(
     AccumulateCategorical(LABELS_DOM_SCRIPT_PRELOAD_RESULT::RequestMismatch);
     return nullptr;
   }
+
+  // Report any errors that we skipped while preloading.
+  ReportPreloadErrorsToConsole(request);
 
   return request;
 }
@@ -2301,9 +2299,8 @@ nsresult ScriptLoader::FillCompileOptionsForRequest(
 
   bool isScriptElement =
       !aRequest->IsModuleRequest() || aRequest->AsModuleRequest()->IsTopLevel();
-  aOptions->setIntroductionInfoToCaller(jsapi.cx(),
-                                        isScriptElement ? "scriptElement"
-                                                        : "importedModule");
+  aOptions->setIntroductionInfoToCaller(
+      jsapi.cx(), isScriptElement ? "scriptElement" : "importedModule");
   aOptions->setFileAndLine(aRequest->mURL.get(), aRequest->mLineNo);
   aOptions->setIsRunOnce(true);
   aOptions->setNoScriptRval(true);
@@ -2444,7 +2441,7 @@ class MOZ_RAII AutoSetProcessingScriptTag {
 static nsresult ExecuteCompiledScript(JSContext* aCx,
                                       ScriptLoadRequest* aRequest,
                                       nsJSUtils::ExecutionContext& aExec) {
-  JS::Rooted<JSScript*> script(aCx, aExec.GetScript());
+  JS::Rooted<JSScript*> script(aCx, aExec.MaybeGetScript());
   if (!script) {
     // Compilation succeeds without producing a script if scripting is
     // disabled for the global.
@@ -2457,6 +2454,49 @@ static nsresult ExecuteCompiledScript(JSContext* aCx,
   classicScript->AssociateWithScript(script);
 
   return aExec.ExecScript();
+}
+
+static void GetProfilerLabelForRequest(ScriptLoadRequest* aRequest,
+                                       nsACString& aOutString) {
+#ifdef MOZ_GECKO_PROFILER
+  if (!profiler_is_active()) {
+    aOutString.Append("<script> element");
+    return;
+  }
+  aOutString.Append("<script");
+  if (aRequest->IsAsyncScript()) {
+    aOutString.Append(" async");
+  } else if (aRequest->IsDeferredScript()) {
+    aOutString.Append(" defer");
+  }
+  if (aRequest->IsModuleRequest()) {
+    aOutString.Append(" type=\"module\"");
+  }
+
+  nsAutoCString url;
+  if (aRequest->mURI) {
+    aRequest->mURI->GetAsciiSpec(url);
+  } else {
+    url = "<unknown>";
+  }
+
+  if (aRequest->mIsInline) {
+    if (aRequest->GetParserCreated() != NOT_FROM_PARSER) {
+      aOutString.Append("> inline at line ");
+      aOutString.AppendInt(aRequest->mLineNo);
+      aOutString.Append(" of ");
+    } else {
+      aOutString.Append("> inline (dynamically created) in ");
+    }
+    aOutString.Append(url);
+  } else {
+    aOutString.Append(" src=\"");
+    aOutString.Append(url);
+    aOutString.Append("\">");
+  }
+#else
+  aOutString.Append("<script> element");
+#endif
 }
 
 nsresult ScriptLoader::EvaluateScript(ScriptLoadRequest* aRequest) {
@@ -2496,7 +2536,9 @@ nsresult ScriptLoader::EvaluateScript(ScriptLoadRequest* aRequest) {
   // New script entry point required, due to the "Create a script" sub-step of
   // http://www.whatwg.org/specs/web-apps/current-work/#execute-the-script-block
   nsAutoMicroTask mt;
-  AutoEntryScript aes(globalObject, "<script> element", true);
+  nsAutoCString profilerLabelString;
+  GetProfilerLabelForRequest(aRequest, profilerLabelString);
+  AutoEntryScript aes(globalObject, profilerLabelString.get(), true);
   JSContext* cx = aes.cx();
   JS::Rooted<JSObject*> global(cx, globalObject->GetGlobalJSObject());
 
@@ -2535,10 +2577,8 @@ nsresult ScriptLoader::EvaluateScript(ScriptLoadRequest* aRequest) {
       JS::Rooted<JSObject*> module(cx, moduleScript->ModuleRecord());
       MOZ_ASSERT(module);
 
-      if (!moduleScript->SourceElementAssociated()) {
-        rv = AssociateSourceElementsForModuleTree(cx, request);
-        NS_ENSURE_SUCCESS(rv, rv);
-      }
+      rv = InitDebuggerDataForModuleTree(cx, request);
+      NS_ENSURE_SUCCESS(rv, rv);
 
       rv = nsJSUtils::ModuleEvaluate(cx, module);
       MOZ_ASSERT(NS_FAILED(rv) == aes.HasException());
@@ -2715,7 +2755,8 @@ void ScriptLoader::MaybeTriggerBytecodeEncoding() {
   // give-up on encoding the bytecode.
   nsCOMPtr<nsIRunnable> encoder = NewRunnableMethod(
       "ScriptLoader::EncodeBytecode", this, &ScriptLoader::EncodeBytecode);
-  if (NS_FAILED(NS_IdleDispatchToCurrentThread(encoder.forget()))) {
+  if (NS_FAILED(NS_DispatchToCurrentThreadQueue(encoder.forget(),
+                                                EventQueuePriority::Idle))) {
     GiveUpBytecodeEncoding();
     return;
   }
@@ -3196,6 +3237,9 @@ void ScriptLoader::ReportErrorToConsole(ScriptLoadRequest* aRequest,
   MOZ_ASSERT(aRequest);
 
   if (aRequest->IsPreload()) {
+    // Skip reporting errors in preload requests. If the request is actually
+    // used then we will report the error in ReportPreloadErrorsToConsole below.
+    aRequest->mUnreportedPreloadError = aResult;
     return;
   }
 
@@ -3205,8 +3249,9 @@ void ScriptLoader::ReportErrorToConsole(ScriptLoadRequest* aRequest,
     message = isScript ? "ScriptSourceMalformed" : "ModuleSourceMalformed";
   } else if (aResult == NS_ERROR_DOM_BAD_URI) {
     message = isScript ? "ScriptSourceNotAllowed" : "ModuleSourceNotAllowed";
-  } else if (aResult == NS_ERROR_TRACKING_URI) {
-    // Tracking protection errors already show their own console messages.
+  } else if (net::UrlClassifierFeatureFactory::IsClassifierBlockingErrorCode(
+                 aResult)) {
+    // Blocking classifier error codes already show their own console messages.
     return;
   } else {
     message = isScript ? "ScriptSourceLoadFailed" : "ModuleSourceLoadFailed";
@@ -3225,16 +3270,31 @@ void ScriptLoader::ReportErrorToConsole(ScriptLoadRequest* aRequest,
       ArrayLength(params), nullptr, EmptyString(), lineNo, columnNo);
 }
 
+void ScriptLoader::ReportPreloadErrorsToConsole(ScriptLoadRequest* aRequest) {
+  if (NS_FAILED(aRequest->mUnreportedPreloadError)) {
+    ReportErrorToConsole(aRequest, aRequest->mUnreportedPreloadError);
+    aRequest->mUnreportedPreloadError = NS_OK;
+  }
+
+  if (aRequest->IsModuleRequest()) {
+    for (auto childRequest : aRequest->AsModuleRequest()->mImports) {
+      ReportPreloadErrorsToConsole(childRequest);
+    }
+  }
+}
+
 void ScriptLoader::HandleLoadError(ScriptLoadRequest* aRequest,
                                    nsresult aResult) {
   /*
-   * Handle script not loading error because source was a tracking URL.
+   * Handle script not loading error because source was an tracking URL (or
+   * fingerprinting, cryptoming, etc).
    * We make a note of this script node by including it in a dedicated
    * array of blocked tracking nodes under its parent document.
    */
-  if (aResult == NS_ERROR_TRACKING_URI) {
+  if (net::UrlClassifierFeatureFactory::IsClassifierBlockingErrorCode(
+          aResult)) {
     nsCOMPtr<nsIContent> cont = do_QueryInterface(aRequest->Element());
-    mDocument->AddBlockedTrackingNode(cont);
+    mDocument->AddBlockedNodeByClassifier(cont);
   }
 
   if (aRequest->IsModuleRequest() && !aRequest->mIsInline) {

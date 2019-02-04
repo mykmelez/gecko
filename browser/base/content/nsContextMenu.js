@@ -4,10 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
-ChromeUtils.import("resource://gre/modules/BrowserUtils.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+var {PrivateBrowsingUtils} = ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
+var {BrowserUtils} = ChromeUtils.import("resource://gre/modules/BrowserUtils.jsm");
+var {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   SpellCheckHelper: "resource://gre/modules/InlineSpellChecker.jsm",
@@ -425,12 +425,21 @@ nsContextMenu.prototype = {
     this.showItem("context-viewpartialsource-selection",
                   this.isContentSelected);
 
+    const {gBrowser} = this.browser.ownerGlobal;
+    // Hide menu that opens devtools when the window is showing `about:devtools-toolbox`.
+    // This is to avoid displaying multiple devtools at the same time. See bug 1495944.
+    const isAboutDevtoolsToolbox = gBrowser &&
+                                   gBrowser.currentURI &&
+                                   gBrowser.currentURI.scheme === "about" &&
+                                   gBrowser.currentURI.filePath === "devtools-toolbox";
+
     var shouldShow = !(this.isContentSelected ||
                        this.onImage || this.onCanvas ||
                        this.onVideo || this.onAudio ||
                        this.onLink || this.onTextInput);
 
     var showInspect = this.inTabBrowser &&
+                      !isAboutDevtoolsToolbox &&
                       Services.prefs.getBoolPref("devtools.inspector.enabled", true) &&
                       !Services.prefs.getBoolPref("devtools.policy.disabled", false);
 
@@ -1096,7 +1105,6 @@ nsContextMenu.prototype = {
       extListener: null,
 
       onStartRequest: function saveLinkAs_onStartRequest(aRequest, aContext) {
-
         // if the timer fired, the error status will have been caused by that,
         // and we'll be restarting in onStopRequest, so no reason to notify
         // the user

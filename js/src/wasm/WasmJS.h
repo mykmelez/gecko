@@ -40,6 +40,10 @@ namespace wasm {
 
 bool HasCompilerSupport(JSContext* cx);
 
+// Return whether WebAssembly has support for an optimized compiler backend.
+
+bool HasOptimizedCompilerTier(JSContext* cx);
+
 // Return whether WebAssembly is supported on this platform. This determines
 // whether the WebAssembly object is exposed to JS and takes into account
 // configuration options that disable various modes.
@@ -52,6 +56,11 @@ bool HasSupport(JSContext* cx);
 bool HasStreamingSupport(JSContext* cx);
 
 bool HasCachingSupport(JSContext* cx);
+
+// Returns true if WebAssembly as configured by compile-time flags and run-time
+// options can support reference types and stack walking.
+
+bool HasReftypesSupport(JSContext* cx);
 
 // Compiles the given binary wasm module given the ArrayBufferObject
 // and links the module's imports with the given import object.

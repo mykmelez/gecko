@@ -360,8 +360,7 @@ enum class nsDisplayListBuilderMode : uint8_t {
   PLUGIN_GEOMETRY,
   FRAME_VISIBILITY,
   TRANSFORM_COMPUTATION,
-  GENERATE_GLYPH,
-  PAINTING_SELECTION_BACKGROUND
+  GENERATE_GLYPH
 };
 
 /**
@@ -522,14 +521,6 @@ class nsDisplayListBuilder {
     return mMode == nsDisplayListBuilderMode::GENERATE_GLYPH;
   }
 
-  /**
-   * @return true if the display list is being built for painting selection
-   * background.
-   */
-  bool IsForPaintingSelectionBG() const {
-    return mMode == nsDisplayListBuilderMode::PAINTING_SELECTION_BACKGROUND;
-  }
-
   bool BuildCompositorHitTestInfo() const {
     return mBuildCompositorHitTestInfo;
   }
@@ -674,6 +665,13 @@ class nsDisplayListBuilder {
    */
   void SetPaintingToWindow(bool aToWindow) { mIsPaintingToWindow = aToWindow; }
   bool IsPaintingToWindow() const { return mIsPaintingToWindow; }
+  /**
+   * Call this if we're doing painting for WebRender
+   */
+  void SetPaintingForWebRender(bool aForWebRender) {
+    mIsPaintingForWebRender = true;
+  }
+  bool IsPaintingForWebRender() const { return mIsPaintingForWebRender; }
   /**
    * Call this to prevent descending into subdocuments.
    */
@@ -1735,6 +1733,13 @@ class nsDisplayListBuilder {
     mHitTestIsForVisibility = aHitTestIsForVisibility;
   }
 
+  bool ShouldBuildAsyncZoomContainer() const {
+    return mBuildAsyncZoomContainer;
+  }
+  void SetBuildAsyncZoomContainer(bool aBuildAsyncZoomContainer) {
+    mBuildAsyncZoomContainer = aBuildAsyncZoomContainer;
+  }
+
   /**
    * Represents a region composed of frame/rect pairs.
    * WeakFrames are used to track whether a rect still belongs to the region.
@@ -1970,6 +1975,7 @@ class nsDisplayListBuilder {
   bool mIsInChromePresContext;
   bool mSyncDecodeImages;
   bool mIsPaintingToWindow;
+  bool mIsPaintingForWebRender;
   bool mIsCompositingCheap;
   bool mContainsPluginItem;
   bool mAncestorHasApzAwareEventHandler;
@@ -1989,6 +1995,7 @@ class nsDisplayListBuilder {
   bool mDisablePartialUpdates;
   bool mPartialBuildFailed;
   bool mIsInActiveDocShell;
+  bool mBuildAsyncZoomContainer;
 
   nsRect mHitTestArea;
   CompositorHitTestInfo mHitTestInfo;
@@ -3422,6 +3429,15 @@ struct nsDisplayListCollection : public nsDisplayListSet {
     }
   }
 
+  /**
+   * Serialize this display list collection into a display list with the items
+   * in the correct Z order.
+   * @param aOutList the result display list
+   * @param aContent the content element to use for content ordering
+   */
+  void SerializeWithCorrectZOrder(nsDisplayList* aOutResultList,
+                                  nsIContent* aContent);
+
  private:
   // This class is only used on stack, so we don't have to worry about leaking
   // it.  Don't let us be heap-allocated!
@@ -3779,9 +3795,9 @@ class nsDisplayReflowCount : public nsDisplayItem {
     MOZ_COUNT_CTOR(nsDisplayReflowCount);
   }
 
-#ifdef NS_BUILD_REFCNT_LOGGING
+#  ifdef NS_BUILD_REFCNT_LOGGING
   ~nsDisplayReflowCount() override { MOZ_COUNT_DTOR(nsDisplayReflowCount); }
-#endif
+#  endif
 
   NS_DISPLAY_DECL_NAME("nsDisplayReflowCount", TYPE_REFLOW_COUNT)
 
@@ -3795,40 +3811,40 @@ class nsDisplayReflowCount : public nsDisplayItem {
   nscolor mColor;
 };
 
-#define DO_GLOBAL_REFLOW_COUNT_DSP(_name)                                 \
-  PR_BEGIN_MACRO                                                          \
-  if (!aBuilder->IsBackgroundOnly() && !aBuilder->IsForEventDelivery() && \
-      PresShell()->IsPaintingFrameCounts()) {                             \
-    aLists.Outlines()->AppendToTop(                                       \
-        MakeDisplayItem<nsDisplayReflowCount>(aBuilder, this, _name));    \
-  }                                                                       \
-  PR_END_MACRO
+#  define DO_GLOBAL_REFLOW_COUNT_DSP(_name)                                 \
+    PR_BEGIN_MACRO                                                          \
+    if (!aBuilder->IsBackgroundOnly() && !aBuilder->IsForEventDelivery() && \
+        PresShell()->IsPaintingFrameCounts()) {                             \
+      aLists.Outlines()->AppendToTop(                                       \
+          MakeDisplayItem<nsDisplayReflowCount>(aBuilder, this, _name));    \
+    }                                                                       \
+    PR_END_MACRO
 
-#define DO_GLOBAL_REFLOW_COUNT_DSP_COLOR(_name, _color)                        \
-  PR_BEGIN_MACRO                                                               \
-  if (!aBuilder->IsBackgroundOnly() && !aBuilder->IsForEventDelivery() &&      \
-      PresShell()->IsPaintingFrameCounts()) {                                  \
-    aLists.Outlines()->AppendToTop(                                            \
-        MakeDisplayItem<nsDisplayReflowCount>(aBuilder, this, _name, _color)); \
-  }                                                                            \
-  PR_END_MACRO
+#  define DO_GLOBAL_REFLOW_COUNT_DSP_COLOR(_name, _color)                   \
+    PR_BEGIN_MACRO                                                          \
+    if (!aBuilder->IsBackgroundOnly() && !aBuilder->IsForEventDelivery() && \
+        PresShell()->IsPaintingFrameCounts()) {                             \
+      aLists.Outlines()->AppendToTop(MakeDisplayItem<nsDisplayReflowCount>( \
+          aBuilder, this, _name, _color));                                  \
+    }                                                                       \
+    PR_END_MACRO
 
 /*
   Macro to be used for classes that don't actually implement BuildDisplayList
  */
-#define DECL_DO_GLOBAL_REFLOW_COUNT_DSP(_class, _super)     \
-  void BuildDisplayList(nsDisplayListBuilder* aBuilder,     \
-                        const nsRect& aDirtyRect,           \
-                        const nsDisplayListSet& aLists) {   \
-    DO_GLOBAL_REFLOW_COUNT_DSP(#_class);                    \
-    _super::BuildDisplayList(aBuilder, aDirtyRect, aLists); \
-  }
+#  define DECL_DO_GLOBAL_REFLOW_COUNT_DSP(_class, _super)     \
+    void BuildDisplayList(nsDisplayListBuilder* aBuilder,     \
+                          const nsRect& aDirtyRect,           \
+                          const nsDisplayListSet& aLists) {   \
+      DO_GLOBAL_REFLOW_COUNT_DSP(#_class);                    \
+      _super::BuildDisplayList(aBuilder, aDirtyRect, aLists); \
+    }
 
 #else  // MOZ_REFLOW_PERF_DSP && MOZ_REFLOW_PERF
 
-#define DO_GLOBAL_REFLOW_COUNT_DSP(_name)
-#define DO_GLOBAL_REFLOW_COUNT_DSP_COLOR(_name, _color)
-#define DECL_DO_GLOBAL_REFLOW_COUNT_DSP(_class, _super)
+#  define DO_GLOBAL_REFLOW_COUNT_DSP(_name)
+#  define DO_GLOBAL_REFLOW_COUNT_DSP_COLOR(_name, _color)
+#  define DECL_DO_GLOBAL_REFLOW_COUNT_DSP(_class, _super)
 
 #endif  // MOZ_REFLOW_PERF_DSP && MOZ_REFLOW_PERF
 
@@ -5334,8 +5350,8 @@ class nsDisplayOpacity : public nsDisplayWrapList {
     return mChildOpacityState == ChildOpacityState::Applied;
   }
 
-  static bool NeedsActiveLayer(nsDisplayListBuilder* aBuilder,
-                               nsIFrame* aFrame);
+  static bool NeedsActiveLayer(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+                               bool aEnforceMinimumSize = true);
   void WriteDebugInfo(std::stringstream& aStream) override;
   bool CanUseAsyncAnimations(nsDisplayListBuilder* aBuilder) override;
   bool CreateWebRenderCommands(
@@ -6114,6 +6130,43 @@ class nsDisplayZoom : public nsDisplaySubDocument {
 };
 
 /**
+ * nsDisplayAsyncZoom is used for APZ zooming. It wraps the contents of the
+ * root content document's scroll frame, including fixed position content. It
+ * does not contain the scroll frame's scrollbars. It is clipped to the scroll
+ * frame's scroll port clip. It is not scrolled; only its non-fixed contents
+ * are scrolled. This item creates a container layer.
+ */
+class nsDisplayAsyncZoom : public nsDisplayOwnLayer {
+ public:
+  nsDisplayAsyncZoom(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+                     nsDisplayList* aList,
+                     const ActiveScrolledRoot* aActiveScrolledRoot,
+                     mozilla::layers::FrameMetrics::ViewID aViewID);
+  nsDisplayAsyncZoom(nsDisplayListBuilder* aBuilder,
+                     const nsDisplayAsyncZoom& aOther)
+      : nsDisplayOwnLayer(aBuilder, aOther), mViewID(aOther.mViewID) {
+    MOZ_COUNT_CTOR(nsDisplayAsyncZoom);
+  }
+
+#ifdef NS_BUILD_REFCNT_LOGGING
+  virtual ~nsDisplayAsyncZoom();
+#endif
+
+  virtual already_AddRefed<Layer> BuildLayer(
+      nsDisplayListBuilder* aBuilder, LayerManager* aManager,
+      const ContainerLayerParameters& aContainerParameters) override;
+  NS_DISPLAY_DECL_NAME("AsyncZoom", TYPE_ASYNC_ZOOM)
+  virtual LayerState GetLayerState(
+      nsDisplayListBuilder* aBuilder, LayerManager* aManager,
+      const ContainerLayerParameters& aParameters) override {
+    return mozilla::LAYER_ACTIVE_FORCE;
+  }
+
+ protected:
+  mozilla::layers::FrameMetrics::ViewID mViewID;
+};
+
+/**
  * A base class for different effects types.
  */
 class nsDisplayEffectsBase : public nsDisplayWrapList {
@@ -6351,8 +6404,9 @@ class nsDisplayFilters : public nsDisplayEffectsBase {
       const StackingContextHelper& aSc,
       mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override;
+  bool CanCreateWebRenderCommands(nsDisplayListBuilder* aBuilder);
 
-  bool CreateWebRenderCSSFilters(nsTArray<mozilla::wr::WrFilterOp>& wrFilters);
+  bool CreateWebRenderCSSFilters(nsTArray<mozilla::wr::FilterOp>& wrFilters);
 
  private:
   // relative to mFrame
@@ -6705,13 +6759,10 @@ class nsDisplayTransform : public nsDisplayHitTestInfoItem {
       nsDisplayListBuilder* aBuilder, nsIFrame* aFrame, nsRect* aDirtyRect);
   bool CanUseAsyncAnimations(nsDisplayListBuilder* aBuilder) override;
 
-  bool MayBeAnimated(nsDisplayListBuilder* aBuilder) const;
+  bool MayBeAnimated(nsDisplayListBuilder* aBuilder,
+                     bool aEnforceMinimumSize = true) const;
 
   void WriteDebugInfo(std::stringstream& aStream) override;
-
-  // Force the layer created for this item not to extend 3D context.
-  // See nsIFrame::BuildDisplayListForStackingContext()
-  void SetNoExtendContext() { mNoExtendContext = true; }
 
   void DoUpdateBoundsPreserves3D(nsDisplayListBuilder* aBuilder) override {
     MOZ_ASSERT(mFrame->Combines3DTransformWithAncestors() ||
@@ -6793,15 +6844,13 @@ class nsDisplayTransform : public nsDisplayHitTestInfoItem {
   mutable nsRect mBounds;
   // True for mBounds is valid.
   mutable bool mHasBounds;
-  // Be forced not to extend 3D context.  Since we don't create a
-  // transform item, a container layer, for every frames in a
-  // preserves3d context, the transform items of a child preserves3d
-  // context may extend the parent context not intented if the root of
-  // the child preserves3d context doesn't create a transform item.
-  // With this flags, we force the item not extending 3D context.
-  bool mNoExtendContext;
   // This item is a separator between 3D rendering contexts, and
   // mTransform have been presetted by the constructor.
+  // This also forces us not to extend the 3D context.  Since we don't create a
+  // transform item, a container layer, for every frame in a preserves3d
+  // context, the transform items of a child preserves3d context may extend the
+  // parent context unintendedly if the root of the child preserves3d context
+  // doesn't create a transform item.
   bool mIsTransformSeparator;
   // True if mTransformPreserves3D have been initialized.
   bool mTransformPreserves3DInited;

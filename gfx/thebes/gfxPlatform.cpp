@@ -39,10 +39,10 @@
 #include "VRThread.h"
 
 #ifdef XP_WIN
-#include <process.h>
-#define getpid _getpid
+#  include <process.h>
+#  define getpid _getpid
 #else
-#include <unistd.h>
+#  include <unistd.h>
 #endif
 
 #include "nsXULAppAPI.h"
@@ -50,23 +50,23 @@
 #include "nsDirectoryServiceDefs.h"
 
 #if defined(XP_WIN)
-#include "gfxWindowsPlatform.h"
+#  include "gfxWindowsPlatform.h"
 #elif defined(XP_MACOSX)
-#include "gfxPlatformMac.h"
-#include "gfxQuartzSurface.h"
-#include "nsCocoaFeatures.h"
+#  include "gfxPlatformMac.h"
+#  include "gfxQuartzSurface.h"
+#  include "nsCocoaFeatures.h"
 #elif defined(MOZ_WIDGET_GTK)
-#include "gfxPlatformGtk.h"
+#  include "gfxPlatformGtk.h"
 #elif defined(ANDROID)
-#include "gfxAndroidPlatform.h"
+#  include "gfxAndroidPlatform.h"
 #endif
 #if defined(MOZ_WIDGET_ANDROID)
-#include "mozilla/jni/Utils.h"  // for IsFennec
+#  include "mozilla/jni/Utils.h"  // for IsFennec
 #endif
 
 #ifdef XP_WIN
-#include "mozilla/WindowsVersion.h"
-#include "mozilla/gfx/DeviceManagerDx.h"
+#  include "mozilla/WindowsVersion.h"
+#  include "mozilla/gfx/DeviceManagerDx.h"
 #endif
 
 #include "nsGkAtoms.h"
@@ -103,23 +103,23 @@
 #include "mozilla/gfx/Logging.h"
 
 #ifdef USE_SKIA
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wshadow"
-#endif
-#include "skia/include/core/SkGraphics.h"
-#ifdef USE_SKIA_GPU
-#include "skia/include/gpu/GrContext.h"
-#include "skia/include/gpu/gl/GrGLInterface.h"
-#include "SkiaGLGlue.h"
-#endif
-#ifdef MOZ_ENABLE_FREETYPE
-#include "skia/include/ports/SkTypeface_cairo.h"
-#endif
-#include "mozilla/gfx/SkMemoryReporter.h"
-#ifdef __GNUC__
-#pragma GCC diagnostic pop  // -Wshadow
-#endif
+#  ifdef __GNUC__
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wshadow"
+#  endif
+#  include "skia/include/core/SkGraphics.h"
+#  ifdef USE_SKIA_GPU
+#    include "skia/include/gpu/GrContext.h"
+#    include "skia/include/gpu/gl/GrGLInterface.h"
+#    include "SkiaGLGlue.h"
+#  endif
+#  ifdef MOZ_ENABLE_FREETYPE
+#    include "skia/include/ports/SkTypeface_cairo.h"
+#  endif
+#  include "mozilla/gfx/SkMemoryReporter.h"
+#  ifdef __GNUC__
+#    pragma GCC diagnostic pop  // -Wshadow
+#  endif
 static const uint32_t kDefaultGlyphCacheSize = -1;
 
 #endif
@@ -579,6 +579,9 @@ void WebRenderDebugPrefChangeCallback(const char* aPrefName, void*) {
   GFX_WEBRENDER_DEBUG(".gpu-cache", 1 << 12)
   GFX_WEBRENDER_DEBUG(".slow-frame-indicator", 1 << 13)
   GFX_WEBRENDER_DEBUG(".texture-cache.clear-evicted", 1 << 14)
+  GFX_WEBRENDER_DEBUG(".picture-caching", 1 << 15)
+  GFX_WEBRENDER_DEBUG(".texture-cache.disable-shrink", 1 << 16)
+  GFX_WEBRENDER_DEBUG(".primitives", 1 << 17)
 #undef GFX_WEBRENDER_DEBUG
 
   gfx::gfxVars::SetWebRenderDebugFlags(flags);
@@ -587,7 +590,7 @@ void WebRenderDebugPrefChangeCallback(const char* aPrefName, void*) {
 #if defined(USE_SKIA)
 static uint32_t GetSkiaGlyphCacheSize() {
   // Only increase font cache size on non-android to save memory.
-#if !defined(MOZ_WIDGET_ANDROID)
+#  if !defined(MOZ_WIDGET_ANDROID)
   // 10mb as the default pref cache size on desktop due to talos perf tweaking.
   // Chromium uses 20mb and skia default uses 2mb.
   // We don't need to change the font cache count since we usually
@@ -599,9 +602,9 @@ static uint32_t GetSkiaGlyphCacheSize() {
   }
 
   return cacheSize;
-#else
+#  else
   return kDefaultGlyphCacheSize;
-#endif  // MOZ_WIDGET_ANDROID
+#  endif  // MOZ_WIDGET_ANDROID
 }
 #endif
 
@@ -679,6 +682,17 @@ static void FinishAsyncMemoryReport() {
   }
 }
 
+// clang-format off
+// (For some reason, clang-format gets the second macro right, but totally mangles the first).
+#define REPORT_INTERNER(id)                      \
+  helper.Report(aReport.interning.interners.id, \
+                "interning/" #id "/interners");
+// clang-format on
+
+#define REPORT_DATA_STORE(id)                     \
+  helper.Report(aReport.interning.data_stores.id, \
+                "interning/" #id "/data-stores");
+
 NS_IMPL_ISUPPORTS(WebRenderMemoryReporter, nsIMemoryReporter)
 
 NS_IMETHODIMP
@@ -697,7 +711,6 @@ WebRenderMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
   manager->SendReportMemory(
       [=](wr::MemoryReport aReport) {
         // CPU Memory.
-        helper.Report(aReport.primitive_stores, "primitive-stores");
         helper.Report(aReport.clip_stores, "clip-stores");
         helper.Report(aReport.gpu_cache_metadata, "gpu-cache/metadata");
         helper.Report(aReport.gpu_cache_cpu_mirror, "gpu-cache/cpu-mirror");
@@ -708,8 +721,9 @@ WebRenderMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
         helper.Report(aReport.rasterized_blobs,
                       "resource-cache/rasterized-blobs");
         helper.Report(aReport.shader_cache, "shader-cache");
-        helper.Report(aReport.data_stores, "interning/data-stores");
-        helper.Report(aReport.interners, "interning/interners");
+
+        WEBRENDER_FOR_EACH_INTERNER(REPORT_INTERNER);
+        WEBRENDER_FOR_EACH_INTERNER(REPORT_DATA_STORE);
 
         // GPU Memory.
         helper.ReportTexture(aReport.gpu_cache_textures, "gpu-cache");
@@ -727,6 +741,9 @@ WebRenderMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
 
   return NS_OK;
 }
+
+#undef REPORT_INTERNER
+#undef REPORT_DATA_STORE
 
 static const char* const WR_ROLLOUT_PREF = "gfx.webrender.all.qualified";
 static const char* const WR_ROLLOUT_PREF_DEFAULT =
@@ -912,7 +929,7 @@ void gfxPlatform::Init() {
 #elif defined(ANDROID)
   gPlatform = new gfxAndroidPlatform;
 #else
-#error "No gfxPlatform implementation available"
+#  error "No gfxPlatform implementation available"
 #endif
   gPlatform->InitAcceleration();
   gPlatform->InitWebRenderConfig();
@@ -928,15 +945,6 @@ void gfxPlatform::Init() {
   if (gfxConfig::IsEnabled(Feature::GPU_PROCESS)) {
     GPUProcessManager* gpu = GPUProcessManager::Get();
     gpu->LaunchGPUProcess();
-  }
-
-  if (XRE_IsParentProcess() &&
-      BrowserTabsRemoteAutostart() &&  // only do rdd process if e10s on
-      Preferences::GetBool("media.rdd-process.enabled", false)) {
-    RDDProcessManager* rdd = RDDProcessManager::Get();
-    if (rdd) {
-      rdd->LaunchRDDProcess();
-    }
   }
 
   gLastUsedFrameRate = ForceSoftwareVsync() ? GetSoftwareVsyncRate() : -1;
@@ -957,9 +965,9 @@ void gfxPlatform::Init() {
 
 #ifdef USE_SKIA
   SkGraphics::Init();
-#ifdef MOZ_ENABLE_FREETYPE
+#  ifdef MOZ_ENABLE_FREETYPE
   SkInitCairoFT(gPlatform->FontHintingEnabled());
-#endif
+#  endif
 #endif
 
   InitLayersIPC();
@@ -1304,15 +1312,15 @@ gfxPlatform::~gfxPlatform() {
   // because cairo can assert and thus crash on shutdown, don't do this in
   // release builds
 #ifdef NS_FREE_PERMANENT_DATA
-#ifdef USE_SKIA
+#  ifdef USE_SKIA
   // must do Skia cleanup before Cairo cleanup, because Skia may be referencing
   // Cairo objects e.g. through SkCairoFTTypeface
   SkGraphics::PurgeFontCache();
-#endif
+#  endif
 
-#if MOZ_TREE_CAIRO
+#  if MOZ_TREE_CAIRO
   cairo_debug_reset_static_data();
-#endif
+#  endif
 #endif
 }
 
@@ -1626,11 +1634,11 @@ void gfxPlatform::InitializeSkiaCacheLimits() {
     // Ensure cache size doesn't overflow on 32-bit platforms.
     cacheSizeLimit = std::min(cacheSizeLimit, (uint64_t)SIZE_MAX);
 
-#ifdef DEBUG
+#  ifdef DEBUG
     printf_stderr("Determined SkiaGL cache limits: Size %" PRIu64
                   ", Items: %i\n",
                   cacheSizeLimit, cacheItemLimit);
-#endif
+#  endif
 
     mSkiaGlue->GetGrContext()->setResourceCacheLimits(cacheItemLimit,
                                                       (size_t)cacheSizeLimit);
@@ -2103,9 +2111,11 @@ void gfxPlatform::GetPlatformCMSOutputProfile(void*& mem, size_t& size) {
 void gfxPlatform::GetCMSOutputProfileData(void*& mem, size_t& size) {
   nsAutoCString fname;
   Preferences::GetCString("gfx.color_management.display_profile", fname);
+  mem = nullptr;
   if (!fname.IsEmpty()) {
     qcms_data_from_path(fname.get(), &mem, &size);
-  } else {
+  }
+  if (mem == nullptr) {
     gfxPlatform::GetPlatform()->GetPlatformCMSOutputProfile(mem, size);
   }
 }
@@ -2649,26 +2659,65 @@ static FeatureState& WebRenderHardwareQualificationStatus(
     } else {
       nsAutoString adapterVendorID;
       gfxInfo->GetAdapterVendorID(adapterVendorID);
-      if (adapterVendorID != u"0x10de") {
+
+      nsAutoString adapterDeviceID;
+      gfxInfo->GetAdapterDeviceID(adapterDeviceID);
+      nsresult valid;
+      int32_t deviceID = adapterDeviceID.ToInteger(&valid, 16);
+      if (valid != NS_OK) {
         featureWebRenderQualified.Disable(
-            FeatureStatus::Blocked, "Not Nvidia",
-            NS_LITERAL_CSTRING("FEATURE_FAILURE_NOT_NVIDIA"));
+            FeatureStatus::Blocked, "Bad device id",
+            NS_LITERAL_CSTRING("FEATURE_FAILURE_BAD_DEVICE_ID"));
       } else {
-        nsAutoString adapterDeviceID;
-        gfxInfo->GetAdapterDeviceID(adapterDeviceID);
-        nsresult valid;
-        int32_t deviceID = adapterDeviceID.ToInteger(&valid, 16);
-        if (valid != NS_OK) {
+        if (adapterVendorID == u"0x10de") {
+          if (deviceID < 0x6c0) {
+            // 0x6c0 is the lowest Fermi device id. Unfortunately some Tesla
+            // devices that don't support D3D 10.1 have higher deviceIDs. They
+            // will be included, but blocked by ANGLE.
+            featureWebRenderQualified.Disable(
+                FeatureStatus::Blocked, "Device too old",
+                NS_LITERAL_CSTRING("FEATURE_FAILURE_DEVICE_TOO_OLD"));
+          }
+#ifdef NIGHTLY_BUILD
+        } else if (adapterVendorID == u"0x1002") {  // AMD
+          // AMD deviceIDs are not very well ordered. This
+          // condition is based off the information in gpu-db
+          if ((deviceID >= 0x6640 && deviceID < 0x6660) ||
+              (deviceID >= 0x67a0 && deviceID < 0x6800) ||
+              (deviceID >= 0x6860 && deviceID < 0x6880) ||
+              (deviceID >= 0x6900 && deviceID < 0x6a00) ||
+              (deviceID == 0x7300) ||
+              (deviceID >= 0x9830 && deviceID < 0x9870)) {
+            // we have a desktop CIK, VI, or GFX9 device
+          } else {
+            featureWebRenderQualified.Disable(
+                FeatureStatus::Blocked, "Device too old",
+                NS_LITERAL_CSTRING("FEATURE_FAILURE_DEVICE_TOO_OLD"));
+          }
+        } else if (adapterVendorID == u"0x8086") {  // Intel
+          const uint16_t supportedDevices[] = {
+              0x191d,  // HD Graphics P530
+              0x192d,  // Iris Pro Graphics P555
+              0x1912,  // HD Graphics 530
+              0x5912,  // HD Graphics 630
+              0x3e92,  // UHD Graphics 630
+          };
+          bool supported = false;
+          for (uint16_t id : supportedDevices) {
+            if (deviceID == id) {
+              supported = true;
+            }
+          }
+          if (!supported) {
+            featureWebRenderQualified.Disable(
+                FeatureStatus::Blocked, "Device too old",
+                NS_LITERAL_CSTRING("FEATURE_FAILURE_DEVICE_TOO_OLD"));
+          }
+#endif
+        } else {
           featureWebRenderQualified.Disable(
-              FeatureStatus::Blocked, "Bad device id",
-              NS_LITERAL_CSTRING("FEATURE_FAILURE_BAD_DEVICE_ID"));
-        } else if (deviceID < 0x6c0) {
-          // 0x6c0 is the lowest Fermi device id. Unfortunately some Tesla
-          // devices that don't support D3D 10.1 have higher deviceIDs. They
-          // will be included, but blocked by ANGLE.
-          featureWebRenderQualified.Disable(
-              FeatureStatus::Blocked, "Device too old",
-              NS_LITERAL_CSTRING("FEATURE_FAILURE_DEVICE_TOO_OLD"));
+              FeatureStatus::Blocked, "Unsupported vendor",
+              NS_LITERAL_CSTRING("FEATURE_FAILURE_UNSUPPORTED_VENDOR"));
         }
       }
     }
@@ -2684,17 +2733,14 @@ void gfxPlatform::InitWebRenderConfig() {
   bool prefEnabled = WebRenderPrefEnabled();
   bool envvarEnabled = WebRenderEnvvarEnabled();
 
-  // On Nightly:
-  //   WR? WR+   => means WR was enabled via gfx.webrender.all.qualified
-  //   WR! WR+   => means WR was enabled via gfx.webrender.{all,enabled} or
-  //                envvar
-  // On Beta/Release:
-  //   WR? WR+   => means WR was enabled via gfx.webrender.all.qualified on
-  //                qualified hardware
-  //   WR! WR+   => means WR was enabled via envvar, possibly on unqualified
-  //                hardware.
+  // WR? WR+   => means WR was enabled via gfx.webrender.all.qualified on
+  //              qualified hardware
+  // WR! WR+   => means WR was enabled via gfx.webrender.{all,enabled} or
+  //              envvar, possibly on unqualified hardware
   // In all cases WR- means WR was not enabled, for one of many possible
-  // reasons.
+  // reasons. Prior to bug 1523788 landing the gfx.webrender.{all,enabled}
+  // prefs only worked on Nightly so keep that in mind when looking at older
+  // crash reports.
   ScopedGfxFeatureReporter reporter("WR", prefEnabled || envvarEnabled);
   if (!XRE_IsParentProcess()) {
     // Force-disable WebRender in recording/replaying child processes, which
@@ -2723,19 +2769,14 @@ void gfxPlatform::InitWebRenderConfig() {
 
   const bool wrQualifiedAll = CalculateWrQualifiedPrefValue();
 
-  // envvar works everywhere; we need this for testing in CI. Sadly this allows
-  // beta/release to enable it on unqualified hardware, but at least this is
-  // harder for the average person than flipping a pref.
+  // envvar works everywhere; note that we need this for testing in CI.
+  // Prior to bug 1523788, the `prefEnabled` check was only done on Nightly,
+  // so as to prevent random users from easily enabling WebRender on
+  // unqualified hardware in beta/release.
   if (envvarEnabled) {
     featureWebRender.UserEnable("Force enabled by envvar");
-
-    // gfx.webrender.enabled and gfx.webrender.all only work on nightly
-#ifdef NIGHTLY_BUILD
   } else if (prefEnabled) {
     featureWebRender.UserEnable("Force enabled by pref");
-#endif
-
-    // gfx.webrender.all.qualified works on all channels
   } else if (wrQualifiedAll && featureWebRenderQualified.IsEnabled()) {
     featureWebRender.UserEnable("Qualified enabled by pref ");
   }

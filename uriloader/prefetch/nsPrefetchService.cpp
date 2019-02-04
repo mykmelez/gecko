@@ -8,6 +8,7 @@
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/CORSMode.h"
+#include "mozilla/Components.h"
 #include "mozilla/dom/ClientInfo.h"
 #include "mozilla/dom/HTMLLinkElement.h"
 #include "mozilla/dom/ServiceWorkerDescriptor.h"
@@ -18,7 +19,6 @@
 #include "nsICategoryManager.h"
 #include "nsIObserverService.h"
 #include "nsIWebProgress.h"
-#include "nsCURILoader.h"
 #include "nsICacheInfoChannel.h"
 #include "nsIHttpChannel.h"
 #include "nsIURL.h"
@@ -62,17 +62,6 @@ static LazyLogModule gPrefetchLog("nsPrefetch");
 #define PRELOAD_PREF "network.preload"
 #define PARALLELISM_PREF "network.prefetch-next.parallelism"
 #define AGGRESSIVE_PREF "network.prefetch-next.aggressive"
-
-//-----------------------------------------------------------------------------
-// helpers
-//-----------------------------------------------------------------------------
-
-static inline uint32_t PRTimeToSeconds(PRTime t_usec) {
-  PRTime usec_per_sec = PR_USEC_PER_SEC;
-  return uint32_t(t_usec /= usec_per_sec);
-}
-
-#define NowInSeconds() PRTimeToSeconds(PR_Now())
 
 //-----------------------------------------------------------------------------
 // nsPrefetchNode <public>
@@ -492,16 +481,14 @@ void nsPrefetchService::DispatchEvent(nsPrefetchNode *node, bool aSuccess) {
 
 void nsPrefetchService::AddProgressListener() {
   // Register as an observer for the document loader
-  nsCOMPtr<nsIWebProgress> progress =
-      do_GetService(NS_DOCUMENTLOADER_SERVICE_CONTRACTID);
+  nsCOMPtr<nsIWebProgress> progress = components::DocLoader::Service();
   if (progress)
     progress->AddProgressListener(this, nsIWebProgress::NOTIFY_STATE_DOCUMENT);
 }
 
 void nsPrefetchService::RemoveProgressListener() {
   // Register as an observer for the document loader
-  nsCOMPtr<nsIWebProgress> progress =
-      do_GetService(NS_DOCUMENTLOADER_SERVICE_CONTRACTID);
+  nsCOMPtr<nsIWebProgress> progress = components::DocLoader::Service();
   if (progress) progress->RemoveProgressListener(this);
 }
 
@@ -919,7 +906,15 @@ nsPrefetchService::OnStatusChange(nsIWebProgress *aWebProgress,
 
 NS_IMETHODIMP
 nsPrefetchService::OnSecurityChange(nsIWebProgress *aWebProgress,
-                                    nsIRequest *aRequest, uint32_t state) {
+                                    nsIRequest *aRequest, uint32_t aState) {
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsPrefetchService::OnContentBlockingEvent(nsIWebProgress *aWebProgress,
+                                          nsIRequest *aRequest,
+                                          uint32_t aEvent) {
   MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }

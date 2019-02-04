@@ -21,7 +21,7 @@ function testFirstPartyDomain(pageInfo) {
       for (let i = 0; i < 3; i++) {
         info("imagetree select " + i);
         tree.view.selection.select(i);
-        tree.treeBoxObject.ensureRowIsVisible(i);
+        tree.ensureRowIsVisible(i);
         tree.focus();
 
         let preview = pageInfo.document.getElementById("thepreviewimage");
@@ -55,7 +55,6 @@ function testFirstPartyDomain(pageInfo) {
         let loadingPrincipal = serial.deserializeObject(loadingPrincipalStr);
         Assert.equal(loadingPrincipal.originAttributes.firstPartyDomain, EXPECTED_DOMAIN,
                      "loadingPrincipal should have firstPartyDomain set to " + EXPECTED_DOMAIN);
-
       }
 
       resolve();

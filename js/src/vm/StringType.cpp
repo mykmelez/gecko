@@ -2169,7 +2169,8 @@ JSString* js::ToStringSlow(
     if (!allowGC) {
       return nullptr;
     }
-    str = BigInt::toString(cx, v.toBigInt(), 10);
+    RootedBigInt i(cx, v.toBigInt());
+    str = BigInt::toString<CanGC>(cx, i, 10);
   }
 #endif
   else {

@@ -21,6 +21,8 @@ export type Mode =
       }
     };
 
+export type ThreadId = string;
+
 /**
  * Breakpoint ID
  *
@@ -44,6 +46,12 @@ export type SourceId = string;
  * @static
  */
 export type ActorId = string;
+
+export type SourceActorLocation = {|
+  +sourceActor: SourceActor,
+  +line: number,
+  +column?: number
+|};
 
 /**
  * Source File Location
@@ -89,7 +97,7 @@ export type ASTLocation = {|
 |};
 
 /**
- * Breakpoint
+ * Breakpoint is associated with a Source.
  *
  * @memberof types
  * @static
@@ -101,11 +109,23 @@ export type Breakpoint = {|
   +generatedLocation: SourceLocation,
   +loading: boolean,
   +disabled: boolean,
-  +hidden: boolean,
   +text: string,
   +originalText: string,
-  +condition: ?string,
-  +log: boolean
+  +options: BreakpointOptions
+|};
+
+/**
+ * Options for a breakpoint that can be modified by the user.
+ */
+export type BreakpointOptions = {
+  hidden?: boolean,
+  condition?: string,
+  logValue?: string
+};
+
+export type BreakpointActor = {|
+  +actor: ActorId,
+  +source: SourceActor
 |};
 
 /**
@@ -129,7 +149,7 @@ export type XHRBreakpoint = {|
  */
 export type BreakpointResult = {
   id: ActorId,
-  actualLocation: SourceLocation
+  actualLocation: SourceActorLocation
 };
 
 /**
@@ -145,7 +165,7 @@ export type PendingBreakpoint = {
   +loading: boolean,
   +disabled: boolean,
   +text: string,
-  +condition: ?string
+  +options: BreakpointOptions
 };
 
 /**
@@ -163,6 +183,7 @@ export type FrameId = string;
  */
 export type Frame = {
   id: FrameId,
+  thread: string,
   displayName: string,
   location: SourceLocation,
   generatedLocation: SourceLocation,
@@ -302,16 +323,16 @@ export type Grip = {
  */
 
 type BaseSource = {|
-  +id: string,
+  +id: SourceId,
   +url: string,
-  +thread: string,
   +sourceMapURL?: string,
   +isBlackBoxed: boolean,
   +isPrettyPrinted: boolean,
   +contentType?: string,
   +error?: string,
   +loadedState: "unloaded" | "loading" | "loaded",
-  +relativeUrl: string
+  +relativeUrl: string,
+  introductionUrl: ?string
 |};
 
 /**
@@ -341,6 +362,12 @@ export type WasmSource = {|
 |};
 
 export type Source = JsSource | WasmSource;
+
+export type SourceActor = {|
+  +actor: ActorId,
+  +source: SourceId,
+  +thread: ThreadId
+|};
 
 /**
  * Script
@@ -409,3 +436,7 @@ export type WorkerList = Array<Worker>;
 export type Cancellable = {
   cancel: () => void
 };
+
+export type EventListenerBreakpoints = string[];
+
+export type SourceDocuments = { [string]: Object };

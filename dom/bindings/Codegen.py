@@ -356,7 +356,9 @@ class CGNativePropertyHooks(CGThing):
         if not self.descriptor.wantsXrays:
             return ""
         deleteNamedProperty = "nullptr"
-        if self.descriptor.concrete and self.descriptor.proxy:
+        if (self.descriptor.concrete and
+            self.descriptor.proxy and
+            not self.descriptor.isMaybeCrossOriginObject()):
             resolveOwnProperty = "ResolveOwnProperty"
             enumerateOwnProperties = "EnumerateOwnProperties"
             if self.descriptor.needsXrayNamedDeleterHook():
@@ -445,7 +447,14 @@ def DOMClass(descriptor):
 
 
 def InstanceReservedSlots(descriptor):
-    return INSTANCE_RESERVED_SLOTS + descriptor.interface.totalMembersInSlots
+    slots = INSTANCE_RESERVED_SLOTS + descriptor.interface.totalMembersInSlots
+    if descriptor.isMaybeCrossOriginObject():
+        # We need a slot for the cross-origin holder too.
+        if descriptor.interface.hasChildInterfaces():
+            raise TypeError("We don't support non-leaf cross-origin interfaces "
+                            "like %s" % descriptor.interface.identifier.name)
+        slots += 1
+    return slots
 
 
 class CGDOMJSClass(CGThing):
@@ -2577,22 +2586,6 @@ class MethodDefiner(PropertyDefiner):
             self.condition, functools.partial(self.specData, unforgeable=self.unforgeable))
 
 
-def isCrossOriginWritable(attr, descriptor):
-    """
-    Return whether the IDLAttribute in question is cross-origin writable on the
-    interface represented by descriptor.  This is needed to handle the fact that
-    some, but not all, interfaces implementing URLUtils want a cross-origin
-    writable .href.
-    """
-    crossOriginWritable = attr.getExtendedAttribute("CrossOriginWritable")
-    if not crossOriginWritable:
-        return False
-    if crossOriginWritable is True:
-        return True
-    assert (isinstance(crossOriginWritable, list) and
-            len(crossOriginWritable) == 1)
-    return crossOriginWritable[0] == descriptor.interface.identifier.name
-
 def isNonExposedNavigatorObjectGetter(attr, descriptor):
     return (attr.navigatorObjectGetter and
             not descriptor.getDescriptor(attr.type.inner.identifier.name).register)
@@ -2608,7 +2601,7 @@ class AttrDefiner(PropertyDefiner):
                         m.isAttr() and m.isStatic() == static and
                         MemberIsUnforgeable(m, descriptor) == unforgeable and
                         (not crossOriginOnly or m.getExtendedAttribute("CrossOriginReadable") or
-                         isCrossOriginWritable(m, descriptor)) and
+                         m.getExtendedAttribute("CrossOriginWritable")) and
                         not isNonExposedNavigatorObjectGetter(m, descriptor)]
         else:
             idlAttrs = []
@@ -2690,20 +2683,20 @@ class AttrDefiner(PropertyDefiner):
                 attr.getExtendedAttribute("Replaceable") is None and
                 attr.getExtendedAttribute("LenientSetter") is None):
                 return "nullptr, nullptr"
-            if crossOriginOnly and not isCrossOriginWritable(attr, descriptor):
+            if crossOriginOnly and not attr.getExtendedAttribute("CrossOriginWritable"):
                 return "nullptr, nullptr"
             if static:
                 accessor = 'set_' + IDLToCIdentifier(attr.identifier.name)
                 jitinfo = "nullptr"
             else:
                 if attr.hasLenientThis():
-                    if isCrossOriginWritable(attr, descriptor):
+                    if attr.getExtendedAttribute("CrossOriginWritable"):
                         raise TypeError("Can't handle lenient cross-origin "
                                         "writable attribute %s.%s" %
                                         (descriptor.name,
                                          attr.identifier.name))
                     accessor = "GenericSetter<LenientThisPolicy>"
-                elif isCrossOriginWritable(attr, descriptor):
+                elif attr.getExtendedAttribute("CrossOriginWritable"):
                     accessor = "GenericSetter<CrossOriginThisPolicy>"
                 elif descriptor.interface.isOnGlobalProtoChain():
                     accessor = "GenericSetter<MaybeGlobalThisPolicy>"
@@ -2996,9 +2989,14 @@ class CGCollectJSONAttributesMethod(CGAbstractMethod):
         ret += 'return true;\n'
 
         if needUnwrappedObj:
+            # If we started allowing cross-origin objects here, we'd need to
+            # use CheckedUnwrapDynamic and figure out whether it makes sense.
+            # But in practice no one is trying to add toJSON methods to those,
+            # so let's just guard against it.
+            assert not self.descriptor.isMaybeCrossOriginObject()
             ret= fill(
                 """
-                JS::Rooted<JSObject*> unwrappedObj(cx, js::CheckedUnwrap(obj));
+                JS::Rooted<JSObject*> unwrappedObj(cx, js::CheckedUnwrapStatic(obj));
                 if (!unwrappedObj) {
                   // How did that happen?  We managed to get called with that
                   // object as "this"!  Just give up on sanity.
@@ -3582,19 +3580,30 @@ def CreateBindingJSObject(descriptor, properties):
     # of cases where we do, so for simplicity, just always root it.
     if descriptor.proxy:
         if descriptor.interface.getExtendedAttribute('OverrideBuiltins'):
+            assert not descriptor.isMaybeCrossOriginObject()
             create = dedent(
                 """
                 aObject->mExpandoAndGeneration.expando.setUndefined();
                 JS::Rooted<JS::Value> expandoValue(aCx, JS::PrivateValue(&aObject->mExpandoAndGeneration));
                 creator.CreateProxyObject(aCx, &sClass.mBase, DOMProxyHandler::getInstance(),
-                                          proto, aObject, expandoValue, aReflector);
+                                          proto, /* aLazyProto = */ false, aObject,
+                                          expandoValue, aReflector);
                 """)
         else:
-            create = dedent(
+            if descriptor.isMaybeCrossOriginObject():
+                proto = "nullptr"
+                lazyProto = "true"
+            else:
+                proto = "proto"
+                lazyProto = "false"
+            create = fill(
                 """
                 creator.CreateProxyObject(aCx, &sClass.mBase, DOMProxyHandler::getInstance(),
-                                          proto, aObject, JS::UndefinedHandleValue, aReflector);
-                """)
+                                          ${proto}, /* aLazyProto = */ ${lazyProto},
+                                          aObject, JS::UndefinedHandleValue, aReflector);
+                """,
+                proto=proto,
+                lazyProto=lazyProto)
     else:
         create = dedent(
             """
@@ -3757,35 +3766,30 @@ def InitMemberSlots(descriptor, failureCode):
         failureCode=failureCode)
 
 
-def SetImmutablePrototype(descriptor, failureCode):
-    if not descriptor.hasNonOrdinaryGetPrototypeOf():
-        return ""
-
-    return fill(
-        """
-        bool succeeded;
-        if (!JS_SetImmutablePrototype(aCx, aReflector, &succeeded)) {
-          ${failureCode}
-        }
-        MOZ_ASSERT(succeeded,
-                   "Making a fresh reflector instance have an immutable "
-                   "prototype can internally fail, but it should never be "
-                   "unsuccessful");
-        """,
-        failureCode=failureCode)
-
-
-def DeclareProto():
+def DeclareProto(descriptor):
     """
     Declare the canonicalProto and proto we have for our wrapping operation.
     """
-    return dedent(
+    preamble = dedent(
         """
         JS::Handle<JSObject*> canonicalProto = GetProtoObjectHandle(aCx);
         if (!canonicalProto) {
           return false;
         }
         JS::Rooted<JSObject*> proto(aCx);
+        """)
+    if descriptor.isMaybeCrossOriginObject():
+        return preamble + dedent(
+            """
+            MOZ_ASSERT(!aGivenProto,
+                       "Shouldn't have constructors on cross-origin objects");
+            // Set proto to canonicalProto to avoid preserving our wrapper if
+            // we don't have to.
+            proto = canonicalProto;
+            """)
+
+    return preamble + dedent(
+        """
         if (aGivenProto) {
           proto = aGivenProto;
           // Unfortunately, while aGivenProto was in the compartment of aCx
@@ -3864,7 +3868,6 @@ class CGWrapWithCacheMethod(CGAbstractMethod):
             aCache->SetWrapper(aReflector);
             $*{unforgeable}
             $*{slots}
-            $*{setImmutablePrototype}
             creator.InitializationSucceeded();
 
             MOZ_ASSERT(aCache->GetWrapperPreserveColor() &&
@@ -3883,13 +3886,11 @@ class CGWrapWithCacheMethod(CGAbstractMethod):
             """,
             nativeType=self.descriptor.nativeType,
             assertInheritance=AssertInheritanceChain(self.descriptor),
-            declareProto=DeclareProto(),
+            declareProto=DeclareProto(self.descriptor),
             createObject=CreateBindingJSObject(self.descriptor, self.properties),
             unforgeable=CopyUnforgeablePropertiesToInstance(self.descriptor,
                                                             failureCode),
-            slots=InitMemberSlots(self.descriptor, failureCode),
-            setImmutablePrototype=SetImmutablePrototype(self.descriptor,
-                                                        failureCode))
+            slots=InitMemberSlots(self.descriptor, failureCode))
 
 
 class CGWrapMethod(CGAbstractMethod):
@@ -3943,18 +3944,15 @@ class CGWrapNonWrapperCacheMethod(CGAbstractMethod):
 
             $*{slots}
 
-            $*{setImmutablePrototype}
             creator.InitializationSucceeded();
             return true;
             """,
             assertions=AssertInheritanceChain(self.descriptor),
-            declareProto=DeclareProto(),
+            declareProto=DeclareProto(self.descriptor),
             createObject=CreateBindingJSObject(self.descriptor, self.properties),
             unforgeable=CopyUnforgeablePropertiesToInstance(self.descriptor,
                                                             failureCode),
-            slots=InitMemberSlots(self.descriptor, failureCode),
-            setImmutablePrototype=SetImmutablePrototype(self.descriptor,
-                                                        failureCode))
+            slots=InitMemberSlots(self.descriptor, failureCode))
 
 
 class CGWrapGlobalMethod(CGAbstractMethod):
@@ -4155,7 +4153,8 @@ class CGCrossOriginProperties(CGThing):
         attrs = []
         methods = []
         for m in descriptor.interface.members:
-            if m.isAttr() and (m.getExtendedAttribute("CrossOriginReadable") or isCrossOriginWritable(m, descriptor)):
+            if m.isAttr() and (m.getExtendedAttribute("CrossOriginReadable") or
+                               m.getExtendedAttribute("CrossOriginWritable")):
                 if m.isStatic():
                     raise TypeError("Don't know how to deal with static method %s" %
                                     m.identifier.name)
@@ -4219,48 +4218,6 @@ class CGCrossOriginProperties(CGThing):
             """,
             attributeSpecs=",\n".join(self.attributeSpecs),
             methodSpecs=",\n".join(self.methodSpecs))
-
-
-class CGIsPermittedMethod(CGAbstractMethod):
-    """
-    crossOriginGetters/Setters/Methods are sets of names of the relevant members.
-    """
-    def __init__(self, descriptor, crossOriginGetters, crossOriginSetters,
-                 crossOriginMethods):
-        self.crossOriginGetters = crossOriginGetters
-        self.crossOriginSetters = crossOriginSetters
-        self.crossOriginMethods = crossOriginMethods
-        args = [Argument("JSFlatString*", "prop"),
-                Argument("char16_t", "propFirstChar"),
-                Argument("bool", "set")]
-        CGAbstractMethod.__init__(self, descriptor, "IsPermitted", "bool", args,
-                                  inline=True)
-
-    def definition_body(self):
-        allNames = self.crossOriginGetters | self.crossOriginSetters | self.crossOriginMethods
-        readwrite = self.crossOriginGetters & self.crossOriginSetters
-        readonly = (self.crossOriginGetters - self.crossOriginSetters) | self.crossOriginMethods
-        writeonly = self.crossOriginSetters - self.crossOriginGetters
-        cases = {}
-        for name in sorted(allNames):
-            cond = 'JS_FlatStringEqualsAscii(prop, "%s")' % name
-            if name in readonly:
-                cond = "!set && %s" % cond
-            elif name in writeonly:
-                cond = "set && %s" % cond
-            else:
-                assert name in readwrite
-            firstLetter = name[0]
-            case = cases.get(firstLetter, CGList([]))
-            case.append(CGGeneric("if (%s) {\n"
-                                  "  return true;\n"
-                                  "}\n" % cond))
-            cases[firstLetter] = case
-        caseList = []
-        for firstLetter in sorted(cases.keys()):
-            caseList.append(CGCase("'%s'" % firstLetter, cases[firstLetter]))
-        switch = CGSwitch("propFirstChar", caseList)
-        return switch.define() + "\nreturn false;\n"
 
 
 class CGCycleCollectionTraverseForOwningUnionMethod(CGAbstractMethod):
@@ -4419,7 +4376,8 @@ class CastableObjectUnwrapper():
         return fill(
             """
             {
-              nsresult rv = UnwrapObject<${protoID}, ${type}>(${mutableSource}, ${target});
+              // Our JSContext should be in the right global to do unwrapping in.
+              nsresult rv = UnwrapObject<${protoID}, ${type}>(${mutableSource}, ${target}, cx);
               if (NS_FAILED(rv)) {
                 $*{codeOnFailure}
               }
@@ -5531,8 +5489,8 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
         #    that will wrap it up in a chrome-side Promise, which is
         #    decidedly _not_ what's desired here.  So in that case we
         #    should really unwrap the return value and use the global of
-        #    the result.  CheckedUnwrap should be good enough for that; if
-        #    it fails, then we're failing unwrap while in a
+        #    the result.  CheckedUnwrapStatic should be good enough for that;
+        #    if it fails, then we're failing unwrap while in a
         #    system-privileged compartment, so presumably we have a dead
         #    object wrapper.  Just error out.  Do NOT fall back to using
         #    the current compartment instead: that will return a
@@ -5553,7 +5511,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
                   aRv.ThrowTypeError<MSG_NOT_OBJECT>(NS_LITERAL_STRING("${sourceDescription}"));
                   return nullptr;
                 }
-                JSObject* unwrappedVal = js::CheckedUnwrap(&$${val}.toObject());
+                JSObject* unwrappedVal = js::CheckedUnwrapStatic(&$${val}.toObject());
                 if (!unwrappedVal) {
                   // A slight lie, but not much of one, for a dead object wrapper.
                   aRv.ThrowTypeError<MSG_NOT_OBJECT>(NS_LITERAL_STRING("${sourceDescription}"));
@@ -7404,11 +7362,8 @@ class CGCallGenerator(CGThing):
         if not static:
             call = CGWrapper(call, pre="%s->" % object)
         call = CGList([call, CGWrapper(args, pre="(", post=")")])
-        if ((returnType is None or returnType.isVoid() or
-             resultOutParam is not None) and
-            # This check for TreeBoxObject is here due to bug 1434641.  Once
-            # nsITreeBoxObject is gone, it can go away.
-            descriptor.name != "TreeBoxObject"):
+        if (returnType is None or returnType.isVoid() or
+            resultOutParam is not None):
             assert resultConversion is None
             call = CGList([
                 CGWrapper(
@@ -7798,11 +7753,16 @@ class CGPerSignatureCall(CGThing):
         elif needScopeObject(returnType, arguments, self.extendedAttributes,
                              descriptor.wrapperCache, True,
                              idlNode.getExtendedAttribute("StoreInSlot")):
+            # If we ever end up with APIs like this on cross-origin objects,
+            # figure out how the CheckedUnwrapDynamic bits should work.  Chances
+            # are, just calling it with "cx" is fine...  For now, though, just
+            # assert that it does not matter.
+            assert not descriptor.isMaybeCrossOriginObject()
             # The scope object should always be from the relevant
             # global.  Make sure to unwrap it as needed.
             cgThings.append(CGGeneric(dedent(
                 """
-                JS::Rooted<JSObject*> unwrappedObj(cx, js::CheckedUnwrap(obj));
+                JS::Rooted<JSObject*> unwrappedObj(cx, js::CheckedUnwrapStatic(obj));
                 // Caller should have ensured that "obj" can be unwrapped already.
                 MOZ_DIAGNOSTIC_ASSERT(unwrappedObj);
                 """)))
@@ -7877,7 +7837,9 @@ class CGPerSignatureCall(CGThing):
             xraySteps.append(
                 CGGeneric(fill(
                     """
-                    ${obj} = js::CheckedUnwrap(${obj});
+                    // Since our object is an Xray, we can just CheckedUnwrapStatic:
+                    // we know Xrays have no dynamic unwrap behavior.
+                    ${obj} = js::CheckedUnwrapStatic(${obj});
                     if (!${obj}) {
                       return false;
                     }
@@ -11673,6 +11635,21 @@ class CGDOMJSProxyHandler_getOwnPropDescriptor(ClassMethod):
         indexedGetter = self.descriptor.operations['IndexedGetter']
         indexedSetter = self.descriptor.operations['IndexedSetter']
 
+        if self.descriptor.isMaybeCrossOriginObject():
+            xrayDecl = dedent(
+                """
+                MOZ_ASSERT(!xpc::WrapperFactory::IsXrayWrapper(proxy));
+                MOZ_ASSERT(IsPlatformObjectSameOrigin(cx, proxy),
+                           "getOwnPropertyDescriptor() and set() should have dealt");
+                MOZ_ASSERT(js::IsObjectInContextCompartment(proxy, cx),
+                           "getOwnPropertyDescriptor() and set() should have dealt");
+
+                """)
+            xrayCheck = ""
+        else:
+            xrayDecl = "bool isXray = xpc::WrapperFactory::IsXrayWrapper(proxy);\n"
+            xrayCheck = "!isXray &&"
+
         if self.descriptor.supportsIndexedProperties():
             readonly = toStringBool(indexedSetter is None)
             fillDescriptor = "FillPropertyDescriptor(desc, proxy, %s);\nreturn true;\n" % readonly
@@ -11747,10 +11724,10 @@ class CGDOMJSProxyHandler_getOwnPropDescriptor(ClassMethod):
 
         return fill(
             """
-            bool isXray = xpc::WrapperFactory::IsXrayWrapper(proxy);
+            $*{xrayDecl}
             $*{getIndexed}
             JS::Rooted<JSObject*> expando(cx);
-            if (!isXray && (expando = GetExpandoObject(proxy))) {
+            if (${xrayCheck}(expando = GetExpandoObject(proxy))) {
               if (!JS_GetOwnPropertyDescriptorById(cx, expando, id, desc)) {
                 return false;
               }
@@ -11765,6 +11742,8 @@ class CGDOMJSProxyHandler_getOwnPropDescriptor(ClassMethod):
             desc.object().set(nullptr);
             return true;
             """,
+            xrayDecl=xrayDecl,
+            xrayCheck=xrayCheck,
             getIndexed=getIndexed,
             namedGet=namedGet)
 
@@ -11851,6 +11830,14 @@ class CGDOMJSProxyHandler_defineProperty(ClassMethod):
                     }
                     """,
                     presenceChecker=CGProxyNamedPresenceChecker(self.descriptor, foundVar="found").define())
+            if self.descriptor.isMaybeCrossOriginObject():
+                set += dedent(
+                    """
+                    MOZ_ASSERT(IsPlatformObjectSameOrigin(cx, proxy),
+                               "Why did the MaybeCrossOriginObject defineProperty override fail?");
+                    MOZ_ASSERT(js::IsObjectInContextCompartment(proxy, cx),
+                               "Why did the MaybeCrossOriginObject defineProperty override fail?");
+                    """)
             set += ("return mozilla::dom::DOMProxyHandler::defineProperty(%s);\n" %
                     ", ".join(a.name for a in self.args))
         return set
@@ -11962,8 +11949,22 @@ class CGDOMJSProxyHandler_delete(ClassMethod):
 
             """)
 
+        if self.descriptor.isMaybeCrossOriginObject():
+            delete += dedent(
+                """
+                if (!IsPlatformObjectSameOrigin(cx, proxy)) {
+                  return ReportCrossOriginDenial(cx, id, NS_LITERAL_CSTRING("delete"));
+                }
+
+                // Safe to enter the Realm of proxy now.
+                JSAutoRealm ar(cx, proxy);
+                JS_MarkCrossZoneId(cx, id);
+                """)
+
         indexedBody = getDeleterBody(self.descriptor, "Indexed")
         if indexedBody is not None:
+            # Can't handle cross-origin objects here.
+            assert not self.descriptor.isMaybeCrossOriginObject();
             delete += fill(
                 """
                 uint32_t index = GetArrayIndexFromId(id);
@@ -12041,6 +12042,34 @@ class CGDOMJSProxyHandler_ownPropNames(ClassMethod):
         self.descriptor = descriptor
 
     def getBody(self):
+        if self.descriptor.isMaybeCrossOriginObject():
+            xrayDecl = dedent(
+                """
+                MOZ_ASSERT(!xpc::WrapperFactory::IsXrayWrapper(proxy));
+                if (!IsPlatformObjectSameOrigin(cx, proxy)) {
+                  if (!(flags & JSITER_HIDDEN)) {
+                    // There are no enumerable cross-origin props, so we're done.
+                    return true;
+                  }
+
+                  JS::Rooted<JSObject*> holder(cx);
+                  if (!EnsureHolder(cx, proxy, &holder)) {
+                    return false;
+                  }
+
+                  if (!js::GetPropertyKeys(cx, holder, flags, &props)) {
+                    return false;
+                  }
+
+                  return xpc::AppendCrossOriginWhitelistedPropNames(cx, props);
+                }
+
+                """)
+            xrayCheck = ""
+        else:
+            xrayDecl = "bool isXray = xpc::WrapperFactory::IsXrayWrapper(proxy);\n"
+            xrayCheck = "!isXray &&"
+
         # Per spec, we do indices, then named props, then everything else.
         if self.descriptor.supportsIndexedProperties():
             if self.descriptor.lengthNeedsCallerType():
@@ -12090,22 +12119,46 @@ class CGDOMJSProxyHandler_ownPropNames(ClassMethod):
         else:
             addNames = ""
 
-        return fill(
+        addExpandoProps = fill(
             """
-            bool isXray = xpc::WrapperFactory::IsXrayWrapper(proxy);
-            $*{addIndices}
-            $*{addNames}
-
             JS::Rooted<JSObject*> expando(cx);
-            if (!isXray && (expando = DOMProxyHandler::GetExpandoObject(proxy)) &&
+            if (${xrayCheck}(expando = DOMProxyHandler::GetExpandoObject(proxy)) &&
                 !js::GetPropertyKeys(cx, expando, flags, &props)) {
               return false;
             }
+            """,
+            xrayCheck=xrayCheck)
+            
+        if self.descriptor.isMaybeCrossOriginObject():
+            # We need to enter our compartment (which we might not be
+            # in right now) to get the expando props.
+            addExpandoProps = fill(
+                """
+                {  // Scope for accessing the expando.
+                  // Safe to enter our compartment, because IsPlatformObjectSameOrigin tested true.
+                  JSAutoRealm ar(cx, proxy);
+                  $*{addExpandoProps}
+                }
+                for (auto& id : props) {
+                  JS_MarkCrossZoneId(cx, id);
+                }
+                """,
+                addExpandoProps=addExpandoProps)
+
+        return fill(
+            """
+            $*{xrayDecl}
+            $*{addIndices}
+            $*{addNames}
+
+            $*{addExpandoProps}
 
             return true;
             """,
+            xrayDecl=xrayDecl,
             addIndices=addIndices,
-            addNames=addNames)
+            addNames=addNames,
+            addExpandoProps=addExpandoProps)
 
 
 class CGDOMJSProxyHandler_hasOwn(ClassMethod):
@@ -12119,6 +12172,23 @@ class CGDOMJSProxyHandler_hasOwn(ClassMethod):
         self.descriptor = descriptor
 
     def getBody(self):
+        if self.descriptor.isMaybeCrossOriginObject():
+            maybeCrossOrigin = dedent(
+                """
+                if (!IsPlatformObjectSameOrigin(cx, proxy)) {
+                  // Just hand this off to BaseProxyHandler to do the slow-path thing.
+                  // The BaseProxyHandler code is OK with this happening without entering the
+                  // compartment of "proxy", which is important to get the right answers.
+                  return js::BaseProxyHandler::hasOwn(cx, proxy, id, bp);
+                }
+
+                // Now safe to enter the Realm of proxy and do the rest of the work there.
+                JSAutoRealm ar(cx, proxy);
+                JS_MarkCrossZoneId(cx, id);
+                """)
+        else:
+            maybeCrossOrigin = ""
+
         if self.descriptor.supportsIndexedProperties():
             indexed = fill(
                 """
@@ -12170,7 +12240,7 @@ class CGDOMJSProxyHandler_hasOwn(ClassMethod):
             """
             MOZ_ASSERT(!xpc::WrapperFactory::IsXrayWrapper(proxy),
                       "Should not have a XrayWrapper here");
-
+            $*{maybeCrossOrigin}
             $*{indexed}
 
             JS::Rooted<JSObject*> expando(cx, GetExpandoObject(proxy));
@@ -12186,6 +12256,7 @@ class CGDOMJSProxyHandler_hasOwn(ClassMethod):
             $*{named}
             return true;
             """,
+            maybeCrossOrigin=maybeCrossOrigin,
             indexed=indexed,
             named=named)
 
@@ -12202,27 +12273,77 @@ class CGDOMJSProxyHandler_get(ClassMethod):
         self.descriptor = descriptor
 
     def getBody(self):
+        if self.descriptor.isMaybeCrossOriginObject():
+            maybeCrossOriginGet = dedent(
+                """
+                if (!IsPlatformObjectSameOrigin(cx, proxy)) {
+                  return CrossOriginGet(cx, proxy, receiver, id, vp);
+                }
+
+                """)
+        else:
+            maybeCrossOriginGet = ""
+
         getUnforgeableOrExpando = dedent("""
             { // Scope for expando
               JS::Rooted<JSObject*> expando(cx, DOMProxyHandler::GetExpandoObject(proxy));
               if (expando) {
-                bool hasProp;
-                if (!JS_HasPropertyById(cx, expando, id, &hasProp)) {
+                if (!JS_HasPropertyById(cx, expando, id, &expandoHasProp)) {
                   return false;
                 }
 
-                if (hasProp) {
+                if (expandoHasProp) {
                   // Forward the get to the expando object, but our receiver is whatever our
                   // receiver is.
-                  return JS_ForwardGetPropertyTo(cx, expando, id, receiver, vp);
+                  if (!JS_ForwardGetPropertyTo(cx, expando, id, rootedReceiver, vp)) {
+                    return false;
+                  }
                 }
               }
             }
             """)
 
+        if self.descriptor.isMaybeCrossOriginObject():
+            getUnforgeableOrExpando = fill(
+                """
+                { // Scope for the JSAutoRealm accessing expando
+                  JSAutoRealm ar(cx, proxy);
+                  if (!MaybeWrapValue(cx, &rootedReceiver)) {
+                    return false;
+                  }
+                  JS_MarkCrossZoneId(cx, id);
+
+                  $*{getUnforgeableOrExpando}
+                }
+                if (expandoHasProp) {
+                  return MaybeWrapValue(cx, vp);
+                }
+                """,
+                getUnforgeableOrExpando=getUnforgeableOrExpando)
+        else:
+            getUnforgeableOrExpando = fill(
+                """
+                $*{getUnforgeableOrExpando}
+
+                if (expandoHasProp) {
+                  return true;
+                }
+                """,
+                getUnforgeableOrExpando=getUnforgeableOrExpando)
+
+        getUnforgeableOrExpando = fill(
+            """
+            bool expandoHasProp = false;
+            $*{getUnforgeableOrExpando}
+            """,
+            getUnforgeableOrExpando=getUnforgeableOrExpando)
+
         templateValues = {'jsvalRef': 'vp', 'jsvalHandle': 'vp', 'obj': 'proxy'}
 
         if self.descriptor.supportsIndexedProperties():
+            # We can't handle this for cross-origin objects
+            assert not self.descriptor.isMaybeCrossOriginObject()
+
             getIndexedOrExpando = fill(
                 """
                 uint32_t index = GetArrayIndexFromId(id);
@@ -12240,6 +12361,9 @@ class CGDOMJSProxyHandler_get(ClassMethod):
             getIndexedOrExpando = getUnforgeableOrExpando
 
         if self.descriptor.supportsNamedProperties():
+            # We can't handle this for cross-origin objects
+            assert not self.descriptor.isMaybeCrossOriginObject()
+
             getNamed = CGProxyNamedGetter(self.descriptor, templateValues)
             if self.descriptor.supportsIndexedProperties():
                 getNamed = CGIfWrapper(getNamed, "!IsArrayIndex(index)")
@@ -12248,16 +12372,43 @@ class CGDOMJSProxyHandler_get(ClassMethod):
             getNamed = ""
 
         getOnPrototype = dedent("""
-            bool foundOnPrototype;
-            if (!GetPropertyOnPrototype(cx, proxy, receiver, id, &foundOnPrototype, vp)) {
+            if (!GetPropertyOnPrototype(cx, proxy, rootedReceiver, id, &foundOnPrototype, vp)) {
               return false;
             }
 
-            if (foundOnPrototype) {
-              return true;
-            }
-
             """)
+
+        if self.descriptor.isMaybeCrossOriginObject():
+            getOnPrototype = fill(
+                """
+                bool foundOnPrototype;
+                { // Scope for JSAutoRealm
+                  JSAutoRealm ar(cx, proxy);
+                  // We already wrapped rootedReceiver
+                  MOZ_ASSERT_IF(rootedReceiver.isObject(),
+                                js::IsObjectInContextCompartment(&rootedReceiver.toObject(), cx));
+                  JS_MarkCrossZoneId(cx, id);
+                  $*{getOnPrototype}
+                }
+
+                if (foundOnPrototype) {
+                  return MaybeWrapValue(cx, vp);
+                }
+
+                """,
+                getOnPrototype=getOnPrototype)
+        else:
+            getOnPrototype = fill(
+                """
+                bool foundOnPrototype;
+                $*{getOnPrototype}
+                if (foundOnPrototype) {
+                  return true;
+                }
+
+                """,
+                getOnPrototype=getOnPrototype)
+
         if self.descriptor.interface.getExtendedAttribute('OverrideBuiltins'):
             getNamed = getNamed + getOnPrototype
         else:
@@ -12268,12 +12419,16 @@ class CGDOMJSProxyHandler_get(ClassMethod):
             MOZ_ASSERT(!xpc::WrapperFactory::IsXrayWrapper(proxy),
                         "Should not have a XrayWrapper here");
 
+            $*{maybeCrossOriginGet}
+            JS::Rooted<JS::Value> rootedReceiver(cx, receiver);
+
             $*{indexedOrExpando}
 
             $*{named}
             vp.setUndefined();
             return true;
             """,
+            maybeCrossOriginGet=maybeCrossOriginGet,
             indexedOrExpando=getIndexedOrExpando,
             named=getNamed)
 
@@ -12345,7 +12500,23 @@ class CGDOMJSProxyHandler_className(ClassMethod):
         self.descriptor = descriptor
 
     def getBody(self):
-        return 'return "%s";\n' % self.descriptor.name
+        if self.descriptor.isMaybeCrossOriginObject():
+            crossOrigin = dedent(
+                """
+                if (!IsPlatformObjectSameOrigin(cx, proxy)) {
+                  return "Object";
+                }
+                
+                """)
+        else:
+            crossOrigin = ""
+        return fill(
+            """
+            $*{crossOrigin}
+            return "${name}";
+            """,
+            crossOrigin=crossOrigin,
+            name=self.descriptor.name)
 
 
 class CGDOMJSProxyHandler_finalizeInBackground(ClassMethod):
@@ -12460,23 +12631,6 @@ class CGDOMJSProxyHandler_getInstance(ClassMethod):
             """)
 
 
-class CGDOMJSProxyHandler_getPrototypeIfOrdinary(ClassMethod):
-    def __init__(self):
-        args = [Argument('JSContext*', 'cx'),
-                Argument('JS::Handle<JSObject*>', 'proxy'),
-                Argument('bool*', 'isOrdinary'),
-                Argument('JS::MutableHandle<JSObject*>', 'proto')]
-
-        ClassMethod.__init__(self, "getPrototypeIfOrdinary", "bool", args,
-                             virtual=True, override=True, const=True)
-
-    def getBody(self):
-        return dedent("""
-            *isOrdinary = false;
-            return true;
-            """)
-
-
 class CGDOMJSProxyHandler_call(ClassMethod):
     def __init__(self):
         args = [Argument('JSContext*', 'cx'),
@@ -12521,11 +12675,176 @@ class CGDOMJSProxyHandler_canNurseryAllocate(ClassMethod):
         """)
 
 
+class CGDOMJSProxyHandler_getOwnPropertyDescriptor(ClassMethod):
+    """
+    Implementation of getOwnPropertyDescriptor.  We only use this for
+    cross-origin objects. 
+    """
+    def __init__(self, descriptor):
+        assert descriptor.isMaybeCrossOriginObject()
+
+        args = [Argument('JSContext*', 'cx'),
+                Argument('JS::Handle<JSObject*>', 'proxy'),
+                Argument('JS::Handle<jsid>', 'id'),
+                Argument('JS::MutableHandle<JS::PropertyDescriptor>', 'desc')]
+        ClassMethod.__init__(self, "getOwnPropertyDescriptor", "bool", args,
+                             virtual=True, override=True, const=True)
+        self.descriptor = descriptor
+
+    def getBody(self):
+        return dedent(
+            """
+            // Implementation of <https://html.spec.whatwg.org/multipage/history.html#location-getownproperty>.
+            MOZ_ASSERT(!xpc::WrapperFactory::IsXrayWrapper(proxy));
+
+            // Step 1.
+            if (IsPlatformObjectSameOrigin(cx, proxy)) {
+              { // Scope so we can wrap our PropertyDescriptor back into
+                // the caller compartment.
+                // Enter the Realm of "proxy" so we can work with it.
+                JSAutoRealm ar(cx, proxy);
+
+                JS_MarkCrossZoneId(cx, id);
+
+                // The spec messes around with configurability of the returned
+                // descriptor here, but it's not clear what should actually happen
+                // here.  See <https://github.com/whatwg/html/issues/4157>.  For
+                // now, keep our old behavior and don't do any magic.
+                if (!dom::DOMProxyHandler::getOwnPropertyDescriptor(cx, proxy, id, desc)) {
+                  return false;
+                }
+              }
+              return JS_WrapPropertyDescriptor(cx, desc);
+            }
+
+            // Step 2.
+            if (!CrossOriginGetOwnPropertyHelper(cx, proxy, id, desc)) {
+              return false;
+            }
+
+            // Step 3.
+            if (desc.object()) {
+              return true;
+            }
+
+            // And step 4.
+            return CrossOriginPropertyFallback(cx, proxy, id, desc);
+            """)
+
+
+class CGDOMJSProxyHandler_getSameOriginPrototype(ClassMethod):
+    """
+    Implementation of getSameOriginPrototype.  We only use this for
+    cross-origin objects. 
+    """
+    def __init__(self, descriptor):
+        assert descriptor.isMaybeCrossOriginObject()
+
+        args = [Argument('JSContext*', 'cx')]
+        ClassMethod.__init__(self, "getSameOriginPrototype", "JSObject*", args,
+                             virtual=True, override=True, const=True)
+        self.descriptor = descriptor
+
+    def getBody(self):
+        return dedent(
+            """
+            return GetProtoObjectHandle(cx);
+            """)
+
+
+class CGDOMJSProxyHandler_definePropertySameOrigin(ClassMethod):
+    """
+    Implementation of definePropertySameOrigin.  We only use this for
+    cross-origin objects. 
+    """
+    def __init__(self, descriptor):
+        assert descriptor.isMaybeCrossOriginObject()
+
+        args = [Argument('JSContext*', 'cx'),
+                Argument('JS::Handle<JSObject*>', 'proxy'),
+                Argument('JS::Handle<jsid>', 'id'),
+                Argument('JS::Handle<JS::PropertyDescriptor>', 'desc'),
+                Argument('JS::ObjectOpResult&', 'result')]
+        ClassMethod.__init__(self, "definePropertySameOrigin", "bool", args,
+                             virtual=True, override=True, const=True)
+        self.descriptor = descriptor
+
+    def getBody(self):
+        return dedent(
+            """
+            return dom::DOMProxyHandler::defineProperty(cx, proxy, id, desc, result);
+            """)
+
+
+class CGDOMJSProxyHandler_set(ClassMethod):
+    """
+    Implementation of set().  We only use this for cross-origin objects. 
+    """
+    def __init__(self, descriptor):
+        assert descriptor.isMaybeCrossOriginObject()
+
+        args = [Argument('JSContext*', 'cx'),
+                Argument('JS::Handle<JSObject*>', 'proxy'),
+                Argument('JS::Handle<jsid>', 'id'),
+                Argument('JS::Handle<JS::Value>', 'v'),
+                Argument('JS::Handle<JS::Value>', 'receiver'),
+                Argument('JS::ObjectOpResult&', 'result')]
+        ClassMethod.__init__(self, "set", "bool", args,
+                             virtual=True, override=True, const=True)
+        self.descriptor = descriptor
+
+    def getBody(self):
+        return dedent(
+            """
+            if (!IsPlatformObjectSameOrigin(cx, proxy)) {
+              return CrossOriginSet(cx, proxy, id, v, receiver, result);
+            }
+
+            // Safe to enter the Realm of proxy now, since it's same-origin with us.
+            JSAutoRealm ar(cx, proxy);
+            JS::Rooted<JS::Value> wrappedReceiver(cx, receiver);
+            if (!MaybeWrapValue(cx, &wrappedReceiver)) {
+              return false;
+            }
+
+            JS::Rooted<JS::Value> wrappedValue(cx, v);
+            if (!MaybeWrapValue(cx, &wrappedValue)) {
+              return false;
+            }
+
+            JS_MarkCrossZoneId(cx, id);
+            
+            return dom::DOMProxyHandler::set(cx, proxy, id, wrappedValue, wrappedReceiver, result);
+            """)
+
+
+class CGDOMJSProxyHandler_EnsureHolder(ClassMethod):
+    """
+    Implementation of set().  We only use this for cross-origin objects. 
+    """
+    def __init__(self, descriptor):
+        args = [Argument('JSContext*', 'cx'),
+                Argument('JS::Handle<JSObject*>', 'proxy'),
+                Argument('JS::MutableHandle<JSObject*>', 'holder')]
+        ClassMethod.__init__(self, "EnsureHolder", "bool", args,
+                             virtual=True, override=True, const=True)
+        self.descriptor = descriptor
+
+    def getBody(self):
+        return dedent(
+            """
+            // Our holder slot is our last slot.
+            return EnsureHolder(cx, proxy,
+                                JSCLASS_RESERVED_SLOTS(js::GetObjectClass(proxy)) - 1,
+                                sCrossOriginAttributes, sCrossOriginMethods, holder);
+            """)
+
+
 class CGDOMJSProxyHandler(CGClass):
     def __init__(self, descriptor):
         assert (descriptor.supportsIndexedProperties() or
                 descriptor.supportsNamedProperties() or
-                descriptor.hasNonOrdinaryGetPrototypeOf())
+                descriptor.isMaybeCrossOriginObject())
         methods = [CGDOMJSProxyHandler_getOwnPropDescriptor(descriptor),
                    CGDOMJSProxyHandler_defineProperty(descriptor),
                    ClassUsingDeclaration("mozilla::dom::DOMProxyHandler",
@@ -12552,8 +12871,6 @@ class CGDOMJSProxyHandler(CGClass):
             (descriptor.operations['NamedSetter'] is not None and
              descriptor.interface.getExtendedAttribute('OverrideBuiltins'))):
             methods.append(CGDOMJSProxyHandler_setCustom(descriptor))
-        if descriptor.hasNonOrdinaryGetPrototypeOf():
-            methods.append(CGDOMJSProxyHandler_getPrototypeIfOrdinary())
         if descriptor.operations['LegacyCaller']:
             methods.append(CGDOMJSProxyHandler_call())
             methods.append(CGDOMJSProxyHandler_isCallable())
@@ -12565,8 +12882,22 @@ class CGDOMJSProxyHandler(CGClass):
         if descriptor.wrapperCache:
             methods.append(CGDOMJSProxyHandler_objectMoved(descriptor))
 
+        if descriptor.isMaybeCrossOriginObject():
+            methods.extend([
+                CGDOMJSProxyHandler_getOwnPropertyDescriptor(descriptor),
+                CGDOMJSProxyHandler_getSameOriginPrototype(descriptor),
+                CGDOMJSProxyHandler_definePropertySameOrigin(descriptor),
+                CGDOMJSProxyHandler_set(descriptor),
+                CGDOMJSProxyHandler_EnsureHolder(descriptor),
+                ClassUsingDeclaration("MaybeCrossOriginObjectMixins",
+                                      "EnsureHolder")
+                ])
+
         if descriptor.interface.getExtendedAttribute('OverrideBuiltins'):
+            assert not descriptor.isMaybeCrossOriginObject()
             parentClass = 'ShadowingDOMProxyHandler'
+        elif descriptor.isMaybeCrossOriginObject():
+            parentClass = 'MaybeCrossOriginObject<mozilla::dom::DOMProxyHandler>'
         else:
             parentClass = 'mozilla::dom::DOMProxyHandler'
 
@@ -12631,14 +12962,14 @@ def memberProperties(m, descriptor):
                 props.isCrossOriginGetter = True
         if not m.readonly:
             if not m.isStatic() and descriptor.interface.hasInterfacePrototypeObject():
-                if isCrossOriginWritable(m, descriptor):
+                if m.getExtendedAttribute("CrossOriginWritable"):
                     props.isCrossOriginSetter = True
         elif m.getExtendedAttribute("PutForwards"):
-            if isCrossOriginWritable(m, descriptor):
+            if m.getExtendedAttribute("CrossOriginWritable"):
                 props.isCrossOriginSetter = True
         elif (m.getExtendedAttribute("Replaceable") or
               m.getExtendedAttribute("LenientSetter")):
-            if isCrossOriginWritable(m, descriptor):
+            if m.getExtendedAttribute("CrossOriginWritable"):
                 props.isCrossOriginSetter = True
 
     return props
@@ -12662,7 +12993,7 @@ class CGDescriptor(CGThing):
                                       toBindingNamespace(descriptor.parentPrototypeName)))
 
         defaultToJSONMethod = None
-        crossOriginMethods, crossOriginGetters, crossOriginSetters = set(), set(), set()
+        needCrossOriginPropertyArrays = False
         unscopableNames = list()
         for n in descriptor.interface.namedConstructors:
             cgThings.append(CGClassConstructor(descriptor, n,
@@ -12692,7 +13023,7 @@ class CGDescriptor(CGThing):
                             cgThings.append(CGMethodPromiseWrapper(descriptor, specializedMethod))
                         cgThings.append(CGMemberJITInfo(descriptor, m))
                         if props.isCrossOriginMethod:
-                            crossOriginMethods.add(m.identifier.name)
+                            needCrossOriginPropertyArrays = True
             # If we've hit the maplike/setlike member itself, go ahead and
             # generate its convenience functions.
             elif m.isMaplikeOrSetlike():
@@ -12716,7 +13047,7 @@ class CGDescriptor(CGThing):
                     if m.type.isPromise():
                         cgThings.append(CGGetterPromiseWrapper(descriptor, specializedGetter))
                     if props.isCrossOriginGetter:
-                        crossOriginGetters.add(m.identifier.name)
+                        needCrossOriginPropertyArrays = True
                 if not m.readonly:
                     if m.isStatic():
                         assert descriptor.interface.hasInterfaceObject()
@@ -12724,11 +13055,11 @@ class CGDescriptor(CGThing):
                     elif descriptor.interface.hasInterfacePrototypeObject():
                         cgThings.append(CGSpecializedSetter(descriptor, m))
                         if props.isCrossOriginSetter:
-                            crossOriginSetters.add(m.identifier.name)
+                            needCrossOriginPropertyArrays = True
                 elif m.getExtendedAttribute("PutForwards"):
                     cgThings.append(CGSpecializedForwardingSetter(descriptor, m))
                     if props.isCrossOriginSetter:
-                        crossOriginSetters.add(m.identifier.name)
+                        needCrossOriginPropertyArrays = True
                 elif m.getExtendedAttribute("Replaceable"):
                     cgThings.append(CGSpecializedReplaceableSetter(descriptor, m))
                 elif m.getExtendedAttribute("LenientSetter"):
@@ -12834,8 +13165,9 @@ class CGDescriptor(CGThing):
         # after we have our DOMProxyHandler defined.
         if descriptor.wantsXrays:
             if descriptor.concrete and descriptor.proxy:
-                cgThings.append(CGResolveOwnProperty(descriptor))
-                cgThings.append(CGEnumerateOwnProperties(descriptor))
+                if not descriptor.isMaybeCrossOriginObject():
+                    cgThings.append(CGResolveOwnProperty(descriptor))
+                    cgThings.append(CGEnumerateOwnProperties(descriptor))
                 if descriptor.needsXrayNamedDeleterHook():
                     cgThings.append(CGDeleteNamedProperty(descriptor))
             elif descriptor.needsXrayResolveHooks():
@@ -12879,13 +13211,9 @@ class CGDescriptor(CGThing):
             cgThings.append(CGGetConstructorObjectHandleMethod(descriptor))
             cgThings.append(CGGetConstructorObjectMethod(descriptor))
 
-        # See whether we need we need to generate an IsPermitted method
-        if crossOriginGetters or crossOriginSetters or crossOriginMethods:
+        # See whether we need to generate cross-origin property arrays.
+        if needCrossOriginPropertyArrays:
             cgThings.append(CGCrossOriginProperties(descriptor))
-            cgThings.append(CGIsPermittedMethod(descriptor,
-                                                crossOriginGetters,
-                                                crossOriginSetters,
-                                                crossOriginMethods))
 
         cgThings = CGList((CGIndenter(t, declareOnly=True) for t in cgThings), "\n")
         cgThings = CGWrapper(cgThings, pre='\n', post='\n')
@@ -14209,6 +14537,10 @@ class CGBindingRoot(CGThing):
             descriptorRequiresPreferences(d) for d in descriptors)
         bindingHeaders["mozilla/dom/DOMJSProxyHandler.h"] = any(
             d.concrete and d.proxy for d in descriptors)
+        hasCrossOriginObjects = any(
+            d.concrete and d.isMaybeCrossOriginObject() for d in descriptors)
+        bindingHeaders["mozilla/dom/MaybeCrossOriginObject.h"] = hasCrossOriginObjects
+        bindingHeaders["AccessCheck.h"] = hasCrossOriginObjects
         hasCEReactions = any(d.hasCEReactions() for d in descriptors)
         bindingHeaders["mozilla/dom/CustomElementRegistry.h"] = hasCEReactions
         bindingHeaders["mozilla/dom/DocGroup.h"] = hasCEReactions

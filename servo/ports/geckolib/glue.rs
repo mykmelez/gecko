@@ -809,7 +809,7 @@ pub extern "C" fn Servo_AnimationValue_GetColor(
             let computed: ComputedColor = ToAnimatedValue::from_animated_value(color);
             let foreground_color = convert_nscolor_to_rgba(foreground_color);
             convert_rgba_to_nscolor(&computed.to_rgba(foreground_color))
-        }
+        },
         _ => panic!("Other color properties are not supported yet"),
     }
 }
@@ -832,7 +832,7 @@ pub extern "C" fn Servo_AnimationValue_Opacity(opacity: f32) -> RawServoAnimatio
 #[no_mangle]
 pub extern "C" fn Servo_AnimationValue_Color(
     color_property: nsCSSPropertyID,
-    color: structs::nscolor
+    color: structs::nscolor,
 ) -> RawServoAnimationValueStrong {
     use style::gecko::values::convert_nscolor_to_rgba;
     use style::values::animated::color::RGBA as AnimatedRGBA;
@@ -842,13 +842,16 @@ pub extern "C" fn Servo_AnimationValue_Color(
 
     let rgba = convert_nscolor_to_rgba(color);
 
-    let animatedRGBA = AnimatedRGBA::new(rgba.red_f32(),
-                                         rgba.green_f32(),
-                                         rgba.blue_f32(),
-                                         rgba.alpha_f32());
+    let animatedRGBA = AnimatedRGBA::new(
+        rgba.red_f32(),
+        rgba.green_f32(),
+        rgba.blue_f32(),
+        rgba.alpha_f32(),
+    );
     match property {
-        LonghandId::BackgroundColor =>
-            Arc::new(AnimationValue::BackgroundColor(animatedRGBA.into())).into_strong(),
+        LonghandId::BackgroundColor => {
+            Arc::new(AnimationValue::BackgroundColor(animatedRGBA.into())).into_strong()
+        },
         _ => panic!("Should be background-color property"),
     }
 }
@@ -1050,7 +1053,7 @@ pub extern "C" fn Servo_ResolveLogicalProperty(
     style: ComputedStyleBorrowed,
 ) -> nsCSSPropertyID {
     let longhand = LonghandId::from_nscsspropertyid(property_id)
-        .expect("There are no logical shorthands (yet)");
+        .expect("We shouldn't need to care about shorthands");
 
     longhand
         .to_physical(style.writing_mode)
@@ -1613,19 +1616,6 @@ pub unsafe extern "C" fn Servo_StyleSet_MediumFeaturesChanged(
         mAffectsNonDocumentRules: affects_non_document_rules,
         mUsesViewportUnits: uses_viewport_units,
     }
-}
-
-#[no_mangle]
-pub extern "C" fn Servo_StyleSet_PrependStyleSheet(
-    raw_data: RawServoStyleSetBorrowed,
-    sheet: *const DomStyleSheet,
-) {
-    let global_style_data = &*GLOBAL_STYLE_DATA;
-    let mut data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
-    let data = &mut *data;
-    let guard = global_style_data.shared_lock.read();
-    let sheet = unsafe { GeckoStyleSheet::new(sheet) };
-    data.stylist.prepend_stylesheet(sheet, &guard);
 }
 
 #[no_mangle]
@@ -3585,12 +3575,7 @@ pub extern "C" fn Servo_StyleSet_Drop(data: RawServoStyleSetOwned) {
 #[no_mangle]
 pub unsafe extern "C" fn Servo_StyleSet_CompatModeChanged(raw_data: RawServoStyleSetBorrowed) {
     let mut data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
-    let doc = &*data
-        .stylist
-        .device()
-        .pres_context()
-        .mDocument
-        .mRawPtr;
+    let doc = &*data.stylist.device().pres_context().mDocument.mRawPtr;
     data.stylist
         .set_quirks_mode(QuirksMode::from(doc.mCompatMode));
 }
@@ -4371,37 +4356,24 @@ pub extern "C" fn Servo_DeclarationBlock_SetKeywordValue(
     use style::values::specified::Display;
     use style::values::specified::{Clear, Float};
 
+    fn get_from_computed<T>(value: u32) -> T
+    where
+        T: ToComputedValue,
+        T::ComputedValue: FromPrimitive,
+    {
+        T::from_computed_value(&T::ComputedValue::from_u32(value).unwrap())
+    }
+
+
     let long = get_longhand_from_id!(property);
     let value = value as u32;
 
     let prop = match_wrap_declared! { long,
         MozUserModify => longhands::_moz_user_modify::SpecifiedValue::from_gecko_keyword(value),
         Direction => longhands::direction::SpecifiedValue::from_gecko_keyword(value),
-        Display => Display::from_u32(value).unwrap(),
-        Float => {
-            const LEFT: u32 = structs::StyleFloat::Left as u32;
-            const RIGHT: u32 = structs::StyleFloat::Right as u32;
-            const NONE: u32 = structs::StyleFloat::None as u32;
-            match value {
-                LEFT => Float::Left,
-                RIGHT => Float::Right,
-                NONE => Float::None,
-                _ => unreachable!(),
-            }
-        },
-        Clear => {
-            const LEFT: u32 = structs::StyleClear::Left as u32;
-            const RIGHT: u32 = structs::StyleClear::Right as u32;
-            const NONE: u32 = structs::StyleClear::None as u32;
-            const BOTH: u32 = structs::StyleClear::Both as u32;
-            match value {
-                LEFT => Clear::Left,
-                RIGHT => Clear::Right,
-                NONE => Clear::None,
-                BOTH => Clear::Both,
-                _ => unreachable!(),
-            }
-        },
+        Display => get_from_computed::<Display>(value),
+        Float => get_from_computed::<Float>(value),
+        Clear => get_from_computed::<Clear>(value),
         VerticalAlign => longhands::vertical_align::SpecifiedValue::from_gecko_keyword(value),
         TextAlign => longhands::text_align::SpecifiedValue::from_gecko_keyword(value),
         TextEmphasisPosition => longhands::text_emphasis_position::SpecifiedValue::from_gecko_keyword(value),
@@ -4424,10 +4396,10 @@ pub extern "C" fn Servo_DeclarationBlock_SetKeywordValue(
         MozMathVariant => longhands::_moz_math_variant::SpecifiedValue::from_gecko_keyword(value),
         WhiteSpace => longhands::white_space::SpecifiedValue::from_gecko_keyword(value),
         CaptionSide => longhands::caption_side::SpecifiedValue::from_gecko_keyword(value),
-        BorderTopStyle => BorderStyle::from_gecko_keyword(value),
-        BorderRightStyle => BorderStyle::from_gecko_keyword(value),
-        BorderBottomStyle => BorderStyle::from_gecko_keyword(value),
-        BorderLeftStyle => BorderStyle::from_gecko_keyword(value),
+        BorderTopStyle => get_from_computed::<BorderStyle>(value),
+        BorderRightStyle => get_from_computed::<BorderStyle>(value),
+        BorderBottomStyle => get_from_computed::<BorderStyle>(value),
+        BorderLeftStyle => get_from_computed::<BorderStyle>(value),
     };
     write_locked_arc(declarations, |decls: &mut PropertyDeclarationBlock| {
         decls.push(prop, Importance::Normal);
@@ -4463,10 +4435,11 @@ pub extern "C" fn Servo_DeclarationBlock_SetPixelValue(
 ) {
     use style::properties::longhands::border_spacing::SpecifiedValue as BorderSpacing;
     use style::properties::{LonghandId, PropertyDeclaration};
-    use style::values::generics::NonNegative;
     use style::values::generics::length::MozLength;
-    use style::values::specified::length::{NoCalcLength, NonNegativeLength, NonNegativeLengthPercentage};
-    use style::values::specified::length::{LengthPercentageOrAuto, LengthPercentage};
+    use style::values::generics::NonNegative;
+    use style::values::specified::length::NonNegativeLengthPercentage;
+    use style::values::specified::length::{LengthPercentage, LengthPercentageOrAuto};
+    use style::values::specified::length::{NoCalcLength, NonNegativeLength};
     use style::values::specified::{BorderCornerRadius, BorderSideWidth};
 
     let long = get_longhand_from_id!(property);
@@ -4524,8 +4497,9 @@ pub extern "C" fn Servo_DeclarationBlock_SetLengthValue(
     use style::properties::longhands::_moz_script_min_size::SpecifiedValue as MozScriptMinSize;
     use style::properties::{LonghandId, PropertyDeclaration};
     use style::values::generics::length::MozLength;
+    use style::values::specified::length::NoCalcLength;
     use style::values::specified::length::{AbsoluteLength, FontRelativeLength};
-    use style::values::specified::length::{LengthPercentage, LengthPercentageOrAuto, NoCalcLength};
+    use style::values::specified::length::{LengthPercentage, LengthPercentageOrAuto};
 
     let long = get_longhand_from_id!(property);
     let nocalc = match unit {
@@ -4592,12 +4566,11 @@ pub extern "C" fn Servo_DeclarationBlock_SetPercentValue(
     use style::properties::{LonghandId, PropertyDeclaration};
     use style::values::computed::Percentage;
     use style::values::generics::length::MozLength;
-    use style::values::specified::length::{LengthPercentageOrAuto, LengthPercentage};
+    use style::values::specified::length::{LengthPercentage, LengthPercentageOrAuto};
 
     let long = get_longhand_from_id!(property);
     let pc = Percentage(value);
-    let lp_or_auto =
-        LengthPercentageOrAuto::LengthPercentage(LengthPercentage::Percentage(pc));
+    let lp_or_auto = LengthPercentageOrAuto::LengthPercentage(LengthPercentage::Percentage(pc));
 
     let prop = match_wrap_declared! { long,
         Height => MozLength::LengthPercentageOrAuto(lp_or_auto),
@@ -5792,8 +5765,8 @@ pub extern "C" fn Servo_GetCustomPropertyNameAt(
         None => return false,
     };
 
-    let property_name = match custom_properties.get_key_at(index) {
-        Some(n) => n,
+    let property_name = match custom_properties.get_index(index as usize) {
+        Some((key, _value)) => key,
         None => return false,
     };
 

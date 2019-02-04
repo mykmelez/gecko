@@ -10,6 +10,7 @@
 #include "js/Promise.h"
 
 #include "builtin/SelfHostingDefines.h"
+#include "ds/Fifo.h"
 #include "threading/ConditionVariable.h"
 #include "threading/Mutex.h"
 #include "vm/NativeObject.h"
@@ -100,6 +101,9 @@ class PromiseObject : public NativeObject {
   static JSObject* unforgeableReject(JSContext* cx, HandleValue value);
 
   int32_t flags() { return getFixedSlot(PromiseSlot_Flags).toInt32(); }
+  void setHandled() {
+    setFixedSlot(PromiseSlot_Flags, Int32Value(flags() | PROMISE_FLAG_HANDLED));
+  }
   JS::PromiseState state() {
     int32_t flags = this->flags();
     if (!(flags & PROMISE_FLAG_RESOLVED)) {
@@ -419,6 +423,8 @@ class MOZ_NON_TEMPORARY_CLASS PromiseLookup final {
   }
 };
 
+class OffThreadPromiseRuntimeState;
+
 // [SMDOC] OffThreadPromiseTask: an off-main-thread task that resolves a promise
 //
 // An OffThreadPromiseTask is an abstract base class holding a JavaScript
@@ -494,6 +500,8 @@ class OffThreadPromiseTask : public JS::Dispatchable {
   void operator=(const OffThreadPromiseTask&) = delete;
   OffThreadPromiseTask(const OffThreadPromiseTask&) = delete;
 
+  void unregister(OffThreadPromiseRuntimeState& state);
+
  protected:
   OffThreadPromiseTask(JSContext* cx, Handle<PromiseObject*> promise);
 
@@ -523,7 +531,7 @@ using OffThreadPromiseTaskSet =
     HashSet<OffThreadPromiseTask*, DefaultHasher<OffThreadPromiseTask*>,
             SystemAllocPolicy>;
 
-using DispatchableVector = Vector<JS::Dispatchable*, 0, SystemAllocPolicy>;
+using DispatchableFifo = Fifo<JS::Dispatchable*, 0, SystemAllocPolicy>;
 
 class OffThreadPromiseRuntimeState {
   friend class OffThreadPromiseTask;
@@ -538,7 +546,7 @@ class OffThreadPromiseRuntimeState {
   ConditionVariable allCanceled_;
   OffThreadPromiseTaskSet live_;
   size_t numCanceled_;
-  DispatchableVector internalDispatchQueue_;
+  DispatchableFifo internalDispatchQueue_;
   ConditionVariable internalDispatchQueueAppended_;
   bool internalDispatchQueueClosed_;
 

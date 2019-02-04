@@ -6,11 +6,11 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/UpdateTelemetry.jsm");
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {FileUtils} = ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {AUSTLMY} = ChromeUtils.import("resource://gre/modules/UpdateTelemetry.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 XPCOMUtils.defineLazyGlobalGetters(this, ["DOMParser", "XMLHttpRequest"]);
 
 XPCOMUtils.defineLazyModuleGetters(this, {
@@ -531,20 +531,6 @@ function LOG(string) {
     dump("*** AUS:SVC " + string + "\n");
     Services.console.logStringMessage("AUS:SVC " + string);
   }
-}
-
-/**
- * Convert a string containing binary values to hex.
- */
-function binaryToHex(input) {
-  var result = "";
-  for (var i = 0; i < input.length; ++i) {
-    var hex = input.charCodeAt(i).toString(16);
-    if (hex.length == 1)
-      hex = "0" + hex;
-    result += hex;
-  }
-  return result;
 }
 
 /**
@@ -1233,13 +1219,21 @@ function UpdatePatch(patch) {
         this[attr.name] = attr.value;
         break;
       default:
-        // Set nsIPropertyBag properties that were read from the xml file.
-        this.setProperty(attr.name, attr.value);
+        if (!this._attrNames.includes(attr.name)) {
+          // Set nsIPropertyBag properties that were read from the xml file.
+          this.setProperty(attr.name, attr.value);
+        }
         break;
     }
   }
 }
 UpdatePatch.prototype = {
+  // nsIUpdatePatch attribute names used to prevent nsIWritablePropertyBag from
+  // over writing nsIUpdatePatch attributes.
+  _attrNames: [
+    "errorCode", "finalURL", "selected", "size", "state", "type", "URL",
+  ],
+
   /**
    * See nsIUpdateService.idl
    */
@@ -1266,7 +1260,7 @@ UpdatePatch.prototype = {
     }
 
     for (let [name, value] of Object.entries(this._properties)) {
-      if (value.present) {
+      if (value.present && !this._attrNames.includes(name)) {
         patch.setAttribute(name, value.data);
       }
     }
@@ -1277,6 +1271,12 @@ UpdatePatch.prototype = {
    * See nsIWritablePropertyBag.idl
    */
   setProperty: function UpdatePatch_setProperty(name, value) {
+    if (this._attrNames.includes(name)) {
+      throw Components.Exception(
+        "Illegal value '" + name + "' (attribute exists on nsIUpdatePatch) " +
+        "when calling method: [nsIWritablePropertyBag::setProperty]",
+        Cr.NS_ERROR_ILLEGAL_VALUE);
+    }
     this._properties[name] = { data: value, present: true };
   },
 
@@ -1284,6 +1284,12 @@ UpdatePatch.prototype = {
    * See nsIWritablePropertyBag.idl
    */
   deleteProperty: function UpdatePatch_deleteProperty(name) {
+    if (this._attrNames.includes(name)) {
+      throw Components.Exception(
+        "Illegal value '" + name + "' (attribute exists on nsIUpdatePatch) " +
+        "when calling method: [nsIWritablePropertyBag::deleteProperty]",
+        Cr.NS_ERROR_ILLEGAL_VALUE);
+    }
     if (name in this._properties) {
       this._properties[name].present = false;
     } else {
@@ -1308,7 +1314,7 @@ UpdatePatch.prototype = {
              createInstance(Ci.nsISupportsInterfacePointer);
     let qi = ChromeUtils.generateQI([Ci.nsIProperty]);
     for (let [name, value] of Object.entries(this._properties)) {
-      if (value.present) {
+      if (value.present && !this._attrNames.includes(name)) {
         // The nsIPropertyBag enumerator returns a nsISimpleEnumerator whose
         // elements are nsIProperty objects. Calling QueryInterface for
         // nsIProperty on the object doesn't return to the caller an object that
@@ -1327,6 +1333,12 @@ UpdatePatch.prototype = {
    *       simplify code and to silence warnings in debug builds.
    */
   getProperty: function UpdatePatch_getProperty(name) {
+    if (this._attrNames.includes(name)) {
+      throw Components.Exception(
+        "Illegal value '" + name + "' (attribute exists on nsIUpdatePatch) " +
+        "when calling method: [nsIWritablePropertyBag::getProperty]",
+        Cr.NS_ERROR_ILLEGAL_VALUE);
+    }
     if (name in this._properties && this._properties[name].present) {
       return this._properties[name].data;
     }
@@ -1431,8 +1443,10 @@ function Update(update) {
           this[attr.name] = attr.value;
           break;
         default:
-          // Set nsIPropertyBag properties that were read from the xml file.
-          this.setProperty(attr.name, attr.value);
+          if (!this._attrNames.includes(attr.name)) {
+            // Set nsIPropertyBag properties that were read from the xml file.
+            this.setProperty(attr.name, attr.value);
+          }
           break;
       }
     }
@@ -1470,6 +1484,15 @@ function Update(update) {
   }
 }
 Update.prototype = {
+  // nsIUpdate attribute names used to prevent nsIWritablePropertyBag from over
+  // writing nsIUpdate attributes.
+  _attrNames: [
+    "appVersion", "buildID", "channel", "detailsURL", "displayVersion",
+    "elevationFailure", "errorCode", "installDate", "isCompleteUpdate", "name",
+    "previousAppVersion", "promptWaitTime", "serviceURL", "state", "statusText",
+    "type", "unsupported",
+  ],
+
   /**
    * See nsIUpdateService.idl
    */
@@ -1563,7 +1586,7 @@ Update.prototype = {
     }
 
     for (let [name, value] of Object.entries(this._properties)) {
-      if (value.present) {
+      if (value.present && !this._attrNames.includes(name)) {
         update.setAttribute(name, value.data);
       }
     }
@@ -1580,6 +1603,12 @@ Update.prototype = {
    * See nsIWritablePropertyBag.idl
    */
   setProperty: function Update_setProperty(name, value) {
+    if (this._attrNames.includes(name)) {
+      throw Components.Exception(
+        "Illegal value '" + name + "' (attribute exists on nsIUpdate) " +
+        "when calling method: [nsIWritablePropertyBag::setProperty]",
+        Cr.NS_ERROR_ILLEGAL_VALUE);
+    }
     this._properties[name] = { data: value, present: true };
   },
 
@@ -1587,6 +1616,12 @@ Update.prototype = {
    * See nsIWritablePropertyBag.idl
    */
   deleteProperty: function Update_deleteProperty(name) {
+    if (this._attrNames.includes(name)) {
+      throw Components.Exception(
+        "Illegal value '" + name + "' (attribute exists on nsIUpdate) " +
+        "when calling method: [nsIWritablePropertyBag::deleteProperty]",
+        Cr.NS_ERROR_ILLEGAL_VALUE);
+    }
     if (name in this._properties) {
       this._properties[name].present = false;
     } else {
@@ -1611,7 +1646,7 @@ Update.prototype = {
              createInstance(Ci.nsISupportsInterfacePointer);
     let qi = ChromeUtils.generateQI([Ci.nsIProperty]);
     for (let [name, value] of Object.entries(this._properties)) {
-      if (value.present) {
+      if (value.present && !this._attrNames.includes(name)) {
         // The nsIPropertyBag enumerator returns a nsISimpleEnumerator whose
         // elements are nsIProperty objects. Calling QueryInterface for
         // nsIProperty on the object doesn't return to the caller an object that
@@ -1629,6 +1664,12 @@ Update.prototype = {
    *       simplify code and to silence warnings in debug builds.
    */
   getProperty: function Update_getProperty(name) {
+    if (this._attrNames.includes(name)) {
+      throw Components.Exception(
+        "Illegal value '" + name + "' (attribute exists on nsIUpdate) " +
+        "when calling method: [nsIWritablePropertyBag::getProperty]",
+        Cr.NS_ERROR_ILLEGAL_VALUE);
+    }
     if (name in this._properties && this._properties[name].present) {
       return this._properties[name].data;
     }
@@ -1764,6 +1805,15 @@ UpdateService.prototype = {
         // In case an update check is in progress.
         Cc["@mozilla.org/updates/update-checker;1"].
           createInstance(Ci.nsIUpdateChecker).stopCurrentCheck();
+        break;
+      case "test-close-handle-update-mutex":
+        if (Cu.isInAutomation) {
+          if (AppConstants.platform == "win" && gUpdateMutexHandle) {
+            LOG("UpdateService:observe - closing mutex handle for testing");
+            closeHandle(gUpdateMutexHandle);
+            gUpdateMutexHandle = null;
+          }
+        }
         break;
     }
   },
@@ -3961,8 +4011,7 @@ Downloader.prototype = {
         // Stage the update
         try {
           Cc["@mozilla.org/updates/update-processor;1"].
-            createInstance(Ci.nsIUpdateProcessor).
-            processUpdate(this._update);
+            createInstance(Ci.nsIUpdateProcessor).processUpdate();
         } catch (e) {
           // Fail gracefully in case the application does not support the update
           // processor service.

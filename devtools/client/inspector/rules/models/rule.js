@@ -57,6 +57,8 @@ function Rule(elementStyle, options) {
   // value, and add in any disabled properties from the store.
   this.textProps = this._getTextProperties();
   this.textProps = this.textProps.concat(this._getDisabledProperties());
+
+  this.getUniqueSelector = this.getUniqueSelector.bind(this);
 }
 
 Rule.prototype = {
@@ -79,9 +81,10 @@ Rule.prototype = {
 
   get selector() {
     return {
+      getUniqueSelector: this.getUniqueSelector,
       matchedSelectors: this.matchedSelectors,
       selectors: this.domRule.selectors,
-      selectorText: this.selectorText,
+      selectorText: this.keyframes ? this.domRule.keyText : this.selectorText,
     };
   },
 
@@ -166,6 +169,39 @@ Rule.prototype = {
    */
   get ruleColumn() {
     return this.domRule ? this.domRule.column : null;
+  },
+
+  /**
+   * Returns the TextProperty with the given id or undefined if it cannot be found.
+   *
+   * @param {String} id
+   *        A TextProperty id.
+   * @return {TextProperty|undefined} with the given id in the current Rule or undefined
+   * if it cannot be found.
+   */
+  getDeclaration: function(id) {
+    return this.textProps.find(textProp => textProp.id === id);
+  },
+
+  /**
+   * Returns an unique selector for the CSS rule.
+   */
+  async getUniqueSelector() {
+    let selector = "";
+
+    if (this.domRule.selectors) {
+      // This is a style rule with a selector.
+      selector = this.domRule.selectors.join(", ");
+    } else if (this.inherited) {
+      // This is an inline style from an inherited rule. Need to resolve the unique
+      // selector from the node which rule this is inherited from.
+      selector = await this.inherited.getUniqueSelector();
+    } else {
+      // This is an inline style from the current node.
+      selector = this.elementStyle.ruleView.inspector.selectionCssSelector;
+    }
+
+    return selector;
   },
 
   /**
@@ -351,16 +387,17 @@ Rule.prototype = {
    *        The property to rename.
    * @param {String} name
    *        The new property name (such as "background" or "border-top").
+   * @return {Promise}
    */
   setPropertyName: function(property, name) {
     if (name === property.name) {
-      return;
+      return Promise.resolve();
     }
 
     const oldName = property.name;
     property.name = name;
     const index = this.textProps.indexOf(property);
-    this.applyProperties((modifications) => {
+    return this.applyProperties(modifications => {
       modifications.renameProperty(index, oldName, name);
     });
   },
@@ -385,7 +422,7 @@ Rule.prototype = {
     property.priority = priority;
 
     const index = this.textProps.indexOf(property);
-    return this.applyProperties((modifications) => {
+    return this.applyProperties(modifications => {
       modifications.setProperty(index, property.name, value, priority);
     });
   },
@@ -524,7 +561,11 @@ Rule.prototype = {
     // style attribute.
     if (this.domRule.type === ELEMENT_STYLE) {
       this.textProps = newTextProps;
-      this.editor.populate(true);
+
+      if (this.editor) {
+        this.editor.populate(true);
+      }
+
       return;
     }
 

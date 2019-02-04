@@ -647,7 +647,8 @@ class nsWindow::NPZCSupport final
 
   bool HandleMotionEvent(const PanZoomController::LocalRef& aInstance,
                          int32_t aAction, int32_t aActionIndex, int64_t aTime,
-                         int32_t aMetaState, jni::IntArray::Param aPointerId,
+                         int32_t aMetaState, float aScreenX, float aScreenY,
+                         jni::IntArray::Param aPointerId,
                          jni::FloatArray::Param aX, jni::FloatArray::Param aY,
                          jni::FloatArray::Param aOrientation,
                          jni::FloatArray::Param aPressure,
@@ -697,6 +698,8 @@ class nsWindow::NPZCSupport final
     MultiTouchInput input(type, aTime, GetEventTimeStamp(aTime), 0);
     input.modifiers = GetModifiers(aMetaState);
     input.mTouches.SetCapacity(endIndex - startIndex);
+    input.mScreenOffset =
+        ExternalIntPoint(int32_t(floorf(aScreenX)), int32_t(floorf(aScreenY)));
 
     nsTArray<float> x(aX->GetElements());
     nsTArray<float> y(aY->GetElements());
@@ -890,7 +893,14 @@ class nsWindow::LayerViewSupport final
     }
 
     MOZ_ASSERT(aNPZC);
-    MOZ_ASSERT(!mWindow->mNPZCSupport);
+
+    // We can have this situation if we get two GeckoViewSupport::Transfer()
+    // called before the first AttachNPZC() gets here. Just detach the current
+    // instance since that's what happens in GeckoViewSupport::Transfer() as
+    // well.
+    if (mWindow->mNPZCSupport) {
+      mWindow->mNPZCSupport.Detach(mWindow->mNPZCSupport->GetJavaNPZC());
+    }
 
     auto npzc = PanZoomController::LocalRef(
         jni::GetGeckoThreadEnv(), PanZoomController::Ref::From(aNPZC));
@@ -2176,20 +2186,15 @@ void nsWindow::RecvScreenPixels(Shmem&& aMem, const ScreenIntSize& aSize) {
 }
 
 nsresult nsWindow::SetPrefersReducedMotionOverrideForTest(bool aValue) {
-  nsXPLookAndFeel* xpLookAndFeel = nsLookAndFeel::GetInstance();
-
-  static_cast<nsLookAndFeel*>(xpLookAndFeel)
-      ->SetPrefersReducedMotionOverrideForTest(aValue);
+  nsXPLookAndFeel::GetInstance()->SetPrefersReducedMotionOverrideForTest(
+      aValue);
 
   java::GeckoSystemStateListener::NotifyPrefersReducedMotionChangedForTest();
   return NS_OK;
 }
 
 nsresult nsWindow::ResetPrefersReducedMotionOverrideForTest() {
-  nsXPLookAndFeel* xpLookAndFeel = nsLookAndFeel::GetInstance();
-
-  static_cast<nsLookAndFeel*>(xpLookAndFeel)
-      ->ResetPrefersReducedMotionOverrideForTest();
+  nsXPLookAndFeel::GetInstance()->ResetPrefersReducedMotionOverrideForTest();
   return NS_OK;
 }
 

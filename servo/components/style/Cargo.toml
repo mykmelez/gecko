@@ -31,6 +31,7 @@ bitflags = "1.0"
 byteorder = "1.0"
 cssparser = "0.25"
 crossbeam-channel = { version = "0.3", optional = true }
+derive_more = "0.13"
 new_debug_unreachable = "1.0"
 encoding_rs = {version = "0.8", optional = true}
 euclid = "0.19"
@@ -38,12 +39,13 @@ fallible = { path = "../fallible" }
 fxhash = "0.2"
 hashglobe = { path = "../hashglobe" }
 html5ever = {version = "0.22", optional = true}
+indexmap = "1.0"
 itertools = "0.7.6"
 itoa = "0.4"
 lazy_static = "1"
 log = "0.4"
 malloc_size_of = { path = "../malloc_size_of" }
-malloc_size_of_derive = { path = "../malloc_size_of_derive" }
+malloc_size_of_derive = "0.1"
 matches = "0.1"
 nsstring = {path = "../../../xpcom/rust/nsstring/", optional = true}
 num_cpus = {version = "1.1.0"}

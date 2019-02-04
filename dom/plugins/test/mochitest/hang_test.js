@@ -1,5 +1,5 @@
 
-ChromeUtils.import("resource://gre/modules/KeyValueParser.jsm");
+const {parseKeyValuePairsFromFile} = ChromeUtils.import("resource://gre/modules/KeyValueParser.jsm");
 
 var success = false;
 var observerFired = false;
@@ -54,10 +54,6 @@ var testObserver = {
     } else {
       ok(cpuUsage > 0, "plugin cpu usage is >0%");
     }
-
-    // check processor count field
-    ok("NumberOfProcessors" in extraData, "got extra field for processor count");
-    ok(parseInt(extraData["NumberOfProcessors"]) > 0, "number of processors is >0");
   },
 
   QueryInterface: function(iid) {

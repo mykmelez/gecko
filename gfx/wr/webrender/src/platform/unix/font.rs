@@ -25,7 +25,7 @@ use glyph_rasterizer::{GlyphRasterError, GlyphRasterResult, RasterizedGlyph};
 #[cfg(feature = "pathfinder")]
 use glyph_rasterizer::NativeFontHandleWrapper;
 use internal_types::{FastHashMap, ResourceCacheError};
-#[cfg(not(target_os = "android"))]
+#[cfg(any(not(target_os = "android"), feature = "no_static_freetype"))]
 use libc::{dlsym, RTLD_DEFAULT};
 use libc::free;
 #[cfg(feature = "pathfinder")]
@@ -77,7 +77,7 @@ pub fn unimplemented(error: FT_Error) -> bool {
 }
 
 // Use dlsym to check for symbols. If not available. just return an unimplemented error.
-#[cfg(not(target_os = "android"))]
+#[cfg(any(not(target_os = "android"), feature = "no_static_freetype"))]
 macro_rules! ft_dyn_fn {
     ($func_name:ident($($arg_name:ident:$arg_type:ty),*) -> FT_Error) => {
         #[allow(non_snake_case)]
@@ -86,7 +86,7 @@ macro_rules! ft_dyn_fn {
                 FT_Err_Unimplemented_Feature as FT_Error
             }
             lazy_static! {
-                static ref func: unsafe extern "C" fn($($arg_type),*) -> FT_Error = {
+                static ref FUNC: unsafe extern "C" fn($($arg_type),*) -> FT_Error = {
                     unsafe {
                         let cname = CString::new(stringify!($func_name)).unwrap();
                         let ptr = dlsym(RTLD_DEFAULT, cname.as_ptr());
@@ -94,13 +94,13 @@ macro_rules! ft_dyn_fn {
                     }
                 };
             }
-            (*func)($($arg_name),*)
+            (*FUNC)($($arg_name),*)
         }
     }
 }
 
 // On Android, just statically link in the symbols...
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", not(feature = "no_static_freetype")))]
 macro_rules! ft_dyn_fn {
     ($($proto:tt)+) => { extern "C" { fn $($proto)+; } }
 }
@@ -319,7 +319,8 @@ impl FontContext {
 
     pub fn add_native_font(&mut self, font_key: &FontKey, native_font_handle: NativeFontHandle) {
         if !self.faces.contains_key(&font_key) {
-            let file = FontFile::Pathname(CString::new(native_font_handle.pathname).unwrap());
+            let cstr = CString::new(native_font_handle.path.as_os_str().to_str().unwrap()).unwrap();
+            let file = FontFile::Pathname(cstr);
             let index = native_font_handle.index;
             if let Some(face) = new_ft_face(font_key, self.lib, &file, index) {
                 self.faces.insert(*font_key, FontFace { file, index, face, mm_var: ptr::null_mut() });
@@ -965,6 +966,7 @@ impl Drop for FontContext {
 impl<'a> Into<pf_freetype::FontDescriptor> for NativeFontHandleWrapper<'a> {
     fn into(self) -> pf_freetype::FontDescriptor {
         let NativeFontHandleWrapper(font_handle) = self;
-        pf_freetype::FontDescriptor::new(font_handle.pathname.clone().into(), font_handle.index)
+        let str = font_handle.path.as_os_str().to_str().unwrap();
+        pf_freetype::FontDescriptor::new(str.into(), font_handle.index)
     }
 }

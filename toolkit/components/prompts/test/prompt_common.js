@@ -1,7 +1,4 @@
-const Ci = SpecialPowers.Ci;
-const Cc = SpecialPowers.Cc;
-ok(Ci != null, "Access Ci");
-ok(Cc != null, "Access Cc");
+const { Cc, Ci } = SpecialPowers;
 
 function hasTabModalPrompts() {
   var prefName = "prompts.tab_modal.enabled";
@@ -39,6 +36,7 @@ function handlePrompt(state, action) {
 }
 
 function checkPromptState(promptState, expectedState) {
+    info(`checkPromptState: ${expectedState.msg}`);
     // XXX check title? OS X has title in content
     is(promptState.msg, expectedState.msg, "Checking expected message");
     if (isOSX && !isTabModal)
@@ -79,6 +77,19 @@ function checkPromptState(promptState, expectedState) {
         is(promptState.focused, "infoBody", "buttons don't focus on OS X, but infoBody does instead");
     } else {
         is(promptState.focused, expectedState.focused, "Checking focused element");
+    }
+
+    if (expectedState.hasOwnProperty("chrome")) {
+        is(promptState.chrome, expectedState.chrome, "Dialog should be opened as chrome");
+    }
+    if (expectedState.hasOwnProperty("dialog")) {
+        is(promptState.dialog, expectedState.dialog, "Dialog should be opened as a dialog");
+    }
+    if (expectedState.hasOwnProperty("chromeDependent")) {
+        is(promptState.chromeDependent, expectedState.chromeDependent, "Dialog should be opened as dependent");
+    }
+    if (expectedState.hasOwnProperty("isWindowModal")) {
+        is(promptState.isWindowModal, expectedState.isWindowModal, "Dialog should be modal");
     }
 }
 

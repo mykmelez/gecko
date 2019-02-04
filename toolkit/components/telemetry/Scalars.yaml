@@ -19,7 +19,6 @@ a11y:
       - 'main'
     release_channel_collection: opt-out
     keyed: false
-    cpp_guard: 'ACCESSIBILITY'
 
   indicator_acted_on:
     bug_numbers:
@@ -472,7 +471,8 @@ sandbox:
     release_channel_collection: opt-out
     record_in_processes:
       - main
-    cpp_guard: 'XP_WIN'
+    operating_systems:
+      - "windows"
 
 preferences:
   created_new_user_prefs_file:
@@ -942,6 +942,22 @@ media:
       The number of HTMLMediaElements which were blocked because they hadn't loaded metadata yet, but ended up having no audio track.
     expires: "68"
     kind: uint
+    notification_emails:
+      - cpearce@mozilla.com
+      - alwu@mozilla.com
+      - nohlmeier@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+      - content
+
+  autoplay_default_blocked:
+    bug_numbers:
+      - 1521947
+    description: >
+      Whether the user blocked autoplay by default. Recorded when the preference is toggled.
+    expires: "72"
+    kind: boolean
     notification_emails:
       - cpearce@mozilla.com
       - alwu@mozilla.com
@@ -1564,6 +1580,48 @@ devtools.changesview:
     record_in_processes:
       - 'main'
 
+  copy:
+    bug_numbers:
+      - 1522843
+    description: >
+      Number of times any text content from the Changes panel is copied to the clipboard.
+    expires: "69"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - mbalfanz@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  contextmenu:
+    bug_numbers:
+      - 1522843
+    description: >
+      Number of times the Changes panel context menu is shown.
+    expires: "69"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - mbalfanz@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  contextmenu_copy:
+    bug_numbers:
+      - 1522843
+    description: >
+      Number of times the Copy option is picked from the Changes panel context menu.
+    expires: "69"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - mbalfanz@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
 navigator.storage:
   estimate_count:
     bug_numbers:
@@ -1833,17 +1891,36 @@ gfx.omtp:
   paint_wait_ratio:
     bug_numbers:
       - 1386968
+      - 1518669
     description: >
       Ratio (in units of 1/100th of a percent) of how many times OMTP waited
       for a paint for more than 200us, versus the total number of paints.
     keyed: false
     kind: uint
-    expires: "66"
+    expires: "never"
     notification_emails:
       - gfx-telemetry-alerts@mozilla.com
       - rhunt@mozilla.com
     record_in_processes:
       - 'content'
+
+gfx.hdr:
+  windows_display_colorspace_bitfield:
+    bug_numbers:
+      - 1514840
+    description: >
+      A bitfield representation of the available DXGI color spaces of the connected displays on Windows.
+      See (https://docs.microsoft.com/en-us/windows/desktop/api/dxgicommon/ne-dxgicommon-dxgi_color_space_type)
+      for definitions of color spaces. Each N'th bit of this scalar indicates whether the DXGI color space with
+      index 'N' is available on at least one connected monitor.
+    keyed: false
+    kind: uint
+    expires: "70"
+    notification_emails:
+      - gfx-telemetry-alerts@mozilla.com
+      - rhunt@mozilla.com
+    record_in_processes:
+      - 'main'
 
 # The following section contains the form autofill related scalars.
 formautofill:
@@ -2028,6 +2105,22 @@ idb.type:
       - 'main'
       - 'content'
 
+# The following section is for tracking the number of failure for indexedDB.
+idb.failure:
+  fileinfo_error:
+    bug_numbers:
+      - 1432133
+    description: >
+      Tracking the number of failure due to missing fileInfo while doing
+      structured clone.
+    expires: "70"
+    kind: uint
+    notification_emails:
+      - ttung@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
 # The following section contains probes that record timestamps.
 timestamps:
   first_paint:
@@ -2039,6 +2132,20 @@ timestamps:
     kind: uint
     notification_emails:
       - hkirschner@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+
+  about_home_topsites_first_paint:
+    bug_numbers:
+      - 1518521
+    description: >
+      Record the timestamp of when the first about:home's Topsites are painted. Only records if
+      about:home is set as the default homepage, and if sessions are not being restored by default.
+    expires: never
+    kind: uint
+    notification_emails:
+      - mconley@mozilla.com
     release_channel_collection: opt-out
     record_in_processes:
       - main
@@ -2108,94 +2215,6 @@ sw:
     record_in_processes:
       - 'main'
       - 'content'
-
-# The following section contains the BrowserErrorReporter scalars.
-browser.errors:
-  collected_count:
-    bug_numbers:
-      - 1444554
-    description: >
-      The count of all browser chrome JS errors that were collected locally.
-    expires: "67"
-    kind: uint
-    notification_emails:
-      - nightly-js-errors@mozilla.com
-      - mkelly@mozilla.com
-    record_in_processes:
-      - 'main'
-
-  collected_with_stack_count:
-    bug_numbers:
-      - 1444554
-    description: >
-      The count of browser chrome JS errors that were collected locally and had
-      a usable stack trace.
-    expires: "67"
-    kind: uint
-    notification_emails:
-      - nightly-js-errors@mozilla.com
-      - mkelly@mozilla.com
-    record_in_processes:
-      - 'main'
-
-  reported_success_count:
-    bug_numbers:
-      - 1444554
-    description: >
-      The count of all browser chrome JS errors that were reported to the
-      remote collection service.
-    expires: "67"
-    kind: uint
-    notification_emails:
-      - nightly-js-errors@mozilla.com
-      - mkelly@mozilla.com
-    record_in_processes:
-      - 'main'
-
-  reported_failure_count:
-    bug_numbers:
-      - 1444554
-    description: >
-      The count of all browser chrome JS errors that we attempted to report to
-      the remote collection service, but failed to.
-    expires: "67"
-    kind: uint
-    notification_emails:
-      - nightly-js-errors@mozilla.com
-      - mkelly@mozilla.com
-    record_in_processes:
-      - 'main'
-
-  sample_rate:
-    bug_numbers:
-      - 1444554
-    description: >
-      The sample rate at which collected errors were reported.
-    expires: "67"
-    kind: string
-    notification_emails:
-      - nightly-js-errors@mozilla.com
-      - mkelly@mozilla.com
-    record_in_processes:
-      - 'main'
-
-  collected_count_by_filename:
-    bug_numbers:
-      - 1444554
-    description: >
-      The count of all browser chrome JS errors that were collected locally,
-      keyed by the filename of the file in which the error occurred. Collected
-      filenames are limited to specific paths under the resource:// and
-      chrome:// protocols; non-matching filenames are reported as "FILTERED".
-      Long filenames are truncated to the first 70 characters.
-    keyed: true
-    expires: "67"
-    kind: uint
-    notification_emails:
-      - nightly-js-errors@mozilla.com
-      - mkelly@mozilla.com
-    record_in_processes:
-      - 'main'
 
 widget:
   ime_name_on_windows:
@@ -2350,6 +2369,46 @@ encoding:
     record_in_processes:
       - main
       - content
+
+startup:
+  profile_selection_reason:
+    bug_numbers:
+      - 1522934
+    description: >
+      How the profile was selected during startup. One of the following reasons:
+        unknown:
+          Generally should not happen, set as a default in case no other reason
+          occured.
+        profile-manager:
+          The profile was selected by the profile manager.
+        profile-reset:
+          The profile was selected for reset, normally this would mean a restart.
+        restart:
+          The user restarted the application, the same profile as previous will
+          be used.
+        argument-profile
+          The profile was selected by the --profile command line argument.
+        argument-p
+          The profile was selected by the -p command line argument.
+        firstrun-claimed-default
+          A first run of a dedicated profiles build chose the old default
+          profile to be the default for this install.
+        firstrun-skipped-default:
+          A first run of a dedicated profiles build skipped over the old default
+          profile and created a new profile.
+        firstrun-created-default:
+          A first run of the application created a new profile to use.
+        default:
+          The default profile was selected as normal.
+    expires: "72"
+    keyed: false
+    kind: string
+    notification_emails:
+      - dtownsend@mozilla.com
+      - rtestard@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
 
 # The following section is for probes testing the Telemetry system. They will not be
 # submitted in pings and are only used for testing.
@@ -2520,6 +2579,17 @@ telemetry.test:
       - telemetry-client-dev@mozilla.com
     record_in_processes:
       - 'content'
+
+  socket_only_uint:
+    bug_numbers:
+      - 1486033
+    description: A testing uint scalar; not meant to be touched.
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'socket'
 
   all_processes_uint:
     bug_numbers:

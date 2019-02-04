@@ -52,7 +52,7 @@ JS::Zone::Zone(JSRuntime* rt)
       functionToStringCache_(this),
       keepAtomsCount(this, 0),
       purgeAtomsDeferred(this, 0),
-      usage(&rt->gc.usage),
+      zoneSize(&rt->gc.heapSize),
       threshold(),
       gcDelayBytes(0),
       tenuredStrings(this, 0),
@@ -195,8 +195,9 @@ void Zone::sweepWeakMaps() {
   WeakMapBase::sweepZone(this);
 }
 
-void Zone::discardJitCode(FreeOp* fop, bool discardBaselineCode,
-                          bool releaseTypes) {
+void Zone::discardJitCode(FreeOp* fop,
+                          ShouldDiscardBaselineCode discardBaselineCode,
+                          ShouldReleaseTypes releaseTypes) {
   if (!jitZone()) {
     return;
   }
@@ -488,7 +489,7 @@ void JS::Zone::maybeTriggerGCForTooMuchMalloc(js::gc::MemoryCounter& counter,
     return;
   }
 
-  if (!rt->gc.triggerZoneGC(this, JS::gcreason::TOO_MUCH_MALLOC,
+  if (!rt->gc.triggerZoneGC(this, JS::GCReason::TOO_MUCH_MALLOC,
                             counter.bytes(), counter.maxBytes())) {
     return;
   }

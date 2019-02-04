@@ -243,6 +243,7 @@ class LayerManager : public FrameRecorder {
         mSnapEffectiveTransforms(true),
         mId(0),
         mInTransaction(false),
+        mContainsSVG(false),
         mPaintedPixelCount(0) {}
 
   /**
@@ -610,6 +611,7 @@ class LayerManager : public FrameRecorder {
    * Flag the next paint as the first for a document.
    */
   virtual void SetIsFirstPaint() {}
+  virtual bool GetIsFirstPaint() const { return false; }
 
   /**
    * Set the current focus target to be sent with the next paint.
@@ -741,6 +743,8 @@ class LayerManager : public FrameRecorder {
   }
   void PayloadPresented();
 
+  void SetContainsSVG(bool aContainsSVG) { mContainsSVG = aContainsSVG; }
+
  protected:
   RefPtr<Layer> mRoot;
   gfx::UserData mUserData;
@@ -762,6 +766,9 @@ class LayerManager : public FrameRecorder {
 
   uint64_t mId;
   bool mInTransaction;
+
+  // Used for tracking CONTENT_FRAME_TIME_WITH_SVG
+  bool mContainsSVG;
   // The time when painting most recently finished. This is recorded so that
   // we can time any play-pending animations from this point.
   TimeStamp mAnimationReadyTime;
@@ -1209,6 +1216,14 @@ class Layer {
     }
   }
 
+  void SetIsAsyncZoomContainer(const Maybe<FrameMetrics::ViewID>& aViewId) {
+    if (mSimpleAttrs.SetIsAsyncZoomContainer(aViewId)) {
+      MOZ_LAYERS_LOG_IF_SHADOWABLE(
+          this, ("Layer::Mutated(%p) IsAsyncZoomContainer", this));
+      MutatedSimple();
+    }
+  }
+
   /**
    * CONSTRUCTION PHASE ONLY
    * This flag is true when the transform on the layer is a perspective
@@ -1352,6 +1367,9 @@ class Layer {
   virtual float GetPostXScale() const { return mSimpleAttrs.GetPostXScale(); }
   virtual float GetPostYScale() const { return mSimpleAttrs.GetPostYScale(); }
   bool GetIsFixedPosition() { return mSimpleAttrs.IsFixedPosition(); }
+  Maybe<FrameMetrics::ViewID> IsAsyncZoomContainer() {
+    return mSimpleAttrs.IsAsyncZoomContainer();
+  }
   bool GetTransformIsPerspective() const {
     return mSimpleAttrs.GetTransformIsPerspective();
   }

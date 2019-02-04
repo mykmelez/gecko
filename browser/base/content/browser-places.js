@@ -542,8 +542,7 @@ var PlacesCommandHook = {
   },
 
   searchBookmarks() {
-    focusAndSelectUrlBar();
-    gURLBar.typeRestrictToken(UrlbarTokenizer.RESTRICT.BOOKMARK);
+    gURLBar.search(UrlbarTokenizer.RESTRICT.BOOKMARK);
   },
 };
 
@@ -786,12 +785,11 @@ var BookmarksEventHandler = {
 
     if (aDocument.tooltipNode.localName == "treechildren") {
       var tree = aDocument.tooltipNode.parentNode;
-      var tbo = tree.treeBoxObject;
-      var cell = tbo.getCellAt(aEvent.clientX, aEvent.clientY);
+      var cell = tree.getCellAt(aEvent.clientX, aEvent.clientY);
       if (cell.row == -1)
         return false;
       node = tree.view.nodeForTreeIndex(cell.row);
-      cropped = tbo.isCellCropped(cell.row, cell.col);
+      cropped = tree.isCellCropped(cell.row, cell.col);
     } else {
       // Check whether the tooltipNode is a Places node.
       // In such a case use it, otherwise check for targetURI attribute.
@@ -1489,8 +1487,10 @@ var BookmarkingUI = {
       }
       if (starred) {
         element.setAttribute("starred", "true");
+        Services.obs.notifyObservers(null, "bookmark-icon-updated", "starred");
       } else {
         element.removeAttribute("starred");
+        Services.obs.notifyObservers(null, "bookmark-icon-updated", "unstarred");
       }
     }
 

@@ -10,6 +10,7 @@
 #include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/dom/CustomElementRegistryBinding.h"
 #include "mozilla/dom/HTMLElementBinding.h"
+#include "mozilla/dom/ShadowIncludingTreeIterator.h"
 #include "mozilla/dom/XULElementBinding.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/WebComponentsBinding.h"
@@ -379,7 +380,9 @@ CustomElementDefinition* CustomElementRegistry::LookupCustomElementDefinition(
 
 CustomElementDefinition* CustomElementRegistry::LookupCustomElementDefinition(
     JSContext* aCx, JSObject* aConstructor) const {
-  JS::Rooted<JSObject*> constructor(aCx, js::CheckedUnwrap(aConstructor));
+  // We're looking up things that tested true for JS::IsConstructor,
+  // so doing a CheckedUnwrapStatic is fine here.
+  JS::Rooted<JSObject*> constructor(aCx, js::CheckedUnwrapStatic(aConstructor));
 
   const auto& ptr = mConstructors.lookup(constructor);
   if (!ptr) {
@@ -557,8 +560,6 @@ class CandidateFinder {
   nsTArray<nsCOMPtr<Element>> OrderedCandidates();
 
  private:
-  bool Traverse(Element* aRoot, nsTArray<nsCOMPtr<Element>>& aOrderedElements);
-
   nsCOMPtr<Document> mDoc;
   nsInterfaceHashtable<nsPtrHashKey<Element>, Element> mCandidates;
 };
@@ -590,45 +591,22 @@ nsTArray<nsCOMPtr<Element>> CandidateFinder::OrderedCandidates() {
   }
 
   nsTArray<nsCOMPtr<Element>> orderedElements(mCandidates.Count());
-  for (Element* child = mDoc->GetFirstElementChild(); child;
-       child = child->GetNextElementSibling()) {
-    if (!Traverse(child, orderedElements)) {
-      break;
+  for (nsINode* node : ShadowIncludingTreeIterator(*mDoc)) {
+    Element* element = Element::FromNode(node);
+    if (!element) {
+      continue;
     }
-  }
 
-  return orderedElements;
-}
-
-bool CandidateFinder::Traverse(Element* aRoot,
-                               nsTArray<nsCOMPtr<Element>>& aOrderedElements) {
-  nsCOMPtr<Element> elem;
-  if (mCandidates.Remove(aRoot, getter_AddRefs(elem))) {
-    aOrderedElements.AppendElement(std::move(elem));
-    if (mCandidates.Count() == 0) {
-      return false;
-    }
-  }
-
-  if (ShadowRoot* root = aRoot->GetShadowRoot()) {
-    // First iterate the children of the shadow root if aRoot is a shadow host.
-    for (Element* child = root->GetFirstElementChild(); child;
-         child = child->GetNextElementSibling()) {
-      if (!Traverse(child, aOrderedElements)) {
-        return false;
+    nsCOMPtr<Element> elem;
+    if (mCandidates.Remove(element, getter_AddRefs(elem))) {
+      orderedElements.AppendElement(std::move(elem));
+      if (mCandidates.Count() == 0) {
+        break;
       }
     }
   }
 
-  // Iterate the explicit children of aRoot.
-  for (Element* child = aRoot->GetFirstElementChild(); child;
-       child = child->GetNextElementSibling()) {
-    if (!Traverse(child, aOrderedElements)) {
-      return false;
-    }
-  }
-
-  return true;
+  return orderedElements;
 }
 
 }  // namespace
@@ -689,8 +667,14 @@ void CustomElementRegistry::Define(JSContext* aCx, const nsAString& aName,
                                    ErrorResult& aRv) {
   JS::Rooted<JSObject*> constructor(aCx, aFunctionConstructor.CallableOrNull());
 
-  JS::Rooted<JSObject*> constructorUnwrapped(aCx,
-                                             js::CheckedUnwrap(constructor));
+  // We need to do a dynamic unwrap in order to throw the right exception.  We
+  // could probably avoid that if we just threw MSG_NOT_CONSTRUCTOR if unwrap
+  // fails.
+  //
+  // In any case, aCx represents the global we want to be using for the unwrap
+  // here.
+  JS::Rooted<JSObject*> constructorUnwrapped(
+      aCx, js::CheckedUnwrapDynamic(constructor, aCx));
   if (!constructorUnwrapped) {
     // If the caller's compartment does not have permission to access the
     // unwrapped constructor then throw.
@@ -1005,9 +989,13 @@ void CustomElementRegistry::SetElementCreationCallback(
   return;
 }
 
-static void TryUpgrade(nsINode& aNode) {
-  Element* element = aNode.IsElement() ? aNode.AsElement() : nullptr;
-  if (element) {
+void CustomElementRegistry::Upgrade(nsINode& aRoot) {
+  for (nsINode* node : ShadowIncludingTreeIterator(aRoot)) {
+    Element* element = Element::FromNode(node);
+    if (!element) {
+      continue;
+    }
+
     CustomElementData* ceData = element->GetCustomElementData();
     if (ceData) {
       NodeInfo* nodeInfo = element->NodeInfo();
@@ -1020,22 +1008,8 @@ static void TryUpgrade(nsINode& aNode) {
         nsContentUtils::EnqueueUpgradeReaction(element, definition);
       }
     }
-
-    if (ShadowRoot* root = element->GetShadowRoot()) {
-      for (Element* child = root->GetFirstElementChild(); child;
-           child = child->GetNextElementSibling()) {
-        TryUpgrade(*child);
-      }
-    }
-  }
-
-  for (Element* child = aNode.GetFirstElementChild(); child;
-       child = child->GetNextElementSibling()) {
-    TryUpgrade(*child);
   }
 }
-
-void CustomElementRegistry::Upgrade(nsINode& aRoot) { TryUpgrade(aRoot); }
 
 void CustomElementRegistry::Get(JSContext* aCx, const nsAString& aName,
                                 JS::MutableHandle<JS::Value> aRetVal) {

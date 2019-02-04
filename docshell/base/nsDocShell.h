@@ -199,10 +199,6 @@ class nsDocShell final : public nsDocLoader,
 
   NS_FORWARD_SAFE_NSIDOMSTORAGEMANAGER(TopSessionStorageManager())
 
-  // Need to implement (and forward) nsISecurityEventSink, because
-  // nsIWebProgressListener has methods with identical names...
-  NS_FORWARD_NSISECURITYEVENTSINK(nsDocLoader::)
-
   // Create a new nsDocShell object, initializing it.
   static already_AddRefed<nsDocShell> Create(
       mozilla::dom::BrowsingContext* aBrowsingContext);
@@ -283,6 +279,8 @@ class nsDocShell final : public nsDocLoader,
 
   void SetInFrameSwap(bool aInSwap) { mInFrameSwap = aInSwap; }
   bool InFrameSwap();
+
+  void SetIsFrame() { mIsFrame = true; };
 
   const mozilla::Encoding* GetForcedCharset() { return mForcedCharset; }
 
@@ -546,6 +544,10 @@ class nsDocShell final : public nsDocLoader,
 
   nsresult DoChannelLoad(nsIChannel* aChannel, nsIURILoader* aURILoader,
                          bool aBypassClassifier);
+
+  nsresult OpenInitializedChannel(nsIChannel* aChannel,
+                                  nsIURILoader* aURILoader,
+                                  uint32_t aOpenFlags);
 
   nsresult ScrollToAnchor(bool aCurHasRef, bool aNewHasRef,
                           nsACString& aNewHash, uint32_t aLoadType);
@@ -864,9 +866,9 @@ class nsDocShell final : public nsDocLoader,
   nsresult ConfirmRepost(bool* aRepost);
   nsresult GetPromptAndStringBundle(nsIPrompt** aPrompt,
                                     nsIStringBundle** aStringBundle);
-  nsresult GetCurScrollPos(int32_t aScrollOrientation, int32_t* aCurPos);
   nsresult SetCurScrollPosEx(int32_t aCurHorizontalPos,
                              int32_t aCurVerticalPos);
+  nsPoint GetCurScrollPos();
 
   already_AddRefed<mozilla::dom::ChildSHistory> GetRootSessionHistory();
 
@@ -1154,6 +1156,8 @@ class nsDocShell final : public nsDocLoader,
 
   // This flag indicates when the title is valid for the current URI.
   bool mTitleValidForCurrentURI : 1;
+
+  bool mIsFrame : 1;
 };
 
 #endif /* nsDocShell_h__ */

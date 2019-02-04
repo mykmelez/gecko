@@ -1,7 +1,7 @@
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(this, "OfflineAppCacheHelper",
                                "resource://gre/modules/offlineAppCache.jsm");
@@ -342,8 +342,9 @@ var SiteDataManager = {
     for (let host of hosts) {
       let site = this._sites.get(host);
       if (site) {
-        // Clear localstorage.
-        Services.obs.notifyObservers(null, "browser:purge-domain-data", host);
+        // Clear localStorage & sessionStorage
+        Services.obs.notifyObservers(null, "extension:purge-localStorage", host);
+        Services.obs.notifyObservers(null, "extension:purge-sessionStorage", host);
         this._removePermission(site);
         this._removeAppCache(site);
         this._removeCookies(site);

@@ -14,15 +14,34 @@ const Types = require("../types");
 class Rules extends PureComponent {
   static get propTypes() {
     return {
+      onToggleDeclaration: PropTypes.func.isRequired,
+      onToggleSelectorHighlighter: PropTypes.func.isRequired,
       rules: PropTypes.arrayOf(PropTypes.shape(Types.rule)).isRequired,
+      showDeclarationNameEditor: PropTypes.func.isRequired,
+      showDeclarationValueEditor: PropTypes.func.isRequired,
+      showSelectorEditor: PropTypes.func.isRequired,
     };
   }
 
   render() {
-    return this.props.rules.map(rule => {
+    const {
+      onToggleDeclaration,
+      onToggleSelectorHighlighter,
+      rules,
+      showDeclarationNameEditor,
+      showDeclarationValueEditor,
+      showSelectorEditor,
+    } = this.props;
+
+    return rules.map(rule => {
       return Rule({
         key: rule.id,
+        onToggleDeclaration,
+        onToggleSelectorHighlighter,
         rule,
+        showDeclarationNameEditor,
+        showDeclarationValueEditor,
+        showSelectorEditor,
       });
     });
   }

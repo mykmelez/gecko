@@ -22,20 +22,20 @@
 
 #include <chrono>
 #ifdef JS_POSIX_NSPR
-#include <dlfcn.h>
+#  include <dlfcn.h>
 #endif
 #ifdef XP_WIN
-#include <direct.h>
-#include <process.h>
+#  include <direct.h>
+#  include <process.h>
 #endif
 #include <errno.h>
 #include <fcntl.h>
 #if defined(XP_WIN)
-#include <io.h> /* for isatty() */
+#  include <io.h> /* for isatty() */
 #endif
 #include <locale.h>
 #if defined(MALLOC_H)
-#include MALLOC_H /* for malloc_usable_size, malloc_size, _msize */
+#  include MALLOC_H /* for malloc_usable_size, malloc_size, _msize */
 #endif
 #include <math.h>
 #include <signal.h>
@@ -47,13 +47,13 @@
 #include <thread>
 #include <utility>
 #ifdef XP_UNIX
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
-#include <unistd.h>
+#  include <sys/mman.h>
+#  include <sys/stat.h>
+#  include <sys/wait.h>
+#  include <unistd.h>
 #endif
 #ifdef XP_LINUX
-#include <sys/prctl.h>
+#  include <sys/prctl.h>
 #endif
 
 #include "jsapi.h"
@@ -61,8 +61,8 @@
 #include "jstypes.h"
 #include "jsutil.h"
 #ifndef JS_POSIX_NSPR
-#include "prerror.h"
-#include "prlink.h"
+#  include "prerror.h"
+#  include "prlink.h"
 #endif
 #include "shellmoduleloader.out.h"
 
@@ -73,7 +73,7 @@
 #include "builtin/RegExp.h"
 #include "builtin/TestingFunctions.h"
 #if defined(JS_BUILD_BINAST)
-#include "frontend/BinASTParser.h"
+#  include "frontend/BinASTParser.h"
 #endif  // defined(JS_BUILD_BINAST)
 #include "frontend/ModuleSharedContext.h"
 #include "frontend/Parser.h"
@@ -88,6 +88,7 @@
 #include "js/CharacterEncoding.h"
 #include "js/CompilationAndEvaluation.h"
 #include "js/CompileOptions.h"
+#include "js/ContextOptions.h"  // JS::ContextOptions{,Ref}
 #include "js/Debug.h"
 #include "js/Equality.h"  // JS::SameValue
 #include "js/GCVector.h"
@@ -173,8 +174,8 @@ struct PRLibSpec {
 
 typedef void PRLibrary;
 
-#define PR_LD_NOW RTLD_NOW
-#define PR_LD_GLOBAL RTLD_GLOBAL
+#  define PR_LD_NOW RTLD_NOW
+#  define PR_LD_GLOBAL RTLD_GLOBAL
 
 static PRLibrary* PR_LoadLibraryWithFlags(PRLibSpec libSpec, int flags) {
   return dlopen(libSpec.value.pathname, flags);
@@ -222,23 +223,23 @@ static const double MAX_TIMEOUT_SECONDS = 1800.0;
 
 // Code to support GCOV code coverage measurements on standalone shell
 #ifdef MOZ_CODE_COVERAGE
-#if defined(__GNUC__) && !defined(__clang__)
+#  if defined(__GNUC__) && !defined(__clang__)
 extern "C" void __gcov_dump();
 extern "C" void __gcov_reset();
 
 void counters_dump(int) { __gcov_dump(); }
 
 void counters_reset(int) { __gcov_reset(); }
-#else
+#  else
 void counters_dump(int) { /* Do nothing */
 }
 
 void counters_reset(int) { /* Do nothing */
 }
-#endif
+#  endif
 
 static void InstallCoverageSignalHandlers() {
-#ifndef XP_WIN
+#  ifndef XP_WIN
   fprintf(stderr, "[CodeCoverage] Setting handlers for process %d.\n",
           getpid());
 
@@ -255,7 +256,7 @@ static void InstallCoverageSignalHandlers() {
   sigemptyset(&reset_sa.sa_mask);
   mozilla::DebugOnly<int> r2 = sigaction(SIGUSR2, &reset_sa, nullptr);
   MOZ_ASSERT(r2 == 0, "Failed to install GCOV SIGUSR2 handler");
-#endif
+#  endif
 }
 #endif
 
@@ -491,10 +492,8 @@ static bool enableNativeRegExp = false;
 static bool enableSharedMemory = SHARED_MEMORY_DEFAULT;
 static bool enableWasmBaseline = false;
 static bool enableWasmIon = false;
-#ifdef ENABLE_WASM_CRANELIFT
-static bool wasmForceCranelift = false;
-#endif
-#ifdef ENABLE_WASM_GC
+static bool enableWasmCranelift = false;
+#ifdef ENABLE_WASM_REFTYPES
 static bool enableWasmGc = false;
 #endif
 static bool enableWasmVerbose = false;
@@ -517,6 +516,7 @@ static bool reportWarnings = true;
 static bool compileOnly = false;
 static bool fuzzingSafe = false;
 static bool disableOOMFunctions = false;
+static bool defaultToSameCompartment = true;
 
 #ifdef DEBUG
 static bool dumpEntrainedVariables = false;
@@ -524,7 +524,6 @@ static bool OOM_printAllocationCount = false;
 #endif
 
 // Shell state this is only accessed on the main thread.
-bool jsCachingEnabled = false;
 mozilla::Atomic<bool> jsCacheOpened(false);
 
 static bool SetTimeoutValue(JSContext* cx, double t);
@@ -1068,6 +1067,19 @@ static bool TrackUnhandledRejections(JSContext* cx, JS::HandleObject promise,
     return true;
   }
 
+#if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
+  if (cx->runningOOMTest) {
+    // When OOM happens, we cannot reliably track the set of unhandled
+    // promise rejections. Throw error only when simulated OOM is used
+    // *and* promises are used in the test.
+    JS_ReportErrorASCII(
+        cx,
+        "Can't track unhandled rejections while running simulated OOM "
+        "test. Call ignoreUnhandledRejections before using oomTest etc.");
+    return false;
+  }
+#endif
+
   if (!sc->unhandledRejectedPromises) {
     sc->unhandledRejectedPromises = SetObject::create(cx);
     if (!sc->unhandledRejectedPromises) {
@@ -1077,12 +1089,9 @@ static bool TrackUnhandledRejections(JSContext* cx, JS::HandleObject promise,
 
   RootedValue promiseVal(cx, ObjectValue(*promise));
 
-  Maybe<AutoRealm> ar;
-  if (cx->realm() != sc->unhandledRejectedPromises->realm()) {
-    ar.emplace(cx, sc->unhandledRejectedPromises);
-    if (!cx->compartment()->wrap(cx, &promiseVal)) {
-      return false;
-    }
+  AutoRealm ar(cx, sc->unhandledRejectedPromises);
+  if (!cx->compartment()->wrap(cx, &promiseVal)) {
+    return false;
   }
 
   switch (state) {
@@ -1097,7 +1106,8 @@ static bool TrackUnhandledRejections(JSContext* cx, JS::HandleObject promise,
                               &deleted)) {
         return false;
       }
-      MOZ_ASSERT(deleted);
+      // We can't MOZ_ASSERT(deleted) here, because it's possible we failed to
+      // add the promise in the first place, due to OOM.
       break;
   }
 
@@ -1130,7 +1140,7 @@ static void ForwardingPromiseRejectionTrackerCallback(
   }
 
   RootedValue rval(cx);
-  (void) Call(cx, callback, UndefinedHandleValue, args, &rval);
+  (void)Call(cx, callback, UndefinedHandleValue, args, &rval);
 }
 
 static bool SetPromiseRejectionTrackerCallback(JSContext* cx, unsigned argc,
@@ -1463,9 +1473,9 @@ static MOZ_MUST_USE bool Process(JSContext* cx, const char* filename,
 }
 
 #ifdef XP_WIN
-#define GET_FD_FROM_FILE(a) int(_get_osfhandle(fileno(a)))
+#  define GET_FD_FROM_FILE(a) int(_get_osfhandle(fileno(a)))
 #else
-#define GET_FD_FROM_FILE(a) fileno(a)
+#  define GET_FD_FROM_FILE(a) fileno(a)
 #endif
 
 static bool CreateMappedArrayBuffer(JSContext* cx, unsigned argc, Value* vp) {
@@ -1842,7 +1852,7 @@ static void my_LargeAllocFailCallback() {
   MOZ_ASSERT(!JS::RuntimeHeapIsBusy());
 
   JS::PrepareForFullGC(cx);
-  cx->runtime()->gc.gc(GC_NORMAL, JS::gcreason::SHARED_MEMORY_LIMIT);
+  cx->runtime()->gc.gc(GC_NORMAL, JS::GCReason::SHARED_MEMORY_LIMIT);
 }
 
 static const uint32_t CacheEntry_SOURCE = 0;
@@ -3766,11 +3776,56 @@ static void SetStandardRealmOptions(JS::RealmOptions& options) {
       .setStreamsEnabled(enableStreams);
 }
 
+static MOZ_MUST_USE bool CheckRealmOptions(JSContext* cx,
+                                           JS::RealmOptions& options,
+                                           JSPrincipals* principals) {
+  JS::RealmCreationOptions& creationOptions = options.creationOptions();
+  if (creationOptions.compartmentSpecifier() !=
+      JS::CompartmentSpecifier::ExistingCompartment) {
+    return true;
+  }
+
+  JS::Compartment* comp = creationOptions.compartment();
+
+  // All realms in a compartment must be either system or non-system.
+  bool isSystem =
+      principals && principals == cx->runtime()->trustedPrincipals();
+  if (isSystem != IsSystemCompartment(comp)) {
+    JS_ReportErrorASCII(cx,
+                        "Cannot create system and non-system realms in the "
+                        "same compartment");
+    return false;
+  }
+
+  // Debugger visibility is per-compartment, not per-realm, so make sure the
+  // requested visibility matches the existing compartment's.
+  if (creationOptions.invisibleToDebugger() != comp->invisibleToDebugger()) {
+    JS_ReportErrorASCII(cx,
+                        "All the realms in a compartment must have "
+                        "the same debugger visibility");
+    return false;
+  }
+
+  return true;
+}
+
 static JSObject* NewSandbox(JSContext* cx, bool lazy) {
   JS::RealmOptions options;
   SetStandardRealmOptions(options);
+
+  if (defaultToSameCompartment) {
+    options.creationOptions().setExistingCompartment(cx->global());
+  } else {
+    options.creationOptions().setNewCompartmentAndZone();
+  }
+
+  JSPrincipals* principals = nullptr;
+  if (!CheckRealmOptions(cx, options, principals)) {
+    return nullptr;
+  }
+
   RootedObject obj(cx,
-                   JS_NewGlobalObject(cx, &sandbox_class, nullptr,
+                   JS_NewGlobalObject(cx, &sandbox_class, principals,
                                       JS::DontFireOnNewGlobalHook, options));
   if (!obj) {
     return nullptr;
@@ -3850,17 +3905,13 @@ static bool EvalInContext(JSContext* cx, unsigned argc, Value* vp) {
 
   DescribeScriptedCaller(cx, &filename, &lineno);
   {
-    Maybe<JSAutoRealm> ar;
-    unsigned flags;
-    JSObject* unwrapped = UncheckedUnwrap(sobj, true, &flags);
-    if (flags & Wrapper::CROSS_COMPARTMENT) {
-      sobj = unwrapped;
-      ar.emplace(cx, sobj);
-    }
+    sobj = UncheckedUnwrap(sobj, true);
+
+    JSAutoRealm ar(cx, sobj);
 
     sobj = ToWindowIfWindowProxy(sobj);
 
-    if (!(sobj->getClass()->flags & JSCLASS_IS_GLOBAL)) {
+    if (!JS_IsGlobalObject(sobj)) {
       JS_ReportErrorASCII(cx, "Invalid scope argument to evalcx");
       return false;
     }
@@ -4969,10 +5020,10 @@ static bool ParseBinASTData(JSContext* cx, uint8_t* buf_data,
     return false;
   }
 
-#ifdef DEBUG
+#  ifdef DEBUG
   Fprinter out(stderr);
   DumpParseTree(parsed.unwrap(), out);
-#endif
+#  endif
 
   return true;
 }
@@ -6180,7 +6231,14 @@ static bool NewGlobal(JSContext* cx, unsigned argc, Value* vp) {
   JS::RealmBehaviors& behaviors = options.behaviors();
 
   SetStandardRealmOptions(options);
-  options.creationOptions().setNewCompartmentAndZone();
+
+  // Default to creating the global in the current compartment unless
+  // --more-compartments is used.
+  if (defaultToSameCompartment) {
+    creationOptions.setExistingCompartment(cx->global());
+  } else {
+    creationOptions.setNewCompartmentAndZone();
+  }
 
   CallArgs args = CallArgsFromVp(argc, vp);
   if (args.length() == 1 && args[0].isObject()) {
@@ -6216,6 +6274,13 @@ static bool NewGlobal(JSContext* cx, unsigned argc, Value* vp) {
       creationOptions.setExistingCompartment(UncheckedUnwrap(&v.toObject()));
     }
 
+    if (!JS_GetProperty(cx, opts, "newCompartment", &v)) {
+      return false;
+    }
+    if (v.isBoolean() && v.toBoolean()) {
+      creationOptions.setNewCompartmentAndZone();
+    }
+
     if (!JS_GetProperty(cx, opts, "disableLazyParsing", &v)) {
       return false;
     }
@@ -6247,26 +6312,8 @@ static bool NewGlobal(JSContext* cx, unsigned argc, Value* vp) {
     }
   }
 
-  if (creationOptions.compartmentSpecifier() ==
-      JS::CompartmentSpecifier::ExistingCompartment) {
-    JS::Compartment* comp = creationOptions.compartment();
-    bool isSystem =
-        principals && principals == cx->runtime()->trustedPrincipals();
-    if (isSystem != IsSystemCompartment(comp)) {
-      JS_ReportErrorASCII(cx,
-                          "Cannot create system and non-system realms in the "
-                          "same compartment");
-      return false;
-    }
-
-    // Debugger visibility is per-compartment, not per-realm, so make sure the
-    // requested visibility matches the existing compartment's.
-    if (creationOptions.invisibleToDebugger() != comp->invisibleToDebugger()) {
-      JS_ReportErrorASCII(cx,
-                          "All the realms in a compartment must have "
-                          "the same debugger visibility");
-      return false;
-    }
+  if (!CheckRealmOptions(cx, options, principals)) {
+    return false;
   }
 
   RootedObject global(cx, NewGlobalObject(cx, options, principals));
@@ -6486,24 +6533,6 @@ static bool WithSourceHook(JSContext* cx, unsigned argc, Value* vp) {
   return result;
 }
 
-static bool IsCachingEnabled(JSContext* cx, unsigned argc, Value* vp) {
-  CallArgs args = CallArgsFromVp(argc, vp);
-  args.rval().setBoolean(jsCachingEnabled && jsCacheAsmJSPath != nullptr);
-  return true;
-}
-
-static bool SetCachingEnabled(JSContext* cx, unsigned argc, Value* vp) {
-  CallArgs args = CallArgsFromVp(argc, vp);
-  if (GetShellContext(cx)->isWorker) {
-    JS_ReportErrorASCII(cx, "Caching is not supported in workers");
-    return false;
-  }
-
-  jsCachingEnabled = ToBoolean(args.get(0));
-  args.rval().setUndefined();
-  return true;
-}
-
 static void PrintProfilerEvents_Callback(const char* msg) {
   fprintf(stderr, "PROFILER EVENT: %s\n", msg);
 }
@@ -6528,17 +6557,17 @@ static void SingleStepCallback(void* arg, jit::Simulator* sim, void* pc) {
 
   JS::ProfilingFrameIterator::RegisterState state;
   state.pc = pc;
-#if defined(JS_SIMULATOR_ARM)
+#  if defined(JS_SIMULATOR_ARM)
   state.sp = (void*)sim->get_register(jit::Simulator::sp);
   state.lr = (void*)sim->get_register(jit::Simulator::lr);
   state.fp = (void*)sim->get_register(jit::Simulator::fp);
-#elif defined(JS_SIMULATOR_MIPS64) || defined(JS_SIMULATOR_MIPS32)
+#  elif defined(JS_SIMULATOR_MIPS64) || defined(JS_SIMULATOR_MIPS32)
   state.sp = (void*)sim->getRegister(jit::Simulator::sp);
   state.lr = (void*)sim->getRegister(jit::Simulator::ra);
   state.fp = (void*)sim->getRegister(jit::Simulator::fp);
-#else
-#error "NYI: Single-step profiling support"
-#endif
+#  else
+#    error "NYI: Single-step profiling support"
+#  endif
 
   mozilla::DebugOnly<void*> lastStackAddress = nullptr;
   StackChars stack;
@@ -7673,7 +7702,11 @@ static bool DumpScopeChain(JSContext* cx, unsigned argc, Value* vp) {
     }
   }
 
+#ifndef JS_MORE_DETERMINISTIC
+  // Don't dump anything in more-deterministic builds because the output
+  // includes pointer values.
   script->bodyScope()->dump();
+#endif
 
   args.rval().setUndefined();
   return true;
@@ -8084,7 +8117,7 @@ static bool SetARMHwCapFlags(JSContext* cx, unsigned argc, Value* vp) {
 }
 
 #ifndef __AFL_HAVE_MANUAL_CONTROL
-#define __AFL_LOOP(x) true
+#  define __AFL_LOOP(x) true
 #endif
 
 static bool WasmLoop(JSContext* cx, unsigned argc, Value* vp) {
@@ -8540,7 +8573,10 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
 "      sameZoneAs: The compartment will be in the same zone as the given\n"
 "         object (defaults to a new zone).\n"
 "      sameCompartmentAs: The global will be in the same compartment and\n"
-"         zone as the given object (defaults to a new compartment).\n"
+"         zone as the given object (defaults to the current compartment,\n"
+"         unless the --more-compartments option is used).\n"
+"      newCompartment: If true, the global will always be created in a new\n"
+"         compartment, even without --more-compartments.\n"
 "      cloneSingletons: If true, always clone the objects baked into\n"
 "         scripts, even if it's a top-level script that will only run once\n"
 "         (defaults to using them directly in scripts that will only run\n"
@@ -8605,14 +8641,6 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
 "  null.  (Calling |obj| any other way crashes or throws an exception.)\n"
 "  This function implements the exact requirements of the $262.IsHTMLDDA\n"
 "  property in test262."),
-
-    JS_FN_HELP("isCachingEnabled", IsCachingEnabled, 0, 0,
-"isCachingEnabled()",
-"  Return whether JS caching is enabled."),
-
-    JS_FN_HELP("setCachingEnabled", SetCachingEnabled, 1, 0,
-"setCachingEnabled(b)",
-"  Enable or disable JS caching."),
 
     JS_FN_HELP("cacheEntry", CacheEntry, 1, 0,
 "cacheEntry(code)",
@@ -8902,21 +8930,21 @@ bool DefineConsole(JSContext* cx, HandleObject global) {
 }
 
 #ifdef MOZ_PROFILING
-#define PROFILING_FUNCTION_COUNT 5
-#ifdef MOZ_CALLGRIND
-#define CALLGRIND_FUNCTION_COUNT 3
+#  define PROFILING_FUNCTION_COUNT 5
+#  ifdef MOZ_CALLGRIND
+#    define CALLGRIND_FUNCTION_COUNT 3
+#  else
+#    define CALLGRIND_FUNCTION_COUNT 0
+#  endif
+#  ifdef MOZ_VTUNE
+#    define VTUNE_FUNCTION_COUNT 4
+#  else
+#    define VTUNE_FUNCTION_COUNT 0
+#  endif
+#  define EXTERNAL_FUNCTION_COUNT \
+    (PROFILING_FUNCTION_COUNT + CALLGRIND_FUNCTION_COUNT + VTUNE_FUNCTION_COUNT)
 #else
-#define CALLGRIND_FUNCTION_COUNT 0
-#endif
-#ifdef MOZ_VTUNE
-#define VTUNE_FUNCTION_COUNT 4
-#else
-#define VTUNE_FUNCTION_COUNT 0
-#endif
-#define EXTERNAL_FUNCTION_COUNT \
-  (PROFILING_FUNCTION_COUNT + CALLGRIND_FUNCTION_COUNT + VTUNE_FUNCTION_COUNT)
-#else
-#define EXTERNAL_FUNCTION_COUNT 0
+#  define EXTERNAL_FUNCTION_COUNT 0
 #endif
 
 #undef PROFILING_FUNCTION_COUNT
@@ -9641,59 +9669,7 @@ static const uint32_t asmJSCacheCookie = 0xabbadaba;
 static bool ShellOpenAsmJSCacheEntryForRead(
     HandleObject global, const char16_t* begin, const char16_t* limit,
     size_t* serializedSizeOut, const uint8_t** memoryOut, intptr_t* handleOut) {
-  if (!jsCachingEnabled || !jsCacheAsmJSPath) {
-    return false;
-  }
-
-  ScopedFileDesc fd(open(jsCacheAsmJSPath, O_RDWR), ScopedFileDesc::READ_LOCK);
-  if (fd == -1) {
-    return false;
-  }
-
-  // Get the size and make sure we can dereference at least one uint32_t.
-  off_t off = lseek(fd, 0, SEEK_END);
-  if (off == -1 || off < (off_t)sizeof(uint32_t)) {
-    return false;
-  }
-
-  // Map the file into memory.
-  void* memory;
-#ifdef XP_WIN
-  HANDLE fdOsHandle = (HANDLE)_get_osfhandle(fd);
-  HANDLE fileMapping =
-      CreateFileMapping(fdOsHandle, nullptr, PAGE_READWRITE, 0, 0, nullptr);
-  if (!fileMapping) {
-    return false;
-  }
-
-  memory = MapViewOfFile(fileMapping, FILE_MAP_READ, 0, 0, 0);
-  CloseHandle(fileMapping);
-  if (!memory) {
-    return false;
-  }
-#else
-  memory = mmap(nullptr, off, PROT_READ, MAP_SHARED, fd, 0);
-  if (memory == MAP_FAILED) {
-    return false;
-  }
-#endif
-
-  // Perform check described by asmJSCacheCookie comment.
-  if (*(uint32_t*)memory != asmJSCacheCookie) {
-#ifdef XP_WIN
-    UnmapViewOfFile(memory);
-#else
-    munmap(memory, off);
-#endif
-    return false;
-  }
-
-  // The embedding added the cookie so strip it off of the buffer returned to
-  // the JS engine.
-  *serializedSizeOut = off - sizeof(uint32_t);
-  *memoryOut = (uint8_t*)memory + sizeof(uint32_t);
-  *handleOut = fd.forget();
-  return true;
+  return false;
 }
 
 static void ShellCloseAsmJSCacheEntryForRead(size_t serializedSize,
@@ -9718,86 +9694,7 @@ static void ShellCloseAsmJSCacheEntryForRead(size_t serializedSize,
 static JS::AsmJSCacheResult ShellOpenAsmJSCacheEntryForWrite(
     HandleObject global, const char16_t* begin, const char16_t* end,
     size_t serializedSize, uint8_t** memoryOut, intptr_t* handleOut) {
-  if (!jsCachingEnabled || !jsCacheAsmJSPath) {
-    return JS::AsmJSCache_Disabled_ShellFlags;
-  }
-
-  // Create the cache directory if it doesn't already exist.
-  struct stat dirStat;
-  if (stat(jsCacheDir, &dirStat) == 0) {
-    if (!(dirStat.st_mode & S_IFDIR)) {
-      return JS::AsmJSCache_InternalError;
-    }
-  } else {
-#ifdef XP_WIN
-    if (mkdir(jsCacheDir) != 0) {
-      return JS::AsmJSCache_InternalError;
-    }
-#else
-    if (mkdir(jsCacheDir, 0777) != 0) {
-      return JS::AsmJSCache_InternalError;
-    }
-#endif
-  }
-
-  ScopedFileDesc fd(open(jsCacheAsmJSPath, O_CREAT | O_RDWR, 0660),
-                    ScopedFileDesc::WRITE_LOCK);
-  if (fd == -1) {
-    return JS::AsmJSCache_InternalError;
-  }
-
-  // Include extra space for the asmJSCacheCookie.
-  serializedSize += sizeof(uint32_t);
-
-  // Resize the file to the appropriate size after zeroing their contents.
-#ifdef XP_WIN
-  if (chsize(fd, 0)) {
-    return JS::AsmJSCache_InternalError;
-  }
-  if (chsize(fd, serializedSize)) {
-    return JS::AsmJSCache_InternalError;
-  }
-#else
-  if (ftruncate(fd, 0)) {
-    return JS::AsmJSCache_InternalError;
-  }
-  if (ftruncate(fd, serializedSize)) {
-    return JS::AsmJSCache_InternalError;
-  }
-#endif
-
-  // Map the file into memory.
-  void* memory;
-#ifdef XP_WIN
-  HANDLE fdOsHandle = (HANDLE)_get_osfhandle(fd);
-  HANDLE fileMapping =
-      CreateFileMapping(fdOsHandle, nullptr, PAGE_READWRITE, 0, 0, nullptr);
-  if (!fileMapping) {
-    return JS::AsmJSCache_InternalError;
-  }
-
-  memory = MapViewOfFile(fileMapping, FILE_MAP_WRITE, 0, 0, 0);
-  CloseHandle(fileMapping);
-  if (!memory) {
-    return JS::AsmJSCache_InternalError;
-  }
-  MOZ_ASSERT(*(uint32_t*)memory == 0);
-#else
-  memory = mmap(nullptr, serializedSize, PROT_READ, MAP_SHARED, fd, 0);
-  if (memory == MAP_FAILED) {
-    return JS::AsmJSCache_InternalError;
-  }
-  MOZ_ASSERT(*(uint32_t*)memory == 0);
-  if (mprotect(memory, serializedSize, PROT_READ | PROT_WRITE)) {
-    return JS::AsmJSCache_InternalError;
-  }
-#endif
-
-  // The embedding added the cookie so strip it off of the buffer returned to
-  // the JS engine. The asmJSCacheCookie will be written on close, below.
-  *memoryOut = (uint8_t*)memory + sizeof(uint32_t);
-  *handleOut = fd.forget();
-  return JS::AsmJSCache_Success;
+  return JS::AsmJSCache_Disabled_ShellFlags;
 }
 
 static void ShellCloseAsmJSCacheEntryForWrite(size_t serializedSize,
@@ -10105,10 +10002,8 @@ static MOZ_MUST_USE bool ProcessArgs(JSContext* cx, OptionParser* op) {
       JS::CompileOptions opts(cx);
       opts.setFileAndLine("-e", 1);
 
-      // This might be upgradable to UTF-8, but for now keep assuming the
-      // worst.
       RootedValue rval(cx);
-      if (!JS::EvaluateLatin1(cx, opts, code, strlen(code), &rval)) {
+      if (!JS::EvaluateUtf8(cx, opts, code, strlen(code), &rval)) {
         return false;
       }
 
@@ -10166,23 +10061,38 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
   enableBaseline = !op.getBoolOption("no-baseline");
   enableIon = !op.getBoolOption("no-ion");
   enableAsmJS = !op.getBoolOption("no-asmjs");
-  enableWasm = !op.getBoolOption("no-wasm");
   enableNativeRegExp = !op.getBoolOption("no-native-regexp");
-  enableWasmBaseline = !op.getBoolOption("no-wasm-baseline");
-  enableWasmIon = !op.getBoolOption("no-wasm-ion");
-#ifdef ENABLE_WASM_CRANELIFT
-  wasmForceCranelift = op.getBoolOption("wasm-force-cranelift");
-#endif
-#ifdef ENABLE_WASM_GC
-  enableWasmGc = op.getBoolOption("wasm-gc");
-#ifdef ENABLE_WASM_CRANELIFT
-  if (enableWasmGc && wasmForceCranelift) {
-    fprintf(stderr,
-            "Do not combine --wasm-gc and --wasm-force-cranelift, they are "
-            "incompatible.\n");
+
+  // Default values for wasm.
+  enableWasm = true;
+  enableWasmBaseline = true;
+  enableWasmIon = true;
+  if (const char* str = op.getStringOption("wasm-compiler")) {
+    if (strcmp(str, "none") == 0) {
+      enableWasm = false;
+    } else if (strcmp(str, "baseline") == 0) {
+      // Baseline is enabled by default.
+      enableWasmIon = false;
+    } else if (strcmp(str, "ion") == 0) {
+      // Ion is enabled by default.
+      enableWasmBaseline = false;
+    } else if (strcmp(str, "cranelift") == 0) {
+      enableWasmBaseline = false;
+      enableWasmIon = false;
+      enableWasmCranelift = true;
+    } else if (strcmp(str, "baseline+ion") == 0) {
+      // Default.
+    } else if (strcmp(str, "baseline+cranelift") == 0) {
+      // Baseline is enabled by default.
+      enableWasmIon = false;
+      enableWasmCranelift = true;
+    } else {
+      return OptionFailure("wasm-compiler", str);
+    }
   }
-  enableWasmGc = enableWasmGc && !wasmForceCranelift;
-#endif
+
+#ifdef ENABLE_WASM_REFTYPES
+  enableWasmGc = op.getBoolOption("wasm-gc");
 #endif
   enableWasmVerbose = op.getBoolOption("wasm-verbose");
   enableTestWasmAwaitTier2 = op.getBoolOption("test-wasm-await-tier2");
@@ -10200,9 +10110,9 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
       .setWasmBaseline(enableWasmBaseline)
       .setWasmIon(enableWasmIon)
 #ifdef ENABLE_WASM_CRANELIFT
-      .setWasmForceCranelift(wasmForceCranelift)
+      .setWasmCranelift(enableWasmCranelift)
 #endif
-#ifdef ENABLE_WASM_GC
+#ifdef ENABLE_WASM_REFTYPES
       .setWasmGc(enableWasmGc)
 #endif
       .setWasmVerbose(enableWasmVerbose)
@@ -10328,16 +10238,6 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
       jit::JitOptions.disableSink = true;
     } else {
       return OptionFailure("ion-sink", str);
-    }
-  }
-
-  if (const char* str = op.getStringOption("ion-loop-unrolling")) {
-    if (strcmp(str, "on") == 0) {
-      jit::JitOptions.disableLoopUnrolling = false;
-    } else if (strcmp(str, "off") == 0) {
-      jit::JitOptions.disableLoopUnrolling = true;
-    } else {
-      return OptionFailure("ion-loop-unrolling", str);
     }
   }
 
@@ -10527,9 +10427,9 @@ static void SetWorkerContextOptions(JSContext* cx) {
       .setWasmBaseline(enableWasmBaseline)
       .setWasmIon(enableWasmIon)
 #ifdef ENABLE_WASM_CRANELIFT
-      .setWasmForceCranelift(wasmForceCranelift)
+      .setWasmCranelift(enableWasmCranelift)
 #endif
-#ifdef ENABLE_WASM_GC
+#ifdef ENABLE_WASM_REFTYPES
       .setWasmGc(enableWasmGc)
 #endif
       .setWasmVerbose(enableWasmVerbose)
@@ -10686,6 +10586,10 @@ static int Shell(JSContext* cx, OptionParser* op, char** envp) {
     disableOOMFunctions = true;
   }
 
+  if (op->getBoolOption("more-compartments")) {
+    defaultToSameCompartment = false;
+  }
+
   JS::RealmOptions options;
   SetStandardRealmOptions(options);
   RootedObject glob(cx, NewGlobalObject(cx, options, nullptr));
@@ -10715,6 +10619,7 @@ static int Shell(JSContext* cx, OptionParser* op, char** envp) {
 
   // Only if there's no other error, report unhandled rejections.
   if (!result && !sc->exitCode) {
+    AutoReportException are(cx);
     if (!ReportUnhandledRejections(cx)) {
       FILE* fp = ErrorFilePointer();
       fputs("Error while printing unhandled rejection\n", fp);
@@ -10919,20 +10824,16 @@ int main(int argc, char** argv, char** envp) {
       !op.addBoolOption('\0', "ion", "Enable IonMonkey (default)") ||
       !op.addBoolOption('\0', "no-ion", "Disable IonMonkey") ||
       !op.addBoolOption('\0', "no-asmjs", "Disable asm.js compilation") ||
-      !op.addBoolOption('\0', "no-wasm", "Disable WebAssembly compilation") ||
-      !op.addBoolOption('\0', "no-wasm-baseline",
-                        "Disable wasm baseline compiler") ||
-      !op.addBoolOption('\0', "no-wasm-ion", "Disable wasm ion compiler")
-#ifdef ENABLE_WASM_CRANELIFT
-      || !op.addBoolOption('\0', "wasm-force-cranelift",
-                           "Enable wasm Cranelift compiler")
-#endif
-      || !op.addBoolOption('\0', "wasm-verbose",
-                           "Enable WebAssembly verbose logging") ||
+      !op.addStringOption(
+          '\0', "wasm-compiler", "[option]",
+          "Choose to enable a subset of the wasm compilers (valid options are "
+          "none/baseline/ion/cranelift/baseline+ion/baseline+cranelift)") ||
+      !op.addBoolOption('\0', "wasm-verbose",
+                        "Enable WebAssembly verbose logging") ||
       !op.addBoolOption('\0', "test-wasm-await-tier2",
                         "Forcibly activate tiering and block "
                         "instantiation on completion of tier2")
-#ifdef ENABLE_WASM_GC
+#ifdef ENABLE_WASM_REFTYPES
       || !op.addBoolOption('\0', "wasm-gc", "Enable wasm GC features")
 #else
       || !op.addBoolOption('\0', "wasm-gc", "No-op")
@@ -10994,7 +10895,7 @@ int main(int argc, char** argv, char** envp) {
       || !op.addStringOption('\0', "ion-sink", "on/off",
                              "Sink code motion (default: off, on to enable)") ||
       !op.addStringOption('\0', "ion-loop-unrolling", "on/off",
-                          "Loop unrolling (default: off, on to enable)") ||
+                          "(NOP for fuzzers)") ||
       !op.addStringOption(
           '\0', "ion-instruction-reordering", "on/off",
           "Instruction reordering (default: off, on to enable)") ||
@@ -11056,6 +10957,9 @@ int main(int argc, char** argv, char** envp) {
                         "(no-op on platforms other than x86 and x64).") ||
       !op.addBoolOption('\0', "no-avx",
                         "No-op. AVX is currently disabled by default.") ||
+      !op.addBoolOption('\0', "more-compartments",
+                        "Make newGlobal default to creating a new "
+                        "compartment.") ||
       !op.addBoolOption('\0', "fuzzing-safe",
                         "Don't expose functions that aren't safe for "
                         "fuzzers to call") ||

@@ -183,6 +183,17 @@
     "n_values": 8,
     "description": "Application reputation remote verdict (0=SAFE, 1=DANGEROUS, 2=UNCOMMON, 3=POTENTIALLY_UNWANTED, 4=DANGEROUS_HOST, 5=UNKNOWN)"
   },
+  "APPLICATION_REPUTATION_SERVER_VERDICT_2": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["dlee@mozilla.com", "safebrowsing-telemetry@mozilla.org"],
+    "expires_in_version": "73",
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1501974],
+    "kind": "categorical",
+    "keyed": true,
+    "labels": ["Safe", "Dangerous", "Uncommon", "PotentiallyUnwanted", "DangerousHost", "Unknown"],
+    "description": "Application reputation remote verdict, keyed by file extension"
+  },
   "APPLICATION_REPUTATION_REMOTE_LOOKUP_RESPONSE_TIME": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["dlee@mozilla.com", "safebrowsing-telemetry@mozilla.org"],
@@ -910,11 +921,11 @@
   "GEOLOCATION_REQUEST_GRANTED": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["tdsmith@mozilla.com"],
-    "expires_in_version": "65",
+    "expires_in_version": "67",
     "kind": "enumerated",
     "n_values": 20,
     "releaseChannelCollection": "opt-out",
-    "bug_numbers": [1230209, 1494496],
+    "bug_numbers": [1230209, 1494496, 1519170],
     "description": "Geolocation requests either granted or denied (0=denied/other, 1=denied/http, 2=denied/https, ..., 10=granted/other, 11=granted/http, 12=granted/https)"
   },
   "GEOLOCATION_WATCHPOSITION_SECURE_ORIGIN" : {
@@ -1007,6 +1018,15 @@
     "high": 10000,
     "n_buckets": 10,
     "description": "Time elapsed between the moment a function is lazy-parsed (end of parsing of the ScriptSource) and the moment it is recompiled as non-lazy (start of compilation), in milliseconds, for web code."
+  },
+  "JS_DEPRECATED_STRING_GENERICS": {
+    "record_in_processes": ["content"],
+    "alert_emails": ["jdemooij@mozilla.com"],
+    "expires_in_version": "72",
+    "bug_numbers": [1339777],
+    "kind": "enumerated",
+    "n_values": 25,
+    "description": "A string generic function was called, like String.join etc. See STRING_GENERICS_* defines in SelfHostingDefines.h for the meaning of values."
   },
   "XUL_CACHE_DISABLED": {
     "record_in_processes": ["main", "content"],
@@ -1565,11 +1585,14 @@
     "n_buckets": 50,
     "description": "HTTP: requests per connection"
   },
-  "HTTP_KBREAD_PER_CONN": {
+  "HTTP_KBREAD_PER_CONN2": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
+    "releaseChannelCollection": "opt-out",
+    "alert_emails": ["necko@mozilla.com", "ddamjanovic@mozilla.com"],
+    "bug_numbers": [1520260],
     "kind": "exponential",
-    "high": 3000,
+    "high": 100000,
     "n_buckets": 50,
     "description": "HTTP: KB read per connection"
   },
@@ -2382,15 +2405,6 @@
     "n_values": 16,
     "description": "SSL Handshake Key Exchange Algorithm for resumed handshake (null=0, rsa=1, dh=2, fortezza=3, ecdh=4)"
   },
-  "SSL_OBSERVED_END_ENTITY_CERTIFICATE_LIFETIME": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "55",
-    "alert_emails": ["seceng-telemetry@mozilla.com"],
-    "kind": "enumerated",
-    "n_values": 125,
-    "releaseChannelCollection": "opt-out",
-    "description": "The lifetime of accepted HTTPS server certificates, in weeks, up to 2 years. Bucket 105 is all end-entity HTTPS server certificates with a lifetime > 2 years."
-  },
   "WEBSOCKETS_HANDSHAKE_TYPE": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
@@ -2511,12 +2525,14 @@
     "kind": "boolean",
     "description": "SPDY: Coalesce Succeeded"
   },
-  "SPDY_KBREAD_PER_CONN": {
+  "SPDY_KBREAD_PER_CONN2": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["necko@mozilla.com"],
+    "alert_emails": ["necko@mozilla.com", "ddamjanovic@mozilla.com"],
     "expires_in_version": "never",
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1520260],
     "kind": "exponential",
-    "high": 3000,
+    "high": 100000,
     "n_buckets": 50,
     "description": "SPDY: KB read per connection"
   },
@@ -8097,6 +8113,15 @@
     "n_values": 100,
     "description": "Security-related UI events (addons, form submission, TLS certs, Safe Browsing, updates and geolocation). See /security/manager/ssl/nsISecurityUITelemetry.idl for the specific values."
   },
+  "STORAGE_ACCESS_API_UI": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["seceng-telemetry@mozilla.com", "ehsan+telemetry@mozilla.com"],
+    "bug_numbers": [1513309],
+    "expires_in_version": "73",
+    "kind": "categorical",
+    "labels": ["Request", "AllowAutomatically", "Deny", "Allow", "AllowOnAnySite"],
+    "description": "Storage Access API UI events."
+  },
   "IPC_TRANSACTION_CANCEL": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["billm@mozilla.com"],
@@ -10468,7 +10493,7 @@
     "bug_numbers": [1205845, 1389995],
     "n_values": 9,
     "releaseChannelCollection": "opt-out",
-    "description": "Records DevTools toolbox host each time the toolbox is opened and when the host is changed (0:Bottom, 1:Side, 2:Window, 3:Custom, 9:Unknown)."
+    "description": "Records DevTools toolbox host each time the toolbox is opened and when the host is changed (0:Bottom, 1:RIGHT, 2:WINDOW, 3:CUSTOM, 4:LEFT, 5:PAGE, 9:Unknown)."
   },
   "DEVTOOLS_NUMBER_OF_CSS_GRIDS_IN_A_PAGE": {
     "record_in_processes": ["main", "content"],
@@ -10481,47 +10506,15 @@
     "description": "On page load, record the number of CSS Grid elements present on a page when the DevTools is open",
     "releaseChannelCollection": "opt-out"
   },
-  "DEVTOOLS_FONTEDITOR_N_FONT_AXES": {
-    "record_in_processes": ["main"],
-    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "mbalfanz@mozilla.com"],
-    "expires_in_version": "66",
-    "bug_numbers": [1465424],
-    "description": "Indicates the number of variation axes of the variable fonts that are displayed in the font editor UI",
-    "releaseChannelCollection": "opt-out",
-    "kind": "exponential",
-    "high": 100,
-    "n_buckets": 20
-  },
-  "DEVTOOLS_FONTEDITOR_N_FONTS_RENDERED": {
-    "record_in_processes": ["main"],
-    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "mbalfanz@mozilla.com"],
-    "expires_in_version": "66",
-    "bug_numbers": [1465424],
-    "description": "Indicates how many fonts the font editor displayed as being needed to render the selected element's content",
-    "releaseChannelCollection": "opt-out",
-    "kind": "exponential",
-    "high": 50,
-    "n_buckets": 10
-  },
   "DEVTOOLS_FONTEDITOR_FONT_TYPE_DISPLAYED": {
     "record_in_processes": ["main"],
     "alert_emails": ["dev-developer-tools@lists.mozilla.org", "mbalfanz@mozilla.com"],
-    "expires_in_version": "66",
-    "bug_numbers": [1465424],
+    "expires_in_version": "never",
+    "bug_numbers": [1523656],
     "description": "Indicates if the font editor displayed its UI for a non-variable font or a variable font",
     "releaseChannelCollection": "opt-out",
     "kind": "categorical",
     "labels": ["variable", "nonvariable"]
-  },
-  "DEVTOOLS_FLEXINSPECTOR_ELEMENT_TYPE_DISPLAYED": {
-    "record_in_processes": ["main"],
-    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "mbalfanz@mozilla.com"],
-    "expires_in_version": "68",
-    "bug_numbers": [1503197],
-    "description": "Records the type of flex element displayed in the flex inspector (container, item, or both)",
-    "releaseChannelCollection": "opt-out",
-    "kind": "categorical",
-    "labels": ["container", "item", "both"]
   },
   "BROWSER_IS_USER_DEFAULT": {
     "record_in_processes": ["main"],
@@ -10830,21 +10823,16 @@
     "n_buckets": 50,
     "description": "Time spent to read the missing part of the metadata from the cache entry file."
   },
-  "NETWORK_CACHE_METADATA_FIRST_READ_SIZE": {
-    "record_in_processes": ["main", "content"],
+  "NETWORK_CACHE_METADATA_SIZE_2": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
+    "bug_numbers": [1133739, 1495336],
     "expires_in_version": "never",
     "kind": "linear",
-    "high": 5119,
-    "n_buckets": 256,
-    "description": "Guessed size of the metadata that we read from the cache file as the first part."
-  },
-  "NETWORK_CACHE_METADATA_SIZE": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "linear",
-    "high": 5119,
-    "n_buckets": 256,
-    "description": "Actual size of the metadata parsed from the disk."
+    "low": 1024,
+    "high": 66560,
+    "n_buckets": 66,
+    "description": "Size of the metadata in bytes parsed from the disk."
   },
   "NETWORK_CACHE_HASH_STATS": {
     "record_in_processes": ["main", "content"],
@@ -11628,8 +11616,12 @@
       "gmplugin-hang",
       "gpu-crash",
       "gpu-hang",
+      "vr-crash",
+      "vr-hang",
       "rdd-crash",
-      "rdd-hang"
+      "rdd-hang",
+      "socket-crash",
+      "socket-hang"
     ],
     "releaseChannelCollection": "opt-out",
     "description": "An attempt to submit a crash. Keyed on the CrashManager Crash.type."
@@ -13255,7 +13247,7 @@
     "expires_in_version": "73",
     "kind": "categorical",
     "description": "The reason that CONTENT_FRAME_TIME recorded a slow (>200) result, if any.",
-    "labels": ["OnTime", "NoVsync", "MissedComposite", "SlowComposite", "MissedCompositeMid", "MissedCompositeLong", "MissedCompositeLow"]
+    "labels": ["OnTime", "NoVsync", "MissedComposite", "SlowComposite", "MissedCompositeMid", "MissedCompositeLong", "MissedCompositeLow", "NoVsyncNoId"]
   },
   "CONTENT_LARGE_PAINT_PHASE_WEIGHT": {
     "record_in_processes": ["main", "content"],
@@ -14200,22 +14192,22 @@
   "GFX_OMTP_PAINT_TIME": {
     "record_in_processes": ["content"],
     "alert_emails": ["gfx-telemetry-alerts@mozilla.com", "rhunt@mozilla.com"],
-    "expires_in_version": "70",
+    "expires_in_version": "never",
     "kind": "exponential",
     "high": 10000,
     "n_buckets": 50,
     "description": "Amount of time in tenths of a millisecond from the beginning of the first async paint until all async paints are finished.",
-    "bug_numbers": [1483245]
+    "bug_numbers": [1483245, 1518669]
   },
   "GFX_OMTP_PAINT_WAIT_TIME": {
     "record_in_processes": ["content"],
     "alert_emails": ["gfx-telemetry-alerts@mozilla.com", "rhunt@mozilla.com"],
-    "expires_in_version": "66",
+    "expires_in_version": "never",
     "kind": "exponential",
     "high": 200,
     "n_buckets": 50,
     "description": "Amount of time in milliseconds the main thread spends waiting for the paint thread to complete, if the time was greater than 200us.",
-    "bug_numbers": [1386968]
+    "bug_numbers": [1386968, 1518669]
   },
   "GFX_OMTP_PAINT_TASK_COUNT": {
     "record_in_processes": ["content"],
@@ -14431,6 +14423,16 @@
     "n_buckets": 50,
     "description": "WebRender render time in milliseconds"
   },
+  "TOUCHBAR_BUTTON_PRESSES": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["mdeboer@mozilla.com"],
+    "bug_numbers": [1313429],
+    "expires_in_version": "71",
+    "kind": "categorical",
+    "labels": ["Back", "Forward", "Reload", "Home",  "Fullscreen", "Find", "NewTab", "ReaderView", "AddBookmark", "OpenLocation", "Focus", "Share", "Sidebar"],
+    "releaseChannelCollection": "opt-out",
+    "description": "What buttons are pressed most often on the Mac Touch Bar?"
+  },
   "AUDIO_TRACK_SILENCE_PROPORTION": {
     "record_in_processes": ["main", "content"],
     "alert_emails": [
@@ -14477,10 +14479,23 @@
     "description": "The number of times an AudioContext is allowed to start after being blocked, or the number of AudioContexts attempting to start which were never blocked or never allowed.",
     "releaseChannelCollection": "opt-out"
   },
+  "AUTOPLAY_SITES_SETTING_CHANGE": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": [
+      "alwu@mozilla.com",
+      "cpearce@mozilla.com"
+    ],
+    "expires_in_version": "71",
+    "kind": "categorical",
+    "labels": ["AddAllow", "RemoveAllow", "AddBlock", "RemoveBlock"],
+    "bug_numbers": [1520361],
+    "description": "The number of times the user adds a site to the allow list, removes a site from the allow list, adds a site to the block list and removes a site from the block list.",
+    "releaseChannelCollection": "opt-out"
+  },
   "QM_REPOSITORIES_INITIALIZATION_TIME": {
     "record_in_processes": ["main"],
-    "expires_in_version": "68",
-    "bug_numbers": [1481716],
+    "expires_in_version": "72",
+    "bug_numbers": [1481716, 1523682],
     "kind": "exponential",
     "high": 30000,
     "n_buckets": 30,
@@ -14539,5 +14554,112 @@
     "n_buckets": 50,
     "bug_numbers": [1499418],
     "description": "GeckoView: Time taken to initialize all GeckoView modules in ms."
+  },
+  "SCROLL_ANCHOR_ADJUSTMENT_LENGTH": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": [
+      "rhunt@mozilla.com"
+    ],
+    "expires_in_version": "70",
+    "kind": "exponential",
+    "low": 1,
+    "high": 10000,
+    "n_buckets": 50,
+    "bug_numbers": [1518624],
+    "description": "The absolute length in CSS pixels of all scroll adjustments performed by scroll anchoring in a top-level document."
+  },
+  "SCROLL_ANCHOR_ADJUSTMENT_COUNT": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": [
+      "rhunt@mozilla.com"
+    ],
+    "expires_in_version": "70",
+    "kind": "exponential",
+    "low": 1,
+    "high": 500,
+    "n_buckets": 50,
+    "bug_numbers": [1518624],
+    "description": "The amount of scroll adjustments performed by scroll anchoring in a top-level document."
+  },
+  "QM_INIT_TELEMETRY_ERROR": {
+      "record_in_processes": ["main"],
+      "alert_emails": ["ttung@mozilla.com"],
+      "expires_in_version": "70",
+      "bug_numbers": [1436188],
+      "kind": "categorical",
+      "n_values": 75,
+      "labels": [
+          "Rep_NewLocalFile",
+          "Rep_EnsureDirectory",
+          "Rep_GetDirEntries",
+          "Rep_IsDirectory",
+          "Rep_GetLeafName",
+          "Rep_UnexpectedFile",
+          "Rep_GetNextFile",
+          "Rep_RestoreDirMeta",
+          "Rep_GetDirMeta",
+          "Ori_GetDirEntries",
+          "Ori_IsDirectory",
+          "Ori_GetLeafName",
+          "Ori_Remove",
+          "Ori_UnexpectedFile",
+          "Ori_UnexpectedClient",
+          "Ori_GetNextFile",
+          "Asm_GetDirForOrigin",
+          "Asm_Append",
+          "Asm_GetDirEntries",
+          "Asm_GetFileSize",
+          "Asm_GetNextFile",
+          "Cache_GetDirForOri",
+          "Cache_Append",
+          "Cache_GetPaddingSize",
+          "Cache_GetDirEntries",
+          "Cache_GetLeafName",
+          "Cache_IsDirectory",
+          "Cache_GetBodyUsage",
+          "Cache_GetFileSize",
+          "LS_GetDirForOrigin",
+          "LS_Append",
+          "LS_Exists",
+          "LS_GetPath",
+          "LS_GetUsageFile",
+          "LS_IsDirectory",
+          "LS_UnexpectedDir",
+          "LS_GetUsageForJFile",
+          "LS_IsDirectory2",
+          "LS_UnexpectedDir2",
+          "LS_Remove",
+          "LS_Remove2",
+          "LS_Clone",
+          "LS_Append2",
+          "LS_IsDirectory3",
+          "LS_UnexpectedDir3",
+          "LS_CreateConnection",
+          "LS_GetUsage",
+          "LS_UpdateUsageFile",
+          "LS_Remove3",
+          "LS_Remove4",
+          "LS_GetDirEntries",
+          "LS_GetNextFile",
+          "LS_GetLeafName",
+          "LS_IsDirectory4",
+          "IDB_GetDirectory",
+          "IDB_GetDBFilenames",
+          "IDB_GetBaseFilename",
+          "IDB_GetEntry",
+          "IDB_Clone",
+          "IDB_Append",
+          "IDB_Clone2",
+          "IDB_Append2",
+          "IDB_Clone3",
+          "IDB_Append3",
+          "IDB_InitDirectory",
+          "IDB_GetFileSize",
+          "IDB_GetWalFileSize",
+          "IDB_GetUsage",
+          "IDB_RemoveDBFiles"
+      ],
+      "keyed": true,
+      "description": "Getting the number of errors in QuotaManager initialization."
   }
 }

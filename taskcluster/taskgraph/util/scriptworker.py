@@ -48,6 +48,7 @@ SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
     'all-nightly-branches', set([
         'mozilla-central',
         'comm-central',
+        'oak',
     ])
 ], [
     'all-release-branches', set([
@@ -84,6 +85,7 @@ BEETMOVER_SCOPE_ALIAS_TO_PROJECT = [[
     'all-nightly-branches', set([
         'mozilla-central',
         'comm-central',
+        'oak',
     ])
 ], [
     'all-release-branches', set([
@@ -107,6 +109,7 @@ BEETMOVER_BUCKET_SCOPES = {
 """
 BEETMOVER_ACTION_SCOPES = {
     'nightly': 'beetmover:action:push-to-nightly',
+    'nightly-oak': 'beetmover:action:push-to-nightly',
     'default': 'beetmover:action:push-to-candidates',
 }
 
@@ -121,7 +124,8 @@ This is a list of list-pairs, for ordering.
 BALROG_SCOPE_ALIAS_TO_PROJECT = [[
     'nightly', set([
         'mozilla-central',
-        'comm-central'
+        'comm-central',
+        'oak',
     ])
 ], [
     'beta', set([

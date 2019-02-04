@@ -878,6 +878,8 @@ you can use these alternative items. Otherwise, their values should be empty.  -
 <!ENTITY identity.permissionsEmpty "You have not granted this site any special permissions.">
 <!ENTITY identity.permissionsReloadHint "You may need to reload the page for changes to apply.">
 <!ENTITY identity.permissionsPreferences.tooltip "Open Permissions Preferences">
+<!ENTITY identity.contentBlockingPreferences.tooltip "Open Content Blocking Preferences">
+
 
 <!-- Name for the tabs toolbar as spoken by screen readers.
      The word "toolbar" is appended automatically and should not be contained below! -->
@@ -1123,3 +1125,10 @@ you can use these alternative items. Otherwise, their values should be empty.  -
      The first <image> tag is replaced with the icon for the add-ons menu.
      The second <image> tag is replaced with the icon for the toolbar menu. -->
 <!ENTITY addonPostInstallMessage.label "Manage your add-ons by clicking <image class='addon-addon-icon'/> in the <image class='addon-toolbar-icon'/> menu.">
+
+<!ENTITY addonPrivateBrowsing.header.label "Extensions in Private Windows">
+<!ENTITY addonPrivateBrowsing.body.label "Extensions are not allowed to run by default in Private Windows. They won’t work while private browsing, and they won’t have access to your online activities. You can allow each extension to run in Private Windows by managing your settings.">
+<!ENTITY addonPrivateBrowsing.okButton.label "Okay, Got It">
+<!ENTITY addonPrivateBrowsing.okButton.accesskey "O">
+<!ENTITY addonPrivateBrowsing.manageButton.label "Manage Extensions">
+<!ENTITY addonPrivateBrowsing.manageButton.accesskey "M">
