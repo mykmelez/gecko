@@ -1042,6 +1042,7 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
       mDisablePartialUpdates(false),
       mPartialBuildFailed(false),
       mIsInActiveDocShell(false),
+      mBuildAsyncZoomContainer(false),
       mHitTestArea(),
       mHitTestInfo(CompositorHitTestInvisibleToHit) {
   MOZ_COUNT_CTOR(nsDisplayListBuilder);
@@ -2470,8 +2471,11 @@ FrameLayerBuilder* nsDisplayList::BuildLayers(nsDisplayListBuilder* aBuilder,
       rootLayer->SetScrollMetadata(nsTArray<ScrollMetadata>());
     }
 
-    ContainerLayerParameters containerParameters(presShell->GetResolution(),
-                                                 presShell->GetResolution());
+    float rootLayerResolution = gfxPrefs::LayoutUseContainersForRootFrames()
+                                    ? presShell->GetResolution()
+                                    : 1.0f;
+    ContainerLayerParameters containerParameters(rootLayerResolution,
+                                                 rootLayerResolution);
 
     {
       PaintTelemetry::AutoRecord record(PaintTelemetry::Metric::Layerization);
@@ -2491,10 +2495,12 @@ FrameLayerBuilder* nsDisplayList::BuildLayers(nsDisplayListBuilder* aBuilder,
     if (!root) {
       return nullptr;
     }
-    // Root is being scaled up by the X/Y resolution. Scale it back down.
-    root->SetPostScale(1.0f / containerParameters.mXScale,
-                       1.0f / containerParameters.mYScale);
-    root->SetScaleToResolution(containerParameters.mXScale);
+    if (gfxPrefs::LayoutUseContainersForRootFrames()) {
+      // Root is being scaled up by the X/Y resolution. Scale it back down.
+      root->SetPostScale(1.0f / containerParameters.mXScale,
+                         1.0f / containerParameters.mYScale);
+      root->SetScaleToResolution(containerParameters.mXScale);
+    }
 
     auto callback = [root](ScrollableLayerGuid::ViewID aScrollId) -> bool {
       return nsLayoutUtils::ContainsMetricsWithId(root, aScrollId);
@@ -6572,15 +6578,22 @@ already_AddRefed<Layer> nsDisplayResolution::BuildLayer(
     nsDisplayListBuilder* aBuilder, LayerManager* aManager,
     const ContainerLayerParameters& aContainerParameters) {
   nsIPresShell* presShell = mFrame->PresShell();
+  float rootLayerResolution = gfxPrefs::LayoutUseContainersForRootFrames()
+                                  ? presShell->GetResolution()
+                                  : 1.0f;
   ContainerLayerParameters containerParameters(
-      presShell->GetResolution(), presShell->GetResolution(), nsIntPoint(),
+      rootLayerResolution, rootLayerResolution, nsIntPoint(),
       aContainerParameters);
 
   RefPtr<Layer> layer =
       nsDisplaySubDocument::BuildLayer(aBuilder, aManager, containerParameters);
-  layer->SetPostScale(1.0f / presShell->GetResolution(),
-                      1.0f / presShell->GetResolution());
-  layer->AsContainerLayer()->SetScaleToResolution(presShell->GetResolution());
+
+  if (gfxPrefs::LayoutUseContainersForRootFrames()) {
+    layer->SetPostScale(1.0f / presShell->GetResolution(),
+                        1.0f / presShell->GetResolution());
+    layer->AsContainerLayer()->SetScaleToResolution(presShell->GetResolution());
+  }
+
   return layer.forget();
 }
 
@@ -7153,6 +7166,41 @@ bool nsDisplayZoom::ComputeVisibility(nsDisplayListBuilder* aBuilder,
   aBuilder->SubtractFromVisibleRegion(aVisibleRegion, removed);
 
   return retval;
+}
+
+nsDisplayAsyncZoom::nsDisplayAsyncZoom(
+    nsDisplayListBuilder* aBuilder, nsIFrame* aFrame, nsDisplayList* aList,
+    const ActiveScrolledRoot* aActiveScrolledRoot,
+    mozilla::layers::FrameMetrics::ViewID aViewID)
+    : nsDisplayOwnLayer(aBuilder, aFrame, aList, aActiveScrolledRoot),
+      mViewID(aViewID) {
+  MOZ_COUNT_CTOR(nsDisplayAsyncZoom);
+}
+
+#ifdef NS_BUILD_REFCNT_LOGGING
+nsDisplayAsyncZoom::~nsDisplayAsyncZoom() {
+  MOZ_COUNT_DTOR(nsDisplayAsyncZoom);
+}
+#endif
+
+already_AddRefed<Layer> nsDisplayAsyncZoom::BuildLayer(
+    nsDisplayListBuilder* aBuilder, LayerManager* aManager,
+    const ContainerLayerParameters& aContainerParameters) {
+  nsIPresShell* presShell = mFrame->PresShell();
+  ContainerLayerParameters containerParameters(
+      presShell->GetResolution(), presShell->GetResolution(), nsIntPoint(),
+      aContainerParameters);
+
+  RefPtr<Layer> layer =
+      nsDisplayOwnLayer::BuildLayer(aBuilder, aManager, containerParameters);
+
+  layer->SetIsAsyncZoomContainer(Some(mViewID));
+
+  layer->SetPostScale(1.0f / presShell->GetResolution(),
+                      1.0f / presShell->GetResolution());
+  layer->AsContainerLayer()->SetScaleToResolution(presShell->GetResolution());
+
+  return layer.forget();
 }
 
 ///////////////////////////////////////////////////
@@ -9568,6 +9616,49 @@ bool nsDisplayForeignObject::CreateWebRenderCommands(
   } else {
     return false;
   }
+}
+
+void nsDisplayListCollection::SerializeWithCorrectZOrder(
+    nsDisplayList* aOutResultList, nsIContent* aContent) {
+  // Sort PositionedDescendants() in CSS 'z-order' order.  The list is already
+  // in content document order and SortByZOrder is a stable sort which
+  // guarantees that boxes produced by the same element are placed together
+  // in the sort. Consider a position:relative inline element that breaks
+  // across lines and has absolutely positioned children; all the abs-pos
+  // children should be z-ordered after all the boxes for the position:relative
+  // element itself.
+  PositionedDescendants()->SortByZOrder();
+
+  // Now follow the rules of http://www.w3.org/TR/CSS21/zindex.html
+  // 1,2: backgrounds and borders
+  aOutResultList->AppendToTop(BorderBackground());
+  // 3: negative z-index children.
+  for (;;) {
+    nsDisplayItem* item = PositionedDescendants()->GetBottom();
+    if (item && item->ZIndex() < 0) {
+      PositionedDescendants()->RemoveBottom();
+      aOutResultList->AppendToTop(item);
+      continue;
+    }
+    break;
+  }
+  // 4: block backgrounds
+  aOutResultList->AppendToTop(BlockBorderBackgrounds());
+  // 5: floats
+  aOutResultList->AppendToTop(Floats());
+  // 7: general content
+  aOutResultList->AppendToTop(Content());
+  // 7.5: outlines, in content tree order. We need to sort by content order
+  // because an element with outline that breaks and has children with outline
+  // might have placed child outline items between its own outline items.
+  // The element's outline items need to all come before any child outline
+  // items.
+  if (aContent) {
+    Outlines()->SortByContentOrder(aContent);
+  }
+  aOutResultList->AppendToTop(Outlines());
+  // 8, 9: non-negative z-index children
+  aOutResultList->AppendToTop(PositionedDescendants());
 }
 
 namespace mozilla {

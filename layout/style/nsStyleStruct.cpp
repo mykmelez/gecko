@@ -289,12 +289,12 @@ nsStyleBorder::nsStyleBorder(const nsStyleBorder& aSrc)
 
 nsStyleBorder::~nsStyleBorder() { MOZ_COUNT_DTOR(nsStyleBorder); }
 
-void nsStyleBorder::FinishStyle(nsPresContext* aPresContext,
+void nsStyleBorder::FinishStyle(Document& aDocument,
                                 const nsStyleBorder* aOldStyle) {
   MOZ_ASSERT(NS_IsMainThread());
 
   mBorderImageSource.ResolveImage(
-      aPresContext, aOldStyle ? &aOldStyle->mBorderImageSource : nullptr);
+      aDocument, aOldStyle ? &aOldStyle->mBorderImageSource : nullptr);
 }
 
 nsMargin nsStyleBorder::GetImageOutset() const {
@@ -459,7 +459,7 @@ nsStyleList::nsStyleList(const Document& aDocument)
   MOZ_COUNT_CTOR(nsStyleList);
   MOZ_ASSERT(NS_IsMainThread());
 
-  mCounterStyle = CounterStyleManager::GetDiscStyle();
+  mCounterStyle = nsGkAtoms::disc;
   mQuotes = Servo_Quotes_GetInitialValue().Consume();
 }
 
@@ -474,15 +474,14 @@ nsStyleList::nsStyleList(const nsStyleList& aSource)
   MOZ_COUNT_CTOR(nsStyleList);
 }
 
-void nsStyleList::FinishStyle(nsPresContext* aPresContext,
+void nsStyleList::FinishStyle(Document& aDocument,
                               const nsStyleList* aOldStyle) {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (mListStyleImage && !mListStyleImage->IsResolved()) {
     mListStyleImage->Resolve(
-        aPresContext, aOldStyle ? aOldStyle->mListStyleImage.get() : nullptr);
+        aDocument, aOldStyle ? aOldStyle->mListStyleImage.get() : nullptr);
   }
-  mCounterStyle.Resolve(aPresContext->CounterStyleManager());
 }
 
 nsChangeHint nsStyleList::CalcDifference(
@@ -889,7 +888,7 @@ void StyleShapeSource::SetPath(UniquePtr<StyleSVGPath> aPath) {
   mType = StyleShapeSourceType::Path;
 }
 
-void StyleShapeSource::FinishStyle(nsPresContext* aPresContext,
+void StyleShapeSource::FinishStyle(Document& aDocument,
                                    const StyleShapeSource* aOldShapeSource) {
   if (GetType() != StyleShapeSourceType::Image) {
     return;
@@ -899,7 +898,7 @@ void StyleShapeSource::FinishStyle(nsPresContext* aPresContext,
                                                 StyleShapeSourceType::Image)
                             ? &aOldShapeSource->ShapeImage()
                             : nullptr;
-  mShapeImage->ResolveImage(aPresContext, oldShapeImage);
+  mShapeImage->ResolveImage(aDocument, oldShapeImage);
 }
 
 void StyleShapeSource::SetReferenceBox(StyleGeometryBox aReferenceBox) {
@@ -1084,7 +1083,7 @@ nsStyleSVGReset::nsStyleSVGReset(const nsStyleSVGReset& aSource)
   MOZ_COUNT_CTOR(nsStyleSVGReset);
 }
 
-void nsStyleSVGReset::FinishStyle(nsPresContext* aPresContext,
+void nsStyleSVGReset::FinishStyle(Document& aDocument,
                                   const nsStyleSVGReset* aOldStyle) {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1114,7 +1113,7 @@ void nsStyleSVGReset::FinishStyle(nsPresContext* aPresContext,
               ? &aOldStyle->mMask.mLayers[i].mImage
               : nullptr;
 
-      image.ResolveImage(aPresContext, oldImage);
+      image.ResolveImage(aDocument, oldImage);
     }
   }
 }
@@ -1852,16 +1851,14 @@ nsStyleImageRequest::~nsStyleImageRequest() {
   MOZ_ASSERT(!mImageTracker);
 }
 
-bool nsStyleImageRequest::Resolve(nsPresContext* aPresContext,
+bool nsStyleImageRequest::Resolve(Document& aDocument,
                                   const nsStyleImageRequest* aOldImageRequest) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!IsResolved(), "already resolved");
-  MOZ_ASSERT(aPresContext);
 
   mResolved = true;
 
-  Document* doc = aPresContext->Document();
-  nsIURI* docURI = doc->GetDocumentURI();
+  nsIURI* docURI = aDocument.GetDocumentURI();
   if (GetImageValue()->HasRef()) {
     bool isEqualExceptRef = false;
     RefPtr<nsIURI> imageURI = GetImageURI();
@@ -1882,21 +1879,22 @@ bool nsStyleImageRequest::Resolve(nsPresContext* aPresContext,
   // 1440305, but that seems too risky, and a lot of work to do before 60.
   //
   // Once that's fixed, the "old style" argument to FinishStyle can go away.
-  if (aPresContext->IsChrome() && aOldImageRequest &&
+  if (nsContentUtils::IsChromeDoc(&aDocument) && aOldImageRequest &&
       aOldImageRequest->IsResolved() && DefinitelyEquals(*aOldImageRequest)) {
-    MOZ_ASSERT(aOldImageRequest->mDocGroup == doc->GetDocGroup());
+    MOZ_ASSERT(aOldImageRequest->mDocGroup == aDocument.GetDocGroup());
     MOZ_ASSERT(mModeFlags == aOldImageRequest->mModeFlags);
 
     mDocGroup = aOldImageRequest->mDocGroup;
     mImageValue = aOldImageRequest->mImageValue;
     mRequestProxy = aOldImageRequest->mRequestProxy;
   } else {
-    mDocGroup = doc->GetDocGroup();
-    imgRequestProxy* request = mImageValue->LoadImage(doc);
-    if (aPresContext->IsDynamic()) {
+    mDocGroup = aDocument.GetDocGroup();
+    imgRequestProxy* request = mImageValue->LoadImage(&aDocument);
+    bool isPrint = !!aDocument.GetOriginalDocument();
+    if (!isPrint) {
       mRequestProxy = request;
     } else if (request) {
-      request->GetStaticRequest(doc, getter_AddRefs(mRequestProxy));
+      request->GetStaticRequest(&aDocument, getter_AddRefs(mRequestProxy));
     }
   }
 
@@ -1906,7 +1904,7 @@ bool nsStyleImageRequest::Resolve(nsPresContext* aPresContext,
   }
 
   if (mModeFlags & Mode::Track) {
-    mImageTracker = doc->ImageTracker();
+    mImageTracker = aDocument.ImageTracker();
   }
 
   MaybeTrackAndLock();
@@ -2859,11 +2857,10 @@ nsStyleBackground::nsStyleBackground(const nsStyleBackground& aSource)
 
 nsStyleBackground::~nsStyleBackground() { MOZ_COUNT_DTOR(nsStyleBackground); }
 
-void nsStyleBackground::FinishStyle(nsPresContext* aPresContext,
+void nsStyleBackground::FinishStyle(Document& aDocument,
                                     const nsStyleBackground* aOldStyle) {
   MOZ_ASSERT(NS_IsMainThread());
-
-  mImage.ResolveImages(aPresContext, aOldStyle ? &aOldStyle->mImage : nullptr);
+  mImage.ResolveImages(aDocument, aOldStyle ? &aOldStyle->mImage : nullptr);
 }
 
 nsChangeHint nsStyleBackground::CalcDifference(
@@ -3135,11 +3132,11 @@ nsStyleDisplay::~nsStyleDisplay() {
   MOZ_COUNT_DTOR(nsStyleDisplay);
 }
 
-void nsStyleDisplay::FinishStyle(nsPresContext* aPresContext,
+void nsStyleDisplay::FinishStyle(Document& aDocument,
                                  const nsStyleDisplay* aOldStyle) {
   MOZ_ASSERT(NS_IsMainThread());
 
-  mShapeOutside.FinishStyle(aPresContext,
+  mShapeOutside.FinishStyle(aDocument,
                             aOldStyle ? &aOldStyle->mShapeOutside : nullptr);
   GenerateCombinedIndividualTransform();
 }
@@ -3635,26 +3632,17 @@ bool nsStyleContentData::operator==(const nsStyleContentData& aOther) const {
   return true;
 }
 
-void nsStyleContentData::Resolve(nsPresContext* aPresContext,
+void nsStyleContentData::Resolve(Document& aDocument,
                                  const nsStyleContentData* aOldStyle) {
-  switch (mType) {
-    case StyleContentType::Image:
-      if (!mContent.mImage->IsResolved()) {
-        const nsStyleImageRequest* oldRequest =
-            (aOldStyle && aOldStyle->mType == StyleContentType::Image)
-                ? aOldStyle->mContent.mImage
-                : nullptr;
-        mContent.mImage->Resolve(aPresContext, oldRequest);
-      }
-      break;
-    case StyleContentType::Counter:
-    case StyleContentType::Counters: {
-      mContent.mCounters->mCounterStyle.Resolve(
-          aPresContext->CounterStyleManager());
-      break;
-    }
-    default:
-      break;
+  if (mType != StyleContentType::Image) {
+    return;
+  }
+  if (!mContent.mImage->IsResolved()) {
+    const nsStyleImageRequest* oldRequest =
+        (aOldStyle && aOldStyle->mType == StyleContentType::Image)
+            ? aOldStyle->mContent.mImage
+            : nullptr;
+    mContent.mImage->Resolve(aDocument, oldRequest);
   }
 }
 
@@ -3668,14 +3656,14 @@ nsStyleContent::nsStyleContent(const Document& aDocument) {
 
 nsStyleContent::~nsStyleContent() { MOZ_COUNT_DTOR(nsStyleContent); }
 
-void nsStyleContent::FinishStyle(nsPresContext* aPresContext,
+void nsStyleContent::FinishStyle(Document& aDocument,
                                  const nsStyleContent* aOldStyle) {
   for (size_t i = 0; i < mContents.Length(); ++i) {
     const nsStyleContentData* oldData =
         (aOldStyle && aOldStyle->mContents.Length() > i)
             ? &aOldStyle->mContents[i]
             : nullptr;
-    mContents[i].Resolve(aPresContext, oldData);
+    mContents[i].Resolve(aDocument, oldData);
   }
 }
 
@@ -3688,25 +3676,9 @@ nsStyleContent::nsStyleContent(const nsStyleContent& aSource)
 
 nsChangeHint nsStyleContent::CalcDifference(
     const nsStyleContent& aNewData) const {
-  // In ElementRestyler::Restyle we assume that if there's no existing
-  // ::before or ::after and we don't have to restyle children of the
-  // node then we can't end up with a ::before or ::after due to the
-  // restyle of the node itself.  That's not quite true, but the only
-  // exception to the above is when the 'content' property of the node
-  // changes and the pseudo-element inherits the changed value.  Since
-  // the code here triggers a frame change on the node in that case,
-  // the optimization in ElementRestyler::Restyle is ok.  But if we ever
-  // change this code to not reconstruct frames on changes to the
-  // 'content' property, then we will need to revisit the optimization
-  // in ElementRestyler::Restyle.
-
   // Unfortunately we need to reframe even if the content lengths are the same;
   // a simple reflow will not pick up different text or different image URLs,
   // since we set all that up in the CSSFrameConstructor
-  //
-  // Also note that we also rely on this to return ReconstructFrame when
-  // content changes to ensure that nsCounterUseNode wouldn't reference
-  // to stale counter stylex.
   if (mContents != aNewData.mContents || mIncrements != aNewData.mIncrements ||
       mResets != aNewData.mResets) {
     return nsChangeHint_ReconstructFrame;
@@ -4018,8 +3990,7 @@ nsStyleUI::nsStyleUI(const nsStyleUI& aSource)
 
 nsStyleUI::~nsStyleUI() { MOZ_COUNT_DTOR(nsStyleUI); }
 
-void nsStyleUI::FinishStyle(nsPresContext* aPresContext,
-                            const nsStyleUI* aOldStyle) {
+void nsStyleUI::FinishStyle(Document& aDocument, const nsStyleUI* aOldStyle) {
   MOZ_ASSERT(NS_IsMainThread());
 
   for (size_t i = 0; i < mCursorImages.Length(); ++i) {
@@ -4030,7 +4001,7 @@ void nsStyleUI::FinishStyle(nsPresContext* aPresContext,
           (aOldStyle && aOldStyle->mCursorImages.Length() > i)
               ? &aOldStyle->mCursorImages[i]
               : nullptr;
-      cursor.mImage->Resolve(aPresContext,
+      cursor.mImage->Resolve(aDocument,
                              oldCursor ? oldCursor->mImage.get() : nullptr);
     }
   }

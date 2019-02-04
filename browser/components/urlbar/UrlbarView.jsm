@@ -92,14 +92,16 @@ class UrlbarView {
 
     let row;
     if (reverse) {
-      row = this._selected.previousElementSibling ||
+      row = (this._selected && this._selected.previousElementSibling) ||
             this._rows.lastElementChild;
     } else {
-      row = this._selected.nextElementSibling ||
+      row = (this._selected && this._selected.nextElementSibling) ||
             this._rows.firstElementChild;
     }
 
-    this._selected.toggleAttribute("selected", false);
+    if (this._selected) {
+      this._selected.toggleAttribute("selected", false);
+    }
     this._selected = row;
     row.toggleAttribute("selected", true);
 
@@ -119,7 +121,7 @@ class UrlbarView {
 
   // UrlbarController listener methods.
   onQueryStarted(queryContext) {
-    this._rows.textContent = "";
+    this._rows.style.minHeight = this._getBoundsWithoutFlushing(this._rows).height + "px";
   }
 
   onQueryCancelled(queryContext) {
@@ -127,7 +129,7 @@ class UrlbarView {
   }
 
   onQueryFinished(queryContext) {
-    // Nothing.
+    this._rows.style.minHeight = "";
   }
 
   onQueryResults(queryContext) {
@@ -286,9 +288,9 @@ class UrlbarView {
     favicon.className = "urlbarView-favicon";
     if (result.type == UrlbarUtils.RESULT_TYPE.SEARCH ||
         result.type == UrlbarUtils.RESULT_TYPE.KEYWORD) {
-      favicon.src = "chrome://browser/skin/search-glass.svg";
+      favicon.src = UrlbarUtils.ICON.SEARCH_GLASS;
     } else {
-      favicon.src = result.payload.icon || "chrome://mozapps/skin/places/defaultFavicon.svg";
+      favicon.src = result.payload.icon || UrlbarUtils.ICON.DEFAULT;
     }
     content.appendChild(favicon);
 

@@ -575,6 +575,16 @@ class PresShell final : public nsIPresShell,
         PresShell& aPresShell);
 
     /**
+     * MaybeDiscardEvent() checks whether it's safe to handle aGUIEvent right
+     * now.  If it's not safe, this may notify somebody of discarding event if
+     * necessary.
+     *
+     * @param aGUIEvent   Handling event.
+     * @return            true if it's not safe to handle the event.
+     */
+    bool MaybeDiscardEvent(WidgetGUIEvent* aGUIEvent);
+
+    /**
      * GetCapturingContentFor() returns capturing content for aGUIEvent.
      * If aGUIEvent is not related to capturing, this returns nullptr.
      */
@@ -615,6 +625,28 @@ class PresShell final : public nsIPresShell,
     nsIFrame* GetFrameForHandlingEventWith(WidgetGUIEvent* aGUIEvent,
                                            Document* aRetargetDocument,
                                            nsIFrame* aFrameForPresShell);
+
+    /**
+     * MaybeHandleEventWithAnotherPresShell() may handle aGUIEvent with another
+     * PresShell.
+     *
+     * @param aFrameForPresShell        Set aFrame of HandleEvent() which called
+     *                                  this method.
+     * @param aGUIEvent                 Handling event.
+     * @param aEventStatus              [in/out] EventStatus of aGUIEvent.
+     * @param aRv                       [out] Returns error if this gets an
+     *                                  error handling the event.
+     * @return                          false if caller needs to keep handling
+     *                                  the event by itself.
+     *                                  true if caller shouldn't keep handling
+     *                                  the event.  Note that when no PresShell
+     *                                  can handle the event, this returns true.
+     */
+    MOZ_CAN_RUN_SCRIPT
+    bool MaybeHandleEventWithAnotherPresShell(nsIFrame* aFrameForPresShell,
+                                              WidgetGUIEvent* aGUIEvent,
+                                              nsEventStatus* aEventStatus,
+                                              nsresult* aRv);
 
     MOZ_CAN_RUN_SCRIPT
     nsresult RetargetEventToParent(WidgetGUIEvent* aGUIEvent,
