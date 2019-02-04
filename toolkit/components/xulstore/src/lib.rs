@@ -57,7 +57,6 @@ extern crate tempdir;
 extern crate xpcom;
 
 use lmdb::Transaction;
-use itertools::Itertools;
 use nserror::{nsresult, NS_OK};
 use nsstring::{nsAString, nsString};
 use rkv::{Rkv, SingleStore, StoreError, StoreOptions, Value};
@@ -166,7 +165,7 @@ pub extern "C" fn xulstore_set_value(
         &String::from_utf16_lossy(attr),
     );
     info!("set value {} {} {} {}", doc, id, attr, value);
-    let store = STORE.clone();
+    let mut store = STORE.clone();
     let mut writer = RKV.write().expect("writer");
 
     // TODO: store (and retrieve) values as blobs instead of converting them
@@ -245,7 +244,7 @@ pub extern "C" fn xulstore_remove_value(
         &String::from_utf16_lossy(id),
         &String::from_utf16_lossy(attr),
     );
-    let store = STORE.clone();
+    let mut store = STORE.clone();
     let mut writer = RKV.write().expect("writer");
 
     // TODO: handle errors by returning NS_ERROR_FAILURE or another nsresult.
@@ -273,12 +272,11 @@ pub extern "C" fn xulstore_get_ids_iterator(doc: &nsAString) -> *const StringIte
     let reader = RKV.read().expect("reader");
     let iterator = store.iter_from(&reader, &doc_url).expect("iter");
 
-    let collection: Result<Vec<String>, StoreError> = iterator
+    let mut collection: Vec<String> = iterator
         .map(|result| match result {
             // TODO: avoid assuming we control writes and check the conversion.
-            Ok((key, val)) => Ok((str::from_utf8_unchecked(&key), val)),
+            Ok((key, val)) => Ok((unsafe { str::from_utf8_unchecked(&key) }, val)),
             Err(err) => Err(err) })
-
         // Stop iterating once we reach a key for another doc URL or hit an error.
         .take_while(|result| match result {
             Ok((key, _val)) => {
@@ -287,7 +285,6 @@ pub extern "C" fn xulstore_get_ids_iterator(doc: &nsAString) -> *const StringIte
             }
             Err(_) => true,
         })
-
         .map(|result| match result {
             Ok((key, _val)) => {
                 let parts = key.split('\u{0009}').collect::<Vec<&str>>();
@@ -295,11 +292,10 @@ pub extern "C" fn xulstore_get_ids_iterator(doc: &nsAString) -> *const StringIte
             }
             Err(error) => Err(error),
         })
+        .collect::<Result<Vec<String>, StoreError>>()
+        .unwrap();
 
-        // TODO: unique() collects values, and collect() does too,
-        // so do so only once, by collecting the values into a set.
-        .unique()
-        .collect();
+    collection.dedup();
 
     Box::into_raw(Box::new(StringIterator::new(collection)))
 }
@@ -317,14 +313,30 @@ pub extern "C" fn xulstore_get_attribute_iterator<'a>(
     let reader = RKV.read().expect("reader");
     let iterator = store.iter_from(&reader, &key_prefix).expect("iter");
 
-    let collection: Vec<String> = iterator
-        .map(|(key, _val)| key)
-        // TODO: avoid assuming we control writes and check the conversion.
-        .map(|key| unsafe { str::from_utf8_unchecked(&key) })
-        .map(|key| key.split('\u{0009}').collect::<Vec<&str>>())
-        .filter(|parts| parts[0] == doc_url && parts[1] == element_id)
-        .map(|parts| parts[2].to_owned())
-        .collect();
+    let mut collection: Vec<String> = iterator
+        .map(|result| match result {
+            // TODO: avoid assuming we control writes and check the conversion.
+            Ok((key, val)) => Ok((unsafe { str::from_utf8_unchecked(&key) }, val)),
+            Err(err) => Err(err) })
+        // Stop iterating once we reach a key for another doc URL or hit an error.
+        .take_while(|result| match result {
+            Ok((key, _val)) => {
+                let parts = key.split('\u{0009}').collect::<Vec<&str>>();
+                parts[0] == doc_url && parts[1] == element_id
+            }
+            Err(_) => true,
+        })
+        .map(|result| match result {
+            Ok((key, _val)) => {
+                let parts = key.split('\u{0009}').collect::<Vec<&str>>();
+                Ok(parts[2].to_owned())
+            }
+            Err(error) => Err(error),
+        })
+        .collect::<Result<Vec<String>, StoreError>>()
+        .unwrap();
+
+    collection.dedup();
 
     Box::into_raw(Box::new(StringIterator::new(collection)))
 }

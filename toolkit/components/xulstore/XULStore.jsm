@@ -21,7 +21,7 @@ function makeKey(docURI, id, attr) {
 XPCOMUtils.defineLazyGetter(this, "gDatabasePromise", async function() {
   const databaseDir = OS.Path.join(OS.Constants.Path.profileDir, "xulstore");
   await OS.File.makeDir(databaseDir, { from: OS.Constants.Path.profileDir });
-  return KeyValueService.getOrCreate(databaseDir);
+  return KeyValueService.getOrCreate(databaseDir, "db");
 });
 
 let saveAllowed = true;

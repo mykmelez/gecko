@@ -120,11 +120,7 @@ impl Task for GetOrCreateTask {
             || -> Result<(Arc<RwLock<Rkv>>, SingleStore), KeyValueError> {
                 let mut writer = Manager::singleton().write()?;
                 let rkv = writer.get_or_create(Path::new(str::from_utf8(&self.path)?), Rkv::new)?;
-                let store = if self.name.is_empty() {
-                    rkv.write()?.open_single("default", StoreOptions::create())
-                } else {
-                    rkv.write()?.open_single(str::from_utf8(&self.name)?, StoreOptions::create())
-                }?;
+                let store = rkv.write()?.open_single(str::from_utf8(&self.name)?, StoreOptions::create())?;
                 Ok((rkv, store))
             }(),
         ));
