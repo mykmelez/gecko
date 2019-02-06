@@ -812,7 +812,8 @@ class js::jit::OutOfLineTableSwitch
 void CodeGeneratorARM64::visitOutOfLineTableSwitch(OutOfLineTableSwitch* ool) {
   MTableSwitch* mir = ool->mir();
 
-  AutoForbidPools afp(&masm, (mir->numCases() + 1) * (sizeof(void*) / vixl::kInstructionSize));
+  AutoForbidPools afp(
+      &masm, (mir->numCases() + 1) * (sizeof(void*) / vixl::kInstructionSize));
   masm.haltingAlign(sizeof(void*));
   masm.bind(ool->jumpLabel());
   masm.addCodeLabel(*ool->jumpLabel());
@@ -1251,6 +1252,11 @@ void CodeGenerator::visitUnbox(LUnbox* unbox) {
       case MIRType::Symbol:
         cond = masm.testSymbol(Assembler::NotEqual, value);
         break;
+#ifdef ENABLE_BIGINT
+      case MIRType::BigInt:
+        cond = masm.testBigInt(Assembler::NotEqual, value);
+        break;
+#endif
       default:
         MOZ_CRASH("Given MIRType cannot be unboxed.");
     }
@@ -1288,6 +1294,11 @@ void CodeGenerator::visitUnbox(LUnbox* unbox) {
     case MIRType::Symbol:
       masm.unboxSymbol(input, result);
       break;
+#ifdef ENABLE_BIGINT
+    case MIRType::BigInt:
+      masm.unboxBigInt(input, result);
+      break;
+#endif
     default:
       MOZ_CRASH("Given MIRType cannot be unboxed.");
   }

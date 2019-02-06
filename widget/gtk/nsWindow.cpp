@@ -2935,7 +2935,6 @@ void nsWindow::OnWindowStateEvent(GtkWidget *aWidget,
         !(aEvent->new_window_state & GDK_WINDOW_STATE_FOCUSED);
 
     ForceTitlebarRedraw();
-    return;
   }
 
   // We don't care about anything but changes in the maximized/icon/fullscreen
@@ -3308,7 +3307,8 @@ nsresult nsWindow::Create(nsIWidget *aParent, nsNativeWidget aNativeParent,
         int screenNumber = GDK_SCREEN_XNUMBER(screen);
         int visualId = 0;
         if (useWebRender) {
-          // WebRender rquests AlphaVisual for making readback to work correctly.
+          // WebRender rquests AlphaVisual for making readback to work
+          // correctly.
           needsAlphaVisual = true;
         }
         if (GLContextGLX::FindVisual(display, screenNumber, useWebRender,

@@ -327,8 +327,7 @@ uint32_t Gecko_CalcStyleDifference(ComputedStyleBorrowed aOldStyle,
 
   uint32_t equalStructs;
   nsChangeHint result =
-      const_cast<ComputedStyle*>(aOldStyle)->CalcStyleDifference(
-          const_cast<ComputedStyle*>(aNewStyle), &equalStructs);
+      aOldStyle->CalcStyleDifference(*aNewStyle, &equalStructs);
 
   *aAnyStyleStructChanged =
       equalStructs != StyleStructConstants::kAllStructsMask;
@@ -1761,6 +1760,10 @@ nsCSSValueSharedList* Gecko_NewNoneTransform() {
   return list.forget().take();
 }
 
+void Gecko_StyleDisplay_GenerateCombinedTransform(nsStyleDisplay* aDisplay) {
+  aDisplay->GenerateCombinedIndividualTransform();
+}
+
 void Gecko_CSSValue_SetNumber(nsCSSValueBorrowedMut aCSSValue, float aNumber) {
   aCSSValue->SetFloatValue(aNumber, eCSSUnit_Number);
 }
@@ -2048,8 +2051,7 @@ GeckoFontMetrics Gecko_GetFontMetrics(RawGeckoPresContextBorrowed aPresContext,
   nsPresContext* presContext = const_cast<nsPresContext*>(aPresContext);
   presContext->SetUsesExChUnits(true);
   RefPtr<nsFontMetrics> fm = nsLayoutUtils::GetMetricsFor(
-      presContext, aIsVertical, aFont, aFontSize, aUseUserFontSet,
-      nsLayoutUtils::FlushUserFontSet::No);
+      presContext, aIsVertical, aFont, aFontSize, aUseUserFontSet);
 
   ret.mXSize = fm->XHeight();
   gfxFloat zeroWidth = fm->GetThebesFontGroup()

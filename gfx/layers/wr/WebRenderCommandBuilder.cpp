@@ -520,7 +520,7 @@ struct DIGroup {
           // we need to catch bounds changes of containers so that we continue
           // to have the correct bounds rects in the recording
           if (DetectContainerLayerPropertiesBoundsChange(aItem, aData,
-                                                            *geometry)) {
+                                                         *geometry)) {
             nsRect clippedBounds = clip.ApplyNonRoundedIntersection(
                 geometry->ComputeInvalidationRegion());
             aData->mGeometry = std::move(geometry);
@@ -1442,6 +1442,8 @@ void WebRenderCommandBuilder::BuildWebRenderCommands(
     params.mFilters = std::move(aFilters);
     params.animation = mZoomProp.ptrOr(nullptr);
     params.cache_tiles = isTopLevelContent;
+    params.clip =
+        wr::WrStackingContextClip::ClipChain(aBuilder.CurrentClipChainId());
 
     StackingContextHelper pageRootSc(sc, nullptr, nullptr, nullptr, aBuilder,
                                      params);

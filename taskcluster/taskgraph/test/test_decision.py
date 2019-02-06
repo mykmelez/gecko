@@ -6,7 +6,6 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 import os
 import json
-import yaml
 import shutil
 import unittest
 import tempfile
@@ -14,6 +13,7 @@ import tempfile
 from mock import patch
 from mozunit import main, MockedOpen
 from taskgraph import decision
+from taskgraph.util.yaml import load_yaml
 
 
 FAKE_GRAPH_CONFIG = {'product-dir': 'browser'}
@@ -40,8 +40,7 @@ class TestDecision(unittest.TestCase):
         try:
             decision.ARTIFACTS_DIR = os.path.join(tmpdir, "artifacts")
             decision.write_artifact("artifact.yml", data)
-            with open(os.path.join(decision.ARTIFACTS_DIR, "artifact.yml")) as f:
-                self.assertEqual(yaml.safe_load(f), data)
+            self.assertEqual(load_yaml(decision.ARTIFACTS_DIR, "artifact.yml"), data)
         finally:
             if os.path.exists(tmpdir):
                 shutil.rmtree(tmpdir)
@@ -87,8 +86,9 @@ class TestGetDecisionParameters(unittest.TestCase):
         self.assertEqual(params['owner'], 'ffxbld@noreply.mozilla.org')
 
     @patch('taskgraph.decision.get_hg_revision_branch')
-    def test_try_options(self, _):
-        self.options['message'] = 'try: -b do -t all'
+    @patch('taskgraph.decision.get_hg_commit_message')
+    def test_try_options(self, mock_get_hg_commit_message, _):
+        mock_get_hg_commit_message.return_value = 'try: -b do -t all'
         self.options['project'] = 'try'
         with MockedOpen({self.ttc_file: None}):
             params = decision.get_decision_parameters(FAKE_GRAPH_CONFIG, self.options)
