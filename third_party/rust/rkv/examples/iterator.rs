@@ -13,7 +13,6 @@ use rkv::{
     SingleStore,
     StoreError,
     StoreOptions,
-    Transaction,
     Value,
 };
 use tempfile::Builder;
@@ -42,7 +41,7 @@ fn main() {
         println!("{}, {:?}", str::from_utf8(country).unwrap(), city);
     }
 
-    println!("");
+    println!();
     println!("Iterating from the given key...");
     // Reader::iter_from() iterates from the first key equal to or greater
     // than the given key.
@@ -51,7 +50,7 @@ fn main() {
         println!("{}, {:?}", str::from_utf8(country).unwrap(), city);
     }
 
-    println!("");
+    println!();
     println!("Iterating from the given prefix...");
     let mut iter = store.iter_from(&reader, "Un").unwrap();
     while let Some(Ok((country, city))) = iter.next() {
@@ -59,7 +58,7 @@ fn main() {
     }
 }
 
-fn populate_store(k: &Rkv, mut store: SingleStore) -> Result<(), StoreError> {
+fn populate_store(k: &Rkv, store: SingleStore) -> Result<(), StoreError> {
     let mut writer = k.write()?;
     for (country, city) in vec![
         ("Canada", Value::Str("Ottawa")),
@@ -72,5 +71,5 @@ fn populate_store(k: &Rkv, mut store: SingleStore) -> Result<(), StoreError> {
     ] {
         store.put(&mut writer, country, &city)?;
     }
-    writer.commit().map_err(|e| e.into())
+    writer.commit()
 }

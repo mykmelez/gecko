@@ -11,21 +11,21 @@
 # will likely look very different (and much more reasonable)
 
 [package]
-name = "lmdb-sys"
-version = "0.8.0"
+name = "lmdb-rkv-sys"
+version = "0.8.2"
 authors = ["Dan Burkert <dan@danburkert.com>"]
 build = "build.rs"
 description = "Rust bindings for liblmdb."
-documentation = "https://docs.rs/lmdb-sys"
+documentation = "https://docs.rs/lmdb-rkv-sys"
 readme = "../README.md"
 keywords = ["LMDB", "database", "storage-engine", "bindings", "library"]
 categories = ["database", "external-ffi-bindings"]
 license = "Apache-2.0"
-repository = "https://github.com/danburkert/lmdb-rs.git"
+repository = "https://github.com/mozilla/lmdb-rs.git"
 [dependencies.libc]
 version = "0.2"
 [build-dependencies.cc]
 version = "1"
 
 [build-dependencies.pkg-config]
-version = "0.3"
+version = "0.3.2"

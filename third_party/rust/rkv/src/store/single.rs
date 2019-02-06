@@ -8,30 +8,22 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
-use lmdb;
-
+use crate::{
+    error::StoreError,
+    read_transform,
+    readwrite::{
+        Readable,
+        Writer,
+    },
+    value::Value,
+};
 use lmdb::{
     Cursor,
     Database,
     Iter as LmdbIter,
     RoCursor,
-    RwTransaction,
-    Transaction,
+    WriteFlags,
 };
-
-use lmdb::WriteFlags;
-
-use crate::error::StoreError;
-
-use crate::value::Value;
-
-fn read_transform(val: Result<&[u8], lmdb::Error>) -> Result<Option<Value>, StoreError> {
-    match val {
-        Ok(bytes) => Value::from_tagged_slice(bytes).map(Some).map_err(StoreError::DataError),
-        Err(lmdb::Error::NotFound) => Ok(None),
-        Err(e) => Err(StoreError::LmdbError(e)),
-    }
-}
 
 #[derive(Copy, Clone)]
 pub struct SingleStore {
@@ -50,28 +42,21 @@ impl SingleStore {
         }
     }
 
-    pub fn get<'env, T: Transaction, K: AsRef<[u8]>>(
-        &self,
-        txn: &'env T,
-        k: K,
-    ) -> Result<Option<Value<'env>>, StoreError> {
-        let bytes = txn.get(self.db, &k);
-        read_transform(bytes)
+    pub fn get<T: Readable, K: AsRef<[u8]>>(self, reader: &T, k: K) -> Result<Option<Value>, StoreError> {
+        reader.get(self.db, &k)
     }
 
     // TODO: flags
-    pub fn put<K: AsRef<[u8]>>(&mut self, txn: &mut RwTransaction, k: K, v: &Value) -> Result<(), StoreError> {
-        // TODO: don't allocate twice.
-        let bytes = v.to_bytes()?;
-        txn.put(self.db, &k, &bytes, WriteFlags::empty()).map_err(StoreError::LmdbError)
+    pub fn put<K: AsRef<[u8]>>(self, writer: &mut Writer, k: K, v: &Value) -> Result<(), StoreError> {
+        writer.put(self.db, &k, v, WriteFlags::empty())
     }
 
-    pub fn delete<K: AsRef<[u8]>>(&mut self, txn: &mut RwTransaction, k: K) -> Result<(), StoreError> {
-        txn.del(self.db, &k, None).map_err(StoreError::LmdbError)
+    pub fn delete<K: AsRef<[u8]>>(self, writer: &mut Writer, k: K) -> Result<(), StoreError> {
+        writer.delete(self.db, &k, None)
     }
 
-    pub fn iter_start<'env, T: Transaction>(&self, txn: &'env T) -> Result<Iter<'env>, StoreError> {
-        let mut cursor = txn.open_ro_cursor(self.db).map_err(StoreError::LmdbError)?;
+    pub fn iter_start<T: Readable>(self, reader: &T) -> Result<Iter, StoreError> {
+        let mut cursor = reader.open_ro_cursor(self.db)?;
 
         // We call Cursor.iter() instead of Cursor.iter_start() because
         // the latter panics at "called `Result::unwrap()` on an `Err` value:
@@ -89,12 +74,8 @@ impl SingleStore {
         })
     }
 
-    pub fn iter_from<'env, T: Transaction, K: AsRef<[u8]>>(
-        &self,
-        txn: &'env T,
-        k: K,
-    ) -> Result<Iter<'env>, StoreError> {
-        let mut cursor = txn.open_ro_cursor(self.db).map_err(StoreError::LmdbError)?;
+    pub fn iter_from<T: Readable, K: AsRef<[u8]>>(self, reader: &T, k: K) -> Result<Iter, StoreError> {
+        let mut cursor = reader.open_ro_cursor(self.db)?;
         let iter = cursor.iter_from(k);
         Ok(Iter {
             iter,
