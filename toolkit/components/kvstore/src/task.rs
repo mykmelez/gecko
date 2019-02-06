@@ -6,7 +6,6 @@ extern crate xpcom;
 
 use crossbeam_utils::atomic::AtomicCell;
 use error::KeyValueError;
-use lmdb::Transaction;
 use moz_task::Task;
 use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE};
 use nsstring::{nsCString, nsString};
