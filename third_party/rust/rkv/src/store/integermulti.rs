@@ -10,14 +10,17 @@
 
 use lmdb::{
     Database,
-    RwTransaction,
-    Transaction,
     WriteFlags,
 };
 
 use std::marker::PhantomData;
 
 use crate::error::StoreError;
+
+use crate::readwrite::{
+    Readable,
+    Writer,
+};
 
 use crate::value::Value;
 
@@ -50,34 +53,28 @@ where
         }
     }
 
-    pub fn get<'env, T: Transaction>(&self, txn: &'env T, k: K) -> Result<Iter<'env>, StoreError> {
-        self.inner.get(txn, Key::new(k)?)
+    pub fn get<'env, T: Readable>(&self, reader: &'env T, k: K) -> Result<Iter<'env>, StoreError> {
+        self.inner.get(reader, Key::new(&k)?)
     }
 
-    pub fn get_first<'env, T: Transaction>(&self, txn: &'env T, k: K) -> Result<Option<Value<'env>>, StoreError> {
-        self.inner.get_first(txn, Key::new(k)?)
+    pub fn get_first<'env, T: Readable>(&self, reader: &'env T, k: K) -> Result<Option<Value<'env>>, StoreError> {
+        self.inner.get_first(reader, Key::new(&k)?)
     }
 
-    pub fn put(&mut self, txn: &mut RwTransaction, k: K, v: &Value) -> Result<(), StoreError> {
-        self.inner.put(txn, Key::new(k)?, v)
+    pub fn put(&self, writer: &mut Writer, k: K, v: &Value) -> Result<(), StoreError> {
+        self.inner.put(writer, Key::new(&k)?, v)
     }
 
-    pub fn put_with_flags(
-        &mut self,
-        txn: &mut RwTransaction,
-        k: K,
-        v: &Value,
-        flags: WriteFlags,
-    ) -> Result<(), StoreError> {
-        self.inner.put_with_flags(txn, Key::new(k)?, v, flags)
+    pub fn put_with_flags(&self, writer: &mut Writer, k: K, v: &Value, flags: WriteFlags) -> Result<(), StoreError> {
+        self.inner.put_with_flags(writer, Key::new(&k)?, v, flags)
     }
 
-    pub fn delete_all(&mut self, txn: &mut RwTransaction, k: K) -> Result<(), StoreError> {
-        self.inner.delete_all(txn, Key::new(k)?)
+    pub fn delete_all(&self, writer: &mut Writer, k: K) -> Result<(), StoreError> {
+        self.inner.delete_all(writer, Key::new(&k)?)
     }
 
-    pub fn delete(&mut self, txn: &mut RwTransaction, k: K, v: &Value) -> Result<(), StoreError> {
-        self.inner.delete(txn, Key::new(k)?, v)
+    pub fn delete(&self, writer: &mut Writer, k: K, v: &Value) -> Result<(), StoreError> {
+        self.inner.delete(writer, Key::new(&k)?, v)
     }
 }
 
@@ -96,7 +93,7 @@ mod tests {
         let root = Builder::new().prefix("test_integer_keys").tempdir().expect("tempdir");
         fs::create_dir_all(root.path()).expect("dir created");
         let k = Rkv::new(root.path()).expect("new succeeded");
-        let mut s = k.open_multi_integer("s", StoreOptions::create()).expect("open");
+        let s = k.open_multi_integer("s", StoreOptions::create()).expect("open");
 
         macro_rules! test_integer_keys {
             ($type:ty, $key:expr) => {{

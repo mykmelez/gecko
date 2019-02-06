@@ -1157,9 +1157,7 @@ void PresShell::Destroy() {
     }
   }
   if (mPresContext) {
-    const bool mayFlushUserFontSet = false;
-    gfxUserFontSet* fs = mPresContext->GetUserFontSet(mayFlushUserFontSet);
-    if (fs) {
+    if (gfxUserFontSet* fs = mPresContext->GetUserFontSet()) {
       uint32_t fontCount;
       uint64_t fontSize;
       fs->GetLoadStatistics(fontCount, fontSize);
@@ -7811,7 +7809,7 @@ nsresult PresShell::EventHandler::DispatchEventToDOM(
             nsContentUtils::IsURIInPrefList(
                 uri,
                 "dom.keyboardevent.keypress.hack.dispatch_non_printable_keys");
-        mPresShell->mForceUseLegacyKeyCodeAndCharCodeValues =
+        mPresShell->mForceUseLegacyKeyCodeAndCharCodeValues |=
             nsContentUtils::IsURIInPrefList(uri,
                                             "dom.keyboardevent.keypress.hack."
                                             "use_legacy_keycode_and_charcode");

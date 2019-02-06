@@ -31,17 +31,17 @@ function makeNodeDetailsKey(nodeOrDetails) {
   return "";
 }
 
-function PlacesTreeView(aFlatList, aOnOpenFlatContainer, aController, xulStoreCache) {
+function PlacesTreeView(aContainer) {
   this._tree = null;
   this._result = null;
   this._selection = null;
   this._rootNode = null;
   this._rows = [];
-  this._flatList = aFlatList;
+  this._flatList = aContainer.flatList;
   this._nodeDetails = new Map();
-  this._openContainerCallback = aOnOpenFlatContainer;
-  this._controller = aController;
-  this._xulStoreCache = xulStoreCache;
+  this._element = aContainer;
+  this._controller = aContainer._controller;
+  this._xulStoreCache = aContainer._xulStoreCache;
 }
 
 PlacesTreeView.prototype = {
@@ -1479,8 +1479,9 @@ PlacesTreeView.prototype = {
       throw Cr.NS_ERROR_UNEXPECTED;
 
     let node = this._rows[aRow];
-    if (this._flatList && this._openContainerCallback) {
-      this._openContainerCallback(node);
+    if (this._flatList && this._element) {
+      let event = new CustomEvent("onOpenFlatContainer", { detail: node });
+      this._element.dispatchEvent(event);
       return;
     }
 

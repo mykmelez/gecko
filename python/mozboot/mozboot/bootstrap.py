@@ -341,7 +341,7 @@ class Bootstrapper(object):
     # be available. We /could/ refactor parts of mach_bootstrap.py to be
     # part of this directory to avoid the code duplication.
     def try_to_create_state_dir(self):
-        state_dir, _ = get_state_dir()
+        state_dir = get_state_dir()
 
         if not os.path.exists(state_dir):
             should_create_state_dir = True
@@ -441,7 +441,8 @@ class Bootstrapper(object):
 
         hg_installed, hg_modern = self.instance.ensure_mercurial_modern()
         self.instance.ensure_python_modern()
-        self.instance.ensure_rust_modern()
+        if not self.instance.artifact_mode:
+            self.instance.ensure_rust_modern()
 
         state_dir_available, state_dir = self.try_to_create_state_dir()
 

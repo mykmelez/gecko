@@ -14,15 +14,16 @@ use bincode::serialize;
 
 use serde::Serialize;
 
-use lmdb::{
-    Database,
-    RwTransaction,
-    Transaction,
-};
+use lmdb::Database;
 
 use crate::error::{
     DataError,
     StoreError,
+};
+
+use crate::readwrite::{
+    Readable,
+    Writer,
 };
 
 use crate::value::Value;
@@ -65,7 +66,8 @@ impl<K> Key<K>
 where
     K: EncodableKey,
 {
-    pub(crate) fn new(k: K) -> Result<Key<K>, DataError> {
+    #[allow(clippy::new_ret_no_self)]
+    pub(crate) fn new(k: &K) -> Result<Key<K>, DataError> {
         Ok(Key {
             bytes: k.to_bytes()?,
             phantom: PhantomData,
@@ -92,16 +94,16 @@ where
         }
     }
 
-    pub fn get<'env, T: Transaction>(&self, txn: &'env T, k: K) -> Result<Option<Value<'env>>, StoreError> {
-        self.inner.get(txn, Key::new(k)?)
+    pub fn get<'env, T: Readable>(&self, reader: &'env T, k: K) -> Result<Option<Value<'env>>, StoreError> {
+        self.inner.get(reader, Key::new(&k)?)
     }
 
-    pub fn put(&mut self, txn: &mut RwTransaction, k: K, v: &Value) -> Result<(), StoreError> {
-        self.inner.put(txn, Key::new(k)?, v)
+    pub fn put(&self, writer: &mut Writer, k: K, v: &Value) -> Result<(), StoreError> {
+        self.inner.put(writer, Key::new(&k)?, v)
     }
 
-    pub fn delete(&mut self, txn: &mut RwTransaction, k: K) -> Result<(), StoreError> {
-        self.inner.delete(txn, Key::new(k)?)
+    pub fn delete(&self, writer: &mut Writer, k: K) -> Result<(), StoreError> {
+        self.inner.delete(writer, Key::new(&k)?)
     }
 }
 
@@ -118,7 +120,7 @@ mod tests {
         let root = Builder::new().prefix("test_integer_keys").tempdir().expect("tempdir");
         fs::create_dir_all(root.path()).expect("dir created");
         let k = Rkv::new(root.path()).expect("new succeeded");
-        let mut s = k.open_integer("s", StoreOptions::create()).expect("open");
+        let s = k.open_integer("s", StoreOptions::create()).expect("open");
 
         macro_rules! test_integer_keys {
             ($type:ty, $key:expr) => {{

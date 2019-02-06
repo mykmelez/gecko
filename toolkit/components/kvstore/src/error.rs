@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use libc::uint16_t;
-use lmdb::Error as LmdbError;
 use nserror::{
     nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_INTERFACE,
     NS_ERROR_NULL_POINTER, NS_ERROR_UNEXPECTED,
@@ -68,12 +67,6 @@ impl From<KeyValueError> for nsresult {
             KeyValueError::UnsupportedType(_) => NS_ERROR_NOT_IMPLEMENTED,
             KeyValueError::UnexpectedValue => NS_ERROR_UNEXPECTED,
         }
-    }
-}
-
-impl From<LmdbError> for KeyValueError {
-    fn from(err: LmdbError) -> KeyValueError {
-        KeyValueError::from(StoreError::from(err))
     }
 }
 
