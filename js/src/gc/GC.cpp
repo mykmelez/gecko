@@ -4238,15 +4238,15 @@ static void RelazifyFunctionsForShrinkingGC(JSRuntime* rt) {
   }
 }
 
-static void PurgeShapeTablesForShrinkingGC(JSRuntime* rt) {
-  gcstats::AutoPhase ap(rt->gc.stats(), gcstats::PhaseKind::PURGE_SHAPE_TABLES);
+static void PurgeShapeCachesForShrinkingGC(JSRuntime* rt) {
+  gcstats::AutoPhase ap(rt->gc.stats(), gcstats::PhaseKind::PURGE_SHAPE_CACHES);
   for (GCZonesIter zone(rt); !zone.done(); zone.next()) {
-    if (!CanRelocateZone(zone) || zone->keepShapeTables()) {
+    if (!CanRelocateZone(zone) || zone->keepShapeCaches()) {
       continue;
     }
     for (auto baseShape = zone->cellIter<BaseShape>(); !baseShape.done();
          baseShape.next()) {
-      baseShape->maybePurgeTable();
+      baseShape->maybePurgeCache();
     }
   }
 }
@@ -4337,7 +4337,7 @@ bool GCRuntime::beginMarkPhase(JS::GCReason reason, AutoGCSession& session) {
      */
     if (invocationKind == GC_SHRINK) {
       RelazifyFunctionsForShrinkingGC(rt);
-      PurgeShapeTablesForShrinkingGC(rt);
+      PurgeShapeCachesForShrinkingGC(rt);
     }
 
     /*
@@ -7383,7 +7383,7 @@ MOZ_NEVER_INLINE GCRuntime::IncrementalResult GCRuntime::gcCycle(
   if (shouldCollectNurseryForSlice(nonincrementalByAPI, budget)) {
     minorGC(reason, gcstats::PhaseKind::EVICT_NURSERY_FOR_MAJOR_GC);
   } else {
-    ++number; // This otherwise happens in minorGC().
+    ++number;  // This otherwise happens in minorGC().
   }
 
   AutoGCSession session(rt, JS::HeapState::MajorCollecting);
@@ -8051,7 +8051,7 @@ void GCRuntime::mergeRealms(Realm* source, Realm* target) {
        script.next()) {
     MOZ_ASSERT(script->realm() == source);
     script->realm_ = target;
-    script->setTypesGeneration(target->zone()->types.generation);
+    MOZ_ASSERT(!script->types());
   }
 
   GlobalObject* global = target->maybeGlobal();
@@ -8456,9 +8456,8 @@ void js::gc::CheckHashTablesAfterMovingGC(JSRuntime* rt) {
     JS::AutoCheckCannotGC nogc;
     for (auto baseShape = zone->cellIter<BaseShape>(); !baseShape.done();
          baseShape.next()) {
-      if (ShapeTable* table = baseShape->maybeTable(nogc)) {
-        table->checkAfterMovingGC();
-      }
+      ShapeCachePtr p = baseShape->getCache(nogc);
+      p.checkAfterMovingGC();
     }
   }
 
