@@ -7,10 +7,10 @@ license = "MPL-2.0"
 [dependencies]
 itertools = "^0.7.6"
 lazy_static = "1.0"
-lmdb-rkv = "0.11"
+lmdb-rkv = "0.11.2"
 log = "0.4"
 nsstring = { path = "../../../xpcom/rust/nsstring" }
 nserror = { path = "../../../xpcom/rust/nserror" }
-rkv = "0.8"
+rkv = "0.9.1"
 tempdir = "0.3.5"
 xpcom = { path = "../../../xpcom/rust/xpcom" }
