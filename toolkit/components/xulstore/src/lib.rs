@@ -56,7 +56,6 @@ extern crate tempdir;
 // Will need #[macro_use] if we ever implement XPCOM interfaces.
 extern crate xpcom;
 
-use lmdb::Transaction;
 use nserror::{nsresult, NS_OK};
 use nsstring::{nsAString, nsString};
 use rkv::{Rkv, SingleStore, StoreError, StoreOptions, Value};
@@ -165,7 +164,7 @@ pub extern "C" fn xulstore_set_value(
         &String::from_utf16_lossy(attr),
     );
     info!("set value {} {} {} {}", doc, id, attr, value);
-    let mut store = STORE.clone();
+    let store = STORE.clone();
     let mut writer = RKV.write().expect("writer");
 
     // TODO: store (and retrieve) values as blobs instead of converting them
@@ -244,7 +243,7 @@ pub extern "C" fn xulstore_remove_value(
         &String::from_utf16_lossy(id),
         &String::from_utf16_lossy(attr),
     );
-    let mut store = STORE.clone();
+    let store = STORE.clone();
     let mut writer = RKV.write().expect("writer");
 
     // TODO: handle errors by returning NS_ERROR_FAILURE or another nsresult.
