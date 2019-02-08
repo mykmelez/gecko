@@ -44,7 +44,7 @@ use xpcom::{
     nsIID, RefPtr, ThreadBoundRefPtr,
 };
 
-type KeyValueResult = Result<(String, OwnedValue), KeyValueError>;
+type KeyValuePairResult = Result<(String, OwnedValue), KeyValueError>;
 
 #[no_mangle]
 pub unsafe extern "C" fn nsKeyValueServiceConstructor(
@@ -274,11 +274,11 @@ impl KeyValueDatabase {
 #[xpimplements(nsIKeyValueEnumerator)]
 #[refcnt = "atomic"]
 pub struct InitKeyValueEnumerator {
-    iter: AtomicRefCell<IntoIter<KeyValueResult>>,
+    iter: AtomicRefCell<IntoIter<KeyValuePairResult>>,
 }
 
 impl KeyValueEnumerator {
-    fn new(pairs: Vec<KeyValueResult>) -> RefPtr<KeyValueEnumerator> {
+    fn new(pairs: Vec<KeyValuePairResult>) -> RefPtr<KeyValueEnumerator> {
         KeyValueEnumerator::allocate(InitKeyValueEnumerator {
             iter: AtomicRefCell::new(pairs.into_iter()),
         })

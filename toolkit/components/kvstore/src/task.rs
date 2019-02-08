@@ -26,7 +26,7 @@ use xpcom::{
 };
 use KeyValueDatabase;
 use KeyValueEnumerator;
-use KeyValueResult;
+use KeyValuePairResult;
 
 /// A macro to generate a done() implementation for a Task.
 /// Takes one argument that specifies the type of the Task's callback function:
@@ -360,7 +360,7 @@ pub struct EnumerateTask {
     store: SingleStore,
     from_key: nsCString,
     to_key: nsCString,
-    result: AtomicCell<Option<Result<Vec<KeyValueResult>, KeyValueError>>>,
+    result: AtomicCell<Option<Result<Vec<KeyValuePairResult>, KeyValueError>>>,
 }
 
 impl EnumerateTask {
@@ -383,7 +383,7 @@ impl EnumerateTask {
 
     fn convert(
         &self,
-        result: Vec<KeyValueResult>,
+        result: Vec<KeyValuePairResult>,
     ) -> Result<RefPtr<KeyValueEnumerator>, KeyValueError> {
         Ok(KeyValueEnumerator::new(result))
     }
@@ -394,7 +394,7 @@ impl Task for EnumerateTask {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
         self.result
-            .store(Some(|| -> Result<Vec<KeyValueResult>, KeyValueError> {
+            .store(Some(|| -> Result<Vec<KeyValuePairResult>, KeyValueError> {
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
                 let from_key = str::from_utf8(&self.from_key)?;
@@ -416,7 +416,7 @@ impl Task for EnumerateTask {
                 // Our fallback approach is to eagerly collect the iterator
                 // into a collection that KeyValueEnumerator owns.  Fixing this so we
                 // enumerate pairs lazily is bug 1499252.
-                let pairs: Vec<KeyValueResult> = iterator
+                let pairs: Vec<KeyValuePairResult> = iterator
                     // Convert the key to a string so we can compare it to the "to" key.
                     // For forward compatibility, we don't fail here if we can't convert
                     // a key to UTF-8.  Instead, we store the Err in the collection
