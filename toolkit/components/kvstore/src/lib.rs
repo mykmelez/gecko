@@ -274,11 +274,11 @@ impl KeyValueDatabase {
 #[xpimplements(nsIKeyValueEnumerator)]
 #[refcnt = "atomic"]
 pub struct InitKeyValueEnumerator {
-    iter: AtomicRefCell<IntoIter<Result<(String, OwnedValue), KeyValueError>>>,
+    iter: AtomicRefCell<IntoIter<KeyValueResult>>,
 }
 
 impl KeyValueEnumerator {
-    fn new(pairs: Vec<Result<(String, OwnedValue), KeyValueError>>) -> RefPtr<KeyValueEnumerator> {
+    fn new(pairs: Vec<KeyValueResult>) -> RefPtr<KeyValueEnumerator> {
         KeyValueEnumerator::allocate(InitKeyValueEnumerator {
             iter: AtomicRefCell::new(pairs.into_iter()),
         })
