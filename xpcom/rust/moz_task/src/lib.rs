@@ -94,17 +94,14 @@ impl TaskRunnable {
 
     xpcom_method!(run => Run());
     fn run(&self) -> Result<(), nsresult> {
-        match self.has_run.load(Ordering::Acquire) {
-            false => {
-                assert!(!is_main_thread());
-                self.has_run.store(true, Ordering::Release);
-                self.task.run();
-                self.dispatch(get_main_thread()?)
-            }
-            true => {
-                assert!(is_main_thread());
-                self.task.done()
-            }
+        if self.has_run.load(Ordering::Acquire) {
+            assert!(!is_main_thread());
+            self.has_run.store(true, Ordering::Release);
+            self.task.run();
+            self.dispatch(get_main_thread()?)
+        } else {
+            assert!(is_main_thread());
+            self.task.done()
         }
     }
 
