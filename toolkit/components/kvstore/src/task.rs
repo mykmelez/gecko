@@ -393,8 +393,8 @@ impl Task for EnumerateTask {
     fn run(&self) {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
-        self.result
-            .store(Some(|| -> Result<Vec<KeyValuePairResult>, KeyValueError> {
+        self.result.store(Some(
+            || -> Result<Vec<KeyValuePairResult>, KeyValueError> {
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
                 let from_key = str::from_utf8(&self.from_key)?;
@@ -451,7 +451,8 @@ impl Task for EnumerateTask {
                     .collect();
 
                 Ok(pairs)
-            }()));
+            }(),
+        ));
     }
 
     task_done!(value);
