@@ -27,6 +27,11 @@ git = "https://github.com/mozilla/lmdb-rs"
 branch = "lmdb-sys-0.8.0-android-fix"
 replace-with = "vendored-sources"
 
+[source."https://github.com/mykmelez/rkv"]
+git = "https://github.com/mykmelez/rkv"
+branch = "owned-value"
+replace-with = "vendored-sources"
+
 [source.vendored-sources]
 directory = '@top_srcdir@/third_party/rust'
 
