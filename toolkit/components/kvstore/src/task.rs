@@ -9,8 +9,8 @@ use error::KeyValueError;
 use moz_task::Task;
 use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE};
 use nsstring::nsCString;
-use owned_value::{owned_to_variant, value_to_owned};
-use rkv::{Manager, OwnedValue, Rkv, SingleStore, StoreError, StoreOptions, Value};
+use owned_value::{owned_to_value, owned_to_variant};
+use rkv::{Manager, OwnedValue, Rkv, SingleStore, StoreError, StoreOptions};
 use std::{
     path::Path,
     str,
@@ -170,21 +170,7 @@ impl Task for PutTask {
             let env = self.rkv.read()?;
             let mut writer = env.write()?;
 
-            let value = match self.value {
-                OwnedValue::Bool(val) => Value::Bool(val),
-                OwnedValue::I64(val) => Value::I64(val),
-                OwnedValue::F64(val) => Value::F64(val),
-                OwnedValue::Str(ref val) => Value::Str(&val),
-
-                // NB: kvstore doesn't support these types of OwnedValue, but we still
-                // have to match them in order to be an exhaustive pattern.
-                OwnedValue::Instant(val) => Value::Instant(val),
-                OwnedValue::Json(ref val) => Value::Str(&val),
-                OwnedValue::U64(_) => panic!("not supported; shouldn't happen"),
-                OwnedValue::Uuid(_) => panic!("not supported; shouldn't happen"),
-                OwnedValue::Blob(_) => panic!("not supported; shouldn't happen"),
-            };
-
+            let value = owned_to_value(&self.value)?;
             self.store.put(&mut writer, key, &value)?;
             writer.commit()?;
 
@@ -223,9 +209,8 @@ impl GetTask {
     }
 
     fn convert(&self, result: Option<OwnedValue>) -> Result<RefPtr<nsIVariant>, KeyValueError> {
-        // TODO: refactor with owned_to_variant in owned_value.rs.
         Ok(match result {
-            Some(val) => owned_to_variant(val),
+            Some(val) => owned_to_variant(val)?,
             None => ().into_variant(),
         })
     }
@@ -242,13 +227,8 @@ impl Task for GetTask {
                 let reader = env.read()?;
                 let value = self.store.get(&reader, key)?;
 
-                // TODO: refactor with value_to_owned in owned_value.rs.
                 Ok(match value {
-                    Some(Value::Bool(val)) => Some(OwnedValue::Bool(val)),
-                    Some(Value::I64(val)) => Some(OwnedValue::I64(val)),
-                    Some(Value::F64(val)) => Some(OwnedValue::F64(val)),
-                    Some(Value::Str(val)) => Some(OwnedValue::Str(val.to_owned())),
-                    Some(_value) => return Err(KeyValueError::UnexpectedValue),
+                    Some(value) => Some(OwnedValue::from(value)),
                     None => match self.default_value {
                         Some(ref val) => Some(val.clone()),
                         None => None,
@@ -446,10 +426,10 @@ impl Task for EnumerateTask {
                     })
                     // Convert the key/value pair to owned.
                     .map(|result| match result {
-                        Ok((key, val)) => match (key, value_to_owned(val)) {
-                            (Ok(key), Ok(val)) => Ok((key.to_owned(), val)),
+                        Ok((key, val)) => match (key, val) {
+                            (Ok(key), Some(val)) => Ok((key.to_owned(), OwnedValue::from(val))),
                             (Err(err), _) => Err(err.into()),
-                            (_, Err(err)) => Err(err),
+                            (_, None) => Err(KeyValueError::UnexpectedValue),
                         },
                         Err(err) => Err(KeyValueError::StoreError(err)),
                     })
