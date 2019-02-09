@@ -7,22 +7,12 @@ use libc::int32_t;
 use nserror::NsresultExt;
 use nsstring::nsString;
 use ordered_float::OrderedFloat;
-use rkv::Value;
+use rkv::{OwnedValue, Value};
 use storage_variant::{
     GetDataType, VariantType, DATA_TYPE_BOOL, DATA_TYPE_DOUBLE, DATA_TYPE_EMPTY, DATA_TYPE_INT32,
     DATA_TYPE_VOID, DATA_TYPE_WSTRING,
 };
 use xpcom::{interfaces::nsIVariant, RefPtr};
-
-// This is implemented in rkv but is incomplete there.  We implement a subset
-// to give KeyValuePair ownership over its value, so it can #[derive(xpcom)].
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum OwnedValue {
-    Bool(bool),
-    I64(i64),
-    F64(OrderedFloat<f64>),
-    Str(String),
-}
 
 pub fn value_to_owned(value: Option<Value>) -> Result<OwnedValue, KeyValueError> {
     match value {
@@ -41,6 +31,14 @@ pub fn owned_to_variant(owned: OwnedValue) -> RefPtr<nsIVariant> {
         OwnedValue::I64(val) => val.into_variant(),
         OwnedValue::F64(OrderedFloat(val)) => val.into_variant(),
         OwnedValue::Str(ref val) => nsString::from(val).into_variant(),
+
+        // NB: kvstore doesn't support these types of OwnedValue, but we still
+        // have to match them in order to be an exhaustive pattern.
+        OwnedValue::Instant(val) => val.into_variant(),
+        OwnedValue::Json(ref val) => nsString::from(val).into_variant(),
+        OwnedValue::U64(_) => panic!("not supported; shouldn't happen"),
+        OwnedValue::Uuid(_) => panic!("not supported; shouldn't happen"),
+        OwnedValue::Blob(_) => panic!("not supported; shouldn't happen"),
     }
 }
 

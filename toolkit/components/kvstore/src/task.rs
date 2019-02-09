@@ -8,9 +8,9 @@ use crossbeam_utils::atomic::AtomicCell;
 use error::KeyValueError;
 use moz_task::Task;
 use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE};
-use nsstring::{nsCString, nsString};
-use owned_value::{value_to_owned, OwnedValue};
-use rkv::{Manager, Rkv, SingleStore, StoreError, StoreOptions, Value};
+use nsstring::nsCString;
+use owned_value::{owned_to_variant, value_to_owned};
+use rkv::{Manager, OwnedValue, Rkv, SingleStore, StoreError, StoreOptions, Value};
 use std::{
     path::Path,
     str,
@@ -175,6 +175,14 @@ impl Task for PutTask {
                 OwnedValue::I64(val) => Value::I64(val),
                 OwnedValue::F64(val) => Value::F64(val),
                 OwnedValue::Str(ref val) => Value::Str(&val),
+
+                // NB: kvstore doesn't support these types of OwnedValue, but we still
+                // have to match them in order to be an exhaustive pattern.
+                OwnedValue::Instant(val) => Value::Instant(val),
+                OwnedValue::Json(ref val) => Value::Str(&val),
+                OwnedValue::U64(_) => panic!("not supported; shouldn't happen"),
+                OwnedValue::Uuid(_) => panic!("not supported; shouldn't happen"),
+                OwnedValue::Blob(_) => panic!("not supported; shouldn't happen"),
             };
 
             self.store.put(&mut writer, key, &value)?;
@@ -217,10 +225,7 @@ impl GetTask {
     fn convert(&self, result: Option<OwnedValue>) -> Result<RefPtr<nsIVariant>, KeyValueError> {
         // TODO: refactor with owned_to_variant in owned_value.rs.
         Ok(match result {
-            Some(OwnedValue::Bool(val)) => val.into_variant(),
-            Some(OwnedValue::I64(val)) => val.into_variant(),
-            Some(OwnedValue::F64(val)) => val.into_variant(),
-            Some(OwnedValue::Str(ref val)) => nsString::from(val).into_variant(),
+            Some(val) => owned_to_variant(val),
             None => ().into_variant(),
         })
     }

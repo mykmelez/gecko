@@ -28,8 +28,8 @@ use libc::c_void;
 use moz_task::{create_thread, TaskRunnable};
 use nserror::{nsresult, NS_ERROR_FAILURE, NS_ERROR_NO_AGGREGATION, NS_OK};
 use nsstring::{nsACString, nsCString};
-use owned_value::{owned_to_variant, variant_to_owned, OwnedValue};
-use rkv::{Rkv, SingleStore};
+use owned_value::{owned_to_variant, variant_to_owned};
+use rkv::{OwnedValue, Rkv, SingleStore};
 use std::{
     ptr,
     sync::{Arc, RwLock},
