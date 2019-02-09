@@ -2174,7 +2174,7 @@ dependencies = [
 [[package]]
 name = "rkv"
 version = "0.9.1"
-source = "git+https://github.com/mykmelez/rkv?branch=owned-value#e3531ee507ab9a0ad88a14bc7bba27b5986ff784"
+source = "git+https://github.com/mykmelez/rkv?branch=owned-value#ffe5e1f226d96c27e70b092646c378d8b38cabce"
 dependencies = [
  "arrayref 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "bincode 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
