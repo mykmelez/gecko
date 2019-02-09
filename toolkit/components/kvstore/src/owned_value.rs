@@ -18,7 +18,7 @@ pub fn owned_to_value<'a>(owned: &'a OwnedValue) -> Result<Value<'a>, KeyValueEr
     match *owned {
         OwnedValue::Bool(val) => Ok(Value::Bool(val)),
         OwnedValue::I64(val) => Ok(Value::I64(val)),
-        OwnedValue::F64(val) => Ok(Value::F64(val)),
+        OwnedValue::F64(val) => Ok(Value::F64(OrderedFloat::from(val))),
         OwnedValue::Str(ref val) => Ok(Value::Str(&val)),
 
         // kvstore doesn't (yet?) support these types of OwnedValue,
@@ -36,7 +36,7 @@ pub fn owned_to_variant(owned: OwnedValue) -> Result<RefPtr<nsIVariant>, KeyValu
     match owned {
         OwnedValue::Bool(val) => Ok(val.into_variant()),
         OwnedValue::I64(val) => Ok(val.into_variant()),
-        OwnedValue::F64(OrderedFloat(val)) => Ok(val.into_variant()),
+        OwnedValue::F64(val) => Ok(val.into_variant()),
         OwnedValue::Str(ref val) => Ok(nsString::from(val).into_variant()),
 
         // kvstore doesn't (yet?) support these types of OwnedValue,

@@ -96,12 +96,12 @@ pub enum Value<'s> {
     Blob(&'s [u8]),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum OwnedValue {
     Bool(bool),
     U64(u64),
     I64(i64),
-    F64(OrderedFloat<f64>),
+    F64(f64),
     Instant(i64), // Millisecond-precision timestamp.
     Uuid(Uuid),
     Str(String),
@@ -123,7 +123,7 @@ impl<'a> From<Value<'a>> for OwnedValue {
             Value::Bool(val) => OwnedValue::Bool(val),
             Value::U64(val) => OwnedValue::U64(val),
             Value::I64(val) => OwnedValue::I64(val),
-            Value::F64(val) => OwnedValue::F64(val),
+            Value::F64(val) => OwnedValue::F64(*val),
             Value::Instant(val) => OwnedValue::Instant(val),
             Value::Uuid(val) => OwnedValue::Uuid(Uuid::from_bytes(*val)),
             Value::Str(val) => OwnedValue::Str(val.to_owned()),
@@ -207,7 +207,7 @@ impl<'s> From<&'s Value<'s>> for OwnedValue {
             Value::Bool(ref v) => OwnedValue::Bool(*v),
             Value::U64(ref v) => OwnedValue::U64(*v),
             Value::I64(ref v) => OwnedValue::I64(*v),
-            Value::F64(ref v) => OwnedValue::F64(*v),
+            Value::F64(ref v) => OwnedValue::F64(**v),
             Value::Instant(ref v) => OwnedValue::Instant(*v),
             Value::Uuid(ref v) => OwnedValue::Uuid(Uuid::from_bytes(**v)),
             Value::Str(ref v) => OwnedValue::Str(v.to_string()),
