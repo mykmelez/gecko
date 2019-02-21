@@ -210,9 +210,9 @@
     }
 
     buildPopup(aPopup) {
-      // We no longer cache the picker content, remove the old content.
-      while (aPopup.childNodes.length > 2)
-        aPopup.firstChild.remove();
+      // We no longer cache the picker content, remove the old content related to
+      // the cols - menuitem and separator should stay.
+      aPopup.querySelectorAll("[colindex]").forEach((e) => { e.remove(); });
 
       var refChild = aPopup.firstChild;
 
@@ -237,24 +237,18 @@
       }
 
       var hidden = !tree.enableColumnDrag;
-      const anonids = ["menuseparator", "menuitem"];
-      for (var i = 0; i < anonids.length; i++) {
-        var element = this.querySelector(`[anonid=\"${anonids[i]}\"]`);
-        element.hidden = hidden;
-      }
+      aPopup.querySelectorAll(":not([colindex])").forEach((e) => { e.hidden = hidden; });
     }
   }
 
   customElements.define("treecolpicker", MozTreecolPicker);
 
   class MozTreecol extends MozElements.BaseControl {
-    static get observedAttributes() {
-      return [
-        "label",
-        "sortdirection",
-        "hideheader",
-        "crop",
-      ];
+    static get inheritedAttributes() {
+      return {
+        ".treecol-sortdirection": "sortdirection,hidden=hideheader",
+        ".treecol-text": "value=label,crop",
+      };
     }
 
     get content() {
@@ -320,28 +314,7 @@
 
       this.textContent = "";
       this.appendChild(this.content);
-
-      this._updateAttributes();
-    }
-
-    attributeChangedCallback() {
-      if (this.isConnectedAndReady) {
-        this._updateAttributes();
-      }
-    }
-
-    _updateAttributes() {
-      let image = this.querySelector(".treecol-sortdirection");
-      let label = this.querySelector(".treecol-text");
-
-      this.inheritAttribute(image, "sortdirection");
-      this.inheritAttribute(image, "hidden=hideheader");
-      this.inheritAttribute(label, "value=label");
-
-      // Don't remove the attribute on the child if it's los on the host.
-      if (this.hasAttribute("crop")) {
-        this.inheritAttribute(label, "crop");
-      }
+      this.initializeAttributeInheritance();
     }
 
     set ordinal(val) {
@@ -493,6 +466,12 @@
   customElements.define("treecol", MozTreecol);
 
   class MozTreecols extends MozElements.BaseControl {
+    static get inheritedAttributes() {
+      return {
+        "treecolpicker": "tooltiptext=pickertooltiptext",
+      };
+    }
+
     connectedCallback() {
       if (this.delayConnectedCallback()) {
         return;
@@ -502,10 +481,8 @@
         this.appendChild(MozXULElement.parseXULToFragment(`
           <treecolpicker class="treecol-image" fixed="true"></treecolpicker>
         `));
+        this.initializeAttributeInheritance();
       }
-
-      let treecolpicker = this.querySelector("treecolpicker");
-      this.inheritAttribute(treecolpicker, "tooltiptext=pickertooltiptext");
 
       // Set resizeafter="farthest" on the splitters if nothing else has been
       // specified.

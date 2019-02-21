@@ -236,8 +236,7 @@ let FormAutofillDoorhanger = {
    */
   _appendPrivacyPanelLink(content, message, link) {
     let chromeDoc = content.ownerDocument;
-    let privacyLinkElement = chromeDoc.createXULElement("label");
-    privacyLinkElement.className = "text-link";
+    let privacyLinkElement = chromeDoc.createXULElement("label", {is: "text-link"});
     privacyLinkElement.setAttribute("useoriginprincipal", true);
     privacyLinkElement.setAttribute("href", link || "about:preferences#privacy-form-autofill");
     privacyLinkElement.setAttribute("value", message);
@@ -388,7 +387,7 @@ let FormAutofillDoorhanger = {
           notificationContent.setAttribute("orient", "vertical");
           this._appendDescription(notificationContent, descriptionLabel, descriptionIcon);
           this._appendPrivacyPanelLink(notificationContent, linkMessage, spotlightURL);
-          notification.append(notificationContent);
+          notification.appendNotificationContent(notificationContent);
         }
         this._updateDescription(notificationContent, description);
       };

@@ -247,20 +247,6 @@ class nsIPresShell : public nsStubDocumentObserver {
     if (!mIsDestroying) mFrameArena.FreeByObjectID(aID, aPtr);
   }
 
-  template <typename T>
-  void RegisterArenaRefPtr(mozilla::ArenaRefPtr<T>* aPtr) {
-    mFrameArena.RegisterArenaRefPtr(aPtr);
-  }
-
-  template <typename T>
-  void DeregisterArenaRefPtr(mozilla::ArenaRefPtr<T>* aPtr) {
-    mFrameArena.DeregisterArenaRefPtr(aPtr);
-  }
-
-  void ClearArenaRefPtrs(mozilla::ArenaObjectID aObjectID) {
-    mFrameArena.ClearArenaRefPtrs(aObjectID);
-  }
-
   Document* GetDocument() const { return mDocument; }
 
   nsPresContext* GetPresContext() const { return mPresContext; }
@@ -1718,6 +1704,7 @@ class nsIPresShell : public nsStubDocumentObserver {
   }
 
   nsPoint GetLayoutViewportOffset() const;
+  nsSize GetLayoutViewportSize() const;
 
   virtual void WindowSizeMoveDone() = 0;
   virtual void SysColorChanged() = 0;
@@ -1750,6 +1737,18 @@ class nsIPresShell : public nsStubDocumentObserver {
                                          uint32_t aSheetType);
   void NotifyStyleSheetServiceSheetRemoved(mozilla::StyleSheet* aSheet,
                                            uint32_t aSheetType);
+
+  struct MOZ_RAII AutoAssertNoFlush {
+    explicit AutoAssertNoFlush(nsIPresShell& aShell)
+        : mShell(aShell), mOldForbidden(mShell.mForbiddenToFlush) {
+      mShell.mForbiddenToFlush = true;
+    }
+
+    ~AutoAssertNoFlush() { mShell.mForbiddenToFlush = mOldForbidden; }
+
+    nsIPresShell& mShell;
+    const bool mOldForbidden;
+  };
 
  protected:
   friend class nsRefreshDriver;
@@ -1983,6 +1982,11 @@ class nsIPresShell : public nsStubDocumentObserver {
   bool mIsDestroying : 1;
   bool mIsReflowing : 1;
   bool mIsObservingDocument : 1;
+  // Whether we shouldn't ever get to FlushPendingNotifications. This flag is
+  // meant only to sanity-check / assert that FlushPendingNotifications doesn't
+  // happen during certain periods of time. It shouldn't be made public nor used
+  // for other purposes.
+  bool mForbiddenToFlush : 1;
 
   // We've been disconnected from the document.  We will refuse to paint the
   // document until either our timer fires or all frames are constructed.

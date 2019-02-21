@@ -27,7 +27,8 @@ class nsSubDocumentFrame final : public nsAtomicContainerFrame,
  public:
   NS_DECL_FRAMEARENA_HELPERS(nsSubDocumentFrame)
 
-  explicit nsSubDocumentFrame(ComputedStyle* aStyle);
+  explicit nsSubDocumentFrame(ComputedStyle* aStyle,
+                              nsPresContext* aPresContext);
 
 #ifdef DEBUG_FRAME_DUMP
   void List(FILE* out = stderr, const char* aPrefix = "",
@@ -117,15 +118,13 @@ class nsSubDocumentFrame final : public nsAtomicContainerFrame,
     }
   }
 
-  mozilla::layout::RenderFrame* GetRenderFrame() const;
+  nsFrameLoader* FrameLoader() const;
 
  protected:
   friend class AsyncFrameInit;
 
   // Helper method to look up the HTML marginwidth & marginheight attributes.
   mozilla::CSSIntSize GetMarginAttributes();
-
-  nsFrameLoader* FrameLoader() const;
 
   bool IsInline() { return mIsInline; }
 

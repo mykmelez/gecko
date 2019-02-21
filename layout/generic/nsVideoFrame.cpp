@@ -36,7 +36,7 @@ using namespace mozilla::gfx;
 
 nsIFrame* NS_NewHTMLVideoFrame(nsIPresShell* aPresShell,
                                ComputedStyle* aStyle) {
-  return new (aPresShell) nsVideoFrame(aStyle);
+  return new (aPresShell) nsVideoFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsVideoFrame)
@@ -71,8 +71,8 @@ static void SwapScaleWidthHeightForRotation(IntSize& aSize,
   }
 }
 
-nsVideoFrame::nsVideoFrame(ComputedStyle* aStyle)
-    : nsContainerFrame(aStyle, kClassID) {
+nsVideoFrame::nsVideoFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+    : nsContainerFrame(aStyle, aPresContext, kClassID) {
   EnableVisibilityTracking();
 }
 
@@ -547,8 +547,7 @@ void nsVideoFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
       nsDisplayListBuilder::AutoBuildingDisplayList buildingForChild(
           aBuilder, child,
           aBuilder->GetVisibleRect() - child->GetOffsetTo(this),
-          aBuilder->GetDirtyRect() - child->GetOffsetTo(this),
-          aBuilder->IsAtRootOfPseudoStackingContext());
+          aBuilder->GetDirtyRect() - child->GetOffsetTo(this));
 
       child->BuildDisplayListForStackingContext(aBuilder, aLists.Content());
     }

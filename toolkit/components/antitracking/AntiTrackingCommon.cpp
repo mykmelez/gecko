@@ -9,8 +9,10 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/ipc/MessageChannel.h"
 #include "mozilla/AbstractThread.h"
+#include "mozilla/HashFunctions.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Logging.h"
+#include "mozilla/MruCache.h"
 #include "mozilla/Pair.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozIThirdPartyUtil.h"
@@ -63,6 +65,9 @@ static const uint32_t kMaxConsoleOutputDelayMs = 100;
   PR_END_MACRO
 
 namespace {
+
+UniquePtr<nsTArray<AntiTrackingCommon::AntiTrackingSettingsChangedCallback>>
+    gSettingsChangedCallbacks;
 
 bool GetParentPrincipalAndTrackingOrigin(
     nsGlobalWindowInner* a3rdPartyTrackingWindow,
@@ -117,16 +122,36 @@ bool GetParentPrincipalAndTrackingOrigin(
 };
 
 void CreatePermissionKey(const nsCString& aTrackingOrigin,
+                         nsACString& aPermissionKey) {
+  MOZ_ASSERT(aPermissionKey.IsEmpty());
+
+  static const nsLiteralCString prefix =
+      NS_LITERAL_CSTRING(ANTITRACKING_PERM_KEY "^");
+
+  aPermissionKey.SetCapacity(prefix.Length() + aTrackingOrigin.Length());
+  aPermissionKey.Append(prefix);
+  aPermissionKey.Append(aTrackingOrigin);
+}
+
+void CreatePermissionKey(const nsCString& aTrackingOrigin,
                          const nsCString& aGrantedOrigin,
                          nsACString& aPermissionKey) {
+  MOZ_ASSERT(aPermissionKey.IsEmpty());
+
   if (aTrackingOrigin == aGrantedOrigin) {
-    aPermissionKey =
-        nsPrintfCString(ANTITRACKING_PERM_KEY "^%s", aTrackingOrigin.get());
+    CreatePermissionKey(aTrackingOrigin, aPermissionKey);
     return;
   }
 
-  aPermissionKey = nsPrintfCString(ANTITRACKING_PERM_KEY "^%s^%s",
-                                   aTrackingOrigin.get(), aGrantedOrigin.get());
+  static const nsLiteralCString prefix =
+      NS_LITERAL_CSTRING(ANTITRACKING_PERM_KEY "^");
+
+  aPermissionKey.SetCapacity(prefix.Length() + 1 + aTrackingOrigin.Length() +
+                             aGrantedOrigin.Length());
+  aPermissionKey.Append(prefix);
+  aPermissionKey.Append(aTrackingOrigin);
+  aPermissionKey.AppendLiteral("^");
+  aPermissionKey.Append(aGrantedOrigin);
 }
 
 // This internal method returns ACCESS_DENY if the access is denied,
@@ -200,6 +225,70 @@ int32_t CookiesBehavior(nsIPrincipal* aTopLevelPrincipal,
   return StaticPrefs::network_cookie_cookieBehavior();
 }
 
+struct ContentBlockingAllowListKey {
+  ContentBlockingAllowListKey() : mHash(mozilla::HashGeneric(uintptr_t(0))) {}
+
+  // Ensure that we compute a different hash for window and channel pointers of
+  // the same numeric value, in the off chance that we get unlucky and encounter
+  // a case where the allocator reallocates a window object where a channel used
+  // to live and vice versa.
+  explicit ContentBlockingAllowListKey(nsPIDOMWindowInner* aWindow)
+      : mHash(mozilla::AddToHash(uintptr_t(aWindow),
+                                 mozilla::HashString("window"))) {}
+  explicit ContentBlockingAllowListKey(nsIChannel* aChannel)
+      : mHash(mozilla::AddToHash(uintptr_t(aChannel),
+                                 mozilla::HashString("channel"))) {}
+
+  ContentBlockingAllowListKey(const ContentBlockingAllowListKey& aRHS)
+      : mHash(aRHS.mHash) {}
+
+  bool operator==(const ContentBlockingAllowListKey& aRHS) const {
+    return mHash == aRHS.mHash;
+  }
+
+  HashNumber GetHash() const { return mHash; }
+
+ private:
+  HashNumber mHash;
+};
+
+struct ContentBlockingAllowListEntry {
+  ContentBlockingAllowListEntry() : mResult(false) {}
+  ContentBlockingAllowListEntry(nsPIDOMWindowInner* aWindow, bool aResult)
+      : mKey(aWindow), mResult(aResult) {}
+  ContentBlockingAllowListEntry(nsIChannel* aChannel, bool aResult)
+      : mKey(aChannel), mResult(aResult) {}
+
+  ContentBlockingAllowListKey mKey;
+  bool mResult;
+};
+
+struct ContentBlockingAllowListCache
+    : MruCache<ContentBlockingAllowListKey, ContentBlockingAllowListEntry,
+               ContentBlockingAllowListCache> {
+  static HashNumber Hash(const ContentBlockingAllowListKey& aKey) {
+    return aKey.GetHash();
+  }
+  static bool Match(const ContentBlockingAllowListKey& aKey,
+                    const ContentBlockingAllowListEntry& aValue) {
+    return aValue.mKey == aKey;
+  }
+};
+
+ContentBlockingAllowListCache& GetContentBlockingAllowListCache() {
+  static bool initialized = false;
+  static ContentBlockingAllowListCache cache;
+  if (!initialized) {
+    AntiTrackingCommon::OnAntiTrackingSettingsChanged([&] {
+      // Drop everything in the cache, since the result of content blocking
+      // allow list checks may change past this point.
+      cache.Clear();
+    });
+    initialized = true;
+  }
+  return cache;
+}
+
 bool CheckContentBlockingAllowList(nsIURI* aTopWinURI,
                                    bool aIsPrivateBrowsing) {
   bool isAllowed = false;
@@ -224,35 +313,65 @@ bool CheckContentBlockingAllowList(nsIURI* aTopWinURI,
 }
 
 bool CheckContentBlockingAllowList(nsPIDOMWindowInner* aWindow) {
+  ContentBlockingAllowListKey cacheKey(aWindow);
+  auto entry = GetContentBlockingAllowListCache().Lookup(cacheKey);
+  if (entry) {
+    // We've recently performed a content blocking allow list check for this
+    // window, so let's quickly return the answer instead of continuing with the
+    // rest of this potentially expensive computation.
+    return entry.Data().mResult;
+  }
+
   nsPIDOMWindowOuter* top = aWindow->GetScriptableTop();
   if (top) {
     nsIURI* topWinURI = top->GetDocumentURI();
     Document* doc = top->GetExtantDoc();
     bool isPrivateBrowsing =
         doc ? nsContentUtils::IsInPrivateBrowsing(doc) : false;
-    return CheckContentBlockingAllowList(topWinURI, isPrivateBrowsing);
+
+    const bool result =
+        CheckContentBlockingAllowList(topWinURI, isPrivateBrowsing);
+
+    entry.Set(ContentBlockingAllowListEntry(aWindow, result));
+
+    return result;
   }
 
   LOG(
       ("Could not check the content blocking allow list because the top "
        "window wasn't accessible"));
+  entry.Set(ContentBlockingAllowListEntry(aWindow, false));
   return false;
 }
 
 bool CheckContentBlockingAllowList(nsIHttpChannel* aChannel) {
+  ContentBlockingAllowListKey cacheKey(aChannel);
+  auto entry = GetContentBlockingAllowListCache().Lookup(cacheKey);
+  if (entry) {
+    // We've recently performed a content blocking allow list check for this
+    // channel, so let's quickly return the answer instead of continuing with
+    // the rest of this potentially expensive computation.
+    return entry.Data().mResult;
+  }
+
   nsCOMPtr<nsIHttpChannelInternal> chan = do_QueryInterface(aChannel);
   if (chan) {
     nsCOMPtr<nsIURI> topWinURI;
     nsresult rv = chan->GetTopWindowURI(getter_AddRefs(topWinURI));
     if (NS_SUCCEEDED(rv)) {
-      return CheckContentBlockingAllowList(topWinURI,
-                                           NS_UsePrivateBrowsing(aChannel));
+      const bool result = CheckContentBlockingAllowList(
+          topWinURI, NS_UsePrivateBrowsing(aChannel));
+
+      entry.Set(ContentBlockingAllowListEntry(aChannel, result));
+
+      return result;
     }
   }
 
   LOG(
       ("Could not check the content blocking allow list because the top "
        "window wasn't accessible"));
+  entry.Set(ContentBlockingAllowListEntry(aChannel, false));
   return false;
 }
 
@@ -521,6 +640,77 @@ TemporaryAccessGrantObserver::Observe(nsISupports* aSubject, const char* aTopic,
   }
 
   return NS_OK;
+}
+
+class SettingsChangeObserver final : public nsIObserver {
+  ~SettingsChangeObserver() = default;
+
+ public:
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIOBSERVER
+
+  static void PrivacyPrefChanged(const char* aPref = nullptr, void* = nullptr);
+
+ private:
+  static void RunAntiTrackingSettingsChangedCallbacks();
+};
+
+NS_IMPL_ISUPPORTS(SettingsChangeObserver, nsIObserver)
+
+NS_IMETHODIMP SettingsChangeObserver::Observe(nsISupports* aSubject,
+                                              const char* aTopic,
+                                              const char16_t* aData) {
+  if (!strcmp(aTopic, "xpcom-shutdown")) {
+    nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
+    if (obs) {
+      obs->RemoveObserver(this, "perm-added");
+      obs->RemoveObserver(this, "perm-changed");
+      obs->RemoveObserver(this, "perm-cleared");
+      obs->RemoveObserver(this, "perm-deleted");
+      obs->RemoveObserver(this, "xpcom-shutdown");
+
+      Preferences::UnregisterPrefixCallback(
+          SettingsChangeObserver::PrivacyPrefChanged,
+          "browser.contentblocking.");
+      Preferences::UnregisterPrefixCallback(
+          SettingsChangeObserver::PrivacyPrefChanged, "network.cookie.");
+      Preferences::UnregisterPrefixCallback(
+          SettingsChangeObserver::PrivacyPrefChanged, "privacy.");
+
+      gSettingsChangedCallbacks = nullptr;
+    }
+  } else {
+    nsCOMPtr<nsIPermission> perm = do_QueryInterface(aSubject);
+    if (perm) {
+      nsAutoCString type;
+      nsresult rv = perm->GetType(type);
+      if (NS_WARN_IF(NS_FAILED(rv)) ||
+          type.EqualsLiteral(USER_INTERACTION_PERM)) {
+        // Ignore failures or notifications that have been sent because of
+        // user interactions.
+        return NS_OK;
+      }
+    }
+
+    RunAntiTrackingSettingsChangedCallbacks();
+  }
+
+  return NS_OK;
+}
+
+// static
+void SettingsChangeObserver::PrivacyPrefChanged(const char* aPref,
+                                                void* aClosure) {
+  RunAntiTrackingSettingsChangedCallbacks();
+}
+
+// static
+void SettingsChangeObserver::RunAntiTrackingSettingsChangedCallbacks() {
+  if (gSettingsChangedCallbacks) {
+    for (auto& callback : *gSettingsChangedCallbacks) {
+      callback();
+    }
+  }
 }
 
 }  // namespace
@@ -851,7 +1041,7 @@ bool AntiTrackingCommon::IsStorageAccessPermission(nsIPermission* aPermission,
   // shorter permission key and will then do a prefix match on the type of the
   // input permission to see if it is a storage access permission or not.
   nsAutoCString permissionKey;
-  CreatePermissionKey(origin, origin, permissionKey);
+  CreatePermissionKey(origin, permissionKey);
 
   nsAutoCString type;
   rv = aPermission->GetType(type);
@@ -1082,12 +1272,7 @@ bool AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(
       ("Computing whether channel %p has access to URI %s", aChannel, _spec),
       channelURI);
 
-  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
-  if (!loadInfo) {
-    LOG(("No loadInfo, bail out early"));
-    return true;
-  }
-
+  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
   // We need to find the correct principal to check the cookie permission. For
   // third-party contexts, we want to check if the top-level window has a custom
   // cookie permission.
@@ -1375,7 +1560,7 @@ bool AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(
   }
 
   nsAutoCString type;
-  CreatePermissionKey(origin, origin, type);
+  CreatePermissionKey(origin, type);
 
   nsPermissionManager* permManager = nsPermissionManager::GetInstance();
   if (NS_WARN_IF(!permManager)) {
@@ -1654,6 +1839,41 @@ nsresult AntiTrackingCommon::IsOnContentBlockingAllowList(
   }
 
   return result == nsIPermissionManager::ALLOW_ACTION;
+}
+
+// static
+void AntiTrackingCommon::OnAntiTrackingSettingsChanged(
+    const AntiTrackingCommon::AntiTrackingSettingsChangedCallback& aCallback) {
+  static bool initialized = false;
+  if (!initialized) {
+    // It is possible that while we have some data in our cache, something
+    // changes in our environment that causes the anti-tracking checks below to
+    // change their response.  Therefore, we need to clear our cache when we
+    // detect a related change.
+    Preferences::RegisterPrefixCallback(
+        SettingsChangeObserver::PrivacyPrefChanged, "browser.contentblocking.");
+    Preferences::RegisterPrefixCallback(
+        SettingsChangeObserver::PrivacyPrefChanged, "network.cookie.");
+    Preferences::RegisterPrefixCallback(
+        SettingsChangeObserver::PrivacyPrefChanged, "privacy.");
+
+    nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
+    if (obs) {
+      RefPtr<SettingsChangeObserver> observer = new SettingsChangeObserver();
+      obs->AddObserver(observer, "perm-added", false);
+      obs->AddObserver(observer, "perm-changed", false);
+      obs->AddObserver(observer, "perm-cleared", false);
+      obs->AddObserver(observer, "perm-deleted", false);
+      obs->AddObserver(observer, "xpcom-shutdown", false);
+    }
+
+    gSettingsChangedCallbacks =
+        MakeUnique<nsTArray<AntiTrackingSettingsChangedCallback>>();
+
+    initialized = true;
+  }
+
+  gSettingsChangedCallbacks->AppendElement(aCallback);
 }
 
 /* static */ already_AddRefed<nsIURI>

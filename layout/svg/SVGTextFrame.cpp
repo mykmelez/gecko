@@ -2911,7 +2911,7 @@ NS_QUERYFRAME_TAIL_INHERITING(nsSVGDisplayContainerFrame)
 // Implementation
 
 nsIFrame* NS_NewSVGTextFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) SVGTextFrame(aStyle);
+  return new (aPresShell) SVGTextFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(SVGTextFrame)
@@ -3520,7 +3520,7 @@ void SVGTextFrame::ReflowSVG() {
     // Due to rounding issues when we have a transform applied, we sometimes
     // don't include an additional row of pixels.  For now, just inflate our
     // covered region.
-    mRect.Inflate(presContext->AppUnitsPerDevPixel() / mLastContextScale);
+    mRect.Inflate(ceil(presContext->AppUnitsPerDevPixel() / mLastContextScale));
   }
 
   if (mState & NS_FRAME_FIRST_REFLOW) {
@@ -4547,8 +4547,7 @@ static void ShiftAnchoredChunk(nsTArray<CharPosition>& aCharPositions,
 }
 
 void SVGTextFrame::AdjustChunksForLineBreaks() {
-  nsBlockFrame* block =
-      nsLayoutUtils::GetAsBlock(PrincipalChildList().FirstChild());
+  nsBlockFrame* block = do_QueryFrame(PrincipalChildList().FirstChild());
   NS_ASSERTION(block, "expected block frame");
 
   nsBlockFrame::LineIterator line = block->LinesBegin();

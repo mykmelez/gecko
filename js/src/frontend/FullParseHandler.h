@@ -36,8 +36,7 @@ class FullParseHandler {
   ParseNodeAllocator allocator;
 
   ParseNode* allocParseNode(size_t size) {
-    MOZ_ASSERT(size == sizeof(ParseNode));
-    return static_cast<ParseNode*>(allocator.allocNode());
+    return static_cast<ParseNode*>(allocator.allocNode(size));
   }
 
   /*
@@ -131,7 +130,6 @@ class FullParseHandler {
     return new_<NumericLiteral>(value, decimalPoint, pos);
   }
 
-#ifdef ENABLE_BIGINT
   // The Boxer object here is any object that can allocate BigIntBoxes.
   // Specifically, a Boxer has a .newBigIntBox(T) method that accepts a
   // BigInt* argument and returns a BigIntBox*.
@@ -143,7 +141,6 @@ class FullParseHandler {
     }
     return new_<BigIntLiteral>(box, pos);
   }
-#endif
 
   BooleanLiteralType newBooleanLiteral(bool cond, const TokenPos& pos) {
     return new_<BooleanLiteral>(cond, pos);
@@ -785,6 +782,12 @@ class FullParseHandler {
 
     return newBinary(ParseNodeKind::Colon, key, value,
                      AccessorTypeToJSOp(atype));
+  }
+
+  BinaryNodeType newShorthandPropertyDefinition(Node key, Node value) {
+    MOZ_ASSERT(isUsableAsObjectPropertyName(key));
+
+    return newBinary(ParseNodeKind::Shorthand, key, value, JSOP_INITPROP);
   }
 
   void setFunctionFormalParametersAndBody(FunctionNodeType funNode,

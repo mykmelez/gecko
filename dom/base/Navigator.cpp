@@ -1220,8 +1220,8 @@ bool Navigator::SendBeaconInternal(const nsAString& aUrl,
   channel->SetLoadGroup(loadGroup);
 
   RefPtr<BeaconStreamListener> beaconListener = new BeaconStreamListener();
-  rv = channel->AsyncOpen2(beaconListener);
-  // do not throw if security checks fail within asyncOpen2
+  rv = channel->AsyncOpen(beaconListener);
+  // do not throw if security checks fail within asyncOpen
   NS_ENSURE_SUCCESS(rv, false);
 
   // make the beaconListener hold a strong reference to the loadgroup
@@ -1688,10 +1688,7 @@ nsresult Navigator::GetUserAgent(nsPIDOMWindowInner* aWindow,
   // specific OS version, etc.
   if (!aIsCallerChrome && nsContentUtils::ShouldResistFingerprinting()) {
     nsAutoCString spoofedUA;
-    nsresult rv = nsRFPService::GetSpoofedUserAgent(spoofedUA, false);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
+    nsRFPService::GetSpoofedUserAgent(spoofedUA, false);
     CopyASCIItoUTF16(spoofedUA, aUserAgent);
     return NS_OK;
   }

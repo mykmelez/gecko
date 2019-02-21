@@ -217,6 +217,7 @@ impl<'a> DisplayListFlattener<'a> {
             &mut root_pipeline.display_list.iter(),
             root_pipeline.pipeline_id,
             LayoutVector2D::zero(),
+            true,
         );
 
         flattener.pop_stacking_context();
@@ -470,6 +471,7 @@ impl<'a> DisplayListFlattener<'a> {
         traversal: &mut BuiltDisplayListIter<'a>,
         pipeline_id: PipelineId,
         reference_frame_relative_offset: LayoutVector2D,
+        apply_pipeline_clip: bool,
     ) {
         loop {
             let subtraversal = {
@@ -488,6 +490,7 @@ impl<'a> DisplayListFlattener<'a> {
                     item,
                     pipeline_id,
                     reference_frame_relative_offset,
+                    apply_pipeline_clip,
                 )
             };
 
@@ -567,6 +570,7 @@ impl<'a> DisplayListFlattener<'a> {
         origin: LayoutPoint,
         reference_frame: &ReferenceFrame,
         reference_frame_relative_offset: LayoutVector2D,
+        apply_pipeline_clip: bool,
     ) {
         self.push_reference_frame(
             reference_frame.id,
@@ -578,7 +582,7 @@ impl<'a> DisplayListFlattener<'a> {
             reference_frame_relative_offset + origin.to_vector(),
         );
 
-        self.flatten_items(traversal, pipeline_id, LayoutVector2D::zero());
+        self.flatten_items(traversal, pipeline_id, LayoutVector2D::zero(), apply_pipeline_clip);
     }
 
 
@@ -592,6 +596,7 @@ impl<'a> DisplayListFlattener<'a> {
         filters: ItemRange<FilterOp>,
         reference_frame_relative_offset: &LayoutVector2D,
         is_backface_visible: bool,
+        apply_pipeline_clip: bool,
     ) {
         // Avoid doing unnecessary work for empty stacking contexts.
         if traversal.current_stacking_context_empty() {
@@ -624,10 +629,30 @@ impl<'a> DisplayListFlattener<'a> {
             stacking_context.raster_space,
         );
 
+        if cfg!(debug_assertions) && apply_pipeline_clip && clip_chain_id != ClipChainId::NONE {
+            // This is the rootmost stacking context in this pipeline that has
+            // a clip set. Check that the clip chain includes the pipeline clip
+            // as well, because this where we recurse with `apply_pipeline_clip`
+            // set to false and stop explicitly adding the pipeline clip to
+            // individual items.
+            let pipeline_clip = self.pipeline_clip_chain_stack.last().unwrap();
+            let mut found_root = *pipeline_clip == ClipChainId::NONE;
+            let mut cur_clip = clip_chain_id.clone();
+            while cur_clip != ClipChainId::NONE {
+                if cur_clip == *pipeline_clip {
+                    found_root = true;
+                    break;
+                }
+                cur_clip = self.clip_store.get_clip_chain(cur_clip).parent_clip_chain_id;
+            }
+            debug_assert!(found_root);
+        }
+
         self.flatten_items(
             traversal,
             pipeline_id,
             *reference_frame_relative_offset + origin.to_vector(),
+            apply_pipeline_clip && clip_chain_id == ClipChainId::NONE,
         );
 
         self.pop_stacking_context();
@@ -687,6 +712,7 @@ impl<'a> DisplayListFlattener<'a> {
             &mut pipeline.display_list.iter(),
             pipeline.pipeline_id,
             LayoutVector2D::zero(),
+            true,
         );
 
         self.pipeline_clip_chain_stack.pop();
@@ -697,11 +723,14 @@ impl<'a> DisplayListFlattener<'a> {
         item: DisplayItemRef<'a, 'b>,
         pipeline_id: PipelineId,
         reference_frame_relative_offset: LayoutVector2D,
+        apply_pipeline_clip: bool,
     ) -> Option<BuiltDisplayListIter<'a>> {
         let space_and_clip = item.space_and_clip_info();
         let clip_and_scroll = ScrollNodeAndClipChain::new(
             self.id_to_index_mapper.get_spatial_node_index(space_and_clip.spatial_id),
-            if space_and_clip.clip_id.is_valid() {
+            if !apply_pipeline_clip && space_and_clip.clip_id.is_root() {
+                ClipChainId::NONE
+            } else if space_and_clip.clip_id.is_valid() {
                 self.id_to_index_mapper.get_clip_chain_id(space_and_clip.clip_id)
             } else {
                 ClipChainId::INVALID
@@ -855,6 +884,7 @@ impl<'a> DisplayListFlattener<'a> {
                     item.filters(),
                     &reference_frame_relative_offset,
                     prim_info.is_backface_visible,
+                    apply_pipeline_clip,
                 );
                 return Some(subtraversal);
             }
@@ -867,6 +897,7 @@ impl<'a> DisplayListFlattener<'a> {
                     item.rect().origin,
                     &info.reference_frame,
                     reference_frame_relative_offset,
+                    apply_pipeline_clip,
                 );
                 return Some(subtraversal);
             }
@@ -1319,22 +1350,26 @@ impl<'a> DisplayListFlattener<'a> {
         // (b) It's useful for the initial version of picture caching in gecko, by enabling
         //     is to just look for interesting scroll roots on the root stacking context,
         //     without having to consider cuts at stacking context boundaries.
-        if let Some(parent_sc) = self.sc_stack.last_mut() {
-            if stacking_context.is_redundant(
-                parent_sc,
-                self.clip_scroll_tree,
-            ) {
-                // If the parent context primitives list is empty, it's faster
-                // to assign the storage of the popped context instead of paying
-                // the copying cost for extend.
-                if parent_sc.primitives.is_empty() {
-                    parent_sc.primitives = stacking_context.primitives;
-                } else {
-                    parent_sc.primitives.extend(stacking_context.primitives);
+        let parent_is_empty = match self.sc_stack.last_mut() {
+            Some(parent_sc) => {
+                if stacking_context.is_redundant(
+                    parent_sc,
+                    self.clip_scroll_tree,
+                ) {
+                    // If the parent context primitives list is empty, it's faster
+                    // to assign the storage of the popped context instead of paying
+                    // the copying cost for extend.
+                    if parent_sc.primitives.is_empty() {
+                        parent_sc.primitives = stacking_context.primitives;
+                    } else {
+                        parent_sc.primitives.extend(stacking_context.primitives);
+                    }
+                    return;
                 }
-                return;
-            }
-        }
+                parent_sc.primitives.is_empty()
+            },
+            None => true,
+        };
 
         if stacking_context.create_tile_cache {
             self.setup_picture_caching(
@@ -1499,8 +1534,19 @@ impl<'a> DisplayListFlattener<'a> {
             self.prim_store.optimize_picture_if_possible(current_pic_index);
         }
 
-        // Same for mix-blend-mode.
-        if let Some(mix_blend_mode) = stacking_context.composite_ops.mix_blend_mode {
+        // Same for mix-blend-mode, except we can skip if this primitive is the first in the parent
+        // stacking context.
+        // From https://drafts.fxtf.org/compositing-1/#generalformula, the formula for blending is:
+        // Cs = (1 - ab) x Cs + ab x Blend(Cb, Cs)
+        // where
+        // Cs = Source color
+        // ab = Backdrop alpha
+        // Cb = Backdrop color
+        //
+        // If we're the first primitive within a stacking context, then we can guarantee that the
+        // backdrop alpha will be 0, and then the blend equation collapses to just
+        // Cs = Cs, and the blend mode isn't taken into account at all.
+        let has_mix_blend = if let (Some(mix_blend_mode), false) = (stacking_context.composite_ops.mix_blend_mode, parent_is_empty) {
             let composite_mode = Some(PictureCompositeMode::MixBlend(mix_blend_mode));
 
             let blend_pic_index = PictureIndex(self.prim_store.pictures
@@ -1536,15 +1582,14 @@ impl<'a> DisplayListFlattener<'a> {
             if cur_instance.is_chased() {
                 println!("\tis a mix-blend picture for a stacking context with {:?}", mix_blend_mode);
             }
-        }
+            true
+        } else {
+            false
+        };
 
         // Set the stacking context clip on the outermost picture in the chain,
         // unless we already set it on the leaf picture.
         cur_instance.clip_chain_id = stacking_context.clip_chain_id;
-
-        let has_mix_blend_on_secondary_framebuffer =
-            stacking_context.composite_ops.mix_blend_mode.is_some() &&
-            self.sc_stack.len() > 2;
 
         // The primitive instance for the remainder of flat children of this SC
         // if it's a part of 3D hierarchy but not the root of it.
@@ -1555,12 +1600,11 @@ impl<'a> DisplayListFlattener<'a> {
             }
             // Regular parenting path
             Some(ref mut parent_sc) => {
-                // If we have a mix-blend-mode, and we aren't the primary framebuffer,
-                // the stacking context needs to be isolated to blend correctly as per
-                // the CSS spec.
+                // If we have a mix-blend-mode, the stacking context needs to be isolated
+                // to blend correctly as per the CSS spec.
                 // If not already isolated for some other reason,
                 // make this picture as isolated.
-                if has_mix_blend_on_secondary_framebuffer {
+                if has_mix_blend {
                     parent_sc.blit_reason |= BlitReason::ISOLATE;
                 }
                 parent_sc.primitives.push(cur_instance);
@@ -2629,7 +2673,14 @@ impl FlattenedStackingContext {
         }
 
         // If there are filters / mix-blend-mode
-        if !self.composite_ops.is_empty() {
+        if !self.composite_ops.filters.is_empty() {
+            return false;
+        }
+
+        // We can skip mix-blend modes if they are the first primitive in a stacking context,
+        // see pop_stacking_context for a full explanation.
+        if !self.composite_ops.mix_blend_mode.is_none() &&
+           !parent.primitives.is_empty() {
             return false;
         }
 

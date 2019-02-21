@@ -875,6 +875,11 @@ var BrowserPageActions = {
     this._contextAction = null;
 
     PageActions.logTelemetry("managed", action);
+    AMTelemetry.recordActionEvent({
+      object: "pageAction",
+      action: "manage",
+      extra: {addonId: action.extensionID},
+    });
 
     let viewID = "addons://detail/" + encodeURIComponent(action.extensionID);
     window.BrowserOpenAddonsMgr(viewID);
@@ -1194,7 +1199,7 @@ BrowserPageActions.addSearchEngine = {
         showBrowserPageActionFeedback(this.action);
       },
       errorCode => {
-        if (errorCode != Ci.nsISearchInstallCallback.ERROR_DUPLICATE_ENGINE) {
+        if (errorCode != Ci.nsISearchService.ERROR_DUPLICATE_ENGINE) {
           // Download error is shown by the search service
           return;
         }

@@ -12,10 +12,7 @@ import {
   getTelemetryEvents
 } from "../../../utils/test-head";
 
-import {
-  simulateCorrectThreadClient,
-  simpleMockThreadClient
-} from "../../tests/helpers/threadClient.js";
+import { simpleMockThreadClient } from "../../tests/helpers/threadClient.js";
 
 describe("breakpoints", () => {
   it("should add a breakpoint", async () => {
@@ -26,9 +23,9 @@ describe("breakpoints", () => {
       sourceUrl: "http://localhost:8000/examples/a"
     };
 
-    const csr = makeSource("a");
-    await dispatch(actions.newSource(csr));
-    await dispatch(actions.loadSourceText(csr.source));
+    const source = makeSource("a");
+    await dispatch(actions.newSource(source));
+    await dispatch(actions.loadSourceText(source));
     await dispatch(actions.addBreakpoint(loc1));
 
     expect(selectors.getBreakpointCount(getState())).toEqual(1);
@@ -47,9 +44,9 @@ describe("breakpoints", () => {
       line: 5,
       sourceUrl: "http://localhost:8000/examples/a"
     };
-    const csr = makeSource("a");
-    await dispatch(actions.newSource(csr));
-    await dispatch(actions.loadSourceText(csr.source));
+    const source = makeSource("a");
+    await dispatch(actions.newSource(source));
+    await dispatch(actions.loadSourceText(source));
     await dispatch(actions.addBreakpoint(loc1));
 
     expect(selectors.getBreakpointCount(getState())).toEqual(1);
@@ -65,10 +62,10 @@ describe("breakpoints", () => {
       line: 5,
       sourceUrl: "http://localhost:8000/examples/a"
     };
-    const csr = makeSource("a");
-    await dispatch(actions.newSource(csr));
-    await dispatch(actions.loadSourceText(csr.source));
-    const { breakpoint } = await dispatch(actions.addBreakpoint(loc1));
+    const source = makeSource("a");
+    await dispatch(actions.newSource(source));
+    await dispatch(actions.loadSourceText(source));
+    const breakpoint = await dispatch(actions.addBreakpoint(loc1));
     await dispatch(actions.disableBreakpoint(breakpoint));
 
     expect(selectors.getBreakpointCount(getState())).toEqual(1);
@@ -85,9 +82,9 @@ describe("breakpoints", () => {
       sourceUrl: "http://localhost:8000/examples/a"
     };
 
-    const csr = makeSource("a");
-    await dispatch(actions.newSource(csr));
-    await dispatch(actions.loadSourceText(csr.source));
+    const source = makeSource("a");
+    await dispatch(actions.newSource(source));
+    await dispatch(actions.loadSourceText(source));
 
     await dispatch(actions.addBreakpoint(loc1));
     expect(selectors.getBreakpointCount(getState())).toEqual(1);
@@ -96,31 +93,6 @@ describe("breakpoints", () => {
 
     await dispatch(actions.addBreakpoint(loc1));
     expect(selectors.getBreakpointCount(getState())).toEqual(1);
-  });
-
-  describe("adding a breakpoint to an invalid location", () => {
-    it("adds only one breakpoint with a corrected location", async () => {
-      const invalidLocation = {
-        sourceId: "a",
-        line: 5,
-        sourceUrl: "http://localhost:8000/examples/a"
-      };
-      const {
-        correctedThreadClient,
-        correctedLocation
-      } = simulateCorrectThreadClient(2, invalidLocation);
-      const { dispatch, getState } = createStore(correctedThreadClient);
-
-      const csr = makeSource("a");
-      await dispatch(actions.newSource(csr));
-      await dispatch(actions.loadSourceText(csr.source));
-
-      await dispatch(actions.addBreakpoint(invalidLocation));
-      const state = getState();
-      expect(selectors.getBreakpointCount(state)).toEqual(1);
-      const bp = selectors.getBreakpoint(state, correctedLocation);
-      expect(bp).toMatchSnapshot();
-    });
   });
 
   it("should remove a breakpoint", async () => {
@@ -138,13 +110,13 @@ describe("breakpoints", () => {
       sourceUrl: "http://localhost:8000/examples/b"
     };
 
-    const aCSR = makeSource("a");
-    await dispatch(actions.newSource(aCSR));
-    await dispatch(actions.loadSourceText(aCSR.source));
+    const aSource = makeSource("a");
+    await dispatch(actions.newSource(aSource));
+    await dispatch(actions.loadSourceText(aSource));
 
-    const bCSR = makeSource("b");
-    await dispatch(actions.newSource(bCSR));
-    await dispatch(actions.loadSourceText(bCSR.source));
+    const bSource = makeSource("b");
+    await dispatch(actions.newSource(bSource));
+    await dispatch(actions.loadSourceText(bSource));
 
     await dispatch(actions.addBreakpoint(loc1));
     await dispatch(actions.addBreakpoint(loc2));
@@ -173,15 +145,15 @@ describe("breakpoints", () => {
       sourceUrl: "http://localhost:8000/examples/b"
     };
 
-    const aCSR = makeSource("a");
-    await dispatch(actions.newSource(aCSR));
-    await dispatch(actions.loadSourceText(aCSR.source));
+    const aSource = makeSource("a");
+    await dispatch(actions.newSource(aSource));
+    await dispatch(actions.loadSourceText(aSource));
 
-    const bCSR = makeSource("b");
-    await dispatch(actions.newSource(bCSR));
-    await dispatch(actions.loadSourceText(bCSR.source));
+    const bSource = makeSource("b");
+    await dispatch(actions.newSource(bSource));
+    await dispatch(actions.loadSourceText(bSource));
 
-    const { breakpoint } = await dispatch(actions.addBreakpoint(loc1));
+    const breakpoint = await dispatch(actions.addBreakpoint(loc1));
     await dispatch(actions.addBreakpoint(loc2));
 
     await dispatch(actions.disableBreakpoint(breakpoint));
@@ -198,11 +170,11 @@ describe("breakpoints", () => {
       sourceUrl: "http://localhost:8000/examples/a"
     };
 
-    const aCSR = makeSource("a");
-    await dispatch(actions.newSource(aCSR));
-    await dispatch(actions.loadSourceText(aCSR.source));
+    const aSource = makeSource("a");
+    await dispatch(actions.newSource(aSource));
+    await dispatch(actions.loadSourceText(aSource));
 
-    const { breakpoint } = await dispatch(actions.addBreakpoint(loc));
+    const breakpoint = await dispatch(actions.addBreakpoint(loc));
     await dispatch(actions.disableBreakpoint(breakpoint));
 
     let bp = selectors.getBreakpoint(getState(), loc);
@@ -229,13 +201,13 @@ describe("breakpoints", () => {
       sourceUrl: "http://localhost:8000/examples/b"
     };
 
-    const aCSR = makeSource("a");
-    await dispatch(actions.newSource(aCSR));
-    await dispatch(actions.loadSourceText(aCSR.source));
+    const aSource = makeSource("a");
+    await dispatch(actions.newSource(aSource));
+    await dispatch(actions.loadSourceText(aSource));
 
-    const bCSR = makeSource("b");
-    await dispatch(actions.newSource(bCSR));
-    await dispatch(actions.loadSourceText(bCSR.source));
+    const bSource = makeSource("b");
+    await dispatch(actions.newSource(bSource));
+    await dispatch(actions.loadSourceText(bSource));
 
     await dispatch(actions.addBreakpoint(loc1));
     await dispatch(actions.addBreakpoint(loc2));
@@ -261,9 +233,9 @@ describe("breakpoints", () => {
 
     const { dispatch, getState } = createStore(simpleMockThreadClient);
 
-    const csr = makeSource("foo1");
-    await dispatch(actions.newSource(csr));
-    await dispatch(actions.loadSourceText(csr.source));
+    const source = makeSource("foo1");
+    await dispatch(actions.newSource(source));
+    await dispatch(actions.loadSourceText(source));
 
     await dispatch(actions.selectLocation({ sourceId: "foo1", line: 1 }));
 
@@ -281,9 +253,9 @@ describe("breakpoints", () => {
 
     const { dispatch, getState } = createStore(simpleMockThreadClient);
 
-    const csr = makeSource("foo1");
-    await dispatch(actions.newSource(csr));
-    await dispatch(actions.loadSourceText(csr.source));
+    const source = makeSource("foo1");
+    await dispatch(actions.newSource(source));
+    await dispatch(actions.loadSourceText(source));
 
     await dispatch(actions.selectLocation({ sourceId: "foo1", line: 1 }));
 
@@ -308,9 +280,9 @@ describe("breakpoints", () => {
       sourceUrl: "http://localhost:8000/examples/a"
     };
 
-    const csr = makeSource("a");
-    await dispatch(actions.newSource(csr));
-    await dispatch(actions.loadSourceText(csr.source));
+    const source = makeSource("a");
+    await dispatch(actions.newSource(source));
+    await dispatch(actions.loadSourceText(source));
 
     await dispatch(actions.addBreakpoint(loc));
 
@@ -338,7 +310,7 @@ describe("breakpoints", () => {
     };
 
     await dispatch(actions.newSource(makeSource("a")));
-    const { breakpoint } = await dispatch(actions.addBreakpoint(loc));
+    const breakpoint = await dispatch(actions.addBreakpoint(loc));
     await dispatch(actions.disableBreakpoint(breakpoint));
 
     const bp = selectors.getBreakpoint(getState(), loc);
@@ -366,9 +338,9 @@ describe("breakpoints", () => {
       sourceUrl: "http://localhost:8000/examples/a.js"
     };
 
-    const csr = makeSource("a.js");
-    await dispatch(actions.newSource(csr));
-    await dispatch(actions.loadSourceText(csr.source));
+    const source = makeSource("a.js");
+    await dispatch(actions.newSource(source));
+    await dispatch(actions.loadSourceText(source));
 
     await dispatch(actions.addBreakpoint(loc));
     await dispatch(actions.togglePrettyPrint("a.js"));

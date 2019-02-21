@@ -4,7 +4,6 @@
 "use strict";
 
 const { Component } = require("devtools/client/shared/vendor/react");
-const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const { connect } = require("devtools/client/shared/vendor/react-redux");
 const { getAllFilters } = require("devtools/client/webconsole/selectors/filters");
@@ -21,14 +20,14 @@ const {
 const FilterButton = require("devtools/client/webconsole/components/FilterButton");
 const FilterCheckbox = require("devtools/client/webconsole/components/FilterCheckbox");
 
+loader.lazyRequireGetter(this, "PropTypes", "devtools/client/shared/vendor/react-prop-types");
+
 class FilterBar extends Component {
   static get propTypes() {
     return {
       dispatch: PropTypes.func.isRequired,
       filter: PropTypes.object.isRequired,
-      serviceContainer: PropTypes.shape({
-        attachRefToHud: PropTypes.func.isRequired,
-      }).isRequired,
+      attachRefToWebConsoleUI: PropTypes.func.isRequired,
       filterBarVisible: PropTypes.bool.isRequired,
       persistLogs: PropTypes.bool.isRequired,
       hidePersistLogsCheckbox: PropTypes.bool.isRequired,
@@ -56,7 +55,7 @@ class FilterBar extends Component {
   }
 
   componentDidMount() {
-    this.props.serviceContainer.attachRefToHud(
+    this.props.attachRefToWebConsoleUI(
       "filterBox",
       this.wrapperNode.querySelector(".text-filter")
     );

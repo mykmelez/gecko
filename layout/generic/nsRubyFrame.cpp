@@ -32,7 +32,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsRubyFrame)
 
 nsContainerFrame* NS_NewRubyFrame(nsIPresShell* aPresShell,
                                   ComputedStyle* aStyle) {
-  return new (aPresShell) nsRubyFrame(aStyle);
+  return new (aPresShell) nsRubyFrame(aStyle, aPresShell->GetPresContext());
 }
 
 //----------------------------------------------------------------------
@@ -404,7 +404,7 @@ nsRubyBaseContainerFrame* nsRubyFrame::PullOneSegment(
   }
 
   if (nsBlockFrame* newFloatCB =
-          nsLayoutUtils::GetAsBlock(aLineLayout->LineContainerFrame())) {
+          do_QueryFrame(aLineLayout->LineContainerFrame())) {
     if (oldFloatCB && oldFloatCB != newFloatCB) {
       newFloatCB->ReparentFloats(baseFrame, oldFloatCB, true,
                                  ReparentingDirection::Backwards);

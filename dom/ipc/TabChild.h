@@ -215,6 +215,8 @@ class TabChild final : public TabChildBase,
       SetAllowedTouchBehaviorCallback;
   typedef mozilla::layers::TouchBehaviorFlags TouchBehaviorFlags;
 
+  friend class PBrowserChild;
+
  public:
   /**
    * Find TabChild of aTabId in the same content process of the
@@ -667,6 +669,11 @@ class TabChild final : public TabChildBase,
       const WindowGlobalInit& aInit) override;
 
   virtual bool DeallocPWindowGlobalChild(PWindowGlobalChild* aActor) override;
+
+  virtual PRemoteFrameChild* AllocPRemoteFrameChild(
+      const nsString& aName, const nsString& aRemoteType) override;
+
+  virtual bool DeallocPRemoteFrameChild(PRemoteFrameChild* aActor) override;
 
   virtual mozilla::ipc::IPCResult RecvDestroy() override;
 

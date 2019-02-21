@@ -9,7 +9,9 @@ from collections import OrderedDict
 import ipdl.ast
 import ipdl.builtin
 from ipdl.cxx.ast import *
+from ipdl.direct_call import VIRTUAL_CALL_CLASSES, DIRECT_CALL_OVERRIDES
 from ipdl.type import ActorType, UnionType, TypeVisitor, builtinHeaderIncludes
+
 
 # -----------------------------------------------------------------------------
 # "Public" interface to lowering
@@ -623,11 +625,11 @@ def _cxxConstPtrToType(ipdltype, side):
 
 
 def _allocMethod(ptype, side):
-    return ExprVar('Alloc' + ptype.name() + side.title())
+    return 'Alloc' + ptype.name() + side.title()
 
 
 def _deallocMethod(ptype, side):
-    return ExprVar('Dealloc' + ptype.name() + side.title())
+    return 'Dealloc' + ptype.name() + side.title()
 
 ##
 # A _HybridDecl straddles IPDL and C++ decls.  It knows which C++
@@ -644,16 +646,8 @@ info needed by later passes, along with a basic name for the decl."""
         self.ipdltype = ipdltype
         self.name = name
 
-    def isCopyable(self):
-        return not _cxxTypeNeedsMove(self.ipdltype)
-
     def var(self):
         return ExprVar(self.name)
-
-    def mayMoveExpr(self):
-        if self.isCopyable():
-            return self.var()
-        return ExprMove(self.var())
 
     def bareType(self, side, fq=False):
         """Return this decl's unqualified C++ type."""
@@ -956,7 +950,7 @@ class MessageDecl(ipdl.ast.MessageDecl):
         name = _recvPrefix(self.decl.type) + self.baseName()
         if self.decl.type.isCtor():
             name += 'Constructor'
-        return ExprVar(name)
+        return name
 
     def sendMethod(self):
         name = _sendPrefix(self.decl.type) + self.baseName()
@@ -1069,7 +1063,13 @@ class MessageDecl(ipdl.ast.MessageDecl):
         cxxargs = []
 
         if paramsems == 'move':
-            cxxargs.extend([p.mayMoveExpr() for p in self.params])
+            # We don't std::move() RefPtr<T> types because current Recv*()
+            # implementors take these parameters as T*, and
+            # std::move(RefPtr<T>) doesn't coerce to T*.
+            cxxargs.extend([
+                p.var() if p.ipdltype.isCxx() and p.ipdltype.isRefcounted() else ExprMove(p.var())
+                for p in self.params
+            ])
         elif paramsems == 'in':
             cxxargs.extend([p.var() for p in self.params])
         else:
@@ -2951,6 +2951,18 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
         )
 
         # make the .cpp file
+        if (self.protocol.name, self.side) not in VIRTUAL_CALL_CLASSES:
+            if (self.protocol.name, self.side) in DIRECT_CALL_OVERRIDES:
+                (_, header_file) = DIRECT_CALL_OVERRIDES[self.protocol.name, self.side]
+            else:
+                assert self.protocol.name.startswith("P")
+                header_file = "{}/{}{}.h".format(
+                    "/".join(n.name for n in self.protocol.namespaces),
+                    self.protocol.name[1:],
+                    self.side.capitalize(),
+                )
+            self.externalIncludes.add(header_file)
+
         cf.addthings([
             _DISCLAIMER,
             Whitespace.NL,
@@ -3133,7 +3145,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
                 implicit = (not isdtor)
                 returnsems = 'resolver' if md.decl.type.isAsync() else 'out'
                 recvDecl = MethodDecl(
-                    md.recvMethod().name,
+                    md.recvMethod(),
                     params=md.makeCxxParams(paramsems='move', returnsems=returnsems,
                                             side=self.side, implicit=implicit),
                     ret=Type('mozilla::ipc::IPCResult'),
@@ -3143,27 +3155,32 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
                     defaultRecv = MethodDefn(recvDecl)
                     defaultRecv.addstmt(StmtReturn(ExprCall(ExprVar('IPC_OK'))))
                     self.cls.addstmt(defaultRecv)
-                else:
+                elif (self.protocol.name, self.side) in VIRTUAL_CALL_CLASSES:
+                    # If we're using virtual calls, we need the methods to be
+                    # declared on the base class.
                     recvDecl.methodspec = MethodSpec.PURE
                     self.cls.addstmt(StmtDecl(recvDecl))
 
-        for md in p.messageDecls:
-            managed = md.decl.type.constructedType()
-            if not ptype.isManagerOf(managed) or md.decl.type.isDtor():
-                continue
+        # If we're using virtual calls, we need the methods to be declared on
+        # the base class.
+        if (self.protocol.name, self.side) in VIRTUAL_CALL_CLASSES:
+            for md in p.messageDecls:
+                managed = md.decl.type.constructedType()
+                if not ptype.isManagerOf(managed) or md.decl.type.isDtor():
+                    continue
 
-            # add the Alloc/Dealloc interface for managed actors
-            actortype = md.actorDecl().bareType(self.side)
+                # add the Alloc/Dealloc interface for managed actors
+                actortype = md.actorDecl().bareType(self.side)
 
-            self.cls.addstmt(StmtDecl(MethodDecl(
-                _allocMethod(managed, self.side).name,
-                params=md.makeCxxParams(side=self.side, implicit=False),
-                ret=actortype, methodspec=MethodSpec.PURE)))
+                self.cls.addstmt(StmtDecl(MethodDecl(
+                    _allocMethod(managed, self.side),
+                    params=md.makeCxxParams(side=self.side, implicit=False),
+                    ret=actortype, methodspec=MethodSpec.PURE)))
 
-            self.cls.addstmt(StmtDecl(MethodDecl(
-                _deallocMethod(managed, self.side).name,
-                params=[Decl(actortype, 'aActor')],
-                ret=Type.BOOL, methodspec=MethodSpec.PURE)))
+                self.cls.addstmt(StmtDecl(MethodDecl(
+                    _deallocMethod(managed, self.side),
+                    params=[Decl(actortype, 'aActor')],
+                    ret=Type.BOOL, methodspec=MethodSpec.PURE)))
 
         # ActorDestroy() method; default is no-op
         if self.side == 'parent':
@@ -3577,8 +3594,8 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
 
             foreachdealloc = forLoopOverHashtable(managedVar, itervar)
             foreachdealloc.addstmts([
-                StmtExpr(ExprCall(_deallocMethod(managed, self.side),
-                                  args=[actorFromIter(itervar)]))
+                StmtExpr(self.thisCall(_deallocMethod(managed, self.side),
+                                       [actorFromIter(itervar)]))
             ])
 
             block = StmtBlock()
@@ -3683,8 +3700,8 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
                         "actor not managed by this!"),
                     Whitespace.NL,
                     StmtExpr(_callRemoveManagedActor(containervar, actorvar)),
-                    StmtExpr(ExprCall(_deallocMethod(manageeipdltype, self.side),
-                                      args=[actorvar])),
+                    StmtExpr(self.thisCall(_deallocMethod(manageeipdltype, self.side),
+                                           [actorvar])),
                     StmtReturn()
                 ])
                 switchontype.addcase(CaseLabel(_protocolId(manageeipdltype).name),
@@ -3732,6 +3749,27 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
     # serialization/deserialization and dispatching handlers for
     # received messages.
     ##
+
+    def thisCall(self, function, args):
+        # If we're a direct call type, we cast `this` to the derived class
+        # before performing the call. Otherwise just emit the virtual call.
+        if (self.protocol.name, self.side) in VIRTUAL_CALL_CLASSES:
+            return ExprCall(ExprVar(function), args=args)
+
+        if (self.protocol.name, self.side) in DIRECT_CALL_OVERRIDES:
+            (class_name, _) = DIRECT_CALL_OVERRIDES[self.protocol.name, self.side]
+        else:
+            assert self.protocol.name.startswith("P")
+            class_name = "{}{}".format(self.protocol.name[1:], self.side.capitalize())
+        return ExprCall(
+            ExprSelect(
+                ExprCast(ExprVar("this"), Type(class_name, ptr=True), static=True),
+                "->",
+                ExprVar(function)
+            ),
+            args=args
+        )
+
     def visitMessageDecl(self, md):
         isctor = md.decl.type.isCtor()
         isdtor = md.decl.type.isDtor()
@@ -4619,7 +4657,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
         return stmts
 
     def callAllocActor(self, md, retsems, side):
-        return ExprCall(
+        return self.thisCall(
             _allocMethod(md.decl.type.constructedType(), side),
             args=md.makeCxxArgs(retsems=retsems, retcallsems='out',
                                 implicit=False))
@@ -4650,11 +4688,15 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
         retsems = 'in'
         if md.decl.type.isAsync() and md.returns:
             retsems = 'resolver'
-        failif = StmtIf(ExprNot(
-            ExprCall(md.recvMethod(),
-                     args=md.makeCxxArgs(paramsems='move', retsems=retsems,
-                                         retcallsems='out',
-                                         implicit=implicit))))
+        failif = StmtIf(ExprNot(self.thisCall(
+            md.recvMethod(),
+            md.makeCxxArgs(
+                paramsems='move',
+                retsems=retsems,
+                retcallsems='out',
+                implicit=implicit
+            )
+        )))
         failif.addifstmts([
             _protocolErrorBreakpoint('Handler returned error code!'),
             Whitespace('// Error handled in mozilla::ipc::IPCResult\n', indent=True),
@@ -4785,16 +4827,22 @@ methodDefns."""
 
     for i, stmt in enumerate(cls.stmts):
         if isinstance(stmt, MethodDefn) and not stmt.decl.force_inline:
-            decl, defn = _splitMethodDefn(stmt, cls)
+            decl, defn = _splitMethodDeclDefn(stmt, cls)
             cls.stmts[i] = StmtDecl(decl)
-            defns.addstmts([defn, Whitespace.NL])
+            if defn:
+                defns.addstmts([defn, Whitespace.NL])
 
     return cls, defns
 
 
-def _splitMethodDefn(md, cls):
+def _splitMethodDeclDefn(md, cls):
+    # Pure methods have decls but no defns.
+    if md.decl.methodspec == MethodSpec.PURE:
+        return md.decl, None
+
     saveddecl = deepcopy(md.decl)
     md.decl.cls = cls
+    # Don't emit method specifiers on method defns.
     md.decl.methodspec = MethodSpec.NONE
     md.decl.warn_unused = False
     md.decl.only_for_definition = True

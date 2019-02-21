@@ -104,6 +104,8 @@ nsView::~nsView() {
   // Destroy and release the widget
   DestroyWidget();
 
+  MOZ_RELEASE_ASSERT(!mFrame);
+
   delete mDirtyRegion;
 }
 
@@ -316,7 +318,7 @@ void nsView::DoResetWidgetBounds(bool aMoveOnly, bool aInvalidateChangedSize) {
   }
 
   bool curVisibility = widget->IsVisible();
-  bool newVisibility = IsEffectivelyVisible();
+  bool newVisibility = !invisiblePopup && IsEffectivelyVisible();
   if (curVisibility && !newVisibility) {
     widget->Show(false);
   }

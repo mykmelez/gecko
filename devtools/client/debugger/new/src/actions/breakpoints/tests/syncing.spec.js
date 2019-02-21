@@ -98,11 +98,12 @@ function pendingBreakpoint(overrides) {
       },
       index: 0
     },
-    condition: null,
+    options: {
+      logValue: "",
+      hidden: false
+    },
     disabled: false,
-    hidden: false,
     loading: false,
-    options: {},
     text: "",
     ...overrides
   };
@@ -135,7 +136,8 @@ describe("loading the debugger", () => {
       getState,
       threadClient,
       sourceMaps,
-      reloadedSource.source.id,
+      dispatch,
+      reloadedSource.id,
       pendingBreakpoint()
     );
 
@@ -165,7 +167,8 @@ describe("loading the debugger", () => {
       getState,
       threadClient,
       sourceMaps,
-      reloadedSource.source.id,
+      dispatch,
+      reloadedSource.id,
       pendingBreakpoint()
     );
 
@@ -209,7 +212,8 @@ describe("reloading debuggee", () => {
       getState,
       threadClient,
       sourceMaps,
-      reloadedSource.source.id,
+      dispatch,
+      reloadedSource.id,
       pendingBreakpoint({ location: loc1 })
     );
     expect(threadClient.removeBreakpoint.mock.calls).toHaveLength(0);
@@ -252,7 +256,8 @@ describe("reloading debuggee", () => {
       getState,
       threadClient,
       sourceMaps,
-      reloadedSource.source.id,
+      dispatch,
+      reloadedSource.id,
       pendingBreakpoint()
     );
     expect(threadClient.removeBreakpoint.mock.calls).toHaveLength(1);
@@ -274,12 +279,12 @@ describe("reloading debuggee", () => {
     await dispatch(actions.newSource(generatedSource));
 
     const location = {
-      sourceId: reloadedSource.source.id,
+      sourceId: reloadedSource.id,
       line: 3,
       column: undefined
     };
 
-    const { breakpoint } = await dispatch(actions.addBreakpoint(location));
+    const breakpoint = await dispatch(actions.addBreakpoint(location));
     await dispatch(actions.disableBreakpoint(breakpoint));
 
     (getGeneratedLocation: any).mockImplementationOnce(() =>
@@ -288,7 +293,7 @@ describe("reloading debuggee", () => {
 
     await dispatch(
       actions.syncBreakpoint(
-        reloadedSource.source.id,
+        reloadedSource.id,
         pendingBreakpoint({ disabled: true })
       )
     );

@@ -382,7 +382,7 @@ static inline bool ExtractNonDiscreteComputedValue(
 }
 
 bool nsTransitionManager::UpdateTransitions(dom::Element* aElement,
-                                            CSSPseudoElementType aPseudoType,
+                                            PseudoStyleType aPseudoType,
                                             const ComputedStyle& aOldStyle,
                                             const ComputedStyle& aNewStyle) {
   if (!mPresContext->IsDynamic()) {
@@ -392,15 +392,13 @@ bool nsTransitionManager::UpdateTransitions(dom::Element* aElement,
 
   CSSTransitionCollection* collection =
       CSSTransitionCollection::GetAnimationCollection(aElement, aPseudoType);
-  const nsStyleDisplay* disp = aNewStyle.ComputedData()->GetStyleDisplay();
-  return DoUpdateTransitions(*disp, aElement, aPseudoType, collection,
-                             aOldStyle, aNewStyle);
+  return DoUpdateTransitions(*aNewStyle.StyleDisplay(), aElement, aPseudoType,
+                             collection, aOldStyle, aNewStyle);
 }
 
 bool nsTransitionManager::DoUpdateTransitions(
     const nsStyleDisplay& aDisp, dom::Element* aElement,
-    CSSPseudoElementType aPseudoType,
-    CSSTransitionCollection*& aElementTransitions,
+    PseudoStyleType aPseudoType, CSSTransitionCollection*& aElementTransitions,
     const ComputedStyle& aOldStyle, const ComputedStyle& aNewStyle) {
   MOZ_ASSERT(!aElementTransitions || aElementTransitions->mElement == aElement,
              "Element mismatch");
@@ -572,8 +570,7 @@ static bool IsTransitionable(nsCSSPropertyID aProperty) {
 
 bool nsTransitionManager::ConsiderInitiatingTransition(
     nsCSSPropertyID aProperty, const nsStyleDisplay& aStyleDisplay,
-    uint32_t transitionIdx, dom::Element* aElement,
-    CSSPseudoElementType aPseudoType,
+    uint32_t transitionIdx, dom::Element* aElement, PseudoStyleType aPseudoType,
     CSSTransitionCollection*& aElementTransitions,
     const ComputedStyle& aOldStyle, const ComputedStyle& aNewStyle,
     nsCSSPropertyIDSet& aPropertiesChecked) {

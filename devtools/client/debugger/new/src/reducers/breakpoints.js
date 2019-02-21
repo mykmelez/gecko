@@ -9,7 +9,7 @@
  * @module reducers/breakpoints
  */
 
-import { isGeneratedId } from "devtools-source-map";
+import { isGeneratedId, isOriginalId } from "devtools-source-map";
 import { isEqual } from "lodash";
 
 import { makeBreakpointId } from "../utils/breakpoint";
@@ -18,16 +18,20 @@ import type {
   XHRBreakpoint,
   Breakpoint,
   BreakpointId,
-  SourceLocation
+  SourceLocation,
+  BreakpointPositions
 } from "../types";
 import type { Action, DonePromiseAction } from "../actions/types";
 
 export type BreakpointsMap = { [BreakpointId]: Breakpoint };
 export type XHRBreakpointsList = $ReadOnlyArray<XHRBreakpoint>;
+export type BreakpointPositionsMap = { [string]: BreakpointPositions };
 
 export type BreakpointsState = {
   breakpoints: BreakpointsMap,
-  xhrBreakpoints: XHRBreakpointsList
+  breakpointPositions: BreakpointPositionsMap,
+  xhrBreakpoints: XHRBreakpointsList,
+  breakpointsDisabled: boolean
 };
 
 export function initialBreakpointsState(
@@ -36,6 +40,7 @@ export function initialBreakpointsState(
   return {
     breakpoints: {},
     xhrBreakpoints: xhrBreakpoints,
+    breakpointPositions: {},
     breakpointsDisabled: false
   };
 }
@@ -103,6 +108,20 @@ function update(
 
     case "DISABLE_XHR_BREAKPOINT": {
       return updateXHRBreakpoint(state, action);
+    }
+
+    case "ADD_BREAKPOINT_POSITIONS": {
+      const {
+        location: { sourceId },
+        positions
+      } = action;
+      return {
+        ...state,
+        breakpointPositions: {
+          ...state.breakpointPositions,
+          [sourceId]: positions
+        }
+      };
     }
   }
 
@@ -186,7 +205,7 @@ function addBreakpoint(state, action): BreakpointsState {
   // when the action completes, we can commit the breakpoint
   if (action.status === "done") {
     const { value } = ((action: any): DonePromiseAction);
-    return syncBreakpoint(state, value);
+    return syncBreakpoint(state, { breakpoint: value, previousLocation: null });
   }
 
   // Remove the optimistic update
@@ -329,6 +348,35 @@ export function getBreakpointForLocation(
 export function getHiddenBreakpoint(state: OuterState): ?Breakpoint {
   const breakpoints = getBreakpointsList(state);
   return breakpoints.find(bp => bp.options.hidden);
+}
+
+export function getBreakpointPositions(
+  state: OuterState
+): BreakpointPositionsMap {
+  return state.breakpoints.breakpointPositions;
+}
+
+export function getBreakpointPositionsForSource(
+  state: OuterState,
+  sourceId: string
+): ?BreakpointPositions {
+  const positions = getBreakpointPositions(state);
+  return positions && positions[sourceId];
+}
+
+export function getBreakpointPositionsForLine(
+  state: OuterState,
+  sourceId: string,
+  line: number
+): ?BreakpointPositions {
+  const positions = getBreakpointPositionsForSource(state, sourceId);
+  if (!positions) {
+    return [];
+  }
+  return positions.filter(({ location, generatedLocation }) => {
+    const loc = isOriginalId(sourceId) ? location : generatedLocation;
+    return loc.line == line;
+  });
 }
 
 export default update;

@@ -754,10 +754,6 @@ static bool LaunchProgram(const XP_CHAR* aProgramPath,
   if (pid == -1) {
     return false;
   } else if (pid == 0) {
-    // need to clobber this, as libcurl might load NSS,
-    // and we want it to load the system NSS.
-    unsetenv("LD_LIBRARY_PATH");
-
     Unused << execl(aProgramPath, aProgramPath, aMinidumpPath, nullptr);
     _exit(1);
   }
@@ -1409,13 +1405,9 @@ nsresult SetExceptionHandler(nsIFile* aXREDirectory, bool force /*=false*/) {
   if (envvar && *envvar && !force) return NS_OK;
 #endif
 
-#if defined(XP_WIN)
-  doReport = ShouldReport();
-#else
   // this environment variable prevents us from launching
   // the crash reporter client
   doReport = ShouldReport();
-#endif
 
   // allocate our strings
   crashReporterAPIData = new nsCString();

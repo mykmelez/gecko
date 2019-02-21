@@ -637,19 +637,22 @@ BreakStatement:
       if (!IsIdentifier(label)) {
         return raiseError("Invalid identifier");
       }
+    }
 
-      auto validity
-          = parseContext_->checkBreakStatement(label->asPropertyName());
-
-      if (validity.isErr()) {
-        switch (validity.unwrapErr()) {
-          case ParseContext::BreakStatementError::ToughBreak:
-            return raiseError(kind, "Not in a loop");
-          case ParseContext::BreakStatementError::LabelNotFound:
-            return raiseError(kind, "Label not found");
-        }
+    auto validity
+        = parseContext_->checkBreakStatement(label ? label->asPropertyName()
+                                                    : nullptr);
+    if (validity.isErr()) {
+      switch (validity.unwrapErr()) {
+        case ParseContext::BreakStatementError::ToughBreak:
+          this->error(JSMSG_TOUGH_BREAK);
+          return cx_->alreadyReportedError();
+        case ParseContext::BreakStatementError::LabelNotFound:
+          this->error(JSMSG_LABEL_NOT_FOUND);
+          return cx_->alreadyReportedError();
       }
     }
+
     BINJS_TRY_DECL(result,
                    factory_.newBreakStatement(label ? label->asPropertyName()
                                                     : nullptr,
@@ -775,22 +778,25 @@ ContinueStatement:
       if (!IsIdentifier(label)) {
         return raiseError("ContinueStatement - Label MUST be an identifier");
       }
+    }
 
-      auto validity
-          = parseContext_->checkContinueStatement(label ? label->asPropertyName()
-                                                        : nullptr);
-      if (validity.isErr()) {
-        switch (validity.unwrapErr()) {
-          case ParseContext::ContinueStatementError::NotInALoop:
-            return raiseError(kind, "Not in a loop");
-          case ParseContext::ContinueStatementError::LabelNotFound:
-            return raiseError(kind, "Label not found");
-        }
+    auto validity
+        = parseContext_->checkContinueStatement(label ? label->asPropertyName()
+                                                      : nullptr);
+    if (validity.isErr()) {
+      switch (validity.unwrapErr()) {
+        case ParseContext::ContinueStatementError::NotInALoop:
+          this->error(JSMSG_BAD_CONTINUE);
+          return cx_->alreadyReportedError();
+        case ParseContext::ContinueStatementError::LabelNotFound:
+          this->error(JSMSG_LABEL_NOT_FOUND);
+          return cx_->alreadyReportedError();
       }
     }
 
     BINJS_TRY_DECL(result,
-                   factory_.newContinueStatement(label ? label->asPropertyName() : nullptr,
+                   factory_.newContinueStatement(label ? label->asPropertyName()
+                                                       : nullptr,
                                                  tokenizer_->pos(start)));
 
 DataProperty:
@@ -1246,11 +1252,12 @@ ListOfSwitchCase:
     factory_.addCaseStatementToList(result, item);
 
 ListOfVariableDeclarator:
+  extra-params: ParseNodeKind declarationListKind
   type-ok:
     ListNode*
   init: |
     BINJS_TRY_DECL(result,
-                   factory_.newDeclarationList(ParseNodeKind::ConstDecl /* Placeholder */,
+                   factory_.newDeclarationList(declarationListKind,
                    tokenizer_->pos(start)));
 
 LiteralBooleanExpression:
@@ -1377,9 +1384,7 @@ ShorthandProperty:
                                                          tokenizer_->pos(start)));
 
     BINJS_TRY_DECL(result,
-                   factory_.newObjectMethodOrPropertyDefinition(propName, name,
-                                                                AccessorType::None));
-    result->setKind(ParseNodeKind::Shorthand);
+                   factory_.newShorthandPropertyDefinition(propName, name));
 
 SwitchCase:
   type-ok:
@@ -1393,6 +1398,10 @@ SwitchDefault:
                    factory_.newCaseOrDefault(start, nullptr, consequent));
 
 SwitchStatement:
+  fields:
+    discriminant:
+      after: |
+        ParseContext::Statement stmt(parseContext_, StatementKind::Switch);
   build: |
     BINJS_TRY_DECL(scope, factory_.newLexicalScope(nullptr, cases));
     BINJS_TRY_DECL(result,
@@ -1400,6 +1409,10 @@ SwitchStatement:
                                                /* hasDefault = */ false));
 
 SwitchStatementWithDefault:
+  fields:
+    discriminant:
+      after: |
+        ParseContext::Statement stmt(parseContext_, StatementKind::Switch);
   build: |
     // Concatenate `preDefaultCase`, `defaultCase`, `postDefaultCase`
     auto cases = preDefaultCases;
@@ -1577,6 +1590,18 @@ VariableDeclaration:
       after: |
         // Restored by `kindGuard`.
         variableDeclarationKind_ = kind_;
+        ParseNodeKind declarationListKind;
+        switch (kind_) {
+        case VariableDeclarationKind::Var:
+          declarationListKind = ParseNodeKind::VarStmt;
+          break;
+        case VariableDeclarationKind::Let:
+          return raiseError("Let is not supported in this preview release");
+        case VariableDeclarationKind::Const:
+          return raiseError("Const is not supported in this preview release");
+        }
+    declarators:
+      extra-args: declarationListKind
 
   build: |
     // By specification, the list may not be empty.
@@ -1584,17 +1609,6 @@ VariableDeclaration:
       return raiseEmpty("VariableDeclaration");
     }
 
-    ParseNodeKind pnk;
-    switch (kind_) {
-      case VariableDeclarationKind::Var:
-        pnk = ParseNodeKind::VarStmt;
-        break;
-      case VariableDeclarationKind::Let:
-        return raiseError("Let is not supported in this preview release");
-      case VariableDeclarationKind::Const:
-        return raiseError("Const is not supported in this preview release");
-    }
-    declarators->setKind(pnk);
     auto result = declarators;
 
 VariableDeclarator:

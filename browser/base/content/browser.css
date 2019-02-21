@@ -253,19 +253,13 @@ panelview[mainview] > .panel-header {
   z-index: 2;
 }
 
-/* The next 3 rules allow dragging tabs slightly outside of the tabstrip
- * to make it easier to drag tabs. */
-#navigator-toolbox[movingtab] > #titlebar > #TabsToolbar {
-  padding-bottom: 15px;
-}
-
-#navigator-toolbox[movingtab] #tabbrowser-tabs {
+/* Make it easier to drag tabs by expanding the drag area downwards. */
+#tabbrowser-tabs[movingtab] {
   padding-bottom: 15px;
   margin-bottom: -15px;
 }
 
 #navigator-toolbox[movingtab] > #nav-bar {
-  margin-top: -15px;
   pointer-events: none;
 }
 
@@ -301,8 +295,8 @@ window:not([chromehidden~="toolbar"]) #nav-bar[nonemptyoverflow] > .overflow-but
 
 
 %ifdef MENUBAR_CAN_AUTOHIDE
-#toolbar-menubar:not([autohide=true]) + #TabsToolbar > .titlebar-buttonbox-container,
-#toolbar-menubar:not([autohide=true]) + #TabsToolbar .titlebar-spacer,
+:root:not([chromehidden~="menubar"]) #toolbar-menubar:not([autohide=true]) + #TabsToolbar > .titlebar-buttonbox-container,
+:root:not([chromehidden~="menubar"]) #toolbar-menubar:not([autohide=true]) + #TabsToolbar .titlebar-spacer,
 %endif
 %ifndef MOZ_WIDGET_COCOA
 %ifndef MOZ_WIDGET_GTK
@@ -780,22 +774,13 @@ html|input.urlbar-input {
 #identity-box.chromeUI ~ #page-action-buttons > .urlbar-page-action:not(#star-button-box),
 .urlbar-history-dropmarker[usertyping],
 .urlbar-go-button:not([usertyping]),
-.urlbar-go-button:not([parentfocused="true"]),
-#urlbar[pageproxystate="invalid"] > #identity-box > #blocked-permissions-container,
-#urlbar[pageproxystate="invalid"] > #identity-box > #notification-popup-box,
-#urlbar[pageproxystate="invalid"] > #identity-box > #identity-icon-labels {
+.urlbar-go-button:not([parentfocused="true"]) {
   display: none;
 }
 
-#identity-box {
+#nav-bar:not([keyNav=true]) #identity-box {
   -moz-user-focus: normal;
 }
-
-#urlbar[pageproxystate="invalid"] > #identity-box {
-  pointer-events: none;
-  -moz-user-focus: ignore;
-}
-
 
 /* We leave 49ch plus whatever space the download button will need when it
  * appears. Normally this should be 16px for the icon, plus 2 * 2px padding
@@ -996,7 +981,7 @@ html|*#fullscreen-exit-button {
 
 /* notification anchors should only be visible when their associated
    notifications are */
-.notification-anchor-icon {
+#nav-bar:not([keyNav=true]) .notification-anchor-icon {
   -moz-user-focus: normal;
 }
 
@@ -1014,10 +999,6 @@ html|*#fullscreen-exit-button {
   opacity: 0;
   pointer-events: none;
   -moz-stack-sizing: ignore;
-}
-
-#addon-progress-notification {
-  -moz-binding: url("chrome://browser/content/urlbarBindings.xml#addon-progress-notification");
 }
 
 browser[tabmodalPromptShowing] {
@@ -1444,6 +1425,10 @@ toolbarpaletteitem > toolbaritem {
   #sidebar-box[sidebarcommand$="-sidebar-action"] > #sidebar-header > #sidebar-switcher-target > #sidebar-icon {
     list-style-image: var(--webextension-menuitem-image-2x, inherit);
   }
+}
+
+toolbar[keyNav=true]:not([collapsed=true]):not([customizing=true]) toolbartabstop {
+  -moz-user-focus: normal;
 }
 
 %include theme-vars.inc.css

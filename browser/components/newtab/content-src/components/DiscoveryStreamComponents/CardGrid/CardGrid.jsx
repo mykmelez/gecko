@@ -15,6 +15,7 @@ export class CardGrid extends React.PureComponent {
     let cards = data.recommendations.slice(0, this.props.items).map((rec, index) => (
       <DSCard
         key={`dscard-${index}`}
+        campaignId={rec.campaign_id}
         image_src={rec.image_src}
         title={rec.title}
         excerpt={rec.excerpt}

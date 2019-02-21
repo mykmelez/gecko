@@ -15,8 +15,10 @@
 #include "nsDisplayList.h"
 #include "nsTreeBodyFrame.h"
 #include "nsXULElement.h"
+#include "mozilla/dom/XULTreeElement.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 //
 // NS_NewTreeColFrame
@@ -24,7 +26,7 @@ using namespace mozilla;
 // Creates a new col frame
 //
 nsIFrame* NS_NewTreeColFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsTreeColFrame(aStyle);
+  return new (aPresShell) nsTreeColFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsTreeColFrame)
@@ -151,18 +153,22 @@ XULTreeElement* nsTreeColFrame::GetTree() {
 
 void nsTreeColFrame::InvalidateColumns(bool aCanWalkFrameTree) {
   RefPtr<XULTreeElement> tree = GetTree();
-  if (tree) {
-    RefPtr<nsTreeColumns> columns;
-
-    if (aCanWalkFrameTree) {
-      columns = tree->GetColumns();
-    } else {
-      nsTreeBodyFrame* body = tree->GetCachedTreeBodyFrame();
-      if (body) {
-        columns = body->Columns();
-      }
-    }
-
-    if (columns) columns->InvalidateColumns();
+  if (!tree) {
+    return;
   }
+
+  nsTreeBodyFrame* body = aCanWalkFrameTree
+                              ? tree->GetTreeBodyFrame(FlushType::None)
+                              : tree->GetCachedTreeBodyFrame();
+
+  if (!body) {
+    return;
+  }
+
+  RefPtr<nsTreeColumns> columns = body->Columns();
+  if (!columns) {
+    return;
+  }
+
+  columns->InvalidateColumns();
 }

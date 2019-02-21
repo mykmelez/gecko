@@ -10,8 +10,11 @@ const { createFactory, createElement } = require("devtools/client/shared/vendor/
 const { Provider } = require("devtools/client/shared/vendor/react-redux");
 
 loader.lazyRequireGetter(this, "ChangesContextMenu", "devtools/client/inspector/changes/ChangesContextMenu");
+loader.lazyRequireGetter(this, "prettifyCSS", "devtools/shared/inspector/css-logic", true);
+loader.lazyRequireGetter(this, "clipboardHelper", "devtools/shared/platform/clipboard");
 
 const ChangesApp = createFactory(require("./components/ChangesApp"));
+const { getChangesStylesheet } = require("./selectors/changes");
 
 const {
   TELEMETRY_SCALAR_CONTEXTMENU,
@@ -30,6 +33,7 @@ class ChangesView {
     this.inspector = inspector;
     this.store = this.inspector.store;
     this.telemetry = this.inspector.telemetry;
+    this.window = window;
 
     this.onAddChange = this.onAddChange.bind(this);
     this.onClearChanges = this.onClearChanges.bind(this);
@@ -100,6 +104,61 @@ class ChangesView {
     }
   }
 
+  /**
+   * Handler for the "Copy Changes" option from the context menu.
+   * Builds a CSS text with the aggregated changes and copies it to the clipboard.
+   *
+   * Optional rule and source ids can be used to filter the scope of the operation:
+   * - if both a rule id and source id are provided, copy only the changes to the
+   * matching rule within the matching source.
+   * - if only a source id is provided, copy the changes to all rules within the
+   * matching source.
+   * - if neither rule id nor source id are provided, copy the changes too all rules
+   * within all sources.
+   *
+   * @param {String|null} ruleId
+   *        Optional rule id.
+   * @param {String|null} sourceId
+   *        Optional source id.
+   */
+  copyChanges(ruleId, sourceId) {
+    const state = this.store.getState().changes || {};
+    const filter = {};
+    if (ruleId) {
+      filter.ruleIds = [ruleId];
+    }
+    if (sourceId) {
+      filter.sourceIds = [sourceId];
+    }
+
+    const text = getChangesStylesheet(state, filter);
+    clipboardHelper.copyString(text);
+  }
+
+  /**
+   * Handler for the "Copy Rule" option from the context menu.
+   * Gets the full content of the target CSS rule (including any changes applied)
+   * and copies it to the clipboard.
+   *
+   * @param {String} ruleId
+   *        Rule id of the target CSS rule.
+   */
+  async copyRule(ruleId) {
+    const rule = await this.inspector.pageStyle.getRule(ruleId);
+    const text = await rule.getRuleText();
+    const prettyCSS = prettifyCSS(text);
+    clipboardHelper.copyString(prettyCSS);
+  }
+
+  /**
+   * Handler for the "Copy" option from the context menu.
+   * Copies the current text selection to the clipboard.
+   */
+  copySelection() {
+    clipboardHelper.copyString(this.window.getSelection().toString());
+    this.telemetry.scalarAdd(TELEMETRY_SCALAR_CONTEXTMENU_COPY, 1);
+  }
+
   onAddChange(change) {
     // Turn data into a suitable change to send to the store.
     this.store.dispatch(trackChange(change));
@@ -116,14 +175,6 @@ class ChangesView {
   onContextMenu(e) {
     this.contextMenu.show(e);
     this.telemetry.scalarAdd(TELEMETRY_SCALAR_CONTEXTMENU, 1);
-  }
-
-  /**
-   * Callback function ran after the "Copy" option from the context menu is used.
-   * This is not an event handler. The copy event cannot be prevented from this method.
-   */
-  onContextMenuCopy() {
-    this.telemetry.scalarAdd(TELEMETRY_SCALAR_CONTEXTMENU_COPY, 1);
   }
 
   /**

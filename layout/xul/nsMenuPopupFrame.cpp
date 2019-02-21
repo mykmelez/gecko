@@ -57,6 +57,7 @@
 #include <algorithm>
 
 using namespace mozilla;
+using mozilla::dom::Document;
 using mozilla::dom::Event;
 using mozilla::dom::KeyboardEvent;
 
@@ -79,7 +80,8 @@ const char kPrefIncrementalSearchTimeout[] =
 //
 nsIFrame* NS_NewMenuPopupFrame(nsIPresShell* aPresShell,
                                ComputedStyle* aStyle) {
-  return new (aPresShell) nsMenuPopupFrame(aStyle);
+  return new (aPresShell)
+      nsMenuPopupFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMenuPopupFrame)
@@ -91,8 +93,9 @@ NS_QUERYFRAME_TAIL_INHERITING(nsBoxFrame)
 //
 // nsMenuPopupFrame ctor
 //
-nsMenuPopupFrame::nsMenuPopupFrame(ComputedStyle* aStyle)
-    : nsBoxFrame(aStyle, kClassID),
+nsMenuPopupFrame::nsMenuPopupFrame(ComputedStyle* aStyle,
+                                   nsPresContext* aPresContext)
+    : nsBoxFrame(aStyle, aPresContext, kClassID),
       mCurrentMenu(nullptr),
       mView(nullptr),
       mPrefSize(-1, -1),
@@ -389,15 +392,6 @@ void nsXULPopupShownEvent::CancelListener() {
 NS_IMPL_ISUPPORTS_INHERITED(nsXULPopupShownEvent, Runnable,
                             nsIDOMEventListener);
 
-void nsMenuPopupFrame::SetInitialChildList(ChildListID aListID,
-                                           nsFrameList& aChildList) {
-  // unless the list is empty, indicate that children have been generated.
-  if (aListID == kPrincipalList && aChildList.NotEmpty()) {
-    mGeneratedChildren = true;
-  }
-  nsBoxFrame::SetInitialChildList(aListID, aChildList);
-}
-
 bool nsMenuPopupFrame::IsLeafDynamic() const {
   if (mGeneratedChildren) return false;
 
@@ -451,7 +445,9 @@ void nsMenuPopupFrame::UpdateWidgetProperties() {
 void nsMenuPopupFrame::LayoutPopup(nsBoxLayoutState& aState,
                                    nsIFrame* aParentMenu, nsIFrame* aAnchor,
                                    bool aSizedToPopup) {
-  if (!mGeneratedChildren) return;
+  if (IsLeaf()) {
+    return;
+  }
 
   SchedulePaint();
 

@@ -136,9 +136,11 @@ void LiveSavedFrameCache::find(JSContext* cx, FramePtr& framePtr,
     // everything younger than framePtr, so this entry should be popped.
     frames->popBack();
 
-    // Since the cache does contain an entry for framePtr's frame somewhere,
-    // popping this younger frame had better not empty the cache.
-    MOZ_ALWAYS_TRUE(!frames->empty());
+    // If the frame's bit was set, the frame should always have an entry in
+    // the cache. (If we purged the entire cache because its SavedFrames had
+    // been captured for a different compartment, then we would have
+    // returned early above.)
+    MOZ_RELEASE_ASSERT(!frames->empty());
   }
 
   // The youngest valid frame may have run some code, so its current pc may
@@ -651,12 +653,10 @@ static MOZ_MUST_USE bool SavedFrame_checkThis(JSContext* cx, CallArgs& args,
     return false;
   }
 
-  JSObject* thisObject = CheckedUnwrap(&thisValue.toObject());
-  if (!thisObject || !thisObject->is<SavedFrame>()) {
-    JS_ReportErrorNumberASCII(
-        cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
-        SavedFrame::class_.name, fnName,
-        thisObject ? thisObject->getClass()->name : "object");
+  if (!thisValue.toObject().canUnwrapAs<SavedFrame>()) {
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                              JSMSG_INCOMPATIBLE_PROTO, SavedFrame::class_.name,
+                              fnName, "object");
     return false;
   }
 
@@ -696,13 +696,11 @@ static inline js::SavedFrame* UnwrapSavedFrame(JSContext* cx,
     return nullptr;
   }
 
-  RootedObject savedFrameObj(cx, CheckedUnwrap(obj));
-  if (!savedFrameObj) {
+  js::RootedSavedFrame frame(cx, obj->maybeUnwrapAs<js::SavedFrame>());
+  if (!frame) {
     return nullptr;
   }
 
-  MOZ_RELEASE_ASSERT(savedFrameObj->is<js::SavedFrame>());
-  js::RootedSavedFrame frame(cx, &savedFrameObj->as<js::SavedFrame>());
   return GetFirstSubsumedFrame(cx, principals, frame, selfHosted, skippedAsync);
 }
 
@@ -1191,10 +1189,10 @@ bool SavedStacks::copyAsyncStack(JSContext* cx, HandleObject asyncStack,
     return false;
   }
 
-  RootedObject asyncStackObj(cx, CheckedUnwrap(asyncStack));
+  RootedSavedFrame asyncStackObj(cx,
+                                 asyncStack->maybeUnwrapAs<js::SavedFrame>());
   MOZ_RELEASE_ASSERT(asyncStackObj);
-  MOZ_RELEASE_ASSERT(asyncStackObj->is<js::SavedFrame>());
-  adoptedStack.set(&asyncStackObj->as<js::SavedFrame>());
+  adoptedStack.set(asyncStackObj);
 
   if (!adoptAsyncStack(cx, adoptedStack, asyncCauseAtom, maxFrameCount)) {
     return false;

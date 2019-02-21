@@ -4034,8 +4034,9 @@ AsyncPanZoomController::GetCurrentAsyncTransformForFixedAdjustment(
 
 AsyncTransformComponentMatrix
 AsyncPanZoomController::GetCurrentAsyncTransformWithOverscroll(
-    AsyncTransformConsumer aMode) const {
-  return AsyncTransformComponentMatrix(GetCurrentAsyncTransform(aMode)) *
+    AsyncTransformConsumer aMode, AsyncTransformComponents aComponents) const {
+  return AsyncTransformComponentMatrix(
+             GetCurrentAsyncTransform(aMode, aComponents)) *
          GetOverscrollTransform(aMode);
 }
 
@@ -5058,7 +5059,6 @@ Maybe<CSSPoint> AsyncPanZoomController::FindSnapPointNear(
   CSSRect scrollRange = Metrics().CalculateScrollRange();
   if (Maybe<nsPoint> snapPoint = ScrollSnapUtils::GetSnapPointForDestination(
           mScrollMetadata.GetSnapInfo(), aUnit,
-          CSSSize::ToAppUnits(Metrics().CalculateCompositedSizeInCssPixels()),
           CSSRect::ToAppUnits(scrollRange),
           CSSPoint::ToAppUnits(Metrics().GetScrollOffset()),
           CSSPoint::ToAppUnits(aDestination))) {

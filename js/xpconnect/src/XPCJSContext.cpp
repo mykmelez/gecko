@@ -749,16 +749,12 @@ bool xpc::ExtraWarningsForSystemJS() { return false; }
 
 static mozilla::Atomic<bool> sSharedMemoryEnabled(false);
 static mozilla::Atomic<bool> sStreamsEnabled(false);
-#ifdef ENABLE_BIGINT
 static mozilla::Atomic<bool> sBigIntEnabled(false);
-#endif
 
 void xpc::SetPrefableRealmOptions(JS::RealmOptions& options) {
   options.creationOptions()
       .setSharedMemoryAndAtomicsEnabled(sSharedMemoryEnabled)
-#ifdef ENABLE_BIGINT
       .setBigIntEnabled(sBigIntEnabled)
-#endif
       .setStreamsEnabled(sStreamsEnabled);
 }
 
@@ -810,9 +806,7 @@ static void ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx) {
 
   bool useAsyncStack = Preferences::GetBool(JS_OPTIONS_DOT_STR "asyncstack");
 
-#ifdef ENABLE_BIGINT
   sBigIntEnabled = Preferences::GetBool(JS_OPTIONS_DOT_STR "bigint");
-#endif
 
   bool throwOnDebuggeeWouldRun =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "throw_on_debuggee_would_run");
@@ -836,6 +830,9 @@ static void ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx) {
       Preferences::GetBool(JS_OPTIONS_DOT_STR "spectre.value_masking");
   bool spectreJitToCxxCalls =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "spectre.jit_to_C++_calls");
+
+  bool unboxedObjects =
+      Preferences::GetBool(JS_OPTIONS_DOT_STR "unboxed_objects");
 
   sSharedMemoryEnabled =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "shared_memory");
@@ -922,6 +919,9 @@ static void ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx) {
                                 spectreValueMasking);
   JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_SPECTRE_JIT_TO_CXX_CALLS,
                                 spectreJitToCxxCalls);
+
+  JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_UNBOXED_OBJECTS,
+                                unboxedObjects);
 }
 
 XPCJSContext::~XPCJSContext() {

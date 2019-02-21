@@ -8,7 +8,6 @@
 
 loader.lazyRequireGetter(this, "Menu", "devtools/client/framework/menu");
 loader.lazyRequireGetter(this, "MenuItem", "devtools/client/framework/menu-item");
-loader.lazyRequireGetter(this, "clipboardHelper", "devtools/shared/platform/clipboard");
 
 const { getStr } = require("./utils/l10n");
 
@@ -29,13 +28,15 @@ class ChangesContextMenu {
     // Window object to which the Changes panel belongs to.
     this.window = this.document.defaultView;
 
-    this._onCopy = this._onCopy.bind(this);
+    this._onCopyChanges = this.view.copyChanges.bind(this.view);
+    this._onCopyRule = this.view.copyRule.bind(this.view);
+    this._onCopySelection = this.view.copySelection.bind(this.view);
     this._onSelectAll = this._onSelectAll.bind(this);
   }
 
   show(event) {
     this._openMenu({
-      target: event.explicitOriginalTarget,
+      target: event.target,
       screenX: event.screenX,
       screenY: event.screenY,
     });
@@ -50,10 +51,47 @@ class ChangesContextMenu {
     const menuitemCopy = new MenuItem({
       label: getStr("changes.contextmenu.copy"),
       accesskey: getStr("changes.contextmenu.copy.accessKey"),
-      click: this._onCopy,
+      click: this._onCopySelection,
       disabled: !this._hasTextSelected(),
     });
     menu.append(menuitemCopy);
+
+    const ruleEl = target.closest("[data-rule-id]");
+    const ruleId = ruleEl ? ruleEl.dataset.ruleId : null;
+    const sourceEl = target.closest("[data-source-id]");
+    const sourceId = sourceEl ? sourceEl.dataset.sourceId : null;
+
+    // When both rule id and source id are found, deal with just for that rule.
+    if (ruleId && sourceId) {
+      // Copy Changes option
+      menu.append(new MenuItem({
+        label: getStr("changes.contextmenu.copyChanges"),
+        click: () => this._onCopyChanges(ruleId, sourceId),
+      }));
+
+      // Copy Rule option
+      menu.append(new MenuItem({
+        label: getStr("changes.contextmenu.copyRule"),
+        click: () => this._onCopyRule(ruleId),
+      }));
+
+      menu.append(new MenuItem({
+        type: "separator",
+      }));
+    }
+
+    // When only the source id is found, deal with all changed rules in that source.
+    if (!ruleId && sourceId) {
+      // Copy All Changes option
+      menu.append(new MenuItem({
+        label: getStr("changes.contextmenu.copyAllChanges"),
+        click: () => this._onCopyChanges(null, sourceId),
+      }));
+
+      menu.append(new MenuItem({
+        type: "separator",
+      }));
+    }
 
     // Select All option
     const menuitemSelectAll = new MenuItem({
@@ -78,15 +116,6 @@ class ChangesContextMenu {
   _onSelectAll() {
     const selection = this.window.getSelection();
     selection.selectAllChildren(this.panel);
-  }
-
-  /**
-   * Copy the selected text to clipboard.
-   */
-  _onCopy() {
-    const text = this.window.getSelection().toString();
-    clipboardHelper.copyString(text);
-    this.view.onContextMenuCopy();
   }
 
   destroy() {

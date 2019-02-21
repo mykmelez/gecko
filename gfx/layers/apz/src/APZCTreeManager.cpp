@@ -258,6 +258,7 @@ APZCTreeManager::APZCTreeManager(LayersId aRootLayersId)
       mSampler(nullptr),
       mUpdater(nullptr),
       mTreeLock("APZCTreeLock"),
+      mUsingAsyncZoomContainer(false),
       mMapLock("APZCMapLock"),
       mRetainedTouchIdentifier(-1),
       mInScrollbarTouchDrag(false),
@@ -387,6 +388,7 @@ APZCTreeManager::UpdateHitTestingTreeImpl(LayersId aRootLayerTreeId,
                                  state.mNodesToDestroy.AppendElement(aNode);
                                });
   mRootNode = nullptr;
+  mUsingAsyncZoomContainer = false;
 
   if (aRoot) {
     std::stack<gfx::TreeAutoIndent> indents;
@@ -405,6 +407,10 @@ APZCTreeManager::UpdateHitTestingTreeImpl(LayersId aRootLayerTreeId,
         [&](ScrollNode aLayerMetrics) {
           mApzcTreeLog << aLayerMetrics.Name() << '\t';
 
+          if (aLayerMetrics.IsAsyncZoomContainer()) {
+            mUsingAsyncZoomContainer = true;
+          }
+
           HitTestingTreeNode* node = PrepareNodeForLayer(
               lock, aLayerMetrics, aLayerMetrics.Metrics(), layersId,
               ancestorTransforms.top(), parent, next, state);
@@ -412,7 +418,7 @@ APZCTreeManager::UpdateHitTestingTreeImpl(LayersId aRootLayerTreeId,
           AsyncPanZoomController* apzc = node->GetApzc();
           aLayerMetrics.SetApzc(apzc);
 
-          // GetScrollbarAnimationId is only non-zero when webrender is enabled,
+          // GetScrollbarAnimationId is only set when webrender is enabled,
           // which limits the extra thumb mapping work to the webrender-enabled
           // case where it is needed.
           // Note also that when webrender is enabled, a "valid" animation id
@@ -526,7 +532,7 @@ APZCTreeManager::UpdateHitTestingTreeImpl(LayersId aRootLayerTreeId,
       }
       HitTestingTreeNode* target = it->second;
       mScrollThumbInfo.emplace_back(
-          thumb->GetScrollbarAnimationId(), thumb->GetTransform(),
+          *(thumb->GetScrollbarAnimationId()), thumb->GetTransform(),
           thumb->GetScrollbarData(), targetGuid, target->GetTransform(),
           target->IsAncestorOf(thumb));
     }
@@ -808,17 +814,16 @@ void APZCTreeManager::NotifyScrollbarDragInitiated(
     ScrollDirection aDirection) const {
   RefPtr<GeckoContentController> controller =
       GetContentController(aGuid.mLayersId);
-  MOZ_ASSERT(controller);
-  controller->NotifyAsyncScrollbarDragInitiated(aDragBlockId, aGuid.mScrollId,
-                                                aDirection);
+  if (controller) {
+    controller->NotifyAsyncScrollbarDragInitiated(aDragBlockId, aGuid.mScrollId,
+                                                  aDirection);
+  }
 }
 
 void APZCTreeManager::NotifyScrollbarDragRejected(
     const ScrollableLayerGuid& aGuid) const {
   RefPtr<GeckoContentController> controller =
       GetContentController(aGuid.mLayersId);
-  // If you hit this crash and have STR, please file a bug!
-  MOZ_ASSERT(controller);
   if (controller) {
     controller->NotifyAsyncScrollbarDragRejected(aGuid.mScrollId);
   }
@@ -877,7 +882,8 @@ HitTestingTreeNode* APZCTreeManager::PrepareNodeForLayer(
                              ? Some(ParentLayerIntRegion(*aLayer.GetClipRect()))
                              : Nothing(),
                          GetEventRegionsOverride(aParent, aLayer),
-                         aLayer.IsBackfaceHidden());
+                         aLayer.IsBackfaceHidden(),
+                         !!aLayer.IsAsyncZoomContainer());
     node->SetScrollbarData(aLayer.GetScrollbarAnimationId(),
                            aLayer.GetScrollbarData());
     node->SetFixedPosData(aLayer.GetFixedPositionScrollContainerId());
@@ -998,7 +1004,8 @@ HitTestingTreeNode* APZCTreeManager::PrepareNodeForLayer(
     node->SetHitTestData(GetEventRegions(aLayer), aLayer.GetVisibleRegion(),
                          aLayer.GetTransformTyped(), clipRegion,
                          GetEventRegionsOverride(aParent, aLayer),
-                         aLayer.IsBackfaceHidden());
+                         aLayer.IsBackfaceHidden(),
+                         !!aLayer.IsAsyncZoomContainer());
     apzc->SetAncestorTransform(aAncestorTransform);
 
     PrintAPZCInfo(aLayer, apzc);
@@ -1101,7 +1108,8 @@ HitTestingTreeNode* APZCTreeManager::PrepareNodeForLayer(
     node->SetHitTestData(GetEventRegions(aLayer), aLayer.GetVisibleRegion(),
                          aLayer.GetTransformTyped(), clipRegion,
                          GetEventRegionsOverride(aParent, aLayer),
-                         aLayer.IsBackfaceHidden());
+                         aLayer.IsBackfaceHidden(),
+                         !!aLayer.IsAsyncZoomContainer());
   }
 
   // Note: if layer properties must be propagated to nodes, RecvUpdate in
@@ -3040,15 +3048,59 @@ already_AddRefed<AsyncPanZoomController> APZCTreeManager::CommonAncestor(
 LayerToParentLayerMatrix4x4 APZCTreeManager::ComputeTransformForNode(
     const HitTestingTreeNode* aNode) const {
   mTreeLock.AssertCurrentThreadIn();
+  // The async transforms applied here for hit-testing purposes, are intended
+  // to match the ones AsyncCompositionManager (or equivalent WebRender code)
+  // applies for rendering purposes.
+  // Note that with containerless scrolling, the layer structure looks like
+  // this:
+  //
+  //   root container layer
+  //     async zoom container layer
+  //       scrollable content layers (with scroll metadata)
+  //       fixed content layers (no scroll metadta, annotated isFixedPosition)
+  //     scrollbar layers
+  //
+  // The intended async transforms in this case are:
+  //  * On the async zoom container layer, the zoom portion of the root content
+  //    APZC's async transform.
+  //  * On the scrollable layers bearing the root content APZC's scroll
+  //    metadata, the scroll portion of the root content APZC's async transform.
+  //  * On layers fixed with respect to the root content APZC, the async
+  //    transform of the visual viewport relative to the layout viewport.
   if (AsyncPanZoomController* apzc = aNode->GetApzc()) {
     // Apply any additional async scrolling for testing purposes (used for
     // reftest-async-scroll and reftest-async-zoom).
     AutoApplyAsyncTestAttributes testAttributeApplier(apzc);
     // If the node represents scrollable content, apply the async transform
     // from its APZC.
+    AsyncTransformComponents components =
+        mUsingAsyncZoomContainer && apzc->IsRootContent()
+            ? AsyncTransformComponents{AsyncTransformComponent::eScroll}
+            : ScrollAndZoom;
     return aNode->GetTransform() *
            CompleteAsyncTransform(apzc->GetCurrentAsyncTransformWithOverscroll(
-               AsyncPanZoomController::eForHitTesting));
+               AsyncPanZoomController::eForHitTesting, components));
+  } else if (aNode->IsAsyncZoomContainer()) {
+    if (AsyncPanZoomController* rootContent =
+            FindRootContentApzcForLayersId(aNode->GetLayersId())) {
+      return aNode->GetTransform() *
+             CompleteAsyncTransform(
+                 rootContent->GetCurrentAsyncTransformWithOverscroll(
+                     AsyncPanZoomController::eForHitTesting,
+                     {AsyncTransformComponent::eZoom}));
+    }
+  } else if (mUsingAsyncZoomContainer &&
+             aNode->GetFixedPosTarget() !=
+                 ScrollableLayerGuid::NULL_SCROLL_ID) {
+    if (AsyncPanZoomController* rootContent =
+            FindRootContentApzcForLayersId(aNode->GetLayersId())) {
+      if (aNode->GetFixedPosTarget() == rootContent->GetGuid().mScrollId) {
+        return aNode->GetTransform() *
+               CompleteAsyncTransform(
+                   rootContent->GetCurrentAsyncViewportRelativeTransform(
+                       AsyncPanZoomController::eForHitTesting));
+      }
+    }
   } else if (aNode->IsScrollThumbNode()) {
     // If the node represents a scrollbar thumb, compute and apply the
     // transformation that will be applied to the thumb in

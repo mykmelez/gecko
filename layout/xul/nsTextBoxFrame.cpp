@@ -59,7 +59,7 @@ bool nsTextBoxFrame::gInsertSeparatorBeforeAccessKey = false;
 bool nsTextBoxFrame::gInsertSeparatorPrefInitialized = false;
 
 nsIFrame* NS_NewTextBoxFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsTextBoxFrame(aStyle);
+  return new (aPresShell) nsTextBoxFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsTextBoxFrame)
@@ -92,8 +92,9 @@ nsresult nsTextBoxFrame::AttributeChanged(int32_t aNameSpaceID,
   return NS_OK;
 }
 
-nsTextBoxFrame::nsTextBoxFrame(ComputedStyle* aStyle)
-    : nsLeafBoxFrame(aStyle, kClassID),
+nsTextBoxFrame::nsTextBoxFrame(ComputedStyle* aStyle,
+                               nsPresContext* aPresContext)
+    : nsLeafBoxFrame(aStyle, aPresContext, kClassID),
       mAccessKeyInfo(nullptr),
       mCropType(CropRight),
       mAscent(0),
@@ -887,6 +888,8 @@ void nsTextBoxFrame::RecomputeTitle() {
 }
 
 void nsTextBoxFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
+  nsLeafBoxFrame::DidSetComputedStyle(aOldComputedStyle);
+
   if (!aOldComputedStyle) {
     // We're just being initialized
     return;

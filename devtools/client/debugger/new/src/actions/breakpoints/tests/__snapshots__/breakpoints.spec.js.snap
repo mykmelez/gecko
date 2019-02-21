@@ -1,40 +1,5 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
-exports[`breakpoints adding a breakpoint to an invalid location adds only one breakpoint with a corrected location 1`] = `
-Object {
-  "astLocation": Object {
-    "index": 0,
-    "name": undefined,
-    "offset": Object {
-      "line": 7,
-      "sourceId": "a",
-      "sourceUrl": "http://localhost:8000/examples/a",
-    },
-  },
-  "disabled": false,
-  "generatedLocation": Object {
-    "column": undefined,
-    "line": 7,
-    "sourceId": "a",
-    "sourceUrl": "http://localhost:8000/examples/a",
-  },
-  "id": "a:5:",
-  "loading": false,
-  "location": Object {
-    "line": 7,
-    "sourceId": "a",
-    "sourceUrl": "http://localhost:8000/examples/a",
-  },
-  "options": Object {
-    "condition": null,
-    "hidden": false,
-    "logValue": null,
-  },
-  "originalText": "",
-  "text": "",
-}
-`;
-
 exports[`breakpoints should add a breakpoint 1`] = `
 Array [
   Object {
@@ -51,7 +16,6 @@ Array [
         },
         "disabled": false,
         "generatedLocation": Object {
-          "column": undefined,
           "line": 2,
           "sourceId": "a",
           "sourceUrl": "http://localhost:8000/examples/a",
@@ -73,6 +37,13 @@ Array [
       },
     ],
     "source": Object {
+      "actors": Array [
+        Object {
+          "actor": "a-actor",
+          "source": "a",
+          "thread": "FakeThread",
+        },
+      ],
       "contentType": "text/javascript",
       "error": undefined,
       "id": "a",
@@ -81,6 +52,7 @@ Array [
       "isPrettyPrinted": false,
       "isWasm": false,
       "loadedState": "loaded",
+      "relativeUrl": "/examples/a",
       "sourceMapURL": undefined,
       "text": "function a() {
   return a 
@@ -106,7 +78,6 @@ Object {
   },
   "disabled": false,
   "generatedLocation": Object {
-    "column": undefined,
     "line": 1,
     "sourceId": "a.js",
     "sourceUrl": "http://localhost:8000/examples/a.js",
@@ -145,7 +116,6 @@ Array [
         },
         "disabled": true,
         "generatedLocation": Object {
-          "column": undefined,
           "line": 5,
           "sourceId": "a",
           "sourceUrl": "http://localhost:8000/examples/a",
@@ -167,6 +137,13 @@ Array [
       },
     ],
     "source": Object {
+      "actors": Array [
+        Object {
+          "actor": "a-actor",
+          "source": "a",
+          "thread": "FakeThread",
+        },
+      ],
       "contentType": "text/javascript",
       "error": undefined,
       "id": "a",
@@ -175,6 +152,7 @@ Array [
       "isPrettyPrinted": false,
       "isWasm": false,
       "loadedState": "loaded",
+      "relativeUrl": "/examples/a",
       "sourceMapURL": undefined,
       "text": "function a() {
   return a 

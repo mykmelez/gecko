@@ -1888,6 +1888,11 @@ gboolean nsWindow::OnExposeEvent(cairo_t *cr) {
   region.ScaleRoundOut(scale, scale);
 
   if (GetLayerManager()->AsKnowsCompositor() && mCompositorSession) {
+#ifdef MOZ_WAYLAND
+    if (mCompositorWidgetDelegate && WaylandRequestsUpdatingEGLSurface()) {
+      mCompositorWidgetDelegate->RequestsUpdatingEGLSurface();
+    }
+#endif
     // We need to paint to the screen even if nothing changed, since if we
     // don't have a compositing window manager, our pixels could be stale.
     GetLayerManager()->SetNeedsComposite(true);
@@ -1928,14 +1933,18 @@ gboolean nsWindow::OnExposeEvent(cairo_t *cr) {
 
   bool shaped = false;
   if (eTransparencyTransparent == GetTransparencyMode()) {
+    auto window = static_cast<nsWindow *>(GetTopLevelWidget());
     if (mTransparencyBitmapForTitlebar) {
-      static_cast<nsWindow *>(GetTopLevelWidget())
-          ->UpdateTitlebarTransparencyBitmap();
+      if (mSizeState == nsSizeMode_Normal) {
+        window->UpdateTitlebarTransparencyBitmap();
+      } else {
+        window->ClearTransparencyBitmap();
+      }
     } else {
       if (mHasAlphaVisual) {
         // Remove possible shape mask from when window manger was not
         // previously compositing.
-        static_cast<nsWindow *>(GetTopLevelWidget())->ClearTransparencyBitmap();
+        window->ClearTransparencyBitmap();
       } else {
         shaped = true;
       }
@@ -3290,6 +3299,15 @@ nsresult nsWindow::Create(nsIWidget *aParent, nsNativeWidget aNativeParent,
           // We use ARGB visual for mShell only and shape mask
           // for mContainer where is all our content drawn.
           mTransparencyBitmapForTitlebar = true;
+        }
+
+        // When mozilla.widget.use-argb-visuals is set don't use shape mask.
+        if (mTransparencyBitmapForTitlebar &&
+            Preferences::GetBool("mozilla.widget.use-argb-visuals", false)) {
+          mTransparencyBitmapForTitlebar = false;
+        }
+
+        if (mTransparencyBitmapForTitlebar) {
           mCSDSupportLevel = CSD_SUPPORT_CLIENT;
         }
       }
@@ -3581,6 +3599,8 @@ nsresult nsWindow::Create(nsIWidget *aParent, nsNativeWidget aNativeParent,
     g_signal_connect_after(default_settings, "notify::gtk-font-name",
                            G_CALLBACK(settings_changed_cb), this);
     g_signal_connect_after(default_settings, "notify::gtk-enable-animations",
+                           G_CALLBACK(settings_changed_cb), this);
+    g_signal_connect_after(default_settings, "notify::gtk-decoration-layout",
                            G_CALLBACK(settings_changed_cb), this);
   }
 
@@ -6139,7 +6159,7 @@ void nsWindow::SetDrawsInTitlebar(bool aState) {
   mDrawInTitlebar = aState;
 
   if (mTransparencyBitmapForTitlebar) {
-    if (mDrawInTitlebar) {
+    if (mDrawInTitlebar && mSizeState == nsSizeMode_Normal) {
       UpdateTitlebarTransparencyBitmap();
     } else {
       ClearTransparencyBitmap();
@@ -6568,6 +6588,17 @@ bool nsWindow::WaylandSurfaceNeedsClear() {
       "nsWindow::WaylandSurfaceNeedsClear(): We don't have any mContainer!");
   return false;
 }
+
+bool nsWindow::WaylandRequestsUpdatingEGLSurface() {
+  if (mContainer) {
+    return moz_container_egl_surface_needs_update(MOZ_CONTAINER(mContainer));
+  }
+
+  NS_WARNING(
+      "nsWindow::WaylandSurfaceNeedsClear(): We don't have any mContainer!");
+  return false;
+}
+
 #endif
 
 #ifdef MOZ_X11

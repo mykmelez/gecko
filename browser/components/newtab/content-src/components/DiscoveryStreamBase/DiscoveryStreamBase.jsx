@@ -1,24 +1,14 @@
 import {CardGrid} from "content-src/components/DiscoveryStreamComponents/CardGrid/CardGrid";
 import {connect} from "react-redux";
+import {DSMessage} from "content-src/components/DiscoveryStreamComponents/DSMessage/DSMessage";
 import {Hero} from "content-src/components/DiscoveryStreamComponents/Hero/Hero";
 import {HorizontalRule} from "content-src/components/DiscoveryStreamComponents/HorizontalRule/HorizontalRule";
-import {ImpressionStats} from "content-src/components/DiscoveryStreamImpressionStats/ImpressionStats";
 import {List} from "content-src/components/DiscoveryStreamComponents/List/List";
 import {Navigation} from "content-src/components/DiscoveryStreamComponents/Navigation/Navigation";
 import React from "react";
 import {SectionTitle} from "content-src/components/DiscoveryStreamComponents/SectionTitle/SectionTitle";
 import {selectLayoutRender} from "content-src/lib/selectLayoutRender";
 import {TopSites} from "content-src/components/DiscoveryStreamComponents/TopSites/TopSites";
-
-// According to the Pocket API endpoint specs, `component.properties.items` is a required property with following values:
-//   - List 1-6 items
-//   - Hero 1-5 items
-//   - CardGrid 1-8 items
-// To enforce that, we define various maximium items for individual components as an extra check.
-// Note that these values are subject to the future changes of the specs.
-const MAX_ROWS_HERO = 5;
-const MAX_ROWS_LIST = 6;
-const MAX_ROWS_CARDGRID = 8;
 
 const ALLOWED_CSS_URL_PREFIXES = ["chrome://", "resource://", "https://img-getpocket.cdn.mozilla.net/"];
 const DUMMY_CSS_SELECTOR = "DUMMY#CSS.SELECTOR";
@@ -44,25 +34,6 @@ export class _DiscoveryStreamBase extends React.PureComponent {
   constructor(props) {
     super(props);
     this.onStyleMount = this.onStyleMount.bind(this);
-  }
-
-  /**
-   * Extracts the recommendation rows from component for the impression ping.
-   * If `component.data.recommendations` is unset, returns an empty array.
-   *
-   * The row size is determined by the following rules:
-   *   - Use `component.properties.items` from the endpoint if it's specified
-   *   - Otherwise, use the length of recommendation array
-   *   - The row size is capped by the argument `limit`, which could be one of
-   *     [`MAX_ROW_HERO`, `MAX_ROWS_LIST`, `MAX_ROWS_CARDGRID`]
-   */
-  extractRows(component, limit) {
-    if (component.data && component.data.recommendations) {
-      const items = Math.min(limit, component.properties.items || component.data.recommendations.length);
-      return component.data.recommendations.slice(0, items);
-    }
-
-    return [];
   }
 
   onStyleMount(style) {
@@ -114,19 +85,18 @@ export class _DiscoveryStreamBase extends React.PureComponent {
   }
 
   renderComponent(component, embedWidth) {
-    let rows;
-    const {spocs} = this.props.DiscoveryStream;
-
-    // TODO: Can we make this a bit better visually while it loads?
-    // If this component expects spocs,
-    // wait until spocs are loaded before attempting to use it.
-    if (component.spocs && !spocs.loaded) {
-      return null;
-    }
-
     switch (component.type) {
       case "TopSites":
         return (<TopSites header={component.header} />);
+      case "Message":
+        return (
+          <DSMessage
+            title={component.header && component.header.title}
+            subtitle={component.header && component.header.subtitle}
+            link_text={component.header && component.header.link_text}
+            link_url={component.header && component.header.link_url}
+            icon={component.header && component.header.icon} />
+        );
       case "SectionTitle":
         return (
           <SectionTitle
@@ -140,50 +110,41 @@ export class _DiscoveryStreamBase extends React.PureComponent {
             header={component.header} />
         );
       case "CardGrid":
-        rows = this.extractRows(component, MAX_ROWS_CARDGRID);
         return (
-          <ImpressionStats rows={rows} dispatch={this.props.dispatch} source={component.type}>
-            <CardGrid
-              title={component.header && component.header.title}
-              data={component.data}
-              feed={component.feed}
-              border={component.properties.border}
-              type={component.type}
-              dispatch={this.props.dispatch}
-              items={component.properties.items} />
-          </ImpressionStats>
+          <CardGrid
+            title={component.header && component.header.title}
+            data={component.data}
+            feed={component.feed}
+            border={component.properties.border}
+            type={component.type}
+            dispatch={this.props.dispatch}
+            items={component.properties.items} />
         );
       case "Hero":
-        rows = this.extractRows(component, MAX_ROWS_HERO);
         return (
-          <ImpressionStats rows={rows} dispatch={this.props.dispatch} source={component.type}>
-            <Hero
-              subComponentType={embedWidth >= 9 ? `cards` : `list`}
-              feed={component.feed}
-              title={component.header && component.header.title}
-              data={component.data}
-              border={component.properties.border}
-              type={component.type}
-              dispatch={this.props.dispatch}
-              items={component.properties.items} />
-          </ImpressionStats>
+          <Hero
+            subComponentType={embedWidth >= 9 ? `cards` : `list`}
+            feed={component.feed}
+            title={component.header && component.header.title}
+            data={component.data}
+            border={component.properties.border}
+            type={component.type}
+            dispatch={this.props.dispatch}
+            items={component.properties.items} />
         );
       case "HorizontalRule":
         return (<HorizontalRule />);
       case "List":
-        rows = this.extractRows(component, MAX_ROWS_LIST);
         return (
-          <ImpressionStats rows={rows} dispatch={this.props.dispatch} source={component.type}>
-            <List
-              feed={component.feed}
-              fullWidth={component.properties.full_width}
-              hasBorders={component.properties.border === "border"}
-              hasImages={component.properties.has_images}
-              hasNumbers={component.properties.has_numbers}
-              items={component.properties.items}
-              type={component.type}
-              header={component.header} />
-          </ImpressionStats>
+          <List
+            data={component.data}
+            fullWidth={component.properties.full_width}
+            hasBorders={component.properties.border === "border"}
+            hasImages={component.properties.has_images}
+            hasNumbers={component.properties.has_numbers}
+            items={component.properties.items}
+            type={component.type}
+            header={component.header} />
         );
       default:
         return (<div>{component.type}</div>);
@@ -200,6 +161,12 @@ export class _DiscoveryStreamBase extends React.PureComponent {
   render() {
     const {layoutRender} = this.props.DiscoveryStream;
     const styles = [];
+    const {spocs, feeds} = this.props.DiscoveryStream;
+
+    if (!spocs.loaded || !feeds.loaded) {
+      return null;
+    }
+
     return (
       <div className="discovery-stream ds-layout">
         {layoutRender.map((row, rowIndex) => (

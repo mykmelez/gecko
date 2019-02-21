@@ -46,6 +46,7 @@
 #include "mozilla/dom/LSObject.h"
 #include "mozilla/dom/MemoryReportRequest.h"
 #include "mozilla/dom/PLoginReputationChild.h"
+#include "mozilla/dom/PSessionStorageObserverChild.h"
 #include "mozilla/dom/PostMessageEvent.h"
 #include "mozilla/dom/PushNotifier.h"
 #include "mozilla/dom/RemoteWorkerService.h"
@@ -165,6 +166,7 @@
 #  include "nsPrintingProxy.h"
 #endif
 #include "nsWindowMemoryReporter.h"
+#include "nsIReferrerInfo.h"
 
 #include "IHistory.h"
 #include "nsNetUtil.h"
@@ -732,7 +734,11 @@ void ContentChild::SetProcessName(const nsAString& aName) {
   }
 
   mProcessName = aName;
-  mozilla::ipc::SetThisProcessName(NS_LossyConvertUTF16toASCII(aName).get());
+  NS_LossyConvertUTF16toASCII asciiName(aName);
+  mozilla::ipc::SetThisProcessName(asciiName.get());
+#ifdef MOZ_GECKO_PROFILER
+  profiler_set_process_name(asciiName);
+#endif
 }
 
 NS_IMETHODIMP
@@ -777,12 +783,12 @@ static nsresult GetCreateWindowParams(mozIDOMWindowProxy* aParent,
   }
 
   baseURI->GetSpec(aBaseURIString);
-
   if (aLoadState) {
-    if (!aLoadState->SendReferrer()) {
-      *aReferrerPolicy = mozilla::net::RP_No_Referrer;
+    nsCOMPtr<nsIReferrerInfo> referrerInfo = aLoadState->GetReferrerInfo();
+    if (referrerInfo && referrerInfo->GetSendReferrer()) {
+      referrerInfo->GetReferrerPolicy(aReferrerPolicy);
     } else {
-      *aReferrerPolicy = aLoadState->ReferrerPolicy();
+      *aReferrerPolicy = mozilla::net::RP_No_Referrer;
     }
   }
 
@@ -1963,8 +1969,9 @@ bool ContentChild::DeallocPPSMContentDownloaderChild(
 }
 
 PExternalHelperAppChild* ContentChild::AllocPExternalHelperAppChild(
-    const OptionalURIParams& uri, const nsCString& aMimeContentType,
-    const nsCString& aContentDisposition,
+    const OptionalURIParams& uri,
+    const mozilla::net::OptionalLoadInfoArgs& aLoadInfoArgs,
+    const nsCString& aMimeContentType, const nsCString& aContentDisposition,
     const uint32_t& aContentDispositionHint,
     const nsString& aContentDispositionFilename, const bool& aForceSave,
     const int64_t& aContentLength, const bool& aWasFileChannel,
@@ -3243,6 +3250,20 @@ bool ContentChild::DeallocPLoginReputationChild(PLoginReputationChild* aActor) {
   return true;
 }
 
+PSessionStorageObserverChild*
+ContentChild::AllocPSessionStorageObserverChild() {
+  MOZ_CRASH(
+      "PSessionStorageObserverChild actors should be manually constructed!");
+}
+
+bool ContentChild::DeallocPSessionStorageObserverChild(
+    PSessionStorageObserverChild* aActor) {
+  MOZ_ASSERT(aActor);
+
+  delete aActor;
+  return true;
+}
+
 // The IPC code will call this method asking us to assign an event target to new
 // actors created by the ContentParent.
 already_AddRefed<nsIEventTarget> ContentChild::GetConstructedEventTarget(
@@ -3573,68 +3594,56 @@ PContentChild::Result ContentChild::OnMessageReceived(const Message& aMsg,
   return result;
 }
 
-mozilla::ipc::IPCResult ContentChild::RecvWindowClose(
-    const BrowsingContextId& aContextId, const bool& aTrustedCaller) {
-  RefPtr<BrowsingContext> bc = BrowsingContext::Get(aContextId);
-  if (!bc) {
+mozilla::ipc::IPCResult ContentChild::RecvWindowClose(BrowsingContext* aContext,
+                                                      bool aTrustedCaller) {
+  if (!aContext) {
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
-            ("ChildIPC: Trying to send a message to dead or detached context "
-             "0x%08" PRIx64,
-             (uint64_t)aContextId));
+            ("ChildIPC: Trying to send a message to dead or detached context"));
     return IPC_OK();
   }
 
-  nsCOMPtr<nsPIDOMWindowOuter> window = bc->GetDOMWindow();
+  nsCOMPtr<nsPIDOMWindowOuter> window = aContext->GetDOMWindow();
   nsGlobalWindowOuter::Cast(window)->CloseOuter(aTrustedCaller);
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult ContentChild::RecvWindowFocus(
-    const BrowsingContextId& aContextId) {
-  RefPtr<BrowsingContext> bc = BrowsingContext::Get(aContextId);
-  if (!bc) {
+    BrowsingContext* aContext) {
+  if (!aContext) {
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
-            ("ChildIPC: Trying to send a message to dead or detached context "
-             "0x%08" PRIx64,
-             (uint64_t)aContextId));
+            ("ChildIPC: Trying to send a message to dead or detached context"));
     return IPC_OK();
   }
 
-  nsCOMPtr<nsPIDOMWindowOuter> window = bc->GetDOMWindow();
+  nsCOMPtr<nsPIDOMWindowOuter> window = aContext->GetDOMWindow();
   nsGlobalWindowOuter::Cast(window)->FocusOuter();
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult ContentChild::RecvWindowBlur(
-    const BrowsingContextId& aContextId) {
-  RefPtr<BrowsingContext> bc = BrowsingContext::Get(aContextId);
-  if (!bc) {
+    BrowsingContext* aContext) {
+  if (!aContext) {
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
-            ("ChildIPC: Trying to send a message to dead or detached context "
-             "0x%08" PRIx64,
-             (uint64_t)aContextId));
+            ("ChildIPC: Trying to send a message to dead or detached context"));
     return IPC_OK();
   }
 
-  nsCOMPtr<nsPIDOMWindowOuter> window = bc->GetDOMWindow();
+  nsCOMPtr<nsPIDOMWindowOuter> window = aContext->GetDOMWindow();
   nsGlobalWindowOuter::Cast(window)->BlurOuter();
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult ContentChild::RecvWindowPostMessage(
-    const BrowsingContextId& aContextId, const ClonedMessageData& aMessage,
+    BrowsingContext* aContext, const ClonedMessageData& aMessage,
     const PostMessageData& aData) {
-  RefPtr<BrowsingContext> bc = BrowsingContext::Get(aContextId);
-  if (!bc) {
+  if (!aContext) {
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
-            ("ChildIPC: Trying to send a message to dead or detached context "
-             "0x%08" PRIx64,
-             (uint64_t)aContextId));
+            ("ChildIPC: Trying to send a message to dead or detached context"));
     return IPC_OK();
   }
 
   RefPtr<nsGlobalWindowOuter> window =
-      nsGlobalWindowOuter::Cast(bc->GetDOMWindow());
+      nsGlobalWindowOuter::Cast(aContext->GetDOMWindow());
   nsCOMPtr<nsIPrincipal> providedPrincipal;
   if (!window->GetPrincipalForPostMessage(
           aData.targetOrigin(), aData.targetOriginURI(),
@@ -3643,11 +3652,10 @@ mozilla::ipc::IPCResult ContentChild::RecvWindowPostMessage(
     return IPC_OK();
   }
 
-  RefPtr<BrowsingContext> sourceBc = BrowsingContext::Get(aData.source());
+  RefPtr<BrowsingContext> sourceBc = aData.source();
   if (!sourceBc) {
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
-            ("ChildIPC: Trying to use a dead or detached context 0x%08" PRIx64,
-             (uint64_t)aData.source()));
+            ("ChildIPC: Trying to use a dead or detached context"));
     return IPC_OK();
   }
 

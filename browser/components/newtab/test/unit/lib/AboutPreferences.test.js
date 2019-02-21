@@ -16,7 +16,10 @@ describe("AboutPreferences Feed", () => {
     Sections = [];
     DiscoveryStream = {config: {enabled: false}};
     instance = new AboutPreferences();
-    instance.store = {getState: () => ({Sections, DiscoveryStream})};
+    instance.store = {
+      dispatch: sandbox.stub(),
+      getState: () => ({Sections, DiscoveryStream}),
+    };
   });
   afterEach(() => {
     globals.restore();
@@ -139,18 +142,20 @@ describe("AboutPreferences Feed", () => {
         createElementNS: sandbox.stub().callsFake((NS, el) => node),
         getElementById: sandbox.stub().returns(node),
         insertBefore: sandbox.stub().returnsArg(0),
+        querySelector: sandbox.stub().returns({appendChild: sandbox.stub()}),
       },
       Preferences,
       gHomePane,
-    }, strings, prefStructure, DiscoveryStream.config.enabled);
+    }, strings, prefStructure, DiscoveryStream.config);
     beforeEach(() => {
       node = {
         appendChild: sandbox.stub().returnsArg(0),
         addEventListener: sandbox.stub(),
-        classList: {add: sandbox.stub()},
+        classList: {add: sandbox.stub(), remove: sandbox.stub()},
         cloneNode: sandbox.stub().returnsThis(),
         insertAdjacentElement: sandbox.stub().returnsArg(1),
         setAttribute: sandbox.stub(),
+        remove: sandbox.stub(),
         style: {},
       };
       strings = {};
@@ -293,13 +298,23 @@ describe("AboutPreferences Feed", () => {
       });
     });
     describe("#DiscoveryStream", () => {
+      let PreferenceExperimentsStub;
+      beforeEach(() => {
+        DiscoveryStream = {config: {enabled: true, show_spocs: false}};
+        PreferenceExperimentsStub = {
+          getAllActive: sandbox.stub().resolves([{name: "discoverystream", preferenceName: "browser.newtabpage.activity-stream.discoverystream.config"}]),
+          stop: sandbox.stub().resolves(),
+        };
+        globals.set("PreferenceExperiments", PreferenceExperimentsStub);
+      });
       it("should not render the Discovery Stream section", () => {
+        DiscoveryStream = {config: {enabled: false}};
+
         testRender();
 
         assert.isFalse(node.textContent.includes("prefs_content_discovery"));
       });
       it("should render the Discovery Stream section", () => {
-        DiscoveryStream = {config: {enabled: true}};
         const spy = sandbox.spy(instance, "renderPreferences");
 
         testRender();
@@ -308,18 +323,19 @@ describe("AboutPreferences Feed", () => {
 
         assert.equal(node.textContent, "prefs_content_discovery_button");
         assert.calledWith(documentStub.createElementNS, "http://www.w3.org/1999/xhtml", "button");
-        // node points to contentsGroup, style is set to hidden if Discovery
+        // node points to contentsGroup, style is set to collapse if Discovery
         // Stream is enabled
-        assert.propertyVal(node.style, "visibility", "hidden");
+        assert.propertyVal(node.style, "visibility", "collapse");
       });
-      it("should toggle the Discovery Stream pref on button click", async () => {
-        DiscoveryStream = {config: {enabled: true}};
-        const PreferenceExperimentsStub = {
-          getAllActive: sandbox.stub().resolves([{name: "discoverystream", preferenceName: "browser.newtabpage.activity-stream.discoverystream.config"}]),
-          stop: sandbox.stub().resolves(),
-        };
-        globals.set("PreferenceExperiments", PreferenceExperimentsStub);
+      it("should request Discovery Stream opt-out on button click", async () => {
+        testRender();
+        // Trigger the button click listener
+        await node.addEventListener.firstCall.args[1]();
 
+        assert.calledOnce(instance.store.dispatch);
+        assert.calledWithExactly(instance.store.dispatch, {type: at.DISCOVERY_STREAM_OPT_OUT});
+      });
+      it("should reset the Discovery Stream experiment on button click", async () => {
         testRender();
 
         assert.calledOnce(node.addEventListener);
@@ -330,6 +346,49 @@ describe("AboutPreferences Feed", () => {
         assert.calledOnce(PreferenceExperimentsStub.getAllActive);
         assert.calledOnce(PreferenceExperimentsStub.stop);
         assert.calledWithExactly(PreferenceExperimentsStub.stop, "discoverystream", {resetValue: true, reason: "individual-opt-out"});
+      });
+      it("should render the spocs opt out checkbox if show_spocs is true", () => {
+        const spy = sandbox.spy(instance, "renderPreferences");
+        DiscoveryStream = {config: {enabled: true, show_spocs: true}};
+        testRender();
+
+        const {createXULElement} = spy.firstCall.args[0].document;
+        assert.calledWith(createXULElement, "checkbox");
+        assert.calledWith(Preferences.add, {id: "browser.newtabpage.activity-stream.showSponsored", type: "bool"});
+      });
+      it("should not render the spocs opt out checkbox if show_spocs is false", () => {
+        const spy = sandbox.spy(instance, "renderPreferences");
+        DiscoveryStream = {config: {enabled: true, show_spocs: false}};
+        testRender();
+
+        const {createXULElement} = spy.firstCall.args[0].document;
+        assert.neverCalledWith(createXULElement, "checkbox");
+        assert.neverCalledWith(Preferences.add, {id: "browser.newtabpage.activity-stream.showSponsored", type: "bool"});
+      });
+      describe("spocs pref checkbox", () => {
+        beforeEach(() => {
+          DiscoveryStream = {config: {enabled: true, show_spocs: true}};
+          prefStructure = [{pref: {nestedPrefs: [{titleString: "spocs", name: "showSponsored"}]}}];
+        });
+        it("should remove the topstories spocs checkbox", () => {
+          testRender();
+
+          assert.calledOnce(node.remove);
+          assert.calledOnce(node.classList.remove);
+          assert.calledWith(node.classList.remove, "indent");
+        });
+        it("should restore the checkbox when leaving the experiment", async () => {
+          const spy = sandbox.spy(instance, "renderPreferences");
+
+          testRender();
+
+          const [{document}] = spy.firstCall.args;
+
+          // Trigger the button click listener
+          await node.addEventListener.firstCall.args[1]();
+          assert.calledOnce(document.querySelector);
+          assert.calledWith(document.querySelector, "[data-subcategory='topstories'] .indent");
+        });
       });
     });
   });

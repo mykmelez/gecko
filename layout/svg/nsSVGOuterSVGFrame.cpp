@@ -59,13 +59,15 @@ void nsSVGOuterSVGFrame::UnregisterForeignObject(
 
 nsContainerFrame* NS_NewSVGOuterSVGFrame(nsIPresShell* aPresShell,
                                          ComputedStyle* aStyle) {
-  return new (aPresShell) nsSVGOuterSVGFrame(aStyle);
+  return new (aPresShell)
+      nsSVGOuterSVGFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGOuterSVGFrame)
 
-nsSVGOuterSVGFrame::nsSVGOuterSVGFrame(ComputedStyle* aStyle)
-    : nsSVGDisplayContainerFrame(aStyle, kClassID),
+nsSVGOuterSVGFrame::nsSVGOuterSVGFrame(ComputedStyle* aStyle,
+                                       nsPresContext* aPresContext)
+    : nsSVGDisplayContainerFrame(aStyle, aPresContext, kClassID),
       mCallingReflowSVG(false),
       mFullZoom(PresContext()->GetFullZoom()),
       mViewportInitialized(false),
@@ -77,8 +79,8 @@ nsSVGOuterSVGFrame::nsSVGOuterSVGFrame(ComputedStyle* aStyle)
 // helper
 static inline bool DependsOnIntrinsicSize(const nsIFrame* aEmbeddingFrame) {
   const nsStylePosition* pos = aEmbeddingFrame->StylePosition();
-  const nsStyleCoord& width = pos->mWidth;
-  const nsStyleCoord& height = pos->mHeight;
+  const auto& width = pos->mWidth;
+  const auto& height = pos->mHeight;
 
   // XXX it would be nice to know if the size of aEmbeddingFrame's containing
   // block depends on aEmbeddingFrame, then we'd know if we can return false
@@ -928,7 +930,8 @@ void nsSVGOuterSVGFrame::AppendDirectlyOwnedAnonBoxes(
 
 nsContainerFrame* NS_NewSVGOuterSVGAnonChildFrame(nsIPresShell* aPresShell,
                                                   ComputedStyle* aStyle) {
-  return new (aPresShell) nsSVGOuterSVGAnonChildFrame(aStyle);
+  return new (aPresShell)
+      nsSVGOuterSVGAnonChildFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGOuterSVGAnonChildFrame)

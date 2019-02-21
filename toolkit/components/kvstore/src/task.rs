@@ -8,9 +8,9 @@ use crossbeam_utils::atomic::AtomicCell;
 use error::KeyValueError;
 use moz_task::Task;
 use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE};
-use nsstring::{nsCString, nsString};
-use owned_value::{value_to_owned, OwnedValue};
-use rkv::{Manager, Rkv, SingleStore, StoreError, StoreOptions, Value};
+use nsstring::nsCString;
+use owned_value::owned_to_variant;
+use rkv::{Manager, OwnedValue, Rkv, SingleStore, StoreError, StoreOptions, Value};
 use std::{
     path::Path,
     str,
@@ -22,11 +22,11 @@ use xpcom::{
         nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback, nsIKeyValueVariantCallback,
         nsIKeyValueVoidCallback, nsIThread, nsIVariant,
     },
-    RefPtr,
-    ThreadBoundRefPtr,
+    RefPtr, ThreadBoundRefPtr,
 };
 use KeyValueDatabase;
 use KeyValueEnumerator;
+use KeyValuePairResult;
 
 /// A macro to generate a done() implementation for a Task.
 /// Takes one argument that specifies the type of the Task's callback function:
@@ -78,12 +78,19 @@ macro_rules! task_done {
     };
 }
 
+/// A tuple comprising an Arc<RwLock<Rkv>> and a SingleStore, which is
+/// the result of GetOrCreateTask.  We declare this type because otherwise
+/// Clippy complains "error: very complex type used. Consider factoring
+/// parts into `type` definitions" (i.e. clippy::type-complexity) when we
+/// declare the type of `GetOrCreateTask::result`.
+type RkvStoreTuple = (Arc<RwLock<Rkv>>, SingleStore);
+
 pub struct GetOrCreateTask {
     callback: AtomicCell<Option<ThreadBoundRefPtr<nsIKeyValueDatabaseCallback>>>,
     thread: AtomicCell<Option<ThreadBoundRefPtr<nsIThread>>>,
     path: nsCString,
     name: nsCString,
-    result: AtomicCell<Option<Result<(Arc<RwLock<Rkv>>, SingleStore), KeyValueError>>>,
+    result: AtomicCell<Option<Result<RkvStoreTuple, KeyValueError>>>,
 }
 
 impl GetOrCreateTask {
@@ -102,10 +109,7 @@ impl GetOrCreateTask {
         }
     }
 
-    fn convert(
-        &self,
-        result: (Arc<RwLock<Rkv>>, SingleStore),
-    ) -> Result<RefPtr<KeyValueDatabase>, KeyValueError> {
+    fn convert(&self, result: RkvStoreTuple) -> Result<RefPtr<KeyValueDatabase>, KeyValueError> {
         let thread = self.thread.swap(None).ok_or(NS_ERROR_FAILURE)?;
         Ok(KeyValueDatabase::new(result.0, result.1, thread))
     }
@@ -115,14 +119,15 @@ impl Task for GetOrCreateTask {
     fn run(&self) {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
-        self.result.store(Some(
-            || -> Result<(Arc<RwLock<Rkv>>, SingleStore), KeyValueError> {
+        self.result
+            .store(Some(|| -> Result<RkvStoreTuple, KeyValueError> {
                 let mut writer = Manager::singleton().write()?;
                 let rkv = writer.get_or_create(Path::new(str::from_utf8(&self.path)?), Rkv::new)?;
-                let store = rkv.write()?.open_single(str::from_utf8(&self.name)?, StoreOptions::create())?;
+                let store = rkv
+                    .write()?
+                    .open_single(str::from_utf8(&self.name)?, StoreOptions::create())?;
                 Ok((rkv, store))
-            }(),
-        ));
+            }()));
     }
 
     task_done!(value);
@@ -165,14 +170,8 @@ impl Task for PutTask {
             let env = self.rkv.read()?;
             let mut writer = env.write()?;
 
-            let value = match self.value {
-                OwnedValue::Bool(val) => Value::Bool(val),
-                OwnedValue::I64(val) => Value::I64(val),
-                OwnedValue::F64(val) => Value::F64(val),
-                OwnedValue::Str(ref val) => Value::Str(&val),
-            };
-
-            self.store.clone().put(&mut writer, key, &value)?;
+            self.store
+                .put(&mut writer, key, &Value::from(&self.value))?;
             writer.commit()?;
 
             Ok(())
@@ -210,12 +209,8 @@ impl GetTask {
     }
 
     fn convert(&self, result: Option<OwnedValue>) -> Result<RefPtr<nsIVariant>, KeyValueError> {
-        // TODO: refactor with owned_to_variant in owned_value.rs.
         Ok(match result {
-            Some(OwnedValue::Bool(val)) => val.into_variant(),
-            Some(OwnedValue::I64(val)) => val.into_variant(),
-            Some(OwnedValue::F64(val)) => val.into_variant(),
-            Some(OwnedValue::Str(ref val)) => nsString::from(val).into_variant(),
+            Some(val) => owned_to_variant(val)?,
             None => ().into_variant(),
         })
     }
@@ -232,13 +227,8 @@ impl Task for GetTask {
                 let reader = env.read()?;
                 let value = self.store.get(&reader, key)?;
 
-                // TODO: refactor with value_to_owned in owned_value.rs.
                 Ok(match value {
-                    Some(Value::Bool(val)) => Some(OwnedValue::Bool(val)),
-                    Some(Value::I64(val)) => Some(OwnedValue::I64(val)),
-                    Some(Value::F64(val)) => Some(OwnedValue::F64(val)),
-                    Some(Value::Str(val)) => Some(OwnedValue::Str(val.to_owned())),
-                    Some(_value) => return Err(KeyValueError::UnexpectedValue),
+                    Some(value) => Some(OwnedValue::from(&value)),
                     None => match self.default_value {
                         Some(ref val) => Some(val.clone()),
                         None => None,
@@ -329,7 +319,7 @@ impl Task for DeleteTask {
             let env = self.rkv.read()?;
             let mut writer = env.write()?;
 
-            match self.store.clone().delete(&mut writer, key) {
+            match self.store.delete(&mut writer, key) {
                 Ok(_) => (),
 
                 // LMDB fails with an error if the key to delete wasn't found,
@@ -355,7 +345,7 @@ pub struct EnumerateTask {
     store: SingleStore,
     from_key: nsCString,
     to_key: nsCString,
-    result: AtomicCell<Option<Result<Vec<KeyValuePair>, KeyValueError>>>,
+    result: AtomicCell<Option<Result<Vec<KeyValuePairResult>, KeyValueError>>>,
 }
 
 impl EnumerateTask {
@@ -378,20 +368,18 @@ impl EnumerateTask {
 
     fn convert(
         &self,
-        result: Vec<KeyValuePair>,
+        result: Vec<KeyValuePairResult>,
     ) -> Result<RefPtr<KeyValueEnumerator>, KeyValueError> {
         Ok(KeyValueEnumerator::new(result))
     }
 }
 
-type KeyValuePair = Result<(String, OwnedValue), KeyValueError>;
-
 impl Task for EnumerateTask {
     fn run(&self) {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
-        self.result
-            .store(Some(|| -> Result<Vec<KeyValuePair>, KeyValueError> {
+        self.result.store(Some(
+            || -> Result<Vec<KeyValuePairResult>, KeyValueError> {
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
                 let from_key = str::from_utf8(&self.from_key)?;
@@ -413,14 +401,15 @@ impl Task for EnumerateTask {
                 // Our fallback approach is to eagerly collect the iterator
                 // into a collection that KeyValueEnumerator owns.  Fixing this so we
                 // enumerate pairs lazily is bug 1499252.
-                let pairs: Vec<KeyValuePair> = iterator
+                let pairs: Vec<KeyValuePairResult> = iterator
                     // Convert the key to a string so we can compare it to the "to" key.
                     // For forward compatibility, we don't fail here if we can't convert
                     // a key to UTF-8.  Instead, we store the Err in the collection
                     // and fail lazily in KeyValueEnumerator.get_next().
                     .map(|result| match result {
                         Ok((key, val)) => Ok((str::from_utf8(&key), val)),
-                        Err(err) => Err(err) })
+                        Err(err) => Err(err),
+                    })
                     // Stop iterating once we reach the to_key, if any.
                     .take_while(|result| match result {
                         Ok((key, _val)) => {
@@ -432,24 +421,23 @@ impl Task for EnumerateTask {
                                     Err(_err) => true,
                                 }
                             }
-                        },
+                        }
                         Err(_) => true,
                     })
-                    // Convert the key, value pair to owned.
+                    // Convert the key/value pair to owned.
                     .map(|result| match result {
-                        Ok((key, val)) => {
-                            match (key, value_to_owned(val)) {
-                                (Ok(key), Ok(val)) => Ok((key.to_owned(), val)),
-                                (Err(err), _) => Err(err.into()),
-                                (_, Err(err)) => Err(err),
-                            }
+                        Ok((key, val)) => match (key, val) {
+                            (Ok(key), Some(val)) => Ok((key.to_owned(), OwnedValue::from(&val))),
+                            (Err(err), _) => Err(err.into()),
+                            (_, None) => Err(KeyValueError::UnexpectedValue),
                         },
                         Err(err) => Err(KeyValueError::StoreError(err)),
                     })
                     .collect();
 
                 Ok(pairs)
-            }()));
+            }(),
+        ));
     }
 
     task_done!(value);

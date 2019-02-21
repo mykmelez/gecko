@@ -10,16 +10,15 @@ with Files('**'):
 MOCHITEST_CHROME_MANIFESTS += ['tests/chrome/chrome.ini']
 XPCSHELL_TESTS_MANIFESTS += ['tests/xpcshell/xpcshell.ini']
 
-EXTRA_JS_MODULES += [
-    'XULStore.jsm',
-]
-
 TEST_DIRS += [
     'tests/gtest',
 ]
 
 EXPORTS += [
     'XULStore.h',
+
+EXTRA_JS_MODULES += [
+    'XULStore.jsm',
 ]
 
 FINAL_LIBRARY = 'xul'

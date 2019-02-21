@@ -7,14 +7,17 @@
 import { createSelector } from "reselect";
 import { uniqBy } from "lodash";
 
-import { getBreakpointsList } from "../reducers/breakpoints";
+import {
+  getBreakpointsList,
+  getBreakpointPositionsForLine
+} from "../reducers/breakpoints";
 import { getSelectedSource } from "../reducers/sources";
 
 import { sortBreakpoints } from "../utils/breakpoint";
 import { getSelectedLocation } from "../utils/source-maps";
 
-import type { Breakpoint, Source } from "../types";
-import type { Selector } from "../reducers/types";
+import type { Breakpoint, Source, SourceLocation } from "../types";
+import type { Selector, State } from "../reducers/types";
 
 function isVisible(breakpoint: Breakpoint, selectedSource: Source) {
   const location = getSelectedLocation(breakpoint, selectedSource);
@@ -38,6 +41,15 @@ export const getVisibleBreakpoints: Selector<?(Breakpoint[])> = createSelector(
     return breakpoints.filter(bp => isVisible(bp, source));
   }
 );
+
+export function getFirstVisibleBreakpointPosition(
+  state: State,
+  location: SourceLocation
+): ?SourceLocation {
+  const { sourceId, line } = location;
+  const positions = getBreakpointPositionsForLine(state, sourceId, line);
+  return positions && positions[0].location;
+}
 
 /*
  * Finds the first breakpoint per line, which appear in the selected source.

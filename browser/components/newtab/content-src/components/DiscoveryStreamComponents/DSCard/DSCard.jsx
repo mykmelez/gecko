@@ -1,9 +1,12 @@
 import {actionCreators as ac} from "common/Actions.jsm";
+import {ImpressionStats} from "../../DiscoveryStreamImpressionStats/ImpressionStats";
 import React from "react";
+import {SafeAnchor} from "../SafeAnchor/SafeAnchor";
 
 export class DSCard extends React.PureComponent {
   constructor(props) {
     super(props);
+
     this.onLinkClick = this.onLinkClick.bind(this);
   }
 
@@ -25,7 +28,7 @@ export class DSCard extends React.PureComponent {
 
   render() {
     return (
-      <a href={this.props.url} className="ds-card" onClick={this.onLinkClick}>
+      <SafeAnchor url={this.props.url} className="ds-card" onLinkClick={this.onLinkClick}>
         <div className="img-wrapper">
           <div className="img" style={{backgroundImage: `url(${this.props.image_src}`}} />
         </div>
@@ -44,7 +47,12 @@ export class DSCard extends React.PureComponent {
             <span className="source">{this.props.source}</span>
           </p>
         </div>
-      </a>
+        <ImpressionStats
+          campaignId={this.props.campaignId}
+          rows={[{id: this.props.id}]}
+          dispatch={this.props.dispatch}
+          source={this.props.type} />
+      </SafeAnchor>
     );
   }
 }

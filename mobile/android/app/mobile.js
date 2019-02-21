@@ -184,7 +184,7 @@ pref("dom.forms.datetime.others", true);
 /* extension manager and xpinstall */
 pref("xpinstall.whitelist.directRequest", false);
 pref("xpinstall.whitelist.fileRequest", false);
-pref("xpinstall.whitelist.add", "https://addons.mozilla.org,https://testpilot.firefox.com");
+pref("xpinstall.whitelist.add", "https://addons.mozilla.org");
 
 pref("extensions.langpacks.signatures.required", true);
 pref("xpinstall.signatures.required", true);
@@ -379,14 +379,6 @@ pref("browser.ui.zoom.force-user-scalable", false);
 
 // With the typical screen sizes on mobile devices, we want to wrap page sources by default.
 pref("view_source.wrap_long_lines", true);
-
-// When removing this Nightly flag, also remember to remove the flags surrounding this feature
-// in GeckoPreferences and BrowserApp (see bug 1245930).
-#ifdef NIGHTLY_BUILD
-pref("ui.bookmark.mobilefolder.enabled", true);
-#else
-pref("ui.bookmark.mobilefolder.enabled", false);
-#endif
 
 
 pref("ui.touch.radius.enabled", false);

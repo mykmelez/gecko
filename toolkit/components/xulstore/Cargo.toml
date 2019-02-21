@@ -11,6 +11,6 @@ lmdb-rkv = "0.11.2"
 log = "0.4"
 nsstring = { path = "../../../xpcom/rust/nsstring" }
 nserror = { path = "../../../xpcom/rust/nserror" }
-rkv = "0.9.1"
+rkv = "0.9.3"
 tempdir = "0.3.5"
 xpcom = { path = "../../../xpcom/rust/xpcom" }

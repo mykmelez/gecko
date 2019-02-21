@@ -2591,7 +2591,7 @@ bool CanvasRenderingContext2D::ParseFilter(
     return false;
   }
 
-  nsString usedFont;  // unused
+  nsAutoString usedFont;  // unused
 
   RefPtr<ComputedStyle> parentStyle = GetFontStyleForServo(
       mCanvasElement, GetFont(), presShell, usedFont, aError);
@@ -2599,16 +2599,13 @@ bool CanvasRenderingContext2D::ParseFilter(
     return false;
   }
 
-  RefPtr<ComputedStyle> computedValues =
+  RefPtr<ComputedStyle> style =
       ResolveFilterStyleForServo(aString, parentStyle, presShell, aError);
-  if (!computedValues) {
+  if (!style) {
     return false;
   }
 
-  const nsStyleEffects* effects =
-      computedValues->ComputedData()->GetStyleEffects();
-  // XXX: This mFilters is a one shot object, we probably could avoid copying.
-  aFilterChain = effects->mFilters;
+  aFilterChain = style->StyleEffects()->mFilters;
   return true;
 }
 
@@ -2648,6 +2645,7 @@ class CanvasUserSpaceMetrics : public UserSpaceMetricsWithSize {
     params.language = mFontLanguage;
     params.explicitLanguage = mExplicitLanguage;
     params.textPerf = mPresContext->GetTextPerfMetrics();
+    params.featureValueLookup = mPresContext->GetFontFeatureValuesLookup();
     RefPtr<nsFontMetrics> fontMetrics = dc->GetMetricsFor(mFont, params);
     return NSAppUnitsToFloatPixels(fontMetrics->XHeight(),
                                    AppUnitsPerCSSPixel());
@@ -5733,6 +5731,13 @@ bool CanvasRenderingContext2D::IsContextCleanForFrameCapture() {
 bool CanvasRenderingContext2D::ShouldForceInactiveLayer(
     LayerManager* aManager) {
   return !aManager->CanUseCanvasLayerForSize(GetSize());
+}
+
+void CanvasRenderingContext2D::SetWriteOnly() {
+  mWriteOnly = true;
+  if (mCanvasElement) {
+    mCanvasElement->SetWriteOnly();
+  }
 }
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(CanvasPath, AddRef)

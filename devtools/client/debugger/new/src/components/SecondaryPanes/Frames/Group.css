@@ -19,10 +19,6 @@
   color: var(--theme-highlight-blue);
 }
 
-.frames [role="list"] .frames-group.expanded .react path {
-  fill: var(--theme-highlight-blue);
-}
-
 .frames [role="list"] .frames-group .frames-list [role="listitem"] {
   padding-left: 30px;
 }
@@ -30,11 +26,6 @@
 .frames [role="list"] .frames-group .frames-list {
   border-top: 1px solid var(--theme-splitter-color);
   border-bottom: 1px solid var(--theme-splitter-color);
-}
-
-/* We don't want to display those as flex since only the name is displayed */
-.frames [role="list"] .frames-group .frames-list [role="listitem"] {
-  display: block;
 }
 
 .frames [role="list"] .frames-group.expanded .badge {

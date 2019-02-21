@@ -856,6 +856,7 @@ nsGlobalWindowInner::nsGlobalWindowInner(nsGlobalWindowOuter* aOuterWindow)
       mHasFocus(false),
       mShowFocusRingForContent(false),
       mFocusByKeyOccurred(false),
+      mDidFireDocElemInserted(false),
       mHasGamepad(false),
       mHasVREvents(false),
       mHasVRDisplayActivateEvents(false),
@@ -1717,7 +1718,7 @@ nsresult nsGlobalWindowInner::EnsureClientSource() {
     }
 
     if (!ignoreLoadInfo) {
-      loadInfo = channel->GetLoadInfo();
+      loadInfo = channel->LoadInfo();
     }
   }
 

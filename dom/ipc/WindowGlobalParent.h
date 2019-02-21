@@ -22,6 +22,7 @@ namespace dom {
 class CanonicalBrowsingContext;
 class WindowGlobalChild;
 class JSWindowActorParent;
+class TabParent;
 
 /**
  * A handle in the parent process to a specific nsGlobalWindowInner object.
@@ -29,6 +30,8 @@ class JSWindowActorParent;
 class WindowGlobalParent final : public nsISupports,
                                  public nsWrapperCache,
                                  public PWindowGlobalParent {
+  friend class PWindowGlobalParent;
+
  public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(WindowGlobalParent)
@@ -59,6 +62,10 @@ class WindowGlobalParent final : public nsISupports,
   // Get this actor's manager if it is not an in-process actor. Returns
   // |nullptr| if the actor has been torn down, or is in-process.
   already_AddRefed<TabParent> GetTabParent();
+
+  void HandleAsyncMessage(const nsString& aActorName,
+                          const nsString& aMessageName,
+                          ipc::StructuredCloneData& aData);
 
   // The principal of this WindowGlobal. This value will not change over the
   // lifetime of the WindowGlobal object, even to reflect changes in
@@ -97,9 +104,12 @@ class WindowGlobalParent final : public nsISupports,
 
  protected:
   // IPC messages
-  mozilla::ipc::IPCResult RecvUpdateDocumentURI(nsIURI* aURI) override;
-  mozilla::ipc::IPCResult RecvBecomeCurrentWindowGlobal() override;
-  mozilla::ipc::IPCResult RecvDestroy() override;
+  mozilla::ipc::IPCResult RecvUpdateDocumentURI(nsIURI* aURI);
+  mozilla::ipc::IPCResult RecvBecomeCurrentWindowGlobal();
+  mozilla::ipc::IPCResult RecvDestroy();
+  mozilla::ipc::IPCResult RecvAsyncMessage(const nsString& aActorName,
+                                           const nsString& aMessageName,
+                                           const ClonedMessageData& aData);
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
 

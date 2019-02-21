@@ -8,9 +8,7 @@
 
 #include "mozilla/MaybeOneOf.h"
 
-#ifdef ENABLE_BIGINT
-#  include "builtin/BigInt.h"
-#endif
+#include "builtin/BigInt.h"
 #include "builtin/Eval.h"
 #include "builtin/SelfHostingDefines.h"
 #include "builtin/String.h"
@@ -515,7 +513,7 @@ static bool GetBuiltinTagSlow(JSContext* cx, HandleObject obj,
     default:
       if (obj->isCallable()) {
         // Non-standard: Prevent <object> from showing up as Function.
-        RootedObject unwrapped(cx, CheckedUnwrap(obj));
+        RootedObject unwrapped(cx, CheckedUnwrapDynamic(obj, cx));
         if (!unwrapped || !unwrapped->getClass()->isDOMClass()) {
           builtinTag.set(cx->names().objectFunction);
           return true;
@@ -1061,7 +1059,8 @@ PlainObject* js::ObjectCreateWithTemplate(JSContext* cx,
 
 // ES 2017 draft 19.1.2.3.1
 static bool ObjectDefineProperties(JSContext* cx, HandleObject obj,
-                                   HandleValue properties) {
+                                   HandleValue properties,
+                                   bool* failedOnWindowProxy) {
   // Step 1. implicit
   // Step 2.
   RootedObject props(cx, ToObject(cx, properties));
@@ -1105,9 +1104,19 @@ static bool ObjectDefineProperties(JSContext* cx, HandleObject obj,
   }
 
   // Step 6.
+  *failedOnWindowProxy = false;
   for (size_t i = 0, len = descriptors.length(); i < len; i++) {
-    if (!DefineProperty(cx, obj, descriptorKeys[i], descriptors[i])) {
+    ObjectOpResult result;
+    if (!DefineProperty(cx, obj, descriptorKeys[i], descriptors[i], result)) {
       return false;
+    }
+
+    if (!result.ok()) {
+      if (result.failureCode() == JSMSG_CANT_DEFINE_WINDOW_NC) {
+        *failedOnWindowProxy = true;
+      } else if (!result.checkStrict(cx, obj, descriptorKeys[i])) {
+        return false;
+      }
     }
   }
 
@@ -1145,9 +1154,13 @@ bool js::obj_create(JSContext* cx, unsigned argc, Value* vp) {
 
   // Step 3.
   if (args.hasDefined(1)) {
-    if (!ObjectDefineProperties(cx, obj, args[1])) {
+    // we can't ever end up with failures to define on a WindowProxy
+    // here, because "obj" is never a WindowProxy.
+    bool failedOnWindowProxy = false;
+    if (!ObjectDefineProperties(cx, obj, args[1], &failedOnWindowProxy)) {
       return false;
     }
+    MOZ_ASSERT(!failedOnWindowProxy, "How did we get a WindowProxy here?");
   }
 
   // Step 4.
@@ -1890,12 +1903,11 @@ static bool obj_getOwnPropertySymbols(JSContext* cx, unsigned argc, Value* vp) {
 static bool obj_defineProperties(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  /* Steps 1 and 7. */
+  /* Step 1. */
   RootedObject obj(cx);
   if (!GetFirstArgumentAsObject(cx, args, "Object.defineProperties", &obj)) {
     return false;
   }
-  args.rval().setObject(*obj);
 
   /* Step 2. */
   if (!args.requireAtLeast(cx, "Object.defineProperties", 2)) {
@@ -1903,7 +1915,18 @@ static bool obj_defineProperties(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   /* Steps 3-6. */
-  return ObjectDefineProperties(cx, obj, args[1]);
+  bool failedOnWindowProxy = false;
+  if (!ObjectDefineProperties(cx, obj, args[1], &failedOnWindowProxy)) {
+    return false;
+  }
+
+  /* Step 7, but modified to deal with WindowProxy mess */
+  if (failedOnWindowProxy) {
+    args.rval().setNull();
+  } else {
+    args.rval().setObject(*obj);
+  }
+  return true;
 }
 
 // ES6 20141014 draft 19.1.2.15 Object.preventExtensions(O)

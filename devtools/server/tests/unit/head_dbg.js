@@ -64,14 +64,7 @@ async function createTargetForFakeTab(title) {
   const client = await startTestDebuggerServer(title);
 
   const tabs = await listTabs(client);
-  const front = findTab(tabs, title);
-  const options = {
-    activeTab: front,
-    client,
-    chrome: false,
-  };
-  const target = await TargetFactory.forRemoteTab(options);
-  return target;
+  return findTab(tabs, title);
 }
 
 async function createTargetForMainProcess() {
@@ -82,14 +75,7 @@ async function createTargetForMainProcess() {
   const client = new DebuggerClient(DebuggerServer.connectPipe());
   await client.connect();
 
-  const front = await client.mainRoot.getMainProcess();
-  const options = {
-    activeTab: front,
-    client,
-    chrome: true,
-  };
-  const target = await TargetFactory.forRemoteTab(options);
-  return target;
+  return client.mainRoot.getMainProcess();
 }
 
 /**
@@ -263,9 +249,9 @@ function waitForProperty(dbg, property) {
   });
 }
 
-function setBreakpoint(sourceClient, location) {
+function setBreakpoint(threadClient, location) {
   dump("Setting breakpoint.\n");
-  return sourceClient.setBreakpoint(location);
+  return threadClient.setBreakpoint(location, {});
 }
 
 function getPrototypeAndProperties(objClient) {
@@ -802,9 +788,7 @@ function getSourceContent(sourceClient) {
  * @returns Promise<SourceClient>
  */
 async function getSource(threadClient, url) {
-  const {sources} = await threadClient.getSources();
-  const source = sources.find((s) => s.url === url);
-
+  const source = await getSourceForm(threadClient, url);
   if (source) {
     return threadClient.source(source);
   }
@@ -813,9 +797,13 @@ async function getSource(threadClient, url) {
 }
 
 async function getSourceById(threadClient, id) {
-  const { sources } = await threadClient.getSources();
-  const form = sources.find(source => source.actor == id);
+  const form = await getSourceFormById(threadClient, id);
   return threadClient.source(form);
+}
+
+async function getSourceForm(threadClient, url) {
+  const {sources} = await threadClient.getSources();
+  return sources.find((s) => s.url === url);
 }
 
 async function getSourceFormById(threadClient, id) {

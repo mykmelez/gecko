@@ -53,7 +53,8 @@ using namespace mozilla::dom;
 
 nsIFrame* NS_NewTextControlFrame(nsIPresShell* aPresShell,
                                  ComputedStyle* aStyle) {
-  return new (aPresShell) nsTextControlFrame(aStyle);
+  return new (aPresShell)
+      nsTextControlFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsTextControlFrame)
@@ -109,8 +110,9 @@ class nsTextControlFrame::nsAnonDivObserver final
   nsTextControlFrame& mFrame;
 };
 
-nsTextControlFrame::nsTextControlFrame(ComputedStyle* aStyle)
-    : nsContainerFrame(aStyle, kClassID),
+nsTextControlFrame::nsTextControlFrame(ComputedStyle* aStyle,
+                                       nsPresContext* aPresContext)
+    : nsContainerFrame(aStyle, aPresContext, kClassID),
       mFirstBaseline(NS_INTRINSIC_WIDTH_UNKNOWN),
       mEditorHasBeenInitialized(false),
       mIsProcessing(false)
@@ -477,7 +479,7 @@ void nsTextControlFrame::CreatePlaceholderIfNeeded() {
 
   mPlaceholderDiv = CreateEmptyDivWithTextNode(*this);
   // Associate ::placeholder pseudo-element with the placeholder node.
-  mPlaceholderDiv->SetPseudoElementType(CSSPseudoElementType::placeholder);
+  mPlaceholderDiv->SetPseudoElementType(PseudoStyleType::placeholder);
   mPlaceholderDiv->GetFirstChild()->AsText()->SetText(placeholderTxt, false);
 }
 
@@ -532,8 +534,8 @@ LogicalSize nsTextControlFrame::ComputeAutoSize(
 
   // Note: nsContainerFrame::ComputeAutoSize only computes the inline-size (and
   // only for 'auto'), the block-size it returns is always NS_UNCONSTRAINEDSIZE.
-  const nsStyleCoord& iSizeCoord = StylePosition()->ISize(aWM);
-  if (iSizeCoord.GetUnit() == eStyleUnit_Auto) {
+  const auto& iSizeCoord = StylePosition()->ISize(aWM);
+  if (iSizeCoord.IsAuto()) {
     if (aFlags & ComputeSizeFlags::eIClampMarginBoxMinSize) {
       // CalcIntrinsicSize isn't aware of grid-item margin-box clamping, so we
       // fall back to nsContainerFrame's ComputeAutoSize to handle that.

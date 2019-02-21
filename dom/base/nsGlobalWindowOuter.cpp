@@ -1796,6 +1796,12 @@ static JS::RealmCreationOptions& SelectZone(
 
   if (aNewInner->GetOuterWindow()) {
     nsGlobalWindowOuter* top = aNewInner->GetTopInternal();
+    if (top == aNewInner->GetOuterWindow()) {
+      // We're a toplevel load.  Use a new zone.  This way, when we do
+      // zone-based compartment sharing we won't share compartments
+      // across navigations.
+      return aOptions.setNewCompartmentAndZone();
+    }
 
     // If we have a top-level window, use its zone.
     if (top && top->GetGlobalJSObject()) {
@@ -1994,9 +2000,6 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
     if (aDocument != oldDoc) {
       JS::SetRealmPrincipals(realm,
                              nsJSPrincipals::get(aDocument->NodePrincipal()));
-      // Make sure we clear out the old content XBL scope, so the new one will
-      // get created with a principal that subsumes our new principal.
-      xpc::ClearContentXBLScope(newInnerGlobal);
     }
   } else {
     if (aState) {
@@ -2080,12 +2083,15 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
         return NS_ERROR_FAILURE;
       }
 
-      JS::Rooted<JSObject*> obj(cx, GetWrapperPreserveColor());
+      JS::Rooted<JSObject*> obj(cx, GetWrapper());
+
+      MOZ_ASSERT(js::IsWindowProxy(obj));
 
       js::SetProxyReservedSlot(obj, OUTER_WINDOW_SLOT,
                                js::PrivateValue(nullptr));
       js::SetProxyReservedSlot(outerObject, OUTER_WINDOW_SLOT,
                                js::PrivateValue(nullptr));
+      js::SetProxyReservedSlot(obj, HOLDER_WEAKMAP_SLOT, JS::UndefinedValue());
 
       outerObject = xpc::TransplantObject(cx, obj, outerObject);
       if (!outerObject) {
@@ -3927,7 +3933,7 @@ already_AddRefed<BrowsingContext> nsGlobalWindowOuter::GetChildWindow(
     const nsAString& aName) {
   NS_ENSURE_TRUE(mBrowsingContext, nullptr);
 
-  return mBrowsingContext->FindChildWithName(aName);
+  return do_AddRef(mBrowsingContext->FindChildWithName(aName));
 }
 
 bool nsGlobalWindowOuter::DispatchCustomEvent(const nsAString& aEventName) {
@@ -5510,11 +5516,10 @@ void nsGlobalWindowOuter::NotifyContentBlockingEvent(unsigned aEvent,
 // static
 bool nsGlobalWindowOuter::SameLoadingURI(Document* aDoc, nsIChannel* aChannel) {
   nsCOMPtr<nsIURI> docURI = aDoc->GetDocumentURI();
-  nsCOMPtr<nsILoadInfo> channelLoadInfo = aChannel->GetLoadInfo();
-  if (!channelLoadInfo || !docURI) {
+  if (!docURI) {
     return false;
   }
-
+  nsCOMPtr<nsILoadInfo> channelLoadInfo = aChannel->LoadInfo();
   nsCOMPtr<nsIPrincipal> channelLoadingPrincipal =
       channelLoadInfo->LoadingPrincipal();
   if (!channelLoadingPrincipal) {
@@ -7496,7 +7501,7 @@ void nsGlobalWindowOuter::SetCursorOuter(const nsAString& aCursor,
 
     // Call esm and set cursor.
     aError = presContext->EventStateManager()->SetCursor(
-        cursor, nullptr, false, 0.0f, 0.0f, widget, true);
+        cursor, nullptr, Nothing(), widget, true);
   }
 }
 

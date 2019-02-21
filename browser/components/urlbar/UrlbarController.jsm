@@ -12,11 +12,12 @@ const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm")
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.jsm",
-  // BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.jsm",
+  BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.jsm",
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
   UrlbarProvidersManager: "resource:///modules/UrlbarProvidersManager.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
+  URLBAR_SELECTED_RESULT_TYPES: "resource:///modules/BrowserUsageTelemetry.jsm",
 });
 
 const TELEMETRY_1ST_RESULT = "PLACES_AUTOCOMPLETE_1ST_RESULT_TIME_MS";
@@ -61,6 +62,7 @@ class UrlbarController {
     this.browserWindow = options.browserWindow;
 
     this._listeners = new Set();
+    this._userSelectionBehavior = "none";
   }
 
   /**
@@ -136,8 +138,8 @@ class UrlbarController {
     }
 
     if (queryContext.lastResultCount == 0) {
-      if (queryContext.autofillValue) {
-        this.input.autofill(queryContext.autofillValue);
+      if (queryContext.results.length && queryContext.results[0].autofill) {
+        this.input.setValueFromResult(queryContext.results[0]);
       }
       // The first time we receive results try to connect to the heuristic
       // result.
@@ -198,6 +200,20 @@ class UrlbarController {
       return;
     }
 
+    if (this.view.isOpen) {
+      let queryContext = this._lastQueryContext;
+      if (queryContext) {
+        this.view.oneOffSearchButtons.handleKeyPress(
+          event,
+          queryContext.results.length,
+          this.view.allowEmptySelection,
+          queryContext.searchString);
+        if (event.defaultPrevented) {
+          return;
+        }
+      }
+    }
+
     switch (event.keyCode) {
       case KeyEvent.DOM_VK_ESCAPE:
         this.input.handleRevert();
@@ -216,6 +232,7 @@ class UrlbarController {
       case KeyEvent.DOM_VK_TAB:
         if (this.view.isOpen) {
           this.view.selectNextItem({ reverse: event.shiftKey });
+          this.userSelectionBehavior = "tab";
           event.preventDefault();
         }
         break;
@@ -223,6 +240,7 @@ class UrlbarController {
       case KeyEvent.DOM_VK_UP:
         if (!event.ctrlKey && !event.altKey) {
           if (this.view.isOpen) {
+            this.userSelectionBehavior = "arrow";
             this.view.selectNextItem({
               reverse: event.keyCode == KeyEvent.DOM_VK_UP });
           } else {
@@ -273,7 +291,7 @@ class UrlbarController {
     switch (reason) {
       case "resultsadded": {
         // We should connect to an heuristic result, if it exists.
-        if (resultIndex == 0 && (context.preselected || context.autofillValue)) {
+        if ((resultIndex == 0 && context.preselected) || result.autofill) {
           if (result.type == UrlbarUtils.RESULT_TYPE.SEARCH) {
             // Speculative connect only if search suggestions are enabled.
             if (UrlbarPrefs.get("suggest.searches") &&
@@ -281,7 +299,7 @@ class UrlbarController {
               let engine = Services.search.defaultEngine;
               UrlbarUtils.setupSpeculativeConnection(engine, this.browserWindow);
             }
-          } else if (context.autofillValue) {
+          } else if (result.autofill) {
             UrlbarUtils.setupSpeculativeConnection(url, this.browserWindow);
           }
         }
@@ -297,6 +315,98 @@ class UrlbarController {
       default: {
         throw new Error("Invalid speculative connection reason");
       }
+    }
+  }
+
+  /**
+   * Stores the selection behavior that the user has used to select a result.
+   *
+   * @param {"arrow"|"tab"|"none"} behavior
+   *   The behavior the user used.
+   */
+  set userSelectionBehavior(behavior) {
+    // Don't change the behavior to arrow if tab has already been recorded,
+    // as we want to know that the tab was used first.
+    if (behavior == "arrow" && this._userSelectionBehavior == "tab") {
+      return;
+    }
+    this._userSelectionBehavior = behavior;
+  }
+
+  /**
+   * Records details of the selected result in telemetry. We only record the
+   * selection behavior, type and index.
+   *
+   * @param {Event} event
+   *   The event which triggered the result to be selected.
+   * @param {number} resultIndex
+   *   The index of the result.
+   */
+  recordSelectedResult(event, resultIndex) {
+    let result;
+    let selectedResult = -1;
+
+    if (resultIndex >= 0) {
+      result = this.view.getResult(resultIndex);
+      // Except for the history popup, the urlbar always has a selection.  The
+      // first result at index 0 is the "heuristic" result that indicates what
+      // will happen when you press the Enter key.  Treat it as no selection.
+      selectedResult = resultIndex > 0 || !result.heuristic ? resultIndex : -1;
+    }
+    BrowserUsageTelemetry.recordUrlbarSelectedResultMethod(
+      event, selectedResult, this._userSelectionBehavior);
+
+    if (!result) {
+      return;
+    }
+
+    let telemetryType;
+    switch (result.type) {
+      case UrlbarUtils.RESULT_TYPE.TAB_SWITCH:
+        telemetryType = "switchtab";
+        break;
+      case UrlbarUtils.RESULT_TYPE.SEARCH:
+        telemetryType = result.payload.suggestion ? "searchsuggestion" : "searchengine";
+        break;
+      case UrlbarUtils.RESULT_TYPE.URL:
+        if (result.autofill) {
+          telemetryType = "autofill";
+        } else if (result.source == UrlbarUtils.RESULT_SOURCE.OTHER_LOCAL &&
+                   result.heuristic) {
+          telemetryType = "visiturl";
+        } else {
+          telemetryType = result.source == UrlbarUtils.RESULT_SOURCE.BOOKMARKS ? "bookmark" : "history";
+        }
+        break;
+      case UrlbarUtils.RESULT_TYPE.KEYWORD:
+        telemetryType = "keyword";
+        break;
+      case UrlbarUtils.RESULT_TYPE.OMNIBOX:
+        telemetryType = "extension";
+        break;
+      case UrlbarUtils.RESULT_TYPE.REMOTE_TAB:
+        telemetryType = "remotetab";
+        break;
+      default:
+        Cu.reportError(`Unknown Result Type ${result.type}`);
+        return;
+    }
+
+    Services.telemetry
+            .getHistogramById("FX_URLBAR_SELECTED_RESULT_INDEX")
+            .add(resultIndex);
+    // You can add values but don't change any of the existing values.
+    // Otherwise you'll break our data.
+    if (telemetryType in URLBAR_SELECTED_RESULT_TYPES) {
+      Services.telemetry
+              .getHistogramById("FX_URLBAR_SELECTED_RESULT_TYPE")
+              .add(URLBAR_SELECTED_RESULT_TYPES[telemetryType]);
+      Services.telemetry
+              .getKeyedHistogramById("FX_URLBAR_SELECTED_RESULT_INDEX_BY_TYPE")
+              .add(telemetryType, resultIndex);
+    } else {
+      Cu.reportError("Unknown FX_URLBAR_SELECTED_RESULT_TYPE type: " +
+                     telemetryType);
     }
   }
 

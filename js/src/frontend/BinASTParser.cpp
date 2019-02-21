@@ -2037,18 +2037,21 @@ JS::Result<ParseNode*> BinASTParser<Tok>::parseInterfaceBreakStatement(
     if (!IsIdentifier(label)) {
       return raiseError("Invalid identifier");
     }
+  }
 
-    auto validity = parseContext_->checkBreakStatement(label->asPropertyName());
-
-    if (validity.isErr()) {
-      switch (validity.unwrapErr()) {
-        case ParseContext::BreakStatementError::ToughBreak:
-          return raiseError(kind, "Not in a loop");
-        case ParseContext::BreakStatementError::LabelNotFound:
-          return raiseError(kind, "Label not found");
-      }
+  auto validity = parseContext_->checkBreakStatement(
+      label ? label->asPropertyName() : nullptr);
+  if (validity.isErr()) {
+    switch (validity.unwrapErr()) {
+      case ParseContext::BreakStatementError::ToughBreak:
+        this->error(JSMSG_TOUGH_BREAK);
+        return cx_->alreadyReportedError();
+      case ParseContext::BreakStatementError::LabelNotFound:
+        this->error(JSMSG_LABEL_NOT_FOUND);
+        return cx_->alreadyReportedError();
     }
   }
+
   BINJS_TRY_DECL(result, factory_.newBreakStatement(
                              label ? label->asPropertyName() : nullptr,
                              tokenizer_->pos(start)));
@@ -2322,16 +2325,18 @@ JS::Result<ParseNode*> BinASTParser<Tok>::parseInterfaceContinueStatement(
     if (!IsIdentifier(label)) {
       return raiseError("ContinueStatement - Label MUST be an identifier");
     }
+  }
 
-    auto validity = parseContext_->checkContinueStatement(
-        label ? label->asPropertyName() : nullptr);
-    if (validity.isErr()) {
-      switch (validity.unwrapErr()) {
-        case ParseContext::ContinueStatementError::NotInALoop:
-          return raiseError(kind, "Not in a loop");
-        case ParseContext::ContinueStatementError::LabelNotFound:
-          return raiseError(kind, "Label not found");
-      }
+  auto validity = parseContext_->checkContinueStatement(
+      label ? label->asPropertyName() : nullptr);
+  if (validity.isErr()) {
+    switch (validity.unwrapErr()) {
+      case ParseContext::ContinueStatementError::NotInALoop:
+        this->error(JSMSG_BAD_CONTINUE);
+        return cx_->alreadyReportedError();
+      case ParseContext::ContinueStatementError::LabelNotFound:
+        this->error(JSMSG_LABEL_NOT_FOUND);
+        return cx_->alreadyReportedError();
     }
   }
 
@@ -3760,9 +3765,8 @@ JS::Result<ParseNode*> BinASTParser<Tok>::parseInterfaceShorthandProperty(
                                name->template as<NameNode>().name(),
                                tokenizer_->pos(start)));
 
-  BINJS_TRY_DECL(result, factory_.newObjectMethodOrPropertyDefinition(
-                             propName, name, AccessorType::None));
-  result->setKind(ParseNodeKind::Shorthand);
+  BINJS_TRY_DECL(result,
+                 factory_.newShorthandPropertyDefinition(propName, name));
   return result;
 }
 
@@ -3924,7 +3928,7 @@ JS::Result<ParseNode*> BinASTParser<Tok>::parseInterfaceSwitchStatement(
 #endif  // defined(DEBUG)
 
   BINJS_MOZ_TRY_DECL(discriminant, parseExpression());
-
+  ParseContext::Statement stmt(parseContext_, StatementKind::Switch);
   BINJS_MOZ_TRY_DECL(cases, parseListOfSwitchCase());
 
   BINJS_TRY_DECL(scope, factory_.newLexicalScope(nullptr, cases));
@@ -3948,7 +3952,7 @@ BinASTParser<Tok>::parseInterfaceSwitchStatementWithDefault(
 #endif  // defined(DEBUG)
 
   BINJS_MOZ_TRY_DECL(discriminant, parseExpression());
-
+  ParseContext::Statement stmt(parseContext_, StatementKind::Switch);
   BINJS_MOZ_TRY_DECL(preDefaultCases, parseListOfSwitchCase());
 
   BINJS_MOZ_TRY_DECL(defaultCase, parseSwitchDefault());
@@ -4191,24 +4195,24 @@ JS::Result<ParseNode*> BinASTParser<Tok>::parseInterfaceVariableDeclaration(
   BINJS_MOZ_TRY_DECL(kind_, parseVariableDeclarationKind());
   // Restored by `kindGuard`.
   variableDeclarationKind_ = kind_;
-  BINJS_MOZ_TRY_DECL(declarators, parseListOfVariableDeclarator());
-
-  // By specification, the list may not be empty.
-  if (declarators->empty()) {
-    return raiseEmpty("VariableDeclaration");
-  }
-
-  ParseNodeKind pnk;
+  ParseNodeKind declarationListKind;
   switch (kind_) {
     case VariableDeclarationKind::Var:
-      pnk = ParseNodeKind::VarStmt;
+      declarationListKind = ParseNodeKind::VarStmt;
       break;
     case VariableDeclarationKind::Let:
       return raiseError("Let is not supported in this preview release");
     case VariableDeclarationKind::Const:
       return raiseError("Const is not supported in this preview release");
   }
-  declarators->setKind(pnk);
+  BINJS_MOZ_TRY_DECL(declarators,
+                     parseListOfVariableDeclarator(declarationListKind));
+
+  // By specification, the list may not be empty.
+  if (declarators->empty()) {
+    return raiseEmpty("VariableDeclaration");
+  }
+
   auto result = declarators;
   return result;
 }
@@ -4808,15 +4812,15 @@ JS::Result<ListNode*> BinASTParser<Tok>::parseListOfSwitchCase() {
 }
 
 template <typename Tok>
-JS::Result<ListNode*> BinASTParser<Tok>::parseListOfVariableDeclarator() {
+JS::Result<ListNode*> BinASTParser<Tok>::parseListOfVariableDeclarator(
+    ParseNodeKind declarationListKind) {
   uint32_t length;
   AutoList guard(*tokenizer_);
 
   const auto start = tokenizer_->offset();
   MOZ_TRY(tokenizer_->enterList(length, guard));
-  BINJS_TRY_DECL(result, factory_.newDeclarationList(
-                             ParseNodeKind::ConstDecl /* Placeholder */,
-                             tokenizer_->pos(start)));
+  BINJS_TRY_DECL(result, factory_.newDeclarationList(declarationListKind,
+                                                     tokenizer_->pos(start)));
 
   for (uint32_t i = 0; i < length; ++i) {
     BINJS_MOZ_TRY_DECL(item, parseVariableDeclarator());

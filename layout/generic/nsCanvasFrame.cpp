@@ -45,7 +45,7 @@ using namespace mozilla::layers;
 
 nsCanvasFrame* NS_NewCanvasFrame(nsIPresShell* aPresShell,
                                  ComputedStyle* aStyle) {
-  return new (aPresShell) nsCanvasFrame(aStyle);
+  return new (aPresShell) nsCanvasFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsCanvasFrame)
@@ -529,7 +529,7 @@ void nsCanvasFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
         auto* displayData = aBuilder->GetCurrentFixedBackgroundDisplayData();
         nsDisplayListBuilder::AutoBuildingDisplayList buildingDisplayList(
             aBuilder, this, aBuilder->GetVisibleRect(),
-            aBuilder->GetDirtyRect(), false);
+            aBuilder->GetDirtyRect());
 
         DisplayListClipState::AutoSaveRestore clipState(aBuilder);
         nsDisplayListBuilder::AutoCurrentActiveScrolledRootSetter asrSetter(

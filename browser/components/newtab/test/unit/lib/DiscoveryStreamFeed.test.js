@@ -3,22 +3,31 @@ import {combineReducers, createStore} from "redux";
 import {DiscoveryStreamFeed} from "lib/DiscoveryStreamFeed.jsm";
 import {reducers} from "common/Reducers.jsm";
 
-const CONFIG_PREF_NAME = "browser.newtabpage.activity-stream.discoverystream.config";
+const CONFIG_PREF_NAME = "discoverystream.config";
+const SPOC_IMPRESSION_TRACKING_PREF = "discoverystream.spoc.impressions";
+const REC_IMPRESSION_TRACKING_PREF = "discoverystream.rec.impressions";
 const THIRTY_MINUTES = 30 * 60 * 1000;
+const ONE_WEEK = 7 * 24 * 60 * 60 * 1000; // 1 week
 
 describe("DiscoveryStreamFeed", () => {
   let feed;
   let sandbox;
-  let configPrefStub;
   let fetchStub;
   let clock;
+  const setPref = (name, value) => {
+    const action = {
+      type: at.PREF_CHANGED,
+      data: {
+        name,
+        value: typeof value === "object" ? JSON.stringify(value) : value,
+      },
+    };
+    feed.store.dispatch(action);
+    feed.onAction(action);
+  };
 
   beforeEach(() => {
-    // Pref
     sandbox = sinon.createSandbox();
-    configPrefStub = sandbox.stub(global.Services.prefs, "getStringPref")
-      .withArgs(CONFIG_PREF_NAME)
-      .returns(JSON.stringify({enabled: false, show_spocs: false, layout_endpoint: "foo.com"}));
 
     // Fetch
     fetchStub = sandbox.stub(global, "fetch");
@@ -28,22 +37,20 @@ describe("DiscoveryStreamFeed", () => {
 
     // Feed
     feed = new DiscoveryStreamFeed();
-    feed.store = createStore(combineReducers(reducers));
+    feed.store = createStore(combineReducers(reducers), {
+      Prefs: {
+        values: {
+          [CONFIG_PREF_NAME]: JSON.stringify({enabled: false, show_spocs: false, layout_endpoint: "foo"}),
+        },
+      },
+    });
+
+    sandbox.stub(feed, "_maybeUpdateCachedData").resolves();
   });
 
   afterEach(() => {
     clock.restore();
     sandbox.restore();
-  });
-
-  describe("#observe", () => {
-    it("should update state.DiscoveryStream.config when the pref changes", async () => {
-      configPrefStub.returns(JSON.stringify({enabled: true, show_spocs: false, layout_endpoint: "foo"}));
-
-      feed.observe(null, null, CONFIG_PREF_NAME);
-
-      assert.deepEqual(feed.store.getState().DiscoveryStream.config, {enabled: true, show_spocs: false, layout_endpoint: "foo"});
-    });
   });
 
   describe("#loadLayout", () => {
@@ -58,11 +65,12 @@ describe("DiscoveryStreamFeed", () => {
       await feed.loadLayout(feed.store.dispatch);
 
       assert.calledOnce(fetchStub);
-      assert.calledWith(feed.cache.set, "layout", resp);
+      assert.equal(feed.cache.set.firstCall.args[0], "layout");
+      assert.deepEqual(feed.cache.set.firstCall.args[1].layout, resp.layout);
     });
     it("should fetch data and populate the cache if the cached data is older than 30 mins", async () => {
       const resp = {layout: ["foo", "bar"]};
-      const fakeCache = {layout: {layout: ["hello"], _timestamp: Date.now()}};
+      const fakeCache = {layout: {layout: ["hello"], lastUpdated: Date.now()}};
 
       sandbox.stub(feed.cache, "get").returns(Promise.resolve(fakeCache));
       sandbox.stub(feed.cache, "set").returns(Promise.resolve());
@@ -73,10 +81,11 @@ describe("DiscoveryStreamFeed", () => {
       await feed.loadLayout(feed.store.dispatch);
 
       assert.calledOnce(fetchStub);
-      assert.calledWith(feed.cache.set, "layout", resp);
+      assert.equal(feed.cache.set.firstCall.args[0], "layout");
+      assert.deepEqual(feed.cache.set.firstCall.args[1].layout, resp.layout);
     });
     it("should use the cached data and not fetch if the cached data is less than 30 mins old", async () => {
-      const fakeCache = {layout: {layout: ["hello"], _timestamp: Date.now()}};
+      const fakeCache = {layout: {layout: ["hello"], lastUpdated: Date.now()}};
 
       sandbox.stub(feed.cache, "get").returns(Promise.resolve(fakeCache));
       sandbox.stub(feed.cache, "set").returns(Promise.resolve());
@@ -101,19 +110,162 @@ describe("DiscoveryStreamFeed", () => {
     });
   });
 
+  describe("#loadLayoutEndPointUsingPref", () => {
+    it("should return endpoint if valid key", async () => {
+      const endpoint = feed.finalLayoutEndpoint("https://somedomain.org/stories?consumer_key=$apiKey", "test_key_val");
+      assert.equal("https://somedomain.org/stories?consumer_key=test_key_val", endpoint);
+    });
+
+    it("should throw error if key is empty", async () => {
+      assert.throws(() => {
+        feed.finalLayoutEndpoint("https://somedomain.org/stories?consumer_key=$apiKey", "");
+      });
+    });
+
+    it("should return url if $apiKey is missing in layout_endpoint", async () => {
+      const endpoint = feed.finalLayoutEndpoint("https://somedomain.org/stories?consumer_key=", "test_key_val");
+      assert.equal("https://somedomain.org/stories?consumer_key=", endpoint);
+    });
+
+    it("should update config layout_endpoint based on api_key_pref value", async () => {
+      feed.store.getState = () => ({
+        Prefs: {
+          values: {
+            [CONFIG_PREF_NAME]: JSON.stringify({
+              api_key_pref: "test_api_key_pref",
+              enabled: true,
+              layout_endpoint: "https://somedomain.org/stories?consumer_key=$apiKey",
+            }),
+          },
+        },
+      });
+      sandbox.stub(global.Services.prefs, "getCharPref").returns("test_api_key_val");
+      assert.equal("https://somedomain.org/stories?consumer_key=test_api_key_val", feed.config.layout_endpoint);
+    });
+
+    it("should not update config layout_endpoint if api_key_pref missing", async () => {
+      feed.store.getState = () => ({
+        Prefs: {
+          values: {
+            [CONFIG_PREF_NAME]: JSON.stringify({
+              enabled: true,
+              layout_endpoint: "https://somedomain.org/stories?consumer_key=1234",
+            }),
+          },
+        },
+      });
+      sandbox.stub(global.Services.prefs, "getCharPref").returns("test_api_key_val");
+      assert.notCalled(global.Services.prefs.getCharPref);
+      assert.equal("https://somedomain.org/stories?consumer_key=1234", feed.config.layout_endpoint);
+    });
+
+    it("should not set config layout_endpoint if layout_endpoint missing in prefs", async () => {
+      feed.store.getState = () => ({
+        Prefs: {
+          values: {
+            [CONFIG_PREF_NAME]: JSON.stringify({
+              enabled: true,
+            }),
+          },
+        },
+      });
+      sandbox.stub(global.Services.prefs, "getCharPref").returns("test_api_key_val");
+      assert.notCalled(global.Services.prefs.getCharPref);
+      assert.isUndefined(feed.config.layout_endpoint);
+    });
+  });
+
   describe("#loadComponentFeeds", () => {
-    it("should populate feeds cache", async () => {
-      const fakeComponents = {components: [{feed: {url: "foo.com"}}]};
-      const fakeLayout = [fakeComponents, {components: [{}]}, {}];
-      const fakeDiscoveryStream = {DiscoveryStream: {layout: fakeLayout}};
+    let fakeCache;
+    let fakeDiscoveryStream;
+    beforeEach(() => {
+      fakeDiscoveryStream = {
+        DiscoveryStream: {
+          layout: [
+            {components: [{feed: {url: "foo.com"}}]},
+            {components: [{}]},
+            {},
+          ],
+        },
+      };
+      fakeCache = {};
       sandbox.stub(feed.store, "getState").returns(fakeDiscoveryStream);
       sandbox.stub(feed.cache, "set").returns(Promise.resolve());
-      const fakeCache = {feeds: {"foo.com": {"lastUpdated": Date.now(), "data": "data"}}};
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    it("should not dispatch updates when layout is not defined", async () => {
+      fakeDiscoveryStream = {
+        DiscoveryStream: {},
+      };
+      feed.store.getState.returns(fakeDiscoveryStream);
+      sandbox.spy(feed.store, "dispatch");
+
+      await feed.loadComponentFeeds(feed.store.dispatch);
+
+      assert.notCalled(feed.store.dispatch);
+    });
+
+    it("should populate feeds cache", async () => {
+      fakeCache = {feeds: {"foo.com": {"lastUpdated": Date.now(), "data": "data"}}};
       sandbox.stub(feed.cache, "get").returns(Promise.resolve(fakeCache));
 
       await feed.loadComponentFeeds(feed.store.dispatch);
 
       assert.calledWith(feed.cache.set, "feeds", {"foo.com": {"data": "data", "lastUpdated": 0}});
+    });
+
+    it("should send at.DISCOVERY_STREAM_FEEDS_UPDATE with new feed data",
+      async () => {
+        sandbox.stub(feed.cache, "get").returns(Promise.resolve(fakeCache));
+        sandbox.spy(feed.store, "dispatch");
+
+        await feed.loadComponentFeeds(feed.store.dispatch);
+
+        assert.calledWith(feed.store.dispatch, {
+          type: at.DISCOVERY_STREAM_FEEDS_UPDATE,
+          data: {"foo.com": null},
+        });
+      });
+
+    it("should return number of promises equal to unique urls",
+      async () => {
+        sandbox.stub(feed.cache, "get").returns(Promise.resolve(fakeCache));
+        sandbox.stub(global.Promise, "all").resolves();
+        fakeDiscoveryStream = {
+          DiscoveryStream: {
+            layout: [
+              {components: [{feed: {url: "foo.com"}}, {feed: {url: "bar.com"}}]},
+              {components: [{feed: {url: "foo.com"}}]},
+              {},
+              {components: [{feed: {url: "baz.com"}}]},
+            ],
+          },
+        };
+        feed.store.getState.returns(fakeDiscoveryStream);
+
+        await feed.loadComponentFeeds(feed.store.dispatch);
+
+        assert.calledOnce(global.Promise.all);
+        const {args} = global.Promise.all.firstCall;
+        assert.equal(args[0].length, 3);
+      }
+    );
+
+    it("should not record the request time if no fetch request was issued", async () => {
+      const fakeComponents = {components: []};
+      const fakeLayout = [fakeComponents, {components: [{}]}, {}];
+      fakeDiscoveryStream = {DiscoveryStream: {layout: fakeLayout}};
+      fakeCache = {feeds: {"foo.com": {"lastUpdated": Date.now(), "data": "data"}}};
+      sandbox.stub(feed.cache, "get").returns(Promise.resolve(fakeCache));
+      feed.componentFeedRequestTime = undefined;
+
+      await feed.loadComponentFeeds(feed.store.dispatch);
+
+      assert.isUndefined(feed.componentFeedRequestTime);
     });
   });
 
@@ -121,6 +273,7 @@ describe("DiscoveryStreamFeed", () => {
     it("should fetch fresh data if cache is empty", async () => {
       const fakeCache = {};
       sandbox.stub(feed.cache, "get").returns(Promise.resolve(fakeCache));
+      sandbox.stub(feed, "rotate").callsFake(val => val);
       sandbox.stub(feed, "fetchFromEndpoint").resolves("data");
 
       const feedResp = await feed.getComponentFeed("foo.com");
@@ -131,6 +284,7 @@ describe("DiscoveryStreamFeed", () => {
       const fakeCache = {feeds: {"foo.com": {lastUpdated: Date.now()}}};
       sandbox.stub(feed.cache, "get").returns(Promise.resolve(fakeCache));
       sandbox.stub(feed, "fetchFromEndpoint").resolves("data");
+      sandbox.stub(feed, "rotate").callsFake(val => val);
       clock.tick(THIRTY_MINUTES + 1);
 
       const feedResp = await feed.getComponentFeed("foo.com");
@@ -234,10 +388,39 @@ describe("DiscoveryStreamFeed", () => {
 
       assert.isTrue(feed.showSpocs);
     });
-    it("should fire loadSpocs is showSponsored pref changes", async () => {
-      sandbox.stub(feed, "loadSpocs").returns(Promise.resolve());
-      await feed.onAction({type: at.PREF_CHANGED, data: {name: "showSponsored"}});
-      assert.calledOnce(feed.loadSpocs);
+  });
+
+  describe("#rotate", () => {
+    it("should move seen first story to the back of the response", () => {
+      const recsExpireTime = 5600;
+      const feedResponse = {
+        recommendations: [
+          {
+            id: "first",
+          },
+          {
+            id: "second",
+          },
+          {
+            id: "third",
+          },
+          {
+            id: "fourth",
+          },
+        ],
+        settings: {
+          recsExpireTime,
+        },
+      };
+      const fakeImpressions = {
+        "first": Date.now() - (recsExpireTime * 1000),
+        "third": Date.now(),
+      };
+      sandbox.stub(feed, "readImpressionsPref").returns(fakeImpressions);
+
+      const result = feed.rotate(feedResponse);
+
+      assert.equal(result.recommendations[3].id, "first");
     });
   });
 
@@ -257,32 +440,380 @@ describe("DiscoveryStreamFeed", () => {
     });
   });
 
+  describe("#filterSpocs", () => {
+    it("should return filtered out spocs based on frequency caps", () => {
+      const fakeSpocs = {
+        spocs: [
+          {
+            campaign_id: "seen",
+            caps: {
+              lifetime: 3,
+              campaign: {
+                count: 1,
+                period: 1,
+              },
+            },
+          },
+          {
+            campaign_id: "not-seen",
+            caps: {
+              lifetime: 3,
+              campaign: {
+                count: 1,
+                period: 1,
+              },
+            },
+          },
+        ],
+      };
+      const fakeImpressions = {
+        "seen": [Date.now() - 1],
+      };
+      sandbox.stub(feed, "readImpressionsPref").returns(fakeImpressions);
+
+      const result = feed.filterSpocs(fakeSpocs);
+
+      assert.equal(result.spocs.length, 1);
+      assert.equal(result.spocs[0].campaign_id, "not-seen");
+    });
+  });
+
+  describe("#isBelowFrequencyCap", () => {
+    it("should return true if there are no campaign impressions", () => {
+      const fakeImpressions = {
+        "seen": [Date.now() - 1],
+      };
+      const fakeSpoc = {
+        campaign_id: "not-seen",
+        caps: {
+          lifetime: 3,
+          campaign: {
+            count: 1,
+            period: 1,
+          },
+        },
+      };
+
+      const result = feed.isBelowFrequencyCap(fakeImpressions, fakeSpoc);
+
+      assert.isTrue(result);
+    });
+    it("should return true if there are no campaign caps", () => {
+      const fakeImpressions = {
+        "seen": [Date.now() - 1],
+      };
+      const fakeSpoc = {
+        campaign_id: "seen",
+        caps: {
+          lifetime: 3,
+        },
+      };
+
+      const result = feed.isBelowFrequencyCap(fakeImpressions, fakeSpoc);
+
+      assert.isTrue(result);
+    });
+
+    it("should return false if lifetime cap is hit", () => {
+      const fakeImpressions = {
+        "seen": [Date.now() - 1],
+      };
+      const fakeSpoc = {
+        campaign_id: "seen",
+        caps: {
+          lifetime: 1,
+          campaign: {
+            count: 3,
+            period: 1,
+          },
+        },
+      };
+
+      const result = feed.isBelowFrequencyCap(fakeImpressions, fakeSpoc);
+
+      assert.isFalse(result);
+    });
+
+    it("should return false if time based cap is hit", () => {
+      const fakeImpressions = {
+        "seen": [Date.now() - 1],
+      };
+      const fakeSpoc = {
+        campaign_id: "seen",
+        caps: {
+          lifetime: 3,
+          campaign: {
+            count: 1,
+            period: 1,
+          },
+        },
+      };
+
+      const result = feed.isBelowFrequencyCap(fakeImpressions, fakeSpoc);
+
+      assert.isFalse(result);
+    });
+  });
+
+  describe("#recordCampaignImpression", () => {
+    it("should return false if time based cap is hit", () => {
+      sandbox.stub(feed, "readImpressionsPref").returns({});
+      sandbox.stub(feed, "writeImpressionsPref").returns();
+
+      feed.recordCampaignImpression("seen");
+
+      assert.calledWith(feed.writeImpressionsPref, SPOC_IMPRESSION_TRACKING_PREF, {"seen": [0]});
+    });
+  });
+
+  describe("#cleanUpCampaignImpressionPref", () => {
+    it("should remove campaign-3 because it is no longer being used", async () => {
+      const fakeSpocs = {
+        spocs: [
+          {
+            campaign_id: "campaign-1",
+            caps: {
+              lifetime: 3,
+              campaign: {
+                count: 1,
+                period: 1,
+              },
+            },
+          },
+          {
+            campaign_id: "campaign-2",
+            caps: {
+              lifetime: 3,
+              campaign: {
+                count: 1,
+                period: 1,
+              },
+            },
+          },
+        ],
+      };
+      const fakeImpressions = {
+        "campaign-2": [Date.now() - 1],
+        "campaign-3": [Date.now() - 1],
+      };
+      sandbox.stub(feed, "readImpressionsPref").returns(fakeImpressions);
+      sandbox.stub(feed, "writeImpressionsPref").returns();
+
+      feed.cleanUpCampaignImpressionPref(fakeSpocs);
+
+      assert.calledWith(feed.writeImpressionsPref, SPOC_IMPRESSION_TRACKING_PREF, {"campaign-2": [-1]});
+    });
+  });
+
+  describe("#recordTopRecImpressions", () => {
+    it("should add a rec id to the rec impression pref", () => {
+      sandbox.stub(feed, "readImpressionsPref").returns({});
+      sandbox.stub(feed, "writeImpressionsPref");
+
+      feed.recordTopRecImpressions("rec");
+
+      assert.calledWith(feed.writeImpressionsPref, REC_IMPRESSION_TRACKING_PREF, {rec: 0});
+    });
+    it("should not add an impression if it already exists", () => {
+      sandbox.stub(feed, "readImpressionsPref").returns({"rec": 4});
+      sandbox.stub(feed, "writeImpressionsPref");
+
+      feed.recordTopRecImpressions("rec");
+
+      assert.notCalled(feed.writeImpressionsPref);
+    });
+  });
+
+  describe("#cleanUpTopRecImpressionPref", () => {
+    it("should remove recs no longer being used", () => {
+      const newFeeds = {
+        "https://foo.com": {
+          data: {
+            recommendations: [
+              {
+                id: "rec1",
+              },
+              {
+                id: "rec2",
+              },
+            ],
+          },
+        },
+        "https://bar.com": {
+          data: {
+            recommendations: [
+              {
+                id: "rec3",
+              },
+              {
+                id: "rec4",
+              },
+            ],
+          },
+        },
+      };
+      const fakeImpressions = {
+        "rec2": Date.now() - 1,
+        "rec3": Date.now() - 1,
+        "rec5": Date.now() - 1,
+      };
+      sandbox.stub(feed, "readImpressionsPref").returns(fakeImpressions);
+      sandbox.stub(feed, "writeImpressionsPref").returns();
+
+      feed.cleanUpTopRecImpressionPref(newFeeds);
+
+      assert.calledWith(feed.writeImpressionsPref, REC_IMPRESSION_TRACKING_PREF, {rec2: -1, rec3: -1});
+    });
+  });
+
+  describe("#writeImpressionsPref", () => {
+    it("should call Services.prefs.setStringPref", () => {
+      sandbox.spy(feed.store, "dispatch");
+      const fakeImpressions = {
+        "foo": [Date.now() - 1],
+        "bar": [Date.now() - 1],
+      };
+
+      feed.writeImpressionsPref(SPOC_IMPRESSION_TRACKING_PREF, fakeImpressions);
+
+      assert.calledWithMatch(feed.store.dispatch, {
+        data: {
+          name: SPOC_IMPRESSION_TRACKING_PREF,
+          value: JSON.stringify(fakeImpressions),
+        },
+        type: at.SET_PREF,
+      });
+    });
+  });
+
+  describe("#readImpressionsPref", () => {
+    it("should return what's in Services.prefs.getStringPref", () => {
+      const fakeImpressions = {
+        "foo": [Date.now() - 1],
+        "bar": [Date.now() - 1],
+      };
+      setPref(SPOC_IMPRESSION_TRACKING_PREF, fakeImpressions);
+
+      const result = feed.readImpressionsPref(SPOC_IMPRESSION_TRACKING_PREF);
+
+      assert.deepEqual(result, fakeImpressions);
+    });
+  });
+
+  describe("#onAction: DISCOVERY_STREAM_SPOC_IMPRESSION", () => {
+    it("should call recordTopRecImpressions from DISCOVERY_STREAM_REC_IMPRESSION", async () => {
+      sandbox.stub(feed, "recordTopRecImpressions").returns();
+      await feed.onAction({type: at.DISCOVERY_STREAM_REC_IMPRESSION, data: {recId: "seen"}});
+
+      assert.calledWith(feed.recordTopRecImpressions, "seen");
+    });
+  });
+
+  describe("#onAction: DISCOVERY_STREAM_SPOC_IMPRESSION", () => {
+    it("should call dispatch to ac.AlsoToPreloaded with filtered spoc data", async () => {
+      Object.defineProperty(feed, "showSpocs", {get: () => true});
+      const fakeSpocs = {
+        lastUpdated: 1,
+        data: {
+          spocs: [
+            {
+              campaign_id: "seen",
+              caps: {
+                lifetime: 3,
+                campaign: {
+                  count: 1,
+                  period: 1,
+                },
+              },
+            },
+            {
+              campaign_id: "not-seen",
+              caps: {
+                lifetime: 3,
+                campaign: {
+                  count: 1,
+                  period: 1,
+                },
+              },
+            },
+          ],
+        },
+      };
+      const fakeImpressions = {
+        "seen": [Date.now() - 1],
+      };
+      const result = {
+        spocs: [
+          {
+            campaign_id: "not-seen",
+            caps: {
+              lifetime: 3,
+              campaign: {
+                count: 1,
+                period: 1,
+              },
+            },
+          },
+        ],
+      };
+      sandbox.stub(feed, "recordCampaignImpression").returns();
+      sandbox.stub(feed, "readImpressionsPref").returns(fakeImpressions);
+      sandbox.stub(feed.cache, "get").returns(Promise.resolve({spocs: fakeSpocs}));
+      sandbox.spy(feed.store, "dispatch");
+
+      await feed.onAction({type: at.DISCOVERY_STREAM_SPOC_IMPRESSION, data: {campaign_id: "seen"}});
+
+      assert.deepEqual(feed.store.dispatch.firstCall.args[0].data.spocs, result);
+    });
+  });
+
   describe("#onAction: INIT", () => {
     it("should be .loaded=false before initialization", () => {
       assert.isFalse(feed.loaded);
     });
-    it("should load data, add pref observer, and set .loaded=true if config.enabled is true", async () => {
+    it("should load data and set .loaded=true if config.enabled is true", async () => {
       sandbox.stub(feed.cache, "set").returns(Promise.resolve());
-      configPrefStub.returns(JSON.stringify({enabled: true}));
+      setPref(CONFIG_PREF_NAME, {enabled: true});
       sandbox.stub(feed, "loadLayout").returns(Promise.resolve());
-      sandbox.stub(global.Services.prefs, "addObserver");
+      sandbox.stub(feed, "reportCacheAge").resolves();
+      sandbox.spy(feed, "reportRequestTime");
 
       await feed.onAction({type: at.INIT});
 
       assert.calledOnce(feed.loadLayout);
-      assert.calledWith(global.Services.prefs.addObserver, CONFIG_PREF_NAME, feed);
+      assert.calledOnce(feed.reportCacheAge);
+      assert.calledOnce(feed.reportRequestTime);
       assert.isTrue(feed.loaded);
     });
   });
 
-  describe("#onAction: DISCOVERY_STREAM_CONFIG_SET_VALUE", () => {
+  describe("#onAction: DISCOVERY_STREAM_CONFIG_SET_VALUE", async () => {
     it("should add the new value to the pref without changing the existing values", async () => {
-      sandbox.stub(global.Services.prefs, "setStringPref");
-      configPrefStub.returns(JSON.stringify({enabled: true}));
+      sandbox.spy(feed.store, "dispatch");
+      setPref(CONFIG_PREF_NAME, {enabled: true, other: "value"});
 
       await feed.onAction({type: at.DISCOVERY_STREAM_CONFIG_SET_VALUE, data: {name: "layout_endpoint", value: "foo.com"}});
 
-      assert.calledWith(global.Services.prefs.setStringPref, CONFIG_PREF_NAME, JSON.stringify({enabled: true, layout_endpoint: "foo.com"}));
+      assert.calledWithMatch(feed.store.dispatch, {
+        data: {
+          name: CONFIG_PREF_NAME,
+          value: JSON.stringify({enabled: true, other: "value", layout_endpoint: "foo.com"}),
+        },
+        type: at.SET_PREF,
+      });
+    });
+    it("should disable opt-out when setting config enabled", () => {
+      sandbox.spy(feed.store, "dispatch");
+
+      feed.onAction({type: at.DISCOVERY_STREAM_CONFIG_SET_VALUE, data: {name: "enabled", value: true}});
+
+      assert.calledWithMatch(feed.store.dispatch, {
+        data: {
+          name: "discoverystream.optOut.0",
+          value: false,
+        },
+        type: at.SET_PREF,
+      });
     });
   });
 
@@ -295,7 +826,7 @@ describe("DiscoveryStreamFeed", () => {
 
       // force clear cached pref value
       feed._prefCache = {};
-      configPrefStub.returns(JSON.stringify({enabled: true}));
+      setPref(CONFIG_PREF_NAME, {enabled: true});
 
       sandbox.stub(feed, "clearCache").returns(Promise.resolve());
       sandbox.stub(feed, "loadLayout").returns(Promise.resolve());
@@ -309,7 +840,7 @@ describe("DiscoveryStreamFeed", () => {
       sandbox.stub(feed.cache, "set").returns(Promise.resolve());
       // force clear cached pref value
       feed._prefCache = {};
-      configPrefStub.returns(JSON.stringify({enabled: true}));
+      setPref(CONFIG_PREF_NAME, {enabled: true});
 
       sandbox.stub(feed, "clearCache").returns(Promise.resolve());
       await feed.onAction({type: at.DISCOVERY_STREAM_CONFIG_CHANGE});
@@ -320,13 +851,13 @@ describe("DiscoveryStreamFeed", () => {
       sandbox.stub(feed.cache, "set").returns(Promise.resolve());
       // force clear cached pref value
       feed._prefCache = {};
-      configPrefStub.returns(JSON.stringify({enabled: true}));
+      setPref(CONFIG_PREF_NAME, {enabled: true});
 
       await feed.onAction({type: at.INIT});
       assert.isTrue(feed.loaded);
 
       feed._prefCache = {};
-      configPrefStub.returns(JSON.stringify({enabled: false}));
+      setPref(CONFIG_PREF_NAME, {enabled: false});
       sandbox.stub(feed, "clearCache").returns(Promise.resolve());
       sandbox.stub(feed, "loadLayout").returns(Promise.resolve());
       await feed.onAction({type: at.DISCOVERY_STREAM_CONFIG_CHANGE});
@@ -336,19 +867,59 @@ describe("DiscoveryStreamFeed", () => {
       assert.isFalse(feed.loaded);
     });
   });
+
+  describe("#onAction: DISCOVERY_STREAM_OPT_OUT", () => {
+    it("should update opt-out pref", async () => {
+      sandbox.spy(feed.store, "dispatch");
+
+      await feed.onAction({type: at.DISCOVERY_STREAM_OPT_OUT});
+
+      assert.calledWithMatch(feed.store.dispatch, {
+        data: {
+          name: "discoverystream.optOut.0",
+          value: true,
+        },
+        type: at.SET_PREF,
+      });
+    });
+  });
+
   describe("#onAction: UNINIT", () => {
-    it("should remove pref listeners", async () => {
-      sandbox.stub(global.Services.prefs, "removeObserver");
+    it("should reset pref cache", async () => {
+      feed._prefCache = {cached: "value"};
 
       await feed.onAction({type: at.UNINIT});
-      assert.calledWith(global.Services.prefs.removeObserver, CONFIG_PREF_NAME, feed);
+
+      assert.deepEqual(feed._prefCache, {});
+    });
+  });
+
+  describe("#onAction: PREF_CHANGED", () => {
+    it("should update state.DiscoveryStream.config when the pref changes", async () => {
+      setPref(CONFIG_PREF_NAME, {enabled: true, show_spocs: false, layout_endpoint: "foo"});
+
+      assert.deepEqual(feed.store.getState().DiscoveryStream.config, {enabled: true, show_spocs: false, layout_endpoint: "foo"});
+    });
+    it("should handle pref changes when opt out changes", async () => {
+      setPref(CONFIG_PREF_NAME, {enabled: true, show_spocs: false, layout_endpoint: "foo"});
+
+      setPref("discoverystream.optOut.0", true);
+
+      assert.deepEqual(feed.store.getState().DiscoveryStream.config, {enabled: false, show_spocs: false, layout_endpoint: "foo"});
+    });
+    it("should fire loadSpocs is showSponsored pref changes", async () => {
+      sandbox.stub(feed, "loadSpocs").returns(Promise.resolve());
+
+      await feed.onAction({type: at.PREF_CHANGED, data: {name: "showSponsored"}});
+
+      assert.calledOnce(feed.loadSpocs);
     });
   });
 
   describe("#onAction: SYSTEM_TICK", () => {
     it("should not refresh if DiscoveryStream has not been loaded", async () => {
       sandbox.stub(feed, "refreshAll").resolves();
-      configPrefStub.returns(JSON.stringify({enabled: true}));
+      setPref(CONFIG_PREF_NAME, {enabled: true});
 
       await feed.onAction({type: at.SYSTEM_TICK});
       assert.notCalled(feed.refreshAll);
@@ -356,7 +927,7 @@ describe("DiscoveryStreamFeed", () => {
 
     it("should not refresh if no caches are expired", async () => {
       sandbox.stub(feed.cache, "set").resolves();
-      configPrefStub.returns(JSON.stringify({enabled: true}));
+      setPref(CONFIG_PREF_NAME, {enabled: true});
 
       await feed.onAction({type: at.INIT});
 
@@ -369,7 +940,7 @@ describe("DiscoveryStreamFeed", () => {
 
     it("should refresh if DiscoveryStream has been loaded at least once and a cache has expired", async () => {
       sandbox.stub(feed.cache, "set").resolves();
-      configPrefStub.returns(JSON.stringify({enabled: true}));
+      setPref(CONFIG_PREF_NAME, {enabled: true});
 
       await feed.onAction({type: at.INIT});
 
@@ -382,7 +953,7 @@ describe("DiscoveryStreamFeed", () => {
 
     it("should refresh and not update open tabs if DiscoveryStream has been loaded at least once", async () => {
       sandbox.stub(feed.cache, "set").resolves();
-      configPrefStub.returns(JSON.stringify({enabled: true}));
+      setPref(CONFIG_PREF_NAME, {enabled: true});
 
       await feed.onAction({type: at.INIT});
 
@@ -394,11 +965,45 @@ describe("DiscoveryStreamFeed", () => {
     });
   });
 
+  describe("#onAction: PREF_SHOW_SPONSORED", () => {
+    it("should call loadSpocs when preference changes", async () => {
+      sandbox.stub(feed, "loadSpocs").resolves();
+      sandbox.stub(feed.store, "dispatch");
+
+      await feed.onAction({type: at.PREF_CHANGED, data: {name: "showSponsored"}});
+
+      assert.calledOnce(feed.loadSpocs);
+      const [dispatchFn] = feed.loadSpocs.firstCall.args;
+      dispatchFn({});
+      assert.calledWith(feed.store.dispatch, ac.BroadcastToContent({}));
+    });
+  });
+
   describe("#isExpired", () => {
     it("should throw if the key is not valid", () => {
       assert.throws(() => {
         feed.isExpired({}, "foo");
       });
+    });
+    it("should return false for layout on startup for content under 1 week", () => {
+      const layout = {lastUpdated: Date.now()};
+      const result = feed.isExpired({cachedData: {layout}, key: "layout", isStartup: true});
+
+      assert.isFalse(result);
+    });
+    it("should return true for layout for isStartup=false", () => {
+      const layout = {lastUpdated: Date.now()};
+      clock.tick(THIRTY_MINUTES + 1);
+      const result = feed.isExpired({cachedData: {layout}, key: "layout"});
+
+      assert.isTrue(result);
+    });
+    it("should return true for layout on startup for content over 1 week", () => {
+      const layout = {lastUpdated: Date.now()};
+      clock.tick(ONE_WEEK + 1);
+      const result = feed.isExpired({cachedData: {layout}, key: "layout", isStartup: true});
+
+      assert.isTrue(result);
     });
   });
 
@@ -406,7 +1011,7 @@ describe("DiscoveryStreamFeed", () => {
     let cache;
     beforeEach(() => {
       cache = {
-        layout: {_timestamp: Date.now()},
+        layout: {lastUpdated: Date.now()},
         feeds: {"foo.com": {lastUpdated: Date.now()}},
         spocs: {lastUpdated: Date.now()},
       };
@@ -438,7 +1043,7 @@ describe("DiscoveryStreamFeed", () => {
     it("should return true if .spocs is expired", async () => {
       clock.tick(THIRTY_MINUTES + 1);
       // Update other caches we aren't testing
-      cache.layout._timestamp = Date.now();
+      cache.layout.lastUpdated = Date.now();
       cache.feeds["foo.com"].lastUpdate = Date.now();
 
       assert.isTrue(await feed.checkIfAnyCacheExpired());
@@ -455,7 +1060,7 @@ describe("DiscoveryStreamFeed", () => {
     it("should return true if data for .feeds[url] is expired", async () => {
       clock.tick(THIRTY_MINUTES + 1);
       // Update other caches we aren't testing
-      cache.layout._timestamp = Date.now();
+      cache.layout.lastUpdated = Date.now();
       cache.spocs.lastUpdate = Date.now();
       assert.isTrue(await feed.checkIfAnyCacheExpired());
     });
@@ -467,9 +1072,10 @@ describe("DiscoveryStreamFeed", () => {
       sandbox.stub(feed, "loadComponentFeeds").resolves();
       sandbox.stub(feed, "loadSpocs").resolves();
       sandbox.spy(feed.store, "dispatch");
+      Object.defineProperty(feed, "showSpocs", {get: () => true});
     });
 
-    it("should call layout, component, spocs update functions", async () => {
+    it("should call layout, component, spocs update and telemetry reporting functions", async () => {
       await feed.refreshAll();
 
       assert.calledOnce(feed.loadLayout);
@@ -493,6 +1099,168 @@ describe("DiscoveryStreamFeed", () => {
           const result = fn.firstCall.args[0]({type: "FOO"});
           assert.deepEqual(result, {type: "FOO"});
         });
+    });
+    it("should set loaded to true if loadSpocs and loadComponentFeeds fails", async () => {
+      feed.loadComponentFeeds.rejects("loadComponentFeeds error");
+      feed.loadSpocs.rejects("loadSpocs error");
+
+      await feed.refreshAll();
+
+      assert.isTrue(feed.loaded);
+    });
+    it("should call loadComponentFeeds and loadSpocs in Promise.all", async () => {
+      sandbox.stub(global.Promise, "all").resolves();
+
+      await feed.refreshAll();
+
+      assert.calledOnce(global.Promise.all);
+      const {args} = global.Promise.all.firstCall;
+      assert.equal(args[0].length, 2);
+    });
+    describe("test startup cache behaviour", () => {
+      beforeEach(() => {
+        feed._maybeUpdateCachedData.restore();
+        sandbox.stub(feed.cache, "set").resolves();
+      });
+      it("should refresh layout on startup if it was served from cache", async () => {
+        feed.loadLayout.restore();
+        sandbox.stub(feed.cache, "get").resolves({layout: {lastUpdated: Date.now(), layout: {}}});
+        sandbox.stub(feed, "fetchFromEndpoint").resolves({layout: {}});
+        clock.tick(THIRTY_MINUTES + 1);
+
+        await feed.refreshAll({isStartup: true});
+
+        assert.calledOnce(feed.fetchFromEndpoint);
+        // Once from cache, once to update the store
+        assert.calledTwice(feed.store.dispatch);
+        assert.equal(feed.store.dispatch.firstCall.args[0].type, at.DISCOVERY_STREAM_LAYOUT_UPDATE);
+      });
+      it("should not refresh layout on startup if it is under THIRTY_MINUTES", async () => {
+        feed.loadLayout.restore();
+        sandbox.stub(feed.cache, "get").resolves({layout: {lastUpdated: Date.now(), layout: {}}});
+        sandbox.stub(feed, "fetchFromEndpoint").resolves({layout: {}});
+
+        await feed.refreshAll({isStartup: true});
+
+        assert.notCalled(feed.fetchFromEndpoint);
+      });
+      it("should refresh spocs on startup if it was served from cache", async () => {
+        feed.loadSpocs.restore();
+        sandbox.stub(feed.cache, "get").resolves({spocs: {lastUpdated: Date.now()}});
+        sandbox.stub(feed, "fetchFromEndpoint").resolves("data");
+        clock.tick(THIRTY_MINUTES + 1);
+
+        await feed.refreshAll({isStartup: true});
+
+        assert.calledOnce(feed.fetchFromEndpoint);
+        // Once from cache, once to update the store
+        assert.calledTwice(feed.store.dispatch);
+        assert.equal(feed.store.dispatch.firstCall.args[0].type, at.DISCOVERY_STREAM_SPOCS_UPDATE);
+      });
+      it("should not refresh spocs on startup if it is under THIRTY_MINUTES", async () => {
+        feed.loadSpocs.restore();
+        sandbox.stub(feed.cache, "get").resolves({spocs: {lastUpdated: Date.now()}});
+        sandbox.stub(feed, "fetchFromEndpoint").resolves("data");
+
+        await feed.refreshAll({isStartup: true});
+
+        assert.notCalled(feed.fetchFromEndpoint);
+      });
+      it("should refresh feeds on startup if it was served from cache", async () => {
+        feed.loadComponentFeeds.restore();
+
+        const fakeComponents = {components: [{feed: {url: "foo.com"}}]};
+        const fakeLayout = [fakeComponents];
+        const fakeDiscoveryStream = {DiscoveryStream: {layout: fakeLayout}};
+        sandbox.stub(feed.store, "getState").returns(fakeDiscoveryStream);
+        sandbox.stub(feed, "rotate").callsFake(val => val);
+        sandbox.stub(feed, "cleanUpTopRecImpressionPref").callsFake(val => val);
+
+        const fakeCache = {feeds: {"foo.com": {lastUpdated: Date.now(), data: "data"}}};
+        sandbox.stub(feed.cache, "get").resolves(fakeCache);
+        clock.tick(THIRTY_MINUTES + 1);
+        sandbox.stub(feed, "fetchFromEndpoint").resolves("data");
+
+        await feed.refreshAll({isStartup: true});
+
+        assert.calledOnce(feed.fetchFromEndpoint);
+        // Once from cache, once to update the store
+        assert.calledTwice(feed.store.dispatch);
+        assert.equal(feed.store.dispatch.firstCall.args[0].type, at.DISCOVERY_STREAM_FEEDS_UPDATE);
+      });
+    });
+  });
+
+  describe("#reportCacheAge", () => {
+    let cache;
+    const cacheAge = 30;
+    beforeEach(() => {
+      cache = {
+        layout: {lastUpdated: Date.now() - 10 * 1000},
+        feeds: {"foo.com": {lastUpdated: Date.now() - cacheAge * 1000}},
+        spocs: {lastUpdated: Date.now() - 20 * 1000},
+      };
+      sandbox.stub(feed.cache, "get").resolves(cache);
+    });
+
+    it("should report the oldest lastUpdated date as the cache age", async () => {
+      sandbox.spy(feed.store, "dispatch");
+      feed.loaded = false;
+      await feed.reportCacheAge();
+
+      assert.calledOnce(feed.store.dispatch);
+
+      const [action] = feed.store.dispatch.firstCall.args;
+      assert.equal(action.type, at.TELEMETRY_PERFORMANCE_EVENT);
+      assert.equal(action.data.event, "DS_CACHE_AGE_IN_SEC");
+      assert.isAtLeast(action.data.value, cacheAge);
+      feed.loaded = true;
+    });
+  });
+
+  describe("#reportRequestTime", () => {
+    let cache;
+    const cacheAge = 30;
+    beforeEach(() => {
+      cache = {
+        layout: {lastUpdated: Date.now() - 10 * 1000},
+        feeds: {"foo.com": {lastUpdated: Date.now() - cacheAge * 1000}},
+        spocs: {lastUpdated: Date.now() - 20 * 1000},
+      };
+      sandbox.stub(feed.cache, "get").resolves(cache);
+    });
+
+    it("should report all the request times", async () => {
+      sandbox.spy(feed.store, "dispatch");
+      feed.loaded = false;
+      feed.layoutRequestTime = 1000;
+      feed.spocsRequestTime = 2000;
+      feed.componentFeedRequestTime = 3000;
+      feed.totalRequestTime = 5000;
+      feed.reportRequestTime();
+
+      assert.equal(feed.store.dispatch.callCount, 4);
+
+      let [action] = feed.store.dispatch.getCall(0).args;
+      assert.equal(action.type, at.TELEMETRY_PERFORMANCE_EVENT);
+      assert.equal(action.data.event, "LAYOUT_REQUEST_TIME");
+      assert.equal(action.data.value, 1000);
+
+      [action] = feed.store.dispatch.getCall(1).args;
+      assert.equal(action.type, at.TELEMETRY_PERFORMANCE_EVENT);
+      assert.equal(action.data.event, "SPOCS_REQUEST_TIME");
+      assert.equal(action.data.value, 2000);
+
+      [action] = feed.store.dispatch.getCall(2).args;
+      assert.equal(action.type, at.TELEMETRY_PERFORMANCE_EVENT);
+      assert.equal(action.data.event, "COMPONENT_FEED_REQUEST_TIME");
+      assert.equal(action.data.value, 3000);
+
+      [action] = feed.store.dispatch.getCall(3).args;
+      assert.equal(action.type, at.TELEMETRY_PERFORMANCE_EVENT);
+      assert.equal(action.data.event, "DS_FEED_TOTAL_REQUEST_TIME");
+      assert.equal(action.data.value, 5000);
+      feed.loaded = true;
     });
   });
 });

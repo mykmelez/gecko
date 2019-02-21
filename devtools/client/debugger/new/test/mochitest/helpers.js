@@ -243,8 +243,7 @@ function waitForSelectedSource(dbg, url) {
         state,
         source.id
       );
-      const hasPausePoints = dbg.selectors.hasPausePoints(state, source.id);
-      return hasSymbols && hasSourceMetaData && hasPausePoints;
+      return hasSymbols && hasSourceMetaData;
     },
     "selected source"
   );
@@ -767,10 +766,13 @@ function findBreakpoint(dbg, url, line) {
   if (
     Services.prefs.getBoolPref("devtools.debugger.features.column-breakpoints")
   ) {
-    column = dbg.selectors.getFirstPausePointLocation(dbg.store.getState(), {
-      sourceId: source.id,
-      line
-    }).column;
+    ({ column } = dbg.selectors.getFirstVisibleBreakpointPosition(
+      dbg.store.getState(),
+      {
+        sourceId: source.id,
+        line
+      }
+    ));
   }
   return getBreakpoint(getState(), { sourceId: source.id, line, column });
 }
@@ -789,7 +791,7 @@ async function loadAndAddBreakpoint(dbg, filename, line, column) {
   await selectSource(dbg, source);
 
   // Test that breakpoint is not off by a line.
-  await addBreakpoint(dbg, source, line);
+  await addBreakpoint(dbg, source, line, column);
 
   is(getBreakpointCount(getState()), 1, "One breakpoint exists");
   if (!getBreakpoint(getState(), { sourceId: source.id, line, column })) {
@@ -1110,7 +1112,9 @@ const selectors = {
     addConditionalBreakpoint:
       "#node-menu-add-condition, #node-menu-add-conditional-breakpoint",
     editConditionalBreakpoint:
-      "#node-menu-edit-condition, #node-menu-edit-conditional-breakpoint"
+      "#node-menu-edit-condition, #node-menu-edit-conditional-breakpoint",
+    addLogPoint: "#node-menu-add-log-point",
+    editLogPoint: "#node-menu-edit-log-point"
   },
   menuitem: i => `menupopup menuitem:nth-child(${i})`,
   pauseOnExceptions: ".pause-exceptions",
@@ -1144,7 +1148,7 @@ const selectors = {
   outlineItem: i =>
     `.outline-list__element:nth-child(${i}) .function-signature`,
   outlineItems: ".outline-list__element",
-  conditionalPanelInput: ".conditional-breakpoint-panel input",
+  conditionalPanelInput: ".conditional-breakpoint-panel textarea",
   searchField: ".search-field",
   blackbox: ".action.black-box",
   projectSearchCollapsed: ".project-text-search .arrow:not(.expanded)",
@@ -1312,7 +1316,17 @@ async function hoverAtPos(dbg, { line, ch }) {
   await waitForScrolling(cm);
 
   const coords = getCoordsFromPosition(cm, { line: line - 1, ch });
-  const tokenEl = dbg.win.document.elementFromPoint(coords.left, coords.top);
+
+  const { left, top } = coords;
+
+  // Adds a vertical offset due to increased line height
+  // https://github.com/firefox-devtools/debugger.html/pull/7934
+  const lineHeightOffset = 3;
+
+  const tokenEl = dbg.win.document.elementFromPoint(
+    left,
+    top + lineHeightOffset
+  );
 
   if (!tokenEl) {
     return false;
@@ -1502,15 +1516,15 @@ async function getDebuggerSplitConsole(dbg) {
 }
 
 async function openConsoleContextMenu(hud, element) {
-  const onConsoleMenuOpened = hud.ui.consoleOutput.once("menu-open");
+  const onConsoleMenuOpened = hud.ui.wrapper.once("menu-open");
   synthesizeContextMenuEvent(element);
   await onConsoleMenuOpened;
-  const doc = hud.ui.consoleOutput.owner.chromeWindow.document;
+  const doc = hud.ui.wrapper.owner.chromeWindow.document;
   return doc.getElementById("webconsole-menu");
 }
 
 function hideConsoleContextMenu(hud) {
-  const doc = hud.ui.consoleOutput.owner.chromeWindow.document;
+  const doc = hud.ui.wrapper.owner.chromeWindow.document;
   const popup = doc.getElementById("webconsole-menu");
   if (!popup) {
     return Promise.resolve();

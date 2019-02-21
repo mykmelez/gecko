@@ -140,7 +140,7 @@ add_task(async function getOrCreateNamedDatabases() {
   Assert.ok(barDB, "retrieval of second named database works");
 
   let bazDB = await KeyValueService.getOrCreate(databaseDir, "baz");
-  Assert.ok(bazDB, "retrieval of default database works");
+  Assert.ok(bazDB, "retrieval of third named database works");
 
   // Key/value pairs that are put into a database don't exist in others.
   await bazDB.put("key", 1);
