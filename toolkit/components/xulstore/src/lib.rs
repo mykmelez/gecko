@@ -74,8 +74,8 @@ lazy_static! {
     #[derive(Debug)]
     static ref RKV: Rkv = {
         // Get the profile directory path.
-        let dir_svc = xpcom::services::get_DirectoryService().unwrap();
-        let property = CString::new("ProfD").unwrap();
+        let dir_svc = xpcom::services::get_DirectoryService().expect("directory service");
+        let property = CString::new("ProfD").expect("ProfD");
         let mut profile_dir = xpcom::GetterAddrefs::<interfaces::nsIFile>::new();
         unsafe {
             dir_svc.Get(property.as_ptr(), &interfaces::nsIFile::IID, profile_dir.void_ptr());
@@ -89,7 +89,7 @@ lazy_static! {
         //
         let mut profile_dir_path = nsString::new();
         unsafe {
-            profile_dir.refptr().unwrap().GetPath(profile_dir_path.deref_mut());
+            profile_dir.refptr().expect("refptr").GetPath(profile_dir_path.deref_mut());
             // TODO: ensure the directory service returns a valid pointer
             // to an nsIFile instance.
             // let profile_dir_path: Result<RefPtr<nsAString>, nsresult> =
@@ -265,8 +265,27 @@ pub extern "C" fn xulstore_remove_value(
 
 #[no_mangle]
 pub extern "C" fn xulstore_get_ids_iterator(doc: &nsAString) -> *const StringIterator {
-    info!("get IDs iterator {}", doc);
+    info!("xulstore_get_ids_iterator({})", doc);
     let doc_url = String::from_utf16_lossy(doc);
+
+    // If we don't have a profile directory, then we can't get the datastore.
+    // This can happen during profile migration.
+    // TODO: find a better way to handle this situation.
+    let dir_svc = xpcom::services::get_DirectoryService();
+    if let None = dir_svc {
+        println!("can't get directory service");
+        return Box::into_raw(Box::new(StringIterator::new(vec![])));
+    }
+    let property = CString::new("ProfD").expect("ProfD");
+    let mut profile_dir = xpcom::GetterAddrefs::<interfaces::nsIFile>::new();
+    unsafe {
+        dir_svc.unwrap().Get(property.as_ptr(), &interfaces::nsIFile::IID, profile_dir.void_ptr());
+    }
+    if let None = profile_dir.refptr() {
+        println!("can't get profile dir");
+        return Box::into_raw(Box::new(StringIterator::new(vec![])));
+    }
+
     let store = STORE.clone();
     let reader = RKV.read().expect("reader");
     let iterator = store.iter_from(&reader, &doc_url).expect("iter");
