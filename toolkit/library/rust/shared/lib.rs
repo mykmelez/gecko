@@ -145,8 +145,8 @@ pub extern "C" fn GkRust_Init() {
     let _ = GeckoLogger::init();
 
     let dir = std::env::temp_dir();
-    let canonical_path = std::fs::canonicalize(dir.as_path()).expect("canonical path");
-    dbg!(canonical_path);
+    let path = std::fs::canonicalize(dir.as_path()).expect("path");
+    dbg!(path);
 }
 
 #[no_mangle]
