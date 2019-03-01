@@ -41,7 +41,6 @@ extern crate arrayvec;
 use std::boxed::Box;
 use std::env;
 use std::ffi::{CStr, CString};
-use std::fs::canonicalize;
 use std::os::raw::c_char;
 use std::os::raw::c_int;
 #[cfg(target_os = "android")]
@@ -145,8 +144,8 @@ pub extern "C" fn GkRust_Init() {
     // Initialize logging.
     let _ = GeckoLogger::init();
 
-    let dir = env::temp_dir();
-    let canonical_path = canonicalize(dir.as_path()).expect("canonical path");
+    let dir = std::env::temp_dir();
+    let canonical_path = std::fs::canonicalize(dir.as_path()).expect("canonical path");
     dbg!(canonical_path);
 }
 
