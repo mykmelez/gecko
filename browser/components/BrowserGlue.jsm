@@ -321,8 +321,8 @@ let ACTORS = {
         "default-theme@mozilla.org")
     return;
 
-  let getValue = async (attr) =>
-    await XULStore.getValue(AppConstants.BROWSER_CHROME_URL, "main-window", attr);
+  let getValue = attr =>
+    XULStore.getValue(AppConstants.BROWSER_CHROME_URL, "main-window", attr);
   let width = await getValue("width");
   let height = await getValue("height");
 

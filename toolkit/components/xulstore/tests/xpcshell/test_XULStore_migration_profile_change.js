@@ -26,8 +26,8 @@ add_task(async function test_get_values() {
         doc1: {
           id1: {
             attr1: "value1",
-          }
-        }
+          },
+        },
       });
       let stream = FileUtils.openAtomicFileOutputStream(file);
       stream.write(xulstoreJSON, xulstoreJSON.length);

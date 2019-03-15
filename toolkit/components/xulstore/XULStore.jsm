@@ -75,7 +75,7 @@ const XULStore = {
     this.log("has store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
 
     const gDatabase = await gDatabasePromise;
-    return await gDatabase.has(makeKey(docURI, id, attr));
+    return gDatabase.has(makeKey(docURI, id, attr));
   },
 
   async getValue(docURI, id, attr) {
@@ -161,7 +161,7 @@ const XULStore = {
     const cache = {};
 
     for (const {key, value} of enumerator) {
-      const [uri, id, attr] = key.split("\t");
+      const [, id, attr] = key.split("\t");
         if (!(id in cache)) {
           cache[id] = {};
         }

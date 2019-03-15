@@ -226,7 +226,7 @@ DistributionCustomizer.prototype = {
       this._newProfile = true;
 
     if (!this._ini)
-      return await this._checkCustomizationComplete();
+      return this._checkCustomizationComplete();
 
     if (!this._prefDefaultsApplied) {
       await this.applyPrefDefaults();
@@ -281,16 +281,16 @@ DistributionCustomizer.prototype = {
   applyPrefDefaults: async function DIST_applyPrefDefaults() {
     this._prefDefaultsApplied = true;
     if (!this._ini)
-      return await this._checkCustomizationComplete();
+      return this._checkCustomizationComplete();
 
     let sections = enumToObject(this._ini.getSections());
 
     // The global section, and several of its fields, is required
     if (!sections.Global)
-      return await this._checkCustomizationComplete();
+      return this._checkCustomizationComplete();
     let globalPrefs = enumToObject(this._ini.getKeys("Global"));
     if (!(globalPrefs.id && globalPrefs.version && globalPrefs.about))
-      return await this._checkCustomizationComplete();
+      return this._checkCustomizationComplete();
 
     let defaults = new Preferences({defaultBranch: true});
 
@@ -418,7 +418,7 @@ DistributionCustomizer.prototype = {
       }
     }
 
-    return await this._checkCustomizationComplete();
+    return this._checkCustomizationComplete();
   },
 
   _checkCustomizationComplete: async function DIST__checkCustomizationComplete() {
