@@ -20,7 +20,7 @@ extern "C" {
 nsresult xulstore_set_value(const nsAString* doc, const nsAString* id,
                             const nsAString* attr, const nsAString* value);
 nsresult xulstore_has_value(const nsAString* doc, const nsAString* id,
-                        const nsAString* attr, bool* has_value);
+                            const nsAString* attr, bool* has_value);
 nsresult xulstore_get_value(const nsAString* doc, const nsAString* id,
                             const nsAString* attr, nsAString* value);
 nsresult xulstore_remove_value(const nsAString* doc, const nsAString* id,
