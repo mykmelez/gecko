@@ -14,12 +14,22 @@ XPIDL_SOURCES += [
     'nsIXULStore.idl',
 ]
 
-XPIDL_MODULE = 'toolkit_xulstore'
+TEST_DIRS += [
+    'tests/gtest',
+]
+
+EXPORTS += [
+    'XULStore.h',
+]
 
 EXTRA_JS_MODULES += [
     'XULStore.jsm',
 ]
 
-XPCOM_MANIFESTS += [
-    'components.conf',
+XPIDL_MODULE = 'xulstore'
+
+UNIFIED_SOURCES += [
+    'nsXULStoreModule.cpp',
 ]
+
+FINAL_LIBRARY = 'xul'

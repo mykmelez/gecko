@@ -16,6 +16,8 @@ ChromeUtils.defineModuleGetter(this, "Preferences",
                                "resource://gre/modules/Preferences.jsm");
 ChromeUtils.defineModuleGetter(this, "PlacesUtils",
                                "resource://gre/modules/PlacesUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "XULStore",
+                               "resource://gre/modules/XULStore.jsm");
 
 function DistributionCustomizer() {
 }
@@ -217,17 +219,17 @@ DistributionCustomizer.prototype = {
 
   _newProfile: false,
   _customizationsApplied: false,
-  applyCustomizations: function DIST_applyCustomizations() {
+  applyCustomizations: async function DIST_applyCustomizations() {
     this._customizationsApplied = true;
 
     if (!Services.prefs.prefHasUserValue("browser.migration.version"))
       this._newProfile = true;
 
     if (!this._ini)
-      return this._checkCustomizationComplete();
+      return await this._checkCustomizationComplete();
 
     if (!this._prefDefaultsApplied) {
-      this.applyPrefDefaults();
+      await this.applyPrefDefaults();
     }
   },
 
@@ -235,7 +237,7 @@ DistributionCustomizer.prototype = {
   async applyBookmarks() {
     await this._doApplyBookmarks();
     this._bookmarksApplied = true;
-    this._checkCustomizationComplete();
+    await this._checkCustomizationComplete();
   },
 
   async _doApplyBookmarks() {
@@ -276,19 +278,19 @@ DistributionCustomizer.prototype = {
   },
 
   _prefDefaultsApplied: false,
-  applyPrefDefaults: function DIST_applyPrefDefaults() {
+  applyPrefDefaults: async function DIST_applyPrefDefaults() {
     this._prefDefaultsApplied = true;
     if (!this._ini)
-      return this._checkCustomizationComplete();
+      return await this._checkCustomizationComplete();
 
     let sections = enumToObject(this._ini.getSections());
 
     // The global section, and several of its fields, is required
     if (!sections.Global)
-      return this._checkCustomizationComplete();
+      return await this._checkCustomizationComplete();
     let globalPrefs = enumToObject(this._ini.getKeys("Global"));
     if (!(globalPrefs.id && globalPrefs.version && globalPrefs.about))
-      return this._checkCustomizationComplete();
+      return await this._checkCustomizationComplete();
 
     let defaults = new Preferences({defaultBranch: true});
 
@@ -416,25 +418,23 @@ DistributionCustomizer.prototype = {
       }
     }
 
-    return this._checkCustomizationComplete();
+    return await this._checkCustomizationComplete();
   },
 
-  _checkCustomizationComplete: function DIST__checkCustomizationComplete() {
+  _checkCustomizationComplete: async function DIST__checkCustomizationComplete() {
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     if (this._newProfile) {
-      let xulStore = Services.xulStore;
-
       try {
         var showPersonalToolbar = Services.prefs.getBoolPref("browser.showPersonalToolbar");
         if (showPersonalToolbar) {
-          xulStore.setValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed", "false");
+          await XULStore.setValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed", "false");
         }
       } catch (e) {}
       try {
         var showMenubar = Services.prefs.getBoolPref("browser.showMenubar");
         if (showMenubar) {
-          xulStore.setValue(BROWSER_DOCURL, "toolbar-menubar", "autohide", "false");
+          await XULStore.setValue(BROWSER_DOCURL, "toolbar-menubar", "autohide", "false");
         }
       } catch (e) {}
     }

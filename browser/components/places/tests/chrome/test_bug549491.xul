@@ -63,7 +63,7 @@
 
         // Setup the places tree contents.
         let tree = document.getElementById("tree");
-        tree.place = queryURI;
+        await tree.setPlace(queryURI);
 
         let rootNode = tree.result.root;
         let obs = tree.view.QueryInterface(Ci.nsINavHistoryResultObserver);

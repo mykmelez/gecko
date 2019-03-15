@@ -448,7 +448,7 @@ var gEditItemOverlay = {
       // Hide the folder tree if it was previously visible.
       var folderTreeRow = this._element("folderTreeRow");
       if (!folderTreeRow.collapsed)
-        this.toggleFolderTreeVisibility();
+        this.toggleFolderTreeVisibility().catch(Cu.reportError);
 
       // Hide the tag selector if it was previously visible.
       var tagsSelectorRow = this._element("tagsSelectorRow");
@@ -660,7 +660,7 @@ var gEditItemOverlay = {
                                                     .transact().catch(Cu.reportError));
   },
 
-  toggleFolderTreeVisibility() {
+  async toggleFolderTreeVisibility() {
     var expander = this._element("foldersExpander");
     var folderTreeRow = this._element("folderTreeRow");
     expander.classList.toggle("expander-up", folderTreeRow.collapsed);
@@ -682,7 +682,7 @@ var gEditItemOverlay = {
       const FOLDER_TREE_PLACE_URI =
         "place:excludeItems=1&excludeQueries=1&type=" +
         Ci.nsINavHistoryQueryOptions.RESULTS_AS_ROOTS_QUERY;
-      this._folderTree.place = FOLDER_TREE_PLACE_URI;
+      await this._folderTree.setPlace(FOLDER_TREE_PLACE_URI);
 
       this._element("chooseFolderSeparator").hidden =
         this._element("chooseFolderMenuItem").hidden = true;
@@ -731,7 +731,7 @@ var gEditItemOverlay = {
       this._folderMenuList.selectedItem = item;
       // XXXmano HACK: setTimeout 100, otherwise focus goes back to the
       // menulist right away
-      setTimeout(() => this.toggleFolderTreeVisibility(), 100);
+      setTimeout(() => this.toggleFolderTreeVisibility().catch(Cu.reportError), 100);
       return;
     }
 
