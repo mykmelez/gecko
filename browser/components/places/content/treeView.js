@@ -1489,8 +1489,6 @@ PlacesTreeView.prototype = {
     let uri = node.uri;
 
     if (uri) {
-      let docURI = document.documentURI;
-
       if (node.containerOpen) {
         this._xulStoreCache.removeValue(uri, "open");
       } else {
