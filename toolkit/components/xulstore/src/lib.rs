@@ -20,12 +20,12 @@ extern crate xpcom;
 mod error;
 mod ffi;
 mod iter;
-mod store;
+mod statics;
 
 use crate::{
     error::{XULStoreError, XULStoreResult},
     iter::XULStoreIterator,
-    store::{RKV, STORE},
+    statics::{RKV, STORE},
 };
 use lmdb::Error as LmdbError;
 use nsstring::nsAString;

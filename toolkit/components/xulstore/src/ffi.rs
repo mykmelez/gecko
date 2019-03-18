@@ -5,7 +5,7 @@
 use crate::{
     error::XULStoreNsResult,
     iter::XULStoreIterator,
-    store::{update_profile_dir, STORE},
+    statics::{update_profile_dir, STORE},
     XULStore,
 };
 use libc::{c_char, c_void};
