@@ -43,7 +43,6 @@ async function init() {
 
 async function searchBookmarks(aSearchString) {
   var tree = document.getElementById("bookmarks-view");
-
   if (!aSearchString) {
     // eslint-disable-next-line no-self-assign
     await tree.setPlace(tree.place);
