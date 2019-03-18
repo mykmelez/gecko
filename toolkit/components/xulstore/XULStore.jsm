@@ -2,76 +2,68 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// Enables logging and shorter save intervals.
+"use strict";
+
+// Get the nsIXULStore service to ensure that data is migrated from the old
+// store (xulstore.json) to the new one before we access the new store.
+Cc["@mozilla.org/xul-store-service;1"].getService(Ci.nsIXULStore);
+
+// Enables logging.
 const debugMode = false;
 
-// Delay when a change is made to when the file is saved.
-// 30 seconds normally, or 3 seconds for testing
-const WRITE_DELAY_MS = (debugMode ? 3 : 30) * 1000;
+const EXPORTED_SYMBOLS = ["XULStore"];
 
-const XULSTORE_CID = Components.ID("{6f46b6f4-c8b1-4bd4-a4fa-9ebbed0753ea}");
-const STOREDB_FILENAME = "xulstore.json";
-
+const {KeyValueService} = ChromeUtils.import("resource://gre/modules/kvstore.jsm");
+const {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm");
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-ChromeUtils.defineModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
+// A cache of XULStore data, indexed by document URL.  This exists to support
+// consumers that can't use the async API, and it shouldn't be used except by
+// those consumers (namely: Places).  Whenever possible, access XULStore using
+// its standard async API.
+//
+// If you must access it synchronously, however, then (asynchronously) retrieve
+// a cache of XULStore values for a given URI via XULStore.cache(), after which
+// you can (synchronously) use the cache in place of XULStore's standard API.
+let cache = {};
 
-function XULStore() {
-  if (!Services.appinfo.inSafeMode)
-    this.load();
+// Enumeration is inclusive of the lower bound and exclusive of the upper
+// bound, i.e. [from,to). In order to ensure that we enumerate all keys
+// for the document URI, and only those for the document URI, we enumerate
+// from the document URI + the separator char (to ensure we match the URI
+// exactly in the URI part of the key) until the document URI + the next char
+// after the separator (to stop iteration at the first key greater than
+// the document URI + the separator char).
+const SEPARATOR = "\t";
+const SEPARATOR_NEXT_CHAR = String.fromCharCode(SEPARATOR.charCodeAt(0) + 1);
+
+function makeKey(docURI, id, attr) {
+  return docURI.concat(SEPARATOR, id).concat(SEPARATOR, attr);
 }
 
-XULStore.prototype = {
-  classID: XULSTORE_CID,
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver, Ci.nsIXULStore,
-                                          Ci.nsISupportsWeakReference]),
-  _xpcom_factory: XPCOMUtils.generateSingletonFactory(XULStore),
+async function getDatabase() {
+  // This module should not generally be loaded before the profile dir
+  // is available, but it can happen during profile migration.
+  //
+  // This code must be kept in sync with the code that updates the store's
+  // location in toolkit/components/xulstore/src/ffi.rs.
+  const profileDir = OS.Constants.Path.profileDir || OS.Constants.Path.tmpDir;
+  const databaseDir = OS.Path.join(profileDir, "xulstore");
+  await OS.File.makeDir(databaseDir, { from: OS.Constants.Path.profileDir });
+  return KeyValueService.getOrCreate(databaseDir, "db");
+}
 
-  /* ---------- private members ---------- */
+XPCOMUtils.defineLazyGetter(this, "gDatabasePromise", getDatabase);
 
-  /*
-   * The format of _data is _data[docuri][elementid][attribute]. For example:
-   *  {
-   *      "chrome://blah/foo.xul" : {
-   *                                    "main-window" : { aaa : 1, bbb : "c" },
-   *                                    "barColumn"   : { ddd : 9, eee : "f" },
-   *                                },
-   *
-   *      "chrome://foopy/b.xul" :  { ... },
-   *      ...
-   *  }
-   */
-  _data: {},
-  _storeFile: null,
-  _needsSaving: false,
-  _saveAllowed: true,
-  _writeTimer: Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer),
-
-  load() {
-    Services.obs.addObserver(this, "profile-before-change", true);
-
-    try {
-      this._storeFile = Services.dirsvc.get("ProfD", Ci.nsIFile);
-    } catch (ex) {
-      try {
-        this._storeFile = Services.dirsvc.get("ProfDS", Ci.nsIFile);
-      } catch (ex) {
-        throw new Error("Can't find profile directory.");
-      }
-    }
-    this._storeFile.append(STOREDB_FILENAME);
-
-    this.readFile();
+Services.obs.addObserver({
+  async observe() {
+    gDatabasePromise = getDatabase();
+    cache = {};
   },
+}, "profile-after-change");
 
-  observe(subject, topic, data) {
-    this.writeFile();
-    if (topic == "profile-before-change") {
-      this._saveAllowed = false;
-    }
-  },
-
+const XULStore = {
   /*
    * Internal function for logging debug messages to the Error Console window
    */
@@ -81,49 +73,45 @@ XULStore.prototype = {
     console.log("XULStore: " + message);
   },
 
-  readFile() {
-    try {
-      this._data = JSON.parse(Cu.readUTF8File(this._storeFile));
-    } catch (e) {
-      this.log("Error reading JSON: " + e);
-      // This exception could mean that the file didn't exist.
-      // We'll just ignore the error and start with a blank slate.
+  async setValue(docURI, id, attr, value) {
+    this.log("Saving " + attr + "=" + value + " for id=" + id + ", doc=" + docURI);
+
+    // bug 319846 -- don't save really long attributes or values.
+    if (id.length > 512 || attr.length > 512) {
+      throw Components.Exception("id or attribute name too long", Cr.NS_ERROR_ILLEGAL_VALUE);
     }
-  },
 
-  async writeFile() {
-    if (!this._needsSaving)
-      return;
-
-    this._needsSaving = false;
-
-    this.log("Writing to xulstore.json");
-
-    try {
-      let data = JSON.stringify(this._data);
-      let encoder = new TextEncoder();
-
-      data = encoder.encode(data);
-      await OS.File.writeAtomic(this._storeFile.path, data,
-                              { tmpPath: this._storeFile.path + ".tmp" });
-    } catch (e) {
-      this.log("Failed to write xulstore.json: " + e);
-      throw e;
+    if (value.length > 4096) {
+      Services.console.logStringMessage("XULStore: Warning, truncating long attribute value");
+      value = value.substr(0, 4096);
     }
+
+    const gDatabase = await gDatabasePromise;
+    await gDatabase.put(makeKey(docURI, id, attr), value);
   },
 
-  markAsChanged() {
-    if (this._needsSaving || !this._storeFile)
-      return;
+  async hasValue(docURI, id, attr) {
+    this.log("has store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
 
-    // Don't write the file more than once every 30 seconds.
-    this._needsSaving = true;
-    this._writeTimer.init(this, WRITE_DELAY_MS, Ci.nsITimer.TYPE_ONE_SHOT);
+    const gDatabase = await gDatabasePromise;
+    return gDatabase.has(makeKey(docURI, id, attr));
   },
 
-  /* ---------- interface implementation ---------- */
+  async getValue(docURI, id, attr) {
+    this.log("get store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
 
-  persist(node, attr) {
+    const gDatabase = await gDatabasePromise;
+    return await gDatabase.get(makeKey(docURI, id, attr)) || "";
+  },
+
+  async removeValue(docURI, id, attr) {
+    this.log("remove store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
+
+    const gDatabase = await gDatabasePromise;
+    await gDatabase.delete(makeKey(docURI, id, attr));
+  },
+
+  async persist(node, attr) {
     if (!node.id) {
       throw new Error("Node without ID passed into persist()");
     }
@@ -140,169 +128,112 @@ XULStore.prototype = {
     // any time there's an empty attribute it gets removed from the
     // store. Since this is copying behavior from document.persist,
     // callers would need to be updated with that change.
-    if (!value && this.hasValue(uri, node.id, attr)) {
-      this.removeValue(uri, node.id, attr);
+    if (!value && await this.hasValue(uri, node.id, attr)) {
+      await this.removeValue(uri, node.id, attr);
     } else {
-      this.setValue(uri, node.id, attr, value);
+      await this.setValue(uri, node.id, attr, value);
     }
   },
 
-  setValue(docURI, id, attr, value) {
-    this.log("Saving " + attr + "=" + value + " for id=" + id + ", doc=" + docURI);
-
-    if (!this._saveAllowed) {
-      Services.console.logStringMessage("XULStore: Changes after profile-before-change are ignored!");
-      return;
-    }
-
-    // bug 319846 -- don't save really long attributes or values.
-    if (id.length > 512 || attr.length > 512) {
-      throw Components.Exception("id or attribute name too long", Cr.NS_ERROR_ILLEGAL_VALUE);
-    }
-
-    if (value.length > 4096) {
-      Services.console.logStringMessage("XULStore: Warning, truncating long attribute value");
-      value = value.substr(0, 4096);
-    }
-
-    let obj = this._data;
-    if (!(docURI in obj)) {
-      obj[docURI] = {};
-    }
-    obj = obj[docURI];
-    if (!(id in obj)) {
-      obj[id] = {};
-    }
-    obj = obj[id];
-
-    // Don't set the value if it is already set to avoid saving the file.
-    if (attr in obj && obj[attr] == value)
-      return;
-
-    obj[attr] = value; // IE, this._data[docURI][id][attr] = value;
-
-    this.markAsChanged();
-  },
-
-  hasValue(docURI, id, attr) {
-    this.log("has store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
-
-    let ids = this._data[docURI];
-    if (ids) {
-      let attrs = ids[id];
-      if (attrs) {
-        return attr in attrs;
-      }
-    }
-
-    return false;
-  },
-
-  getValue(docURI, id, attr) {
-    this.log("get store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
-
-    let ids = this._data[docURI];
-    if (ids) {
-      let attrs = ids[id];
-      if (attrs) {
-        return attrs[attr] || "";
-      }
-    }
-
-    return "";
-  },
-
-  removeValue(docURI, id, attr) {
-    this.log("remove store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
-
-    if (!this._saveAllowed) {
-      Services.console.logStringMessage("XULStore: Changes after profile-before-change are ignored!");
-      return;
-    }
-
-    let ids = this._data[docURI];
-    if (ids) {
-      let attrs = ids[id];
-      if (attrs && attr in attrs) {
-        delete attrs[attr];
-
-        if (Object.getOwnPropertyNames(attrs).length == 0) {
-          delete ids[id];
-
-          if (Object.getOwnPropertyNames(ids).length == 0) {
-            delete this._data[docURI];
-          }
-        }
-
-        this.markAsChanged();
-      }
-    }
-  },
-
-  removeDocument(docURI) {
-    this.log("remove store values for doc=" + docURI);
-
-    if (!this._saveAllowed) {
-      Services.console.logStringMessage("XULStore: Changes after profile-before-change are ignored!");
-      return;
-    }
-
-    if (this._data[docURI]) {
-      delete this._data[docURI];
-      this.markAsChanged();
-    }
-  },
-
-  getIDsEnumerator(docURI) {
+  async getIDs(docURI) {
     this.log("Getting ID enumerator for doc=" + docURI);
 
-    if (!(docURI in this._data))
-      return new nsStringEnumerator([]);
+    const gDatabase = await gDatabasePromise;
+    const from = docURI.concat(SEPARATOR);
+    const to = docURI.concat(SEPARATOR_NEXT_CHAR);
+    const enumerator = await gDatabase.enumerate(from, to);
+    const ids = new Set();
 
-    let result = [];
-    let ids = this._data[docURI];
-    if (ids) {
-      for (let id in this._data[docURI]) {
-        result.push(id);
-      }
+    for (const {key} of enumerator) {
+      // IDs are the second of the three tab-delimited fields in the key.
+      const id = key.split(SEPARATOR)[1];
+      ids.add(id);
     }
 
-    return new nsStringEnumerator(result);
+    return ids;
   },
 
-  getAttributeEnumerator(docURI, id) {
+  async getAttributes(docURI, id) {
     this.log("Getting attribute enumerator for id=" + id + ", doc=" + docURI);
 
-    if (!(docURI in this._data) || !(id in this._data[docURI]))
-      return new nsStringEnumerator([]);
+    const gDatabase = await gDatabasePromise;
+    const prefix = docURI.concat(SEPARATOR, id);
+    const from = prefix.concat(SEPARATOR);
+    const to = prefix.concat(SEPARATOR_NEXT_CHAR);
+    const enumerator = await gDatabase.enumerate(from, to);
+    const attrs = new Set();
 
-    let attrs = [];
-    for (let attr in this._data[docURI][id]) {
-      attrs.push(attr);
+    for (const {key} of enumerator) {
+      // Attributes are the third of the three tab-delimited fields in the key.
+      const attr = key.split(SEPARATOR)[2];
+      attrs.add(attr);
     }
 
-    return new nsStringEnumerator(attrs);
+    return attrs;
+  },
+
+  async removeDocument(docURI) {
+    this.log("remove store values for doc=" + docURI);
+
+    const gDatabase = await gDatabasePromise;
+    const from = docURI.concat(SEPARATOR);
+    const to = docURI.concat(SEPARATOR_NEXT_CHAR);
+    const enumerator = await gDatabase.enumerate(from, to);
+
+    await Promise.all(Array.from(enumerator).map(({key}) => gDatabase.delete(key)));
+  },
+
+  async cache(docURI) {
+    this.log("cache store values for doc=" + docURI);
+
+    const gDatabase = await gDatabasePromise;
+    const from = docURI.concat(SEPARATOR);
+    const to = docURI.concat(SEPARATOR_NEXT_CHAR);
+    const enumerator = await gDatabase.enumerate(from, to);
+    const cache = {};
+
+    for (const {key, value} of enumerator) {
+      const [, id, attr] = key.split(SEPARATOR);
+        if (!(id in cache)) {
+          cache[id] = {};
+        }
+        cache[id][attr] = value;
+    }
+
+    return new XULStoreCache(docURI, cache);
+  },
+
+  decache(docURI) {
+    delete cache[docURI];
   },
 };
 
-function nsStringEnumerator(items) {
-  this._items = items;
+class XULStoreCache {
+  constructor(uri, cache) {
+    this.uri = uri;
+    this.cache = cache;
+  }
+
+  getValue(id, attr) {
+    if (id in this.cache && attr in this.cache[id]) {
+      return this.cache[id][attr];
+    }
+    return "";
+  }
+
+  setValue(id, attr, value) {
+    if (!(id in this.cache)) {
+      this.cache[id] = {};
+    }
+    this.cache[id][attr] = value;
+    XULStore.setValue(this.uri, id, attr, value).catch(Cu.reportError);
+  }
+
+  removeValue(id, attr) {
+    if (!(id in this.cache) || !(attr in this.cache[id])) {
+      return;
+    }
+    delete this.cache[id][attr];
+    XULStore.removeValue(this.uri, id, attr).catch(Cu.reportError);
+  }
 }
-
-nsStringEnumerator.prototype = {
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIStringEnumerator]),
-  _nextIndex: 0,
-  [Symbol.iterator]() {
-    return this._items.values();
-  },
-  hasMore() {
-    return this._nextIndex < this._items.length;
-  },
-  getNext() {
-    if (!this.hasMore())
-      throw Cr.NS_ERROR_NOT_AVAILABLE;
-    return this._items[this._nextIndex++];
-  },
-};
-
-var EXPORTED_SYMBOLS = ["XULStore"];

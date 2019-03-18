@@ -4,11 +4,11 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-Classes = [
-    {
-        'cid': '{6f46b6f4-c8b1-4bd4-a4fa-9ebbed0753ea}',
-        'contract_ids': ['@mozilla.org/xul/xulstore;1'],
-        'jsm': 'resource://gre/modules/XULStore.jsm',
-        'constructor': 'XULStore',
-    },
+UNIFIED_SOURCES += [
+    'TestXULStore.cpp',
 ]
+
+FINAL_LIBRARY = 'xul-gtest'
+
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']

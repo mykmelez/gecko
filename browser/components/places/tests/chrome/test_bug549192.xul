@@ -75,7 +75,7 @@
 
         // Setup the places tree contents.
         var tree = document.getElementById("tree");
-        tree.place = queryURI;
+        await tree.setPlace(queryURI);
 
         // loop through the rows and check them.
         let treeView = tree.view;

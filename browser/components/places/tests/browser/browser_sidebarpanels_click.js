@@ -38,7 +38,7 @@ add_task(async function test_sidebarpanels_click() {
         url: TEST_URL,
       });
     },
-    prepare() {
+    async prepare() {
     },
     async selectNode(tree) {
       tree.selectItems([this._bookmark.guid]);
@@ -60,8 +60,11 @@ add_task(async function test_sidebarpanels_click() {
         transition: PlacesUtils.history.TRANSITION_TYPED,
       });
     },
-    prepare() {
-      sidebar.contentDocument.getElementById("byvisited").doCommand();
+    async prepare() {
+      // Call GroupBy() directly rather than indirectly through
+      // menuItem.doCommand() so we can await its resolution.
+      let menuItem = sidebar.contentDocument.getElementById("byvisited");
+      await sidebar.contentWindow.GroupBy(menuItem, "visited");
     },
     selectNode(tree) {
       tree.selectNode(tree.view.nodeForTreeIndex(0));
@@ -101,11 +104,12 @@ async function testPlacesPanel(testInfo, preFunc) {
   let promise = new Promise(resolve => {
     sidebar.addEventListener("load", function() {
       executeSoon(async function() {
-        testInfo.prepare();
+        await testInfo.prepare();
 
         preFunc();
 
         let tree = sidebar.contentDocument.getElementById(testInfo.treeName);
+        await tree.initPromise;
 
         // Select the inserted places item.
         await testInfo.selectNode(tree);

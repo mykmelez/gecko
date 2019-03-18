@@ -20,7 +20,7 @@
         ondialogaccept="BookmarkPropertiesPanel.onDialogAccept();"
         ondialogcancel="BookmarkPropertiesPanel.onDialogCancel();"
         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
-        onload="BookmarkPropertiesPanel.onDialogLoad();"
+        onload="BookmarkPropertiesPanel.onDialogLoad().catch(Cu.reportError);"
         onunload="BookmarkPropertiesPanel.onDialogUnload();"
         style="min-width: 30em;"
         persist="screenX screenY width">

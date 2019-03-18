@@ -41,6 +41,7 @@ function PlacesTreeView(aContainer) {
   this._nodeDetails = new Map();
   this._element = aContainer;
   this._controller = aContainer._controller;
+  this._xulStoreCache = aContainer._xulStoreCache;
 }
 
 PlacesTreeView.prototype = {
@@ -345,7 +346,7 @@ PlacesTreeView.prototype = {
         let isopen = false;
 
         if (uri) {
-          let val = Services.xulStore.getValue(document.documentURI, uri, "open");
+          let val = this._xulStoreCache.getValue(uri, "open");
           isopen = (val == "true");
         }
 
@@ -1488,12 +1489,10 @@ PlacesTreeView.prototype = {
     let uri = node.uri;
 
     if (uri) {
-      let docURI = document.documentURI;
-
       if (node.containerOpen) {
-        Services.xulStore.removeValue(docURI, uri, "open");
+        this._xulStoreCache.removeValue(uri, "open");
       } else {
-        Services.xulStore.setValue(docURI, uri, "open", "true");
+        this._xulStoreCache.setValue(uri, "open", "true");
       }
     }
 

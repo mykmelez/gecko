@@ -39,8 +39,8 @@ const HISTORY_LIBRARY_SEARCH_TELEMETRY = "PLACES_HISTORY_LIBRARY_SEARCH_TIME_MS"
 var PlacesOrganizer = {
   _places: null,
 
-  _initFolderTree() {
-    this._places.place = `place:type=${Ci.nsINavHistoryQueryOptions.RESULTS_AS_LEFT_PANE_QUERY}&excludeItems=1&expandQueries=0`;
+  async _initFolderTree() {
+    await this._places.setPlace(`place:type=${Ci.nsINavHistoryQueryOptions.RESULTS_AS_LEFT_PANE_QUERY}&excludeItems=1&expandQueries=0`);
   },
 
   /**
@@ -130,7 +130,7 @@ var PlacesOrganizer = {
     }
   },
 
-  init: function PO_init() {
+  init: async function PO_init() {
     // Register the downloads view.
     const DOWNLOADS_QUERY = "place:transition=" +
       Ci.nsINavHistoryService.TRANSITION_DOWNLOAD +
@@ -145,7 +145,7 @@ var PlacesOrganizer = {
     ContentArea.init();
 
     this._places = document.getElementById("placesList");
-    this._initFolderTree();
+    await this._initFolderTree();
 
     var leftPaneSelection = "AllBookmarks"; // default to all-bookmarks
     if (window.arguments && window.arguments[0])
@@ -200,7 +200,7 @@ var PlacesOrganizer = {
 
   QueryInterface: ChromeUtils.generateQI([]),
 
-  handleEvent: function PO_handleEvent(aEvent) {
+  handleEvent: async function PO_handleEvent(aEvent) {
     if (aEvent.type != "AppCommand")
       return;
 
@@ -215,7 +215,7 @@ var PlacesOrganizer = {
           this.forward();
         break;
       case "Search":
-        PlacesSearchBox.findAll();
+        await PlacesSearchBox.findAll();
         break;
     }
   },
@@ -286,7 +286,7 @@ var PlacesOrganizer = {
    *          deleting its text, this will be false.
    */
   _cachedLeftPaneSelectedURI: null,
-  onPlaceSelected: function PO_onPlaceSelected(resetSearchBox) {
+  onPlaceSelected: async function PO_onPlaceSelected(resetSearchBox) {
     // Don't change the right-hand pane contents when there's no selection.
     if (!this._places.hasSelection)
       return;
@@ -316,7 +316,7 @@ var PlacesOrganizer = {
     // has changed; otherwise we would have returned earlier.
 
     PlacesSearchBox.searchFilter.reset();
-    this._setSearchScopeForNode(node);
+    await this._setSearchScopeForNode(node);
     this.updateDetailsPane();
   },
 
@@ -325,17 +325,17 @@ var PlacesOrganizer = {
    * @param   aNode
    *          the node to set up scope from
    */
-  _setSearchScopeForNode: function PO__setScopeForNode(aNode) {
+  _setSearchScopeForNode: async function PO__setScopeForNode(aNode) {
     let itemGuid = aNode.bookmarkGuid;
 
     if (PlacesUtils.nodeIsHistoryContainer(aNode) ||
         itemGuid == PlacesUtils.virtualHistoryGuid) {
-      PlacesQueryBuilder.setScope("history");
+      await PlacesQueryBuilder.setScope("history");
     } else if (itemGuid == PlacesUtils.virtualDownloadsGuid) {
-      PlacesQueryBuilder.setScope("downloads");
+      await PlacesQueryBuilder.setScope("downloads");
     } else {
       // Default to All Bookmarks for all other nodes, per bug 469437.
-      PlacesQueryBuilder.setScope("bookmarks");
+      await PlacesQueryBuilder.setScope("bookmarks");
     }
   },
 
@@ -715,14 +715,14 @@ var PlacesSearchBox = {
    * @param   filterString
    *          The text to search for.
    */
-  search: function PSB_search(filterString) {
+  search: async function PSB_search(filterString) {
     var PO = PlacesOrganizer;
     // If the user empties the search box manually, reset it and load all
     // contents of the current scope.
     // XXX this might be to jumpy, maybe should search for "", so results
     // are ungrouped, and search box not reset
     if (filterString == "") {
-      PO.onPlaceSelected(false);
+      await PO.onPlaceSelected(false);
       return;
     }
 
@@ -732,7 +732,7 @@ var PlacesSearchBox = {
     // PQB_setScope()
     switch (PlacesSearchBox.filterCollection) {
       case "bookmarks":
-        currentView.applyFilter(filterString, this.folders);
+        await currentView.applyFilter(filterString, this.folders);
         break;
       case "history": {
         let currentOptions = PO.getCurrentOptions();
@@ -744,10 +744,11 @@ var PlacesSearchBox = {
           options.resultType = currentOptions.RESULTS_AS_URI;
           options.queryType = Ci.nsINavHistoryQueryOptions.QUERY_TYPE_HISTORY;
           options.includeHidden = true;
+          await currentView.initPromise;
           currentView.load([query], options);
         } else {
           TelemetryStopwatch.start(HISTORY_LIBRARY_SEARCH_TELEMETRY);
-          currentView.applyFilter(filterString, null, true);
+          await currentView.applyFilter(filterString, null, true);
           TelemetryStopwatch.finish(HISTORY_LIBRARY_SEARCH_TELEMETRY);
         }
         break;
@@ -768,16 +769,16 @@ var PlacesSearchBox = {
   /**
    * Finds across all history, downloads or all bookmarks.
    */
-  findAll: function PSB_findAll() {
+  findAll: async function PSB_findAll() {
     switch (this.filterCollection) {
       case "history":
-        PlacesQueryBuilder.setScope("history");
+        await PlacesQueryBuilder.setScope("history");
         break;
       case "downloads":
-        PlacesQueryBuilder.setScope("downloads");
+        await PlacesQueryBuilder.setScope("downloads");
         break;
       default:
-        PlacesQueryBuilder.setScope("bookmarks");
+        await PlacesQueryBuilder.setScope("bookmarks");
         break;
     }
     this.focus();
@@ -864,7 +865,7 @@ var PlacesQueryBuilder = {
    *          The search scope: "bookmarks", "collection", "downloads" or
    *          "history".
    */
-  setScope: function PQB_setScope(aScope) {
+  setScope: async function PQB_setScope(aScope) {
     // Determine filterCollection, folders, and scopeButtonId based on aScope.
     var filterCollection;
     var folders = [];
@@ -888,7 +889,7 @@ var PlacesQueryBuilder = {
     PlacesSearchBox.folders = folders;
     var searchStr = PlacesSearchBox.searchFilter.value;
     if (searchStr)
-      PlacesSearchBox.search(searchStr);
+      await PlacesSearchBox.search(searchStr);
   },
 };
 

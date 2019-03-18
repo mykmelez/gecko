@@ -20,7 +20,7 @@ XPCOMUtils.defineLazyScriptGetter(this, ["PlacesInsertionPoint", "PlacesControll
                                   "chrome://browser/content/places/controller.js");
 /* End Shared Places Import */
 
-function init() {
+async function init() {
   let uidensity = window.top.document.documentElement.getAttribute("uidensity");
   if (uidensity) {
     document.documentElement.setAttribute("uidensity", uidensity);
@@ -37,18 +37,17 @@ function init() {
     themeListener.cleanup();
   });
 
-  document.getElementById("bookmarks-view").place =
-    "place:type=" + Ci.nsINavHistoryQueryOptions.RESULTS_AS_ROOTS_QUERY;
+  let tree = document.getElementById("bookmarks-view");
+  await tree.setPlace("place:type=" + Ci.nsINavHistoryQueryOptions.RESULTS_AS_ROOTS_QUERY);
 }
 
-function searchBookmarks(aSearchString) {
+async function searchBookmarks(aSearchString) {
   var tree = document.getElementById("bookmarks-view");
   if (!aSearchString) {
     // eslint-disable-next-line no-self-assign
-    tree.place = tree.place;
+    await tree.setPlace(tree.place);
   } else {
-    tree.applyFilter(aSearchString,
-                     PlacesUtils.bookmarks.userContentRoots);
+    await tree.applyFilter(aSearchString, PlacesUtils.bookmarks.userContentRoots);
   }
 }
 

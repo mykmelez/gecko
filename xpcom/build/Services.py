@@ -42,6 +42,8 @@ service('ActivityDistributor', 'nsIHttpActivityDistributor',
         "@mozilla.org/network/http-activity-distributor;1")
 service('HistoryService', 'mozilla::IHistory',
         "@mozilla.org/browser/history;1")
+service('DirectoryService', 'nsIProperties',
+        "@mozilla.org/file/directory_service;1")
 service('ThirdPartyUtil', 'mozIThirdPartyUtil',
         "@mozilla.org/thirdpartyutil;1")
 service('URIFixup', 'nsIURIFixup',

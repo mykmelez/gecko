@@ -13,7 +13,7 @@
 <script>
 <![CDATA[
 
-let XULStore = Cc["@mozilla.org/xul/xulstore;1"].getService(Ci.nsIXULStore);
+const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
 let URI = "chrome://mochitests/content/chrome/toolkit/components/xulstore/tests/chrome/window_persistence.xul";
 
 function opened()
@@ -21,7 +21,7 @@ function opened()
   runTest();
 }
 
-function runTest()
+async function runTest()
 {
   var firstRun = window.arguments[0];
   var button1 = document.getElementById("button1");
@@ -31,11 +31,11 @@ function runTest()
     button2.removeAttribute("value");
 
     button2.setAttribute("foo", "bar");
-    XULStore.persist(button2, "foo");
-    is(XULStore.getValue(URI, "button2", "foo"), "bar", "attribute persisted");
+    await XULStore.persist(button2, "foo");
+    is(await XULStore.getValue(URI, "button2", "foo"), "bar", "attribute persisted");
     button2.removeAttribute("foo");
-    XULStore.persist(button2, "foo");
-    is(XULStore.hasValue(URI, "button2", "foo"), false, "attribute removed");
+    await XULStore.persist(button2, "foo");
+    is(await XULStore.hasValue(URI, "button2", "foo"), false, "attribute removed");
 
     window.close();
     window.opener.windowOpened();

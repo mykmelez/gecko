@@ -76,6 +76,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   WebNavigationFrames: "resource://gre/modules/WebNavigationFrames.jsm",
   fxAccounts: "resource://gre/modules/FxAccounts.jsm",
   webrtcUI: "resource:///modules/webrtcUI.jsm",
+  XULStore: "resource://gre/modules/XULStore.jsm",
   ZoomUI: "resource:///modules/ZoomUI.jsm",
 });
 
@@ -5884,7 +5885,11 @@ function setToolbarVisibility(toolbar, isVisible, persist = true) {
 
   toolbar.setAttribute(hidingAttribute, !isVisible);
   if (persist) {
-    Services.xulStore.persist(toolbar, hidingAttribute);
+    // NB: it isn't clear that we need to await persisting the value,
+    // as the rest of this function doesn't seem to depend on it, nor do
+    // its callers.  If we do need to do so, then we'll need to make
+    // this function async, which has cascading ramifications.
+    XULStore.persist(toolbar, hidingAttribute).catch(Cu.reportError);
   }
 
   let eventParams = {

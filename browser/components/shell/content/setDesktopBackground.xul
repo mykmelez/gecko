@@ -26,7 +26,7 @@
 #endif
         buttonlabelaccept="&setDesktopBackground.title;"
         onload="gSetBackground.load();"
-        ondialogaccept="gSetBackground.setDesktopBackground();"
+        ondialogaccept="gSetBackground.setDesktopBackground().catch(Cu.reportError);"
         title="&setDesktopBackground.title;"
         style="width: 30em;">
 
@@ -76,7 +76,7 @@
     <hbox align="right">
       <button id="setDesktopBackground"
               label="&setDesktopBackground.title;"
-              oncommand="gSetBackground.setDesktopBackground();"/>
+              oncommand="gSetBackground.setDesktopBackground().catch(Cu.reportError);"/>
       <button id="showDesktopPreferences"
               label="&openDesktopPrefs.label;"
               oncommand="gSetBackground.showDesktopPrefs();"

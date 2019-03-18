@@ -32,7 +32,7 @@ add_task(async function test_change_title_from_BookmarkStar() {
 
   await shownPromise;
 
-  window.gEditItemOverlay.toggleFolderTreeVisibility();
+  await window.gEditItemOverlay.toggleFolderTreeVisibility();
 
   let folderTree = document.getElementById("editBMPanel_folderTree");
 
