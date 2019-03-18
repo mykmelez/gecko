@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use crate::{error::XULStoreError, error::XULStoreResult, ffi::ProfileChangeObserver};
+use crate::{error::XULStoreError, error::XULStoreResult, ffi::ProfileChangeObserver, make_key};
 use nsstring::nsString;
 use rkv::{Manager, Rkv, SingleStore, StoreOptions, Value};
 use std::{
@@ -41,6 +41,38 @@ lazy_static! {
     };
 }
 
+// Memoized to the PROFILE_DIR lazy static. Prefer that accessor to calling
+// this function, to avoid extra trips across the XPCOM FFI.
+// NB: this code must be kept in sync with the code that updates the store's
+// location in toolkit/components/xulstore/XULStore.jsm.
+pub(crate) fn get_profile_dir() -> XULStoreResult<PathBuf> {
+    let dir_svc = xpcom::services::get_DirectoryService().ok_or(XULStoreError::Unavailable)?;
+    let mut profile_dir = xpcom::GetterAddrefs::<nsIFile>::new();
+    let property = CString::new("ProfD")?;
+    unsafe {
+        dir_svc.Get(property.as_ptr(), &nsIFile::IID, profile_dir.void_ptr());
+    }
+    let profile_dir = profile_dir.refptr().ok_or(XULStoreError::Unavailable)?;
+
+    let mut profile_path = nsString::new();
+    unsafe {
+        profile_dir.GetPath(profile_path.deref_mut());
+    }
+
+    let path = String::from_utf16(&profile_path[..])?;
+    Ok(PathBuf::from(&path))
+}
+
+fn get_xulstore_dir() -> XULStoreResult<PathBuf> {
+    let mut xulstore_dir = PROFILE_DIR.read()?.as_ref().ok_or(XULStoreError::Unavailable)?.clone();
+    xulstore_dir.push("xulstore");
+    info!("get XULStore dir: {:?}", &xulstore_dir);
+
+    create_dir_all(xulstore_dir.clone())?;
+
+    Ok(xulstore_dir)
+}
+
 pub(crate) fn get_rkv() -> XULStoreResult<Arc<RwLock<Rkv>>> {
     let mut manager = Manager::singleton().write()?;
     let xulstore_dir = get_xulstore_dir()?;
@@ -54,7 +86,9 @@ pub(crate) fn get_store() -> XULStoreResult<SingleStore> {
     rkv.open_single("db", StoreOptions::create()).map_err(|err| err.into())
 }
 
-pub(crate) fn maybe_migrate_data(store: SingleStore) {
+fn maybe_migrate_data(store: SingleStore) {
+    // Failure to migrate data isn't fatal, so we don't return a result.
+    // But we use a closure returning a result to enable use of the ? operator.
     (|| -> XULStoreResult<()> {
         let mut old_datastore = PROFILE_DIR.read()?.as_ref().ok_or(XULStoreError::Unavailable)?.clone();
         old_datastore.push("xulstore.json");
@@ -99,29 +133,10 @@ fn observe_profile_change() {
     })().unwrap_or_else(|err| error!("error observing profile change: {}", err));
 }
 
-// Memoized to the PROFILE_DIR lazy static. Prefer that accessor to calling
-// this function, to avoid extra trips across the XPCOM FFI.
-// NB: this code must be kept in sync with the code that updates the store's
-// location in toolkit/components/xulstore/XULStore.jsm.
-pub(crate) fn get_profile_dir() -> XULStoreResult<PathBuf> {
-    let dir_svc = xpcom::services::get_DirectoryService().ok_or(XULStoreError::Unavailable)?;
-    let mut profile_dir = xpcom::GetterAddrefs::<nsIFile>::new();
-    let property = CString::new("ProfD")?;
-    unsafe {
-        dir_svc.Get(property.as_ptr(), &nsIFile::IID, profile_dir.void_ptr());
-    }
-    let profile_dir = profile_dir.refptr().ok_or(XULStoreError::Unavailable)?;
-
-    let mut profile_path = nsString::new();
-    unsafe {
-        profile_dir.GetPath(profile_path.deref_mut());
-    }
-
-    let path = String::from_utf16(&profile_path[..])?;
-    Ok(PathBuf::from(&path))
-}
-
 pub(crate) fn update_profile_dir() {
+    // Failure to update the dir isn't fatal (although it means that we won't
+    // persist XULStore data for this session), so we don't return a result.
+    // But we use a closure returning a result to enable use of the ? operator.
     (|| -> XULStoreResult<()> {
         {
             let mut profile_dir_guard = PROFILE_DIR.write()?;
@@ -150,18 +165,4 @@ pub(crate) fn update_profile_dir() {
 
         Ok(())
     })().unwrap_or_else(|err| error!("error updating profile dir: {}", err));
-}
-
-fn get_xulstore_dir() -> XULStoreResult<PathBuf> {
-    let mut xulstore_dir = PROFILE_DIR.read()?.as_ref().ok_or(XULStoreError::Unavailable)?.clone();
-    xulstore_dir.push("xulstore");
-    info!("get XULStore dir: {:?}", &xulstore_dir);
-
-    create_dir_all(xulstore_dir.clone())?;
-
-    Ok(xulstore_dir)
-}
-
-pub(crate) fn make_key<T: std::fmt::Display>(doc: &T, id: &T, attr: &T) -> String {
-    format!("{}\u{0009}{}\u{0009}{}", doc, id, attr)
 }

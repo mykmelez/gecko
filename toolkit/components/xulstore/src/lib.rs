@@ -25,12 +25,18 @@ mod store;
 use crate::{
     error::{XULStoreError, XULStoreResult},
     iter::XULStoreIterator,
-    store::{make_key, RKV, STORE},
+    store::{RKV, STORE},
 };
 use lmdb::Error as LmdbError;
 use nsstring::nsAString;
 use rkv::{StoreError as RkvStoreError, Value};
 use std::str;
+
+const SEPARATOR: char = '\u{0009}';
+
+pub(crate) fn make_key<T: std::fmt::Display>(doc: &T, id: &T, attr: &T) -> String {
+    format!("{}{}{}{}{}", doc, SEPARATOR, id, SEPARATOR, attr)
+}
 
 struct XULStore {}
 
@@ -175,7 +181,7 @@ impl XULStore {
             // Stop iterating once we reach another doc URL or hit an error.
             .take_while(|result| match result {
                 Ok(key) => {
-                    let parts = key.split('\u{0009}').collect::<Vec<&str>>();
+                    let parts = key.split(SEPARATOR).collect::<Vec<&str>>();
                     parts[0] == doc_url
                 }
                 Err(_) => true,
@@ -183,7 +189,7 @@ impl XULStore {
             // Extract the element ID from the key.
             .map(|result| match result {
                 Ok(key) => {
-                    let parts = key.split('\u{0009}').collect::<Vec<&str>>();
+                    let parts = key.split(SEPARATOR).collect::<Vec<&str>>();
                     Ok(parts[1].to_owned())
                 }
                 Err(err) => Err(err),
@@ -203,7 +209,7 @@ impl XULStore {
 
         let doc_url = String::from_utf16(doc)?;
         let element_id = String::from_utf16(id)?;
-        let key_prefix = doc_url.to_owned() + "\u{0009}" + &element_id;
+        let key_prefix = doc_url.to_owned() + &SEPARATOR.to_string() + &element_id;
         let store = STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?.clone();
         let rkv_guard = RKV.read()?;
         let rkv = rkv_guard.as_ref().ok_or(XULStoreError::Unavailable)?.read()?;
@@ -223,7 +229,7 @@ impl XULStore {
             // or hit an error.
             .take_while(|result| match result {
                 Ok(key) => {
-                    let parts = key.split('\u{0009}').collect::<Vec<&str>>();
+                    let parts = key.split(SEPARATOR).collect::<Vec<&str>>();
                     parts[0] == doc_url && parts[1] == element_id
                 }
                 Err(_) => true,
@@ -231,7 +237,7 @@ impl XULStore {
             // Extract the attribute name from the key.
             .map(|result| match result {
                 Ok(key) => {
-                    let parts = key.split('\u{0009}').collect::<Vec<&str>>();
+                    let parts = key.split(SEPARATOR).collect::<Vec<&str>>();
                     Ok(parts[2].to_owned())
                 }
                 Err(err) => Err(err),
