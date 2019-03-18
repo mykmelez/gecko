@@ -28,7 +28,7 @@ use crate::{
     store::{make_key, RKV, STORE},
 };
 use lmdb::Error as LmdbError;
-use nsstring::{nsAString, nsString};
+use nsstring::nsAString;
 use rkv::{StoreError as RkvStoreError, Value};
 use std::str;
 
@@ -59,9 +59,8 @@ impl XULStore {
     fn has_value(
         doc: &nsAString,
         id: &nsAString,
-        attr: &nsAString,
-        has_value: *mut bool,
-    ) -> XULStoreResult<()> {
+        attr: &nsAString
+    ) -> XULStoreResult<bool> {
         debug!("XULStore has value: {} {} {}", doc, id, attr);
 
         let rkv_guard = RKV.read()?;
@@ -71,34 +70,30 @@ impl XULStore {
         let store = STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?.clone();
 
         match store.get(&reader, &key) {
-            Ok(Some(_)) => unsafe { *has_value = true },
+            Ok(Some(_)) => Ok(true),
 
-            Ok(None) => unsafe { *has_value = false },
+            Ok(None) => Ok(false),
 
-            // For some reason, the first call to STORE.read()?.get on an empty store
+            // For some reason, the first call to STORE.read()?.get in GTests
             // triggers an LMDB "other" error with code 22, which is described
-            // as EINVAL (BAD COMMAND).  Perhaps LMDB fails to position
-            // the cursor in an empty database?
+            // as EINVAL (BAD COMMAND).
             //
             // TODO: figure out why this happens and fix the problem instead of
             // merely working around it.
             Err(RkvStoreError::LmdbError(LmdbError::Other(22))) => {
                 error!("XULStore has value error: EINVAL");
-                unsafe { *has_value = false };
+                Ok(false)
             }
 
             Err(err) => return Err(err.into()),
-        };
-
-        Ok(())
+        }
     }
 
     fn get_value(
         doc: &nsAString,
         id: &nsAString,
-        attr: &nsAString,
-        value: *mut nsAString,
-    ) -> XULStoreResult<()> {
+        attr: &nsAString
+    ) -> XULStoreResult<String> {
         debug!("XULStore get value {} {} {}", doc, id, attr);
 
         let rkv_guard = RKV.read()?;
@@ -119,13 +114,12 @@ impl XULStore {
             // using a more general API (kvstore, rkv, LMDB).
             Ok(Some(_)) => return Err(XULStoreError::UnexpectedValue),
 
-            // For some reason, the first call to STORE.read()?.get on an empty store
+            // For some reason, the first call to STORE.read()?.get in GTests
             // triggers an LMDB "other" error with code 22, which is described
-            // as EINVAL (BAD COMMAND).  Perhaps LMDB fails to position
-            // the cursor in an empty database?
+            // as EINVAL (BAD COMMAND).
             //
-            // TODO: figure out why this happens and fix the problem
-            // instead of merely working around it.
+            // TODO: figure out why this happens and fix the problem instead of
+            // merely working around it.
             Err(RkvStoreError::LmdbError(LmdbError::Other(22))) => {
                 error!("XULStore get value error: EINVAL");
                 ""
@@ -134,11 +128,7 @@ impl XULStore {
             Err(err) => return Err(err.into()),
         };
 
-        unsafe {
-            (*value).assign(&nsString::from(retrieved_value));
-        };
-
-        Ok(())
+        Ok(retrieved_value.to_string())
     }
 
     fn remove_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<()> {
@@ -165,7 +155,7 @@ impl XULStore {
         Ok(())
     }
 
-    fn get_ids(doc: &nsAString) -> XULStoreResult<*mut XULStoreIterator> {
+    fn get_ids(doc: &nsAString) -> XULStoreResult<XULStoreIterator> {
         debug!("XULStore get IDs for {}", doc);
 
         let doc_url = String::from_utf16(doc)?;
@@ -208,12 +198,10 @@ impl XULStore {
         // requires its Item to be PartialEq, and Err(XULStoreError) isn't.
         collection.dedup();
 
-        Ok(Box::into_raw(Box::new(XULStoreIterator::new(
-            collection.into_iter(),
-        ))))
+        Ok(XULStoreIterator::new(collection.into_iter()))
     }
 
-    fn get_attrs(doc: &nsAString, id: &nsAString) -> XULStoreResult<*mut XULStoreIterator> {
+    fn get_attrs(doc: &nsAString, id: &nsAString) -> XULStoreResult<XULStoreIterator> {
         debug!("XULStore get attrs for doc, ID: {} {}", doc, id);
 
         let doc_url = String::from_utf16(doc)?;
@@ -257,8 +245,6 @@ impl XULStore {
         // requires its Item to be PartialEq, and Err(XULStoreError) isn't.
         collection.dedup();
 
-        Ok(Box::into_raw(Box::new(XULStoreIterator::new(
-            collection.into_iter(),
-        ))))
+        Ok(XULStoreIterator::new(collection.into_iter()))
     }
 }

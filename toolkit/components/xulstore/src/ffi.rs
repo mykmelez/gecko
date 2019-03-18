@@ -10,7 +10,7 @@ use crate::{
 };
 use libc::{c_char, c_void};
 use nserror::{nsresult, NS_ERROR_NO_AGGREGATION, NS_OK};
-use nsstring::nsAString;
+use nsstring::{nsAString, nsString};
 use std::ptr;
 use xpcom::{interfaces::nsISupports, nsIID, RefPtr};
 
@@ -18,6 +18,13 @@ use xpcom::{interfaces::nsISupports, nsIID, RefPtr};
 // xultore.jsm, while C++ consumers include XULStore.h.  But we still construct
 // an nsIXULStore instance in order to support migration from the old store
 // (xulstore.json) to the new one.
+//
+// To ensure migration occurs before the new store is accessed for the first
+// time, regardless of whether the first caller is JS or C++, xulstore.jsm
+// retrieves this service, which triggers lazy instantiation of the "STORE"
+// static (which then migrates data if an old store is present in the profile);
+// and all of the methods in XULStore.h that access data in the new store
+// similarly trigger instantiation of that static (and thus data migration).
 #[no_mangle]
 pub unsafe extern "C" fn nsXULStoreServiceConstructor(
     outer: *const nsISupports,
@@ -71,36 +78,48 @@ impl ProfileChangeObserver {
 
 #[no_mangle]
 pub unsafe extern "C" fn xulstore_set_value(
-    doc: *const nsAString,
-    id: *const nsAString,
-    attr: *const nsAString,
-    value: *const nsAString,
+    doc: &nsAString,
+    id: &nsAString,
+    attr: &nsAString,
+    value: &nsAString,
 ) -> XULStoreNsResult {
-    XULStore::set_value(&*doc, &*id, &*attr, &*value).into()
+    XULStore::set_value(doc, id, attr, value).into()
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_has_value(
+pub unsafe extern "C" fn xulstore_has_value(
     doc: &nsAString,
     id: &nsAString,
     attr: &nsAString,
     has_value: *mut bool,
 ) -> XULStoreNsResult {
-    XULStore::has_value(doc, id, attr, has_value).into()
+    match XULStore::has_value(doc, id, attr) {
+        Ok(val) => {
+            *has_value = val;
+            XULStoreNsResult(NS_OK)
+        },
+        Err(err) => XULStoreNsResult(err.into()),
+    }
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_get_value(
+pub unsafe extern "C" fn xulstore_get_value(
     doc: &nsAString,
     id: &nsAString,
     attr: &nsAString,
     value: *mut nsAString,
 ) -> XULStoreNsResult {
-    XULStore::get_value(doc, id, attr, value).into()
+    match XULStore::get_value(doc, id, attr) {
+        Ok(val) => {
+            (*value).assign(&nsString::from(&val));
+            XULStoreNsResult(NS_OK)
+        },
+        Err(err) => XULStoreNsResult(err.into()),
+    }
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_remove_value(
+pub unsafe extern "C" fn xulstore_remove_value(
     doc: &nsAString,
     id: &nsAString,
     attr: &nsAString,
@@ -109,14 +128,14 @@ pub extern "C" fn xulstore_remove_value(
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_get_ids(
+pub unsafe extern "C" fn xulstore_get_ids(
     doc: &nsAString,
-    result: &mut nsresult,
+    result: *mut nsresult,
 ) -> *mut XULStoreIterator {
     match XULStore::get_ids(doc) {
         Ok(iter) => {
             *result = NS_OK;
-            iter
+            Box::into_raw(Box::new(iter))
         }
         Err(err) => {
             *result = err.into();
@@ -126,15 +145,15 @@ pub extern "C" fn xulstore_get_ids(
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_get_attrs(
+pub unsafe extern "C" fn xulstore_get_attrs(
     doc: &nsAString,
     id: &nsAString,
-    result: &mut nsresult,
+    result: *mut nsresult,
 ) -> *mut XULStoreIterator {
     match XULStore::get_attrs(doc, id) {
         Ok(iter) => {
             *result = NS_OK;
-            iter
+            Box::into_raw(Box::new(iter))
         }
         Err(err) => {
             *result = err.into();
@@ -144,23 +163,27 @@ pub extern "C" fn xulstore_get_attrs(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn xulstore_iter_has_more(iter: *const XULStoreIterator) -> bool {
-    assert!(!iter.is_null());
-    (&*iter).has_more()
+pub unsafe extern "C" fn xulstore_iter_has_more(iter: &XULStoreIterator) -> bool {
+    iter.has_more()
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn xulstore_iter_get_next(
-    iter: *mut XULStoreIterator,
+    iter: &mut XULStoreIterator,
     value: *mut nsAString,
 ) -> XULStoreNsResult {
-    assert!(!iter.is_null());
-    (&mut *iter).get_next(value).into()
+    match iter.get_next() {
+        Ok(val) => {
+            (*value).assign(&nsString::from(&val));
+            XULStoreNsResult(NS_OK)
+        },
+        Err(err) => {
+            XULStoreNsResult(err.into())
+        }
+    }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn xulstore_iter_free(iter: *mut XULStoreIterator) {
-    if !iter.is_null() {
-        drop(Box::from_raw(iter));
-    }
+    drop(Box::from_raw(iter));
 }

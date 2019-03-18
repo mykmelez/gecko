@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::error::{XULStoreError, XULStoreResult};
-use nsstring::{nsAString, nsString};
 use std::vec::IntoIter;
 
 pub struct XULStoreIterator {
@@ -19,15 +18,7 @@ impl<'a> XULStoreIterator {
         !self.values.as_slice().is_empty()
     }
 
-    pub fn get_next(&mut self, value: *mut nsAString) -> XULStoreResult<()> {
-        unsafe {
-            (*value).assign(&nsString::from(
-                self.values
-                    .next()
-                    .ok_or(XULStoreError::IterationFinished)?
-                    .as_str(),
-            ));
-        }
-        Ok(())
+    pub fn get_next(&mut self) -> XULStoreResult<String> {
+        Ok(self.values.next().ok_or(XULStoreError::IterationFinished)?)
     }
 }

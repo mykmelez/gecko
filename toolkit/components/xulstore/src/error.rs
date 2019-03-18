@@ -11,7 +11,7 @@ use std::{ffi::NulError, io::Error as IoError, str::Utf8Error, string::FromUtf16
 pub(crate) type XULStoreResult<T> = Result<T, XULStoreError>;
 
 // This newtype enables us to implement From<XULStoreResult> for nsresult.
-pub struct XULStoreNsResult(nsresult);
+pub struct XULStoreNsResult(pub nsresult);
 
 #[derive(Debug, Fail)]
 pub enum XULStoreError {
