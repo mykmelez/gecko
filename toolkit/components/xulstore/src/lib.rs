@@ -209,7 +209,7 @@ impl XULStore {
 
         let doc_url = String::from_utf16(doc)?;
         let element_id = String::from_utf16(id)?;
-        let key_prefix = doc_url.to_owned() + &SEPARATOR.to_string() + &element_id;
+        let key_prefix = format!("{}{}{}", doc_url, SEPARATOR, element_id);
         let store = STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?.clone();
         let rkv_guard = RKV.read()?;
         let rkv = rkv_guard.as_ref().ok_or(XULStoreError::Unavailable)?.read()?;
