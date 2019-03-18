@@ -390,6 +390,9 @@ APZCTreeManager::UpdateHitTestingTreeImpl(LayersId aRootLayerTreeId,
                                });
   mRootNode = nullptr;
   mUsingAsyncZoomContainer = false;
+  int asyncZoomContainerNestingDepth = 0;
+  bool haveMultipleAsyncZoomContainers = false;
+  bool haveRootContentOutsideAsyncZoomContainer = false;
 
   if (aRoot) {
     std::stack<gfx::TreeAutoIndent> indents;
@@ -409,7 +412,16 @@ APZCTreeManager::UpdateHitTestingTreeImpl(LayersId aRootLayerTreeId,
           mApzcTreeLog << aLayerMetrics.Name() << '\t';
 
           if (aLayerMetrics.IsAsyncZoomContainer()) {
+            if (mUsingAsyncZoomContainer) {
+              haveMultipleAsyncZoomContainers = true;
+            }
             mUsingAsyncZoomContainer = true;
+            ++asyncZoomContainerNestingDepth;
+          }
+
+          if (aLayerMetrics.Metrics().IsRootContent() &&
+              asyncZoomContainerNestingDepth == 0) {
+            haveRootContentOutsideAsyncZoomContainer = true;
           }
 
           HitTestingTreeNode* node = PrepareNodeForLayer(
@@ -467,6 +479,10 @@ APZCTreeManager::UpdateHitTestingTreeImpl(LayersId aRootLayerTreeId,
               aLayerMetrics.TransformIsPerspective());
         },
         [&](ScrollNode aLayerMetrics) {
+          if (aLayerMetrics.IsAsyncZoomContainer()) {
+            --asyncZoomContainerNestingDepth;
+          }
+
           next = parent;
           parent = parent->GetParent();
           layersId = next->GetLayersId();
@@ -476,6 +492,17 @@ APZCTreeManager::UpdateHitTestingTreeImpl(LayersId aRootLayerTreeId,
         });
 
     mApzcTreeLog << "[end]\n";
+
+    MOZ_ASSERT(
+        !mUsingAsyncZoomContainer || !haveRootContentOutsideAsyncZoomContainer,
+        "If there is an async zoom container, all scroll nodes with root "
+        "content scroll metadata should be inside it");
+    // TODO(bug 1534459): Avoid multiple async zoom containers. They
+    // can't currently occur in production code, but that will become
+    // possible with either OOP iframes or desktop zooming (due to
+    // RDM), and will need to be guarded against.
+    // MOZ_ASSERT(!haveMultipleAsyncZoomContainers,
+    //           "Should only have one async zoom container");
 
     // If we have perspective transforms deferred to children, do another
     // walk of the tree and actually apply them to the children.
@@ -1621,7 +1648,7 @@ APZCTreeManager::GetTouchInputBlockAPZC(
     if (aOutTouchBehaviors) {
       aOutTouchBehaviors->AppendElement(ConvertToTouchBehavior(hitResult));
     }
-    apzc = GetMultitouchTarget(apzc, apzc2);
+    apzc = GetZoomableTarget(apzc, apzc2);
     APZCTM_LOG("Using APZC %p as the root APZC for multi-touch\n", apzc.get());
     // A multi-touch gesture will not be a scrollbar drag, even if the
     // first touch point happened to hit a scrollbar.
@@ -2080,7 +2107,7 @@ void APZCTreeManager::SetTargetAPZC(
   }
   for (size_t i = 1; i < aTargets.Length(); i++) {
     RefPtr<AsyncPanZoomController> apzc = GetTargetAPZC(aTargets[i]);
-    target = GetMultitouchTarget(target, apzc);
+    target = GetZoomableTarget(target, apzc);
   }
   mInputQueue->SetConfirmedTargetApzc(aInputBlockId, target);
 }
@@ -2763,6 +2790,11 @@ AsyncPanZoomController* APZCTreeManager::FindRootApzcForLayersId(
   return resultNode ? resultNode->GetApzc() : nullptr;
 }
 
+already_AddRefed<AsyncPanZoomController> APZCTreeManager::FindZoomableApzc(
+    AsyncPanZoomController* aStart) const {
+  return GetZoomableTarget(aStart, aStart);
+}
+
 AsyncPanZoomController* APZCTreeManager::FindRootContentApzcForLayersId(
     LayersId aLayersId) const {
   mTreeLock.AssertCurrentThreadIn();
@@ -2990,7 +3022,7 @@ ScreenPoint APZCTreeManager::GetCurrentMousePosition() const {
   return mCurrentMousePosition;
 }
 
-already_AddRefed<AsyncPanZoomController> APZCTreeManager::GetMultitouchTarget(
+already_AddRefed<AsyncPanZoomController> APZCTreeManager::GetZoomableTarget(
     AsyncPanZoomController* aApzc1, AsyncPanZoomController* aApzc2) const {
   RecursiveMutexAutoLock lock(mTreeLock);
   RefPtr<AsyncPanZoomController> apzc;

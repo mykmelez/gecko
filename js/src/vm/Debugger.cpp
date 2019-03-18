@@ -6494,6 +6494,7 @@ class DebuggerScriptGetPossibleBreakpointsMatcher {
                                   JSMSG_UNEXPECTED_TYPE,
                                   "getPossibleBreakpoints' 'line'",
                                   "not allowed alongside 'minLine'/'maxLine'");
+        return false;
       }
 
       size_t line;
@@ -8410,9 +8411,7 @@ class DebuggerSourceGetIdMatcher {
     ScriptSource* ss = sourceObject->source();
     return ss->id();
   }
-  ReturnType match(Handle<WasmInstanceObject*> instanceObj) {
-    return 0;
-  }
+  ReturnType match(Handle<WasmInstanceObject*> instanceObj) { return 0; }
 };
 
 static bool DebuggerSource_getId(JSContext* cx, unsigned argc, Value* vp) {

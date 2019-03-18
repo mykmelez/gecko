@@ -566,6 +566,37 @@ static bool IsFontSizeInflationContainer(nsIFrame* aFrame,
   return !isInline;
 }
 
+static void MaybeScheduleReflowSVGNonDisplayText(nsFrame* aFrame) {
+  if (!nsSVGUtils::IsInSVGTextSubtree(aFrame)) {
+    return;
+  }
+
+  // We need to ensure that any non-display SVGTextFrames get reflowed when a
+  // child text frame gets new style. Thus we need to schedule a reflow in
+  // |DidSetComputedStyle|. We also need to call it from |DestroyFrom|,
+  // because otherwise we won't get notified when style changes to
+  // "display:none".
+  SVGTextFrame* svgTextFrame = static_cast<SVGTextFrame*>(
+      nsLayoutUtils::GetClosestFrameOfType(aFrame, LayoutFrameType::SVGText));
+  nsIFrame* anonBlock = svgTextFrame->PrincipalChildList().FirstChild();
+
+  // Note that we must check NS_FRAME_FIRST_REFLOW on our SVGTextFrame's
+  // anonymous block frame rather than our aFrame, since NS_FRAME_FIRST_REFLOW
+  // may be set on us if we're a new frame that has been inserted after the
+  // document's first reflow. (In which case this DidSetComputedStyle call may
+  // be happening under frame construction under a Reflow() call.)
+  if (!anonBlock || anonBlock->HasAnyStateBits(NS_FRAME_FIRST_REFLOW)) {
+    return;
+  }
+
+  if (!svgTextFrame->HasAnyStateBits(NS_FRAME_IS_NONDISPLAY) ||
+      svgTextFrame->HasAnyStateBits(NS_STATE_SVG_TEXT_IN_REFLOW)) {
+    return;
+  }
+
+  svgTextFrame->ScheduleReflowSVGNonDisplayText(nsIPresShell::eStyleChange);
+}
+
 void nsFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
                    nsIFrame* aPrevInFlow) {
   MOZ_ASSERT(nsQueryFrame::FrameIID(mClass) == GetFrameId());
@@ -698,6 +729,8 @@ void nsFrame::DestroyFrom(nsIFrame* aDestructRoot,
   MOZ_ASSERT(!HasAbsolutelyPositionedChildren());
   MOZ_ASSERT(!HasAnyStateBits(NS_FRAME_PART_OF_IBSPLIT),
              "NS_FRAME_PART_OF_IBSPLIT set on non-nsContainerFrame?");
+
+  MaybeScheduleReflowSVGNonDisplayText(this);
 
   SVGObserverUtils::InvalidateDirectRenderingObservers(this);
 
@@ -1060,25 +1093,7 @@ void nsIFrame::MarkNeedsDisplayItemRebuild() {
 // Subclass hook for style post processing
 /* virtual */
 void nsFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
-  if (nsSVGUtils::IsInSVGTextSubtree(this)) {
-    SVGTextFrame* svgTextFrame = static_cast<SVGTextFrame*>(
-        nsLayoutUtils::GetClosestFrameOfType(this, LayoutFrameType::SVGText));
-    nsIFrame* anonBlock = svgTextFrame->PrincipalChildList().FirstChild();
-    // Just as in SVGTextFrame::DidSetComputedStyle, we need to ensure that
-    // any non-display SVGTextFrames get reflowed when a child text frame
-    // gets new style.
-    //
-    // Note that we must check NS_FRAME_FIRST_REFLOW on our SVGTextFrame's
-    // anonymous block frame rather than our self, since NS_FRAME_FIRST_REFLOW
-    // may be set on us if we're a new frame that has been inserted after the
-    // document's first reflow. (In which case this DidSetComputedStyle call may
-    // be happening under frame construction under a Reflow() call.)
-    if (anonBlock && !(anonBlock->GetStateBits() & NS_FRAME_FIRST_REFLOW) &&
-        (svgTextFrame->GetStateBits() & NS_FRAME_IS_NONDISPLAY) &&
-        !(svgTextFrame->GetStateBits() & NS_STATE_SVG_TEXT_IN_REFLOW)) {
-      svgTextFrame->ScheduleReflowSVGNonDisplayText(nsIPresShell::eStyleChange);
-    }
-  }
+  MaybeScheduleReflowSVGNonDisplayText(this);
 
   Document* doc = PresContext()->Document();
   ImageLoader* imageLoader = doc->StyleImageLoader();
@@ -1087,15 +1102,16 @@ void nsFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
   // doesn't affect correctness because text can't match selectors.
   //
   // FIXME(emilio): We should consider fixing that.
-  const bool isNonTextFirstContinuation =
-      !IsTextFrame() && !GetPrevContinuation();
-  if (isNonTextFirstContinuation) {
+  //
+  // TODO(emilio): Can we avoid doing some / all of the image stuff when
+  // isNonTextFirstContinuation is false? We should consider doing this just for
+  // primary frames and pseudos, but the first-line reparenting code makes it
+  // all bad, should get around to bug 1465474 eventually :(
+  const bool isNonText = !IsTextFrame();
+  if (isNonText) {
     mComputedStyle->StartImageLoads(*doc);
   }
 
-  // TODO(emilio): Can we avoid doing some / all of this when
-  // isNonTextFirstContinuation is false? We should consider doing this just for
-  // primary frames and pseudos.
   const nsStyleImageLayers* oldLayers =
       aOldComputedStyle ? &aOldComputedStyle->StyleBackground()->mImage
                         : nullptr;
@@ -1228,6 +1244,7 @@ void nsFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
 
   // SVGObserverUtils::GetEffectProperties() asserts that we only invoke it with
   // the first continuation so we need to check that in advance.
+  const bool isNonTextFirstContinuation = isNonText && !GetPrevContinuation();
   if (isNonTextFirstContinuation) {
     // Kick off loading of external SVG resources referenced from properties if
     // any. This currently includes filter, clip-path, and mask.
@@ -5135,22 +5152,20 @@ void nsIFrame::AssociateImage(const nsStyleImage& aImage,
   loader->AssociateRequestToFrame(req, this, aImageLoaderFlags);
 }
 
-nsresult nsFrame::GetCursor(const nsPoint& aPoint, nsIFrame::Cursor& aCursor) {
-  FillCursorInformationFromStyle(StyleUI(), aCursor);
-  if (StyleCursorKind::Auto == aCursor.mCursor) {
+Maybe<nsIFrame::Cursor> nsIFrame::GetCursor(const nsPoint&) {
+  StyleCursorKind kind = StyleUI()->mCursor;
+  if (kind == StyleCursorKind::Auto) {
     // If this is editable, I-beam cursor is better for most elements.
-    aCursor.mCursor = (mContent && mContent->IsEditable())
-                          ? StyleCursorKind::Text
-                          : StyleCursorKind::Default;
+    kind = (mContent && mContent->IsEditable()) ? StyleCursorKind::Text
+                                                : StyleCursorKind::Default;
   }
-  if (StyleCursorKind::Text == aCursor.mCursor &&
-      GetWritingMode().IsVertical()) {
+  if (kind == StyleCursorKind::Text && GetWritingMode().IsVertical()) {
     // Per CSS UI spec, UA may treat value 'text' as
     // 'vertical-text' for vertical text.
-    aCursor.mCursor = StyleCursorKind::VerticalText;
+    kind = StyleCursorKind::VerticalText;
   }
 
-  return NS_OK;
+  return Some(Cursor{kind, AllowCustomCursorImage::Yes});
 }
 
 // Resize and incremental reflow
@@ -9748,35 +9763,6 @@ uint8_t nsIFrame::VerticalAlignEnum() const {
   }
 
   return eInvalidVerticalAlign;
-}
-
-/* static */
-void nsFrame::FillCursorInformationFromStyle(const nsStyleUI* ui,
-                                             nsIFrame::Cursor& aCursor) {
-  aCursor.mCursor = ui->mCursor;
-  aCursor.mHaveHotspot = false;
-  aCursor.mLoading = false;
-  aCursor.mHotspotX = aCursor.mHotspotY = 0.0f;
-
-  for (const nsCursorImage& item : ui->mCursorImages) {
-    uint32_t status;
-    imgRequestProxy* req = item.GetImage();
-    if (!req || NS_FAILED(req->GetImageStatus(&status))) {
-      continue;
-    }
-    if (!(status & imgIRequest::STATUS_LOAD_COMPLETE)) {
-      // If we are falling back because any cursor before is loading,
-      // let the consumer know.
-      aCursor.mLoading = true;
-    } else if (!(status & imgIRequest::STATUS_ERROR)) {
-      // This is the one we want
-      req->GetImage(getter_AddRefs(aCursor.mContainer));
-      aCursor.mHaveHotspot = item.mHaveHotspot;
-      aCursor.mHotspotX = item.mHotspotX;
-      aCursor.mHotspotY = item.mHotspotY;
-      break;
-    }
-  }
 }
 
 NS_IMETHODIMP

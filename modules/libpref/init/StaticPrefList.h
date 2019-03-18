@@ -427,6 +427,13 @@ VARCACHE_PREF(
   RelaxedAtomicBool, true
 )
 
+// Render animations and videos as a solid color
+VARCACHE_PREF(
+  "browser.measurement.render_anims_and_video_solid",
+  browser_measurement_render_anims_and_video_solid,
+  RelaxedAtomicBool, false
+)
+
 // Enable passing the "storage" option to indexedDB.open.
 VARCACHE_PREF(
   "dom.indexedDB.storageOption.enabled",
@@ -1289,6 +1296,8 @@ VARCACHE_PREF(
 # define PREF_VALUE true
 #elif defined(XP_MACOSX)
 # define PREF_VALUE true
+#elif defined(XP_UNIX)
+# define PREF_VALUE true
 #else
 # define PREF_VALUE false
 #endif
@@ -1617,6 +1626,8 @@ VARCACHE_PREF(
 #if defined(XP_WIN) && !defined(_ARM64_)
 # define PREF_VALUE true
 #elif defined(XP_MACOSX)
+# define PREF_VALUE true
+#elif defined(XP_UNIX)
 # define PREF_VALUE true
 #else
 # define PREF_VALUE false
@@ -2000,22 +2011,32 @@ VARCACHE_PREF(
 )
 
 // Block 3rd party fingerprinting resources.
-# define PREF_VALUE false
 VARCACHE_PREF(
   "privacy.trackingprotection.fingerprinting.enabled",
    privacy_trackingprotection_fingerprinting_enabled,
-  bool, PREF_VALUE
+  bool, false
 )
-#undef PREF_VALUE
+
+// Annotate fingerprinting resources.
+VARCACHE_PREF(
+  "privacy.trackingprotection.fingerprinting.annotate.enabled",
+   privacy_trackingprotection_fingerprinting_annotate_enabled,
+  bool, false
+)
 
 // Block 3rd party cryptomining resources.
-# define PREF_VALUE false
 VARCACHE_PREF(
   "privacy.trackingprotection.cryptomining.enabled",
    privacy_trackingprotection_cryptomining_enabled,
-  bool, PREF_VALUE
+  bool, false
 )
-#undef PREF_VALUE
+
+// Annotate cryptomining resources.
+VARCACHE_PREF(
+  "privacy.trackingprotection.cryptomining.annotate.enabled",
+   privacy_trackingprotection_cryptomining_annotate_enabled,
+  bool, false
+)
 
 // Lower the priority of network loads for resources on the tracking protection
 // list.  Note that this requires the

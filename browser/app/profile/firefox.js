@@ -76,7 +76,7 @@ pref("xpinstall.signatures.required", true);
 pref("xpinstall.signatures.devInfoURL", "https://wiki.mozilla.org/Addons/Extension_Signing");
 
 // Dictionary download preference
-pref("browser.dictionaries.download.url", "https://addons.mozilla.org/%LOCALE%/firefox/dictionaries/");
+pref("browser.dictionaries.download.url", "https://addons.mozilla.org/%LOCALE%/firefox/language-tools/");
 
 // At startup, should we check to see if the installation
 // date is older than some threshold
@@ -971,6 +971,9 @@ pref("browser.security.newcerterrorpage.enabled", true);
 pref("browser.security.newcerterrorpage.mitm.enabled", true);
 pref("security.certerrors.recordEventTelemetry", true);
 pref("security.certerrors.permanentOverride", true);
+pref("security.certerrors.mitm.priming.enabled", true);
+pref("security.certerrors.mitm.priming.endpoint", "https://mitmdetection.services.mozilla.com/");
+pref("security.certerrors.mitm.auto_enable_enterprise_roots", false);
 
 // Whether to start the private browsing mode at application startup
 pref("browser.privatebrowsing.autostart", false);
@@ -1244,7 +1247,9 @@ pref("services.sync.prefs.sync.privacy.fuzzyfox.clockgrainus", false);
 pref("services.sync.prefs.sync.privacy.sanitize.sanitizeOnShutdown", true);
 pref("services.sync.prefs.sync.privacy.trackingprotection.enabled", true);
 pref("services.sync.prefs.sync.privacy.trackingprotection.cryptomining.enabled", true);
+pref("services.sync.prefs.sync.privacy.trackingprotection.cryptomining.annotate.enabled", true);
 pref("services.sync.prefs.sync.privacy.trackingprotection.fingerprinting.enabled", true);
+pref("services.sync.prefs.sync.privacy.trackingprotection.fingerprinting.annotate.enabled", true);
 pref("services.sync.prefs.sync.privacy.trackingprotection.pbmode.enabled", true);
 pref("services.sync.prefs.sync.privacy.resistFingerprinting", true);
 pref("services.sync.prefs.sync.privacy.reduceTimerPrecision", true);
@@ -1839,4 +1844,4 @@ pref("browser.engagement.recent_visited_origins.expiry", 86400); // 24 * 60 * 60
 
 pref("browser.aboutConfig.showWarning", true);
 
-pref("browser.toolbars.keyboard_navigation", false);
+pref("browser.toolbars.keyboard_navigation", true);

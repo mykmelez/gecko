@@ -418,13 +418,13 @@ extern mozilla::Module const* const __stop_kPStaticModules __asm(
 #    error Do not know how to find NSModules.
 #  endif
 
-mozilla::Module const* const* begin(AllStaticModules& _) {
+static mozilla::Module const* const* begin(AllStaticModules& _) {
   return &__start_kPStaticModules;
 }
 
 #endif
 
-mozilla::Module const* const* end(AllStaticModules& _) {
+static mozilla::Module const* const* end(AllStaticModules& _) {
   return &__stop_kPStaticModules;
 }
 
@@ -512,6 +512,7 @@ nsresult nsComponentManagerImpl::Init() {
     // We are going to assume that only a select few (see below) process types
     // want to load chrome manifests, and that any new process types will not
     // want to load them, because they're not going to be executing JS.
+    case GeckoProcessType_RemoteSandboxBroker:
     default:
       loadChromeManifests = false;
       break;

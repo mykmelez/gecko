@@ -59,6 +59,10 @@ window._gBrowser = {
     messageManager.addMessageListener("Findbar:Keypress", this);
     this._setFindbarData();
 
+    XPCOMUtils.defineLazyModuleGetters(this, {
+      E10SUtils: "resource://gre/modules/E10SUtils.jsm",
+    });
+
     XPCOMUtils.defineLazyPreferenceGetter(this, "animationsEnabled",
       "toolkit.cosmeticAnimations.enabled");
 
@@ -278,7 +282,7 @@ window._gBrowser = {
   _setupInitialBrowserAndTab() {
     // See browser.js for the meaning of window.arguments.
     // Bug 1485961 covers making this more sane.
-    let userContextId = window.arguments && window.arguments[6];
+    let userContextId = window.arguments && window.arguments[5];
 
     let tabArgument = gBrowserInit.getTabToAdopt();
 
@@ -1382,9 +1386,9 @@ window._gBrowser = {
     return true;
   },
 
-  loadOneTab(aURI, aReferrerURI, aCharset, aPostData, aLoadInBackground, aAllowThirdPartyFixup) {
+  loadOneTab(aURI, aReferrerInfoOrParams, aCharset, aPostData, aLoadInBackground, aAllowThirdPartyFixup) {
     var aTriggeringPrincipal;
-    var aReferrerPolicy;
+    var aReferrerInfo;
     var aFromExternal;
     var aRelatedToCurrent;
     var aAllowInheritPrincipal;
@@ -1392,7 +1396,6 @@ window._gBrowser = {
     var aSkipAnimation;
     var aForceNotRemote;
     var aPreferredRemoteType;
-    var aNoReferrer;
     var aUserContextId;
     var aSameProcessAsFrameLoader;
     var aOriginPrincipal;
@@ -1408,8 +1411,7 @@ window._gBrowser = {
         !(arguments[1] instanceof Ci.nsIURI)) {
       let params = arguments[1];
       aTriggeringPrincipal = params.triggeringPrincipal;
-      aReferrerURI = params.referrerURI;
-      aReferrerPolicy = params.referrerPolicy;
+      aReferrerInfo = params.referrerInfo;
       aCharset = params.charset;
       aPostData = params.postData;
       aLoadInBackground = params.inBackground;
@@ -1421,7 +1423,6 @@ window._gBrowser = {
       aSkipAnimation = params.skipAnimation;
       aForceNotRemote = params.forceNotRemote;
       aPreferredRemoteType = params.preferredRemoteType;
-      aNoReferrer = params.noReferrer;
       aUserContextId = params.userContextId;
       aSameProcessAsFrameLoader = params.sameProcessAsFrameLoader;
       aOriginPrincipal = params.originPrincipal;
@@ -1445,8 +1446,7 @@ window._gBrowser = {
 
     var tab = this.addTab(aURI, {
       triggeringPrincipal: aTriggeringPrincipal,
-      referrerURI: aReferrerURI,
-      referrerPolicy: aReferrerPolicy,
+      referrerInfo: aReferrerInfo,
       charset: aCharset,
       postData: aPostData,
       ownerTab: owner,
@@ -1459,7 +1459,6 @@ window._gBrowser = {
       forceNotRemote: aForceNotRemote,
       createLazyBrowser: aCreateLazyBrowser,
       preferredRemoteType: aPreferredRemoteType,
-      noReferrer: aNoReferrer,
       userContextId: aUserContextId,
       originPrincipal: aOriginPrincipal,
       sameProcessAsFrameLoader: aSameProcessAsFrameLoader,
@@ -1599,7 +1598,7 @@ window._gBrowser = {
     }
   },
 
-  updateBrowserRemoteness(aBrowser, aShouldBeRemote, {
+  updateBrowserRemoteness(aBrowser, {
     newFrameloader,
     opener,
     remoteType,
@@ -1608,21 +1607,25 @@ window._gBrowser = {
   } = {}) {
     let isRemote = aBrowser.getAttribute("remote") == "true";
 
-    if (!gMultiProcessBrowser && aShouldBeRemote) {
-      throw new Error("Cannot switch to remote browser in a window " +
-        "without the remote tabs load context.");
+    // We have to be careful with this here, as the "no remote type" is null,
+    // not a string. Make sure to check only for undefined, since null is
+    // allowed.
+    if (remoteType === undefined) {
+      throw new Error("Remote type must be set!");
     }
 
-    // Default values for remoteType
-    if (!remoteType) {
-      remoteType = aShouldBeRemote ? E10SUtils.DEFAULT_REMOTE_TYPE : E10SUtils.NOT_REMOTE;
+    let shouldBeRemote = remoteType !== E10SUtils.NOT_REMOTE;
+
+    if (!gMultiProcessBrowser && shouldBeRemote) {
+      throw new Error("Cannot switch to remote browser in a window " +
+        "without the remote tabs load context.");
     }
 
     // If we are passed an opener, we must be making the browser non-remote, and
     // if the browser is _currently_ non-remote, we need the openers to match,
     // because it is already too late to change it.
     if (opener) {
-      if (aShouldBeRemote) {
+      if (shouldBeRemote) {
         throw new Error("Cannot set an opener on a browser which should be remote!");
       }
       if (!isRemote && aBrowser.contentWindow.opener != opener) {
@@ -1632,7 +1635,7 @@ window._gBrowser = {
 
     // Abort if we're not going to change anything
     let oldRemoteType = aBrowser.remoteType;
-    if (isRemote == aShouldBeRemote && !newFrameloader &&
+    if (isRemote == shouldBeRemote && !newFrameloader &&
         (!isRemote || oldRemoteType == remoteType)) {
       return false;
     }
@@ -1663,19 +1666,15 @@ window._gBrowser = {
     let oldSameProcessAsFrameLoader = aBrowser.sameProcessAsFrameLoader;
     let oldUserTypedValue = aBrowser.userTypedValue;
     let hadStartedLoad = aBrowser.didStartLoadSinceLastUserTyping();
+    let parent = aBrowser.parentNode;
+
+    // Change the "remote" attribute.
 
     // Make sure the browser is destroyed so it unregisters from observer notifications
     aBrowser.destroy();
-
-    // Change the "remote" attribute.
-    let parent = aBrowser.parentNode;
-    aBrowser.remove();
-    if (aShouldBeRemote) {
-      aBrowser.setAttribute("remote", "true");
-      aBrowser.setAttribute("remoteType", remoteType);
-    } else {
-      aBrowser.setAttribute("remote", "false");
-      aBrowser.removeAttribute("remoteType");
+    // Only remove the node if we're not rebuilding the frameloader via nsFrameLoaderOwner.
+    if (!Services.prefs.getBoolPref("fission.rebuild_frameloaders_on_remoteness_change", false)) {
+      aBrowser.remove();
     }
 
     if (recordExecution) {
@@ -1693,7 +1692,7 @@ window._gBrowser = {
     if (sameProcessAsFrameLoader) {
       // Always set sameProcessAsFrameLoader when passed in explicitly.
       aBrowser.sameProcessAsFrameLoader = sameProcessAsFrameLoader;
-    } else if (!aShouldBeRemote || oldRemoteType == remoteType) {
+    } else if (!shouldBeRemote || oldRemoteType == remoteType) {
       // Only copy existing sameProcessAsFrameLoader when not switching
       // remote type otherwise it would stop the switch.
       aBrowser.sameProcessAsFrameLoader = oldSameProcessAsFrameLoader;
@@ -1705,7 +1704,30 @@ window._gBrowser = {
       aBrowser.presetOpenerWindow(opener);
     }
 
-    parent.appendChild(aBrowser);
+    // Note that this block is also affected by the
+    // rebuild_frameloaders_on_remoteness_change pref. If the pref is set to
+    // false, this attribute change is observed by browser-custom-element,
+    // causing browser destroy()/construct() to be run. If the pref is true,
+    // then we update the attributes, we run the construct() call ourselves
+    // after the new frameloader has been created.
+    if (shouldBeRemote) {
+      aBrowser.setAttribute("remote", "true");
+      aBrowser.setAttribute("remoteType", remoteType);
+    } else {
+      aBrowser.setAttribute("remote", "false");
+      aBrowser.removeAttribute("remoteType");
+    }
+
+    if (!Services.prefs.getBoolPref("fission.rebuild_frameloaders_on_remoteness_change", false)) {
+      parent.appendChild(aBrowser);
+    } else {
+      // This call actually switches out our frameloaders. Do this as late as
+      // possible before rebuilding the browser, as we'll need the new browser
+      // state set up completely first.
+      aBrowser.changeRemoteness({ remoteType });
+      // Once we have new frameloaders, this call sets the browser back up.
+      aBrowser.construct();
+    }
 
     aBrowser.userTypedValue = oldUserTypedValue;
     if (hadStartedLoad) {
@@ -1744,7 +1766,7 @@ window._gBrowser = {
                                 [aBrowser.webProgress, null, event, true],
                                 true, false);
 
-    if (aShouldBeRemote) {
+    if (shouldBeRemote) {
       // Switching the browser to be remote will connect to a new child
       // process so the browser can no longer be considered to be
       // crashed.
@@ -1776,8 +1798,9 @@ window._gBrowser = {
   },
 
   updateBrowserRemotenessByURL(aBrowser, aURL, aOptions = {}) {
-    if (!gMultiProcessBrowser)
-      return this.updateBrowserRemoteness(aBrowser, false);
+    if (!gMultiProcessBrowser) {
+      return this.updateBrowserRemoteness(aBrowser, { remoteType: E10SUtils.NOT_REMOTE });
+    }
 
     let oldRemoteType = aBrowser.remoteType;
 
@@ -1791,8 +1814,7 @@ window._gBrowser = {
     // correct type.
     if (oldRemoteType != aOptions.remoteType ||
         aOptions.newFrameloader) {
-      let remote = aOptions.remoteType != E10SUtils.NOT_REMOTE;
-      return this.updateBrowserRemoteness(aBrowser, remote, aOptions);
+      return this.updateBrowserRemoteness(aBrowser, aOptions);
     }
 
     return false;
@@ -2317,7 +2339,6 @@ window._gBrowser = {
     name,
     nextTabParentId,
     noInitialLabel,
-    noReferrer,
     opener,
     openerBrowser,
     originPrincipal,
@@ -2325,8 +2346,7 @@ window._gBrowser = {
     pinned,
     postData,
     preferredRemoteType,
-    referrerPolicy,
-    referrerURI,
+    referrerInfo,
     relatedToCurrent,
     sameProcessAsFrameLoader,
     skipAnimation,
@@ -2358,13 +2378,13 @@ window._gBrowser = {
     //
     // Otherwise, if the tab is related to the current tab (e.g.,
     // because it was opened by a link click), use the selected tab as
-    // the owner. If referrerURI is set, and we don't have an
+    // the owner. If referrerInfo is set, and we don't have an
     // explicit relatedToCurrent arg, we assume that the tab is
     // related to the current tab, since referrerURI is null or
     // undefined if the tab is opened from an external application or
     // bookmark (i.e. somewhere other than an existing tab).
     if (relatedToCurrent == null) {
-      relatedToCurrent = !!referrerURI;
+      relatedToCurrent = !!(referrerInfo && referrerInfo.originalReferrer);
     }
     let openerTab = ((openerBrowser && this.getTabForBrowser(openerBrowser)) ||
       (relatedToCurrent && this.selectedTab));
@@ -2510,9 +2530,11 @@ window._gBrowser = {
       // If URI is about:blank and we don't have a preferred remote type,
       // then we need to use the referrer, if we have one, to get the
       // correct remote type for the new tab.
-      if (uriIsAboutBlank && !preferredRemoteType && referrerURI) {
+      if (uriIsAboutBlank && !preferredRemoteType && referrerInfo &&
+          referrerInfo.originalReferrer) {
         preferredRemoteType =
-          E10SUtils.getRemoteTypeForURI(referrerURI.spec, gMultiProcessBrowser);
+          E10SUtils.getRemoteTypeForURI(referrerInfo.originalReferrer.spec,
+                                        gMultiProcessBrowser);
       }
 
       let remoteType =
@@ -2640,16 +2662,11 @@ window._gBrowser = {
       if (!allowInheritPrincipal) {
         flags |= Ci.nsIWebNavigation.LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL;
       }
-
-      let ReferrerInfo = Components.Constructor("@mozilla.org/referrer-info;1",
-                                                "nsIReferrerInfo",
-                                                "init");
       try {
         b.loadURI(aURI, {
           flags,
           triggeringPrincipal,
-          referrerInfo: new ReferrerInfo(
-            referrerPolicy, !noReferrer, referrerURI),
+          referrerInfo,
           charset,
           postData,
           csp,
@@ -4707,7 +4724,7 @@ window._gBrowser = {
       if (this.selectedBrowser == browser) {
         TabCrashHandler.onSelectedBrowserCrash(browser, false);
       } else {
-        this.updateBrowserRemoteness(browser, false);
+        this.updateBrowserRemoteness(browser, { remoteType: E10SUtils.NOT_REMOTE });
         SessionStore.reviveCrashedTab(tab);
       }
 

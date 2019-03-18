@@ -631,9 +631,10 @@ SYNC_ENUMS(GPU, GPU)
 SYNC_ENUMS(VR, VR)
 SYNC_ENUMS(RDD, RDD)
 SYNC_ENUMS(SOCKET, Socket)
+SYNC_ENUMS(SANDBOX_BROKER, RemoteSandboxBroker)
 
 // .. and ensure that that is all of them:
-static_assert(GeckoProcessType_Socket + 1 == GeckoProcessType_End,
+static_assert(GeckoProcessType_RemoteSandboxBroker + 1 == GeckoProcessType_End,
               "Did not find the final GeckoProcessType");
 
 NS_IMETHODIMP
@@ -1292,8 +1293,8 @@ nsresult ScopedXPCOMStartup::Initialize() {
 
   nsresult rv;
 
-  rv = NS_InitXPCOM2(&mServiceManager, gDirServiceProvider->GetAppDir(),
-                     gDirServiceProvider);
+  rv = NS_InitXPCOM(&mServiceManager, gDirServiceProvider->GetAppDir(),
+                    gDirServiceProvider);
   if (NS_FAILED(rv)) {
     NS_ERROR("Couldn't start xpcom!");
     mServiceManager = nullptr;
@@ -1535,11 +1536,11 @@ static const char kShieldPrefName[] = "app.shield.optoutstudies.enabled";
 static void OnLauncherPrefChanged(const char* aPref, void* aData) {
   const bool kLauncherPrefDefaultValue =
 #    if defined(NIGHTLY_BUILD) || (MOZ_UPDATE_CHANNEL == beta)
-    true
+      true
 #    else
-    false
+      false
 #    endif  // defined(NIGHTLY_BUILD) || (MOZ_UPDATE_CHANNEL == beta)
-    ;
+      ;
   bool prefVal = Preferences::GetBool(kShieldPrefName, false) &&
                  Preferences::GetBool(PREF_WIN_LAUNCHER_PROCESS_ENABLED,
                                       kLauncherPrefDefaultValue);
@@ -1982,7 +1983,8 @@ static nsresult LockProfile(nsINativeAppSupport* aNative, nsIFile* aRootDir,
 static nsresult SelectProfile(nsToolkitProfileService* aProfileSvc,
                               nsINativeAppSupport* aNative, nsIFile** aRootDir,
                               nsIFile** aLocalDir,
-                              nsIToolkitProfile** aProfile) {
+                              nsIToolkitProfile** aProfile,
+                              bool* aWasDefaultSelection) {
   StartupTimeline::Record(StartupTimeline::SELECT_PROFILE);
 
   nsresult rv;
@@ -2030,7 +2032,7 @@ static nsresult SelectProfile(nsToolkitProfileService* aProfileSvc,
   bool didCreate = false;
   rv = aProfileSvc->SelectStartupProfile(&gArgc, gArgv, gDoProfileReset,
                                          aRootDir, aLocalDir, aProfile,
-                                         &didCreate);
+                                         &didCreate, aWasDefaultSelection);
 
   if (rv == NS_ERROR_SHOW_PROFILE_MANAGER) {
     return ShowProfileManager(aProfileSvc, aNative);
@@ -2799,7 +2801,8 @@ class XREMain {
         mShuttingDown(false)
 #ifdef MOZ_HAS_REMOTE
         ,
-        mDisableRemote(false)
+        mDisableRemoteClient(false),
+        mDisableRemoteServer(false)
 #endif
 #if defined(MOZ_WIDGET_GTK)
         ,
@@ -2837,7 +2840,8 @@ class XREMain {
   bool mStartOffline;
   bool mShuttingDown;
 #if defined(MOZ_HAS_REMOTE)
-  bool mDisableRemote;
+  bool mDisableRemoteClient;
+  bool mDisableRemoteServer;
 #endif
 
 #if defined(MOZ_WIDGET_GTK)
@@ -3351,11 +3355,12 @@ int XREMain::XRE_mainInit(bool* aExitFlag) {
                "is specified\n");
     return 1;
   }
-  if (ar == ARG_FOUND) {
-    SaveToEnv("MOZ_NO_REMOTE=1");
-    mDisableRemote = true;
-  } else if (EnvHasValue("MOZ_NO_REMOTE")) {
-    mDisableRemote = true;
+  if (ar == ARG_FOUND || EnvHasValue("MOZ_NO_REMOTE")) {
+    mDisableRemoteClient = true;
+    mDisableRemoteServer = true;
+    if (!EnvHasValue("MOZ_NO_REMOTE")) {
+      SaveToEnv("MOZ_NO_REMOTE=1");
+    }
   }
 
   ar = CheckArg("new-instance", nullptr,
@@ -3367,7 +3372,7 @@ int XREMain::XRE_mainInit(bool* aExitFlag) {
     return 1;
   }
   if (ar == ARG_FOUND || EnvHasValue("MOZ_NEW_INSTANCE")) {
-    mDisableRemote = true;
+    mDisableRemoteClient = true;
   }
 #else
   // These arguments do nothing in platforms with no remoting support but we
@@ -3773,7 +3778,8 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
 
 #ifdef MOZ_HAS_REMOTE
   if (gfxPlatform::IsHeadless()) {
-    mDisableRemote = true;
+    mDisableRemoteClient = true;
+    mDisableRemoteServer = true;
   }
 #endif
 
@@ -3851,11 +3857,9 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
 #endif
 #if defined(MOZ_HAS_REMOTE)
   // handle --remote now that xpcom is fired up
-  if (!mDisableRemote) {
-    mRemoteService = new nsRemoteService(gAppData->remotingName);
-    if (mRemoteService) {
-      mRemoteService->LockStartup();
-    }
+  mRemoteService = new nsRemoteService(gAppData->remotingName);
+  if (mRemoteService && !mDisableRemoteServer) {
+    mRemoteService->LockStartup();
   }
 #endif
 #if defined(MOZ_WIDGET_GTK)
@@ -3900,6 +3904,70 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
     return 0;
   }
 
+  rv = NS_NewToolkitProfileService(getter_AddRefs(mProfileSvc));
+  if (rv == NS_ERROR_FILE_ACCESS_DENIED) {
+    PR_fprintf(PR_STDERR,
+               "Error: Access was denied while trying to open files in "
+               "your profile directory.\n");
+  }
+  if (NS_FAILED(rv)) {
+    // We failed to choose or create profile - notify user and quit
+    ProfileMissingDialog(mNativeApp);
+    return 1;
+  }
+
+  bool wasDefaultSelection;
+  nsCOMPtr<nsIToolkitProfile> profile;
+  rv = SelectProfile(mProfileSvc, mNativeApp, getter_AddRefs(mProfD),
+                     getter_AddRefs(mProfLD), getter_AddRefs(profile),
+                     &wasDefaultSelection);
+  if (rv == NS_ERROR_LAUNCHED_CHILD_PROCESS || rv == NS_ERROR_ABORT) {
+    *aExitFlag = true;
+    return 0;
+  }
+
+  if (NS_FAILED(rv)) {
+    // We failed to choose or create profile - notify user and quit
+    ProfileMissingDialog(mNativeApp);
+    return 1;
+  }
+
+#if defined(MOZ_HAS_REMOTE)
+  if (mRemoteService) {
+    // We want a unique profile name to identify the remote instance.
+    nsCString profileName;
+    if (profile) {
+      rv = profile->GetName(profileName);
+    }
+    if (!profile || NS_FAILED(rv) || profileName.IsEmpty()) {
+      // Couldn't get a name from the profile. Use the directory name?
+      nsString leafName;
+      rv = mProfD->GetLeafName(leafName);
+      if (NS_SUCCEEDED(rv)) {
+        profileName = NS_ConvertUTF16toUTF8(leafName);
+      }
+    }
+
+    mRemoteService->SetProfile(profileName);
+
+    if (!mDisableRemoteClient) {
+      // Try to remote the entire command line. If this fails, start up
+      // normally.
+      const char* desktopStartupIDPtr =
+          mDesktopStartupID.IsEmpty() ? nullptr : mDesktopStartupID.get();
+
+      RemoteResult rr = mRemoteService->StartClient(desktopStartupIDPtr);
+      if (rr == REMOTE_FOUND) {
+        *aExitFlag = true;
+        return 0;
+      }
+      if (rr == REMOTE_ARG_BAD) {
+        return 1;
+      }
+    }
+  }
+#endif
+
 #if defined(MOZ_UPDATER) && !defined(MOZ_WIDGET_ANDROID)
   // Check for and process any available updates
   nsCOMPtr<nsIFile> updRoot;
@@ -3907,7 +3975,9 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
   rv = mDirProvider.GetFile(XRE_UPDATE_ROOT_DIR, &persistent,
                             getter_AddRefs(updRoot));
   // XRE_UPDATE_ROOT_DIR may fail. Fallback to appDir if failed
-  if (NS_FAILED(rv)) updRoot = mDirProvider.GetAppDir();
+  if (NS_FAILED(rv)) {
+    updRoot = mDirProvider.GetAppDir();
+  }
 
   // If the MOZ_TEST_PROCESS_UPDATES environment variable already exists, then
   // we are being called from the callback application.
@@ -3952,65 +4022,25 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
   }
 #endif
 
-  rv = NS_NewToolkitProfileService(getter_AddRefs(mProfileSvc));
-  if (rv == NS_ERROR_FILE_ACCESS_DENIED) {
-    PR_fprintf(PR_STDERR,
-               "Error: Access was denied while trying to open files in "
-               "your profile directory.\n");
-  }
-  if (NS_FAILED(rv)) {
-    // We failed to choose or create profile - notify user and quit
-    ProfileMissingDialog(mNativeApp);
-    return 1;
-  }
+  // We now know there is no existing instance using the selected profile. If
+  // the profile wasn't selected by specific command line arguments and the
+  // user has chosen to show the profile manager on startup then do that.
+  if (wasDefaultSelection) {
+    bool useSelectedProfile;
+    rv = mProfileSvc->GetStartWithLastProfile(&useSelectedProfile);
+    NS_ENSURE_SUCCESS(rv, 1);
 
-  nsCOMPtr<nsIToolkitProfile> profile;
-  rv = SelectProfile(mProfileSvc, mNativeApp, getter_AddRefs(mProfD),
-                     getter_AddRefs(mProfLD), getter_AddRefs(profile));
-  if (rv == NS_ERROR_LAUNCHED_CHILD_PROCESS || rv == NS_ERROR_ABORT) {
-    *aExitFlag = true;
-    return 0;
-  }
-
-  if (NS_FAILED(rv)) {
-    // We failed to choose or create profile - notify user and quit
-    ProfileMissingDialog(mNativeApp);
-    return 1;
-  }
-
-#if defined(MOZ_HAS_REMOTE)
-  if (mRemoteService) {
-    // We want a unique profile name to identify the remote instance.
-    nsCString profileName;
-    if (profile) {
-      rv = profile->GetName(profileName);
-    }
-    if (!profile || NS_FAILED(rv) || profileName.IsEmpty()) {
-      // Couldn't get a name from the profile. Use the directory name?
-      nsString leafName;
-      rv = mProfD->GetLeafName(leafName);
-      if (NS_SUCCEEDED(rv)) {
-        profileName = NS_ConvertUTF16toUTF8(leafName);
+    if (!useSelectedProfile) {
+      rv = ShowProfileManager(mProfileSvc, mNativeApp);
+      if (rv == NS_ERROR_LAUNCHED_CHILD_PROCESS || rv == NS_ERROR_ABORT) {
+        *aExitFlag = true;
+        return 0;
+      }
+      if (NS_FAILED(rv)) {
+        return 1;
       }
     }
-
-    mRemoteService->SetProfile(profileName);
-
-    // Try to remote the entire command line. If this fails, start up
-    // normally.
-    const char* desktopStartupIDPtr =
-        mDesktopStartupID.IsEmpty() ? nullptr : mDesktopStartupID.get();
-
-    RemoteResult rr = mRemoteService->StartClient(desktopStartupIDPtr);
-    if (rr == REMOTE_FOUND) {
-      *aExitFlag = true;
-      return 0;
-    }
-    if (rr == REMOTE_ARG_BAD) {
-      return 1;
-    }
   }
-#endif
 
   // We always want to lock the profile even if we're actually going to reset
   // it later.
@@ -4509,7 +4539,7 @@ nsresult XREMain::XRE_mainRun() {
 #if defined(MOZ_HAS_REMOTE)
     // if we have X remote support, start listening for requests on the
     // proxy window.
-    if (mRemoteService) {
+    if (mRemoteService && !mDisableRemoteServer) {
       mRemoteService->StartupServer();
       mRemoteService->UnlockStartup();
     }
@@ -4717,7 +4747,7 @@ int XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
   // Shut down the remote service. We must do this before calling LaunchChild
   // if we're restarting because otherwise the new instance will attempt to
   // remote to this instance.
-  if (mRemoteService) {
+  if (mRemoteService && !mDisableRemoteServer) {
     mRemoteService->ShutdownServer();
   }
 #endif /* MOZ_WIDGET_GTK */

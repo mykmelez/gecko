@@ -1372,7 +1372,9 @@ class RTCPeerConnection {
     if (this._remoteIdp) {
         this._remoteIdp.close();
     }
-    this._transceivers.forEach(t => t.setStopped());
+    if (!this._suppressEvents) {
+      this._transceivers.forEach(t => t.setStopped());
+    }
     this._impl.close();
     this._suppressEvents = true;
     delete this._pc;
@@ -1537,10 +1539,26 @@ class RTCPeerConnection {
   }
 
   getStats(selector, onSucc, onErr) {
+    if (selector !== null) {
+      let matchingSenders =
+        this.getSenders().filter(s => s.track === selector);
+      let matchingReceivers =
+        this.getReceivers().filter(r => r.track === selector);
+
+      if (matchingSenders.length + matchingReceivers.length != 1) {
+        throw new this._win.DOMException(
+            "track must be associated with a unique sender or receiver, but "
+            + " is associated with " + matchingSenders.length
+            + " senders and " + matchingReceivers.length + " receivers.",
+            "InvalidAccessError");
+      }
+    }
+
     if (this._iceConnectionState === "completed" ||
         this._iceConnectionState === "connected") {
       this._pcTelemetry.recordGetStats();
     }
+
     return this._auto(onSucc, onErr, () => this._getStats(selector));
   }
 

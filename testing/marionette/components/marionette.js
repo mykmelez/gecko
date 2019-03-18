@@ -241,6 +241,9 @@ const RECOMMENDED_PREFS = new Map([
   // Make sure SNTP requests do not hit the network
   ["network.sntp.pools", "%(server)s"],
 
+  // Don't do network connections for mitm priming
+  ["security.certerrors.mitm.priming.enabled", false],
+
   // Local documents have access to all other local documents,
   // including directory listings
   ["security.fileuri.strict_origin_policy", false],
@@ -330,7 +333,6 @@ class MarionetteParentProcess {
 
       case "profile-after-change":
         Services.obs.addObserver(this, "command-line-startup");
-        Services.obs.addObserver(this, "sessionstore-windows-restored");
         Services.obs.addObserver(this, "toplevel-window-ready");
         Services.obs.addObserver(this, "marionette-startup-requested");
 
@@ -361,9 +363,12 @@ class MarionetteParentProcess {
       case "domwindowclosed":
         if (this.gfxWindow === null || subject === this.gfxWindow) {
           Services.obs.removeObserver(this, topic);
+          Services.obs.removeObserver(this, "toplevel-window-ready");
 
           Services.obs.addObserver(this, "xpcom-will-shutdown");
-          Services.obs.notifyObservers(this, "marionette-startup-requested");
+
+          this.finalUIStartup = true;
+          this.init();
         }
         break;
 
@@ -385,9 +390,8 @@ class MarionetteParentProcess {
         }, {once: true});
         break;
 
-      case "sessionstore-windows-restored":
+      case "marionette-startup-requested":
         Services.obs.removeObserver(this, topic);
-        Services.obs.removeObserver(this, "toplevel-window-ready");
 
         // When Firefox starts on Windows, an additional GFX sanity test
         // window may appear off-screen.  Marionette should wait for it
@@ -403,15 +407,14 @@ class MarionetteParentProcess {
           log.trace("GFX sanity window detected, waiting until it has been closed...");
           Services.obs.addObserver(this, "domwindowclosed");
         } else {
+          Services.obs.removeObserver(this, "toplevel-window-ready");
+
           Services.obs.addObserver(this, "xpcom-will-shutdown");
-          Services.obs.notifyObservers(this, "marionette-startup-requested");
+
+          this.finalUIStartup = true;
+          this.init();
         }
 
-        break;
-
-      case "marionette-startup-requested":
-        this.finalUIStartup = true;
-        this.init();
         break;
 
       case "xpcom-will-shutdown":

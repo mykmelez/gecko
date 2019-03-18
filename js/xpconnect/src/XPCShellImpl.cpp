@@ -1233,9 +1233,9 @@ int XRE_XPCShellMain(int argc, char** argv, char** envp,
     }
 
     nsCOMPtr<nsIServiceManager> servMan;
-    rv = NS_InitXPCOM2(getter_AddRefs(servMan), appDir, &dirprovider);
+    rv = NS_InitXPCOM(getter_AddRefs(servMan), appDir, &dirprovider);
     if (NS_FAILED(rv)) {
-      printf("NS_InitXPCOM2 failed!\n");
+      printf("NS_InitXPCOM failed!\n");
       return 1;
     }
 
@@ -1326,7 +1326,8 @@ int XRE_XPCShellMain(int argc, char** argv, char** envp,
 
     // Ensure that DLL Services are running
     RefPtr<DllServices> dllSvc(DllServices::Get());
-    auto dllServicesDisable = MakeScopeExit([&dllSvc]() { dllSvc->DisableFull(); });
+    auto dllServicesDisable =
+        MakeScopeExit([&dllSvc]() { dllSvc->DisableFull(); });
 
 #  if defined(MOZ_SANDBOX)
     // Required for sandboxed child processes.

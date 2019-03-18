@@ -163,7 +163,9 @@ class ArtifactJob(object):
         self._log = log
         self._substs = substs
         self._symbols_archive_suffix = None
-        if download_symbols:
+        if download_symbols == 'full':
+            self._symbols_archive_suffix = 'crashreporter-symbols-full.zip'
+        elif download_symbols:
             self._symbols_archive_suffix = 'crashreporter-symbols.zip'
 
     def log(self, *args, **kwargs):
@@ -1271,8 +1273,12 @@ class Artifacts(object):
             if source:
                 return self.install_from_revset(source, distdir)
 
-            if 'MOZ_ARTIFACT_TASK' in os.environ:
-                return self.install_from_task(os.environ['MOZ_ARTIFACT_TASK'], distdir)
+            for var in (
+                'MOZ_ARTIFACT_TASK_%s' % self._job.upper().replace('-', '_'),
+                'MOZ_ARTIFACT_TASK',
+            ):
+                if var in os.environ:
+                    return self.install_from_task(os.environ[var], distdir)
 
             return self.install_from_recent(distdir)
 

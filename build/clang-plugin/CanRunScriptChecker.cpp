@@ -2,6 +2,48 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/**
+ * This checker implements the "can run script" analysis.  The idea is to detect
+ * functions that can run script that are being passed reference-counted
+ * arguments (including "this") whose refcount might go to zero as a result of
+ * the script running.  We want to prevent that.
+ *
+ * The approach is to attempt to enforce the following invariants on the call
+ * graph:
+ *
+ * 1) Any caller of a MOZ_CAN_RUN_SCRIPT function is itself MOZ_CAN_RUN_SCRIPT.
+ * 2) If a virtual MOZ_CAN_RUN_SCRIPT method overrides a base class method,
+ *    that base class method is also MOZ_CAN_RUN_SCRIPT.
+ *
+ * Invariant 2 ensures that we don't accidentally call a MOZ_CAN_RUN_SCRIPT
+ * function via a base-class virtual call.  Invariant 1 ensures that
+ * the property of being able to run script propagates up the callstack.  There
+ * is an opt-out for invariant 1: A function (declaration _or_ implementation)
+ * can be decorated with MOZ_CAN_RUN_SCRIPT_BOUNDARY to indicate that we do not
+ * require it or any of its callers to be MOZ_CAN_RUN_SCRIPT even if it calls
+ * MOZ_CAN_RUN_SCRIPT functions.
+ *
+ * There are two known holes in invariant 1, apart from the
+ * MOZ_CAN_RUN_SCRIPT_BOUNDARY opt-out:
+ *
+ *  - Functions called via function pointers can be MOZ_CAN_RUN_SCRIPT even if
+ *    their caller is not, because we have no way to determine from the function
+ *    pointer what function is being called.
+ *  - MOZ_CAN_RUN_SCRIPT destructors can happen in functions that are not
+ *    MOZ_CAN_RUN_SCRIPT.
+ *    https://bugzilla.mozilla.org/show_bug.cgi?id=1535523 tracks this.
+ *
+ * Given those invariants we then require that when calling a MOZ_CAN_RUN_SCRIPT
+ * function all refcounted arguments (including "this") satisfy one of three
+ * conditions:
+ *  a) The argument is held via a strong pointer on the stack.
+ *  b) The argument is an argument of the caller (and hence held by a strong
+ *     pointer somewhere higher up the callstack).
+ *  c) The argument is explicitly annotated with MOZ_KnownLive, which indicates
+ *     that something is guaranteed to keep it alive (e.g. it's rooted via a JS
+ *     reflector).
+ */
+
 #include "CanRunScriptChecker.h"
 #include "CustomMatchers.h"
 
@@ -45,6 +87,26 @@ void CanRunScriptChecker::registerMatchers(MatchFinder *AstMatcher) {
           // and which is not a default arg with value nullptr, since those are
           // always safe.
           unless(cxxDefaultArgExpr(isNullDefaultArg())),
+          // and which is not a dereference of a parameter of the parent
+          // function (including "this"),
+          unless(
+            unaryOperator(
+              unaryDereferenceOperator(),
+              hasUnaryOperand(
+                anyOf(
+                  // If we're doing *someArg, the argument of the dereference is
+                  // an ImplicitCastExpr LValueToRValue which has the
+                  // DeclRefExpr as an argument.  We could try to match that
+                  // explicitly with a custom matcher (none of the built-in
+                  // matchers seem to match on the thing being cast for an
+                  // implicitCastExpr), but it's simpler to just use
+                  // ignoreTrivials to strip off the cast.
+                  ignoreTrivials(declRefExpr(to(parmVarDecl()))),
+                  cxxThisExpr()
+                )
+              )
+            )
+          ),
           // and which is not a MOZ_KnownLive wrapped value.
           unless(
             anyOf(
@@ -202,7 +264,7 @@ void CanRunScriptChecker::check(const MatchFinder::MatchResult &Result) {
   const char *ErrorNonCanRunScriptParent =
       "functions marked as MOZ_CAN_RUN_SCRIPT can only be called from "
       "functions also marked as MOZ_CAN_RUN_SCRIPT";
-  const char *NoteNonCanRunScriptParent = "parent function declared here";
+  const char *NoteNonCanRunScriptParent = "caller function declared here";
 
   const Expr *InvalidArg = Result.Nodes.getNodeAs<Expr>("invalidArg");
 
@@ -268,7 +330,7 @@ void CanRunScriptChecker::check(const MatchFinder::MatchResult &Result) {
     diag(CallRange.getBegin(), ErrorNonCanRunScriptParent, DiagnosticIDs::Error)
         << CallRange;
 
-    diag(ParentFunction->getLocation(), NoteNonCanRunScriptParent,
-         DiagnosticIDs::Note);
+    diag(ParentFunction->getCanonicalDecl()->getLocation(),
+	 NoteNonCanRunScriptParent, DiagnosticIDs::Note);
   }
 }

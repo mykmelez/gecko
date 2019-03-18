@@ -485,12 +485,17 @@ void nsSVGOuterSVGFrame::Reflow(nsPresContext* aPresContext,
   // overflow rects here! (Again, see bug 875175.)
   //
   aDesiredSize.SetOverflowAreasToDesiredBounds();
-  if (!mIsRootContent) {
-    aDesiredSize.mOverflowAreas.VisualOverflow().UnionRect(
-        aDesiredSize.mOverflowAreas.VisualOverflow(),
-        anonKid->GetVisualOverflowRect() + anonKid->GetPosition());
+
+  // An outer SVG will be here as a nondisplay if it fails the conditional
+  // processing test. In that case, we don't maintain its overflow.
+  if (!HasAnyStateBits(NS_FRAME_IS_NONDISPLAY)) {
+    if (!mIsRootContent) {
+      aDesiredSize.mOverflowAreas.VisualOverflow().UnionRect(
+          aDesiredSize.mOverflowAreas.VisualOverflow(),
+          anonKid->GetVisualOverflowRect() + anonKid->GetPosition());
+    }
+    FinishAndStoreOverflow(&aDesiredSize);
   }
-  FinishAndStoreOverflow(&aDesiredSize);
 
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                  ("exit nsSVGOuterSVGFrame::Reflow: size=%d,%d",
@@ -609,9 +614,7 @@ void nsDisplayOuterSVG::Paint(nsDisplayListBuilder* aBuilder,
       viewportRect.TopLeft(), appUnitsPerDevPixel);
 
   aContext->Save();
-  imgDrawingParams imgParams(aBuilder->ShouldSyncDecodeImages()
-                                 ? imgIContainer::FLAG_SYNC_DECODE
-                                 : imgIContainer::FLAG_SYNC_DECODE_IF_FAST);
+  imgDrawingParams imgParams(aBuilder->GetImageDecodeFlags());
   // We include the offset of our frame and a scale from device pixels to user
   // units (i.e. CSS px) in the matrix that we pass to our children):
   gfxMatrix tm = nsSVGUtils::GetCSSPxToDevPxMatrix(mFrame) *

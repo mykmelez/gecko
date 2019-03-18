@@ -388,6 +388,7 @@ pref("media.wmf.dxva.enabled", true);
 pref("media.wmf.dxva.d3d11.enabled", true);
 pref("media.wmf.dxva.max-videos", 8);
 pref("media.wmf.low-latency.enabled", false);
+pref("media.wmf.low-latency.force-disabled", false);
 pref("media.wmf.amd.highres.enabled", true);
 pref("media.wmf.allow-unsupported-resolutions", false);
 pref("media.wmf.use-nv12-format", true);
@@ -660,6 +661,9 @@ pref("media.cubeb.sandbox", false);
 pref("media.av1.enabled", true);
 pref("media.av1.use-dav1d", true);
 #elif defined(XP_MACOSX)
+pref("media.av1.enabled", true);
+pref("media.av1.use-dav1d", true);
+#elif defined(XP_UNIX)
 pref("media.av1.enabled", true);
 pref("media.av1.use-dav1d", false);
 #else
@@ -1303,7 +1307,8 @@ pref("dom.serviceWorkers.disable_open_click_delay", 1000);
 pref("dom.storage.enabled", true);
 // Whether or not LSNG (Next Generation Local Storage) is enabled.
 // See bug 1517090 for enabling this on Nightly.
-#ifdef NIGHTLY_BUILD
+// See bug 1534736 for changing it to EARLY_BETA_OR_EARLIER.
+#ifdef EARLY_BETA_OR_EARLIER
 pref("dom.storage.next_gen", true);
 #else
 pref("dom.storage.next_gen", false);
@@ -2691,7 +2696,7 @@ pref("security.dialog_enable_delay", 1000);
 pref("security.notification_enable_delay", 500);
 
 #if defined(DEBUG) && !defined(ANDROID)
-pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,about,addons,cache-entry,config,crashes,debugging,devtools,downloads,home,memory,networking,newtab,performance,plugins,policies,profiles,restartrequired,searchreset,serviceworkers,sessionrestore,support,sync-log,telemetry,url-classifier,webrtc,welcomeback");
+pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,about,addons,cache-entry,config,crashes,debugging,devtools,downloads,home,memory,networking,newtab,performance,plugins,policies,profiles,restartrequired,serviceworkers,sessionrestore,support,sync-log,telemetry,url-classifier,webrtc,welcomeback");
 // the following prefs are for testing purposes only.
 pref("csp.overrule_about_uris_without_csp_whitelist", false);
 pref("csp.skip_about_page_has_csp_assert", false);
@@ -4420,121 +4425,149 @@ pref("font.name-list.emoji", "Twemoji Mozilla");
 pref("font.name-list.serif.ar", "serif");
 pref("font.name-list.sans-serif.ar", "sans-serif");
 pref("font.name-list.monospace.ar", "monospace");
+pref("font.name-list.cursive.ar", "cursive");
 pref("font.size.fixed.ar", 12);
 
 pref("font.name-list.serif.el", "serif");
 pref("font.name-list.sans-serif.el", "sans-serif");
 pref("font.name-list.monospace.el", "monospace");
+pref("font.name-list.cursive.el", "cursive");
 pref("font.size.fixed.el", 12);
 
 pref("font.name-list.serif.he", "serif");
 pref("font.name-list.sans-serif.he", "sans-serif");
 pref("font.name-list.monospace.he", "monospace");
+pref("font.name-list.cursive.he", "cursive");
 pref("font.size.fixed.he", 12);
 
 pref("font.name-list.serif.ja", "serif");
 pref("font.name-list.sans-serif.ja", "sans-serif");
 pref("font.name-list.monospace.ja", "monospace");
+pref("font.name-list.cursive.ja", "cursive");
 
 pref("font.name-list.serif.ko", "serif");
 pref("font.name-list.sans-serif.ko", "sans-serif");
 pref("font.name-list.monospace.ko", "monospace");
+pref("font.name-list.cursive.ko", "cursive");
 
 pref("font.name-list.serif.th", "serif");
 pref("font.name-list.sans-serif.th", "sans-serif");
 pref("font.name-list.monospace.th", "monospace");
+pref("font.name-list.cursive.th", "cursive");
 pref("font.minimum-size.th", 13);
 
 pref("font.name-list.serif.x-armn", "serif");
 pref("font.name-list.sans-serif.x-armn", "sans-serif");
 pref("font.name-list.monospace.x-armn", "monospace");
+pref("font.name-list.cursive.x-armn", "cursive");
 
 pref("font.name-list.serif.x-beng", "serif");
 pref("font.name-list.sans-serif.x-beng", "sans-serif");
 pref("font.name-list.monospace.x-beng", "monospace");
+pref("font.name-list.cursive.x-beng", "cursive");
 
 pref("font.name-list.serif.x-cans", "serif");
 pref("font.name-list.sans-serif.x-cans", "sans-serif");
 pref("font.name-list.monospace.x-cans", "monospace");
+pref("font.name-list.cursive.x-cans", "cursive");
 
 pref("font.name-list.serif.x-cyrillic", "serif");
 pref("font.name-list.sans-serif.x-cyrillic", "sans-serif");
 pref("font.name-list.monospace.x-cyrillic", "monospace");
+pref("font.name-list.cursive.x-cyrillic", "cursive");
 pref("font.size.fixed.x-cyrillic", 12);
 
 pref("font.name-list.serif.x-devanagari", "serif");
 pref("font.name-list.sans-serif.x-devanagari", "sans-serif");
 pref("font.name-list.monospace.x-devanagari", "monospace");
+pref("font.name-list.cursive.x-devanagari", "cursive");
 
 pref("font.name-list.serif.x-ethi", "serif");
 pref("font.name-list.sans-serif.x-ethi", "sans-serif");
 pref("font.name-list.monospace.x-ethi", "monospace");
+pref("font.name-list.cursive.x-ethi", "cursive");
 
 pref("font.name-list.serif.x-geor", "serif");
 pref("font.name-list.sans-serif.x-geor", "sans-serif");
 pref("font.name-list.monospace.x-geor", "monospace");
+pref("font.name-list.cursive.x-geor", "cursive");
 
 pref("font.name-list.serif.x-gujr", "serif");
 pref("font.name-list.sans-serif.x-gujr", "sans-serif");
 pref("font.name-list.monospace.x-gujr", "monospace");
+pref("font.name-list.cursive.x-gujr", "cursive");
 
 pref("font.name-list.serif.x-guru", "serif");
 pref("font.name-list.sans-serif.x-guru", "sans-serif");
 pref("font.name-list.monospace.x-guru", "monospace");
+pref("font.name-list.cursive.x-guru", "cursive");
 
 pref("font.name-list.serif.x-khmr", "serif");
 pref("font.name-list.sans-serif.x-khmr", "sans-serif");
 pref("font.name-list.monospace.x-khmr", "monospace");
+pref("font.name-list.cursive.x-khmr", "cursive");
 
 pref("font.name-list.serif.x-knda", "serif");
 pref("font.name-list.sans-serif.x-knda", "sans-serif");
 pref("font.name-list.monospace.x-knda", "monospace");
+pref("font.name-list.cursive.x-knda", "cursive");
 
 pref("font.name-list.serif.x-mlym", "serif");
 pref("font.name-list.sans-serif.x-mlym", "sans-serif");
 pref("font.name-list.monospace.x-mlym", "monospace");
+pref("font.name-list.cursive.x-mlym", "cursive");
 
 pref("font.name-list.serif.x-orya", "serif");
 pref("font.name-list.sans-serif.x-orya", "sans-serif");
 pref("font.name-list.monospace.x-orya", "monospace");
+pref("font.name-list.cursive.x-orya", "cursive");
 
 pref("font.name-list.serif.x-sinh", "serif");
 pref("font.name-list.sans-serif.x-sinh", "sans-serif");
 pref("font.name-list.monospace.x-sinh", "monospace");
+pref("font.name-list.cursive.x-sinh", "cursive");
 
 pref("font.name-list.serif.x-tamil", "serif");
 pref("font.name-list.sans-serif.x-tamil", "sans-serif");
 pref("font.name-list.monospace.x-tamil", "monospace");
+pref("font.name-list.cursive.x-tamil", "cursive");
 
 pref("font.name-list.serif.x-telu", "serif");
 pref("font.name-list.sans-serif.x-telu", "sans-serif");
 pref("font.name-list.monospace.x-telu", "monospace");
+pref("font.name-list.cursive.x-telu", "cursive");
 
 pref("font.name-list.serif.x-tibt", "serif");
 pref("font.name-list.sans-serif.x-tibt", "sans-serif");
 pref("font.name-list.monospace.x-tibt", "monospace");
+pref("font.name-list.cursive.x-tibt", "cursive");
 
 pref("font.name-list.serif.x-unicode", "serif");
 pref("font.name-list.sans-serif.x-unicode", "sans-serif");
 pref("font.name-list.monospace.x-unicode", "monospace");
+pref("font.name-list.cursive.x-unicode", "cursive");
 pref("font.size.fixed.x-unicode", 12);
 
 pref("font.name-list.serif.x-western", "serif");
 pref("font.name-list.sans-serif.x-western", "sans-serif");
 pref("font.name-list.monospace.x-western", "monospace");
+pref("font.name-list.cursive.x-western", "cursive");
 pref("font.size.fixed.x-western", 12);
 
 pref("font.name-list.serif.zh-CN", "serif");
 pref("font.name-list.sans-serif.zh-CN", "sans-serif");
 pref("font.name-list.monospace.zh-CN", "monospace");
+pref("font.name-list.cursive.zh-CN", "cursive");
 
 pref("font.name-list.serif.zh-HK", "serif");
 pref("font.name-list.sans-serif.zh-HK", "sans-serif");
 pref("font.name-list.monospace.zh-HK", "monospace");
+pref("font.name-list.cursive.zh-HK", "cursive");
 
 pref("font.name-list.serif.zh-TW", "serif");
 pref("font.name-list.sans-serif.zh-TW", "sans-serif");
 pref("font.name-list.monospace.zh-TW", "monospace");
+pref("font.name-list.cursive.zh-TW", "cursive");
 
 /* PostScript print module prefs */
 // pref("print.postscript.enabled",      true);
@@ -4605,8 +4638,8 @@ pref("font.name-list.serif.el", "Droid Serif, Noto Serif"); // not Charis SIL Co
 pref("font.name-list.sans-serif.el", "Roboto, Google Sans, Droid Sans");
 pref("font.name-list.monospace.el", "Droid Sans Mono");
 
-pref("font.name-list.serif.he", "Droid Serif, Noto Serif");
-pref("font.name-list.sans-serif.he", "Roboto, Google Sans, Droid Sans Hebrew, Droid Sans, Arial");
+pref("font.name-list.serif.he", "Droid Serif, Noto Serif, Noto Serif Hebrew");
+pref("font.name-list.sans-serif.he", "Roboto, Google Sans, Noto Sans Hebrew, Droid Sans Hebrew, Droid Sans, Arial");
 pref("font.name-list.monospace.he", "Droid Sans Mono");
 
 pref("font.name-list.serif.ja", "Charis SIL Compact, Noto Serif CJK JP, Noto Serif, Droid Serif");
@@ -4617,13 +4650,57 @@ pref("font.name-list.serif.ko", "Charis SIL Compact, Noto Serif CJK KR, Noto Ser
 pref("font.name-list.sans-serif.ko", "Roboto, Google Sans, SmartGothic, NanumGothic, Noto Sans KR, Noto Sans CJK KR, DroidSansFallback, Droid Sans Fallback");
 pref("font.name-list.monospace.ko", "Droid Sans Mono, Noto Sans Mono CJK KR");
 
-pref("font.name-list.serif.th", "Charis SIL Compact, Noto Serif, Droid Serif");
-pref("font.name-list.sans-serif.th", "Roboto, Google Sans, Droid Sans Thai, Droid Sans");
+pref("font.name-list.serif.th", "Charis SIL Compact, Noto Serif, Noto Serif Thai, Droid Serif");
+pref("font.name-list.sans-serif.th", "Roboto, Google Sans, Noto Sans Thai, Droid Sans Thai, Droid Sans");
 pref("font.name-list.monospace.th", "Droid Sans Mono");
+
+pref("font.name-list.serif.x-armn", "Noto Serif Armenian");
+pref("font.name-list.sans-serif.x-armn", "Noto Sans Armenian");
+
+pref("font.name-list.serif.x-beng", "Noto Serif Bengali");
+pref("font.name-list.sans-serif.x-beng", "Noto Sans Bengali");
 
 pref("font.name-list.serif.x-cyrillic", "Charis SIL Compact, Noto Serif, Droid Serif");
 pref("font.name-list.sans-serif.x-cyrillic", "Roboto, Google Sans, Droid Sans");
 pref("font.name-list.monospace.x-cyrillic", "Droid Sans Mono");
+
+pref("font.name-list.serif.x-devanagari", "Noto Serif Devanagari");
+pref("font.name-list.sans-serif.x-devanagari", "Noto Sans Devanagari");
+
+pref("font.name-list.serif.x-ethi", "Noto Serif Ethiopic");
+pref("font.name-list.sans-serif.x-ethi", "Noto Sans Ethiopic");
+
+pref("font.name-list.serif.x-geor", "Noto Serif Georgian");
+pref("font.name-list.sans-serif.x-geor", "Noto Sans Georgian");
+
+pref("font.name-list.serif.x-gujr", "Noto Serif Gujarati");
+pref("font.name-list.sans-serif.x-gujr", "Noto Sans Gujarati");
+
+pref("font.name-list.serif.x-guru", "Noto Serif Gurmukhi");
+pref("font.name-list.sans-serif.x-guru", "Noto Sans Gurmukhi");
+
+pref("font.name-list.serif.x-khmr", "Noto Serif Khmer");
+pref("font.name-list.sans-serif.x-khmr", "Noto Sans Khmer");
+
+pref("font.name-list.serif.x-knda", "Noto Serif Kannada");
+pref("font.name-list.sans-serif.x-knda", "Noto Sans Kannada");
+
+pref("font.name-list.serif.x-mlym", "Noto Serif Malayalam");
+pref("font.name-list.sans-serif.x-mlym", "Noto Sans Malayalam");
+
+pref("font.name-list.sans-serif.x-orya", "Noto Sans Oriya");
+
+pref("font.name-list.serif.x-sinh", "Noto Serif Sinhala");
+pref("font.name-list.sans-serif.x-sinh", "Noto Sans Sinhala");
+
+pref("font.name-list.serif.x-tamil", "Noto Serif Tamil");
+pref("font.name-list.sans-serif.x-tamil", "Noto Sans Tamil");
+
+pref("font.name-list.serif.x-telu", "Noto Serif Telugu");
+pref("font.name-list.sans-serif.x-telu", "Noto Sans Telugu");
+
+pref("font.name-list.serif.x-tibt", "Noto Serif Tibetan");
+pref("font.name-list.sans-serif.x-tibt", "Noto Sans Tibetan");
 
 pref("font.name-list.serif.x-unicode", "Charis SIL Compact, Noto Serif, Droid Serif");
 pref("font.name-list.sans-serif.x-unicode", "Roboto, Google Sans, Droid Sans");
@@ -5233,8 +5310,6 @@ pref("dom.vibrator.max_vibrate_list_len", 128);
 pref("dom.battery.enabled", true);
 
 // Push
-
-pref("dom.push.alwaysConnect", false);
 
 pref("dom.push.loglevel", "Error");
 

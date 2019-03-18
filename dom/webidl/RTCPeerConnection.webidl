@@ -163,11 +163,10 @@ interface RTCPeerConnection : EventTarget  {
   attribute EventHandler onaddstream; // obsolete
   attribute EventHandler onaddtrack;  // obsolete
   attribute EventHandler ontrack;     // replaces onaddtrack and onaddstream.
-  attribute EventHandler onremovestream;
   attribute EventHandler oniceconnectionstatechange;
   attribute EventHandler onicegatheringstatechange;
 
-  Promise<RTCStatsReport> getStats (optional MediaStreamTrack? selector);
+  Promise<RTCStatsReport> getStats (optional MediaStreamTrack? selector = null);
 
   // Data channel.
   RTCDataChannel createDataChannel (DOMString label,
