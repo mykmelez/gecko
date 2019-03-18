@@ -15,7 +15,7 @@
  * To access XULStore data from JS, import XULStore.jsm; to access it from C++,
  * include XULStore.h.
  *
- * @note See toolkit/components/xulstore/src/lib.rs for the implementation
+ * @note See toolkit/components/xulstore/src/ffi.rs for the implementation
  * of this interface (and an explanation of its continued existence).
  */
 interface nsIXULStore: nsISupports {};
