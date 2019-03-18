@@ -5,7 +5,7 @@ const {FileUtils} = ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 add_task(async function test_get_values() {
-  // Import XULStore.jsm before getting the profile to ensure that XULStore
+  // Import XULStore.jsm before getting the profile to ensure that the new store
   // is initialized, as the purpose of this test is to confirm that the old
   // store data gets migrated if the profile change happens post-initialization.
   const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
@@ -20,7 +20,6 @@ add_task(async function test_get_values() {
   // racing XULStore, so we use FileUtils instead of OS.File.
   Services.obs.addObserver({
     observe() {
-      console.log("start writing xulstore.json");
       const file = FileUtils.getFile("ProfD", ["xulstore.json"]);
       const xulstoreJSON = JSON.stringify({
         doc1: {
@@ -32,7 +31,6 @@ add_task(async function test_get_values() {
       let stream = FileUtils.openAtomicFileOutputStream(file);
       stream.write(xulstoreJSON, xulstoreJSON.length);
       FileUtils.closeAtomicFileOutputStream(stream);
-      console.log("finish writing xulstore.json");
     },
   }, "profile-after-change");
 

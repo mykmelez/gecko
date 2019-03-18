@@ -36,8 +36,8 @@ add_task(async function test_get_values() {
   // XULStore should *not* have migrated the values from the old store,
   // so it should return empty strings when we try to retrieve them.
   // That's true for both values, even though one of them is valid,
-  // because the migrator uses a typed parser that fails to parse the JSON
-  // if it doesn't conform to the XULStore format.
+  // because the migrator uses a typed parser that requires the entire
+  // JSON file to conform to the XULStore format.
   Assert.equal(await XULStore.getValue("doc1", "id1", "attr1"), "");
   Assert.equal(await XULStore.getValue("doc2", "id2", "attr2"), "");
 });
