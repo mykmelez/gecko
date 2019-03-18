@@ -55,7 +55,7 @@ impl XULStore {
         let key = make_key(doc, id, attr);
         let value = String::from_utf16(value)?;
 
-        let store = STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?.clone();
+        let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
         store.put(&mut writer, &key, &Value::Str(&value))?;
         writer.commit()?;
 
@@ -73,7 +73,7 @@ impl XULStore {
         let rkv = rkv_guard.as_ref().ok_or(XULStoreError::Unavailable)?.read()?;
         let reader = rkv.read()?;
         let key = make_key(doc, id, attr);
-        let store = STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?.clone();
+        let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
 
         match store.get(&reader, &key) {
             Ok(Some(_)) => Ok(true),
@@ -106,7 +106,7 @@ impl XULStore {
         let rkv = rkv_guard.as_ref().ok_or(XULStoreError::Unavailable)?.read()?;
         let reader = rkv.read()?;
         let key = make_key(doc, id, attr);
-        let store = STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?.clone();
+        let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
 
         match store.get(&reader, &key) {
             Ok(Some(Value::Str(val))) => Ok(val.to_owned()),
@@ -118,7 +118,7 @@ impl XULStore {
             // This should never happen, but it could happen in theory
             // if someone writes a different kind of value into the store
             // using a more general API (kvstore, rkv, LMDB).
-            Ok(Some(_)) => return Err(XULStoreError::UnexpectedValue),
+            Ok(Some(_)) => Err(XULStoreError::UnexpectedValue),
 
             // For some reason, the first call to STORE.read()?.get/has()
             // when running GTests triggers an LMDB "other" error with code 22,
@@ -142,7 +142,7 @@ impl XULStore {
         let rkv = rkv_guard.as_ref().ok_or(XULStoreError::Unavailable)?.read()?;
         let mut writer = rkv.write()?;
         let key = make_key(doc, id, attr);
-        let store = STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?.clone();
+        let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
 
         match store.delete(&mut writer, &key) {
             Ok(_) => {
@@ -163,7 +163,7 @@ impl XULStore {
 
         let doc_url = String::from_utf16(doc)?;
 
-        let store = STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?.clone();
+        let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
         let rkv_guard = RKV.read()?;
         let rkv = rkv_guard.as_ref().ok_or(XULStoreError::Unavailable)?.read()?;
         let reader = rkv.read()?;
@@ -210,7 +210,7 @@ impl XULStore {
         let doc_url = String::from_utf16(doc)?;
         let element_id = String::from_utf16(id)?;
         let key_prefix = format!("{}{}{}", doc_url, SEPARATOR, element_id);
-        let store = STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?.clone();
+        let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
         let rkv_guard = RKV.read()?;
         let rkv = rkv_guard.as_ref().ok_or(XULStoreError::Unavailable)?.read()?;
         let reader = rkv.read()?;
