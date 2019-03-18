@@ -4,19 +4,29 @@
 
 "use strict";
 
+const EXPORTED_SYMBOLS = ["XULStore"];
+
 // Get the nsIXULStore service to ensure that data is migrated from the old
 // store (xulstore.json) to the new one before we access the new store.
 Cc["@mozilla.org/xul-store-service;1"].getService(Ci.nsIXULStore);
-
-// Enables logging.
-const debugMode = false;
-
-const EXPORTED_SYMBOLS = ["XULStore"];
 
 const {KeyValueService} = ChromeUtils.import("resource://gre/modules/kvstore.jsm");
 const {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm");
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+
+// Enumeration is inclusive of the lower bound and exclusive of the upper
+// bound, i.e. [lower,upper).  In order to ensure that we enumerate all keys
+// for a given document URI, and only those for the document URI, we enumerate
+// from the document URI + the separator char (to ensure we match the URI
+// exactly in the URI part of the key) until the document URI + the next char
+// after the separator (to stop iteration at the first key greater than
+// the document URI + the separator char).
+const SEPARATOR = "\t";
+const SEPARATOR_NEXT_CHAR = String.fromCharCode(SEPARATOR.charCodeAt(0) + 1);
+
+// Enables logging.
+const debugMode = false;
 
 // A cache of XULStore data, indexed by document URL.  This exists to support
 // consumers that can't use the async API, and it shouldn't be used except by
@@ -28,15 +38,12 @@ const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm")
 // you can (synchronously) use the cache in place of XULStore's standard API.
 let cache = {};
 
-// Enumeration is inclusive of the lower bound and exclusive of the upper
-// bound, i.e. [from,to). In order to ensure that we enumerate all keys
-// for the document URI, and only those for the document URI, we enumerate
-// from the document URI + the separator char (to ensure we match the URI
-// exactly in the URI part of the key) until the document URI + the next char
-// after the separator (to stop iteration at the first key greater than
-// the document URI + the separator char).
-const SEPARATOR = "\t";
-const SEPARATOR_NEXT_CHAR = String.fromCharCode(SEPARATOR.charCodeAt(0) + 1);
+// Internal function for logging debug messages to the Error Console window
+function log(message) {
+  if (!debugMode)
+    return;
+  console.log("XULStore: " + message);
+}
 
 function makeKey(docURI, id, attr) {
   return docURI.concat(SEPARATOR, id).concat(SEPARATOR, attr);
@@ -64,17 +71,8 @@ Services.obs.addObserver({
 }, "profile-after-change");
 
 const XULStore = {
-  /*
-   * Internal function for logging debug messages to the Error Console window
-   */
-  log(message) {
-    if (!debugMode)
-      return;
-    console.log("XULStore: " + message);
-  },
-
   async setValue(docURI, id, attr, value) {
-    this.log("Saving " + attr + "=" + value + " for id=" + id + ", doc=" + docURI);
+    log("Saving " + attr + "=" + value + " for id=" + id + ", doc=" + docURI);
 
     // bug 319846 -- don't save really long attributes or values.
     if (id.length > 512 || attr.length > 512) {
@@ -91,21 +89,21 @@ const XULStore = {
   },
 
   async hasValue(docURI, id, attr) {
-    this.log("has store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
+    log("has store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
 
     const gDatabase = await gDatabasePromise;
     return gDatabase.has(makeKey(docURI, id, attr));
   },
 
   async getValue(docURI, id, attr) {
-    this.log("get store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
+    log("get store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
 
     const gDatabase = await gDatabasePromise;
     return await gDatabase.get(makeKey(docURI, id, attr)) || "";
   },
 
   async removeValue(docURI, id, attr) {
-    this.log("remove store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
+    log("remove store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
 
     const gDatabase = await gDatabasePromise;
     await gDatabase.delete(makeKey(docURI, id, attr));
@@ -120,7 +118,7 @@ const XULStore = {
     const value = node.getAttribute(attr);
 
     if (node.localName == "window") {
-      this.log("Persisting attributes to windows is handled by nsXULWindow.");
+      log("Persisting attributes to windows is handled by nsXULWindow.");
       return;
     }
 
@@ -136,7 +134,7 @@ const XULStore = {
   },
 
   async getIDs(docURI) {
-    this.log("Getting ID enumerator for doc=" + docURI);
+    log("Getting ID enumerator for doc=" + docURI);
 
     const gDatabase = await gDatabasePromise;
     const from = docURI.concat(SEPARATOR);
@@ -154,7 +152,7 @@ const XULStore = {
   },
 
   async getAttributes(docURI, id) {
-    this.log("Getting attribute enumerator for id=" + id + ", doc=" + docURI);
+    log("Getting attribute enumerator for id=" + id + ", doc=" + docURI);
 
     const gDatabase = await gDatabasePromise;
     const prefix = docURI.concat(SEPARATOR, id);
@@ -173,7 +171,7 @@ const XULStore = {
   },
 
   async removeDocument(docURI) {
-    this.log("remove store values for doc=" + docURI);
+    log("remove store values for doc=" + docURI);
 
     const gDatabase = await gDatabasePromise;
     const from = docURI.concat(SEPARATOR);
@@ -184,7 +182,7 @@ const XULStore = {
   },
 
   async cache(docURI) {
-    this.log("cache store values for doc=" + docURI);
+    log("cache store values for doc=" + docURI);
 
     const gDatabase = await gDatabasePromise;
     const from = docURI.concat(SEPARATOR);
