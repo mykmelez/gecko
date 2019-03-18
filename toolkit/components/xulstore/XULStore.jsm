@@ -26,9 +26,10 @@ function makeKey(docURI, id, attr) {
 
 async function getDatabase() {
   // This module should not generally be loaded before the profile dir
-  // is available, but it can happen during profile migration.  This code
-  // must be kept in sync with the code that updates the store's location
-  // in toolkit/components/xulstore/src/ffi.rs.
+  // is available, but it can happen during profile migration.
+  //
+  // This code must be kept in sync with the code that updates the store's
+  // location in toolkit/components/xulstore/src/ffi.rs.
   const profileDir = OS.Constants.Path.profileDir || OS.Constants.Path.tmpDir;
   const databaseDir = OS.Path.join(profileDir, "xulstore");
   await OS.File.makeDir(databaseDir, { from: OS.Constants.Path.profileDir });
