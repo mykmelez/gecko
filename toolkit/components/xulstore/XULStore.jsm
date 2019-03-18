@@ -9,7 +9,7 @@
 Cc["@mozilla.org/xul-store-service;1"].getService(Ci.nsIXULStore);
 
 // Enables logging.
-const debugMode = true;
+const debugMode = false;
 
 const EXPORTED_SYMBOLS = ["XULStore"];
 
