@@ -74,18 +74,18 @@ impl XULStore {
 
             Ok(None) => Ok(false),
 
-            // For some reason, the first call to STORE.read()?.get in GTests
-            // triggers an LMDB "other" error with code 22, which is described
-            // as EINVAL (BAD COMMAND).
+            // For some reason, the first call to STORE.read()?.get/has()
+            // when running GTests triggers an LMDB "other" error with code 22,
+            // which is described in LMDB docs as EINVAL (BAD COMMAND).
             //
-            // TODO: figure out why this happens and fix the problem instead of
-            // merely working around it.
+            // TODO: figure out why this happens and fix the actual issue
+            // instead of merely working around it.
             Err(RkvStoreError::LmdbError(LmdbError::Other(22))) => {
                 error!("XULStore has value error: EINVAL");
                 Ok(false)
             }
 
-            Err(err) => return Err(err.into()),
+            Err(err) => Err(err.into()),
         }
     }
 
@@ -102,33 +102,31 @@ impl XULStore {
         let key = make_key(doc, id, attr);
         let store = STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?.clone();
 
-        let retrieved_value = match store.get(&reader, &key) {
-            Ok(Some(Value::Str(val))) => val,
+        match store.get(&reader, &key) {
+            Ok(Some(Value::Str(val))) => Ok(val.to_owned()),
 
             // Per the XULStore API, return an empty string if the value
             // isn't found.
-            Ok(None) => "",
+            Ok(None) => Ok("".to_owned()),
 
             // This should never happen, but it could happen in theory
             // if someone writes a different kind of value into the store
             // using a more general API (kvstore, rkv, LMDB).
             Ok(Some(_)) => return Err(XULStoreError::UnexpectedValue),
 
-            // For some reason, the first call to STORE.read()?.get in GTests
-            // triggers an LMDB "other" error with code 22, which is described
-            // as EINVAL (BAD COMMAND).
+            // For some reason, the first call to STORE.read()?.get/has()
+            // when running GTests triggers an LMDB "other" error with code 22,
+            // which is described in LMDB docs as EINVAL (BAD COMMAND).
             //
-            // TODO: figure out why this happens and fix the problem instead of
-            // merely working around it.
+            // TODO: figure out why this happens and fix the actual issue
+            // instead of merely working around it.
             Err(RkvStoreError::LmdbError(LmdbError::Other(22))) => {
                 error!("XULStore get value error: EINVAL");
-                ""
+                Ok("".to_owned())
             }
 
-            Err(err) => return Err(err.into()),
-        };
-
-        Ok(retrieved_value.to_string())
+            Err(err) => Err(err.into()),
+        }
     }
 
     fn remove_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<()> {
@@ -141,18 +139,17 @@ impl XULStore {
         let store = STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?.clone();
 
         match store.delete(&mut writer, &key) {
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                writer.commit()?;
+                Ok(())
+            },
 
             // The XULStore API doesn't care if a consumer tries to remove
             // a value that doesn't actually exist, so we ignore that error.
             Err(RkvStoreError::LmdbError(LmdbError::NotFound)) => Ok(()),
 
-            Err(err) => Err(err),
-        }?;
-
-        writer.commit()?;
-
-        Ok(())
+            Err(err) => Err(err.into()),
+        }
     }
 
     fn get_ids(doc: &nsAString) -> XULStoreResult<XULStoreIterator> {
@@ -194,7 +191,7 @@ impl XULStore {
             // Collect the results or report an error.
             .collect::<XULStoreResult<Vec<String>>>()?;
 
-        // Ideally, we'd dedup while iterating, but IterTools.dedup()
+        // NB: ideally, we'd dedup while iterating, but IterTools.dedup()
         // requires its Item to be PartialEq, and Err(XULStoreError) isn't.
         collection.dedup();
 
@@ -241,7 +238,7 @@ impl XULStore {
             })
             .collect::<XULStoreResult<Vec<String>>>()?;
 
-        // Ideally, we'd dedup while iterating, but IterTools.dedup()
+        // NB: ideally, we'd dedup while iterating, but IterTools.dedup()
         // requires its Item to be PartialEq, and Err(XULStoreError) isn't.
         collection.dedup();
 
