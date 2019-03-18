@@ -2253,7 +2253,7 @@ BrowserGlue.prototype = {
    * If the user does not have a persisted value for the toolbar's
    * "collapsed" attribute, try to determine whether it's customized.
    */
-  _maybeToggleBookmarkToolbarVisibility: async function BG__maybeToggleBookmarkToolbarVisibility() {
+  async _maybeToggleBookmarkToolbarVisibility() {
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
     const NUM_TOOLBAR_BOOKMARKS_TO_UNHIDE = 3;
     if (!(await XULStore.hasValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed"))) {
