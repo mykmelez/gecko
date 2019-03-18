@@ -43,6 +43,7 @@ lazy_static! {
 
 // Memoized to the PROFILE_DIR lazy static. Prefer that accessor to calling
 // this function, to avoid extra trips across the XPCOM FFI.
+//
 // NB: this code must be kept in sync with the code that updates the store's
 // location in toolkit/components/xulstore/XULStore.jsm.
 pub(crate) fn get_profile_dir() -> XULStoreResult<PathBuf> {
@@ -123,6 +124,9 @@ fn maybe_migrate_data(store: SingleStore) {
 }
 
 fn observe_profile_change() {
+    // Failure to observe the change isn't fatal (although it means we won't
+    // persist XULStore data for this session), so we don't return a result.
+    // But we use a closure returning a result to enable use of the ? operator.
     (|| -> XULStoreResult<()> {
         // Observe profile changes so we can update this directory accordingly.
         let obs_svc = xpcom::services::get_ObserverService().ok_or(XULStoreError::Unavailable)?;
