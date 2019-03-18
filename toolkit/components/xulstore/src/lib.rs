@@ -50,7 +50,10 @@ impl XULStore {
         debug!("XULStore set value: {} {} {} {}", doc, id, attr, value);
 
         let rkv_guard = RKV.read()?;
-        let rkv = rkv_guard.as_ref().ok_or(XULStoreError::Unavailable)?.read()?;
+        let rkv = rkv_guard
+            .as_ref()
+            .ok_or(XULStoreError::Unavailable)?
+            .read()?;
         let mut writer = rkv.write()?;
         let key = make_key(doc, id, attr);
         let value = String::from_utf16(value)?;
@@ -62,15 +65,14 @@ impl XULStore {
         Ok(())
     }
 
-    fn has_value(
-        doc: &nsAString,
-        id: &nsAString,
-        attr: &nsAString
-    ) -> XULStoreResult<bool> {
+    fn has_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<bool> {
         debug!("XULStore has value: {} {} {}", doc, id, attr);
 
         let rkv_guard = RKV.read()?;
-        let rkv = rkv_guard.as_ref().ok_or(XULStoreError::Unavailable)?.read()?;
+        let rkv = rkv_guard
+            .as_ref()
+            .ok_or(XULStoreError::Unavailable)?
+            .read()?;
         let reader = rkv.read()?;
         let key = make_key(doc, id, attr);
         let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
@@ -95,15 +97,14 @@ impl XULStore {
         }
     }
 
-    fn get_value(
-        doc: &nsAString,
-        id: &nsAString,
-        attr: &nsAString
-    ) -> XULStoreResult<String> {
+    fn get_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<String> {
         debug!("XULStore get value {} {} {}", doc, id, attr);
 
         let rkv_guard = RKV.read()?;
-        let rkv = rkv_guard.as_ref().ok_or(XULStoreError::Unavailable)?.read()?;
+        let rkv = rkv_guard
+            .as_ref()
+            .ok_or(XULStoreError::Unavailable)?
+            .read()?;
         let reader = rkv.read()?;
         let key = make_key(doc, id, attr);
         let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
@@ -139,7 +140,10 @@ impl XULStore {
         debug!("XULStore remove value {} {} {}", doc, id, attr);
 
         let rkv_guard = RKV.read()?;
-        let rkv = rkv_guard.as_ref().ok_or(XULStoreError::Unavailable)?.read()?;
+        let rkv = rkv_guard
+            .as_ref()
+            .ok_or(XULStoreError::Unavailable)?
+            .read()?;
         let mut writer = rkv.write()?;
         let key = make_key(doc, id, attr);
         let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
@@ -148,7 +152,7 @@ impl XULStore {
             Ok(_) => {
                 writer.commit()?;
                 Ok(())
-            },
+            }
 
             // The XULStore API doesn't care if a consumer tries to remove
             // a value that doesn't actually exist, so we ignore that error.
@@ -165,7 +169,10 @@ impl XULStore {
 
         let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
         let rkv_guard = RKV.read()?;
-        let rkv = rkv_guard.as_ref().ok_or(XULStoreError::Unavailable)?.read()?;
+        let rkv = rkv_guard
+            .as_ref()
+            .ok_or(XULStoreError::Unavailable)?
+            .read()?;
         let reader = rkv.read()?;
         let iterator = store.iter_from(&reader, &doc_url)?;
 
@@ -212,7 +219,10 @@ impl XULStore {
         let key_prefix = format!("{}{}{}", doc_url, SEPARATOR, element_id);
         let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
         let rkv_guard = RKV.read()?;
-        let rkv = rkv_guard.as_ref().ok_or(XULStoreError::Unavailable)?.read()?;
+        let rkv = rkv_guard
+            .as_ref()
+            .ok_or(XULStoreError::Unavailable)?
+            .read()?;
         let reader = rkv.read()?;
         let iterator = store.iter_from(&reader, &key_prefix)?;
 

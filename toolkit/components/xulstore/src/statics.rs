@@ -65,7 +65,11 @@ pub(crate) fn get_profile_dir() -> XULStoreResult<PathBuf> {
 }
 
 fn get_xulstore_dir() -> XULStoreResult<PathBuf> {
-    let mut xulstore_dir = PROFILE_DIR.read()?.as_ref().ok_or(XULStoreError::Unavailable)?.clone();
+    let mut xulstore_dir = PROFILE_DIR
+        .read()?
+        .as_ref()
+        .ok_or(XULStoreError::Unavailable)?
+        .clone();
     xulstore_dir.push("xulstore");
     info!("get XULStore dir: {:?}", &xulstore_dir);
 
@@ -78,20 +82,29 @@ pub(crate) fn get_rkv() -> XULStoreResult<Arc<RwLock<Rkv>>> {
     let mut manager = Manager::singleton().write()?;
     let xulstore_dir = get_xulstore_dir()?;
     manager
-        .get_or_create(xulstore_dir.as_path(), Rkv::new).map_err(|err| err.into())
+        .get_or_create(xulstore_dir.as_path(), Rkv::new)
+        .map_err(|err| err.into())
 }
 
 pub(crate) fn get_store() -> XULStoreResult<SingleStore> {
     let rkv_guard = RKV.read()?;
-    let rkv = rkv_guard.as_ref().ok_or(XULStoreError::Unavailable)?.read()?;
-    rkv.open_single("db", StoreOptions::create()).map_err(|err| err.into())
+    let rkv = rkv_guard
+        .as_ref()
+        .ok_or(XULStoreError::Unavailable)?
+        .read()?;
+    rkv.open_single("db", StoreOptions::create())
+        .map_err(|err| err.into())
 }
 
 fn maybe_migrate_data(store: SingleStore) {
     // Failure to migrate data isn't fatal, so we don't return a result.
     // But we use a closure returning a result to enable use of the ? operator.
     (|| -> XULStoreResult<()> {
-        let mut old_datastore = PROFILE_DIR.read()?.as_ref().ok_or(XULStoreError::Unavailable)?.clone();
+        let mut old_datastore = PROFILE_DIR
+            .read()?
+            .as_ref()
+            .ok_or(XULStoreError::Unavailable)?
+            .clone();
         old_datastore.push("xulstore.json");
         if !old_datastore.exists() {
             debug!("old datastore doesn't exist: {:?}", old_datastore);
@@ -103,7 +116,10 @@ fn maybe_migrate_data(store: SingleStore) {
             serde_json::from_reader(file)?;
 
         let rkv_guard = RKV.read()?;
-        let rkv = rkv_guard.as_ref().ok_or(XULStoreError::Unavailable)?.read()?;
+        let rkv = rkv_guard
+            .as_ref()
+            .ok_or(XULStoreError::Unavailable)?
+            .read()?;
         let mut writer = rkv.write()?;
 
         for (doc, ids) in json {
@@ -120,7 +136,8 @@ fn maybe_migrate_data(store: SingleStore) {
         remove_file(old_datastore)?;
 
         Ok(())
-    })().unwrap_or_else(|err| error!("error migrating data: {}", err));
+    })()
+    .unwrap_or_else(|err| error!("error migrating data: {}", err));
 }
 
 fn observe_profile_change() {
@@ -132,9 +149,14 @@ fn observe_profile_change() {
         let obs_svc = xpcom::services::get_ObserverService().ok_or(XULStoreError::Unavailable)?;
         let observer = ProfileChangeObserver::new();
         let topic = CString::new("profile-after-change")?;
-        unsafe { obs_svc.AddObserver(observer.coerce(), topic.as_ptr(), false).to_result()? };
+        unsafe {
+            obs_svc
+                .AddObserver(observer.coerce(), topic.as_ptr(), false)
+                .to_result()?
+        };
         Ok(())
-    })().unwrap_or_else(|err| error!("error observing profile change: {}", err));
+    })()
+    .unwrap_or_else(|err| error!("error observing profile change: {}", err));
 }
 
 pub(crate) fn update_profile_dir() {
@@ -160,13 +182,14 @@ pub(crate) fn update_profile_dir() {
             Ok(store) => {
                 maybe_migrate_data(store);
                 Some(store)
-            },
+            }
             Err(err) => {
                 error!("error getting store: {}", err);
                 None
-            },
+            }
         };
 
         Ok(())
-    })().unwrap_or_else(|err| error!("error updating profile dir: {}", err));
+    })()
+    .unwrap_or_else(|err| error!("error updating profile dir: {}", err));
 }

@@ -6,7 +6,9 @@ use nserror::{nsresult, NS_ERROR_FAILURE, NS_ERROR_NOT_AVAILABLE, NS_ERROR_UNEXP
 use nsstring::nsCString;
 use rkv::StoreError as RkvStoreError;
 use serde_json::Error as SerdeJsonError;
-use std::{ffi::NulError, io::Error as IoError, str::Utf8Error, string::FromUtf16Error, sync::PoisonError};
+use std::{
+    ffi::NulError, io::Error as IoError, str::Utf8Error, string::FromUtf16Error, sync::PoisonError,
+};
 
 pub(crate) type XULStoreResult<T> = Result<T, XULStoreError>;
 

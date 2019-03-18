@@ -97,7 +97,7 @@ pub unsafe extern "C" fn xulstore_has_value(
         Ok(val) => {
             *has_value = val;
             XULStoreNsResult(NS_OK)
-        },
+        }
         Err(err) => XULStoreNsResult(err.into()),
     }
 }
@@ -113,7 +113,7 @@ pub unsafe extern "C" fn xulstore_get_value(
         Ok(val) => {
             (*value).assign(&nsString::from(&val));
             XULStoreNsResult(NS_OK)
-        },
+        }
         Err(err) => XULStoreNsResult(err.into()),
     }
 }
@@ -176,10 +176,8 @@ pub unsafe extern "C" fn xulstore_iter_get_next(
         Ok(val) => {
             (*value).assign(&nsString::from(&val));
             XULStoreNsResult(NS_OK)
-        },
-        Err(err) => {
-            XULStoreNsResult(err.into())
         }
+        Err(err) => XULStoreNsResult(err.into()),
     }
 }
 
