@@ -18,10 +18,28 @@ const {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm");
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
+// A cache of XULStore data, indexed by document URL.  This exists to support
+// consumers that can't use the async API, and it shouldn't be used except by
+// those consumers (namely: Places).  Whenever possible, access XULStore using
+// its standard async API.
+//
+// If you must access it synchronously, however, then (asynchronously) retrieve
+// a cache of XULStore values for a given URI via XULStore.cache(), after which
+// you can (synchronously) use the cache in place of XULStore's standard API.
 let cache = {};
 
+// Enumeration is inclusive of the lower bound and exclusive of the upper
+// bound, i.e. [from,to). In order to ensure that we enumerate all keys
+// for the document URI, and only those for the document URI, we enumerate
+// from the document URI + the separator char (to ensure we match the URI
+// exactly in the URI part of the key) until the document URI + the next char
+// after the separator (to stop iteration at the first key greater than
+// the document URI + the separator char).
+const SEPARATOR = "\t";
+const SEPARATOR_NEXT_CHAR = String.fromCharCode(SEPARATOR.charCodeAt(0) + 1);
+
 function makeKey(docURI, id, attr) {
-  return docURI.concat("\t", id).concat("\t", attr);
+  return docURI.concat(SEPARATOR, id).concat(SEPARATOR, attr);
 }
 
 async function getDatabase() {
@@ -81,6 +99,7 @@ const XULStore = {
 
   async getValue(docURI, id, attr) {
     this.log("get store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
+
     const gDatabase = await gDatabasePromise;
     return await gDatabase.get(makeKey(docURI, id, attr)) || "";
   },
@@ -118,13 +137,16 @@ const XULStore = {
 
   async getIDs(docURI) {
     this.log("Getting ID enumerator for doc=" + docURI);
+
     const gDatabase = await gDatabasePromise;
-    const enumerator = await gDatabase.enumerate(docURI.concat("\t"), docURI.concat("\n"));
+    const from = docURI.concat(SEPARATOR);
+    const to = docURI.concat(SEPARATOR_NEXT_CHAR);
+    const enumerator = await gDatabase.enumerate(from, to);
     const ids = new Set();
 
     for (const {key} of enumerator) {
       // IDs are the second of the three tab-delimited fields in the key.
-      const id = key.split("\t")[1];
+      const id = key.split(SEPARATOR)[1];
       ids.add(id);
     }
 
@@ -133,14 +155,17 @@ const XULStore = {
 
   async getAttributes(docURI, id) {
     this.log("Getting attribute enumerator for id=" + id + ", doc=" + docURI);
+
     const gDatabase = await gDatabasePromise;
-    const prefix = docURI.concat("\t", id);
-    const enumerator = await gDatabase.enumerate(prefix.concat("\t"), prefix.concat("\n"));
+    const prefix = docURI.concat(SEPARATOR, id);
+    const from = prefix.concat(SEPARATOR);
+    const to = prefix.concat(SEPARATOR_NEXT_CHAR);
+    const enumerator = await gDatabase.enumerate(from, to);
     const attrs = new Set();
 
     for (const {key} of enumerator) {
       // Attributes are the third of the three tab-delimited fields in the key.
-      const attr = key.split("\t")[2];
+      const attr = key.split(SEPARATOR)[2];
       attrs.add(attr);
     }
 
@@ -151,18 +176,24 @@ const XULStore = {
     this.log("remove store values for doc=" + docURI);
 
     const gDatabase = await gDatabasePromise;
-    const enumerator = await gDatabase.enumerate(docURI.concat("\t"), docURI.concat("\n"));
+    const from = docURI.concat(SEPARATOR);
+    const to = docURI.concat(SEPARATOR_NEXT_CHAR);
+    const enumerator = await gDatabase.enumerate(from, to);
 
     await Promise.all(Array.from(enumerator).map(({key}) => gDatabase.delete(key)));
   },
 
   async cache(docURI) {
+    this.log("cache store values for doc=" + docURI);
+
     const gDatabase = await gDatabasePromise;
-    const enumerator = await gDatabase.enumerate(docURI.concat("\t"), docURI.concat("\n"));
+    const from = docURI.concat(SEPARATOR);
+    const to = docURI.concat(SEPARATOR_NEXT_CHAR);
+    const enumerator = await gDatabase.enumerate(from, to);
     const cache = {};
 
     for (const {key, value} of enumerator) {
-      const [, id, attr] = key.split("\t");
+      const [, id, attr] = key.split(SEPARATOR);
         if (!(id in cache)) {
           cache[id] = {};
         }
