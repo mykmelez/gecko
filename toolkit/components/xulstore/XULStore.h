@@ -78,7 +78,7 @@ class XULStore final {
     // to ensure that any old value is deleted, since the UniquePtr's
     // assignment operator won't delete the old value if the assignment
     // happens in Rust.
-    nsresult result = NS_OK;
+    nsresult result;
     iter->reset(xulstore_get_ids(doc, &result));
     return result;
   }
@@ -89,7 +89,7 @@ class XULStore final {
     // to ensure that any old value is deleted, since the UniquePtr's
     // assignment operator won't delete the old value if the assignment
     // happens in Rust.
-    nsresult result = NS_OK;
+    nsresult result;
     iter->reset(xulstore_get_attrs(doc, id, &result));
     return result;
   }
