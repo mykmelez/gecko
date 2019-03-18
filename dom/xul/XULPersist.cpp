@@ -95,13 +95,13 @@ void XULPersist::Persist(Element* aElement, int32_t aNameSpaceID,
   NS_ConvertUTF8toUTF16 uri(utf8uri);
 
   bool hasAttr;
-  rv = XULStore::HasValue(&uri, &id, &attrstr, &hasAttr);
+  rv = XULStore::HasValue(uri, id, attrstr, hasAttr);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return;
   }
 
   if (hasAttr && valuestr.IsEmpty()) {
-    rv = XULStore::RemoveValue(&uri, &id, &attrstr);
+    rv = XULStore::RemoveValue(uri, id, attrstr);
     NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "value removed");
     return;
   }
@@ -114,7 +114,7 @@ void XULPersist::Persist(Element* aElement, int32_t aNameSpaceID,
     }
   }
 
-  rv = XULStore::SetValue(&uri, &id, &attrstr, &valuestr);
+  rv = XULStore::SetValue(uri, id, attrstr, valuestr);
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "value set");
 }
 
@@ -146,7 +146,7 @@ nsresult XULPersist::ApplyPersistentAttributesInternal() {
 
   // Get a list of element IDs for which persisted values are available
   UniquePtr<XULStoreIterator> ids;
-  rv = XULStore::GetIDs(&uri, &ids);
+  rv = XULStore::GetIDs(uri, ids);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -190,7 +190,7 @@ nsresult XULPersist::ApplyPersistentAttributesToElements(
 
   // Get a list of attributes for which persisted values are available
   UniquePtr<XULStoreIterator> attrs;
-  rv = XULStore::GetAttrs(&uri, &aID, &attrs);
+  rv = XULStore::GetAttrs(uri, aID, attrs);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -203,7 +203,7 @@ nsresult XULPersist::ApplyPersistentAttributesToElements(
     }
 
     nsAutoString value;
-    rv = XULStore::GetValue(&uri, &aID, &attrstr, &value);
+    rv = XULStore::GetValue(uri, aID, attrstr, value);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }

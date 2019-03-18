@@ -70,13 +70,13 @@ impl ProfileChangeObserver {
 }
 
 #[no_mangle]
-pub extern "C" fn xulstore_set_value(
-    doc: &nsAString,
-    id: &nsAString,
-    attr: &nsAString,
-    value: &nsAString,
+pub unsafe extern "C" fn xulstore_set_value(
+    doc: *const nsAString,
+    id: *const nsAString,
+    attr: *const nsAString,
+    value: *const nsAString,
 ) -> XULStoreNsResult {
-    XULStore::set_value(doc, id, attr, value).into()
+    XULStore::set_value(&*doc, &*id, &*attr, &*value).into()
 }
 
 #[no_mangle]

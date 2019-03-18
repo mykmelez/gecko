@@ -1605,7 +1605,7 @@ nsresult nsXULWindow::GetPersistentValue(const nsAtom* aAttr,
   NS_ConvertUTF8toUTF16 uri(utf8uri);
 
   nsDependentAtomString attrString(aAttr);
-  rv = XULStore::GetValue(&uri, &windowElementId, &attrString, &aValue);
+  rv = XULStore::GetValue(uri, windowElementId, attrString, aValue);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -1656,8 +1656,8 @@ nsresult nsXULWindow::SetPersistentValue(const nsAtom* aAttr,
   }
 
   nsDependentAtomString attrString(aAttr);
-  return XULStore::SetValue(&uri, &windowElementId, &attrString,
-                            &maybeConvertedValue);
+  return XULStore::SetValue(uri, windowElementId, attrString,
+                            maybeConvertedValue);
 }
 
 NS_IMETHODIMP nsXULWindow::SavePersistentAttributes() {

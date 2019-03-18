@@ -2,10 +2,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/*
+ * This file defines the XULStore API for C++ consumers via the XULStore
+ * and XULStoreIterator classes.
+ *
+ * The XULStore API is implemented in Rust and exposed to C++ via a set
+ * of C functions with the "xulstore_" prefix.  Although C++ code could call
+ * the C functions directly, it should not do so.  Instead, it should call
+ * the static methods on the XULStore class.
+ */
+
 #ifndef XULStore_h
 #define XULStore_h
 
-// Helper Classes
 #include "nsCOMPtr.h"
 #include "nsString.h"
 
@@ -54,43 +63,43 @@ class XULStoreIterator final {
 
 class XULStore final {
  public:
-  static inline nsresult SetValue(const nsAString* doc, const nsAString* id,
-                                  const nsAString* attr,
-                                  const nsAString* value) {
-    return xulstore_set_value(doc, id, attr, value);
+  static inline nsresult SetValue(const nsAString& doc, const nsAString& id,
+                                  const nsAString& attr,
+                                  const nsAString& value) {
+    return xulstore_set_value(&doc, &id, &attr, &value);
   }
-  static inline nsresult HasValue(const nsAString* doc, const nsAString* id,
-                                  const nsAString* attr, bool* has_value) {
-    return xulstore_has_value(doc, id, attr, has_value);
+  static inline nsresult HasValue(const nsAString& doc, const nsAString& id,
+                                  const nsAString& attr, bool& has_value) {
+    return xulstore_has_value(&doc, &id, &attr, &has_value);
   }
-  static inline nsresult GetValue(const nsAString* doc, const nsAString* id,
-                                  const nsAString* attr, nsAString* value) {
-    return xulstore_get_value(doc, id, attr, value);
+  static inline nsresult GetValue(const nsAString& doc, const nsAString& id,
+                                  const nsAString& attr, nsAString& value) {
+    return xulstore_get_value(&doc, &id, &attr, &value);
   }
-  static inline nsresult RemoveValue(const nsAString* doc, const nsAString* id,
-                                     const nsAString* attr) {
-    return xulstore_remove_value(doc, id, attr);
+  static inline nsresult RemoveValue(const nsAString& doc, const nsAString& id,
+                                     const nsAString& attr) {
+    return xulstore_remove_value(&doc, &id, &attr);
   }
-  static inline nsresult GetIDs(const nsAString* doc,
-                                UniquePtr<XULStoreIterator>* iter) {
-    // We assign the value of iter here in C++ via a return value
+  static inline nsresult GetIDs(const nsAString& doc,
+                                UniquePtr<XULStoreIterator>& iter) {
+    // We assign the value of the iter here in C++ via a return value
     // rather than in the Rust function via an out parameter in order
     // to ensure that any old value is deleted, since the UniquePtr's
     // assignment operator won't delete the old value if the assignment
     // happens in Rust.
     nsresult result;
-    iter->reset(xulstore_get_ids(doc, &result));
+    iter.reset(xulstore_get_ids(&doc, &result));
     return result;
   }
-  static inline nsresult GetAttrs(const nsAString* doc, const nsAString* id,
-                                  UniquePtr<XULStoreIterator>* iter) {
-    // We assign the value of iter here in C++ via a return value
+  static inline nsresult GetAttrs(const nsAString& doc, const nsAString& id,
+                                  UniquePtr<XULStoreIterator>& iter) {
+    // We assign the value of the iter here in C++ via a return value
     // rather than in the Rust function via an out parameter in order
     // to ensure that any old value is deleted, since the UniquePtr's
     // assignment operator won't delete the old value if the assignment
     // happens in Rust.
     nsresult result;
-    iter->reset(xulstore_get_attrs(doc, id, &result));
+    iter.reset(xulstore_get_attrs(&doc, &id, &result));
     return result;
   }
 
