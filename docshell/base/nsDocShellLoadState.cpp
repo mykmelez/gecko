@@ -9,6 +9,8 @@
 #include "nsIDocShellTreeItem.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIWebNavigation.h"
+#include "nsIChildChannel.h"
+#include "ReferrerInfo.h"
 
 #include "mozilla/OriginAttributes.h"
 #include "mozilla/NullPrincipal.h"
@@ -24,8 +26,6 @@ nsDocShellLoadState::nsDocShellLoadState(nsIURI* aURI)
       mPrincipalIsExplicit(false),
       mForceAllowDataURI(false),
       mOriginalFrameSrc(false),
-      mSendReferrer(true),
-      mReferrerPolicy(mozilla::net::RP_Unset),
       mLoadType(LOAD_NORMAL),
       mTarget(),
       mSrcdocData(VoidString()),
@@ -46,8 +46,6 @@ nsDocShellLoadState::nsDocShellLoadState(DocShellLoadStateInit& aLoadState) {
   mPrincipalIsExplicit = aLoadState.PrincipalIsExplicit();
   mForceAllowDataURI = aLoadState.ForceAllowDataURI();
   mOriginalFrameSrc = aLoadState.OriginalFrameSrc();
-  mSendReferrer = aLoadState.SendReferrer();
-  mReferrerPolicy = (mozilla::net::ReferrerPolicy)aLoadState.ReferrerPolicy();
   mLoadType = aLoadState.LoadType();
   mTarget = aLoadState.Target();
   mLoadFlags = aLoadState.LoadFlags();
@@ -56,20 +54,58 @@ nsDocShellLoadState::nsDocShellLoadState(DocShellLoadStateInit& aLoadState) {
   mFileName = aLoadState.FileName();
   mIsFromProcessingFrameAttributes =
       aLoadState.IsFromProcessingFrameAttributes();
-  mReferrer = aLoadState.Referrer();
+  mReferrerInfo = aLoadState.ReferrerInfo();
   mURI = aLoadState.URI();
   mOriginalURI = aLoadState.OriginalURI();
   mBaseURI = aLoadState.BaseURI();
   mTriggeringPrincipal = aLoadState.TriggeringPrincipal();
   mPrincipalToInherit = aLoadState.PrincipalToInherit();
+  mCsp = aLoadState.Csp();
 }
 
 nsDocShellLoadState::~nsDocShellLoadState() {}
 
-nsIURI* nsDocShellLoadState::Referrer() const { return mReferrer; }
+nsresult nsDocShellLoadState::CreateFromPendingChannel(
+    nsIChildChannel* aPendingChannel, nsDocShellLoadState** aResult) {
+  nsCOMPtr<nsIChannel> channel = do_QueryInterface(aPendingChannel);
+  if (NS_WARN_IF(!channel)) {
+    return NS_ERROR_UNEXPECTED;
+  }
 
-void nsDocShellLoadState::SetReferrer(nsIURI* aReferrer) {
-  mReferrer = aReferrer;
+  // Create the nsDocShellLoadState object with default state pulled from the
+  // passed-in channel.
+  nsCOMPtr<nsIURI> uri;
+  nsresult rv = channel->GetURI(getter_AddRefs(uri));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  RefPtr<nsDocShellLoadState> loadState = new nsDocShellLoadState(uri);
+  loadState->mPendingRedirectedChannel = aPendingChannel;
+
+  // Pull relevant state from the channel, and store it on the
+  // nsDocShellLoadState.
+  nsCOMPtr<nsIURI> originalUri;
+  rv = channel->GetOriginalURI(getter_AddRefs(originalUri));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  loadState->SetOriginalURI(originalUri);
+
+  nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
+  loadState->SetTriggeringPrincipal(loadInfo->TriggeringPrincipal());
+
+  // Return the newly created loadState.
+  loadState.forget(aResult);
+  return NS_OK;
+}
+
+nsIReferrerInfo* nsDocShellLoadState::GetReferrerInfo() const {
+  return mReferrerInfo;
+}
+
+void nsDocShellLoadState::SetReferrerInfo(nsIReferrerInfo* aReferrerInfo) {
+  mReferrerInfo = aReferrerInfo;
 }
 
 nsIURI* nsDocShellLoadState::URI() const { return mURI; }
@@ -129,6 +165,12 @@ void nsDocShellLoadState::SetPrincipalToInherit(
     nsIPrincipal* aPrincipalToInherit) {
   mPrincipalToInherit = aPrincipalToInherit;
 }
+
+void nsDocShellLoadState::SetCsp(nsIContentSecurityPolicy* aCsp) {
+  mCsp = aCsp;
+}
+
+nsIContentSecurityPolicy* nsDocShellLoadState::Csp() const { return mCsp; }
 
 bool nsDocShellLoadState::InheritPrincipal() const { return mInheritPrincipal; }
 
@@ -190,21 +232,6 @@ nsIInputStream* nsDocShellLoadState::HeadersStream() const {
 
 void nsDocShellLoadState::SetHeadersStream(nsIInputStream* aHeadersStream) {
   mHeadersStream = aHeadersStream;
-}
-
-bool nsDocShellLoadState::SendReferrer() const { return mSendReferrer; }
-
-void nsDocShellLoadState::SetSendReferrer(bool aSendReferrer) {
-  mSendReferrer = aSendReferrer;
-}
-
-mozilla::net::ReferrerPolicy nsDocShellLoadState::ReferrerPolicy() const {
-  return mReferrerPolicy;
-}
-
-void nsDocShellLoadState::SetReferrerPolicy(
-    mozilla::net::ReferrerPolicy aReferrerPolicy) {
-  mReferrerPolicy = aReferrerPolicy;
 }
 
 const nsString& nsDocShellLoadState::SrcdocData() const { return mSrcdocData; }
@@ -358,9 +385,10 @@ nsresult nsDocShellLoadState::SetupTriggeringPrincipal(
   // enter code blocks checking if the principalToInherit is null and we will
   // end up with a wrong inheritPrincipal flag.
   if (!mTriggeringPrincipal) {
-    if (mReferrer) {
+    if (mReferrerInfo) {
+      nsCOMPtr<nsIURI> referrer = mReferrerInfo->GetOriginalReferrer();
       mTriggeringPrincipal =
-          BasePrincipal::CreateCodebasePrincipal(mReferrer, aOriginAttributes);
+          BasePrincipal::CreateCodebasePrincipal(referrer, aOriginAttributes);
 
       if (!mTriggeringPrincipal) {
         return NS_ERROR_FAILURE;
@@ -382,10 +410,9 @@ void nsDocShellLoadState::CalculateLoadURIFlags() {
     mLoadFlags |= nsDocShell::INTERNAL_LOAD_FLAGS_INHERIT_PRINCIPAL;
   }
 
-  if (!mSendReferrer) {
+  if (mReferrerInfo && !mReferrerInfo->GetSendReferrer()) {
     mLoadFlags |= nsDocShell::INTERNAL_LOAD_FLAGS_DONT_SEND_REFERRER;
   }
-
   if (oldLoadFlags & nsIWebNavigation::LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP) {
     mLoadFlags |= nsDocShell::INTERNAL_LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP;
   }
@@ -424,8 +451,6 @@ DocShellLoadStateInit nsDocShellLoadState::Serialize() {
   loadState.PrincipalIsExplicit() = mPrincipalIsExplicit;
   loadState.ForceAllowDataURI() = mForceAllowDataURI;
   loadState.OriginalFrameSrc() = mOriginalFrameSrc;
-  loadState.SendReferrer() = mSendReferrer;
-  loadState.ReferrerPolicy() = mReferrerPolicy;
   loadState.LoadType() = mLoadType;
   loadState.Target() = mTarget;
   loadState.LoadFlags() = mLoadFlags;
@@ -434,11 +459,12 @@ DocShellLoadStateInit nsDocShellLoadState::Serialize() {
   loadState.FileName() = mFileName;
   loadState.IsFromProcessingFrameAttributes() =
       mIsFromProcessingFrameAttributes;
-  loadState.Referrer() = mReferrer;
   loadState.URI() = mURI;
   loadState.OriginalURI() = mOriginalURI;
   loadState.BaseURI() = mBaseURI;
   loadState.TriggeringPrincipal() = mTriggeringPrincipal;
   loadState.PrincipalToInherit() = mPrincipalToInherit;
+  loadState.Csp() = mCsp;
+  loadState.ReferrerInfo() = mReferrerInfo;
   return loadState;
 }

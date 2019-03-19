@@ -32,7 +32,8 @@ using namespace mozilla::gl;
 namespace mozilla {
 namespace layers {
 
-/* static */ already_AddRefed<CanvasClient> CanvasClient::CreateCanvasClient(
+/* static */
+already_AddRefed<CanvasClient> CanvasClient::CreateCanvasClient(
     CanvasClientType aType, CompositableForwarder* aForwarder,
     TextureFlags aFlags) {
   switch (aType) {
@@ -294,8 +295,10 @@ static already_AddRefed<TextureClient> TexClientFromReadback(
       MOZ_CRASH("GFX: Bad `read{Format,Type}`.");
     }
 
-    MOZ_ASSERT(texClient);
-    if (!texClient) return nullptr;
+    if (!texClient) {
+      gfxWarning() << "Couldn't create texClient for readback.";
+      return nullptr;
+    }
 
     // With a texClient, we can lock for writing.
     TextureClientAutoLock autoLock(texClient, OpenMode::OPEN_WRITE);
@@ -385,14 +388,7 @@ void CanvasClientSharedSurface::UpdateRenderer(gfx::IntSize aSize,
   RefPtr<TextureClient> newFront;
 
   mShSurfClient = nullptr;
-  if (canvasRenderer && canvasRenderer->mGLFrontbuffer) {
-    mShSurfClient = CloneSurface(canvasRenderer->mGLFrontbuffer.get(),
-                                 canvasRenderer->mFactory.get());
-    if (!mShSurfClient) {
-      gfxCriticalError() << "Invalid canvas front buffer";
-      return;
-    }
-  } else if (gl->Screen()) {
+  if (gl->Screen()) {
     mShSurfClient = gl->Screen()->Front();
     if (mShSurfClient && mShSurfClient->GetAllocator() &&
         mShSurfClient->GetAllocator() !=
@@ -461,10 +457,9 @@ void CanvasClientSharedSurface::UpdateRenderer(gfx::IntSize aSize,
     asyncRenderer->CopyFromTextureClient(mReadbackClient);
   }
 
-  MOZ_ASSERT(newFront);
   if (!newFront) {
     // May happen in a release build in case of memory pressure.
-    gfxCriticalError()
+    gfxWarning()
         << "Failed to allocate a TextureClient for SharedSurface Canvas. Size: "
         << aSize;
     return;

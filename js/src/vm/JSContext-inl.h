@@ -12,9 +12,7 @@
 #include "builtin/Object.h"
 #include "jit/JitFrames.h"
 #include "proxy/Proxy.h"
-#ifdef ENABLE_BIGINT
 #include "vm/BigIntType.h"
-#endif
 #include "vm/HelperThreads.h"
 #include "vm/Interpreter.h"
 #include "vm/Iteration.h"
@@ -105,9 +103,7 @@ class ContextChecks {
 
   void check(JS::Symbol* symbol, int argIndex) { checkAtom(symbol, argIndex); }
 
-#ifdef ENABLE_BIGINT
   void check(JS::BigInt* bi, int argIndex) { check(bi->zone(), argIndex); }
-#endif
 
   void check(const js::Value& v, int argIndex) {
     if (v.isObject()) {
@@ -116,12 +112,9 @@ class ContextChecks {
       check(v.toString(), argIndex);
     } else if (v.isSymbol()) {
       check(v.toSymbol(), argIndex);
-    }
-#ifdef ENABLE_BIGINT
-    else if (v.isBigInt()) {
+    } else if (v.isBigInt()) {
       check(v.toBigInt(), argIndex);
     }
-#endif
   }
 
   // Check the contents of any container class that supports the C++
@@ -305,7 +298,7 @@ inline js::LifoAlloc& JSContext::typeLifoAlloc() {
 
 inline js::Nursery& JSContext::nursery() { return runtime()->gc.nursery(); }
 
-inline void JSContext::minorGC(JS::gcreason::Reason reason) {
+inline void JSContext::minorGC(JS::GCReason reason) {
   runtime()->gc.minorGC(reason);
 }
 

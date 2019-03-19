@@ -38,6 +38,10 @@ ManifestDPIAware true
 Var TmpVal
 Var MaintCertKey
 Var ShouldOpenSurvey
+; AddTaskbarSC is defined here in order to silence warnings from inside
+; MigrateTaskBarShortcut and is not intended to be used here.
+; See Bug 1329869 for more.
+Var AddTaskbarSC
 
 ; Other included files may depend upon these includes!
 ; The following includes are provided by NSIS.
@@ -410,6 +414,12 @@ Section "Uninstall"
   ${If} "$INSTDIR\AccessibleHandler.dll" == "$R1"
     ${UnregisterDLL} "$INSTDIR\AccessibleHandler.dll"
   ${EndIf}
+
+!ifdef MOZ_LAUNCHER_PROCESS
+  DeleteRegValue HKCU ${MOZ_LAUNCHER_SUBKEY} "$INSTDIR\${FileMainEXE}|Launcher"
+  DeleteRegValue HKCU ${MOZ_LAUNCHER_SUBKEY} "$INSTDIR\${FileMainEXE}|Browser"
+  DeleteRegValue HKCU ${MOZ_LAUNCHER_SUBKEY} "$INSTDIR\${FileMainEXE}|Image"
+!endif
 
   ${un.RemovePrecompleteEntries} "false"
 

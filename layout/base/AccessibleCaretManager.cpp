@@ -91,7 +91,7 @@ void AccessibleCaretManager::Terminate() {
   mPresShell = nullptr;
 }
 
-nsresult AccessibleCaretManager::OnSelectionChanged(nsIDocument* aDoc,
+nsresult AccessibleCaretManager::OnSelectionChanged(Document* aDoc,
                                                     Selection* aSel,
                                                     int16_t aReason) {
   Selection* selection = GetSelection();
@@ -244,7 +244,7 @@ void AccessibleCaretManager::UpdateCaretsForCursorMode(
   switch (result) {
     case PositionChangedResult::NotChanged:
     case PositionChangedResult::Changed:
-      if (aHints == UpdateCaretsHint::Default) {
+      if (!aHints.contains(UpdateCaretsHint::RespectOldAppearance)) {
         if (HasNonEmptyTextContent(GetEditingHostForFrame(frame))) {
           mFirstCaret->SetAppearance(Appearance::Normal);
         } else if (
@@ -268,9 +268,6 @@ void AccessibleCaretManager::UpdateCaretsForCursorMode(
         } else {
           mFirstCaret->SetAppearance(Appearance::NormalNotShown);
         }
-      } else if (aHints.contains(UpdateCaretsHint::RespectOldAppearance)) {
-        // Do nothing to preserve the appearance of the caret set by the
-        // caller.
       }
       break;
 
@@ -311,11 +308,8 @@ void AccessibleCaretManager::UpdateCaretsForSelectionMode(
     switch (result) {
       case PositionChangedResult::NotChanged:
       case PositionChangedResult::Changed:
-        if (aHints == UpdateCaretsHint::Default) {
+        if (!aHints.contains(UpdateCaretsHint::RespectOldAppearance)) {
           aCaret->SetAppearance(Appearance::Normal);
-        } else if (aHints.contains(UpdateCaretsHint::RespectOldAppearance)) {
-          // Do nothing to preserve the appearance of the caret set by the
-          // caller.
         }
         break;
 
@@ -339,9 +333,10 @@ void AccessibleCaretManager::UpdateCaretsForSelectionMode(
     }
   }
 
-  if (aHints == UpdateCaretsHint::Default) {
-    // Only check for tilt carets with default update hint. Otherwise we might
-    // override the appearance set by the caller.
+  if (!aHints.contains(UpdateCaretsHint::RespectOldAppearance)) {
+    // Only check for tilt carets when the caller doesn't ask us to preserve
+    // old appearance. Otherwise we might override the appearance set by the
+    // caller.
     if (StaticPrefs::layout_accessiblecaret_always_tilt()) {
       UpdateCaretsForAlwaysTilt(startFrame, endFrame);
     } else {
@@ -584,6 +579,9 @@ nsresult AccessibleCaretManager::SelectWordOrShortcut(const nsPoint& aPoint) {
 void AccessibleCaretManager::OnScrollStart() {
   AC_LOG("%s", __FUNCTION__);
 
+  AutoRestore<bool> saveAllowFlushingLayout(mAllowFlushingLayout);
+  mAllowFlushingLayout = false;
+
   mIsScrollStarted = true;
 
   if (mFirstCaret->IsLogicallyVisible() || mSecondCaret->IsLogicallyVisible()) {
@@ -597,6 +595,9 @@ void AccessibleCaretManager::OnScrollEnd() {
   if (mLastUpdateCaretMode != GetCaretMode()) {
     return;
   }
+
+  AutoRestore<bool> saveAllowFlushingLayout(mAllowFlushingLayout);
+  mAllowFlushingLayout = false;
 
   mIsScrollStarted = false;
 
@@ -625,6 +626,9 @@ void AccessibleCaretManager::OnScrollPositionChanged() {
     return;
   }
 
+  AutoRestore<bool> saveAllowFlushingLayout(mAllowFlushingLayout);
+  mAllowFlushingLayout = false;
+
   if (mFirstCaret->IsLogicallyVisible() || mSecondCaret->IsLogicallyVisible()) {
     if (mIsScrollStarted) {
       // We don't want extra CaretStateChangedEvents dispatched when user is
@@ -644,6 +648,9 @@ void AccessibleCaretManager::OnReflow() {
   if (mLastUpdateCaretMode != GetCaretMode()) {
     return;
   }
+
+  AutoRestore<bool> saveAllowFlushingLayout(mAllowFlushingLayout);
+  mAllowFlushingLayout = false;
 
   if (mFirstCaret->IsLogicallyVisible() || mSecondCaret->IsLogicallyVisible()) {
     AC_LOG("%s: UpdateCarets(RespectOldAppearance)", __FUNCTION__);
@@ -712,9 +719,11 @@ already_AddRefed<nsFrameSelection> AccessibleCaretManager::GetFrameSelection()
 
 nsAutoString AccessibleCaretManager::StringifiedSelection() const {
   nsAutoString str;
-  Selection* selection = GetSelection();
+  RefPtr<Selection> selection = GetSelection();
   if (selection) {
-    selection->Stringify(str);
+    selection->Stringify(str, mAllowFlushingLayout
+                                  ? Selection::FlushFrames::Yes
+                                  : Selection::FlushFrames::No);
   }
   return str;
 }
@@ -809,7 +818,7 @@ void AccessibleCaretManager::SetSelectionDragState(bool aState) const {
 }
 
 bool AccessibleCaretManager::IsPhoneNumber(nsAString& aCandidate) const {
-  RefPtr<nsIDocument> doc = mPresShell->GetDocument();
+  RefPtr<Document> doc = mPresShell->GetDocument();
   nsAutoString phoneNumberRegex(
       NS_LITERAL_STRING("(^\\+)?[0-9 ,\\-.()*#pw]{1,30}$"));
   return nsContentUtils::IsPatternMatching(aCandidate, phoneNumberRegex, doc);
@@ -900,11 +909,11 @@ void AccessibleCaretManager::ClearMaintainedSelection() const {
 }
 
 bool AccessibleCaretManager::FlushLayout() {
-  if (mPresShell) {
+  if (mPresShell && mAllowFlushingLayout) {
     AutoRestore<bool> flushing(mFlushingLayout);
     mFlushingLayout = true;
 
-    if (nsIDocument* doc = mPresShell->GetDocument()) {
+    if (Document* doc = mPresShell->GetDocument()) {
       doc->FlushPendingNotifications(FlushType::Layout);
     }
   }
@@ -1273,7 +1282,7 @@ void AccessibleCaretManager::DispatchCaretStateChangedEvent(
     return;
   }
 
-  nsIDocument* doc = mPresShell->GetDocument();
+  Document* doc = mPresShell->GetDocument();
   MOZ_ASSERT(doc);
 
   CaretStateChangedEventInit init;
@@ -1330,7 +1339,7 @@ void AccessibleCaretManager::DispatchCaretStateChangedEvent(
       mFirstCaret->IsLogicallyVisible() || mSecondCaret->IsLogicallyVisible();
   init.mCaretVisuallyVisible =
       mFirstCaret->IsVisuallyVisible() || mSecondCaret->IsVisuallyVisible();
-  sel->Stringify(init.mSelectedTextContent);
+  init.mSelectedTextContent = StringifiedSelection();
 
   RefPtr<CaretStateChangedEvent> event = CaretStateChangedEvent::Constructor(
       doc, NS_LITERAL_STRING("mozcaretstatechanged"), init);

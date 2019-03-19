@@ -12,8 +12,7 @@ const { remoteClientManager } =
 const { l10n } = require("../modules/l10n");
 
 const {
-  debugLocalAddon,
-  debugRemoteAddon,
+  debugAddon,
   openTemporaryExtension,
   uninstallAddon,
 } = require("../modules/extensions-helper");
@@ -40,8 +39,10 @@ const {
   RUNTIMES,
 } = require("../constants");
 
+const Actions = require("./index");
+
 function inspectDebugTarget(type, id) {
-  return async (_, getState) => {
+  return async (dispatch, getState) => {
     const runtime = getCurrentRuntime(getState().runtimes);
     const { runtimeDetails, type: runtimeType } = runtime;
 
@@ -59,12 +60,7 @@ function inspectDebugTarget(type, id) {
         break;
       }
       case DEBUG_TARGETS.EXTENSION: {
-        if (runtimeType === RUNTIMES.NETWORK || runtimeType === RUNTIMES.USB) {
-          const devtoolsClient = runtimeDetails.clientWrapper.client;
-          await debugRemoteAddon(id, devtoolsClient);
-        } else if (runtimeType === RUNTIMES.THIS_FIREFOX) {
-          debugLocalAddon(id);
-        }
+        await debugAddon(id, runtimeDetails.clientWrapper.client);
         break;
       }
       case DEBUG_TARGETS.WORKER: {
@@ -74,12 +70,16 @@ function inspectDebugTarget(type, id) {
         gDevToolsBrowser.openWorkerToolbox(front);
         break;
       }
-
       default: {
         console.error("Failed to inspect the debug target of " +
                       `type: ${ type } id: ${ id }`);
       }
     }
+
+    dispatch(Actions.recordTelemetryEvent("inspect", {
+      "target_type": type,
+      "runtime_type": runtimeType,
+    }));
   };
 }
 
@@ -203,16 +203,12 @@ function requestWorkers() {
       } = await clientWrapper.listWorkers();
 
       for (const serviceWorker of serviceWorkers) {
-        const { registrationActor } = serviceWorker;
-        if (!registrationActor) {
+        const { registrationFront } = serviceWorker;
+        if (!registrationFront) {
           continue;
         }
 
-        const { subscription } = await clientWrapper.request({
-          to: registrationActor,
-          type: "getPushSubscription",
-        });
-
+        const subscription = await registrationFront.getPushSubscription();
         serviceWorker.subscription = subscription;
       }
 
@@ -228,12 +224,20 @@ function requestWorkers() {
   };
 }
 
-function startServiceWorker(actor) {
+function startServiceWorker(registrationFront) {
   return async (_, getState) => {
-    const clientWrapper = getCurrentClient(getState().runtimes);
-
     try {
-      await clientWrapper.request({ to: actor, type: "start" });
+      await registrationFront.start();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+}
+
+function unregisterServiceWorker(registrationFront) {
+  return async (_, getState) => {
+    try {
+      await registrationFront.unregister();
     } catch (e) {
       console.error(e);
     }
@@ -250,4 +254,5 @@ module.exports = {
   requestExtensions,
   requestWorkers,
   startServiceWorker,
+  unregisterServiceWorker,
 };

@@ -79,7 +79,7 @@ class ShutdownObserver : public nsIObserver {
 
 NS_IMPL_ISUPPORTS(ShutdownObserver, nsIObserver)
 
-void InitGfxDriverInfoShutdownObserver() {
+static void InitGfxDriverInfoShutdownObserver() {
   if (GfxInfoBase::sDriverInfoObserverInitialized) return;
 
   GfxInfoBase::sDriverInfoObserverInitialized = true;
@@ -1455,6 +1455,18 @@ GfxInfoBase::GetOffMainThreadPaintWorkerCount(
   } else {
     *aOffMainThreadPaintWorkerCount = 0;
   }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+GfxInfoBase::GetLowEndMachine(bool* aLowEndMachine) {
+  *aLowEndMachine = gfxPlatform::ShouldAdjustForLowEndMachine();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+GfxInfoBase::GetTargetFrameRate(uint32_t* aTargetFrameRate) {
+  *aTargetFrameRate = gfxPlatform::TargetFrameRate();
   return NS_OK;
 }
 

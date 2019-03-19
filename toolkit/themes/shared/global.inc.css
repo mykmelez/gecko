@@ -2,6 +2,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* General styles */
+
+*|*.plain {
+  -moz-appearance: none;
+  margin: 0 !important;
+  border: none;
+  padding: 0;
+}
+
+html|textarea {
+  font: inherit;
+}
+
 /* Close icon */
 
 .close-icon {
@@ -57,20 +70,31 @@
 
 .panel-footer > button {
   -moz-appearance: none;
+  border-top: 1px solid var(--panel-separator-color);
   /* !important overrides :hover and :active colors from button.css: */
   color: inherit !important;
+  min-width: 0;
+  margin: 0;
+  padding: .9em 2px;
 }
 
 .panel-footer > button[disabled] {
   color: var(--panel-disabled-color) !important;
 }
 
+.panel-footer > button:-moz-focusring {
+  outline: 1px dotted;
+  outline-offset: -3px;
+}
+
 .panel-footer > button:not([disabled]):hover {
   background-color: var(--arrowpanel-dimmed);
 }
 
-.panel-footer > button:not([disabled]):hover:active {
+.panel-footer > button:not([disabled]):hover:active,
+.panel-footer > button:not([disabled])[open] {
   background-color: var(--arrowpanel-dimmed-further);
+  box-shadow: 0 1px 0 hsla(210,4%,10%,.05) inset;
 }
 
 .panel-footer > button:not([disabled])[default] {
@@ -84,4 +108,8 @@
 
 .panel-footer > button:not([disabled])[default]:hover:active {
   background-color: #002275;
+}
+
+.panel-footer > button > .button-box {
+  padding: 0;
 }

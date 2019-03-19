@@ -3,6 +3,9 @@
 
 "use strict";
 
+/* import-globals-from helper-adb.js */
+Services.scriptloader.loadSubScript(CHROME_URL_ROOT + "helper-adb.js", this);
+
 const { AddonManager } = require("resource://gre/modules/AddonManager.jsm");
 
 /**
@@ -11,6 +14,7 @@ const { AddonManager } = require("resource://gre/modules/AddonManager.jsm");
 add_task(async function() {
   await pushPref("devtools.remote.adb.extensionURL",
                  CHROME_URL_ROOT + "resources/test-adb-extension/adb-extension-#OS#.xpi");
+  await checkAdbNotRunning();
 
   const { document, tab } = await openAboutDebugging();
 
@@ -42,7 +46,7 @@ add_task(async function() {
   Assert.deepEqual(addon.installTelemetryInfo, { source: "about:debugging" },
     "Got the expected addon.installTelemetryInfo");
 
-  // Right now we are resuming as soon as "USB devices enabled" is displayed, but ADB
+  // Right now we are resuming as soon as "USB enabled" is displayed, but ADB
   // might still be starting up. If we move to uninstall directly, the ADB startup will
   // fail and we will have an unhandled promise rejection.
   // See Bug 1498469.

@@ -37,9 +37,9 @@
 #include <d3dcommon.h>
 // Win 8.0 SDK types we'll need when building using older sdks.
 #if !defined(D3D_FEATURE_LEVEL_11_1)  // defined in the 8.0 SDK only
-#define D3D_FEATURE_LEVEL_11_1 static_cast<D3D_FEATURE_LEVEL>(0xb100)
-#define D3D_FL9_1_REQ_TEXTURE2D_U_OR_V_DIMENSION 2048
-#define D3D_FL9_3_REQ_TEXTURE2D_U_OR_V_DIMENSION 4096
+#  define D3D_FEATURE_LEVEL_11_1 static_cast<D3D_FEATURE_LEVEL>(0xb100)
+#  define D3D_FL9_1_REQ_TEXTURE2D_U_OR_V_DIMENSION 2048
+#  define D3D_FL9_3_REQ_TEXTURE2D_U_OR_V_DIMENSION 4096
 #endif
 
 namespace mozilla {
@@ -167,8 +167,6 @@ class gfxWindowsPlatform : public gfxPlatform {
   void SchedulePaintIfDeviceReset() override;
   void CheckForContentOnlyDeviceReset();
 
-  bool AllowOpenGLCanvas() override;
-
   mozilla::gfx::BackendType GetContentBackendFor(
       mozilla::layers::LayersBackend aLayers) override;
 
@@ -183,7 +181,7 @@ class gfxWindowsPlatform : public gfxPlatform {
 
   void SetupClearTypeParams();
 
-  inline bool DWriteEnabled() const {
+  static inline bool DWriteEnabled() {
     return !!mozilla::gfx::Factory::GetDWriteFactory();
   }
   inline DWRITE_MEASURING_MODE DWriteMeasuringMode() { return mMeasuringMode; }
@@ -257,6 +255,8 @@ class gfxWindowsPlatform : public gfxPlatform {
   void InitializeD2DConfig();
   void InitializeDirectDrawConfig();
   void InitializeAdvancedLayersConfig();
+
+  void RecordStartupTelemetry();
 
   RefPtr<IDWriteRenderingParams> mRenderingParams[TEXT_RENDERING_COUNT];
   DWRITE_MEASURING_MODE mMeasuringMode;

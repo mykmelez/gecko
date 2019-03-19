@@ -98,7 +98,8 @@ void WebRenderBridgeChild::UpdateResources(
   nsTArray<ipc::Shmem> largeShmems;
   aResources.Flush(resourceUpdates, smallShmems, largeShmems);
 
-  this->SendUpdateResources(resourceUpdates, smallShmems, largeShmems);
+  this->SendUpdateResources(resourceUpdates, smallShmems,
+                            std::move(largeShmems));
 }
 
 void WebRenderBridgeChild::EndTransaction(
@@ -106,6 +107,7 @@ void WebRenderBridgeChild::EndTransaction(
     wr::IpcResourceUpdateQueue& aResources, const gfx::IntSize& aSize,
     TransactionId aTransactionId, const WebRenderScrollData& aScrollData,
     bool aContainsSVGGroup, const mozilla::VsyncId& aVsyncId,
+    const mozilla::TimeStamp& aVsyncStartTime,
     const mozilla::TimeStamp& aRefreshStartTime,
     const mozilla::TimeStamp& aTxnStartTime, const nsCString& aTxnURL) {
   MOZ_ASSERT(!mDestroyed);
@@ -122,12 +124,12 @@ void WebRenderBridgeChild::EndTransaction(
   nsTArray<ipc::Shmem> largeShmems;
   aResources.Flush(resourceUpdates, smallShmems, largeShmems);
 
-  this->SendSetDisplayList(aSize, mParentCommands, mDestroyedActors,
-                           GetFwdTransactionId(), aTransactionId, aContentSize,
-                           dlData, aDL.dl_desc, aScrollData, resourceUpdates,
-                           smallShmems, largeShmems, mIdNamespace,
-                           aContainsSVGGroup, aVsyncId, aRefreshStartTime,
-                           aTxnStartTime, aTxnURL, fwdTime);
+  this->SendSetDisplayList(
+      aSize, mParentCommands, mDestroyedActors, GetFwdTransactionId(),
+      aTransactionId, aContentSize, std::move(dlData), aDL.dl_desc, aScrollData,
+      resourceUpdates, smallShmems, std::move(largeShmems), mIdNamespace,
+      aContainsSVGGroup, aVsyncId, aVsyncStartTime, aRefreshStartTime,
+      aTxnStartTime, aTxnURL, fwdTime);
 
   mParentCommands.Clear();
   mDestroyedActors.Clear();
@@ -138,7 +140,7 @@ void WebRenderBridgeChild::EndEmptyTransaction(
     const FocusTarget& aFocusTarget, const ScrollUpdatesMap& aUpdates,
     Maybe<wr::IpcResourceUpdateQueue>& aResources,
     uint32_t aPaintSequenceNumber, TransactionId aTransactionId,
-    const mozilla::VsyncId& aVsyncId,
+    const mozilla::VsyncId& aVsyncId, const mozilla::TimeStamp& aVsyncStartTime,
     const mozilla::TimeStamp& aRefreshStartTime,
     const mozilla::TimeStamp& aTxnStartTime, const nsCString& aTxnURL) {
   MOZ_ASSERT(!mDestroyed);
@@ -157,8 +159,8 @@ void WebRenderBridgeChild::EndEmptyTransaction(
   this->SendEmptyTransaction(
       aFocusTarget, aUpdates, aPaintSequenceNumber, mParentCommands,
       mDestroyedActors, GetFwdTransactionId(), aTransactionId, resourceUpdates,
-      smallShmems, largeShmems, mIdNamespace, aVsyncId, aRefreshStartTime,
-      aTxnStartTime, aTxnURL, fwdTime);
+      smallShmems, std::move(largeShmems), mIdNamespace, aVsyncId,
+      aVsyncStartTime, aRefreshStartTime, aTxnStartTime, aTxnURL, fwdTime);
   mParentCommands.Clear();
   mDestroyedActors.Clear();
   mIsInTransaction = false;
@@ -225,16 +227,6 @@ static void WriteFontDescriptor(const uint8_t* aData, uint32_t aLength,
 
   *sink->mFontKey = sink->mWrBridge->GetNextFontKey();
 
-#ifdef XP_WIN
-  // FIXME: Debugging kluge for bug 1455848. Remove once debugged!
-  nsTArray<uint8_t> data;
-  data.AppendElements(aData, aLength);
-  sink->mWrBridge->SendValidateFontDescriptor(data);
-  aLength =
-      uint32_t(wcsnlen_s((const wchar_t*)aData, aLength / sizeof(wchar_t)) *
-               sizeof(wchar_t));
-#endif
-
   sink->mResources->AddFontDescriptor(
       *sink->mFontKey, Range<uint8_t>(const_cast<uint8_t*>(aData), aLength),
       aIndex);
@@ -248,14 +240,16 @@ void WebRenderBridgeChild::PushGlyphs(
     const wr::GlyphOptions* aGlyphOptions) {
   MOZ_ASSERT(aFont);
 
-  wr::WrFontInstanceKey key = GetFontKeyForScaledFont(aFont);
-  MOZ_ASSERT(key.mNamespace.mHandle && key.mHandle);
+  Maybe<wr::WrFontInstanceKey> key = GetFontKeyForScaledFont(aFont);
+  MOZ_ASSERT(key.isSome());
 
-  aBuilder.PushText(aBounds, aClip, aBackfaceVisible, aColor, key, aGlyphs,
-                    aGlyphOptions);
+  if (key.isSome()) {
+    aBuilder.PushText(aBounds, aClip, aBackfaceVisible, aColor, key.value(),
+                      aGlyphs, aGlyphOptions);
+  }
 }
 
-wr::FontInstanceKey WebRenderBridgeChild::GetFontKeyForScaledFont(
+Maybe<wr::FontInstanceKey> WebRenderBridgeChild::GetFontKeyForScaledFont(
     gfx::ScaledFont* aScaledFont, wr::IpcResourceUpdateQueue* aResources) {
   MOZ_ASSERT(!mDestroyed);
   MOZ_ASSERT(aScaledFont);
@@ -263,18 +257,17 @@ wr::FontInstanceKey WebRenderBridgeChild::GetFontKeyForScaledFont(
 
   wr::FontInstanceKey instanceKey = {wr::IdNamespace{0}, 0};
   if (mFontInstanceKeys.Get(aScaledFont, &instanceKey)) {
-    return instanceKey;
+    return Some(instanceKey);
   }
 
   Maybe<wr::IpcResourceUpdateQueue> resources =
       aResources ? Nothing() : Some(wr::IpcResourceUpdateQueue(this));
   aResources = resources.ptrOr(aResources);
 
-  wr::FontKey fontKey =
+  Maybe<wr::FontKey> fontKey =
       GetFontKeyForUnscaledFont(aScaledFont->GetUnscaledFont(), aResources);
-  wr::FontKey nullKey = {wr::IdNamespace{0}, 0};
-  if (fontKey == nullKey) {
-    return instanceKey;
+  if (fontKey.isNothing()) {
+    return Nothing();
   }
 
   instanceKey = GetNextFontInstanceKey();
@@ -286,8 +279,8 @@ wr::FontInstanceKey WebRenderBridgeChild::GetFontKeyForScaledFont(
                                         &variations);
 
   aResources->AddFontInstance(
-      instanceKey, fontKey, aScaledFont->GetSize(), options.ptrOr(nullptr),
-      platformOptions.ptrOr(nullptr),
+      instanceKey, fontKey.value(), aScaledFont->GetSize(),
+      options.ptrOr(nullptr), platformOptions.ptrOr(nullptr),
       Range<const FontVariation>(variations.data(), variations.size()));
   if (resources.isSome()) {
     UpdateResources(resources.ref());
@@ -295,10 +288,10 @@ wr::FontInstanceKey WebRenderBridgeChild::GetFontKeyForScaledFont(
 
   mFontInstanceKeys.Put(aScaledFont, instanceKey);
 
-  return instanceKey;
+  return Some(instanceKey);
 }
 
-wr::FontKey WebRenderBridgeChild::GetFontKeyForUnscaledFont(
+Maybe<wr::FontKey> WebRenderBridgeChild::GetFontKeyForUnscaledFont(
     gfx::UnscaledFont* aUnscaled, wr::IpcResourceUpdateQueue* aResources) {
   MOZ_ASSERT(!mDestroyed);
 
@@ -315,7 +308,7 @@ wr::FontKey WebRenderBridgeChild::GetFontKeyForUnscaledFont(
     // null font key.
     if (!aUnscaled->GetWRFontDescriptor(WriteFontDescriptor, &sink) &&
         !aUnscaled->GetFontFileData(WriteFontFileData, &sink)) {
-      return fontKey;
+      return Nothing();
     }
 
     if (resources.isSome()) {
@@ -325,7 +318,7 @@ wr::FontKey WebRenderBridgeChild::GetFontKeyForUnscaledFont(
     mFontKeys.Put(aUnscaled, fontKey);
   }
 
-  return fontKey;
+  return Some(fontKey);
 }
 
 void WebRenderBridgeChild::RemoveExpiredFontKeys(

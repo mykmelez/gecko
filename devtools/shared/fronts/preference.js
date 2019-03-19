@@ -7,10 +7,11 @@ const {preferenceSpec} = require("devtools/shared/specs/preference");
 const { FrontClassWithSpec, registerFront } = require("devtools/shared/protocol");
 
 class PreferenceFront extends FrontClassWithSpec(preferenceSpec) {
-  constructor(client, form) {
+  constructor(client) {
     super(client);
-    this.actorID = form.preferenceActor;
-    this.manage(this);
+
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "preferenceActor";
   }
 }
 

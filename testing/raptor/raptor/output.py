@@ -21,7 +21,7 @@ LOG = get_proxy_logger(component="raptor-output")
 class Output(object):
     """class for raptor output"""
 
-    def __init__(self, results, supporting_data):
+    def __init__(self, results, supporting_data, subtest_alert_on):
         """
         - results : list of RaptorTestResult instances
         """
@@ -29,8 +29,10 @@ class Output(object):
         self.summarized_results = {}
         self.supporting_data = supporting_data
         self.summarized_supporting_data = []
+        self.summarized_screenshots = []
+        self.subtest_alert_on = subtest_alert_on
 
-    def summarize(self):
+    def summarize(self, test_names):
         suites = []
         test_results = {
             'framework': {
@@ -41,7 +43,8 @@ class Output(object):
 
         # check if we actually have any results
         if len(self.results) == 0:
-            LOG.error("error: no raptor test results found!")
+            LOG.error("error: no raptor test results found for %s" %
+                      ', '.join(test_names))
             return
 
         for test in self.results:
@@ -76,7 +79,7 @@ class Output(object):
 
                 for measurement_name, replicates in test.measurements.iteritems():
                     new_subtest = {}
-                    new_subtest['name'] = test.name + "-" + measurement_name
+                    new_subtest['name'] = measurement_name
                     new_subtest['replicates'] = replicates
                     new_subtest['lowerIsBetter'] = test.subtest_lower_is_better
                     new_subtest['alertThreshold'] = float(test.alert_threshold)
@@ -98,6 +101,14 @@ class Output(object):
                         # valid TTFI values available for this pageload just remove it from results
                         if len(filtered_values) < 1:
                             continue
+
+                    # if 'alert_on' is set for this particular measurement, then we want to set the
+                    # flag in the perfherder output to turn on alerting for this subtest
+                    if self.subtest_alert_on is not None:
+                        if measurement_name in self.subtest_alert_on:
+                            LOG.info("turning on subtest alerting for measurement type: %s"
+                                     % measurement_name)
+                            new_subtest['shouldAlert'] = True
 
                     new_subtest['value'] = filter.median(filtered_values)
 
@@ -124,7 +135,8 @@ class Output(object):
                 suite['subtests'] = subtests
 
             else:
-                LOG.error("output.summarize received unsupported test results type")
+                LOG.error("output.summarize received unsupported test results type for %s" %
+                          test.name)
                 return
 
             # for benchmarks there is generally  more than one subtest in each cycle
@@ -555,24 +567,75 @@ class Output(object):
 
         return subtests, vals
 
-    def output(self):
-        """output to file and perfherder data json """
-        if self.summarized_results == {}:
-            LOG.error("error: no summarized raptor results found!")
-            return False
+    def summarize_screenshots(self, screenshots):
+        if len(screenshots) == 0:
+            return
 
+        self.summarized_screenshots.append("""<!DOCTYPE html>
+        <head>
+        <style>
+            table, th, td {
+              border: 1px solid black;
+              border-collapse: collapse;
+            }
+        </style>
+        </head>
+        <html> <body>
+        <h1>Captured screenshots!</h1>
+        <table style="width:100%">
+          <tr>
+            <th>Test Name</th>
+            <th>Pagecycle</th>
+            <th>Screenshot</th>
+          </tr>""")
+
+        for screenshot in screenshots:
+            self.summarized_screenshots.append("""<tr>
+            <th>%s</th>
+            <th> %s</th>
+            <th>
+                <img src="%s" alt="%s %s" width="320" height="240">
+            </th>
+            </tr>""" % (screenshot['test_name'],
+                        screenshot['page_cycle'],
+                        screenshot['screenshot'],
+                        screenshot['test_name'],
+                        screenshot['page_cycle']))
+
+        self.summarized_screenshots.append("""</table></body> </html>""")
+
+    def output(self, test_names):
+        """output to file and perfherder data json """
         if os.environ['MOZ_UPLOAD_DIR']:
             # i.e. testing/mozharness/build/raptor.json locally; in production it will
             # be at /tasks/task_*/build/ (where it will be picked up by mozharness later
             # and made into a tc artifact accessible in treeherder as perfherder-data.json)
             results_path = os.path.join(os.path.dirname(os.environ['MOZ_UPLOAD_DIR']),
                                         'raptor.json')
+            screenshot_path = os.path.join(os.path.dirname(os.environ['MOZ_UPLOAD_DIR']),
+                                           'screenshots.html')
         else:
             results_path = os.path.join(os.getcwd(), 'raptor.json')
+            screenshot_path = os.path.join(os.getcwd(), 'screenshots.html')
 
-        with open(results_path, 'w') as f:
-            for result in self.summarized_results:
-                f.write("%s\n" % result)
+        if self.summarized_results == {}:
+            LOG.error("error: no summarized raptor results found for %s" %
+                      ', '.join(test_names))
+        else:
+            with open(results_path, 'w') as f:
+                for result in self.summarized_results:
+                    f.write("%s\n" % result)
+
+        if len(self.summarized_screenshots) > 0:
+            with open(screenshot_path, 'w') as f:
+                for result in self.summarized_screenshots:
+                    f.write("%s\n" % result)
+            LOG.info("screen captures can be found locally at: %s" % screenshot_path)
+
+        # now that we've checked for screen captures too, if there were no actual
+        # test results we can bail out here
+        if self.summarized_results == {}:
+            return False
 
         # when gecko_profiling, we don't want results ingested by Perfherder
         extra_opts = self.summarized_results['suites'][0].get('extraOptions', [])
@@ -594,7 +657,7 @@ class Output(object):
 
         return True
 
-    def output_supporting_data(self):
+    def output_supporting_data(self, test_names):
         '''
         Supporting data was gathered outside of the main raptor test; it has already
         been summarized, now output it appropriately.
@@ -605,7 +668,8 @@ class Output(object):
         from the actual Raptor test that was ran when the supporting data was gathered.
         '''
         if len(self.summarized_supporting_data) == 0:
-            LOG.error("error: no summarized supporting data found!")
+            LOG.error("error: no summarized supporting data found for %s" %
+                      ', '.join(test_names))
             return False
 
         for next_data_set in self.summarized_supporting_data:

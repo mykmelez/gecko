@@ -13,10 +13,10 @@
 #include "gfxPrefs.h"
 
 #if defined(XP_WIN)
-#include <d3d11.h>
-#include "mozilla/gfx/DeviceManagerDx.h"
+#  include <d3d11.h>
+#  include "mozilla/gfx/DeviceManagerDx.h"
 #elif defined(XP_MACOSX)
-#include "mozilla/gfx/MacIOSurface.h"
+#  include "mozilla/gfx/MacIOSurface.h"
 #endif
 
 #include "mozilla/dom/GamepadEventTypes.h"
@@ -24,13 +24,15 @@
 #include "binding/OpenVRKnucklesBinding.h"
 #include "binding/OpenVRViveBinding.h"
 #if defined(XP_WIN)  // Windows Mixed Reality is only available in Windows.
-#include "binding/OpenVRWMRBinding.h"
+#  include "binding/OpenVRWMRBinding.h"
 #endif
 
+#include "VRParent.h"
+#include "VRProcessChild.h"
 #include "VRThread.h"
 
 #if !defined(M_PI)
-#define M_PI 3.14159265358979323846264338327950288
+#  define M_PI 3.14159265358979323846264338327950288
 #endif
 
 #define BTN_MASK_FROM_ID(_id) ::vr::ButtonMaskFromId(vr::EVRButtonId::_id)
@@ -169,6 +171,13 @@ void UpdateButton(VRControllerState& aState,
   }
 }
 
+bool FileIsExisting(const nsCString& aPath) {
+  if (aPath.IsEmpty() || !std::ifstream(aPath.BeginReading())) {
+    return false;
+  }
+  return true;
+}
+
 };  // anonymous namespace
 
 OpenVRSession::OpenVRSession()
@@ -261,53 +270,131 @@ bool OpenVRSession::Initialize(mozilla::gfx::VRSystemState& aSystemState) {
 void OpenVRSession::SetupContollerActions() {
   // Check if this device binding file has been created.
   // If it didn't exist yet, create a new temp file.
-  if (!sViveBindingFile) {
-    sViveBindingFile = ControllerManifestFile::CreateManifest();
-    NS_DispatchToMainThread(
-        NS_NewRunnableFunction("ClearOnShutdown ControllerManifestFile",
-                               []() { ClearOnShutdown(&sViveBindingFile); }));
-  }
-  if (!sViveBindingFile->IsExisting()) {
-    sViveBindingFile->SetFileName(std::tmpnam(nullptr));
-    OpenVRViveBinding viveBinding;
-    std::ofstream viveBindingFile(sViveBindingFile->GetFileName());
-    if (viveBindingFile.is_open()) {
-      viveBindingFile << viveBinding.binding;
-      viveBindingFile.close();
+  nsCString controllerAction;
+  nsCString viveManifest;
+  nsCString WMRManifest;
+  nsCString knucklesManifest;
+
+  if (gfxPrefs::VRProcessEnabled()) {
+    VRParent* vrParent = VRProcessChild::GetVRParent();
+    nsCString output;
+
+    if (vrParent->GetOpenVRControllerActionPath(&output)) {
+      controllerAction = output;
+    } else {
+      controllerAction = std::tmpnam(nullptr);
     }
-  }
-  if (!sKnucklesBindingFile) {
-    sKnucklesBindingFile = ControllerManifestFile::CreateManifest();
-    NS_DispatchToMainThread(NS_NewRunnableFunction(
-        "ClearOnShutdown ControllerManifestFile",
-        []() { ClearOnShutdown(&sKnucklesBindingFile); }));
-  }
-  if (!sKnucklesBindingFile->IsExisting()) {
-    sKnucklesBindingFile->SetFileName(std::tmpnam(nullptr));
-    OpenVRKnucklesBinding knucklesBinding;
-    std::ofstream knucklesBindingFile(sKnucklesBindingFile->GetFileName());
-    if (knucklesBindingFile.is_open()) {
-      knucklesBindingFile << knucklesBinding.binding;
-      knucklesBindingFile.close();
+
+    if (vrParent->GetOpenVRControllerManifestPath(OpenVRControllerType::Vive,
+                                                  &output)) {
+      viveManifest = output;
+    } else {
+      viveManifest = std::tmpnam(nullptr);
     }
-  }
+    if (!FileIsExisting(viveManifest)) {
+      OpenVRViveBinding viveBinding;
+      std::ofstream viveBindingFile(viveManifest.BeginReading());
+      if (viveBindingFile.is_open()) {
+        viveBindingFile << viveBinding.binding;
+        viveBindingFile.close();
+      }
+    }
+
 #if defined(XP_WIN)
-  if (!sWMRBindingFile) {
-    sWMRBindingFile = ControllerManifestFile::CreateManifest();
-    NS_DispatchToMainThread(
-        NS_NewRunnableFunction("ClearOnShutdown ControllerManifestFile",
-                               []() { ClearOnShutdown(&sWMRBindingFile); }));
-  }
-  if (!sWMRBindingFile->IsExisting()) {
-    sWMRBindingFile->SetFileName(std::tmpnam(nullptr));
-    OpenVRWMRBinding WMRBinding;
-    std::ofstream WMRBindingFile(sWMRBindingFile->GetFileName());
-    if (WMRBindingFile.is_open()) {
-      WMRBindingFile << WMRBinding.binding;
-      WMRBindingFile.close();
+    if (vrParent->GetOpenVRControllerManifestPath(OpenVRControllerType::WMR,
+                                                  &output)) {
+      WMRManifest = output;
+    } else {
+      WMRManifest = std::tmpnam(nullptr);
     }
-  }
+    if (!FileIsExisting(WMRManifest)) {
+      OpenVRWMRBinding WMRBinding;
+      std::ofstream WMRBindingFile(WMRManifest.BeginReading());
+      if (WMRBindingFile.is_open()) {
+        WMRBindingFile << WMRBinding.binding;
+        WMRBindingFile.close();
+      }
+    }
 #endif
+
+    if (vrParent->GetOpenVRControllerManifestPath(
+            OpenVRControllerType::Knuckles, &output)) {
+      knucklesManifest = output;
+    } else {
+      knucklesManifest = std::tmpnam(nullptr);
+    }
+    if (!FileIsExisting(knucklesManifest)) {
+      OpenVRKnucklesBinding knucklesBinding;
+      std::ofstream knucklesBindingFile(knucklesManifest.BeginReading());
+      if (knucklesBindingFile.is_open()) {
+        knucklesBindingFile << knucklesBinding.binding;
+        knucklesBindingFile.close();
+      }
+    }
+  } else {
+    if (!sControllerActionFile) {
+      sControllerActionFile = ControllerManifestFile::CreateManifest();
+      NS_DispatchToMainThread(NS_NewRunnableFunction(
+          "ClearOnShutdown ControllerManifestFile",
+          []() { ClearOnShutdown(&sControllerActionFile); }));
+
+      sControllerActionFile->SetFileName(std::tmpnam(nullptr));
+    }
+    controllerAction = sControllerActionFile->GetFileName();
+
+    if (!sViveBindingFile) {
+      sViveBindingFile = ControllerManifestFile::CreateManifest();
+      NS_DispatchToMainThread(
+          NS_NewRunnableFunction("ClearOnShutdown ControllerManifestFile",
+                                 []() { ClearOnShutdown(&sViveBindingFile); }));
+    }
+    if (!sViveBindingFile->IsExisting()) {
+      sViveBindingFile->SetFileName(std::tmpnam(nullptr));
+      OpenVRViveBinding viveBinding;
+      std::ofstream viveBindingFile(sViveBindingFile->GetFileName());
+      if (viveBindingFile.is_open()) {
+        viveBindingFile << viveBinding.binding;
+        viveBindingFile.close();
+      }
+    }
+    viveManifest = sViveBindingFile->GetFileName();
+
+    if (!sKnucklesBindingFile) {
+      sKnucklesBindingFile = ControllerManifestFile::CreateManifest();
+      NS_DispatchToMainThread(NS_NewRunnableFunction(
+          "ClearOnShutdown ControllerManifestFile",
+          []() { ClearOnShutdown(&sKnucklesBindingFile); }));
+    }
+    if (!sKnucklesBindingFile->IsExisting()) {
+      sKnucklesBindingFile->SetFileName(std::tmpnam(nullptr));
+      OpenVRKnucklesBinding knucklesBinding;
+      std::ofstream knucklesBindingFile(sKnucklesBindingFile->GetFileName());
+      if (knucklesBindingFile.is_open()) {
+        knucklesBindingFile << knucklesBinding.binding;
+        knucklesBindingFile.close();
+      }
+    }
+    knucklesManifest = sKnucklesBindingFile->GetFileName();
+
+#if defined(XP_WIN)
+    if (!sWMRBindingFile) {
+      sWMRBindingFile = ControllerManifestFile::CreateManifest();
+      NS_DispatchToMainThread(
+          NS_NewRunnableFunction("ClearOnShutdown ControllerManifestFile",
+                                 []() { ClearOnShutdown(&sWMRBindingFile); }));
+    }
+    if (!sWMRBindingFile->IsExisting()) {
+      sWMRBindingFile->SetFileName(std::tmpnam(nullptr));
+      OpenVRWMRBinding WMRBinding;
+      std::ofstream WMRBindingFile(sWMRBindingFile->GetFileName());
+      if (WMRBindingFile.is_open()) {
+        WMRBindingFile << WMRBinding.binding;
+        WMRBindingFile.close();
+      }
+    }
+    WMRManifest = sWMRBindingFile->GetFileName();
+#endif
+  }
 
   ControllerInfo leftContollerInfo;
   leftContollerInfo.mActionPose =
@@ -408,19 +495,10 @@ void OpenVRSession::SetupContollerActions() {
   mControllerHand[OpenVRHand::Left] = leftContollerInfo;
   mControllerHand[OpenVRHand::Right] = rightContollerInfo;
 
-  // Check if the action file has been created,
-  // if it doesn't exist, create a new temp file.
-  if (!sControllerActionFile) {
-    sControllerActionFile = ControllerManifestFile::CreateManifest();
-    NS_DispatchToMainThread(NS_NewRunnableFunction(
-        "ClearOnShutdown ControllerManifestFile",
-        []() { ClearOnShutdown(&sControllerActionFile); }));
-  }
-  if (sControllerActionFile->IsExisting()) {
+  if (FileIsExisting(controllerAction)) {
     return;
   }
 
-  sControllerActionFile->SetFileName(std::tmpnam(nullptr));
   nsAutoString actionData;
   JSONWriter actionWriter(MakeUnique<StringWriteFunc>(actionData));
   actionWriter.Start();
@@ -431,17 +509,16 @@ void OpenVRSession::SetupContollerActions() {
   actionWriter.StartArrayProperty("default_bindings");
   actionWriter.StartObjectElement();
   actionWriter.StringProperty("controller_type", "vive_controller");
-  actionWriter.StringProperty("binding_url", sViveBindingFile->GetFileName());
+  actionWriter.StringProperty("binding_url", viveManifest.BeginReading());
   actionWriter.EndObject();
   actionWriter.StartObjectElement();
   actionWriter.StringProperty("controller_type", "knuckles");
-  actionWriter.StringProperty("binding_url",
-                              sKnucklesBindingFile->GetFileName());
+  actionWriter.StringProperty("binding_url", knucklesManifest.BeginReading());
   actionWriter.EndObject();
 #if defined(XP_WIN)
   actionWriter.StartObjectElement();
   actionWriter.StringProperty("controller_type", "holographic_controller");
-  actionWriter.StringProperty("binding_url", sWMRBindingFile->GetFileName());
+  actionWriter.StringProperty("binding_url", WMRManifest.BeginReading());
   actionWriter.EndObject();
 #endif
   actionWriter.EndArray();  // End "default_bindings": []
@@ -615,14 +692,31 @@ void OpenVRSession::SetupContollerActions() {
   actionWriter.EndArray();  // End "actions": []
   actionWriter.End();
 
-  std::ofstream actionfile(sControllerActionFile->GetFileName());
+  std::ofstream actionfile(controllerAction.BeginReading());
   nsCString actionResult(NS_ConvertUTF16toUTF8(actionData.get()));
   if (actionfile.is_open()) {
     actionfile << actionResult.get();
     actionfile.close();
   }
 
-  vr::VRInput()->SetActionManifestPath(sControllerActionFile->GetFileName());
+  vr::VRInput()->SetActionManifestPath(controllerAction.BeginReading());
+
+  // Notify the parent process these manifest files are already been recorded.
+  if (gfxPrefs::VRProcessEnabled()) {
+    NS_DispatchToMainThread(NS_NewRunnableFunction(
+        "SendOpenVRControllerActionPathToParent",
+        [controllerAction, viveManifest, WMRManifest, knucklesManifest]() {
+          VRParent* vrParent = VRProcessChild::GetVRParent();
+          Unused << vrParent->SendOpenVRControllerActionPathToParent(
+              controllerAction);
+          Unused << vrParent->SendOpenVRControllerManifestPathToParent(
+              OpenVRControllerType::Vive, viveManifest);
+          Unused << vrParent->SendOpenVRControllerManifestPathToParent(
+              OpenVRControllerType::WMR, WMRManifest);
+          Unused << vrParent->SendOpenVRControllerManifestPathToParent(
+              OpenVRControllerType::Knuckles, knucklesManifest);
+        }));
+  }
 }
 
 #if defined(XP_WIN)
@@ -651,34 +745,34 @@ void OpenVRSession::Shutdown() {
 
 bool OpenVRSession::InitState(VRSystemState& aSystemState) {
   VRDisplayState& state = aSystemState.displayState;
-  strncpy(state.mDisplayName, "OpenVR HMD", kVRDisplayNameMaxLen);
-  state.mEightCC = GFX_VR_EIGHTCC('O', 'p', 'e', 'n', 'V', 'R', ' ', ' ');
-  state.mIsConnected =
+  strncpy(state.displayName, "OpenVR HMD", kVRDisplayNameMaxLen);
+  state.eightCC = GFX_VR_EIGHTCC('O', 'p', 'e', 'n', 'V', 'R', ' ', ' ');
+  state.isConnected =
       mVRSystem->IsTrackedDeviceConnected(::vr::k_unTrackedDeviceIndex_Hmd);
-  state.mIsMounted = false;
-  state.mCapabilityFlags = (VRDisplayCapabilityFlags)(
+  state.isMounted = false;
+  state.capabilityFlags = (VRDisplayCapabilityFlags)(
       (int)VRDisplayCapabilityFlags::Cap_None |
       (int)VRDisplayCapabilityFlags::Cap_Orientation |
       (int)VRDisplayCapabilityFlags::Cap_Position |
       (int)VRDisplayCapabilityFlags::Cap_External |
       (int)VRDisplayCapabilityFlags::Cap_Present |
       (int)VRDisplayCapabilityFlags::Cap_StageParameters);
-  state.mReportsDroppedFrames = true;
+  state.reportsDroppedFrames = true;
 
   ::vr::ETrackedPropertyError err;
   bool bHasProximitySensor = mVRSystem->GetBoolTrackedDeviceProperty(
       ::vr::k_unTrackedDeviceIndex_Hmd, ::vr::Prop_ContainsProximitySensor_Bool,
       &err);
   if (err == ::vr::TrackedProp_Success && bHasProximitySensor) {
-    state.mCapabilityFlags = (VRDisplayCapabilityFlags)(
-        (int)state.mCapabilityFlags |
+    state.capabilityFlags = (VRDisplayCapabilityFlags)(
+        (int)state.capabilityFlags |
         (int)VRDisplayCapabilityFlags::Cap_MountDetection);
   }
 
   uint32_t w, h;
   mVRSystem->GetRecommendedRenderTargetSize(&w, &h);
-  state.mEyeResolution.width = w;
-  state.mEyeResolution.height = h;
+  state.eyeResolution.width = w;
+  state.eyeResolution.height = h;
 
   // default to an identity quaternion
   aSystemState.sensorState.pose.orientation[3] = 1.0f;
@@ -701,53 +795,53 @@ void OpenVRSession::UpdateStageParameters(VRDisplayState& aState) {
   if (mVRChaperone->GetPlayAreaSize(&sizeX, &sizeZ)) {
     ::vr::HmdMatrix34_t t =
         mVRSystem->GetSeatedZeroPoseToStandingAbsoluteTrackingPose();
-    aState.mStageSize.width = sizeX;
-    aState.mStageSize.height = sizeZ;
+    aState.stageSize.width = sizeX;
+    aState.stageSize.height = sizeZ;
 
-    aState.mSittingToStandingTransform[0] = t.m[0][0];
-    aState.mSittingToStandingTransform[1] = t.m[1][0];
-    aState.mSittingToStandingTransform[2] = t.m[2][0];
-    aState.mSittingToStandingTransform[3] = 0.0f;
+    aState.sittingToStandingTransform[0] = t.m[0][0];
+    aState.sittingToStandingTransform[1] = t.m[1][0];
+    aState.sittingToStandingTransform[2] = t.m[2][0];
+    aState.sittingToStandingTransform[3] = 0.0f;
 
-    aState.mSittingToStandingTransform[4] = t.m[0][1];
-    aState.mSittingToStandingTransform[5] = t.m[1][1];
-    aState.mSittingToStandingTransform[6] = t.m[2][1];
-    aState.mSittingToStandingTransform[7] = 0.0f;
+    aState.sittingToStandingTransform[4] = t.m[0][1];
+    aState.sittingToStandingTransform[5] = t.m[1][1];
+    aState.sittingToStandingTransform[6] = t.m[2][1];
+    aState.sittingToStandingTransform[7] = 0.0f;
 
-    aState.mSittingToStandingTransform[8] = t.m[0][2];
-    aState.mSittingToStandingTransform[9] = t.m[1][2];
-    aState.mSittingToStandingTransform[10] = t.m[2][2];
-    aState.mSittingToStandingTransform[11] = 0.0f;
+    aState.sittingToStandingTransform[8] = t.m[0][2];
+    aState.sittingToStandingTransform[9] = t.m[1][2];
+    aState.sittingToStandingTransform[10] = t.m[2][2];
+    aState.sittingToStandingTransform[11] = 0.0f;
 
-    aState.mSittingToStandingTransform[12] = t.m[0][3];
-    aState.mSittingToStandingTransform[13] = t.m[1][3];
-    aState.mSittingToStandingTransform[14] = t.m[2][3];
-    aState.mSittingToStandingTransform[15] = 1.0f;
+    aState.sittingToStandingTransform[12] = t.m[0][3];
+    aState.sittingToStandingTransform[13] = t.m[1][3];
+    aState.sittingToStandingTransform[14] = t.m[2][3];
+    aState.sittingToStandingTransform[15] = 1.0f;
   } else {
     // If we fail, fall back to reasonable defaults.
     // 1m x 1m space, 0.75m high in seated position
-    aState.mStageSize.width = 1.0f;
-    aState.mStageSize.height = 1.0f;
+    aState.stageSize.width = 1.0f;
+    aState.stageSize.height = 1.0f;
 
-    aState.mSittingToStandingTransform[0] = 1.0f;
-    aState.mSittingToStandingTransform[1] = 0.0f;
-    aState.mSittingToStandingTransform[2] = 0.0f;
-    aState.mSittingToStandingTransform[3] = 0.0f;
+    aState.sittingToStandingTransform[0] = 1.0f;
+    aState.sittingToStandingTransform[1] = 0.0f;
+    aState.sittingToStandingTransform[2] = 0.0f;
+    aState.sittingToStandingTransform[3] = 0.0f;
 
-    aState.mSittingToStandingTransform[4] = 0.0f;
-    aState.mSittingToStandingTransform[5] = 1.0f;
-    aState.mSittingToStandingTransform[6] = 0.0f;
-    aState.mSittingToStandingTransform[7] = 0.0f;
+    aState.sittingToStandingTransform[4] = 0.0f;
+    aState.sittingToStandingTransform[5] = 1.0f;
+    aState.sittingToStandingTransform[6] = 0.0f;
+    aState.sittingToStandingTransform[7] = 0.0f;
 
-    aState.mSittingToStandingTransform[8] = 0.0f;
-    aState.mSittingToStandingTransform[9] = 0.0f;
-    aState.mSittingToStandingTransform[10] = 1.0f;
-    aState.mSittingToStandingTransform[11] = 0.0f;
+    aState.sittingToStandingTransform[8] = 0.0f;
+    aState.sittingToStandingTransform[9] = 0.0f;
+    aState.sittingToStandingTransform[10] = 1.0f;
+    aState.sittingToStandingTransform[11] = 0.0f;
 
-    aState.mSittingToStandingTransform[12] = 0.0f;
-    aState.mSittingToStandingTransform[13] = 0.75f;
-    aState.mSittingToStandingTransform[14] = 0.0f;
-    aState.mSittingToStandingTransform[15] = 1.0f;
+    aState.sittingToStandingTransform[12] = 0.0f;
+    aState.sittingToStandingTransform[13] = 0.75f;
+    aState.sittingToStandingTransform[14] = 0.0f;
+    aState.sittingToStandingTransform[15] = 1.0f;
   }
 }
 
@@ -759,17 +853,17 @@ void OpenVRSession::UpdateEyeParameters(VRSystemState& aState) {
   for (uint32_t eye = 0; eye < 2; ++eye) {
     ::vr::HmdMatrix34_t eyeToHead =
         mVRSystem->GetEyeToHeadTransform(static_cast<::vr::Hmd_Eye>(eye));
-    aState.displayState.mEyeTranslation[eye].x = eyeToHead.m[0][3];
-    aState.displayState.mEyeTranslation[eye].y = eyeToHead.m[1][3];
-    aState.displayState.mEyeTranslation[eye].z = eyeToHead.m[2][3];
+    aState.displayState.eyeTranslation[eye].x = eyeToHead.m[0][3];
+    aState.displayState.eyeTranslation[eye].y = eyeToHead.m[1][3];
+    aState.displayState.eyeTranslation[eye].z = eyeToHead.m[2][3];
 
     float left, right, up, down;
     mVRSystem->GetProjectionRaw(static_cast<::vr::Hmd_Eye>(eye), &left, &right,
                                 &up, &down);
-    aState.displayState.mEyeFOV[eye].upDegrees = atan(-up) * 180.0 / M_PI;
-    aState.displayState.mEyeFOV[eye].rightDegrees = atan(right) * 180.0 / M_PI;
-    aState.displayState.mEyeFOV[eye].downDegrees = atan(down) * 180.0 / M_PI;
-    aState.displayState.mEyeFOV[eye].leftDegrees = atan(-left) * 180.0 / M_PI;
+    aState.displayState.eyeFOV[eye].upDegrees = atan(-up) * 180.0 / M_PI;
+    aState.displayState.eyeFOV[eye].rightDegrees = atan(right) * 180.0 / M_PI;
+    aState.displayState.eyeFOV[eye].downDegrees = atan(down) * 180.0 / M_PI;
+    aState.displayState.eyeFOV[eye].leftDegrees = atan(-left) * 180.0 / M_PI;
 
     Matrix4x4 pose;
     // NOTE! eyeToHead.m is a 3x4 matrix, not 4x4.  But
@@ -1799,27 +1893,30 @@ void OpenVRSession::ProcessEvents(mozilla::gfx::VRSystemState& aSystemState) {
     switch (event.eventType) {
       case ::vr::VREvent_TrackedDeviceUserInteractionStarted:
         if (event.trackedDeviceIndex == ::vr::k_unTrackedDeviceIndex_Hmd) {
-          aSystemState.displayState.mIsMounted = true;
+          aSystemState.displayState.isMounted = true;
         }
         break;
       case ::vr::VREvent_TrackedDeviceUserInteractionEnded:
         if (event.trackedDeviceIndex == ::vr::k_unTrackedDeviceIndex_Hmd) {
-          aSystemState.displayState.mIsMounted = false;
+          aSystemState.displayState.isMounted = false;
         }
         break;
       case ::vr::EVREventType::VREvent_TrackedDeviceActivated:
         if (event.trackedDeviceIndex == ::vr::k_unTrackedDeviceIndex_Hmd) {
-          aSystemState.displayState.mIsConnected = true;
+          aSystemState.displayState.isConnected = true;
         }
         break;
       case ::vr::EVREventType::VREvent_TrackedDeviceDeactivated:
         if (event.trackedDeviceIndex == ::vr::k_unTrackedDeviceIndex_Hmd) {
-          aSystemState.displayState.mIsConnected = false;
+          aSystemState.displayState.isConnected = false;
         }
         break;
       case ::vr::EVREventType::VREvent_DriverRequestedQuit:
       case ::vr::EVREventType::VREvent_Quit:
-      case ::vr::EVREventType::VREvent_ProcessQuit:
+      // When SteamVR runtime haven't been launched before viewing VR,
+      // SteamVR will send a VREvent_ProcessQuit event. It will tell the parent
+      // process to shutdown the VR process, and we need to avoid it.
+      // case ::vr::EVREventType::VREvent_ProcessQuit:
       case ::vr::EVREventType::VREvent_QuitAcknowledged:
       case ::vr::EVREventType::VREvent_QuitAborted_UserPrompt:
         mShouldQuit = true;
@@ -1836,14 +1933,14 @@ bool OpenVRSession::SubmitFrame(
     const mozilla::gfx::VRLayer_Stereo_Immersive& aLayer,
     ID3D11Texture2D* aTexture) {
   return SubmitFrame((void*)aTexture, ::vr::ETextureType::TextureType_DirectX,
-                     aLayer.mLeftEyeRect, aLayer.mRightEyeRect);
+                     aLayer.leftEyeRect, aLayer.rightEyeRect);
 }
 #elif defined(XP_MACOSX)
 bool OpenVRSession::SubmitFrame(
     const mozilla::gfx::VRLayer_Stereo_Immersive& aLayer,
     const VRLayerTextureHandle& aTexture) {
   return SubmitFrame(aTexture, ::vr::ETextureType::TextureType_IOSurface,
-                     aLayer.mLeftEyeRect, aLayer.mRightEyeRect);
+                     aLayer.leftEyeRect, aLayer.rightEyeRect);
 }
 #endif
 
@@ -1969,8 +2066,8 @@ void OpenVRSession::StopHapticTimer() {
   }
 }
 
-/*static*/ void OpenVRSession::HapticTimerCallback(nsITimer* aTimer,
-                                                   void* aClosure) {
+/*static*/
+void OpenVRSession::HapticTimerCallback(nsITimer* aTimer, void* aClosure) {
   /**
    * It is safe to use the pointer passed in aClosure to reference the
    * OpenVRSession object as the timer is canceled in OpenVRSession::Shutdown,
@@ -2093,7 +2190,7 @@ void OpenVRSession::UpdateTelemetry(VRSystemState& aSystemState) {
   ::vr::Compositor_CumulativeStats stats;
   mVRCompositor->GetCumulativeStats(&stats,
                                     sizeof(::vr::Compositor_CumulativeStats));
-  aSystemState.displayState.mDroppedFrameCount = stats.m_nNumReprojectedFrames;
+  aSystemState.displayState.droppedFrameCount = stats.m_nNumReprojectedFrames;
 }
 
 }  // namespace gfx

@@ -40,7 +40,7 @@ function swapToInnerBrowser({ tab, containerURL, getInnerBrowser }) {
 
   // Dispatch a custom event each time the _viewport content_ is swapped from one browser
   // to another.  DevTools server code uses this to follow the content if there is an
-  // active DevTools connection.  While browser.xml does dispatch it's own SwapDocShells
+  // active DevTools connection.  While browser.js does dispatch it's own SwapDocShells
   // event, this one is easier for DevTools to follow because it's only emitted once per
   // transition, instead of twice like SwapDocShells.
   const dispatchDevToolsBrowserSwap = (from, to) => {
@@ -144,7 +144,7 @@ function swapToInnerBrowser({ tab, containerURL, getInnerBrowser }) {
           tab.linkedBrowser.remoteType == "privileged") {
         debug(`Tab must flip away from the privileged content process ` +
               `on navigation`);
-        gBrowser.updateBrowserRemoteness(tab.linkedBrowser, true, {
+        gBrowser.updateBrowserRemoteness(tab.linkedBrowser, {
           remoteType: requiredRemoteType,
         });
       }
@@ -229,7 +229,9 @@ function swapToInnerBrowser({ tab, containerURL, getInnerBrowser }) {
       //    must be loaded in the parent process, and we're about to swap the
       //    tool UI into this tab.
       debug("Flip original tab to remote false");
-      gBrowser.updateBrowserRemoteness(tab.linkedBrowser, false);
+      gBrowser.updateBrowserRemoteness(tab.linkedBrowser, {
+        remoteType: E10SUtils.NOT_REMOTE,
+      });
 
       // 6. Swap the tool UI (with viewport showing the content) into the
       //    original browser tab and close the temporary tab used to load the
@@ -301,7 +303,7 @@ function swapToInnerBrowser({ tab, containerURL, getInnerBrowser }) {
       // 5. Force the original browser tab to be remote since web content is
       //    loaded in the child process, and we're about to swap the content
       //    into this tab.
-      gBrowser.updateBrowserRemoteness(tab.linkedBrowser, true, {
+      gBrowser.updateBrowserRemoteness(tab.linkedBrowser, {
         remoteType: contentBrowser.remoteType,
       });
 
@@ -395,7 +397,7 @@ function addXULBrowserDecorations(browser) {
   if (browser.remoteType == undefined) {
     Object.defineProperty(browser, "remoteType", {
       get() {
-        return this.getAttribute("remoteType");
+        return this.messageManager.remoteType;
       },
       configurable: true,
       enumerable: true,
@@ -421,7 +423,7 @@ function addXULBrowserDecorations(browser) {
   }
 
   // It's not necessary for these to actually do anything.  These properties are
-  // swapped between browsers in browser.xml's `swapDocShells`, and then their
+  // swapped between browsers in browser.js's `swapDocShells`, and then their
   // `swapBrowser` methods are called, so we define them here for that to work
   // without errors.  During the swap process above, these will move from the
   // the new inner browser to the original tab's browser (step 4) and then to

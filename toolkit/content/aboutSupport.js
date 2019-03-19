@@ -4,11 +4,10 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/Troubleshoot.jsm");
-ChromeUtils.import("resource://gre/modules/ResetProfile.jsm");
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Troubleshoot} = ChromeUtils.import("resource://gre/modules/Troubleshoot.jsm");
+const {ResetProfile} = ChromeUtils.import("resource://gre/modules/ResetProfile.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 ChromeUtils.defineModuleGetter(this, "PluralForm",
                                "resource://gre/modules/PluralForm.jsm");
@@ -57,6 +56,19 @@ var snapshotFormatters = {
     if (data.updateChannel)
       $("updatechannel-box").textContent = data.updateChannel;
     $("profile-dir-box").textContent = Services.dirsvc.get("ProfD", Ci.nsIFile).path;
+
+    try {
+      let launcherStatusTextId = "launcher-process-status-unknown";
+      switch (data.launcherProcessState) {
+        case 0:
+        case 1:
+        case 2:
+          launcherStatusTextId = "launcher-process-status-" + data.launcherProcessState;
+          break;
+      }
+
+      document.l10n.setAttributes($("launcher-process-box"), launcherStatusTextId);
+    } catch (e) {}
 
     let statusTextId = "multi-process-status-unknown";
 
@@ -121,8 +133,11 @@ var snapshotFormatters = {
       $("policies-status-row").hidden = true;
     }
 
-    let keyGoogleFound = data.keyGoogleFound ? "found" : "missing";
-    document.l10n.setAttributes($("key-google-box"), keyGoogleFound);
+    let keyLocationServiceGoogleFound = data.keyLocationServiceGoogleFound ? "found" : "missing";
+    document.l10n.setAttributes($("key-location-service-google-box"), keyLocationServiceGoogleFound);
+
+    let keySafebrowsingGoogleFound = data.keySafebrowsingGoogleFound ? "found" : "missing";
+    document.l10n.setAttributes($("key-safebrowsing-google-box"), keySafebrowsingGoogleFound);
 
     let keyMozillaFound = data.keyMozillaFound ? "found" : "missing";
     document.l10n.setAttributes($("key-mozilla-box"), keyMozillaFound);
@@ -274,7 +289,7 @@ var snapshotFormatters = {
     // Create a <tr> element with key and value columns.
     //
     // @key      Text in the key column. Localized automatically, unless starts with "#".
-    // @value    Text in the value column. Not localized.
+    // @value    Fluent ID for text in the value column, or array of children.
     function buildRow(key, value) {
       let title = key[0] == "#" ? key.substr(1) : key;
       let keyStrId = toFluentID(key);
@@ -306,9 +321,6 @@ var snapshotFormatters = {
     // @where    The name in "graphics-<name>-tbody", of the element to append to.
     function addRow(where, key, value) {
       addRows(where, [buildRow(key, value)]);
-    }
-    if (data.clearTypeParameters !== undefined) {
-      addRow("diagnostics", "clear-type-parameters", data.clearTypeParameters);
     }
     if ("info" in data) {
       apzInfo = formatApzInfo(data.info);
@@ -384,6 +396,7 @@ var snapshotFormatters = {
                           return $.new("p", val);
                        }))])]);
       }
+      delete data.failures;
     } else {
       $("graphics-failures-tbody").style.display = "none";
     }
@@ -434,8 +447,8 @@ var snapshotFormatters = {
 
     addRow("features", "asyncPanZoom",
            apzInfo.length
-           ? (await document.l10n.formatValues(apzInfo.map(id => { return {id}; }))).join("; ")
-           : await localizedMsg("apz-none"));
+           ? [new Text((await document.l10n.formatValues(apzInfo.map(id => { return {id}; }))).join("; "))]
+           : "apz-none");
     let featureKeys = [
       "webgl1WSIInfo",
       "webgl1Renderer",
@@ -453,6 +466,8 @@ var snapshotFormatters = {
       "contentUsesTiling",
       "offMainThreadPaintEnabled",
       "offMainThreadPaintWorkerCount",
+      "lowEndMachine",
+      "targetFrameRate",
     ];
     for (let feature of featureKeys) {
       if (Array.isArray(feature)) {
@@ -572,7 +587,7 @@ var snapshotFormatters = {
 
     if (featureLog.fallbacks.length) {
       for (let fallback of featureLog.fallbacks) {
-        addRow("workarounds", fallback.name, fallback.message);
+        addRow("workarounds", fallback.name, [new Text(fallback.message)]);
       }
     } else {
       $("graphics-workarounds-tbody").style.display = "none";
@@ -603,7 +618,7 @@ var snapshotFormatters = {
     // the diagnostics section.
     for (let key in data) {
       let value = data[key];
-      addRow("diagnostics", key, value);
+      addRow("diagnostics", key, [new Text(value)]);
     }
   },
 
@@ -855,7 +870,7 @@ $.new = function $_new(tag, textContentOrChildren, className, attributes) {
   }
   if (Array.isArray(textContentOrChildren)) {
     this.append(elt, textContentOrChildren);
-  } else if (textContentOrChildren) {
+  } else if (!attributes || !attributes["data-l10n-id"]) {
     elt.textContent = String(textContentOrChildren);
   }
   return elt;
@@ -916,7 +931,7 @@ function copyRawDataToClipboard(button) {
       Services.clipboard.setData(transferable, null, Ci.nsIClipboard.kGlobalClipboard);
       if (AppConstants.platform == "android") {
         // Present a snackbar notification.
-        ChromeUtils.import("resource://gre/modules/Snackbars.jsm");
+        var {Snackbars} = ChromeUtils.import("resource://gre/modules/Snackbars.jsm");
         let rawDataCopiedString = await document.l10n.formatValue("raw-data-copied");
         Snackbars.show(rawDataCopiedString, Snackbars.LENGTH_SHORT);
       }
@@ -962,7 +977,7 @@ async function copyContentsToClipboard() {
 
   if (AppConstants.platform == "android") {
     // Present a snackbar notification.
-    ChromeUtils.import("resource://gre/modules/Snackbars.jsm");
+    var {Snackbars} = ChromeUtils.import("resource://gre/modules/Snackbars.jsm");
     let textCopiedString = await document.l10n.formatValue("text-copied");
     Snackbars.show(textCopiedString, Snackbars.LENGTH_SHORT);
   }
@@ -1024,8 +1039,9 @@ Serializer.prototype = {
         let text = this._nodeText(child);
         this._appendText(text);
         hasText = hasText || !!text.trim();
-      } else if (child.nodeType == Node.ELEMENT_NODE)
+      } else if (child.nodeType == Node.ELEMENT_NODE) {
         this._serializeElement(child);
+      }
     }
 
     // For headings, draw a "line" underneath them so they stand out.

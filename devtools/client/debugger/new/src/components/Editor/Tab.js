@@ -23,9 +23,10 @@ import {
   getRawSourceURL,
   getSourceQueryString,
   getTruncatedFileName,
-  isPretty
+  isJavaScript,
+  isPretty,
+  shouldBlackbox
 } from "../../utils/source";
-import { shouldShowPrettyPrint } from "../../utils/editor";
 import { copyToTheClipboard } from "../../utils/clipboard";
 import { getTabMenuItems } from "../../utils/tabs";
 
@@ -33,8 +34,7 @@ import {
   getSelectedSource,
   getActiveSearch,
   getSourcesForTabs,
-  getHasSiblingOfSameName,
-  getWorkerDisplayName
+  getHasSiblingOfSameName
 } from "../../selectors";
 import type { ActiveSearchType } from "../../selectors";
 
@@ -53,7 +53,7 @@ type Props = {
   closeTabs: typeof actions.closeTabs,
   togglePrettyPrint: typeof actions.togglePrettyPrint,
   showSource: typeof actions.showSource,
-  threadName: string
+  toggleBlackBox: typeof actions.toggleBlackBox
 };
 
 class Tab extends PureComponent<Props> {
@@ -68,6 +68,7 @@ class Tab extends PureComponent<Props> {
       closeTabs,
       tabSources,
       showSource,
+      toggleBlackBox,
       togglePrettyPrint,
       selectedSource,
       source
@@ -134,16 +135,25 @@ class Tab extends PureComponent<Props> {
           disabled: !selectedSource.url,
           click: () => showSource(tab)
         }
+      },
+      {
+        item: {
+          ...tabMenuItems.toggleBlackBox,
+          label: source.isBlackBoxed
+            ? L10N.getStr("sourceFooter.unblackbox")
+            : L10N.getStr("sourceFooter.blackbox"),
+          disabled: !shouldBlackbox(source),
+          click: () => toggleBlackBox(source)
+        }
+      },
+      {
+        item: {
+          ...tabMenuItems.prettyPrint,
+          click: () => togglePrettyPrint(tab),
+          disabled: isPretty(source) || !isJavaScript(source)
+        }
       }
     ];
-
-    items.push({
-      item: {
-        ...tabMenuItems.prettyPrint,
-        click: () => togglePrettyPrint(tab),
-        disabled: !shouldShowPrettyPrint(source)
-      }
-    });
 
     showMenu(e, buildMenu(items));
   }
@@ -163,8 +173,7 @@ class Tab extends PureComponent<Props> {
       closeTab,
       source,
       tabSources,
-      hasSiblingOfSameName,
-      threadName
+      hasSiblingOfSameName
     } = this.props;
     const sourceId = source.id;
     const active =
@@ -191,7 +200,6 @@ class Tab extends PureComponent<Props> {
 
     const path = getDisplayPath(source, tabSources);
     const query = hasSiblingOfSameName ? getSourceQueryString(source) : "";
-    const threadNamePrefix = `${threadName}${threadName ? ": " : ""}`;
 
     return (
       <div
@@ -208,7 +216,7 @@ class Tab extends PureComponent<Props> {
           shouldHide={icon => ["file", "javascript"].includes(icon)}
         />
         <div className="filename">
-          {`${threadNamePrefix}${getTruncatedFileName(source, query)}`}
+          {getTruncatedFileName(source, query)}
           {path && <span>{`../${path}/..`}</span>}
         </div>
         <CloseButton
@@ -227,8 +235,7 @@ const mapStateToProps = (state, { source }) => {
     tabSources: getSourcesForTabs(state),
     selectedSource: selectedSource,
     activeSearch: getActiveSearch(state),
-    hasSiblingOfSameName: getHasSiblingOfSameName(state, source),
-    threadName: getWorkerDisplayName(state, source.thread)
+    hasSiblingOfSameName: getHasSiblingOfSameName(state, source)
   };
 };
 
@@ -239,6 +246,7 @@ export default connect(
     closeTab: actions.closeTab,
     closeTabs: actions.closeTabs,
     togglePrettyPrint: actions.togglePrettyPrint,
-    showSource: actions.showSource
+    showSource: actions.showSource,
+    toggleBlackBox: actions.toggleBlackBox
   }
 )(Tab);

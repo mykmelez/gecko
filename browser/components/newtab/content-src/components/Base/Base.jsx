@@ -3,6 +3,7 @@ import {addLocaleData, injectIntl, IntlProvider} from "react-intl";
 import {ASRouterAdmin} from "content-src/components/ASRouterAdmin/ASRouterAdmin";
 import {ConfirmDialog} from "content-src/components/ConfirmDialog/ConfirmDialog";
 import {connect} from "react-redux";
+import {DarkModeMessage} from "content-src/components/DarkModeMessage/DarkModeMessage";
 import {DiscoveryStreamBase} from "content-src/components/DiscoveryStreamBase/DiscoveryStreamBase";
 import {ErrorBoundary} from "content-src/components/ErrorBoundary/ErrorBoundary";
 import {ManualMigration} from "content-src/components/ManualMigration/ManualMigration";
@@ -10,6 +11,8 @@ import {PrerenderData} from "common/PrerenderData.jsm";
 import React from "react";
 import {Search} from "content-src/components/Search/Search";
 import {Sections} from "content-src/components/Sections/Sections";
+
+let didLogDevtoolsHelpText = false;
 
 const PrefsButton = injectIntl(props => (
   <div className="prefs-button">
@@ -86,8 +89,10 @@ export class _Base extends React.PureComponent {
       if (window.location.hash.startsWith("#asrouter") ||
           window.location.hash.startsWith("#devtools")) {
         return (<ASRouterAdmin />);
+      } else if (!didLogDevtoolsHelpText) {
+        console.log("Activity Stream devtools enabled. To access visit %cabout:newtab#devtools", "font-weight: bold"); // eslint-disable-line no-console
+        didLogDevtoolsHelpText = true;
       }
-      console.log("Activity Stream devtools enabled. To access visit %cabout:newtab#devtools", "font-weight: bold"); // eslint-disable-line no-console
     }
 
     if (!props.isPrerendered && !initialized) {
@@ -145,6 +150,8 @@ export class BaseContent extends React.PureComponent {
 
     const outerClassName = [
       "outer-wrapper",
+      isDiscoveryStream && "ds-outer-wrapper-search-alignment",
+      isDiscoveryStream && "ds-outer-wrapper-breakpoint-override",
       shouldBeFixedToTop && "fixed-to-top",
       prefs.showSearch && this.state.fixedSearch && !noSectionsEnabled && "fixed-search",
       prefs.showSearch && noSectionsEnabled && "only-search",
@@ -167,7 +174,11 @@ export class BaseContent extends React.PureComponent {
                   <ManualMigration />
                 </div>
                 }
-              {isDiscoveryStream ? <DiscoveryStreamBase /> : <Sections />}
+              {isDiscoveryStream ? (
+                <ErrorBoundary className="borderless-error">
+                  {prefs.darkModeMessage && <DarkModeMessage />}
+                  <DiscoveryStreamBase />
+                </ErrorBoundary>) : <Sections />}
               <PrefsButton onClick={this.openPreferences} />
             </div>
             <ConfirmDialog />

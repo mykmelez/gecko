@@ -57,7 +57,7 @@ struct nsTArray_CopyChooser<TestTArray::Movable> {
 
 namespace TestTArray {
 
-const nsTArray<int>& DummyArray() {
+static const nsTArray<int>& DummyArray() {
   static nsTArray<int> sArray;
   if (sArray.IsEmpty()) {
     const int data[] = {4, 1, 2, 8};
@@ -69,7 +69,7 @@ const nsTArray<int>& DummyArray() {
 // This returns an invalid nsTArray with a huge length in order to test that
 // fallible operations actually fail.
 #ifdef DEBUG
-const nsTArray<int>& FakeHugeArray() {
+static const nsTArray<int>& FakeHugeArray() {
   static nsTArray<int> sArray;
   if (sArray.IsEmpty()) {
     sArray.AppendElement();
@@ -122,13 +122,13 @@ TEST(TArray, AssignmentOperatorSelfAssignment) {
   ASSERT_EQ(DummyArray(), array);
 
 #if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wself-move"
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wself-move"
 #endif
   array = std::move(array);  // self-move
   ASSERT_EQ(DummyArray(), array);
 #if defined(__clang__)
-#pragma clang diagnostic pop
+#  pragma clang diagnostic pop
 #endif
 }
 

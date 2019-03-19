@@ -68,6 +68,16 @@ nsresult AccessibleWrap::HandleAccEvent(AccEvent* aEvent) {
         }
         break;
       }
+      case nsIAccessibleEvent::EVENT_SHOW:
+      case nsIAccessibleEvent::EVENT_HIDE: {
+        if (DocAccessibleWrap* topContentDoc =
+                doc->GetTopLevelContentDoc(accessible)) {
+          topContentDoc->CacheViewport();
+        }
+        break;
+      }
+      default:
+        break;
     }
   }
 
@@ -157,13 +167,6 @@ nsresult AccessibleWrap::HandleAccEvent(AccEvent* aEvent) {
       sessionAcc->SendScrollingEvent(accessible, event->ScrollX(),
                                      event->ScrollY(), event->MaxScrollX(),
                                      event->MaxScrollY());
-      break;
-    }
-    case nsIAccessibleEvent::EVENT_SHOW:
-    case nsIAccessibleEvent::EVENT_HIDE: {
-      AccMutationEvent* event = downcast_accEvent(aEvent);
-      auto parent = static_cast<AccessibleWrap*>(event->Parent());
-      sessionAcc->SendWindowContentChangedEvent(parent);
       break;
     }
     default:
@@ -307,7 +310,8 @@ void AccessibleWrap::GetRoleDescription(role aRole,
     return;
   }
 
-  if (aRole == roles::HEADING) {
+  if (aRole == roles::HEADING && aAttributes) {
+    // The heading level is an attribute, so we need that.
     nsString level;
     rv = aAttributes->GetStringProperty(NS_LITERAL_CSTRING("level"), level);
     if (NS_SUCCEEDED(rv)) {
@@ -411,13 +415,20 @@ bool AccessibleWrap::WrapperRangeInfo(double* aCurVal, double* aMinVal,
   return false;
 }
 
-mozilla::java::GeckoBundle::LocalRef AccessibleWrap::ToBundle() {
+mozilla::java::GeckoBundle::LocalRef AccessibleWrap::ToBundle(bool aSmall) {
   nsAutoString name;
   Name(name);
   nsAutoString textValue;
   Value(textValue);
   nsAutoString nodeID;
   WrapperDOMNodeID(nodeID);
+  nsAutoString description;
+  Description(description);
+
+  if (aSmall) {
+    return ToBundle(State(), Bounds(), ActionCount(), name, textValue, nodeID,
+                    description);
+  }
 
   double curValue = UnspecifiedNaN<double>();
   double minValue = UnspecifiedNaN<double>();
@@ -428,15 +439,15 @@ mozilla::java::GeckoBundle::LocalRef AccessibleWrap::ToBundle() {
   nsCOMPtr<nsIPersistentProperties> attributes = Attributes();
 
   return ToBundle(State(), Bounds(), ActionCount(), name, textValue, nodeID,
-                  curValue, minValue, maxValue, step, attributes);
+                  description, curValue, minValue, maxValue, step, attributes);
 }
 
 mozilla::java::GeckoBundle::LocalRef AccessibleWrap::ToBundle(
     const uint64_t aState, const nsIntRect& aBounds, const uint8_t aActionCount,
     const nsString& aName, const nsString& aTextValue,
-    const nsString& aDOMNodeID, const double& aCurVal, const double& aMinVal,
-    const double& aMaxVal, const double& aStep,
-    nsIPersistentProperties* aAttributes) {
+    const nsString& aDOMNodeID, const nsString& aDescription,
+    const double& aCurVal, const double& aMinVal, const double& aMaxVal,
+    const double& aStep, nsIPersistentProperties* aAttributes) {
   if (!IsProxy() && IsDefunct()) {
     return nullptr;
   }
@@ -456,10 +467,18 @@ mozilla::java::GeckoBundle::LocalRef AccessibleWrap::ToBundle(
                   java::sdk::Integer::ValueOf(AndroidClass()));
 
   if (aState & states::EDITABLE) {
-    GECKOBUNDLE_PUT(nodeInfo, "hint", jni::StringParam(aName));
+    nsAutoString hint(aName);
+    if (!aDescription.IsEmpty()) {
+      hint.AppendLiteral(" ");
+      hint.Append(aDescription);
+    }
+    GECKOBUNDLE_PUT(nodeInfo, "hint", jni::StringParam(hint));
     GECKOBUNDLE_PUT(nodeInfo, "text", jni::StringParam(aTextValue));
   } else {
     GECKOBUNDLE_PUT(nodeInfo, "text", jni::StringParam(aName));
+    if (!aDescription.IsEmpty()) {
+      GECKOBUNDLE_PUT(nodeInfo, "hint", jni::StringParam(aDescription));
+    }
   }
 
   nsAutoString geckoRole;
@@ -513,113 +532,82 @@ mozilla::java::GeckoBundle::LocalRef AccessibleWrap::ToBundle(
     GECKOBUNDLE_PUT(nodeInfo, "rangeInfo", rangeInfo);
   }
 
-  nsString inputTypeAttr;
-  nsAccUtils::GetAccAttr(aAttributes, nsGkAtoms::textInputType, inputTypeAttr);
-  int32_t inputType = GetInputType(inputTypeAttr);
-  if (inputType) {
-    GECKOBUNDLE_PUT(nodeInfo, "inputType",
-                    java::sdk::Integer::ValueOf(inputType));
-  }
+  if (aAttributes) {
+    nsString inputTypeAttr;
+    nsAccUtils::GetAccAttr(aAttributes, nsGkAtoms::textInputType,
+                           inputTypeAttr);
+    int32_t inputType = GetInputType(inputTypeAttr);
+    if (inputType) {
+      GECKOBUNDLE_PUT(nodeInfo, "inputType",
+                      java::sdk::Integer::ValueOf(inputType));
+    }
 
-  nsString posinset;
-  nsresult rv =
-      aAttributes->GetStringProperty(NS_LITERAL_CSTRING("posinset"), posinset);
-  if (NS_SUCCEEDED(rv)) {
-    int32_t rowIndex;
-    if (sscanf(NS_ConvertUTF16toUTF8(posinset).get(), "%d", &rowIndex) > 0) {
-      GECKOBUNDLE_START(collectionItemInfo);
-      GECKOBUNDLE_PUT(collectionItemInfo, "rowIndex",
-                      java::sdk::Integer::ValueOf(rowIndex));
-      GECKOBUNDLE_PUT(collectionItemInfo, "columnIndex",
-                      java::sdk::Integer::ValueOf(0));
-      GECKOBUNDLE_PUT(collectionItemInfo, "rowSpan",
-                      java::sdk::Integer::ValueOf(1));
-      GECKOBUNDLE_PUT(collectionItemInfo, "columnSpan",
-                      java::sdk::Integer::ValueOf(1));
-      GECKOBUNDLE_FINISH(collectionItemInfo);
+    nsString posinset;
+    nsresult rv = aAttributes->GetStringProperty(NS_LITERAL_CSTRING("posinset"),
+                                                 posinset);
+    if (NS_SUCCEEDED(rv)) {
+      int32_t rowIndex;
+      if (sscanf(NS_ConvertUTF16toUTF8(posinset).get(), "%d", &rowIndex) > 0) {
+        GECKOBUNDLE_START(collectionItemInfo);
+        GECKOBUNDLE_PUT(collectionItemInfo, "rowIndex",
+                        java::sdk::Integer::ValueOf(rowIndex));
+        GECKOBUNDLE_PUT(collectionItemInfo, "columnIndex",
+                        java::sdk::Integer::ValueOf(0));
+        GECKOBUNDLE_PUT(collectionItemInfo, "rowSpan",
+                        java::sdk::Integer::ValueOf(1));
+        GECKOBUNDLE_PUT(collectionItemInfo, "columnSpan",
+                        java::sdk::Integer::ValueOf(1));
+        GECKOBUNDLE_FINISH(collectionItemInfo);
 
-      GECKOBUNDLE_PUT(nodeInfo, "collectionItemInfo", collectionItemInfo);
+        GECKOBUNDLE_PUT(nodeInfo, "collectionItemInfo", collectionItemInfo);
+      }
+    }
+
+    nsString colSize;
+    rv = aAttributes->GetStringProperty(NS_LITERAL_CSTRING("child-item-count"),
+                                        colSize);
+    if (NS_SUCCEEDED(rv)) {
+      int32_t rowCount;
+      if (sscanf(NS_ConvertUTF16toUTF8(colSize).get(), "%d", &rowCount) > 0) {
+        GECKOBUNDLE_START(collectionInfo);
+        GECKOBUNDLE_PUT(collectionInfo, "rowCount",
+                        java::sdk::Integer::ValueOf(rowCount));
+        GECKOBUNDLE_PUT(collectionInfo, "columnCount",
+                        java::sdk::Integer::ValueOf(1));
+
+        nsString unused;
+        rv = aAttributes->GetStringProperty(NS_LITERAL_CSTRING("hierarchical"),
+                                            unused);
+        if (NS_SUCCEEDED(rv)) {
+          GECKOBUNDLE_PUT(collectionInfo, "isHierarchical",
+                          java::sdk::Boolean::TRUE());
+        }
+
+        if (IsSelect()) {
+          int32_t selectionMode = (aState & states::MULTISELECTABLE) ? 2 : 1;
+          GECKOBUNDLE_PUT(collectionInfo, "selectionMode",
+                          java::sdk::Integer::ValueOf(selectionMode));
+        }
+
+        GECKOBUNDLE_FINISH(collectionInfo);
+        GECKOBUNDLE_PUT(nodeInfo, "collectionInfo", collectionInfo);
+      }
     }
   }
 
-  nsString colSize;
-  rv = aAttributes->GetStringProperty(NS_LITERAL_CSTRING("child-item-count"),
-                                      colSize);
-  if (NS_SUCCEEDED(rv)) {
-    int32_t rowCount;
-    if (sscanf(NS_ConvertUTF16toUTF8(colSize).get(), "%d", &rowCount) > 0) {
-      GECKOBUNDLE_START(collectionInfo);
-      GECKOBUNDLE_PUT(collectionInfo, "rowCount",
-                      java::sdk::Integer::ValueOf(rowCount));
-      GECKOBUNDLE_PUT(collectionInfo, "columnCount",
-                      java::sdk::Integer::ValueOf(1));
-
-      nsString unused;
-      rv = aAttributes->GetStringProperty(NS_LITERAL_CSTRING("hierarchical"),
-                                          unused);
-      if (NS_SUCCEEDED(rv)) {
-        GECKOBUNDLE_PUT(collectionInfo, "isHierarchical",
-                        java::sdk::Boolean::TRUE());
-      }
-
-      if (IsSelect()) {
-        int32_t selectionMode = (aState & states::MULTISELECTABLE) ? 2 : 1;
-        GECKOBUNDLE_PUT(collectionInfo, "selectionMode",
-                        java::sdk::Integer::ValueOf(selectionMode));
-      }
-      GECKOBUNDLE_FINISH(collectionInfo);
-
-      GECKOBUNDLE_PUT(nodeInfo, "collectionInfo", collectionInfo);
+  bool mustPrune =
+      IsProxy() ? nsAccUtils::MustPrune(Proxy()) : nsAccUtils::MustPrune(this);
+  if (!mustPrune) {
+    auto childCount = ChildCount();
+    nsTArray<int32_t> children(childCount);
+    for (uint32_t i = 0; i < childCount; i++) {
+      auto child = static_cast<AccessibleWrap*>(GetChildAt(i));
+      children.AppendElement(child->VirtualViewID());
     }
+
+    GECKOBUNDLE_PUT(nodeInfo, "children",
+                    jni::IntArray::New(children.Elements(), children.Length()));
   }
-
-  auto childCount = ChildCount();
-  nsTArray<int32_t> children(childCount);
-  for (uint32_t i = 0; i < childCount; i++) {
-    auto child = static_cast<AccessibleWrap*>(GetChildAt(i));
-    children.AppendElement(child->VirtualViewID());
-  }
-
-  GECKOBUNDLE_PUT(nodeInfo, "children",
-                  jni::IntArray::New(children.Elements(), children.Length()));
-  GECKOBUNDLE_FINISH(nodeInfo);
-
-  return nodeInfo;
-}
-
-mozilla::java::GeckoBundle::LocalRef AccessibleWrap::ToSmallBundle() {
-  return ToSmallBundle(State(), Bounds(), ActionCount());
-}
-
-mozilla::java::GeckoBundle::LocalRef AccessibleWrap::ToSmallBundle(
-    const uint64_t aState, const nsIntRect& aBounds,
-    const uint8_t aActionCount) {
-  GECKOBUNDLE_START(nodeInfo);
-  GECKOBUNDLE_PUT(nodeInfo, "id", java::sdk::Integer::ValueOf(VirtualViewID()));
-
-  AccessibleWrap* parent = WrapperParent();
-  GECKOBUNDLE_PUT(
-      nodeInfo, "parentId",
-      java::sdk::Integer::ValueOf(parent ? parent->VirtualViewID() : 0));
-
-  uint32_t flags = GetFlags(WrapperRole(), aState, aActionCount);
-  GECKOBUNDLE_PUT(nodeInfo, "flags", java::sdk::Integer::ValueOf(flags));
-  GECKOBUNDLE_PUT(nodeInfo, "className",
-                  java::sdk::Integer::ValueOf(AndroidClass()));
-
-  const int32_t data[4] = {aBounds.x, aBounds.y, aBounds.x + aBounds.width,
-                           aBounds.y + aBounds.height};
-  GECKOBUNDLE_PUT(nodeInfo, "bounds", jni::IntArray::New(data, 4));
-
-  auto childCount = ChildCount();
-  nsTArray<int32_t> children(childCount);
-  for (uint32_t i = 0; i < childCount; ++i) {
-    auto child = static_cast<AccessibleWrap*>(GetChildAt(i));
-    children.AppendElement(child->VirtualViewID());
-  }
-
-  GECKOBUNDLE_PUT(nodeInfo, "children",
-                  jni::IntArray::New(children.Elements(), children.Length()));
 
   GECKOBUNDLE_FINISH(nodeInfo);
 

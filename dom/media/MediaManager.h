@@ -36,7 +36,7 @@
 #include "DOMMediaStream.h"
 
 #ifdef MOZ_WEBRTC
-#include "mtransport/runnable_utils.h"
+#  include "mtransport/runnable_utils.h"
 #endif
 
 // Note, these suck in Windows headers, unfortunately.
@@ -67,16 +67,16 @@ class MediaDevice : public nsIMediaDevice {
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIMEDIADEVICE
 
-  explicit MediaDevice(const RefPtr<MediaEngineSource>& aSource,
-                       const nsString& aName, const nsString& aID,
-                       const nsString& aRawID);
+  MediaDevice(const RefPtr<MediaEngineSource>& aSource, const nsString& aName,
+              const nsString& aID, const nsString& aGroupID,
+              const nsString& aRawID);
 
-  explicit MediaDevice(const RefPtr<AudioDeviceInfo>& aAudioDeviceInfo,
-                       const nsString& aID,
-                       const nsString& aRawID = NS_LITERAL_STRING(""));
+  MediaDevice(const RefPtr<AudioDeviceInfo>& aAudioDeviceInfo,
+              const nsString& aID, const nsString& aGroupID,
+              const nsString& aRawID = NS_LITERAL_STRING(""));
 
-  explicit MediaDevice(const RefPtr<MediaDevice>& aOther, const nsString& aID,
-                       const nsString& aRawID);
+  MediaDevice(const RefPtr<MediaDevice>& aOther, const nsString& aID,
+              const nsString& aGroupID, const nsString& aRawID);
 
   uint32_t GetBestFitnessDistance(
       const nsTArray<const NormalizedConstraintSet*>& aConstraintSets,
@@ -86,8 +86,8 @@ class MediaDevice : public nsIMediaDevice {
                     const MediaEnginePrefs& aPrefs,
                     const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
                     const char** aOutBadConstraint);
-  nsresult SetTrack(const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
-                    const PrincipalHandle& aPrincipal);
+  void SetTrack(const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
+                const PrincipalHandle& aPrincipal);
   nsresult Start();
   nsresult Reconfigure(const dom::MediaTrackConstraints& aConstraints,
                        const MediaEnginePrefs& aPrefs,
@@ -130,6 +130,7 @@ class MediaDevice : public nsIMediaDevice {
   const nsString mType;
   const nsString mName;
   const nsString mID;
+  const nsString mGroupID;
   const nsString mRawID;
 };
 
@@ -275,9 +276,11 @@ class MediaManager final : public nsIMediaManagerService,
 
  public:  // TODO: make private once we upgrade to GCC 4.8+ on linux.
   static void AnonymizeDevices(MediaDeviceSet& aDevices,
-                               const nsACString& aOriginKey);
+                               const nsACString& aOriginKey,
+                               const uint64_t aWindowId);
   static already_AddRefed<nsIWritableVariant> ToJSArray(
       MediaDeviceSet& aDevices);
+  static void GuessVideoDeviceGroupIDs(MediaManager::MediaDeviceSet& aDevices);
 
  private:
   enum class DeviceEnumerationType : uint8_t {

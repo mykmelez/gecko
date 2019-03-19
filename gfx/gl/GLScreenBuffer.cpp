@@ -20,18 +20,18 @@
 #include "mozilla/layers/TextureClientSharedSurface.h"
 
 #ifdef XP_WIN
-#include "SharedSurfaceANGLE.h"         // for SurfaceFactory_ANGLEShareHandle
-#include "SharedSurfaceD3D11Interop.h"  // for SurfaceFactory_D3D11Interop
-#include "mozilla/gfx/DeviceManagerDx.h"
+#  include "SharedSurfaceANGLE.h"         // for SurfaceFactory_ANGLEShareHandle
+#  include "SharedSurfaceD3D11Interop.h"  // for SurfaceFactory_D3D11Interop
+#  include "mozilla/gfx/DeviceManagerDx.h"
 #endif
 
 #ifdef XP_MACOSX
-#include "SharedSurfaceIO.h"
+#  include "SharedSurfaceIO.h"
 #endif
 
 #ifdef MOZ_X11
-#include "GLXLibrary.h"
-#include "SharedSurfaceGLX.h"
+#  include "GLXLibrary.h"
+#  include "SharedSurfaceGLX.h"
 #endif
 
 namespace mozilla {
@@ -59,7 +59,8 @@ UniquePtr<GLScreenBuffer> GLScreenBuffer::Create(GLContext* gl,
   return ret;
 }
 
-/* static */ UniquePtr<SurfaceFactory> GLScreenBuffer::CreateFactory(
+/* static */
+UniquePtr<SurfaceFactory> GLScreenBuffer::CreateFactory(
     GLContext* gl, const SurfaceCaps& caps,
     KnowsCompositor* compositorConnection, const layers::TextureFlags& flags) {
   LayersIPCChannel* ipcChannel = compositorConnection->GetTextureForwarder();
@@ -87,7 +88,9 @@ UniquePtr<GLScreenBuffer> GLScreenBuffer::Create(GLContext* gl,
     factory = MakeUnique<SurfaceFactory_GLTexture>(mGLContext, caps, ipcChannel,
                                                    mFlags);
 #elif defined(MOZ_WIDGET_ANDROID)
-    if (XRE_IsParentProcess() && !gfxPrefs::WebGLSurfaceTextureEnabled()) {
+    // XXX WebRender does not support SurfaceFactory_EGLImage usage.
+    if (XRE_IsParentProcess() && !gfxPrefs::WebGLSurfaceTextureEnabled() &&
+        backend != layers::LayersBackend::LAYERS_WR) {
       factory = SurfaceFactory_EGLImage::Create(gl, caps, ipcChannel, flags);
     } else {
       factory =

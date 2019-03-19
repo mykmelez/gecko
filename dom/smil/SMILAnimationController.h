@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef NS_SMILANIMATIONCONTROLLER_H_
-#define NS_SMILANIMATIONCONTROLLER_H_
+#ifndef mozilla_SMILAnimationController_h
+#define mozilla_SMILAnimationController_h
 
 #include "mozilla/Attributes.h"
 #include "mozilla/SMILCompositorTable.h"
@@ -18,8 +18,6 @@
 #include "nsTHashtable.h"
 #include "nsHashKeys.h"
 #include "nsRefreshDriver.h"
-
-class nsIDocument;
 
 namespace mozilla {
 struct SMILTargetIdentifier;
@@ -44,15 +42,16 @@ class SVGAnimationElement;
 class SMILAnimationController final : public SMILTimeContainer,
                                       public nsARefreshObserver {
  public:
-  explicit SMILAnimationController(nsIDocument* aDoc);
+  explicit SMILAnimationController(mozilla::dom::Document* aDoc);
 
-  // Clears mDocument pointer. (Called by our nsIDocument when it's going away)
+  // Clears mDocument pointer. (Called by our mozilla::dom::Document when it's
+  // going away)
   void Disconnect();
 
-  // nsSMILContainer
+  // SMILContainer
   virtual void Pause(uint32_t aType) override;
   virtual void Resume(uint32_t aType) override;
-  virtual nsSMILTime GetParentTime() const override;
+  virtual SMILTime GetParentTime() const override;
 
   // nsARefreshObserver
   NS_IMETHOD_(MozExternalRefCountType) AddRef() override;
@@ -180,7 +179,7 @@ class SMILAnimationController final : public SMILTimeContainer,
   // This behaviour does not affect pausing (since we're not *expecting* any
   // samples then) nor seeking (where the SMIL model behaves somewhat
   // differently such as not dispatching events).
-  nsSMILTime mAvgTimeBetweenSamples;
+  SMILTime mAvgTimeBetweenSamples;
 
   bool mResampleNeeded;
   // If we're told to start sampling but there are no animation elements we just
@@ -197,7 +196,7 @@ class SMILAnimationController final : public SMILTimeContainer,
 
   // Store raw ptr to mDocument.  It owns the controller, so controller
   // shouldn't outlive it
-  nsIDocument* mDocument;
+  mozilla::dom::Document* mDocument;
 
   // Contains compositors used in our last sample.  We keep this around
   // so we can detect when an element/attribute used to be animated,
@@ -208,4 +207,4 @@ class SMILAnimationController final : public SMILTimeContainer,
 
 }  // namespace mozilla
 
-#endif  // NS_SMILANIMATIONCONTROLLER_H_
+#endif  // mozilla_SMILAnimationController_h

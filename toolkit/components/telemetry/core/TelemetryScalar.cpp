@@ -1864,6 +1864,7 @@ void internal_DynamicScalarToIPC(
     stubDefinition.expired = info.mDynamicExpiration;
     stubDefinition.keyed = info.keyed;
     stubDefinition.name = info.mDynamicName;
+    stubDefinition.builtin = info.builtin;
     aIPCDefs.AppendElement(stubDefinition);
   }
 }
@@ -2158,7 +2159,10 @@ void internal_ApplyScalarActions(
     nsresult rv =
         internal_GetScalarByEnum(lock, uniqueId, processType, &scalar);
     if (NS_FAILED(rv)) {
-      NS_WARNING("NS_FAILED internal_GetScalarByEnum for CHILD");
+      // Bug 1513496 - We no longer log a warning if the scalar is expired.
+      if (rv != NS_ERROR_NOT_AVAILABLE) {
+        NS_WARNING("NS_FAILED internal_GetScalarByEnum for CHILD");
+      }
       continue;
     }
 
@@ -2271,7 +2275,10 @@ void internal_ApplyKeyedScalarActions(
     nsresult rv =
         internal_GetKeyedScalarByEnum(lock, uniqueId, processType, &scalar);
     if (NS_FAILED(rv)) {
-      NS_WARNING("NS_FAILED internal_GetScalarByEnum for CHILD");
+      // Bug 1513496 - We no longer log a warning if the scalar is expired.
+      if (rv != NS_ERROR_NOT_AVAILABLE) {
+        NS_WARNING("NS_FAILED internal_GetScalarByEnum for CHILD");
+      }
       continue;
     }
 
@@ -3672,7 +3679,7 @@ void TelemetryScalar::AddDynamicScalarDefinitions(
                                                  def.expired,
                                                  def.name,
                                                  def.keyed,
-                                                 false /* builtin */,
+                                                 def.builtin,
                                                  {} /* stores */});
   }
 

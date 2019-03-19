@@ -8,21 +8,22 @@
 //! computed values and need yet another intermediate representation. This
 //! module's raison d'être is to ultimately contain all these types.
 
-use app_units::Au;
 use crate::properties::PropertyId;
-use crate::values::computed::length::CalcLengthOrPercentage;
+use crate::values::computed::length::LengthPercentage;
 use crate::values::computed::url::ComputedUrl;
 use crate::values::computed::Angle as ComputedAngle;
 use crate::values::computed::Image;
-use crate::values::CSSFloat;
 use crate::values::specified::SVGPathData;
-use euclid::{Point2D, Size2D};
+use crate::values::CSSFloat;
+use app_units::Au;
+use euclid::Point2D;
 use smallvec::SmallVec;
 use std::cmp;
 
 pub mod color;
 pub mod effects;
 mod font;
+mod grid;
 mod length;
 mod svg;
 pub mod transform;
@@ -113,7 +114,8 @@ pub fn animate_multiplicative_factor(
 /// function has been specified through `#[animate(fallback)]`.
 ///
 /// Trait bounds for type parameter `Foo` can be opted out of with
-/// `#[animation(no_bound(Foo))]` on the type definition.
+/// `#[animation(no_bound(Foo))]` on the type definition, trait bounds for
+/// fields can be opted into with `#[animation(field_bound)]` on the field.
 pub trait Animate: Sized {
     /// Animate a value towards another one, given an animation procedure.
     fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()>;
@@ -239,19 +241,6 @@ impl Animate for Au {
     }
 }
 
-impl<T> Animate for Size2D<T>
-where
-    T: Animate,
-{
-    #[inline]
-    fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()> {
-        Ok(Size2D::new(
-            self.width.animate(&other.width, procedure)?,
-            self.height.animate(&other.height, procedure)?,
-        ))
-    }
-}
-
 impl<T> Animate for Point2D<T>
 where
     T: Animate,
@@ -335,7 +324,7 @@ macro_rules! trivial_to_animated_value {
 }
 
 trivial_to_animated_value!(Au);
-trivial_to_animated_value!(CalcLengthOrPercentage);
+trivial_to_animated_value!(LengthPercentage);
 trivial_to_animated_value!(ComputedAngle);
 trivial_to_animated_value!(ComputedUrl);
 trivial_to_animated_value!(bool);
@@ -395,16 +384,13 @@ where
     }
 }
 
-impl<T> ToAnimatedZero for Size2D<T>
+impl<T> ToAnimatedZero for Vec<T>
 where
     T: ToAnimatedZero,
 {
     #[inline]
     fn to_animated_zero(&self) -> Result<Self, ()> {
-        Ok(Size2D::new(
-            self.width.to_animated_zero()?,
-            self.height.to_animated_zero()?,
-        ))
+        self.iter().map(|v| v.to_animated_zero()).collect()
     }
 }
 

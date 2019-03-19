@@ -9,14 +9,14 @@ var EXPORTED_SYMBOLS = [];
 const DEBUG = false;
 function debug(s) { dump("-*- NotificationDB component: " + s + "\n"); }
 
-// Import Services eagerly because we use it immediately to add an observer
-// for xpcom-shutdown.
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-
-// Import all other modules lazily.
 ChromeUtils.defineModuleGetter(this, "FileUtils", "resource://gre/modules/FileUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "KeyValueService", "resource://gre/modules/kvstore.jsm");
 ChromeUtils.defineModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
+ChromeUtils.defineModuleGetter(this, "Services", "resource://gre/modules/Services.jsm");
+
+const NOTIFICATION_STORE_DIR = OS.Constants.Path.profileDir;
+const NOTIFICATION_STORE_PATH =
+        OS.Path.join(NOTIFICATION_STORE_DIR, "notificationstore.json");
 
 const kMessages = [
   "Notification:Save",

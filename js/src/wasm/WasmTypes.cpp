@@ -37,15 +37,15 @@ using mozilla::MakeEnumeratedRange;
 // We have only tested x64 with WASM_HUGE_MEMORY.
 
 #if defined(JS_CODEGEN_X64) && !defined(WASM_HUGE_MEMORY)
-#error "Not an expected configuration"
+#  error "Not an expected configuration"
 #endif
 
 // We have only tested WASM_HUGE_MEMORY on x64 and arm64.
 
 #if defined(WASM_HUGE_MEMORY)
-#if !(defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM64))
-#error "Not an expected configuration"
-#endif
+#  if !(defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM64))
+#    error "Not an expected configuration"
+#  endif
 #endif
 
 // More sanity checks.
@@ -300,7 +300,8 @@ static unsigned EncodeImmediateType(ValType vt) {
   MOZ_CRASH("bad ValType");
 }
 
-/* static */ bool FuncTypeIdDesc::isGlobal(const FuncType& funcType) {
+/* static */
+bool FuncTypeIdDesc::isGlobal(const FuncType& funcType) {
   unsigned numTypes =
       (funcType.ret() == ExprType::Void ? 0 : 1) + (funcType.args().length());
   if (numTypes > sMaxTypes) {
@@ -321,8 +322,9 @@ static unsigned EncodeImmediateType(ValType vt) {
   return false;
 }
 
-/* static */ FuncTypeIdDesc FuncTypeIdDesc::global(const FuncType& funcType,
-                                                   uint32_t globalDataOffset) {
+/* static */
+FuncTypeIdDesc FuncTypeIdDesc::global(const FuncType& funcType,
+                                      uint32_t globalDataOffset) {
   MOZ_ASSERT(isGlobal(funcType));
   return FuncTypeIdDesc(FuncTypeIdDescKind::Global, globalDataOffset);
 }
@@ -333,8 +335,8 @@ static ImmediateType LengthToBits(uint32_t length) {
   return length;
 }
 
-/* static */ FuncTypeIdDesc FuncTypeIdDesc::immediate(
-    const FuncType& funcType) {
+/* static */
+FuncTypeIdDesc FuncTypeIdDesc::immediate(const FuncType& funcType) {
   ImmediateType immediate = ImmediateBit;
   uint32_t shift = sTagBits;
 
@@ -592,11 +594,11 @@ uint32_t wasm::RoundUpToNextValidARMImmediate(uint32_t i) {
 #ifndef WASM_HUGE_MEMORY
 
 bool wasm::IsValidBoundsCheckImmediate(uint32_t i) {
-#ifdef JS_CODEGEN_ARM
+#  ifdef JS_CODEGEN_ARM
   return IsValidARMImmediate(i);
-#else
+#  else
   return true;
-#endif
+#  endif
 }
 
 size_t wasm::ComputeMappedSize(uint32_t maxSize) {
@@ -606,11 +608,11 @@ size_t wasm::ComputeMappedSize(uint32_t maxSize) {
   // code. Thus round up the maxSize to the next valid immediate value
   // *before* adding in the guard page.
 
-#ifdef JS_CODEGEN_ARM
+#  ifdef JS_CODEGEN_ARM
   uint32_t boundsCheckLimit = RoundUpToNextValidARMImmediate(maxSize);
-#else
+#  else
   uint32_t boundsCheckLimit = maxSize;
-#endif
+#  endif
   MOZ_ASSERT(IsValidBoundsCheckImmediate(boundsCheckLimit));
 
   MOZ_ASSERT(boundsCheckLimit % gc::SystemPageSize() == 0);
@@ -620,7 +622,8 @@ size_t wasm::ComputeMappedSize(uint32_t maxSize) {
 
 #endif  // WASM_HUGE_MEMORY
 
-/* static */ DebugFrame* DebugFrame::from(Frame* fp) {
+/* static */
+DebugFrame* DebugFrame::from(Frame* fp) {
   MOZ_ASSERT(fp->tls->instance->code().metadata().debugEnabled);
   auto* df =
       reinterpret_cast<DebugFrame*>((uint8_t*)fp - DebugFrame::offsetOfFrame());
@@ -647,6 +650,10 @@ void DebugFrame::alignmentStaticAsserts() {
 
 GlobalObject* DebugFrame::global() const {
   return &instance()->object()->global();
+}
+
+bool DebugFrame::hasGlobal(const GlobalObject* global) const {
+  return global == &instance()->objectUnbarriered()->global();
 }
 
 JSObject* DebugFrame::environmentChain() const {
@@ -683,7 +690,7 @@ bool DebugFrame::getLocal(uint32_t localIndex, MutableHandleValue vp) {
     case jit::MIRType::Double:
       vp.set(NumberValue(JS::CanonicalizeNaN(*static_cast<double*>(dataPtr))));
       break;
-    case jit::MIRType::Pointer:
+    case jit::MIRType::RefOrNull:
       vp.set(ObjectOrNullValue(*(JSObject**)dataPtr));
       break;
     default:
@@ -955,4 +962,28 @@ void wasm::Log(JSContext* cx, const char* fmt, ...) {
   }
 
   va_end(args);
+}
+
+#ifdef WASM_CODEGEN_DEBUG
+bool wasm::IsCodegenDebugEnabled(DebugChannel channel) {
+  switch (channel) {
+    case DebugChannel::Function:
+      return JitOptions.enableWasmFuncCallSpew;
+    case DebugChannel::Import:
+      return JitOptions.enableWasmImportCallSpew;
+  }
+  return false;
+}
+#endif
+
+void wasm::DebugCodegen(DebugChannel channel, const char* fmt, ...) {
+#ifdef WASM_CODEGEN_DEBUG
+  if (!IsCodegenDebugEnabled(channel)) {
+    return;
+  }
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  va_end(ap);
+#endif
 }

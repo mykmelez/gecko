@@ -6,7 +6,6 @@
 import React, { PureComponent } from "react";
 import { connect } from "../../utils/connect";
 import classnames from "classnames";
-import Svg from "../shared/Svg";
 import actions from "../../actions";
 import {
   getSelectedSource,
@@ -76,7 +75,7 @@ class SourceFooter extends PureComponent<Props, State> {
     if (isLoading(selectedSource) && selectedSource.isPrettyPrinted) {
       return (
         <div className="loader" key="pretty-loader">
-          <Svg name="loader" />
+          <AccessibleImage className="loader" />
         </div>
       );
     }
@@ -134,20 +133,6 @@ class SourceFooter extends PureComponent<Props, State> {
     );
   }
 
-  blackBoxSummary() {
-    const { selectedSource } = this.props;
-
-    if (!selectedSource || !selectedSource.isBlackBoxed) {
-      return;
-    }
-
-    return (
-      <span className="blackbox-summary" key="blackbox-summary">
-        {L10N.getStr("sourceFooter.blackboxed")}
-      </span>
-    );
-  }
-
   renderToggleButton() {
     if (this.props.horizontal) {
       return;
@@ -157,19 +142,17 @@ class SourceFooter extends PureComponent<Props, State> {
       <PaneToggleButton
         position="end"
         key="toggle"
-        collapsed={!this.props.endPanelCollapsed}
+        collapsed={this.props.endPanelCollapsed}
         horizontal={this.props.horizontal}
-        handleClick={this.props.togglePaneCollapse}
+        handleClick={(this.props.togglePaneCollapse: any)}
       />
     );
   }
 
   renderCommands() {
-    const commands = [
-      this.prettyPrintButton(),
-      this.blackBoxButton(),
-      this.blackBoxSummary()
-    ].filter(Boolean);
+    const commands = [this.prettyPrintButton(), this.blackBoxButton()].filter(
+      Boolean
+    );
 
     return commands.length ? <div className="commands">{commands}</div> : null;
   }
@@ -239,8 +222,8 @@ class SourceFooter extends PureComponent<Props, State> {
       <div className="source-footer">
         {this.renderCommands()}
         {this.renderSourceSummary()}
-        {this.renderToggleButton()}
         {this.renderCursorPosition()}
+        {this.renderToggleButton()}
       </div>
     );
   }

@@ -26,14 +26,6 @@ const HIDDEN_CLASS = "__fx-devtools-hide-shortcut__";
  * Client side of a node list as returned by querySelectorAll()
  */
 class NodeListFront extends FrontClassWithSpec(nodeListSpec) {
-  constructor(client, form) {
-    super(client, form);
-  }
-
-  destroy() {
-    super.destroy();
-  }
-
   marshallPool() {
     return this.parent();
   }
@@ -115,8 +107,8 @@ class AttributeModificationList {
  * to traverse children.
  */
 class NodeFront extends FrontClassWithSpec(nodeSpec) {
-  constructor(conn, form, detail, ctx) {
-    super(conn, form, detail, ctx);
+  constructor(conn, form) {
+    super(conn, form);
     // The parent node
     this._parent = null;
     // The first child of this node.
@@ -137,12 +129,7 @@ class NodeFront extends FrontClassWithSpec(nodeSpec) {
   }
 
   // Update the object given a form representation off the wire.
-  form(form, detail, ctx) {
-    if (detail === "actorid") {
-      this.actorID = form;
-      return;
-    }
-
+  form(form, ctx) {
     // backward-compatibility: shortValue indicates we are connected to old server
     if (form.shortValue) {
       // If the value is not complete, set nodeValue to null, it will be fetched
@@ -365,6 +352,10 @@ class NodeFront extends FrontClassWithSpec(nodeSpec) {
 
   get isDisplayed() {
     return this._form.isDisplayed;
+  }
+
+  get isScrollable() {
+    return this._form.isScrollable;
   }
 
   get isTreeDisplayed() {

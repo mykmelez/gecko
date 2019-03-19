@@ -15,7 +15,7 @@
 #include "mozilla/layers/APZThreadUtils.h"
 #include "mozilla/layers/IAPZCTreeManager.h"
 #include "mozilla/layers/DoubleTapToZoom.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIPresShell.h"
 #include "nsLayoutUtils.h"
@@ -46,6 +46,18 @@ ChromeProcessController::~ChromeProcessController() {}
 
 void ChromeProcessController::InitializeRoot() {
   APZCCallbackHelper::InitializeRootDisplayport(GetPresShell());
+}
+
+void ChromeProcessController::NotifyLayerTransforms(
+    const nsTArray<MatrixMessage>& aTransforms) {
+  if (MessageLoop::current() != mUILoop) {
+    mUILoop->PostTask(NewRunnableMethod<nsTArray<MatrixMessage>>(
+        "layers::ChromeProcessController::NotifyLayerTransforms", this,
+        &ChromeProcessController::NotifyLayerTransforms, aTransforms));
+    return;
+  }
+
+  APZCCallbackHelper::NotifyLayerTransforms(aTransforms);
 }
 
 void ChromeProcessController::RequestContentRepaint(
@@ -94,14 +106,14 @@ nsIPresShell* ChromeProcessController::GetPresShell() const {
   return nullptr;
 }
 
-nsIDocument* ChromeProcessController::GetRootDocument() const {
+dom::Document* ChromeProcessController::GetRootDocument() const {
   if (nsIPresShell* presShell = GetPresShell()) {
     return presShell->GetDocument();
   }
   return nullptr;
 }
 
-nsIDocument* ChromeProcessController::GetRootContentDocument(
+dom::Document* ChromeProcessController::GetRootContentDocument(
     const ScrollableLayerGuid::ViewID& aScrollId) const {
   nsIContent* content = nsLayoutUtils::FindContentFor(aScrollId);
   if (!content) {
@@ -120,7 +132,7 @@ void ChromeProcessController::HandleDoubleTap(
     const ScrollableLayerGuid& aGuid) {
   MOZ_ASSERT(MessageLoop::current() == mUILoop);
 
-  nsCOMPtr<nsIDocument> document = GetRootContentDocument(aGuid.mScrollId);
+  RefPtr<dom::Document> document = GetRootContentDocument(aGuid.mScrollId);
   if (!document.get()) {
     return;
   }
@@ -187,13 +199,17 @@ void ChromeProcessController::HandleTap(
     case TapType::eSecondTap:
       mAPZEventState->ProcessSingleTap(point, scale, aModifiers, aGuid, 2);
       break;
-    case TapType::eLongTap:
-      mAPZEventState->ProcessLongTap(presShell, point, scale, aModifiers, aGuid,
-                                     aInputBlockId);
+    case TapType::eLongTap: {
+      RefPtr<APZEventState> eventState(mAPZEventState);
+      eventState->ProcessLongTap(presShell, point, scale, aModifiers, aGuid,
+                                 aInputBlockId);
       break;
-    case TapType::eLongTapUp:
-      mAPZEventState->ProcessLongTapUp(presShell, point, scale, aModifiers);
+    }
+    case TapType::eLongTapUp: {
+      RefPtr<APZEventState> eventState(mAPZEventState);
+      eventState->ProcessLongTapUp(presShell, point, scale, aModifiers);
       break;
+    }
   }
 }
 

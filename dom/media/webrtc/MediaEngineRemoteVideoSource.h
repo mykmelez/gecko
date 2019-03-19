@@ -124,9 +124,9 @@ class MediaEngineRemoteVideoSource : public MediaEngineSource,
                     AllocationHandle** aOutHandle,
                     const char** aOutBadConstraint) override;
   nsresult Deallocate(const RefPtr<const AllocationHandle>& aHandle) override;
-  nsresult SetTrack(const RefPtr<const AllocationHandle>& aHandle,
-                    const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
-                    const PrincipalHandle& aPrincipal) override;
+  void SetTrack(const RefPtr<const AllocationHandle>& aHandle,
+                const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
+                const PrincipalHandle& aPrincipal) override;
   nsresult Start(const RefPtr<const AllocationHandle>& aHandle) override;
   nsresult Reconfigure(const RefPtr<AllocationHandle>& aHandle,
                        const dom::MediaTrackConstraints& aConstraints,
@@ -152,6 +152,9 @@ class MediaEngineRemoteVideoSource : public MediaEngineSource,
 
   nsCString GetUUID() const override;
   void SetUUID(const char* aUUID);
+
+  nsString GetGroupId() const override;
+  void SetGroupId(nsString aGroupId);
 
   bool GetScary() const override { return mScary; }
 
@@ -250,6 +253,7 @@ class MediaEngineRemoteVideoSource : public MediaEngineSource,
 
   nsString mDeviceName;
   nsCString mUniqueId;
+  nsString mGroupId;
   nsString mFacingMode;
 
   // Whether init has successfully completed.

@@ -14,9 +14,9 @@
 // operations wouldn't be a bad thing.
 
 #ifdef XP_UNIX
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/wait.h>
+#  include <unistd.h>
+#  include <sys/types.h>
+#  include <sys/wait.h>
 
 // This global variable is defined in toolkit/xre/nsSigHandlers.cpp.
 extern unsigned int _gdb_sleep_duration;
@@ -30,7 +30,7 @@ extern unsigned int _gdb_sleep_duration;
 //   up when running this test locally, which is surprising and annoying.
 // - On ASAN builds, because ASAN alters the way a MOZ_CRASHing process
 //   terminates, which makes it harder to test if the right thing has occurred.
-void TestCrashyOperation(void (*aCrashyOperation)()) {
+static void TestCrashyOperation(void (*aCrashyOperation)()) {
 #if defined(XP_UNIX) && defined(DEBUG) && !defined(MOZ_ASAN)
   // We're about to trigger a crash. When it happens don't pause to allow GDB
   // to be attached.
@@ -87,19 +87,19 @@ void TestCrashyOperation(void (*aCrashyOperation)()) {
 #endif
 }
 
-void InitCapacityOk_InitialLengthTooBig() {
+static void InitCapacityOk_InitialLengthTooBig() {
   PLDHashTable t(PLDHashTable::StubOps(), sizeof(PLDHashEntryStub),
                  PLDHashTable::kMaxInitialLength + 1);
 }
 
-void InitCapacityOk_InitialEntryStoreTooBig() {
+static void InitCapacityOk_InitialEntryStoreTooBig() {
   // Try the smallest disallowed power-of-two entry store size, which is 2^32
   // bytes (which overflows to 0). (Note that the 2^23 *length* gets converted
   // to a 2^24 *capacity*.)
   PLDHashTable t(PLDHashTable::StubOps(), (uint32_t)1 << 8, (uint32_t)1 << 23);
 }
 
-void InitCapacityOk_EntrySizeTooBig() {
+static void InitCapacityOk_EntrySizeTooBig() {
   // Try the smallest disallowed entry size, which is 256 bytes.
   PLDHashTable t(PLDHashTable::StubOps(), 256);
 }
@@ -181,12 +181,12 @@ TEST(PLDHashTableTest, MoveSemantics) {
   t2.Add((const void*)99);
 
 #if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wself-move"
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wself-move"
 #endif
   t1 = std::move(t1);  // self-move
 #if defined(__clang__)
-#pragma clang diagnostic pop
+#  pragma clang diagnostic pop
 #endif
 
   t1 = std::move(t2);  // empty overwritten with empty

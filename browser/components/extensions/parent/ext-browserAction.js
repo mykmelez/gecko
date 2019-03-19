@@ -18,7 +18,7 @@ var {
   ExtensionError,
 } = ExtensionUtils;
 
-ChromeUtils.import("resource://gre/modules/ExtensionParent.jsm");
+var {ExtensionParent} = ChromeUtils.import("resource://gre/modules/ExtensionParent.jsm");
 
 var {
   IconDetails,
@@ -201,7 +201,7 @@ this.browserAction = class extends ExtensionAPI {
             if (this.eventQueue.length) {
               ExtensionTelemetry.browserActionPreloadResult.histogramAdd({
                 category: "popupShown",
-                extension: this.extension,
+                extension,
               });
               this.eventQueue = [];
             }
@@ -247,7 +247,7 @@ this.browserAction = class extends ExtensionAPI {
     let widget = this.widget.forWindow(window);
     let tab = window.gBrowser.selectedTab;
 
-    if (!widget || !this.getProperty(tab, "enabled")) {
+    if (!widget.node || !this.getProperty(tab, "enabled")) {
       return;
     }
 
@@ -495,10 +495,10 @@ this.browserAction = class extends ExtensionAPI {
    *        Browser chrome window.
    */
   updateWindow(window) {
-    let widget = this.widget.forWindow(window);
-    if (widget) {
+    let node = this.widget.forWindow(window).node;
+    if (node) {
       let tab = window.gBrowser.selectedTab;
-      this.updateButton(widget.node, this.tabContext.get(tab));
+      this.updateButton(node, this.tabContext.get(tab));
     }
   }
 

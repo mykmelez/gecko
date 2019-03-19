@@ -69,8 +69,6 @@ class MochiRemote(MochitestDesktop):
         if not self.device.is_app_installed(expected):
             raise Exception("%s is not installed on this device" % expected)
 
-        self.automation.deleteANRs()
-        self.automation.deleteTombstones()
         self.device.clear_logcat()
 
         self.remoteModulesDir = posixpath.join(options.remoteTestRoot, "modules/")
@@ -102,7 +100,7 @@ class MochiRemote(MochitestDesktop):
             "Android sdk version '%s'; will use this to filter manifests" %
             str(self.device.version))
         mozinfo.info['android_version'] = str(self.device.version)
-        mozinfo.info['isFennec'] = not ('geckoview' in options.app)
+        mozinfo.info['is_fennec'] = not ('geckoview' in options.app)
         mozinfo.info['is_emulator'] = self.device._device_serial.startswith('emulator-')
 
     def cleanup(self, options, final=False):
@@ -216,12 +214,10 @@ class MochiRemote(MochitestDesktop):
     def startServers(self, options, debuggerInfo):
         """ Create the servers on the host and start them up """
         restoreRemotePaths = self.switchToLocalPaths(options)
-        # ignoreSSLTunnelExts is a workaround for bug 1109310
         MochitestDesktop.startServers(
             self,
             options,
-            debuggerInfo,
-            ignoreSSLTunnelExts=True)
+            debuggerInfo)
         restoreRemotePaths()
 
     def buildProfile(self, options):

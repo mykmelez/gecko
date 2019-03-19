@@ -16,6 +16,7 @@
 #include "nsNetUtil.h"
 #include "nsPIDOMWindow.h"
 #include "nsURLHelper.h"
+#include "ReferrerInfo.h"
 
 namespace mozilla {
 namespace dom {
@@ -126,6 +127,13 @@ class NavigateLoadListener final : public nsIWebProgressListener,
     return NS_OK;
   }
 
+  NS_IMETHOD
+  OnContentBlockingEvent(nsIWebProgress* aWebProgress, nsIRequest* aRequest,
+                         uint32_t aEvent) override {
+    MOZ_CRASH("Unexpected notification.");
+    return NS_OK;
+  }
+
   NS_DECL_ISUPPORTS
 };
 
@@ -200,7 +208,7 @@ RefPtr<ClientOpPromise> ClientNavigateOpChild::DoNavigate(
     return ClientOpPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
   }
 
-  nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
+  RefPtr<Document> doc = window->GetExtantDoc();
   if (!doc || !doc->IsActive()) {
     return ClientOpPromise::CreateAndReject(NS_ERROR_DOM_INVALID_STATE_ERR,
                                             __func__);
@@ -219,9 +227,20 @@ RefPtr<ClientOpPromise> ClientNavigateOpChild::DoNavigate(
   }
 
   RefPtr<nsDocShellLoadState> loadState = new nsDocShellLoadState(url);
-
+  nsCOMPtr<nsIReferrerInfo> referrerInfo =
+      new ReferrerInfo(doc->GetDocumentURI(), doc->GetReferrerPolicy());
   loadState->SetTriggeringPrincipal(principal);
-  loadState->SetReferrerPolicy(doc->GetReferrerPolicy());
+
+  // Currently we query the CSP from the principal, which is the
+  // doc->NodePrincipal(). After Bug 965637 we can query the CSP
+  // from the doc directly.
+  if (principal) {
+    nsCOMPtr<nsIContentSecurityPolicy> csp;
+    principal->GetCsp(getter_AddRefs(csp));
+    loadState->SetCsp(csp);
+  }
+
+  loadState->SetReferrerInfo(referrerInfo);
   loadState->SetLoadType(LOAD_STOP_CONTENT);
   loadState->SetSourceDocShell(docShell);
   loadState->SetLoadFlags(nsIWebNavigation::LOAD_FLAGS_NONE);

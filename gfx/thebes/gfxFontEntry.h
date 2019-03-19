@@ -30,7 +30,7 @@ typedef struct gr_face gr_face;
 typedef struct FT_MM_Var_ FT_MM_Var;
 
 #ifdef DEBUG
-#include <stdio.h>
+#  include <stdio.h>
 #endif
 
 struct gfxFontStyle;
@@ -266,11 +266,7 @@ class gfxFontEntry {
     AutoTable(gfxFontEntry* aFontEntry, uint32_t aTag) {
       mBlob = aFontEntry->GetFontTable(aTag);
     }
-    ~AutoTable() {
-      if (mBlob) {
-        hb_blob_destroy(mBlob);
-      }
-    }
+    ~AutoTable() { hb_blob_destroy(mBlob); }
     operator hb_blob_t*() const { return mBlob; }
 
    private:

@@ -13,10 +13,11 @@ from .base import (get_free_port,
                    browser_command)
 from ..executors.executormarionette import (MarionetteTestharnessExecutor,  # noqa: F401
                                             MarionetteRefTestExecutor)  # noqa: F401
-from .firefox import (get_timeout_multiplier,
-                      update_properties,
-                      executor_kwargs,
-                      FirefoxBrowser)
+from .firefox import (get_timeout_multiplier,  # noqa: F401
+                      run_info_browser_version,
+                      update_properties,  # noqa: F401
+                      executor_kwargs,  # noqa: F401
+                      FirefoxBrowser)  # noqa: F401
 
 
 __wptrunner__ = {"product": "fennec",
@@ -29,7 +30,9 @@ __wptrunner__ = {"product": "fennec",
                  "env_extras": "env_extras",
                  "env_options": "env_options",
                  "run_info_extras": "run_info_extras",
-                 "update_properties": "update_properties"}
+                 "update_properties": "update_properties",
+                 "timeout_multiplier": "get_timeout_multiplier"}
+
 
 
 def check_args(**kwargs):
@@ -65,9 +68,11 @@ def env_extras(**kwargs):
 
 
 def run_info_extras(**kwargs):
-    return {"e10s": False,
-            "headless": False,
-            "sw-e10s": False}
+    rv = {"e10s": False,
+          "headless": False,
+          "sw-e10s": False}
+    rv.update(run_info_browser_version(kwargs["binary"]))
+    return rv
 
 
 def env_options():
@@ -141,7 +146,7 @@ class FennecBrowser(FirefoxBrowser):
                                       "network.preload": True})
         if self.test_type == "reftest":
             self.logger.info("Setting android reftest preferences")
-            self.profile.set_preferences({"browser.viewport.desktopWidth": 600,
+            self.profile.set_preferences({"browser.viewport.desktopWidth": 800,
                                           # Disable high DPI
                                           "layout.css.devPixelsPerPx": "1.0",
                                           # Ensure that the full browser element
@@ -149,7 +154,7 @@ class FennecBrowser(FirefoxBrowser):
                                           "apz.allow_zooming": False,
                                           "android.widget_paints_background": False,
                                           # Ensure that scrollbars are always painted
-                                          "ui.scrollbarFadeBeginDelay": 100000})
+                                          "layout.testing.overlay-scrollbars.always-visible": True})
 
         if self.install_fonts:
             self.logger.debug("Copying Ahem font to profile")

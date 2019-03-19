@@ -22,7 +22,7 @@ const uint32_t kCacheRefreshInterval = 500;
 // DocAccessibleWrap
 ////////////////////////////////////////////////////////////////////////////////
 
-DocAccessibleWrap::DocAccessibleWrap(nsIDocument* aDocument,
+DocAccessibleWrap::DocAccessibleWrap(Document* aDocument,
                                      nsIPresShell* aPresShell)
     : DocAccessible(aDocument, aPresShell) {
   nsCOMPtr<nsIDocShellTreeItem> treeItem(aDocument->GetDocShell());
@@ -133,10 +133,20 @@ void DocAccessibleWrap::CacheViewportCallback(nsITimer* aTimer,
       auto uid = accessible->IsDoc() && accessible->AsDoc()->IPCDoc()
                      ? 0
                      : reinterpret_cast<uint64_t>(accessible->UniqueID());
+
+      nsAutoString name;
+      accessible->Name(name);
+      nsAutoString textValue;
+      accessible->Value(textValue);
+      nsAutoString nodeID;
+      static_cast<AccessibleWrap*>(accessible)->WrapperDOMNodeID(nodeID);
+      nsAutoString description;
+      accessible->Description(description);
+
       cacheData.AppendElement(
           BatchData(accessible->Document()->IPCDoc(), uid, accessible->State(),
-                    accessible->Bounds(), accessible->ActionCount(), nsString(),
-                    nsString(), nsString(), UnspecifiedNaN<double>(),
+                    accessible->Bounds(), accessible->ActionCount(), name,
+                    textValue, nodeID, description, UnspecifiedNaN<double>(),
                     UnspecifiedNaN<double>(), UnspecifiedNaN<double>(),
                     UnspecifiedNaN<double>(), nsTArray<Attribute>()));
     }
@@ -197,13 +207,16 @@ void DocAccessibleWrap::CacheFocusPath(AccessibleWrap* aAccessible) {
       acc->Value(textValue);
       nsAutoString nodeID;
       acc->WrapperDOMNodeID(nodeID);
+      nsAutoString description;
+      acc->Description(description);
       nsCOMPtr<nsIPersistentProperties> props = acc->Attributes();
       nsTArray<Attribute> attributes;
       nsAccUtils::PersistentPropertiesToArray(props, &attributes);
-      cacheData.AppendElement(BatchData(
-          acc->Document()->IPCDoc(), uid, acc->State(), acc->Bounds(),
-          acc->ActionCount(), name, textValue, nodeID, acc->CurValue(),
-          acc->MinValue(), acc->MaxValue(), acc->Step(), attributes));
+      cacheData.AppendElement(
+          BatchData(acc->Document()->IPCDoc(), uid, acc->State(), acc->Bounds(),
+                    acc->ActionCount(), name, textValue, nodeID, description,
+                    acc->CurValue(), acc->MinValue(), acc->MaxValue(),
+                    acc->Step(), attributes));
       mFocusPath.Put(acc->UniqueID(), acc);
     }
 
@@ -214,6 +227,7 @@ void DocAccessibleWrap::CacheFocusPath(AccessibleWrap* aAccessible) {
     for (AccessibleWrap* acc = aAccessible; acc && acc != this->Parent();
          acc = static_cast<AccessibleWrap*>(acc->Parent())) {
       accessibles.AppendElement(acc);
+      mFocusPath.Put(acc->UniqueID(), acc);
     }
 
     sessionAcc->ReplaceFocusPathCache(accessibles);
@@ -238,11 +252,12 @@ void DocAccessibleWrap::UpdateFocusPathBounds() {
       auto uid = accessible->IsDoc() && accessible->AsDoc()->IPCDoc()
                      ? 0
                      : reinterpret_cast<uint64_t>(accessible->UniqueID());
-      boundsData.AppendElement(BatchData(
-          accessible->Document()->IPCDoc(), uid, 0, accessible->Bounds(), 0,
-          nsString(), nsString(), nsString(), UnspecifiedNaN<double>(),
-          UnspecifiedNaN<double>(), UnspecifiedNaN<double>(),
-          UnspecifiedNaN<double>(), nsTArray<Attribute>()));
+      boundsData.AppendElement(
+          BatchData(accessible->Document()->IPCDoc(), uid, 0,
+                    accessible->Bounds(), 0, nsString(), nsString(), nsString(),
+                    nsString(), UnspecifiedNaN<double>(),
+                    UnspecifiedNaN<double>(), UnspecifiedNaN<double>(),
+                    UnspecifiedNaN<double>(), nsTArray<Attribute>()));
     }
 
     ipcDoc->SendBatch(eBatch_BoundsUpdate, boundsData);
@@ -250,8 +265,13 @@ void DocAccessibleWrap::UpdateFocusPathBounds() {
                  SessionAccessibility::GetInstanceFor(this)) {
     nsTArray<AccessibleWrap*> accessibles(mFocusPath.Count());
     for (auto iter = mFocusPath.Iter(); !iter.Done(); iter.Next()) {
-      accessibles.AppendElement(
-          static_cast<AccessibleWrap*>(iter.Data().get()));
+      Accessible* accessible = iter.Data();
+      if (!accessible || accessible->IsDefunct()) {
+        MOZ_ASSERT_UNREACHABLE("Focus path cached accessible is gone.");
+        continue;
+      }
+
+      accessibles.AppendElement(static_cast<AccessibleWrap*>(accessible));
     }
 
     sessionAcc->UpdateCachedBounds(accessibles);

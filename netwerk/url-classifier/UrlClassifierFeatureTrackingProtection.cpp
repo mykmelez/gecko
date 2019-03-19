@@ -17,6 +17,8 @@ namespace net {
 
 namespace {
 
+#define TRACKING_PROTECTION_FEATURE_NAME "tracking-protection"
+
 #define URLCLASSIFIER_TRACKING_BLACKLIST "urlclassifier.trackingTable"
 #define URLCLASSIFIER_TRACKING_BLACKLIST_TEST_ENTRIES \
   "urlclassifier.trackingTable.testEntries"
@@ -32,7 +34,7 @@ StaticRefPtr<UrlClassifierFeatureTrackingProtection> gFeatureTrackingProtection;
 
 UrlClassifierFeatureTrackingProtection::UrlClassifierFeatureTrackingProtection()
     : UrlClassifierFeatureBase(
-          NS_LITERAL_CSTRING("tracking-protection"),
+          NS_LITERAL_CSTRING(TRACKING_PROTECTION_FEATURE_NAME),
           NS_LITERAL_CSTRING(URLCLASSIFIER_TRACKING_BLACKLIST),
           NS_LITERAL_CSTRING(URLCLASSIFIER_TRACKING_WHITELIST),
           NS_LITERAL_CSTRING(URLCLASSIFIER_TRACKING_BLACKLIST_TEST_ENTRIES),
@@ -40,25 +42,34 @@ UrlClassifierFeatureTrackingProtection::UrlClassifierFeatureTrackingProtection()
           NS_LITERAL_CSTRING(TABLE_TRACKING_BLACKLIST_PREF),
           NS_LITERAL_CSTRING(TABLE_TRACKING_WHITELIST_PREF), EmptyCString()) {}
 
-/* static */ void UrlClassifierFeatureTrackingProtection::Initialize() {
-  UC_LOG(("UrlClassifierFeatureTrackingProtection: Initializing"));
-  MOZ_ASSERT(!gFeatureTrackingProtection);
-
-  gFeatureTrackingProtection = new UrlClassifierFeatureTrackingProtection();
-  gFeatureTrackingProtection->InitializePreferences();
+/* static */ const char* UrlClassifierFeatureTrackingProtection::Name() {
+  return TRACKING_PROTECTION_FEATURE_NAME;
 }
 
-/* static */ void UrlClassifierFeatureTrackingProtection::Shutdown() {
+/* static */
+void UrlClassifierFeatureTrackingProtection::MaybeInitialize() {
+  MOZ_ASSERT(XRE_IsParentProcess());
+  UC_LOG(("UrlClassifierFeatureTrackingProtection: MaybeInitialize"));
+
+  if (!gFeatureTrackingProtection) {
+    gFeatureTrackingProtection = new UrlClassifierFeatureTrackingProtection();
+    gFeatureTrackingProtection->InitializePreferences();
+  }
+}
+
+/* static */
+void UrlClassifierFeatureTrackingProtection::MaybeShutdown() {
   UC_LOG(("UrlClassifierFeatureTrackingProtection: Shutdown"));
-  MOZ_ASSERT(gFeatureTrackingProtection);
 
-  gFeatureTrackingProtection->ShutdownPreferences();
-  gFeatureTrackingProtection = nullptr;
+  if (gFeatureTrackingProtection) {
+    gFeatureTrackingProtection->ShutdownPreferences();
+    gFeatureTrackingProtection = nullptr;
+  }
 }
 
-/* static */ already_AddRefed<UrlClassifierFeatureTrackingProtection>
+/* static */
+already_AddRefed<UrlClassifierFeatureTrackingProtection>
 UrlClassifierFeatureTrackingProtection::MaybeCreate(nsIChannel* aChannel) {
-  MOZ_ASSERT(gFeatureTrackingProtection);
   MOZ_ASSERT(aChannel);
 
   UC_LOG(("UrlClassifierFeatureTrackingProtection: MaybeCreate for channel %p",
@@ -93,10 +104,28 @@ UrlClassifierFeatureTrackingProtection::MaybeCreate(nsIChannel* aChannel) {
     return nullptr;
   }
 
-  if (!UrlClassifierCommon::ShouldEnableTrackingProtectionOrAnnotation(
-          aChannel, AntiTrackingCommon::eTrackingProtection)) {
+  if (!UrlClassifierCommon::ShouldEnableClassifier(aChannel)) {
     return nullptr;
   }
+
+  MaybeInitialize();
+  MOZ_ASSERT(gFeatureTrackingProtection);
+
+  RefPtr<UrlClassifierFeatureTrackingProtection> self =
+      gFeatureTrackingProtection;
+  return self.forget();
+}
+
+/* static */
+already_AddRefed<nsIUrlClassifierFeature>
+UrlClassifierFeatureTrackingProtection::GetIfNameMatches(
+    const nsACString& aName) {
+  if (!aName.EqualsLiteral(TRACKING_PROTECTION_FEATURE_NAME)) {
+    return nullptr;
+  }
+
+  MaybeInitialize();
+  MOZ_ASSERT(gFeatureTrackingProtection);
 
   RefPtr<UrlClassifierFeatureTrackingProtection> self =
       gFeatureTrackingProtection;
@@ -110,24 +139,44 @@ UrlClassifierFeatureTrackingProtection::ProcessChannel(nsIChannel* aChannel,
   NS_ENSURE_ARG_POINTER(aChannel);
   NS_ENSURE_ARG_POINTER(aShouldContinue);
 
+  bool isAllowListed = UrlClassifierCommon::IsAllowListed(
+      aChannel, AntiTrackingCommon::eTrackingProtection);
+
   // This is a blocking feature.
-  *aShouldContinue = false;
+  *aShouldContinue = isAllowListed;
 
-  UrlClassifierCommon::SetBlockedContent(aChannel, NS_ERROR_TRACKING_URI, aList,
-                                         EmptyCString(), EmptyCString());
+  if (!isAllowListed) {
+    UrlClassifierCommon::SetBlockedContent(
+        aChannel, NS_ERROR_TRACKING_URI, aList, EmptyCString(), EmptyCString());
 
-  UC_LOG(
-      ("UrlClassifierFeatureTrackingProtection::ProcessChannel, cancelling "
-       "channel[%p]",
-       aChannel));
-  nsCOMPtr<nsIHttpChannelInternal> httpChannel = do_QueryInterface(aChannel);
-  if (httpChannel) {
-    Unused << httpChannel->CancelForTrackingProtection();
-  } else {
-    Unused << aChannel->Cancel(NS_ERROR_TRACKING_URI);
+    UC_LOG(
+        ("UrlClassifierFeatureTrackingProtection::ProcessChannel, cancelling "
+         "channel[%p]",
+         aChannel));
+    nsCOMPtr<nsIHttpChannelInternal> httpChannel = do_QueryInterface(aChannel);
+    if (httpChannel) {
+      Unused << httpChannel->CancelByChannelClassifier(NS_ERROR_TRACKING_URI);
+    } else {
+      Unused << aChannel->Cancel(NS_ERROR_TRACKING_URI);
+    }
   }
 
   return NS_OK;
+}
+
+NS_IMETHODIMP
+UrlClassifierFeatureTrackingProtection::GetURIByListType(
+    nsIChannel* aChannel, nsIUrlClassifierFeature::listType aListType,
+    nsIURI** aURI) {
+  NS_ENSURE_ARG_POINTER(aChannel);
+  NS_ENSURE_ARG_POINTER(aURI);
+
+  if (aListType == nsIUrlClassifierFeature::blacklist) {
+    return aChannel->GetURI(aURI);
+  }
+
+  MOZ_ASSERT(aListType == nsIUrlClassifierFeature::whitelist);
+  return UrlClassifierCommon::CreatePairwiseWhiteListURI(aChannel, aURI);
 }
 
 }  // namespace net

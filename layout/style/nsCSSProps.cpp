@@ -113,7 +113,8 @@ void nsCSSProps::ReleaseTable(void) {
   }
 }
 
-/* static */ bool nsCSSProps::IsCustomPropertyName(const nsAString& aProperty) {
+/* static */
+bool nsCSSProps::IsCustomPropertyName(const nsAString& aProperty) {
   return aProperty.Length() >= CSS_CUSTOM_NAME_PREFIX_LENGTH &&
          StringBeginsWith(aProperty, NS_LITERAL_STRING("--"));
 }
@@ -177,49 +178,49 @@ const KTableEntry nsCSSProps::kBoxShadowTypeKTable[] = {
 
 const KTableEntry nsCSSProps::kCursorKTable[] = {
     // CSS 2.0
-    {eCSSKeyword_auto, NS_STYLE_CURSOR_AUTO},
-    {eCSSKeyword_crosshair, NS_STYLE_CURSOR_CROSSHAIR},
-    {eCSSKeyword_default, NS_STYLE_CURSOR_DEFAULT},
-    {eCSSKeyword_pointer, NS_STYLE_CURSOR_POINTER},
-    {eCSSKeyword_move, NS_STYLE_CURSOR_MOVE},
-    {eCSSKeyword_e_resize, NS_STYLE_CURSOR_E_RESIZE},
-    {eCSSKeyword_ne_resize, NS_STYLE_CURSOR_NE_RESIZE},
-    {eCSSKeyword_nw_resize, NS_STYLE_CURSOR_NW_RESIZE},
-    {eCSSKeyword_n_resize, NS_STYLE_CURSOR_N_RESIZE},
-    {eCSSKeyword_se_resize, NS_STYLE_CURSOR_SE_RESIZE},
-    {eCSSKeyword_sw_resize, NS_STYLE_CURSOR_SW_RESIZE},
-    {eCSSKeyword_s_resize, NS_STYLE_CURSOR_S_RESIZE},
-    {eCSSKeyword_w_resize, NS_STYLE_CURSOR_W_RESIZE},
-    {eCSSKeyword_text, NS_STYLE_CURSOR_TEXT},
-    {eCSSKeyword_wait, NS_STYLE_CURSOR_WAIT},
-    {eCSSKeyword_help, NS_STYLE_CURSOR_HELP},
+    {eCSSKeyword_auto, StyleCursorKind::Auto},
+    {eCSSKeyword_crosshair, StyleCursorKind::Crosshair},
+    {eCSSKeyword_default, StyleCursorKind::Default},
+    {eCSSKeyword_pointer, StyleCursorKind::Pointer},
+    {eCSSKeyword_move, StyleCursorKind::Move},
+    {eCSSKeyword_e_resize, StyleCursorKind::EResize},
+    {eCSSKeyword_ne_resize, StyleCursorKind::NeResize},
+    {eCSSKeyword_nw_resize, StyleCursorKind::NwResize},
+    {eCSSKeyword_n_resize, StyleCursorKind::NResize},
+    {eCSSKeyword_se_resize, StyleCursorKind::SeResize},
+    {eCSSKeyword_sw_resize, StyleCursorKind::SwResize},
+    {eCSSKeyword_s_resize, StyleCursorKind::SResize},
+    {eCSSKeyword_w_resize, StyleCursorKind::WResize},
+    {eCSSKeyword_text, StyleCursorKind::Text},
+    {eCSSKeyword_wait, StyleCursorKind::Wait},
+    {eCSSKeyword_help, StyleCursorKind::Help},
     // CSS 2.1
-    {eCSSKeyword_progress, NS_STYLE_CURSOR_SPINNING},
+    {eCSSKeyword_progress, StyleCursorKind::Progress},
     // CSS3 basic user interface module
-    {eCSSKeyword_copy, NS_STYLE_CURSOR_COPY},
-    {eCSSKeyword_alias, NS_STYLE_CURSOR_ALIAS},
-    {eCSSKeyword_context_menu, NS_STYLE_CURSOR_CONTEXT_MENU},
-    {eCSSKeyword_cell, NS_STYLE_CURSOR_CELL},
-    {eCSSKeyword_not_allowed, NS_STYLE_CURSOR_NOT_ALLOWED},
-    {eCSSKeyword_col_resize, NS_STYLE_CURSOR_COL_RESIZE},
-    {eCSSKeyword_row_resize, NS_STYLE_CURSOR_ROW_RESIZE},
-    {eCSSKeyword_no_drop, NS_STYLE_CURSOR_NO_DROP},
-    {eCSSKeyword_vertical_text, NS_STYLE_CURSOR_VERTICAL_TEXT},
-    {eCSSKeyword_all_scroll, NS_STYLE_CURSOR_ALL_SCROLL},
-    {eCSSKeyword_nesw_resize, NS_STYLE_CURSOR_NESW_RESIZE},
-    {eCSSKeyword_nwse_resize, NS_STYLE_CURSOR_NWSE_RESIZE},
-    {eCSSKeyword_ns_resize, NS_STYLE_CURSOR_NS_RESIZE},
-    {eCSSKeyword_ew_resize, NS_STYLE_CURSOR_EW_RESIZE},
-    {eCSSKeyword_none, NS_STYLE_CURSOR_NONE},
-    {eCSSKeyword_grab, NS_STYLE_CURSOR_GRAB},
-    {eCSSKeyword_grabbing, NS_STYLE_CURSOR_GRABBING},
-    {eCSSKeyword_zoom_in, NS_STYLE_CURSOR_ZOOM_IN},
-    {eCSSKeyword_zoom_out, NS_STYLE_CURSOR_ZOOM_OUT},
+    {eCSSKeyword_copy, StyleCursorKind::Copy},
+    {eCSSKeyword_alias, StyleCursorKind::Alias},
+    {eCSSKeyword_context_menu, StyleCursorKind::ContextMenu},
+    {eCSSKeyword_cell, StyleCursorKind::Cell},
+    {eCSSKeyword_not_allowed, StyleCursorKind::NotAllowed},
+    {eCSSKeyword_col_resize, StyleCursorKind::ColResize},
+    {eCSSKeyword_row_resize, StyleCursorKind::RowResize},
+    {eCSSKeyword_no_drop, StyleCursorKind::NoDrop},
+    {eCSSKeyword_vertical_text, StyleCursorKind::VerticalText},
+    {eCSSKeyword_all_scroll, StyleCursorKind::AllScroll},
+    {eCSSKeyword_nesw_resize, StyleCursorKind::NeswResize},
+    {eCSSKeyword_nwse_resize, StyleCursorKind::NwseResize},
+    {eCSSKeyword_ns_resize, StyleCursorKind::NsResize},
+    {eCSSKeyword_ew_resize, StyleCursorKind::EwResize},
+    {eCSSKeyword_none, StyleCursorKind::None},
+    {eCSSKeyword_grab, StyleCursorKind::Grab},
+    {eCSSKeyword_grabbing, StyleCursorKind::Grabbing},
+    {eCSSKeyword_zoom_in, StyleCursorKind::ZoomIn},
+    {eCSSKeyword_zoom_out, StyleCursorKind::ZoomOut},
     // -moz- prefixed vendor specific
-    {eCSSKeyword__moz_grab, NS_STYLE_CURSOR_GRAB},
-    {eCSSKeyword__moz_grabbing, NS_STYLE_CURSOR_GRABBING},
-    {eCSSKeyword__moz_zoom_in, NS_STYLE_CURSOR_ZOOM_IN},
-    {eCSSKeyword__moz_zoom_out, NS_STYLE_CURSOR_ZOOM_OUT},
+    {eCSSKeyword__moz_grab, StyleCursorKind::Grab},
+    {eCSSKeyword__moz_grabbing, StyleCursorKind::Grabbing},
+    {eCSSKeyword__moz_zoom_in, StyleCursorKind::ZoomIn},
+    {eCSSKeyword__moz_zoom_out, StyleCursorKind::ZoomOut},
     {eCSSKeyword_UNKNOWN, -1}};
 
 KTableEntry nsCSSProps::kDisplayKTable[] = {
@@ -346,16 +347,6 @@ const KTableEntry nsCSSProps::kLineHeightKTable[] = {
     {eCSSKeyword__moz_block_height, NS_STYLE_LINE_HEIGHT_BLOCK_HEIGHT},
     {eCSSKeyword_UNKNOWN, -1}};
 
-const KTableEntry nsCSSProps::kContainKTable[] = {
-    {eCSSKeyword_none, NS_STYLE_CONTAIN_NONE},
-    {eCSSKeyword_strict, NS_STYLE_CONTAIN_STRICT},
-    {eCSSKeyword_content, NS_STYLE_CONTAIN_CONTENT},
-    {eCSSKeyword_layout, NS_STYLE_CONTAIN_LAYOUT},
-    {eCSSKeyword_style, NS_STYLE_CONTAIN_STYLE},
-    {eCSSKeyword_paint, NS_STYLE_CONTAIN_PAINT},
-    {eCSSKeyword_size, NS_STYLE_CONTAIN_SIZE},
-    {eCSSKeyword_UNKNOWN, -1}};
-
 const KTableEntry nsCSSProps::kTextAlignKTable[] = {
     {eCSSKeyword_left, NS_STYLE_TEXT_ALIGN_LEFT},
     {eCSSKeyword_right, NS_STYLE_TEXT_ALIGN_RIGHT},
@@ -418,28 +409,6 @@ const KTableEntry nsCSSProps::kVerticalAlignKTable[] = {
     {eCSSKeyword_bottom, NS_STYLE_VERTICAL_ALIGN_BOTTOM},
     {eCSSKeyword_text_bottom, NS_STYLE_VERTICAL_ALIGN_TEXT_BOTTOM},
     {eCSSKeyword_UNKNOWN, -1}};
-
-const KTableEntry nsCSSProps::kWidthKTable[] = {
-    {eCSSKeyword_max_content, NS_STYLE_WIDTH_MAX_CONTENT},
-    {eCSSKeyword_min_content, NS_STYLE_WIDTH_MIN_CONTENT},
-    {eCSSKeyword__moz_fit_content, NS_STYLE_WIDTH_FIT_CONTENT},
-    {eCSSKeyword__moz_available, NS_STYLE_WIDTH_AVAILABLE},
-    {eCSSKeyword_UNKNOWN, -1}};
-
-// This must be the same as kWidthKTable, but just with 'content' added:
-const KTableEntry nsCSSProps::kFlexBasisKTable[] = {
-    {eCSSKeyword_max_content, NS_STYLE_WIDTH_MAX_CONTENT},
-    {eCSSKeyword_min_content, NS_STYLE_WIDTH_MIN_CONTENT},
-    {eCSSKeyword__moz_fit_content, NS_STYLE_WIDTH_FIT_CONTENT},
-    {eCSSKeyword__moz_available, NS_STYLE_WIDTH_AVAILABLE},
-    {eCSSKeyword_content, NS_STYLE_FLEX_BASIS_CONTENT},
-    {eCSSKeyword_UNKNOWN, -1}};
-static_assert(ArrayLength(nsCSSProps::kFlexBasisKTable) ==
-                  ArrayLength(nsCSSProps::kWidthKTable) + 1,
-              "kFlexBasisKTable should have the same entries as "
-              "kWidthKTable, plus one more for 'content'");
-
-// Specific keyword tables for XUL.properties
 
 // keyword tables for SVG properties
 
@@ -530,8 +499,8 @@ const CSSPropFlags nsCSSProps::kFlagsTable[eCSSProperty_COUNT] = {
 #undef CSS_PROP_LONGHAND
 };
 
-/* static */ bool
-    nsCSSProps::gPropertyEnabled[eCSSProperty_COUNT_with_aliases] = {
+/* static */
+bool nsCSSProps::gPropertyEnabled[eCSSProperty_COUNT_with_aliases] = {
 // If the property has any "ENABLED_IN" flag set, it is disabled by
 // default. Note that, if a property has pref, whatever its default
 // value is, it will later be changed in nsCSSProps::AddRefTable().

@@ -18,7 +18,7 @@
 #include <stdarg.h>
 #include "nsStyleConsts.h"
 #include "SVGContentUtils.h"
-#include "SVGGeometryElement.h"  // for nsSVGMark
+#include "SVGGeometryElement.h"
 #include "SVGPathSegUtils.h"
 #include <algorithm>
 
@@ -528,7 +528,8 @@ already_AddRefed<Path> SVGPathData::BuildPathForMeasuring() const {
 // We could simplify this function because this is only used by CSS motion path
 // and clip-path, which don't render the SVG Path. i.e. The returned path is
 // used as a reference.
-/* static */ already_AddRefed<Path> SVGPathData::BuildPath(
+/* static */
+already_AddRefed<Path> SVGPathData::BuildPath(
     const nsTArray<StylePathCommand>& aPath, PathBuilder* aBuilder,
     uint8_t aStrokeLineCap, Float aStrokeWidth, float aZoomFactor) {
   if (aPath.IsEmpty() || !aPath[0].IsMoveTo()) {
@@ -748,7 +749,7 @@ static float AngleOfVector(const Point& cp1, const Point& cp2) {
   return static_cast<float>(AngleOfVector(cp1 - cp2));
 }
 
-void SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark>* aMarks) const {
+void SVGPathData::GetMarkerPositioningData(nsTArray<SVGMark>* aMarks) const {
   // This code should assume that ANY type of segment can appear at ANY index.
   // It should also assume that segments such as M and Z can appear in weird
   // places, and repeat multiple times consecutively.
@@ -756,6 +757,7 @@ void SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark>* aMarks) const {
   // info on current [sub]path (reset every M command):
   Point pathStart(0.0, 0.0);
   float pathStartAngle = 0.0f;
+  uint32_t pathStartIndex = 0;
 
   // info on previous segment:
   uint16_t prevSegType = PATHSEG_UNKNOWN;
@@ -787,6 +789,7 @@ void SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark>* aMarks) const {
           segEnd = segStart + Point(mData[i], mData[i + 1]);
         }
         pathStart = segEnd;
+        pathStartIndex = aMarks->Length();
         // If authors are going to specify multiple consecutive moveto commands
         // with markers, me might as well make the angle do something useful:
         segStartAngle = segEndAngle = AngleOfVector(segEnd, segStart);
@@ -1018,7 +1021,7 @@ void SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark>* aMarks) const {
 
     // Set the angle of the mark at the start of this segment:
     if (aMarks->Length()) {
-      nsSVGMark& mark = aMarks->LastElement();
+      SVGMark& mark = aMarks->LastElement();
       if (!IsMoveto(segType) && IsMoveto(prevSegType)) {
         // start of new subpath
         pathStartAngle = mark.angle = segStartAngle;
@@ -1033,16 +1036,15 @@ void SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark>* aMarks) const {
     }
 
     // Add the mark at the end of this segment, and set its position:
-    if (!aMarks->AppendElement(nsSVGMark(static_cast<float>(segEnd.x),
-                                         static_cast<float>(segEnd.y), 0.0f,
-                                         nsSVGMark::eMid))) {
+    if (!aMarks->AppendElement(SVGMark(static_cast<float>(segEnd.x),
+                                       static_cast<float>(segEnd.y), 0.0f,
+                                       SVGMark::eMid))) {
       aMarks->Clear();  // OOM, so try to free some
       return;
     }
 
     if (segType == PATHSEG_CLOSEPATH && prevSegType != PATHSEG_CLOSEPATH) {
-      aMarks->LastElement().angle =
-          // aMarks->ElementAt(pathStartIndex).angle =
+      aMarks->LastElement().angle = aMarks->ElementAt(pathStartIndex).angle =
           SVGContentUtils::AngleBisect(segEndAngle, pathStartAngle);
     }
 
@@ -1057,8 +1059,8 @@ void SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark>* aMarks) const {
     if (prevSegType != PATHSEG_CLOSEPATH) {
       aMarks->LastElement().angle = prevSegEndAngle;
     }
-    aMarks->LastElement().type = nsSVGMark::eEnd;
-    aMarks->ElementAt(0).type = nsSVGMark::eStart;
+    aMarks->LastElement().type = SVGMark::eEnd;
+    aMarks->ElementAt(0).type = SVGMark::eStart;
   }
 }
 

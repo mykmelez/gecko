@@ -13,7 +13,7 @@ use rayon::prelude::*;
 use std::sync::{Arc, MutexGuard};
 use platform::font::FontContext;
 use glyph_rasterizer::{FontInstance, FontContexts, GlyphKey};
-use glyph_rasterizer::{GlyphRasterizer, GlyphRasterJob, GlyphRasterJobs, GlyphRasterResult};
+use glyph_rasterizer::{GlyphRasterizer, GlyphRasterJob, GlyphRasterJobs};
 use glyph_cache::{GlyphCache, CachedGlyphInfo, GlyphCacheEntry};
 use resource_cache::CachedImageData;
 use texture_cache::{TextureCache, TextureCacheHandle, Eviction};
@@ -107,18 +107,22 @@ impl GlyphRasterizer {
                 .map(|key: &GlyphKey| {
                     profile_scope!("glyph-raster");
                     let mut context = font_contexts.lock_current_context();
-                    let job = GlyphRasterJob {
+                    let mut job = GlyphRasterJob {
                         key: key.clone(),
                         result: context.rasterize_glyph(&font, key),
                     };
 
-                    // Sanity check.
-                    if let GlyphRasterResult::Bitmap(ref glyph) = job.result {
+                    if let Ok(ref mut glyph) = job.result {
+                        // Sanity check.
                         let bpp = 4; // We always render glyphs in 32 bits RGBA format.
                         assert_eq!(
                             glyph.bytes.len(),
                             bpp * (glyph.width * glyph.height) as usize
                         );
+                        assert_eq!((glyph.left.fract(), glyph.top.fract()), (0.0, 0.0));
+
+                        // Check if the glyph has a bitmap that needs to be downscaled.
+                        glyph.downscale_bitmap_if_required(&font);
                     }
 
                     job
@@ -161,13 +165,11 @@ impl GlyphRasterizer {
 
             for GlyphRasterJob { key, result } in jobs {
                 let glyph_info = match result {
-                    GlyphRasterResult::LoadFailed => GlyphCacheEntry::Blank,
-                    GlyphRasterResult::Bitmap(ref glyph) if glyph.width == 0 ||
-                                                            glyph.height == 0 => {
+                    Err(_) => GlyphCacheEntry::Blank,
+                    Ok(ref glyph) if glyph.width == 0 || glyph.height == 0 => {
                         GlyphCacheEntry::Blank
                     }
-                    GlyphRasterResult::Bitmap(glyph) => {
-                        assert_eq!((glyph.left.fract(), glyph.top.fract()), (0.0, 0.0));
+                    Ok(glyph) => {
                         let mut texture_cache_handle = TextureCacheHandle::invalid();
                         texture_cache.request(&texture_cache_handle, gpu_cache);
                         texture_cache.update(

@@ -44,8 +44,8 @@ class WalkerFront extends FrontClassWithSpec(walkerSpec) {
     });
   }
 
-  constructor(client, form) {
-    super(client, form);
+  constructor(client) {
+    super(client);
     this._createRootNodePromise();
     this._orphaned = new Set();
     this._retainedOrphans = new Set();
@@ -54,10 +54,6 @@ class WalkerFront extends FrontClassWithSpec(walkerSpec) {
     this.autoCleanup = true;
 
     this.before("new-mutations", this.onMutations.bind(this));
-  }
-
-  destroy() {
-    super.destroy();
   }
 
   // Update the object given a form representation off the wire.
@@ -438,16 +434,14 @@ registerFront(WalkerFront);
  * inspector-related actors, including the walker.
  */
 class InspectorFront extends FrontClassWithSpec(inspectorSpec) {
-  constructor(client, tabForm) {
-    super(client, tabForm);
+  constructor(client) {
+    super(client);
 
-    this.actorID = tabForm.inspectorActor;
     this._client = client;
     this._highlighters = new Map();
 
-    // XXX: This is the first actor type in its hierarchy to use the protocol
-    // library, so we're going to self-own on the client side for now.
-    this.manage(this);
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "inspectorActor";
   }
 
   // async initialization

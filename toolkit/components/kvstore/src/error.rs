@@ -4,7 +4,7 @@
 
 use libc::uint16_t;
 use nserror::{
-    nsresult, NsresultExt, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_INTERFACE,
+    nsresult, NS_ERROR_FAILURE, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_INTERFACE,
     NS_ERROR_NULL_POINTER, NS_ERROR_UNEXPECTED,
 };
 use nsstring::nsCString;
@@ -40,11 +40,14 @@ pub enum KeyValueError {
     #[fail(display = "store error: {:?}", _0)]
     StoreError(StoreError),
 
-    #[fail(display = "unsupported type: {}", _0)]
-    UnsupportedType(uint16_t),
+    #[fail(display = "unsupported owned value type")]
+    UnsupportedOwned,
 
     #[fail(display = "unexpected value")]
     UnexpectedValue,
+
+    #[fail(display = "unsupported variant type: {}", _0)]
+    UnsupportedVariant(uint16_t),
 }
 
 impl From<nsresult> for KeyValueError {
@@ -64,8 +67,9 @@ impl From<KeyValueError> for nsresult {
             KeyValueError::PoisonError => NS_ERROR_UNEXPECTED,
             KeyValueError::Read => NS_ERROR_FAILURE,
             KeyValueError::StoreError(_) => NS_ERROR_FAILURE,
-            KeyValueError::UnsupportedType(_) => NS_ERROR_NOT_IMPLEMENTED,
+            KeyValueError::UnsupportedOwned => NS_ERROR_NOT_IMPLEMENTED,
             KeyValueError::UnexpectedValue => NS_ERROR_UNEXPECTED,
+            KeyValueError::UnsupportedVariant(_) => NS_ERROR_NOT_IMPLEMENTED,
         }
     }
 }

@@ -6,10 +6,10 @@ var EXPORTED_SYMBOLS = [
   "Troubleshoot",
 ];
 
-ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {AddonManager} = ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyGlobalGetters(this, ["DOMParser"]);
 
 // We use a preferences whitelist to make sure we only show preferences that
@@ -56,6 +56,7 @@ const PREFS_WHITELIST = [
   "general.useragent.",
   "gfx.",
   "html5.",
+  "idle.",
   "image.",
   "javascript.",
   "keyword.",
@@ -95,6 +96,7 @@ const PREFS_BLACKLIST = [
   /^network[.]proxy[.]/,
   /[.]print_to_filename$/,
   /^print[.]macosx[.]pagesetup/,
+  /^print[.]printer/,
 ];
 
 // Table of getters for various preference types.
@@ -197,6 +199,10 @@ var dataProviders = {
       }
     }
 
+    try {
+      data.launcherProcessState = Services.appinfo.launcherProcessState;
+    } catch (e) {}
+
     data.remoteAutoStart = Services.appinfo.browserTabsRemoteAutostart;
 
     // Services.ppmm.childCount is a count of how many processes currently
@@ -220,8 +226,11 @@ var dataProviders = {
       data.policiesStatus = Services.policies.status;
     }
 
-    const keyGoogle = Services.urlFormatter.formatURL("%GOOGLE_API_KEY%").trim();
-    data.keyGoogleFound = keyGoogle != "no-google-api-key" && keyGoogle.length > 0;
+    const keyLocationServiceGoogle = Services.urlFormatter.formatURL("%GOOGLE_LOCATION_SERVICE_API_KEY%").trim();
+    data.keyLocationServiceGoogleFound = keyLocationServiceGoogle != "no-google-location-service-api-key" && keyLocationServiceGoogle.length > 0;
+
+    const keySafebrowsingGoogle = Services.urlFormatter.formatURL("%GOOGLE_SAFEBROWSING_API_KEY%").trim();
+    data.keySafebrowsingGoogleFound = keySafebrowsingGoogle != "no-google-safebrowsing-api-key" && keySafebrowsingGoogle.length > 0;
 
     const keyMozilla = Services.urlFormatter.formatURL("%MOZILLA_API_KEY%").trim();
     data.keyMozillaFound = keyMozilla != "no-mozilla-api-key" && keyMozilla.length > 0;
@@ -237,8 +246,8 @@ var dataProviders = {
         return b.isActive ? 1 : -1;
 
       // In some unfortunate cases addon names can be null.
-      let aname = a.name || null;
-      let bname = b.name || null;
+      let aname = a.name || "";
+      let bname = b.name || "";
       let lc = aname.localeCompare(bname);
       if (lc != 0)
         return lc;
@@ -425,6 +434,8 @@ var dataProviders = {
       ContentUsesTiling: "contentUsesTiling",
       OffMainThreadPaintEnabled: "offMainThreadPaintEnabled",
       OffMainThreadPaintWorkerCount: "offMainThreadPaintWorkerCount",
+      LowEndMachine: "lowEndMachine",
+      TargetFrameRate: "targetFrameRate",
     };
 
     for (let prop in gfxInfoProps) {
@@ -634,7 +645,7 @@ var dataProviders = {
 
 if (AppConstants.MOZ_CRASHREPORTER) {
   dataProviders.crashes = function crashes(done) {
-    let CrashReports = ChromeUtils.import("resource://gre/modules/CrashReports.jsm").CrashReports;
+    const {CrashReports} = ChromeUtils.import("resource://gre/modules/CrashReports.jsm");
     let reports = CrashReports.getReports();
     let now = new Date();
     let reportsNew = reports.filter(report => (now - report.date < Troubleshoot.kMaxCrashAge));

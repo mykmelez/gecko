@@ -7,5 +7,5 @@ description = "Rust wrappers around XPCOM threading functions"
 
 [dependencies]
 nserror = { path = "../nserror" }
-nsstring = { path = "../../../servo/support/gecko/nsstring" }
+nsstring = { path = "../nsstring" }
 xpcom = { path = "../xpcom" }

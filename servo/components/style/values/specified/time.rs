@@ -92,12 +92,11 @@ impl Time {
             // ParsingMode::DEFAULT directly.
             Ok(&Token::Dimension {
                 value, ref unit, ..
-            })
-                if clamping_mode.is_ok(ParsingMode::DEFAULT, value) =>
-            {
-                return Time::parse_dimension(value, unit, /* from_calc = */ false)
-                    .map_err(|()| location.new_custom_error(StyleParseErrorKind::UnspecifiedError));
-            }
+            }) if clamping_mode.is_ok(ParsingMode::DEFAULT, value) => {
+                return Time::parse_dimension(value, unit, /* from_calc = */ false).map_err(|()| {
+                    location.new_custom_error(StyleParseErrorKind::UnspecifiedError)
+                });
+            },
             Ok(&Token::Function(ref name)) if name.eq_ignore_ascii_case("calc") => {},
             Ok(t) => return Err(location.new_unexpected_token_error(t.clone())),
             Err(e) => return Err(e.into()),

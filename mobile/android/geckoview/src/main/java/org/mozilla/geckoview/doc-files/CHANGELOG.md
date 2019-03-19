@@ -1,16 +1,127 @@
 ---
-layout: geckoview
+layout: default
+title: API Changelog
+description: GeckoView API Changelog.
+nav_exclude: true
+exclude: true
 ---
 
 <h1> GeckoView API Changelog. </h1>
 
+## v67
+- Added [`setAutomaticFontSizeAdjustment`][67.2] to
+  [`GeckoRuntimeSettings`][67.3] for automatically adjusting font size settings
+  depending on the OS-level font size setting.
+
+[67.2]: ../GeckoRuntimeSettings.html#setAutomaticFontSizeAdjustment-boolean-
+[67.3]: ../GeckoRuntimeSettings.html
+
+- Added [`setFontSizeFactor`][67.4] to [`GeckoRuntimeSettings`][67.3] for
+  setting a font size scaling factor, and for enabling font inflation for
+  non-mobile-friendly pages.
+
+[67.4]: ../GeckoRuntimeSettings.html#setFontSizeFactor-float-
+
+- Updated video autoplay API to reflect changes in Gecko. Instead of being a
+  per-video permission in the [`PermissionDelegate`][67.5], it is a [runtime
+  setting][67.6] that either allows or blocks autoplay videos.
+
+[67.5]: ../GeckoSession.PermissionDelegate.html
+[67.6]: ../GeckoRuntimeSettings.html#setAutoplayDefault-int-
+
+- Change [`ContentBlocking.AT_ALL`][67.7] and [`ContentBlocking.SB_ALL`][67.8]
+  values to mirror the actual constants they encompass.
+
+[67.7]: ../ContentBlocking.html#AT_ALL
+[67.8]: ../ContentBlocking.html#SB_ALL
+
+- Added nested [`ContentBlocking`][67.9] runtime settings.
+
+[67.9]: ../ContentBlocking.html
+
+- Added [`RuntimeSettings`][67.10] base class to support nested settings.
+
+[67.10]: ../RuntimeSettings.html
+
+- Added [`baseUri`][67.11] to [`ContentDelegate.ContextElement`][65.21] and
+  changed [`linkUri`][67.12] to absolute form.
+
+[67.11]: ../GeckoSession.ContentDelegate.ContextElement.html#baseUri
+[67.12]: ../GeckoSession.ContentDelegate.ContextElement.html#linkUri
+
+- Added [`scrollBy`][67.13] and [`scrollTo`][67.14] to [`PanZoomController`][65.4].
+
+[67.13]: ../PanZoomController.html#scrollBy-org.mozilla.geckoview.ScreenLength-org.mozilla.geckoview.ScreenLength-
+[67.14]: ../PanZoomController.html#scrollTo-org.mozilla.geckoview.ScreenLength-org.mozilla.geckoview.ScreenLength-
+
+- Added [`GeckoSession.getDefaultUserAgent`][67.1] to expose the build-time
+  default user agent synchronously.
+
+- Changed `WebResponse.body` from a `ByteBuffer` to an `InputStream`. Apps that want access
+  to the entire response body will now need to read the stream themselves.
+
+- Added `GeckoWebExecutor.FETCH_FLAGS_NO_REDIRECTS`, which will cause `GeckoWebExecutor.fetch()` to not
+  automatically follow HTTP redirects (e.g., 302).
+
+- Moved [`GeckoVRManager`][67.2] into the org.mozilla.geckoview package.
+
+[67.1]: ../GeckoSession.html#getDefaultUserAgent--
+[67.2]: ../GeckoVRManager.html
+
+- Initial WebExtension support. [`GeckoRuntime#registerWebExtension`][67.15]
+  allows embedders to register a local web extension.
+
+[67.15]: ../GeckoRuntime.html#registerWebExtension-org.mozilla.geckoview.WebExtension-
+
+- Added API to [`GeckoView`][65.5] to take screenshot of the visible page. Calling [`capturePixels`][67.16] returns a ['GeckoResult'][65.25] that completes to a [`Bitmap`][67.17] of the current [`Surface`][67.18] contents, or an [`IllegalStateException`][67.19] if the [`GeckoSession`][65.9] is not ready to render content.
+
+[67.16]: ../GeckoView.html#capturePixels
+[67.17]: https://developer.android.com/reference/android/graphics/Bitmap
+[67.18]: https://developer.android.com/reference/android/view/Surface
+[67.19]: https://developer.android.com/reference/java/lang/IllegalStateException
+
+- Added API to capture a screenshot to [`GeckoDisplay`][67.20]. [`capturePixels`][67.21] returns a ['GeckoResult'][65.25] that completes to a [`Bitmap`][67.16] of the current [`Surface`][67.17] contents, or an [`IllegalStateException`][67.18] if the [`GeckoSession`][65.9] is not ready to render content.
+
+[67.20]: ../GeckoDisplay.html
+[67.21]: ../GeckoDisplay.html#capturePixels
+
+- Add missing `@Nullable` annotation to return value for
+  `GeckoSession.PromptDelegate.ChoiceCallback.onPopupResult()`
+
+- Added `default` implementations for all non-functional `interface`s.
+
 ## v66
+- Removed redundant field `trackingMode` from [`SecurityInformation`][66.6].
+  Use `TrackingProtectionDelegate.onTrackerBlocked` for notification of blocked
+  elements during page load.
+
+[66.6]: ../GeckoSession.ProgressDelegate.SecurityInformation.html
+
 - Added [`@NonNull`][66.1] or [`@Nullable`][66.2] to all APIs.
 
 [66.1]: https://developer.android.com/reference/android/support/annotation/NonNull
 [66.2]: https://developer.android.com/reference/android/support/annotation/Nullable
 
+- Added methods for each setting in [`GeckoSessionSettings`][66.3]
+
+[66.3]: ../GeckoSessionSettings.html
+
+- Added [`GeckoSessionSettings`][66.4] for enabling desktop viewport. Desktop
+  viewport is no longer set by [`USER_AGENT_MODE_DESKTOP`][66.5] and must be set
+  separately.
+
+[66.4]: ../GeckoSessionSettings.html
+[66.5]: ../GeckoSessionSettings.html#USER_AGENT_MODE_DESKTOP
+
+- Added [`@UiThread`][65.6] to [`GeckoSession.releaseSession`][66.7] and
+  [`GeckoSession.setSession`][66.8]
+
+[66.7]: ../GeckoView.html#releaseSession--
+[66.8]: ../GeckoView.html#setSession-org.mozilla.geckoview.GeckoSession-
+
 ## v65
+- Added experimental ad-blocking category to `GeckoSession.TrackingProtectionDelegate`.
+
 - Moved [`CompositorController`][65.1], [`DynamicToolbarAnimator`][65.2],
   [`OverscrollEdgeEffect`][65.3], [`PanZoomController`][65.4] from
   `org.mozilla.gecko.gfx` to [`org.mozilla.geckoview`][65.5]
@@ -98,4 +209,4 @@ layout: geckoview
 [65.24]: ../CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: ../GeckoResult.html
 
-[api-version]: 8827d6c8c7c2aa54cfad31c21aca5dc7d6d42311
+[api-version]: 09c473360eb5e17aa801fa0f966cd8671cf2f3d2

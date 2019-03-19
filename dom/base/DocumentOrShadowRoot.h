@@ -8,14 +8,13 @@
 #define mozilla_dom_DocumentOrShadowRoot_h__
 
 #include "mozilla/dom/NameSpaceConstants.h"
+#include "mozilla/IdentifierMapEntry.h"
 #include "nsClassHashtable.h"
 #include "nsContentListDeclarations.h"
 #include "nsTArray.h"
-#include "nsIdentifierMapEntry.h"
 
 class nsContentList;
 class nsCycleCollectionTraversalCallback;
-class nsIDocument;
 class nsINode;
 class nsINodeList;
 class nsIRadioVisitor;
@@ -47,7 +46,7 @@ class DocumentOrShadowRoot {
   };
 
  public:
-  explicit DocumentOrShadowRoot(nsIDocument&);
+  explicit DocumentOrShadowRoot(Document&);
   explicit DocumentOrShadowRoot(ShadowRoot&);
 
   // Unusual argument naming is because of cycle collection macros.
@@ -227,7 +226,7 @@ class DocumentOrShadowRoot {
    * 3) Additions to the DOM always update existing entries for names, and add
    *    new ones for IDs.
    */
-  nsTHashtable<nsIdentifierMapEntry> mIdentifierMap;
+  nsTHashtable<IdentifierMapEntry> mIdentifierMap;
 
   nsClassHashtable<nsStringHashKey, nsRadioGroupStruct> mRadioGroups;
 
@@ -241,7 +240,7 @@ inline const nsTArray<Element*>* DocumentOrShadowRoot::GetAllElementsForId(
     return nullptr;
   }
 
-  nsIdentifierMapEntry* entry = mIdentifierMap.GetEntry(aElementId);
+  IdentifierMapEntry* entry = mIdentifierMap.GetEntry(aElementId);
   return entry ? &entry->GetIdElements() : nullptr;
 }
 

@@ -79,6 +79,8 @@ def get_flavors(graph_config, param):
     title='Release Promotion',
     symbol='${input.release_promotion_flavor}',
     description="Promote a release.",
+    # Bug 1485680
+    kind='task',
     order=500,
     context=[],
     available=is_release_promotion_available,
@@ -235,7 +237,7 @@ def get_flavors(graph_config, param):
         "required": ['release_promotion_flavor', 'build_number'],
     }
 )
-def release_promotion_action(parameters, graph_config, input, task_group_id, task_id, task):
+def release_promotion_action(parameters, graph_config, input, task_group_id, task_id):
     release_promotion_flavor = input['release_promotion_flavor']
     promotion_config = graph_config['release-promotion']['flavors'][release_promotion_flavor]
     release_history = {}

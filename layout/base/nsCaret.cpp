@@ -70,7 +70,7 @@ static nsIFrame* CheckForTrailingTextFrameRecursive(nsIFrame* aFrame,
 static nsLineBox* FindContainingLine(nsIFrame* aFrame) {
   while (aFrame && aFrame->IsFrameOfType(nsIFrame::eLineParticipant)) {
     nsIFrame* parent = aFrame->GetParent();
-    nsBlockFrame* blockParent = nsLayoutUtils::GetAsBlock(parent);
+    nsBlockFrame* blockParent = do_QueryFrame(parent);
     if (blockParent) {
       bool isValid;
       nsBlockInFlowLineIterator iter(blockParent, aFrame, &isValid);
@@ -240,9 +240,9 @@ void nsCaret::SetCaretReadOnly(bool inMakeReadonly) {
   SchedulePaint();
 }
 
-/* static */ nsRect nsCaret::GetGeometryForFrame(nsIFrame* aFrame,
-                                                 int32_t aFrameOffset,
-                                                 nscoord* aBidiIndicatorSize) {
+/* static */
+nsRect nsCaret::GetGeometryForFrame(nsIFrame* aFrame, int32_t aFrameOffset,
+                                    nscoord* aBidiIndicatorSize) {
   nsPoint framePos(0, 0);
   nsRect rect;
   nsresult rv = aFrame->GetPointFromOffset(aFrameOffset, &framePos);
@@ -384,8 +384,8 @@ nsIFrame* nsCaret::GetFrameAndOffset(Selection* aSelection,
   return frame;
 }
 
-/* static */ nsIFrame* nsCaret::GetGeometry(Selection* aSelection,
-                                            nsRect* aRect) {
+/* static */
+nsIFrame* nsCaret::GetGeometry(Selection* aSelection, nsRect* aRect) {
   int32_t frameOffset;
   nsIFrame* frame = GetFrameAndOffset(aSelection, nullptr, 0, &frameOffset);
   if (frame) {
@@ -527,7 +527,7 @@ void nsCaret::PaintCaret(DrawTarget& aDrawTarget, nsIFrame* aForFrame,
 }
 
 NS_IMETHODIMP
-nsCaret::NotifySelectionChanged(nsIDocument*, Selection* aDomSel,
+nsCaret::NotifySelectionChanged(Document*, Selection* aDomSel,
                                 int16_t aReason) {
   // Note that aDomSel, per the comment below may not be the same as our
   // selection, but that's OK since if that is the case, it wouldn't have
@@ -574,7 +574,7 @@ void nsCaret::ResetBlinking() {
   } else {
     nsIEventTarget* target = nullptr;
     if (nsCOMPtr<nsIPresShell> presShell = do_QueryReferent(mPresShell)) {
-      if (nsCOMPtr<nsIDocument> doc = presShell->GetDocument()) {
+      if (nsCOMPtr<Document> doc = presShell->GetDocument()) {
         target = doc->EventTargetFor(TaskCategory::Other);
       }
     }

@@ -11,13 +11,11 @@ const {changesSpec} = require("devtools/shared/specs/changes");
  * ChangesFront, the front object for the ChangesActor
  */
 class ChangesFront extends FrontClassWithSpec(changesSpec) {
-  constructor(client, {changesActor}) {
-    super(client, {actor: changesActor});
-    this.manage(this);
-  }
+  constructor(client) {
+    super(client);
 
-  destroy() {
-    super.destroy();
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "changesActor";
   }
 }
 

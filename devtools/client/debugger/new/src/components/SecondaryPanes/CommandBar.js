@@ -12,10 +12,11 @@ import { connect } from "../../utils/connect";
 import classnames from "classnames";
 import { features } from "../../utils/prefs";
 import {
-  isPaused as getIsPaused,
+  getIsPaused,
   getIsWaitingOnBreak,
   getCanRewind,
-  getSkipPausing
+  getSkipPausing,
+  getCurrentThread
 } from "../../selectors";
 import { formatKeyShortcut } from "../../utils/text";
 import actions from "../../actions";
@@ -48,8 +49,8 @@ const KEYS = {
   Linux: {
     resume: "F8",
     stepOver: "F10",
-    stepIn: "Ctrl+F11",
-    stepOut: "Ctrl+Shift+F11"
+    stepIn: "F11",
+    stepOut: "Shift+F11"
   }
 };
 
@@ -274,7 +275,7 @@ class CommandBar extends Component<Props> {
         title={L10N.getStr("skipPausingTooltip.label")}
         onClick={toggleSkipPausing}
       >
-        <AccessibleImage className="skipPausing" />
+        <AccessibleImage className="disable-pausing" />
       </button>
     );
   }
@@ -302,8 +303,8 @@ CommandBar.contextTypes = {
 };
 
 const mapStateToProps = state => ({
-  isPaused: getIsPaused(state),
-  isWaitingOnBreak: getIsWaitingOnBreak(state),
+  isPaused: getIsPaused(state, getCurrentThread(state)),
+  isWaitingOnBreak: getIsWaitingOnBreak(state, getCurrentThread(state)),
   canRewind: getCanRewind(state),
   skipPausing: getSkipPausing(state)
 });

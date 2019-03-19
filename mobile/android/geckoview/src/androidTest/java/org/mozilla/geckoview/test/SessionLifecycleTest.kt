@@ -4,6 +4,7 @@
 
 package org.mozilla.geckoview.test
 
+import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.GeckoView
@@ -15,6 +16,7 @@ import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.WithDevToolsAPI
 import org.mozilla.geckoview.test.util.Callbacks
 import org.mozilla.geckoview.test.util.UiThreadUtils
 
+import android.os.Bundle
 import android.os.Debug
 import android.os.Parcelable
 import android.os.SystemClock
@@ -25,6 +27,7 @@ import android.util.Log
 import android.util.SparseArray
 
 import org.hamcrest.Matchers.*
+import org.junit.Assume.assumeThat
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -75,28 +78,6 @@ class SessionLifecycleTest : BaseSessionTest() {
     fun open_throwOnAlreadyOpen() {
         // Throw exception if retrying to open again; otherwise we would leak the old open window.
         sessionRule.session.open()
-    }
-
-    @Test(expected = IllegalStateException::class)
-    fun setChromeURI_throwOnOpenSession() {
-        sessionRule.session.settings.setString(GeckoSessionSettings.CHROME_URI, "chrome://invalid/path/to.xul")
-    }
-
-    @Test(expected = IllegalStateException::class)
-    fun setScreenID_throwOnOpenSession() {
-        sessionRule.session.settings.setInt(GeckoSessionSettings.SCREEN_ID, 42)
-    }
-
-    @Test(expected = IllegalStateException::class)
-    fun setUsePrivateMode_throwOnOpenSession() {
-        sessionRule.session.settings.setBoolean(GeckoSessionSettings.USE_PRIVATE_MODE, true)
-    }
-
-    @Test(expected = IllegalStateException::class)
-    fun setUseMultiprocess_throwOnOpenSession() {
-        sessionRule.session.settings.setBoolean(
-                GeckoSessionSettings.USE_MULTIPROCESS,
-                !sessionRule.session.settings.getBoolean(GeckoSessionSettings.USE_MULTIPROCESS))
     }
 
     @Test fun readFromParcel() {
@@ -169,6 +150,8 @@ class SessionLifecycleTest : BaseSessionTest() {
     }
 
     @Test fun readFromParcel_closedSessionAfterReadParcel() {
+        // disable test on opt for frequently failing Bug 1519591
+        assumeThat(sessionRule.env.isDebugBuild, equalTo(true))
         val session = sessionRule.createOpenSession()
 
         session.toParcel { parcel ->
@@ -319,6 +302,33 @@ class SessionLifecycleTest : BaseSessionTest() {
                 }
                 restoreHierarchyState(state)
             }
+
+    @ClosedSessionAtStart
+    @Test fun restoreRuntimeSettings_noSession() {
+        val extrasSetting = Bundle(2)
+        extrasSetting.putInt("test1", 10)
+        extrasSetting.putBoolean("test2", true)
+
+        val settings = GeckoRuntimeSettings.Builder()
+                       .javaScriptEnabled(false)
+                       .extras(extrasSetting)
+                       .build()
+
+        settings.toParcel { parcel ->
+            val newSettings = GeckoRuntimeSettings.Builder().build()
+            newSettings.readFromParcel(parcel)
+
+            assertThat("Parceled settings must match",
+                       newSettings.javaScriptEnabled,
+                       equalTo(settings.javaScriptEnabled))
+            assertThat("Parceled settings must match",
+                       newSettings.extras.getInt("test1"),
+                       equalTo(settings.extras.getInt("test1")))
+            assertThat("Parceled settings must match",
+                       newSettings.extras.getBoolean("test2"),
+                       equalTo(settings.extras.getBoolean("test2")))
+        }
+    }
 
     @ClosedSessionAtStart
     @Test fun restoreInstanceState_noSessionOntoNoSession() {

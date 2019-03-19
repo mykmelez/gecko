@@ -37,7 +37,8 @@ static EGLSurface CreatePBufferSurface(GLLibraryEGL* egl, EGLDisplay display,
   return surface;
 }
 
-/*static*/ UniquePtr<SharedSurface_ANGLEShareHandle>
+/*static*/
+UniquePtr<SharedSurface_ANGLEShareHandle>
 SharedSurface_ANGLEShareHandle::Create(GLContext* gl, EGLConfig config,
                                        const gfx::IntSize& size,
                                        bool hasAlpha) {
@@ -98,8 +99,10 @@ SharedSurface_ANGLEShareHandle::SharedSurface_ANGLEShareHandle(
       mKeyedMutex(keyedMutex) {}
 
 SharedSurface_ANGLEShareHandle::~SharedSurface_ANGLEShareHandle() {
-  if (GLContextEGL::Cast(mGL)->GetEGLSurfaceOverride() == mPBuffer) {
-    GLContextEGL::Cast(mGL)->SetEGLSurfaceOverride(EGL_NO_SURFACE);
+  GLContext* gl = mGL;
+
+  if (gl && GLContextEGL::Cast(gl)->GetEGLSurfaceOverride() == mPBuffer) {
+    GLContextEGL::Cast(gl)->SetEGLSurfaceOverride(EGL_NO_SURFACE);
   }
   mEGL->fDestroySurface(Display(), mPBuffer);
 }
@@ -297,7 +300,8 @@ bool SharedSurface_ANGLEShareHandle::ReadbackBySharedHandle(
 ////////////////////////////////////////////////////////////////////////////////
 // Factory
 
-/*static*/ UniquePtr<SurfaceFactory_ANGLEShareHandle>
+/*static*/
+UniquePtr<SurfaceFactory_ANGLEShareHandle>
 SurfaceFactory_ANGLEShareHandle::Create(
     GLContext* gl, const SurfaceCaps& caps,
     const RefPtr<layers::LayersIPCChannel>& allocator,

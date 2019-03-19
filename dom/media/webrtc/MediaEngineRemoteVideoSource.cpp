@@ -86,6 +86,7 @@ void MediaEngineRemoteVideoSource::Init() {
 
   SetName(NS_ConvertUTF8toUTF16(deviceName));
   SetUUID(uniqueId);
+  SetGroupId(NS_ConvertUTF8toUTF16(deviceName));
 
   mInitDone = true;
 }
@@ -180,6 +181,18 @@ nsCString MediaEngineRemoteVideoSource::GetUUID() const {
   return mUniqueId;
 }
 
+void MediaEngineRemoteVideoSource::SetGroupId(nsString aGroupId) {
+  AssertIsOnOwningThread();
+
+  mGroupId = std::move(aGroupId);
+}
+
+nsString MediaEngineRemoteVideoSource::GetGroupId() const {
+  AssertIsOnOwningThread();
+
+  return mGroupId;
+}
+
 nsresult MediaEngineRemoteVideoSource::Allocate(
     const MediaTrackConstraints& aConstraints, const MediaEnginePrefs& aPrefs,
     const nsString& aDeviceId,
@@ -259,7 +272,7 @@ nsresult MediaEngineRemoteVideoSource::Deallocate(
   return NS_OK;
 }
 
-nsresult MediaEngineRemoteVideoSource::SetTrack(
+void MediaEngineRemoteVideoSource::SetTrack(
     const RefPtr<const AllocationHandle>& aHandle,
     const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
     const PrincipalHandle& aPrincipal) {
@@ -285,7 +298,6 @@ nsresult MediaEngineRemoteVideoSource::SetTrack(
   }
   aStream->AddTrack(aTrackID, new VideoSegment(),
                     SourceMediaStream::ADDTRACK_QUEUED);
-  return NS_OK;
 }
 
 nsresult MediaEngineRemoteVideoSource::Start(
@@ -736,7 +748,8 @@ uint32_t MediaEngineRemoteVideoSource::GetFeasibilityDistance(
 
 // Find best capability by removing inferiors. May leave >1 of equal distance
 
-/* static */ void MediaEngineRemoteVideoSource::TrimLessFitCandidates(
+/* static */
+void MediaEngineRemoteVideoSource::TrimLessFitCandidates(
     nsTArray<CapabilityCandidate>& aSet) {
   uint32_t best = UINT32_MAX;
   for (auto& candidate : aSet) {
@@ -992,6 +1005,7 @@ void MediaEngineRemoteVideoSource::Refresh(int aIndex) {
 
   SetName(NS_ConvertUTF8toUTF16(deviceName));
   MOZ_ASSERT(mUniqueId.Equals(uniqueId));
+  SetGroupId(NS_ConvertUTF8toUTF16(deviceName));
 }
 
 }  // namespace mozilla

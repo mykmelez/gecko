@@ -22,11 +22,14 @@ const {
 } = utils;
 
 import actions from "../../../actions";
-import { getAllPopupObjectProperties } from "../../../selectors";
+import {
+  getAllPopupObjectProperties,
+  getCurrentThread
+} from "../../../selectors";
 import Popover from "../../shared/Popover";
 import PreviewFunction from "../../shared/PreviewFunction";
 
-import Svg from "../../shared/Svg";
+import AccessibleImage from "../../shared/AccessibleImage";
 import { createObjectClient } from "../../../client/firefox";
 
 import "./Popup.css";
@@ -198,19 +201,8 @@ export class Popup extends Component<Props, State> {
 
     return (
       <div className="header-container">
-        <Svg name="react" className="logo" />
+        <AccessibleImage className="logo react" />
         <h3>{reactHeader}</h3>
-      </div>
-    );
-  }
-
-  renderImmutable(immutable: Object) {
-    const immutableHeader = immutable.type || "Immutable";
-
-    return (
-      <div className="header-container">
-        <Svg name="immutable" className="logo" />
-        <h3>{immutableHeader}</h3>
       </div>
     );
   }
@@ -329,22 +321,26 @@ export class Popup extends Component<Props, State> {
 }
 
 const mapStateToProps = state => ({
-  popupObjectProperties: getAllPopupObjectProperties(state),
-  openElementInInspector: actions.openElementInInspectorCommand
+  popupObjectProperties: getAllPopupObjectProperties(
+    state,
+    getCurrentThread(state)
+  )
 });
 
 const {
   addExpression,
   selectSourceURL,
   setPopupObjectProperties,
-  openLink
+  openLink,
+  openElementInInspectorCommand
 } = actions;
 
 const mapDispatchToProps = {
   addExpression,
   selectSourceURL,
   setPopupObjectProperties,
-  openLink
+  openLink,
+  openElementInInspector: openElementInInspectorCommand
 };
 
 export default connect(

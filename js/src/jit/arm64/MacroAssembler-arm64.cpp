@@ -202,7 +202,21 @@ void MacroAssemblerCompat::handleFailureWithHandlerTail(
       Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfReturnValue()),
       JSReturnOperand);
   movePtr(BaselineFrameReg, r28);
-  vixl::MacroAssembler::Pop(ARMRegister(BaselineFrameReg, 64), vixl::lr);
+  vixl::MacroAssembler::Pop(ARMRegister(BaselineFrameReg, 64));
+
+  // If profiling is enabled, then update the lastProfilingFrame to refer to
+  // caller frame before returning.
+  {
+    Label skipProfilingInstrumentation;
+    AbsoluteAddress addressOfEnabled(
+        GetJitContext()->runtime->geckoProfiler().addressOfEnabled());
+    asMasm().branch32(Assembler::Equal, addressOfEnabled, Imm32(0),
+                      &skipProfilingInstrumentation);
+    jump(profilerExitTail);
+    bind(&skipProfilingInstrumentation);
+  }
+
+  vixl::MacroAssembler::Pop(vixl::lr);
   syncStackPtr();
   vixl::MacroAssembler::Ret(vixl::lr);
 
@@ -479,10 +493,10 @@ void MacroAssembler::storeRegsInMask(LiveRegisterSet set, Address dest,
     } else {
       MOZ_CRASH("Unknown register type.");
     }
-
   }
   MOZ_ASSERT(numFpu == 0);
-  // Padding to keep the stack aligned, taken from the x64 and mips64 implementations.
+  // Padding to keep the stack aligned, taken from the x64 and mips64
+  // implementations.
   diffF -= diffF % sizeof(uintptr_t);
   MOZ_ASSERT(diffF == 0);
 }
@@ -652,7 +666,12 @@ CodeOffset MacroAssembler::callWithPatch() {
 void MacroAssembler::patchCall(uint32_t callerOffset, uint32_t calleeOffset) {
   Instruction* inst = getInstructionAt(BufferOffset(callerOffset - 4));
   MOZ_ASSERT(inst->IsBL());
-  bl(inst, ((int)calleeOffset - ((int)callerOffset - 4)) >> 2);
+  ptrdiff_t relTarget = (int)calleeOffset - ((int)callerOffset - 4);
+  ptrdiff_t relTarget00 = relTarget >> 2;
+  MOZ_RELEASE_ASSERT((relTarget & 0x3) == 0);
+  MOZ_RELEASE_ASSERT(vixl::is_int26(relTarget00));
+  bl(inst, relTarget00);
+  AutoFlushICache::flush(uintptr_t(inst), 4);
 }
 
 CodeOffset MacroAssembler::farJumpWithPatch() {
@@ -880,7 +899,7 @@ void MacroAssembler::moveValue(const TypedOrValueRegister& src,
     return;
   }
 
-  FloatRegister scratch = ScratchDoubleReg;
+  ScratchDoubleScope scratch(*this);
   FloatRegister freg = reg.fpu();
   if (type == MIRType::Float32) {
     convertFloat32ToDouble(freg, scratch);
@@ -1216,19 +1235,19 @@ void MacroAssembler::oolWasmTruncateCheckF32ToI32(FloatRegister input,
 
   Label isOverflow;
   const float two_31 = -float(INT32_MIN);
+  ScratchFloat32Scope fpscratch(*this);
   if (flags & TRUNC_UNSIGNED) {
-    loadConstantFloat32(two_31 * 2, ScratchFloat32Reg);
-    branchFloat(Assembler::DoubleGreaterThanOrEqual, input, ScratchFloat32Reg,
+    loadConstantFloat32(two_31 * 2, fpscratch);
+    branchFloat(Assembler::DoubleGreaterThanOrEqual, input, fpscratch,
                 &isOverflow);
-    loadConstantFloat32(-1.0f, ScratchFloat32Reg);
-    branchFloat(Assembler::DoubleGreaterThan, input, ScratchFloat32Reg, rejoin);
+    loadConstantFloat32(-1.0f, fpscratch);
+    branchFloat(Assembler::DoubleGreaterThan, input, fpscratch, rejoin);
   } else {
-    loadConstantFloat32(two_31, ScratchFloat32Reg);
-    branchFloat(Assembler::DoubleGreaterThanOrEqual, input, ScratchFloat32Reg,
+    loadConstantFloat32(two_31, fpscratch);
+    branchFloat(Assembler::DoubleGreaterThanOrEqual, input, fpscratch,
                 &isOverflow);
-    loadConstantFloat32(-two_31, ScratchFloat32Reg);
-    branchFloat(Assembler::DoubleGreaterThanOrEqual, input, ScratchFloat32Reg,
-                rejoin);
+    loadConstantFloat32(-two_31, fpscratch);
+    branchFloat(Assembler::DoubleGreaterThanOrEqual, input, fpscratch, rejoin);
   }
   bind(&isOverflow);
   wasmTrap(wasm::Trap::IntegerOverflow, off);
@@ -1246,18 +1265,19 @@ void MacroAssembler::oolWasmTruncateCheckF64ToI32(FloatRegister input,
 
   Label isOverflow;
   const double two_31 = -double(INT32_MIN);
+  ScratchDoubleScope fpscratch(*this);
   if (flags & TRUNC_UNSIGNED) {
-    loadConstantDouble(two_31 * 2, ScratchDoubleReg);
-    branchDouble(Assembler::DoubleGreaterThanOrEqual, input, ScratchDoubleReg,
+    loadConstantDouble(two_31 * 2, fpscratch);
+    branchDouble(Assembler::DoubleGreaterThanOrEqual, input, fpscratch,
                  &isOverflow);
-    loadConstantDouble(-1.0, ScratchDoubleReg);
-    branchDouble(Assembler::DoubleGreaterThan, input, ScratchDoubleReg, rejoin);
+    loadConstantDouble(-1.0, fpscratch);
+    branchDouble(Assembler::DoubleGreaterThan, input, fpscratch, rejoin);
   } else {
-    loadConstantDouble(two_31, ScratchDoubleReg);
-    branchDouble(Assembler::DoubleGreaterThanOrEqual, input, ScratchDoubleReg,
+    loadConstantDouble(two_31, fpscratch);
+    branchDouble(Assembler::DoubleGreaterThanOrEqual, input, fpscratch,
                  &isOverflow);
-    loadConstantDouble(-two_31 - 1, ScratchDoubleReg);
-    branchDouble(Assembler::DoubleGreaterThan, input, ScratchDoubleReg, rejoin);
+    loadConstantDouble(-two_31 - 1, fpscratch);
+    branchDouble(Assembler::DoubleGreaterThan, input, fpscratch, rejoin);
   }
   bind(&isOverflow);
   wasmTrap(wasm::Trap::IntegerOverflow, off);
@@ -1275,19 +1295,19 @@ void MacroAssembler::oolWasmTruncateCheckF32ToI64(FloatRegister input,
 
   Label isOverflow;
   const float two_63 = -float(INT64_MIN);
+  ScratchFloat32Scope fpscratch(*this);
   if (flags & TRUNC_UNSIGNED) {
-    loadConstantFloat32(two_63 * 2, ScratchFloat32Reg);
-    branchFloat(Assembler::DoubleGreaterThanOrEqual, input, ScratchFloat32Reg,
+    loadConstantFloat32(two_63 * 2, fpscratch);
+    branchFloat(Assembler::DoubleGreaterThanOrEqual, input, fpscratch,
                 &isOverflow);
-    loadConstantFloat32(-1.0f, ScratchFloat32Reg);
-    branchFloat(Assembler::DoubleGreaterThan, input, ScratchFloat32Reg, rejoin);
+    loadConstantFloat32(-1.0f, fpscratch);
+    branchFloat(Assembler::DoubleGreaterThan, input, fpscratch, rejoin);
   } else {
-    loadConstantFloat32(two_63, ScratchFloat32Reg);
-    branchFloat(Assembler::DoubleGreaterThanOrEqual, input, ScratchFloat32Reg,
+    loadConstantFloat32(two_63, fpscratch);
+    branchFloat(Assembler::DoubleGreaterThanOrEqual, input, fpscratch,
                 &isOverflow);
-    loadConstantFloat32(-two_63, ScratchFloat32Reg);
-    branchFloat(Assembler::DoubleGreaterThanOrEqual, input, ScratchFloat32Reg,
-                rejoin);
+    loadConstantFloat32(-two_63, fpscratch);
+    branchFloat(Assembler::DoubleGreaterThanOrEqual, input, fpscratch, rejoin);
   }
   bind(&isOverflow);
   wasmTrap(wasm::Trap::IntegerOverflow, off);
@@ -1305,19 +1325,19 @@ void MacroAssembler::oolWasmTruncateCheckF64ToI64(FloatRegister input,
 
   Label isOverflow;
   const double two_63 = -double(INT64_MIN);
+  ScratchDoubleScope fpscratch(*this);
   if (flags & TRUNC_UNSIGNED) {
-    loadConstantDouble(two_63 * 2, ScratchDoubleReg);
-    branchDouble(Assembler::DoubleGreaterThanOrEqual, input, ScratchDoubleReg,
+    loadConstantDouble(two_63 * 2, fpscratch);
+    branchDouble(Assembler::DoubleGreaterThanOrEqual, input, fpscratch,
                  &isOverflow);
-    loadConstantDouble(-1.0, ScratchDoubleReg);
-    branchDouble(Assembler::DoubleGreaterThan, input, ScratchDoubleReg, rejoin);
+    loadConstantDouble(-1.0, fpscratch);
+    branchDouble(Assembler::DoubleGreaterThan, input, fpscratch, rejoin);
   } else {
-    loadConstantDouble(two_63, ScratchDoubleReg);
-    branchDouble(Assembler::DoubleGreaterThanOrEqual, input, ScratchDoubleReg,
+    loadConstantDouble(two_63, fpscratch);
+    branchDouble(Assembler::DoubleGreaterThanOrEqual, input, fpscratch,
                  &isOverflow);
-    loadConstantDouble(-two_63, ScratchDoubleReg);
-    branchDouble(Assembler::DoubleGreaterThanOrEqual, input, ScratchDoubleReg,
-                 rejoin);
+    loadConstantDouble(-two_63, fpscratch);
+    branchDouble(Assembler::DoubleGreaterThanOrEqual, input, fpscratch, rejoin);
   }
   bind(&isOverflow);
   wasmTrap(wasm::Trap::IntegerOverflow, off);
@@ -1585,6 +1605,8 @@ static void CompareExchange(MacroAssembler& masm,
   Register scratch2 = temps.AcquireX().asUnsized();
   MemOperand ptr = ComputePointerForAtomic(masm, mem, scratch2);
 
+  MOZ_ASSERT(ptr.base().asUnsized() != output);
+
   masm.memoryBarrierBefore(sync);
 
   Register scratch = temps.AcquireX().asUnsized();
@@ -1686,6 +1708,27 @@ void MacroAssembler::compareExchange(Scalar::Type type,
                                      Register newval, Register output) {
   CompareExchange(*this, nullptr, type, Width::_32, sync, mem, oldval, newval,
                   output);
+}
+
+void MacroAssembler::compareExchange64(const Synchronization& sync,
+                                       const Address& mem, Register64 expect,
+                                       Register64 replace, Register64 output) {
+  CompareExchange(*this, nullptr, Scalar::Int64, Width::_64, sync, mem,
+                  expect.reg, replace.reg, output.reg);
+}
+
+void MacroAssembler::atomicExchange64(const Synchronization& sync,
+                                      const Address& mem, Register64 value,
+                                      Register64 output) {
+  AtomicExchange(*this, nullptr, Scalar::Int64, Width::_64, sync, mem,
+                 value.reg, output.reg);
+}
+
+void MacroAssembler::atomicFetchOp64(const Synchronization& sync, AtomicOp op,
+                                     Register64 value, const Address& mem,
+                                     Register64 temp, Register64 output) {
+  AtomicFetchOp<true>(*this, nullptr, Scalar::Int64, Width::_64, sync, op, mem,
+                      value.reg, temp.reg, output.reg);
 }
 
 void MacroAssembler::wasmCompareExchange(const wasm::MemoryAccessDesc& access,

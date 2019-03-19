@@ -14,10 +14,10 @@ var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 
 loader.lazyRequireGetter(this, "RootActor", "devtools/server/actors/root", true);
 loader.lazyRequireGetter(this, "FrameTargetActorProxy", "devtools/server/actors/targets/frame-proxy", true);
-loader.lazyRequireGetter(this, "AddonTargetActor", "devtools/server/actors/targets/addon", true);
 loader.lazyRequireGetter(this, "WebExtensionActor", "devtools/server/actors/addon/webextension", true);
-loader.lazyRequireGetter(this, "WorkerTargetActorList", "devtools/server/actors/worker/worker-list", true);
-loader.lazyRequireGetter(this, "ServiceWorkerRegistrationActorList", "devtools/server/actors/worker/worker-list", true);
+loader.lazyRequireGetter(this, "WorkerTargetActorList", "devtools/server/actors/worker/worker-target-actor-list", true);
+loader.lazyRequireGetter(this, "ServiceWorkerRegistrationActorList",
+  "devtools/server/actors/worker/service-worker-registration-list", true);
 loader.lazyRequireGetter(this, "ProcessActorList", "devtools/server/actors/process", true);
 loader.lazyImporter(this, "AddonManager", "resource://gre/modules/AddonManager.jsm");
 loader.lazyImporter(this, "AppConstants", "resource://gre/modules/AppConstants.jsm");
@@ -730,12 +730,7 @@ BrowserAddonList.prototype.getList = async function() {
   for (const addon of addons) {
     let actor = this._actorByAddonId.get(addon.id);
     if (!actor) {
-      if (addon.isWebExtension) {
-        actor = new WebExtensionActor(this._connection, addon);
-      } else {
-        actor = new AddonTargetActor(this._connection, addon);
-      }
-
+      actor = new WebExtensionActor(this._connection, addon);
       this._actorByAddonId.set(addon.id, actor);
     }
   }

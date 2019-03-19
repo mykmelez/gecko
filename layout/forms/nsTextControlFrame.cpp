@@ -53,7 +53,8 @@ using namespace mozilla::dom;
 
 nsIFrame* NS_NewTextControlFrame(nsIPresShell* aPresShell,
                                  ComputedStyle* aStyle) {
-  return new (aPresShell) nsTextControlFrame(aStyle);
+  return new (aPresShell)
+      nsTextControlFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsTextControlFrame)
@@ -109,8 +110,9 @@ class nsTextControlFrame::nsAnonDivObserver final
   nsTextControlFrame& mFrame;
 };
 
-nsTextControlFrame::nsTextControlFrame(ComputedStyle* aStyle)
-    : nsContainerFrame(aStyle, kClassID),
+nsTextControlFrame::nsTextControlFrame(ComputedStyle* aStyle,
+                                       nsPresContext* aPresContext)
+    : nsContainerFrame(aStyle, aPresContext, kClassID),
       mFirstBaseline(NS_INTRINSIC_WIDTH_UNKNOWN),
       mEditorHasBeenInitialized(false),
       mIsProcessing(false)
@@ -199,12 +201,9 @@ LogicalSize nsTextControlFrame::CalcIntrinsicSize(
 
   // Increment width with cols * letter-spacing.
   {
-    const nsStyleCoord& lsCoord = StyleText()->mLetterSpacing;
-    if (eStyleUnit_Coord == lsCoord.GetUnit()) {
-      nscoord letterSpacing = lsCoord.GetCoordValue();
-      if (letterSpacing != 0) {
-        intrinsicSize.ISize(aWM) += cols * letterSpacing;
-      }
+    const StyleLength& letterSpacing = StyleText()->mLetterSpacing;
+    if (!letterSpacing.IsZero()) {
+      intrinsicSize.ISize(aWM) += cols * letterSpacing.ToAppUnits();
     }
   }
 
@@ -246,7 +245,7 @@ nsresult nsTextControlFrame::EnsureEditorInitialized() {
 
   if (mEditorHasBeenInitialized) return NS_OK;
 
-  nsIDocument* doc = mContent->GetComposedDoc();
+  Document* doc = mContent->GetComposedDoc();
   NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
 
   AutoWeakFrame weakFrame(this);
@@ -326,7 +325,7 @@ nsresult nsTextControlFrame::EnsureEditorInitialized() {
 
 static already_AddRefed<Element> CreateEmptyDiv(
     const nsTextControlFrame& aOwnerFrame) {
-  nsIDocument* doc = aOwnerFrame.PresContext()->Document();
+  Document* doc = aOwnerFrame.PresContext()->Document();
   RefPtr<mozilla::dom::NodeInfo> nodeInfo = doc->NodeInfoManager()->GetNodeInfo(
       nsGkAtoms::div, nullptr, kNameSpaceID_XHTML, nsINode::ELEMENT_NODE);
 
@@ -477,7 +476,7 @@ void nsTextControlFrame::CreatePlaceholderIfNeeded() {
 
   mPlaceholderDiv = CreateEmptyDivWithTextNode(*this);
   // Associate ::placeholder pseudo-element with the placeholder node.
-  mPlaceholderDiv->SetPseudoElementType(CSSPseudoElementType::placeholder);
+  mPlaceholderDiv->SetPseudoElementType(PseudoStyleType::placeholder);
   mPlaceholderDiv->GetFirstChild()->AsText()->SetText(placeholderTxt, false);
 }
 
@@ -532,8 +531,8 @@ LogicalSize nsTextControlFrame::ComputeAutoSize(
 
   // Note: nsContainerFrame::ComputeAutoSize only computes the inline-size (and
   // only for 'auto'), the block-size it returns is always NS_UNCONSTRAINEDSIZE.
-  const nsStyleCoord& iSizeCoord = StylePosition()->ISize(aWM);
-  if (iSizeCoord.GetUnit() == eStyleUnit_Auto) {
+  const auto& iSizeCoord = StylePosition()->ISize(aWM);
+  if (iSizeCoord.IsAuto()) {
     if (aFlags & ComputeSizeFlags::eIClampMarginBoxMinSize) {
       // CalcIntrinsicSize isn't aware of grid-item margin-box clamping, so we
       // fall back to nsContainerFrame's ComputeAutoSize to handle that.
@@ -722,7 +721,7 @@ void nsTextControlFrame::SetFocus(bool aOn, bool aRepaint) {
   if (!isFocusedRightNow) {
     // Don't scroll the current selection if we've been focused using the mouse.
     uint32_t lastFocusMethod = 0;
-    nsIDocument* doc = GetContent()->GetComposedDoc();
+    Document* doc = GetContent()->GetComposedDoc();
     if (doc) {
       nsIFocusManager* fm = nsFocusManager::GetFocusManager();
       if (fm) {

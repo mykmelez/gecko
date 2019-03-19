@@ -29,7 +29,6 @@
 #include "nsTableCellFrame.h"
 #include "nsIScrollableFrame.h"
 #include "nsCCUncollectableMarker.h"
-#include "nsIContentIterator.h"
 #include "nsIDocumentEncoder.h"
 #include "nsTextFragment.h"
 #include <algorithm>
@@ -56,7 +55,7 @@ static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 
 #include "nsITimer.h"
 // notifications
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 
 #include "nsISelectionController.h"  //for the enums
 #include "nsCopySupport.h"
@@ -93,9 +92,9 @@ static nsINode* GetCellParent(nsINode* aDomNode);
 
 #ifdef PRINT_RANGE
 static void printRange(nsRange* aDomRange);
-#define DEBUG_OUT_RANGE(x) printRange(x)
+#  define DEBUG_OUT_RANGE(x) printRange(x)
 #else
-#define DEBUG_OUT_RANGE(x)
+#  define DEBUG_OUT_RANGE(x)
 #endif  // PRINT_RANGE
 
 /******************************************************************************
@@ -112,13 +111,14 @@ nsPeekOffsetStruct::nsPeekOffsetStruct(
     nsPoint aDesiredPos, bool aJumpLines, bool aScrollViewStop,
     bool aIsKeyboardSelect, bool aVisual, bool aExtend,
     ForceEditableRegion aForceEditableRegion,
-    EWordMovementType aWordMovementType)
+    EWordMovementType aWordMovementType, bool aTrimSpaces)
     : mAmount(aAmount),
       mDirection(aDirection),
       mStartOffset(aStartOffset),
       mDesiredPos(aDesiredPos),
       mWordMovementType(aWordMovementType),
       mJumpLines(aJumpLines),
+      mTrimSpaces(aTrimSpaces),
       mScrollViewStop(aScrollViewStop),
       mIsKeyboardSelect(aIsKeyboardSelect),
       mVisual(aVisual),
@@ -602,7 +602,7 @@ void nsFrameSelection::Init(nsIPresShell* aShell, nsIContent* aLimiter,
                               ? sSelectionEventsOnTextControlsEnabled
                               : sSelectionEventsEnabled;
 
-  nsIDocument* doc = aShell->GetDocument();
+  Document* doc = aShell->GetDocument();
   if (initSelectEvents ||
       (doc && nsContentUtils::IsSystemPrincipal(doc->NodePrincipal()))) {
     int8_t index = GetIndexFromSelectionType(SelectionType::eNormal);
@@ -810,7 +810,9 @@ nsresult nsFrameSelection::MoveCaret(nsDirection aDirection,
           }
       }
     }
-    result = TakeFocus(pos.mResultContent, pos.mContentOffset,
+    // "pos" is on the stack, so pos.mResultContent has stack lifetime, so using
+    // MOZ_KnownLive is ok.
+    result = TakeFocus(MOZ_KnownLive(pos.mResultContent), pos.mContentOffset,
                        pos.mContentOffset, tHint, aContinueSelection, false);
   } else if (aAmount <= eSelectWordNoSpace && aDirection == eDirNext &&
              !aContinueSelection) {
@@ -1860,7 +1862,7 @@ nsresult nsFrameSelection::SelectAll() {
     rootContent = mAncestorLimiter;
   } else {
     NS_ENSURE_STATE(mShell);
-    nsIDocument* doc = mShell->GetDocument();
+    Document* doc = mShell->GetDocument();
     if (!doc) return NS_ERROR_FAILURE;
     rootContent = doc->GetRootElement();
     if (!rootContent) return NS_ERROR_FAILURE;
@@ -2648,7 +2650,8 @@ void nsFrameSelection::SetAncestorLimiter(nsIContent* aLimiter) {
       ClearNormalSelection();
       if (mAncestorLimiter) {
         PostReason(nsISelectionListener::NO_REASON);
-        TakeFocus(mAncestorLimiter, 0, 0, CARET_ASSOCIATE_BEFORE, false, false);
+        nsCOMPtr<nsIContent> limiter(mAncestorLimiter);
+        TakeFocus(limiter, 0, 0, CARET_ASSOCIATE_BEFORE, false, false);
       }
     }
   }
@@ -2735,7 +2738,7 @@ nsresult nsFrameSelection::UpdateSelectionCacheOnRepaintSelection(
   if (!ps) {
     return NS_OK;
   }
-  nsCOMPtr<nsIDocument> aDoc = ps->GetDocument();
+  nsCOMPtr<Document> aDoc = ps->GetDocument();
 
   if (aDoc && aSel && !aSel->IsCollapsed()) {
     return nsCopySupport::HTMLCopy(aSel, aDoc, nsIClipboard::kSelectionCache,
@@ -2782,7 +2785,7 @@ int16_t AutoCopyListener::sClipboardID = -1;
  */
 
 // static
-void AutoCopyListener::OnSelectionChange(nsIDocument* aDocument,
+void AutoCopyListener::OnSelectionChange(Document* aDocument,
                                          Selection& aSelection,
                                          int16_t aReason) {
   MOZ_ASSERT(IsValidClipboardID(sClipboardID));

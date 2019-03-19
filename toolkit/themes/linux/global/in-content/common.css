@@ -33,7 +33,7 @@ xul|*.menulist-dropmarker {
   margin-bottom: 6px;
 }
 
-xul|*.checkbox-check[checked],
+xul|checkbox[checked] > xul|*.checkbox-check,
 xul|*.radio-check[selected] {
   background-color: -moz-field;
   fill: -moz-fieldText;
@@ -41,11 +41,6 @@ xul|*.radio-check[selected] {
 
 xul|*.radio-label-box {
   -moz-appearance: none;
-}
-
-xul|*.numberbox-input-box {
-  -moz-appearance: none;
-  border-width: 0;
 }
 
 xul|menulist:-moz-focusring > xul|*.menulist-label-box {

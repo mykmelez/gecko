@@ -18,10 +18,8 @@ from mozbuild.configure.options import (
     CommandLineHelper,
     ConflictingOptionError,
     InvalidOptionError,
-    NegativeOptionValue,
     Option,
     OptionValue,
-    PositiveOptionValue,
 )
 from mozbuild.configure.help import HelpFormatter
 from mozbuild.configure.util import (
@@ -30,13 +28,19 @@ from mozbuild.configure.util import (
     LineIO,
 )
 from mozbuild.util import (
+    encode,
     exec_,
     memoize,
+    memoized_property,
     ReadOnlyDict,
     ReadOnlyNamespace,
 )
 
 import mozpack.path as mozpath
+
+
+# TRACE logging level, below (thus more verbose than) DEBUG
+TRACE = 5
 
 
 class ConfigureError(Exception):
@@ -147,8 +151,7 @@ class DependsFunction(object):
         return self._func(*resolved_args)
 
     def __repr__(self):
-        return '<%s.%s %s(%s)>' % (
-            self.__class__.__module__,
+        return '<%s %s(%s)>' % (
             self.__class__.__name__,
             self.name,
             ', '.join(repr(d) for d in self.dependencies),
@@ -280,7 +283,7 @@ class ConfigureSandbox(dict):
         b: getattr(__builtin__, b)
         for b in ('None', 'False', 'True', 'int', 'bool', 'any', 'all', 'len',
                   'list', 'tuple', 'set', 'dict', 'isinstance', 'getattr',
-                  'hasattr', 'enumerate', 'range', 'zip')
+                  'hasattr', 'enumerate', 'range', 'zip', 'AssertionError')
     }, __import__=forbidden_import, str=unicode)
 
     # Expose a limited set of functions from os.path
@@ -293,6 +296,8 @@ class ConfigureSandbox(dict):
     def __init__(self, config, environ=os.environ, argv=sys.argv,
                  stdout=sys.stdout, stderr=sys.stderr, logger=None):
         dict.__setitem__(self, '__builtins__', self.BUILTINS)
+
+        self._environ = dict(environ)
 
         self._paths = []
         self._all_paths = set()
@@ -329,6 +334,7 @@ class ConfigureSandbox(dict):
         assert isinstance(config, dict)
         self._config = config
 
+        logging.addLevelName(TRACE, 'TRACE')
         if logger is None:
             logger = moz_logger = logging.getLogger('moz.configure')
             logger.setLevel(logging.DEBUG)
@@ -438,10 +444,28 @@ class ConfigureSandbox(dict):
         for implied_option in self._implied_options:
             value = self._resolve(implied_option.value)
             if value is not None:
-                raise ConfigureError(
-                    '`%s`, emitted from `%s` line %d, is unknown.'
-                    % (implied_option.option, implied_option.caller[1],
-                       implied_option.caller[2]))
+                # There are two ways to end up here: either the implied option
+                # is unknown, or it's known but there was a dependency loop
+                # that prevented the implication from being applied.
+                option = self._options.get(implied_option.name)
+                if not option:
+                    raise ConfigureError(
+                        '`%s`, emitted from `%s` line %d, is unknown.'
+                        % (implied_option.option, implied_option.caller[1],
+                           implied_option.caller[2]))
+                # If the option is known, check that the implied value doesn't
+                # conflict with what value was attributed to the option.
+                option_value = self._value_for_option(option)
+                if value != option_value:
+                    reason = implied_option.reason
+                    if isinstance(reason, Option):
+                        reason = self._raw_options.get(reason) or reason.option
+                        reason = reason.split('=', 1)[0]
+                    value = OptionValue.from_(value)
+                    raise InvalidOptionError(
+                        "'%s' implied by '%s' conflicts with '%s' from the %s"
+                        % (value.format(option.option), reason,
+                           option_value.format(option.option), option_value.origin))
 
         # All options should have been removed (handled) by now.
         for arg in self._helper:
@@ -474,7 +498,7 @@ class ConfigureSandbox(dict):
             raise KeyError('Cannot reassign builtins')
 
         if inspect.isfunction(value) and value not in self._templates:
-            value, _ = self._prepare_function(value)
+            value = self._prepare_function(value)
 
         elif (not isinstance(value, SandboxDependsFunction) and
                 value not in self._templates and
@@ -507,7 +531,9 @@ class ConfigureSandbox(dict):
 
     @memoize
     def _value_for_depends(self, obj):
-        return obj.result()
+        value = obj.result()
+        self._logger.log(TRACE, '%r = %r', obj, value)
+        return value
 
     @memoize
     def _value_for_option(self, option):
@@ -524,20 +550,7 @@ class ConfigureSandbox(dict):
             value = self._resolve(implied_option.value)
 
             if value is not None:
-                if isinstance(value, OptionValue):
-                    pass
-                elif value is True:
-                    value = PositiveOptionValue()
-                elif value is False or value == ():
-                    value = NegativeOptionValue()
-                elif isinstance(value, types.StringTypes):
-                    value = PositiveOptionValue((value,))
-                elif isinstance(value, tuple):
-                    value = PositiveOptionValue(value)
-                else:
-                    raise TypeError("Unexpected type: '%s'"
-                                    % type(value).__name__)
-
+                value = OptionValue.from_(value)
                 opt = value.format(implied_option.option)
                 self._helper.add(opt, 'implied')
                 implied[opt] = implied_option
@@ -553,20 +566,33 @@ class ConfigureSandbox(dict):
                 "'%s' implied by '%s' conflicts with '%s' from the %s"
                 % (e.arg, reason, e.old_arg, e.old_origin))
 
+        if value.origin == 'implied':
+            recursed_value = getattr(self, '__value_for_option').get((option,))
+            if recursed_value is not None:
+                _, filename, line, _, _, _ = implied[value.format(option.option)].caller
+                raise ConfigureError(
+                    "'%s' appears somewhere in the direct or indirect dependencies when "
+                    "resolving imply_option at %s:%d" % (option.option, filename, line))
+
         if option_string:
             self._raw_options[option] = option_string
 
         when = self._conditions.get(option)
-        if (when and not self._value_for(when) and
-            value is not None and value.origin != 'default'):
-            if value.origin == 'environment':
-                # The value we return doesn't really matter, because of the
-                # requirement for @depends to have the same when.
-                return None
-            raise InvalidOptionError(
-                '%s is not available in this configuration'
-                % option_string.split('=', 1)[0])
+        # If `when` resolves to a false-ish value, we always return None.
+        # This makes option(..., when='--foo') equivalent to
+        # option(..., when=depends('--foo')(lambda x: x)).
+        if when and not self._value_for(when) and value is not None:
+            # If the option was passed explicitly, we throw an error that
+            # the option is not available. Except when the option was passed
+            # from the environment, because that would be too cumbersome.
+            if value.origin not in ('default', 'environment'):
+                raise InvalidOptionError(
+                    '%s is not available in this configuration'
+                    % option_string.split('=', 1)[0])
+            self._logger.log(TRACE, '%r = None', option)
+            return None
 
+        self._logger.log(TRACE, '%r = %r', option, value)
         return value
 
     def _dependency(self, arg, callee_name, arg_name=None):
@@ -698,7 +724,7 @@ class ConfigureSandbox(dict):
             if inspect.isgeneratorfunction(func):
                 raise ConfigureError(
                     'Cannot decorate generator functions with @depends')
-            func, glob = self._prepare_function(func)
+            func = self._prepare_function(func)
             depends = DependsFunction(self, func, dependencies, when=when)
             return depends.sandboxed
 
@@ -727,12 +753,14 @@ class ConfigureSandbox(dict):
         Templates allow to simplify repetitive constructs, or to implement
         helper decorators and somesuch.
         '''
-        template, glob = self._prepare_function(func)
-        glob.update(
-            (k[:-len('_impl')], getattr(self, k))
-            for k in dir(self) if k.endswith('_impl') and k != 'template_impl'
-        )
-        glob.update((k, v) for k, v in self.iteritems() if k not in glob)
+        def update_globals(glob):
+            glob.update(
+                (k[:-len('_impl')], getattr(self, k))
+                for k in dir(self) if k.endswith('_impl') and k != 'template_impl'
+            )
+            glob.update((k, v) for k, v in self.iteritems() if k not in glob)
+
+        template = self._prepare_function(func, update_globals)
 
         # Any function argument to the template must be prepared to be sandboxed.
         # If the template itself returns a function (in which case, it's very
@@ -743,8 +771,7 @@ class ConfigureSandbox(dict):
 
             def maybe_prepare_function(obj):
                 if isfunction(obj):
-                    func, _ = self._prepare_function(obj)
-                    return func
+                    return self._prepare_function(obj)
                 return obj
 
             # The following function may end up being prepared to be sandboxed,
@@ -824,6 +851,30 @@ class ConfigureSandbox(dict):
                 what = _import.split('.')[0]
                 glob[what] = self._get_one_import('%s%s' % (_from, what))
 
+    @memoized_property
+    def _wrapped_os(self):
+        wrapped_os = {}
+        exec_('from os import *', {}, wrapped_os)
+        wrapped_os['environ'] = self._environ
+        return ReadOnlyNamespace(**wrapped_os)
+
+    @memoized_property
+    def _wrapped_subprocess(self):
+        wrapped_subprocess = {}
+        exec_('from subprocess import *', {}, wrapped_subprocess)
+
+        def wrap(function):
+            def wrapper(*args, **kwargs):
+                if 'env' not in kwargs:
+                    kwargs['env'] = encode(self._environ)
+                return function(*args, **kwargs)
+            return wrapper
+
+        for f in ('call', 'check_call', 'check_output', 'Popen'):
+            wrapped_subprocess[f] = wrap(wrapped_subprocess[f])
+
+        return ReadOnlyNamespace(**wrapped_subprocess)
+
     def _get_one_import(self, what):
         # The special `__sandbox__` module gives access to the sandbox
         # instance.
@@ -834,6 +885,18 @@ class ConfigureSandbox(dict):
         # restricted mode"
         if what == '__builtin__.open':
             return lambda *args, **kwargs: open(*args, **kwargs)
+        # Special case os and os.environ so that os.environ is our copy of
+        # the environment.
+        if what == 'os.environ':
+            return self._environ
+        if what == 'os':
+            return self._wrapped_os
+        # And subprocess, so that its functions use our os.environ
+        if what == 'subprocess':
+            return self._wrapped_subprocess
+        if what in ('subprocess.call', 'subprocess.check_call',
+                    'subprocess.check_output', 'subprocess.Popen'):
+            return getattr(self._wrapped_subprocess, what[len('subprocess.'):])
         # Until this proves to be a performance problem, just construct an
         # import statement and execute it.
         import_line = ''
@@ -862,6 +925,11 @@ class ConfigureSandbox(dict):
                 "exists" % name)
         value = self._resolve(value)
         if value is not None:
+            if self._logger.isEnabledFor(TRACE):
+                if data is self._config:
+                    self._logger.log(TRACE, 'set_config(%s, %r)', name, value)
+                elif data is self._config.get('DEFINES'):
+                    self._logger.log(TRACE, 'set_define(%s, %r)', name, value)
             data[name] = value
 
     def set_config_impl(self, name, value, when=None):
@@ -973,14 +1041,14 @@ class ConfigureSandbox(dict):
             when=when,
         ))
 
-    def _prepare_function(self, func):
+    def _prepare_function(self, func, update_globals=None):
         '''Alter the given function global namespace with the common ground
         for @depends, and @template.
         '''
         if not inspect.isfunction(func):
             raise TypeError("Unexpected type: '%s'" % type(func).__name__)
         if func in self._prepared_functions:
-            return func, func.func_globals
+            return func
 
         glob = SandboxedGlobal(
             (k, v) for k, v in func.func_globals.iteritems()
@@ -994,6 +1062,8 @@ class ConfigureSandbox(dict):
             os=self.OS,
             log=self.log_impl,
         )
+        if update_globals:
+            update_globals(glob)
 
         # The execution model in the sandbox doesn't guarantee the execution
         # order will always be the same for a given function, and if it uses
@@ -1027,4 +1097,4 @@ class ConfigureSandbox(dict):
             return new_func(*args, **kwargs)
 
         self._prepared_functions.add(wrapped)
-        return wrapped, glob
+        return wrapped

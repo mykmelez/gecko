@@ -250,6 +250,11 @@ panel[photon] > .panel-arrowcontainer > .panel-arrowcontent {
   height: 14px;
 }
 
+/* Don't show the checkmark if there is a description */
+#confirmation-hint.with-description #confirmation-hint-checkmark-animation-container  {
+  display: none;
+}
+
 #confirmation-hint-checkmark-animation-container[animate] > #confirmation-hint-checkmark-image {
   position: absolute;
   background-image: url(chrome://browser/skin/check-animation.svg);
@@ -291,13 +296,21 @@ panel[photon] > .panel-arrowcontainer > .panel-arrowcontent {
 #confirmation-hint-message {
   margin-inline-start: 7px;
   margin-inline-end: 0;
+}
+
+#confirmation-hint.with-description #confirmation-hint-message {
+  font-size: 1.2em;
+  font-weight: 600;
+}
+
+#confirmation-hint-message-container {
   transform: scale(.8);
   opacity: 0;
   transition: transform 120ms cubic-bezier(.25,1.27,.35,1.18),
               opacity 60ms linear;
 }
 
-#confirmation-hint-checkmark-animation-container[animate] + #confirmation-hint-message {
+#confirmation-hint-checkmark-animation-container[animate] + #confirmation-hint-message-container {
   transform: scale(1);
   opacity: 1;
 }
@@ -402,13 +415,6 @@ toolbarbutton[constrain-size="true"][cui-areatype="menu-panel"] > .toolbarbutton
   min-height: @panelPaletteIconSize@;
   margin: 0;
   padding: 0;
-}
-
-#edit-controls@inAnyPanel@ > #copy-button,
-#zoom-controls@inAnyPanel@ > #zoom-reset-button {
-  border-left: none;
-  border-right: none;
-  border-radius: 0;
 }
 
 #zoom-in-button > .toolbarbutton-text,
@@ -611,7 +617,6 @@ toolbarbutton[constrain-size="true"][cui-areatype="menu-panel"] > .toolbarbutton
 }
 
 #appMenu-tp-category {
-  color: var(--panel-disabled-color);
   margin-inline-end: 0;
 }
 
@@ -873,7 +878,6 @@ panelview .toolbarbutton-1,
 
 .addon-banner-item > .toolbarbutton-text,
 .subviewbutton-iconic > .toolbarbutton-text,
-.cui-withicon > .toolbarbutton-text,
 .subviewbutton[image] > .toolbarbutton-text,
 .subviewbutton[targetURI] > .toolbarbutton-text,
 .subviewbutton.restoreallitem > .toolbarbutton-text,
@@ -925,7 +929,6 @@ panelview .toolbarbutton-1,
 .subviewbutton[shortcut]::after {
   content: attr(shortcut);
   float: right;
-  color: var(--panel-disabled-color);
 }
 
 .PanelUI-subView .subviewbutton-nav::after {
@@ -1122,11 +1125,11 @@ menuitem.panel-subview-footer@menuStateActive@,
 }
 
 /* Popups with only one item don't have a footer */
-#BMB_bookmarksPopup menupopup[placespopup=true][singleitempopup=true] > hbox > .popup-internal-box > .arrowscrollbox-scrollbox > .scrollbox-innerbox,
+#BMB_bookmarksPopup menupopup[placespopup=true][singleitempopup=true] > hbox > .popup-internal-box > .arrowscrollbox-scrollbox,
 /* These popups never have a footer */
-#BMB_bookmarksToolbarPopup > hbox > .popup-internal-box > .arrowscrollbox-scrollbox > .scrollbox-innerbox,
-#BMB_unsortedBookmarksPopup > hbox > .popup-internal-box > .arrowscrollbox-scrollbox > .scrollbox-innerbox,
-#BMB_mobileBookmarksPopup > hbox > .popup-internal-box > .arrowscrollbox-scrollbox > .scrollbox-innerbox {
+#BMB_bookmarksToolbarPopup > hbox > .popup-internal-box > .arrowscrollbox-scrollbox,
+#BMB_unsortedBookmarksPopup > hbox > .popup-internal-box > .arrowscrollbox-scrollbox,
+#BMB_mobileBookmarksPopup > hbox > .popup-internal-box > .arrowscrollbox-scrollbox {
   /* And so they need some bottom padding: */
   padding-bottom: 4px;
 }
@@ -1250,22 +1253,6 @@ toolbarpaletteitem[place="menu-panel"] > .toolbaritem-combined-buttons > toolbar
 %else
   min-width: 7ch;
 %endif
-}
-
-#edit-controls@inAnyPanel@ > #cut-button:-moz-locale-dir(ltr),
-#edit-controls@inAnyPanel@ > #paste-button:-moz-locale-dir(rtl),
-#zoom-controls@inAnyPanel@ > #zoom-out-button:-moz-locale-dir(ltr),
-#zoom-controls@inAnyPanel@ > #zoom-in-button:-moz-locale-dir(rtl) {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-#edit-controls@inAnyPanel@ > #cut-button:-moz-locale-dir(rtl),
-#edit-controls@inAnyPanel@ > #paste-button:-moz-locale-dir(ltr),
-#zoom-controls@inAnyPanel@ > #zoom-out-button:-moz-locale-dir(rtl),
-#zoom-controls@inAnyPanel@ > #zoom-in-button:-moz-locale-dir(ltr) {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
 }
 
 .toolbaritem-combined-buttons@inAnyPanel@ > separator {

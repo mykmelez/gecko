@@ -7,10 +7,11 @@ const {addonsSpec} = require("devtools/shared/specs/addon/addons");
 const { FrontClassWithSpec, registerFront } = require("devtools/shared/protocol");
 
 class AddonsFront extends FrontClassWithSpec(addonsSpec) {
-  constructor(client, {addonsActor}) {
+  constructor(client) {
     super(client);
-    this.actorID = addonsActor;
-    this.manage(this);
+
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "addonsActor";
   }
 }
 

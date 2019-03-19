@@ -1,4 +1,4 @@
-// |jit-test| skip-if: !wasmGcEnabled()
+// |jit-test| skip-if: !wasmReftypesEnabled()
 
 // Generates a bunch of numbers-on-the-heap, and tries to ensure that they are
 // held live -- at least for a short while -- only by references from the wasm
@@ -24,7 +24,6 @@ const DEBUG = false;
 
 let t =
   `(module
-     (gc_feature_opt_in 2)
      (import $mkCons "" "mkCons" (func (result anyref)
                                        (param anyref) (param anyref)))
      (import $mkBoxedInt "" "mkBoxedInt" (func (result anyref)))

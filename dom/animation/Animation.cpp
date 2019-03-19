@@ -8,6 +8,7 @@
 #include "AnimationUtils.h"
 #include "mozilla/dom/AnimationBinding.h"
 #include "mozilla/dom/AnimationPlaybackEvent.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/dom/DocumentTimeline.h"
 #include "mozilla/AnimationEventDispatcher.h"
 #include "mozilla/AnimationTarget.h"
@@ -16,7 +17,6 @@
 #include "mozilla/TypeTraits.h"     // For std::forward<>
 #include "nsAnimationManager.h"     // For CSSAnimation
 #include "nsDOMMutationObserver.h"  // For nsAutoAnimationMutationBatch
-#include "nsIDocument.h"            // For nsIDocument
 #include "nsIPresShell.h"           // For nsIPresShell
 #include "nsThreadUtils.h"  // For nsRunnableMethod and nsRevocableEventPtr
 #include "nsTransitionManager.h"      // For CSSTransition
@@ -63,12 +63,7 @@ class MOZ_RAII AutoMutationBatchForAnimation {
     }
 
     // For mutation observers, we use the OwnerDoc.
-    nsIDocument* doc = target->mElement->OwnerDoc();
-    if (!doc) {
-      return;
-    }
-
-    mAutoBatch.emplace(doc);
+    mAutoBatch.emplace(target->mElement->OwnerDoc());
   }
 
  private:
@@ -82,7 +77,8 @@ class MOZ_RAII AutoMutationBatchForAnimation {
 // Animation interface:
 //
 // ---------------------------------------------------------------------------
-/* static */ already_AddRefed<Animation> Animation::Constructor(
+/* static */
+already_AddRefed<Animation> Animation::Constructor(
     const GlobalObject& aGlobal, AnimationEffect* aEffect,
     const Optional<AnimationTimeline*>& aTimeline, ErrorResult& aRv) {
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aGlobal.GetAsSupports());
@@ -92,7 +88,7 @@ class MOZ_RAII AutoMutationBatchForAnimation {
   if (aTimeline.WasPassed()) {
     timeline = aTimeline.Value();
   } else {
-    nsIDocument* document =
+    Document* document =
         AnimationUtils::GetCurrentRealmDocument(aGlobal.Context());
     if (!document) {
       aRv.Throw(NS_ERROR_FAILURE);
@@ -801,7 +797,7 @@ void Animation::CancelNoUpdate() {
 }
 
 bool Animation::ShouldBeSynchronizedWithMainThread(
-    nsCSSPropertyID aProperty, const nsIFrame* aFrame,
+    const nsCSSPropertyIDSet& aPropertySet, const nsIFrame* aFrame,
     AnimationPerformanceWarning::Type& aPerformanceWarning) const {
   // Only synchronize playing animations
   if (!IsPlaying()) {
@@ -809,7 +805,7 @@ bool Animation::ShouldBeSynchronizedWithMainThread(
   }
 
   // Currently only transform animations need to be synchronized
-  if (aProperty != eCSSProperty_transform) {
+  if (!aPropertySet.Intersects(nsCSSPropertyIDSet::TransformLikeProperties())) {
     return false;
   }
 
@@ -824,7 +820,8 @@ bool Animation::ShouldBeSynchronizedWithMainThread(
   // because it's cheaper, but also because it's often the most useful thing
   // to know when you're debugging performance.
   if (mSyncWithGeometricAnimations &&
-      keyframeEffect->HasAnimationOfProperty(eCSSProperty_transform)) {
+      keyframeEffect->HasAnimationOfPropertySet(
+          nsCSSPropertyIDSet::TransformLikeProperties())) {
     aPerformanceWarning =
         AnimationPerformanceWarning::Type::TransformWithSyncGeometricAnimations;
     return true;
@@ -1077,8 +1074,7 @@ void Animation::PlayNoUpdate(ErrorResult& aRv, LimitBehavior aLimitBehavior) {
   // animations if it applies.
   mSyncWithGeometricAnimations = false;
 
-  nsIDocument* doc = GetRenderedDocument();
-  if (doc) {
+  if (Document* doc = GetRenderedDocument()) {
     PendingAnimationTracker* tracker =
         doc->GetOrCreatePendingAnimationTracker();
     tracker->AddPlayPending(*this);
@@ -1126,8 +1122,7 @@ void Animation::Pause(ErrorResult& aRv) {
 
   mPendingState = PendingState::PausePending;
 
-  nsIDocument* doc = GetRenderedDocument();
-  if (doc) {
+  if (Document* doc = GetRenderedDocument()) {
     PendingAnimationTracker* tracker =
         doc->GetOrCreatePendingAnimationTracker();
     tracker->AddPausePending(*this);
@@ -1284,8 +1279,7 @@ void Animation::UpdateEffect() {
 }
 
 void Animation::FlushUnanimatedStyle() const {
-  nsIDocument* doc = GetRenderedDocument();
-  if (doc) {
+  if (Document* doc = GetRenderedDocument()) {
     doc->FlushPendingNotifications(
         ChangesToFlush(FlushType::Style, false /* flush animations */));
   }
@@ -1308,8 +1302,7 @@ void Animation::CancelPendingTasks() {
     return;
   }
 
-  nsIDocument* doc = GetRenderedDocument();
-  if (doc) {
+  if (Document* doc = GetRenderedDocument()) {
     PendingAnimationTracker* tracker = doc->GetPendingAnimationTracker();
     if (tracker) {
       if (mPendingState == PendingState::PlayPending) {
@@ -1346,8 +1339,7 @@ void Animation::ReschedulePendingTasks() {
 
   mPendingReadyTime.SetNull();
 
-  nsIDocument* doc = GetRenderedDocument();
-  if (doc) {
+  if (Document* doc = GetRenderedDocument()) {
     PendingAnimationTracker* tracker =
         doc->GetOrCreatePendingAnimationTracker();
     if (mPendingState == PendingState::PlayPending &&
@@ -1401,7 +1393,7 @@ bool Animation::IsPossiblyOrphanedPendingAnimation() const {
   // If we're wrong and another document is tracking us then, at worst, we'll
   // simply start/pause the animation one tick too soon. That's better than
   // never starting/pausing the animation and is unlikely.
-  nsIDocument* doc = GetRenderedDocument();
+  Document* doc = GetRenderedDocument();
   if (!doc) {
     return true;
   }
@@ -1419,7 +1411,7 @@ StickyTimeDuration Animation::EffectEnd() const {
   return mEffect->SpecifiedTiming().EndTime();
 }
 
-nsIDocument* Animation::GetRenderedDocument() const {
+Document* Animation::GetRenderedDocument() const {
   if (!mEffect || !mEffect->AsKeyframeEffect()) {
     return nullptr;
   }
@@ -1427,7 +1419,7 @@ nsIDocument* Animation::GetRenderedDocument() const {
   return mEffect->AsKeyframeEffect()->GetRenderedDocument();
 }
 
-nsIDocument* Animation::GetTimelineDocument() const {
+Document* Animation::GetTimelineDocument() const {
   return mTimeline ? mTimeline->GetDocument() : nullptr;
 }
 
@@ -1495,7 +1487,7 @@ void Animation::QueuePlaybackEvent(const nsAString& aName,
                                    TimeStamp&& aScheduledEventTime) {
   // Use document for timing.
   // https://drafts.csswg.org/web-animations-1/#document-for-timing
-  nsIDocument* doc = GetTimelineDocument();
+  Document* doc = GetTimelineDocument();
   if (!doc) {
     return;
   }

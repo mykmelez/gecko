@@ -17,9 +17,9 @@
 #include "nsIInputStream.h"
 #include "nsISupportsImpl.h"
 #ifdef DEBUG
-#include "nsIURLParser.h"
-#include "nsNetCID.h"
-#include "nsServiceManagerUtils.h"
+#  include "nsIURLParser.h"
+#  include "nsNetCID.h"
+#  include "nsServiceManagerUtils.h"
 #endif
 
 namespace mozilla {
@@ -49,6 +49,7 @@ namespace dom {
  * "paintworklet"    | TODO
  * report"           | TODO
  * script            | TYPE_INTERNAL_SCRIPT, TYPE_INTERNAL_SCRIPT_PRELOAD,
+ *                   | TYPE_INTERNAL_MODULE, TYPE_INTERNAL_MODULE_PRELOAD,
  *                   | TYPE_SCRIPT,
  *                   | TYPE_INTERNAL_SERVICE_WORKER,
  *                   | TYPE_INTERNAL_WORKER_IMPORT_SCRIPTS

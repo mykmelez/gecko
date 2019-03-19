@@ -7,6 +7,9 @@
 // incognito data in event listeners it will fail.
 let monitor;
 add_task(async function startup() {
+  SpecialPowers.pushPrefEnv({set: [
+    ["extensions.allowPrivateBrowsingByDefault", false],
+  ]});
   monitor = await startIncognitoMonitorExtension();
 });
 registerCleanupFunction(async function finish() {
@@ -195,6 +198,7 @@ add_task(async function test_tab_events_incognito_monitored() {
       "permissions": ["tabs"],
     },
     background,
+    incognitoOverride: "spanning",
   });
 
   await extension.startup();
@@ -397,12 +401,13 @@ add_task(async function testLastTabRemoval() {
   async function background() {
     let windowId;
     browser.tabs.onCreated.addListener(tab => {
-      browser.test.assertEq(windowId, tab.windowId,
-                            "expecting onCreated after onRemoved on the same window");
+      windowId = tab.windowId;
       browser.test.sendMessage("tabCreated", `${tab.width}x${tab.height}`);
     });
     browser.tabs.onRemoved.addListener((tabId, info) => {
-      windowId = info.windowId;
+      browser.test.assertEq(windowId, info.windowId,
+                            "expecting onRemoved after onCreated on the same window");
+      browser.test.sendMessage("tabRemoved");
     });
   }
 
@@ -422,6 +427,7 @@ add_task(async function testLastTabRemoval() {
 
   const actualDims = await extension.awaitMessage("tabCreated");
   is(actualDims, expectedDims, "created tab reports a size same to the removed last tab");
+  await extension.awaitMessage("tabRemoved");
 
   await extension.unload();
   await BrowserTestUtils.closeWindow(newWin);

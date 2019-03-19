@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/SMILAnimationController.h"
+#include "SMILAnimationController.h"
 
 #include <algorithm>
 
@@ -15,12 +15,12 @@
 #include "mozilla/dom/SVGAnimationElement.h"
 #include "nsContentUtils.h"
 #include "nsCSSProps.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIPresShell.h"
 #include "nsIPresShellInlines.h"
 #include "nsITimer.h"
 #include "SMILCompositor.h"
-#include "nsSMILCSSProperty.h"
+#include "SMILCSSProperty.h"
 
 using namespace mozilla::dom;
 
@@ -32,7 +32,7 @@ namespace mozilla {
 //----------------------------------------------------------------------
 // ctors, dtors, factory methods
 
-SMILAnimationController::SMILAnimationController(nsIDocument* aDoc)
+SMILAnimationController::SMILAnimationController(Document* aDoc)
     : mAvgTimeBetweenSamples(0),
       mResampleNeeded(false),
       mDeferredStartSampling(false),
@@ -93,14 +93,14 @@ void SMILAnimationController::Resume(uint32_t aType) {
 
   SMILTimeContainer::Resume(aType);
 
-  if (wasPaused && !mPauseState && mChildContainerTable.Count()) {
+  if (wasPaused && !mPauseState && !mChildContainerTable.IsEmpty()) {
     MaybeStartSampling(GetRefreshDriver());
     Sample();  // Run the first sample manually
   }
 }
 
-nsSMILTime SMILAnimationController::GetParentTime() const {
-  return (nsSMILTime)(mCurrentSampleTime - mStartTime).ToMilliseconds();
+SMILTime SMILAnimationController::GetParentTime() const {
+  return (SMILTime)(mCurrentSampleTime - mStartTime).ToMilliseconds();
 }
 
 //----------------------------------------------------------------------
@@ -132,8 +132,8 @@ void SMILAnimationController::WillRefresh(mozilla::TimeStamp aTime) {
   // initiate special behaviour to basically ignore the intervening time.
   static const double SAMPLE_DEV_THRESHOLD = 200.0;
 
-  nsSMILTime elapsedTime =
-      (nsSMILTime)(aTime - mCurrentSampleTime).ToMilliseconds();
+  SMILTime elapsedTime =
+      (SMILTime)(aTime - mCurrentSampleTime).ToMilliseconds();
   if (mAvgTimeBetweenSamples == 0) {
     // First sample.
     mAvgTimeBetweenSamples = elapsedTime;
@@ -148,8 +148,8 @@ void SMILAnimationController::WillRefresh(mozilla::TimeStamp aTime) {
     // Update the moving average. Due to truncation here the average will
     // normally be a little less than it should be but that's probably ok.
     mAvgTimeBetweenSamples =
-        (nsSMILTime)(elapsedTime * SAMPLE_DUR_WEIGHTING +
-                     mAvgTimeBetweenSamples * (1.0 - SAMPLE_DUR_WEIGHTING));
+        (SMILTime)(elapsedTime * SAMPLE_DUR_WEIGHTING +
+                   mAvgTimeBetweenSamples * (1.0 - SAMPLE_DUR_WEIGHTING));
   }
   mCurrentSampleTime = aTime;
 
@@ -164,7 +164,7 @@ void SMILAnimationController::RegisterAnimationElement(
   mAnimationElementTable.PutEntry(aAnimationElement);
   if (mDeferredStartSampling) {
     mDeferredStartSampling = false;
-    if (mChildContainerTable.Count()) {
+    if (!mChildContainerTable.IsEmpty()) {
       // mAnimationElementTable was empty, but now we've added its 1st element
       MOZ_ASSERT(mAnimationElementTable.Count() == 1,
                  "we shouldn't have deferred sampling if we already had "
@@ -212,7 +212,7 @@ void SMILAnimationController::Unlink() { mLastCompositorTable = nullptr; }
 
 void SMILAnimationController::NotifyRefreshDriverCreated(
     nsRefreshDriver* aRefreshDriver) {
-  if (!mPauseState) {
+  if (!mPauseState && !mChildContainerTable.IsEmpty()) {
     MaybeStartSampling(aRefreshDriver);
   }
 }
@@ -290,7 +290,7 @@ void SMILAnimationController::DoSample(bool aSkipUnchangedContainers) {
   bool isStyleFlushNeeded = mResampleNeeded;
   mResampleNeeded = false;
 
-  nsCOMPtr<nsIDocument> document(mDocument);  // keeps 'this' alive too
+  nsCOMPtr<Document> document(mDocument);  // keeps 'this' alive too
 
   // Set running sample flag -- do this before flushing styles so that when we
   // flush styles we don't end up requesting extra samples
@@ -464,7 +464,7 @@ void SMILAnimationController::DoMilestoneSamples() {
   // registered for those times. This way events can fire in the correct order,
   // dependencies can be resolved etc.
 
-  nsSMILTime sampleTime = INT64_MIN;
+  SMILTime sampleTime = INT64_MIN;
 
   while (true) {
     // We want to find any milestones AT OR BEFORE the current sample time so we
@@ -521,13 +521,13 @@ void SMILAnimationController::DoMilestoneSamples() {
         // its parent since registering a milestone.
         continue;
 
-      nsSMILTimeValue containerTimeValue =
+      SMILTimeValue containerTimeValue =
           container->ParentToContainerTime(sampleTime);
       if (!containerTimeValue.IsDefinite()) continue;
 
       // Clamp the converted container time to non-negative values.
-      nsSMILTime containerTime =
-          std::max<nsSMILTime>(0, containerTimeValue.GetMillis());
+      SMILTime containerTime =
+          std::max<SMILTime>(0, containerTimeValue.GetMillis());
 
       if (nextMilestone.mIsEnd) {
         elem->TimedElement().SampleEndAt(containerTime);
@@ -538,7 +538,8 @@ void SMILAnimationController::DoMilestoneSamples() {
   }
 }
 
-/*static*/ void SMILAnimationController::SampleTimedElement(
+/*static*/
+void SMILAnimationController::SampleTimedElement(
     SVGAnimationElement* aElement, TimeContainerHashtable* aActiveContainers) {
   SMILTimeContainer* timeContainer = aElement->GetTimeContainer();
   if (!timeContainer) return;
@@ -554,14 +555,15 @@ void SMILAnimationController::DoMilestoneSamples() {
   // timed element is in the list.
   if (!aActiveContainers->GetEntry(timeContainer)) return;
 
-  nsSMILTime containerTime = timeContainer->GetCurrentTimeAsSMILTime();
+  SMILTime containerTime = timeContainer->GetCurrentTimeAsSMILTime();
 
   MOZ_ASSERT(!timeContainer->IsSeeking(),
              "Doing a regular sample but the time container is still seeking");
   aElement->TimedElement().SampleAt(containerTime);
 }
 
-/*static*/ void SMILAnimationController::AddAnimationToCompositorTable(
+/*static*/
+void SMILAnimationController::AddAnimationToCompositorTable(
     SVGAnimationElement* aElement, SMILCompositorTable* aCompositorTable,
     bool& aStyleFlushNeeded) {
   // Add a compositor to the hash table if there's not already one there
@@ -609,7 +611,8 @@ static inline bool IsTransformAttribute(int32_t aNamespaceID,
 // Helper function that, given a SVGAnimationElement, looks up its target
 // element & target attribute and populates a SMILTargetIdentifier
 // for this target.
-/*static*/ bool SMILAnimationController::GetTargetIdentifierForAnimation(
+/*static*/
+bool SMILAnimationController::GetTargetIdentifierForAnimation(
     SVGAnimationElement* aAnimElem, SMILTargetIdentifier& aResult) {
   // Look up target (animated) element
   Element* targetElem = aAnimElem->GetTargetElementContent();
@@ -675,8 +678,8 @@ bool SMILAnimationController::PreTraverseInSubtree(Element* aRoot) {
     }
 
     context->RestyleManager()->PostRestyleEventForAnimations(
-        key.mElement, CSSPseudoElementType::NotPseudo,
-        eRestyle_StyleAttribute_Animations);
+        key.mElement, PseudoStyleType::NotPseudo,
+        StyleRestyleHint_RESTYLE_SMIL);
 
     foundElementsNeedingRestyle = true;
   }
@@ -708,7 +711,7 @@ nsresult SMILAnimationController::AddChild(SMILTimeContainer& aChild) {
 void SMILAnimationController::RemoveChild(SMILTimeContainer& aChild) {
   mChildContainerTable.RemoveEntry(&aChild);
 
-  if (!mPauseState && mChildContainerTable.Count() == 0) {
+  if (!mPauseState && mChildContainerTable.IsEmpty()) {
     StopSampling(GetRefreshDriver());
   }
 }
@@ -731,4 +734,3 @@ void SMILAnimationController::FlagDocumentNeedsFlush() {
 }
 
 }  // namespace mozilla
-

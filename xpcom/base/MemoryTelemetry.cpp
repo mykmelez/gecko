@@ -237,8 +237,10 @@ nsresult MemoryTelemetry::GatherReports(
   do {                                                                  \
     int64_t amt;                                                        \
     nsresult rv = mgr->Get##metric(&amt);                               \
-    if (!NS_WARN_IF(NS_FAILED(rv))) {                                   \
+    if (NS_SUCCEEDED(rv)) {                                             \
       HandleMemoryReport(Telemetry::id, nsIMemoryReporter::units, amt); \
+    } else if (rv != NS_ERROR_NOT_AVAILABLE) {                          \
+      NS_WARNING("Failed to retrieve memory telemetry for " #metric);   \
     }                                                                   \
   } while (0)
 
@@ -269,8 +271,12 @@ nsresult MemoryTelemetry::GatherReports(
   // Collect cheap or main-thread only metrics synchronously, on the main
   // thread.
   RECORD(MEMORY_JS_GC_HEAP, JSMainRuntimeGCHeap, UNITS_BYTES);
-  RECORD(MEMORY_JS_COMPARTMENTS_SYSTEM, JSMainRuntimeRealmsSystem, UNITS_COUNT);
-  RECORD(MEMORY_JS_COMPARTMENTS_USER, JSMainRuntimeRealmsUser, UNITS_COUNT);
+  RECORD(MEMORY_JS_COMPARTMENTS_SYSTEM, JSMainRuntimeCompartmentsSystem,
+         UNITS_COUNT);
+  RECORD(MEMORY_JS_COMPARTMENTS_USER, JSMainRuntimeCompartmentsUser,
+         UNITS_COUNT);
+  RECORD(MEMORY_JS_REALMS_SYSTEM, JSMainRuntimeRealmsSystem, UNITS_COUNT);
+  RECORD(MEMORY_JS_REALMS_USER, JSMainRuntimeRealmsUser, UNITS_COUNT);
   RECORD(MEMORY_IMAGES_CONTENT_USED_UNCOMPRESSED, ImagesContentUsedUncompressed,
          UNITS_BYTES);
   RECORD(MEMORY_STORAGE_SQLITE, StorageSQLite, UNITS_BYTES);
@@ -521,9 +527,11 @@ nsresult MemoryTelemetry::Observe(nsISupports* aSubject, const char* aTopic,
 
     mLastPoll = now;
 
-    NS_IdleDispatchToCurrentThread(NewRunnableMethod<std::function<void()>>(
-        "MemoryTelemetry::GatherReports", this, &MemoryTelemetry::GatherReports,
-        nullptr));
+    NS_DispatchToCurrentThreadQueue(
+        NewRunnableMethod<std::function<void()>>(
+            "MemoryTelemetry::GatherReports", this,
+            &MemoryTelemetry::GatherReports, nullptr),
+        EventQueuePriority::Idle);
   } else if (strcmp(aTopic, "content-child-shutdown") == 0) {
     if (nsCOMPtr<nsITelemetry> telemetry =
             do_GetService("@mozilla.org/base/telemetry;1")) {

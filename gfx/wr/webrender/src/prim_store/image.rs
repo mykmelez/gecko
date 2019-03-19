@@ -3,20 +3,20 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{
-    AlphaType, ColorDepth, ColorF, ColorU, DeviceIntRect, DeviceIntSideOffsets,
-    DeviceIntSize, ImageRendering, LayoutRect, LayoutSize, LayoutPrimitiveInfo,
-    PremultipliedColorF, Shadow, TileOffset, YuvColorSpace, YuvFormat
+    AlphaType, ColorDepth, ColorF, ColorU,
+    ImageKey as ApiImageKey, ImageRendering, LayoutPrimitiveInfo,
+    PremultipliedColorF, Shadow, YuvColorSpace, YuvFormat,
 };
-use api::ImageKey as ApiImageKey;
-use display_list_flattener::{AsInstanceKind, CreateShadow, IsVisible};
+use api::units::*;
+use display_list_flattener::{CreateShadow, IsVisible};
 use frame_builder::FrameBuildingState;
-use gpu_cache::{GpuCacheHandle, GpuDataRequest};
-use intern::{DataStore, Handle, Internable, Interner, InternDebug, UpdateList};
+use gpu_cache::{GpuDataRequest};
+use intern::{Internable, InternDebug, Handle as InternHandle};
 use prim_store::{
     EdgeAaSegmentMask, OpacityBindingIndex, PrimitiveInstanceKind,
     PrimitiveOpacity, PrimitiveSceneData, PrimKey, PrimKeyCommonData,
     PrimTemplate, PrimTemplateCommonData, PrimitiveStore, SegmentInstanceIndex,
-    SizeKey
+    SizeKey, InternablePrimitive,
 };
 use render_task::{
     BlitSource, RenderTask, RenderTaskCacheEntryHandle, RenderTaskCacheKey,
@@ -30,7 +30,6 @@ use util::pack_as_float;
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct VisibleImageTile {
     pub tile_offset: TileOffset,
-    pub handle: GpuCacheHandle,
     pub edge_flags: EdgeAaSegmentMask,
     pub local_rect: LayoutRect,
     pub local_clip_rect: LayoutRect,
@@ -59,15 +58,17 @@ pub struct ImageCacheKey {
 ///     now to reduce the number of changes, and because image
 ///     tiling is very rare on real pages.
 #[derive(Debug)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
 pub struct ImageInstance {
     pub opacity_binding_index: OpacityBindingIndex,
     pub segment_instance_index: SegmentInstanceIndex,
+    pub tight_local_clip_rect: LayoutRect,
     pub visible_tiles: Vec<VisibleImageTile>,
 }
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, MallocSizeOf, Hash)]
 pub struct Image {
     pub key: ApiImageKey,
     pub stretch_size: SizeKey,
@@ -84,7 +85,6 @@ impl ImageKey {
     pub fn new(
         is_backface_visible: bool,
         prim_size: LayoutSize,
-        prim_relative_clip_rect: LayoutRect,
         image: Image,
     ) -> Self {
 
@@ -92,7 +92,6 @@ impl ImageKey {
             common: PrimKeyCommonData {
                 is_backface_visible,
                 prim_size: prim_size.into(),
-                prim_relative_clip_rect: prim_relative_clip_rect.into(),
             },
             kind: image,
         }
@@ -101,33 +100,10 @@ impl ImageKey {
 
 impl InternDebug for ImageKey {}
 
-impl AsInstanceKind<ImageDataHandle> for ImageKey {
-    /// Construct a primitive instance that matches the type
-    /// of primitive key.
-    fn as_instance_kind(
-        &self,
-        data_handle: ImageDataHandle,
-        prim_store: &mut PrimitiveStore,
-    ) -> PrimitiveInstanceKind {
-        // TODO(gw): Refactor this to not need a separate image
-        //           instance (see ImageInstance struct).
-        let image_instance_index = prim_store.images.push(ImageInstance {
-            opacity_binding_index: OpacityBindingIndex::INVALID,
-            segment_instance_index: SegmentInstanceIndex::INVALID,
-            visible_tiles: Vec::new(),
-        });
-
-        PrimitiveInstanceKind::Image {
-            data_handle,
-            image_instance_index,
-        }
-    }
-}
-
 // Where to find the texture data for an image primitive.
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug)]
+#[derive(Debug, MallocSizeOf)]
 pub enum ImageSource {
     // A normal image - just reference the texture cache.
     Default,
@@ -141,6 +117,7 @@ pub enum ImageSource {
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
+#[derive(MallocSizeOf)]
 pub struct ImageData {
     pub key: ApiImageKey,
     pub stretch_size: LayoutSize,
@@ -310,6 +287,7 @@ impl ImageData {
     pub fn write_prim_gpu_blocks(&self, request: &mut GpuDataRequest) {
         // Images are drawn as a white color, modulated by the total
         // opacity coming from any collapsed property bindings.
+        // Size has to match `VECS_PER_SPECIFIC_BRUSH` from `brush_image.glsl` exactly.
         request.push(self.color.premultiplied());
         request.push(PremultipliedColorF::WHITE);
         request.push([
@@ -334,34 +312,45 @@ impl From<ImageKey> for ImageTemplate {
     }
 }
 
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
-pub struct ImageDataMarker;
-
-pub type ImageDataStore = DataStore<ImageKey, ImageTemplate, ImageDataMarker>;
-pub type ImageDataHandle = Handle<ImageDataMarker>;
-pub type ImageDataUpdateList = UpdateList<ImageKey>;
-pub type ImageDataInterner = Interner<ImageKey, PrimitiveSceneData, ImageDataMarker>;
+pub type ImageDataHandle = InternHandle<Image>;
 
 impl Internable for Image {
-    type Marker = ImageDataMarker;
-    type Source = ImageKey;
+    type Key = ImageKey;
     type StoreData = ImageTemplate;
     type InternData = PrimitiveSceneData;
+}
 
-    /// Build a new key from self with `info`.
-    fn build_key(
+impl InternablePrimitive for Image {
+    fn into_key(
         self,
         info: &LayoutPrimitiveInfo,
-        prim_relative_clip_rect: LayoutRect,
     ) -> ImageKey {
         ImageKey::new(
             info.is_backface_visible,
             info.rect.size,
-            prim_relative_clip_rect,
             self
         )
+    }
+
+    fn make_instance_kind(
+        _key: ImageKey,
+        data_handle: ImageDataHandle,
+        prim_store: &mut PrimitiveStore,
+        _reference_frame_relative_offset: LayoutVector2D,
+    ) -> PrimitiveInstanceKind {
+        // TODO(gw): Refactor this to not need a separate image
+        //           instance (see ImageInstance struct).
+        let image_instance_index = prim_store.images.push(ImageInstance {
+            opacity_binding_index: OpacityBindingIndex::INVALID,
+            segment_instance_index: SegmentInstanceIndex::INVALID,
+            tight_local_clip_rect: LayoutRect::zero(),
+            visible_tiles: Vec::new(),
+        });
+
+        PrimitiveInstanceKind::Image {
+            data_handle,
+            image_instance_index,
+        }
     }
 }
 
@@ -389,7 +378,7 @@ impl IsVisible for Image {
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, MallocSizeOf, PartialEq, Hash)]
 pub struct YuvImage {
     pub color_depth: ColorDepth,
     pub yuv_key: [ApiImageKey; 3],
@@ -404,7 +393,6 @@ impl YuvImageKey {
     pub fn new(
         is_backface_visible: bool,
         prim_size: LayoutSize,
-        prim_relative_clip_rect: LayoutRect,
         yuv_image: YuvImage,
     ) -> Self {
 
@@ -412,7 +400,6 @@ impl YuvImageKey {
             common: PrimKeyCommonData {
                 is_backface_visible,
                 prim_size: prim_size.into(),
-                prim_relative_clip_rect: prim_relative_clip_rect.into(),
             },
             kind: yuv_image,
         }
@@ -421,23 +408,9 @@ impl YuvImageKey {
 
 impl InternDebug for YuvImageKey {}
 
-impl AsInstanceKind<YuvImageDataHandle> for YuvImageKey {
-    /// Construct a primitive instance that matches the type
-    /// of primitive key.
-    fn as_instance_kind(
-        &self,
-        data_handle: YuvImageDataHandle,
-        _prim_store: &mut PrimitiveStore,
-    ) -> PrimitiveInstanceKind {
-        PrimitiveInstanceKind::YuvImage {
-            data_handle,
-            segment_instance_index: SegmentInstanceIndex::INVALID
-        }
-    }
-}
-
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
+#[derive(MallocSizeOf)]
 pub struct YuvImageData {
     pub color_depth: ColorDepth,
     pub yuv_key: [ApiImageKey; 3],
@@ -511,34 +484,36 @@ impl From<YuvImageKey> for YuvImageTemplate {
     }
 }
 
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
-pub struct YuvImageDataMarker;
-
-pub type YuvImageDataStore = DataStore<YuvImageKey, YuvImageTemplate, YuvImageDataMarker>;
-pub type YuvImageDataHandle = Handle<YuvImageDataMarker>;
-pub type YuvImageDataUpdateList = UpdateList<YuvImageKey>;
-pub type YuvImageDataInterner = Interner<YuvImageKey, PrimitiveSceneData, YuvImageDataMarker>;
+pub type YuvImageDataHandle = InternHandle<YuvImage>;
 
 impl Internable for YuvImage {
-    type Marker = YuvImageDataMarker;
-    type Source = YuvImageKey;
+    type Key = YuvImageKey;
     type StoreData = YuvImageTemplate;
     type InternData = PrimitiveSceneData;
+}
 
-    /// Build a new key from self with `info`.
-    fn build_key(
+impl InternablePrimitive for YuvImage {
+    fn into_key(
         self,
         info: &LayoutPrimitiveInfo,
-        prim_relative_clip_rect: LayoutRect,
     ) -> YuvImageKey {
         YuvImageKey::new(
             info.is_backface_visible,
             info.rect.size,
-            prim_relative_clip_rect,
-            self
+            self,
         )
+    }
+
+    fn make_instance_kind(
+        _key: YuvImageKey,
+        data_handle: YuvImageDataHandle,
+        _prim_store: &mut PrimitiveStore,
+        _reference_frame_relative_offset: LayoutVector2D,
+    ) -> PrimitiveInstanceKind {
+        PrimitiveInstanceKind::YuvImage {
+            data_handle,
+            segment_instance_index: SegmentInstanceIndex::INVALID
+        }
     }
 }
 
@@ -559,9 +534,9 @@ fn test_struct_sizes() {
     // (b) You made a structure larger. This is not necessarily a problem, but should only
     //     be done with care, and after checking if talos performance regresses badly.
     assert_eq!(mem::size_of::<Image>(), 56, "Image size changed");
-    assert_eq!(mem::size_of::<ImageTemplate>(), 124, "ImageTemplate size changed");
-    assert_eq!(mem::size_of::<ImageKey>(), 84, "ImageKey size changed");
+    assert_eq!(mem::size_of::<ImageTemplate>(), 108, "ImageTemplate size changed");
+    assert_eq!(mem::size_of::<ImageKey>(), 68, "ImageKey size changed");
     assert_eq!(mem::size_of::<YuvImage>(), 36, "YuvImage size changed");
-    assert_eq!(mem::size_of::<YuvImageTemplate>(), 72, "YuvImageTemplate size changed");
-    assert_eq!(mem::size_of::<YuvImageKey>(), 64, "YuvImageKey size changed");
+    assert_eq!(mem::size_of::<YuvImageTemplate>(), 56, "YuvImageTemplate size changed");
+    assert_eq!(mem::size_of::<YuvImageKey>(), 48, "YuvImageKey size changed");
 }

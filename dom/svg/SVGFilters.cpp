@@ -14,15 +14,11 @@
 #include "nsIFrame.h"
 #include "nsLayoutUtils.h"
 #include "SVGAnimatedNumberList.h"
-#include "nsSVGBoolean.h"
 #include "SVGEnum.h"
 #include "nsSVGFilterInstance.h"
-#include "nsSVGInteger.h"
-#include "nsSVGIntegerPair.h"
-#include "nsSVGNumber2.h"
-#include "nsSVGNumberPair.h"
 #include "SVGNumberList.h"
-#include "nsSVGString.h"
+#include "SVGNumberPair.h"
+#include "SVGString.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/ComputedStyle.h"
 #include "mozilla/SVGContentUtils.h"
@@ -42,7 +38,7 @@
 
 #if defined(XP_WIN)
 // Prevent Windows redefining LoadImage
-#undef LoadImage
+#  undef LoadImage
 #endif
 
 using namespace mozilla::gfx;
@@ -140,7 +136,8 @@ bool SVGFE::StyleIsSetToSRGB() {
          NS_STYLE_COLOR_INTERPOLATION_SRGB;
 }
 
-/* virtual */ bool SVGFE::HasValidDimensions() const {
+/* virtual */
+bool SVGFE::HasValidDimensions() const {
   return (!mLengthAttributes[ATTR_WIDTH].IsExplicitlySet() ||
           mLengthAttributes[ATTR_WIDTH].GetAnimValInSpecifiedUnits() > 0) &&
          (!mLengthAttributes[ATTR_HEIGHT].IsExplicitlySet() ||
@@ -148,15 +145,15 @@ bool SVGFE::StyleIsSetToSRGB() {
 }
 
 Size SVGFE::GetKernelUnitLength(nsSVGFilterInstance* aInstance,
-                                nsSVGNumberPair* aKernelUnitLength) {
+                                SVGNumberPair* aKernelUnitLength) {
   if (!aKernelUnitLength->IsExplicitlySet()) {
     return Size(1, 1);
   }
 
   float kernelX = aInstance->GetPrimitiveNumber(
-      SVGContentUtils::X, aKernelUnitLength, nsSVGNumberPair::eFirst);
+      SVGContentUtils::X, aKernelUnitLength, SVGNumberPair::eFirst);
   float kernelY = aInstance->GetPrimitiveNumber(
-      SVGContentUtils::Y, aKernelUnitLength, nsSVGNumberPair::eSecond);
+      SVGContentUtils::Y, aKernelUnitLength, SVGNumberPair::eSecond);
   return Size(kernelX, kernelY);
 }
 
@@ -310,8 +307,9 @@ SVGComponentTransferFunctionElement::GetNumberInfo() {
                               ArrayLength(sNumberInfo));
 }
 
-/* virtual */ JSObject* SVGFEFuncRElement::WrapNode(
-    JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
+/* virtual */
+JSObject* SVGFEFuncRElement::WrapNode(JSContext* aCx,
+                                      JS::Handle<JSObject*> aGivenProto) {
   return SVGFEFuncRElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
@@ -325,8 +323,9 @@ namespace dom {
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEFuncRElement)
 
-/* virtual */ JSObject* SVGFEFuncGElement::WrapNode(
-    JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
+/* virtual */
+JSObject* SVGFEFuncGElement::WrapNode(JSContext* aCx,
+                                      JS::Handle<JSObject*> aGivenProto) {
   return SVGFEFuncGElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
@@ -340,8 +339,9 @@ namespace dom {
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEFuncGElement)
 
-/* virtual */ JSObject* SVGFEFuncBElement::WrapNode(
-    JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
+/* virtual */
+JSObject* SVGFEFuncBElement::WrapNode(JSContext* aCx,
+                                      JS::Handle<JSObject*> aGivenProto) {
   return SVGFEFuncBElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
@@ -355,8 +355,9 @@ namespace dom {
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEFuncBElement)
 
-/* virtual */ JSObject* SVGFEFuncAElement::WrapNode(
-    JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
+/* virtual */
+JSObject* SVGFEFuncAElement::WrapNode(JSContext* aCx,
+                                      JS::Handle<JSObject*> aGivenProto) {
   return SVGFEFuncAElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 

@@ -6,30 +6,27 @@ extern crate xpcom;
 
 use crossbeam_utils::atomic::AtomicCell;
 use error::KeyValueError;
-use moz_task::{get_main_thread, is_main_thread};
-use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_OK};
-use nsstring::{nsACString, nsCString, nsString};
-use owned_value::{value_to_owned, OwnedValue};
-use rkv::{Manager, Rkv, Store, StoreError, Value};
+use moz_task::Task;
+use nserror::{nsresult, NS_ERROR_FAILURE};
+use nsstring::nsCString;
+use owned_value::owned_to_variant;
+use rkv::{Manager, OwnedValue, Rkv, SingleStore, StoreError, StoreOptions, Value};
 use std::{
     path::Path,
     str,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, RwLock,
-    },
+    sync::{Arc, RwLock},
 };
 use storage_variant::VariantType;
-use threadbound::ThreadBound;
 use xpcom::{
     interfaces::{
-        nsIEventTarget, nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback,
-        nsIKeyValueVariantCallback, nsIKeyValueVoidCallback, nsIThread, nsIVariant,
+        nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback, nsIKeyValueVariantCallback,
+        nsIKeyValueVoidCallback, nsIThread, nsIVariant,
     },
-    RefPtr,
+    RefPtr, ThreadBoundRefPtr,
 };
 use KeyValueDatabase;
 use KeyValueEnumerator;
+use KeyValuePairResult;
 
 /// A macro to generate a done() implementation for a Task.
 /// Takes one argument that specifies the type of the Task's callback function:
@@ -81,72 +78,19 @@ macro_rules! task_done {
     };
 }
 
-/// A database operation that is executed asynchronously on a database thread
-/// and returns its result to the original thread from which it was dispatched.
-pub trait Task {
-    fn run(&self);
-    fn done(&self) -> Result<(), nsresult>;
-}
-
-/// The struct responsible for dispatching a Task by calling its run() method
-/// on the target thread and returning its result by calling its done() method
-/// on the original thread.
-///
-/// The struct uses its has_run field to determine whether it should call
-/// run() or done().  It could instead check if task.result is Some or None,
-/// but if run() failed to set task.result, then it would loop infinitely.
-#[derive(xpcom)]
-#[xpimplements(nsIRunnable, nsINamed)]
-#[refcnt = "atomic"]
-pub struct InitTaskRunnable {
-    name: &'static str,
-    task: Box<dyn Task>,
-    has_run: AtomicBool,
-}
-
-impl TaskRunnable {
-    pub fn new(name: &'static str, task: Box<dyn Task>) -> Result<RefPtr<TaskRunnable>, nsresult> {
-        assert!(is_main_thread());
-        Ok(TaskRunnable::allocate(InitTaskRunnable {
-            name,
-            task,
-            has_run: AtomicBool::new(false),
-        }))
-    }
-    pub fn dispatch(&self, target_thread: RefPtr<nsIThread>) -> Result<(), nsresult> {
-        unsafe {
-            target_thread.DispatchFromScript(self.coerce(), nsIEventTarget::DISPATCH_NORMAL as u32)
-        }.to_result()
-    }
-
-    xpcom_method!(run => Run());
-    fn run(&self) -> Result<(), nsresult> {
-        match self.has_run.load(Ordering::Acquire) {
-            false => {
-                assert!(!is_main_thread());
-                self.has_run.store(true, Ordering::Release);
-                self.task.run();
-                self.dispatch(get_main_thread()?)
-            }
-            true => {
-                assert!(is_main_thread());
-                self.task.done()
-            }
-        }
-    }
-
-    xpcom_method!(get_name => GetName() -> nsACString);
-    fn get_name(&self) -> Result<nsCString, nsresult> {
-        Ok(nsCString::from(self.name))
-    }
-}
+/// A tuple comprising an Arc<RwLock<Rkv>> and a SingleStore, which is
+/// the result of GetOrCreateTask.  We declare this type because otherwise
+/// Clippy complains "error: very complex type used. Consider factoring
+/// parts into `type` definitions" (i.e. clippy::type-complexity) when we
+/// declare the type of `GetOrCreateTask::result`.
+type RkvStoreTuple = (Arc<RwLock<Rkv>>, SingleStore);
 
 pub struct GetOrCreateTask {
-    callback: AtomicCell<Option<ThreadBound<RefPtr<nsIKeyValueDatabaseCallback>>>>,
-    thread: AtomicCell<Option<ThreadBound<RefPtr<nsIThread>>>>,
+    callback: AtomicCell<Option<ThreadBoundRefPtr<nsIKeyValueDatabaseCallback>>>,
+    thread: AtomicCell<Option<ThreadBoundRefPtr<nsIThread>>>,
     path: nsCString,
     name: nsCString,
-    result: AtomicCell<Option<Result<(Arc<RwLock<Rkv>>, Store), KeyValueError>>>,
+    result: AtomicCell<Option<Result<RkvStoreTuple, KeyValueError>>>,
 }
 
 impl GetOrCreateTask {
@@ -157,18 +101,15 @@ impl GetOrCreateTask {
         name: nsCString,
     ) -> GetOrCreateTask {
         GetOrCreateTask {
-            callback: AtomicCell::new(Some(ThreadBound::new(callback))),
-            thread: AtomicCell::new(Some(ThreadBound::new(thread))),
+            callback: AtomicCell::new(Some(ThreadBoundRefPtr::new(callback))),
+            thread: AtomicCell::new(Some(ThreadBoundRefPtr::new(thread))),
             path,
             name,
             result: AtomicCell::default(),
         }
     }
 
-    fn convert(
-        &self,
-        result: (Arc<RwLock<Rkv>>, Store),
-    ) -> Result<RefPtr<KeyValueDatabase>, KeyValueError> {
+    fn convert(&self, result: RkvStoreTuple) -> Result<RefPtr<KeyValueDatabase>, KeyValueError> {
         let thread = self.thread.swap(None).ok_or(NS_ERROR_FAILURE)?;
         Ok(KeyValueDatabase::new(result.0, result.1, thread))
     }
@@ -178,28 +119,24 @@ impl Task for GetOrCreateTask {
     fn run(&self) {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
-        self.result.store(Some(
-            || -> Result<(Arc<RwLock<Rkv>>, Store), KeyValueError> {
+        self.result
+            .store(Some(|| -> Result<RkvStoreTuple, KeyValueError> {
                 let mut writer = Manager::singleton().write()?;
                 let rkv = writer.get_or_create(Path::new(str::from_utf8(&self.path)?), Rkv::new)?;
-                let store = if self.name.is_empty() {
-                    rkv.write()?.open_or_create_default()
-                } else {
-                    rkv.write()?
-                        .open_or_create(Some(str::from_utf8(&self.name)?))
-                }?;
+                let store = rkv
+                    .write()?
+                    .open_single(str::from_utf8(&self.name)?, StoreOptions::create())?;
                 Ok((rkv, store))
-            }(),
-        ));
+            }()));
     }
 
     task_done!(value);
 }
 
 pub struct PutTask {
-    callback: AtomicCell<Option<ThreadBound<RefPtr<nsIKeyValueVoidCallback>>>>,
+    callback: AtomicCell<Option<ThreadBoundRefPtr<nsIKeyValueVoidCallback>>>,
     rkv: Arc<RwLock<Rkv>>,
-    store: Store,
+    store: SingleStore,
     key: nsCString,
     value: OwnedValue,
     result: AtomicCell<Option<Result<(), KeyValueError>>>,
@@ -209,12 +146,12 @@ impl PutTask {
     pub fn new(
         callback: RefPtr<nsIKeyValueVoidCallback>,
         rkv: Arc<RwLock<Rkv>>,
-        store: Store,
+        store: SingleStore,
         key: nsCString,
         value: OwnedValue,
     ) -> PutTask {
         PutTask {
-            callback: AtomicCell::new(Some(ThreadBound::new(callback))),
+            callback: AtomicCell::new(Some(ThreadBoundRefPtr::new(callback))),
             rkv,
             store,
             key,
@@ -233,14 +170,8 @@ impl Task for PutTask {
             let env = self.rkv.read()?;
             let mut writer = env.write()?;
 
-            let value = match self.value {
-                OwnedValue::Bool(val) => Value::Bool(val),
-                OwnedValue::I64(val) => Value::I64(val),
-                OwnedValue::F64(val) => Value::F64(val),
-                OwnedValue::Str(ref val) => Value::Str(&val),
-            };
-
-            writer.put(self.store, key, &value)?;
+            self.store
+                .put(&mut writer, key, &Value::from(&self.value))?;
             writer.commit()?;
 
             Ok(())
@@ -251,9 +182,9 @@ impl Task for PutTask {
 }
 
 pub struct GetTask {
-    callback: AtomicCell<Option<ThreadBound<RefPtr<nsIKeyValueVariantCallback>>>>,
+    callback: AtomicCell<Option<ThreadBoundRefPtr<nsIKeyValueVariantCallback>>>,
     rkv: Arc<RwLock<Rkv>>,
-    store: Store,
+    store: SingleStore,
     key: nsCString,
     default_value: Option<OwnedValue>,
     result: AtomicCell<Option<Result<Option<OwnedValue>, KeyValueError>>>,
@@ -263,12 +194,12 @@ impl GetTask {
     pub fn new(
         callback: RefPtr<nsIKeyValueVariantCallback>,
         rkv: Arc<RwLock<Rkv>>,
-        store: Store,
+        store: SingleStore,
         key: nsCString,
         default_value: Option<OwnedValue>,
     ) -> GetTask {
         GetTask {
-            callback: AtomicCell::new(Some(ThreadBound::new(callback))),
+            callback: AtomicCell::new(Some(ThreadBoundRefPtr::new(callback))),
             rkv,
             store,
             key,
@@ -278,12 +209,8 @@ impl GetTask {
     }
 
     fn convert(&self, result: Option<OwnedValue>) -> Result<RefPtr<nsIVariant>, KeyValueError> {
-        // TODO: refactor with owned_to_variant in owned_value.rs.
         Ok(match result {
-            Some(OwnedValue::Bool(val)) => val.into_variant(),
-            Some(OwnedValue::I64(val)) => val.into_variant(),
-            Some(OwnedValue::F64(val)) => val.into_variant(),
-            Some(OwnedValue::Str(ref val)) => nsString::from(val).into_variant(),
+            Some(val) => owned_to_variant(val)?,
             None => ().into_variant(),
         })
     }
@@ -298,15 +225,10 @@ impl Task for GetTask {
                 let key = str::from_utf8(&self.key)?;
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
-                let value = reader.get(self.store, key)?;
+                let value = self.store.get(&reader, key)?;
 
-                // TODO: refactor with value_to_owned in owned_value.rs.
                 Ok(match value {
-                    Some(Value::Bool(val)) => Some(OwnedValue::Bool(val)),
-                    Some(Value::I64(val)) => Some(OwnedValue::I64(val)),
-                    Some(Value::F64(val)) => Some(OwnedValue::F64(val)),
-                    Some(Value::Str(val)) => Some(OwnedValue::Str(val.to_owned())),
-                    Some(_value) => return Err(KeyValueError::UnexpectedValue),
+                    Some(value) => Some(OwnedValue::from(&value)),
                     None => match self.default_value {
                         Some(ref val) => Some(val.clone()),
                         None => None,
@@ -319,9 +241,9 @@ impl Task for GetTask {
 }
 
 pub struct HasTask {
-    callback: AtomicCell<Option<ThreadBound<RefPtr<nsIKeyValueVariantCallback>>>>,
+    callback: AtomicCell<Option<ThreadBoundRefPtr<nsIKeyValueVariantCallback>>>,
     rkv: Arc<RwLock<Rkv>>,
-    store: Store,
+    store: SingleStore,
     key: nsCString,
     result: AtomicCell<Option<Result<bool, KeyValueError>>>,
 }
@@ -330,11 +252,11 @@ impl HasTask {
     pub fn new(
         callback: RefPtr<nsIKeyValueVariantCallback>,
         rkv: Arc<RwLock<Rkv>>,
-        store: Store,
+        store: SingleStore,
         key: nsCString,
     ) -> HasTask {
         HasTask {
-            callback: AtomicCell::new(Some(ThreadBound::new(callback))),
+            callback: AtomicCell::new(Some(ThreadBoundRefPtr::new(callback))),
             rkv,
             store,
             key,
@@ -355,7 +277,7 @@ impl Task for HasTask {
             let key = str::from_utf8(&self.key)?;
             let env = self.rkv.read()?;
             let reader = env.read()?;
-            let value = reader.get(self.store, key)?;
+            let value = self.store.get(&reader, key)?;
             Ok(value.is_some())
         }()));
     }
@@ -364,9 +286,9 @@ impl Task for HasTask {
 }
 
 pub struct DeleteTask {
-    callback: AtomicCell<Option<ThreadBound<RefPtr<nsIKeyValueVoidCallback>>>>,
+    callback: AtomicCell<Option<ThreadBoundRefPtr<nsIKeyValueVoidCallback>>>,
     rkv: Arc<RwLock<Rkv>>,
-    store: Store,
+    store: SingleStore,
     key: nsCString,
     result: AtomicCell<Option<Result<(), KeyValueError>>>,
 }
@@ -375,11 +297,11 @@ impl DeleteTask {
     pub fn new(
         callback: RefPtr<nsIKeyValueVoidCallback>,
         rkv: Arc<RwLock<Rkv>>,
-        store: Store,
+        store: SingleStore,
         key: nsCString,
     ) -> DeleteTask {
         DeleteTask {
-            callback: AtomicCell::new(Some(ThreadBound::new(callback))),
+            callback: AtomicCell::new(Some(ThreadBoundRefPtr::new(callback))),
             rkv,
             store,
             key,
@@ -397,7 +319,7 @@ impl Task for DeleteTask {
             let env = self.rkv.read()?;
             let mut writer = env.write()?;
 
-            match writer.delete(self.store, key) {
+            match self.store.delete(&mut writer, key) {
                 Ok(_) => (),
 
                 // LMDB fails with an error if the key to delete wasn't found,
@@ -418,24 +340,24 @@ impl Task for DeleteTask {
 }
 
 pub struct EnumerateTask {
-    callback: AtomicCell<Option<ThreadBound<RefPtr<nsIKeyValueEnumeratorCallback>>>>,
+    callback: AtomicCell<Option<ThreadBoundRefPtr<nsIKeyValueEnumeratorCallback>>>,
     rkv: Arc<RwLock<Rkv>>,
-    store: Store,
+    store: SingleStore,
     from_key: nsCString,
     to_key: nsCString,
-    result: AtomicCell<Option<Result<Vec<KeyValuePair>, KeyValueError>>>,
+    result: AtomicCell<Option<Result<Vec<KeyValuePairResult>, KeyValueError>>>,
 }
 
 impl EnumerateTask {
     pub fn new(
         callback: RefPtr<nsIKeyValueEnumeratorCallback>,
         rkv: Arc<RwLock<Rkv>>,
-        store: Store,
+        store: SingleStore,
         from_key: nsCString,
         to_key: nsCString,
     ) -> EnumerateTask {
         EnumerateTask {
-            callback: AtomicCell::new(Some(ThreadBound::new(callback))),
+            callback: AtomicCell::new(Some(ThreadBoundRefPtr::new(callback))),
             rkv,
             store,
             from_key,
@@ -446,32 +368,27 @@ impl EnumerateTask {
 
     fn convert(
         &self,
-        result: Vec<KeyValuePair>,
+        result: Vec<KeyValuePairResult>,
     ) -> Result<RefPtr<KeyValueEnumerator>, KeyValueError> {
         Ok(KeyValueEnumerator::new(result))
     }
 }
 
-type KeyValuePair = (
-    Result<String, KeyValueError>,
-    Result<OwnedValue, KeyValueError>,
-);
-
 impl Task for EnumerateTask {
     fn run(&self) {
         // We do the work within a closure that returns a Result so we can
         // use the ? operator to simplify the implementation.
-        self.result
-            .store(Some(|| -> Result<Vec<KeyValuePair>, KeyValueError> {
+        self.result.store(Some(
+            || -> Result<Vec<KeyValuePairResult>, KeyValueError> {
                 let env = self.rkv.read()?;
                 let reader = env.read()?;
                 let from_key = str::from_utf8(&self.from_key)?;
                 let to_key = str::from_utf8(&self.to_key)?;
 
                 let iterator = if from_key.is_empty() {
-                    reader.iter_start(self.store)?
+                    self.store.iter_start(&reader)?
                 } else {
-                    reader.iter_from(self.store, &from_key)?
+                    self.store.iter_from(&reader, &from_key)?
                 };
 
                 // Ideally, we'd enumerate pairs lazily, as the consumer calls
@@ -484,36 +401,43 @@ impl Task for EnumerateTask {
                 // Our fallback approach is to eagerly collect the iterator
                 // into a collection that KeyValueEnumerator owns.  Fixing this so we
                 // enumerate pairs lazily is bug 1499252.
-                let pairs: Vec<KeyValuePair> = iterator
+                let pairs: Vec<KeyValuePairResult> = iterator
                     // Convert the key to a string so we can compare it to the "to" key.
                     // For forward compatibility, we don't fail here if we can't convert
                     // a key to UTF-8.  Instead, we store the Err in the collection
                     // and fail lazily in KeyValueEnumerator.get_next().
-                    .map(|(key, val)| (str::from_utf8(&key), val))
-                    .take_while(|(key, _val)| {
-                        if to_key.is_empty() {
-                            true
-                        } else {
-                            match *key {
-                                Ok(key) => key < to_key,
-                                Err(_err) => true,
+                    .map(|result| match result {
+                        Ok((key, val)) => Ok((str::from_utf8(&key), val)),
+                        Err(err) => Err(err),
+                    })
+                    // Stop iterating once we reach the to_key, if any.
+                    .take_while(|result| match result {
+                        Ok((key, _val)) => {
+                            if to_key.is_empty() {
+                                true
+                            } else {
+                                match *key {
+                                    Ok(key) => key < to_key,
+                                    Err(_err) => true,
+                                }
                             }
                         }
-                    }).map(|(key, val)| {
-                        (
-                            match key {
-                                Ok(key) => Ok(key.to_owned()),
-                                Err(err) => Err(err.into()),
-                            },
-                            match val {
-                                Ok(val) => value_to_owned(val),
-                                Err(err) => Err(KeyValueError::StoreError(err)),
-                            },
-                        )
-                    }).collect();
+                        Err(_) => true,
+                    })
+                    // Convert the key/value pair to owned.
+                    .map(|result| match result {
+                        Ok((key, val)) => match (key, val) {
+                            (Ok(key), Some(val)) => Ok((key.to_owned(), OwnedValue::from(&val))),
+                            (Err(err), _) => Err(err.into()),
+                            (_, None) => Err(KeyValueError::UnexpectedValue),
+                        },
+                        Err(err) => Err(KeyValueError::StoreError(err)),
+                    })
+                    .collect();
 
                 Ok(pairs)
-            }()));
+            }(),
+        ));
     }
 
     task_done!(value);

@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 // Import common head.
 /* import-globals-from ../../../../../toolkit/components/places/tests/head_common.js */
@@ -12,40 +12,34 @@ if (commonFile) {
 }
 
 // Put any other stuff relative to this test folder below.
-ChromeUtils.import("resource:///modules/UrlbarUtils.jsm");
+var {UrlbarMuxer, UrlbarProvider, UrlbarQueryContext, UrlbarUtils} = ChromeUtils.import("resource:///modules/UrlbarUtils.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
   HttpServer: "resource://testing-common/httpd.js",
   PlacesTestUtils: "resource://testing-common/PlacesTestUtils.jsm",
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
   UrlbarController: "resource:///modules/UrlbarController.jsm",
   UrlbarInput: "resource:///modules/UrlbarInput.jsm",
-  UrlbarMatch: "resource:///modules/UrlbarMatch.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
   UrlbarProviderOpenTabs: "resource:///modules/UrlbarProviderOpenTabs.jsm",
   UrlbarProvidersManager: "resource:///modules/UrlbarProvidersManager.jsm",
+  UrlbarResult: "resource:///modules/UrlbarResult.jsm",
   UrlbarTokenizer: "resource:///modules/UrlbarTokenizer.jsm",
 });
-
-// ================================================
-// Load mocking/stubbing library, sinon
-// docs: http://sinonjs.org/releases/v2.3.2/
-// Sinon needs Timer.jsm for setTimeout etc.
-ChromeUtils.import("resource://gre/modules/Timer.jsm");
-Services.scriptloader.loadSubScript("resource://testing-common/sinon-2.3.2.js", this);
-/* globals sinon */
-// ================================================
+const {sinon} = ChromeUtils.import("resource://testing-common/Sinon.jsm");
 
 /**
  * @param {string} searchString The search string to insert into the context.
  * @param {object} properties Overrides for the default values.
- * @returns {QueryContext} Creates a dummy query context with pre-filled required options.
+ * @returns {UrlbarQueryContext} Creates a dummy query context with pre-filled
+ *          required options.
  */
 function createContext(searchString = "foo", properties = {}) {
-  let context = new QueryContext({
-    searchString,
+  let context = new UrlbarQueryContext({
+    enableAutofill: UrlbarPrefs.get("autoFill"),
+    isPrivate: true,
     lastKey: searchString ? searchString[searchString.length - 1] : "",
     maxResults: UrlbarPrefs.get("maxRichResults"),
-    isPrivate: true,
+    searchString,
   });
   return Object.assign(context, properties);
 }
@@ -87,7 +81,7 @@ class TestProvider extends UrlbarProvider {
   constructor(matches, cancelCallback) {
     super();
     this._name = "TestProvider" + Math.floor(Math.random() * 100000);
-    this._cancel = cancelCallback;
+    this._cancelCallback = cancelCallback;
     this._matches = matches;
   }
   get name() {
@@ -156,7 +150,6 @@ async function addTestEngine(basename, httpServer = undefined) {
     "http://localhost:" + httpServer.identity.primaryPort + "/data/";
 
   info("Adding engine: " + basename);
-  await new Promise(resolve => Services.search.init(resolve));
   return new Promise(resolve => {
     Services.obs.addObserver(function obs(subject, topic, data) {
       let engine = subject.QueryInterface(Ci.nsISearchEngine);

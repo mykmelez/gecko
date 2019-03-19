@@ -13,6 +13,7 @@
 #include "MediaStreamGraphImpl.h"
 #include "MediaStreamListener.h"
 #include "VideoStreamTrack.h"
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/dom/AudioNode.h"
 #include "mozilla/dom/AudioTrack.h"
 #include "mozilla/dom/AudioTrackList.h"
@@ -33,7 +34,7 @@
 #include "nsServiceManagerUtils.h"
 
 #ifdef LOG
-#undef LOG
+#  undef LOG
 #endif
 
 using namespace mozilla;
@@ -248,13 +249,15 @@ JSObject* DOMMediaStream::WrapObject(JSContext* aCx,
   return dom::MediaStream_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-/* static */ already_AddRefed<DOMMediaStream> DOMMediaStream::Constructor(
+/* static */
+already_AddRefed<DOMMediaStream> DOMMediaStream::Constructor(
     const GlobalObject& aGlobal, ErrorResult& aRv) {
   Sequence<OwningNonNull<MediaStreamTrack>> emptyTrackSeq;
   return Constructor(aGlobal, emptyTrackSeq, aRv);
 }
 
-/* static */ already_AddRefed<DOMMediaStream> DOMMediaStream::Constructor(
+/* static */
+already_AddRefed<DOMMediaStream> DOMMediaStream::Constructor(
     const GlobalObject& aGlobal, const DOMMediaStream& aStream,
     ErrorResult& aRv) {
   nsTArray<RefPtr<MediaStreamTrack>> tracks;
@@ -274,7 +277,8 @@ JSObject* DOMMediaStream::WrapObject(JSContext* aCx,
   return Constructor(aGlobal, nonNullTrackSeq, aRv);
 }
 
-/* static */ already_AddRefed<DOMMediaStream> DOMMediaStream::Constructor(
+/* static */
+already_AddRefed<DOMMediaStream> DOMMediaStream::Constructor(
     const GlobalObject& aGlobal,
     const Sequence<OwningNonNull<MediaStreamTrack>>& aTracks,
     ErrorResult& aRv) {
@@ -443,7 +447,7 @@ void DOMMediaStream::AddTrack(MediaStreamTrack& aTrack) {
     aTrack.GetId(trackId);
     const char16_t* params[] = {trackId.get()};
     nsCOMPtr<nsPIDOMWindowInner> pWindow = GetParentObject();
-    nsIDocument* document = pWindow ? pWindow->GetExtantDoc() : nullptr;
+    Document* document = pWindow ? pWindow->GetExtantDoc() : nullptr;
     nsContentUtils::ReportToConsole(nsIScriptError::errorFlag,
                                     NS_LITERAL_CSTRING("Media"), document,
                                     nsContentUtils::eDOM_PROPERTIES,
@@ -732,7 +736,7 @@ void DOMMediaStream::NotifyPrincipalChanged() {
                          this, mPrincipal->GetIsNullPrincipal(),
                          mPrincipal->GetIsCodebasePrincipal(),
                          mPrincipal->GetIsExpandedPrincipal(),
-                         mPrincipal->GetIsSystemPrincipal()));
+                         mPrincipal->IsSystemPrincipal()));
   }
 
   for (uint32_t i = 0; i < mPrincipalChangeObservers.Length(); ++i) {

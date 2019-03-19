@@ -1,36 +1,63 @@
+// @flow
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-import { groupBy, get, sortedUniqBy } from "lodash";
+import { groupBy } from "lodash";
 import { createSelector } from "reselect";
 
-import { getViewport } from "../selectors";
+import {
+  getViewport,
+  getSource,
+  getSelectedSource,
+  getBreakpointPositions,
+  getBreakpointPositionsForSource
+} from "../selectors";
 import { getVisibleBreakpoints } from "./visibleBreakpoints";
-import { getVisiblePausePoints } from "./visiblePausePoints";
-import { makeLocationId } from "../utils/breakpoint";
+import { getSelectedLocation } from "../utils/source-maps";
+import type { Selector, State } from "../reducers/types";
 
-import type { SourceLocation } from "../types";
+import type {
+  SourceLocation,
+  PartialPosition,
+  Breakpoint,
+  Range,
+  BreakpointPositions,
+  BreakpointPosition,
+  Source
+} from "../types";
 
 export type ColumnBreakpoint = {|
   +location: SourceLocation,
-  +enabled: boolean,
-  +condition: ?string
+  +breakpoint: ?Breakpoint
 |};
 
-function contains(location, range) {
+export type ColumnBreakpoints = Array<ColumnBreakpoint>;
+
+function contains(location: PartialPosition, range: Range) {
   return (
     location.line >= range.start.line &&
     location.line <= range.end.line &&
-    location.column >= range.start.column &&
-    location.column <= range.end.column
+    (!location.column ||
+      (location.column >= range.start.column &&
+        location.column <= range.end.column))
   );
 }
 
-function groupBreakpoints(breakpoints) {
-  const map = groupBy(breakpoints, ({ location }) => location.line);
+function groupBreakpoints(breakpoints, selectedSource) {
+  if (!breakpoints) {
+    return {};
+  }
+  const map: any = groupBy(
+    breakpoints,
+    breakpoint => getSelectedLocation(breakpoint, selectedSource).line
+  );
+
   for (const line in map) {
-    map[line] = groupBy(map[line], ({ location }) => location.column);
+    map[line] = groupBy(
+      map[line],
+      breakpoint => getSelectedLocation(breakpoint, selectedSource).column
+    );
   }
 
   return map;
@@ -38,89 +65,111 @@ function groupBreakpoints(breakpoints) {
 
 function findBreakpoint(location, breakpointMap) {
   const { line, column } = location;
-  const breakpoints = get(breakpointMap, [line, column]);
+  const breakpoints = breakpointMap[line] && breakpointMap[line][column];
 
   if (breakpoints) {
     return breakpoints[0];
   }
 }
 
-function getLineCount(columnBreakpoints) {
+function filterByLineCount(positions, selectedSource) {
   const lineCount = {};
-  columnBreakpoints.forEach(({ location: { line } }) => {
+
+  for (const breakpoint of positions) {
+    const { line } = getSelectedLocation(breakpoint, selectedSource);
     if (!lineCount[line]) {
       lineCount[line] = 0;
     }
 
     lineCount[line] = lineCount[line] + 1;
-  });
-
-  return lineCount;
-}
-
-export function formatColumnBreakpoints(columnBreakpoints) {
-  console.log(
-    "Column Breakpoints\n\n",
-    columnBreakpoints
-      .map(
-        ({ location, enabled }) =>
-          `(${location.line}, ${location.column}) ${enabled}`
-      )
-      .join("\n")
-  );
-}
-
-export function getColumnBreakpoints(pausePoints, breakpoints, viewport) {
-  if (!pausePoints) {
-    return [];
   }
 
-  const breakpointMap = groupBreakpoints(breakpoints);
-
-  // We only want to show a column breakpoint if several conditions are matched
-  // 1. it is a "break" point and not a "step" point
-  // 2. there is a breakpoint on that line
-  // 3. the breakpoint is in the current viewport
-  // 4. it is the first breakpoint to appear at that generated location
-  // 5. there is atleast one other breakpoint on that line
-
-  let columnBreakpoints = pausePoints.filter(
-    ({ types, location }) =>
-      // 1. check that the pause point is a "break" point
-      types.break &&
-      // 2. check that there is a registered breakpoint on the line
-      breakpointMap[location.line] &&
-      // 3. check that the breakpoint is visible
-      viewport &&
-      contains(location, viewport)
+  return positions.filter(
+    breakpoint =>
+      lineCount[getSelectedLocation(breakpoint, selectedSource).line] > 1
   );
+}
 
-  // 4. Only show one column breakpoint per generated location
-  columnBreakpoints = sortedUniqBy(columnBreakpoints, ({ generatedLocation }) =>
-    makeLocationId(generatedLocation)
-  );
+function filterVisible(positions, selectedSource, viewport) {
+  return positions.filter(columnBreakpoint => {
+    const location = getSelectedLocation(columnBreakpoint, selectedSource);
+    return viewport && contains(location, viewport);
+  });
+}
 
-  // 5. Check that there is atleast one other possible breakpoint on the line
-  const lineCount = getLineCount(columnBreakpoints);
-  columnBreakpoints = columnBreakpoints.filter(
-    ({ location: { line } }) => lineCount[line] > 1
-  );
+function filterByBreakpoints(positions, selectedSource, breakpointMap) {
+  return positions.filter(position => {
+    const location = getSelectedLocation(position, selectedSource);
+    return breakpointMap[location.line];
+  });
+}
 
-  return columnBreakpoints.map(({ location }) => {
-    // Find the breakpoint so if we know it's enabled and has condition
-    const foundBreakpoint = findBreakpoint(location, breakpointMap);
-
+function formatPositions(
+  positions: BreakpointPositions,
+  selectedSource,
+  breakpointMap
+) {
+  return (positions: any).map((position: BreakpointPosition) => {
+    const location = getSelectedLocation(position, selectedSource);
     return {
       location,
-      enabled: !!foundBreakpoint && !foundBreakpoint.disabled,
-      condition: foundBreakpoint ? foundBreakpoint.condition : null
+      breakpoint: findBreakpoint(location, breakpointMap)
     };
   });
 }
 
-export const visibleColumnBreakpoints = createSelector(
-  getVisiblePausePoints,
+export function getColumnBreakpoints(
+  positions: ?BreakpointPositions,
+  breakpoints: ?(Breakpoint[]),
+  viewport: Range,
+  selectedSource: ?Source
+) {
+  if (!positions) {
+    return [];
+  }
+
+  // We only want to show a column breakpoint if several conditions are matched
+  // - it is the first breakpoint to appear at an the original location
+  // - the position is in the current viewport
+  // - there is atleast one other breakpoint on that line
+  // - there is a breakpoint on that line
+  const breakpointMap = groupBreakpoints(breakpoints, selectedSource);
+
+  positions = filterByLineCount(positions, selectedSource);
+  positions = filterVisible(positions, selectedSource, viewport);
+  positions = filterByBreakpoints(positions, selectedSource, breakpointMap);
+
+  return formatPositions(positions, selectedSource, breakpointMap);
+}
+
+const getVisibleBreakpointPositions = createSelector(
+  getSelectedSource,
+  getBreakpointPositions,
+  (source, positions) => source && positions[source.id]
+);
+
+export const visibleColumnBreakpoints: Selector<
+  ColumnBreakpoints
+> = createSelector(
+  getVisibleBreakpointPositions,
   getVisibleBreakpoints,
   getViewport,
+  getSelectedSource,
   getColumnBreakpoints
 );
+
+export function getFirstBreakpointPosition(
+  state: State,
+  { line, sourceId }: SourceLocation
+) {
+  const positions = getBreakpointPositionsForSource(state, sourceId);
+  const source = getSource(state, sourceId);
+
+  if (!source || !positions) {
+    return;
+  }
+
+  return positions.find(
+    position => getSelectedLocation(position, source).line == line
+  );
+}

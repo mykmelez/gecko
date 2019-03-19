@@ -32,7 +32,7 @@ class Promise;
 #ifdef XP_WIN
 // If we're on windows, simulate including windows.h. This step will cause
 // compilation failure if NeedsWindowsUndef is not defined.
-#define NO_ERROR 0x1
+#  define NO_ERROR 0x1
 #endif
 #include "../TestCodeGenBinding.h"
 
@@ -1581,6 +1581,21 @@ class TestCEReactionsInterface : public nsISupports, public nsWrapperCache {
   void NamedGetter(const nsAString&, bool&, nsString&);
   void NamedSetter(const nsAString&, const nsAString&);
   void GetSupportedNames(nsTArray<nsString>&);
+};
+
+class TestAttributesOnTypes : public nsISupports, public nsWrapperCache {
+ public:
+  NS_DECL_ISUPPORTS
+
+  // We need a GetParentObject and GetDocGroup to make binding codegen happy
+  virtual nsISupports* GetParentObject();
+
+  void Foo(uint8_t arg);
+  void Bar(uint8_t arg);
+  void Baz(const nsAString& arg);
+  uint8_t SomeAttr();
+  void SetSomeAttr(uint8_t);
+  void ArgWithAttr(uint8_t arg1, const Optional<uint8_t>& arg2);
 };
 
 }  // namespace dom

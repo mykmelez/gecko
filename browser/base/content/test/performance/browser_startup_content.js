@@ -1,8 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* This test records which services, JS components and JS modules are loaded
- * when creating a new content process.
+/* This test records which services, JS components, frame scripts, process
+ * scripts, and JS modules are loaded when creating a new content process.
  *
  * If you made changes that cause this test to fail, it's likely because you
  * are loading more JS code during content process startup.
@@ -18,13 +18,12 @@
 const kDumpAllStacks = false;
 
 const whitelist = {
-  components: new Set([
-    "ContentProcessSingleton.js",
-  ]),
   modules: new Set([
     "chrome://mochikit/content/ShutdownLeaksCollector.jsm",
     "resource://specialpowers/specialpowers.js",
     "resource://specialpowers/specialpowersAPI.js",
+
+    "resource://gre/modules/ContentProcessSingleton.jsm",
 
     // General utilities
     "resource://gre/modules/AppConstants.jsm",
@@ -42,16 +41,11 @@ const whitelist = {
     "resource:///modules/sessionstore/ContentSessionStore.jsm",
     "resource://gre/modules/sessionstore/SessionHistory.jsm",
 
-    // Forms and passwords
-    "resource://formautofill/FormAutofill.jsm",
-    "resource://formautofill/FormAutofillContent.jsm",
-
     // Browser front-end
     "resource:///actors/AboutReaderChild.jsm",
     "resource:///actors/BrowserTabChild.jsm",
     "resource:///modules/ContentMetaHandler.jsm",
     "resource:///actors/LinkHandlerChild.jsm",
-    "resource:///actors/PageStyleChild.jsm",
     "resource:///actors/SearchTelemetryChild.jsm",
     "resource://gre/modules/ActorChild.jsm",
     "resource://gre/modules/ActorManagerChild.jsm",
@@ -68,17 +62,49 @@ const whitelist = {
     "resource://gre/modules/ExtensionUtils.jsm",
     "resource://gre/modules/MessageChannel.jsm",
   ]),
+  frameScripts: new Set([
+    // Test related
+    "resource://specialpowers/MozillaLogger.js",
+    "resource://specialpowers/specialpowersFrameScript.js",
+    "chrome://mochikit/content/shutdown-leaks-collector.js",
+    "chrome://mochikit/content/tests/SimpleTest/AsyncUtilsContent.js",
+    "chrome://mochikit/content/tests/BrowserTestUtils/content-utils.js",
+
+    // Browser front-end
+    "chrome://global/content/browser-content.js",
+
+    // Forms
+    "chrome://formautofill/content/FormAutofillFrameScript.js",
+
+    // Extensions
+    "resource://gre/modules/addons/Content.js",
+  ]),
+  processScripts: new Set([
+    "chrome://global/content/process-content.js",
+    "resource:///modules/ContentObservers.js",
+    "data:,ChromeUtils.import('resource://gre/modules/ExtensionProcessScript.jsm')",
+    "resource://devtools/client/jsonview/converter-observer.js",
+    "resource://gre/modules/WebRequestContent.js",
+  ]),
 };
 
 // Items on this list are allowed to be loaded but not
 // required, as opposed to items in the main whitelist,
 // which are all required.
 const intermittently_loaded_whitelist = {
-  components: new Set([
-    "nsAsyncShutdown.js",
-  ]),
   modules: new Set([
+    "resource://gre/modules/nsAsyncShutdown.jsm",
     "resource://gre/modules/sessionstore/Utils.jsm",
+
+    // Webcompat about:config front-end. This is presently nightly-only and
+    // part of a system add-on which may not load early enough for the test.
+    "resource://webcompat/AboutCompat.jsm",
+  ]),
+  frameScripts: new Set([]),
+  processScripts: new Set([
+    // Webcompat about:config front-end. This is presently nightly-only and
+    // part of a system add-on which may not load early enough for the test.
+    "resource://webcompat/aboutPageProcessScript.js",
   ]),
 };
 
@@ -104,7 +130,7 @@ add_task(async function() {
     /* eslint-env mozilla/frame-script */
     const Cm = Components.manager;
     Cm.QueryInterface(Ci.nsIServiceManager);
-    ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+    const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
     let collectStacks = AppConstants.NIGHTLY_BUILD || AppConstants.DEBUG;
     let components = {};
     for (let component of Cu.loadedComponents) {
@@ -129,6 +155,19 @@ add_task(async function() {
   } + ")()", false);
 
   let loadedInfo = await promise;
+
+  // Gather loaded frame scripts.
+  loadedInfo.frameScripts = {};
+  for (let [uri] of Services.mm.getDelayedFrameScripts()) {
+    loadedInfo.frameScripts[uri] = "";
+  }
+
+  // Gather loaded process scripts.
+  loadedInfo.processScripts = {};
+  for (let [uri] of Services.ppmm.getDelayedProcessScripts()) {
+    loadedInfo.processScripts[uri] = "";
+  }
+
   let loadedList = {};
 
   for (let scriptType in whitelist) {

@@ -6,9 +6,9 @@
 
 var EXPORTED_SYMBOLS = ["CustomizableUI"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   SearchWidgetTracker: "resource:///modules/SearchWidgetTracker.jsm",
@@ -1451,6 +1451,9 @@ var CustomizableUIInternal = {
     if (!aWidget) {
       throw new Error("buildWidget was passed a non-widget to build.");
     }
+    if (!aWidget.showInPrivateBrowsing && PrivateBrowsingUtils.isWindowPrivate(aDocument.defaultView)) {
+      return null;
+    }
 
     log.debug("Building " + aWidget.id + " of type " + aWidget.type);
 
@@ -1806,7 +1809,6 @@ var CustomizableUIInternal = {
       // that this was prevented, but we probably still want to close the panel.
       // If consumers don't want this to happen, they should specify the closemenu
       // attribute.
-
     } else if (aEvent.type != "command") { // mouse events:
       if (aEvent.defaultPrevented || aEvent.button != 0) {
         return;
@@ -2632,7 +2634,10 @@ var CustomizableUIInternal = {
 
   _resetUIState() {
     try {
-      gUIStateBeforeReset.drawInTitlebar = Services.prefs.getBoolPref(kPrefDrawInTitlebar);
+      // kPrefDrawInTitlebar may not be defined on Linux/Gtk+ which throws an exception
+      // and leads to whole test failure. Let's set a fallback default value to avoid that,
+      // both titlebar states are tested anyway and it's not important which state is tested first.
+      gUIStateBeforeReset.drawInTitlebar = Services.prefs.getBoolPref(kPrefDrawInTitlebar, false);
       gUIStateBeforeReset.extraDragSpace = Services.prefs.getBoolPref(kPrefExtraDragSpace);
       gUIStateBeforeReset.uiCustomizationState = Services.prefs.getCharPref(kPrefCustomizationState);
       gUIStateBeforeReset.uiDensity = Services.prefs.getIntPref(kPrefUIDensity);
@@ -4024,8 +4029,7 @@ function WidgetGroupWrapper(aWidget) {
     }
 
     let instance = aWidget.instances.get(aWindow.document);
-    if (!instance &&
-        (aWidget.showInPrivateBrowsing || !PrivateBrowsingUtils.isWindowPrivate(aWindow))) {
+    if (!instance) {
       instance = CustomizableUIInternal.buildWidget(aWindow.document,
                                                     aWidget);
     }
@@ -4283,6 +4287,7 @@ OverflowableToolbar.prototype = {
     let chevronId = this._toolbar.getAttribute("overflowbutton");
     this._chevron = doc.getElementById(chevronId);
     this._chevron.addEventListener("mousedown", this);
+    this._chevron.addEventListener("keypress", this);
     this._chevron.addEventListener("dragover", this);
     this._chevron.addEventListener("dragend", this);
 
@@ -4319,7 +4324,8 @@ OverflowableToolbar.prototype = {
     window.removeEventListener("resize", this);
     window.gNavToolbox.removeEventListener("customizationstarting", this);
     window.gNavToolbox.removeEventListener("aftercustomization", this);
-    this._chevron.removeEventListener("command", this);
+    this._chevron.removeEventListener("mousedown", this);
+    this._chevron.removeEventListener("keypress", this);
     this._chevron.removeEventListener("dragover", this);
     this._chevron.removeEventListener("dragend", this);
     this._panel.removeEventListener("popuphiding", this);
@@ -4357,6 +4363,12 @@ OverflowableToolbar.prototype = {
           this._onClickChevron(aEvent);
         } else {
           PanelMultiView.hidePopup(this._panel);
+        }
+        break;
+      case "keypress":
+        if (aEvent.target == this._chevron &&
+            (aEvent.key == " " || aEvent.key == "Enter")) {
+          this._onClickChevron(aEvent);
         }
         break;
       case "customizationstarting":

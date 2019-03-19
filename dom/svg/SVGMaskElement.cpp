@@ -6,8 +6,8 @@
 
 #include "mozilla/dom/SVGMaskElement.h"
 
-#include "nsCOMPtr.h"
 #include "nsGkAtoms.h"
+#include "mozilla/AlreadyAddRefed.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/dom/SVGLengthBinding.h"
 #include "mozilla/dom/SVGMaskElementBinding.h"
@@ -84,7 +84,8 @@ already_AddRefed<SVGAnimatedLength> SVGMaskElement::Height() {
 //----------------------------------------------------------------------
 // SVGElement methods
 
-/* virtual */ bool SVGMaskElement::HasValidDimensions() const {
+/* virtual */
+bool SVGMaskElement::HasValidDimensions() const {
   return (!mLengthAttributes[ATTR_WIDTH].IsExplicitlySet() ||
           mLengthAttributes[ATTR_WIDTH].GetAnimValInSpecifiedUnits() > 0) &&
          (!mLengthAttributes[ATTR_HEIGHT].IsExplicitlySet() ||

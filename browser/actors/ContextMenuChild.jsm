@@ -8,10 +8,10 @@
 
 var EXPORTED_SYMBOLS = ["ContextMenuChild"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-ChromeUtils.import("resource://gre/modules/ActorChild.jsm");
+const {ActorChild} = ChromeUtils.import("resource://gre/modules/ActorChild.jsm");
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["URL"]);
 
@@ -94,7 +94,12 @@ const messageListeners = {
             if (this.content.document.fullscreenEnabled) {
               media.requestFullscreen();
             }
-
+            break;
+          case "pictureinpicture":
+            let event = new this.content.CustomEvent("MozTogglePictureInPicture", {
+              bubbles: true,
+            }, this.content);
+            media.dispatchEvent(event);
             break;
         }
       }
@@ -701,6 +706,16 @@ class ContextMenuChild extends ActorChild {
       return;
     }
 
+    const isAboutDevtoolsToolbox =
+          this.content.document.documentURI.startsWith("about:devtools-toolbox");
+    const editFlags = SpellCheckHelper.isEditable(node, this.content);
+
+    if (isAboutDevtoolsToolbox && (editFlags & SpellCheckHelper.TEXTINPUT) === 0) {
+      // Don't display for about:devtools-toolbox page unless the source was text input.
+      context.shouldDisplay = false;
+      return;
+    }
+
     // Initialize context to be sent to nsContextMenu
     // Keep this consistent with the similar code in nsContextMenu's setContext
     context.bgImageURL          = "";
@@ -751,6 +766,9 @@ class ContextMenuChild extends ActorChild {
     context.target = node;
 
     context.principal = context.target.ownerDocument.nodePrincipal;
+    // Bug 965637, query the CSP from the doc instead of the Principal
+    context.csp = E10SUtils.serializeCSP(context.target.ownerDocument.nodePrincipal.csp);
+
     context.frameOuterWindowID = WebNavigationFrames.getFrameId(context.target.ownerGlobal);
 
     // Check if we are in a synthetic document (stand alone image, video, etc.).
@@ -759,7 +777,6 @@ class ContextMenuChild extends ActorChild {
     context.shouldInitInlineSpellCheckerUINoChildren = false;
     context.shouldInitInlineSpellCheckerUIWithChildren = false;
 
-    let editFlags = SpellCheckHelper.isEditable(context.target, this.content);
     this._setContextForNodesNoChildren(editFlags);
     this._setContextForNodesWithChildren(editFlags);
 
@@ -769,6 +786,16 @@ class ContextMenuChild extends ActorChild {
       // The timestamp is used to verify that the target wasn't changed since the observed menu event.
       timeStamp: context.timeStamp,
     };
+
+    if (isAboutDevtoolsToolbox) {
+      // Setup the menu items on text input in about:devtools-toolbox.
+      context.inAboutDevtoolsToolbox = true;
+      context.canSpellCheck = false;
+      context.inTabBrowser = false;
+      context.inFrame = false;
+      context.inSrcdocFrame = false;
+      context.onSpellcheckable = false;
+    }
   }
 
   /**
@@ -935,7 +962,6 @@ class ContextMenuChild extends ActorChild {
             (elem instanceof this.content.HTMLAreaElement && elem.href) ||
             elem instanceof this.content.HTMLLinkElement ||
             elem.getAttributeNS(XLINK_NS, "type") == "simple")) {
-
           // Target is a link or a descendant of a link.
           context.onLink = true;
 

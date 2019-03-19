@@ -17,25 +17,21 @@ namespace net {
 class UrlClassifierFeatureLoginReputation final
     : public UrlClassifierFeatureBase {
  public:
+  static const char* Name();
+
   static void MaybeShutdown();
 
   static nsIUrlClassifierFeature* MaybeGetOrCreate();
 
-  NS_IMETHOD
-  GetTables(nsIUrlClassifierFeature::listType aListType,
-            nsTArray<nsCString>& aResult) override;
-
-  NS_IMETHOD
-  HasTable(const nsACString& aTable,
-           nsIUrlClassifierFeature::listType aListType, bool* aResult) override;
-
-  NS_IMETHOD
-  HasHostInPreferences(const nsACString& aHost,
-                       nsIUrlClassifierFeature::listType aListType,
-                       nsACString& aPrefTableName, bool* aResult) override;
+  static already_AddRefed<nsIUrlClassifierFeature> GetIfNameMatches(
+      const nsACString& aName);
 
   NS_IMETHOD ProcessChannel(nsIChannel* aChannel, const nsACString& aList,
                             bool* aShouldContinue) override;
+
+  NS_IMETHOD GetURIByListType(nsIChannel* aChannel,
+                              nsIUrlClassifierFeature::listType aListType,
+                              nsIURI** aURI) override;
 
  private:
   UrlClassifierFeatureLoginReputation();

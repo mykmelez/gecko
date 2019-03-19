@@ -267,7 +267,7 @@ this.DateTimeInputBaseImplWidget = class {
 
     // Used to store the non-formatted value, cleared when value is
     // cleared.
-    // nsDateTimeControlFrame::HasBadInput() will read this to decide
+    // DateTimeInputTypeBase::HasBadInput() will read this to decide
     // if the input has value.
     field.setAttribute("value", "");
 
@@ -308,7 +308,7 @@ this.DateTimeInputBaseImplWidget = class {
 
   updateResetButtonVisibility() {
     if (this.isAnyFieldAvailable(false)) {
-      this.mResetButton.style.visibility = "visible";
+      this.mResetButton.style.visibility = "";
     } else {
       this.mResetButton.style.visibility = "hidden";
     }
@@ -1504,7 +1504,7 @@ this.TimeInputImplWidget = class extends DateTimeInputBaseImplWidget {
 
       let n = Number(buffer);
       let max = targetField.getAttribute("max");
-      let maxLength = targetField.getAttribute("maxLength");
+      let maxLength = targetField.getAttribute("maxlength");
       if (buffer.length >= maxLength || n * 10 > max) {
         buffer = "";
         this.advanceToNextField();

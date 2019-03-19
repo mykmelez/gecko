@@ -18,11 +18,10 @@
 #include "mozilla/MozPromise.h"
 #include "mozilla/Vector.h"
 #if defined(OS_WIN)
-#include "mozilla/ipc/Neutering.h"
+#  include "mozilla/ipc/Neutering.h"
 #endif  // defined(OS_WIN)
 #include "mozilla/ipc/Transport.h"
 #include "MessageLink.h"
-#include "nsILabelableRunnable.h"
 #include "nsThreadUtils.h"
 
 #include <deque>
@@ -313,6 +312,11 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
     sIsPumpingMessages = aIsPumping;
   }
 
+  /**
+   * Does this MessageChannel cross process boundaries?
+   */
+  bool IsCrossProcess() const { return mIsCrossProcess; }
+
 #ifdef OS_WIN
   struct MOZ_STACK_CLASS SyncStackFrame {
     SyncStackFrame(MessageChannel* channel, bool interrupt);
@@ -353,10 +357,10 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
 
  private:
   void SpinInternalEventLoop();
-#if defined(ACCESSIBILITY)
+#  if defined(ACCESSIBILITY)
   bool WaitForSyncNotifyWithA11yReentry();
-#endif  // defined(ACCESSIBILITY)
-#endif  // defined(OS_WIN)
+#  endif  // defined(ACCESSIBILITY)
+#endif    // defined(OS_WIN)
 
  private:
   void CommonThreadOpenInit(MessageChannel* aTargetChan, Side aSide);
@@ -560,8 +564,7 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
  private:
   class MessageTask : public CancelableRunnable,
                       public LinkedListElement<RefPtr<MessageTask>>,
-                      public nsIRunnablePriority,
-                      public nsILabelableRunnable {
+                      public nsIRunnablePriority {
    public:
     explicit MessageTask(MessageChannel* aChannel, Message&& aMessage);
 
@@ -577,8 +580,6 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
 
     Message& Msg() { return mMessage; }
     const Message& Msg() const { return mMessage; }
-
-    bool GetAffectedSchedulerGroups(SchedulerGroupSet& aGroups) override;
 
    private:
     MessageTask() = delete;

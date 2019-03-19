@@ -209,6 +209,7 @@ class SmartTrace extends Component {
           : onViewSourceInDebugger || onViewSource;
 
         viewSource({
+          sourceId: location.sourceId,
           url: location.filename,
           line: location.line,
           column: location.column,
@@ -221,6 +222,7 @@ class SmartTrace extends Component {
       disableContextMenu: true,
       frameworkGroupingOn: true,
       displayFullUrl: !this.state || !this.state.isSourceMapped,
+      selectable: true,
     });
   }
 }

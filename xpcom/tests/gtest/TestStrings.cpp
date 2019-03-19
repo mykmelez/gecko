@@ -31,8 +31,8 @@
 
 // Disable the C++ 2a warning. See bug #1509926
 #if defined(__clang__) && (__clang_major__ >= 6)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wc++2a-compat"
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wc++2a-compat"
 #endif
 
 namespace TestStrings {
@@ -468,7 +468,7 @@ class Strings : public ::testing::Test {
   nsCString mViThousandUtf8;
 };
 
-void test_assign_helper(const nsACString& in, nsACString& _retval) {
+static void test_assign_helper(const nsACString& in, nsACString& _retval) {
   _retval = in;
 }
 
@@ -2346,5 +2346,5 @@ CONVERSION_BENCH(PerfUTF8toUTF16VIThousand, CopyUTF8toUTF16, mViThousandUtf8,
 }  // namespace TestStrings
 
 #if defined(__clang__) && (__clang_major__ >= 6)
-#pragma clang diagnostic pop
+#  pragma clang diagnostic pop
 #endif

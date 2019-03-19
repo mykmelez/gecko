@@ -20,11 +20,12 @@ use freetype::freetype::{FT_LOAD_NO_BITMAP, FT_LOAD_NO_HINTING, FT_LOAD_VERTICAL
 use freetype::freetype::{FT_FACE_FLAG_SCALABLE, FT_FACE_FLAG_FIXED_SIZES};
 use freetype::freetype::{FT_FACE_FLAG_MULTIPLE_MASTERS};
 use freetype::succeeded;
-use glyph_rasterizer::{FontInstance, GlyphFormat, GlyphKey, GlyphRasterResult, RasterizedGlyph};
+use glyph_rasterizer::{FontInstance, GlyphFormat, GlyphKey};
+use glyph_rasterizer::{GlyphRasterError, GlyphRasterResult, RasterizedGlyph};
 #[cfg(feature = "pathfinder")]
 use glyph_rasterizer::NativeFontHandleWrapper;
 use internal_types::{FastHashMap, ResourceCacheError};
-#[cfg(not(target_os = "android"))]
+#[cfg(any(not(target_os = "android"), feature = "no_static_freetype"))]
 use libc::{dlsym, RTLD_DEFAULT};
 use libc::free;
 #[cfg(feature = "pathfinder")]
@@ -76,7 +77,7 @@ pub fn unimplemented(error: FT_Error) -> bool {
 }
 
 // Use dlsym to check for symbols. If not available. just return an unimplemented error.
-#[cfg(not(target_os = "android"))]
+#[cfg(any(not(target_os = "android"), feature = "no_static_freetype"))]
 macro_rules! ft_dyn_fn {
     ($func_name:ident($($arg_name:ident:$arg_type:ty),*) -> FT_Error) => {
         #[allow(non_snake_case)]
@@ -85,7 +86,7 @@ macro_rules! ft_dyn_fn {
                 FT_Err_Unimplemented_Feature as FT_Error
             }
             lazy_static! {
-                static ref func: unsafe extern "C" fn($($arg_type),*) -> FT_Error = {
+                static ref FUNC: unsafe extern "C" fn($($arg_type),*) -> FT_Error = {
                     unsafe {
                         let cname = CString::new(stringify!($func_name)).unwrap();
                         let ptr = dlsym(RTLD_DEFAULT, cname.as_ptr());
@@ -93,13 +94,13 @@ macro_rules! ft_dyn_fn {
                     }
                 };
             }
-            (*func)($($arg_name),*)
+            (*FUNC)($($arg_name),*)
         }
     }
 }
 
 // On Android, just statically link in the symbols...
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", not(feature = "no_static_freetype")))]
 macro_rules! ft_dyn_fn {
     ($($proto:tt)+) => { extern "C" { fn $($proto)+; } }
 }
@@ -318,7 +319,8 @@ impl FontContext {
 
     pub fn add_native_font(&mut self, font_key: &FontKey, native_font_handle: NativeFontHandle) {
         if !self.faces.contains_key(&font_key) {
-            let file = FontFile::Pathname(CString::new(native_font_handle.pathname).unwrap());
+            let cstr = CString::new(native_font_handle.path.as_os_str().to_str().unwrap()).unwrap();
+            let file = FontFile::Pathname(cstr);
             let index = native_font_handle.index;
             if let Some(face) = new_ft_face(font_key, self.lib, &file, index) {
                 self.faces.insert(*font_key, FontFace { file, index, face, mm_var: ptr::null_mut() });
@@ -655,7 +657,7 @@ impl FontContext {
         key: &GlyphKey,
     ) -> Option<GlyphDimensions> {
         let slot = self.load_glyph(font, key);
-        slot.and_then(|(slot, scale)| self.get_glyph_dimensions_impl(slot, font, key, scale, true))
+        slot.and_then(|(slot, scale)| self.get_glyph_dimensions_impl(slot, &font, key, scale, true))
     }
 
     fn choose_bitmap_size(&self, face: FT_Face, requested_size: f64) -> FT_Error {
@@ -754,23 +756,18 @@ impl FontContext {
 
     #[cfg(not(feature = "pathfinder"))]
     pub fn rasterize_glyph(&mut self, font: &FontInstance, key: &GlyphKey) -> GlyphRasterResult {
-        let (slot, scale) = match self.load_glyph(font, key) {
-            Some(val) => val,
-            None => return GlyphRasterResult::LoadFailed,
-        };
+        let (slot, scale) = self.load_glyph(font, key).ok_or(GlyphRasterError::LoadFailed)?;
 
         // Get dimensions of the glyph, to see if we need to rasterize it.
         // Don't apply scaling to the dimensions, as the glyph cache needs to know the actual
         // footprint of the glyph.
-        let dimensions = match self.get_glyph_dimensions_impl(slot, font, key, scale, false) {
-            Some(val) => val,
-            None => return GlyphRasterResult::LoadFailed,
-        };
+        let dimensions = self.get_glyph_dimensions_impl(slot, font, key, scale, false)
+                             .ok_or(GlyphRasterError::LoadFailed)?;
         let GlyphDimensions { mut left, mut top, width, height, .. } = dimensions;
 
         // For spaces and other non-printable characters, early out.
         if width == 0 || height == 0 {
-            return GlyphRasterResult::LoadFailed;
+            return Err(GlyphRasterError::LoadFailed);
         }
 
         let format = unsafe { (*slot).format };
@@ -778,13 +775,13 @@ impl FontContext {
             FT_Glyph_Format::FT_GLYPH_FORMAT_BITMAP => {}
             FT_Glyph_Format::FT_GLYPH_FORMAT_OUTLINE => {
                 if !self.rasterize_glyph_outline(slot, font, key, scale) {
-                    return GlyphRasterResult::LoadFailed;
+                    return Err(GlyphRasterError::LoadFailed);
                 }
             }
             _ => {
                 error!("Unsupported format");
                 debug!("format={:?}", format);
-                return GlyphRasterResult::LoadFailed;
+                return Err(GlyphRasterError::LoadFailed);
             }
         };
 
@@ -943,7 +940,7 @@ impl FontContext {
             _ => font.get_alpha_glyph_format(),
         };
 
-        GlyphRasterResult::Bitmap(RasterizedGlyph {
+        Ok(RasterizedGlyph {
             left: left as f32,
             top: top as f32,
             width: actual_width as i32,
@@ -969,6 +966,7 @@ impl Drop for FontContext {
 impl<'a> Into<pf_freetype::FontDescriptor> for NativeFontHandleWrapper<'a> {
     fn into(self) -> pf_freetype::FontDescriptor {
         let NativeFontHandleWrapper(font_handle) = self;
-        pf_freetype::FontDescriptor::new(font_handle.pathname.clone().into(), font_handle.index)
+        let str = font_handle.path.as_os_str().to_str().unwrap();
+        pf_freetype::FontDescriptor::new(str.into(), font_handle.index)
     }
 }

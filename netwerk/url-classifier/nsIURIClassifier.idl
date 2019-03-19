@@ -63,10 +63,6 @@ interface nsIURIClassifier : nsISupports
    *        The event target should be tied to Docgroup/Tabgroup by
    *        using EventTargetFor
    *
-   * @param aTrackingProtectionEnabled
-   *        Whether or not to classify the given URI against tracking
-   *        protection lists
-   *
    * @param aCallback
    *        The URI classifier will call this callback when the URI has been
    *        classified.
@@ -78,29 +74,7 @@ interface nsIURIClassifier : nsISupports
    */
   boolean classify(in nsIPrincipal aPrincipal,
                    in nsIEventTarget aEventTarget,
-                   in boolean aTrackingProtectionEnabled,
                    in nsIURIClassifierCallback aCallback);
-
-  /**
-   * Synchronously classify a URI with a comma-separated string
-   * containing the given tables. This does not make network requests.
-   * The result is an array of table names that match.
-   */
-  [noscript] StringArrayRef classifyLocalWithTables(in nsIURI aURI, in ACString aTables);
-
-  /**
-   * Asynchronously classify a URI with a comma-separated string
-   * containing the given tables. This does not make network requests.
-   * The callback does NOT totally follow nsIURIClassifierCallback's
-   * semantics described above. Only |aList| will be meaningful, which
-   * is a comma separated list of table names. (same as what classifyLocal
-   * returns.)
-   */
-  void asyncClassifyLocalWithTables(in nsIURI aURI,
-                                    in ACString aTables,
-                                    in Array<ACString> aExtraTablesByPrefs,
-                                    in Array<ACString> aExtraEntriesByPrefs,
-                                    in nsIURIClassifierCallback aCallback);
 
   /**
    * Asynchronously classify a URI with list of features. This does not make
@@ -112,10 +86,22 @@ interface nsIURIClassifier : nsISupports
                                       in nsIUrlClassifierFeatureCallback aCallback);
 
   /**
-   * Same as above, but returns a comma separated list of table names.
-   * This is an internal interface used only for testing purposes.
+   * Returns a feature named aFeatureName.
    */
-  ACString classifyLocal(in nsIURI aURI, in ACString aTables);
+  nsIUrlClassifierFeature getFeatureByName(in ACString aFeatureName);
+
+  /**
+   * Returns all the feature names.
+   */
+  Array<ACString> getFeatureNames();
+
+  /**
+   * Create a new feature with a list of tables. This method is just for
+   * testing! Don't use it elsewhere.
+   */
+  nsIUrlClassifierFeature createFeatureWithTables(in ACString aName,
+                                                  in Array<ACString> aBlacklistTables,
+                                                  in Array<ACString> aWhitelistTables);
 
   /**
    * Report to the provider that a Safe Browsing warning was shown.

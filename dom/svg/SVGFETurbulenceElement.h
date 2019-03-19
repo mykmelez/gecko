@@ -10,8 +10,8 @@
 #include "SVGEnum.h"
 #include "SVGFilters.h"
 #include "nsSVGNumber2.h"
-#include "nsSVGInteger.h"
-#include "nsSVGString.h"
+#include "SVGInteger.h"
+#include "SVGString.h"
 
 nsresult NS_NewSVGFETurbulenceElement(
     nsIContent** aResult, already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
@@ -42,7 +42,7 @@ class SVGFETurbulenceElement : public SVGFETurbulenceElementBase {
       nsTArray<RefPtr<SourceSurface>>& aInputImages) override;
   virtual bool AttributeAffectsRendering(int32_t aNameSpaceID,
                                          nsAtom* aAttribute) const override;
-  virtual nsSVGString& GetResultImageName() override {
+  virtual SVGString& GetResultImageName() override {
     return mStringAttributes[RESULT];
   }
 
@@ -68,11 +68,11 @@ class SVGFETurbulenceElement : public SVGFETurbulenceElementBase {
   static NumberInfo sNumberInfo[1];
 
   enum { BASE_FREQ };
-  nsSVGNumberPair mNumberPairAttributes[1];
+  SVGNumberPair mNumberPairAttributes[1];
   static NumberPairInfo sNumberPairInfo[1];
 
   enum { OCTAVES };
-  nsSVGInteger mIntegerAttributes[1];
+  SVGInteger mIntegerAttributes[1];
   static IntegerInfo sIntegerInfo[1];
 
   enum { TYPE, STITCHTILES };
@@ -82,7 +82,7 @@ class SVGFETurbulenceElement : public SVGFETurbulenceElementBase {
   static EnumInfo sEnumInfo[2];
 
   enum { RESULT };
-  nsSVGString mStringAttributes[1];
+  SVGString mStringAttributes[1];
   static StringInfo sStringInfo[1];
 };
 

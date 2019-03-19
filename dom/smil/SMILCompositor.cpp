@@ -9,7 +9,7 @@
 #include "nsComputedDOMStyle.h"
 #include "nsCSSProps.h"
 #include "nsHashKeys.h"
-#include "nsSMILCSSProperty.h"
+#include "SMILCSSProperty.h"
 
 namespace mozilla {
 
@@ -18,7 +18,8 @@ bool SMILCompositor::KeyEquals(KeyTypePointer aKey) const {
   return aKey && aKey->Equals(mKey);
 }
 
-/*static*/ PLDHashNumber SMILCompositor::HashKey(KeyTypePointer aKey) {
+/*static*/
+PLDHashNumber SMILCompositor::HashKey(KeyTypePointer aKey) {
   // Combine the 3 values into one numeric value, which will be hashed.
   // NOTE: We right-shift one of the pointers by 2 to get some randomness in
   // its 2 lowest-order bits. (Those shifted-off bits will always be 0 since
@@ -46,16 +47,16 @@ void SMILCompositor::ComposeAttribute(bool& aMightHavePendingStyleUpdates) {
   if (!mKey.mElement) return;
 
   // If we might need to resolve base styles, grab a suitable ComputedStyle
-  // for initializing our nsISMILAttr with.
+  // for initializing our SMILAttr with.
   RefPtr<ComputedStyle> baseComputedStyle;
   if (MightNeedBaseStyle()) {
     baseComputedStyle = nsComputedDOMStyle::GetUnanimatedComputedStyleNoFlush(
         mKey.mElement, nullptr);
   }
 
-  // FIRST: Get the nsISMILAttr (to grab base value from, and to eventually
+  // FIRST: Get the SMILAttr (to grab base value from, and to eventually
   // give animated value to)
-  UniquePtr<nsISMILAttr> smilAttr = CreateSMILAttr(baseComputedStyle);
+  UniquePtr<SMILAttr> smilAttr = CreateSMILAttr(baseComputedStyle);
   if (!smilAttr) {
     // Target attribute not found (or, out of memory)
     return;
@@ -78,7 +79,7 @@ void SMILCompositor::ComposeAttribute(bool& aMightHavePendingStyleUpdates) {
   uint32_t firstFuncToCompose = GetFirstFuncToAffectSandwich();
 
   // FOURTH: Get & cache base value
-  nsSMILValue sandwichResultValue;
+  SMILValue sandwichResultValue;
   if (!mAnimationFunctions[firstFuncToCompose]->WillReplace()) {
     sandwichResultValue = smilAttr->GetBaseValue();
   }
@@ -102,14 +103,14 @@ void SMILCompositor::ComposeAttribute(bool& aMightHavePendingStyleUpdates) {
   // SIXTH: Set the animated value to the final composited result.
   nsresult rv = smilAttr->SetAnimValue(sandwichResultValue);
   if (NS_FAILED(rv)) {
-    NS_WARNING("nsISMILAttr::SetAnimValue failed");
+    NS_WARNING("SMILAttr::SetAnimValue failed");
   }
 }
 
 void SMILCompositor::ClearAnimationEffects() {
   if (!mKey.mElement || !mKey.mAttributeName) return;
 
-  UniquePtr<nsISMILAttr> smilAttr = CreateSMILAttr(nullptr);
+  UniquePtr<SMILAttr> smilAttr = CreateSMILAttr(nullptr);
   if (!smilAttr) {
     // Target attribute not found (or, out of memory)
     return;
@@ -119,13 +120,13 @@ void SMILCompositor::ClearAnimationEffects() {
 
 // Protected Helper Functions
 // --------------------------
-UniquePtr<nsISMILAttr> SMILCompositor::CreateSMILAttr(
+UniquePtr<SMILAttr> SMILCompositor::CreateSMILAttr(
     ComputedStyle* aBaseComputedStyle) {
   nsCSSPropertyID propID = GetCSSPropertyToAnimate();
 
   if (propID != eCSSProperty_UNKNOWN) {
-    return MakeUnique<nsSMILCSSProperty>(propID, mKey.mElement.get(),
-                                         aBaseComputedStyle);
+    return MakeUnique<SMILCSSProperty>(propID, mKey.mElement.get(),
+                                       aBaseComputedStyle);
   }
 
   return mKey.mElement->GetAnimatedAttr(mKey.mAttributeNamespaceID,
@@ -140,7 +141,7 @@ nsCSSPropertyID SMILCompositor::GetCSSPropertyToAnimate() const {
   nsCSSPropertyID propID =
       nsCSSProps::LookupProperty(nsDependentAtomString(mKey.mAttributeName));
 
-  if (!nsSMILCSSProperty::IsPropertyAnimatable(propID)) {
+  if (!SMILCSSProperty::IsPropertyAnimatable(propID)) {
     return eCSSProperty_UNKNOWN;
   }
 
@@ -224,7 +225,7 @@ uint32_t SMILCompositor::GetFirstFuncToAffectSandwich() {
   return i;
 }
 
-void SMILCompositor::UpdateCachedBaseValue(const nsSMILValue& aBaseValue) {
+void SMILCompositor::UpdateCachedBaseValue(const SMILValue& aBaseValue) {
   if (mCachedBaseValue != aBaseValue) {
     // Base value has changed since last sample.
     mCachedBaseValue = aBaseValue;

@@ -5,17 +5,18 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "SVGMotionSMILAnimationFunction.h"
+
 #include "mozilla/dom/SVGAnimationElement.h"
-#include "mozilla/dom/SVGPathElement.h"  // for nsSVGPathList
+#include "mozilla/dom/SVGPathElement.h"
 #include "mozilla/dom/SVGMPathElement.h"
 #include "mozilla/gfx/2D.h"
+#include "mozilla/SMILParserUtils.h"
 #include "nsAttrValue.h"
 #include "nsAttrValueInlines.h"
-#include "nsSMILParserUtils.h"
-#include "SVGAngle.h"
-#include "SVGPathDataParser.h"
-#include "SVGMotionSMILType.h"
+#include "SVGOrient.h"
 #include "SVGMotionSMILPathUtils.h"
+#include "SVGMotionSMILType.h"
+#include "SVGPathDataParser.h"
 
 using namespace mozilla::dom;
 using namespace mozilla::dom::SVGAngle_Binding;
@@ -103,14 +104,14 @@ bool SVGMotionSMILAnimationFunction::UnsetAttr(nsAtom* aAttribute) {
   return true;
 }
 
-SMILAnimationFunction::nsSMILCalcMode
+SMILAnimationFunction::SMILCalcMode
 SVGMotionSMILAnimationFunction::GetCalcMode() const {
   const nsAttrValue* value = GetAttr(nsGkAtoms::calcMode);
   if (!value) {
     return CALC_PACED;  // animateMotion defaults to calcMode="paced"
   }
 
-  return nsSMILCalcMode(value->GetEnumValue());
+  return SMILCalcMode(value->GetEnumValue());
 }
 
 //----------------------------------------------------------------------
@@ -154,7 +155,7 @@ void SVGMotionSMILAnimationFunction::RebuildPathAndVerticesFromBasicAttrs(
     const nsAString& valuesStr = GetAttr(nsGkAtoms::values)->GetStringValue();
     SVGMotionSMILPathUtils::MotionValueParser parser(&pathGenerator,
                                                      &mPathVertices);
-    success = nsSMILParserUtils::ParseValuesGeneric(valuesStr, parser);
+    success = SMILParserUtils::ParseValuesGeneric(valuesStr, parser);
   } else if (HasAttr(nsGkAtoms::to) || HasAttr(nsGkAtoms::by)) {
     // Apply 'from' value (or a dummy 0,0 'from' value)
     if (HasAttr(nsGkAtoms::from)) {
@@ -273,7 +274,7 @@ void SVGMotionSMILAnimationFunction::RebuildPathAndVertices(
 
 bool SVGMotionSMILAnimationFunction::GenerateValuesForPathAndPoints(
     Path* aPath, bool aIsKeyPoints, FallibleTArray<double>& aPointDistances,
-    nsSMILValueArray& aResult) {
+    SMILValueArray& aResult) {
   MOZ_ASSERT(aResult.IsEmpty(), "outparam is non-empty");
 
   // If we're using "keyPoints" as our list of input distances, then we need
@@ -291,8 +292,8 @@ bool SVGMotionSMILAnimationFunction::GenerateValuesForPathAndPoints(
   return true;
 }
 
-nsresult SVGMotionSMILAnimationFunction::GetValues(const nsISMILAttr& aSMILAttr,
-                                                   nsSMILValueArray& aResult) {
+nsresult SVGMotionSMILAnimationFunction::GetValues(const SMILAttr& aSMILAttr,
+                                                   SMILValueArray& aResult) {
   if (mIsPathStale) {
     RebuildPathAndVertices(aSMILAttr.GetTargetNode());
   }
@@ -305,7 +306,7 @@ nsresult SVGMotionSMILAnimationFunction::GetValues(const nsISMILAttr& aSMILAttr,
   }
   MOZ_ASSERT(!mPathVertices.IsEmpty(), "have a path but no vertices");
 
-  // Now: Make the actual list of nsSMILValues (using keyPoints, if set)
+  // Now: Make the actual list of SMILValues (using keyPoints, if set)
   bool isUsingKeyPoints = !mKeyPoints.IsEmpty();
   bool success = GenerateValuesForPathAndPoints(
       mPath, isUsingKeyPoints, isUsingKeyPoints ? mKeyPoints : mPathVertices,
@@ -362,8 +363,8 @@ nsresult SVGMotionSMILAnimationFunction::SetKeyPoints(
 
   mHasChanged = true;
 
-  if (!nsSMILParserUtils::ParseSemicolonDelimitedProgressList(aKeyPoints, false,
-                                                              mKeyPoints)) {
+  if (!SMILParserUtils::ParseSemicolonDelimitedProgressList(aKeyPoints, false,
+                                                            mKeyPoints)) {
     mKeyPoints.Clear();
     return NS_ERROR_FAILURE;
   }
@@ -390,7 +391,7 @@ nsresult SVGMotionSMILAnimationFunction::SetRotate(const nsAString& aRotate,
     mRotateType = eRotateType_Explicit;
 
     uint16_t angleUnit;
-    if (!SVGAngle::GetValueFromString(aRotate, mRotateAngle, &angleUnit)) {
+    if (!SVGOrient::GetValueFromString(aRotate, mRotateAngle, &angleUnit)) {
       mRotateAngle = 0.0f;  // set default rotate angle
       // XXX report to console?
       return NS_ERROR_DOM_SYNTAX_ERR;
@@ -398,8 +399,8 @@ nsresult SVGMotionSMILAnimationFunction::SetRotate(const nsAString& aRotate,
 
     // Convert to radian units, if we're not already in radians.
     if (angleUnit != SVG_ANGLETYPE_RAD) {
-      mRotateAngle *= SVGAngle::GetDegreesPerUnit(angleUnit) /
-                      SVGAngle::GetDegreesPerUnit(SVG_ANGLETYPE_RAD);
+      mRotateAngle *= SVGOrient::GetDegreesPerUnit(angleUnit) /
+                      SVGOrient::GetDegreesPerUnit(SVG_ANGLETYPE_RAD);
     }
   }
   return NS_OK;

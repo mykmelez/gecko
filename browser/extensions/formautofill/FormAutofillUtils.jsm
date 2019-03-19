@@ -33,9 +33,9 @@ const SECTION_TYPES = {
 // attacks that fill the user's hard drive(s).
 const MAX_FIELD_VALUE_LENGTH = 200;
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://formautofill/FormAutofill.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {FormAutofill} = ChromeUtils.import("resource://formautofill/FormAutofill.jsm");
 ChromeUtils.defineModuleGetter(this, "CreditCard",
   "resource://gre/modules/CreditCard.jsm");
 
@@ -893,10 +893,24 @@ this.FormAutofillUtils = {
    *         }
    */
   getFormFormat(country) {
-    const dataset = this.getCountryAddressData(country);
+    let dataset = this.getCountryAddressData(country);
+    // We hit a country fallback in `getCountryAddressRawData` but it's not relevant here.
+    if (country != dataset.key) {
+      // Use a sparse object so the below default values take effect.
+      dataset = {
+        /**
+         * Even though data/ZZ only has address-level2, include the other levels
+         * in case they are needed for unknown countries. Users can leave the
+         * unnecessary fields blank which is better than forcing users to enter
+         * the data in incorrect fields.
+         */
+        fmt: "%N%n%O%n%A%n%C %S %Z",
+      };
+    }
     return {
       // When particular values are missing for a country, the
-      // data/ZZ value should be used instead.
+      // data/ZZ value should be used instead:
+      // https://chromium-i18n.appspot.com/ssl-aggregate-address/data/ZZ
       addressLevel3Label: dataset.sublocality_name_type || "suburb",
       addressLevel2Label: dataset.locality_name_type || "city",
       addressLevel1Label: dataset.state_name_type || "province",
@@ -950,7 +964,7 @@ this.FormAutofillUtils = {
 };
 
 this.log = null;
-this.FormAutofill.defineLazyLogGetter(this, EXPORTED_SYMBOLS[0]);
+FormAutofill.defineLazyLogGetter(this, EXPORTED_SYMBOLS[0]);
 
 XPCOMUtils.defineLazyGetter(FormAutofillUtils, "stringBundle", function() {
   return Services.strings.createBundle("chrome://formautofill/locale/formautofill.properties");

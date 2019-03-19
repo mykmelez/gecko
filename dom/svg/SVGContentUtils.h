@@ -13,15 +13,15 @@
 #include "mozilla/gfx/2D.h"  // for StrokeOptions
 #include "mozilla/gfx/Matrix.h"
 #include "mozilla/RangedPtr.h"
+#include "nsStyleCoord.h"
 #include "nsError.h"
 #include "nsStringFwd.h"
 #include "gfx2DGlue.h"
 
 class nsIContent;
-class nsIDocument;
+
 class nsIFrame;
 class nsPresContext;
-class nsStyleCoord;
 
 namespace mozilla {
 class ComputedStyle;
@@ -30,6 +30,7 @@ class SVGAnimatedPreserveAspectRatio;
 class SVGContextPaint;
 class SVGPreserveAspectRatio;
 namespace dom {
+class Document;
 class Element;
 class SVGElement;
 class SVGSVGElement;
@@ -190,7 +191,7 @@ class SVGContentUtils {
   /*
    * Report a localized error message to the error console.
    */
-  static nsresult ReportToConsole(nsIDocument* doc, const char* aWarning,
+  static nsresult ReportToConsole(dom::Document* doc, const char* aWarning,
                                   const char16_t** aParams,
                                   uint32_t aParamsLength);
 
@@ -317,12 +318,10 @@ class SVGContentUtils {
   static bool ParseInteger(const nsAString& aString, int32_t& aValue);
 
   /**
-   * Converts an nsStyleCoord into a userspace value.  Handles units
-   * Factor (straight userspace), Coord (dimensioned), and Percent (of
-   * aContent's SVG viewport)
+   * Converts an nsStyleCoord into a userspace value, resolving percentage
+   * values relative to aContent's SVG viewport.
    */
-  static float CoordToFloat(dom::SVGElement* aContent,
-                            const nsStyleCoord& aCoord);
+  static float CoordToFloat(dom::SVGElement* aContent, const LengthPercentage&);
   /**
    * Parse the SVG path string
    * Returns a path

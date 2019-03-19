@@ -10,6 +10,7 @@
 #include "js/Promise.h"
 
 #include "builtin/SelfHostingDefines.h"
+#include "ds/Fifo.h"
 #include "threading/ConditionVariable.h"
 #include "threading/Mutex.h"
 #include "vm/NativeObject.h"
@@ -32,10 +33,7 @@ enum PromiseSlots {
   //   This slot holds only the reject function. The resolve function is
   //   reachable from the reject function's extended slot.
   // * if this promise is either fulfilled or rejected, undefined
-  // * (special case) if this promise is the return value of an async function
-  //   invocation, the generator object for the function's internal generator
   PromiseSlot_RejectFunction,
-  PromiseSlot_AwaitGenerator = PromiseSlot_RejectFunction,
 
   // Promise object's debug info, which is created on demand.
   // * if this promise has no debug info, undefined
@@ -100,6 +98,9 @@ class PromiseObject : public NativeObject {
   static JSObject* unforgeableReject(JSContext* cx, HandleValue value);
 
   int32_t flags() { return getFixedSlot(PromiseSlot_Flags).toInt32(); }
+  void setHandled() {
+    setFixedSlot(PromiseSlot_Flags, Int32Value(flags() | PROMISE_FLAG_HANDLED));
+  }
   JS::PromiseState state() {
     int32_t flags = this->flags();
     if (!(flags & PROMISE_FLAG_RESOLVED)) {
@@ -234,8 +235,7 @@ MOZ_MUST_USE bool RejectPromiseWithPendingError(JSContext* cx,
  * Create the promise object which will be used as the return value of an async
  * function.
  */
-MOZ_MUST_USE PromiseObject* CreatePromiseObjectForAsync(
-    JSContext* cx, HandleValue generatorVal);
+MOZ_MUST_USE PromiseObject* CreatePromiseObjectForAsync(JSContext* cx);
 
 /**
  * Returns true if the given object is a promise created by
@@ -243,16 +243,21 @@ MOZ_MUST_USE PromiseObject* CreatePromiseObjectForAsync(
  */
 MOZ_MUST_USE bool IsPromiseForAsync(JSObject* promise);
 
+class AsyncFunctionGeneratorObject;
+
 MOZ_MUST_USE bool AsyncFunctionReturned(JSContext* cx,
                                         Handle<PromiseObject*> resultPromise,
                                         HandleValue value);
 
 MOZ_MUST_USE bool AsyncFunctionThrown(JSContext* cx,
-                                      Handle<PromiseObject*> resultPromise);
+                                      Handle<PromiseObject*> resultPromise,
+                                      HandleValue reason);
 
-MOZ_MUST_USE bool AsyncFunctionAwait(JSContext* cx,
-                                     Handle<PromiseObject*> resultPromise,
-                                     HandleValue value);
+// Start awaiting `value` in an async function (, but doesn't suspend the
+// async function's execution!). Returns the async function's result promise.
+MOZ_MUST_USE JSObject* AsyncFunctionAwait(
+    JSContext* cx, Handle<AsyncFunctionGeneratorObject*> genObj,
+    HandleValue value);
 
 // If the await operation can be skipped and the resolution value for `val` can
 // be acquired, stored the resolved value to `resolved` and `true` to
@@ -419,6 +424,8 @@ class MOZ_NON_TEMPORARY_CLASS PromiseLookup final {
   }
 };
 
+class OffThreadPromiseRuntimeState;
+
 // [SMDOC] OffThreadPromiseTask: an off-main-thread task that resolves a promise
 //
 // An OffThreadPromiseTask is an abstract base class holding a JavaScript
@@ -494,6 +501,8 @@ class OffThreadPromiseTask : public JS::Dispatchable {
   void operator=(const OffThreadPromiseTask&) = delete;
   OffThreadPromiseTask(const OffThreadPromiseTask&) = delete;
 
+  void unregister(OffThreadPromiseRuntimeState& state);
+
  protected:
   OffThreadPromiseTask(JSContext* cx, Handle<PromiseObject*> promise);
 
@@ -523,7 +532,7 @@ using OffThreadPromiseTaskSet =
     HashSet<OffThreadPromiseTask*, DefaultHasher<OffThreadPromiseTask*>,
             SystemAllocPolicy>;
 
-using DispatchableVector = Vector<JS::Dispatchable*, 0, SystemAllocPolicy>;
+using DispatchableFifo = Fifo<JS::Dispatchable*, 0, SystemAllocPolicy>;
 
 class OffThreadPromiseRuntimeState {
   friend class OffThreadPromiseTask;
@@ -533,12 +542,24 @@ class OffThreadPromiseRuntimeState {
   JS::DispatchToEventLoopCallback dispatchToEventLoopCallback_;
   void* dispatchToEventLoopClosure_;
 
-  // These fields are mutated by any thread and are guarded by mutex_.
+  // All following fields are mutated by any thread and are guarded by mutex_.
   Mutex mutex_;
-  ConditionVariable allCanceled_;
+
+  // A set of all OffThreadPromiseTasks that have successfully called 'init'.
+  // OffThreadPromiseTask's destructor removes them from the set.
   OffThreadPromiseTaskSet live_;
+
+  // The allCancelled_ condition is waited on and notified during engine
+  // shutdown, communicating when all off-thread tasks in live_ are safe to be
+  // destroyed from the (shutting down) main thread. This condition is met when
+  // live_.count() == numCanceled_ where "canceled" means "the
+  // DispatchToEventLoopCallback failed after this task finished execution".
+  ConditionVariable allCanceled_;
   size_t numCanceled_;
-  DispatchableVector internalDispatchQueue_;
+
+  // The queue of JS::Dispatchables used by the DispatchToEventLoopCallback that
+  // calling js::UseInternalJobQueues installs.
+  DispatchableFifo internalDispatchQueue_;
   ConditionVariable internalDispatchQueueAppended_;
   bool internalDispatchQueueClosed_;
 

@@ -9,7 +9,7 @@
 #include "mozilla/dom/HTMLMediaElement.h"
 #ifdef XP_WIN
 // HTMLTrackElement.webidl defines ERROR, but so does windows.h:
-#undef ERROR
+#  undef ERROR
 #endif
 #include "WebVTTListener.h"
 #include "mozilla/LoadInfo.h"
@@ -27,7 +27,7 @@
 #include "nsIChannelEventSink.h"
 #include "nsIContentPolicy.h"
 #include "nsIContentSecurityPolicy.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIHttpChannel.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsILoadGroup.h"
@@ -297,7 +297,7 @@ void HTMLTrackElement::LoadResource(RefPtr<WebVTTListener>&& aWebVTTListener) {
   rv = mListener->LoadResource();
   NS_ENSURE_TRUE_VOID(NS_SUCCEEDED(rv));
 
-  nsIDocument* doc = OwnerDoc();
+  Document* doc = OwnerDoc();
   if (!doc) {
     return;
   }
@@ -326,7 +326,7 @@ void HTMLTrackElement::LoadResource(RefPtr<WebVTTListener>&& aWebVTTListener) {
         channel->SetNotificationCallbacks(self->mListener);
 
         LOG(LogLevel::Debug, ("opening webvtt channel"));
-        rv = channel->AsyncOpen2(self->mListener);
+        rv = channel->AsyncOpen(self->mListener);
 
         if (NS_FAILED(rv)) {
           self->SetReadyState(TextTrackReadyState::FailedToLoad);
@@ -337,8 +337,7 @@ void HTMLTrackElement::LoadResource(RefPtr<WebVTTListener>&& aWebVTTListener) {
   doc->Dispatch(TaskCategory::Other, runnable.forget());
 }
 
-nsresult HTMLTrackElement::BindToTree(nsIDocument* aDocument,
-                                      nsIContent* aParent,
+nsresult HTMLTrackElement::BindToTree(Document* aDocument, nsIContent* aParent,
                                       nsIContent* aBindingParent) {
   nsresult rv =
       nsGenericHTMLElement::BindToTree(aDocument, aParent, aBindingParent);
@@ -411,7 +410,7 @@ void HTMLTrackElement::SetReadyState(uint16_t aReadyState) {
 }
 
 void HTMLTrackElement::DispatchTrackRunnable(const nsString& aEventName) {
-  nsIDocument* doc = OwnerDoc();
+  Document* doc = OwnerDoc();
   if (!doc) {
     return;
   }
@@ -422,7 +421,7 @@ void HTMLTrackElement::DispatchTrackRunnable(const nsString& aEventName) {
 }
 
 void HTMLTrackElement::DispatchTrustedEvent(const nsAString& aName) {
-  nsIDocument* doc = OwnerDoc();
+  Document* doc = OwnerDoc();
   if (!doc) {
     return;
   }

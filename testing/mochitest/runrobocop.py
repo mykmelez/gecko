@@ -96,8 +96,6 @@ class RobocopTestRunner(MochitestDesktop):
         # trying to start new ones.
         self.killNamedProc('ssltunnel')
         self.killNamedProc('xpcshell')
-        self.auto.deleteANRs()
-        self.auto.deleteTombstones()
         procName = self.options.app.split('/')[-1]
         self.device.stop_application(procName)
         if self.device.process_exist(procName):
@@ -123,11 +121,9 @@ class RobocopTestRunner(MochitestDesktop):
             self.printDeviceInfo()
         self.setupLocalPaths()
         self.buildProfile()
-        # ignoreSSLTunnelExts is a workaround for bug 1109310
         self.startServers(
             self.options,
-            debuggerInfo=None,
-            ignoreSSLTunnelExts=True)
+            debuggerInfo=None)
         self.log.debug("Servers started")
 
     def cleanup(self):
@@ -233,7 +229,6 @@ class RobocopTestRunner(MochitestDesktop):
         self.options.extraPrefs.append('browser.search.suggest.prompted=true')
         self.options.extraPrefs.append('layout.css.devPixelsPerPx=1.0')
         self.options.extraPrefs.append('browser.chrome.dynamictoolbar=false')
-        self.options.extraPrefs.append('browser.snippets.enabled=false')
         self.options.extraPrefs.append('extensions.autoupdate.enabled=false')
 
         # Override the telemetry init delay for integration testing.

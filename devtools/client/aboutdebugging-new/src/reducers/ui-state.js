@@ -7,9 +7,10 @@
 const {
   ADB_ADDON_STATUS_UPDATED,
   DEBUG_TARGET_COLLAPSIBILITY_UPDATED,
-  MULTI_E10S_UPDATED,
+  HIDE_PROFILER_DIALOG,
   NETWORK_LOCATIONS_UPDATED,
-  PAGE_SELECTED,
+  SELECT_PAGE_SUCCESS,
+  SHOW_PROFILER_DIALOG,
   TEMPORARY_EXTENSION_INSTALL_FAILURE,
   TEMPORARY_EXTENSION_INSTALL_SUCCESS,
   USB_RUNTIMES_SCAN_START,
@@ -18,16 +19,15 @@ const {
 
 function UiState(locations = [], debugTargetCollapsibilities = {},
                  networkEnabled = false, wifiEnabled = false,
-                 showSystemAddons = false, isMultiE10s = false) {
+                 showSystemAddons = false) {
   return {
     adbAddonStatus: null,
     debugTargetCollapsibilities,
-    isMultiE10s,
     isScanningUsb: false,
     networkEnabled,
     networkLocations: locations,
     selectedPage: null,
-    selectedRuntime: null,
+    showProfilerDialog: false,
     showSystemAddons,
     temporaryInstallError: null,
     wifiEnabled,
@@ -48,20 +48,22 @@ function uiReducer(state = UiState(), action) {
       return Object.assign({}, state, { debugTargetCollapsibilities });
     }
 
-    case MULTI_E10S_UPDATED: {
-      const { isMultiE10s } = action;
-      return Object.assign({}, state, { isMultiE10s });
-    }
-
     case NETWORK_LOCATIONS_UPDATED: {
       const { locations } = action;
       return Object.assign({}, state, { networkLocations: locations });
     }
 
-    case PAGE_SELECTED: {
-      const { page, runtimeId } = action;
-      return Object.assign({}, state,
-        { selectedPage: page, selectedRuntime: runtimeId });
+    case SELECT_PAGE_SUCCESS: {
+      const { page } = action;
+      return Object.assign({}, state, { selectedPage: page });
+    }
+
+    case SHOW_PROFILER_DIALOG: {
+      return Object.assign({}, state, { showProfilerDialog: true });
+    }
+
+    case HIDE_PROFILER_DIALOG: {
+      return Object.assign({}, state, { showProfilerDialog: false });
     }
 
     case USB_RUNTIMES_SCAN_START: {
@@ -78,7 +80,7 @@ function uiReducer(state = UiState(), action) {
 
     case TEMPORARY_EXTENSION_INSTALL_FAILURE: {
       const { error } = action;
-      return Object.assign({}, state, { temporaryInstallError: error.message });
+      return Object.assign({}, state, { temporaryInstallError: error });
     }
 
     default:

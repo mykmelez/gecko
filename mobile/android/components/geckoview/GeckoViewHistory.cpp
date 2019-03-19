@@ -44,7 +44,7 @@ enum class GeckoViewVisitFlags : int32_t {
 // reduce the number of IPC and JNI calls.
 static const uint32_t GET_VISITS_WAIT_MS = 250;
 
-static inline nsIDocument* OwnerDocForLink(Link* aLink) {
+static inline Document* OwnerDocForLink(Link* aLink) {
   Element* element = aLink->GetElement();
   return element ? element->OwnerDoc() : nullptr;
 }
@@ -360,7 +360,7 @@ GeckoViewHistory::VisitURI(nsIWidget* aWidget, nsIURI* aURI,
     URIParams uri;
     SerializeURI(aURI, uri);
 
-    OptionalURIParams lastVisitedURI;
+    Maybe<URIParams> lastVisitedURI;
     SerializeURI(aLastVisitedURI, lastVisitedURI);
 
     // If we're in the content process, send the visit to the parent. The parent
@@ -472,11 +472,11 @@ GeckoViewHistory::NotifyVisited(nsIURI* aURI) {
   if (auto entry = mTrackedURIs.Lookup(aURI)) {
     TrackedURI& trackedURI = entry.Data();
     trackedURI.mVisited = true;
-    nsTArray<nsIDocument*> seen;
+    nsTArray<Document*> seen;
     nsTObserverArray<Link*>::BackwardIterator iter(trackedURI.mLinks);
     while (iter.HasMore()) {
       Link* link = iter.GetNext();
-      nsIDocument* doc = OwnerDocForLink(link);
+      Document* doc = OwnerDocForLink(link);
       if (seen.Contains(doc)) {
         continue;
       }
@@ -680,10 +680,10 @@ void GeckoViewHistory::HandleVisitedState(
  * `History::NotifyVisitedForDocument`.
  */
 void GeckoViewHistory::DispatchNotifyVisited(nsIURI* aURI,
-                                             nsIDocument* aDocument) {
+                                             Document* aDocument) {
   // Capture strong references to the arguments to capture in the closure.
   RefPtr<GeckoViewHistory> kungFuDeathGrip(this);
-  nsCOMPtr<nsIDocument> doc(aDocument);
+  RefPtr<Document> doc(aDocument);
   nsCOMPtr<nsIURI> uri(aURI);
 
   nsCOMPtr<nsIRunnable> runnable = NS_NewRunnableFunction(

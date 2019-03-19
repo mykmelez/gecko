@@ -1,5 +1,3 @@
-// |jit-test| skip-if: getBuildConfiguration()['arm64']
-// skip arm64 due to bug 1513231
 // Test bounds checking at the end of memory with a constant base pointer.
 // This is intended to verify a bounds check elimination optimization in
 // the baseline compiler.
@@ -29,7 +27,7 @@ function gen2(base, offset) {
 			(memory 1)
 			(data (i32.const 65528) "aaaaaaaa")
 			(func (result i32)
-			 (drop (grow_memory (i32.const 1)))
+			 (drop (memory.grow (i32.const 1)))
 			 (i32.store (i32.const 65536) (i32.const 0x61616161))
 			 (i32.store (i32.const 65540) (i32.const 0x61616161))
 			 (i32.store (i32.const 80000) (i32.const 0x61616161))

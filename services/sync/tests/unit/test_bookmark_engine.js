@@ -1,17 +1,12 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-ChromeUtils.import("resource://gre/modules/BookmarkHTMLUtils.jsm");
-ChromeUtils.import("resource://gre/modules/BookmarkJSONUtils.jsm");
-ChromeUtils.import("resource://gre/modules/SyncedBookmarksMirror.jsm");
-ChromeUtils.import("resource://gre/modules/Log.jsm");
-ChromeUtils.import("resource://gre/modules/osfile.jsm");
-ChromeUtils.import("resource://services-common/utils.js");
-ChromeUtils.import("resource://services-sync/constants.js");
-ChromeUtils.import("resource://services-sync/engines.js");
-ChromeUtils.import("resource://services-sync/engines/bookmarks.js");
-ChromeUtils.import("resource://services-sync/service.js");
-ChromeUtils.import("resource://services-sync/util.js");
+const {BookmarkHTMLUtils} = ChromeUtils.import("resource://gre/modules/BookmarkHTMLUtils.jsm");
+const {BookmarkJSONUtils} = ChromeUtils.import("resource://gre/modules/BookmarkJSONUtils.jsm");
+const {SyncedBookmarksMirror} = ChromeUtils.import("resource://gre/modules/SyncedBookmarksMirror.jsm");
+const {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm");
+const {Bookmark, BookmarkFolder, BookmarksEngine, BufferedBookmarksEngine, Livemark} = ChromeUtils.import("resource://services-sync/engines/bookmarks.js");
+const {Service} = ChromeUtils.import("resource://services-sync/service.js");
 
 var recordedEvents = [];
 
@@ -248,7 +243,6 @@ add_bookmark_test(async function test_processIncoming_error_orderChildren(engine
   let collection = server.user("foo").collection("bookmarks");
 
   try {
-
     let folder1 = await PlacesUtils.bookmarks.insert({
       parentGuid: PlacesUtils.bookmarks.toolbarGuid,
       type: PlacesUtils.bookmarks.TYPE_FOLDER,
@@ -312,7 +306,6 @@ add_bookmark_test(async function test_processIncoming_error_orderChildren(engine
     let localChildIds = await PlacesSyncUtils.bookmarks.fetchChildRecordIds(
       folder1.guid);
     Assert.deepEqual(localChildIds.sort(), [bmk2.guid, bmk1.guid].sort());
-
   } finally {
     await cleanup(engine, server);
   }
@@ -343,7 +336,6 @@ async function test_restoreOrImport(engine, { replace }) {
   engine._tracker.start(); // We skip usual startup...
 
   try {
-
     let folder1 = await PlacesUtils.bookmarks.insert({
       parentGuid: PlacesUtils.bookmarks.toolbarGuid,
       type: PlacesUtils.bookmarks.TYPE_FOLDER,
@@ -485,7 +477,6 @@ async function test_restoreOrImport(engine, { replace }) {
     }
 
     doCheckWBOs(folderWBOs, expectedFolders);
-
   } finally {
     await cleanup(engine, server);
   }
@@ -889,9 +880,6 @@ add_bookmark_test(async function test_sync_dateAdded(engine) {
     let newerRecord2 = await store.createRecord(item2GUID);
     equal(newerRecord2.dateAdded, newRecord2.dateAdded,
       "dateAdded update should be ignored for later date if we know an earlier one ");
-
-
-
   } finally {
     await cleanup(engine, server);
   }
@@ -1097,93 +1085,10 @@ add_task(async function test_resume_buffer() {
     // Check that all the children made it onto the correct record.
     let toolbarRecord = await engine._store.createRecord("toolbar");
     Assert.deepEqual(toolbarRecord.children.sort(), children.sort());
-
   } finally {
     await cleanup(engine, server);
     await engine.finalize();
   }
-});
-
-add_task(async function test_legacy_migrate_sync_metadata() {
-  let legacyEngine = new BookmarksEngine(Service);
-  await legacyEngine.initialize();
-  await legacyEngine.resetClient();
-
-  let syncID = Utils.makeGUID();
-  let lastSync = Date.now() / 1000;
-
-  Svc.Prefs.set(`${legacyEngine.name}.syncID`, syncID);
-  Svc.Prefs.set(`${legacyEngine.name}.lastSync`, lastSync.toString());
-
-  strictEqual(await legacyEngine.getSyncID(), "",
-    "Legacy engine should start with empty sync ID");
-  strictEqual(await legacyEngine.getLastSync(), 0,
-    "Legacy engine should start with empty last sync");
-
-  info("Migrate Sync metadata prefs");
-  await legacyEngine._migrateSyncMetadata();
-
-  equal(await legacyEngine.getSyncID(), syncID,
-    "Initializing legacy engine should migrate sync ID");
-  equal(await legacyEngine.getLastSync(), lastSync,
-    "Initializing legacy engine should migrate last sync time");
-
-  let newSyncID = Utils.makeGUID();
-  await legacyEngine.ensureCurrentSyncID(newSyncID);
-
-  equal(await legacyEngine.getSyncID(), newSyncID,
-    "Changing legacy engine sync ID should update Places");
-  strictEqual(await legacyEngine.getLastSync(), 0,
-    "Changing legacy engine sync ID should clear last sync in Places");
-
-  equal(Svc.Prefs.get(`${legacyEngine.name}.syncID`), newSyncID,
-    "Changing legacy engine sync ID should update prefs");
-  strictEqual(Svc.Prefs.get(`${legacyEngine.name}.lastSync`), "0",
-    "Changing legacy engine sync ID should clear last sync pref");
-
-  await cleanupEngine(legacyEngine);
-  await legacyEngine.finalize();
-});
-
-add_task(async function test_buffered_migate_sync_metadata() {
-  let bufferedEngine = new BufferedBookmarksEngine(Service);
-  await bufferedEngine.initialize();
-  await bufferedEngine.resetClient();
-
-  let syncID = Utils.makeGUID();
-  let lastSync = Date.now() / 1000;
-
-  Svc.Prefs.set(`${bufferedEngine.name}.syncID`, syncID);
-  Svc.Prefs.set(`${bufferedEngine.name}.lastSync`, lastSync.toString());
-
-  strictEqual(await bufferedEngine.getSyncID(), "",
-    "Buffered engine should start with empty sync ID");
-  strictEqual(await bufferedEngine.getLastSync(), 0,
-    "Buffered engine should start with empty last sync");
-
-  info("Migrate Sync metadata prefs");
-  await bufferedEngine._migrateSyncMetadata({
-    migrateLastSync: false,
-  });
-
-  equal(await bufferedEngine.getSyncID(), syncID,
-    "Initializing buffered engine should migrate sync ID");
-  strictEqual(await bufferedEngine.getLastSync(), 0,
-    "Initializing buffered engine should not migrate last sync time");
-
-  let newSyncID = Utils.makeGUID();
-  await bufferedEngine.ensureCurrentSyncID(newSyncID);
-
-  equal(await bufferedEngine.getSyncID(), newSyncID,
-    "Changing buffered engine sync ID should update Places");
-
-  equal(Svc.Prefs.get(`${bufferedEngine.name}.syncID`), newSyncID,
-    "Changing buffered engine sync ID should update prefs");
-  strictEqual(Svc.Prefs.get(`${bufferedEngine.name}.lastSync`), "0",
-    "Changing buffered engine sync ID should clear last sync pref");
-
-  await cleanupEngine(bufferedEngine);
-  await bufferedEngine.finalize();
 });
 
 // The buffered engine stores the sync ID and last sync time in three places:

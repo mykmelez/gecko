@@ -33,7 +33,7 @@
 #include "nsIContent.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsIDocShell.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIDocumentEncoder.h"
 #include "nsILoadContext.h"
 #include "nsIProtocolHandler.h"
@@ -45,6 +45,7 @@
 #include "nsIWebNavigation.h"
 #include "nsIWebPageDescriptor.h"
 #include "nsNetUtil.h"
+#include "nsQueryObject.h"
 
 namespace mozilla {
 
@@ -59,7 +60,7 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTION(WebBrowserPersistLocalDocument, mDocument)
 
 WebBrowserPersistLocalDocument::WebBrowserPersistLocalDocument(
-    nsIDocument* aDocument)
+    dom::Document* aDocument)
     : mDocument(aDocument), mPersistFlags(0) {
   MOZ_ASSERT(mDocument);
 }
@@ -283,7 +284,7 @@ void ResourceReader::DocumentDone(nsresult aStatus) {
 }
 
 nsresult ResourceReader::OnWalkSubframe(nsINode* aNode) {
-  nsCOMPtr<nsIFrameLoaderOwner> loaderOwner = do_QueryInterface(aNode);
+  RefPtr<nsFrameLoaderOwner> loaderOwner = do_QueryObject(aNode);
   NS_ENSURE_STATE(loaderOwner);
   RefPtr<nsFrameLoader> loader = loaderOwner->GetFrameLoader();
   NS_ENSURE_STATE(loader);
@@ -816,7 +817,7 @@ PersistNodeFixup::FixupNode(nsINode* aNodeIn, bool* aSerializeCloneKids,
     // FromContent on, since it represents multiple elements. Since we've
     // already checked IsHTMLElement here, just cast as we were doing.
     auto* base = static_cast<dom::HTMLSharedElement*>(content.get());
-    nsIDocument* ownerDoc = base->OwnerDoc();
+    dom::Document* ownerDoc = base->OwnerDoc();
 
     nsAutoString href;
     base->GetHref(href);  // Doesn't matter if this fails

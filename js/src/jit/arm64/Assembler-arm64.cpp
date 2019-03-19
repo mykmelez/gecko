@@ -35,6 +35,7 @@ ABIArg ABIArgGenerator::next(MIRType type) {
     case MIRType::Int32:
     case MIRType::Int64:
     case MIRType::Pointer:
+    case MIRType::RefOrNull:
       if (intRegIndex_ == NumIntArgRegs) {
         current_ = ABIArg(stackOffset_);
         stackOffset_ += sizeof(uintptr_t);
@@ -377,6 +378,20 @@ void PatchJump(CodeLocationJump& jump_, CodeLocationLabel label) {
   }
 }
 
+void Assembler::PatchWrite_NearCall(CodeLocationLabel start,
+                                    CodeLocationLabel toCall) {
+  Instruction* dest = (Instruction*)start.raw();
+  ptrdiff_t relTarget = (Instruction*)toCall.raw() - dest;
+  ptrdiff_t relTarget00 = relTarget >> 2;
+  MOZ_RELEASE_ASSERT((relTarget & 0x3) == 0);
+  MOZ_RELEASE_ASSERT(vixl::is_int26(relTarget00));
+
+  // printf("patching %p with call to %p\n", start.raw(), toCall.raw());
+  bl(dest, relTarget00);
+
+  AutoFlushICache::flush(uintptr_t(dest), 4);
+}
+
 void Assembler::PatchDataWithValueCheck(CodeLocationLabel label,
                                         PatchedImmPtr newValue,
                                         PatchedImmPtr expected) {
@@ -586,8 +601,9 @@ void Assembler::TraceJumpRelocations(JSTracer* trc, JitCode* code,
   }
 }
 
-/* static */ void Assembler::TraceDataRelocations(JSTracer* trc, JitCode* code,
-                                                  CompactBufferReader& reader) {
+/* static */
+void Assembler::TraceDataRelocations(JSTracer* trc, JitCode* code,
+                                     CompactBufferReader& reader) {
   uint8_t* buffer = code->raw();
 
   while (reader.more()) {

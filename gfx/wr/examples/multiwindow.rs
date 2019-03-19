@@ -2,19 +2,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-extern crate app_units;
 extern crate euclid;
 extern crate gleam;
 extern crate glutin;
 extern crate webrender;
 extern crate winit;
 
-use app_units::Au;
 use gleam::gl;
 use glutin::GlContext;
 use std::fs::File;
 use std::io::Read;
 use webrender::api::*;
+use webrender::api::units::*;
 use webrender::DebugFlags;
 use winit::dpi::LogicalSize;
 
@@ -103,7 +102,7 @@ impl Window {
                 .get_inner_size()
                 .unwrap()
                 .to_physical(device_pixel_ratio as f64);
-            DeviceIntSize::new(size.width as i32, size.height as i32)
+            FramebufferIntSize::new(size.width as i32, size.height as i32)
         };
         let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
         let (renderer, sender) = webrender::Renderer::new(gl.clone(), notifier, opts, None).unwrap();
@@ -182,28 +181,25 @@ impl Window {
                 .get_inner_size()
                 .unwrap()
                 .to_physical(device_pixel_ratio as f64);
-            DeviceIntSize::new(size.width as i32, size.height as i32)
+            FramebufferIntSize::new(size.width as i32, size.height as i32)
         };
         let layout_size = framebuffer_size.to_f32() / euclid::TypedScale::new(device_pixel_ratio);
         let mut txn = Transaction::new();
         let mut builder = DisplayListBuilder::new(self.pipeline_id, layout_size);
+        let space_and_clip = SpaceAndClipInfo::root_scroll(self.pipeline_id);
 
         let bounds = LayoutRect::new(LayoutPoint::zero(), builder.content_size());
         let info = LayoutPrimitiveInfo::new(bounds);
-        builder.push_stacking_context(
+        builder.push_simple_stacking_context(
             &info,
-            None,
-            TransformStyle::Flat,
-            MixBlendMode::Normal,
-            &[],
-            RasterSpace::Screen,
+            space_and_clip.spatial_id,
         );
 
         let info = LayoutPrimitiveInfo::new(LayoutRect::new(
             LayoutPoint::new(100.0, 100.0),
             LayoutSize::new(100.0, 200.0)
         ));
-        builder.push_rect(&info, ColorF::new(0.0, 1.0, 0.0, 1.0));
+        builder.push_rect(&info, &space_and_clip, ColorF::new(0.0, 1.0, 0.0, 1.0));
 
         let text_bounds = LayoutRect::new(
             LayoutPoint::new(100.0, 50.0),
@@ -263,6 +259,7 @@ impl Window {
         let info = LayoutPrimitiveInfo::new(text_bounds);
         builder.push_text(
             &info,
+            &space_and_clip,
             &glyphs,
             self.font_instance_key,
             ColorF::new(1.0, 1.0, 0.0, 1.0),

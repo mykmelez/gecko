@@ -20,7 +20,7 @@
 #include "mozilla/SyncRunnable.h"
 
 #if XP_WIN
-#include <objbase.h>
+#  include <objbase.h>
 #endif
 
 namespace mozilla {
@@ -265,7 +265,7 @@ mozilla::ipc::IPCResult VideoDecoderManagerParent::RecvReadback(
   dt->Flush();
 
   *aResult = SurfaceDescriptorBuffer(RGBDescriptor(size, format, true),
-                                     MemoryOrShmem(buffer));
+                                     MemoryOrShmem(std::move(buffer)));
   return IPC_OK();
 }
 

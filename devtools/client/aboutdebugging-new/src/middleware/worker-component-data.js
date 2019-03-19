@@ -28,7 +28,10 @@ const workerComponentDataMiddleware = store => next => action => {
   return next(action);
 };
 
-function getServiceWorkerStatus(isActive, isRunning) {
+function getServiceWorkerStatus(worker) {
+  const isActive = worker.active;
+  const isRunning = !!worker.workerTargetFront;
+
   if (isActive && isRunning) {
     return SERVICE_WORKER_STATUSES.RUNNING;
   } else if (isActive) {
@@ -48,7 +51,7 @@ function toComponentData(workers, isServiceWorker) {
     let { fetch } = worker;
     const {
       name,
-      registrationActor,
+      registrationFront,
       scope,
       subscription,
       workerTargetFront,
@@ -57,29 +60,23 @@ function toComponentData(workers, isServiceWorker) {
     // For registering service workers, workerTargetFront will not be available.
     // The only valid identifier we can use at that point is the actorID for the
     // service worker registration.
-    const id = workerTargetFront ? workerTargetFront.actorID : registrationActor;
+    const id = workerTargetFront ? workerTargetFront.actorID : registrationFront.actorID;
 
-    let isActive = false;
-    let isRunning = false;
     let pushServiceEndpoint = null;
     let status = null;
 
     if (isServiceWorker) {
       fetch = fetch ? SERVICE_WORKER_FETCH_STATES.LISTENING
                     : SERVICE_WORKER_FETCH_STATES.NOT_LISTENING;
-      isActive = worker.active;
-      isRunning = !!worker.workerTargetFront;
-      status = getServiceWorkerStatus(isActive, isRunning);
+      status = getServiceWorkerStatus(worker);
       pushServiceEndpoint = subscription ? subscription.endpoint : null;
     }
 
     return {
       details: {
         fetch,
-        isActive,
-        isRunning,
         pushServiceEndpoint,
-        registrationActor,
+        registrationFront,
         scope,
         status,
       },

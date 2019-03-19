@@ -27,20 +27,37 @@ class UrlClassifierCommon final {
 
   static bool AddonMayLoad(nsIChannel* aChannel, nsIURI* aURI);
 
-  static void NotifyTrackingProtectionDisabled(nsIChannel* aChannel);
+  static void NotifyChannelClassifierProtectionDisabled(
+      nsIChannel* aChannel, uint32_t aAcceptedReason);
 
-  // aBlockedReason must be one of the nsIWebProgressListener state.
-  static void NotifyChannelBlocked(nsIChannel* aChannel,
-                                   unsigned aBlockedReason);
-
-  static bool ShouldEnableTrackingProtectionOrAnnotation(
-      nsIChannel* aChannel,
-      AntiTrackingCommon::ContentBlockingAllowListPurpose aBlockingPurpose);
+  static bool ShouldEnableClassifier(nsIChannel* aChannel);
 
   static nsresult SetBlockedContent(nsIChannel* channel, nsresult aErrorCode,
                                     const nsACString& aList,
                                     const nsACString& aProvider,
                                     const nsACString& aFullHash);
+
+  // Use this function only when you are looking for a pairwise whitelist uri
+  // with the format: http://toplevel.page/?resource=channel.uri.domain
+  static nsresult CreatePairwiseWhiteListURI(nsIChannel* aChannel,
+                                             nsIURI** aURI);
+
+  static void AnnotateChannel(
+      nsIChannel* aChannel,
+      AntiTrackingCommon::ContentBlockingAllowListPurpose aPurpose,
+      uint32_t aClassificationFlags, uint32_t aLoadingState);
+
+  static bool IsAllowListed(
+      nsIChannel* aChannel,
+      AntiTrackingCommon::ContentBlockingAllowListPurpose aPurpose);
+
+  static bool IsTrackingClassificationFlag(uint32_t aFlag);
+
+ private:
+  // aBlockedReason must be one of the nsIWebProgressListener state.
+  static void NotifyChannelBlocked(nsIChannel* aChannel,
+                                   nsIURI* aURIBeingLoaded,
+                                   unsigned aBlockedReason);
 };
 
 }  // namespace net

@@ -6,8 +6,8 @@
 
 const EXPORTED_SYMBOLS = ["FaviconLoader"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["Blob", "FileReader"]);
 
@@ -90,7 +90,7 @@ class FaviconLoad {
   constructor(iconInfo) {
     this.icon = iconInfo;
 
-    this.channel = Services.io.newChannelFromURI2(
+    this.channel = Services.io.newChannelFromURI(
       iconInfo.iconUri,
       iconInfo.node,
       iconInfo.node.nodePrincipal,
@@ -107,6 +107,19 @@ class FaviconLoad {
     // the easiest single way to get to the load group in both those cases.
     this.channel.loadGroup = iconInfo.node.ownerGlobal.document.documentLoadGroup;
     this.channel.notificationCallbacks = this;
+
+    if (this.channel instanceof Ci.nsIHttpChannel) {
+      try {
+        let acceptHeader = Services.prefs.getCharPref("image.http.accept");
+        this.channel.setRequestHeader("Accept", acceptHeader, false);
+      } catch (e) {
+        // Failing to get the pref or set the header is ignorable.
+      }
+    }
+
+    if (this.channel instanceof Ci.nsIHttpChannelInternal) {
+      this.channel.blockAuthPrompt = true;
+    }
 
     if (Services.prefs.getBoolPref("network.http.tailing.enabled", true) &&
         this.channel instanceof Ci.nsIClassOfService) {
@@ -131,7 +144,7 @@ class FaviconLoad {
     this.stream = new BufferedOutputStream(this.dataBuffer.getOutputStream(0), STREAM_SEGMENT_SIZE * 2);
 
     try {
-      this.channel.asyncOpen2(this);
+      this.channel.asyncOpen(this);
     } catch (e) {
       this._deferred.reject(e);
     }
@@ -147,10 +160,10 @@ class FaviconLoad {
     this.channel.cancel(Cr.NS_BINDING_ABORTED);
   }
 
-  onStartRequest(request, context) {
+  onStartRequest(request) {
   }
 
-  onDataAvailable(request, context, inputStream, offset, count) {
+  onDataAvailable(request, inputStream, offset, count) {
     this.stream.writeFrom(inputStream, count);
   }
 
@@ -162,7 +175,7 @@ class FaviconLoad {
     callback.onRedirectVerifyCallback(Cr.NS_OK);
   }
 
-  async onStopRequest(request, context, statusCode) {
+  async onStopRequest(request, statusCode) {
     if (request != this.channel) {
       // Indicates that a redirect has occurred. We don't care about the result
       // of the original channel.

@@ -4,10 +4,21 @@
 
 var EXPORTED_SYMBOLS = ["LightweightThemeConsumer"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const DEFAULT_THEME_ID = "default-theme@mozilla.org";
 const ICONS = Services.prefs.getStringPref("extensions.webextensions.themes.icons.buttons", "").split(",");
+
+ChromeUtils.defineModuleGetter(this, "AppConstants",
+  "resource://gre/modules/AppConstants.jsm");
+ChromeUtils.defineModuleGetter(this, "LightweightThemeImageOptimizer",
+  "resource://gre/modules/addons/LightweightThemeImageOptimizer.jsm");
+// Get the theme variables from the app resource directory.
+// This allows per-app variables.
+ChromeUtils.defineModuleGetter(this, "ThemeContentPropertyList",
+  "resource:///modules/ThemeVariableMap.jsm");
+ChromeUtils.defineModuleGetter(this, "ThemeVariableMap",
+  "resource:///modules/ThemeVariableMap.jsm");
 
 const toolkitVariableMap = [
   ["--lwt-accent-color", {
@@ -96,16 +107,22 @@ const toolkitVariableMap = [
   ["--toolbar-field-focus-border-color", {
     lwtProperty: "toolbar_field_border_focus",
   }],
+  ["--lwt-toolbar-field-highlight", {
+    lwtProperty: "toolbar_field_highlight",
+    processColor(rgbaChannels, element) {
+      if (!rgbaChannels) {
+        element.removeAttribute("lwt-selection");
+        return null;
+      }
+      element.setAttribute("lwt-selection", "true");
+      const {r, g, b, a} = rgbaChannels;
+      return `rgba(${r}, ${g}, ${b}, ${a})`;
+    },
+  }],
+  ["--lwt-toolbar-field-highlight-text", {
+    lwtProperty: "toolbar_field_highlight_text",
+  }],
 ];
-
-// Get the theme variables from the app resource directory.
-// This allows per-app variables.
-ChromeUtils.defineModuleGetter(this, "ThemeContentPropertyList",
-  "resource:///modules/ThemeVariableMap.jsm");
-ChromeUtils.defineModuleGetter(this, "ThemeVariableMap",
-  "resource:///modules/ThemeVariableMap.jsm");
-ChromeUtils.defineModuleGetter(this, "LightweightThemeImageOptimizer",
-  "resource://gre/modules/addons/LightweightThemeImageOptimizer.jsm");
 
 function LightweightThemeConsumer(aDocument) {
   this._doc = aDocument;
@@ -114,16 +131,21 @@ function LightweightThemeConsumer(aDocument) {
 
   Services.obs.addObserver(this, "lightweight-theme-styling-update");
 
-  var temp = {};
-  ChromeUtils.import("resource://gre/modules/LightweightThemeManager.jsm", temp);
-  this._update(temp.LightweightThemeManager.currentThemeWithPersistedData);
+  ChromeUtils.import("resource://gre/modules/LightweightThemeManager.jsm", this);
+
+  // We're responsible for notifying LightweightThemeManager when the OS is in
+  // dark mode so it can activate the dark theme. We don't want this on Linux
+  // as the default theme picks up the right colors from dark GTK themes.
+  if (AppConstants.platform != "linux") {
+    this._darkThemeMediaQuery = this._win.matchMedia("(-moz-system-dark-theme)");
+    this._darkThemeMediaQuery.addListener(this.LightweightThemeManager);
+    this.LightweightThemeManager.systemThemeChanged(this._darkThemeMediaQuery);
+  }
+
+  this._update(this.LightweightThemeManager.currentThemeWithPersistedData);
 
   this._win.addEventListener("resolutionchange", this);
   this._win.addEventListener("unload", this, { once: true });
-
-  let darkThemeMediaQuery = this._win.matchMedia("(-moz-system-dark-theme)");
-  darkThemeMediaQuery.addListener(temp.LightweightThemeManager);
-  temp.LightweightThemeManager.systemThemeChanged(darkThemeMediaQuery);
 }
 
 LightweightThemeConsumer.prototype = {
@@ -159,6 +181,10 @@ LightweightThemeConsumer.prototype = {
         Services.ppmm.sharedData.delete(`theme/${this._winId}`);
         this._win.removeEventListener("resolutionchange", this);
         this._win = this._doc = null;
+        if (this._darkThemeMediaQuery) {
+          this._darkThemeMediaQuery.removeListener(this.LightweightThemeManager);
+          this._darkThemeMediaQuery = null;
+        }
         break;
     }
   },
@@ -168,12 +194,22 @@ LightweightThemeConsumer.prototype = {
     if (theme) {
       theme = LightweightThemeImageOptimizer.optimize(theme, this._win.screen);
     }
-
-    let active = this._active = theme && theme.id !== DEFAULT_THEME_ID;
-
     if (!theme) {
-      theme = {};
+      theme = { id: DEFAULT_THEME_ID };
     }
+
+    let active = this._active = (theme.id != DEFAULT_THEME_ID);
+
+    // The theme we're switching to can be different from the user-selected
+    // theme. E.g. if the default theme is selected and the OS is in dark mode,
+    // we'd silently activate the dark theme if available. We set an attribute
+    // in that case so stylesheets can differentiate this from the dark theme
+    // being selected explicitly by the user.
+    let isDefaultThemeInDarkMode =
+      theme.id == this.LightweightThemeManager.defaultDarkThemeID &&
+      this.LightweightThemeManager.selectedThemeID == DEFAULT_THEME_ID &&
+      this._darkThemeMediaQuery &&
+      this._darkThemeMediaQuery.matches;
 
     let root = this._doc.documentElement;
 
@@ -205,6 +241,11 @@ LightweightThemeConsumer.prototype = {
     } else {
       root.removeAttribute("lwtheme");
       root.removeAttribute("lwthemetextcolor");
+    }
+    if (isDefaultThemeInDarkMode) {
+      root.setAttribute("lwt-default-theme-in-dark-mode", "true");
+    } else {
+      root.removeAttribute("lwt-default-theme-in-dark-mode");
     }
 
     let contentThemeData = _getContentProperties(this._doc, active, theme);

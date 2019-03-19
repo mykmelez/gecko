@@ -11,6 +11,8 @@
 #include "nsIObserver.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/PreferenceSheet.h"
+#include "mozilla/NotNull.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/css/Loader.h"
 
@@ -39,14 +41,14 @@ class nsLayoutStylesheetCache final : public nsIObserver,
   static nsLayoutStylesheetCache* Singleton();
 
 #define STYLE_SHEET(identifier_, url_, lazy_) \
-  mozilla::StyleSheet* identifier_##Sheet();
+  mozilla::NotNull<mozilla::StyleSheet*> identifier_##Sheet();
 #include "mozilla/UserAgentStyleSheetList.h"
 #undef STYLE_SHEET
 
-  mozilla::StyleSheet* UserContentSheet();
-  mozilla::StyleSheet* UserChromeSheet();
-  mozilla::StyleSheet* ChromePreferenceSheet(nsPresContext* aPresContext);
-  mozilla::StyleSheet* ContentPreferenceSheet(nsPresContext* aPresContext);
+  mozilla::StyleSheet* GetUserContentSheet();
+  mozilla::StyleSheet* GetUserChromeSheet();
+  mozilla::StyleSheet* ChromePreferenceSheet();
+  mozilla::StyleSheet* ContentPreferenceSheet();
 
   static void InvalidatePreferenceSheets();
 
@@ -72,7 +74,7 @@ class nsLayoutStylesheetCache final : public nsIObserver,
                  mozilla::css::SheetParsingMode aParsingMode,
                  mozilla::css::FailureAction aFailureAction);
   void BuildPreferenceSheet(RefPtr<mozilla::StyleSheet>* aSheet,
-                            nsPresContext* aPresContext);
+                            const mozilla::PreferenceSheet::Prefs&);
 
   static mozilla::StaticRefPtr<nsLayoutStylesheetCache> gStyleCache;
   static mozilla::StaticRefPtr<mozilla::css::Loader> gCSSLoader;

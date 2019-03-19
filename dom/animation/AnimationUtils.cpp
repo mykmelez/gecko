@@ -6,21 +6,24 @@
 
 #include "AnimationUtils.h"
 
+#include "mozilla/dom/Document.h"
+#include "mozilla/dom/KeyframeEffect.h"
+#include "mozilla/EffectSet.h"
+#include "mozilla/Preferences.h"
 #include "nsDebug.h"
 #include "nsAtom.h"
 #include "nsIContent.h"
-#include "nsIDocument.h"
 #include "nsGlobalWindow.h"
 #include "nsString.h"
 #include "xpcpublic.h"  // For xpc::NativeGlobal
-#include "mozilla/EffectSet.h"
-#include "mozilla/dom/KeyframeEffect.h"
-#include "mozilla/Preferences.h"
+
+using namespace mozilla::dom;
 
 namespace mozilla {
 
-/* static */ void AnimationUtils::LogAsyncAnimationFailure(
-    nsCString& aMessage, const nsIContent* aContent) {
+/* static */
+void AnimationUtils::LogAsyncAnimationFailure(nsCString& aMessage,
+                                              const nsIContent* aContent) {
   if (aContent) {
     aMessage.AppendLiteral(" [");
     aMessage.Append(nsAtomCString(aContent->NodeInfo()->NameAtom()));
@@ -37,8 +40,8 @@ namespace mozilla {
   printf_stderr("%s", aMessage.get());
 }
 
-/* static */ nsIDocument* AnimationUtils::GetCurrentRealmDocument(
-    JSContext* aCx) {
+/* static */
+Document* AnimationUtils::GetCurrentRealmDocument(JSContext* aCx) {
   nsGlobalWindowInner* win = xpc::CurrentWindowOrNull(aCx);
   if (!win) {
     return nullptr;
@@ -46,8 +49,8 @@ namespace mozilla {
   return win->GetDoc();
 }
 
-/* static */ nsIDocument* AnimationUtils::GetDocumentFromGlobal(
-    JSObject* aGlobalObject) {
+/* static */
+Document* AnimationUtils::GetDocumentFromGlobal(JSObject* aGlobalObject) {
   nsGlobalWindowInner* win = xpc::WindowOrNull(aGlobalObject);
   if (!win) {
     return nullptr;
@@ -55,7 +58,8 @@ namespace mozilla {
   return win->GetDoc();
 }
 
-/* static */ bool AnimationUtils::IsOffscreenThrottlingEnabled() {
+/* static */
+bool AnimationUtils::IsOffscreenThrottlingEnabled() {
   static bool sOffscreenThrottlingEnabled;
   static bool sPrefCached = false;
 
@@ -68,8 +72,9 @@ namespace mozilla {
   return sOffscreenThrottlingEnabled;
 }
 
-/* static */ bool AnimationUtils::EffectSetContainsAnimatedScale(
-    EffectSet& aEffects, const nsIFrame* aFrame) {
+/* static */
+bool AnimationUtils::EffectSetContainsAnimatedScale(EffectSet& aEffects,
+                                                    const nsIFrame* aFrame) {
   for (const dom::KeyframeEffect* effect : aEffects) {
     if (effect->ContainsAnimatedScale(aFrame)) {
       return true;

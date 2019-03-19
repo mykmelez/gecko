@@ -69,10 +69,10 @@ public class GeckoThread extends Thread {
          * components are shut down and become unavailable. EXITING has the same rank as
          * LIBS_READY because both states have a similar amount of components available.
          */
-        private final int rank;
+        private final int mRank;
 
-        private State(int rank) {
-            this.rank = rank;
+        private State(final int rank) {
+            mRank = rank;
         }
 
         @Override
@@ -83,7 +83,7 @@ public class GeckoThread extends Thread {
         @Override
         public boolean isAtLeast(final NativeQueue.State other) {
             if (other instanceof State) {
-                return this.rank >= ((State) other).rank;
+                return mRank >= ((State) other).mRank;
             }
             return false;
         }
@@ -129,7 +129,8 @@ public class GeckoThread extends Thread {
     // Main process parameters
     public static final int FLAG_DEBUGGING = 1 << 0; // Debugging mode.
     public static final int FLAG_PRELOAD_CHILD = 1 << 1; // Preload child during main thread start.
-    public static final int FLAG_ENABLE_NATIVE_CRASHREPORTER = 1 << 2; // Enable native crash reporting
+    public static final int FLAG_ENABLE_NATIVE_CRASHREPORTER = 1 << 2; // Enable native crash reporting.
+    public static final int FLAG_ENABLE_MARIONETTE = 1 << 3; // Enable Marionette at startup.
 
     public static final long DEFAULT_TIMEOUT = 5000;
 
@@ -158,7 +159,9 @@ public class GeckoThread extends Thread {
     }
 
     GeckoThread() {
-        setName("Gecko");
+        // Request more (virtual) stack space to avoid overflows in the CSS frame
+        // constructor. 8 MB matches desktop.
+        super(null, null, "Gecko", 8 * 1024 * 1024);
     }
 
     @WrapForJNI
@@ -268,9 +271,6 @@ public class GeckoThread extends Thread {
 
     private static void initGeckoEnvironment() {
         final Context context = GeckoAppShell.getApplicationContext();
-        GeckoLoader.loadMozGlue(context);
-        setState(State.MOZGLUE_READY);
-
         final Locale locale = Locale.getDefault();
         final Resources res = context.getResources();
         if (locale.toString().equalsIgnoreCase("zh_hk")) {
@@ -411,17 +411,39 @@ public class GeckoThread extends Thread {
         };
         Looper.myQueue().addIdleHandler(idleHandler);
 
-        initGeckoEnvironment();
-
-        // Wait until initialization before calling Gecko entry point.
+        // Wait until initialization before preparing environment.
         synchronized (this) {
-            while (!mInitialized || !isState(State.LIBS_READY)) {
+            while (!mInitialized) {
                 try {
                     wait();
                 } catch (final InterruptedException e) {
                 }
             }
         }
+
+        final Context context = GeckoAppShell.getApplicationContext();
+        final List<String> env = getEnvFromExtras(mInitInfo.extras);
+
+        // In Gecko, the native crash reporter is enabled by default in opt builds, and
+        // disabled by default in debug builds.
+        if ((mInitInfo.flags & FLAG_ENABLE_NATIVE_CRASHREPORTER) == 0 && !BuildConfig.DEBUG_BUILD) {
+            env.add(0, "MOZ_CRASHREPORTER_DISABLE=1");
+        } else if ((mInitInfo.flags & FLAG_ENABLE_NATIVE_CRASHREPORTER) != 0 && BuildConfig.DEBUG_BUILD) {
+            env.add(0, "MOZ_CRASHREPORTER=1");
+        }
+
+        if (!isChildProcess() && ((mInitInfo.flags & FLAG_ENABLE_MARIONETTE) != 0)) {
+            // The presence of this environment variable determines the initial
+            // value of `marionette.enabled`.
+            env.add(0, "MOZ_MARIONETTE=1");
+        }
+
+        GeckoLoader.loadMozGlue(context);
+        setState(State.MOZGLUE_READY);
+
+        GeckoLoader.setupGeckoEnvironment(context, context.getFilesDir().getPath(), env, mInitInfo.prefs);
+
+        initGeckoEnvironment();
 
         if ((mInitInfo.flags & FLAG_PRELOAD_CHILD) != 0) {
             ThreadUtils.postToBackgroundThread(new Runnable() {
@@ -442,24 +464,11 @@ public class GeckoThread extends Thread {
 
         Log.w(LOGTAG, "zerdatime " + SystemClock.elapsedRealtime() + " - runGecko");
 
-        final Context context = GeckoAppShell.getApplicationContext();
         final String[] args = isChildProcess() ? mInitInfo.args : getMainProcessArgs();
 
         if ((mInitInfo.flags & FLAG_DEBUGGING) != 0) {
             Log.i(LOGTAG, "RunGecko - args = " + TextUtils.join(" ", args));
         }
-
-        final List<String> env = getEnvFromExtras(mInitInfo.extras);
-
-        // In Gecko, the native crash reporter is enabled by default in opt builds, and
-        // disabled by default in debug builds.
-        if ((mInitInfo.flags & FLAG_ENABLE_NATIVE_CRASHREPORTER) == 0 && !BuildConfig.DEBUG_BUILD) {
-            env.add(0, "MOZ_CRASHREPORTER_DISABLE=1");
-        } else if ((mInitInfo.flags & FLAG_ENABLE_NATIVE_CRASHREPORTER) != 0 && BuildConfig.DEBUG_BUILD) {
-            env.add(0, "MOZ_CRASHREPORTER=1");
-        }
-
-        GeckoLoader.setupGeckoEnvironment(context, context.getFilesDir().getPath(), env, mInitInfo.prefs);
 
         // And go.
         GeckoLoader.nativeRun(args,
@@ -587,7 +596,7 @@ public class GeckoThread extends Thread {
         return waitOnGecko(DEFAULT_TIMEOUT);
     }
 
-    public static boolean waitOnGecko(long timeoutMillis) {
+    public static boolean waitOnGecko(final long timeoutMillis) {
         return nativeWaitOnGecko(timeoutMillis);
     }
 
@@ -637,7 +646,7 @@ public class GeckoThread extends Thread {
     public static native void crash();
 
     @WrapForJNI
-    private static void requestUiThreadCallback(long delay) {
+    private static void requestUiThreadCallback(final long delay) {
         ThreadUtils.getUiHandler().postDelayed(UI_THREAD_CALLBACK, delay);
     }
 

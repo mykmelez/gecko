@@ -69,10 +69,15 @@ bool ToJSValue(JSContext* aCx, const WindowProxyHolder& aArgument,
     return true;
   }
   JS::Rooted<JSObject*> windowProxy(aCx);
-  if (bc->GetDocShell()) {
+  if (bc->IsInProcess()) {
     windowProxy = bc->GetWindowProxy();
     if (!windowProxy) {
       nsPIDOMWindowOuter* window = bc->GetDOMWindow();
+      if (!window) {
+        // Torn down enough that we should just return null.
+        aValue.setNull();
+        return true;
+      }
       if (!window->EnsureInnerWindow()) {
         return Throw(aCx, NS_ERROR_UNEXPECTED);
       }

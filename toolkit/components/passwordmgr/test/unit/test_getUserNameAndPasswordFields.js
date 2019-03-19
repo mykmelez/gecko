@@ -1,15 +1,13 @@
-/*
+/**
  * Test for LoginManagerContent.getUserNameAndPasswordFields
  */
 
 "use strict";
 
-// Services.prefs.setBoolPref("signon.debug", true);
-
 XPCOMUtils.defineLazyGlobalGetters(this, ["URL"]);
 
-const LMCBackstagePass = ChromeUtils.import("resource://gre/modules/LoginManagerContent.jsm", {});
-const { LoginManagerContent, LoginFormFactory } = LMCBackstagePass;
+const LMCBackstagePass = ChromeUtils.import("resource://gre/modules/LoginManagerContent.jsm", null);
+const { LoginManagerContent } = LMCBackstagePass;
 const TESTCASES = [
   {
     description: "1 password field outside of a <form>",
@@ -84,7 +82,7 @@ for (let tc of TESTCASES) {
     add_task(async function() {
       info("Starting testcase: " + testcase.description);
       let document = MockDocument.createTestDocument("http://localhost:8080/test/",
-                                                      testcase.document);
+                                                     testcase.document);
 
       let input = document.querySelector("input");
       MockDocument.mockOwnerDocumentProperty(input, document, "http://localhost:8080/test/");
@@ -95,7 +93,7 @@ for (let tc of TESTCASES) {
       Object.defineProperty(document, "defaultView", {
         value: win,
       });
-      let formOrigin = LMCBackstagePass.LoginUtils._getPasswordOrigin(document.documentURI);
+      let formOrigin = LoginHelper.getLoginOrigin(document.documentURI);
       LoginRecipesContent.cacheRecipes(formOrigin, win, new Set());
 
       let actual = LoginManagerContent.getUserNameAndPasswordFields(input);

@@ -118,7 +118,7 @@ nsJSUtils::ExecutionContext::ExecutionContext(JSContext* aCx,
 #ifdef MOZ_GECKO_PROFILER
       mAutoProfilerLabel("nsJSUtils::ExecutionContext",
                          /* dynamicStr */ nullptr,
-                         js::ProfilingStackFrame::Category::JS),
+                         JS::ProfilingCategoryPair::JS),
 #endif
       mCx(aCx),
       mRealm(aCx, aGlobal),
@@ -343,9 +343,9 @@ nsresult nsJSUtils::ExecutionContext::DecodeBinAST(
 
   MOZ_ASSERT(aBuf);
   MOZ_ASSERT(mRetValue.isUndefined());
-#ifdef DEBUG
+#  ifdef DEBUG
   mWantsReturnValue = !aCompileOptions.noScriptRval;
-#endif
+#  endif
 
   mScript.set(JS::DecodeBinAST(mCx, aCompileOptions, aBuf, aLength));
 
@@ -374,8 +374,10 @@ JSScript* nsJSUtils::ExecutionContext::GetScript() {
   mScriptUsed = true;
 #endif
 
-  return mScript;
+  return MaybeGetScript();
 }
+
+JSScript* nsJSUtils::ExecutionContext::MaybeGetScript() { return mScript; }
 
 nsresult nsJSUtils::ExecutionContext::ExecScript() {
   if (mSkip) {
@@ -398,7 +400,8 @@ static bool IsPromiseValue(JSContext* aCx, JS::Handle<JS::Value> aValue) {
     return false;
   }
 
-  JS::Rooted<JSObject*> obj(aCx, js::CheckedUnwrap(&aValue.toObject()));
+  // We only care about Promise here, so CheckedUnwrapStatic is fine.
+  JS::Rooted<JSObject*> obj(aCx, js::CheckedUnwrapStatic(&aValue.toObject()));
   if (!obj) {
     return false;
   }

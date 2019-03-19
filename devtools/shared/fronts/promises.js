@@ -13,14 +13,11 @@ const { promisesSpec } = require("devtools/shared/specs/promises");
  * PromisesFront, the front for the PromisesActor.
  */
 class PromisesFront extends FrontClassWithSpec(promisesSpec) {
-  constructor(client, form) {
-    super(client, form);
-    this.actorID = form.promisesActor;
-    this.manage(this);
-  }
+  constructor(client) {
+    super(client);
 
-  destroy() {
-    super.destroy();
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "promisesActor";
   }
 }
 

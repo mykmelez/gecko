@@ -230,7 +230,7 @@ void SVGSVGElement::SetCurrentTime(float seconds) {
     double fMilliseconds = double(seconds) * PR_MSEC_PER_SEC;
     // Round to nearest whole number before converting, to avoid precision
     // errors
-    nsSMILTime lMilliseconds = int64_t(NS_round(fMilliseconds));
+    SMILTime lMilliseconds = int64_t(NS_round(fMilliseconds));
     mTimedDocumentRoot->SetCurrentTime(lMilliseconds);
     AnimationNeedsResample();
     // Trigger synchronous sample now, to:
@@ -252,13 +252,11 @@ void SVGSVGElement::DeselectAll() {
 }
 
 already_AddRefed<DOMSVGNumber> SVGSVGElement::CreateSVGNumber() {
-  RefPtr<DOMSVGNumber> number = new DOMSVGNumber(ToSupports(this));
-  return number.forget();
+  return do_AddRef(new DOMSVGNumber(this));
 }
 
 already_AddRefed<DOMSVGLength> SVGSVGElement::CreateSVGLength() {
-  nsCOMPtr<DOMSVGLength> length = new DOMSVGLength();
-  return length.forget();
+  return do_AddRef(new DOMSVGLength());
 }
 
 already_AddRefed<DOMSVGAngle> SVGSVGElement::CreateSVGAngle() {
@@ -266,13 +264,11 @@ already_AddRefed<DOMSVGAngle> SVGSVGElement::CreateSVGAngle() {
 }
 
 already_AddRefed<nsISVGPoint> SVGSVGElement::CreateSVGPoint() {
-  nsCOMPtr<nsISVGPoint> point = new DOMSVGPoint(0, 0);
-  return point.forget();
+  return do_AddRef(new DOMSVGPoint(0, 0));
 }
 
 already_AddRefed<SVGMatrix> SVGSVGElement::CreateSVGMatrix() {
-  RefPtr<SVGMatrix> matrix = new SVGMatrix();
-  return matrix.forget();
+  return do_AddRef(new SVGMatrix());
 }
 
 already_AddRefed<SVGIRect> SVGSVGElement::CreateSVGRect() {
@@ -280,14 +276,12 @@ already_AddRefed<SVGIRect> SVGSVGElement::CreateSVGRect() {
 }
 
 already_AddRefed<DOMSVGTransform> SVGSVGElement::CreateSVGTransform() {
-  RefPtr<DOMSVGTransform> transform = new DOMSVGTransform();
-  return transform.forget();
+  return do_AddRef(new DOMSVGTransform());
 }
 
 already_AddRefed<DOMSVGTransform> SVGSVGElement::CreateSVGTransformFromMatrix(
     SVGMatrix& matrix) {
-  RefPtr<DOMSVGTransform> transform = new DOMSVGTransform(matrix.GetMatrix());
-  return transform.forget();
+  return do_AddRef(new DOMSVGTransform(matrix.GetMatrix()));
 }
 
 //----------------------------------------------------------------------
@@ -323,7 +317,7 @@ void SVGSVGElement::SetCurrentScaleTranslate(float s, float x, float y) {
   mCurrentTranslate = SVGPoint(x, y);
 
   // now dispatch the appropriate event if we are the root element
-  nsIDocument* doc = GetUncomposedDoc();
+  Document* doc = GetUncomposedDoc();
   if (doc) {
     nsCOMPtr<nsIPresShell> presShell = doc->GetShell();
     if (presShell && IsRoot()) {
@@ -374,7 +368,7 @@ SMILTimeContainer* SVGSVGElement::GetTimedDocumentRoot() {
 }
 //----------------------------------------------------------------------
 // SVGElement
-nsresult SVGSVGElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+nsresult SVGSVGElement::BindToTree(Document* aDocument, nsIContent* aParent,
                                    nsIContent* aBindingParent) {
   SMILAnimationController* smilController = nullptr;
 
@@ -526,10 +520,8 @@ SVGElement::EnumAttributesInfo SVGSVGElement::GetEnumInfo() {
 
 void SVGSVGElement::SetImageOverridePreserveAspectRatio(
     const SVGPreserveAspectRatio& aPAR) {
-#ifdef DEBUG
   MOZ_ASSERT(OwnerDoc()->IsBeingUsedAsImage(),
              "should only override preserveAspectRatio in images");
-#endif
 
   bool hasViewBoxRect = HasViewBoxRect();
   if (!hasViewBoxRect && ShouldSynthesizeViewBox()) {
@@ -549,10 +541,8 @@ void SVGSVGElement::SetImageOverridePreserveAspectRatio(
 }
 
 void SVGSVGElement::ClearImageOverridePreserveAspectRatio() {
-#ifdef DEBUG
   MOZ_ASSERT(OwnerDoc()->IsBeingUsedAsImage(),
              "should only override image preserveAspectRatio in images");
-#endif
 
   if (!HasViewBoxRect() && ShouldSynthesizeViewBox()) {
     // My non-<svg:image> clients will want to paint me with a synthesized
@@ -601,7 +591,7 @@ bool SVGSVGElement::ClearPreserveAspectRatioProperty() {
 
 SVGPreserveAspectRatio SVGSVGElement::GetPreserveAspectRatioWithOverride()
     const {
-  nsIDocument* doc = GetUncomposedDoc();
+  Document* doc = GetUncomposedDoc();
   if (doc && doc->IsBeingUsedAsImage()) {
     const SVGPreserveAspectRatio* pAROverridePtr =
         GetPreserveAspectRatioProperty();
@@ -636,7 +626,7 @@ SVGPreserveAspectRatio SVGSVGElement::GetPreserveAspectRatioWithOverride()
 SVGViewElement* SVGSVGElement::GetCurrentViewElement() const {
   if (mCurrentViewID) {
     // XXXsmaug It is unclear how this should work in case we're in Shadow DOM.
-    nsIDocument* doc = GetUncomposedDoc();
+    Document* doc = GetUncomposedDoc();
     if (doc) {
       Element* element = doc->GetElementById(*mCurrentViewID);
       if (element && element->IsSVGElement(nsGkAtoms::view)) {
@@ -647,7 +637,7 @@ SVGViewElement* SVGSVGElement::GetCurrentViewElement() const {
   return nullptr;
 }
 
-const nsSVGViewBox& SVGSVGElement::GetViewBoxInternal() const {
+const SVGViewBox& SVGSVGElement::GetViewBoxInternal() const {
   SVGViewElement* viewElement = GetCurrentViewElement();
 
   if (viewElement && viewElement->mViewBox.HasRect()) {

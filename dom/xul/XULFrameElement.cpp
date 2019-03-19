@@ -9,6 +9,7 @@
 #include "nsFrameLoader.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/dom/HTMLIFrameElement.h"
+#include "mozilla/dom/WindowProxyHolder.h"
 #include "mozilla/dom/XULFrameElement.h"
 #include "mozilla/dom/XULFrameElementBinding.h"
 
@@ -30,7 +31,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(XULFrameElement, nsXULElement)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(XULFrameElement, nsXULElement,
-                                             nsIFrameLoaderOwner)
+                                             nsFrameLoaderOwner)
 
 JSObject* XULFrameElement::WrapNode(JSContext* aCx,
                                     JS::Handle<JSObject*> aGivenProto) {
@@ -57,7 +58,7 @@ Nullable<WindowProxyHolder> XULFrameElement::GetContentWindow() {
   return nullptr;
 }
 
-nsIDocument* XULFrameElement::GetContentDocument() {
+Document* XULFrameElement::GetContentDocument() {
   nsCOMPtr<nsIDocShell> docShell = GetDocShell();
   if (docShell) {
     nsCOMPtr<nsPIDOMWindowOuter> win = docShell->GetWindow();
@@ -120,7 +121,7 @@ void XULFrameElement::SwapFrameLoaders(XULFrameElement& aOtherLoaderOwner,
   aOtherLoaderOwner.SwapFrameLoaders(this, rv);
 }
 
-void XULFrameElement::SwapFrameLoaders(nsIFrameLoaderOwner* aOtherLoaderOwner,
+void XULFrameElement::SwapFrameLoaders(nsFrameLoaderOwner* aOtherLoaderOwner,
                                        mozilla::ErrorResult& rv) {
   RefPtr<nsFrameLoader> loader = GetFrameLoader();
   RefPtr<nsFrameLoader> otherLoader = aOtherLoaderOwner->GetFrameLoader();
@@ -132,8 +133,7 @@ void XULFrameElement::SwapFrameLoaders(nsIFrameLoaderOwner* aOtherLoaderOwner,
   rv = loader->SwapWithOtherLoader(otherLoader, this, aOtherLoaderOwner);
 }
 
-nsresult XULFrameElement::BindToTree(nsIDocument* aDocument,
-                                     nsIContent* aParent,
+nsresult XULFrameElement::BindToTree(Document* aDocument, nsIContent* aParent,
                                      nsIContent* aBindingParent) {
   nsresult rv = nsXULElement::BindToTree(aDocument, aParent, aBindingParent);
   NS_ENSURE_SUCCESS(rv, rv);

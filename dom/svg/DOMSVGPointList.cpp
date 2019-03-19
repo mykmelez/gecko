@@ -5,12 +5,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "DOMSVGPointList.h"
+
+#include "nsCOMPtr.h"
+#include "nsContentUtils.h"
 #include "DOMSVGPoint.h"
 #include "nsError.h"
 #include "SVGAnimatedPointList.h"
-#include "nsCOMPtr.h"
-#include "nsSVGAttrTearoffTable.h"
-#include "nsContentUtils.h"
+#include "SVGAttrTearoffTable.h"
 #include "mozilla/dom/SVGElement.h"
 #include "mozilla/dom/SVGPointListBinding.h"
 #include <algorithm>
@@ -38,9 +39,9 @@ void UpdateListIndicesFromIndex(
 
 namespace mozilla {
 
-static inline nsSVGAttrTearoffTable<void, DOMSVGPointList>&
+static inline SVGAttrTearoffTable<void, DOMSVGPointList>&
 SVGPointListTearoffTable() {
-  static nsSVGAttrTearoffTable<void, DOMSVGPointList> sSVGPointListTearoffTable;
+  static SVGAttrTearoffTable<void, DOMSVGPointList> sSVGPointListTearoffTable;
   return sSVGPointListTearoffTable;
 }
 
@@ -93,7 +94,8 @@ class MOZ_RAII AutoChangePointListNotifier {
   MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
-/* static */ already_AddRefed<DOMSVGPointList> DOMSVGPointList::GetDOMWrapper(
+/* static */
+already_AddRefed<DOMSVGPointList> DOMSVGPointList::GetDOMWrapper(
     void* aList, SVGElement* aElement, bool aIsAnimValList) {
   RefPtr<DOMSVGPointList> wrapper =
       SVGPointListTearoffTable().GetTearoff(aList);
@@ -104,8 +106,8 @@ class MOZ_RAII AutoChangePointListNotifier {
   return wrapper.forget();
 }
 
-/* static */ DOMSVGPointList* DOMSVGPointList::GetDOMWrapperIfExists(
-    void* aList) {
+/* static */
+DOMSVGPointList* DOMSVGPointList::GetDOMWrapperIfExists(void* aList) {
   return SVGPointListTearoffTable().GetTearoff(aList);
 }
 

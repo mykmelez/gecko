@@ -16,6 +16,7 @@
 #include "nsWrapperCache.h"
 #include "nsString.h"
 #include "nsXULElement.h"
+#include "nsFrameLoaderOwner.h"
 
 class nsIWebNavigation;
 class nsFrameLoader;
@@ -25,7 +26,7 @@ namespace dom {
 
 class BrowsingContext;
 
-class XULFrameElement final : public nsXULElement, public nsIFrameLoaderOwner {
+class XULFrameElement final : public nsXULElement, public nsFrameLoaderOwner {
  public:
   explicit XULFrameElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
       : nsXULElement(std::move(aNodeInfo)) {}
@@ -37,17 +38,7 @@ class XULFrameElement final : public nsXULElement, public nsIFrameLoaderOwner {
   nsDocShell* GetDocShell();
   already_AddRefed<nsIWebNavigation> GetWebNavigation();
   Nullable<WindowProxyHolder> GetContentWindow();
-  nsIDocument* GetContentDocument();
-
-  // nsIFrameLoaderOwner / MozFrameLoaderOwner
-  NS_IMETHOD_(already_AddRefed<nsFrameLoader>) GetFrameLoader() override {
-    return do_AddRef(mFrameLoader);
-  }
-
-  NS_IMETHOD_(void)
-  InternalSetFrameLoader(nsFrameLoader* aFrameLoader) override {
-    mFrameLoader = aFrameLoader;
-  }
+  Document* GetContentDocument();
 
   void PresetOpenerWindow(const Nullable<WindowProxyHolder>& aWindow,
                           ErrorResult& aRv) {
@@ -58,11 +49,11 @@ class XULFrameElement final : public nsXULElement, public nsIFrameLoaderOwner {
                         mozilla::ErrorResult& rv);
   void SwapFrameLoaders(XULFrameElement& aOtherLoaderOwner,
                         mozilla::ErrorResult& rv);
-  void SwapFrameLoaders(nsIFrameLoaderOwner* aOtherLoaderOwner,
+  void SwapFrameLoaders(nsFrameLoaderOwner* aOtherLoaderOwner,
                         mozilla::ErrorResult& rv);
 
   // nsIContent
-  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+  virtual nsresult BindToTree(Document* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent) override;
   virtual void UnbindFromTree(bool aDeep, bool aNullParent) override;
   virtual void DestroyContent() override;
@@ -76,7 +67,6 @@ class XULFrameElement final : public nsXULElement, public nsIFrameLoaderOwner {
  protected:
   virtual ~XULFrameElement() {}
 
-  RefPtr<nsFrameLoader> mFrameLoader;
   RefPtr<BrowsingContext> mOpener;
 
   JSObject* WrapNode(JSContext* aCx,

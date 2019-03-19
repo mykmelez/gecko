@@ -126,9 +126,8 @@ var Utils = { // jshint ignore:line
           }
         } catch (e) {
           Logger.debug("Failed to get a string from a bundle for", string);
-        } finally {
-          return str;
         }
+        return str;
       },
     };
     return this.stringBundle;
@@ -153,7 +152,6 @@ var Utils = { // jshint ignore:line
       let extState = {};
       aAccessibleOrEvent.getState(state, extState);
       return new State(state.value, extState.value);
-
   },
 
   getAttributes: function getAttributes(aAccessible) {
@@ -276,6 +274,7 @@ var Utils = { // jshint ignore:line
         return value;
       }
     }
+    return undefined;
   },
 
   getLandmarkName: function getLandmarkName(aAccessible) {
@@ -309,7 +308,7 @@ var Utils = { // jshint ignore:line
   matchRoles: function matchRoles(aAccessible, aRoles) {
     let roles = this.getAttributes(aAccessible)["xml-roles"];
     if (!roles) {
-      return;
+      return undefined;
     }
 
     // Looking up a role that would match any in the provided roles.

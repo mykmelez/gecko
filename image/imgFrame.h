@@ -95,7 +95,8 @@ class imgFrame {
   nsresult InitWithDrawable(gfxDrawable* aDrawable, const nsIntSize& aSize,
                             const SurfaceFormat aFormat,
                             SamplingFilter aSamplingFilter,
-                            uint32_t aImageFlags, gfx::BackendType aBackend);
+                            uint32_t aImageFlags, gfx::BackendType aBackend,
+                            DrawTarget* aTarget);
 
   DrawableFrameRef DrawableRef();
 
@@ -202,8 +203,6 @@ class imgFrame {
   bool GetCompositingFailed() const;
   void SetCompositingFailed(bool val);
 
-  bool ShouldRecycle() const { return mShouldRecycle; }
-
   void SetOptimizable();
 
   void FinalizeSurface();
@@ -301,12 +300,14 @@ class imgFrame {
    * references, the buffer may be released due to events such as low memory.
    */
   RefPtr<DataSourceSurface> mRawSurface;
+  RefPtr<DataSourceSurface> mBlankRawSurface;
 
   /**
    * Refers to the same data as mRawSurface, but when set, it guarantees that
    * we hold a strong reference to the underlying data buffer.
    */
   RefPtr<DataSourceSurface> mLockedSurface;
+  RefPtr<DataSourceSurface> mBlankLockedSurface;
 
   /**
    * Optimized copy of mRawSurface for the DrawTarget that will render it. This

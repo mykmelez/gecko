@@ -2327,11 +2327,12 @@
       GetFullPathName $R8 "$R9"
       IfErrors end_GetLongPath +1 ; If the path doesn't exist return an empty string.
 
-      System::Call 'kernel32::GetLongPathNameW(w R8, w .R7, i 1024)i .R6'
-      StrCmp "$R7" "" +4 +1 ; Empty string when GetLongPathNameW is not present.
-      StrCmp $R6 0 +3 +1    ; Should never equal 0 since the path exists.
-      StrCpy $R9 "$R7"
-      GoTo end_GetLongPath
+      ; Make the drive letter uppercase.
+      StrCpy $R9 "$R8" 1    ; Copy the first char.
+      StrCpy $R8 "$R8" "" 1 ; Copy everything after the first char.
+      ; Convert the first char to uppercase.
+      System::Call "User32::CharUpper(w R9 R9)i"
+      StrCpy $R8 "$R9$R8"   ; Copy the uppercase char and the rest of the chars.
 
       ; Do it the hard way.
       StrCpy $R4 0     ; Stores the position in the string of the last \ found.
@@ -8402,3 +8403,71 @@ end:
   Pop $1
   Pop $0
 !macroend
+
+Function WriteRegQWORD
+          ; Stack contents:
+          ; VALUE, VALUE_NAME, SUBKEY, ROOTKEY
+  Exch $3 ; $3, VALUE_NAME, SUBKEY, ROOTKEY
+  Exch 1  ; VALUE_NAME, $3, SUBKEY, ROOTKEY
+  Exch $2 ; $2, $3, SUBKEY, ROOTKEY
+  Exch 2  ; SUBKEY, $3, $2, ROOTKEY
+  Exch $1 ; $1, $3, $2, ROOTKEY
+  Exch 3  ; ROOTKEY, $3, $2, $1
+  Exch $0 ; $0, $3, $2, $1
+  System::Call "advapi32::RegSetKeyValueW(p r0, w r1, w r2, i 11, *l r3, i 8) i.r0"
+  ${IfNot} $0 = 0
+    SetErrors
+  ${EndIf}
+  Pop $0
+  Pop $3
+  Pop $2
+  Pop $1
+FunctionEnd
+!macro WriteRegQWORD ROOTKEY SUBKEY VALUE_NAME VALUE
+  ${If} "${ROOTKEY}" == "HKCR"
+    Push 0x80000000
+  ${ElseIf} "${ROOTKEY}" == "HKCU"
+    Push 0x80000001
+  ${ElseIf} "${ROOTKEY}" == "HKLM"
+    Push 0x80000002
+  ${Endif}
+  Push "${SUBKEY}"
+  Push "${VALUE_NAME}"
+  System::Int64Op ${VALUE} + 0 ; The result is pushed on the stack
+  Call WriteRegQWORD
+!macroend
+!define WriteRegQWORD "!insertmacro WriteRegQWORD"
+
+Function ReadRegQWORD
+          ; Stack contents:
+          ; VALUE_NAME, SUBKEY, ROOTKEY
+  Exch $2 ; $2, SUBKEY, ROOTKEY
+  Exch 1  ; SUBKEY, $2, ROOTKEY
+  Exch $1 ; $1, $2, ROOTKEY
+  Exch 2  ; ROOTKEY, $2, $1
+  Exch $0 ; $0, $2, $1
+  System::Call "advapi32::RegGetValueW(p r0, w r1, w r2, i 0x48, p 0, *l s, *i 8) i.r0"
+  ${IfNot} $0 = 0
+    SetErrors
+  ${EndIf}
+          ; VALUE, $0, $2, $1
+  Exch 3  ; $1, $0, $2, VALUE
+  Pop $1  ; $0, $2, VALUE
+  Pop $0  ; $2, VALUE
+  Pop $2  ; VALUE
+FunctionEnd
+!macro ReadRegQWORD DEST ROOTKEY SUBKEY VALUE_NAME
+  ${If} "${ROOTKEY}" == "HKCR"
+    Push 0x80000000
+  ${ElseIf} "${ROOTKEY}" == "HKCU"
+    Push 0x80000001
+  ${ElseIf} "${ROOTKEY}" == "HKLM"
+    Push 0x80000002
+  ${Endif}
+  Push "${SUBKEY}"
+  Push "${VALUE_NAME}"
+  Call ReadRegQWORD
+  Pop ${DEST}
+!macroend
+!define ReadRegQWORD "!insertmacro ReadRegQWORD"
+

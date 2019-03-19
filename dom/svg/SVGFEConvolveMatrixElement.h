@@ -8,13 +8,13 @@
 #define mozilla_dom_SVGFEConvolveMatrixElement_h
 
 #include "SVGAnimatedNumberList.h"
-#include "nsSVGBoolean.h"
+#include "SVGBoolean.h"
 #include "SVGEnum.h"
 #include "SVGFilters.h"
-#include "nsSVGInteger.h"
-#include "nsSVGIntegerPair.h"
+#include "SVGInteger.h"
+#include "SVGIntegerPair.h"
 #include "nsSVGNumber2.h"
-#include "nsSVGString.h"
+#include "SVGString.h"
 
 nsresult NS_NewSVGFEConvolveMatrixElement(
     nsIContent** aResult, already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
@@ -46,7 +46,7 @@ class SVGFEConvolveMatrixElement : public SVGFEConvolveMatrixElementBase {
       nsTArray<RefPtr<SourceSurface>>& aInputImages) override;
   virtual bool AttributeAffectsRendering(int32_t aNameSpaceID,
                                          nsAtom* aAttribute) const override;
-  virtual nsSVGString& GetResultImageName() override {
+  virtual SVGString& GetResultImageName() override {
     return mStringAttributes[RESULT];
   }
   virtual void GetSourceImageNames(nsTArray<SVGStringInfo>& aSources) override;
@@ -82,19 +82,19 @@ class SVGFEConvolveMatrixElement : public SVGFEConvolveMatrixElementBase {
   static NumberInfo sNumberInfo[2];
 
   enum { KERNEL_UNIT_LENGTH };
-  nsSVGNumberPair mNumberPairAttributes[1];
+  SVGNumberPair mNumberPairAttributes[1];
   static NumberPairInfo sNumberPairInfo[1];
 
   enum { TARGET_X, TARGET_Y };
-  nsSVGInteger mIntegerAttributes[2];
+  SVGInteger mIntegerAttributes[2];
   static IntegerInfo sIntegerInfo[2];
 
   enum { ORDER };
-  nsSVGIntegerPair mIntegerPairAttributes[1];
+  SVGIntegerPair mIntegerPairAttributes[1];
   static IntegerPairInfo sIntegerPairInfo[1];
 
   enum { PRESERVEALPHA };
-  nsSVGBoolean mBooleanAttributes[1];
+  SVGBoolean mBooleanAttributes[1];
   static BooleanInfo sBooleanInfo[1];
 
   enum { EDGEMODE };
@@ -103,7 +103,7 @@ class SVGFEConvolveMatrixElement : public SVGFEConvolveMatrixElementBase {
   static EnumInfo sEnumInfo[1];
 
   enum { RESULT, IN1 };
-  nsSVGString mStringAttributes[2];
+  SVGString mStringAttributes[2];
   static StringInfo sStringInfo[2];
 
   enum { KERNELMATRIX };

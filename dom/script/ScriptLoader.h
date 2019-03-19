@@ -16,7 +16,7 @@
 #include "nsTArray.h"
 #include "nsAutoPtr.h"
 #include "nsICacheInfoChannel.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIIncrementalStreamLoader.h"
 #include "nsURIHashKey.h"
 #include "mozilla/CORSMode.h"
@@ -79,7 +79,7 @@ class ScriptLoader final : public nsISupports {
   friend class AutoCurrentScriptUpdater;
 
  public:
-  explicit ScriptLoader(nsIDocument* aDocument);
+  explicit ScriptLoader(Document* aDocument);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_CLASS(ScriptLoader)
@@ -198,13 +198,13 @@ class ScriptLoader final : public nsISupports {
   static nsresult ConvertToUTF16(nsIChannel* aChannel, const uint8_t* aData,
                                  uint32_t aLength,
                                  const nsAString& aHintCharset,
-                                 nsIDocument* aDocument, char16_t*& aBufOut,
+                                 Document* aDocument, char16_t*& aBufOut,
                                  size_t& aLengthOut);
 
   static inline nsresult ConvertToUTF16(nsIChannel* aChannel,
                                         const uint8_t* aData, uint32_t aLength,
                                         const nsAString& aHintCharset,
-                                        nsIDocument* aDocument,
+                                        Document* aDocument,
                                         JS::UniqueTwoByteChars& aBufOut,
                                         size_t& aLengthOut) {
     char16_t* bufOut;
@@ -339,7 +339,7 @@ class ScriptLoader final : public nsISupports {
    */
   static LoadedScript* GetActiveScript(JSContext* aCx);
 
-  nsIDocument* GetDocument() const { return mDocument; }
+  Document* GetDocument() const { return mDocument; }
 
  private:
   virtual ~ScriptLoader();
@@ -383,9 +383,9 @@ class ScriptLoader final : public nsISupports {
   /**
    * Helper function to check the content policy for a given request.
    */
-  static nsresult CheckContentPolicy(nsIDocument* aDocument,
-                                     nsISupports* aContext, nsIURI* aURI,
-                                     const nsAString& aType, bool aIsPreLoad);
+  static nsresult CheckContentPolicy(Document* aDocument, nsISupports* aContext,
+                                     const nsAString& aType,
+                                     ScriptLoadRequest* aRequest);
 
   /**
    * Start a load for aRequest's URI.
@@ -400,14 +400,6 @@ class ScriptLoader final : public nsISupports {
   nsresult RestartLoad(ScriptLoadRequest* aRequest);
 
   void HandleLoadError(ScriptLoadRequest* aRequest, nsresult aResult);
-
-  static bool BinASTEncodingEnabled() {
-#ifdef JS_BUILD_BINAST
-    return StaticPrefs::dom_script_loader_binast_encoding_enabled();
-#else
-    return false;
-#endif
-  }
 
   /**
    * Process any pending requests asynchronously (i.e. off an event) if there
@@ -448,6 +440,7 @@ class ScriptLoader final : public nsISupports {
 
   void ReportErrorToConsole(ScriptLoadRequest* aRequest,
                             nsresult aResult) const;
+  void ReportPreloadErrorsToConsole(ScriptLoadRequest* aRequest);
 
   nsresult AttemptAsyncScriptCompile(ScriptLoadRequest* aRequest,
                                      bool* aCouldCompileOut);
@@ -531,12 +524,12 @@ class ScriptLoader final : public nsISupports {
   RefPtr<mozilla::GenericPromise> StartFetchingModuleAndDependencies(
       ModuleLoadRequest* aParent, nsIURI* aURI);
 
-  nsresult AssociateSourceElementsForModuleTree(JSContext* aCx,
-                                                ModuleLoadRequest* aRequest);
+  nsresult InitDebuggerDataForModuleTree(JSContext* aCx,
+                                         ModuleLoadRequest* aRequest);
 
   void RunScriptWhenSafe(ScriptLoadRequest* aRequest);
 
-  nsIDocument* mDocument;  // [WEAK]
+  Document* mDocument;  // [WEAK]
   nsCOMArray<nsIScriptLoaderObserver> mObservers;
   ScriptLoadRequestList mNonAsyncExternalScriptInsertedRequests;
   // mLoadingAsyncRequests holds async requests while they're loading; when they
@@ -604,7 +597,7 @@ class ScriptLoader final : public nsISupports {
 
 class nsAutoScriptLoaderDisabler {
  public:
-  explicit nsAutoScriptLoaderDisabler(nsIDocument* aDoc) {
+  explicit nsAutoScriptLoaderDisabler(Document* aDoc) {
     mLoader = aDoc->ScriptLoader();
     mWasEnabled = mLoader->GetEnabled();
     if (mWasEnabled) {

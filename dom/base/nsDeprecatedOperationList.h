@@ -3,7 +3,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-// IWYU pragma: private, include "nsIDocument.h"
+// IWYU pragma: private, include "mozilla/dom/Document.h"
 
 /*
  * This file contains the list of deprecated DOM operations.  It is
@@ -40,7 +40,6 @@ DEPRECATED_OPERATION(OrientationEvent)
 DEPRECATED_OPERATION(ProximityEvent)
 DEPRECATED_OPERATION(AmbientLightEvent)
 DEPRECATED_OPERATION(IDBOpenDBOptions_StorageType)
-DEPRECATED_OPERATION(DOMAttrModifiedEvent)
 DEPRECATED_OPERATION(MozBoxOrInlineBoxDisplay)
 DEPRECATED_OPERATION(DOMQuadBoundsAttr)
 DEPRECATED_OPERATION(DeprecatedTestingInterface)

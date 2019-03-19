@@ -19,6 +19,7 @@ import mozinfo
 from mozharness.base.errors import BaseErrorList
 from mozharness.base.script import PreScriptAction
 from mozharness.base.vcs.vcsbase import MercurialScript
+from mozharness.mozilla.automation import TBPL_RETRY
 from mozharness.mozilla.testing.android import AndroidMixin
 from mozharness.mozilla.testing.testbase import TestingMixin, testing_config_options
 from mozharness.mozilla.testing.codecoverage import (
@@ -341,7 +342,8 @@ class WebPlatformTest(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidM
         parser = StructuredOutputParser(config=self.config,
                                         log_obj=self.log_obj,
                                         log_compact=True,
-                                        error_list=BaseErrorList + HarnessErrorList)
+                                        error_list=BaseErrorList + HarnessErrorList,
+                                        allow_crashes=True)
 
         env = {'MINIDUMP_SAVE_PATH': dirs['abs_blob_upload_dir']}
         env['RUST_BACKTRACE'] = 'full'
@@ -444,6 +446,9 @@ class WebPlatformTest(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidM
 
                 if len(per_test_args) > 0:
                     self.log_per_test_status(per_test_args[-1], tbpl_status, log_level)
+                    if tbpl_status == TBPL_RETRY:
+                        self.info("Per-test run abandoned due to RETRY status")
+                        return
 
 
 # main {{{1

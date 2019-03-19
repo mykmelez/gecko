@@ -32,7 +32,19 @@ add_task(async function() {
   }, tab.linkedBrowser);
   await popupShown;
 
-  checkElements(true, ["context-pocket", "context-savelinktopocket"]);
+  checkElements(true, ["context-pocket"]);
+
+  contextMenu.hidePopup();
+  await popupHidden;
+  popupShown = BrowserTestUtils.waitForEvent(contextMenu, "popupshown");
+  popupHidden = BrowserTestUtils.waitForEvent(contextMenu, "popuphidden");
+  await BrowserTestUtils.synthesizeMouseAtCenter("a", {
+    type: "contextmenu",
+    button: 2,
+  }, tab.linkedBrowser);
+  await popupShown;
+
+  checkElements(true, ["context-savelinktopocket"]);
 
   contextMenu.hidePopup();
   await popupHidden;
@@ -44,6 +56,15 @@ add_task(async function() {
                         "context-pocket", "context-savelinktopocket"]);
   buttonBox = document.getElementById("pocket-button-box");
   is(buttonBox.hidden, true, "Button should have been hidden");
+
+  let newWin = await BrowserTestUtils.openNewBrowserWindow();
+  checkElements(false, ["appMenu-library-pocket-button",
+                        "context-pocket", "context-savelinktopocket"],
+                newWin);
+  buttonBox = newWin.document.getElementById("pocket-button-box");
+  is(buttonBox.hidden, true, "Button should have been hidden");
+
+  await BrowserTestUtils.closeWindow(newWin);
 
   await promisePocketReset();
 });

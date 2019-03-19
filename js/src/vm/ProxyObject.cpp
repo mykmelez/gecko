@@ -45,10 +45,10 @@ static gc::AllocKind GetProxyGCObjectKind(const Class* clasp,
   return kind;
 }
 
-/* static */ ProxyObject* ProxyObject::New(JSContext* cx,
-                                           const BaseProxyHandler* handler,
-                                           HandleValue priv, TaggedProto proto_,
-                                           const ProxyOptions& options) {
+/* static */
+ProxyObject* ProxyObject::New(JSContext* cx, const BaseProxyHandler* handler,
+                              HandleValue priv, TaggedProto proto_,
+                              const ProxyOptions& options) {
   Rooted<TaggedProto> proto(cx, proto_);
 
   const Class* clasp = options.clasp();
@@ -107,7 +107,7 @@ static gc::AllocKind GetProxyGCObjectKind(const Class* clasp,
 
   proxy->data.handler = handler;
   if (IsCrossCompartmentWrapper(proxy)) {
-    MOZ_ASSERT(cx->realm() == cx->compartment()->realmForNewCCW());
+    MOZ_ASSERT(cx->global() == &cx->compartment()->globalForNewCCW());
     proxy->setCrossCompartmentPrivate(priv);
   } else {
     proxy->setSameCompartmentPrivate(priv);
@@ -187,8 +187,8 @@ void ProxyObject::nuke() {
   gc::InitialHeap heap = GetInitialHeap(newKind, clasp);
   debugCheckNewObject(group, shape, allocKind, heap);
 
-  JSObject* obj = js::Allocate<JSObject>(cx, allocKind, /* nDynamicSlots = */ 0,
-                                         heap, clasp);
+  JSObject* obj =
+      js::AllocateObject(cx, allocKind, /* nDynamicSlots = */ 0, heap, clasp);
   if (!obj) {
     return cx->alreadyReportedOOM();
   }

@@ -578,13 +578,31 @@ bool TokenStreamAnyChars::checkOptions() {
   return true;
 }
 
+void TokenStreamAnyChars::reportErrorNoOffset(unsigned errorNumber, ...) {
+  va_list args;
+  va_start(args, errorNumber);
+
+  reportErrorNoOffsetVA(errorNumber, &args);
+
+  va_end(args);
+}
+
+void TokenStreamAnyChars::reportErrorNoOffsetVA(unsigned errorNumber,
+                                                va_list* args) {
+  ErrorMetadata metadata;
+  computeErrorMetadataNoOffset(&metadata);
+
+  ReportCompileError(cx, std::move(metadata), nullptr, JSREPORT_ERROR,
+                     errorNumber, args);
+}
+
 // Use the fastest available getc.
 #if defined(HAVE_GETC_UNLOCKED)
-#define fast_getc getc_unlocked
+#  define fast_getc getc_unlocked
 #elif defined(HAVE__GETC_NOLOCK)
-#define fast_getc _getc_nolock
+#  define fast_getc _getc_nolock
 #else
-#define fast_getc getc
+#  define fast_getc getc
 #endif
 
 MOZ_MUST_USE MOZ_ALWAYS_INLINE bool
@@ -741,14 +759,14 @@ MOZ_COLD void TokenStreamChars<Utf8Unit, AnyCharsAccess>::internalEncodingError(
     uint32_t line, column;
     computeLineAndColumn(offset, &line, &column);
 
-    if (!notes->addNoteASCII(anyChars.cx, anyChars.getFilename(), line, column,
-                             GetErrorMessage, nullptr, JSMSG_BAD_CODE_UNITS,
-                             badUnitsStr)) {
+    if (!notes->addNoteASCII(anyChars.cx, anyChars.getFilename(), 0, line,
+                             column, GetErrorMessage, nullptr,
+                             JSMSG_BAD_CODE_UNITS, badUnitsStr)) {
       break;
     }
 
     ReportCompileError(anyChars.cx, std::move(err), std::move(notes),
-                       JSREPORT_ERROR, errorNumber, args);
+                       JSREPORT_ERROR, errorNumber, &args);
   } while (false);
 
   va_end(args);
@@ -1257,6 +1275,7 @@ bool TokenStreamSpecific<Unit, AnyCharsAccess>::advance(size_t position) {
   TokenStreamAnyChars& anyChars = anyCharsAccess();
   Token* cur = const_cast<Token*>(&anyChars.currentToken());
   cur->pos.begin = this->sourceUnits.offset();
+  cur->pos.end = cur->pos.begin;
   MOZ_MAKE_MEM_UNDEFINED(&cur->type, sizeof(cur->type));
   anyChars.lookahead = 0;
   return true;
@@ -1289,46 +1308,6 @@ bool TokenStreamSpecific<Unit, AnyCharsAccess>::seek(
 
   seek(pos);
   return true;
-}
-
-template <typename Unit, class AnyCharsAccess>
-bool TokenStreamSpecific<Unit, AnyCharsAccess>::reportStrictModeErrorNumberVA(
-    UniquePtr<JSErrorNotes> notes, uint32_t offset, bool strictMode,
-    unsigned errorNumber, va_list* args) {
-  TokenStreamAnyChars& anyChars = anyCharsAccess();
-  if (!strictMode && !anyChars.options().extraWarningsOption) {
-    return true;
-  }
-
-  ErrorMetadata metadata;
-  if (!computeErrorMetadata(&metadata, offset)) {
-    return false;
-  }
-
-  if (strictMode) {
-    ReportCompileError(anyChars.cx, std::move(metadata), std::move(notes),
-                       JSREPORT_ERROR, errorNumber, *args);
-    return false;
-  }
-
-  return anyChars.compileWarning(std::move(metadata), std::move(notes),
-                                 JSREPORT_WARNING | JSREPORT_STRICT,
-                                 errorNumber, *args);
-}
-
-bool TokenStreamAnyChars::compileWarning(ErrorMetadata&& metadata,
-                                         UniquePtr<JSErrorNotes> notes,
-                                         unsigned flags, unsigned errorNumber,
-                                         va_list args) {
-  if (options().werrorOption) {
-    flags &= ~JSREPORT_WARNING;
-    ReportCompileError(cx, std::move(metadata), std::move(notes), flags,
-                       errorNumber, args);
-    return false;
-  }
-
-  return ReportCompileWarning(cx, std::move(metadata), std::move(notes), flags,
-                              errorNumber, args);
 }
 
 void TokenStreamAnyChars::computeErrorMetadataNoOffset(ErrorMetadata* err) {
@@ -1508,10 +1487,17 @@ bool TokenStreamCharsBase<Unit>::addLineOfContext(ErrorMetadata* err,
 
 template <typename Unit, class AnyCharsAccess>
 bool TokenStreamSpecific<Unit, AnyCharsAccess>::computeErrorMetadata(
-    ErrorMetadata* err, uint32_t offset) {
-  if (offset == NoOffset) {
+    ErrorMetadata* err, const ErrorOffset& errorOffset) {
+  if (errorOffset.is<NoOffset>()) {
     anyCharsAccess().computeErrorMetadataNoOffset(err);
     return true;
+  }
+
+  uint32_t offset;
+  if (errorOffset.is<uint32_t>()) {
+    offset = errorOffset.as<uint32_t>();
+  } else {
+    offset = this->sourceUnits.offset();
   }
 
   // This function's return value isn't a success/failure indication: it
@@ -1524,131 +1510,6 @@ bool TokenStreamSpecific<Unit, AnyCharsAccess>::computeErrorMetadata(
 
   // We can't fill in any more here.
   return true;
-}
-
-template <typename Unit, class AnyCharsAccess>
-bool TokenStreamSpecific<Unit, AnyCharsAccess>::reportStrictModeError(
-    unsigned errorNumber, ...) {
-  va_list args;
-  va_start(args, errorNumber);
-
-  TokenStreamAnyChars& anyChars = anyCharsAccess();
-  bool result =
-      reportStrictModeErrorNumberVA(nullptr, anyChars.currentToken().pos.begin,
-                                    anyChars.strictMode(), errorNumber, &args);
-
-  va_end(args);
-  return result;
-}
-
-template <typename Unit, class AnyCharsAccess>
-void TokenStreamSpecific<Unit, AnyCharsAccess>::reportError(
-    unsigned errorNumber, ...) {
-  va_list args;
-  va_start(args, errorNumber);
-
-  TokenStreamAnyChars& anyChars = anyCharsAccess();
-  ErrorMetadata metadata;
-  if (computeErrorMetadata(&metadata, anyChars.currentToken().pos.begin)) {
-    ReportCompileError(anyChars.cx, std::move(metadata), nullptr,
-                       JSREPORT_ERROR, errorNumber, args);
-  }
-
-  va_end(args);
-}
-
-void TokenStreamAnyChars::reportErrorNoOffset(unsigned errorNumber, ...) {
-  va_list args;
-  va_start(args, errorNumber);
-
-  reportErrorNoOffsetVA(errorNumber, args);
-
-  va_end(args);
-}
-
-void TokenStreamAnyChars::reportErrorNoOffsetVA(unsigned errorNumber,
-                                                va_list args) {
-  ErrorMetadata metadata;
-  computeErrorMetadataNoOffset(&metadata);
-
-  ReportCompileError(cx, std::move(metadata), nullptr, JSREPORT_ERROR,
-                     errorNumber, args);
-}
-
-template <typename Unit, class AnyCharsAccess>
-bool TokenStreamSpecific<Unit, AnyCharsAccess>::warning(unsigned errorNumber,
-                                                        ...) {
-  va_list args;
-  va_start(args, errorNumber);
-
-  ErrorMetadata metadata;
-  bool result =
-      computeErrorMetadata(&metadata,
-                           anyCharsAccess().currentToken().pos.begin) &&
-      anyCharsAccess().compileWarning(std::move(metadata), nullptr,
-                                      JSREPORT_WARNING, errorNumber, args);
-
-  va_end(args);
-  return result;
-}
-
-template <typename Unit, class AnyCharsAccess>
-bool TokenStreamSpecific<Unit, AnyCharsAccess>::reportExtraWarningErrorNumberVA(
-    UniquePtr<JSErrorNotes> notes, uint32_t offset, unsigned errorNumber,
-    va_list* args) {
-  TokenStreamAnyChars& anyChars = anyCharsAccess();
-  if (!anyChars.options().extraWarningsOption) {
-    return true;
-  }
-
-  ErrorMetadata metadata;
-  if (!computeErrorMetadata(&metadata, offset)) {
-    return false;
-  }
-
-  return anyChars.compileWarning(std::move(metadata), std::move(notes),
-                                 JSREPORT_STRICT | JSREPORT_WARNING,
-                                 errorNumber, *args);
-}
-
-template <typename Unit, class AnyCharsAccess>
-void TokenStreamSpecific<Unit, AnyCharsAccess>::error(unsigned errorNumber,
-                                                      ...) {
-  va_list args;
-  va_start(args, errorNumber);
-
-  ErrorMetadata metadata;
-  if (computeErrorMetadata(&metadata, this->sourceUnits.offset())) {
-    TokenStreamAnyChars& anyChars = anyCharsAccess();
-    ReportCompileError(anyChars.cx, std::move(metadata), nullptr,
-                       JSREPORT_ERROR, errorNumber, args);
-  }
-
-  va_end(args);
-}
-
-template <typename Unit, class AnyCharsAccess>
-void TokenStreamSpecific<Unit, AnyCharsAccess>::errorAtVA(uint32_t offset,
-                                                          unsigned errorNumber,
-                                                          va_list* args) {
-  ErrorMetadata metadata;
-  if (computeErrorMetadata(&metadata, offset)) {
-    TokenStreamAnyChars& anyChars = anyCharsAccess();
-    ReportCompileError(anyChars.cx, std::move(metadata), nullptr,
-                       JSREPORT_ERROR, errorNumber, *args);
-  }
-}
-
-template <typename Unit, class AnyCharsAccess>
-void TokenStreamSpecific<Unit, AnyCharsAccess>::errorAt(uint32_t offset,
-                                                        unsigned errorNumber,
-                                                        ...) {
-  va_list args;
-  va_start(args, errorNumber);
-
-  errorAtVA(offset, errorNumber, &args);
-
-  va_end(args);
 }
 
 // We have encountered a '\': check for a Unicode escape sequence after it.
@@ -2132,9 +1993,10 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::identifierName(
                "Private identifier starts with #");
     newPrivateNameToken(atom->asPropertyName(), start, modifier, out);
 
-    // TODO(khypera): Delete the below once private names are supported.
-    errorAt(start.offset(), JSMSG_FIELDS_NOT_SUPPORTED);
-    return false;
+    if (!anyCharsAccess().options().fieldsEnabledOption) {
+      errorAt(start.offset(), JSMSG_FIELDS_NOT_SUPPORTED);
+      return false;
+    }
   } else {
     newNameToken(atom->asPropertyName(), start, modifier, out);
   }
@@ -2282,12 +2144,9 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::decimalNumber(
 
   // Numbers contain no escapes, so we can read directly from |sourceUnits|.
   double dval;
-#ifdef ENABLE_BIGINT
   bool isBigInt = false;
-#endif
   DecimalPoint decimalPoint = NoDecimal;
-  if (unit != '.' && unit != 'e' && unit != 'E' &&
-      IF_BIGINT(unit != 'n', true)) {
+  if (unit != '.' && unit != 'e' && unit != 'E' && unit != 'n') {
     // NOTE: |unit| may be EOF here.
     ungetCodeUnit(unit);
 
@@ -2297,14 +2156,10 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::decimalNumber(
                            this->sourceUnits.addressOfNextCodeUnit(), &dval)) {
       return false;
     }
-  }
-#ifdef ENABLE_BIGINT
-  else if (unit == 'n') {
+  } else if (unit == 'n' && anyCharsAccess().options().bigIntEnabledOption) {
     isBigInt = true;
     unit = peekCodeUnit();
-  }
-#endif
-  else {
+  } else {
     // Consume any decimal dot and fractional component.
     if (unit == '.') {
       decimalPoint = HasDecimal;
@@ -2366,11 +2221,9 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::decimalNumber(
 
   noteBadToken.release();
 
-#ifdef ENABLE_BIGINT
   if (isBigInt) {
     return bigIntLiteral(start, modifier, out);
   }
-#endif
 
   newNumberToken(dval, decimalPoint, start, modifier, out);
   return true;
@@ -2395,7 +2248,7 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::regexpLiteral(
     if (MOZ_UNLIKELY(codePoint == unicode::LINE_SEPARATOR ||
                      codePoint == unicode::PARA_SEPARATOR)) {
       this->sourceUnits.ungetLineOrParagraphSeparator();
-      this->reportError(JSMSG_UNTERMINATED_REGEXP);
+      this->error(JSMSG_UNTERMINATED_REGEXP);
       return false;
     }
 
@@ -2501,10 +2354,10 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::regexpLiteral(
   return true;
 }
 
-#ifdef ENABLE_BIGINT
 template <typename Unit, class AnyCharsAccess>
 MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::bigIntLiteral(
     TokenStart start, Modifier modifier, TokenKind* out) {
+  MOZ_ASSERT(anyCharsAccess().options().bigIntEnabledOption);
   MOZ_ASSERT(this->sourceUnits.previousCodeUnit() == toUnit('n'));
   MOZ_ASSERT(this->sourceUnits.offset() > start.offset());
   uint32_t length = this->sourceUnits.offset() - start.offset();
@@ -2525,7 +2378,34 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::bigIntLiteral(
   newBigIntToken(start, modifier, out);
   return true;
 }
-#endif
+
+template <typename Unit, class AnyCharsAccess>
+void GeneralTokenStreamChars<Unit,
+                             AnyCharsAccess>::consumeOptionalHashbangComment() {
+  MOZ_ASSERT(this->sourceUnits.atStart(),
+             "HashBangComment can only appear immediately at the start of a "
+             "Script or Module");
+
+  // HashbangComment ::
+  //   #!  SingleLineCommentChars_opt
+
+  if (!matchCodeUnit('#')) {
+    // HashbangComment is optional at start of Script or Module.
+    return;
+  }
+
+  if (!matchCodeUnit('!')) {
+    // # not followed by ! at start of Script or Module is an error, but normal
+    // parsing code will handle that error just fine if we let it.
+    ungetCodeUnit('#');
+    return;
+  }
+
+  // This doesn't consume a concluding LineTerminator, and it stops consuming
+  // just before any encoding error.  The subsequent |getToken| call will call
+  // |getTokenInternal| below which will handle these possibilities.
+  this->sourceUnits.consumeRestOfSingleLineComment();
+}
 
 template <typename Unit, class AnyCharsAccess>
 MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::getTokenInternal(
@@ -2691,10 +2571,8 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::getTokenInternal(
     if (c1kind == ZeroDigit) {
       TokenStart start(this->sourceUnits, -1);
       int radix;
-#ifdef ENABLE_BIGINT
       bool isLegacyOctalOrNoctal = false;
       bool isBigInt = false;
-#endif
       const Unit* numStart;
       unit = getCodeUnit();
       if (unit == 'x' || unit == 'X') {
@@ -2747,16 +2625,14 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::getTokenInternal(
         }
       } else if (IsAsciiDigit(unit)) {
         radix = 8;
-#ifdef ENABLE_BIGINT
         isLegacyOctalOrNoctal = true;
-#endif
         // one past the '0'
         numStart = this->sourceUnits.addressOfNextCodeUnit() - 1;
 
         do {
           // Octal integer literals are not permitted in strict mode
           // code.
-          if (!reportStrictModeError(JSMSG_DEPRECATED_OCTAL)) {
+          if (!strictModeError(JSMSG_DEPRECATED_OCTAL)) {
             return badToken();
           }
 
@@ -2784,8 +2660,7 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::getTokenInternal(
         return decimalNumber(unit, start, numStart, modifier, ttp);
       }
 
-#ifdef ENABLE_BIGINT
-      if (unit == 'n') {
+      if (unit == 'n' && anyCharsAccess().options().bigIntEnabledOption) {
         if (isLegacyOctalOrNoctal) {
           error(JSMSG_BIGINT_INVALID_SYNTAX);
           return badToken();
@@ -2795,9 +2670,6 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::getTokenInternal(
       } else {
         ungetCodeUnit(unit);
       }
-#else
-      ungetCodeUnit(unit);
-#endif
 
       // Error if an identifier-start code point appears immediately
       // after the number.  Somewhat surprisingly, if we don't check
@@ -2818,11 +2690,9 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::getTokenInternal(
         }
       }
 
-#ifdef ENABLE_BIGINT
       if (isBigInt) {
         return bigIntLiteral(start, modifier, ttp);
       }
-#endif
 
       double dval;
       if (!GetFullInteger(anyCharsAccess().cx, numStart,
@@ -3028,7 +2898,7 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::getTokenInternal(
           do {
             int32_t unit = getCodeUnit();
             if (unit == EOF) {
-              reportError(JSMSG_UNTERMINATED_COMMENT);
+              error(JSMSG_UNTERMINATED_COMMENT);
               return badToken();
             }
 
@@ -3400,7 +3270,7 @@ bool TokenStreamSpecific<Unit, AnyCharsAccess>::getStringOrTemplateToken(
                                                 InvalidEscapeType::Octal);
               continue;
             }
-            if (!reportStrictModeError(JSMSG_DEPRECATED_OCTAL)) {
+            if (!strictModeError(JSMSG_DEPRECATED_OCTAL)) {
               return false;
             }
             anyChars.flags.sawOctalEscape = true;
@@ -3501,11 +3371,11 @@ const char* TokenKindToDesc(TokenKind tt) {
 #ifdef DEBUG
 const char* TokenKindToString(TokenKind tt) {
   switch (tt) {
-#define EMIT_CASE(name, desc) \
-  case TokenKind::name:       \
-    return "TokenKind::" #name;
+#  define EMIT_CASE(name, desc) \
+    case TokenKind::name:       \
+      return "TokenKind::" #name;
     FOR_EACH_TOKEN_KIND(EMIT_CASE)
-#undef EMIT_CASE
+#  undef EMIT_CASE
     case TokenKind::Limit:
       break;
   }

@@ -82,7 +82,6 @@ ModuleGenerator::ModuleGenerator(const CompileArgs& args,
       debugTrapCodeOffset_(),
       lastPatchedCallSite_(0),
       startOfUnpatchedCallsites_(0),
-      deferredValidationState_(mutexid::WasmDeferredValidation),
       parallel_(false),
       outstanding_(0),
       currentTask_(nullptr),
@@ -353,6 +352,9 @@ bool ModuleGenerator::init(Metadata* maybeAsmJSMetadata) {
           return false;
         }
         for (uint32_t funcIndex : seg->elemFuncIndices) {
+          if (funcIndex == NullFuncIndex) {
+            continue;
+          }
           exportedFuncs.infallibleEmplaceBack(funcIndex, false);
         }
         break;
@@ -386,10 +388,6 @@ bool ModuleGenerator::init(Metadata* maybeAsmJSMetadata) {
         std::move(funcType), funcIndex.index(), funcIndex.isExplicit());
   }
 
-  // Ensure that mutable shared state for deferred validation is correctly
-  // set up.
-  deferredValidationState_.lock()->init();
-
   // Determine whether parallel or sequential compilation is to be used and
   // initialize the CompileTasks that will be used in either mode.
 
@@ -408,7 +406,7 @@ bool ModuleGenerator::init(Metadata* maybeAsmJSMetadata) {
     return false;
   }
   for (size_t i = 0; i < numTasks; i++) {
-    tasks_.infallibleEmplaceBack(*env_, taskState_, deferredValidationState_,
+    tasks_.infallibleEmplaceBack(*env_, taskState_,
                                  COMPILATION_LIFO_DEFAULT_CHUNK_SIZE);
   }
 
@@ -708,7 +706,7 @@ static bool ExecuteCompileTask(CompileTask* task, UniqueChars* error) {
 #ifdef ENABLE_WASM_CRANELIFT
       if (task->env.optimizedBackend() == OptimizedBackend::Cranelift) {
         if (!CraneliftCompileFunctions(task->env, task->lifo, task->inputs,
-                                       &task->output, task->dvs, error)) {
+                                       &task->output, error)) {
           return false;
         }
         break;
@@ -716,13 +714,13 @@ static bool ExecuteCompileTask(CompileTask* task, UniqueChars* error) {
 #endif
       MOZ_ASSERT(task->env.optimizedBackend() == OptimizedBackend::Ion);
       if (!IonCompileFunctions(task->env, task->lifo, task->inputs,
-                               &task->output, task->dvs, error)) {
+                               &task->output, error)) {
         return false;
       }
       break;
     case Tier::Baseline:
       if (!BaselineCompileFunctions(task->env, task->lifo, task->inputs,
-                                    &task->output, task->dvs, error)) {
+                                    &task->output, error)) {
         return false;
       }
       break;
@@ -1010,14 +1008,6 @@ UniqueCodeTier ModuleGenerator::finishCodeTier() {
     return nullptr;
   }
 
-  // All functions and stubs have been compiled.  Perform module-end
-  // validation.
-
-  if (!deferredValidationState_.lock()->performDeferredValidation(*env_,
-                                                                  error_)) {
-    return nullptr;
-  }
-
   // Finish linking and metadata.
 
   if (!finishCodegen()) {
@@ -1056,7 +1046,6 @@ SharedMetadata ModuleGenerator::finishMetadata(const Bytes& bytecode) {
   // Copy over data from the ModuleEnvironment.
 
   metadata_->memoryUsage = env_->memoryUsage;
-  metadata_->temporaryGcTypesConfigured = env_->gcTypesConfigured;
   metadata_->minMemoryLength = env_->minMemoryLength;
   metadata_->maxMemoryLength = env_->maxMemoryLength;
   metadata_->startFuncIndex = env_->startFuncIndex;
@@ -1105,8 +1094,7 @@ SharedMetadata ModuleGenerator::finishMetadata(const Bytes& bytecode) {
 
 SharedModule ModuleGenerator::finishModule(
     const ShareableBytes& bytecode,
-    JS::OptimizedEncodingListener* maybeTier2Listener,
-    UniqueLinkData* maybeLinkData) {
+    JS::OptimizedEncodingListener* maybeTier2Listener) {
   MOZ_ASSERT(mode() == CompileMode::Once || mode() == CompileMode::Tier1);
 
   UniqueCodeTier codeTier = finishCodeTier();
@@ -1222,11 +1210,6 @@ SharedModule ModuleGenerator::finishModule(
     module->startTier2(*compileArgs_, bytecode, maybeTier2Listener);
   } else if (tier() == Tier::Serialized && maybeTier2Listener) {
     module->serialize(*linkData_, *maybeTier2Listener);
-  }
-
-  if (maybeLinkData) {
-    MOZ_ASSERT(!env_->debugEnabled());
-    *maybeLinkData = std::move(linkData_);
   }
 
   return module;

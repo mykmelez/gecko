@@ -1,4 +1,4 @@
-// |jit-test| skip-if: !wasmGcEnabled()
+// |jit-test| skip-if: !wasmReftypesEnabled()
 
 // Tests wasm frame tracing.  Only tests for direct and indirect call chains
 // in wasm that lead to JS allocation.  Does not test any timeout or interrupt
@@ -17,12 +17,11 @@ const {Module,Instance} = WebAssembly;
 
 let t =
   `(module
-     (gc_feature_opt_in 2)
      (import $check3 "" "check3" (func (param anyref) (param anyref) (param anyref)))
      (type $typeOfFn0
            (func (result i32) (param i32) (param anyref) (param i32)
                               (param anyref) (param anyref) (param i32)))
-     (table 1 1 anyfunc)
+     (table 1 1 funcref)
      (elem (i32.const 0) $fn0)
 
      (import $alloc "" "alloc" (func (result anyref)))

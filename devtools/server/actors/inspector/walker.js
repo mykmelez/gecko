@@ -36,7 +36,6 @@ loader.lazyRequireGetter(this, "SKIP_TO_SIBLING", "devtools/server/actors/inspec
 loader.lazyRequireGetter(this, "NodeActor", "devtools/server/actors/inspector/node", true);
 loader.lazyRequireGetter(this, "NodeListActor", "devtools/server/actors/inspector/node", true);
 loader.lazyRequireGetter(this, "LayoutActor", "devtools/server/actors/layout", true);
-loader.lazyRequireGetter(this, "findFlexOrGridParentContainerForNode", "devtools/server/actors/layout", true);
 loader.lazyRequireGetter(this, "getLayoutChangesObserver", "devtools/server/actors/reflow", true);
 loader.lazyRequireGetter(this, "releaseLayoutChangesObserver", "devtools/server/actors/reflow", true);
 loader.lazyRequireGetter(this, "WalkerSearch", "devtools/server/actors/utils/walker-search", true);
@@ -370,9 +369,11 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
   },
 
   _onReflows: function(reflows) {
-    // Going through the nodes the walker knows about, see which ones have
-    // had their display changed and send a display-change event if any
-    const changes = [];
+    // Going through the nodes the walker knows about, see which ones have had their
+    // display or scrollable state changed and send events if any.
+    const displayTypeChanges = [];
+    const scrollableStateChanges = [];
+
     for (const [node, actor] of this._refMap) {
       if (Cu.isDeadWrapper(node)) {
         continue;
@@ -383,16 +384,26 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
       if (displayType !== actor.currentDisplayType ||
           isDisplayed !== actor.wasDisplayed) {
-        changes.push(actor);
+        displayTypeChanges.push(actor);
 
         // Updating the original value
         actor.currentDisplayType = displayType;
         actor.wasDisplayed = isDisplayed;
       }
+
+      const isScrollable = actor.isScrollable;
+      if (isScrollable !== actor.wasScrollable) {
+        scrollableStateChanges.push(actor);
+        actor.wasScrollable = isScrollable;
+      }
     }
 
-    if (changes.length) {
-      this.emit("display-change", changes);
+    if (displayTypeChanges.length) {
+      this.emit("display-change", displayTypeChanges);
+    }
+
+    if (scrollableStateChanges.length) {
+      this.emit("scrollable-change", scrollableStateChanges);
     }
   },
 
@@ -548,9 +559,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       rawNode.nodeName === "SLOT" &&
       isDirectShadowHostChild(firstChild);
 
-    const isFlexItem =
-      !!firstChild &&
-      findFlexOrGridParentContainerForNode(firstChild, "flex", this);
+    const isFlexItem = !!(firstChild && firstChild.parentFlexElement);
 
     if (!firstChild ||
         walker.nextSibling() ||
@@ -1208,7 +1217,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       return sortA.localeCompare(sortB);
     });
 
-    result.slice(0, 25);
+    result = result.slice(0, 25);
 
     return {
       query: query,

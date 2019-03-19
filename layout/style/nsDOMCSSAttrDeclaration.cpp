@@ -8,23 +8,24 @@
 
 #include "nsDOMCSSAttrDeclaration.h"
 
-#include "mozilla/DeclarationBlock.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/MutationEventBinding.h"
+#include "mozilla/DeclarationBlock.h"
 #include "mozilla/InternalMutationEvent.h"
+#include "mozilla/SMILCSSValueType.h"
 #include "mozAutoDocUpdate.h"
-#include "nsIDocument.h"
 #include "nsIURI.h"
 #include "nsNodeUtils.h"
-#include "SMILCSSValueType.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsIFrame.h"
 #include "ActiveLayerTracker.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
-nsDOMCSSAttributeDeclaration::nsDOMCSSAttributeDeclaration(
-    dom::Element* aElement, bool aIsSMILOverride)
+nsDOMCSSAttributeDeclaration::nsDOMCSSAttributeDeclaration(Element* aElement,
+                                                           bool aIsSMILOverride)
     : mElement(aElement), mIsSMILOverride(aIsSMILOverride) {
   NS_ASSERTION(aElement, "Inline style for a NULL element?");
 }
@@ -78,11 +79,11 @@ nsresult nsDOMCSSAttributeDeclaration::SetCSSDeclaration(
 
   aDecl->SetDirty();
   return mIsSMILOverride
-             ? mElement->SetSMILOverrideStyleDeclaration(aDecl, true)
+             ? mElement->SetSMILOverrideStyleDeclaration(aDecl)
              : mElement->SetInlineStyleDeclaration(*aDecl, *aClosureData);
 }
 
-nsIDocument* nsDOMCSSAttributeDeclaration::DocToUpdate() {
+Document* nsDOMCSSAttributeDeclaration::DocToUpdate() {
   // We need OwnerDoc() rather than GetUncomposedDoc() because it might
   // be the BeginUpdate call that inserts mElement into the document.
   return mElement->OwnerDoc();
@@ -133,7 +134,7 @@ nsDOMCSSAttributeDeclaration::GetParsingEnvironment(
 }
 
 nsresult nsDOMCSSAttributeDeclaration::SetSMILValue(
-    const nsCSSPropertyID aPropID, const nsSMILValue& aValue) {
+    const nsCSSPropertyID aPropID, const SMILValue& aValue) {
   MOZ_ASSERT(mIsSMILOverride);
   // No need to do the ActiveLayerTracker / ScrollLinkedEffectDetector bits,
   // since we're in a SMIL animation anyway, no need to try to detect we're a
@@ -158,14 +159,17 @@ nsresult nsDOMCSSAttributeDeclaration::SetSMILValue(
 nsresult nsDOMCSSAttributeDeclaration::SetPropertyValue(
     const nsCSSPropertyID aPropID, const nsAString& aValue,
     nsIPrincipal* aSubjectPrincipal) {
-  // Scripted modifications to style.opacity or style.transform
+  // Scripted modifications to style.opacity or style.transform (or other
+  // transform-like properties, e.g. style.translate, style.rotate, style.scale)
   // could immediately force us into the animated state if heuristics suggest
   // this is scripted animation.
   // FIXME: This is missing the margin shorthand and the logical versions of
   // the margin properties, see bug 1266287.
   if (aPropID == eCSSProperty_opacity || aPropID == eCSSProperty_transform ||
-      aPropID == eCSSProperty_left || aPropID == eCSSProperty_top ||
-      aPropID == eCSSProperty_right || aPropID == eCSSProperty_bottom ||
+      aPropID == eCSSProperty_translate || aPropID == eCSSProperty_rotate ||
+      aPropID == eCSSProperty_scale || aPropID == eCSSProperty_left ||
+      aPropID == eCSSProperty_top || aPropID == eCSSProperty_right ||
+      aPropID == eCSSProperty_bottom ||
       aPropID == eCSSProperty_background_position_x ||
       aPropID == eCSSProperty_background_position_y ||
       aPropID == eCSSProperty_background_position) {

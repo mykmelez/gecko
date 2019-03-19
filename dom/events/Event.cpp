@@ -29,7 +29,7 @@
 #include "nsIFrame.h"
 #include "nsIContent.h"
 #include "nsIContentInlines.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIPresShell.h"
 #include "nsIScrollableFrame.h"
 #include "nsJSEnvironment.h"
@@ -39,9 +39,6 @@
 
 namespace mozilla {
 namespace dom {
-
-static bool sReturnHighResTimeStamp = false;
-static bool sReturnHighResTimeStampIsSet = false;
 
 Event::Event(EventTarget* aOwner, nsPresContext* aPresContext,
              WidgetEvent* aEvent) {
@@ -56,13 +53,6 @@ void Event::ConstructorInit(EventTarget* aOwner, nsPresContext* aPresContext,
                             WidgetEvent* aEvent) {
   SetOwner(aOwner);
   mIsMainThreadEvent = NS_IsMainThread();
-
-  if (mIsMainThreadEvent && !sReturnHighResTimeStampIsSet) {
-    Preferences::AddBoolVarCache(&sReturnHighResTimeStamp,
-                                 "dom.event.highrestimestamp.enabled",
-                                 sReturnHighResTimeStamp);
-    sReturnHighResTimeStampIsSet = true;
-  }
 
   mPrivateDataDuplicated = false;
   mWantsPopupControlCheck = false;
@@ -154,6 +144,9 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Event)
       case eClipboardEventClass:
         tmp->mEvent->AsClipboardEvent()->mClipboardData = nullptr;
         break;
+      case eEditorInputEventClass:
+        tmp->mEvent->AsEditorInputEvent()->mDataTransfer = nullptr;
+        break;
       case eMutationEventClass:
         tmp->mEvent->AsMutationEvent()->mRelatedNode = nullptr;
         break;
@@ -189,6 +182,10 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Event)
         NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mEvent->mClipboardData");
         cb.NoteXPCOMChild(tmp->mEvent->AsClipboardEvent()->mClipboardData);
         break;
+      case eEditorInputEventClass:
+        NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mEvent->mDataTransfer");
+        cb.NoteXPCOMChild(tmp->mEvent->AsEditorInputEvent()->mDataTransfer);
+        break;
       case eMutationEventClass:
         NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mEvent->mRelatedNode");
         cb.NoteXPCOMChild(tmp->mEvent->AsMutationEvent()->mRelatedNode);
@@ -222,7 +219,7 @@ void Event::GetType(nsAString& aType) const {
 
 EventTarget* Event::GetTarget() const { return mEvent->GetDOMEventTarget(); }
 
-already_AddRefed<nsIDocument> Event::GetDocument() const {
+already_AddRefed<Document> Event::GetDocument() const {
   nsCOMPtr<EventTarget> eventTarget = GetTarget();
 
   if (!eventTarget) {
@@ -236,7 +233,7 @@ already_AddRefed<nsIDocument> Event::GetDocument() const {
     return nullptr;
   }
 
-  nsCOMPtr<nsIDocument> doc;
+  nsCOMPtr<Document> doc;
   doc = win->GetExtantDoc();
 
   return doc.forget();
@@ -301,7 +298,7 @@ bool Event::Init(mozilla::dom::EventTarget* aGlobal) {
   bool trusted = false;
   nsCOMPtr<nsPIDOMWindowInner> w = do_QueryInterface(aGlobal);
   if (w) {
-    nsCOMPtr<nsIDocument> d = w->GetExtantDoc();
+    nsCOMPtr<Document> d = w->GetExtantDoc();
     if (d) {
       trusted = nsContentUtils::IsChromeDoc(d);
       nsPresContext* presContext = d->GetPresContext();
@@ -384,12 +381,12 @@ void Event::PreventDefaultInternal(bool aCalledByDefaultHandler,
   if (mEvent->mFlags.mInPassiveListener) {
     nsCOMPtr<nsPIDOMWindowInner> win(do_QueryInterface(mOwner));
     if (win) {
-      if (nsIDocument* doc = win->GetExtantDoc()) {
+      if (Document* doc = win->GetExtantDoc()) {
         nsString type;
         GetType(type);
         const char16_t* params[] = {type.get()};
-        doc->WarnOnceAbout(nsIDocument::ePreventDefaultFromPassiveListener,
-                           false, params, ArrayLength(params));
+        doc->WarnOnceAbout(Document::ePreventDefaultFromPassiveListener, false,
+                           params, ArrayLength(params));
       }
     }
     return;
@@ -685,15 +682,6 @@ void Event::SetReturnValue(bool aReturnValue, CallerType aCallerType) {
 }
 
 double Event::TimeStamp() {
-  if (!sReturnHighResTimeStamp) {
-    // In the situation where you have set a very old, not-very-supported
-    // non-default preference, we will always reduce the precision,
-    // regardless of system principal or not.
-    // The timestamp is absolute, so we supply a zero context mix-in.
-    double ret = static_cast<double>(mEvent->mTime);
-    return nsRFPService::ReduceTimePrecisionAsMSecs(ret, 0);
-  }
-
   if (mEvent->mTimeStamp.IsNull()) {
     return 0.0;
   }

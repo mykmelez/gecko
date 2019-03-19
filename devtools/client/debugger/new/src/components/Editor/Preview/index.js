@@ -9,7 +9,12 @@ import { connect } from "../../../utils/connect";
 
 import Popup from "./Popup";
 
-import { getPreview, getSelectedSource, getIsPaused } from "../../../selectors";
+import {
+  getPreview,
+  getSelectedSource,
+  getIsPaused,
+  getCurrentThread
+} from "../../../selectors";
 import actions from "../../../actions";
 import { toEditorRange } from "../../../utils/editor";
 
@@ -41,19 +46,20 @@ function inPopup(e) {
   }
 
   const pop =
-    relatedTarget.closest(".tooltip") ||
-    relatedTarget.closest(".popover") ||
-    relatedTarget.classList.contains("debug-expression");
+    relatedTarget.closest(".tooltip") || relatedTarget.closest(".popover");
 
   return pop;
 }
 
 function getElementFromPos(pos: DOMRect) {
-  // $FlowIgnore
-  return document.elementFromPoint(
-    pos.x + pos.width / 2,
-    pos.y + pos.height / 2
-  );
+  // We need to use element*s*AtPoint because the tooltip overlays
+  // the token and thus an undesirable element may be returned
+  const elementsAtPoint = [
+    // $FlowIgnore
+    ...document.elementsFromPoint(pos.x + pos.width / 2, pos.y + pos.height / 2)
+  ];
+
+  return elementsAtPoint.find(el => el.className.startsWith("cm-"));
 }
 
 class Preview extends PureComponent<Props, State> {
@@ -67,33 +73,29 @@ class Preview extends PureComponent<Props, State> {
     this.updateListeners();
   }
 
+  componentWillUnmount() {
+    const { codeMirror } = this.props.editor;
+    const codeMirrorWrapper = codeMirror.getWrapperElement();
+
+    codeMirror.off("scroll", this.onScroll);
+    codeMirror.off("tokenenter", this.onTokenEnter);
+    codeMirror.off("tokenleave", this.onTokenLeave);
+    codeMirrorWrapper.removeEventListener("mouseup", this.onMouseUp);
+    codeMirrorWrapper.removeEventListener("mousedown", this.onMouseDown);
+  }
+
   componentDidUpdate(prevProps) {
-    this.updateListeners(prevProps);
     this.updateHighlight(prevProps);
   }
 
   updateListeners(prevProps: ?Props) {
-    const { isPaused } = this.props;
-
     const { codeMirror } = this.props.editor;
     const codeMirrorWrapper = codeMirror.getWrapperElement();
-    const wasNotPaused = !prevProps || !prevProps.isPaused;
-    const wasPaused = prevProps && prevProps.isPaused;
-
-    if (isPaused && wasNotPaused) {
-      codeMirror.on("scroll", this.onScroll);
-      codeMirror.on("tokenenter", this.onTokenEnter);
-      codeMirror.on("tokenleave", this.onTokenLeave);
-      codeMirrorWrapper.addEventListener("mouseup", this.onMouseUp);
-      codeMirrorWrapper.addEventListener("mousedown", this.onMouseDown);
-    }
-
-    if (!isPaused && wasPaused) {
-      codeMirror.off("tokenenter", this.onTokenEnter);
-      codeMirror.off("tokenleave", this.onTokenLeave);
-      codeMirrorWrapper.removeEventListener("mouseup", this.onMouseUp);
-      codeMirrorWrapper.removeEventListener("mousedown", this.onMouseDown);
-    }
+    codeMirror.on("scroll", this.onScroll);
+    codeMirror.on("tokenenter", this.onTokenEnter);
+    codeMirror.on("tokenleave", this.onTokenLeave);
+    codeMirrorWrapper.addEventListener("mouseup", this.onMouseUp);
+    codeMirrorWrapper.addEventListener("mousedown", this.onMouseDown);
   }
 
   updateHighlight(prevProps) {
@@ -111,31 +113,41 @@ class Preview extends PureComponent<Props, State> {
   }
 
   onTokenEnter = ({ target, tokenPos }) => {
-    this.props.updatePreview(target, tokenPos, this.props.editor.codeMirror);
+    if (this.props.isPaused) {
+      this.props.updatePreview(target, tokenPos, this.props.editor.codeMirror);
+    }
   };
 
   onTokenLeave = e => {
-    if (!inPopup(e)) {
+    if (this.props.isPaused && !inPopup(e)) {
       this.props.clearPreview();
     }
   };
 
   onMouseUp = () => {
-    this.setState({ selecting: false });
-    return true;
+    if (this.props.isPaused) {
+      this.setState({ selecting: false });
+      return true;
+    }
   };
 
   onMouseDown = () => {
-    this.setState({ selecting: true });
-    return true;
+    if (this.props.isPaused) {
+      this.setState({ selecting: true });
+      return true;
+    }
   };
 
   onScroll = () => {
-    this.props.clearPreview();
+    if (this.props.isPaused) {
+      this.props.clearPreview();
+    }
   };
 
   onClose = e => {
-    this.props.clearPreview();
+    if (this.props.isPaused) {
+      this.props.clearPreview();
+    }
   };
 
   render() {
@@ -172,7 +184,7 @@ class Preview extends PureComponent<Props, State> {
 
 const mapStateToProps = state => ({
   preview: getPreview(state),
-  isPaused: getIsPaused(state),
+  isPaused: getIsPaused(state, getCurrentThread(state)),
   selectedSource: getSelectedSource(state)
 });
 

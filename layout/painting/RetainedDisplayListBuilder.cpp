@@ -19,10 +19,10 @@
  * Code for doing display list building for a modified subset of the window,
  * and then merging it into the existing display list (for the full window).
  *
- * The approach primarily hinges on the observation that the ‘true’ ordering of
- * display items is represented by a DAG (only items that intersect in 2d space
- * have a defined ordering). Our display list is just one of a many possible
- * linear representations of this ordering.
+ * The approach primarily hinges on the observation that the 'true' ordering
+ * of display items is represented by a DAG (only items that intersect in 2d
+ * space have a defined ordering). Our display list is just one of a many
+ * possible linear representations of this ordering.
  *
  * Each time a frame changes (gets a new ComputedStyle, or has a size/position
  * change), we schedule a paint (as we do currently), but also reord the frame
@@ -41,6 +41,7 @@
  */
 
 using namespace mozilla;
+using mozilla::dom::Document;
 
 void RetainedDisplayListData::AddModifiedFrame(nsIFrame* aFrame) {
   MOZ_ASSERT(!aFrame->IsFrameModified());
@@ -446,6 +447,11 @@ class MergeState {
       return true;
     }
 
+    if (type == DisplayItemType::TYPE_TRANSFORM) {
+      // Prerendering of transforms can change without frame invalidation.
+      return true;
+    }
+
     return false;
   }
 
@@ -652,6 +658,8 @@ bool RetainedDisplayListBuilder::MergeDisplayLists(
     RetainedDisplayList* aOutList,
     mozilla::Maybe<const mozilla::ActiveScrolledRoot*>& aOutContainerASR,
     nsDisplayItem* aOuterItem) {
+  AUTO_PROFILER_LABEL_CATEGORY_PAIR(GRAPHICS_DisplayListMerging);
+
   MergeState merge(this, *aOldList,
                    aOuterItem ? aOuterItem->GetPerFrameKey() : 0);
 
@@ -710,7 +718,7 @@ struct CbData {
 };
 
 static nsIFrame* GetRootFrameForPainting(nsDisplayListBuilder* aBuilder,
-                                         nsIDocument* aDocument) {
+                                         Document* aDocument) {
   // Although this is the actual subdocument, it might not be
   // what painting uses. Walk up to the nsSubDocumentFrame owning
   // us, and then ask that which subdoc it's going to paint.
@@ -750,7 +758,7 @@ static nsIFrame* GetRootFrameForPainting(nsDisplayListBuilder* aBuilder,
   return presShell ? presShell->GetRootFrame() : nullptr;
 }
 
-static bool SubDocEnumCb(nsIDocument* aDocument, void* aData) {
+static bool SubDocEnumCb(Document* aDocument, void* aData) {
   MOZ_ASSERT(aDocument);
   MOZ_ASSERT(aData);
 
@@ -761,7 +769,7 @@ static bool SubDocEnumCb(nsIDocument* aDocument, void* aData) {
     TakeAndAddModifiedAndFramesWithPropsFromRootFrame(
         data->builder, data->modifiedFrames, data->framesWithProps, rootFrame);
 
-    nsIDocument* innerDoc = rootFrame->PresShell()->GetDocument();
+    Document* innerDoc = rootFrame->PresShell()->GetDocument();
     if (innerDoc) {
       innerDoc->EnumerateSubDocuments(SubDocEnumCb, aData);
     }
@@ -778,7 +786,7 @@ static void GetModifiedAndFramesWithProps(
   TakeAndAddModifiedAndFramesWithPropsFromRootFrame(
       aBuilder, aOutModifiedFrames, aOutFramesWithProps, rootFrame);
 
-  nsIDocument* rootdoc = rootFrame->PresContext()->Document();
+  Document* rootdoc = rootFrame->PresContext()->Document();
   if (rootdoc) {
     CbData data = {aBuilder, aOutModifiedFrames, aOutFramesWithProps};
 
@@ -789,9 +797,9 @@ static void GetModifiedAndFramesWithProps(
 // ComputeRebuildRegion  debugging
 // #define CRR_DEBUG 1
 #if CRR_DEBUG
-#define CRR_LOG(...) printf_stderr(__VA_ARGS__)
+#  define CRR_LOG(...) printf_stderr(__VA_ARGS__)
 #else
-#define CRR_LOG(...)
+#  define CRR_LOG(...)
 #endif
 
 static nsDisplayItem* GetFirstDisplayItemWithChildren(nsIFrame* aFrame) {
@@ -836,10 +844,12 @@ static bool ProcessFrameInternal(nsIFrame* aFrame,
                                 : nullptr;
 
     if (placeholder) {
-      // The rect aOverflow is in the coordinate space of the containing block.
-      // Convert it to a coordinate space of the placeholder frame.
-      nsRect placeholderOverflow =
-          aOverflow + currentFrame->GetOffsetTo(placeholder);
+      nsRect placeholderOverflow = aOverflow;
+      auto rv = nsLayoutUtils::TransformRect(currentFrame, placeholder,
+                                             placeholderOverflow);
+      if (rv != nsLayoutUtils::TRANSFORM_SUCCEEDED) {
+        placeholderOverflow = nsRect();
+      }
 
       CRR_LOG("Processing placeholder %p for OOF frame %p\n", placeholder,
               currentFrame);
@@ -1075,7 +1085,8 @@ static void AddFramesForContainingBlock(nsIFrame* aBlock,
 // so that we can avoid an extra ancestor walk, and we can reuse the flag
 // to detect when we've already visited an ancestor (and thus all further
 // ancestors must also be visited).
-void FindContainingBlocks(nsIFrame* aFrame, nsTArray<nsIFrame*>& aExtraFrames) {
+static void FindContainingBlocks(nsIFrame* aFrame,
+                                 nsTArray<nsIFrame*>& aExtraFrames) {
   for (nsIFrame* f = aFrame; f;
        f = nsLayoutUtils::GetParentOrPlaceholderForCrossDoc(f)) {
     if (f->ForceDescendIntoIfVisible()) return;

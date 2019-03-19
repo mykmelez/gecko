@@ -3,12 +3,6 @@
 
 "use strict";
 
-/* import-globals-from mocks/head-client-wrapper-mock.js */
-Services.scriptloader.loadSubScript(
-  CHROME_URL_ROOT + "mocks/head-client-wrapper-mock.js", this);
-/* import-globals-from mocks/head-runtime-client-factory-mock.js */
-Services.scriptloader.loadSubScript(
-  CHROME_URL_ROOT + "mocks/head-runtime-client-factory-mock.js", this);
 const { gDevToolsBrowser } = require("devtools/client/framework/devtools-browser");
 
 add_task(async function() {
@@ -49,7 +43,8 @@ add_task(async function() {
     gDevToolsBrowser.openWorkerToolbox = originalOpenWorkerForToolbox;
   });
 
-  const { document, tab } = await openAboutDebugging();
+  const { document, tab, window } = await openAboutDebugging();
+  await selectThisFirefoxPage(document, window.AboutDebugging.store);
 
   const workerTarget = findDebugTargetByText(testWorker.name, document);
   ok(workerTarget, "Worker target appeared for the test worker");

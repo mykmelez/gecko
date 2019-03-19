@@ -6,9 +6,6 @@
 const RUNTIME_DEVICE_ID = "1234";
 const RUNTIME_DEVICE_NAME = "A device";
 
-/* import-globals-from head-mocks.js */
-Services.scriptloader.loadSubScript(CHROME_URL_ROOT + "head-mocks.js", this);
-
 // Test that we can select a runtime in the sidebar
 add_task(async function() {
   const mocks = new Mocks();

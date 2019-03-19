@@ -3,8 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{DebugCommand, DocumentId, ExternalImageData, ExternalImageId};
-use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize};
-use api::{ImageFormat, WorldPixel, NotificationRequest};
+use api::{ImageFormat, NotificationRequest};
+use api::units::*;
 use device::TextureFilter;
 use renderer::PipelineInfo;
 use gpu_cache::GpuCacheUpdateList;
@@ -295,7 +295,6 @@ pub enum ResultMsg {
     DebugOutput(DebugOutput),
     RefreshShader(PathBuf),
     UpdateGpuCache(GpuCacheUpdateList),
-    ClearGpuCache,
     UpdateResources {
         updates: TextureUpdateList,
         memory_pressure: bool,

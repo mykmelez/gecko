@@ -7,7 +7,7 @@
 #include "nsError.h"
 #include "MediaResource.h"
 #ifdef MOZ_AV1
-#include "AOMDecoder.h"
+#  include "AOMDecoder.h"
 #endif
 #include "OpusDecoder.h"
 #include "VPXDecoder.h"
@@ -361,7 +361,9 @@ nsresult WebMDemuxer::ReadMetadata() {
         mInfo.mVideo.mDuration = TimeUnit::FromNanoseconds(duration);
       }
       mInfo.mVideo.mCrypto = GetTrackCrypto(TrackInfo::kVideoTrack, track);
-      if (mInfo.mVideo.mCrypto.mValid) {
+      if (mInfo.mVideo.mCrypto.IsEncrypted()) {
+        MOZ_ASSERT(mInfo.mVideo.mCrypto.mCryptoScheme == CryptoScheme::Cenc,
+                   "WebM should only use cenc scheme");
         mCrypto.AddInitData(NS_LITERAL_STRING("webm"),
                             mInfo.mVideo.mCrypto.mKeyId);
       }
@@ -370,6 +372,10 @@ nsresult WebMDemuxer::ReadMetadata() {
       r = nestegg_track_audio_params(context, track, &params);
       if (r == -1) {
         return NS_ERROR_FAILURE;
+      }
+      if (params.rate > AudioInfo::MAX_RATE ||
+          params.channels > AudioConfig::ChannelLayout::MAX_CHANNELS) {
+        return NS_ERROR_DOM_MEDIA_METADATA_ERR;
       }
 
       mAudioTrack = track;
@@ -426,7 +432,9 @@ nsresult WebMDemuxer::ReadMetadata() {
         mInfo.mAudio.mDuration = TimeUnit::FromNanoseconds(duration);
       }
       mInfo.mAudio.mCrypto = GetTrackCrypto(TrackInfo::kAudioTrack, track);
-      if (mInfo.mAudio.mCrypto.mValid) {
+      if (mInfo.mAudio.mCrypto.IsEncrypted()) {
+        MOZ_ASSERT(mInfo.mAudio.mCrypto.mCryptoScheme == CryptoScheme::Cenc,
+                   "WebM should only use cenc scheme");
         mCrypto.AddInitData(NS_LITERAL_STRING("webm"),
                             mInfo.mAudio.mCrypto.mKeyId);
       }
@@ -508,8 +516,8 @@ CryptoTrack WebMDemuxer::GetTrackCrypto(TrackInfo::TrackType aType,
   }
 
   if (!initData.IsEmpty()) {
-    crypto.mValid = true;
-    // crypto.mMode is not used for WebMs
+    // Webm only uses a cenc style scheme.
+    crypto.mCryptoScheme = CryptoScheme::Cenc;
     crypto.mIVSize = WEBM_IV_SIZE;
     crypto.mKeyId = std::move(initData);
   }
@@ -552,7 +560,7 @@ nsresult WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType,
 
   int64_t next_tstamp = INT64_MIN;
   auto calculateNextTimestamp = [&](auto&& pushPacket, auto&& lastFrameTime,
-                                    auto&& trackEndTime) {
+                                    int64_t trackEndTime) {
     if (next_holder) {
       next_tstamp = next_holder->Timestamp();
       (this->*pushPacket)(next_holder);
@@ -566,8 +574,15 @@ nsresult WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType,
       // If we can't get frame's duration, it means either we need to wait for
       // more data for MSE case or this is the last frame for file resource
       // case.
-      MOZ_ASSERT(trackEndTime >= tstamp);
-      next_tstamp = trackEndTime;
+      if (tstamp > trackEndTime) {
+        // This shouldn't happen, but some muxers give incorrect durations to
+        // segments, then have samples appear beyond those durations.
+        WEBM_DEBUG("Found tstamp=%" PRIi64 " > trackEndTime=%" PRIi64
+                   " while calculating next timestamp! Indicates a bad mux! "
+                   "Will use tstamp value.",
+                   tstamp, trackEndTime);
+      }
+      next_tstamp = std::max<int64_t>(tstamp, trackEndTime);
     }
     lastFrameTime = Some(tstamp);
   };
@@ -679,7 +694,9 @@ nsresult WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType,
     }
     sample->mTimecode = TimeUnit::FromMicroseconds(tstamp);
     sample->mTime = TimeUnit::FromMicroseconds(tstamp);
-    sample->mDuration = TimeUnit::FromMicroseconds(next_tstamp - tstamp);
+    if (next_tstamp > tstamp) {
+      sample->mDuration = TimeUnit::FromMicroseconds(next_tstamp - tstamp);
+    }
     sample->mOffset = holder->Offset();
     sample->mKeyframe = isKeyframe;
     if (discardPadding && i == count - 1) {
@@ -705,7 +722,7 @@ nsresult WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType,
       unsigned char const* iv;
       size_t ivLength;
       nestegg_packet_iv(holder->Packet(), &iv, &ivLength);
-      writer->mCrypto.mValid = true;
+      writer->mCrypto.mCryptoScheme = CryptoScheme::Cenc;
       writer->mCrypto.mIVSize = ivLength;
       if (ivLength == 0) {
         // Frame is not encrypted. This shouldn't happen as it means the
@@ -1165,9 +1182,8 @@ void WebMTrackDemuxer::Reset() {
 
 void WebMTrackDemuxer::UpdateSamples(nsTArray<RefPtr<MediaRawData>>& aSamples) {
   for (const auto& sample : aSamples) {
-    if (sample->mCrypto.mValid) {
+    if (sample->mCrypto.IsEncrypted()) {
       UniquePtr<MediaRawDataWriter> writer(sample->CreateWriter());
-      writer->mCrypto.mMode = mInfo->mCrypto.mMode;
       writer->mCrypto.mIVSize = mInfo->mCrypto.mIVSize;
       writer->mCrypto.mKeyId.AppendElements(mInfo->mCrypto.mKeyId);
     }

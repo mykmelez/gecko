@@ -1,8 +1,141 @@
+import {actionCreators as ac, actionTypes as at} from "common/Actions.jsm";
 import {ASRouterUtils} from "../../asrouter/asrouter-content";
 import {connect} from "react-redux";
 import {ModalOverlay} from "../../asrouter/components/ModalOverlay/ModalOverlay";
 import React from "react";
 import {SimpleHashRouter} from "./SimpleHashRouter";
+
+const Row = props => (<tr className="message-item" {...props}>{props.children}</tr>);
+
+function relativeTime(timestamp) {
+  if (!timestamp) {
+    return "";
+  }
+  const seconds = Math.floor((Date.now() - timestamp) / 1000);
+  const minutes = Math.floor((Date.now() - timestamp) / 60000);
+  if (seconds < 2) {
+    return "just now";
+  } else if (seconds < 60) {
+    return `${seconds} seconds ago`;
+  } else if (minutes === 1) {
+    return "1 minute ago";
+  } else if (minutes < 600) {
+    return `${minutes} minutes ago`;
+  }
+  return new Date(timestamp).toLocaleString();
+}
+
+const OPT_OUT_PREF = "discoverystream.optOut.0";
+const LAYOUT_VARIANTS = {
+  "basic": "Basic default layout (on by default in nightly)",
+  "dev-test-all": "A little bit of everything. Good layout for testing all components",
+  "dev-test-feeds": "Stress testing for slow feeds",
+};
+class DiscoveryStreamAdmin extends React.PureComponent {
+  constructor(props) {
+    super(props);
+    this.onEnableToggle = this.onEnableToggle.bind(this);
+    this.changeEndpointVariant = this.changeEndpointVariant.bind(this);
+  }
+
+  get isOptedOut() {
+    return this.props.otherPrefs[OPT_OUT_PREF];
+  }
+
+  setConfigValue(name, value) {
+    this.props.dispatch(ac.OnlyToMain({type: at.DISCOVERY_STREAM_CONFIG_SET_VALUE, data: {name, value}}));
+  }
+
+  onEnableToggle(event) {
+    this.setConfigValue("enabled", event.target.checked);
+  }
+
+  changeEndpointVariant(event) {
+    const endpoint = this.props.state.config.layout_endpoint;
+    if (endpoint) {
+      this.setConfigValue("layout_endpoint", endpoint.replace(/layout_variant=.+/, `layout_variant=${event.target.value}`));
+    }
+  }
+
+  renderComponent(width, component) {
+    return (
+      <table><tbody>
+        <Row>
+          <td className="min">Type</td>
+          <td>{component.type}</td>
+        </Row>
+        <Row>
+          <td className="min">Width</td>
+          <td>{width}</td>
+        </Row>
+        {component.feed && this.renderFeed(component.feed)}
+      </tbody></table>
+    );
+  }
+
+  isCurrentVariant(id) {
+    const endpoint = this.props.state.config.layout_endpoint;
+    const isMatch = endpoint && !!endpoint.match(`layout_variant=${id}`);
+    return isMatch;
+  }
+
+  renderFeed(feed) {
+    const {feeds} = this.props.state;
+    if (!feed.url) {
+      return null;
+    }
+    return (
+      <React.Fragment>
+        <Row>
+          <td className="min">Feed url</td>
+          <td>{feed.url}</td>
+        </Row>
+        <Row>
+          <td className="min">Data last fetched</td>
+          <td>{relativeTime(feeds.data[feed.url] ? feeds.data[feed.url].lastUpdated : null) || "(no data)"}</td>
+        </Row>
+      </React.Fragment>
+    );
+  }
+
+  render() {
+    const {isOptedOut} = this;
+
+    const {config, lastUpdated, layout} = this.props.state;
+    return (<div>
+
+      <div className="dsEnabled"><input type="checkbox" checked={config.enabled} onChange={this.onEnableToggle} /> enabled
+        {isOptedOut ? (<span className="optOutNote">(Note: User has opted-out. Check this box to reset)</span>) : ""}</div>
+
+      <h3>Endpoint variant</h3>
+      <p>You can also change this manually by changing this pref: <code>browser.newtabpage.activity-stream.discoverystream.config</code></p>
+      <table style={config.enabled ? null : {opacity: 0.5}}><tbody>
+        {Object.keys(LAYOUT_VARIANTS).map(id => (<Row key={id}>
+          <td className="min"><input type="radio" value={id} checked={this.isCurrentVariant(id)} onChange={this.changeEndpointVariant} /></td>
+          <td className="min">{id}</td>
+          <td>{LAYOUT_VARIANTS[id]}</td>
+        </Row>))}
+      </tbody></table>
+
+      <h3>Caching info</h3>
+      <table style={config.enabled ? null : {opacity: 0.5}}><tbody>
+        <Row><td className="min">Data last fetched</td><td>{relativeTime(lastUpdated) || "(no data)"}</td></Row>
+      </tbody></table>
+
+      <h3>Layout</h3>
+
+      {layout.map((row, rowIndex) => (
+        <div key={`row-${rowIndex}`}>
+          {row.components.map((component, componentIndex) => (
+            <div key={`component-${componentIndex}`} className="ds-component">
+              {this.renderComponent(row.width, component)}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>);
+  }
+}
 
 export class ASRouterAdminInner extends React.PureComponent {
   constructor(props) {
@@ -393,6 +526,17 @@ export class ASRouterAdminInner extends React.PureComponent {
     </tbody></table>);
   }
 
+  renderDiscoveryStream() {
+    const {config} = this.props.DiscoveryStream;
+
+    return (<div>
+      <table><tbody>
+        <tr className="message-item"><td className="min">Enabled</td><td>{config.enabled ? "yes" : "no"}</td></tr>
+        <tr className="message-item"><td className="min">Endpoint</td><td>{config.endpoint || "(empty)"}</td></tr>
+      </tbody></table>
+    </div>);
+  }
+
   renderAttributionParamers() {
     return (
       <div>
@@ -433,9 +577,14 @@ export class ASRouterAdminInner extends React.PureComponent {
           <h2>Pocket</h2>
           {this.renderPocketStories()}
         </React.Fragment>);
+      case "ds":
+        return (<React.Fragment>
+          <h2>Discovery Stream</h2>
+          <DiscoveryStreamAdmin state={this.props.DiscoveryStream} otherPrefs={this.props.Prefs.values} dispatch={this.props.dispatch} />
+        </React.Fragment>);
       default:
         return (<React.Fragment>
-          <h2>Message Providers <button title="Restore all provider settings that ship with Firefox" className="button" onClick={this.resetPref}>Restorear default prefs</button></h2>
+          <h2>Message Providers <button title="Restore all provider settings that ship with Firefox" className="button" onClick={this.resetPref}>Restore default prefs</button></h2>
           {this.state.providers ? this.renderProviders() : null}
           <h2>Messages</h2>
           {this.renderMessageFilter()}
@@ -452,6 +601,7 @@ export class ASRouterAdminInner extends React.PureComponent {
           <li><a href="#devtools">General</a></li>
           <li><a href="#devtools-targeting">Targeting</a></li>
           <li><a href="#devtools-pocket">Pocket</a></li>
+          <li><a href="#devtools-ds">Discovery Stream</a></li>
         </ul>
       </aside>
       <main className="main-panel">
@@ -472,4 +622,4 @@ export class ASRouterAdminInner extends React.PureComponent {
 }
 
 export const _ASRouterAdmin = props => (<SimpleHashRouter><ASRouterAdminInner {...props} /></SimpleHashRouter>);
-export const ASRouterAdmin = connect(state => ({Sections: state.Sections}))(_ASRouterAdmin);
+export const ASRouterAdmin = connect(state => ({Sections: state.Sections, DiscoveryStream: state.DiscoveryStream, Prefs: state.Prefs}))(_ASRouterAdmin);

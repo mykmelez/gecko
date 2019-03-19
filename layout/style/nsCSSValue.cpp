@@ -20,7 +20,7 @@
 #include "gfxFontConstants.h"
 #include "imgIRequest.h"
 #include "imgRequestProxy.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIURIMutator.h"
 #include "nsCSSProps.h"
 #include "nsNetUtil.h"
@@ -31,6 +31,7 @@
 
 using namespace mozilla;
 using namespace mozilla::css;
+using namespace mozilla::dom;
 
 nsCSSValue::nsCSSValue(int32_t aValue, nsCSSUnit aUnit) : mUnit(aUnit) {
   MOZ_ASSERT(aUnit == eCSSUnit_Integer || aUnit == eCSSUnit_Enumerated,
@@ -550,8 +551,9 @@ void nsCSSValueList::CloneInto(nsCSSValueList* aList) const {
   aList->mNext = mNext ? mNext->Clone() : nullptr;
 }
 
-/* static */ bool nsCSSValueList::Equal(const nsCSSValueList* aList1,
-                                        const nsCSSValueList* aList2) {
+/* static */
+bool nsCSSValueList::Equal(const nsCSSValueList* aList1,
+                           const nsCSSValueList* aList2) {
   if (aList1 == aList2) {
     return true;
   }
@@ -655,8 +657,9 @@ nsCSSValuePairList* nsCSSValuePairList::Clone() const {
   return result;
 }
 
-/* static */ bool nsCSSValuePairList::Equal(const nsCSSValuePairList* aList1,
-                                            const nsCSSValuePairList* aList2) {
+/* static */
+bool nsCSSValuePairList::Equal(const nsCSSValuePairList* aList1,
+                               const nsCSSValuePairList* aList2) {
   if (aList1 == aList2) {
     return true;
   }
@@ -839,7 +842,7 @@ size_t css::URLValue::SizeOfIncludingThis(
   return n;
 }
 
-imgRequestProxy* css::URLValue::LoadImage(nsIDocument* aDocument) {
+imgRequestProxy* css::URLValue::LoadImage(Document* aDocument) {
   MOZ_ASSERT(NS_IsMainThread());
 
   static uint64_t sNextLoadID = 1;
@@ -851,7 +854,7 @@ imgRequestProxy* css::URLValue::LoadImage(nsIDocument* aDocument) {
   // NB: If aDocument is not the original document, we may not be able to load
   // images from aDocument.  Instead we do the image load from the original doc
   // and clone it to aDocument.
-  nsIDocument* loadingDoc = aDocument->GetOriginalDocument();
+  Document* loadingDoc = aDocument->GetOriginalDocument();
   if (!loadingDoc) {
     loadingDoc = aDocument;
   }

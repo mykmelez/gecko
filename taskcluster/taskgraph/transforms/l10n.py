@@ -36,11 +36,6 @@ def _by_platform(arg):
     return optionally_keyed_by('build-platform', arg)
 
 
-# Voluptuous uses marker objects as dictionary *keys*, but they are not
-# comparable, so we cast all of the keys back to regular strings
-job_description_schema = {str(k): v for k, v in job_description_schema.schema.iteritems()}
-task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
-
 l10n_description_schema = schema.extend({
     # Name for this job, inferred from the dependent job before validation
     Required('name'): basestring,
@@ -287,6 +282,7 @@ def handle_artifact_prefix(config, jobs):
 def all_locales_attribute(config, jobs):
     for job in jobs:
         locales_platform = job['attributes']['build_platform'].replace("-nightly", "")
+        locales_platform = locales_platform.replace("-pgo", "")
         locales_with_changesets = parse_locales_file(job["locales-file"],
                                                      platform=locales_platform)
         locales_with_changesets = _remove_locales(locales_with_changesets,
@@ -341,30 +337,6 @@ def chunk_locales(config, jobs):
             yield job
 
 
-@transforms.add
-def mh_config_replace_project(config, jobs):
-    """ Replaces {project} in mh config entries with the current project """
-    # XXXCallek This is a bad pattern but exists to satisfy ease-of-porting for buildbot
-    for job in jobs:
-        job['mozharness']['config'] = map(
-            lambda x: x.format(project=config.params['project']),
-            job['mozharness']['config']
-            )
-        yield job
-
-
-@transforms.add
-def mh_options_replace_project(config, jobs):
-    """ Replaces {project} in mh option entries with the current project """
-    # XXXCallek This is a bad pattern but exists to satisfy ease-of-porting for buildbot
-    for job in jobs:
-        job['mozharness']['options'] = map(
-            lambda x: x.format(project=config.params['project']),
-            job['mozharness']['options']
-            )
-        yield job
-
-
 transforms.add_validate(l10n_description_schema)
 
 
@@ -375,6 +347,17 @@ def stub_installer(config, jobs):
         job.setdefault('env', {})
         if job["attributes"].get('stub-installer'):
             job['env'].update({"USE_STUB_INSTALLER": "1"})
+        yield job
+
+
+@transforms.add
+def set_extra_config(config, jobs):
+    for job in jobs:
+        job['mozharness'].setdefault('extra-config', {})['branch'] = config.params['project']
+        if 'update-channel' in job['attributes']:
+            job['mozharness']['extra-config']['update_channel'] = (
+                job['attributes']['update-channel']
+            )
         yield job
 
 

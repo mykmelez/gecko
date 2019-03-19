@@ -3,9 +3,6 @@
 
 "use strict";
 
-/* import-globals-from head-mocks.js */
-Services.scriptloader.loadSubScript(CHROME_URL_ROOT + "head-mocks.js", this);
-
 const RUNTIME_NAME = "Firefox 123";
 
 // Test that unknown runtimes:

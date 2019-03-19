@@ -244,8 +244,8 @@ global.TabContext = class extends EventEmitter {
 
 // This promise is used to wait for the search service to be initialized.
 // None of the code in the WebExtension modules requests that initialization.
-// It is assumed that it is started at some point. If tests start to fail
-// because this promise never resolves, that's likely the cause.
+// It is assumed that it is started at some point. That might never happen,
+// e.g. if the application shuts down before the search service initializes.
 XPCOMUtils.defineLazyGetter(global, "searchInitialized", () => {
   if (Services.search.isInitialized) {
     return Promise.resolve();
@@ -454,31 +454,23 @@ class TabTracker extends TabTrackerBase {
           // This tab is being created to adopt a tab from a different window.
           // Handle the adoption.
           this.adopt(nativeTab, adoptedTab);
-
-          adoptedTab.linkedBrowser.messageManager.sendAsyncMessage("Extension:SetFrameData", {
-            windowId: windowTracker.getId(nativeTab.ownerGlobal),
-          });
+          if (adoptedTab.linkedPanel) {
+            adoptedTab.linkedBrowser.messageManager.sendAsyncMessage("Extension:SetFrameData", {
+              windowId: windowTracker.getId(nativeTab.ownerGlobal),
+            });
+          }
         } else {
-          // Save the size of the current tab, since the newly-created tab will
-          // likely be active by the time the promise below resolves and the
-          // event is dispatched.
+          if (!event.originalTarget.parentNode) {
+            // If the tab is already be destroyed, do nothing.
+            return;
+          }
           const currentTab = nativeTab.ownerGlobal.gBrowser.selectedTab;
           const {frameLoader} = currentTab.linkedBrowser;
           const currentTabSize = {
             width: frameLoader.lazyWidth,
             height: frameLoader.lazyHeight,
           };
-
-          // We need to delay sending this event until the next tick, since the
-          // tab could have been created with a lazy browser but still not have
-          // been assigned a SessionStore tab state with the URL and title.
-          Promise.resolve().then(() => {
-            if (!event.originalTarget.parentNode) {
-              // If the tab is already be destroyed, do nothing.
-              return;
-            }
-            this.emitCreated(event.originalTarget, currentTabSize);
-          });
+          this.emitCreated(event.originalTarget, currentTabSize);
         }
         break;
 
@@ -496,8 +488,8 @@ class TabTracker extends TabTrackerBase {
         break;
 
       case "TabSelect":
-        // Because we are delaying calling emitCreated above, we also need to
-        // delay sending this event because it shouldn't fire before onCreated.
+        // We need to delay sending this event because it shouldn't fire before
+        // onRemoved when the active tab is removed.
         Promise.resolve().then(() => {
           if (!nativeTab.parentNode) {
             // If the tab is already be destroyed, do nothing.
@@ -509,8 +501,8 @@ class TabTracker extends TabTrackerBase {
 
       case "TabMultiSelect":
         if (this.has("tabs-highlighted")) {
-          // Because we are delaying calling emitCreated above, we also need to
-          // delay sending this event because it shouldn't fire before onCreated.
+          // Because we are delaying calling emitActivated above, we also need to
+          // delay sending this event because it shouldn't fire before onActivated.
           Promise.resolve().then(() => {
             this.emitHighlighted(event.target.ownerGlobal);
           });

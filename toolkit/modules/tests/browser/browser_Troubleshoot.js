@@ -6,9 +6,8 @@
 // that aren't initialized outside of a XUL app environment like AddonManager
 // and the "@mozilla.org/xre/app-info;1" component.
 
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/Troubleshoot.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {Troubleshoot} = ChromeUtils.import("resource://gre/modules/Troubleshoot.jsm");
 
 function test() {
   waitForExplicitFinish();
@@ -125,6 +124,9 @@ const SNAPSHOT_SCHEMA = {
         supportURL: {
           type: "string",
         },
+        launcherProcessState: {
+          type: "number",
+        },
         remoteAutoStart: {
           type: "boolean",
           required: true,
@@ -147,7 +149,10 @@ const SNAPSHOT_SCHEMA = {
         policiesStatus: {
           type: "number",
         },
-        keyGoogleFound: {
+        keyLocationServiceGoogleFound: {
+          type: "boolean",
+        },
+        keySafebrowsingGoogleFound: {
           type: "boolean",
         },
         keyMozillaFound: {
@@ -440,6 +445,12 @@ const SNAPSHOT_SCHEMA = {
               type: "object",
             },
           },
+        },
+        lowEndMachine: {
+          type: "boolean",
+        },
+        targetFrameRate: {
+          type: "number",
         },
       },
     },

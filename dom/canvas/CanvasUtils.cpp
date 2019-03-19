@@ -39,17 +39,17 @@
 #define TOPIC_CANVAS_PERMISSIONS_PROMPT "canvas-permissions-prompt"
 #define TOPIC_CANVAS_PERMISSIONS_PROMPT_HIDE_DOORHANGER \
   "canvas-permissions-prompt-hide-doorhanger"
-#define PERMISSION_CANVAS_EXTRACT_DATA "canvas"
+#define PERMISSION_CANVAS_EXTRACT_DATA NS_LITERAL_CSTRING("canvas")
 
 using namespace mozilla::gfx;
 
 namespace mozilla {
 namespace CanvasUtils {
 
-bool IsImageExtractionAllowed(nsIDocument* aDocument, JSContext* aCx,
+bool IsImageExtractionAllowed(Document* aDocument, JSContext* aCx,
                               nsIPrincipal& aPrincipal) {
   // Do the rest of the checks only if privacy.resistFingerprinting is on.
-  if (!nsContentUtils::ShouldResistFingerprinting()) {
+  if (!nsContentUtils::ShouldResistFingerprinting(aDocument)) {
     return true;
   }
 
@@ -93,7 +93,7 @@ bool IsImageExtractionAllowed(nsIDocument* aDocument, JSContext* aCx,
     }
   }
 
-  nsIDocument* topLevelDocument = aDocument->GetTopLevelContentDocument();
+  Document* topLevelDocument = aDocument->GetTopLevelContentDocument();
   nsIURI* topLevelDocURI =
       topLevelDocument ? topLevelDocument->GetDocumentURI() : nullptr;
   nsCString topLevelDocURISpec;

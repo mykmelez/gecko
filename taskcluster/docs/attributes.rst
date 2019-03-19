@@ -136,6 +136,12 @@ serviceworker_e10s
 For test suites which distinguish whether or not they run with the serviceworker
 e10s redesign enabled.
 
+socketprocess_e10s
+==================
+
+For test suites which distinguish whether or not they run with the socket
+process enabled.
+
 e10s
 ====
 
@@ -281,3 +287,18 @@ require these signoffs. For example, ``mar-signing`` signoffs may be required
 by some releases in the future; for any releases that require ``mar-signing``
 signoffs, the kinds that also require that signoff are marked with this
 attribute.
+
+update-channel
+==============
+The update channel the build is configured to use.
+
+openh264_rev
+============
+Only used for openh264 plugin builds, used to signify the revision (and thus inform artifact name) of the given build.
+
+code-review
+===========
+If a task set this boolean attribute to `true`, it will be processed by the code
+review bot, the task will ran for every new Phabricator diff.
+Any supported and detected issue will be automatically reported on the
+Phabricator revision.

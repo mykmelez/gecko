@@ -8,7 +8,7 @@
 
 #include "mozilla/Attributes.h"
 #include "nsContentList.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIHTMLDocument.h"
 #include "nsIHTMLCollection.h"
 #include "nsIScriptElement.h"
@@ -24,7 +24,6 @@
 class nsIURI;
 class nsIDocShell;
 class nsICachingChannel;
-class nsIWyciwygChannel;
 class nsILoadGroup;
 
 namespace mozilla {
@@ -36,20 +35,25 @@ class WindowProxyHolder;
 }  // namespace dom
 }  // namespace mozilla
 
-class nsHTMLDocument : public nsIDocument, public nsIHTMLDocument {
+class nsHTMLDocument : public mozilla::dom::Document, public nsIHTMLDocument {
+ protected:
   typedef mozilla::net::ReferrerPolicy ReferrerPolicy;
+  typedef mozilla::dom::Document Document;
+  typedef mozilla::Encoding Encoding;
+  template <typename T>
+  using NotNull = mozilla::NotNull<T>;
 
  public:
-  using nsIDocument::GetPlugins;
-  using nsIDocument::SetDocumentURI;
+  using Document::GetPlugins;
+  using Document::SetDocumentURI;
 
   nsHTMLDocument();
   virtual nsresult Init() override;
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsHTMLDocument, nsIDocument)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsHTMLDocument, Document)
 
-  // nsIDocument
+  // Document
   virtual void Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup) override;
   virtual void ResetToURI(nsIURI* aURI, nsILoadGroup* aLoadGroup,
                           nsIPrincipal* aPrincipal) override;
@@ -60,17 +64,20 @@ class nsHTMLDocument : public nsIDocument, public nsIHTMLDocument {
                                      nsIStreamListener** aDocListener,
                                      bool aReset = true,
                                      nsIContentSink* aSink = nullptr) override;
-  virtual void StopDocumentLoad() override;
 
   virtual void BeginLoad() override;
   virtual void EndLoad() override;
 
+ protected:
+  virtual bool UseWidthDeviceWidthFallbackViewport() const override;
+
+ public:
   // nsIHTMLDocument
   virtual void SetCompatibilityMode(nsCompatibility aMode) override;
 
   virtual bool IsWriting() override { return mWriteLevel != uint32_t(0); }
 
-  virtual nsIContent* GetUnfocusedKeyEventTarget() override;
+  virtual Element* GetUnfocusedKeyEventTarget() override;
 
   nsContentList* GetExistingForms() const { return mForms; }
 
@@ -128,7 +135,7 @@ class nsHTMLDocument : public nsIDocument, public nsIHTMLDocument {
 
   virtual void DocAddSizeOfExcludingThis(
       nsWindowSizes& aWindowSizes) const override;
-  // DocAddSizeOfIncludingThis is inherited from nsIDocument.
+  // DocAddSizeOfIncludingThis is inherited from Document.
 
   virtual bool WillIgnoreCharsetOverride() override;
 
@@ -150,16 +157,15 @@ class nsHTMLDocument : public nsIDocument, public nsIHTMLDocument {
     }
   }
   void GetSupportedNames(nsTArray<nsString>& aNames);
-  already_AddRefed<nsIDocument> Open(
-      JSContext* cx, const mozilla::dom::Optional<nsAString>& /* unused */,
-      const nsAString& aReplace, mozilla::ErrorResult& aError);
+  Document* Open(const mozilla::dom::Optional<nsAString>& /* unused */,
+                 const nsAString& /* unused */, mozilla::ErrorResult& aError);
   mozilla::dom::Nullable<mozilla::dom::WindowProxyHolder> Open(
-      JSContext* cx, const nsAString& aURL, const nsAString& aName,
-      const nsAString& aFeatures, bool aReplace, mozilla::ErrorResult& rv);
+      const nsAString& aURL, const nsAString& aName, const nsAString& aFeatures,
+      bool aReplace, mozilla::ErrorResult& rv);
   void Close(mozilla::ErrorResult& rv);
-  void Write(JSContext* cx, const mozilla::dom::Sequence<nsString>& aText,
+  void Write(const mozilla::dom::Sequence<nsString>& aText,
              mozilla::ErrorResult& rv);
-  void Writeln(JSContext* cx, const mozilla::dom::Sequence<nsString>& aText,
+  void Writeln(const mozilla::dom::Sequence<nsString>& aText,
                mozilla::ErrorResult& rv);
   void GetDesignMode(nsAString& aDesignMode);
   void SetDesignMode(const nsAString& aDesignMode,
@@ -167,6 +173,10 @@ class nsHTMLDocument : public nsIDocument, public nsIHTMLDocument {
   void SetDesignMode(const nsAString& aDesignMode,
                      const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
                      mozilla::ErrorResult& rv);
+  // MOZ_CAN_RUN_SCRIPT_BOUNDARY because I haven't figured out how to teach the
+  // analysis that a MOZ_KnownLive(NonNull<T>) being passed as T& is OK.  See
+  // bug 1534383.
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   bool ExecCommand(const nsAString& aCommandID, bool aDoShowUI,
                    const nsAString& aValue, nsIPrincipal& aSubjectPrincipal,
                    mozilla::ErrorResult& rv);
@@ -178,6 +188,7 @@ class nsHTMLDocument : public nsIDocument, public nsIHTMLDocument {
   bool QueryCommandState(const nsAString& aCommandID, mozilla::ErrorResult& rv);
   bool QueryCommandSupported(const nsAString& aCommandID,
                              mozilla::dom::CallerType aCallerType);
+  MOZ_CAN_RUN_SCRIPT
   void QueryCommandValue(const nsAString& aCommandID, nsAString& aValue,
                          mozilla::ErrorResult& rv);
   void GetFgColor(nsAString& aFgColor);
@@ -197,7 +208,7 @@ class nsHTMLDocument : public nsIDocument, public nsIHTMLDocument {
   void ReleaseEvents();
   // We're picking up GetLocation from Document
   already_AddRefed<mozilla::dom::Location> GetLocation() const {
-    return nsIDocument::GetLocation();
+    return Document::GetLocation();
   }
 
   static bool MatchFormControls(Element* aElement, int32_t aNamespaceID,
@@ -207,6 +218,8 @@ class nsHTMLDocument : public nsIDocument, public nsIHTMLDocument {
                                nsContentList** aFormControlList);
 
   void UserInteractionForTesting();
+
+  void SetKeyPressEventModel(uint16_t aKeyPressEventModel);
 
  protected:
   ~nsHTMLDocument();
@@ -223,14 +236,11 @@ class nsHTMLDocument : public nsIDocument, public nsIHTMLDocument {
   already_AddRefed<nsIURI> RegistrableDomainSuffixOfInternal(
       const nsAString& aHostSuffixString, nsIURI* aOrigHost);
 
-  void WriteCommon(JSContext* cx, const nsAString& aText,
-                   bool aNewlineTerminate, mozilla::ErrorResult& aRv);
+  void WriteCommon(const nsAString& aText, bool aNewlineTerminate,
+                   mozilla::ErrorResult& aRv);
   // A version of WriteCommon used by WebIDL bindings
-  void WriteCommon(JSContext* cx, const mozilla::dom::Sequence<nsString>& aText,
+  void WriteCommon(const mozilla::dom::Sequence<nsString>& aText,
                    bool aNewlineTerminate, mozilla::ErrorResult& rv);
-
-  nsresult CreateAndAddWyciwygChannel(void);
-  nsresult RemoveWyciwygChannel(void);
 
   // This should *ONLY* be used in GetCookie/SetCookie.
   already_AddRefed<nsIChannel> CreateDummyChannelForCookies(
@@ -274,8 +284,6 @@ class nsHTMLDocument : public nsIDocument, public nsIHTMLDocument {
   /** # of forms in the document, synchronously set */
   int32_t mNumForms;
 
-  static uint32_t gWyciwygSessionCnt;
-
   static void TryHintCharset(nsIContentViewer* aContentViewer,
                              int32_t& aCharsetSource,
                              NotNull<const Encoding*>& aEncoding);
@@ -291,9 +299,14 @@ class nsHTMLDocument : public nsIDocument, public nsIHTMLDocument {
   static void TryFallback(int32_t& aCharsetSource,
                           NotNull<const Encoding*>& aEncoding);
 
-  // Override so we can munge the charset on our wyciwyg channel as needed.
-  virtual void SetDocumentCharacterSet(
-      NotNull<const Encoding*> aEncoding) override;
+  /**
+   * MaybeDispatchCheckKeyPressEventModelEvent() dispatches
+   * "CheckKeyPressEventModel" event to check whether we should dispatch
+   * keypress events in confluent model or split model.  This should be
+   * called only when mEditingState is changed to eDesignMode or
+   * eConentEditable at first time.
+   */
+  void MaybeDispatchCheckKeyPressEventModelEvent();
 
   // Tracks if we are currently processing any document.write calls (either
   // implicit or explicit). Note that if a write call writes out something which
@@ -309,8 +322,6 @@ class nsHTMLDocument : public nsIDocument, public nsIHTMLDocument {
   bool mDisableDocWrite;
 
   bool mWarnedWidthHeight;
-
-  nsCOMPtr<nsIWyciwygChannel> mWyciwygChannel;
 
   /* Midas implementation */
   nsresult GetMidasCommandManager(nsICommandManager** aCommandManager);
@@ -332,12 +343,27 @@ class nsHTMLDocument : public nsIDocument, public nsIHTMLDocument {
    * MaybeEditingStateChanged() script runners from a nested scope.
    */
   bool mPendingMaybeEditingStateChanged;
+
+  // mHasBeenEditable is set to true when mEditingState is firstly set to
+  // eDesignMode or eContentEditable.
+  bool mHasBeenEditable;
+
+  /**
+   * Set to true once we know that we are loading plain text content.
+   */
+  bool mIsPlainText;
 };
 
-inline nsHTMLDocument* nsIDocument::AsHTMLDocument() {
+namespace mozilla {
+namespace dom {
+
+inline nsHTMLDocument* Document::AsHTMLDocument() {
   MOZ_ASSERT(IsHTMLOrXHTML());
   return static_cast<nsHTMLDocument*>(this);
 }
+
+}  // namespace dom
+}  // namespace mozilla
 
 #define NS_HTML_DOCUMENT_INTERFACE_TABLE_BEGIN(_class) \
   NS_DOCUMENT_INTERFACE_TABLE_BEGIN(_class)            \

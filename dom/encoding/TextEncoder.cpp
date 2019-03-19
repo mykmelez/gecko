@@ -24,8 +24,7 @@ void TextEncoder::Encode(JSContext* aCx, JS::Handle<JSObject*> aObj,
   // in the future.
   // Uint8Array::Create takes uint32_t as the length.
   CheckedInt<uint32_t> bufLen(aString.Length());
-  bufLen *= 3;
-  bufLen += 1;  // plus one is part of the contract for ConvertUTF16toUTF8
+  bufLen *= 3;  // from the contract for ConvertUTF16toUTF8
   if (!bufLen.isValid()) {
     aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
     return;
@@ -49,6 +48,17 @@ void TextEncoder::Encode(JSContext* aCx, JS::Handle<JSObject*> aObj,
   }
 
   aRetval.set(outView);
+}
+
+void TextEncoder::EncodeInto(const nsAString& aSrc, const Uint8Array& aDst,
+                             TextEncoderEncodeIntoResult& aResult) {
+  aDst.ComputeLengthAndData();
+  size_t read;
+  size_t written;
+  Tie(read, written) = ConvertUTF16toUTF8Partial(
+      aSrc, MakeSpan(reinterpret_cast<char*>(aDst.Data()), aDst.Length()));
+  aResult.mRead.Construct() = read;
+  aResult.mWritten.Construct() = written;
 }
 
 void TextEncoder::GetEncoding(nsAString& aEncoding) {

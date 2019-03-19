@@ -9,10 +9,11 @@ const { FrontClassWithSpec, registerFront } = require("devtools/shared/protocol"
 const defer = require("devtools/shared/defer");
 
 class DeviceFront extends FrontClassWithSpec(deviceSpec) {
-  constructor(client, form) {
+  constructor(client) {
     super(client);
-    this.actorID = form.deviceActor;
-    this.manage(this);
+
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "deviceActor";
   }
 
   screenshotToBlob() {

@@ -8,7 +8,7 @@
 #include "base/task.h"
 
 #ifdef OS_POSIX
-#include <errno.h>
+#  include <errno.h>
 #endif
 
 #include "mozilla/IntegerPrintfMacros.h"
@@ -25,14 +25,14 @@
 #include "nsPrintfCString.h"
 
 #if defined(MOZ_SANDBOX) && defined(XP_WIN)
-#include "mozilla/sandboxTarget.h"
+#  include "mozilla/sandboxTarget.h"
 #endif
 
 #if defined(XP_WIN)
-#include "aclapi.h"
-#include "sddl.h"
+#  include "aclapi.h"
+#  include "sddl.h"
 
-#include "mozilla/TypeTraits.h"
+#  include "mozilla/TypeTraits.h"
 #endif
 
 #include "nsAutoPtr.h"
@@ -171,14 +171,14 @@ bool DuplicateHandle(HANDLE aSourceHandle, DWORD aTargetProcessId,
                                aDesiredAccess, false, aOptions);
   }
 
-#if defined(MOZ_SANDBOX)
+#  if defined(MOZ_SANDBOX)
   // Try the broker next (will fail if not sandboxed).
   if (SandboxTarget::Instance()->BrokerDuplicateHandle(
           aSourceHandle, aTargetProcessId, aTargetHandle, aDesiredAccess,
           aOptions)) {
     return true;
   }
-#endif
+#  endif
 
   // Finally, see if we already have access to the process.
   ScopedProcessHandle targetProcess(
@@ -261,12 +261,12 @@ void FatalError(const char* aMsg, bool aIsParent) {
   } else {
     formattedMessage.AppendLiteral("\". abort()ing as a result.");
 #ifndef FUZZING
-    MOZ_CRASH_UNSAFE_OOL(formattedMessage.get());
+    MOZ_CRASH_UNSAFE(formattedMessage.get());
 #endif
   }
 }
 
-void LogicError(const char* aMsg) { MOZ_CRASH_UNSAFE_OOL(aMsg); }
+void LogicError(const char* aMsg) { MOZ_CRASH_UNSAFE(aMsg); }
 
 void ActorIdReadError(const char* aActorDescription) {
 #ifndef FUZZING

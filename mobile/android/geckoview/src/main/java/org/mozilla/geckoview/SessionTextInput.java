@@ -7,7 +7,6 @@ package org.mozilla.geckoview;
 
 import org.mozilla.gecko.InputMethods;
 import org.mozilla.gecko.annotation.WrapForJNI;
-import org.mozilla.gecko.GeckoEditableChild;
 import org.mozilla.gecko.IGeckoEditableParent;
 import org.mozilla.gecko.NativeQueue;
 import org.mozilla.gecko.util.ActivityUtils;
@@ -205,6 +204,19 @@ public final class SessionTextInput {
             final View view = session.getTextInput().getView();
             final InputMethodManager imm = getInputMethodManager(view);
             if (imm != null) {
+                // When composition start and end is -1,
+                // InputMethodManager.updateSelection will remove composition
+                // on most IMEs. But ATOK series do nothing. So we have to
+                // restart input method to remove composition as workaround.
+                if (compositionStart < 0 && compositionEnd < 0 &&
+                    InputMethods.needsRestartInput(
+                        InputMethods.getCurrentInputMethod(view.getContext()))) {
+                    try {
+                        imm.restartInput(view);
+                    } catch (RuntimeException e) {
+                        Log.e(LOGTAG, "Error restarting input", e);
+                    }
+                }
                 imm.updateSelection(view, selStart, selEnd, compositionStart, compositionEnd);
             }
         }

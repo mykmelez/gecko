@@ -38,8 +38,11 @@ window.gActivityStreamStrings = {
   "section_disclaimer_topstories": "あなたが読んだページに基づいて選ばれた、ウェブ上で最も興味深い記事。Mozilla の一員となった Pocket がお届けします。",
   "section_disclaimer_topstories_linktext": "詳しくはこちら。",
   "section_disclaimer_topstories_buttontext": "了解しました",
-  "prefs_home_header": "Firefox ホームコンテンツ",
-  "prefs_home_description": "Firefox のホーム画面に表示するコンテンツを選びましょう。",
+  "prefs_home_header": "Firefox Home コンテンツ",
+  "prefs_home_description": "Firefox Home に表示するコンテンツを選びましょう。",
+  "prefs_content_discovery_header": "Firefox Home",
+  "prefs_content_discovery_description": "Firefox Home のコンテンツディスカバリーは関連性の高い優れた記事をウェブ上から発見できます。",
+  "prefs_content_discovery_button": "コンテンツディスカバリーをオフにする",
   "prefs_section_rows_option": "{num} 行",
   "prefs_search_header": "ウェブ検索",
   "prefs_topsites_description": "よく訪れるサイト",
@@ -107,6 +110,5 @@ window.gActivityStreamStrings = {
   "firstrun_privacy_notice": "プライバシーに関する通知",
   "firstrun_continue_to_login": "続ける",
   "firstrun_skip_login": "この手順をスキップ",
-  "context_menu_title": "メニューを開きます",
-  "pocket_learn_more": "詳細"
+  "context_menu_title": "メニューを開きます"
 };

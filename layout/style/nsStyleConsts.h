@@ -274,9 +274,7 @@ enum class StyleImageLayerRepeat : uint8_t {
 };
 
 // Mask mode
-#define NS_STYLE_MASK_MODE_ALPHA 0
-#define NS_STYLE_MASK_MODE_LUMINANCE 1
-#define NS_STYLE_MASK_MODE_MATCH_SOURCE 2
+enum class StyleMaskMode : uint8_t { Alpha = 0, Luminance, MatchSource };
 
 // See nsStyleTable
 #define NS_STYLE_BORDER_COLLAPSE 0
@@ -284,9 +282,6 @@ enum class StyleImageLayerRepeat : uint8_t {
 
 // border-image-repeat
 enum class StyleBorderImageRepeat : uint8_t { Stretch, Repeat, Round, Space };
-
-#define NS_STYLE_BORDER_IMAGE_SLICE_NOFILL 0
-#define NS_STYLE_BORDER_IMAGE_SLICE_FILL 1
 
 // See nsStyleContent
 enum class StyleContent : uint8_t {
@@ -296,44 +291,6 @@ enum class StyleContent : uint8_t {
   NoCloseQuote,
   AltContent
 };
-
-// See nsStyleUI
-#define NS_STYLE_CURSOR_AUTO 1
-#define NS_STYLE_CURSOR_CROSSHAIR 2
-#define NS_STYLE_CURSOR_DEFAULT 3  // ie: an arrow
-#define NS_STYLE_CURSOR_POINTER 4  // for links
-#define NS_STYLE_CURSOR_MOVE 5
-#define NS_STYLE_CURSOR_E_RESIZE 6
-#define NS_STYLE_CURSOR_NE_RESIZE 7
-#define NS_STYLE_CURSOR_NW_RESIZE 8
-#define NS_STYLE_CURSOR_N_RESIZE 9
-#define NS_STYLE_CURSOR_SE_RESIZE 10
-#define NS_STYLE_CURSOR_SW_RESIZE 11
-#define NS_STYLE_CURSOR_S_RESIZE 12
-#define NS_STYLE_CURSOR_W_RESIZE 13
-#define NS_STYLE_CURSOR_TEXT 14  // ie: i-beam
-#define NS_STYLE_CURSOR_WAIT 15
-#define NS_STYLE_CURSOR_HELP 16
-#define NS_STYLE_CURSOR_COPY 17  // CSS3
-#define NS_STYLE_CURSOR_ALIAS 18
-#define NS_STYLE_CURSOR_CONTEXT_MENU 19
-#define NS_STYLE_CURSOR_CELL 20
-#define NS_STYLE_CURSOR_GRAB 21
-#define NS_STYLE_CURSOR_GRABBING 22
-#define NS_STYLE_CURSOR_SPINNING 23
-#define NS_STYLE_CURSOR_ZOOM_IN 24
-#define NS_STYLE_CURSOR_ZOOM_OUT 25
-#define NS_STYLE_CURSOR_NOT_ALLOWED 26
-#define NS_STYLE_CURSOR_COL_RESIZE 27
-#define NS_STYLE_CURSOR_ROW_RESIZE 28
-#define NS_STYLE_CURSOR_NO_DROP 29
-#define NS_STYLE_CURSOR_VERTICAL_TEXT 30
-#define NS_STYLE_CURSOR_ALL_SCROLL 31
-#define NS_STYLE_CURSOR_NESW_RESIZE 32
-#define NS_STYLE_CURSOR_NWSE_RESIZE 33
-#define NS_STYLE_CURSOR_NS_RESIZE 34
-#define NS_STYLE_CURSOR_EW_RESIZE 35
-#define NS_STYLE_CURSOR_NONE 36
 
 // See nsStyleVisibility
 #define NS_STYLE_DIRECTION_LTR 0
@@ -356,23 +313,6 @@ enum class StyleContent : uint8_t {
   (NS_STYLE_WRITING_MODE_VERTICAL_RL | NS_STYLE_WRITING_MODE_SIDEWAYS_MASK)
 #define NS_STYLE_WRITING_MODE_SIDEWAYS_LR \
   (NS_STYLE_WRITING_MODE_VERTICAL_LR | NS_STYLE_WRITING_MODE_SIDEWAYS_MASK)
-
-// See nsStyleDisplay
-// If these are re-ordered, nsComputedDOMStyle::DoGetContain() must be updated.
-#define NS_STYLE_CONTAIN_NONE 0
-#define NS_STYLE_CONTAIN_SIZE 0x01
-#define NS_STYLE_CONTAIN_LAYOUT 0x02
-#define NS_STYLE_CONTAIN_STYLE 0x04
-#define NS_STYLE_CONTAIN_PAINT 0x08
-#define NS_STYLE_CONTAIN_STRICT 0x10
-#define NS_STYLE_CONTAIN_CONTENT 0x20
-// NS_STYLE_CONTAIN_ALL_BITS does not correspond to a keyword.
-#define NS_STYLE_CONTAIN_ALL_BITS                                              \
-  (NS_STYLE_CONTAIN_LAYOUT | NS_STYLE_CONTAIN_STYLE | NS_STYLE_CONTAIN_PAINT | \
-   NS_STYLE_CONTAIN_SIZE)
-// NS_STYLE_CONTAIN_CONTENT_BITS does not correspond to a keyword.
-#define NS_STYLE_CONTAIN_CONTENT_BITS \
-  (NS_STYLE_CONTAIN_LAYOUT | NS_STYLE_CONTAIN_STYLE | NS_STYLE_CONTAIN_PAINT)
 
 // Shared constants for all align/justify properties (nsStylePosition):
 #define NS_STYLE_ALIGN_AUTO 0
@@ -424,10 +364,12 @@ enum class StyleContent : uint8_t {
 #define NS_STYLE_JUSTIFY_ALL_SHIFT NS_STYLE_ALIGN_ALL_SHIFT
 
 // See nsStylePosition
-#define NS_STYLE_FLEX_DIRECTION_ROW 0
-#define NS_STYLE_FLEX_DIRECTION_ROW_REVERSE 1
-#define NS_STYLE_FLEX_DIRECTION_COLUMN 2
-#define NS_STYLE_FLEX_DIRECTION_COLUMN_REVERSE 3
+enum class StyleFlexDirection : uint8_t {
+  Row,
+  RowReverse,
+  Column,
+  ColumnReverse,
+};
 
 // See nsStylePosition
 #define NS_STYLE_FLEX_WRAP_NOWRAP 0
@@ -515,27 +457,6 @@ enum class StyleGridTrackBreadth : uint8_t {
 // See nsStyleFont::mMathDisplay
 #define NS_MATHML_DISPLAYSTYLE_INLINE 0
 #define NS_MATHML_DISPLAYSTYLE_BLOCK 1
-
-// See nsStylePosition::mWidth, mMinWidth, mMaxWidth
-#define NS_STYLE_WIDTH_MAX_CONTENT \
-  ((uint8_t)mozilla::StyleExtremumLength::MaxContent)
-#define NS_STYLE_WIDTH_MIN_CONTENT \
-  ((uint8_t)mozilla::StyleExtremumLength::MinContent)
-#define NS_STYLE_WIDTH_FIT_CONTENT \
-  ((uint8_t)mozilla::StyleExtremumLength::MozFitContent)
-#define NS_STYLE_WIDTH_AVAILABLE \
-  ((uint8_t)mozilla::StyleExtremumLength::MozAvailable)
-// The 'content' keyword is only valid for 'flex-basis' (not for 'width').  But
-// aside from that, the 'flex-basis' property accepts exactly the same values
-// as 'width'. So I'm listing this one 'flex-basis'-specific enumerated value
-// alongside the 'width' ones, to be sure we don't accidentally overload this
-// numeric value with two different meanings if new 'width' keywords are added.
-#define NS_STYLE_FLEX_BASIS_CONTENT 4
-static_assert(NS_STYLE_FLEX_BASIS_CONTENT != NS_STYLE_WIDTH_MAX_CONTENT &&
-                  NS_STYLE_FLEX_BASIS_CONTENT != NS_STYLE_WIDTH_MIN_CONTENT &&
-                  NS_STYLE_FLEX_BASIS_CONTENT != NS_STYLE_WIDTH_FIT_CONTENT &&
-                  NS_STYLE_FLEX_BASIS_CONTENT != NS_STYLE_WIDTH_AVAILABLE,
-              "Should use different enum value for flex basis content");
 
 // See nsStyleDisplay.mPosition
 #define NS_STYLE_POSITION_STATIC 0
@@ -720,11 +641,6 @@ enum class StyleWhiteSpace : uint8_t {
   PreLine,
   PreSpace,
 };
-
-// See nsStyleText
-#define NS_STYLE_WORDBREAK_NORMAL 0
-#define NS_STYLE_WORDBREAK_BREAK_ALL 1
-#define NS_STYLE_WORDBREAK_KEEP_ALL 2
 
 // ruby-align, see nsStyleText
 #define NS_STYLE_RUBY_ALIGN_START 0

@@ -209,12 +209,16 @@ def get_build_opts(substs):
                 ('opt', 'MOZ_OPTIMIZE', bool),
                 ('ccache', 'CCACHE', bool),
                 ('sccache', 'MOZ_USING_SCCACHE', bool),
-                # TODO: detect icecream: https://bugzilla.mozilla.org/show_bug.cgi?id=1481614
             )
         }
         compiler = substs.get('CC_TYPE', None)
         if compiler:
             opts['compiler'] = str(compiler)
+        # icecream may be enabled by setting CC/CXX to symlinks to icecc,
+        # or if using it together with ccache by setting CCACHE_PREFIX=icecc.
+        prefix = os.path.basename(substs.get('CCACHE_PREFIX', ''))
+        if substs.get('CXX_IS_ICECREAM', None) or prefix == 'icecc':
+            opts['icecream'] = True
         return opts
     except BuildEnvironmentNotFoundException:
         return {}
@@ -258,8 +262,8 @@ def gather_telemetry(command='', success=False, start_time=None, end_time=None,
     '''
     data = {
         'client_id': get_client_id(mach_context.state_dir),
-        # Simplest way to get an rfc3339 datetime string, AFAICT.
-        'time': datetime.utcfromtimestamp(start_time).isoformat(b'T') + 'Z',
+        # Get an rfc3339 datetime string.
+        'time': datetime.utcfromtimestamp(start_time).strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
         'command': command,
         'argv': filter_args(command, sys.argv, paths),
         'success': success,

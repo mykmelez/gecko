@@ -5,27 +5,30 @@
 // @flow
 
 import React, { Component } from "react";
-import { sortBy } from "lodash";
-import { connect } from "../../utils/connect";
+import classnames from "classnames";
 import { Tab, Tabs, TabList, TabPanels } from "react-aria-components/src/tabs";
-import { formatKeyShortcut } from "../../utils/text";
+
 import actions from "../../actions";
 import {
-  getRelativeSources,
+  getDisplayedSources,
   getActiveSearch,
+  getProjectDirectoryRoot,
   getSelectedPrimaryPaneTab,
-  getWorkerDisplayName,
-  isValidThread
+  getThreads
 } from "../../selectors";
 import { features, prefs } from "../../utils/prefs";
-import "./Sources.css";
-import classnames from "classnames";
+import { connect } from "../../utils/connect";
+import { formatKeyShortcut } from "../../utils/text";
 
 import Outline from "./Outline";
 import SourcesTree from "./SourcesTree";
+import AccessibleImage from "../shared/AccessibleImage";
 
 import type { SourcesMapByThread } from "../../reducers/types";
 import type { SelectedPrimaryPaneTabType } from "../../selectors";
+import type { Thread } from "../../types";
+
+import "./Sources.css";
 
 type State = {
   alphabetizeOutline: boolean
@@ -35,12 +38,13 @@ type Props = {
   selectedTab: SelectedPrimaryPaneTabType,
   sources: SourcesMapByThread,
   horizontal: boolean,
+  projectRoot: string,
   sourceSearchOn: boolean,
   setPrimaryPaneTab: typeof actions.setPrimaryPaneTab,
   setActiveSearch: typeof actions.setActiveSearch,
   closeActiveSearch: typeof actions.closeActiveSearch,
-  getWorkerDisplayName: string => string,
-  isValidThread: string => boolean
+  clearProjectDirectoryRoot: typeof actions.clearProjectDirectoryRoot,
+  threads: Thread[]
 };
 
 class PrimaryPanes extends Component<Props, State> {
@@ -96,19 +100,38 @@ class PrimaryPanes extends Component<Props, State> {
     ];
   }
 
-  renderThreadSources() {
-    const threads = sortBy(
-      Object.getOwnPropertyNames(this.props.sources).filter(
-        this.props.isValidThread
-      ),
-      this.props.getWorkerDisplayName
-    );
+  renderProjectRootHeader() {
+    const { projectRoot } = this.props;
 
-    return threads.map(thread => <SourcesTree thread={thread} key={thread} />);
+    if (!projectRoot) {
+      return null;
+    }
+
+    const rootLabel = projectRoot.split("/").pop();
+
+    return (
+      <div key="root" className="sources-clear-root-container">
+        <button
+          className="sources-clear-root"
+          onClick={() => this.props.clearProjectDirectoryRoot()}
+          title={L10N.getStr("removeDirectoryRoot.label")}
+        >
+          <AccessibleImage className="home" />
+          <AccessibleImage className="breadcrumb" />
+          <span className="sources-clear-root-label">{rootLabel}</span>
+        </button>
+      </div>
+    );
+  }
+
+  renderThreadSources() {
+    return this.props.threads.map(({ actor }) => (
+      <SourcesTree thread={actor} key={actor} />
+    ));
   }
 
   render() {
-    const { selectedTab } = this.props;
+    const { selectedTab, projectRoot } = this.props;
     const activeIndex = selectedTab === "sources" ? 0 : 1;
 
     return (
@@ -120,8 +143,16 @@ class PrimaryPanes extends Component<Props, State> {
         <TabList className="source-outline-tabs">
           {this.renderOutlineTabs()}
         </TabList>
-        <TabPanels className="source-outline-panel" hasFocusableContent>
-          <div>{this.renderThreadSources()}</div>
+        <TabPanels
+          className={classnames("source-outline-panel", {
+            "has-root": projectRoot
+          })}
+          hasFocusableContent
+        >
+          <div className="threads-list">
+            {this.renderProjectRootHeader()}
+            {this.renderThreadSources()}
+          </div>
           <Outline
             alphabetizeOutline={this.state.alphabetizeOutline}
             onAlphabetizeClick={this.onAlphabetizeClick}
@@ -134,10 +165,10 @@ class PrimaryPanes extends Component<Props, State> {
 
 const mapStateToProps = state => ({
   selectedTab: getSelectedPrimaryPaneTab(state),
-  sources: getRelativeSources(state),
+  sources: getDisplayedSources(state),
   sourceSearchOn: getActiveSearch(state) === "source",
-  getWorkerDisplayName: thread => getWorkerDisplayName(state, thread),
-  isValidThread: thread => isValidThread(state, thread)
+  threads: getThreads(state),
+  projectRoot: getProjectDirectoryRoot(state)
 });
 
 const connector = connect(
@@ -145,7 +176,8 @@ const connector = connect(
   {
     setPrimaryPaneTab: actions.setPrimaryPaneTab,
     setActiveSearch: actions.setActiveSearch,
-    closeActiveSearch: actions.closeActiveSearch
+    closeActiveSearch: actions.closeActiveSearch,
+    clearProjectDirectoryRoot: actions.clearProjectDirectoryRoot
   }
 );
 

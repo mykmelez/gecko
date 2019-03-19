@@ -177,7 +177,7 @@ void WasmFrameIter::popFrame() {
     // |      WASM FRAME     | (already unwound)
     // |---------------------|
     //
-    // The next value of FP is just a regular jit frame used marked to
+    // The next value of FP is just a regular jit frame used as a marker to
     // know that we should transition to a JSJit frame iterator.
     unwoundIonCallerFP_ = (uint8_t*)fp_;
     unwoundIonFrameType_ = FrameType::JSJitToWasm;
@@ -376,7 +376,7 @@ static const unsigned SetFP = 3;
 static const unsigned PoppedFP = 4;
 static const unsigned PoppedTLSReg = 5;
 #else
-#error "Unknown architecture!"
+#  error "Unknown architecture!"
 #endif
 static constexpr unsigned SetJitEntryFP = PushedRetAddr + SetFP - PushedFP;
 
@@ -457,17 +457,17 @@ static void GenerateCallablePrologue(MacroAssembler& masm, uint32_t* entry) {
   }
 #else
   {
-#if defined(JS_CODEGEN_ARM)
+#  if defined(JS_CODEGEN_ARM)
     AutoForbidPools afp(&masm, /* number of instructions in scope = */ 7);
 
     *entry = masm.currentOffset();
 
     MOZ_ASSERT(BeforePushRetAddr == 0);
     masm.push(lr);
-#else
+#  else
     *entry = masm.currentOffset();
     // The x86/x64 call instruction pushes the return address.
-#endif
+#  endif
 
     MOZ_ASSERT_IF(!masm.oom(), PushedRetAddr == masm.currentOffset() - *entry);
     masm.push(WasmTlsReg);
@@ -527,9 +527,9 @@ static void GenerateCallableEpilogue(MacroAssembler& masm, unsigned framePushed,
 
 #else
   // Forbid pools for the same reason as described in GenerateCallablePrologue.
-#if defined(JS_CODEGEN_ARM)
+#  if defined(JS_CODEGEN_ARM)
   AutoForbidPools afp(&masm, /* number of instructions in scope = */ 7);
-#endif
+#  endif
 
   // There is an important ordering constraint here: fp must be repointed to
   // the caller's frame before any field of the frame currently pointed to by
@@ -1123,6 +1123,8 @@ ProfilingFrameIterator::ProfilingFrameIterator(const JitActivation& activation,
     return;
   }
 
+  MOZ_ASSERT(unwindState.codeRange);
+
   if (unwoundCaller) {
     callerFP_ = unwindState.fp;
     callerPC_ = unwindState.pc;
@@ -1131,7 +1133,7 @@ ProfilingFrameIterator::ProfilingFrameIterator(const JitActivation& activation,
     // and the jit entry don't set FP's low bit). We can't observe
     // transient tagged values of FP (during wasm::SetExitFP) here because
     // StartUnwinding would not have unwound then.
-    if (unwindState.codeRange && unwindState.codeRange->isFunction() &&
+    if (unwindState.codeRange->isFunction() &&
         (uintptr_t(state.fp) & ExitOrJitEntryFPTag)) {
       unwoundIonCallerFP_ = (uint8_t*)callerFP_;
     }
@@ -1331,10 +1333,10 @@ static const char* ThunkedNativeToDescription(SymbolicAddress func) {
       return "call to asm.js native f64 Math.pow";
     case SymbolicAddress::ATan2D:
       return "call to asm.js native f64 Math.atan2";
-    case SymbolicAddress::GrowMemory:
-      return "call to native grow_memory (in wasm)";
-    case SymbolicAddress::CurrentMemory:
-      return "call to native current_memory (in wasm)";
+    case SymbolicAddress::MemoryGrow:
+      return "call to native memory.grow (in wasm)";
+    case SymbolicAddress::MemorySize:
+      return "call to native memory.size (in wasm)";
     case SymbolicAddress::WaitI32:
       return "call to native i32.wait (in wasm)";
     case SymbolicAddress::WaitI64:
@@ -1347,16 +1349,16 @@ static const char* ThunkedNativeToDescription(SymbolicAddress func) {
       return "jit call to int64 wasm function";
     case SymbolicAddress::MemCopy:
       return "call to native memory.copy function";
-    case SymbolicAddress::MemDrop:
-      return "call to native memory.drop function";
+    case SymbolicAddress::DataDrop:
+      return "call to native data.drop function";
     case SymbolicAddress::MemFill:
       return "call to native memory.fill function";
     case SymbolicAddress::MemInit:
       return "call to native memory.init function";
     case SymbolicAddress::TableCopy:
       return "call to native table.copy function";
-    case SymbolicAddress::TableDrop:
-      return "call to native table.drop function";
+    case SymbolicAddress::ElemDrop:
+      return "call to native elem.drop function";
     case SymbolicAddress::TableGet:
       return "call to native table.get function";
     case SymbolicAddress::TableGrow:
@@ -1369,6 +1371,8 @@ static const char* ThunkedNativeToDescription(SymbolicAddress func) {
       return "call to native table.size function";
     case SymbolicAddress::PostBarrier:
       return "call to native GC postbarrier (in wasm)";
+    case SymbolicAddress::PostBarrierFiltering:
+      return "call to native filtering GC postbarrier (in wasm)";
     case SymbolicAddress::StructNew:
       return "call to native struct.new (in wasm)";
     case SymbolicAddress::StructNarrow:
@@ -1376,6 +1380,13 @@ static const char* ThunkedNativeToDescription(SymbolicAddress func) {
 #if defined(JS_CODEGEN_MIPS32)
     case SymbolicAddress::js_jit_gAtomic64Lock:
       MOZ_CRASH();
+#endif
+#ifdef WASM_CODEGEN_DEBUG
+    case SymbolicAddress::PrintI32:
+    case SymbolicAddress::PrintPtr:
+    case SymbolicAddress::PrintF32:
+    case SymbolicAddress::PrintF64:
+    case SymbolicAddress::PrintText:
 #endif
     case SymbolicAddress::Limit:
       break;

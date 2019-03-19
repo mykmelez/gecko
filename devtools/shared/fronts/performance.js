@@ -14,25 +14,22 @@ loader.lazyRequireGetter(this, "getSystemInfo",
   "devtools/shared/system", true);
 
 class PerformanceFront extends FrontClassWithSpec(performanceSpec) {
-  constructor(client, form) {
-    super(client, form);
-    this.actorID = form.performanceActor;
+  constructor(client) {
+    super(client);
     this._queuedRecordings = [];
-    this.manage(this);
     this._onRecordingStartedEvent = this._onRecordingStartedEvent.bind(this);
     this.flushQueuedRecordings = this.flushQueuedRecordings.bind(this);
 
     this.before("profiler-status", this._onProfilerStatus.bind(this));
     this.before("timeline-data", this._onTimelineEvent.bind(this));
     this.on("recording-started", this._onRecordingStartedEvent);
+
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "performanceActor";
   }
 
   async initialize() {
     await this.connect();
-  }
-
-  destroy() {
-    super.destroy();
   }
 
   /**

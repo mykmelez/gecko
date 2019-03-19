@@ -13,24 +13,16 @@ const {
 } = require("devtools/shared/specs/animation");
 
 class AnimationPlayerFront extends FrontClassWithSpec(animationPlayerSpec) {
-  constructor(conn, form, detail, ctx) {
-    super(conn, form, detail, ctx);
+  constructor(conn, form) {
+    super(conn, form);
 
     this.state = {};
     this.before("changed", this.onChanged.bind(this));
   }
 
-  form(form, detail) {
-    if (detail === "actorid") {
-      this.actorID = form;
-      return;
-    }
+  form(form) {
     this._form = form;
     this.state = this.initialState;
-  }
-
-  destroy() {
-    super.destroy();
   }
 
   /**
@@ -202,13 +194,11 @@ exports.AnimationPlayerFront = AnimationPlayerFront;
 registerFront(AnimationPlayerFront);
 
 class AnimationsFront extends FrontClassWithSpec(animationsSpec) {
-  constructor(client, {animationsActor}) {
-    super(client, {actor: animationsActor});
-    this.manage(this);
-  }
+  constructor(client) {
+    super(client);
 
-  destroy() {
-    super.destroy();
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "animationsActor";
   }
 }
 

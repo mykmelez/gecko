@@ -606,7 +606,7 @@ describe("Reducers", () => {
       assert.propertyVal(state, "version", data.version);
     });
     it("should reset to the initial state on a SNIPPETS_RESET action", () => {
-      const state = Snippets({initalized: true, foo: "bar"}, {type: at.SNIPPETS_RESET});
+      const state = Snippets({initialized: true, foo: "bar"}, {type: at.SNIPPETS_RESET});
       assert.equal(state, INITIAL_STATE.Snippets);
     });
     it("should set the new blocklist on SNIPPET_BLOCKED", () => {
@@ -660,12 +660,145 @@ describe("Reducers", () => {
       assert.equal(DiscoveryStream(undefined, {type: "some_action"}), INITIAL_STATE.DiscoveryStream);
     });
     it("should set layout data with DISCOVERY_STREAM_LAYOUT_UPDATE", () => {
-      const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_LAYOUT_UPDATE, data: ["test"]});
+      const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_LAYOUT_UPDATE, data: {layout: ["test"], lastUpdated: 123}});
       assert.equal(state.layout[0], "test");
+      assert.equal(state.lastUpdated, 123);
     });
     it("should set config data with DISCOVERY_STREAM_CONFIG_CHANGE", () => {
       const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_CONFIG_CHANGE, data: {enabled: true}});
       assert.deepEqual(state.config, {enabled: true});
+    });
+    it("should load feeds with DISCOVERY_STREAM_FEEDS_UPDATE", () => {
+      const data = {
+        "https://foo.com/feed1": {lastUpdated: 123, data: [1, 2, 3]},
+      };
+
+      const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_FEEDS_UPDATE, data});
+
+      assert.deepEqual(state.feeds, {
+        data,
+        loaded: true,
+      });
+    });
+    it("should set spoc_endpoint with DISCOVERY_STREAM_SPOCS_ENDPOINT", () => {
+      const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_SPOCS_ENDPOINT, data: "foo.com"});
+      assert.equal(state.spocs.spocs_endpoint, "foo.com");
+    });
+    it("should set spocs with DISCOVERY_STREAM_SPOCS_UPDATE", () => {
+      const data = {
+        lastUpdated: 123,
+        spocs: [1, 2, 3],
+      };
+      const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_SPOCS_UPDATE, data});
+      assert.deepEqual(state.spocs, {
+        spocs_endpoint: "",
+        data: [1, 2, 3],
+        lastUpdated: 123,
+        loaded: true,
+      });
+    });
+    it("should handle no data from DISCOVERY_STREAM_SPOCS_UPDATE", () => {
+      const data = null;
+      const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_SPOCS_UPDATE, data});
+      assert.deepEqual(state.spocs, INITIAL_STATE.DiscoveryStream.spocs);
+    });
+    it("should not update state for empty action.data on PLACES_LINK_BLOCKED", () => {
+      const newState = DiscoveryStream(undefined, {type: at.PLACES_LINK_BLOCKED});
+      assert.equal(newState, INITIAL_STATE.DiscoveryStream);
+    });
+    it("should not update state if feeds are not loaded", () => {
+      const deleteAction = {type: at.PLACES_LINK_BLOCKED, data: {url: "foo.com"}};
+      const newState = DiscoveryStream(undefined, deleteAction);
+      assert.equal(newState, INITIAL_STATE.DiscoveryStream);
+    });
+    it("should not update state if spocs and feeds data is undefined", () => {
+      const deleteAction = {type: at.PLACES_LINK_BLOCKED, data: {url: "foo.com"}};
+      const oldState = {
+        spocs: {
+          data: {},
+          loaded: true,
+        },
+        feeds: {
+          data: {},
+          loaded: true,
+        },
+      };
+      const newState = DiscoveryStream(oldState, deleteAction);
+      assert.deepEqual(newState, oldState);
+    });
+    it("should remove the site on PLACES_LINK_BLOCKED from spocs if feeds data is empty", () => {
+      const deleteAction = {type: at.PLACES_LINK_BLOCKED, data: {url: "https://foo.com"}};
+      const oldState = {
+        spocs: {
+          data: {
+            spocs: [
+              {url: "https://foo.com"},
+              {url: "test-spoc.com"},
+            ],
+          },
+          loaded: true,
+        },
+        feeds: {
+          data: {},
+          loaded: true,
+        },
+      };
+      const newState = DiscoveryStream(oldState, deleteAction);
+      assert.deepEqual(newState.spocs.data.spocs, [{url: "test-spoc.com"}]);
+    });
+    it("should remove the site on PLACES_LINK_BLOCKED from feeds if spocs data is empty", () => {
+      const deleteAction = {type: at.PLACES_LINK_BLOCKED, data: {url: "https://foo.com"}};
+      const oldState = {
+        spocs: {
+          data: {},
+          loaded: true,
+        },
+        feeds: {
+          data: {
+            "https://foo.com/feed1": {
+              data: {
+                recommendations: [
+                  {url: "https://foo.com"},
+                  {url: "test.com"},
+                ],
+              },
+            },
+          },
+          loaded: true,
+        },
+      };
+      const newState = DiscoveryStream(oldState, deleteAction);
+      assert.deepEqual(newState.feeds.data["https://foo.com/feed1"].data.recommendations, [{url: "test.com"}]);
+    });
+    it("should remove the site on PLACES_LINK_BLOCKED from both feeds and spocs", () => {
+      const oldState = {
+        feeds: {
+          data: {
+            "https://foo.com/feed1": {
+              data: {
+                recommendations: [
+                  {url: "https://foo.com"},
+                  {url: "test.com"},
+                ],
+              },
+            },
+          },
+          loaded: true,
+        },
+        spocs: {
+          data: {
+            spocs: [
+              {url: "https://foo.com"},
+              {url: "test-spoc.com"},
+            ],
+          },
+          loaded: true,
+        },
+      };
+      const deleteAction = {type: at.PLACES_LINK_BLOCKED, data: {url: "https://foo.com"}};
+      const newState = DiscoveryStream(oldState, deleteAction);
+      assert.deepEqual(newState.spocs.data.spocs, [{url: "test-spoc.com"}]);
+      assert.deepEqual(newState.feeds.data["https://foo.com/feed1"].data.recommendations, [{url: "test.com"}]);
     });
   });
   describe("Search", () => {
@@ -676,13 +809,13 @@ describe("Reducers", () => {
       const nextState = Search(undefined, {type: "HIDE_SEARCH"});
       assert.propertyVal(nextState, "hide", true);
     });
-    it("should set focus to true on FOCUS_SEARCH", () => {
-      const nextState = Search(undefined, {type: "FOCUS_SEARCH"});
-      assert.propertyVal(nextState, "focus", true);
+    it("should set focus to true on FAKE_FOCUS_SEARCH", () => {
+      const nextState = Search(undefined, {type: "FAKE_FOCUS_SEARCH"});
+      assert.propertyVal(nextState, "fakeFocus", true);
     });
     it("should set focus and hide to false on SHOW_SEARCH", () => {
       const nextState = Search(undefined, {type: "SHOW_SEARCH"});
-      assert.propertyVal(nextState, "focus", false);
+      assert.propertyVal(nextState, "fakeFocus", false);
       assert.propertyVal(nextState, "hide", false);
     });
   });

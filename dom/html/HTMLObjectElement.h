@@ -52,7 +52,7 @@ class HTMLObjectElement final : public nsGenericHTMLFormElement,
   // EventTarget
   virtual void AsyncEventRunning(AsyncEventDispatcher* aEvent) override;
 
-  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+  virtual nsresult BindToTree(Document* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent) override;
   virtual void UnbindFromTree(bool aDeep = true,
                               bool aNullParent = true) override;
@@ -177,7 +177,7 @@ class HTMLObjectElement final : public nsGenericHTMLFormElement,
     SetHTMLAttr(nsGkAtoms::border, aValue, aRv);
   }
 
-  nsIDocument* GetSVGDocument(nsIPrincipal& aSubjectPrincipal) {
+  Document* GetSVGDocument(nsIPrincipal& aSubjectPrincipal) {
     return GetContentDocument(aSubjectPrincipal);
   }
 
@@ -185,8 +185,6 @@ class HTMLObjectElement final : public nsGenericHTMLFormElement,
    * Calls LoadObject with the correct arguments to start the plugin load.
    */
   void StartObjectLoad(bool aNotify, bool aForceLoad);
-
-  NS_FORWARD_NSIFRAMELOADEROWNER(nsObjectLoadingContent::)
 
  protected:
   // Override for nsImageLoadingContent.

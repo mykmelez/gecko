@@ -11,11 +11,9 @@
 #include "mozIDOMWindow.h"
 
 #include "nsCOMPtr.h"
-#include "nsDataHashtable.h"
 #include "nsTArray.h"
 #include "mozilla/dom/EventTarget.h"
 #include "mozilla/TaskCategory.h"
-#include "mozilla/TimeStamp.h"
 #include "js/TypeDecls.h"
 #include "nsRefPtrHashtable.h"
 
@@ -34,7 +32,6 @@ class nsIContent;
 class nsICSSDeclaration;
 class nsIDocShell;
 class nsDocShellLoadState;
-class nsIDocument;
 class nsIPrincipal;
 class nsIScriptTimeoutHandler;
 class nsISerialEventTarget;
@@ -47,7 +44,6 @@ class nsXBLPrototypeHandler;
 typedef uint32_t SuspendTypes;
 
 namespace mozilla {
-class AutoplayPermissionManager;
 namespace dom {
 class AudioContext;
 class BrowsingContext;
@@ -55,9 +51,9 @@ class ClientInfo;
 class ClientState;
 class ContentFrameMessageManager;
 class DocGroup;
+class Document;
 class TabGroup;
 class Element;
-class MozIdleObserver;
 class Navigator;
 class Performance;
 class Report;
@@ -137,6 +133,7 @@ enum class LargeAllocStatus : uint8_t {
 
 class nsPIDOMWindowInner : public mozIDOMWindow {
  protected:
+  typedef mozilla::dom::Document Document;
   friend nsGlobalWindowInner;
   friend nsGlobalWindowOuter;
 
@@ -171,9 +168,13 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
   // Returns true if this window is the same as mTopInnerWindow
   inline bool IsTopInnerWindow() const;
 
-  // Check whether a document is currently loading
+  // Check whether a document is currently loading (really checks if the
+  // load event has completed).  May not be reset to false on errors.
   inline bool IsLoading() const;
   inline bool IsHandlingResizeEvent() const;
+
+  // Note: not related to IsLoading.  Set to false if there's an error, etc.
+  void SetActiveLoadingState(bool aIsActiveLoading);
 
   bool AddAudioContext(mozilla::dom::AudioContext* aAudioContext);
   void RemoveAudioContext(mozilla::dom::AudioContext* aAudioContext);
@@ -341,11 +342,6 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
     return mChromeEventHandler;
   }
 
-  virtual nsresult RegisterIdleObserver(
-      mozilla::dom::MozIdleObserver& aIdleObserver) = 0;
-  virtual nsresult UnregisterIdleObserver(
-      mozilla::dom::MozIdleObserver& aIdleObserver) = 0;
-
   mozilla::dom::EventTarget* GetParentTarget() {
     if (!mParentTarget) {
       UpdateParentTarget();
@@ -355,11 +351,11 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
 
   virtual void MaybeUpdateTouchState() {}
 
-  nsIDocument* GetExtantDoc() const { return mDoc; }
+  Document* GetExtantDoc() const { return mDoc; }
   nsIURI* GetDocumentURI() const;
   nsIURI* GetDocBaseURI() const;
 
-  nsIDocument* GetDoc() {
+  Document* GetDoc() {
     if (!mDoc) {
       MaybeCreateDoc();
     }
@@ -385,19 +381,6 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
    * Get the docshell in this window.
    */
   inline nsIDocShell* GetDocShell() const;
-
-  /**
-   * Set a new document in the window. Calling this method will in most cases
-   * create a new inner window. The call will be forewarded to the outer window,
-   * if the inner window is not the current inner window an
-   * NS_ERROR_NOT_AVAILABLE error code will be returned. This may be called with
-   * a pointer to the current document, in that case the document remains
-   * unchanged, but a new inner window will be created.
-   *
-   * aDocument must not be null.
-   */
-  virtual nsresult SetNewDocument(nsIDocument* aDocument, nsISupports* aState,
-                                  bool aForceReuseInnerWindow) = 0;
 
   /**
    * Call this to indicate that some node (this window, its document,
@@ -565,11 +548,6 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
   virtual nsISerialEventTarget* EventTargetFor(
       mozilla::TaskCategory aCategory) const = 0;
 
-  // Returns the AutoplayPermissionManager that documents in this window should
-  // use to request permission to autoplay.
-  already_AddRefed<mozilla::AutoplayPermissionManager>
-  GetAutoplayPermissionManager();
-
   void RegisterReportingObserver(mozilla::dom::ReportingObserver* aObserver,
                                  bool aBuffered);
 
@@ -603,7 +581,7 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
   // value on both the outer window and the current inner window. Make
   // sure you keep them in sync!
   nsCOMPtr<mozilla::dom::EventTarget> mChromeEventHandler;  // strong
-  nsCOMPtr<nsIDocument> mDoc;                               // strong
+  RefPtr<Document> mDoc;
   // Cache the URI when mDoc is cleared.
   nsCOMPtr<nsIURI> mDocumentURI;  // strong
   nsCOMPtr<nsIURI> mDocBaseURI;   // strong
@@ -668,11 +646,6 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
   // The number of open WebSockets.
   uint32_t mNumOfOpenWebSockets;
 
-  // If we're in the process of requesting permission for this window to
-  // play audible media, or we've already been granted permission by the
-  // user, this is non-null, and encapsulates the request.
-  RefPtr<mozilla::AutoplayPermissionManager> mAutoplayPermissionManager;
-
   // The event dispatch code sets and unsets this while keeping
   // the event object alive.
   mozilla::dom::Event* mEvent;
@@ -697,6 +670,8 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsPIDOMWindowInner, NS_PIDOMWINDOWINNER_IID)
 
 class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
  protected:
+  typedef mozilla::dom::Document Document;
+
   explicit nsPIDOMWindowOuter(uint64_t aWindowID);
 
   ~nsPIDOMWindowOuter();
@@ -787,13 +762,6 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
   virtual void ActivateOrDeactivate(bool aActivate) = 0;
 
   /**
-   * These functions are used to modify and check temporary autoplay permission.
-   */
-  void NotifyTemporaryAutoplayPermissionChanged(int32_t aState,
-                                                const nsAString& aPrePath);
-  bool HasTemporaryAutoplayPermission();
-
-  /**
    * |top| gets the root of the window hierarchy.
    *
    * This function does not cross chrome-content boundaries, so if this
@@ -846,10 +814,10 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
     return mMessageManager;
   }
 
-  nsIDocument* GetExtantDoc() const { return mDoc; }
+  Document* GetExtantDoc() const { return mDoc; }
   nsIURI* GetDocumentURI() const;
 
-  nsIDocument* GetDoc() {
+  Document* GetDoc() {
     if (!mDoc) {
       MaybeCreateDoc();
     }
@@ -896,7 +864,7 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
    *
    * aDocument must not be null.
    */
-  virtual nsresult SetNewDocument(nsIDocument* aDocument, nsISupports* aState,
+  virtual nsresult SetNewDocument(Document* aDocument, nsISupports* aState,
                                   bool aForceReuseInnerWindow) = 0;
 
   /**
@@ -1036,11 +1004,11 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
   /**
    * Fire a popup blocked event on the document.
    */
-  virtual void FirePopupBlockedEvent(nsIDocument* aDoc, nsIURI* aPopupURI,
+  virtual void FirePopupBlockedEvent(Document* aDoc, nsIURI* aPopupURI,
                                      const nsAString& aPopupWindowName,
                                      const nsAString& aPopupWindowFeatures) = 0;
 
-  virtual void NotifyContentBlockingState(unsigned aState, nsIChannel* aChannel,
+  virtual void NotifyContentBlockingEvent(unsigned aEvent, nsIChannel* aChannel,
                                           bool aBlocked, nsIURI* aURIHint) = 0;
 
   // WebIDL-ish APIs
@@ -1125,7 +1093,7 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
   // value on both the outer window and the current inner window. Make
   // sure you keep them in sync!
   nsCOMPtr<mozilla::dom::EventTarget> mChromeEventHandler;  // strong
-  nsCOMPtr<nsIDocument> mDoc;                               // strong
+  RefPtr<Document> mDoc;
   // Cache the URI when mDoc is cleared.
   nsCOMPtr<nsIURI> mDocumentURI;  // strong
 
@@ -1187,9 +1155,6 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
   mozilla::dom::LargeAllocStatus mLargeAllocStatus;
 
   RefPtr<mozilla::dom::BrowsingContext> mOpenerForInitialContentBrowser;
-
-  using PermissionInfo = std::pair<bool, mozilla::TimeStamp>;
-  nsDataHashtable<nsStringHashKey, PermissionInfo> mAutoplayTemporaryPermission;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsPIDOMWindowOuter, NS_PIDOMWINDOWOUTER_IID)

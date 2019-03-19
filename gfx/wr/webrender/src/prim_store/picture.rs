@@ -3,23 +3,25 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{
-    ColorU, FilterOp, LayoutRect, LayoutSize, LayoutPrimitiveInfo, MixBlendMode,
+    ColorU, FilterOp, LayoutPrimitiveInfo, MixBlendMode,
     PropertyBinding, PropertyBindingId,
 };
-use app_units::Au;
-use display_list_flattener::{AsInstanceKind, IsVisible};
-use intern::{DataStore, Handle, Internable, Interner, InternDebug, UpdateList};
+use api::units::{Au, LayoutSize, LayoutVector2D};
+use intern::ItemUid;
+use display_list_flattener::IsVisible;
+use intern::{Internable, InternDebug, Handle as InternHandle};
 use picture::PictureCompositeMode;
 use prim_store::{
     PrimKey, PrimKeyCommonData, PrimTemplate, PrimTemplateCommonData,
     PrimitiveInstanceKind, PrimitiveSceneData, PrimitiveStore, VectorKey,
+    InternablePrimitive,
 };
 
 /// Represents a hashable description of how a picture primitive
 /// will be composited into its parent.
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug, Clone, PartialEq, Hash, Eq)]
+#[derive(Debug, Clone, MallocSizeOf, PartialEq, Hash, Eq)]
 pub enum PictureCompositeKey {
     // No visual compositing effect
     Identity,
@@ -39,6 +41,7 @@ pub enum PictureCompositeKey {
     ColorMatrix([Au; 20]),
     SrgbToLinear,
     LinearToSrgb,
+    ComponentTransfer(ItemUid),
 
     // MixBlendMode
     Multiply,
@@ -114,9 +117,13 @@ impl From<Option<PictureCompositeMode>> for PictureCompositeKey {
                         }
                         PictureCompositeKey::ColorMatrix(quantized_values)
                     }
+                    FilterOp::ComponentTransfer => unreachable!(),
                 }
             }
-            Some(PictureCompositeMode::Blit) |
+            Some(PictureCompositeMode::ComponentTransferFilter(handle)) => {
+                PictureCompositeKey::ComponentTransfer(handle.uid())
+            }
+            Some(PictureCompositeMode::Blit(_)) |
             Some(PictureCompositeMode::TileCache { .. }) |
             None => {
                 PictureCompositeKey::Identity
@@ -127,7 +134,7 @@ impl From<Option<PictureCompositeMode>> for PictureCompositeKey {
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, MallocSizeOf, PartialEq, Hash)]
 pub struct Picture {
     pub composite_mode_key: PictureCompositeKey,
 }
@@ -138,7 +145,6 @@ impl PictureKey {
     pub fn new(
         is_backface_visible: bool,
         prim_size: LayoutSize,
-        prim_relative_clip_rect: LayoutRect,
         pic: Picture,
     ) -> Self {
 
@@ -146,7 +152,6 @@ impl PictureKey {
             common: PrimKeyCommonData {
                 is_backface_visible,
                 prim_size: prim_size.into(),
-                prim_relative_clip_rect: prim_relative_clip_rect.into(),
             },
             kind: pic,
         }
@@ -155,22 +160,9 @@ impl PictureKey {
 
 impl InternDebug for PictureKey {}
 
-impl AsInstanceKind<PictureDataHandle> for PictureKey {
-    /// Construct a primitive instance that matches the type
-    /// of primitive key.
-    fn as_instance_kind(
-        &self,
-        _: PictureDataHandle,
-        _: &mut PrimitiveStore,
-    ) -> PrimitiveInstanceKind {
-        // Should never be hit as this method should not be
-        // called for pictures.
-        unreachable!();
-    }
-}
-
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
+#[derive(MallocSizeOf)]
 pub struct PictureData;
 
 pub type PictureTemplate = PrimTemplate<PictureData>;
@@ -186,34 +178,35 @@ impl From<PictureKey> for PictureTemplate {
     }
 }
 
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
-pub struct PictureDataMarker;
-
-pub type PictureDataStore = DataStore<PictureKey, PictureTemplate, PictureDataMarker>;
-pub type PictureDataHandle = Handle<PictureDataMarker>;
-pub type PictureDataUpdateList = UpdateList<PictureKey>;
-pub type PictureDataInterner = Interner<PictureKey, PrimitiveSceneData, PictureDataMarker>;
+pub type PictureDataHandle = InternHandle<Picture>;
 
 impl Internable for Picture {
-    type Marker = PictureDataMarker;
-    type Source = PictureKey;
+    type Key = PictureKey;
     type StoreData = PictureTemplate;
     type InternData = PrimitiveSceneData;
+}
 
-    /// Build a new key from self with `info`.
-    fn build_key(
+impl InternablePrimitive for Picture {
+    fn into_key(
         self,
         info: &LayoutPrimitiveInfo,
-        prim_relative_clip_rect: LayoutRect,
     ) -> PictureKey {
         PictureKey::new(
             info.is_backface_visible,
             info.rect.size,
-            prim_relative_clip_rect,
-            self
+            self,
         )
+    }
+
+    fn make_instance_kind(
+        _key: PictureKey,
+        _: PictureDataHandle,
+        _: &mut PrimitiveStore,
+        _reference_frame_relative_offset: LayoutVector2D,
+    ) -> PrimitiveInstanceKind {
+        // Should never be hit as this method should not be
+        // called for pictures.
+        unreachable!();
     }
 }
 
@@ -233,7 +226,7 @@ fn test_struct_sizes() {
     //     test expectations and move on.
     // (b) You made a structure larger. This is not necessarily a problem, but should only
     //     be done with care, and after checking if talos performance regresses badly.
-    assert_eq!(mem::size_of::<Picture>(), 84, "Picture size changed");
-    assert_eq!(mem::size_of::<PictureTemplate>(), 36, "PictureTemplate size changed");
-    assert_eq!(mem::size_of::<PictureKey>(), 112, "PictureKey size changed");
+    assert_eq!(mem::size_of::<Picture>(), 88, "Picture size changed");
+    assert_eq!(mem::size_of::<PictureTemplate>(), 20, "PictureTemplate size changed");
+    assert_eq!(mem::size_of::<PictureKey>(), 104, "PictureKey size changed");
 }

@@ -10,6 +10,7 @@
 #include "mozilla/dom/PaymentRequest.h"
 #include "mozilla/dom/PaymentRequestChild.h"
 #include "mozilla/dom/PaymentRequestManager.h"
+#include "mozilla/dom/RootedDictionary.h"
 #include "mozilla/intl/LocaleService.h"
 #include "mozilla/intl/MozLocale.h"
 #include "mozilla/EventStateManager.h"
@@ -42,6 +43,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(PaymentRequest,
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mResponse)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mShippingAddress)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFullShippingAddress)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocument)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(PaymentRequest,
@@ -52,6 +54,8 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(PaymentRequest,
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mResponse)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mShippingAddress)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mFullShippingAddress)
+  tmp->UnregisterActivityObserver();
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocument)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(PaymentRequest)
@@ -547,7 +551,7 @@ already_AddRefed<PaymentRequest> PaymentRequest::Constructor(
     return nullptr;
   }
 
-  nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
+  nsCOMPtr<Document> doc = window->GetExtantDoc();
   if (!doc) {
     aRv.Throw(NS_ERROR_UNEXPECTED);
     return nullptr;
@@ -566,7 +570,7 @@ already_AddRefed<PaymentRequest> PaymentRequest::Constructor(
   }
 
   // Get the top level principal
-  nsCOMPtr<nsIDocument> topLevelDoc = doc->GetTopLevelContentDocument();
+  nsCOMPtr<Document> topLevelDoc = doc->GetTopLevelContentDocument();
   MOZ_ASSERT(topLevelDoc);
   nsCOMPtr<nsIPrincipal> topLevelPrincipal = topLevelDoc->NodePrincipal();
 
@@ -695,7 +699,7 @@ already_AddRefed<Promise> PaymentRequest::Show(
 
   nsIGlobalObject* global = GetOwnerGlobal();
   nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(global);
-  nsIDocument* doc = win->GetExtantDoc();
+  Document* doc = win->GetExtantDoc();
 
   if (!EventStateManager::IsHandlingUserInput()) {
     nsString msg = NS_LITERAL_STRING(
@@ -1080,7 +1084,7 @@ void PaymentRequest::ResolvedCallback(JSContext* aCx,
   }
 
   // Converting value to a PaymentDetailsUpdate dictionary
-  PaymentDetailsUpdate details;
+  RootedDictionary<PaymentDetailsUpdate> details(aCx);
   if (!details.Init(aCx, aValue)) {
     AbortUpdate(NS_ERROR_DOM_TYPE_ERR);
     JS_ClearPendingException(aCx);
@@ -1117,14 +1121,14 @@ bool PaymentRequest::InFullyActiveDocument() {
   }
 
   nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(global);
-  nsIDocument* doc = win->GetExtantDoc();
+  Document* doc = win->GetExtantDoc();
   if (!doc || !doc->IsCurrentActiveDocument()) {
     return false;
   }
 
   // According to the definition of the fully active document, recursive
   // checking the parent document are all IsCurrentActiveDocument
-  nsIDocument* parentDoc = doc->GetParentDocument();
+  Document* parentDoc = doc->GetParentDocument();
   while (parentDoc) {
     if (parentDoc && !parentDoc->IsCurrentActiveDocument()) {
       return false;
@@ -1136,28 +1140,25 @@ bool PaymentRequest::InFullyActiveDocument() {
 
 void PaymentRequest::RegisterActivityObserver() {
   if (nsPIDOMWindowInner* window = GetOwner()) {
-    nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
-    if (doc) {
-      doc->RegisterActivityObserver(
+    mDocument = window->GetExtantDoc();
+    if (mDocument) {
+      mDocument->RegisterActivityObserver(
           NS_ISUPPORTS_CAST(nsIDocumentActivity*, this));
     }
   }
 }
 
 void PaymentRequest::UnregisterActivityObserver() {
-  if (nsPIDOMWindowInner* window = GetOwner()) {
-    nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
-    if (doc) {
-      doc->UnregisterActivityObserver(
-          NS_ISUPPORTS_CAST(nsIDocumentActivity*, this));
-    }
+  if (mDocument) {
+    mDocument->UnregisterActivityObserver(
+        NS_ISUPPORTS_CAST(nsIDocumentActivity*, this));
   }
 }
 
 void PaymentRequest::NotifyOwnerDocumentActivityChanged() {
   nsPIDOMWindowInner* window = GetOwner();
   NS_ENSURE_TRUE_VOID(window);
-  nsIDocument* doc = window->GetExtantDoc();
+  Document* doc = window->GetExtantDoc();
   NS_ENSURE_TRUE_VOID(doc);
 
   if (!InFullyActiveDocument()) {

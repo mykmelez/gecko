@@ -322,7 +322,7 @@ void nsSVGRenderingObserverProperty::OnRenderingChange() {
     // do that using a change hint (multiple change hints of the same type are
     // coalesced).
     nsLayoutUtils::PostRestyleEvent(frame->GetContent()->AsElement(),
-                                    nsRestyleHint(0),
+                                    RestyleHint{0},
                                     nsChangeHint_InvalidateRenderingObservers);
   }
 }
@@ -383,7 +383,7 @@ void SVGTextPathObserver::OnRenderingChange() {
   nsChangeHint changeHint =
       nsChangeHint(nsChangeHint_RepaintFrame | nsChangeHint_UpdateTextPath);
   frame->PresContext()->RestyleManager()->PostRestyleEvent(
-      frame->GetContent()->AsElement(), nsRestyleHint(0), changeHint);
+      frame->GetContent()->AsElement(), RestyleHint{0}, changeHint);
 }
 
 class SVGMarkerObserver final : public nsSVGRenderingObserverProperty {
@@ -414,7 +414,7 @@ void SVGMarkerObserver::OnRenderingChange() {
     nsSVGUtils::ScheduleReflowSVG(frame);
   }
   frame->PresContext()->RestyleManager()->PostRestyleEvent(
-      frame->GetContent()->AsElement(), nsRestyleHint(0),
+      frame->GetContent()->AsElement(), RestyleHint{0},
       nsChangeHint_RepaintFrame);
 }
 
@@ -675,7 +675,7 @@ void SVGFilterObserverListForCSSProp::OnRenderingChange() {
     changeHint |= nsChangeHint_UpdateOverflow;
   }
   frame->PresContext()->RestyleManager()->PostRestyleEvent(
-      frame->GetContent()->AsElement(), nsRestyleHint(0), changeHint);
+      frame->GetContent()->AsElement(), RestyleHint{0}, changeHint);
 }
 
 class SVGFilterObserverListForCanvasContext final
@@ -759,7 +759,7 @@ void SVGMaskObserverList::ResolveImage(uint32_t aIndex) {
 
   if (!image.IsResolved()) {
     MOZ_ASSERT(image.GetType() == nsStyleImageType::eStyleImageType_Image);
-    image.ResolveImage(mFrame->PresContext(), nullptr);
+    image.ResolveImage(*mFrame->PresContext()->Document(), nullptr);
 
     mozilla::css::ImageLoader* imageLoader =
         mFrame->PresContext()->Document()->StyleImageLoader();
@@ -966,7 +966,7 @@ typedef nsInterfaceHashtable<nsRefPtrHashKey<URLAndReferrerInfo>,
 using PaintingPropertyDescriptor =
     const mozilla::FramePropertyDescriptor<nsSVGPaintingProperty>*;
 
-void DestroyFilterProperty(SVGFilterObserverListForCSSProp* aProp) {
+static void DestroyFilterProperty(SVGFilterObserverListForCSSProp* aProp) {
   // SVGFilterObserverListForCSSProp is cycle-collected, so dropping the last
   // reference doesn't necessarily destroy it. We need to tell it that the
   // frame has now become invalid.
@@ -1044,7 +1044,7 @@ bool SVGObserverUtils::GetAndObserveMarkers(nsIFrame* aMarkedFrame,
                           LayoutFrameType::SVGMarker, nullptr)              \
                     : nullptr;                                              \
   foundMarker = foundMarker || bool(marker);                                \
-  (*aFrames)[nsSVGMark::e##type] = static_cast<nsSVGMarkerFrame*>(marker);
+  (*aFrames)[SVGMark::e##type] = static_cast<nsSVGMarkerFrame*>(marker);
 
   GET_MARKER(Start)
   GET_MARKER(Mid)

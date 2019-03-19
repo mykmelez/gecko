@@ -9,7 +9,6 @@
 
 #include "mozilla/BasicEvents.h"
 
-class nsIDocument;
 class nsIPrincipal;
 
 namespace mozilla {
@@ -21,6 +20,7 @@ class PopupBlocker final {
   // permissive to least permissive so that it's safe to push state in
   // all situations. Pushing popup state onto the stack never makes the
   // current popup state less permissive.
+  // Keep this in sync with PopupBlockerState webidl dictionary!
   enum PopupControlState {
     openAllowed = 0,  // open that window without worries
     openControlled,   // it's a popup, but allow it
@@ -48,8 +48,19 @@ class PopupBlocker final {
   // allowed per event.
   static bool TryUsePopupOpeningToken();
 
+  static bool IsPopupOpeningTokenUnused();
+
   static PopupBlocker::PopupControlState GetEventPopupControlState(
       WidgetEvent* aEvent, Event* aDOMEvent = nullptr);
+
+  // Returns if a external protocol iframe is allowed.
+  static bool ConsumeTimerTokenForExternalProtocolIframe();
+
+  // Returns when the last external protocol iframe has been allowed.
+  static TimeStamp WhenLastExternalProtocolIframeAllowed();
+
+  // Reset the last external protocol iframe timestamp.
+  static void ResetLastExternalProtocolIframeAllowed();
 
   static void Initialize();
   static void Shutdown();
@@ -59,9 +70,9 @@ class PopupBlocker final {
 }  // namespace mozilla
 
 #ifdef MOZILLA_INTERNAL_API
-#define NS_AUTO_POPUP_STATE_PUSHER nsAutoPopupStatePusherInternal
+#  define NS_AUTO_POPUP_STATE_PUSHER nsAutoPopupStatePusherInternal
 #else
-#define NS_AUTO_POPUP_STATE_PUSHER nsAutoPopupStatePusherExternal
+#  define NS_AUTO_POPUP_STATE_PUSHER nsAutoPopupStatePusherExternal
 #endif
 
 // Helper class that helps with pushing and popping popup control

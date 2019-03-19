@@ -22,7 +22,7 @@
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
 #include "nsPresContext.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIFormControlFrame.h"
 #include "nsError.h"
 #include "nsContentUtils.h"
@@ -91,9 +91,6 @@ static const nsAttrValue::EnumTable kFormAutocompleteTable[] = {
 // Default autocomplete value is 'on'.
 static const nsAttrValue::EnumTable* kFormDefaultAutocomplete =
     &kFormAutocompleteTable[0];
-
-bool HTMLFormElement::gFirstFormSubmitted = false;
-bool HTMLFormElement::gPasswordManagerInitialized = false;
 
 HTMLFormElement::HTMLFormElement(
     already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
@@ -255,8 +252,7 @@ bool HTMLFormElement::ParseAttribute(int32_t aNamespaceID, nsAtom* aAttribute,
                                               aMaybeScriptedPrincipal, aResult);
 }
 
-nsresult HTMLFormElement::BindToTree(nsIDocument* aDocument,
-                                     nsIContent* aParent,
+nsresult HTMLFormElement::BindToTree(Document* aDocument, nsIContent* aParent,
                                      nsIContent* aBindingParent) {
   nsresult rv =
       nsGenericHTMLElement::BindToTree(aDocument, aParent, aBindingParent);
@@ -494,7 +490,7 @@ nsresult HTMLFormElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
 nsresult HTMLFormElement::DoSubmitOrReset(WidgetEvent* aEvent,
                                           EventMessage aMessage) {
   // Make sure the presentation is up-to-date
-  nsIDocument* doc = GetComposedDoc();
+  Document* doc = GetComposedDoc();
   if (doc) {
     doc->FlushPendingNotifications(FlushType::ContentAndNotify);
   }
@@ -640,7 +636,7 @@ nsresult HTMLFormElement::SubmitSubmission(
   }
 
   // If there is no link handler, then we won't actually be able to submit.
-  nsIDocument* doc = GetComposedDoc();
+  Document* doc = GetComposedDoc();
   nsCOMPtr<nsISupports> container = doc ? doc->GetContainer() : nullptr;
   nsCOMPtr<nsILinkHandler> linkHandler(do_QueryInterface(container));
   if (!linkHandler || IsEditable()) {
@@ -747,7 +743,7 @@ nsresult HTMLFormElement::DoSecureToInsecureSubmitCheck(nsIURI* aActionURL,
   // Only ask the user about posting from a secure URI to an insecure URI if
   // this element is in the root document. When this is not the case, the mixed
   // content blocker will take care of security for us.
-  nsIDocument* parent = OwnerDoc()->GetParentDocument();
+  Document* parent = OwnerDoc()->GetParentDocument();
   bool isRootDocument = (!parent || nsContentUtils::IsChromeDoc(parent));
   if (!isRootDocument) {
     return NS_OK;
@@ -854,14 +850,6 @@ nsresult HTMLFormElement::DoSecureToInsecureSubmitCheck(nsIURI* aActionURL,
 nsresult HTMLFormElement::NotifySubmitObservers(nsIURI* aActionURL,
                                                 bool* aCancelSubmit,
                                                 bool aEarlyNotify) {
-  // If this is the first form, bring alive the first form submit
-  // category observers
-  if (!gFirstFormSubmitted) {
-    gFirstFormSubmitted = true;
-    NS_CreateServicesFromCategory(NS_FIRST_FORMSUBMIT_CATEGORY, nullptr,
-                                  NS_FIRST_FORMSUBMIT_CATEGORY);
-  }
-
   if (!aEarlyNotify) {
     nsresult rv = DoSecureToInsecureSubmitCheck(aActionURL, aCancelSubmit);
     if (NS_FAILED(rv)) {
@@ -872,44 +860,16 @@ nsresult HTMLFormElement::NotifySubmitObservers(nsIURI* aActionURL,
     }
   }
 
-  // Notify observers that the form is being submitted.
-  nsCOMPtr<nsIObserverService> service =
-      mozilla::services::GetObserverService();
-  if (!service) return NS_ERROR_FAILURE;
-
-  nsCOMPtr<nsISimpleEnumerator> theEnum;
-  nsresult rv = service->EnumerateObservers(
-      aEarlyNotify ? NS_EARLYFORMSUBMIT_SUBJECT : NS_FORMSUBMIT_SUBJECT,
-      getter_AddRefs(theEnum));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  if (theEnum) {
-    nsCOMPtr<nsISupports> inst;
-    *aCancelSubmit = false;
-
-    // XXXbz what do the submit observers actually want?  The window
-    // of the document this is shown in?  Or something else?
-    // sXBL/XBL2 issue
-    nsCOMPtr<nsPIDOMWindowOuter> window = OwnerDoc()->GetWindow();
-
-    bool loop = true;
-    while (NS_SUCCEEDED(theEnum->HasMoreElements(&loop)) && loop) {
-      theEnum->GetNext(getter_AddRefs(inst));
-
-      nsCOMPtr<nsIFormSubmitObserver> formSubmitObserver(
-          do_QueryInterface(inst));
-      if (formSubmitObserver) {
-        rv = formSubmitObserver->Notify(
-            this, window ? window->GetCurrentInnerWindow() : nullptr,
-            aActionURL, aCancelSubmit);
-        NS_ENSURE_SUCCESS(rv, rv);
-      }
-      if (*aCancelSubmit) {
-        return NS_OK;
-      }
-    }
+  bool defaultAction = true;
+  nsresult rv = nsContentUtils::DispatchEventOnlyToChrome(
+      OwnerDoc(), static_cast<nsINode*>(this),
+      aEarlyNotify ? NS_LITERAL_STRING("DOMFormBeforeSubmit")
+                   : NS_LITERAL_STRING("DOMFormSubmit"),
+      CanBubble::eYes, Cancelable::eYes, &defaultAction);
+  *aCancelSubmit = !defaultAction;
+  if (*aCancelSubmit) {
+    return NS_OK;
   }
-
   return rv;
 }
 
@@ -959,8 +919,10 @@ HTMLFormElement::GetElementAt(int32_t aIndex) const {
  *         > 0 if aControl1 is after aControl2,
  *         0 otherwise
  */
-/* static */ int32_t HTMLFormElement::CompareFormControlPosition(
-    Element* aElement1, Element* aElement2, const nsIContent* aForm) {
+/* static */
+int32_t HTMLFormElement::CompareFormControlPosition(Element* aElement1,
+                                                    Element* aElement2,
+                                                    const nsIContent* aForm) {
   NS_ASSERTION(aElement1 != aElement2, "Comparing a form control to itself");
 
   // If an element has a @form, we can assume it *might* be able to not have
@@ -995,7 +957,8 @@ HTMLFormElement::GetElementAt(int32_t aIndex) const {
  * @param aControls List of form controls to check.
  * @param aForm Parent form of the controls.
  */
-/* static */ void HTMLFormElement::AssertDocumentOrder(
+/* static */
+void HTMLFormElement::AssertDocumentOrder(
     const nsTArray<nsGenericHTMLFormElement*>& aControls, nsIContent* aForm) {
   // TODO: remove the return statement with bug 598468.
   // This is done to prevent asserts in some edge cases.
@@ -1019,7 +982,8 @@ HTMLFormElement::GetElementAt(int32_t aIndex) const {
  * @param aControls List of form controls to check.
  * @param aForm Parent form of the controls.
  */
-/* static */ void HTMLFormElement::AssertDocumentOrder(
+/* static */
+void HTMLFormElement::AssertDocumentOrder(
     const nsTArray<RefPtr<nsGenericHTMLFormElement>>& aControls,
     nsIContent* aForm) {
   // TODO: remove the return statement with bug 598468.
@@ -1125,16 +1089,8 @@ nsresult HTMLFormElement::AddElement(nsGenericHTMLFormElement* aChild,
 
   int32_t type = aChild->ControlType();
 
-  //
-  // If it is a password control, and the password manager has not yet been
-  // initialized, initialize the password manager
-  //
+  // If it is a password control, inform the password manager.
   if (type == NS_FORM_INPUT_PASSWORD) {
-    if (!gPasswordManagerInitialized) {
-      gPasswordManagerInitialized = true;
-      NS_CreateServicesFromCategory(NS_PASSWORDMANAGER_CATEGORY, nullptr,
-                                    NS_PASSWORDMANAGER_CATEGORY);
-    }
     PostPasswordEvent();
   }
 
@@ -1449,7 +1405,7 @@ void HTMLFormElement::FlushPendingSubmission() {
 void HTMLFormElement::GetAction(nsString& aValue) {
   if (!GetAttr(kNameSpaceID_None, nsGkAtoms::action, aValue) ||
       aValue.IsEmpty()) {
-    nsIDocument* document = OwnerDoc();
+    Document* document = OwnerDoc();
     nsIURI* docURI = document->GetDocumentURI();
     if (docURI) {
       nsAutoCString spec;
@@ -1518,7 +1474,7 @@ nsresult HTMLFormElement::GetActionURL(nsIURI** aActionURL,
   }
 
   // Get base URL
-  nsIDocument* document = OwnerDoc();
+  Document* document = OwnerDoc();
   nsIURI* docURI = document->GetDocumentURI();
   NS_ENSURE_TRUE(docURI, NS_ERROR_UNEXPECTED);
 
@@ -1559,25 +1515,6 @@ nsresult HTMLFormElement::GetActionURL(nsIURI** aActionURL,
   rv = securityManager->CheckLoadURIWithPrincipal(
       NodePrincipal(), actionURL, nsIScriptSecurityManager::STANDARD);
   NS_ENSURE_SUCCESS(rv, rv);
-
-  // Check if CSP allows this form-action
-  nsCOMPtr<nsIContentSecurityPolicy> csp;
-  rv = NodePrincipal()->GetCsp(getter_AddRefs(csp));
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (csp) {
-    bool permitsFormAction = true;
-
-    // form-action is only enforced if explicitly defined in the
-    // policy - do *not* consult default-src, see:
-    // http://www.w3.org/TR/CSP2/#directive-default-src
-    rv = csp->Permits(this, nullptr /* nsICSPEventListener */, actionURL,
-                      nsIContentSecurityPolicy::FORM_ACTION_DIRECTIVE, true,
-                      &permitsFormAction);
-    NS_ENSURE_SUCCESS(rv, rv);
-    if (!permitsFormAction) {
-      return NS_ERROR_CSP_FORM_ACTION_VIOLATION;
-    }
-  }
 
   // Potentially the page uses the CSP directive 'upgrade-insecure-requests'. In
   // such a case we have to upgrade the action url from http:// to https://.
@@ -1994,7 +1931,14 @@ HTMLFormElement::OnStatusChange(nsIWebProgress* aWebProgress,
 
 NS_IMETHODIMP
 HTMLFormElement::OnSecurityChange(nsIWebProgress* aWebProgress,
-                                  nsIRequest* aRequest, uint32_t state) {
+                                  nsIRequest* aRequest, uint32_t aState) {
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HTMLFormElement::OnContentBlockingEvent(nsIWebProgress* aWebProgress,
+                                        nsIRequest* aRequest, uint32_t aEvent) {
   MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }

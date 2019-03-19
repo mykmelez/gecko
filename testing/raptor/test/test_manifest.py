@@ -27,7 +27,8 @@ VALID_MANIFESTS = [{'apps': 'firefox',
                     'type': 'pageload',
                     'page_cycles': 25,
                     'test_url': 'http://www.test-url/goes/here',
-                    'measure': 'fnbpaint, dcf',
+                    'measure': 'fnbpaint, fcp',
+                    'alert_on': 'fcp',
                     'unit': 'ms',
                     'lower_is_better': True,
                     'alert_threshold': 2.0,
@@ -35,12 +36,12 @@ VALID_MANIFESTS = [{'apps': 'firefox',
                     'playback_binary_manifest': 'binary.manifest',
                     'playback_pageset_manifest': 'pageset.manifest',
                     'playback_recordings': 'recorded_site.mp',
-                    'python3_win_manifest': 'py3.manifest',
                     'manifest': 'valid_details_1'},
                    {'apps': 'chrome',
                     'type': 'benchmark',
                     'page_cycles': 5,
                     'test_url': 'http://www.test-url/goes/here',
+                    'measure': 'fcp',
                     'unit': 'score',
                     'lower_is_better': False,
                     'alert_threshold': 2.0,
@@ -57,24 +58,40 @@ INVALID_MANIFESTS = [{'apps': 'firefox',
                       'playback_binary_manifest': 'binary.manifest',
                       'playback_pageset_manifest': 'pageset.manifest',
                       'playback_recordings': 'recorded_site.mp',
-                      'python3_win_manifest': 'py3.manifest',
                       'manifest': 'invalid_details_1'},
                      {'apps': 'chrome',
                       'type': 'pageload',
                       'page_cycles': 25,
                       'test_url': 'http://www.test-url/goes/here',
-                      'measure': 'fnbpaint, dcf',
+                      'measure': 'fnbpaint, fcp',
                       'unit': 'ms',
                       'lower_is_better': True,
                       'alert_threshold': 2.0,
                       'playback': 'mitmproxy',
-                      'manifest': 'invalid_details_2'}]
+                      'manifest': 'invalid_details_2'},
+                     {'apps': 'firefox',
+                      'type': 'pageload',
+                      'page_cycles': 25,
+                      'test_url': 'http://www.test-url/goes/here',
+                      'measure': 'fnbpaint, fcp',
+                      'alert_on': 'nope',
+                      'unit': 'ms',
+                      'lower_is_better': True,
+                      'alert_threshold': 2.0,
+                      'playback': 'mitmproxy',
+                      'playback_binary_manifest': 'binary.manifest',
+                      'playback_pageset_manifest': 'pageset.manifest',
+                      'playback_recordings': 'recorded_site.mp',
+                      'manifest': 'invalid_details_3'}]
 
 
-@pytest.mark.parametrize('app', ['firefox', 'chrome', 'geckoview'])
+@pytest.mark.parametrize('app', ['firefox', 'chrome', 'geckoview', 'refbrow', 'fenix'])
 def test_get_browser_test_list(app):
-    test_list = get_browser_test_list(app)
-    assert len(test_list) > 0
+    test_list = get_browser_test_list(app, run_local=True)
+    if app != "fenix":
+        assert len(test_list) > 0
+    else:
+        assert len(test_list) == 0
 
 
 @pytest.mark.parametrize('test_details', VALID_MANIFESTS)
@@ -158,6 +175,24 @@ def test_get_raptor_test_list_override_page_timeout(create_args):
     assert len(test_list) == 1
     assert test_list[0]['name'] == 'raptor-tp6-google-firefox'
     assert test_list[0]['page_timeout'] == 9999
+
+
+def test_get_raptor_test_list_refbrow(create_args):
+    args = create_args(app="refbrow",
+                       test="raptor-speedometer")
+
+    test_list = get_raptor_test_list(args, mozinfo.os)
+    assert len(test_list) == 1
+    assert test_list[0]['name'] == 'raptor-speedometer-refbrow'
+
+
+def test_get_raptor_test_list_fenix(create_args):
+    args = create_args(app="fenix",
+                       test="raptor-speedometer")
+
+    test_list = get_raptor_test_list(args, mozinfo.os)
+    # we don't have any actual fenix tests yet
+    assert len(test_list) == 0
 
 
 if __name__ == '__main__':

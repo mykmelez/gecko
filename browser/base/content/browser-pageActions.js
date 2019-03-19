@@ -875,6 +875,11 @@ var BrowserPageActions = {
     this._contextAction = null;
 
     PageActions.logTelemetry("managed", action);
+    AMTelemetry.recordActionEvent({
+      object: "pageAction",
+      action: "manage",
+      extra: {addonId: action.extensionID},
+    });
 
     let viewID = "addons://detail/" + encodeURIComponent(action.extensionID);
     window.BrowserOpenAddonsMgr(viewID);
@@ -973,6 +978,36 @@ BrowserPageActions.bookmark = {
   },
 };
 
+// pin tab
+BrowserPageActions.pinTab = {
+  updateState() {
+    let action = PageActions.actionForID("pinTab");
+    let { pinned } = gBrowser.selectedTab;
+    if (pinned) {
+      action.setTitle(BrowserPageActions.panelNode.getAttribute("unpinTab-title"));
+    } else {
+      action.setTitle(BrowserPageActions.panelNode.getAttribute("pinTab-title"));
+    }
+
+    let panelButton = BrowserPageActions.panelButtonNodeForActionID(action.id);
+    if (panelButton) {
+      panelButton.toggleAttribute("pinned", pinned);
+    }
+    let urlbarButton = BrowserPageActions.urlbarButtonNodeForActionID(action.id);
+    if (urlbarButton) {
+      urlbarButton.toggleAttribute("pinned", pinned);
+    }
+  },
+
+  onCommand(event, buttonNode) {
+    if (gBrowser.selectedTab.pinned) {
+      gBrowser.unpinTab(gBrowser.selectedTab);
+    } else {
+      gBrowser.pinTab(gBrowser.selectedTab);
+    }
+  },
+};
+
 // copy URL
 BrowserPageActions.copyURL = {
   onBeforePlacedInWindow(browserWindow) {
@@ -1065,7 +1100,9 @@ BrowserPageActions.sendToDevice = {
       item.classList.add("pageAction-sendToDevice-device", "subviewbutton");
       if (clientId) {
         item.classList.add("subviewbutton-iconic");
-        item.setAttribute("tooltiptext", gSync.formatLastSyncDate(lastModified));
+        if (lastModified) {
+          item.setAttribute("tooltiptext", gSync.formatLastSyncDate(lastModified));
+        }
       }
 
       item.addEventListener("command", event => {
@@ -1086,14 +1123,14 @@ BrowserPageActions.sendToDevice = {
     bodyNode.removeAttribute("state");
     // In the first ~10 sec after startup, Sync may not be loaded and the list
     // of devices will be empty.
-    if (gSync.syncConfiguredAndLoading) {
+    if (gSync.sendTabConfiguredAndLoading) {
       bodyNode.setAttribute("state", "notready");
       // Force a background Sync
       Services.tm.dispatchToMainThread(async () => {
         await Weave.Service.sync({why: "pageactions", engines: []}); // [] = clients engine only
         // There's no way Sync is still syncing at this point, but we check
         // anyway to avoid infinite looping.
-        if (!window.closed && !gSync.syncConfiguredAndLoading) {
+        if (!window.closed && !gSync.sendTabConfiguredAndLoading) {
           this.onShowingSubview(panelViewNode);
         }
       });
@@ -1187,12 +1224,12 @@ BrowserPageActions.addSearchEngine = {
   },
 
   _installEngine(uri, image) {
-    Services.search.addEngine(uri, image, false, {
-      onSuccess: engine => {
+    Services.search.addEngine(uri, image, false).then(
+      engine => {
         showBrowserPageActionFeedback(this.action);
       },
-      onError(errorCode) {
-        if (errorCode != Ci.nsISearchInstallCallback.ERROR_DUPLICATE_ENGINE) {
+      errorCode => {
+        if (errorCode != Ci.nsISearchService.ERROR_DUPLICATE_ENGINE) {
           // Download error is shown by the search service
           return;
         }
@@ -1208,8 +1245,8 @@ BrowserPageActions.addSearchEngine = {
         prompt.QueryInterface(Ci.nsIWritablePropertyBag2);
         prompt.setPropertyAsBool("allowTabModal", true);
         prompt.alert(title, text);
-      },
-    });
+      }
+    );
   },
 };
 

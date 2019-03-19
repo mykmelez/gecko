@@ -70,7 +70,7 @@ nsresult CSSStyleRuleDeclaration::SetCSSDeclaration(
   return NS_OK;
 }
 
-nsIDocument* CSSStyleRuleDeclaration::DocToUpdate() { return nullptr; }
+Document* CSSStyleRuleDeclaration::DocToUpdate() { return nullptr; }
 
 nsDOMCSSDeclaration::ParsingEnvironment
 CSSStyleRuleDeclaration::GetParsingEnvironment(
@@ -193,13 +193,13 @@ nsresult CSSStyleRule::SelectorMatchesElement(Element* aElement,
                                               uint32_t aSelectorIndex,
                                               const nsAString& aPseudo,
                                               bool* aMatches) {
-  CSSPseudoElementType pseudoType = CSSPseudoElementType::NotPseudo;
+  PseudoStyleType pseudoType = PseudoStyleType::NotPseudo;
   if (!aPseudo.IsEmpty()) {
     RefPtr<nsAtom> pseudoElt = NS_Atomize(aPseudo);
     pseudoType = nsCSSPseudoElements::GetPseudoType(
         pseudoElt, CSSEnabledState::eIgnoreEnabledState);
 
-    if (pseudoType == CSSPseudoElementType::NotPseudo) {
+    if (pseudoType == PseudoStyleType::NotPseudo) {
       *aMatches = false;
       return NS_OK;
     }

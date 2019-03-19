@@ -7,7 +7,7 @@
 #include "mozilla/dom/SVGFilterElement.h"
 
 #include "nsGkAtoms.h"
-#include "nsCOMPtr.h"
+#include "mozilla/AlreadyAddRefed.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/dom/SVGFilterElementBinding.h"
 #include "mozilla/dom/SVGLengthBinding.h"
@@ -110,7 +110,8 @@ SVGFilterElement::IsAttributeMapped(const nsAtom* name) const {
 //----------------------------------------------------------------------
 // SVGElement methods
 
-/* virtual */ bool SVGFilterElement::HasValidDimensions() const {
+/* virtual */
+bool SVGFilterElement::HasValidDimensions() const {
   return (!mLengthAttributes[ATTR_WIDTH].IsExplicitlySet() ||
           mLengthAttributes[ATTR_WIDTH].GetAnimValInSpecifiedUnits() > 0) &&
          (!mLengthAttributes[ATTR_HEIGHT].IsExplicitlySet() ||

@@ -12,7 +12,7 @@
 #include "mozilla/dom/SVGUseElementBinding.h"
 #include "nsGkAtoms.h"
 #include "mozilla/dom/SVGSVGElement.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIPresShell.h"
 #include "mozilla/dom/Element.h"
 #include "nsContentUtils.h"
@@ -150,7 +150,7 @@ nsresult SVGUseElement::Clone(dom::NodeInfo* aNodeInfo,
   return NS_FAILED(rv1) ? rv1 : rv2;
 }
 
-nsresult SVGUseElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+nsresult SVGUseElement::BindToTree(Document* aDocument, nsIContent* aParent,
                                    nsIContent* aBindingParent) {
   nsresult rv =
       SVGUseElementBase::BindToTree(aDocument, aParent, aBindingParent);
@@ -420,7 +420,7 @@ void SVGUseElement::LookupHref() {
 }
 
 void SVGUseElement::TriggerReclone() {
-  if (nsIDocument* doc = GetComposedDoc()) {
+  if (Document* doc = GetComposedDoc()) {
     doc->ScheduleSVGUseElementShadowTreeUpdate(*this);
   }
 }
@@ -435,7 +435,8 @@ void SVGUseElement::UnlinkSource() {
 //----------------------------------------------------------------------
 // SVGElement methods
 
-/* virtual */ gfxMatrix SVGUseElement::PrependLocalTransformsTo(
+/* virtual */
+gfxMatrix SVGUseElement::PrependLocalTransformsTo(
     const gfxMatrix& aMatrix, SVGTransformTypes aWhich) const {
   // 'transform' attribute:
   gfxMatrix userToParent;
@@ -470,7 +471,8 @@ void SVGUseElement::UnlinkSource() {
   return childToUser * aMatrix;
 }
 
-/* virtual */ bool SVGUseElement::HasValidDimensions() const {
+/* virtual */
+bool SVGUseElement::HasValidDimensions() const {
   return (!mLengthAttributes[ATTR_WIDTH].IsExplicitlySet() ||
           mLengthAttributes[ATTR_WIDTH].GetAnimValInSpecifiedUnits() > 0) &&
          (!mLengthAttributes[ATTR_HEIGHT].IsExplicitlySet() ||

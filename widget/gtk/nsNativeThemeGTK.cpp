@@ -46,12 +46,12 @@
 #include "nsWindow.h"
 
 #ifdef MOZ_X11
-#ifdef CAIRO_HAS_XLIB_SURFACE
-#include "cairo-xlib.h"
-#endif
-#ifdef CAIRO_HAS_XLIB_XRENDER_SURFACE
-#include "cairo-xlib-xrender.h"
-#endif
+#  ifdef CAIRO_HAS_XLIB_SURFACE
+#    include "cairo-xlib.h"
+#  endif
+#  ifdef CAIRO_HAS_XLIB_XRENDER_SURFACE
+#    include "cairo-xlib-xrender.h"
+#  endif
 #endif
 
 #include <algorithm>
@@ -186,8 +186,8 @@ static void SetWidgetStateSafe(uint8_t* aSafeVector,
   aSafeVector[key >> 3] |= (1 << (key & 7));
 }
 
-/* static */ GtkTextDirection nsNativeThemeGTK::GetTextDirection(
-    nsIFrame* aFrame) {
+/* static */
+GtkTextDirection nsNativeThemeGTK::GetTextDirection(nsIFrame* aFrame) {
   // IsFrameRTL() treats vertical-rl modes as right-to-left (in addition to
   // horizontal text with direction=RTL), rather than just considering the
   // text direction.  GtkTextDirection does not have distinct values for
@@ -903,15 +903,15 @@ static void DrawThemeWithCairo(gfxContext* aContext, DrawTarget* aDrawTarget,
     nsIntSize size = borrow.GetSize();
     cairo_surface_t* surf = nullptr;
     // Check if the surface is using XRender.
-#ifdef CAIRO_HAS_XLIB_XRENDER_SURFACE
+#  ifdef CAIRO_HAS_XLIB_XRENDER_SURFACE
     if (borrow.GetXRenderFormat()) {
       surf = cairo_xlib_surface_create_with_xrender_format(
           borrow.GetDisplay(), borrow.GetDrawable(), borrow.GetScreen(),
           borrow.GetXRenderFormat(), size.width, size.height);
     } else {
-#else
+#  else
     if (!borrow.GetXRenderFormat()) {
-#endif
+#  endif
       surf = cairo_xlib_surface_create(borrow.GetDisplay(),
                                        borrow.GetDrawable(), borrow.GetVisual(),
                                        size.width, size.height);
@@ -1226,7 +1226,7 @@ bool nsNativeThemeGTK::CreateWebRenderCommandsForWidget(
     mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const mozilla::layers::StackingContextHelper& aSc,
-    mozilla::layers::WebRenderLayerManager* aManager, nsIFrame* aFrame,
+    mozilla::layers::RenderRootStateManager* aManager, nsIFrame* aFrame,
     StyleAppearance aAppearance, const nsRect& aRect) {
   nsPresContext* presContext = aFrame->PresContext();
   wr::LayoutRect bounds =

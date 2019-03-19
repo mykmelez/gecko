@@ -57,10 +57,10 @@ class WebRenderCommandBuilder {
                               nsDisplayListBuilder* aDisplayListBuilder,
                               WebRenderScrollData& aScrollData,
                               wr::LayoutSize& aContentSize,
-                              const nsTArray<wr::WrFilterOp>& aFilters);
+                              WrFiltersHolder&& aFilters);
 
   void PushOverrideForASR(const ActiveScrolledRoot* aASR,
-                          const wr::WrClipId& aClipId);
+                          const wr::WrSpatialId& aSpatialId);
   void PopOverrideForASR(const ActiveScrolledRoot* aASR);
 
   Maybe<wr::ImageKey> CreateImageKey(
@@ -80,7 +80,7 @@ class WebRenderCommandBuilder {
                  const StackingContextHelper& aSc,
                  const LayoutDeviceRect& aRect, const LayoutDeviceRect& aClip);
 
-  Maybe<wr::WrImageMask> BuildWrMaskImage(
+  Maybe<wr::ImageMask> BuildWrMaskImage(
       nsDisplayMasksAndClipPaths* aMaskItem, wr::DisplayListBuilder& aBuilder,
       wr::IpcResourceUpdateQueue& aResources, const StackingContextHelper& aSc,
       nsDisplayListBuilder* aDisplayListBuilder,
@@ -92,7 +92,7 @@ class WebRenderCommandBuilder {
                        nsDisplayListBuilder* aDisplayListBuilder);
 
   void CreateWebRenderCommandsFromDisplayList(
-      nsDisplayList* aDisplayList, nsDisplayItem* aOuterItem,
+      nsDisplayList* aDisplayList, nsDisplayItem* aWrappingItem,
       nsDisplayListBuilder* aDisplayListBuilder,
       const StackingContextHelper& aSc, wr::DisplayListBuilder& aBuilder,
       wr::IpcResourceUpdateQueue& aResources);
@@ -142,12 +142,7 @@ class WebRenderCommandBuilder {
     RefPtr<WebRenderUserData>& data = userDataTable->GetOrInsert(
         WebRenderUserDataKey(aItem->GetPerFrameKey(), T::Type()));
     if (!data) {
-      // To recreate a new user data, we should remove the data from the table
-      // first.
-      if (data) {
-        data->RemoveFromTable();
-      }
-      data = new T(mManager, aItem);
+      data = new T(GetRenderRootStateManager(), aItem);
       mWebRenderUserDatas.PutEntry(data);
       if (aOutIsRecycled) {
         *aOutIsRecycled = false;
@@ -171,6 +166,8 @@ class WebRenderCommandBuilder {
   WebRenderLayerManager* mManager;
 
  private:
+  RenderRootStateManager* GetRenderRootStateManager();
+
   ClipManager mClipManager;
 
   // We use this as a temporary data structure while building the mScrollData
@@ -191,14 +188,11 @@ class WebRenderCommandBuilder {
   wr::usize mBuilderDumpIndex;
   wr::usize mDumpIndent;
 
-  // When zooming is enabled, this stores the animation property that we use
-  // to manipulate the zoom from APZ.
-  Maybe<wr::WrAnimationProperty> mZoomProp;
-
  public:
   // Whether consecutive inactive display items should be grouped into one
   // blob image.
   bool mDoGrouping;
+  Maybe<nsRect> mClippedGroupBounds;
 
   // True if we're currently within an opacity:0 container, and only
   // plugin and hit test items should be considered.

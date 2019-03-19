@@ -13,6 +13,7 @@
 */
 
 #include "mozilla/Attributes.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/SVGContentUtils.h"
 #include "mozilla/dom/DOMRect.h"
 #include "mozilla/dom/Element.h"
@@ -20,21 +21,14 @@
 #include "mozilla/gfx/MatrixFwd.h"
 #include "nsAutoPtr.h"
 #include "nsChangeHint.h"
-#include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsError.h"
 #include "nsISupportsImpl.h"
 #include "nsStyledElement.h"
 #include "gfxMatrix.h"
 
-class nsSVGBoolean;
-class nsSVGInteger;
-class nsSVGIntegerPair;
 class nsSVGLength2;
 class nsSVGNumber2;
-class nsSVGNumberPair;
-class nsSVGString;
-class nsSVGViewBox;
 
 nsresult NS_NewSVGElement(mozilla::dom::Element** aResult,
                           already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
@@ -42,18 +36,24 @@ nsresult NS_NewSVGElement(mozilla::dom::Element** aResult,
 namespace mozilla {
 class DeclarationBlock;
 
-class SVGAngle;
 class SVGAnimatedNumberList;
-class SVGNumberList;
-class SVGAnimatedLengthList;
-class SVGEnum;
-class SVGUserUnitList;
-class SVGAnimatedPointList;
 class SVGAnimatedPathSegList;
+class SVGAnimatedPointList;
 class SVGAnimatedPreserveAspectRatio;
 class SVGAnimatedTransformList;
+class SVGAnimatedLengthList;
+class SVGBoolean;
+class SVGEnum;
+class SVGUserUnitList;
+class SVGInteger;
+class SVGIntegerPair;
+class SVGNumberList;
+class SVGNumberPair;
+class SVGOrient;
+class SVGString;
 class SVGStringList;
 class DOMSVGStringList;
+class SVGViewBox;
 
 struct SVGEnumMapping;
 
@@ -97,7 +97,7 @@ class SVGElement : public SVGElementBase  // nsIContent
 
   // nsIContent interface methods
 
-  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+  virtual nsresult BindToTree(Document* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent) override;
 
   virtual nsChangeHint GetAttributeChangeHint(const nsAtom* aAttribute,
@@ -109,7 +109,7 @@ class SVGElement : public SVGElementBase  // nsIContent
    * We override the default to unschedule computation of Servo declaration
    * blocks when adopted across documents.
    */
-  virtual void NodeInfoChanged(nsIDocument* aOldDoc) override;
+  virtual void NodeInfoChanged(Document* aOldDoc) override;
 
   NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
 
@@ -182,7 +182,7 @@ class SVGElement : public SVGElementBase  // nsIContent
   nsAttrValue WillChangeLength(uint8_t aAttrEnum);
   nsAttrValue WillChangeNumberPair(uint8_t aAttrEnum);
   nsAttrValue WillChangeIntegerPair(uint8_t aAttrEnum);
-  nsAttrValue WillChangeAngle(uint8_t aAttrEnum);
+  nsAttrValue WillChangeOrient();
   nsAttrValue WillChangeViewBox();
   nsAttrValue WillChangePreserveAspectRatio();
   nsAttrValue WillChangeNumberList(uint8_t aAttrEnum);
@@ -200,9 +200,9 @@ class SVGElement : public SVGElementBase  // nsIContent
   void DidChangeInteger(uint8_t aAttrEnum);
   void DidChangeIntegerPair(uint8_t aAttrEnum,
                             const nsAttrValue& aEmptyOrOldValue);
-  void DidChangeAngle(uint8_t aAttrEnum, const nsAttrValue& aEmptyOrOldValue);
   void DidChangeBoolean(uint8_t aAttrEnum);
   void DidChangeEnum(uint8_t aAttrEnum);
+  void DidChangeOrient(const nsAttrValue& aEmptyOrOldValue);
   void DidChangeViewBox(const nsAttrValue& aEmptyOrOldValue);
   void DidChangePreserveAspectRatio(const nsAttrValue& aEmptyOrOldValue);
   void DidChangeNumberList(uint8_t aAttrEnum,
@@ -222,9 +222,9 @@ class SVGElement : public SVGElementBase  // nsIContent
   void DidAnimateNumberPair(uint8_t aAttrEnum);
   void DidAnimateInteger(uint8_t aAttrEnum);
   void DidAnimateIntegerPair(uint8_t aAttrEnum);
-  void DidAnimateAngle(uint8_t aAttrEnum);
   void DidAnimateBoolean(uint8_t aAttrEnum);
   void DidAnimateEnum(uint8_t aAttrEnum);
+  void DidAnimateOrient();
   void DidAnimateViewBox();
   void DidAnimatePreserveAspectRatio();
   void DidAnimateNumberList(uint8_t aAttrEnum);
@@ -277,8 +277,8 @@ class SVGElement : public SVGElementBase  // nsIContent
     return nullptr;
   }
 
-  mozilla::UniquePtr<nsISMILAttr> GetAnimatedAttr(int32_t aNamespaceID,
-                                                  nsAtom* aName) override;
+  mozilla::UniquePtr<SMILAttr> GetAnimatedAttr(int32_t aNamespaceID,
+                                               nsAtom* aName) override;
   void AnimationNeedsResample();
   void FlushAnimations();
 
@@ -328,7 +328,7 @@ class SVGElement : public SVGElementBase  // nsIContent
                               const nsAString& aValue,
                               nsIPrincipal* aMaybeScriptedPrincipal,
                               nsAttrValue& aResult) override;
-  static nsresult ReportAttributeParseFailure(nsIDocument* aDocument,
+  static nsresult ReportAttributeParseFailure(Document* aDocument,
                                               nsAtom* aAttribute,
                                               const nsAString& aValue);
 
@@ -389,11 +389,11 @@ class SVGElement : public SVGElementBase  // nsIContent
   };
 
   struct NumberPairAttributesInfo {
-    nsSVGNumberPair* const mNumberPairs;
+    SVGNumberPair* const mNumberPairs;
     const NumberPairInfo* const mNumberPairInfo;
     const uint32_t mNumberPairCount;
 
-    NumberPairAttributesInfo(nsSVGNumberPair* aNumberPairs,
+    NumberPairAttributesInfo(SVGNumberPair* aNumberPairs,
                              NumberPairInfo* aNumberPairInfo,
                              uint32_t aNumberPairCount)
         : mNumberPairs(aNumberPairs),
@@ -409,11 +409,11 @@ class SVGElement : public SVGElementBase  // nsIContent
   };
 
   struct IntegerAttributesInfo {
-    nsSVGInteger* const mIntegers;
+    SVGInteger* const mIntegers;
     const IntegerInfo* const mIntegerInfo;
     const uint32_t mIntegerCount;
 
-    IntegerAttributesInfo(nsSVGInteger* aIntegers, IntegerInfo* aIntegerInfo,
+    IntegerAttributesInfo(SVGInteger* aIntegers, IntegerInfo* aIntegerInfo,
                           uint32_t aIntegerCount)
         : mIntegers(aIntegers),
           mIntegerInfo(aIntegerInfo),
@@ -429,34 +429,16 @@ class SVGElement : public SVGElementBase  // nsIContent
   };
 
   struct IntegerPairAttributesInfo {
-    nsSVGIntegerPair* const mIntegerPairs;
+    SVGIntegerPair* const mIntegerPairs;
     const IntegerPairInfo* const mIntegerPairInfo;
     const uint32_t mIntegerPairCount;
 
-    IntegerPairAttributesInfo(nsSVGIntegerPair* aIntegerPairs,
+    IntegerPairAttributesInfo(SVGIntegerPair* aIntegerPairs,
                               IntegerPairInfo* aIntegerPairInfo,
                               uint32_t aIntegerPairCount)
         : mIntegerPairs(aIntegerPairs),
           mIntegerPairInfo(aIntegerPairInfo),
           mIntegerPairCount(aIntegerPairCount) {}
-
-    void Reset(uint8_t aAttrEnum);
-  };
-
-  struct AngleInfo {
-    nsStaticAtom* const mName;
-    const float mDefaultValue;
-    const uint8_t mDefaultUnitType;
-  };
-
-  struct AngleAttributesInfo {
-    SVGAngle* const mAngles;
-    const AngleInfo* const mAngleInfo;
-    const uint32_t mAngleCount;
-
-    AngleAttributesInfo(SVGAngle* aAngles, AngleInfo* aAngleInfo,
-                        uint32_t aAngleCount)
-        : mAngles(aAngles), mAngleInfo(aAngleInfo), mAngleCount(aAngleCount) {}
 
     void Reset(uint8_t aAttrEnum);
   };
@@ -467,11 +449,11 @@ class SVGElement : public SVGElementBase  // nsIContent
   };
 
   struct BooleanAttributesInfo {
-    nsSVGBoolean* const mBooleans;
+    SVGBoolean* const mBooleans;
     const BooleanInfo* const mBooleanInfo;
     const uint32_t mBooleanCount;
 
-    BooleanAttributesInfo(nsSVGBoolean* aBooleans, BooleanInfo* aBooleanInfo,
+    BooleanAttributesInfo(SVGBoolean* aBooleans, BooleanInfo* aBooleanInfo,
                           uint32_t aBooleanCount)
         : mBooleans(aBooleans),
           mBooleanInfo(aBooleanInfo),
@@ -556,11 +538,11 @@ class SVGElement : public SVGElementBase  // nsIContent
   };
 
   struct StringAttributesInfo {
-    nsSVGString* const mStrings;
+    SVGString* const mStrings;
     const StringInfo* const mStringInfo;
     const uint32_t mStringCount;
 
-    StringAttributesInfo(nsSVGString* aStrings, StringInfo* aStringInfo,
+    StringAttributesInfo(SVGString* aStrings, StringInfo* aStringInfo,
                          uint32_t aStringCount)
         : mStrings(aStrings),
           mStringInfo(aStringInfo),
@@ -595,12 +577,12 @@ class SVGElement : public SVGElementBase  // nsIContent
   virtual NumberPairAttributesInfo GetNumberPairInfo();
   virtual IntegerAttributesInfo GetIntegerInfo();
   virtual IntegerPairAttributesInfo GetIntegerPairInfo();
-  virtual AngleAttributesInfo GetAngleInfo();
   virtual BooleanAttributesInfo GetBooleanInfo();
   virtual EnumAttributesInfo GetEnumInfo();
-  // We assume all viewboxes and preserveAspectRatios are alike
+  // We assume all orients, viewboxes and preserveAspectRatios are alike
   // so we don't need to wrap the class
-  virtual nsSVGViewBox* GetViewBox();
+  virtual SVGOrient* GetOrient();
+  virtual SVGViewBox* GetViewBox();
   virtual SVGAnimatedPreserveAspectRatio* GetPreserveAspectRatio();
   virtual NumberListAttributesInfo GetNumberListInfo();
   virtual LengthListAttributesInfo GetLengthListInfo();

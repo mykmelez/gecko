@@ -96,6 +96,7 @@ ${helpers.predefined_type(
 ${helpers.single_keyword(
     "mask-mode",
     "match-source alpha luminance",
+    gecko_enum_prefix="StyleMaskMode",
     vector=True,
     products="gecko",
     animation_value_type="discrete",
@@ -118,7 +119,7 @@ ${helpers.predefined_type(
     ${helpers.predefined_type(
         "mask-position-" + axis,
         "position::" + direction + "Position",
-        "computed::LengthOrPercentage::zero()",
+        "computed::LengthPercentage::zero()",
         products="gecko",
         extra_prefixes="webkit",
         initial_specified_value="specified::PositionComponent::Center",

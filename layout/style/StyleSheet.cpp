@@ -84,12 +84,12 @@ bool StyleSheet::HasRules() const {
   return Servo_StyleSheet_HasRules(Inner().mContents);
 }
 
-nsIDocument* StyleSheet::GetAssociatedDocument() const {
+Document* StyleSheet::GetAssociatedDocument() const {
   return mDocumentOrShadowRoot ? mDocumentOrShadowRoot->AsNode().OwnerDoc()
                                : nullptr;
 }
 
-nsIDocument* StyleSheet::GetComposedDoc() const {
+Document* StyleSheet::GetComposedDoc() const {
   return mDocumentOrShadowRoot
              ? mDocumentOrShadowRoot->AsNode().GetComposedDoc()
              : nullptr;
@@ -542,7 +542,7 @@ void StyleSheet::RuleAdded(css::Rule& aRule) {
   mState |= State::ModifiedRules;
   NOTIFY(RuleAdded, (*this, aRule));
 
-  if (nsIDocument* doc = GetComposedDoc()) {
+  if (Document* doc = GetComposedDoc()) {
     doc->StyleRuleAdded(this, &aRule);
   }
 }
@@ -551,7 +551,7 @@ void StyleSheet::RuleRemoved(css::Rule& aRule) {
   mState |= State::ModifiedRules;
   NOTIFY(RuleRemoved, (*this, aRule));
 
-  if (nsIDocument* doc = GetComposedDoc()) {
+  if (Document* doc = GetComposedDoc()) {
     doc->StyleRuleRemoved(this, &aRule);
   }
 }
@@ -560,7 +560,7 @@ void StyleSheet::RuleChanged(css::Rule* aRule) {
   mState |= State::ModifiedRules;
   NOTIFY(RuleChanged, (*this, aRule));
 
-  if (nsIDocument* doc = GetComposedDoc()) {
+  if (Document* doc = GetComposedDoc()) {
     doc->StyleRuleChanged(this, aRule);
   }
 }
@@ -586,7 +586,7 @@ nsresult StyleSheet::InsertRuleIntoGroup(const nsAString& aRule,
 
 uint64_t StyleSheet::FindOwningWindowInnerID() const {
   uint64_t windowID = 0;
-  if (nsIDocument* doc = GetAssociatedDocument()) {
+  if (Document* doc = GetAssociatedDocument()) {
     windowID = doc->InnerWindowID();
   }
 
@@ -807,7 +807,8 @@ JSObject* StyleSheet::WrapObject(JSContext* aCx,
   return dom::CSSStyleSheet_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-/* static */ bool StyleSheet::RuleHasPendingChildSheet(css::Rule* aRule) {
+/* static */
+bool StyleSheet::RuleHasPendingChildSheet(css::Rule* aRule) {
   MOZ_ASSERT(aRule->Type() == dom::CSSRule_Binding::IMPORT_RULE);
   auto rule = static_cast<dom::CSSImportRule*>(aRule);
   if (StyleSheet* childSheet = rule->GetStyleSheet()) {
@@ -868,7 +869,7 @@ static bool AllowParallelParse(css::Loader* aLoader, nsIURI* aSheetURI) {
 
   // If the browser is recording CSS errors, we need to use the sequential path
   // because the parallel path doesn't support that.
-  nsIDocument* doc = aLoader->GetDocument();
+  Document* doc = aLoader->GetDocument();
   if (doc && css::ErrorReporter::ShouldReportErrors(*doc)) {
     return false;
   }
@@ -966,10 +967,17 @@ nsresult StyleSheet::ReparseSheet(const nsAString& aInput) {
     return NS_ERROR_DOM_INVALID_ACCESS_ERR;
   }
 
+  // Allowing to modify UA sheets is dangerous (in the sense that C++ code
+  // relies on rules in those sheets), plus they're probably going to be shared
+  // across processes in which case this is directly a no-go.
+  if (GetOrigin() == OriginFlags::UserAgent) {
+    return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
+  }
+
   // Hold strong ref to the CSSLoader in case the document update
   // kills the document
   RefPtr<css::Loader> loader;
-  if (nsIDocument* doc = GetAssociatedDocument()) {
+  if (Document* doc = GetAssociatedDocument()) {
     loader = doc->CSSLoader();
     NS_ASSERTION(loader, "Document with no CSS loader!");
   } else {

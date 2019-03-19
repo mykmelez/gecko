@@ -11,9 +11,6 @@ const { FrontClassWithSpec, registerFront } = require("devtools/shared/protocol"
 loader.lazyImporter(this, "NetUtil", "resource://gre/modules/NetUtil.jsm");
 
 class ActorActorFront extends FrontClassWithSpec(actorActorSpec) {
-  constructor(client, form) {
-    super(client, form);
-  }
 }
 
 exports.ActorActorFront = ActorActorFront;
@@ -47,11 +44,11 @@ function request(uri) {
 }
 
 class ActorRegistryFront extends FrontClassWithSpec(actorRegistrySpec) {
-  constructor(client, form) {
-    super(client,
-                                             { actor: form.actorRegistryActor });
+  constructor(client) {
+    super(client);
 
-    this.manage(this);
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "actorRegistryActor";
   }
 
   registerActor(uri, options) {

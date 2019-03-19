@@ -19,6 +19,8 @@ from taskgraph.util.taskcluster import (
     get_root_url,
 )
 from .registry import register_callback_action
+from taskgraph.util import taskcluster
+
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,8 @@ SCOPE_WHITELIST = [
     re.compile(r'^secrets:get:project/releng/gecko/build/level-[0-9]/\*'),
     # ptracing is generally useful for interactive tasks, too!
     re.compile(r'^docker-worker:feature:allowPtrace$'),
+    # docker-worker capabilities include loopback devices
+    re.compile(r'^docker-worker:capability:device:.*$'),
 ]
 
 
@@ -67,14 +71,13 @@ def context(params):
     if int(params['level']) < 3:
         return [{'worker-implementation': 'docker-worker'}]
     else:
-        return [{'worker-implementation': 'docker-worker', 'kind': 'test'}],
+        return [{'worker-implementation': 'docker-worker', 'kind': 'test'}]
 
 
 @register_callback_action(
     title='Create Interactive Task',
     name='create-interactive',
     symbol='create-inter',
-    kind='hook',
     generic=True,
     description=(
         'Create a a copy of the task that you can interact with'
@@ -99,12 +102,13 @@ def context(params):
         'additionalProperties': False,
     },
 )
-def create_interactive_action(parameters, graph_config, input, task_group_id, task_id, task):
+def create_interactive_action(parameters, graph_config, input, task_group_id, task_id):
     # fetch the original task definition from the taskgraph, to avoid
     # creating interactive copies of unexpected tasks.  Note that this only applies
     # to docker-worker tasks, so we can assume the docker-worker payload format.
     decision_task_id, full_task_graph, label_to_taskid = fetch_graph_and_labels(
         parameters, graph_config)
+    task = taskcluster.get_task_definition(task_id)
     label = task['metadata']['name']
 
     def edit(task):
@@ -144,7 +148,7 @@ def create_interactive_action(parameters, graph_config, input, task_group_id, ta
 
     # Create the task and any of its dependencies. This uses a new taskGroupId to avoid
     # polluting the existing taskGroup with interactive tasks.
-    label_to_taskid = create_tasks([label], full_task_graph, label_to_taskid,
+    label_to_taskid = create_tasks(graph_config, [label], full_task_graph, label_to_taskid,
                                    parameters, modifier=edit)
 
     taskId = label_to_taskid[label]
@@ -157,7 +161,7 @@ def create_interactive_action(parameters, graph_config, input, task_group_id, ta
             return
 
         info = {
-            'url': taskcluster_urls.ui(get_root_url(), 'tasks/{}/connect'.format(taskId)),
+            'url': taskcluster_urls.ui(get_root_url(False), 'tasks/{}/connect'.format(taskId)),
             'label': label,
             'revision': parameters['head_rev'],
             'repo': parameters['head_repository'],

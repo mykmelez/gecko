@@ -51,6 +51,7 @@ interface nsISHEntry;
 interface nsILayoutHistoryState;
 interface nsISecureBrowserUI;
 interface nsIScriptGlobalObject;
+interface nsIStructuredCloneContainer;
 interface nsIDOMStorage;
 interface nsIPrincipal;
 interface nsIWebBrowserPrint;
@@ -68,6 +69,7 @@ native nsDocShellLoadStatePtr(nsDocShellLoadState*);
 webidl BrowsingContext;
 webidl ContentFrameMessageManager;
 webidl EventTarget;
+webidl Document;
 
 [scriptable, builtinclass, uuid(049234fe-da10-478b-bc5d-bc6f9a1ba63d)]
 interface nsIDocShell : nsIDocShellTreeItem
@@ -89,6 +91,30 @@ interface nsIDocShell : nsIDocShellTreeItem
   [implicit_jscontext]
   void addState(in jsval aData, in AString aTitle,
                 in AString aURL, in boolean aReplace);
+
+  /**
+   * Helper for addState and document.open that does just the
+   * history-manipulation guts.
+   *
+   * Arguments the spec defines:
+   *
+   * @param aDocument the document we're manipulating.  This will get the new URI.
+   * @param aNewURI the new URI.
+   * @param aData The serialized state data.  May be null.
+   * @param aTitle The new title.  May be empty.
+   * @param aReplace whether this should replace the exising SHEntry.
+   *
+   * Arguments we need internally because deriving them from the
+   * others is a bit complicated:
+   *
+   * @param aCurrentURI the current URI we're working with.  Might be null.
+   * @param aEqualURIs whether the two URIs involved are equal.
+   */
+  [nostdcall]
+  void updateURLAndHistory(in Document aDocument, in nsIURI aNewURI,
+                           in nsIStructuredCloneContainer aData, in AString aTitle,
+                           in boolean aReplace, in nsIURI aCurrentURI,
+                           in boolean aEqualURIs);
 
   /**
    * Reset state to a new content model within the current document and the document
@@ -255,7 +281,7 @@ interface nsIDocShell : nsIDocShellTreeItem
   [infallible] attribute nsIDocShell_AppType appType;
 
   /**
-   * certain dochshells (like the message pane)
+   * certain docshells (like the message pane)
    * should not throw up auth dialogs
    * because it can act as a password trojan
    */
@@ -498,49 +524,6 @@ interface nsIDocShell : nsIDocShellTreeItem
    * hasMixedActiveContentBlocked.
    */
   [infallible] readonly attribute boolean hasMixedDisplayContentBlocked;
-
-   /**
-   * This attribute determines whether a document has Tracking Content
-   * that has been blocked from loading.
-   */
-   [infallible] readonly attribute boolean hasTrackingContentBlocked;
-
-   /**
-   * This attribute determines whether Tracking Content is loaded on the
-   * document. When it is true, tracking content was not blocked and has
-   * loaded (or is about to load) on the page.
-   */
-  [infallible] readonly attribute boolean hasTrackingContentLoaded;
-
-   /**
-   * This attribute determines whether a document seen cookies or storage
-   * blocked due to a site permission being denied.
-   */
-   [infallible] readonly attribute boolean hasCookiesBlockedByPermission;
-
-   /**
-   * This attribute determines whether a document seen cookies or storage
-   * blocked due to a the request being made by a tracker.
-   */
-   [infallible] readonly attribute boolean hasCookiesBlockedDueToTrackers;
-
-   /**
-   * This attribute determines whether a document seen cookies or storage
-   * blocked due to cookie behavior settings blocking all cookies.
-   */
-   [infallible] readonly attribute boolean hasAllCookiesBeenBlocked;
-
-   /**
-   * This attribute determines whether a document seen cookies or storage
-   * blocked due to cookie behavior settings blocking all third-party cookies.
-   */
-   [infallible] readonly attribute boolean hasForeignCookiesBeenBlocked;
-
-   /**
-   * This attribute determines whether a document seen cookies or storage
-   * attempts ever whether they've been allowed or blocked.
-   */
-   [infallible] readonly attribute boolean hasCookiesLoaded;
 
   /**
    * Disconnects this docshell's editor from its window, and stores the
@@ -928,7 +911,9 @@ interface nsIDocShell : nsIDocShellTreeItem
     * from JS.
     */
   boolean isCommandEnabled(in string command);
+  [can_run_script]
   void doCommand(in string command);
+  [can_run_script]
   void doCommandWithParams(in string command, in nsICommandParams aParams);
 
   /**
@@ -937,7 +922,7 @@ interface nsIDocShell : nsIDocShellTreeItem
    * at construction time, to avoid any painting activity.
    */
   [noscript, notxpcom] bool IsInvisible();
-  [noscript, notxpcom] void SetInvisible(in bool aIsInvisibleDochsell);
+  [noscript, notxpcom] void SetInvisible(in bool aIsInvisibleDocshell);
 
 /**
  * Get the script global for the document in this docshell.
@@ -1167,4 +1152,10 @@ interface nsIDocShell : nsIDocShellTreeItem
    * see nsISecureBrowserUI.contentBlockingLogJSON.
    */
   Promise getContentBlockingLog();
+
+  /**
+   * Return whether this docshell is "attempting to navigate" in the
+   * sense that's relevant to document.open.
+   */
+  [notxpcom, nostdcall] readonly attribute boolean isAttemptingToNavigate;
 };

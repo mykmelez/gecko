@@ -92,7 +92,7 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = _compile_regex_mapping({
                     "host/bin/mar.exe",
                     "host/bin/mbsdiff.exe",
                 ]),
-    r'^win(32|64(|-aarch64-msvc))(|-devedition)-nightly$':
+    r'^win(32|64(|-aarch64))(|-devedition)-nightly$':
         _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
             'host/bin/mar.exe',
             'host/bin/mbsdiff.exe',
@@ -108,7 +108,7 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = _compile_regex_mapping({
 UPSTREAM_ARTIFACT_SIGNED_PATHS = _compile_regex_mapping({
     r'^linux(|64)(|-devedition|-asan-reporter)-nightly(|-l10n)$':
         ['target.tar.bz2', 'target.tar.bz2.asc'],
-    r'^win(32|64)(|-aarch64-msvc)(|-devedition|-asan-reporter)-nightly(|-l10n)$': ['target.zip'],
+    r'^win(32|64)(|-aarch64)(|-devedition|-asan-reporter)-nightly(|-l10n)$': ['target.zip'],
 })
 
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
@@ -135,10 +135,6 @@ UPSTREAM_ARTIFACT_SIGNED_MAR_PATHS = [
     'target.complete.mar',
     'target.bz2.complete.mar',
 ]
-
-# Voluptuous uses marker objects as dictionary *keys*, but they are not
-# comparable, so we cast all of the keys back to regular strings
-task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
 
 beetmover_description_schema = schema.extend({
     # depname is used in taskref's to identify the taskID of the unsigned things
@@ -246,7 +242,9 @@ def make_task_description(config, jobs):
         yield task
 
 
-def generate_upstream_artifacts(job, dependencies, platform, locale=None, project=None):
+def generate_upstream_artifacts(
+    config, job, dependencies, platform, locale=None, project=None
+):
 
     build_mapping = UPSTREAM_ARTIFACT_UNSIGNED_PATHS
     build_signing_mapping = UPSTREAM_ARTIFACT_SIGNED_PATHS
@@ -356,7 +354,7 @@ def make_task_worker(config, jobs):
         platform = job["attributes"]["build_platform"]
 
         upstream_artifacts = generate_upstream_artifacts(
-            job, job['dependencies'], platform, locale,
+            config, job, job['dependencies'], platform, locale,
             project=config.params['project']
         )
 
@@ -385,7 +383,6 @@ def make_partials_artifacts(config, jobs):
         platform = job["attributes"]["build_platform"]
 
         if 'partials-signing' not in job['dependencies']:
-            logger.debug("beetmover-repackage partials finished, no partials")
             yield job
             continue
 

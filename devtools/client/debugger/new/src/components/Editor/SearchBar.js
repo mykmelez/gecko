@@ -8,7 +8,7 @@ import PropTypes from "prop-types";
 import React, { Component } from "react";
 import { connect } from "../../utils/connect";
 import { CloseButton } from "../shared/Button";
-import Svg from "../shared/Svg";
+import AccessibleImage from "../shared/AccessibleImage";
 import actions from "../../actions";
 import {
   getActiveSearch,
@@ -242,13 +242,7 @@ class SearchBar extends Component<Props, State> {
   }
 
   renderSearchModifiers = () => {
-    const {
-      modifiers,
-      toggleFileSearchModifier,
-      query,
-      showClose = true,
-      size = "big"
-    } = this.props;
+    const { modifiers, toggleFileSearchModifier, query } = this.props;
     const { doSearch } = this;
 
     function SearchModBtn({ modVal, className, svgName, tooltip }) {
@@ -270,7 +264,7 @@ class SearchBar extends Component<Props, State> {
           }}
           title={tooltip}
         >
-          <Svg name={svgName} />
+          <AccessibleImage className={svgName} />
         </button>
       );
     }
@@ -299,12 +293,6 @@ class SearchBar extends Component<Props, State> {
           svgName="whole-word-match"
           tooltip={L10N.getStr("symbolSearch.searchModifier.wholeWord")}
         />
-        {showClose && (
-          <React.Fragment>
-            <span className="pipe-divider" />
-            <CloseButton handleClick={this.closeSearch} buttonClass={size} />
-          </React.Fragment>
-        )}
       </div>
     );
   };
@@ -320,7 +308,9 @@ class SearchBar extends Component<Props, State> {
   render() {
     const {
       searchResults: { count },
-      searchOn
+      searchOn,
+      showClose = true,
+      size = "big"
     } = this.props;
 
     if (!searchOn) {
@@ -348,7 +338,15 @@ class SearchBar extends Component<Props, State> {
           shouldFocus={this.state.inputFocused}
           showClose={false}
         />
-        <div className="search-bottom-bar">{this.renderSearchModifiers()}</div>
+        <div className="search-bottom-bar">
+          {this.renderSearchModifiers()}
+          {showClose && (
+            <React.Fragment>
+              <span className="pipe-divider" />
+              <CloseButton handleClick={this.closeSearch} buttonClass={size} />
+            </React.Fragment>
+          )}
+        </div>
       </div>
     );
   }

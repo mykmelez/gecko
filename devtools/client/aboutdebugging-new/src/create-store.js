@@ -9,7 +9,6 @@ const Services = require("Services");
 const { applyMiddleware, createStore } = require("devtools/client/shared/vendor/redux");
 const { thunk } = require("devtools/client/shared/redux/middleware/thunk.js");
 const { waitUntilService } = require("devtools/client/shared/redux/middleware/wait-service.js");
-const { isMultiE10s } = require("devtools/client/shared/multi-e10s-helper");
 
 const rootReducer = require("./reducers/index");
 const { DebugTargetsState } = require("./reducers/debug-targets-state");
@@ -17,6 +16,7 @@ const { RuntimesState } = require("./reducers/runtimes-state");
 const { UiState } = require("./reducers/ui-state");
 const debugTargetListenerMiddleware = require("./middleware/debug-target-listener");
 const errorLoggingMiddleware = require("./middleware/error-logging");
+const eventRecordingMiddleware = require("./middleware/event-recording");
 const extensionComponentDataMiddleware = require("./middleware/extension-component-data");
 const tabComponentDataMiddleware = require("./middleware/tab-component-data");
 const workerComponentDataMiddleware = require("./middleware/worker-component-data");
@@ -35,6 +35,7 @@ function configureStore() {
   const middleware = applyMiddleware(thunk,
                                      debugTargetListenerMiddleware,
                                      errorLoggingMiddleware,
+                                     eventRecordingMiddleware,
                                      extensionComponentDataMiddleware,
                                      tabComponentDataMiddleware,
                                      workerComponentDataMiddleware,
@@ -51,7 +52,7 @@ function getUiState() {
   const showSystemAddons = Services.prefs.getBoolPref(PREFERENCES.SHOW_SYSTEM_ADDONS,
     false);
   return new UiState(locations, collapsibilities, networkEnabled, wifiEnabled,
-    showSystemAddons, isMultiE10s());
+    showSystemAddons);
 }
 
 exports.configureStore = configureStore;

@@ -119,7 +119,7 @@ LexerResult Decoder::Decode(IResumable* aOnResume /* = nullptr */) {
 
   LexerResult lexerResult(TerminalState::FAILURE);
   {
-    AUTO_PROFILER_LABEL("Decoder::Decode", GRAPHICS);
+    AUTO_PROFILER_LABEL_CATEGORY_PAIR(GRAPHICS_ImageDecoding);
     AutoRecordDecoderTelemetry telemetry(this);
 
     lexerResult = DoDecode(*mIterator, aOnResume);
@@ -350,8 +350,7 @@ RawAccessFrameRef Decoder::AllocateFrameInternal(
       // animation parameters elsewhere. For now we just drop it.
       bool blocked = ref.get() == mRestoreFrame.get();
       if (!blocked) {
-        nsresult rv = ref->InitForDecoderRecycle(aAnimParams.ref());
-        blocked = NS_WARN_IF(NS_FAILED(rv));
+        blocked = NS_FAILED(ref->InitForDecoderRecycle(aAnimParams.ref()));
       }
 
       if (blocked) {

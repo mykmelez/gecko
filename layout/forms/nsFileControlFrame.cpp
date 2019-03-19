@@ -8,7 +8,7 @@
 
 #include "nsGkAtoms.h"
 #include "nsCOMPtr.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/dom/NodeInfo.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/DOMStringList.h"
@@ -34,13 +34,15 @@ using namespace mozilla::dom;
 
 nsIFrame* NS_NewFileControlFrame(nsIPresShell* aPresShell,
                                  ComputedStyle* aStyle) {
-  return new (aPresShell) nsFileControlFrame(aStyle);
+  return new (aPresShell)
+      nsFileControlFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsFileControlFrame)
 
-nsFileControlFrame::nsFileControlFrame(ComputedStyle* aStyle)
-    : nsBlockFrame(aStyle, kClassID) {
+nsFileControlFrame::nsFileControlFrame(ComputedStyle* aStyle,
+                                       nsPresContext* aPresContext)
+    : nsBlockFrame(aStyle, aPresContext, kClassID) {
   AddStateBits(NS_BLOCK_FLOAT_MGR);
 }
 
@@ -201,7 +203,7 @@ void nsFileControlFrame::DestroyFrom(nsIFrame* aDestructRoot,
   nsBlockFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
 }
 
-static already_AddRefed<Element> MakeAnonButton(nsIDocument* aDoc,
+static already_AddRefed<Element> MakeAnonButton(Document* aDoc,
                                                 const char* labelKey,
                                                 HTMLInputElement* aInputElement,
                                                 const nsAString& aAccessKey) {
@@ -248,7 +250,7 @@ static already_AddRefed<Element> MakeAnonButton(nsIDocument* aDoc,
 
 nsresult nsFileControlFrame::CreateAnonymousContent(
     nsTArray<ContentInfo>& aElements) {
-  nsCOMPtr<nsIDocument> doc = mContent->GetComposedDoc();
+  nsCOMPtr<Document> doc = mContent->GetComposedDoc();
 
   RefPtr<HTMLInputElement> fileContent =
       HTMLInputElement::FromNodeOrNull(mContent);

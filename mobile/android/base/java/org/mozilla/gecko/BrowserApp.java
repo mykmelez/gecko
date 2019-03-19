@@ -89,7 +89,6 @@ import org.mozilla.gecko.dlc.DlcStudyService;
 import org.mozilla.gecko.dlc.DlcSyncService;
 import org.mozilla.gecko.extensions.ExtensionPermissionsHelper;
 import org.mozilla.gecko.firstrun.OnboardingHelper;
-import org.mozilla.geckoview.DynamicToolbarAnimator.PinReason;
 import org.mozilla.gecko.home.BrowserSearch;
 import org.mozilla.gecko.home.HomeBanner;
 import org.mozilla.gecko.home.HomeConfig;
@@ -125,6 +124,7 @@ import org.mozilla.gecko.reader.SavedReaderViewHelper;
 import org.mozilla.gecko.restrictions.Restrictable;
 import org.mozilla.gecko.restrictions.Restrictions;
 import org.mozilla.gecko.search.SearchEngineManager;
+import org.mozilla.gecko.search.SearchWidgetProvider;
 import org.mozilla.gecko.switchboard.AsyncConfigLoader;
 import org.mozilla.gecko.switchboard.SwitchBoard;
 import org.mozilla.gecko.sync.repositories.android.FennecTabsRepository;
@@ -167,6 +167,7 @@ import org.mozilla.gecko.widget.AnimatedProgressBar;
 import org.mozilla.gecko.widget.GeckoActionProvider;
 import org.mozilla.gecko.widget.SplashScreen;
 import org.mozilla.geckoview.DynamicToolbarAnimator;
+import org.mozilla.geckoview.DynamicToolbarAnimator.PinReason;
 import org.mozilla.geckoview.GeckoSession;
 
 import java.io.File;
@@ -182,6 +183,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
+import static org.mozilla.gecko.Tabs.TabEvents.THUMBNAIL;
+import static org.mozilla.gecko.mma.MmaDelegate.INTERACT_WITH_SEARCH_WIDGET_URL_AREA;
 import static org.mozilla.gecko.mma.MmaDelegate.NEW_TAB;
 import static org.mozilla.gecko.util.JavaUtil.getBundleSizeInBytes;
 
@@ -871,6 +874,67 @@ public class BrowserApp extends GeckoApp
     }
 
     /**
+     * This method is used in order to check if an intent came from {@link SearchWidgetProvider}
+     * and handle it accordingly.
+     * @param intent to be checked and handled
+     * @return True if the intent could be handled
+     */
+    private boolean handleSearchWidgetIntent(Intent intent) {
+        SearchWidgetProvider.InputType input = getWidgetInputType(intent);
+
+        if (input == null) {
+            return false;
+        }
+
+        MmaDelegate.track(INTERACT_WITH_SEARCH_WIDGET_URL_AREA);
+        Telemetry.sendUIEvent(TelemetryContract.Event.SEARCH, TelemetryContract.Method.WIDGET);
+
+        switch (input) {
+            case TEXT:
+                cleanupForNewTabEditing();
+                handleTabEditingMode(false);
+                return true;
+            case VOICE:
+                cleanupForNewTabEditing();
+                handleTabEditingMode(true);
+                return true;
+            default:
+                // Can't handle this input type, where did it came from though?
+                Log.e(LOGTAG, "can't handle search action :: input == " + input);
+                return false;
+        }
+    }
+
+    private void cleanupForNewTabEditing() {
+        closeOptionsMenu();
+        autoHideTabs();
+    }
+
+    private synchronized void handleTabEditingMode(boolean isVoice) {
+        final Tabs.OnTabsChangedListener tabsChangedListener = new Tabs.OnTabsChangedListener() {
+            @Override
+            public void onTabChanged(Tab tab, TabEvents msg, String data) {
+                // Listening for THUMBNAIL, while entailing a small delay
+                // allows for fully loading the "about:home" screen and finishing all related operations
+                // so that we can safely enter editing mode.
+                if (tab != null && tab.getURL().equals("about:home") && (THUMBNAIL.equals(msg))) {
+                    selectTabAndEnterEditingMode(tab.getId(), isVoice);
+                    Tabs.unregisterOnTabsChangedListener(this);
+                }
+            }
+        };
+        Tabs.registerOnTabsChangedListener(tabsChangedListener);
+    }
+
+    private void selectTabAndEnterEditingMode(int tabId, boolean isVoice) {
+        Tabs.getInstance().selectTab(tabId);
+        enterEditingMode();
+        if (isVoice) {
+            mBrowserToolbar.launchVoiceRecognizer();
+        }
+    }
+
+    /**
      * Initializes the default Switchboard URLs the first time.
      * @param intent
      */
@@ -1083,11 +1147,14 @@ public class BrowserApp extends GeckoApp
                 // by checking if the activity received onStop() or not.
                 final boolean userReturnedToFullApp = !isApplicationInBackground();
 
-                // After returning from Picture-in-picture mode the video will still be playing
+                // After returning from Picture-in-picture mode the video can still be playing
                 // in fullscreen. But now we have the status bar showing.
-                // Call setFullscreen(..) to hide it and offer the same fullscreen video experience
-                // that the user had before entering in Picture-in-picture mode.
-                if (userReturnedToFullApp) {
+                // If media is still playing / is paused we need to call setFullscreen(..) to hide
+                // the status bar and offer the same fullscreen video experience that the user had
+                // before entering in Picture-in-picture mode.
+                final boolean shouldKeepVideoInFullscreen =
+                        mPipController.isMediaPlaying() || mPipController.isMediaPaused();
+                if (userReturnedToFullApp && shouldKeepVideoInFullscreen) {
                     ActivityUtils.setFullScreen(this, true);
                 } else {
                     // User closed the PIP mode.
@@ -1704,6 +1771,10 @@ public class BrowserApp extends GeckoApp
 
                 // Force tabs panel inflation once the initial pageload is finished.
                 ensureTabsPanelExists();
+
+                if (handleSearchWidgetIntent(safeStartingIntent.getUnsafe())) {
+                    return;
+                }
 
                 if (AppConstants.MOZ_MEDIA_PLAYER) {
                     // Check if the fragment is already added. This should never be true
@@ -3830,6 +3901,10 @@ public class BrowserApp extends GeckoApp
 
         for (final BrowserAppDelegate delegate : delegates) {
             delegate.onNewIntent(this, intent);
+        }
+
+        if (handleSearchWidgetIntent(externalIntent)) {
+            return;
         }
 
         if (!mInitialized || !Intent.ACTION_MAIN.equals(action)) {

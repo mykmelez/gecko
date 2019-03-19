@@ -489,6 +489,10 @@ Section "-Application" APP_IDX
     ${SetAppLSPCategories} ${LSP_CATEGORIES}
   ${EndIf}
 
+!ifdef MOZ_LAUNCHER_PROCESS
+  ${DisableLauncherProcessByDefault}
+!endif
+
   ; Create shortcuts
   ${LogHeader} "Adding Shortcuts"
 

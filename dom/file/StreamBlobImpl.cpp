@@ -17,32 +17,37 @@ namespace dom {
 
 NS_IMPL_ISUPPORTS_INHERITED(StreamBlobImpl, BlobImpl, nsIMemoryReporter)
 
-/* static */ already_AddRefed<StreamBlobImpl> StreamBlobImpl::Create(
+/* static */
+already_AddRefed<StreamBlobImpl> StreamBlobImpl::Create(
     already_AddRefed<nsIInputStream> aInputStream,
-    const nsAString& aContentType, uint64_t aLength) {
+    const nsAString& aContentType, uint64_t aLength,
+    const nsAString& aBlobImplType) {
   nsCOMPtr<nsIInputStream> inputStream = std::move(aInputStream);
 
-  RefPtr<StreamBlobImpl> blobImplStream =
-      new StreamBlobImpl(inputStream.forget(), aContentType, aLength);
+  RefPtr<StreamBlobImpl> blobImplStream = new StreamBlobImpl(
+      inputStream.forget(), aContentType, aLength, aBlobImplType);
   blobImplStream->MaybeRegisterMemoryReporter();
   return blobImplStream.forget();
 }
 
-/* static */ already_AddRefed<StreamBlobImpl> StreamBlobImpl::Create(
+/* static */
+already_AddRefed<StreamBlobImpl> StreamBlobImpl::Create(
     already_AddRefed<nsIInputStream> aInputStream, const nsAString& aName,
-    const nsAString& aContentType, int64_t aLastModifiedDate,
-    uint64_t aLength) {
+    const nsAString& aContentType, int64_t aLastModifiedDate, uint64_t aLength,
+    const nsAString& aBlobImplType) {
   nsCOMPtr<nsIInputStream> inputStream = std::move(aInputStream);
 
-  RefPtr<StreamBlobImpl> blobImplStream = new StreamBlobImpl(
-      inputStream.forget(), aName, aContentType, aLastModifiedDate, aLength);
+  RefPtr<StreamBlobImpl> blobImplStream =
+      new StreamBlobImpl(inputStream.forget(), aName, aContentType,
+                         aLastModifiedDate, aLength, aBlobImplType);
   blobImplStream->MaybeRegisterMemoryReporter();
   return blobImplStream.forget();
 }
 
 StreamBlobImpl::StreamBlobImpl(already_AddRefed<nsIInputStream> aInputStream,
-                               const nsAString& aContentType, uint64_t aLength)
-    : BaseBlobImpl(NS_LITERAL_STRING("StreamBlobImpl"), aContentType, aLength),
+                               const nsAString& aContentType, uint64_t aLength,
+                               const nsAString& aBlobImplType)
+    : BaseBlobImpl(aBlobImplType, aContentType, aLength),
       mInputStream(std::move(aInputStream)),
       mIsDirectory(false),
       mFileId(-1) {
@@ -52,9 +57,10 @@ StreamBlobImpl::StreamBlobImpl(already_AddRefed<nsIInputStream> aInputStream,
 StreamBlobImpl::StreamBlobImpl(already_AddRefed<nsIInputStream> aInputStream,
                                const nsAString& aName,
                                const nsAString& aContentType,
-                               int64_t aLastModifiedDate, uint64_t aLength)
-    : BaseBlobImpl(NS_LITERAL_STRING("StreamBlobImpl"), aName, aContentType,
-                   aLength, aLastModifiedDate),
+                               int64_t aLastModifiedDate, uint64_t aLength,
+                               const nsAString& aBlobImplType)
+    : BaseBlobImpl(aBlobImplType, aName, aContentType, aLength,
+                   aLastModifiedDate),
       mInputStream(std::move(aInputStream)),
       mIsDirectory(false),
       mFileId(-1) {
@@ -113,8 +119,8 @@ already_AddRefed<BlobImpl> StreamBlobImpl::CreateSlice(
 
   MOZ_ASSERT(clonedStream);
 
-  RefPtr<BlobImpl> impl =
-      new StreamBlobImpl(clonedStream.forget(), aContentType, aLength);
+  RefPtr<BlobImpl> impl = new StreamBlobImpl(
+      clonedStream.forget(), aContentType, aLength, mBlobImplType);
   return impl.forget();
 }
 
@@ -154,6 +160,12 @@ size_t StreamBlobImpl::GetAllocationSize() const {
   }
 
   return stringInputStream->SizeOfIncludingThis(MallocSizeOf);
+}
+
+void StreamBlobImpl::GetBlobImplType(nsAString& aBlobImplType) const {
+  aBlobImplType.AssignLiteral("StreamBlobImpl[");
+  aBlobImplType.Append(mBlobImplType);
+  aBlobImplType.AppendLiteral("]");
 }
 
 }  // namespace dom

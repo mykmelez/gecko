@@ -1,4 +1,4 @@
-// Copyright 2018 Mozilla
+// Copyright 2018-2019 Mozilla
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use
 // this file except in compliance with the License. You may obtain a copy of the
@@ -8,26 +8,23 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
-use lmdb;
-
-use std::marker::PhantomData;
-
 use lmdb::{
-    Cursor,
     Database,
-    Iter as LmdbIter,
     RoCursor,
     RoTransaction,
     RwTransaction,
     Transaction,
+    WriteFlags,
 };
 
-use lmdb::WriteFlags;
+use crate::error::StoreError;
+use crate::read_transform;
+use crate::value::Value;
 
-use error::StoreError;
+pub struct Reader<'env>(pub RoTransaction<'env>);
+pub struct Writer<'env>(pub RwTransaction<'env>);
 
-use value::Value;
-
+<<<<<<< HEAD
 fn read_transform(val: Result<&[u8], lmdb::Error>) -> Result<Option<Value>, StoreError> {
     match val {
         Ok(bytes) => Value::from_tagged_slice(bytes).map(Some).map_err(StoreError::DataError),
@@ -91,17 +88,35 @@ where
         // data items (MDB_DUPSORT) the data parameter is ignored" in the docs,
         // I see a footgun that we can avoid by using the type system.
         unimplemented!();
+=======
+pub trait Readable {
+    fn get<K: AsRef<[u8]>>(&self, db: Database, k: &K) -> Result<Option<Value>, StoreError>;
+    fn open_ro_cursor(&self, db: Database) -> Result<RoCursor, StoreError>;
+}
+
+impl<'env> Readable for Reader<'env> {
+    fn get<K: AsRef<[u8]>>(&self, db: Database, k: &K) -> Result<Option<Value>, StoreError> {
+        let bytes = self.0.get(db, &k);
+        read_transform(bytes)
     }
 
-    pub fn commit(self) -> Result<(), StoreError> {
-        self.tx.commit().map_err(StoreError::LmdbError)
-    }
-
-    pub fn abort(self) {
-        self.tx.abort();
+    fn open_ro_cursor(&self, db: Database) -> Result<RoCursor, StoreError> {
+        self.0.open_ro_cursor(db).map_err(StoreError::LmdbError)
+>>>>>>> central
     }
 }
 
+impl<'env> Reader<'env> {
+    pub(crate) fn new(txn: RoTransaction) -> Reader {
+        Reader(txn)
+    }
+
+    pub fn abort(self) {
+        self.0.abort();
+    }
+}
+
+<<<<<<< HEAD
 impl<'env, K> Reader<'env, K>
 where
     K: AsRef<[u8]>,
@@ -115,13 +130,20 @@ where
 
     pub fn get(&self, store: Store, k: K) -> Result<Option<Value>, StoreError> {
         let bytes = self.tx.get(store.0, &k);
+=======
+impl<'env> Readable for Writer<'env> {
+    fn get<K: AsRef<[u8]>>(&self, db: Database, k: &K) -> Result<Option<Value>, StoreError> {
+        let bytes = self.0.get(db, &k);
+>>>>>>> central
         read_transform(bytes)
     }
 
-    pub fn abort(self) {
-        self.tx.abort();
+    fn open_ro_cursor(&self, db: Database) -> Result<RoCursor, StoreError> {
+        self.0.open_ro_cursor(db).map_err(StoreError::LmdbError)
     }
+}
 
+<<<<<<< HEAD
     pub fn iter_start(&self, store: Store) -> Result<Iter, StoreError> {
         let mut cursor = self.tx.open_ro_cursor(store.0).map_err(StoreError::LmdbError)?;
 
@@ -148,9 +170,18 @@ where
             iter,
             cursor,
         })
+=======
+impl<'env> Writer<'env> {
+    pub(crate) fn new(txn: RwTransaction) -> Writer {
+        Writer(txn)
     }
-}
 
+    pub fn commit(self) -> Result<(), StoreError> {
+        self.0.commit().map_err(StoreError::LmdbError)
+>>>>>>> central
+    }
+
+<<<<<<< HEAD
 impl<'env> Iterator for Iter<'env> {
     type Item = (&'env [u8], Result<Option<Value<'env>>, StoreError>);
 
@@ -159,9 +190,13 @@ impl<'env> Iterator for Iter<'env> {
             None => None,
             Some((key, bytes)) => Some((key, read_transform(Ok(bytes)))),
         }
+=======
+    pub fn abort(self) {
+        self.0.abort();
+>>>>>>> central
     }
-}
 
+<<<<<<< HEAD
 /// New type around an `lmdb::Database`.  At this time, the underlying LMDB
 /// handle (within lmdb-rs::Database) is a C integer, so Copy is automatic.
 #[derive(Copy, Clone)]
@@ -170,5 +205,20 @@ pub struct Store(Database);
 impl Store {
     pub fn new(db: Database) -> Store {
         Store(db)
+=======
+    pub(crate) fn put<K: AsRef<[u8]>>(
+        &mut self,
+        db: Database,
+        k: &K,
+        v: &Value,
+        flags: WriteFlags,
+    ) -> Result<(), StoreError> {
+        // TODO: don't allocate twice.
+        self.0.put(db, &k, &v.to_bytes()?, flags).map_err(StoreError::LmdbError)
+    }
+
+    pub(crate) fn delete<K: AsRef<[u8]>>(&mut self, db: Database, k: &K, v: Option<&[u8]>) -> Result<(), StoreError> {
+        self.0.del(db, &k, v).map_err(StoreError::LmdbError)
+>>>>>>> central
     }
 }

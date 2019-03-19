@@ -70,9 +70,14 @@
           :root[sizemode=normal][tabsintitlebar] {
             border-top: 1px solid -moz-win-accentcolor;
           }
-          :root[tabsintitlebar]:not(:-moz-window-inactive):not(:-moz-lwtheme) {
+          :root[tabsintitlebar]:not(:-moz-window-inactive):not(:-moz-lwtheme),
+          :root[tabsintitlebar]:not(:-moz-window-inactive)[lwt-default-theme-in-dark-mode] {
             background-color: -moz-win-accentcolor;
             color: -moz-win-accentcolortext;
+          }
+          :root[tabsintitlebar][lwt-default-theme-in-dark-mode] #titlebar {
+            --lwt-toolbarbutton-icon-fill: currentColor;
+            --toolbarbutton-icon-fill-opacity: .7;
           }
         }
 
@@ -89,8 +94,11 @@
 
       @media (-moz-windows-default-theme: 0) {
         :root[tabsintitlebar] {
-          background-color: transparent;
           -moz-appearance: -moz-win-glass;
+        }
+
+        :root[tabsintitlebar]:not(:-moz-lwtheme) {
+          background-color: transparent;
         }
 
         /* On win10, if we don't set this on the entire browser container including
@@ -210,7 +218,7 @@
           background-color: hsla(0,0%,0%,.22);
         }
 
-        #toolbar-menubar[brighttext] > #main-menubar > menu[_moz-menuactive="true"],
+        #toolbar-menubar[brighttext] > #menubar-items > #main-menubar > menu[_moz-menuactive="true"],
         toolbar[brighttext] .titlebar-button:not(.titlebar-close):hover {
           background-color: hsla(0,0%,100%,.22);
         }

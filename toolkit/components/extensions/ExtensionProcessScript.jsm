@@ -12,9 +12,9 @@
 
 var EXPORTED_SYMBOLS = ["ExtensionProcessScript"];
 
-ChromeUtils.import("resource://gre/modules/MessageChannel.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {MessageChannel} = ChromeUtils.import("resource://gre/modules/MessageChannel.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   ExtensionChild: "resource://gre/modules/ExtensionChild.jsm",
@@ -23,7 +23,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ExtensionPageChild: "resource://gre/modules/ExtensionPageChild.jsm",
 });
 
-ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
+const {ExtensionUtils} = ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "console", () => ExtensionCommon.getConsole());
 
@@ -47,6 +47,8 @@ const isContentProcess = appinfo.processType == appinfo.PROCESS_TYPE_CONTENT;
 var extensions = new DefaultWeakMap(policy => {
   return new ExtensionChild.BrowserExtensionContent(policy);
 });
+
+var pendingExtensions = new Map();
 
 var ExtensionManager;
 
@@ -123,14 +125,47 @@ ExtensionManager = {
       global => this.globals.set(global, new ExtensionGlobal(global)),
       "tab-content-frameloader-created");
 
+    this.updateStubExtensions();
+
     for (let id of sharedData.get("extensions/activeIDs") || []) {
       this.initExtension(getData({id}));
     }
   },
 
+  initStubPolicy(id, data) {
+    let resolveReadyPromise;
+    let readyPromise = new Promise(resolve => {
+      resolveReadyPromise = resolve;
+    });
+
+    let policy = new WebExtensionPolicy({
+      id,
+      localizeCallback() {},
+      readyPromise,
+      allowedOrigins: new MatchPatternSet([]),
+      ...data,
+    });
+
+    try {
+      policy.active = true;
+
+      pendingExtensions.set(id, {policy, resolveReadyPromise});
+    } catch (e) {
+      Cu.reportError(e);
+    }
+  },
+
+  updateStubExtensions() {
+    for (let [id, data] of sharedData.get("extensions/pending") || []) {
+      if (!pendingExtensions.has(id)) {
+        this.initStubPolicy(id, data);
+      }
+    }
+  },
+
   initExtensionPolicy(extension) {
     let policy = WebExtensionPolicy.getByID(extension.id);
-    if (!policy) {
+    if (!policy || pendingExtensions.has(extension.id)) {
       let localizeCallback;
       if (extension.localize) {
         // We have a real Extension object.
@@ -154,8 +189,6 @@ ExtensionManager = {
         permissions: extension.permissions,
         allowedOrigins: extension.whiteListedHosts,
         webAccessibleResources: extension.webAccessibleResources,
-
-        privateBrowsingAllowed: extension.privateBrowsingAllowed,
 
         contentSecurityPolicy: extension.contentSecurityPolicy,
 
@@ -186,6 +219,13 @@ ExtensionManager = {
         registeredContentScripts.set(scriptId, script);
       }
 
+      let stub = pendingExtensions.get(extension.id);
+      if (stub) {
+        pendingExtensions.delete(extension.id);
+        stub.policy.active = false;
+        stub.resolveReadyPromise(policy);
+      }
+
       policy.active = true;
       policy.instanceId = extension.instanceId;
       policy.optionalPermissions = extension.optionalPermissions;
@@ -200,6 +240,12 @@ ExtensionManager = {
     let policy = this.initExtensionPolicy(data);
 
     policy.injectContentScripts();
+  },
+
+  handleEvent(event) {
+    if (event.type === "change" && event.changedKeys.includes("extensions/pending")) {
+      this.updateStubExtensions();
+    }
   },
 
   receiveMessage({name, data}) {

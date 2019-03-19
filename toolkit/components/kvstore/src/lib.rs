@@ -12,10 +12,8 @@ extern crate log;
 extern crate moz_task;
 extern crate nserror;
 extern crate nsstring;
-extern crate ordered_float;
 extern crate rkv;
 extern crate storage_variant;
-extern crate threadbound;
 #[macro_use]
 extern crate xpcom;
 
@@ -26,25 +24,26 @@ mod task;
 use atomic_refcell::AtomicRefCell;
 use error::KeyValueError;
 use libc::c_void;
-use moz_task::create_thread;
+use moz_task::{create_thread, TaskRunnable};
 use nserror::{nsresult, NS_ERROR_FAILURE, NS_ERROR_NO_AGGREGATION, NS_OK};
 use nsstring::{nsACString, nsCString};
-use owned_value::{owned_to_variant, variant_to_owned, OwnedValue};
-use rkv::{Rkv, Store};
+use owned_value::{owned_to_variant, variant_to_owned};
+use rkv::{OwnedValue, Rkv, SingleStore};
 use std::{
     ptr,
     sync::{Arc, RwLock},
     vec::IntoIter,
 };
-use task::{DeleteTask, EnumerateTask, GetOrCreateTask, GetTask, HasTask, PutTask, TaskRunnable};
-use threadbound::ThreadBound;
+use task::{DeleteTask, EnumerateTask, GetOrCreateTask, GetTask, HasTask, PutTask};
 use xpcom::{
     interfaces::{
         nsIKeyValueDatabaseCallback, nsIKeyValueEnumeratorCallback, nsIKeyValuePair,
         nsIKeyValueVariantCallback, nsIKeyValueVoidCallback, nsISupports, nsIThread, nsIVariant,
     },
-    nsIID, RefPtr,
+    nsIID, RefPtr, ThreadBoundRefPtr,
 };
+
+type KeyValuePairResult = Result<(String, OwnedValue), KeyValueError>;
 
 #[no_mangle]
 pub unsafe extern "C" fn nsKeyValueServiceConstructor(
@@ -94,13 +93,13 @@ pub unsafe extern "C" fn nsKeyValueServiceConstructor(
 #[xpimplements(nsIKeyValueService)]
 #[refcnt = "atomic"]
 pub struct InitKeyValueService {
-    thread: ThreadBound<RefPtr<nsIThread>>,
+    thread: ThreadBoundRefPtr<nsIThread>,
 }
 
 impl KeyValueService {
     fn new(thread: RefPtr<nsIThread>) -> RefPtr<KeyValueService> {
         KeyValueService::allocate(InitKeyValueService {
-            thread: ThreadBound::new(thread),
+            thread: ThreadBoundRefPtr::new(thread),
         })
     }
 
@@ -122,12 +121,12 @@ impl KeyValueService {
 
         let task = Box::new(GetOrCreateTask::new(
             RefPtr::new(callback),
-            thread.clone(),
+            RefPtr::new(thread),
             nsCString::from(path),
             nsCString::from(name),
         ));
 
-        TaskRunnable::new("KVService::GetOrCreate", task)?.dispatch(thread.clone())
+        TaskRunnable::new("KVService::GetOrCreate", task)?.dispatch(RefPtr::new(thread))
     }
 }
 
@@ -136,15 +135,15 @@ impl KeyValueService {
 #[refcnt = "atomic"]
 pub struct InitKeyValueDatabase {
     rkv: Arc<RwLock<Rkv>>,
-    store: Store,
-    thread: ThreadBound<RefPtr<nsIThread>>,
+    store: SingleStore,
+    thread: ThreadBoundRefPtr<nsIThread>,
 }
 
 impl KeyValueDatabase {
     fn new(
         rkv: Arc<RwLock<Rkv>>,
-        store: Store,
-        thread: ThreadBound<RefPtr<nsIThread>>,
+        store: SingleStore,
+        thread: ThreadBoundRefPtr<nsIThread>,
     ) -> RefPtr<KeyValueDatabase> {
         KeyValueDatabase::allocate(InitKeyValueDatabase { rkv, store, thread })
     }
@@ -178,7 +177,7 @@ impl KeyValueDatabase {
 
         let thread = self.thread.get_ref().ok_or(NS_ERROR_FAILURE)?;
 
-        TaskRunnable::new("KVDatabase::Put", task)?.dispatch(thread.clone())
+        TaskRunnable::new("KVDatabase::Put", task)?.dispatch(RefPtr::new(thread))
     }
 
     xpcom_method!(
@@ -205,7 +204,7 @@ impl KeyValueDatabase {
 
         let thread = self.thread.get_ref().ok_or(NS_ERROR_FAILURE)?;
 
-        TaskRunnable::new("KVDatabase::Get", task)?.dispatch(thread.clone())
+        TaskRunnable::new("KVDatabase::Get", task)?.dispatch(RefPtr::new(thread))
     }
 
     xpcom_method!(
@@ -222,7 +221,7 @@ impl KeyValueDatabase {
 
         let thread = self.thread.get_ref().ok_or(NS_ERROR_FAILURE)?;
 
-        TaskRunnable::new("KVDatabase::Has", task)?.dispatch(thread.clone())
+        TaskRunnable::new("KVDatabase::Has", task)?.dispatch(RefPtr::new(thread))
     }
 
     xpcom_method!(
@@ -239,7 +238,7 @@ impl KeyValueDatabase {
 
         let thread = self.thread.get_ref().ok_or(NS_ERROR_FAILURE)?;
 
-        TaskRunnable::new("KVDatabase::Delete", task)?.dispatch(thread.clone())
+        TaskRunnable::new("KVDatabase::Delete", task)?.dispatch(RefPtr::new(thread))
     }
 
     xpcom_method!(
@@ -266,7 +265,7 @@ impl KeyValueDatabase {
 
         let thread = self.thread.get_ref().ok_or(NS_ERROR_FAILURE)?;
 
-        TaskRunnable::new("KVDatabase::Enumerate", task)?.dispatch(thread.clone())
+        TaskRunnable::new("KVDatabase::Enumerate", task)?.dispatch(RefPtr::new(thread))
     }
 }
 
@@ -274,21 +273,11 @@ impl KeyValueDatabase {
 #[xpimplements(nsIKeyValueEnumerator)]
 #[refcnt = "atomic"]
 pub struct InitKeyValueEnumerator {
-    iter: AtomicRefCell<
-        IntoIter<(
-            Result<String, KeyValueError>,
-            Result<OwnedValue, KeyValueError>,
-        )>,
-    >,
+    iter: AtomicRefCell<IntoIter<KeyValuePairResult>>,
 }
 
 impl KeyValueEnumerator {
-    fn new(
-        pairs: Vec<(
-            Result<String, KeyValueError>,
-            Result<OwnedValue, KeyValueError>,
-        )>,
-    ) -> RefPtr<KeyValueEnumerator> {
+    fn new(pairs: Vec<KeyValuePairResult>) -> RefPtr<KeyValueEnumerator> {
         KeyValueEnumerator::allocate(InitKeyValueEnumerator {
             iter: AtomicRefCell::new(pairs.into_iter()),
         })
@@ -304,13 +293,15 @@ impl KeyValueEnumerator {
 
     fn get_next(&self) -> Result<RefPtr<nsIKeyValuePair>, KeyValueError> {
         let mut iter = self.iter.borrow_mut();
-        let (key, value) = iter.next().ok_or(KeyValueError::from(NS_ERROR_FAILURE))?;
+        let (key, value) = iter
+            .next()
+            .ok_or_else(|| KeyValueError::from(NS_ERROR_FAILURE))??;
 
         // We fail on retrieval of the key/value pair if the key isn't valid
         // UTF-*, if the value is unexpected, or if we encountered a store error
         // while retrieving the pair.
         Ok(RefPtr::new(
-            KeyValuePair::new(key?, value?).coerce::<nsIKeyValuePair>(),
+            KeyValuePair::new(key, value).coerce::<nsIKeyValuePair>(),
         ))
     }
 }
@@ -336,6 +327,6 @@ impl KeyValuePair {
     }
 
     fn get_value(&self) -> Result<RefPtr<nsIVariant>, KeyValueError> {
-        Ok(owned_to_variant(self.value.clone()))
+        Ok(owned_to_variant(self.value.clone())?)
     }
 }
