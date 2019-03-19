@@ -121,36 +121,3 @@
       0x9b, 0x4a, 0x58, 0xdc, 0xec, 0x46, 0xeb, 0xce \
     }                                                \
   }
-<<<<<<< HEAD
-
-#define NS_ADDONCONTENTPOLICY_CID                    \
-  {                                                  \
-    0xc26a8241, 0xecf4, 0x4aed, {                    \
-      0x9f, 0x3c, 0xf1, 0xf5, 0xc7, 0x13, 0xb9, 0xa5 \
-    }                                                \
-  }
-
-#define NS_ADDON_POLICY_SERVICE_CID                  \
-  {                                                  \
-    0x562de129, 0x8338, 0x482c, {                    \
-      0xbb, 0x96, 0xa1, 0xff, 0x09, 0xee, 0x53, 0xcc \
-    }                                                \
-  }
-
-#define NS_ADDON_POLICY_SERVICE_CONTRACTID \
-  "@mozilla.org/addons/policy-service;1"
-
-#if defined(ENABLE_TESTS)
-#define NS_TELEMETRYGECKOVIEWTESTING_CID \
-  {0xaaa3f7f2, 0x8ef0, 0x41ec, {0x8d, 0x3, 0xae, 0xd6, 0x67, 0xcf, 0x7f, 0xa2}};
-#endif
-
-// 6cc1a0a8-af97-4d41-9b4a-58dcec46ebce
-#define NS_KEY_VALUE_SERVICE_CID                     \
-  {                                                  \
-    0x6cc1a0a8, 0xaf97, 0x4d41, {                    \
-      0x9b, 0x4a, 0x58, 0xdc, 0xec, 0x46, 0xeb, 0xce \
-    }                                                \
-  }
-=======
->>>>>>> central
