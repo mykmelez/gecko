@@ -74,16 +74,6 @@
 //!
 //!     // Keys are `AsRef<[u8]>`, while values are `Value` enum instances.
 //!     // Use the `Blob` variant to store arbitrary collections of bytes.
-<<<<<<< HEAD
-//!     writer.put(store, "int", &Value::I64(1234)).unwrap();
-//!     writer.put(store, "uint", &Value::U64(1234_u64)).unwrap();
-//!     writer.put(store, "float", &Value::F64(1234.0.into())).unwrap();
-//!     writer.put(store, "instant", &Value::Instant(1528318073700)).unwrap();
-//!     writer.put(store, "boolean", &Value::Bool(true)).unwrap();
-//!     writer.put(store, "string", &Value::Str("héllo, yöu")).unwrap();
-//!     writer.put(store, "json", &Value::Json(r#"{"foo":"bar", "number": 1}"#)).unwrap();
-//!     writer.put(store, "blob", &Value::Blob(b"blob")).unwrap();
-=======
 //!     // Putting data returns a `Result<(), StoreError>`, where StoreError
 //!     // is an enum identifying the reason for a failure.
 //!     store.put(&mut writer, "int", &Value::I64(1234)).unwrap();
@@ -94,7 +84,6 @@
 //!     store.put(&mut writer, "string", &Value::Str("Héllo, wörld!")).unwrap();
 //!     store.put(&mut writer, "json", &Value::Json(r#"{"foo":"bar", "number": 1}"#)).unwrap();
 //!     store.put(&mut writer, "blob", &Value::Blob(b"blob")).unwrap();
->>>>>>> central
 //!
 //!     // You must commit a write transaction before the writer goes out
 //!     // of scope, or the transaction will abort and the data won't persist.
@@ -107,21 +96,6 @@
 //!     // never block on a writer nor other readers.
 //!     let reader = env.read().expect("reader");
 //!
-<<<<<<< HEAD
-//!     // To retrieve data, call `Reader.get()`, passing it the target store
-//!     // and the key for the value to retrieve.
-//!     println!("Get int {:?}", reader.get(store, "int").unwrap());
-//!     println!("Get uint {:?}", reader.get(store, "uint").unwrap());
-//!     println!("Get float {:?}", reader.get(store, "float").unwrap());
-//!     println!("Get instant {:?}", reader.get(store, "instant").unwrap());
-//!     println!("Get boolean {:?}", reader.get(store, "boolean").unwrap());
-//!     println!("Get string {:?}", reader.get(store, "string").unwrap());
-//!     println!("Get json {:?}", reader.get(store, "json").unwrap());
-//!     println!("Get blob {:?}", reader.get(store, "blob").unwrap());
-//!
-//!     // Retrieving a non-existent value returns `Ok(None)`.
-//!     println!("Get non-existent value {:?}", reader.get(store, "non-existent"));
-=======
 //!     // Keys are `AsRef<u8>`, and the return value is `Result<Option<Value>, StoreError>`.
 //!     println!("Get int {:?}", store.get(&reader, "int").unwrap());
 //!     println!("Get uint {:?}", store.get(&reader, "uint").unwrap());
@@ -134,7 +108,6 @@
 //!
 //!     // Retrieving a non-existent value returns `Ok(None)`.
 //!     println!("Get non-existent value {:?}", store.get(&reader, "non-existent").unwrap());
->>>>>>> central
 //!
 //!     // A read transaction will automatically close once the reader
 //!     // goes out of scope, so isn't necessary to close it explicitly,
@@ -144,18 +117,10 @@
 //! {
 //!     // Aborting a write transaction rolls back the change(s).
 //!     let mut writer = env.write().unwrap();
-<<<<<<< HEAD
-//!     writer.put(store, "foo", &Value::Str("bar")).unwrap();
-=======
 //!     store.put(&mut writer, "foo", &Value::Str("bar")).unwrap();
->>>>>>> central
 //!     writer.abort();
 //!     let reader = env.read().expect("reader");
-<<<<<<< HEAD
-//!     println!("It should be None! ({:?})", reader.get(store, "foo").unwrap());
-=======
 //!     println!("It should be None! ({:?})", store.get(&reader, "foo").unwrap());
->>>>>>> central
 //! }
 //!
 //! {
@@ -164,51 +129,24 @@
 //!     // implicitly be aborted once they go out of scope.
 //!     {
 //!         let mut writer = env.write().unwrap();
-<<<<<<< HEAD
-//!         writer.put(store, "foo", &Value::Str("bar")).unwrap();
-//!     }
-//!     let reader = env.read().expect("reader");
-//!     println!("It should be None! ({:?})", reader.get(store, "foo").unwrap());
-=======
 //!         store.put(&mut writer, "foo", &Value::Str("bar")).unwrap();
 //!     }
 //!     let reader = env.read().expect("reader");
 //!     println!("It should be None! ({:?})", store.get(&reader, "foo").unwrap());
->>>>>>> central
 //! }
 //!
 //! {
 //!     // Deleting a key/value pair also requires a write transaction.
 //!     let mut writer = env.write().unwrap();
-<<<<<<< HEAD
-//!     writer.put(store, "foo", &Value::Str("bar")).unwrap();
-//!     writer.put(store, "bar", &Value::Str("baz")).unwrap();
-//!     writer.delete(store, "foo").unwrap();
-=======
 //!     store.put(&mut writer, "foo", &Value::Str("bar")).unwrap();
 //!     store.put(&mut writer, "bar", &Value::Str("baz")).unwrap();
 //!     store.delete(&mut writer, "foo").unwrap();
->>>>>>> central
 //!
 //!     // A write transaction also supports reading, and the version of the
 //!     // store that it reads includes the changes it has made regardless of
 //!     // the commit state of that transaction.
 
 //!     // In the code above, "foo" and "bar" were put into the store,
-<<<<<<< HEAD
-//!     // then "foo" was deleted so only "bar" will return a result.
-//!     println!("It should be None! ({:?})", writer.get(store, "foo").unwrap());
-//!     println!("Get bar ({:?})", writer.get(store, "bar").unwrap());
-//!     writer.commit().unwrap();
-//!     let reader = env.read().expect("reader");
-//!     println!("It should be None! ({:?})", reader.get(store, "foo").unwrap());
-//!     println!("Get bar {:?}", reader.get(store, "bar").unwrap());
-//!
-//!     // Committing a transaction consumes the writer, preventing you
-//!     // from reusing it by failing at compile time with an error.
-//!     // This line would report error[E0382]: use of moved value: `writer`.
-//!     // writer.put(store, "baz", &Value::Str("buz")).unwrap();
-=======
 //!     // then "foo" was deleted so only "bar" will return a result when the
 //!     // database is queried via the writer.
 //!     println!("It should be None! ({:?})", store.get(&writer, "foo").unwrap());
@@ -232,7 +170,6 @@
 //!     // from reusing it by failing at compile time with an error.
 //!     // This line would report error[E0382]: borrow of moved value: `writer`.
 //!     // store.put(&mut writer, "baz", &Value::Str("buz")).unwrap();
->>>>>>> central
 //! }
 //! ```
 
@@ -287,12 +224,6 @@ pub use self::value::{
     Value,
 };
 
-<<<<<<< HEAD
-pub use value::{
-    OwnedValue,
-    Value,
-};
-=======
 fn read_transform(val: Result<&[u8], lmdb::Error>) -> Result<Option<Value>, StoreError> {
     match val {
         Ok(bytes) => Value::from_tagged_slice(bytes).map(Some).map_err(StoreError::DataError),
@@ -300,4 +231,3 @@ fn read_transform(val: Result<&[u8], lmdb::Error>) -> Result<Option<Value>, Stor
         Err(e) => Err(StoreError::LmdbError(e)),
     }
 }
->>>>>>> central

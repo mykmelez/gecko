@@ -36,13 +36,8 @@ fn main() {
     println!("Iterating from the beginning...");
     // Reader::iter_start() iterates from the first item in the store, and
     // returns the (key, value) tuples in order.
-<<<<<<< HEAD
-    let mut iter = reader.iter_start(store).unwrap();
-    while let Some((country, city)) = iter.next() {
-=======
     let mut iter = store.iter_start(&reader).unwrap();
     while let Some(Ok((country, city))) = iter.next() {
->>>>>>> central
         println!("{}, {:?}", str::from_utf8(country).unwrap(), city);
     }
 
@@ -50,34 +45,20 @@ fn main() {
     println!("Iterating from the given key...");
     // Reader::iter_from() iterates from the first key equal to or greater
     // than the given key.
-<<<<<<< HEAD
-    let mut iter = reader.iter_from(store, "Japan").unwrap();
-    while let Some((country, city)) = iter.next() {
-=======
     let mut iter = store.iter_from(&reader, "Japan").unwrap();
     while let Some(Ok((country, city))) = iter.next() {
->>>>>>> central
         println!("{}, {:?}", str::from_utf8(country).unwrap(), city);
     }
 
     println!();
     println!("Iterating from the given prefix...");
-<<<<<<< HEAD
-    let mut iter = reader.iter_from(store, "Un").unwrap();
-    while let Some((country, city)) = iter.next() {
-=======
     let mut iter = store.iter_from(&reader, "Un").unwrap();
     while let Some(Ok((country, city))) = iter.next() {
->>>>>>> central
         println!("{}, {:?}", str::from_utf8(country).unwrap(), city);
     }
 }
 
-<<<<<<< HEAD
-fn populate_store(k: &Rkv, store: Store) -> Result<(), StoreError> {
-=======
 fn populate_store(k: &Rkv, store: SingleStore) -> Result<(), StoreError> {
->>>>>>> central
     let mut writer = k.write()?;
     for (country, city) in vec![
         ("Canada", Value::Str("Ottawa")),

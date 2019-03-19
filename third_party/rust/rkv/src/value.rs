@@ -96,11 +96,7 @@ pub enum Value<'s> {
     Blob(&'s [u8]),
 }
 
-<<<<<<< HEAD
-#[derive(Debug, PartialEq)]
-=======
 #[derive(Clone, Debug, PartialEq)]
->>>>>>> central
 pub enum OwnedValue {
     Bool(bool),
     U64(u64),
@@ -217,22 +213,6 @@ impl<'s> From<&'s OwnedValue> for Value<'s> {
             OwnedValue::Str(v) => Value::Str(v),
             OwnedValue::Json(v) => Value::Json(v),
             OwnedValue::Blob(v) => Value::Blob(v),
-        }
-    }
-}
-
-impl<'s> From<&'s Value<'s>> for OwnedValue {
-    fn from(value: &Value) -> OwnedValue {
-        match value {
-            Value::Bool(ref v) => OwnedValue::Bool(*v),
-            Value::U64(ref v) => OwnedValue::U64(*v),
-            Value::I64(ref v) => OwnedValue::I64(*v),
-            Value::F64(ref v) => OwnedValue::F64(**v),
-            Value::Instant(ref v) => OwnedValue::Instant(*v),
-            Value::Uuid(ref v) => OwnedValue::Uuid(Uuid::from_bytes(**v)),
-            Value::Str(ref v) => OwnedValue::Str(v.to_string()),
-            Value::Json(ref v) => OwnedValue::Json(v.to_string()),
-            Value::Blob(ref v) => OwnedValue::Blob(v.to_vec()),
         }
     }
 }
