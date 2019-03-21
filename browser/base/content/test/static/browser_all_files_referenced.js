@@ -169,8 +169,6 @@ var whitelist = [
   {file: "chrome://devtools/skin/images/aboutdebugging-firefox-release.svg",
    isFromDevTools: true},
   {file: "chrome://devtools/skin/images/next.svg", isFromDevTools: true},
-  {file: "chrome://devtools/content/aboutdebugging-new/tmp-locale/en-US/aboutdebugging.ftl",
-   isFromDevTools: true},
   // Bug 1526672
   {file: "resource://app/localization/en-US/browser/touchbar/touchbar.ftl",
    platforms: ["linux", "win"]},

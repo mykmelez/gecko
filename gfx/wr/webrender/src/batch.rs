@@ -396,6 +396,9 @@ pub struct AlphaBatchContainer {
     /// in. Each region will have scissor rect set before drawing.
     pub regions: Vec<DeviceIntRect>,
     pub tile_blits: Vec<TileBlit>,
+    /// The rectangle of the owning render target that this
+    /// set of batches affects.
+    pub task_rect: DeviceIntRect,
 }
 
 impl AlphaBatchContainer {
@@ -409,6 +412,7 @@ impl AlphaBatchContainer {
             task_scissor_rect,
             regions,
             tile_blits: Vec::new(),
+            task_rect: DeviceIntRect::zero(),
         }
     }
 
@@ -417,7 +421,9 @@ impl AlphaBatchContainer {
         self.alpha_batches.is_empty()
     }
 
-    fn merge(&mut self, batch_list: BatchList) {
+    fn merge(&mut self, batch_list: BatchList, task_rect: &DeviceIntRect) {
+        self.task_rect = self.task_rect.union(task_rect);
+
         for other_batch in batch_list.opaque_batch_list.batches {
             let batch_index = self.opaque_batches.iter().position(|batch| {
                 batch.key.is_compatible_with(&other_batch.key)
@@ -517,6 +523,7 @@ impl AlphaBatchBuilder {
         mut self,
         batch_containers: &mut Vec<AlphaBatchContainer>,
         merged_batches: &mut AlphaBatchContainer,
+        task_rect: DeviceIntRect,
     ) {
         for batch_list in &mut self.batch_lists {
             batch_list.finalize();
@@ -525,7 +532,7 @@ impl AlphaBatchBuilder {
         if self.can_merge() {
             let batch_list = self.batch_lists.pop().unwrap();
             debug_assert!(batch_list.tile_blits.is_empty());
-            merged_batches.merge(batch_list);
+            merged_batches.merge(batch_list, &task_rect);
         } else {
             for batch_list in self.batch_lists {
                 batch_containers.push(AlphaBatchContainer {
@@ -534,6 +541,7 @@ impl AlphaBatchBuilder {
                     task_scissor_rect: self.task_scissor_rect,
                     regions: batch_list.regions,
                     tile_blits: batch_list.tile_blits,
+                    task_rect,
                 });
             }
         }
@@ -2660,7 +2668,8 @@ pub fn resolve_image(
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct ClipBatchList {
     /// Rectangle draws fill up the rectangles with rounded corners.
-    pub rectangles: Vec<ClipMaskInstance>,
+    pub slow_rectangles: Vec<ClipMaskInstance>,
+    pub fast_rectangles: Vec<ClipMaskInstance>,
     /// Image draws apply the image masking.
     pub images: FastHashMap<TextureSource, Vec<ClipMaskInstance>>,
     pub box_shadows: FastHashMap<TextureSource, Vec<ClipMaskInstance>>,
@@ -2669,7 +2678,8 @@ pub struct ClipBatchList {
 impl ClipBatchList {
     fn new() -> Self {
         ClipBatchList {
-            rectangles: Vec::new(),
+            slow_rectangles: Vec::new(),
+            fast_rectangles: Vec::new(),
             images: FastHashMap::default(),
             box_shadows: FastHashMap::default(),
         }
@@ -2726,7 +2736,7 @@ impl ClipBatcher {
             device_pixel_scale,
         };
 
-        self.primary_clips.rectangles.push(instance);
+        self.primary_clips.slow_rectangles.push(instance);
     }
 
     /// Where appropriate, draw a clip rectangle as a small series of tiles,
@@ -2808,7 +2818,7 @@ impl ClipBatcher {
                 // these pixels would be redundant - since this clip can't possibly
                 // affect the pixels in this tile, skip them!
                 if !world_device_rect.contains_rect(&world_sub_rect) {
-                    clip_list.rectangles.push(ClipMaskInstance {
+                    clip_list.slow_rectangles.push(ClipMaskInstance {
                         clip_data_address: gpu_address,
                         sub_rect: normalized_sub_rect,
                         ..*instance
@@ -2964,7 +2974,7 @@ impl ClipBatcher {
                     let gpu_address =
                         gpu_cache.get_address(&clip_node.gpu_cache_handle);
                     self.get_batch_list(is_first_clip)
-                        .rectangles
+                        .slow_rectangles
                         .push(ClipMaskInstance {
                             clip_data_address: gpu_address,
                             ..instance
@@ -2990,7 +3000,7 @@ impl ClipBatcher {
                             is_first_clip,
                         ) {
                             self.get_batch_list(is_first_clip)
-                                .rectangles
+                                .slow_rectangles
                                 .push(ClipMaskInstance {
                                     clip_data_address: gpu_address,
                                     ..instance
@@ -3003,12 +3013,16 @@ impl ClipBatcher {
                 ClipItem::RoundedRectangle(..) => {
                     let gpu_address =
                         gpu_cache.get_address(&clip_node.gpu_cache_handle);
-                    self.get_batch_list(is_first_clip)
-                        .rectangles
-                        .push(ClipMaskInstance {
-                            clip_data_address: gpu_address,
-                            ..instance
-                        });
+                    let batch_list = self.get_batch_list(is_first_clip);
+                    let instance = ClipMaskInstance {
+                        clip_data_address: gpu_address,
+                        ..instance
+                    };
+                    if clip_instance.flags.contains(ClipNodeFlags::USE_FAST_PATH) {
+                        batch_list.fast_rectangles.push(instance);
+                    } else {
+                        batch_list.slow_rectangles.push(instance);
+                    }
 
                     true
                 }

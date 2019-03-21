@@ -53,14 +53,6 @@ pref("devtools.inspector.showUserAgentShadowRoots", false);
 // Enable the new Rules View
 pref("devtools.inspector.new-rulesview.enabled", false);
 
-// Flexbox preferences
-// Whether or not to show the combined flexbox and box model highlighter.
-#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
-pref("devtools.inspector.flexboxHighlighter.combine", true);
-#else
-pref("devtools.inspector.flexboxHighlighter.combine", false);
-#endif
-
 // Grid highlighter preferences
 pref("devtools.gridinspector.gridOutlineMaxColumns", 50);
 pref("devtools.gridinspector.gridOutlineMaxRows", 50);
@@ -349,10 +341,8 @@ pref("devtools.responsive.showUserAgentInput", false);
 
 // Enable new about:debugging.
 pref("devtools.aboutdebugging.new-enabled", false);
-// Enable the network location feature.
-pref("devtools.aboutdebugging.network", false);
-// Enable the wifi feature.
-pref("devtools.aboutdebugging.wifi", false);
+// Show process debug targets.
+pref("devtools.aboutdebugging.process-debugging", false);
 // Stringified array of network locations that users can connect to.
 pref("devtools.aboutdebugging.network-locations", "[]");
 // Debug target pane collapse/expand settings.

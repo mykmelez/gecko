@@ -136,6 +136,9 @@ LazyLogModule gBrowserFocusLog("BrowserFocus");
 #define LOGBROWSERFOCUS(args) \
   MOZ_LOG(gBrowserFocusLog, mozilla::LogLevel::Debug, args)
 
+/* static */
+StaticAutoPtr<nsTArray<TabParent*>> TabParent::sFocusStack;
+
 // The flags passed by the webProgress notifications are 16 bits shifted
 // from the ones registered by webProgressListeners.
 #define NOTIFY_FLAG_SHIFT 16
@@ -352,6 +355,7 @@ void TabParent::RemoveWindowListeners() {
 }
 
 void TabParent::DestroyInternal() {
+  PopFocus(this);
   IMEStateManager::OnTabParentDestroying(this);
 
   RemoveWindowListeners();
@@ -838,12 +842,14 @@ void TabParent::HandleAccessKey(const WidgetKeyboardEvent& aEvent,
 void TabParent::Activate() {
   LOGBROWSERFOCUS(("Activate %p", this));
   if (!mIsDestroyed) {
+    PushFocus(this);  // Intentionally inside "if"
     Unused << Manager()->SendActivate(this);
   }
 }
 
 void TabParent::Deactivate() {
   LOGBROWSERFOCUS(("Deactivate %p", this));
+  PopFocus(this);  // Intentionally outside "if"
   if (!mIsDestroyed) {
     Unused << Manager()->SendDeactivate(this);
   }
@@ -2204,26 +2210,24 @@ mozilla::ipc::IPCResult TabParent::RecvRegisterProtocolHandler(
 }
 
 mozilla::ipc::IPCResult TabParent::RecvOnContentBlockingEvent(
-    const OptionalWebProgressData& aWebProgressData,
+    const Maybe<WebProgressData>& aWebProgressData,
     const RequestData& aRequestData, const uint32_t& aEvent) {
   nsCOMPtr<nsIBrowser> browser =
       mFrameElement ? mFrameElement->AsBrowser() : nullptr;
   if (browser) {
-    MOZ_ASSERT(aWebProgressData.type() != OptionalWebProgressData::T__None);
-
-    if (aWebProgressData.type() == OptionalWebProgressData::Tvoid_t) {
+    if (aWebProgressData.isNothing()) {
       Unused << browser->CallWebProgressContentBlockingEventListeners(
           false, false, false, 0, 0, aRequestData.requestURI(),
           aRequestData.originalRequestURI(), aRequestData.matchedList(),
           aEvent);
     } else {
       Unused << browser->CallWebProgressContentBlockingEventListeners(
-          true, aWebProgressData.get_WebProgressData().isTopLevel(),
-          aWebProgressData.get_WebProgressData().isLoadingDocument(),
-          aWebProgressData.get_WebProgressData().loadType(),
-          aWebProgressData.get_WebProgressData().DOMWindowID(),
-          aRequestData.requestURI(), aRequestData.originalRequestURI(),
-          aRequestData.matchedList(), aEvent);
+          true, aWebProgressData.ref().isTopLevel(),
+          aWebProgressData.ref().isLoadingDocument(),
+          aWebProgressData.ref().loadType(),
+          aWebProgressData.ref().DOMWindowID(), aRequestData.requestURI(),
+          aRequestData.originalRequestURI(), aRequestData.matchedList(),
+          aEvent);
     }
   }
 
@@ -2303,6 +2307,105 @@ bool TabParent::SendPasteTransferable(
     const uint32_t& aContentPolicyType) {
   return PBrowserParent::SendPasteTransferable(
       aDataTransfer, aIsPrivateData, aRequestingPrincipal, aContentPolicyType);
+}
+
+/* static */
+void TabParent::InitializeStatics() {
+  MOZ_ASSERT(XRE_IsParentProcess());
+  sFocusStack = new nsTArray<TabParent*>();
+  ClearOnShutdown(&sFocusStack);
+}
+
+/* static */
+TabParent* TabParent::GetFocused() {
+  if (!sFocusStack) {
+    return nullptr;
+  }
+  if (sFocusStack->IsEmpty()) {
+    return nullptr;
+  }
+  return sFocusStack->LastElement();
+}
+
+/* static */
+void TabParent::PushFocus(TabParent* aTabParent) {
+  if (!sFocusStack) {
+    MOZ_ASSERT_UNREACHABLE("PushFocus when not initialized");
+    return;
+  }
+  if (!aTabParent->GetBrowserBridgeParent()) {
+    // top-level Web content
+    if (!sFocusStack->IsEmpty()) {
+      // When a new native window is created, we spin a nested event loop.
+      // As a result, unlike when raising an existing window, we get
+      // PushFocus for content in the new window before we get the PopFocus
+      // for content in the old one. Hence, if the stack isn't empty when
+      // pushing top-level Web content, first pop everything off the stack.
+      LOGBROWSERFOCUS(
+          ("PushFocus for top-level Web content needs to clear the stack %p",
+           aTabParent));
+      PopFocus(sFocusStack->ElementAt(0));
+    }
+    MOZ_ASSERT(sFocusStack->IsEmpty());
+  } else {
+    // out-of-process iframe
+    // Considering that we can get top-level pushes out of order, let's
+    // ignore trailing out-of-process iframe pushes for the previous top-level
+    // Web content.
+    if (sFocusStack->IsEmpty()) {
+      LOGBROWSERFOCUS(
+          ("PushFocus for out-of-process iframe ignored with empty stack %p",
+           aTabParent));
+      return;
+    }
+    nsCOMPtr<nsIWidget> webRootWidget = sFocusStack->ElementAt(0)->GetWidget();
+    nsCOMPtr<nsIWidget> iframeWigdet = aTabParent->GetWidget();
+    if (webRootWidget != iframeWigdet) {
+      LOGBROWSERFOCUS(
+          ("PushFocus for out-of-process iframe ignored with mismatching "
+           "top-level content %p",
+           aTabParent));
+      return;
+    }
+  }
+  if (sFocusStack->Contains(aTabParent)) {
+    MOZ_ASSERT_UNREACHABLE(
+        "Trying to push a TabParent that is already on the stack");
+    return;
+  }
+  TabParent* old = GetFocused();
+  sFocusStack->AppendElement(aTabParent);
+  MOZ_ASSERT(GetFocused() == aTabParent);
+  LOGBROWSERFOCUS(("PushFocus changed focus to %p", aTabParent));
+  IMEStateManager::OnFocusMovedBetweenBrowsers(old, aTabParent);
+}
+
+/* static */
+void TabParent::PopFocus(TabParent* aTabParent) {
+  if (!sFocusStack) {
+    MOZ_ASSERT_UNREACHABLE("PopFocus when not initialized");
+    return;
+  }
+  // When focus is in an out-of-process iframe and the whole window
+  // or tab loses focus, we first receive a pop for the top-level Web
+  // content process and only then for its out-of-process iframes.
+  // Hence, we do all the popping up front and then ignore the
+  // pop requests for the out-of-process iframes that we already
+  // popped.
+  auto pos = sFocusStack->LastIndexOf(aTabParent);
+  if (pos == nsTArray<TabParent*>::NoIndex) {
+    LOGBROWSERFOCUS(("PopFocus not on stack %p", aTabParent));
+    return;
+  }
+  auto len = sFocusStack->Length();
+  auto itemsToPop = len - pos;
+  LOGBROWSERFOCUS(("PopFocus pops %zu items %p", itemsToPop, aTabParent));
+  while (pos < sFocusStack->Length()) {
+    TabParent* popped = sFocusStack->PopLastElement();
+    TabParent* focused = GetFocused();
+    LOGBROWSERFOCUS(("PopFocus changed focus to %p", focused));
+    IMEStateManager::OnFocusMovedBetweenBrowsers(popped, focused);
+  }
 }
 
 /*static*/
@@ -3196,7 +3299,7 @@ mozilla::ipc::IPCResult TabParent::RecvAsyncAuthPrompt(
 
 mozilla::ipc::IPCResult TabParent::RecvInvokeDragSession(
     nsTArray<IPCDataTransfer>&& aTransfers, const uint32_t& aAction,
-    const OptionalShmem& aVisualDnDData, const uint32_t& aStride,
+    Maybe<Shmem>&& aVisualDnDData, const uint32_t& aStride,
     const gfx::SurfaceFormat& aFormat, const LayoutDeviceIntRect& aDragRect,
     const IPC::Principal& aPrincipal) {
   mInitialDataTransferItems.Clear();
@@ -3221,14 +3324,13 @@ mozilla::ipc::IPCResult TabParent::RecvInvokeDragSession(
     dragService->MaybeAddChildProcess(Manager());
   }
 
-  if (aVisualDnDData.type() == OptionalShmem::Tvoid_t ||
-      !aVisualDnDData.get_Shmem().IsReadable() ||
-      aVisualDnDData.get_Shmem().Size<char>() < aDragRect.height * aStride) {
+  if (aVisualDnDData.isNothing() || !aVisualDnDData.ref().IsReadable() ||
+      aVisualDnDData.ref().Size<char>() < aDragRect.height * aStride) {
     mDnDVisualization = nullptr;
   } else {
     mDnDVisualization = gfx::CreateDataSourceSurfaceFromData(
         gfx::IntSize(aDragRect.width, aDragRect.height), aFormat,
-        aVisualDnDData.get_Shmem().get<uint8_t>(), aStride);
+        aVisualDnDData.ref().get<uint8_t>(), aStride);
   }
 
   mDragValid = true;
@@ -3237,8 +3339,8 @@ mozilla::ipc::IPCResult TabParent::RecvInvokeDragSession(
 
   esm->BeginTrackingRemoteDragGesture(mFrameElement);
 
-  if (aVisualDnDData.type() == OptionalShmem::TShmem) {
-    Unused << DeallocShmem(aVisualDnDData);
+  if (aVisualDnDData.isSome()) {
+    Unused << DeallocShmem(aVisualDnDData.ref());
   }
 
   return IPC_OK();

@@ -12,6 +12,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
   TestUtils: "resource://testing-common/TestUtils.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
+  UrlbarTokenizer: "resource:///modules/UrlbarTokenizer.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
 });
 
@@ -45,15 +46,24 @@ var UrlbarTestUtils = {
     let urlbar = getUrlbarAbstraction(win);
     let restoreAnimationsFn = urlbar.disableAnimations();
     await new Promise(resolve => waitForFocus(resolve, win));
+    let lastSearchString = urlbar.lastSearchString;
     urlbar.focus();
     urlbar.value = inputText;
     if (fireInputEvent) {
       // This is necessary to get the urlbar to set gBrowser.userTypedValue.
       urlbar.fireInputEvent();
     }
-    // In the quantum bar it's enough to fire the input event to start a query,
-    // invoking startSearch would do it twice.
-    if (!urlbar.quantumbar || !fireInputEvent) {
+    // With awesomebar, we must call startSearch to start the search.  With
+    // quantumbar, we can either fire an input event or call start search, so be
+    // careful not to do both since that would start two searches.  However,
+    // there's one wrinkle with quantumbar: If the new search and old search are
+    // the same, the input event will *not* start a new search, by design.  Many
+    // existing tests do consecutive searches with the same string and expect
+    // new searches to start.  To keep those tests running, call startSearch
+    // directly in those cases.
+    if (!urlbar.quantumbar ||
+        !fireInputEvent ||
+        inputText == lastSearchString) {
       urlbar.startSearch(inputText);
     }
     return this.promiseSearchComplete(win, restoreAnimationsFn);
@@ -287,6 +297,11 @@ class UrlbarAbstraction {
     return this.urlbar.value;
   }
 
+  get lastSearchString() {
+    return this.quantumbar ? this.urlbar._lastSearchString :
+                             this.urlbar.controller.searchString;
+  }
+
   get panel() {
     return this.quantumbar ? this.urlbar.panel : this.urlbar.popup;
   }
@@ -454,10 +469,16 @@ class UrlbarAbstraction {
         url: element._urlText,
       };
       if (details.type == UrlbarUtils.RESULT_TYPE.SEARCH) {
+        // Strip restriction tokens from input.
+        let query = action.params.input;
+        let restrictTokens = Object.values(UrlbarTokenizer.RESTRICT);
+        if (restrictTokens.includes(query[0])) {
+          query = query.substring(1).trim();
+        }
         details.searchParams = {
           engine: action.params.engineName,
           keyword: action.params.alias,
-          query: action.params.input,
+          query,
           suggestion: action.params.searchSuggestion,
         };
       }
