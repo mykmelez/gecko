@@ -204,7 +204,7 @@ use style::values::specified;
 use style::values::specified::gecko::IntersectionObserverRootMargin;
 use style::values::specified::source_size_list::SourceSizeList;
 use style::values::{CustomIdent, KeyframesName};
-use style_traits::{CssType, CssWriter, ParsingMode, StyleParseErrorKind, ToCss};
+use style_traits::{CssWriter, ParsingMode, StyleParseErrorKind, ToCss};
 
 trait ClosureHelper {
     fn invoke(&self);
@@ -234,6 +234,7 @@ static mut DUMMY_URL_DATA: *mut URLExtraData = 0 as *mut _;
 #[no_mangle]
 pub unsafe extern "C" fn Servo_Initialize(dummy_url_data: *mut URLExtraData) {
     use style::gecko_bindings::sugar::origin_flags;
+    use style::properties::computed_value_flags;
 
     // Pretend that we're a Servo Layout thread, to make some assertions happy.
     thread_state::initialize(thread_state::ThreadState::LAYOUT);
@@ -241,10 +242,10 @@ pub unsafe extern "C" fn Servo_Initialize(dummy_url_data: *mut URLExtraData) {
     // Perform some debug-only runtime assertions.
     origin_flags::assert_flags_match();
     parser::assert_parsing_mode_match();
+    computed_value_flags::assert_match();
     traversal_flags::assert_traversal_flags_match();
     specified::font::assert_variant_east_asian_matches();
     specified::font::assert_variant_ligatures_matches();
-    specified::box_::assert_touch_action_matches();
 
     DUMMY_URL_DATA = dummy_url_data;
 }
@@ -857,7 +858,7 @@ pub extern "C" fn Servo_AnimationValue_Color(
 pub unsafe extern "C" fn Servo_AnimationValue_GetTransform(
     value: RawServoAnimationValueBorrowed,
     list: *mut structs::RefPtr<nsCSSValueSharedList>,
-) {
+) -> nsCSSPropertyID {
     let list = &mut *list;
     let value = AnimationValue::as_arc(&value);
     match **value {
@@ -867,6 +868,7 @@ pub unsafe extern "C" fn Servo_AnimationValue_GetTransform(
             } else {
                 gecko_properties::convert_transform(&servo_list.0, list);
             }
+            nsCSSPropertyID::eCSSProperty_transform
         },
         AnimationValue::Translate(ref v) => {
             if let Some(v) = v.to_transform_operation() {
@@ -874,6 +876,7 @@ pub unsafe extern "C" fn Servo_AnimationValue_GetTransform(
             } else {
                 list.set_move(RefPtr::from_addrefed(Gecko_NewNoneTransform()));
             }
+            nsCSSPropertyID::eCSSProperty_translate
         },
         AnimationValue::Rotate(ref v) => {
             if let Some(v) = v.to_transform_operation() {
@@ -881,6 +884,7 @@ pub unsafe extern "C" fn Servo_AnimationValue_GetTransform(
             } else {
                 list.set_move(RefPtr::from_addrefed(Gecko_NewNoneTransform()));
             }
+            nsCSSPropertyID::eCSSProperty_rotate
         },
         AnimationValue::Scale(ref v) => {
             if let Some(v) = v.to_transform_operation() {
@@ -888,18 +892,49 @@ pub unsafe extern "C" fn Servo_AnimationValue_GetTransform(
             } else {
                 list.set_move(RefPtr::from_addrefed(Gecko_NewNoneTransform()));
             }
+            nsCSSPropertyID::eCSSProperty_scale
         },
         _ => unreachable!("Unsupported transform-like animation value"),
     }
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_AnimationValue_Transform(
+pub unsafe extern "C" fn Servo_AnimationValue_Transform(
+    property: nsCSSPropertyID,
     list: *const nsCSSValueSharedList,
 ) -> RawServoAnimationValueStrong {
-    let list = unsafe { (&*list).mHead.as_ref() };
+    use style::values::computed::transform::{Rotate, Scale, Translate};
+
+    let property = LonghandId::from_nscsspropertyid(property)
+        .expect("We don't have shorthand property animation value");
+    let list = (&*list).mHead.as_ref();
     let transform = gecko_properties::clone_transform_from_list(list);
-    Arc::new(AnimationValue::Transform(transform)).into_strong()
+    match property {
+        LonghandId::Rotate => {
+            let rotate = if transform.0.is_empty() {
+                style::values::generics::transform::Rotate::None
+            } else {
+                debug_assert_eq!(transform.0.len(), 1);
+                Rotate::from_transform_operation(&(transform.0)[0])
+            };
+            Arc::new(AnimationValue::Rotate(rotate)).into_strong()
+        },
+        LonghandId::Scale => {
+            debug_assert_eq!(transform.0.len(), 1);
+            Arc::new(AnimationValue::Scale(Scale::from_transform_operation(&(transform.0)[0])))
+                .into_strong()
+        },
+        LonghandId::Translate => {
+            debug_assert_eq!(transform.0.len(), 1);
+            Arc::new(AnimationValue::Translate(
+                    Translate::from_transform_operation(&(transform.0)[0])))
+                .into_strong()
+        },
+        LonghandId::Transform => {
+            Arc::new(AnimationValue::Transform(transform)).into_strong()
+        },
+        _ => unreachable!("Unsupported transform-like animation value"),
+    }
 }
 
 #[no_mangle]
@@ -1149,20 +1184,10 @@ pub unsafe extern "C" fn Servo_Property_IsInherited(prop_name: *const nsACString
 #[no_mangle]
 pub unsafe extern "C" fn Servo_Property_SupportsType(
     prop_name: *const nsACString,
-    ty: u32,
+    ty: u8,
     found: *mut bool,
 ) -> bool {
     let prop_id = parse_enabled_property_name!(prop_name, found, false);
-    // This should match the constants in InspectorUtils.
-    // (Let's don't bother importing InspectorUtilsBinding into bindings
-    // because it is not used anywhere else, and issue here would be
-    // caught by the property-db test anyway.)
-    let ty = match ty {
-        1 => CssType::COLOR,
-        2 => CssType::GRADIENT,
-        3 => CssType::TIMING_FUNCTION,
-        _ => unreachable!("unknown CSS type {}", ty),
-    };
     prop_id.supports_type(ty)
 }
 
@@ -3495,30 +3520,6 @@ pub unsafe extern "C" fn Servo_ComputedValues_Inherit(
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_ComputedValues_GetStyleBits(values: ComputedStyleBorrowed) -> u8 {
-    use style::properties::computed_value_flags::ComputedValueFlags;
-    // FIXME(emilio): We could do this more efficiently I'm quite sure.
-    let flags = values.flags;
-    let mut result = 0;
-    if flags.contains(ComputedValueFlags::IS_RELEVANT_LINK_VISITED) {
-        result |= structs::ComputedStyleBit_RelevantLinkVisited;
-    }
-    if flags.contains(ComputedValueFlags::HAS_TEXT_DECORATION_LINES) {
-        result |= structs::ComputedStyleBit_HasTextDecorationLines;
-    }
-    if flags.contains(ComputedValueFlags::SHOULD_SUPPRESS_LINEBREAK) {
-        result |= structs::ComputedStyleBit_SuppressLineBreak;
-    }
-    if flags.contains(ComputedValueFlags::IS_TEXT_COMBINED) {
-        result |= structs::ComputedStyleBit_IsTextCombined;
-    }
-    if flags.contains(ComputedValueFlags::IS_IN_PSEUDO_ELEMENT_SUBTREE) {
-        result |= structs::ComputedStyleBit_HasPseudoElementData;
-    }
-    result
-}
-
-#[no_mangle]
 pub extern "C" fn Servo_ComputedValues_SpecifiesAnimationsOrTransitions(
     values: ComputedStyleBorrowed,
 ) -> bool {
@@ -4752,8 +4753,7 @@ pub extern "C" fn Servo_DeclarationBlock_SetTextDecorationColorOverride(
     use style::properties::PropertyDeclaration;
     use style::values::specified::text::TextDecorationLine;
 
-    let mut decoration = TextDecorationLine::none();
-    decoration |= TextDecorationLine::COLOR_OVERRIDE;
+    let decoration = TextDecorationLine::COLOR_OVERRIDE;
     let decl = PropertyDeclaration::TextDecorationLine(decoration);
     write_locked_arc(declarations, |decls: &mut PropertyDeclarationBlock| {
         decls.push(decl, Importance::Normal);

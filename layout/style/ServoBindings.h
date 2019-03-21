@@ -579,11 +579,11 @@ RawServoAnimationValueStrong Servo_AnimationValue_Color(nsCSSPropertyID,
 float Servo_AnimationValue_GetOpacity(RawServoAnimationValueBorrowed value);
 RawServoAnimationValueStrong Servo_AnimationValue_Opacity(float);
 
-void Servo_AnimationValue_GetTransform(RawServoAnimationValueBorrowed value,
-                                       RefPtr<nsCSSValueSharedList>* list);
+nsCSSPropertyID Servo_AnimationValue_GetTransform(
+    RawServoAnimationValueBorrowed value, RefPtr<nsCSSValueSharedList>* list);
 
 RawServoAnimationValueStrong Servo_AnimationValue_Transform(
-    const nsCSSValueSharedList& list);
+    nsCSSPropertyID property, const nsCSSValueSharedList& list);
 
 bool Servo_AnimationValue_DeepEqual(RawServoAnimationValueBorrowed,
                                     RawServoAnimationValueBorrowed);
@@ -789,8 +789,6 @@ ComputedStyleStrong Servo_ComputedValues_Inherit(
     RawServoStyleSetBorrowed, mozilla::PseudoStyleType,
     ComputedStyleBorrowedOrNull parent_style, mozilla::InheritTarget);
 
-uint8_t Servo_ComputedValues_GetStyleBits(ComputedStyleBorrowed values);
-
 bool Servo_ComputedValues_EqualCustomProperties(
     ServoComputedDataBorrowed first, ServoComputedDataBorrowed second);
 
@@ -965,7 +963,7 @@ const uint8_t* Servo_Property_GetName(nsCSSPropertyID, uint32_t* out_length);
 bool Servo_Property_IsShorthand(const nsACString* name, bool* found);
 bool Servo_Property_IsInherited(const nsACString* name);
 
-bool Servo_Property_SupportsType(const nsACString* name, uint32_t ty,
+bool Servo_Property_SupportsType(const nsACString* name, uint8_t ty,
                                  bool* found);
 
 void Servo_Property_GetCSSValuesForProperty(const nsACString* name, bool* found,

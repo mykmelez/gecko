@@ -20,7 +20,7 @@ use crate::context::{PostAnimationTasks, QuirksMode, SharedStyleContext, UpdateA
 use crate::data::ElementData;
 use crate::dom::{LayoutIterator, NodeInfo, OpaqueNode, TDocument, TElement, TNode, TShadowRoot};
 use crate::element_state::{DocumentState, ElementState};
-use crate::font_metrics::{FontMetrics, FontMetricsProvider, FontMetricsQueryResult};
+use crate::font_metrics::{FontMetrics, FontMetricsOrientation, FontMetricsProvider};
 use crate::gecko::data::GeckoStyleSheet;
 use crate::gecko::selector_parser::{NonTSPseudoClass, PseudoElement, SelectorImpl};
 use crate::gecko::snapshot_helpers;
@@ -58,10 +58,8 @@ use crate::gecko_bindings::sugar::ownership::{HasArcFFI, HasSimpleFFI};
 use crate::global_style_data::GLOBAL_STYLE_DATA;
 use crate::hash::FxHashMap;
 use crate::invalidation::element::restyle_hints::RestyleHint;
-use crate::logical_geometry::WritingMode;
 use crate::media_queries::Device;
 use crate::properties::animated_properties::{AnimationValue, AnimationValueMap};
-use crate::properties::style_structs::Font;
 use crate::properties::{ComputedValues, LonghandId};
 use crate::properties::{Importance, PropertyDeclaration, PropertyDeclarationBlock};
 use crate::rule_tree::CascadeLevel as ServoCascadeLevel;
@@ -69,6 +67,7 @@ use crate::selector_parser::{AttrValue, HorizontalDirection, Lang};
 use crate::shared_lock::Locked;
 use crate::string_cache::{Atom, Namespace, WeakAtom, WeakNamespace};
 use crate::stylist::CascadeData;
+use crate::values::specified::length::FontBaseSize;
 use crate::CaseSensitivityExt;
 use app_units::Au;
 use atomic_refcell::{AtomicRefCell, AtomicRefMut};
@@ -1023,44 +1022,63 @@ impl FontMetricsProvider for GeckoFontMetricsProvider {
     }
 
     fn get_size(&self, font_name: &Atom, font_family: u8) -> Au {
-        use crate::gecko_bindings::bindings::Gecko_GetBaseSize;
         let mut cache = self.font_size_cache.borrow_mut();
         if let Some(sizes) = cache.iter().find(|el| el.0 == *font_name) {
             return sizes.1.size_for_generic(font_family);
         }
-        let sizes = unsafe { Gecko_GetBaseSize(font_name.as_ptr()) };
+        let sizes = unsafe { bindings::Gecko_GetBaseSize(font_name.as_ptr()) };
         cache.push((font_name.clone(), sizes));
         sizes.size_for_generic(font_family)
     }
 
     fn query(
         &self,
-        font: &Font,
-        font_size: Au,
-        wm: WritingMode,
-        in_media_query: bool,
-        device: &Device,
-    ) -> FontMetricsQueryResult {
-        use crate::gecko_bindings::bindings::Gecko_GetFontMetrics;
-        let pc = match device.pres_context() {
+        context: &crate::values::computed::Context,
+        base_size: FontBaseSize,
+        orientation: FontMetricsOrientation,
+    ) -> FontMetrics {
+        let pc = match context.device().pres_context() {
             Some(pc) => pc,
-            None => return FontMetricsQueryResult::NotAvailable,
+            None => return Default::default(),
+        };
+
+        let size = base_size.resolve(context);
+        let style = context.style();
+
+        let (wm, font) = match base_size {
+            FontBaseSize::CurrentStyle => {
+                (style.writing_mode, style.get_font())
+            },
+            // These are only used for font-size computation, and the first is
+            // really dubious...
+            FontBaseSize::InheritedStyleButStripEmUnits |
+            FontBaseSize::InheritedStyle => {
+                (*style.inherited_writing_mode(), style.get_parent_font())
+            },
+        };
+
+        let vertical_metrics = match orientation {
+            FontMetricsOrientation::MatchContext => wm.is_vertical() && wm.is_upright(),
+            FontMetricsOrientation::Horizontal => false,
         };
         let gecko_metrics = unsafe {
-            Gecko_GetFontMetrics(
+            bindings::Gecko_GetFontMetrics(
                 pc,
-                wm.is_vertical() && !wm.is_sideways(),
+                vertical_metrics,
                 font.gecko(),
-                font_size.0,
+                size.0,
                 // we don't use the user font set in a media query
-                !in_media_query,
+                !context.in_media_query,
             )
         };
-        let metrics = FontMetrics {
-            x_height: Au(gecko_metrics.mXSize),
-            zero_advance_measure: Au(gecko_metrics.mChSize),
-        };
-        FontMetricsQueryResult::Available(metrics)
+        FontMetrics {
+            x_height: Some(Au(gecko_metrics.mXSize)),
+            zero_advance_measure: if gecko_metrics.mChSize >= 0 {
+                Some(Au(gecko_metrics.mChSize))
+            } else {
+                None
+            },
+        }
     }
 }
 

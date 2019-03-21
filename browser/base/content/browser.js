@@ -13,6 +13,7 @@ ChromeUtils.import("resource://gre/modules/NotificationDB.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
   AddonManager: "resource://gre/modules/AddonManager.jsm",
   AMTelemetry: "resource://gre/modules/AddonManager.jsm",
+  NewTabPagePreloading: "resource:///modules/NewTabPagePreloading.jsm",
   BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.jsm",
   BrowserUtils: "resource://gre/modules/BrowserUtils.jsm",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
@@ -361,6 +362,16 @@ XPCOMUtils.defineLazyPreferenceGetter(this, "gToolbarKeyNavEnabled",
     }
   });
 
+XPCOMUtils.defineLazyPreferenceGetter(this, "gFxaToolbarEnabled",
+  "identity.fxaccounts.toolbar.enabled", false, (aPref, aOldVal, aNewVal) => {
+    showFxaToolbarMenu(aNewVal);
+  });
+
+XPCOMUtils.defineLazyPreferenceGetter(this, "gFxaToolbarAccessed",
+  "identity.fxaccounts.toolbar.accessed", false, (aPref, aOldVal, aNewVal) => {
+    showFxaToolbarMenu(gFxaToolbarEnabled);
+  });
+
 customElements.setElementCreationCallback("translation-notification", () => {
   Services.scriptloader.loadSubScript(
     "chrome://browser/content/translation-notification.js", window);
@@ -459,6 +470,34 @@ var gNavigatorBundle = {
     return gBrowserBundle.formatStringFromName(key, array, array.length);
   },
 };
+
+function showFxaToolbarMenu(enable) {
+  // We only show the Firefox Account toolbar menu if the feature is enabled and
+  // if sync is enabled.
+  const syncEnabled = Services.prefs.getBoolPref("identity.fxaccounts.enabled", false);
+  const mainWindowEl = document.documentElement;
+  const fxaPanelEl = document.getElementById("PanelUI-fxa");
+  if (enable && syncEnabled) {
+    fxaPanelEl.addEventListener("ViewShowing", gSync.updateSendToDeviceTitle);
+
+    mainWindowEl.setAttribute("fxastatus", "not_configured");
+    // We have to manually update the sync state UI when toggling the FxA toolbar
+    // because it could show an invalid icon if the user is logged in and no sync
+    // event was performed yet.
+    gSync.maybeUpdateUIState();
+
+    // We set an attribute here so that we can toggle the custom
+    // badge depending on whether the FxA menu was ever accessed.
+    if (!gFxaToolbarAccessed) {
+      mainWindowEl.setAttribute("fxa_avatar_badged", "badged");
+    } else {
+      mainWindowEl.removeAttribute("fxa_avatar_badged");
+    }
+  } else {
+    mainWindowEl.removeAttribute("fxastatus");
+    fxaPanelEl.removeEventListener("ViewShowing", gSync.updateSendToDeviceTitle);
+  }
+}
 
 function UpdateBackForwardCommands(aWebNavigation) {
   var backCommand = document.getElementById("Browser:Back");
@@ -1402,6 +1441,8 @@ var gBrowserInit = {
     });
 
     this._setInitialFocus();
+
+    showFxaToolbarMenu(gFxaToolbarEnabled);
   },
 
   onLoad() {
@@ -1890,6 +1931,10 @@ var gBrowserInit = {
       }, 300 * 1000);
     });
 
+    scheduleIdleTask(async () => {
+      NewTabPagePreloading.maybeCreatePreloadedBrowser(window);
+    });
+
     // This should always go last, since the idle tasks (except for the ones with
     // timeouts) should execute in order. Note that this observer notification is
     // not guaranteed to fire, since the window could close before we get here.
@@ -2016,6 +2061,8 @@ var gBrowserInit = {
     }
 
     BrowserSearch.uninit();
+
+    NewTabPagePreloading.removePreloadedBrowser(window);
 
     // Now either cancel delayedStartup, or clean up the services initialized from
     // it.
@@ -2640,6 +2687,8 @@ async function BrowserViewSourceOfDocument(aArgsOrDocument) {
     tabBrowser = browserWindow.gBrowser;
   }
 
+  const inNewWindow = !Services.prefs.getBoolPref("view_source.tab");
+
   // `viewSourceInBrowser` will load the source content from the page
   // descriptor for the tab (when possible) or fallback to the network if
   // that fails.  Either way, the view source module will manage the tab's
@@ -2647,13 +2696,19 @@ async function BrowserViewSourceOfDocument(aArgsOrDocument) {
   // requests.
   let tab = tabBrowser.loadOneTab("about:blank", {
     relatedToCurrent: true,
-    inBackground: false,
+    inBackground: inNewWindow,
+    skipAnimation: inNewWindow,
     preferredRemoteType,
     sameProcessAsFrameLoader: args.browser ? args.browser.frameLoader : null,
     triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
   });
   args.viewSourceBrowser = tabBrowser.getBrowserForTab(tab);
   top.gViewSourceUtils.viewSourceInBrowser(args);
+
+  if (inNewWindow) {
+    tabBrowser.hideTab(tab);
+    tabBrowser.replaceTabWithWindow(tab);
+  }
 }
 
 /**
@@ -3171,7 +3226,6 @@ var BrowserOnClick = {
         break;
 
       case "advancedButton":
-      case "moreInformationButton":
         securityInfo = getSecurityInfo(securityInfoAsString);
         let errorInfo = getDetailedCertErrorInfo(location,
                                                  securityInfo);
@@ -5528,6 +5582,8 @@ var TabsProgressListener = {
     gBrowser.getNotificationBox(aBrowser).removeTransientNotifications();
 
     FullZoom.onLocationChange(aLocationURI, false, aBrowser);
+
+    ContentBlocking.onLocationChange();
   },
 
   onLinkIconAvailable(browser, dataURI, iconURI) {

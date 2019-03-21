@@ -166,7 +166,7 @@ class TabParent final : public PBrowserParent,
                                                       nsIURI* aDocURI);
 
   mozilla::ipc::IPCResult RecvOnContentBlockingEvent(
-      const OptionalWebProgressData& aWebProgressData,
+      const Maybe<WebProgressData>& aWebProgressData,
       const RequestData& aRequestData, const uint32_t& aEvent);
 
   mozilla::ipc::IPCResult RecvBrowserFrameOpenWindow(
@@ -472,6 +472,15 @@ class TabParent final : public PBrowserParent,
                              const IPC::Principal& aRequestingPrincipal,
                              const uint32_t& aContentPolicyType);
 
+  // Call from LayoutStatics only
+  static void InitializeStatics();
+
+  /**
+   * Returns the focused TabParent or nullptr if chrome or another app
+   * is focused.
+   */
+  static TabParent* GetFocused();
+
   static TabParent* GetFrom(nsFrameLoader* aFrameLoader);
 
   static TabParent* GetFrom(nsITabParent* aTabParent);
@@ -563,7 +572,7 @@ class TabParent final : public PBrowserParent,
 
   mozilla::ipc::IPCResult RecvInvokeDragSession(
       nsTArray<IPCDataTransfer>&& aTransfers, const uint32_t& aAction,
-      const OptionalShmem& aVisualDnDData, const uint32_t& aStride,
+      Maybe<Shmem>&& aVisualDnDData, const uint32_t& aStride,
       const gfx::SurfaceFormat& aFormat, const LayoutDeviceIntRect& aDragRect,
       const IPC::Principal& aPrincipal);
 
@@ -779,6 +788,13 @@ class TabParent final : public PBrowserParent,
                                   TabParent* aTabParent);
 
   static void RemoveTabParentFromTable(layers::LayersId aLayersId);
+
+  // Keeps track of which TabParent has keyboard focus
+  static StaticAutoPtr<nsTArray<TabParent*>> sFocusStack;
+
+  static void PushFocus(TabParent* aTabParent);
+
+  static void PopFocus(TabParent* aTabParent);
 
   layout::RenderFrame mRenderFrame;
   LayersObserverEpoch mLayerTreeEpoch;

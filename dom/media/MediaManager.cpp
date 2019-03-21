@@ -301,26 +301,14 @@ static uint16_t FromCaptureState(CaptureState aState) {
   return static_cast<uint16_t>(aState);
 }
 
-void MediaManager::CallOnError(
-    const MediaManager::GetUserMediaErrorCallback* aCallback,
-    MediaStreamError& aError) {
-  MOZ_ASSERT(aCallback);
-  if (aCallback->HasWebIDLCallback()) {
-    aCallback->GetWebIDLCallback()->Call(aError);
-  } else {
-    aCallback->GetXPCOMCallback()->OnError(&aError);
-  }
+void MediaManager::CallOnError(GetUserMediaErrorCallback& aCallback,
+                               MediaStreamError& aError) {
+  aCallback.Call(aError);
 }
 
-void MediaManager::CallOnSuccess(
-    const MediaManager::GetUserMediaSuccessCallback* aCallback,
-    DOMMediaStream& aStream) {
-  MOZ_ASSERT(aCallback);
-  if (aCallback->HasWebIDLCallback()) {
-    aCallback->GetWebIDLCallback()->Call(aStream);
-  } else {
-    aCallback->GetXPCOMCallback()->OnSuccess(&aStream);
-  }
+void MediaManager::CallOnSuccess(GetUserMediaSuccessCallback& aCallback,
+                                 DOMMediaStream& aStream) {
+  aCallback.Call(aStream);
 }
 
 /**
@@ -2464,6 +2452,9 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetUserMedia(
   bool privileged =
       isChrome ||
       Preferences::GetBool("media.navigator.permission.disabled", false);
+  bool isSecure = aWindow->IsSecureContext();
+  // Note: isHTTPS is for legacy telemetry only! Use isSecure for security, as
+  // it handles things like https iframes in http pages correctly.
   bool isHTTPS = false;
   bool isHandlingUserInput = EventStateManager::IsHandlingUserInput();
   docURI->SchemeIs("https", &isHTTPS);
@@ -2518,8 +2509,9 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetUserMedia(
         __func__);
   }
 
-  // Disallow access to null principal pages.
-  if (principal->GetIsNullPrincipal()) {
+  // Disallow access to null principal pages and http pages (unless pref)
+  if (principal->GetIsNullPrincipal() ||
+      !(isSecure || StaticPrefs::media_getusermedia_insecure_enabled())) {
     return StreamPromise::CreateAndReject(
         MakeRefPtr<MediaMgrError>(MediaMgrError::Name::NotAllowedError),
         __func__);
@@ -2880,8 +2872,9 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetUserMedia(
       ->Then(
           GetCurrentThreadSerialEventTarget(), __func__,
           [self, windowID, c, windowListener, sourceListener, askPermission,
-           prefs, isHTTPS, isHandlingUserInput, callID, principalInfo, isChrome,
-           devices, resistFingerprinting](const char* badConstraint) mutable {
+           prefs, isSecure, isHandlingUserInput, callID, principalInfo,
+           isChrome, devices,
+           resistFingerprinting](const char* badConstraint) mutable {
             LOG("GetUserMedia: starting post enumeration promise2 success "
                 "callback!");
 
@@ -2971,7 +2964,7 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetUserMedia(
                                    callID.BeginReading());
             } else {
               auto req = MakeRefPtr<GetUserMediaRequest>(
-                  window, callID, c, isHTTPS, isHandlingUserInput);
+                  window, callID, c, isSecure, isHandlingUserInput);
               if (!Preferences::GetBool("media.navigator.permission.force") &&
                   array->Length() > 1) {
                 // there is at least 1 pending gUM request

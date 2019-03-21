@@ -1888,6 +1888,15 @@ XMLHttpRequestMainThread::OnStartRequest(nsIRequest* request) {
                    !(mRequestMethod.EqualsLiteral("HEAD") ||
                      mRequestMethod.EqualsLiteral("CONNECT"));
 
+  if (parseBody) {
+    // Do not try to parse documents if content-length = 0
+    int64_t contentLength;
+    if (NS_SUCCEEDED(mChannel->GetContentLength(&contentLength)) &&
+        contentLength == 0) {
+      parseBody = false;
+    }
+  }
+
   mIsHtml = false;
   mWarnAboutSyncHtml = false;
   if (parseBody && NS_SUCCEEDED(status)) {
@@ -2776,16 +2785,19 @@ nsresult XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody,
         uploadContentType = defaultContentType;
       } else if (aBodyIsDocumentOrString &&
                  StaticPrefs::dom_xhr_standard_content_type_normalization()) {
-        UniquePtr<CMimeType> parsed = CMimeType::Parse(uploadContentType);
-        if (parsed && parsed->HasParameter(kLiteralString_charset)) {
-          parsed->SetParameterValue(kLiteralString_charset,
-                                    kLiteralString_UTF_8);
-          parsed->Serialize(uploadContentType);
+        UniquePtr<CMimeType> contentTypeRecord =
+            CMimeType::Parse(uploadContentType);
+        nsAutoCString charset;
+        if (contentTypeRecord &&
+            contentTypeRecord->GetParameterValue(kLiteralString_charset,
+                                                 charset) &&
+            !charset.EqualsIgnoreCase("utf-8")) {
+          contentTypeRecord->SetParameterValue(kLiteralString_charset,
+                                               kLiteralString_UTF_8);
+          contentTypeRecord->Serialize(uploadContentType);
         }
-      }
-
-      // We don't want to set a charset for streams.
-      if (!charset.IsEmpty()) {
+      } else if (!charset.IsEmpty()) {
+        // We don't want to set a charset for streams.
         // Replace all case-insensitive matches of the charset in the
         // content-type with the correct case.
         RequestHeaders::CharsetIterator iter(uploadContentType);

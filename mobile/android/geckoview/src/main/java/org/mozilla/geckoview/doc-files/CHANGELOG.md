@@ -8,6 +8,12 @@ exclude: true
 
 <h1> GeckoView API Changelog. </h1>
 
+## v68
+- Added [`GeckoRuntime#configurationChanged`][68.1] to notify the device
+  configuration has changed.
+
+[68.1]: ../GeckoRuntime.html#configurationChanged
+
 ## v67
 - Added [`setAutomaticFontSizeAdjustment`][67.2] to
   [`GeckoRuntimeSettings`][67.3] for automatically adjusting font size settings
@@ -89,6 +95,11 @@ exclude: true
   `GeckoSession.PromptDelegate.ChoiceCallback.onPopupResult()`
 
 - Added `default` implementations for all non-functional `interface`s.
+
+- Added [`ContentDelegate.onWebAppManifest`][67.22], which will deliver the contents of a parsed
+  and validated Web App Manifest on pages that contain one.
+
+[67.22]: ../GeckoSession.ContentDelegate.html#onWebAppManifest-org.mozilla.geckoview.GeckoSession-org.json.JSONObject
 
 ## v66
 - Removed redundant field `trackingMode` from [`SecurityInformation`][66.6].
@@ -209,4 +220,4 @@ exclude: true
 [65.24]: ../CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: ../GeckoResult.html
 
-[api-version]: 09c473360eb5e17aa801fa0f966cd8671cf2f3d2
+[api-version]: 07af02921c277f9461d7532f2a6a78c527c9cb47
