@@ -43,8 +43,6 @@
 
 #define NS_KEY_VALUE_SERVICE_CONTRACTID "@mozilla.org/key-value-service;1"
 
-#define NS_KEY_VALUE_SERVICE_CONTRACTID "@mozilla.org/key-value-service;1"
-
 /////////////////////////////////////////////////////////////////////////////
 
 // {84E11F80-CA55-11DD-AD8B-0800200C9A66}
