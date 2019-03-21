@@ -183,9 +183,6 @@ dom/media/webspeech/**
 dom/messagechannel/**
 dom/midi/**
 dom/network/**
-dom/notification/NotificationStorage.js
-dom/notification/test/browser/**
-dom/notification/test/mochitest/**
 dom/payments/**
 dom/performance/**
 dom/permission/**

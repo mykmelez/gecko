@@ -14,10 +14,6 @@ ChromeUtils.defineModuleGetter(this, "KeyValueService", "resource://gre/modules/
 ChromeUtils.defineModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
 ChromeUtils.defineModuleGetter(this, "Services", "resource://gre/modules/Services.jsm");
 
-const NOTIFICATION_STORE_DIR = OS.Constants.Path.profileDir;
-const NOTIFICATION_STORE_PATH =
-        OS.Path.join(NOTIFICATION_STORE_DIR, "notificationstore.json");
-
 const kMessages = [
   "Notification:Save",
   "Notification:Delete",
@@ -266,7 +262,7 @@ var NotificationDB = {
           return this.taskDelete(task.data);
       }
 
-      throw `Unknown task operation: ${task.operation}`;
+      throw new Error(`Unknown task operation: ${task.operation}`);
     })
     .then(payload => {
       if (DEBUG) {
@@ -278,7 +274,7 @@ var NotificationDB = {
       if (DEBUG) {
         debug("Error while running " + this.runningTask.operation + ": " + err);
       }
-      this.runningTask.defer.reject(new Error(err));
+      this.runningTask.defer.reject(err);
     })
     .then(() => {
       this.runNextTask();
