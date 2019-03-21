@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use crate::{error::XULStoreError, error::XULStoreResult, ffi::ProfileChangeObserver, make_key};
+use crate::{error::XULStoreError, error::XULStoreResult, ffi::ProfileChangeObserver, make_key, SEPARATOR};
 use nsstring::nsString;
 use rkv::{Manager, Rkv, SingleStore, StoreOptions, Value};
 use std::{
@@ -11,9 +11,12 @@ use std::{
     fs::{create_dir_all, remove_file, File},
     ops::DerefMut,
     path::PathBuf,
+    str,
     sync::{Arc, RwLock},
 };
 use xpcom::{interfaces::nsIFile, XpCom};
+
+type XULStoreData = HashMap<String, HashMap<String, HashMap<String, String>>>;
 
 lazy_static! {
     pub(crate) static ref PROFILE_DIR: RwLock<Option<PathBuf>> = {
@@ -38,6 +41,10 @@ lazy_static! {
                 None
             },
         })
+    };
+
+    pub(crate) static ref DATA: RwLock<Option<XULStoreData>> = {
+        RwLock::new(get_data().ok())
     };
 }
 
@@ -192,4 +199,58 @@ pub(crate) fn update_profile_dir() {
         Ok(())
     })()
     .unwrap_or_else(|err| error!("error updating profile dir: {}", err));
+}
+
+fn unwrap_value(value: &Option<Value>) -> XULStoreResult<String> {
+    match value {
+        Some(Value::Str(val)) => Ok(val.to_string()),
+
+        // Per the XULStore API, return an empty string if the value
+        // isn't found.
+        None => Ok("".to_owned()),
+
+        // This should never happen, but it could happen in theory
+        // if someone writes a different kind of value into the store
+        // using a more general API (kvstore, rkv, LMDB).
+        Some(_) => Err(XULStoreError::UnexpectedValue),
+    }
+}
+
+fn get_data() -> XULStoreResult<XULStoreData> {
+    let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
+    let rkv_guard = RKV.read()?;
+    let rkv = rkv_guard
+        .as_ref()
+        .ok_or(XULStoreError::Unavailable)?
+        .read()?;
+    let reader = rkv.read()?;
+    let mut all = HashMap::new();
+    let iterator = store.iter_start(&reader)?;
+
+    for result in iterator {
+        let (key, value): (&str, String) = match result {
+            Ok((key, value)) => {
+                assert!(value.is_some(), "iterated key has value");
+                match (str::from_utf8(&key), unwrap_value(&value)) {
+                    (Ok(key), Ok(value)) => (key, value),
+                    (Err(err), _) => return Err(err.into()),
+                    (_, Err(err)) => return Err(err.into()),
+                }
+            }
+            Err(err) => return Err(err.into()),
+        };
+
+        let parts = key.split(SEPARATOR).collect::<Vec<&str>>();
+        if parts.len() != 3 {
+            // TODO: make this UnexpectedKey.
+            return Err(XULStoreError::UnexpectedValue);
+        }
+        let (doc_url, element_id, attr_name) = (parts[0].to_owned(), parts[1].to_owned(), parts[2].to_owned());
+
+        let doc = all.entry(doc_url).or_insert(HashMap::new());
+        let id = doc.entry(element_id).or_insert(HashMap::new());
+        id.entry(attr_name).or_insert(value);
+    }
+
+    Ok(all)
 }
