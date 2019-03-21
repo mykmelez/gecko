@@ -1,6 +1,6 @@
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/osfile.jsm");
+const {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
 const fooNotification =
   getNotificationObject("foo", "a4f1d54a-98b7-4231-9120-5afc26545bad", null, true);
