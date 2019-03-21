@@ -184,17 +184,22 @@ pub(crate) fn update_profile_dir() {
             *rkv_guard = get_rkv().ok();
         }
 
-        let mut store_guard = STORE.write()?;
-        *store_guard = match get_store() {
-            Ok(store) => {
-                maybe_migrate_data(store);
-                Some(store)
-            }
-            Err(err) => {
-                error!("error getting store: {}", err);
-                None
-            }
-        };
+        {
+            let mut store_guard = STORE.write()?;
+            *store_guard = match get_store() {
+                Ok(store) => {
+                    maybe_migrate_data(store);
+                    Some(store)
+                }
+                Err(err) => {
+                    error!("error getting store: {}", err);
+                    None
+                }
+            };
+        }
+
+        let mut data_guard = DATA.write()?;
+        *data_guard = get_data().ok();
 
         Ok(())
     })()
