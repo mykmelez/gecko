@@ -250,11 +250,11 @@ fn get_data() -> XULStoreResult<XULStoreData> {
             // TODO: make this UnexpectedKey.
             return Err(XULStoreError::UnexpectedValue);
         }
-        let (doc_url, element_id, attr_name) = (parts[0].to_owned(), parts[1].to_owned(), parts[2].to_owned());
+        let (doc, id, attr) = (parts[0].to_owned(), parts[1].to_owned(), parts[2].to_owned());
 
-        let doc = all.entry(doc_url).or_insert(HashMap::new());
-        let id = doc.entry(element_id).or_insert(HashMap::new());
-        id.entry(attr_name).or_insert(value);
+        all.entry(doc).or_insert(HashMap::new())
+           .entry(id).or_insert(HashMap::new())
+           .entry(attr).or_insert(value);
     }
 
     Ok(all)
