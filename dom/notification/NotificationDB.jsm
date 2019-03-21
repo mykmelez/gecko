@@ -143,7 +143,7 @@ var NotificationDB = {
   async load() {
     // Get and cache a handle to the kvstore.
     const dir = FileUtils.getDir("ProfD", ["notificationstore"], true);
-    this._store = await KeyValueService.getOrCreate(dir.path);
+    this._store = await KeyValueService.getOrCreate(dir.path, "notifications");
 
     // Migrate data from the old JSON file to the new kvstore if the old file
     // is present in the user's profile directory.
