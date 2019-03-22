@@ -25,12 +25,15 @@ mod statics;
 use crate::{
     error::{XULStoreError, XULStoreResult},
     iter::XULStoreIterator,
-    statics::{RKV, STORE},
+    statics::{DATA, RKV, STORE},
 };
 use lmdb::Error as LmdbError;
 use nsstring::nsAString;
 use rkv::{StoreError as RkvStoreError, Value};
-use std::str;
+use std::{
+    collections::HashMap,
+    str,
+};
 
 const SEPARATOR: char = '\u{0009}';
 
@@ -62,77 +65,50 @@ impl XULStore {
         store.put(&mut writer, &key, &Value::Str(&value))?;
         writer.commit()?;
 
+        let mut data_guard = DATA.write()?;
+        let data = data_guard.as_mut().ok_or(XULStoreError::Unavailable)?;
+        data.entry(doc.to_string()).or_insert(HashMap::new())
+           .entry(id.to_string()).or_insert(HashMap::new())
+           .insert(attr.to_string(), value);
+
         Ok(())
     }
 
     fn has_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<bool> {
         debug!("XULStore has value: {} {} {}", doc, id, attr);
 
-        let rkv_guard = RKV.read()?;
-        let rkv = rkv_guard
-            .as_ref()
-            .ok_or(XULStoreError::Unavailable)?
-            .read()?;
-        let reader = rkv.read()?;
-        let key = make_key(doc, id, attr);
-        let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
+        let data_guard = DATA.read()?;
+        let data = data_guard.as_ref().ok_or(XULStoreError::Unavailable)?;
 
-        match store.get(&reader, &key) {
-            Ok(Some(_)) => Ok(true),
-
-            Ok(None) => Ok(false),
-
-            // For some reason, the first call to STORE.read()?.get/has()
-            // when running GTests triggers an LMDB "other" error with code 22,
-            // which is described in LMDB docs as EINVAL (BAD COMMAND).
-            //
-            // TODO: figure out why this happens and fix the actual issue
-            // instead of merely working around it.
-            Err(RkvStoreError::LmdbError(LmdbError::Other(22))) => {
-                error!("XULStore has value error: EINVAL");
-                Ok(false)
+        match data.get(&doc.to_string()) {
+            Some(ids) => {
+                match ids.get(&id.to_string()) {
+                    Some(attrs) => Ok(attrs.contains_key(&attr.to_string())),
+                    None => Ok(false),
+                }
             }
-
-            Err(err) => Err(err.into()),
+            None => Ok(false),
         }
     }
 
     fn get_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<String> {
         debug!("XULStore get value {} {} {}", doc, id, attr);
 
-        let rkv_guard = RKV.read()?;
-        let rkv = rkv_guard
-            .as_ref()
-            .ok_or(XULStoreError::Unavailable)?
-            .read()?;
-        let reader = rkv.read()?;
-        let key = make_key(doc, id, attr);
-        let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
-
-        match store.get(&reader, &key) {
-            Ok(Some(Value::Str(val))) => Ok(val.to_owned()),
-
-            // Per the XULStore API, return an empty string if the value
-            // isn't found.
-            Ok(None) => Ok("".to_owned()),
-
-            // This should never happen, but it could happen in theory
-            // if someone writes a different kind of value into the store
-            // using a more general API (kvstore, rkv, LMDB).
-            Ok(Some(_)) => Err(XULStoreError::UnexpectedValue),
-
-            // For some reason, the first call to STORE.read()?.get/has()
-            // when running GTests triggers an LMDB "other" error with code 22,
-            // which is described in LMDB docs as EINVAL (BAD COMMAND).
-            //
-            // TODO: figure out why this happens and fix the actual issue
-            // instead of merely working around it.
-            Err(RkvStoreError::LmdbError(LmdbError::Other(22))) => {
-                error!("XULStore get value error: EINVAL");
-                Ok("".to_owned())
+        let data_guard = DATA.read()?;
+        let data = data_guard.as_ref().ok_or(XULStoreError::Unavailable)?;
+        match data.get(&doc.to_string()) {
+            Some(ids) => {
+                match ids.get(&id.to_string()) {
+                    Some(attrs) => {
+                        match attrs.get(&attr.to_string()) {
+                            Some(value) => Ok(value.to_owned()),
+                            None => Ok("".to_owned()),
+                        }
+                    }
+                    None => Ok("".to_owned()),
+                }
             }
-
-            Err(err) => Err(err.into()),
+            None => Ok("".to_owned()),
         }
     }
 
@@ -151,6 +127,19 @@ impl XULStore {
         match store.delete(&mut writer, &key) {
             Ok(_) => {
                 writer.commit()?;
+
+                let mut data_guard = DATA.write()?;
+                let data = data_guard.as_mut().ok_or(XULStoreError::Unavailable)?;
+                match data.get_mut(&doc.to_string()) {
+                    Some(ids) => {
+                        match ids.get_mut(&id.to_string()) {
+                            Some(attrs) => { attrs.remove(&attr.to_string()); },
+                            None => (),
+                        }
+                    }
+                    None => (),
+                };
+
                 Ok(())
             }
 
