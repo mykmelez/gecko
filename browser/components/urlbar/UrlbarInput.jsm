@@ -258,7 +258,7 @@ class UrlbarInput {
 
   /**
    * Handles an event which would cause a url or text to be opened.
-   * XXX the name is currently handleCommand which is compatible with
+   * TODO Bug 1536816 the name is currently handleCommand which is compatible with
    * urlbarBindings. However, it is no longer called automatically by autocomplete,
    * See _on_keydown.
    *
@@ -345,7 +345,7 @@ class UrlbarInput {
             browser.lastLocationChange == lastLocationChange) {
           openParams.postData = data.postData;
           openParams.allowInheritPrincipal = data.mayInheritPrincipal;
-          this._loadURL(data.url, where, openParams, browser);
+          this._loadURL(data.url, where, openParams, null, browser);
         }
       });
       return;
@@ -445,7 +445,10 @@ class UrlbarInput {
     if (!url) {
       throw new Error(`Invalid url for result ${JSON.stringify(result)}`);
     }
-    this._loadURL(url, where, openParams);
+    this._loadURL(url, where, openParams, {
+      source: result.source,
+      type: result.type,
+    });
   }
 
   /**
@@ -471,7 +474,8 @@ class UrlbarInput {
       if (canonizedUrl) {
         this.value = canonizedUrl;
       } else if (result.autofill) {
-        this._autofillValue(result.autofill);
+        let { value, selectionStart, selectionEnd } = result.autofill;
+        this._autofillValue(value, selectionStart, selectionEnd);
       } else {
         this.value = this._getValueFromResult(result);
       }
@@ -715,8 +719,15 @@ class UrlbarInput {
         !this._autofillPlaceholder.startsWith(value)) {
       this._autofillPlaceholder = "";
     }
-    if (this._autofillPlaceholder) {
-      this._autofillValueOnInput(this._autofillPlaceholder);
+
+    // Don't ever autofill on input if the caret/selection isn't at the end, or
+    // if the placeholder doesn't start with what the user typed.
+    if (this._autofillPlaceholder &&
+        this.selectionEnd == this.value.length &&
+        this._autofillPlaceholder.toLocaleLowerCase()
+          .startsWith(value.toLocaleLowerCase())) {
+      this._autofillValue(this._autofillPlaceholder, value.length,
+                          this._autofillPlaceholder.length);
     }
 
     return allowAutofill;
@@ -845,10 +856,15 @@ class UrlbarInput {
         this.view.panel.setAttribute("actionoverride", "true");
       } else if (this._actionOverrideKeyCount &&
                  --this._actionOverrideKeyCount == 0) {
-        this.removeAttribute("actionoverride");
-        this.view.panel.removeAttribute("actionoverride");
+        this._clearActionOverride();
       }
     }
+  }
+
+  _clearActionOverride() {
+    this._actionOverrideKeyCount = 0;
+    this.removeAttribute("actionoverride");
+    this.view.panel.removeAttribute("actionoverride");
   }
 
   /**
@@ -928,40 +944,17 @@ class UrlbarInput {
   }
 
   /**
-   * Autofills a value into the input in response to the user's typing.  The
-   * autofill value must start with the value that's already in the input.  If
-   * it doesn't, this method doesn't do anything.  If it does, this method will
-   * autofill and set the selection automatically.
-   *
-   * @param {string} value
-   *   The value to autofill.
-   */
-  _autofillValueOnInput(value) {
-    // Don't ever autofill on input if the caret/selection isn't at the end, or
-    // if the value doesn't start with what the user typed.
-    if (this.selectionEnd != this.value.length ||
-        !value.startsWith(this._lastSearchString)) {
-      return;
-    }
-    this._autofillValue({
-      value,
-      selectionStart: this._lastSearchString.length,
-      selectionEnd: value.length,
-    });
-  }
-
-  /**
    * Autofills a value into the input.  The value will be autofilled regardless
    * of the input's current value.
    *
-   * @param {string} options.value
+   * @param {string} value
    *   The value to autofill.
-   * @param {integer} options.selectionStart
+   * @param {integer} selectionStart
    *   The new selectionStart.
-   * @param {integer} options.selectionEnd
+   * @param {integer} selectionEnd
    *   The new selectionEnd.
    */
-  _autofillValue({ value, selectionStart, selectionEnd } = {}) {
+  _autofillValue(value, selectionStart, selectionEnd) {
     // The autofilled value may be a URL that includes a scheme at the
     // beginning.  Do not allow it to be trimmed.
     this._setValue(value, false);
@@ -986,9 +979,15 @@ class UrlbarInput {
    *   The POST data associated with a search submission.
    * @param {boolean} [params.allowInheritPrincipal]
    *   If the principal may be inherited
+   * @param {object} [result]
+   *   Details of the selected result, if any
+   * @param {UrlbarUtils.RESULT_TYPE} [result.type]
+   *   Details of the result type, if any.
+   * @param {UrlbarUtils.RESULT_SOURCE} [result.source]
+   *   Details of the result source, if any.
    * @param {object} browser [optional] the browser to use for the load.
    */
-  _loadURL(url, openUILinkWhere, params,
+  _loadURL(url, openUILinkWhere, params, result = {},
            browser = this.window.gBrowser.selectedBrowser) {
     this.value = url;
     browser.userTypedValue = url;
@@ -1031,6 +1030,9 @@ class UrlbarInput {
     if (openUILinkWhere != "current") {
       this.handleRevert();
     }
+
+    // Notify about the start of navigation.
+    this._notifyStartNavigation(result);
 
     try {
       this.window.openTrustedLinkIn(url, openUILinkWhere, params);
@@ -1131,9 +1133,27 @@ class UrlbarInput {
     insertLocation.insertAdjacentElement("afterend", pasteAndGo);
   }
 
+  /**
+   * This notifies observers that the user has entered or selected something in
+   * the URL bar which will cause navigation.
+   *
+   * We use the observer service, so that we don't need to load extra facilities
+   * if they aren't being used, e.g. WebNavigation.
+   *
+   * @param {UrlbarResult} [result]
+   *   The result that was selected, if any.
+   */
+  _notifyStartNavigation(result) {
+    Services.obs.notifyObservers({result}, "urlbar-user-start-navigation");
+  }
+
   // Event handlers below.
 
   _on_blur(event) {
+    // In certain cases, like holding an override key and confirming an entry,
+    // we don't key a keyup event for the override key, thus we make this
+    // additional cleanup on blur.
+    this._clearActionOverride();
     this.formatValue();
     // Respect the autohide preference for easier inspecting/debugging via
     // the browser toolbox.
@@ -1238,7 +1258,7 @@ class UrlbarInput {
     let allowAutofill =
       this._maybeAutofillOnInput(value, deletedAutofilledSubstring);
 
-    // XXX Fill in lastKey, and add anything else we need.
+    // TODO Bug 1524550: Fill in lastKey, and add anything else we need.
     this.startQuery({
       searchString: value,
       allowAutofill,

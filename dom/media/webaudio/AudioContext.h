@@ -310,8 +310,6 @@ class AudioContext final : public DOMEventTargetHelper,
 
   BasicWaveFormCache* GetBasicWaveFormCache();
 
-  bool CheckClosed(ErrorResult& aRv);
-
   // Steals from |aParamMap|
   void SetParamMapForWorkletName(const nsAString& aName,
                                  AudioParamDescriptorMap* aParamMap);
@@ -336,6 +334,7 @@ class AudioContext final : public DOMEventTargetHelper,
 
   void ResumeInternal();
   void SuspendInternal(void* aPromise);
+  void CloseInternal(void* aPromise);
 
   // Will report error message to console and dispatch testing event if needed
   // when AudioContext is blocked by autoplay policy.

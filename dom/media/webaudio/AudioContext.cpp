@@ -328,15 +328,6 @@ already_AddRefed<AudioContext> AudioContext::Constructor(
   return object.forget();
 }
 
-bool AudioContext::CheckClosed(ErrorResult& aRv) {
-  if (mAudioContextState == AudioContextState::Closed || mIsShutDown ||
-      mIsDisconnecting) {
-    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
-    return true;
-  }
-  return false;
-}
-
 already_AddRefed<AudioBufferSourceNode> AudioContext::CreateBufferSource(
     ErrorResult& aRv) {
   return AudioBufferSourceNode::Create(nullptr, *this,
@@ -345,10 +336,6 @@ already_AddRefed<AudioBufferSourceNode> AudioContext::CreateBufferSource(
 
 already_AddRefed<ConstantSourceNode> AudioContext::CreateConstantSource(
     ErrorResult& aRv) {
-  if (CheckClosed(aRv)) {
-    return nullptr;
-  }
-
   RefPtr<ConstantSourceNode> constantSourceNode = new ConstantSourceNode(this);
   return constantSourceNode.forget();
 }
@@ -399,10 +386,6 @@ already_AddRefed<ScriptProcessorNode> AudioContext::CreateScriptProcessor(
       aNumberOfOutputChannels > WebAudioUtils::MaxChannelCount ||
       !IsValidBufferSize(aBufferSize)) {
     aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
-    return nullptr;
-  }
-
-  if (CheckClosed(aRv)) {
     return nullptr;
   }
 
@@ -700,7 +683,7 @@ void AudioContext::Shutdown() {
   // We don't want to touch promises if the global is going away soon.
   if (!mIsDisconnecting) {
     if (!mIsOffline) {
-      RefPtr<Promise> ignored = Close(IgnoreErrors());
+      CloseInternal(nullptr);
     }
 
     for (auto p : mPromiseGripArray) {
@@ -1123,6 +1106,12 @@ already_AddRefed<Promise> AudioContext::Close(ErrorResult& aRv) {
 
   mPromiseGripArray.AppendElement(promise);
 
+  CloseInternal(promise);
+
+  return promise.forget();
+}
+
+void AudioContext::CloseInternal(void* aPromise) {
   // This can be called when freeing a document, and the streams are dead at
   // this point, so we need extra null-checks.
   AudioNodeStream* ds = DestinationStream();
@@ -1135,11 +1124,9 @@ already_AddRefed<Promise> AudioContext::Close(ErrorResult& aRv) {
       streams = GetAllStreams();
     }
     Graph()->ApplyAudioContextOperation(ds, streams,
-                                        AudioContextOperation::Close, promise);
+                                        AudioContextOperation::Close, aPromise);
   }
   mCloseCalled = true;
-
-  return promise.forget();
 }
 
 void AudioContext::RegisterNode(AudioNode* aNode) {

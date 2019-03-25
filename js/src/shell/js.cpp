@@ -99,6 +99,7 @@
 #include "js/Printf.h"
 #include "js/PropertySpec.h"
 #include "js/Realm.h"
+#include "js/RegExp.h"  // JS::ObjectIsRegExp
 #include "js/SourceText.h"
 #include "js/StableStringChars.h"
 #include "js/StructuredClone.h"
@@ -6557,24 +6558,6 @@ static bool IsLatin1(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
-static bool UnboxedObjectsEnabled(JSContext* cx, unsigned argc, Value* vp) {
-  // Note: this also returns |false| if we're using --ion-eager or if the
-  // JITs are disabled, since that affects how unboxed objects are used.
-
-  CallArgs args = CallArgsFromVp(argc, vp);
-  args.rval().setBoolean(!jit::JitOptions.disableUnboxedObjects &&
-                         !jit::JitOptions.eagerCompilation &&
-                         jit::IsIonEnabled(cx));
-  return true;
-}
-
-static bool IsUnboxedObject(JSContext* cx, unsigned argc, Value* vp) {
-  CallArgs args = CallArgsFromVp(argc, vp);
-  args.rval().setBoolean(args.get(0).isObject() &&
-                         args[0].toObject().is<UnboxedPlainObject>());
-  return true;
-}
-
 static bool HasCopyOnWriteElements(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
   args.rval().setBoolean(
@@ -8865,14 +8848,6 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
 "isLatin1(s)",
 "  Return true iff the string's characters are stored as Latin1."),
 
-    JS_FN_HELP("unboxedObjectsEnabled", UnboxedObjectsEnabled, 0, 0,
-"unboxedObjectsEnabled()",
-"  Return true if unboxed objects are enabled."),
-
-    JS_FN_HELP("isUnboxedObject", IsUnboxedObject, 1, 0,
-"isUnboxedObject(o)",
-"  Return true iff the object is an unboxed object."),
-
     JS_FN_HELP("hasCopyOnWriteElements", HasCopyOnWriteElements, 1, 0,
 "hasCopyOnWriteElements(o)",
 "  Return true iff the object has copy-on-write dense elements."),
@@ -9276,7 +9251,7 @@ static bool Help(JSContext* cx, unsigned argc, Value* vp) {
     return true;
   }
   bool isRegexp;
-  if (!JS_ObjectIsRegExp(cx, obj, &isRegexp)) {
+  if (!JS::ObjectIsRegExp(cx, obj, &isRegexp)) {
     return false;
   }
 
@@ -10207,10 +10182,6 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
       .setTestWasmAwaitTier2(enableTestWasmAwaitTier2)
       .setNativeRegExp(enableNativeRegExp)
       .setAsyncStack(enableAsyncStacks);
-
-  if (op.getBoolOption("no-unboxed-objects")) {
-    jit::JitOptions.disableUnboxedObjects = true;
-  }
 
   if (const char* str = op.getStringOption("cache-ir-stubs")) {
     if (strcmp(str, "on") == 0) {
@@ -11177,7 +11148,7 @@ int main(int argc, char** argv, char** envp) {
   nurseryBytes = op.getIntOption("nursery-size") * 1024L * 1024L;
 
   /* Use the same parameters as the browser in xpcjsruntime.cpp. */
-  JSContext* cx = JS_NewContext(JS::DefaultHeapMaxBytes, nurseryBytes);
+  JSContext* const cx = JS_NewContext(JS::DefaultHeapMaxBytes, nurseryBytes);
   if (!cx) {
     return 1;
   }

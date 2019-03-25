@@ -2596,7 +2596,7 @@ BrowserGlue.prototype = {
         const DEFAULT = Services.prefs.getDefaultBranch(HOMEPAGE_PREF).getCharPref("");
         let value = Services.prefs.getCharPref(HOMEPAGE_PREF);
         let updated = value.replace(
-          /https?:\/\/([\w\-]+[.])?start[\d]*\.mozilla\.(org|com)[^|]*/ig, DEFAULT);
+          /https?:\/\/([\w\-]+\.)?start\d*\.mozilla\.(org|com)[^|]*/ig, DEFAULT);
         if (updated != value) {
           if (updated == DEFAULT) {
             Services.prefs.clearUserPref(HOMEPAGE_PREF);
@@ -2618,8 +2618,7 @@ BrowserGlue.prototype = {
       return;
     }
 
-    let shouldCheck = AppConstants.DEBUG ? false :
-                                           ShellService.shouldCheckDefaultBrowser;
+    let shouldCheck = !AppConstants.DEBUG && ShellService.shouldCheckDefaultBrowser;
 
     const skipDefaultBrowserCheck =
       Services.prefs.getBoolPref("browser.shell.skipDefaultBrowserCheckOnFirstRun") &&

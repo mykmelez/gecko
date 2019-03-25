@@ -83,10 +83,6 @@ bool SetImmutablePrototype(JSContext* cx, JS::HandleObject obj,
  *       in-place so avoid assuming an object with same pointer has same class
  *       as before.
  *       - JSObject::swap()
- *       - UnboxedPlainObject::convertToNative()
- *
- * NOTE: UnboxedObjects may change class without changing |group_|.
- *       - js::TryConvertToUnboxedLayout
  */
 class JSObject : public js::gc::Cell {
  protected:
@@ -801,23 +797,6 @@ using ClassInitializerOp = JSObject* (*)(JSContext* cx,
 } /* namespace js */
 
 namespace js {
-
-inline gc::InitialHeap GetInitialHeap(NewObjectKind newKind,
-                                      const Class* clasp) {
-  if (newKind == NurseryAllocatedProxy) {
-    MOZ_ASSERT(clasp->isProxy());
-    MOZ_ASSERT(clasp->hasFinalize());
-    MOZ_ASSERT(!CanNurseryAllocateFinalizedClass(clasp));
-    return gc::DefaultHeap;
-  }
-  if (newKind != GenericObject) {
-    return gc::TenuredHeap;
-  }
-  if (clasp->hasFinalize() && !CanNurseryAllocateFinalizedClass(clasp)) {
-    return gc::TenuredHeap;
-  }
-  return gc::DefaultHeap;
-}
 
 bool NewObjectWithTaggedProtoIsCachable(JSContext* cx,
                                         Handle<TaggedProto> proto,

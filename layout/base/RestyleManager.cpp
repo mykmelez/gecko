@@ -1038,7 +1038,7 @@ static void DoApplyRenderingChangeToTree(nsIFrame* aFrame,
       aFrame->InvalidateFrameSubtree();
       if ((aChange & nsChangeHint_UpdateEffects) &&
           aFrame->IsFrameOfType(nsIFrame::eSVG) &&
-          !(aFrame->GetStateBits() & NS_STATE_IS_OUTER_SVG)) {
+          !aFrame->IsSVGOuterSVGFrame()) {
         // Need to update our overflow rects:
         nsSVGUtils::ScheduleReflowSVG(aFrame);
       }
@@ -1666,7 +1666,7 @@ void RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList) {
       if ((hint & nsChangeHint_InvalidateRenderingObservers) ||
           ((hint & nsChangeHint_UpdateOpacityLayer) &&
            frame->IsFrameOfType(nsIFrame::eSVG) &&
-           !(frame->GetStateBits() & NS_STATE_IS_OUTER_SVG))) {
+           !frame->IsSVGOuterSVGFrame())) {
         SVGObserverUtils::InvalidateRenderingObservers(frame);
         frame->SchedulePaint();
       }
@@ -2048,10 +2048,6 @@ static const nsIFrame* ExpectedOwnerForChild(const nsIFrame* aFrame) {
     }
     return parent->IsViewportFrame() ? nullptr
                                      : FirstContinuationOrPartOfIBSplit(parent);
-  }
-
-  if (aFrame->IsBulletFrame()) {
-    return FirstContinuationOrPartOfIBSplit(parent);
   }
 
   if (aFrame->IsLineFrame()) {
@@ -2565,7 +2561,8 @@ static void UpdateOneAdditionalComputedStyle(nsIFrame* aFrame, uint32_t aIndex,
   uint32_t equalStructs;  // Not used, actually.
   nsChangeHint childHint =
       aOldContext.CalcStyleDifference(*newStyle, &equalStructs);
-  if (!aFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW)) {
+  if (!aFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW) &&
+      !aFrame->IsColumnSpanInMulticolSubtree()) {
     childHint = NS_RemoveSubsumedHints(childHint,
                                        aRestyleState.ChangesHandledFor(aFrame));
   }
@@ -2742,6 +2739,20 @@ bool RestyleManager::ProcessPostTraversal(Element* aElement,
         maybeAnonBoxChild->ParentIsWrapperAnonBox()) {
       aRestyleState.AddPendingWrapperRestyle(
           ServoRestyleState::TableAwareParentFor(maybeAnonBoxChild));
+    }
+
+    // If we don't have a ::marker pseudo-element, but need it, then
+    // reconstruct the frame.  (The opposite situation implies 'display'
+    // changes so doesn't need to be handled explicitly here.)
+    if (styleFrame->StyleDisplay()->mDisplay == StyleDisplay::ListItem &&
+        styleFrame->IsBlockFrameOrSubclass() &&
+        !nsLayoutUtils::GetMarkerPseudo(aElement)) {
+      RefPtr<ComputedStyle> pseudoStyle =
+          aRestyleState.StyleSet().ProbePseudoElementStyle(
+              *aElement, PseudoStyleType::marker, styleFrame->Style());
+      if (pseudoStyle) {
+        changeHint |= nsChangeHint_ReconstructFrame;
+      }
     }
   }
 

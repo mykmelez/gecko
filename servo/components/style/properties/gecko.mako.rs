@@ -66,16 +66,25 @@ use crate::values::generics::url::UrlOrNone;
 pub mod style_structs {
     % for style_struct in data.style_structs:
     pub use super::${style_struct.gecko_struct_name} as ${style_struct.name};
+
+    unsafe impl Send for ${style_struct.name} {}
+    unsafe impl Sync for ${style_struct.name} {}
     % endfor
+
 }
 
 /// FIXME(emilio): This is completely duplicated with the other properties code.
-pub type ComputedValuesInner = crate::gecko_bindings::structs::ServoComputedData;
+pub type ComputedValuesInner = structs::ServoComputedData;
 
 #[repr(C)]
-pub struct ComputedValues(crate::gecko_bindings::structs::mozilla::ComputedStyle);
+pub struct ComputedValues(structs::mozilla::ComputedStyle);
 
 impl ComputedValues {
+    #[inline]
+    pub (crate) fn as_gecko_computed_style(&self) -> &structs::ComputedStyle {
+        &self.0
+    }
+
     pub fn new(
         pseudo: Option<<&PseudoElement>,
         custom_properties: Option<Arc<CustomPropertiesMap>>,
@@ -929,7 +938,7 @@ transform_functions = [
                 debug_assert!(!${item}${index + 1}.0.is_empty());
             % endif
             ${css_value_setters[item] % (
-                "bindings::Gecko_CSSValue_GetArrayItem(gecko_value, %d)" % (index + 1),
+                "(&mut *bindings::Gecko_CSSValue_GetArrayItem(gecko_value, %d))" % (index + 1),
                 item + str(index + 1)
             )};
         % endfor
@@ -980,7 +989,7 @@ transform_functions = [
             % endif
             <%
                 getter = css_value_getters[item] % (
-                    "bindings::Gecko_CSSValue_GetArrayItemConst(gecko_value, %d)" % (index + 1)
+                    "(&*bindings::Gecko_CSSValue_GetArrayItemConst(gecko_value, %d))" % (index + 1)
                 )
             %>
             ${getter},
@@ -989,6 +998,7 @@ transform_functions = [
     },
 </%def>
 
+#[allow(unused_parens)]
 fn set_single_transform_function(
     servo_value: &values::computed::TransformOperation,
     gecko_value: &mut structs::nsCSSValue /* output */
@@ -1031,6 +1041,7 @@ pub fn convert_transform(
     output.set_move(list);
 }
 
+#[allow(unused_parens)]
 fn clone_single_transform_function(
     gecko_value: &structs::nsCSSValue
 ) -> values::computed::TransformOperation {
@@ -1236,6 +1247,7 @@ impl Clone for ${style_struct.gecko_struct_name} {
         "Length": impl_absolute_length,
         "LengthOrNormal": impl_style_coord,
         "LengthPercentageOrAuto": impl_style_coord,
+        "MozListReversed": impl_simple,
         "MozScriptMinSize": impl_absolute_length,
         "RGBAColor": impl_rgba_color,
         "SVGLength": impl_svg_length,
@@ -4548,7 +4560,7 @@ clip-path
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="Counters"
-                  skip_longhands="content counter-increment counter-reset">
+                  skip_longhands="content counter-increment counter-reset counter-set">
     pub fn ineffective_content_property(&self) -> bool {
         self.gecko.mContents.is_empty()
     }
@@ -4777,7 +4789,7 @@ clip-path
         )
     }
 
-    % for counter_property in ["Increment", "Reset"]:
+    % for counter_property in ["Increment", "Reset", "Set"]:
         pub fn set_counter_${counter_property.lower()}(
             &mut self,
             v: longhands::counter_${counter_property.lower()}::computed_value::T

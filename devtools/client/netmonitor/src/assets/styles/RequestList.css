@@ -112,7 +112,7 @@
   border-inline-start-width: 1px;
   width: 100%;
   min-height: 23px;
-  text-align: left;
+  text-align: start;
   color: inherit;
   padding: 1px 4px;
 }
@@ -128,7 +128,6 @@
 
 .requests-list-header-button > .button-text {
   display: inline-block;
-  text-align: left;
   vertical-align: middle;
   width: 100%;
   overflow: hidden;
@@ -259,10 +258,6 @@
 
 .requests-list-file.requests-list-column {
   text-align: start;
-}
-
-.request-list-item.selected {
-  filter: brightness(1.3);
 }
 
 .requests-list-domain.requests-list-column {

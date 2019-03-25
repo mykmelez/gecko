@@ -203,7 +203,7 @@ void ServoStyleSet::InvalidateStyleForDocumentStateChanges(
   // for XBL sheets / Shadow DOM. Consider just enumerating bound content
   // instead and run invalidation individually, passing mRawSet for the UA /
   // User sheets.
-  AutoTArray<RawServoAuthorStylesBorrowed, 20> nonDocumentStyles;
+  AutoTArray<const RawServoAuthorStyles*, 20> nonDocumentStyles;
 
   EnumerateShadowRoots(*mDocument, [&](ShadowRoot& aShadowRoot) {
     if (auto* authorStyles = aShadowRoot.GetServoStyles()) {
@@ -234,7 +234,7 @@ static const MediaFeatureChangeReason kMediaFeaturesAffectingDefaultStyle =
 
 RestyleHint ServoStyleSet::MediumFeaturesChanged(
     MediaFeatureChangeReason aReason) {
-  AutoTArray<RawServoAuthorStylesBorrowedMut, 20> nonDocumentStyles;
+  AutoTArray<RawServoAuthorStyles*, 20> nonDocumentStyles;
 
   EnumerateShadowRoots(*mDocument, [&](ShadowRoot& aShadowRoot) {
     if (auto* authorStyles = aShadowRoot.GetServoStyles()) {
@@ -431,7 +431,7 @@ void ServoStyleSet::PreTraverse(ServoTraversalFlags aFlags, Element* aRoot) {
 }
 
 static inline already_AddRefed<ComputedStyle>
-ResolveStyleForTextOrFirstLetterContinuation(RawServoStyleSetBorrowed aStyleSet,
+ResolveStyleForTextOrFirstLetterContinuation(const RawServoStyleSet* aStyleSet,
                                              ComputedStyle& aParent,
                                              PseudoStyleType aType) {
   MOZ_ASSERT(aType == PseudoStyleType::mozText ||
@@ -825,6 +825,17 @@ already_AddRefed<ComputedStyle> ServoStyleSet::ProbePseudoElementStyle(
       // NB: We don't need to worry about the before/after handling below
       // because those are eager and thus not |cacheable| anyway.
       aParentStyle->SetCachedLazyPseudoStyle(computedValues);
+    }
+  }
+
+  if (aType == PseudoStyleType::marker) {
+    // ::marker only exist for list items (for now).
+    if (aParentStyle->StyleDisplay()->mDisplay != StyleDisplay::ListItem) {
+      return nullptr;
+    }
+    // display:none is equivalent to not having the pseudo-element at all.
+    if (computedValues->StyleDisplay()->mDisplay == StyleDisplay::None) {
+      return nullptr;
     }
   }
 
@@ -1261,7 +1272,7 @@ ServoStyleSet::BuildFontFeatureValueSet() {
 
 already_AddRefed<ComputedStyle> ServoStyleSet::ResolveForDeclarations(
     const ComputedStyle* aParentOrNull,
-    RawServoDeclarationBlockBorrowed aDeclarations) {
+    const RawServoDeclarationBlock* aDeclarations) {
   // No need to update the stylist, we're only cascading aDeclarations.
   return Servo_StyleSet_ResolveForDeclarations(mRawSet.get(), aParentOrNull,
                                                aDeclarations)

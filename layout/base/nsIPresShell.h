@@ -1689,18 +1689,25 @@ class nsIPresShell : public nsStubDocumentObserver {
     FrameMetrics::ScrollOffsetUpdateType mUpdateType;
   };
 
+  // Scroll mode enum for ScrollToVisual(). We'd like to reuse
+  // nsIScrollableFrame::ScrollMode but that would require including
+  // nsIScrollableFrame.h from this header, which quickly sinks everything
+  // into a circular dependency quagmire.
+  enum class ScrollMode { eInstant, eSmooth };
+
   // Ask APZ in the next transaction to scroll to the given visual viewport
   // offset (relative to the document).
   // Use this sparingly, as it will clobber JS-driven scrolling that happens
   // in the same frame. This is mostly intended to be used in special
   // situations like "first paint" or session restore.
+  // If scrolling "far away", i.e. not just within the existing layout
+  // viewport, it's recommended to use both nsIScrollableFrame.ScrollTo*()
+  // (via window.scrollTo if calling from JS) *and* this function; otherwise,
+  // temporary checkerboarding may result.
   // Please request APZ review if adding a new call site.
-  void SetPendingVisualScrollUpdate(
-      const nsPoint& aVisualViewportOffset,
-      FrameMetrics::ScrollOffsetUpdateType aUpdateType) {
-    mPendingVisualScrollUpdate =
-        mozilla::Some(VisualScrollUpdate{aVisualViewportOffset, aUpdateType});
-  }
+  void ScrollToVisual(const nsPoint& aVisualViewportOffset,
+                      FrameMetrics::ScrollOffsetUpdateType aUpdateType,
+                      ScrollMode aMode);
   void ClearPendingVisualScrollUpdate() {
     mPendingVisualScrollUpdate = mozilla::Nothing();
   }
@@ -1765,6 +1772,10 @@ class nsIPresShell : public nsStubDocumentObserver {
 
   void CancelPostedReflowCallbacks();
   void FlushPendingScrollAnchorAdjustments();
+
+  void SetPendingVisualScrollUpdate(
+      const nsPoint& aVisualViewportOffset,
+      FrameMetrics::ScrollOffsetUpdateType aUpdateType);
 
 #ifdef DEBUG
   mozilla::UniquePtr<mozilla::ServoStyleSet> CloneStyleSet(

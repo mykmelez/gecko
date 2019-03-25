@@ -4695,7 +4695,7 @@ bool Parser<FullParseHandler, Unit>::checkExportedNamesForObjectBinding(
 
   for (ParseNode* node : obj->contents()) {
     MOZ_ASSERT(node->isKind(ParseNodeKind::MutateProto) ||
-               node->isKind(ParseNodeKind::Colon) ||
+               node->isKind(ParseNodeKind::PropertyDefinition) ||
                node->isKind(ParseNodeKind::Shorthand) ||
                node->isKind(ParseNodeKind::Spread));
 
@@ -5810,8 +5810,6 @@ bool GeneralParser<ParseHandler, Unit>::forHeadStart(
         return false;
       }
     }
-
-    handler_.adjustGetToSet(*forInitialPart);
   } else if (handler_.isPropertyAccess(*forInitialPart)) {
     // Permitted: no additional testing/fixup needed.
   } else if (handler_.isFunctionCall(*forInitialPart)) {
@@ -8423,8 +8421,6 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::assignExpr(
         return null();
       }
     }
-
-    handler_.adjustGetToSet(lhs);
   } else if (handler_.isPropertyAccess(lhs)) {
     // Permitted: no additional testing/fixup needed.
   } else if (handler_.isFunctionCall(lhs)) {
@@ -8837,13 +8833,9 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::memberExpr(
         return null();
       }
 
-      lhs = handler_.newNewExpression(newBegin, ctorExpr, args);
+      lhs = handler_.newNewExpression(newBegin, ctorExpr, args, isSpread);
       if (!lhs) {
         return null();
-      }
-
-      if (isSpread) {
-        handler_.setOp(lhs, JSOP_SPREADNEW);
       }
     }
   } else if (tt == TokenKind::Super) {
@@ -8947,14 +8939,12 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::memberExpr(
           return null();
         }
 
-        nextMember = handler_.newSuperCall(lhs, args);
-        if (!nextMember) {
+        CallNodeType superCall = handler_.newSuperCall(lhs, args, isSpread);
+        if (!superCall) {
           return null();
         }
 
-        if (isSpread) {
-          handler_.setOp(nextMember, JSOP_SPREADSUPERCALL);
-        }
+        nextMember = superCall;
 
         NameNodeType thisName = newThisName();
         if (!thisName) {
@@ -9033,7 +9023,7 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::memberExpr(
             }
           }
 
-          nextMember = handler_.newCall(lhs, args);
+          nextMember = handler_.newCall(lhs, args, op);
           if (!nextMember) {
             return null();
           }
@@ -9047,12 +9037,11 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::memberExpr(
             return null();
           }
 
-          nextMember = handler_.newTaggedTemplate(lhs, args);
+          nextMember = handler_.newTaggedTemplate(lhs, args, op);
           if (!nextMember) {
             return null();
           }
         }
-        handler_.setOp(nextMember, op);
       }
     } else {
       anyChars.ungetToken();

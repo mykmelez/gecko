@@ -2092,8 +2092,7 @@ JS::Result<ParseNode*> BinASTParser<Tok>::parseInterfaceCallExpression(
     }
   }
 
-  BINJS_TRY_DECL(result, handler_.newCall(callee, arguments));
-  result->setOp(op);
+  BINJS_TRY_DECL(result, handler_.newCall(callee, arguments, op));
   return result;
 }
 
@@ -3591,8 +3590,9 @@ JS::Result<ParseNode*> BinASTParser<Tok>::parseInterfaceNewExpression(
 
   BINJS_MOZ_TRY_DECL(arguments, parseArguments());
 
-  BINJS_TRY_DECL(result, handler_.newNewExpression(tokenizer_->pos(start).begin,
-                                                   callee, arguments));
+  BINJS_TRY_DECL(result,
+                 handler_.newNewExpression(tokenizer_->pos(start).begin, callee,
+                                           arguments, /* isSpread = */ false));
   return result;
 }
 
@@ -4134,7 +4134,6 @@ JS::Result<ParseNode*> BinASTParser<Tok>::parseInterfaceUnaryExpression(
     case UnaryOperator::Delete: {
       switch (operand->getKind()) {
         case ParseNodeKind::Name:
-          operand->setOp(JSOP_DELNAME);
           pnk = ParseNodeKind::DeleteNameExpr;
           BINJS_TRY(this->strictModeError(JSMSG_DEPRECATED_DELETE_OPERAND));
           pc_->sc()->setBindingsAccessedDynamically();

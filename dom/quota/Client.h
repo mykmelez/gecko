@@ -18,10 +18,13 @@ class nsIFile;
 class nsIRunnable;
 
 #define IDB_DIRECTORY_NAME "idb"
-#define ASMJSCACHE_DIRECTORY_NAME "asmjs"
 #define DOMCACHE_DIRECTORY_NAME "cache"
 #define SDB_DIRECTORY_NAME "sdb"
 #define LS_DIRECTORY_NAME "ls"
+
+// Deprecated
+#define ASMJSCACHE_DIRECTORY_NAME "asmjs"
+const int32_t kDeprecatedAsmJsVersion = int32_t((2 << 16) + 2);
 
 BEGIN_QUOTA_NAMESPACE
 
@@ -63,10 +66,6 @@ class Client {
         aText.AssignLiteral(IDB_DIRECTORY_NAME);
         break;
 
-      case ASMJS:
-        aText.AssignLiteral(ASMJSCACHE_DIRECTORY_NAME);
-        break;
-
       case DOMCACHE:
         aText.AssignLiteral(DOMCACHE_DIRECTORY_NAME);
         break;
@@ -91,11 +90,10 @@ class Client {
     return NS_OK;
   }
 
-  static nsresult TypeFromText(const nsAString& aText, Type& aType) {
+  static nsresult TypeFromText(const nsAString& aText, Type& aType,
+                               int32_t aStorageVersion) {
     if (aText.EqualsLiteral(IDB_DIRECTORY_NAME)) {
       aType = IDB;
-    } else if (aText.EqualsLiteral(ASMJSCACHE_DIRECTORY_NAME)) {
-      aType = ASMJS;
     } else if (aText.EqualsLiteral(DOMCACHE_DIRECTORY_NAME)) {
       aType = DOMCACHE;
     } else if (aText.EqualsLiteral(SDB_DIRECTORY_NAME)) {
@@ -104,6 +102,10 @@ class Client {
                aText.EqualsLiteral(LS_DIRECTORY_NAME)) {
       aType = LS;
     } else {
+      // Only enable the assert after the certain version.
+      if (aStorageVersion >= kDeprecatedAsmJsVersion) {
+        MOZ_RELEASE_ASSERT(!IsDeprecatedClient(aText));
+      }
       return NS_ERROR_FAILURE;
     }
 
@@ -118,7 +120,10 @@ class Client {
     }
 
     Type type;
-    nsresult rv = TypeFromText(aText, type);
+    // This function is only called by QuotaManagerService, so disable the
+    // assert on TypeFromText because client name will be checked during
+    // initialization anyway.
+    nsresult rv = TypeFromText(aText, type, /* Disable the version check */ 0);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -127,12 +132,20 @@ class Client {
     return NS_OK;
   }
 
+  static bool IsDeprecatedClient(const nsAString& aText) {
+    return aText.EqualsLiteral(ASMJSCACHE_DIRECTORY_NAME);
+  }
+
   // Methods which are called on the IO thread.
   virtual nsresult UpgradeStorageFrom1_0To2_0(nsIFile* aDirectory) {
     return NS_OK;
   }
 
   virtual nsresult UpgradeStorageFrom2_0To2_1(nsIFile* aDirectory) {
+    return NS_OK;
+  }
+
+  virtual nsresult UpgradeStorageFrom2_1To2_2(nsIFile* aDirectory) {
     return NS_OK;
   }
 
