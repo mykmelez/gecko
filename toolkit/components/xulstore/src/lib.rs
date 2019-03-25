@@ -32,7 +32,6 @@ use nsstring::nsAString;
 use rkv::{StoreError as RkvStoreError, Value};
 use std::{
     collections::HashMap,
-    str,
 };
 
 const SEPARATOR: char = '\u{0009}';
@@ -154,99 +153,43 @@ impl XULStore {
     fn get_ids(doc: &nsAString) -> XULStoreResult<XULStoreIterator> {
         debug!("XULStore get IDs for {}", doc);
 
-        let doc_url = String::from_utf16(doc)?;
+        let data_guard = DATA.read()?;
+        let data = data_guard.as_ref().ok_or(XULStoreError::Unavailable)?;
 
-        let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
-        let rkv_guard = RKV.read()?;
-        let rkv = rkv_guard
-            .as_ref()
-            .ok_or(XULStoreError::Unavailable)?
-            .read()?;
-        let reader = rkv.read()?;
-        let iterator = store.iter_from(&reader, &doc_url)?;
-
-        let mut collection = iterator
-            // Convert the key to a string.
-            .map(|result| match result {
-                Ok((key, _)) => match str::from_utf8(&key) {
-                    Ok(key) => Ok(key),
-                    Err(err) => Err(err.into()),
-                },
-                Err(err) => Err(err.into()),
-            })
-            // Stop iterating once we reach another doc URL or hit an error.
-            .take_while(|result| match result {
-                Ok(key) => {
-                    let parts = key.split(SEPARATOR).collect::<Vec<&str>>();
-                    parts[0] == doc_url
-                }
-                Err(_) => true,
-            })
-            // Extract the element ID from the key.
-            .map(|result| match result {
-                Ok(key) => {
-                    let parts = key.split(SEPARATOR).collect::<Vec<&str>>();
-                    Ok(parts[1].to_owned())
-                }
-                Err(err) => Err(err),
-            })
-            // Collect the results or report an error.
-            .collect::<XULStoreResult<Vec<String>>>()?;
-
-        // NB: ideally, we'd dedup while iterating, but IterTools.dedup()
-        // requires its Item to be PartialEq, and Err(XULStoreError) isn't.
-        collection.dedup();
-
-        Ok(XULStoreIterator::new(collection.into_iter()))
+        match data.get(&doc.to_string()) {
+            Some(ids) => {
+                let mut ids: Vec<String> = ids.keys().map(|id| id.to_owned()).collect();
+                // TODO: rather than sorting here, use a pre-sorted
+                // data structure, such as a BTreeMap, so the items
+                // are already in sorted order.
+                ids.sort();
+                Ok(XULStoreIterator::new(ids.into_iter()))
+            },
+            None => Ok(XULStoreIterator::new(vec![].into_iter())),
+        }
     }
 
     fn get_attrs(doc: &nsAString, id: &nsAString) -> XULStoreResult<XULStoreIterator> {
         debug!("XULStore get attrs for doc, ID: {} {}", doc, id);
 
-        let doc_url = String::from_utf16(doc)?;
-        let element_id = String::from_utf16(id)?;
-        let key_prefix = format!("{}{}{}", doc_url, SEPARATOR, element_id);
-        let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
-        let rkv_guard = RKV.read()?;
-        let rkv = rkv_guard
-            .as_ref()
-            .ok_or(XULStoreError::Unavailable)?
-            .read()?;
-        let reader = rkv.read()?;
-        let iterator = store.iter_from(&reader, &key_prefix)?;
+        let data_guard = DATA.read()?;
+        let data = data_guard.as_ref().ok_or(XULStoreError::Unavailable)?;
 
-        let mut collection: Vec<String> = iterator
-            // Convert the key to a string.
-            .map(|result| match result {
-                Ok((key, _)) => match str::from_utf8(&key) {
-                    Ok(key) => Ok(key),
-                    Err(err) => Err(err.into()),
-                },
-                Err(err) => Err(err.into()),
-            })
-            // Stop iterating once we reach another doc URL or element ID
-            // or hit an error.
-            .take_while(|result| match result {
-                Ok(key) => {
-                    let parts = key.split(SEPARATOR).collect::<Vec<&str>>();
-                    parts[0] == doc_url && parts[1] == element_id
+        match data.get(&doc.to_string()) {
+            Some(ids) => {
+                match ids.get(&id.to_string()) {
+                    Some(attrs) => {
+                        let mut attrs: Vec<String> = attrs.keys().map(|attr| attr.to_owned()).collect();
+                        // TODO: rather than sorting here, use a pre-sorted
+                        // data structure, such as a BTreeMap, so the items
+                        // are already in sorted order.
+                        attrs.sort();
+                        Ok(XULStoreIterator::new(attrs.into_iter()))
+                    },
+                    None => Ok(XULStoreIterator::new(vec![].into_iter())),
                 }
-                Err(_) => true,
-            })
-            // Extract the attribute name from the key.
-            .map(|result| match result {
-                Ok(key) => {
-                    let parts = key.split(SEPARATOR).collect::<Vec<&str>>();
-                    Ok(parts[2].to_owned())
-                }
-                Err(err) => Err(err),
-            })
-            .collect::<XULStoreResult<Vec<String>>>()?;
-
-        // NB: ideally, we'd dedup while iterating, but IterTools.dedup()
-        // requires its Item to be PartialEq, and Err(XULStoreError) isn't.
-        collection.dedup();
-
-        Ok(XULStoreIterator::new(collection.into_iter()))
+            },
+            None => Ok(XULStoreIterator::new(vec![].into_iter())),
+        }
     }
 }
