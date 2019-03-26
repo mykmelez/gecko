@@ -76,7 +76,61 @@ impl XULStoreService {
         attr: &nsAString,
         value: &nsAString,
     ) -> Result<(), nsresult> {
-        XULStore::set_value(doc, id, attr, value).map_err(|e| e.into())
+        XULStore::set_value(doc, id, attr, value).map_err(|err| err.into())
+    }
+
+    xpcom_method!(
+        has_value => HasValue(
+            doc: *const nsAString,
+            id: *const nsAString,
+            attr: *const nsAString
+        ) -> bool
+    );
+
+    fn has_value(
+        &self,
+        doc: &nsAString,
+        id: &nsAString,
+        attr: &nsAString,
+    ) -> Result<bool, nsresult> {
+        XULStore::has_value(doc, id, attr).map_err(|err| err.into())
+    }
+
+    xpcom_method!(
+        get_value => GetValue(
+            doc: *const nsAString,
+            id: *const nsAString,
+            attr: *const nsAString
+        ) -> nsAString
+    );
+
+    fn get_value(
+        &self,
+        doc: &nsAString,
+        id: &nsAString,
+        attr: &nsAString,
+    ) -> Result<nsString, nsresult> {
+        match XULStore::get_value(doc, id, attr) {
+            Ok(val) => Ok(nsString::from(&val)),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    xpcom_method!(
+        remove_value => RemoveValue(
+            doc: *const nsAString,
+            id: *const nsAString,
+            attr: *const nsAString
+        )
+    );
+
+    fn remove_value(
+        &self,
+        doc: &nsAString,
+        id: &nsAString,
+        attr: &nsAString,
+    ) -> Result<(), nsresult> {
+        XULStore::remove_value(doc, id, attr).map_err(|err| err.into())
     }
 }
 
