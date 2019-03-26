@@ -17,18 +17,6 @@ webidl Node;
 interface nsIXULStore: nsISupports
 {
   /**
-   * Sets a value for a specified node's attribute, except in
-   * the case below (following the original XULDocument::persist):
-   * If the value is empty and if calling `hasValue` with the node's
-   * document and ID and `attr` would return true, then the
-   * value instead gets removed from the store (see Bug 1476680).
-   *
-   * @param node - DOM node
-   * @param attr - attribute to store
-   */
-  /* void persist(in Node aNode, in AString attr); */
-
-  /**
    * Sets a value in the store.
    *
    * @param doc - document URI
@@ -72,7 +60,7 @@ interface nsIXULStore: nsISupports
    *
    * @param doc - document URI
    */
-  /* void removeDocument(in AString doc); */
+  void removeDocument(in AString doc);
 
   /**
    * Iterates over all of the ids associated with a given document uri that

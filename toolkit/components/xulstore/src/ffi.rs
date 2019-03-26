@@ -132,6 +132,14 @@ impl XULStoreService {
     ) -> Result<(), nsresult> {
         XULStore::remove_value(doc, id, attr).map_err(|err| err.into())
     }
+
+    xpcom_method!(
+        remove_document => RemoveDocument(doc: *const nsAString)
+    );
+
+    fn remove_document(&self, doc: &nsAString) -> Result<(), nsresult> {
+        XULStore::remove_document(doc).map_err(|err| err.into())
+    }
 }
 
 #[derive(xpcom)]

@@ -160,6 +160,59 @@ impl XULStore {
         }
     }
 
+    fn remove_document(doc: &nsAString) -> XULStoreResult<()> {
+        debug!("XULStore remove document {}", doc);
+
+        let mut data_guard = DATA.write()?;
+        let data = data_guard.as_mut().ok_or(XULStoreError::Unavailable)?;
+        let mut keys_to_remove: Vec<String> = Vec::new();
+        let doc = doc.to_string();
+
+        // Build a list of keys to remove from the store.
+        match data.get(&doc) {
+            Some(ids) => {
+                for (id, attrs) in ids {
+                    for (attr, _value) in attrs {
+                        keys_to_remove.push(make_key(&doc, id, attr));
+                    }
+                }
+            }
+            None => (),
+        };
+
+        // We can remove the document from the data cache in one fell swoop.
+        data.remove_entry(&doc.to_string());
+
+        let rkv_guard = RKV.read()?;
+        let rkv = rkv_guard
+            .as_ref()
+            .ok_or(XULStoreError::Unavailable)?
+            .read()?;
+        let mut writer = rkv.write()?;
+        let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
+
+        // Removing the document from the store requires iterating the keys
+        // to remove.
+        keys_to_remove.iter().map(|key|
+            match store.delete(&mut writer, &key) {
+                Ok(_) => Ok(()),
+
+                // The XULStore API doesn't care if a consumer tries to remove
+                // a value that doesn't actually exist, so we ignore that error,
+                // although in this case the key should exist since it was in
+                // the cache!
+                // TODO: warn if a key doesn't exist.
+                Err(RkvStoreError::LmdbError(LmdbError::NotFound)) => Ok(()),
+
+                Err(err) => Err(err.into()),
+            }
+        ).collect::<Result<Vec<()>, XULStoreError>>()?;
+
+        writer.commit()?;
+
+        Ok(())
+    }
+
     fn get_ids(doc: &nsAString) -> XULStoreResult<XULStoreIterator> {
         debug!("XULStore get IDs for {}", doc);
 
