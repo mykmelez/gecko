@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use nserror::{nsresult, NS_ERROR_FAILURE, NS_ERROR_NOT_AVAILABLE, NS_ERROR_UNEXPECTED, NS_OK};
+use nserror::{nsresult, NS_ERROR_FAILURE, NS_ERROR_ILLEGAL_VALUE, NS_ERROR_NOT_AVAILABLE, NS_ERROR_UNEXPECTED, NS_OK};
 use nsstring::nsCString;
 use rkv::StoreError as RkvStoreError;
 use serde_json::Error as SerdeJsonError;
@@ -50,6 +50,9 @@ pub enum XULStoreError {
     #[fail(display = "store error: {:?}", _0)]
     RkvStoreError(RkvStoreError),
 
+    #[fail(display = "id or attribute name too long")]
+    IdAttrNameTooLong,
+
     #[fail(display = "unavailable")]
     Unavailable,
 
@@ -69,6 +72,7 @@ impl From<XULStoreError> for nsresult {
             XULStoreError::NulError => NS_ERROR_UNEXPECTED,
             XULStoreError::PoisonError => NS_ERROR_UNEXPECTED,
             XULStoreError::RkvStoreError(_) => NS_ERROR_FAILURE,
+            XULStoreError::IdAttrNameTooLong => NS_ERROR_ILLEGAL_VALUE,
             XULStoreError::Unavailable => NS_ERROR_NOT_AVAILABLE,
             XULStoreError::UnexpectedValue => NS_ERROR_UNEXPECTED,
         }

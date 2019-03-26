@@ -51,6 +51,11 @@ impl XULStore {
     ) -> XULStoreResult<()> {
         debug!("XULStore set value: {} {} {} {}", doc, id, attr, value);
 
+        // bug 319846 -- don't save really long attributes or values.
+        if id.len() > 512 || attr.len() > 512 {
+          return Err(XULStoreError::IdAttrNameTooLong);
+        }
+
         let rkv_guard = RKV.read()?;
         let rkv = rkv_guard
             .as_ref()
@@ -58,7 +63,12 @@ impl XULStore {
             .read()?;
         let mut writer = rkv.write()?;
         let key = make_key(doc, id, attr);
-        let value = String::from_utf16(value)?;
+        let value = if value.len() > 4096 {
+            warn!("XULStore: truncating long attribute value");
+            String::from_utf16(&value[0..4096])?
+        } else {
+            String::from_utf16(value)?
+        };
 
         let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
         store.put(&mut writer, &key, &Value::Str(&value))?;

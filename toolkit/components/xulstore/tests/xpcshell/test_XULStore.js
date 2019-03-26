@@ -4,14 +4,17 @@
 
 "use strict";
 
+do_get_profile();
+
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
+
+const xulStore = Cc["@mozilla.org/xul-store-service;1"].getService(Ci.nsIXULStore);
 
 var browserURI = "chrome://browser/content/browser.xul";
 var aboutURI = "about:config";
 
 function run_test() {
-  do_get_profile();
   run_next_test();
 }
 
@@ -40,7 +43,7 @@ function checkArrays(a, b) {
 
 add_task(async function setup() {
   // Set a value that a future test depends on manually
-  await XULStore.setValue(browserURI, "main-window", "width", "994");
+  xulStore.setValue(browserURI, "main-window", "width", "994");
 });
 
 add_task(async function testTruncation() {
@@ -52,7 +55,7 @@ add_task(async function testTruncation() {
   await Assert.rejects(XULStore.setValue(browserURI, "foo", dos, "foo"), /NS_ERROR_ILLEGAL_VALUE/);
 
   // Long values should be truncated
-  await XULStore.setValue(browserURI, "dos", "dos", dos);
+  xulStore.setValue(browserURI, "dos", "dos", dos);
   dos = await XULStore.getValue(browserURI, "dos", "dos");
   Assert.ok(dos.length == 4096);
   await XULStore.removeValue(browserURI, "dos", "dos");
@@ -77,21 +80,21 @@ add_task(async function testHasValue() {
 add_task(async function testSetValue() {
   // Set new attribute
   await checkValue(browserURI, "side-bar", "width", "");
-  await XULStore.setValue(browserURI, "side-bar", "width", "1000");
+  xulStore.setValue(browserURI, "side-bar", "width", "1000");
   await checkValue(browserURI, "side-bar", "width", "1000");
   checkArrays(["main-window", "side-bar"], await getIDs(browserURI));
   checkArrays(["width"], await getAttributes(browserURI, "side-bar"));
 
   // Modify existing property
   await checkValue(browserURI, "side-bar", "width", "1000");
-  await XULStore.setValue(browserURI, "side-bar", "width", "1024");
+  xulStore.setValue(browserURI, "side-bar", "width", "1024");
   await checkValue(browserURI, "side-bar", "width", "1024");
   checkArrays(["main-window", "side-bar"], await getIDs(browserURI));
   checkArrays(["width"], await getAttributes(browserURI, "side-bar"));
 
   // Add another attribute
   await checkValue(browserURI, "side-bar", "height", "");
-  await XULStore.setValue(browserURI, "side-bar", "height", "1000");
+  xulStore.setValue(browserURI, "side-bar", "height", "1000");
   await checkValue(browserURI, "side-bar", "height", "1000");
   checkArrays(["main-window", "side-bar"], await getIDs(browserURI));
   checkArrays(["width", "height"], await getAttributes(browserURI, "side-bar"));

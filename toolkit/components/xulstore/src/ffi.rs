@@ -59,6 +59,25 @@ impl XULStoreService {
 
         XULStoreService::allocate(InitXULStoreService {})
     }
+
+    xpcom_method!(
+        set_value => SetValue(
+            doc: *const nsAString,
+            id: *const nsAString,
+            attr: *const nsAString,
+            value: *const nsAString
+        )
+    );
+
+    fn set_value(
+        &self,
+        doc: &nsAString,
+        id: &nsAString,
+        attr: &nsAString,
+        value: &nsAString,
+    ) -> Result<(), nsresult> {
+        XULStore::set_value(doc, id, attr, value).map_err(|e| e.into())
+    }
 }
 
 #[derive(xpcom)]
